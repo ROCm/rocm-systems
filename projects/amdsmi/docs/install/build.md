@@ -73,6 +73,8 @@ Users that wish to also build the AMD SMI Rust interface will also need the foll
    make package
    ```
 
+   To build with AddressSanitizer instrumentation, see [Build with AddressSanitizer](#build_asan).
+
 (rebuild_py_wrapper)=
 ## Rebuild the Python wrapper
 
@@ -114,6 +116,50 @@ make -j $(nproc)
 
 Once the tests are [built](#build_tests), you can run them by executing the
 `amdsmitst` program. The executable can be found at `build/tests/amd_smi_test/`.
+
+(build_asan)=
+## Build with AddressSanitizer
+
+`-DADDRESS_SANITIZER=ON` instruments the library and the C/C++ tests.
+
+```bash
+cmake -DADDRESS_SANITIZER=ON ..
+make -j $(nproc)
+```
+
+`-DENABLE_ASAN_PACKAGING=ON` produces a library-only `amd-smi-lib-asan` package.
+The CLI and the Python bindings are excluded from it because neither can load an
+instrumented `libamd_smi.so` unaided; see below.
+
+(asan_python)=
+### Run the CLI or the Python bindings against an instrumented library
+
+`amd-smi` is a Python script, and the bindings are `ctypes`, so both reach the
+library through `dlopen`. AddressSanitizer has to be initialized before the
+process allocates any memory, which is long before `dlopen` runs, so an
+uninstrumented Python aborts with:
+
+```text
+==1234==ASan runtime does not come first in initial library list; you should
+either link runtime to your application or manually preload it with LD_PRELOAD.
+```
+
+Preload the runtime the library was linked against. Leak detection has to be off
+because CPython does not free everything at shutdown.
+
+```bash
+ASAN_RT=$(ldd build/lib/libamd_smi.so | awk '/libclang_rt\.asan|libasan/ && $3 ~ /^\// {print $3}')
+[ -n "$ASAN_RT" ] || echo "No ASAN runtime resolved; rebuild with -DADDRESS_SANITIZER=ON."
+LD_PRELOAD=$ASAN_RT ASAN_OPTIONS=detect_leaks=0 amd-smi static
+```
+
+An empty `ASAN_RT` means the library is either uninstrumented or instrumented
+against a runtime that is not on the search path, which `ldd` reports as
+`=> not found`.
+
+This applies to any Python process that imports `amdsmi`, not just the CLI. C and
+C++ consumers linked with `-fsanitize=address` need no preload, because the
+runtime is already in their initial library list.
 
 (build_docs)=
 ## Build the docs

@@ -6,8 +6,11 @@ This document outlines coding conventions and best practices for Python developm
 
 - [Function Length](#function-length)
 - [Naming Conventions](#naming-conventions)
+- [Python 3.8 Compatible Syntax](#python-38-compatible-syntax)
+- [Docstrings](#docstrings)
 - [I/O and Computation Separation](#io-and-computation-separation)
 - [File I/O Encoding](#file-io-encoding)
+- [Caching Loaded Data](#caching-loaded-data)
 - [Nested Functions](#nested-functions)
 - [When to Use Helper Functions](#when-to-use-helper-functions)
 - [When NOT to Extract Helper Functions](#when-not-to-extract-helper-functions)
@@ -15,6 +18,7 @@ This document outlines coding conventions and best practices for Python developm
 - [Levels of Abstraction](#levels-of-abstraction)
 - [Avoiding Deep Nesting](#avoiding-deep-nesting)
 - [Code Organization](#code-organization)
+- [Testing Conventions](#testing-conventions)
 - [Key Principles Summary](#key-principles-summary)
 
 ## Function Length
@@ -119,6 +123,85 @@ def resolve_library_path(library_path: Optional[str]) -> Optional[str]:
     # This makes the function hard to test and understand.
 ```
 
+## Python 3.8 Compatible Syntax
+
+Profile mode runs on Python 3.8, so every module must parse and execute there.
+`from __future__ import annotations` makes newer syntax appear to work by
+deferring annotation evaluation, which hides 3.8 breakage until a runtime that
+actually evaluates the annotation reaches it. Write the 3.8 form directly
+instead, so the syntax a module uses is the syntax it supports.
+
+### Rules
+
+- Never add `from __future__ import annotations`, or any other `__future__` import.
+- Use `typing.List`, `typing.Dict`, `typing.Tuple`, and `typing.Set` for annotations, not the builtin generics `list[...]`, `dict[...]`, `tuple[...]`, `set[...]`.
+- Use `typing.Optional[X]` and `typing.Union[X, Y]`, not `X | None` or `X | Y`.
+- Do not use 3.9+ library additions such as `dict` merge with `|`, `str.removeprefix`, or `str.removesuffix`.
+
+### Example
+
+**Good:** Annotations a 3.8 interpreter evaluates without help
+
+```python
+from pathlib import Path
+from typing import List, Optional
+
+
+def list_result_csvs(directory: Path) -> List[Path]:
+    ...
+
+
+def compressed_name(path: Optional[Path]) -> Path:
+    ...
+```
+
+**Bad:** Builtin generics propped up by a `__future__` import
+
+```python
+from __future__ import annotations
+
+from pathlib import Path
+
+
+def list_result_csvs(directory: Path) -> list[Path]:
+    ...
+
+
+def compressed_name(path: Path | None) -> Path:
+    ...
+```
+
+## Docstrings
+
+Docstrings are read in the editor and in `help()`. This project publishes no Sphinx site, so reStructuredText markup renders nowhere and only makes the text harder to read.
+
+Write docstrings as plain sentences and name other functions, classes, and constants directly.
+
+### Rules
+
+- Never use reStructuredText markup in docstrings: no `:func:`, `:data:`, `:class:`, `:meth:`, `:mod:`, `:param:`, `:returns:`, or `:raises:`.
+- Never use double-backtick literals.
+- Keep the existing `Args:` / `Returns:` block style where a function needs one.
+
+### Example
+
+**Good:** Plain sentence naming the constant directly
+
+```python
+def counter_to_block(counter: str) -> str:
+    """Map a counter name to its IP block, applying the BLOCK_REMAP table."""
+```
+
+**Bad:** reStructuredText markup
+
+```python
+def counter_to_block(counter: str) -> str:
+    """Map a counter name to its IP block, applying :data:`BLOCK_REMAP`.
+
+    Unlike :func:`parse_counters_text`, returns a single ``str``.
+    """
+```
+
 ## I/O and Computation Separation
 
 I/O — reading files, sockets, environment variables, or command-line arguments — depends on external state and is hard to test in isolation. Computation transforms inputs into outputs deterministically. Mixing the two in one function makes the computation impossible to reuse without paying the I/O cost, and impossible to verify without staging external state.
@@ -165,6 +248,7 @@ Text-mode file I/O should be deterministic across machines. Bare `open()` picks 
 
 - Always pass `encoding="utf-8"` to `open()` for text-mode reads and writes.
 - Keep committed configuration files (YAML, JSON, INI) ASCII-only. Use plain ASCII substitutes for typographic glyphs: `x` or `*` for multiplication, straight quotes for smart quotes, and `--` for em dashes.
+- In Python comments and docstrings, use the plain ASCII hyphen `-` instead of the Unicode em dash or en dash.
 
 ### Example
 
@@ -180,6 +264,59 @@ with open(config_path, encoding="utf-8") as f:
 ```python
 with open(config_path) as f:
     data = yaml.safe_load(f)
+```
+
+## Caching Loaded Data
+
+Data read from disk once and reused for the rest of the run needs somewhere to
+live. Put it on the class that owns it, as a class attribute filled on first
+use. Do not reach for `functools.lru_cache` on a module-level function.
+
+A decorated function hides the dependency. The call site reads as an ordinary
+function call, so nothing at that line says the first call in the process opens
+a file and every later one does not, or that some unrelated code path already
+populated it. Reviewers cannot see the coupling, and a traceback does not show
+which caller paid for the load.
+
+It also promises less than it appears to across processes. The cache is
+per-interpreter, so every forked or spawned worker re-reads the file and
+rebuilds its own copy. Work that reads as "paid once" is paid once per process,
+which is a cost worth being able to see.
+
+### Rules
+
+- Never use `functools.lru_cache` or `functools.cache` to hold loaded data.
+- Hold it as a class attribute on the class that owns it, filled on first use,
+  following `Database._type_cache` in `src/utils/analysis_orm.py`.
+- Pass the data as an argument instead whenever the caller already has it.
+
+### Example
+
+**Good:** the state is a named attribute of the class that owns it
+
+```python
+class InstructionPipelines:
+    """The generated mnemonic-to-pipeline table, read once and kept."""
+
+    _table: Optional[dict[str, str]] = None
+
+    @classmethod
+    def lookup(cls, mnemonic: str) -> Optional[str]:
+        if cls._table is None:
+            cls._table = cls._load()
+        return cls._table.get(mnemonic)
+```
+
+**Bad:** the file read is invisible at every call site
+
+```python
+@functools.lru_cache(maxsize=1)
+def _load_table() -> dict[str, str]:
+    return yaml.safe_load(path.read_text(encoding="utf-8"))
+
+
+def lookup(mnemonic: str) -> Optional[str]:
+    return _load_table().get(mnemonic)
 ```
 
 ## Nested Functions
@@ -379,16 +516,14 @@ Each function should do **ONE** thing well. If you use "and" to describe what it
 ```python
 def create_df_pmc(
     raw_data_dir: str,
-    kernel_verbose: int,
     verbose: int,
-    config_dict: dict[str, Any],
 ) -> pd.DataFrame:
     """Load all raw pmc counters and join into one dataframe."""
     # Single responsibility: load counters into a DataFrame and return it.
     df = pd.read_csv(Path(raw_data_dir) / "pmc_perf.csv")
-    if config_dict.get("format_rocprof_output") == "rocpd":
+    if {"Counter_Name", "Counter_Value"}.issubset(df.columns):
         df = utils_analysis.process_rocpd_csv(df)
-    kernel_name_shortener(df, kernel_verbose)
+    utils_analysis.add_unit_counter(df)
     return df
 ```
 
@@ -436,7 +571,6 @@ def pre_processing(self) -> None:
             )
 
         file_io.create_df_kernel_top_stats(...)
-        kernel_name_shortener(workload.raw_pmc, args.kernel_verbose)
         parser.load_table_data(...)
 ```
 
@@ -659,6 +793,7 @@ def create_filtered_stats(df_in, filter_nodes, ...) -> None:
 ### Rules
 
 - Module structure order: docstring → imports (stdlib → third-party → local, sorted within each group) → constants → public functions → private helpers → classes.
+- Keep imports at module level. The one exception is an optional dependency such as `torch` that the module must still load without: import it inside the function, after the check that skips or returns when it is missing (in tests, after `require_torch()`). A module-level import of it makes the whole module fail to load, or be skipped, on hosts that lack it.
 - Public functions appear **before** private helpers in every file, except when a private helper is used as a decorator on those public functions. Python evaluates decorators at module load, so the helper must precede the functions it decorates.
 - The `_` prefix marks privacy for module-level helpers and class members only — do not use it for helpers in test files (`test_*.py`). Test modules are imported only by pytest for collection and should not import each other (use `conftest.py` for shared fixtures), so there is no internal API to mark private.
 - Use `is None` / `is not None` — never `== None` or `!= None`.
@@ -731,8 +866,6 @@ Usage:
     python hash_manager.py --compute-all <configs_dir>
 """
 
-from __future__ import annotations
-
 import argparse
 import hashlib
 import json
@@ -782,10 +915,24 @@ def _other_helper():
     pass
 ```
 
+## Testing Conventions
+
+Before adding or modifying tests, read the existing test modules to understand the project's conventions for class-vs-function grouping, marker usage, import style, and helper naming. Identify whether the change calls for a unit test or an integration test and place it in the appropriate module — do not mix the two in the same file.
+
+### Rules
+
+- Unit test module names must correspond 1:1 with the source file's leaf name (e.g. source `parser.py` maps to test file `test_parser.py`).
+- Integration test modules are named after the user-facing feature or workflow they exercise end-to-end (e.g. `test_roofline_workflow.py`, `test_profile_export.py`), not after a single source file. The name should tell a reader what scenario is being validated without opening the file.
+- Prefer `monkeypatch` (pytest fixture) over `unittest.mock.Mock` / `MagicMock` — `monkeypatch` integrates with pytest's fixture lifecycle and is the dominant pattern in this project. Reserve `Mock` / `MagicMock` for cases that genuinely need call tracking or attribute auto-creation.
+- Use `types.SimpleNamespace` or `argparse.Namespace` for plain attribute bags instead of mock objects.
+- Define module-level helpers, constants, and fixtures at the top of a test module, above the first test. Do not interleave them between test functions, even when a helper serves only one section.
+- Test behavior that exists. When code is removed, delete its tests instead of inverting them into assertions that the old behavior no longer happens. A test named for a feature the codebase no longer has misleads the next reader into thinking the feature is still there.
+
 ## Key Principles Summary
 
 | Principle | Guideline |
 |-----------|-----------|
+| **Visible state** | Cache loaded data on the class that owns it, never with `lru_cache` |
 | **Readability first** | Code is read far more than written — optimize for clarity and maintainability over brevity |
 | **Single responsibility** | Each function should do exactly one thing well |
 | **Consistent abstraction** | Keep operations at the same conceptual level within a function |

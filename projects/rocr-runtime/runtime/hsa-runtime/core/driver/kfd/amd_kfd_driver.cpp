@@ -47,6 +47,8 @@
     #include <link.h>
 #endif
 
+#include <cstring>
+
 #if defined(__linux__)
     #include <amdgpu_drm.h>
 #endif
@@ -95,17 +97,16 @@ static_assert(
 namespace {
 
 __forceinline HsaMemoryMapFlags mem_perm(hsa_access_permission_t perm) {
-  switch (perm) {
-  case HSA_ACCESS_PERMISSION_RO:
-    return HSA_MEMORY_ACCESS_RO;
-  case HSA_ACCESS_PERMISSION_WO:
-    return HSA_MEMORY_ACCESS_WO;
-  case HSA_ACCESS_PERMISSION_RW:
-    return HSA_MEMORY_ACCESS_RW;
-  case HSA_ACCESS_PERMISSION_NONE:
-  default:
-    return HSA_MEMORY_ACCESS_NONE;
-  }
+  unsigned flags = HSA_MEMORY_ACCESS_NONE;
+
+  if (perm & HSA_ACCESS_PERMISSION_RO)
+    flags |= HSA_MEMORY_ACCESS_RO;
+  if (perm & HSA_ACCESS_PERMISSION_WO)
+    flags |= HSA_MEMORY_ACCESS_WO;
+  if (perm & HSA_ACCESS_PERMISSION_EX)
+    flags |= HSA_MEMORY_ACCESS_EX;
+
+  return static_cast<HsaMemoryMapFlags>(flags);
 }
 
 } // namespace
@@ -113,11 +114,46 @@ __forceinline HsaMemoryMapFlags mem_perm(hsa_access_permission_t perm) {
 KfdDriver::KfdDriver(std::string devnode_name)
     : core::Driver(core::DriverType::KFD, std::move(devnode_name)) {}
 
-hsa_status_t KfdDriver::Init() {
-  HSAKMT_STATUS ret =
-      HSAKMT_CALL(hsaKmtRuntimeEnable(&_amdgpu_r_debug, core::Runtime::runtime_singleton_->flag().debug()));
+hsa_status_t KfdDriver::AcquireTopologySnapshot() const {
+  if (topology_snapshot_acquired_) return HSA_STATUS_SUCCESS;
 
+  HsaSystemProperties props = {};
+  if (HSAKMT_CALL(hsaKmtAcquireSystemProperties(&props)) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+
+  sys_props_ = props;
+  topology_snapshot_acquired_ = true;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::ReleaseTopologySnapshot() {
+  if (!topology_snapshot_acquired_) return HSA_STATUS_SUCCESS;
+
+  topology_snapshot_acquired_ = false;
+  return HSAKMT_CALL(hsaKmtReleaseSystemProperties()) == HSAKMT_STATUS_SUCCESS ? HSA_STATUS_SUCCESS
+                                                                               : HSA_STATUS_ERROR;
+}
+
+hsa_status_t KfdDriver::DisableRuntime() {
+  if (!runtime_enabled_) return HSA_STATUS_SUCCESS;
+
+  runtime_enabled_ = false;
+  const HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtRuntimeDisable());
+  return (ret == HSAKMT_STATUS_SUCCESS || ret == HSAKMT_STATUS_NOT_SUPPORTED) ? HSA_STATUS_SUCCESS
+                                                                              : HSA_STATUS_ERROR;
+}
+
+hsa_status_t KfdDriver::Init() {
+  // Own one snapshot from before the debug probe through BuildTopology().
+  if (AcquireTopologySnapshot() != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+  MAKE_NAMED_SCOPE_GUARD(snapshot_guard, [this]() { ReleaseTopologySnapshot(); });
+
+  HSAKMT_STATUS ret = HSAKMT_CALL(
+      hsaKmtRuntimeEnable(&_amdgpu_r_debug, core::Runtime::runtime_singleton_->flag().debug()));
   if (ret != HSAKMT_STATUS_SUCCESS && ret != HSAKMT_STATUS_NOT_SUPPORTED) return HSA_STATUS_ERROR;
+
+  runtime_enabled_ = true;
+  MAKE_NAMED_SCOPE_GUARD(runtime_guard, [this]() { DisableRuntime(); });
 
   uint32_t caps_mask = 0;
   if (HSAKMT_CALL(hsaKmtGetRuntimeCapabilities(&caps_mask)) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
@@ -140,18 +176,19 @@ hsa_status_t KfdDriver::Init() {
   bool xnack_mode = BindXnackMode();
   core::Runtime::runtime_singleton_->XnackEnabled(xnack_mode);
 
+  runtime_guard.Dismiss();
+  snapshot_guard.Dismiss();
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t KfdDriver::ShutDown() {
-  HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtRuntimeDisable());
-  if (ret != HSAKMT_STATUS_SUCCESS && ret != HSAKMT_STATUS_NOT_SUPPORTED) return HSA_STATUS_ERROR;
+  const hsa_status_t disable_status = DisableRuntime();
+  const hsa_status_t release_status = ReleaseTopologySnapshot();
+  const hsa_status_t close_status = Close();
 
-  ret = HSAKMT_CALL(hsaKmtReleaseSystemProperties());
-
-  if (ret != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
-
-  return Close();
+  if (disable_status != HSA_STATUS_SUCCESS) return disable_status;
+  if (release_status != HSA_STATUS_SUCCESS) return release_status;
+  return close_status;
 }
 
 hsa_status_t KfdDriver::DiscoverDriver(std::unique_ptr<core::Driver>& driver) {
@@ -170,23 +207,25 @@ hsa_status_t KfdDriver::QueryKernelModeDriver(core::DriverQuery query) {
 }
 
 hsa_status_t KfdDriver::Open() {
-  return HSAKMT_CALL(hsaKmtOpenKFD()) == HSAKMT_STATUS_SUCCESS ? HSA_STATUS_SUCCESS
-                                                  : HSA_STATUS_ERROR;
+  const HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtOpenKFD());
+  if (ret == HSAKMT_STATUS_SUCCESS ||
+      (ret == HSAKMT_STATUS_KERNEL_ALREADY_OPENED &&
+       core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()))
+    return HSA_STATUS_SUCCESS;
+
+  return HSA_STATUS_ERROR;
 }
 
 hsa_status_t KfdDriver::Close() {
   return HSAKMT_CALL(hsaKmtCloseKFD()) == HSAKMT_STATUS_SUCCESS ? HSA_STATUS_SUCCESS
-                                                   : HSA_STATUS_ERROR;
+                                                                : HSA_STATUS_ERROR;
 }
 
 hsa_status_t KfdDriver::GetSystemProperties(HsaSystemProperties& sys_props) const {
-  // Note: We intentionally do NOT call hsaKmtReleaseSystemProperties() here.
-  // hsaKmtRuntimeEnable (called from Init) already acquired system properties.
-  // Releasing and re-acquiring would tear down FMM apertures and fail to
-  // re-acquire the VM because the kernel-side VM binding persists.
-  // hsaKmtAcquireSystemProperties handles the cached-snapshot case internally.
-  if (HSAKMT_CALL(hsaKmtAcquireSystemProperties(&sys_props)) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+  const hsa_status_t status = AcquireTopologySnapshot();
+  if (status != HSA_STATUS_SUCCESS) return status;
 
+  sys_props = sys_props_;
   return HSA_STATUS_SUCCESS;
 }
 
@@ -241,6 +280,8 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
     handle->handle = reinterpret_cast<uint64_t>(mem);
     handle->vaddr = mem;
     handle->size = size;
+    handle->owner = this;
+    handle->owns_allocation = true;
   };
 
   kmt_alloc_flags.ui32.ExecuteAccess =
@@ -297,8 +338,7 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
              : kmt_alloc_flags.ui32.Contiguous);
   }
 
-  //// Only allow using the suballocator for ordinary VRAM.
-  if (m_region.IsLocalMemory() && !kmt_alloc_flags.ui32.NoAddress) {
+  if (!kmt_alloc_flags.ui32.NoAddress) {
     bool subAllocEnabled =
         !core::Runtime::runtime_singleton_->flag().disable_fragment_alloc();
     // Avoid modifying executable or queue allocations.
@@ -308,6 +348,17 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
 
     if (useSubAlloc) {
       mem = m_region.fragment_alloc(size);
+
+      // Suballocated fragments may hold stale data from previously freed
+      // fragments, unlike dedicated BOs which are backed by fresh (zeroed)
+      // kernel pages. Zero system-memory fragments so callers that rely on a
+      // freshly allocated buffer being zero-initialized (e.g. an hipHostMalloc
+      // buffer used as an atomic accumulator) behave as they do with a
+      // dedicated BO. Local (device) memory is not host-writable here and is
+      // left untouched (matching pre-existing VRAM suballocation behavior).
+      if (m_region.IsSystem()) {
+        memset(mem, 0, size);
+      }
 
       if ((alloc_flags & core::MemoryRegion::AllocateAsan) &&
           HSAKMT_CALL(hsaKmtReplaceAsanHeaderPage(mem)) != HSAKMT_STATUS_SUCCESS) {
@@ -390,7 +441,7 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
     // On Windows/DXG, allow allocations to succeed even if MakeResident
     // is best-effort; WDDM will demand-page on GPU access.
     const bool is_windxg =
-        core::Runtime::runtime_singleton_->thunkLoader()->IsWinDxg();
+        core::Runtime::runtime_singleton_->thunkLoader()->IsDXG();
     const bool require_pinning =
         !is_windxg &&
         (!m_region.full_profile() || m_region.IsLocalMemory() ||
@@ -419,6 +470,17 @@ hsa_status_t KfdDriver::FreeMemory(const core::DriverMemoryHandle& handle) {
   return (HSAKMT_CALL(hsaKmtFreeMemory(mem, handle.size)) == HSAKMT_STATUS_SUCCESS)
       ? HSA_STATUS_SUCCESS
       : HSA_STATUS_ERROR;
+}
+
+hsa_status_t KfdDriver::QueryPointerInfo(const void* ptr, const core::MemoryRegion* /*region*/,
+                                         core::MemoryRegion::AllocateFlags /*alloc_flags*/,
+                                         const core::DriverMemoryHandle* /*handle*/,
+                                         HsaPointerInfo* info) const {
+  if (HSAKMT_CALL(hsaKmtQueryPointerInfo(ptr, info)) != HSAKMT_STATUS_SUCCESS ||
+      info->Type == HSA_POINTER_UNKNOWN) {
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  }
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t KfdDriver::CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
@@ -576,6 +638,16 @@ hsa_status_t KfdDriver::ImportMemoryHandle(const core::Agent& agent, core::Drive
     }
     handle->handle = reinterpret_cast<uint64_t>(res.buf_handle);
     handle->size = res.alloc_size;
+    handle->owner = this;
+    // hsaKmtHandleImport creates a distinct object per import, so this handle owns it.
+    handle->owns_allocation = true;
+
+    if (HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(gpu_agent.libThunkDev(), res.buf_handle,
+                                           &handle->mmap_offset)) != HSAKMT_STATUS_SUCCESS) {
+      DestroyMemoryHandle(handle);
+      return HSA_STATUS_ERROR;
+    }
+
     return HSA_STATUS_SUCCESS;
   }
   case core::ShareType::FABRIC_HANDLE: {
@@ -600,11 +672,31 @@ hsa_status_t KfdDriver::ImportMemoryHandle(const core::Agent& agent, core::Drive
     handle->handle = reinterpret_cast<uint64_t>(res.buf_handle);
     if (rocr::os::DmaBufClose(&res.dmabuf_fd) != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
     handle->size = res.alloc_size;
+    handle->owner = this;
+    // hsaKmtHandleImport creates a distinct object per import, so this handle owns it.
+    handle->owns_allocation = true;
     return HSA_STATUS_SUCCESS;
   }
   default:
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
+}
+
+hsa_status_t KfdDriver::QueryDmaBufInfo(int dmabuf_fd, core::DmaBufInfo* info) const {
+  if (dmabuf_fd < 0 || info == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  // The symbol is loaded optionally, so an older thunk leaves it null.
+  if (HSAKMT_CALL(hsaKmtQueryDmaBufInfo) == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  HsaDmaBufInfo kmt_info = {};
+  if (HSAKMT_CALL(hsaKmtQueryDmaBufInfo)(dmabuf_fd, &kmt_info) != HSAKMT_STATUS_SUCCESS) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  info->size = kmt_info.Size;
+  info->node_id = kmt_info.GpuId;
+  info->is_device_memory = kmt_info.IsDeviceMemory != 0;
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t KfdDriver::Map(const core::DriverMemoryHandle& handle, void* mem, size_t offset, size_t size,
@@ -671,26 +763,26 @@ hsa_status_t KfdDriver::CreateShareableHandle(core::DriverMemoryHandle* handle,
     return ret;
   assert(targetHandle.size == size);
 
-#if defined(__linux__)
-  /*
-   * We converted mem into a driver handle. The driver handle will keep the reference count
-   * inside the KMD so we can free the original KFD allocation.
-   */
-  if (HSAKMT_CALL(hsaKmtFreeMemory(mem, size)) != HSAKMT_STATUS_SUCCESS) {
-    DestroyMemoryHandle(&targetHandle);
-    return HSA_STATUS_ERROR;
-  }
-#endif
-
-  const auto devhandle = static_cast<const GpuAgent&>(agent).libThunkDev();
-  const auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(targetHandle.handle);
-  if (HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(devhandle, memhandle, &handle->mmap_offset)) != HSAKMT_STATUS_SUCCESS) {
-    DestroyMemoryHandle(&targetHandle);
-    return HSA_STATUS_ERROR;
-  }
+  handle->mmap_offset = targetHandle.mmap_offset;
 
   // handle->handle is replaced by the imported BO; handle->size carries over from allocation.
   handle->handle = targetHandle.handle;
+#if defined(__linux__)
+  /*
+   * Keep the original KFD allocation alive in handle->vaddr; DestroyMemoryHandle releases it.
+   *
+   * The DRM import alone keeps the buffer's reference count up, but a buffer that KFD no longer
+   * tracks is only revalidated from the command submission path. ROCr dispatches through KFD user
+   * mode queues and never submits through amdgpu_cs, so a peer dma-buf attach that migrates the
+   * buffer would leave the exporting agent with stale page table entries. While the KFD allocation
+   * exists the buffer carries KFD's eviction fence, so the migration goes through KFD
+   * evict/restore, which also revalidates the mappings KFD does not manage.
+   */
+  handle->vaddr = mem;
+#else
+  // Windows KFD and DRM handles are equivalent, so targetHandle already owns the allocation.
+  handle->vaddr = nullptr;
+#endif
   /*
    * Do not hold a shareable dmabuf_fd open for the lifetime of the handle. It is created lazily
    * (and closed again) when access is set in Runtime::VMemorySetAccessPerHandle.
@@ -702,13 +794,20 @@ hsa_status_t KfdDriver::CreateShareableHandle(core::DriverMemoryHandle* handle,
 hsa_status_t KfdDriver::DestroyMemoryHandle(core::DriverMemoryHandle* handle) {
   hsa_status_t ret = rocr::os::DmaBufClose(&handle->dmabuf_fd);
 
+  // Attempt every release even if an earlier one fails, so a failure to free the imported BO
+  // does not leak the KFD allocation retained by CreateShareableHandle.
   auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle->handle);
-  if (memhandle != nullptr) {
-    HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemHandleFree(memhandle));
-    if (status != HSAKMT_STATUS_SUCCESS) {
-      return HSA_STATUS_ERROR;
-    }
+  if (memhandle != nullptr &&
+      HSAKMT_CALL(hsaKmtMemHandleFree(memhandle)) != HSAKMT_STATUS_SUCCESS) {
+    ret = HSA_STATUS_ERROR;
   }
+
+  // Release the KFD allocation retained by CreateShareableHandle, if any.
+  if (handle->vaddr != nullptr &&
+      HSAKMT_CALL(hsaKmtFreeMemory(handle->vaddr, handle->size)) != HSAKMT_STATUS_SUCCESS) {
+    ret = HSA_STATUS_ERROR;
+  }
+
   *handle = {};
   return ret;
 }
@@ -734,7 +833,6 @@ hsa_status_t KfdDriver::SPMSetDestBuffer(uint32_t preferred_node_id, uint32_t si
 
   return HSA_STATUS_SUCCESS;
 }
-
 hsa_status_t KfdDriver::OpenSMI(uint32_t node_id, int* fd) const {
   if (HSAKMT_CALL(hsaKmtOpenSMI(node_id, fd)) != HSAKMT_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR;
@@ -917,7 +1015,16 @@ hsa_status_t KfdDriver::GetDeviceFd(uint32_t node_id, int *fd) const {
 hsa_status_t KfdDriver::GetClockCounters(uint32_t node_id, HsaClockCounters* clock_counter) const {
   assert(clock_counter);
 
-  if (HSAKMT_CALL(hsaKmtGetClockCounters(node_id, clock_counter)) != HSAKMT_STATUS_SUCCESS)
+  const bool precise_timestamps =
+      core::Runtime::runtime_singleton_ != nullptr &&
+      core::Runtime::runtime_singleton_->flag().enable_high_precision_timestamps() &&
+      core::Runtime::runtime_singleton_->thunkLoader()->HSAKMT_PFN(
+          hsaKmtGetClockCountersPrecise) != nullptr;
+
+  HSAKMT_STATUS err = precise_timestamps
+      ? HSAKMT_CALL(hsaKmtGetClockCountersPrecise(node_id, clock_counter))
+      : HSAKMT_CALL(hsaKmtGetClockCounters(node_id, clock_counter));
+  if (err != HSAKMT_STATUS_SUCCESS)
     return HSA_STATUS_ERROR;
   return HSA_STATUS_SUCCESS;
 }
@@ -1038,6 +1145,13 @@ hsa_status_t KfdDriver::CheckAcceleratorReadiness(core::Agent& agent, bool* read
     *ready = false;
   }
 
+  return HSA_STATUS_SUCCESS;
+}
+
+
+hsa_status_t KfdDriver::SetPersistingCacheSize(uint32_t node_id, uint64_t cache_size) {
+  if (HSAKMT_CALL(hsaKmtSetPersistingCacheSize)(node_id, cache_size) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
   return HSA_STATUS_SUCCESS;
 }
 

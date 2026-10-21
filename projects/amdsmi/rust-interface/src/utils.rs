@@ -1,22 +1,6 @@
-// Copyright (C) 2024 Advanced Micro Devices. All rights reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy of
-// this software and associated documentation files (the "Software"), to deal in
-// the Software without restriction, including without limitation the rights to
-// use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-// the Software, and to permit persons to whom the Software is furnished to do so,
-// subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-// FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-// COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-// IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-// CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-//
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 use std::fmt;
 
 // Re-export all the alias type
@@ -27,7 +11,7 @@ pub use crate::amdsmi_wrapper::{
     AmdsmiCachePropertyTypeT, AmdsmiCardFormFactorT, AmdsmiClkLimitTypeT, AmdsmiClkTypeT,
     AmdsmiComputePartitionTypeT, AmdsmiCounterCommandT, AmdsmiDevPerfLevelT, AmdsmiEventGroupT,
     AmdsmiEventTypeT, AmdsmiEvtNotificationTypeT, AmdsmiFreqIndT, AmdsmiFwBlockT, AmdsmiGpuBlockT,
-    AmdsmiInitFlagsT, AmdsmiLinkTypeT, AmdsmiMemoryPartitionTypeT, AmdsmiMemoryTypeT,
+    AmdsmiInitFlagsT, AmdsmiLinkStatusT, AmdsmiLinkTypeT, AmdsmiMemoryPartitionTypeT, AmdsmiMemoryTypeT,
     AmdsmiPowerProfilePresetMasksT, AmdsmiRasErrStateT, AmdsmiStatusT,
     AmdsmiTemperatureMetricT, AmdsmiTemperatureTypeT, AmdsmiUtilizationCounterTypeT,
     AmdsmiVoltageMetricT, AmdsmiVoltageTypeT, AmdsmiXgmiStatusT, AmdsmiProcessorTypeT, AmdsmiAcceleratorPartitionTypeT
@@ -40,7 +24,7 @@ pub use crate::amdsmi_wrapper::{
     AmdsmiDriverInfoT, AmdsmiEngineUsageT, AmdsmiErrorCountT, AmdsmiEvtNotificationDataT,
     AmdsmiFreqVoltRegionT, AmdsmiFrequenciesT, AmdsmiFrequencyRangeT, AmdsmiFwInfoT,
     AmdsmiGpuCacheInfoT, AmdsmiGpuCacheInfoTCache, AmdsmiGpuMetricsT, AmdsmiKfdInfoT,
-    AmdsmiLinkMetricsT, AmdsmiLinkMetricsTLinks, AmdsmiNameValueT,
+    AmdsmiLinkMetricsT, AmdsmiLinkMetricsTLinks, AmdsmiLinkTopologyT, AmdsmiNameValueT,
     AmdsmiOdVoltFreqDataT, AmdsmiP2pCapabilityT, AmdsmiPcieBandwidthT, AmdsmiPcieInfoT,
     AmdsmiPcieInfoTPcieMetric, AmdsmiPcieInfoTPcieStatic, AmdsmiPowerCapInfoT, AmdsmiPowerInfoT,
     AmdsmiPowerProfileStatusT, AmdsmiProcInfoT, AmdsmiProcInfoTEngineUsage,
@@ -48,6 +32,12 @@ pub use crate::amdsmi_wrapper::{
     AmdsmiRegTypeT, AmdsmiRetiredPageRecordT, AmdsmiTopologyNearestT, AmdsmiUtilizationCounterT,
     AmdsmiVbiosInfoT, AmdsmiVersionT, AmdsmiViolationStatusT, AmdsmiVramInfoT, AmdsmiVramUsageT,
     AmdsmiXgmiInfoT, AmdsmiNpsCapsT, AmdsmiNpsCapsTNpsFlags
+};
+
+// Re-export the CUID types
+pub use crate::amdsmi_wrapper::{
+    AmdsmiCuidComponentT, AmdsmiCuidComponentTypeT, AmdsmiCuidInfoT, AmdsmiCuidSourceT,
+    AMDSMI_GPU_CUID_SIZE,
 };
 
 //Re-export all the union type
@@ -172,7 +162,16 @@ impl_cstr_getters!(
 );
 
 // Implement the getters for the C string fields in AmdsmiDriverInfoT
-impl_cstr_getters!(AmdsmiDriverInfoT, driver_version, driver_date, driver_name);
+impl_cstr_getters!(
+    AmdsmiDriverInfoT,
+    driver_version,
+    driver_date,
+    driver_name,
+    driver_kernel_version,
+    amdgpu_driver_version,
+    driver_build_version,
+    driver_full_version
+);
 
 // Implement the getters for the C string fields in AmdsmiNameValueT
 impl_cstr_getters!(AmdsmiNameValueT, name);
@@ -182,3 +181,9 @@ impl_cstr_getters!(AmdsmiProcInfoT, name, container_name);
 
 // Implement the getters for the C string fields in AmdsmiDpmPolicyEntryT
 impl_cstr_getters!(AmdsmiDpmPolicyEntryT, policy_description);
+
+// Implement the getters for the C string fields in AmdsmiCuidInfoT
+impl_cstr_getters!(AmdsmiCuidInfoT, primary, derived);
+
+// Implement the getters for the C string fields in AmdsmiCuidComponentT
+impl_cstr_getters!(AmdsmiCuidComponentT, bdf, device_path);

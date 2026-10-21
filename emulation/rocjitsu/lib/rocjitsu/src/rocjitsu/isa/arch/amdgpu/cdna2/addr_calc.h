@@ -4,20 +4,23 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_CDNA2_ADDR_CALC_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_CDNA2_ADDR_CALC_H_
 
-#include "rocjitsu/isa/arch/amdgpu/cdna2/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/machine_insts.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 
 #include <cstdint>
+#include <optional>
 
 namespace rocjitsu {
 namespace amdgpu {
 class Wavefront;
-struct VectorMemState;
+class VectorMemState;
+class ScalarMemState;
 } // namespace amdgpu
 
 namespace cdna2 {
 
-uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf);
+std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf,
+                                               amdgpu::ScalarMemState *state = nullptr);
 
 void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf,
                               amdgpu::VectorMemState &d);

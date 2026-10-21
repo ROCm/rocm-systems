@@ -52,8 +52,10 @@ void Kernel::setWorkGroupInfo(const uint32_t privateSegmentSize,
     workGroupInfo_.availableVGPRs_ = 256;
     workGroupInfo_.preferredSizeMultiple_ = workGroupInfo_.wavefrontPerSIMD_ = 64;
   }
-  workGroupInfo_.maxDynamicSharedSizeBytes_ =
+  const int maxDynamicSharedSizeBytes =
       static_cast<int>(workGroupInfo_.availableLDSSize_ - workGroupInfo_.localMemSize_);
+  workGroupInfo_.maxDynamicSharedSizeBytes_ = maxDynamicSharedSizeBytes;
+  workGroupInfo_.kernelMaxDynamicSharedSizeBytes_ = maxDynamicSharedSizeBytes;
 }
 
 bool Kernel::setKernelCode(amd::hsa::loader::Symbol* sym, amd_kernel_code_t* akc) {
@@ -192,10 +194,10 @@ Kernel::loadArguments(VirtualGPU& gpu, const amd::Kernel& kernel,
   }
 
   amd::NDRange local(sizes.local());
-  const amd::NDRange& global = sizes.global();
+  const amd::NDRange global(sizes.global());
 
   // Check if runtime has to find local workgroup size
-  FindLocalWorkSize(sizes.dimensions(), sizes.global(), local);
+  FindLocalWorkSize(sizes.dimensions(), global, local);
 
   address hidden_arguments = const_cast<address>(parameters);
 

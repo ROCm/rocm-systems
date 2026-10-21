@@ -4,7 +4,7 @@
 #pragma once
 
 #include "common/defines.h"
-#include "rocprofiler-systems/categories.h"  // in rocprof-sys-user
+#include "rocprofiler-systems/categories.h"  // in rocprof-sys-common-api
 
 #if defined(TIMEMORY_PERFETTO_CATEGORIES)
 #    error "TIMEMORY_PERFETTO_CATEGORIES is already defined. Please include \"" __FILE__ "\" before including any timemory files"
@@ -38,7 +38,7 @@ template <typename Tp>
 struct category_enum_id;
 
 template <size_t Idx>
-using category_type_id_t = typename category_type_id<Idx>::type;
+using category_type_id_t = category_type_id<Idx>::type;
 }  // namespace rocprofsys
 
 #define ROCPROFSYS_DEFINE_CATEGORY_TRAIT(TYPE, ENUM)                                     \
@@ -90,12 +90,15 @@ ROCPROFSYS_DEFINE_CATEGORY(category, rocm_rocshmem_api, ROCPROFSYS_CATEGORY_ROCM
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_ompt_api, ROCPROFSYS_CATEGORY_ROCM_OMPT_API, "rocm_ompt_api", "ROCm OMPT API")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kfd_page_fault, ROCPROFSYS_CATEGORY_ROCM_KFD_PAGE_FAULT, "rocm_kfd_page_fault", "KFD Page Fault Events")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kfd_page_migrate, ROCPROFSYS_CATEGORY_ROCM_KFD_PAGE_MIGRATE, "rocm_kfd_page_migrate", "KFD Page Migration Events")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kfd_event_page_fault, ROCPROFSYS_CATEGORY_ROCM_KFD_EVENT_PAGE_FAULT, "rocm_kfd_event_page_fault", "KFD Event Page Fault Events")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kfd_event_page_migrate, ROCPROFSYS_CATEGORY_ROCM_KFD_EVENT_PAGE_MIGRATE, "rocm_kfd_event_page_migrate", "KFD Event Page Migration Events")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kfd_queue, ROCPROFSYS_CATEGORY_ROCM_KFD_QUEUE, "rocm_kfd_queue", "KFD Queue Events")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kfd_event_queue, ROCPROFSYS_CATEGORY_ROCM_KFD_EVENT_QUEUE, "rocm_kfd_event_queue", "KFD Event Queue Operations")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kfd_event_unmap_from_gpu, ROCPROFSYS_CATEGORY_ROCM_KFD_EVENT_UNMAP_FROM_GPU, "rocm_kfd_event_unmap_from_gpu", "KFD Unmap from GPU Events")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kfd_event_dropped_events, ROCPROFSYS_CATEGORY_ROCM_KFD_EVENT_DROPPED_EVENTS, "rocm_kfd_event_dropped_events", "KFD Dropped Events")
 ROCPROFSYS_DEFINE_CATEGORY(category, unified_memory_migration_throughput, ROCPROFSYS_CATEGORY_UNIFIED_MEMORY_MIGRATION_THROUGHPUT, "unified_memory_migration_throughput", "Unified Memory Migration Throughput")
 ROCPROFSYS_DEFINE_CATEGORY(category, unified_memory_fault_rate, ROCPROFSYS_CATEGORY_UNIFIED_MEMORY_FAULT_RATE, "unified_memory_fault_rate", "Unified Memory Page Fault Rate")
+ROCPROFSYS_DEFINE_CATEGORY(category, hipfile, ROCPROFSYS_CATEGORY_HIPFILE, "hipfile", "hipFile's AMD Infinity Storage I/O statistics")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi, ROCPROFSYS_CATEGORY_AMD_SMI, "amd_smi", "AMD-SMI data")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC, "amd_smi_nic", "AMD-SMI NIC data")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_rx_cnp_pkts, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_RX_CNP_PKTS, "nic_rx_cnp_pkts", "AI NIC RX CNP Packets")
@@ -160,14 +163,11 @@ ROCPROFSYS_DEFINE_CATEGORY(category, overflow_sampling, ROCPROFSYS_CATEGORY_OVER
 ROCPROFSYS_DECLARE_CATEGORY(category, sampling, ROCPROFSYS_CATEGORY_SAMPLING, "sampling", "Host-side call-stack sampling")
 // clang-format on
 
-namespace tim
-{
-namespace trait
+namespace tim::trait
 {
 template <typename... Tp>
 using name = perfetto_category<Tp...>;
 }
-}  // namespace tim
 
 #define ROCPROFSYS_PERFETTO_CATEGORY(TYPE)                                               \
     ::perfetto::Category(::tim::trait::perfetto_category<::tim::TYPE>::value)            \
@@ -197,6 +197,8 @@ using name = perfetto_category<Tp...>;
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_ompt_api),                           \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_kfd_page_fault),                     \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_kfd_page_migrate),                   \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_kfd_event_page_fault),               \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_kfd_event_page_migrate),             \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_kfd_queue),                          \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_kfd_event_queue),                    \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_kfd_event_unmap_from_gpu),           \
@@ -264,6 +266,7 @@ using name = perfetto_category<Tp...>;
         ROCPROFSYS_PERFETTO_CATEGORY(category::overflow_sampling),                       \
         ROCPROFSYS_PERFETTO_CATEGORY(category::unified_memory_migration_throughput),     \
         ROCPROFSYS_PERFETTO_CATEGORY(category::unified_memory_fault_rate),               \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::hipfile),                                 \
         ::perfetto::Category("timemory").SetDescription("Events from the timemory API")
 
 #if defined(TIMEMORY_USE_PERFETTO)

@@ -389,6 +389,41 @@ TEST_F(IRDeviceTest, B3d_CoopInitLanes_UpperLaneMask) {
              [](int t){ return (t == 63) ? 0 : -1; });
 }
 
+TEST_F(IRDeviceTest, B3e_CoopInitLanes_IgnoresNonexistentLanes) {
+  const uint64_t mask = 0xffffffff00000000ull;
+  const int      sz   = warpSize_ > 32 ? 32 : 0;
+  auto h = launch_coop_r(k_coop_lanes_r, warpSize_, mask);
+  check_coop(h,
+             [sz](int) { return sz; },
+             [](int)   { return -1; });
+}
+
+/* ncclCoopTile::laneMask() is not reached by the ncclCoopAny tests above.
+ * AMD shims discard the mask today; this pins the value the tile returns. */
+__global__ void k_coop_tile4_lane_mask(uint64_t* out) {
+  ncclCoopTile<4> tile;
+  int tid = blockIdx.x * blockDim.x + threadIdx.x;
+  out[tid] = static_cast<uint64_t>(tile.laneMask());
+}
+
+TEST_F(IRDeviceTest, B3f_CoopTileLaneMask_AlignedGroupOfFour) {
+  const int n = warpSize_;
+  uint64_t* d = nullptr;
+  HIP_ASSERT(hipMalloc(&d, sizeof(uint64_t) * n));
+  k_coop_tile4_lane_mask<<<1, n>>>(d);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+  std::vector<uint64_t> got(n);
+  HIP_ASSERT(hipMemcpy(got.data(), d, sizeof(uint64_t) * n, hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipFree(d));
+
+  const uint64_t window = ~uint64_t(0) >> (64 - n);
+  for (int lane = 0; lane < n; ++lane) {
+    const uint64_t expect = (window >> (n - 4)) << (lane & -4);
+    EXPECT_EQ(got[lane], expect) << "lane " << lane;
+  }
+}
+
 /* =====================================================================
  * [B4] ncclCoopAnyInitWarpSpan — 1-warp and 2-warp spans
  * rank = threadIdx.x - WARP_SIZE * warp0  (WARP_SIZE == device warpSize)

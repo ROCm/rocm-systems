@@ -5,7 +5,6 @@
 # benchmark_gfx1151.py
 #
 # Benchmarking class for all gfx1151 products
-# AMD Ryzen AI MAX / MAX+ / PRO
 #
 # -----------------------------------------------------------------------------
 

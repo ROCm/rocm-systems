@@ -22,6 +22,8 @@ subtrees:
     - file: how-to/use.rst
     - file: how-to/pc_sampling.rst
       title: Use PC sampling
+    - file: how-to/membw_analysis.rst
+      title: Use Memory bandwidth analysis
     - file: how-to/live_attach_detach.rst
       title: Use Dynamic process attachment
     - file: how-to/profile/mode.rst
@@ -30,6 +32,7 @@ subtrees:
       - file: how-to/analyze/cli.rst
       - file: how-to/analyze/standalone-gui.rst
       - file: how-to/analyze/tui.rst
+      - file: how-to/analyze/optiq.rst
 
   - caption: Conceptual
     entries:
@@ -38,6 +41,8 @@ subtrees:
       - file: conceptual/cdna/cdna-performance-model.rst
         title: CDNA-CDNA4
         entries:
+        - file: conceptual/cdna/compute-memory-partition.rst
+          title: Compute and memory partition modes
         - file: conceptual/cdna/system-speed-of-light.rst
           title: System Speed-of-Light
         - file: conceptual/cdna/compute-unit.rst

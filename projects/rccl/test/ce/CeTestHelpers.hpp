@@ -14,7 +14,11 @@
 #include "DeviceBufferHelpers.hpp"
 #include "MPIHelpers.hpp"
 
+#include <comm.h>
+
 #include <hip/hip_runtime.h>
+#include <cstdlib>
+#include <string>
 
 // Returns true when compiled with CE batch API support (CE_BATCH_ASYNC_SUPPORTED).
 // Gated at build time via check_symbol_exists(hipMemcpyBatchAsync); no runtime query needed.
@@ -46,6 +50,8 @@ inline bool isCeRuntimeDriverSupported()
 //   4. NCCL_LOCAL_REGISTER=0      (explicit buffer registration only).
 //   5. NCCL_CUMEM_ENABLE=1        (VMM-backed symmetric memory; default is 0).
 //      Without this, comm->symmetricSupport is false and CE is never dispatched.
+//      RCCL can still leave it false (no cuMem, e.g. kernel < 6.8), so once a
+//      communicator exists, gate on the overload that takes it.
 //
 // Use this single check wherever a test needs to decide between asserting the
 // CE path or the SM fallback path.
@@ -64,6 +70,36 @@ inline bool isCeDispatchConfigured()
            MPIHelpers::getEnvParam("NCCL_CTA_POLICY",           kCtaPolicyDefault)         == kCtaPolicyCE &&
            MPIHelpers::getEnvParam("NCCL_LOCAL_REGISTER",        kLocalRegisterDefault)     == kLocalRegisterCE &&
            MPIHelpers::getEnvParam("NCCL_CUMEM_ENABLE",          kCuMemEnableDefault)       == kCuMemEnable;
+}
+
+// Same gate for a live communicator: ncclCeAvailable also requires its symmetric memory support.
+inline bool isCeDispatchConfigured(const ncclComm* comm)
+{
+    return isCeDispatchConfigured() && comm != nullptr && comm->symmetricSupport;
+}
+
+// Returns true when CE AlltoAll dispatch is expected (CE prerequisites + RCCL_DDA_ENABLE=0).
+inline bool isCeAlltoAllDispatchConfigured()
+{
+    constexpr int kDdaEnableDefault = 1; // RCCL_DDA_ENABLE defaults on
+    constexpr int kDdaDisabled      = 0;
+    return isCeDispatchConfigured() &&
+           MPIHelpers::getEnvParam("RCCL_DDA_ENABLE", kDdaEnableDefault) == kDdaDisabled;
+}
+
+// Returns true when CE AllReduce dispatch is expected (CE prerequisites + RCCL_CE_ALLREDUCE=1).
+inline bool isCeAllReduceDispatchConfigured()
+{
+    constexpr int kCeAllReduceDefault = 0;
+    constexpr int kCeAllReduceEnabled = 1;
+    return isCeDispatchConfigured() &&
+           MPIHelpers::getEnvParam("RCCL_CE_ALLREDUCE", kCeAllReduceDefault) == kCeAllReduceEnabled;
+}
+
+// CE AllReduce gate for a live communicator; see isCeDispatchConfigured(const ncclComm*).
+inline bool isCeAllReduceDispatchConfigured(const ncclComm* comm)
+{
+    return isCeDispatchConfigured(comm) && isCeAllReduceDispatchConfigured();
 }
 
 // Batch path prediction helpers
@@ -91,6 +127,45 @@ inline hipError_t ceFillRankScalarFloat(void* buf, size_t nElem, int rank)
 {
     return RCCLTestHelpers::initializeBufferWithPattern<float>(
         buf, nElem, [rank](size_t) { return static_cast<float>(rank + 1); });
+}
+
+// True when NCCL logs indicate the CE AllReduce pipeline ran.
+// Match the execution INFO lines from ncclCeAllReduce(), not the
+// "Skipping CE AllReduce: ..." WARN that rcclUseCeAr2Shot() emits
+// when nNodes > 1 (that substring used to fail multi-node EightRanks).
+inline bool ceLogShowsAllReducePath(const std::string& log)
+{
+    return log.find("CE AllReduce: rank") != std::string::npos ||
+           log.find("CE AllReduce: Phase") != std::string::npos ||
+           log.find("CE 2-shot AllReduce") != std::string::npos;
+}
+
+// Largest chunksPerShard reported by the "CE AllReduce: rank ..." INFO line that
+// ncclCeAllReduce() emits once per call, or 0 when no such line was logged.
+// 1 means the single-shot path ran; >= 2 means the multi-chunk pipeline ran.
+inline size_t ceLogChunksPerShard(const std::string& log)
+{
+    const std::string key  = "chunksPerShard=";
+    size_t            best = 0;
+    for(size_t p = log.find(key); p != std::string::npos; p = log.find(key, p + key.size()))
+    {
+        const size_t value =
+            static_cast<size_t>(std::strtoull(log.c_str() + p + key.size(), nullptr, 10));
+        if(value > best)
+            best = value;
+    }
+    return best;
+}
+
+// Round count up to the next multiple of nRanks (CE AR requires count % nRanks == 0).
+inline size_t ceAllReduceAlignedCount(size_t count, int nRanks)
+{
+    if(nRanks <= 0)
+        return count;
+    const size_t nr = static_cast<size_t>(nRanks);
+    if(count % nr == 0)
+        return count;
+    return count + (nr - (count % nr));
 }
 
 // Verify AllGather / AlltoAll output: element at index i must equal

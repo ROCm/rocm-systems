@@ -1,16 +1,9 @@
 # Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Side-by-side validation: SemaAST lowering vs old generators.
+"""Check operand access, execution loops and side effects in semantic lowering.
 
-Validates that the SemaAST pipeline (derive → enrich → lower) produces
-C++ that has the same structural properties as the old string-tag
-generators. Does NOT require byte-identical output — instead checks
-that both outputs:
-  - Use the same operand names (ssrc0, vdst, etc.)
-  - Use the same read/write methods (read_scalar, write_lane, etc.)
-  - Write the same side-effect registers (SCC, VCC, EXEC)
-  - Have the same execution model (EXEC loop vs no loop)
+Scalar cases also compare the corresponding scalar emitters.
 """
 
 import re
@@ -30,11 +23,6 @@ from amdisa.codegen.execute.scalar import (
     gen_scalar_cmp,
     gen_scalar_saveexec,
     gen_scalar_unary,
-)
-from amdisa.codegen.execute.vector_alu import (
-    gen_vector_binop,
-    gen_vector_ternary,
-    gen_vector_unary,
 )
 
 
@@ -63,7 +51,7 @@ def _extract_properties(cpp: str) -> dict:
         'writes_scalar': 'write_scalar' in cpp,
         'writes_lane': 'write_lane' in cpp,
         'uses_fabs': 'fabs' in cpp,
-        'uses_fma': 'fma' in cpp or 'std::fma' in cpp,
+        'uses_fma': 'fma' in cpp or 'Arithmetic::FMA' in cpp,
         'operand_names': set(re.findall(r'\b(ssrc\d|sdst|src\d|vsrc\d|vdst)\b', cpp)),
     }
 
@@ -145,31 +133,25 @@ class TestVectorBinopValidation:
     )
     def test_vector_binop_has_exec_loop(self, op, dtype):
         sem = _FakeSem(f'V_{op.upper()}_{dtype.upper()}', 'vector_binop', op, dtype)
-        old = gen_vector_binop(['vdst'], ['src0', 'vsrc1'], op, dtype)
         new = _new_output(sem, ['src0', 'vsrc1'], ['vdst'], dtype)
-        old_props = _extract_properties(old)
         new_props = _extract_properties(new)
-        assert old_props['has_exec_loop']
         assert new_props['has_exec_loop']
         assert 'vdst' in new_props['operand_names']
         assert new_props['reads_lane']
         assert new_props['writes_lane']
 
-    def test_legacy_i24_mul_uses_unsigned_helper(self):
-        old = gen_vector_binop(['vdst'], ['src0', 'vsrc1'], 'mul', 'i24')
+    def test_i24_mul_uses_unsigned_helper(self):
+        sem = _FakeSem('V_MUL_I32_I24', 'vector_binop', 'mul', 'i24')
+        new = _new_output(sem, ['src0', 'vsrc1'], ['vdst'], 'i24')
 
-        assert '::rocjitsu::amdgpu::mul_i24_u32' in old
-        assert 'sv0 * sv1' not in old
+        assert '::rocjitsu::amdgpu::mul_i24_u32' in new
 
 
 class TestVectorTernaryValidation:
     def test_fma_f32(self):
         sem = _FakeSem('V_FMA_F32', 'vector_ternary', 'fma', 'f32')
-        old = gen_vector_ternary(['vdst'], ['src0', 'src1', 'src2'], 'fma', 'f32')
         new = _new_output(sem, ['src0', 'src1', 'src2'], ['vdst'], 'f32')
-        old_props = _extract_properties(old)
         new_props = _extract_properties(new)
-        assert old_props['uses_fma']
         assert new_props['uses_fma']
         assert new_props['has_exec_loop']
 
@@ -178,9 +160,7 @@ class TestVectorUnaryValidation:
     @pytest.mark.parametrize('op', ['floor', 'trunc', 'sqrt'])
     def test_vector_unary_exec_loop(self, op):
         sem = _FakeSem(f'V_{op.upper()}_F32', 'vector_unary', op, 'f32')
-        old = gen_vector_unary(['vdst'], ['src0'], op, 'f32')
         new = _new_output(sem, ['src0'], ['vdst'], 'f32')
-        assert 'for (uint32_t lane' in old
         assert 'for (uint32_t lane' in new
 
 
@@ -211,8 +191,8 @@ class TestSaveexecValidation:
         sem = _FakeSem('S_AND_SAVEEXEC_B64', 'scalar_saveexec', 'and', 'b64', 'nonzero')
         old = gen_scalar_saveexec(['sdst'], ['ssrc0'], 'and')
         new = _new_output(sem, ['ssrc0'], ['sdst'])
-        assert 'set_exec' in old or 'set_exec' in old
-        assert 'set_exec' in new
+        assert 'wf.set_exec(' in old
+        assert 'wf.write_exec(' in new
         assert 'write_scc' in new
 
     def test_saveexec_b32_uses_32_bit_operand_access(self):
@@ -243,6 +223,7 @@ class TestAllClassesLowerWithOperandMap:
         }
         for cls_name in sorted(_DERIVE_REGISTRY.keys()):
             operation = {
+                'pseudo_scalar_unary': 'sqrt',
                 'scalar_saveexec': 'and',
                 'scalar_wrexec': 'andn1',
             }.get(cls_name, 'add')

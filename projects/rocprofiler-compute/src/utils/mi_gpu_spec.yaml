@@ -9,7 +9,7 @@
 # GPUs
 #   |-- series: the specific series; mi50, mi100, mi200, mi300
 #       |-- architecture: currently, only mi300 gpus hold different architectures
-#           |-- perfmon_config, copy from ROCm/aqlprofile from gfxip/gfx9/gfx9_block_info.h
+#           |-- perfmon_config, copy from aqlprofile from gfxip/gfx<version>/gfx<version>_block_info.h block counter registers
 #           |-- gpu model
 #           |-- chip_ids: chip id is specific to the environment the gpu is being used on
 #               | -- physical
@@ -28,6 +28,8 @@
 # --------------------------------------------------------------------------------
 
 mi_gpu_spec:
+  #########################################################
+  # CDNA 1-4 family
   - gpu_series: mi100
     gpu_archs:
       - gpu_arch: gfx908
@@ -508,4 +510,53 @@ mi_gpu_spec:
               memory_levels: ["LDS", "L0", "L1", "L2"]
             chip_ids:
               physical: 6402
+
+  #########################################################
+  # gfx1250 family
+  - gpu_series: gfx1250_series
+    gpu_archs:
+      - gpu_arch: gfx1250
+        perfmon_config:
+          CHA: 4
+          CHC: 4
+          CPC: 2
+          CPF: 2
+          GCR: 2
+          GC_CANE: 1
+          GC_EA_SE: 2
+          GL1A: 4
+          GL1C: 4
+          GL2A: 4
+          GL2C: 4
+          GLARBA: 4
+          GLARBC: 4
+          GRBM: 2
+          SDMA: 6
+          SPI: 6
+          SQG: 8
+          SQ: 8  # Including all SQC and SP counters
+          TCP: 8  # All TX counters using the old TCP block name
+          UTCL1: 4
+        models:
+          - gpu_model: gfx1250
+            partition_mode:
+              compute_partition_mode:
+                num_xcds:
+                  spx: 8
+                  dpx: 4
+                  qpx: 2
+                  cpx: 1
+              memory_partition_mode:
+                nps1:
+                  spx: 1
+                  dpx: 2
+                  qpx: 4
+                  cpx: 8
+            design:
+              physical_aid: 2
+              logical_partitions_per_die: 1
+              memory_levels: ["LDS", "L0", "L1", "L2", "HBM"]
+            chip_ids:
+              physical: 30145
+              virtual: 30161
   #########################################################

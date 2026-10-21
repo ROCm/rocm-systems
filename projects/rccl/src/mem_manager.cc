@@ -20,6 +20,7 @@
 #include "param.h"
 #include "group.h"
 #include "p2p.h"  // For CU_MEM_HANDLE_TYPE_FABRIC alias used by ncclCommMemResume
+#include "enqueue.h"
 #include "compiler.h"
 #include <string.h>
 #include <stdlib.h>
@@ -233,8 +234,14 @@ ncclResult_t ncclMemTrackImportFromPeer(struct ncclMemManager* manager, void* pt
   return ncclMemTrackInternal(manager, ptr, size, handle, handleType, memType, true, ownerRank, ownerDev, ownerPtr);
 }
 
-// Untrack allocation
-ncclResult_t ncclMemUntrack(struct ncclMemManager* manager, void* ptr, size_t size) {
+// Untrack a dynamic (scratch/offload) allocation
+ncclResult_t ncclMemUntrackDynamic(struct ncclMemManager* manager, void* ptr, struct ncclMemUntrackInfo* info) {
+  if (info != nullptr) {
+    info->memType = ncclMemPersist;
+    info->dynMemState = ncclDynMemStateActive;
+    info->dynMemSize = 0;
+  }
+
   if (ncclParamMemManagerDisable()) return ncclSuccess;
   if (manager == nullptr || ptr == nullptr) return ncclInternalError;
 
@@ -245,6 +252,7 @@ ncclResult_t ncclMemUntrack(struct ncclMemManager* manager, void* ptr, size_t si
   }
 
   // Variables to save values before releasing lock
+  bool found = false;
   size_t entrySize = 0;
   int numEntries COMPILER_ATTRIBUTE_UNUSED = 0;  // May be unused if TRACE compiled out
   bool isImportedFromPeer = false;
@@ -287,14 +295,15 @@ ncclResult_t ncclMemUntrack(struct ncclMemManager* manager, void* ptr, size_t si
         }
 
         // Save values before unlock for logging (may be unused if TRACE is compiled out)
+        found = true;
         entrySize = entry->size;
         numEntries = manager->numEntries;
         isImportedFromPeer = entry->isImportedFromPeer;
         memType = entry->memType;
-
-        // Safety check: log if tracked size doesn't match passed size
-        if (entrySize != size) {
-          INFO(NCCL_ALLOC, "MemManager: Untrack size mismatch ptr=%p tracked=%zu passed=%zu", ptr, entrySize, size);
+        if (info != nullptr) {
+          info->memType = entry->memType;
+          info->dynMemState = entry->state;
+          info->dynMemSize = entry->size;
         }
 
         free(entry);
@@ -305,9 +314,8 @@ ncclResult_t ncclMemUntrack(struct ncclMemManager* manager, void* ptr, size_t si
     }
   } // lock_guard automatically releases mutex
 
-  // Update statistics
-  if (entrySize > 0) {
-    // Entry found in linked list
+  // Update statistics for the dynamic entry we just removed (if any)
+  if (found) {
     if (isImportedFromPeer) {
       if (memType == ncclMemScratch) {
         (void)COMPILER_ATOMIC_SUB_FETCH(&manager->totalScratchImported, entrySize, std::memory_order_relaxed);
@@ -324,8 +332,23 @@ ncclResult_t ncclMemUntrack(struct ncclMemManager* manager, void* ptr, size_t si
 
     TRACE(NCCL_ALLOC, "MemManager: Untrack ptr=%p size=%zu entries=%d", ptr, entrySize, numEntries);
     (void)numEntries; // suppress unused-variable warning when TRACE expands to no-op in Release
-  } else {
-    // Entry not found in linked list - must be persistent memory
+  }
+
+  return ncclSuccess;
+}
+
+// Decrement the persistent-memory counter. No linked-list traversal.
+ncclResult_t ncclMemUntrackPersist(struct ncclMemManager* manager, void* ptr, size_t size) {
+  if (ncclParamMemManagerDisable()) return ncclSuccess;
+  if (manager == nullptr || ptr == nullptr) return ncclInternalError;
+
+  // Atomic check to avoid touching a destroyed manager
+  if (!COMPILER_ATOMIC_LOAD(&manager->initialized, std::memory_order_acquire)) {
+    WARN("MemManager: Cannot untrack persistent allocation ptr=%p, manager not initialized", ptr);
+    return ncclInternalError;
+  }
+
+  if (size > 0) {
     (void)COMPILER_ATOMIC_SUB_FETCH(&manager->totalPersist, size, std::memory_order_relaxed);
     TRACE(NCCL_ALLOC, "MemManager: Untrack Persistent ptr=%p size=%zu", ptr, size);
   }
@@ -794,7 +817,7 @@ ncclResult_t ncclCommMemResume(struct ncclComm* comm) {
               memcpy(&localInfos[idx].fabricHandle, &entry->desc.local.shareableHandle.fabricHandle,
                      sizeof(hipMemFabricHandle_compat_t));
             } else {
-              WARN("MemManager: FABRIC handle not valid for entry ptr=%p", entry->ptr);
+              ATTN("MemManager: FABRIC handle not valid for entry ptr=%p", entry->ptr);
             }
           } else {
             // For POSIX FD: store the cuMem handle (for FD conversion via proxy)
@@ -876,7 +899,7 @@ ncclResult_t ncclCommMemResume(struct ncclComm* comm) {
       }
 
       if (matchedInfo == nullptr) {
-        WARN("MemManager: Could not find matching handle info for ptr=%p from rank %d", entry->ptr,
+        ATTN("MemManager: Could not find matching handle info for ptr=%p from rank %d", entry->ptr,
              entry->desc.imported.ownerRank);
         // RCCL: surface partial-failure so released stays 1 below
         if (ret == ncclSuccess) ret = ncclSystemError;
@@ -894,7 +917,7 @@ ncclResult_t ncclCommMemResume(struct ncclComm* comm) {
         // POSIX FD handles only work within the same node - check hostHash
         if (comm->peerInfo && comm->peerInfoValid &&
             comm->peerInfo[entry->desc.imported.ownerRank].hostHash != comm->peerInfo[comm->rank].hostHash) {
-          WARN("MemManager: Cannot re-import peer buffer from rank %d (different node) using POSIX FD - skipping",
+          ATTN("MemManager: Cannot re-import peer buffer from rank %d (different node) using POSIX FD - skipping",
                entry->desc.imported.ownerRank);
           if (ret == ncclSuccess) ret = ncclInvalidUsage;
           entry = entry->next;
@@ -903,7 +926,7 @@ ncclResult_t ncclCommMemResume(struct ncclComm* comm) {
 
         // For POSIX FD: We need to get the FD from the owner
         // Use proxy to convert cuMem handle to FD
-        int fd = -1;
+        ncclIpcFd fd = NCCL_INVALID_IPC_FD;
 
         // RCCL: use a local result so a successful conversion does not clobber
         // a prior partial-failure ret set earlier in the loop
@@ -911,7 +934,7 @@ ncclResult_t ncclCommMemResume(struct ncclComm* comm) {
         ncclResult_t fdRet =
           ncclProxyClientGetFdBlocking(comm, entry->desc.imported.ownerRank, &matchedInfo->handleData, &fd);
         if (fdRet != ncclSuccess || fd < 0) {
-          WARN("MemManager: Failed to get FD from rank %d for ptr=%p", entry->desc.imported.ownerRank, entry->ptr);
+          ATTN("MemManager: Failed to get FD from rank %d for ptr=%p", entry->desc.imported.ownerRank, entry->ptr);
           if (ret == ncclSuccess) {
             ret = (fdRet != ncclSuccess) ? fdRet : ncclSystemError;
           }
@@ -921,20 +944,20 @@ ncclResult_t ncclCommMemResume(struct ncclComm* comm) {
 
         curet = CUPFN(cuMemImportFromShareableHandle(&newHandle, (void*)(uintptr_t)fd,
                                                      CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR));
-        close(fd);
+        ncclIpcFdClose(fd);
       } else if (matchedInfo->handleType == CU_MEM_HANDLE_TYPE_FABRIC) {
         // For FABRIC: Import directly using the fabric handle
         curet =
           CUPFN(cuMemImportFromShareableHandle(&newHandle, &matchedInfo->fabricHandle, CU_MEM_HANDLE_TYPE_FABRIC));
       } else {
-        WARN("MemManager: Unknown handle type %d for peer import", matchedInfo->handleType);
+        ATTN("MemManager: Unknown handle type %d for peer import", matchedInfo->handleType);
         if (ret == ncclSuccess) ret = ncclInvalidUsage;
         entry = entry->next;
         continue;
       }
 
       if (curet != CUDA_SUCCESS) {
-        WARN("MemManager: cuMemImportFromShareableHandle failed for ptr=%p (curet=%d)", entry->ptr, curet);
+        ATTN("MemManager: cuMemImportFromShareableHandle failed for ptr=%p (curet=%d)", entry->ptr, curet);
         if (ret == ncclSuccess) ret = ncclUnhandledCudaError;
         entry = entry->next;
         continue;
@@ -945,7 +968,7 @@ ncclResult_t ncclCommMemResume(struct ncclComm* comm) {
       if (mapResult != ncclSuccess) {
         CUCHECKIGNORE(cuMemRelease(newHandle));
         entry->handle = 0;
-        WARN("MemManager: ncclCuMemMapAndSetAccess failed for re-imported ptr=%p", entry->ptr);
+        ATTN("MemManager: ncclCuMemMapAndSetAccess failed for re-imported ptr=%p", entry->ptr);
         if (ret == ncclSuccess) ret = mapResult;
         entry = entry->next;
         continue;
@@ -1013,6 +1036,50 @@ fail:
  * provides an implicit single-comm group that drains immediately.
  */
 
+struct ncclMemManagerSuspendAsyncJob {
+  struct ncclAsyncJob base;
+  struct ncclComm* comm;
+};
+
+static void ncclMemManagerSuspendAsyncJobFree(void* _job) {
+  delete (struct ncclMemManagerSuspendAsyncJob*)_job;
+}
+
+static ncclResult_t ncclCommMemSuspendJob(struct ncclAsyncJob* job_) {
+  struct ncclMemManagerSuspendAsyncJob* job = (struct ncclMemManagerSuspendAsyncJob*)job_;
+  ncclResult_t ret = ncclSuccess;
+
+  CUDACHECKGOTO(cudaSetDevice(job->comm->cudaDev), ret, fail);
+  NCCLCHECKGOTO(ncclCommMemSuspend(job->comm), ret, fail);
+
+exit:
+  return ret;
+fail:
+  goto exit;
+}
+
+struct ncclMemManagerResumeAsyncJob {
+  struct ncclAsyncJob base;
+  struct ncclComm* comm;
+};
+
+static void ncclMemManagerResumeAsyncJobFree(void* _job) {
+  delete (struct ncclMemManagerResumeAsyncJob*)_job;
+}
+
+static ncclResult_t ncclCommMemResumeJob(struct ncclAsyncJob* job_) {
+  struct ncclMemManagerResumeAsyncJob* job = (struct ncclMemManagerResumeAsyncJob*)job_;
+  ncclResult_t ret = ncclSuccess;
+
+  CUDACHECKGOTO(cudaSetDevice(job->comm->cudaDev), ret, fail);
+  NCCLCHECKGOTO(ncclCommMemResume(job->comm), ret, fail);
+
+exit:
+  return ret;
+fail:
+  goto exit;
+}
+
 ncclResult_t ncclCommSuspend_impl(ncclComm_t comm, int flags) {
   NCCL_NVTX3_FUNC_RANGE;
 
@@ -1026,7 +1093,11 @@ ncclResult_t ncclCommSuspend_impl(ncclComm_t comm, int flags) {
   }
 
   ncclResult_t ret = ncclSuccess;
+  ncclResult_t groupRet = ncclSuccess;
+  cudaError_t restoreErr = cudaSuccess;
   int saveDev;
+  struct ncclMemManagerSuspendAsyncJob* suspendJob = nullptr;
+  struct ncclMemManagerTask* task = nullptr;
   CUDACHECK(cudaGetDevice(&saveDev));
   NCCLCHECK(ncclGroupStartInternal());
   CUDACHECKGOTO(cudaSetDevice(comm->cudaDev), ret, fail);
@@ -1051,22 +1122,40 @@ ncclResult_t ncclCommSuspend_impl(ncclComm_t comm, int flags) {
       goto fail;
     }
     INFO(NCCL_INIT, "ncclCommSuspend: rank %d suspending memory", comm->rank);
-    struct ncclMemManagerTask* task;
-    NCCLCHECKGOTO(ncclCalloc(&task, 1), ret, fail);
-    task->comm = comm;
-    ncclIntruQueueEnqueue(&comm->suspendTaskQueue, task);
-    ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister); // Reuse to avoid creating a new task type
+    if (ncclParamEnqueueRearchEnable()) {
+      NEW_NOTHROW_GOTO(suspendJob, ncclMemManagerSuspendAsyncJob, ret, fail);
+      suspendJob->comm = comm;
+      NCCLCHECKGOTO(ncclMgmtTaskEnqueue((struct ncclAsyncJob*)suspendJob, ncclCommMemSuspendJob,
+                                        ncclMemManagerSuspendAsyncJobFree, comm),
+                    ret, fail);
+    } else {
+      NCCLCHECKGOTO(ncclCalloc(&task, 1), ret, fail);
+      task->comm = comm;
+      ncclIntruQueueEnqueue(&comm->suspendTaskQueue, task);
+      ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister); // Reuse to avoid creating a new task type
+    }
   }
 
 exit:
+  // RCCL: the current device was switched to comm->cudaDev above and is switched
+  // back at the end of this block. Do not return in between: a rejected call comes
+  // back out of ncclGroupEndInternal and would skip the switch back.
   ncclGroupErrCheck(ret);
-  NCCLCHECK(ncclGroupEndInternal());
-  if (comm && !comm->config.blocking) {
-    NCCLCHECK(ncclCommGetAsyncError(comm, &ret));
+  groupRet = ncclGroupEndInternal();
+  if (ret == ncclSuccess) ret = groupRet;
+  if (ret == ncclSuccess && comm && !comm->config.blocking) {
+    const ncclResult_t asyncRet = ncclCommGetAsyncError(comm, &ret);
+    if (asyncRet != ncclSuccess) ret = asyncRet;
   }
-  CUDACHECK(cudaSetDevice(saveDev));
+  restoreErr = cudaSetDevice(saveDev);
+  if (restoreErr != cudaSuccess) {
+    const ncclResult_t restoreRet = rcclCudaErrorHandler(restoreErr);
+    if (ret == ncclSuccess) ret = restoreRet;
+  }
   return ret;
 fail:
+  ncclMemManagerSuspendAsyncJobFree(suspendJob);
+  free(task);
   goto exit;
 }
 
@@ -1077,6 +1166,8 @@ ncclResult_t ncclCommResume_impl(ncclComm_t comm) {
   NCCLCHECK(ncclCommEnsureReady(comm));
 
   ncclResult_t ret = ncclSuccess;
+  ncclResult_t groupRet = ncclSuccess;
+  cudaError_t restoreErr = cudaSuccess;
   int saveDev;
   CUDACHECK(cudaGetDevice(&saveDev));
   NCCLCHECK(ncclGroupStartInternal());
@@ -1101,19 +1192,37 @@ ncclResult_t ncclCommResume_impl(ncclComm_t comm) {
     goto fail;
   }
   INFO(NCCL_INIT, "ncclCommResume: rank %d resuming all resources", comm->rank);
-  struct ncclMemManagerTask* task;
-  NCCLCHECKGOTO(ncclCalloc(&task, 1), ret, fail);
-  task->comm = comm;
-  ncclIntruQueueEnqueue(&comm->resumeTaskQueue, task);
-  ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister); // Reuse to avoid creating a new task type
+  if (ncclParamEnqueueRearchEnable()) {
+    struct ncclMemManagerResumeAsyncJob* resumeJob;
+    NEW_NOTHROW_GOTO(resumeJob, ncclMemManagerResumeAsyncJob, ret, fail);
+    resumeJob->comm = comm;
+    NCCLCHECKGOTO(ncclMgmtTaskEnqueue((struct ncclAsyncJob*)resumeJob, ncclCommMemResumeJob,
+                                      ncclMemManagerResumeAsyncJobFree, comm),
+                  ret, fail);
+  } else {
+    struct ncclMemManagerTask* task;
+    NCCLCHECKGOTO(ncclCalloc(&task, 1), ret, fail);
+    task->comm = comm;
+    ncclIntruQueueEnqueue(&comm->resumeTaskQueue, task);
+    ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister); // Reuse to avoid creating a new task type
+  }
 
 exit:
+  // RCCL: the current device was switched to comm->cudaDev above and is switched
+  // back at the end of this block. Do not return in between: a rejected call comes
+  // back out of ncclGroupEndInternal and would skip the switch back.
   ncclGroupErrCheck(ret);
-  NCCLCHECK(ncclGroupEndInternal());
-  if (comm && !comm->config.blocking) {
-    NCCLCHECK(ncclCommGetAsyncError(comm, &ret));
+  groupRet = ncclGroupEndInternal();
+  if (ret == ncclSuccess) ret = groupRet;
+  if (ret == ncclSuccess && comm && !comm->config.blocking) {
+    const ncclResult_t asyncRet = ncclCommGetAsyncError(comm, &ret);
+    if (asyncRet != ncclSuccess) ret = asyncRet;
   }
-  CUDACHECK(cudaSetDevice(saveDev));
+  restoreErr = cudaSetDevice(saveDev);
+  if (restoreErr != cudaSuccess) {
+    const ncclResult_t restoreRet = rcclCudaErrorHandler(restoreErr);
+    if (ret == ncclSuccess) ret = restoreRet;
+  }
   return ret;
 fail:
   goto exit;

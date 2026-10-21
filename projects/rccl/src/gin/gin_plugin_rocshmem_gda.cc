@@ -22,6 +22,10 @@
 #include "gin/gin_rocshmem_gda_factory.h"
 #include <hip/hip_runtime.h>
 
+// RCCL env-var parameters for traffic class (defined in transport/net_ib/)
+extern int64_t ncclParamGinIbTc();
+extern int64_t ncclParamIbTc();
+
 // collComm: per-connection state, returned by connect()
 struct ginRocshmemGdaCollCtx {
   int nranks;
@@ -82,6 +86,15 @@ static ncclResult_t ginRocshmemGdaDevices(int* ndev) {
   return ncclSuccess;
 }
 
+// v14 GIN plugins expose GIN capability flags via getGinProperties. The rocshmem
+// GDA backend uses IB atomics for signals (strong, VA-addressable); report both
+// as supported (matches the behavior previously injected by the v13->v14 shim).
+static ncclResult_t ginRocshmemGdaGetGinProperties(ncclGinProperties_t* ginProps) {
+  ginProps->supportsStrongSignals = true;
+  ginProps->supportsVASignals = true;
+  return ncclSuccess;
+}
+
 static ncclResult_t ginRocshmemGdaGetProperties(int dev, ncclNetProperties_v12_t* props) {
   memset(props, 0, sizeof(*props));
   props->name = const_cast<char*>("rocshmem-gda");
@@ -111,9 +124,22 @@ static ncclResult_t ginRocshmemGdaConnect(void* ctx, void* handles[], int nranks
   cctx->rank = rank;
   cctx->comm = ictx->comm;
 
+  // Resolve traffic class: NCCL_GIN_IB_TC > NCCL_IB_TC > host comm config > default 0.
+  // The proxy path also has a device-communicator ginTrafficClass rung, but the GDA
+  // backend creates its QPs here in connect(), before ginConfig.trafficClass is known
+  // (it only reaches createContext()), so that rung cannot be honored on this path.
+  int trafficClass = 0;
+  if (ncclParamGinIbTc() != -1) {
+    trafficClass = static_cast<int>(ncclParamGinIbTc());
+  } else if (ncclParamIbTc() != -1) {
+    trafficClass = static_cast<int>(ncclParamIbTc());
+  } else if (cctx->comm->config.trafficClass != NCCL_CONFIG_UNDEF_INT) {
+    trafficClass = cctx->comm->config.trafficClass;
+  }
+
   // Create QPs during connect (like GDAKI creates IB connections in connect)
-  int rc = rocshmem_gin_create_qps(nranks, rank, ginGdaBootstrapAllgather, cctx->comm->bootstrap, &cctx->qpSet,
-                                   &cctx->gpu_qp_ptrs);
+  int rc = rocshmem_gin_create_qps(nranks, rank, ginGdaBootstrapAllgather, cctx->comm->bootstrap, trafficClass,
+                                   &cctx->qpSet, &cctx->gpu_qp_ptrs);
   if (rc != 0) {
     WARN("GIN rocshmem-gda: failed to create QPs");
     delete cctx;
@@ -123,7 +149,7 @@ static ncclResult_t ginRocshmemGdaConnect(void* ctx, void* handles[], int nranks
   // Initialize rocshmem __constant__ device memory
   rocshmem_gin_init_constmem(rocshmem_gin_get_provider(cctx->qpSet), rank);
 
-  INFO(NCCL_INIT, "GIN rocshmem-gda: QPs created (%d ranks)", nranks);
+  INFO(NCCL_INIT, "GIN rocshmem-gda: QPs created (%d ranks, tc=%d)", nranks, trafficClass);
   *collComm = cctx;
   return ncclSuccess;
 }
@@ -234,7 +260,7 @@ static ncclResult_t ginRocshmemGdaDeregMrSym(void* collComm, void* mhandle) {
 // createContext: lightweight setup (signals, counters, GPU context)
 ///////////////////////////////////////////////////////////////////////////////
 
-static ncclResult_t ginRocshmemGdaCreateContext(void* collComm, ncclGinConfig_v13_t* config, void** outGinCtx,
+static ncclResult_t ginRocshmemGdaCreateContext(void* collComm, ncclGinConfig_t* config, void** outGinCtx,
                                                 ncclNetDeviceHandle_v11_t** outDevHandle) {
   struct ginRocshmemGdaCollCtx* cctx = (struct ginRocshmemGdaCollCtx*)collComm;
   ncclResult_t ret = ncclSuccess;
@@ -376,6 +402,7 @@ __attribute__((visibility("default"))) ncclGin_t ncclGinRocshmemGdaPlugin = {
   .name = "rocshmem-gda",
   .init = ginRocshmemGdaInit,
   .devices = ginRocshmemGdaDevices,
+  .getGinProperties = ginRocshmemGdaGetGinProperties,
   .getProperties = ginRocshmemGdaGetProperties,
   .listen = ginRocshmemGdaListen,
   .connect = ginRocshmemGdaConnect,
@@ -386,11 +413,6 @@ __attribute__((visibility("default"))) ncclGin_t ncclGinRocshmemGdaPlugin = {
   .destroyContext = ginRocshmemGdaDestroyContext,
   .closeColl = ginRocshmemGdaCloseColl,
   .closeListen = ginRocshmemGdaCloseListen,
-  .iput = NULL,
-  .iputSignal = NULL,
-  .iget = NULL,
-  .iflush = NULL,
-  .test = NULL,
   .ginProgress = ginRocshmemGdaGinProgress,
   .queryLastError = ginRocshmemGdaQueryLastError,
   .finalize = ginRocshmemGdaFinalize,

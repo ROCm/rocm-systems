@@ -3,27 +3,30 @@
 
 # Multi-Arch CI ASAN for rocm-systems
 #
-# Postsubmit and on-demand ASAN builds. TheRock's configure_multi_arch_ci.py
-# automatically selects host-asan for push events (faster, host-only) and
-# full asan for workflow_dispatch (comprehensive device-side instrumentation).
+# Presubmit and on-demand ASAN builds. TheRock's configure_multi_arch_ci.py
+# automatically selects host-asan for pull_request events (faster, host-only)
+# and full asan for workflow_dispatch (comprehensive device-side instrumentation).
 #
 # For scheduled nightly runs, see therock-multi-arch-ci-asan-nightly.yml.
 
 name: TheRock Multi-Arch CI ASAN
 
 on:
-  push:
-    branches:
-      - develop
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - labeled
   workflow_dispatch:
     inputs:
       linux_amdgpu_families:
         type: string
         description: "Insert comma-separated list of Linux GPU families to build and test. ex: gfx94X, gfx120X"
         default: ""
-      linux_test_labels:
+      pr_labels:
         type: string
-        description: "If enabled, reduce test set on Linux to the list of labels prefixed with 'test:'. ex: test:rocprim, test:hipcub"
+        description: "Comma-separated PR labels (e.g. ci:skip-pytorch,test:rocprim,test_filter:quick)."
         default: ""
       prebuilt_stages:
         type: string
@@ -33,9 +36,14 @@ on:
         type: string
         default: ""
         description: "Workflow run ID to copy prebuilt stage artifacts from; required when prebuilt_stages is set"
+      baseline_repository:
+        type: string
+        default: ""
+        description: "Repository to query for baseline_run_id. Defaults to github.repository for workflow_dispatch."
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   # Only allow one run at a time for 'pull_request' events.
@@ -49,16 +57,30 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@main
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@47434387de730d51788b705e5600602dd6064997 # 2026-10-16
     with:
       build_variant: "asan"
+      # Python/PyTorch/JAX builds are not supported with ASAN yet
+      build_python_packages: false
+      build_pytorch: false
+      build_jax: false
       linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950,gfx125X' }}
-      linux_test_labels: ${{ inputs.linux_test_labels || '' }}
+      pr_labels: ${{ inputs.pr_labels || '' }}
       prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
+      baseline_repository: ${{ inputs.baseline_repository || (inputs.baseline_run_id != '' && github.repository) || '' }}
       repository: ROCm/TheRock
-      ref: "main"
-      external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
+      ref: 47434387de730d51788b705e5600602dd6064997 # 2026-10-16
+      external_repo: >-
+        {
+          "repository": "${{ github.repository }}",
+          "ref": "${{ github.sha }}",
+          "base_sha": "${{ github.event.pull_request.base.sha || github.event.before }}",
+          "head_sha": "${{ github.sha }}",
+          "pr_number": ${{ github.event.pull_request.number || 'null' }},
+          "event_name": "${{ github.event_name }}",
+          "skip_ci_config": ".github/skip-ci-config.toml"
+        }
 
   linux_build_and_test:
     name: Linux::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}
@@ -68,22 +90,23 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@main
-    secrets: inherit
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@47434387de730d51788b705e5600602dd6064997 # 2026-10-16
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
+      rocm_deb_package_version: ${{ needs.setup.outputs.rocm_deb_package_version }}
+      rocm_rpm_package_version: ${{ needs.setup.outputs.rocm_rpm_package_version }}
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       repository: ROCm/TheRock
-      ref: ${{ needs.setup.outputs.ref }}
+      ref: 47434387de730d51788b705e5600602dd6064997 # 2026-10-16
     permissions:
       contents: read
       id-token: write
 
-  multi_arch_ci_summary:
-    name: Multi-Arch CI Summary
+  multi_arch_ci_asan_summary:
+    name: Multi-Arch CI ASAN Summary
     # always() is needed to show the job statuses regardless of failure
     if: always()
     needs:
@@ -95,13 +118,14 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: ${{ needs.setup.outputs.ref }}
+          ref: 47434387de730d51788b705e5600602dd6064997 # 2026-10-16
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
       - name: Evaluate workflow results
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          NEEDS_JSON: ${{ toJSON(needs) }}
         run: |
           python build_tools/github_actions/workflow_summary.py \
-            --needs-json '${{ toJSON(needs) }}'
+            --needs-json "${NEEDS_JSON}"

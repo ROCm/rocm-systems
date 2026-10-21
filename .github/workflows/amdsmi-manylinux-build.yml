@@ -18,6 +18,10 @@ on:
       - '!projects/amdsmi/docs/**'
       - '!projects/amdsmi/**/*.md'
       - '!projects/amdsmi/**/*.rst'
+      # libamd_smi compiles shared/cuid and shared/sha256 in-tree.
+      - 'shared/cuid/**'
+      - '!shared/cuid/docs/**'
+      - 'shared/sha256/**'
       - '.github/workflows/amdsmi-manylinux-build.yml'
   push:
     branches: [develop]
@@ -26,11 +30,22 @@ on:
       - '!projects/amdsmi/docs/**'
       - '!projects/amdsmi/**/*.md'
       - '!projects/amdsmi/**/*.rst'
+      # libamd_smi compiles shared/cuid and shared/sha256 in-tree.
+      - 'shared/cuid/**'
+      - '!shared/cuid/docs/**'
+      - 'shared/sha256/**'
       - '.github/workflows/amdsmi-manylinux-build.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  # Group by PR number so a new push supersedes the previous run. Pushes to
+  # develop fall back to the commit sha, which is unique, so post-merge runs
+  # never cancel each other.
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
 
 jobs:
   build-amdsmi-wheels:
@@ -69,11 +84,14 @@ jobs:
 
     steps:
       # rocm-systems is a large monorepo; the wheel build only needs the amdsmi
-      # project, so sparse-checkout keeps the fetch cheap.
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      # project and the CUID sources it builds in-tree, so sparse-checkout keeps
+      # the fetch cheap.
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: |
             projects/amdsmi
+            shared/cuid
+            shared/sha256
             .github/workflows
 
       - name: Install Debian build prerequisites
@@ -130,7 +148,7 @@ jobs:
       # Not consumed by any downstream job; kept so a reviewer can download the
       # built wheel from a run. Named by commit SHA for traceability.
       - name: Upload wheels
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{matrix.target.artifact-prefix}}-${{github.sha}}
           path: ${{github.workspace}}/wheels/*.whl

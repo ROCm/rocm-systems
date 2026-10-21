@@ -121,6 +121,15 @@ class TestPresets(RocprofsysTest):
             ],
         )
 
+    def test_trace_hpc_uses_flat_profile(self, target):
+        """trace-hpc profiles flat by default (no call-stack hierarchy)."""
+        _assert_baseline_output(
+            self,
+            target=target,
+            run_args=["--preset=trace-hpc", "-v", "2", "--", "ls"],
+            pass_regex=["ROCPROFSYS_FLAT_PROFILE=true"],
+        )
+
 
 # ============================================================================
 # Legacy preset flag translation --preset=<name>
@@ -539,6 +548,7 @@ class TestSamplingTargetFlags(RocprofsysTest):
         )
         self.assert_regex(result, pass_regex=["ROCPROFSYS_SAMPLING_CPUS=0-3"])
 
+    @pytest.mark.amdsmi_min_version("26.3")
     def test_ai_nics_without_device(self, target):
         result = self.run_test(
             "baseline",

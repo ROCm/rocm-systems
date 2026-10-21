@@ -34,6 +34,7 @@ Running Subtest: ctest –R “...” (Regex to match the subtest name)
 ## New Features
 - Better CI integration via xunit compatible output
 - hip-tests can be built in SPIRV, where all kernels are compiled in SPIRV, enable with cmake flag `-DENABLE_SPIRV=ON`. By default it's `OFF`.
+- hip-tests can be built with `-Wall -Werror` so that compiler warnings are treated as errors, controlled by the cmake flag `-DHIP_TESTS_ENABLE_WERROR`. It defaults to `OFF` in all cases. 
 
 ## Testing Context
 HIP testing framework gives you a context for each test. This context will have useful information about the environment your test is running.
@@ -68,7 +69,18 @@ All configuration for the test cases is done through the `hip_tests_config.yaml`
 Every test case has its own entry. Currently supported options are:
 - level : Specify to which level the case belongs to (e.g. Level_2 is a standard test)
 - tags : List all Catch2 tags that the case is associated with
-- disabled : List all platforms where the case should be disabled
+- disabled : Temporarily skip the case on the listed targets (a regression or tracked bug that is expected to be re-enabled)
+- unsupported : Permanently skip the case on the listed targets, where the platform, architecture, or backend cannot support it
+`disabled` and `unsupported` share the same syntax and produce the same skip; they differ only in intent (temporary regression versus permanent capability gap).
+Each takes the mapping form `{targets: [...], reason: "..."}`. A section with a
+non-empty `targets` list **must** carry a non-empty `reason`, and that reason **must**
+cite a real Jira reference from a known project key (**AIRUNTIME, ROCM, SWDEV, EXSWHTEC,
+AIRADSW**), e.g. `AIRUNTIME-2892`; both are enforced by `check_config.py` in CI. The known
+project keys are an allowlist; add a new one by editing the `JIRA_PROJECTS` tuple in
+`check_config.py`. The bare flat-list form (`disabled: [amd_wsl]`) is no longer accepted for a
+non-empty skip. An empty section (`targets: []`) is a no-op and needs no reason. If a
+skip has not yet been triaged, lead the reason with the tracking ticket, e.g.
+`AIRUNTIME-2744 - needs to be re-triaged`.
 The group name is automatically added as a tag for every case.
 Changing the configuration file will retrigger the build, so we have an up to date configuration every time.
 
@@ -79,8 +91,12 @@ unit:
     Unit_atomicExch_system_Positive_Peer_GPUs:
       <<: *level_2
       tags: [multigpu]
-      # SWDEV-435667: Below tests failing randomly in stress test on 01/12/23
-      disabled: [amd_wsl]
+      disabled:
+        targets: [amd_wsl]
+        reason: "SWDEV-435667: fails randomly in stress test"
+      unsupported:
+        targets: [gfx900]
+        reason: requires a hardware feature not present on this architecture
 ```
 will be generated (on an AMD linux machine) as:
 ```cpp
@@ -99,7 +115,7 @@ TEMPLATE_TEST_CASE(Unit_atomicExch_system_Positive_Peer_GPUs, int, float, double
 
 ## Test Levels and Quick Mode (`level_0`)
 
-Tests are assigned a level in the YAML configuration (`level: 0` through `level: 4`). The level serves two purposes: it controls which tests are **selected** to run (via Catch2 tag filters), and it allows tests to **adjust their behavior** at runtime (e.g., reducing workload at lower levels).
+Tests are assigned a level in the YAML configuration (`level: 0` through `level: 4`). Levels serve two independent purposes, each controlled by its own knob: the `[level_N]` tags let you **select** which tests run (Catch2 tag filter or `ctest -L`), and the `HIP_TEST_LEVEL` environment variable picks the **parameters** tests run with (memory sizes, iteration counts, `isQuickLevel()`, ...).
 
 | Level | Use case | Typical runtime |
 |-------|----------|-----------------|
@@ -111,21 +127,43 @@ Tests are assigned a level in the YAML configuration (`level: 0` through `level:
 
 ### Running at a specific level
 
-Use the `HIP_TEST_LEVEL` environment variable:
+Each knob has exactly one meaning:
 
-```bash
-HIP_TEST_LEVEL=level_0 ./MemoryTest1 "Unit_hipMemsetSync"
-```
+- **`HIP_TEST_LEVEL=level_N` only sets the parameters.** It never filters: every
+  requested test runs, with `level_N` parameters. Unset (or empty), the
+  parameters default to `level_2`.
+- **A `[level_N]` Catch2 filter or `ctest -L level_N` only selects tests.** It
+  never changes the parameters, so the selected tests run with whatever
+  `HIP_TEST_LEVEL` says — `level_2` by default.
 
-Or use Catch2 tag filters:
+To run the `level_0` tests with `level_0` parameters, set both explicitly.
 
-```bash
-./MemoryTest1 "[level_0]"
-```
+| Invocation | Parameters | Tests that run |
+|---|---|---|
+| `./MemoryTest1` | `level_2` (default) | every test in the binary |
+| `./MemoryTest1 Unit_hipMemsetSync` | `level_2` (default) | `Unit_hipMemsetSync` |
+| `./MemoryTest1 "[level_0]"` | `level_2` (default) | only `[level_0]`-tagged |
+| `HIP_TEST_LEVEL=level_0 ./MemoryTest1` | `level_0` | every test in the binary |
+| `HIP_TEST_LEVEL=level_0 ./MemoryTest1 "[level_0]"` | `level_0` | only `[level_0]`-tagged |
+| `HIP_TEST_LEVEL=level_0 ./MemoryTest1 "[level_2]"` | `level_0` | only `[level_2]`-tagged |
+| `HIP_TEST_LEVEL=level_4 ./MemoryTest1 "[level_0]"` | `level_4` | only `[level_0]`-tagged |
+| `HIP_TEST_LEVEL=level_0 ./MemoryTest1 Unit_hipMemsetSync` | `level_0` | `Unit_hipMemsetSync` |
+| `ctest` | `level_2` (default) | every test |
+| `ctest -L level_0` | `level_2` (default) | the `level_0`-labelled entries |
+| `HIP_TEST_LEVEL=level_0 ctest` | `level_0` | every test |
+| `HIP_TEST_LEVEL=level_0 ctest -L level_0` | `level_0` | the `level_0`-labelled entries |
+| `HIP_TEST_LEVEL=level_0 ctest -L level_2` | `level_0` | the `level_2`-labelled entries |
+| `ctest -N`, `--list-tests`, `--help` | — | no level is resolved at all |
+
+`HIP_TEST_LEVEL` must name exactly one supported level (`level_0` through
+`level_4`). Anything else — a list such as `level_0,level_2`, an exclusion such
+as `~level_4`, a bracketed tag such as `[level_0]`, or a typo — is rejected: the
+test binary prints an error and exits with a failure before running any test,
+rather than silently falling back to the default parameters.
 
 ### Writing level-aware tests with `isQuickLevel()`
 
-Tests that are slow in emulation environments can use `isQuickLevel()` to reduce their workload at `level_0` while preserving full coverage at higher levels. This function returns `true` when the active test level is `level_0` (set via `HIP_TEST_LEVEL` environment variable or `[level_0]` Catch2 tag filter).
+Tests that are slow in emulation environments can use `isQuickLevel()` to reduce their workload at `level_0` while preserving full coverage at higher levels. This function returns `true` when the active parameter level is `level_0`, i.e. when `HIP_TEST_LEVEL=level_0` is set. A `[level_0]` Catch2 tag filter alone does not make it return `true`.
 
 ```cpp
 #include <hip_test_common.hh>
@@ -139,7 +177,7 @@ HIP_TEST_CASE(Unit_hipMemsetSync) {
 #### Guidelines for `isQuickLevel()` trimming
 
 - **Prefer reducing iteration counts and buffer sizes** over skipping code paths, so the same API surface is exercised with less data.
-- **Call `isQuickLevel()` inside the test function**, not in global/static variable initializers. The test level is detected at runtime by the Catch2 listener, which runs after static initialization.
+- **Call `isQuickLevel()` inside the test function**, not in global/static variable initializers. The test level is resolved when the test run starts, before any test runs, which is after static initialization.
 - **Use reproducible seeds** when tests involve randomization. Log the seed and allow overriding (e.g., via `HIP_TEST_SEED`) so failures can be replayed.
 
 #### Example: reducing a memset size
@@ -255,13 +293,13 @@ The process must be a standalone exe inside the same folder as other tests.
 Initially, the new tests can be enabled via using ```-DHIP_CATCH_TEST=1```. After porting existing tests, this will be turned on by default.
 
 ## Building a single test
-Generate `hip_test_config.hh` before compilation
+Generate `hip_test_config.hh` and `hip_test_parameters.hh` before compilation
 ```bash
-python3 <HIP_SRC_DIR>/catch/config/parse_config.py <HIP_SRC_DIR>/catch/config/configs <PLATFORM> <OS> <ARCH> <CONFIG_TARGET_DIR>/hip_test_config.hh
+python3 <HIP_SRC_DIR>/catch/config/parse_config.py <HIP_SRC_DIR>/catch/config/configs <PLATFORM> <OS> <ARCH> <CONFIG_TARGET_DIR>/hip_test_config.hh <CONFIG_TARGET_DIR>/hip_test_parameters.hh
 ```
 
 ```bash
-hipcc -I <HIP_SRC_DIR>/catch/include -I <CONFIG_TARGET_DIR> <HIP_SRC_DIR>/catch/hipTestMain/main.cc <HIP_SRC_DIR>/catch/hipTestMain/hip_test_context.cc -I <CATCH2_INCLUDE_DIR> -L <CATCH2_LIB_DIR> -lCatch2 -I $HIP_PATH/include -O1 -ggdb <PATH_TO_TEST.cc> -o <OUT_FILE_NAME>
+hipcc -I <HIP_SRC_DIR>/catch/include -I <CONFIG_TARGET_DIR> <HIP_SRC_DIR>/catch/hipTestMain/main.cc <HIP_SRC_DIR>/catch/hipTestMain/hip_test_context.cc <HIP_SRC_DIR>/catch/hipTestMain/hip_test_params.cc -I <CATCH2_INCLUDE_DIR> -L <CATCH2_LIB_DIR> -lCatch2 -I $HIP_PATH/include -O1 -ggdb <PATH_TO_TEST.cc> -o <OUT_FILE_NAME>
 ```
 
 ## Debugging support

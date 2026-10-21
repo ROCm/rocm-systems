@@ -20,23 +20,19 @@
 #include <utility>
 #include <vector>
 
-#include "hsa/hsa_api_trace_minimal.h"
+#include "hsa/hsa_api_trace.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/dbt/virtual_lds.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/sidecar_metadata.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "scoped_temp.h"
 
-#include "rocjitsu/base/rj_compiler.h"
-RJ_DIAGNOSTIC_PUSH
-RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
-RJ_DIAGNOSTIC_POP
-
 extern "C" bool OnLoad(HsaApiTable *table, uint64_t runtime_version, uint64_t failed_tool_count,
                        const char *const *failed_tool_names);
 extern "C" void OnUnload();
+extern "C" void rj_hsa_dbt_set_topology_nodes_root_for_test(const char *root);
 
 namespace {
 
@@ -46,13 +42,19 @@ constexpr hsa_agent_t kHostAgent{2};
 // are tracked for doorbell forwarding but never rewritten, and host_lds_bytes
 // (derived from the guest target arch) does not apply to them.
 constexpr hsa_agent_t kUnrelatedAgent{3};
+// A CPU agent. Enumeration must keep publishing it even when the guest/host
+// mapping is unresolved: host fine-grained pools, hsa_amd_memory_lock, and
+// host-side copies all need it, and it cannot execute a guest kernel.
+constexpr hsa_agent_t kCpuAgent{4};
 constexpr hsa_isa_t kGuestIsa{950};
 constexpr hsa_isa_t kHostIsa{1201};
 constexpr hsa_amd_memory_pool_t kGuestPool{10};
 constexpr hsa_amd_memory_pool_t kHostPool{20};
 constexpr hsa_amd_memory_pool_t kHostKernargPool{21};
+constexpr hsa_amd_memory_pool_t kCpuFineGrainedPool{30};
 constexpr uint32_t kGuestNodeId = 100;
 constexpr uint32_t kHostNodeId = 200;
+constexpr uint32_t kCpuNodeId = 0;
 constexpr uint32_t kVirtualLdsWrapperStateOffsetForTest = 8;
 constexpr uint32_t kVirtualLdsWrapperSizeForTest = 32;
 constexpr uint16_t kVirtualLdsWrapperFlagsForTest =
@@ -69,6 +71,11 @@ std::condition_variable g_agent_cv;
 bool g_block_agent_iteration = false;
 bool g_agent_iteration_entered = false;
 bool g_release_agent_iteration = false;
+// Plain globals rather than g_agent_mutex-guarded state: only the
+// single-threaded discovery-retry tests touch them, and the blocking multi-
+// threaded test must not contend on them.
+bool g_fail_agent_iteration = false;
+int g_fake_iterate_agents_calls = 0;
 int g_fake_shutdown_calls = 0;
 hsa_amd_memory_pool_t g_last_allocate_pool{};
 hsa_agent_t g_last_agent_memory_pool_agent{};
@@ -104,7 +111,7 @@ struct FakeSignalValue {
 };
 std::vector<FakeSignalValue> g_fake_signal_values;
 hsa_queue_t *g_last_intercept_registered_queue = nullptr;
-hsa_amd_queue_intercept_handler_t g_fake_intercept_handler = nullptr;
+hsa_amd_queue_intercept_handler g_fake_intercept_handler = nullptr;
 void *g_fake_intercept_user_data = nullptr;
 std::vector<hsa_kernel_dispatch_packet_t> g_last_intercept_written_packets;
 uint64_t g_fake_symbol_kernel_object = 0;
@@ -118,6 +125,7 @@ hsa_agent_t g_last_load_agent{};
 hsa_code_object_reader_t g_last_load_reader{};
 constexpr hsa_executable_t kFakeExecutable{123};
 constexpr hsa_executable_symbol_t kFakeKernelSymbol{500};
+constexpr uint32_t kResolvedHostGpuId = 8716;
 
 const char *isa_name(hsa_isa_t isa) {
   if (isa.handle == kGuestIsa.handle)
@@ -131,6 +139,10 @@ hsa_status_t HSA_API fake_iterate_agents(hsa_status_t (*callback)(hsa_agent_t, v
                                          void *data) {
   if (callback == nullptr)
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  ++g_fake_iterate_agents_calls;
+  if (g_fail_agent_iteration)
+    return HSA_STATUS_ERROR;
 
   {
     std::unique_lock lock(g_agent_mutex);
@@ -152,10 +164,38 @@ hsa_status_t HSA_API fake_iterate_agents_host_first(hsa_status_t (*callback)(hsa
   if (callback == nullptr)
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
+  ++g_fake_iterate_agents_calls;
   hsa_status_t status = callback(kHostAgent, data);
   if (status != HSA_STATUS_SUCCESS)
     return status;
   return callback(kGuestAgent, data);
+}
+
+hsa_status_t HSA_API fake_iterate_agents_with_cpu(hsa_status_t (*callback)(hsa_agent_t, void *),
+                                                  void *data) {
+  if (callback == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  ++g_fake_iterate_agents_calls;
+  hsa_status_t status = callback(kCpuAgent, data);
+  if (status != HSA_STATUS_SUCCESS)
+    return status;
+  status = callback(kGuestAgent, data);
+  if (status != HSA_STATUS_SUCCESS)
+    return status;
+  return callback(kHostAgent, data);
+}
+
+// Only the physical host is present -- the synthetic guest node never appeared.
+// Paired with fake_agent_iterate_isas_overlapping this is the guest/host role
+// collision: one agent satisfies both predicates and no distinct guest remains.
+hsa_status_t HSA_API fake_iterate_agents_host_only(hsa_status_t (*callback)(hsa_agent_t, void *),
+                                                   void *data) {
+  if (callback == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  ++g_fake_iterate_agents_calls;
+  return callback(kHostAgent, data);
 }
 
 hsa_status_t HSA_API fake_shut_down() {
@@ -169,7 +209,8 @@ hsa_status_t HSA_API fake_agent_get_info(hsa_agent_t agent, hsa_agent_info_t att
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   if (attribute == HSA_AGENT_INFO_DEVICE) {
-    *static_cast<hsa_device_type_t *>(value) = HSA_DEVICE_TYPE_GPU;
+    *static_cast<hsa_device_type_t *>(value) =
+        agent.handle == kCpuAgent.handle ? HSA_DEVICE_TYPE_CPU : HSA_DEVICE_TYPE_GPU;
     return HSA_STATUS_SUCCESS;
   }
   if (attribute == HSA_AGENT_INFO_ISA) {
@@ -177,8 +218,11 @@ hsa_status_t HSA_API fake_agent_get_info(hsa_agent_t agent, hsa_agent_info_t att
     return HSA_STATUS_SUCCESS;
   }
   if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID)) {
-    *static_cast<uint32_t *>(value) =
-        agent.handle == kGuestAgent.handle ? kGuestNodeId : kHostNodeId;
+    if (agent.handle == kCpuAgent.handle)
+      *static_cast<uint32_t *>(value) = kCpuNodeId;
+    else
+      *static_cast<uint32_t *>(value) =
+          agent.handle == kGuestAgent.handle ? kGuestNodeId : kHostNodeId;
     return HSA_STATUS_SUCCESS;
   }
   return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -195,6 +239,23 @@ hsa_status_t HSA_API fake_agent_iterate_isas(hsa_agent_t agent,
   if (agent.handle == kHostAgent.handle)
     return callback(kHostIsa, data);
   return HSA_STATUS_ERROR_INVALID_AGENT;
+}
+
+// Every GPU advertises both the guest and the host ISA. This is the shape of a
+// same-ISA DBT config (guest_isa == host_isa, the gfx1250 B0-on-A0 revision
+// profile): both predicates match every agent, so only the host's node-id
+// constraint can tell the two roles apart.
+hsa_status_t HSA_API fake_agent_iterate_isas_overlapping(
+    hsa_agent_t agent, hsa_status_t (*callback)(hsa_isa_t, void *), void *data) {
+  if (callback == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  if (agent.handle != kGuestAgent.handle && agent.handle != kHostAgent.handle)
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+
+  hsa_status_t status = callback(kGuestIsa, data);
+  if (status != HSA_STATUS_SUCCESS)
+    return status;
+  return callback(kHostIsa, data);
 }
 
 hsa_status_t HSA_API fake_isa_get_info_alt(hsa_isa_t isa, hsa_isa_info_t attribute, void *value) {
@@ -249,7 +310,7 @@ hsa_status_t HSA_API fake_amd_queue_intercept_create(
 }
 
 hsa_status_t HSA_API fake_amd_queue_intercept_register(hsa_queue_t *queue,
-                                                       hsa_amd_queue_intercept_handler_t callback,
+                                                       hsa_amd_queue_intercept_handler callback,
                                                        void *user_data) {
   g_last_intercept_registered_queue = queue;
   g_fake_intercept_handler = callback;
@@ -531,6 +592,8 @@ hsa_status_t HSA_API fake_amd_agent_iterate_memory_pools(
       return status;
     return callback(kHostKernargPool, data);
   }
+  if (agent.handle == kCpuAgent.handle)
+    return callback(kCpuFineGrainedPool, data);
   return HSA_STATUS_ERROR_INVALID_AGENT;
 }
 
@@ -578,6 +641,19 @@ hsa_status_t HSA_API fake_amd_agent_memory_pool_get_info(hsa_agent_t agent,
   return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 }
 
+hsa_agent_t g_last_agent_preload_agent{};
+hsa_agent_t g_last_async_scratch_limit_agent{};
+
+hsa_status_t HSA_API fake_amd_agent_preload(hsa_agent_t agent, uint64_t) {
+  g_last_agent_preload_agent = agent;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t HSA_API fake_amd_agent_set_async_scratch_limit(hsa_agent_t agent, size_t) {
+  g_last_async_scratch_limit_agent = agent;
+  return HSA_STATUS_SUCCESS;
+}
+
 struct FakeApiTable {
   CoreApiTable core{};
   AmdExtTable amd{};
@@ -620,24 +696,41 @@ struct FakeApiTable {
     amd.hsa_amd_vmem_set_access_fn = fake_amd_vmem_set_access;
     amd.hsa_amd_memory_pool_free_fn = fake_amd_memory_pool_free;
     amd.hsa_amd_agents_allow_access_fn = fake_amd_agents_allow_access;
+    amd.hsa_amd_agent_preload_fn = fake_amd_agent_preload;
+    amd.hsa_amd_agent_set_async_scratch_limit_fn = fake_amd_agent_set_async_scratch_limit;
   }
 };
 
-void write_runtime_config_path(const std::string &runtime_dir) {
+void write_runtime_config_path(const std::string &runtime_dir,
+                               bool create_host_topology_node = true) {
   setenv("ROCJITSU_RUNTIME_DIR", runtime_dir.c_str(), 1);
 
+  const std::filesystem::path topology_root =
+      std::filesystem::path(runtime_dir) / "topology" / "nodes";
+  std::filesystem::create_directories(topology_root);
+  if (create_host_topology_node) {
+    const std::filesystem::path host_node = topology_root / std::to_string(kHostNodeId);
+    std::filesystem::create_directories(host_node);
+    std::ofstream(host_node / "gpu_id") << kResolvedHostGpuId << '\n';
+  }
+  rj_hsa_dbt_set_topology_nodes_root_for_test(topology_root.c_str());
+
   std::ofstream config_path(rocjitsu::rpc_default_config_file_path());
-  config_path << RJ_HOOK_UNIT_CONFIG_PATH << '\n';
+  config_path << RJ_HOOK_UNIT_CONFIG_PATH << '\n' << kResolvedHostGpuId << '\n';
 }
 
 class InstalledHook {
 public:
-  explicit InstalledHook(FakeApiTable &api) : runtime_dir_("rocjitsu-hsa-hooks-unit-") {
+  explicit InstalledHook(FakeApiTable &api, bool create_host_topology_node = true)
+      : runtime_dir_("rocjitsu-hsa-hooks-unit-") {
     OnUnload();
-    write_runtime_config_path(runtime_dir_.path());
+    write_runtime_config_path(runtime_dir_.path(), create_host_topology_node);
     installed_ = OnLoad(&api.table, 0, 0, nullptr);
   }
-  ~InstalledHook() { OnUnload(); }
+  ~InstalledHook() {
+    OnUnload();
+    rj_hsa_dbt_set_topology_nodes_root_for_test(nullptr);
+  }
 
   [[nodiscard]] bool installed() const { return installed_; }
 
@@ -667,6 +760,13 @@ void reset_agent_blocker(bool enabled) {
   g_block_agent_iteration = enabled;
   g_agent_iteration_entered = false;
   g_release_agent_iteration = false;
+  g_fail_agent_iteration = false;
+  g_fake_iterate_agents_calls = 0;
+}
+
+hsa_status_t HSA_API collect_agent_handles(hsa_agent_t agent, void *data) {
+  static_cast<std::vector<uint64_t> *>(data)->push_back(agent.handle);
+  return HSA_STATUS_SUCCESS;
 }
 
 void release_agent_blocker() {
@@ -874,8 +974,8 @@ make_translated_metadata_elf(uint32_t mach, const std::vector<VirtualLdsMetadata
 struct VirtualLdsRegistrationForTest {};
 
 VirtualLdsRegistrationForTest register_virtual_lds_kernel_for_test(
-    FakeApiTable &api, const rocr::llvm::amdhsa::kernel_descriptor_t &normal_descriptor,
-    const rocr::llvm::amdhsa::kernel_descriptor_t &virtual_descriptor, uint32_t static_lds_bytes,
+    FakeApiTable &api, const rocjitsu::amdhsa::kernel_descriptor_t &normal_descriptor,
+    const rocjitsu::amdhsa::kernel_descriptor_t &virtual_descriptor, uint32_t static_lds_bytes,
     uint32_t kernarg_size = 0,
     uint32_t backing_pointer_kernarg_offset = kVirtualLdsWrapperStateOffsetForTest,
     uint16_t flags = kVirtualLdsWrapperFlagsForTest, bool resolve_symbol_by_name = true,
@@ -990,6 +1090,380 @@ TEST(HsaHooksUnitTest, IterateAgentsDropsGuestOwnSlotWhenHostAppearsFirst) {
 
   EXPECT_EQ(status, HSA_STATUS_SUCCESS);
   EXPECT_EQ(seen, std::vector<uint64_t>{kGuestAgent.handle});
+}
+
+// The configured host gpu_id has no topology node here, so the hook cannot tell
+// which physical agent the guest should execute on. Every GPU must be suppressed
+// rather than falling through to the raw agent list: publishing the physical host
+// would let an application using the default device run untranslated on it.
+// GuestKfd already rejects the same unresolved host with ENODEV. The status stays
+// SUCCESS so a GPU client sees an empty device list instead of the opaque error
+// HIP/CLR reports as a fatal ROCR init failure.
+TEST(HsaHooksUnitTest, MissingResolvedHostSuppressesGpuAgents) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  FakeApiTable api;
+  InstalledHook hook(api, /*create_host_topology_node=*/false);
+  ASSERT_TRUE(hook.installed());
+  // Without this anchor the expectations below are indistinguishable from an
+  // unpatched table forwarding straight to a fake that emits only GPU agents.
+  ASSERT_NE(api.core.hsa_iterate_agents_fn, fake_iterate_agents);
+
+  std::vector<uint64_t> seen;
+  hsa_status_t status = api.core.hsa_iterate_agents_fn(
+      [](hsa_agent_t agent, void *data) -> hsa_status_t {
+        static_cast<std::vector<uint64_t> *>(data)->push_back(agent.handle);
+        return HSA_STATUS_SUCCESS;
+      },
+      &seen);
+
+  EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+  EXPECT_TRUE(seen.empty());
+}
+
+// Suppression is GPU-only. A CPU agent cannot run a guest kernel, and callers
+// that need one -- host fine-grained pool lookup, hsa_amd_memory_lock, host-side
+// copies -- must keep working while the mapping is unresolved.
+TEST(HsaHooksUnitTest, MissingResolvedHostStillPublishesCpuAgents) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  FakeApiTable api;
+  api.core.hsa_iterate_agents_fn = fake_iterate_agents_with_cpu;
+  InstalledHook hook(api, /*create_host_topology_node=*/false);
+  ASSERT_TRUE(hook.installed());
+  ASSERT_NE(api.core.hsa_iterate_agents_fn, fake_iterate_agents_with_cpu);
+
+  std::vector<uint64_t> seen;
+  EXPECT_EQ(api.core.hsa_iterate_agents_fn(collect_agent_handles, &seen), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(seen, std::vector<uint64_t>{kCpuAgent.handle});
+}
+
+// The GPU-only suppression must not have disturbed the success-path shadow
+// callback: CPU agents still pass through untouched, and the guest is still
+// emitted in the selected host's ordinal slot.
+TEST(HsaHooksUnitTest, MappedEnumerationStillPublishesCpuAgents) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  FakeApiTable api;
+  api.core.hsa_iterate_agents_fn = fake_iterate_agents_with_cpu;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+  ASSERT_NE(api.core.hsa_iterate_agents_fn, fake_iterate_agents_with_cpu);
+
+  std::vector<uint64_t> seen;
+  EXPECT_EQ(api.core.hsa_iterate_agents_fn(collect_agent_handles, &seen), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(seen, (std::vector<uint64_t>{kCpuAgent.handle, kGuestAgent.handle}));
+}
+
+// An unopenable topology root is an I/O failure, not proof the configured host
+// gpu_id is absent. Latching it would poison enumeration for the process: every
+// later hsa_iterate_agents would keep suppressing every GPU, even once the
+// redirected topology tree became readable.
+TEST(HsaHooksUnitTest, AgentMapperRetriesAfterUnreadableTopologyRoot) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  FakeApiTable api;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+  ASSERT_NE(api.core.hsa_iterate_agents_fn, fake_iterate_agents);
+
+  // Redirect at a root that does not exist yet, so opendir fails outright.
+  rocjitsu::test::ScopedTempDirectory late("rocjitsu-late-topology-");
+  const std::filesystem::path nodes = std::filesystem::path(late.path()) / "nodes";
+  rj_hsa_dbt_set_topology_nodes_root_for_test(nodes.c_str());
+
+  std::vector<uint64_t> first;
+  EXPECT_EQ(api.core.hsa_iterate_agents_fn(collect_agent_handles, &first), HSA_STATUS_SUCCESS);
+  // The fake publishes only GPU agents, so a suppressed list is an empty list.
+  EXPECT_TRUE(first.empty());
+
+  const std::filesystem::path host_node = nodes / std::to_string(kHostNodeId);
+  std::filesystem::create_directories(host_node);
+  std::ofstream(host_node / "gpu_id") << kResolvedHostGpuId << '\n';
+
+  std::vector<uint64_t> second;
+  EXPECT_EQ(api.core.hsa_iterate_agents_fn(collect_agent_handles, &second), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(second, std::vector<uint64_t>{kGuestAgent.handle});
+}
+
+// A readable topology root whose node directory has no readable gpu_id is the other
+// half of the same rule: the skipped node may be the one being searched for, so the
+// scan cannot prove the configured gpu_id is absent. The verdict must stay retryable
+// rather than latching as a permanent "absent" that suppresses every GPU for good.
+TEST(HsaHooksUnitTest, AgentMapperRetriesAfterUnreadableTopologyNode) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  FakeApiTable api;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+  ASSERT_NE(api.core.hsa_iterate_agents_fn, fake_iterate_agents);
+
+  // Unlike the root test above, this root opens fine; it is the per-node gpu_id read
+  // that fails, because the node directory exists with no gpu_id file in it.
+  rocjitsu::test::ScopedTempDirectory partial("rocjitsu-partial-topology-");
+  const std::filesystem::path nodes = std::filesystem::path(partial.path()) / "nodes";
+  const std::filesystem::path host_node = nodes / std::to_string(kHostNodeId);
+  std::filesystem::create_directories(host_node);
+  ASSERT_FALSE(std::filesystem::exists(host_node / "gpu_id"));
+  rj_hsa_dbt_set_topology_nodes_root_for_test(nodes.c_str());
+
+  std::vector<uint64_t> first;
+  EXPECT_EQ(api.core.hsa_iterate_agents_fn(collect_agent_handles, &first), HSA_STATUS_SUCCESS);
+  EXPECT_TRUE(first.empty());
+
+  std::ofstream(host_node / "gpu_id") << kResolvedHostGpuId << '\n';
+
+  std::vector<uint64_t> second;
+  EXPECT_EQ(api.core.hsa_iterate_agents_fn(collect_agent_handles, &second), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(second, std::vector<uint64_t>{kGuestAgent.handle});
+}
+
+// The retry must be budgeted. An application that polls the device list while
+// ROCR stays broken would otherwise pay a sysfs topology walk plus a full agent
+// iteration on every query.
+TEST(HsaHooksUnitTest, AgentMapperStopsRediscoveringAfterTransientRetryBudget) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  FakeApiTable api;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+  ASSERT_NE(api.core.hsa_iterate_agents_fn, fake_iterate_agents);
+
+  constexpr int kEnumerationCalls = 64;
+  g_fail_agent_iteration = true;
+  g_fake_iterate_agents_calls = 0;
+  for (int i = 0; i < kEnumerationCalls; ++i) {
+    std::vector<uint64_t> seen;
+    EXPECT_EQ(api.core.hsa_iterate_agents_fn(collect_agent_handles, &seen), HSA_STATUS_ERROR);
+  }
+  // Each refused enumeration still forwards to the original iterator once, to
+  // filter GPU agents out of the published list, so kEnumerationCalls of these
+  // are pass-throughs rather than rediscovery. A range rather than the exact
+  // bound, so the test does not pin kMaxTransientAttempts: at least one retry
+  // happened on top of the first attempt, and the mapper latched well before
+  // rediscovering on every call.
+  EXPECT_GE(g_fake_iterate_agents_calls, kEnumerationCalls + 2);
+  EXPECT_LT(g_fake_iterate_agents_calls, kEnumerationCalls * 2);
+  g_fail_agent_iteration = false;
+}
+
+// Only the enumeration entry point opts into rediscovery. Everything reached
+// per copy, per dispatch, or per allocation stays on the cached verdict.
+TEST(HsaHooksUnitTest, HotPathAgentMappingDoesNotRerunDiscovery) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  FakeApiTable api;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+  ASSERT_NE(api.amd.hsa_amd_memory_pool_allocate_fn, fake_amd_memory_pool_allocate);
+
+  g_fail_agent_iteration = true;
+  g_fake_iterate_agents_calls = 0;
+  for (int i = 0; i < 16; ++i) {
+    void *ptr = nullptr;
+    EXPECT_EQ(api.amd.hsa_amd_memory_pool_allocate_fn(kGuestPool, 4096, 0, &ptr),
+              HSA_STATUS_SUCCESS);
+  }
+  // hsa_amd_memory_pool_allocate reaches AgentMapper through
+  // MemoryPoolMapper::ensure_discovered, which retries pool discovery on every
+  // call; none of those retries may rerun agent discovery.
+  EXPECT_EQ(g_fake_iterate_agents_calls, 1);
+  g_fail_agent_iteration = false;
+}
+
+// Enumeration publishing no GPU is not by itself fail-closed: a handle cached
+// before discovery failed, or one held by a co-loaded tool, still reaches the
+// execution entry points. Each of the five that can put code on -- or dispatch
+// to -- real silicon must refuse while the mapping is unusable.
+TEST(HsaHooksUnitTest, UnresolvedMappingRefusesQueueCreate) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  reset_queue_fakes();
+  FakeApiTable api;
+  InstalledHook hook(api, /*create_host_topology_node=*/false);
+  ASSERT_TRUE(hook.installed());
+  ASSERT_NE(api.core.hsa_queue_create_fn, fake_queue_create);
+
+  hsa_queue_t *queue = nullptr;
+  EXPECT_EQ(api.core.hsa_queue_create_fn(kHostAgent, 4, HSA_QUEUE_TYPE_MULTI, nullptr, nullptr, 0,
+                                         0, &queue),
+            HSA_STATUS_ERROR_INVALID_AGENT);
+  EXPECT_EQ(queue, nullptr);
+  EXPECT_EQ(g_last_queue_create_agent.handle, 0u);
+}
+
+TEST(HsaHooksUnitTest, UnresolvedMappingRefusesInterceptQueueCreate) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  reset_queue_fakes();
+  FakeApiTable api;
+  api.amd.hsa_amd_queue_intercept_create_fn = fake_amd_queue_intercept_create;
+  api.amd.hsa_amd_queue_intercept_register_fn = fake_amd_queue_intercept_register;
+  InstalledHook hook(api, /*create_host_topology_node=*/false);
+  ASSERT_TRUE(hook.installed());
+  ASSERT_NE(api.amd.hsa_amd_queue_intercept_create_fn, fake_amd_queue_intercept_create);
+
+  hsa_queue_t *queue = nullptr;
+  EXPECT_EQ(api.amd.hsa_amd_queue_intercept_create_fn(kHostAgent, 4, HSA_QUEUE_TYPE_MULTI, nullptr,
+                                                      nullptr, 0, 0, &queue),
+            HSA_STATUS_ERROR_INVALID_AGENT);
+  EXPECT_EQ(queue, nullptr);
+}
+
+// The regression test for the load path specifically: is_guest() is false
+// whenever the mapping failed, so without the guard this load would take the
+// "not the guest, forward verbatim" branch and put an untranslated guest code
+// object on the raw host.
+TEST(HsaHooksUnitTest, UnresolvedMappingRefusesAgentCodeObjectLoad) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  reset_queue_fakes();
+  FakeApiTable api;
+  InstalledHook hook(api, /*create_host_topology_node=*/false);
+  ASSERT_TRUE(hook.installed());
+  ASSERT_NE(api.core.hsa_executable_load_agent_code_object_fn,
+            fake_executable_load_agent_code_object);
+
+  std::vector<uint8_t> image(sizeof(rocjitsu::Elf64_Ehdr), 0);
+  write_struct(image, 0, make_amdgpu_elf_header(rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX950));
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(
+      api.core.hsa_code_object_reader_create_from_memory_fn(image.data(), image.size(), &reader),
+      HSA_STATUS_SUCCESS);
+
+  hsa_loaded_code_object_t loaded{};
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kFakeExecutable, kHostAgent, reader,
+                                                              nullptr, &loaded),
+            HSA_STATUS_ERROR_INVALID_AGENT);
+  EXPECT_EQ(g_fake_load_agent_calls, 0);
+}
+
+TEST(HsaHooksUnitTest, UnresolvedMappingRefusesAgentPreload) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  FakeApiTable api;
+  InstalledHook hook(api, /*create_host_topology_node=*/false);
+  ASSERT_TRUE(hook.installed());
+  ASSERT_NE(api.amd.hsa_amd_agent_preload_fn, fake_amd_agent_preload);
+
+  g_last_agent_preload_agent = {};
+  EXPECT_EQ(api.amd.hsa_amd_agent_preload_fn(kHostAgent, 0), HSA_STATUS_ERROR_INVALID_AGENT);
+  EXPECT_EQ(g_last_agent_preload_agent.handle, 0u);
+}
+
+TEST(HsaHooksUnitTest, UnresolvedMappingRefusesAsyncScratchLimit) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  FakeApiTable api;
+  InstalledHook hook(api, /*create_host_topology_node=*/false);
+  ASSERT_TRUE(hook.installed());
+  ASSERT_NE(api.amd.hsa_amd_agent_set_async_scratch_limit_fn,
+            fake_amd_agent_set_async_scratch_limit);
+
+  g_last_async_scratch_limit_agent = {};
+  EXPECT_EQ(api.amd.hsa_amd_agent_set_async_scratch_limit_fn(kHostAgent, 4096),
+            HSA_STATUS_ERROR_INVALID_AGENT);
+  EXPECT_EQ(g_last_async_scratch_limit_agent.handle, 0u);
+}
+
+// The guard against over-applying the refusal. Query and allocation hooks
+// legitimately take CPU agents and cannot execute a kernel; blanket-guarding
+// them would undo the CPU pass-through that enumeration deliberately preserves.
+TEST(HsaHooksUnitTest, UnresolvedMappingStillAllowsCpuPoolIteration) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  FakeApiTable api;
+  InstalledHook hook(api, /*create_host_topology_node=*/false);
+  ASSERT_TRUE(hook.installed());
+  ASSERT_NE(api.amd.hsa_amd_agent_iterate_memory_pools_fn, fake_amd_agent_iterate_memory_pools);
+
+  std::vector<uint64_t> pools;
+  EXPECT_EQ(api.amd.hsa_amd_agent_iterate_memory_pools_fn(
+                kCpuAgent,
+                [](hsa_amd_memory_pool_t pool, void *data) -> hsa_status_t {
+                  static_cast<std::vector<uint64_t> *>(data)->push_back(pool.handle);
+                  return HSA_STATUS_SUCCESS;
+                },
+                &pools),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(pools, std::vector<uint64_t>{kCpuFineGrainedPool.handle});
+}
+
+// The refusal is conditional on the mapping being unusable, not on the agent
+// being unrelated to DBT: a resolved mapping must leave other GPUs alone.
+TEST(HsaHooksUnitTest, ResolvedMappingStillAllowsUnrelatedAgentQueueCreate) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  reset_queue_fakes();
+  FakeApiTable api;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+  ASSERT_NE(api.core.hsa_queue_create_fn, fake_queue_create);
+
+  hsa_queue_t *queue = nullptr;
+  EXPECT_EQ(api.core.hsa_queue_create_fn(kUnrelatedAgent, 4, HSA_QUEUE_TYPE_MULTI, nullptr, nullptr,
+                                         0, 0, &queue),
+            HSA_STATUS_SUCCESS);
+  ASSERT_NE(queue, nullptr);
+  EXPECT_EQ(g_last_queue_create_agent.handle, kUnrelatedAgent.handle);
+}
+
+// Only the host predicate carries the node-id constraint, so when both agents
+// advertise both ISAs -- the shape of a same-ISA config -- the guest predicate
+// must not be allowed to claim the physical host. Enumeration still resolves a
+// distinct pair, whichever side ROCR emits first.
+TEST(HsaHooksUnitTest, SameIsaGuestAndHostSelectDistinctAgentsWhenGuestAppearsFirst) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  FakeApiTable api;
+  api.core.hsa_agent_iterate_isas_fn = fake_agent_iterate_isas_overlapping;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+  ASSERT_NE(api.core.hsa_iterate_agents_fn, fake_iterate_agents);
+
+  std::vector<uint64_t> seen;
+  EXPECT_EQ(api.core.hsa_iterate_agents_fn(collect_agent_handles, &seen), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(seen, std::vector<uint64_t>{kGuestAgent.handle});
+}
+
+TEST(HsaHooksUnitTest, SameIsaGuestAndHostSelectDistinctAgentsWhenHostAppearsFirst) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  FakeApiTable api;
+  api.core.hsa_agent_iterate_isas_fn = fake_agent_iterate_isas_overlapping;
+  api.core.hsa_iterate_agents_fn = fake_iterate_agents_host_first;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+  ASSERT_NE(api.core.hsa_iterate_agents_fn, fake_iterate_agents_host_first);
+
+  std::vector<uint64_t> seen;
+  EXPECT_EQ(api.core.hsa_iterate_agents_fn(collect_agent_handles, &seen), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(seen, std::vector<uint64_t>{kGuestAgent.handle});
+}
+
+// One agent satisfies both roles and no distinct guest exists. The mapping is a
+// failure, not a pass-through: aliasing guest onto host would translate nothing
+// and load guest code objects verbatim on real silicon.
+TEST(HsaHooksUnitTest, SameAgentForGuestAndHostFailsClosed) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  reset_queue_fakes();
+  FakeApiTable api;
+  api.core.hsa_agent_iterate_isas_fn = fake_agent_iterate_isas_overlapping;
+  api.core.hsa_iterate_agents_fn = fake_iterate_agents_host_only;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+  ASSERT_NE(api.core.hsa_iterate_agents_fn, fake_iterate_agents_host_only);
+
+  std::vector<uint64_t> seen;
+  EXPECT_EQ(api.core.hsa_iterate_agents_fn(collect_agent_handles, &seen), HSA_STATUS_SUCCESS);
+  EXPECT_TRUE(seen.empty());
+
+  hsa_queue_t *queue = nullptr;
+  EXPECT_EQ(api.core.hsa_queue_create_fn(kHostAgent, 4, HSA_QUEUE_TYPE_MULTI, nullptr, nullptr, 0,
+                                         0, &queue),
+            HSA_STATUS_ERROR_INVALID_AGENT);
+  EXPECT_EQ(queue, nullptr);
 }
 
 TEST(HsaHooksUnitTest, BatchCopyMapsScalarSourceAndDestinationAgents) {
@@ -1310,7 +1784,7 @@ TEST(HsaHooksUnitTest, GuestShutdownKeepsHookInstalledForProcessLifetime) {
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsSymbolInfoReportsNormalDescriptorUntilPacketFallback) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -1371,7 +1845,7 @@ TEST(HsaHooksUnitTest, VirtualLdsSymbolInfoReportsNormalDescriptorUntilPacketFal
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsRegistryKeepsFittingDispatchOnNormalDescriptor) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -1465,7 +1939,7 @@ TEST(HsaHooksUnitTest, VirtualLdsRegistryKeepsFittingDispatchOnNormalDescriptor)
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsRegistryResolvesKernelObjectFromIteratedSymbol) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -1536,7 +2010,7 @@ TEST(HsaHooksUnitTest, VirtualLdsRegistryResolvesKernelObjectFromIteratedSymbol)
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsRegistryRejectsSidecarDescriptorAsPacketInput) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -1658,7 +2132,7 @@ TEST(HsaHooksUnitTest, QueueDoorbellSignalStoreIsForwardedAfterTrackedQueueScan)
 }
 
 TEST(HsaHooksUnitTest, QueueDoorbellRaisesPacketPrivateSizeFromDescriptor) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -1724,7 +2198,7 @@ TEST(HsaHooksUnitTest, QueueDoorbellRaisesPacketPrivateSizeFromDescriptor) {
 }
 
 TEST(HsaHooksUnitTest, MultiProducerDoorbellRewritesEarlierPublishedPacket) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   // Fallback (non-intercept) multi-producer path: a producer publishes two ready
   // packets and rings once with the FINAL packet id. Packet 0 needs virtual-LDS
@@ -1785,7 +2259,7 @@ TEST(HsaHooksUnitTest, MultiProducerDoorbellRewritesEarlierPublishedPacket) {
 }
 
 TEST(HsaHooksUnitTest, MultiProducerHoleCloseAdvancesFrontierAcrossReadySuffix) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   // Regression for the stranded-frontier bug: on a size-4 multi-producer queue an
   // out-of-order ring publishes a ready suffix ABOVE an unready hole, the hole
@@ -1885,7 +2359,7 @@ TEST(HsaHooksUnitTest, MultiProducerHoleCloseAdvancesFrontierAcrossReadySuffix) 
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsRewriteWorksWithoutLoadedCodeObjectOutput) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -1965,7 +2439,7 @@ TEST(HsaHooksUnitTest, VirtualLdsRewriteWorksWithoutLoadedCodeObjectOutput) {
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsScannerKeepsDestroyedSignalSlotUntilReuse) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -2043,7 +2517,7 @@ TEST(HsaHooksUnitTest, VirtualLdsScannerKeepsDestroyedSignalSlotUntilReuse) {
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsRewriteCopiesOriginalKernargIntoWrapperPrefix) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -2123,7 +2597,7 @@ TEST(HsaHooksUnitTest, VirtualLdsRewriteCopiesOriginalKernargIntoWrapperPrefix) 
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsRewriteKeepsBelowThresholdDispatchOnNormalDescriptor) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -2173,7 +2647,7 @@ TEST(HsaHooksUnitTest, VirtualLdsRewriteKeepsBelowThresholdDispatchOnNormalDescr
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsRewriteKeepsExactHardwareLimitOnNormalDescriptor) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -2221,7 +2695,7 @@ TEST(HsaHooksUnitTest, VirtualLdsRewriteKeepsExactHardwareLimitOnNormalDescripto
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsRewriteKeepsStaticPlusDynamicLimitOnNormalDescriptor) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -2270,7 +2744,7 @@ TEST(HsaHooksUnitTest, VirtualLdsRewriteKeepsStaticPlusDynamicLimitOnNormalDescr
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsInterceptRewritePublishesWrapperKernarg) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -2359,7 +2833,7 @@ TEST(HsaHooksUnitTest, VirtualLdsInterceptRewritePublishesWrapperKernarg) {
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsInterceptReleasesCompletedRetiredBuffers) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -2435,7 +2909,7 @@ TEST(HsaHooksUnitTest, VirtualLdsInterceptReleasesCompletedRetiredBuffers) {
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsInterceptReleasesBorrowedSignalBeforeDestroy) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -2502,7 +2976,7 @@ TEST(HsaHooksUnitTest, VirtualLdsInterceptReleasesBorrowedSignalBeforeDestroy) {
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsInterceptKeepsBelowThresholdPacketOnNormalDescriptor) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -2558,7 +3032,7 @@ TEST(HsaHooksUnitTest, VirtualLdsInterceptKeepsBelowThresholdPacketOnNormalDescr
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsInterceptKeepsStaticPlusDynamicLimitOnNormalDescriptor) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -2616,7 +3090,7 @@ TEST(HsaHooksUnitTest, VirtualLdsInterceptKeepsStaticPlusDynamicLimitOnNormalDes
 }
 
 TEST(HsaHooksUnitTest, DoorbellForwardsOversizedPacketOnUnrelatedAgentQueueUnchanged) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -2661,7 +3135,7 @@ TEST(HsaHooksUnitTest, DoorbellForwardsOversizedPacketOnUnrelatedAgentQueueUncha
 }
 
 TEST(HsaHooksUnitTest, InterceptForwardsOversizedPacketOnUnrelatedAgentQueueUnchanged) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -2775,7 +3249,7 @@ TEST(HsaHooksUnitTest, LoadOnUnrelatedAgentForwardsMalformedMetadataImageUnchang
 }
 
 TEST(HsaHooksUnitDeathTest, InterceptGuestUnregisteredOversizedDispatchAborts) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   // fork-based death test: the guest queue's intercept handler runs synchronously
   // (no scanner jthread on the intercept path), so aborting inside it is safe to

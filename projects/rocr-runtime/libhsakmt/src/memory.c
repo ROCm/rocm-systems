@@ -24,7 +24,7 @@
  */
 
 #include "libhsakmt.h"
-#include "hsakmt/linux/kfd_ioctl.h"
+#include "kfd_ioctl.h"
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
@@ -282,6 +282,46 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterMemoryCtx(HsaKFDContext *ctx,
 	return hsakmt_fmm_register_memory(ctx,
 				   MemoryAddress, MemorySizeInBytes,
 				   NULL, 0, flags);
+}
+
+
+
+// Configure the persisting GL2 (L2) cache size for a GPU node.
+//
+// The kernel implements this through the amdgpu render-node ioctl
+// DRM_IOCTL_AMDGPU_VM (amdgpu_vm_ioctl -> AMDGPU_VM_OP_GL2_PERSISTING_L2_CACHE),
+// not through a KFD ioctl. So the request must be issued on the per-node DRM
+// render fd, not on the KFD device fd.
+HSAKMT_STATUS HSAKMTAPI hsaKmtSetPersistingCacheSizeCtx(HsaKFDContext *ctx,
+												HSAuint32 Node,
+												HSAuint64 CacheSize) {
+	union drm_amdgpu_vm args = {0};
+	int drm_fd;
+	int ret;
+
+	CHECK_KFD_OPEN();
+
+	pr_debug("[%s] node %d size %lu\n", __func__, Node, CacheSize);
+
+	/* Get the amdgpu render-node fd for this KFD node */
+	drm_fd = hsakmt_fmm_get_drm_render_fd(ctx, Node);
+	if (drm_fd < 0) {
+		pr_err("[%s] invalid node ID: %d\n", __func__, Node);
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+	}
+
+	args.in.op = AMDGPU_VM_OP_GL2_PERSISTING_L2_CACHE;
+	if (CacheSize > UINT32_MAX)
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+	args.in.size = (uint32_t)CacheSize;
+
+	ret = drmIoctl(drm_fd, DRM_IOCTL_AMDGPU_VM, &args);
+	if (ret) {
+		pr_err("[%s] DRM_IOCTL_AMDGPU_VM GL2 persisting failed: %d\n", __func__, ret);
+		return HSAKMT_STATUS_ERROR;
+	}
+
+	return HSAKMT_STATUS_SUCCESS;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterMemoryToNodesCtx(HsaKFDContext *ctx,
@@ -935,6 +975,12 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetAMDGPUDeviceHandle(HSAuint32 NodeId,
 	return hsaKmtGetAMDGPUDeviceHandleCtx(&hsakmt_primary_kfd_ctx, NodeId, DeviceHandle);
 }
 
+HSAKMT_STATUS HSAKMTAPI hsaKmtSetPersistingCacheSize(HSAuint32 Node,
+												HSAuint64 CacheSize)
+{
+	return hsaKmtSetPersistingCacheSizeCtx(&hsakmt_primary_kfd_ctx, Node, CacheSize);
+}
+
 HSAKMT_STATUS HSAKMTAPI hsaKmtHandleExport(const HsaHandleExportDesc* desc,
 					   HsaMemoryExportResult* res,
 					   HsaHandleExportFlags* flags)
@@ -1087,18 +1133,50 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtHandleImport(const HsaHandleImportDesc* import_des
 	return HSAKMT_STATUS_SUCCESS;
 }
 
+HSAKMT_STATUS HSAKMTAPI hsaKmtQueryDmaBufInfoCtx(HsaKFDContext *ctx,
+						 int DMABufFd,
+						 HsaDmaBufInfo *Info)
+{
+	struct kfd_ioctl_get_dmabuf_info_args args = {};
+
+	CHECK_KFD_OPEN();
+
+	if (DMABufFd < 0 || !Info)
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+
+	pr_debug("[%s] dmabuf fd %d\n", __func__, DMABufFd);
+
+	args.dmabuf_fd = (__u32)DMABufFd;
+	/* Metadata is not needed here; ask only for size/gpu_id/flags. */
+	args.metadata_ptr = 0;
+	args.metadata_size = 0;
+
+	if (hsakmt_ioctl(ctx->fd, AMDKFD_IOC_GET_DMABUF_INFO, &args))
+		return HSAKMT_STATUS_NOT_SUPPORTED;
+
+	Info->Size  = args.size;
+	Info->GpuId = args.gpu_id;
+	/* GTT and USERPTR are both host-resident; only VRAM is device-local. */
+	Info->IsDeviceMemory = !!(args.flags & KFD_IOC_ALLOC_MEM_FLAGS_VRAM);
+	return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtQueryDmaBufInfo(int DMABufFd, HsaDmaBufInfo *Info)
+{
+	return hsaKmtQueryDmaBufInfoCtx(&hsakmt_primary_kfd_ctx, DMABufFd, Info);
+}
+
 HSAuint64 MapDrmPerm(HsaMemoryMapFlags flags) {
-  switch (flags) {
-  case HSA_MEMORY_ACCESS_RO:
-    return AMDGPU_VM_PAGE_READABLE;
-  case HSA_MEMORY_ACCESS_WO:
-    return AMDGPU_VM_PAGE_WRITEABLE;
-  case HSA_MEMORY_ACCESS_RW:
-    return AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE;
-  case HSA_MEMORY_ACCESS_NONE:
-  default:
-    return 0;
-  }
+  HSAuint64 drm_flags = 0;
+
+  if (flags & HSA_MEMORY_ACCESS_RO)
+    drm_flags |= AMDGPU_VM_PAGE_READABLE;
+  if (flags & HSA_MEMORY_ACCESS_WO)
+    drm_flags |= AMDGPU_VM_PAGE_WRITEABLE;
+  if (flags & HSA_MEMORY_ACCESS_EX)
+    drm_flags |= AMDGPU_VM_PAGE_EXECUTABLE;
+
+  return drm_flags;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HsaMemoryObjectHandle Handle,

@@ -109,26 +109,6 @@ if(BUILD_CTESTS AND (BUILD_FUNCTIONAL_TESTS OR BUILD_UNIT_TESTS))
                  RENAME CTestTestfile.cmake)
 endif()
 
-IF (BUILD_PYTHON_TESTS)
-    # Canonical source of truth is projects/rocshmem/python/tests.
-    # This test CMake path only installs those assets into the test package.
-    configure_file(../scripts/python_tests/driver.sh rocshmem_python_driver.sh COPYONLY)
-    rocm_install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/rocshmem_python_driver.sh
-                 COMPONENT tests DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem)
-
-    # Install all Python test files so adding new tests does not require
-    # touching this CMake list.
-    file(GLOB ROCSHMEM_PYTHON_TEST_FILES CONFIGURE_DEPENDS
-        ${CMAKE_SOURCE_DIR}/python/tests/*.py)
-    list(SORT ROCSHMEM_PYTHON_TEST_FILES)
-
-    rocm_install(FILES
-        ${ROCSHMEM_PYTHON_TEST_FILES}
-        COMPONENT tests
-        DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem/python_tests)
-
-    rocm_install(PROGRAMS
-        ${CMAKE_SOURCE_DIR}/python/launch_test.sh
-        COMPONENT tests
-        DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem)
-ENDIF()
+# NOTE: rocshmem4py Python test assets are no longer packaged from this C++
+# test tree. The Python binding and its tests now live in the standalone
+# project at rocm-systems/python/rocshmem and are exercised there (pytest).

@@ -6,11 +6,12 @@
 #include "engine.hpp"
 #include "logger/debug.hpp"
 #include "packet_framing.hpp"
+#include "sinks/trace_sink.hpp"
 
 #include <cstdint>
 #include <exception>
+#include <memory>
 #include <utility>
-#include <variant>
 
 namespace rocprofsys::core
 {
@@ -48,7 +49,8 @@ basic_cached_perfetto_engine<Backend>::init_sdk()
 
 template <perfetto_backend Backend>
 void
-basic_cached_perfetto_engine<Backend>::start(trace_sink& sink)
+basic_cached_perfetto_engine<Backend>::start(
+    const std::shared_ptr<trace_sink_interface>& sink)
 {
     if(is_system_backend())
     {
@@ -67,7 +69,7 @@ basic_cached_perfetto_engine<Backend>::start(trace_sink& sink)
     m_session = m_backend.start_cached_session(m_cfg);
 
     {
-        std::lock_guard<std::mutex> lk{ m_collector_mutex };
+        std::lock_guard<std::mutex> const lk{ m_collector_mutex };
         m_collected_bytes.clear();
     }
     m_collected_bytes_frozen.store(false, std::memory_order_release);
@@ -75,7 +77,7 @@ basic_cached_perfetto_engine<Backend>::start(trace_sink& sink)
     m_running     = true;
     m_active_sink = sink;
 
-    void* prev =
+    void const* prev =
         activate_cached_engine(this, &basic_cached_perfetto_engine::collect_thunk);
     if(prev != nullptr && prev != this)
     {
@@ -88,7 +90,10 @@ template <perfetto_backend Backend>
 void
 basic_cached_perfetto_engine<Backend>::stop()
 {
-    if(!m_running) return;
+    if(!m_running)
+    {
+        return;
+    }
 
     void* observed = nullptr;
     if(!clear_active_cached_engine(this, &observed) && observed != nullptr)
@@ -111,18 +116,27 @@ basic_cached_perfetto_engine<Backend>::stop()
 
     std::unordered_map<int, std::vector<char>> drained;
     {
-        std::lock_guard<std::mutex> lk{ m_collector_mutex };
+        std::lock_guard<std::mutex> const lk{ m_collector_mutex };
         drained.swap(m_collected_bytes);
     }
 
-    if(!m_active_sink.has_value())
+    auto const sink = m_active_sink.lock();
+    m_active_sink.reset();
+
+    if(!sink)
     {
-        if(first_exc) std::rethrow_exception(first_exc);
+        if(!drained.empty())
+        {
+            LOG_ERROR("cached_perfetto_engine::stop(): trace sink was destroyed before "
+                      "stop() could drain {} source(s); drained bytes discarded",
+                      drained.size());
+        }
+        if(first_exc)
+        {
+            std::rethrow_exception(first_exc);
+        }
         return;
     }
-
-    auto& sink = m_active_sink->get();
-    m_active_sink.reset();
 
     const auto dropped = m_dropped_packet_count.exchange(0, std::memory_order_relaxed);
     if(dropped > 0)
@@ -133,30 +147,38 @@ basic_cached_perfetto_engine<Backend>::stop()
 
     for(auto& [source_pid, bytes] : drained)
     {
-        if(bytes.empty()) continue;
+        if(bytes.empty())
+        {
+            continue;
+        }
         try
         {
-            std::visit(
-                [source_pid, &bytes](auto& s) {
-                    s.on_source_drained(source_pid, std::move(bytes));
-                },
-                sink);
+            sink->on_source_drained(source_pid, bytes);
         } catch(...)
         {
-            if(!first_exc) first_exc = std::current_exception();
+            if(!first_exc)
+            {
+                first_exc = std::current_exception();
+            }
         }
     }
 
     try
     {
-        std::visit([](auto& s) { s.finalize(); }, sink);
+        sink->finalize();
     } catch(...)
     {
-        if(!first_exc) first_exc = std::current_exception();
+        if(!first_exc)
+        {
+            first_exc = std::current_exception();
+        }
     }
 
     m_session = {};
-    if(first_exc) std::rethrow_exception(first_exc);
+    if(first_exc)
+    {
+        std::rethrow_exception(first_exc);
+    }
 }
 
 template <perfetto_backend Backend>
@@ -178,8 +200,8 @@ basic_cached_perfetto_engine<Backend>::preregister_pids(
     }
 
     {
-        std::lock_guard<std::mutex> lk{ m_collector_mutex };
-        for(int pid : source_pids)
+        std::lock_guard<std::mutex> const lk{ m_collector_mutex };
+        for(const int pid : source_pids)
         {
             auto& bytes = m_collected_bytes[pid];
             bytes.reserve(COLLECTED_BYTES_INITIAL_CAPACITY);
@@ -194,7 +216,10 @@ void
 basic_cached_perfetto_engine<Backend>::collect_packet_bytes(int pid, const void* data,
                                                             std::size_t size) noexcept
 {
-    if(data == nullptr || size == 0) return;
+    if(data == nullptr || size == 0)
+    {
+        return;
+    }
 
     if(!m_collected_bytes_frozen.load(std::memory_order_acquire))
     {
@@ -206,7 +231,7 @@ basic_cached_perfetto_engine<Backend>::collect_packet_bytes(int pid, const void*
 
     try
     {
-        auto it = m_collected_bytes.find(pid);
+        auto const it = m_collected_bytes.find(pid);
         if(it == m_collected_bytes.end())
         {
             LOG_ERROR("perfetto cached collector dropped packet for unregistered pid {}",
@@ -242,7 +267,10 @@ basic_cached_perfetto_engine<Backend>::collect_thunk(void* engine, int pid,
                                                      std::size_t size) noexcept
 {
     auto* typed = static_cast<basic_cached_perfetto_engine*>(engine);
-    if(typed == nullptr) return;
+    if(typed == nullptr)
+    {
+        return;
+    }
     typed->collect_packet_bytes(pid, data, size);
 }
 }  // namespace rocprofsys::core

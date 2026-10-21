@@ -27,7 +27,9 @@ typedef enum rj_status_e {
   /// @brief The supplied code object is malformed or unsupported.
   ROCJITSU_STATUS_INVALID_CODE_OBJECT = 4,
   /// @brief A required file could not be opened or read.
-  ROCJITSU_STATUS_INVALID_FILE = 5
+  ROCJITSU_STATUS_INVALID_FILE = 5,
+  /// @brief The requested operation is not supported by this configuration.
+  ROCJITSU_STATUS_UNSUPPORTED = 6
 } rj_status_t;
 
 /// @}

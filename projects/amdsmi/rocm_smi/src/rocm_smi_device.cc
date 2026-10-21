@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "rocm_smi/rocm_smi_device.h"
 
@@ -28,6 +9,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cerrno>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
@@ -691,7 +673,19 @@ static const std::map<const char*, dev_depends_t> kDevFuncDependsMap = {
   }
 
 Device::Device(std::string p, RocmSMI_env_vars const* e)
-    : monitor_(nullptr), path_(p), env_(e), evt_notif_anon_fd_(-1), m_gpu_metrics_header{0, 0, 0} {
+    : monitor_(nullptr),
+      path_(p),
+      card_indx_(0),
+      drm_render_minor_(0),
+      env_(e),
+      bdfid_(UINT64_MAX),
+      kfd_gpu_id_(0),
+      evt_notif_anon_fd_(-1),
+      evt_notif_anon_file_ptr_(nullptr),
+      m_gpu_metrics_header{0, 0, 0},
+      m_gpu_metrics_updated_timestamp(0),
+      m_device_id(0),
+      m_partition_id(0) {
 #ifndef DEBUG
   env_ = nullptr;
 #endif
@@ -721,6 +715,14 @@ Device::~Device() { shared_mutex_close(mutex_); }
 std::string Device::get_gpu_od_fan_min_pwm_path(void) const {
   return path_ + "/device/" + kDevGpuOdFanMinPwmFName;
 }
+
+/**
+ * @brief Get the full sysfs path to the AMPP (amdsmi power profile)
+ * app_modes/ root directory
+ * @return Full path to the app_modes/ directory (e.g.,
+ * /sys/class/drm/card0/device/app_modes/)
+ */
+std::string Device::get_ampp_root_path(void) const { return path_ + "/device/app_modes/"; }
 
 template <typename T>
 int Device::openDebugFileStream(DevInfoTypes type, T* fs, const char* str) {
@@ -1184,15 +1186,52 @@ int Device::readDevInfoBinary(DevInfoTypes type, std::size_t b_size, void* p_bin
     return errno;
   }
 
-  size_t num = fread(p_binary_data, b_size, 1, ptr);
+  // Count bytes, not items: an empty node must be told from a short one.
+  errno = 0;
+  const std::size_t bytes_read = fread(p_binary_data, 1, b_size, ptr);
+  const int read_errno = errno;
+  // Only the stream says which of the three it was. Ask before fclose().
+  const bool read_failed = (std::ferror(ptr) != 0);
   fclose(ptr);
-  if ((num * b_size) != b_size) {
+  if (bytes_read != b_size) {
+    auto result = EIO;
+    const auto* cause = "the node came up short of the size it declared";
+    if (read_failed) {
+      // Pass on only the errnos that name a device state the caller can act on:
+      // suspended or resetting answers EBUSY, runtime-inactive EPERM, a real
+      // access problem EACCES, and a signal EINTR. Every other errno would be
+      // re-mapped into a status that misdescribes the failure -- EINVAL becomes
+      // INVALID_ARGS and blames the caller for a fault on the driver's side --
+      // so the rest are reported as the plain read failure they are.
+      switch (read_errno) {
+        // EOPNOTSUPP is what the SMU layer answers when the firmware does not
+        // know the metrics command at all (SMU_RESP_CMD_UNKNOWN), so it is the
+        // one errno here that genuinely means unsupported. Listing ENOTSUP
+        // beside it would not compile: glibc gives both the same value.
+        case EOPNOTSUPP:
+        case EBUSY:
+        case EPERM:
+        case EACCES:
+        case EINTR:
+          result = read_errno;
+          break;
+        default:
+          result = EIO;
+          break;
+      }
+      cause = "the driver refused the read";
+    } else if (bytes_read == 0) {
+      // A driver with no metrics callback publishes an empty node: nothing
+      // to report, not a bad table, so it stays NOT_SUPPORTED.
+      result = ENOENT;
+      cause = "the node is empty";
+    }
     ss << "Could not read DevInfoBinary for DevInfoType (" << get_type_string(type) << ") - SYSFS ("
-       << sysfs_path << "), binary size error; "
-       << "[buff: " << p_binary_data << " size: " << b_size << " read: " << num << "]"
-       << ", returning ENOENT (" << std::strerror(ENOENT) << ")";
+       << sysfs_path << "), " << cause << "; [buff: " << p_binary_data << " size: " << b_size
+       << " read: " << bytes_read << "]"
+       << ", returning " << std::to_string(result) << " (" << std::strerror(result) << ")";
     LOG_ERROR(ss);
-    return ENOENT;
+    return result;
   }
 
   if (ROCmLogging::Logger::getInstance()->isLoggerEnabled()) {

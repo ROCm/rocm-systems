@@ -353,6 +353,24 @@ inline void hipFreeWrapper(void* ptr)
     }
 }
 
+// Frees buffers from allocateDeviceBuffer/ncclMemAlloc; a VMM buffer must go
+// through ncclMemFree, not hipFree.
+inline void ncclMemFreeWrapper(void* ptr)
+{
+    if(ptr)
+    {
+        ncclResult_t result = ncclMemFree(ptr);
+        if(result != ncclSuccess)
+        {
+            fprintf(stderr,
+                    "WARNING: rank %s: ncclMemFree failed in destructor: %s (ptr=%p)\n",
+                    getMpiRankStr(),
+                    ncclGetErrorString(result),
+                    ptr);
+        }
+    }
+}
+
 inline void hipStreamDestroyWrapper(hipStream_t stream)
 {
     if(stream)
@@ -409,6 +427,7 @@ inline void freeWrapper(void* ptr)
 // Type aliases for AutoGuard-based guards
 using HostBufferAutoGuard   = AutoGuard<void*, freeWrapper>;
 using DeviceBufferAutoGuard = AutoGuard<void*, hipFreeWrapper>;
+using HipMemBufferAutoGuard = AutoGuard<void*, ncclMemFreeWrapper>;
 using HipStreamAutoGuard    = AutoGuard<hipStream_t, hipStreamDestroyWrapper>;
 using HipEventAutoGuard     = AutoGuard<hipEvent_t, hipEventDestroyWrapper>;
 using NcclCommAutoGuard     = AutoGuard<ncclComm_t, ncclCommDestroyWrapper>;
@@ -449,6 +468,12 @@ inline HostBufferAutoGuard makeHostBufferAutoGuard(void* buffer)
 inline DeviceBufferAutoGuard makeDeviceBufferAutoGuard(void* buffer)
 {
     return DeviceBufferAutoGuard(buffer);
+}
+
+// RAII guard for allocateDeviceBuffer/ncclMemAlloc buffers (frees via ncclMemFree).
+inline HipMemBufferAutoGuard makeHipMemBufferAutoGuard(void* buffer)
+{
+    return HipMemBufferAutoGuard(buffer);
 }
 
 inline HipStreamAutoGuard makeStreamAutoGuard(hipStream_t stream)

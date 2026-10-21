@@ -15,6 +15,8 @@
 #include <cstdlib>
 #include <iostream>
 #include <iomanip>
+#include <sstream>
+#include <string>
 #include <mutex>
 #include <cstdlib>
 #include <thread>
@@ -144,6 +146,32 @@ inline bool isQuickLevel() {
 // Do not call before all threads have joined
 #define HIP_CHECK_THREAD_FINALIZE()                                                                \
   { TestContext::get().finalizeResults(); }
+
+// Per-thread buffer used by INFO_THREAD
+inline std::string& threadInfoMessageBuffer() {
+  static thread_local std::string buffer;
+  return buffer;
+}
+
+// Thread-safe counterpart of INFO: stashes a diagnostic message that the next
+// CHECK_THREAD attaches to its recorded result.
+#define INFO_THREAD(message)                                                                       \
+  {                                                                                                \
+    std::stringstream threadInfoStream;                                                            \
+    threadInfoStream << message;                                                                   \
+    threadInfoMessageBuffer() = threadInfoStream.str();                                            \
+  }
+
+// Thread-safe counterpart of CHECK
+#define CHECK_THREAD(condition)                                                                    \
+  {                                                                                                \
+    auto localResult = (condition);                                                                \
+    std::string threadCall =                                                                       \
+        threadInfoMessageBuffer().empty() ? std::string(#condition) : threadInfoMessageBuffer();   \
+    HCResult result(__LINE__, __FILE__, hipSuccess, threadCall, localResult);                      \
+    TestContext::get().addResults(result);                                                         \
+    threadInfoMessageBuffer().clear();                                                             \
+  }
 
 // Selects between the thread-safe and the regular check based on a runtime flag.
 #define HIP_CHECK_OPT_THREAD(threadSafe, error)                                                    \
@@ -287,10 +315,12 @@ static void initHipCtx(hipCtx_t* pcontext) {
 #define HIP_TEST_DRIVER_INIT()
 #endif
 
-#if defined(__gfx1250__) || defined(__gfx1251__)
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
 // Wrap __cluster_dims__ so a test's host code is NOT compiled away when the
 // offload-arch string mixes archs that support clusters with ones that don't
 // (e.g. gfx950). The attribute is only emitted for targets with cluster support.
+// Note: __gfx1250_strict__ is a separate predefine; __gfx1250__ is NOT defined
+// for the gfx1250-strict target, so it must be listed explicitly.
 #define CLUSTER_DIMS(...) __cluster_dims__(__VA_ARGS__)
 #else
 #define CLUSTER_DIMS(...)
@@ -494,13 +524,18 @@ inline bool checkConcurrentKernels(int num_devices) {
   return true;
 }
 
+// The runtime reports pageable memory access iff XNACK is on; stall-only XNACK GPUs never
+// report xnack+ in gcnArchName.
 inline bool isXnackOn() {
-  hipDeviceProp_t prop;
+#if HT_AMD
   int device = 0;
+  int pageable = 0;
   HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&prop, device));
-  std::string gfxName(prop.gcnArchName);
-  return gfxName.find("xnack+") != std::string::npos;
+  HIP_CHECK(hipDeviceGetAttribute(&pageable, hipDeviceAttributePageableMemoryAccess, device));
+  return pageable != 0;
+#else
+  return false;
+#endif
 }
 
 inline bool areWarpMatchFunctionsSupported() {
@@ -578,6 +613,11 @@ inline constexpr char const kApiUnsupportedOnNvidia[] =
     "API is not supported on NVIDIA.";
 inline constexpr char const kTextureGatherUnsupportedAmd[] =
     "texture gather arrays are not supported on AMD backend.";
+inline constexpr char const kPitch2DSamplerModesSupportedOnNvidia[] =
+    "Pitch2D normalized coordinates / linear filtering are supported on NVIDIA.";
+inline constexpr char const kPitch2DMismatchedPitchAmdOnly[] =
+    "mismatched-but-aligned Pitch2D row pitch rejection (HSA pitch-unsupported) is AMD-specific "
+    "and ASIC-dependent; the exact addrlib rowPitch varies per GPU.";
 inline constexpr char const kGlewInitFailed[] = "GLEW initialization failed.";
 inline constexpr char const kAssertionsDisabled[] =
     "assertions are disabled in this build.";
@@ -600,6 +640,8 @@ inline constexpr char const kNotEnoughFreeHostMemory[] =
 inline constexpr char const kRequiresLinux[] = "this test requires Linux.";
 inline constexpr char const kSdmaSwapUnsupported[] =
     "SDMA swap is not supported on this device.";
+inline constexpr char const kConcurrentManagedAccessUnsupported[] =
+    "device does not support concurrent managed access.";
 }  // namespace SkipReason
 
 /**

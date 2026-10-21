@@ -1,6 +1,15 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+// Exit codes are a contract with the pytest harness; stdout is human-readable
+// and never parsed:
+//   0: the capability is held
+//   1: the capability is absent
+//   2: the capability name is unknown
+//   3: the capability set name is unknown
+// Changes here should be reflected in _has_capability() in
+// tests/pytest/rocprofsys/capabilities.py
+
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>

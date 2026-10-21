@@ -42,6 +42,30 @@ CONST_VERSION_INFO = {
     "rocm_version": "@rocm_version_FULL_VERSION@",
 }
 
+# `rocprofv3 --doctor` execs this script. SYNC: DOCTOR_FLAG and DOCTOR_COMMAND in
+# source/lib/python/rocprofv3/doctor_result.py, and source/libexec/rocprofiler-sdk/
+# rocprofv3-doctor/CMakeLists.txt for where it is installed.
+DOCTOR_FLAG = "--doctor"
+DOCTOR_LIBEXEC_DIR = "@CMAKE_INSTALL_LIBEXECDIR@"
+
+# Perfetto's TraceConfig BufferConfig.size_kb field is a uint32_t, and the
+# tracing service allocates size_kb * 1024 bytes and rejects the config when
+# that byte count does not fit in a uint32_t. So although the option is named
+# in "KB", the value is treated as KiB (multiplied by 1024). The usable range
+# is 1 KiB up to floor((2^32 - 1) / 1024) = 4,194,303 KiB. These bounds mirror
+# the C++ limits (defaults::perfetto_buffer_size_{min,max}_kb in
+# source/lib/output/output_config.hpp) so both validation paths agree.
+PERFETTO_BUFFER_SIZE_KB_MIN = 1
+PERFETTO_BUFFER_SIZE_KB_MAX = ((1 << 32) - 1) // 1024
+DEPRECATED_DIRECT_OUTPUT_FORMATS = ("csv", "pftrace", "otf2")
+ATT_RESOURCE_MODES = ("default", "hsa", "code-object")
+REATTACH_INVARIANT_FILTER = (
+    r".*_trace|^pc_sampling_.*$|^att_.*$|"
+    r"^(pmc|pmc_groups|output_config|extra_counters)$|"
+    r"^selected_regions(_ref_count)?$|"
+    r"^kernel_(include_regex|exclude_regex|iteration_range)$"
+)
+
 
 class dotdict(dict):
     """dot.notation access to dictionary attributes"""
@@ -90,6 +114,30 @@ def warning(msg, *args):
     sys.stderr.flush()
 
 
+def warn_deprecated_output_formats(output_formats):
+    requested_formats = {
+        str(itr).strip().lower() for itr in (output_formats or []) if str(itr).strip()
+    }
+    deprecated_formats = [
+        itr for itr in DEPRECATED_DIRECT_OUTPUT_FORMATS if itr in requested_formats
+    ]
+
+    if deprecated_formats:
+        display_names = {
+            "csv": "CSV",
+            "pftrace": "PFTrace (Perfetto)",
+            "otf2": "OTF2",
+        }
+        warning(
+            "The following direct rocprofv3 output format(s) are deprecated: "
+            f"{', '.join(display_names[itr] for itr in deprecated_formats)}. "
+            "Some tracing features, including hipFILE, rocSHMEM, and HIP event tracing, might not "
+            "produce output in these formats. Use `--output-format rocpd` (the default), "
+            "then run `rocpd convert -i <database>.db --output-format csv` when CSV "
+            "output is needed."
+        )
+
+
 def format_help(formatter, w=120, h=40):
     """Return a wider HelpFormatter, if possible."""
     try:
@@ -122,6 +170,24 @@ def strtobool(val):
     else:
         val_type = type(val).__name__
         raise ValueError(f"invalid truth value {val} (type={val_type})")
+
+
+def perfetto_buffer_size_kb(val):
+    if isinstance(val, bool) or not isinstance(val, (int, str)):
+        raise argparse.ArgumentTypeError(f"invalid integer value: {val}")
+
+    try:
+        value = int(val)
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError(f"invalid integer value: {val}")
+
+    if not PERFETTO_BUFFER_SIZE_KB_MIN <= value <= PERFETTO_BUFFER_SIZE_KB_MAX:
+        raise argparse.ArgumentTypeError(
+            f"must be between {PERFETTO_BUFFER_SIZE_KB_MIN} and "
+            f"{PERFETTO_BUFFER_SIZE_KB_MAX} KB"
+        )
+
+    return value
 
 
 def get_mpi_rank_and_size(custom_rank_env=None, custom_size_env=None):
@@ -288,7 +354,6 @@ def resolve_library_path(val, args, is_sdk_lib=True):
 
 
 def get_att_paths(args):
-
     ROCPROFV3_DIR = os.path.dirname(os.path.realpath(__file__))
     ROCM_DIR = os.path.dirname(ROCPROFV3_DIR)
     if args.rocm_root is not None:
@@ -299,7 +364,12 @@ def get_att_paths(args):
     if args.att_library_path:
         library_paths.extend(args.att_library_path)
     elif os.environ.get("ROCPROF_ATT_LIBRARY_PATH"):
-        return os.environ.get("ROCPROF_ATT_LIBRARY_PATH")
+        # Return a list (not a bare str) so the caller iterates over paths and
+        # not over the individual characters of the string. Support a
+        # colon-separated list for consistency with LD_LIBRARY_PATH.
+        for itr in os.environ["ROCPROF_ATT_LIBRARY_PATH"].split(":"):
+            if itr and itr not in library_paths:
+                library_paths += [itr]
     else:
         default_lib_path_env = os.environ.get("LD_LIBRARY_PATH", "").split(":") + [
             f"{ROCM_DIR}/lib"
@@ -312,10 +382,14 @@ def get_att_paths(args):
 
 
 def check_att_capability(args, att_lib_name="librocprof-trace-decoder.so"):
-
     library_paths = get_att_paths(args)
 
     for path in library_paths:
+        # Skip entries that are not existing directories so a stray value (e.g.
+        # an empty string, a file, or a bad path) cannot become an os.walk()
+        # root and silently trigger a full "/" scan.
+        if not path or not os.path.isdir(path):
+            continue
         for root, dirs, files in os.walk(path, topdown=True):
             for itr in files:
                 if att_lib_name in itr:
@@ -408,7 +482,6 @@ class omptTraceArgAction(argparse.Action):
 
 
 def parse_arguments(args=None):
-
     usage_examples = """
 
 %(prog)s requires double-hyphen (--) before the application to be executed, e.g.
@@ -487,7 +560,7 @@ For attachment profiling of running processes:
     io_options.add_argument(
         "-f",
         "--output-format",
-        help="For adding output format (supported formats: csv, json, pftrace, otf2, rocpd)",
+        help="For adding output format (supported formats: csv, json, pftrace, otf2, rocpd). Direct csv, pftrace, and otf2 output is deprecated; use rocpd and rocpd convert",
         nargs="+",
         default=None,
         choices=("csv", "json", "pftrace", "otf2", "rocpd"),
@@ -519,13 +592,13 @@ For attachment profiling of running processes:
         aggregate_tracing_options,
         "-r",
         "--runtime-trace",
-        help="Collect tracing data for HIP runtime API, Marker (ROCTx) API, RCCL API, rocDecode API, rocJPEG API, rocSHMEM API, hipFILE API, Memory operations (copies, scratch, and allocation), and Kernel dispatches. Similar to --sys-trace but without tracing HIP compiler API and the underlying HSA API.",
+        help="Collect tracing data for HIP runtime API, Marker (ROCTx) API, RCCL API, rocDecode API, rocJPEG API, rocSHMEM API, hipFILE API, HIP event barriers, Memory operations (copies, scratch, and allocation), and Kernel dispatches. Similar to --sys-trace but without tracing HIP compiler API and the underlying HSA API.",
     )
     add_parser_bool_argument(
         aggregate_tracing_options,
         "-s",
         "--sys-trace",
-        help="Collect tracing data for HIP API, HSA API, Marker (ROCTx) API, RCCL API, rocDecode API, rocJPEG API, rocSHMEM API, hipFILE API, Memory operations (copies, scratch, and allocations), and Kernel dispatches.",
+        help="Collect tracing data for HIP API, HSA API, Marker (ROCTx) API, RCCL API, rocDecode API, rocJPEG API, rocSHMEM API, hipFILE API, HIP event barriers, Memory operations (copies, scratch, and allocations), and Kernel dispatches.",
     )
 
     basic_tracing_options = parser.add_argument_group("Basic tracing options")
@@ -534,7 +607,7 @@ For attachment profiling of running processes:
     add_parser_bool_argument(
         basic_tracing_options,
         "--hip-trace",
-        help="Combination of --hip-runtime-trace and --hip-compiler-trace. This option only enables the tracing of the HIP API. Unlike previous iterations of rocprof, this does not enable kernel tracing, memory copy tracing, etc",
+        help="Combination of --hip-runtime-trace and --hip-compiler-trace (which in turn enables --hip-event-trace and --hip-graph-trace). This option only enables the tracing of the HIP API. Unlike previous iterations of rocprof, this does not enable kernel tracing, memory copy tracing, etc",
     )
     add_parser_bool_argument(
         basic_tracing_options,
@@ -550,6 +623,11 @@ For attachment profiling of running processes:
         basic_tracing_options,
         "--hip-graph-trace",
         help="For collecting one record per hipGraphLaunch invocation. Emits graph launch records to JSON and rocpd with the graph_exec_id and kernel_dispatch_count for each launch. Independent of --kernel-trace; kernel-dispatch records are emitted by --kernel-trace. Automatically enabled by --hip-trace and --hip-runtime-trace.",
+    )
+    add_parser_bool_argument(
+        basic_tracing_options,
+        "--hip-event-trace",
+        help="Trace GPU-side HIP event barriers produced by hipEventRecord and hipStreamWaitEvent. Emits hip_event records to JSON and rocpd with the operation, event handle, queue, and source queue for cross-stream dependencies. Independent of --kernel-trace. Automatically enabled by --hip-trace and --hip-runtime-trace. Use rocpd convert for CSV or Perfetto output.",
     )
     add_parser_bool_argument(
         basic_tracing_options,
@@ -695,6 +773,32 @@ For attachment profiling of running processes:
         action="append",
     )
 
+    kernel_replay_options = parser.add_argument_group("Kernel replay options (beta)")
+
+    kernel_replay_options.add_argument(
+        "--replay-mode",
+        help=(
+            "Select the counter-collection replay strategy. "
+            "'kernel' collects all counter groups within a single application run via in-process "
+            "kernel replay: each dispatch is replayed once per counter group, with device-memory "
+            "snapshot/restore between passes, instead of re-running the whole application per "
+            "group. Requires --pmc and --kernel-replay-beta-enabled. "
+            "'application' (default) re-runs the whole application once per counter group."
+        ),
+        choices=("kernel", "application"),
+        default=None,
+    )
+
+    add_parser_bool_argument(
+        kernel_replay_options,
+        "--kernel-replay-beta-enabled",
+        help=(
+            "Acknowledge that kernel replay (--replay-mode kernel) is a beta feature and its "
+            "behaviour may change in a future release. Required when --replay-mode kernel is "
+            "specified."
+        ),
+    )
+
     spm_options = parser.add_argument_group("Streaming Performance Monitor(SPM) options")
 
     add_parser_bool_argument(
@@ -725,7 +829,7 @@ For attachment profiling of running processes:
         help="Specifies the unit for the SPM sample interval. Used with --spm-sample-interval to define the sampling interval",
         default=None,
         type=str.lower,
-        choices=("sclk_cycles",),
+        choices=("sclk_cycles", "refclk_cycles"),
     )
 
     pc_sampling_options = parser.add_argument_group("PC sampling options")
@@ -908,9 +1012,9 @@ For attachment profiling of running processes:
     )
     perfetto_options.add_argument(
         "--perfetto-buffer-size",
-        help="Size of buffer for perfetto output in KB. default: 1 GB",
+        help=f"Size of buffer for perfetto output in KB ({PERFETTO_BUFFER_SIZE_KB_MIN}-{PERFETTO_BUFFER_SIZE_KB_MAX}). default: 1 GB",
         default=None,
-        type=int,
+        type=perfetto_buffer_size_kb,
         metavar="KB",
     )
     perfetto_options.add_argument(
@@ -1076,6 +1180,18 @@ For attachment profiling of running processes:
         default=True,
     )
 
+    # NOTE: --doctor is intercepted in main() before parse_arguments() runs, so
+    # this entry exists only to document the flag in --help. Any remaining
+    # arguments are forwarded verbatim to the doctor, which is why the
+    # interception cannot be deferred to argparse: flags such as --format have
+    # incompatible meanings in the two.
+    advanced_options.add_argument(
+        DOCTOR_FLAG,
+        action="store_true",
+        help="""Check whether this machine and ROCm installation are ready for profiling, report what would stop rocprofv3 from working and how to fix it, then exit. Options after --doctor configure the check (for example: rocprofv3 --doctor --format json); see rocprofv3 --doctor --help.""",
+        default=False,
+    )
+
     add_parser_bool_argument(
         advanced_options,
         "--attach-sync-output",
@@ -1145,6 +1261,13 @@ For attachment profiling of running processes:
     )
 
     att_options.add_argument(
+        "--att-resource-mode",
+        help="When to allocate thread trace resources: profiler-selected, HSA initialization, or the first code object per GPU. Default: code-object.",
+        default=None,
+        choices=ATT_RESOURCE_MODES,
+    )
+
+    att_options.add_argument(
         "--att-shader-engine-mask",
         help="Bitmask of shader engines to enable. Default 0x1",
         default=None,
@@ -1191,6 +1314,12 @@ For attachment profiling of running processes:
         "--att-serialize-all",
         default=False,
         help="Serialize all kernels, not just the traced ones.",
+    )
+
+    add_parser_bool_argument(
+        att_options,
+        "--att-no-detail",
+        help="Collect occupancy data without instruction-level detail.",
     )
 
     return (parser.parse_args(rocp_args), app_args)
@@ -1278,7 +1407,6 @@ def parse_text(text_file):
 
 
 def parse_input(input_file):
-
     _, extension = os.path.splitext(input_file)
     if extension == ".txt" or extension == ".text":
         warning("""
@@ -1321,8 +1449,46 @@ def has_set_attr(obj, key):
         return False
 
 
+def services_conflicting_with_kernel_replay(args, environ=None):
+    """Services that kernel replay cannot collect correctly in the same run.
+
+    Kernel replay re-runs each dispatch once per counter group. Counter collection is the only
+    pass-aware service: the tool hands the SDK a pass count derived from the counter groups and
+    picks a different group on each pass. Every other service is simply left enabled for the whole
+    replay loop, so it instruments all of the passes and reports them under the one dispatch id the
+    replay reuses -- N thread traces, or N sets of PC samples, where the run asked for one.
+
+    Returns the display names of the conflicting services, in the order they are reported.
+    """
+    environ = os.environ if environ is None else environ
+    conflicts = []
+
+    if getattr(args, "advanced_thread_trace", None):
+        conflicts.append("--att")
+
+    if (
+        getattr(args, "pc_sampling_beta_enabled", None)
+        or environ.get("ROCPROFILER_PC_SAMPLING_BETA_ENABLED", None) is not None
+    ):
+        conflicts.append("PC sampling")
+
+    # SPM is rejected alongside counter collection further down, but that check only looks at
+    # --pmc. Counter groups can also arrive from an input file, which is the form kernel replay
+    # takes, so name SPM here too rather than letting it through to fail inside the SDK.
+    if getattr(args, "spm", None):
+        conflicts.append("--spm")
+
+    return conflicts
+
+
 def patch_args(data):
     """Used to handle certain fields which might be specified as a string instead of an array or vice-versa"""
+
+    if hasattr(data, "perfetto_buffer_size") and data.perfetto_buffer_size is not None:
+        try:
+            data.perfetto_buffer_size = perfetto_buffer_size_kb(data.perfetto_buffer_size)
+        except argparse.ArgumentTypeError as err:
+            fatal_error(f"Invalid perfetto_buffer_size: {err}")
 
     if hasattr(data, "kernel_iteration_range") and isinstance(
         data.kernel_iteration_range, str
@@ -1456,7 +1622,6 @@ def int_auto(num_str):
 
 
 def run(app_args, args, **kwargs):
-
     app_env = dict(os.environ)
     use_execv = kwargs.get("use_execv", True)
     app_pass = kwargs.get("pass_id", None)
@@ -1660,6 +1825,13 @@ def run(app_args, args, **kwargs):
     if not args.output_format:
         args.output_format = ["rocpd"]
 
+    effective_output_formats = list(args.output_format)
+    effective_output_formats.extend(
+        re.split(r"[\s,;:]+", app_env.get("ROCPROF_OUTPUT_FORMAT", ""))
+    )
+    if args.hipfile_trace or args.rocshmem_trace:
+        warn_deprecated_output_formats(effective_output_formats)
+
     if args.kokkos_trace:
         update_env("KOKKOS_TOOLS_LIBS", ROCPROF_KOKKOSP_LIBRARY, append=True)
         for itr in (
@@ -1684,6 +1856,7 @@ def run(app_args, args, **kwargs):
             "rocjpeg_trace",
             "rocshmem_trace",
             "hipfile_trace",
+            "hip_event_trace",
         ):
             setattrifnone(args, itr, True)
 
@@ -1702,23 +1875,9 @@ def run(app_args, args, **kwargs):
             "rocjpeg_trace",
             "rocshmem_trace",
             "hipfile_trace",
+            "hip_event_trace",
         ):
             setattrifnone(args, itr, True)
-
-    # OMPT is a rocpd-only trace: it is written to the rocpd database and exported to
-    # other formats via `rocpd convert`; the direct csv/json/pftrace/otf2 emitters do
-    # not contain OMPT records. This runs after the --sys-trace/--runtime-trace folds
-    # have resolved args.ompt_trace, which honors an explicit --ompt-trace=false. If
-    # OMPT tracing is effectively enabled but rocpd was not requested, add it so OMPT
-    # data is not silently dropped, and warn the user.
-    if bool(getattr(args, "ompt_trace", None)) and "rocpd" not in args.output_format:
-        warning(
-            "--ompt-trace: OMPT data is only emitted to the 'rocpd' output format; "
-            "the requested output format(s) {fmts} will not contain OMPT records. "
-            "Adding 'rocpd' to --output-format -- use `rocpd convert` to export OMPT "
-            "to csv/pftrace/otf2.".format(fmts=", ".join(args.output_format))
-        )
-        args.output_format.append("rocpd")
 
     update_env(
         "ROCPROF_OUTPUT_FORMAT", ",".join(args.output_format), append=True, join_char=","
@@ -1729,8 +1888,9 @@ def run(app_args, args, **kwargs):
             setattrifnone(args, f"hip_{itr}_trace", True)
 
     if args.hip_runtime_trace:
-        # HIP graphs are part of the HIP runtime
+        # HIP graphs and HIP events are part of the HIP runtime
         setattrifnone(args, "hip_graph_trace", True)
+        setattrifnone(args, "hip_event_trace", True)
 
     if args.hsa_trace:
         for itr in ("core", "amd", "image", "finalizer"):
@@ -1769,6 +1929,7 @@ def run(app_args, args, **kwargs):
             ["kfd_queue_trace", "KFD_QUEUE_TRACE"],
             ["kfd_dropped_events_trace", "KFD_DROPPED_EVENTS_TRACE"],
             ["scratch_memory_trace", "SCRATCH_MEMORY_TRACE"],
+            ["hip_event_trace", "HIP_EVENT_TRACE"],
             ["group_by_queue", "GROUP_BY_QUEUE"],
         ]
     ).items():
@@ -1972,7 +2133,6 @@ def run(app_args, args, **kwargs):
             update_env(f"ROCPROF_{env_val}", val, overwrite=True)
 
     def log_config(_env):
-
         cfg_init_message = "\n- rocprofv3 configuration{}:\n".format(
             "" if app_pass is None else f" (pass {app_pass})"
         )
@@ -2072,10 +2232,40 @@ def run(app_args, args, **kwargs):
     if args.extra_counters is not None:
         with open(args.extra_counters, "r") as e_file:
             e_file_contents = e_file.read()
+            if not e_file_contents.strip():
+                warning("Extra counter file '{}' was empty.", args.extra_counters)
             update_env("ROCPROF_EXTRA_COUNTERS_CONTENTS", e_file_contents, overwrite=True)
 
     if args.pmc and args.pmc_groups:
         fatal_error("Cannot specify both --pmc and (input file) pmc_groups")
+
+    kernel_replay_mode = getattr(args, "replay_mode", None) == "kernel"
+
+    if kernel_replay_mode:
+        if not getattr(args, "kernel_replay_beta_enabled", None):
+            fatal_error(
+                "--replay-mode kernel requires acknowledgement that kernel replay is a beta "
+                "feature via --kernel-replay-beta-enabled"
+            )
+        if not args.pmc and not args.pmc_groups:
+            fatal_error(
+                "--replay-mode kernel requires counter collection "
+                "(--pmc or pmc_groups)"
+            )
+        replay_conflicts = services_conflicting_with_kernel_replay(args)
+        if replay_conflicts:
+            fatal_error(
+                "--replay-mode kernel cannot be combined with "
+                + " or ".join(replay_conflicts)
+                + ". Kernel replay only varies counter groups from one pass to the next; "
+                "every other service stays on for all of the passes and would report each "
+                "kernel once per pass. Collect them in a separate run."
+            )
+
+        # Route counter collection through the in-process kernel-replay service. The SDK derives
+        # the pass count from the number of counter groups via the tool's pass-count callback, so
+        # there is nothing else to communicate.
+        update_env("ROCPROF_KERNEL_REPLAY", True, overwrite_if_true=True)
 
     if args.pmc:
         update_env("ROCPROF_COUNTER_COLLECTION", True, overwrite=True)
@@ -2131,7 +2321,6 @@ def run(app_args, args, **kwargs):
             )
 
     if args.pc_sampling_unit or args.pc_sampling_method or args.pc_sampling_interval:
-
         if (
             not args.pc_sampling_beta_enabled
             and os.environ.get("ROCPROFILER_PC_SAMPLING_BETA_ENABLED", None) is None
@@ -2161,7 +2350,6 @@ def run(app_args, args, **kwargs):
         update_env("ROCPROF_PC_SAMPLING_INTERVAL", args.pc_sampling_interval)
 
     if args.spm or args.spm_sample_interval or args.spm_sample_interval_unit:
-
         if (
             not args.spm_beta_enabled
             and os.environ.get("ROCPROFILER_SPM_BETA_ENABLED", None) is None
@@ -2214,9 +2402,20 @@ def run(app_args, args, **kwargs):
         update_env("ROCPROF_MINIMUM_OUTPUT_BYTES", args.minimum_output_data * 1024)
 
     if args.advanced_thread_trace:
-
         update_env("ROCPROF_ADVANCED_THREAD_TRACE", True, overwrite=True)
         update_env("ROCPROF_ATT_NO_INTERCEPT", args.att_no_intercept, overwrite=True)
+
+        if args.att_resource_mode is not None:
+            if args.att_resource_mode not in ATT_RESOURCE_MODES:
+                fatal_error(
+                    f"Invalid att_resource_mode: {args.att_resource_mode}. "
+                    f"Valid choices are: {', '.join(ATT_RESOURCE_MODES)}"
+                )
+            update_env(
+                "ROCPROF_ATT_PARAM_RESOURCE_MODE",
+                args.att_resource_mode,
+                overwrite=True,
+            )
 
         if args.att_target_cu is not None:
             update_env(
@@ -2253,6 +2452,12 @@ def run(app_args, args, **kwargs):
             update_env(
                 "ROCPROF_ATT_PARAM_SERIALIZE_ALL",
                 args.att_serialize_all,
+                overwrite=True,
+            )
+        if args.att_no_detail:
+            update_env(
+                "ROCPROF_ATT_PARAM_NO_DETAIL",
+                args.att_no_detail,
                 overwrite=True,
             )
         if args.att_gpu_index:
@@ -2341,7 +2546,74 @@ def run(app_args, args, **kwargs):
         return exit_code
 
 
+def find_doctor_script():
+    """Path of the script behind --doctor, or None.
+
+    Installed and build trees keep it at <prefix>/<libexecdir>/rocprofiler-sdk/;
+    a source checkout keeps it under source/libexec/.
+    """
+    prefix = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    libexec_dirs = ["libexec"]
+    if not DOCTOR_LIBEXEC_DIR.startswith("@"):
+        libexec_dirs.insert(0, DOCTOR_LIBEXEC_DIR)
+    candidates = [
+        os.path.join(prefix, libexec_dir, "rocprofiler-sdk", "rocprofv3-doctor")
+        for libexec_dir in libexec_dirs
+    ]
+    candidates.append(
+        os.path.join(
+            prefix,
+            "libexec",
+            "rocprofiler-sdk",
+            "rocprofv3-doctor",
+            "rocprofv3-doctor.py",
+        )
+    )
+    for candidate in candidates:
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+def dispatch_doctor(raw_args):
+    """Replace this process with the doctor, passing the remaining arguments.
+
+    Intercepted before parse_arguments() because rocprofv3 and the doctor both
+    define --format and --output with different meanings; letting argparse see
+    the doctor's flags would be an error rather than a passthrough.
+
+    exec rather than a child process: no rocprofv3 process lingers while the
+    doctor runs (it would otherwise appear to the doctor as a running
+    profiler), and signals and the exit status pass straight through.
+    Returns only when the doctor cannot be started.
+    """
+    args = [itr for itr in raw_args if itr != DOCTOR_FLAG]
+    script = find_doctor_script()
+    if script is None:
+        sys.stderr.write(
+            "rocprofv3: the {} component is not installed next to this rocprofv3 "
+            "({}); reinstall rocprofiler-sdk\n".format(
+                DOCTOR_FLAG, os.path.dirname(os.path.realpath(__file__))
+            )
+        )
+        return 2
+
+    sys.stdout.flush()
+    sys.stderr.flush()
+    try:
+        os.execv(sys.executable, [sys.executable, script] + args)
+    except OSError as exc:
+        sys.stderr.write("rocprofv3: cannot run {} ({})\n".format(script, exc))
+    return 2
+
+
 def main(argv=None):
+    raw_args = list(sys.argv[1:] if argv is None else argv)
+    # only rocprofv3's own options count: everything after "--" belongs to the
+    # application and must reach it verbatim, "--doctor" included
+    profiler_args = raw_args[: raw_args.index("--")] if "--" in raw_args else raw_args
+    if DOCTOR_FLAG in profiler_args:
+        return dispatch_doctor(profiler_args)
 
     cmd_args, app_args = parse_arguments(argv)
 
@@ -2374,17 +2646,6 @@ def main(argv=None):
                     "Each --pmc must specify at least one counter."
                 )
 
-    # Validate incompatible options
-    if cli_multipass and cmd_args.pid:
-        fatal_error(
-            "Multi-pass counter collection (multiple --pmc flags) is not compatible with attach mode (--pid)"
-        )
-
-    if cli_multipass and cmd_args.collection_period:
-        fatal_error(
-            "Multi-pass counter collection (multiple --pmc flags) is not compatible with --collection-period"
-        )
-
     def validate_selected_regions_conflicts(_args):
         if getattr(_args, "selected_regions", False) and getattr(
             _args, "att_no_intercept", False
@@ -2413,6 +2674,77 @@ def main(argv=None):
     # 3. CLI has --pmc AND input file has pmc (combine them as separate passes)
     cli_has_pmc = hasattr(cmd_args, "pmc") and cmd_args.pmc is not None
     input_has_pmc = len(inp_args) > 0 and has_set_attr(inp_args[0], "pmc")
+    # pmc_groups only ever arrives from an input file, so look for it there rather than on
+    # cmd_args, where it is never set.
+    input_has_counters = any(
+        has_set_attr(inp, "pmc") or has_set_attr(inp, "pmc_groups") for inp in inp_args
+    )
+
+    replay_enabled = getattr(cmd_args, "replay_mode", None) == "kernel"
+    if replay_enabled and not getattr(cmd_args, "kernel_replay_beta_enabled", None):
+        fatal_error(
+            "--replay-mode kernel requires acknowledgement that kernel replay is a beta "
+            "feature via --kernel-replay-beta-enabled"
+        )
+    if replay_enabled and not (cli_has_pmc or input_has_counters):
+        fatal_error(
+            "--replay-mode kernel requires counter collection "
+            "(--pmc, input-file pmc, or pmc_groups)"
+        )
+
+    # Kernel replay replays each dispatch once per counter group within one application run, so
+    # the groups given on the command line are passes of a single run rather than the per-group
+    # child-process relaunch application replay uses. Normalize them to the list-of-lists shape
+    # process_args turns into ROCPROF_COUNTER_GROUPS. Input-file jobs are left alone: a job is a
+    # unit of configuration in its own right, so each one still runs as its own job with its own
+    # output configuration, kernel filters and ranges, and replay applies to the groups that job
+    # asks for.
+    if replay_enabled and cli_has_pmc:
+        cmd_args.pmc = [g if isinstance(g, list) else [g] for g in cmd_args.pmc]
+        cli_multipass = False
+
+    def multipass_source(cmd_args, inp_args):
+        """Return why the arguments request application-replay counter multi-pass."""
+        cli_pmc = getattr(cmd_args, "pmc", None)
+        input_pmc_jobs = [itr for itr in inp_args if has_set_attr(itr, "pmc")]
+
+        if (
+            cli_pmc is not None
+            and len(cli_pmc) > 1
+            and getattr(cmd_args, "replay_mode", None) != "kernel"
+        ):
+            return "multiple --pmc flags"
+        if len(input_pmc_jobs) > 1:
+            return "multiple input-file jobs"
+        if cli_pmc is not None and input_pmc_jobs:
+            return "--pmc combined with input-file pmc"
+        return None
+
+    def multipass_incompatible_message(cmd_args, inp_args):
+        """Return an error for options incompatible with counter multi-pass."""
+        source = multipass_source(cmd_args, inp_args)
+        if source is None:
+            return None
+        if has_set_attr(cmd_args, "pid") or any(
+            has_set_attr(itr, "pid") for itr in inp_args
+        ):
+            return (
+                f"Multi-pass counter collection ({source}) is not compatible "
+                "with attach mode (--pid)"
+            )
+        if has_set_attr(cmd_args, "collection_period") or any(
+            has_set_attr(itr, "collection_period") for itr in inp_args
+        ):
+            return (
+                f"Multi-pass counter collection ({source}) is not compatible "
+                "with --collection-period"
+            )
+        return None
+
+    incompatible = multipass_incompatible_message(cmd_args, inp_args)
+    if incompatible is not None:
+        fatal_error(incompatible)
+
     use_multipass = cli_multipass or len(inp_args) > 1 or (cli_has_pmc and input_has_pmc)
 
     if not use_multipass:
@@ -2491,9 +2823,7 @@ def main(argv=None):
                     dotdict(prev_args),
                     # when updating this filter, please also update documentation on reattachment
                     # in using-rocprofv3-process-attachment.rst
-                    filter=r".*_trace|^pc_sampling_.*$|^att_.*$|"
-                    r"^(pmc|pmc_groups|output_config|extra_counters)$|"
-                    r"^kernel_(include_regex|exclude_regex|iteration_range)$",
+                    filter=REATTACH_INVARIANT_FILTER,
                     require_in_both=True,
                     # Allow this value to be None if it is not set in current cmd line
                     ignore_prev_inp=r"attach_duration_msec",
@@ -2517,6 +2847,10 @@ def main(argv=None):
             # Normalize: action="append" creates [['GRBM_COUNT']] for single --pmc
             if len(cli_pmc_groups) == 1 and isinstance(cli_pmc_groups[0], list):
                 all_pass_configs.append({"pmc": cli_pmc_groups[0], "from_cli": True})
+            elif replay_enabled:
+                # Replay covers every command-line group inside one run, so they are one config
+                # here rather than one per group.
+                all_pass_configs.append({"pmc": cli_pmc_groups, "from_cli": True})
             else:
                 # Multiple --pmc flags: already a list of lists
                 for pmc_group in cli_pmc_groups:

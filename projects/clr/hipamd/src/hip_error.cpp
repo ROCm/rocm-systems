@@ -149,6 +149,8 @@ const char* ihipGetErrorName(hipError_t hip_error) {
       return "hipErrorHostMemoryNotRegistered";
     case hipErrorLaunchFailure:
       return "hipErrorLaunchFailure";
+    case hipErrorNotPermitted:
+      return "hipErrorNotPermitted";
     case hipErrorNotSupported:
       return "hipErrorNotSupported";
     case hipErrorUnknown:
@@ -310,6 +312,8 @@ const char* ihipGetErrorString(hipError_t hip_error) {
       return "unspecified launch failure";
     case hipErrorCooperativeLaunchTooLarge:
       return "too many blocks in cooperative launch";
+    case hipErrorNotPermitted:
+      return "operation not permitted";
     case hipErrorNotSupported:
       return "operation not supported";
     case hipErrorStreamCaptureUnsupported:

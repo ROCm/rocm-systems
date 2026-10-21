@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "ualoe_nl.h"
 
@@ -47,6 +28,7 @@ struct ualoe_nl_handle {
   int port_id;
   int seq;
   int cdev_fd;
+  pthread_mutex_t request_lock;
   LIST_ENTRY(ualoe_nl_handle) lentry;
 };
 
@@ -59,11 +41,86 @@ static void ualoe_nl_init_msg(struct ualoe_nl_handle* handle, struct nlmsghdr** 
   *nlh = mnl_nlmsg_put_header(buf);
   (*nlh)->nlmsg_type = type;
   (*nlh)->nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK;
-  (*nlh)->nlmsg_seq = ++handle->seq;
+  (*nlh)->nlmsg_seq = 0;
   (*nlh)->nlmsg_pid = handle->port_id;
   *genlh = mnl_nlmsg_put_extra_header(*nlh, sizeof(**genlh));
   (*genlh)->cmd = cmd;
   (*genlh)->version = vers;
+}
+
+static void ualoe_nl_request_lock(struct ualoe_nl_handle* nl_handle, struct nlmsghdr* nlh) {
+  pthread_mutex_lock(&nl_handle->request_lock);
+  nlh->nlmsg_seq = ++nl_handle->seq;
+}
+
+static void ualoe_nl_request_unlock(struct ualoe_nl_handle* nl_handle) {
+  pthread_mutex_unlock(&nl_handle->request_lock);
+}
+
+struct ualoe_nl_response_ctx {
+  mnl_cb_t cb;
+  void* data;
+  int callback_error;
+  bool skip_payloads;
+};
+
+static int ualoe_nl_response_cb(const struct nlmsghdr* nlh, void* data) {
+  struct ualoe_nl_response_ctx* ctx = data;
+  int rc;
+
+  if (ctx->skip_payloads) return MNL_CB_OK;
+
+  errno = 0;
+  rc = ctx->cb ? ctx->cb(nlh, ctx->data) : MNL_CB_OK;
+  if (rc == MNL_CB_ERROR) {
+    ctx->callback_error = errno ? errno : EPROTO;
+    ctx->skip_payloads = true;
+  } else if (rc == MNL_CB_STOP) {
+    ctx->skip_payloads = true;
+  }
+
+  /* Continue until mnl_cb_run consumes the terminal ACK or NLMSG_DONE. */
+  return MNL_CB_OK;
+}
+
+static int ualoe_nl_send_recv(struct ualoe_nl_handle* nl_handle, char* buf, size_t buf_size,
+                              struct nlmsghdr* nlh, mnl_cb_t cb, void* cb_data) {
+  struct ualoe_nl_response_ctx ctx = {
+      .cb = cb,
+      .data = cb_data,
+  };
+  unsigned int exp_seq, exp_pid;
+  int rc;
+
+  ualoe_nl_request_lock(nl_handle, nlh);
+
+  if (mnl_socket_sendto(nl_handle->sk, buf, nlh->nlmsg_len) < 0) {
+    rc = errno;
+    ualoe_log_error("Failed to send message rc=%d\n", rc);
+    goto unlock;
+  }
+
+  exp_seq = nlh->nlmsg_seq;
+  exp_pid = nlh->nlmsg_pid;
+
+  rc = mnl_socket_recvfrom(nl_handle->sk, buf, buf_size);
+  while (rc > 0) {
+    rc = mnl_cb_run(buf, rc, exp_seq, exp_pid, ualoe_nl_response_cb, &ctx);
+    if (rc <= MNL_CB_STOP) break;
+    rc = mnl_socket_recvfrom(nl_handle->sk, buf, buf_size);
+  }
+
+  if (ctx.callback_error) {
+    rc = ctx.callback_error;
+  } else if (rc == -1) {
+    rc = errno;
+  } else {
+    rc = 0;
+  }
+
+unlock:
+  ualoe_nl_request_unlock(nl_handle);
+  return rc;
 }
 
 static int ualoe_nl_get_family_attrs(const struct nlattr* attr, void* data) {
@@ -84,55 +141,16 @@ static int ualoe_nl_get_family_id(struct ualoe_nl_handle* nl_handle) {
   char buf[MNL_SOCKET_BUFFER_SIZE];
   struct genlmsghdr* genlh;
   struct nlmsghdr* nlh;
-  int rc;
 
   ualoe_nl_init_msg(nl_handle, &nlh, &genlh, buf, CTRL_CMD_GETFAMILY, GENL_ID_CTRL, 2);
 
   mnl_attr_put_strz(nlh, CTRL_ATTR_FAMILY_NAME, CFG_FAMILY_NAME);
 
-  if (mnl_socket_sendto(nl_handle->sk, buf, nlh->nlmsg_len) < 0) {
-    rc = errno;
-    ualoe_log_error("Failed to send message rc=%d\n", rc);
-    return rc;
-  }
-
-  rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  while (rc > 0) {
-    rc = mnl_cb_run(buf, rc, nl_handle->seq, nl_handle->port_id, ualoe_nl_get_family_cb, nl_handle);
-    if (rc <= MNL_CB_STOP) break;
-    rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  }
-  if (rc == -1) {
-    rc = errno;
-    ualoe_log_error("Failed to receive message rc=%d\n", rc);
-    return rc;
-  }
-
-  return 0;
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, ualoe_nl_get_family_cb, nl_handle);
 }
 
-/* Context structure for ualoe_nl_connect callbacks */
-struct ualoe_nl_connect_ctx {
-  struct ualoe_nl_handle* nl_handle;
-  int error_code;
-};
-
-static int ualoe_nl_connect_err_cb(const struct nlmsghdr* nlh, void* data) {
-  const struct nlmsgerr* err = mnl_nlmsg_get_payload(nlh);
-  struct ualoe_nl_connect_ctx* ctx = data;
-
-  /* Extract the actual error code from the NLMSG_ERROR payload
-   * The kernel error is stored as negative value in err->error
-   * We want to return positive errno value
-   */
-  ctx->error_code = -err->error;
-
-  return MNL_CB_ERROR;
-}
-
-static int ualoe_nl_connect_attrs_ctx(const struct nlattr* attr, void* data) {
-  struct ualoe_nl_connect_ctx* ctx = data;
-  struct ualoe_nl_handle* nl_handle = ctx->nl_handle;
+static int ualoe_nl_connect_attrs(const struct nlattr* attr, void* data) {
+  struct ualoe_nl_handle* nl_handle = data;
   int type = mnl_attr_get_type(attr);
 
   switch (type) {
@@ -145,8 +163,8 @@ static int ualoe_nl_connect_attrs_ctx(const struct nlattr* attr, void* data) {
   return MNL_CB_OK;
 }
 
-static int ualoe_nl_connect_cb_ctx(const struct nlmsghdr* nlh, void* data) {
-  return mnl_attr_parse(nlh, sizeof(struct genlmsghdr), ualoe_nl_connect_attrs_ctx, data);
+static int ualoe_nl_connect_cb(const struct nlmsghdr* nlh, void* data) {
+  return mnl_attr_parse(nlh, sizeof(struct genlmsghdr), ualoe_nl_connect_attrs, data);
 }
 
 static int ualoe_nl_connect(struct ualoe_nl_handle* nl_handle, const char* addr) {
@@ -154,52 +172,20 @@ static int ualoe_nl_connect(struct ualoe_nl_handle* nl_handle, const char* addr)
   struct genlmsghdr* genlh;
   struct nlmsghdr* nlh;
   int rc;
-  struct ualoe_nl_connect_ctx ctx = {
-      .nl_handle = nl_handle,
-      .error_code = 0,
-  };
-  mnl_cb_t cb_ctl_array[NLMSG_MIN_TYPE] = {NULL};
-
-  /* Register error callback for NLMSG_ERROR messages */
-  cb_ctl_array[NLMSG_ERROR] = ualoe_nl_connect_err_cb;
 
   ualoe_nl_init_msg(nl_handle, &nlh, &genlh, buf, CFG_CMD_CONNECT, nl_handle->family_id, 1);
 
   mnl_attr_put_strz(nlh, CFG_ATTR_PCI_ADDR, addr);
 
-  if (mnl_socket_sendto(nl_handle->sk, buf, nlh->nlmsg_len) < 0) {
-    int rc = errno;
-    ualoe_log_error("Failed to send message rc=%d\n", rc);
-    return rc;
+  rc = ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, ualoe_nl_connect_cb, nl_handle);
+  if (rc) return rc;
+
+  if (nl_handle->dev_id < 0) {
+    ualoe_log_error("Device %s did not return a device ID\n", addr);
+    return ENODEV;
   }
 
-  rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-
-  while (rc > 0) {
-    /* Use mnl_cb_run2 to provide custom error callback that extracts
-     * the actual kernel error code from NLMSG_ERROR messages
-     */
-    rc = mnl_cb_run2(buf, rc, nl_handle->seq, nl_handle->port_id, ualoe_nl_connect_cb_ctx, &ctx,
-                     cb_ctl_array, NLMSG_MIN_TYPE);
-
-    if (rc <= MNL_CB_STOP) break;
-
-    rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  }
-
-  /* Check if we successfully received the device ID.
-   * If dev_id was set (>= 0), the connection succeeded even if we got an ACK.
-   * If rc == -1 and dev_id is still -1, then an actual error occurred.
-   */
-  if (nl_handle->dev_id >= 0) return 0;
-
-  /* If we get here, connection failed. ctx.error_code contains the error
-   * from NLMSG_ERROR, or we fall back to ENODEV if no error was reported.
-   */
-  rc = ctx.error_code ? ctx.error_code : ENODEV;
-  printf("Device %s not found (error=%d)\n", addr, rc);
-  nl_handle->dev_id = -1;
-  return rc;
+  return 0;
 }
 
 int ualoe_nl_open(const char* name, ualoe_handle_t* handle) {
@@ -209,10 +195,14 @@ int ualoe_nl_open(const char* name, ualoe_handle_t* handle) {
   nl_handle = malloc(sizeof(*nl_handle));
   if (!nl_handle) return ENOMEM;
 
+  rc = pthread_mutex_init(&nl_handle->request_lock, NULL);
+  if (rc) goto free_handle;
+
+  nl_handle->seq = 0;
   nl_handle->sk = mnl_socket_open(NETLINK_GENERIC);
   if (!nl_handle->sk) {
     rc = errno;
-    goto free_handle;
+    goto destroy_mutex;
   }
 
   if (mnl_socket_bind(nl_handle->sk, 0, MNL_SOCKET_AUTOPID) < 0) {
@@ -230,10 +220,6 @@ int ualoe_nl_open(const char* name, ualoe_handle_t* handle) {
   rc = ualoe_nl_connect(nl_handle, name);
   if (rc) goto free_socket;
 
-  pthread_mutex_lock(&handle_lock);
-  LIST_INSERT_HEAD(&open_handles, nl_handle, lentry);
-  pthread_mutex_unlock(&handle_lock);
-
   /**
    * For now, keep cdev fd for ioctl calls until netlink support is
    * added for all operations.
@@ -241,12 +227,18 @@ int ualoe_nl_open(const char* name, ualoe_handle_t* handle) {
   rc = ualoe_cdev_open(name, &nl_handle->cdev_fd);
   if (rc) goto free_socket;
 
+  pthread_mutex_lock(&handle_lock);
+  LIST_INSERT_HEAD(&open_handles, nl_handle, lentry);
+  pthread_mutex_unlock(&handle_lock);
+
   *handle = nl_handle->fd;
 
   return 0;
 
 free_socket:
   mnl_socket_close(nl_handle->sk);
+destroy_mutex:
+  pthread_mutex_destroy(&nl_handle->request_lock);
 free_handle:
   free(nl_handle);
   return rc;
@@ -271,9 +263,12 @@ int ualoe_nl_close(ualoe_handle_t handle) {
    * operations.
    */
   ualoe_cb_fini(handle);
-  ualoe_cdev_close(nl_handle->cdev_fd);
 
+  pthread_mutex_lock(&nl_handle->request_lock);
+  ualoe_cdev_close(nl_handle->cdev_fd);
   mnl_socket_close(nl_handle->sk);
+  pthread_mutex_unlock(&nl_handle->request_lock);
+  pthread_mutex_destroy(&nl_handle->request_lock);
   free(nl_handle);
 
   return 0;
@@ -367,22 +362,7 @@ int ualoe_nl_get_version(ualoe_handle_t handle, ualoe_version_t* lib_version,
 
   mnl_attr_put_u32(nlh, CFG_ATTR_DEV_ID, nl_handle->dev_id);
 
-  if (mnl_socket_sendto(nl_handle->sk, buf, nlh->nlmsg_len) < 0) {
-    rc = errno;
-    ualoe_log_error("Failed to send message rc=%d\n", rc);
-    return rc;
-  }
-
-  /* Receive and parse response */
-  rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  while (rc > 0) {
-    rc = mnl_cb_run(buf, rc, nlh->nlmsg_seq, nlh->nlmsg_pid, ualoe_nl_get_version_handler, &ctx);
-    if (rc <= MNL_CB_STOP) break;
-    rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  }
-
-  if (rc == -1) return errno;
-  return 0;
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, ualoe_nl_get_version_handler, &ctx);
 }
 
 int ualoe_nl_reset(ualoe_handle_t handle) {
@@ -398,21 +378,7 @@ int ualoe_nl_reset(ualoe_handle_t handle) {
   ualoe_nl_init_msg(nl_handle, &nlh, &genlh, buf, CFG_CMD_RESET, nl_handle->family_id, 1);
 
   mnl_attr_put_u32(nlh, CFG_ATTR_DEV_ID, nl_handle->dev_id);
-  if (mnl_socket_sendto(nl_handle->sk, buf, nlh->nlmsg_len) < 0) {
-    rc = errno;
-    ualoe_log_error("Failed to send message rc=%d\n", rc);
-    return rc;
-  }
-
-  rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  while (rc > 0) {
-    rc = mnl_cb_run(buf, rc, nlh->nlmsg_seq, nlh->nlmsg_pid, NULL, NULL);
-    if (rc <= MNL_CB_STOP) break;
-    rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  }
-
-  if (rc == -1) return errno;
-  return 0;
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, NULL, NULL);
 }
 
 static int ualoe_nl_parse_get_caps_nested(const struct nlattr* attr, void* arg) {
@@ -466,21 +432,7 @@ int ualoe_nl_get_capabilities(ualoe_handle_t handle, ualoe_capabilities_t* caps)
 
   mnl_attr_put_u32(nlh, CFG_ATTR_DEV_ID, nl_handle->dev_id);
 
-  if (mnl_socket_sendto(nl_handle->sk, buf, nlh->nlmsg_len) < 0) {
-    rc = errno;
-    ualoe_log_error("Failed to send message rc=%d\n", rc);
-    return rc;
-  }
-
-  rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  while (rc > 0) {
-    rc = mnl_cb_run(buf, rc, nlh->nlmsg_seq, nlh->nlmsg_pid, ualoe_nl_get_caps_handler, caps);
-    if (rc <= MNL_CB_STOP) break;
-    rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  }
-
-  if (rc == -1) return errno;
-  return 0;
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, ualoe_nl_get_caps_handler, caps);
 }
 
 int ualoe_nl_set_identity(ualoe_handle_t handle, uint32_t accelerator_id) {
@@ -499,21 +451,7 @@ int ualoe_nl_set_identity(ualoe_handle_t handle, uint32_t accelerator_id) {
   mnl_attr_put_u32(nlh, CFG_ATTR_DEV_ID, nl_handle->dev_id);
   mnl_attr_put_u32(nlh, CFG_ATTR_ACCELERATOR_ID, accelerator_id);
 
-  if (mnl_socket_sendto(nl_handle->sk, buf, nlh->nlmsg_len) < 0) {
-    rc = errno;
-    ualoe_log_error("Failed to send message rc=%d\n", rc);
-    return rc;
-  }
-
-  rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  while (rc > 0) {
-    rc = mnl_cb_run(buf, rc, nlh->nlmsg_seq, nlh->nlmsg_pid, NULL, NULL);
-    if (rc <= MNL_CB_STOP) break;
-    rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  }
-
-  if (rc == -1) return errno;
-  return 0;
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, NULL, NULL);
 }
 
 int ualoe_nl_set_accelerator_config(ualoe_handle_t handle, unsigned bitmask_size,
@@ -551,21 +489,7 @@ int ualoe_nl_set_accelerator_config(ualoe_handle_t handle, unsigned bitmask_size
   }
   mnl_attr_nest_end(nlh, nest);
 
-  if (mnl_socket_sendto(nl_handle->sk, buf, nlh->nlmsg_len) < 0) {
-    rc = errno;
-    ualoe_log_error("Failed to send message rc=%d\n", rc);
-    return rc;
-  }
-
-  rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  while (rc > 0) {
-    rc = mnl_cb_run(buf, rc, nlh->nlmsg_seq, nlh->nlmsg_pid, NULL, NULL);
-    if (rc <= MNL_CB_STOP) break;
-    rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  }
-
-  if (rc == -1) return errno;
-  return 0;
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, NULL, NULL);
 }
 
 int ualoe_nl_set_config_phase(ualoe_handle_t handle, ualoe_config_phase_e next_phase) {
@@ -584,21 +508,7 @@ int ualoe_nl_set_config_phase(ualoe_handle_t handle, ualoe_config_phase_e next_p
   mnl_attr_put_u32(nlh, CFG_ATTR_DEV_ID, nl_handle->dev_id);
   mnl_attr_put_u32(nlh, CFG_ATTR_CONFIG_PHASE, next_phase);
 
-  if (mnl_socket_sendto(nl_handle->sk, buf, nlh->nlmsg_len) < 0) {
-    rc = errno;
-    ualoe_log_error("Failed to send message rc=%d\n", rc);
-    return rc;
-  }
-
-  rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  while (rc > 0) {
-    rc = mnl_cb_run(buf, rc, nlh->nlmsg_seq, nlh->nlmsg_pid, NULL, NULL);
-    if (rc <= MNL_CB_STOP) break;
-    rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  }
-
-  if (rc == -1) return errno;
-  return 0;
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, NULL, NULL);
 }
 
 static int ualoe_nl_parse_get_current_config_phase_nested(const struct nlattr* attr, void* arg) {
@@ -644,22 +554,8 @@ int ualoe_nl_get_current_config_phase(ualoe_handle_t handle, ualoe_config_phase_
 
   mnl_attr_put_u32(nlh, CFG_ATTR_DEV_ID, nl_handle->dev_id);
 
-  if (mnl_socket_sendto(nl_handle->sk, buf, nlh->nlmsg_len) < 0) {
-    rc = errno;
-    ualoe_log_error("Failed to send message rc=%d\n", rc);
-    return rc;
-  }
-
-  rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  while (rc > 0) {
-    rc = mnl_cb_run(buf, rc, nlh->nlmsg_seq, nlh->nlmsg_pid,
-                    ualoe_nl_get_current_config_phase_handler, phase);
-    if (rc <= MNL_CB_STOP) break;
-    rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  }
-
-  if (rc == -1) return errno;
-  return 0;
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh,
+                            ualoe_nl_get_current_config_phase_handler, phase);
 }
 
 int ualoe_nl_set_ifoe_config(ualoe_handle_t handle, ifoe_virt_mode_e virt_mode,
@@ -683,21 +579,7 @@ int ualoe_nl_set_ifoe_config(ualoe_handle_t handle, ifoe_virt_mode_e virt_mode,
   mnl_attr_put_u32(nlh, CFG_ATTR_IFOE_CONFIG_FAILOVER_MODE, failover_mode);
   mnl_attr_put_u32(nlh, CFG_ATTR_IFOE_CONFIG_LOOPBACK_MODE, loopback_mode);
 
-  if (mnl_socket_sendto(nl_handle->sk, buf, nlh->nlmsg_len) < 0) {
-    rc = errno;
-    ualoe_log_error("Failed to send message rc=%d\n", rc);
-    return rc;
-  }
-
-  rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  while (rc > 0) {
-    rc = mnl_cb_run(buf, rc, nlh->nlmsg_seq, nlh->nlmsg_pid, NULL, NULL);
-    if (rc <= MNL_CB_STOP) break;
-    rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  }
-
-  if (rc == -1) return errno;
-  return 0;
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, NULL, NULL);
 }
 
 struct ualoe_nl_ifoe_cfg {
@@ -867,22 +749,8 @@ int ualoe_nl_get_ifoe_config(ualoe_handle_t handle, ifoe_config_t* config, unsig
       .bitmask_size = bitmask_size,
   };
 
-  if (mnl_socket_sendto(nl_handle->sk, buf, nlh->nlmsg_len) < 0) {
-    rc = errno;
-    ualoe_log_error("Failed to send message rc=%d\n", rc);
-    return rc;
-  }
-
-  rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  while (rc > 0) {
-    rc = mnl_cb_run(buf, rc, nlh->nlmsg_seq, nlh->nlmsg_pid, ualoe_nl_get_ifoe_config_handler,
-                    &cb_ctx);
-    if (rc <= MNL_CB_STOP) break;
-    rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  }
-
-  if (rc == -1) return errno;
-  return 0;
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, ualoe_nl_get_ifoe_config_handler,
+                            &cb_ctx);
 }
 
 int ualoe_nl_enable_accelerators(ualoe_handle_t handle, unsigned bitmask_size,
@@ -905,21 +773,7 @@ int ualoe_nl_enable_accelerators(ualoe_handle_t handle, unsigned bitmask_size,
   if (bitmask_size > 0 && enabled_accelerator_bitmask)
     mnl_attr_put(nlh, CFG_ATTR_ENABLED_ACCEL, bitmask_size, enabled_accelerator_bitmask);
 
-  if (mnl_socket_sendto(nl_handle->sk, buf, nlh->nlmsg_len) < 0) {
-    rc = errno;
-    ualoe_log_error("Failed to send message rc=%d\n", rc);
-    return rc;
-  }
-
-  rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  while (rc > 0) {
-    rc = mnl_cb_run(buf, rc, nlh->nlmsg_seq, nlh->nlmsg_pid, NULL, NULL);
-    if (rc <= MNL_CB_STOP) break;
-    rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  }
-
-  if (rc == -1) return errno;
-  return 0;
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, NULL, NULL);
 }
 
 int ualoe_nl_config_crypto(ualoe_handle_t handle, ualoe_crypto_mode_e mode) {
@@ -937,20 +791,7 @@ int ualoe_nl_config_crypto(ualoe_handle_t handle, ualoe_crypto_mode_e mode) {
   mnl_attr_put_u32(nlh, CFG_ATTR_DEV_ID, nl_handle->dev_id);
   mnl_attr_put_u32(nlh, CFG_ATTR_CRYPTO_MODE, mode);
 
-  if (mnl_socket_sendto(nl_handle->sk, buf, nlh->nlmsg_len) < 0) {
-    rc = errno;
-    ualoe_log_error("Failed to send message rc=%d\n", rc);
-    return rc;
-  }
-  rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  while (rc > 0) {
-    rc = mnl_cb_run(buf, rc, nlh->nlmsg_seq, nlh->nlmsg_pid, NULL, NULL);
-    if (rc <= MNL_CB_STOP) break;
-    rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  }
-
-  if (rc == -1) return errno;
-  return 0;
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, NULL, NULL);
 }
 
 int ualoe_nl_set_tx_crypto_key(ualoe_handle_t handle, ualoe_crypto_key_id_e key_id,
@@ -972,21 +813,7 @@ int ualoe_nl_set_tx_crypto_key(ualoe_handle_t handle, ualoe_crypto_key_id_e key_
   mnl_attr_put_u32(nlh, CFG_ATTR_CRYPTO_KEY_LEN, UALOE_CRYPTO_KEY_SIZE);
   mnl_attr_put(nlh, CFG_ATTR_CRYPTO_KEY, UALOE_CRYPTO_KEY_SIZE * sizeof(uint32_t), key);
 
-  if (mnl_socket_sendto(nl_handle->sk, buf, nlh->nlmsg_len) < 0) {
-    rc = errno;
-    ualoe_log_error("Failed to send message rc=%d\n", rc);
-    return rc;
-  }
-
-  rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  while (rc > 0) {
-    rc = mnl_cb_run(buf, rc, nlh->nlmsg_seq, nlh->nlmsg_pid, NULL, NULL);
-    if (rc <= MNL_CB_STOP) break;
-    rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  }
-
-  if (rc == -1) return errno;
-  return 0;
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, NULL, NULL);
 }
 
 int ualoe_nl_disable_rx_crypto_key(ualoe_handle_t handle, ualoe_crypto_key_id_e key_id) {
@@ -1005,21 +832,7 @@ int ualoe_nl_disable_rx_crypto_key(ualoe_handle_t handle, ualoe_crypto_key_id_e 
   mnl_attr_put_u32(nlh, CFG_ATTR_DEV_ID, nl_handle->dev_id);
   mnl_attr_put_u32(nlh, CFG_ATTR_CRYPTO_KEY_ID, key_id);
 
-  if (mnl_socket_sendto(nl_handle->sk, buf, nlh->nlmsg_len) < 0) {
-    rc = errno;
-    ualoe_log_error("Failed to send message rc=%d\n", rc);
-    return rc;
-  }
-
-  rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  while (rc > 0) {
-    rc = mnl_cb_run(buf, rc, nlh->nlmsg_seq, nlh->nlmsg_pid, NULL, NULL);
-    if (rc <= MNL_CB_STOP) break;
-    rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  }
-
-  if (rc == -1) return errno;
-  return 0;
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, NULL, NULL);
 }
 
 int ualoe_nl_set_rx_crypto_key(ualoe_handle_t handle, ualoe_crypto_key_id_e key_id,
@@ -1041,21 +854,7 @@ int ualoe_nl_set_rx_crypto_key(ualoe_handle_t handle, ualoe_crypto_key_id_e key_
   mnl_attr_put_u32(nlh, CFG_ATTR_CRYPTO_KEY_LEN, UALOE_CRYPTO_KEY_SIZE);
   mnl_attr_put(nlh, CFG_ATTR_CRYPTO_KEY, UALOE_CRYPTO_KEY_SIZE * sizeof(uint32_t), key);
 
-  if (mnl_socket_sendto(nl_handle->sk, buf, nlh->nlmsg_len) < 0) {
-    rc = errno;
-    ualoe_log_error("Failed to send message rc=%d\n", rc);
-    return rc;
-  }
-
-  rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  while (rc > 0) {
-    rc = mnl_cb_run(buf, rc, nlh->nlmsg_seq, nlh->nlmsg_pid, NULL, NULL);
-    if (rc <= MNL_CB_STOP) break;
-    rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  }
-
-  if (rc == -1) return errno;
-  return 0;
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, NULL, NULL);
 }
 
 static int ifoe_nl_parse_station_desc(const struct nlattr* attr, void* data) {
@@ -1086,17 +885,33 @@ static int ifoe_nl_parse_station_desc(const struct nlattr* attr, void* data) {
   return MNL_CB_OK;
 }
 
+struct ifoe_nl_station_list_ctx {
+  ifoe_station_desc_t* descs;
+  unsigned desc_count;
+  unsigned received;
+};
+
 static int ifoe_nl_get_station_list_handler(const struct nlmsghdr* nlh, void* data) {
-  return mnl_attr_parse(nlh, sizeof(struct genlmsghdr), ifoe_nl_parse_station_desc, data);
+  struct ifoe_nl_station_list_ctx* ctx = data;
+  ifoe_station_desc_t* desc = ctx->received < ctx->desc_count ? &ctx->descs[ctx->received] : NULL;
+  int rc;
+
+  rc = mnl_attr_parse(nlh, sizeof(struct genlmsghdr), ifoe_nl_parse_station_desc, desc);
+  if (rc > MNL_CB_STOP) ctx->received++;
+  return rc;
 }
 
 int ifoe_nl_get_station_list(ualoe_handle_t handle, unsigned desc_count,
                              ifoe_station_desc_t descs[]) {
+  struct ifoe_nl_station_list_ctx ctx = {
+      .descs = descs,
+      .desc_count = desc_count,
+  };
   struct ualoe_nl_handle* nl_handle;
   char buf[MNL_SOCKET_BUFFER_SIZE];
   struct genlmsghdr* genlh;
   struct nlmsghdr* nlh;
-  int rc, i;
+  int rc;
 
   rc = ualoe_nl_find_handle(handle, &nl_handle);
   if (rc) return rc;
@@ -1105,28 +920,10 @@ int ifoe_nl_get_station_list(ualoe_handle_t handle, unsigned desc_count,
                     1);
   mnl_attr_put_u32(nlh, CFG_ATTR_DEV_ID, nl_handle->dev_id);
   mnl_attr_put_u32(nlh, CFG_ATTR_DESC_COUNT, desc_count);
-  if (mnl_socket_sendto(nl_handle->sk, buf, nlh->nlmsg_len) < 0) {
-    rc = errno;
-    ualoe_log_error("Failed to send message rc=%d\n", rc);
-    return rc;
-  }
 
-  i = 0;
-
-  rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  while (rc > 0) {
-    ifoe_station_desc_t* desc = i < desc_count ? &descs[i] : NULL;
-
-    rc =
-        mnl_cb_run(buf, rc, nlh->nlmsg_seq, nlh->nlmsg_pid, ifoe_nl_get_station_list_handler, desc);
-    if (rc <= MNL_CB_STOP) break;
-    i++;
-    rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  }
-
-  if (rc == -1) return errno;
-  if (i != desc_count) return ERANGE;
-  return 0;
+  rc = ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, ifoe_nl_get_station_list_handler, &ctx);
+  if (rc) return rc;
+  return ctx.received == desc_count ? 0 : ERANGE;
 }
 
 int ifoe_nl_station_ctrl(ualoe_handle_t handle, unsigned station_idx, ifoe_station_state_e state) {
@@ -1143,21 +940,7 @@ int ifoe_nl_station_ctrl(ualoe_handle_t handle, unsigned station_idx, ifoe_stati
   mnl_attr_put_u32(nlh, CFG_ATTR_DEV_ID, nl_handle->dev_id);
   mnl_attr_put_u32(nlh, CFG_ATTR_STATION_LOGICAL_IDX, station_idx);
   mnl_attr_put_u32(nlh, CFG_ATTR_STATION_STATE, state);
-  if (mnl_socket_sendto(nl_handle->sk, buf, nlh->nlmsg_len) < 0) {
-    rc = errno;
-    ualoe_log_error("Failed to send message rc=%d\n", rc);
-    return rc;
-  }
-
-  rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  while (rc > 0) {
-    rc = mnl_cb_run(buf, rc, nlh->nlmsg_seq, nlh->nlmsg_pid, NULL, NULL);
-    if (rc <= MNL_CB_STOP) break;
-    rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  }
-
-  if (rc == -1) return errno;
-  return 0;
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, NULL, NULL);
 }
 
 struct ualoe_nl_netport_cb_ctx {
@@ -1293,22 +1076,8 @@ int ifoe_nl_station_get_state(ualoe_handle_t handle, unsigned station_idx,
                     1);
   mnl_attr_put_u32(nlh, CFG_ATTR_DEV_ID, nl_handle->dev_id);
   mnl_attr_put_u32(nlh, CFG_ATTR_STATION_LOGICAL_IDX, station_idx);
-  if (mnl_socket_sendto(nl_handle->sk, buf, nlh->nlmsg_len) < 0) {
-    rc = errno;
-    ualoe_log_error("Failed to send message rc=%d\n", rc);
-    return rc;
-  }
-
-  rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  while (rc > 0) {
-    rc = mnl_cb_run(buf, rc, nlh->nlmsg_seq, nlh->nlmsg_pid, ifoe_nl_station_get_state_handler,
-                    state);
-    if (rc <= MNL_CB_STOP) break;
-    rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  }
-
-  if (rc == -1) return errno;
-  return 0;
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, ifoe_nl_station_get_state_handler,
+                            state);
 }
 
 int ifoe_nl_set_path_to_port_map(ualoe_handle_t handle, bool specify_station,
@@ -1339,21 +1108,7 @@ int ifoe_nl_set_path_to_port_map(ualoe_handle_t handle, bool specify_station,
   if (specify_station) mnl_attr_put_u32(nlh, CFG_ATTR_STATION_LOGICAL_IDX, station_idx);
   if (specify_accelerator) mnl_attr_put_u32(nlh, CFG_ATTR_ACCELERATOR_ID, accelerator_id);
 
-  if (mnl_socket_sendto(nl_handle->sk, buf, nlh->nlmsg_len) < 0) {
-    rc = errno;
-    ualoe_log_error("Failed to send message rc=%d\n", rc);
-    return rc;
-  }
-
-  rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  while (rc > 0) {
-    rc = mnl_cb_run(buf, rc, nlh->nlmsg_seq, nlh->nlmsg_pid, NULL, NULL);
-    if (rc <= MNL_CB_STOP) break;
-    rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  }
-
-  if (rc == -1) return errno;
-  return 0;
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, NULL, NULL);
 }
 
 struct ifoe_nl_path_to_port_map_cb_ctx {
@@ -1413,22 +1168,8 @@ int ifoe_nl_get_path_to_port_map(ualoe_handle_t handle, unsigned station_idx,
       .map = map,
   };
 
-  if (mnl_socket_sendto(nl_handle->sk, buf, nlh->nlmsg_len) < 0) {
-    rc = errno;
-    ualoe_log_error("Failed to send message rc=%d\n", rc);
-    return rc;
-  }
-
-  rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  while (rc > 0) {
-    rc = mnl_cb_run(buf, rc, nlh->nlmsg_seq, nlh->nlmsg_pid, ifoe_nl_get_path_to_port_map_cb,
-                    &cb_ctx);
-    if (rc <= MNL_CB_STOP) break;
-    rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  }
-
-  if (rc == -1) return errno;
-  return 0;
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, ifoe_nl_get_path_to_port_map_cb,
+                            &cb_ctx);
 }
 
 static int ifoe_nl_parse_netport_properties(const struct nlattr* attr, void* data) {
@@ -1484,22 +1225,8 @@ int ifoe_nl_get_netport_properties(ualoe_handle_t handle, ualoe_netport_properti
                     nl_handle->family_id, 1);
   mnl_attr_put_u32(nlh, CFG_ATTR_DEV_ID, nl_handle->dev_id);
 
-  if (mnl_socket_sendto(nl_handle->sk, buf, nlh->nlmsg_len) < 0) {
-    rc = errno;
-    ualoe_log_error("Failed to send message rc=%d\n", rc);
-    return rc;
-  }
-
-  rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  while (rc > 0) {
-    rc = mnl_cb_run(buf, rc, nlh->nlmsg_seq, nlh->nlmsg_pid, ifoe_nl_get_netport_properties_handler,
-                    properties);
-    if (rc <= MNL_CB_STOP) break;
-    rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  }
-
-  if (rc == -1) return errno;
-  return 0;
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh,
+                            ifoe_nl_get_netport_properties_handler, properties);
 }
 
 static int ifoe_nl_parse_netport_desc(const struct nlattr* attr, void* data) {
@@ -1538,16 +1265,32 @@ static int ifoe_nl_parse_netport_desc(const struct nlattr* attr, void* data) {
   return MNL_CB_OK;
 }
 
+struct ifoe_nl_netport_list_ctx {
+  ifoe_netport_desc_t* descs;
+  unsigned desc_count;
+  unsigned received;
+};
+
 static int ifoe_nl_get_netport_list_handler(const struct nlmsghdr* nlh, void* data) {
-  return mnl_attr_parse(nlh, sizeof(struct genlmsghdr), ifoe_nl_parse_netport_desc, data);
+  struct ifoe_nl_netport_list_ctx* ctx = data;
+  ifoe_netport_desc_t* desc = ctx->received < ctx->desc_count ? &ctx->descs[ctx->received] : NULL;
+  int rc;
+
+  rc = mnl_attr_parse(nlh, sizeof(struct genlmsghdr), ifoe_nl_parse_netport_desc, desc);
+  if (rc > MNL_CB_STOP) ctx->received++;
+  return rc;
 }
 int ifoe_nl_get_netport_list(ualoe_handle_t handle, unsigned desc_count,
                              ifoe_netport_desc_t descs[]) {
+  struct ifoe_nl_netport_list_ctx ctx = {
+      .descs = descs,
+      .desc_count = desc_count,
+  };
   struct ualoe_nl_handle* nl_handle;
   char buf[MNL_SOCKET_BUFFER_SIZE];
   struct genlmsghdr* genlh;
   struct nlmsghdr* nlh;
-  int rc, i;
+  int rc;
 
   rc = ualoe_nl_find_handle(handle, &nl_handle);
   if (rc) return rc;
@@ -1556,27 +1299,106 @@ int ifoe_nl_get_netport_list(ualoe_handle_t handle, unsigned desc_count,
                     1);
   mnl_attr_put_u32(nlh, CFG_ATTR_DEV_ID, nl_handle->dev_id);
   mnl_attr_put_u32(nlh, CFG_ATTR_DESC_COUNT, desc_count);
-  if (mnl_socket_sendto(nl_handle->sk, buf, nlh->nlmsg_len) < 0) {
-    rc = errno;
-    ualoe_log_error("Failed to send message rc=%d\n", rc);
-    return rc;
+
+  rc = ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, ifoe_nl_get_netport_list_handler, &ctx);
+  if (rc == ENOSPC) /* Preserve the legacy v1 behavior when descs is too small. */
+    return EINVAL;
+  if (rc) return rc;
+  return ctx.received == desc_count ? 0 : ERANGE;
+}
+
+/** Context for parsing netport list responses which include the
+ *  total netport count alongside each descriptor.
+ */
+struct netport_list_v2_ctx {
+  ifoe_netport_desc_t* descs;
+  ifoe_netport_desc_t* desc;
+  unsigned max_count;
+  unsigned received;
+  unsigned total_count;
+};
+
+static int ifoe_nl_parse_netport_desc_v2(const struct nlattr* attr, void* data) {
+  struct netport_list_v2_ctx* ctx = data;
+
+  switch (mnl_attr_get_type(attr)) {
+    case CFG_ATTR_NETPORT_LOGICAL_IDX:
+      if (mnl_attr_validate(attr, MNL_TYPE_U32) < 0) return MNL_CB_ERROR;
+      if (ctx->desc) ctx->desc->logical_idx = mnl_attr_get_u32(attr);
+      break;
+    case CFG_ATTR_NETPORT_REL_IDX:
+      if (mnl_attr_validate(attr, MNL_TYPE_U32) < 0) return MNL_CB_ERROR;
+      if (ctx->desc) ctx->desc->station_rel_netport_idx = mnl_attr_get_u32(attr);
+      break;
+    case CFG_ATTR_NETPORT_LABEL:
+      if (mnl_attr_validate(attr, MNL_TYPE_STRING) < 0) return MNL_CB_ERROR;
+      if (ctx->desc)
+        snprintf(ctx->desc->name.text, UALOE_LABEL_SIZE, "%s", (char*)mnl_attr_get_str(attr));
+      break;
+    case CFG_ATTR_STATION_LOGICAL_IDX:
+      if (mnl_attr_validate(attr, MNL_TYPE_U32) < 0) return MNL_CB_ERROR;
+      if (ctx->desc) ctx->desc->station_idx = mnl_attr_get_u32(attr);
+      break;
+    case CFG_ATTR_STATION_LABEL:
+      if (mnl_attr_validate(attr, MNL_TYPE_STRING) < 0) return MNL_CB_ERROR;
+      if (ctx->desc)
+        snprintf(ctx->desc->station_name.text, UALOE_LABEL_SIZE, "%s",
+                 (char*)mnl_attr_get_str(attr));
+      break;
+    case CFG_ATTR_NETPORT_TOTAL_COUNT:
+      if (mnl_attr_validate(attr, MNL_TYPE_U32) < 0) return MNL_CB_ERROR;
+      ctx->total_count = mnl_attr_get_u32(attr);
+      break;
+    default:
+      break;
+  }
+  return MNL_CB_OK;
+}
+
+static int ifoe_nl_get_netport_list_v2_handler(const struct nlmsghdr* nlh, void* data) {
+  struct netport_list_v2_ctx* ctx = data;
+  int rc;
+
+  ctx->desc = ctx->received < ctx->max_count ? &ctx->descs[ctx->received] : NULL;
+  rc = mnl_attr_parse(nlh, sizeof(struct genlmsghdr), ifoe_nl_parse_netport_desc_v2, ctx);
+  if (rc > MNL_CB_STOP) ctx->received++;
+  return rc;
+}
+
+int ifoe_nl_get_netport_list_v2(ualoe_handle_t handle, unsigned* desc_count,
+                                ifoe_netport_desc_t descs[]) {
+  struct netport_list_v2_ctx ctx = {
+      .descs = descs,
+      .max_count = *desc_count,
+  };
+  struct ualoe_nl_handle* nl_handle;
+  char buf[MNL_SOCKET_BUFFER_SIZE];
+  struct genlmsghdr* genlh;
+  struct nlmsghdr* nlh;
+  int rc;
+
+  rc = ualoe_nl_find_handle(handle, &nl_handle);
+  if (rc) return rc;
+
+  /* Omit CFG_ATTR_DESC_COUNT so the driver returns all configured
+   * netports and includes CFG_ATTR_NETPORT_TOTAL_COUNT in responses.
+   */
+  ualoe_nl_init_msg(nl_handle, &nlh, &genlh, buf, CFG_CMD_GET_NETPORT_LIST, nl_handle->family_id,
+                    1);
+  mnl_attr_put_u32(nlh, CFG_ATTR_DEV_ID, nl_handle->dev_id);
+
+  rc = ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, ifoe_nl_get_netport_list_v2_handler,
+                          &ctx);
+  if (rc) return rc;
+
+  if (ctx.total_count && ctx.received != ctx.total_count) {
+    ualoe_log_error("Expected %u netports but received %u\n", ctx.total_count, ctx.received);
+    return EIO;
   }
 
-  i = 0;
-  rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  while (rc > 0) {
-    ifoe_netport_desc_t* desc = i < desc_count ? &descs[i] : NULL;
+  *desc_count = ctx.received;
 
-    rc =
-        mnl_cb_run(buf, rc, nlh->nlmsg_seq, nlh->nlmsg_pid, ifoe_nl_get_netport_list_handler, desc);
-    if (rc <= MNL_CB_STOP) break;
-    i++;
-    rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  }
-
-  if (rc == -1) return errno;
-  if (i != desc_count) return ERANGE;
-  return 0;
+  return ctx.received > ctx.max_count ? ENOSPC : 0;
 }
 
 int ifoe_nl_netport_ctrl(ualoe_handle_t handle, unsigned netport_idx, ifoe_netport_state_e state) {
@@ -1593,21 +1415,7 @@ int ifoe_nl_netport_ctrl(ualoe_handle_t handle, unsigned netport_idx, ifoe_netpo
   mnl_attr_put_u32(nlh, CFG_ATTR_DEV_ID, nl_handle->dev_id);
   mnl_attr_put_u32(nlh, CFG_ATTR_NETPORT_LOGICAL_IDX, netport_idx);
   mnl_attr_put_u32(nlh, CFG_ATTR_NETPORT_STATE, state);
-  if (mnl_socket_sendto(nl_handle->sk, buf, nlh->nlmsg_len) < 0) {
-    rc = errno;
-    ualoe_log_error("Failed to send message rc=%d\n", rc);
-    return rc;
-  }
-
-  rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  while (rc > 0) {
-    rc = mnl_cb_run(buf, rc, nlh->nlmsg_seq, nlh->nlmsg_pid, NULL, NULL);
-    if (rc <= MNL_CB_STOP) break;
-    rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  }
-
-  if (rc == -1) return errno;
-  return 0;
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, NULL, NULL);
 }
 
 int ifoe_nl_netport_config_link_auto(ualoe_handle_t handle, unsigned netport_idx,
@@ -1634,21 +1442,7 @@ int ifoe_nl_netport_config_link_auto(ualoe_handle_t handle, unsigned netport_idx
     return ENOMEM;
   }
 
-  if (mnl_socket_sendto(nl_handle->sk, buf, nlh->nlmsg_len) < 0) {
-    rc = errno;
-    ualoe_log_error("Failed to send message rc=%d\n", rc);
-    return rc;
-  }
-
-  rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  while (rc > 0) {
-    rc = mnl_cb_run(buf, rc, nlh->nlmsg_seq, nlh->nlmsg_pid, NULL, NULL);
-    if (rc <= MNL_CB_STOP) break;
-    rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  }
-
-  if (rc == -1) return errno;
-  return 0;
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, NULL, NULL);
 }
 
 int ifoe_nl_netport_config_link_manual(ualoe_handle_t handle, unsigned netport_idx,
@@ -1671,21 +1465,7 @@ int ifoe_nl_netport_config_link_manual(ualoe_handle_t handle, unsigned netport_i
   mnl_attr_put_u8(nlh, CFG_ATTR_NETPORT_FEC_MODE, fec_mode);
   mnl_attr_put_u8(nlh, CFG_ATTR_NETPORT_LOOPBACK_MODE, loopback_mode);
 
-  if (mnl_socket_sendto(nl_handle->sk, buf, nlh->nlmsg_len) < 0) {
-    rc = errno;
-    ualoe_log_error("Failed to send message rc=%d\n", rc);
-    return rc;
-  }
-
-  rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  while (rc > 0) {
-    rc = mnl_cb_run(buf, rc, nlh->nlmsg_seq, nlh->nlmsg_pid, NULL, NULL);
-    if (rc <= MNL_CB_STOP) break;
-    rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  }
-
-  if (rc == -1) return errno;
-  return 0;
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, NULL, NULL);
 }
 
 _Static_assert((sizeof(ifoe_accelerator_addr_map_t) ==
@@ -1711,7 +1491,7 @@ _Static_assert((sizeof(ifoe_accelerator_addr_map_t) ==
 #define NETPORT_SET_ACCELERATOR_ADDR_MAP_U32_ATTRS 25
 
 #define MAX(a, b) (((a) > (b)) ? (a) : (b))
-#define NETPORT_SET_ACCELERATOR_ADDR_MAP_BUF_SIZE                                                 \
+#define NETPORT_ACCELERATOR_ADDR_MAP_BUF_SIZE                                                     \
   MAX(MNL_SOCKET_BUFFER_SIZE, MNL_NLMSG_HDRLEN +                                                  \
                                   NETPORT_SET_ACCELERATOR_ADDR_MAP_U32_ATTRS * sizeof(uint32_t) + \
                                   UALOE_MAX_ACCELERATORS * sizeof(ifoe_accelerator_addr_map_t))
@@ -1738,7 +1518,7 @@ int ifoe_nl_netport_set_accelerator_addr_map(ualoe_handle_t handle, unsigned net
                                              ifoe_accelerator_addr_map_t map[]) {
   struct ualoe_nl_handle* nl_handle;
   enum cfg_network_addr_type cfg_map_addr_type;
-  char buf[NETPORT_SET_ACCELERATOR_ADDR_MAP_BUF_SIZE];
+  char buf[NETPORT_ACCELERATOR_ADDR_MAP_BUF_SIZE];
   struct genlmsghdr* genlh;
   struct nlmsghdr* nlh;
   int rc;
@@ -1763,21 +1543,70 @@ int ifoe_nl_netport_set_accelerator_addr_map(ualoe_handle_t handle, unsigned net
     return ENOMEM;
   }
 
-  if (mnl_socket_sendto(nl_handle->sk, buf, nlh->nlmsg_len) < 0) {
-    rc = errno;
-    ualoe_log_error("Failed to send message rc=%d\n", rc);
-    return rc;
-  }
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, NULL, NULL);
+}
 
-  rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  while (rc > 0) {
-    rc = mnl_cb_run(buf, rc, nlh->nlmsg_seq, nlh->nlmsg_pid, NULL, NULL);
-    if (rc <= MNL_CB_STOP) break;
-    rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  }
+struct get_accelerator_addr_map_cb_ctx {
+  unsigned map_count;
+  ifoe_accelerator_addr_map_t* map;
+};
 
-  if (rc == -1) return errno;
-  return 0;
+static int ifoe_nl_parse_netport_accel_addr_map(const struct nlattr* attr, void* data) {
+  struct get_accelerator_addr_map_cb_ctx* cb_ctx = data;
+
+  switch (mnl_attr_get_type(attr)) {
+    case CFG_ATTR_NETPORT_ACCELERATOR_ADDR_MAP:
+      if (mnl_attr_get_payload_len(attr) !=
+          cb_ctx->map_count * sizeof(ifoe_accelerator_addr_map_t)) {
+        errno = ERANGE;
+        return MNL_CB_ERROR;
+      }
+      memcpy(cb_ctx->map, mnl_attr_get_payload(attr),
+             cb_ctx->map_count * sizeof(ifoe_accelerator_addr_map_t));
+      break;
+    case CFG_ATTR_DESC_COUNT:
+      if (mnl_attr_validate(attr, MNL_TYPE_U32) < 0) return MNL_CB_ERROR;
+      if (mnl_attr_get_u32(attr) != cb_ctx->map_count) {
+        errno = ERANGE;
+        return MNL_CB_ERROR;
+      }
+      break;
+    default:
+      errno = EINVAL;
+      return MNL_CB_ERROR;
+  }
+  return MNL_CB_OK;
+}
+
+static int ifoe_nl_get_accel_addr_map_cb(const struct nlmsghdr* nlh, void* data) {
+  return mnl_attr_parse(nlh, sizeof(struct genlmsghdr), ifoe_nl_parse_netport_accel_addr_map, data);
+}
+
+int ifoe_nl_netport_get_accelerator_addr_map(ualoe_handle_t handle, unsigned netport_idx,
+                                             unsigned map_count,
+                                             ifoe_accelerator_addr_map_t map[]) {
+  char buf[NETPORT_ACCELERATOR_ADDR_MAP_BUF_SIZE];
+  struct ualoe_nl_handle* nl_handle;
+  struct genlmsghdr* genlh;
+  struct nlmsghdr* nlh;
+  int rc;
+
+  rc = ualoe_nl_find_handle(handle, &nl_handle);
+  if (rc) return rc;
+
+  ualoe_nl_init_msg(nl_handle, &nlh, &genlh, buf, CFG_CMD_NETPORT_GET_ACCELERATOR_ADDR_MAP,
+                    nl_handle->family_id, 1);
+  mnl_attr_put_u32(nlh, CFG_ATTR_DEV_ID, nl_handle->dev_id);
+  mnl_attr_put_u32(nlh, CFG_ATTR_NETPORT_LOGICAL_IDX, netport_idx);
+  mnl_attr_put_u32(nlh, CFG_ATTR_DESC_COUNT, map_count);
+
+  struct get_accelerator_addr_map_cb_ctx cb_ctx = {
+      .map_count = map_count,
+      .map = map,
+  };
+
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, ifoe_nl_get_accel_addr_map_cb,
+                            &cb_ctx);
 }
 
 int ifoe_nl_netport_set_addr(ualoe_handle_t handle, unsigned netport_idx,
@@ -1807,21 +1636,7 @@ int ifoe_nl_netport_set_addr(ualoe_handle_t handle, unsigned netport_idx,
     mnl_attr_put(nlh, CFG_ATTR_NETPORT_IFOE_MAC_ADDR, UALOE_MAC_ADDRESS_SIZE, mac_addr);
   }
   mnl_attr_put_u32(nlh, CFG_ATTR_NETPORT_IFOE_IP_ADDR, ip_addr);
-  if (mnl_socket_sendto(nl_handle->sk, buf, nlh->nlmsg_len) < 0) {
-    rc = errno;
-    ualoe_log_error("Failed to send message rc=%d\n", rc);
-    return rc;
-  }
-
-  rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  while (rc > 0) {
-    rc = mnl_cb_run(buf, rc, nlh->nlmsg_seq, nlh->nlmsg_pid, NULL, NULL);
-    if (rc <= MNL_CB_STOP) break;
-    rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  }
-
-  if (rc == -1) return errno;
-  return 0;
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, NULL, NULL);
 }
 
 static int ifoe_nl_parse_netport_state(const struct nlattr* attr, void* data) {
@@ -1888,21 +1703,478 @@ int ifoe_nl_netport_get_state(ualoe_handle_t handle, unsigned netport_idx,
                     1);
   mnl_attr_put_u32(nlh, CFG_ATTR_DEV_ID, nl_handle->dev_id);
   mnl_attr_put_u32(nlh, CFG_ATTR_NETPORT_LOGICAL_IDX, netport_idx);
-  if (mnl_socket_sendto(nl_handle->sk, buf, nlh->nlmsg_len) < 0) {
-    rc = errno;
-    ualoe_log_error("Failed to send message rc=%d\n", rc);
-    return rc;
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, ualoe_nl_netport_state_handler,
+                            state);
+}
+
+static int ifoe_nl_parse_ifcp_netport_state(const struct nlattr* attr, void* data) {
+  ifoe_ifcp_netport_state_t* state = data;
+
+  switch (mnl_attr_get_type(attr)) {
+    case CFG_ATTR_IFCP_LOCAL_PORT_ID:
+      if (mnl_attr_validate(attr, MNL_TYPE_U32) < 0) return MNL_CB_ERROR;
+      state->local_port_id = mnl_attr_get_u32(attr);
+      break;
+    case CFG_ATTR_IFCP_LOCAL_LINK_UP:
+      if (mnl_attr_validate(attr, MNL_TYPE_U8) < 0) return MNL_CB_ERROR;
+      state->local_link_up = mnl_attr_get_u8(attr);
+      break;
+    case CFG_ATTR_IFCP_LOCAL_IN_ERROR:
+      if (mnl_attr_validate(attr, MNL_TYPE_U8) < 0) return MNL_CB_ERROR;
+      state->local_in_error = mnl_attr_get_u8(attr);
+      break;
+    case CFG_ATTR_IFCP_LOCAL_LL_UP:
+      if (mnl_attr_validate(attr, MNL_TYPE_U8) < 0) return MNL_CB_ERROR;
+      state->local_ll_up = mnl_attr_get_u8(attr);
+      break;
+    case CFG_ATTR_IFCP_LOCAL_MAC_ADDR:
+      if (mnl_attr_get_payload_len(attr) != UALOE_MAC_ADDRESS_SIZE) {
+        errno = ERANGE;
+        return MNL_CB_ERROR;
+      }
+      memcpy(state->local_mac_addr, mnl_attr_get_payload(attr), UALOE_MAC_ADDRESS_SIZE);
+      break;
+    case CFG_ATTR_IFCP_PEER_DEVICE_ID:
+      if (mnl_attr_validate(attr, MNL_TYPE_U64) < 0) return MNL_CB_ERROR;
+      state->peer_device_id = mnl_attr_get_u64(attr);
+      break;
+    case CFG_ATTR_IFCP_PEER_PORT_ID:
+      if (mnl_attr_validate(attr, MNL_TYPE_U32) < 0) return MNL_CB_ERROR;
+      state->peer_port_id = mnl_attr_get_u32(attr);
+      break;
+    case CFG_ATTR_IFCP_PEER_ENABLED:
+      if (mnl_attr_validate(attr, MNL_TYPE_U8) < 0) return MNL_CB_ERROR;
+      state->peer_enabled = mnl_attr_get_u8(attr);
+      break;
+    case CFG_ATTR_IFCP_PEER_IN_ERROR:
+      if (mnl_attr_validate(attr, MNL_TYPE_U8) < 0) return MNL_CB_ERROR;
+      state->peer_in_error = mnl_attr_get_u8(attr);
+      break;
+    case CFG_ATTR_IFCP_PEER_ENCRYPT_MODE:
+      if (mnl_attr_validate(attr, MNL_TYPE_U8) < 0) return MNL_CB_ERROR;
+      state->peer_encrypt_mode = (ualoe_crypto_mode_e)mnl_attr_get_u8(attr);
+      break;
+    case CFG_ATTR_IFCP_PEER_MAC_ADDR:
+      if (mnl_attr_get_payload_len(attr) != UALOE_MAC_ADDRESS_SIZE) {
+        errno = ERANGE;
+        return MNL_CB_ERROR;
+      }
+      memcpy(state->peer_mac_addr, mnl_attr_get_payload(attr), UALOE_MAC_ADDRESS_SIZE);
+      break;
+    case CFG_ATTR_IFCP_PEER_MTU:
+      if (mnl_attr_validate(attr, MNL_TYPE_U32) < 0) return MNL_CB_ERROR;
+      state->peer_mtu = mnl_attr_get_u32(attr);
+      break;
+    default:
+      errno = EINVAL;
+      return MNL_CB_ERROR;
+  }
+  return MNL_CB_OK;
+}
+
+static int ualoe_nl_ifcp_netport_state_handler(const struct nlmsghdr* nlh, void* data) {
+  return mnl_attr_parse(nlh, sizeof(struct genlmsghdr), ifoe_nl_parse_ifcp_netport_state, data);
+}
+
+int ifoe_nl_ifcp_netport_get_state(ualoe_handle_t handle, unsigned netport_idx,
+                                   ifoe_ifcp_netport_state_t* state) {
+  struct ualoe_nl_handle* nl_handle;
+  char buf[MNL_SOCKET_BUFFER_SIZE];
+  struct genlmsghdr* genlh;
+  struct nlmsghdr* nlh;
+  int rc;
+
+  rc = ualoe_nl_find_handle(handle, &nl_handle);
+  if (rc) return rc;
+
+  ualoe_nl_init_msg(nl_handle, &nlh, &genlh, buf, CFG_CMD_IFCP_GET_NETPORT_STATE,
+                    nl_handle->family_id, 1);
+  mnl_attr_put_u32(nlh, CFG_ATTR_DEV_ID, nl_handle->dev_id);
+  mnl_attr_put_u32(nlh, CFG_ATTR_NETPORT_LOGICAL_IDX, netport_idx);
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, ualoe_nl_ifcp_netport_state_handler,
+                            state);
+}
+
+static int ifoe_nl_parse_ifcp_netport_stats(const struct nlattr* attr, void* data) {
+  ifoe_ifcp_netport_stats_t* stats = data;
+
+  switch (mnl_attr_get_type(attr)) {
+    case CFG_ATTR_IFCP_STATS_RX_COUNT:
+      if (mnl_attr_validate(attr, MNL_TYPE_U64) < 0) return MNL_CB_ERROR;
+      stats->rx_count = mnl_attr_get_u64(attr);
+      break;
+    case CFG_ATTR_IFCP_STATS_TX_COUNT:
+      if (mnl_attr_validate(attr, MNL_TYPE_U64) < 0) return MNL_CB_ERROR;
+      stats->tx_count = mnl_attr_get_u64(attr);
+      break;
+    case CFG_ATTR_IFCP_STATS_TX_ERRORS:
+      if (mnl_attr_validate(attr, MNL_TYPE_U64) < 0) return MNL_CB_ERROR;
+      stats->tx_errors = mnl_attr_get_u64(attr);
+      break;
+    case CFG_ATTR_IFCP_STATS_RX_DROPPED:
+      if (mnl_attr_validate(attr, MNL_TYPE_U64) < 0) return MNL_CB_ERROR;
+      stats->rx_dropped = mnl_attr_get_u64(attr);
+      break;
+    default:
+      errno = EINVAL;
+      return MNL_CB_ERROR;
+  }
+  return MNL_CB_OK;
+}
+
+static int ualoe_nl_ifcp_netport_stats_handler(const struct nlmsghdr* nlh, void* data) {
+  return mnl_attr_parse(nlh, sizeof(struct genlmsghdr), ifoe_nl_parse_ifcp_netport_stats, data);
+}
+
+int ifoe_nl_ifcp_netport_get_stats(ualoe_handle_t handle, unsigned netport_idx,
+                                   ifoe_ifcp_netport_stats_t* stats) {
+  struct ualoe_nl_handle* nl_handle;
+  char buf[MNL_SOCKET_BUFFER_SIZE];
+  struct genlmsghdr* genlh;
+  struct nlmsghdr* nlh;
+  int rc;
+
+  rc = ualoe_nl_find_handle(handle, &nl_handle);
+  if (rc) return rc;
+
+  ualoe_nl_init_msg(nl_handle, &nlh, &genlh, buf, CFG_CMD_IFCP_GET_NETPORT_STATS,
+                    nl_handle->family_id, 1);
+  mnl_attr_put_u32(nlh, CFG_ATTR_DEV_ID, nl_handle->dev_id);
+  mnl_attr_put_u32(nlh, CFG_ATTR_NETPORT_LOGICAL_IDX, netport_idx);
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, ualoe_nl_ifcp_netport_stats_handler,
+                            stats);
+}
+
+static int ualoe_nl_parse_scaleup_fabric_config(const struct nlattr* attr, void* arg) {
+  ualoe_scaleup_fabric_config_t* config = arg;
+  unsigned payload_len, count;
+
+  switch (mnl_attr_get_type(attr)) {
+    case CFG_ATTR_SCALEUP_PHYSICAL_POD_ID:
+      if (mnl_attr_get_payload_len(attr) != UALOE_SCALEUP_FABRIC_POD_ID_SIZE) {
+        errno = ERANGE;
+        return MNL_CB_ERROR;
+      }
+      memcpy(config->physical_pod_id, mnl_attr_get_payload(attr), UALOE_SCALEUP_FABRIC_POD_ID_SIZE);
+      break;
+    case CFG_ATTR_SCALEUP_PHYSICAL_POD_SIZE:
+      if (mnl_attr_validate(attr, MNL_TYPE_U32) < 0) return MNL_CB_ERROR;
+      config->physical_pod_size = mnl_attr_get_u32(attr);
+      break;
+    case CFG_ATTR_SCALEUP_LOCAL_ACCELERATORS:
+      payload_len = mnl_attr_get_payload_len(attr);
+      if (payload_len % sizeof(uint32_t) != 0) {
+        errno = ERANGE;
+        return MNL_CB_ERROR;
+      }
+      count = payload_len / sizeof(uint32_t);
+      if (count > UALOE_SCALEUP_FABRIC_MAX_LOCAL_ACCELERATORS) {
+        errno = ERANGE;
+        return MNL_CB_ERROR;
+      }
+      memcpy(config->local_accelerators, mnl_attr_get_payload(attr), payload_len);
+      config->num_local_accelerators = count;
+      break;
+    default:
+      break;
+  }
+  return MNL_CB_OK;
+}
+
+static int ualoe_nl_get_scaleup_fabric_config_handler(const struct nlmsghdr* nlh, void* arg) {
+  return mnl_attr_parse(nlh, sizeof(struct genlmsghdr), ualoe_nl_parse_scaleup_fabric_config, arg);
+}
+
+int ualoe_nl_get_scaleup_fabric_config(ualoe_handle_t handle,
+                                       ualoe_scaleup_fabric_config_t* config) {
+  struct ualoe_nl_handle* nl_handle;
+  char buf[MNL_SOCKET_BUFFER_SIZE];
+  struct genlmsghdr* genlh;
+  struct nlmsghdr* nlh;
+  int rc;
+
+  rc = ualoe_nl_find_handle(handle, &nl_handle);
+  if (rc) return rc;
+
+  ualoe_nl_init_msg(nl_handle, &nlh, &genlh, buf, CFG_CMD_GET_SCALEUP_FABRIC_CONFIG,
+                    nl_handle->family_id, 1);
+  mnl_attr_put_u32(nlh, CFG_ATTR_DEV_ID, nl_handle->dev_id);
+
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh,
+                            ualoe_nl_get_scaleup_fabric_config_handler, config);
+}
+
+int ualoe_nl_set_scaleup_fabric_config(ualoe_handle_t handle,
+                                       const ualoe_scaleup_fabric_config_t* config) {
+  struct ualoe_nl_handle* nl_handle;
+  char buf[MNL_SOCKET_BUFFER_SIZE];
+  struct genlmsghdr* genlh;
+  struct nlmsghdr* nlh;
+  int rc;
+
+  rc = ualoe_nl_find_handle(handle, &nl_handle);
+  if (rc) return rc;
+
+  ualoe_nl_init_msg(nl_handle, &nlh, &genlh, buf, CFG_CMD_SET_SCALEUP_FABRIC_CONFIG,
+                    nl_handle->family_id, 1);
+  mnl_attr_put_u32(nlh, CFG_ATTR_DEV_ID, nl_handle->dev_id);
+  if (!mnl_attr_put_check(nlh, sizeof(buf), CFG_ATTR_SCALEUP_PHYSICAL_POD_ID,
+                          sizeof(config->physical_pod_id), config->physical_pod_id)) {
+    ualoe_log_error("%s: Failed to put physical_pod_id to buffer\n", __func__);
+    return ENOMEM;
+  }
+  mnl_attr_put_u32(nlh, CFG_ATTR_SCALEUP_PHYSICAL_POD_SIZE, config->physical_pod_size);
+  if (!mnl_attr_put_check(nlh, sizeof(buf), CFG_ATTR_SCALEUP_LOCAL_ACCELERATORS,
+                          config->num_local_accelerators * sizeof(uint32_t),
+                          config->local_accelerators)) {
+    ualoe_log_error("%s: Failed to put local_accelerators to buffer\n", __func__);
+    return ENOMEM;
   }
 
-  rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
-  while (rc > 0) {
-    rc = mnl_cb_run(buf, rc, nlh->nlmsg_seq, nlh->nlmsg_pid, ualoe_nl_netport_state_handler, state);
-    if (rc <= MNL_CB_STOP) break;
-    rc = mnl_socket_recvfrom(nl_handle->sk, buf, sizeof(buf));
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, NULL, NULL);
+}
+
+int ualoe_nl_set_scaleup_fabric_vpod_config(ualoe_handle_t handle,
+                                            const ualoe_scaleup_fabric_vpod_config_t* config) {
+  struct ualoe_nl_handle* nl_handle;
+  char buf[MNL_SOCKET_BUFFER_SIZE];
+  struct genlmsghdr* genlh;
+  struct nlmsghdr* nlh;
+  int rc;
+
+  rc = ualoe_nl_find_handle(handle, &nl_handle);
+  if (rc) return rc;
+
+  ualoe_nl_init_msg(nl_handle, &nlh, &genlh, buf, CFG_CMD_SET_SCALEUP_FABRIC_VPOD_CONFIG,
+                    nl_handle->family_id, 1);
+  mnl_attr_put_u32(nlh, CFG_ATTR_DEV_ID, nl_handle->dev_id);
+  mnl_attr_put_u32(nlh, CFG_ATTR_SCALEUP_VIRTUAL_POD_ID, config->virtual_pod_id);
+  mnl_attr_put_u32(nlh, CFG_ATTR_SCALEUP_NPA_ADDRESS_MODE, config->npa_address_mode);
+
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, NULL, NULL);
+}
+
+int ualoe_nl_set_scaleup_fabric_station_info(ualoe_handle_t handle,
+                                             const ualoe_scaleup_fabric_station_info_t* info) {
+  struct ualoe_nl_handle* nl_handle;
+  char buf[MNL_SOCKET_BUFFER_SIZE];
+  struct genlmsghdr* genlh;
+  struct nlmsghdr* nlh;
+  int rc;
+
+  rc = ualoe_nl_find_handle(handle, &nl_handle);
+  if (rc) return rc;
+
+  ualoe_nl_init_msg(nl_handle, &nlh, &genlh, buf, CFG_CMD_SET_SCALEUP_FABRIC_STATION_INFO,
+                    nl_handle->family_id, 1);
+  mnl_attr_put_u32(nlh, CFG_ATTR_DEV_ID, nl_handle->dev_id);
+  mnl_attr_put_u32(nlh, CFG_ATTR_SCALEUP_STATION_COUNT, info->num_stations);
+  if (!mnl_attr_put_check(nlh, sizeof(buf), CFG_ATTR_SCALEUP_STATION_BANDWIDTH, info->num_stations,
+                          info->station_bandwidth)) {
+    ualoe_log_error("%s: Failed to put station_bandwidth to buffer\n", __func__);
+    return ENOMEM;
   }
 
-  if (rc == -1) return errno;
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, NULL, NULL);
+}
+
+static int ualoe_nl_parse_scaleup_fabric_vpod_config(const struct nlattr* attr, void* arg) {
+  ualoe_scaleup_fabric_vpod_config_t* config = arg;
+
+  switch (mnl_attr_get_type(attr)) {
+    case CFG_ATTR_SCALEUP_VIRTUAL_POD_ID:
+      if (mnl_attr_validate(attr, MNL_TYPE_U32) < 0) return MNL_CB_ERROR;
+      config->virtual_pod_id = mnl_attr_get_u32(attr);
+      break;
+    case CFG_ATTR_SCALEUP_NPA_ADDRESS_MODE:
+      if (mnl_attr_validate(attr, MNL_TYPE_U32) < 0) return MNL_CB_ERROR;
+      config->npa_address_mode = mnl_attr_get_u32(attr);
+      break;
+    default:
+      break;
+  }
+  return MNL_CB_OK;
+}
+
+static int ualoe_nl_get_scaleup_fabric_vpod_config_handler(const struct nlmsghdr* nlh, void* arg) {
+  return mnl_attr_parse(nlh, sizeof(struct genlmsghdr), ualoe_nl_parse_scaleup_fabric_vpod_config,
+                        arg);
+}
+
+int ualoe_nl_get_scaleup_fabric_vpod_config(ualoe_handle_t handle,
+                                            ualoe_scaleup_fabric_vpod_config_t* config) {
+  struct ualoe_nl_handle* nl_handle;
+  char buf[MNL_SOCKET_BUFFER_SIZE];
+  struct genlmsghdr* genlh;
+  struct nlmsghdr* nlh;
+  int rc;
+
+  rc = ualoe_nl_find_handle(handle, &nl_handle);
+  if (rc) return rc;
+
+  ualoe_nl_init_msg(nl_handle, &nlh, &genlh, buf, CFG_CMD_GET_SCALEUP_FABRIC_VPOD_CONFIG,
+                    nl_handle->family_id, 1);
+  mnl_attr_put_u32(nlh, CFG_ATTR_DEV_ID, nl_handle->dev_id);
+
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh,
+                            ualoe_nl_get_scaleup_fabric_vpod_config_handler, config);
+}
+
+struct ualoe_nl_scaleup_station_ctx {
+  ualoe_scaleup_fabric_station_info_t* info;
+  uint32_t reported_count;
+  unsigned bandwidth_len;
+};
+
+static int ualoe_nl_parse_scaleup_fabric_station_info(const struct nlattr* attr, void* arg) {
+  struct ualoe_nl_scaleup_station_ctx* ctx = arg;
+
+  switch (mnl_attr_get_type(attr)) {
+    case CFG_ATTR_SCALEUP_STATION_COUNT:
+      if (mnl_attr_validate(attr, MNL_TYPE_U32) < 0) return MNL_CB_ERROR;
+      ctx->reported_count = mnl_attr_get_u32(attr);
+      break;
+    case CFG_ATTR_SCALEUP_STATION_BANDWIDTH:
+      ctx->bandwidth_len = mnl_attr_get_payload_len(attr);
+      if (ctx->bandwidth_len > sizeof(ctx->info->station_bandwidth)) {
+        errno = ERANGE;
+        return MNL_CB_ERROR;
+      }
+      memcpy(ctx->info->station_bandwidth, mnl_attr_get_payload(attr), ctx->bandwidth_len);
+      break;
+    default:
+      break;
+  }
+  return MNL_CB_OK;
+}
+
+static int ualoe_nl_get_scaleup_fabric_station_info_handler(const struct nlmsghdr* nlh, void* arg) {
+  struct ualoe_nl_scaleup_station_ctx* ctx = arg;
+
+  return mnl_attr_parse(nlh, sizeof(struct genlmsghdr), ualoe_nl_parse_scaleup_fabric_station_info,
+                        ctx);
+}
+
+int ualoe_nl_get_scaleup_fabric_station_info(ualoe_handle_t handle,
+                                             ualoe_scaleup_fabric_station_info_t* info) {
+  struct ualoe_nl_scaleup_station_ctx ctx = {
+      .info = info,
+      .reported_count = 0,
+      .bandwidth_len = 0,
+  };
+  struct ualoe_nl_handle* nl_handle;
+  char buf[MNL_SOCKET_BUFFER_SIZE];
+  struct genlmsghdr* genlh;
+  struct nlmsghdr* nlh;
+  int rc;
+
+  rc = ualoe_nl_find_handle(handle, &nl_handle);
+  if (rc) return rc;
+
+  ualoe_nl_init_msg(nl_handle, &nlh, &genlh, buf, CFG_CMD_GET_SCALEUP_FABRIC_STATION_INFO,
+                    nl_handle->family_id, 1);
+  mnl_attr_put_u32(nlh, CFG_ATTR_DEV_ID, nl_handle->dev_id);
+
+  rc = ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh,
+                          ualoe_nl_get_scaleup_fabric_station_info_handler, &ctx);
+  if (rc) return rc;
+
+  /* Enforce the invariant that the reported station count equals the
+   * bandwidth payload length in bytes (one byte per station); a response
+   * that violates it is rejected. An all-zero result (no stations) is a
+   * valid empty set.
+   */
+  if (ctx.reported_count != ctx.bandwidth_len) return EINVAL;
+
+  info->num_stations = ctx.reported_count;
   return 0;
+}
+
+static int ualoe_nl_parse_gpu_identity(const struct nlattr* attr, void* arg) {
+  ualoe_gpu_identity_t* identity = arg;
+
+  switch (mnl_attr_get_type(attr)) {
+    case CFG_ATTR_GPU_PHYS_ID:
+      if (mnl_attr_validate(attr, MNL_TYPE_U32) < 0) return MNL_CB_ERROR;
+      identity->phys_id = mnl_attr_get_u32(attr);
+      break;
+    case CFG_ATTR_GPU_NUM_GPUS:
+      if (mnl_attr_validate(attr, MNL_TYPE_U32) < 0) return MNL_CB_ERROR;
+      identity->num_gpus = mnl_attr_get_u32(attr);
+      break;
+    case CFG_ATTR_GPU_TRAY_TYPE:
+      if (mnl_attr_validate(attr, MNL_TYPE_U32) < 0) return MNL_CB_ERROR;
+      identity->tray_type = mnl_attr_get_u32(attr);
+      break;
+    case CFG_ATTR_GPU_OAM_ID:
+      if (mnl_attr_validate(attr, MNL_TYPE_U32) < 0) return MNL_CB_ERROR;
+      identity->oam_id = mnl_attr_get_u32(attr);
+      break;
+    default:
+      break;
+  }
+  return MNL_CB_OK;
+}
+
+static int ualoe_nl_get_gpu_identity_handler(const struct nlmsghdr* nlh, void* arg) {
+  return mnl_attr_parse(nlh, sizeof(struct genlmsghdr), ualoe_nl_parse_gpu_identity, arg);
+}
+
+int ualoe_nl_get_gpu_identity(ualoe_handle_t handle, ualoe_gpu_identity_t* identity) {
+  struct ualoe_nl_handle* nl_handle;
+  char buf[MNL_SOCKET_BUFFER_SIZE];
+  struct genlmsghdr* genlh;
+  struct nlmsghdr* nlh;
+  int rc;
+
+  rc = ualoe_nl_find_handle(handle, &nl_handle);
+  if (rc) return rc;
+
+  ualoe_nl_init_msg(nl_handle, &nlh, &genlh, buf, CFG_CMD_GET_GPU_IDENTITY, nl_handle->family_id,
+                    1);
+  mnl_attr_put_u32(nlh, CFG_ATTR_DEV_ID, nl_handle->dev_id);
+
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, ualoe_nl_get_gpu_identity_handler,
+                            identity);
+}
+
+static int ualoe_nl_parse_telemetry_category_mask(const struct nlattr* attr, void* arg) {
+  unsigned* category_mask = arg;
+
+  switch (mnl_attr_get_type(attr)) {
+    case CFG_ATTR_CATEGORY_MASK:
+      if (mnl_attr_validate(attr, MNL_TYPE_U32) < 0) return MNL_CB_ERROR;
+      *category_mask = mnl_attr_get_u32(attr);
+      break;
+    default:
+      break;
+  }
+  return MNL_CB_OK;
+}
+
+static int ualoe_nl_telemetry_get_category_mask_handler(const struct nlmsghdr* nlh, void* arg) {
+  return mnl_attr_parse(nlh, sizeof(struct genlmsghdr), ualoe_nl_parse_telemetry_category_mask,
+                        arg);
+}
+
+int ualoe_nl_telemetry_get_category_mask(ualoe_handle_t handle, unsigned* category_mask) {
+  struct ualoe_nl_handle* nl_handle;
+  char buf[MNL_SOCKET_BUFFER_SIZE];
+  struct genlmsghdr* genlh;
+  struct nlmsghdr* nlh;
+  int rc;
+
+  *category_mask = 0;
+
+  rc = ualoe_nl_find_handle(handle, &nl_handle);
+  if (rc) return rc;
+
+  ualoe_nl_init_msg(nl_handle, &nlh, &genlh, buf, CFG_CMD_GET_TELEMETRY_CATEGORY_MASK,
+                    nl_handle->family_id, 1);
+  mnl_attr_put_u32(nlh, CFG_ATTR_DEV_ID, nl_handle->dev_id);
+
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh,
+                            ualoe_nl_telemetry_get_category_mask_handler, category_mask);
 }
 
 int ualoe_nl_telemetry_alloc(ualoe_handle_t handle, unsigned category_mask,
@@ -1913,7 +2185,10 @@ int ualoe_nl_telemetry_alloc(ualoe_handle_t handle, unsigned category_mask,
   rc = ualoe_nl_find_handle(handle, &nl_handle);
   if (rc) return rc;
 
-  return ualoe_cdev_telemetry_alloc(nl_handle->cdev_fd, category_mask, telemetry);
+  pthread_mutex_lock(&nl_handle->request_lock);
+  rc = ualoe_cdev_telemetry_alloc(nl_handle->cdev_fd, category_mask, telemetry);
+  pthread_mutex_unlock(&nl_handle->request_lock);
+  return rc;
 }
 
 int ualoe_nl_telemetry_get(ualoe_handle_t handle, ualoe_telemetry_t* telemetry) {
@@ -1923,7 +2198,10 @@ int ualoe_nl_telemetry_get(ualoe_handle_t handle, ualoe_telemetry_t* telemetry) 
   rc = ualoe_nl_find_handle(handle, &nl_handle);
   if (rc) return rc;
 
-  return ualoe_cdev_telemetry_get(nl_handle->cdev_fd, telemetry);
+  pthread_mutex_lock(&nl_handle->request_lock);
+  rc = ualoe_cdev_telemetry_get(nl_handle->cdev_fd, telemetry);
+  pthread_mutex_unlock(&nl_handle->request_lock);
+  return rc;
 }
 
 int ualoe_nl_telemetry_free(ualoe_handle_t handle, ualoe_telemetry_t* telemetry) {
@@ -1933,7 +2211,10 @@ int ualoe_nl_telemetry_free(ualoe_handle_t handle, ualoe_telemetry_t* telemetry)
   rc = ualoe_nl_find_handle(handle, &nl_handle);
   if (rc) return rc;
 
-  return ualoe_cdev_telemetry_free(nl_handle->cdev_fd, telemetry);
+  pthread_mutex_lock(&nl_handle->request_lock);
+  rc = ualoe_cdev_telemetry_free(nl_handle->cdev_fd, telemetry);
+  pthread_mutex_unlock(&nl_handle->request_lock);
+  return rc;
 }
 
 int ualoe_nl_l2ping_start(ualoe_handle_t handle, ualoe_ping_spec_t* spec, ualoe_ping_t** ping) {
@@ -1943,7 +2224,10 @@ int ualoe_nl_l2ping_start(ualoe_handle_t handle, ualoe_ping_spec_t* spec, ualoe_
   rc = ualoe_nl_find_handle(handle, &nl_handle);
   if (rc) return rc;
 
-  return ualoe_cdev_l2ping_start(nl_handle->cdev_fd, spec, ping);
+  pthread_mutex_lock(&nl_handle->request_lock);
+  rc = ualoe_cdev_l2ping_start(nl_handle->cdev_fd, spec, ping);
+  pthread_mutex_unlock(&nl_handle->request_lock);
+  return rc;
 }
 
 int ualoe_nl_l2ping_update(ualoe_handle_t handle, ualoe_ping_t* ping) {
@@ -1953,7 +2237,10 @@ int ualoe_nl_l2ping_update(ualoe_handle_t handle, ualoe_ping_t* ping) {
   rc = ualoe_nl_find_handle(handle, &nl_handle);
   if (rc) return rc;
 
-  return ualoe_cdev_l2ping_update(nl_handle->cdev_fd, ping);
+  pthread_mutex_lock(&nl_handle->request_lock);
+  rc = ualoe_cdev_l2ping_update(nl_handle->cdev_fd, ping);
+  pthread_mutex_unlock(&nl_handle->request_lock);
+  return rc;
 }
 
 int ualoe_nl_l2ping_fini(ualoe_handle_t handle, ualoe_ping_t* ping) {
@@ -1963,7 +2250,10 @@ int ualoe_nl_l2ping_fini(ualoe_handle_t handle, ualoe_ping_t* ping) {
   rc = ualoe_nl_find_handle(handle, &nl_handle);
   if (rc) return rc;
 
-  return ualoe_cdev_l2ping_fini(nl_handle->cdev_fd, ping);
+  pthread_mutex_lock(&nl_handle->request_lock);
+  rc = ualoe_cdev_l2ping_fini(nl_handle->cdev_fd, ping);
+  pthread_mutex_unlock(&nl_handle->request_lock);
+  return rc;
 }
 
 int ualoe_nl_register_event_callback(ualoe_handle_t handle, ualoe_event_callback_t callback,
@@ -1974,5 +2264,168 @@ int ualoe_nl_register_event_callback(ualoe_handle_t handle, ualoe_event_callback
   rc = ualoe_nl_find_handle(handle, &nl_handle);
   if (rc) return rc;
 
-  return ualoe_cb_init(handle, nl_handle->dev_id, callback, user_context);
+  return ualoe_cb_init(handle, nl_handle->dev_id, nl_handle->cdev_fd, callback, user_context);
+}
+
+/*---------- PMA lane and PRBS diagnostic netlink functions ----------*/
+
+int ualoe_nl_diag_config_pma_lane(ualoe_handle_t handle, unsigned netport_idx, unsigned lane_idx,
+                                  bool enable, ualoe_pma_rate_e pma_rate,
+                                  ualoe_netport_loopback_mode_e loopback_mode,
+                                  ualoe_pma_polarity_e tx_polarity,
+                                  ualoe_pma_polarity_e rx_polarity) {
+  struct ualoe_nl_handle* nl_handle;
+  char buf[MNL_SOCKET_BUFFER_SIZE];
+  struct genlmsghdr* genlh;
+  struct nlmsghdr* nlh;
+  int rc;
+
+  rc = ualoe_nl_find_handle(handle, &nl_handle);
+  if (rc) return rc;
+
+  ualoe_nl_init_msg(nl_handle, &nlh, &genlh, buf, CFG_CMD_DIAG_CONFIG_PMA_LANE,
+                    nl_handle->family_id, 1);
+
+  mnl_attr_put_u32(nlh, CFG_ATTR_DEV_ID, nl_handle->dev_id);
+  mnl_attr_put_u32(nlh, CFG_ATTR_NETPORT_LOGICAL_IDX, netport_idx);
+  mnl_attr_put_u32(nlh, CFG_ATTR_LANE_IDX, lane_idx);
+  mnl_attr_put_u8(nlh, CFG_ATTR_ENABLE, (uint8_t)enable);
+  mnl_attr_put_u32(nlh, CFG_ATTR_PMA_RATE, (uint32_t)pma_rate);
+  mnl_attr_put_u32(nlh, CFG_ATTR_NETPORT_LOOPBACK_MODE, (uint32_t)loopback_mode);
+  mnl_attr_put_u32(nlh, CFG_ATTR_TX_POLARITY, (uint32_t)tx_polarity);
+  mnl_attr_put_u32(nlh, CFG_ATTR_RX_POLARITY, (uint32_t)rx_polarity);
+
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, NULL, NULL);
+}
+
+int ualoe_nl_diag_config_prbs_tx(ualoe_handle_t handle, unsigned netport_idx, unsigned lane_idx,
+                                 bool enable, ualoe_prbs_pattern_e pattern,
+                                 __uint128_t user_pattern) {
+  struct ualoe_nl_handle* nl_handle;
+  char buf[MNL_SOCKET_BUFFER_SIZE];
+  struct genlmsghdr* genlh;
+  struct nlmsghdr* nlh;
+  int rc;
+
+  rc = ualoe_nl_find_handle(handle, &nl_handle);
+  if (rc) return rc;
+
+  ualoe_nl_init_msg(nl_handle, &nlh, &genlh, buf, CFG_CMD_DIAG_CONFIG_PRBS_TX, nl_handle->family_id,
+                    1);
+
+  mnl_attr_put_u32(nlh, CFG_ATTR_DEV_ID, nl_handle->dev_id);
+  mnl_attr_put_u32(nlh, CFG_ATTR_NETPORT_LOGICAL_IDX, netport_idx);
+  mnl_attr_put_u32(nlh, CFG_ATTR_LANE_IDX, lane_idx);
+  mnl_attr_put_u8(nlh, CFG_ATTR_ENABLE, (uint8_t)enable);
+  mnl_attr_put_u32(nlh, CFG_ATTR_PRBS_PATTERN, (uint32_t)pattern);
+  if (!mnl_attr_put_check(nlh, sizeof(buf), CFG_ATTR_USER_PATTERN, sizeof(user_pattern),
+                          &user_pattern)) {
+    ualoe_log_error("%s: Failed to put user_pattern to buffer\n", __func__);
+    return ENOMEM;
+  }
+
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, NULL, NULL);
+}
+
+int ualoe_nl_diag_config_prbs_rx(ualoe_handle_t handle, unsigned netport_idx, unsigned lane_idx,
+                                 bool enable, bool resync, ualoe_prbs_pattern_e pattern,
+                                 __uint128_t user_pattern) {
+  struct ualoe_nl_handle* nl_handle;
+  char buf[MNL_SOCKET_BUFFER_SIZE];
+  struct genlmsghdr* genlh;
+  struct nlmsghdr* nlh;
+  int rc;
+
+  rc = ualoe_nl_find_handle(handle, &nl_handle);
+  if (rc) return rc;
+
+  ualoe_nl_init_msg(nl_handle, &nlh, &genlh, buf, CFG_CMD_DIAG_CONFIG_PRBS_RX, nl_handle->family_id,
+                    1);
+
+  mnl_attr_put_u32(nlh, CFG_ATTR_DEV_ID, nl_handle->dev_id);
+  mnl_attr_put_u32(nlh, CFG_ATTR_NETPORT_LOGICAL_IDX, netport_idx);
+  mnl_attr_put_u32(nlh, CFG_ATTR_LANE_IDX, lane_idx);
+  mnl_attr_put_u8(nlh, CFG_ATTR_ENABLE, (uint8_t)enable);
+  mnl_attr_put_u8(nlh, CFG_ATTR_RESYNC, (uint8_t)resync);
+  mnl_attr_put_u32(nlh, CFG_ATTR_PRBS_PATTERN, (uint32_t)pattern);
+  if (!mnl_attr_put_check(nlh, sizeof(buf), CFG_ATTR_USER_PATTERN, sizeof(user_pattern),
+                          &user_pattern)) {
+    ualoe_log_error("%s: Failed to put user_pattern to buffer\n", __func__);
+    return ENOMEM;
+  }
+
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, NULL, NULL);
+}
+
+static int ualoe_nl_parse_prbs_results_nested(const struct nlattr* attr, void* arg) {
+  ualoe_prbs_results_t* results = arg;
+  uint64_t elapsed_us;
+
+  switch (mnl_attr_get_type(attr)) {
+    case CFG_ATTR_PRBS_RESULTS_VALID:
+      if (mnl_attr_validate(attr, MNL_TYPE_U8) < 0) return MNL_CB_ERROR;
+      results->valid = !!mnl_attr_get_u8(attr);
+      break;
+    case CFG_ATTR_PRBS_RESULTS_RXEQ_SUCCESS:
+      if (mnl_attr_validate(attr, MNL_TYPE_U8) < 0) return MNL_CB_ERROR;
+      results->rxeq_success = !!mnl_attr_get_u8(attr);
+      break;
+    case CFG_ATTR_PRBS_RESULTS_CDR_LOCK:
+      if (mnl_attr_validate(attr, MNL_TYPE_U8) < 0) return MNL_CB_ERROR;
+      results->cdr_lock = !!mnl_attr_get_u8(attr);
+      break;
+    case CFG_ATTR_PRBS_RESULTS_PATTERN_LOCK:
+      if (mnl_attr_validate(attr, MNL_TYPE_U8) < 0) return MNL_CB_ERROR;
+      results->pattern_lock = !!mnl_attr_get_u8(attr);
+      break;
+    case CFG_ATTR_PRBS_RESULTS_OVERFLOW:
+      if (mnl_attr_validate(attr, MNL_TYPE_U8) < 0) return MNL_CB_ERROR;
+      results->overflow = !!mnl_attr_get_u8(attr);
+      break;
+    case CFG_ATTR_PRBS_RESULTS_ELAPSED_US:
+      if (mnl_attr_validate(attr, MNL_TYPE_U64) < 0) return MNL_CB_ERROR;
+      elapsed_us = mnl_attr_get_u64(attr);
+      results->interval.tv_sec = (time_t)(elapsed_us / 1000000ULL);
+      results->interval.tv_nsec = (long)((elapsed_us % 1000000ULL) * 1000ULL);
+      break;
+    case CFG_ATTR_PRBS_RESULTS_ERROR_COUNT:
+      if (mnl_attr_validate(attr, MNL_TYPE_U64) < 0) return MNL_CB_ERROR;
+      results->error_count = mnl_attr_get_u64(attr);
+      break;
+    default:
+      break;
+  }
+  return MNL_CB_OK;
+}
+
+static int ualoe_nl_parse_prbs_results(const struct nlattr* attr, void* arg) {
+  if (mnl_attr_get_type(attr) == CFG_ATTR_PRBS_RESULTS)
+    return mnl_attr_parse_nested(attr, ualoe_nl_parse_prbs_results_nested, arg);
+  return MNL_CB_OK;
+}
+
+static int ualoe_nl_get_prbs_results_handler(const struct nlmsghdr* nlh, void* arg) {
+  return mnl_attr_parse(nlh, sizeof(struct genlmsghdr), ualoe_nl_parse_prbs_results, arg);
+}
+
+int ualoe_nl_diag_get_prbs_results(ualoe_handle_t handle, unsigned netport_idx, unsigned lane_idx,
+                                   ualoe_prbs_results_t* results) {
+  struct ualoe_nl_handle* nl_handle;
+  char buf[MNL_SOCKET_BUFFER_SIZE];
+  struct genlmsghdr* genlh;
+  struct nlmsghdr* nlh;
+  int rc;
+
+  rc = ualoe_nl_find_handle(handle, &nl_handle);
+  if (rc) return rc;
+
+  ualoe_nl_init_msg(nl_handle, &nlh, &genlh, buf, CFG_CMD_DIAG_GET_PRBS_RESULTS,
+                    nl_handle->family_id, 1);
+
+  mnl_attr_put_u32(nlh, CFG_ATTR_DEV_ID, nl_handle->dev_id);
+  mnl_attr_put_u32(nlh, CFG_ATTR_NETPORT_LOGICAL_IDX, netport_idx);
+  mnl_attr_put_u32(nlh, CFG_ATTR_LANE_IDX, lane_idx);
+
+  return ualoe_nl_send_recv(nl_handle, buf, sizeof(buf), nlh, ualoe_nl_get_prbs_results_handler,
+                            results);
 }

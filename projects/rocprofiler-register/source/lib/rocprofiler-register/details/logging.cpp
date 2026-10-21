@@ -61,7 +61,7 @@ struct log_level_info
 };
 
 void
-update_logging(const logging_config& cfg, bool setup_env = false, int env_override = 0)
+update_logging(const logging_config& cfg)
 {
     static auto _mtx = std::mutex{};
     auto        _lk  = std::unique_lock<std::mutex>{ _mtx };
@@ -72,7 +72,8 @@ update_logging(const logging_config& cfg, bool setup_env = false, int env_overri
     FLAGS_stderrthreshold           = cfg.loglevel;
     FLAGS_alsologtostderr           = cfg.alsologtostderr;
 
-    // if(!cfg.logdir.empty()) FLAGS_log_dir = cfg.logdir.c_str();
+    if(!cfg.logdir.empty()) FLAGS_log_dir = cfg.logdir;
+    if(!cfg.vlog_modules.empty()) FLAGS_vmodule = cfg.vlog_modules;
 
     if(!cfg.logdir.empty() && !fs::exists(cfg.logdir))
     {
@@ -87,22 +88,6 @@ update_logging(const logging_config& cfg, bool setup_env = false, int env_overri
                 ofs << "/**" << std::flush;
             }
         }
-    }
-
-    if(setup_env)
-    {
-        common::set_env("GLOG_minloglevel", cfg.loglevel, env_override);
-        common::set_env("GLOG_logtostderr", cfg.logtostderr ? 1 : 0, env_override);
-        common::set_env(
-            "GLOG_alsologtostderr", cfg.alsologtostderr ? 1 : 0, env_override);
-        common::set_env("GLOG_stderrthreshold", cfg.loglevel, env_override);
-        if(!cfg.logdir.empty())
-        {
-            common::set_env("GOOGLE_LOG_DIR", cfg.logdir, env_override);
-            common::set_env("GLOG_log_dir", cfg.logdir, env_override);
-        }
-        if(!cfg.vlog_modules.empty())
-            common::set_env("GLOG_vmodule", cfg.vlog_modules, env_override);
     }
 }
 
@@ -197,7 +182,8 @@ init_logging(std::string_view env_prefix, logging_config cfg = logging_config{})
             }
         }
 
-        update_logging(cfg, !google::IsGoogleLoggingInitialized());
+        // Configure glog directly to avoid racing concurrent environment reads.
+        update_logging(cfg);
 
         if(!google::IsGoogleLoggingInitialized())
         {

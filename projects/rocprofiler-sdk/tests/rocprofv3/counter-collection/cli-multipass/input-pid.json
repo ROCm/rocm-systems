@@ -1,0 +1,15 @@
+{
+    "jobs": [
+        {
+            "pmc": [
+                "SQ_WAVES"
+            ],
+            "pid": 12345
+        },
+        {
+            "pmc": [
+                "GRBM_COUNT"
+            ]
+        }
+    ]
+}

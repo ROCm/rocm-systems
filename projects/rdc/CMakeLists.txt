@@ -60,7 +60,10 @@ set_property(
 )
 
 # Set compile flags
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -m64 -msse -msse2")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra")
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64")
+    string(APPEND CMAKE_CXX_FLAGS " -m64 -msse -msse2")
+endif()
 set(CMAKE_CXX_FLAGS_DEBUG
     "${CMAKE_CXX_FLAGS_DEBUG} -O0 -ggdb -DDEBUG"
     CACHE STRING
@@ -93,7 +96,7 @@ include(utils)
 set(PKG_VERSION_GIT_TAG_PREFIX "rdc_pkg_ver")
 # Provide git to utilities
 find_program(GIT NAMES git)
-get_version_from_tag("1.3.1" ${PKG_VERSION_GIT_TAG_PREFIX} GIT)
+get_version_from_tag("1.4.0" ${PKG_VERSION_GIT_TAG_PREFIX} GIT)
 # VERSION_* variables should be set by get_version_from_tag
 message("Package version: ${VERSION_STRING}")
 
@@ -122,7 +125,11 @@ option(BUILD_EXAMPLES "Build examples" OFF)
 # Enable shared libraries for gtest
 option(BUILD_SHARED_LIBS "Build shared library (.so) or not." ON)
 
-option(BUILD_ESMI "Enable AMDSMI ESMI Library" ON)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64")
+    option(BUILD_ESMI "Enable AMDSMI ESMI Library" ON)
+else()
+    option(BUILD_ESMI "Enable AMDSMI ESMI Library" OFF)
+endif()
 if(BUILD_ESMI)
     add_definitions("-DENABLE_ESMI_LIB=1")
 endif()
@@ -167,7 +174,10 @@ set(GRPC_DESIRED_VERSION 1.78.1 CACHE STRING "GRPC desired package version.")
 
 # add package search paths
 list(APPEND CMAKE_PREFIX_PATH ${GRPC_ROOT} /usr/local)
-set(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH} /usr/lib64 /usr/lib/x86_64-linux-gnu)
+set(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH} /usr/lib64)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64")
+    list(APPEND CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu)
+endif()
 
 # configure packaging
 # cpack version is populated with CMAKE_PROJECT_VERSION implicitly
@@ -282,7 +292,9 @@ if(BUILD_STANDALONE)
     message("LD_LIBRARY_PATH = $ENV{LD_LIBRARY_PATH}")
     foreach(file ${PROTOB_DEF_SRC_FILES})
         execute_process(
-            COMMAND ${PROTOB_CMD} --proto_path=${PROTOB_SRC_DIR} --cpp_out=${PROTOB_OUT_DIR} ${file}
+            COMMAND
+                ${THEROCK_SANITIZER_LAUNCHER} ${PROTOB_CMD} --proto_path=${PROTOB_SRC_DIR}
+                --cpp_out=${PROTOB_OUT_DIR} ${file}
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
             RESULT_VARIABLE PROTOB_RESULT
             OUTPUT_VARIABLE PROTOB_OUT_VAR
@@ -298,8 +310,8 @@ if(BUILD_STANDALONE)
 
         execute_process(
             COMMAND
-                ${PROTOB_CMD} --proto_path=${PROTOB_SRC_DIR} --grpc_out=${PROTOB_OUT_DIR}
-                --plugin=protoc-gen-grpc=${GRPC_PLUGIN} ${file}
+                ${THEROCK_SANITIZER_LAUNCHER} ${PROTOB_CMD} --proto_path=${PROTOB_SRC_DIR}
+                --grpc_out=${PROTOB_OUT_DIR} --plugin=protoc-gen-grpc=${GRPC_PLUGIN} ${file}
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
             RESULT_VARIABLE PROTOB_RESULT
             OUTPUT_VARIABLE PROTOB_OUT_VAR

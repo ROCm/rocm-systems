@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_VM_AMDGPU_MEM_STATE_H_
-#define ROCJITSU_VM_AMDGPU_MEM_STATE_H_
+#pragma once
 
 /// @file Dynamic pipeline state for AMDGPU memory instructions.
 ///
@@ -11,14 +10,24 @@
 /// pipeline subclasses own the initiate/complete logic that operates
 /// on this state.
 
+#include "rocjitsu/isa/arch/amdgpu/shared/block_memory.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_traits.h"
+#include "rocjitsu/vm/amdgpu/atomic_op.h"
+#include "rocjitsu/vm/amdgpu/buffer_format.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
 
-#include <string>
-
+#include <algorithm>
 #include <array>
+#include <cassert>
+#include <cstddef>
 #include <cstdint>
+#include <optional>
+#include <span>
 #include <vector>
 
 namespace rocjitsu {
@@ -39,60 +48,134 @@ enum MemPipelineTag : uint8_t {
   SCALAR_MEM = 1,
   GLOBAL_MEM = 2,
   LOCAL_MEM = 3,
+  TENSOR_DMA = 4,
 };
 
-/// @brief Atomic read-modify-write operation type.
-enum class AtomicOp : uint8_t {
-  NONE = 0,       ///< Not an atomic operation.
-  SWAP,           ///< Exchange.
-  CMPSWAP,        ///< Compare-and-swap (data[0] = src, data[1] = cmp).
-  MSKOR,          ///< Masked OR (data[0] = mask, data[1] = src).
-  ADD,            ///< Atomic add.
-  SUB,            ///< Atomic subtract (mem - data).
-  RSUB,           ///< Atomic reverse subtract (data - mem).
-  SMIN,           ///< Signed minimum.
-  UMIN,           ///< Unsigned minimum.
-  SMAX,           ///< Signed maximum.
-  UMAX,           ///< Unsigned maximum.
-  AND,            ///< Bitwise AND.
-  OR,             ///< Bitwise OR.
-  XOR,            ///< Bitwise XOR.
-  INC,            ///< Increment (wrapping).
-  DEC,            ///< Decrement (wrapping).
-  FADD,           ///< Floating-point add.
-  FMIN,           ///< Floating-point minimum.
-  FMAX,           ///< Floating-point maximum.
-  APPEND,         ///< LDS append counter.
-  CONSUME,        ///< LDS consume counter.
-  BARRIER_ARRIVE, ///< LDS barrier-arrive state update.
+/// @brief One physical-transfer request prepared from a vector memory operation.
+struct TranslatedMemoryRequest {
+  uint64_t address = 0;
+  uint32_t data_offset = 0;
+  uint32_t size = 0;
+};
+
+/// @brief Retry state retained by a prepared translated memory instruction.
+///
+/// @details The operation-scoped VM snapshot prevents a root replacement from
+/// splitting one instruction across translation epochs. Request and byte cursors
+/// advance only after completed backing operations, so retrying Unavailable does
+/// not replay stores or already-completed lanes of a vector atomic.
+class TranslatedMemoryProgress {
+public:
+  std::optional<GpuVmAccess> access;
+  std::vector<TranslatedMemoryRequest> requests;
+  std::size_t request_index = 0;
+  std::size_t completed_bytes = 0;
+  uint32_t atomic_lane = 0;
+  uint64_t atomic_loaded_value = 0;
+  bool initialized = false;
+  bool atomic_loaded = false;
 };
 
 /// @brief Dynamic pipeline state for scalar memory instructions (SMEM).
-struct ScalarMemState : DynamicInstState {
+class ScalarMemState : public DynamicInstState {
+public:
   ScalarMemState() { tag_ = SCALAR_MEM; }
   uint64_t addr = 0;
-  uint32_t dst_reg_base = 0;
+  /// Architectural destination resolved and range-checked at issue time.
+  ScalarRegisterRange dst_register;
   uint32_t num_dwords = 0;
+  /// Bytes per element. An atomic is one element of elem_size bytes, returned as
+  /// num_dwords dwords.
   uint32_t elem_size = 4;
   bool sign_extend = false;
+  /// Loads and returning atomics write response_data to dst_register.
   bool is_load = true;
+  AtomicOp atomic_op = AtomicOp::NONE;
   Mtype mtype = Mtype::RW;
   WaitCounterType wait_counter_type = WaitCounterType::LGKMCNT;
+  uint16_t load_dword_mask = 0xffff;
   uint32_t response_data[16] = {};
   uint32_t store_data[16] = {};
+  TranslatedMemoryProgress translated;
+};
+
+/// @brief Per-element vector-memory lane masks with inline storage for the
+/// common one-to-four-element access widths.
+class ElementLaneMasks {
+public:
+  static constexpr size_t kInlineCapacity = 4;
+
+  [[nodiscard]] bool empty() const { return size_ == 0; }
+  [[nodiscard]] size_t size() const { return size_; }
+
+  void clear() {
+    size_ = 0;
+    overflow_.clear();
+  }
+
+  void assign(size_t count, uint64_t value) {
+    if (count <= kInlineCapacity) {
+      overflow_.clear();
+      for (size_t i = 0; i < count; ++i)
+        inline_[i] = value;
+      size_ = count;
+      return;
+    }
+    overflow_.assign(count, value);
+    size_ = count;
+  }
+
+  uint64_t &operator[](size_t index) {
+    assert(index < size_);
+    return data()[index];
+  }
+
+  const uint64_t &operator[](size_t index) const {
+    assert(index < size_);
+    return data()[index];
+  }
+
+  [[nodiscard]] std::span<const uint64_t> view() const { return {data(), size_}; }
+
+private:
+  [[nodiscard]] uint64_t *data() {
+    return size_ <= kInlineCapacity ? inline_.data() : overflow_.data();
+  }
+
+  [[nodiscard]] const uint64_t *data() const {
+    return size_ <= kInlineCapacity ? inline_.data() : overflow_.data();
+  }
+
+  std::array<uint64_t, kInlineCapacity> inline_{};
+  std::vector<uint64_t> overflow_;
+  size_t size_ = 0;
 };
 
 /// @brief Dynamic pipeline state for vector memory instructions
 /// (FLAT, MUBUF, MTBUF, DS).
-struct VectorMemState : DynamicInstState {
+class VectorMemState : public DynamicInstState {
+public:
   VectorMemState(MemPipelineTag pipeline) {
     tag_ = pipeline;
     wait_counter_type = (pipeline == LOCAL_MEM) ? WaitCounterType::LGKMCNT : WaitCounterType::VMCNT;
   }
   std::array<uint64_t, 64> per_lane_addr = {};
   uint64_t lane_mask = 0;
-  uint64_t exec_mask = 0; ///< EXEC mask at issue time. Set by addr calc functions.
-                          ///< Writeback zeroes OOB lanes (exec_mask & ~lane_mask).
+  /// Optional per-element lanes requesting memory traffic. Buffer bounds can
+  /// narrow later elements; M0-masked blocks can have arbitrary holes.
+  /// Empty means every element uses lane_mask; otherwise the container has
+  /// exactly num_elems masks and lane_mask is their union.
+  ElementLaneMasks element_lane_masks;
+  /// Captured M0 distinguishes preserved block destinations from buffer-OOB
+  /// elements, which are zero-filled on load despite requesting no traffic.
+  uint32_t block_dword_mask = kUnmaskedBlockDwordMask;
+  /// Block operands validate ownership per DWORD, including with all bits enabled.
+  bool is_block_transfer = false;
+  uint64_t exec_mask = 0; ///< Effective issue mask set by address calculation. This normally
+                          ///< snapshots EXEC, but ISA exceptions may replace it (for example,
+                          ///< CDNA5 DS transpose loads use an all-lanes mask), while
+                          ///< architecturally ignored accesses clear it. Writeback zeroes OOB
+                          ///< lanes (exec_mask & ~lane_mask).
   uint32_t wf_size = 64;  ///< Wavefront width (set from wavefront's wf_size()).
   uint32_t dst_reg_base = 0;
   uint32_t elem_size = 0;
@@ -100,16 +183,76 @@ struct VectorMemState : DynamicInstState {
   bool is_load = true;
   Mtype mtype = Mtype::RW;
   WaitCounterType wait_counter_type = WaitCounterType::VMCNT;
+  /// FLAT counter participation selected from the resolved requesting lanes.
+  /// Unset before routing; decoded metadata continues to describe all domains.
+  std::optional<MemoryIssueInfo> routed_issue_info;
+  // Routing normalizes ordinary LDS lanes in per_lane_addr once, including
+  // mixed FLAT requests. CDNA5 DDS has no backing implementation and faults before
+  // either pipeline accesses memory. Original aperture addresses live only in
+  // the routed observation's callback snapshot.
+  uint64_t flat_local_lane_mask = 0;
+  uint64_t flat_dds_lane_mask = 0;
   bool non_temporal = false;
   // Keep this outside Mtype: cluster loads force only the request-side vector
   // L1 lookup to miss, while mtype must still preserve the instruction/PTE
   // cacheability and response policy used by the downstream memory path.
   bool request_force_l1_bypass = false;
   bool sign_extend = false;
-  bool d16_hi = false;                 ///< D16_HI load: write to upper 16 bits, preserve lower 16.
-  bool d16_lo = false;                 ///< D16 load: write to lower 16 bits, preserve upper 16.
+  // Formatted buffer transfers use elem_size bytes in memory and one full
+  // VGPR per component, or packed halves for D16. Zero components selects
+  // the ordinary memory path.
+  uint32_t buffer_format = 0;
+  BufferFormat decoded_buffer_format;
+  BufferFormatEncoding buffer_format_encoding = BufferFormatEncoding::Gfx11;
+  uint32_t buffer_selectors = 0;
+  uint32_t buffer_components = 0;
+  bool buffer_d16 = false;
+  // Some accesses use an interleaved ("swizzled") layout: consecutive units
+  // of a lane are separated rather than contiguous. Units are 4 bytes for
+  // scratch and GFX9 buffers, and 4 or 16 bytes for RDNA buffers.
+  // Private scratch uses this layout so it matches what rocm-dbgapi reads, but
+  // Buffer descriptors can independently request a similar layout for
+  // ordinary global memory. When scratch_swizzle is set, per_lane_addr holds
+  // the swizzled address of element 0 and scratch_addr_stride is the per-unit
+  // destination-address stride; the register/LDS buffer indexing is unchanged.
+  // See rocm-dbgapi memory.cpp private_swizzled conversion.
+  // FLAT routing is per lane: one wave can mix private-aperture lanes with
+  // global ones. scratch_lane_mask records exactly which lanes were swizzled,
+  // so the stride is applied to those and not to their global neighbours.
+  // For dedicated SCRATCH ops every active lane is private and this equals
+  // lane_mask.
+  bool scratch_swizzle = false;
+  // True only when the swizzled addresses were derived from the wave's private
+  // scratch backing. Layout alone does not imply scratch address-space
+  // provenance: buffer SRD swizzling still addresses the SRD's global base.
+  bool requires_scratch_backing = false;
+  uint64_t scratch_lane_mask = 0;
+  uint32_t scratch_addr_stride = 0;
+  uint32_t scratch_swizzle_unit = 4; ///< Bytes per swizzle unit; RDNA buffers can use 16.
+  // Low bits of the uniform address contribution applied after swizzling. The
+  // cache walker subtracts this contribution when locating logical swizzle-unit
+  // boundaries, while per_lane_addr remains the actual first-byte address.
+  uint32_t scratch_addr_base_offset = 0;
+  bool d16_hi = false; ///< D16_HI load: write upper 16 bits; preserve or zero lower per SRAM ECC.
+  bool d16_lo = false; ///< D16 load: write lower 16 bits; preserve or zero upper per SRAM ECC.
   AtomicOp atomic_op = AtomicOp::NONE; ///< Atomic RMW operation (NONE for regular loads/stores).
-  bool lds_dst = false;                ///< Buffer load with LDS bit: write to LDS, not VGPRs.
+  // DS packed atomics capture MODE.FP_DENORM16_64 at issue (CDNA5 ISA 12.2).
+  // Rounding is fixed RNE; VALU FP16_OVFL does not apply. Preserve denormals
+  // by default, including FLAT atomics routed to LDS through the shared
+  // aperture (RDNA4 ISA MODE.FP_DENORM). Direct DS execution overrides this.
+  uint32_t packed_denorm_mode = 3;
+  /// Scalar atomic policies are captured at issue, before MODE can change.
+  /// Separate LDS and L2 modes cover FLAT requests routed to either pipeline.
+  uint32_t atomic_denorm_mode = 3;
+  uint32_t atomic_lds_denorm_mode = 3;
+  /// Older MIN/MAX compare flushed inputs but return the original selected bits.
+  /// They also propagate signaling NaNs instead of treating them as missing numbers.
+  bool atomic_legacy_minmax = true;
+  /// L2 ADD on qualified RDNA4 targets selects the incoming NaN first.
+  /// Indexed LDS has an independent source-first policy.
+  bool atomic_source_nan_first = false;
+  bool lds_dword_extend = false; ///< Narrow LDS transfers extend to a full DWORD per lane.
+  bool lds_dst = false;          ///< Write the loaded payload to LDS instead of VGPRs.
   /// Reference LDS address for LDS-destination loads. For ordinary LDS-dst
   /// paths this may include the lane-0 destination offset. For cluster
   /// multicast this must be exactly Wavefront::lds_base(), the source WG
@@ -121,9 +264,10 @@ struct VectorMemState : DynamicInstState {
   bool cluster_multicast = false;  ///< Cluster async-to-LDS load: multicast LDS writes by M0 mask.
   uint32_t cluster_mcast_mask = 0; ///< Cluster workgroup destination mask captured at issue time.
   uint64_t issue_pc = 0;           ///< PC at which the instruction was issued (debug).
-  uint32_t wg_id = 0;              ///< Workgroup ID (for trace output).
-  uint32_t wf_id = 0;              ///< Wavefront ID within WG (for trace output).
-  std::string cu_path;             ///< CU full path (for trace output).
+  // Snapshot dispatch identity at issue time for deferred trace output. The CU
+  // is stable for the slot, so its path is materialized only inside log lambdas.
+  uint32_t wg_id = 0; ///< Workgroup ID (for trace output).
+  uint32_t wf_id = 0; ///< Wavefront ID within WG (for trace output).
   std::vector<uint8_t> response_data;
   std::vector<uint8_t> store_data;
   uint8_t transpose = 0; ///< Transpose-load kind (0=none, see ds_transpose.h).
@@ -135,14 +279,95 @@ struct VectorMemState : DynamicInstState {
   /// atomics, ds2_dst_reg_base is the VGPR base for the second result and the
   /// two response vectors preserve each access independently. For stores and
   /// atomics, ds2_store_data contains the second access payload.
+  // LDS stack inputs are snapshotted in store_data; the second-result slot returns
+  // the stack pointer. Flags: bit 0 = RDNA4, bit 1 = triangle pairs, bit 2 = primitive ranges.
+  uint8_t lds_stack_inputs = 0, lds_stack_size = 0, lds_stack_flags = 0;
   bool ds2_active = false;
   std::array<uint64_t, 64> ds2_per_lane_addr = {};
   uint32_t ds2_dst_reg_base = 0;
   std::vector<uint8_t> ds2_store_data;
   std::vector<uint8_t> ds2_response_data;
+  TranslatedMemoryProgress translated;
+
+  /// Capture the issue-time M0 mask and populate element_lane_masks from the
+  /// current lane_mask. An empty mask clears lane_mask; exec_mask is retained
+  /// so the instruction still participates in wait-counter accounting.
+  void set_block_dword_mask(uint32_t mask) {
+    assert(elem_size == sizeof(uint32_t) && num_elems == kBlockDwordCount);
+    is_block_transfer = true;
+    block_dword_mask = mask;
+    element_lane_masks.assign(kBlockDwordCount, 0);
+    for (uint32_t i = 0; i < kBlockDwordCount; ++i) {
+      if (block_dword_enabled(i))
+        element_lane_masks[i] = lane_mask;
+    }
+    if (mask == 0)
+      lane_mask = 0;
+  }
+
+  /// Whether the captured block mask enables this DWORD. Other instructions
+  /// retain the all-ones default; results wider than a block are not masked.
+  [[nodiscard]] bool block_dword_enabled(uint32_t word) const {
+    return amdgpu::block_dword_enabled(block_dword_mask, word);
+  }
+
+  /// Number of consecutive VGPRs written starting at dst_reg_base.
+  [[nodiscard]] uint32_t destination_vgpr_count() const {
+    if (buffer_components)
+      return buffer_d16 ? (buffer_components + 1) / 2 : buffer_components;
+    const uint32_t result_bytes = atomic_op == AtomicOp::NONE ? num_elems * elem_size : elem_size;
+    constexpr uint32_t kBytesPerVgpr = sizeof(uint32_t);
+    return std::max(1u, (result_bytes + kBytesPerVgpr - 1u) / kBytesPerVgpr);
+  }
+
+  /// Number of consecutive VGPRs written starting at ds2_dst_reg_base.
+  /// LDS stack instructions return one pointer DWORD independently of the
+  /// popped-node count. Ordinary DS dual-access results have equal widths.
+  [[nodiscard]] uint32_t ds2_destination_vgpr_count() const {
+    return lds_stack_inputs ? 1u : destination_vgpr_count();
+  }
 };
+
+/// CDNA1-4 buffer-OOB reads still write zeros to legal LDS destinations.
+/// Later architectures suppress the LDS write for lanes that did not request data.
+inline uint64_t lds_destination_write_mask(const VectorMemState &state, rj_code_arch_t arch) {
+  uint64_t mask = arch_is_cdna_4_or_lower(arch) ? state.exec_mask : state.lane_mask;
+  if (state.lds_per_lane_addr)
+    for (uint32_t lane = 0; lane < state.wf_size; ++lane)
+      if (state.per_lane_lds_addr[lane] == kInvalidLdsAddress)
+        mask &= ~(uint64_t{1} << lane);
+  return mask;
+}
+
+/// Capture ordinary LDS-destination addresses and suppress out-of-allocation reads.
+/// Payload size and lane stride differ for DWORDX3: the fourth DWORD is untouched.
+inline void prepare_lds_destination(VectorMemState &state, uint32_t allocation_base,
+                                    uint32_t allocation_size, int64_t offset,
+                                    uint32_t payload_bytes, uint32_t lane_stride) {
+  state.lds_base = allocation_base;
+  state.lds_per_lane_addr = true;
+  state.per_lane_lds_addr.fill(kInvalidLdsAddress);
+  for (uint32_t lane = 0; lane < state.wf_size; ++lane) {
+    if (!(state.exec_mask & (uint64_t{1} << lane)))
+      continue;
+    const int64_t relative = offset + static_cast<int64_t>(lane) * lane_stride;
+    if (relative < 0 || static_cast<uint64_t>(relative) + payload_bytes > allocation_size ||
+        static_cast<uint64_t>(allocation_base) + relative + payload_bytes > UINT32_MAX) {
+      state.lane_mask &= ~(uint64_t{1} << lane);
+      continue;
+    }
+    state.per_lane_lds_addr[lane] = allocation_base + static_cast<uint32_t>(relative);
+  }
+}
+
+/// @brief Reject a vector-memory instruction before it reaches a memory pipeline.
+/// @details Preserve exec_mask so normal load completion semantics treat every
+/// denied lane as inactive/OOB, while clearing lane addresses and lane_mask so
+/// no transaction or store reaches memory.
+inline void reject_vector_memory_access(VectorMemState &state) {
+  state.lane_mask = 0;
+  state.per_lane_addr.fill(0);
+}
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_AMDGPU_MEM_STATE_H_

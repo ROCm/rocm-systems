@@ -8,6 +8,7 @@
 #SBATCH --output=%x-%j.out
 #SBATCH --error=%x-%j.err
 #SBATCH --propagate=NONE
+#SBATCH --qos=vip_prio
 #
 # Compute-node orchestrator for the RCCL device-API CI job, invoked from
 # .github/workflows/rccl-suite.yml (suite=device-api) via submit_slurm_job.py.
@@ -59,16 +60,17 @@ build_jobs="${RCCL_BUILD_JOBS}"
 
 # --- build phase -> build-%j.{out,err} ---
 {
-# 1) ROCm: provisioned on the head node; consume its shared tree via rocm.env.
-echo "==> [1/5] use ROCm (provisioned on head node)"
+# 1) ROCm: provisioned on the head node from TheRock CI artifacts; consume the
+# workspace tree via rocm.env.
+echo "==> [1/5] use ROCm (provisioned from TheRock artifacts on head node)"
 rocm_env="${workdir}/.ci-out/rocm.env"
 if [[ ! -f "${rocm_env}" ]]; then
-  echo "ERROR: ${rocm_env} not found. The workflow must run the 'Provision ROCm'" >&2
-  echo "       step (lib/fetch-rocm.sh on the head node) before sbatch." >&2
+  echo "ERROR: ${rocm_env} not found. The workflow must run the 'Provision ROCm" >&2
+  echo "       from TheRock artifacts' step on the head node before sbatch." >&2
   exit 1
 fi
 set -a
-# shellcheck source=/dev/null  # runtime fragment written by fetch-rocm.sh
+# shellcheck source=/dev/null  # runtime fragment written by the provision step
 source "${rocm_env}"
 set +a
 if [[ ! -x "${ROCM_PATH:-}/bin/hipcc" ]]; then
@@ -77,31 +79,11 @@ if [[ ! -x "${ROCM_PATH:-}/bin/hipcc" ]]; then
 fi
 echo "    ROCM_PATH=${ROCM_PATH}"
 echo "    ROCM_RELEASE=${ROCM_RELEASE:-<unset>}"
-
-# Prove the build uses the ROCm we downloaded, not a system /opt/rocm. Fail loudly
-# rather than silently compiling against the wrong toolchain.
-rocm_cache="${RCCL_DEVICE_API_CACHE:-/apps/rccl-ci}/rocm"
-case "${ROCM_PATH}" in
-  "${rocm_cache}"/*) : ;;
-  *)
-    if [[ -z "${ROCM_PATH_OVERRIDE:-}" ]]; then
-      echo "ERROR: ROCM_PATH=${ROCM_PATH} is not under the provisioned cache" >&2
-      echo "       ${rocm_cache} (stale rocm.env or wrong ROCm?)." >&2
-      exit 1
-    fi
-    echo "    (ROCM_PATH_OVERRIDE in effect; skipping cache-path check)" ;;
-esac
-if [[ -n "${ROCM_RELEASE:-}" ]] \
-   && ! grep -qx "release=${ROCM_RELEASE}" "${ROCM_PATH}/.stamp" 2>/dev/null; then
-  echo "ERROR: ${ROCM_PATH}/.stamp does not record release=${ROCM_RELEASE}" >&2
-  cat "${ROCM_PATH}/.stamp" 2>/dev/null >&2 || echo "       (.stamp missing)" >&2
-  exit 1
-fi
 echo "    hipcc: $("${ROCM_PATH}/bin/hipcc" --version 2>/dev/null | head -n1)"
 
-# 2) OpenMPI: prebuilt by the OpenMPI provision job; this is a cache hit that
-# just writes ompi.env (MPI_HOME). Falls back to building if run standalone.
-echo "==> [2/5] use OpenMPI"
+# 2) OpenMPI: built here against ROCM_PATH into the per-job workspace cache
+# (no shared cache), then ompi.env (MPI_HOME) is sourced below.
+echo "==> [2/5] build OpenMPI"
 "${ci_dir}/lib/build-ompi.sh"
 set -a
 # shellcheck source=/dev/null  # runtime fragment written by build-ompi.sh

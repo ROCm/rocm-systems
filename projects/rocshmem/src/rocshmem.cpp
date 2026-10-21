@@ -164,11 +164,14 @@ static void setFilesLimit() {
 [[maybe_unused]] __host__ void inline library_init(MPI_Comm comm) {
   assert(!backend);
 
-#if defined(USE_HEAP_DEVICE_VMM_POSIX)
-  LOG_ERROR_EXIT("VMM POSIX allocator (USE_HEAP_DEVICE_VMM_POSIX) is not compatible with MPI-based initialization.\n"
-                 "  Please use ROCSHMEM_INIT_WITH_UNIQUEID instead or disable VMM POSIX allocator.\n"
-                 "  ");
-#endif
+  {
+    const std::string alloc_type = envvar::heap_allocator_type.get_value();
+    if (alloc_type == "vmm_posix" || alloc_type == "VMM_POSIX") {
+      LOG_ERROR_EXIT("ROCSHMEM_HEAP_ALLOCATOR_TYPE=vmm_posix is not compatible with MPI-based initialization.\n"
+                     "  Please use ROCSHMEM_INIT_WITH_UNIQUEID instead or choose a different allocator type.\n"
+                     "  ");
+    }
+  }
 
   int count = 0;
   CHECK_HIP(hipGetDeviceCount(&count));
@@ -825,10 +828,10 @@ __host__ int rocshmem_team_split_strided(
   return 0;
 }
 
-__host__ int rocshmem_team_split_2d(rocshmem_team_t parent_team, int xrange, const 
-                                    rocshmem_team_config_t *xaxis_config, long xaxis_mask, 
-                                    rocshmem_team_t *xaxis_team, 
-                                    const rocshmem_team_config_t *yaxis_config, long yaxis_mask, 
+__host__ int rocshmem_team_split_2d(rocshmem_team_t parent_team, int xrange,
+                                    const rocshmem_team_config_t *xaxis_config, long xaxis_mask,
+                                    rocshmem_team_t *xaxis_team,
+                                    const rocshmem_team_config_t *yaxis_config, long yaxis_mask,
                                     rocshmem_team_t *yaxis_team)
 {
   VERIFY_BACKEND();
@@ -868,10 +871,10 @@ __host__ int rocshmem_team_split_2d(rocshmem_team_t parent_team, int xrange, con
       LOG_ERROR("Unable to make xteam %d out of %d", i + 1, num_xteams);
       return ROCSHMEM_ERROR;
     }
-    
+
     start += _xrange;
 
-    if (my_xteam != ROCSHMEM_TEAM_INVALID) 
+    if (my_xteam != ROCSHMEM_TEAM_INVALID)
       *xaxis_team = my_xteam;
   }
 
@@ -881,7 +884,7 @@ __host__ int rocshmem_team_split_2d(rocshmem_team_t parent_team, int xrange, con
     rocshmem_team_t my_yteam;
     int ysize = yrange;
     if (remainder && i < remainder) ysize += 1;
-    
+
     ret = rocshmem_team_split_strided(parent_team, start, _xrange, ysize, yaxis_config,
                                       yaxis_mask, &my_yteam);
 
@@ -892,7 +895,7 @@ __host__ int rocshmem_team_split_2d(rocshmem_team_t parent_team, int xrange, con
 
     start += 1;
 
-    if (my_yteam != ROCSHMEM_TEAM_INVALID) 
+    if (my_yteam != ROCSHMEM_TEAM_INVALID)
       *yaxis_team = my_yteam;
   }
   return ROCSHMEM_SUCCESS;

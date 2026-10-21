@@ -201,6 +201,10 @@ HIP_TEST_CASE(Unit_hipGraphAddMemFreeNode_Functional) {
   hipGraphNode_t allocNodeA, freeNodeA;
   hipMemAllocNodeParams allocParam;
 
+  size_t before = 0, after = 0;
+  HIP_CHECK(hipDeviceGraphMemTrim(0));
+  HIP_CHECK(hipDeviceGetGraphMemAttribute(0, hipGraphMemAttrUsedMemCurrent, &before));
+
   HIP_CHECK(hipGraphCreate(&graph, 0));
   HIP_CHECK(hipStreamCreate(&stream));
 
@@ -217,9 +221,6 @@ HIP_TEST_CASE(Unit_hipGraphAddMemFreeNode_Functional) {
 
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
 
-  size_t before = 0, after = 0;
-  HIP_CHECK(hipDeviceGraphMemTrim(0));
-  HIP_CHECK(hipDeviceGetGraphMemAttribute(0, hipGraphMemAttrUsedMemCurrent, &before));
   HIP_CHECK(hipGraphLaunch(graphExec, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
   HIP_CHECK(hipDeviceGraphMemTrim(0));

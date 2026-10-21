@@ -222,6 +222,11 @@ rocprofiler_systems_add_option(CMAKE_CXX_STANDARD_REQUIRED
 rocprofiler_systems_add_option(ROCPROFSYS_USE_AINIC
     "Enable AI NIC profiling through AMD SMI" ON
 )
+rocprofiler_systems_add_tristate_option(
+    ROCPROFSYS_USE_HIPFILE
+    "Enable hipFile's AMD Infinity Storage I/O telemetry (ON, OFF, or AUTO)"
+    "AUTO"
+)
 rocprofiler_systems_add_option(CMAKE_CXX_EXTENSIONS
     "Compiler specific language extensions" OFF
 )
@@ -257,9 +262,6 @@ rocprofiler_systems_add_option(ROCPROFSYS_BUILD_ELFUTILS "Build elfutils from su
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_LIBIBERTY "Build libiberty from submodule"
     OFF
 )
-rocprofiler_systems_add_option(ROCPROFSYS_BUILD_TBB "Build tbb from submodule"
-    OFF
-)
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_LIBUNWIND
     "Build libunwind from submodule" ON
 )
@@ -275,8 +277,8 @@ rocprofiler_systems_add_option(ROCPROFSYS_BUILD_SPDLOG
     "Enable building spdlog library internally" ON
 )
 
-rocprofiler_systems_add_option(ROCPROFSYS_BUILD_SQLITE3
-    "Enable building sqlite3 library internally" ON
+rocprofiler_systems_add_option(ROCPROFSYS_BUILD_FMT
+    "Enable building fmt library internally" ON
 )
 
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_GTEST
@@ -580,6 +582,18 @@ install(
     FILES "${PROJECT_SOURCE_DIR}/source/bin/common/presets/schema.json"
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/presets
     COMPONENT setup
+)
+
+# Agent skills (see skills/)
+install(
+    DIRECTORY skills/
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/skills
+    COMPONENT setup
+    USE_SOURCE_PERMISSIONS
+    PATTERN "evals" EXCLUDE
+    PATTERN "run_evals.py" EXCLUDE
+    PATTERN "test_run_evals.py" EXCLUDE
+    PATTERN "__pycache__" EXCLUDE
 )
 
 # ------------------------------------------------------------------------------#

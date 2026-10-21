@@ -10,7 +10,7 @@
 
 #include "../reduce_copy.h"
 
-#if NCCL_CHECK_CUDACC
+#ifdef __CUDACC__
 #if defined(__CUDACC_EXTENDED_LAMBDA__)
 
 #include "reduce_copy__impl.h"
@@ -605,7 +605,8 @@ NCCL_DEVICE_INLINE void ncclLsaReduceLsaCopy(Coop, SrcLambda, int, DstLambda, in
   // C++11 - C++17 considers this a template invalid cannot have a valid specialation.
   // By making this a dependent static_assert, there may exists an overload of always_false that is true, it is valid.
   // "The validity of a template checked prior to any instantiation."
-  // C++20+ may make an exception for static_assert for this exact situation. https://eel.is/c++draft/temp.res#general-6
+  // C++20+ may make an exception for static_assert for this exact situation.
+  // https://eel.is/c++draft/temp.res#general-6
   static_assert(nccl::utility::always_false<T>::value,
                 "NCCL device API reduce/Copy functions require device side lambdas, please use '--extended-lambda' as "
                 "compilation flag to enable that API.");
@@ -916,6 +917,6 @@ NCCL_DEVICE_INLINE void ncclLocalReduceSumCopy(Coop, int, T*, size_t, int, T*, s
 }
 
 #endif // __CUDACC_EXTENDED_LAMBDA__
-#endif // NCCL_CHECK_CUDACC
+#endif // __CUDACC__
 
 #endif // _NCCL_DEVICE_REDUCE_COPY__FUNCS_H_

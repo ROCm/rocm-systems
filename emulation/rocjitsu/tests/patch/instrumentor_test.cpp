@@ -1,18 +1,29 @@
 // Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "decode_test_util.h"
 #include "rocjitsu/code/patch/instrumentor.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/basic_block.h"
-#include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/code/builders/smem_builders.h"
+#include "rocjitsu/code/builders/spill_builders.h"
+#include "rocjitsu/code/builders/vector_builders.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
+#include "rocjitsu/code/patch/code_object_patcher.h"
+#include "rocjitsu/code/patch/entry_prologue.h"
+#include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/probe_clobber.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/register_set.h"
+
+#include "../dbi_test_util.h"
 
 #include <gtest/gtest.h>
 
@@ -32,6 +43,8 @@
 
 namespace rocjitsu {
 namespace {
+
+using namespace rocjitsu::test;
 
 //==============================================================================
 // Synthetic Instruction subclass for fast validator unit tests.
@@ -240,7 +253,8 @@ TEST(Validator, AcceptsProbeObjWithSymbol) {
       << err;
 }
 
-TEST(Validator, RejectsForceFullExec) {
+// The inline nop has no call envelope, so there is no mask to widen around one.
+TEST(Validator, RejectsForceFullExecWithoutAProbe) {
   static constexpr uint32_t kRaw = 0xDEADBEEFu;
   TestInstruction anchor("v_add_f32_e32", 4, 0, std::nullopt, &kRaw);
   auto text = dummy_text();
@@ -249,7 +263,7 @@ TEST(Validator, RejectsForceFullExec) {
 
   std::string err;
   EXPECT_FALSE(validate_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value());
-  EXPECT_FALSE(err.empty());
+  EXPECT_NE(err.find("force_full_exec"), std::string::npos) << err;
 }
 
 TEST(Validator, RejectsDenylistedMnemonic) {
@@ -297,7 +311,7 @@ TEST(Validator, RejectsNegativeInstructionSize) {
 }
 
 //==============================================================================
-// Section 1b: validate_inline_nop_plan
+// validate_inline_nop_plan
 //
 // This guardrail used to live in TrampolineBuilder. It now lives at the
 // orchestrator boundary so the builder stays generic. Tests moved with it.
@@ -392,28 +406,14 @@ TEST(MakeTrampolinePlan, FillsCanonicalBodyAndCopiesSiteFields) {
 }
 
 //==============================================================================
-// Section 3: Instrumentor integration tests (minimal in-memory gfx950 ELF)
+// Section 3: Instrumentor integration tests (minimal in-memory gfx950/gfx1200 ELF)
 //==============================================================================
 
-// NOTE: helpers below are intentionally duplicated from
-//   tests/dbt/translate_test.cpp::add_elf_name
-//   tests/dbt/translate_test.cpp::align_up_for_test
-//   tests/dbt/translate_test.cpp::make_minimal_amdgpu_elf_with_text_and_rodata
-// to keep this slice self-contained. If/when a third test file needs the same
-// helpers, extract them into a shared test-fixture header (the project lead
-// may also have a different preference for where this should live).
-
-uint32_t add_elf_name(std::vector<uint8_t> &names, std::string_view name) {
-  const uint32_t offset = static_cast<uint32_t>(names.size());
-  names.insert(names.end(), name.begin(), name.end());
-  names.push_back('\0');
-  return offset;
-}
-
-uint64_t align_up_for_test(uint64_t value, uint64_t alignment) {
-  const uint64_t remainder = value % alignment;
-  return remainder == 0 ? value : value + alignment - remainder;
-}
+// add_elf_name, align_up_for_test, make_gfx950_kernel_elf, make_gfx950_probe_elf,
+// make_gfx1200_kernel_elf, make_gfx1200_probe_elf, section_words,
+// patched_private_segment_size, and the kMov*/kProbe* opcode constants are shared
+// via dbi_test_util.h (namespace rocjitsu::test). The make_gfx950_elf_with_*
+// builders below are used only by this file.
 
 // gfx950 ELF with a single .text of `text_size` bytes filled with `s_nop 0`
 // words (so every dword-aligned offset is a valid anchor). Used for the
@@ -569,72 +569,19 @@ std::vector<uint8_t> make_gfx950_elf_with_two_text_sections() {
   return image;
 }
 
-// gfx950 ELF with .text containing two `s_nop 0` words (8 bytes total).
-// The two-instruction layout lets tests verify that anchor resolution finds
-// the second instruction at offset 4, not just the first at offset 0.
+// gfx950 ELF with .text containing two `s_nop 0` words (8 bytes total). The
+// two-instruction layout lets tests verify that anchor resolution finds the second
+// instruction at offset 4, not just the first at offset 0.
 std::vector<uint8_t> make_gfx950_elf_with_two_nops() {
-  constexpr uint64_t text_offset = 0x100;
-  constexpr uint64_t text_size = 8;
-  constexpr uint64_t rodata_size = 4;
+  return make_gfx950_elf_with_text_words({0xBF800000u, 0xBF800000u});
+}
 
-  std::vector<uint8_t> shstrtab{'\0'};
-  const uint32_t text_name = add_elf_name(shstrtab, ".text");
-  const uint32_t rodata_name = add_elf_name(shstrtab, ".rodata");
-  const uint32_t shstrtab_name = add_elf_name(shstrtab, ".shstrtab");
-
-  const uint64_t rodata_offset = text_offset + text_size;
-  const uint64_t shstrtab_offset = rodata_offset + rodata_size;
-  const uint64_t shoff = align_up_for_test(shstrtab_offset + shstrtab.size(), 8);
-  constexpr uint16_t section_count = 4;
-
-  std::vector<uint8_t> image(shoff + section_count * sizeof(Elf64_Shdr), 0);
-
-  Elf64_Ehdr ehdr{};
-  std::memcpy(ehdr.e_ident, EI_MAGIC, EI_MAGIC_SIZE);
-  ehdr.e_ident[EI_CLASS] = ELFCLASS64;
-  ehdr.e_ident[EI_OSABI] = ELFOSABI_AMDGPU_HSA;
-  ehdr.e_type = ET_REL;
-  ehdr.e_machine = EM_AMDGPU;
-  ehdr.e_version = 1;
-  ehdr.e_shoff = shoff;
-  ehdr.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX950;
-  ehdr.e_ehsize = sizeof(Elf64_Ehdr);
-  ehdr.e_shentsize = sizeof(Elf64_Shdr);
-  ehdr.e_shnum = section_count;
-  ehdr.e_shstrndx = 3;
-  std::memcpy(image.data(), &ehdr, sizeof(ehdr));
-
-  // Two s_nop 0 words: SOPP encoding prefix 0x17F << 23, opcode 0, simm16 0.
-  const std::array<uint32_t, 2> text_words = {0xBF800000u, 0xBF800000u};
-  std::memcpy(image.data() + text_offset, text_words.data(), text_size);
-
-  const uint32_t rodata_word = 0xA5A55A5Au;
-  std::memcpy(image.data() + rodata_offset, &rodata_word, sizeof(rodata_word));
-  std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
-
-  std::array<Elf64_Shdr, section_count> shdrs{};
-  shdrs[1].sh_name = text_name;
-  shdrs[1].sh_type = SHT_PROGBITS;
-  shdrs[1].sh_flags = SHF_ALLOC | SHF_EXECINSTR;
-  shdrs[1].sh_offset = text_offset;
-  shdrs[1].sh_size = text_size;
-  shdrs[1].sh_addralign = sizeof(uint32_t);
-
-  shdrs[2].sh_name = rodata_name;
-  shdrs[2].sh_type = SHT_PROGBITS;
-  shdrs[2].sh_flags = SHF_ALLOC;
-  shdrs[2].sh_offset = rodata_offset;
-  shdrs[2].sh_size = rodata_size;
-  shdrs[2].sh_addralign = sizeof(uint32_t);
-
-  shdrs[3].sh_name = shstrtab_name;
-  shdrs[3].sh_type = SHT_STRTAB;
-  shdrs[3].sh_offset = shstrtab_offset;
-  shdrs[3].sh_size = shstrtab.size();
-  shdrs[3].sh_addralign = 1;
-
-  std::memcpy(image.data() + shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
-  return image;
+// Like make_gfx950_elf_with_two_nops() but with a discoverable `.kd` descriptor
+// (nops at .text offsets 0 and 4). Probe calls require a discovered descriptor to
+// bound SGPR selection, so probe-call tests use this variant. private_bytes is 0
+// because these bodies clobber nothing live, so no site spills.
+std::vector<uint8_t> make_gfx950_kernel_elf_with_two_nops() {
+  return make_gfx950_kernel_elf({0xBF800000u, 0xBF800000u}, /*private_bytes=*/0);
 }
 
 TEST(Instrumentor, AddPointByOffsetResolvesValidatedSite) {
@@ -947,7 +894,7 @@ TEST(InstrumentorPatch, PatchesEightByteAnchorEndToEnd) {
   auto decode_at = [&](uint64_t off) {
     std::array<rj_code_binary_inst_t, 2> w{};
     std::memcpy(w.data(), text->data() + off, w.size() * sizeof(rj_code_binary_inst_t));
-    return std::unique_ptr<Instruction>(decoder->decode(w.data()));
+    return std::unique_ptr<Instruction>(decode_valid(*decoder, w.data()));
   };
 
   // Patched anchor decodes as a forward s_branch.
@@ -1241,7 +1188,7 @@ protected:
   std::unique_ptr<Instruction> decode_word(const Section *section, size_t byte_offset) {
     rj_code_binary_inst_t word = 0;
     std::memcpy(&word, section->data() + byte_offset, sizeof(word));
-    return std::unique_ptr<Instruction>(decoder_->decode(&word));
+    return std::unique_ptr<Instruction>(decode_valid(*decoder_, &word));
   }
 
   // Byte size of the original .text before instrumentation. The trampoline cave
@@ -1533,22 +1480,91 @@ TEST(InstrumentorSpill, SpillSetIsLiveIntersectClobbers) {
   EXPECT_FALSE(has_sgpr(spill, 31));
 }
 
-// An empty spill set passes the no-spill policy.
-TEST(InstrumentorSpill, EmptySpillSetPassesPolicy) {
-  const RegisterSet spill; // empty
-  std::string err;
-  EXPECT_TRUE(check_spill_policy(spill, SpillPolicy::NoSpillsSupported, &err));
-  EXPECT_TRUE(err.empty());
+//==============================================================================
+// Probe-call reserved registers
+//
+// What framework storage has to stay out of: nothing saves and restores it
+// across a probe call.
+//==============================================================================
+
+namespace {
+
+// A registry entry carrying only what compute_probe_reserved_registers reads.
+ProbeCallable reserved_test_probe(std::string symbol) {
+  ProbeCallable probe;
+  probe.symbol = std::move(symbol);
+  probe.abi = *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31);
+  return probe;
 }
 
-// A non-empty spill set fails closed under NoSpillsSupported and names the
-// live, clobbered registers in the diagnostic.
-TEST(InstrumentorSpill, NonEmptySpillSetFailsPolicy) {
-  const RegisterSet spill = make_sgpr_set({8, 30});
+ProbeClobberSummary summary_clobbering(std::initializer_list<uint16_t> sgprs) {
+  ProbeClobberSummary summary;
+  summary.ordinary_clobbers = make_sgpr_set(sgprs);
+  return summary;
+}
+
+} // namespace
+
+// The body's own writes plus the pair the convention returns through. The link
+// pair is absent from the summary, since the envelope writes it, not the body.
+TEST(InstrumentorProbeReserved, UnionsBodyClobbersAndTheLinkPair) {
+  const std::vector<ProbeCallable> probes{reserved_test_probe("p")};
+  const std::vector<ProbeClobberSummary> summaries{summary_clobbering({4, 5})};
+
+  RegisterSet reserved;
   std::string err;
-  EXPECT_FALSE(check_spill_policy(spill, SpillPolicy::NoSpillsSupported, &err));
-  EXPECT_NE(err.find("s8"), std::string::npos);
-  EXPECT_NE(err.find("s30"), std::string::npos);
+  ASSERT_TRUE(compute_probe_reserved_registers(probes, summaries, reserved, &err)) << err;
+  EXPECT_TRUE(has_sgpr(reserved, 4));
+  EXPECT_TRUE(has_sgpr(reserved, 5));
+  EXPECT_TRUE(has_sgpr(reserved, 30));
+  EXPECT_TRUE(has_sgpr(reserved, 31));
+  EXPECT_FALSE(has_sgpr(reserved, 6));
+}
+
+// Unioned over every probe, not just the ones a given site calls: a pointer
+// loaded at kernel entry passes through every probe call in between.
+TEST(InstrumentorProbeReserved, CoversEveryProbeNotJustOne) {
+  const std::vector<ProbeCallable> probes{reserved_test_probe("first"),
+                                          reserved_test_probe("second")};
+  const std::vector<ProbeClobberSummary> summaries{summary_clobbering({4}),
+                                                   summary_clobbering({12})};
+
+  RegisterSet reserved;
+  std::string err;
+  ASSERT_TRUE(compute_probe_reserved_registers(probes, summaries, reserved, &err)) << err;
+  EXPECT_TRUE(has_sgpr(reserved, 4));
+  EXPECT_TRUE(has_sgpr(reserved, 12));
+}
+
+// Nothing to avoid when the patch calls no probes.
+TEST(InstrumentorProbeReserved, EmptyWithoutProbes) {
+  RegisterSet reserved;
+  std::string err;
+  ASSERT_TRUE(compute_probe_reserved_registers({}, {}, reserved, &err)) << err;
+  EXPECT_TRUE(reserved.none());
+}
+
+// The spans are indexed together, so a mismatch would pair one probe's ABI with
+// another's clobbers.
+TEST(InstrumentorProbeReserved, MismatchedSpansFail) {
+  const std::vector<ProbeCallable> probes{reserved_test_probe("p")};
+  RegisterSet reserved;
+  std::string err;
+  EXPECT_FALSE(compute_probe_reserved_registers(probes, {}, reserved, &err));
+  EXPECT_NE(err.find("different sizes"), std::string::npos) << err;
+}
+
+// An ABI that did not come from derive_probe_abi names no pair worth reserving.
+// Skipping it would under-reserve silently.
+TEST(InstrumentorProbeReserved, UnusableAbiFails) {
+  std::vector<ProbeCallable> probes{reserved_test_probe("p")};
+  probes.front().abi.link_pair_base = 7; // odd base; no convention selects it
+  const std::vector<ProbeClobberSummary> summaries{summary_clobbering({4})};
+
+  RegisterSet reserved;
+  std::string err;
+  EXPECT_FALSE(compute_probe_reserved_registers(probes, summaries, reserved, &err));
+  EXPECT_NE(err.find("unusable ABI"), std::string::npos) << err;
 }
 
 // Coarse SGPR-allocation gate for probe calls: a kernel must allocate through
@@ -1575,7 +1591,7 @@ TEST(InstrumentorSpill, BuilderPlanFeedsSpillFormula) {
   std::string err;
   // s5 live: the planner must avoid it; the rest are free.
   ASSERT_TRUE(TrampolineBuilder::plan_probe_call(
-      plan, ProbeCallingConvention::AmdGpuFuncNoArgsReturnS30S31, make_sgpr_set({5}),
+      plan, *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31), make_sgpr_set({5}),
       probe_summary.ordinary_clobbers, &err));
 
   const RegisterSet clobbers =
@@ -1584,13 +1600,248 @@ TEST(InstrumentorSpill, BuilderPlanFeedsSpillFormula) {
   // A live value outside the envelope's registers does not spill.
   const RegisterSet spill_clear = compute_spill_set(make_sgpr_set({5}), clobbers);
   EXPECT_TRUE(spill_clear.none());
-  EXPECT_TRUE(check_spill_policy(spill_clear, SpillPolicy::NoSpillsSupported, &err));
 
-  // A live value that collides with the chosen target pair spills, and the
-  // no-spill policy rejects it naming that register.
+  // A live value that collides with the chosen target pair spills.
   const RegisterSet spill_hit = compute_spill_set(make_sgpr_set({plan.target_pair_base}), clobbers);
   EXPECT_TRUE(has_sgpr(spill_hit, plan.target_pair_base));
-  EXPECT_FALSE(check_spill_policy(spill_hit, SpillPolicy::NoSpillsSupported, &err));
+}
+
+RegisterSet make_vgpr_set(std::initializer_list<uint16_t> indices) {
+  RegisterSet set;
+  for (uint16_t i : indices)
+    set.expand(RegisterRef{RegClass::VGPR, i, 1});
+  return set;
+}
+
+// plan_vgpr_spills reserves one slot per VGPR in for_each (ascending) order,
+// starting at align_up(original_private_bytes, kDbiZoneAlignment).
+TEST(InstrumentorSpill, PlanVgprSpillsReservesAscendingOffsets) {
+  SpillManager spills(/*original_private_bytes=*/64, /*per_lane_scratch_limit=*/4096);
+  std::vector<SpillSlot> out;
+  std::string err;
+  ASSERT_TRUE(plan_vgpr_spills(make_vgpr_set({5, 3}), spills, ROCJITSU_CODE_ARCH_CDNA4, out, &err))
+      << err;
+  ASSERT_EQ(out.size(), 2u);
+  EXPECT_EQ(out[0].reg, 3u);
+  EXPECT_EQ(out[0].byte_offset, 64u);
+  EXPECT_EQ(out[1].reg, 5u);
+  EXPECT_EQ(out[1].byte_offset, 68u);
+  EXPECT_EQ(spills.total_private_bytes(), 72u);
+}
+
+// An empty spill set succeeds with no reservations.
+TEST(InstrumentorSpill, PlanVgprSpillsEmptyIsSuccess) {
+  SpillManager spills(0, 4096);
+  std::vector<SpillSlot> out;
+  std::string err;
+  EXPECT_TRUE(plan_vgpr_spills(RegisterSet{}, spills, ROCJITSU_CODE_ARCH_CDNA4, out, &err));
+  EXPECT_TRUE(out.empty());
+}
+
+// A non-VGPR register in the spill set fails closed and is named; nothing reserved.
+TEST(InstrumentorSpill, PlanVgprSpillsRejectsNonVgpr) {
+  RegisterSet spill = make_vgpr_set({2});
+  spill.expand(RegisterRef{RegClass::SGPR, 7, 1});
+  SpillManager spills(0, 4096);
+  std::vector<SpillSlot> out;
+  std::string err;
+  EXPECT_FALSE(plan_vgpr_spills(spill, spills, ROCJITSU_CODE_ARCH_CDNA4, out, &err));
+  EXPECT_TRUE(out.empty());
+  EXPECT_NE(err.find("s7"), std::string::npos);
+}
+
+// A special register (EXEC/SCC/...) in the spill set is named by its
+// architectural name -- def/use surfaces special singletons, so a
+// consumer that forgets to project them out must still get a readable diagnostic.
+TEST(InstrumentorSpill, PlanVgprSpillsNamesSpecialRegisters) {
+  RegisterSet spill;
+  spill.expand(RegisterRef{RegClass::EXEC, 0, 1});
+  spill.expand(RegisterRef{RegClass::SCC, 0, 1});
+  SpillManager spills(0, 4096);
+  std::vector<SpillSlot> out;
+  std::string err;
+  EXPECT_FALSE(plan_vgpr_spills(spill, spills, ROCJITSU_CODE_ARCH_CDNA4, out, &err));
+  EXPECT_TRUE(out.empty());
+  EXPECT_NE(err.find("exec"), std::string::npos) << err;
+  EXPECT_NE(err.find("scc"), std::string::npos) << err;
+  EXPECT_EQ(err.find('?'), std::string::npos) << err;
+}
+
+// An offset past the CDNA4 12-bit FLAT field fails even within the scratch limit.
+TEST(InstrumentorSpill, PlanVgprSpillsFailsWhenOffsetExceedsField) {
+  SpillManager spills(/*original_private_bytes=*/0x1000, /*per_lane_scratch_limit=*/0x4000);
+  std::vector<SpillSlot> out;
+  std::string err;
+  EXPECT_FALSE(plan_vgpr_spills(make_vgpr_set({1}), spills, ROCJITSU_CODE_ARCH_CDNA4, out, &err));
+  EXPECT_TRUE(out.empty());
+  EXPECT_NE(err.find("offset"), std::string::npos);
+}
+
+// Reserving past the per-lane scratch limit fails closed.
+TEST(InstrumentorSpill, PlanVgprSpillsFailsPastScratchLimit) {
+  SpillManager spills(/*original_private_bytes=*/0, /*per_lane_scratch_limit=*/4); // one slot
+  std::vector<SpillSlot> out;
+  std::string err;
+  EXPECT_FALSE(
+      plan_vgpr_spills(make_vgpr_set({1, 2}), spills, ROCJITSU_CODE_ARCH_CDNA4, out, &err));
+  EXPECT_TRUE(out.empty());
+  EXPECT_NE(err.find("scratch limit"), std::string::npos);
+}
+
+// An arch with no scratch spill emitter fails closed.
+TEST(InstrumentorSpill, PlanVgprSpillsRejectsUnsupportedArch) {
+  SpillManager spills(0, 4096);
+  std::vector<SpillSlot> out;
+  std::string err;
+  EXPECT_FALSE(plan_vgpr_spills(make_vgpr_set({1}), spills, ROCJITSU_CODE_ARCH_CDNA2, out, &err));
+  EXPECT_TRUE(out.empty());
+}
+
+// RDNA4 uses the wide VSCRATCH offset and reserves normally.
+TEST(InstrumentorSpill, PlanVgprSpillsRdna4) {
+  SpillManager spills(0, 4096);
+  std::vector<SpillSlot> out;
+  std::string err;
+  ASSERT_TRUE(plan_vgpr_spills(make_vgpr_set({0}), spills, ROCJITSU_CODE_ARCH_RDNA4, out, &err))
+      << err;
+  ASSERT_EQ(out.size(), 1u);
+  EXPECT_EQ(out[0].reg, 0u);
+  EXPECT_EQ(out[0].byte_offset, 0u);
+}
+
+// plan_sgpr_spills reserves a slot per SGPR and picks the lowest VGPR that is
+// neither live nor already spilled as the bridge.
+TEST(InstrumentorSpill, PlanSgprSpillsPicksLowestDeadBridge) {
+  SpillManager spills(/*original_private_bytes=*/64, /*per_lane_scratch_limit=*/4096);
+  std::vector<SpillSlot> out;
+  uint16_t bridge = 0xFFFF;
+  std::string err;
+  // v0,v1,v2 live (v2 is also a VGPR spill -- a spilled reg is always live) -> the
+  // lowest dead bridge is v3.
+  const RegisterSet live = make_vgpr_set({0, 1, 2});
+  const std::vector<SpillSlot> vgpr_spills{SpillSlot{RegClass::VGPR, 2, 0}};
+  ASSERT_TRUE(plan_sgpr_spills(make_sgpr_set({7}), live, vgpr_spills, /*kernel_vgpr_count=*/8,
+                               spills, ROCJITSU_CODE_ARCH_CDNA4, out, bridge, &err))
+      << err;
+  ASSERT_EQ(out.size(), 1u);
+  EXPECT_EQ(out[0].reg, 7u);
+  EXPECT_EQ(out[0].byte_offset, 64u);
+  EXPECT_EQ(bridge, 3u);
+}
+
+// When no VGPR is dead within the kernel's allocation, the bridge falls back to a
+// spilled VGPR: its value is already saved to scratch, so it can be clobbered by the
+// writelane and its own reload restores it.
+TEST(InstrumentorSpill, PlanSgprSpillsReusesSpilledBridgeWhenNoneDead) {
+  SpillManager spills(/*original_private_bytes=*/64, /*per_lane_scratch_limit=*/4096);
+  std::vector<SpillSlot> out;
+  uint16_t bridge = 0xFFFF;
+  std::string err;
+  // v0,v1 both live (no dead VGPR in [0,2)); v1 is a spill -> bridge reuses v1.
+  const RegisterSet live = make_vgpr_set({0, 1});
+  const std::vector<SpillSlot> vgpr_spills{SpillSlot{RegClass::VGPR, 1, 0}};
+  ASSERT_TRUE(plan_sgpr_spills(make_sgpr_set({7}), live, vgpr_spills, /*kernel_vgpr_count=*/2,
+                               spills, ROCJITSU_CODE_ARCH_CDNA4, out, bridge, &err))
+      << err;
+  ASSERT_EQ(out.size(), 1u);
+  EXPECT_EQ(out[0].reg, 7u);
+  EXPECT_EQ(bridge, 1u);
+}
+
+// The bridge search is bounded by the kernel's allocated VGPR count: if every
+// VGPR in [0, count) is live, no bridge exists and the spill fails closed.
+TEST(InstrumentorSpill, PlanSgprSpillsFailsWhenNoBridgeWithinVgprCount) {
+  SpillManager spills(0, 4096);
+  std::vector<SpillSlot> out;
+  uint16_t bridge = 0xFFFF;
+  std::string err;
+  const RegisterSet live = make_vgpr_set({0, 1}); // both allocated VGPRs live.
+  ASSERT_FALSE(plan_sgpr_spills(make_sgpr_set({7}), live, {}, /*kernel_vgpr_count=*/2, spills,
+                                ROCJITSU_CODE_ARCH_CDNA4, out, bridge, &err));
+  EXPECT_TRUE(out.empty());
+  EXPECT_NE(err.find("bridge VGPR"), std::string::npos) << "error was: " << err;
+}
+
+// A non-SGPR register in the spill set fails closed and is named.
+TEST(InstrumentorSpill, PlanSgprSpillsRejectsNonSgpr) {
+  SpillManager spills(0, 4096);
+  std::vector<SpillSlot> out;
+  uint16_t bridge = 0xFFFF;
+  std::string err;
+  ASSERT_FALSE(plan_sgpr_spills(make_vgpr_set({2}), RegisterSet{}, {}, /*kernel_vgpr_count=*/8,
+                                spills, ROCJITSU_CODE_ARCH_CDNA4, out, bridge, &err));
+  EXPECT_TRUE(out.empty());
+  EXPECT_NE(err.find("v2"), std::string::npos) << "error was: " << err;
+}
+
+RegisterSet make_acc_set(std::initializer_list<uint16_t> indices) {
+  RegisterSet set;
+  for (uint16_t i : indices)
+    set.expand(RegisterRef{RegClass::ACC_VGPR, i, 1});
+  return set;
+}
+
+// plan_acc_spills reserves a slot per AccVGPR directly (no bridge) in ascending
+// order, tagging each slot RegClass::ACC_VGPR so the emitter uses the `acc` bit.
+TEST(InstrumentorSpill, PlanAccSpillsReservesSlots) {
+  SpillManager spills(/*original_private_bytes=*/64, /*per_lane_scratch_limit=*/4096);
+  std::vector<SpillSlot> out;
+  std::string err;
+  ASSERT_TRUE(plan_acc_spills(make_acc_set({5, 2}), /*acc_count=*/8, spills,
+                              ROCJITSU_CODE_ARCH_CDNA4, out, &err))
+      << err;
+  ASSERT_EQ(out.size(), 2u);
+  EXPECT_EQ(out[0].cls, RegClass::ACC_VGPR);
+  EXPECT_EQ(out[0].reg, 2u);
+  EXPECT_EQ(out[0].byte_offset, 64u);
+  EXPECT_EQ(out[1].reg, 5u);
+  EXPECT_EQ(out[1].byte_offset, 68u);
+}
+
+// A non-AccVGPR register in the spill set fails closed and is named.
+TEST(InstrumentorSpill, PlanAccSpillsRejectsNonAcc) {
+  SpillManager spills(0, 4096);
+  std::vector<SpillSlot> out;
+  std::string err;
+  ASSERT_FALSE(plan_acc_spills(make_vgpr_set({2}), /*acc_count=*/8, spills,
+                               ROCJITSU_CODE_ARCH_CDNA4, out, &err));
+  EXPECT_TRUE(out.empty());
+  EXPECT_NE(err.find("v2"), std::string::npos) << "error was: " << err;
+}
+
+// An AccVGPR index at or past the kernel's allocated AGPR count fails closed
+// before anything is reserved (never spill an AGPR the kernel didn't allocate).
+TEST(InstrumentorSpill, PlanAccSpillsRejectsIndexPastAllocatedCount) {
+  SpillManager spills(0, 4096);
+  std::vector<SpillSlot> out;
+  std::string err;
+  ASSERT_FALSE(plan_acc_spills(make_acc_set({8}), /*acc_count=*/8, spills, ROCJITSU_CODE_ARCH_CDNA4,
+                               out, &err));
+  EXPECT_TRUE(out.empty());
+  EXPECT_NE(err.find("acc8"), std::string::npos) << "error was: " << err;
+}
+
+// An arch with no scratch spill emitter fails closed.
+TEST(InstrumentorSpill, PlanAccSpillsRejectsUnsupportedArch) {
+  SpillManager spills(0, 4096);
+  std::vector<SpillSlot> out;
+  std::string err;
+  ASSERT_FALSE(plan_acc_spills(make_acc_set({1}), /*acc_count=*/8, spills, ROCJITSU_CODE_ARCH_CDNA2,
+                               out, &err));
+  EXPECT_TRUE(out.empty());
+}
+
+// AccVGPR spilling is CDNA-only. RDNA4 has a scratch emitter (nonzero offset cap)
+// but no AccVGPR file, so plan_acc_spills rejects it up front with a CDNA-only
+// diagnostic instead of letting emission throw UnimplementedInst later.
+TEST(InstrumentorSpill, PlanAccSpillsRejectsNonCdnaArch) {
+  SpillManager spills(0, 4096);
+  std::vector<SpillSlot> out;
+  std::string err;
+  ASSERT_FALSE(plan_acc_spills(make_acc_set({0}), /*acc_count=*/8, spills, ROCJITSU_CODE_ARCH_RDNA4,
+                               out, &err));
+  EXPECT_TRUE(out.empty());
+  EXPECT_NE(err.find("CDNA"), std::string::npos) << "error was: " << err;
 }
 
 //==============================================================================
@@ -1604,127 +1855,40 @@ TEST(InstrumentorSpill, BuilderPlanFeedsSpillFormula) {
 //   anchor at offset 4, return_target   = 4 + 4 = 8
 //==============================================================================
 
-// s_setpc_b64 s[30:31] (GFX9 family): a minimal self-contained probe body that
-// returns through the link pair, so build_probe_callable accepts it.
-constexpr uint32_t kProbeSetpcS30S31 = 0xbe801d1eu;
+TEST(InstrumentorProbePatch, RejectsGfx1251ProbeForGfx1250Destination) {
+  constexpr uint32_t kGfx1250Nop = 0xBF800000u;
+  constexpr uint32_t kGfx1250SetPcS30 = 0xBE80481Eu;
+  // Public LLVM gfx1251_asm_vop3p.s encoding for
+  // v_pk_add_nc_u64 v[4:7], v[8:11], v[12:15].
+  constexpr std::array<uint32_t, 2> kGfx1251OnlyInstruction{0xCC4C4004u, 0x1A021908u};
 
-// s_mov_b32 s30, 0 (GFX9 family): overwrites the low half of the return-link
-// pair. A body that runs this before the closing s_setpc still passes
-// build_probe_callable (which only inspects the final instruction) but must be
-// rejected because it would return through a corrupted PC.
-constexpr uint32_t kProbeMovS30_0 = 0xbe9e0080u;
+  auto target = make_amdgpu_kernel_elf({kGfx1250Nop, kGfx1250Nop}, /*private_bytes=*/0,
+                                       /*granulated_sgpr_count=*/3, EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  auto probe = make_amdgpu_probe_elf(
+      "rj_gfx1251_probe",
+      {kGfx1251OnlyInstruction[0], kGfx1251OnlyInstruction[1], kGfx1250SetPcS30},
+      EF_AMDGPU_MACH_AMDGCN_GFX1251);
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+  ASSERT_TRUE(obj.is_valid());
+  ASSERT_TRUE(probe_obj.is_valid());
 
-// Distinguishable leading marker words for multi-probe layout tests. Each is a
-// harmless, self-contained op the probe verifier accepts (neither is a call,
-// scratch access, nor a write to the link pair). They must not collide with the
-// anchor instruction (s_nop, which the trampoline relocates) nor with any
-// envelope opcode, so a test can tell one copied probe body from another in the
-// appended cave by counting/locating the marker. s5/s6 are dead in the fixtures
-// and are not the low registers the planner picks for target/scc.
-constexpr uint32_t kProbeMarkerMovS5 = 0xbe850080u; // s_mov_b32 s5, 0
-constexpr uint32_t kProbeMarkerMovS6 = 0xbe860080u; // s_mov_b32 s6, 0
+  Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_CDNA5);
+  InstrumentationPoint point;
+  point.anchor_offset = 4;
+  point.probe_obj = &probe_obj;
+  point.probe_symbol = "rj_gfx1251_probe";
+  instrumentor.add_point(point);
 
-// gfx950 ELF exporting one STT_FUNC probe symbol whose body is `body_words`, in
-// an executable .text. Mirrors the symtab layout in probe_symbol_test (kept
-// local per the duplication note above). Sections: [1]=.text, [2]=.strtab,
-// [3]=.symtab, [4]=.shstrtab.
-std::vector<uint8_t> make_gfx950_probe_elf(std::string_view symbol,
-                                           const std::vector<uint32_t> &body_words) {
-  const uint64_t text_offset = 0x100;
-  const uint64_t text_size = body_words.size() * sizeof(uint32_t);
-
-  std::vector<uint8_t> shstrtab{'\0'};
-  const uint32_t text_name = add_elf_name(shstrtab, ".text");
-  const uint32_t strtab_name = add_elf_name(shstrtab, ".strtab");
-  const uint32_t symtab_name = add_elf_name(shstrtab, ".symtab");
-  const uint32_t shstrtab_name = add_elf_name(shstrtab, ".shstrtab");
-
-  std::vector<uint8_t> strtab{'\0'};
-  const uint32_t sym_name = add_elf_name(strtab, symbol);
-
-  // Two symbols: the mandatory null entry plus the probe at .text offset 0.
-  std::array<Elf64_Sym, 2> syms{};
-  syms[1].st_name = sym_name;
-  syms[1].st_info = static_cast<uint8_t>((1u << 4) | kElfSymbolTypeFunc); // global func
-  syms[1].st_shndx = 1;                                                   // .text
-  syms[1].st_value = 0;
-  syms[1].st_size = text_size;
-
-  const uint64_t strtab_offset = text_offset + text_size;
-  const uint64_t symtab_offset = align_up_for_test(strtab_offset + strtab.size(), 8);
-  const uint64_t shstrtab_offset = symtab_offset + syms.size() * sizeof(Elf64_Sym);
-  const uint64_t shoff = align_up_for_test(shstrtab_offset + shstrtab.size(), 8);
-  constexpr uint16_t section_count = 5;
-
-  std::vector<uint8_t> image(shoff + section_count * sizeof(Elf64_Shdr), 0);
-
-  Elf64_Ehdr ehdr{};
-  std::memcpy(ehdr.e_ident, EI_MAGIC, EI_MAGIC_SIZE);
-  ehdr.e_ident[EI_CLASS] = ELFCLASS64;
-  ehdr.e_ident[EI_OSABI] = ELFOSABI_AMDGPU_HSA;
-  ehdr.e_type = ET_REL;
-  ehdr.e_machine = EM_AMDGPU;
-  ehdr.e_version = 1;
-  ehdr.e_shoff = shoff;
-  ehdr.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX950;
-  ehdr.e_ehsize = sizeof(Elf64_Ehdr);
-  ehdr.e_shentsize = sizeof(Elf64_Shdr);
-  ehdr.e_shnum = section_count;
-  ehdr.e_shstrndx = 4;
-  std::memcpy(image.data(), &ehdr, sizeof(ehdr));
-
-  std::memcpy(image.data() + text_offset, body_words.data(), text_size);
-  std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());
-  std::memcpy(image.data() + symtab_offset, syms.data(), syms.size() * sizeof(Elf64_Sym));
-  std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
-
-  std::array<Elf64_Shdr, section_count> shdrs{};
-  shdrs[1].sh_name = text_name;
-  shdrs[1].sh_type = SHT_PROGBITS;
-  shdrs[1].sh_flags = SHF_ALLOC | SHF_EXECINSTR;
-  shdrs[1].sh_offset = text_offset;
-  shdrs[1].sh_size = text_size;
-  shdrs[1].sh_addralign = sizeof(uint32_t);
-
-  shdrs[2].sh_name = strtab_name;
-  shdrs[2].sh_type = SHT_STRTAB;
-  shdrs[2].sh_offset = strtab_offset;
-  shdrs[2].sh_size = strtab.size();
-  shdrs[2].sh_addralign = 1;
-
-  shdrs[3].sh_name = symtab_name;
-  shdrs[3].sh_type = SHT_SYMTAB;
-  shdrs[3].sh_offset = symtab_offset;
-  shdrs[3].sh_size = syms.size() * sizeof(Elf64_Sym);
-  shdrs[3].sh_link = 2; // .strtab
-  shdrs[3].sh_info = 1; // index of first global symbol
-  shdrs[3].sh_entsize = sizeof(Elf64_Sym);
-  shdrs[3].sh_addralign = 8;
-
-  shdrs[4].sh_name = shstrtab_name;
-  shdrs[4].sh_type = SHT_STRTAB;
-  shdrs[4].sh_offset = shstrtab_offset;
-  shdrs[4].sh_size = shstrtab.size();
-  shdrs[4].sh_addralign = 1;
-
-  std::memcpy(image.data() + shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
-  return image;
-}
-
-// Copy a named section's bytes out of a reparsed code object as 32-bit words.
-std::vector<uint32_t> section_words(const AmdGpuCodeObject &obj, std::string_view name) {
-  for (const auto &sec : obj.all_sections()) {
-    if (sec->name() != name)
-      continue;
-    std::vector<uint32_t> words(sec->size() / sizeof(uint32_t));
-    std::memcpy(words.data(), sec->data(), words.size() * sizeof(uint32_t));
-    return words;
-  }
-  return {};
+  auto result = instrumentor.validate_points();
+  EXPECT_TRUE(result.sites.empty());
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("concrete target"), std::string::npos)
+      << "error was: " << result.errors.front();
 }
 
 TEST(InstrumentorProbePatch, EmitsValidElfWithProbeMetadata) {
-  auto target = make_gfx950_elf_with_two_nops();
+  auto target = make_gfx950_kernel_elf_with_two_nops();
   auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
   AmdGpuCodeObject obj(target.data(), target.size());
   AmdGpuCodeObject probe_obj(probe.data(), probe.size());
@@ -1759,7 +1923,7 @@ TEST(InstrumentorProbePatch, EmitsValidElfWithProbeMetadata) {
 }
 
 TEST(InstrumentorProbePatch, PatchedAnchorIsBranchToTrampoline) {
-  auto target = make_gfx950_elf_with_two_nops();
+  auto target = make_gfx950_kernel_elf_with_two_nops();
   auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
   AmdGpuCodeObject obj(target.data(), target.size());
   AmdGpuCodeObject probe_obj(probe.data(), probe.size());
@@ -1785,7 +1949,7 @@ TEST(InstrumentorProbePatch, PatchedAnchorIsBranchToTrampoline) {
 }
 
 TEST(InstrumentorProbePatch, CopiesProbeBodyOnceAndCallTargetsIt) {
-  auto target = make_gfx950_elf_with_two_nops();
+  auto target = make_gfx950_kernel_elf_with_two_nops();
   auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
   AmdGpuCodeObject obj(target.data(), target.size());
   AmdGpuCodeObject probe_obj(probe.data(), probe.size());
@@ -1815,20 +1979,20 @@ TEST(InstrumentorProbePatch, CopiesProbeBodyOnceAndCallTargetsIt) {
   ASSERT_FALSE(cave.empty());
 
   // The probe body is copied exactly once, at the front of the appended region.
-  EXPECT_EQ(std::count(cave.begin(), cave.end(), kProbeSetpcS30S31), 1);
+  EXPECT_EQ(std::ranges::count(cave, kProbeSetpcS30S31), 1);
   EXPECT_EQ(cave.front(), kProbeSetpcS30S31);
 
   // The call is present, through the cc-derived link pair and chosen target pair.
   const uint32_t swappc =
       build_s_swappc_b64(p.link_pair_base, p.target_pair_base, ROCJITSU_CODE_ARCH_CDNA4);
-  EXPECT_NE(std::find(cave.begin(), cave.end(), swappc), cave.end());
+  EXPECT_NE(std::ranges::find(cave, swappc), cave.end());
 
   // Re-derive the call target from the materialization delta and confirm it
   // lands on the copied body. s_getpc writes the VA of the next instruction; the
   // 64-bit add chain folds in (probe_target_offset - that VA).
   const size_t body_words = (p.trampoline_offset - p.probe_target_offset) / sizeof(uint32_t);
   const uint32_t getpc = build_s_getpc_b64(p.target_pair_base, ROCJITSU_CODE_ARCH_CDNA4);
-  const auto getpc_it = std::find(cave.begin() + body_words, cave.end(), getpc);
+  const auto getpc_it = std::ranges::find(cave.begin() + body_words, cave.end(), getpc);
   ASSERT_NE(getpc_it, cave.end());
   const size_t cave_idx = static_cast<size_t>(getpc_it - cave.begin());
   const size_t tramp_idx = cave_idx - body_words; // index within the trampoline.
@@ -1837,11 +2001,1089 @@ TEST(InstrumentorProbePatch, CopiesProbeBodyOnceAndCallTargetsIt) {
   EXPECT_EQ(va_after_getpc + delta, p.probe_target_offset); // wraps mod 2^64.
 }
 
+// Two points naming one symbol with different counts are describing one probe
+// two ways. The framework cannot tell which count the body wants, so it refuses
+// the second declaration instead of resolving a second probe.
+TEST(InstrumentorProbePatch, PointsDisagreeingOnArgumentCountAreRejected) {
+  auto target = make_gfx950_kernel_elf_with_two_nops(); // anchors at offsets 0 and 4.
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeMarkerMovS5, kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  for (uint64_t anchor : {uint64_t{0}, uint64_t{4}}) {
+    InstrumentationPoint pt;
+    pt.anchor_offset = anchor;
+    pt.probe_obj = &probe_obj;
+    pt.probe_symbol = "rj_test_probe";
+    if (anchor != 0)
+      pt.probe_args = {probe_arg_imm(0xAAAAAAAAu)};
+    instr.add_point(pt);
+  }
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("already declared with 0 argument dwords"),
+            std::string::npos)
+      << result.errors.front();
+}
+
+// Arity is not the only fact the probe owns. One point asking for a constant and
+// another for the anchor mask disagree about what the body receives, and the
+// body cannot arbitrate.
+TEST(InstrumentorProbePatch, PointsDisagreeingOnArgumentSourceAreRejected) {
+  auto target = make_gfx950_kernel_elf_with_two_nops(); // anchors at offsets 0 and 4.
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeMarkerMovS5, kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  for (uint64_t anchor : {uint64_t{0}, uint64_t{4}}) {
+    InstrumentationPoint pt;
+    pt.anchor_offset = anchor;
+    pt.probe_obj = &probe_obj;
+    pt.probe_symbol = "rj_test_probe";
+    pt.probe_args = anchor == 0 ? std::vector<ProbeArgValue>{probe_arg_imm(0xAAAAAAAAu)}
+                                : std::vector<ProbeArgValue>{{ProbeArgSource::AnchorExecLo, 0}};
+    instr.add_point(pt);
+  }
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("different argument sources"), std::string::npos)
+      << result.errors.front();
+}
+
+// Mask policy is the same class of fact: which lanes the body runs on follows
+// from what the body computes, so one probe cannot be masked at one point and
+// full-exec at another.
+TEST(InstrumentorProbePatch, PointsDisagreeingOnMaskPolicyAreRejected) {
+  auto target = make_gfx950_kernel_elf_with_two_nops(); // anchors at offsets 0 and 4.
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeMarkerMovS5, kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  for (uint64_t anchor : {uint64_t{0}, uint64_t{4}}) {
+    InstrumentationPoint pt;
+    pt.anchor_offset = anchor;
+    pt.probe_obj = &probe_obj;
+    pt.probe_symbol = "rj_test_probe";
+    pt.force_full_exec = anchor != 0;
+    instr.add_point(pt);
+  }
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("already declared with the anchor mask"), std::string::npos)
+      << result.errors.front();
+}
+
+TEST(InstrumentorProbePatch, PointsAgreeingOnPolicyAndSourcesShareOneBody) {
+  auto target = make_gfx950_kernel_elf_with_two_nops(); // anchors at offsets 0 and 4.
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeMarkerMovS5, kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  for (uint64_t anchor : {uint64_t{0}, uint64_t{4}}) {
+    InstrumentationPoint pt;
+    pt.anchor_offset = anchor;
+    pt.probe_obj = &probe_obj;
+    pt.probe_symbol = "rj_test_probe";
+    pt.probe_args = {{ProbeArgSource::AnchorExecLo, 0}, {ProbeArgSource::AnchorExecHi, 0}};
+    pt.force_full_exec = true;
+    instr.add_point(pt);
+  }
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+  ASSERT_EQ(result.patches.size(), 2u);
+  EXPECT_EQ(result.patches[0].probe_target_offset, result.patches[1].probe_target_offset);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> text = section_words(patched, ".text");
+  constexpr size_t kOriginalTextWords = 2;
+  ASSERT_GT(text.size(), kOriginalTextWords);
+  const std::vector<uint32_t> cave(text.begin() + kOriginalTextWords, text.end());
+  EXPECT_EQ(std::ranges::count(cave, kProbeMarkerMovS5), 1);
+}
+
+// An immediate's value is the one part of an argument the probe declaration
+// deliberately excludes: the body reveals nothing about which constant it wants,
+// and each trampoline materializes its own. Two sites agreeing on the source but
+// not the payload are therefore one probe, not two.
+TEST(InstrumentorProbePatch, PointsDifferingOnlyInImmediateValuesShareOneBody) {
+  auto target = make_gfx950_kernel_elf_with_two_nops(); // anchors at offsets 0 and 4.
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeMarkerMovS5, kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  constexpr uint32_t kFirstValue = 0xAAAAAAAAu;
+  constexpr uint32_t kSecondValue = 0xBBBBBBBBu;
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  for (uint64_t anchor : {uint64_t{0}, uint64_t{4}}) {
+    InstrumentationPoint pt;
+    pt.anchor_offset = anchor;
+    pt.probe_obj = &probe_obj;
+    pt.probe_symbol = "rj_test_probe";
+    pt.probe_args = {probe_arg_imm(anchor == 0 ? kFirstValue : kSecondValue)};
+    instr.add_point(pt);
+  }
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+  ASSERT_EQ(result.patches.size(), 2u);
+  EXPECT_EQ(result.patches[0].probe_target_offset, result.patches[1].probe_target_offset);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> text = section_words(patched, ".text");
+  constexpr size_t kOriginalTextWords = 2;
+  ASSERT_GT(text.size(), kOriginalTextWords);
+  const std::vector<uint32_t> cave(text.begin() + kOriginalTextWords, text.end());
+  EXPECT_EQ(std::ranges::count(cave, kProbeMarkerMovS5), 1);
+  // One shared body, but each trampoline still materializes its own constant.
+  EXPECT_EQ(std::ranges::count(cave, kFirstValue), 1);
+  EXPECT_EQ(std::ranges::count(cave, kSecondValue), 1);
+}
+
+// A Wave32 kernel's EXEC is one dword. Passing the high half would hand the
+// probe a register the kernel's wave size gives no meaning, so the site is
+// rejected rather than delivering it.
+TEST(InstrumentorProbePatch, AnchorExecHighDwordOnAWave32KernelFailsClosed) {
+  auto target = make_gfx1200_wave32_kernel_elf({0xBF800000u, 0xBF800000u}, /*private_bytes=*/0);
+  auto probe = make_gfx1200_probe_elf(
+      "rj_test_probe", {build_s_setpc_b64(/*s[30:31]=*/30, ROCJITSU_CODE_ARCH_RDNA4)});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_RDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 0;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  pt.probe_args = {{ProbeArgSource::AnchorExecLo, 0}, {ProbeArgSource::AnchorExecHi, 0}};
+  instr.add_point(pt);
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("Wave32"), std::string::npos) << result.errors.front();
+}
+
+// The same request on a Wave64 kernel is accepted: the gate is the wave size,
+// not the source.
+TEST(InstrumentorProbePatch, AnchorExecHighDwordOnAWave64KernelIsAccepted) {
+  auto target = make_gfx1200_kernel_elf({0xBF800000u, 0xBF800000u}, /*private_bytes=*/0);
+  auto probe = make_gfx1200_probe_elf(
+      "rj_test_probe", {build_s_setpc_b64(/*s[30:31]=*/30, ROCJITSU_CODE_ARCH_RDNA4)});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_RDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 0;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  pt.probe_args = {{ProbeArgSource::AnchorExecLo, 0}, {ProbeArgSource::AnchorExecHi, 0}};
+  instr.add_point(pt);
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+  ASSERT_EQ(result.patches.size(), 1u);
+}
+
+namespace {
+
+// gfx1200 `global_store_b32 v0, v1, s[2:3]`, 12 bytes, from
+// `llvm-mc -triple=amdgcn -mcpu=gfx1200 -show-encoding`.
+constexpr std::array<uint32_t, 3> kGfx12GlobalStoreV0V1S2{0xee068002u, 0x00800000u, 0x00000000u};
+
+// gfx1200 `image_store v[0:3], [v4, v5, v6], s[8:15] dmask:0xf dim:SQ_RSRC_IMG_3D`,
+// 12 bytes, from `llvm-mc -triple=amdgcn -mcpu=gfx1200 -show-encoding`.
+constexpr std::array<uint32_t, 3> kGfx12ImageStoreV4V5V6{0xd3c18002u, 0x00001000u, 0x00060504u};
+
+// The store, then a return. With @p define_base the body first writes the
+// store's SGPR base pair, s[2:3].
+std::vector<uint32_t> gfx12_store_probe_body(bool define_base) {
+  std::vector<uint32_t> body;
+  if (define_base)
+    body.push_back(build_s_mov_b64(2, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4));
+  body.insert(body.end(), kGfx12GlobalStoreV0V1S2.begin(), kGfx12GlobalStoreV0V1S2.end());
+  body.push_back(build_s_setpc_b64(/*s[30:31]=*/30, ROCJITSU_CODE_ARCH_RDNA4));
+  return body;
+}
+
+// Patch @p body into a Wave32 gfx1200 kernel, passing @p arg_dwords immediate
+// arguments in v0 upward.
+InstrumentedCodeObjectDebug patch_gfx12_probe(const std::vector<uint32_t> &body,
+                                              size_t arg_dwords) {
+  auto target = make_gfx1200_wave32_kernel_elf({0xBF800000u, 0xBF800000u}, /*private_bytes=*/0);
+  auto probe = make_gfx1200_probe_elf("rj_test_probe", body);
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_RDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 0;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  pt.probe_args.assign(arg_dwords, probe_arg_imm(0));
+  instr.add_point(pt);
+  return instr.patch_with_debug_summaries();
+}
+
+} // namespace
+
+// A probe built around a 12-byte RDNA4 store, with every input defined or
+// passed, is admitted and copied into the patched .text word for word.
+TEST(InstrumentorProbePatch, Rdna4TwelveByteStoreProbeIsCopiedWhole) {
+  const std::vector<uint32_t> body = gfx12_store_probe_body(/*define_base=*/true);
+  const auto result = patch_gfx12_probe(body, /*arg_dwords=*/2);
+  ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+  ASSERT_EQ(result.patches.size(), 1u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> text = section_words(patched, ".text");
+  const size_t first = result.patches[0].probe_target_offset / sizeof(uint32_t);
+  ASSERT_LE(first + body.size(), text.size());
+  EXPECT_TRUE(std::equal(body.begin(), body.end(), text.begin() + first));
+}
+
+// Without the definition, the store reads s[2:3] before anything writes it, and
+// two argument dwords supply only v0 and v1.
+TEST(InstrumentorProbePatch, Rdna4TwelveByteStoreProbeWithAnUndefinedBaseIsRefused) {
+  const auto result =
+      patch_gfx12_probe(gfx12_store_probe_body(/*define_base=*/false), /*arg_dwords=*/2);
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("reads s2, s3 before defining it"), std::string::npos)
+      << result.errors.front();
+}
+
+// An RDNA4 image store whose address registers, v4..v6, nothing defines. Its
+// decoder names no address register, and the four arguments supply the data
+// registers v0..v3, so without the image check this probe would be admitted.
+TEST(InstrumentorProbePatch, Rdna4ImageProbeIsRefused) {
+  std::vector<uint32_t> body;
+  for (const uint16_t sgpr : {8, 10, 12, 14}) // s[8:15], the image descriptor
+    body.push_back(build_s_mov_b64(sgpr, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4));
+  body.insert(body.end(), kGfx12ImageStoreV4V5V6.begin(), kGfx12ImageStoreV4V5V6.end());
+  body.push_back(build_s_setpc_b64(/*s[30:31]=*/30, ROCJITSU_CODE_ARCH_RDNA4));
+
+  const auto result = patch_gfx12_probe(body, /*arg_dwords=*/4);
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("image instruction"), std::string::npos)
+      << result.errors.front();
+}
+
+// The ABI fixes the argument VGPRs at v0 upward, so unlike the envelope's SGPR
+// temps they cannot be re-picked to fit. The default fixture allocates 8 unified
+// VGPRs with the AGPR window at v4, leaving v0..v3 ordinary, so a fifth argument
+// would name a register that aliases an AGPR.
+TEST(InstrumentorProbePatch, ArgumentsPastTheKernelVgprAllocationFailClosed) {
+  auto target = make_gfx950_kernel_elf_with_two_nops();
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 0;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  pt.probe_args.assign(5, probe_arg_imm(0));
+  instr.add_point(pt);
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("v0..v4"), std::string::npos) << result.errors.front();
+  EXPECT_NE(result.errors.front().find("only 4 ordinary VGPRs"), std::string::npos)
+      << result.errors.front();
+}
+
+// Exactly filling the ordinary window is accepted: the gate is ownership, not a
+// margin.
+TEST(InstrumentorProbePatch, ArgumentsFillingTheOrdinaryVgprWindowAreAccepted) {
+  auto target = make_gfx950_kernel_elf_with_two_nops();
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 0;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  pt.probe_args = {probe_arg_imm(1), probe_arg_imm(2), probe_arg_imm(3), probe_arg_imm(4)};
+  instr.add_point(pt);
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+  ASSERT_EQ(result.patches.size(), 1u);
+}
+
+// With more than one kernel there is no single VGPR allocation to bound the
+// argument registers against, the same fail-closed shape as the SGPR bound. A
+// zero-argument call is unaffected, which the sibling multi-kernel tests cover.
+TEST(InstrumentorProbePatch, ArgumentsWithoutASingleKernelDescriptorFailClosed) {
+  auto target = make_gfx950_two_kernel_elf({0xBF800000u, 0xBF800000u}, /*private_bytes=*/0);
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 0;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  pt.probe_args = {probe_arg_imm(1)};
+  instr.add_point(pt);
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("bound VGPR selection"), std::string::npos)
+      << result.errors.front();
+}
+
+//==============================================================================
+// The DBI entry prologue
+//
+// A probe asking for the framework's entry storage makes the instrumentor place
+// an entry-prologue stub that defines it in the cave and redirect the kernel
+// descriptor to it. These cover the gates
+// that refuse a kernel the prologue could not cover, plus the `.rocjitsu.kernarg`
+// record the successful path declares.
+//==============================================================================
+
+namespace {
+
+// A probe declaring one argument sourced from the framework's entry storage,
+// which is what asks the instrumentor for a prologue.
+InstrumentationPoint log_buffer_point(const AmdGpuCodeObject &probe_obj, uint64_t anchor_offset) {
+  InstrumentationPoint pt;
+  pt.anchor_offset = anchor_offset;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  pt.probe_args = {{ProbeArgSource::LogBufferPtrLo, 0}};
+  return pt;
+}
+
+// Not payload-aligned, so the wrapper offset is a value only this layout
+// produces rather than a round number anything could.
+constexpr uint32_t kTestKernargSize = 20;
+
+// gfx950 kernel whose descriptor advertises a kernarg segment pointer, so the
+// prologue's success path is reachable. Entry at .text offset 0.
+std::vector<uint8_t> make_gfx950_kernarg_kernel_elf() {
+  return test::make_kernarg_kernel_elf({0xBF800000u, 0xBF800000u}, /*private_bytes=*/0,
+                                       EF_AMDGPU_MACH_AMDGCN_GFX950, kTestKernargSize);
+}
+
+bool contains_words(const std::vector<uint32_t> &haystack, std::span<const uint32_t> needle) {
+  return std::search(haystack.begin(), haystack.end(), needle.begin(), needle.end()) !=
+         haystack.end();
+}
+
+// The SGPR pair the prologue loaded into, recovered from the site that reads it.
+// The argument v_mov names the pair, so the site and the prologue agreeing is
+// what makes the pair meaningful rather than whatever the planner picked.
+//
+// This decodes *argument 0*, not "the storage pair": every argument lands in
+// v[arg_vgpr_base + i] and arg_vgpr_base is 0, so matching vdst 0 finds whichever
+// source the site declared first. Correct only for a point whose first argument
+// is LogBufferPtrLo, which is every caller here. Put another source ahead of it
+// and this silently returns that one's register instead, so the callers pass
+// points built by log_buffer_point().
+std::optional<uint16_t> storage_base_from_argument(const std::vector<uint32_t> &trampoline,
+                                                   rj_code_arch_t arch) {
+  for (uint16_t sgpr = 0; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr) {
+    const uint32_t mov = build_v_mov_b32_src(/*vdst=*/0, sgpr, arch);
+    if (std::find(trampoline.begin(), trampoline.end(), mov) != trampoline.end())
+      return sgpr;
+  }
+  return std::nullopt;
+}
+
+// Five argument dwords: the buffer pointer, the Wave64 anchor mask, and a site
+// immediate, one more than the kernarg fixture's default allocation leaves
+// ordinary on CDNA.
+std::vector<ProbeArgValue> five_log_buffer_args() {
+  return {{ProbeArgSource::LogBufferPtrLo, 0},
+          {ProbeArgSource::LogBufferPtrHi, 0},
+          {ProbeArgSource::AnchorExecLo, 0},
+          {ProbeArgSource::AnchorExecHi, 0},
+          probe_arg_imm(0)};
+}
+
+InstrumentedCodeObjectDebug patch_five_log_buffer_args(const std::vector<uint8_t> &target) {
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  InstrumentationPoint pt = log_buffer_point(probe_obj, /*anchor_offset=*/0);
+  pt.probe_args = five_log_buffer_args();
+  instr.add_point(pt);
+  return instr.patch_with_debug_summaries();
+}
+
+} // namespace
+
+// A kernarg kernel that declares a wider VGPR window admits the fifth argument:
+// 16 unified VGPRs with the AGPR window at v8 leaves v0..v7 ordinary.
+TEST(InstrumentorEntryPrologue, AWiderVgprAllocationAdmitsAFifthArgument) {
+  namespace kd = rocjitsu::amdhsa;
+  const auto target = test::make_kernarg_kernel_elf(
+      {0xBF800000u, 0xBF800000u}, /*private_bytes=*/0, EF_AMDGPU_MACH_AMDGCN_GFX950,
+      kTestKernargSize, /*wave32=*/false, /*granulated_sgpr_count=*/3, /*entry_text_offset=*/0,
+      /*granulated_vgpr_count=*/1, /*accum_offset=*/1);
+
+  // The patch outcome turns on the AGPR window alone, so check that the helper
+  // wrote both fields.
+  AmdGpuCodeObject obj(target.data(), target.size());
+  ASSERT_TRUE(obj.is_valid());
+  const Section *text = obj.text_sections().front();
+  const auto kernels = scan_kernel_descriptors(target, text->sectionOffset(), text->size());
+  ASSERT_EQ(kernels.size(), 1u);
+  const kd::kernel_descriptor_t &desc = kernels.front().descriptor;
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(desc.compute_pgm_rsrc1,
+                               kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT),
+            1u);
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET),
+            1u);
+
+  const auto result = patch_five_log_buffer_args(target);
+  ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+  EXPECT_EQ(result.patches.size(), 1u);
+}
+
+// Control: the default allocation refuses the same point.
+TEST(InstrumentorEntryPrologue, TheDefaultVgprAllocationRefusesAFifthArgument) {
+  const auto result = patch_five_log_buffer_args(make_gfx950_kernarg_kernel_elf());
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("v0..v4"), std::string::npos) << result.errors.front();
+  EXPECT_NE(result.errors.front().find("only 4 ordinary VGPRs"), std::string::npos)
+      << result.errors.front();
+}
+
+// The prologue loads its pointer out of the kernarg wrapper the CP delivers, so
+// a kernel that never receives a kernarg pointer has nothing to load through.
+TEST(InstrumentorEntryPrologue, KernelWithoutAKernargPointerFailsClosed) {
+  auto target = make_gfx950_kernel_elf_with_two_nops();
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("ENABLE_SGPR_KERNARG_SEGMENT_PTR"), std::string::npos)
+      << result.errors.front();
+  // The diagnostic names the probe that required a prologue. Without it the
+  // rejection reads as unprompted, since nothing in the point asked for one.
+  EXPECT_NE(result.errors.front().find("rj_test_probe"), std::string::npos)
+      << result.errors.front();
+}
+
+// The prologue runs from a stub dispatch enters at, so the entry is an ordinary
+// anchor: a point on it composes, running after the prologue.
+TEST(InstrumentorEntryPrologue, PointOnTheKernelEntryComposesWithThePrologue) {
+  auto target = make_gfx950_kernarg_kernel_elf(); // entry at .text offset 0.
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/0));
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+  ASSERT_EQ(result.patches.size(), 1u);
+  EXPECT_EQ(result.patches[0].anchor_offset, 0u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const auto stub = test::patched_entry_text_offset(patched);
+  ASSERT_TRUE(stub.has_value());
+  EXPECT_NE(*stub, 0u) << "dispatch still enters at the original entry, skipping the prologue";
+
+  // The entry is spliced to the site's trampoline, and the stub branches to it.
+  const std::vector<uint32_t> text = section_words(patched, ".text");
+  ASSERT_LT(result.patches[0].trampoline_offset / sizeof(uint32_t), text.size());
+  EXPECT_NE(text[0], 0xBF800000u) << "the point on the entry was not spliced";
+  const uint64_t branch_pc = result.patches[0].trampoline_offset - sizeof(uint32_t);
+  const auto back = compute_sopp_branch_simm16(branch_pc, /*target=*/0);
+  ASSERT_TRUE(back.has_value());
+  EXPECT_EQ(text[branch_pc / sizeof(uint32_t)], build_s_branch(*back, ROCJITSU_CODE_ARCH_CDNA4))
+      << "the stub does not branch to the entry";
+}
+
+// The stub's s_branch back to the entry has to reach it, and the alignment
+// padding ahead of the stub is what moves it out of range. With the entry at 0
+// and a one-word probe body, the stub lands at the first 256-byte boundary past
+// .text + 4: a .text of 130812 bytes puts it at 130816, from where its branch
+// still reaches the entry; 130816 bytes pushes it to 131072, past the 128 KiB a
+// backward s_branch covers. The site sits 8 bytes before the end of .text so its own forward
+// branch stays in range and the stub's is the only one that can fail.
+namespace {
+
+InstrumentedCodeObjectDebug patch_kernel_of_size(uint64_t text_bytes) {
+  std::vector<uint32_t> words(text_bytes / sizeof(uint32_t), 0xBF800000u);
+  words.back() = 0xBF810000u;
+  auto target = test::make_kernarg_kernel_elf(words, /*private_bytes=*/0,
+                                              EF_AMDGPU_MACH_AMDGCN_GFX950, kTestKernargSize);
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/text_bytes - 8));
+  return instr.patch_with_debug_summaries();
+}
+
+} // namespace
+
+TEST(InstrumentorEntryPrologue, StubAtTheEdgeOfBranchRangeIsAccepted) {
+  auto result = patch_kernel_of_size(130812);
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const auto stub = test::patched_entry_text_offset(patched);
+  ASSERT_TRUE(stub.has_value());
+  EXPECT_EQ(*stub, 130816u);
+}
+
+TEST(InstrumentorEntryPrologue, StubPaddedOutOfBranchRangeFailsClosed) {
+  auto result = patch_kernel_of_size(130816);
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("out of branch range of the kernel entry"),
+            std::string::npos)
+      << result.errors.front();
+  EXPECT_NE(result.errors.front().find("rj_test_probe"), std::string::npos)
+      << result.errors.front();
+  EXPECT_TRUE(result.elf_bytes.empty()) << "a rejected patch still produced an ELF";
+}
+
+// The stub keeps the entry's residue modulo 256, not merely a 256-byte
+// alignment, so an entry that is not at a residue of 0 lands the stub off one
+// too. Hardware alignment then follows from the entry's own.
+TEST(InstrumentorEntryPrologue, StubKeepsANonzeroEntryResidue) {
+  constexpr uint64_t kEntry = 8;
+  auto target = test::make_kernarg_kernel_elf(
+      {0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF810000u}, /*private_bytes=*/0,
+      EF_AMDGPU_MACH_AMDGCN_GFX950, kTestKernargSize, /*wave32=*/false,
+      /*granulated_sgpr_count=*/3, kEntry);
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/12));
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+  ASSERT_EQ(result.patches.size(), 1u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const auto stub = test::patched_entry_text_offset(patched);
+  ASSERT_TRUE(stub.has_value());
+  EXPECT_EQ(*stub % 256, kEntry);
+
+  const std::vector<uint32_t> text = section_words(patched, ".text");
+  EXPECT_EQ(text[kEntry / sizeof(uint32_t)], 0xBF800000u) << "the kernel entry was overwritten";
+  const uint64_t branch_pc = result.patches[0].trampoline_offset - sizeof(uint32_t);
+  const auto back = compute_sopp_branch_simm16(branch_pc, kEntry);
+  ASSERT_TRUE(back.has_value());
+  EXPECT_EQ(text[branch_pc / sizeof(uint32_t)], build_s_branch(*back, ROCJITSU_CODE_ARCH_CDNA4))
+      << "the stub does not branch to the entry";
+}
+
+// Nothing is written over the entry, so an entry that could not be an anchor is
+// no obstacle.
+TEST(InstrumentorEntryPrologue, KernelEntryKeepsItsBytes) {
+  const uint32_t branch = build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA4);
+  auto target = test::make_kernarg_kernel_elf({branch, 0xBF800000u}, /*private_bytes=*/0,
+                                              EF_AMDGPU_MACH_AMDGCN_GFX950, kTestKernargSize);
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> text = section_words(patched, ".text");
+  ASSERT_FALSE(text.empty());
+  EXPECT_EQ(text[0], branch) << "the kernel entry was overwritten";
+}
+
+// patch() is the production entry point, and no runtime builds the kernarg
+// wrapper the prologue loads through, so it refuses before planning anything.
+TEST(InstrumentorEntryPrologue, PatchRefusesEntryStorageWithoutAWrapper) {
+  auto target = make_gfx950_kernel_elf_with_two_nops();
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
+
+  auto result = instr.patch();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_NE(result.errors.front().find("kernarg wrapper"), std::string::npos)
+      << result.errors.front();
+  EXPECT_NE(result.errors.front().find("rj_test_probe"), std::string::npos)
+      << result.errors.front();
+}
+
+// Instrumentation does not support multi-kernel objects, so neither does the
+// prologue. Rejected here rather than downstream at the argument-VGPR bound,
+// which would reject it for a reason that reads as unrelated.
+TEST(InstrumentorEntryPrologue, MultipleKernelsFailClosed) {
+  auto target = make_gfx950_two_kernel_elf({0xBF800000u, 0xBF800000u}, /*private_bytes=*/0);
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/0));
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("multi-kernel code object"), std::string::npos)
+      << result.errors.front();
+}
+
+// Nothing asks for the storage, so no prologue is planned and no gate applies:
+// the descriptor still enters at the original entry.
+TEST(InstrumentorEntryPrologue, OrdinaryProbeCallLeavesTheEntryAlone) {
+  auto target = make_gfx950_kernel_elf_with_two_nops();
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 4;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  pt.probe_args = {probe_arg_imm(1)};
+  instr.add_point(pt);
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const auto entry = test::patched_entry_text_offset(patched);
+  ASSERT_TRUE(entry.has_value());
+  EXPECT_EQ(*entry, 0u) << "the descriptor was redirected with no prologue to run";
+}
+
+// The cave is [probe bodies][s_nop padding][entry stub][trampolines], with the
+// descriptor entering at the stub. This is what pins the stub's contents: both
+// loads at the offsets the record declares, the restores, and the wait ordered
+// between them.
+TEST(InstrumentorEntryPrologue, CaveHoldsThePrologueBetweenTheProbeAndTheTrampoline) {
+  auto target = make_gfx950_kernarg_kernel_elf();
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+  ASSERT_EQ(result.patches.size(), 1u);
+  const auto &p = result.patches[0];
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> text = section_words(patched, ".text");
+
+  // One probe body, one word long, at the front of the cave, then padding up to
+  // the stub the descriptor now enters at, then the stub up to the site's
+  // trampoline.
+  const uint64_t probe_end = p.probe_target_offset + sizeof(uint32_t);
+  const auto stub = test::patched_entry_text_offset(patched);
+  ASSERT_TRUE(stub.has_value());
+  ASSERT_GE(*stub, probe_end) << "the descriptor does not enter at a stub in the cave";
+  ASSERT_GT(p.trampoline_offset, *stub) << "nothing lies between the stub and the trampoline";
+  ASSERT_LE(p.trampoline_offset / sizeof(uint32_t), text.size());
+  // The original entry is .text offset 0, and hardware takes the entry address
+  // shifted right by 8, so the stub keeps the entry's 256-byte residue.
+  EXPECT_EQ(*stub % 256, 0u) << "the stub is not at a launchable entry address";
+  for (uint64_t off = probe_end; off < *stub; off += sizeof(uint32_t))
+    EXPECT_EQ(text[off / sizeof(uint32_t)], 0xBF800000u) << "padding at " << off << " is not s_nop";
+  const std::vector<uint32_t> prologue(
+      text.begin() + static_cast<ptrdiff_t>(*stub / sizeof(uint32_t)),
+      text.begin() + static_cast<ptrdiff_t>(p.trampoline_offset / sizeof(uint32_t)));
+  const std::vector<uint32_t> trampoline(
+      text.begin() + static_cast<ptrdiff_t>(p.trampoline_offset / sizeof(uint32_t)), text.end());
+
+  const auto storage_base = storage_base_from_argument(trampoline, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(storage_base.has_value()) << "the site reads no SGPR pair as its argument";
+
+  // Offsets come from the layout function rather than being written out, because
+  // the record round-trip already pins the layout to what a consumer rebuilds.
+  const std::array<KernargExtensionPayloadLayout, 1> payloads{kDbiEntryPayloadLayout};
+  const auto layout = make_kernarg_extension_layout(kTestKernargSize, payloads);
+  ASSERT_TRUE(layout.has_value());
+
+  // Both loads address through the kernarg pair at s[0:1], the only enabled
+  // user SGPR in this descriptor.
+  const auto load_payload = build_s_load_dwordx2(
+      *storage_base, /*sbase=*/0, layout->payload_offsets.front(), ROCJITSU_CODE_ARCH_CDNA4);
+  const auto load_guest_ptr =
+      build_s_load_dwordx2(static_cast<uint16_t>(*storage_base + 2), /*sbase=*/0,
+                           layout->original_kernarg_pointer_offset, ROCJITSU_CODE_ARCH_CDNA4);
+  EXPECT_TRUE(contains_words(prologue, load_payload))
+      << "the prologue does not load the payload the record declares";
+  EXPECT_TRUE(contains_words(prologue, load_guest_ptr));
+
+  // The restore, without which the guest reads its kernargs through the wrapper.
+  const uint32_t restore_lo =
+      build_s_mov_b32(0, static_cast<uint16_t>(*storage_base + 2), ROCJITSU_CODE_ARCH_CDNA4);
+  const uint32_t restore_hi =
+      build_s_mov_b32(1, static_cast<uint16_t>(*storage_base + 3), ROCJITSU_CODE_ARCH_CDNA4);
+  EXPECT_NE(std::find(prologue.begin(), prologue.end(), restore_lo), prologue.end());
+  EXPECT_NE(std::find(prologue.begin(), prologue.end(), restore_hi), prologue.end());
+
+  // The wait sits after both loads and before the restore. The second half is
+  // the subtle one: the restore overwrites the SBASE the loads are still in
+  // flight against, so a wait placed only ahead of the reads below it would be
+  // too late. Both bounds are asserted, since either alone admits a placement
+  // that would not work.
+  const uint32_t wait = build_wait_scalar_loads_complete(ROCJITSU_CODE_ARCH_CDNA4);
+  const auto wait_it = std::find(prologue.begin(), prologue.end(), wait);
+  ASSERT_NE(wait_it, prologue.end()) << "the prologue does not wait for its loads";
+  const auto guest_ptr_load_it =
+      std::search(prologue.begin(), prologue.end(), load_guest_ptr.begin(), load_guest_ptr.end());
+  ASSERT_NE(guest_ptr_load_it, prologue.end());
+  EXPECT_LT(guest_ptr_load_it, wait_it) << "the wait runs before a load it is meant to cover";
+  EXPECT_LT(wait_it, std::find(prologue.begin(), prologue.end(), restore_lo));
+
+  // The stub ends by branching to the untouched original entry.
+  EXPECT_EQ(text[0], 0xBF800000u) << "the kernel entry no longer holds its original s_nop";
+  const uint64_t branch_pc = p.trampoline_offset - sizeof(uint32_t);
+  const auto back = compute_sopp_branch_simm16(branch_pc, /*target=*/0);
+  ASSERT_TRUE(back.has_value());
+  EXPECT_EQ(prologue.back(), build_s_branch(*back, ROCJITSU_CODE_ARCH_CDNA4))
+      << "the stub does not branch to the original entry";
+}
+
+namespace {
+
+// The storage pair a patch chose, recovered through the site that reads it.
+// nullopt when the patch failed, with the reason in @p error_out.
+std::optional<uint16_t> patch_and_recover_storage(const std::vector<uint32_t> &probe_words,
+                                                  std::string *error_out) {
+  auto target = make_gfx950_kernarg_kernel_elf();
+  auto probe = make_gfx950_probe_elf("rj_test_probe", probe_words);
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
+
+  auto result = instr.patch_with_debug_summaries();
+  if (!result.errors.empty()) {
+    *error_out = result.errors.front();
+    return std::nullopt;
+  }
+  if (result.patches.size() != 1)
+    return std::nullopt;
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  const std::vector<uint32_t> text = section_words(patched, ".text");
+  const size_t first = result.patches[0].trampoline_offset / sizeof(uint32_t);
+  if (first >= text.size())
+    return std::nullopt;
+  return storage_base_from_argument(
+      std::vector<uint32_t>(text.begin() + static_cast<ptrdiff_t>(first), text.end()),
+      ROCJITSU_CODE_ARCH_CDNA4);
+}
+
+// s_mov_b32 s<n>, 0. Inline constant 0 is scalar source code 128.
+uint32_t clobber_sgpr(uint16_t sgpr) {
+  return build_s_mov_b32(sgpr, 128, ROCJITSU_CODE_ARCH_CDNA4);
+}
+
+} // namespace
+
+// Liveness cannot supply this: the prologue's write lives in the cave, so the
+// pair reads dead at every anchor. A probe body writing the chosen pair would
+// fail at its every site instead, since the clobber set is a property of the
+// body rather than of the anchor.
+TEST(InstrumentorEntryPrologue, StorageAvoidsWhatTheProbeBodyClobbers) {
+  std::string err;
+  const auto baseline = patch_and_recover_storage({kProbeSetpcS30S31}, &err);
+  ASSERT_TRUE(baseline.has_value()) << err;
+  const uint16_t low = *baseline;
+
+  // Clobber the run the planner just chose. It has to pick a different one.
+  const auto moved =
+      patch_and_recover_storage({clobber_sgpr(low), clobber_sgpr(static_cast<uint16_t>(low + 1)),
+                                 clobber_sgpr(static_cast<uint16_t>(low + 2)),
+                                 clobber_sgpr(static_cast<uint16_t>(low + 3)), kProbeSetpcS30S31},
+                                &err);
+  ASSERT_TRUE(moved.has_value()) << err;
+  EXPECT_NE(*moved, low);
+  // Disjoint from the clobbered run, not merely shifted off its base.
+  EXPECT_TRUE(*moved > low + 3 || *moved + 3 < low)
+      << "storage s[" << *moved << ":" << *moved + 3 << "] overlaps the probe's clobbers s[" << low
+      << ":" << low + 3 << "]";
+}
+
+// Runs are 4 SGPRs on an even base below s26, where the fixture's 32-SGPR
+// CDNA allocation starts its special-register tail, so a clobber every fourth
+// register from s3 leaves every candidate base blocked by a clobber. Failing
+// closed is the only safe answer, since the alternative is storage a probe
+// overwrites between the prologue and the site.
+TEST(InstrumentorEntryPrologue, StorageExhaustedByProbeClobbersFailsClosed) {
+  std::vector<uint32_t> body;
+  for (uint16_t sgpr = 3; sgpr < 32; sgpr += 4)
+    body.push_back(clobber_sgpr(sgpr));
+  body.push_back(kProbeSetpcS30S31);
+
+  std::string err;
+  const auto storage = patch_and_recover_storage(body, &err);
+  ASSERT_FALSE(storage.has_value()) << "storage was found where no aligned run fits";
+  EXPECT_NE(err.find("no free run of"), std::string::npos) << err;
+  // The kernel is not at fault, so the diagnostic has to name what asked for a
+  // prologue. Otherwise the rejection reads as unprompted.
+  EXPECT_NE(err.find("rj_test_probe"), std::string::npos) << err;
+}
+
+// The union is over every probe on the object, not only the ones passing the
+// pointer on. The pair has to survive from entry to each later site, so a probe
+// that never reads it can still destroy it.
+TEST(InstrumentorEntryPrologue, StorageAvoidsAProbeThatDoesNotReadIt) {
+  std::string err;
+  const auto baseline = patch_and_recover_storage({kProbeSetpcS30S31}, &err);
+  ASSERT_TRUE(baseline.has_value()) << err;
+  const uint16_t low = *baseline;
+
+  // Three words, so the two probes get distinct sites.
+  auto target = test::make_kernarg_kernel_elf({0xBF800000u, 0xBF800000u, 0xBF800000u},
+                                              /*private_bytes=*/0, EF_AMDGPU_MACH_AMDGCN_GFX950,
+                                              kTestKernargSize);
+  auto reader = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  auto writer = make_gfx950_probe_elf(
+      "rj_test_writer", {clobber_sgpr(low), clobber_sgpr(static_cast<uint16_t>(low + 1)),
+                         clobber_sgpr(static_cast<uint16_t>(low + 2)),
+                         clobber_sgpr(static_cast<uint16_t>(low + 3)), kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject reader_obj(reader.data(), reader.size());
+  AmdGpuCodeObject writer_obj(writer.data(), writer.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  instr.add_point(log_buffer_point(reader_obj, /*anchor_offset=*/4));
+  // No log-buffer argument: this probe never reads the storage, it only writes
+  // over where the storage would otherwise go.
+  InstrumentationPoint plain;
+  plain.anchor_offset = 8;
+  plain.probe_obj = &writer_obj;
+  plain.probe_symbol = "rj_test_writer";
+  instr.add_point(plain);
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+  ASSERT_EQ(result.patches.size(), 2u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  const std::vector<uint32_t> text = section_words(patched, ".text");
+  const auto &reader_patch =
+      result.patches[0].anchor_offset == 4 ? result.patches[0] : result.patches[1];
+  const size_t first = reader_patch.trampoline_offset / sizeof(uint32_t);
+  ASSERT_LT(first, text.size());
+  const auto storage = storage_base_from_argument(
+      std::vector<uint32_t>(text.begin() + static_cast<ptrdiff_t>(first), text.end()),
+      ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(storage.has_value());
+
+  EXPECT_TRUE(*storage > low + 3 || *storage + 3 < low)
+      << "storage s[" << *storage << ":" << *storage + 3
+      << "] overlaps the clobbers of a probe that never reads it, s[" << low << ":" << low + 3
+      << "]";
+}
+
+// A runtime builds its wrapper from the record alone, so the layout the record
+// implies must be the one the prologue encoded as immediates.
+TEST(InstrumentorKernargRecord, DeclaresTheWrapperThePrologueReadsFrom) {
+  auto target = make_gfx950_kernarg_kernel_elf();
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint8_t> bytes =
+      test::section_bytes(patched, kKernargExtensionMetadataSectionName);
+  ASSERT_FALSE(bytes.empty()) << "no .rocjitsu.kernarg section was appended";
+
+  const auto parsed = parse_kernarg_extension_metadata(bytes);
+  ASSERT_TRUE(parsed.has_value());
+  ASSERT_EQ(parsed->size(), 1u);
+  const KernargExtensionMetadata &record = parsed->front();
+  EXPECT_EQ(record.kernel_name, "test_kernel");
+  EXPECT_EQ(record.variant_name, kDbiKernargVariantName);
+  EXPECT_EQ(record.original_kernarg_size, kTestKernargSize);
+  ASSERT_EQ(record.payloads.size(), 1u);
+  EXPECT_EQ(record.payloads.front().name, kDbiEntryPayloadName);
+  EXPECT_EQ(record.payloads.front().size, kDbiEntryPayloadLayout.size);
+  EXPECT_EQ(record.payloads.front().alignment, kDbiEntryPayloadLayout.alignment);
+
+  // Rebuild from the record's own sizes and alignments, as a consumer would.
+  // This pins the record's *fields*, not the layout function: a producer that
+  // wrote the wrapper size into original_kernarg_size, or the wrong payload
+  // alignment, lands somewhere the prologue does not read from.
+  const std::array<KernargExtensionPayloadLayout, 1> payloads{KernargExtensionPayloadLayout{
+      .size = record.payloads.front().size, .alignment = record.payloads.front().alignment}};
+  const auto rebuilt = make_kernarg_extension_layout(record.original_kernarg_size, payloads);
+  ASSERT_TRUE(rebuilt.has_value());
+  ASSERT_EQ(rebuilt->payload_offsets.size(), 1u);
+
+  const Section *text = obj.text_sections().front();
+  const auto kernels = scan_kernel_descriptors(
+      {reinterpret_cast<const uint8_t *>(obj.image_data()), obj.image_size()},
+      text->sectionOffset(), text->size());
+  ASSERT_EQ(kernels.size(), 1u);
+  const auto prologue = build_dbi_entry_prologue(kernels.front().descriptor,
+                                                 ROCJITSU_CODE_ARCH_CDNA4, DbiEntryStorage{8, 10});
+  ASSERT_TRUE(prologue.has_value());
+  EXPECT_EQ(rebuilt->payload_offsets.front(), prologue->payload_byte_offset);
+  EXPECT_EQ(rebuilt->original_kernarg_pointer_offset, prologue->original_kernarg_pointer_offset);
+}
+
+// The loader-side reader stops at the first section of this name, so a second
+// record would be silently ignored. The fixture appends one directly rather than
+// instrumenting twice, so the test isolates this check from whatever else a
+// second pass over a patched object would run into first.
+TEST(InstrumentorKernargRecord, ObjectAlreadyDeclaringAKernargExtensionFailsClosed) {
+  auto target = make_gfx950_kernarg_kernel_elf();
+  AmdGpuCodeObject plain(target.data(), target.size());
+  ASSERT_TRUE(plain.is_valid());
+
+  CodeObjectPatcher patcher(plain);
+  const std::vector<uint8_t> foreign_record(16, 0);
+  ASSERT_TRUE(
+      patcher.append_nonalloc_section(kKernargExtensionMetadataSectionName, foreign_record));
+  const std::vector<uint8_t> with_record = patcher.emit();
+
+  AmdGpuCodeObject obj(with_record.data(), with_record.size());
+  ASSERT_TRUE(obj.is_valid());
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_FALSE(result.errors.empty()) << "a second kernarg record was appended";
+  EXPECT_NE(result.errors.front().find("already carries"), std::string::npos)
+      << result.errors.front();
+}
+
+// A record with no prologue would tell a runtime to build a wrapper the kernel
+// never reads through.
+TEST(InstrumentorKernargRecord, OrdinaryProbeCallDeclaresNothing) {
+  auto target = make_gfx950_kernarg_kernel_elf();
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 4;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  pt.probe_args = {probe_arg_imm(1)};
+  instr.add_point(pt);
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  EXPECT_TRUE(test::section_bytes(patched, kKernargExtensionMetadataSectionName).empty());
+}
+
+// An inline nop has nowhere to put arguments.
+TEST(InstrumentorProbePatch, RejectsArgumentsWithoutAProbe) {
+  auto target = make_gfx950_kernel_elf_with_two_nops();
+  AmdGpuCodeObject obj(target.data(), target.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 0;
+  pt.probe_args = {probe_arg_imm(1)};
+  instr.add_point(pt);
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("probe_args"), std::string::npos) << result.errors.front();
+}
+
+// More arguments than the ABI has registers for. Rejected before the count is
+// narrowed to uint8_t, which would wrap a large request into a small in-range
+// one.
+TEST(InstrumentorProbePatch, RejectsMoreArgumentsThanFitInRegisters) {
+  auto target = make_gfx950_kernel_elf_with_two_nops();
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeMarkerMovS5, kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 0;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  pt.probe_args.assign(kMaxProbeArgVgprs + 1, probe_arg_imm(0));
+  instr.add_point(pt);
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("the limit is"), std::string::npos) << result.errors.front();
+}
+
 // Two anchors calling the SAME (probe_obj, symbol) share a single copied body:
 // the body is emitted once and both trampolines target that one copy. Locks in
 // the resolve_probe_index dedup so a regression that copies per site is caught.
 TEST(InstrumentorProbePatch, TwoSitesSharingOneProbeCopyBodyOnce) {
-  auto target = make_gfx950_elf_with_two_nops(); // anchors at offsets 0 and 4.
+  auto target = make_gfx950_kernel_elf_with_two_nops(); // anchors at offsets 0 and 4.
   auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeMarkerMovS5, kProbeSetpcS30S31});
   AmdGpuCodeObject obj(target.data(), target.size());
   AmdGpuCodeObject probe_obj(probe.data(), probe.size());
@@ -1872,7 +3114,7 @@ TEST(InstrumentorProbePatch, TwoSitesSharingOneProbeCopyBodyOnce) {
   const std::vector<uint32_t> cave(text.begin() + kOriginalTextWords, text.end());
 
   // Deduped: the body's marker appears exactly once across the appended region.
-  EXPECT_EQ(std::count(cave.begin(), cave.end(), kProbeMarkerMovS5), 1);
+  EXPECT_EQ(std::ranges::count(cave, kProbeMarkerMovS5), 1);
   EXPECT_EQ(cave.front(), kProbeMarkerMovS5); // body sits ahead of both trampolines.
 
   // Each trampoline emits its own call and targets the shared body's offset.
@@ -1880,7 +3122,7 @@ TEST(InstrumentorProbePatch, TwoSitesSharingOneProbeCopyBodyOnce) {
     EXPECT_EQ(p.probe_target_offset, kCaveStart);
     const uint32_t swappc =
         build_s_swappc_b64(p.link_pair_base, p.target_pair_base, ROCJITSU_CODE_ARCH_CDNA4);
-    EXPECT_NE(std::find(cave.begin(), cave.end(), swappc), cave.end());
+    EXPECT_NE(std::ranges::find(cave, swappc), cave.end());
   }
 }
 
@@ -1888,7 +3130,7 @@ TEST(InstrumentorProbePatch, TwoSitesSharingOneProbeCopyBodyOnce) {
 // the probes were first requested, and each trampoline's probe_target_offset
 // points at its own body. Catches ordering / wrong-body-target regressions.
 TEST(InstrumentorProbePatch, TwoSitesDistinctProbesEachTargetsItsBody) {
-  auto target = make_gfx950_elf_with_two_nops(); // anchors at offsets 0 and 4.
+  auto target = make_gfx950_kernel_elf_with_two_nops(); // anchors at offsets 0 and 4.
   // Distinguishable 2-word bodies: a unique leading marker then the return.
   auto probe_a = make_gfx950_probe_elf("rj_probe_a", {kProbeMarkerMovS5, kProbeSetpcS30S31});
   auto probe_b = make_gfx950_probe_elf("rj_probe_b", {kProbeMarkerMovS6, kProbeSetpcS30S31});
@@ -1922,11 +3164,11 @@ TEST(InstrumentorProbePatch, TwoSitesDistinctProbesEachTargetsItsBody) {
   const std::vector<uint32_t> cave(text.begin() + kOriginalTextWords, text.end());
 
   // Each distinct body is copied exactly once.
-  EXPECT_EQ(std::count(cave.begin(), cave.end(), kProbeMarkerMovS5), 1);
-  EXPECT_EQ(std::count(cave.begin(), cave.end(), kProbeMarkerMovS6), 1);
+  EXPECT_EQ(std::ranges::count(cave, kProbeMarkerMovS5), 1);
+  EXPECT_EQ(std::ranges::count(cave, kProbeMarkerMovS6), 1);
   // ...and in request order: body A (marker mov s5) precedes body B (marker s6).
-  const auto a_it = std::find(cave.begin(), cave.end(), kProbeMarkerMovS5);
-  const auto b_it = std::find(cave.begin(), cave.end(), kProbeMarkerMovS6);
+  const auto a_it = std::ranges::find(cave, kProbeMarkerMovS5);
+  const auto b_it = std::ranges::find(cave, kProbeMarkerMovS6);
   ASSERT_NE(a_it, cave.end());
   ASSERT_NE(b_it, cave.end());
   EXPECT_LT(a_it, b_it);
@@ -1986,7 +3228,7 @@ TEST(InstrumentorProbePatch, ProbeObjWithoutSymbolFailsClosed) {
 // build_probe_callable accepts it (the final instruction is still the setpc), so
 // the orchestrator's check_probe_link_pair is what fails closed.
 TEST(InstrumentorProbePatch, ProbeClobberingLinkPairFailsClosed) {
-  auto target = make_gfx950_elf_with_two_nops();
+  auto target = make_gfx950_kernel_elf_with_two_nops();
   auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeMovS30_0, kProbeSetpcS30S31});
   AmdGpuCodeObject obj(target.data(), target.size());
   AmdGpuCodeObject probe_obj(probe.data(), probe.size());
@@ -2003,6 +3245,874 @@ TEST(InstrumentorProbePatch, ProbeClobberingLinkPairFailsClosed) {
   ASSERT_FALSE(result.errors.empty());
   EXPECT_NE(result.errors.front().find("return-link pair"), std::string::npos)
       << "error was: " << result.errors.front();
+}
+
+// A probe reading v31 without defining it wants workitem_id_x, which only the
+// kernel's own entry prologue produces. Nothing in the instrumentation path
+// supplies it, so the site is rejected rather than silently handed whatever the
+// instrumented kernel left in v31.
+TEST(InstrumentorProbePatch, ProbeWithImplicitLiveInFailsClosed) {
+  auto target = make_gfx950_kernel_elf_with_two_nops();
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeMovV0FromV31, kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 4;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  instr.add_point(pt);
+
+  auto result = instr.patch();
+  EXPECT_TRUE(result.elf_bytes.empty());
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("v31"), std::string::npos)
+      << "error was: " << result.errors.front();
+  EXPECT_NE(result.errors.front().find("before defining it"), std::string::npos)
+      << "error was: " << result.errors.front();
+}
+
+// A probe call needs the kernel's SGPR allocation to bound temp selection. On a
+// descriptorless object that bound is unknown, so the call fails closed rather than
+// fall back to the device-wide default (which could pick temps past the allocation).
+TEST(InstrumentorProbePatch, DescriptorlessProbeCallFailsClosed) {
+  auto target = make_gfx950_elf_with_two_nops(); // no `.kd` descriptor
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 4;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  instr.add_point(pt);
+
+  auto result = instr.patch();
+  EXPECT_TRUE(result.elf_bytes.empty());
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("discovered kernel descriptor"), std::string::npos)
+      << "error was: " << result.errors.front();
+}
+
+// Section 8: probe-call register spilling (end-to-end)
+
+// True if `w` is a SOP1 s_mov (opcode `mov_op`) whose scalar source (save,
+// as_src=true) or scalar destination (restore, as_src=false) is `operand`. Used
+// to spot the special-state save/restore s_mov pair regardless of which dead SGPR
+// temp the planner happened to pick.
+[[nodiscard]] bool is_special_mov(uint32_t w, uint32_t mov_op, uint16_t operand, bool as_src) {
+  if ((w >> 23) != kSop1EncodingPrefix)
+    return false;
+  if (((w >> 8) & 0xFFu) != mov_op)
+    return false;
+  const uint16_t field =
+      as_src ? static_cast<uint16_t>(w & 0xFFu) : static_cast<uint16_t>((w >> 16) & 0x7Fu);
+  return field == operand;
+}
+
+// True if `cave` holds a special-state s_mov as is_special_mov() defines it.
+[[nodiscard]] bool cave_has_special_mov(const std::vector<uint32_t> &cave, uint32_t mov_op,
+                                        uint16_t operand, bool as_src) {
+  return std::ranges::any_of(
+      cave, [&](uint32_t w) { return is_special_mov(w, mov_op, operand, as_src); });
+}
+
+// Anchors that read a register the envelope restores right before them. Same
+// encoding on gfx942 and gfx950 (llvm-mc).
+// global_load_dword v1, v0, s[8:9]: reads s[8:9] as saddr and v0 as the offset.
+constexpr std::array<uint32_t, 2> kGlobalLoadV1V0S8 = {0xDC508000u, 0x01080000u};
+// s_movrels_b32 s1, s2: reads s[2 + M0].
+constexpr uint32_t kMovrelsS1S2 = 0xBE812A02u;
+
+// DBI probe-call spill path: static e2e over CDNA3 (gfx942), CDNA4 (gfx950), and
+// RDNA4 (gfx1200). CDNA shares one GFX9 FLAT-scratch bracket on wave64; RDNA4 uses
+// VSCRATCH on wave32. One base fixture drives the shared patch/extract flow -- the
+// arch differs only in its {kernel, probe} ELF factory pair and the setpc word.
+// Per-arch derived fixtures pin the arch; TEST_F names read <Arch>ProbeSpill.<Case>.
+
+// The arch-varying inputs: the ISA enum plus its {kernel, probe} ELF factories.
+struct SpillArch {
+  rj_code_arch_t arch;
+  std::vector<uint8_t> (*make_kernel)(const std::vector<uint32_t> &, uint32_t, uint32_t, uint32_t,
+                                      uint32_t);
+  std::vector<uint8_t> (*make_probe)(std::string_view, const std::vector<uint32_t> &);
+};
+inline SpillArch cdna3_probe_spill_arch() {
+  return {ROCJITSU_CODE_ARCH_CDNA3, &make_gfx942_kernel_elf, &make_gfx942_probe_elf};
+}
+inline SpillArch cdna4_probe_spill_arch() {
+  return {ROCJITSU_CODE_ARCH_CDNA4, &make_gfx950_kernel_elf, &make_gfx950_probe_elf};
+}
+inline SpillArch rdna4_probe_spill_arch() {
+  return {ROCJITSU_CODE_ARCH_RDNA4, &make_gfx1200_kernel_elf, &make_gfx1200_probe_elf};
+}
+
+class InstrProbeSpillBase : public ::testing::Test {
+protected:
+  explicit InstrProbeSpillBase(SpillArch a) : a_(a) {}
+  rj_code_arch_t arch() const { return a_.arch; }
+  uint32_t endpgm() const { return build_s_endpgm(a_.arch); }
+  uint32_t setpc() const { return build_s_setpc_b64(/*s[30:31]=*/30, a_.arch); }
+
+  // Cave (trampoline body appended after the original text) plus the patched
+  // kernel's private_segment_fixed_size.
+  struct Caved {
+    std::vector<uint32_t> cave;
+    uint32_t scratch = 0;
+  };
+
+  // Full probe-call patch: dispatch one point at offset 0 over `kernel_body` (the
+  // original .text) with a probe of `probe_body`. Returns the cave (text past the
+  // original words) and the patched scratch size; empty cave on failure.
+  // granulated_vgpr_count / accum_offset shape the descriptor's VGPR/AccVGPR window
+  // for AGPR tests; the defaults reproduce the historical CDNA shape.
+  Caved patch_spill(const std::vector<uint32_t> &kernel_body,
+                    const std::vector<uint32_t> &probe_body, uint32_t private_bytes,
+                    uint32_t granulated_vgpr_count = 0, uint32_t accum_offset = 0) {
+    auto target = a_.make_kernel(kernel_body, private_bytes, /*granulated_sgpr_count=*/3,
+                                 granulated_vgpr_count, accum_offset);
+    auto probe = a_.make_probe("rj_test_probe", probe_body);
+    AmdGpuCodeObject obj(target.data(), target.size());
+    AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+    EXPECT_TRUE(obj.is_valid());
+    EXPECT_TRUE(probe_obj.is_valid());
+
+    Instrumentor instr(obj, a_.arch);
+    InstrumentationPoint pt;
+    pt.anchor_offset = 0;
+    pt.probe_obj = &probe_obj;
+    pt.probe_symbol = "rj_test_probe";
+    instr.add_point(pt);
+
+    auto result = instr.patch_with_debug_summaries();
+    EXPECT_TRUE(result.errors.empty())
+        << (result.errors.empty() ? std::string{} : result.errors.front());
+    if (!result.errors.empty())
+      return {};
+    EXPECT_EQ(result.patches.size(), 1u);
+    EXPECT_TRUE(result.patches[0].is_probe_call);
+
+    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    EXPECT_TRUE(patched.is_valid());
+    const std::vector<uint32_t> text = section_words(patched, ".text");
+    if (text.size() <= kernel_body.size())
+      return {};
+    return {std::vector<uint32_t>(text.begin() + kernel_body.size(), text.end()),
+            patched_private_segment_size(patched)};
+  }
+
+  // Arch's single-kernel target ELF / probe ELF for this fixture's arch.
+  std::vector<uint8_t> kernel_elf(const std::vector<uint32_t> &body, uint32_t private_bytes,
+                                  uint32_t granulated_vgpr_count = 0, uint32_t accum_offset = 0) {
+    return a_.make_kernel(body, private_bytes, /*granulated_sgpr_count=*/3, granulated_vgpr_count,
+                          accum_offset);
+  }
+  std::vector<uint8_t> probe_elf(const std::vector<uint32_t> &body) {
+    return a_.make_probe("rj_test_probe", body);
+  }
+
+  // Fail-closed patch over prebuilt ELF bytes: returns the raw result for
+  // empty-elf / error-substring checks (covers the two-kernel case too).
+  InstrumentedCodeObject patch_expecting_result(const std::vector<uint8_t> &target,
+                                                const std::vector<uint8_t> &probe) {
+    AmdGpuCodeObject obj(target.data(), target.size());
+    AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+    Instrumentor instr(obj, a_.arch);
+    InstrumentationPoint pt;
+    pt.anchor_offset = 0;
+    pt.probe_obj = &probe_obj;
+    pt.probe_symbol = "rj_test_probe";
+    instr.add_point(pt);
+    return instr.patch();
+  }
+
+  // Assert a fail-closed patch: empty ELF and an error mentioning `needle`.
+  void expect_failure_containing(const InstrumentedCodeObject &r, std::string_view needle) {
+    EXPECT_TRUE(r.elf_bytes.empty());
+    ASSERT_FALSE(r.errors.empty());
+    EXPECT_NE(r.errors.front().find(needle), std::string::npos)
+        << "error was: " << r.errors.front();
+  }
+
+  // Patch a probe that clobbers one special register on a zero-scratch kernel
+  // whose anchor (v_mov v3, v2) needs no spill, isolating the save/restore.
+  // The compare's vsrc1 is v0, so the body defines v0 before reading it. A probe
+  // that read v0 cold would be rejected as having an implicit live-in, which is
+  // a different gate than the special-state preservation under test here.
+  std::vector<uint32_t> patch_probe_clobbering(uint32_t probe_clobber_word) {
+    Caved c = patch_spill({kMovV3V2, endpgm()}, {kMovV0Zero, probe_clobber_word, setpc()},
+                          /*private_bytes=*/0);
+    EXPECT_EQ(c.scratch, 0u) << "special-state preservation needs no scratch";
+    return c.cave;
+  }
+
+  // The architecture-complete load drain opens the probe-call envelope, ahead of the
+  // special-state saves and `first_spill_op` (the first store on the VGPR path, the
+  // first writelane on the SGPR path), so a register whose producing load is still
+  // pending is stored final-valued, not stale.
+  void expect_drain_before_store(const std::vector<uint32_t> &cave,
+                                 const std::vector<uint32_t> &first_spill_op) {
+    const auto drain = build_wait_all_loads_complete(a_.arch);
+    auto op = std::ranges::search(cave, first_spill_op).begin();
+    ASSERT_NE(op, cave.end());
+    EXPECT_NE(std::ranges::search(std::ranges::subrange(cave.begin(), op), drain).begin(), op)
+        << "no load drain before the first spill op";
+  }
+
+  // The matching drain is emitted immediately after the probe call returns, ahead of
+  // any restoration, so a probe's own still-in-flight load cannot retire onto a just-
+  // restored register -- on RDNA4 the per-fill s_wait_loadcnt misses a scalar s_load
+  // (KMCNT). It sits after the prologue op (`first_spill_op`, before the call) and
+  // before `first_fill_load` (the first epilogue scratch load), i.e. after the
+  // s_swappc_b64 return.
+  void expect_drain_after_return(const std::vector<uint32_t> &cave,
+                                 const std::vector<uint32_t> &first_spill_op,
+                                 const std::vector<uint32_t> &first_fill_load) {
+    const auto drain = build_wait_all_loads_complete(a_.arch);
+    auto op = std::ranges::search(cave, first_spill_op).begin();
+    ASSERT_NE(op, cave.end());
+    auto fill = std::ranges::search(std::ranges::subrange(op, cave.end()), first_fill_load).begin();
+    ASSERT_NE(fill, cave.end());
+    EXPECT_NE(std::ranges::search(std::ranges::subrange(op, fill), drain).begin(), fill)
+        << "no load drain after the call return, before the first spill fill";
+  }
+
+  // Assert v`vgpr`'s spill words are in `cave`: a scratch store (prologue) and load
+  // (epilogue) at slot `off`. Checks the words appear, not their order or the
+  // descriptor size -- callers assert the load wait, drain, and scratch growth.
+  void expect_vgpr_spill_present(const std::vector<uint32_t> &cave, uint16_t vgpr, uint32_t off) {
+    const auto store = build_scratch_store_dword(vgpr, off, a_.arch);
+    const auto load = build_scratch_load_dword(vgpr, off, a_.arch);
+    EXPECT_NE(std::ranges::search(cave, store).begin(), cave.end())
+        << "missing store for v" << vgpr;
+    EXPECT_NE(std::ranges::search(cave, load).begin(), cave.end()) << "missing load for v" << vgpr;
+  }
+
+  // Assert s`sgpr`'s spill words are in `cave`: writelane + scratch store (prologue)
+  // and scratch load + readlane (epilogue), bridged through v0 at slot `off`. Checks
+  // the words appear, not their order or the descriptor size -- callers assert the
+  // load wait, drain, and scratch growth.
+  void expect_sgpr_spill_present(const std::vector<uint32_t> &cave, uint16_t sgpr, uint32_t off) {
+    const auto writelane = build_v_writelane_b32(/*bridge=*/0, sgpr, /*lane=*/0, a_.arch);
+    const auto store = build_scratch_store_dword(/*bridge=*/0, off, a_.arch);
+    const auto load = build_scratch_load_dword(/*bridge=*/0, off, a_.arch);
+    const auto readlane = build_v_readlane_b32(sgpr, /*bridge=*/0, /*lane=*/0, a_.arch);
+    EXPECT_NE(std::ranges::search(cave, writelane).begin(), cave.end())
+        << "missing writelane for s" << sgpr;
+    EXPECT_NE(std::ranges::search(cave, store).begin(), cave.end())
+        << "missing store for s" << sgpr;
+    EXPECT_NE(std::ranges::search(cave, load).begin(), cave.end()) << "missing load for s" << sgpr;
+    EXPECT_NE(std::ranges::search(cave, readlane).begin(), cave.end())
+        << "missing readlane for s" << sgpr;
+  }
+
+  // Assert AccVGPR acc`acc`'s spill words are in `cave`: a scratch store (prologue) and
+  // load (epilogue) at slot `off`, both carrying the `acc` bit (a direct accumulator-file
+  // spill, no bridge). Checks the words appear, not their order or the descriptor size.
+  void expect_acc_spill_present(const std::vector<uint32_t> &cave, uint16_t acc, uint32_t off) {
+    const auto store = build_scratch_store_dword(acc, off, a_.arch, /*acc=*/true);
+    const auto load = build_scratch_load_dword(acc, off, a_.arch, /*acc=*/true);
+    EXPECT_NE(std::ranges::search(cave, store).begin(), cave.end())
+        << "missing store for acc" << acc;
+    EXPECT_NE(std::ranges::search(cave, load).begin(), cave.end()) << "missing load for acc" << acc;
+  }
+
+  // Assert the standard single-VGPR spill in `caved`: v2 stored/reloaded at slot 64,
+  // the reload guarded by a load wait, the boundary drain before the store and after
+  // the call return, and the descriptor grown by one slot (64 -> 68).
+  void expect_vgpr_spill(const Caved &caved) {
+    const std::vector<uint32_t> &cave = caved.cave;
+    expect_vgpr_spill_present(cave, /*vgpr=*/2, /*off=*/64);
+    EXPECT_NE(std::ranges::find(cave, build_wait_loads_complete(a_.arch)), cave.end());
+    const auto store = build_scratch_store_dword(/*vgpr=*/2, /*off=*/64, a_.arch);
+    expect_drain_before_store(cave, store);
+    expect_drain_after_return(cave, store,
+                              build_scratch_load_dword(/*vgpr=*/2, /*off=*/64, a_.arch));
+    EXPECT_EQ(caved.scratch, 68u);
+  }
+
+  // Assert the standard single-SGPR spill in `caved`: s8 bridged through v0, stored/reloaded
+  // at slot 64, the reload guarded by a load wait, the boundary drain before the first spill
+  // op (the writelane) and after the call return, and the descriptor grown by one slot
+  // (64 -> 68).
+  void expect_sgpr_spill(const Caved &caved) {
+    const std::vector<uint32_t> &cave = caved.cave;
+    expect_sgpr_spill_present(cave, /*sgpr=*/8, /*off=*/64);
+    EXPECT_NE(std::ranges::find(cave, build_wait_loads_complete(a_.arch)), cave.end());
+    const auto writelane = build_v_writelane_b32(/*bridge=*/0, /*sgpr=*/8, /*lane=*/0, a_.arch);
+    const std::vector<uint32_t> writelane_words{writelane.begin(), writelane.end()};
+    expect_drain_before_store(cave, writelane_words);
+    expect_drain_after_return(cave, writelane_words,
+                              build_scratch_load_dword(/*bridge=*/0, /*off=*/64, a_.arch));
+    EXPECT_EQ(caved.scratch, 68u);
+  }
+
+  // Assert the standard single-AccVGPR spill in `caved`: acc0 stored/reloaded at slot 64
+  // via the `acc` bit (no bridge), the prologue drain immediately before the store and the
+  // boundary drain after the call return before the fill, and the descriptor grown by one
+  // slot (64 -> 68). The positional drain checks matter because on CDNA the drain, load wait,
+  // and store wait all encode as the same s_waitcnt 0, so a bare "an s_waitcnt 0 exists" search
+  // would pass even with the store's guarding drain gone.
+  void expect_acc_spill(const Caved &caved) {
+    const std::vector<uint32_t> &cave = caved.cave;
+    expect_acc_spill_present(cave, /*acc=*/0, /*off=*/64);
+    EXPECT_NE(std::ranges::find(cave, build_wait_loads_complete(a_.arch)), cave.end());
+    const auto store = build_scratch_store_dword(/*acc=*/0, /*off=*/64, a_.arch, /*acc=*/true);
+    expect_drain_before_store(cave, store);
+    expect_drain_after_return(
+        cave, store, build_scratch_load_dword(/*acc=*/0, /*off=*/64, a_.arch, /*acc=*/true));
+    EXPECT_EQ(caved.scratch, 68u);
+  }
+
+  // Assert an AccVGPR tuple spill in `caved`: acc0-3 each stored/reloaded straight to
+  // scratch via the `acc` bit in acc order at slots 64/68/72/76, the reload guarded by a
+  // load wait, and the descriptor grown to cover all four (64 -> 80). Used by the MFMA
+  // acc_cd fixtures.
+  void expect_acc_tuple_spill(const Caved &caved) {
+    const std::vector<uint32_t> &cave = caved.cave;
+    expect_acc_spill_present(cave, /*acc=*/0, /*off=*/64);
+    expect_acc_spill_present(cave, /*acc=*/1, /*off=*/68);
+    expect_acc_spill_present(cave, /*acc=*/2, /*off=*/72);
+    expect_acc_spill_present(cave, /*acc=*/3, /*off=*/76);
+    EXPECT_NE(std::ranges::find(cave, build_wait_loads_complete(a_.arch)), cave.end());
+    EXPECT_EQ(caved.scratch, 80u);
+  }
+
+  // Assert the cave both saves and restores `operand` via an s_mov of `mov_op`.
+  void expect_special_preserved(const std::vector<uint32_t> &cave, uint32_t mov_op,
+                                uint16_t operand) {
+    EXPECT_TRUE(cave_has_special_mov(cave, mov_op, operand, /*as_src=*/true))
+        << "missing special-state save (s_mov tmp, <reg>)";
+    EXPECT_TRUE(cave_has_special_mov(cave, mov_op, operand, /*as_src=*/false))
+        << "missing special-state restore (s_mov <reg>, tmp)";
+  }
+
+  // A kernel with zero fixed scratch cannot be spilled into and fails closed.
+  void expect_zero_scratch_fails_closed() {
+    expect_failure_containing(
+        patch_expecting_result(kernel_elf({kMovV3V2, endpgm()}, /*private_bytes=*/0),
+                               probe_elf({kMovV2Zero, setpc()})),
+        "fixed scratch");
+  }
+
+  // A probe that clobbers EXEC is preserved: s_mov_b64 tmp, exec (save) / s_mov_b64
+  // exec, tmp (restore). On RDNA4 the save/restore stays wave64-shaped even on wave32
+  // (width hardcoded to 2); EXEC_LO round-trips correctly.
+  void expect_preserves_clobbered_exec() {
+    const uint32_t clobber =
+        build_s_mov_b32(scalar_operand_exec_lo(arch()), /*inline 0=*/128, arch());
+    const std::vector<uint32_t> cave = patch_probe_clobbering(clobber);
+    ASSERT_FALSE(cave.empty());
+    expect_special_preserved(cave, sop1_op_mov_b64(arch()), scalar_operand_exec_lo(arch()));
+  }
+
+  // VCC is preserved the same way (64-bit pair).
+  void expect_preserves_clobbered_vcc() {
+    const uint32_t clobber =
+        build_s_mov_b32(scalar_operand_vcc_lo(arch()), /*inline 0=*/128, arch());
+    const std::vector<uint32_t> cave = patch_probe_clobbering(clobber);
+    ASSERT_FALSE(cave.empty());
+    expect_special_preserved(cave, sop1_op_mov_b64(arch()), scalar_operand_vcc_lo(arch()));
+  }
+
+  // M0 is preserved with a single 32-bit s_mov (m0 = 124 on CDNA4, 125 on RDNA4).
+  void expect_preserves_clobbered_m0() {
+    const uint16_t m0 = scalar_operand_m0(arch());
+    const std::vector<uint32_t> cave =
+        patch_probe_clobbering(build_s_mov_b32(m0, /*inline 0=*/128, arch()));
+    ASSERT_FALSE(cave.empty());
+    expect_special_preserved(cave, sop1_op_mov_b32(arch()), m0);
+  }
+
+  // EXEC and VCC are preserved unconditionally, even when the probe body touches
+  // neither explicitly. The clobber summary sees only explicit operands, so implicit
+  // defs (v_cmp->VCC, v_cmpx->EXEC) would otherwise slip through; always saving both
+  // closes that hole. Probe body here is a bare s_nop (no special-state operand).
+  void expect_preserves_exec_and_vcc_unconditionally() {
+    const std::vector<uint32_t> cave = patch_probe_clobbering(build_s_nop(0, arch()));
+    ASSERT_FALSE(cave.empty());
+    expect_special_preserved(cave, sop1_op_mov_b64(arch()), scalar_operand_exec_lo(arch()));
+    expect_special_preserved(cave, sop1_op_mov_b64(arch()), scalar_operand_vcc_lo(arch()));
+  }
+
+  // Every probe-call envelope -- including a no-spill site -- opens with a load drain
+  // and emits a matching drain right after the call returns, so a pre-anchor or
+  // probe-issued asynchronous load cannot retire onto the saved/restored special
+  // state. The probe body is a bare s_nop (no spill; special state still preserved).
+  void expect_boundary_drains_at_no_spill_site() {
+    const std::vector<uint32_t> cave = patch_probe_clobbering(build_s_nop(0, arch()));
+    ASSERT_FALSE(cave.empty());
+    const auto drain = build_wait_all_loads_complete(arch());
+    size_t count = 0;
+    for (auto it = std::ranges::search(cave, drain).begin(); it != cave.end();
+         it = std::ranges::search(std::ranges::subrange(it + drain.size(), cave.end()), drain)
+                  .begin())
+      ++count;
+    EXPECT_GE(count, 2u) << "a no-spill probe envelope must still be bracketed by boundary drains";
+  }
+
+  // FLAT_SCRATCH stays rejected (the spill store/load depend on it), failing closed.
+  // gfx9 only (CDNA3, CDNA4): flat_scratch_lo/hi are writable operands (102/103) here;
+  // gfx11+ removed them (OPR_SDST_SGPR_MAX=105, so dst 102 is the plain SGPR s102), so
+  // the clobber is inexpressible via s_mov on RDNA4 -- no RDNA4 analog.
+  void expect_rejects_clobbered_flat_scratch() {
+    // FLAT_SCRATCH_LO is operand 102 on gfx9.
+    const uint32_t clobber = build_s_mov_b32(/*flat_scratch_lo=*/102, /*inline 0=*/128, arch());
+    expect_failure_containing(
+        patch_expecting_result(kernel_elf({kMovV3V2, endpgm()}, /*private_bytes=*/0),
+                               probe_elf({clobber, setpc()})),
+        "FLAT_SCRATCH");
+  }
+
+  // The instructions a cave runs between a hazard's producer and the relocated
+  // anchor, counted the way GFX9 hardware counts wait states: s_nop N supplies N+1,
+  // any other instruction 1. `trace` names each instruction for failure messages.
+  struct WaitGap {
+    uint32_t wait_states = 0;
+    uint32_t nops = 0;
+    std::string trace;
+  };
+
+  // Gap between the last instruction before the relocated `anchor` for which
+  // `is_producer(words)` holds and the anchor itself. Walks decoded instructions, so
+  // a multi-word instruction counts once. nullopt (with a failure recorded if the
+  // anchor is missing) when either end is not found.
+  template <typename IsProducer>
+  std::optional<WaitGap> wait_gap_before_anchor(const std::vector<uint32_t> &cave,
+                                                std::span<const uint32_t> anchor,
+                                                IsProducer is_producer) {
+    const std::unique_ptr<Decoder> decoder = Decoder::create(a_.arch);
+    if (decoder == nullptr) {
+      ADD_FAILURE() << "no decoder for the fixture's arch";
+      return std::nullopt;
+    }
+    std::optional<WaitGap> gap;
+    for (size_t i = 0; i < cave.size();) {
+      const std::span<const uint32_t> rest(cave.data() + i, cave.size() - i);
+      if (rest.size() >= anchor.size() && std::ranges::equal(rest.first(anchor.size()), anchor))
+        return gap;
+      DecodeResult decoded = decoder->decode_window(rest);
+      if (decoded.failed()) {
+        ADD_FAILURE() << "cave word " << i << " does not decode";
+        return std::nullopt;
+      }
+      const std::unique_ptr<Instruction> inst = std::move(decoded).value();
+      const size_t words = static_cast<size_t>(inst->size()) / sizeof(uint32_t);
+      if (is_producer(rest.first(words))) {
+        gap = WaitGap{};
+      } else if (gap) {
+        const bool is_nop = inst->mnemonic() == "s_nop";
+        gap->wait_states += is_nop ? (rest.front() & 0xFFFFu) + 1 : 1;
+        gap->nops += is_nop ? 1 : 0;
+        gap->trace += "  " + std::string(inst->mnemonic()) + "\n";
+      }
+      i += words;
+    }
+    ADD_FAILURE() << "relocated anchor not found in the cave";
+    return std::nullopt;
+  }
+
+  // Gap after the envelope's last v_readlane_b32 restoring s`sgpr`, whichever bridge
+  // VGPR the planner picked.
+  std::optional<WaitGap> sgpr_restore_gap(const std::vector<uint32_t> &cave,
+                                          std::span<const uint32_t> anchor, uint16_t sgpr) {
+    // The bridge is an ordinary VGPR, so the scan covers the ordinary VGPR file
+    // (256 on both CDNA and RDNA).
+    constexpr uint16_t kVgprFileSize = 256;
+    return wait_gap_before_anchor(cave, anchor, [&](std::span<const uint32_t> words) {
+      for (uint16_t bridge = 0; bridge < kVgprFileSize; ++bridge)
+        if (std::ranges::equal(words, build_v_readlane_b32(sgpr, bridge, /*lane=*/0, a_.arch)))
+          return true;
+      return false;
+    });
+  }
+
+  // Gap after the envelope's s_mov_b32 restoring M0.
+  std::optional<WaitGap> m0_restore_gap(const std::vector<uint32_t> &cave,
+                                        std::span<const uint32_t> anchor) {
+    return wait_gap_before_anchor(cave, anchor, [&](std::span<const uint32_t> words) {
+      return words.size() == 1 && is_special_mov(words.front(), sop1_op_mov_b32(a_.arch),
+                                                 scalar_operand_m0(a_.arch), /*as_src=*/false);
+    });
+  }
+
+  // s8 live at a global load that reads s[8:9] as saddr, and a probe that writes it:
+  // s8 is the site's only spill, so only the EXEC and VCC restores follow its
+  // v_readlane_b32, 2 of the 5 wait states the load needs. The envelope pads with
+  // s_nop 2 and no further.
+  void expect_sgpr_restore_padded_to_five() {
+    const Caved caved = patch_spill({kGlobalLoadV1V0S8[0], kGlobalLoadV1V0S8[1], endpgm()},
+                                    {build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch()), setpc()},
+                                    /*private_bytes=*/64);
+    const std::optional<WaitGap> gap = sgpr_restore_gap(caved.cave, kGlobalLoadV1V0S8, 8);
+    ASSERT_TRUE(gap) << "no v_readlane_b32 restoring s8 before the anchor";
+    EXPECT_EQ(gap->wait_states, 5u) << gap->trace;
+    EXPECT_EQ(gap->nops, 1u) << gap->trace;
+  }
+
+  // M0 restored right before an anchor that reads it: s_movrels_b32 indexes its
+  // source by M0, and needs 1 wait state after the SALU write. Nothing follows the
+  // M0 restore, so the envelope pads with s_nop 0. No register spills.
+  void expect_m0_restore_padded_to_one() {
+    const Caved caved =
+        patch_spill({kMovrelsS1S2, endpgm()},
+                    {build_s_mov_b32(scalar_operand_m0(arch()), /*inline 0=*/128, arch()), setpc()},
+                    /*private_bytes=*/0);
+    const std::optional<WaitGap> gap = m0_restore_gap(caved.cave, std::span(&kMovrelsS1S2, 1));
+    ASSERT_TRUE(gap) << "no s_mov_b32 restoring M0 before the anchor";
+    EXPECT_EQ(gap->wait_states, 1u) << gap->trace;
+    EXPECT_EQ(gap->nops, 1u) << gap->trace;
+  }
+
+  SpillArch a_;
+};
+
+class Cdna3ProbeSpill : public InstrProbeSpillBase {
+protected:
+  Cdna3ProbeSpill() : InstrProbeSpillBase(cdna3_probe_spill_arch()) {}
+};
+class Cdna4ProbeSpill : public InstrProbeSpillBase {
+protected:
+  Cdna4ProbeSpill() : InstrProbeSpillBase(cdna4_probe_spill_arch()) {}
+};
+class Rdna4ProbeSpill : public InstrProbeSpillBase {
+protected:
+  Rdna4ProbeSpill() : InstrProbeSpillBase(rdna4_probe_spill_arch()) {}
+};
+
+TEST_F(Cdna3ProbeSpill, SpillsLiveClobberedVgpr) {
+  expect_vgpr_spill(patch_spill({kMovV3V2, endpgm()}, {kMovV2Zero, setpc()}, 64));
+}
+
+TEST_F(Cdna4ProbeSpill, SpillsLiveClobberedVgpr) {
+  expect_vgpr_spill(patch_spill({kMovV3V2, endpgm()}, {kMovV2Zero, setpc()}, 64));
+}
+
+// RDNA4 spills to VSCRATCH; additionally the STORECNT fence must sit after the store
+// and before the reload, since s_wait_loadcnt does not order stores on RDNA4.
+TEST_F(Rdna4ProbeSpill, SpillsLiveClobberedVgpr) {
+  const Caved caved = patch_spill({kMovV3V2, endpgm()}, {kMovV2Zero, setpc()}, 64);
+  expect_vgpr_spill(caved);
+
+  const std::vector<uint32_t> &cave = caved.cave;
+  const auto store = build_scratch_store_dword(2, 64, arch());
+  const auto load = build_scratch_load_dword(2, 64, arch());
+  const auto store_it = std::ranges::search(cave, store).begin();
+  const auto load_it = std::ranges::search(cave, load).begin();
+  const uint32_t store_wait = build_wait_stores_complete(arch());
+  const auto store_wait_it = std::ranges::find(cave, store_wait);
+  ASSERT_NE(store_wait_it, cave.end()) << "missing RDNA4 store-counter fence before the reload";
+  EXPECT_LT(store_it, store_wait_it) << "store-counter fence must follow the store";
+  EXPECT_LT(store_wait_it, load_it) << "store-counter fence must precede the reload";
+}
+
+TEST_F(Cdna3ProbeSpill, SpillsLiveClobberedSgpr) {
+  expect_sgpr_spill(patch_spill(
+      {kMovV3S8, endpgm()}, {build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch()), setpc()}, 64));
+}
+
+TEST_F(Cdna4ProbeSpill, SpillsLiveClobberedSgpr) {
+  expect_sgpr_spill(patch_spill(
+      {kMovV3S8, endpgm()}, {build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch()), setpc()}, 64));
+}
+
+TEST_F(Rdna4ProbeSpill, SpillsLiveClobberedSgpr) {
+  expect_sgpr_spill(patch_spill(
+      {kMovV3S8, endpgm()}, {build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch()), setpc()}, 64));
+}
+
+// A live+clobbered AccVGPR spills straight to scratch via the `acc` bit -- no bridge
+// VGPR, no writelane/readlane. AGPRs are CDNA-only, so there is no RDNA4 variant. Relies
+// on the decoder tagging v_accvgpr_read (src) and v_accvgpr_write (dst) operands as
+// ACC_VGPR so they reach the spill set.
+TEST_F(Cdna3ProbeSpill, SpillsLiveClobberedAccVgpr) {
+  expect_acc_spill(patch_spill({kAccReadV3A0Lo, kAccReadV3A0Hi, endpgm()},
+                               {kAccWriteA0ZeroLo, kAccWriteA0ZeroHi, setpc()}, 64));
+}
+
+TEST_F(Cdna4ProbeSpill, SpillsLiveClobberedAccVgpr) {
+  expect_acc_spill(patch_spill({kAccReadV3A0Lo, kAccReadV3A0Hi, endpgm()},
+                               {kAccWriteA0ZeroLo, kAccWriteA0ZeroHi, setpc()}, 64));
+}
+
+// The AccVGPR window size is descriptor-derived: acc_count = kernel_vgpr_count -
+// accum_base. With ACCUM_OFFSET=1 the accumulator base rises to v8 == the 8-VGPR
+// allocation, so the window is empty and a probe clobbering live acc0 must fail
+// closed -- even though the same kernel with ACCUM_OFFSET=0
+// (Cdna4SpillsLiveClobberedAccVgpr) spills acc0 fine. Pins both sides of the
+// descriptor-derived boundary end to end.
+TEST_F(Cdna4ProbeSpill, RejectsAccVgprPastAccumOffsetWindow) {
+  const InstrumentedCodeObject result = patch_expecting_result(
+      kernel_elf({kAccReadV3A0Lo, kAccReadV3A0Hi, endpgm()}, /*private_bytes=*/64,
+                 /*granulated_vgpr_count=*/0, /*accum_offset=*/1),
+      probe_elf({kAccWriteA0ZeroLo, kAccWriteA0ZeroHi, setpc()}));
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("allocated count"), std::string::npos)
+      << result.errors.front();
+}
+
+// AccVGPR liveness must be classified through an MFMA's single acc_cd operand, not only the
+// one-lane v_accvgpr_read/write forms. v_mfma_f32_16x16x16_f16 a[0:3], v[0:1], v[2:3],
+// a[0:3] (acc_cd=1) reads and writes acc[0:3], so all four lanes are live at the anchor; a
+// probe clobbering acc0..acc3 must spill the whole tuple. The default descriptor (8 VGPRs,
+// accum_base=4) allocates exactly acc0-3 -> slots 64/68/72/76. AGPRs are CDNA-only, so no
+// RDNA4 variant.
+TEST_F(Cdna3ProbeSpill, SpillsMfmaAccVgprTupleLiveAcrossProbe) {
+  expect_acc_tuple_spill(
+      patch_spill({kMfmaF32_16x16x16F16_A0to3_Lo, kMfmaF32_16x16x16F16_A0to3_Hi, endpgm()},
+                  {make_accvgpr_write_lo(0), kAccWriteA0ZeroHi, make_accvgpr_write_lo(1),
+                   kAccWriteA0ZeroHi, make_accvgpr_write_lo(2), kAccWriteA0ZeroHi,
+                   make_accvgpr_write_lo(3), kAccWriteA0ZeroHi, setpc()},
+                  64));
+}
+
+TEST_F(Cdna4ProbeSpill, SpillsMfmaAccVgprTupleLiveAcrossProbe) {
+  expect_acc_tuple_spill(
+      patch_spill({kMfmaF32_16x16x16F16_A0to3_Lo, kMfmaF32_16x16x16F16_A0to3_Hi, endpgm()},
+                  {make_accvgpr_write_lo(0), kAccWriteA0ZeroHi, make_accvgpr_write_lo(1),
+                   kAccWriteA0ZeroHi, make_accvgpr_write_lo(2), kAccWriteA0ZeroHi,
+                   make_accvgpr_write_lo(3), kAccWriteA0ZeroHi, setpc()},
+                  64));
+}
+
+// A kernel with zero fixed scratch cannot be spilled into and fails closed.
+TEST_F(Cdna3ProbeSpill, ZeroScratchFailsClosed) { expect_zero_scratch_fails_closed(); }
+TEST_F(Cdna4ProbeSpill, ZeroScratchFailsClosed) { expect_zero_scratch_fails_closed(); }
+TEST_F(Rdna4ProbeSpill, ZeroScratchFailsClosed) { expect_zero_scratch_fails_closed(); }
+
+TEST_F(Cdna3ProbeSpill, PreservesClobberedExec) { expect_preserves_clobbered_exec(); }
+TEST_F(Cdna4ProbeSpill, PreservesClobberedExec) { expect_preserves_clobbered_exec(); }
+TEST_F(Rdna4ProbeSpill, PreservesClobberedExec) { expect_preserves_clobbered_exec(); }
+
+TEST_F(Cdna3ProbeSpill, PreservesClobberedVcc) { expect_preserves_clobbered_vcc(); }
+TEST_F(Cdna4ProbeSpill, PreservesClobberedVcc) { expect_preserves_clobbered_vcc(); }
+TEST_F(Rdna4ProbeSpill, PreservesClobberedVcc) { expect_preserves_clobbered_vcc(); }
+
+TEST_F(Cdna3ProbeSpill, PreservesClobberedM0) { expect_preserves_clobbered_m0(); }
+TEST_F(Cdna4ProbeSpill, PreservesClobberedM0) { expect_preserves_clobbered_m0(); }
+TEST_F(Rdna4ProbeSpill, PreservesClobberedM0) { expect_preserves_clobbered_m0(); }
+
+TEST_F(Cdna3ProbeSpill, PreservesExecAndVccUnconditionally) {
+  expect_preserves_exec_and_vcc_unconditionally();
+}
+TEST_F(Cdna4ProbeSpill, PreservesExecAndVccUnconditionally) {
+  expect_preserves_exec_and_vcc_unconditionally();
+}
+TEST_F(Rdna4ProbeSpill, PreservesExecAndVccUnconditionally) {
+  expect_preserves_exec_and_vcc_unconditionally();
+}
+
+TEST_F(Cdna3ProbeSpill, BoundaryDrainsAtNoSpillSite) { expect_boundary_drains_at_no_spill_site(); }
+TEST_F(Cdna4ProbeSpill, BoundaryDrainsAtNoSpillSite) { expect_boundary_drains_at_no_spill_site(); }
+TEST_F(Rdna4ProbeSpill, BoundaryDrainsAtNoSpillSite) { expect_boundary_drains_at_no_spill_site(); }
+
+// Compare-based coverage: v_cmp writes VCC and v_cmpx writes EXEC. The always-on
+// preservation brackets the call regardless of the summary, so VCC/EXEC round-trip
+// even for a probe whose special-state write the summary might miss. The VOPC
+// encodings are arch-specific single words, so each test passes its own.
+TEST_F(Cdna3ProbeSpill, PreservesVccFromImplicitCompare) {
+  const std::vector<uint32_t> cave =
+      patch_probe_clobbering(/*v_cmp_eq_u32 vcc, 0, v0=*/0x7D940080u);
+  ASSERT_FALSE(cave.empty());
+  expect_special_preserved(cave, sop1_op_mov_b64(arch()), scalar_operand_vcc_lo(arch()));
+}
+
+TEST_F(Cdna3ProbeSpill, PreservesExecFromImplicitCmpx) {
+  const std::vector<uint32_t> cave = patch_probe_clobbering(/*v_cmpx_eq_u32 0, v0=*/0x7DB40080u);
+  ASSERT_FALSE(cave.empty());
+  expect_special_preserved(cave, sop1_op_mov_b64(arch()), scalar_operand_exec_lo(arch()));
+}
+
+TEST_F(Cdna4ProbeSpill, PreservesVccFromImplicitCompare) {
+  const std::vector<uint32_t> cave =
+      patch_probe_clobbering(/*v_cmp_eq_u32 vcc, 0, v0=*/0x7D940080u);
+  ASSERT_FALSE(cave.empty());
+  expect_special_preserved(cave, sop1_op_mov_b64(arch()), scalar_operand_vcc_lo(arch()));
+}
+
+TEST_F(Cdna4ProbeSpill, PreservesExecFromImplicitCmpx) {
+  const std::vector<uint32_t> cave = patch_probe_clobbering(/*v_cmpx_eq_u32 0, v0=*/0x7DB40080u);
+  ASSERT_FALSE(cave.empty());
+  expect_special_preserved(cave, sop1_op_mov_b64(arch()), scalar_operand_exec_lo(arch()));
+}
+
+TEST_F(Rdna4ProbeSpill, PreservesVccFromImplicitCompare) {
+  const std::vector<uint32_t> cave =
+      patch_probe_clobbering(/*v_cmp_eq_u32 vcc, 0, v0=*/0x7C940080u);
+  ASSERT_FALSE(cave.empty());
+  expect_special_preserved(cave, sop1_op_mov_b64(arch()), scalar_operand_vcc_lo(arch()));
+}
+
+TEST_F(Rdna4ProbeSpill, PreservesExecFromImplicitCmpx) {
+  const std::vector<uint32_t> cave = patch_probe_clobbering(/*v_cmpx_eq_u32 0, v0=*/0x7D940080u);
+  ASSERT_FALSE(cave.empty());
+  expect_special_preserved(cave, sop1_op_mov_b64(arch()), scalar_operand_exec_lo(arch()));
+}
+
+TEST_F(Cdna3ProbeSpill, RejectsClobberedFlatScratch) { expect_rejects_clobbered_flat_scratch(); }
+TEST_F(Cdna4ProbeSpill, RejectsClobberedFlatScratch) { expect_rejects_clobbered_flat_scratch(); }
+
+// GFX9 (CDNA1-4) does not interlock a VALU write of an SGPR against a later
+// vector-memory read of it (5 wait states, LLVM GCNHazardRecognizer::
+// checkVMEMHazards), nor a SALU write of M0 against a later M0 reader (1,
+// checkReadM0Hazards). The envelope restores SGPRs with v_readlane_b32 and M0 with
+// s_mov_b32 just before the relocated anchor, so it pads with one s_nop covering
+// whatever the instructions after the restore leave short. DbiSim models no wait
+// states, so only the emitted sequence shows this.
+TEST_F(Cdna3ProbeSpill, SgprRestorePadsToFiveWaitStates) { expect_sgpr_restore_padded_to_five(); }
+TEST_F(Cdna4ProbeSpill, SgprRestorePadsToFiveWaitStates) { expect_sgpr_restore_padded_to_five(); }
+TEST_F(Cdna3ProbeSpill, M0RestorePadsToOneWaitState) { expect_m0_restore_padded_to_one(); }
+TEST_F(Cdna4ProbeSpill, M0RestorePadsToOneWaitState) { expect_m0_restore_padded_to_one(); }
+
+// The pad counts instructions, not words: the probe also writes v0, the load's live
+// offset, so one two-word scratch_load and its wait follow the readlane. With the
+// EXEC and VCC restores that is 4, and s_nop 0 supplies the fifth.
+TEST_F(Cdna4ProbeSpill, SgprRestoreCountsAReloadAsOneWaitState) {
+  const Caved caved =
+      patch_spill({kGlobalLoadV1V0S8[0], kGlobalLoadV1V0S8[1], endpgm()},
+                  {build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch()), kMovV0Zero, setpc()},
+                  /*private_bytes=*/64);
+  const std::optional<WaitGap> gap = sgpr_restore_gap(caved.cave, kGlobalLoadV1V0S8, 8);
+  ASSERT_TRUE(gap) << "no v_readlane_b32 restoring s8 before the anchor";
+  EXPECT_EQ(gap->wait_states, 5u) << gap->trace;
+  EXPECT_EQ(gap->nops, 1u) << gap->trace;
+}
+
+// AccVGPR reloads count the same way: the probe also writes acc0, which the guest
+// reads after the anchor, so one acc-bit scratch_load and its wait follow the
+// readlane, and s_nop 0 supplies the fifth wait state.
+TEST_F(Cdna4ProbeSpill, SgprRestoreCountsAnAccVgprReloadAsOneWaitState) {
+  const Caved caved = patch_spill(
+      {kGlobalLoadV1V0S8[0], kGlobalLoadV1V0S8[1], kAccReadV3A0Lo, kAccReadV3A0Hi, endpgm()},
+      {build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch()), kAccWriteA0ZeroLo, kAccWriteA0ZeroHi,
+       setpc()},
+      /*private_bytes=*/64);
+  const std::optional<WaitGap> gap = sgpr_restore_gap(caved.cave, kGlobalLoadV1V0S8, 8);
+  ASSERT_TRUE(gap) << "no v_readlane_b32 restoring s8 before the anchor";
+  EXPECT_EQ(gap->wait_states, 5u) << gap->trace;
+  EXPECT_EQ(gap->nops, 1u) << gap->trace;
+}
+
+// Two reloads (v0, and v2 which the guest reads after the anchor), their wait, and
+// the EXEC and VCC restores already supply all 5, so no s_nop is emitted.
+TEST_F(Cdna4ProbeSpill, SgprRestoreAfterTwoReloadsAddsNoNop) {
+  const Caved caved = patch_spill(
+      {kGlobalLoadV1V0S8[0], kGlobalLoadV1V0S8[1], kMovV3V2, endpgm()},
+      {build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch()), kMovV0Zero, kMovV2Zero, setpc()},
+      /*private_bytes=*/64);
+  const std::optional<WaitGap> gap = sgpr_restore_gap(caved.cave, kGlobalLoadV1V0S8, 8);
+  ASSERT_TRUE(gap) << "no v_readlane_b32 restoring s8 before the anchor";
+  EXPECT_EQ(gap->wait_states, 5u) << gap->trace;
+  EXPECT_EQ(gap->nops, 0u) << gap->trace;
+}
+
+// One s_nop serves both restores, sized by the larger shortfall rather than their
+// sum: the EXEC, VCC and M0 restores give the SGPR 3 of its 5, the M0 restore has
+// none of its 1, so s_nop 1.
+TEST_F(Cdna4ProbeSpill, SgprAndM0RestoresShareOneNop) {
+  const Caved caved =
+      patch_spill({kGlobalLoadV1V0S8[0], kGlobalLoadV1V0S8[1], endpgm()},
+                  {build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch()),
+                   build_s_mov_b32(scalar_operand_m0(arch()), /*inline 0=*/128, arch()), setpc()},
+                  /*private_bytes=*/64);
+  const std::optional<WaitGap> sgpr_gap = sgpr_restore_gap(caved.cave, kGlobalLoadV1V0S8, 8);
+  ASSERT_TRUE(sgpr_gap) << "no v_readlane_b32 restoring s8 before the anchor";
+  EXPECT_EQ(sgpr_gap->wait_states, 5u) << sgpr_gap->trace;
+  EXPECT_EQ(sgpr_gap->nops, 1u) << sgpr_gap->trace;
+  const std::optional<WaitGap> m0_gap = m0_restore_gap(caved.cave, kGlobalLoadV1V0S8);
+  ASSERT_TRUE(m0_gap) << "no s_mov_b32 restoring M0 before the anchor";
+  EXPECT_EQ(m0_gap->wait_states, 2u) << m0_gap->trace;
+  EXPECT_EQ(m0_gap->nops, 1u) << m0_gap->trace;
+}
+
+// GFX9-style s_nop padding is omitted on RDNA4, and that is all this pins. The anchor
+// reads s8 through a VALU, which falls under RDNA4's separate SGPR hazard (deferred,
+// see docs/dbi-design.md), so the missing s_nop says nothing about whether this
+// sequence is hazard-free there. RDNA4 global loads are 12 bytes and cannot be
+// anchors, hence the VALU read.
+TEST_F(Rdna4ProbeSpill, SgprRestoreAddsNoNop) {
+  const Caved caved = patch_spill(
+      {kMovV3S8, endpgm()}, {build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch()), setpc()}, 64);
+  const std::optional<WaitGap> gap = sgpr_restore_gap(caved.cave, std::span(&kMovV3S8, 1), 8);
+  ASSERT_TRUE(gap) << "no v_readlane_b32 restoring s8 before the anchor";
+  EXPECT_EQ(gap->nops, 0u) << gap->trace;
+}
+
+// A site that must spill on a code object with more than one kernel has no
+// unambiguous descriptor to grow, so it fails closed (instrumentor.cpp:768).
+TEST_F(Cdna4ProbeSpill, MultiKernelSpillFailsClosed) {
+  auto target = make_gfx950_two_kernel_elf({kMovV3V2, endpgm()}, /*private_bytes=*/64);
+  auto probe = probe_elf({kMovV2Zero, setpc()});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  ASSERT_TRUE(obj.is_valid());
+  const Section *text = obj.text_sections().front();
+  ASSERT_EQ(scan_kernel_descriptors(
+                {reinterpret_cast<const uint8_t *>(obj.image_data()), obj.image_size()},
+                text->sectionOffset(), text->size())
+                .size(),
+            2u);
+
+  expect_failure_containing(patch_expecting_result(target, probe), "single kernel");
+}
+
+// A site whose spill set contains a live+clobbered VGPR, SGPR, and AccVGPR spills all
+// three in one bracket: the VGPR and AccVGPR straight to scratch, the SGPR bridged
+// through v0. Allocation is VGPR -> SGPR -> ACC, so v2 -> slot 64, s8 -> 68, acc0 -> 72;
+// the descriptor grows to cover all three -> 76.
+TEST_F(Cdna4ProbeSpill, SpillsLiveClobberedVgprSgprAndAccVgpr) {
+  // Anchor reads v2; the next two instructions read s8 then a0, so v2, s8, and acc0 are
+  // all live at the anchor and all clobbered by the probe. Distinct readback dests
+  // (v5/v6/v7) so the sim e2e can share this exact kernel shape.
+  // 16 VGPRs with ACCUM_OFFSET=1 puts the accumulator window at v8-v15, so v2 and
+  // the v5/v6/v7 dests are genuine ordinary VGPRs and acc0 sits in a nonempty
+  // window (the SGPR bridge is then bounded to the ordinary prefix v0-v7).
+  const Caved caved =
+      patch_spill({kMovV5V2, kMovV6S8, kAccReadV7A0Lo, kAccReadV7A0Hi, endpgm()},
+                  {kMovV2Zero, kMovS8Zero, kAccWriteA0ZeroLo, kAccWriteA0ZeroHi, setpc()}, 64,
+                  /*granulated_vgpr_count=*/1, /*accum_offset=*/1);
+  const std::vector<uint32_t> &cave = caved.cave;
+
+  // VGPR v2 -> slot 64, straight to scratch.
+  expect_vgpr_spill_present(cave, /*vgpr=*/2, /*off=*/64);
+  // SGPR s8 -> slot 68, bridged through v0.
+  expect_sgpr_spill_present(cave, /*sgpr=*/8, /*off=*/68);
+  // AccVGPR acc0 -> slot 72, straight to scratch via the acc bit.
+  expect_acc_spill_present(cave, /*acc=*/0, /*off=*/72);
+  EXPECT_NE(std::ranges::find(cave, build_wait_loads_complete(arch())), cave.end());
+
+  // Three 4-byte slots on top of the 16-aligned base: 64 -> 76.
+  EXPECT_EQ(caved.scratch, 76u);
+}
+
+// End-to-end guard for the orchestrator-derived bridge bound. With the default CDNA4
+// descriptor (kernel_vgpr_count=8, accum_base=4) v0-v3 are the entire ordinary-VGPR
+// prefix; here all four are live at the anchor and s8 must spill. The bridge is bounded
+// to min(kernel_vgpr_count, accum_base)=4, so no ordinary VGPR is free and the patch
+// fails closed. A regression that used kernel_vgpr_count as the bound would pick v4,
+// which aliases acc0 -- silently corrupting an AGPR outside acc_spills. Exercises the
+// orchestrator's own accum_base computation, unlike a unit call given a clamped bound.
+TEST_F(Cdna4ProbeSpill, SgprBridgeBoundedToOrdinaryVgprPrefix) {
+  // Anchor (v_mov v5,v0) reads v0; the next three read v1,v2,v3 and then s8, so v0-v3
+  // and s8 are all live at the anchor. v5/v6 are dead sinks, not spill candidates.
+  const InstrumentedCodeObject result = patch_expecting_result(
+      kernel_elf({kMovV5V0, kMovV5V1, kMovV5V2, kMovV5V3, kMovV6S8, endpgm()},
+                 /*private_bytes=*/64),
+      probe_elf({kMovS8Zero, setpc()}));
+  expect_failure_containing(result, "bridge VGPR");
+}
+
+// Two live+clobbered SGPRs spill through a single shared bridge VGPR (v0), each to
+// its own scratch slot (s8 -> 64, s9 -> 68); descriptor grows to cover both -> 72.
+TEST_F(Cdna4ProbeSpill, SpillsMultipleLiveClobberedSgprs) {
+  // Anchor reads s8; the next instruction reads s9, so both are live at the anchor.
+  const Caved caved =
+      patch_spill({kMovV3S8, kMovV4S9, endpgm()}, {kMovS8Zero, kMovS9Zero, setpc()}, 64);
+  expect_sgpr_spill_present(caved.cave, /*sgpr=*/8, /*off=*/64);
+  expect_sgpr_spill_present(caved.cave, /*sgpr=*/9, /*off=*/68);
+  EXPECT_NE(std::ranges::find(caved.cave, build_wait_loads_complete(arch())), caved.cave.end());
+  EXPECT_EQ(caved.scratch, 72u);
 }
 
 } // namespace

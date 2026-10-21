@@ -5,7 +5,6 @@
 # benchmark_gfx1150.py
 #
 # Benchmarking class for all gfx1150 products
-# AMD Ryzen AI 9
 #
 # -----------------------------------------------------------------------------
 

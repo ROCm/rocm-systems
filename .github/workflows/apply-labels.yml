@@ -8,9 +8,15 @@ on:
         required: true
         default: '.github/labels.yml'
 
+permissions:
+  contents: read
+
 jobs:
   apply-labels:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
 
     steps:
       - name: Checkout super-repo

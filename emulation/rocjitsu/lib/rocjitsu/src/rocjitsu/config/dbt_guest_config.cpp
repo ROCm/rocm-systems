@@ -3,6 +3,8 @@
 
 #include "rocjitsu/config/dbt_guest_config.h"
 
+#include "rocjitsu/vm/amdgpu/pci/gpu_generation_registry.h"
+
 #include "rocjitsu/config/config_common.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 
@@ -10,6 +12,7 @@
 #include "flatbuffers/idl.h"
 #include "simulation_config_generated.h"
 
+#include <charconv>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -17,6 +20,7 @@
 #include <stdexcept>
 #include <string>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
@@ -49,18 +53,24 @@ void validate_guest_device_geometry(const KfdDeviceConfig &device) {
   if (!device.present || device.simd_count == 0)
     return;
 
-  const uint64_t expected_simds =
-      static_cast<uint64_t>(device.num_shader_engines) * device.num_cu_per_sh * device.simd_per_cu;
+  // num_cu_per_sh counts CUs per shader *array*, so the engine count only
+  // yields the CU total once it is multiplied out by the arrays each engine
+  // carries -- the same product KFD reports as node_props.array_count.
+  const uint32_t arrays_per_engine =
+      device.num_shader_arrays_per_engine == 0 ? 1u : device.num_shader_arrays_per_engine;
+  const uint64_t expected_simds = static_cast<uint64_t>(device.num_shader_engines) *
+                                  arrays_per_engine * device.num_cu_per_sh * device.simd_per_cu;
   if (expected_simds == device.simd_count)
     return;
 
   // DBT guest configs are written verbatim into synthetic KFD sysfs. Reject
   // internally inconsistent CU/SIMD geometry before ROCR observes properties
   // that disagree with each other during guest-agent discovery.
-  throw std::runtime_error("dbt_guest.guest_device simd_count (" +
-                           std::to_string(device.simd_count) +
-                           ") must equal num_shader_engines * num_cu_per_sh * simd_per_cu (" +
-                           std::to_string(expected_simds) + ")");
+  throw std::runtime_error(
+      "dbt_guest.guest_device simd_count (" + std::to_string(device.simd_count) +
+      ") must equal num_shader_engines * num_shader_arrays_per_engine * num_cu_per_sh * "
+      "simd_per_cu (" +
+      std::to_string(expected_simds) + ")");
 }
 
 } // namespace
@@ -92,7 +102,8 @@ void validate_dbt_simulator_device_limits(const DbtGuestConfig &guest,
                              std::to_string(simulator_device.wave_front_size) + ")");
 }
 
-DbtGuestConfig dbt_guest_from_fb(const fb::DbtGuestConfig *guest) {
+util::FailureOr<DbtGuestConfig> dbt_guest_from_fb(const fb::DbtGuestConfig *guest,
+                                                  util::DiagnosticEmitter emit_error) {
   DbtGuestConfig config;
   if (guest == nullptr)
     return config;
@@ -108,7 +119,13 @@ DbtGuestConfig dbt_guest_from_fb(const fb::DbtGuestConfig *guest) {
     config.host.simulator_config_path = guest->simulator_config()->str();
   config.log_level = guest->log_level();
   config.signal_backtrace = guest->signal_backtrace();
-  config.guest_device = kfd_device_from_fb(guest->guest_device());
+  auto guest_device =
+      kfd_device_from_fb(guest->guest_device(), "dbt_guest.guest_device", emit_error);
+  if (guest_device.failed())
+    return util::Result::failure();
+  config.guest_device = std::move(guest_device).value();
+  if (config.guest_device.present)
+    (void)resolve_gpu_generation_topology(config.guest_device);
   config.guest_revision = silicon_revision_from_fb(guest->guest_revision());
   config.host_revision = silicon_revision_from_fb(guest->host_revision());
   validate_guest_device_geometry(config.guest_device);
@@ -130,14 +147,20 @@ std::string resolve_dbt_host_config_path(const std::string &dbt_config_path,
   return (dbt_path.parent_path() / host_path).lexically_normal().string();
 }
 
-DbtGuestConfig load_dbt_guest_config_from_file(const std::string &path) {
-  const std::string json = read_config_file(path);
+util::FailureOr<DbtGuestConfig>
+load_dbt_guest_config_from_file(const std::string &path, util::DiagnosticEmitter emit_error) {
+  auto json = read_config_file(path, emit_error);
+  if (json.failed())
+    return util::Result::failure();
   bool has_dbt_guest = false;
-  DbtGuestConfig parsed = with_parsed_simulation_config_json(
-      json, rocjitsu::kEmbeddedSchema, [&has_dbt_guest](const fb::SimulationConfig *config) {
+  auto parsed = with_parsed_simulation_config_json(
+      json.value(), rocjitsu::kEmbeddedSchema, emit_error,
+      [&has_dbt_guest, emit_error](const fb::SimulationConfig *config) {
         has_dbt_guest = config->dbt_guest() != nullptr;
-        return dbt_guest_from_fb(config->dbt_guest());
+        return dbt_guest_from_fb(config->dbt_guest(), emit_error);
       });
+  if (parsed.failed())
+    return util::Result::failure();
   if (!has_dbt_guest)
     return parsed;
 
@@ -145,12 +168,94 @@ DbtGuestConfig load_dbt_guest_config_from_file(const std::string &path) {
   // DBT guest block selects execution behavior and must reject misspelled keys
   // instead of silently falling back to the hardware backend.
   return with_parsed_simulation_config_json(
-      json, rocjitsu::kEmbeddedSchema,
-      [](const fb::SimulationConfig *config) { return dbt_guest_from_fb(config->dbt_guest()); },
+      json.value(), rocjitsu::kEmbeddedSchema, emit_error,
+      [emit_error](const fb::SimulationConfig *config) {
+        return dbt_guest_from_fb(config->dbt_guest(), emit_error);
+      },
       false);
 }
 
-std::optional<DbtGuestConfig> load_dbt_guest_config_from_runtime_config() {
+void apply_resolved_dbt_host_gpu_id(DbtGuestConfig &config, std::string_view value) {
+  if (!config.enabled || config.host.gpu_id != 0)
+    return;
+
+  uint32_t gpu_id = 0;
+  const char *begin = value.data();
+  const char *end = begin + value.size();
+  auto [ptr, error] = std::from_chars(begin, end, gpu_id);
+  if (error != std::errc{} || ptr != end || gpu_id == 0)
+    throw std::runtime_error("runtime config handoff must contain a nonzero KFD gpu_id");
+  config.host.gpu_id = gpu_id;
+}
+
+bool write_dbt_runtime_config_handoff(const std::string &config_path, const DbtGuestConfig &config,
+                                      pid_t pid) {
+  if (config.enabled && config.host.gpu_id == 0)
+    return false;
+
+  const std::string handoff_file = rpc_invocation_config_file_path(pid);
+  std::error_code directory_error;
+  std::filesystem::create_directories(std::filesystem::path(handoff_file).parent_path(),
+                                      directory_error);
+  if (directory_error)
+    return false;
+  const std::string temp_file = handoff_file + ".tmp";
+  std::ofstream output(temp_file);
+  if (!output)
+    return false;
+  output << config_path << '\n';
+  if (config.enabled)
+    output << config.host.gpu_id << '\n';
+  output.close();
+  if (!output.good()) {
+    std::filesystem::remove(temp_file);
+    return false;
+  }
+
+  std::error_code rename_error;
+  std::filesystem::rename(temp_file, handoff_file, rename_error);
+  if (rename_error)
+    std::filesystem::remove(temp_file);
+  return !rename_error;
+}
+
+std::optional<DbtRuntimeConfigHandoff> parse_dbt_runtime_config_handoff(std::string_view contents) {
+  const size_t first_newline = contents.find('\n');
+  std::string_view config_path = contents.substr(0, first_newline);
+  if (!config_path.empty() && config_path.back() == '\r')
+    config_path.remove_suffix(1);
+  if (config_path.empty())
+    return std::nullopt;
+
+  std::optional<std::string> resolved_gpu_id;
+  if (first_newline != std::string_view::npos) {
+    std::string_view second_line = contents.substr(first_newline + 1);
+    if (!second_line.empty()) {
+      const size_t second_newline = second_line.find_first_of("\r\n");
+      resolved_gpu_id = second_line.substr(0, second_newline);
+    }
+  }
+  return DbtRuntimeConfigHandoff{std::string(config_path), std::move(resolved_gpu_id)};
+}
+
+util::FailureOr<DbtGuestConfig>
+load_dbt_guest_config_from_handoff(const DbtRuntimeConfigHandoff &handoff,
+                                   util::DiagnosticEmitter emit_error) {
+  auto loaded = load_dbt_guest_config_from_file(handoff.config_path, emit_error);
+  if (loaded.failed())
+    return util::Result::failure();
+  DbtGuestConfig config = std::move(loaded).value();
+  if (handoff.resolved_gpu_id) {
+    apply_resolved_dbt_host_gpu_id(config, *handoff.resolved_gpu_id);
+  } else if (config.enabled && config.host.gpu_id == 0) {
+    throw std::runtime_error("runtime config handoff must contain a resolved KFD gpu_id for "
+                             "automatic DBT host selection");
+  }
+  return config;
+}
+
+util::FailureOr<std::optional<DbtGuestConfig>>
+load_dbt_guest_config_from_runtime_config(util::DiagnosticEmitter emit_error) {
   // Try the handoff tiers in priority order, opening the first that exists:
   //   1. $ROCJITSU_INVOCATION_DIR/config_path — the launcher exports this dir before
   //      execvp so every descendant (incl. grandchildren via ctest, whose PID differs)
@@ -176,11 +281,15 @@ std::optional<DbtGuestConfig> load_dbt_guest_config_from_runtime_config() {
   if (!file.is_open())
     return std::nullopt;
 
-  std::string path;
-  std::getline(file, path);
-  if (path.empty())
+  const std::string contents((std::istreambuf_iterator<char>(file)),
+                             std::istreambuf_iterator<char>());
+  std::optional<DbtRuntimeConfigHandoff> handoff = parse_dbt_runtime_config_handoff(contents);
+  if (!handoff)
     return std::nullopt;
-  return load_dbt_guest_config_from_file(path);
+  auto loaded = load_dbt_guest_config_from_handoff(*handoff, emit_error);
+  if (loaded.failed())
+    return util::Result::failure();
+  return std::optional<DbtGuestConfig>(std::move(loaded).value());
 }
 
 } // namespace config

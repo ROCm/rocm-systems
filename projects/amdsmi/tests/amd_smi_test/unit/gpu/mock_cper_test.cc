@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 // Mock-value tests for the CPER read path via
 // amdsmi_get_gpu_cper_entries_by_path(); no GPU required.
@@ -29,14 +10,18 @@
 // the build-tree fallback for in-tree runs.
 // Single-record parsing is also covered synthetically in cper_read_test.cc; these
 // fixtures add real-capture coverage: header byte alignment, multi-record
-// rings, and severity_mask filtering.
+// rings, severity_mask filtering, and amdgpu's crashdump section length.
 
 #include <gtest/gtest.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <climits>
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -74,6 +59,11 @@ std::string MockDir() {
 }
 
 std::string MockPath(const char* name) { return MockDir() + "/" + name; }
+
+std::vector<char> ReadFixture(const char* name) {
+  std::ifstream in(MockPath(name), std::ios::binary);
+  return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
 
 // Reads a mock fixture and returns the parsed severities of the accepted
 // records (those passing severity_mask). entry_count and buf_size are reported
@@ -211,4 +201,31 @@ TEST(GpuUnit, CperMockSeverityMaskRejectAll) {
   EXPECT_EQ(entry_count, 0u);
   EXPECT_EQ(buf_size, 0u);
   EXPECT_TRUE(sevs.empty());
+}
+
+// The fixture's crashdump section is amdgpu's 0xB0-byte fatal shape, shorter than
+// sizeof(cper_sec_crashdump). Its payload is scrubbed, so the registers of a real
+// MI308X fatal record (SMU GfxMmhubError, AFID 30) are written back in.
+TEST(GpuUnit, CperMockFatalRecordDecodesAfid) {
+  std::vector<char> rec = ReadFixture("cper_fatal.cper");
+  ASSERT_GE(rec.size(), sizeof(amdsmi_cper_hdr_t) + sizeof(struct cper_sec_desc));
+  const auto* hdr = reinterpret_cast<const amdsmi_cper_hdr_t*>(rec.data());
+  ASSERT_EQ(hdr->record_length, rec.size());
+  ASSERT_EQ(hdr->sec_cnt, 1);
+  const auto* desc =
+      reinterpret_cast<const struct cper_sec_desc*>(rec.data() + sizeof(amdsmi_cper_hdr_t));
+  ASSERT_EQ(desc->sec_length, 0xB0u);
+  ASSERT_EQ(desc->sec_offset + desc->sec_length, hdr->record_length);
+
+  EXPECT_TRUE(cper_decode(hdr, rec.size()).empty()) << "scrubbed payload decoded an AFID";
+
+  constexpr uint16_t kAcaRegisterContext = 1;
+  constexpr uint64_t kRegs[] = {0xBAA00000003B0000ULL, 0, 0x0001100103B30401ULL, 0x905ULL};
+  const size_t data_off = desc->sec_offset + offsetof(struct cper_sec_crashdump, data);
+  const size_t dump_off = data_off + offsetof(struct cper_sec_crashdump_data, dump);
+  ASSERT_LE(dump_off + sizeof(kRegs), rec.size());
+  std::memcpy(rec.data() + data_off, &kAcaRegisterContext, sizeof(kAcaRegisterContext));
+  std::memcpy(rec.data() + dump_off, kRegs, sizeof(kRegs));
+
+  EXPECT_EQ(cper_decode(hdr, rec.size()), std::vector<int>{30});
 }

@@ -20,6 +20,9 @@ on:
         required: false
         default: "develop"
 
+permissions:
+  contents: read
+
 jobs:
   import-prs:
     runs-on: ubuntu-latest

@@ -8,10 +8,14 @@
 #define ROCJITSU_CONFIG_DBT_GUEST_CONFIG_H_
 
 #include "rocjitsu/config/kfd_device_config.h"
+#include "util/diagnostic.h"
 
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
+
+#include <sys/types.h>
 
 namespace rocjitsu::fb {
 struct DbtGuestConfig;
@@ -40,7 +44,7 @@ enum class DbtSiliconRevision {
 /// @brief Host target selected for DBT translation and execution.
 struct DbtHostConfig {
   std::string isa;     ///< Host ISA used for DBT output and ROCR execution.
-  uint32_t gpu_id = 0; ///< Host KFD topology gpu_id; 0 matches topology to isa.
+  uint32_t gpu_id = 0; ///< Host KFD topology gpu_id; 0 selects the first ISA match.
   DbtExecutionBackend backend = DbtExecutionBackend::Hardware; ///< Hardware or simulator execution.
   std::string simulator_config_path; ///< Optional external simulator host config.
 };
@@ -65,6 +69,12 @@ struct DbtGuestConfig {
   DbtSiliconRevision host_revision = DbtSiliconRevision::Unspecified;
 };
 
+/// @brief Parsed per-invocation config handoff shared by child runtime layers.
+struct DbtRuntimeConfigHandoff {
+  std::string config_path;
+  std::optional<std::string> resolved_gpu_id;
+};
+
 /// @brief Resolve the simulator host config selected by a DBT guest config.
 /// @details An empty host_config_path selects dbt_config_path itself. Relative
 /// external paths are resolved beside the DBT guest config. A non-empty path
@@ -86,7 +96,14 @@ void validate_dbt_simulator_device_limits(const DbtGuestConfig &guest,
 ///
 /// @details Shared by the DBT-only loader and the full simulation config
 /// loader so both paths interpret `dbt_guest` identically.
-DbtGuestConfig dbt_guest_from_fb(const fb::DbtGuestConfig *guest);
+/// @returns Converted config (defaults when @p guest is null), or failure with
+/// a diagnostic for guest-device validation errors from kfd_device_from_fb,
+/// including invalid SDMA queue and IP-version fields.
+/// @throws std::runtime_error for inconsistent guest CU/SIMD geometry, invalid
+/// execution-backend or guest/host silicon-revision enum values, or an enabled
+/// hardware backend that specifies simulator_config.
+util::FailureOr<DbtGuestConfig> dbt_guest_from_fb(const fb::DbtGuestConfig *guest,
+                                                  util::DiagnosticEmitter emit_error);
 
 /// @brief Load only dbt_guest from a rocjitsu JSON config.
 ///
@@ -94,17 +111,48 @@ DbtGuestConfig dbt_guest_from_fb(const fb::DbtGuestConfig *guest);
 /// intentionally accepts configs that contain only the top-level `dbt_guest`
 /// table, so guest discovery configs do not need unused `vm` or `topology`
 /// sections.
-/// @throws std::runtime_error on file I/O, parse errors, or invalid config.
-DbtGuestConfig load_dbt_guest_config_from_file(const std::string &path);
+/// @returns Loaded config (defaults when dbt_guest is absent), or failure with
+/// a diagnostic on file-open, parse, or guest-device validation errors from
+/// kfd_device_from_fb. Invalid execution-backend names in JSON are parse errors.
+/// @throws std::runtime_error for inconsistent guest CU/SIMD geometry, invalid
+/// execution-backend or guest/host silicon-revision enum values, or an enabled
+/// hardware backend that specifies simulator_config, as in dbt_guest_from_fb.
+util::FailureOr<DbtGuestConfig> load_dbt_guest_config_from_file(const std::string &path,
+                                                                util::DiagnosticEmitter emit_error);
+
+/// @brief Apply the launcher's resolved GPU to an automatic DBT host config.
+/// @details Child processes read this value from the second line of the
+/// per-invocation config handoff. Explicit nonzero config values remain authoritative.
+/// @throws std::runtime_error when @p value is not a nonzero KFD gpu_id.
+void apply_resolved_dbt_host_gpu_id(DbtGuestConfig &config, std::string_view value);
+
+/// @brief Atomically write the per-invocation runtime config handoff.
+/// @returns false when enabled DBT lacks a resolved host GPU or the handoff cannot be published.
+bool write_dbt_runtime_config_handoff(const std::string &config_path, const DbtGuestConfig &config,
+                                      pid_t pid);
+
+/// @brief Parse the config path and optional resolved GPU ID from a runtime handoff.
+/// @returns std::nullopt when the first line does not contain a config path.
+std::optional<DbtRuntimeConfigHandoff> parse_dbt_runtime_config_handoff(std::string_view contents);
+
+/// @brief Load and validate the DBT guest config referenced by a runtime handoff.
+/// @returns Failure with a diagnostic when loading the referenced config fails.
+/// @throws std::runtime_error on other invalid guest settings or when automatic
+/// DBT host selection lacks a valid resolved GPU ID.
+util::FailureOr<DbtGuestConfig>
+load_dbt_guest_config_from_handoff(const DbtRuntimeConfigHandoff &handoff,
+                                   util::DiagnosticEmitter emit_error);
 
 /// @brief Load only dbt_guest from the rocjitsu child-process runtime config file.
 ///
 /// @details HSA tools run inside ROCR initialization and must not depend on the
 /// full simulation topology builder. This helper parses the same JSON schema as
 /// the main config loader but copies only the DBT guest-GPU block.
-/// @returns DbtGuestConfig when the runtime config path file exists; std::nullopt otherwise.
-/// @throws std::runtime_error on file I/O, parse errors, or invalid config.
-std::optional<DbtGuestConfig> load_dbt_guest_config_from_runtime_config();
+/// @returns A successful std::nullopt when no handoff is available or it contains
+/// no config path; failure with a diagnostic when loading its referenced config fails.
+/// @throws std::runtime_error on other invalid guest settings or resolved GPU IDs.
+util::FailureOr<std::optional<DbtGuestConfig>>
+load_dbt_guest_config_from_runtime_config(util::DiagnosticEmitter emit_error);
 
 } // namespace rocjitsu::config
 

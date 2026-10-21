@@ -122,6 +122,9 @@ namespace envvar {
     const var<size_t> heap_size("HEAP_SIZE",
       "Defines the size of the rocSHMEM symmetric heap in bytes (per PE). Size in bytes (per PE); Note: the heap is on GPU memory",
       1L << 30);
+    const var<std::string> heap_allocator_type("HEAP_ALLOCATOR_TYPE",
+      "Selects the allocator type for the symmetric heap. Accepted values: uncached, finegrained, coarsegrained, vmm_posix, vmm_fabric. "
+      "Default is finegrained.");
     const var<std::string> backend("BACKEND",
       "When rocSHMEM is compiled for all backends, this environment variable selects which backend to execute. The default value is an empty string and rocSHMEM auto-selects the most appropriate backend. ipc: IPC Backend; ro: Reverse Offload Backend; gda: GPU Direct Async Backend");
     const var<size_t> max_num_contexts("MAX_NUM_CONTEXTS",
@@ -224,8 +227,8 @@ namespace envvar {
   }  // namespace gda
 
   namespace sdma {
-    const var<bool> enabled("ENABLED", "Enable SDMA transport at runtime", true);
-    const var<size_t> threshold("THRESHOLD", "SDMA transfer size threshold in bytes", 256);
+    const var<bool> enabled("ENABLED", "Enable SDMA transport at runtime", false);
+    const var<size_t> threshold("THRESHOLD", "SDMA transfer size threshold in bytes (scaled by WF_SIZE for wave/wg ops)", 1024);
     const var<int32_t> num_channels("NUM_CHANNELS", "Number of SDMA channels per destination [1, 8]", 1);
     const var<bool> spread_channels("SPREAD_CHANNELS",
         "Apply wf_id round-robin channel offset for all contexts (default: only for default ctx)",

@@ -141,6 +141,10 @@ extern int HIP_TRACE_API;
 #endif /* Device feature flags */
 
 
+// Early clang 24 builds and older accept launch_bounds (so __has_attribute is 1) but ignore it.
+#if __clang_major__ >= 25
+#define __launch_bounds__(...) __attribute__((launch_bounds(__VA_ARGS__)))
+#else
 #define launch_bounds_impl0(requiredMaxThreadsPerBlock)                                            \
   __attribute__((amdgpu_flat_work_group_size(1, requiredMaxThreadsPerBlock)))
 #define launch_bounds_impl1(requiredMaxThreadsPerBlock, minBlocksPerMultiprocessor)                \
@@ -149,6 +153,7 @@ extern int HIP_TRACE_API;
 #define select_impl_(_1, _2, impl_, ...) impl_
 #define __launch_bounds__(...)                                                                     \
   select_impl_(__VA_ARGS__, launch_bounds_impl1, launch_bounds_impl0, )(__VA_ARGS__)
+#endif
 
 #if !defined(__HIPCC_RTC__)
 __host__ inline void* __get_dynamicgroupbaseptr() { return nullptr; }
@@ -412,13 +417,13 @@ inline __device__ __attribute__((always_inline)) unsigned int hc_get_workitem_ab
 #pragma push_macro("__CUDA__")
 #define __CUDA__
 #include <__clang_cuda_math_forward_declares.h>
-#include <__clang_cuda_complex_builtins.h>
 // Workaround for using libc++ with HIP-Clang.
 // The following headers requires clang include path before standard C++ include path.
 // However libc++ include path requires to be before clang include path.
 // To workaround this, we pass -isystem with the parent directory of clang include
 // path instead of the clang include path itself.
 #include <include/cuda_wrappers/algorithm>
+#include <__clang_cuda_complex_builtins.h>
 #include <include/cuda_wrappers/complex>
 #include <include/cuda_wrappers/new>
 #undef __CUDA__

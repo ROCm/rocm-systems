@@ -35,14 +35,20 @@ and tweak the default sampling values.
 
    # ...
    ROCPROFSYS_TRACE                = true
-   # ROCPROFSYS_TRACE_LEGACY       = false  # Set to true for direct mode (higher overhead)
    ROCPROFSYS_PROFILE              = true
    ROCPROFSYS_USE_SAMPLING         = true
    ROCPROFSYS_USE_PROCESS_SAMPLING = true
    # ...
    ROCPROFSYS_SAMPLING_FREQ        = 50
    ROCPROFSYS_SAMPLING_CPUS        = all
-   ROCPROFSYS_SAMPLING_GPUS        = $env:HIP_VISIBLE_DEVICES
+   ROCPROFSYS_SAMPLING_GPUS        = all
+
+.. note::
+
+   * ``ROCPROFSYS_SAMPLING_GPUS`` is further restricted to the GPUs that the ROCm runtime
+     exposes, as controlled by ``ROCR_VISIBLE_DEVICES`` and ``HIP_VISIBLE_DEVICES``.
+   * ``ROCPROFSYS_SAMPLING_GPUS`` accepts only ``all`` or numeric indices and ranges, not
+     GPU UUIDs.
 
 Use the configuration file
 -----------------------------------
@@ -316,11 +322,18 @@ For example, the following is a valid configuration:
 
    ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy,rocdecode_api,rocjpeg_api
 
-Add ``hipfile_api`` to trace the hipFILE (GPU-direct storage) API:
+Add ``hipfile_api`` to trace the hipFile (direct-to-GPU I/O) API:
 
 .. code-block:: shell
 
    ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy,hipfile_api
+
+This traces individual hipFile API calls. To instead sample per-GPU hipFile I/O
+counters, such as fastpath and fallback operation counts, bandwidth, and bytes
+transferred, enable ``ROCPROFSYS_USE_HIPFILE`` and select metrics with
+``ROCPROFSYS_HIPFILE_METRICS``. The two features are independent and can be used
+together. For the full workflow, see
+:doc:`hipFile Infinity Storage I/O telemetry <./hipfile-telemetry>`.
 
 
 For KFD event tracing, first check whether your GPU supports XNACK by running
@@ -453,7 +466,6 @@ Generating a default configuration file
    ROCPROFSYS_CONFIG_FILE                              =
    ROCPROFSYS_MODE                                     = trace
    ROCPROFSYS_TRACE                                    = true
-   ROCPROFSYS_TRACE_LEGACY                             = false
    ROCPROFSYS_PROFILE                                  = false
    ROCPROFSYS_USE_SAMPLING                             = false
    ROCPROFSYS_USE_PROCESS_SAMPLING                     = true
@@ -473,7 +485,7 @@ Generating a default configuration file
    ROCPROFSYS_PERFETTO_BACKEND                         = inprocess
    ROCPROFSYS_PERFETTO_BUFFER_SIZE_KB                  = 1024000
    ROCPROFSYS_PERFETTO_COMBINE_TRACES                  = false
-   ROCPROFSYS_PERFETTO_FILE                            = perfetto-trace.proto
+   ROCPROFSYS_PERFETTO_FILE                            = perfetto-trace.pftrace
    ROCPROFSYS_PERFETTO_FILL_POLICY                     = discard
    ROCPROFSYS_PERFETTO_SHMEM_SIZE_HINT_KB              = 4096
    ROCPROFSYS_SAMPLING_CPUS                            =
@@ -612,7 +624,6 @@ Viewing the setting descriptions
    | ROCPROFSYS_USE_KOKKOSP                   | Enable support for Kokkos Tools         |
    | ROCPROFSYS_USE_OMPT                      | Enable support for OpenMP-Tools         |
    | ROCPROFSYS_TRACE                         | Enable perfetto backend for tracing     |
-   | ROCPROFSYS_TRACE_LEGACY                  | Use legacy direct mode for tracing      |
    | ROCPROFSYS_USE_PID                       | Enable tagging filenames with proces... |
    | ROCPROFSYS_USE_AMD_SMI                   | Enable sampling GPU power, temp, uti... |
    | ROCPROFSYS_USE_SAMPLING                  | Enable statistical sampling of call-... |
@@ -1460,7 +1471,6 @@ but do not override an existing value for the environment variable.
 
    # use fields
    ROCPROFSYS_TRACE                 = $ENABLE
-   # ROCPROFSYS_TRACE_LEGACY        = OFF      # Set to ON for direct mode (higher overhead)
    ROCPROFSYS_PROFILE               = $ENABLE
    ROCPROFSYS_USE_SAMPLING          = $SAMPLE
    ROCPROFSYS_USE_PROCESS_SAMPLING  = $SAMPLE
@@ -1485,7 +1495,7 @@ but do not override an existing value for the environment variable.
    ROCPROFSYS_SAMPLING_FREQ         = 50
    ROCPROFSYS_SAMPLING_DELAY        = 0.1
    ROCPROFSYS_SAMPLING_CPUS         = 0-3
-   ROCPROFSYS_SAMPLING_GPUS         = $env:HIP_VISIBLE_DEVICES
+   ROCPROFSYS_SAMPLING_GPUS         = all
 
    # misc env variables (see metadata JSON file after run)
    $env:ROCPROFSYS_SAMPLING_KEEP_DYNINST_SUFFIX  = OFF

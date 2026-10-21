@@ -5,8 +5,8 @@
 // ProbeCallable is a plain struct, so these tests construct it directly from
 // body words instead of parsing an ELF.
 //
-// Instruction encodings below are gfx90a ground truth captured from
-// `llvm-mc -arch=amdgcn -mcpu=gfx90a -show-encoding`.
+// Instruction encodings below are ground truth captured from
+// `llvm-mc -arch=amdgcn -mcpu=<gfx90a|gfx1200> -show-encoding`.
 
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/patch/probe_clobber.h"
@@ -28,6 +28,12 @@ constexpr uint32_t kSWaitcnt0 = 0xbf8c0000;    // s_waitcnt 0
 constexpr uint32_t kSNop0 = 0xbf800000;        // s_nop 0
 constexpr uint32_t kSSetpcS30S31 = 0xbe801d1e; // s_setpc_b64 s[30:31]
 
+// gfx1200 encodings. RDNA4 global memory instructions (VGLOBAL) are 96-bit.
+constexpr uint32_t kGfx12GlobalLoadW0 = 0xee050002; // global_load_b32 v1, v0, s[2:3] (word 0)
+constexpr uint32_t kGfx12GlobalLoadW1 = 0x00000001; // ... (word 1)
+constexpr uint32_t kGfx12GlobalLoadW2 = 0x00000000; // ... (word 2)
+constexpr uint32_t kGfx12SSetpcS30S31 = 0xbe80481e; // s_setpc_b64 s[30:31]
+
 // Explicit special-state writes. to_register_ref() currently returns nullopt
 // for these operand forms, so the summary must recognize them via the operand
 // name.
@@ -36,6 +42,13 @@ constexpr uint32_t kSMovM0_0 = 0xbefc0080;        // s_mov_b32 m0, 0
 constexpr uint32_t kSMovVccLo_0 = 0xbeea0080;     // s_mov_b32 vcc_lo, 0
 constexpr uint32_t kSMovFlatScrLo_0 = 0xbee60080; // s_mov_b32 flat_scratch_lo, 0
 
+// VOPC compares model their special-state write as a named destination operand:
+// v_cmp_eq_u32 exposes "vcc"; v_cmpx_eq_u32 exposes "vcc" and "exec". The summary's
+// operand-name scan therefore sees these defs (see the *WriteFromCompareIsDetected
+// tests), even though the write carries no explicitly-encoded operand field.
+constexpr uint32_t kVCmpEqU32 = 0x7D940000;  // v_cmp_eq_u32 vcc, s0, v0
+constexpr uint32_t kVCmpxEqU32 = 0x7DB40000; // v_cmpx_eq_u32 s0, v0
+
 constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA2;
 
 ProbeCallable make_callable(std::vector<uint32_t> body) {
@@ -43,7 +56,7 @@ ProbeCallable make_callable(std::vector<uint32_t> body) {
   callable.symbol = "rj_nop_probe";
   callable.arch = kArch;
   callable.body_words = std::move(body);
-  callable.cc = ProbeCallingConvention::AmdGpuFuncNoArgsReturnS30S31;
+  callable.abi = *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31);
   return callable;
 }
 
@@ -67,6 +80,14 @@ TEST(ProbeClobber, NopProbeSummaryIsEmpty) {
   EXPECT_FALSE(summary->uses_private_segment);
 }
 
+TEST(ProbeClobber, ReportsRejectedEncodingAndWordOffset) {
+  const auto callable = make_callable({0xffffffffu, kSSetpcS30S31});
+  std::string err;
+  EXPECT_FALSE(build_probe_clobber_summary(callable, &err).has_value());
+  EXPECT_NE(err.find("word 0"), std::string::npos) << err;
+  EXPECT_NE(err.find("Invalid instruction opcode"), std::string::npos) << err;
+}
+
 // The summary is decode-derived, not declared: a body that writes s5 reports s5
 // (and only s5) as an ordinary clobber.
 TEST(ProbeClobber, DerivesOrdinaryClobberFromBody) {
@@ -76,6 +97,31 @@ TEST(ProbeClobber, DerivesOrdinaryClobberFromBody) {
   ASSERT_TRUE(summary.has_value()) << err;
   EXPECT_TRUE(has_sgpr(summary->ordinary_clobbers, 5));
   EXPECT_FALSE(has_sgpr(summary->ordinary_clobbers, 6));
+}
+
+// A 12-byte RDNA4 global load is summarized like any other instruction: its
+// destination is a clobber, and the address registers it only reads are not.
+TEST(ProbeClobber, DerivesClobberFromATwelveByteInstruction) {
+  ProbeCallable callable = make_callable(
+      {kGfx12GlobalLoadW0, kGfx12GlobalLoadW1, kGfx12GlobalLoadW2, kGfx12SSetpcS30S31});
+  callable.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  std::string err;
+  const auto summary = build_probe_clobber_summary(callable, &err);
+  ASSERT_TRUE(summary.has_value()) << err;
+  EXPECT_TRUE(summary->ordinary_clobbers.contains(RegisterRef{RegClass::VGPR, 1, 1}));
+  EXPECT_FALSE(summary->ordinary_clobbers.contains(RegisterRef{RegClass::VGPR, 0, 1}));
+  EXPECT_FALSE(has_sgpr(summary->ordinary_clobbers, 2));
+}
+
+// The body ends one word into a 12-byte load. The summary decodes independently
+// of build_probe_callable, so it must bound its own reads to the body.
+TEST(ProbeClobber, RejectsAnInstructionRunningPastTheBody) {
+  ProbeCallable callable = make_callable({kGfx12GlobalLoadW0});
+  callable.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  std::string err;
+  EXPECT_FALSE(build_probe_clobber_summary(callable, &err).has_value());
+  EXPECT_NE(err.find("word 0"), std::string::npos) << err;
+  EXPECT_NE(err.find("truncated"), std::string::npos) << err;
 }
 
 // The return-link use (s_setpc_b64 s[30:31]) is a use, not a def, so it must not
@@ -129,6 +175,27 @@ TEST(ProbeClobber, DetectsExplicitVccWrite) {
   EXPECT_FALSE(summary->touches_flat_scratch);
 }
 
+// VOPC compares write VCC (v_cmp) / EXEC (v_cmpx) through a named destination
+// operand the decoder exposes ("vcc", "exec"), so the summary's operand-name scan
+// catches them even though the write carries no explicitly-encoded operand field.
+// (Genuinely operand-less implicit defs would still be invisible here; the
+// trampoline preserves EXEC/VCC unconditionally to cover that case.)
+TEST(ProbeClobber, VccWriteFromCompareIsDetected) {
+  const auto callable = make_callable({kVCmpEqU32, kSSetpcS30S31});
+  std::string err;
+  const auto summary = build_probe_clobber_summary(callable, &err);
+  ASSERT_TRUE(summary.has_value()) << err;
+  EXPECT_TRUE(summary->touches_vcc) << "v_cmp's VCC def is exposed as a named 'vcc' operand";
+}
+
+TEST(ProbeClobber, ExecWriteFromCmpxIsDetected) {
+  const auto callable = make_callable({kVCmpxEqU32, kSSetpcS30S31});
+  std::string err;
+  const auto summary = build_probe_clobber_summary(callable, &err);
+  ASSERT_TRUE(summary.has_value()) << err;
+  EXPECT_TRUE(summary->touches_exec) << "v_cmpx's EXEC def is exposed as a named 'exec' operand";
+}
+
 // A body that writes FLAT_SCRATCH via an explicit operand must set
 // touches_flat_scratch.
 TEST(ProbeClobber, DetectsExplicitFlatScratchWrite) {
@@ -140,6 +207,21 @@ TEST(ProbeClobber, DetectsExplicitFlatScratchWrite) {
   EXPECT_FALSE(summary->touches_exec);
   EXPECT_FALSE(summary->touches_vcc);
   EXPECT_FALSE(summary->touches_m0);
+}
+
+// A body that writes both an ordinary SGPR (s5) and EXEC (via the s_mov_b32
+// exec_lo selector). ordinary_clobbers is built from InstDefUse's ordinary
+// projection, so s5 appears there while no special member does. The
+// selector-encoded EXEC write is not surfaced by InstDefUse; it is caught
+// separately by scan_special_state and reported via touches_exec.
+TEST(ProbeClobber, SpecialWritesDoNotLeakIntoOrdinaryClobbers) {
+  const auto callable = make_callable({kSMovS5_0, kSMovExecLo_0, kSSetpcS30S31});
+  std::string err;
+  const auto summary = build_probe_clobber_summary(callable, &err);
+  ASSERT_TRUE(summary.has_value()) << err;
+  EXPECT_TRUE(has_sgpr(summary->ordinary_clobbers, 5));
+  EXPECT_FALSE(summary->ordinary_clobbers.has_specials());
+  EXPECT_TRUE(summary->touches_exec);
 }
 
 } // namespace

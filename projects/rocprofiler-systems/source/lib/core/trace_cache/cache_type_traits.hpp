@@ -2,21 +2,19 @@
 // SPDX-License-Identifier: MIT
 
 #pragma once
-#include "common/span.hpp"
 #include <array>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string_view>
 #include <tuple>
 #include <type_traits>
 #include <variant>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 
 namespace type_traits
@@ -68,7 +66,7 @@ struct is_span : std::false_type
 {};
 
 template <typename T>
-struct is_span<span<T>> : std::true_type
+struct is_span<std::span<T>> : std::true_type
 {};
 
 template <typename T>
@@ -156,5 +154,4 @@ concept sample_processor = requires(T t, TypeIdentifierEnum e, const CacheableTy
 };
 
 }  // namespace type_traits
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache

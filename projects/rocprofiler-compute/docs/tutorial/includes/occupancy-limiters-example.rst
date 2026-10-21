@@ -101,7 +101,7 @@ the analyze step on this kernel:
 
 .. code-block:: shell
 
-   $ rocprof-compute analyze -p workloads/occupancy/mi200/ -b 2.1.15 6.2 7.1.5 7.1.6 7.1.7 --dispatch 1
+   $ rocprof-compute analyze -p workloads/occupancy/mi200/ -b 2.1.13 6.2 7.1.5 7.1.6 7.1.7 --dispatch 2
    <...>
    --------------------------------------------------------------------------------
    0. Top Stat
@@ -118,7 +118,7 @@ the analyze step on this kernel:
    ╒═════════╤═════════════════════╤═════════╤════════════╤═════════╤═══════════════════╕
    │ Index   │ Metric              │     Avg │ Unit       │    Peak │   Percent of Peak │
    ╞═════════╪═════════════════════╪═════════╪════════════╪═════════╪═══════════════════╡
-   │ 2.1.15  │ Wavefront Occupancy │ 1661.24 │ Wavefronts │ 3328.00 │         49.92     │
+   │ 2.1.13  │ Wavefront Occupancy │ 1661.24 │ Wavefronts │ 3328.00 │         49.92     │
    ╘═════════╧═════════════════════╧═════════╧════════════╧═════════╧═══════════════════╛
 
 
@@ -177,7 +177,7 @@ the assembly metadata:
 
 denotes the divide between ``VGPRs`` and ``AGPRs``.
 
-Next, we examine our wavefront occupancy (**2.1.15**), and see that we are
+Next, we examine our wavefront occupancy (**2.1.13**), and see that we are
 reaching only :math:`\sim50\%` of peak occupancy. As a result, we see
 that:
 
@@ -226,7 +226,7 @@ Analyzing this:
 
 .. code-block:: shell
 
-   $ rocprof-compute analyze -p workloads/occupancy/mi200/ -b 2.1.15 6.2 7.1.5 7.1.6 7.1.7 7.1.8 --dispatch 3
+   $ rocprof-compute analyze -p workloads/occupancy/mi200/ -b 2.1.13 6.2 7.1.5 7.1.6 7.1.7 7.1.8 --dispatch 4
    <...>
    --------------------------------------------------------------------------------
    2. System Speed-of-Light
@@ -234,7 +234,7 @@ Analyzing this:
    ╒═════════╤═════════════════════╤════════╤════════════╤═════════╤═══════════════════╕
    │ Index   │ Metric              │    Avg │ Unit       │    Peak │   Percent of Peak │
    ╞═════════╪═════════════════════╪════════╪════════════╪═════════╪═══════════════════╡
-   │ 2.1.15  │ Wavefront Occupancy │ 415.52 │ Wavefronts │ 3328.00 │         12.49     │
+   │ 2.1.13  │ Wavefront Occupancy │ 415.52 │ Wavefronts │ 3328.00 │         12.49     │
    ╘═════════╧═════════════════════╧════════╧════════════╧═════════╧═══════════════════╛
 
 
@@ -290,7 +290,7 @@ non-schedule rate (**6.2.1**) and stall rate (**6.2.2**) as in our
 shifted from VGPRs (**6.2.5**) to LDS (**6.2.7**).
 
 We note that although we see the around the same scheduler/stall rates
-(with our LDS limiter), our wave occupancy (**2.1.15**) is significantly
+(with our LDS limiter), our wave occupancy (**2.1.13**) is significantly
 lower (:math:`\sim12\%`)! This is important to remember: the occupancy
 limiter metrics in the resource allocation section tell you what the
 limiter was, but *not* how much the occupancy was limited. These metrics
@@ -351,7 +351,7 @@ Analyzing this workload yields:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze -p workloads/occupancy/mi200/ -b 2.1.15 6.2 7.1.5 7.1.6 7.1.7 7.1.8 7.1.9 --dispatch 5
+   $ rocprof-compute analyze -p workloads/occupancy/mi200/ -b 2.1.13 6.2 7.1.5 7.1.6 7.1.7 7.1.8 7.1.9 --dispatch 6
    <...>
    --------------------------------------------------------------------------------
    0. Top Stat
@@ -368,7 +368,7 @@ Analyzing this workload yields:
    ╒═════════╤═════════════════════╤═════════╤════════════╤═════════╤═══════════════════╕
    │ Index   │ Metric              │     Avg │ Unit       │    Peak │   Percent of Peak │
    ╞═════════╪═════════════════════╪═════════╪════════════╪═════════╪═══════════════════╡
-   │ 2.1.15  │ Wavefront Occupancy │ 3291.76 │ Wavefronts │ 3328.00 │         98.91     │
+   │ 2.1.13  │ Wavefront Occupancy │ 3291.76 │ Wavefronts │ 3328.00 │         98.91     │
    ╘═════════╧═════════════════════╧═════════╧════════════╧═════════╧═══════════════════╛
 
 
@@ -442,7 +442,7 @@ Next, we see that the scheduler-pipe stall rate (**6.2.2**), that is, how often
 we could not schedule a workgroup to a CU, was only about
 :math:`\sim8\%`. This hints that perhaps, our kernel is not
 *particularly* occupancy limited by resources. Indeed, checking the
-wave occupancy metric (**2.1.15**) shows that this kernel is reaching nearly
+wave occupancy metric (**2.1.13**) shows that this kernel is reaching nearly
 99% occupancy.
 
 Finally, we inspect the occupancy limiter metrics and see a roughly even
