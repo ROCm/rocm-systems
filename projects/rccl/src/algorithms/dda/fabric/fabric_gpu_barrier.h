@@ -119,6 +119,23 @@ public:
     __syncthreads();
   }
 
+  // The two halves of signalWaitPeer, for pipelined callers that post several pieces. A flag slot holds one token and
+  // a post waits until the previous token has been consumed, so every post must be matched by exactly one wait on
+  // the receiving rank within the same kernel.
+  __device__ __forceinline__ void postPeer(int dstRank, int dstBlock) {
+    orderDestWrites();
+    __syncthreads();
+    if (threadIdx.x == 0) {
+      putFlag<std::memory_order_release>(peerFlags_[dstRank] + getFlagIdx(selfRank_, dstBlock));
+    }
+  }
+  __device__ __forceinline__ void waitPeer(int srcRank) {
+    if (threadIdx.x == 0) {
+      waitFlag<std::memory_order_acquire>(peerFlags_[selfRank_] + getFlagIdx(srcRank, blockIdx.x));
+    }
+    __syncthreads();
+  }
+
 private:
   int nBlocks_{-1};
   int selfRank_{-1};
