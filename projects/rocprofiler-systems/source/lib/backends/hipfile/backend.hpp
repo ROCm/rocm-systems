@@ -36,10 +36,12 @@ concept wrapper_policy =
  * exactly one @c hipFileGetStatsL3 call regardless of GPU count, and every device in
  * that interval observes the same coherent snapshot.
  *
- * A failed query is not an error to propagate: hipFile stats are frequently unavailable
- * (the target never performed hipFile I/O), which is an expected steady state rather
- * than a fault. The snapshot goes zero-filled and @c is_available() reports false, and
- * the collector suppresses the sample rather than writing misleading zeros.
+ * A failed query is not an error to propagate. hipFile also returns success with a
+ * zero-filled struct and @c num_gpus == 0 when no GPU has performed hipFile I/O, and
+ * when @c HIPFILE_STATS_LEVEL disables recording. Both are an expected steady state
+ * rather than a fault: the snapshot stays zero-filled, @c is_available() reports false,
+ * and the collector suppresses the sample. A stored zero means that counter was
+ * measured and did not increase, which is only true once some GPU is active.
  *
  * @tparam Wrapper Raw hipFile C-API policy (e.g. @c wrapper).
  */
@@ -66,7 +68,7 @@ public:
         return m_snapshot;
     }
 
-    /// @brief Whether the most recent query succeeded.
+    /// @brief Whether the most recent query observed an active GPU.
     [[nodiscard]] bool is_available() const noexcept { return m_available; }
 
     void shutdown() noexcept {}
@@ -92,6 +94,15 @@ private:
 
         if(!m_available)
         {
+            return out;
+        }
+
+        // Success with no active GPU is not a measurement. hipFile fills the struct
+        // with zeros and returns success until a GPU is in use, including for the
+        // whole run when HIPFILE_STATS_LEVEL disables the statistics server.
+        if(raw.num_gpus == 0)
+        {
+            m_available = false;
             return out;
         }
 

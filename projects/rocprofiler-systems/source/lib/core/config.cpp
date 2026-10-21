@@ -1916,17 +1916,18 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
 #if defined(ROCPROFSYS_BUILD_HIPFILE) && ROCPROFSYS_BUILD_HIPFILE == 1
     if(_config->get<bool>(std::string{ env_vars::USE_HIPFILE }))
     {
-        // hipFile already defaults HIPFILE_STATS_LEVEL to 1, so injecting "1" here is a
-        // no-op. Do not override an explicit 0 either: that is the user's choice to turn
-        // hipFile's stats server off. Warn, because the combination produces empty
-        // telemetry despite ROCPROFSYS_USE_HIPFILE=ON.
+        // hipFile already defaults HIPFILE_STATS_LEVEL to 1. An explicit 0 is the
+        // user's choice to turn the statistics server off; do not override it.
+        // hipFileGetStatsL3 still returns success and a zero-filled snapshot in that
+        // mode, so the collector has to be turned off or those zeros are stored.
         if(rocprofsys::get_env<int>(env_vars::HIPFILE_STATS_LEVEL, 1) == 0)
         {
             LOG_WARNING("ROCPROFSYS_USE_HIPFILE=ON but HIPFILE_STATS_LEVEL=0; hipFile's "
                         "statistics server is disabled, so no hipFile telemetry will be "
                         "recorded. Unset HIPFILE_STATS_LEVEL or set it to 1 or higher");
+            _set(env_vars::USE_HIPFILE, false);
         }
-        if(!_config->get<bool>(std::string{ env_vars::USE_PROCESS_SAMPLING }))
+        else if(!_config->get<bool>(std::string{ env_vars::USE_PROCESS_SAMPLING }))
         {
             LOG_WARNING(
                 "ROCPROFSYS_USE_HIPFILE=ON but ROCPROFSYS_USE_PROCESS_SAMPLING=OFF; "
