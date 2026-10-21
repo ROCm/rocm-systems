@@ -302,8 +302,10 @@ WORKLOAD_CONFIGS = {
         "model_repo": "sglang-disagg-deepseek-r1",
         # A ROCm SDK (TheRock) base, not a rocm7xx one: the candidate librccl
         # is kpack-split, and a pre-kpack HIP runtime segfaults on it in
-        # ncclInitKernelsForDevice.
-        "base_image": "rocm/sgl-dev:v0.5.22-rocm10-mi35x-20261020",
+        # ncclInitKernelsForDevice. No newer than sglang 0.5.18: 0.5.19 split
+        # --cuda-graph-bs into -decode/-prefill, and argparse rejects the
+        # plain flag MAD's models.yaml passes as ambiguous.
+        "base_image": "rocm/sgl-dev:v0.5.18-rocm10-mi35x-20260904",
         "gpu_target": "gfx950",
         "metric_key": "output_token_throughput_tok_s",
         "metric_unit": "output tok/s of the whole 2P+2D deployment",
