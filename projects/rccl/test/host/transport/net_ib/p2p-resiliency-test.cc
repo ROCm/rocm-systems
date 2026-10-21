@@ -47,6 +47,21 @@ std::function<ncclResult_t(ncclIbQp*, ncclIbQpCreateAttr*)> g_resiliencyQpCreate
 std::function<ncclResult_t(ncclIbQp*)> g_resiliencyQpInit = [](ncclIbQp*) { return ncclSystemError; };
 std::function<ncclResult_t(ncclIbQp*)> g_resiliencyQpRtr = [](ncclIbQp*) { return ncclSystemError; };
 std::function<ncclResult_t(ncclIbQp*)> g_resiliencyQpRts = [](ncclIbQp*) { return ncclSystemError; };
+std::vector<size_t> g_resiliencyIbMallocSizes;
+bool g_resiliencyIbMallocPoison = false;
+
+ncclResult_t TestResiliencyIbMalloc(void** ptr, size_t size) {
+  g_resiliencyIbMallocSizes.push_back(size);
+  ncclResult_t result = ncclIbMallocDebug(ptr, size, __FILE__, __LINE__, __func__);
+  if (result == ncclSuccess && g_resiliencyIbMallocPoison) std::memset(*ptr, 0x01, size);
+  return result;
+}
+
+template <typename T>
+bool AllBytesZero(const T& value) {
+  const auto* bytes = reinterpret_cast<const unsigned char*>(&value);
+  return std::all_of(bytes, bytes + sizeof(T), [](unsigned char byte) { return byte == 0; });
+}
 
 uint64_t TestResiliencyClockNano() { return g_resiliencyNow; }
 ncclResult_t TestResiliencyMultiSend(ncclIbSendComm*, int) {
@@ -127,7 +142,12 @@ int ResiliencyProbePollCq(ibv_cq*, int maxCount, ibv_wc* completions) {
 #define ncclIbQpInit TestResiliencyQpInit
 #define ncclIbQpRtr TestResiliencyQpRtr
 #define ncclIbQpRts TestResiliencyQpRts
+#pragma push_macro("ncclIbMalloc")
+#undef ncclIbMalloc
+#define ncclIbMalloc TestResiliencyIbMalloc
 #include NET_IB_P2P_RESILIENCY_CC_PATH
+#undef ncclIbMalloc
+#pragma pop_macro("ncclIbMalloc")
 #undef ncclIbQpRts
 #undef ncclIbQpRtr
 #undef ncclIbQpInit
@@ -226,6 +246,8 @@ class NetIbP2pResiliencyMicrotest : public ::testing::Test {
     g_resiliencyQpInit = [](ncclIbQp*) { return ncclSystemError; };
     g_resiliencyQpRtr = [](ncclIbQp*) { return ncclSystemError; };
     g_resiliencyQpRts = [](ncclIbQp*) { return ncclSystemError; };
+    g_resiliencyIbMallocSizes.clear();
+    g_resiliencyIbMallocPoison = false;
     ResetTransportNetIbRecoveryFakes();
     ResetTransportNetIbResiliencyFakes();
     ResetIbvwrapFakes();
@@ -447,23 +469,44 @@ TEST_F(NetIbP2pResiliencyMicrotest,
 }
 
 TEST_F(NetIbP2pResiliencyMicrotest, Init_DisabledReturnsNullAndEnabledInitializesDirectionSpecificContext) {
-  ncclIbNetCommBase base{};
-  base.isSend = true;
+  ncclIbNetCommBase sendBase{};
+  sendBase.isSend = true;
+  ncclIbNetCommBase recvBase{};
   ncclIbResiliency* resiliency = reinterpret_cast<ncclIbResiliency*>(0x1);
-  EXPECT_EQ(NetIbResiliencyInit(&base, &resiliency), ncclSuccess);
+  EXPECT_EQ(NetIbResiliencyInit(&sendBase, &resiliency), ncclSuccess);
   EXPECT_EQ(resiliency, nullptr);
+  EXPECT_TRUE(g_resiliencyIbMallocSizes.empty());
 
   ScopedHook params(g_loadParam, [](const char* name, int64_t fallback) {
     return std::strcmp(name, "IB_RESILIENCY_PORT_FAILOVER") == 0 ? int64_t{1} : fallback;
   });
   ScopedHook recovery(g_ncclIbPortRecoveryInit, [](ncclIbResiliency* context) {
-    context->recoveryEnabled = false;
+    context->recoveryEnabled = !context->baseComm->isSend;
     return ncclSuccess;
   });
-  ASSERT_EQ(NetIbResiliencyInit(&base, &resiliency), ncclSuccess);
+  // ncclIbMalloc zero-fills, so poison the allocation to observe Init's explicit resets.
+  g_resiliencyIbMallocPoison = true;
+
+  ASSERT_EQ(NetIbResiliencyInit(&sendBase, &resiliency), ncclSuccess);
   ASSERT_NE(resiliency, nullptr);
-  EXPECT_EQ(resiliency->baseComm, &base);
+  ASSERT_EQ(g_resiliencyIbMallocSizes.size(), 1u);
+  EXPECT_EQ(g_resiliencyIbMallocSizes[0], sizeof(ncclIbResiliencySend));
+  EXPECT_EQ(resiliency->baseComm, &sendBase);
   EXPECT_FALSE(resiliency->inProgress);
+  auto* sendResiliency = reinterpret_cast<ncclIbResiliencySend*>(resiliency);
+  EXPECT_TRUE(AllBytesZero(sendResiliency->failedRequests));
+  EXPECT_TRUE(AllBytesZero(sendResiliency->probingResults));
+  EXPECT_TRUE(AllBytesZero(sendResiliency->remCmplRecordsInfo));
+  EXPECT_EQ(NetIbResiliencyDestroy(&resiliency), ncclSuccess);
+  EXPECT_EQ(resiliency, nullptr);
+
+  ASSERT_EQ(NetIbResiliencyInit(&recvBase, &resiliency), ncclSuccess);
+  ASSERT_NE(resiliency, nullptr);
+  ASSERT_EQ(g_resiliencyIbMallocSizes.size(), 2u);
+  EXPECT_EQ(g_resiliencyIbMallocSizes[1], sizeof(ncclIbResiliency));
+  EXPECT_EQ(resiliency->baseComm, &recvBase);
+  EXPECT_FALSE(resiliency->inProgress);
+  EXPECT_EQ(resiliency->outstandingRecovery, 0);
   EXPECT_EQ(NetIbResiliencyDestroy(&resiliency), ncclSuccess);
   EXPECT_EQ(resiliency, nullptr);
 }
