@@ -2896,7 +2896,14 @@ ncclResult_t ncclLaunchFinish(struct ncclComm* comm) {
         // So we could do this:
         //   CUDACHECK(cudaStreamWaitEvent(deviceStream, finishedEvent, 0));
         // But instead we do:
-        NCCLCHECK(ncclStreamAdvanceToEvent(planner->capturingGraph, deviceStream, finishedEvent));
+        if (capturing && planner->numStreams == 1) {
+          // Nothing is captured on launchStream between recording finishedEvent and here, so
+          // its capture dependencies are exactly what a wait on finishedEvent would install.
+          // Reading them directly avoids the temporary stream ncclStreamAdvanceToEvent creates.
+          NCCLCHECK(ncclStreamAdvanceToStream(deviceStream, launchStream));
+        } else {
+          NCCLCHECK(ncclStreamAdvanceToEvent(planner->capturingGraph, deviceStream, finishedEvent));
+        }
       }
 
       // Each userStream[i] waits on userStream[0]
