@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Describe and check the fixed benchmark runner CPU policy."""
+"""Describe and check benchmark runner CPU policy and Bpfland identity."""
 
 from collections.abc import Iterable
 from pathlib import Path

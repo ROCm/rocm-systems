@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""CPU policy regression tests using temporary sysfs files, never host settings."""
+"""Regression tests for benchmark-runner scripts; never modify host settings."""
 
 from contextlib import ExitStack
 import importlib.util
