@@ -12,10 +12,11 @@
 #include "rocjitsu/vm/soc.h"
 
 #include "rocjitsu/base/rj_compiler.h"
+#include "util/diagnostic.h"
 #include "util/log.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "linux/uapi/kfd_ioctl.h"
+#include "uapi/linux/kfd_ioctl.h"
 RJ_DIAGNOSTIC_POP
 
 #include <algorithm>
@@ -256,8 +257,13 @@ rj_status_t rj_vm_create(const char *json_path, rj_vm_mode_t mode, rj_vm_t **vm)
   if (!json_path || !vm)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   try {
-    auto loaded = config::load_config(json_path, rocjitsu::kEmbeddedSchema);
-    return create_from_loaded(loaded, mode, vm);
+    util::StringDiagnostic diagnostic;
+    auto loaded = config::load_config(json_path, rocjitsu::kEmbeddedSchema, diagnostic.emitter());
+    if (loaded.failed()) {
+      util::Logger::warn("rj_vm_create failed: ", diagnostic.message());
+      return ROCJITSU_STATUS_INVALID_FILE;
+    }
+    return create_from_loaded(loaded.value(), mode, vm);
   } catch (const std::exception &e) {
     util::Logger::warn("rj_vm_create failed: ", e.what());
     return ROCJITSU_STATUS_INVALID_FILE;
@@ -268,8 +274,14 @@ rj_status_t rj_vm_create_from_string(const char *json, rj_vm_mode_t mode, rj_vm_
   if (!json || !vm)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   try {
-    auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
-    return create_from_loaded(loaded, mode, vm);
+    util::StringDiagnostic diagnostic;
+    auto loaded =
+        config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, diagnostic.emitter());
+    if (loaded.failed()) {
+      util::Logger::warn("rj_vm_create_from_string failed: ", diagnostic.message());
+      return ROCJITSU_STATUS_INVALID_ARGUMENT;
+    }
+    return create_from_loaded(loaded.value(), mode, vm);
   } catch (const std::exception &e) {
     util::Logger::warn("rj_vm_create_from_string failed: ", e.what());
     return ROCJITSU_STATUS_INVALID_ARGUMENT;

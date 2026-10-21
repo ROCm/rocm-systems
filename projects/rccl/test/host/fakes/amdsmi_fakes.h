@@ -25,6 +25,7 @@ ncclResult_t DefaultAmdSmiGetFabricDeviceInfo(uint32_t deviceIndex, struct amdsm
 extern std::function<ncclResult_t(uint32_t, struct amdsmiFabricDeviceInfo*)> g_amdSmiGetFabricDeviceInfo;
 
 extern ncclResult_t g_amdSmiInitResult;
+extern int g_amdSmiInitCalls;
 
 // XGMI discovery in ncclTopoGetXmlFromGpu. The defaults report an empty machine and fail every per-device query.
 extern std::function<ncclResult_t(uint32_t*)> g_amdSmiGetNumDevice;

@@ -15,6 +15,8 @@
 #include <functional>
 
 #include "nccl.h"
+// ncclDevrRegisterCapability is a plain enum, which C++ cannot forward-declare.
+#include "dev_runtime.h"
 
 struct ncclComm;
 struct ncclDevrWindow;
@@ -37,6 +39,21 @@ extern std::function<ncclResult_t(struct ncclComm*, struct ncclDevrWindow*, size
 extern std::function<ncclResult_t(struct ncclComm*, void*, size_t, int, ncclWindow_t*)> g_devrWindowRegisterInGroup;
 // Fail-loud default; same spelling as dev_runtime_micro_fakes.h, which no target links alongside this file.
 extern std::function<ncclResult_t(ncclComm_t, ncclWindow_t)> g_devrNcclCommWindowDeregister;
+
+// The dev_runtime.cc functions src/cft_dev_runtime.cc calls. All fail loud by default.
+struct ncclTeam;
+struct ncclDevrTeam;
+extern std::function<int(struct ncclComm*)> g_computeLsaSize;
+extern std::function<bool(int, ncclDevrRegisterCapability)> g_devrWinRegEnabled;
+extern std::function<ncclResult_t(struct ncclComm*, struct ncclTeam, bool, bool, bool, bool, struct ncclDevrTeam**,
+                                  bool*)>
+    g_symTeamObtain;
+extern std::function<ncclResult_t(ncclWindow_t, ncclComm_t*, struct ncclDevrWindow**)>
+    g_findCommAndHostWindowFromDeviceWindow;
+// UseFoundCommAndWindow() installs a g_findCommAndHostWindowFromDeviceWindow that returns these.
+extern ncclComm_t g_foundComm;
+extern struct ncclDevrWindow* g_foundWinHost;
+void UseFoundCommAndWindow();
 
 void ResetDevRuntimeFakes();
 

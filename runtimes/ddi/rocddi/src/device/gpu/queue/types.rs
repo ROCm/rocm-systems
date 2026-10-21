@@ -107,8 +107,10 @@ pub struct QueueScratch {
     pub device_address: u64,
     /// Bytes available to the queue starting at `device_address`.
     pub byte_length: u64,
-    /// Largest packet private-segment request accepted by the queue.
+    /// Largest private segment per execution lane accepted by the queue.
     pub maximum_private_segment_byte_length: u32,
+    /// Execution lanes per wave used to size the private segment.
+    pub lanes_per_wave: u32,
     /// Maximum number of simultaneously scratch-backed waves.
     pub maximum_wave_count: u32,
 }
