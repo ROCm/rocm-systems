@@ -61,9 +61,8 @@ else
 	$(CXX) $(CXXFLAGS) -x hip $(INCLUDES) -c $< -o $@
 endif
 
-# Upstream .cuh headers are hipified into HIPIFY_DIR too. A quoted #include in a
-# hipified source searches HIPIFY_DIR first, so it picks up the HIP copy rather
-# than the CUDA original. Point vpath at the header's directory to use this rule.
+# Quoted #includes in hipified sources search HIPIFY_DIR first, so this HIP copy
+# shadows the CUDA header. Needs a vpath to the header's directory.
 $(HIPIFY_DIR)/%.cuh: %.cuh
 	@mkdir -p $(dir $@)
 	$(HIPIFY) -experimental -quiet-warnings $< -o $@.tmp && mv -f $@.tmp $@

@@ -10,8 +10,7 @@
 #include "utility.h"
 
 // ROCM_VERSION is defined only when building RCCL itself; applications that
-// include these headers get the HIP version instead. Without __syncwarp, warp
-// and thread coops fall back to a block-wide __syncthreads().
+// include these headers get the HIP version instead.
 #if defined(ROCM_VERSION)
 #define NCCL_COOP_HAS_WARP_SYNC (ROCM_VERSION >= 70000)
 #elif defined(__HIP_PLATFORM_AMD__)
