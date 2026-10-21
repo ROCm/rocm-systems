@@ -20,7 +20,11 @@ execute_process(
 if(NOT _nm_rc EQUAL 0)
   message(FATAL_ERROR "nm -D ${FILE} failed (${_nm_rc}): ${_nm_err}")
 endif()
-if(NOT _nm_out MATCHES "(^|[ \t])__asan_init([ \t]|$)")
+# __asan_init is emitted only when at least one object was instrumented.
+# Do not anchor this to whitespace: CMake's regex engine does not treat a
+# newline after the symbol as a line boundary for `$`, which made a genuine
+# `U __asan_init` false-negative after llvm-strip.
+if(NOT _nm_out MATCHES "__asan_init")
   set(_asan_lines "")
   string(REPLACE "\n" ";" _nm_lines "${_nm_out}")
   foreach(_line IN LISTS _nm_lines)
