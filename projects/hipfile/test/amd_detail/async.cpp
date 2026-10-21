@@ -102,7 +102,7 @@ hipfileFlagsPowerSet()
 
 struct HipFileAsyncOpStreamParams
     : public HipFileAsyncOp,
-      public WithParamInterface<std::tuple<uint32_t, uint32_t, uint32_t, uint32_t>> {
+      public WithParamInterface<std::tuple<std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t>> {
     HipFileAsyncOpStreamParams() : HipFileAsyncOp{}
     {
         auto params            = GetParam();
@@ -1252,6 +1252,22 @@ TEST_P(AsyncFastpathCopyOp, hipExceptionSetsError)
     }
     async_fastpath_copy(op.get());
     ASSERT_EQ(op->bytes_transferred_internal, -hipFileInternalError);
+}
+
+TEST_P(AsyncFastpathCopyOp, hipErrorUnknownSetsFallbackNeeded)
+{
+    op->failover = std::make_shared<AsyncFailoverState>();
+    EXPECT_CALL(*mbuffer, getLength).WillOnce(Return(size));
+    EXPECT_CALL(*mfile, unbufferedFd).WillOnce(Return(42));
+    if (io_type == IoType::Read) {
+        EXPECT_CALL(mhip, hipAmdFileRead).WillOnce(Throw(Hip::RuntimeError(hipErrorUnknown)));
+    }
+    else {
+        EXPECT_CALL(mhip, hipAmdFileWrite).WillOnce(Throw(Hip::RuntimeError(hipErrorUnknown)));
+    }
+    async_fastpath_copy(op.get());
+    ASSERT_EQ(op->bytes_transferred_internal, -hipFileInternalError);
+    ASSERT_TRUE(op->failover->fallback_needed);
 }
 
 TEST_P(AsyncFastpathCopyOp, sizeClampedToMaxRwCount)

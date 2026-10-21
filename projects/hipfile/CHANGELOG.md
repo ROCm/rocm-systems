@@ -13,6 +13,7 @@
 
 ### Resolved issues
 
+* A fastpath transfer that fails because P2PDMA is unavailable now completes on the POSIX fallback. `hipAmdFileRead`/`hipAmdFileWrite` report that failure as `hipErrorUnknown` and leave the kernel status at 0, so hipFile was returning `-999` instead of falling back. `HIPFILE_FORCE_COMPAT_MODE` is no longer required for this case.
 * `ais-check` no longer reports an LVM parity RAID logical volume (`raid4`, `raid5`, `raid6`) as fastpath capable.
 * The `HIPFILE_WARN_UNSAFE_BUFFER_OPS` CMake option now applies the clang `-Wunsafe-buffer-usage` and `-fsafe-buffer-usage-suggestions` flags to C++ sources. Previously, the flags were never passed to the compiler.
 * hipFile now returns `hipFileGetNewFDFailed` instead of `hipFileInternalError` when the process or system runs out of file descriptors. API calls that need a new file descriptor, such as `hipFileHandleRegister()`, can return this error.
