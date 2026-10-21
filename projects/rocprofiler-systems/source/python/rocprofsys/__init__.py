@@ -1,4 +1,3 @@
-#!/usr/bin/env python@_VERSION@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
