@@ -272,7 +272,11 @@ __device__ int IPCContext::reduce_wave(rocshmem_team_t team, T *dest,
 
   int PE_size = team_obj->tinfo_wrt_world->size;
 
-  size_t direct_pWrk = PE_size * nreduce;
+  // pWrk is indexed by world rank in internal_direct_allreduce_wave, so its
+  // required capacity is bounded by the largest world rank in the team, not
+  // the team size.
+  size_t direct_pWrk =
+      (static_cast<size_t>(team_obj->get_pe_in_world(PE_size - 1)) + 1) * nreduce;
   size_t direct_pSync = PE_size;
   // See reduce_wg for why this is rescaled from double-sized units to
   // T-sized units.
@@ -458,6 +462,15 @@ __device__ void IPCContext::internal_ring_allreduce_wg(
       }
       __syncthreads();
     }
+
+    // The next segment reuses this segment's pWrk slots (loop 1 of seg+1
+    // writes where loop 2 of this seg just wrote). The pSync flags only
+    // signal "data arrived," not "receiver has consumed it," so without a
+    // barrier a fast PE could start seg+1's sends before a slower peer has
+    // copied seg's data out of pWrk, corrupting it.
+    if (seg + 1 < n_seg) {
+      barrier_wg(reinterpret_cast<rocshmem_team_t>(team_obj));
+    }
   }
 
   // Team-relative bound: clear only this call's half of the double-buffered
@@ -552,7 +565,11 @@ __device__ int IPCContext::reduce_wg(rocshmem_team_t team, T *dest,
 
   int PE_size = team_obj->tinfo_wrt_world->size;
 
-  size_t direct_pWrk = PE_size * nreduce;
+  // pWrk is indexed by world rank in internal_direct_allreduce_wg, so its
+  // required capacity is bounded by the largest world rank in the team, not
+  // the team size.
+  size_t direct_pWrk =
+      (static_cast<size_t>(team_obj->get_pe_in_world(PE_size - 1)) + 1) * nreduce;
   size_t direct_pSync = PE_size;
   size_t ring_pSync = 2 * PE_size;
   size_t provided_pWrk = max(nreduce / 2 + 1,
