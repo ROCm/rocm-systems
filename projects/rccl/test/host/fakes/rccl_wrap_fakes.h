@@ -42,6 +42,7 @@ extern int64_t g_rcclParamDirectReduceScatterThreshold;  // UNDRIVEN
 extern int g_rcclUpdateCollectiveProtocolCalls;
 extern int g_rcclUpdateCollectiveAlgorithmCalls;
 extern bool g_rcclUpdateCollectiveAlgorithmBeforeProtocol;
+extern int g_rcclUpdateAllReduceAlgoProtoCalls;
 extern int g_rcclUpdateCollectiveChannelsCalls;
 extern int g_rcclSetPipeliningCalls;
 extern int g_rcclUpdateThreadThresholdCalls;

@@ -155,6 +155,8 @@ void rcclUpdateCollectiveAlgorithm(struct ncclComm* comm, size_t nBytes, struct 
 // Arch-table channel cap for Ring Simple ReduceScatter
 // (rcclArchThresholds::rsRingSimpleCapped*). NCCL_MIN/MAX_NCHANNELS turn it off.
 void rcclUpdateCollectiveChannels(struct ncclComm* comm, size_t nBytes, const struct ncclTaskColl* info, int& nc);
+void rcclUpdateAllReduceAlgoProto(struct ncclComm* comm, size_t nBytes, struct ncclTaskColl* info,
+                                  float (*table)[NCCL_NUM_PROTOCOLS]);
 void rcclUpdateThreadThreshold(struct ncclComm* comm, size_t const& nBytes, struct ncclTaskColl* info,
                                int& threadThreshold);
 void rcclSetPipelining(struct ncclComm* comm, size_t const& nBytes, struct ncclTaskColl* info);

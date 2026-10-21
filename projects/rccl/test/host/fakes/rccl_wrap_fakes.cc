@@ -48,6 +48,10 @@ void rcclUpdateCollectiveAlgorithm(struct ncclComm*, size_t, struct ncclTaskColl
   // Production requires the algorithm hook to run before the protocol hook.
   g_rcclUpdateCollectiveAlgorithmBeforeProtocol = g_rcclUpdateCollectiveProtocolCalls == 0;
 }
+int g_rcclUpdateAllReduceAlgoProtoCalls = 0;
+void rcclUpdateAllReduceAlgoProto(struct ncclComm*, size_t, struct ncclTaskColl*, float (*)[NCCL_NUM_PROTOCOLS]) {
+  ++g_rcclUpdateAllReduceAlgoProtoCalls;
+}
 void rcclUpdateCollectiveChannels(struct ncclComm*, size_t, const struct ncclTaskColl*, int&) {
   ++g_rcclUpdateCollectiveChannelsCalls;
 }
@@ -177,6 +181,7 @@ void ResetRcclWrapFakes() {
   g_rcclUpdateCollectiveProtocolCalls = 0;
   g_rcclUpdateCollectiveAlgorithmCalls = 0;
   g_rcclUpdateCollectiveAlgorithmBeforeProtocol = false;
+  g_rcclUpdateAllReduceAlgoProtoCalls = 0;
   g_rcclUpdateCollectiveChannelsCalls = 0;
   g_rcclSetPipeliningCalls = 0;
   g_rcclUpdateThreadThresholdCalls = 0;
