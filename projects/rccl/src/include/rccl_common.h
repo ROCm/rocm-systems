@@ -308,7 +308,7 @@ bool rcclNcclAlgoEnvIsSet();
 // gfx1250 may still take fabric DDA when CE is eligible. DDA must also be enabled for this
 // arch/size. Host-side and GPU-free so the dispatch decision can be unit tested.
 bool rcclAllReduceShouldTakeDdaPath(const struct ncclComm* comm, size_t count, ncclDataType_t datatype,
-                                    bool symEligible, bool ceAllReduceAllowed, bool query);
+                                    bool symEligible, bool query);
 // Decides whether ncclAlltoAll_impl takes the DDA early-return. AlltoAll has no
 // symmetric kernel, so unlike AllGather it cannot gate DDA on !symEligible.
 // `ceAlltoAllAllowed` is single-node CE (ncclCeAvailable); hier CE does not yield DDA.
