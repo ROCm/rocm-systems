@@ -987,14 +987,13 @@ these wraps. ``ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS`` is enabled by default.
 Torch trace collector
 ---------------------
 
-One ``torch_trace_collector.so`` ships with rocprofiler-compute and is loaded
-through a plain-C interface. It is built as C++17 without PyTorch headers or
-libraries, and it does not depend on the Python version the workload runs, so
-a single file covers every supported setup.
+rocprofiler-compute ships one collector library, ``torch_trace_collector.so``.
+It does not need PyTorch development packages and works with any Python
+version.
 
-The collector reads a few PyTorch types by byte offset, so it is enabled only
-for the PyTorch versions whose layouts rocprofiler-compute records. Any other
-version falls back to ``TorchDispatchMode``.
+The collector depends on how a specific PyTorch version stores its data
+internally, so it runs only with PyTorch 2.13 and 2.14. Other PyTorch versions
+use ``TorchDispatchMode`` instead, which misses backward-pass operators.
 
 Output
 ------
@@ -1006,15 +1005,14 @@ in the workload directory.
 
 Analyze reads those files and prints an operator call tree and a per-operator
 summary (for example with ``--list-torch-operators`` or ``--torch-operator``).
-Analyze no longer writes ``ml_api_trace/consolidated.csv``.
 
 Performance counter data
 ------------------------
 
-The retained ``ml_api_trace_*_counter_collection.csv.gz`` files hold the
-same per-dispatch performance counters as a profile without torch tracing.
-Analyze attributes GPU kernels to operators; ``--torch-operator`` /
-``--triton-operator`` run the usual metric tables on those kernels.
+The ``ml_api_trace_*_counter_collection.csv.gz`` files hold the same
+performance counters as a profile without Torch trace. In analyze mode,
+``--torch-operator`` and ``--triton-operator`` show the usual metric tables
+for the kernels that the matching operators launched.
 
 .. _torch-trace-limitations:
 
@@ -1027,9 +1025,7 @@ The Torch trace feature currently has the following limitations:
 
 * The ``--torch-trace`` option requires the application to be a Python command or Python script.
 
-* Legacy stacked Function labels (``:#`` or ``#n@file:line``) make
-  analyze exit during parse, before the tree. Re-profile with current
-  ``--torch-trace`` or ``--triton-trace``.
+* The workload's Python version must match the Python version used by ``roctx``.
 
 * This feature adds instrumentation overhead to track operator boundaries. For performance-critical measurements, consider profiling without this option first.
 
@@ -1052,8 +1048,8 @@ This means the install requirement above was not met.
 Hierarchical operator names
 ----------------------------
 
-Analyze prints a call tree from the captured ranges. ``/`` in the operator
-summary is the reconstructed call path.
+Analyze shows each operator under the operator that called it. The operator
+summary writes this call path with ``/`` between operators:
 
 .. code-block:: text
 
@@ -1078,14 +1074,15 @@ Example:
            self.decoder = nn.Linear(1024, 512)
 
        def forward(self, x):
-           x = self.encoder(x)  # MyModel.forward nests Linear.forward
-           x = self.decoder(x)  # Second Linear.forward sibling under MyModel.forward
+           x = self.encoder(x)  # Linear.forward appears under MyModel.forward
+           x = self.decoder(x)  # A second Linear.forward under MyModel.forward
            return x
 
 **Analyzing captured operators**: After profiling, use the analyze CLI (see
 :doc:`../analyze/cli`) to list and filter by operator name. Filtering
-(``--torch-operator``) accepts shell-style glob patterns on the reconstructed
-path (e.g. ``*relu*``, ``*/aten::addmm``). To select all operators, pass
+(``--torch-operator``) accepts shell-style glob patterns that match an operator
+name or its call path (for example ``*relu*`` or ``*/aten::addmm``). To select
+all operators, pass
 no arguments, ``all``, ``*``, or ``**`` — all four forms are equivalent.
 
 Combining Torch operator with other options
@@ -1111,13 +1108,13 @@ Triton trace
 ============
 
 In addition to PyTorch, ROCm Compute Profiler can map performance counters to
-Triton kernels launched through Triton's Python runtime. This is enabled with
-the ``--triton-trace`` option and shares the same ``ml_api_trace`` output,
-``Backend`` attribution, and analysis flow as Torch trace.
+the Triton kernels that your code launches, such as ``@triton.jit`` functions.
+Enable it with the ``--triton-trace`` option. It writes the same
+``ml_api_trace`` output as Torch trace and is analyzed the same way.
 
-``torch.compile`` / Inductor launches fused kernels through PyTorch's static
-launcher, not that runtime, so those launches do not emit ``|triton`` ranges.
-Use ``--torch-trace``; the GPU kernels nest under ``torch.compile.<fn>``.
+``--triton-trace`` does not capture the Triton kernels that ``torch.compile``
+generates, because PyTorch launches those kernels itself. Use ``--torch-trace``
+for them. They appear under the ``torch.compile`` call in the operator tree.
 
 .. warning::
 
@@ -1150,10 +1147,9 @@ frameworks in a single run:
 
    $ rocprof-compute profile --experimental --torch-trace --triton-trace --name compiled_model -- python train.py
 
-Each captured marker records its originating framework as the trailing
-``|torch`` or ``|triton`` on Function (``user`` when that suffix is absent), so
-each framework can be analyzed independently. To enable all supported backends
-at once, use :ref:`--ml-api-trace <ml-api-trace>`.
+Each captured operator records which framework it came from, so you can
+analyze each framework separately. To enable all supported backends at once,
+use :ref:`--ml-api-trace <ml-api-trace>`.
 
 To analyze the captured Triton kernels, use the ``--list-triton-operators`` and
 ``--triton-operator`` options in analyze mode (see :doc:`../analyze/cli`).
@@ -1176,9 +1172,8 @@ single option.
    $ rocprof-compute profile --experimental --ml-api-trace --name model -- python train.py
 
 The output is identical to enabling each framework's trace flag individually.
-Captured kernels are attributed from the trailing ``|torch`` / ``|triton`` on
-Function (``user`` when that suffix is absent) and analyzed with the
-corresponding per-framework operator options (see :doc:`../analyze/cli`).
+Each kernel is attributed to the framework that launched it. Analyze each
+framework with its own operator options (see :doc:`../analyze/cli`).
 
 .. _profile-vllm-workloads:
 

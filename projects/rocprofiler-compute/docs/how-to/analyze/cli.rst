@@ -691,8 +691,6 @@ analysis report. Supported formats are ``stdout``, ``txt``, ``csv``, and ``db``.
 format is ``stdout``.
 
 ``--list-stats`` is available only with ``stdout`` and ``txt`` output.
-``--list-torch-operators``, ``--list-triton-operators``, ``--torch-operator``,
-and ``--triton-operator`` are available only with ``stdout``.
 
 * ``stdout`` format:
    * Print analysis report to the terminal.
@@ -797,41 +795,9 @@ PyTorch operator analysis
    use ``rocprof-compute analyze ... --experimental`` with
    ``--list-torch-operators`` or ``--torch-operator`` as needed.
 
-These flags require ``--output-format stdout`` (the default). Combining
-``--list-*-operators`` with ``--*-operator`` warns and lists all operators.
-``-k`` is a row in the kernel table. ``-d`` runs first, so the table
-keeps only kernels from those dispatches. Run with the same ``-d``, then
-pass one of those rows to ``-k``. ``--torch-operator`` uses the same order.
-The ``(id N)`` on its filtered tree is that row.
-
-``--list-stats`` with ``--*-operator`` prints the kernel table for that
-operator's launches.
-
-``--list-*-operators`` and ``--*-operator`` load each profiling pass's marker
-and counter CSV pair and print an operator call tree. Plain ``analyze -p``
-without those flags does not join markers. Analyze does not write
-``ml_api_trace/consolidated.csv``.
-
-Operator analyze exits when:
-
-* two markers on the same ``Thread_Id`` overlap in time (neither nested
-  nor adjacent)
-* a marker is not nested in the call forest
-* kernel-name and timestamp lists on a marker have unequal lengths
-* operator calls or kernel names disagree across passes
-
-Operator analyze warns before the tree is printed and continues when:
-
-* a kernel dispatch does not match any ROCTX range
-* attach cannot find the launcher thread
-* a worker interval is not contained in any launcher interval
-* a torch or triton call-tree root has no file/line and no launcher thread
-
-Workloads from an older profile can contain stacked Function markers.
-Analyze exits during parse, before the tree.
-Re-profile with current ``--torch-trace`` or ``--triton-trace``.
-
-``/`` in the Operator column and in globs is the reconstructed call path.
+These options work only with the default ``--output-format stdout``. If you
+combine ``--list-torch-operators`` with ``--torch-operator``, rocprof-compute
+lists all operators and ignores the filter.
 
 
 List all operators
@@ -869,20 +835,19 @@ Display all PyTorch operators captured during profiling:
    │ nn.Module.Net.forward/aten::relu                 │      40 │           30 │  0.31 ms │      0.72 │     7.70 us │ 0.01 ms │ 0.01 ms │ 0.02 ms │
    ╘══════════════════════════════════════════════════╧═════════╧══════════════╧══════════╧═══════════╧═════════════╧═════════╧═════════╧═════════╛
 
-The printed call tree is sorted by GPU duration. Identical sibling subtrees
-are folded for display only; the forest and operator summary are not folded.
-Source location is shown on
-each node that recorded a file and line. Kernel stats appear under the
-operators that launched them. See :ref:`torch-operator-profiling` for how
-markers are captured.
+The call tree is sorted by GPU time. Repeated calls that ran the same
+operators and kernels are shown once, with their combined counts. Each
+operator shows the source file and line it was called from, when available,
+and each kernel appears under the operator that launched it. See
+:ref:`torch-operator-profiling` for how operators are captured.
 
 The flat **Operator summary** table below the call tree has one row per
 operator that ran at least one GPU kernel. Time cells auto-switch between
 milliseconds and microseconds per cell; missing values render as ``N/A``.
 
-* **Operator** — reconstructed path (for example
+* **Operator** — the operator's full call path (for example
   ``nn.Module.Net.forward/aten::addmm``).
-* **Calls** — how many nested marker intervals ran for that operator.
+* **Calls** — how many times the operator was called.
 * **Dispatches** — how many GPU kernels ran while the operator was on the
   call stack (kernels launched by operators it called also count).
 * **Total** — total GPU time spent while the operator was on the call
@@ -903,25 +868,29 @@ line ``Operator summary: (no operators with recorded dispatches)``.
 Filtering by Operator
 ---------------------
 
-``--torch-operator`` uses shell-style glob patterns to select
-nodes whose backend is torch. Metric kernel ids come only from nodes whose
-backend is in the requested list. Ancestors of any backend stay in the path
-string, so ``user/.../aten::addmm`` still matches. Hierarchies are
-``/``-separated; ``*``, ``?``, and ``[seq]`` cross path components, and
-matching is case-sensitive:
+``--torch-operator`` selects PyTorch operators with shell-style glob patterns.
+A pattern can match an operator's name or its full call path, such as
+``nn.Module.Net.forward/aten::addmm``. Matching is case-sensitive.
 
-* **Wildcard** — ``*relu*`` (contains relu), ``*/aten::addmm`` (addmm leaf)
+* **Wildcard** — ``*relu*`` matches any operator whose name contains ``relu``.
+* **Call path** — ``*/aten::addmm`` matches ``aten::addmm`` when another
+  operator calls it.
 * **Exact** — ``aten::addmm``
 * **Match all** — no arguments, ``all``, ``*``, or ``**``
 
-``--torch-operator`` and ``--triton-operator`` show the kernel launches
-from the chosen operators. ``-d`` does not change that tree. It filters
-kernel-top, the dispatch list, and ``--list-stats``. ``-k`` does not
-filter that tree, kernel-top, the dispatch list, or ``--list-stats``.
-It filters the metric rows to that kernel's launches.
+rocprof-compute prints the call tree of the matching operators. The metric
+tables then cover only the kernels that those operators launched. To narrow
+the metric tables further:
 
-``-k`` is the ``(id N)`` on the filtered tree. It keeps that kernel's
-launches in the metric rows. A ``-d`` or ``-k`` off the subtree fails.
+* ``-k`` keeps only the listed kernels. Use the ``(id N)`` shown next to each
+  kernel in the operator tree.
+* ``-d`` keeps only the listed dispatches that the matching operators
+  launched.
+* ``--list-stats`` lists only the kernels that the matching operators
+  launched.
+
+These options do not change the printed operator tree. Kernel IDs depend on
+``-d``, so use the same ``-d`` when you look up a kernel ID.
 
 .. code-block:: shell-session
 
@@ -952,10 +921,9 @@ Triton operator analysis
    ``rocprof-compute analyze ... --experimental`` with
    ``--list-triton-operators`` or ``--triton-operator`` as needed.
 
-Triton kernels use the same analyze path as PyTorch operators.
-``--list-triton-operators`` and ``--triton-operator`` keep nodes
-whose backend is ``triton`` (plus their ancestors), so Triton kernels are
-reported independently even if PyTorch operators appear in the same run.
+Triton kernels are analyzed the same way as PyTorch operators.
+``--list-triton-operators`` and ``--triton-operator`` report only the kernels
+that Triton launched, even when the same run also captured PyTorch operators.
 
 List all captured Triton kernels
 ---------------------------------
@@ -992,11 +960,8 @@ Display all Triton kernels captured during profiling:
 Filter the Triton kernels
 -------------------------
 
-``--triton-operator`` uses the same shell-style glob matching and the same
-``-d`` and ``-k`` rules as ``--torch-operator``; see
-:ref:`operator-filtering`. ``*rmsnorm_kernel*`` matches
-``triton.JITFunction.rmsnorm_kernel``, ``triton.CompiledKernel.rmsnorm_kernel``,
-and the leaf ``rmsnorm_kernel``.
+``--triton-operator`` uses the same patterns and options as
+``--torch-operator``; see :ref:`operator-filtering`.
 
 .. code-block:: shell-session
 
