@@ -7,6 +7,7 @@
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
+#include "core/control/clocks/timeline.hpp"
 #include "core/demangler.hpp"
 #include "core/locking.hpp"
 #include "core/node_info.hpp"
@@ -24,7 +25,7 @@
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
-#include "library/tracing/annotation.hpp"
+#include <algorithm>
 #include <cstdint>
 
 #include <timemory/backends/papi.hpp>
@@ -157,7 +158,7 @@ generate_line_info_json(const tim::unwind::processed_entry& line_info_entry)
     if(line_info_entry.lineinfo && !line_info_entry.lineinfo.lines.empty())
     {
         auto _lines = line_info_entry.lineinfo.lines;
-        std::reverse(_lines.begin(), _lines.end());
+        std::ranges::reverse(_lines);
         for(const auto& line : _lines)
         {
             nlohmann::json inlined;
@@ -309,10 +310,11 @@ cache_sampling_data(std::int64_t                               _tid,
 
         for(const auto& iitr : itr.m_stack)
         {
-            auto _name       = std::string(rocprofsys::utility::demangle(iitr.name));
-            auto _track_name = get_track_name<category::timer_sampling>(*_thread_info);
-            auto _call_stack = generate_call_stack_json(iitr);
-            auto _line_info  = generate_line_info_json(iitr);
+            auto const _name = std::string(rocprofsys::utility::demangle(iitr.name));
+            auto const _track_name =
+                get_track_name<category::timer_sampling>(*_thread_info);
+            auto const _call_stack = generate_call_stack_json(iitr);
+            auto const _line_info  = generate_line_info_json(iitr);
 
             trace_cache::get_buffer_storage().store(trace_cache::backtrace_region_sample{
                 static_cast<std::uint32_t>(ROCPROFSYS_CATEGORY_TIMER_SAMPLING),
@@ -347,10 +349,11 @@ cache_sampling_data(std::int64_t                               _tid,
 
         for(const auto& iitr : itr.m_stack)
         {
-            auto _name       = std::string(rocprofsys::utility::demangle(iitr.name));
-            auto _track_name = get_track_name<category::overflow_sampling>(*_thread_info);
-            auto _call_stack = generate_call_stack_json(iitr);
-            auto _line_info  = generate_line_info_json(iitr);
+            auto const _name = std::string(rocprofsys::utility::demangle(iitr.name));
+            auto const _track_name =
+                get_track_name<category::overflow_sampling>(*_thread_info);
+            auto const _call_stack = generate_call_stack_json(iitr);
+            auto const _line_info  = generate_line_info_json(iitr);
 
             trace_cache::get_buffer_storage().store(trace_cache::backtrace_region_sample{
                 static_cast<std::uint32_t>(ROCPROFSYS_CATEGORY_OVERFLOW_SAMPLING),
@@ -381,7 +384,7 @@ configure_sampler_allocator(std::shared_ptr<sampler_allocator_t>& _v)
     }
 
     ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
-    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     _v = std::make_shared<sampler_allocator_t>();
     _v->reserve(config::get_sampling_allocator_size());
@@ -414,7 +417,7 @@ get_sampler_allocator()
 
     auto& _allocators = get_sampler_allocators();
 
-    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     const auto_lock_t _lk{ type_mutex<sampler_allocator_t>() };
 
@@ -439,7 +442,7 @@ template <typename... Args>
 void
 thread_sigmask(Args... _args)
 {
-    auto _err = pthread_sigmask(_args...);
+    auto const _err = pthread_sigmask(_args...);
     if(_err != 0)
     {
         errno = _err;
@@ -454,7 +457,7 @@ get_signal_set(Tp&& _v)
 {
     sigset_t _sigset;
     sigemptyset(&_sigset);
-    for(auto itr : _v)
+    for(auto const itr : _v)
     {
         sigaddset(&_sigset, itr);
     }
@@ -518,7 +521,7 @@ get_offload_file()
         auto _tmp_v = config::get_tmp_file("sampling");
         if(get_use_tmp_files())
         {
-            auto _success = _tmp_v->open();
+            auto const _success = _tmp_v->open();
             if(!_success)
             {
                 LOG_CRITICAL("Error opening sampling offload temporary file '{}'",
@@ -559,8 +562,8 @@ offload_buffer(std::int64_t _seq, sampler_buffer_t&& _buf)
 
     // use homemade atomic_mutex/atomic_lock since contention will be low
     // and using pthread_lock might trigger our wrappers
-    auto  _lk   = locking::atomic_lock{ get_offload_mutex() };
-    auto& _file = get_offload_file();
+    auto const  _lk   = locking::atomic_lock{ get_offload_mutex() };
+    auto const& _file = get_offload_file();
 
     if(!_file)
     {
@@ -605,8 +608,8 @@ load_offload_buffer(std::int64_t _thread_idx)
 
     // use homemade atomic_mutex/atomic_lock since contention will be low
     // and using pthread_lock might trigger our wrappers
-    auto  _lk   = locking::atomic_lock{ get_offload_mutex() };
-    auto& _file = get_offload_file();
+    auto const  _lk   = locking::atomic_lock{ get_offload_mutex() };
+    auto const& _file = get_offload_file();
     if(!_file)
     {
         LOG_WARNING(
@@ -627,13 +630,13 @@ load_offload_buffer(std::int64_t _thread_idx)
         return _data;
     }
 
-    if(offload_seq_data.count(_thread_idx) == 0)
+    if(!offload_seq_data.contains(_thread_idx))
     {
         return _data;
     }
 
     size_t _count = 0;
-    for(auto itr : offload_seq_data.at(_thread_idx))
+    for(auto const itr : offload_seq_data.at(_thread_idx))
     {
         _fs.seekg(itr);  // set to the absolute position
 
@@ -682,13 +685,13 @@ configure(bool _setup, std::int64_t _tid)
     }
 
     ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
-    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     auto&& _cputime_tids  = get_sampling_cputime_tids();
     auto&& _realtime_tids = get_sampling_realtime_tids();
     auto&& _overflow_tids = get_sampling_overflow_tids();
 
-    auto _erase_tid_signal = [_tid, &_signal_types](auto& _tids, int _signum) {
+    auto const _erase_tid_signal = [_tid, &_signal_types](auto& _tids, int _signum) {
         if(!_tids.empty())
         {
             if(_tids.count(_tid) == 0)
@@ -737,7 +740,7 @@ configure(bool _setup, std::int64_t _tid)
         }
 
         LOG_DEBUG("Requesting allocator for sampler on thread {}", _tid);
-        auto _alloc = get_sampler_allocator();
+        auto const _alloc = get_sampler_allocator();
 
         LOG_DEBUG("Configuring sampler for thread {}", _tid);
         sampling::sampler_instances::construct(construct_on_thread{ _tid }, _alloc,
@@ -746,7 +749,7 @@ configure(bool _setup, std::int64_t _tid)
         _sampler->set_flags(SA_RESTART);
         _sampler->set_verbose(_verbose);
 
-        if(_signal_types->count(get_sampling_realtime_signal()) > 0)
+        if(_signal_types->contains(get_sampling_realtime_signal()))
         {
             _sampler->configure(timer{ get_sampling_realtime_signal(), CLOCK_REALTIME,
                                        SIGEV_THREAD_ID, get_sampling_realtime_freq(),
@@ -754,7 +757,7 @@ configure(bool _setup, std::int64_t _tid)
                                        threading::get_sys_tid() });
         }
 
-        if(_signal_types->count(get_sampling_cputime_signal()) > 0)
+        if(_signal_types->contains(get_sampling_cputime_signal()))
         {
             _sampler->configure(
                 timer{ get_sampling_cputime_signal(), CLOCK_THREAD_CPUTIME_ID,
@@ -762,7 +765,7 @@ configure(bool _setup, std::int64_t _tid)
                        get_sampling_cputime_delay(), _tid, threading::get_sys_tid() });
         }
 
-        if(_signal_types->count(get_sampling_overflow_signal()) > 0)
+        if(_signal_types->contains(get_sampling_overflow_signal()))
         {
             if(_signal_types->size() == 1)
             {
@@ -774,10 +777,11 @@ configure(bool _setup, std::int64_t _tid)
             struct perf_event_attr _pe;
             memset(&_pe, 0, sizeof(_pe));
 
-            auto _freq           = get_sampling_overflow_freq();
-            auto _overflow_event = get_setting_value<std::string>(
-                                       std::string{ env_vars::SAMPLING_OVERFLOW_EVENT })
-                                       .value_or("perf::PERF_COUNT_HW_CACHE_REFERENCES");
+            auto const _freq = get_sampling_overflow_freq();
+            auto const _overflow_event =
+                get_setting_value<std::string>(
+                    std::string{ env_vars::SAMPLING_OVERFLOW_EVENT })
+                    .value_or("perf::PERF_COUNT_HW_CACHE_REFERENCES");
 
             perf::config_overflow_sampling(_pe, _overflow_event, _freq);
 
@@ -791,11 +795,11 @@ configure(bool _setup, std::int64_t _tid)
             _pe.disabled                 = 1;
             _pe.inherit                  = 0;
 
-            if(_pe.type == PERF_TYPE_SOFTWARE)
-            {
-                _pe.use_clockid = 1;
-                _pe.clockid     = CLOCK_REALTIME;
-            }
+            // Hardware events are the default overflow source. Their sample times
+            // otherwise stay on perf's CLOCK_MONOTONIC, and parse_overflow_data()
+            // freezes the monotonic-to-timeline offset from the first sample.
+            _pe.use_clockid = 1;
+            _pe.clockid     = CLOCK_BOOTTIME;
 
             auto _perf_open_error =
                 _perf_sampler->open(_pe, _info->index_data->system_value);
@@ -842,7 +846,7 @@ configure(bool _setup, std::int64_t _tid)
 
         if(get_use_tmp_files())
         {
-            auto _file = get_offload_file();
+            auto const _file = get_offload_file();
             if(_file && *_file)
             {
                 _sampler->set_offload(&offload_buffer);
@@ -978,7 +982,7 @@ configure(bool _setup, std::int64_t _tid)
             }
 
             // wait for the samples to finish
-            for(auto& itr : get_sampler_allocators())
+            for(auto const& itr : get_sampler_allocators())
             {
                 if(itr)
                 {
@@ -999,10 +1003,6 @@ configure(bool _setup, std::int64_t _tid)
 }
 
 void
-post_process_perfetto(std::int64_t, const std::vector<timer_sampling_data>&,
-                      const std::vector<overflow_sampling_data>&);
-
-void
 post_process_timemory(std::int64_t, const std::vector<timer_sampling_data>&,
                       const std::vector<overflow_sampling_data>&);
 
@@ -1010,8 +1010,6 @@ void
 store_sampling_data_in_cache(std::int64_t                               _tid,
                              const std::vector<timer_sampling_data>&    _timer_data,
                              const std::vector<overflow_sampling_data>& _overflow_data);
-
-auto static_strings = std::set<std::string>{};
 
 struct pause_interval_t
 {
@@ -1032,10 +1030,7 @@ spans_pause_interval(std::uint64_t _beg, std::uint64_t _end)
     }
 
     const auto _it =
-        std::lower_bound(pause_intervals.cbegin(), pause_intervals.cend(), _beg,
-                         [](const auto& _interval, std::uint64_t _val) {
-                             return _interval.resume_ts < _val;
-                         });
+        std::ranges::lower_bound(pause_intervals, _beg, {}, &pause_interval_t::resume_ts);
 
     return _it != pause_intervals.cend() && _it->pause_ts <= _end;
 }
@@ -1214,12 +1209,12 @@ unblock_signals(std::set<int> _signals)
 void
 post_process()
 {
-    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
-    size_t _total_data       = 0;
-    size_t _total_threads    = 0;
-    auto   _external_samples = std::atomic<size_t>{ 0 };
-    auto   _internal_samples = std::atomic<size_t>{ 0 };
+    size_t     _total_data       = 0;
+    size_t     _total_threads    = 0;
+    auto const _external_samples = std::atomic<size_t>{ 0 };
+    auto const _internal_samples = std::atomic<size_t>{ 0 };
 
     if(get_debug_sampling())
     {
@@ -1229,7 +1224,7 @@ post_process()
     rocprofsys::component::backtrace::stop();
     configure(false, 0);
 
-    for(auto& itr : get_sampler_allocators())
+    for(auto const& itr : get_sampler_allocators())
     {
         if(itr)
         {
@@ -1249,7 +1244,7 @@ post_process()
             continue;
         }
 
-        auto* _init = get_sampler_init(i).get();
+        auto const* _init = get_sampler_init(i).get();
 
         if(!_init)
         {
@@ -1267,8 +1262,8 @@ post_process()
             LOG_DEBUG("Getting sampler data for thread {}...", i);
         }
 
-        auto _raw_data    = _sampler->get_data();
-        auto _loaded_data = load_offload_buffer(i);
+        auto       _raw_data    = _sampler->get_data();
+        auto const _loaded_data = load_offload_buffer(i);
         for(auto line : _loaded_data)
         {
             while(!line.is_empty())
@@ -1301,9 +1296,9 @@ post_process()
         std::vector<sampling::bundle_t*> _data{};
         for(auto& itr : _raw_data)
         {
-            auto* _bt = itr.get<backtrace>();
-            auto* _cc = itr.get<callchain>();
-            auto* _ts = itr.get<backtrace_timestamp>();
+            auto const* _bt = itr.get<backtrace>();
+            auto const* _cc = itr.get<callchain>();
+            auto const* _ts = itr.get<backtrace_timestamp>();
             if(_thread_info && ((_bt && !_bt->empty()) || (_cc && !_cc->empty())) &&
                _ts && _thread_info->is_valid_time(_ts->get_timestamp()))
             {
@@ -1322,13 +1317,9 @@ post_process()
                           _data.size());
             }
 
-            auto _timer_data    = parse_timer_data(i, _init, _data);
-            auto _overflow_data = parse_overflow_data(i, _init, _data);
+            auto const _timer_data    = parse_timer_data(i, _init, _data);
+            auto const _overflow_data = parse_overflow_data(i, _init, _data);
 
-            if(get_use_perfetto())
-            {
-                post_process_perfetto(i, _timer_data, _overflow_data);
-            }
             if(get_use_timemory())
             {
                 post_process_timemory(i, _timer_data, _overflow_data);
@@ -1392,9 +1383,9 @@ parse_timer_data(std::int64_t _tid, const bundle_t* _init,
     const auto* _last = _init;
     for(const auto& itr : _data)
     {
-        auto*       _bt_data      = itr->get<backtrace>();
-        auto*       _bt_time      = itr->get<backtrace_timestamp>();
-        auto*       _bt_metrics   = itr->get<backtrace_metrics>();
+        auto const* _bt_data      = itr->get<backtrace>();
+        auto const* _bt_time      = itr->get<backtrace_timestamp>();
+        auto const* _bt_metrics   = itr->get<backtrace_metrics>();
         const auto* _last_metrics = _last->get<backtrace_metrics>();
 
         if(!_bt_data || !_bt_time || _bt_data->empty() || _bt_time->get_tid() != _tid)
@@ -1410,7 +1401,7 @@ parse_timer_data(std::int64_t _tid, const bundle_t* _init,
         _ret.m_stack = backtrace::filter_and_patch(_bt_data->get());
         if constexpr(tim::trait::is_available<hw_counters>::value)
         {
-            auto _hw_counters_enabled = [](const auto* _bt_v) {
+            auto const _hw_counters_enabled = [](const auto* _bt_v) {
                 return (_bt_v != nullptr) &&
                        (*_bt_v)(type_list<backtrace_metrics::hw_counters>{}) &&
                        (*_bt_v)(category::thread_hardware_counter{});
@@ -1430,8 +1421,9 @@ parse_timer_data(std::int64_t _tid, const bundle_t* _init,
         _last = itr;
     }
 
-    std::sort(_results.begin(), _results.end(),
-              [](const auto& _lhs, const auto& _rhs) { return _lhs.m_beg < _rhs.m_beg; });
+    std::ranges::sort(_results, [](const auto& _lhs, const auto& _rhs) {
+        return _lhs.m_beg < _rhs.m_beg;
+    });
 
     return _results;
 }
@@ -1446,8 +1438,8 @@ parse_overflow_data(std::int64_t                  _tid, const bundle_t*,
     std::uint64_t _perf_ts_offset = 0;
     for(const auto& itr : _data)
     {
-        auto* _bt_call = itr->get<callchain>();
-        auto* _bt_time = itr->get<backtrace_timestamp>();
+        auto const* _bt_call = itr->get<callchain>();
+        auto const* _bt_time = itr->get<backtrace_timestamp>();
 
         if(!_bt_call || !_bt_time || _bt_call->empty() || _bt_time->get_tid() != _tid)
         {
@@ -1477,299 +1469,11 @@ parse_overflow_data(std::int64_t                  _tid, const bundle_t*,
         }
     }
 
-    std::sort(_results.begin(), _results.end(),
-              [](const auto& _lhs, const auto& _rhs) { return _lhs.m_beg < _rhs.m_beg; });
+    std::ranges::sort(_results, [](const auto& _lhs, const auto& _rhs) {
+        return _lhs.m_beg < _rhs.m_beg;
+    });
 
     return _results;
-}
-
-void
-post_process_perfetto(std::int64_t                               _tid,
-                      const std::vector<timer_sampling_data>&    _timer_data,
-                      const std::vector<overflow_sampling_data>& _overflow_data)
-{
-    auto _valid_metrics = backtrace_metrics::valid_array_t{};
-
-    for(const auto& itr : _timer_data)
-    {
-        _valid_metrics |= itr.m_metrics.get_valid();
-    }
-
-    if(trait::runtime_enabled<backtrace_metrics>::get())
-    {
-        if(get_debug_sampling())
-        {
-            LOG_DEBUG("[{}] Post-processing metrics for perfetto...", _tid);
-        }
-        backtrace_metrics::init_perfetto(_tid, _valid_metrics);
-        for(const auto& itr : _timer_data)
-        {
-            itr.m_metrics.post_process_perfetto(_tid, 0.5 * (itr.m_beg + itr.m_end));
-        }
-        backtrace_metrics::fini_perfetto(_tid, _valid_metrics);
-    }
-
-    if(get_debug_sampling())
-    {
-        LOG_DEBUG("[{}] Post-processing backtraces for perfetto...", _tid);
-    }
-
-    const auto& _thread_info = thread_info::get(_tid, SequentTID);
-    if(!_thread_info)
-    {
-        throw std::runtime_error(fmt::format("No valid thread info for tid={}", _tid));
-    }
-    if(!_thread_info)
-    {
-        return;
-    }
-
-    auto _overflow_event =
-        get_setting_value<std::string>(std::string{ env_vars::SAMPLING_OVERFLOW_EVENT })
-            .value_or("");
-
-    if(!_overflow_event.empty() && !_overflow_data.empty())
-    {
-        auto _beg_ns = std::max(_overflow_data.front().m_beg, _thread_info->get_start());
-        auto _end_ns = std::min(_overflow_data.back().m_end, _thread_info->get_stop());
-
-        const auto _overflow_prefix = std::string_view{ "PERF_COUNT_" };
-        const auto _overflow_pos    = _overflow_event.find(_overflow_prefix);
-        if(_overflow_pos != std::string::npos)
-        {
-            _overflow_event =
-                _overflow_event.substr(_overflow_pos + _overflow_prefix.length());
-        }
-
-        const auto* _main_name =
-            static_strings
-                .emplace(fmt::format("{} samples [rocprof-sys]", _overflow_event))
-                .first->c_str();
-
-        auto _track = tracing::get_perfetto_track(
-            category::overflow_sampling{},
-            [](auto _seq_id, auto _sys_id) {
-                return fmt::format("Thread {} Overflow (S) {}", _seq_id, _sys_id);
-            },
-            _thread_info->index_data->sequent_value,
-            _thread_info->index_data->system_value);
-
-        tracing::push_perfetto_track(category::overflow_sampling{}, _main_name, _track,
-                                     _beg_ns, [&](::perfetto::EventContext ctx) {
-                                         if(config::get_perfetto_annotations())
-                                         {
-                                             tracing::add_perfetto_annotation(
-                                                 ctx, "begin_ns", _beg_ns);
-                                         }
-                                     });
-
-        for(const auto& itr : _overflow_data)
-        {
-            auto _beg = itr.m_beg;
-            auto _end = itr.m_end;
-
-            if(!_thread_info->is_valid_lifetime({ _beg, _end }))
-            {
-                continue;
-            }
-
-            for(const auto& iitr : itr.m_stack)
-            {
-                const auto* _name =
-                    static_strings.emplace(rocprofsys::utility::demangle(iitr.name))
-                        .first->c_str();
-                tracing::push_perfetto_track(
-                    category::overflow_sampling{}, _name, _track, _beg,
-                    [&](::perfetto::EventContext ctx) {
-                        if(config::get_perfetto_annotations())
-                        {
-                            tracing::add_perfetto_annotation(ctx, "file", iitr.location);
-                            tracing::add_perfetto_annotation(
-                                ctx, "pc", fmt::format("{:X}", iitr.address));
-                            tracing::add_perfetto_annotation(
-                                ctx, "line_address",
-                                fmt::format("{:X}", iitr.line_address));
-                            if(iitr.lineinfo)
-                            {
-                                auto _lines = iitr.lineinfo.lines;
-                                std::reverse(_lines.begin(), _lines.end());
-                                size_t _n = 0;
-                                for(const auto& line : _lines)
-                                {
-                                    auto _label = fmt::format("lineinfo-{}", _n++);
-                                    tracing::add_perfetto_annotation(
-                                        ctx, _label.c_str(),
-                                        fmt::format(
-                                            "{}@{}:{}",
-                                            rocprofsys::utility::demangle(line.name),
-                                            line.location, line.line));
-                                }
-                            }
-                        }
-                    });
-                tracing::pop_perfetto_track(category::overflow_sampling{}, _name, _track,
-                                            _end);
-            }
-        }
-
-        tracing::pop_perfetto_track(category::overflow_sampling{}, _main_name, _track,
-                                    _end_ns, [&](::perfetto::EventContext ctx) {
-                                        if(config::get_perfetto_annotations())
-                                        {
-                                            tracing::add_perfetto_annotation(
-                                                ctx, "end_ns", _end_ns);
-                                        }
-                                    });
-    }
-
-    if(!_timer_data.empty())
-    {
-        auto _beg_ns = std::max(_timer_data.front().m_beg, _thread_info->get_start());
-        auto _end_ns = std::min(_timer_data.back().m_end, _thread_info->get_stop());
-
-        auto _track = tracing::get_perfetto_track(
-            category::timer_sampling{},
-            [](auto _seq_id, auto _sys_id) {
-                return fmt::format("Thread {} (S) {}", _seq_id, _sys_id);
-            },
-            _thread_info->index_data->sequent_value,
-            _thread_info->index_data->system_value);
-
-        tracing::push_perfetto_track(category::timer_sampling{}, "samples [rocprof-sys]",
-                                     _track, _beg_ns, [&](::perfetto::EventContext ctx) {
-                                         if(config::get_perfetto_annotations())
-                                         {
-                                             tracing::add_perfetto_annotation(
-                                                 ctx, "begin_ns", _beg_ns);
-                                         }
-                                     });
-
-        auto _labels = backtrace_metrics::get_hw_counter_labels(_tid);
-        for(const auto& itr : _timer_data)
-        {
-            size_t        _ncount = 0;
-            std::uint64_t _beg    = itr.m_beg;
-            std::uint64_t _end    = itr.m_end;
-            if(!_thread_info->is_valid_lifetime({ _beg, _end }))
-            {
-                continue;
-            }
-
-            for(const auto& iitr : itr.m_stack)
-            {
-                auto _ncur = _ncount++;
-                // the begin/end + HW counters will be same for entire call-stack so
-                // only annotate the top and the bottom functions to keep the data
-                // consumption low
-                bool _include_common = (_ncur == 0 || _ncur + 1 == itr.m_stack.size());
-
-                // Only annotate HW counters when first or last and HW counters are
-                // not empty
-                bool _include_hw =
-                    _include_common && !itr.m_metrics.get_hw_counters().empty();
-
-                // annotations common to both modes
-                auto _common_annotate = [&](::perfetto::EventContext& ctx,
-                                            bool                      _is_last) {
-                    if(_include_common && _is_last)
-                    {
-                        tracing::add_perfetto_annotation(ctx, "begin_ns", _beg);
-                        tracing::add_perfetto_annotation(ctx, "end_ns", _end);
-                    }
-
-                    if(_include_hw)
-                    {
-                        // current values when read
-                        auto _hw_cnt_vals = itr.m_metrics.get_hw_counters();
-                        for(size_t i = 0; i < _labels.size(); ++i)
-                        {
-                            tracing::add_perfetto_annotation(ctx, _labels.at(i),
-                                                             _hw_cnt_vals.at(i));
-                        }
-                    }
-                };
-
-                if(get_sampling_include_inlines() && iitr.lineinfo)
-                {
-                    auto _lines = iitr.lineinfo.lines;
-                    std::reverse(_lines.begin(), _lines.end());
-                    size_t _n = 0;
-                    for(const auto& line : _lines)
-                    {
-                        const auto* _name =
-                            static_strings
-                                .emplace(rocprofsys::utility::demangle(line.name))
-                                .first->c_str();
-                        auto _info = fmt::format("{}:{}", line.location, line.line);
-                        tracing::push_perfetto_track(
-                            category::timer_sampling{}, _name, _track, _beg,
-                            [&](::perfetto::EventContext ctx) {
-                                if(config::get_perfetto_annotations())
-                                {
-                                    _common_annotate(ctx, (_n == 0 && _ncur == 0) ||
-                                                              (_n + 1 == _lines.size()));
-                                    tracing::add_perfetto_annotation(ctx, "file",
-                                                                     iitr.location);
-                                    tracing::add_perfetto_annotation(ctx, "lineinfo",
-                                                                     _info);
-                                    tracing::add_perfetto_annotation(ctx, "inlined",
-                                                                     (_n++ > 0));
-                                }
-                            });
-                        tracing::pop_perfetto_track(category::timer_sampling{}, _name,
-                                                    _track, _end);
-                    }
-                }
-                else
-                {
-                    const auto* _name = static_strings.emplace(iitr.name).first->c_str();
-                    tracing::push_perfetto_track(
-                        category::timer_sampling{}, _name, _track, _beg,
-                        [&](::perfetto::EventContext ctx) {
-                            if(config::get_perfetto_annotations())
-                            {
-                                _common_annotate(ctx, true);
-                                tracing::add_perfetto_annotation(ctx, "file",
-                                                                 iitr.location);
-                                tracing::add_perfetto_annotation(
-                                    ctx, "pc", fmt::format("{:X}", iitr.address));
-                                tracing::add_perfetto_annotation(
-                                    ctx, "line_address",
-                                    fmt::format("{:X}", iitr.line_address));
-                                if(iitr.lineinfo)
-                                {
-                                    auto _lines = iitr.lineinfo.lines;
-                                    std::reverse(_lines.begin(), _lines.end());
-                                    size_t _n = 0;
-                                    for(const auto& line : _lines)
-                                    {
-                                        auto _label = fmt::format("lineinfo-{}", _n++);
-                                        tracing::add_perfetto_annotation(
-                                            ctx, _label.c_str(),
-                                            fmt::format(
-                                                "{}@{}:{}",
-                                                rocprofsys::utility::demangle(line.name),
-                                                line.location, line.line));
-                                    }
-                                }
-                            }
-                        });
-
-                    tracing::pop_perfetto_track(category::timer_sampling{}, _name, _track,
-                                                _end);
-                }
-            }
-        }
-
-        tracing::pop_perfetto_track(category::timer_sampling{}, "samples [rocprof-sys]",
-                                    _track, _end_ns, [&](::perfetto::EventContext ctx) {
-                                        if(config::get_perfetto_annotations())
-                                        {
-                                            tracing::add_perfetto_annotation(
-                                                ctx, "end_ns", _end_ns);
-                                        }
-                                    });
-    }
 }
 
 void
@@ -1817,8 +1521,8 @@ post_process_timemory(std::int64_t                               _tid,
                 auto* _sc = iitr.get<sampling_wall_clock>();
                 if(_sc)
                 {
-                    auto _value = static_cast<double>(itr.m_end - itr.m_beg) /
-                                  sampling_wall_clock::get_unit();
+                    auto const _value = static_cast<double>(itr.m_end - itr.m_beg) /
+                                        sampling_wall_clock::get_unit();
                     _sc->set_value(_value);
                     _sc->set_accum(_value);
                 }
@@ -1856,7 +1560,7 @@ post_process_timemory(std::int64_t                               _tid,
                 auto* _sc = iitr.get<sampling_wall_clock>();
                 if(_sc)
                 {
-                    auto _value = _elapsed_wc / sampling_wall_clock::get_unit();
+                    auto const _value = _elapsed_wc / sampling_wall_clock::get_unit();
                     _sc->set_value(_value);
                     _sc->set_accum(_value);
                 }
@@ -2108,7 +1812,7 @@ pause()
     }
 
     LOG_DEBUG("Pausing sampling...");
-    pending_pause_ts.store(tim::get_clock_real_now<std::uint64_t, std::nano>());
+    pending_pause_ts.store(control::clocks::timeline_ns());
     block_samples();
     set_sampler_timers(timer_state::stopped);
 }
@@ -2126,13 +1830,13 @@ resume()
     }
 
     LOG_DEBUG("Resuming sampling...");
-    auto _pause_ts  = pending_pause_ts.exchange(0);
-    auto _resume_ts = tim::get_clock_real_now<std::uint64_t, std::nano>();
-    if(_pause_ts > 0)
+    auto const pause_ts  = pending_pause_ts.exchange(0);
+    auto const resume_ts = control::clocks::timeline_ns();
+    if(pause_ts > 0)
     {
-        auto _lk = std::lock_guard<std::mutex>{ pause_mutex };
+        auto const _lk = std::lock_guard<std::mutex>{ pause_mutex };
         pause_intervals.push_back(
-            pause_interval_t{ .pause_ts = _pause_ts, .resume_ts = _resume_ts });
+            pause_interval_t{ .pause_ts = pause_ts, .resume_ts = resume_ts });
     }
 
     set_sampler_timers(timer_state::running);

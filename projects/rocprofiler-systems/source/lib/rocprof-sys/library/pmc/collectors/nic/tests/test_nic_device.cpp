@@ -134,7 +134,7 @@ TEST_F(NicDeviceTest, GetSupportedMetrics_AllEnabled)
     SetupFullRdmaSupport();
 
     const device<MockBackend> dev(mock_backend, test_index);
-    auto                      supported = dev.get_supported_metrics();
+    auto const                supported = dev.get_supported_metrics();
 
     EXPECT_TRUE(supported.bits.rx_rdma_ucast_bytes);
     EXPECT_TRUE(supported.bits.tx_rdma_ucast_bytes);
@@ -153,7 +153,7 @@ TEST_F(NicDeviceTest, GetNicMetrics_ReturnsCorrectValues)
     SetupStatisticsData();
 
     const device<MockBackend> dev(mock_backend, test_index);
-    auto                      m = dev.get_nic_metrics();
+    auto const                m = dev.get_nic_metrics();
 
     EXPECT_EQ(m.rx_rdma_ucast_bytes, 1000000ULL);
     EXPECT_EQ(m.tx_rdma_ucast_bytes, 2000000ULL);
@@ -186,7 +186,7 @@ TEST_F(NicDeviceTest, GetNicMetrics_ReturnsZeros_WhenNoRdmaPorts)
 
     EXPECT_FALSE(dev.is_supported());
 
-    auto m = dev.get_nic_metrics();
+    auto const m = dev.get_nic_metrics();
     EXPECT_EQ(m.rx_rdma_ucast_bytes, 0ULL);
     EXPECT_EQ(m.tx_rdma_ucast_bytes, 0ULL);
 }
@@ -220,7 +220,7 @@ TEST_F(NicDeviceTest, GetNicMetrics_ReturnsZeros_WhenStatisticsQueryThrows)
     const device<MockBackend> dev(mock_backend, test_index);
     EXPECT_TRUE(dev.is_supported());
 
-    auto m = dev.get_nic_metrics();
+    auto const m = dev.get_nic_metrics();
     EXPECT_EQ(m.rx_rdma_ucast_bytes, 0ULL);
     EXPECT_EQ(m.tx_rdma_ucast_bytes, 0ULL);
     EXPECT_EQ(m.rx_rdma_ucast_pkts, 0ULL);
@@ -247,7 +247,7 @@ TEST_F(NicDeviceTest, GetNicMetrics_IgnoresUnknownStatNames)
         }));
 
     const device<MockBackend> dev(mock_backend, test_index);
-    auto                      m = dev.get_nic_metrics();
+    auto const                m = dev.get_nic_metrics();
 
     EXPECT_EQ(m.rx_rdma_ucast_bytes, 1000ULL);
     EXPECT_EQ(m.tx_rdma_ucast_bytes, 2000ULL);
@@ -273,7 +273,7 @@ TEST_F(NicDeviceTest, GetNicMetrics_HandlesPartialStats)
         }));
 
     const device<MockBackend> dev(mock_backend, test_index);
-    auto                      m = dev.get_nic_metrics();
+    auto const                m = dev.get_nic_metrics();
 
     EXPECT_EQ(m.rx_rdma_ucast_bytes, 500ULL);
     EXPECT_EQ(m.tx_rdma_cnp_pkts, 10ULL);

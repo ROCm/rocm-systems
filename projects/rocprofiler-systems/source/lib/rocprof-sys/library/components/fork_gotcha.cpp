@@ -5,8 +5,6 @@
 
 #include "common/env_vars.hpp"
 #include "core/config.hpp"
-#include "core/perfetto.hpp"
-#include "core/perfetto_fwd.hpp"
 #include "core/state.hpp"
 #include "library/components/fork_gotcha.hpp"
 #include "library/runtime.hpp"
@@ -50,7 +48,7 @@ prefork_setup()
         return;
     }
 
-    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
     ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
 
     if(state::process::get() < state::process::Active &&
@@ -152,8 +150,6 @@ postfork_child()
     rocprofsys::sampling::postfork_child_release_samplers();
     rocprofsys::categories::shutdown();
     state::thread::set(state::thread::Disabled);
-
-    rocprofsys::get_perfetto_session(process::get_parent_id()).release();
 
     // register these exit handlers to avoid cleaning up resources
     on_exit(&child_exit, nullptr);

@@ -214,6 +214,9 @@ def omniarg_parser(
     )
     parser._positionals.title = "Modes"
     parser._optionals.title = "Help"
+    skills_note = _skills_note(rocprof_compute_home)
+    if skills_note is not None:
+        parser.description = f"{parser.description}\n\n{skills_note}"
 
     subparsers = parser.add_subparsers(
         dest="mode", help="Select mode of interaction with the target application:"
@@ -224,6 +227,7 @@ def omniarg_parser(
     profile_parser = subparsers.add_parser(
         "profile",
         help="Profile the target application",
+        description=skills_note,
         usage="""
 
 `rocprof-compute profile --name <workload_name> [profile options] [roofline options] -- <workload_cmd>`
@@ -639,6 +643,7 @@ Examples:
     analyze_parser = subparsers.add_parser(
         "analyze",
         help="Analyze existing profiling results at command line",
+        description=skills_note,
         usage="""
 rocprof-compute analyze --path <workload_path> [analyze options]
 
@@ -1049,8 +1054,10 @@ Examples:
         experimental_enabled=experimental_enabled,
         feature_label="GUI",
         help=(
-            "\t\tActivate a GUI to interate with rocprofiler-compute metrics.\n"
-            "\t\tOptionally, specify port to launch application (DEFAULT: 8050)"
+            "\t\t(DEPRECATED) Activate a GUI to interate with rocprofiler-compute "
+            "metrics.\n"
+            "\t\tOptionally, specify port to launch application (DEFAULT: 8050)\n"
+            "\t\t--gui is deprecated and will be removed in a future release."
         ),
     )
     analyze_group.add_argument(
@@ -1062,6 +1069,20 @@ Examples:
         action=ExperimentalAction,
         experimental_enabled=experimental_enabled,
         feature_label="TUI",
-        help="\t\tActivate a Textual User Interface (TUI) to "
-        "interact with rocprofiler-compute metrics.",
+        help="\t\t(DEPRECATED) Activate a Textual User Interface (TUI) to "
+        "interact with rocprofiler-compute metrics.\n"
+        "\t\t--tui is deprecated and will be removed in a future release.",
     )
+
+
+def _skills_note(rocprof_compute_home: Path) -> Optional[str]:
+    """Return the help line that points to the Agent Skills README, if shipped."""
+    # Source checkout first, then the install's share directory.
+    for skills_dir in (
+        rocprof_compute_home.parent / "skills",
+        rocprof_compute_home.parent.parent / "share" / "rocprofiler-compute" / "skills",
+    ):
+        readme = skills_dir / "README.md"
+        if readme.is_file():
+            return f"Agent Skills: see {readme} to install them."
+    return None

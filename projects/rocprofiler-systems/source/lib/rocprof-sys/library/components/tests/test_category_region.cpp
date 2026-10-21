@@ -380,7 +380,7 @@ TEST(category_region_cache, cache_start_pushes_pending_entry)
     map_name_to_args.clear();
     cache_start<category_t>(name, serialize_name_value_pairs("a", 1, "b", 2));
 
-    auto itr = map_name_to_args.find(key);
+    auto const itr = map_name_to_args.find(key);
     ASSERT_TRUE(itr != map_name_to_args.end());
     ASSERT_EQ(itr->second.size(), 1u);
 
@@ -522,8 +522,8 @@ TEST(category_region_cache, cache_start_keys_on_name_and_category)
     const entry_key key_a{ .name = name, .category = "cat_a" };
     const entry_key key_b{ .name = name, .category = "cat_b" };
 
-    auto itr_a = map_name_to_args.find(key_a);
-    auto itr_b = map_name_to_args.find(key_b);
+    auto const itr_a = map_name_to_args.find(key_a);
+    auto const itr_b = map_name_to_args.find(key_b);
     ASSERT_TRUE(itr_a != map_name_to_args.end());
     ASSERT_TRUE(itr_b != map_name_to_args.end());
 
@@ -559,7 +559,7 @@ TEST(category_region_cache, append_cache_args_is_scoped_to_category)
     const entry_key key_b{ .name = name, .category = "cat_b" };
     EXPECT_TRUE(map_name_to_args.find(key_b) == map_name_to_args.end());
 
-    auto itr_a = map_name_to_args.find(key_a);
+    auto const itr_a = map_name_to_args.find(key_a);
     ASSERT_TRUE(itr_a != map_name_to_args.end());
     EXPECT_EQ(parse(itr_a->second.back().args).size(), 1u);
 
@@ -686,7 +686,7 @@ TEST_F(category_region_policy_test, cache_start_records_injected_clock_without_e
     region.cache_start("region", "cat", serialize_name_value_pairs("a", 1));
 
     const entry_key key{ .name = "region", .category = "cat" };
-    auto            itr = region.pending_entries().find(key);
+    auto const      itr = region.pending_entries().find(key);
     ASSERT_TRUE(itr != region.pending_entries().end());
     ASSERT_EQ(itr->second.size(), 1u);
     EXPECT_EQ(itr->second.back().start_ts, 1234u);
@@ -765,7 +765,7 @@ TEST_F(category_region_policy_test, cache_stop_pops_only_the_innermost_frame)
 
     // the outer frame remains open with its original timestamp
     const entry_key key{ .name = "region", .category = "cat" };
-    auto            itr = region.pending_entries().find(key);
+    auto const      itr = region.pending_entries().find(key);
     ASSERT_TRUE(itr != region.pending_entries().end());
     ASSERT_EQ(itr->second.size(), 1u);
     EXPECT_EQ(itr->second.back().start_ts, 100u);

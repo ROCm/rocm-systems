@@ -15,6 +15,16 @@
 #include <string>
 #include <vector>
 
+// Kept out of hip_capture.cpp: glibc's <sys/auxv.h> includes <elf.h>, whose
+// Elf64_* typedefs collide with the ones CLR's ELF headers put in the global
+// namespace.
+#if defined(__linux__)
+#include <sys/auxv.h>
+#ifndef AT_SECURE
+#define AT_SECURE 23  // Linux ABI value; same fallback as ROCr's runtime.cpp
+#endif
+#endif
+
 namespace hip {
 class Device;
 extern std::vector<hip::Device*> g_devices;
@@ -24,7 +34,6 @@ extern hipError_t ihipGetDeviceProperties(hipDeviceProp_t* props, hipDevice_t de
 
 namespace hrr_cap {
 namespace metadata {
-namespace {
 
 std::string json_escape(const char* s) {
   std::string out;
@@ -54,7 +63,9 @@ std::string json_escape(const char* s) {
   return out;
 }
 
-std::string json_escape(const std::string& s) { return json_escape(s.c_str()); }
+namespace {
+
+std::string json_escape(const std::string& s) { return metadata::json_escape(s.c_str()); }
 
 std::string quote(const std::string& s) { return "\"" + json_escape(s) + "\""; }
 
@@ -77,22 +88,6 @@ std::string version_string_from_int(int version) {
   return std::to_string(major) + "." + std::to_string(minor) + "." + std::to_string(patch);
 }
 
-std::string bytes_to_hex(const char* bytes, size_t len) {
-  static constexpr char kHex[] = "0123456789abcdef";
-  std::string result;
-  result.resize(len * 2);
-  for (size_t i = 0; i < len; ++i) {
-    const auto v = static_cast<unsigned char>(bytes[i]);
-    result[2 * i] = kHex[v >> 4];
-    result[2 * i + 1] = kHex[v & 0xf];
-  }
-  return result;
-}
-
-std::string uuid_to_hex(const hipUUID& uuid) {
-  return bytes_to_hex(uuid.bytes, sizeof(uuid.bytes));
-}
-
 void append_prop_fields(std::ostringstream& os, const hipDeviceProp_t& prop) {
   os << "      \"properties\": {\n"
      << "        \"name\": " << quote(bounded_string(prop.name, sizeof(prop.name))) << ",\n"
@@ -112,11 +107,11 @@ void append_prop_fields(std::ostringstream& os, const hipDeviceProp_t& prop) {
      << "        \"compute_mode\": " << prop.computeMode << ",\n"
      << "        \"compute_capability\": " << quote(std::to_string(prop.major) + "." +
                                                   std::to_string(prop.minor)) << ",\n"
-     << "        \"pci\": " << quote(std::to_string(prop.pciDomainID) + ":" +
-                                    std::to_string(prop.pciBusID) + ":" +
-                                    std::to_string(prop.pciDeviceID)) << ",\n"
-     << "        \"uuid\": " << quote(uuid_to_hex(prop.uuid)) << ",\n"
-     << "        \"luid\": " << quote(bytes_to_hex(prop.luid, sizeof(prop.luid))) << ",\n"
+     // Left blank: they name the individual accelerator, and with it the machine
+     // that captured, and replay needs none of them.
+     << "        \"pci\": \"\",\n"
+     << "        \"uuid\": \"\",\n"
+     << "        \"luid\": \"\",\n"
      << "        \"luid_device_node_mask\": " << prop.luidDeviceNodeMask << "\n"
      << "      }";
 }
@@ -188,6 +183,14 @@ std::string collect_json() {
   os << "  \"devices\": " << device_metadata.devices_json << "\n"
      << "}";
   return os.str();
+}
+
+bool secure_exec() {
+#if defined(__linux__)
+  return getauxval(AT_SECURE) != 0;
+#else
+  return false;
+#endif
 }
 
 }  // namespace metadata

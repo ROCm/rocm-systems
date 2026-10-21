@@ -105,6 +105,11 @@ void TestConcurrentInit::Run(void) {
     return;
   }
 
+  // The counts below assume this test holds every reference.
+  uint32_t socket_count = 0;
+  ASSERT_EQ(AMDSMI_STATUS_NOT_INIT, amdsmi_get_socket_handles(&socket_count, nullptr))
+      << "An earlier test left the library initialized.";
+
   pthread_t ThreadId[NumOfThreads];
   pthread_attr_t attr;
   pthread_attr_init(&attr);
@@ -121,19 +126,24 @@ void TestConcurrentInit::Run(void) {
     ASSERT_EQ(0, err) << "pthread_join failed.";
   }
 
-  // Invoke hsa_shut_down and verify that all the hsa_init's were counted.
-  // HSA should be exactly closed after NumOfThreads calls.
+  // Every concurrent amdsmi_init() must have been counted: the library stays up
+  // through the first NumOfThreads - 1 shut downs and goes down on the last one.
   for (int Id = 0; Id < NumOfThreads; ++Id) {
+    ASSERT_EQ(AMDSMI_STATUS_SUCCESS, amdsmi_get_socket_handles(&socket_count, nullptr))
+        << "An amdsmi_init was missed.";
     DISPLAY_AMDSMI_API("amdsmi_shut_down", "id=" + std::to_string(Id), VERB(STANDARD));
     amdsmi_status_t err = amdsmi_shut_down();
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
-    ASSERT_EQ(AMDSMI_STATUS_SUCCESS, err) << "An amdsmi_init was missed.";
+    ASSERT_EQ(AMDSMI_STATUS_SUCCESS, err);
   }
+  ASSERT_EQ(AMDSMI_STATUS_NOT_INIT, amdsmi_get_socket_handles(&socket_count, nullptr))
+      << "amdsmi_init reference count was too high.";
 
+  // A shut down with no reference left is a no-op.
   DISPLAY_AMDSMI_API("amdsmi_shut_down", "", VERB(STANDARD));
   amdsmi_status_t err = amdsmi_shut_down();
   DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
-  ASSERT_EQ(AMDSMI_STATUS_INIT_ERROR, err) << "amdsmi_init reference count was too high.";
+  ASSERT_EQ(AMDSMI_STATUS_SUCCESS, err);
 
   int32_t refcnt = rsmi_test_refcount(0);
   ASSERT_EQ(0, refcnt);
@@ -163,6 +173,7 @@ void TestConcurrentInit::Run(void) {
 
   refcnt = rsmi_test_refcount(0);
   ASSERT_EQ(0, refcnt);
+  ASSERT_EQ(AMDSMI_STATUS_NOT_INIT, amdsmi_get_socket_handles(&socket_count, nullptr));
 
   IF_VERB(STANDARD) {
     std::cout << "Concurrent amdsmi_shut_down() passed." << std::endl;
@@ -180,6 +191,7 @@ void TestConcurrentInit::Run(void) {
 
   refcnt = rsmi_test_refcount(0);
   ASSERT_EQ(0, refcnt);
+  ASSERT_EQ(AMDSMI_STATUS_NOT_INIT, amdsmi_get_socket_handles(&socket_count, nullptr));
 
   IF_VERB(STANDARD) {
     std::cout << "Concurrent amdsmi_init() followed by amdsmi_shut_down() passed." << std::endl;

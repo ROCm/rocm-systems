@@ -22,13 +22,8 @@ HIP_TEST_CASE(Stress_HMM_OverSubscriptionTst) {
   const bool hmm = HipTest::isManagedMemorySupportedOnDevice(0);
 
   bool shouldRun = []() -> bool {
-#if HT_AMD  // For AMD this gcn arch needs to have xnack+
-    int device = 0;
-    hipDeviceProp_t props{};
-    HIP_CHECK(hipGetDevice(&device));
-    HIP_CHECK(hipGetDeviceProperties(&props, device));
-    std::string arch(props.gcnArchName);
-    return arch.find("xnack+") != std::string::npos;
+#if HT_AMD  // For AMD this needs XNACK on
+    return HipTest::isXnackOn();
 #else  // For CUDA this depends on SM and attribute check should be fine
     return true;
 #endif

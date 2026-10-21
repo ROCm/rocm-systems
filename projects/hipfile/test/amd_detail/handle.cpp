@@ -279,6 +279,42 @@ TEST_F(HipFileHandle, RocfileHandleRegisterLibMountError)
     ASSERT_EQ(hipFileHandleRegister(&fh, &rfd), HipFileOpError(hipFileInternalError));
 }
 
+struct ErrnoParam {
+    int         value;
+    const char *name;
+};
+
+// Readable test parameter in gtest/ctest output
+static void
+PrintTo(const ErrnoParam &param, std::ostream *os)
+{
+    *os << param.name;
+}
+
+struct HipFileHandleOutOfFds : public HipFileHandle, public WithParamInterface<ErrnoParam> {};
+
+// If reopening the file during registration fails because the process or
+// system is out of file descriptors return hipFileGetNewFDFailed
+TEST_P(HipFileHandleOutOfFds, hipfileHandleRegisterReopenError)
+{
+    hipFileHandle_t fh{};
+    hipFileDescr_t  rfd{};
+    rfd.type      = hipFileHandleTypeOpaqueFD;
+    rfd.handle.fd = 0xBADF00D;
+
+    // Deliberately test the registering non-O_DIRECT path as it catches std::system_error.
+    ExpectUnregisteredFileBuilder(msys, mlibmounthelper)
+        .fd_flags(~O_DIRECT)
+        .open_throws(GetParam().value)
+        .build();
+
+    ASSERT_EQ(hipFileHandleRegister(&fh, &rfd), HipFileOpError(hipFileGetNewFDFailed));
+}
+
+INSTANTIATE_TEST_SUITE_P(, HipFileHandleOutOfFds,
+                         Values(ErrnoParam{EMFILE, "EMFILE"}, ErrnoParam{ENFILE, "ENFILE"}),
+                         PrintToStringParamName());
+
 TEST_F(HipFileHandle, register_handle_linux_fd_already_registered)
 {
     hipFileHandle_t fh{};

@@ -3,14 +3,18 @@ name: "rocjitsu-website"
 on:
   pull_request:
     paths:
-      - "emulation/rocjitsu/website/**"
+      - "emulation/rocjitsu/website/dashboard/**"
       - ".github/workflows/rocjitsu-website-test.yml"
+      - ".github/workflows/rocjitsu-publish-website.yml"
+      - ".github/workflows/rocjitsu-benchmarks.yml"
   push:
     branches:
       - develop
     paths:
-      - "emulation/rocjitsu/website/**"
+      - "emulation/rocjitsu/website/dashboard/**"
       - ".github/workflows/rocjitsu-website-test.yml"
+      - ".github/workflows/rocjitsu-publish-website.yml"
+      - ".github/workflows/rocjitsu-benchmarks.yml"
   workflow_dispatch:
 
 permissions:
@@ -21,13 +25,47 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  dashboard-data:
+    name: Verify dashboard data tools
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: emulation/rocjitsu/website/dashboard
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: emulation/rocjitsu/website/dashboard/scripts/dashboard-data/requirements-test.txt
+
+      - name: Install test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bash git jq
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.13.0"
+
+      - name: Install Python test dependencies
+        run: python -m pip install -r scripts/dashboard-data/requirements-test.txt
+
+      - name: Test dashboard data tools
+        run: python -m pytest scripts/dashboard-data/tests
+
   verify:
     name: Verify website
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
       run:
-        working-directory: emulation/rocjitsu/website
+        working-directory: emulation/rocjitsu/website/dashboard
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -37,7 +75,7 @@ jobs:
         with:
           node-version: "22.13.0"
           cache: npm
-          cache-dependency-path: emulation/rocjitsu/website/package-lock.json
+          cache-dependency-path: emulation/rocjitsu/website/dashboard/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -45,23 +83,8 @@ jobs:
       - name: Install Playwright browser
         run: npm run test:e2e:install
 
-      - name: Lint
-        run: npm run lint
-
-      - name: Build
-        run: npm run build
-
-      - name: Run unit tests
-        run: npm run test:unit
-
-      - name: Run e2e tests
-        run: npm run test:e2e
-
-      - name: Smoke test production hosting and caching
-        run: npm run test:e2e:production
-
-      - name: Run chart race tests
-        run: npm run test:e2e:chart-race
+      - name: Verify website
+        run: npm run verify
 
       - name: Upload Playwright diagnostics
         if: ${{ !cancelled() && failure() }}
@@ -69,7 +92,7 @@ jobs:
         with:
           name: rocjitsu-website-playwright-results
           path: |
-            emulation/rocjitsu/website/test-results
-            emulation/rocjitsu/website/playwright-report
+            emulation/rocjitsu/website/dashboard/test-results
+            emulation/rocjitsu/website/dashboard/playwright-report
           if-no-files-found: ignore
           retention-days: 7

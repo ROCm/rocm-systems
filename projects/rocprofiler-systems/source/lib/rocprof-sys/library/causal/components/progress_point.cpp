@@ -192,7 +192,7 @@ push_node<causal::component::progress_point>::operator()(type&        _obj, scop
                                                          hash_value_t _hash,
                                                          std::int64_t _tid) const
 {
-    auto itr = causal::component::get_progress_map(_tid).emplace(_hash, nullptr);
+    auto const itr = causal::component::get_progress_map(_tid).emplace(_hash, nullptr);
     if(itr.second && !itr.first->second)
     {
         auto& _alloc = causal::component::get_progress_allocator(_tid);

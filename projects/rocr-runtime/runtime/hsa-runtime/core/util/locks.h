@@ -72,7 +72,7 @@ class HybridMutex {
     while (!lock_.compare_exchange_strong(old, 1)) {
       cnt--;
       if (cnt > maxSpinIterPause) {
-        _mm_pause();
+        cpu_relax();
       } else if (cnt-- > maxSpinIterYield) {
         os::YieldThread();
       } else {

@@ -257,9 +257,6 @@ Options:
                                 libroctx64.so
                                 librt.so.1
                                 libstdc++.so.6
-                                libtbb.so
-                                libtbbmalloc.so
-                                libtbbmalloc_proxy.so
                                 libtcmalloc.so
                                 libtcmalloc_and_profiler.so
                                 libtcmalloc_debug.so
