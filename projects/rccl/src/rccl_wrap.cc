@@ -1934,8 +1934,9 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // size a buffer. kThreshUnlimited = no upper bound (null table or explicit table entry);
   // env var 0 disables registered CE. Independent of the 2-shot selector
   // (ceNonRegMax/env, 0 = off) and ceARTmpBuf sizing.
+  const size_t ceArRegMin = rcclCeRegMinTab(archTable, ncclFuncAllReduce);
   const size_t ceArRegMax = rcclCeRegMaxTab(archTable, ncclFuncAllReduce);
-  const bool ceRegInWindow = ceArRegMax == kThreshUnlimited || msgBytes <= ceArRegMax;
+  const bool ceRegInWindow = rcclWindowFits(msgBytes, ceArRegMin, ceArRegMax);
   // CTAPolicy=ZERO takes CE whenever it is available, like upstream taskAppend and rcclSelectAllGather Branch #3.
   // Under ZERO symk does not veto CE and a positive table cap is ignored; a cap of 0 and an explicit env cap still apply.
   const bool ceZeroPolicy = (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) != 0;
