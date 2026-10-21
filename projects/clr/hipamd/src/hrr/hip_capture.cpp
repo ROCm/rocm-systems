@@ -3038,7 +3038,9 @@ void hip_capture_init() {
                 "[HRR capture] HIP_HRR_CAPTURE_OUTPUT ignored: the program was started in "
                 "secure-execution mode (set-user-ID, set-group-ID, file capabilities or an "
                 "LSM transition).\n");
-      hip_capture_uninstall();
+      // Only the bootstrap can have installed shims by now. Without them the
+      // dispatch table is left as it is.
+      if (g_installed.load(std::memory_order_acquire)) hip_capture_uninstall();
       return;
     }
 
