@@ -994,6 +994,12 @@ ph_ctx::initialize_track_list()
                                                                   track->value_range->max,
                                                                   1 }
                                               : ph_value_range_t{},
+            .process_row_id = track->process_info
+                                  ? static_cast<std::uint64_t>(track->process_info->id)
+                                  : 0,
+            .thread_row_id  = track->thread_info
+                                  ? static_cast<std::uint64_t>(track->thread_info->id)
+                                  : 0,
         });
     }
 }

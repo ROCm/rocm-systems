@@ -267,7 +267,7 @@ reader_catalog_t::build_tracks(data_storage::schema_v3::read_statements& stmts)
     {
         auto track_info_ptr         = std::make_shared<reader_types::track_info_t>();
         track_info_ptr->id          = next_id++;
-        track_info_ptr->name        = fmt::format("Thread {} (Sample)", stats.tid);
+        track_info_ptr->name        = fmt::format("Thread {}", stats.tid);
         track_info_ptr->category    = reader_types::track_kind_t::thread_sample;
         track_info_ptr->event_count = stats.count;
         if(stats.has_range)
@@ -276,7 +276,7 @@ reader_catalog_t::build_tracks(data_storage::schema_v3::read_statements& stmts)
             track_info_ptr->end_ts   = stats.max_end;
         }
 
-        link_owner(*track_info_ptr, stats.nid, stats.pid, stats.tid);
+        link_owner(*track_info_ptr, stats.nid, stats.pid, stats.thread_row_id);
 
         tracks.push_back(track_info_ptr);
         db_id_by_track.emplace(track_info_ptr, sample_track_id);
@@ -584,10 +584,19 @@ reader_catalog_t::discover_thread_sample_tracks(
     auto accumulate = [&](const auto& statement) {
         for(const auto& row : statement().to_vector())
         {
-            auto& stats = track_stats[row.sample_track_id];
-            stats.nid   = row.nid;
-            stats.pid   = row.pid.value_or(0);
-            stats.tid   = row.tid.value_or(0);
+            // Event-table tid is rocpd_info_thread.id. The track name wants
+            // the OS tid, which lives on the catalogued thread.
+            const size_t thread_row_id = row.tid.value_or(0);
+            auto&        stats         = track_stats[row.sample_track_id];
+            stats.nid                  = row.nid;
+            stats.pid                  = row.pid.value_or(0);
+            stats.thread_row_id        = thread_row_id;
+            stats.tid                  = thread_row_id;
+            if(const auto thread_it = threads_by_id.find(thread_row_id);
+               thread_it != threads_by_id.end() && thread_it->second)
+            {
+                stats.tid = thread_it->second->thread_id;
+            }
             stats.count += row.count;
             stats.merge(row.min_start, row.max_end);
         }

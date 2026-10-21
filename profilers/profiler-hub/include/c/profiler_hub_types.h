@@ -115,8 +115,9 @@ extern "C"
         uint32_t    id;
         const char* track_name;
         uint32_t    nid;         /**< Node id this track belongs to. */
-        uint32_t    pid;         /**< Process id this track belongs to. */
-        uint32_t    tid;         /**< Thread id this track belongs to, or 0 if unknown. */
+        uint32_t    pid;         /**< OS process id. Not rocpd_info_process.id. */
+        uint32_t    tid;         /**< OS thread id, or 0 if this track has no thread.
+                                       Not rocpd_info_thread.id. */
         uint32_t    event_count; /**< Total events recorded on this track. */
         uint32_t    agent_id;    /**< Owning device (agent) id, or 0 if not
                                        device-specific. */
@@ -135,6 +136,10 @@ extern "C"
                                             at least one sample value. */
         uint32_t nesting_depth; /**< Largest ph_event_t::nesting_depth of the track's
                                       events; 0 for PMC tracks. */
+        uint64_t process_row_id; /**< rocpd_info_process.id. Not pid. 0 if this
+                                       track has no process. */
+        uint64_t thread_row_id;  /**< rocpd_info_thread.id. Not tid. 0 if this
+                                       track has no thread. */
     } ph_track_t;
 
     /**

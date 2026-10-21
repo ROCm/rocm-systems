@@ -106,15 +106,17 @@ struct track_range_stats_t
     }
 };
 
-/** @brief track_range_stats_t plus the topology it was derived from --
- *         used only for node/process/thread_info linkage when building a
- *         thread_sample track (the read path identifies it by db track id,
- *         not by topology; see reader_catalog_t::build_tracks()). */
+/** @brief track_range_stats_t plus the owning node, process, and thread.
+ *         tid is the OS thread id (rocpd_info_thread.tid) and is what the
+ *         track name prints. thread_row_id is rocpd_info_thread.id, the key
+ *         threads_by_id is indexed by. The read path identifies a sample
+ *         track by db track id, not by topology. */
 struct thread_sample_stats_t : track_range_stats_t
 {
     size_t nid{};
     size_t pid{};
     size_t tid{};
+    size_t thread_row_id{};
 };
 
 /**
