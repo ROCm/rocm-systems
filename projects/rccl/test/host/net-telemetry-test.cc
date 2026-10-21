@@ -297,6 +297,31 @@ class NetTelemetryMicrotest : public ::testing::Test {
     ASSERT_TRUE(rcclTelemetryOn());
   }
 
+  static void ExpectEveryCounterUnavailable(const RcclDeviceStats& dev) {
+    for (int c = 0; c < RCCL_TELEMETRY_MAX_HWC; c++) {
+      EXPECT_EQ(dev.hw_counters[c], -1);
+      EXPECT_EQ(dev.snap_init_hw_counters[c], -1);
+    }
+    for (int p = 0; p < RCCL_TELEMETRY_NUM_PFC_PRIO; p++) {
+      EXPECT_EQ(dev.pfc_rx_frames[p], -1);
+      EXPECT_EQ(dev.snap_init_pfc_rx_frames[p], -1);
+      EXPECT_EQ(dev.pfc_tx_frames[p], -1);
+      EXPECT_EQ(dev.snap_init_pfc_tx_frames[p], -1);
+      EXPECT_EQ(dev.pfc_rx_pause_us[p], -1);
+      EXPECT_EQ(dev.snap_init_pfc_rx_pause_us[p], -1);
+      EXPECT_EQ(dev.pfc_tx_pause_us[p], -1);
+      EXPECT_EQ(dev.snap_init_pfc_tx_pause_us[p], -1);
+    }
+    EXPECT_EQ(dev.snap_init_tx_bytes, -1);
+    EXPECT_EQ(dev.snap_init_rx_bytes, -1);
+    EXPECT_EQ(dev.snap_init_tx_packets, -1);
+    EXPECT_EQ(dev.snap_init_rx_packets, -1);
+    EXPECT_EQ(dev.delta_tx_bytes, -1);
+    EXPECT_EQ(dev.delta_rx_bytes, -1);
+    EXPECT_EQ(dev.delta_tx_packets, -1);
+    EXPECT_EQ(dev.delta_rx_packets, -1);
+  }
+
   static void AddNic(const std::string& roce, const std::string& eth, const std::string& driver) {
     g_sys.dirs[kIb + roce + "/device/net"] = {".", "..", eth};
     g_sys.links[kIb + roce + "/device/driver"] = "../../../bus/pci/drivers/" + driver;
@@ -403,29 +428,9 @@ TEST_F(NetTelemetryInitMicrotest, Init_Enabled_AppliesDefaultsAndRegistersExitFl
 TEST_F(NetTelemetryInitMicrotest, Init_Enabled_SeedsEveryDeviceCounterAsUnavailable) {
   Enable();
 
-  for (const RcclDeviceStats& dev : rcclTelemetryDevs) {
-    for (int c = 0; c < RCCL_TELEMETRY_MAX_HWC; c++) {
-      ASSERT_EQ(dev.hw_counters[c], -1);
-      ASSERT_EQ(dev.snap_init_hw_counters[c], -1);
-    }
-    for (int p = 0; p < RCCL_TELEMETRY_NUM_PFC_PRIO; p++) {
-      ASSERT_EQ(dev.pfc_rx_frames[p], -1);
-      ASSERT_EQ(dev.pfc_tx_frames[p], -1);
-      ASSERT_EQ(dev.pfc_rx_pause_us[p], -1);
-      ASSERT_EQ(dev.pfc_tx_pause_us[p], -1);
-      ASSERT_EQ(dev.snap_init_pfc_rx_frames[p], -1);
-      ASSERT_EQ(dev.snap_init_pfc_tx_frames[p], -1);
-      ASSERT_EQ(dev.snap_init_pfc_rx_pause_us[p], -1);
-      ASSERT_EQ(dev.snap_init_pfc_tx_pause_us[p], -1);
-    }
-    ASSERT_EQ(dev.snap_init_tx_bytes, -1);
-    ASSERT_EQ(dev.snap_init_rx_bytes, -1);
-    ASSERT_EQ(dev.snap_init_tx_packets, -1);
-    ASSERT_EQ(dev.snap_init_rx_packets, -1);
-    ASSERT_EQ(dev.delta_tx_bytes, -1);
-    ASSERT_EQ(dev.delta_rx_bytes, -1);
-    ASSERT_EQ(dev.delta_tx_packets, -1);
-    ASSERT_EQ(dev.delta_rx_packets, -1);
+  for (int d = 0; d < RCCL_TELEMETRY_MAX_DEVS; d++) {
+    SCOPED_TRACE(d);
+    ExpectEveryCounterUnavailable(rcclTelemetryDevs[d]);
   }
 }
 
@@ -761,28 +766,7 @@ TEST_F(NetTelemetryRegisterMicrotest, RegisterDevice_ReregisteredDevice_ResetsEv
 
   ASSERT_EQ(rcclTelemetryRegisterDevice(0, "rdma0", "IB"), 0);
 
-  for (int c = 0; c < RCCL_TELEMETRY_MAX_HWC; c++) {
-    EXPECT_EQ(dev.hw_counters[c], -1);
-    EXPECT_EQ(dev.snap_init_hw_counters[c], -1);
-  }
-  for (int p = 0; p < RCCL_TELEMETRY_NUM_PFC_PRIO; p++) {
-    EXPECT_EQ(dev.pfc_rx_frames[p], -1);
-    EXPECT_EQ(dev.snap_init_pfc_rx_frames[p], -1);
-    EXPECT_EQ(dev.pfc_tx_frames[p], -1);
-    EXPECT_EQ(dev.snap_init_pfc_tx_frames[p], -1);
-    EXPECT_EQ(dev.pfc_rx_pause_us[p], -1);
-    EXPECT_EQ(dev.snap_init_pfc_rx_pause_us[p], -1);
-    EXPECT_EQ(dev.pfc_tx_pause_us[p], -1);
-    EXPECT_EQ(dev.snap_init_pfc_tx_pause_us[p], -1);
-  }
-  EXPECT_EQ(dev.snap_init_tx_bytes, -1);
-  EXPECT_EQ(dev.snap_init_rx_bytes, -1);
-  EXPECT_EQ(dev.snap_init_tx_packets, -1);
-  EXPECT_EQ(dev.snap_init_rx_packets, -1);
-  EXPECT_EQ(dev.delta_tx_bytes, -1);
-  EXPECT_EQ(dev.delta_rx_bytes, -1);
-  EXPECT_EQ(dev.delta_tx_packets, -1);
-  EXPECT_EQ(dev.delta_rx_packets, -1);
+  ExpectEveryCounterUnavailable(dev);
 }
 
 TEST_F(NetTelemetryRegisterMicrotest, RegisterDevice_KnownDrivers_ResolveTheirCounterTables) {
@@ -1558,9 +1542,9 @@ TEST_F(NetTelemetryCountersMicrotest, ReadSysfsCounter_MissingOrEmpty_ReturnsMin
 }
 
 TEST_F(NetTelemetryCountersMicrotest, ReadSysfsCounter_LongContent_ReadsAtMost63Bytes) {
-  g_sys.files["/long"] = std::string(63, '1') + "9";
+  g_sys.files["/long"] = std::string(63, '0') + "9";
 
-  EXPECT_EQ(rcclTelemetryReadSysfsCounter("/long"), LLONG_MAX);
+  EXPECT_EQ(rcclTelemetryReadSysfsCounter("/long"), 0);
   EXPECT_EQ(g_sys.fds.size(), 0u);
 }
 
@@ -1848,8 +1832,9 @@ TEST_F(NetTelemetryReadCountersMicrotest, ReadCounters_NothingReadable_ResetsEve
   Read(Device(&rcclHwConfigAinic));
 
   for (int64_t v : hwc_) EXPECT_EQ(v, -1);
-  for (auto& row : pfc_)
+  for (auto& row : pfc_) {
     for (int64_t v : row) EXPECT_EQ(v, -1);
+  }
   for (int64_t v : delta_) EXPECT_EQ(v, -1);
 }
 
@@ -2193,6 +2178,7 @@ TEST_F(NetTelemetrySamplerMicrotest, WarnUnresolvedSampled_ResolvedOnAnyDevice_D
   rcclTelemetryWarnUnresolvedSampled(idx, 2, warned);
 
   EXPECT_EQ(StderrWrites(), 0);
+  for (int w : warned) EXPECT_EQ(w, 0);
 }
 
 TEST_F(NetTelemetrySamplerMicrotest, SamplerMain_OneRound_SamplesEachUsableDeviceThenSleeps) {
@@ -2700,12 +2686,14 @@ TEST_F(NetTelemetryFlushMicrotest, Flush_CollectsCountersOnlyForUsedDevices) {
     ASSERT_EQ(rcclTelemetryRegisterDevice(1, "rdma1", "IB"), 1);
     SetHwCounter("rdma0", "tx_rdma_cnp_pkts", 14);
     SetHwCounter("rdma1", "tx_rdma_cnp_pkts", 14);
+    g_sys.opened.clear();
 
     ASSERT_EQ(rcclTelemetryFlush(), 0);
 
     int idx = CounterIndex(&rcclHwConfigAinic, "cnp_sent");
     EXPECT_EQ(used->hw_counters[idx], 3);
     EXPECT_EQ(rcclTelemetryDevs[1].hw_counters[idx], -1);
+    for (const std::string& path : g_sys.opened) EXPECT_EQ(path.find("/rdma1/"), std::string::npos) << path;
   });
 }
 
