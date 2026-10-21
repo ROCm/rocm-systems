@@ -36,6 +36,10 @@ class CuidNpu : public CuidDevice {
   amdcuid_status_t get_device_id(uint16_t& device_id) const override;
   amdcuid_status_t get_pci_class(uint16_t& pci_class) const override;
   amdcuid_status_t get_revision_id(uint8_t& revision_id) const override;
+  amdcuid_status_t get_unit_id(uint16_t& unit_id) const override {
+    unit_id = 0;
+    return AMDCUID_STATUS_SUCCESS;
+  }
   amdcuid_status_t get_bdf(std::string& bdf) const override;
   amdcuid_status_t get_device_path(std::string& path) const override;
 

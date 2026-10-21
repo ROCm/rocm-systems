@@ -13,7 +13,7 @@ typedef struct {
   uint16_t model;        ///< CPU Model (from CPUID EAX=1)
   uint16_t device_id;    ///< DeviceID = Family & Model combined
   uint8_t revision_id;   ///< CPU Stepping/RevisionID (from CPUID EAX=1)
-  uint16_t unit_id;      ///< UnitID from APIC ID (from ACPI MADT)
+  uint16_t unit_id;      ///< Always 0: a package is published as a whole
   uint16_t core;         ///< Core number within package
   uint16_t physical_id;  ///< Physical package/socket ID
 } amdcuid_cuid_public_fields_cpu;
