@@ -2398,7 +2398,14 @@
       "env_variables": {
         "NCCL_GIN_ENABLE": "1",
         "NCCL_GIN_TYPE": "2"
-      }
+      },
+      "tests": [
+        {
+          "name": "SymWin_WindowLifecycle_RankDivergentReregister",
+          "description": "Collective re-register when only one rank has dropped its backing cache. Two-node runs keep the suite timeout so a slow startup is not reported as a deadlock.",
+          "timeout": 600
+        }
+      ]
     },
 
     "symmetric_abort_checkmode_tests": {
