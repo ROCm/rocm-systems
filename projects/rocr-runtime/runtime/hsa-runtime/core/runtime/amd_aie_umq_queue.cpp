@@ -232,8 +232,6 @@ void AieUmqQueue::SubmitPackets() {
                 std::memory_order_release);
 
   if (err != HSA_STATUS_SUCCESS) {
-    // Stop processing further packets on this queue and report the failure through the per-queue
-    // error callback (mirrors the GPU AqlQueue error path, and AieKmqQueue::SubmitPackets).
     debug_print("AIE UMQ queue: command submission failed (0x%x)\n", err);
     suspended_ = true;
     InvokeErrorCallback(err);
@@ -254,7 +252,6 @@ hsa_status_t AieUmqQueue::GetInfo(hsa_queue_info_attribute_t attribute, void* va
       *static_cast<hsa_agent_t*>(value) = GetAgent()->public_handle();
       break;
     case HSA_AMD_QUEUE_INFO_DOORBELL_ID:
-      // Hardware doorbell supports AQL semantics.
       *static_cast<uint64_t*>(value) = reinterpret_cast<uint64_t>(signal_.hardware_doorbell_ptr);
       break;
     case HSA_QUEUE_INFO_USE_COUNT:

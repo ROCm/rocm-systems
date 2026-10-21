@@ -965,16 +965,15 @@ static void FlushArguments(const hsa_amd_aie_kernel_dispatch_packet_t* pkt) {
   }
 }
 
-/// @brief Completes the first @p num_pkts packets of a batch: makes the kernels' writes visible
-/// where that takes a cache flush, and releases each packet's completion signal.
+/// @brief Completes the first @p num_pkts packets of a batch: flushes the kernels' writes to
+/// CPU-visible memory and releases each packet's completion signal.
 ///
-/// Only ever called for packets that actually executed. A packet that was refused, or that the
-/// device never reached, must not be passed here: its completion signal stays untouched, because
-/// firing it would tell a waiter that output exists when nothing wrote any.
+/// Only call this for packets that actually executed. A refused packet, or one the device never
+/// reached, must not be passed here: its completion signal has to stay untouched, since firing it
+/// would tell a waiter that output exists when nothing wrote any.
 ///
-/// Shared by KMQ's synchronous completion path (SubmitCmdChain, where the device is known to be
-/// done by the time the submitting ioctl returns) and UMQ's (SubmitUmqPackets, which confirms
-/// completion separately via WaitUmqCmd before calling this).
+/// Used by KMQ's synchronous completion path (SubmitCmdChain), where the device is known to be
+/// done by the time the submitting ioctl returns.
 ///
 /// @param[in] queue base of the packet ring
 /// @param[in] mask ring index mask (queue size - 1)
@@ -1882,7 +1881,6 @@ static hsa_status_t TranslateUmqPacket(hsa_amd_aie_kernel_dispatch_packet_t& pkt
     return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
   }
 
-  // Freed by SubmitUmqPackets, via ctrl_copy_out, once CERT is confirmed done with it.
   void* ctrl_copy = aie_agent.system_allocator()(desc->static_ctrl_code_size, kCtrlCodeCopyAlign,
                                                  core::MemoryRegion::AllocateNoFlags);
   if (ctrl_copy == nullptr) {
@@ -1900,19 +1898,18 @@ static hsa_status_t TranslateUmqPacket(hsa_amd_aie_kernel_dispatch_packet_t& pkt
     }
   }
 
-  // CERT's fields that only the runtime can fill in. The rest already hold what CERT expects,
-  // as the application must leave them: the header and opcode (type 0, opcode EXEC_BUF,
-  // chain_flag LAST_CMD: every packet is its own chain; the header's barrier and fence scope
-  // bits land in CERT's reserved byte, which it ignores), count (the exec_buf's size), and zeros
-  // for the remaining reserved fields -- notably no argument list, as with XRT, since the
-  // arguments are patched into the control code above. Given one (args_len non-zero), CERT reads
-  // 3 KiB from args_host_addr, stalling -- it never completes or fails the packet -- if that runs
-  // into an unmapped page, and adds its values to the argument buffer descriptors
-  // (APPLY_OFFSET_57).
-  //  - CERT writes the packet's return code, a 32-bit store (measured), to completion_signal's
-  //    address: an ert_cmd_state in its low 4 bits, COMPLETED or, for a failed packet, ERROR with
-  //    the error code above it. It goes into completion_signal itself, which CERT has finished
-  //    reading by then, and SubmitUmqPackets reads it back once read_index passes the packet.
+  // CERT's own fields, the only ones the runtime fills in here. The rest already hold what CERT
+  // expects, as the application must leave them: the header and opcode (type 0, opcode EXEC_BUF,
+  // chain_flag LAST_CMD -- every packet is its own chain; the header's barrier/fence-scope bits
+  // land in CERT's reserved byte, which it ignores), count (the exec_buf's size), and zero for the
+  // remaining reserved fields -- notably no argument list, as with XRT, since arguments are patched
+  // into the control code above instead. A non-zero args_len would make CERT read 3 KiB from
+  // args_host_addr (stalling rather than failing the packet on an unmapped page there) and add its
+  // values to the argument buffer descriptors (APPLY_OFFSET_57).
+  //
+  // CERT writes the packet's return code -- a 32-bit store (measured) -- to completion_signal's own
+  // address: an ert_cmd_state in its low 4 bits, COMPLETED or, for a failure, ERROR with the error
+  // code above it. SubmitUmqPackets reads this back once read_index passes the packet.
   auto& cert = reinterpret_cast<host_queue_packet&>(pkt);
   cert.completion_signal = reinterpret_cast<uint64_t>(&cert.completion_signal);
   const uint64_t ctrl_code_addr = reinterpret_cast<uint64_t>(ctrl_copy);
@@ -1933,10 +1930,11 @@ hsa_status_t XdnaDriver::SubmitUmqPackets(hsa_amd_aie_kernel_dispatch_packet_t* 
   const auto& aie_agent = static_cast<const AieAgent&>(agent);
   host_queue_header* header = static_cast<UmqMetadata*>(queue_metadata)->header;
 
-  // Guards the copies made below until the doorbell is rung for the whole batch: a translate
-  // failure partway through means none of this batch is rung, so nothing else would free the
-  // copies already made for the packets translated so far. Dismissed once the doorbell is rung;
-  // the wait loop below then owns freeing each one explicitly.
+  // Frees whatever copies are still non-null on any return, from either loop below: a translate
+  // failure leaves copies only for the packets translated so far; once the doorbell is rung, every
+  // packet is handed to CERT, so a wait failure leaves copies for every later packet too (already
+  // rung but not yet reached). Never dismissed -- each entry is nulled as it is freed in the wait
+  // loop, so running the guard again on a normal return is a no-op.
   std::vector<void*> ctrl_copies(num_pkts);
   MAKE_NAMED_SCOPE_GUARD(ctrl_copies_guard, [&] {
     for (void* ctrl_copy : ctrl_copies) {
@@ -1946,9 +1944,9 @@ hsa_status_t XdnaDriver::SubmitUmqPackets(hsa_amd_aie_kernel_dispatch_packet_t* 
     }
   });
 
-  // Every packet in the batch is translated and readied before the doorbell is rung once for all
-  // of them: CERT does not act on write_index until the doorbell is rung. Each packet gets its own
-  // control-code copy, since concurrent dispatches of the same kernel must not share one.
+  // CERT does not act on write_index until the doorbell is rung below, so nothing reaches it yet.
+  // Each packet gets its own control-code copy, since concurrent dispatches of the same kernel must
+  // not share one.
   for (uint64_t i = 0; i < num_pkts; ++i) {
     const uint64_t idx = first_pkt_idx + i;
     hsa_amd_aie_kernel_dispatch_packet_t& pkt = ring[idx % ring_capacity];
@@ -1970,11 +1968,6 @@ hsa_status_t XdnaDriver::SubmitUmqPackets(hsa_amd_aie_kernel_dispatch_packet_t* 
   // index of the last readied packet, not a count, so one ring covers the whole batch.
   *doorbell = static_cast<uint32_t>(first_pkt_idx + num_pkts - 1);
 
-  // Not dismissed here: every packet in the batch is now handed to CERT, not just the ones this
-  // loop has waited on yet, so the guard stays armed through the wait loop below too, freeing
-  // whichever copies an early return (a failing packet's own, plus every later packet's, already
-  // rung but never reached) leaves outstanding. Each copy is cleared to null as it is freed below,
-  // so the guard never frees one twice.
   for (uint64_t i = 0; i < num_pkts; ++i) {
     const uint64_t idx = first_pkt_idx + i;
     hsa_amd_aie_kernel_dispatch_packet_t& pkt = ring[idx % ring_capacity];
@@ -2221,9 +2214,8 @@ hsa_status_t XdnaDriver::QueryDriverVersion() {
 }
 
 hsa_status_t XdnaDriver::InitDeviceHeap() {
-  // UMQ (AIE4) devices have no KMQ-style pre-reserved dev heap: the kernel driver rejects
-  // AMDXDNA_BO_DEV_HEAP creation for them. Leave dev_heap_bo/dev_heap_vaddr unset; HasDevHeap()
-  // reports this so AieAgent sizes its device-local memory region at 0 instead of assuming one.
+  // UMQ (AIE4) devices have no dev heap (see HasDevHeap); leave dev_heap_bo/dev_heap_vaddr unset so
+  // AieAgent sizes its device-local memory region at 0 instead of assuming one.
   if (UsesUserModeQueue()) {
     has_dev_heap_ = false;
     return HSA_STATUS_SUCCESS;

@@ -86,23 +86,19 @@ def my_vector_scalar_mul():
     # both source and destination: the fill and the drain walk it in the same
     # order, so a chunk is only written back after it has been read.
     def sequence(inoutTensor, in_handle, out_handle):
-        # On the xclbin path the driver programs the array from the xclbin's
-        # AIE_PARTITION PDI before the sequence runs. A full ELF has no xclbin,
-        # so the sequence must load the PDI itself -- without this the cores
-        # never start and the closing DMA token wait never retires, which the
-        # driver reports as ERT_CMD_STATE_TIMEOUT. Skipped on aie4 (npu3), whose
-        # control code already configures the array in its own first job: loading
-        # the PDI on top applies that configuration twice, and every run then writes
-        # back stretches of the output shifted by 128 elements.
+        # A full ELF has no xclbin, so unlike the xclbin path, the sequence must load the PDI
+        # itself -- without it the cores never start and the closing DMA token wait times out
+        # (ERT_CMD_STATE_TIMEOUT). Skipped on aie4 (npu3): its control code already configures the
+        # array in its own first job, so loading the PDI again applies that configuration twice,
+        # shifting every run's output by 128 elements.
         if FULL_ELF and positional[0] != "npu3":
             npu_load_pdi(device_ref="main")
-        # Required on aie4 (npu3): re-arm every objectFifo's DMA channel before this dispatch
-        # touches it. The runtime does not gap back-to-back full-ELF dispatches to cover for
-        # this; without the reset, this design corrupts the same way the comment above describes
-        # for an unwanted second load_pdi (output shifted by 128 elements), because the next
-        # dispatch reconfigures a memtile channel before the previous run's DMA has drained.
-        # aiecc's default pipeline never emits this reset on its own, so every aie4 full-ELF
-        # design needs it. See aiex.dma_channel_reset_for's own doc.
+        # Required on aie4 (npu3): re-arm every objectFifo's DMA channel before this dispatch,
+        # since nothing else gaps back-to-back full-ELF dispatches. Without it, the next dispatch
+        # reconfigures a memtile channel before the previous run's DMA has drained, corrupting
+        # output the same way an unwanted second load_pdi does (above). aiecc never emits this
+        # reset itself, so every aie4 full-ELF design needs it; see aiex.dma_channel_reset_for's
+        # own doc.
         if FULL_ELF and positional[0] == "npu3":
             for fifo in ("in", "in_fwd", "out", "out_fwd"):
                 dma_channel_reset_for(fifo)

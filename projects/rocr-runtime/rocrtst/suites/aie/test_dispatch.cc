@@ -707,9 +707,8 @@ class DispatchTest : public aie_test::AieTestBase {
     ASSERT_FALSE(aie_agents.empty());
 
     // dev pool: coarse-grained, non-allocatable (for PDI and instructions). aie4 (UMQ) has no
-    // such pool at all -- it has no device heap, so there is nothing non-allocatable to find (see
-    // XdnaDriver::HasDevHeap) -- so this is left default-constructed instead of asserted, and
-    // every test that needs it skips itself.
+    // device heap (see XdnaDriver::HasDevHeap), so this stays default-constructed rather than
+    // asserted; every test that needs it skips itself.
     find_pool_data dev_pool_data{};
     dev_pool_data.expected_flags = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED;
     dev_pool_data.expected_allocatable = false;
@@ -3315,9 +3314,7 @@ TEST_F(DispatchTest, PdiChainSplit) {
 // output is the load-bearing one -- it is what would catch the runtime crediting a packet that
 // never executed.
 TEST_F(DispatchTest, PartiallyFailedBatchRetiresCompletedPackets) {
-  // This chain-splitting ceiling is specific to the PDI + instruction sequence path's chain
-  // format; checked before min_queue_size, which aie4 (UMQ) reports as its own, smaller ring-slot
-  // cap and would otherwise fail this test's assertion before ever reaching the PDI-specific skip.
+  // Checked before min_queue_size for the same reason as PdiChainSplit's identical skip.
   if (!hsaco_available()) GTEST_SKIP() << "hsaco was not built: " << kHsacoPath;
 
   constexpr std::uint32_t total_num_dispatches = 64;

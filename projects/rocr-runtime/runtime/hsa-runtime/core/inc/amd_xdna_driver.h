@@ -77,12 +77,11 @@ public:
   /// devices do not, since the kernel driver rejects AMDXDNA_BO_DEV_HEAP creation for them.
   bool HasDevHeap() const { return has_dev_heap_; }
 
-  /// @brief Matches aie4_host_queue.h's CTX_MAX_CMDS: the fixed slot count CERT itself validates
-  /// write_index/read_index against (the kernel driver's get_read_index()/valid_queue_index()),
-  /// regardless of whatever capacity a UMQ queue's header declares. A UMQ queue's ring must be
-  /// sized for exactly this many packets, and no HSA queue on a UMQ agent can be asked to hold more
-  /// packets in flight than this at once (see AieAgent's min_aql_size_/max_aql_size_, which this
-  /// bounds).
+  /// @brief Matches aie4_host_queue.h's CTX_MAX_CMDS: the fixed slot count CERT validates
+  /// write_index/read_index against (get_read_index()/valid_queue_index() in the kernel driver),
+  /// regardless of the header's declared capacity. A UMQ queue's ring must be sized for exactly
+  /// this many packets, and no HSA queue on a UMQ agent can hold more packets in flight at once
+  /// (see AieAgent's min_aql_size_/max_aql_size_, which this bounds).
   static constexpr uint32_t UmqMaxCmds() { return 32; }
 
   /// @brief Size of the header that opens a UMQ queue's buffer, ahead of its packet ring: sizeof

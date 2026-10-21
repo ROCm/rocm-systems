@@ -142,14 +142,12 @@ struct AieKernelDescriptor {
   ///
   /// Every page aie_elf::Parse() found is concatenated into this one buffer at load (see the
   /// loader), so arg_sites above are absolute offsets into it (page always 0, in_ctrldata always
-  /// false) -- the page/ctrldata split that distinguished a page's two buffers only matters while
-  /// parsing the ELF. aie4's CERT firmware does not patch argument addresses into the control code
-  /// itself (confirmed on real hardware: it faults rather than computing them), so exactly like
-  /// aie2p, this is a template copied fresh and patched (PatchShimDma57Aie4) before every dispatch
-  /// -- never this buffer itself. Allocated through the agent's system allocator rather than a
-  /// device segment (aie4 has no device heap to carve a CODE_AGENT segment region out of), so this
-  /// is already an address the agent can dereference directly -- no separate device-address
-  /// resolution, unlike a blob placed into that segment.
+  /// false) -- the page/ctrldata split only matters while parsing the ELF. CERT does not patch
+  /// argument addresses into the control code itself (confirmed on real hardware: it faults
+  /// instead), so as with aie2p, every dispatch copies and patches (PatchShimDma57Aie4) a fresh
+  /// template rather than this buffer. Allocated through the agent's system allocator, not a
+  /// device segment (aie4 has no device heap for one), so this is already a directly
+  /// dereferenceable address.
   uint64_t static_ctrl_code_dev_addr = 0;
   /// @brief Size in bytes of the buffer at @ref static_ctrl_code_dev_addr. aie4 UMQ dispatch only;
   /// 0 otherwise.

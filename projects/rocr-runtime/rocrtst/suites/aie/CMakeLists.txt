@@ -582,10 +582,9 @@ endif()
 # ---------------------------------------------------------------------------
 # test_dispatch executable
 #
-# Built for every target, including npu3 (AIE4): its full-ELF tests run there (see
-# FullElfDispatchTest in test_dispatch.cc), while its PDI+insts/multi-arch tests self-skip when
-# the matching hsaco file does not exist, the same way every other kernel-toolchain-dependent test
-# already does.
+# Built for every target, including npu3 (AIE4, which has no PDI+insts/multi-arch hsacos -- see
+# above): FullElfDispatchTest covers it instead, while the PDI+insts/multi-arch tests self-skip
+# there like any other kernel-toolchain-dependent test whose hsaco file does not exist.
 # ---------------------------------------------------------------------------
 add_executable(test_dispatch test_dispatch.cc)
 set_target_properties(test_dispatch
@@ -627,9 +626,7 @@ target_link_libraries(test_dispatch
     hsa-runtime64::hsa-runtime64
     GTest::gtest_main
 )
-# None of these targets exist for npu3 (AIE4): it only builds the full-ELF toolchain flow (see
-# AIE_HSACO_ARCH's npu3 branch above), so add_aie_kernel and the packaging block never define
-# PDI+insts/multi-arch targets.
+# None of these targets exist for npu3 (AIE4): see above.
 if(NOT NPU_TARGET STREQUAL "npu3")
   add_dependencies(test_dispatch vsadd_kernel_artifacts vsmul_kernel_artifacts vsadd_hsaco_artifact
                                  vsmul_hsaco_artifact multiarch_hsaco_artifact)
