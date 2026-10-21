@@ -1793,7 +1793,10 @@ TEST_F(DdaFabricLL128EligibilityTest, ReduceScatterLL128_PastThresholdRejected)
 }
 
 // Bank 0 occupies [0, bankBytes) and bank 1 occupies [bankSize, bankSize + bankBytes).
-// 2 * bankBytes is the smallest scratch where both ranges fit.
+// 2 * bankBytes is the smallest scratch where both ranges fit. There bankSize equals
+// bankBytes, so the old packed offset (nRanks * kDdaLLRsSlotStridePkts) and the shared
+// midpoint agree. 4 * bankBytes is a scratch where they differ: bank 1 must start at
+// bankSize, and the packed offset would land short of it.
 TEST_F(DdaFabricEligibilityTest, ReduceScatterLL_ScratchBanksFit)
 {
     const size_t recvcount = 4; // 16B, inside the per-rank cap
@@ -1813,6 +1816,15 @@ TEST_F(DdaFabricEligibilityTest, ReduceScatterLL_ScratchBanksFit)
         mockComm_.comm.ddaScratchBytes = scratch - 16;
         EXPECT_FALSE(ncclReduceScatterDdaFabricLLEligible(
             mockComm_.get(), sendbuff_, recvbuff_, recvcount, ncclFloat32, ncclSum))
+            << "nRanks=" << nRanks;
+
+        const size_t bigBank = dda::common::ddaBankSize(bankBytes * 4);
+        const size_t pktBytes = sizeof(dda::common::LLPacket16);
+        const size_t packedPkts = bankBytes / pktBytes;
+        ASSERT_GT(bigBank / pktBytes, packedPkts) << "nRanks=" << nRanks;
+        EXPECT_EQ(dda::common::ddaLLRsBankOffsetPkts(1, bigBank), bigBank / pktBytes)
+            << "nRanks=" << nRanks;
+        EXPECT_EQ(dda::common::ddaLLRsBankOffsetPkts(0, bigBank), 0u)
             << "nRanks=" << nRanks;
     }
 }
