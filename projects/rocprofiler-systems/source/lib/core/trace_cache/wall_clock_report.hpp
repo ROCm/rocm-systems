@@ -15,8 +15,9 @@ namespace rocprofsys::trace_cache
 {
 struct wall_clock_layout
 {
-    bool flat     = false;
-    bool timeline = false;
+    bool flat             = false;
+    bool timeline         = false;
+    bool collapse_threads = false;
 };
 
 struct wall_clock_thread_trees;
@@ -36,32 +37,30 @@ struct wall_clock_interval
  * Call-tree report of wall-clock time in the layout of the timemory wall_clock text
  * file. Regions nest by time containment per thread; GPU activity (kernel, memory copy,
  * scratch memory) nests under the region with the same correlation id, or sits at the
- * top of its thread if none does. The tree is built once, on the first write; the
- * intervals are released afterwards, so nothing may be added then.
+ * top of its thread if none does. Collapsing threads merges every thread into one tree
+ * whose rows carry no thread number.
  */
 class wall_clock_report
 {
 public:
-    explicit wall_clock_report(wall_clock_layout layout);
-
-    void add_region(wall_clock_interval region);
-
-    void add_gpu_activity(wall_clock_interval activity);
-
-    [[nodiscard]] bool empty() const noexcept;
+    /**
+     * Builds the call trees of the given intervals.
+     * @param layout       Flat, timeline and thread-collapsing options of the tree.
+     * @param regions      CPU regions; nest by time containment per thread.
+     * @param gpu_activity Kernels, memory copies and scratch memory.
+     * @throws std::runtime_error If an interval ends before it begins.
+     */
+    wall_clock_report(wall_clock_layout layout, std::vector<wall_clock_interval> regions,
+                      const std::vector<wall_clock_interval>& gpu_activity);
 
     /// Writes the table in the layout of the timemory wall_clock text file.
-    void write_text(std::ostream& out);
+    void write_text(std::ostream& out) const;
 
     /// Writes the rows in the layout of the timemory wall_clock JSON file.
-    void write_json(std::ostream& out, std::int32_t rank, std::int32_t mpi_size);
+    void write_json(std::ostream& out, std::int32_t rank, std::int32_t mpi_size) const;
 
 private:
-    const wall_clock_thread_trees& trees();
-
     wall_clock_layout                              m_layout;
-    std::vector<wall_clock_interval>               m_regions;
-    std::vector<wall_clock_interval>               m_gpu_activity;
     std::shared_ptr<const wall_clock_thread_trees> m_trees;
 };
 
