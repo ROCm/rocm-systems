@@ -4,10 +4,12 @@
 
 """Run unit tests for the metric-health utility scripts.
 
-Those scripts are not product code. Their tests stay out of the default ctest
-set, and the pre-commit hook calls this when one of the scripts changes.
+Those scripts are not product code. Their tests stay out of ctest. A local
+pre-commit hook runs them when one of the scripts changes. GitHub Actions
+uses the same hook config, so this runner does nothing there.
 """
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -22,6 +24,8 @@ TEST_PATHS: Tuple[str, ...] = (
 
 def main() -> int:
     """Run the utility-script unit tests from the project root."""
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        return 0
     # Skip tests/conftest.py. It imports the product stack, and these script
     # tests only use pytest's own fixtures.
     command = [sys.executable, "-m", "pytest", "--noconftest", *TEST_PATHS]
