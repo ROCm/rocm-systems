@@ -1,6 +1,8 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+cmake_minimum_required(VERSION 3.22)
+
 # Inspect full local symbols as well as dynamic exports. Hidden
 # compiler or diagnosis code is still an unwanted dependency.
 foreach(
