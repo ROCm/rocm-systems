@@ -1360,6 +1360,24 @@ HRR_TEST_CASE(Unit_HRR_FailedEndCaptureRoundtrip) {
                            HRR_API_HIPMEMCPYASYNC});
 }
 
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_FailedEndCaptureInvalidated_Direct: a hipMalloc during a
+ *     global-mode capture invalidates it, so hipStreamEndCapture fails with
+ *     hipErrorStreamCaptureInvalidated, then the same direct work as above.
+ *   - The failed hipMalloc is not recorded, so replay's capture is valid and
+ *     its EndCapture returns a graph, which replay must destroy.
+ *   - Replay with byte-exact D2H must match.
+ */
+HRR_TEST_CASE(Unit_HRR_FailedEndCaptureInvalidatedRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_failedendcaptureinval"};
+  hrr_run_exact_roundtrip("Unit_HRR_FailedEndCaptureInvalidated_Direct", cap.path,
+                          {HRR_API_HIPSTREAMBEGINCAPTURE,
+                           HRR_API_HIPSTREAMENDCAPTURE,
+                           HRR_API_HIPMEMCPYASYNC});
+}
+
 HRR_TEST_CASE(Unit_HRR_HostRegLaunchRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_hostreglch"};
   hrr_run_roundtrip("Unit_HRR_HostRegLaunch_Direct", cap.path);

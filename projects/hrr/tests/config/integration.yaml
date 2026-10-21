@@ -141,6 +141,8 @@ cases:
   Unit_HRR_FailedBlobClose_LeavesCaptureIncomplete: {}
   Unit_HRR_FailedBlobWrite_Direct: {}
   Unit_HRR_FailedBlobWrite_LeavesCaptureIncomplete: {}
+  Unit_HRR_FailedEndCaptureInvalidatedRoundtrip: {}
+  Unit_HRR_FailedEndCaptureInvalidated_Direct: {}
   Unit_HRR_FailedEndCaptureRoundtrip: {}
   Unit_HRR_FailedEndCapture_Direct: {}
   Unit_HRR_FailedMemcpy3DNotRecorded: {}
