@@ -46,11 +46,16 @@
 #include <fmt/format.h>
 
 #include <dlfcn.h>
+#include <fcntl.h>
 #include <unistd.h>
+#include <cerrno>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace rocprofiler
@@ -162,6 +167,94 @@ process_agent_counters(rocprofiler_agent_id_t    agent_id,
             return ROCPROFILER_STATUS_SUCCESS;
         },
         &cb_data);
+}
+
+// Percent-encodes everything but unreserved characters and '/' so the path round-trips through
+// URI parsing (e.g. '#' or '%' in an output directory).
+std::string
+make_file_uri(std::string_view path)
+{
+    auto is_unreserved = [](unsigned char c) {
+        return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+               c == '-' || c == '_' || c == '.' || c == '~' || c == '/';
+    };
+
+    auto uri = std::string{"file://"};
+    for(unsigned char c : path)
+    {
+        if(is_unreserved(c))
+            uri += static_cast<char>(c);
+        else
+            uri += fmt::format("%{:02X}", c);
+    }
+    return uri;
+}
+
+// Writes `size` bytes straight from `data` (no intermediate copy) into a file that did not exist
+// before, so a snapshot never replaces one that another recording may reference: if `filename`
+// is taken, a numbered variant is used. Returns the absolute path written, or nullopt after
+// removing any partially written file.
+std::optional<std::string>
+write_code_object_snapshot(const std::string& filename, const char* data, size_t size)
+{
+    constexpr int max_attempts = 100;
+
+    // A file:// URI needs an absolute path.
+    auto       ec   = std::error_code{};
+    const auto base = fs::absolute(fs::path{filename}, ec);
+    if(ec)
+    {
+        ROCP_WARNING << fmt::format(
+            "Failed to resolve code object snapshot path '{}': {}", filename, ec.message());
+        return std::nullopt;
+    }
+
+    for(int attempt = 0; attempt < max_attempts; ++attempt)
+    {
+        auto path = (attempt == 0) ? base
+                                   : base.parent_path() / fmt::format("{}.{}{}",
+                                                                      base.stem().string(),
+                                                                      attempt,
+                                                                      base.extension().string());
+
+        int fd = ::open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
+        if(fd < 0 && errno == EEXIST) continue;
+        if(fd < 0)
+        {
+            ROCP_WARNING << fmt::format(
+                "Failed to create code object snapshot '{}': {}", path.string(), strerror(errno));
+            return std::nullopt;
+        }
+
+        size_t written = 0;
+        while(written < size)
+        {
+            auto ret = ::write(fd, data + written, size - written);
+            if(ret < 0 && errno == EINTR) continue;
+            if(ret <= 0) break;
+            written += static_cast<size_t>(ret);
+        }
+        auto write_errno = errno;
+
+        if(::close(fd) != 0 || written != size)
+        {
+            ROCP_WARNING << fmt::format(
+                "Failed to write code object snapshot '{}' ({} of {} bytes written): {}",
+                path.string(),
+                written,
+                size,
+                strerror((written != size) ? write_errno : errno));
+            ::unlink(path.c_str());
+            return std::nullopt;
+        }
+
+        return path.string();
+    }
+
+    ROCP_WARNING << fmt::format(
+        "Failed to create code object snapshot '{}': too many existing files with this name",
+        filename);
+    return std::nullopt;
 }
 }  // namespace
 
@@ -910,6 +1003,41 @@ metadata::get_code_object_content_hash(uint64_t code_obj_id) const
             return std::nullopt;
         },
         code_obj_id);
+}
+
+std::optional<std::string>
+metadata::get_code_object_snapshot_uri(uint64_t code_obj_id) const
+{
+    return code_object_snapshot_uris.rlock(
+        [](const auto& _uris, uint64_t _id) -> std::optional<std::string> {
+            if(auto itr = _uris.find(_id); itr != _uris.end()) return itr->second;
+            return std::nullopt;
+        },
+        code_obj_id);
+}
+
+bool
+metadata::add_code_object_snapshot(const rocprofiler_code_object_info_t& obj_data,
+                                   const std::string&                    filename)
+{
+    if(obj_data.storage_type != ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY ||
+       obj_data.memory_base == 0 || obj_data.memory_size == 0)
+        return false;
+
+    // Write each code object once, even if its load is reported again.
+    if(get_code_object_snapshot_uri(obj_data.code_object_id)) return true;
+
+    // NOLINTBEGIN(performance-no-int-to-ptr)
+    const auto* bytes = reinterpret_cast<const char*>(obj_data.memory_base);
+    // NOLINTEND(performance-no-int-to-ptr)
+    auto path = write_code_object_snapshot(filename, bytes, obj_data.memory_size);
+    if(!path) return false;
+
+    code_object_snapshot_uris.wlock(
+        [](auto& _uris, uint64_t _id, std::string _uri) { _uris.emplace(_id, std::move(_uri)); },
+        obj_data.code_object_id,
+        make_file_uri(*path));
+    return true;
 }
 
 std::unique_ptr<instruction_t>

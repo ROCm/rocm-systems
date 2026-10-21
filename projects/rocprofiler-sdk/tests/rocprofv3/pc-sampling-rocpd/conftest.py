@@ -48,6 +48,11 @@ def pytest_addoption(parser):
         help="Path to a rocPD database produced with --complete-isa-decode.",
     )
     parser.addoption(
+        "--rocpd-memory-input",
+        action="store",
+        help="Path to a rocPD database whose samples hit memory-only code objects.",
+    )
+    parser.addoption(
         "--expected-method",
         action="store",
         default=None,
@@ -93,6 +98,20 @@ def rocpd_disasm_connection(request):
         pytest.skip("disassembly rocPD input database not provided")
     if not os.path.isfile(filename):
         pytest.fail(f"disassembly rocPD input database does not exist: {filename}")
+
+    from rocpd.importer import RocpdImportData
+
+    with RocpdImportData(filename, cache_disassembly=False) as conn:
+        yield conn
+
+
+@pytest.fixture
+def rocpd_memory_connection(request):
+    filename = request.config.getoption("--rocpd-memory-input")
+    if not filename:
+        pytest.skip("memory code-object rocPD input database not provided")
+    if not os.path.isfile(filename):
+        pytest.fail(f"memory code-object rocPD input database does not exist: {filename}")
 
     from rocpd.importer import RocpdImportData
 

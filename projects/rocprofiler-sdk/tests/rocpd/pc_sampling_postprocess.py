@@ -209,7 +209,8 @@ def file_code_object(path, data):
 def build_db(path, *, code_objects=(), samples=(), regions=(), guid=None):
     """Write a schema-3.0.6 database and return its guid.
 
-    ``code_objects``: dicts with id, uri and optional storage_type, memory_size, content_hash.
+    ``code_objects``: dicts with id, uri and optional storage_type, memory_size, content_hash,
+    snapshot_uri.
     ``samples``: dicts with timestamp and optional offset, code_object_id, exec_mask, event_id.
     ``regions``: dicts with event_id, start and end; each gets a region-schema blob.
     """
@@ -267,8 +268,9 @@ def build_db(path, *, code_objects=(), samples=(), regions=(), guid=None):
 
         for code_object in code_objects:
             extdata = {"memory_size": code_object.get("memory_size", 0)}
-            if code_object.get("content_hash"):
-                extdata["content_hash"] = code_object["content_hash"]
+            for key in ("content_hash", "snapshot_uri"):
+                if code_object.get(key):
+                    extdata[key] = code_object[key]
             conn.execute(
                 f"INSERT INTO {table('rocpd_info_code_object')} (id, guid, nid, pid, "
                 "agent_id, uri, load_base, load_size, load_delta, storage_type, extdata) "
@@ -524,6 +526,86 @@ def test_memory_code_object_size_mismatch_is_rejected(tmp_path, code_object):
     rows = run_driver(tmp_path, inputs=[str(db)])
     assert rows[0][3] is None
     assert stored_disassembly(db) == []
+
+
+def memory_code_object(data, snapshot=None):
+    """Memory-only code object 1 recorded with the content hash of *data*."""
+    return {
+        "id": 1,
+        "uri": f"memory://{PID}#offset=0x1000&size={len(data)}",
+        "storage_type": "MEMORY",
+        "memory_size": len(data),
+        "content_hash": content_hash(data),
+        "snapshot_uri": snapshot.as_uri() if snapshot else None,
+    }
+
+
+@pytest.mark.parametrize(
+    "snapshot_state", ["intact", "unrecorded", "missing", "truncated", "modified"]
+)
+def test_memory_code_object_decodes_from_snapshot(tmp_path, code_object, snapshot_state):
+    snapshot, data = code_object
+    if snapshot_state == "missing":
+        snapshot.unlink()
+    elif snapshot_state == "truncated":
+        snapshot.write_bytes(data[:-1])
+    elif snapshot_state == "modified":
+        snapshot.write_bytes(bytes(reversed(data)))
+    db = tmp_path / "pc.db"
+    recorded_snapshot = None if snapshot_state == "unrecorded" else snapshot
+    guid = build_db(
+        db,
+        code_objects=[memory_code_object(data, recorded_snapshot)],
+        samples=[{"timestamp": 100, "offset": 4}],
+    )
+    rows = run_driver(tmp_path, inputs=[str(db)])
+    if snapshot_state == "intact":
+        assert rows[0][3] == insn(data, 4)
+        assert stored_disassembly(db) == [(guid, 1, 4, insn(data, 4))]
+    else:
+        # The memory:// URI is not readable after the process exits, so without
+        # matching snapshot bytes the PC is reported unavailable, never misdecoded.
+        assert rows[0][3] is None
+        assert rows[0][4].startswith("Decode unavailable")
+        assert stored_disassembly(db) == []
+
+
+def test_memory_code_object_falls_back_to_file_uri(tmp_path, code_object):
+    # A corrupt snapshot must not hide a file-backed original URI with matching bytes.
+    path, data = code_object
+    snapshot = tmp_path / "snapshot.hsaco"
+    snapshot.write_bytes(bytes(reversed(data)))
+    recorded_object = memory_code_object(data, snapshot)
+    recorded_object["uri"] = path.as_uri()
+    db = tmp_path / "pc.db"
+    build_db(
+        db, code_objects=[recorded_object], samples=[{"timestamp": 100, "offset": 4}]
+    )
+    rows = run_driver(tmp_path, inputs=[str(db)])
+    assert rows[0][3] == insn(data, 4)
+
+
+def test_relocated_memory_code_object_snapshot(tmp_path, code_object):
+    # Snapshots moved with their database resolve through the path prefix map; the
+    # '#' and space in the directory name must survive the snapshot URI round trip.
+    _, data = code_object
+    recorded_dir = tmp_path / "recorded #1"
+    relocated_dir = tmp_path / "relocated #1"
+    relocated_dir.mkdir()
+    (relocated_dir / "snapshot.hsaco").write_bytes(data)
+    db = tmp_path / "pc.db"
+    guid = build_db(
+        db,
+        code_objects=[memory_code_object(data, recorded_dir / "snapshot.hsaco")],
+        samples=[{"timestamp": 100, "offset": 9}],
+    )
+    rows = run_driver(tmp_path, inputs=[str(db)])
+    assert rows[0][3] is None
+    rows = run_driver(
+        tmp_path, inputs=[str(db)], prefix_map=[f"{recorded_dir}={relocated_dir}"]
+    )
+    assert rows[0][3] == insn(data, 9)
+    assert stored_disassembly(db) == [(guid, 1, 9, insn(data, 9))]
 
 
 def test_writeback_skips_stored_rows_without_an_index(tmp_path):

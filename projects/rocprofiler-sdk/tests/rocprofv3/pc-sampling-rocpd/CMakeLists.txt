@@ -195,3 +195,56 @@ rocprofiler_add_integration_validate_test(
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     FIXTURES_REQUIRED rocprofv3-test-pc-sampling-rocpd-host-trap
     DISABLED "${IS_PC_SAMPLING_HOST_TRAP_DISABLED}")
+
+# Memory-only code objects: the workload compiles a module with hiprtc and loads it with
+# hipModuleLoadData, so every sample lands in a code object with a memory:// URI whose
+# bytes are gone once the process exits.  rocprofv3 snapshots such objects next to the
+# ROCPD output; validation decodes the samples lazily from those snapshots (no
+# --complete-isa-decode) and compares them with the JSON instruction text decoded
+# in-process from live memory.
+foreach(_METHOD stochastic host_trap)
+    string(REPLACE "_" "-" _METHOD_NAME "${_METHOD}")
+    set(_INPUT_DIR
+        ${CMAKE_CURRENT_BINARY_DIR}/pc-sampling-rocpd-memory-${_METHOD_NAME}-input)
+
+    if(_METHOD STREQUAL "stochastic")
+        set(_SAMPLING_ARGS --pc-sampling-unit cycles --pc-sampling-interval 1048576)
+        set(_DISABLED "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}")
+    else()
+        set(_SAMPLING_ARGS --pc-sampling-unit time --pc-sampling-interval 1)
+        set(_DISABLED "${IS_PC_SAMPLING_HOST_TRAP_DISABLED}")
+    endif()
+
+    rocprofiler_add_integration_execute_test(
+        rocprofv3-test-pc-sampling-rocpd-memory-${_METHOD_NAME}
+        COMMAND
+            $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pc-sampling-beta-enabled 1
+            --kernel-trace --pc-sampling-method ${_METHOD} ${_SAMPLING_ARGS} -d
+            ${_INPUT_DIR} -o out --output-format rocpd json --
+            $<TARGET_FILE:code-object-multithread-testapp> --pc-sampling
+        DEPENDS code-object-multithread-testapp
+        TIMEOUT 120
+        LABELS "integration-tests;pc-sampling;${_METHOD_NAME};rocpd"
+        PRELOAD "${PRELOAD_ENV}"
+        ENVIRONMENT "${rocprofv3-pc-sampling-rocpd-env}"
+        SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
+        FIXTURES_SETUP rocprofv3-test-pc-sampling-rocpd-memory-${_METHOD_NAME}
+        DISABLED "${_DISABLED}")
+
+    rocprofiler_add_integration_validate_test(
+        rocprofv3-test-pc-sampling-rocpd-memory-${_METHOD_NAME}
+        TEST_PATHS validate.py
+        COPY conftest.py
+        CONFIG pytest.ini LIBRARY_PATH "${rocprofiler-sdk_LIB_DIR}"
+        PYTHON_PATH
+            "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
+        ARGS --json-input ${_INPUT_DIR}/out_results.json --rocpd-memory-input
+             ${_INPUT_DIR}/out_results.db
+        DISCOVERY_ARGS -k memory_code_object
+        TIMEOUT 120
+        LABELS "integration-tests;pc-sampling;${_METHOD_NAME};rocpd"
+        PRELOAD "${PRELOAD_ENV}"
+        SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
+        FIXTURES_REQUIRED rocprofv3-test-pc-sampling-rocpd-memory-${_METHOD_NAME}
+        DISABLED "${_DISABLED}")
+endforeach()
