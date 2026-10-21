@@ -9,7 +9,6 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from .cache import persistent_cache
 
@@ -95,7 +94,7 @@ class GPUInfo:
         return [f"rocprof-device-[0-9]-{name}*.txt" for name in self.counter_names]
 
 
-def get_rocminfo(rocm_path: Optional[Path] = None) -> Optional[Path]:
+def get_rocminfo(rocm_path: Path | None = None) -> Path | None:
     """Get the path to the rocminfo executable.
 
     Args:
@@ -126,7 +125,7 @@ def _rocminfo_reports_no_gpu(output: str) -> bool:
     return _ROCMINFO_NO_GPU_MARKER in output.lower()
 
 
-def run_rocminfo(rocm_path: Optional[Path] = None) -> Optional[str]:
+def run_rocminfo(rocm_path: Path | None = None) -> str | None:
     """Run ``rocminfo`` and return its stdout for further processing.
 
     Args:
@@ -166,7 +165,7 @@ def run_rocminfo(rocm_path: Optional[Path] = None) -> Optional[str]:
 
 
 @persistent_cache("gpu.detect_gpu")
-def detect_gpu(rocm_path: Optional[Path] = None) -> GPUInfo:
+def detect_gpu(rocm_path: Path | None = None) -> GPUInfo:
     """Detect available AMD GPUs and their capabilities.
 
     Uses rocminfo to get the list of GPU architectures.
@@ -202,7 +201,7 @@ def detect_gpu(rocm_path: Optional[Path] = None) -> GPUInfo:
 
 def lookup_gpu_category(
     arch: str,
-    rocminfo_stdout: Optional[str] = None,
+    rocminfo_stdout: str | None = None,
 ) -> list[str]:
     """Lookup the GPU category for an architecture.
 
@@ -271,8 +270,8 @@ def lookup_gpu_category(
 
 @persistent_cache("gpu.get_offload_extractor")
 def get_offload_extractor(
-    rocm_path: Optional[Path] = None,
-) -> tuple[Optional[Path], Optional[bool]]:
+    rocm_path: Path | None = None,
+) -> tuple[Path | None, bool | None]:
     """Get offload extractor path
 
     An offload extractor is one of:
@@ -438,7 +437,7 @@ def get_target_gpu_arch(rocm_path: Path, target_path: Path) -> list[str]:
 
 
 @persistent_cache("gpu.get_xnack_support")
-def get_xnack_support(rocm_path: Optional[Path] = None) -> bool:
+def get_xnack_support(rocm_path: Path | None = None) -> bool:
     """Check whether the current GPU is XNACK-capable.
 
     Run ``rocminfo`` with ``HSA_XNACK=1`` injected into the subprocess

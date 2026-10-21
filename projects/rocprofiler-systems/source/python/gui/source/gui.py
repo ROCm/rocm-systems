@@ -38,7 +38,7 @@ pd.set_option(
 
 
 def print_speedup_info(data):
-    for idx in set(list(data.idx)):
+    for idx in set(data.idx):
         sub_data = data[data["idx"] == idx]
         print()
         for sub_idx, row in sub_data.iterrows():
@@ -135,9 +135,10 @@ def update_line_graph(
                 go.Scatter(
                     x=sub_data_prog["line speedup"],
                     y=sub_data_prog["program speedup"],
-                    error_y=dict(
-                        type="data", array=sub_data_prog["speedup err"].tolist()
-                    ),
+                    error_y={
+                        "type": "data",
+                        "array": sub_data_prog["speedup err"].tolist(),
+                    },
                     line_shape="spline",
                     name=prog,
                     mode="lines+markers",
@@ -305,8 +306,8 @@ def build_causal_layout(
             global_data, global_samples, global_filenames = parse_files(
                 workload_path, verbose=verbose
             )
-            experiment_list = sorted(list(global_data.point.unique()))
-            progpt_list = sorted(list(global_data["progress points"].unique()))
+            experiment_list = sorted(global_data.point.unique())
+            progpt_list = sorted(global_data["progress points"].unique())
 
             max_points = global_data.point.value_counts().max().max()
 
@@ -337,8 +338,8 @@ def build_causal_layout(
 
                 max_points = new_data.point.value_counts().max().max()
 
-                experiment_list = sorted(list(global_data.point.unique()))
-                progpt_list = sorted(list(global_data["progress points"].unique()))
+                experiment_list = sorted(global_data.point.unique())
+                progpt_list = sorted(global_data["progress points"].unique())
 
                 # reset input_filters
                 global_input_filters = reset_input_filters(
@@ -407,8 +408,8 @@ def build_causal_layout(
                 if verbose >= 3:
                     print(global_data.keys())
 
-                experiment_list = sorted(list(global_data.point.unique()))
-                progpt_list = sorted(list(global_data["progress points"].unique()))
+                experiment_list = sorted(global_data.point.unique())
+                progpt_list = sorted(global_data["progress points"].unique())
 
                 screen_data, fig1, fig2 = update_line_graph(
                     sort_filter,
@@ -425,8 +426,8 @@ def build_causal_layout(
             if not global_data.empty:
                 if verbose == 3:
                     print(global_data)
-                experiment_list = sorted(list(global_data.point.unique()))
-                progpt_list = sorted(list(global_data["progress points"].unique()))
+                experiment_list = sorted(global_data.point.unique())
+                progpt_list = sorted(global_data["progress points"].unique())
                 screen_data, fig1, fig2 = update_line_graph(
                     sort_filter,
                     experiment_list,

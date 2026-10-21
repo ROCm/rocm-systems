@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright Advanced Micro Devices, Inc.
+# Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 """Run the rocprofiler-systems project's installed CTest suite.
 
@@ -8,6 +8,8 @@ is driven by CTest, whose test definitions are generated from the project's
 pytest suite (see share/rocprofiler-systems/tests/CTestTestfile.cmake). This
 script discovers the installed test directory and invokes ``ctest`` against it.
 """
+
+from __future__ import annotations
 
 import argparse
 import logging

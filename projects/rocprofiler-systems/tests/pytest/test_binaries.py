@@ -183,14 +183,16 @@ class TestRocprofilerSystemsInstrument(RocprofsysTest):
     @pytest.mark.timeout(45)
     def test_help(self):
         pass_regex = [
-            r"\[rocprof-sys-instrument\] Usage:[\s\S]*"
-            r"\[DEBUG OPTIONS\][\s\S]*"
-            r"\[MODE OPTIONS\][\s\S]*"
-            r"\[LIBRARY OPTIONS\][\s\S]*"
-            r"\[SYMBOL SELECTION OPTIONS\][\s\S]*"
-            r"\[RUNTIME OPTIONS\][\s\S]*"
-            r"\[GRANULARITY OPTIONS\][\s\S]*"
-            r"\[DYNINST OPTIONS\]"
+            (
+                r"\[rocprof-sys-instrument\] Usage:[\s\S]*"
+                r"\[DEBUG OPTIONS\][\s\S]*"
+                r"\[MODE OPTIONS\][\s\S]*"
+                r"\[LIBRARY OPTIONS\][\s\S]*"
+                r"\[SYMBOL SELECTION OPTIONS\][\s\S]*"
+                r"\[RUNTIME OPTIONS\][\s\S]*"
+                r"\[GRANULARITY OPTIONS\][\s\S]*"
+                r"\[DYNINST OPTIONS\]"
+            )
         ]
 
         result = self.run_test(
@@ -257,8 +259,10 @@ class TestRocprofilerSystemsInstrument(RocprofsysTest):
             pytest.fail("librocprof-sys-causal-api.so not found")
 
         pass_regex = [
-            r"\[rocprof-sys\]\[exe\] Runtime instrumentation is not possible![\s\S]*"
-            r"\[rocprof-sys\]\[exe\] Switching to binary rewrite mode and assuming '--simulate --all-functions'"
+            (
+                r"\[rocprof-sys\]\[exe\] Runtime instrumentation is not possible![\s\S]*"
+                r"\[rocprof-sys\]\[exe\] Switching to binary rewrite mode and assuming '--simulate --all-functions'"
+            )
         ]
 
         result = self.run_test(
@@ -367,8 +371,10 @@ class TestRocprofilerSystemsInstrument(RocprofsysTest):
         ls_name, ls_args = get_ls_command()
 
         pass_regex = [
-            r"\[filter\] skipping shared lib '.*' "
-            r"\(\d+ functions > --max-library-functions=10\)"
+            (
+                r"\[filter\] skipping shared lib '.*' "
+                r"\(\d+ functions > --max-library-functions=10\)"
+            )
         ]
 
         result = self.run_test(
@@ -402,13 +408,15 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
     @pytest.mark.timeout(45)
     def test_help(self):
         pass_regex = [
-            r"\[rocprof-sys-avail\] Usage:[\s\S]*"
-            r"\[DEBUG OPTIONS\][\s\S]*"
-            r"\[INFO OPTIONS\][\s\S]*"
-            r"\[FILTER OPTIONS\][\s\S]*"
-            r"\[COLUMN OPTIONS\][\s\S]*"
-            r"\[DISPLAY OPTIONS\][\s\S]*"
-            r"\[OUTPUT OPTIONS\][\s\S]*"
+            (
+                r"\[rocprof-sys-avail\] Usage:[\s\S]*"
+                r"\[DEBUG OPTIONS\][\s\S]*"
+                r"\[INFO OPTIONS\][\s\S]*"
+                r"\[FILTER OPTIONS\][\s\S]*"
+                r"\[COLUMN OPTIONS\][\s\S]*"
+                r"\[DISPLAY OPTIONS\][\s\S]*"
+                r"\[OUTPUT OPTIONS\][\s\S]*"
+            )
         ]
 
         result = self.run_test(
@@ -466,9 +474,11 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
     @pytest.mark.timeout(45)
     def test_all_csv(self):
         pass_regex = [
-            r"COMPONENT#AVAILABLE#VALUE_TYPE#STRING_IDS#FILENAME#DESCRIPTION#CATEGORY#[\s\S]*"
-            r"ENVIRONMENT VARIABLE#VALUE#DATA TYPE#DESCRIPTION#CATEGORIES#[\s\S]*"
-            r"HARDWARE COUNTER#DEVICE#AVAILABLE#DESCRIPTION#"
+            (
+                r"COMPONENT#AVAILABLE#VALUE_TYPE#STRING_IDS#FILENAME#DESCRIPTION#CATEGORY#[\s\S]*"
+                r"ENVIRONMENT VARIABLE#VALUE#DATA TYPE#DESCRIPTION#CATEGORIES#[\s\S]*"
+                r"HARDWARE COUNTER#DEVICE#AVAILABLE#DESCRIPTION#"
+            )
         ]
 
         result = self.run_test(
@@ -482,11 +492,13 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
     @pytest.mark.timeout(45)
     def test_filter_wall_clock_available(self):
         pass_regex = [
-            r"\|[-]+\|[\s\S]*"
-            r"\|[ ]+COMPONENT[ ]+\|[\s\S]*"
-            r"\|[-]+\|[\s\S]*"
-            r"\| (wall_clock)[ ]+\|[\s\S]*"
-            r"\|[-]+\|"
+            (
+                r"\|[-]+\|[\s\S]*"
+                r"\|[ ]+COMPONENT[ ]+\|[\s\S]*"
+                r"\|[-]+\|[\s\S]*"
+                r"\| (wall_clock)[ ]+\|[\s\S]*"
+                r"\|[-]+\|"
+            )
         ]
 
         result = self.run_test(
@@ -530,9 +542,11 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
     @pytest.mark.timeout(45)
     def test_regex_negation(self):
         pass_regex = [
-            r"ENVIRONMENT VARIABLE,[\s\S]*"
-            r"ROCPROFSYS_THREAD_POOL_SIZE,[\s\S]*"
-            r"ROCPROFSYS_USE_PID,"
+            (
+                r"ENVIRONMENT VARIABLE,[\s\S]*"
+                r"ROCPROFSYS_THREAD_POOL_SIZE,[\s\S]*"
+                r"ROCPROFSYS_USE_PID,"
+            )
         ]
         fail_regex = [r"ROCPROFSYS_TRACE"]
 
@@ -565,11 +579,13 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
         avail_cfg_path = str(avail_cfg_path).replace("+", r"\+")
 
         pass_regex = [
-            rf"Outputting JSON configuration file '{avail_cfg_path}test\.json'"
-            r"[\s\S]*"
-            rf"Outputting XML configuration file '{avail_cfg_path}test\.xml'"
-            r"[\s\S]*"
-            rf"Outputting text configuration file '{avail_cfg_path}test\.cfg'"
+            (
+                rf"Outputting JSON configuration file '{avail_cfg_path}test\.json'"
+                r"[\s\S]*"
+                rf"Outputting XML configuration file '{avail_cfg_path}test\.xml'"
+                r"[\s\S]*"
+                rf"Outputting text configuration file '{avail_cfg_path}test\.cfg'"
+            )
         ]
 
         result = self.run_test(
@@ -614,11 +630,13 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
         avail_cfg_path = str(avail_cfg_path).replace("+", r"\+")
 
         pass_regex = [
-            rf"Outputting JSON configuration file '{avail_cfg_path}tweak\.json'"
-            r"[\s\S]*"
-            rf"Outputting XML configuration file '{avail_cfg_path}tweak\.xml'"
-            r"[\s\S]*"
-            rf"Outputting text configuration file '{avail_cfg_path}tweak\.cfg'"
+            (
+                rf"Outputting JSON configuration file '{avail_cfg_path}tweak\.json'"
+                r"[\s\S]*"
+                rf"Outputting XML configuration file '{avail_cfg_path}tweak\.xml'"
+                r"[\s\S]*"
+                rf"Outputting text configuration file '{avail_cfg_path}tweak\.cfg'"
+            )
         ]
 
         result = self.run_test(
@@ -740,8 +758,10 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
     @pytest.mark.timeout(45)
     def test_core_categories(self):
         pass_regex = [
-            r"ROCPROFSYS_CONFIG_FILE[\s\S]*ROCPROFSYS_ENABLED[\s\S]*"
-            r"ROCPROFSYS_SUPPRESS_CONFIG[\s\S]*ROCPROFSYS_SUPPRESS_PARSING[\s\S]*ROCPROFSYS_VERBOSE"
+            (
+                r"ROCPROFSYS_CONFIG_FILE[\s\S]*ROCPROFSYS_ENABLED[\s\S]*"
+                r"ROCPROFSYS_SUPPRESS_CONFIG[\s\S]*ROCPROFSYS_SUPPRESS_PARSING[\s\S]*ROCPROFSYS_VERBOSE"
+            )
         ]
 
         result = self.run_test(

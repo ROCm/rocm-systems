@@ -171,10 +171,12 @@ class TestPython(RocprofsysTest):
 
         if not annotated and not exclude:
             file_pass_regex = [
-                r"(\[compile\]).*"
-                r"(\| \|0>>> \[run\]\[external.py\]).*"
-                r"(\| \|0>>> \|_\[fib\]\[external.py\]).*"
-                r"(\| \|0>>> \|_\[inefficient\]\[external.py\])"
+                (
+                    r"(\[compile\]).*"
+                    r"(\| \|0>>> \[run\]\[external.py\]).*"
+                    r"(\| \|0>>> \|_\[fib\]\[external.py\]).*"
+                    r"(\| \|0>>> \|_\[inefficient\]\[external.py\])"
+                )
             ]
             self.assert_file_regex(
                 result.output_dir / "trip_count.txt",

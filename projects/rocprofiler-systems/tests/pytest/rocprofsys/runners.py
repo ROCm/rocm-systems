@@ -22,7 +22,6 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Optional
 
 from .cache import resolve_username
 from .config import RocprofsysConfig
@@ -68,8 +67,8 @@ class TestResult:
     output_dir: Path
     command: list[str]
     environment: TestEnvironment
-    extra_output: Optional[str] = None
-    duration: Optional[float] = None
+    extra_output: str | None = None
+    duration: float | None = None
     _instrumented_files: list[Path] = field(default_factory=list)
     __test__ = False
 
@@ -83,7 +82,7 @@ class TestResult:
         return self.returncode == 0
 
     @property
-    def perfetto_file(self) -> Optional[Path]:
+    def perfetto_file(self) -> Path | None:
         for ext in ("pftrace", "proto"):
             candidates = [
                 self.output_dir / f"perfetto-trace.{ext}",
@@ -109,7 +108,7 @@ class TestResult:
         """List of timemory output files."""
         return list(self.output_dir.glob("*.json")) + list(self.output_dir.glob("*.txt"))
 
-    def get_output_file(self, pattern: str) -> Optional[Path]:
+    def get_output_file(self, pattern: str) -> Path | None:
         """Get an output file matching the given pattern.
 
         Args:
@@ -164,7 +163,7 @@ class BaseRunner(ABC):
         MPI = "mpi"
         SHMEM = "shmem"
 
-        def get_executable(self, capabilities) -> Optional[Path]:
+        def get_executable(self, capabilities) -> Path | None:
             return {
                 type(self).MPI: capabilities.mpiexec_exec,
                 type(self).SHMEM: capabilities.oshrun_exec,
@@ -180,15 +179,15 @@ class BaseRunner(ABC):
         test_type: TestEnvKind,
         target: str,
         output_dir: Path,
-        run_args: Optional[list[str]] = None,
-        pre_run_args: Optional[list[str]] = None,
-        env: Optional[dict[str, str]] = None,
+        run_args: list[str] | None = None,
+        pre_run_args: list[str] | None = None,
+        env: dict[str, str] | None = None,
         timeout: int = 300,
-        launcher: Optional[BaseRunner.Launcher | str] = None,
+        launcher: BaseRunner.Launcher | str | None = None,
         num_procs: int = 0,
-        working_directory: Optional[Path] = None,
+        working_directory: Path | None = None,
         no_base_env: bool = False,
-        python_version: Optional[str] = None,
+        python_version: str | None = None,
     ):
         self.config = config
         self.target = target
@@ -384,7 +383,7 @@ class BaselineRunner(BaseRunner):
         config: RocprofsysConfig,
         target: str,
         output_dir: Path,
-        command: Optional[list[str]] = None,
+        command: list[str] | None = None,
         **kwargs,
     ):
         test_type = (
@@ -407,7 +406,7 @@ class SamplingRunner(BaseRunner):
         config: RocprofsysConfig,
         target: str,
         output_dir: Path,
-        sampling_args: Optional[list[str]] = None,
+        sampling_args: list[str] | None = None,
         **kwargs,
     ):
         """Initialize sampling runner.
@@ -441,7 +440,7 @@ class BinaryRewriteRunner(BaseRunner):
         config: RocprofsysConfig,
         target: str,
         output_dir: Path,
-        binary_rewrite_args: Optional[list[str]] = None,
+        binary_rewrite_args: list[str] | None = None,
         cleanup_on_success: bool = False,
         **kwargs,
     ):
@@ -606,7 +605,7 @@ class RuntimeInstrumentRunner(BaseRunner):
         config: RocprofsysConfig,
         target: str,
         output_dir: Path,
-        runtime_instrument_args: Optional[list[str]] = None,
+        runtime_instrument_args: list[str] | None = None,
         **kwargs,
     ):
         """Initialize runtime instrument runner.
@@ -641,7 +640,7 @@ class SysRunRunner(BaseRunner):
         config: RocprofsysConfig,
         target: str,
         output_dir: Path,
-        sys_run_args: Optional[list[str]] = None,
+        sys_run_args: list[str] | None = None,
         **kwargs,
     ):
         """Initialize sys-run runner.
@@ -676,7 +675,7 @@ class CausalRunner(BaseRunner):
         target: str,
         output_dir: Path,
         causal_mode: str,
-        causal_args: Optional[list[str]] = None,
+        causal_args: list[str] | None = None,
         **kwargs,
     ):
         """Initialize causal runner.
@@ -713,8 +712,8 @@ class PythonRunner(BaseRunner):
         config: RocprofsysConfig,
         target: str,
         output_dir: Path,
-        profile_args: Optional[list[str]] = None,
-        python_version: Optional[str] = None,
+        profile_args: list[str] | None = None,
+        python_version: str | None = None,
         annotated: bool = False,
         standalone: bool = False,
         **kwargs,

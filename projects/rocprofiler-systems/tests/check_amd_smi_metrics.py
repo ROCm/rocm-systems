@@ -22,6 +22,8 @@ Usage:
     python3 check_amd_smi_metrics.py --json
 """
 
+from __future__ import annotations
+
 import json
 import subprocess
 import sys

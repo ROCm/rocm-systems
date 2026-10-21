@@ -35,7 +35,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .config import RocprofsysConfig
@@ -78,7 +78,7 @@ class TestEnvironment:
         self,
         config: RocprofsysConfig,
         test_type: TestEnvKind = TestEnvKind.BASE,
-        python_version: Optional[str] = None,
+        python_version: str | None = None,
     ) -> None:
         """Set the base layer to the preset for ``test_type`` (default: BASE).
 
@@ -253,7 +253,7 @@ def base_binary_environment() -> dict[str, str]:
 
 
 def base_python_environment(
-    config: RocprofsysConfig, python_version: Optional[str] = None
+    config: RocprofsysConfig, python_version: str | None = None
 ) -> dict[str, str]:
     """Framework default environment for Python test execution.
 

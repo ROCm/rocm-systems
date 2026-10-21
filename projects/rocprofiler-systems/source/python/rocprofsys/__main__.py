@@ -66,7 +66,7 @@ def find_script(script_name):
         if os.path.isfile(fn):
             return fn
 
-    sys.stderr.write("Could not find script %s\n" % script_name)
+    sys.stderr.write(f"Could not find script {script_name}\n")
     raise SystemExit(1)
 
 
@@ -389,7 +389,7 @@ def main(main_args=sys.argv):
             if opts.builtin:
                 execfile(script_file, ns, ns)
             else:
-                prof.runctx("execfile_(%r, globals())" % (script_file,), ns, ns)
+                prof.runctx(f"execfile_({script_file!r}, globals())", ns, ns)
         except (KeyboardInterrupt, SystemExit):
             pass
         finally:

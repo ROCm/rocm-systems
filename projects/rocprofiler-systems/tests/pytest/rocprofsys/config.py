@@ -10,7 +10,6 @@ import subprocess
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 from .cache import persistent_cache, persistent_cached_property, resolve_username
 from .capabilities import SystemCapabilities
@@ -55,23 +54,21 @@ class RocprofsysConfig:
     rocprofsys_sample: Path
     rocprofsys_causal: Path
     rocprofsys_avail: Path
-    rocprofsys_attach: Optional[Path]
-    rocm_path: Optional[Path]
+    rocprofsys_attach: Path | None
+    rocm_path: Path | None
     rocprofsys_lib_dir: Path
     rocprofsys_bin_dir: Path
     rocprofsys_examples_dir: Path
     rocprofsys_tests_dir: Path
     rocpd_validation_rules: Path
     test_output_dir: Path
-    rocprofsys_python: Optional[Path] = None
-    rocprofsys_site_packages: Optional[Path] = None
+    rocprofsys_python: Path | None = None
+    rocprofsys_site_packages: Path | None = None
     is_installed: bool = False
-    rocm_version: Optional[tuple[int, int, int]] = None
-    _python_versions_hint: Optional[list[str]] = field(default=None, repr=False)
-    _python_root_dirs_hint: Optional[list[Path]] = field(default=None, repr=False)
-    _capabilities: Optional[SystemCapabilities] = field(
-        default=None, init=False, repr=False
-    )
+    rocm_version: tuple[int, int, int] | None = None
+    _python_versions_hint: list[str] | None = field(default=None, repr=False)
+    _python_root_dirs_hint: list[Path] | None = field(default=None, repr=False)
+    _capabilities: SystemCapabilities | None = field(default=None, init=False, repr=False)
 
     @property
     def capabilities(self) -> SystemCapabilities:
@@ -129,7 +126,7 @@ class RocprofsysConfig:
                     found_paths.append(candidate)
         return found_paths
 
-    def get_library_path(self, python_version: Optional[str] = None) -> str:
+    def get_library_path(self, python_version: str | None = None) -> str:
         """Get LD_LIBRARY_PATH including rocprofiler-systems libraries.
 
         Args:
@@ -172,7 +169,7 @@ class RocprofsysConfig:
 
         return ":".join(paths)
 
-    def get_preload_path(self) -> Optional[str]:
+    def get_preload_path(self) -> str | None:
         """Get LD_PRELOAD for sanitizer builds, or None when not applicable.
 
         When $ASAN_LIBRARY is set (exported by the sanitizer CI) it is prepended
@@ -263,7 +260,7 @@ class RocprofsysConfig:
             )
 
 
-def _find_rocm_path(optional: bool = False) -> Optional[Path]:
+def _find_rocm_path(optional: bool = False) -> Path | None:
     """Find ROCm installation path.
 
     Args:
@@ -283,7 +280,7 @@ def _find_rocm_path(optional: bool = False) -> Optional[Path]:
     )
 
 
-def _get_rocm_version(rocm_optional: bool = False) -> Optional[tuple[int, int, int]]:
+def _get_rocm_version(rocm_optional: bool = False) -> tuple[int, int, int] | None:
     """Get the installed ROCm version as a tuple (major, minor, patch).
 
     Returns:
@@ -311,7 +308,7 @@ def _get_rocm_version(rocm_optional: bool = False) -> Optional[tuple[int, int, i
     return None
 
 
-def _find_executable(name: str, search_paths: list[Path]) -> Optional[Path]:
+def _find_executable(name: str, search_paths: list[Path]) -> Path | None:
     """Find a rocprof-sys executable within the given search paths.
 
     Only the explicit search paths are consulted -- these are the build/install
@@ -331,7 +328,7 @@ def _find_executable(name: str, search_paths: list[Path]) -> Optional[Path]:
 
 def _find_rocprofsys_core_executables(
     search_paths: list[Path],
-) -> dict[str, Optional[Path]]:
+) -> dict[str, Path | None]:
     """Return a dictionary of rocprofiler-systems executables and their paths.
 
     Throws a FileNotFoundError if any of the executables are not found.
@@ -364,7 +361,7 @@ def _find_rocprofsys_core_executables(
 
 def _find_rocprofsys_python(
     search_paths: list[Path], rocprofsys_build_dir: Path
-) -> tuple[Optional[Path], Optional[Path]]:
+) -> tuple[Path | None, Path | None]:
     """Return the Python executable and rocprofsys site-package path.
 
     Both must be found, otherwise (None, None) is returned.
@@ -390,8 +387,8 @@ def _find_rocprofsys_python(
 
 
 def _merge_python_root_dirs(
-    explicit_dirs: Optional[list[Path]],
-) -> Optional[list[Path]]:
+    explicit_dirs: list[Path] | None,
+) -> list[Path] | None:
     """Merge explicit --python-root-dirs with ROCPROFSYS_PYTHON_HINTS env var.
 
     ROCPROFSYS_PYTHON_HINTS entries may point to bin/ directories or their parents;
@@ -412,8 +409,8 @@ def _merge_python_root_dirs(
 
 @persistent_cache("config.discover_install_config")
 def discover_install_config(
-    python_versions: Optional[list[str]] = None,
-    python_root_dirs: Optional[list[Path]] = None,
+    python_versions: list[str] | None = None,
+    python_root_dirs: list[Path] | None = None,
     rocm_optional: bool = False,
 ) -> RocprofsysConfig:
     """Discover rocprofiler-systems installation configuration.
@@ -428,7 +425,7 @@ def discover_install_config(
         FileNotFoundError: If build/installation dirs and executables are not found
     """
 
-    install_dir: Optional[Path] = None
+    install_dir: Path | None = None
     env_install = os.environ.get("ROCPROFSYS_INSTALL_DIR")
     if env_install:
         install_dir = Path(env_install).resolve()
@@ -513,8 +510,8 @@ def discover_install_config(
 
 @persistent_cache("config.discover_build_config")
 def discover_build_config(
-    python_versions: Optional[list[str]] = None,
-    python_root_dirs: Optional[list[Path]] = None,
+    python_versions: list[str] | None = None,
+    python_root_dirs: list[Path] | None = None,
     rocm_optional: bool = False,
 ) -> RocprofsysConfig:
     """Discover rocprofiler-systems build configuration.

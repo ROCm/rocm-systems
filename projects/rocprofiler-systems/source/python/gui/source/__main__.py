@@ -80,7 +80,7 @@ def causal(args):
             args.light,
         )
         app.run_server(
-            debug=True if args.verbose >= 3 else False,
+            debug=args.verbose >= 3,
             host=args.ip_address,
             port=args.ip_port,
         )

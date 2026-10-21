@@ -3,6 +3,8 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+from __future__ import annotations
+
 import argparse
 import os
 import sqlite3
@@ -272,7 +274,7 @@ def validate_table(
                     cursor.execute(query)
                     result = cursor.fetchone()
 
-                    if result and "count" in result.keys():
+                    if result and "count" in result:
                         actual_result = result["count"]
                     else:
                         actual_result = result[0] if result else None

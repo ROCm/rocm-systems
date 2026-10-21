@@ -78,7 +78,7 @@ class Profiler:
             and not libpyrocprofsys.is_finalized()
         )
         self._file = _file()
-        self.debug = kwargs["debug"] if "debug" in kwargs else False
+        self.debug = kwargs.get("debug", False)
 
     def __del__(self):
         """Make sure the profiler stops"""

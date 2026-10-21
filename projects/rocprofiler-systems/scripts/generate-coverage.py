@@ -30,7 +30,6 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
 
 GCOVR_EXCLUDE_PATTERNS = [
     r"/usr/.*",
@@ -42,7 +41,7 @@ GCOVR_EXCLUDE_PATTERNS = [
 ]
 
 
-def find_tool(name: str, required: bool = True) -> Optional[str]:
+def find_tool(name: str, required: bool = True) -> str | None:
     path = shutil.which(name)
     if required and path is None:
         print(f"ERROR: {name} not found in PATH", file=sys.stderr)
@@ -82,8 +81,7 @@ def git(directory: Path, *args: str) -> bytes:
         proc = subprocess.run(
             ["git", *args],
             cwd=directory,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             timeout=60,
             check=False,
         )
@@ -94,7 +92,7 @@ def git(directory: Path, *args: str) -> bytes:
     return proc.stdout
 
 
-def changed_files(source_dir: Path, base: Optional[str]) -> set[Path]:
+def changed_files(source_dir: Path, base: str | None) -> set[Path]:
     """Files changed vs merge-base(HEAD, base): committed, staged/unstaged, untracked."""
     root = Path(
         os.fsdecode(git(source_dir, "rev-parse", "--show-toplevel")).strip()
@@ -270,7 +268,7 @@ def compute_file_coverage(
     *,
     source_dir: Path,
     dir_scope: Path,
-    changed: Optional[set[Path]] = None,
+    changed: set[Path] | None = None,
 ) -> list[dict]:
     files = []
     for file_data in data.get("files", []):
@@ -367,8 +365,8 @@ def generate_markdown(
     *,
     file_coverages: list[dict],
     totals: dict,
-    baseline_totals: Optional[dict],
-    baseline_files: Optional[list[dict]] = None,
+    baseline_totals: dict | None,
+    baseline_files: list[dict] | None = None,
     source_dir: Path,
 ) -> str:
     baseline_by_filename = (
