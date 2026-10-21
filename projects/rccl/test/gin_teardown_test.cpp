@@ -342,7 +342,8 @@ TEST(DevrGetWinOffsetTest, OffsetIsWindowPositionWithinBackingMemory) {
 }
 
 // NCCL_PARAM caches the first read. Drive WindowRegisterInGroup in a child so
-// reverting CheckRegistrationSupport fails this test (a helper-direct call would not).
+// reverting the CheckRegistrationSupport call in rcclDevrProbeNonSymWindow fails this test (a helper-direct call
+// would not).
 TEST(DevrRegistrationSupportTest, DisabledElasticRejectsHostSegment) {
   using RcclUnitTesting::ProcessIsolatedTestRunner;
 
@@ -356,6 +357,7 @@ TEST(DevrRegistrationSupportTest, DisabledElasticRejectsHostSegment) {
     comm->localRanks = 1;
     comm->bootstrap = reinterpret_cast<void*>(0x1);
     comm->symmetricSupport = 0;  // the non-sym host-VMM probe, not the symmetric walk
+    comm->cuMemSupport = 1;      // the probe is gated on the comm-wide cuMem flag
     comm->globalRmaProxySupport = false;
     comm->config.numRmaCtx = 0;
     comm->devrState.lsaSelf = 0;
