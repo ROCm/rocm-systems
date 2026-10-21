@@ -19,7 +19,8 @@ mod types;
 mod virtual_memory;
 
 pub use access::DeviceAccess;
-pub use allocation::Allocation;
+pub(crate) use allocation::record_rollback;
+pub use allocation::{Allocation, RollbackReport, with_rollback_report};
 pub use registered_host::{RegisteredHostAllocation, RegisteredHostMemory};
 pub use types::{
     AllocationInfo, HostCacheability, HostMappingPolicy, MemoryKind, VirtualAddressInfo,

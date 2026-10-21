@@ -811,6 +811,18 @@ fn ipc_import_maps_requested_devices_and_owns_cpu_visible_backing() {
         allocation.device_address(&peer).unwrap(),
         info.device_address
     );
+    assert_eq!(allocation.remaining_backing_byte_length(), 0);
+    allocation
+        .reservation
+        .as_mut()
+        .unwrap()
+        .fail_release_once(errno::ENOMEM);
+    assert_eq!(
+        allocation.free().unwrap_err().kind(),
+        ErrorKind::ResourceExhausted
+    );
+    assert!(allocation.handle.is_none());
+    assert_eq!(allocation.remaining_backing_byte_length(), 0);
     allocation.free().unwrap();
     drop(allocation);
     fixture.exhausted();
@@ -1830,6 +1842,7 @@ fn registered_host_cache_policies_reach_kfd() {
                 DeviceAccess::READ | DeviceAccess::WRITE,
             )
             .unwrap();
+        assert_eq!(allocation.remaining_backing_byte_length(), 0);
         allocation.free().unwrap();
         drop(allocation);
         fixture.exhausted();
@@ -1866,6 +1879,50 @@ fn owned_system_pages_use_one_cpu_and_gpu_address() {
     drop(allocation);
     fixture.exhausted();
     assert_eq!(Shared::strong_count(&fixture.vm), 1);
+}
+
+#[test]
+fn owned_host_pages_remain_accounted_after_kfd_free_when_cpu_unmap_fails() {
+    let fixture = Fixture::with_owned_userptr(
+        [
+            Reply::Allocate(17, None),
+            Reply::Map(0, 1, None),
+            Reply::Unmap(0, 1, None),
+            Reply::Free(None),
+        ],
+        uapi::USERPTR | uapi::COHERENT | uapi::NO_SUBSTITUTE | uapi::WRITABLE,
+    );
+    let mut allocation = fixture
+        .allocate(
+            MemoryKind::OwnedHost {
+                policy: HostMappingPolicy::Fine,
+            },
+            DeviceAccess::READ | DeviceAccess::WRITE,
+        )
+        .unwrap();
+    assert_eq!(allocation.remaining_backing_byte_length(), desc().size);
+    allocation
+        .reservation
+        .as_mut()
+        .unwrap()
+        .fail_release_once(errno::ENOMEM);
+    assert_eq!(
+        allocation.free().unwrap_err().kind(),
+        ErrorKind::ResourceExhausted
+    );
+    assert!(allocation.handle.is_none());
+    assert!(
+        allocation
+            .reservation
+            .as_ref()
+            .unwrap()
+            .has_writable_mapping()
+    );
+    assert_eq!(allocation.remaining_backing_byte_length(), desc().size);
+    allocation.free().unwrap();
+    assert_eq!(allocation.remaining_backing_byte_length(), 0);
+    drop(allocation);
+    fixture.exhausted();
 }
 
 #[test]
@@ -1957,6 +2014,7 @@ fn failed_free_retries_completion_then_only_the_remaining_native_work() {
         assert_eq!(allocation.free().unwrap_err().kind(), ErrorKind::Busy);
         assert!(allocation.reservation.is_some());
         assert_eq!(allocation.handle, Some(17));
+        assert_eq!(allocation.remaining_backing_byte_length(), desc().size);
         allocation
             .reservation
             .as_mut()
@@ -1970,6 +2028,7 @@ fn failed_free_retries_completion_then_only_the_remaining_native_work() {
             allocation.handle.is_none(),
             "successful FREE must not be replayed"
         );
+        assert_eq!(allocation.remaining_backing_byte_length(), 0);
         allocation.free().unwrap();
         allocation.free().unwrap();
         drop(allocation);
