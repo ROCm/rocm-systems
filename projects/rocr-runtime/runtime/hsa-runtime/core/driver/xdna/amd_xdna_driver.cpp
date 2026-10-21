@@ -980,18 +980,14 @@ static void FlushArguments(const hsa_amd_aie_kernel_dispatch_packet_t* pkt) {
 /// @param[in] mask ring index mask (queue size - 1)
 /// @param[in] first_pkt_idx ring index of the batch's first packet
 /// @param[in] num_pkts how many packets from @p first_pkt_idx completed
-/// @param[in] flush_arguments whether the device needs the CPU caches flushed to see its writes
 static void RetireCompletedPackets(hsa_amd_aie_kernel_dispatch_packet_t* queue, uint64_t mask,
-                                   uint64_t first_pkt_idx, uint64_t num_pkts,
-                                   bool flush_arguments) {
+                                   uint64_t first_pkt_idx, uint64_t num_pkts) {
   for (uint64_t i = 0; i < num_pkts; ++i) {
     auto* pkt = queue + ((first_pkt_idx + i) & mask);
 
     // Flush again after execution: the kernel's writes have to be visible before the signal that
     // announces them.
-    if (flush_arguments) {
-      FlushArguments(pkt);
-    }
+    FlushArguments(pkt);
 
     if (pkt->completion_signal.handle != 0) {
       core::Signal* sig = core::Signal::Convert(pkt->completion_signal);
@@ -1858,12 +1854,14 @@ hsa_status_t XdnaDriver::DestroyUserModeQueue(void* queue_metadata) const {
 /// @param[in,out] pkt the packet, in the queue's ring; reserved2 and kernel_object_low/high are
 /// modified
 /// @param[in] agent agent that owns the queue
+/// @param[out] ctrl_copy_out the per-dispatch control-code copy's address, on success; the
+/// caller's to free once CERT is confirmed done with this packet
 /// @retval HSA_STATUS_ERROR_INVALID_PACKET_FORMAT the packet's kernel_object names no loaded
 /// kernel
 /// @retval HSA_STATUS_ERROR_OUT_OF_RESOURCES the per-dispatch control-code copy could not be
 /// allocated
 static hsa_status_t TranslateUmqPacket(hsa_amd_aie_kernel_dispatch_packet_t& pkt,
-                                       const core::Agent& agent) {
+                                       const core::Agent& agent, void** ctrl_copy_out) {
   // Alignment for a per-dispatch control-code copy; no hardware requirement is known to need more
   // than this (also used for the kernel's one static pristine copy; see executable.cpp).
   constexpr size_t kCtrlCodeCopyAlign = 64;
@@ -1884,8 +1882,7 @@ static hsa_status_t TranslateUmqPacket(hsa_amd_aie_kernel_dispatch_packet_t& pkt
     return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
   }
 
-  // Freed once CERT is confirmed done with it, by SubmitUmqPackets (it reads this address back
-  // out of kernel_object_low/high at retirement).
+  // Freed by SubmitUmqPackets, via ctrl_copy_out, once CERT is confirmed done with it.
   void* ctrl_copy = aie_agent.system_allocator()(desc->static_ctrl_code_size, kCtrlCodeCopyAlign,
                                                  core::MemoryRegion::AllocateNoFlags);
   if (ctrl_copy == nullptr) {
@@ -1922,6 +1919,7 @@ static hsa_status_t TranslateUmqPacket(hsa_amd_aie_kernel_dispatch_packet_t& pkt
   cert.exec_buf.dpu_control_code_host_addr_low = static_cast<uint32_t>(ctrl_code_addr & 0xFFFFFFFF);
   cert.exec_buf.dpu_control_code_host_addr_high = static_cast<uint32_t>(ctrl_code_addr >> 32);
 
+  *ctrl_copy_out = ctrl_copy;
   return HSA_STATUS_SUCCESS;
 }
 
@@ -1935,17 +1933,6 @@ hsa_status_t XdnaDriver::SubmitUmqPackets(hsa_amd_aie_kernel_dispatch_packet_t* 
   const auto& aie_agent = static_cast<const AieAgent&>(agent);
   host_queue_header* header = static_cast<UmqMetadata*>(queue_metadata)->header;
 
-  // Every packet in the batch is translated and readied before the doorbell is rung once for all
-  // of them: CERT does not act on write_index until the doorbell is rung (confirmed on real
-  // hardware -- a batch readied this way runs every packet correctly, in submission order), so
-  // nothing here is handed to CERT until the whole batch has translated cleanly. Each packet still
-  // gets its own control-code copy, since concurrent dispatches of the same kernel must not share
-  // one.
-  //
-  // Ready-then-ring changes the earlier per-packet design's failure contract for a translate
-  // failure specifically: since nothing is rung until every packet has translated, a bad packet
-  // partway through aborts the whole batch, not just itself and what follows, so num_completed
-  // stays 0 rather than counting packets that would have run before it.
   // Guards the copies made below until the doorbell is rung for the whole batch: a translate
   // failure partway through means none of this batch is rung, so nothing else would free the
   // copies already made for the packets translated so far. Dismissed once the doorbell is rung;
@@ -1958,31 +1945,36 @@ hsa_status_t XdnaDriver::SubmitUmqPackets(hsa_amd_aie_kernel_dispatch_packet_t* 
       }
     }
   });
+
+  // Every packet in the batch is translated and readied before the doorbell is rung once for all
+  // of them: CERT does not act on write_index until the doorbell is rung. Each packet gets its own
+  // control-code copy, since concurrent dispatches of the same kernel must not share one.
   for (uint64_t i = 0; i < num_pkts; ++i) {
     const uint64_t idx = first_pkt_idx + i;
     hsa_amd_aie_kernel_dispatch_packet_t& pkt = ring[idx % ring_capacity];
 
-    const hsa_status_t translate_err = TranslateUmqPacket(pkt, agent);
+    const hsa_status_t translate_err = TranslateUmqPacket(pkt, agent, &ctrl_copies[i]);
     if (translate_err != HSA_STATUS_SUCCESS) {
       return translate_err;
     }
-    // TranslateUmqPacket overwrote this packet's kernel_object with the address of a per-dispatch
-    // control-code copy it allocated through this same agent's system allocator.
-    ctrl_copies[i] = reinterpret_cast<void*>(
-        (static_cast<uint64_t>(pkt.kernel_object_high) << 32) | pkt.kernel_object_low);
-
-    // CERT's own write_index is a monotonic count of readied packets, i.e. idx+1 itself (an index
-    // one past the last readied packet). Each packet is its own singleton chain, so chain_flag
-    // stays 0, which the application's opcode already leaves it at (see
-    // HOST_QUEUE_PACKET_EXEC_BUF).
-    atomic::Store(&header->write_index, idx + 1, std::memory_order_release);
   }
+
+  // CERT's own write_index is a monotonic count of readied packets, i.e., one past the last one in
+  // this batch. Nothing reads write_index until the doorbell is rung below, so one store with the
+  // batch's final value does the same job as storing it once per packet. Each packet is its own
+  // singleton chain, so chain_flag stays 0, which the application's opcode already leaves it at
+  // (see HOST_QUEUE_PACKET_EXEC_BUF).
+  atomic::Store(&header->write_index, first_pkt_idx + num_pkts, std::memory_order_release);
   store_fence();
   // Hardware doorbell supports AQL semantics, the same as a GPU queue: the value rung is the
   // index of the last readied packet, not a count, so one ring covers the whole batch.
   *doorbell = static_cast<uint32_t>(first_pkt_idx + num_pkts - 1);
-  ctrl_copies_guard.Dismiss();
 
+  // Not dismissed here: every packet in the batch is now handed to CERT, not just the ones this
+  // loop has waited on yet, so the guard stays armed through the wait loop below too, freeing
+  // whichever copies an early return (a failing packet's own, plus every later packet's, already
+  // rung but never reached) leaves outstanding. Each copy is cleared to null as it is freed below,
+  // so the guard never frees one twice.
   for (uint64_t i = 0; i < num_pkts; ++i) {
     const uint64_t idx = first_pkt_idx + i;
     hsa_amd_aie_kernel_dispatch_packet_t& pkt = ring[idx % ring_capacity];
@@ -1997,6 +1989,7 @@ hsa_status_t XdnaDriver::SubmitUmqPackets(hsa_amd_aie_kernel_dispatch_packet_t* 
     // retries inside it), which already leaves the queue unusable, so this is freed rather than
     // leaked.
     aie_agent.system_deallocator()(ctrl_copies[i]);
+    ctrl_copies[i] = nullptr;
     if (wait_err != HSA_STATUS_SUCCESS) {
       return wait_err;
     }
@@ -2008,10 +2001,10 @@ hsa_status_t XdnaDriver::SubmitUmqPackets(hsa_amd_aie_kernel_dispatch_packet_t* 
     if ((return_code & 0xF) != ERT_CMD_STATE_COMPLETED) {
       return HSA_STATUS_ERROR;
     }
-    // A UMQ device (AMDXDNA_DEV_TYPE_UMQ) is cache-coherent with the CPU, which is why XRT's
-    // sync_bo does nothing for one and why UMQ submission never flushes before dispatch either.
-    RetireCompletedPackets(ring, ring_capacity - 1, idx, /*num_pkts=*/1,
-                           /*flush_arguments=*/false);
+    // Release the completion signal directly.
+    if (pkt.completion_signal.handle != 0) {
+      core::Signal::Convert(pkt.completion_signal)->SubRelease(1);
+    }
     *num_completed = i + 1;
   }
 
@@ -2748,7 +2741,7 @@ static hsa_status_t SubmitBatchInChunks(int fd, std::vector<BOHandle>* cmd_bo_ha
       // output; retiring them here is what keeps a waiter on an earlier packet of a partially
       // failed batch from blocking forever. The rest never ran and get nothing.
       *num_completed = chunk_start + chunk_completed;
-      RetireCompletedPackets(queue, mask, first_pkt_idx, *num_completed, /*flush_arguments=*/true);
+      RetireCompletedPackets(queue, mask, first_pkt_idx, *num_completed);
       return status;
     }
 
@@ -2756,7 +2749,7 @@ static hsa_status_t SubmitBatchInChunks(int fd, std::vector<BOHandle>* cmd_bo_ha
   }
 
   *num_completed = num_pkts;
-  RetireCompletedPackets(queue, mask, first_pkt_idx, num_pkts, /*flush_arguments=*/true);
+  RetireCompletedPackets(queue, mask, first_pkt_idx, num_pkts);
 
   return HSA_STATUS_SUCCESS;
 }
