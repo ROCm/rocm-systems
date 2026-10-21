@@ -172,7 +172,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tar -C build/rocjitsu -cf rocjitsu.tar tools/rocjitsu librocjitsu.so*
+          # The glob must expand inside build/rocjitsu, so cd there. tar keeps
+          # symlinks, so a versioned librocjitsu.so chain survives.
+          ls -l build/rocjitsu/tools/rocjitsu build/rocjitsu/librocjitsu.so*
+          (cd build/rocjitsu && tar -cf "${GITHUB_WORKSPACE}/rocjitsu.tar" tools/rocjitsu librocjitsu.so*)
           tar -tvf rocjitsu.tar
 
       - name: Upload rocJitsu
