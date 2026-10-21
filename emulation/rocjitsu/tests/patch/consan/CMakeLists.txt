@@ -94,7 +94,9 @@ else()
         "ConSan original HSACO fixtures unavailable (need AMD LLVM assembler/linker)"
     )
 endif()
-rj_add_gtest_tests(consan_input_test)
+# Preserve the explicit target/wave suffix across CMake versions. Older GoogleTest
+# discovery otherwise appends GetParam comments to custom parameter names.
+rj_add_gtest_tests(consan_input_test NO_PRETTY_VALUES)
 
 set(RJ_CONSAN_TEST_ARTIFACT_ROOT
     "${PROJECT_BINARY_DIR}/Testing/ConSan"
@@ -142,7 +144,7 @@ if(TARGET consan_original_fixtures)
         PRIVATE CONSAN_FIXTURE_DIR="${_fixture_dir}"
     )
 endif()
-rj_add_gtest_tests(consan_bootstrap_sim_test)
+rj_add_gtest_tests(consan_bootstrap_sim_test NO_PRETTY_VALUES)
 
 if(TARGET consan_original_fixtures)
     set(_artifact ${CMAKE_CURRENT_BINARY_DIR}/prepared/race)

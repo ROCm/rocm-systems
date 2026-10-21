@@ -41,7 +41,7 @@ FailureOr<LdsRaceResult> analyze_capture(const Capture &capture, const AnalysisO
   result.wave_size = capture.header.manifest.wave_size;
   result.coverage_complete = !capture.executions.empty();
   for (const auto &execution : capture.executions) {
-    auto analyzed =
+    LdsRaceExecutionResult analyzed =
         analyze_lds_race_execution(capture.header.manifest, execution, options.examples);
     result.cross_wave_pairs += analyzed.cross_wave_pairs;
     result.collision_groups += analyzed.collision_groups;

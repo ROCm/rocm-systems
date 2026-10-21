@@ -21,6 +21,8 @@ foreach(_input "${RUNTIME_CORE}" "${IMAGE_ARCHIVE}" "${PLUGIN}")
         "rocjitsu::Instrumentor::"
         "rocjitsu::BinaryTranslator::"
         "rocjitsu::VirtualMachine::"
+        "rocjitsu::serialize_kernarg_extension_metadata("
+        "rocjitsu::parse_kernarg_extension_metadata("
         "rocjitsu::consan::prepare("
         "rocjitsu::consan::analyze_original("
         "rocjitsu::consan::analyze_capture("

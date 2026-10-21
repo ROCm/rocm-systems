@@ -214,7 +214,7 @@ TEST(KernargExtensionTest, LayoutRejectsOriginalSizeAlignmentOverflow) {
 // --- parse_kernarg_extension_metadata negative paths ------------------------
 
 namespace {
-// Header field byte offsets (see MetadataHeader in kernarg_extension.cpp):
+// Header field byte offsets (see MetadataHeader in kernarg_extension_metadata.cpp):
 // magic[8]@0, version@8, extension_count@12, payload_count@16, string_bytes@20.
 constexpr size_t kVersionOffset = 8;
 constexpr size_t kExtensionCountOffset = 12;

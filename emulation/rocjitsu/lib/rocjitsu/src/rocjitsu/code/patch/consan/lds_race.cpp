@@ -12,6 +12,7 @@
 #include "rocjitsu/isa/instruction.h"
 
 #include <algorithm>
+#include <bitset>
 #include <cassert>
 #include <cstring>
 #include <set>
@@ -102,11 +103,36 @@ public:
     append_words(text_, words);
   }
   void word(uint32_t value) { emit(std::array<uint32_t, 1>{value}); }
+  void wait_rdna4_scalar(uint16_t control) {
+    if (arch_ != ROCJITSU_CODE_ARCH_RDNA4)
+      return;
+    word(build_sopp_encoding(arch_, rdna4::kSWaitAluSopp, control));
+    if ((control & 1) == 0)
+      pending_scalar_writes_.reset();
+  }
+  void scalar_read(uint8_t source, uint8_t width = 1) {
+    if (arch_ != ROCJITSU_CODE_ARCH_RDNA4 || source >= 128)
+      return;
+    for (uint16_t lane = source; lane < source + width; ++lane)
+      if (pending_scalar_writes_[lane]) {
+        wait_rdna4_scalar(0xfffe); // sa_sdst(0), including SGPR-pair reuse.
+        return;
+      }
+  }
+  void scalar_write(uint8_t destination, uint8_t width = 1) {
+    if (arch_ == ROCJITSU_CODE_ARCH_RDNA4 && destination < 128)
+      for (uint16_t lane = destination; lane < destination + width; ++lane)
+        pending_scalar_writes_.set(lane);
+  }
   void move(uint8_t destination, uint8_t source) {
+    scalar_read(source);
     word(build_s_mov_b32(destination, source, arch_));
+    scalar_write(destination);
   }
   void pair(uint8_t destination, uint8_t source) {
+    scalar_read(source, 2);
     word(build_s_mov_b64(destination, source, arch_));
+    scalar_write(destination, 2);
   }
   void immediate(uint8_t destination, uint32_t value) {
     move(destination, kLiteral);
@@ -119,6 +145,10 @@ public:
   }
   void publish_lane() { pair(exec_, kOne); }
   void binary(ScalarOp operation, uint8_t destination, uint8_t left, uint8_t right) {
+    const uint8_t width = operation == ScalarOp::AndNot && wave_size_ == 64 ? 2 : 1;
+    scalar_read(left, width);
+    scalar_read(right, width);
+    scalar_write(destination, width);
     switch (operation) {
     case ScalarOp::Add:
       word(build_s_add_u32(destination, left, right, arch_));
@@ -196,14 +226,22 @@ public:
     }
   }
   void save() {
+    // Probe boundaries may follow guest VALU activity or a different emitter.
+    // Drain scalar/VCC hazards before saving architectural state.
+    wait_rdna4_scalar(0xf1fc);
     pair(scalar_ + 4, exec_);
     move(scalar_ + 6, kScc);
     pair(scalar_ + 8, vcc_);
   }
   void restore() {
+    // Every forward early-exit path joins here. A wait on the join itself
+    // covers paths that skipped waits in the address-group publication body.
+    wait_rdna4_scalar(0xf1fc);
     pair(vcc_, scalar_ + 8);
     pair(exec_, scalar_ + 4);
+    scalar_read(scalar_ + 6);
     word(build_s_cmp_lg_u32(scalar_ + 6, kZero, arch_));
+    wait_rdna4_scalar(0xf1fc);
   }
   void read_first(uint8_t destination, uint8_t source) {
     switch (arch_) {
@@ -231,8 +269,14 @@ public:
       valid_ = false;
       return;
     }
+    // GFX9 VALU-to-SGPR consumers require two wait states. RDNA4 instead
+    // drains va_sdst before a comparison can consume a reused SGPR pair.
+    if (arch_ == ROCJITSU_CODE_ARCH_CDNA3 || arch_ == ROCJITSU_CODE_ARCH_CDNA4)
+      word(build_s_nop(1, arch_));
+    wait_rdna4_scalar(0xf1ff);
   }
   void compare_address(uint8_t scalar, uint8_t vector) {
+    scalar_read(scalar);
     switch (arch_) {
     case ROCJITSU_CODE_ARCH_CDNA3:
       emit(cdna3::build_vopc(cdna3::kVCmpEqU32Vopc, {.src0 = scalar, .vsrc1 = vector}));
@@ -253,8 +297,11 @@ public:
       valid_ = false;
       return;
     }
+    wait_rdna4_scalar(0xfffd); // va_vcc(0) before copying the comparison mask.
   }
   void store(uint32_t offset, uint8_t source) {
+    scalar_read(source);
+    scalar_read(scalar_, 2);
     emit(build_v_mov_b32_imm(vector_, offset, arch_));
     word(build_v_mov_b32_src(vector_ + 1, source, arch_));
     switch (arch_) {
@@ -293,6 +340,9 @@ public:
     store(offset, scalar_ + 2);
   }
   size_t branch_execz() {
+    // Both successors must inherit a drained state; emission-time bookkeeping
+    // alone cannot describe which forward branch the wave will take.
+    wait_rdna4_scalar(0xfffe);
     const size_t offset = text_.size();
     const uint16_t opcode = arch_ == ROCJITSU_CODE_ARCH_CDNA3   ? cdna3::kSCbranchExeczSopp
                             : arch_ == ROCJITSU_CODE_ARCH_CDNA4 ? cdna4::kSCbranchExeczSopp
@@ -342,7 +392,7 @@ public:
     const size_t empty = branch_execz();
     binary(ScalarOp::Add, scalar_ + 15, scalar_ + 15, kOne);
     std::vector<size_t> done;
-    for (uint32_t bank = 0; bank < kBanksPerSite; ++bank) {
+    for (uint32_t address_group = 0; address_group < kAddressGroupsPerSite; ++address_group) {
       mask(exec_, scalar_ + 10);
       done.push_back(branch_execz());
       read_first(scalar_ + 14, static_cast<uint8_t>(access.address_vgpr));
@@ -353,7 +403,8 @@ public:
       binary(ScalarOp::Select, scalar_ + 17, kZero + 3, kOne);
       publish_lane();
       const uint32_t record =
-          kRowHeaderBytes + (access.site * kBanksPerSite + bank) * kAccessRecordBytes;
+          kRowHeaderBytes +
+          (access.site * kAddressGroupsPerSite + address_group) * kAccessRecordBytes;
       store_immediate(record + wire::kRecordAnalysis, uint32_t(AnalysisKind::LdsRaceDetection));
       store_immediate(record + wire::kRecordKind, uint32_t(RecordKind::Access));
       store_immediate(record + wire::kRecordSite, access.site);
@@ -391,6 +442,7 @@ public:
     store(wire::kRowFinalSequence, scalar_ + 15);
     store(wire::kRowLoss, scalar_ + 16);
     wait_stores();
+    scalar_read(scalar_ + 16);
     word(build_s_cmp_lg_u32(scalar_ + 16, kZero, arch_));
     binary(ScalarOp::Select, scalar_ + 2,
            kZero + wire::kRowEntered + wire::kRowExited + wire::kRowExhausted,
@@ -407,6 +459,10 @@ private:
   uint32_t wave_size_;
   uint8_t exec_, vcc_;
   bool valid_ = true;
+  // Treat every scalar destination as potentially tracked by an earlier VALU
+  // read. The probe ABI is small; this conservative set avoids a second ISA
+  // decoder/scheduler while coalescing writes until an actual scalar consumer.
+  std::bitset<128> pending_scalar_writes_;
 };
 
 ProbeEmitter make_probe_emitter(std::vector<uint8_t> &text, const LdsRaceProbePlan &plan) {
@@ -426,7 +482,7 @@ ProbeEmitter make_probe_emitter(std::vector<uint8_t> &text, const LdsRaceProbePl
          plan.scalar_base % 2 == 0 && "native LDS probes require bounded SGPR scratch");
   assert(plan.vgprs >= 2 && plan.vgprs <= 256 && plan.vector_base <= plan.vgprs - 2 &&
          "native LDS probes require bounded VGPR scratch");
-  assert(plan.row_stride >= kRowHeaderBytes + kBanksPerSite * kAccessRecordBytes &&
+  assert(plan.row_stride >= kRowHeaderBytes + kAddressGroupsPerSite * kAccessRecordBytes &&
          plan.row_stride <= ContractLimits{}.report_bytes - kReportHeaderBytes &&
          "native LDS probes require a bounded report row");
   return ProbeEmitter(text, static_cast<uint8_t>(plan.scalar_base),
@@ -512,8 +568,8 @@ FailureOr<LdsRaceProbePlan> plan_lds_race_probes(const InputProgram &program, In
   // uniform payloads. Preserve the original declared registers and ABI inputs.
   const uint32_t sgprs = std::max(program.original_sgprs, scalar_base + 22);
   const uint32_t vgprs = (vector_base + 2 + granule - 1) / granule * granule;
-  const uint64_t stride =
-      kRowHeaderBytes + uint64_t{program.accesses.size()} * kBanksPerSite * kAccessRecordBytes;
+  const uint64_t stride = kRowHeaderBytes + uint64_t{program.accesses.size()} *
+                                                kAddressGroupsPerSite * kAccessRecordBytes;
   if (sgprs > 102 || vgprs > 256 || stride > ContractLimits{}.report_bytes - kReportHeaderBytes)
     return reject(error, "no bounded, disjoint probe register/report plan");
   return LdsRaceProbePlan{.arch = arch,
@@ -551,7 +607,7 @@ FailureOr<SiteFacts> emit_lds_race_access(std::vector<uint8_t> &text, const LdsR
                    .prepared_guest_size = 8,
                    .probe_offset = probe,
                    .probe_size = static_cast<uint32_t>(text.size() - probe),
-                   .first_slot = access.site * kBanksPerSite};
+                   .first_slot = access.site * kAddressGroupsPerSite};
 }
 
 Result emit_lds_race_exit(std::vector<uint8_t> &text, const LdsRaceProbePlan &plan,

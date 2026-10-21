@@ -740,12 +740,18 @@ private:
       std::memcpy(launch->context, transport.value().context.data(), kContextBytes);
       auto wrapper =
           std::span(static_cast<uint8_t *>(launch->wrapper), layout.value().wrapper_bytes);
-      std::memset(wrapper.data(), 0, wrapper.size());
-      std::memcpy(wrapper.data(), packet.kernarg_address, facts.entry.original_kernarg_bytes);
-      wire::write_u64(wrapper, layout.value().original_pointer_offset,
-                      reinterpret_cast<uint64_t>(packet.kernarg_address));
-      wire::write_u64(wrapper, layout.value().context_pointer_offset,
-                      reinterpret_cast<uint64_t>(launch->context));
+      const std::optional<rocjitsu::KernargExtensionLayout> kernarg =
+          rocjitsu::make_kernarg_extension_layout(facts.entry.original_kernarg_bytes,
+                                                  kContextPointerPayloads);
+      const uint64_t context_pointer = reinterpret_cast<uint64_t>(launch->context);
+      const std::array<rocjitsu::KernargExtensionPayloadWrite, 1> payloads = {
+          {{.data = &context_pointer, .size = sizeof(context_pointer)}}};
+      if (!kernarg || !rocjitsu::write_kernarg_extension_wrapper(
+                          wrapper, *kernarg, packet.kernarg_address,
+                          reinterpret_cast<uint64_t>(packet.kernarg_address), payloads)) {
+        reject_packet_locked(packet, "kernarg wrapper initialization failed before submission");
+        return;
+      }
       // Bind execution identity and original arguments to an empty report
       // envelope. Lifecycle admission does not itself submit the HSA packet.
       CapturedExecution envelope;
@@ -903,7 +909,7 @@ private:
   std::deque<std::shared_ptr<Launch>> pending_, completed_;
   std::thread observer_, collector_;
   SnapshotWriter writer_;
-  rj_consan_statistics statistics_;
+  rj_consan_statistics statistics_{};
   // Collector-handled launches, including failed snapshot/write attempts.
   uint64_t processed_ = 0;
   // Cumulative file reservation: prefix, End and all admitted execution frames,

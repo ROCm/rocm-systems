@@ -515,6 +515,7 @@ add_executable(
     util_observable_shared_mutex_test.cpp
     host_mapping_lock_test.cpp
     util_result_test.cpp
+    util_bit_test.cpp
     util_unique_handle_test.cpp
     util_simd_test.cpp
     v_add_simd_benchmark.cpp
@@ -886,7 +887,6 @@ add_executable(
     consan_contract_test
     code/consan/contract_test.cpp
     code/consan/capture_test.cpp
-    ${ROCJITSU_SRC_DIR}/rocjitsu/code/patch/kernarg_extension.cpp
 )
 target_link_libraries(
     consan_contract_test

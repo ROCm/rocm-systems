@@ -69,9 +69,9 @@ int main(int argc, char **argv) {
                 << ",\"records\":[";
       bool first_record = true;
       for (const auto &site : capture.header.manifest.sites) {
-        for (uint32_t bank = 0; bank < kBanksPerSite; ++bank) {
+        for (uint32_t address_group = 0; address_group < kAddressGroupsPerSite; ++address_group) {
           const size_t record =
-              row + kRowHeaderBytes + (site.first_slot + bank) * kAccessRecordBytes;
+              row + kRowHeaderBytes + (site.first_slot + address_group) * kAccessRecordBytes;
           const auto commit = *wire::read_u32(execution.report, record + wire::kRecordCommit);
           if (commit == 0)
             continue;

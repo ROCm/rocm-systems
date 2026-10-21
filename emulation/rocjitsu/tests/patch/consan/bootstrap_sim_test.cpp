@@ -359,8 +359,9 @@ TEST_F(ConSanBootstrapSim, ProductionRaceReadReadAndCollisionMasksComeFromGuestP
       EXPECT_EQ(wire::read_u32(result.report, row + wire::kRowStatus), kCompletedRowStatus);
       EXPECT_EQ(wire::read_u32(result.report, row + wire::kRowLoss), 0u);
       for (uint32_t site = 0; site < sites; ++site) {
-        for (uint32_t bank = 0; bank < 4; ++bank) {
-          const size_t record = row + kRowHeaderBytes + (site * 4 + bank) * kAccessRecordBytes;
+        for (uint32_t address_group = 0; address_group < 4; ++address_group) {
+          const size_t record =
+              row + kRowHeaderBytes + (site * 4 + address_group) * kAccessRecordBytes;
           if (wire::read_u32(result.report, record + wire::kRecordCommit) == 0u)
             continue;
           ++records;
@@ -397,16 +398,18 @@ TEST_F(ConSanBootstrapSim,
                 lost ? (kCompletedRowStatus | wire::kRowExhausted) : kCompletedRowStatus);
       EXPECT_EQ(wire::read_u32(result.report, row + wire::kRowLoss), lost ? 1u : 0u);
       for (const SiteFacts &site : result.manifest.sites) {
-        for (uint32_t bank = 0; bank < 4; ++bank) {
+        for (uint32_t address_group = 0; address_group < 4; ++address_group) {
           const size_t record =
-              row + kRowHeaderBytes + (site.first_slot + bank) * kAccessRecordBytes;
+              row + kRowHeaderBytes + (site.first_slot + address_group) * kAccessRecordBytes;
           if (wire::read_u32(result.report, record + wire::kRecordCommit) == 0)
             continue;
           ++count;
           if (fixture == "four_ranges" || fixture == "exhausted") {
             EXPECT_EQ(wave, 0u);
-            EXPECT_EQ(wire::read_u32(result.report, record + wire::kRecordGuestMask), 1u << bank);
-            EXPECT_EQ(wire::read_u32(result.report, record + wire::kRecordLdsOffset), bank * 4);
+            EXPECT_EQ(wire::read_u32(result.report, record + wire::kRecordGuestMask),
+                      1u << address_group);
+            EXPECT_EQ(wire::read_u32(result.report, record + wire::kRecordLdsOffset),
+                      address_group * 4);
           } else {
             EXPECT_EQ(wire::read_u32(result.report, record + wire::kRecordGuestMask), 1u);
             EXPECT_EQ(wire::read_u32(result.report, record + wire::kRecordLdsOffset),
@@ -457,7 +460,7 @@ struct ObservedAccess {
 std::vector<ObservedAccess> published_accesses(const RunResult &result, bool exhausted = false) {
   std::vector<ObservedAccess> accesses;
   const uint32_t stride =
-      kRowHeaderBytes + result.manifest.sites.size() * kBanksPerSite * kAccessRecordBytes;
+      kRowHeaderBytes + result.manifest.sites.size() * kAddressGroupsPerSite * kAccessRecordBytes;
   for (uint32_t wave = 0; wave < result.waves.size(); ++wave) {
     const size_t row = kReportHeaderBytes + wave * stride;
     EXPECT_EQ(wire::read_u64(result.report, row + wire::kRowSerial), 41u);
@@ -468,8 +471,9 @@ std::vector<ObservedAccess> published_accesses(const RunResult &result, bool exh
     EXPECT_EQ(wire::read_u32(result.report, row + wire::kRowLoss),
               exhausted && wave == 0 ? 1u : 0u);
     for (const auto &site : result.manifest.sites) {
-      for (uint32_t bank = 0; bank < kBanksPerSite; ++bank) {
-        const size_t record = row + kRowHeaderBytes + (site.first_slot + bank) * kAccessRecordBytes;
+      for (uint32_t address_group = 0; address_group < kAddressGroupsPerSite; ++address_group) {
+        const size_t record =
+            row + kRowHeaderBytes + (site.first_slot + address_group) * kAccessRecordBytes;
         if (wire::read_u32(result.report, record + wire::kRecordCommit) == 0)
           continue;
         EXPECT_EQ(wire::read_u32(result.report, record + wire::kRecordCommit),
