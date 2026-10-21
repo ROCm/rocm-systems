@@ -623,65 +623,65 @@ struct ipcHdl {
 #if HT_WIN
     HANDLE mailslot;
 #else
-    int socket;
+    int socket = 0;
 #endif
-    char *name;
+    std::unique_ptr<char[]> name;
 };
 
 class ipcSocketCom {
-  ipcHdl *handle;
+  std::unique_ptr<ipcHdl> handle;
 
   int createSocket() {
 #if HT_WIN
-    handle = new ipcHdl;
-    if (nullptr == handle) {
+    handle.reset(new (std::nothrow) ipcHdl);
+    if (!handle) {
       perror("Socket failure: Handle memory allocation failed");
       return -1;
     }
     handle->mailslot = INVALID_HANDLE_VALUE;
-    handle->name = NULL;
     return 0;
 #else
     int server_fd;
     struct sockaddr_un servaddr;
 
     char name[16];
+    socklen_t addr_len;
+
     sprintf(name, "%u", getpid());
 
-    handle = new ipcHdl;
-    if (nullptr == handle) {
+    handle.reset(new (std::nothrow) ipcHdl);
+    if (!handle) {
       perror("Socket failure: Handle memory allocation failed");
       return -1;
     }
 
-    memset(handle, 0, sizeof(*handle));
     handle->socket = -1;
-    handle->name = NULL;
 
     if ((server_fd = socket(AF_UNIX, SOCK_DGRAM, 0)) < 0) {
       perror("Socket failure: Socket creation failed");
       return -1;
     }
 
-    unlink(name);
     bzero(&servaddr, sizeof(servaddr));
     servaddr.sun_family = AF_UNIX;
 
     size_t len = strlen(name);
-    if (len > (sizeof(servaddr.sun_path) - 1)) {
+    if (len > (sizeof(servaddr.sun_path) - 2)) {
       perror("Socket failure: Cannot bind provided name to socket. Name too large");
       return -1;
     }
 
-    strncpy(servaddr.sun_path, name, len);
+    servaddr.sun_path[0] = '\0';
+    strncpy(&servaddr.sun_path[1], name, len);
+    addr_len = offsetof(struct sockaddr_un, sun_path) + 1 + len;
 
-    if (bind(server_fd, (struct sockaddr *)&servaddr, SUN_LEN(&servaddr)) < 0) {
+    if (bind(server_fd, (struct sockaddr *)&servaddr, addr_len) < 0) {
       perror("Socket failure: Binding socket failed");
       return -1;
     }
 
-    handle->name = new char[strlen(name) + 1];
-    strcpy(handle->name, name);
+    handle->name.reset(new char[strlen(name) + 1]);
+    strcpy(handle->name.get(), name);
     handle->socket = server_fd;
     return 0;
 #endif
@@ -689,38 +689,35 @@ class ipcSocketCom {
 
   int openSocket() {
 #if HT_WIN
-    handle = new ipcHdl;
-    if (nullptr == handle) {
+    handle = new (std::nothrow) ipcHdl;
+    if (!handle) {
       perror("Socket failure: Handle memory allocation failed");
       return -1;
     }
-    memset(handle, 0, sizeof(*handle));
+
     handle->mailslot = INVALID_HANDLE_VALUE;
-    handle->name = nullptr;
     char name[128];
     sprintf(name, "\\\\.\\mailslot\\hipMemPoolIPC_%lu",
             (unsigned long)GetCurrentProcessId());
     handle->mailslot = CreateMailslot(name, 0, MAILSLOT_WAIT_FOREVER, NULL);
     if (handle->mailslot == INVALID_HANDLE_VALUE) {
       fprintf(stderr, "CreateMailslot failed (%lu)\n", GetLastError());
-      if (handle->name) delete[] handle->name;
-      delete handle;
-      handle = nullptr;
+      handle.reset();
       return -1;
     }
-    handle->name = new char[strlen(name) + 1];
-    strcpy(handle->name, name);
+    handle->name.reset(new char[strlen(name) + 1]);
+    strcpy(handle->name.get(), name);
     return 0;
 #else
     int sock = 0;
     struct sockaddr_un cliaddr;
 
-    handle = new ipcHdl;
-    if (nullptr == handle) {
+    handle.reset(new (std::nothrow) ipcHdl);
+
+    if (!handle) {
       perror("Socket failure: Handle memory allocation failed");
       return -1;
     }
-    memset(handle, 0, sizeof(*handle));
 
     if ((sock = socket(AF_UNIX, SOCK_DGRAM, 0)) < 0) {
       perror("IPC failure:Socket creation error");
@@ -740,8 +737,8 @@ class ipcSocketCom {
     }
 
     handle->socket = sock;
-    handle->name = new char[strlen(name) + 1];
-    strcpy(handle->name, name);
+    handle->name.reset(new char[strlen(name) + 1]);
+    strcpy(handle->name.get(), name);
 
     return 0;
 #endif
@@ -753,9 +750,8 @@ class ipcSocketCom {
     if (handle->mailslot != INVALID_HANDLE_VALUE) {
       CloseHandle(handle->mailslot);
     }
-    if (handle->name) delete[] handle->name;
-    delete handle;
-    handle = nullptr;
+
+    handle.reset();
     return 0;
 #else
     if (!handle) {
@@ -763,11 +759,14 @@ class ipcSocketCom {
     }
 
     if (handle->name) {
-      unlink(handle->name);
-      delete[] handle->name;
+
+      if (handle->name[0] != '\0') {
+        //abstract names do not need unlink()
+        unlink(handle->name.get());
+      }
     }
     close(handle->socket);
-    delete handle;
+    handle.reset();
     return 0;
 #endif
   }
