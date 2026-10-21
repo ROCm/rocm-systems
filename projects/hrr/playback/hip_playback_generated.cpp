@@ -2281,6 +2281,7 @@ static hipError_t playback_hipHostFree(PlaybackContext& ctx, const uint8_t* payl
   const auto* a = reinterpret_cast<const hrr_args_hipHostFree*>(payload);
   uint64_t _rec_ptr = a->ptr;
   void*    _live_ptr = ctx.lookup_ptr(_rec_ptr);
+  if (_live_ptr == nullptr) return hipSuccess;
   hipError_t _r = (hipError_t)hipHostFree(_live_ptr);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipHostFree", a->ret);
@@ -2336,10 +2337,16 @@ static hipError_t playback_hipInit(PlaybackContext& ctx, const uint8_t* payload)
 
 static hipError_t playback_hipIpcCloseMemHandle(PlaybackContext& ctx, const uint8_t* payload) {
   const auto* a = reinterpret_cast<const hrr_args_hipIpcCloseMemHandle*>(payload);
-  hipError_t _r = (hipError_t)hipIpcCloseMemHandle(ctx.translate_ptr(a->devPtr));
+  uint64_t _rec_ptr = a->devPtr;
+  void*    _live_ptr = ctx.lookup_ptr(_rec_ptr);
+  if (_live_ptr == nullptr) return hipSuccess;
+  hipError_t _r = (hipError_t)hipIpcCloseMemHandle(_live_ptr);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipIpcCloseMemHandle", a->ret);
     return hipSuccess;
+  }
+  if (_r == hipSuccess) {
+    ctx.remove_alloc(_rec_ptr);
   }
   return _r;
 }

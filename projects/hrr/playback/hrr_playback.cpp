@@ -759,7 +759,8 @@ static hipError_t dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
   // hip_playback.h.
   if (hrr_unmapped_note.count > 0) {
     ctx.unmapped_events.fetch_add(1, std::memory_order_relaxed);
-    if (log) {
+    // A strict abort names its event even in the silent warm-up pass.
+    if (log || ctx.strict_unmapped) {
       char more[48] = "";
       if (hrr_unmapped_note.count > 1)
         snprintf(more, sizeof(more), " (and %u more)", hrr_unmapped_note.count - 1);
@@ -827,9 +828,11 @@ static hipError_t dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
 // Per-thread replay worker (MT path)
 // ---------------------------------------------------------------------------
 
+// `first` is archive.events.data(): diagnostics name an event by its archive
+// index, the same in either replay mode, not by its place in this thread.
 static void replay_thread(PlaybackContext& ctx,
                           const std::vector<const hrr::Event*>& events,
-                          bool log) {
+                          const hrr::Event* first, bool log) {
   for (size_t i = 0; i < events.size(); i++) {
     if (ctx.fatal_error.load(std::memory_order_acquire))
       return;
@@ -838,7 +841,7 @@ static void replay_thread(PlaybackContext& ctx,
       fprintf(stderr, "[HRR] T%llu [%zu] %s\n",
               (unsigned long long)ev.header().thread_id, i,
               hrr::event_type_name(ev.header().event_type));
-    (void)dispatch_event(ctx, ev, i, log);
+    (void)dispatch_event(ctx, ev, static_cast<size_t>(&ev - first), log);
   }
 }
 
@@ -951,7 +954,7 @@ static bool run_pass(PlaybackContext& ctx,
     for (uint64_t tid : archive.threads) {
       const auto& evlist = thread_events.at(tid);
       threads.emplace_back(replay_thread, std::ref(ctx),
-                           std::cref(evlist), log);
+                           std::cref(evlist), archive.events.data(), log);
     }
     for (auto& t : threads) t.join();
   } else {

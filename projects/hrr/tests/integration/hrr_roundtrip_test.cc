@@ -888,7 +888,8 @@ HRR_TEST_CASE(Unit_HRR_MemsetD2DPitchAllocRoundtrip) {
  *     pointer, the summary counts them on its Unmapped line, and the replay
  *     still reaches and passes the D2H check after them.
  *   - --strict-unmapped reports the first one the same way and ends the replay
- *     there, before the summary.
+ *     there, before the summary, also from the warm-up pass --kernel-filter
+ *     runs without its usual log.
  */
 HRR_TEST_CASE(Unit_HRR_UnmappedPointerPolicy) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_unmapped_policy"};
@@ -932,6 +933,16 @@ HRR_TEST_CASE(Unit_HRR_UnmappedPointerPolicy) {
     CHECK(out.find(diag) != std::string::npos);
     CHECK(out.find("aborting replay (--strict-unmapped)") != std::string::npos);
     CHECK(out.find("D2H checks") == std::string::npos);
+  }
+
+  SECTION("--strict-unmapped names the event in the silent warm-up pass too") {
+    auto [ret, out] = hrr_playback_merged(
+        cap.path, "--kernel-filter hrr_no_such_kernel --strict-unmapped",
+        {{"HIP_HRR_D2H_EXACT", "1"}});
+    INFO("Playback output:\n" << out);
+    CHECK(ret != 0);
+    CHECK(out.find("Fatal error in warm-up pass") != std::string::npos);
+    CHECK(out.find(diag) != std::string::npos);
   }
 }
 

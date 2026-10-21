@@ -2965,11 +2965,14 @@ _ALLOC_CREATE_APIS: Dict[str, Tuple[str, str]] = {
 # AllocKind tag recorded here. APIs not listed default to AllocKind::Device.
 _HOST_ALLOC_CREATE_APIS = {'hipHostMalloc', 'hipHostAlloc'}
 
-# APIs that free device allocations: API name -> rec_ptr_param name in struct
+# APIs that free device allocations: API name -> rec_ptr_param name in struct.
+# hipIpcCloseMemHandle releases the pointer hipIpcOpenMemHandle imported, which
+# replay skips when no export in the archive matches it.
 _ALLOC_FREE_APIS: Dict[str, str] = {
-    'hipFree':         'ptr',
-    'hipFreeAsync':    'dev_ptr',
-    'hipHostFree':     'ptr',
+    'hipFree':              'ptr',
+    'hipFreeAsync':         'dev_ptr',
+    'hipHostFree':          'ptr',
+    'hipIpcCloseMemHandle': 'devPtr',
 }
 
 # APIs that destroy handles: API name -> (handle param name in struct, handle type)
@@ -3604,6 +3607,7 @@ def generate_playback_shim(entry: ApiEntry) -> str:
         # A release of memory replay never had has nothing to do: not an
         # unmapped pointer in the policy's sense, so lookup_ptr, no note.
         lines.append(f"  void*    _live_ptr = ctx.lookup_ptr(_rec_ptr);")
+        lines.append(f"  if (_live_ptr == nullptr) return hipSuccess;")
     if is_hdl_destroy:
         rec_param, hdl_type = _HANDLE_DESTROY_APIS[entry.name]
         translate_fn = _PLAYBACK_HANDLE_TRANSLATE.get(hdl_type, '')
