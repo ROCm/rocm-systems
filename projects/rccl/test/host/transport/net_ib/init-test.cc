@@ -610,6 +610,7 @@ TEST_F(NetIbInitMicrotest, GetProperties_ValidMergedDeviceOverridesAggregateFiel
   EXPECT_EQ(props.speed, 300);
   EXPECT_EQ(props.railId, 6);
   EXPECT_EQ(props.planeId, 7);
+  EXPECT_EQ(props.ptrSupport, NCCL_PTR_HOST);
   EXPECT_EQ(props.vProps.ndevs, 1);
   EXPECT_EQ(ncclIbGetProperties(1, &props), ncclInvalidUsage);
 }
