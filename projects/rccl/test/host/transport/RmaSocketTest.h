@@ -52,12 +52,19 @@ struct Scene {
     }
   }
 
-  ncclRmaSocketProxyMrHandle MakeMr(void* data, size_t size, int type, uint64_t id) {
+  static ncclRmaSocketProxyMrHandle MakeMr(void* data, size_t size, int type, uint64_t id) {
     ncclRmaSocketProxyMrHandle handle{};
     handle.data = data;
     handle.size = size;
     handle.type = type;
     handle.mrId = id;
+    return handle;
+  }
+
+  static ncclRmaSocketProxyMrHandle MakeGdrMappedMr(void* data, size_t size, void* barPtr, uint64_t id = 0) {
+    ncclRmaSocketProxyMrHandle handle = MakeMr(data, size, NCCL_PTR_CUDA, id);
+    handle.gdr.mapped = 1;
+    handle.gdr.barPtr = barPtr;
     return handle;
   }
 

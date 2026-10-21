@@ -11,40 +11,17 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
-#include <functional>
 #include <vector>
 
 #include "ScopedHook.h"
+#include "fakes/gdrwrap_fakes.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/socket_fakes.h"
 #include "transport/RmaSocketTest.h"
 
-namespace {
-
-static ncclResult_t DefaultProgressGdrCopy(gdr_mh_t, void*, const void*, size_t) {
-  return ncclInternalError;
-}
-
-std::function<ncclResult_t(gdr_mh_t, void*, const void*, size_t)> g_testProgressGdrCopyTo =
-    DefaultProgressGdrCopy;
-std::function<ncclResult_t(gdr_mh_t, void*, const void*, size_t)> g_testProgressGdrCopyFrom =
-    DefaultProgressGdrCopy;
-
-ncclResult_t TestProgressGdrCopyTo(gdr_mh_t mh, void* map, const void* host, size_t size) {
-  return g_testProgressGdrCopyTo(mh, map, host, size);
-}
-
-ncclResult_t TestProgressGdrCopyFrom(gdr_mh_t mh, void* host, const void* map, size_t size) {
-  return g_testProgressGdrCopyFrom(mh, host, map, size);
-}
-
-}  // namespace
-
-#define wrap_gdr_copy_to_mapping TestProgressGdrCopyTo
-#define wrap_gdr_copy_from_mapping TestProgressGdrCopyFrom
+#include "fakes/gdrwrap_seam.h"
 #include RMA_SOCKET_PROGRESS_RECVER_CC_PATH
-#undef wrap_gdr_copy_from_mapping
-#undef wrap_gdr_copy_to_mapping
+#include "fakes/gdrwrap_seam_undef.h"
 
 namespace {
 
@@ -53,8 +30,7 @@ using rma_socket_test::Scene;
 class RmaSocketProgressRecverMicrotest : public ::testing::Test {
  protected:
   void TearDown() override {
-    g_testProgressGdrCopyTo = DefaultProgressGdrCopy;
-    g_testProgressGdrCopyFrom = DefaultProgressGdrCopy;
+    ResetGdrwrapFakes();
     ResetSocketFakes();
     ResetNcclFakes();
   }
@@ -188,22 +164,17 @@ TEST_F(RmaSocketProgressRecverMicrotest, ApplySignal_NoSignalIsNoOpAndInvalidTar
 TEST_F(RmaSocketProgressRecverMicrotest, ApplySignal_UnalignedBarMappingIsRejectedBeforeCopy) {
   alignas(uint64_t) std::array<unsigned char, 16> data{};
   alignas(uint64_t) std::array<unsigned char, 17> bar{};
-  ncclRmaSocketProxyMrHandle handle{};
-  handle.data = data.data();
-  handle.size = data.size();
-  handle.type = NCCL_PTR_CUDA;
-  handle.gdr.mapped = 1;
-  handle.gdr.barPtr = bar.data() + 1;
+  auto handle = Scene::MakeGdrMappedMr(data.data(), data.size(), bar.data() + 1);
   ncclRmaSocketProxyPeerReceiver receiver{};
   receiver.hasSignal = 1;
   receiver.signalType = NCCL_PTR_CUDA;
   receiver.signalPtr = data.data();
   receiver.signalHandle = &handle;
-  ScopedHook copyFrom(g_testProgressGdrCopyFrom, [](gdr_mh_t, void*, const void*, size_t) {
+  ScopedHook copyFrom(g_wrapGdrCopyFromMapping, [](gdr_mh_t, void*, const void*, size_t) {
     ADD_FAILURE() << "unaligned mapping must be rejected before reading";
     return ncclSuccess;
   });
-  ScopedHook copyTo(g_testProgressGdrCopyTo, [](gdr_mh_t, void*, const void*, size_t) {
+  ScopedHook copyTo(g_wrapGdrCopyToMapping, [](gdr_mh_t, void*, const void*, size_t) {
     ADD_FAILURE() << "unaligned mapping must be rejected before writing";
     return ncclSuccess;
   });
@@ -216,26 +187,21 @@ TEST_F(RmaSocketProgressRecverMicrotest, ApplySignal_UnalignedBarMappingIsReject
 TEST_F(RmaSocketProgressRecverMicrotest, ApplySignal_AlignedMappingReadsAddsAndWritesSignal) {
   alignas(uint64_t) std::array<unsigned char, 16> data{};
   alignas(uint64_t) std::array<unsigned char, 16> bar{};
-  ncclRmaSocketProxyMrHandle handle{};
-  handle.data = data.data();
-  handle.size = data.size();
-  handle.type = NCCL_PTR_CUDA;
-  handle.gdr.mapped = 1;
-  handle.gdr.barPtr = bar.data();
+  auto handle = Scene::MakeGdrMappedMr(data.data(), data.size(), bar.data());
   ncclRmaSocketProxyPeerReceiver receiver{};
   receiver.hasSignal = 1;
   receiver.signalType = NCCL_PTR_CUDA;
   receiver.signalPtr = data.data();
   receiver.signalDelta = 5;
   receiver.signalHandle = &handle;
-  ScopedHook copyFrom(g_testProgressGdrCopyFrom,
+  ScopedHook copyFrom(g_wrapGdrCopyFromMapping,
                       [&bar](gdr_mh_t, void* host, const void* map, size_t size) {
                         EXPECT_EQ(map, bar.data());
                         EXPECT_EQ(size, sizeof(uint64_t));
                         *static_cast<uint64_t*>(host) = 10;
                         return ncclSuccess;
                       });
-  ScopedHook copyTo(g_testProgressGdrCopyTo, [&bar](gdr_mh_t, void* map, const void* host, size_t size) {
+  ScopedHook copyTo(g_wrapGdrCopyToMapping, [&bar](gdr_mh_t, void* map, const void* host, size_t size) {
     EXPECT_EQ(map, bar.data());
     EXPECT_EQ(size, sizeof(uint64_t));
     EXPECT_EQ(*static_cast<const uint64_t*>(host), 15u);

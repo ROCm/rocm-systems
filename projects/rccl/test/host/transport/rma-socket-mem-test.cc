@@ -12,64 +12,17 @@
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
-#include <functional>
 #include <future>
 
 #include "ScopedHook.h"
+#include "fakes/gdrwrap_fakes.h"
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
 #include "transport/RmaSocketTest.h"
 
-namespace {
-
-static ncclResult_t DefaultGdrMapPointer(void*, size_t, gdr_mh_t*, void**, size_t*, gdr_info_t*, uint32_t) {
-  return ncclInvalidUsage;
-}
-
-static ncclResult_t DefaultGdrUnmapPointer(gdr_mh_t, void*, size_t) { return ncclSuccess; }
-static ncclResult_t DefaultGdrCopyToMapping(gdr_mh_t, void*, const void*, size_t) {
-  return ncclInternalError;
-}
-static ncclResult_t DefaultGdrCopyFromMapping(gdr_mh_t, void*, const void*, size_t) {
-  return ncclInternalError;
-}
-
-std::function<ncclResult_t(void*, size_t, gdr_mh_t*, void**, size_t*, gdr_info_t*, uint32_t)> g_testGdrMapPointer =
-    DefaultGdrMapPointer;
-std::function<ncclResult_t(gdr_mh_t, void*, size_t)> g_testGdrUnmapPointer = DefaultGdrUnmapPointer;
-std::function<ncclResult_t(gdr_mh_t, void*, const void*, size_t)> g_testGdrCopyToMapping =
-    DefaultGdrCopyToMapping;
-std::function<ncclResult_t(gdr_mh_t, void*, const void*, size_t)> g_testGdrCopyFromMapping =
-    DefaultGdrCopyFromMapping;
-
-ncclResult_t TestGdrMapPointer(void* data, size_t size, gdr_mh_t* mh, void** map, size_t* mapSize, gdr_info_t* info,
-                               uint32_t pinFlags = 0) {
-  return g_testGdrMapPointer(data, size, mh, map, mapSize, info, pinFlags);
-}
-
-ncclResult_t TestGdrUnmapPointer(gdr_mh_t mh, void* map, size_t mapSize) {
-  return g_testGdrUnmapPointer(mh, map, mapSize);
-}
-
-ncclResult_t TestGdrCopyToMapping(gdr_mh_t mh, void* map, const void* host, size_t size) {
-  return g_testGdrCopyToMapping(mh, map, host, size);
-}
-
-ncclResult_t TestGdrCopyFromMapping(gdr_mh_t mh, void* host, const void* map, size_t size) {
-  return g_testGdrCopyFromMapping(mh, host, map, size);
-}
-
-}  // namespace
-
-#define ncclGdrCudaMapPointer TestGdrMapPointer
-#define ncclGdrCudaUnmapPointer TestGdrUnmapPointer
-#define wrap_gdr_copy_to_mapping TestGdrCopyToMapping
-#define wrap_gdr_copy_from_mapping TestGdrCopyFromMapping
+#include "fakes/gdrwrap_seam.h"
 #include RMA_SOCKET_MEM_CC_PATH
-#undef wrap_gdr_copy_from_mapping
-#undef wrap_gdr_copy_to_mapping
-#undef ncclGdrCudaUnmapPointer
-#undef ncclGdrCudaMapPointer
+#include "fakes/gdrwrap_seam_undef.h"
 
 // Owned by src/init.cc. This binary does not compile init.cc; the socket-RMA
 // units use the real discriminator exposed by gdrwrap.h.
@@ -85,10 +38,7 @@ class RmaSocketMemMicrotest : public ::testing::Test {
 
   void TearDown() override {
     ncclGdrCopy = nullptr;
-    g_testGdrMapPointer = DefaultGdrMapPointer;
-    g_testGdrUnmapPointer = DefaultGdrUnmapPointer;
-    g_testGdrCopyToMapping = DefaultGdrCopyToMapping;
-    g_testGdrCopyFromMapping = DefaultGdrCopyFromMapping;
+    ResetGdrwrapFakes();
     ResetHipFakes();
     ResetNcclFakes();
   }
@@ -171,16 +121,11 @@ TEST_F(RmaSocketMemMicrotest, Copy_CudaDirectionsPropagateCopyErrorAfterResolvin
   alignas(uint64_t) std::array<unsigned char, 8> data{};
   alignas(uint64_t) std::array<unsigned char, 8> bar{};
   std::array<unsigned char, 8> host{};
-  ncclRmaSocketProxyMrHandle handle{};
-  handle.data = data.data();
-  handle.size = data.size();
-  handle.type = NCCL_PTR_CUDA;
-  handle.gdr.mapped = 1;
-  handle.gdr.barPtr = bar.data();
-  ScopedHook copyFrom(g_testGdrCopyFromMapping, [](gdr_mh_t, void*, const void*, size_t) {
+  auto handle = Scene::MakeGdrMappedMr(data.data(), data.size(), bar.data());
+  ScopedHook copyFrom(g_wrapGdrCopyFromMapping, [](gdr_mh_t, void*, const void*, size_t) {
     return ncclInternalError;
   });
-  ScopedHook copyTo(g_testGdrCopyToMapping, [](gdr_mh_t, void*, const void*, size_t) {
+  ScopedHook copyTo(g_wrapGdrCopyToMapping, [](gdr_mh_t, void*, const void*, size_t) {
     return ncclInternalError;
   });
 
@@ -196,18 +141,13 @@ TEST_F(RmaSocketMemMicrotest, Copy_CudaToHostUsesFromMapping) {
   std::array<unsigned char, 4> data{};
   const std::array<unsigned char, 4> bar{{1, 2, 3, 4}};
   std::array<unsigned char, 4> host{};
-  ncclRmaSocketProxyMrHandle handle{};
-  handle.data = data.data();
-  handle.size = data.size();
-  handle.type = NCCL_PTR_CUDA;
-  handle.gdr.mapped = 1;
-  handle.gdr.barPtr = const_cast<unsigned char*>(bar.data());
-  ScopedHook copyFrom(g_testGdrCopyFromMapping, [&bar](gdr_mh_t, void* dst, const void* src, size_t size) {
+  auto handle = Scene::MakeGdrMappedMr(data.data(), data.size(), const_cast<unsigned char*>(bar.data()));
+  ScopedHook copyFrom(g_wrapGdrCopyFromMapping, [&bar](gdr_mh_t, void* dst, const void* src, size_t size) {
     EXPECT_EQ(src, bar.data());
     std::memcpy(dst, src, size);
     return ncclSuccess;
   });
-  ScopedHook copyTo(g_testGdrCopyToMapping, [](gdr_mh_t, void*, const void*, size_t) {
+  ScopedHook copyTo(g_wrapGdrCopyToMapping, [](gdr_mh_t, void*, const void*, size_t) {
     ADD_FAILURE() << "GPU-to-host must not use copy-to-mapping";
     return ncclSuccess;
   });
@@ -224,17 +164,12 @@ TEST_F(RmaSocketMemMicrotest, Copy_HostToCudaUsesToMapping) {
   std::array<unsigned char, 4> data{};
   std::array<unsigned char, 4> bar{};
   const std::array<unsigned char, 4> host{{5, 6, 7, 8}};
-  ncclRmaSocketProxyMrHandle handle{};
-  handle.data = data.data();
-  handle.size = data.size();
-  handle.type = NCCL_PTR_CUDA;
-  handle.gdr.mapped = 1;
-  handle.gdr.barPtr = bar.data();
-  ScopedHook copyFrom(g_testGdrCopyFromMapping, [](gdr_mh_t, void*, const void*, size_t) {
+  auto handle = Scene::MakeGdrMappedMr(data.data(), data.size(), bar.data());
+  ScopedHook copyFrom(g_wrapGdrCopyFromMapping, [](gdr_mh_t, void*, const void*, size_t) {
     ADD_FAILURE() << "host-to-GPU must not use copy-from-mapping";
     return ncclSuccess;
   });
-  ScopedHook copyTo(g_testGdrCopyToMapping, [](gdr_mh_t, void* dst, const void* src, size_t size) {
+  ScopedHook copyTo(g_wrapGdrCopyToMapping, [](gdr_mh_t, void* dst, const void* src, size_t size) {
     std::memcpy(dst, src, size);
     return ncclSuccess;
   });
@@ -300,7 +235,7 @@ TEST_F(RmaSocketMemMicrotest, FreeMr_MappedHandleIsUnmappedWhenGdrCopyIsActive) 
   handle->gdr.map = reinterpret_cast<void*>(0x1000);
   handle->gdr.mapSize = 4096;
   ncclGdrCopy = reinterpret_cast<gdr_t>(0x1);
-  ScopedHook unmap(g_testGdrUnmapPointer, [](gdr_mh_t, void* map, size_t size) {
+  ScopedHook unmap(g_ncclGdrCudaUnmapPointer, [](gdr_mh_t, void* map, size_t size) {
     EXPECT_EQ(map, reinterpret_cast<void*>(0x1000));
     EXPECT_EQ(size, 4096u);
     return ncclSuccess;
@@ -381,12 +316,20 @@ TEST_F(RmaSocketMemMicrotest, RegMrSym_NonEmptyCudaRegistrationPropagatesMapping
   Scene scene;
   int data = 0;
   void* opaque = reinterpret_cast<void*>(0x1);
+  ScopedHook map(g_ncclGdrCudaMapPointer,
+                 [&data](void* ptr, size_t size, gdr_mh_t*, void**, size_t*, gdr_info_t*, uint32_t pinFlags) {
+                   EXPECT_EQ(ptr, &data);
+                   EXPECT_EQ(size, sizeof(data));
+                   EXPECT_EQ(pinFlags, 0u);
+                   return ncclInvalidUsage;
+                 });
 
   EXPECT_EQ(ncclRmaSocketProxyRegMrSym(&scene.comm, &data, sizeof(data), NCCL_PTR_CUDA, 0, &opaque),
             ncclInvalidUsage);
   EXPECT_EQ(opaque, nullptr);
   EXPECT_EQ(scene.comm.mrHead, nullptr);
   EXPECT_EQ(scene.comm.nextMrId, 0u);
+  EXPECT_EQ(map.calls, 1);
 }
 
 TEST_F(RmaSocketMemMicrotest, RegMrSym_CudaMappingSuccessPublishesMappedHandle) {
@@ -395,7 +338,7 @@ TEST_F(RmaSocketMemMicrotest, RegMrSym_CudaMappingSuccessPublishesMappedHandle) 
   alignas(uint64_t) std::array<unsigned char, 32> bar{};
   void* opaque = nullptr;
   ncclGdrCopy = reinterpret_cast<gdr_t>(0x1);
-  ScopedHook map(g_testGdrMapPointer,
+  ScopedHook map(g_ncclGdrCudaMapPointer,
                  [&data, &bar](void* ptr, size_t size, gdr_mh_t* mh, void** mapped, size_t* mappedSize,
                                gdr_info_t* info, uint32_t pinFlags) {
                    EXPECT_EQ(ptr, data.data());
@@ -408,7 +351,7 @@ TEST_F(RmaSocketMemMicrotest, RegMrSym_CudaMappingSuccessPublishesMappedHandle) 
                    info->va = reinterpret_cast<uint64_t>(data.data()) - 4;
                    return ncclSuccess;
                  });
-  ScopedHook unmap(g_testGdrUnmapPointer, [](gdr_mh_t, void*, size_t) { return ncclSuccess; });
+  ScopedHook unmap(g_ncclGdrCudaUnmapPointer, [](gdr_mh_t, void*, size_t) { return ncclSuccess; });
 
   ASSERT_EQ(ncclRmaSocketProxyRegMrSym(&scene.comm, data.data(), data.size(), NCCL_PTR_CUDA, 0, &opaque),
             ncclSuccess);
