@@ -3,9 +3,9 @@
 
 #include "amdgpu_elf_test_support.h"
 #include "aql_queue.h"
+#include "config_test_util.h"
 #include "test_paths.h"
 
-#include "embedded_schema.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/kernel_descriptor_abi.h"
@@ -158,8 +158,8 @@ TEST_P(Gfx1251SimulatorInstructionTest, DispatchesCodeObjectAndVerifiesExactOutp
   const uint64_t descriptor_offset = code_object.kernel_descriptor_offset("kernel");
   ASSERT_NE(descriptor_offset, 0u);
 
-  auto loaded =
-      config::load_config(test::config_path("gfx1251_synthetic.json"), rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(test::config_path("gfx1251_synthetic.json"), loaded));
   ASSERT_EQ(loaded.target, code_object.target_id());
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
@@ -341,8 +341,8 @@ TEST(Gfx1251SimulatorTest, DispatchesTargetSpecificSetregSemantics) {
   const uint64_t descriptor_offset = code_object.kernel_descriptor_offset("kernel");
   ASSERT_NE(descriptor_offset, 0u);
 
-  auto loaded =
-      config::load_config(test::config_path("gfx1251_synthetic.json"), rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(test::config_path("gfx1251_synthetic.json"), loaded));
   ASSERT_EQ(loaded.target, code_object.target_id());
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();

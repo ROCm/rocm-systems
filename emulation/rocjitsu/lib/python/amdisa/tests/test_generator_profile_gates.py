@@ -3781,10 +3781,14 @@ def generated_f16_sdwa_consumers(request, tmp_path_factory):
     ]
     + [('V_ADD_F16', 'finish_arithmetic_f16')],
 )
-def test_generated_f16_sdwa_preserves_unvalidated_legacy_ordering(
+def test_generated_f16_sdwa_keeps_unmigrated_ordering(
     generated_f16_sdwa_consumers, instruction, helper
 ):
-    """Pin current helper selection; no SDWA captures establish its ordering."""
+    """Pin current helper selection, not hardware order.
+
+    gfx1030 SDWA captures contradict the arithmetic order (MUL_F16, ADD_F16);
+    no SDWA captures cover TRANS or integral rounding.
+    """
     route, output = generated_f16_sdwa_consumers
     encoding = 'vop2' if instruction == 'V_ADD_F16' else 'vop1'
     if route == 'shared':
@@ -3800,6 +3804,30 @@ def test_generated_f16_sdwa_preserves_unvalidated_legacy_ordering(
         helper
     }:
         assert f'amdgpu::sdwa::{other}(' not in body
+
+
+@pytest.mark.parametrize(
+    'instruction,encoding', [('V_FRACT_F16', 'vop1'), ('V_LDEXP_F16', 'vop2')]
+)
+def test_generated_f16_sdwa_rounds_before_omod(
+    generated_f16_sdwa_consumers, instruction, encoding
+):
+    """gfx1030 SDWA captures: the body rounds; the SDWA store applies OMOD."""
+    route, output = generated_f16_sdwa_consumers
+    if route == 'shared':
+        source = (output / 'shared' / 'execute_shared.h').read_text()
+        signature = f'inline void execute_{instruction.lower()}_{encoding}('
+    else:
+        source = (output / 'rdna2' / f'{encoding}_exec.cpp').read_text()
+        class_name = ''.join(word.title() for word in instruction.split('_'))
+        signature = f'void {class_name}{encoding.title()}::execute_modifier_impl('
+    body = _generated_function_body(source, signature)
+    assert 'ResultFormat::F16, amdgpu::sdwa::OutputPolicy::ROUNDED>' in body
+    # The body applies no OMOD; LDEXP reads it only to flush tiny results.
+    assert 'floating_operation::apply' not in body
+    assert ('amdgpu::sdwa::output_modifier<' in body) == (instruction == 'V_LDEXP_F16')
+    for helper in ('finish_rounded_f16', 'round_f16_result', 'finish_arithmetic_f16'):
+        assert f'amdgpu::sdwa::{helper}(' not in body
 
 
 def test_local_true16_vop3_probe_uses_scoped_dpp_binding(tmp_path):
