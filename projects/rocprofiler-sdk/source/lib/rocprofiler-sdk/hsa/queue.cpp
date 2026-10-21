@@ -196,6 +196,8 @@ get_dispatch_time_impl(hsa_agent_t                        _agent,
             const auto& _entry = itr->second;
             if(_entry.pending_signal.handle != 0)
             {
+                // the rocprofiler-owned signal may already be released
+                if(registration::get_fini_status() > 0) return;
                 _status = get_amd_ext_table()->hsa_amd_profiling_get_dispatch_time_fn(
                     _entry.agent, _entry.pending_signal, _time);
             }
@@ -812,6 +814,9 @@ WriteInterceptor(const void* packets,
                 bit_extract(original_packet.header,
                             HSA_PACKET_HEADER_TYPE,
                             HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1);
+            // in packet order, so a later packet sharing the signal drops an earlier kernel's time
+            if(packet_type != HSA_PACKET_TYPE_INVALID)
+                forget_dispatch_time(original_packet.completion_signal);
             bool is_kernel_dispatch     = (packet_type == HSA_PACKET_TYPE_KERNEL_DISPATCH);
             bool is_ext_kernel_dispatch = false;
 
@@ -1794,7 +1799,7 @@ queue_fini()
 void
 dispatch_time_init(HsaApiTable* table, uint64_t tbl_instance)
 {
-    if(!table || !table->amd_ext_ || !table->core_) return;
+    if(!table || !table->amd_ext_ || !table->core_ || !enable_queue_intercept()) return;
 
     wrap_table_func<ROCPROFILER_HSA_TABLE_ID_AmdExt,
                     ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_profiling_get_dispatch_time>(

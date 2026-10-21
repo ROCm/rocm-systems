@@ -22,8 +22,9 @@
 
 // Dispatches kernels through an AQL packet with an application-owned completion signal and reads
 // hsa_amd_profiling_get_dispatch_time() on that signal after waiting, the way libomptarget does.
-// Each signal is then reused for a barrier packet. Exits with failure if any dispatch time is
-// unavailable, shorter than the kernel can run, or if the barrier reports the kernel's time.
+// Each signal is then reused for a barrier packet, and for a kernel and a barrier submitted in one
+// queue write. Exits with failure if any dispatch time is unavailable, if the kernel's time is
+// shorter than the kernel can run, or if a barrier reports the kernel's time.
 
 #include "hsa_code_object_app.h"
 
@@ -94,6 +95,24 @@ main()
         return hsa_amd_profiling_get_dispatch_time(agent, signal, &time);
     };
 
+    // writes both packets before ringing the doorbell once, so they arrive in one queue write
+    auto submit_together = [queue](MQDependencyTest::Aql& first, MQDependencyTest::Aql& second) {
+        auto*    ring  = static_cast<MQDependencyTest::Aql*>(queue->base_address);
+        uint64_t write = hsa_queue_load_write_index_relaxed(queue);
+        uint64_t index = write;
+        for(auto* pkt : {&first, &second})
+        {
+            auto&    dst    = ring[index++ & (queue->size - 1)];
+            uint16_t header = pkt->header.raw;
+            pkt->header.raw = dst.header.raw;
+            dst             = *pkt;
+            __atomic_store_n(&dst.header.raw, header, __ATOMIC_RELEASE);
+            pkt->header.raw = header;
+        }
+        hsa_queue_store_write_index_release(queue, index);
+        hsa_signal_store_screlease(queue->doorbell_signal, index - 1);
+    };
+
     int failures = 0;
     for(int i = 0; i < iterations; ++i)
     {
@@ -158,6 +177,24 @@ main()
                     static_cast<unsigned long>(barrier_time.end),
                     static_cast<unsigned long>(kernel_time.start),
                     static_cast<unsigned long>(kernel_time.end));
+            ++failures;
+        }
+
+        // a kernel and a barrier sharing the signal in one write must report the barrier's time
+        hsa_signal_store_screlease(signal, 2);
+        submit_together(packet, barrier);
+
+        auto shared_time = hsa_amd_profiling_dispatch_time_t{};
+        status           = wait_and_get_time(signal, shared_time);
+        if(status != HSA_STATUS_SUCCESS || shared_time.end >= shared_time.start + min_duration_ns)
+        {
+            fprintf(stderr,
+                    "kernel and barrier %d: hsa_amd_profiling_get_dispatch_time returned %d "
+                    "(start=%lu end=%lu)\n",
+                    i,
+                    static_cast<int>(status),
+                    static_cast<unsigned long>(shared_time.start),
+                    static_cast<unsigned long>(shared_time.end));
             ++failures;
         }
 
