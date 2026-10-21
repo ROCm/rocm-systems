@@ -2362,6 +2362,10 @@ def _generated_matrix_call(body: str, callee: str) -> str:
             'exec_smfmac_f32_16x16x64_fp8',
             True,
         ),
+        ('V_SMFMAC_I32_16X16X64_I8', 'cdna3', 'exec_smfmac_i32_i8', True),
+        ('V_SMFMAC_I32_32X32X32_I8', 'cdna3', 'exec_smfmac_i32_i8', True),
+        ('V_SMFMAC_I32_16X16X128_I8', 'cdna4', 'exec_smfmac_i32_i8', True),
+        ('V_SMFMAC_I32_32X32X64_I8', 'cdna4', 'exec_smfmac_i32_i8', True),
         # Fixed-wave sparse float result variants.
         ('V_SWMMAC_F32_16X16X32_F16', 'cdna5', 'exec_swmmac_f32', True),
         ('V_SWMMAC_F16_16X16X32_F16', 'cdna5', 'exec_swmmac_f16', True),
@@ -2601,14 +2605,15 @@ def test_unimplemented_execute_stub_requires_unconditional_failure(body, expecte
         ('cdna4', 'VSmfmacI3232x32x32I8Vop3pMfma'),
     ],
 )
-def test_generated_sparse_integer_mma_stubs_report_failure(
+def test_generated_sparse_integer_mma_dispatches_cross_lane_helper(
     amdgpu_generated_root: Path, arch: str, class_name: str
 ):
     source = (amdgpu_generated_root / arch / 'vop3p_exec.cpp').read_text()
     body = _generated_function_body(source, f'void {class_name}::execute_impl')
-    assert 'wf.report_instruction_execution_error(' in body
-    assert 'InstructionExecutionError::UnimplementedInstruction' in body
-    assert 'throw ' not in body
+    assert 'amdgpu::exec_smfmac_i32_i8<' in body
+    assert 'idx, inst_.cbsz, inst_.abid);' in body
+    assert 'inst_.acc_cd' in body
+    assert 'InstructionExecutionError::UnimplementedInstruction' not in body
 
 
 def test_cdna3_real_spec_mfma_destination_uses_acc_cd(tmp_path):
@@ -3776,10 +3781,14 @@ def generated_f16_sdwa_consumers(request, tmp_path_factory):
     ]
     + [('V_ADD_F16', 'finish_arithmetic_f16')],
 )
-def test_generated_f16_sdwa_preserves_unvalidated_legacy_ordering(
+def test_generated_f16_sdwa_keeps_unmigrated_ordering(
     generated_f16_sdwa_consumers, instruction, helper
 ):
-    """Pin current helper selection; no SDWA captures establish its ordering."""
+    """Pin current helper selection, not hardware order.
+
+    gfx1030 SDWA captures contradict the arithmetic order (MUL_F16, ADD_F16);
+    no SDWA captures cover TRANS or integral rounding.
+    """
     route, output = generated_f16_sdwa_consumers
     encoding = 'vop2' if instruction == 'V_ADD_F16' else 'vop1'
     if route == 'shared':
@@ -3795,6 +3804,30 @@ def test_generated_f16_sdwa_preserves_unvalidated_legacy_ordering(
         helper
     }:
         assert f'amdgpu::sdwa::{other}(' not in body
+
+
+@pytest.mark.parametrize(
+    'instruction,encoding', [('V_FRACT_F16', 'vop1'), ('V_LDEXP_F16', 'vop2')]
+)
+def test_generated_f16_sdwa_rounds_before_omod(
+    generated_f16_sdwa_consumers, instruction, encoding
+):
+    """gfx1030 SDWA captures: the body rounds; the SDWA store applies OMOD."""
+    route, output = generated_f16_sdwa_consumers
+    if route == 'shared':
+        source = (output / 'shared' / 'execute_shared.h').read_text()
+        signature = f'inline void execute_{instruction.lower()}_{encoding}('
+    else:
+        source = (output / 'rdna2' / f'{encoding}_exec.cpp').read_text()
+        class_name = ''.join(word.title() for word in instruction.split('_'))
+        signature = f'void {class_name}{encoding.title()}::execute_modifier_impl('
+    body = _generated_function_body(source, signature)
+    assert 'ResultFormat::F16, amdgpu::sdwa::OutputPolicy::ROUNDED>' in body
+    # The body applies no OMOD; LDEXP reads it only to flush tiny results.
+    assert 'floating_operation::apply' not in body
+    assert ('amdgpu::sdwa::output_modifier<' in body) == (instruction == 'V_LDEXP_F16')
+    for helper in ('finish_rounded_f16', 'round_f16_result', 'finish_arithmetic_f16'):
+        assert f'amdgpu::sdwa::{helper}(' not in body
 
 
 def test_local_true16_vop3_probe_uses_scoped_dpp_binding(tmp_path):
