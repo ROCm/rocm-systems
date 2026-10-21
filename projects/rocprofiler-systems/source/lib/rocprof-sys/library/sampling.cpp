@@ -751,7 +751,7 @@ configure(bool _setup, std::int64_t _tid)
 
         if(_signal_types->contains(get_sampling_realtime_signal()))
         {
-            _sampler->configure(timer{ get_sampling_realtime_signal(), CLOCK_REALTIME,
+            _sampler->configure(timer{ get_sampling_realtime_signal(), CLOCK_BOOTTIME,
                                        SIGEV_THREAD_ID, get_sampling_realtime_freq(),
                                        get_sampling_realtime_delay(), _tid,
                                        threading::get_sys_tid() });
