@@ -1762,6 +1762,17 @@ Value accepted
 ^^^^^^^^^^^^^^
 0 or 1. Default value is 1 (enabled).
 
+NCCL_MULTI_SEGMENT_REGISTER
+---------------------------
+
+Register one DMA-BUF memory region per physical segment. When this is off,
+registration keeps the single-region path.
+
+Value accepted
+^^^^^^^^^^^^^^
+0 or 1. Default is 0 on HIP, so multi-segment registration stays off until a
+job sets the variable. Default is 1 on other builds.
+
 NCCL_SET_STACK_SIZE
 -------------------
 (since 2.9)
