@@ -6,7 +6,8 @@
 # It runs on the self-hosted org runner "tw-gfx950-ainic-ROCm-scale-runner"
 # (org: ROCm). Adjust `runs-on` labels to match how that runner was registered.
 # The `paths` filter keeps the gate scoped to RCCL-only changes in the monorepo,
-# and the `changes` job skips PRs to develop that only touch projects/rccl/test/host;
+# and the `changes` job skips PRs whose code changes another workflow already
+# covers (COVERAGE_RULES in .github/scripts/rccl_change_sets.py);
 # build_rccl.sh auto-detects the projects/rccl cmake subdir in the checkout.
 #
 # The Slurm submit/poll/report scripts these steps call
@@ -36,6 +37,10 @@ on:
     paths:
       - 'projects/rccl/**'
       - '.github/workflows/rccl_perf_regression.yml'
+      # The `changes` job's decision, so edits to it run the gate they change.
+      # ci_utils.py is shared with TheRock; *rccl*_test.py covers its use here.
+      - '.github/scripts/rccl_detect_perf_changes.py'
+      - '.github/scripts/rccl_change_sets.py'
   # Allow manual dispatch for testing the pipeline before the workflow is on develop.
   # Inputs mirror what a PR run would supply; omit them to use the defaults
   # (A=A detect: ref == cand == current built lib, expects 0 regressions).
@@ -60,16 +65,19 @@ permissions:
   pull-requests: write
 
 jobs:
-  # Host-only test changes on develop are covered by rccl-host-unit-tests.yml
-  # and cannot change librccl, so they skip the cluster A/B run. Never skipped
-  # itself: a skipped ancestor would also skip `detect`.
+  # Decides whether the gate runs and whether it builds librccl. Never skipped
+  # itself: a skipped ancestor would also skip `detect`. Empty outputs (not a
+  # PR, or this job failed) run the full gate.
   changes:
-    name: Detect host-only test changes
+    name: Detect perf gate changes
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    # Runs PR-authored code, so no write scope.
+    permissions:
+      contents: read
     outputs:
-      # The filter step only runs on PRs; default to running the gate.
-      host_tests_only: ${{ steps.filter.outputs.host_tests_only || 'false' }}
+      run_gate: ${{ steps.filter.outputs.run_gate }}
+      build_rccl: ${{ steps.filter.outputs.build_rccl }}
     steps:
       - name: Checkout scripts
         if: github.event_name == 'pull_request'
@@ -78,13 +86,14 @@ jobs:
           sparse-checkout: .github/scripts
           # HEAD^ on a PR merge commit is the base branch tip.
           fetch-depth: 2
+          persist-credentials: false
 
-      - name: Check for host-only test changes
+      - name: Classify changed files
         id: filter
         if: github.event_name == 'pull_request'
         env:
           BASE_BRANCH: ${{ github.base_ref }}
-        run: python3 .github/scripts/rccl_detect_coco_changes.py --base-ref HEAD^ --base-branch "$BASE_BRANCH"
+        run: python3 .github/scripts/rccl_detect_perf_changes.py --base-ref HEAD^ --base-branch "$BASE_BRANCH"
 
   build:
     needs: changes
@@ -93,8 +102,8 @@ jobs:
     # arbitrary code execution on our infrastructure. Scope to same-repo PRs
     # only; workflow_dispatch is unaffected (it already requires repo write
     # access to trigger).
-    # Runs even if `changes` failed; only an explicit host_tests_only skips it.
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && needs.changes.outputs.host_tests_only != 'true')) }}
+    # Runs even if `changes` failed; only an explicit run_gate=false skips it.
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && needs.changes.outputs.run_gate != 'false')) }}
     # Separate lock from the detect job below: build never touches the pinned
     # nodes, so it shouldn't queue behind another PR's in-flight A/B run.
     # (Real cross-PR parallelism from this also needs a 2nd self-hosted runner
@@ -117,19 +126,11 @@ jobs:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
-      - name: Detect changed paths
-        id: paths
-        if: github.event_name == 'pull_request'
-        run: |
-          git diff --name-only origin/${{ github.base_ref }}...HEAD \
-            | grep -q '^projects/rccl/' \
-            && echo "rccl_changed=1" >> "$GITHUB_OUTPUT" \
-            || echo "rccl_changed=0" >> "$GITHUB_OUTPUT"
-
       - name: Build reference + candidate librccl (single build node)
         id: resolve
         env:
-          BUILD_RCCL: ${{ github.event_name == 'pull_request' && steps.paths.outputs.rccl_changed || inputs.build_rccl || '0' }}
+          # On a PR, build unless `changes` said not to (empty if it failed).
+          BUILD_RCCL: ${{ github.event_name == 'pull_request' && (needs.changes.outputs.build_rccl || '1') || inputs.build_rccl || '0' }}
           CANDIDATE_SRC: ${{ github.workspace }}
           BASE_REF: origin/${{ github.base_ref || 'develop' }}
           _CONFIG: ${{ inputs.config || '/it-share/rccl-ci/configs/ci_detect_prod.json' }}
