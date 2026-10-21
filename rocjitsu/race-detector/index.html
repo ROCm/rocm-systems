@@ -2023,7 +2023,7 @@ regardless of the order the waves execute in:</p>
 <p>Source files are under <code>lib/rocjitsu/src/rocjitsu/vm/plugins/race_detector/</code>:</p>
 <div class="highlight"><pre><span></span><code>race_detector/
 ├── plugin.h/.cpp            rocjitsu plugin adapter (translates hooks to core API)
-└── core/                    detection algorithm (does not depend on rocjitsu types)
+└── core/                    event tracking and lifetime
     ├── race_detector.h/.cpp  main detector: event allocation, validation, retirement
     ├── wave_race_state.h/.cpp  per-wave state: register tracking, waitcnt resolution
     ├── event_registry.h      append-only event store with prefix trimming
@@ -2033,6 +2033,8 @@ regardless of the order the waves execute in:</p>
     ├── dim3d.h               3D coordinate helpers
     └── profiler_interface.h  optional hook profiling
 </code></pre></div>
+<p>Explicit wait decoding is shared with the core checker in
+<code>lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h</code>.</p>
 <h2 id="tests">Tests<a class="headerlink" href="#tests" title="Permanent link">&para;</a></h2>
 <p>Tests are part of the rocjitsu test suite (<code>emulation/rocjitsu/tests/</code>):</p>
 <ul>
@@ -2040,6 +2042,7 @@ regardless of the order the waves execute in:</p>
   via <code>race_test_builder.h</code>, covering VGPR, SGPR, LDS, D16, DTL, exec mask,
   multi-workgroup, and mixed counter scenarios.</li>
 <li><code>interval_set_tests.cpp</code> — unit tests for <code>IntervalSet</code>.</li>
+<li><code>wait_hazard_test.cpp</code> — wait/readiness tests shared with the core checker.</li>
 <li>The <code>race</code> suite in
   <a href="https://github.com/ROCm/rocjitsu-test-corpus">ROCm/rocjitsu-test-corpus</a>
   owns the gfx950 and gfx1151 end-to-end HIP programs. The
@@ -2075,6 +2078,16 @@ the corpus's <code>--case</code> option.</p>
   asynchronous memory writes that overlap a pending load. Scalar-register WAW
   covers instruction writes and scalar loads that overlap pending scalar-memory
   destinations. LDS WAW is not currently reported.</p>
+</li>
+<li>
+<p><strong>Embedded waits</strong>: the plugin handles explicit wait instructions, including
+  <code>s_wait_idle</code> and RDNA4's compatibility <code>s_waitcnt</code>, but does not apply waits
+  embedded in other instructions. For example, RDNA4 <code>v_interp_p10_f32</code> with
+  <code>wait_exp:0</code> retires pending EXPCNT results in the core checker, while the
+  plugin leaves them pending and can report false register hazards. With
+  <code>wait_exp:7</code> (no wait), both keep those results pending. The shared
+  <code>wait_hazard_test.cpp</code> suite records this boundary. Supporting embedded waits
+  requires retirement before the instruction's register accesses.</p>
 </li>
 <li>
 <p><strong>Conservative DPP/SDWA write masks</strong>: WAW precision depends on the execution
