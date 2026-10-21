@@ -97,10 +97,43 @@ if(NOT ENABLE_SANITIZER STREQUAL "OFF")
       "${CMAKE_EXE_LINKER_FLAGS} ${_linker_flags} -Wl,--build-id=sha1")
   set(CMAKE_SHARED_LINKER_FLAGS
       "${CMAKE_SHARED_LINKER_FLAGS} ${_linker_flags} -Wl,--build-id=sha1")
+
+  # Directory and target options, not only CMAKE_*_FLAGS. ccache drops
+  # -Xarch_* unless the compile also passes -arch, so TheRock's
+  # -Xarch_host -fsanitize=address never reaches clang and the cached objects
+  # are uninstrumented. A plain -fsanitize=address is what the compiler and
+  # ccache both keep. These sources are host C/C++; hiprtc device commands
+  # do not inherit them.
+  add_compile_options(
+    "$<$<COMPILE_LANGUAGE:C,CXX>:-fno-omit-frame-pointer>"
+    "$<$<COMPILE_LANGUAGE:C,CXX>:-fsanitize=address>")
+  if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND BUILD_SHARED_LIBS)
+    add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-shared-libsan>")
+    add_link_options(
+      "$<$<LINK_LANGUAGE:C,CXX>:-fsanitize=address>"
+      "$<$<LINK_LANGUAGE:C,CXX>:-shared-libsan>")
+  endif()
   unset(_compiler_flags)
   unset(_linker_flags)
   message(STATUS "CLR sanitizer: ${ENABLE_SANITIZER} (host flags applied by CLR)")
 endif()
+
+# Attach the host sanitizer to one target. add_compile_options above covers
+# targets created later in this directory tree; call this for targets that
+# must stay instrumented even if a subdirectory replaces the directory flags.
+function(clr_asan_instrument_target target)
+  if(ENABLE_SANITIZER STREQUAL "OFF")
+    return()
+  endif()
+  target_compile_options(${target} PRIVATE
+    "$<$<COMPILE_LANGUAGE:C,CXX>:-fno-omit-frame-pointer>"
+    "$<$<COMPILE_LANGUAGE:C,CXX>:-fsanitize=address>")
+  if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND BUILD_SHARED_LIBS)
+    target_compile_options(${target} PRIVATE
+      "$<$<COMPILE_LANGUAGE:C,CXX>:-shared-libsan>")
+    target_link_options(${target} PRIVATE -fsanitize=address -shared-libsan)
+  endif()
+endfunction()
 
 # Fail the build if a shared library was only linked with ASan. Link-only
 # -fsanitize=address emits weak __asan_report_* symbols and no __asan_init.
