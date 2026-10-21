@@ -51,7 +51,6 @@ class TestCpuPstate(unittest.TestCase):
         # a GPU handle, and that sweep is intentionally omitted.
         correct_processor = [
             amdsmi.AmdSmiStatus.SUCCESS,
-            amdsmi.AmdSmiStatus.NOT_SUPPORTED,
             amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
             amdsmi.AmdSmiStatus.NO_PERM,
         ]
@@ -179,7 +178,6 @@ class TestCpuPstate(unittest.TestCase):
         # a GPU handle, and that sweep is intentionally omitted.
         correct_processor = [
             amdsmi.AmdSmiStatus.SUCCESS,
-            amdsmi.AmdSmiStatus.NOT_SUPPORTED,
             amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
             amdsmi.AmdSmiStatus.NO_PERM,
         ]
