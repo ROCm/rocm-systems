@@ -140,6 +140,10 @@ kernel:
 - ``2`` forces them wherever the collective has one, ignoring the cost model and
   the minimum size. Use ``2`` for A/B measurements only.
 
+Set ``NCCL_SYM_TMA_ENABLE`` to the same value on every rank. Each rank reads it
+on its own, and ranks that disagree can pick different kernels for the same
+collective and hang.
+
 .. _device-symmetric-memory:
 
 Device-side symmetric memory access (``ncclFindWindow``)

@@ -116,17 +116,21 @@ static inline bool ncclAllGatherIsInPlace(const void* sendbuff, const void* recv
 }
 
 // [RCCL] Whether the Tma symmetric kernels may run: input and output must sit at the same offset
-// modulo 16 within their windows. In-place AllGather and ReduceScatter shift one side by
-// rank * perRankBytes, so that check alone can differ across ranks, and ranks that pick different
-// symmetric kernels launch grids that never meet at the LSA barrier. There the per-rank slice must
-// itself be 16 B aligned, so every rank reaches the same answer. Null buffers count as aligned.
+// modulo 16 within their windows. The answer must be the same on every rank, or ranks pick
+// different symmetric kernels and launch grids that never meet at the LSA barrier. Both windows
+// must therefore be symmetric: an unregistered buffer's raw address differs by rank. In-place
+// AllGather and ReduceScatter shift one side by rank * perRankBytes, so there the per-rank slice
+// must itself be 16 B aligned.
 static inline bool ncclSymAligned16B(ncclFunc_t func, int rank, const void* sendbuff, const void* recvbuff,
                                      struct ncclDevrWindow* sendWin, struct ncclDevrWindow* recvWin,
                                      size_t perRankBytes) {
-  size_t inputOff = sendWin ? (uintptr_t)sendbuff - (uintptr_t)sendWin->userPtr : (uintptr_t)sendbuff;
-  size_t outputOff = recvWin ? (uintptr_t)recvbuff - (uintptr_t)recvWin->userPtr : (uintptr_t)recvbuff;
+  if (sendWin == nullptr || recvWin == nullptr || !(sendWin->winFlags & NCCL_WIN_COLL_SYMMETRIC) ||
+      !(recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC)) {
+    return false;
+  }
+  size_t inputOff = (uintptr_t)sendbuff - (uintptr_t)sendWin->userPtr;
+  size_t outputOff = (uintptr_t)recvbuff - (uintptr_t)recvWin->userPtr;
   if (uint32_t(inputOff - outputOff) % 16 != 0) return false;
-  if (sendbuff == nullptr || recvbuff == nullptr) return true;
   bool inPlace = (func == ncclFuncAllGather && ncclAllGatherIsInPlace(sendbuff, recvbuff, rank, perRankBytes)) ||
                  (func == ncclFuncReduceScatter && ncclAllGatherIsInPlace(recvbuff, sendbuff, rank, perRankBytes));
   return !inPlace || perRankBytes % 16 == 0;

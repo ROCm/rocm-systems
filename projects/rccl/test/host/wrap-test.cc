@@ -149,6 +149,26 @@ struct TestDevrWindows {
   ncclDevrWindowSorted sorted[2]{};
 };
 
+// Symmetric windows over [a, a + aSize) and [b, b + bSize), found by the real ncclDevrFindWindow.
+struct SymmetricTestWindows {
+  SymmetricTestWindows(ncclComm* comm, char* a, size_t aSize, char* b, size_t bSize) {
+    char* bases[2] = {a, b};
+    size_t sizes[2] = {aSize, bSize};
+    for (int i = 0; i < 2; i++) {
+      windows[i].userPtr = bases[i];
+      windows[i].size = sizes[i];
+      windows[i].winFlags = NCCL_WIN_COLL_SYMMETRIC;
+      sorted[i] = {reinterpret_cast<uintptr_t>(bases[i]), sizes[i], &windows[i]};
+    }
+    if (sorted[1].userAddr < sorted[0].userAddr) std::swap(sorted[0], sorted[1]);
+    comm->devrState.winSorted = sorted;
+    comm->devrState.winSortedCount = 2;
+  }
+
+  ncclDevrWindow windows[2]{};
+  ncclDevrWindowSorted sorted[2]{};
+};
+
 auto ForceParam(const char* name, int64_t value) {
   return [name = std::string(name), value](const char* env, int64_t defaultValue) {
     return std::strcmp(env, name.c_str()) == 0 ? value : defaultValue;
@@ -159,6 +179,17 @@ auto ForceParam(const char* name, int64_t value) {
 auto SelectSymkTuning(ncclFunc_t func, ncclSymkKernelId id, int maxChannels) {
   return [func, id, maxChannels](struct ncclTuningInput_t* in, struct ncclTuningResult_t* result) {
     EXPECT_EQ(func, in->func);
+    result->symKernelId = id;
+    result->maxChannels = maxChannels;
+    return ncclSuccess;
+  };
+}
+
+// g_tuningCompute stub: picks id, and records each query's symAligned16B in *aligned and counts it in *calls.
+auto RecordAlignedTuning(ncclSymkKernelId id, int maxChannels, bool* aligned, int* calls = nullptr) {
+  return [id, maxChannels, aligned, calls](struct ncclTuningInput_t* in, struct ncclTuningResult_t* result) {
+    *aligned = in->symAligned16B;
+    if (calls != nullptr) ++*calls;
     result->symKernelId = id;
     result->maxChannels = maxChannels;
     return ncclSuccess;
@@ -7535,14 +7566,9 @@ TEST(WrapMicrotestIsolated, SymkQuery_DefaultsToAligned16BWithoutOperands) {
       []() {
         ScopedHook symkAvailable(g_symkAvailable,
                                  [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
-        static bool aligned;
-        aligned = false;
-        ScopedHook tuningCompute(g_tuningCompute, [](struct ncclTuningInput_t* in, struct ncclTuningResult_t* out) {
-          aligned = in->symAligned16B;
-          out->symKernelId = ncclSymkKernelId_AllGather_TmaST;
-          out->maxChannels = 64;
-          return ncclSuccess;
-        });
+        bool aligned = false;
+        ScopedHook tuningCompute(g_tuningCompute,
+                                 RecordAlignedTuning(ncclSymkKernelId_AllGather_TmaST, /*maxChannels=*/64, &aligned));
         ncclComm* comm = MakeZeroedComm();
         comm->symmetricSupport = 1;
         int algo, protocol, maxChannels;
@@ -7561,14 +7587,9 @@ TEST(WrapMicrotestIsolated, SymkQuery_PassesCallerAligned16BToTuner) {
       []() {
         ScopedHook symkAvailable(g_symkAvailable,
                                  [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
-        static bool aligned;
-        aligned = true;
-        ScopedHook tuningCompute(g_tuningCompute, [](struct ncclTuningInput_t* in, struct ncclTuningResult_t* out) {
-          aligned = in->symAligned16B;
-          out->symKernelId = ncclSymkKernelId_AllGather_ST;
-          out->maxChannels = 8;
-          return ncclSuccess;
-        });
+        bool aligned = true;
+        ScopedHook tuningCompute(g_tuningCompute,
+                                 RecordAlignedTuning(ncclSymkKernelId_AllGather_ST, /*maxChannels=*/8, &aligned));
         ncclComm* comm = MakeZeroedComm();
         comm->symmetricSupport = 1;
         int algo, protocol, maxChannels;
@@ -7591,22 +7612,17 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_InPlaceUnalignedSliceQueriesUnal
                                                                   size_t, const void*, void*, bool) { return true; });
         ScopedHook symkAvailable(g_symkAvailable,
                                  [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
-        static int calls;
-        static bool aligned;
-        calls = 0;
-        ScopedHook tuningCompute(g_tuningCompute, [](struct ncclTuningInput_t* in, struct ncclTuningResult_t* out) {
-          ++calls;
-          aligned = in->symAligned16B;
-          out->symKernelId = ncclSymkKernelId_ReduceScatter_LD;
-          out->maxChannels = 8;
-          return ncclSuccess;
-        });
+        int calls = 0;
+        bool aligned = false;
+        ScopedHook tuningCompute(g_tuningCompute, RecordAlignedTuning(ncclSymkKernelId_ReduceScatter_LD,
+                                                                      /*maxChannels=*/8, &aligned, &calls));
         ncclComm* comm = MakeSelectComm();
         comm->symmetricSupport = 1;
         comm->nRanks = 4;
         comm->rank = 2;
         alignas(16) static char sendbuf[256];
         alignas(16) static char otherbuf[256];
+        SymmetricTestWindows windows(comm, sendbuf, sizeof(sendbuf), otherbuf, sizeof(otherbuf));
         constexpr size_t kRecvcount = 6;  // 24 B per rank in float32
         rcclCollDecision decision{};
 
@@ -7635,22 +7651,17 @@ TEST(WrapMicrotestIsolated, SelectAllGather_InPlaceUnalignedSliceQueriesUnaligne
                                                                   size_t, const void*, void*, bool) { return true; });
         ScopedHook symkAvailable(g_symkAvailable,
                                  [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
-        static int calls;
-        static bool aligned;
-        calls = 0;
-        ScopedHook tuningCompute(g_tuningCompute, [](struct ncclTuningInput_t* in, struct ncclTuningResult_t* out) {
-          ++calls;
-          aligned = in->symAligned16B;
-          out->symKernelId = ncclSymkKernelId_AllGather_ST;
-          out->maxChannels = 8;
-          return ncclSuccess;
-        });
+        int calls = 0;
+        bool aligned = false;
+        ScopedHook tuningCompute(g_tuningCompute, RecordAlignedTuning(ncclSymkKernelId_AllGather_ST,
+                                                                      /*maxChannels=*/8, &aligned, &calls));
         ncclComm* comm = MakeSelectComm();
         comm->symmetricSupport = 1;
         comm->nRanks = 4;
         comm->rank = 2;
         alignas(16) static char recvbuf[256];
         alignas(16) static char otherbuf[256];
+        SymmetricTestWindows windows(comm, recvbuf, sizeof(recvbuf), otherbuf, sizeof(otherbuf));
         constexpr size_t kSendcount = 6;  // 24 B per rank in float32
         rcclCollDecision decision{};
 
