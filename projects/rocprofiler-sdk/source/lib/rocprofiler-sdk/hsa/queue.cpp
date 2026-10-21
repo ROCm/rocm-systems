@@ -574,12 +574,6 @@ WriteInterceptor(const void* packets,
                  void*                                 data,
                  hsa_amd_queue_intercept_packet_writer writer)
 {
-    if(registration::get_fini_status() > 0)
-    {
-        writer(packets, pkt_count);
-        return;
-    }
-
     // every packet, traced or not, starts a new use of its completion signal
     for(size_t i = 0; i < pkt_count; ++i)
     {
@@ -589,6 +583,12 @@ WriteInterceptor(const void* packets,
                                  HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1);
         if(_type != HSA_PACKET_TYPE_INVALID)
             forget_dispatch_time(_packet.kernel_dispatch.completion_signal);
+    }
+
+    if(registration::get_fini_status() > 0)
+    {
+        writer(packets, pkt_count);
+        return;
     }
 
     ROCP_TRACE << fmt::format("WriteInterceptor called with pkt_count={}", pkt_count);
