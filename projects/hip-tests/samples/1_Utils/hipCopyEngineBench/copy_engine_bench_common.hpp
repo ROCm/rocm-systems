@@ -305,11 +305,11 @@ inline bool SelectSourceDevice(int src_device) {
   return true;
 }
 
-// Most handles one kernel can hold: they travel by value, as one launch argument.
-constexpr size_t kMaxHandles = 64;
+// Most destinations one kernel can serve: their handles travel by value, as one launch argument.
+constexpr size_t kMaxDestinations = 16;
 
 struct HandleSet {
-  hipExtCopyEngineDeviceHandle handles[kMaxHandles];
+  hipExtCopyEngineDeviceHandle handles[kMaxDestinations];
 };
 
 // Asks for |count| handles a kernel on |src_device| submits through for copies from |src_device|

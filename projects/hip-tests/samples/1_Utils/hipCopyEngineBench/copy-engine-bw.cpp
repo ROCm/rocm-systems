@@ -26,7 +26,6 @@ struct Params {
   size_t num_destinations = 1;
   size_t warps_per_wg = 1;
   size_t wgs_per_destination = 1;
-  size_t num_queues = 1;
   std::string output_file = "copy_engine_bw.csv";
   std::string signal_memory = "device";
   bool verbose = false;
@@ -34,26 +33,25 @@ struct Params {
 
 // Lane 0 of every warp copies its own slice of the source to one destination: the warp's
 // destination is its work-group's index modulo the number of destinations, and the work-groups of
-// a destination take turns over its engines, so |handles| holds each destination's engines in turn.
+// a destination share its engine, so |handles| holds one handle per destination.
 __global__ void CopyBandwidthKernel(HandleSet handles, const char* src, char* const* dst_bufs,
                                     uint64_t copy_size, uint32_t num_commands,
-                                    uint32_t num_destinations, uint32_t num_queues,
-                                    uint64_t* signals, uint64_t epoch, int64_t* start_clocks,
-                                    int64_t* end_clocks, hipError_t* statuses) {
+                                    uint32_t num_destinations, uint64_t* signals, uint64_t epoch,
+                                    int64_t* start_clocks, int64_t* end_clocks,
+                                    hipError_t* statuses) {
   if (threadIdx.x % warpSize != 0) return;
   const uint32_t warp = threadIdx.x / warpSize;
   const uint32_t warps_per_block = blockDim.x / warpSize;
   const uint32_t dst_idx = blockIdx.x % num_destinations;
   const uint32_t block_in_dst = blockIdx.x / num_destinations;
-  const uint32_t queue = block_in_dst % num_queues;
   const uint32_t slot = blockIdx.x * warps_per_block + warp;
   const uint64_t offset =
       (uint64_t{block_in_dst} * warps_per_block + warp) * copy_size * num_commands;
 
   start_clocks[slot] = wall_clock64();
   statuses[slot] =
-      SubmitBatchAndWait(&handles.handles[dst_idx * num_queues + queue], dst_bufs[dst_idx] + offset,
-                         src + offset, copy_size, num_commands, signals + slot, epoch, nullptr);
+      SubmitBatchAndWait(&handles.handles[dst_idx], dst_bufs[dst_idx] + offset, src + offset,
+                         copy_size, num_commands, signals + slot, epoch, nullptr);
   end_clocks[slot] = wall_clock64();
 }
 
@@ -91,18 +89,14 @@ int Run(const Params& params, SignalMemory signal_memory) {
     if (!EnablePeerAccess(params.src_gpu, dst)) return EXIT_FAILURE;
   }
   HIP_CHECK(hipSetDevice(params.src_gpu));
-  if (dst_devices.size() * params.num_queues > kMaxHandles) {
-    std::cerr << "error: --numDestinations x --numOfQueuesPerDestination is at most " << kMaxHandles
-              << "\n";
+  if (dst_devices.size() > kMaxDestinations) {
+    std::cerr << "error: --numDestinations is at most " << kMaxDestinations << "\n";
     return EXIT_FAILURE;
   }
-  // Each destination's engines in turn, best first.
+  // One engine per destination: the runtime's best for the pair.
   std::vector<hipExtCopyEngineDeviceHandle> all_handles;
   for (int dst : dst_devices) {
-    if (!GetCopyEngineHandles(params.src_gpu, dst, static_cast<int>(params.num_queues),
-                              &all_handles)) {
-      return EXIT_FAILURE;
-    }
+    if (!GetCopyEngineHandles(params.src_gpu, dst, 1, &all_handles)) return EXIT_FAILURE;
   }
   HandleSet handles{};
   std::copy(all_handles.begin(), all_handles.end(), handles.handles);
@@ -181,8 +175,7 @@ int Run(const Params& params, SignalMemory signal_memory) {
       hipLaunchKernelGGL(
           CopyBandwidthKernel, grid, block, 0, 0, handles, static_cast<const char*>(src_buffer),
           dst_buffers_d, uint64_t{copy_size}, static_cast<uint32_t>(params.num_copy_commands),
-          static_cast<uint32_t>(params.num_destinations), static_cast<uint32_t>(params.num_queues),
-          signals, ++epoch, starts, ends, statuses);
+          static_cast<uint32_t>(params.num_destinations), signals, ++epoch, starts, ends, statuses);
     };
 
     if (!params.skip_verification) {
@@ -206,12 +199,12 @@ int Run(const Params& params, SignalMemory signal_memory) {
     std::vector<hipEvent_t> events(params.iterations * 2);
     for (hipEvent_t& event : events) HIP_CHECK(hipEventCreate(&event));
     for (size_t iter = 0; iter < params.iterations; ++iter) {
-      hipExtLaunchKernelGGL(
-          CopyBandwidthKernel, grid, block, 0, 0, events[iter * 2], events[iter * 2 + 1], 0,
-          handles, static_cast<const char*>(src_buffer), dst_buffers_d, uint64_t{copy_size},
-          static_cast<uint32_t>(params.num_copy_commands),
-          static_cast<uint32_t>(params.num_destinations), static_cast<uint32_t>(params.num_queues),
-          signals, ++epoch, start_d + iter * total_warps, end_d + iter * total_warps, statuses);
+      hipExtLaunchKernelGGL(CopyBandwidthKernel, grid, block, 0, 0, events[iter * 2],
+                            events[iter * 2 + 1], 0, handles, static_cast<const char*>(src_buffer),
+                            dst_buffers_d, uint64_t{copy_size},
+                            static_cast<uint32_t>(params.num_copy_commands),
+                            static_cast<uint32_t>(params.num_destinations), signals, ++epoch,
+                            start_d + iter * total_warps, end_d + iter * total_warps, statuses);
     }
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
@@ -282,9 +275,6 @@ int main(int argc, char** argv) {
   parser.AddOption("--warpsPerWG", &params.warps_per_wg, "Submitting warps per work-group");
   parser.AddOption("--wgsPerDestination", &params.wgs_per_destination,
                    "Work-groups per destination");
-  parser.AddOption("--numOfQueuesPerDestination", &params.num_queues,
-                   "Copy engines per destination: the runtime's best N for each pair, which the "
-                   "work-groups of a destination take turns over");
   parser.AddOption("-o,--outputFile", &params.output_file, "Filename for CSV results");
   parser.AddOption("--signalMemory", &params.signal_memory,
                    "Where completion words live: device or host");
@@ -300,7 +290,7 @@ int main(int argc, char** argv) {
   }
   if (!ValidateSweep(params.min_copy_size, params.max_copy_size)) return 2;
   if (params.num_copy_commands == 0 || params.iterations == 0 || params.num_destinations == 0 ||
-      params.warps_per_wg == 0 || params.wgs_per_destination == 0 || params.num_queues == 0) {
+      params.warps_per_wg == 0 || params.wgs_per_destination == 0) {
     std::cerr << "error: counts must be non-zero\n";
     return 2;
   }

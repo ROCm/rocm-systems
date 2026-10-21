@@ -76,17 +76,20 @@ reserve/build/atomic latency breakdown).
 
 ## Engines and handles
 
-`hipExtCopyEngineGetDeviceHandles` returns the runtime's engines for a pair, best first.
-`copy-engine-latency --handleRank N` submits on the Nth and `copy-engine-bw
---numOfQueuesPerDestination N` spreads a destination's work-groups over the best N.
+`hipExtCopyEngineGetDeviceHandles` returns engines for a pair, best first, one ring per engine.
+Both tools use one handle per destination: rank 0, the pair's affinity engine, which is also the
+engine rocm-xio picks. Every warp and work-group of a destination submits to that one ring.
+`copy-engine-latency --handleRank N` submits on the Nth instead, as a diagnostic.
 
-On an 8x MI300X node some of the returned engines are unusable from a kernel: a 16 KiB copy takes
-about 7 us on most and 200-340 ms on the others. Which ranks are slow depends on the pair (GPU 0 to
-GPU 1: ranks 1, 3, 5, 7; GPU 0 to GPU 2 and 0 to GPU 5: rank 2; GPU 1 to GPU 0: ranks 1 and 3), so
-it is not rank parity. The runtime ranks engines for the pair's route but does not check that a
-kernel can drive the ring. Check a rank with `copy-engine-latency --handleRank N --srcGpu S --dstGpu D
--b 16384 -e 16384 -n 20` before trusting a multi-queue run; `--numOfQueuesPerDestination 2` and up
-may include a slow ring.
+Rings are created on first use and count against `GPU_MAX_SDMA_DEVICE_QUEUES` (default 0: off). The
+HIP API has no query for that limit; a call that cannot get a ring comes back with fewer handles
+than asked for, and the tools say so. `-d` destinations need that many rings.
+
+On an 8x MI300X node only rank 0 is ranked for the pair; the rest are the other xGMI engines in
+ascending id, and the odd ones are unusable from a kernel: a 16 KiB copy takes about 7 us on an
+even engine and 200-340 ms on an odd one. Which ranks that is depends on the pair (GPU 0 to GPU 1:
+ranks 1, 3, 5, 7; GPU 0 to GPU 2: rank 2). Check a rank with `copy-engine-latency --handleRank N
+--srcGpu S --dstGpu D -b 16384 -e 16384 -n 20` before using it.
 
 ## Differences from sdma-ep-bench
 
@@ -96,8 +99,8 @@ host chose, and every copy retires its own completion word. So:
 | Reference | Here |
 |---|---|
 | `sdma-ep-bw --no-queue-state`, `--device-triggered` | Not available: no queue-state object, no host-preprogrammed wait-then-put. |
-| `sdma-ep-bw --numOfQueuesPerDestination` | The same option; queues are the runtime's best N engines for the pair, not a count of queues the tool creates. |
-| `sdma-ep-bw --wgsPerQueue` | `--wgsPerDestination`: work-groups per destination, spread over its queues. |
+| `sdma-ep-bw --numOfQueuesPerDestination` | Not available: the API makes one ring per engine, not several queues on one engine, so a destination always has one. The `#Queues` CSV column is gone. |
+| `sdma-ep-bw --wgsPerQueue` | `--wgsPerDestination`: work-groups per destination, all sharing its ring. |
 | `sdma-ep-bw` signals | One completion word per copy instead of one atomic per batch; a warp waits for all of its copies. |
 | `sdma-ep-latency --fine-grained` and the Reserve/Build/Submit/Atomic* columns | Replaced by two always-on columns: `Submit [us]` (mean per submit call, including ring reserve, packet build and doorbell) and `Transfer [us]` (last submit returned until every copy retired). |
 | Reference quirks | Not reproduced: `sdma-ep-bw` printed std in ms under a us label; `sdma-ep-latency` timed only its last iteration and always reported std 0. Both now report real per-iteration statistics in us. |
