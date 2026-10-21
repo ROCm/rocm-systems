@@ -1600,8 +1600,7 @@ amdsmi_status_t fill_cuid_info(const amdcuid_id_t& handle, amdsmi_cuid_info_t* i
 
   // The primary is CAP_SYS_ADMIN-gated at the source because its payload embeds
   // the raw serial number. An unprivileged caller gets an empty string and a
-  // successful call: the derived CUID is what it is supposed to be reading, and
-  // failing the whole snapshot would push it back onto the legacy UUID.
+  // successful call: the derived CUID is what it is supposed to be reading.
   amdcuid_id_t primary = {};
   uint32_t length = sizeof(primary);
   const amdcuid_status_t primary_status =

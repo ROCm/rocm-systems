@@ -114,26 +114,23 @@ details for usage.
 (cmd-list)=
 ### amd-smi list
 
-Lists GPU information, including identifier kind and CUID provenance.
+Lists GPU information, including the CUID and its provenance.
 
 #### CUID identity and compatibility
 
-The `uuid` field (human-readable/JSON) and `gpu_uuid` column (CSV) are
-**CUID-first compatibility aliases**: the derived CUID when available,
-otherwise the legacy GPU UUID, otherwise `N/A`. The fields below follow all
-existing list fields, including those selected by `--enumeration`; new
-consumers should use `identifier_kind` and `cuid`.
+The `uuid` field (human-readable/JSON) and `gpu_uuid` column (CSV) report the
+legacy GPU UUID, or `N/A`; they never contain a CUID. The CUID fields below
+follow all existing list fields, including those selected by `--enumeration`.
 
 Field | Meaning
 ---|---
-`identifier_kind` | `cuid`, `legacy_uuid`, or `unknown`; identifies the value in the compatibility alias
 `cuid` | Derived CUID, or `N/A`; never contains a legacy UUID
 `source` | `DRIVER`, `LIBRARY`, or `UNKNOWN`, from the CUID API
 `auxiliary` | Boolean `true`/`false` in JSON, `True`/`False` in CSV, or the string `unknown`; unknown is not false
 `cuid_metadata_status` | `available`, `partial`, `unsupported` (the library predates the call), `not_supported` (no CUID for this handle; the other CUID fields read `N/A`), `invalid_value`, or `amdsmi_error_<numeric status>`; preserves metadata failures even when an identifier remains available
 
-If the CUID info API fails, the CUID-only API is tried before the legacy UUID
-API, so a metadata failure alone does not turn a readable CUID into a legacy UUID.
+If the CUID info API fails, the CUID-only API is tried, so a metadata failure
+alone does not hide a readable CUID.
 
 `list` never reports the primary CUID.
 
@@ -193,7 +190,8 @@ output](#cli-ex-static) for `amd-smi static`.
 
 `amd-smi static --cuid` adds a per-GPU `cuid` block with `derived_cuid`,
 `primary_cuid`, `component_type`, `auxiliary`, `source`, `identifier_kind`
-and `cuid_metadata_status`, with the semantics
+and `cuid_metadata_status`. `identifier_kind` is `cuid` when `derived_cuid`
+holds a CUID and `unknown` otherwise; the other fields have the semantics
 described under [`amd-smi list`](#cmd-list). It does not fall back to a legacy
 UUID. `primary_cuid` is `N/A (not requested)` unless `--cuid-primary` is given.
 
