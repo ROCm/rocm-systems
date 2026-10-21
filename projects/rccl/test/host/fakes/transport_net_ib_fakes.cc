@@ -33,7 +33,22 @@ std::function<ncclResult_t(void*, int)> g_rcclCastNetP2pPolicy = DefaultCastNetP
 ASSERT_HOOK_MATCHES_PROD(g_rcclCastNetP2pPolicy, rcclCastNetP2pPolicy);
 ncclResult_t rcclCastNetP2pPolicy(void* handle, int isP2p) { return g_rcclCastNetP2pPolicy(handle, isP2p); }
 
+static ncclResult_t DefaultIbGidInfoQuery(struct ibv_context*, uint8_t, struct ibv_port_attr*,
+                                          struct ncclIbGidInfo*) {
+  return ncclSystemError;
+}
+std::function<ncclResult_t(struct ibv_context*, uint8_t, struct ibv_port_attr*, struct ncclIbGidInfo*)>
+    g_ncclIbGidInfoQuery = DefaultIbGidInfoQuery;
+ASSERT_HOOK_MATCHES_PROD(g_ncclIbGidInfoQuery, ncclIbGidInfoQuery);
+#undef ASSERT_HOOK_MATCHES_PROD
+
+ncclResult_t ncclIbGidInfoQuery(struct ibv_context* context, uint8_t port, struct ibv_port_attr* attr,
+                                struct ncclIbGidInfo* info) {
+  return g_ncclIbGidInfoQuery(context, port, attr, info);
+}
+
 void ResetTransportNetIbFakes() {
   g_rcclNetP2pPolicy = DefaultNetP2pPolicy;
   g_rcclCastNetP2pPolicy = DefaultCastNetP2pPolicy;
+  g_ncclIbGidInfoQuery = DefaultIbGidInfoQuery;
 }
