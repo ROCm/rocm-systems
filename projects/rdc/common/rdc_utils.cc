@@ -75,6 +75,24 @@ int ReadFile(const char* path, std::string* retStr, bool chop_newline) {
   return amd::rdc::ReadFile(file_path, retStr, chop_newline);
 }
 
+std::vector<GpuPartition> GpuPartitions(const std::vector<uint16_t>& counts) {
+  std::vector<GpuPartition> out;
+  out.reserve(counts.size());
+  uint32_t socket = 0;
+  for (size_t i = 0; i < counts.size(); ++socket) {
+    const uint16_t n = counts[i];
+    if (n <= 1 || n == UINT16_MAX) {
+      out.push_back({socket, -1});
+      ++i;
+      continue;
+    }
+    for (int32_t k = 0; k < n && i < counts.size() && counts[i] == n; ++k, ++i) {
+      out.push_back({socket, k});
+    }
+  }
+  return out;
+}
+
 bool IsNumber(const std::string& s) {
   return !s.empty() && std::all_of(s.begin(), s.end(), ::isdigit);
 }

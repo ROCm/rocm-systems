@@ -373,3 +373,81 @@ def test_dmon_with_event_fields_only_ends_each_line(tools, tmp_path):
     finally:
         code = d.stop()
     assert code == 0, f"rdcd exited with {code}\n{d.output()}"
+
+
+# ---------------------------------------------------------------------------
+# rdci discovery: partition IDs, a failed profile lookup, a failed version query
+# ---------------------------------------------------------------------------
+def _gpu_rows(out):
+    """`rdci discovery -i` GPU rows: [(GPU index, XCC, DECODER)]."""
+    rows = []
+    for line in out.splitlines():
+        m = re.match(r"^(\d+)\s{2,}.*\s(\S+)\s+(\S+)\s*$", line)
+        if m:
+            rows.append((int(m.group(1)), m.group(2), m.group(3)))
+    return rows
+
+
+def _partition_rows(out):
+    """`rdci discovery -i` partition rows: [(GPU index above, partition ID, XCC, DECODER)]."""
+    rows, gpu = [], None
+    for line in out.splitlines():
+        m = re.match(r"^(\d+)\s{2,}", line)
+        if m:
+            gpu = int(m.group(1))
+            continue
+        m = re.match(r"^\s+(g\d+\.\d+)\s+(\S+)\s+\*?(\S+)\s*$", line)
+        if m:
+            rows.append((gpu, m.group(1), m.group(2), m.group(3)))
+    return rows
+
+
+def test_discovery_shows_each_partition_once_with_its_id(tools, tmp_path):
+    # Two sockets of two partitions: GPU indexes 0 and 1 are socket 0's, 2 and 3 socket 1's.
+    d = Rdcd(tools, tmp_path, gpus=2, RDC_FAKE_PARTITIONS=2).start()
+    try:
+        out = d.ok("discovery", "-i")
+        rows = _partition_rows(out)
+        assert [row[:2] for row in rows] == [(0, "g0.0"), (1, "g0.1"), (2, "g1.0"), (3, "g1.1")], (
+            out
+        )
+        assert all(xcc.isdigit() and int(xcc) > 0 for _, _, xcc, _ in rows), out
+        for _, partition, _, _ in rows:
+            socket = int(partition[1:].split(".")[0])
+            dmon = d.ok("dmon", "-i", partition, "-e", "100", "-c", "1", "-d", "200")
+            m = re.search(rf"^{re.escape(partition)}\s+(\S+)", dmon, re.M)
+            assert m and m.group(1) == str(golden.expected(100, socket)), dmon
+    finally:
+        code = d.stop()
+    assert code == 0, f"rdcd exited with {code}\n{d.output()}"
+
+
+def test_discovery_shows_na_for_a_failed_profile_lookup(tools, tmp_path):
+    # The partition counts come from another call, so only the profiles fail.
+    d = Rdcd(
+        tools,
+        tmp_path,
+        gpus=2,
+        RDC_FAKE_PARTITIONS=2,
+        RDC_FAKE_FAIL="amdsmi_get_gpu_accelerator_partition_profile_config",
+    ).start()
+    try:
+        d.arm()
+        out = d.ok("discovery", "-i")
+        cells = [row[1:] for row in _gpu_rows(out)] + [row[2:] for row in _partition_rows(out)]
+        assert len(cells) == 8 and set(cells) == {("N/A", "N/A")}, out
+    finally:
+        code = d.stop()
+    assert code == 0, f"rdcd exited with {code}\n{d.output()}"
+
+
+def test_discovery_version_fails_with_its_query(tools, tmp_path):
+    d = Rdcd(tools, tmp_path, RDC_FAKE_FAIL="amdsmi_get_lib_version").start()
+    try:
+        d.arm()
+        r = d.rdci("discovery", "-v")
+        assert r.returncode != RDC_ST_OK, r.stdout + r.stderr
+        assert "RDCD :" not in r.stdout, r.stdout
+    finally:
+        code = d.stop()
+    assert code == 0, f"rdcd exited with {code}\n{d.output()}"

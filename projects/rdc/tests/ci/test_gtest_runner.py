@@ -185,3 +185,21 @@ class TestGoogleTestSuite:
         assert result.returncode == 0, (
             f"rdc_topology_tests failed (rc={result.returncode}):\n{result.stdout[-2000:]}"
         )
+
+    def test_rdc_rdci_helpers(self, rocm_dir, rdctst_path):
+        # Needs no GPU and no RDC library: rdci's text and partition helpers on their own.
+        # rdctst_path skips this test unless the RDC test package is installed.
+        binary = os.path.join(rocm_dir, "share", "rdc", "rdctst_tests", "rdc_rdci_helper_tests")
+        assert os.path.isfile(binary), f"{binary} is missing from the RDC test package"
+
+        result = subprocess.run(
+            [binary], capture_output=True, text=True, errors="replace", timeout=120
+        )
+
+        print(result.stdout)
+        if result.stderr:
+            print(result.stderr)
+
+        assert result.returncode == 0, (
+            f"rdc_rdci_helper_tests failed (rc={result.returncode}):\n{result.stdout[-2000:]}"
+        )

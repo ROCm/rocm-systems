@@ -148,6 +148,27 @@ install(
     COMPONENT ${TESTS_COMPONENT}
 )
 
+# rdc_rdci_helper_tests: the text checks that keep control characters out of rdci's output and
+# out of new names (rdc_lib/rdc_common.h), and the partition IDs rdci discovery prints
+# (common/rdc_utils.cc, compiled in). Needs no GPU and no RDC library.
+add_executable(
+    rdc_rdci_helper_tests
+    ${SRC_DIR}/test_rdci_helpers.cc
+    ${PROJECT_SOURCE_DIR}/common/rdc_utils.cc
+)
+target_include_directories(
+    rdc_rdci_helper_tests
+    PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/include
+)
+target_link_libraries(rdc_rdci_helper_tests PRIVATE GTest::gtest_main pthread)
+set_target_properties(rdc_rdci_helper_tests PROPERTIES INSTALL_RPATH "\$ORIGIN")
+add_test(NAME rdc_rdci_helper_tests COMMAND rdc_rdci_helper_tests)
+install(
+    TARGETS rdc_rdci_helper_tests
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
+    COMPONENT ${TESTS_COMPONENT}
+)
+
 # rdc_power_usage_tests: RDC_FI_POWER_USAGE against fake amdsmi power and
 # gpu_metrics replies. Compiles the metric fetcher into the test, which defines
 # the amdsmi calls the tests reach, so it runs on GPU-less CI. amd_smi provides
