@@ -15,6 +15,7 @@
 #include "ScopedHook.h"
 #include "fakes/dl_fakes.h"
 #include "fakes/transport_stubs.h"
+#include "misc/WrapTable.h"
 
 #include IONICDVWRAP_CC_PATH
 
@@ -27,13 +28,6 @@ ionic_dv_puec_route* const kRoute = reinterpret_cast<ionic_dv_puec_route*>(0xE0)
 
 int g_ret;
 int g_calls;
-
-// One wrapper and the fake verb behind it. The fake checks the arguments it was forwarded.
-struct WrapCase {
-  const char* name;
-  void (*install)();
-  ncclResult_t (*call)();
-};
 
 const WrapCase kCases[] = {
     {"qp_set_gda",
@@ -73,15 +67,12 @@ const WrapCase kCases[] = {
 class IonicdvwrapMicrotest : public ::testing::TestWithParam<WrapCase> {
  protected:
   void SetUp() override {
-    saved_ = ionicdvSymbols;
-    std::memset(&ionicdvSymbols, 0, sizeof(ionicdvSymbols));
     g_ret = 0;
     g_calls = 0;
   }
-  void TearDown() override { ionicdvSymbols = saved_; }
 
  private:
-  ncclIonicdvSymbols saved_;
+  ScopedZeroedTable<ncclIonicdvSymbols> table_{ionicdvSymbols};
 };
 
 TEST_P(IonicdvwrapMicrotest, VerbReturnsZero_Succeeds) {
@@ -103,8 +94,7 @@ TEST_P(IonicdvwrapMicrotest, SymbolNotLoaded_ReturnsSystemErrorWithEopnotsupp) {
   EXPECT_EQ(errno, EOPNOTSUPP);
 }
 
-INSTANTIATE_TEST_SUITE_P(Ionicdvwrap, IonicdvwrapMicrotest, ::testing::ValuesIn(kCases),
-                         [](const ::testing::TestParamInfo<WrapCase>& info) { return std::string(info.param.name); });
+INSTANTIATE_TEST_SUITE_P(Ionicdvwrap, IonicdvwrapMicrotest, ::testing::ValuesIn(kCases), CaseName<WrapCase>);
 
 TEST(IonicdvwrapSymbolsMicrotest, NoAinic_SucceedsWithoutLoadingLibionic) {
   ScopedHook noAinic(g_useAinic, [] { return false; });

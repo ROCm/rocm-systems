@@ -12,6 +12,7 @@
 #include "fakes/dl_seam_undef.h"
 
 static void* DefaultDlopen(const char* file, int mode) { return dlopen(file, mode); }
+static void* DefaultDlsym(void* handle, const char* name) { return dlsym(handle, name); }
 static void* DefaultDlvsym(void* handle, const char* name, const char* version) {
   return dlvsym(handle, name, version);
 }
@@ -19,12 +20,14 @@ static int DefaultDlclose(void* handle) { return dlclose(handle); }
 static char* DefaultDlerror() { return dlerror(); }
 
 std::function<void*(const char*, int)> g_dlopen = DefaultDlopen;
+std::function<void*(void*, const char*)> g_dlsym = DefaultDlsym;
 std::function<void*(void*, const char*, const char*)> g_dlvsym = DefaultDlvsym;
 std::function<int(void*)> g_dlclose = DefaultDlclose;
 std::function<char*()> g_dlerror = DefaultDlerror;
 
 void ResetDlFakes() {
   g_dlopen = DefaultDlopen;
+  g_dlsym = DefaultDlsym;
   g_dlvsym = DefaultDlvsym;
   g_dlclose = DefaultDlclose;
   g_dlerror = DefaultDlerror;
@@ -32,6 +35,7 @@ void ResetDlFakes() {
 
 extern "C" {
 void* micro_dlopen(const char* file, int mode) { return g_dlopen(file, mode); }
+void* micro_dlsym(void* handle, const char* name) { return g_dlsym(handle, name); }
 void* micro_dlvsym(void* handle, const char* name, const char* version) { return g_dlvsym(handle, name, version); }
 int micro_dlclose(void* handle) { return g_dlclose(handle); }
 char* micro_dlerror(void) { return g_dlerror(); }
@@ -50,6 +54,15 @@ ScriptedDl::ScriptedDl() {
       if (lib.get() != handle) continue;
       auto it = lib->symbols.find({name, version});
       return it == lib->symbols.end() ? nullptr : it->second;
+    }
+    return nullptr;
+  };
+  g_dlsym = [this](void* handle, const char* name) -> void* {
+    for (auto& lib : libraries_) {
+      if (lib.get() != handle) continue;
+      for (const auto& [key, addr] : lib->symbols) {
+        if (key.first == name) return addr;
+      }
     }
     return nullptr;
   };

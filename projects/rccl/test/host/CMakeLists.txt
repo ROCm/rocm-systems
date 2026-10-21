@@ -715,10 +715,9 @@ function(rccl_define_micro_source_lists)
   set(TEST_MICRO_MISC_SOURCE_FILES
     misc/gdr-peermem-test.cc
     misc/ibvsymbols-test.cc
+    misc/dvsymbols-test.cc               # mlx5dvsymbols.cc + ionicdvsymbols.cc
     misc/ibvwrap-test.cc
-    misc/ionicdvsymbols-test.cc
     misc/ionicdvwrap-test.cc
-    misc/mlx5dvsymbols-test.cc
     misc/mlx5dvwrap-test.cc
     fakes/dl_fakes.cc                    # dlopen/dlvsym
     fakes/env_fakes.cc                   # NCCL_IBVERBS_LIB

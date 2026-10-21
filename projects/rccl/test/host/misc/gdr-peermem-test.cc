@@ -1,7 +1,9 @@
 /*************************************************************************
  * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
- * Host-only tests for src/misc/gdr_peermem.cc.
+ * Host-only tests for src/misc/gdr_peermem.cc. The scan's client matching is covered by
+ * test/GdrPeerMemTests.cpp (rccl-UnitTestsGdr); these cover the opened bases, PATH_MAX and
+ * the default paths.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -70,37 +72,9 @@ class GdrPeermemScanMicrotest : public ::testing::Test {
   std::string root_;
 };
 
-TEST_F(GdrPeermemScanMicrotest, Scan_SubdirWithVersion_FindsClientOfAnyName) {
-  std::string base = MakeBase("memory_peers");
-  AddClient(base, "nv_mem");
-
-  EXPECT_EQ(Scan({base}), 1);
-}
-
-TEST_F(GdrPeermemScanMicrotest, Scan_SubdirWithoutVersion_IsNotAClient) {
-  std::string base = MakeBase("memory_peers");
-  fs::create_directory(base + "/amdkfd");
-
-  EXPECT_EQ(Scan({base}), 0);
-}
-
-TEST_F(GdrPeermemScanMicrotest, Scan_DotEntryWithVersion_IsSkipped) {
-  std::string base = MakeBase("memory_peers");
-  AddClient(base, ".hidden");
-
-  EXPECT_EQ(Scan({base}), 0);
-}
-
 TEST_F(GdrPeermemScanMicrotest, Scan_EmptyList_FindsNothing) {
   EXPECT_EQ(Scan({}), 0);
   EXPECT_TRUE(g_openedDirs.empty());
-}
-
-TEST_F(GdrPeermemScanMicrotest, Scan_MissingBase_MovesOnToNextBase) {
-  std::string second = MakeBase("second");
-  AddClient(second, "amdkfd");
-
-  EXPECT_EQ(Scan({root_ + "/missing", second}), 1);
 }
 
 TEST_F(GdrPeermemScanMicrotest, Scan_ClientInFirstBase_DoesNotOpenLaterBases) {

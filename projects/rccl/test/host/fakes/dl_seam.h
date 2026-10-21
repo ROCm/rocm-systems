@@ -12,12 +12,14 @@
 
 extern "C" {
 void* micro_dlopen(const char*, int);
+void* micro_dlsym(void*, const char*);
 void* micro_dlvsym(void*, const char*, const char*);
 int micro_dlclose(void*);
 char* micro_dlerror(void);
 }  // extern "C"
 
 #define dlopen micro_dlopen
+#define dlsym micro_dlsym
 #define dlvsym micro_dlvsym
 #define dlclose micro_dlclose
 #define dlerror micro_dlerror

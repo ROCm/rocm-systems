@@ -8,6 +8,7 @@
 
 #include "fail_loud.h"
 #include "net_ib_ops_fault.h"
+#include "signature-drift.h"
 
 static ncclResult_t DefaultFaultInstall(struct ibv_context*) {
   FailLoudUnfaked("net_ib_ops_fault_fakes", "ncclIbOpsFaultInstall");
@@ -18,6 +19,9 @@ static ncclResult_t DefaultFaultRemove(struct ibv_context*) {
 
 std::function<ncclResult_t(struct ibv_context*)> g_ncclIbOpsFaultInstall = DefaultFaultInstall;
 std::function<ncclResult_t(struct ibv_context*)> g_ncclIbOpsFaultRemove = DefaultFaultRemove;
+
+ASSERT_HOOK_MATCHES_PROD(g_ncclIbOpsFaultInstall, ncclIbOpsFaultInstall);
+ASSERT_HOOK_MATCHES_PROD(g_ncclIbOpsFaultRemove, ncclIbOpsFaultRemove);
 
 void ResetNetIbOpsFaultFakes() {
   g_ncclIbOpsFaultInstall = DefaultFaultInstall;

@@ -465,8 +465,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
 - **`rccl-UnitTestsMicroMisc`** — the `src/misc/` IB verbs and direct-verbs loaders
   (`ibvwrap`, `ibvsymbols`, `mlx5dvwrap`, `mlx5dvsymbols`, `ionicdvwrap`,
   `ionicdvsymbols`) and `gdr_peermem.cc`; tests mirror the source tree under
-  `test/host/misc/` as `<stem>-test.cc`, with suites `<Stem>*`. The symbol
-  builders load against `fakes/dl_fakes.h`'s scripted libdl. See
+  `test/host/misc/` as `<stem>-test.cc` (`dvsymbols-test.cc` runs one typed suite for
+  both dv providers), with suites `<Stem>*`. The symbol builders load against
+  `fakes/dl_fakes.h`'s scripted libdl. See
   `test_categories_micro_misc.yaml`.
 
 Everything below (seams, fakes, coverage) applies to all of them; the concrete examples
