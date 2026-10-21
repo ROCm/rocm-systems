@@ -64,15 +64,24 @@ sample_where(size_t sample_track_id)
         sample_track_id);
 }
 
+// A recorded id compares equal, so the column can be indexed. 0 is the
+// unrecorded value and also has to match NULL.
+std::string
+match_id(const std::string& column, size_t id)
+{
+    if(id == 0) return fmt::format("({0} = 0 OR {0} IS NULL)", column);
+    return fmt::format("{0} = {1}", column, id);
+}
+
 std::string
 agent_where(const duration_source_t& source, size_t nid, size_t agent_id, size_t queue_id)
 {
-    return fmt::format("{0}.nid = {1} AND {0}.{2} = {3} AND {0}.queue_id = {4}",
+    return fmt::format("{0}.nid = {1} AND {2} AND {3}",
                        source.alias,
                        nid,
-                       source.agent_column,
-                       agent_id,
-                       queue_id);
+                       match_id(fmt::format("{}.{}", source.alias, source.agent_column),
+                                agent_id),
+                       match_id(fmt::format("{}.queue_id", source.alias), queue_id));
 }
 
 std::string
@@ -174,7 +183,7 @@ struct bucket_accumulator_t
 
 reader_types::histogram_bucket_list_t
 accumulate_overlaps(const std::vector<data_storage::schema_v3::interval_result>& rows,
-                    reader_types::timestamp_ns_t                                origin,
+                    reader_types::timestamp_ns_t                                 origin,
                     reader_types::timestamp_ns_t bucket_size,
                     size_t                       bucket_count)
 {
@@ -296,7 +305,7 @@ make_grid(const reader_catalog_t& catalog, size_t max_buckets)
     }
 
     const reader_types::timestamp_ns_t duration = end - origin;
-    reader_types::timestamp_ns_t bucket_size = (duration + max_buckets) / max_buckets;
+    reader_types::timestamp_ns_t bucket_size    = (duration + max_buckets) / max_buckets;
     if(bucket_size == 0) bucket_size = 1;
     const size_t bucket_count =
         duration == 0 ? 1 : (duration + bucket_size) / bucket_size;

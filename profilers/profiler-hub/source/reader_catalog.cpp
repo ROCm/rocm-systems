@@ -377,6 +377,30 @@ reader_catalog_t::add_category_tracks(data_storage::schema_v3::read_statements& 
         [&](reader_types::track_kind_t kind, std::string_view label, const auto& rows) {
             for(const auto& row : rows)
             {
+                // A NULL id is read as 0, so the NULL group and the 0 group
+                // share this key. Fold the later group into the track already
+                // created for it.
+                const agent_queue_track_key_t key{ kind,
+                                                   row.nid,
+                                                   row.agent_id,
+                                                   row.queue_id };
+                if(const auto existing = agent_queue_track_by_key.find(key);
+                   existing != agent_queue_track_by_key.end() && existing->second)
+                {
+                    auto& track = *existing->second;
+                    track.event_count += row.count;
+                    if(row.min_start.has_value() &&
+                       (track.start_ts == 0 || row.min_start.value() < track.start_ts))
+                    {
+                        track.start_ts = row.min_start.value();
+                    }
+                    if(row.max_end.has_value() && row.max_end.value() > track.end_ts)
+                    {
+                        track.end_ts = row.max_end.value();
+                    }
+                    continue;
+                }
+
                 add_agent_queue_track(
                     kind,
                     fmt::format("{} [{}] Queue {}", label, row.agent_id, row.queue_id),
@@ -503,14 +527,11 @@ reader_catalog_t::build_stream_hardware_links(
                 link.stream_track = stream_it->second;
             }
 
-            if(row.agent_id.has_value() && row.queue_id.has_value())
+            if(const auto hardware_it = hardware_tracks.find(agent_queue_track_key_t{
+                   kind, row.nid, row.agent_id.value_or(0), row.queue_id.value_or(0) });
+               hardware_it != hardware_tracks.end())
             {
-                if(const auto hardware_it = hardware_tracks.find(agent_queue_track_key_t{
-                       kind, row.nid, row.agent_id.value(), row.queue_id.value() });
-                   hardware_it != hardware_tracks.end())
-                {
-                    link.hardware_track = hardware_it->second;
-                }
+                link.hardware_track = hardware_it->second;
             }
 
             stream_hardware_links.push_back(std::move(link));

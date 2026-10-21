@@ -926,8 +926,9 @@ ph_ctx::load_all_tracks(const stop_requested_fn& stop_requested,
         }
         else
         {
-            std::ignore           = m_track_reader.events(track, 0, 0);
+            const auto loaded     = m_track_reader.events(track, 0, 0);
             c_track.nesting_depth = m_track_reader.nesting_depth(track);
+            c_track.event_count   = loaded.list_size;
         }
 
         loaded_events += c_track.event_count;

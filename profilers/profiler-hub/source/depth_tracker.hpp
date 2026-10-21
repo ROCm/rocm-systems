@@ -5,51 +5,78 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <functional>
-#include <queue>
 #include <vector>
 
 namespace profiler_hub
 {
 
 /**
- * Tracks how many events of one track overlap at a time. Events must be added in
- * non-decreasing start order. An event that starts exactly when another ends does not
- * overlap it.
+ * Assigns each event the lowest level that is free when it starts. Events must
+ * be added in non-decreasing start order. An event that starts exactly when
+ * another ends does not overlap it. Levels count from 1.
  */
 class depth_tracker
 {
 public:
     /**
      * Adds the next event of the track.
-     * @return how many events, this one included, are active at @p start.
+     * @return the lowest level free at @p start. 1 means nothing on this track
+     *         overlaps the event.
      */
     std::size_t add(std::size_t start, std::size_t end)
     {
-        while(!m_active_ends.empty() && m_active_ends.top() <= start)
+        std::size_t level = 0;
+        auto        it    = m_active.begin();
+        while(it != m_active.end())
         {
-            m_active_ends.pop();
+            if(start >= it->end)
+            {
+                it = m_active.erase(it);
+                continue;
+            }
+            if(end >= it->start)
+            {
+                // A higher level is occupied while this one is free.
+                if(level < it->level)
+                {
+                    break;
+                }
+                level = it->level + 1;
+            }
+            ++it;
         }
-        m_active_ends.push(end);
-        m_depth = std::max(m_depth, m_active_ends.size());
-        return m_active_ends.size();
+
+        m_active.push_back(active_event{ start, end, level });
+        std::sort(m_active.begin(),
+                  m_active.end(),
+                  [](const active_event& lhs, const active_event& rhs) {
+                      return lhs.level < rhs.level;
+                  });
+
+        const std::size_t depth = level + 1;
+        m_depth                 = std::max(m_depth, depth);
+        return depth;
     }
 
-    /** The largest overlap seen since construction or the last reset(); 0 if none. */
+    /** The largest level assigned since construction or the last reset(); 0 if none. */
     [[nodiscard]] std::size_t depth() const noexcept { return m_depth; }
 
     void reset()
     {
-        m_active_ends = {};
-        m_depth       = 0;
+        m_active.clear();
+        m_depth = 0;
     }
 
 private:
-    using min_heap_t =
-        std::priority_queue<std::size_t, std::vector<std::size_t>, std::greater<>>;
+    struct active_event
+    {
+        std::size_t start;
+        std::size_t end;
+        std::size_t level;
+    };
 
-    min_heap_t  m_active_ends;
-    std::size_t m_depth{};
+    std::vector<active_event> m_active;
+    std::size_t               m_depth{};
 };
 
 }  // namespace profiler_hub

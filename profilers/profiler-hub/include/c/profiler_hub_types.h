@@ -372,10 +372,11 @@ extern "C"
      * @note name points into memory owned by the producing ph_ctx_t.
      * @note id is only unique together with type: every event type has its
      *       own id space.
-     * @note nesting_depth is the number of events of the same track, this one
-     *       included, that are active when this event starts (1 = not
-     *       overlapped). It is relative to the whole track, also for a
-     *       time-windowed request.
+     * @note nesting_depth is the lowest level of this track that is free when
+     *       the event starts (1 = nothing on the track overlaps it). A later
+     *       event reuses a lower level once that level no longer overlaps it.
+     *       The value is relative to the whole track, also for a time-windowed
+     *       request.
      * @note track_id is ph_track_t::id of the event's track. Track ids start
      *       at 0.
      */

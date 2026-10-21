@@ -171,6 +171,9 @@ extern "C"
      *       function does NOT invalidate an earlier one's result, and the
      *       arrays are safe to read concurrently from multiple calls
      *       (including calls made through a future).
+     * @note ph_event_t::track_id is @p track_id. A host thread omits rows
+     *       that resolve to a device queue or stream. A stream or queue
+     *       track keeps the rows its own query selected.
      * @note A request for a whole track (@p start_ts and @p end_ts both 0)
      *       is answered from memory after the first call: repeated calls for
      *       the same track return the same storage, so the arrays must be
@@ -188,8 +191,12 @@ extern "C"
 
     /**
      * @brief Retrieves events correlated with @p event by matching stack id.
-     *        The event itself is not included. An event with no stack id, or an
-     *        id that is not in the trace, yields an empty list.
+     *        The event itself is not included. A missing stack id, a stack id
+     *        of 0, or an id that is not in the trace yields an empty list.
+     *        A region reaches regions, kernel dispatches, memory copies, and
+     *        memory allocations. A kernel dispatch reaches regions and kernel
+     *        dispatches. A memory copy reaches regions and memory copies. A
+     *        memory allocation reaches regions.
      * @param ctx Context to query.
      * @param event Event returned by ph_get_track_events(). Only @p event->id and
      *        @p event->type are used. The object does not need to stay alive

@@ -67,20 +67,17 @@ private:
         const data_storage::schema_v3::timeline_event_result& row,
         reader_types::event_type_t                            type)
     {
-        if(row.agent_id.has_value() && row.queue_id.has_value())
+        const auto kind = agent_queue_kind(type);
+        if(kind.has_value())
         {
-            const auto kind = agent_queue_kind(type);
-            if(kind.has_value())
+            const auto it = m_catalog.agent_queue_track_by_key.find(
+                agent_queue_track_key_t{ kind.value(),
+                                         row.nid,
+                                         row.agent_id.value_or(0),
+                                         row.queue_id.value_or(0) });
+            if(it != m_catalog.agent_queue_track_by_key.end() && it->second)
             {
-                const auto it = m_catalog.agent_queue_track_by_key.find(
-                    agent_queue_track_key_t{ kind.value(),
-                                             row.nid,
-                                             row.agent_id.value(),
-                                             row.queue_id.value() });
-                if(it != m_catalog.agent_queue_track_by_key.end() && it->second)
-                {
-                    return it->second;
-                }
+                return it->second;
             }
         }
 
@@ -533,12 +530,27 @@ reader_t::impl::visit_track_events_in_id_range(
     if(topo_it == m_catalog->topology_by_track.end()) return;
     const auto& topo = topo_it->second;
 
-    std::optional<size_t> last_id;
-    std::string_view      last_name;
+    std::optional<size_t>  last_id;
+    std::string_view       last_name;
+    timeline_event_builder build_event{ *m_catalog };
 
     statements_for(*m_read_statements, type)
         .track_range_filtered(topo.nid, topo.pid, topo.tid, id_begin, id_end)
         .for_each([&](const data_storage::schema_v3::event_range_result& row) {
+            data_storage::schema_v3::timeline_event_result located;
+            located.id              = row.id;
+            located.start_timestamp = row.start_timestamp;
+            located.end_timestamp   = row.end_timestamp;
+            located.display_name_id = row.display_name_id;
+            located.nid             = topo.nid;
+            located.pid             = topo.pid;
+            located.tid             = topo.tid;
+            located.agent_id        = row.agent_id;
+            located.queue_id        = row.queue_id;
+            located.stream_id       = row.stream_id;
+            const auto resolved     = build_event(located, type);
+            if(resolved.track && resolved.track->id != track->id) return;
+
             std::string_view name;
             if(row.display_name_id.has_value())
             {
@@ -594,17 +606,39 @@ reader_t::impl::get_category_track_events(const reader_types::track_info_ptr_t& 
                     .for_each(append);
             }
         }
-        else if(range && stmts.agent_queue_time_filtered)
+        else if(range)
         {
-            stmts
-                .agent_queue_time_filtered(
-                    nid, track->agent_id, track->queue_id, range->end, range->start)
-                .for_each(append);
+            const bool unrecorded = track->agent_id == 0 || track->queue_id == 0;
+            if(unrecorded && stmts.agent_queue_unrecorded_time_filtered)
+            {
+                stmts
+                    .agent_queue_unrecorded_time_filtered(
+                        nid, track->agent_id, track->queue_id, range->end, range->start)
+                    .for_each(append);
+            }
+            else if(stmts.agent_queue_time_filtered)
+            {
+                stmts
+                    .agent_queue_time_filtered(
+                        nid, track->agent_id, track->queue_id, range->end, range->start)
+                    .for_each(append);
+            }
         }
-        else if(!range && stmts.agent_queue_filtered)
+        else if(stmts.agent_queue_filtered)
         {
-            stmts.agent_queue_filtered(nid, track->agent_id, track->queue_id)
-                .for_each(append);
+            const bool unrecorded = track->agent_id == 0 || track->queue_id == 0;
+            if(unrecorded && stmts.agent_queue_unrecorded_filtered)
+            {
+                stmts
+                    .agent_queue_unrecorded_filtered(
+                        nid, track->agent_id, track->queue_id)
+                    .for_each(append);
+            }
+            else
+            {
+                stmts.agent_queue_filtered(nid, track->agent_id, track->queue_id)
+                    .for_each(append);
+            }
         }
     });
 
@@ -1003,30 +1037,54 @@ reader_t::impl::get_arguments(const reader_types::timeline_event_t& event)
 reader_types::timeline_event_list_t
 reader_t::impl::get_correlated_events(const reader_types::timeline_event_t& event)
 {
-    auto event_meta = resolve_event_metadata(event);
-    if(!event_meta.has_value() || !event_meta->stack_id.has_value()) return {};
-
-    auto stack_id          = event_meta->stack_id.value();
-    auto excluded_event_id = event_meta->event_id.value_or(0);
-
-    reader_types::timeline_event_list_t all_events;
+    static_assert(static_cast<int>(reader_types::event_type_t::region) == 0);
+    static_assert(static_cast<int>(reader_types::event_type_t::kernel_dispatch) == 1);
+    static_assert(static_cast<int>(reader_types::event_type_t::memory_copy) == 2);
+    static_assert(static_cast<int>(reader_types::event_type_t::memory_allocate) == 3);
 
     const auto& stmts = m_read_statements->correlated_event_statements();
+    const decltype(stmts.region)* statement = nullptr;
+    switch(event.unique_identifier.type)
+    {
+        case reader_types::event_type_t::region:
+            statement = &stmts.region;
+            break;
+        case reader_types::event_type_t::kernel_dispatch:
+            statement = &stmts.kernel_dispatch;
+            break;
+        case reader_types::event_type_t::memory_copy:
+            statement = &stmts.memory_copy;
+            break;
+        case reader_types::event_type_t::memory_allocate:
+            statement = &stmts.memory_allocate;
+            break;
+        default: return {};
+    }
 
-    timeline_event_builder build_event{ *m_catalog };
+    reader_types::timeline_event_list_t all_events;
+    timeline_event_builder              build_event{ *m_catalog };
 
-    auto query_type = [&](const auto& stmt, reader_types::event_type_t type) {
-        stmt(stack_id, excluded_event_id)
-            .for_each([&](const data_storage::schema_v3::timeline_event_result& row) {
-                all_events.push_back(build_event(row, type));
-            });
-    };
+    (*statement)(event.unique_identifier.id)
+        .for_each([&](const data_storage::schema_v3::correlated_event_row& row) {
+            using reader_types::event_type_t;
+            if(row.kind > static_cast<size_t>(event_type_t::memory_allocate)) return;
 
-    query_type(stmts.region, reader_types::event_type_t::region);
-    query_type(stmts.kernel_dispatch, reader_types::event_type_t::kernel_dispatch);
-    query_type(stmts.memory_copy, reader_types::event_type_t::memory_copy);
-    query_type(stmts.memory_allocate, reader_types::event_type_t::memory_allocate);
-
+            data_storage::schema_v3::timeline_event_result mapped;
+            mapped.id              = row.id;
+            mapped.start_timestamp = row.start_timestamp;
+            mapped.end_timestamp   = row.end_timestamp;
+            mapped.display_name_id = row.display_name_id;
+            mapped.category_id     = row.category_id;
+            mapped.nid             = row.nid;
+            mapped.pid             = row.pid;
+            mapped.tid             = row.tid;
+            mapped.track_id        = row.track_id;
+            mapped.agent_id        = row.agent_id;
+            mapped.queue_id        = row.queue_id;
+            mapped.stream_id       = row.stream_id;
+            all_events.push_back(
+                build_event(mapped, static_cast<event_type_t>(row.kind)));
+        });
     return all_events;
 }
 

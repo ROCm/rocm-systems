@@ -50,13 +50,25 @@ TEST(depth_tracker_test, nested_events_add_up)
     EXPECT_EQ(tracker.depth(), 3U);
 }
 
-TEST(depth_tracker_test, events_that_overlap_without_nesting_count_as_concurrent)
+TEST(depth_tracker_test, a_free_lower_level_is_reused)
 {
     depth_tracker tracker;
 
     tracker.add(0, 5);
     EXPECT_EQ(tracker.add(3, 8), 2U);
-    EXPECT_EQ(tracker.add(6, 9), 2U);
+    // The first event has ended, so this one does not overlap level 1.
+    EXPECT_EQ(tracker.add(6, 9), 1U);
+
+    EXPECT_EQ(tracker.depth(), 2U);
+}
+
+TEST(depth_tracker_test, depth_drops_when_the_lower_level_is_free)
+{
+    depth_tracker tracker;
+
+    EXPECT_EQ(tracker.add(0, 100), 1U);
+    EXPECT_EQ(tracker.add(10, 200), 2U);
+    EXPECT_EQ(tracker.add(110, 150), 1U);
 
     EXPECT_EQ(tracker.depth(), 2U);
 }

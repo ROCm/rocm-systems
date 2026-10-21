@@ -284,7 +284,11 @@ struct reader_t
      * @brief Get correlated events via stack_id matching
      * @param event Timeline event to find correlations for
      * @return List of related events (e.g., CPU region -> GPU kernel correlation)
-     * @note Finds events where stack_id matches and id differs (excludes self)
+     * @note A stack id of 0 does not correlate, and the source event is
+     *       excluded. A region reaches regions, kernel dispatches, memory
+     *       copies, and memory allocations. A kernel dispatch reaches regions
+     *       and kernel dispatches. A memory copy reaches regions and memory
+     *       copies. A memory allocation reaches regions.
      */
     [[nodiscard]] reader_types::timeline_event_list_t get_correlated_events(
         const reader_types::timeline_event_t& event) const;
