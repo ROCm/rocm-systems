@@ -26,6 +26,7 @@
 #include "logger/debug.hpp"
 #include <charconv>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <nlohmann/json.hpp>
@@ -219,26 +220,6 @@ using amd_smi_gfx_clock_track =
     core::perfetto::counter_track<category::amd_smi_gfx_clock>;
 using amd_smi_mem_clock_track =
     core::perfetto::counter_track<category::amd_smi_mem_clock>;
-using amd_smi_nic_rx_cnp_pkts_track =
-    core::perfetto::counter_track<category::amd_smi_nic_rx_cnp_pkts>;
-using amd_smi_nic_tx_cnp_pkts_track =
-    core::perfetto::counter_track<category::amd_smi_nic_tx_cnp_pkts>;
-using amd_smi_nic_rx_ucast_bytes_track =
-    core::perfetto::counter_track<category::amd_smi_nic_rx_ucast_bytes>;
-using amd_smi_nic_tx_ucast_bytes_track =
-    core::perfetto::counter_track<category::amd_smi_nic_tx_ucast_bytes>;
-using amd_smi_nic_rx_ucast_pkts_track =
-    core::perfetto::counter_track<category::amd_smi_nic_rx_ucast_pkts>;
-using amd_smi_nic_tx_ucast_pkts_track =
-    core::perfetto::counter_track<category::amd_smi_nic_tx_ucast_pkts>;
-using amd_smi_nic_tx_rdma_ack_timeout_track =
-    core::perfetto::counter_track<category::amd_smi_nic_tx_rdma_ack_timeout>;
-using amd_smi_nic_resp_tx_pkt_seq_err_track =
-    core::perfetto::counter_track<category::amd_smi_nic_resp_tx_pkt_seq_err>;
-using amd_smi_nic_req_rx_pkt_seq_err_track =
-    core::perfetto::counter_track<category::amd_smi_nic_req_rx_pkt_seq_err>;
-using amd_smi_nic_req_rx_impl_nak_seq_err_track =
-    core::perfetto::counter_track<category::amd_smi_nic_req_rx_impl_nak_seq_err>;
 
 // Unified Memory counter tracks
 using unified_memory_migration_throughput_track =
@@ -470,6 +451,45 @@ dispatch_in_time_sample(size_t category_enum_id, const in_time_sample& _sample,
 {
     return dispatch_in_time_sample(
         category_enum_id, _sample, use_annotations,
+        rocprofsys::utility::make_index_sequence_range<1, ROCPROFSYS_CATEGORY_LAST>{});
+}
+
+template <typename CategoryT>
+void
+write_pmc_counter(CategoryT, const info::pmc_series& series, std::uint64_t timestamp,
+                  double value)
+{
+    using track_t        = core::perfetto::counter_track<CategoryT>;
+    const auto track_key = std::hash<std::string>{}(series.perfetto_track);
+    if(!track_t::exists(track_key))
+    {
+        track_t::emplace(track_key, series.perfetto_track, series.units.c_str());
+    }
+    TRACE_COUNTER(trait::name<CategoryT>::value, track_t::at(track_key, 0), timestamp,
+                  value);
+}
+
+// Perfetto categories are compile-time: dispatch the schema's runtime category id the
+// same way dispatch_in_time_sample does.
+template <size_t... Idx>
+bool
+dispatch_pmc_counter(const info::pmc_series& series, std::uint64_t timestamp,
+                     double value, std::index_sequence<Idx...>)
+{
+    return (
+        (series.perfetto_category == Idx
+             ? (write_pmc_counter(category_type_id_t<Idx>{}, series, timestamp, value),
+                true)
+             : false) ||
+        ...);
+}
+
+inline bool
+dispatch_pmc_counter(const info::pmc_series& series, std::uint64_t timestamp,
+                     double value)
+{
+    return dispatch_pmc_counter(
+        series, timestamp, value,
         rocprofsys::utility::make_index_sequence_range<1, ROCPROFSYS_CATEGORY_LAST>{});
 }
 
@@ -1437,135 +1457,24 @@ perfetto_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
 }
 
 void
-perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sample)
+perfetto_processor_t::handle(const pmc_values_sample& sample)
 {
-    auto _ts        = _nic_sample.timestamp;
-    auto _device_id = _nic_sample.device_id;
-
-    // Helper to create track names
-    auto const make_track_name = [&](const char* metric) {
-        return fmt::format("NIC [{}] {} (S)", _device_id, metric);
-    };
-
-    if(_nic_sample.enabled_metric.bits.rx_rdma_ucast_bytes)
+    const auto* schema = m_metadata.find_pmc_schema(sample.schema_id);
+    if(schema == nullptr)
     {
-        if(!amd_smi_nic_rx_ucast_bytes_track::exists(_device_id))
-        {
-            amd_smi_nic_rx_ucast_bytes_track::emplace(
-                _device_id, make_track_name("RX RDMA BYTES"), "bytes");
-        }
-        TRACE_COUNTER(trait::name<category::amd_smi_nic_rx_ucast_bytes>::value,
-                      amd_smi_nic_rx_ucast_bytes_track::at(_device_id, 0), _ts,
-                      static_cast<double>(_nic_sample.metric_values.rx_rdma_ucast_bytes));
+        LOG_WARNING("PMC values sample skipped: unknown schema id {}", sample.schema_id);
+        return;
     }
 
-    if(_nic_sample.enabled_metric.bits.tx_rdma_ucast_bytes)
+    const auto value_count = std::min(sample.size(), schema->series.size());
+    for(std::size_t idx = 0; idx < value_count; ++idx)
     {
-        if(!amd_smi_nic_tx_ucast_bytes_track::exists(_device_id))
+        const auto& series = schema->series[idx];
+        if(!dispatch_pmc_counter(series, sample.timestamp, sample.value(idx)))
         {
-            amd_smi_nic_tx_ucast_bytes_track::emplace(
-                _device_id, make_track_name("TX RDMA BYTES"), "bytes");
+            LOG_DEBUG("PMC value skipped: unknown category id {} for track '{}'",
+                      series.perfetto_category, series.perfetto_track);
         }
-        TRACE_COUNTER(trait::name<category::amd_smi_nic_tx_ucast_bytes>::value,
-                      amd_smi_nic_tx_ucast_bytes_track::at(_device_id, 0), _ts,
-                      static_cast<double>(_nic_sample.metric_values.tx_rdma_ucast_bytes));
-    }
-
-    if(_nic_sample.enabled_metric.bits.rx_rdma_ucast_pkts)
-    {
-        if(!amd_smi_nic_rx_ucast_pkts_track::exists(_device_id))
-        {
-            amd_smi_nic_rx_ucast_pkts_track::emplace(
-                _device_id, make_track_name("RX RDMA PACKETS"), "packets");
-        }
-        TRACE_COUNTER(trait::name<category::amd_smi_nic_rx_ucast_pkts>::value,
-                      amd_smi_nic_rx_ucast_pkts_track::at(_device_id, 0), _ts,
-                      static_cast<double>(_nic_sample.metric_values.rx_rdma_ucast_pkts));
-    }
-
-    if(_nic_sample.enabled_metric.bits.tx_rdma_ucast_pkts)
-    {
-        if(!amd_smi_nic_tx_ucast_pkts_track::exists(_device_id))
-        {
-            amd_smi_nic_tx_ucast_pkts_track::emplace(
-                _device_id, make_track_name("TX RDMA PACKETS"), "packets");
-        }
-        TRACE_COUNTER(trait::name<category::amd_smi_nic_tx_ucast_pkts>::value,
-                      amd_smi_nic_tx_ucast_pkts_track::at(_device_id, 0), _ts,
-                      static_cast<double>(_nic_sample.metric_values.tx_rdma_ucast_pkts));
-    }
-
-    if(_nic_sample.enabled_metric.bits.rx_rdma_cnp_pkts)
-    {
-        if(!amd_smi_nic_rx_cnp_pkts_track::exists(_device_id))
-        {
-            amd_smi_nic_rx_cnp_pkts_track::emplace(
-                _device_id, make_track_name("RX CNP PACKETS"), "packets");
-        }
-        TRACE_COUNTER(trait::name<category::amd_smi_nic_rx_cnp_pkts>::value,
-                      amd_smi_nic_rx_cnp_pkts_track::at(_device_id, 0), _ts,
-                      static_cast<double>(_nic_sample.metric_values.rx_rdma_cnp_pkts));
-    }
-
-    if(_nic_sample.enabled_metric.bits.tx_rdma_cnp_pkts)
-    {
-        if(!amd_smi_nic_tx_cnp_pkts_track::exists(_device_id))
-        {
-            amd_smi_nic_tx_cnp_pkts_track::emplace(
-                _device_id, make_track_name("TX CNP PACKETS"), "packets");
-        }
-        TRACE_COUNTER(trait::name<category::amd_smi_nic_tx_cnp_pkts>::value,
-                      amd_smi_nic_tx_cnp_pkts_track::at(_device_id, 0), _ts,
-                      static_cast<double>(_nic_sample.metric_values.tx_rdma_cnp_pkts));
-    }
-
-    if(_nic_sample.enabled_metric.bits.tx_rdma_ack_timeout)
-    {
-        if(!amd_smi_nic_tx_rdma_ack_timeout_track::exists(_device_id))
-        {
-            amd_smi_nic_tx_rdma_ack_timeout_track::emplace(
-                _device_id, make_track_name("TX ACK TIMEOUT"), "timeouts");
-        }
-        TRACE_COUNTER(trait::name<category::amd_smi_nic_tx_rdma_ack_timeout>::value,
-                      amd_smi_nic_tx_rdma_ack_timeout_track::at(_device_id, 0), _ts,
-                      static_cast<double>(_nic_sample.metric_values.tx_rdma_ack_timeout));
-    }
-
-    if(_nic_sample.enabled_metric.bits.resp_tx_pkt_seq_err)
-    {
-        if(!amd_smi_nic_resp_tx_pkt_seq_err_track::exists(_device_id))
-        {
-            amd_smi_nic_resp_tx_pkt_seq_err_track::emplace(
-                _device_id, make_track_name("RESP TX PKT SEQ ERR"), "errors");
-        }
-        TRACE_COUNTER(trait::name<category::amd_smi_nic_resp_tx_pkt_seq_err>::value,
-                      amd_smi_nic_resp_tx_pkt_seq_err_track::at(_device_id, 0), _ts,
-                      static_cast<double>(_nic_sample.metric_values.resp_tx_pkt_seq_err));
-    }
-
-    if(_nic_sample.enabled_metric.bits.req_rx_pkt_seq_err)
-    {
-        if(!amd_smi_nic_req_rx_pkt_seq_err_track::exists(_device_id))
-        {
-            amd_smi_nic_req_rx_pkt_seq_err_track::emplace(
-                _device_id, make_track_name("REQ RX PKT SEQ ERR"), "errors");
-        }
-        TRACE_COUNTER(trait::name<category::amd_smi_nic_req_rx_pkt_seq_err>::value,
-                      amd_smi_nic_req_rx_pkt_seq_err_track::at(_device_id, 0), _ts,
-                      static_cast<double>(_nic_sample.metric_values.req_rx_pkt_seq_err));
-    }
-
-    if(_nic_sample.enabled_metric.bits.req_rx_impl_nak_seq_err)
-    {
-        if(!amd_smi_nic_req_rx_impl_nak_seq_err_track::exists(_device_id))
-        {
-            amd_smi_nic_req_rx_impl_nak_seq_err_track::emplace(
-                _device_id, make_track_name("REQ RX IMPL NAK SEQ ERR"), "errors");
-        }
-        TRACE_COUNTER(
-            trait::name<category::amd_smi_nic_req_rx_impl_nak_seq_err>::value,
-            amd_smi_nic_req_rx_impl_nak_seq_err_track::at(_device_id, 0), _ts,
-            static_cast<double>(_nic_sample.metric_values.req_rx_impl_nak_seq_err));
     }
 }
 

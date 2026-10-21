@@ -151,7 +151,7 @@ public:
     void handle(const memory_allocate_sample&) override {}
     void handle(const scratch_memory_sample&) override {}
     void handle(const gpu_pmc_sample&) override {}
-    void handle(const ainic_pmc_sample&) override {}
+    void handle(const pmc_values_sample&) override {}
     void handle(const cpu_pmc_sample&) override {}
     void handle(const gpu_perf_counter_sample&) override {}
     void handle(const hipfile_pmc_sample&) override {}

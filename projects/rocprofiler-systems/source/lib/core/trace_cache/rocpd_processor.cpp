@@ -18,7 +18,6 @@
 #include "library/pmc/collectors/gpu/types.hpp"
 #include "library/pmc/collectors/hipfile/sample.hpp"
 #include "library/pmc/collectors/hipfile/types.hpp"
-#include "library/pmc/collectors/nic/sample.hpp"
 #include "library/thread_info.hpp"
 #include "logger/debug.hpp"
 
@@ -581,95 +580,57 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& gpu_pmc)
 }
 
 void
-rocpd_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& nic_sample)
+rocpd_processor_t::handle(const pmc_values_sample& values_sample)
 {
-    // Insert NIC RDMA metrics into rocpd database
-    const auto* name         = trait::name<category::amd_smi_nic>::value;
-    const auto& process_info = m_metadata->get_process_info();
+    const auto* schema = m_metadata->find_pmc_schema(values_sample.schema_id);
+    if(schema == nullptr)
+    {
+        LOG_WARNING("PMC values sample skipped: unknown schema id {}",
+                    values_sample.schema_id);
+        return;
+    }
 
     const agent* agent_ptr = nullptr;
     try
     {
-        agent_ptr =
-            &m_agent_manager->get_agent_by_id(nic_sample.device_id, agent_type::nic);
+        agent_ptr = &m_agent_manager->get_agent_by_type_index(schema->agent_type_index,
+                                                              schema->type);
     } catch(const std::out_of_range& e)
     {
-        LOG_WARNING("NIC PMC sample skipped: agent lookup failed for device_id={}: {}",
-                    nic_sample.device_id, e.what());
+        LOG_WARNING("PMC values sample skipped: agent lookup failed for {} {}: {}",
+                    to_string(schema->type), schema->agent_type_index, e.what());
         return;
     }
 
-    const auto& nic_agent = *agent_ptr;
-    const auto  agent_uid = make_agent_uid(nic_agent);
+    const auto  agent_uid    = make_agent_uid(*agent_ptr);
+    const auto& process_info = m_metadata->get_process_info();
+    const auto  event        = make_event(0, 0, 0, schema->event_category.c_str());
 
-    auto event = make_event(0, 0, 0, name);
-
-    auto const insert_event_and_sample = [&](bool is_enabled, const char* pmc_name,
-                                             const char*   track_name,
-                                             std::uint64_t value) {
-        if(!is_enabled)
-        {
-            return;
-        }
-
-        LOG_TRACE("Inserting metric: pmc_name: {}, track_name: {}, value: {}", pmc_name,
-                  track_name, value);
+    const auto value_count = std::min(values_sample.size(), schema->series.size());
+    for(std::size_t idx = 0; idx < value_count; ++idx)
+    {
+        const auto& series = schema->series[idx];
 
         profiler_hub::writer_types::pmc_event_data_t pmc_data;
         pmc_data.event = event;
-        pmc_data.value = static_cast<double>(value);
+        pmc_data.value = values_sample.value(idx);
 
         profiler_hub::writer_types::track_info_t track;
-        track.name       = track_name;
+        track.name       = series.rocpd_track;
         track.node_id    = node_info::get_instance().id;
         track.process_id = process_info.pid;
 
         profiler_hub::writer_types::sample_data_t sample;
-        sample.timestamp = nic_sample.timestamp;
+        sample.timestamp = values_sample.timestamp;
         sample.track     = track;
         pmc_data.sample  = sample;
 
         profiler_hub::writer_types::pmc_info_unique_id_t pmc_uid;
-        pmc_uid.name     = pmc_name;
+        pmc_uid.name     = series.pmc_name;
         pmc_uid.agent_id = agent_uid;
 
-        try_insert_pmc_event(pmc_data, pmc_uid, "NIC PMC sample");
-    };
-
-    const auto& mtrcs   = nic_sample.metric_values;
-    const auto& enabled = nic_sample.enabled_metric;
-
-    insert_event_and_sample(enabled.bits.rx_rdma_ucast_bytes,
-                            trait::name<category::amd_smi_nic_rx_ucast_bytes>::value,
-                            "ainic_rx_rdma_ucast_bytes", mtrcs.rx_rdma_ucast_bytes);
-    insert_event_and_sample(enabled.bits.tx_rdma_ucast_bytes,
-                            trait::name<category::amd_smi_nic_tx_ucast_bytes>::value,
-                            "ainic_tx_rdma_ucast_bytes", mtrcs.tx_rdma_ucast_bytes);
-    insert_event_and_sample(enabled.bits.rx_rdma_ucast_pkts,
-                            trait::name<category::amd_smi_nic_rx_ucast_pkts>::value,
-                            "ainic_rx_rdma_ucast_pkts", mtrcs.rx_rdma_ucast_pkts);
-    insert_event_and_sample(enabled.bits.tx_rdma_ucast_pkts,
-                            trait::name<category::amd_smi_nic_tx_ucast_pkts>::value,
-                            "ainic_tx_rdma_ucast_pkts", mtrcs.tx_rdma_ucast_pkts);
-    insert_event_and_sample(enabled.bits.rx_rdma_cnp_pkts,
-                            trait::name<category::amd_smi_nic_rx_cnp_pkts>::value,
-                            "ainic_rx_rdma_cnp_pkts", mtrcs.rx_rdma_cnp_pkts);
-    insert_event_and_sample(enabled.bits.tx_rdma_cnp_pkts,
-                            trait::name<category::amd_smi_nic_tx_cnp_pkts>::value,
-                            "ainic_tx_rdma_cnp_pkts", mtrcs.tx_rdma_cnp_pkts);
-    insert_event_and_sample(enabled.bits.tx_rdma_ack_timeout,
-                            trait::name<category::amd_smi_nic_tx_rdma_ack_timeout>::value,
-                            "ainic_tx_rdma_ack_timeout", mtrcs.tx_rdma_ack_timeout);
-    insert_event_and_sample(enabled.bits.resp_tx_pkt_seq_err,
-                            trait::name<category::amd_smi_nic_resp_tx_pkt_seq_err>::value,
-                            "ainic_resp_tx_pkt_seq_err", mtrcs.resp_tx_pkt_seq_err);
-    insert_event_and_sample(enabled.bits.req_rx_pkt_seq_err,
-                            trait::name<category::amd_smi_nic_req_rx_pkt_seq_err>::value,
-                            "ainic_req_rx_pkt_seq_err", mtrcs.req_rx_pkt_seq_err);
-    insert_event_and_sample(
-        enabled.bits.req_rx_impl_nak_seq_err,
-        trait::name<category::amd_smi_nic_req_rx_impl_nak_seq_err>::value,
-        "ainic_req_rx_impl_nak_seq_err", mtrcs.req_rx_impl_nak_seq_err);
+        try_insert_pmc_event(pmc_data, pmc_uid, "PMC values sample");
+    }
 }
 
 void

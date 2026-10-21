@@ -4,8 +4,11 @@
 #pragma once
 #include "core/trace_cache/cacheable.hpp"
 
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unistd.h>
@@ -27,10 +30,11 @@ enum class type_identifier_t : std::uint32_t
     cpu_pmc_sample          = 0x0007,
     backtrace_region_sample = 0x0008,
     scratch_memory          = 0x0009,
-    ainic_pmc_sample        = 0x000A,
+    // 0x000A was ainic_pmc_sample (NIC samples are pmc_values_sample now)
     kfd_sample              = 0x000B,
     gpu_perf_counter_sample = 0x000C,
     hipfile_pmc_sample      = 0x000D,
+    pmc_values_sample       = 0x000E,
     fragmented_space        = 0xFFFF
 };
 
@@ -723,6 +727,72 @@ get_size(const kfd_sample& item)
                              item.track_name, item.event_metadata, item.device_id,
                              item.device_type, item.pmc_info_name, item.value,
                              item.system_tid);
+}
+
+/**
+ * Values of one PMC schema (metadata_registry::add_pmc_schema) at one timestamp, in
+ * schema order: the schema carries every name, unit and the agent, so the record carries
+ * only values.
+ *
+ * Written from a span of the collector's values without copying them into the sample.
+ * When read back, value_bytes points into the parse buffer (like the string_view members
+ * of the other samples) and value() copies one double out, so no alignment is assumed.
+ */
+struct pmc_values_sample : cacheable_t
+{
+    static constexpr type_identifier_t type_identifier =
+        type_identifier_t::pmc_values_sample;
+
+    pmc_values_sample() = default;
+    pmc_values_sample(std::uint32_t schema_id_in, std::uint64_t timestamp_in,
+                      std::span<const double> values_in)
+    : schema_id(schema_id_in)
+    , timestamp(timestamp_in)
+    , value_bytes(std::as_bytes(values_in))
+    {}
+
+    [[nodiscard]] std::size_t size() const noexcept
+    {
+        return value_bytes.size() / sizeof(double);
+    }
+
+    [[nodiscard]] double value(std::size_t position) const noexcept
+    {
+        double out = 0.0;
+        std::memcpy(&out, value_bytes.data() + (position * sizeof(double)),
+                    sizeof(double));
+        return out;
+    }
+
+    std::uint32_t              schema_id = 0;
+    std::uint64_t              timestamp = 0;
+    std::span<const std::byte> value_bytes;
+};
+
+template <>
+inline void
+serialize(std::uint8_t* buffer, const pmc_values_sample& item)
+{
+    utility::store_value(buffer, item.schema_id, item.timestamp, item.value_bytes);
+}
+
+template <>
+inline pmc_values_sample
+deserialize(std::uint8_t*& buffer)
+{
+    pmc_values_sample item;
+    std::size_t       byte_count = 0;
+    utility::parse_value(buffer, item.schema_id, item.timestamp, byte_count);
+    item.value_bytes = { reinterpret_cast<const std::byte*>(buffer), byte_count };
+    buffer += byte_count;
+    return item;
+}
+
+template <>
+inline size_t
+get_size(const pmc_values_sample& item)
+{
+    return utility::get_size(item.schema_id, item.timestamp, item.value_bytes);
 }
 
 }  // namespace rocprofsys::trace_cache

@@ -1,13 +1,17 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "core/agent.hpp"
+#include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/pmc/collectors/hipfile/sample.hpp"
 #include "library/pmc/collectors/hipfile/types.hpp"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <gtest/gtest.h>
+#include <memory>
 #include <vector>
 
 using namespace rocprofsys::trace_cache;
@@ -491,6 +495,7 @@ TEST_F(sample_type_test, type_identifier_enum_values)
     EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::backtrace_region_sample),
               0x0008);
     EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::hipfile_pmc_sample), 0x000D);
+    EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::pmc_values_sample), 0x000E);
     EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::fragmented_space), 0xFFFF);
 }
 
@@ -756,4 +761,64 @@ TEST_F(sample_type_test, kfd_sample_get_size)
     auto const    deserialized = deserialize<kfd_sample>(buffer_ptr);
     EXPECT_EQ(deserialized.name, original.name);
     EXPECT_EQ(deserialized.category, original.category);
+}
+
+namespace pmc_values
+{
+constexpr std::uint32_t k_schema_id = 7;
+constexpr std::uint64_t k_timestamp = 123456789;
+constexpr std::array    k_values{ 1.5, -2.25, 1048576.0 };
+}  // namespace pmc_values
+
+TEST_F(sample_type_test, pmc_values_sample_serialize_deserialize)
+{
+    const pmc_values_sample original{ pmc_values::k_schema_id, pmc_values::k_timestamp,
+                                      pmc_values::k_values };
+    ASSERT_LE(get_size(original), buffer.size());
+    serialize(buffer.data(), original);
+
+    std::uint8_t* buffer_ptr   = buffer.data();
+    auto const    deserialized = deserialize<pmc_values_sample>(buffer_ptr);
+
+    EXPECT_EQ(deserialized.schema_id, pmc_values::k_schema_id);
+    EXPECT_EQ(deserialized.timestamp, pmc_values::k_timestamp);
+    ASSERT_EQ(deserialized.size(), pmc_values::k_values.size());
+    std::array<double, pmc_values::k_values.size()> read_back{};
+    for(std::size_t idx = 0; idx < read_back.size(); ++idx)
+    {
+        read_back[idx] = deserialized.value(idx);
+    }
+    EXPECT_EQ(read_back, pmc_values::k_values);
+}
+
+TEST_F(sample_type_test, pmc_values_sample_deserialize_views_parse_buffer)
+{
+    const pmc_values_sample original{ pmc_values::k_schema_id, pmc_values::k_timestamp,
+                                      pmc_values::k_values };
+    serialize(buffer.data(), original);
+
+    std::uint8_t* buffer_ptr   = buffer.data();
+    auto const    deserialized = deserialize<pmc_values_sample>(buffer_ptr);
+
+    // The values are not copied: they end where the parse cursor stops.
+    EXPECT_EQ(static_cast<const void*>(std::to_address(deserialized.value_bytes.end())),
+              static_cast<const void*>(buffer_ptr));
+    EXPECT_EQ(static_cast<std::size_t>(buffer_ptr - buffer.data()), get_size(original));
+}
+
+TEST(pmc_schema_registry_test, add_returns_dense_ids_and_find_returns_schema)
+{
+    metadata_registry registry;
+    const auto        first = registry.add_pmc_schema(
+        { .type = rocprofsys::agent_type::nic, .agent_type_index = 1 });
+    const auto second = registry.add_pmc_schema(
+        { .type = rocprofsys::agent_type::gpu, .agent_type_index = 2 });
+
+    EXPECT_EQ(first, 0U);
+    EXPECT_EQ(second, 1U);
+    const auto* found = registry.find_pmc_schema(second);
+    ASSERT_NE(found, nullptr);
+    EXPECT_EQ(found->type, rocprofsys::agent_type::gpu);
+    EXPECT_EQ(found->agent_type_index, 2U);
+    EXPECT_EQ(registry.find_pmc_schema(2), nullptr);
 }

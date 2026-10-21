@@ -8,6 +8,7 @@
 #include "core/perfetto/fwd.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_processor_interface.hpp"
+#include "core/trace_cache/sample_type.hpp"
 #include "library/pmc/collectors/hipfile/sample.hpp"
 #include <cstdint>
 
@@ -55,7 +56,7 @@ public:
     void handle(const in_time_sample& sample) override;
     void handle(const pmc_event_with_sample& sample) override;
     void handle(const gpu_pmc_sample& sample) override;
-    void handle(const ainic_pmc_sample& sample) override;
+    void handle(const pmc_values_sample& sample) override;
     void handle(const cpu_pmc_sample& sample) override;
     void handle(const gpu_perf_counter_sample& sample) override;
     void handle(const hipfile_pmc_sample& sample) override;
