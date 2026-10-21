@@ -6,7 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/mimg.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx9_cache_flags.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/gfx9_image_access.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/image_access.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/image_resource.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -27,13 +27,13 @@ void ImageLoadMimg::execute_impl(amdgpu::Wavefront &wf) {
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  if (amdgpu::prepare_gfx9_image_access(wf, *d, inst_.srsrc * 4, inst_.vaddr,
-                                        {.dmask = inst_.dmask,
-                                         .a16 = bool(inst_.a16),
-                                         .d16 = bool(inst_.d16),
-                                         .lwe = bool(inst_.lwe),
-                                         .da = bool(inst_.da),
-                                         .unorm = bool(inst_.unorm)})
+  if (amdgpu::prepare_image_access(wf, *d, inst_.srsrc * 4, inst_.vaddr,
+                                   {.dmask = inst_.dmask,
+                                    .a16 = bool(inst_.a16),
+                                    .d16 = bool(inst_.d16),
+                                    .lwe = bool(inst_.lwe),
+                                    .da = bool(inst_.da),
+                                    .unorm = bool(inst_.unorm)})
           .failed()) {
     return;
   }
@@ -70,13 +70,13 @@ void ImageStoreMimg::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = false;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  if (amdgpu::prepare_gfx9_image_access(wf, *d, inst_.srsrc * 4, inst_.vaddr,
-                                        {.dmask = inst_.dmask,
-                                         .a16 = bool(inst_.a16),
-                                         .d16 = bool(inst_.d16),
-                                         .lwe = bool(inst_.lwe),
-                                         .da = bool(inst_.da),
-                                         .unorm = bool(inst_.unorm)})
+  if (amdgpu::prepare_image_access(wf, *d, inst_.srsrc * 4, inst_.vaddr,
+                                   {.dmask = inst_.dmask,
+                                    .a16 = bool(inst_.a16),
+                                    .d16 = bool(inst_.d16),
+                                    .lwe = bool(inst_.lwe),
+                                    .da = bool(inst_.da),
+                                    .unorm = bool(inst_.unorm)})
           .failed()) {
     return;
   }

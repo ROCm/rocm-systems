@@ -19,8 +19,8 @@
 
 namespace rocjitsu::amdgpu {
 
-/// @brief MIMG fields controlling GFX9 linear image access.
-struct Gfx9ImageFields {
+/// @brief Instruction fields controlling linear image access.
+struct ImageFields {
   uint32_t dmask = 0;
   bool a16 = false;
   bool d16 = false;
@@ -29,9 +29,10 @@ struct Gfx9ImageFields {
   bool unorm = false;
 };
 
-/// @brief Set up a GFX9 IMAGE_LOAD or IMAGE_STORE as a formatted vector access.
+/// @brief Set up IMAGE_LOAD or IMAGE_STORE as a formatted vector access.
 /// @details Each active lane addresses one texel of a linear, single-level
-/// image with unnormalized coordinates read from @p vaddr. Lanes outside the
+/// GFX9, GFX11 or GFX12 image with unnormalized coordinates read from @p vaddr.
+/// Lanes outside the
 /// image are left out of the lane mask, so a load returns zero and a store is
 /// dropped. A null resource drops every lane. The texel layout is the one
 /// addrlib gives a linear surface: rows of PITCH elements, one row per 1D slice
@@ -42,9 +43,9 @@ struct Gfx9ImageFields {
 /// @returns Failure after reporting an unsupported operand (empty DMASK,
 /// UNORM=0 store) or an unimplemented feature (tiling, mips, cube, MSAA,
 /// nonzero base array, format outside the buffer table, or LWE).
-inline util::Result prepare_gfx9_image_access(Wavefront &wf, VectorMemState &state,
-                                              uint32_t resource_reg, uint32_t vaddr,
-                                              Gfx9ImageFields fields) {
+inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
+                                         uint32_t resource_reg, uint32_t vaddr,
+                                         ImageFields fields) {
   const auto fail = [&](InstructionExecutionError error) {
     wf.report_instruction_execution_error(error);
     return util::Result::failure();
@@ -71,7 +72,29 @@ inline util::Result prepare_gfx9_image_access(Wavefront &wf, VectorMemState &sta
   std::array<uint32_t, 8> words{};
   for (uint32_t i = 0; i < words.size(); ++i)
     words[i] = read_scalar_selector(wf, resource_reg + i);
-  const Gfx9ImageResource resource = decode_gfx9_image_resource(words);
+  const auto arch = wf.cu().arch();
+  const bool gfx9 = arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2;
+  const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4;
+  Gfx9ImageResource resource;
+  if (gfx9) {
+    resource = decode_gfx9_image_resource(words);
+  } else {
+    const auto field = [&](uint32_t bit, uint32_t width) {
+      return util::extract_bits_from_words(words.data(), bit, width);
+    };
+    resource.base = ((uint64_t{field(32, 8)} << 32) | words[0]) << 8;
+    resource.data_format = field(gfx12 ? 49 : 52, 8);
+    resource.width = field(62, gfx12 ? 16 : 14) + 1;
+    resource.height = field(78, gfx12 ? 16 : 14) + 1;
+    resource.selectors = field(96, 12);
+    resource.base_level = field(gfx12 ? 57 : 108, gfx12 ? 5 : 4);
+    resource.last_level = field(gfx12 ? 111 : 112, gfx12 ? 5 : 4);
+    resource.swizzle_mode = field(116, 5);
+    resource.type = field(124, 4);
+    resource.depth = field(128, gfx12 ? 14 : 13) + 1;
+    resource.base_array = field(144, gfx12 ? 14 : 13);
+    resource.pitch = gfx12 ? resource.width : field(128, 14) + 1;
+  }
 
   if (resource.type < kGfx9Image1d || resource.data_format == 0)
     return util::Result::success();
@@ -91,9 +114,14 @@ inline util::Result prepare_gfx9_image_access(Wavefront &wf, VectorMemState &sta
       resource.base_array != 0 || resource.array_pitch != 0)
     return fail(InstructionExecutionError::UnimplementedInstruction);
   // The six-bit image DFMT must fit the buffer decoder's four-bit packed key.
-  if (resource.data_format > 15)
+  if (gfx9 && resource.data_format > 15)
     return fail(InstructionExecutionError::UnimplementedInstruction);
-  state.buffer_format = resource.data_format | (resource.num_format << 4);
+  state.buffer_format =
+      gfx9 ? resource.data_format | (resource.num_format << 4) : resource.data_format;
+  state.buffer_format_encoding = gfx9                               ? BufferFormatEncoding::Gfx9
+                                 : arch == ROCJITSU_CODE_ARCH_RDNA1 ? BufferFormatEncoding::Rdna1
+                                 : arch == ROCJITSU_CODE_ARCH_RDNA2 ? BufferFormatEncoding::Rdna2
+                                                                    : BufferFormatEncoding::Gfx11;
   const auto format = prepare_buffer_format_state(state);
   // Buffer decoder failure does not imply an illegal image format: images
   // also support formats such as SRGB that the buffer table does not model.

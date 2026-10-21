@@ -428,7 +428,7 @@ class CodeGenerator:
         'ds_read_tr_b6': 'local',
         # Internal variant selected by the ds_barrier_arrive generator.
         'ds_barrier_arrive_async': 'async_local',
-        # Only the instructions in _GFX9_IMAGE_MEMORY_INSTRUCTIONS issue these.
+        # Only the instructions in _IMAGE_MEMORY_INSTRUCTIONS issue these.
         'image_load': 'vmem_load',
         'image_store': 'vmem_store',
     }
@@ -436,8 +436,12 @@ class CodeGenerator:
 
     # Image instructions whose generated bodies issue a memory access. Every
     # other image instruction keeps its stub, which must not claim a pipeline.
-    _GFX9_IMAGE_MEMORY_INSTRUCTIONS = frozenset(
-        {('cdna2', 'IMAGE_LOAD'), ('cdna2', 'IMAGE_STORE')}
+    _IMAGE_MEMORY_INSTRUCTIONS = frozenset(
+        {
+            (arch, mnemonic)
+            for arch in ('cdna2', 'rdna3', 'rdna3_5', 'rdna4')
+            for mnemonic in ('IMAGE_LOAD', 'IMAGE_STORE')
+        }
     )
 
     # Shared scalar execution uses these encoding values without including one
@@ -506,7 +510,7 @@ class CodeGenerator:
         return (
             self.isa_spec.arch_name,
             name.upper(),
-        ) in self._GFX9_IMAGE_MEMORY_INSTRUCTIONS
+        ) in self._IMAGE_MEMORY_INSTRUCTIONS
 
     @property
     def generated_dir_name(self) -> str:
@@ -5655,7 +5659,11 @@ class CodeGenerator:
             )
         if enc_name.upper() != 'ENC_MIMG':
             return None
-        if self._issues_image_memory(inst_name) and opnd_name == 'vaddr':
+        if (
+            self._issues_image_memory(inst_name)
+            and opnd_name == 'vaddr'
+            and not self.isa_spec.profile.renders_gfx11_image_syntax
+        ):
             # GFX9 dimensions come from T#, unavailable at decode time.
             # Three coordinates cover every supported load/store shape.
             return '(reinterpret_cast<const OpEncoding *>(inst)->a16 ? 64 : 96)'
@@ -8031,6 +8039,27 @@ class CodeGenerator:
         ):
             is_load = cls == 'image_load'
             data_base = self._vgpr_base_expr('vdata')
+            if self.isa_spec.arch_name == 'rdna4':
+                resource = 'inst_.rsrc'
+                vaddr = 'inst_.vaddr0'
+                image_fields = (
+                    '{.dmask = inst_.dmask, .a16 = bool(inst_.a16), '
+                    '.d16 = bool(inst_.d16), .lwe = false, .da = true, '
+                    '.unorm = true}'
+                )
+            else:
+                resource = 'inst_.srsrc * 4'
+                vaddr = 'inst_.vaddr'
+                da = (
+                    'true'
+                    if self.isa_spec.arch_name.startswith('rdna')
+                    else 'bool(inst_.da)'
+                )
+                image_fields = (
+                    '{.dmask = inst_.dmask, .a16 = bool(inst_.a16), '
+                    '.d16 = bool(inst_.d16), .lwe = bool(inst_.lwe), '
+                    f'.da = {da}, .unorm = bool(inst_.unorm)}}'
+                )
             L.append(
                 '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
             )
@@ -8040,10 +8069,8 @@ class CodeGenerator:
             if is_load:
                 L.append(f'  d->dst_reg_base = {data_base};')
             L.append(
-                '  if (amdgpu::prepare_gfx9_image_access(wf, *d, inst_.srsrc * 4, '
-                'inst_.vaddr, {.dmask = inst_.dmask, .a16 = bool(inst_.a16), '
-                '.d16 = bool(inst_.d16), .lwe = bool(inst_.lwe), '
-                '.da = bool(inst_.da), .unorm = bool(inst_.unorm)})'
+                f'  if (amdgpu::prepare_image_access(wf, *d, {resource}, '
+                f'{vaddr}, {image_fields})'
                 '.failed()) {'
             )
             L.append('    return;')
@@ -14167,7 +14194,7 @@ class CodeGenerator:
                     cpp_includes.extend(
                         [
                             (
-                                'rocjitsu/isa/arch/amdgpu/shared/gfx9_image_access.h',
+                                'rocjitsu/isa/arch/amdgpu/shared/image_access.h',
                                 False,
                             ),
                             ('memory', True),

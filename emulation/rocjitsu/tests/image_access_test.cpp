@@ -5,6 +5,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/mimg.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/image_access.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/image_resource.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -489,6 +490,57 @@ TEST_F(Cdna2ImageAccessTest, ImageOnlySrgbFormatStopsAsUnimplemented) {
   EXPECT_FALSE(issue(true));
   EXPECT_EQ(wf->instruction_execution_error(),
             amdgpu::InstructionExecutionError::UnimplementedInstruction);
+}
+
+TEST(ImageAccessTest, RdnaLinearR32DescriptorsPrepareTheExpectedMemoryAccess) {
+  for (auto arch :
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    SCOPED_TRACE(arch);
+    amdgpu::GpuMemory memory{"rdna_image_memory"};
+    amdgpu::L2Cache l2{"rdna_image_l2"};
+    l2.set_backing_memory(&memory);
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = arch;
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = 32;
+    cfg.vgprs_per_wf = 32;
+    auto cu = amdgpu::ComputeUnitCore::create("rdna_image_cu", cfg, &memory, &l2);
+    auto *wf = cu->dispatch_wf(0, 0, 32, 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(1);
+
+    std::array<uint32_t, 8> words{};
+    const auto set = [&](uint32_t bit, uint32_t width, uint64_t value) {
+      for (uint32_t i = 0; i < width; ++i)
+        words[(bit + i) / 32] |= static_cast<uint32_t>((value >> i) & 1u) << ((bit + i) % 32);
+    };
+    const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4;
+    set(0, 40, kBase >> 8);
+    set(gfx12 ? 49 : 52, 8, 20); // R32_UINT.
+    set(62, gfx12 ? 16 : 14, 63);
+    set(78, gfx12 ? 16 : 14, 0);
+    set(96, 12, kXOne);
+    set(116, 5, 0); // Linear.
+    set(124, 4, amdgpu::kGfx9Image2d);
+    set(128, gfx12 ? 14 : 13, 63);
+    for (uint32_t i = 0; i < words.size(); ++i)
+      cu->write_sgpr(wf->sgpr_alloc().base + i, words[i]);
+    cu->write_vgpr(wf->vgpr_alloc().base, 0, 0);
+    cu->write_vgpr(wf->vgpr_alloc().base + 1, 0, 0);
+
+    amdgpu::VectorMemState state(amdgpu::GLOBAL_MEM);
+    state.is_load = true;
+    ASSERT_TRUE(
+        amdgpu::prepare_image_access(
+            *wf, state, 0, 0,
+            {.dmask = 15, .a16 = false, .d16 = false, .lwe = false, .da = true, .unorm = true})
+            .succeeded());
+    EXPECT_EQ(state.lane_mask, 1u);
+    EXPECT_EQ(state.per_lane_addr[0], kBase);
+    EXPECT_EQ(state.elem_size, 4u);
+    EXPECT_EQ(state.buffer_format, 20u);
+    wf->halt();
+  }
 }
 
 } // namespace
