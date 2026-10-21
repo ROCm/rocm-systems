@@ -51,8 +51,8 @@ class TestCpuPstate(unittest.TestCase):
         # a GPU handle, and that sweep is intentionally omitted.
         correct_processor = [
             amdsmi.AmdSmiStatus.SUCCESS,
-            amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
-            amdsmi.AmdSmiStatus.NO_PERM,
+            amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,  # firmware/protocol lacks the message (ENOMSG)
+            amdsmi.AmdSmiStatus.NO_PERM,  # no read access to /dev/hsmp (mode/LSM/container)
         ]
         # A null (default-constructed) handle hits the C-layer null check -> INVAL.
         null_check = [amdsmi.AmdSmiStatus.INVAL]
@@ -99,13 +99,11 @@ class TestCpuPstate(unittest.TestCase):
         # handle is a CPU. A GPU handle would reuse its index as a socket index and
         # reprogram a real socket's DF P-state range on a combined GPU + EPYC host,
         # so that sweep is intentionally omitted.
-        # Writing back a value just read is valid input, so only these are correct:
-        # NO_HSMP_MSG_SUP (ENOMSG: message not implemented) and NO_PERM (EACCES/EPERM
-        # opening /dev/hsmp for write).
+        # A write-back of a just-read value is valid input, so INVAL is not accepted.
         correct_processor = [
             amdsmi.AmdSmiStatus.SUCCESS,
-            amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
-            amdsmi.AmdSmiStatus.NO_PERM,
+            amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,  # firmware/protocol lacks the message (ENOMSG)
+            amdsmi.AmdSmiStatus.NO_PERM,  # no write access to /dev/hsmp (root/LSM/container)
         ]
         null_check = [amdsmi.AmdSmiStatus.INVAL]
 
@@ -178,8 +176,8 @@ class TestCpuPstate(unittest.TestCase):
         # a GPU handle, and that sweep is intentionally omitted.
         correct_processor = [
             amdsmi.AmdSmiStatus.SUCCESS,
-            amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
-            amdsmi.AmdSmiStatus.NO_PERM,
+            amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,  # firmware/protocol lacks the message (ENOMSG)
+            amdsmi.AmdSmiStatus.NO_PERM,  # no read access to /dev/hsmp (mode/LSM/container)
         ]
         # A null (default-constructed) handle hits the C-layer null check -> INVAL.
         null_check = [amdsmi.AmdSmiStatus.INVAL]

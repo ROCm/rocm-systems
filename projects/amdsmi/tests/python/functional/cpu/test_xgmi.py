@@ -38,13 +38,11 @@ class TestCpuXgmi(unittest.TestCase):
         # handle is a CPU. A GPU handle would reuse its index as a socket index and
         # reprogram a real socket's XGMI link width on a combined GPU + EPYC host,
         # so that sweep is intentionally omitted.
-        # Writing back a value just read is valid input, so only these are correct:
-        # NO_HSMP_MSG_SUP (ENOMSG: message not implemented) and NO_PERM (EACCES/EPERM
-        # opening /dev/hsmp for write).
+        # A write-back of a just-read value is valid input, so INVAL is not accepted.
         correct_processor = [
             amdsmi.AmdSmiStatus.SUCCESS,
-            amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
-            amdsmi.AmdSmiStatus.NO_PERM,
+            amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,  # firmware/protocol lacks the message (ENOMSG)
+            amdsmi.AmdSmiStatus.NO_PERM,  # no write access to /dev/hsmp (root/LSM/container)
         ]
         null_check = [amdsmi.AmdSmiStatus.INVAL]
 
@@ -109,20 +107,16 @@ class TestCpuXgmi(unittest.TestCase):
     def test_get_cpu_xgmi_width(self):
         self.common.print_func_name("")
 
-        # amdsmi_get_cpu_xgmi_width delegates to ESMI's esmi_xgmi_width_get, which
-        # is defined only for *multi-socket* systems (XGMI is the socket-to-socket
-        # link). On a single-socket host there is no XGMI link, so ESMI rejects the
-        # query and it surfaces as AMDSMI_STATUS_INVAL -- a legitimate result on
-        # the CPU path. The API derives the socket index from the handle's
+        # amdsmi_get_cpu_xgmi_width derives the socket index from the handle's
         # processor index and does not validate that the handle is a CPU, so a GPU
         # handle reuses its index as a socket index and can legitimately succeed on
         # a combined GPU + EPYC host; there is no well-defined status to assert for
         # a GPU handle, and that sweep is intentionally omitted.
         correct_processor = [
             amdsmi.AmdSmiStatus.SUCCESS,
-            amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
-            amdsmi.AmdSmiStatus.INVAL,
-            amdsmi.AmdSmiStatus.NO_PERM,
+            amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,  # firmware/protocol lacks the message (ENOMSG)
+            amdsmi.AmdSmiStatus.INVAL,  # e_smi.h: multi-socket, protocol >= 7; may be rejected
+            amdsmi.AmdSmiStatus.NO_PERM,  # no read access to /dev/hsmp (mode/LSM/container)
         ]
         # A null (default-constructed) handle hits the C-layer null check -> INVAL.
         null_check = [amdsmi.AmdSmiStatus.INVAL]
