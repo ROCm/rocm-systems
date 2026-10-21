@@ -219,9 +219,16 @@ FailureOr<InputProgram> build_input_program(std::span<const uint8_t> image,
     return reject(error, InputErrorCode::ResourceLimit, "text exceeds analysis budget");
   const std::vector<KernelDescriptorInfo> kernels =
       scan_kernel_descriptors(image, text.sectionOffset(), text.size(), text.sectionHeaderIndex());
-  if (kernels.size() != 1 || kernels.front().kernel_name != entry)
-    return reject(error, InputErrorCode::UnsupportedEntry, "expected one selected kernel entry");
-  const KernelDescriptorInfo &kernel = kernels.front();
+  const std::vector<KernelDescriptorInfo>::const_iterator selected =
+      std::ranges::find(kernels, entry, &KernelDescriptorInfo::kernel_name);
+  if (selected == kernels.end())
+    return reject(error, InputErrorCode::UnsupportedEntry,
+                  "requested kernel entry '" + std::string(entry) + "' was not found");
+  if (kernels.size() != 1)
+    return reject(error, InputErrorCode::UnsupportedEntry,
+                  "ConSan requires a single-kernel code object; found " +
+                      std::to_string(kernels.size()) + " kernels");
+  const KernelDescriptorInfo &kernel = *selected;
   if (validate_entry_abi(kernel.descriptor, *profile, error).failed())
     return Result::failure();
   InputProgram program;

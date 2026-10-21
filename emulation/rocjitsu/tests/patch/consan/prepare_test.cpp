@@ -9,6 +9,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstring>
 #include <fstream>
 #include <iterator>
@@ -44,8 +45,8 @@ TEST_F(ConSanPrepare, AllAdmittedCompanionsHaveOwningValidatedReplayableArtifact
   for (const std::string_view name :
        {"race", "disjoint", "read_read", "collision", "single_lane", "alias", "immediate",
         "four_ranges", "exhausted", "empty", "branched"}) {
-    const auto original = load(name);
-    const auto artifact =
+    const std::vector<uint8_t> original = load(name);
+    const FailureOr<PreparedArtifact> artifact =
         prepare(original, *target_profile("gfx1100"), "lds_producer_consumer", error_);
     ASSERT_TRUE(artifact.succeeded()) << name << ": " << error_.message;
     EXPECT_TRUE(validate_prepared(original, artifact.value(), error_).succeeded())
@@ -55,12 +56,12 @@ TEST_F(ConSanPrepare, AllAdmittedCompanionsHaveOwningValidatedReplayableArtifact
                                        &image_error)
                     .succeeded())
         << name << ": " << image_error.message;
-    const auto encoded = encode_manifest(artifact.value().manifest);
+    const FailureOr<std::vector<uint8_t>> encoded = encode_manifest(artifact.value().manifest);
     ASSERT_TRUE(encoded.succeeded());
-    const auto decoded = decode_manifest(encoded.value());
+    const FailureOr<Manifest> decoded = decode_manifest(encoded.value());
     ASSERT_TRUE(decoded.succeeded());
     EXPECT_EQ(decoded.value(), artifact.value().manifest);
-    const auto repeated =
+    const FailureOr<PreparedArtifact> repeated =
         prepare(original, *target_profile("gfx1100"), "lds_producer_consumer", error_);
     ASSERT_TRUE(repeated.succeeded());
     EXPECT_EQ(repeated.value().image, artifact.value().image);
@@ -92,21 +93,57 @@ TEST_F(ConSanPrepare, NonExecutableOriginalCannotProduceAPublishableArtifact) {
 }
 
 TEST_F(ConSanPrepare, EntrySelectionIsIndependentOfTheExampleKernelName) {
-  const auto bytes = load("renamed");
-  const auto artifact = prepare(bytes, *target_profile("gfx1100"), "renamed_input", error_);
+  const std::vector<uint8_t> bytes = load("renamed");
+  const FailureOr<PreparedArtifact> artifact =
+      prepare(bytes, *target_profile("gfx1100"), "renamed_input", error_);
   ASSERT_TRUE(artifact.succeeded()) << error_.message;
   EXPECT_EQ(artifact.value().manifest.entry.name, "renamed_input");
   EXPECT_EQ(artifact.value().manifest.sites.size(), 2u);
   EXPECT_TRUE(prepare(bytes, *target_profile("gfx1100"), "lds_producer_consumer", error_).failed());
 }
 
+TEST_F(ConSanPrepare, EntryNamesMustBeUsableByTheShippedJsonAnalyzer) {
+  constexpr std::string_view original_name = "lds_producer_consumer";
+  for (const bool valid : {false, true}) {
+    std::string name(original_name);
+    name[0] = valid ? '\xc3' : '\xff';
+    if (valid)
+      name[1] = '\xa9';
+    std::vector<uint8_t> image = original_;
+    size_t replacements = 0;
+    for (std::vector<uint8_t>::iterator position = image.begin();;) {
+      position = std::search(position, image.end(), original_name.begin(), original_name.end());
+      if (position == image.end())
+        break;
+      std::memcpy(&*position, name.data(), name.size());
+      position += name.size();
+      ++replacements;
+    }
+    ASSERT_GE(replacements, 3u); // ELF symbols and AMDHSA metadata agree on the name.
+    const FailureOr<InputProgram> input =
+        build_input_program(image, *target_profile("gfx1100"), name, error_);
+    ASSERT_TRUE(input.succeeded()) << error_.message;
+    const FailureOr<PreparedArtifact> artifact =
+        prepare(image, *target_profile("gfx1100"), name, error_);
+    if (valid) {
+      ASSERT_TRUE(artifact.succeeded()) << error_.message;
+      EXPECT_EQ(artifact.value().manifest.entry.name, name);
+    } else {
+      EXPECT_TRUE(artifact.failed());
+      EXPECT_EQ(error_.code, InputErrorCode::UnsupportedEntry);
+      EXPECT_EQ(error_.message, "entry name is not valid UTF-8 for JSON output");
+    }
+  }
+}
+
 TEST_F(ConSanPrepare, ModifiedPreparedIsaAndMappingsFailAfterRecomputingTheirImageDigest) {
-  auto artifact = prepare(original_, *target_profile("gfx1100"), "lds_producer_consumer", error_);
+  FailureOr<PreparedArtifact> artifact =
+      prepare(original_, *target_profile("gfx1100"), "lds_producer_consumer", error_);
   ASSERT_TRUE(artifact.succeeded()) << error_.message;
-  const auto input =
+  const FailureOr<InputProgram> input =
       build_input_program(original_, *target_profile("gfx1100"), "lds_producer_consumer", error_);
   ASSERT_TRUE(input.succeeded());
-  auto broken = artifact.value();
+  PreparedArtifact broken = artifact.value();
   broken.manifest.sites[0].probe_offset += 4;
   EXPECT_TRUE(validate_manifest(broken.manifest).succeeded());
   EXPECT_TRUE(validate_prepared(original_, broken, error_).failed());
@@ -154,10 +191,10 @@ TEST_F(ConSanPrepare, RegisterPressureReturnsAResourceErrorInsteadOfAnInternalAs
 }
 
 TEST_F(ConSanPrepare, DescriptorAndMetadataMismatchCannotProduceAnArtifact) {
-  const auto input =
+  const FailureOr<InputProgram> input =
       build_input_program(original_, *target_profile("gfx1100"), "lds_producer_consumer", error_);
   ASSERT_TRUE(input.succeeded());
-  auto descriptor = input.value().kernel.descriptor;
+  rocjitsu::amdhsa::kernel_descriptor_t descriptor = input.value().kernel.descriptor;
   descriptor.kernarg_size += 8;
   std::memcpy(original_.data() + input.value().kernel.descriptor_file_offset, &descriptor,
               sizeof(descriptor));
@@ -167,10 +204,10 @@ TEST_F(ConSanPrepare, DescriptorAndMetadataMismatchCannotProduceAnArtifact) {
 }
 
 TEST_F(ConSanPrepare, MetadataGrowthFailureDoesNotPartiallyMutateTheImage) {
-  const auto input =
+  const FailureOr<InputProgram> input =
       build_input_program(original_, *target_profile("gfx1100"), "lds_producer_consumer", error_);
   ASSERT_TRUE(input.succeeded());
-  const auto saved = original_;
+  const std::vector<uint8_t> saved = original_;
   std::string message;
   EXPECT_TRUE(
       update_metadata(original_, input.value().kernel, {4096, 8, 28, 16}, &message).failed());
@@ -189,10 +226,10 @@ TEST_F(ConSanPrepare, ConcreteElfTargetMismatchFailsEvenWhenTheRequestedTargetIs
 }
 
 TEST_F(ConSanPrepare, Gfx1100Wave32RequiresTheInputSgprPaddingWorkaround) {
-  const auto input =
+  const FailureOr<InputProgram> input =
       build_input_program(original_, *target_profile("gfx1100"), "lds_producer_consumer", error_);
   ASSERT_TRUE(input.succeeded());
-  auto descriptor = input.value().kernel.descriptor;
+  rocjitsu::amdhsa::kernel_descriptor_t descriptor = input.value().kernel.descriptor;
   set_kernel_descriptor_user_sgpr_count(ROCJITSU_CODE_ARCH_RDNA3, descriptor, 2);
   std::memcpy(original_.data() + input.value().kernel.descriptor_file_offset, &descriptor,
               sizeof(descriptor));
@@ -203,12 +240,12 @@ TEST_F(ConSanPrepare, Gfx1100Wave32RequiresTheInputSgprPaddingWorkaround) {
 }
 
 TEST_F(ConSanPrepare, TransportStartsUnenteredAndOwnsExactParentAndGeometryBindings) {
-  const auto artifact =
+  const FailureOr<PreparedArtifact> artifact =
       prepare(original_, *target_profile("gfx1100"), "lds_producer_consumer", error_);
   ASSERT_TRUE(artifact.succeeded()) << error_.message;
-  const auto &manifest = artifact.value().manifest;
+  const Manifest &manifest = artifact.value().manifest;
   const LaunchDimensions shape{{64, 1, 1}, {64, 1, 1}};
-  const auto image = initialize_transport(manifest, shape, 8, 0, 101, 0x10000);
+  const FailureOr<TransportImage> image = initialize_transport(manifest, shape, 8, 0, 101, 0x10000);
   ASSERT_TRUE(image.succeeded());
   EXPECT_EQ(wire::read_u64(image.value().context, wire::kContextSerial), 101u);
   EXPECT_EQ(wire::read_u64(image.value().context, wire::kContextReportPointer), 0x10000u);

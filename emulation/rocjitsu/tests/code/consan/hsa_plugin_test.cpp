@@ -42,7 +42,7 @@ protected:
                              std::ios::binary);
     const std::vector<uint8_t> encoded_facts{std::istreambuf_iterator<char>(facts_file),
                                              std::istreambuf_iterator<char>()};
-    const auto facts = decode_manifest(encoded_facts);
+    const FailureOr<Manifest> facts = decode_manifest(encoded_facts);
     ASSERT_TRUE(facts.succeeded());
     facts_ = facts.value();
     const char *root = std::getenv("CONSAN_TEST_ARTIFACT_ROOT");
@@ -266,7 +266,7 @@ protected:
     const LaunchDimensions dimensions{{threads, 1, 1}, {threads, 1, 1}};
     EXPECT_EQ(execution.dimensions.grid, dimensions.grid);
     EXPECT_EQ(execution.dimensions.workgroup, dimensions.workgroup);
-    const auto layout =
+    const FailureOr<LaunchLayout> layout =
         plan_launch(facts_, dimensions, execution.group_bytes, execution.private_bytes);
     ASSERT_TRUE(layout.succeeded());
     EXPECT_EQ(execution.report.size(), layout.value().report_bytes);
@@ -324,11 +324,11 @@ protected:
     const std::vector<uint8_t> second_report(report_, report_ + report_bytes_);
     std::memset(report_, 0xef, report_bytes_);
     ASSERT_EQ(finish_(), 0);
-    const auto captured = decode_capture(read_capture());
+    const FailureOr<Capture> captured = decode_capture(read_capture());
     ASSERT_TRUE(captured.succeeded());
     ASSERT_EQ(captured.value().executions.size(), 2u);
-    const auto &first = captured.value().executions[0];
-    const auto &second = captured.value().executions[1];
+    const CapturedExecution &first = captured.value().executions[0];
+    const CapturedExecution &second = captured.value().executions[1];
     expect_report_extent(first, first_threads);
     expect_report_extent(second, second_threads);
     EXPECT_EQ(first.report, first_report);
@@ -363,7 +363,7 @@ protected:
   }
   static hsa_status_t load_code(hsa_executable_t, hsa_agent_t, hsa_code_object_reader_t reader,
                                 const char *, hsa_loaded_code_object_t *) {
-    const auto bytes = current_->readers_.at(reader.handle);
+    const std::span<const uint8_t> bytes = current_->readers_.at(reader.handle);
     current_->loaded_image_.assign(bytes.begin(), bytes.end());
     return HSA_STATUS_SUCCESS;
   }
@@ -472,11 +472,29 @@ protected:
     ASSERT_EQ(count, 1u);
     std::memcpy(&current_->published_, packets, sizeof(current_->published_));
     ++current_->published_packets_;
+    hsa_barrier_and_packet_t barrier{};
+    std::memcpy(&barrier, packets, sizeof(barrier));
+    current_->published_barriers_.push_back(barrier);
+  }
+
+  static void completing_barrier_writer(const void *packets, uint64_t count) {
+    barrier_writer(packets, count);
+    // A real downstream writer may call another tool. Re-enter our statistics
+    // accessor to require publication outside the ConSan runtime mutex.
+    EXPECT_EQ(current_->statistics_().submitted, 0u);
+    const hsa_barrier_and_packet_t &barrier = current_->published_barriers_.back();
+    for (const hsa_signal_t dependency : barrier.dep_signal) {
+      if (dependency.handle != 0) {
+        EXPECT_EQ(load_signal(dependency), 0);
+      }
+    }
+    if (barrier.completion_signal.handle != 0)
+      store_signal(barrier.completion_signal, load_signal(barrier.completion_signal) - 1);
   }
 
   static void packet_writer(const void *packets, uint64_t count) {
     ASSERT_EQ(count, 1u);
-    auto &state = *current_;
+    ConSanHsaPlugin &state = *current_;
     std::memcpy(&state.published_, packets, sizeof(state.published_));
     ++state.published_packets_;
     const auto wrapper =
@@ -524,6 +542,7 @@ protected:
   hsa_code_object_reader_t reader_{};
   hsa_signal_t signal_{};
   hsa_kernel_dispatch_packet_t published_{};
+  std::vector<hsa_barrier_and_packet_t> published_barriers_;
   std::mutex fake_mutex_;
   std::condition_variable fake_condition_;
   std::promise<void> symbol_query_entered_;
@@ -586,9 +605,9 @@ protected:
             std::_Exit(81);
           std::promise<void> resume;
           resume_symbol_query_ = resume.get_future().share();
-          auto entered = symbol_query_entered_.get_future();
-          auto frozen = std::async(std::launch::async,
-                                   [&] { return core_.hsa_executable_freeze_fn({7}, nullptr); });
+          std::future<void> entered = symbol_query_entered_.get_future();
+          std::future<hsa_status_t> frozen = std::async(
+              std::launch::async, [&] { return core_.hsa_executable_freeze_fn({7}, nullptr); });
           if (entered.wait_for(std::chrono::seconds(2)) != std::future_status::ready)
             std::_Exit(82);
           const bool interrupted = finish_during_query
@@ -694,7 +713,7 @@ TEST_F(ConSanHsaPlugin, CompletionGatesTheRealCopyPathAndRepeatedLaunchActuallyR
   EXPECT_EQ(statistics_().forwarded, 0u);
   EXPECT_EQ(statistics_().copied, 0u);
   EXPECT_EQ(core_.hsa_signal_destroy_fn(signal_), HSA_STATUS_ERROR_INVALID_SIGNAL);
-  const auto first_report = report_;
+  uint8_t *const first_report = report_;
   store_signal(published_.completion_signal, 0);
   ASSERT_EQ(drain_(), 0);
   EXPECT_EQ(statistics_().forwarded, 1u);
@@ -711,7 +730,7 @@ TEST_F(ConSanHsaPlugin, CompletionGatesTheRealCopyPathAndRepeatedLaunchActuallyR
   EXPECT_EQ(report_, first_report);
   EXPECT_EQ(statistics_().reused, 1u);
   ASSERT_EQ(finish_(), 0);
-  const auto captured = decode_capture(read_capture());
+  const FailureOr<Capture> captured = decode_capture(read_capture());
   ASSERT_TRUE(captured.succeeded());
   ASSERT_EQ(captured.value().executions.size(), 2u);
   EXPECT_EQ(wire::read_u32(captured.value().executions[0].arguments, 0), 7u);
@@ -744,7 +763,7 @@ TEST_F(ConSanHsaPlugin, FailedReportGrowthKeepsTheIdleAllocationAndPublishesNoPa
   const size_t first_capacity = report_capacity();
   next_signal();
   fail_allocation_ = allocation_calls_ + 1;
-  const auto layout = plan_launch(facts_, {{128, 1, 1}, {128, 1, 1}}, 8, 0);
+  const FailureOr<LaunchLayout> layout = plan_launch(facts_, {{128, 1, 1}, {128, 1, 1}}, 8, 0);
   ASSERT_TRUE(layout.succeeded());
   submit(128, nullptr, 128);
   EXPECT_EQ(last_allocation_bytes_, layout.value().report_bytes);
@@ -852,19 +871,81 @@ TEST_F(ConSanHsaPlugin, RejectedBatchPreservesSignalsForAlreadyPendingWork) {
   EXPECT_EQ(forwarding_calls_, 1u);
 }
 
-TEST_F(ConSanHsaPlugin, RejectedBatchDoesNotTreatBarrierCompletionAsDispatchCompletion) {
+TEST_F(ConSanHsaPlugin, RejectedBatchNotifiesBarrierWaitersOfFailure) {
   ASSERT_TRUE(bind());
   ASSERT_TRUE(create_queue_and_signal());
   hsa_signal_t second{};
   ASSERT_EQ(core_.hsa_signal_create_fn(1, 0, nullptr, &second), HSA_STATUS_SUCCESS);
-  std::array packets{dispatch_packet(signal_), dispatch_packet(second)};
-  packets[0].header = HSA_PACKET_TYPE_BARRIER_AND;
-  handler_(packets.data(), packets.size(), 0, handler_context_, packet_writer);
-  EXPECT_EQ(load_signal(signal_), 1);
+  for (const uint16_t type : {HSA_PACKET_TYPE_BARRIER_AND, HSA_PACKET_TYPE_BARRIER_OR}) {
+    hsa_signal_t completed{};
+    ASSERT_EQ(core_.hsa_signal_create_fn(1, 0, nullptr, &completed), HSA_STATUS_SUCCESS);
+    hsa_barrier_and_packet_t barrier{};
+    barrier.header = type;
+    barrier.dep_signal[0] = second;
+    barrier.completion_signal = completed;
+    std::array packets{dispatch_packet(signal_), hsa_kernel_dispatch_packet_t{},
+                       dispatch_packet(second)};
+    std::memcpy(&packets[1], &barrier, sizeof(barrier));
+    handler_(packets.data(), packets.size(), 0, handler_context_, completing_barrier_writer);
+    std::unique_lock lock(fake_mutex_);
+    EXPECT_TRUE(fake_condition_.wait_for(lock, std::chrono::milliseconds(100),
+                                         [&] { return signal_values_.at(completed.handle) < 1; }));
+    EXPECT_EQ(signal_values_.at(completed.handle), -1);
+  }
+  EXPECT_EQ(load_signal(signal_), -1);
   EXPECT_EQ(load_signal(second), -1);
   EXPECT_EQ(published_packets_, 0u);
   EXPECT_EQ(statistics_().submitted, 0u);
+  EXPECT_EQ(allocation_calls_, 0u);
   EXPECT_NE(finish_(), 0);
+}
+
+TEST_F(ConSanHsaPlugin, BarrierOnlyBatchPreservesOrderAndDoesNotFailCapture) {
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal());
+  hsa_signal_t second{};
+  ASSERT_EQ(core_.hsa_signal_create_fn(1, 0, nullptr, &second), HSA_STATUS_SUCCESS);
+  std::array<hsa_barrier_and_packet_t, 2> packets{};
+  packets[0].header = HSA_PACKET_TYPE_BARRIER_AND;
+  packets[0].completion_signal = signal_;
+  packets[1].header = HSA_PACKET_TYPE_BARRIER_OR;
+  packets[1].dep_signal[0] = signal_;
+  packets[1].completion_signal = second;
+  handler_(packets.data(), packets.size(), 0, handler_context_, completing_barrier_writer);
+  ASSERT_EQ(published_barriers_.size(), packets.size());
+  EXPECT_EQ(std::memcmp(published_barriers_.data(), packets.data(), sizeof(packets)), 0);
+  EXPECT_EQ(load_signal(signal_), 0);
+  EXPECT_EQ(load_signal(second), 0);
+  EXPECT_EQ(statistics_().submitted, 0u);
+  EXPECT_EQ(allocation_calls_, 0u);
+  EXPECT_EQ(finish_(), 0);
+}
+
+TEST_F(ConSanHsaPlugin, RejectedBatchPreservesPendingWorkWhenNotifyingBarrierFailure) {
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal());
+  auto_complete_ = false;
+  submit();
+  ASSERT_EQ(published_packets_, 1u);
+  const hsa_signal_t proxy = published_.completion_signal;
+  hsa_signal_t completed{};
+  ASSERT_EQ(core_.hsa_signal_create_fn(1, 0, nullptr, &completed), HSA_STATUS_SUCCESS);
+  hsa_barrier_and_packet_t barrier{};
+  barrier.header = HSA_PACKET_TYPE_BARRIER_AND;
+  barrier.dep_signal[0] = signal_;
+  barrier.completion_signal = completed;
+  std::array packets{dispatch_packet(signal_), hsa_kernel_dispatch_packet_t{}};
+  std::memcpy(&packets[1], &barrier, sizeof(barrier));
+  handler_(packets.data(), packets.size(), 0, handler_context_, barrier_writer);
+  EXPECT_EQ(load_signal(signal_), 1);
+  EXPECT_EQ(load_signal(completed), -1);
+  EXPECT_TRUE(published_barriers_.empty());
+  EXPECT_EQ(published_packets_, 1u);
+  store_signal(proxy, 0);
+  EXPECT_NE(finish_(), 0);
+  EXPECT_EQ(load_signal(signal_), 0);
+  EXPECT_EQ(statistics_().forwarded, 1u);
+  EXPECT_EQ(forwarding_calls_, 1u);
 }
 
 TEST_F(ConSanHsaPlugin, RejectedNonDispatchPacketDoesNotModifyATrackedSignal) {
@@ -877,6 +958,62 @@ TEST_F(ConSanHsaPlugin, RejectedNonDispatchPacketDoesNotModifyATrackedSignal) {
   EXPECT_EQ(load_signal(signal_), 1);
   EXPECT_EQ(published_packets_, 0u);
   EXPECT_NE(finish_(), 0);
+}
+
+TEST_F(ConSanHsaPlugin, RejectedBarrierCannotOverwritePendingDispatchCompletion) {
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal());
+  auto_complete_ = false;
+  submit();
+  const hsa_signal_t proxy = published_.completion_signal;
+  hsa_signal_t rejected{};
+  ASSERT_EQ(core_.hsa_signal_create_fn(1, 0, nullptr, &rejected), HSA_STATUS_SUCCESS);
+  hsa_barrier_and_packet_t barrier{};
+  barrier.header = HSA_PACKET_TYPE_BARRIER_AND;
+  barrier.completion_signal = signal_;
+  std::array packets{dispatch_packet(rejected), hsa_kernel_dispatch_packet_t{}};
+  std::memcpy(&packets[1], &barrier, sizeof(barrier));
+  handler_(packets.data(), packets.size(), 0, handler_context_, barrier_writer);
+  EXPECT_EQ(load_signal(signal_), 1);
+  EXPECT_EQ(load_signal(rejected), -1);
+  EXPECT_EQ(published_packets_, 1u);
+  EXPECT_TRUE(published_barriers_.empty());
+  store_signal(proxy, 0);
+  EXPECT_NE(finish_(), 0);
+  EXPECT_EQ(load_signal(signal_), 0);
+  EXPECT_EQ(forwarding_calls_, 1u);
+}
+
+TEST_F(ConSanHsaPlugin, RejectedUnsupportedPacketNotifiesItsNeighboringBarrierOfFailure) {
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal());
+  hsa_signal_t completed{};
+  ASSERT_EQ(core_.hsa_signal_create_fn(1, 0, nullptr, &completed), HSA_STATUS_SUCCESS);
+  hsa_agent_dispatch_packet_t unsupported{};
+  unsupported.header = HSA_PACKET_TYPE_AGENT_DISPATCH;
+  unsupported.completion_signal = signal_;
+  std::array<hsa_barrier_and_packet_t, 2> packets{};
+  std::memcpy(&packets[0], &unsupported, sizeof(unsupported));
+  packets[1].header = HSA_PACKET_TYPE_BARRIER_AND;
+  packets[1].completion_signal = completed;
+  handler_(packets.data(), packets.size(), 0, handler_context_, completing_barrier_writer);
+  EXPECT_EQ(load_signal(signal_), 1);
+  EXPECT_EQ(load_signal(completed), -1);
+  EXPECT_EQ(published_packets_, 0u);
+  EXPECT_NE(finish_(), 0);
+}
+
+TEST_F(ConSanHsaPlugin, BarrierBatchWithoutCompletionSignalsStillPassesThrough) {
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal());
+  std::array<hsa_barrier_and_packet_t, 2> packets{};
+  packets[0].header = HSA_PACKET_TYPE_BARRIER_AND;
+  packets[1].header = HSA_PACKET_TYPE_BARRIER_OR;
+  handler_(packets.data(), packets.size(), 0, handler_context_, completing_barrier_writer);
+  ASSERT_EQ(published_barriers_.size(), packets.size());
+  EXPECT_EQ(std::memcmp(published_barriers_.data(), packets.data(), sizeof(packets)), 0);
+  EXPECT_EQ(load_signal(signal_), 1);
+  EXPECT_EQ(finish_(), 0);
 }
 
 TEST_F(ConSanHsaPlugin, IndividualBarriersStillPassThroughWithoutDispatchAdmission) {
@@ -897,6 +1034,33 @@ TEST_F(ConSanHsaPlugin, IndividualBarriersStillPassThroughWithoutDispatchAdmissi
   EXPECT_EQ(finish_(), 0);
 }
 
+TEST_F(ConSanHsaPlugin, BarriersAfterADispatchRejectionReceiveFailureNotifications) {
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal());
+  submit(128);
+  ASSERT_EQ(load_signal(signal_), -1);
+  for (const bool batch : {false, true}) {
+    std::array<hsa_barrier_and_packet_t, 2> packets{};
+    packets[0].header = HSA_PACKET_TYPE_BARRIER_AND;
+    packets[1].header = HSA_PACKET_TYPE_BARRIER_OR;
+    for (hsa_barrier_and_packet_t &packet : packets) {
+      ASSERT_EQ(core_.hsa_signal_create_fn(1, 0, nullptr, &packet.completion_signal),
+                HSA_STATUS_SUCCESS);
+      packet.dep_signal[0] = signal_;
+    }
+    if (batch)
+      handler_(packets.data(), packets.size(), 0, handler_context_, completing_barrier_writer);
+    else
+      for (const hsa_barrier_and_packet_t &packet : packets)
+        handler_(&packet, 1, 0, handler_context_, completing_barrier_writer);
+    for (const hsa_barrier_and_packet_t &packet : packets)
+      EXPECT_EQ(load_signal(packet.completion_signal), -1);
+  }
+  EXPECT_EQ(published_packets_, 0u);
+  EXPECT_EQ(statistics_().submitted, 0u);
+  EXPECT_NE(finish_(), 0);
+}
+
 TEST_F(ConSanHsaPlugin, ShortOriginalArgumentAllocationFailsBeforePublication) {
   ASSERT_TRUE(bind());
   ASSERT_TRUE(create_queue_and_signal());
@@ -911,12 +1075,12 @@ TEST_F(ConSanHsaPlugin, ShortOriginalArgumentAllocationFailsBeforePublication) {
 TEST_F(ConSanHsaPlugin, ConcurrentFinishClosesAndPublishesOneCompleteCapture) {
   ASSERT_TRUE(bind());
   std::promise<void> release;
-  auto ready = release.get_future().share();
-  auto first = std::async(std::launch::async, [&] {
+  std::shared_future<void> ready = release.get_future().share();
+  std::future<int> first = std::async(std::launch::async, [&] {
     ready.wait();
     return finish_();
   });
-  auto second = std::async(std::launch::async, [&] {
+  std::future<int> second = std::async(std::launch::async, [&] {
     ready.wait();
     return finish_();
   });

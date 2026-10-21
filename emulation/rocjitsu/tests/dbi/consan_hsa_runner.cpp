@@ -95,11 +95,13 @@ int run(int argc, char **argv) {
   if (argc < 5) {
     std::cerr << "Usage: consan_hsa_runner ORIGINAL ENTRY LAUNCHES defined|observe [--baseline] "
                  "[--bad-geometry] [--profiling] [--reuse-signal] [--target GPU] [--wave-size N] "
-                 "[--threads N] [--test-statistics]\n";
+                 "[--threads N] [--test-statistics] [--batch-barrier-and|--batch-barrier-or] "
+                 "[--separate-barrier]\n";
     return 3;
   }
   uint32_t launches = 0;
-  const auto parsed = std::from_chars(argv[3], argv[3] + std::strlen(argv[3]), launches);
+  const std::from_chars_result parsed =
+      std::from_chars(argv[3], argv[3] + std::strlen(argv[3]), launches);
   if (parsed.ec != std::errc{} || *parsed.ptr != '\0' || launches == 0 || launches > 16)
     return 3;
   const bool defined = std::string_view(argv[4]) == "defined";
@@ -108,7 +110,8 @@ int run(int argc, char **argv) {
   std::string_view target = "gfx1100";
   uint32_t threads = 64, wave_size = 32;
   bool baseline = false, bad_geometry = false, profiling = false, reuse_signal = false;
-  bool test_statistics = false;
+  bool test_statistics = false, separate_barrier = false;
+  uint16_t barrier_type = 0;
   for (int index = 5; index < argc; ++index) {
     const std::string_view option(argv[index]);
     if (option == "--baseline")
@@ -121,24 +124,32 @@ int run(int argc, char **argv) {
       reuse_signal = true;
     else if (option == "--test-statistics")
       test_statistics = true;
+    else if (option == "--batch-barrier-and" || option == "--batch-barrier-or")
+      barrier_type = option == "--batch-barrier-and" ? HSA_PACKET_TYPE_BARRIER_AND
+                                                     : HSA_PACKET_TYPE_BARRIER_OR;
+    else if (option == "--separate-barrier")
+      separate_barrier = true;
     else if (option == "--target" && index + 1 < argc)
       target = argv[++index];
     else if ((option == "--threads" || option == "--wave-size") && index + 1 < argc) {
       const char *value = argv[++index];
       uint32_t &number = option == "--threads" ? threads : wave_size;
-      const auto conversion = std::from_chars(value, value + std::strlen(value), number);
+      const std::from_chars_result conversion =
+          std::from_chars(value, value + std::strlen(value), number);
       if (conversion.ec != std::errc{} || *conversion.ptr != '\0')
         return 3;
     } else
       return 3;
   }
-  const auto *profile = rocjitsu::consan::target_profile(target);
+  const rocjitsu::consan::TargetProfile *profile = rocjitsu::consan::target_profile(target);
   if (profile == nullptr || !rocjitsu::consan::supports_wave(*profile, wave_size) || threads == 0 ||
       threads > 1024)
     return 3;
   const uint32_t wave_count = (threads + wave_size - 1) / wave_size;
   const size_t output_bytes = std::max(wave_count, 2u) * sizeof(uint32_t);
-  if (baseline && (bad_geometry || profiling || reuse_signal || test_statistics))
+  if (baseline && (bad_geometry || profiling || reuse_signal || test_statistics || barrier_type))
+    return 3;
+  if (separate_barrier && (!barrier_type || !bad_geometry))
     return 3;
   if (hsa_init() != HSA_STATUS_SUCCESS)
     return 77;
@@ -180,6 +191,8 @@ int run(int argc, char **argv) {
   hsa_code_object_reader_t reader{};
   hsa_queue_t *queue = nullptr;
   hsa_signal_t signal{};
+  hsa_signal_t barrier_signal{};
+  hsa_signal_value_t barrier_completion = 1;
   void *arguments = nullptr, *output = nullptr;
   int result = 0;
   uint32_t completed = 0;
@@ -222,7 +235,7 @@ int run(int argc, char **argv) {
                 "LDS extent") ||
        kernarg_bytes != 16 || kernel == 0))
     result = 20;
-  const auto pool = fine_pool(hardware.cpu);
+  const hsa_amd_memory_pool_t pool = fine_pool(hardware.cpu);
   if (result == 0 &&
       (!pool.handle ||
        !require(hsa_amd_memory_pool_allocate(pool, 16, 0, &arguments), "original arguments") ||
@@ -261,7 +274,13 @@ int run(int argc, char **argv) {
     std::memcpy(arguments, &input, 4);
     std::memcpy(static_cast<uint8_t *>(arguments) + 8, &output, 8);
     std::memset(output, 0, output_bytes);
-    const uint64_t write_index = hsa_queue_add_write_index_relaxed(queue, 1);
+    if (barrier_type &&
+        !require(hsa_signal_create(1, 0, nullptr, &barrier_signal), "barrier completion")) {
+      result = 21;
+      break;
+    }
+    const uint64_t packet_count = barrier_type ? 2 : 1;
+    const uint64_t write_index = hsa_queue_add_write_index_relaxed(queue, packet_count);
     auto *packet = static_cast<hsa_kernel_dispatch_packet_t *>(queue->base_address) +
                    (write_index & (queue->size - 1));
     std::memset(packet, 0, sizeof(*packet));
@@ -278,10 +297,49 @@ int run(int argc, char **argv) {
                             (1u << HSA_PACKET_HEADER_BARRIER) |
                             (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
                             (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+    if (barrier_type) {
+      auto *barrier = reinterpret_cast<hsa_barrier_and_packet_t *>(queue->base_address) +
+                      ((write_index + 1) & (queue->size - 1));
+      std::memset(barrier, 0, sizeof(*barrier));
+      barrier->dep_signal[0] = signal;
+      barrier->completion_signal = barrier_signal;
+      barrier->header =
+          separate_barrier
+              ? uint16_t{HSA_PACKET_TYPE_INVALID}
+              : barrier_type | (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
+                    (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+    }
+    // Keep the second header invalid for the separate-callback control.
     __atomic_store_n(reinterpret_cast<uint16_t *>(packet), header, __ATOMIC_RELEASE);
-    hsa_signal_store_screlease(queue->doorbell_signal, write_index);
+    hsa_signal_store_screlease(queue->doorbell_signal,
+                               separate_barrier ? write_index : write_index + packet_count - 1);
+    if (separate_barrier) {
+      if (hsa_signal_load_scacquire(signal) != -1) {
+        std::cerr << "separate dispatch did not report rejection; retaining live HSA resources\n";
+        ::_exit(24);
+      }
+      auto *barrier = reinterpret_cast<hsa_barrier_and_packet_t *>(queue->base_address) +
+                      ((write_index + 1) & (queue->size - 1));
+      const uint16_t barrier_header =
+          barrier_type | (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
+          (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+      __atomic_store_n(&barrier->header, barrier_header, __ATOMIC_RELEASE);
+      hsa_signal_store_screlease(queue->doorbell_signal, write_index + 1);
+    }
+    if (barrier_type) {
+      const std::chrono::steady_clock::time_point deadline =
+          std::chrono::steady_clock::now() + std::chrono::seconds(5);
+      while (barrier_completion == 1 && std::chrono::steady_clock::now() < deadline)
+        barrier_completion = hsa_signal_wait_scacquire(barrier_signal, HSA_SIGNAL_CONDITION_LT, 1,
+                                                       1000000, HSA_WAIT_STATE_BLOCKED);
+      if (barrier_completion != -1) {
+        std::cerr << "batch barrier did not report failure; retaining live HSA resources\n";
+        ::_exit(24);
+      }
+    }
     hsa_signal_value_t value = 1;
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+    const std::chrono::steady_clock::time_point deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(20);
     while (value == 1 && std::chrono::steady_clock::now() < deadline)
       value = hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, 1000000,
                                         HSA_WAIT_STATE_BLOCKED);
@@ -318,6 +376,9 @@ int run(int argc, char **argv) {
   const rj_consan_statistics stats = statistics ? statistics() : rj_consan_statistics{};
   if (signal.handle && !require(hsa_signal_destroy(signal), "signal cleanup") && result == 0)
     result = 22;
+  if (barrier_signal.handle &&
+      !require(hsa_signal_destroy(barrier_signal), "barrier signal cleanup") && result == 0)
+    result = 22;
   if (queue && !require(hsa_queue_destroy(queue), "queue cleanup") && result == 0)
     result = 22;
   if (reader.handle && !require(hsa_code_object_reader_destroy(reader), "reader cleanup") &&
@@ -336,6 +397,8 @@ int run(int argc, char **argv) {
     ::dlclose(plugin);
   std::cout << "{\"app_status\":" << result << ",\"finish_status\":" << finish_status
             << ",\"completed\":" << completed;
+  if (barrier_type)
+    std::cout << ",\"barrier_completion\":" << barrier_completion;
   if (statistics)
     std::cout << ",\"submitted\":" << stats.submitted << ",\"forwarded\":" << stats.forwarded
               << ",\"copied\":" << stats.copied << ",\"written\":" << stats.written

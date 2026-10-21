@@ -8,6 +8,8 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 
+#include "../../dbi_test_util.h"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -37,6 +39,20 @@ TEST(ConSanInput, TruncatedImageAndWrongSelectedTargetHaveDistinctErrors) {
                                   "kernel", error)
                   .failed());
   EXPECT_EQ(error.code, InputErrorCode::UnsupportedTarget);
+}
+
+TEST(ConSanInput, MissingEntryAndAdditionalKernelHaveDistinctDiagnostics) {
+  std::vector<uint8_t> image = rocjitsu::test::make_gfx950_two_kernel_elf({0xbf810000u}, 0);
+  image[EI_DATA] = ELFDATA2LSB;
+  image[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
+  const TargetProfile &target = *target_profile("gfx950");
+  InputError error;
+  EXPECT_TRUE(build_input_program(image, target, "missing_kernel", error).failed());
+  EXPECT_EQ(error.code, InputErrorCode::UnsupportedEntry);
+  EXPECT_EQ(error.message, "requested kernel entry 'missing_kernel' was not found");
+  EXPECT_TRUE(build_input_program(image, target, "test_kernel0", error).failed());
+  EXPECT_EQ(error.code, InputErrorCode::UnsupportedEntry);
+  EXPECT_EQ(error.message, "ConSan requires a single-kernel code object; found 2 kernels");
 }
 
 class ConSanInputFixture : public ::testing::Test {
@@ -72,8 +88,8 @@ protected:
 
   void expect_value_operand(const InputProgram &program, const NativeLdsAccess &access,
                             uint16_t expected) {
-    const auto original = std::ranges::find(program.instructions, access.original_offset,
-                                            &OriginalInstruction::offset);
+    const std::vector<OriginalInstruction>::const_iterator original = std::ranges::find(
+        program.instructions, access.original_offset, &OriginalInstruction::offset);
     ASSERT_NE(original, program.instructions.end());
     std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3);
     ASSERT_NE(decoder, nullptr);
@@ -161,7 +177,7 @@ TEST_F(ConSanInputFixture, CompanionSitesDoNotDependOnFixtureNamesOrInstructionO
     ASSERT_TRUE(program.succeeded()) << name << ": " << error_.message;
     ASSERT_EQ(program.value().accesses.size(), 2u) << name;
     for (const NativeLdsAccess &access : program.value().accesses) {
-      const auto found =
+      const std::vector<OriginalInstruction>::const_iterator found =
           std::find_if(program.value().instructions.begin(), program.value().instructions.end(),
                        [&](const OriginalInstruction &instruction) {
                          return instruction.offset == access.original_offset;

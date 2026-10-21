@@ -439,6 +439,30 @@ if(RJ_BUILD_CONSAN_ANALYZER AND TARGET consan_hsa_runner)
         consan_add_target_e2e(Sim ${_gpu} ${_wave} ${_kind} disjoint ${_threads} production)
         if(_gpu STREQUAL "gfx1250")
             consan_add_target_e2e(Sim ${_gpu} ${_wave} assembly missing-statistics ${_threads} production)
+            foreach(
+                _barrier
+                IN
+                ITEMS
+                    batch-barrier-and
+                    batch-barrier-or
+                    late-barrier-and
+                    late-barrier-or
+            )
+                consan_add_target_e2e(Sim ${_gpu} ${_wave} assembly ${_barrier} ${_threads} production)
+            endforeach()
+        endif()
+        if(_gpu STREQUAL "gfx1100")
+            foreach(
+                _barrier
+                IN
+                ITEMS
+                    batch-barrier-and
+                    batch-barrier-or
+                    late-barrier-and
+                    late-barrier-or
+            )
+                consan_add_target_e2e(Physical ${_gpu} ${_wave} ${_kind} ${_barrier} ${_threads} production)
+            endforeach()
         endif()
         foreach(_scenario IN ITEMS race disjoint read_read)
             consan_add_target_e2e(Sim ${_gpu} ${_wave} ${_kind} ${_scenario} ${_threads} testable)
