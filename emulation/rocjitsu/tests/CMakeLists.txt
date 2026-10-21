@@ -615,6 +615,7 @@ add_executable(
     ds_memory_snapshot_test.cpp
     ds_gws_test.cpp
     buffer_lds_transfer_test.cpp
+    flat_lds_transfer_test.cpp
     scalar_buffer_store_test.cpp
     lds_test.cpp
     lds_counter_test.cpp
@@ -644,6 +645,7 @@ add_executable(
     shared_infra_test.cpp
     scalar_buffer_test.cpp
     scalar_cache_policy_test.cpp
+    scalar_cache_discard_test.cpp
     transcendental_test.cpp
     comparison_test.cpp
     denormal_test.cpp
@@ -680,6 +682,7 @@ add_executable(
     dbi/dbi_log_record_sim_test.cpp
     dbi/kernarg_sgpr_slot_test.cpp
     code/code_object_target_id_test.cpp
+    code/executable_test.cpp
     code/relocation_function_table_test.cpp
     dbt/semantic_scratch_test.cpp
     dbt/waitcnt_translator_test.cpp
@@ -693,6 +696,7 @@ add_executable(
     sysfs_test.cpp
     kfd_ioctl_test.cpp
     waitcnt_counter_test.cpp
+    wait_hazard_test.cpp
     memory_wait_scoreboard_test.cpp
     register_access_test.cpp
     register_file_test.cpp
@@ -707,6 +711,10 @@ add_executable(
     gfx11_dot2_test.cpp
     gfx12_dot_test.cpp
     packed_wmma_test.cpp
+    rdna_wmma_i32_test.cpp
+    rdna_swmmac_i32_test.cpp
+    rdna_wmma_float_test.cpp
+    rdna_swmmac_float_test.cpp
     atomic_semantics_and_decode_test.cpp
     scalar_atomic_test.cpp
     isa_target_registry_test.cpp

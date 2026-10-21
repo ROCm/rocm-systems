@@ -547,90 +547,6 @@ TEST_F(MemoryWaitScoreboardTest, ConcurrentWavesKeepIndependentPendingRegisters)
   ASSERT_EQ(hazards.size(), 1u);
 }
 
-TEST_F(MemoryWaitScoreboardTest, TargetWaitEncodingsRetireTheirCanonicalCounter) {
-  struct Case {
-    rj_code_arch_t arch;
-    uint32_t word;
-    WaitCounterKind counter;
-  };
-  // Synthetic pending destinations test wait decoding and canonical counter
-  // wiring; they do not assert that every counter has a tracked producer.
-  const Case cases[] = {
-      {ROCJITSU_CODE_ARCH_CDNA1, 0xbf8c0f70u, WaitCounterKind::Load},
-      {ROCJITSU_CODE_ARCH_CDNA1, 0xbf8cc07fu, WaitCounterKind::Ds},
-      {ROCJITSU_CODE_ARCH_CDNA2, 0xbf8c0f70u, WaitCounterKind::Load},
-      {ROCJITSU_CODE_ARCH_CDNA2, 0xbf8cc07fu, WaitCounterKind::Ds},
-      {ROCJITSU_CODE_ARCH_RDNA1, 0xbf8c3f70u, WaitCounterKind::Load},
-      {ROCJITSU_CODE_ARCH_RDNA1, 0xbf8cc07fu, WaitCounterKind::Ds},
-      {ROCJITSU_CODE_ARCH_RDNA1, 0xbbfd0000u, WaitCounterKind::Store},
-      {ROCJITSU_CODE_ARCH_RDNA2, 0xbf8c3f70u, WaitCounterKind::Load},
-      {ROCJITSU_CODE_ARCH_RDNA2, 0xbf8cc07fu, WaitCounterKind::Ds},
-      {ROCJITSU_CODE_ARCH_RDNA2, 0xbbfd0000u, WaitCounterKind::Store},
-      {ROCJITSU_CODE_ARCH_RDNA4, 0xbfc20000u, WaitCounterKind::Sample},
-      {ROCJITSU_CODE_ARCH_RDNA4, 0xbfc30000u, WaitCounterKind::Bvh},
-      {ROCJITSU_CODE_ARCH_CDNA3, 0xbf8c0f70u, WaitCounterKind::Load},
-      {ROCJITSU_CODE_ARCH_CDNA3, 0xbf8cc07fu, WaitCounterKind::Ds},
-      {ROCJITSU_CODE_ARCH_CDNA4, 0xbf8c0f70u, WaitCounterKind::Load},
-      {ROCJITSU_CODE_ARCH_CDNA4, 0xbf8cc07fu, WaitCounterKind::Ds},
-      {ROCJITSU_CODE_ARCH_RDNA3, 0xbf8903f7u, WaitCounterKind::Load},
-      {ROCJITSU_CODE_ARCH_RDNA3, 0xbf89fc07u, WaitCounterKind::Ds},
-      {ROCJITSU_CODE_ARCH_RDNA3, 0xbc7c0000u, WaitCounterKind::Store},
-      {ROCJITSU_CODE_ARCH_RDNA3_5, 0xbf8903f7u, WaitCounterKind::Load},
-      {ROCJITSU_CODE_ARCH_RDNA3_5, 0xbf89fc07u, WaitCounterKind::Ds},
-      {ROCJITSU_CODE_ARCH_RDNA3_5, 0xbc7c0000u, WaitCounterKind::Store},
-      {ROCJITSU_CODE_ARCH_RDNA4, 0xbfc00000u, WaitCounterKind::Load},
-      {ROCJITSU_CODE_ARCH_RDNA4, 0xbfc10000u, WaitCounterKind::Store},
-      {ROCJITSU_CODE_ARCH_RDNA4, 0xbfc60000u, WaitCounterKind::Ds},
-      {ROCJITSU_CODE_ARCH_RDNA4, 0xbfc70000u, WaitCounterKind::Km},
-      {ROCJITSU_CODE_ARCH_RDNA4, 0xbfc40000u, WaitCounterKind::Exp},
-      {ROCJITSU_CODE_ARCH_CDNA5, 0xbfc00000u, WaitCounterKind::Load},
-      {ROCJITSU_CODE_ARCH_CDNA5, 0xbfc10000u, WaitCounterKind::Store},
-      {ROCJITSU_CODE_ARCH_CDNA5, 0xbfc60000u, WaitCounterKind::Ds},
-      {ROCJITSU_CODE_ARCH_CDNA5, 0xbfc70000u, WaitCounterKind::Km},
-      {ROCJITSU_CODE_ARCH_CDNA5, 0xbfca0000u, WaitCounterKind::Async},
-      {ROCJITSU_CODE_ARCH_CDNA5, 0xbfcb0000u, WaitCounterKind::Tensor},
-  };
-  for (const auto &c : cases) {
-    SCOPED_TRACE(static_cast<int>(c.arch));
-    SCOPED_TRACE(c.word);
-    state.clear();
-    auto decoder = Decoder::create(c.arch);
-    ASSERT_NE(decoder, nullptr);
-    util::StringDiagnostic error;
-    auto decoded =
-        decoder->decode_window(std::span<const uint32_t>(&c.word, 1), 0, error.emitter());
-    ASSERT_TRUE(decoded.succeeded()) << error.message();
-    load(5, c.counter);
-    state.before(*decoded.value(), c.arch);
-    EXPECT_TRUE(state.empty());
-    EXPECT_FALSE(shadow.test(5));
-  }
-}
-
-TEST_F(MemoryWaitScoreboardTest, Rdna4CompatibilityWaitDrainsAllCountersForEveryImmediate) {
-  const auto counters = {WaitCounterKind::Load, WaitCounterKind::Store, WaitCounterKind::Ds,
-                         WaitCounterKind::Km,   WaitCounterKind::Exp,   WaitCounterKind::Sample,
-                         WaitCounterKind::Bvh};
-  for (uint32_t immediate : {0u, 0xfc07u, 0xffffu}) {
-    SCOPED_TRACE(immediate);
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
-    const uint32_t word = 0xbf890000u | immediate;
-    util::StringDiagnostic error;
-    auto decoded = decoder->decode_window(std::span<const uint32_t>(&word, 1), 0, error.emitter());
-    ASSERT_TRUE(decoded.succeeded()) << error.message();
-    unsigned reg = 0;
-    for (auto counter : counters)
-      load(reg++, counter, ~uint64_t{0}, 0xf, true);
-    state.before(*decoded.value(), ROCJITSU_CODE_ARCH_RDNA4);
-    EXPECT_TRUE(state.empty());
-    for (auto counter : counters)
-      EXPECT_EQ(state.outstanding(counter), 0u);
-    for (unsigned i = 0; i < counters.size(); ++i)
-      read(i);
-    EXPECT_TRUE(hazards.empty());
-  }
-}
-
 TEST(MemoryWaitExecutionTest, WaitIdleAndRdna4CompatibilityWaitDrainEveryFunctionalCounter) {
   for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
     for (uint32_t word : {0xbf890000u, 0xbf89fc07u, 0xbf89ffffu, 0xbf8a0000u}) {
@@ -1304,7 +1220,7 @@ TEST(MemoryWaitExecutionTest, DecodedFlatPlansMatchExecutedAddressesBeforeAnyReg
     cu->set_plugin_group(group);
     group->onInit();
     auto decoder = Decoder::create(arch);
-    for (unsigned scalar_mode : {0u, 1u, 2u}) {
+    for (unsigned scalar_mode : {0u, 1u, 2u, 3u}) {
       for (int offset : {0, 4, -4}) {
         for (uint64_t exec : {uint64_t{0}, uint64_t{1}, uint64_t{0b1010}, uint64_t{0xf}}) {
           SCOPED_TRACE(scalar_mode);
@@ -1313,13 +1229,16 @@ TEST(MemoryWaitExecutionTest, DecodedFlatPlansMatchExecutedAddressesBeforeAnyReg
           wf->set_exec(exec);
           const uint8_t saddr = scalar_mode == 0   ? (null127 ? 127 : 124)
                                 : scalar_mode == 1 ? 0
-                                                   : 96;
+                                : scalar_mode == 2 ? 96
+                                                   : 127;
+          // 127 is a second NULL selector on RDNA; CDNA5 rejects it during decode.
+          const bool has_scalar = scalar_mode == 1 || scalar_mode == 2;
           RegisterAccess(*wf).write_sgpr64(wf->sgpr_alloc().base, shared);
           const uint64_t addresses[] = {
               shared + 0x100, shared + (uint64_t{1} << 31) + 0x100, uint64_t{8} << 32,
               cdna5 ? 0x400080 | (uint64_t{3} << 52) : private_base + 0x80};
           for (unsigned lane = 0; lane < 4; ++lane) {
-            const uint64_t value = addresses[lane] - (scalar_mode && !legacy_cdna ? shared : 0);
+            const uint64_t value = addresses[lane] - (has_scalar && !legacy_cdna ? shared : 0);
             const unsigned base = wf->vgpr_alloc().base + (cdna5 ? 256 : 0);
             cu->write_vgpr(base, lane, static_cast<uint32_t>(value));
             cu->write_vgpr(base + 1, lane, value >> 32);
@@ -1362,6 +1281,10 @@ TEST(MemoryWaitExecutionTest, DecodedFlatPlansMatchExecutedAddressesBeforeAnyReg
                                            .ioffset = static_cast<uint32_t>(offset) & 0xffffff}));
           util::StringDiagnostic error;
           auto decoded = decoder->decode_window(words, 0, error.emitter());
+          if (cdna5 && scalar_mode == 3) {
+            EXPECT_FALSE(decoded.succeeded()) << "CDNA5 does not accept the RDNA NULL alias";
+            continue;
+          }
           ASSERT_TRUE(decoded.succeeded()) << error.message();
           auto &inst = *decoded.value();
           ASSERT_TRUE(inst.is_memory_wait_producer());
