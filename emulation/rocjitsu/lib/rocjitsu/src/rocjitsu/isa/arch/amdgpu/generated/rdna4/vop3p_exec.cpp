@@ -1451,16 +1451,10 @@ void VWmmaI3216x16x16Iu8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t const_acc;
   uint32_t s2 = rdna4::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  auto extract_a = [&](auto &cu, uint32_t base, const amdgpu::InputLoc &loc) {
-    return (inst_.neg & 0x1u) ? amdgpu::extract_i8(cu, base, loc)
-                              : amdgpu::extract_u8(cu, base, loc);
-  };
-  auto extract_b = [&](auto &cu, uint32_t base, const amdgpu::InputLoc &loc) {
-    return (inst_.neg & 0x2u) ? amdgpu::extract_i8(cu, base, loc)
-                              : amdgpu::extract_u8(cu, base, loc);
-  };
-  amdgpu::exec_wmma_i32(cu, 16, 16, 16, 8, dst, src0_base, src1_base, s2, extract_a, extract_b,
-                        inst_.clamp, const_acc, wf.wf_size());
+  amdgpu::exec_rdna_wmma_i32<true, 8>(
+      cu, wf.wf_size(), dst, src0_base, src1_base, s2,
+      src2.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc) : std::nullopt,
+      /*a_signed=*/(inst_.neg & 0x1u) != 0, /*b_signed=*/(inst_.neg & 0x2u) != 0, inst_.clamp);
 }
 
 void VWmmaI3216x16x16Iu4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -1472,16 +1466,10 @@ void VWmmaI3216x16x16Iu4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t const_acc;
   uint32_t s2 = rdna4::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  auto extract_a = [&](auto &cu, uint32_t base, const amdgpu::InputLoc &loc) {
-    return (inst_.neg & 0x1u) ? amdgpu::extract_i4(cu, base, loc)
-                              : amdgpu::extract_u4(cu, base, loc);
-  };
-  auto extract_b = [&](auto &cu, uint32_t base, const amdgpu::InputLoc &loc) {
-    return (inst_.neg & 0x2u) ? amdgpu::extract_i4(cu, base, loc)
-                              : amdgpu::extract_u4(cu, base, loc);
-  };
-  amdgpu::exec_wmma_i32(cu, 16, 16, 16, 4, dst, src0_base, src1_base, s2, extract_a, extract_b,
-                        inst_.clamp, const_acc, wf.wf_size());
+  amdgpu::exec_rdna_wmma_i32<true, 4>(
+      cu, wf.wf_size(), dst, src0_base, src1_base, s2,
+      src2.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc) : std::nullopt,
+      /*a_signed=*/(inst_.neg & 0x1u) != 0, /*b_signed=*/(inst_.neg & 0x2u) != 0, inst_.clamp);
 }
 
 void VWmmaF3216x16x16Fp8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -1493,9 +1481,9 @@ void VWmmaF3216x16x16Fp8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t const_acc;
   uint32_t s2 = rdna4::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_wmma_f32(cu, 16, 16, 16, 8, dst, src0_base, src1_base, s2, amdgpu::extract_fp8,
-                        amdgpu::extract_fp8, const_acc,
-                        amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi), wf.wf_size());
+  amdgpu::exec_gfx12_wmma_dot8<true, true>(
+      cu, wf.wf_size(), dst, src0_base, src1_base, s2,
+      src2.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc) : std::nullopt);
 }
 
 void VWmmaF3216x16x16Fp8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -1507,9 +1495,9 @@ void VWmmaF3216x16x16Fp8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t const_acc;
   uint32_t s2 = rdna4::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_wmma_f32(cu, 16, 16, 16, 8, dst, src0_base, src1_base, s2, amdgpu::extract_fp8,
-                        amdgpu::extract_bf8, const_acc,
-                        amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi), wf.wf_size());
+  amdgpu::exec_gfx12_wmma_dot8<true, false>(
+      cu, wf.wf_size(), dst, src0_base, src1_base, s2,
+      src2.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc) : std::nullopt);
 }
 
 void VWmmaF3216x16x16Bf8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -1521,9 +1509,9 @@ void VWmmaF3216x16x16Bf8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t const_acc;
   uint32_t s2 = rdna4::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_wmma_f32(cu, 16, 16, 16, 8, dst, src0_base, src1_base, s2, amdgpu::extract_bf8,
-                        amdgpu::extract_fp8, const_acc,
-                        amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi), wf.wf_size());
+  amdgpu::exec_gfx12_wmma_dot8<false, true>(
+      cu, wf.wf_size(), dst, src0_base, src1_base, s2,
+      src2.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc) : std::nullopt);
 }
 
 void VWmmaF3216x16x16Bf8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -1535,9 +1523,9 @@ void VWmmaF3216x16x16Bf8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t const_acc;
   uint32_t s2 = rdna4::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_wmma_f32(cu, 16, 16, 16, 8, dst, src0_base, src1_base, s2, amdgpu::extract_bf8,
-                        amdgpu::extract_bf8, const_acc,
-                        amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi), wf.wf_size());
+  amdgpu::exec_gfx12_wmma_dot8<false, false>(
+      cu, wf.wf_size(), dst, src0_base, src1_base, s2,
+      src2.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc) : std::nullopt);
 }
 
 void VWmmaI3216x16x32Iu4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -1549,16 +1537,10 @@ void VWmmaI3216x16x32Iu4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t const_acc;
   uint32_t s2 = rdna4::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  auto extract_a = [&](auto &cu, uint32_t base, const amdgpu::InputLoc &loc) {
-    return (inst_.neg & 0x1u) ? amdgpu::extract_i4(cu, base, loc)
-                              : amdgpu::extract_u4(cu, base, loc);
-  };
-  auto extract_b = [&](auto &cu, uint32_t base, const amdgpu::InputLoc &loc) {
-    return (inst_.neg & 0x2u) ? amdgpu::extract_i4(cu, base, loc)
-                              : amdgpu::extract_u4(cu, base, loc);
-  };
-  amdgpu::exec_wmma_i32(cu, 16, 16, 32, 4, dst, src0_base, src1_base, s2, extract_a, extract_b,
-                        inst_.clamp, const_acc, wf.wf_size());
+  amdgpu::exec_rdna_wmma_i32<true, 4, 32>(
+      cu, wf.wf_size(), dst, src0_base, src1_base, s2,
+      src2.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc) : std::nullopt,
+      /*a_signed=*/(inst_.neg & 0x1u) != 0, /*b_signed=*/(inst_.neg & 0x2u) != 0, inst_.clamp);
 }
 
 void VSwmmacF3216x16x32F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -1627,20 +1609,11 @@ void VSwmmacI3216x16x32Iu8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t dst = vb + vdst.encoding_value_;
   uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
   uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t const_acc = amdgpu::ACC_FROM_VGPR;
-  uint32_t s2 = dst;
   uint32_t index_base = amdgpu::src_base(vb, src2.encoding_value_);
-  uint32_t index_key = inst_.opsel & 0x1u;
-  auto extract_a = [&](auto &cu, uint32_t base, const amdgpu::InputLoc &loc) {
-    return (inst_.neg & 0x1u) ? amdgpu::extract_i8(cu, base, loc)
-                              : amdgpu::extract_u8(cu, base, loc);
-  };
-  auto extract_b = [&](auto &cu, uint32_t base, const amdgpu::InputLoc &loc) {
-    return (inst_.neg & 0x2u) ? amdgpu::extract_i8(cu, base, loc)
-                              : amdgpu::extract_u8(cu, base, loc);
-  };
-  amdgpu::exec_swmmac_i32(cu, 16, 16, 32, 8, dst, src0_base, src1_base, s2, index_base, 16,
-                          index_key, extract_a, extract_b, inst_.clamp, const_acc, wf.wf_size());
+  uint32_t index_key = inst_.opsel & 0x3u;
+  amdgpu::exec_rdna_swmmac_i32<8, 32>(cu, wf.wf_size(), dst, src0_base, src1_base, index_base,
+                                      index_key, /*a_signed=*/(inst_.neg & 0x1u) != 0,
+                                      /*b_signed=*/(inst_.neg & 0x2u) != 0, inst_.clamp);
 }
 
 void VSwmmacI3216x16x32Iu4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -1649,20 +1622,11 @@ void VSwmmacI3216x16x32Iu4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t dst = vb + vdst.encoding_value_;
   uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
   uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t const_acc = amdgpu::ACC_FROM_VGPR;
-  uint32_t s2 = dst;
   uint32_t index_base = amdgpu::src_base(vb, src2.encoding_value_);
-  uint32_t index_key = inst_.opsel & 0x1u;
-  auto extract_a = [&](auto &cu, uint32_t base, const amdgpu::InputLoc &loc) {
-    return (inst_.neg & 0x1u) ? amdgpu::extract_i4(cu, base, loc)
-                              : amdgpu::extract_u4(cu, base, loc);
-  };
-  auto extract_b = [&](auto &cu, uint32_t base, const amdgpu::InputLoc &loc) {
-    return (inst_.neg & 0x2u) ? amdgpu::extract_i4(cu, base, loc)
-                              : amdgpu::extract_u4(cu, base, loc);
-  };
-  amdgpu::exec_swmmac_i32(cu, 16, 16, 32, 4, dst, src0_base, src1_base, s2, index_base, 16,
-                          index_key, extract_a, extract_b, inst_.clamp, const_acc, wf.wf_size());
+  uint32_t index_key = inst_.opsel & 0x3u;
+  amdgpu::exec_rdna_swmmac_i32<4, 32>(cu, wf.wf_size(), dst, src0_base, src1_base, index_base,
+                                      index_key, /*a_signed=*/(inst_.neg & 0x1u) != 0,
+                                      /*b_signed=*/(inst_.neg & 0x2u) != 0, inst_.clamp);
 }
 
 void VSwmmacI3216x16x64Iu4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -1671,20 +1635,11 @@ void VSwmmacI3216x16x64Iu4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t dst = vb + vdst.encoding_value_;
   uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
   uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t const_acc = amdgpu::ACC_FROM_VGPR;
-  uint32_t s2 = dst;
   uint32_t index_base = amdgpu::src_base(vb, src2.encoding_value_);
-  uint32_t index_key = inst_.opsel & 0x1u;
-  auto extract_a = [&](auto &cu, uint32_t base, const amdgpu::InputLoc &loc) {
-    return (inst_.neg & 0x1u) ? amdgpu::extract_i4(cu, base, loc)
-                              : amdgpu::extract_u4(cu, base, loc);
-  };
-  auto extract_b = [&](auto &cu, uint32_t base, const amdgpu::InputLoc &loc) {
-    return (inst_.neg & 0x2u) ? amdgpu::extract_i4(cu, base, loc)
-                              : amdgpu::extract_u4(cu, base, loc);
-  };
-  amdgpu::exec_swmmac_i32(cu, 16, 16, 64, 4, dst, src0_base, src1_base, s2, index_base, 16,
-                          index_key, extract_a, extract_b, inst_.clamp, const_acc, wf.wf_size());
+  uint32_t index_key = inst_.opsel & 0x3u;
+  amdgpu::exec_rdna_swmmac_i32<4, 64>(cu, wf.wf_size(), dst, src0_base, src1_base, index_base,
+                                      index_key, /*a_signed=*/(inst_.neg & 0x1u) != 0,
+                                      /*b_signed=*/(inst_.neg & 0x2u) != 0, inst_.clamp);
 }
 
 void VSwmmacF3216x16x32Fp8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /// @file gfx12_dot_test.cpp
-/// @brief Hardware-derived GFX12 DOT2 arithmetic and operand regression tests.
+/// @brief GFX12 dot arithmetic and operand regression tests.
 
 #include "fixtures/float_dot/gfx1201_cases.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
@@ -341,3 +341,34 @@ TEST(Gfx12Dot, AccumulateEncodingsAndInlineSources) {
   }
 }
 } // namespace
+
+// Pin the native eight-product contract independently of WMMA register layouts.
+TEST(Gfx12Dot, NativeF8SpecialValues) {
+  struct Case {
+    uint8_t a, b_even, b_odd;
+    uint32_t c, expected;
+  };
+  const Case cases[] = {
+      {0x7c, 0x3c, 0xbc, 0x3f800000, 0xffc00a3d}, // Opposite product infinities.
+      {0x7c, 0x3c, 0x3c, 0xff800000, 0xffc00a3d}, // Product infinity against opposite C infinity.
+      {0x7e, 0x3c, 0x3c, 0, 0xffc00a3d},          // BF8 factor NaN (0x7e is finite in FP8).
+      {0x7c, 0, 0, 0xffc54321, 0xffc00a3d},       // Invalid product takes precedence over C NaN.
+      {0x3c, 0x3c, 0x3c, 0xffc54321, 0xffc54321}, // C-NaN retention.
+  };
+  for (Case sample : cases) {
+    std::array<uint8_t, 8> a, b;
+    a.fill(sample.a);
+    for (size_t i = 0; i < b.size(); ++i)
+      b[i] = i % 2 ? sample.b_odd : sample.b_even;
+    // A_FP8=false, B_FP8=false selects BF8_BF8.
+    EXPECT_EQ((rocjitsu::amdgpu::gfx12_dot8_f32<false, false>(a, b, sample.c)), sample.expected);
+  }
+  std::array<uint8_t, 8> fp8, bf8;
+  fp8.fill(0x38); // FP8 1.0.
+  bf8.fill(0x3c); // BF8 1.0.
+  EXPECT_EQ((rocjitsu::amdgpu::gfx12_dot8_f32<true, false>(fp8, bf8, 0x3f800000)), 0x41100000u);
+  // FP8 has a distinct NaN encoding from BF8.
+  std::array<uint8_t, 8> fp8_nan;
+  fp8_nan.fill(0x7f);
+  EXPECT_EQ((rocjitsu::amdgpu::gfx12_dot8_f32<true, true>(fp8_nan, fp8, 0)), 0xffc00a3du);
+}
