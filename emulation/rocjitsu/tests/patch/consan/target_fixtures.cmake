@@ -34,8 +34,14 @@ foreach(
         foreach(
             _case
             IN
-            ITEMS 1 2 3 4 6 11 12 13 14
+            ITEMS 1 2 3 4 6 11 12 13 14 unknown-environment
         )
+            set(_case_number ${_case})
+            set(_metadata_target "amdgcn-amd-amdhsa--${_gpu}")
+            if(_case STREQUAL "unknown-environment")
+                set(_case_number 1)
+                set(_metadata_target "amdgcn-amd-amdhsa-unknown-${_gpu}")
+            endif()
             set(_object ${_directory}/native-${_case}.o)
             set(_image ${_directory}/native-${_case}.hsaco)
             add_custom_command(
@@ -45,8 +51,9 @@ foreach(
                     assembler-with-cpp -P -target amdgcn-amd-amdhsa
                     -mcpu=${_gpu} -mcode-object-version=5 ${_wave_options}
                     -DCONSAN_TARGET="amdgcn-amd-amdhsa--${_gpu}"
+                    -DCONSAN_METADATA_TARGET="${_metadata_target}"
                     -DCONSAN_WAVE_SIZE=${_wave} -DCONSAN_LEGACY=${_legacy}
-                    -DCONSAN_GFX12=${_gfx12} -DCONSAN_CASE=${_case}
+                    -DCONSAN_GFX12=${_gfx12} -DCONSAN_CASE=${_case_number}
                     -DCONSAN_GROUP_BYTES=128 -c
                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/native_lds.s -o
                     ${_object}
