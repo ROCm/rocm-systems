@@ -20,7 +20,9 @@
 extern "C" {
 #endif  // __cplusplus
 
+#define SDMA_OP_NOP 0u
 #define SDMA_OP_COPY 1u
+#define SDMA_OP_WRITE 2u
 #define SDMA_OP_FENCE 5u
 #define SDMA_OP_TRAP 6u
 #define SDMA_OP_POLL_REGMEM 8u
@@ -30,6 +32,7 @@ extern "C" {
 #define SDMA_OP_GCR 17u
 
 #define SDMA_SUBOP_COPY_LINEAR 0u
+#define SDMA_SUBOP_WRITE_LINEAR 0u
  // Broadcast linear copy uses the linear sub-op with the broadcast packet format.
 #define SDMA_SUBOP_COPY_LINEAR_BROADCAST SDMA_SUBOP_COPY_LINEAR
  // Indirect linear copy reuses the linear sub-op; the engine selects the indirect
@@ -44,6 +47,7 @@ extern "C" {
 #define SDMA_SUBOP_COPY_MULTICAST 10u
 
  // Operations
+#define SDMA_ATOMIC_SWAP64 39u
 #define SDMA_ATOMIC_ADD64 47u
 
  // Memory scopes
@@ -53,11 +57,21 @@ extern "C" {
 #define SDMA_MEMORY_SCOPE_SYS 3u /* system scope */
 
  // Compare functions, for the POLL packets' `func` and the fused wait/signal
- // packets' `wait_function`: proceed once (value & mask) == reference.
+ // packets' `wait_function`: proceed once (value & mask) compares to reference.
+#define SDMA_FUNC_LESS_EQUAL 2u
 #define SDMA_FUNC_EQUAL 3u
+#define SDMA_FUNC_GREATER_EQUAL 5u
 
  // Signal operations, for the fused wait/signal packets' `signal_operation`.
+#define SDMA_SIGNAL_OP_WRITE64 32u
+#define SDMA_SIGNAL_OP_ADD64 111u
 #define SDMA_SIGNAL_OP_SUB64 112u
+
+ // A NOP header's count (bits 16..29) is the number of zero dwords after it
+ // that it covers.
+#define SDMA_NOP_COUNT_SHIFT 16u
+#define SDMA_NOP_COUNT_MASK 0x3fffu
+#define SDMA_NOP_MAX_DWORDS (SDMA_NOP_COUNT_MASK + 1u)
 
  // clang-format off
 #define SDMA_PKT_COPY_LINEAR_MAX_SIZE 0x3fffe0
@@ -587,6 +601,48 @@ extern "C" {
    } COUNT_UNION;
 
  } SDMA_PKT_CONSTANT_FILL;
+
+ // WRITE_LINEAR: count + 1 data dwords follow inline.
+ typedef struct SDMA_PKT_WRITE_UNTILED_TAG {
+   union {
+     struct {
+       unsigned int op : 8;
+       unsigned int sub_op : 8;
+       unsigned int encrypt : 1;
+       unsigned int reserved_0 : 1;
+       unsigned int tmz : 1;
+       unsigned int reserved_1 : 9;
+       unsigned int cpv : 1;
+       unsigned int reserved_2 : 3;
+     };
+     unsigned int DW_0_DATA;
+   } HEADER_UNION;
+
+   union {
+     struct {
+       unsigned int dst_addr_31_0 : 32;
+     };
+     unsigned int DW_1_DATA;
+   } DST_ADDR_LO_UNION;
+
+   union {
+     struct {
+       unsigned int dst_addr_63_32 : 32;
+     };
+     unsigned int DW_2_DATA;
+   } DST_ADDR_HI_UNION;
+
+   union {
+     struct {
+       unsigned int count : 20;
+       unsigned int reserved_0 : 4;
+       unsigned int sw : 2;
+       unsigned int cache_policy : 3;
+       unsigned int reserved_1 : 3;
+     };
+     unsigned int DW_3_DATA;
+   } DW_3_UNION;
+ } SDMA_PKT_WRITE_UNTILED;
 
  typedef struct SDMA_PKT_FENCE_TAG {
    union {
@@ -1928,6 +1984,8 @@ ABCE_STATIC_ASSERT(sizeof(SDMA_PKT_COPY_LINEAR_RECT_GFX12) == 52,
                    "SDMA_PKT_COPY_LINEAR_RECT_GFX12 size is fixed by the SDMA packet format");
 ABCE_STATIC_ASSERT(sizeof(SDMA_PKT_CONSTANT_FILL) == 20,
                    "SDMA_PKT_CONSTANT_FILL size is fixed by the SDMA packet format");
+ABCE_STATIC_ASSERT(sizeof(SDMA_PKT_WRITE_UNTILED) == 16,
+                   "SDMA_PKT_WRITE_UNTILED header size is fixed by the SDMA packet format");
 ABCE_STATIC_ASSERT(sizeof(SDMA_PKT_FENCE) == 16,
                    "SDMA_PKT_FENCE size is fixed by the SDMA packet format");
 ABCE_STATIC_ASSERT(sizeof(SDMA_PKT_FENCE_GFX12) == 16,

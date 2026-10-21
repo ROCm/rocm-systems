@@ -46,6 +46,7 @@ endif()
 #===------------------------------------------------------------------------===#
 
 add_executable(abce_unit_tests
+  unit/device_test.cpp
   unit/orchestrator_test.cpp
   unit/packet_fields_test.cpp
   unit/profiling_test.cpp
@@ -67,11 +68,11 @@ gtest_discover_tests(abce_unit_tests DISCOVERY_MODE PRE_TEST)
 # Header self-containment: each header alone, as C11 and as C++17
 #===------------------------------------------------------------------------===#
 
-# abce_device.h needs the HIP device compiler and is covered by the device tier
-# in TEST_PLAN.md. abce_cxx.h is C++-only.
+# abce_cxx.h is C++-only.
 set(ABCE_C_HEADERS
-  abce_builder.h abce_config.h abce_decode.h abce_frame.h abce_host.h abce_hsa.h
-  abce_ring_core.h abce_ring_host.h abce_topology.h abce_types.h sdma_packets.h)
+  abce_builder.h abce_config.h abce_decode.h abce_device.h abce_frame.h abce_host.h abce_hsa.h
+  abce_ring_core.h abce_ring_device.h abce_ring_host.h abce_topology.h abce_types.h
+  sdma_packets.h)
 set(ABCE_CXX_HEADERS ${ABCE_C_HEADERS} abce_cxx.h)
 
 set(ABCE_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/header_tus")
