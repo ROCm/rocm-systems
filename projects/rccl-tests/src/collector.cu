@@ -259,7 +259,8 @@ std::vector<std::string> NetCounterFilterIbHca(const char* env, std::vector<std:
     if (name.empty()) { continue; }
     int port = -1;
     if (colon != std::string::npos && colon + 1 < token.size() && token[colon + 1] != ':') {
-      port = std::max(0, atoi(token.c_str() + colon + 1));  // 0 matches no port
+      // 0 matches no port, as in RCCL's matchPort (IB ports start at 1)
+      port = std::max(0, atoi(token.c_str() + colon + 1));
     }
     entries.push_back({name, port});
   }
@@ -430,7 +431,7 @@ const char* NicTypeStr(NicType t) {
   }
 }
 
-NicType NetCounterDominantNicType(const std::vector<NicType>& types, bool& mixed) {
+NicType NetCounterDominantNicType(const std::vector<NicType>& types, bool& mixed, bool explicit_list) {
   std::vector<NicType> order;
   std::map<NicType, int> count;
   for (NicType t : types) {
@@ -438,10 +439,12 @@ NicType NetCounterDominantNicType(const std::vector<NicType>& types, bool& mixed
     if (count[t]++ == 0) { order.push_back(t); }
   }
   mixed = order.size() > 1;
-  // On a tie prefer a non-MLX5 type: mlx5 is usually the frontend NIC.
+  // On a tie the user's first listed type wins; without a list prefer a
+  // non-MLX5 type, since mlx5 is usually the frontend NIC.
   NicType best = NIC_UNKNOWN;
   for (NicType t : order) {
-    if (best == NIC_UNKNOWN || count[t] > count[best] || (count[t] == count[best] && best == NIC_MLX5)) {
+    bool tieBreak = !explicit_list && count[t] == count[best] && best == NIC_MLX5;
+    if (best == NIC_UNKNOWN || count[t] > count[best] || tieBreak) {
       best = t;
     }
   }
