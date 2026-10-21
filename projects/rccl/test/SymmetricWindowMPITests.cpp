@@ -236,6 +236,16 @@ protected:
         return ptr;
     }
 
+    void freeTrackedBuf(void* ptr)
+    {
+        for (auto it = allocatedBufs_.begin(); it != allocatedBufs_.end(); ++it) {
+            if (it->ptr != ptr) continue;
+            allocatedBufs_.erase(it);
+            ASSERT_MPI_EQ(ncclSuccess, ncclMemFree(ptr));
+            return;
+        }
+    }
+
     ncclWindow_t registerWindow(ncclComm_t comm, void* buf, size_t size,
                                 int flags = NCCL_WIN_COLL_SYMMETRIC)
     {
@@ -643,9 +653,8 @@ protected:
         return (padded / align) * align;
     }
 
-    // Same rule as ncclDevrInitOnce: an unset, zero, or negative NCCL_WIN_STRIDE
-    // sizes the symmetric VA from the largest GPU. A positive stride, including 1,
-    // is the size itself. Either way, round up to 4 GiB.
+    // Same rule as ncclDevrInitOnce: a positive NCCL_WIN_STRIDE is the size,
+    // otherwise the largest GPU. Round up to 4 GiB.
     size_t symmetricVaLimit()
     {
         int64_t stride = -1;
@@ -710,6 +719,39 @@ protected:
         return agreedOnAllRanks(fits);
     }
 
+    // Few allocations, each large enough that a leaked symmetric-VA range cannot fit the next.
+    bool planVaReleaseProbe(size_t& allocSize, int& iterations)
+    {
+        constexpr int kMaxIterations = 4;
+        const size_t gran = asymChunkBytes();
+        const size_t va = symmetricVaLimit();
+
+        size_t freeBytes = 0;
+        size_t totalBytes = 0;
+        if (hipMemGetInfo(&freeBytes, &totalBytes) != hipSuccess) freeBytes = 0;
+        const size_t freeMin = static_cast<size_t>(allreduceMin(freeBytes));
+        const size_t budget = freeMin - freeMin / 8;
+
+        bool ok = gran != 0 && va > gran && budget >= gran;
+        size_t bytes = 0;
+        int rounds = 0;
+        if (ok) {
+            const size_t half = alignUpBytes(va / 2 + 1, gran);
+            if (half <= budget && half < va) {
+                bytes = half;
+                rounds = 2;
+            } else {
+                bytes = (budget / gran) * gran;
+                rounds = bytes == 0 ? 0 : static_cast<int>(va / bytes) + 1;
+                ok = bytes != 0 && bytes < va && rounds >= 2 && rounds <= kMaxIterations;
+            }
+        }
+        if (!agreedOnAllRanks(ok)) return false;
+        allocSize = bytes;
+        iterations = rounds;
+        return true;
+    }
+
     // Local deregister. ncclCommWindowDeregister is not collective, so a rank
     // may call this while others do not. Do not pair it with ASSERT_MPI_*.
     ncclResult_t deregisterLocal(ncclComm_t comm, ncclWindow_t win)
@@ -718,9 +760,7 @@ protected:
         return ncclCommWindowDeregister(comm, win);
     }
 
-    // Write the window's symmetric mapping. Deregister unmaps that VA and drops
-    // the backing reference; the ncclMemAlloc pointer stays mapped until ncclMemFree,
-    // so a memset of it would pass with the window registered or not.
+    // Memset the window mapping. The caller's own allocation stays mapped either way.
     void assertBytesUsable(ncclWindow_t win, size_t bytes, int rank)
     {
         void* mapped = nullptr;
@@ -1791,7 +1831,7 @@ TEST_F(SymWin_WindowLifecycle, SlicesShareBackingRegistration)
               rank, plan.nWindows, plan.allocSize);
 }
 
-// The shared backing stays until its last window is deregistered.
+// One slice stays mapped after its sibling is deregistered.
 TEST_F(SymWin_WindowLifecycle, BackingReleasedAfterLastWindow)
 {
     if (!setupForAsymmetric()) {
@@ -1818,20 +1858,50 @@ TEST_F(SymWin_WindowLifecycle, BackingReleasedAfterLastWindow)
     assertWindowHonoursSize(second, slice, rank);
     assertBytesUsable(second, slice, rank);
 
-    deregisterTrackedWindow(comm, second);
-
-    ncclWindow_t again = registerWindow(comm, buf, allocSize);
-    ASSERT_MPI_NE(again, nullptr);
-    assertWindowHonoursSize(again, allocSize, rank);
-    assertBytesUsable(again, slice, rank);
-
-    TEST_INFO("Rank %d: second slice stayed usable after the first was deregistered, "
-              "and the allocation could be registered again after the last slice",
-              rank);
+    TEST_INFO("Rank %d: second slice stayed usable after the first was deregistered", rank);
 }
 
-// Two live windows on the same pointer and size. Deregister removes that
-// window's entry, not the other window at the same address.
+// A new allocation fails if the previous backing leaked its symmetric VA.
+TEST_F(SymWin_WindowLifecycle, ReleasedBackingFreesSymmetricVa)
+{
+    if (!setupForAsymmetric()) {
+        GTEST_SKIP() << skipReason_;
+    }
+
+    size_t allocSize = 0;
+    int iterations = 0;
+    if (!planVaReleaseProbe(allocSize, iterations)) {
+        GTEST_SKIP() << "Needs a device allocation large enough that a leaked "
+                        "backing would exhaust symmetric VA within a few registrations";
+    }
+
+    ncclComm_t comm = getActiveCommunicator();
+    int rank;
+    ncclCommUserRank(comm, &rank);
+
+    for (int i = 0; i < iterations; i++) {
+        void* buf = nullptr;
+        const ncclResult_t allocated = ncclMemAlloc(&buf, allocSize);
+        const bool got = allocated == ncclSuccess && buf != nullptr;
+        if (i == 0 && !agreedOnAllRanks(got)) {
+            if (got) ncclMemFree(buf);
+            GTEST_SKIP() << "Could not allocate " << allocSize << " bytes";
+        }
+        ASSERT_MPI_EQ(ncclSuccess, allocated);
+        ASSERT_MPI_NE(buf, nullptr);
+        allocatedBufs_.push_back({buf, allocSize});
+
+        ncclWindow_t win = registerWindow(comm, buf, allocSize);
+        ASSERT_MPI_NE(win, nullptr);
+        deregisterTrackedWindow(comm, win);
+        freeTrackedBuf(buf);
+    }
+
+    TEST_INFO("Rank %d: %d registrations of %zu bytes each fit only because the "
+              "backing was released", rank, iterations, allocSize);
+}
+
+// Two windows on the same pointer and size. Deregistering one leaves the other mapped.
 TEST_F(SymWin_WindowLifecycle, DuplicateExactRange)
 {
     if (!setupForAsymmetric()) {
@@ -1869,9 +1939,7 @@ TEST_F(SymWin_WindowLifecycle, DuplicateExactRange)
 }
 
 // Rank 0 drops every local backing. The other ranks keep one. The next
-// registration is still collective: every rank must take the same path.
-// A local cache decision deadlocks in that register. Single-node runner entries
-// bound that hang at 120s. The two-node suites keep their 600s budget.
+// registration is still collective. A local cache decision deadlocks here.
 TEST_F(SymWin_WindowLifecycle, RankDivergentReregister)
 {
     if (!setupForAsymmetric()) {
