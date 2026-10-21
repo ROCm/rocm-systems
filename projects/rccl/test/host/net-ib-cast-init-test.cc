@@ -123,6 +123,13 @@ class NetIbCastInitMicrotest : public ::testing::Test {
     dev.planeId = NCCL_NET_ID_UNDEF;
     return dev;
   }
+  static void SetPciPath(int d, const std::string& path) {
+    free(IbCastDevs[d].pciPath);
+    IbCastDevs[d].pciPath = strdup(path.c_str());
+  }
+  // Root complex 0000:00 with no numa_node behind it. Merging devices compares their roots, which
+  // are left uninitialized for a NULL pciPath.
+  static void OnRoot0(int d) { SetPciPath(d, "/nonexistent/pci0000:00/0000:0" + std::to_string(d + 1) + ":00.0"); }
 
   static ncclNetVDeviceProps_t Props(std::initializer_list<int> devs) {
     ncclNetVDeviceProps_t props{};
@@ -414,6 +421,7 @@ class NetIbCastInitVDeviceMicrotest : public NetIbCastInitMicrotest {
     Dev(0, "mlx5_0");
     Dev(1, "mlx5_1");
     Dev(2, "mlx5_2");
+    for (int d = 0; d < 3; d++) OnRoot0(d);
   }
   ncclResult_t Make(std::initializer_list<int> devs, int* d) {
     ncclNetVDeviceProps_t props = Props(devs);
@@ -533,9 +541,9 @@ TEST_F(NetIbCastInitVDeviceMicrotest, MakeVDevice_AcrossNumaNodesOrRootComplexes
   std::ofstream(p0 + "/numa_node") << "0\n";
   std::ofstream(p1 + "/numa_node") << "1\n";
   std::ofstream(p2 + "/numa_node") << "0\n";
-  IbCastDevs[0].pciPath = strdup(p0.c_str());
-  IbCastDevs[1].pciPath = strdup(p1.c_str());
-  IbCastDevs[2].pciPath = strdup(p2.c_str());
+  SetPciPath(0, p0);
+  SetPciPath(1, p1);
+  SetPciPath(2, p2);
   int d = -1;
   std::string log = CaptureLog([&] { ASSERT_EQ(Make({0, 1}, &d), ncclSuccess); });
   EXPECT_TRUE(LogHas(log, "Merging NICs across NUMA nodes (mlx5_0 numa=0, mlx5_1 numa=1)")) << log;
@@ -633,8 +641,11 @@ TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_KnownBug_FailedInitMakesTheNex
 }
 
 TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_NoVerbsLibrary_Fails) {
+  FakeIbWorld& world = World();
+  world.AddHca("ionic_0");
   ScopedHook symbols(g_ibvSymbols, [] { return ncclSystemError; });
   EXPECT_EQ(Init(), ncclInternalError);
+  EXPECT_EQ(world.ionicSymbols.calls, 0);
   EXPECT_EQ(IbCastNDevs, -1);
 }
 
@@ -1316,6 +1327,8 @@ TEST_F(NetIbCastInitPropertiesMicrotest, GetProperties_DataDirectAndCtsOffload_C
 
 TEST_F(NetIbCastInitPropertiesMicrotest, GetProperties_MergedDevice_ReportsTheFusedNameSpeedAndIds) {
   Dev(1, "mlx5_1");
+  OnRoot0(0);
+  OnRoot0(1);
   int d;
   ncclNetVDeviceProps_t props = Props({0, 1});
   ASSERT_EQ(IbCastMakeVDevice(&d, &props), ncclSuccess);
