@@ -80,8 +80,9 @@ impl Session {
     /// whose metadata has already changed.
     ///
     /// # Errors
-    /// Rejects an endpoint owned by another session, a closed session, or a
-    /// snapshot whose metadata changed, and propagates any driver query error.
+    /// Rejects an endpoint owned by another session, a closed session, a
+    /// changed snapshot, or details inconsistent with the endpoint kind, and
+    /// propagates any driver query error.
     pub fn query_endpoint_details(&self, endpoint: &Endpoint) -> Result<EndpointDetails, Error> {
         self.ensure_open()?;
         let Some(driver) = self.driver_for_endpoint(endpoint) else {
@@ -98,7 +99,14 @@ impl Session {
                 detail: "endpoint metadata changed before details query",
             });
         }
-        driver.query_endpoint_details(&current)
+        let details = driver.query_endpoint_details(&current)?;
+        if details.gpu.is_some() && current.gpu().is_none() {
+            return Err(Error::Operation {
+                kind: ErrorKind::InvalidData,
+                detail: "driver reported GPU details for a non-GPU endpoint",
+            });
+        }
+        Ok(details)
     }
 
     /// Selects the driver named by a passive endpoint snapshot without
@@ -415,7 +423,7 @@ mod tests {
     use crate::memory::{
         DeviceAccess, DeviceIntervals, DriverVirtualAddress, HostIntervals, MemoryKind,
     };
-    use crate::topology::{EndpointDetailsKind, EndpointKind};
+    use crate::topology::EndpointKind;
     use std::sync::atomic::Ordering;
 
     #[test]
@@ -541,7 +549,7 @@ mod tests {
         for endpoint in &endpoints {
             let details = session.query_endpoint_details(endpoint).unwrap();
             assert_eq!(details.product_name, None);
-            assert_eq!(details.kind, EndpointDetailsKind::Other);
+            assert_eq!(details.gpu, None);
         }
         let mut stale = endpoints[0].clone();
         stale.name[0] = b'!';
