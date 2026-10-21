@@ -57,38 +57,68 @@ class TestCpuPstate(unittest.TestCase):
         # A null (default-constructed) handle hits the C-layer null check -> INVAL.
         null_check = [amdsmi.AmdSmiStatus.INVAL]
 
+        # Independent sections: a bug in one (anything expect_status re-raises, ie.
+        # not a status-carrying amdsmi exception) must not stop the others running.
+        failures = []
+
+        # The null and None checks need no CPU socket: the native library rejects a
+        # null handle (INVAL) and the Python wrapper rejects a non-handle type
+        # before any native call, so both run on hosts with no CPU/HSMP driver.
+        try:
+            msg = "\t### amdsmi_get_cpu_apb_status(cpu=null handle):"
+            null_handle = amdsmi.amdsmi_wrapper.amdsmi_processor_handle()
+            with self.common.expect_status(msg, null_check):
+                amdsmi.amdsmi_get_cpu_apb_status(null_handle)
+        except Exception as e:
+            failures.append(e)
+
+        try:
+            msg = "\t### amdsmi_get_cpu_apb_status(cpu=None):"
+            with self.assertRaises(amdsmi.AmdSmiParameterException):
+                amdsmi.amdsmi_get_cpu_apb_status(None)
+            self.common.print(f"{msg}\n\tTEST SUCCESS, raised AmdSmiParameterException as expected")
+        except Exception as e:
+            failures.append(e)
+
         try:
             cpu_handles = amdsmi.amdsmi_get_cpu_handles()["processor_handles"]
         except amdsmi.AmdSmiLibraryException:
             cpu_handles = []
         self.common.print(f"\t### amdsmi_get_cpu_handles(): cpu_count={len(cpu_handles)}")
+        if not cpu_handles:
+            self.common.print("\tNo CPU sockets on machine, unable to test with valid cpu handles.")
 
         # status_sweep() collects every expect_status failure in the block and
-        # raises once at the end, so a single sweep covers both handle types.
-        with self.common.status_sweep():
-            for i, cpu in enumerate(cpu_handles):
-                msg = f"\t### amdsmi_get_cpu_apb_status(cpu={i}):"
-                val = "N/A"
-                with self.common.expect_status(msg, correct_processor):
-                    val = amdsmi.amdsmi_get_cpu_apb_status(cpu)
-                self.common.print(f"\t    data: {val}")
-                # A SUCCESS must also carry sane data -- status alone would let
-                # swapped or garbage out-params (eg. apb_disabled == 7) pass.
+        # raises once at the end.
+        values = []
+        try:
+            with self.common.status_sweep():
+                for i, cpu in enumerate(cpu_handles):
+                    msg = f"\t### amdsmi_get_cpu_apb_status(cpu={i}):"
+                    val = "N/A"
+                    with self.common.expect_status(msg, correct_processor):
+                        val = amdsmi.amdsmi_get_cpu_apb_status(cpu)
+                    self.common.print(f"\t    data: {val}")
+                    values.append((i, val))
+        except Exception as e:
+            failures.append(e)
+
+        # A SUCCESS must also carry sane data -- status alone would let
+        # swapped or garbage out-params (eg. apb_disabled == 7) pass.
+        for i, val in values:
+            try:
                 if isinstance(val, dict):
                     assert val["apb_disabled"] in (0, 1), (
-                        f"apb_disabled must be 0 or 1, got {val['apb_disabled']}"
+                        f"cpu={i}: apb_disabled must be 0 or 1, got {val['apb_disabled']}"
                     )
                     if val["apb_disabled"] == 1:
                         assert 0 <= val["pstate"] <= 7, (
-                            f"pstate out of range [0, 7], got {val['pstate']}"
+                            f"cpu={i}: pstate out of range [0, 7], got {val['pstate']}"
                         )
-
-            null_handle = amdsmi.amdsmi_wrapper.amdsmi_processor_handle()
-            msg = "\t### amdsmi_get_cpu_apb_status(null handle):"
-            val = "N/A"
-            with self.common.expect_status(msg, null_check):
-                val = amdsmi.amdsmi_get_cpu_apb_status(null_handle)
-            self.common.print(f"\t    data: {val}")
+            except Exception as e:
+                failures.append(e)
+        if failures:
+            raise AssertionError("\n\n".join(str(f) for f in failures)) from failures[0]
         return
 
     def test_set_cpu_df_pstate_range(self):
@@ -182,35 +212,65 @@ class TestCpuPstate(unittest.TestCase):
         # A null (default-constructed) handle hits the C-layer null check -> INVAL.
         null_check = [amdsmi.AmdSmiStatus.INVAL]
 
+        # Independent sections: a bug in one (anything expect_status re-raises, ie.
+        # not a status-carrying amdsmi exception) must not stop the others running.
+        failures = []
+
+        # The null and None checks need no CPU socket: the native library rejects a
+        # null handle (INVAL) and the Python wrapper rejects a non-handle type
+        # before any native call, so both run on hosts with no CPU/HSMP driver.
+        try:
+            msg = "\t### amdsmi_get_cpu_df_pstate_range(cpu=null handle):"
+            null_handle = amdsmi.amdsmi_wrapper.amdsmi_processor_handle()
+            with self.common.expect_status(msg, null_check):
+                amdsmi.amdsmi_get_cpu_df_pstate_range(null_handle)
+        except Exception as e:
+            failures.append(e)
+
+        try:
+            msg = "\t### amdsmi_get_cpu_df_pstate_range(cpu=None):"
+            with self.assertRaises(amdsmi.AmdSmiParameterException):
+                amdsmi.amdsmi_get_cpu_df_pstate_range(None)
+            self.common.print(f"{msg}\n\tTEST SUCCESS, raised AmdSmiParameterException as expected")
+        except Exception as e:
+            failures.append(e)
+
         try:
             cpu_handles = amdsmi.amdsmi_get_cpu_handles()["processor_handles"]
         except amdsmi.AmdSmiLibraryException:
             cpu_handles = []
         self.common.print(f"\t### amdsmi_get_cpu_handles(): cpu_count={len(cpu_handles)}")
+        if not cpu_handles:
+            self.common.print("\tNo CPU sockets on machine, unable to test with valid cpu handles.")
 
         # status_sweep() collects every expect_status failure in the block and
-        # raises once at the end, so a single sweep covers both handle types.
-        with self.common.status_sweep():
-            for i, cpu in enumerate(cpu_handles):
-                msg = f"\t### amdsmi_get_cpu_df_pstate_range(cpu={i}):"
-                val = "N/A"
-                with self.common.expect_status(msg, correct_processor):
-                    val = amdsmi.amdsmi_get_cpu_df_pstate_range(cpu)
-                self.common.print(f"\t    data: {val}")
-                # A SUCCESS must also carry sane data -- status alone would let
-                # out-of-range P-states pass. Note DF P-states are numbered
-                # with P0 as the highest-performance state, so min/max are not
-                # numerically ordered (eg. a valid result is min_pstate=2,
-                # max_pstate=0); only the [0, 7] range is asserted.
+        # raises once at the end.
+        values = []
+        try:
+            with self.common.status_sweep():
+                for i, cpu in enumerate(cpu_handles):
+                    msg = f"\t### amdsmi_get_cpu_df_pstate_range(cpu={i}):"
+                    val = "N/A"
+                    with self.common.expect_status(msg, correct_processor):
+                        val = amdsmi.amdsmi_get_cpu_df_pstate_range(cpu)
+                    self.common.print(f"\t    data: {val}")
+                    values.append((i, val))
+        except Exception as e:
+            failures.append(e)
+
+        # A SUCCESS must also carry sane data -- status alone would let
+        # out-of-range P-states pass. Note DF P-states are numbered
+        # with P0 as the highest-performance state, so min/max are not
+        # numerically ordered (eg. a valid result is min_pstate=2,
+        # max_pstate=0); only the [0, 7] range is asserted.
+        for i, val in values:
+            try:
                 if isinstance(val, dict):
                     assert 0 <= val["min_pstate"] <= 7 and 0 <= val["max_pstate"] <= 7, (
-                        f"df pstate values out of range [0, 7]: {val}"
+                        f"cpu={i}: df pstate values out of range [0, 7]: {val}"
                     )
-
-            null_handle = amdsmi.amdsmi_wrapper.amdsmi_processor_handle()
-            msg = "\t### amdsmi_get_cpu_df_pstate_range(null handle):"
-            val = "N/A"
-            with self.common.expect_status(msg, null_check):
-                val = amdsmi.amdsmi_get_cpu_df_pstate_range(null_handle)
-            self.common.print(f"\t    data: {val}")
+            except Exception as e:
+                failures.append(e)
+        if failures:
+            raise AssertionError("\n\n".join(str(f) for f in failures)) from failures[0]
         return
