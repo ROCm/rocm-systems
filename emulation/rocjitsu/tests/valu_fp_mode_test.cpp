@@ -4112,6 +4112,11 @@ std::vector<ArithmeticCase> ldexp_tininess_cases() {
   return cases;
 }
 
+// The independent MODE fields swept by both DOT families: 0xf0 is the default,
+// 0x70/0xb0 and 0xd0/0xe0 clear one input/output denormal bit of the F16/F64
+// and F32 fields, and 0xf3/0xfc round one precision toward zero.
+const std::vector<uint32_t> kSplitModes{0xf0u, 0x70u, 0xb0u, 0xd0u, 0xe0u, 0xf3u, 0xfcu};
+
 // V_DOT2_F16_F16 and V_DOT2_BF16_BF16 lanes captured on gfx1201 and gfx1100.
 // The cards align and round the products differently and gfx1100 flushes BF16
 // subnormals. Both give +0 for a sum of negative zeros and a fixed payload for
@@ -4139,7 +4144,6 @@ std::vector<ArithmeticCase> dot2_packed16_cases() {
   constexpr uint8_t kNegC = 4;
   constexpr uint8_t kAbsC = 4;
   constexpr uint8_t kHighHalves = 0xc; // C from the high half, D to the high half.
-  const std::vector<uint32_t> kSplitModes{0xf0u, 0x70u, 0xb0u, 0xd0u, 0xe0u, 0xf3u, 0xfcu};
   const std::vector<Lane> lanes{
       {"F16FactorNan",
        false,
@@ -4402,7 +4406,6 @@ std::vector<DotLane> dot_family_lanes() {
     lanes.push_back(
         {name, opcode, modifiers, {src0, src1, acc}, gfx1201, gfx1100, std::move(modes), simd});
   };
-  const std::vector<uint32_t> split_modes{0xf0u, 0x70u, 0xb0u, 0xd0u, 0xe0u, 0xf3u, 0xfcu};
   // NEG_HI on the F32 accumulator is ABS, applied before NEG: -|C| equals C for
   // a negative C and -C for a positive one, and differs from |C| in both.
   add("F32F16AbsAccumulator", dot2_f32_f16, {.neg_hi = kSrc2}, 0x039e5408u, 0x518056e6u,
@@ -4414,19 +4417,19 @@ std::vector<DotLane> dot_family_lanes() {
   add("F32Bf16AbsNegativeZero", dot2_f32_bf16, {.neg_hi = kSrc2}, 0xbf803f00u, 0xbf808000u,
       0x80000000u, 0x3f800000u, 0x3f7fffffu, {0xf0u, 0x30u, 0xc0u});
   add("F32F16NegAbsNegativeAccumulator", dot2_f32_f16, {.neg = kSrc2, .neg_hi = kSrc2}, 0xfbff0400u,
-      0x020083ffu, 0xbf800000u, 0xc03ff000u, 0xc03ff000u, split_modes);
+      0x020083ffu, 0xbf800000u, 0xc03ff000u, 0xc03ff000u, kSplitModes);
   add("F32F16NegAbsPositiveAccumulator", dot2_f32_f16, {.neg = kSrc2, .neg_hi = kSrc2}, 0xfbff0400u,
-      0x020083ffu, 0x3f800000u, 0xc03ff000u, 0xc03ff000u, split_modes);
+      0x020083ffu, 0x3f800000u, 0xc03ff000u, 0xc03ff000u, kSplitModes);
   add("F32Bf16NegAbsPositiveAccumulator", dot2_f32_bf16, {.neg = kSrc2, .neg_hi = kSrc2},
-      0xc0403f80u, 0x0040807fu, 0x00800000u, 0x815f8000u, 0x80800000u, split_modes);
+      0xc0403f80u, 0x0040807fu, 0x00800000u, 0x815f8000u, 0x80800000u, kSplitModes);
   // Subnormal factors and C are read as is on gfx1201 under every MODE; gfx1100
   // keeps F16 subnormal factors but reads BF16 ones as zero.
   add("F32F16SubnormalFactors", dot2_f32_f16, {}, 0x01003800u, 0xbc008000u, 0u, 0xb7800000u,
-      0xb7800004u, split_modes);
+      0xb7800004u, kSplitModes);
   add("F32Bf16SubnormalFactors", dot2_f32_bf16, {}, 0x0040807fu, 0xbf808000u, 0u, 0x80400000u, 0u,
-      split_modes);
+      kSplitModes);
   add("F32Bf16SubnormalAccumulator", dot2_f32_bf16, {}, 0x0040807fu, 0xbf808000u, 1u, 0x803fffffu,
-      0u, split_modes);
+      0u, kSplitModes);
   // gfx1201: a negative subnormal C whose bits all fall below a grid at or
   // under 2^-126 still subtracts one unit. gfx1100 reads BF16 subnormal
   // factors as zero. CLAMP changes neither card's result.
@@ -4468,21 +4471,21 @@ std::vector<DotLane> dot_family_lanes() {
   add("Bf8Bf8AbsAccumulator", dot4_bf8_bf8, {.neg_hi = kSrc2}, 0xbc7897a1u, 0x42bfb6a8u,
       0xf3aa2116u, 0x73aa2116u, {}, {0xf0u, 0x30u, 0xc0u, 0xffu});
   add("Bf8Bf8AbsNegativeAccumulator", dot4_bf8_bf8, {.neg_hi = kSrc2}, 0xb135ba3bu, 0x34d23428u,
-      0xbdbc96cau, 0xc171b6d2u, {}, split_modes);
+      0xbdbc96cau, 0xc171b6d2u, {}, kSplitModes);
   add("Fp8Fp8NegAbsPositiveAccumulator", dot4_fp8_fp8, {.neg = kSrc2, .neg_hi = kSrc2}, 0x30407e08u,
-      0x3cfe0801u, 0x3f800000u, 0xc45e5000u, {}, split_modes);
+      0x3cfe0801u, 0x3f800000u, 0xc45e5000u, {}, kSplitModes);
   add("Bf8Bf8NegAbsNegativeAccumulator", dot4_bf8_bf8, {.neg = kSrc2, .neg_hi = kSrc2}, 0xcc553f2fu,
-      0x56d530bfu, 0xc75dc701u, 0xc77cc6fau, {}, split_modes);
+      0x56d530bfu, 0xc75dc701u, 0xc77cc6fau, {}, kSplitModes);
   add("Fp8Fp8SubnormalFactor", dot4_fp8_fp8, {}, 0x30407e08u, 0x407e0780u, 0u, 0x4461c800u, {},
-      split_modes);
+      kSplitModes);
   add("Bf8Bf8SubnormalFactor", dot4_bf8_bf8, {}, 0x9fb8dca8u, 0xcb2d0379u, 0xb80f58b5u, 0xc49ffe90u,
-      {}, split_modes);
+      {}, kSplitModes);
   // Zero products leave C alone, so flushing a subnormal C changes the result.
   add("Bf8Bf8ZeroProductAccumulator", dot4_bf8_bf8, {}, 0x00000000u, 0x7b5c3a11u, 0x8030a352u,
       0x8030a352u, {}, fp8_modes);
   // An ordinary captured lane: subnormal factors with a negative accumulator.
   add("Bf8Bf8SubnormalFactorsNegativeAccumulator", dot4_bf8_bf8, {}, 0xb3510221u, 0xc48c2309u,
-      0x8030a352u, 0x3f5d8020u, {}, split_modes);
+      0x8030a352u, 0x3f5d8020u, {}, kSplitModes);
   // Integer DOT4/DOT8 read each source as two 16-bit halves: OP_SEL picks the
   // half for bits 15:0 and OP_SEL_HI the half for bits 31:16. Both cards agree.
   // These lanes must also take the integer DOT SIMD path.
