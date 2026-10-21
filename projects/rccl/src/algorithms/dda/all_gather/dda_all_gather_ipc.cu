@@ -60,12 +60,14 @@ static ncclResult_t ncclAllGatherDdaIpcTyped(const void* sendbuff, void* recvbuf
   void* peerPtrsDev = comm->ddaPeerPtrsDev;
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
-  const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
+  const DdaDoneMark done = rcclPrepareAddonDone(comm);
+  const hipEvent_t stopEvent = done.seq != nullptr ? nullptr : rcclTakeAddonStopEvent(comm);
   hipExtLaunchKernelGGL((dda::common::ddaAllGatherIpc<T, kDdaNranks, false>), grid, block, 0, stream,
                         /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff),
-                        sendcount, static_cast<const T*>(sendbuff), comm->rank, barrierHost);
+                        sendcount, static_cast<const T*>(sendbuff), comm->rank, barrierHost, done);
 
   CUDACHECK(cudaGetLastError());
+  rcclCommitAddonDone(comm, done);
 
   return ncclSuccess;
 }

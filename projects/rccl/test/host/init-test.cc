@@ -2300,6 +2300,21 @@ TEST_F(InitMicrotest, CommAlloc_HappyPath_ReturnsSuccessAndSetsIdentity) {
   EXPECT_NE(nullptr, comm->sharedRes);          // parent==NULL -> owns sharedRes
 }
 
+TEST_F(InitMicrotest, CommAlloc_DdaCompletionWord_IsOneEightByteSignalAllocation) {
+  InstallCommAllocSuccess();
+  std::vector<size_t> signalBytes;
+  ScopedHook allocation(g_hipExtMallocWithFlags, [&](void** ptr, size_t bytes, unsigned flags) {
+    if (flags == hipMallocSignalMemory) signalBytes.push_back(bytes);
+    *ptr = std::malloc(bytes);
+    return *ptr == nullptr ? hipErrorOutOfMemory : hipSuccess;
+  });
+  auto comm = FreshComm();
+  ASSERT_EQ(ncclSuccess, commAlloc(comm.get(), nullptr, /*ndev=*/8, /*rank=*/0));
+  EXPECT_EQ(std::vector<size_t>({sizeof(uint64_t)}), signalBytes);
+  EXPECT_NE(nullptr, comm->addonDone);
+  EXPECT_NE(nullptr, comm->addonDoneGrid);
+}
+
 TEST_F(InitMicrotest, CommAlloc_NetInitFails_ReturnsError) {
   InstallCommAllocSuccess();
   g_ncclNetInitResult = ncclSystemError;
@@ -6541,9 +6556,11 @@ TEST_F(InitMicrotest, CommFree_TempBuff_ReleasesItThroughTheCommsMemManager) {
   int buf = 0;
   comm->tempBuff = &buf;
 
+  void* done = comm->addonDone;
+  void* grid = comm->addonDoneGrid;
   Teardown_DeviceFreeSpy spy(comm);
   EXPECT_EQ(ncclSuccess, commFree(comm));
-  EXPECT_EQ(std::vector<void*>({&buf}), spy.freed());
+  EXPECT_EQ(std::vector<void*>({&buf, done, grid}), spy.freed());
   EXPECT_EQ(nullptr, comm->tempBuff);
   ::free(comm);
 }
@@ -6559,9 +6576,11 @@ TEST_F(InitMicrotest, CommFree_HierarchicalTempBuffer_ReleasesItAndClearsThePoin
   int buf = 0;
   comm->hierarchicalTempBuffer = &buf;
 
+  void* done = comm->addonDone;
+  void* grid = comm->addonDoneGrid;
   Teardown_DeviceFreeSpy spy(comm);
   EXPECT_EQ(ncclSuccess, commFree(comm));
-  EXPECT_EQ(std::vector<void*>({&buf}), spy.freed());
+  EXPECT_EQ(std::vector<void*>({&buf, done, grid}), spy.freed());
   EXPECT_EQ(nullptr, comm->hierarchicalTempBuffer);
   ::free(comm);
 }
@@ -6579,9 +6598,11 @@ TEST_F(InitMicrotest, CommFree_BothTempBuffers_ReleasesTempBuffBeforeTheHierarch
   comm->tempBuff = &temp;
   comm->hierarchicalTempBuffer = &hierarchical;
 
+  void* done = comm->addonDone;
+  void* grid = comm->addonDoneGrid;
   Teardown_DeviceFreeSpy spy(comm);
   EXPECT_EQ(ncclSuccess, commFree(comm));
-  EXPECT_EQ(std::vector<void*>({&temp, &hierarchical}), spy.freed());
+  EXPECT_EQ(std::vector<void*>({&temp, &hierarchical, done, grid}), spy.freed());
   EXPECT_EQ(nullptr, comm->tempBuff);
   EXPECT_EQ(nullptr, comm->hierarchicalTempBuffer);
   ::free(comm);

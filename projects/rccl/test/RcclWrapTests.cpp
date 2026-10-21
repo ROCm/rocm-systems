@@ -2741,8 +2741,8 @@ TEST(Rcclwrap, SymEligible_YieldsToSymmetricKernel)
 
 // ---------------------------------------------------------------------------
 // rcclCollectiveMustUseEnqueuePath: DDA/CE/GIN early-returns skip ncclEnqueueCheck.
-// NCCL_CHECK_MODE and a suspended communicator must divert to enqueue so pointer
-// checks and the suspend guard still run. Named Rcclwrap so fixtures-debug CI
+// NCCL_CHECK_MODE, a suspended communicator and a revoked one must divert to
+// enqueue so pointer checks, the suspend guard and the revoked rejection still run. Named Rcclwrap so fixtures-debug CI
 // selects them (Rcclwrap.* is the listed prefix for this file).
 // ---------------------------------------------------------------------------
 
@@ -2774,6 +2774,14 @@ TEST(Rcclwrap, EnqueueGuards_SuspendedForcesEnqueue)
     ncclMemManager mgr{};
     comm.memManager = &mgr;
     __atomic_store_n(&mgr.released, 1, __ATOMIC_RELAXED);
+    EXPECT_TRUE(rcclCollectiveMustUseEnqueuePath(&comm));
+}
+
+TEST(Rcclwrap, EnqueueGuards_RevokedForcesEnqueue)
+{
+    ncclComm comm{};
+    comm.checkMode = ncclCheckModeDefault;
+    __atomic_store_n(&comm.revokedFlag, 1u, __ATOMIC_RELAXED);
     EXPECT_TRUE(rcclCollectiveMustUseEnqueuePath(&comm));
 }
 

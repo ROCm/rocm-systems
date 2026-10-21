@@ -55,7 +55,8 @@ static ncclResult_t ncclReduceScatterDdaIpcTyped(const void* sendbuff, void* rec
   void* peerPtrsDev = comm->ddaPeerPtrsDev;
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
-  const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
+  const DdaDoneMark done = rcclPrepareAddonDone(comm);
+  const hipEvent_t stopEvent = done.seq != nullptr ? nullptr : rcclTakeAddonStopEvent(comm);
   const bool copyInKernel =
     dda::common::ddaReduceScatterIpcStaging(recvcount, sizeof(T)) == dda::common::DdaRsIpcStaging::InKernel;
   if (!copyInKernel) {
@@ -64,13 +65,14 @@ static ncclResult_t ncclReduceScatterDdaIpcTyped(const void* sendbuff, void* rec
   if (copyInKernel) {
     hipExtLaunchKernelGGL((dda::common::ddaReduceScatterIpc<T, kDdaNranks, false, true>), grid, block, 0, stream,
                           /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff),
-                          recvcount, static_cast<const T*>(sendbuff), comm->rank, barrierHost);
+                          recvcount, static_cast<const T*>(sendbuff), comm->rank, barrierHost, done);
   } else {
     hipExtLaunchKernelGGL((dda::common::ddaReduceScatterIpc<T, kDdaNranks, false, false>), grid, block, 0, stream,
                           /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff),
-                          recvcount, static_cast<const T*>(sendbuff), comm->rank, barrierHost);
+                          recvcount, static_cast<const T*>(sendbuff), comm->rank, barrierHost, done);
   }
   CUDACHECK(cudaGetLastError());
+  rcclCommitAddonDone(comm, done);
 
   return ncclSuccess;
 }

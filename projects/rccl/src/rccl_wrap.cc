@@ -1215,6 +1215,10 @@ bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold,
     if (!query && prefix) INFO(NCCL_TUNING, "%s DDA disqualified: RCCL_DDA_ENABLE=%d launchOrderImplicit=%d ncclGroupDepth=%d", prefix, (int)rcclParamDdaEnable(), comm->config.launchOrderImplicit, ncclGroupDepth);
     return false;
   }
+  if (comm->ddaDisabledAfterAbort) {
+    if (!query && prefix) INFO(NCCL_TUNING, "%s DDA disqualified: comm was shrunk with NCCL_SHRINK_ABORT", prefix);
+    return false;
+  }
   if (IsArchMatch(comm->archName, "gfx1250")) {
     // gfx1250 has no nRanks floor.
   } else if (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950")) {

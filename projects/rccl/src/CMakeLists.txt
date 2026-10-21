@@ -141,6 +141,7 @@ set(SRC_FILES
   include/BfdBacktrace.hpp
   algorithms/dda/device/CollCommon.h
   algorithms/dda/device/CollCommon_ll128.h
+  algorithms/dda/device/dda_kernel_params.h
   algorithms/dda/all_gather/all_gather_dda.h
   algorithms/dda/all_gather/all_gather_dda_fabric.h
   algorithms/dda/all_gather/all_gather_dda_fabric_ll.h
@@ -181,6 +182,7 @@ set(SRC_FILES
   include/collectives.h
   include/comm.h
   include/compiler.h
+  include/dda_done.h
   include/compiler/gcc.h
   include/compiler/msvc.h
   include/config/algorithm_parser.h

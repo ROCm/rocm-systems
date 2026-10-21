@@ -33,6 +33,8 @@ using bf16 = __nv_bfloat16;
 using bf162 = __nv_bfloat162;
 #endif
 
+#include "dda_done.h"
+#include "algorithms/dda/device/dda_kernel_params.h"
 #include "nccl_device/rccl_ptr.h"
 
 namespace dda::common {
@@ -137,6 +139,25 @@ static inline __device__ uint4 vecElementAdd(const uint4& a, const uint4& b) {
   return res;
 }
 
+// Last block publishes the launch sequence. A null seq means this launch still uses doneEvent.
+static inline __device__ void ddaPublishDone(DdaDoneMark mark) {
+  if (mark.seq == nullptr) return;
+  __shared__ int isLast;
+  if (threadIdx.x == 0) {
+    isLast = atomicAdd(mark.grid, 1u) == static_cast<unsigned>(gridDim.x) - 1u;
+  }
+  __syncthreads();
+  if (isLast && threadIdx.x == 0) {
+#if defined(__HIP_DEVICE_COMPILE__)
+    __scoped_atomic_store_n(mark.seq, mark.value, __ATOMIC_RELEASE, __MEMORY_SCOPE_SYSTEM);
+    __scoped_atomic_store_n(mark.grid, 0u, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
+#else
+    *mark.seq = mark.value;
+    *mark.grid = 0u;
+#endif
+  }
+}
+
 template <typename T>
 static inline __device__ void copyFromSrcToDest(const T* __restrict__ srcbuff, T* __restrict__ destbuff,
                                                 const size_t idxStart, const size_t idxEnd, const size_t idxStride) {
@@ -153,19 +174,21 @@ static inline __device__ void copyFromSrcToDest(const T* __restrict__ srcbuff, T
 //   - NRANKS_CT == 0 : runtime fallback; nRanks comes from nRanksRuntime and the
 //                      peer loop is partially unrolled 8-wide, covering any clique up to
 //                      kDdaMaxNranks.
-template <typename T, int NRANKS_CT, bool hasAcc>
-static inline __device__ void reduceScatter(T* const* __restrict__ ipcbuffs, T* __restrict__ destbuff,
-                                            const T* __restrict__ acc, int selfRank, int nRanksRuntime,
-                                            const size_t idxStart, const size_t idxEnd, const size_t idxStride,
-                                            int pattern) {
+// Tree allreduce was bound by a 64-bit index multiply in this loop. DDA shard spans fit in
+// 32 bits; keep size_t only when a span does not.
+template <typename T, int NRANKS_CT, bool hasAcc, typename Idx>
+static inline __device__ void reduceScatterIndexed(T* const* __restrict__ ipcbuffs, T* __restrict__ destbuff,
+                                                   const T* __restrict__ acc, int selfRank, int nRanksRuntime,
+                                                   Idx idxStart, Idx idxEnd, Idx idxStride, int pattern) {
   static_assert(is_supported_type_v<T>, "dda: unsupported element type");
   const int nRanks = (NRANKS_CT > 0) ? NRANKS_CT : nRanksRuntime;
   constexpr int kUnroll = (NRANKS_CT > 0) ? NRANKS_CT : 8;
-  for (size_t idx = idxStart; idx < idxEnd; idx += idxStride) {
+  const Idx rankOff = static_cast<Idx>(selfRank) * idxEnd;
+  for (Idx idx = idxStart; idx < idxEnd; idx += idxStride) {
     // pattern = 2 performs reduce (one-shot)
     // pattern = 1 performs reduce-scatter (two-shot)
-    size_t srcIdx = (pattern == 2) ? idx : (idx + static_cast<size_t>(selfRank) * idxEnd);
-    size_t destIdx = (pattern == 1) ? (idx + static_cast<size_t>(selfRank) * idxEnd) : idx;
+    Idx srcIdx = (pattern == 2) ? idx : static_cast<Idx>(idx + rankOff);
+    Idx destIdx = (pattern == 1) ? static_cast<Idx>(idx + rankOff) : idx;
 
     uint4 sum{0, 0, 0, 0};
     if constexpr (hasAcc) {
@@ -185,21 +208,38 @@ static inline __device__ void reduceScatter(T* const* __restrict__ ipcbuffs, T* 
   }
 }
 
+template <typename T, int NRANKS_CT, bool hasAcc>
+static inline __device__ void reduceScatter(T* const* __restrict__ ipcbuffs, T* __restrict__ destbuff,
+                                            const T* __restrict__ acc, int selfRank, int nRanksRuntime,
+                                            const size_t idxStart, const size_t idxEnd, const size_t idxStride,
+                                            int pattern) {
+  const int nRanks = (NRANKS_CT > 0) ? NRANKS_CT : nRanksRuntime;
+  const unsigned long long span = idxEnd * static_cast<unsigned long long>(nRanks > 0 ? nRanks : 1);
+  if (idxStart <= 0xffffffffull && idxEnd <= 0xffffffffull && idxStride <= 0xffffffffull && span <= 0xffffffffull) {
+    reduceScatterIndexed<T, NRANKS_CT, hasAcc, unsigned>(ipcbuffs, destbuff, acc, selfRank, nRanksRuntime,
+                                                         static_cast<unsigned>(idxStart), static_cast<unsigned>(idxEnd),
+                                                         static_cast<unsigned>(idxStride), pattern);
+  } else {
+    reduceScatterIndexed<T, NRANKS_CT, hasAcc, size_t>(ipcbuffs, destbuff, acc, selfRank, nRanksRuntime, idxStart,
+                                                       idxEnd, idxStride, pattern);
+  }
+}
+
 // Unified all-gather helper for both the IPC and fabric paths. See reduceScatter
 // above for the NRANKS_CT / nRanksRuntime / unroll semantics.
-template <typename T, int NRANKS_CT>
-static inline __device__ void allGather(T* const* __restrict__ ipcbuffs, T* __restrict__ destbuff, int selfRank,
-                                        int nRanksRuntime, const size_t idxStart, const size_t idxEnd,
-                                        const size_t idxStride, bool enable_offset) {
+template <typename T, int NRANKS_CT, typename Idx>
+static inline __device__ void allGatherIndexed(T* const* __restrict__ ipcbuffs, T* __restrict__ destbuff, int selfRank,
+                                               int nRanksRuntime, Idx idxStart, Idx idxEnd, Idx idxStride,
+                                               bool enable_offset) {
   static_assert(is_supported_type_v<T>, "dda: unsupported element type");
   const int nRanks = (NRANKS_CT > 0) ? NRANKS_CT : nRanksRuntime;
   constexpr int kUnroll = (NRANKS_CT > 0) ? NRANKS_CT : 8;
-  for (size_t idx = idxStart; idx < idxEnd; idx += idxStride) {
+  for (Idx idx = idxStart; idx < idxEnd; idx += idxStride) {
 #pragma unroll kUnroll
     for (int r = 0; r < nRanks; ++r) {
       int srcRank = (selfRank + r) % nRanks;
-      size_t destIdx = idx + static_cast<size_t>(srcRank) * idxEnd;
-      size_t srcIdx;
+      Idx destIdx = idx + static_cast<Idx>(srcRank) * idxEnd;
+      Idx srcIdx;
       if (enable_offset) {
         srcIdx = destIdx;
       } else {
@@ -207,6 +247,22 @@ static inline __device__ void allGather(T* const* __restrict__ ipcbuffs, T* __re
       }
       *reinterpret_cast<uint4*>(&destbuff[destIdx]) = reinterpret_cast<const uint4*>(&ipcbuffs[srcRank][srcIdx])[0];
     }
+  }
+}
+
+template <typename T, int NRANKS_CT>
+static inline __device__ void allGather(T* const* __restrict__ ipcbuffs, T* __restrict__ destbuff, int selfRank,
+                                        int nRanksRuntime, const size_t idxStart, const size_t idxEnd,
+                                        const size_t idxStride, bool enable_offset) {
+  const int nRanks = (NRANKS_CT > 0) ? NRANKS_CT : nRanksRuntime;
+  const unsigned long long span = idxEnd * static_cast<unsigned long long>(nRanks > 0 ? nRanks : 1);
+  if (idxStart <= 0xffffffffull && idxEnd <= 0xffffffffull && idxStride <= 0xffffffffull && span <= 0xffffffffull) {
+    allGatherIndexed<T, NRANKS_CT, unsigned>(ipcbuffs, destbuff, selfRank, nRanksRuntime, static_cast<unsigned>(idxStart),
+                                             static_cast<unsigned>(idxEnd), static_cast<unsigned>(idxStride),
+                                             enable_offset);
+  } else {
+    allGatherIndexed<T, NRANKS_CT, size_t>(ipcbuffs, destbuff, selfRank, nRanksRuntime, idxStart, idxEnd, idxStride,
+                                           enable_offset);
   }
 }
 
@@ -381,6 +437,20 @@ __device__ __forceinline__ void ddaLLLoadLineB128(const uint32_t* src, uint32_t&
   o2 = __builtin_nontemporal_load((u32_gptr)src + 2);
   o3 = __builtin_nontemporal_load((u32_gptr)src + 3);
 #endif
+}
+
+// Poll one 16B LL line until both flags match, or the comm abort flag is set.
+// Returns false if the wait was aborted so the kernel can exit.
+__device__ __forceinline__ bool ddaLLWaitLineFlags(const volatile LLPacket16* src, uint32_t flag,
+                                                   DdaKernelParams params, uint32_t& d0, uint32_t& f0, uint32_t& d1,
+                                                   uint32_t& f1) {
+  const uint32_t* line = reinterpret_cast<const uint32_t*>(const_cast<const LLPacket16*>(src));
+  int spins = 0;
+  do {
+    ddaLLLoadLineB128(line, d0, f0, d1, f1);
+    if (f0 == flag && f1 == flag) return true;
+  } while (!params.abortSpinTick(spins));
+  return false;
 }
 
 __device__ __forceinline__ uint32_t ddaGetLLEpochInc(const uint32_t* __restrict__ epochDev, int flatBlockId, uint32_t inc) {

@@ -190,7 +190,7 @@ TEST_F(DdaAllGatherFabricLLMicrotest, Launch_PassesBuffersBytesEpochAndBank) {
   EXPECT_EQ(comm().addonStopEvent, nullptr);
   EXPECT_EQ(launch.sharedMemBytes, 0u);
   EXPECT_EQ(launch.flags, 0u);
-  ASSERT_EQ(launch.args.size(), 9u);
+  ASSERT_EQ(launch.args.size(), 10u);
   EXPECT_EQ(launch.Arg<int8_t**>(0), comm().ddaPeerPtrsDev);
   EXPECT_EQ(launch.Arg<int8_t*>(1), kRecvbuff);
   EXPECT_EQ(launch.Arg<const int8_t*>(2), kSendbuff);
@@ -199,6 +199,7 @@ TEST_F(DdaAllGatherFabricLLMicrotest, Launch_PassesBuffersBytesEpochAndBank) {
   EXPECT_EQ(launch.Arg<uint32_t*>(6), comm().ddaLLEpochDev);
   EXPECT_EQ(launch.Arg<int>(7), comm().ddaLLEpochLen);
   EXPECT_EQ(launch.Arg<size_t>(8), 2064u);
+  EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(9).flag, comm().abortFlagDev);
 }
 
 // One block per peer up to 256 packets (2 KiB) per rank, then one per 256 packets, at most 8 per peer.
