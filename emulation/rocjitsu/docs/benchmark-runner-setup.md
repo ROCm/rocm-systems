@@ -117,13 +117,8 @@ To deploy script or policy updates:
 2. Reinstall the scripts and any changed systemd files, run
    `systemctl daemon-reload`, and restart `rocjitsu-bpfland.service`. Reboot if
    CPU allocation drop-ins changed. Checkout changes take effect after installation.
-3. For changes to measurement conditions (CPU layout, frequency, idle controls,
-   or scheduler), bump `-stable-runner-vN` in the workflow's `--environment-id`.
-   Deploy the matching policy to every runner before resuming jobs. Keep runners
-   stopped until the installed policy and workflow label agree; cancel queued
-   runs using an older policy label rather than running them under new settings.
-
-Keep the version unchanged for refactors that preserve measurement conditions.
+3. Restart the runners after the matching configuration is installed on every
+   runner.
 
 ## Run benchmarks
 

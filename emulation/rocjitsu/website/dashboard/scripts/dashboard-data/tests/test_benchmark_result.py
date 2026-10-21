@@ -64,12 +64,7 @@ def raw_run():
 
 
 def convert(
-    tmp_path,
-    attempt='1',
-    raw=None,
-    workflow_sha=WORKFLOW_SHA,
-    tensile_sha=TENSILE_SHA,
-    environment_id=None,
+    tmp_path, attempt='1', raw=None, workflow_sha=WORKFLOW_SHA, tensile_sha=TENSILE_SHA
 ):
     source = tmp_path / 'raw.json'
     # Unusual indentation and trailing whitespace detect raw JSON reserialization.
@@ -103,8 +98,6 @@ def convert(
         '--tensile-sha',
         tensile_sha,
     ]
-    if environment_id is not None:
-        command.extend(['--environment-id', environment_id])
     result = subprocess.run(command, capture_output=True, text=True)
     assert source.read_bytes() == original
     return result, output, original
@@ -172,19 +165,6 @@ def test_environment_labels_in_converter_output(tmp_path):
         ('workflow.commit_sha', WORKFLOW_SHA),
     ]
     assert run['targets'][0]['results'][0]['timing_results_s'] == [0.3, 0.1, 0.2]
-
-
-def test_runner_environment_metadata(tmp_path):
-    environment_id = 'rocjitsu-benchmark-stable-runner-v1'
-    result, output, _ = convert(tmp_path, environment_id=environment_id)
-    assert result.returncode == 0, result.stderr
-    run = json.loads(output.read_text())
-    details = {detail['key']: detail for detail in run['environment']}
-    assert details['runner.environment_id'] == {
-        'key': 'runner.environment_id',
-        'label': 'Benchmark environment',
-        'value': environment_id,
-    }
 
 
 def test_converter_revision_metadata(tmp_path):

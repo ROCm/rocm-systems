@@ -302,8 +302,7 @@ jobs:
             --run-id "${GITHUB_RUN_ID}" --run-attempt "${GITHUB_RUN_ATTEMPT}" \
             --repository "${GITHUB_REPOSITORY}" --event "${GITHUB_EVENT_NAME}" \
             --commit-message "${BENCHMARK_COMMIT_MESSAGE}" --machine "${BENCHMARK_MACHINE}" \
-            --workflow-sha "${BENCHMARK_WORKFLOW_SHA}" --tensile-sha "${TENSILE_SHA}" \
-            --environment-id "rocjitsu-benchmark-u2404-4150afe4-rocm-10.1.0a20260812-stable-runner-v1"
+            --workflow-sha "${BENCHMARK_WORKFLOW_SHA}" --tensile-sha "${TENSILE_SHA}"
 
       - name: Upload dashboard benchmark JSON
         id: upload_dashboard

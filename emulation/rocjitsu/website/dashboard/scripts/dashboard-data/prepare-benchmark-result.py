@@ -161,15 +161,12 @@ def build_published_run(raw, workflow):
             )
     details['workflow.commit_sha'] = workflow['workflow_sha']
     details['tensile.commit_sha'] = workflow['tensile_sha']
-    if workflow.get('environment_id'):
-        details['runner.environment_id'] = workflow['environment_id']
     for key in ('warmups', 'samples', 'timeout_seconds', 'benchmark_suite'):
         details['execution.' + key] = summary[key]
     labels = {
         'thread_policy': 'Thread policy',
         'workflow.commit_sha': 'Workflow commit',
         'tensile.commit_sha': 'Tensile commit',
-        'runner.environment_id': 'Benchmark environment',
         'machine.hostname': 'Hostname',
         'machine.platform': 'Platform',
         'machine.kernel': 'Kernel',
@@ -231,7 +228,6 @@ def main():
     parser.add_argument('--machine', required=True)
     parser.add_argument('--workflow-sha', required=True)
     parser.add_argument('--tensile-sha', required=True)
-    parser.add_argument('--environment-id')
     parser.add_argument('--event', choices=('push', 'workflow_dispatch'), required=True)
     args = parser.parse_args()
     raw = json.loads(args.raw_run.read_text())
@@ -244,7 +240,6 @@ def main():
         'runner': args.machine,
         'workflow_sha': args.workflow_sha,
         'tensile_sha': args.tensile_sha,
-        'environment_id': args.environment_id,
         'trigger': 'manual' if args.event == 'workflow_dispatch' else 'auto',
     }
     result = build_published_run(raw, workflow)
