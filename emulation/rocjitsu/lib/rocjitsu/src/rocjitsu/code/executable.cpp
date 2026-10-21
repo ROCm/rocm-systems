@@ -209,6 +209,13 @@ void Executable::load_hip_fatbin(const Section &fatbin_section) {
     return;
   }
 
+  // Every bundle entry needs an offset, a size, and an ID length before its ID bytes.
+  constexpr size_t kMinBundleEntrySize = 3 * sizeof(uint64_t);
+  if (bundle_hdr.num_code_objs > (fatbin_size - cursor) / kMinBundleEntrySize) {
+    is_valid_ = false;
+    return;
+  }
+
   util::Logger::debug_print(__func__, ": Found .hip_fatbin with ", bundle_hdr.num_code_objs,
                             " code objects");
 

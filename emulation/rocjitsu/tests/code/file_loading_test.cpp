@@ -16,7 +16,6 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
-#include <stdexcept>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -24,10 +23,12 @@
 namespace rocjitsu {
 namespace {
 
-TEST(FileLoadingTest, ExecutableCreationContainsMalformedFatbinException) {
+class FileLoadingBundleCountTest : public ::testing::TestWithParam<uint64_t> {};
+
+TEST_P(FileLoadingBundleCountTest, RejectsImpossibleCountWithoutThrowing) {
   constexpr char names[] = "\0.shstrtab\0.hip_fatbin";
   constexpr char magic[] = "__CLANG_OFFLOAD_BUNDLE__";
-  constexpr uint64_t count = std::numeric_limits<uint64_t>::max();
+  const uint64_t count = GetParam();
   Elf64_Ehdr header{};
   std::memcpy(header.e_ident, EI_MAGIC, EI_MAGIC_SIZE);
   header.e_ident[EI_CLASS] = ELFCLASS64;
@@ -55,14 +56,18 @@ TEST(FileLoadingTest, ExecutableCreationContainsMalformedFatbinException) {
   const test::ScopedTempFile file("rocjitsu_malformed_fatbin_");
   file.write(image);
 
-  // Confirm the input exercises an exception rather than ordinary invalid-ELF handling.
-  EXPECT_THROW((void)Executable(file.path()), std::length_error);
+  EXPECT_FALSE(Executable(file.path()).is_valid());
   char sentinel;
   auto *const original = reinterpret_cast<rj_code_executable_t *>(&sentinel);
   rj_code_executable_t *executable = original;
-  EXPECT_EQ(rj_code_executable_create(file.path().c_str(), &executable), ROCJITSU_STATUS_ERROR);
+  EXPECT_EQ(rj_code_executable_create(file.path().c_str(), &executable),
+            ROCJITSU_STATUS_INVALID_CODE_OBJECT);
   EXPECT_EQ(executable, original);
 }
+
+INSTANTIATE_TEST_SUITE_P(HugeCounts, FileLoadingBundleCountTest,
+                         ::testing::Values(std::numeric_limits<uint64_t>::max(),
+                                           uint64_t{1} << 30));
 
 TEST(FileLoadingTest, RejectsDirectoryWithoutThrowing) {
   const test::ScopedTempDirectory directory("rocjitsu_file_loading_");

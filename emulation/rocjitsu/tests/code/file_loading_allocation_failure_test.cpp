@@ -49,6 +49,16 @@ void *operator new(std::size_t size) {
 void operator delete(void *memory) noexcept { std::free(memory); }
 void operator delete(void *memory, std::size_t) noexcept { std::free(memory); }
 
+void *operator new(std::size_t size, const std::nothrow_t &) noexcept {
+  try {
+    return ::operator new(size);
+  } catch (...) {
+    return nullptr;
+  }
+}
+
+void operator delete(void *memory, const std::nothrow_t &) noexcept { ::operator delete(memory); }
+
 TEST(FileLoadingAllocationFailureTest, TranslatesImageAllocationFailure) {
   constexpr size_t kImageSize = 65536;
   const rocjitsu::test::ScopedTempFile file("rocjitsu_allocation_");

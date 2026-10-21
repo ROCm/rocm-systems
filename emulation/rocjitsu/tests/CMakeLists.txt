@@ -977,6 +977,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     rj_configure_target(cache_allocation_failure_test WARNINGS)
     rj_add_gtest_tests(cache_allocation_failure_test)
 
+    # Isolate the process-wide replacement operator new from rocjitsu_tests.
     add_executable(
         file_loading_allocation_failure_test
         code/file_loading_allocation_failure_test.cpp
