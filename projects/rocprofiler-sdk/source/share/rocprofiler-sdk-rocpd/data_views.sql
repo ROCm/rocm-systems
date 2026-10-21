@@ -164,6 +164,29 @@ FROM
 
 --
 -- Samples
+-- Raw PC samples with recording-scoped event, blob, and optional code-object metadata.
+CREATE VIEW IF NOT EXISTS
+    `pc_samples` AS
+SELECT
+    S.*,
+    E.stack_id,
+    E.parent_stack_id,
+    E.parent_id,
+    B.schema_id,
+    B.blob,
+    A.absolute_index AS agent_abs_index,
+    C.uri AS code_object_uri
+FROM
+    `rocpd_gpu_pc_sample` S
+    LEFT JOIN `rocpd_event` E ON E.id = S.event_id
+    AND E.guid = S.guid
+    LEFT JOIN `rocpd_blob_event` B ON B.event_id = S.event_id
+    AND B.guid = S.guid
+    LEFT JOIN `rocpd_info_agent` A ON A.id = S.agent_id
+    AND A.guid = S.guid
+    LEFT JOIN `rocpd_info_code_object` C ON C.id = S.code_object_id
+    AND C.guid = S.guid;
+
 CREATE VIEW IF NOT EXISTS
     `samples` AS
 SELECT

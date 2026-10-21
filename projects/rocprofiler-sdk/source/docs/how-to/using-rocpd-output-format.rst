@@ -1868,6 +1868,8 @@ PC sampling data (schema 3.0.6)
 PC sampling support was introduced in schema version **3.0.6**. When
 ``rocprofv3`` is run with ``--pc-sampling-beta-enabled`` and
 ``--output-format rocpd``, the following tables are populated.
+Schema 3.0.5 remains frozen under ``versions/3.0.5``; the top-level SQL files
+describe 3.0.6. Older schema snapshots are not changed by PC-sampling support.
 
 rocpd_gpu_pc_sample
 ++++++++++++++++++++
@@ -1886,7 +1888,7 @@ One row per collected PC sample. Key columns:
     - Foreign key into ``rocpd_event``. The corresponding event's ``parent_id``
       points to the dispatch event.
   * - ``timestamp``
-    - INTEGER
+    - BIGINT
     - Sample timestamp in nanoseconds.
   * - ``dispatch_id``
     - INTEGER
@@ -1899,7 +1901,10 @@ One row per collected PC sample. Key columns:
   * - ``exec_mask``
     - TEXT
     - Bitmask of active SIMD lanes at sample time. Stored as a decimal string so
-      the full 64-bit mask is preserved without integer overflow. Because the
+      the full 64-bit mask is preserved without integer overflow. SQLite integers
+      are signed 64-bit values, with maximum 2^63 - 1 (9223372036854775807),
+      whereas a valid 64-lane mask can reach 2^64 - 1 (18446744073709551615).
+      No mask needs to exceed 2^64 - 1 for TEXT storage to be necessary. Because the
       column is TEXT, ``<``, ``>``, ``ORDER BY``, ``MIN``, and ``MAX`` compare
       masks as text (``'255' > '1000'``). For exact equality, use a quoted decimal
       string, such as ``exec_mask = '18446744073709551615'``, or bind a string
@@ -1910,8 +1915,10 @@ One row per collected PC sample. Key columns:
   * - ``code_object_id``
     - INTEGER
     - Identifies the loaded code object containing the sampled instruction.
+      Zero denotes an unknown object. This column deliberately has no foreign-key
+      constraint so samples are retained when code-object metadata is unavailable.
   * - ``code_object_offset``
-    - INTEGER
+    - BIGINT
     - Byte offset within the code object (the program counter value).
   * - ``agent_id``
     - INTEGER
@@ -1934,11 +1941,18 @@ One row per collected PC sample. Key columns:
     - INTEGER
     - Total active waves on the compute unit at sample time. Stochastic only; NULL for host-trap.
 
+``INTEGER`` and ``BIGINT`` have the same integer affinity in SQLite; ``BIGINT``
+does not provide unsigned storage. Metadata IDs consistently use ``INTEGER``;
+timestamps and code-object offsets retain the existing ``BIGINT`` declaration.
+
 rocpd_blob_event, rocpd_info_blob_schema, rocpd_info_blob_field
 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 Each PC sample also has a companion row in ``rocpd_blob_event`` containing a
-packed binary blob of architecture-specific hardware state. The blob layout is
+packed binary blob of architecture-specific hardware state. Both rows contain
+the same ``event_id`` and independently reference ``rocpd_event.id``; there is
+no ``blob_event_id`` column. Join the rows on both ``guid`` and ``event_id``.
+The blob layout is
 self-describing through two metadata tables:
 
 - ``rocpd_info_blob_schema``: Describes the overall layout (name
@@ -1949,13 +1963,36 @@ self-describing through two metadata tables:
 - ``rocpd_info_blob_field``: One row per field with name, byte offset, size, and
   data type. Consumers can decode the binary without hard-coding struct offsets.
 
+Schema names are internal diagnostic labels, not a versioned architecture or
+capability API. Consumers must discover fields from ``rocpd_info_blob_field``
+using ``(guid, schema_id)`` instead of inferring memory-counter presence or field
+lists from a name, suffix, or GPU architecture. Layouts with and without memory
+counters can coexist for the same architecture, according to each sample's
+validity flag.
+
 The blob contains HW ID fields (``hw_id_chiplet``, ``hw_id_wave_id``,
 ``hw_id_simd_id``, ``hw_id_pipe_id``, ``hw_id_cu_or_wgp_id``,
 ``hw_id_shader_array_id``, ``hw_id_shader_engine_id``, ``hw_id_workgroup_id``,
 ``hw_id_vm_id``, ``hw_id_queue_id``, ``hw_id_microengine_id``) and workgroup
 coordinates (``workgroup_id_x/y/z``, ``wave_in_group``). For stochastic sampling,
 arbiter-state fields (``arb_state_issue_*`` and ``arb_state_stall_*``) are also
-non-zero.
+present. Each boolean is currently stored as a one-byte ``uint8_t`` containing
+0 or 1, not a packed bit. Bit packing would require additional bit-offset/width
+metadata and decoder support and is not part of this layout.
+
+The architecture is recovered from the parent dispatch or, without kernel
+tracing, from the sample's code-object agent. If neither identifies an agent,
+the writer uses the architecture only when all enumerated GPUs agree. An
+ambiguous architecture uses an ``_unknown_arch`` layout containing only shared
+fields; it is not silently classified as GFX9.
+
+Joined view
++++++++++++
+
+The persistent ``pc_samples`` view joins raw PC samples to their event, blob,
+agent index, and code-object URI using recording-qualified keys. Its left joins
+retain samples without dispatch or code-object metadata. It does not unpack
+blob bytes or decode instructions; use the decoded view below for those fields.
 
 Decoded view
 +++++++++++++
@@ -1971,7 +2008,10 @@ then enriches with the instruction and enum-name columns. The packed blob bytes
 are only unpacked when the decoded view is queried. Reading
 ``rocpd_gpu_pc_sample`` directly (for example, through ``sqlite3``) does not
 unpack them, but ``rocpd query`` rewrites references to ``rocpd_gpu_pc_sample``
-to the decoded view (see below). If the PC-sampling layer cannot be set up,
+to the decoded view (see below). The intermediate
+``rocpd_gpu_pc_sample_blob_decoded`` temporary view contains the base sample
+columns and unpacked blob fields, without instruction or enum-name enrichment.
+If the PC-sampling layer cannot be set up,
 ``rocpd`` prints a warning, does not create ``rocpd_gpu_pc_sample_decoded``, and
 skips the PC-sampling CSV files; the blob fields remain available through
 ``rocpd_gpu_pc_sample_blob_decoded``.
@@ -1983,8 +2023,10 @@ additional column per blob field, including ``hw_id_chiplet``,
 ``hw_id_shader_engine_id``, ``hw_id_workgroup_id``, ``hw_id_vm_id``,
 ``hw_id_queue_id``, ``hw_id_microengine_id``, ``wave_in_group``,
 ``workgroup_id_x``, ``workgroup_id_y``, ``workgroup_id_z``,
-``dual_issue_valu``, and the ``arb_state_issue_*`` and ``arb_state_stall_*``
-fields. GFX12 adds the ``*_lds_direct`` and ``*_brmsg`` arbiter variants and,
+and the architecture's ``arb_state_issue_*`` and ``arb_state_stall_*``
+fields. GFX9 includes ``dual_issue_valu`` and the ``*_matrix``, ``*_flat``, and
+``*_misc`` arbiters. GFX12 and GFX1250 omit those GFX9-only fields and instead
+include the ``*_lds_direct`` and ``*_brmsg`` arbiter variants and,
 when supplied by the sample, the ``memory_counter_load``, ``memory_counter_store``,
 ``memory_counter_bvh``, ``memory_counter_sample``, ``memory_counter_ds``, and
 ``memory_counter_km`` fields. GFX1250 additionally exposes
@@ -2003,9 +2045,25 @@ Instruction disassembly
 By default, instruction text is decoded lazily during post-processing. Each
 time the ``rocpd_gpu_pc_sample_decoded`` view is queried, ``rocpd``
 disassembles the sampled program counters on demand from the referenced code
-objects and returns the instruction text in the query result. By default this
-lazily decoded text is also written back into the database when the process
-exits, so it is reused on the next open instead of being re-disassembled (described below).
+objects and returns the instruction text in the query result.
+
+.. important::
+
+  Disassembly caching is enabled by default (``cache_disassembly=True``) in
+  the Python API and the ``rocpd`` post-processing tools. This applies to
+  **existing PC-sampling databases** as well as new captures, with no
+  feature-flag gate. A query or conversion that decodes previously unstored
+  instructions can therefore modify its input database at normal Python
+  interpreter shutdown, even when the command is used only for analysis.
+  This is independent of ``--complete-isa-decode``, which persists instruction
+  text during collection.
+
+  Write-back is best-effort: it requires an existing
+  ``rocpd_disassembly_data`` table and a successful decode from code-object
+  bytes that match a recorded content hash. Caching does not create missing
+  tables or migrate older input schemas. Simply opening a database or reading
+  already-stored instruction text does not add cache rows.
+
 Pass ``--no-cache-disassembly`` to ``rocpd convert``, ``rocpd query``,
 ``rocpd summary``, ``rocpd2csv``, or ``python -m rocpd.query`` (or
 ``cache_disassembly=False`` to the ``RocpdImportData`` API) to keep the input
@@ -2014,13 +2072,16 @@ the lifetime of the process and the ``.db`` file is left unchanged.
 
 A code object on disk can change after profiling, for example when the
 application is rebuilt or ``--codeobj-path-prefix-map`` points at a different
-file. When ``rocprofv3`` decodes a code object during PC sampling, it records a
+file. When ``rocprofv3`` decodes a code object during PC sampling with ROCpd
+output enabled, it records a
 hash of the code object's bytes in the ``content_hash`` field of
 ``rocpd_info_code_object.extdata``. Before decoding lazily, ``rocpd`` compares the
 bytes it reads against that hash and reports ``Decode unavailable`` for a
 mismatch rather than returning instructions from a different binary. Code
 objects without a recorded hash are still decoded, but their instructions are
-never written back.
+never written back. The internal ``capture_content_hash`` gate skips hashing
+for CSV/JSON-only PC-sampling captures; it does not skip reading the bytes
+needed for decoding.
 
 Passing ``--complete-isa-decode`` to ``rocprofv3`` instead persists
 the disassembly at collection time into the ``rocpd_disassembly_data`` table
@@ -2129,6 +2190,40 @@ controls whether *new* decodes are persisted:
   process exits, and the view reports ``Decode unavailable``. To retain their
   disassembly, pass ``--complete-isa-decode`` at collection time; it decodes
   the live bytes in-process and persists the text into the database.
+
+Moving a recording to another machine
+++++++++++++++++++++++++++++++++++++++
+
+The database stores code-object metadata (URI, load information, and optional
+content hash), not complete code-object binaries. ROCpd capture and database
+merge/package operations do not automatically bundle the referenced binaries.
+Copying the whole ``.rocprofv3`` directory is therefore not a guarantee that all
+code objects are present: a ``file://`` URI can point to the application's
+executable or a shared library elsewhere, including a byte range within that
+file.
+
+For lazy decoding on another machine, copy the database and the exact binary
+files referenced by its sampled code objects. Keep any URI offset/size fragment
+valid, and pass ``--codeobj-path-prefix-map`` to map the recorded directory
+prefixes to their new locations. The decoder still checks the captured content
+hash; a rebuilt library is not an equivalent replacement. The referenced objects
+can be listed without decoding instructions:
+
+.. code-block:: sql
+
+   SELECT DISTINCT C.guid, C.id, C.storage_type, C.uri
+   FROM rocpd_info_code_object C
+   JOIN rocpd_gpu_pc_sample S
+     ON S.guid = C.guid AND S.code_object_id = C.id
+   WHERE C.id != 0;
+
+Instructions already persisted by ``--complete-isa-decode`` or a verified lazy
+decode remain readable from the copied database without the original binaries.
+This covers only successfully decoded sampled PCs, not the whole code object.
+Pure ``memory://`` objects have no file to copy in the current implementation;
+preserving their loaded bytes requires a separate capture-time snapshot feature.
+``storage_type = MEMORY`` alone does not imply this limitation: an object can
+still have a usable ``file://`` URI.
 
 Querying PC sampling data
 ++++++++++++++++++++++++++

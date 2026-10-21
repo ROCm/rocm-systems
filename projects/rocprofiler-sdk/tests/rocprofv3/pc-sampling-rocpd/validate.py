@@ -62,18 +62,9 @@ _HW_ID_FIELDS = [
     "microengine_id",
 ]
 
-# Arbiter pipes tracked by every stochastic snapshot.
-_ARB_PIPES = [
-    "valu",
-    "matrix",
-    "lds",
-    "scalar",
-    "vmem_tex",
-    "flat",
-    "exp",
-    "misc",
-]
-
+# Arbiter pipes shared by GFX9 and GFX12 stochastic snapshots.
+_ARB_PIPES = ["valu", "lds", "scalar", "vmem_tex", "exp"]
+_GFX9_ARB_PIPES = ["matrix", "flat", "misc"]
 _GFX12_ARB_PIPES = ["lds_direct", "brmsg"]
 _GFX12_MEMORY_COUNTER_FIELDS = [
     "load",
@@ -94,19 +85,55 @@ def _hw_id_value(hw_id, name):
     return hw_id[name]
 
 
-def _dispatch_gfx_versions(json_data):
+def _sampling_architecture(gfx_target_version):
+    major = (gfx_target_version // 10000) % 100
+    minor = (gfx_target_version // 100) % 100
+    if major == 9:
+        return 90000
+    if major == 12:
+        return 120500 if minor == 5 else 120000
+    return 0
+
+
+def _sample_gfx_versions(json_data):
     tool = _tool(json_data)
     agent_gfx_versions = {
-        agent["id"]["handle"]: agent["gfx_target_version"]
+        agent["id"]["handle"]: _sampling_architecture(agent["gfx_target_version"])
         for agent in tool["agents"]
         if agent["type"] == 2
     }
-    return {
+    dispatch_versions = {
         dispatch["dispatch_info"]["dispatch_id"]: agent_gfx_versions[
             dispatch["dispatch_info"]["agent_id"]["handle"]
         ]
         for dispatch in tool["buffer_records"].get("kernel_dispatch", [])
     }
+    code_object_versions = {
+        code_object["code_object_id"]: agent_gfx_versions[
+            code_object["agent_id"]["handle"]
+        ]
+        for code_object in tool["code_objects"]
+        if code_object["agent_id"]["handle"] in agent_gfx_versions
+    }
+    available = set(agent_gfx_versions.values())
+    fallback = next(iter(available)) if len(available) == 1 else 0
+
+    def lookup(record):
+        return dispatch_versions.get(
+            record["dispatch_id"],
+            code_object_versions.get(record["pc"]["code_object_id"], fallback),
+        )
+
+    return lookup
+
+
+def _arbiter_pipes(gfx_target_version):
+    major = (gfx_target_version // 10000) % 100
+    if major == 9:
+        return _ARB_PIPES + _GFX9_ARB_PIPES
+    if major == 12:
+        return _ARB_PIPES + _GFX12_ARB_PIPES
+    return _ARB_PIPES
 
 
 def _field_pairs(record, stochastic, gfx_target_version=0):
@@ -140,31 +167,25 @@ def _field_pairs(record, stochastic, gfx_target_version=0):
             # compare against the decoded view's *_name columns.
             ("inst_type_name", record["inst_type"], True),
             ("stall_reason_name", snapshot["stall_reason"], True),
-            ("dual_issue_valu", snapshot["dual_issue_valu"], False),
         ]
-        for pipe in _ARB_PIPES:
+        gfx_major = (gfx_target_version // 10000) % 100
+        gfx_minor = (gfx_target_version // 100) % 100
+        if gfx_major == 9:
+            pairs.append(("dual_issue_valu", snapshot["dual_issue_valu"], False))
+        for pipe in _arbiter_pipes(gfx_target_version):
             pairs.append(
                 ("arb_state_issue_" + pipe, snapshot["arb_state_issue_" + pipe], False)
             )
-        for pipe in _ARB_PIPES:
+        for pipe in _arbiter_pipes(gfx_target_version):
             pairs.append(
                 ("arb_state_stall_" + pipe, snapshot["arb_state_stall_" + pipe], False)
             )
-        gfx_major = (gfx_target_version // 10000) % 100
-        gfx_minor = (gfx_target_version // 100) % 100
-        if gfx_major == 12:
-            for pipe in _GFX12_ARB_PIPES:
-                issue_key = "arb_state_issue_" + pipe
-                stall_key = "arb_state_stall_" + pipe
-                pairs.append((issue_key, snapshot[issue_key], False))
-                pairs.append((stall_key, snapshot[stall_key], False))
-
         if gfx_major == 12 and gfx_minor == 5:
             pairs.append(("sampling_lock_error", snapshot["lck_err"], False))
 
         flags = record.get("flags", {})
         has_memory_counter = bool(flags.get("has_mem_cnt", False))
-        if has_memory_counter:
+        if has_memory_counter and gfx_major == 12:
             memory_counters = record["memory_counters"]
             counter_fields = list(_GFX12_MEMORY_COUNTER_FIELDS)
             if gfx_major == 12 and gfx_minor == 5:
@@ -317,6 +338,20 @@ _METHOD_SCHEMA = {
 }
 _STOCHASTIC_ONLY_COLUMNS = ("wave_issued", "inst_type", "stall_reason", "wave_count")
 
+_JSON_FIELD_EXCLUSIONS = {
+    "id": "Database-generated sample primary key, not a JSON record field.",
+    "guid": "Database recording identity, not a JSON record field.",
+    "nid": "Generated node metadata reference, not a JSON sample field.",
+    "pid": "Process metadata reference, not a JSON sample field.",
+    "tid": "Derived dispatch thread, absent when dispatches were not captured.",
+    "agent_id": "Derived agent reference, checked by test_rocpd_agent_attribution.",
+    "event_id": "Generated event reference, checked by test_rocpd_sample_event_metadata.",
+    "inst_type": "Numeric enum compared through inst_type_name.",
+    "stall_reason": "Numeric enum compared through stall_reason_name.",
+    "instruction": "Checked separately by the disassembly tests.",
+    "instruction_comment": "Checked separately by the disassembly tests.",
+}
+
 
 def test_rocpd_vs_json_all_fields(rocpd_connection, json_data):
     # Full-field validation: compare every field the ROCPD database stores for each
@@ -330,7 +365,15 @@ def test_rocpd_vs_json_all_fields(rocpd_connection, json_data):
     # order); counts are asserted equal first.
     total_records = 0
     total_field_checks = 0
-    dispatch_gfx_versions = _dispatch_gfx_versions(json_data)
+    sample_gfx_version = _sample_gfx_versions(json_data)
+    covered_columns = set()
+    present_columns = {
+        column[0]
+        for column in rocpd_connection.execute(
+            "SELECT * FROM rocpd_gpu_pc_sample_decoded LIMIT 0"
+        ).description
+    }
+    has_stochastic_records = False
     for method_key, stochastic in (
         ("pc_sample_stochastic", True),
         ("pc_sample_host_trap", False),
@@ -343,6 +386,7 @@ def test_rocpd_vs_json_all_fields(rocpd_connection, json_data):
         total_records += len(records)
         if not rows:
             continue
+        has_stochastic_records |= stochastic
         # Require every column _field_pairs() maps for this method: a schema
         # regression that drops a HW-ID or arbiter field must fail here rather than
         # be silently skipped by the per-row comparison below.  The mapped column
@@ -352,7 +396,7 @@ def test_rocpd_vs_json_all_fields(rocpd_connection, json_data):
             for column, _, _ in _field_pairs(
                 records[0]["record"],
                 stochastic,
-                dispatch_gfx_versions.get(records[0]["record"]["dispatch_id"], 0),
+                sample_gfx_version(records[0]["record"]),
             )
         ]
         present = set(rows[0].keys())
@@ -363,10 +407,11 @@ def test_rocpd_vs_json_all_fields(rocpd_connection, json_data):
         )
         for index, (sample, row) in enumerate(zip(records, rows)):
             record = sample["record"]
-            gfx_target_version = dispatch_gfx_versions.get(record["dispatch_id"], 0)
+            gfx_target_version = sample_gfx_version(record)
             for column, expected, is_name in _field_pairs(
                 record, stochastic, gfx_target_version
             ):
+                covered_columns.add(column)
                 actual = row[column]
                 if is_name:
                     assert str(actual) == str(
@@ -391,6 +436,67 @@ def test_rocpd_vs_json_all_fields(rocpd_connection, json_data):
 
     assert total_records > 0, "no PC-sample records found in JSON oracle"
     assert total_field_checks > 0, "no fields were compared"
+    excluded = set(_JSON_FIELD_EXCLUSIONS)
+    if not has_stochastic_records:
+        excluded.update(_STOCHASTIC_ONLY_COLUMNS)
+        excluded.update({"inst_type_name", "stall_reason_name"})
+    uncovered = present_columns - covered_columns - excluded
+    assert (
+        not uncovered
+    ), f"Decoded columns lack JSON coverage or an explicit exclusion: {sorted(uncovered)}"
+
+
+def test_rocpd_architecture_fields(rocpd_connection):
+    fields = {}
+    for guid, schema_id, name in rocpd_connection.execute(
+        "SELECT guid, schema_id, name FROM rocpd_info_blob_field"
+    ):
+        fields.setdefault((guid, schema_id), set()).add(name)
+    available = {}
+    for guid, version in rocpd_connection.execute(
+        "SELECT guid, json_extract(extdata, '$.gfx_target_version') "
+        "FROM rocpd_info_agent WHERE type = 'GPU'"
+    ):
+        available.setdefault(guid, set()).add(_sampling_architecture(version or 0))
+    layouts = rocpd_connection.execute(
+        "SELECT DISTINCT S.guid, B.schema_id, "
+        "json_extract(A.extdata, '$.gfx_target_version'), S.wave_issued IS NOT NULL "
+        "FROM rocpd_gpu_pc_sample S "
+        "LEFT JOIN rocpd_blob_event B ON B.guid = S.guid AND B.event_id = S.event_id "
+        "LEFT JOIN rocpd_info_agent A ON A.guid = S.guid AND A.id = S.agent_id"
+    ).fetchall()
+    assert layouts, "Expected PC-sample layouts"
+    for guid, schema_id, version, stochastic in layouts:
+        assert (guid, schema_id) in fields, "Every sample must have a described blob"
+        actual = fields[(guid, schema_id)]
+        architectures = available.get(guid, set())
+        if version is None and len(architectures) == 1:
+            version = next(iter(architectures))
+        version = _sampling_architecture(version or 0)
+        expected = {"hw_id_" + name for name in _HW_ID_FIELDS}
+        expected.update(
+            {"wave_in_group", "workgroup_id_x", "workgroup_id_y", "workgroup_id_z"}
+        )
+        if stochastic:
+            expected.update(
+                "arb_state_" + state + "_" + pipe
+                for state in ("issue", "stall")
+                for pipe in _arbiter_pipes(version)
+            )
+            if version == 90000:
+                expected.add("dual_issue_valu")
+            if version == 120500:
+                expected.add("sampling_lock_error")
+            if any(name.startswith("memory_counter_") for name in actual):
+                assert version in (120000, 120500)
+                counters = list(_GFX12_MEMORY_COUNTER_FIELDS)
+                if version == 120500:
+                    counters += _GFX1250_MEMORY_COUNTER_FIELDS
+                expected.update("memory_counter_" + name for name in counters)
+        assert actual == expected, (
+            f"Architecture {version}, schema {schema_id}: "
+            f"missing {sorted(expected - actual)}, unexpected {sorted(actual - expected)}"
+        )
 
 
 def test_rocpd_method_identity(rocpd_connection, json_data, expected_method):
@@ -517,12 +623,21 @@ def test_rocpd_stochastic_columns_populated(rocpd_connection):
     # Every decoded arbiter-state blob field must evaluate to a valid 0/1 flag, and the
     # packed hw_id bitfields must decode within their hardware-defined ranges (simd_id is
     # 2 bits, shader_array_id is 1 bit).  A wrong blob offset/size would violate these.
+    columns = [
+        column[0]
+        for column in conn.execute(
+            "SELECT * FROM rocpd_gpu_pc_sample_decoded LIMIT 0"
+        ).description
+    ]
+    checks = [
+        f'"{column}" NOT IN (0, 1)'
+        for column in columns
+        if column.startswith("arb_state_")
+        or column in ("dual_issue_valu", "sampling_lock_error")
+    ]
+    checks += ["hw_id_simd_id > 3", "hw_id_shader_array_id > 1"]
     invalid = conn.execute(
-        "SELECT COUNT(*) FROM rocpd_gpu_pc_sample_decoded "
-        "WHERE arb_state_issue_valu NOT IN (0, 1) "
-        "OR arb_state_stall_valu NOT IN (0, 1) "
-        "OR dual_issue_valu NOT IN (0, 1) "
-        "OR hw_id_simd_id > 3 OR hw_id_shader_array_id > 1"
+        "SELECT COUNT(*) FROM rocpd_gpu_pc_sample_decoded WHERE " + " OR ".join(checks)
     ).fetchone()[0]
     assert invalid == 0
 

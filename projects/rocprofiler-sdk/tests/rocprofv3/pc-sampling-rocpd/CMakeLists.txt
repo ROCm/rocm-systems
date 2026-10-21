@@ -91,7 +91,7 @@ rocprofiler_add_integration_execute_test(
         --kernel-trace false --pc-sampling-unit cycles --pc-sampling-method stochastic
         --pc-sampling-interval 1048576 -d
         ${CMAKE_CURRENT_BINARY_DIR}/pc-sampling-rocpd-no-dispatch-input -o out
-        --output-format rocpd -- $<TARGET_FILE:exec-mask-manipulation>
+        --output-format rocpd json -- $<TARGET_FILE:exec-mask-manipulation>
     DEPENDS exec-mask-manipulation
     TIMEOUT 120
     LABELS "integration-tests;pc-sampling;stochastic;rocpd"
@@ -110,8 +110,14 @@ rocprofiler_add_integration_validate_test(
         "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
     ARGS --rocpd-input
          ${CMAKE_CURRENT_BINARY_DIR}/pc-sampling-rocpd-no-dispatch-input/out_results.db
+         --json-input
+         ${CMAKE_CURRENT_BINARY_DIR}/pc-sampling-rocpd-no-dispatch-input/out_results.json
+         --expected-method
+         stochastic
          --expect-no-dispatches
-    DISCOVERY_ARGS -k test_rocpd_agent_attribution
+    DISCOVERY_ARGS
+        -k
+        "test_rocpd_agent_attribution or test_rocpd_architecture_fields or test_rocpd_vs_json_all_fields or test_rocpd_sample_event_metadata"
     TIMEOUT 120
     LABELS "integration-tests;pc-sampling;stochastic;rocpd"
     PRELOAD "${PRELOAD_ENV}"

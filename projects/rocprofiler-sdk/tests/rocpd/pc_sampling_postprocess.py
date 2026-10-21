@@ -600,7 +600,8 @@ def test_merged_recordings_keep_their_blob_layouts_and_parents(tmp_path):
 
     inputs, guids = [], []
     # (schema id, field offset): one id shared with a different layout, one distinct id.
-    for index, (schema_id, offset) in enumerate(((1, 0), (1, 4), (7, 0))):
+    layouts = ((1, 0), (1, 4), (7, 0))
+    for index, (schema_id, offset) in enumerate(layouts):
         db = tmp_path / f"recording{index}.db"
         guid = build_db(db, samples=[{"timestamp": 100}])
         uuid = "_" + guid.replace("-", "_")
@@ -643,6 +644,51 @@ def test_merged_recordings_keep_their_blob_layouts_and_parents(tmp_path):
                 "JOIN rocpd_event p ON p.guid = e.guid AND p.id = e.parent_id"
             ).fetchall()
         ) == sorted((guid, guid) for guid in guids)
+        assert sorted(
+            connection.execute(
+                "SELECT guid, event_id, stack_id, parent_id, schema_id, blob, "
+                "code_object_uri FROM pc_samples"
+            ).fetchall()
+        ) == sorted(
+            (guid, 1, 1, 50, schema_id, b"\xff" * offset + struct.pack("<I", 1), None)
+            for guid, (schema_id, offset) in zip(guids, layouts)
+        )
+
+
+@pytest.mark.parametrize("code_object_id", [0, 77])
+def test_pc_samples_view_keeps_unknown_code_objects(tmp_path, code_object_id):
+    db = tmp_path / "pc.db"
+    guid = build_db(db, samples=[{"timestamp": 100, "code_object_id": code_object_id}])
+    uuid = "_" + guid.replace("-", "_")
+    with contextlib.closing(sqlite3.connect(str(db))) as connection:
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute(
+            f'UPDATE "rocpd_gpu_pc_sample{uuid}" SET tid = NULL, agent_id = NULL'
+        )
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+        for name in ("rocpd_gpu_pc_sample", "rocpd_disassembly_data"):
+            columns = {
+                column[1]: column[2]
+                for column in connection.execute(f'PRAGMA table_info("{name}{uuid}")')
+            }
+            assert columns["code_object_id"] == "INTEGER"
+        connection.commit()
+    with open_db([db]) as connection:
+        assert connection.execute(
+            "SELECT guid, code_object_id, tid, agent_abs_index, parent_id, "
+            "code_object_uri, schema_id, blob FROM pc_samples"
+        ).fetchall() == [
+            (
+                guid,
+                code_object_id,
+                None,
+                None,
+                None,
+                None,
+                PC_SCHEMA_ID,
+                struct.pack("<I", 1),
+            )
+        ]
 
 
 def test_merge_skips_views_bound_to_one_recording(tmp_path):
@@ -755,6 +801,39 @@ def test_time_window_without_timed_records_reports_error(tmp_path):
             apply_time_window(connection, start="10%", end="90%")
 
 
+@pytest.mark.parametrize(
+    "text, kind",
+    [
+        ('"quoted""identifier"', "identifier"),
+        ("`quoted``identifier`", "identifier"),
+        ("[quoted identifier]", "identifier"),
+        ("'WITH fake AS (SELECT ''FROM rocpd_gpu_pc_sample'')'", "string"),
+        ("/* WITH fake AS (SELECT * FROM rocpd_gpu_pc_sample) */", "comment"),
+        ("-- WITH fake AS (SELECT * FROM rocpd_gpu_pc_sample)", "comment"),
+    ],
+)
+def test_sql_tokenizer_preserves_quoted_spans(text, kind):
+    from rocpd.query import _sql_tokens
+
+    query = f"SELECT {text}\nFROM rocpd_gpu_pc_sample"
+    tokens = list(_sql_tokens(query))
+    assert "".join(token[1] for token in tokens) == query
+    assert (kind, text, 7, 7 + len(text)) in tokens
+    assert all(query[start:end] == value for _, value, start, end in tokens)
+
+
+def test_cte_names_include_quoted_nested_definitions():
+    from rocpd.query import _cte_names, _sql_tokens
+
+    query = (
+        'WITH RECURSIVE "Outer"(value) AS NOT MATERIALIZED ('
+        "WITH [Inner](value) AS (SELECT 1) SELECT value FROM [Inner]), "
+        '`Escaped``Name` AS (SELECT "WITH fake AS (SELECT 1)" FROM "Outer") '
+        'SELECT * FROM "Outer" /* WITH ignored AS (SELECT 2) */'
+    )
+    assert _cte_names(list(_sql_tokens(query))) == {"outer", "inner", "escaped`name"}
+
+
 def test_query_rewrite_keeps_qualified_columns_and_ctes(tmp_path):
     from rocpd.query import update_query_for_blob_views
 
@@ -796,6 +875,19 @@ def test_query_rewrite_keeps_qualified_columns_and_ctes(tmp_path):
         )
         if sqlite3.sqlite_version_info >= (3, 35, 0):
             assert run(materialized_query) == [(9,)]
+        assert run(
+            'WITH "outer" AS (WITH [inner] AS '
+            '(SELECT hw_id_wave_id FROM "rocpd_gpu_pc_sample") '
+            'SELECT * FROM [inner]) SELECT * FROM "outer" ORDER BY 1'
+        ) == [(1,), (2,)]
+        assert run(
+            'WITH "ROCPD_GPU_PC_SAMPLE"(timestamp) AS (SELECT 42) '
+            'SELECT timestamp FROM "ROCPD_GPU_PC_SAMPLE"'
+        ) == [(42,)]
+        assert run(
+            'SELECT "escaped""alias".hw_id_wave_id FROM "rocpd_gpu_pc_sample" '
+            'AS "escaped""alias" ORDER BY 1'
+        ) == [(1,), (2,)]
 
 
 def test_query_rewrite_handles_quoting_qualifiers_comments_and_literals(tmp_path):
