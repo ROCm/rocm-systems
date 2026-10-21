@@ -106,6 +106,8 @@ Parsing a stream
 
 The stream data buffer is passed through the ``data`` input parameter. The length of the buffer is passed through the ``length`` input parameter. The parsed stream is returned through the ``jpeg_stream_handle`` provided. ``jpeg_stream_handle`` must have already been created with ``rocJpegStreamCreate()``.
 
+The stream data isn't copied. Keep ``data`` valid and unchanged, and don't parse or destroy ``jpeg_stream_handle`` again, until every decode call that uses the handle has returned. ``rocJpegDecode()`` and ``rocJpegDecodeBatched()`` use the handle until they return. ``rocJpegDecodeAsync()`` and ``rocJpegDecodeBatchedAsync()`` use it only until they return, not until the matching sync call. To parse the next images while a decode is running, use a different set of stream handles.
+
 .. code:: cpp
 
     RocJpegStatus rocJpegStreamParse(const unsigned char *data, 

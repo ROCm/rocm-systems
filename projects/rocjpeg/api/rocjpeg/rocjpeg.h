@@ -209,6 +209,11 @@ RocJpegStatus ROCJPEGAPI rocJpegStreamCreate(RocJpegStreamHandle *jpeg_stream_ha
  * This function parses a JPEG stream represented by the `data` parameter of length `length`.
  * The parsed stream is associated with the `jpeg_stream_handle` provided.
  *
+ * The stream data is not copied: `jpeg_stream_handle` refers to `data`, so `data` must stay valid and unchanged
+ * until every decode call that uses the handle has returned. Do not parse or destroy a stream handle while another
+ * call that uses it is running. Different stream handles can be parsed at the same time, including while other
+ * stream handles are being decoded.
+ *
  * @param data The pointer to the JPEG stream data.
  * @param length The length of the JPEG stream data.
  * @param jpeg_stream_handle The handle to the JPEG stream.
@@ -367,6 +372,9 @@ RocJpegStatus ROCJPEGAPI rocJpegDestroy(RocJpegHandle handle);
  * specified by the `jpeg_stream_handle`. The information is stored in the provided output parameters `num_components`,
  * `subsampling`, `widths`, and `heights`.
  *
+ * This function does not wait for decodes running on the same `handle`, so it can be called from another thread
+ * while a decode is in progress, for example to prepare the next batch of images.
+ *
  * @param handle The handle to the RocJpegDecoder instance.
  * @param jpeg_stream_handle The handle to the RocJpegStream instance representing the JPEG image.
  * @param num_components A pointer to an unsigned 8-bit integer that will store the number of components in the JPEG image.
@@ -389,6 +397,9 @@ RocJpegStatus ROCJPEGAPI rocJpegGetImageInfo(RocJpegHandle handle, RocJpegStream
  * a pointer to RocJpegDecodeParams, and a pointer to RocJpegImage as input parameters. The function returns a
  * RocJpegStatus indicating the success or failure of the decoding operation.
  *
+ * The stream handle and the data it was parsed from are used until this function returns; do not parse,
+ * destroy, or modify them before then.
+ *
  * @param handle The rocJpegHandle representing the rocJPEG decoder instance.
  * @param jpeg_stream_handle The rocJpegStreamHandle representing the input JPEG stream.
  * @param decode_params A pointer to RocJpegDecodeParams containing the decoding parameters.
@@ -403,6 +414,10 @@ RocJpegStatus ROCJPEGAPI rocJpegDecode(RocJpegHandle handle, RocJpegStreamHandle
  * @brief Decodes a batch of JPEG images using the rocJPEG library.
  *
  * This function decodes a batch of JPEG images using the rocJPEG library.
+ *
+ * The stream handles and the data they were parsed from are used until this function returns; do not parse,
+ * destroy, or modify them before then. To parse the next batch while this one is decoding, use a different set
+ * of stream handles.
  *
  * @param handle The rocJPEG handle.
  * @param jpeg_stream_handles An array of rocJPEG stream handles representing the input JPEG streams.
@@ -435,6 +450,9 @@ extern const char* ROCJPEGAPI rocJpegGetErrorName(RocJpegStatus rocjpeg_status);
  * These two calls must not be issued concurrently on the same handle. The intended usage is a
  * producer/consumer model where one thread calls rocJpegDecodeAsync() and a separate thread
  * calls rocJpegDecodeSync().
+ *
+ * The stream handle and the data it was parsed from are no longer used once this function returns, so they
+ * can be parsed again, destroyed, or freed before rocJpegDecodeSync() is called.
  *
  * @param handle The rocJPEG handle.
  * @param jpeg_stream_handle The rocJPEG stream handle.
@@ -473,6 +491,9 @@ RocJpegStatus ROCJPEGAPI rocJpegDecodeSync(RocJpegHandle handle, RocJpegImage *d
  * retrieve the decoded output. These two calls must not be issued concurrently on the same handle.
  * The intended usage is a producer/consumer model where one thread calls
  * rocJpegDecodeBatchedAsync() and a separate thread calls rocJpegDecodeBatchedSync().
+ *
+ * The stream handles and the data they were parsed from are no longer used once this function returns, so they
+ * can be parsed again, destroyed, or freed before rocJpegDecodeBatchedSync() is called.
  *
  * @param handle The rocJPEG handle.
  * @param jpeg_stream_handles An array of rocJPEG stream handles representing the input JPEG streams.
