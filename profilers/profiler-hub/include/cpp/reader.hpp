@@ -257,9 +257,12 @@ struct reader_t
      */
 
     /**
-     * @brief Get call stack for an event
+     * @brief Reconstruct the overlapping-region call stack for an event
      * @param event Timeline event to fetch call stack for
-     * @return Call stack data (empty if not available in database)
+     * @return Region frames from the event outward to its active callers.
+     *         The event name is the frame function. Optional source context
+     *         from rocpd_event.line_info supplies file and line data. Empty
+     *         for non-region events or an event not in the database.
      */
     [[nodiscard]] reader_types::call_stack_t get_call_stack(
         const reader_types::timeline_event_t& event) const;

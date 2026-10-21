@@ -47,6 +47,11 @@ downstream consumer of the library.
   and `memory_alloc_data_t`. A missing row returns `PH_RESULT_SUCCESS` with
   `is_valid` 0. A mismatched event type returns `PH_RESULT_INVALID_ARGUMENT`.
   String pointers remain valid until `ph_ctx_free()`.
+- `ph_get_call_stack()` returns the frames `reader_t::get_call_stack()` stores
+  for one duration event. The event is identified by `ph_event_t::id` and
+  `ph_event_t::type`. Index 0 is the top of the stack. An event with no call
+  stack yields an empty list. String pointers remain valid until
+  `ph_ctx_free()`.
 - `ph_get_correlated_events()` returns the events `reader_t::get_correlated_events()`
   finds for one duration event. The source event is identified by
   `ph_event_t::id` and `ph_event_t::type`. The source event is excluded, and

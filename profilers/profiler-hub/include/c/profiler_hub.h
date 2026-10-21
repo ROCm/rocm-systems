@@ -231,6 +231,33 @@ extern "C"
                                          ph_future_t       future);
 
     /**
+     * @brief Reconstructs the overlapping-region call stack for @p event.
+     *        A region event is the top frame, followed by the active caller
+     *        regions on its track. The name of each region is the frame
+     *        function. Optional source context in rocpd_event.line_info
+     *        supplies file and line data. A non-region event or an id that is
+     *        not in the trace yields an empty list.
+     * @param ctx Context to query.
+     * @param event Event returned by ph_get_track_events(). Only @p event->id
+     *        and @p event->type are used. The object does not need to stay
+     *        alive after this call returns.
+     * @param call_stack Out parameter receiving the frames; it is set to an
+     *        empty list before any other work, so it is valid on failure.
+     *        Index 0 is the top of the stack, the most recent call.
+     * @param future Same contract as ph_get_correlated_events().
+     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
+     *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p event or
+     *         @p call_stack is null or @p event->type is not a duration event.
+     * @note @p call_stack->frames and every string in those frames point into
+     *       memory owned by @p ctx and remain valid until @p ctx is freed.
+     *       A later call does not invalidate an earlier result.
+     */
+    ph_result_t ph_get_call_stack(ph_ctx_t          ctx,
+                                  const ph_event_t* event,
+                                  ph_call_stack_t*  call_stack,
+                                  ph_future_t       future);
+
+    /**
      * @brief Retrieves region_data_t for @p event.
      * @param event Event returned by ph_get_track_events(). Only id and type
      *        are used. The object does not need to stay alive after this call

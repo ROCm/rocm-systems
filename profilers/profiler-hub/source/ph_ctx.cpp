@@ -284,6 +284,45 @@ to_c_detail_kernel_symbol(
     return view;
 }
 
+ph_address_range_t
+to_c_address_range(
+    const std::optional<profiler_hub::reader_types::address_range_info_t>& range)
+{
+    ph_address_range_t view{};
+    if(!range.has_value()) return view;
+    view.is_valid     = 1;
+    view.address_base = static_cast<uint64_t>(range->address_base);
+    view.address_low  = static_cast<uint64_t>(range->address_low);
+    view.address_high = static_cast<uint64_t>(range->address_high);
+    view.extdata      = text_or_empty(range->extdata);
+    return view;
+}
+
+ph_program_counter_t
+to_c_program_counter(
+    const std::optional<profiler_hub::reader_types::program_counter_info_t>& counter)
+{
+    ph_program_counter_t view{};
+    if(!counter.has_value()) return view;
+    view.is_valid    = 1;
+    view.event_id    = static_cast<uint64_t>(counter->event_id);
+    view.function    = text_or_empty(counter->function);
+    view.filename    = text_or_empty(counter->filename);
+    view.line_number = optional_size(counter->line_number);
+    view.extdata     = text_or_empty(counter->extdata);
+    return view;
+}
+
+ph_stack_frame_t
+to_c_stack_frame(const profiler_hub::reader_types::stack_frame_t& frame)
+{
+    return ph_stack_frame_t{
+        .program_counter = to_c_program_counter(frame.program_counter),
+        .address_range   = to_c_address_range(frame.address_range),
+        .extdata         = text_or_empty(frame.extdata),
+    };
+}
+
 profiler_hub::reader_types::timeline_event_t
 detail_source(uint64_t event_id, profiler_hub::reader_types::event_type_t type)
 {
@@ -616,6 +655,44 @@ ph_ctx::get_correlated_events(uint64_t event_id, ph_event_type_t event_type)
     auto& stored = m_correlated_events.back();
     return ph_event_list_t{ .list_size = to_list_size(stored.size()),
                             .events    = stored.data() };
+}
+
+ph_call_stack_t
+ph_ctx::get_call_stack(uint64_t event_id, ph_event_type_t event_type)
+{
+    LOG_DEBUG("[Profiler-Hub] Get call stack. Event id {}, type {}",
+              event_id,
+              static_cast<int>(event_type));
+
+    const auto type = to_reader_event_type(event_type);
+    if(!type.has_value())
+    {
+        return ph_call_stack_t{ .list_size = 0, .frames = nullptr };
+    }
+
+    const auto source = detail_source(event_id, type.value());
+    auto       stack  = m_connection_pool.with_connection(
+        [&source](profiler_hub::common::connection& connection) {
+            return connection.reader().get_call_stack(source);
+        });
+    if(stack.empty())
+    {
+        return ph_call_stack_t{ .list_size = 0, .frames = nullptr };
+    }
+
+    auto held  = std::make_unique<call_stack_hold>();
+    held->data = std::move(stack);
+    held->frames.reserve(held->data.size());
+    for(const auto& frame : held->data)
+    {
+        held->frames.push_back(to_c_stack_frame(frame));
+    }
+
+    const ph_call_stack_t view{ .list_size = to_list_size(held->frames.size()),
+                                .frames    = held->frames.data() };
+    const std::lock_guard<std::mutex> lock{ m_call_stack_mutex };
+    m_call_stacks.push_back(std::move(held));
+    return view;
 }
 
 ph_region_details_t

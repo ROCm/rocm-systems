@@ -462,7 +462,7 @@ TEST_F(reader_test, get_arguments_returns_registered_arg)
     EXPECT_EQ(args[0]->value, "5");
 }
 
-TEST_F(reader_test, get_call_stack_and_source_context_do_not_throw)
+TEST_F(reader_test, get_call_stack_reconstructs_a_region_frame)
 {
     auto writer = make_writer();
     seed_region_with_full_event(*writer);
@@ -473,7 +473,11 @@ TEST_F(reader_test, get_call_stack_and_source_context_do_not_throw)
     auto events = reader->get_events();
     ASSERT_EQ(events.size(), 1);
 
-    EXPECT_NO_THROW(reader->get_call_stack(events[0]));
+    const auto stack = reader->get_call_stack(events[0]);
+    ASSERT_EQ(stack.size(), 1);
+    ASSERT_TRUE(stack[0].program_counter.has_value());
+    EXPECT_EQ(stack[0].program_counter->function, "test-region");
+    EXPECT_EQ(stack[0].program_counter->event_id, events[0].unique_identifier.id);
     EXPECT_NO_THROW(reader->get_source_context(events[0]));
 }
 

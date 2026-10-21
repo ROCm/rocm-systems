@@ -995,10 +995,115 @@ reader_t::impl::get_memory_alloc_details(const reader_types::timeline_event_t& e
 reader_types::call_stack_t
 reader_t::impl::get_call_stack(const reader_types::timeline_event_t& event)
 {
-    auto event_meta = resolve_event_metadata(event);
-    if(!event_meta.has_value()) return {};
+    using reader_types::event_type_t;
+    if(event.unique_identifier.type != event_type_t::region) return {};
 
-    return json_serializers::deserialize_call_stack(event_meta->call_stack);
+    const auto source_rows =
+        m_read_statements->region_statements().by_id(event.unique_identifier.id).to_vector();
+    if(source_rows.empty()) return {};
+
+    timeline_event_builder build_event{ *m_catalog };
+    const auto             source = build_event(source_rows.front(), event_type_t::region);
+    if(!source.track) return {};
+
+    reader_types::event_filter_t filter;
+    filter.types.push_back(event_type_t::region);
+    auto regions = get_events_for_track(source.track, filter);
+    std::sort(
+        regions.begin(),
+        regions.end(),
+        [](const reader_types::timeline_event_t& lhs,
+           const reader_types::timeline_event_t& rhs) {
+            return lhs.start_timestamp < rhs.start_timestamp;
+        });
+
+    struct active_region_t
+    {
+        const reader_types::timeline_event_t* event;
+        size_t                                level;
+    };
+
+    std::vector<active_region_t> active;
+    reader_types::call_stack_t   stack;
+    for(const auto& region : regions)
+    {
+        auto it = active.begin();
+        while(it != active.end())
+        {
+            if(region.start_timestamp >= it->event->end_timestamp)
+            {
+                it = active.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+
+        size_t level = 0;
+        for(const auto& ancestor : active)
+        {
+            if(region.end_timestamp < ancestor.event->start_timestamp) continue;
+            if(level < ancestor.level) break;
+            level = ancestor.level + 1;
+        }
+
+        if(region.unique_identifier.id == event.unique_identifier.id)
+        {
+            auto add_frame = [&](const reader_types::timeline_event_t& frame_event) {
+                reader_types::stack_frame_t      frame;
+                reader_types::program_counter_info_t program_counter;
+                program_counter.event_id = frame_event.unique_identifier.id;
+                program_counter.function = std::string(frame_event.display_name);
+
+                const auto frame_meta = resolve_event_metadata(frame_event);
+                if(frame_meta.has_value())
+                {
+                    program_counter.extdata = frame_meta->line_info;
+                    const auto source_context =
+                        json_serializers::deserialize_source_context(frame_meta->line_info);
+                    if(!source_context.empty())
+                    {
+                        const auto& source_info = source_context.front();
+                        if(source_info.program_counter.has_value())
+                        {
+                            program_counter.filename =
+                                source_info.program_counter->filename;
+                            program_counter.line_number =
+                                source_info.program_counter->line_number;
+                        }
+                        else if(source_info.source_code.has_value())
+                        {
+                            program_counter.filename =
+                                source_info.source_code->filename.value_or("");
+                            program_counter.line_number =
+                                source_info.source_code->starting_line_number;
+                        }
+                    }
+                }
+
+                frame.program_counter = std::move(program_counter);
+                stack.push_back(std::move(frame));
+            };
+
+            add_frame(region);
+            for(auto ancestor = active.rbegin(); ancestor != active.rend(); ++ancestor)
+            {
+                if(ancestor->level >= level) continue;
+                add_frame(*ancestor->event);
+            }
+            return stack;
+        }
+
+        active.push_back({ &region, level });
+        std::sort(
+            active.begin(),
+            active.end(),
+            [](const active_region_t& lhs, const active_region_t& rhs) {
+                return lhs.level < rhs.level;
+            });
+    }
+    return {};
 }
 
 reader_types::source_context_list_t

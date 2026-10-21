@@ -71,6 +71,8 @@ struct ph_ctx
     [[nodiscard]] std::optional<ph_event_list_t> get_correlated_events(
         uint64_t        event_id,
         ph_event_type_t event_type);
+    [[nodiscard]] ph_call_stack_t              get_call_stack(uint64_t        event_id,
+                                                              ph_event_type_t event_type);
     [[nodiscard]] ph_region_details_t          get_region_details(uint64_t event_id);
     [[nodiscard]] ph_kernel_dispatch_details_t get_kernel_dispatch_details(
         uint64_t event_id);
@@ -171,6 +173,15 @@ private:
 
     std::mutex                          m_correlated_events_mutex;
     std::deque<std::vector<ph_event_t>> m_correlated_events;
+
+    struct call_stack_hold
+    {
+        profiler_hub::reader_types::call_stack_t data;
+        std::vector<ph_stack_frame_t>            frames;
+    };
+
+    std::mutex                                   m_call_stack_mutex;
+    std::deque<std::unique_ptr<call_stack_hold>> m_call_stacks;
 
     struct region_detail_hold
     {

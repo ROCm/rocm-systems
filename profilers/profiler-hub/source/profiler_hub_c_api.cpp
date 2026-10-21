@@ -352,6 +352,41 @@ ph_get_correlated_events(ph_ctx_t          ctx,
 }
 
 ph_result_t
+ph_get_call_stack(ph_ctx_t          ctx,
+                  const ph_event_t* event,
+                  ph_call_stack_t*  call_stack,
+                  ph_future_t       future)
+{
+    if(call_stack != nullptr)
+    {
+        *call_stack = ph_call_stack_t{ .list_size = 0, .frames = nullptr };
+    }
+
+    if(ctx == nullptr)
+    {
+        return PH_RESULT_INVALID_CONTEXT;
+    }
+
+    if(call_stack == nullptr || event == nullptr || !is_duration_event_type(event->type))
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+
+    const uint64_t        event_id   = event->id;
+    const ph_event_type_t event_type = event->type;
+    return run_operation(
+        ctx, future, [ctx, event_id, event_type, call_stack]() -> ph_result_t {
+            if(const auto ready = ctx->wait_until_ready(); ready != PH_RESULT_SUCCESS)
+            {
+                return ready;
+            }
+
+            *call_stack = ctx->get_call_stack(event_id, event_type);
+            return PH_RESULT_SUCCESS;
+        });
+}
+
+ph_result_t
 ph_get_region_details(ph_ctx_t             ctx,
                       const ph_event_t*    event,
                       ph_region_details_t* details,

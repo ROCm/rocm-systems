@@ -378,6 +378,7 @@ struct address_range_info_t
 
 struct program_counter_info_t
 {
+    size_t                event_id{};  ///< Region row id of this frame. 0 if unknown.
     std::string           function;
     std::string           filename;
     std::optional<size_t> line_number;

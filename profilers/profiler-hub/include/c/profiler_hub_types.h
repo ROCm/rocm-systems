@@ -399,6 +399,50 @@ extern "C"
         ph_event_t* events;
     } ph_event_list_t;
 
+    /** @brief Code-object address range for one call-stack frame.
+     *         Strings are owned by the producing ph_ctx_t. is_valid is 0 when
+     *         the frame has no address range. */
+    typedef struct
+    {
+        uint64_t    address_base;
+        uint64_t    address_low;
+        uint64_t    address_high;
+        const char* extdata;
+        uint32_t    is_valid;
+    } ph_address_range_t;
+
+    /** @brief Program-counter location for one call-stack frame.
+     *         Strings are owned by the producing ph_ctx_t. is_valid is 0 when
+     *         the frame has no program counter. line_number is valid only when
+     *         its is_valid flag is non-zero. event_id is the region row id of
+     *         the frame, the same value as ph_event_t::id, or 0 if unknown. */
+    typedef struct
+    {
+        uint64_t             event_id;
+        const char*          function;
+        const char*          filename;
+        ph_optional_uint64_t line_number;
+        const char*          extdata;
+        uint32_t             is_valid;
+    } ph_program_counter_t;
+
+    /** @brief One frame of a call stack.
+     *         Index 0 is the top of the stack, the most recent call.
+     *         extdata is owned by the producing ph_ctx_t. */
+    typedef struct
+    {
+        ph_program_counter_t program_counter;
+        ph_address_range_t   address_range;
+        const char*          extdata;
+    } ph_stack_frame_t;
+
+    /** @brief Call stack for one event; same lifetime rule as ph_event_list_t. */
+    typedef struct
+    {
+        uint32_t          list_size;
+        ph_stack_frame_t* frames;
+    } ph_call_stack_t;
+
     /** @brief Common event metadata from event_data_t.
      *         Strings are owned by the producing ph_ctx_t. is_valid is 0 when
      *         the event row had no event metadata. */

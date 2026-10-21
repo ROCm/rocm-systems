@@ -104,7 +104,7 @@ struct reader_t::impl
 
 private:
     // Resolve event metadata from event-specific table by db_id and type.
-    // Returns event_id_result containing event_id + stack_id + call_stack JSON etc.
+    // Returns event_id_result containing event_id + stack_id + source context etc.
     [[nodiscard]] std::optional<data_storage::schema_v3::event_id_result>
     resolve_event_metadata(const reader_types::timeline_event_t& event);
 

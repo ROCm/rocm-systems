@@ -529,6 +529,8 @@ struct read_statements
 
     using timeline_event_statement_func_t = statement_func_t<timeline_event_result>;
 
+    using timeline_event_by_id_func_t = statement_func_t<timeline_event_result, size_t>;
+
     using timeline_event_time_filtered_func_t =
         statement_func_t<timeline_event_result, size_t, size_t>;
 
@@ -679,6 +681,7 @@ struct read_statements
     struct timeline_event_statement_set
     {
         timeline_event_statement_func_t               base;
+        timeline_event_by_id_func_t                   by_id;
         timeline_event_time_filtered_func_t           time_filtered;
         timeline_event_track_filtered_func_t          track_filtered;
         timeline_event_track_and_time_filtered_func_t track_and_time_filtered;
@@ -1565,6 +1568,13 @@ private:
                          .left_join("rocpd_sample", "S", "S.event_id = R.event_id");
 
         initialize_timeline_event_variants(base, "R", m_region_statements);
+        m_region_statements.by_id = make_timeline_statement<bind_types<size_t>>(
+            std::string("SELECT R.id, R.start, R.end, R.name_id, E.category_id, R.nid, "
+                        "R.pid, R.tid, S.track_id, NULL, NULL, NULL "
+                        "FROM rocpd_region_") +
+            m_uuid +
+            " R INNER JOIN rocpd_event E ON R.event_id = E.id "
+            "LEFT JOIN rocpd_sample S ON S.event_id = R.event_id WHERE R.id = ?");
         m_region_statements.track_range_filtered =
             make_track_range_statement("rocpd_region", "R", "R.name_id");
     }
