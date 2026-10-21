@@ -8,7 +8,7 @@ l1i.bw:
     requests.
   peak: $max_sclk / 1000 * 64 * $sqc_per_gpu
 l1i.bw_util:
-  name: Bandwidth Utilization
+  name: L1I Bandwidth Utilization
   formula: 100000 * SUM(SQC_ICACHE_REQ) / SUM($max_sclk * $sqc_per_gpu * (End_Timestamp - Start_Timestamp))
   unit: Percent
   description: >-
@@ -36,7 +36,7 @@ l1i.hit_rate_incl_dup:
     the cache. Calculated as the ratio of the number of L1I requests that hit over
     the number of all L1I requests.
 l1i.hits:
-  name: Hits
+  name: L1I Hits
   formula: SUM(SQC_ICACHE_HITS) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
@@ -72,7 +72,7 @@ l1i.misses_duplicated:
     The total number of L1I requests that missed on a cache line that were already
     pending due to another request, per normalization-unit.
 l1i.misses_non_duplicated:
-  name: Misses - Non Duplicated
+  name: L1I Misses - Non Duplicated
   formula: SUM(SQC_ICACHE_MISSES) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-

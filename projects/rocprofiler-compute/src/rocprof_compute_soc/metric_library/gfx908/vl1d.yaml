@@ -14,14 +14,14 @@ vl1d.ai:
     floating-point operations (FLOPs) to total bytes transferred between the L1 cache
     and the processing units.
 vl1d.atomic_req:
-  name: Atomic Req
+  name: vL1D Atomic Requests
   formula: SUM(TCP_TOTAL_ATOMIC_WITH_RET_sum + TCP_TOTAL_ATOMIC_WITHOUT_RET_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
     The total number of incoming atomic requests from the address processing unit
     after coalescing per normalization unit.
 vl1d.bw_util:
-  name: Bandwidth Utilization
+  name: vL1D Bandwidth Utilization
   formula: 100 * 64 * SUM(TCP_TOTAL_CACHE_ACCESSES_sum) / SUM(End_Timestamp - Start_Timestamp) / ($max_sclk / 1000 * 64 * $cu_per_gpu)
   unit: Percent
   description: >-
@@ -101,7 +101,7 @@ vl1d.hit_ratio:
     The ratio of the number of translation requests that hit in the UTCL1 divided
     by the total number of translation requests made to the UTCL1.
 vl1d.hits:
-  name: Hits
+  name: vL1D Hits
   formula: SUM(TCP_UTCL1_TRANSLATION_HIT_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
@@ -211,14 +211,14 @@ vl1d.permission_misses:
     error, per normalization unit. This is unused and expected to be zero in most
     configurations for modern CDNA accelerators.
 vl1d.rd_req:
-  name: Read Req
+  name: vL1D Read Requests
   formula: SUM(TCP_TOTAL_READ_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
     The total number of incoming read requests from the address processing unit after
     coalescing per normalization unit.
 vl1d.req:
-  name: Req
+  name: vL1D Requests
   formula: SUM(TCP_UTCL1_REQUEST_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
@@ -319,7 +319,7 @@ vl1d.uc_wr:
     Total write requests with UC mtype from this TCP to all TCCs Sum over TCP instances
     per normalization unit.
 vl1d.util:
-  name: Utilization
+  name: vL1D Utilization
   formula: 100 * SUM(TCP_GATE_EN2_sum) / SUM(TCP_GATE_EN1_sum)
   unit: Percent
   description: >-
@@ -327,7 +327,7 @@ vl1d.util:
     of cycles where the vL1D Cache RAM is actively processing any request divided
     by the number of cycles where the vL1D is active.
 vl1d.wr_req:
-  name: Write Req
+  name: vL1D Write Requests
   formula: SUM(TCP_TOTAL_WRITE_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
