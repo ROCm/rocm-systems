@@ -122,7 +122,6 @@ class StaticCommands:
         mem_carveout=None,
         ampp=None,
         cuid=None,
-        cuid_primary=None,
     ):
         """Get Static information for target gpu
 
@@ -150,8 +149,6 @@ class StaticCommands:
             xgmi_plpd (bool, optional): Value override for args.xgmi_plpd. Defaults to None.
             process_isolation (bool, optional): Value override for args.process_isolation. Defaults to None.
             cuid (bool, optional): Value override for args.cuid. Defaults to None.
-            cuid_primary (bool, optional): Value override for args.cuid_primary.
-                Defaults to None.
         Returns:
             None: Print output via AMDSMILogger to destination
         """
@@ -162,13 +159,6 @@ class StaticCommands:
             args.asic = asic
         if cuid:
             args.cuid = cuid
-        if cuid_primary:
-            args.cuid_primary = cuid_primary
-        if getattr(args, "cuid_primary", False):
-            # --cuid-primary selects a field of the CUID block, so asking for it
-            # asks for the block. Without this it is a no-op alongside any other
-            # flag.
-            args.cuid = True
         if bus:
             args.bus = bus
         if vbios:
@@ -242,12 +232,11 @@ class StaticCommands:
             current_platform_args += ["partition"]
             current_platform_values += [args.partition]
 
-        # Note: CUID is a special case for the same reason, and is not an
-        # amd-smi static default argument either.
+        # Note: CUID is not an amd-smi static default argument either.
         # Reason: it changes the shape of the default output for every existing
         #         consumer of `amd-smi static --json`, and on a build without
         #         libamdcuid it adds a block of "N/A" to every GPU. Opt in with
-        #         --cuid or --cuid-primary.
+        #         --cuid.
         if getattr(args, "cuid", False):
             current_platform_args += ["cuid"]
             current_platform_values += [args.cuid]
@@ -341,9 +330,7 @@ class StaticCommands:
 
             static_dict["asic"] = asic_dict
         if getattr(args, "cuid", False):
-            static_dict["cuid"] = self.helpers.get_gpu_cuid_info(
-                args.gpu, include_primary=getattr(args, "cuid_primary", False)
-            )
+            static_dict["cuid"] = self.helpers.get_gpu_cuid_info(args.gpu)
         if args.bus:
             bus_info = {
                 "bdf": "N/A",

@@ -85,25 +85,24 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - The Python `amdsmi_get_gpu_fabric_info()` requests the new layout automatically; its dictionary gains the three mask keys and is otherwise unchanged.
 
 - **Added Component Unified ID (CUID) reporting APIs**.  
-  - `amdsmi_get_gpu_cuid_info()` returns a device's primary and derived CUIDs together with the Component Type, the lookup stage that answered, and whether the value is auxiliary (a temporary CUID), in the new `amdsmi_cuid_info_t`. The new `amdsmi_cuid_source_t` and `amdsmi_cuid_component_type_t` enums name the on-wire values.
-  - `amdsmi_get_gpu_device_cuid()` now returns the device's derived CUID.
+  - `amdsmi_get_gpu_cuid_info()` returns a device's CUID in the new `amdsmi_cuid_info_t`: `derived` holds the CUID, `primary` is reserved for a permanent CUID's PrimaryID, and the struct also gives the Component Type, the lookup stage that answered, and `auxiliary`, which is set for a temporary CUID (amd-smi shows it as `temporary`). Every CUID in this release is temporary, so `primary` is always empty, `source` is always `LIBRARY` and `auxiliary` is always 1. The new `amdsmi_cuid_source_t` and `amdsmi_cuid_component_type_t` enums name the on-wire values.
+  - `amdsmi_get_gpu_device_cuid()` now returns the device's CUID, the same value as `derived`.
   - `amdsmi_get_cuid_components()` lists every component on the node that has a CUID (platform, CPU packages, GPUs and their compute partitions, NPUs, one entry per NIC function; a NIC's UnitID is its PCI function number) in the new `amdsmi_cuid_component_t`, with its BDF and sysfs path. It needs no processor handle.
   - The entry points are exported whether or not the build links `libamdcuid`; without it they return `AMDSMI_STATUS_NOT_SUPPORTED`.
-  - Every CUID is a temporary CUID, built from the machine ID and world-readable device information, the same for every caller and on any kernel. A GPU handle in SPX reports the whole GPU's CUID; in DPX and above each handle reports its own partition's, with the partition's UnitID taken from amdgpu's `cuid_unit_id` or, on a kernel without it, from the KFD topology.
-  - CLI: `amd-smi static --cuid` reports the CUID block and `--cuid-primary` adds the serial-bearing primary CUID (requires elevation). `amd-smi node --cuid` (`--cuid-primary` for root) lists every component's CUID. `--cuid` is opt-in.
-  - `amd-smi list` adds `cuid`, `source`, `auxiliary` and `cuid_metadata_status`. The existing `uuid`/`gpu_uuid` fields keep reporting the legacy UUID rather than switching to the CUID as 10.1 announced: a temporary CUID changes with the host's machine-id, so it has its own field.
+  - Every CUID is a temporary CUID, built from the machine ID and world-readable device information, the same for every caller and on any kernel. A GPU handle in SPX reports the whole GPU's CUID; in DPX and above each handle reports its own partition's, with the partition's UnitID taken from the KFD topology, or from amdgpu's `cuid_unit_id` on a kernel that publishes it.
+  - CLI: `amd-smi static --cuid` reports the CUID block and `amd-smi node --cuid` lists every component's CUID. `--cuid` is opt-in. Each CUID is shown with its `component_type`, `source` and `temporary` flag.
+  - A temporary CUID needs a machine-id. Without a valid `/etc/machine-id` (or `/var/lib/dbus/machine-id` when `/etc/machine-id` does not exist) the CUID fields read `N/A` (`not_supported`). A container with its own machine-id gets its own CUIDs; bind-mount the host's `/etc/machine-id` read-only to get the host's.
+  - `amd-smi list` adds `cuid`, `source`, `temporary` and `cuid_metadata_status`, and `-g` accepts a CUID as well as the legacy UUID. The existing `uuid`/`gpu_uuid` fields keep reporting the legacy UUID rather than switching to the CUID as 10.1 announced: a temporary CUID changes with the host's machine-id, so it has its own field.
   - Build: `BUILD_CUID` takes `AUTO` (default), `ON` or `OFF`. Without an installed `libamdcuid` package, the in-tree `shared/cuid` sources are built and absorbed into `libamd_smi`.
 
   ```shell
   $ amd-smi static --cuid
   GPU: 0
       CUID:
-          DERIVED_CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
-          PRIMARY_CUID: N/A (not requested)
+          CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
           COMPONENT_TYPE: GPU
-          AUXILIARY: True
           SOURCE: LIBRARY
-          IDENTIFIER_KIND: cuid
+          TEMPORARY: True
           CUID_METADATA_STATUS: available
   ```
 
