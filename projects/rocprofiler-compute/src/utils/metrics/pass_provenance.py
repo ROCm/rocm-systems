@@ -242,8 +242,9 @@ def pass_scoped_builtins(layout: PassLayout, gpu_series: str) -> FrozenSet[str]:
 
 
 # Column names that are not perfmon counters. PassLayout records Counter_Name
-# only, so timestamps and the per-kernel unit must not decide the pass.
-_NON_PMC_BIND_NAMES = TIMESTAMP_COLUMNS | {UNIT_COUNTER}
+# only, so timestamps, the per-kernel unit, and kernel-launch fields must
+# not decide the pass.
+_NON_PMC_BIND_NAMES = TIMESTAMP_COLUMNS | {UNIT_COUNTER} | KERNEL_LAUNCH_COLUMNS
 
 
 def hardware_counters_for_pass_select(
@@ -252,9 +253,9 @@ def hardware_counters_for_pass_select(
 ) -> FrozenSet[str]:
     """PMC names used to choose a pass.
 
-    Timestamps and non-counter SUPPORTED_DENOM tokens are stripped. They do
-    not choose the pass. Hardware denominator counters such as SQ_WAVES and
-    GRBM_GUI_ACTIVE stay in the set.
+    Timestamps, kernel-launch fields, and non-counter SUPPORTED_DENOM tokens
+    are stripped. They do not choose the pass. Hardware denominator counters
+    such as SQ_WAVES and GRBM_GUI_ACTIVE stay in the set.
     """
     drop = set(_NON_PMC_BIND_NAMES)
     for formula in SUPPORTED_DENOM.values():
