@@ -284,18 +284,6 @@ struct VmFixture {
   }
 };
 
-TEST(VmFixtureSetupTest, ReportsMalformedConfigAndLeavesFixtureEmpty) {
-  EXPECT_FATAL_FAILURE(
-      {
-        VmFixture fixture;
-        fixture.initialize("\"");
-        EXPECT_EQ(fixture.engine, nullptr);
-        EXPECT_EQ(fixture.soc_ptr, nullptr);
-        EXPECT_EQ(fixture.gpu_mem, nullptr);
-      },
-      "Failed to parse JSON config");
-}
-
 // Track each wave incarnation separately: a rollback may reuse the same slot.
 class CancellationLifecyclePlugin : public ExecutionPlugin {
 public:
@@ -321,6 +309,18 @@ public:
   void onAmdgpuWorkgroupCompleted(uint32_t, uint32_t) override { ++completed_workgroups; }
   void onAmdgpuDispatchExecutionEnd(uint32_t) override { ++completed_dispatches; }
 };
+
+TEST(VmFixtureSetupTest, ReportsMalformedConfigAndLeavesFixtureEmpty) {
+  EXPECT_FATAL_FAILURE(
+      {
+        VmFixture fixture;
+        fixture.initialize("\"");
+        EXPECT_EQ(fixture.engine, nullptr);
+        EXPECT_EQ(fixture.soc_ptr, nullptr);
+        EXPECT_EQ(fixture.gpu_mem, nullptr);
+      },
+      "Failed to parse JSON config");
+}
 
 TEST(CommandProcessorTest, LargeInternalWorkgroupsKeepCallbackOrderAndReclaimFailedSetup) {
   class WorkgroupWavesPlugin final : public ExecutionPlugin {
@@ -1008,7 +1008,8 @@ TEST(RdnaDispatchTest, WgpLdsContentsSurviveWorkgroupAllocationReuse) {
 TEST(RdnaDispatchTest, DispatchFailureReclaimsUnlaunchedWgpReservations) {
   for (bool vm_fault : {false, true}) {
     SCOPED_TRACE(vm_fault);
-    VmFixture f("rdna1", 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+    VmFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize("rdna1", 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128));
     test::AqlQueue queue(f.mem(), f.cp());
     auto &spi = f.se()->spi();
 
@@ -9631,6 +9632,27 @@ TEST(AqlDispatchTest, WorkerExceptionPropagatesThroughEngineStep) {
   EXPECT_THROW((void)f.engine->step(), std::exception);
 }
 
+TEST(AqlDispatchTest, UnimplementedInstructionReportsFailureThroughEngineStep) {
+  constexpr uint32_t kSCbranchIFork = 0xB8000000u;
+  VmFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize("cdna4", /*num_cus=*/2));
+  f.cp()->set_dispatch_threads(2);
+  uint64_t kernel = f.write_kernel(0x1000, &kSCbranchIFork, sizeof(kSCbranchIFork));
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(kernel, /*grid_size=*/128, /*workgroup_size=*/64);
+
+  ASSERT_TRUE(f.engine->step());
+  EXPECT_FALSE(f.engine->step());
+  const auto &exit = f.engine->last_exit();
+  EXPECT_EQ(exit.reason, simdojo::ExitReason::EXIT_REQUEST);
+  EXPECT_EQ(exit.code, 1);
+  EXPECT_NE(exit.message.find("s_cbranch_i_fork"), std::string::npos);
+  EXPECT_NE(exit.message.find("pc=0x1040"), std::string::npos);
+  EXPECT_NE(exit.message.find("unimplemented instruction"), std::string::npos);
+  EXPECT_TRUE(f.cu(0)->is_idle());
+  EXPECT_TRUE(f.cu(1)->is_idle());
+}
+
 TEST(AqlDispatchTest, InstructionFailuresDoNotCompleteDispatchOrBarrier) {
   struct CancellationProbe final : ExecutionPlugin {
     CancellationProbe() : ExecutionPlugin("cancellation_probe") {}
@@ -9722,7 +9744,8 @@ TEST(AqlDispatchTest, InstructionFailuresDoNotCompleteDispatchOrBarrier) {
 TEST(AqlDispatchTest, DebuggerCanHandleDecodeRejectionWithoutCancellingDispatch) {
   constexpr uint32_t kUndecodable = 0xBFFF0000u;
   constexpr uint64_t kCompletionSignal = 0x3000;
-  VmFixture f("cdna4", /*num_cus=*/1);
+  VmFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize("cdna4", /*num_cus=*/1));
   uint32_t handled = 0;
   f.cu(0)->set_illegal_inst_handler([&](amdgpu::Wavefront &wf) {
     ++handled;
@@ -9751,7 +9774,8 @@ TEST(AqlDispatchTest, DebuggerCanHandleDecodeRejectionWithoutCancellingDispatch)
 
 TEST(AqlDispatchTest, RuntimeDecodeClaimStillFailsDispatchAndPreservesBarrier) {
   constexpr uint32_t kUndecodable = 0xBFFF0000u;
-  VmFixture f("cdna4", 2);
+  VmFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize("cdna4", 2));
   auto lifecycle = std::make_unique<CancellationLifecyclePlugin>();
   auto *observed = lifecycle.get();
   auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
@@ -10280,7 +10304,9 @@ TEST(Pm4DispatchTest, InstructionFailureReclaimsWgpReservationsForOtherQueues) {
     for (uint32_t failed_workgroups : {1u, 2u, 3u}) {
       for (uint32_t kWgpLdsBytes : {64u * 1024, 128u * 1024}) {
         SCOPED_TRACE(std::format("threads={} workgroups={}", dispatch_threads, failed_workgroups));
-        VmFixture f("rdna1", 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+        VmFixture f;
+        ASSERT_NO_FATAL_FAILURE(
+            f.initialize("rdna1", 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128));
         f.cp()->set_dispatch_threads(dispatch_threads);
         auto *snapshots = f.capture_halts();
         auto lifecycle = std::make_unique<CancellationLifecyclePlugin>();
@@ -10357,7 +10383,8 @@ TEST(AqlDispatchTest, ForcedCloseCancelsWavesAndReclaimsLdsWithoutCompletion) {
     SCOPED_TRACE(arch);
     const bool wgp = arch == "rdna1";
     const bool clustered = arch == "cdna5";
-    VmFixture f(arch, 2, 10, 64, 128);
+    VmFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(arch, 2, 10, 64, 128));
     auto lifecycle = std::make_unique<CancellationLifecyclePlugin>();
     auto *observed = lifecycle.get();
     auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
@@ -10423,7 +10450,8 @@ TEST(ClusterDispatchTest, LaterPeerSetupRollbackCancelsOnlyThatWaveIncarnation) 
   using namespace rocjitsu::amdhsa;
   for (uint32_t dispatch_threads : {1u, 2u}) {
     SCOPED_TRACE(dispatch_threads);
-    VmFixture f("cdna5", 2, 1, 64, 128);
+    VmFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize("cdna5", 2, 1, 64, 128));
     f.cp()->set_dispatch_threads(dispatch_threads);
     constexpr uint32_t process_id = 77;
     auto physical = std::make_shared<amdgpu::GpuMemoryPhysicalAccess>(*f.mem());
