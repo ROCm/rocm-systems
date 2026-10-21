@@ -264,6 +264,36 @@ def test_collect_sum_of_absolute_pieces_across_passes_evaluates():
 
 
 @pytest.mark.misc
+def test_gfx942_cache_hit_rate_stays_unset_across_tcp_passes():
+    """Five TCP counters do not share gfx942's four TCP slots."""
+    perfmon_config = dict(mi_gpu_specs.get_perfmon_config("gfx942"))
+    assert perfmon_config["TCP"] == 4
+    non_rw = frozenset({
+        "TCP_TOTAL_CACHE_ACCESSES_sum",
+        "TCP_TCC_READ_REQ_sum",
+        "TCP_TCC_WRITE_REQ_sum",
+    })
+    atom = frozenset({
+        "TCP_TOTAL_CACHE_ACCESSES_sum",
+        "TCP_TCC_ATOMIC_WITH_RET_REQ_sum",
+        "TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum",
+    })
+    assert counters_fit_one_bucket(non_rw, perfmon_config)
+    assert counters_fit_one_bucket(atom, perfmon_config)
+    assert not counters_fit_one_bucket(non_rw | atom, perfmon_config)
+    table = _two_piece_table(
+        COLLECT_SUM_SPECS_ATTR,
+        ["first", "second"],
+        {
+            "first": "to_sum(raw_pmc_df['A'])",
+            "second": "-100 * to_sum(raw_pmc_df['B'])",
+        },
+        ("pmc_perf_0", "pmc_perf_1"),
+    )
+    assert _evaluate_parent(table) == "N/A"
+
+
+@pytest.mark.misc
 def test_collect_sum_subtracting_a_piece_from_another_pass_stays_unset():
     table = _two_piece_table(
         COLLECT_SUM_SPECS_ATTR,
