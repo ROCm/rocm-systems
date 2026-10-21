@@ -832,7 +832,7 @@ For each D2H memcpy event that has a captured expected-data blob:
 Blobs carry no dtype, and reading integers as floats lets any int32 below about
 9.8e8 match zero within 1e-3, so a guessed tolerance would let a no-op handler pass
 its round-trip. A replay whose outputs really are nondeterministic floats opts in
-with `HIP_HRR_D2H_TOL=<type>:<atol>:<rtol>`, naming one of fp32, bf16, fp16, fp64:
+with `HIP_HRR_D2H_TOL=<type>:<atol>:<rtol>`, with `<type>` one of `f32`, `bf16`, `f16`, `f64` (no other spelling, `fp32` included, is accepted):
 a mismatching buffer then passes when every element, read as that type, satisfies
 `|live − expected| ≤ atol + rtol·|expected|`. A linear copy whose blob is shorter
 than the copy is skipped, not compared on the prefix.
