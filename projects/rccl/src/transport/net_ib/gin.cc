@@ -9,7 +9,7 @@
 
 #include "gin/gin_host.h"
 #include "gin.h"
-#include "rma_multiseg.h"
+#include "rma_multiseg.h" // RCCL: multi-segment RMA splits, credits, and the owner's host fd.
 
 extern int rcclHostSegmentFdLookup(uintptr_t addr, size_t len, uint64_t* offset);
 
@@ -283,7 +283,7 @@ ncclResult_t ncclGinIbCloseColl(void* collComm) {
     cComm->sendComm = NULL;
   }
 
-  free(cComm->regConsensus);
+  free(cComm->regConsensus); // RCCL: connect allocated the per-rank registration records.
   memset(cComm, 0, sizeof(*cComm));
 
   free(cCommArray);
@@ -530,7 +530,7 @@ static void rcclRmaWrCreditsFree(struct ncclRmaIbProxyCtx* ctx) {
   ctx->sendCredits = ctx->flushCredits = NULL;
 }
 
-// Advance completedSeq from up to four CQEs, as Test() does.
+// RCCL: advance completedSeq from up to four CQEs, as Test() does.
 static ncclResult_t rcclRmaIbProxyPollSeq(struct ncclIbNetCommBase* commBase, struct ncclIbNetCommDevBase* devBase,
                                           uint64_t* completedSeq, int* nDone) {
   struct ibv_wc wc[4];
@@ -548,7 +548,7 @@ static ncclResult_t rcclRmaIbProxyPollSeq(struct ncclIbNetCommBase* commBase, st
   return ncclSuccess;
 }
 
-// Wait until nWrs fit on the peer's send (or flush) SQ. Untracked ids are single-MR ops.
+// RCCL: wait until nWrs fit on the peer's send (or flush) SQ. Untracked ids are single-MR ops.
 static ncclResult_t rcclRmaWrCreditsReserve(struct ncclRmaIbProxyCtx* ctx, int rank, bool flush, int nWrs,
                                             struct ncclRmaWrCredits** credits) {
   struct ncclIbNetCommBase* commBase;
@@ -583,7 +583,7 @@ static ncclResult_t rcclRmaWrCreditsReserve(struct ncclRmaIbProxyCtx* ctx, int r
   NCCLCHECK(rcclRmaWrCreditsGet(ctx, rank, flush, &c));
   ncclRmaWrCreditsRelease(c, *completedSeq);
   if (!ncclRmaWrCreditsAvailable(ncclRmaWrCreditsInUse(c, *postedSeq, untrackedCost), nWrs, capacity)) {
-    // Batched WRs count as in use; they have to reach the QP before they can complete.
+    // RCCL: batched WRs count as in use; they have to reach the QP before they can complete.
     // As in Test(), a stuck WR surfaces as an error CQE once the HCA's retries run out.
     NCCLCHECK(ncclRmaIbProxyPostBatch(ctx));
     while (!ncclRmaWrCreditsAvailable(ncclRmaWrCreditsInUse(c, *postedSeq, untrackedCost), nWrs, capacity)) {
@@ -644,7 +644,7 @@ ncclResult_t ncclRmaIbProxyCreateContext(void* collComm, ncclRmaConfig_t* config
     NCCLCHECKGOTO(ncclIbMalloc((void**)&gc->fullSendComm, sizeof(void*) * nranks), ret, end);
     NCCLCHECKGOTO(ncclIbMalloc((void**)&gc->fullRecvComm, sizeof(void*) * nranks), ret, end);
     gc->rank = cComm->rank;
-    gc->nranks = nranks;
+    gc->nranks = nranks; // RCCL: per-rank credit tables are indexed by this count.
     gc->wrBatchsize = (int)wrBatchsize;
 
     for (int i = 0; i < nranks; i += rankStride) {
@@ -694,14 +694,14 @@ ncclResult_t ncclRmaIbProxyDestroyContext(void* rmaCtx) {
       free(gc[c].fullSendComm);
       gc[c].fullSendComm = NULL;
     }
-    rcclRmaWrCreditsFree(&gc[c]);
+    rcclRmaWrCreditsFree(&gc[c]); // RCCL: credit tables outlive the QPs.
   }
   return ncclSuccess;
 }
 
 ncclResult_t ncclRmaIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t size, int type, uint64_t offset, int fd,
                                           uint64_t mr_flags, void** mhandle) {
-  if (rcclRmaMultiSegEnabled())
+  if (rcclRmaMultiSegEnabled()) // RCCL: multi-segment handles are not the single-MR layout.
     return rcclRmaIbProxyRegMrSymDmaBuf(collComm, data, size, type, offset, fd, mr_flags, mhandle);
   ncclResult_t ret = ncclSuccess;
   struct ncclGinIbCollComm* cComm = (struct ncclGinIbCollComm*)collComm;
@@ -738,6 +738,7 @@ ncclResult_t ncclRmaIbProxyRegMrSym(void* collComm, void* data, size_t size, int
 }
 
 ncclResult_t ncclRmaIbProxyDeregMrSym(void* collComm, void* mhandle) {
+  // RCCL: multi-segment handles are not the single-MR layout.
   if (rcclRmaMultiSegEnabled()) return rcclRmaIbProxyDeregMrSym(collComm, mhandle);
   struct ncclGinIbCollComm* cComm = (struct ncclGinIbCollComm*)collComm;
   struct ncclRmaIbProxyMrHandle* rmaMrHandle = (struct ncclRmaIbProxyMrHandle*)mhandle;
@@ -818,7 +819,7 @@ static inline bool ncclRmaRangeOk(const struct rcclRmaIbProxySegMrHandle* h, int
   return off <= bytes && (uint64_t)size <= bytes - off;
 }
 
-// Build a chained RDMA WR list, splitting at segment boundaries so every WR
+// RCCL: build a chained RDMA WR list, splitting at segment boundaries so every WR
 // stays within a single physical segment's MR.
 //
 // Paired mode (flushSge == NULL): move `size` bytes between a local and a
@@ -893,7 +894,7 @@ static ncclResult_t ncclRmaBuildSegmentedWrs(struct ibv_send_wr* wr, struct ibv_
   return ncclSuccess;
 }
 
-// wrap_ibv_post_send returns ncclSystemError on any nonzero ibv_post_send, including
+// RCCL: wrap_ibv_post_send returns ncclSystemError on any nonzero ibv_post_send, including
 // after a prefix of the chain is accepted. Only the last WR is signaled, so
 // NCCLCHECK-and-return would leak the request slot and leave unsignaled WRs
 // without a CQE owner. Count how many WRs the HCA accepted.
@@ -913,6 +914,7 @@ static ncclResult_t ncclRmaPostWrs(struct ncclIbQp* qp, struct ibv_send_wr* wr, 
   return ret;
 }
 
+// RCCL: only the last WR of a segment chain is signaled.
 static void ncclRmaStampSendWrs(struct ibv_send_wr* wr, int nWr, uint64_t wrId, int signalLast) {
   for (int i = 0; i < nWr; i++) {
     wr[i].wr_id = wrId;
@@ -920,7 +922,7 @@ static void ncclRmaStampSendWrs(struct ibv_send_wr* wr, int nWr, uint64_t wrId, 
   }
 }
 
-// Queue a segment-split chain behind earlier batched WRs. A chain longer than
+// RCCL: queue a segment-split chain behind earlier batched WRs. A chain longer than
 // the batch posts directly after the batch so WRs reach the QP in request-id order.
 static ncclResult_t ncclRmaIbProxyQueueWrs(struct ncclRmaIbProxyCtx* ctx, struct ncclIbQp* qp, struct ibv_send_wr* wr,
                                            struct ibv_sge* sge, int nWr, bool aggregate, int* posted) {
@@ -945,7 +947,7 @@ static ncclResult_t ncclRmaIbProxyQueueWrs(struct ncclRmaIbProxyCtx* ctx, struct
   return ncclRmaPostWrs(qp, wr, nWr, posted);
 }
 
-// If nothing posted, release the slot and its sequence id and leave *request unset.
+// RCCL: if nothing posted, release the slot and its sequence id and leave *request unset.
 // If a prefix posted, keep the request so Test() can drain. A rejected signaled
 // tail cannot produce a CQE; mark FAILED so Test() reports it.
 static ncclResult_t ncclRmaFinishPostedRequest(struct ncclIbRequest* req, uint64_t* postedSeq, ncclResult_t postRet,
@@ -964,7 +966,7 @@ static ncclResult_t ncclRmaFinishPostedRequest(struct ncclIbRequest* req, uint64
 
 ncclResult_t rcclRmaIbProxyConnectFinish(void** collComm, int nranks) {
   if (!rcclRmaMultiSegEnabled()) return ncclSuccess;
-  // Registration must not fail locally before its first collective, so the
+  // RCCL: registration must not fail locally before its first collective, so the
   // receive buffer is allocated here. It is page-aligned because allGather
   // registers whole pages for remote write.
   struct ncclGinIbCollComm* cComm = (struct ncclGinIbCollComm*)*collComm;
@@ -977,6 +979,7 @@ ncclResult_t rcclRmaIbProxyConnectFinish(void** collComm, int nranks) {
   return ncclSuccess;
 }
 
+// RCCL: one DMA-BUF MR per physical segment, then one consensus record per rank.
 ncclResult_t rcclRmaIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t size, int type, uint64_t offset, int fd,
                                           uint64_t mr_flags, void** mhandle) {
   struct ncclGinIbCollComm* cComm = (struct ncclGinIbCollComm*)collComm;
@@ -1187,6 +1190,7 @@ fail:
   return ret;
 }
 
+// RCCL: release every segment MR, not only the first.
 ncclResult_t rcclRmaIbProxyDeregMrSym(void* collComm, void* mhandle) {
   struct ncclGinIbCollComm* cComm = (struct ncclGinIbCollComm*)collComm;
   struct rcclRmaIbProxySegMrHandle* rmaMrHandle = (struct rcclRmaIbProxySegMrHandle*)mhandle;
@@ -1206,6 +1210,7 @@ ncclResult_t rcclRmaIbProxyDeregMrSym(void* collComm, void* mhandle) {
   return ret;
 }
 
+// RCCL: split the put at segment boundaries and keep the request if a prefix posted.
 ncclResult_t rcclRmaIbProxyIPut(void* rmaCtx, int context, uint64_t srcOff, void* srcMhandle, size_t size,
                                 uint64_t dstOff, void* dstMhandle, uint32_t rank, uint32_t optFlags, void** request) {
   struct ncclRmaIbProxyCtx* rmaProxyCtx = &((struct ncclRmaIbProxyCtx*)rmaCtx)[context];
@@ -1258,6 +1263,7 @@ ncclResult_t rcclRmaIbProxyIPut(void* rmaCtx, int context, uint64_t srcOff, void
   return ret;
 }
 
+// RCCL: split the get at segment boundaries and keep the request if a prefix posted.
 ncclResult_t rcclRmaIbProxyIGet(void* rmaCtx, int context, uint64_t remoteOffset, void* remoteMhandle, size_t size,
                                 uint64_t localOffset, void* localMhandle, uint32_t rank, uint32_t optFlags,
                                 void** request) {
@@ -1311,6 +1317,7 @@ ncclResult_t rcclRmaIbProxyIGet(void* rmaCtx, int context, uint64_t remoteOffset
   return ret;
 }
 
+// RCCL: the signal rides the last segment WR, so a split put still signals once.
 ncclResult_t rcclRmaIbProxyIPutSignal(void* rmaCtx, int context, uint64_t srcOff, void* srcMhandle, size_t size,
                                       uint64_t dstOff, void* dstMhandle, uint32_t rank, uint64_t signalOff,
                                       void* signalMhandle, uint64_t signalValue, uint32_t signalOp, bool isStrongSignal,
@@ -1408,6 +1415,7 @@ ncclResult_t rcclRmaIbProxyIPutSignal(void* rmaCtx, int context, uint64_t srcOff
   return ret;
 }
 
+// RCCL: one read per touched segment, so a GPUDirect flush covers the whole window.
 ncclResult_t rcclRmaIbProxyIFlush(void* rmaCtx, int context, void* mhandle, uint32_t rank, void** request) {
   struct ncclRmaIbProxyCtx* rmaProxyCtx = &((struct ncclRmaIbProxyCtx*)rmaCtx)[context];
   struct rcclRmaIbProxySegMrHandle* rmaMrHandle = (struct rcclRmaIbProxySegMrHandle*)mhandle;
@@ -1463,14 +1471,14 @@ ncclResult_t rcclRmaIbProxyIFlush(void* rmaCtx, int context, void* mhandle, uint
   return ret;
 }
 
-// Called before the sequence check: later completions advance it past a lost tail.
+// RCCL: a signaled tail that never posted has no CQE. Later completions must not hide it.
 ncclResult_t rcclRmaIbProxyTestFailed(struct ncclIbRequest* req, int* done) {
   *done = 1;
   NCCLCHECK(ncclIbFreeRequest(req));
   return ncclRemoteError;
 }
 
-// Swap every non-NULL handle to its develop-layout view when all of them have one segment.
+// RCCL: a one-segment handle uses develop's op body through the embedded single MR.
 static bool rcclRmaIbProxyUseSingle(void** h0, void** h1, void** h2) {
   void** handles[3] = {h0, h1, h2};
   for (void** h : handles) {
@@ -1485,7 +1493,7 @@ static bool rcclRmaIbProxyUseSingle(void** h0, void** h1, void** h2) {
 
 ncclResult_t ncclRmaIbProxyIPut(void* rmaCtx, int context, uint64_t srcOff, void* srcMhandle, size_t size,
                                 uint64_t dstOff, void* dstMhandle, uint32_t rank, uint32_t optFlags, void** request) {
-  if (rcclRmaMultiSegEnabled()) {
+  if (rcclRmaMultiSegEnabled()) { // RCCL: multi-segment handles take the split path; one segment keeps this body.
     if (!rcclRmaIbProxyUseSingle(&srcMhandle, &dstMhandle, NULL))
       return rcclRmaIbProxyIPut(rmaCtx, context, srcOff, srcMhandle, size, dstOff, dstMhandle, rank, optFlags, request);
     NCCLCHECK(rcclRmaWrCreditsReserve((struct ncclRmaIbProxyCtx*)rmaCtx + context, rank, /*flush=*/false,
@@ -1544,7 +1552,7 @@ ncclResult_t ncclRmaIbProxyIPut(void* rmaCtx, int context, uint64_t srcOff, void
 ncclResult_t ncclRmaIbProxyIGet(void* rmaCtx, int context, uint64_t remoteOffset, void* remoteMhandle, size_t size,
                                 uint64_t localOffset, void* localMhandle, uint32_t rank, uint32_t optFlags,
                                 void** request) {
-  if (rcclRmaMultiSegEnabled()) {
+  if (rcclRmaMultiSegEnabled()) { // RCCL: multi-segment handles take the split path; one segment keeps this body.
     if (!rcclRmaIbProxyUseSingle(&remoteMhandle, &localMhandle, NULL))
       return rcclRmaIbProxyIGet(rmaCtx, context, remoteOffset, remoteMhandle, size, localOffset, localMhandle, rank,
                                 optFlags, request);
@@ -1602,7 +1610,7 @@ ncclResult_t ncclRmaIbProxyIPutSignal(void* rmaCtx, int context, uint64_t srcOff
                                       uint64_t dstOff, void* dstMhandle, uint32_t rank, uint64_t signalOff,
                                       void* signalMhandle, uint64_t signalValue, uint32_t signalOp, bool isStrongSignal,
                                       uint32_t optFlags, void** request) {
-  if (rcclRmaMultiSegEnabled()) {
+  if (rcclRmaMultiSegEnabled()) { // RCCL: multi-segment handles take the split path; one segment keeps this body.
     if (!rcclRmaIbProxyUseSingle(&srcMhandle, &dstMhandle, &signalMhandle))
       return rcclRmaIbProxyIPutSignal(rmaCtx, context, srcOff, srcMhandle, size, dstOff, dstMhandle, rank, signalOff,
                                       signalMhandle, signalValue, signalOp, isStrongSignal, optFlags, request);
@@ -1698,9 +1706,9 @@ ncclResult_t ncclRmaIbProxyTest(void* collComm, void* request, int* done) {
   bool isFlush = req->type == NCCL_NET_IB_REQ_FLUSH;
   *done = 0;
 
-  // The caller is already waiting on this op, so a deferred doorbell must not
-  // hold it back.
+  // RCCL: the caller is already waiting, so a deferred doorbell must not hold it back.
   NCCLCHECK(ncclRmaIbProxyPostBatch(rmaProxyCtx));
+  // RCCL: a request whose signaled tail never posted completes as an error.
   if (req->type == NCCL_NET_IB_REQ_FAILED) return rcclRmaIbProxyTestFailed(req, done);
 
   ncclIbNetCommBase* commBase;
@@ -1764,7 +1772,7 @@ ncclResult_t ncclRmaIbProxyTest(void* collComm, void* request, int* done) {
 }
 
 ncclResult_t ncclRmaIbProxyIFlush(void* rmaCtx, int context, void* mhandle, uint32_t rank, void** request) {
-  if (rcclRmaMultiSegEnabled()) {
+  if (rcclRmaMultiSegEnabled()) { // RCCL: multi-segment handles take the split path; one segment keeps this body.
     if (!rcclRmaIbProxyUseSingle(&mhandle, NULL, NULL))
       return rcclRmaIbProxyIFlush(rmaCtx, context, mhandle, rank, request);
     NCCLCHECK(rcclRmaWrCreditsReserve((struct ncclRmaIbProxyCtx*)rmaCtx + context, rank, /*flush=*/true, 1, NULL));
