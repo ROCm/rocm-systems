@@ -6,6 +6,18 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Added
 
+### Changed
+
+### Resolved issues
+
+### Known issues
+
+### Removed
+
+## ROCprofiler-SDK 1.4.2 for ROCm release 10.2.0
+
+### Added
+
 **API:**
 
   - Device counting mode for the Streaming Performance Monitor (SPM) service (experimental):
