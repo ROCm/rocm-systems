@@ -1816,7 +1816,12 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // 2-shot message-size window: [twoShotMin, twoShotMax], mirroring agCeNonRegWindow
   // for AllGather. Computed here so the bounds are visible in selector-level logs
   // alongside symMaxR2/symMinR2, rather than buried inside rcclUseCeAr2Shot.
-  const size_t arTwoShotMax = rcclCeNonRegMaxTab(archTable, ncclFuncAllReduce);
+  const size_t arTwoShotTabMax = rcclCeNonRegMaxTab(archTable, ncclFuncAllReduce);
+  // Under ZERO CU policy the staging buffer is always available (NCCL_CE_AR_TMPBUF_DEFAULT_BYTES),
+  // so treat a table value of 0 as "no arch-table upper bound" rather than "disabled".
+  const bool arCeZeroPolicy = (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) != 0;
+  const size_t arTwoShotMax = (arCeZeroPolicy && arTwoShotTabMax == 0)
+                               ? NCCL_CE_AR_TMPBUF_DEFAULT_BYTES : arTwoShotTabMax;
   const size_t arTwoShotMin = rcclCeNonRegMinTab(archTable, ncclFuncAllReduce);
   const bool twoShotWindow = rcclWindowFits(msgBytes, arTwoShotMin, arTwoShotMax);
   // This call site never carries a bias buffer (ncclAllReduceWithBias_impl bypasses it entirely

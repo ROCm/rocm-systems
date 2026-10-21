@@ -196,9 +196,20 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   static int64_t paramMax     = rcclParamCeArMaxMsgBytes();
   static int64_t paramStaging = rcclParamCeArStagingBytes();
   static constexpr size_t kCeArMaxDefault = 256ULL * 1024 * 1024;
+  // A table entry of 0 means "disabled by default" not "zero bytes"; fall back to
+  // kCeArMaxDefault (256 MiB, the staging buffer size) so ZERO CU policy can use CE
+  // 2-shot on arches that have ceNonRegMax[AR]=0 as a placeholder.
   comm->ceColl.ceArMaxBytes     = (paramMax >= 0) ? (size_t)paramMax
-      : (comm->archThresholds != nullptr ? comm->archThresholds->ceNonRegMax[ncclFuncAllReduce] : kCeArMaxDefault);
+      : (comm->archThresholds != nullptr && comm->archThresholds->ceNonRegMax[ncclFuncAllReduce] != 0
+         ? comm->archThresholds->ceNonRegMax[ncclFuncAllReduce] : kCeArMaxDefault);
   comm->ceColl.ceArStagingBytes = (paramStaging >= 0) ? (size_t)paramStaging : (size_t)NCCL_CE_AR_STAGING_BYTES;
+  // Schedule AR staging init now: ncclCeInit runs inside ncclGroupEnd via ceInitTaskQueue
+  // (a collective context), and group.cc checks stagingPending immediately after draining
+  // ceInitTaskQueue. This ensures ncclCeEnsureAllReduceStaging fires collectively before
+  // the first AllReduce dispatch, avoiding the chicken-and-egg where CE 2-shot cannot be
+  // selected (ceARTmpBuf==NULL check) before the staging buffer is allocated.
+  if (comm->ceColl.ceArMaxBytes != 0 && comm->ceColl.ceARTmpBuf == nullptr)
+    comm->ceColl.stagingPending = true;
   int i = 0;
   int targetStreams = 0;
   uint32_t graphSyncValue = GRAPH_SYNC_VALUE;
