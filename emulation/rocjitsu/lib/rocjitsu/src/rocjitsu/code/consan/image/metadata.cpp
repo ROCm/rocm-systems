@@ -133,6 +133,18 @@ bool text_equals(const Value &value, std::string_view name, std::string_view exp
   return child != nullptr && child->kind == Value::Kind::String && child->string == expected;
 }
 
+bool matches_target(const Value &root, std::string_view processor) {
+  const Value *target = field(root, "amdhsa.target");
+  if (target == nullptr || target->kind != Value::Kind::String)
+    return false;
+  // An omitted triple environment and "unknown" are equivalent. Keep the
+  // complete processor match: feature suffixes need their own ELF ABI checks.
+  for (const std::string_view prefix : {"amdgcn-amd-amdhsa--", "amdgcn-amd-amdhsa-unknown-"})
+    if (target->string.starts_with(prefix) && target->string.substr(prefix.size()) == processor)
+      return true;
+  return false;
+}
+
 std::optional<std::span<const uint8_t>> note(std::span<const uint8_t> image) {
   Elf64_Ehdr header{};
   if (image.size() < sizeof(header))
@@ -193,8 +205,7 @@ bool parse(std::span<const uint8_t> image, const KernelDescriptorInfo &kernel, P
   parsed.payload = *payload;
   Cursor cursor(*payload);
   if (!cursor.read(parsed.root) || !cursor.at_end() || parsed.root.kind != Value::Kind::Map ||
-      !text_equals(parsed.root, "amdhsa.target",
-                   std::string("amdgcn-amd-amdhsa--") + std::string(target->name)))
+      !matches_target(parsed.root, target->name))
     return false;
   const Value *version = field(parsed.root, "amdhsa.version");
   if (version == nullptr || version->array.size() != 2 ||

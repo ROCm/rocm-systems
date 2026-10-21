@@ -12,6 +12,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <bitset>
 #include <cstring>
 
@@ -19,6 +20,84 @@ namespace rocjitsu::consan {
 namespace {
 
 class ConSanTargetStatic : public ::testing::TestWithParam<test::TargetMode> {};
+
+TEST_P(ConSanTargetStatic, EquivalentMetadataEnvironmentsPreserveTargetAndAbiValidation) {
+  const test::TargetMode mode = GetParam();
+  const TargetProfile &target = *target_profile(mode.target);
+  std::vector<OriginalInstruction> instructions;
+  for (const std::string_view fixture : {"native-1", "native-unknown-environment"}) {
+    SCOPED_TRACE(fixture);
+    const std::vector<uint8_t> original =
+        test::read_fixture(test::target_fixture_path(mode, fixture));
+    InputError error;
+    const FailureOr<InputProgram> input =
+        build_input_program(original, target, "lds_producer_consumer", error);
+    ASSERT_TRUE(input.succeeded()) << error.message;
+    if (instructions.empty()) {
+      instructions = input.value().instructions;
+    } else {
+      ASSERT_EQ(instructions.size(), input.value().instructions.size());
+      for (size_t index = 0; index < instructions.size(); ++index)
+        EXPECT_EQ(instructions[index].words, input.value().instructions[index].words);
+    }
+    const FailureOr<PreparedArtifact> prepared =
+        prepare(original, target, "lds_producer_consumer", error);
+    ASSERT_TRUE(prepared.succeeded()) << error.message;
+    ContractError image_error;
+    ASSERT_TRUE(verify_artifact_images(prepared.value().manifest, original, prepared.value().image,
+                                       &image_error)
+                    .succeeded())
+        << image_error.message;
+    if (fixture == "native-1")
+      continue;
+
+    const std::string expected = std::string("amdgcn-amd-amdhsa-unknown-") + mode.target;
+    std::vector<std::string> invalid;
+    for (const std::pair<std::string_view, std::string_view> replacement :
+         {std::pair{"amdgcn", "xmdgcn"},
+          {"amd", "xyz"},
+          {"amdhsa", "amdxsa"},
+          {"unknown", "invalid"}}) {
+      std::string changed = expected;
+      changed.replace(changed.find(replacement.first), replacement.first.size(),
+                      replacement.second);
+      // Keep the MessagePack length and ELF note framing intact.
+      changed.resize(expected.size(), ' ');
+      invalid.push_back(std::move(changed));
+    }
+    invalid.push_back(std::string("amdgcn-amd-amdhsa-unknown-") + (target.id == 942   ? "gfx950"
+                                                                   : target.id == 950 ? "gfx942"
+                                                                   : target.id == 1100
+                                                                       ? "gfx1201"
+                                                                       : "gfx1100"));
+    invalid.push_back(std::string("amdgcn-amd-amdhsa--") + mode.target + ":xnack+");
+    invalid.push_back(std::string("amdgcn-amd-amdhsa--") + mode.target + ":xnack-");
+    invalid.push_back(expected.substr(0, expected.size() - 1) + '\0');
+    for (const std::string &changed : invalid) {
+      SCOPED_TRACE(changed);
+      ASSERT_EQ(changed.size(), expected.size());
+      for (const bool prepared_image : {false, true}) {
+        std::vector<uint8_t> image = prepared_image ? prepared.value().image : original;
+        const auto position =
+            std::search(image.begin(), image.end(), expected.begin(), expected.end());
+        ASSERT_NE(position, image.end());
+        ASSERT_EQ(
+            std::search(position + expected.size(), image.end(), expected.begin(), expected.end()),
+            image.end());
+        std::copy(changed.begin(), changed.end(), position);
+        if (prepared_image) {
+          Manifest manifest = prepared.value().manifest;
+          manifest.prepared.sha256 = digest(image);
+          ASSERT_TRUE(match_images(manifest, original, image).succeeded());
+          EXPECT_TRUE(verify_artifact_images(manifest, original, image, &image_error).failed());
+        } else {
+          EXPECT_TRUE(build_input_program(image, target, "lds_producer_consumer", error).failed());
+          EXPECT_NE(error.message.find("metadata"), std::string::npos);
+        }
+      }
+    }
+  }
+}
 
 TEST_P(ConSanTargetStatic, PreparedCdnaDescriptorMustAllocateItsDeclaredOrdinarySgprs) {
   const test::TargetMode mode = GetParam();

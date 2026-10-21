@@ -11,6 +11,9 @@
 #ifndef CONSAN_TARGET
 #define CONSAN_TARGET "amdgcn-amd-amdhsa--gfx1100"
 #endif
+#ifndef CONSAN_METADATA_TARGET
+#define CONSAN_METADATA_TARGET CONSAN_TARGET
+#endif
 #ifndef CONSAN_WAVE_SIZE
 #define CONSAN_WAVE_SIZE 32
 #endif
@@ -209,7 +212,7 @@ CONSAN_KERNEL:
 .amdgpu_metadata
 ---
 amdhsa.version: [1, 2]
-amdhsa.target: CONSAN_TARGET
+amdhsa.target: CONSAN_METADATA_TARGET
 amdhsa.kernels:
   - .name: CONSAN_KERNEL
     .symbol: CONSAN_KERNEL.kd
