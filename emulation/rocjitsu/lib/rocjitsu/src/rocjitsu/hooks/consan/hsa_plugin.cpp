@@ -29,6 +29,7 @@
 
 namespace {
 
+using rocjitsu::FailureOr;
 using namespace rocjitsu::consan;
 using Blob = std::shared_ptr<std::vector<uint8_t>>;
 
@@ -154,7 +155,7 @@ public:
     Blob original;
     {
       std::lock_guard lock(mutex_);
-      const auto found = readers_.find(reader.handle);
+      const std::unordered_map<uint64_t, Blob>::iterator found = readers_.find(reader.handle);
       if (closed_ || module_ever_ || loading_ || found == readers_.end())
         return reject_locked("load requires a tracked original reader and one admitted module");
       original = found->second;
@@ -163,7 +164,7 @@ public:
     auto module = std::make_shared<Module>();
     ContractError error;
     const std::string target = agent_target(agent);
-    auto artifact = load_artifact(artifact_path_, *original, target, &error);
+    FailureOr<LoadedArtifact> artifact = load_artifact(artifact_path_, *original, target, &error);
     if (artifact.failed()) {
       std::lock_guard lock(mutex_);
       loading_ = false;
@@ -225,7 +226,8 @@ public:
     if (status == HSA_STATUS_SUCCESS)
       status = core_.hsa_executable_symbol_get_info_fn(
           resolved_symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE, &private_bytes);
-    const auto layout = plan_launch(*module->facts, {{1, 1, 1}, {1, 1, 1}}, group, private_bytes);
+    const FailureOr<LaunchLayout> layout =
+        plan_launch(*module->facts, {{1, 1, 1}, {1, 1, 1}}, group, private_bytes);
     std::lock_guard lock(mutex_);
     // Symbol queries run outside the lock. Finish or executable destruction may
     // have revoked this admission before the binding and workers are installed.
@@ -336,7 +338,7 @@ public:
   hsa_status_t signal_destroy(hsa_signal_t signal) {
     {
       std::lock_guard lock(mutex_);
-      const auto found = signals_.find(signal.handle);
+      const std::unordered_map<uint64_t, Signal>::iterator found = signals_.find(signal.handle);
       if (found != signals_.end() && found->second.pending)
         return HSA_STATUS_ERROR_INVALID_SIGNAL;
     }
@@ -462,7 +464,7 @@ private:
       return {};
     isa_name.remove_prefix(prefix.size());
     isa_name = isa_name.substr(0, isa_name.find(':'));
-    const auto *target = target_profile(isa_name);
+    const TargetProfile *target = target_profile(isa_name);
     return target == nullptr ? std::string{} : std::string(target->name);
   }
 
@@ -553,7 +555,7 @@ private:
     }
     CaptureHeader header;
     header.manifest = *facts;
-    const auto encoded_facts = encode_manifest(*facts);
+    const FailureOr<std::vector<uint8_t>> encoded_facts = encode_manifest(*facts);
     if (encoded_facts.failed()) {
       fail_locked(RuntimeStatus::InvalidFacts, "cannot encode capture facts");
       return false;
@@ -618,17 +620,35 @@ private:
     return true;
   }
 
-  void fail_dispatch_completion_locked(const hsa_kernel_dispatch_packet_t &packet) {
-    if ((packet.header & 0xff) != HSA_PACKET_TYPE_KERNEL_DISPATCH)
+  void fail_packet_completion_locked(const hsa_kernel_dispatch_packet_t &packet) {
+    hsa_signal_t completion{};
+    switch (packet.header & 0xff) {
+    case HSA_PACKET_TYPE_KERNEL_DISPATCH:
+      completion = packet.completion_signal;
+      break;
+    case HSA_PACKET_TYPE_BARRIER_AND: {
+      hsa_barrier_and_packet_t barrier{};
+      std::memcpy(&barrier, &packet, sizeof(barrier));
+      completion = barrier.completion_signal;
+      break;
+    }
+    case HSA_PACKET_TYPE_BARRIER_OR: {
+      hsa_barrier_or_packet_t barrier{};
+      std::memcpy(&barrier, &packet, sizeof(barrier));
+      completion = barrier.completion_signal;
+      break;
+    }
+    default:
       return;
-    const auto found = signals_.find(packet.completion_signal.handle);
+    }
+    const std::unordered_map<uint64_t, Signal>::iterator found = signals_.find(completion.handle);
     if (found != signals_.end() && !found->second.pending)
-      core_.hsa_signal_store_screlease_fn(packet.completion_signal, -1);
+      core_.hsa_signal_store_screlease_fn(completion, -1);
   }
 
   void reject_packet_locked(const hsa_kernel_dispatch_packet_t &packet, std::string_view message) {
     fail_locked(RuntimeStatus::InvalidFacts, message);
-    fail_dispatch_completion_locked(packet);
+    fail_packet_completion_locked(packet);
   }
 
   void release_unsubmitted_locked(Launch &launch) {
@@ -650,16 +670,54 @@ private:
     std::memcpy(&packet, packets, sizeof(packet));
     const uint16_t type = packet.header & 0xff;
     if (count == 1 && (type == HSA_PACKET_TYPE_BARRIER_AND || type == HSA_PACKET_TYPE_BARRIER_OR)) {
+      {
+        std::lock_guard lock(mutex_);
+        if (status_ != RuntimeStatus::Success) {
+          fail_packet_completion_locked(packet);
+          return;
+        }
+      }
       writer(packets, count);
       return;
     }
     if (count != 1 || type != HSA_PACKET_TYPE_KERNEL_DISPATCH) {
-      std::lock_guard lock(mutex_);
-      fail_locked(RuntimeStatus::InvalidFacts, "only individual kernel dispatches are admitted");
       const auto *bytes = static_cast<const uint8_t *>(packets);
+      bool rejected = false;
+      {
+        std::lock_guard lock(mutex_);
+        rejected = status_ != RuntimeStatus::Success;
+        for (uint64_t index = 0; index < count; ++index) {
+          std::memcpy(&packet, bytes + index * sizeof(packet), sizeof(packet));
+          const uint16_t packet_type = packet.header & 0xff;
+          if (packet_type != HSA_PACKET_TYPE_BARRIER_AND &&
+              packet_type != HSA_PACKET_TYPE_BARRIER_OR) {
+            if (!rejected) {
+              fail_locked(RuntimeStatus::InvalidFacts,
+                          "only individual kernel dispatches are admitted");
+              rejected = true;
+            }
+          }
+        }
+        if (rejected) {
+          // A GPU barrier waits for dependency value zero; a dispatch failure
+          // value of -1 cannot satisfy it. Fail the discarded barriers too,
+          // while preserving signals owned by already pending dispatches.
+          for (uint64_t index = 0; index < count; ++index) {
+            std::memcpy(&packet, bytes + index * sizeof(packet), sizeof(packet));
+            fail_packet_completion_locked(packet);
+          }
+        }
+      }
+      if (rejected)
+        return;
+      // A barrier-only batch retains the individual-barrier passthrough
+      // behavior. Call downstream tools outside the runtime mutex.
       for (uint64_t index = 0; index < count; ++index) {
-        std::memcpy(&packet, bytes + index * sizeof(packet), sizeof(packet));
-        fail_dispatch_completion_locked(packet);
+        const uint8_t *current = bytes + index * sizeof(packet);
+        std::memcpy(&packet, current, sizeof(packet));
+        const uint16_t packet_type = packet.header & 0xff;
+        if (packet_type == HSA_PACKET_TYPE_BARRIER_AND || packet_type == HSA_PACKET_TYPE_BARRIER_OR)
+          writer(current, 1);
       }
       return;
     }
@@ -674,7 +732,8 @@ private:
       std::unique_ptr<Launch, decltype(release)> rollback(launch.get(), release);
       // Admit the binding, nonoverlap, dedicated signal, and bounded launch
       // before allocating resources or exposing any packet to HSA.
-      const auto signal = signals_.find(packet.completion_signal.handle);
+      const std::unordered_map<uint64_t, Signal>::iterator signal =
+          signals_.find(packet.completion_signal.handle);
       if (packet.setup != 1 || closed_ || status_ != RuntimeStatus::Success ||
           statistics_.submitted >= CaptureLimits{}.executions || !module_ ||
           packet.kernel_object != module_->kernel_object || active_gpu_ ||
@@ -689,7 +748,7 @@ private:
       const LaunchDimensions dimensions{
           {packet.grid_size_x, packet.grid_size_y, packet.grid_size_z},
           {packet.workgroup_size_x, packet.workgroup_size_y, packet.workgroup_size_z}};
-      const auto layout =
+      const FailureOr<LaunchLayout> layout =
           plan_launch(facts, dimensions, packet.group_segment_size, packet.private_segment_size);
       if (layout.failed() ||
           !host_arguments_locked(packet.kernarg_address, facts.entry.original_kernarg_bytes)) {
@@ -753,16 +812,16 @@ private:
         return;
       }
       const uint64_t serial = statistics_.submitted + 1;
-      const auto transport = initialize_transport(facts, dimensions, layout.value().group_bytes,
-                                                  layout.value().private_bytes, serial,
-                                                  reinterpret_cast<uint64_t>(slot.memory));
+      const FailureOr<TransportImage> transport = initialize_transport(
+          facts, dimensions, layout.value().group_bytes, layout.value().private_bytes, serial,
+          reinterpret_cast<uint64_t>(slot.memory));
       if (transport.failed()) {
         reject_packet_locked(packet, "canonical transport initialization failed before submission");
         return;
       }
       std::memcpy(slot.memory, transport.value().report.data(), transport.value().report.size());
       std::memcpy(launch->context, transport.value().context.data(), kContextBytes);
-      auto wrapper =
+      std::span<uint8_t> wrapper =
           std::span(static_cast<uint8_t *>(launch->wrapper), layout.value().wrapper_bytes);
       const std::optional<rocjitsu::KernargExtensionLayout> kernarg =
           rocjitsu::make_kernarg_extension_layout(facts.entry.original_kernarg_bytes,
@@ -1039,8 +1098,8 @@ bool install(HsaApiTable *table) {
       table->core_->version.minor_id < sizeof(CoreApiTable) ||
       table->amd_ext_->version.minor_id < kAmdTablePrefixBytes)
     return false;
-  const auto &core = *table->core_;
-  const auto &amd = *table->amd_ext_;
+  const CoreApiTable &core = *table->core_;
+  const AmdExtTable &amd = *table->amd_ext_;
   if (!core.hsa_shut_down_fn || !core.hsa_code_object_reader_create_from_memory_fn ||
       !core.hsa_code_object_reader_destroy_fn || !core.hsa_executable_load_agent_code_object_fn ||
       !core.hsa_executable_freeze_fn || !core.hsa_executable_destroy_fn ||
@@ -1062,7 +1121,7 @@ bool install(HsaApiTable *table) {
     return false;
   }
   runtime = std::make_unique<Runtime>(core, amd, artifacts, capture);
-  auto &patched = *table->core_;
+  CoreApiTable &patched = *table->core_;
   patched.hsa_code_object_reader_create_from_memory_fn = reader_memory;
   patched.hsa_code_object_reader_create_from_file_fn = reader_file;
   patched.hsa_code_object_reader_destroy_fn = reader_destroy;
@@ -1117,8 +1176,8 @@ extern "C" RJ_API_EXPORT void OnUnload() noexcept {
   if (installed_core && installed_amd) {
     // ROCR owns these tables through OnUnload. Restore only our installed
     // functions, without replacing hooks another tool installed after ours.
-    auto &core = *installed_core;
-    const auto &saved = runtime->core();
+    CoreApiTable &core = *installed_core;
+    const CoreApiTable &saved = runtime->core();
 #define RJ_CONSAN_RESTORE_HOOK(table, original, field, hook)                                       \
   do {                                                                                             \
     if ((table).field == (hook))                                                                   \
@@ -1139,8 +1198,8 @@ extern "C" RJ_API_EXPORT void OnUnload() noexcept {
     RJ_CONSAN_RESTORE_HOOK(core, saved, hsa_signal_create_fn, signal_create);
     RJ_CONSAN_RESTORE_HOOK(core, saved, hsa_signal_destroy_fn, signal_destroy);
     RJ_CONSAN_RESTORE_HOOK(core, saved, hsa_shut_down_fn, shutdown);
-    auto &amd = *installed_amd;
-    const auto &original = runtime->amd();
+    AmdExtTable &amd = *installed_amd;
+    const AmdExtTable &original = runtime->amd();
     RJ_CONSAN_RESTORE_HOOK(amd, original, hsa_amd_profiling_set_profiler_enabled_fn, profiling);
     RJ_CONSAN_RESTORE_HOOK(amd, original, hsa_amd_queue_intercept_create_fn, intercept_create);
     RJ_CONSAN_RESTORE_HOOK(amd, original, hsa_amd_queue_intercept_register_fn, intercept_register);

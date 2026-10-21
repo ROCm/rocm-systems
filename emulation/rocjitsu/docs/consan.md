@@ -100,8 +100,11 @@ not synchronize guest LDS accesses.
 
 Applications integrating the plugin must check completion values and finish
 status. When the plugin rejects a tracked dispatch before submission, it records
-failure and stores `-1` to its non-null application completion signal. This
-releases a waiter for a value less than `1`, but does not mean that the kernel
+failure and stores `-1` to its non-null application completion signal. Rejected
+batches also notify tracked AND/OR barrier completions with `-1`, preserving
+signals owned by pending dispatches. Later barriers receive the same failure
+notification once the runtime has failed. Healthy barrier-only batches pass
+through. This failure notification releases a waiter for a value less than `1`, but does not mean that the kernel
 ran. Accept only exactly `0` as normal completion, and check it before reading
 kernel output. A timeout or any other completion value is an execution failure.
 The [example runner](../tests/dbi/consan_hsa_runner.cpp) enforces these checks.
@@ -142,6 +145,11 @@ Preparation accepts a limited instruction/access subset without relevant guest
 synchronization; unsupported forms, barriers, and atomics are rejected. Exact
 conditions are defined by [compiler qualification](../lib/rocjitsu/src/rocjitsu/code/patch/consan/lds_race.cpp)
 and [runtime admission](../lib/rocjitsu/src/rocjitsu/hooks/consan/hsa_plugin.cpp).
+
+The input code object must contain exactly one kernel, matching the requested
+entry. Selecting an entry does not exclude sibling kernels from this requirement;
+provide a code object containing only the selected kernel.
+
 Recording is bounded and does not provide a full execution history. Broader
 access forms, synchronization analysis, and application integration require
 extensions.
@@ -289,9 +297,11 @@ Other normal nonzero analyzer statuses indicate input/output failures. See the
 [analysis results](../lib/rocjitsu/src/rocjitsu/code/consan/analysis/lds_race.h)
 for option, status, and result details.
 
-Entry names must be valid UTF-8 for JSON output. The analyzer rejects malformed
-names with input-error exit 2 before writing JSON; binary capture retains the
-original name bytes. ASCII and valid UTF-8 names keep their original spelling.
+Entry names must be valid UTF-8 for JSON output. Preparation rejects malformed
+names before publishing an artifact. The analyzer checks saved captures and
+rejects malformed names with input-error exit 2 before writing JSON. Binary
+capture retains the original name bytes. ASCII and valid UTF-8 names keep their
+original spelling.
 
 ## Extending ConSan
 

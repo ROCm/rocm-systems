@@ -4,6 +4,7 @@
 """Exercise bounded input and expected filesystem failures at the CLI boundary."""
 
 import json
+import os
 from pathlib import Path
 import resource
 import signal
@@ -90,6 +91,32 @@ def main():
         assert result.returncode == 2, record
         assert 'unsupported concrete native LDS target' in result.stderr, record
         assert not destination.exists(), record
+    original_name = b'lds_producer_consumer'
+    invalid_name = b'\xff' + original_name[1:]
+    image = fixture.read_bytes()
+    assert image.count(original_name) >= 3
+    invalid = directory / 'invalid-entry.hsaco'
+    invalid.write_bytes(image.replace(original_name, invalid_name))
+    destination = directory / 'invalid-entry-output'
+    command = [
+        str(prepare),
+        str(invalid),
+        'gfx1100',
+        os.fsdecode(invalid_name),
+        str(destination),
+    ]
+    result = subprocess.run(
+        command, capture_output=True, text=True, timeout=60, check=False
+    )
+    record = {
+        'command': command,
+        'exit_status': result.returncode,
+        'stderr': result.stderr,
+    }
+    (directory / 'invalid-entry.json').write_text(json.dumps(record, indent=2) + '\n')
+    assert result.returncode == 2, record
+    assert 'entry name is not valid UTF-8 for JSON output' in result.stderr, record
+    assert not destination.exists(), record
     for name, limited in (('normal-write', False), ('limited-write', True)):
         destination = directory / name
         command = [

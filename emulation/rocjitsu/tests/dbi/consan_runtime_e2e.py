@@ -40,6 +40,10 @@ CASES = (
     'profiling',
     'reused-signal',
     'missing-statistics',
+    'batch-barrier-and',
+    'batch-barrier-or',
+    'late-barrier-and',
+    'late-barrier-or',
 )
 
 
@@ -133,6 +137,10 @@ class Driver:
             'profiling': 'disjoint',
             'reused-signal': 'disjoint',
             'missing-statistics': 'disjoint',
+            'batch-barrier-and': 'disjoint',
+            'batch-barrier-or': 'disjoint',
+            'late-barrier-and': 'disjoint',
+            'late-barrier-or': 'disjoint',
         }.get(args.case, args.case)
         if args.fixture_kind == 'legacy-assembly':
             fixture = args.fixtures / f'{fixture_name}.hsaco'
@@ -193,6 +201,18 @@ class Driver:
             'bad-geometry': ['--bad-geometry'],
             'profiling': ['--profiling'],
             'reused-signal': ['--reuse-signal'],
+            'batch-barrier-and': ['--batch-barrier-and'],
+            'batch-barrier-or': ['--batch-barrier-or'],
+            'late-barrier-and': [
+                '--batch-barrier-and',
+                '--separate-barrier',
+                '--bad-geometry',
+            ],
+            'late-barrier-or': [
+                '--batch-barrier-or',
+                '--separate-barrier',
+                '--bad-geometry',
+            ],
         }.get(args.case, [])
         if args.test_statistics:
             options.append('--test-statistics')
@@ -213,7 +233,19 @@ class Driver:
         expected_status = (
             20
             if args.case == 'wrong-artifact'
-            else (21 if args.case in ('bad-geometry', 'reused-signal') else 0)
+            else (
+                21
+                if args.case
+                in (
+                    'bad-geometry',
+                    'reused-signal',
+                    'batch-barrier-and',
+                    'batch-barrier-or',
+                    'late-barrier-and',
+                    'late-barrier-or',
+                )
+                else 0
+            )
         )
         if args.case == 'wrong-artifact':
             # A different, valid original image safely exercises exact matching.
@@ -229,6 +261,8 @@ class Driver:
         statistics = json.loads(output.splitlines()[-1])
         assert statistics['app_status'] == expected_status
         if expected_status:
+            if args.case.startswith(('batch-barrier-', 'late-barrier-')):
+                assert statistics['barrier_completion'] == -1
             count = 1 if args.case == 'reused-signal' else 0
             if args.test_statistics:
                 assert statistics['submitted'] == count

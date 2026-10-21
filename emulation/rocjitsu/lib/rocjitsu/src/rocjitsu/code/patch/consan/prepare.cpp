@@ -13,6 +13,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/target_registry.h"
+#include "util/utf8.h"
 
 #include <algorithm>
 #include <cstring>
@@ -228,6 +229,12 @@ FailureOr<PreparedArtifact> prepare(std::span<const uint8_t> original, const Tar
   const FailureOr<InputProgram> program = build_input_program(original, target, entry, error);
   if (program.failed())
     return Result::failure();
+  if (!util::is_valid_utf8(program.value().kernel.kernel_name)) {
+    error = {.code = InputErrorCode::UnsupportedEntry,
+             .text_offset = {},
+             .message = "entry name is not valid UTF-8 for JSON output"};
+    return Result::failure();
+  }
   FailureOr<PreparedArtifact> artifact = lower(program.value(), error);
   if (artifact.failed() || validate_prepared(original, artifact.value(), error).failed())
     return Result::failure();
