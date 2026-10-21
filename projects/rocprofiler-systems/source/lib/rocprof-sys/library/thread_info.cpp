@@ -5,6 +5,7 @@
 #include "core/common.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
+#include "core/control/clocks/timeline.hpp"
 #include "core/state.hpp"
 #include "core/utility.hpp"
 #include "library/causal/delay.hpp"
@@ -13,7 +14,6 @@
 #include "library/thread_data_growth.hpp"
 
 #include <timemory/backends/threading.hpp>
-#include <timemory/components/timing/backends.hpp>
 #include <timemory/process/threading.hpp>
 
 #include "logger/debug.hpp"
@@ -139,7 +139,7 @@ grow_data(std::int64_t _tid)
     // and _tid >= max_supported_threads returns above. Retained for future use.
     if(_tid >= peak_num_threads)
     {
-        auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+        auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
         const auto_lock_t _lk{ type_mutex<data_growth>() };
 
         // check again after locking
@@ -202,7 +202,7 @@ thread_info::init(bool _offset)
         _info                 = thread_info{};
         _info->is_offset      = threading::offset_this_id();
         _info->index_data     = init_index_data(_tid, _info->is_offset);
-        _info->lifetime.first = tim::get_clock_real_now<std::uint64_t, std::nano>();
+        _info->lifetime.first = control::clocks::timeline_ns();
 
         const auto _sequent_tid = _info->index_data->sequent_value;
         _info->causal_count     = (!_info->is_offset && _sequent_tid < peak_num_threads)

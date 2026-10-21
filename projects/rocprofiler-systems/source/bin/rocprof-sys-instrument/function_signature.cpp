@@ -68,7 +68,7 @@ function_signature::get(bool _all, bool _save) const
     }
     if(m_loop)
     {
-        auto _row_col_str = [](unsigned long _row, unsigned long _col) {
+        auto const _row_col_str = [](unsigned long _row, unsigned long _col) {
             std::stringstream _ss{};
             if(_row == 0 && _col == 0)
             {
@@ -85,8 +85,8 @@ function_signature::get(bool _all, bool _save) const
             return _ss.str();
         };
 
-        auto _rc1 = _row_col_str(m_row.first, m_col.first);
-        auto _rc2 = _row_col_str(m_row.second, m_col.second);
+        auto const _rc1 = _row_col_str(m_row.first, m_col.first);
+        auto const _rc2 = _row_col_str(m_row.second, m_col.second);
         if(m_info_end && !_rc1.empty() && !_rc2.empty() && _rc1 != _rc2)
         {
             ss << " [" << _rc1 << "-" << _rc2 << "]";
@@ -146,7 +146,7 @@ function_signature::get_coverage(bool _basic_block) const
         {
             ss << " [" << m_file << "]";
         }
-        auto _row_col_str = [](unsigned long _row, unsigned long _col) {
+        auto const _row_col_str = [](unsigned long _row, unsigned long _col) {
             std::stringstream _ss{};
             if(_row == 0 && _col == 0)
             {
@@ -163,8 +163,8 @@ function_signature::get_coverage(bool _basic_block) const
             return _ss.str();
         };
 
-        auto _rc1 = _row_col_str(m_row.first, m_col.first);
-        auto _rc2 = _row_col_str(m_row.second, m_col.second);
+        auto const _rc1 = _row_col_str(m_row.first, m_col.first);
+        auto const _rc2 = _row_col_str(m_row.second, m_col.second);
         if(m_info_end && !_rc1.empty() && !_rc2.empty() && _rc1 != _rc2)
         {
             ss << " [" << _rc1 << "-" << _rc2 << "]";

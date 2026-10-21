@@ -22,6 +22,7 @@
 #include "gin/gin_anvil_sdma_factory.h"
 #include <hip/hip_runtime.h>
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -40,6 +41,10 @@ static std::set<struct ncclComm*> ginAnvilConnCheckedComms;
 struct ginAnvilInitCtx {
   struct ncclComm* comm;
 };
+
+// Live ginAnvilInitCtx allocations. Only observable surface a test has for the
+// finalize path, which is otherwise reached through ncclCommDestroy.
+static std::atomic<int> ginAnvilLiveInitCtxs{0};
 
 struct ginAnvilCollCtx {
   int nranks;
@@ -142,11 +147,16 @@ void ncclGinAnvilPluginTestResetHostState(void) {
   ginAnvilConnCheckedComms.clear();
 }
 
+int ncclGinAnvilPluginTestLiveInitCtxCount(void) {
+  return ginAnvilLiveInitCtxs.load(std::memory_order_relaxed);
+}
+
 static ncclResult_t ginAnvilInit(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction) {
   const char* gin_type = getenv("NCCL_GIN_TYPE");
   if (gin_type && atoi(gin_type) != NCCL_NET_DEVICE_GIN_ANVIL_SDMA) return ncclInternalError;
   if (gin_anvil_sdma_probe() <= 0) return ncclInternalError;
   auto* ictx = new ginAnvilInitCtx{};
+  ginAnvilLiveInitCtxs.fetch_add(1, std::memory_order_relaxed);
   *ctx = ictx;
   return ncclSuccess;
 }
@@ -225,13 +235,6 @@ static uint32_t ginAnvilFusedSignalFromEnv() {
   return atoi(e) != 0 ? 1u : 0u;
 }
 
-static uint32_t ginAnvilIpcAgentFenceFromEnv() {
-  const char* e = getenv("NCCL_GIN_ANVIL_SDMA_IPC_AGENT_FENCE");
-  if (!e || !e[0]) return 0;
-  if (e[0] == '0' && e[1] == '\0') return 0;
-  return atoi(e) != 0 ? 1u : 0u;
-}
-
 static uint32_t ginAnvilIpcSignalPeerFromEnv() {
   const char* e = getenv("NCCL_GIN_ANVIL_SDMA_SIGNAL_IPC");
   if (!e || !e[0]) return 0;
@@ -291,6 +294,15 @@ static ncclResult_t ginAnvilCloseListen(void* listenComm) {
 static ncclResult_t ginAnvilCloseColl(void* collComm) {
   ginAnvilCollCtx* cctx = (ginAnvilCollCtx*)collComm;
   if (cctx) {
+    // Erase here, not in finalize: closeColl also runs on backend-drop paths
+    // (plugin/gin.cc) that never reach plugin finalize, and a recycled
+    // ncclComm* would otherwise skip the gate. Host finalize keeps the backend
+    // records for ncclGinFinalize (AICOMRCCL-2739), so finalize still runs for
+    // a live connected backend and is not the only erase site.
+    if (cctx->comm) {
+      std::lock_guard<std::mutex> lock(pluginMutex);
+      ginAnvilConnCheckedComms.erase(cctx->comm);
+    }
     if (cctx->sdma) gin_anvil_sdma_destroy(cctx->sdma);
     delete cctx;
   }
@@ -298,12 +310,8 @@ static ncclResult_t ginAnvilCloseColl(void* collComm) {
 }
 
 static ncclResult_t ginAnvilFinalize(void* ctx) {
-  ginAnvilInitCtx* ictx = (ginAnvilInitCtx*)ctx;
-  if (ictx && ictx->comm) {
-    std::lock_guard<std::mutex> lock(pluginMutex);
-    ginAnvilConnCheckedComms.erase(ictx->comm);
-  }
-  delete ictx;
+  if (ctx) ginAnvilLiveInitCtxs.fetch_sub(1, std::memory_order_relaxed);
+  delete (ginAnvilInitCtx*)ctx;
   return ncclSuccess;
 }
 
@@ -451,7 +459,7 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
   const int nRanks = ctx->nRanks;
   const int lsaTeamSize = devr->lsaSize;
   const int rank = ctx->rank;
-  constexpr int kMaxConnCheckRanks = NCCL_GIN_ANVIL_IPC_MAX_RANKS;
+  constexpr int kMaxConnCheckRanks = gin_anvil::conn_check::kMaxConnCheckHostRanks;
   if (nRanks < 2) return ncclSuccess;
   if (nRanks > kMaxConnCheckRanks) {
     WARN("GIN anvil-sdma: conn-check supports at most %d ranks (got %d)", kMaxConnCheckRanks, nRanks);
@@ -590,6 +598,9 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
   if (const char* injEnv = getenv("NCCL_GIN_ANVIL_SDMA_CONN_INJECT_FAIL_RANK")) injRank = atoi(injEnv);
 #endif
 
+  int lastLocalMissing = 0;
+  int lastGlobalMissing = 0;
+  bool lastLocalFail = false;
   for (int attempt = 0; attempt < MAX_ATTEMPTS && !ok; attempt++) {
     unsigned long long stamp = 0xC0FFEE00ULL + (unsigned long long)(attempt + 1);
     bool localFail = false;
@@ -598,6 +609,10 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
     auto failAt = [&](GinAnvilConnCheckStep step) {
       localFail = true;
       failedStep = step;
+    };
+    auto warnStep = [&](GinAnvilConnCheckStep step) {
+      WARN("GIN anvil-sdma: conn-check step '%s' failed (rank %d, attempt %d/%d)",
+           ginAnvilConnCheckStepName(step), rank, attempt + 1, MAX_ATTEMPTS);
     };
 
     if (rank == injRank) {
@@ -612,8 +627,7 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
 
     ret = lsaBarrier(0x51611);
     if (ret != ncclSuccess) {
-      WARN("GIN anvil-sdma: conn-check step '%s' failed (rank %d, attempt %d/%d)",
-           ginAnvilConnCheckStepName(kConnCheckBarrierAfterWrite), rank, attempt + 1, MAX_ATTEMPTS);
+      warnStep(kConnCheckBarrierAfterWrite);
       goto cleanup;
     }
 
@@ -642,20 +656,18 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
     gathered[lsaTeamRank] = localMissing;
     ret = lsaAllgatherInts(gathered);
     if (ret != ncclSuccess) {
-      WARN("GIN anvil-sdma: conn-check step '%s' failed (rank %d, attempt %d/%d)",
-           ginAnvilConnCheckStepName(kConnCheckAllgather), rank, attempt + 1, MAX_ATTEMPTS);
+      warnStep(kConnCheckAllgather);
       goto cleanup;
     }
-    if (localFail) {
-      WARN("GIN anvil-sdma: conn-check step '%s' failed (rank %d, attempt %d/%d)",
-           ginAnvilConnCheckStepName(failedStep), rank, attempt + 1, MAX_ATTEMPTS);
-    }
+    if (localFail) warnStep(failedStep);
     int globalMissing = 0;
     for (int r = 0; r < lsaTeamSize; r++) globalMissing += gathered[r];
+    lastLocalMissing = localMissing;
+    lastGlobalMissing = globalMissing;
+    lastLocalFail = localFail;
     ret = lsaBarrier(0x51612);
     if (ret != ncclSuccess) {
-      WARN("GIN anvil-sdma: conn-check step '%s' failed (rank %d, attempt %d/%d)",
-           ginAnvilConnCheckStepName(kConnCheckBarrierAfterAllgather), rank, attempt + 1, MAX_ATTEMPTS);
+      warnStep(kConnCheckBarrierAfterAllgather);
       goto cleanup;
     }
     if (globalMissing == 0 && !localFail) {
@@ -663,8 +675,11 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
       break;
     }
     if (rank == 0) {
-      WARN("GIN anvil-sdma: LSA signal connectivity attempt %d/%d incomplete (global missing increments=%d); retrying",
-           attempt + 1, MAX_ATTEMPTS, globalMissing);
+      const char* missingKind =
+          (!localFail && localMissing == 0 && globalMissing > 0) ? "peer-reported" : "global";
+      WARN("GIN anvil-sdma: LSA signal connectivity attempt %d/%d incomplete "
+           "(%s missing increments=%d); retrying",
+           attempt + 1, MAX_ATTEMPTS, missingKind, globalMissing);
     }
   }
 
@@ -677,9 +692,24 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
              rank, x);
       }
     }
-    WARN("GIN anvil-sdma: LSA signal connectivity gate failed after %d attempts on rank %d (local missing=%d, "
-         "last step='%s'). Re-launch the job, or set NCCL_GIN_ANVIL_SDMA_CONN_CHECK=0 to bypass.",
-         MAX_ATTEMPTS, rank, localMissing, ginAnvilConnCheckStepName(failedStep));
+    if (!lastLocalFail && lastLocalMissing == 0 && lastGlobalMissing > 0) {
+      WARN("GIN anvil-sdma: LSA signal connectivity gate failed after %d attempts on rank %d "
+           "(peer-reported missing increments=%d). Re-launch the job, or set "
+           "NCCL_GIN_ANVIL_SDMA_CONN_CHECK=0 to bypass.",
+           MAX_ATTEMPTS, rank, lastGlobalMissing);
+    } else if (lastLocalFail) {
+      // localMissing is lsaTeamSize here only so the allgather aborts the team.
+      // That sentinel is not a measured missing-stamp count.
+      WARN("GIN anvil-sdma: LSA signal connectivity gate failed after %d attempts on rank %d "
+           "(local step failure, last step='%s'). Re-launch the job, or set "
+           "NCCL_GIN_ANVIL_SDMA_CONN_CHECK=0 to bypass.",
+           MAX_ATTEMPTS, rank, ginAnvilConnCheckStepName(failedStep));
+    } else {
+      WARN("GIN anvil-sdma: LSA signal connectivity gate failed after %d attempts on rank %d "
+           "(local missing=%d, last step='%s'). Re-launch the job, or set "
+           "NCCL_GIN_ANVIL_SDMA_CONN_CHECK=0 to bypass.",
+           MAX_ATTEMPTS, rank, lastLocalMissing, ginAnvilConnCheckStepName(failedStep));
+    }
     ret = ncclSystemError;
   } else {
     INFO(NCCL_INIT, "GIN anvil-sdma: LSA signal connectivity OK (rank %d, nRanks %d)", rank, nRanks);
@@ -876,7 +906,6 @@ static ncclResult_t ginAnvilCreateContext(void* collComm, ncclGinConfig_t* confi
                                                              : (uint32_t)thr;
   }
   ctx->gpuCtxHost.fusedSdmaSignal = ginAnvilFusedSignalFromEnv();
-  ctx->gpuCtxHost.ipcAgentFence = ginAnvilIpcAgentFenceFromEnv();
   ctx->gpuCtxHost.ipcSignalPeer = ginAnvilIpcSignalPeerFromEnv();
   ctx->gpuCtxHost.signals = nullptr;
   ctx->gpuCtxHost.signal_remote_addrs = nullptr;
@@ -915,10 +944,10 @@ static ncclResult_t ginAnvilCreateContext(void* collComm, ncclGinConfig_t* confi
   *outGinCtx = ctx;
   *outDevHandle = ctx->devHandle;
   INFO(NCCL_INIT,
-       "GIN anvil-sdma: context created (v%d, %d signals, %d counters, signalSlot=%d, sdmaThreshold=%u, "
+       "GIN anvil-sdma: context created (v%d, %d signals, %d counters, sdmaThreshold=%u, %d channels, "
        "spread=%d, fusedSignal=%u)",
-       NCCL_GIN_ANVIL_SDMA_NET_VERSION, config->nSignals, config->nCounters, ctx->signalSlot,
-       ctx->gpuCtxHost.sdmaThreshold, ctx->gpuCtxHost.sdmaChannelStride, ctx->gpuCtxHost.fusedSdmaSignal);
+       NCCL_GIN_ANVIL_SDMA_NET_VERSION, config->nSignals, config->nCounters, ctx->gpuCtxHost.sdmaThreshold,
+       ctx->numChannels, ctx->gpuCtxHost.sdmaChannelStride, ctx->gpuCtxHost.fusedSdmaSignal);
   return ncclSuccess;
 
 fail:

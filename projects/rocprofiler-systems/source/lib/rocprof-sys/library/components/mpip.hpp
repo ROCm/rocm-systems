@@ -98,7 +98,7 @@ struct mpip_handle : base<mpip_handle<Toolset, Tag>, void>
 
     void stop()
     {
-        auto idx = --get_tool_count();
+        auto const idx = --get_tool_count();
         if(get_tool_instance().get())
         {
             get_tool_instance()->stop();
@@ -166,7 +166,7 @@ rocprofsys::component::activate_mpip()
         _handle = std::make_shared<handle_t>();
         _handle->start();
 
-        auto cleanup_functor = [=]() {
+        auto const cleanup_functor = [=]() {
             if(_handle)
             {
                 _handle->stop();
@@ -739,7 +739,7 @@ rocprofsys::component::configure_mpip(const std::set<std::string>& permit,
         mpip_gotcha_t::get_reject_list() = [reject]() {
             auto _reject = reject;
             // check environment
-            auto reject_list = rocprofsys::get_env<std::string>(
+            auto const reject_list = rocprofsys::get_env<std::string>(
                 TIMEMORY_SETTINGS_PREFIX "MPIP_REJECT_LIST", "");
             // add environment setting
             for(const auto& itr : rocprofsys::delimit(reject_list))
@@ -753,7 +753,7 @@ rocprofsys::component::configure_mpip(const std::set<std::string>& permit,
         mpip_gotcha_t::get_permit_list() = [permit]() {
             auto _permit = permit;
             // check environment
-            auto permit_list = rocprofsys::get_env<std::string>(
+            auto const permit_list = rocprofsys::get_env<std::string>(
                 TIMEMORY_SETTINGS_PREFIX "MPIP_PERMIT_LIST", "");
             // add environment setting
             for(const auto& itr : rocprofsys::delimit(permit_list))

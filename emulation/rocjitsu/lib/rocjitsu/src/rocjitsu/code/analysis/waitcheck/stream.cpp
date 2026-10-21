@@ -23,7 +23,8 @@ bool has_committed_generations(rj_code_arch_t arch) {
 
 std::optional<RegisterRef> first_intersection(const RegisterSet &a, const RegisterSet &b) {
   std::optional<RegisterRef> first;
-  (a & b).for_each([&](RegisterRef ref) {
+  // Keep the optional assignment together with RegisterRef construction.
+  (a & b).for_each([&](RegisterRef ref) __attribute__((always_inline)) {
     if (!first)
       first = ref;
   });
@@ -204,7 +205,7 @@ RegisterSet registers_for_event(const ClassifiedEvent &event, const RegisterEffe
 
 bool ordered_waw(const PendingEvent &event, std::span<const ClassifiedEvent> current,
                  rj_code_arch_t arch) {
-  if (!has_ordered_vmem_writeback(arch))
+  if (!amdgpu::has_ordered_vmem_writeback(arch))
     return false;
   if (event.kind == WaitEventKind::FlatLoad) {
     if (event.counter != WaitCounterKind::Load)
@@ -403,7 +404,7 @@ util::FailureOr<WaitcheckStreamReport> analyze_stream(std::span<const uint32_t> 
   if ((options.wave_size != 32 && options.wave_size != 64) ||
       (has_committed_generations(arch) && options.wave_size != 64))
     return emit_error.emit() << "invalid waitcheck wave size";
-  if (options.expert_scheduling && !waitcheck_detail::supports_expert_scheduling(arch))
+  if (options.expert_scheduling && !amdgpu::supports_expert_scheduling(arch))
     return emit_error.emit() << "expert scheduling is unavailable on this architecture";
   WaitcheckStreamReport report;
   StreamAnalyzer analyzer{arch, options, report};

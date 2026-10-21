@@ -7,6 +7,8 @@
 #pragma once
 
 #include <hip/hip_runtime.h>
+#include <algorithm>
+#include <iterator>
 #include <map>
 #include <set>
 #include <unordered_map>
@@ -14,6 +16,7 @@
 #include <vector>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <atomic>
 #include <mutex>
 #include <shared_mutex>
@@ -22,6 +25,8 @@
 
 #include "hrr/hrr_api_args.h"  // for HRR_API_COUNT, hrr_api_id_t
 #include "hrr_region_map.h"    // external region annotations (regions/*.hrrr)
+#include "hrr_replay_limits.h" // bounds on archive-driven waits and retries
+#include "hrr_jit_options.h"   // which JIT options carry a pointer
 
 // Whether a replayed H2D blob restore must be drained before subsequent
 // replay work. Draining is skipped while a stream graph capture is active,
@@ -46,6 +51,73 @@ inline bool hrr_zero_init_needs_drain(bool zero_init_enabled,
                                       bool in_graph_capture) {
     return zero_init_enabled && !in_graph_capture;
 }
+
+// ---- Capture-address placement (DESIGN.md, "GPU Allocator Address
+// Non-Determinism"). Half-open [base, end).
+struct HrrVaRange { uint64_t base = 0, end = 0; };
+
+// The ranges to hold before hipInit: every recorded allocation rounded out to
+// `page`, minus every one overlapping the pages of an allocation that holds an
+// address in `exported` (IPC refuses VMM memory, and an address can be reused),
+// merged where they overlap or touch.
+inline std::vector<HrrVaRange> hrr_place_plan(std::vector<HrrVaRange> allocs,
+                                              const std::vector<uint64_t>& exported,
+                                              uint64_t page = 4096) {
+    std::sort(allocs.begin(), allocs.end(),
+              [](const HrrVaRange& a, const HrrVaRange& b) { return a.base < b.base; });
+    for (auto& r : allocs) {
+        r.base -= r.base % page;
+        r.end += (page - r.end % page) % page;
+    }
+    std::vector<HrrVaRange> ipc;
+    for (const auto& r : allocs)
+        if (std::any_of(exported.begin(), exported.end(),
+                        [&](uint64_t x) { return x >= r.base && x < r.end; }))
+            ipc.push_back(r);
+    std::vector<HrrVaRange> out;
+    for (const auto& r : allocs) {
+        if (r.base == 0 || r.end <= r.base || r.end > (1ull << 47)) continue;
+        if (std::any_of(ipc.begin(), ipc.end(),
+                        [&](const HrrVaRange& x) { return r.base < x.end && x.base < r.end; }))
+            continue;
+        if (!out.empty() && r.base <= out.back().end)
+            out.back().end = std::max(out.back().end, r.end);
+        else
+            out.push_back(r);
+    }
+    return out;
+}
+
+// The placeholders still standing, base -> end, kept merged.
+struct HrrHeldRanges {
+    std::map<uint64_t, uint64_t> r;
+    void add(uint64_t b, uint64_t e) {
+        auto it = r.upper_bound(b);
+        if (it != r.begin() && std::prev(it)->second >= b) {
+            --it;
+            b = it->first;
+            e = std::max(e, it->second);
+            it = r.erase(it);
+        }
+        while (it != r.end() && it->first <= e) {
+            e = std::max(e, it->second);
+            it = r.erase(it);
+        }
+        r[b] = e;
+    }
+    // Drop [b, e) if one held range covers all of it.
+    bool take(uint64_t b, uint64_t e) {
+        auto it = r.upper_bound(b);
+        if (it == r.begin()) return false;
+        --it;
+        const uint64_t hb = it->first, he = it->second;
+        if (e > he) return false;
+        r.erase(it);
+        if (hb < b) r[hb] = b;
+        if (e < he) r[e] = he;
+        return true;
+    }
+};
 
 // ---------------------------------------------------------------------------
 // PlaybackContext — central replay state
@@ -152,8 +224,26 @@ struct PlaybackContext {
     // value for the kernel launch with this 1-based ordinal. Used to diff the
     // captured vs replay pointer contract (e.g. a StreamK synchronizer base).
     size_t dump_ptrs_ordinal = 0;
+    // When non-zero, read back each pointer argument of the launch with this
+    // 1-based ordinal and report any 8-byte word that is a recorded address.
+    // A capture-time pointer in a buffer is one nothing translated, which is
+    // how a replay ends up faulting on an address from the other process.
+    size_t scan_args_ordinal = 0;
+    size_t scan_args_bytes   = 4096;  // per argument
+    // Report recorded addresses found inside replayed H2D payloads. Those
+    // bytes are restored verbatim, so a pointer among them reaches the GPU
+    // untranslated no matter how well kernel arguments are handled.
+    bool scan_h2d = false;
+    // Report every kernel that takes a pointer into host memory. Replay
+    // reallocates those buffers but cannot refill them: the application writes
+    // them with ordinary CPU stores, which no HIP call reports. A kernel
+    // reading one is reading data the archive never captured.
+    bool audit_host_args = false;
     bool verbose           = false;
     bool validate_d2h      = false;  // perform D2H validation against captured expected data
+    // The archive header has HRR_FILE_FLAG_PACKED_HOST_RECTS: the host blobs of
+    // the pitched copies hold only the copied rows, packed end to end.
+    bool packed_host_rects = false;
     std::string kernel_filter;
 
     // Lightweight replay tracing. These are intentionally separate from
@@ -195,7 +285,42 @@ struct PlaybackContext {
     // check this at the top of their event loop and exit immediately.
     // The spin-wait in dispatch_event also checks it to avoid deadlock when a
     // thread that was supposed to advance next_seq has already aborted.
-    std::atomic<bool> fatal_error{false};
+    // mutable: load_blob (const) sets it when a blob is refused.
+    mutable std::atomic<bool> fatal_error{false};
+
+    // Host memory held on behalf of the archive, against --max-host-bytes
+    // (hrr_replay_limits.h). A refused charge reports the site on stderr and
+    // returns false; the caller fails the API with hipErrorMemoryAllocation.
+    hrr::ByteBudget host_budget{hrr::kDefaultMaxHostBytes};
+    bool charge_host(uint64_t bytes, const char* what) {
+        if (host_budget.try_charge(bytes)) return true;
+        report_host_refusal(bytes, what);
+        return false;
+    }
+    // Say a charge was refused, and end the replay: the cap is a limit on the
+    // whole run, so --continue-on-error must not turn a refusal into a skipped
+    // event and carry on past it. Takes no charge, so a caller that already
+    // holds a refused ScopedCharge can report it without touching the budget.
+    void report_host_refusal(uint64_t bytes, const char* what) {
+        fprintf(stderr,
+                "[HRR] Fatal: %s needs %llu host bytes; %llu of the %llu-byte host "
+                "memory cap (--max-host-bytes) is already in use\n",
+                what, (unsigned long long)bytes, (unsigned long long)host_budget.used(),
+                (unsigned long long)host_budget.cap());
+        fatal_error.store(true, std::memory_order_release);
+    }
+
+    // Bounds on what the archive can make replay wait for (hrr_replay_limits.h).
+    // dispatch_event gives up on a sequence number that never becomes current
+    // after this many waits with no progress and no call in flight (a
+    // backstop: main refuses a gap or duplicate in the recorded sequence).
+    // A hipEventQuery/hipStreamQuery replay stops retrying hipErrorNotReady
+    // after max_query_attempts attempts (default: no limit).
+    uint64_t max_seq_waits      = hrr::kDefaultMaxSeqWaits;
+    // Calls in progress, ordered or not. A wait for the next turn does not
+    // count against max_seq_waits while this is non-zero.
+    std::atomic<int> calls_in_flight{0};
+    uint64_t max_query_attempts = hrr::kDefaultMaxQueryAttempts;
 
     // Stats — atomic for safe concurrent increment from replay threads.
     // total_kernel_ms is guarded by map_mutex (unique_lock) in the timing path.
@@ -215,6 +340,11 @@ struct PlaybackContext {
     // If d2h_attempted > 0 but d2h_pass == 0 && d2h_fail == 0, every check was
     // skipped — pointer translation or blob loading failed for all D2H events.
     std::atomic<size_t> d2h_attempted{0};
+    // Pinned host snapshot records written back, refused, and not applied
+    // because the launch was replayed into a graph capture.
+    std::atomic<size_t> host_snapshots_restored{0};
+    std::atomic<size_t> host_snapshots_refused{0};
+    std::atomic<size_t> host_snapshots_skipped{0};
 
     // Set true by note_d2h_fail when the running D2H-failure fraction crosses the
     // configured divergence-abort threshold. Distinguishes a clean "replay
@@ -239,10 +369,15 @@ struct PlaybackContext {
     // Guarded by map_mutex.
     std::unordered_map<uint64_t, void*> host_reg_bufs;
 
+    // APIs this replay refused to reproduce (UNREPLAYABLE_PLAYBACK_APIS), and
     // APIs whose recorded call had already failed at capture and failed the
-    // same way here. Printed in the summary: without it a reader would misread
-    // a faithfully reproduced failure as a replay error. Guarded by map_mutex.
-    std::map<std::string, int> reproduced_errors;  // api -> recorded hipError_t
+    // same way here. Each API is logged to stderr once, on first insertion
+    // (hrr_note_unreplayable / hrr_note_recorded_error); the maps de-duplicate
+    // those lines and are not printed in the summary. The first is what the
+    // replay could not do, the second is what it faithfully reproduced but a
+    // reader would otherwise misread as a replay error. Guarded by map_mutex.
+    std::map<std::string, std::string> unreplayable_apis;  // api -> reason
+    std::map<std::string, int>         reproduced_errors;  // api -> recorded hipError_t
 
     // VMM replay maps (guarded by map_mutex):
     //   vmm_handle_map: recorded hipMemGenericAllocationHandle_t (as u64) -> live handle
@@ -305,16 +440,24 @@ struct PlaybackContext {
     std::atomic<uint64_t> guard_blocks_relocated{0};
     std::atomic<uint64_t> guard_blind_max{0};  // largest unguarded tail seen
 
-    // VMM-backed allocations created for --guard-segments, keyed by the mapped
-    // base that was handed out. hipFree cannot release these, so the free path
+    // VMM-backed allocations created for --guard-segments or placement, keyed
+    // by the pointer that was handed out. hipFree cannot release these, so the free path
     // has to recognise them. Guarded by map_mutex.
     struct GuardAlloc {
         void*  va_base  = nullptr;  // reserved VA base (== mapped base)
         size_t reserved = 0;        // total reserved VA (mapped + guard)
         size_t mapped   = 0;        // mapped/backed bytes
         hipMemGenericAllocationHandle_t handle{};
+        bool   placed   = false;    // a placed allocation, not a guarded one
+        bool   async    = false;    // placed for hipMallocAsync
     };
     std::unordered_map<void*, GuardAlloc> guard_allocs;
+
+    // Capture-address placement. Placed allocations live in guard_allocs.
+    bool place = false;           // set by hrr_place_hold
+    std::mutex place_mutex;       // guards place_held
+    HrrHeldRanges place_held;
+    std::atomic<uint64_t> placed{0}, place_fell_back{0};
 
     // Graphs this replay could not build faithfully: a node the recording
     // added that no handler here can reconstruct. Before the node API was
@@ -345,7 +488,9 @@ struct PlaybackContext {
     }
 
     // IPC handles, recorded 64 bytes -> the 64 bytes this replay's exporter
-    // produced. An importer's handle names an export in the process that made
+    // produced. Filled only from legacy archives, whose handle field holds the
+    // handle bytes; capture now leaves it zero and such an export is not
+    // entered. An importer's handle names an export in the process that made
     // it, so replaying hipIpcOpenMemHandle with the recorded bytes opens
     // nothing; it has to be matched to the handle the replayed exporter
     // returned. Keyed by the recorded bytes because that is all the importing
@@ -408,6 +553,137 @@ struct PlaybackContext {
                        static_cast<ptrdiff_t>(rec - best_base);
         }
         return nullptr;
+    }
+
+    // Does v fall inside a pinned host allocation replay made?
+    bool in_pinned_host(uint64_t v) const {
+        std::shared_lock lk(map_mutex);
+        for (auto& [base, e] : alloc_map)
+            if ((e.kind == AllocKind::HostMalloc || e.kind == AllocKind::HostRegister) &&
+                v - base < e.size)
+                return true;
+        return false;
+    }
+
+    // Is this value an address from the capturing process — i.e. does it fall
+    // inside an allocation as *recorded*, before translation? Reports the
+    // enclosing recorded base so a hit can be traced back to the event that
+    // allocated it. Answers the question a live pointer cannot: whether a word
+    // sitting in device memory is a capture-time pointer nothing rewrote.
+    bool is_recorded_va(uint64_t v, uint64_t* base_out = nullptr,
+                        size_t* size_out = nullptr) const {
+        if (v < 0x10000ULL) return false;
+        std::shared_lock lk(map_mutex);
+        for (auto& [base, entry] : alloc_map) {
+            if (v >= base && v < base + entry.size) {
+                if (base_out) *base_out = base;
+                if (size_out) *size_out = entry.size;
+                return true;
+            }
+        }
+        for (auto& [base, va] : vmm_va_map) {
+            if (v >= base && v < base + va.size) {
+                if (base_out) *base_out = base;
+                if (size_out) *size_out = va.size;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Recorded allocation ranges, sorted by base, for scans that test many
+    // words against them. Testing one word walks every allocation; taking a
+    // snapshot once and binary searching turns a scan of a multi-gigabyte
+    // payload from hours into seconds.
+    std::vector<std::pair<uint64_t, uint64_t>> recorded_ranges() const {
+        std::vector<std::pair<uint64_t, uint64_t>> r;
+        {
+            std::shared_lock lk(map_mutex);
+            r.reserve(alloc_map.size() + vmm_va_map.size());
+            for (auto& [base, e] : alloc_map) r.emplace_back(base, base + e.size);
+            for (auto& [base, va] : vmm_va_map) r.emplace_back(base, base + va.size);
+        }
+        std::sort(r.begin(), r.end());
+        return r;
+    }
+
+    static bool range_contains(
+        const std::vector<std::pair<uint64_t, uint64_t>>& ranges, uint64_t v,
+        uint64_t* base_out = nullptr, size_t* size_out = nullptr) {
+        if (ranges.empty() || v < ranges.front().first || v >= ranges.back().second)
+            return false;
+        auto it = std::upper_bound(
+            ranges.begin(), ranges.end(), v,
+            [](uint64_t x, const std::pair<uint64_t, uint64_t>& p) {
+                return x < p.first;
+            });
+        if (it == ranges.begin()) return false;
+        --it;
+        if (v >= it->second) return false;
+        if (base_out) *base_out = it->first;
+        if (size_out) *size_out = static_cast<size_t>(it->second - it->first);
+        return true;
+    }
+
+    // The live allocation containing a live pointer. A kernel argument usually
+    // points into the middle of a buffer, and the interesting bytes — the ones
+    // whose interpretation went wrong — can lie before it as easily as after.
+    bool live_alloc_of(const void* p, void** base_out, size_t* size_out,
+                       uint64_t* rec_base_out,
+                       AllocKind* kind_out = nullptr) const {
+        uint64_t v = reinterpret_cast<uint64_t>(p);
+        std::shared_lock lk(map_mutex);
+        for (auto& [base, e] : alloc_map) {
+            uint64_t lb = reinterpret_cast<uint64_t>(e.live_ptr);
+            if (!lb || v < lb || v >= lb + e.size) continue;
+            if (base_out) *base_out = e.live_ptr;
+            if (size_out) *size_out = e.size;
+            if (rec_base_out) *rec_base_out = base;
+            if (kind_out) *kind_out = e.kind;
+            return true;
+        }
+        return false;
+    }
+
+    static const char* alloc_kind_name(AllocKind k) {
+        switch (k) {
+            case AllocKind::HostMalloc:     return "pinned host";
+            case AllocKind::HostRegister:   return "registered host";
+            case AllocKind::DevicePtrAlias: return "pinned host alias";
+            default:                        return "device";
+        }
+    }
+
+    // Describe an address from both sides of the replay: as a capture-time
+    // address, and as one of this process's own live allocations. A fault
+    // address that is only the former is a recorded pointer that reached the
+    // GPU; one that is the latter is this replay's own memory, and the
+    // divergence that produced it is upstream of any pointer translation.
+    std::string explain_addr(uint64_t v) const {
+        char buf[320];
+        std::string out;
+        uint64_t rbase = 0; size_t rsize = 0;
+        if (is_recorded_va(v, &rbase, &rsize)) {
+            void* live = translate_ptr(rbase);
+            snprintf(buf, sizeof(buf),
+                     "recorded allocation 0x%llx+%zu (live base %p)",
+                     (unsigned long long)rbase, rsize, live);
+            out += buf;
+        }
+        {
+            std::shared_lock lk(map_mutex);
+            for (auto& [base, entry] : alloc_map) {
+                uint64_t lb = reinterpret_cast<uint64_t>(entry.live_ptr);
+                if (!lb || v < lb || v >= lb + entry.size) continue;
+                snprintf(buf, sizeof(buf),
+                         "%slive allocation %p+%zu (recorded base 0x%llx)",
+                         out.empty() ? "" : "; ", entry.live_ptr, entry.size,
+                         (unsigned long long)base);
+                out += buf;
+                break;
+            }
+        }
+        return out.empty() ? std::string("in no allocation this replay knows") : out;
     }
 
     // Returns bytes available from a live GPU pointer to end of its backing
@@ -500,11 +776,20 @@ struct PlaybackContext {
     void record_alloc(uint64_t rec, void* live, size_t sz,
                       AllocKind kind = AllocKind::Device) {
         std::unique_lock lk(map_mutex);
+        // A host entry still under this address is not given back here: its
+        // buffer is still live, so its charge stays with it. The host-allocating
+        // playback functions free a replaced entry first (free_replaced_host_alloc).
         alloc_map[rec] = {rec, live, sz, kind};
     }
     void remove_alloc(uint64_t rec) {
         std::unique_lock lk(map_mutex);
-        alloc_map.erase(rec);
+        auto it = alloc_map.find(rec);
+        if (it == alloc_map.end()) return;
+        // Host allocations were charged to host_budget before they were made.
+        if (it->second.kind == AllocKind::HostMalloc ||
+            it->second.kind == AllocKind::HostRegister)
+            host_budget.release(it->second.size);
+        alloc_map.erase(it);
     }
     // True if an allocation is already tracked under this recorded address.
     bool has_alloc(uint64_t rec) const {
@@ -526,7 +811,12 @@ struct PlaybackContext {
         if (!rec) return nullptr;
         std::unique_lock lk(map_mutex);
         auto& buf = host_landing_buffers[rec];
-        if (buf.size() < sz) buf.resize(sz);
+        if (buf.size() < sz) {
+            // Charge only the growth; a refusal leaves the buffer as it was.
+            if (!charge_host(sz - buf.size(), "graph host operand buffer"))
+                return nullptr;
+            buf.resize(sz);
+        }
         return buf.data();
     }
 
@@ -589,6 +879,9 @@ struct PlaybackContext {
     // Load a code object from archive_dir/code_objects/<hash>.hsaco
     const void* load_code_object(uint64_t hash_lo, uint64_t hash_hi,
                                  size_t* sz_out) const;
+    // Read `path` into blob_cache_ under `key`, charged to the host budget.
+    const void* cache_file(const std::string& key, const std::string& path,
+                           size_t* sz_out, const char* what) const;
     // Load a code object and cache the resulting hipModule_t
     hipModule_t load_module(uint64_t hash_lo, uint64_t hash_hi);
 
@@ -625,6 +918,35 @@ void hrr_release_region(PlaybackContext& ctx, uint64_t rec_base, void* live);
 // and hipFree cannot release it, so every teardown path has to go through here.
 void hrr_free_device_alloc(PlaybackContext& ctx, void* live);
 
+// Capture-address placement. hrr_place_hold runs before hipInit and holds the
+// planned ranges with PROT_NONE placeholders (Linux only; a no-op on Windows,
+// which leaves placement off). hrr_place_reset releases every placed
+// allocation between the --kernel-filter warm-up and the timed pass.
+void hrr_place_hold(PlaybackContext& ctx, const std::vector<HrrVaRange>& plan);
+void hrr_place_reset(PlaybackContext& ctx);
+
+// ---------------------------------------------------------------------------
+// replay_query_until_success — call `once(arg)` until it stops returning
+// hipErrorNotReady, at most ctx.max_query_attempts times. Returns the first
+// result that is not hipErrorNotReady. If the bound is reached it names `api`,
+// sets ctx.fatal_error (so the replay ends even under --continue-on-error) and
+// returns hipErrorNotReady.
+hipError_t replay_query_until_success(PlaybackContext& ctx, const char* api,
+                                      hipError_t (*once)(void*), void* arg);
+
+// hrr_note_unreplayable — this API cannot be reproduced, and here is why.
+//
+// Called by the UNREPLAYABLE_PLAYBACK_APIS handlers before they return
+// hipErrorNotSupported. Prints once per API:
+//
+//   [HRR] hipStreamAddCallback: NOT REPLAYABLE — the callback is a host
+//         function pointer belonging to the capturing process. ...
+//
+// and records it so the replay summary can list every such API rather than
+// leaving the reader to grep a long log for warnings.
+void hrr_note_unreplayable(PlaybackContext& ctx, const char* api,
+                           const char* reason);
+
 // ---------------------------------------------------------------------------
 // hrr_note_recorded_error — replay reproduced a call that also failed at
 // capture, which is fidelity rather than failure.
@@ -636,6 +958,15 @@ void hrr_free_device_alloc(PlaybackContext& ctx, void* live);
 // would abort the replay over a call the recording shows failing identically.
 void hrr_note_recorded_error(PlaybackContext& ctx, const char* api,
                              int recorded_ret);
+
+// ---------------------------------------------------------------------------
+// hrr_runtime_symbol — address of an exported function in the HIP runtime this
+// process loaded, or nullptr when it does not export it.
+//
+// Handlers for APIs in _PLAYBACK_RUNTIME_RESOLVED_APIS (gen_hrr_api_args.py)
+// call through this instead of a link-time reference, so a playback built
+// against an SDK older than the tree still links and runs.
+void* hrr_runtime_symbol(const char* name);
 
 // ---------------------------------------------------------------------------
 // hrr_replayed_recorded_error — did this call fail exactly as the recording
@@ -673,6 +1004,50 @@ extern thread_local uint64_t hrr_dispatch_seq;
 // deadlocked kernel surfaces instead of hanging the replay forever. Normal
 // completion — including a genuine GPU fault — is returned to the caller.
 hipError_t hrr_watchdog_device_sync(PlaybackContext& ctx, const char* what);
+
+// One pinned host snapshot record of a kernel launch event: u64 ptr_handle,
+// u64 offset, u64 length, u64 hash_lo, u64 hash_hi, u8 direction (0).
+inline constexpr size_t kHostSnapRecordSize = 41;
+
+// Whether n whole records fit between p and the end of the event.
+inline bool hrr_host_snapshots_fit(const uint8_t* p, const uint8_t* end, uint16_t n) {
+    return p <= end && static_cast<size_t>(end - p) / kHostSnapRecordSize >= n;
+}
+
+// Where replay writes the blob of the record at `rec`, or nullptr with *why
+// saying why it refuses the record. The archive is input like any other: a
+// record must name the base of a pinned host allocation replay made, lie
+// inside it, and match its blob's length.
+inline void* hrr_host_snapshot_target(const PlaybackContext& ctx, const uint8_t* rec,
+                                      const void* blob, size_t blob_len,
+                                      const char** why) {
+    uint64_t ptr, off, len;
+    memcpy(&ptr, rec, 8);
+    memcpy(&off, rec + 8, 8);
+    memcpy(&len, rec + 16, 8);
+    void*  live = nullptr;
+    size_t size = 0;
+    {
+        std::shared_lock lk(ctx.map_mutex);
+        auto it = ctx.alloc_map.find(ptr);
+        if (it != ctx.alloc_map.end() && (it->second.kind == AllocKind::HostMalloc ||
+                                          it->second.kind == AllocKind::HostRegister)) {
+            live = it->second.live_ptr;
+            size = it->second.size;
+        }
+    }
+    if (rec[40] != 0)
+        *why = "has an unknown direction";
+    else if (!live)
+        *why = "names no pinned host allocation replay made";
+    else if (off > size || len > size - off)
+        *why = "lies outside its allocation";
+    else if (!blob || blob_len != len)
+        *why = "does not match its blob";
+    else
+        return static_cast<uint8_t*>(live) + off;
+    return nullptr;
+}
 
 // ---------------------------------------------------------------------------
 // Playback function signature and dispatch table

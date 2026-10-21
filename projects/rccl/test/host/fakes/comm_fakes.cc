@@ -82,3 +82,16 @@ ncclResult_t ncclProfilerRecordGroupApiEventState(ncclProfilerEventState_t) { re
 ncclResult_t ncclProfilerStopGroupApiEvent() { return ncclSuccess; }
 ncclResult_t ncclProfilerStartCollApiEvent(struct ncclInfo*, bool) { return ncclSuccess; }
 ncclResult_t ncclProfilerStopCollApiEvent() { return ncclSuccess; }
+ncclResult_t ncclProfilerStartCeCollEvent(struct ncclComm*, struct ncclCeCollArgs*, hipStream_t) { return ncclSuccess; }
+ncclResult_t ncclProfilerStopCeCollEvent(struct ncclComm*, struct ncclCeCollArgs*, hipStream_t) { return ncclSuccess; }
+ncclResult_t ncclProfilerStartCeSyncEvent(struct ncclComm*, struct ncclCeCollArgs*, hipStream_t, void** handle) {
+  *handle = nullptr;
+  return ncclSuccess;
+}
+ncclResult_t ncclProfilerStopCeSyncEvent(struct ncclComm*, void*, hipStream_t) { return ncclSuccess; }
+ncclResult_t ncclProfilerStartCeBatchEvent(struct ncclComm*, struct ncclCeCollArgs*, struct ncclCeBatchOpsParams*,
+                                           hipStream_t, void** handle) {
+  *handle = nullptr;
+  return ncclSuccess;
+}
+ncclResult_t ncclProfilerStopCeBatchEvent(struct ncclComm*, void*, hipStream_t) { return ncclSuccess; }

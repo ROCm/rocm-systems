@@ -92,6 +92,7 @@ struct ncclIbResiliency {
   // QPs used for recovery protocol messages (UD — connectionless, survives link failures).
   struct ncclIbQp portRecoveryQps[NCCL_IB_MAX_DEVS_PER_NIC];
   struct ibv_ah* portRecoveryAh[NCCL_IB_MAX_DEVS_PER_NIC];
+  struct ibv_ah_attr portRecoveryAhAttr[NCCL_IB_MAX_DEVS_PER_NIC];
   uint32_t portRecoveryRemoteQpn[NCCL_IB_MAX_DEVS_PER_NIC];
   int nPortRecoveryQps;
 
@@ -233,6 +234,12 @@ ncclResult_t IbCastResiliencyReceiverQpsCreateToRts(struct ncclIbResiliency* res
                                                     struct ncclIbConnectionMetadata* remInfo,
                                                     struct ncclIbResiliencyInfo* localResiliencyInfo);
 
+ncclResult_t IbCastResiliencyQpsReconfigure(struct ncclIbResiliency* resCtx, int devIndex, bool* success);
+
+// Reconfigure a single QP through RESET -> INIT -> ECE -> RTR -> RTS.
+ncclResult_t IbCastResiliencyQpReconfigure(struct ncclIbResiliency* resCtx, struct ncclIbQp* qp,
+                                           struct ncclIbNetCommDevBase* devBase, int devIndex, bool* success);
+
 ncclResult_t IbCastResiliencyClose(struct ncclIbResiliency* resCtx);
 
 // Allow resiliency context to reuse the memory registration
@@ -242,5 +249,9 @@ ncclResult_t IbCastResiliencyClose(struct ncclIbResiliency* resCtx);
 // structure on the receiver side.
 ncclResult_t IbCastResiliencyRemoteCompletionRecordsSet(struct ncclIbResiliency* resCtx, uint32_t cmplsRecordsRkey,
                                                         uint64_t cmplsRecordsAddr, uint devIndex);
+
+// Resiliency RCCL params (defined in p2p_resiliency.cc / p2p_resiliency_recovery.cc)
+int64_t ncclParamIbCastResiliencyPortFailover();
+int64_t ncclParamIbCastResiliencyPortRecovery();
 
 #endif // NET_IB_P2P_RESILIENCY_H_

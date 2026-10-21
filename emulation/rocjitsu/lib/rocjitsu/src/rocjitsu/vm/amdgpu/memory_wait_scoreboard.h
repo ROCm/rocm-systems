@@ -8,7 +8,7 @@
 #include "rocjitsu/isa/register_set.h"
 
 #include <array>
-#include <atomic>
+#include <cassert>
 #include <cstdint>
 #include <optional>
 #include <vector>
@@ -16,11 +16,12 @@
 namespace rocjitsu {
 class Instruction;
 namespace amdgpu {
+class Wavefront;
+struct RegisterModifiers;
 
-/// A register shadow read by issuers and MMA helpers. Only the issuer writes it.
-/// Helpers use it solely as a filter before consulting their thread-local scope;
-/// they never inspect the mutable dependency records. Relaxed atomics therefore
-/// suffice: the shadow publishes no other state to a helper.
+/// A per-wave register filter owned exclusively by the instruction issuer.
+/// Instruction-boundary validation completes before async work is published;
+/// helper threads and plugin observers never access this filter.
 class MemoryWaitShadow {
 public:
   // Reserve scalar encoding slots separately from allocatable SGPRs. ACC
@@ -44,9 +45,18 @@ public:
   static constexpr uint8_t kResult = 1;
   static constexpr uint8_t kReplaySource = 2;
   bool test(size_t i, bool write = false) const {
-    return i < kRegisters && (bytes_[i].load(std::memory_order_relaxed) &
-                              (write ? kResult | kReplaySource : kResult));
+    return i < kRegisters && (bytes_[i] & (write ? kResult | kReplaySource : kResult));
   }
+  bool pending_vgpr(uint16_t index, uint8_t width) const {
+    assert(index + width <= REGISTER_SET_MAX_VGPRS);
+    if (width == 1)
+      return bytes_[index] != 0;
+    for (unsigned i = 0; i < width; ++i)
+      if (bytes_[index + i])
+        return true;
+    return false;
+  }
+
   bool pending(RegisterRef reg, bool write = false) const {
     for (unsigned r = 0; r < reg.width; ++r) {
       auto element = reg;
@@ -56,18 +66,48 @@ public:
     }
     return false;
   }
-  void set(size_t i, uint8_t bits = kResult) {
-    // Only the issuer writes; helpers only read this filter.
-    bytes_[i].store(bytes_[i].load(std::memory_order_relaxed) | bits, std::memory_order_relaxed);
+  void set(size_t i, uint8_t bits = kResult) { bytes_[i] |= bits; }
+  void clear(size_t i) { bytes_[i] = 0; }
+
+  // Result ranges are normally contiguous physical VGPRs. Resolve their file
+  // once and combine the overlap probe with marking the same shadow bytes.
+  bool mark(RegisterRef reg, uint8_t bits) {
+    bool overlap = false;
+    if (reg.cls == RegClass::VGPR && reg.index + reg.width <= REGISTER_SET_MAX_VGPRS) {
+      for (unsigned r = 0; r < reg.width; ++r) {
+        auto &byte = bytes_[reg.index + r];
+        overlap |= byte != 0;
+        byte |= bits;
+      }
+    } else {
+      for (unsigned r = 0; r < reg.width; ++r) {
+        auto element = reg;
+        element.index += r;
+        if (const auto i = index(element); i < kRegisters) {
+          overlap |= bytes_[i] != 0;
+          bytes_[i] |= bits;
+        }
+      }
+    }
+    return overlap;
   }
-  void clear(size_t i) { bytes_[i].store(0, std::memory_order_relaxed); }
-  void reset() {
-    for (auto &byte : bytes_)
-      byte.store(0, std::memory_order_relaxed);
+  void clear(RegisterRef reg) {
+    if (reg.cls == RegClass::VGPR && reg.index + reg.width <= REGISTER_SET_MAX_VGPRS) {
+      for (unsigned r = 0; r < reg.width; ++r)
+        bytes_[reg.index + r] = 0;
+    } else {
+      for (unsigned r = 0; r < reg.width; ++r) {
+        auto element = reg;
+        element.index += r;
+        if (const auto i = index(element); i < kRegisters)
+          bytes_[i] = 0;
+      }
+    }
   }
+  void reset() { bytes_.fill(0); }
 
 private:
-  std::array<std::atomic<uint8_t>, kRegisters> bytes_{};
+  std::array<uint8_t, kRegisters> bytes_{};
 };
 
 /// Tracks software-visible memory dependencies independently of eager writeback.
@@ -102,6 +142,15 @@ public:
   bool empty() const { return events_.empty(); }
   void clear();
   void before(const Instruction &inst, rj_code_arch_t arch);
+  void check_instruction(const Instruction &inst, Wavefront &wf);
+  static uint64_t result_lanes(const Instruction &inst, Wavefront &wf);
+  static bool result_is_written(const Instruction &inst, Wavefront &wf);
+  struct FlatLanes {
+    uint64_t requests;
+    uint64_t shared;
+  };
+  static FlatLanes flat_lanes(const Instruction &inst, Wavefront &wf, uint64_t shared_base,
+                              uint64_t shared_limit);
   /// X has one translation group at a time, independent of completion queues.
   void xcnt_group(bool scalar);
   /// Map translation to this instruction's completion position, if it received one.
@@ -127,8 +176,8 @@ public:
     const auto i = static_cast<size_t>(counter);
     return issued_[i] - retired_[i];
   }
-  void access(RegisterRef reg, uint64_t lanes, uint8_t bytes, bool write,
-              uint16_t ordered_write_order = kUnordered) {
+  [[gnu::always_inline]] void access(RegisterRef reg, uint64_t lanes, uint8_t bytes, bool write,
+                                     uint16_t ordered_write_order = kUnordered) {
     if (!lanes || !bytes)
       return;
     if (!pending_.pending(reg, write))
@@ -148,11 +197,15 @@ private:
   static constexpr size_t kRegisters = MemoryWaitShadow::kRegisters;
   static size_t index(RegisterRef reg) { return MemoryWaitShadow::index(reg); }
 
+  [[gnu::cold]] RJ_NOINLINE void check_instruction_pending(const Instruction &inst, Wavefront &wf);
+  void check_memory_result(const Instruction &inst, Wavefront &wf, uint64_t vector_lanes,
+                           const RegisterModifiers &modifiers);
   void access_pending(RegisterRef reg, uint64_t lanes, uint8_t bytes, bool write,
                       uint16_t ordered_write_order);
   void rebuild_mask();
   void clear_destination(const Event &event);
   void retire_completed();
+  bool apply_wait(WaitCounterKind counter, uint32_t threshold);
   bool completed(WaitCounterKind counter, uint64_t sequence, uint16_t order,
                  uint64_t order_sequence) const;
   void stamp_order(Event &event) const;
@@ -180,6 +233,11 @@ private:
     uint64_t order_sequence;
   };
   std::vector<Translation> translations_;
+  bool pending_scalar_ = false;
+  // Once two events share a shadow slot, retirement must restore overlapping
+  // entries until the wave has no pending events. Lane/byte disjointness does
+  // not make their shared register byte independently clearable.
+  bool may_overlap_ = false;
   MemoryWaitShadow &pending_;
   std::vector<Event> events_;
   uint64_t pc_ = 0;
@@ -187,74 +245,5 @@ private:
   Reporter reporter_ = nullptr;
 };
 
-// These TLS scopes belong to core, not the observer ABI. Separately loaded
-// observers use register accessors and the exported helper below; they must not
-// install a scope in their own DSO. Only the issuing CPU installs this scope.
-// MMA helpers are checked before publication and never access mutable state.
-inline thread_local MemoryWaitScoreboard *active_memory_wait_check = nullptr;
-// Keep TLS lookup behind the shadow branch; inlining lets the compiler hoist
-// __tls_get_addr onto accesses to registers that have no pending dependency.
-// Inline register accessors are also used by separately loaded observers.
-RJ_API_EXPORT RJ_NOINLINE void check_active_memory_wait(RegisterRef reg, uint64_t lanes,
-                                                        uint8_t bytes, bool write);
-
-// Legacy SDWA compares temporarily compute their explicit SGPR result in VCC
-// and restore VCC afterwards. Those internal writes are not architectural.
-inline thread_local bool suppress_memory_wait_vcc_write = false;
-class ScopedMemoryWaitVccWriteSuppression {
-public:
-  ScopedMemoryWaitVccWriteSuppression(const ScopedMemoryWaitVccWriteSuppression &) = delete;
-  ScopedMemoryWaitVccWriteSuppression &
-  operator=(const ScopedMemoryWaitVccWriteSuppression &) = delete;
-  explicit ScopedMemoryWaitVccWriteSuppression(bool suppress) : suppress_(suppress) {
-    if (suppress_) {
-      previous_ = suppress_memory_wait_vcc_write;
-      suppress_memory_wait_vcc_write = true;
-    }
-  }
-  ~ScopedMemoryWaitVccWriteSuppression() {
-    if (suppress_)
-      suppress_memory_wait_vcc_write = previous_;
-  }
-
-private:
-  bool suppress_;
-  bool previous_ = false;
-};
-
-class ScopedMemoryWaitCheck {
-public:
-  ScopedMemoryWaitCheck(const ScopedMemoryWaitCheck &) = delete;
-  ScopedMemoryWaitCheck &operator=(const ScopedMemoryWaitCheck &) = delete;
-  explicit ScopedMemoryWaitCheck(MemoryWaitScoreboard *state) {
-    if (state && !state->empty()) {
-      installed_ = true;
-      previous_ = active_memory_wait_check;
-      active_memory_wait_check = state;
-    }
-  }
-  ~ScopedMemoryWaitCheck() {
-    if (installed_)
-      active_memory_wait_check = previous_;
-  }
-
-private:
-  MemoryWaitScoreboard *previous_ = nullptr;
-  bool installed_ = false;
-};
-
-/// Observer snapshots must not be mistaken for an instruction's register use.
-class SuspendedMemoryWaitCheck {
-public:
-  SuspendedMemoryWaitCheck(const SuspendedMemoryWaitCheck &) = delete;
-  SuspendedMemoryWaitCheck &operator=(const SuspendedMemoryWaitCheck &) = delete;
-  SuspendedMemoryWaitCheck() : previous_(active_memory_wait_check) {
-    active_memory_wait_check = nullptr;
-  }
-  ~SuspendedMemoryWaitCheck() { active_memory_wait_check = previous_; }
-
-private:
-  MemoryWaitScoreboard *previous_;
-};
 } // namespace amdgpu
 } // namespace rocjitsu

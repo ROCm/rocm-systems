@@ -1,0 +1,92 @@
+CodeObj,Vaddr,Instruction,Latency,HiddenIdle,HiddenStall,HiddenIssue
+1,5632,s_clause 0x1,32,190,0,13
+1,5636,"s_load_b128 s[4:7], s[0:1], null",7302,0,75,11
+1,5644,"s_load_b64 s[2:3], s[0:1], 0x10",1358,0,15,10
+1,5652,"v_and_b32_e32 v24, 15, v0",32,24,0,0
+1,5660,"v_lshlrev_b32_e32 v27, 1, v24",32,56,0,0
+1,5664,s_waitcnt lgkmcnt(0),13089,0,862,17
+1,5668,"v_add_co_u32 v22, s0, s6, v27",32,111,0,0
+1,5680,"v_add_co_ci_u32_e64 v23, null, s7, 0, s0",215,64,181,0
+1,5688,"v_cmp_gt_i32_e64 s0, 0, v0",132,0,98,0
+1,5696,"v_add_co_u32 v1, vcc_lo, v22, 0x2000",32,27,0,0
+1,5712,"v_add_co_ci_u32_e64 v2, null, 0, v23, vcc_lo",133,66,101,0
+1,5720,"v_add_co_u32 v6, vcc_lo, v22, 0x4000",32,26,0,0
+1,5732,"v_add_co_ci_u32_e64 v7, null, 0, v23, vcc_lo",225,69,193,0
+1,5740,"v_add_co_u32 v8, vcc_lo, v22, 0x6000",32,22,0,0
+1,5756,"v_add_co_ci_u32_e64 v9, null, 0, v23, vcc_lo",233,70,201,0
+1,5764,"v_add_co_u32 v18, vcc_lo, 0x7000, v22",32,47,0,0
+1,5776,"v_add_co_ci_u32_e64 v19, null, 0, v23, vcc_lo",32,194,0,0
+1,5784,s_clause 0x7,96,0,38,20
+1,5788,"global_load_u16 v3, v[1:2], off offset:-4096",37404,249,9004,10
+1,5796,"global_load_u16 v4, v[1:2], off",1123,0,299,21
+1,5804,"global_load_u16 v5, v[6:7], off offset:-4096",150,0,20,27
+1,5812,"global_load_u16 v6, v[6:7], off",462,0,156,19
+1,5820,"global_load_u16 v7, v[8:9], off offset:-4096",160,0,28,27
+1,5828,"global_load_u16 v8, v[8:9], off",208,0,54,23
+1,5836,"global_load_u16 v2, v27, s[6:7]",117,0,26,13
+1,5844,"global_load_u16 v9, v[18:19], off",64,86,0,28
+1,5852,"v_add_co_u32 v10, vcc_lo, 0x1000, v22",32,479,0,0
+1,5868,"v_add_co_ci_u32_e64 v11, null, 0, v23, vcc_lo",57,52,9,0
+1,5876,"v_add_co_u32 v12, vcc_lo, 0x2000, v22",32,20,0,0
+1,5888,"v_add_co_ci_u32_e64 v13, null, 0, v23, vcc_lo",66,41,20,0
+1,5896,"v_add_co_u32 v14, vcc_lo, 0x3000, v22",32,24,0,0
+1,5912,"v_add_co_ci_u32_e64 v15, null, 0, v23, vcc_lo",44,42,5,0
+1,5920,"v_add_co_u32 v16, vcc_lo, 0x4000, v22",32,11,0,0
+1,5932,"v_add_co_ci_u32_e64 v17, null, 0, v23, vcc_lo",40,38,1,0
+1,5940,"v_add_co_u32 v20, vcc_lo, 0x5000, v22",32,7,0,0
+1,5956,"v_add_co_ci_u32_e64 v21, null, 0, v23, vcc_lo",145,32,15,0
+1,5964,"v_add_co_u32 v22, vcc_lo, 0x6000, v22",32,30,0,0
+1,5976,"v_add_co_ci_u32_e64 v23, null, 0, v23, vcc_lo",47,42,8,0
+1,5984,"v_lshlrev_b32_e32 v1, 11, v24",32,1,0,0
+1,5988,s_clause 0x5,96,0,49,24
+1,5992,"global_load_d16_hi_b16 v3, v[10:11], off offset:2048",16079,301,6532,0
+1,6000,"global_load_d16_hi_b16 v4, v[12:13], off offset:2048",787,0,175,32
+1,6008,"global_load_d16_hi_b16 v5, v[14:15], off offset:2048",100,0,23,35
+1,6016,"global_load_d16_hi_b16 v6, v[16:17], off offset:2048",237,0,70,31
+1,6024,"global_load_d16_hi_b16 v7, v[20:21], off offset:2048",244,0,38,31
+1,6032,"global_load_d16_hi_b16 v8, v[22:23], off offset:2048",64,106,0,21
+1,6040,s_clause 0x1,64,0,30,28
+1,6044,"global_load_b128 v[10:13], v1, s[4:5]",4008,0,1948,6
+1,6052,"global_load_b128 v[14:17], v1, s[4:5] offset:16",32,157,0,15
+1,6060,s_clause 0x1,96,0,58,27
+1,6064,"global_load_d16_hi_b16 v2, v27, s[6:7] offset:2048",5116,0,2392,11
+1,6072,"global_load_d16_hi_b16 v9, v[18:19], off offset:2048",64,194,0,39
+1,6080,"v_dual_mov_b32 v1, 0 :: v_dual_and_b32 v18, 0xf0, v0",32,511,0,0
+1,6096,"v_mov_b32_e32 v19, v1",128,82,72,0
+1,6100,"v_mov_b32_e32 v21, v1",87,0,17,0
+1,6104,"v_mov_b32_e32 v22, v1",88,0,5,0
+1,6108,"v_mov_b32_e32 v23, v1",113,7,62,0
+1,6112,"v_cmp_ne_u64_e32 vcc_lo, v[18:19], v[0:1]",139,21,39,0
+1,6116,"v_lshrrev_b32_e32 v0, 4, v0",185,0,105,0
+1,6120,"v_mov_b32_e32 v18, v1",79,20,11,0
+1,6124,"s_and_b32 s0, s0, vcc_lo",32,338,0,29
+1,6132,"v_cndmask_b32_e64 v20, 0, 1, s0",32,51,0,0
+1,6140,"v_sub_co_u32 v24, s0, v0, v20",32,288,0,0
+1,6152,"v_sub_co_ci_u32_e64 v25, null, 0, 0, s0",163,96,87,0
+1,6160,"v_add_co_u32 v0, s0, s2, v27",32,24,0,0
+1,6168,"v_add_co_ci_u32_e64 v28, null, s3, 0, s0",85,100,48,0
+1,6180,"v_lshlrev_b64 v[25:26], 11, v[24:25]",76,4,12,0
+1,6188,"v_mov_b32_e32 v20, v1",130,0,98,0
+1,6192,"v_mov_b32_e32 v24, v1",63,12,31,0
+1,6196,"v_add_co_u32 v27, vcc_lo, v0, v25",32,62,0,0
+1,6208,"v_add_co_ci_u32_e64 v28, null, v28, v26, vcc_lo",113,99,79,0
+1,6216,"v_mov_b32_e32 v25, v1",47,0,13,0
+1,6220,"v_add_co_u32 v0, vcc_lo, v27, 0x2000",32,23,0,0
+1,6236,"v_add_co_ci_u32_e64 v1, null, 0, v28, vcc_lo",119,103,53,0
+1,6244,"v_add_co_u32 v29, vcc_lo, v27, 0x4000",32,30,0,0
+1,6256,"v_add_co_ci_u32_e64 v30, null, 0, v28, vcc_lo",74,98,42,0
+1,6264,"v_add_co_u32 v31, vcc_lo, v27, 0x6000",32,9,0,0
+1,6280,"v_add_co_ci_u32_e64 v32, null, 0, v28, vcc_lo",32,131,0,0
+1,6288,s_waitcnt vmcnt(0),22803,0,12499,14
+1,6292,"v_wmma_f16_16x16x16_f16 v[18:25], v[10:17], v[2:9], v[18:25]",216,0,31,0
+1,6312,"v_add_co_ci_u32_e64 v3, null, 0, v28, vcc_lo",32,35,0,0
+1,6320,s_clause 0x7,96,0,24,8
+1,6324,"global_store_b16 v[27:28], v18, off",40141,516,4278,4
+1,6332,"global_store_b16 v[0:1], v20, off",4397,0,500,9
+1,6340,"global_store_b16 v[29:30], v21, off offset:-4096",574,0,65,8
+1,6348,"global_store_b16 v[29:30], v22, off",561,0,48,4
+1,6356,"global_store_b16 v[31:32], v23, off offset:-4096",530,0,42,3
+1,6364,"global_store_b16 v[31:32], v24, off",403,0,46,3
+1,6372,"global_store_b16 v[0:1], v19, off offset:-4096",613,0,49,3
+1,6380,"global_store_b16 v[2:3], v25, off",96,70,0,3
+1,6388,s_endpgm,59306,0,0,9699

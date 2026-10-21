@@ -18,8 +18,6 @@
 
 extern struct ncclMlx5dvSymbols mlx5dvSymbols;
 
-ncclResult_t buildMlx5dvSymbols(struct ncclMlx5dvSymbols*) { return ncclSuccess; }
-
 namespace {
 
 int g_mlx5Calls = 0;

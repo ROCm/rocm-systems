@@ -39,6 +39,7 @@
  */
 
 #include "gin/gin_rocshmem_gda_factory.h"
+#include "dv_dlopen.h"
 #include <gda/queue_pair_provider.hpp>
 #include <gda/ibv_wrapper.hpp>
 #include <gda/gda_enums.hpp>
@@ -157,6 +158,7 @@ struct rocshmem_gin_qp_set {
   struct ibv_mr* fetch_atomic_dummy_mr = nullptr;
 
   uint32_t sq_size = envvar::gda::sq_size;
+  uint8_t traffic_class = 0;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -405,8 +407,8 @@ static int gin_load_dv_library(rocshmem_gin_qp_set* set) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
     {
-      set->dv_handle = dlopen("libionic.so", RTLD_LAZY);
-      if (!set->dv_handle) set->dv_handle = dlopen("/usr/local/lib/libionic.so", RTLD_LAZY);
+      set->dv_handle = ncclDvDlopen("libionic.so", RTLD_LAZY);
+      if (!set->dv_handle) set->dv_handle = ncclDvDlopen("/usr/local/lib/libionic.so", RTLD_LAZY);
       if (!set->dv_handle) {
         LOG_ERROR("GIN QP factory: failed to load libionic.so: %s", dlerror());
         return -1;
@@ -426,8 +428,8 @@ static int gin_load_dv_library(rocshmem_gin_qp_set* set) {
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:
     {
-      set->dv_handle = dlopen("libbnxt_re.so", RTLD_LAZY);
-      if (!set->dv_handle) set->dv_handle = dlopen("/usr/local/lib/libbnxt_re.so", RTLD_LAZY);
+      set->dv_handle = ncclDvDlopen("libbnxt_re.so", RTLD_LAZY);
+      if (!set->dv_handle) set->dv_handle = ncclDvDlopen("/usr/local/lib/libbnxt_re.so", RTLD_LAZY);
       if (!set->dv_handle) {
         LOG_ERROR("GIN QP factory: failed to load libbnxt_re.so: %s", dlerror());
         return -1;
@@ -451,7 +453,7 @@ static int gin_load_dv_library(rocshmem_gin_qp_set* set) {
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
     {
-      set->dv_handle = dlopen("libmlx5.so", RTLD_LAZY);
+      set->dv_handle = ncclDvDlopen("libmlx5.so", RTLD_LAZY);
       if (!set->dv_handle) {
         LOG_ERROR("GIN QP factory: failed to load libmlx5.so: %s", dlerror());
         return -1;
@@ -867,7 +869,7 @@ static int gin_modify_qps_init_to_rtr(rocshmem_gin_qp_set* set, struct gin_dest_
       attr.ah_attr.is_global = 1;
       attr.ah_attr.grh.hop_limit = 255;
       attr.ah_attr.sl = 1;
-      attr.ah_attr.grh.traffic_class = envvar::gda::traffic_class;
+      attr.ah_attr.grh.traffic_class = set->traffic_class;
       memcpy(&attr.ah_attr.grh.dgid, &remote_info[i].gid, 16);
     } else {
       attr.ah_attr.is_global = 0;
@@ -1083,7 +1085,8 @@ int rocshmem_gin_qp_set::initialize_host_gpu_qp(QueuePair* host_gpu_qp, int idx)
 ///////////////////////////////////////////////////////////////////////////////
 
 int rocshmem_gin_create_qps(int nRanks, int myRank, int (*allgather)(void* ctx, void* buf, size_t size),
-                            void* allgather_ctx, rocshmem_gin_qp_set_t* out_qp_set, void*** out_gpu_qps) {
+                            void* allgather_ctx, int traffic_class, rocshmem_gin_qp_set_t* out_qp_set,
+                            void*** out_gpu_qps) {
   // Note: log_pe_number and device-side logd_constants must be initialized
   // by the consumer binary (e.g. rccl-tests) which links rocshmem's device
   // bitcode and can resolve HIP_SYMBOL(logd_constants).
@@ -1091,6 +1094,7 @@ int rocshmem_gin_create_qps(int nRanks, int myRank, int (*allgather)(void* ctx, 
   auto* set = new rocshmem_gin_qp_set();
   set->nRanks = nRanks;
   set->myRank = myRank;
+  set->traffic_class = static_cast<uint8_t>(traffic_class);
 
   // 1. Open IB device and detect provider
   if (gin_open_ib_device(set) != 0) {
@@ -1236,7 +1240,8 @@ int rocshmem_gin_create_qps(int nRanks, int myRank, int (*allgather)(void* ctx, 
     *out_gpu_qps = gpu_ptr_array;
   }
 
-  LOG_TRACE("GIN QP factory: %d QPs ready on %s (rank %d/%d)", nRanks, set->nic.nic_name.c_str(), myRank, nRanks);
+  LOG_TRACE("GIN QP factory: %d QPs ready on %s (rank %d/%d, tc=%d)", nRanks, set->nic.nic_name.c_str(), myRank,
+            nRanks, set->traffic_class);
   *out_qp_set = set;
   return 0;
 
