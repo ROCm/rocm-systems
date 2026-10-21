@@ -57,4 +57,62 @@ __launch_bounds__(512)
   barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();
 }
 
+// Push alltoall: each rank writes its send chunk for peer r into peer r's scratch at this rank's slot,
+// then drains its own scratch into recvbuff. The per-block barrier pairs those writes with the drain, so
+// every rank must launch the same grid. Scratch for peer r, slot s, holds the chunk rank s sends to r.
+template <typename T, int NRANKS_CT>
+#if defined(USE_ROCM)
+__launch_bounds__(512)
+#endif
+  __global__ void ddaAllToAllFabricPush(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
+                                        const T* __restrict__ sendbuff, int selfRank, int nRanks,
+                                        FabricGpuBarrier barrier) {
+  // The previous collective's readers must be done with every scratch slot this block is about to overwrite.
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
+
+  const int nRanksEff = (NRANKS_CT > 0) ? NRANKS_CT : nRanks;
+  constexpr int kUnroll = (NRANKS_CT > 0) ? NRANKS_CT : 8;
+  const size_t countPerRank = count;
+  constexpr auto countPerThread = sizeof(uint4) / sizeof(T);
+  const auto gtIdx = blockDim.x * blockIdx.x + threadIdx.x;
+
+  const auto idxStart = gtIdx * countPerThread;
+  const auto idxEnd = countPerRank;
+  const auto idxStride = gridDim.x * blockDim.x * countPerThread;
+
+  // sendbuff[r] is the chunk destined for rank r. Load a whole peer group into registers before issuing its
+  // remote stores, so those loads can be in flight together. Block i on every rank owns the same idx set.
+  const size_t destIdx = selfRank * idxEnd;
+  for (size_t idx = idxStart; idx < idxEnd; idx += idxStride) {
+    int r0 = 0;
+    for (; r0 + kUnroll <= nRanksEff; r0 += kUnroll) {
+      uint4 v[kUnroll];
+#pragma unroll
+      for (int u = 0; u < kUnroll; ++u) {
+        v[u] = reinterpret_cast<const uint4*>(&sendbuff[idx + (r0 + u) * idxEnd])[0];
+      }
+#pragma unroll
+      for (int u = 0; u < kUnroll; ++u) {
+        *reinterpret_cast<uint4*>(&ipcbuffs[r0 + u][destIdx + idx]) = v[u];
+      }
+    }
+    for (int r = r0; r < nRanksEff; ++r) {
+      *reinterpret_cast<uint4*>(&ipcbuffs[r][destIdx + idx]) =
+        reinterpret_cast<const uint4*>(&sendbuff[idx + r * idxEnd])[0];
+    }
+  }
+
+  // Publish the remote writes before any rank reads its scratch.
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
+
+  T* selfScratch = ipcbuffs[selfRank];
+  for (size_t idx = idxStart; idx < idxEnd; idx += idxStride) {
+#pragma unroll kUnroll
+    for (int r = 0; r < nRanksEff; ++r) {
+      size_t slotIdx = idx + r * idxEnd;
+      *reinterpret_cast<uint4*>(&recvbuff[slotIdx]) = reinterpret_cast<const uint4*>(&selfScratch[slotIdx])[0];
+    }
+  }
+}
+
 } // namespace dda::common

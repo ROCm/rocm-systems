@@ -13,6 +13,7 @@
 #include "debug.h"
 #include "algorithms/dda/dda_init_detail.h"
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h"
+#include "param.h"
 
 #include <cuda_runtime.h>
 #include <hip/hip_ext.h>
@@ -20,6 +21,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <utility>
+
+// Push model: each rank writes its chunks into peers' scratch instead of reading from them.
+// Env: RCCL_DDA_A2A_PUSH.
+RCCL_PARAM(DdaA2APush, "DDA_A2A_PUSH", 0);
 
 namespace {
 
@@ -59,8 +64,37 @@ static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvb
   void* peerPtrsDev = comm->ddaPeerPtrsDev;
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
+  const char* unroll = (nRanks == 4 || nRanks == 8) ? " (unrolled)" : " (runtime)";
+  if (rcclParamDdaA2APush()) {
+    INFO(NCCL_COLL, "DDA fabric AllToAll: launching push kernel: nRanks=%d count=%zu grid=%u block=%u%s", nRanks,
+         count, grid.x, block.x, unroll);
+
+    const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
+    const T* sendPtr = static_cast<const T*>(sendbuff);
+    T* recvPtr = static_cast<T*>(recvbuff);
+    switch (nRanks) {
+    case 4:
+      hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricPush<T, 4>), grid, block, 0, stream, /*startEvent=*/nullptr,
+                            stopEvent, /*flags=*/0, d_ipcbuffs, recvPtr, count, sendPtr, comm->rank, nRanks,
+                            barrierHost);
+      break;
+    case 8:
+      hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricPush<T, 8>), grid, block, 0, stream, /*startEvent=*/nullptr,
+                            stopEvent, /*flags=*/0, d_ipcbuffs, recvPtr, count, sendPtr, comm->rank, nRanks,
+                            barrierHost);
+      break;
+    default:
+      hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricPush<T, 0>), grid, block, 0, stream, /*startEvent=*/nullptr,
+                            stopEvent, /*flags=*/0, d_ipcbuffs, recvPtr, count, sendPtr, comm->rank, nRanks,
+                            barrierHost);
+      break;
+    }
+    CUDACHECK(cudaGetLastError());
+    return ncclSuccess;
+  }
+
   INFO(NCCL_COLL, "DDA fabric AllToAll: launching kernel: nRanks=%d count=%zu grid=%u block=%u%s", nRanks, count,
-       grid.x, block.x, (nRanks == 4 || nRanks == 8) ? " (unrolled)" : " (runtime)");
+       grid.x, block.x, unroll);
 
   // Stage sendbuff into this rank's scratch before the peer exchange. A single
   // host-launched cudaMemcpyAsync avoids the per-block in-kernel copy race on
