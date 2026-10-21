@@ -19,14 +19,15 @@ endif()
 
 # TheRock injects THEROCK_SANITIZER variable. It takes precedence over ENABLE_SANITIZER.
 if(THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
-  # TheRock puts the host -fsanitize=address flags on the compile line itself. Fail if they
-  # are absent, because CLR adds none of its own in this mode and would build uninstrumented.
+  # The enclosing toolchain must already be selecting a sanitizer. CLR still
+  # appends the host flags below; this only rejects a THEROCK_SANITIZER value
+  # that never reached the toolchain file.
   if(NOT (CMAKE_CXX_FLAGS_INIT MATCHES "-fsanitize=address"
           OR CMAKE_CXX_FLAGS MATCHES "-fsanitize=address"))
     message(FATAL_ERROR
       "THEROCK_SANITIZER='${THEROCK_SANITIZER}' but no -fsanitize=address reaches the C++ "
-      "compile line. CLR does not add host flags when THEROCK_SANITIZER is set. For a "
-      "standalone build pass -DENABLE_SANITIZER=${THEROCK_SANITIZER} instead.")
+      "compile line. For a standalone build pass -DENABLE_SANITIZER=${THEROCK_SANITIZER} "
+      "instead.")
   endif()
   set(ENABLE_SANITIZER "${THEROCK_SANITIZER}")
 endif()
@@ -68,9 +69,17 @@ else()
   add_compile_definitions(DEVICE_ADDRESS_SANITIZER=0)
 endif()
 
-# Host instrumentation. Skipped under TheRock, which already instruments the C and C++
-# compile lines through CMAKE_CXX_FLAGS_INIT.
-if(NOT ENABLE_SANITIZER STREQUAL "OFF" AND NOT THEROCK_SANITIZER)
+# Host instrumentation. Always applied, including under TheRock.
+# TheRock's HOST_ASAN path puts -Xarch_host -fsanitize=address in
+# CMAKE_*_FLAGS_INIT and links with -fsanitize=address, but FLAGS_INIT is not
+# re-copied into CMAKE_*_FLAGS on a reconfigure. The shipped libamdhip64 then
+# NEEDs libclang_rt.asan.so and only has the weak __asan_report_* stubs from
+# the link line, so hipFree aborts with "free on address which was not
+# malloc()-ed". Appending the flags here is what the compiler actually uses.
+# Repeating -fsanitize=address is harmless when the enclosing build already
+# added it. These are host C/C++ flags; device bitcode is compiled by hiprtc
+# custom commands that do not inherit CMAKE_CXX_FLAGS.
+if(NOT ENABLE_SANITIZER STREQUAL "OFF")
   set(_linker_flags "-fsanitize=address")
   set(_compiler_flags "-fno-omit-frame-pointer -fsanitize=address")
   if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
@@ -91,6 +100,19 @@ if(NOT ENABLE_SANITIZER STREQUAL "OFF" AND NOT THEROCK_SANITIZER)
   unset(_compiler_flags)
   unset(_linker_flags)
   message(STATUS "CLR sanitizer: ${ENABLE_SANITIZER} (host flags applied by CLR)")
-elseif(NOT ENABLE_SANITIZER STREQUAL "OFF")
-  message(STATUS "CLR sanitizer: ${ENABLE_SANITIZER} (host flags from the enclosing build)")
 endif()
+
+# Fail the build if a shared library was only linked with ASan. Link-only
+# -fsanitize=address emits weak __asan_report_* symbols and no __asan_init.
+function(clr_require_asan_instrumentation target)
+  if(ENABLE_SANITIZER STREQUAL "OFF" OR NOT BUILD_SHARED_LIBS OR NOT UNIX)
+    return()
+  endif()
+  add_custom_command(
+    TARGET ${target} POST_BUILD
+    COMMAND ${CMAKE_COMMAND}
+            -DFILE=$<TARGET_FILE:${target}>
+            -P ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/check_asan_instrumentation.cmake
+    COMMENT "Verifying ${target} is instrumented with ASan"
+    VERBATIM)
+endfunction()
