@@ -45,6 +45,7 @@
 #include "hip_capture_writer.h"
 #include "hip_capture.h"
 #include "hip_capture_metadata.h"
+#include "hip_capture_scrub.h"
 
 #include "os/os.hpp"           // amd::Os::timeNanos()
 #include "utils/debug.hpp"     // LogPrintfError, LogPrintfWarning, LogPrintfInfo
@@ -159,8 +160,10 @@ static constexpr size_t   kPathMax          = 4096;
 static constexpr size_t   kMetadataJsonMax  = 128u * 1024u;
 static constexpr size_t   kEmergencyManifestMax = kMetadataJsonMax + 1024u;
 
-// Lock order: g_reopen_mu, then g_file_mu, then g_blob_mu, then
-// g_unreplayable_mu. atfork_prepare is the only path that holds them all.
+// Lock order: g_pinned_mu (hip_capture.cpp, held while a launch copies pinned
+// host memory or writes its event), then g_reopen_mu, then g_file_mu, then
+// g_blob_mu, then g_unreplayable_mu. Only fork() holds them all: the pinned
+// prepare handler takes g_pinned_mu, then atfork_prepare takes the rest.
 static std::mutex   g_file_mu;
 static int          g_events_fd = -1;
 // g_base_dir is the archive path requested via HIP_HRR_CAPTURE_OUTPUT.
@@ -1770,7 +1773,13 @@ Hash128 write_code_object(const void* image, size_t image_size) {
     if (g_events_fd < 0 || g_events_finalized) return {};  // not open, or past the trailer
   }
 
-  Hash128 h = hash_buffer(image, image_size);
+  // The stored bytes, and so the hash, are the image with its .comment and
+  // debug sections zeroed (see hip_capture_scrub.h).
+  std::vector<uint8_t> scrubbed(static_cast<const uint8_t*>(image),
+                                static_cast<const uint8_t*>(image) + image_size);
+  scrub::scrub_code_object(scrubbed.data(), scrubbed.size());
+
+  Hash128 h = hash_buffer(scrubbed.data(), image_size);
   char hex[33];
   hash_hex(h, hex);
   std::string key = std::string("co:") + hex;  // namespace to match playback load_code_object key
@@ -1790,7 +1799,7 @@ Hash128 write_code_object(const void* image, size_t image_size) {
   ClaimedWrite claim(key);
 
   const bool ok = atomic_write_file(g_code_objects_fd.load(), g_output_dir + "/code_objects",
-                                    std::string(hex) + ".hsaco", image, image_size);
+                                    std::string(hex) + ".hsaco", scrubbed.data(), image_size);
   if (!ok) LogPrintfWarning("[HRR capture] Failed to write code object %s", hex);
   claim.done(ok);
   return h;

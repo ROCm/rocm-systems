@@ -1480,7 +1480,9 @@ void ComputeUnitCore::report_routed_access(const Instruction &inst, Wavefront &w
     access.mtype = state.mtype;
     access.wait_counter = state.wait_counter_type;
     access.element_size_bytes = state.elem_size;
-    access.elements_per_lane = state.num_dwords;
+    // An atomic is one element of elem_size bytes, matching vector atomic
+    // observations; num_dwords counts its returned dwords.
+    access.elements_per_lane = state.atomic_op != AtomicOp::NONE ? 1 : state.num_dwords;
     // A scalar access is one address, so it is a one-lane wavefront as far as
     // the memory system is concerned. Saying so lets a consumer treat both
     // routes with the same per-lane arithmetic.
@@ -1657,13 +1659,16 @@ void AsyncInstructionWindow::materialize() {
 void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCache *admission,
                                               uint32_t wave_size, bool has_accvgprs) {
   // CDNA4 MFMA and the default gfx1250 allowlist have cheap encoding filters.
-  // On a cache hit,
-  // non-candidates use the ordinary issue body, including its fetchability and
+  // For retained dispatch bindings and legacy memory, resident non-candidates
+  // use the ordinary issue body, including its fetchability and
   // debugger checks. A cache miss uses full decoding below.
   // This hint never executes a cached word or bypasses instruction validation.
   if (async_mma_policy::supported(arch())) {
     uint32_t word;
-    if (inst_cache_.peek_word(active->pc, active->process_id(), word)) {
+    const GpuVmAccess *vm_access = active->vm_access();
+    const bool resident = vm_access ? inst_cache_.peek_word(*vm_access, active->pc, word)
+                                    : inst_cache_.peek_word(active->pc, active->process_id(), word);
+    if (resident) {
       if (!async_mma_policy::encoding_may_be_candidate(arch(), word)) {
         issue_instruction(active);
         if (active->is_halted())
@@ -2149,7 +2154,7 @@ template <bool EnableAsync>
       auto &d = *inst->data_as<ScalarMemState>();
       dbg_is_atomic = d.atomic_op != AtomicOp::NONE;
       dbg_is_write = !d.is_load || dbg_is_atomic;
-      dbg_bytes = std::max(1u, d.num_dwords * d.elem_size);
+      dbg_bytes = std::max(1u, dbg_is_atomic ? d.elem_size : d.num_dwords * d.elem_size);
       dbg_addrs.push_back(d.addr);
     } else {
       auto &d = *inst->data_as<VectorMemState>();
