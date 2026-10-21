@@ -599,7 +599,7 @@ TEST(WaitcheckStream, CdnaGdsSourceReuseNeedsExpcntOnlyBeforeCdna4) {
       EXPECT_TRUE(report.diagnostics.empty());
     } else {
       ASSERT_EQ(report.diagnostics.size(), 1u);
-      EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Exp);
+      EXPECT_EQ(report.diagnostics[0].counter, amdgpu::WaitCounterKind::Exp);
       EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccess::Write);
       EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 1, 1}));
       EXPECT_EQ(report.diagnostics[0].required_wait, "s_waitcnt expcnt(0)");
@@ -614,7 +614,7 @@ TEST(WaitcheckStream, CdnaGdsSourceReuseNeedsExpcntOnlyBeforeCdna4) {
   const auto missing_wait = analyze({0xd86d0000u, 1u, v_mov(3, 0)}, ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_FALSE(missing_wait.incomplete);
   ASSERT_EQ(missing_wait.diagnostics.size(), 1u);
-  EXPECT_EQ(missing_wait.diagnostics[0].counter, WaitCounterKind::Ds);
+  EXPECT_EQ(missing_wait.diagnostics[0].counter, amdgpu::WaitCounterKind::Ds);
   EXPECT_EQ(missing_wait.diagnostics[0].access, WaitcheckAccess::Read);
   EXPECT_EQ(missing_wait.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 0, 1}));
   EXPECT_EQ(missing_wait.diagnostics[0].required_wait, "s_waitcnt lgkmcnt(0)");
