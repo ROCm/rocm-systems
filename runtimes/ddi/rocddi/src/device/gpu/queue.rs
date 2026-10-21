@@ -7,13 +7,15 @@
 //! destruction succeeds. Packet-format policy and public ABI behavior remain
 //! responsibilities of the frontend using rocddi.
 
+mod scratch;
 mod types;
 pub use super::kernel_queue::*;
+pub use scratch::{MAX_PRIVATE_SEGMENT_BYTES, ScratchPlan, plan_scratch};
 pub use types::*;
 
 use crate::device::gpu::GpuDevice;
 use crate::driver::{self, Driver, UserQueueResource};
-use crate::host_storage::{Owned, Shared};
+use crate::memory::storage::{Owned, Shared};
 use crate::{Error, ErrorKind};
 
 /// Drains host packet stores before notifying a GPU queue through its doorbell.
@@ -45,9 +47,11 @@ pub unsafe fn ring_doorbell(address: usize, value: u64) {
 /// Driver-owned queue transport and cleanup state, independent of the
 /// selected GPU driver's queue representation.
 pub(crate) struct DriverQueue<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> {
-    // Drop the queue resource before its shared driver instance.
+    /// Native queue dropped before its shared driver instance.
     inner: Owned<Q>,
+    /// Keeps the exact creating driver alive through queue cleanup.
     driver: Shared<D>,
+    /// Transport addresses cached at queue creation.
     info: QueueTransport,
 }
 
@@ -116,6 +120,19 @@ impl<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> DriverQueue<
     pub(crate) unsafe fn destroy(&mut self) -> Result<(), Error> {
         // SAFETY: The caller retired every producer and transport mapping.
         unsafe { self.inner.destroy() }
+    }
+
+    /// # Safety
+    /// Producers and public transport mappings must be retired. The callback
+    /// may release external queue dependencies after native retirement.
+    #[allow(unsafe_code)]
+    pub(crate) unsafe fn destroy_with_retained_transport(
+        &mut self,
+        callback: &mut dyn FnMut(),
+    ) -> Result<(), Error> {
+        // SAFETY: The caller retired producers and retained dependencies until
+        // the native queue is conclusively removed.
+        unsafe { self.inner.destroy_with_retained_transport(callback) }
     }
 }
 
@@ -280,6 +297,27 @@ impl Queue {
         unsafe { self.inner.destroy() }
     }
 
+    /// Retires the native queue and runs `callback` once before its public
+    /// control mapping is released. The callback can release external backing
+    /// and report that release while the original queue header is still valid.
+    /// Native retirement failure leaves the callback pending for a retry.
+    ///
+    /// # Errors
+    /// Returns a native retirement or backing cleanup failure. The callback
+    /// is not repeated if backing cleanup fails after native retirement.
+    ///
+    /// # Safety
+    /// Producers and public transport mappings must be retired. The callback
+    /// must only release dependencies no longer reachable by the native queue.
+    #[allow(unsafe_code)]
+    pub unsafe fn destroy_with_retained_transport(
+        &mut self,
+        callback: &mut dyn FnMut(),
+    ) -> Result<(), Error> {
+        // SAFETY: The caller supplies the producer and dependency contract.
+        unsafe { self.inner.destroy_with_retained_transport(callback) }
+    }
+
     /// Destroys a queue that was never published to producers. The native queue
     /// and externally supplied signal or scratch backing are retained together
     /// if cleanup fails or unwinds; successful cleanup drops both owners.
@@ -326,7 +364,7 @@ impl GpuDevice<'_> {
         // SAFETY: The caller retains every raw address in the request, even
         // when native creation has an ambiguous result.
         Ok(Queue {
-            inner: unsafe { self.device.driver_state.create_queue(desc)? },
+            inner: unsafe { self.driver.create_queue(desc)? },
         })
     }
 
@@ -362,7 +400,6 @@ impl GpuDevice<'_> {
 mod queue_resource_tests {
     use super::*;
     use crate::driver::{CachedInfo, Driver};
-    use crate::host_storage::Allocator;
     use crate::session::DriverContextLifetime;
     use crate::topology::Endpoint;
     use std::sync::Arc;
@@ -407,12 +444,8 @@ mod queue_resource_tests {
     impl Driver for FakeDriver {
         type DeviceState = FakeDevice;
 
-        fn allocator(&self) -> Allocator {
-            Allocator::system()
-        }
-
-        fn driver_instance(&self) -> u64 {
-            1
+        fn driver_instance(&self) -> crate::driver::DriverInstanceId {
+            crate::driver::DriverInstanceId::TEST
         }
 
         fn context_lifetime(&self) -> DriverContextLifetime {
@@ -507,6 +540,16 @@ mod queue_resource_tests {
             Ok(())
         }
 
+        unsafe fn destroy_with_retained_transport(
+            &mut self,
+            callback: &mut dyn FnMut(),
+        ) -> Result<(), Error> {
+            // SAFETY: The fake driver has no external transport mappings.
+            unsafe { self.destroy()? };
+            callback();
+            Ok(())
+        }
+
         fn map_device(&self, _: &FakeDevice) -> Result<QueueTransport, Error> {
             self.check()?;
             Ok(self.info)
@@ -517,33 +560,24 @@ mod queue_resource_tests {
     fn driver_queue_retains_native_owner_and_driver_through_failed_cleanup() -> Result<(), Error> {
         let driver_dropped = Arc::new(AtomicBool::new(false));
         let queue_drops = Arc::new(AtomicUsize::new(0));
-        let driver = Shared::new(
-            FakeDriver {
-                dropped: driver_dropped.clone(),
-                queue_drops: queue_drops.clone(),
-            },
-            Allocator::system(),
-        )?;
+        let driver = Shared::new(FakeDriver {
+            dropped: driver_dropped.clone(),
+            queue_drops: queue_drops.clone(),
+        })?;
         let state = FakeDevice;
-        let driver_queue = Owned::new(
-            FakeQueue {
-                info: transport(),
-                driver_dropped: driver.dropped.clone(),
-                queue_drops: driver.queue_drops.clone(),
-                fail_destroy: true,
-                released: false,
-            },
-            Allocator::system(),
-        )?;
+        let driver_queue = Owned::new(FakeQueue {
+            info: transport(),
+            driver_dropped: driver.dropped.clone(),
+            queue_drops: driver.queue_drops.clone(),
+            fail_destroy: true,
+            released: false,
+        })?;
         let mut queue = DriverQueue::new(driver.clone(), driver_queue);
         assert_eq!(queue.info(), transport());
-        let foreign = Shared::new(
-            FakeDriver {
-                dropped: Arc::new(AtomicBool::new(false)),
-                queue_drops: Arc::new(AtomicUsize::new(0)),
-            },
-            Allocator::system(),
-        )?;
+        let foreign = Shared::new(FakeDriver {
+            dropped: Arc::new(AtomicBool::new(false)),
+            queue_drops: Arc::new(AtomicUsize::new(0)),
+        })?;
         assert!(matches!(
             queue.map_device(&foreign, &state),
             Err(error) if error.kind() == ErrorKind::InvalidArgument

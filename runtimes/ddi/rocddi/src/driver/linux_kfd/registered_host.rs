@@ -6,30 +6,45 @@
 //! A KFD USERPTR allocation is unavailable in that context, but its acquired
 //! render VM can map a DRM GEM USERPTR object. This owner retains the caller's
 //! GPU VA, each render VM, GEM handle, and timeline until native cleanup ends.
-//! The caller continues to own and keep the complete source page cover live.
+//! Borrowed callers keep the complete source page cover live. Registrations of
+//! rocddi-owned backing retain a lease on those pages until cleanup completes.
 
 use super::drm;
 use super::memory::DeviceVm;
 use super::os_memory;
 use super::{errno, error, native_error};
-use crate::host_storage::{Buffer, Owned, Shared};
+use crate::memory::host::HostBackingLease;
+use crate::memory::storage::TryPush;
+use crate::memory::storage::{Owned, Shared};
 use crate::memory::{AllocationDesc, AllocationInfo, DeviceAccess};
 use crate::{Error, ErrorKind};
 
+/// Native mapping phase retained across partial failure and retry.
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum MappingPhase {
+    /// No mapping request has been sent.
     NotMapped,
+    /// A map request may have changed some page-table entries.
     Mapping,
+    /// Mapping and synchronization completed.
     Mapped,
+    /// An unmap request may have changed some page-table entries.
     Unmapping,
+    /// Unmapping and synchronization completed.
     Unmapped,
 }
 
+/// Per-render-VM GEM registration and mapping progress for borrowed pages.
 struct VmMapping {
+    /// Render VM that owns the GEM handle and timeline.
     vm: Shared<DeviceVm>,
+    /// GEM USERPTR handle, or zero before registration.
     handle: u32,
+    /// Timeline used to prove VM update completion.
     timeline: u32,
+    /// Last known mapping phase.
     phase: MappingPhase,
+    /// Native operation may have completed despite reporting an error.
     uncertain: bool,
 }
 
@@ -139,19 +154,28 @@ impl VmMapping {
 
 /// One common GPU VA for a caller-owned page cover across requested render VMs.
 pub(crate) struct DrmRegisteredHost {
+    /// Creating VM retained through every peer registration.
     owner: Shared<DeviceVm>,
-    mappings: Buffer<VmMapping>,
+    /// Native USERPTR handles and mapping progress in each render VM.
+    mappings: Vec<VmMapping>,
+    /// Common GPU virtual address reserved for the page cover.
     reservation: Option<os_memory::Reservation>,
+    /// First caller-visible host byte.
     host_address: usize,
+    /// Owner of runtime-allocated pages, when present.
+    backing: Option<HostBackingLease>,
+    /// Offset from the registered page cover to `host_address`.
     byte_offset: usize,
+    /// Exact public byte extent.
     size: u64,
+    /// Prevents new access changes after cleanup begins.
     freeing: bool,
 }
 
 impl DrmRegisteredHost {
     /// # Safety
-    /// The caller keeps the complete host page cover mapped and synchronizes
-    /// access through successful cleanup or process teardown.
+    /// Borrowed callers keep the complete host page cover mapped and
+    /// synchronized; an owned request transfers that obligation in `backing`.
     #[allow(unsafe_code)]
     pub(super) unsafe fn create(
         owner: Shared<DeviceVm>,
@@ -160,6 +184,7 @@ impl DrmRegisteredHost {
         host_address: usize,
         permissions: DeviceAccess,
         uncached: bool,
+        backing: Option<HostBackingLease>,
     ) -> Result<Owned<Self>, Error> {
         if !permissions.contains(DeviceAccess::READ) {
             return Err(error(
@@ -188,15 +213,14 @@ impl DrmRegisteredHost {
             ));
         }
         owner.check()?;
-        let allocator = owner.allocator();
-        let mut mappings = Buffer::try_with_capacity(
+
+        let mut mappings = crate::memory::storage::try_vec_with_capacity(
             peers.len().checked_add(1).ok_or_else(|| {
                 error(
                     ErrorKind::ResourceExhausted,
                     "registered device count overflow",
                 )
             })?,
-            allocator,
         )?;
         mappings.try_push(VmMapping::new(owner.clone()))?;
         let mut bounds = owner.address_range();
@@ -235,7 +259,7 @@ impl DrmRegisteredHost {
             }
             mappings.try_push(VmMapping::new(peer))?;
         }
-        let owner_slot = Owned::try_new_uninit(allocator)?;
+        let owner_slot = Owned::try_new_uninit()?;
         let alignment = usize::try_from(desc.alignment)
             .map_err(|_| error(ErrorKind::InvalidArgument, "alignment exceeds host width"))?;
         let reservation = os_memory::Reservation::new(size, alignment, bounds, false)
@@ -245,6 +269,7 @@ impl DrmRegisteredHost {
             mappings,
             reservation: Some(reservation),
             host_address,
+            backing,
             byte_offset,
             size: desc.size,
             freeing: false,
@@ -321,6 +346,7 @@ impl DrmRegisteredHost {
             .map_err(|source| native_error("DRM host registration process check", source))?;
         self.freeing = true;
         if self.reservation.is_none() {
+            self.backing = None;
             return Ok(());
         }
         let address = self.address()?;
@@ -333,6 +359,7 @@ impl DrmRegisteredHost {
                 .map_err(|source| native_error("registered GPU address munmap", source))?;
             self.reservation = None;
         }
+        self.backing = None;
         Ok(())
     }
 }
@@ -340,6 +367,19 @@ impl DrmRegisteredHost {
 impl Drop for DrmRegisteredHost {
     fn drop(&mut self) {
         if self.free().is_err() {
+            if self.mappings.iter().any(|mapping| {
+                mapping.handle != 0
+                    || mapping.uncertain
+                    || matches!(
+                        mapping.phase,
+                        MappingPhase::Mapping | MappingPhase::Mapped | MappingPhase::Unmapping
+                    )
+            }) {
+                if let Some(backing) = self.backing.take() {
+                    // A failed native cleanup may leave these pages reachable.
+                    std::mem::forget(backing);
+                }
+            }
             if let Some(reservation) = self.reservation.take() {
                 std::mem::forget(reservation);
             }

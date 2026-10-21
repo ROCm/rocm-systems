@@ -13,13 +13,15 @@
 //! mappings. A failed unmap or handle release leaves its native dependency live
 //! and attached to the owner for an explicit retry.
 
+use crate::memory::storage::TryPush;
 use std::fs::File;
 use std::io;
 use std::os::fd::AsRawFd;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::host_storage::{Allocator, Buffer, Owned, Shared};
+use crate::memory::device::VirtualMemoryPlacement;
 use crate::memory::interop::linux::{DmaBuf, DmaBufInfo};
+use crate::memory::storage::{Owned, Shared};
 use crate::memory::{
     AllocationDesc, AllocationLimits, DeviceAccess, MemoryKind, VirtualMemoryInfo,
 };
@@ -30,36 +32,45 @@ use super::{drm, errno, error, native_error, os_file, os_memory, uapi};
 
 /// Imported GEM handle shared by mappings of the same physical backing.
 struct ImportedGem {
+    /// Native physical backing identity used to share this GEM import.
     backing_id: [u64; 2],
+    /// Process-local GEM handle tied to the creating render file.
     handle: u32,
+    /// Mappings currently using this imported handle.
     references: usize,
 }
 
 /// A failed submission can still have reached the driver.
 struct SubmitError {
+    /// Native failure returned to the caller.
     error: Error,
+    /// Mapping update that may need completion or quarantine.
     update: Option<(u32, u64)>,
 }
 
 /// Per-device DRM virtual-memory state serialized by its owning `DeviceVm`.
 pub(super) struct VmState {
+    /// Timeline sync object shared by mapping transactions on this VM.
     syncobj: u32,
+    /// Its native destruction may have completed despite an error.
     syncobj_destroy_uncertain: bool,
+    /// Next timeline point assigned to a VM update.
     next_point: u64,
-    gems: Buffer<ImportedGem>,
-    // A failed MAP has no public mapping owner. Keep its timeline point and
-    // GEM handle in this VM; the reservation and backing quarantine themselves.
-    pending_maps: Buffer<(u32, u64)>,
+    /// Imported GEM handles shared by backing identity.
+    gems: Vec<ImportedGem>,
+    /// Failed MAP updates with no public owner. The reservation and backing
+    /// quarantine themselves while these timeline points remain reachable.
+    pending_maps: Vec<(u32, u64)>,
 }
 
 impl VmState {
-    pub(super) fn new(allocator: Allocator) -> Self {
+    pub(super) fn new() -> Self {
         Self {
             syncobj: 0,
             syncobj_destroy_uncertain: false,
             next_point: 0,
-            gems: Buffer::new(allocator),
-            pending_maps: Buffer::new(allocator),
+            gems: Vec::new(),
+            pending_maps: Vec::new(),
         }
     }
 
@@ -238,8 +249,11 @@ impl VmState {
 
 /// Owned virtual-address reservation with explicit release progress.
 pub(crate) struct KfdVirtualAddress {
+    /// Process VA range retained until every mapping ends.
     reservation: Option<os_memory::Reservation>,
+    /// Required alignment and mapping size multiple.
     mapping_granularity: u64,
+    /// A native mapping result may still reference this range.
     uncertain: AtomicBool,
 }
 
@@ -249,7 +263,6 @@ impl KfdVirtualAddress {
         size: u64,
         alignment: u64,
         address: u64,
-        allocator: Allocator,
     ) -> Result<Owned<Self>, Error> {
         let desc = AllocationDesc { size, alignment };
         let page = os_memory::page_size()
@@ -279,7 +292,7 @@ impl KfdVirtualAddress {
             )
         })?;
         let address = usize::try_from(address).unwrap_or(0);
-        let owner = Owned::try_new_uninit(allocator)?;
+        let owner = Owned::try_new_uninit()?;
         let reservation = os_memory::Reservation::new_at(size, alignment, bounds, address)
             .map_err(|source| native_error("virtual-address reservation", source))?;
         Ok(owner.write(Self {
@@ -349,13 +362,21 @@ impl Drop for KfdVirtualAddress {
 
 /// Physical KFD allocation or imported DMA-BUF backing for virtual mappings.
 pub(crate) struct KfdVirtualMemory {
+    /// Creating VM retained while native backing exists.
     vm: Option<Shared<DeviceVm>>,
+    /// Process address cover used by host-visible backing.
     reservation: Option<os_memory::Reservation>,
+    /// Native KFD memory handle until release succeeds.
     handle: Option<u64>,
+    /// Imported DMA-BUF descriptor retained with physical backing.
     dma_buf: Option<File>,
+    /// Cached extent, granularity, and backing identity.
     info: VirtualMemoryInfo,
+    /// Prevents new maps once native release begins.
     freeing: bool,
+    /// Native release outcome cannot be safely replayed.
     uncertain: bool,
+    /// A failed map may have left device page tables referring to backing.
     mapping_uncertain: AtomicBool,
 }
 
@@ -400,7 +421,7 @@ impl KfdVirtualMemory {
             MemoryKind::DeviceLocal { coherent, .. } => {
                 uapi::VRAM | if coherent { uapi::COHERENT } else { 0 }
             }
-            MemoryKind::OwnedHost { .. } | MemoryKind::RegisteredHost { .. } => {
+            MemoryKind::OwnedHost { .. } => {
                 return Err(error(
                     ErrorKind::Unsupported,
                     "virtual-memory handles require platform-managed physical backing",
@@ -408,8 +429,10 @@ impl KfdVirtualMemory {
             }
         };
         vm.check()?;
-        let allocator = vm.allocator();
-        let owner = Owned::try_new_uninit(allocator)?;
+
+        let gpu_id = vm.gpu_id();
+
+        let owner = Owned::try_new_uninit()?;
         let reservation =
             os_memory::Reservation::new(size_usize, host_page, vm.address_range(), false)
                 .map_err(|source| native_error("virtual-memory physical reservation", source))?;
@@ -422,6 +445,11 @@ impl KfdVirtualMemory {
                 size,
                 mapping_granularity: page,
                 physical_backing_id: [0; 2],
+                placement: Some(if native_kind & uapi::VRAM != 0 {
+                    VirtualMemoryPlacement::Device(gpu_id)
+                } else {
+                    VirtualMemoryPlacement::System
+                }),
             },
             freeing: false,
             uncertain: false,
@@ -490,7 +518,18 @@ impl KfdVirtualMemory {
         Ok(memory)
     }
 
-    pub(super) fn import(descriptor: i32, allocator: Allocator) -> Result<Owned<Self>, Error> {
+    pub(super) fn import(descriptor: i32) -> Result<Owned<Self>, Error> {
+        Self::import_impl(descriptor, None)
+    }
+
+    pub(super) fn import_with_kfd(
+        descriptor: i32,
+        kfd: &super::sys::Kfd,
+    ) -> Result<Owned<Self>, Error> {
+        Self::import_impl(descriptor, Some(kfd))
+    }
+
+    fn import_impl(descriptor: i32, kfd: Option<&super::sys::Kfd>) -> Result<Owned<Self>, Error> {
         let dma_buf = os_file::duplicate_file(descriptor)
             .map_err(|source| native_error("virtual-memory descriptor duplication", source))?;
         let file_info = os_file::dma_buf_file_info(&dma_buf)
@@ -498,23 +537,38 @@ impl KfdVirtualMemory {
         let page = os_memory::page_size()
             .map_err(|source| native_error("virtual-memory page size", source))?
             as u64;
-        Owned::new(
-            Self {
-                vm: None,
-                reservation: None,
-                handle: None,
-                dma_buf: Some(dma_buf),
-                info: VirtualMemoryInfo {
-                    size: file_info.size,
-                    mapping_granularity: page,
-                    physical_backing_id: file_info.physical_id,
-                },
-                freeing: false,
-                uncertain: false,
-                mapping_uncertain: AtomicBool::new(false),
+        // Older KFD versions can import the DMA-BUF but cannot describe its
+        // origin. Preserve that distinction for the HSA handle-info query.
+        let placement = kfd
+            .and_then(|kfd| kfd.dma_buf_info(dma_buf.as_raw_fd()).ok())
+            .and_then(|details| {
+                let info = details.info;
+                if info.size != file_info.size {
+                    return None;
+                }
+                match info.flags & (uapi::VRAM | uapi::GTT) {
+                    uapi::GTT => Some(VirtualMemoryPlacement::System),
+                    uapi::VRAM if info.gpu_id != 0 => {
+                        Some(VirtualMemoryPlacement::Device(info.gpu_id))
+                    }
+                    _ => None,
+                }
+            });
+        Owned::new(Self {
+            vm: None,
+            reservation: None,
+            handle: None,
+            dma_buf: Some(dma_buf),
+            info: VirtualMemoryInfo {
+                size: file_info.size,
+                mapping_granularity: page,
+                physical_backing_id: file_info.physical_id,
+                placement,
             },
-            allocator,
-        )
+            freeing: false,
+            uncertain: false,
+            mapping_uncertain: AtomicBool::new(false),
+        })
         .map_err(Into::into)
     }
 
@@ -545,6 +599,53 @@ impl KfdVirtualMemory {
                 physical_backing_id: self.info.physical_backing_id,
             },
         ))
+    }
+
+    pub(crate) fn fabric_ready(&self) -> Result<bool, Error> {
+        let vm = self.vm.as_ref().ok_or_else(|| {
+            error(
+                ErrorKind::Unsupported,
+                "imported virtual memory has no fabric export owner",
+            )
+        })?;
+        vm.check()?;
+        let path = format!(
+            "/sys/class/drm/renderD{}/device/ualink/accel_state",
+            vm.render_minor()
+        );
+        Ok(std::fs::read_to_string(path)
+            .is_ok_and(|state| matches!(state.trim(), "ready" | "active")))
+    }
+
+    pub(crate) fn export_fabric_handle(&self) -> Result<[u8; 16], Error> {
+        if self.freeing || self.uncertain || self.mapping_uncertain.load(Ordering::Acquire) {
+            return Err(error(
+                ErrorKind::DriverContract,
+                "virtual-memory backing is unavailable for fabric export",
+            ));
+        }
+        let vm = self.vm.as_ref().ok_or_else(|| {
+            error(
+                ErrorKind::Unsupported,
+                "imported virtual memory has no fabric export owner",
+            )
+        })?;
+        vm.check()?;
+        if !self.fabric_ready()? {
+            return Err(error(
+                ErrorKind::Busy,
+                "UALink accelerator is not ready for fabric export",
+            ));
+        }
+        // GEM handles are scoped to a DRM file. A dedicated file makes the
+        // temporary PRIME import close even if export fails.
+        let render = super::sysfs::open_render(vm.render_minor())
+            .map_err(|source| native_error("fabric render open", source))?;
+        let dma_buf = self.dma_buf()?;
+        let gem = drm::import_dma_buf(&render, dma_buf.as_raw_fd())
+            .map_err(|source| native_error("fabric DMA-BUF import", source))?;
+        drm::export_fabric_handle(&render, gem)
+            .map_err(|source| native_error("DRM UALink fabric export", source))
     }
 
     pub(super) fn dma_buf(&self) -> Result<&File, Error> {
@@ -615,15 +716,25 @@ impl Drop for KfdVirtualMemory {
 
 /// Device mapping joining one address reservation to one physical allocation.
 pub(crate) struct KfdVirtualDeviceMapping {
+    /// Render VM whose page tables contain the mapping.
     vm: Shared<DeviceVm>,
+    /// Physical identity used to share imported GEM handles.
     backing_id: [u64; 2],
+    /// GEM handle mapped in this render VM.
     handle: u32,
+    /// First mapped GPU virtual byte.
     address: u64,
+    /// Byte offset into physical backing.
     offset: u64,
+    /// Mapped byte extent.
     size: u64,
+    /// Native map and synchronization completed.
     mapped: bool,
+    /// Timeline update awaiting proof of unmap completion.
     pending_unmap: Option<(u32, u64)>,
+    /// Whether this mapping must release a GEM import reference.
     owns_gem: bool,
+    /// Native update may have completed despite reporting an error.
     uncertain: bool,
 }
 
@@ -648,8 +759,8 @@ impl KfdVirtualDeviceMapping {
         vm.check()?;
         reservation.check()?;
         let dma_buf = memory.dma_buf()?;
-        let allocator = vm.allocator();
-        let owner = Owned::try_new_uninit(allocator)?;
+
+        let owner = Owned::try_new_uninit()?;
         let render = vm.render()?;
         let mut state = vm.vmem.lock().map_err(|_| {
             error(
@@ -755,6 +866,7 @@ impl Drop for KfdVirtualDeviceMapping {
 
 /// Host mapping joining one address reservation to CPU-accessible backing.
 pub(crate) struct KfdVirtualHostMapping {
+    /// Host VA mapping restored to reservation state on free.
     reservation: Option<os_memory::Reservation>,
 }
 
@@ -766,7 +878,6 @@ impl KfdVirtualHostMapping {
         offset: u64,
         size: u64,
         permissions: DeviceAccess,
-        allocator: Allocator,
     ) -> Result<Owned<Self>, Error> {
         let supported_permissions = DeviceAccess::READ | DeviceAccess::WRITE;
         if !supported_permissions.contains(permissions) {
@@ -788,7 +899,7 @@ impl KfdVirtualHostMapping {
                 "virtual-memory host extent exceeds host width",
             )
         })?;
-        let owner = Owned::try_new_uninit(allocator)?;
+        let owner = Owned::try_new_uninit()?;
         let mut reservation = os_memory::Reservation::view(address, size);
         reservation
             .map_dma_buf_with_permissions(memory.dma_buf()?, offset, permissions.bits())

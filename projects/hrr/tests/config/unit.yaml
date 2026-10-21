@@ -21,10 +21,13 @@ cases:
   Unit_HRR_Format_BadMagic: {}
   Unit_HRR_Format_EventTypeName: {}
   Unit_HRR_Format_HashHex: {}
+  Unit_HRR_Format_HostSnapshotRecord: {}
   Unit_HRR_Format_Roundtrip: {}
   Unit_HRR_Format_SmallPayloadForType: {}
   Unit_HRR_Format_TruncatedEvent: {}
   Unit_HRR_Format_UnknownEventType: {}
+  Unit_HRR_Playback_PlacementHeldRanges: {}
+  Unit_HRR_Playback_PlacementPlan: {}
   Unit_HRR_Playback_ReplayedH2DDrainGraphGuard: {}
   Unit_HRR_Playback_VersionOption: {}
   Unit_HRR_Playback_ZeroInitDrainGuard: {}
@@ -32,9 +35,19 @@ cases:
   Unit_HRR_Recovery_ImplausiblePayloadLength: {}
   Unit_HRR_Recovery_MultiProcessRootInfo: {}
   Unit_HRR_Recovery_NoTrailer: {}
+  Unit_HRR_Recovery_OversizeRecordBeforeTrailer: {}
+  Unit_HRR_Recovery_RecordAfterTrailer: {}
+  Unit_HRR_Recovery_RepairRootRewritesMiscountedTrailer: {}
   Unit_HRR_Recovery_RepairWritesProcessManifest: {}
+  Unit_HRR_Recovery_RootInfoChecksTrailerCount: {}
   Unit_HRR_Recovery_TornHeader: {}
+  Unit_HRR_Recovery_TornMiddleRecord: {}
   Unit_HRR_Recovery_TornPayload: {}
+  Unit_HRR_Recovery_TrailerCountMismatch: {}
+  Unit_HRR_Recovery_TrailerOvercounts: {}
+  Unit_HRR_Scrub_RefusesOutOfBoundsTables: {}
+  Unit_HRR_Scrub_SkipsUnterminatedName: {}
+  Unit_HRR_Scrub_ZeroesAndRetypesBuildInfo: {}
   Unit_HRR_TranslatePtr_ExactMatch: {}
   Unit_HRR_TranslatePtr_OutOfRange_ReturnsNull: {}
   Unit_HRR_TranslatePtr_SubAlloc_ReturnsOffset: {}
