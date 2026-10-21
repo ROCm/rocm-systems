@@ -28,6 +28,14 @@ static ncclResult_t DefaultSocketConnect(struct ncclSocket*) {
   FailLoudUnfaked("socket_fakes", "ncclSocketConnect");
 }
 
+static ncclResult_t DefaultSocketListen(struct ncclSocket*) {
+  FailLoudUnfaked("socket_fakes", "ncclSocketListen");
+}
+
+static ncclResult_t DefaultSocketGetAddr(struct ncclSocket*, union ncclSocketAddress*) {
+  FailLoudUnfaked("socket_fakes", "ncclSocketGetAddr");
+}
+
 static ncclResult_t DefaultSocketAccept(struct ncclSocket*, struct ncclSocket*, bool) {
   FailLoudUnfaked("socket_fakes", "ncclSocketAccept");
 }
@@ -95,6 +103,9 @@ std::function<ncclResult_t(struct ncclSocket*)> g_ncclSocketListen = DefaultSock
 std::function<ncclResult_t(struct ncclSocket*, union ncclSocketAddress*)> g_ncclSocketGetAddr =
     DefaultSocketGetAddr;
 std::function<ncclResult_t(struct ncclSocket*)> g_ncclSocketConnect = DefaultSocketConnect;
+std::function<ncclResult_t(struct ncclSocket*)> g_ncclSocketListen = DefaultSocketListen;
+std::function<ncclResult_t(struct ncclSocket*, union ncclSocketAddress*)> g_ncclSocketGetAddr =
+    DefaultSocketGetAddr;
 std::function<ncclResult_t(struct ncclSocket*, struct ncclSocket*, bool)> g_ncclSocketAccept =
     DefaultSocketAccept;
 std::function<ncclResult_t(struct ncclSocket*, int*)> g_ncclSocketReady = DefaultSocketReady;
@@ -114,6 +125,8 @@ ASSERT_HOOK_MATCHES_PROD(g_ncclSocketInit, ncclSocketInit);
 ASSERT_HOOK_MATCHES_PROD(g_ncclSocketListen, ncclSocketListen);
 ASSERT_HOOK_MATCHES_PROD(g_ncclSocketGetAddr, ncclSocketGetAddr);
 ASSERT_HOOK_MATCHES_PROD(g_ncclSocketConnect, ncclSocketConnect);
+ASSERT_HOOK_MATCHES_PROD(g_ncclSocketListen, ncclSocketListen);
+ASSERT_HOOK_MATCHES_PROD(g_ncclSocketGetAddr, ncclSocketGetAddr);
 ASSERT_HOOK_MATCHES_PROD(g_ncclSocketAccept, ncclSocketAccept);
 ASSERT_HOOK_MATCHES_PROD(g_ncclSocketReady, ncclSocketReady);
 ASSERT_HOOK_MATCHES_PROD(g_ncclSocketSend, ncclSocketSend);
@@ -139,6 +152,10 @@ ncclResult_t ncclSocketGetAddr(struct ncclSocket* sock, union ncclSocketAddress*
 }
 
 ncclResult_t ncclSocketConnect(struct ncclSocket* sock) { return g_ncclSocketConnect(sock); }
+ncclResult_t ncclSocketListen(struct ncclSocket* sock) { return g_ncclSocketListen(sock); }
+ncclResult_t ncclSocketGetAddr(struct ncclSocket* sock, union ncclSocketAddress* addr) {
+  return g_ncclSocketGetAddr(sock, addr);
+}
 
 ncclResult_t ncclSocketAccept(struct ncclSocket* sock, struct ncclSocket* listenSock, bool retry) {
   return g_ncclSocketAccept(sock, listenSock, retry);
@@ -180,6 +197,8 @@ void ResetSocketFakes() {
   g_ncclSocketListen = DefaultSocketListen;
   g_ncclSocketGetAddr = DefaultSocketGetAddr;
   g_ncclSocketConnect = DefaultSocketConnect;
+  g_ncclSocketListen = DefaultSocketListen;
+  g_ncclSocketGetAddr = DefaultSocketGetAddr;
   g_ncclSocketAccept = DefaultSocketAccept;
   g_ncclSocketReady = DefaultSocketReady;
   g_ncclSocketSend = DefaultSocketSend;

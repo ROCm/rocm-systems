@@ -462,6 +462,11 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   - `net_ib/common.cc` and host helpers in `net_ib/common.h`
     (`NET_IB_COMMON_CC_PATH`, from `net_ib/common-test.cc`); suites
     `NetIbCommonMicrotest.*`.
+  - `net_ib/connect.cc` (`NET_IB_CONNECT_CC_PATH`, from
+    `net_ib/connect-test.cc`); suites `NetIbConnectMicrotest.*`.
+  - `net_ib/p2p.cc` and host helpers in `net_ib/p2p.h`
+    (`NET_IB_P2P_CC_PATH`, from `net_ib/p2p-test.cc`); suites
+    `NetIbP2pMicrotest.*`.
   - `net_ib/init.cc` (`NET_IB_INIT_CC_PATH`, from `net_ib/init-test.cc`);
     suites `NetIbInitMicrotest.*`.
   - `net_ib/reg.cc` (`NET_IB_REG_CC_PATH`, from `net_ib/reg-test.cc`);
@@ -627,6 +632,7 @@ symbol.
 | `src/misc/gdr_probe.cc` (targets that do not compile the real probe) | `fakes/gdr_probe_fakes.{h,cc}` |
 | `src/misc/ibvwrap.cc` | `fakes/ibvwrap_fakes.{h,cc}` |
 | file-static RMA helpers in `src/include/gdrwrap.h` | `fakes/gdrwrap_fakes.{h,cc}` via `fakes/gdrwrap_seam.h` / `fakes/gdrwrap_seam_undef.h` |
+| HSA runtime diagnostics | `fakes/hsa_fakes.cc` |
 | ibverbs provider dv libraries (`libionic.so`, `libmlx5.so`) | `fakes/dv_provider_fake.cc` |
 | `src/misc/kernel_config.cc` | `fakes/kernel_config_fakes.cc` |
 | `src/misc/mlx5dvwrap.cc` | `fakes/mlx5dvwrap_fakes.{h,cc}` |
@@ -651,6 +657,7 @@ symbol.
 | `src/transport/net_ib/p2p.cc` | `fakes/transport_net_ib_p2p_fakes.{h,cc}` |
 | `src/transport/net_ib/p2p_resiliency.cc` | `fakes/transport_net_ib_resiliency_fakes.{h,cc}` |
 | `src/transport/net_ib/p2p_resiliency_recovery.cc` | `fakes/transport_net_ib_recovery_fakes.{h,cc}` |
+| `src/transport/net_ib/wqe_lat_mon.cc` | `fakes/transport_net_ib_wqe_lat_fakes.{h,cc}` |
 | `src/transport/net_socket.cc` (targets that do not compile the real file) | `fakes/transport_net_socket_fakes.{h,cc}` |
 | `src/transport/net_socket/common.cc` (targets that do not compile the real file) | `fakes/transport_net_socket_common_fakes.{h,cc}` |
 | generated `sym_kernels_host.cc` (targets that do not compile it) | `fakes/sym_kernels_index_fakes.cc` |

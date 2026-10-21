@@ -21,6 +21,8 @@ extern std::function<ncclResult_t(struct ncclSocket*, const union ncclSocketAddr
 extern std::function<ncclResult_t(struct ncclSocket*)> g_ncclSocketListen;
 extern std::function<ncclResult_t(struct ncclSocket*, union ncclSocketAddress*)> g_ncclSocketGetAddr;
 extern std::function<ncclResult_t(struct ncclSocket*)> g_ncclSocketConnect;
+extern std::function<ncclResult_t(struct ncclSocket*)> g_ncclSocketListen;
+extern std::function<ncclResult_t(struct ncclSocket*, union ncclSocketAddress*)> g_ncclSocketGetAddr;
 extern std::function<ncclResult_t(struct ncclSocket*, struct ncclSocket*, bool)> g_ncclSocketAccept;
 extern std::function<ncclResult_t(struct ncclSocket*, int*)> g_ncclSocketReady;
 extern std::function<ncclResult_t(struct ncclSocket*, void*, int)> g_ncclSocketSend;

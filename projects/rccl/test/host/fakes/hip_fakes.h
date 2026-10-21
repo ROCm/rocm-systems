@@ -147,6 +147,9 @@ extern std::function<hipError_t(size_t* /*granularity*/, const hipMemAllocationP
     g_hipMemGetAllocationGranularity;
 extern std::function<hipError_t(hipMemAllocationProp* /*prop*/, hipMemGenericAllocationHandle_t /*handle*/)>
     g_hipMemGetAllocationPropertiesFromHandle;
+extern std::function<hipError_t(void* /*handle*/, hipDeviceptr_t /*ptr*/, size_t /*size*/,
+                                hipMemRangeHandleType /*type*/, unsigned long long /*flags*/)>
+    g_hipMemGetHandleForAddressRange;
 extern std::function<hipError_t(hipMemGenericAllocationHandle_t* /*handle*/, void* /*shareable*/,
                                 hipMemAllocationHandleType /*type*/)>
     g_hipMemImportFromShareableHandle;
