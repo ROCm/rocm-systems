@@ -490,7 +490,7 @@
       "binary": "host/rccl-UnitTestsMicroNetIbCastDataPath",
       "num_ranks": 1,
       "num_nodes": 1,
-      "num_gpus": 1,
+      "num_gpus": 0,
       "timeout": 60,
       "tests": [
         {"name": "NetIbCastDataPathMicrotests", "description": "Host-only transport/net_ib_cast/{p2p,scheduler,net_ib_ops_fault}.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
