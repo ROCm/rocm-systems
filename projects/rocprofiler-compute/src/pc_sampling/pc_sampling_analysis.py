@@ -128,7 +128,12 @@ def load_pc_sample_records(tool_data: dict[str, Any]) -> pd.DataFrame:
             "wave_issued": record.get("wave_issued"),
             "exec_mask": record.get("exec_mask"),
             "wave_cnt": record.get("wave_cnt"),
-            "stall_reason": record.get("snapshot", {}).get("stall_reason"),
+            # The SDK stall reason is only valid when the wave did not issue.
+            "stall_reason": (
+                None
+                if record.get("wave_issued")
+                else record.get("snapshot", {}).get("stall_reason")
+            ),
             "inst_type": record.get("inst_type"),
         })
 
