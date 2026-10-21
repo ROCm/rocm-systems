@@ -6,6 +6,7 @@ tests consume the captured bits directly and require no GPU.
 
 | Header | Contents |
 | --- | --- |
+| `rdna_sparse_float_samples.h` | Selected RDNA4 sparse FP16 matrix output words. |
 | `rdna_f8_samples.h` | Selected RDNA4 FP8/BF8 WMMA output words. |
 | `rdna_integer_samples.h` | Selected RDNA integer WMMA/SWMMAC output words. |
 | `gfx1100_cases.h` | GFX11 FP32-output DOT2 cases and a WMMA matrix. |
@@ -40,6 +41,8 @@ Integer cases distinguish intermediate saturation, sparse index selection, and
 operand overlap. Inputs use the original capture seed and xorshift sequence.
 
 FP8/BF8 cases distinguish native-format arithmetic and NaN precedence.
+
+Sparse floating-point cases exercise index keys, source signs, and packed outputs.
 
 Tests sample destination words and check that other registers remain unchanged.
 This deliberately small corpus is regression coverage, not exhaustive validation.
