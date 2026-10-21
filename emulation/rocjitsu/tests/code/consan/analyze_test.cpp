@@ -469,6 +469,35 @@ TEST_F(ConSanAnalysis, AcceptedUtf8EntryNamesRetainTheirBytesInJson) {
       std::string::npos);
 }
 
+TEST_F(ConSanAnalysis, InvalidUtf8EntryNamesAreAnalysisInputErrorsAfterBinaryRoundTrip) {
+  for (const std::string_view invalid :
+       {"\x80", "\xbf", "\xc0\x80", "\xc1\xbf", "\xc2", "\xc2\x7f", "\xdf\xff", "\xe0\x80\x80",
+        "\xed\xa0\x80", "\xef\xbf", "\xf0\x80\x80\x80", "\xf4\x90\x80\x80", "\xf5\x80\x80\x80",
+        "\xf8\x88\x80\x80\x80", "\xff"}) {
+    capture_.header.manifest.entry.name = "kernel_" + std::string(invalid);
+    // Binary capture remains byte preserving; only JSON-producing analysis
+    // requires text. Re-encode each case so checksums cannot hide this check.
+    const FailureOr<std::vector<uint8_t>> bytes = encode();
+    ASSERT_TRUE(bytes.succeeded()) << error_.message;
+    const FailureOr<Capture> decoded = decode_capture(bytes.value(), &error_);
+    ASSERT_TRUE(decoded.succeeded()) << error_.message;
+    EXPECT_EQ(decoded.value().header.manifest.entry.name, capture_.header.manifest.entry.name);
+    const FailureOr<LdsRaceResult> result = analyze_capture(decoded.value(), {}, &error_);
+    EXPECT_TRUE(result.failed());
+    EXPECT_EQ(error_.code, ContractErrorCode::InvalidFacts);
+    EXPECT_EQ(error_.message, "entry name is not valid UTF-8 for JSON output");
+  }
+}
+
+TEST_F(ConSanAnalysis, Utf8ScalarBoundariesRetainTheirBytesInJson) {
+  const std::string name = "kernel_\xc2\x80\xdf\xbf\xe0\xa0\x80\xed\x9f\xbf"
+                           "\xee\x80\x80\xef\xbf\xbf\xf0\x90\x80\x80\xf4\x8f\xbf\xbf";
+  capture_.header.manifest.entry.name = name;
+  const FailureOr<LdsRaceResult> result = analyze();
+  ASSERT_TRUE(result.succeeded()) << error_.message;
+  EXPECT_NE(render_analysis(result.value()).find("\"entry\":\"" + name + "\""), std::string::npos);
+}
+
 TEST_F(ConSanAnalysis, EmptyValidObservationsAndNoExecutionsNeverClaimRaceFreedom) {
   auto result = analyze();
   ASSERT_TRUE(result.succeeded()) << error_.message;

@@ -283,8 +283,9 @@ Other normal nonzero analyzer statuses indicate input/output failures. See the
 [analysis results](../lib/rocjitsu/src/rocjitsu/code/consan/analysis/lds_race.h)
 for option, status, and result details.
 
-Known output limitation: entry names are not validated as UTF-8, so accepted
-names can produce invalid UTF-8 JSON despite analyzer exit 0.
+Entry names must be valid UTF-8 for JSON output. The analyzer rejects malformed
+names with input-error exit 2 before writing JSON; binary capture retains the
+original name bytes. ASCII and valid UTF-8 names keep their original spelling.
 
 ## Extending ConSan
 

@@ -20,6 +20,7 @@ struct AnalysisOptions {
 /// @details File callers first use decode_capture for framing, End and envelope
 /// validation. Typed callers must supply equivalent execution envelopes; this
 /// entry still validates manifest, execution conditions, identity and budgets.
+/// Entry names must be valid UTF-8 for JSON output; binary capture retains bytes.
 /// Invalid static facts are input errors. Local raw GPU corruption and
 /// unsupported effective ranges become explicit gaps, preserving independent
 /// findings. Naturally aligned native b32 ranges have mode-independent effective
