@@ -85,7 +85,7 @@ struct MicroReadStep {
 ssize_t DeliverReadStep(const MicroReadStep& step, void* buf, size_t count);
 
 // ---------------------------------------------------------------------------
-// Seams. Each defaults to the success behaviour described in the .cc.
+// Seams. Each default is defined in the .cc.
 // ---------------------------------------------------------------------------
 extern std::function<ssize_t(int, const void*, size_t)> g_write;
 extern std::function<ssize_t(int, void*, size_t)> g_read;
