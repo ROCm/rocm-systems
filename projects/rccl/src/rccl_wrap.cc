@@ -121,7 +121,7 @@ rcclBackendMask_t rcclAllReducePreferredBackends(const ncclComm* comm) {
   if (rcclParamForceSymmetric()) return RCCL_BACKEND_SYMMETRIC;
   if (rcclParamForceDda())       return RCCL_BACKEND_DDA;
   if (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)
-    return RCCL_BACKEND_CE | RCCL_BACKEND_GIN_SDMA;
+    return RCCL_BACKEND_CE;
   return RCCL_BACKEND_ALL;
 }
 

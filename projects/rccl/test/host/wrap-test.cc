@@ -5664,10 +5664,10 @@ TEST(WrapMicrotest, AllReducePreferredBackends_DefaultReturnsAll) {
   DeleteCommWithArch(comm);
 }
 
-TEST(WrapMicrotest, AllReducePreferredBackends_CTAPolicyZeroReturnsCeAndGinSdma) {
+TEST(WrapMicrotest, AllReducePreferredBackends_CTAPolicyZeroReturnsCe) {
   ncclComm* comm = MakeSelectComm();
   comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
-  EXPECT_EQ(rcclBackendMask_t(RCCL_BACKEND_CE | RCCL_BACKEND_GIN_SDMA),
+  EXPECT_EQ(rcclBackendMask_t(RCCL_BACKEND_CE),
             rcclAllReducePreferredBackends(comm));
   DeleteCommWithArch(comm);
 }
