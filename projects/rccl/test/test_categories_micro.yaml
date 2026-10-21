@@ -77,6 +77,8 @@ test_categories:
       - "WrapMicrotestIsolated.*"
       # misc/gdr_probe.cc
       - "GdrProbeTest.*"
+      # misc/mlx5dvwrap.cc
+      - "Mlx5dvRegDmabufTest.*"
       # dev_runtime.cc
       - "Alloc*"
       - "Comm*"

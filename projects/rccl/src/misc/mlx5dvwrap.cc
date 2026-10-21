@@ -35,6 +35,14 @@ ncclResult_t wrap_mlx5dv_symbols(void) {
     return ncclInternalError; \
   }
 
+/* Same as CHECK_NOT_NULL, and sets errno so a caller can fall back. */
+#define CHECK_NOT_NULL_ERRNO(container, internal_name, err) \
+  if (container.internal_name == NULL) { \
+    WARN("NET/MLX5: lib wrapper not initialized."); \
+    errno = (err); \
+    return ncclInternalError; \
+  }
+
 #define MLX5DV_PTR_CHECK_ERRNO(container, internal_name, call, retval, error_retval, name) \
   CHECK_NOT_NULL(container, internal_name); \
   retval = container.call; \
@@ -77,13 +85,13 @@ ncclResult_t wrap_mlx5dv_get_data_direct_sysfs_path(struct ibv_context* context,
 /* DMA-BUF support */
 ncclResult_t wrap_mlx5dv_reg_dmabuf_mr(struct ibv_mr** ret, struct ibv_pd* pd, uint64_t offset, size_t length,
                                        uint64_t iova, int fd, int access, int mlx5_access) {
-  if (mlx5dvSymbols.mlx5dv_internal_reg_dmabuf_mr == NULL) {
-    errno = EOPNOTSUPP;
-    return ncclInternalError;
+  CHECK_NOT_NULL_ERRNO(mlx5dvSymbols, mlx5dv_internal_reg_dmabuf_mr, EOPNOTSUPP);
+  *ret = mlx5dvSymbols.mlx5dv_internal_reg_dmabuf_mr(pd, offset, length, iova, fd, access, mlx5_access);
+  if (*ret == NULL) {
+    WARN("NET/MLX5: Call to mlx5dv_reg_dmabuf_mr failed with error %s", strerror(errno));
+    return ncclSystemError;
   }
-  MLX5DV_PTR_CHECK_ERRNO(mlx5dvSymbols, mlx5dv_internal_reg_dmabuf_mr,
-                         mlx5dv_internal_reg_dmabuf_mr(pd, offset, length, iova, fd, access, mlx5_access), *ret, NULL,
-                         "mlx5dv_reg_dmabuf_mr");
+  return ncclSuccess;
 }
 
 struct ibv_mr* wrap_direct_mlx5dv_reg_dmabuf_mr(struct ibv_pd* pd, uint64_t offset, size_t length, uint64_t iova,
@@ -95,14 +103,37 @@ struct ibv_mr* wrap_direct_mlx5dv_reg_dmabuf_mr(struct ibv_pd* pd, uint64_t offs
   return mlx5dvSymbols.mlx5dv_internal_reg_dmabuf_mr(pd, offset, length, iova, fd, access, mlx5_access);
 }
 
+/* One WARN per protection domain. MR cache misses would otherwise repeat it. */
+static bool warnDmabufFallbackOnce(struct ibv_pd* pd) {
+  constexpr int kMaxWarned = 32;
+  static std::mutex mu;
+  static struct ibv_pd* warned[kMaxWarned];
+  static int nWarned = 0;
+  std::lock_guard<std::mutex> lock(mu);
+  for (int i = 0; i < nWarned; i++) {
+    if (warned[i] == pd) return false;
+  }
+  if (nWarned < kMaxWarned) warned[nWarned++] = pd;
+  return true;
+}
+
 ncclResult_t wrap_reg_dmabuf_mr(struct ibv_mr** ret, struct ibv_pd* pd, uint64_t offset, size_t length, uint64_t iova,
                                 int fd, int access, bool dataDirect) {
   if (dataDirect) {
-    ncclResult_t res =
-      wrap_mlx5dv_reg_dmabuf_mr(ret, pd, offset, length, iova, fd, access, MLX5DV_REG_DMABUF_ACCESS_DATA_DIRECT);
-    if (res == ncclSuccess) return ncclSuccess;
-    INFO(NCCL_NET,
-         "NET/IB: mlx5dv_reg_dmabuf_mr failed (%d, %s); falling back to ibv_reg_dmabuf_mr", res, strerror(errno));
+    // Call the symbol directly. wrap_mlx5dv_reg_dmabuf_mr warns on every failure,
+    // and MR cache misses would repeat that for a NIC that stays on the fallback.
+    if (mlx5dvSymbols.mlx5dv_internal_reg_dmabuf_mr == NULL) {
+      errno = EOPNOTSUPP;
+    } else {
+      *ret = mlx5dvSymbols.mlx5dv_internal_reg_dmabuf_mr(pd, offset, length, iova, fd, access,
+                                                        MLX5DV_REG_DMABUF_ACCESS_DATA_DIRECT);
+      if (*ret != NULL) return ncclSuccess;
+    }
+    int savedErrno = errno;
+    if (warnDmabufFallbackOnce(pd)) {
+      WARN("NET/IB: mlx5dv_reg_dmabuf_mr failed (%s); falling back to ibv_reg_dmabuf_mr", strerror(savedErrno));
+    }
+    errno = savedErrno;
   }
   return wrap_ibv_reg_dmabuf_mr(ret, pd, offset, length, iova, fd, access);
 }
