@@ -114,8 +114,12 @@ Run these two commands separately:
 1. `cmake -S samples/videoDecodePerf -B samples/videoDecodePerf/build`
 2. `cmake --build samples/videoDecodePerf/build --config Release --parallel`
 
-This requires rocDecode to be installed already (`cmake --install build --config Release`);
-run the `/validate` skill first if you have not built and installed the library this session.
+This requires rocDecode to be installed already. If it is not, build and install it first
+(run each separately):
+
+1. `cmake -B build`
+2. `cmake --build build --config Release --parallel`
+3. `cmake --install build --config Release`
 
 CRITICAL stale-build-dir pitfall: cmake configure is a no-op when a `build/` cache already
 exists, so a STALE `samples/videoDecodePerf/build` dir silently keeps building against
