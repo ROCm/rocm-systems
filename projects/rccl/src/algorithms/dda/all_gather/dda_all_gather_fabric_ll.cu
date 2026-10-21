@@ -125,7 +125,7 @@ bool ncclAllGatherDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void
   if (comm->nRanks < 2 || comm->nRanks > dda::common::kDdaMaxNranks) {
     return false;
   }
-  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
+  if (!rcclDdaDatatypeSupported(comm, datatype)) {
     return false;
   }
 
@@ -154,7 +154,7 @@ uint32_t ncclAllGatherDdaFabricLLBlocks(ncclComm* comm, size_t sendcount, ncclDa
 
 ncclResult_t ncclAllGatherDdaFabricLL(const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,
                                       ncclComm* comm, cudaStream_t stream) {
-  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
+  if (!rcclDdaDatatypeSupported(comm, datatype)) {
     return ncclInvalidArgument;
   }
   // AllGather is a pure copy, so the payload moves as raw bytes: instantiate the

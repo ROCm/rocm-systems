@@ -397,6 +397,7 @@ if(BUILD_TESTS)
       Gfx1250SendRecvLl128WindowTests.cpp
       VersionInfoTests.cpp
       device/TestOp128.cpp
+      device/TestFp8Reduce.cpp
       device/RcclEpTests.cpp
       device/LlFifoSysScopeTests.cpp
       device/DdaIpcGpuBarrierOrderingTests.cpp
@@ -1016,6 +1017,7 @@ if(BUILD_TESTS)
       common/MPITestCore.cpp
       common/MPIEnvironment.cpp
       common/TestChecks.cpp
+      common/VerifiableFp8.cpp
       transport/TransportMPIBase.cpp
       transport/P2pMPITests.cpp
       transport/NetMPITests.cpp
@@ -1052,6 +1054,7 @@ if(BUILD_TESTS)
       GrowMPITests.cpp
       GinNcclTimeoutMPITests.cpp
       InspectorPromP2pMPITests.cpp
+      ProfilerKernelChMPITests.cpp
       SymmetricKernelMPITests.cpp
       SymmetricWindowMPITests.cpp
       DeviceApiMPITests.cpp
@@ -1059,8 +1062,11 @@ if(BUILD_TESTS)
       test_sparse_send_recv.cpp
       DdaAllReduceMPITests.cpp
       DdaReduceScatterMPITests.cpp
+      DdaReduceScatterLL128MPITests.cpp
+      DdaCollOpCountMPI_test.cpp
       DdaFabricSimpleMPITests.cpp
       DdaIpcIndexDataMPITests.cpp
+      DdaFp8MPITests.cpp
       SymmetricAbortCheckModeMPITests.cpp
     )
 
@@ -1092,6 +1098,24 @@ if(BUILD_TESTS)
       "LINKER:--export-dynamic-symbol=ncclRmaPlugin_v13")
 
     list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsMPI)
+
+    # Recorder profiler plugin for ProfilerKernelChMPITests. Unlike
+    # rccl-test-profiler-stub it is a working profiler: it records what RCCL
+    # delivers so the test can check it. It builds against the standalone headers
+    # an external plugin ships with rather than RCCL's own, and it lands and
+    # installs beside the test binary, which is where the test looks for it.
+    add_library(rccl-test-profiler-kch-recorder SHARED plugin/profiler_kernelch_recorder.cpp)
+    target_include_directories(rccl-test-profiler-kch-recorder PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/../plugins/profiler/example/nccl
+      ${CMAKE_CURRENT_SOURCE_DIR}/plugin)
+    set_target_properties(rccl-test-profiler-kch-recorder PROPERTIES
+      CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+    add_dependencies(rccl-UnitTestsMPI rccl-test-profiler-kch-recorder)
+    target_compile_definitions(rccl-UnitTestsMPI PRIVATE
+      RCCL_TEST_KCH_RECORDER_NAME="$<TARGET_FILE_NAME:rccl-test-profiler-kch-recorder>")
+    install(TARGETS rccl-test-profiler-kch-recorder
+      LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR}
+      COMPONENT tests)
 
     # Loadable GIN plugin for GinConnectLeakMPITest, built and installed beside the test binary.
     add_library(rccl-test-gin-fault-plugin SHARED plugin/gin_fault_plugin.cpp)
