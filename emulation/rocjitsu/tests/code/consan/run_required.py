@@ -28,6 +28,13 @@ def required_names():
         'ConSanAnalysis.Wave64HighLanesAndFullMasksRetainExactLanePairCounts',
         'ConSanAnalysis.InvalidUtf8EntryNamesAreAnalysisInputErrorsAfterBinaryRoundTrip',
         'ConSanAnalysis.Utf8ScalarBoundariesRetainTheirBytesInJson',
+        'ConSanHsaPluginDeathTest.FinishDuringFreezePreventsWorkerStartupAndUnloadsNormally',
+        'ConSanHsaPluginDeathTest.DestroyDuringFreezeInvalidatesTheAdmittedModule',
+        'ConSanHsaPlugin.RejectedBatchNotifiesEveryDiscardedDispatch',
+        'ConSanHsaPlugin.RejectedBatchPreservesSignalsForAlreadyPendingWork',
+        'ConSanHsaPlugin.RejectedBatchDoesNotTreatBarrierCompletionAsDispatchCompletion',
+        'ConSanHsaPlugin.RejectedNonDispatchPacketDoesNotModifyATrackedSignal',
+        'ConSanHsaPlugin.IndividualBarriersStillPassThroughWithoutDispatchAdmission',
     }
     for gpu, wave in MODES:
         suffix = f'{gpu}Wave{wave}'
