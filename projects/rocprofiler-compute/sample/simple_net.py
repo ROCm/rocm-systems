@@ -22,6 +22,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+try:
+    import roctx
+except ImportError:
+    roctx = None
+
 
 class SimpleNet(nn.Module):
     def __init__(self, same_line_linear=False):
@@ -66,7 +71,29 @@ def parse_args(argv=None):
         action="store_true",
         help="Run loss.backward() on a worker thread",
     )
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.user_range and roctx is None:
+        parser.error("--user-range requires ROCTX Python")
+    return args
+
+
+def run_backward(loss, caught):
+    """Thread target: run loss.backward() and keep any exception in caught."""
+    try:
+        loss.backward()
+    except BaseException:
+        caught.append(sys.exc_info()[1:])
+
+
+def backward_on_worker_thread(loss):
+    """Run loss.backward() on a worker thread and re-raise its exception here."""
+    caught = []
+    worker = threading.Thread(target=run_backward, args=(loss, caught))
+    worker.start()
+    worker.join()
+    if caught:
+        err, tb = caught[0]
+        raise err.with_traceback(tb)
 
 
 def main(argv=None):
@@ -75,14 +102,8 @@ def main(argv=None):
         print("GPU is required for this sample. Exiting.")
         sys.exit(1)
 
-    roctx_module = None
     if args.user_range:
-        try:
-            import roctx as roctx_module
-        except ImportError:
-            print("ROCTX Python is required for --user-range")
-            sys.exit(1)
-        roctx_module.rangePush("TrainingLoop_UserDefinedMarker")
+        roctx.rangePush("TrainingLoop_UserDefinedMarker")
 
     try:
         model = SimpleNet(same_line_linear=args.same_line_linear).cuda()
@@ -92,25 +113,12 @@ def main(argv=None):
             output = model(x)
             loss = output.sum()
             if args.backward_thread:
-                caught = []
-
-                def run_backward():
-                    try:
-                        loss.backward()
-                    except BaseException:
-                        caught.append(sys.exc_info()[1:])
-
-                worker = threading.Thread(target=run_backward)
-                worker.start()
-                worker.join()
-                if caught:
-                    err, tb = caught[0]
-                    raise err.with_traceback(tb)
+                backward_on_worker_thread(loss)
             elif not args.no_backward:
                 loss.backward()
     finally:
-        if roctx_module is not None:
-            roctx_module.rangePop()
+        if args.user_range:
+            roctx.rangePop()
 
     print("Training completed")
 
