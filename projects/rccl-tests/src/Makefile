@@ -227,3 +227,5 @@ endif
 
 clean_intermediates:
 	rm -f ${DST_DIR}/*.o $(TEST_VERIFIABLE_OBJS)
+
+include diff/diff.mk

@@ -28,6 +28,9 @@
 
 #include "verifiable.h"
 #include "util.h"
+#ifdef RCCL_TESTS_DIFF
+#include "diff/diff_api.h"
+#endif
 #include "gin_sdma_devtime_host.h"
 
 #if defined(NCCL_OS_LINUX)
@@ -146,6 +149,10 @@ int warmup_iters = 1;
 int iters = 20;
 int agg_iters = 1;
 static int run_cycles = 1;
+#ifdef RCCL_TESTS_DIFF
+void rcclDiffSetRunCycles(int n) { run_cycles = n; }
+int rcclDiffGetRunCycles() { return run_cycles; }
+#endif
 static int ncclop = ncclSum;
 static int nccltype = ncclFloat;
 static int ncclroot = 0;
@@ -1417,6 +1424,11 @@ void setupArgs(size_t size, ncclDataType_t type, struct threadArgs* args) {
 }
 
 testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* typeName, ncclRedOp_t op, const char* opName, int root) {
+#ifdef RCCL_TESTS_DIFF
+  if (rcclDiffShouldTakeover()) {
+    return rcclDiffTimeTest(args, type, typeName, op, opName, root);
+  }
+#endif
   // Sync to avoid first-call timeout
   Barrier(args);
 
@@ -1937,7 +1949,11 @@ testResult_t AllocateBuffs(void **sendbuff, size_t sendBytes, void **recvbuff, s
 
 testResult_t run(); // Main function
 
+#ifdef RCCL_TESTS_DIFF
+int rcclTestsOrigMain(int argc, char* argv[], char **envp) {
+#else
 int main(int argc, char* argv[], char **envp) {
+#endif
   // Make sure everyline is flushed so that we see the progress of the test
   ncclTestSetlinebuf(stdout);
   const char* slash = strrchr(argv[0], '/');

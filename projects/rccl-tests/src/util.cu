@@ -18,6 +18,9 @@
 
 #include "rccl/rccl.h"
 #include "util.h"
+#ifdef RCCL_TESTS_DIFF
+#include "diff/diff_api.h"
+#endif
 #include "gin_sdma_devtime_host.h"
 #include "git_version.h"
 #include "os.h"
@@ -454,6 +457,9 @@ static void jsonRankInfo(const rankInfo_t *ri) {
 // Write the start of a benchmark output line containing the bytes &
 // op type, both to stdout and to json if we are writing there.
 void writeBenchmarkLinePreamble(size_t nBytes, size_t nElem, const char typeName[], const char opName[], int root) {
+#ifdef RCCL_TESTS_DIFF
+  if (rcclDiffOnPreamble(nBytes, nElem, typeName, opName, root)) return;
+#endif
   char rootName[100];
   sprintf(rootName, "%6i", root);
   PRINT("%12li  %12li  %8s  %6s  %6s", nBytes, nElem, typeName, opName, rootName);
@@ -470,6 +476,9 @@ void writeBenchmarkLinePreamble(size_t nBytes, size_t nElem, const char typeName
 
 // Finish a result record we were writing to stdout/json
 void writeBenchmarkLineTerminator(int actualIters, const char *name) {
+#ifdef RCCL_TESTS_DIFF
+  if (rcclDiffOnTerminator()) return;
+#endif
   PRINT("\n");
   if(write_json) {
     jsonKey("actual_iterations"); jsonInt(actualIters);
@@ -480,6 +489,9 @@ void writeBenchmarkLineTerminator(int actualIters, const char *name) {
 
 // Handle a cases where we don't write out of place results
 void writeBenchMarkLineNullBody() {
+#ifdef RCCL_TESTS_DIFF
+  if (rcclDiffOnNullBody()) return;
+#endif
   rccl_tests_devtime::emitSkippedOutOfPlaceColumnToStdout();
   if(write_json) {
     jsonKey(rccl_tests_devtime::kSkippedOutOfPlaceJsonKey);
@@ -498,6 +510,9 @@ void getFloatStr(double value, int width, char* str) {
 // We call this function twice at the top level per test: once for out-of-place, and once for in-place.
 // The Json output assumes out-of-place happens first.
 void writeBenchmarkLineBody(double timeUsec, double algBw, double busBw, bool reportErrors, int64_t wrongElts, bool report_cputime, bool report_timestamps, bool out_of_place) {
+#ifdef RCCL_TESTS_DIFF
+  if (rcclDiffOnBody(timeUsec, algBw, busBw, reportErrors, wrongElts, out_of_place)) return;
+#endif
   char timeStr[8];
   getFloatStr(timeUsec, 7, timeStr);
 
@@ -741,6 +756,9 @@ testResult_t writeDeviceReport(size_t *maxMem, int localRank, int proc, int tota
 // Json results object and contained table list are left open
 // RCCL: Added parameters to support algo/proto/channels and flexible in-place/out-of-place layout
 void writeResultHeader(bool report_cputime, bool report_timestamps, bool enable_out_of_place, bool enable_in_place, bool output_algo_proto_channels) {
+#ifdef RCCL_TESTS_DIFF
+  if (rcclDiffWriteHeader(report_cputime, report_timestamps, enable_out_of_place, enable_in_place, output_algo_proto_channels)) return;
+#endif
   const char* tsLbl  = report_timestamps ? "timestamp" : "";
   const int tsPad = report_timestamps ? 19 : 0;
   const char* tsFmt = report_timestamps ? TIME_STRING_FORMAT : "";
@@ -797,6 +815,9 @@ void writeResultHeader(bool report_cputime, bool report_timestamps, bool enable_
 // We close the table list and write out the summary items.
 // Results object is left open for errors.
 void writeResultFooter(const int errors[], const double bw[], double check_avg_bw, const char *program_name) {
+#ifdef RCCL_TESTS_DIFF
+  if (rcclDiffWriteFooter(errors, bw, check_avg_bw, program_name)) return;
+#endif
 
   if(write_json) {
     jsonFinishList();
