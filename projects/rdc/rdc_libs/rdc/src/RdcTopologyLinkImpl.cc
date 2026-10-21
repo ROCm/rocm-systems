@@ -181,7 +181,11 @@ rdc_status_t RdcTopologyLinkImpl::rdc_link_status_get(rdc_link_status_t* results
 
   // Assign the index to the index list
   count = device_count.value.l_int;
-  assert(count <= RDC_MAX_NUM_DEVICES);
+  if (count > RDC_MAX_NUM_DEVICES) {
+    RDC_LOG(RDC_ERROR,
+            "GPU count " << count << " exceeds the link status limit " << RDC_MAX_NUM_DEVICES);
+    return RDC_ST_MAX_LIMIT;
+  }
   for (uint32_t i = 0; i < count; i++) {
     gpu_index_list[i] = i;
   }
@@ -198,7 +202,7 @@ rdc_status_t RdcTopologyLinkImpl::rdc_link_status_get(rdc_link_status_t* results
     }
     if (err != AMDSMI_STATUS_SUCCESS) {
       RDC_LOG(RDC_INFO, "Fail to get process GPUs processor handle information: " << err);
-      return status;
+      return RDC_ST_NOT_FOUND;
     }
 
     amdsmi_xgmi_link_status_t link_status = {};

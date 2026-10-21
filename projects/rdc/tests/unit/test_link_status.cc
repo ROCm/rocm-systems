@@ -54,6 +54,8 @@ struct LinkQuery {
   amdsmi_xgmi_link_status_t output;
   // false: a GPU AMD SMI cannot identify, whose handle lookup fails with NOT_FOUND.
   bool available = true;
+  // What the fake get_processor_handle_from_id() returns for an available GPU.
+  amdsmi_status_t lookup = AMDSMI_STATUS_SUCCESS;
 };
 
 // One entry per GPU. The fake processor handle of GPU i points at entry i.
@@ -111,6 +113,9 @@ amdsmi_status_t get_processor_handle_from_id(uint32_t gpu_id,
                                              amdsmi_processor_handle* processor_handle) {
   if (gpu_id >= g_queries.size() || !g_queries[gpu_id].available) {
     return AMDSMI_STATUS_NOT_FOUND;
+  }
+  if (g_queries[gpu_id].lookup != AMDSMI_STATUS_SUCCESS) {
+    return g_queries[gpu_id].lookup;
   }
   *processor_handle = &g_queries[gpu_id];
   return AMDSMI_STATUS_SUCCESS;
@@ -283,4 +288,29 @@ TEST(RdcLinkStatus, CapsLinkCountAtArraySize) {
   for (uint32_t n = 0; n < max_links; n++) {
     EXPECT_EQ(results->gpus[0].link_states[n], RDC_LINK_STATE_UP) << "link " << n;
   }
+}
+
+// More GPUs than rdc_link_status_t holds: an error, not writes past its gpus[].
+TEST(RdcLinkStatus, RejectsMoreGpusThanTheResultHolds) {
+  g_queries.assign(RDC_MAX_NUM_DEVICES,
+                   {AMDSMI_STATUS_SUCCESS, true, make_links({AMDSMI_XGMI_LINK_UP})});
+  amd::rdc::RdcTopologyLinkImpl impl(nullptr, std::make_shared<FakeMetricFetcher>());
+  auto results = std::make_unique<rdc_link_status_t>();
+  ASSERT_EQ(impl.rdc_link_status_get(results.get()), RDC_ST_OK);
+  EXPECT_EQ(results->num_of_gpus, RDC_MAX_NUM_DEVICES);
+
+  g_queries.push_back(g_queries.front());
+  EXPECT_EQ(impl.rdc_link_status_get(results.get()), RDC_ST_MAX_LIMIT);
+}
+
+// A GPU whose processor handle cannot be found: an error, as in rdc_device_topology_get(), not
+// RDC_ST_OK with that GPU and the ones after it left unset.
+TEST(RdcLinkStatus, FailedHandleLookupIsAnError) {
+  g_queries = {
+      {AMDSMI_STATUS_SUCCESS, true, make_links({AMDSMI_XGMI_LINK_UP})},
+      {AMDSMI_STATUS_SUCCESS, true, make_links({AMDSMI_XGMI_LINK_UP}), true, AMDSMI_STATUS_INVAL},
+      {AMDSMI_STATUS_SUCCESS, true, make_links({AMDSMI_XGMI_LINK_UP})}};
+  amd::rdc::RdcTopologyLinkImpl impl(nullptr, std::make_shared<FakeMetricFetcher>());
+  auto results = std::make_unique<rdc_link_status_t>();
+  EXPECT_EQ(impl.rdc_link_status_get(results.get()), RDC_ST_NOT_FOUND);
 }
