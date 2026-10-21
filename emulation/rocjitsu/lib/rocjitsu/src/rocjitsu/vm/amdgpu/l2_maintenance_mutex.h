@@ -191,7 +191,15 @@ private:
   }
 
   void reopen_admission() {
-    writer_pending_.store(0, std::memory_order_release);
+    // A release store followed by notification is sufficient for this protocol
+    // under the C++ atomic wait/notify rules. The seq_cst store is a library
+    // workaround for libstdc++'s implementation.
+    // In libstdc++'s int-sized futex path, notify_all checks the bucket's
+    // waiter count before deciding whether to wake. Order publication before
+    // that check: on x86 a release store can remain buffered while the check
+    // sees no waiter and a newly registered waiter still sees the old state.
+    // Apply the ordering when reopening reader admission.
+    writer_pending_.store(0, std::memory_order_seq_cst);
     writer_pending_.notify_all();
     writers_.unlock();
   }

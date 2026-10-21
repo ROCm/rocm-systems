@@ -363,4 +363,61 @@ TEST(L2MaintenanceMutexTest, ExclusiveUnlockWakesBlockingReaders) {
   EXPECT_EQ(admitted.load(std::memory_order_relaxed), kReaders);
 }
 
+TEST(L2MaintenanceMutexTest, RepeatedAdmissionHandoffsMakeProgress) {
+  constexpr unsigned kRounds = 1000000;
+  constexpr size_t kBufferSize = 64u << 20;
+  rocjitsu::amdgpu::L2MaintenanceMutex mutex;
+  alignas(64) std::atomic<unsigned> offered{0};
+  alignas(64) std::atomic<unsigned> requested{0};
+  alignas(64) std::atomic<unsigned> completed{0};
+  unsigned value = 0;
+  bool matched = true;
+  // Use one pair: unrelated waiters can keep libstdc++'s shared waiter-count
+  // bucket nonzero and mask a missed notification.
+  std::jthread reader([&] {
+    unsigned seed = 17;
+    volatile unsigned spin = 0;
+    for (unsigned round = 1; round <= kRounds; ++round) {
+      while (offered.load(std::memory_order_acquire) != round)
+        std::this_thread::yield();
+      requested.store(round, std::memory_order_release);
+      // Vary arrival at the wait without adding an atomic RMW that could mask
+      // the publication race.
+      seed = seed * 1103515245 + 12345;
+      for (unsigned delay = (seed >> 16) % 1024; delay; --delay)
+        spin = spin + 1;
+      {
+        std::shared_lock lock(mutex);
+        if (value != round)
+          matched = false;
+      }
+      completed.store(round, std::memory_order_release);
+    }
+  });
+  std::vector<char> buffer(kBufferSize);
+  volatile char *cold = buffer.data();
+  size_t pos = 0;
+  for (unsigned round = 1; round <= kRounds; ++round) {
+    std::unique_lock writer(mutex);
+    value = round;
+    offered.store(round, std::memory_order_release);
+    while (requested.load(std::memory_order_acquire) != round)
+      std::this_thread::yield();
+    // Fill the store buffer with cold writes before publishing the open gate.
+    // The stride crosses pages and cache lines; masking keeps the loop cheap.
+    for (unsigned i = 0; i < 64; ++i) {
+      cold[pos] = static_cast<char>(round);
+      pos = (pos + 4160) & (kBufferSize - 1);
+    }
+    writer.unlock();
+    // A later unlock must not rescue a missed wake. CTest's external timeout
+    // bounds this wait and the reader join if admission stalls.
+    while (completed.load(std::memory_order_acquire) != round)
+      std::this_thread::yield();
+  }
+  reader.join();
+  EXPECT_TRUE(matched);
+  EXPECT_EQ(completed.load(std::memory_order_relaxed), kRounds);
+}
+
 } // namespace

@@ -895,6 +895,7 @@ set(_rj_l2_mutex_cases
     PendingWriterClosesAdmissionAndWakesAfterLastReader
     CollidingReadersOverlapAndWriterWaitsForTheLastOwner
     ExclusiveUnlockWakesBlockingReaders
+    RepeatedAdmissionHandoffsMakeProgress
 )
 # Exclude exactly the cases registered below, so future cases still participate
 # in normal discovery until they receive an explicit timeout registration.
@@ -933,12 +934,18 @@ rj_add_test(
 # A failed assertion cannot bound a blocked join or jthread destructor. Give
 # each L2 mutex case its own process timeout in build-tree and installed tests.
 foreach(_l2_mutex_case IN LISTS _rj_l2_mutex_cases)
+    set(_l2_mutex_run_serial)
+    if(_l2_mutex_case STREQUAL "RepeatedAdmissionHandoffsMakeProgress")
+        # Keep scheduling contention out of the handoff stress test.
+        set(_l2_mutex_run_serial RUN_SERIAL)
+    endif()
     rj_add_test(
         NAME "L2MaintenanceMutexTest.${_l2_mutex_case}"
         COMMAND
             $<TARGET_FILE:rocjitsu_tests>
             "--gtest_filter=L2MaintenanceMutexTest.${_l2_mutex_case}"
         TIMEOUT 30
+        ${_l2_mutex_run_serial}
         INSTALL_COMMAND
             "bin/rocjitsu_tests"
             "--gtest_filter=L2MaintenanceMutexTest.${_l2_mutex_case}"
