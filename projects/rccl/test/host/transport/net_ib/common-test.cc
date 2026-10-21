@@ -29,8 +29,6 @@ class NetIbCommonMicrotest : public ::testing::Test {
     ResetTransportNetIbFakes();
     ResetIbvwrapFakes();
     ResetNcclFakes();
-    ncclDebugLevelMask = NCCL_LOG_NONE;
-    ncclDebugMask = 0;
   }
 };
 

@@ -77,14 +77,16 @@ ncclResult_t ncclOsSetAffinity(const ncclAffinity& affinity) {
 // Also not "1" and not the Hyper-V BIOS string, so numa_balancing / bios_version stay on their benign arms.
 ncclResult_t g_ncclOsTopoGetStrFromSysResult = ncclSuccess;
 int g_ncclOsTopoGetStrFromSysCalls = 0;
-ncclResult_t ncclOsTopoGetStrFromSys(const char* path, const char* fileName, char* strValue, int maxLen)
-{
-    ++g_ncclOsTopoGetStrFromSysCalls;
-    if (g_ncclOsTopoGetStrFromSysResult != ncclSuccess) return g_ncclOsTopoGetStrFromSysResult;
-    if (strValue && maxLen > 0) {
-        std::snprintf(strValue, maxLen, "Linux version 6.8.0-microtest");
-    }
-    return ncclSuccess;
+static ncclResult_t DefaultOsTopoGetStrFromSys(const char*, const char*, char* value, int maxLen) {
+  if (g_ncclOsTopoGetStrFromSysResult != ncclSuccess) return g_ncclOsTopoGetStrFromSysResult;
+  if (value && maxLen > 0) std::snprintf(value, maxLen, "Linux version 6.8.0-microtest");
+  return ncclSuccess;
+}
+std::function<ncclResult_t(const char*, const char*, char*, int)> g_ncclOsTopoGetStrFromSys =
+    DefaultOsTopoGetStrFromSys;
+ncclResult_t ncclOsTopoGetStrFromSys(const char* path, const char* fileName, char* strValue, int maxLen) {
+  ++g_ncclOsTopoGetStrFromSysCalls;
+  return g_ncclOsTopoGetStrFromSys(path, fileName, strValue, maxLen);
 }
 
 // fillInfo MLOPart PCI-function fallback (init.cc ~1093). The default models what sysfs actually
@@ -155,6 +157,7 @@ void ResetOsFakes() {
   g_ncclOsSetAffinityMasks.clear();
   g_ncclOsTopoGetStrFromSysResult = ncclSuccess;
   g_ncclOsTopoGetStrFromSysCalls = 0;
+  g_ncclOsTopoGetStrFromSys = DefaultOsTopoGetStrFromSys;
   g_pciDeviceClass = kDefaultPciDeviceClass;
   g_pciDeviceClassCalls = 0;
   g_lastPciDeviceClassBusId.clear();

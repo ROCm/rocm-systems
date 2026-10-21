@@ -10,13 +10,13 @@
 
 #include <cstdio>
 #include <cstring>
-#include <functional>
 
 #include "ScopedHook.h"
 #include "fakes/gdr_peermem_fakes.h"
 #include "fakes/gdr_probe_fakes.h"
 #include "fakes/ibvwrap_fakes.h"
 #include "fakes/nccl_fakes.h"
+#include "fakes/os_fakes.h"
 #include "fakes/param_redirect.h"
 #include "transport/net_ib/common.h"
 
@@ -27,17 +27,10 @@ int TestAccess(const char*, int) {
   ++g_accessCalls;
   return g_accessResult;
 }
-std::function<ncclResult_t(const char*, const char*, char*, int)> g_testTopoRead =
-    [](const char*, const char*, char*, int) { return ncclSystemError; };
-ncclResult_t TestTopoRead(const char* path, const char* file, char* value, int size) {
-  return g_testTopoRead(path, file, value, size);
-}
 }  // namespace
 
 #define access TestAccess
-#define ncclOsTopoGetStrFromSys TestTopoRead
 #include NET_IB_GDR_CC_PATH
-#undef ncclOsTopoGetStrFromSys
 #undef access
 
 namespace {
@@ -47,7 +40,7 @@ class NetIbGdrMicrotest : public ::testing::Test {
   void TearDown() override {
     g_accessResult = -1;
     g_accessCalls = 0;
-    g_testTopoRead = [](const char*, const char*, char*, int) { return ncclSystemError; };
+    ResetOsFakes();
     ResetIbvwrapFakes();
     ResetGdrProbeFakes();
     ResetGdrPeermemFakes();
@@ -102,7 +95,7 @@ TEST_F(NetIbGdrMicrotest, GdrSupportInitOnce_HyperVWithNumaBalancingAndStrictOrd
   ncclIbGdrModuleLoaded = 0;
   ncclIbGdrBlocklisted = 0;
   int reads = 0;
-  ScopedHook topo(g_testTopoRead, [&reads](const char*, const char*, char* value, int size) {
+  ScopedHook topo(g_ncclOsTopoGetStrFromSys, [&reads](const char*, const char*, char* value, int size) {
     std::snprintf(value, size, "%s", reads++ == 0 ? "Hyper-V UEFI Release v4.1" : "1");
     return ncclSuccess;
   });
@@ -122,7 +115,7 @@ TEST_F(NetIbGdrMicrotest, GdrSupportInitOnce_HyperVWithoutNumaBalancingKeepsDisc
   ncclIbGdrModuleLoaded = 0;
   ncclIbGdrBlocklisted = 0;
   int reads = 0;
-  ScopedHook topo(g_testTopoRead, [&reads](const char*, const char*, char* value, int size) {
+  ScopedHook topo(g_ncclOsTopoGetStrFromSys, [&reads](const char*, const char*, char* value, int size) {
     std::snprintf(value, size, "%s", reads++ == 0 ? "Hyper-V UEFI Release v4.1" : "0");
     return ncclSuccess;
   });
@@ -226,29 +219,18 @@ TEST_F(NetIbGdrMicrotest, DmaBufSupportInitOnce_SupportedProbeMarksPhysicalDevic
   ncclIbDevs[0].context = &context;
   ncclIbDevs[0].dmaBufSupported = 0;
   ibDmaSupportInitDev = 0;
-  ScopedHook alloc(g_ibvAllocPd, [&pd, &context](ibv_pd** out, ibv_context* value) {
-    EXPECT_EQ(value, &context);
-    *out = &pd;
-    return ncclSuccess;
-  });
-  ScopedHook probe(g_ibvDirectRegDmaBufMr,
-                   [&pd](ibv_pd* value, uint64_t, size_t, uint64_t, int fd, int) -> ibv_mr* {
-                     EXPECT_EQ(value, &pd);
-                     EXPECT_EQ(fd, -1);
-                     errno = EBADF;
-                     return nullptr;
-                   });
-  ScopedHook dealloc(g_ibvDeallocPd, [&pd](ibv_pd* value) {
-    EXPECT_EQ(value, &pd);
-    return ncclSuccess;
-  });
+  ScopedDmaBufProbe dmaProbe(&pd, EBADF);
 
   ibDmaBufSupportInitOnce();
 
   EXPECT_EQ(ncclIbDevs[0].dmaBufSupported, 1);
-  EXPECT_EQ(alloc.calls, 1);
-  EXPECT_EQ(probe.calls, 1);
-  EXPECT_EQ(dealloc.calls, 1);
+  EXPECT_EQ(dmaProbe.allocContext, &context);
+  EXPECT_EQ(dmaProbe.probePd, &pd);
+  EXPECT_EQ(dmaProbe.probeFd, -1);
+  EXPECT_EQ(dmaProbe.deallocPd, &pd);
+  EXPECT_EQ(dmaProbe.alloc.calls, 1);
+  EXPECT_EQ(dmaProbe.probe.calls, 1);
+  EXPECT_EQ(dmaProbe.dealloc.calls, 1);
 }
 
 TEST_F(NetIbGdrMicrotest, DmaBufSupportInitOnce_UnsupportedErrnoMarksDeviceUnsupported) {
@@ -258,20 +240,14 @@ TEST_F(NetIbGdrMicrotest, DmaBufSupportInitOnce_UnsupportedErrnoMarksDeviceUnsup
   ncclIbDevs[0].context = &context;
   ncclIbDevs[0].dmaBufSupported = 0;
   ibDmaSupportInitDev = 0;
-  ScopedHook alloc(g_ibvAllocPd, [&pd](ibv_pd** out, ibv_context*) {
-    *out = &pd;
-    return ncclSuccess;
-  });
-  ScopedHook probe(g_ibvDirectRegDmaBufMr,
-                   [](ibv_pd*, uint64_t, size_t, uint64_t, int, int) -> ibv_mr* {
-                     errno = EOPNOTSUPP;
-                     return nullptr;
-                   });
-  ScopedHook dealloc(g_ibvDeallocPd, [](ibv_pd*) { return ncclSuccess; });
+  ScopedDmaBufProbe dmaProbe(&pd, EOPNOTSUPP);
 
   ibDmaBufSupportInitOnce();
 
   EXPECT_EQ(ncclIbDevs[0].dmaBufSupported, -1);
+  EXPECT_EQ(dmaProbe.alloc.calls, 1);
+  EXPECT_EQ(dmaProbe.probe.calls, 1);
+  EXPECT_EQ(dmaProbe.dealloc.calls, 1);
 }
 
 TEST_F(NetIbGdrMicrotest, DmaBufSupport_PublicApiReturnsCachedCapability) {

@@ -69,6 +69,45 @@ void ncclSetThreadName(std::thread&, const char*, ...) {}
 
 namespace {
 
+class ScopedInitDevicesBaseline {
+ private:
+  ibv_device** devices_;
+  int count_;
+
+ public:
+  ScopedInitDevicesBaseline(ibv_device** devices, int count)
+      : devices_(devices),
+        count_(count),
+        symbols(g_ibvSymbols, [] { return ncclSuccess; }),
+        forkInit(g_ibvForkInit, [] { return ncclSuccess; }),
+        findInterfaces(g_ncclFindInterfaces, [](char* names, ncclSocketAddress*, int nameSize, int, int* count) {
+          std::snprintf(names, nameSize, "eth0");
+          *count = 1;
+          return ncclSuccess;
+        }),
+        getDevices(g_ibvGetDeviceList, [this](ibv_device*** out, int* count) {
+          *out = devices_;
+          *count = count_;
+          return ncclSuccess;
+        }),
+        freeDevices(g_ibvFreeDeviceList, [](ibv_device**) { return ncclSuccess; }),
+        relaxedProbe(g_ibvRegMrIova2, [](ibv_mr**, ibv_pd*, void*, size_t, uint64_t, int) {
+          return ncclInternalError;
+        }),
+        socketToString(g_ncclSocketToString, [](const ncclSocketAddress*, char* text, size_t, int) {
+          std::strcpy(text, "127.0.0.1");
+          return text;
+        }) {}
+
+  ScopedHook<ncclResult_t()> symbols;
+  ScopedHook<ncclResult_t()> forkInit;
+  ScopedHook<ncclResult_t(char*, ncclSocketAddress*, int, int, int*)> findInterfaces;
+  ScopedHook<ncclResult_t(ibv_device***, int*)> getDevices;
+  ScopedHook<ncclResult_t(ibv_device**)> freeDevices;
+  ScopedHook<ncclResult_t(ibv_mr**, ibv_pd*, void*, size_t, uint64_t, int)> relaxedProbe;
+  ScopedHook<const char*(const ncclSocketAddress*, char*, size_t, int)> socketToString;
+};
+
 class NetIbInitMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -378,21 +417,12 @@ TEST_F(NetIbInitMicrotest, QueryOooRqSize_ProviderQueryFailureReturnsInternalErr
 TEST_F(NetIbInitMicrotest, Mlx5DmaBufCapable_ProbeErrnoSelectsCapability) {
   ibv_context context{};
   ibv_pd pd{};
-  ScopedHook alloc(g_ibvAllocPd, [&pd](ibv_pd** out, ibv_context*) {
-    *out = &pd;
-    return ncclSuccess;
-  });
-  ScopedHook ibProbe(g_ibvDirectRegDmaBufMr,
-                     [](ibv_pd*, uint64_t, size_t, uint64_t, int, int) -> ibv_mr* {
-                       errno = EBADF;
-                       return nullptr;
-                     });
+  ScopedDmaBufProbe dmaProbe(&pd, EBADF);
   ScopedHook mlxProbe(g_mlx5dvDirectRegDmaBufMr,
                       [](ibv_pd*, uint64_t, size_t, uint64_t, int, int, int) -> ibv_mr* {
                         errno = EBADF;
                         return nullptr;
                       });
-  ScopedHook dealloc(g_ibvDeallocPd, [](ibv_pd*) { return ncclSuccess; });
 
   EXPECT_TRUE(ncclMlx5dvDmaBufCapable(&context));
 
@@ -402,6 +432,9 @@ TEST_F(NetIbInitMicrotest, Mlx5DmaBufCapable_ProbeErrnoSelectsCapability) {
                            return nullptr;
                          });
   EXPECT_FALSE(ncclMlx5dvDmaBufCapable(&context));
+  EXPECT_EQ(dmaProbe.alloc.calls, 2);
+  EXPECT_EQ(dmaProbe.probe.calls, 2);
+  EXPECT_EQ(dmaProbe.dealloc.calls, 2);
 }
 
 TEST_F(NetIbInitMicrotest, AutoAssignRailPlane_NoRailPolicyLeavesExplicitIdsUnchanged) {
@@ -587,25 +620,8 @@ TEST_F(NetIbInitMicrotest, InitDevices_OneActivePortPublishesPhysicalAndMergedDe
   std::strcpy(device.dev_name, "uverbs0");
   ibv_device* devices[] = {&device, nullptr};
   ibv_context context{};
-  ScopedHook symbols(g_ibvSymbols, [] { return ncclSuccess; });
+  ScopedInitDevicesBaseline baseline(devices, 1);
   ScopedHook mlxSymbols(g_mlx5dvSymbols, [] { return ncclSuccess; });
-  ScopedHook forkInit(g_ibvForkInit, [] { return ncclSuccess; });
-  ScopedHook findInterfaces(g_ncclFindInterfaces,
-                            [](char* names, ncclSocketAddress*, int nameSize, int maxIfs, int* count) {
-                              EXPECT_EQ(maxIfs, 1);
-                              std::snprintf(names, nameSize, "eth0");
-                              *count = 1;
-                              return ncclSuccess;
-                            });
-  ScopedHook getDevices(g_ibvGetDeviceList, [&devices](ibv_device*** out, int* count) {
-    *out = devices;
-    *count = 1;
-    return ncclSuccess;
-  });
-  ScopedHook freeDevices(g_ibvFreeDeviceList, [&devices](ibv_device** value) {
-    EXPECT_EQ(value, devices);
-    return ncclSuccess;
-  });
   ScopedHook open(g_ibvOpenDevice, [&context, &device](ibv_context** out, ibv_device* value) {
     EXPECT_EQ(value, &device);
     *out = &context;
@@ -640,21 +656,12 @@ TEST_F(NetIbInitMicrotest, InitDevices_OneActivePortPublishesPhysicalAndMergedDe
   });
   ScopedHook provider(g_mlx5dvIsSupported, [](ibv_device*) { return true; });
   ibv_pd pd{};
-  ScopedHook allocPd(g_ibvAllocPd, [&pd](ibv_pd** out, ibv_context*) {
-    *out = &pd;
-    return ncclSuccess;
-  });
-  ScopedHook ibDmaProbe(g_ibvDirectRegDmaBufMr,
-                        [](ibv_pd*, uint64_t, size_t, uint64_t, int, int) -> ibv_mr* {
-                          errno = EBADF;
-                          return nullptr;
-                        });
+  ScopedDmaBufProbe dmaProbe(&pd, EBADF);
   ScopedHook mlxDmaProbe(g_mlx5dvDirectRegDmaBufMr,
                          [](ibv_pd*, uint64_t, size_t, uint64_t, int, int, int) -> ibv_mr* {
                            errno = EBADF;
                            return nullptr;
                          });
-  ScopedHook deallocPd(g_ibvDeallocPd, [](ibv_pd*) { return ncclSuccess; });
   ScopedHook dataDirectPath(g_mlx5dvGetDataDirectSysfsPath, [](ibv_context*, char* path, size_t size) {
     std::snprintf(path, size, "/class/infiniband/mlx5_0/device");
     return ncclSuccess;
@@ -678,14 +685,6 @@ TEST_F(NetIbInitMicrotest, InitDevices_OneActivePortPublishesPhysicalAndMergedDe
                    info->localGid.raw[15] = 0xaa;
                    return ncclSuccess;
                  });
-  ScopedHook relaxed(g_ibvRegMrIova2, [](ibv_mr**, ibv_pd*, void*, size_t, uint64_t, int) {
-    return ncclInternalError;
-  });
-  ScopedHook toString(g_ncclSocketToString, [](const ncclSocketAddress*, char* text, size_t, int) {
-    std::strcpy(text, "127.0.0.1");
-    return text;
-  });
-
   ASSERT_EQ(ncclIbInitDevices(nullptr, nullptr), ncclSuccess);
 
   ASSERT_EQ(ncclNIbDevs, 2);
@@ -705,8 +704,13 @@ TEST_F(NetIbInitMicrotest, InitDevices_OneActivePortPublishesPhysicalAndMergedDe
   EXPECT_EQ(ncclIbDevs[0].gidInfo.localGidIndex, 2);
   EXPECT_EQ(ncclIbMergedDevs[0].vProps.devs[0], 0);
   EXPECT_EQ(ncclIbMergedDevs[1].vProps.devs[0], 1);
-  EXPECT_EQ(getDevices.calls, 1);
-  EXPECT_EQ(freeDevices.calls, 1);
+  EXPECT_EQ(baseline.getDevices.calls, 1);
+  EXPECT_EQ(baseline.freeDevices.calls, 1);
+  EXPECT_EQ(dmaProbe.allocContext, &context);
+  EXPECT_EQ(dmaProbe.probePd, &pd);
+  EXPECT_EQ(dmaProbe.alloc.calls, 1);
+  EXPECT_EQ(dmaProbe.probe.calls, 1);
+  EXPECT_EQ(dmaProbe.dealloc.calls, 1);
 }
 
 TEST_F(NetIbInitMicrotest, InitDevices_DisabledOrMissingVerbsReturnsInternalError) {
@@ -765,18 +769,7 @@ TEST_F(NetIbInitMicrotest, InitDevices_DeviceQueryFailureClosesContextAndContinu
   std::strcpy(device.name, "mlx5_0");
   ibv_device* devices[] = {&device, nullptr};
   ibv_context context{};
-  ScopedHook symbols(g_ibvSymbols, [] { return ncclSuccess; });
-  ScopedHook interfaces(g_ncclFindInterfaces,
-                        [](char*, ncclSocketAddress*, int, int, int* count) {
-                          *count = 1;
-                          return ncclSuccess;
-                        });
-  ScopedHook getDevices(g_ibvGetDeviceList, [&devices](ibv_device*** out, int* count) {
-    *out = devices;
-    *count = 1;
-    return ncclSuccess;
-  });
-  ScopedHook freeDevices(g_ibvFreeDeviceList, [](ibv_device**) { return ncclSuccess; });
+  ScopedInitDevicesBaseline baseline(devices, 1);
   ScopedHook open(g_ibvOpenDevice, [&context](ibv_context** out, ibv_device*) {
     *out = &context;
     return ncclSuccess;
@@ -788,14 +781,6 @@ TEST_F(NetIbInitMicrotest, InitDevices_DeviceQueryFailureClosesContextAndContinu
     EXPECT_EQ(value, &context);
     return ncclSuccess;
   });
-  ScopedHook relaxed(g_ibvRegMrIova2, [](ibv_mr**, ibv_pd*, void*, size_t, uint64_t, int) {
-    return ncclInternalError;
-  });
-  ScopedHook toString(g_ncclSocketToString, [](const ncclSocketAddress*, char* text, size_t, int) {
-    std::strcpy(text, "127.0.0.1");
-    return text;
-  });
-
   EXPECT_EQ(ncclIbInitDevices(nullptr, nullptr), ncclSuccess);
   EXPECT_EQ(ncclNIbDevs, 0);
   EXPECT_EQ(close.calls, 1);
@@ -805,30 +790,11 @@ TEST_F(NetIbInitMicrotest, InitDevices_OpenFailureSkipsDeviceAndContinues) {
   ibv_device device{};
   std::strcpy(device.name, "mlx5_0");
   ibv_device* devices[] = {&device, nullptr};
-  ScopedHook symbols(g_ibvSymbols, [] { return ncclSuccess; });
-  ScopedHook interfaces(g_ncclFindInterfaces,
-                        [](char*, ncclSocketAddress*, int, int, int* count) {
-                          *count = 1;
-                          return ncclSuccess;
-                        });
-  ScopedHook getDevices(g_ibvGetDeviceList, [&devices](ibv_device*** out, int* count) {
-    *out = devices;
-    *count = 1;
-    return ncclSuccess;
-  });
-  ScopedHook freeDevices(g_ibvFreeDeviceList, [](ibv_device**) { return ncclSuccess; });
+  ScopedInitDevicesBaseline baseline(devices, 1);
   ScopedHook open(g_ibvOpenDevice, [](ibv_context** out, ibv_device*) {
     *out = nullptr;
     return ncclSystemError;
   });
-  ScopedHook relaxed(g_ibvRegMrIova2, [](ibv_mr**, ibv_pd*, void*, size_t, uint64_t, int) {
-    return ncclInternalError;
-  });
-  ScopedHook toString(g_ncclSocketToString, [](const ncclSocketAddress*, char* text, size_t, int) {
-    std::strcpy(text, "127.0.0.1");
-    return text;
-  });
-
   EXPECT_EQ(ncclIbInitDevices(nullptr, nullptr), ncclSuccess);
   EXPECT_EQ(ncclNIbDevs, 0);
   EXPECT_EQ(open.calls, 1);
@@ -839,18 +805,7 @@ TEST_F(NetIbInitMicrotest, InitDevices_UnusablePortsAreSkippedAndContextIsClosed
   std::strcpy(device.name, "mlx5_0");
   ibv_device* devices[] = {&device, nullptr};
   ibv_context context{};
-  ScopedHook symbols(g_ibvSymbols, [] { return ncclSuccess; });
-  ScopedHook interfaces(g_ncclFindInterfaces,
-                        [](char*, ncclSocketAddress*, int, int, int* count) {
-                          *count = 1;
-                          return ncclSuccess;
-                        });
-  ScopedHook getDevices(g_ibvGetDeviceList, [&devices](ibv_device*** out, int* count) {
-    *out = devices;
-    *count = 1;
-    return ncclSuccess;
-  });
-  ScopedHook freeDevices(g_ibvFreeDeviceList, [](ibv_device**) { return ncclSuccess; });
+  ScopedInitDevicesBaseline baseline(devices, 1);
   ScopedHook open(g_ibvOpenDevice, [&context](ibv_context** out, ibv_device*) {
     *out = &context;
     return ncclSuccess;
@@ -873,14 +828,6 @@ TEST_F(NetIbInitMicrotest, InitDevices_UnusablePortsAreSkippedAndContextIsClosed
     return ncclSuccess;
   });
   ScopedHook close(g_ibvCloseDevice, [](ibv_context*) { return ncclSuccess; });
-  ScopedHook relaxed(g_ibvRegMrIova2, [](ibv_mr**, ibv_pd*, void*, size_t, uint64_t, int) {
-    return ncclInternalError;
-  });
-  ScopedHook toString(g_ncclSocketToString, [](const ncclSocketAddress*, char* text, size_t, int) {
-    std::strcpy(text, "127.0.0.1");
-    return text;
-  });
-
   EXPECT_EQ(ncclIbInitDevices(nullptr, nullptr), ncclSuccess);
   EXPECT_EQ(ncclNIbDevs, 0);
   EXPECT_EQ(queryPort.calls, 3);
