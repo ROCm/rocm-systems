@@ -10,6 +10,8 @@
 #include "p2p.h"
 #include "p2p_resiliency.h"
 
+#include <mutex>
+
 NCCL_PARAM(IbGidIndex, "IB_GID_INDEX", -1);
 NCCL_PARAM(IbRoutableFlidIbGidIndex, "IB_ROUTABLE_FLID_GID_INDEX", 1);
 NCCL_PARAM(IbRoceVersionNum, "IB_ROCE_VERSION_NUM", 2);
@@ -30,6 +32,11 @@ struct ncclIbDevExtraProps {
 };
 
 extern int64_t rcclParamIbGdrFlushGpuMemNoRelaxedOrdering();
+
+// The flush scratchpad is registered on every accept; report the outcome once per IB device.
+static std::once_flag gpuFlushRegLogOnce[MAX_IB_DEVS];
+static std::once_flag gpuFlushRegWarnOnce[MAX_IB_DEVS];
+
 enum ncclIbCommState {
   ncclIbCommStateStart = 0,
   ncclIbCommStateConnect = 1,
@@ -64,14 +71,40 @@ struct ncclIbHandle {
 NCCL_PARAM(IbQpsPerConn, "IB_QPS_PER_CONNECTION", 1);
 RCCL_PARAM(IbQpsPerP2p, "IB_QPS_PER_P2P", 0);
 
-// Calculate number of QPs based on P2P flag and device counts
-static int ncclIbCalculateNqps(int isP2p, int localNdevs, int remoteNdevs, const char* funcName) {
-  auto qp_multiplier = (rcclParamIbQpsPerP2p() > 0 && isP2p) ? rcclParamIbQpsPerP2p() : ncclParamIbQpsPerConn();
-  int localNqps = qp_multiplier * localNdevs;
-  int remoteNqps = qp_multiplier * remoteNdevs;
+// nQpsPerDev > 0 wins (GIN passes 1). Otherwise use the IB QP env policy.
+static int rcclIbQpsPerDev(int nQpsPerDev, int isP2p) {
+  if (nQpsPerDev > 0) {
+    // GIN opens a link per context per peer, so log once per process.
+    static std::once_flag once;
+    if (ncclParamIbQpsPerConn() > nQpsPerDev) {
+      std::call_once(once, [&]() {
+        INFO(NCCL_ENV | NCCL_NET,
+             "NET/IB: NCCL_IB_QPS_PER_CONNECTION=%ld is not applied to GIN connections, which use %d QP per device",
+             ncclParamIbQpsPerConn(), nQpsPerDev);
+      });
+    }
+    return nQpsPerDev;
+  }
+  if (rcclParamIbQpsPerP2p() > 0 && isP2p) return (int)rcclParamIbQpsPerP2p();
+  return (int)ncclParamIbQpsPerConn();
+}
+
+// Explicit GIN count sizes the CQ. The env path keeps NCCL_IB_QPS_PER_CONNECTION.
+static int rcclIbCqQpsPerDev(int nQpsPerDev) {
+  return nQpsPerDev > 0 ? nQpsPerDev : (int)ncclParamIbQpsPerConn();
+}
+
+static int rcclIbMaxNqps(int qpPerDev, int localNdevs, int remoteNdevs, const char* funcName) {
+  int localNqps = qpPerDev * localNdevs;
+  int remoteNqps = qpPerDev * remoteNdevs;
   int maxNqps = (remoteNqps > localNqps) ? remoteNqps : localNqps;
-  INFO(NCCL_NET, "NET/IB: %s Max Nqps=%d, localNqps=%d, remoteNqps=%d", funcName, maxNqps, localNqps, remoteNqps);
+  INFO(NCCL_NET, "NET/IB: %s Max Nqps=%d, localNqps=%d, remoteNqps=%d, qpPerDev=%d", funcName, maxNqps,
+       localNqps, remoteNqps, qpPerDev);
   return maxNqps;
+}
+
+static int rcclIbSelectNqps(int nQpsPerDev, int isP2p, int localNdevs, int remoteNdevs, const char* funcName) {
+  return rcclIbMaxNqps(rcclIbQpsPerDev(nQpsPerDev, isP2p), localNdevs, remoteNdevs, funcName);
 }
 NCCL_PARAM(IbSubnetAwareRouting, "IB_SUBNET_AWARE_ROUTING", 0);
 NCCL_PARAM(IbSubnetPrefixLen, "IB_SUBNET_PREFIX_LEN", 24);
@@ -932,7 +965,7 @@ ib_recv_dev_list:
   // Read isP2p from handle
   isP2p = handle->isP2p;
   INFO(NCCL_NET, "NET/IB: ncclIbConnect isP2p=%d", isP2p);
-  comm->base.nqps = ncclIbCalculateNqps(isP2p, comm->base.vProps.ndevs, remoteVProps.ndevs, __func__);
+  comm->base.nqps = rcclIbSelectNqps(nQpsPerDev, isP2p, comm->base.vProps.ndevs, remoteVProps.ndevs, __func__);
 
   comm->base.nDataQps = std::max(comm->base.vProps.ndevs, remoteVProps.ndevs);
 
@@ -945,7 +978,7 @@ ib_recv_dev_list:
   // Sender's CQ size needs to accomodate the upper bound of number of send
   // requests multiplied by the number of QPs used per request.
   int cqSize;
-  cqSize = NET_IB_MAX_REQUESTS * ncclParamIbQpsPerConn();
+  cqSize = NET_IB_MAX_REQUESTS * rcclIbCqQpsPerDev(nQpsPerDev);
   for (int i = 0; i < comm->base.vProps.ndevs; i++) {
     int ibDevN = comm->base.vProps.devs[i];
     if (comm->base.resiliency) {
@@ -1143,7 +1176,7 @@ fail:
 
 ncclResult_t ncclIbConnect(void* ctx, int dev, void* opaqueHandle, void** sendComm,
                            ncclNetDeviceHandle_t** sendDevComm) {
-  return ncclIbConnectImpl(ctx, dev, opaqueHandle, sendComm, sendDevComm, ncclParamIbQpsPerConn(), ncclParamIbTc());
+  return ncclIbConnectImpl(ctx, dev, opaqueHandle, sendComm, sendDevComm, /*nQpsPerDev*/ 0, ncclParamIbTc());
 }
 
 NCCL_PARAM(IbWarnRailLocal, "IB_WARN_RAIL_LOCAL", 0);
@@ -1356,7 +1389,8 @@ ncclResult_t ncclIbCreateFlushQp(struct ncclIbRecvComm* comm) {
     qpCreateAttrs.cq = rCommDev->base.cq;
     qpCreateAttrs.pd = rCommDev->base.pd;
     qpCreateAttrs.maxRecvWorkRequest = 0;
-    qpCreateAttrs.maxSendWorkRequest = NET_IB_MAX_REQUESTS;
+    // Each flush may post a scratchpad write in addition to the read.
+    qpCreateAttrs.maxSendWorkRequest = 2 * NET_IB_MAX_REQUESTS;
     qpCreateAttrs.qpContext = &comm->base.stats;
     NCCLCHECK(ncclIbQpCreate(flushQp, &qpCreateAttrs));
     INFO(NCCL_NET, "NET/IB: %s: Flush QP created: port=%d dev=%d devName=%s ndevs=%d nmdevs=%d qp_num=%u pkey=%u pd=%p",
@@ -1545,7 +1579,7 @@ ib_recv:
 
   /* copy back the received info */
   memcpy(&remMeta, stage->buffer, sizeof(struct ncclIbConnectionMetadata));
-  rComm->base.nqps = ncclIbCalculateNqps(remMeta.isP2p, rComm->base.vProps.ndevs, remMeta.ndevs, __func__);
+  rComm->base.nqps = rcclIbSelectNqps(nQpsPerDev, remMeta.isP2p, rComm->base.vProps.ndevs, remMeta.ndevs, __func__);
 
   // Subnet-aware device selection: use the remote sender's GIDs to find a local
   // NIC on the same subnet. Override lComm->dev and update vProps if a
@@ -1587,7 +1621,7 @@ ib_recv:
   // of a receive request) per QP, in the worst case.
   // +1 reserves space for one in-flight speed update RDMA write completion.
   int cqSize;
-  cqSize = 3 * NET_IB_MAX_REQUESTS * ncclParamIbQpsPerConn() +
+  cqSize = 3 * NET_IB_MAX_REQUESTS * rcclIbCqQpsPerDev(nQpsPerDev) +
            ((ncclParamIbEventBasedLb() && ncclParamIbEventBasedLbRemote()) ? 1 : 0);
   for (int i = 0; i < rComm->base.vProps.ndevs; i++) {
     rCommDev = rComm->devs + i;
@@ -1816,6 +1850,25 @@ ib_recv:
               close(rCommDev->gpuFlush.dmabuf_fd);
               rCommDev->gpuFlush.dmabuf_fd = -1;
             }
+          } else if (peermemAvailable) {
+            // Registered without IBV_ACCESS_RELAXED_ORDERING so the flush write to it is strictly ordered.
+            if (wrap_ibv_reg_mr(&rCommDev->gpuFlush.gpuMr, rCommDev->base.pd, rCommDev->gpuFlush.gpuFlushGpuMem,
+                                sizeof(int),
+                                IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ) ==
+                ncclSuccess) {
+              gpuFlushRegistered = true;
+              std::call_once(gpuFlushRegLogOnce[rCommDev->base.ibDevN], [&] {
+                INFO(NCCL_INIT | NCCL_NET, "NET/IB: GDR flush scratchpad registered via peermem on device %d (%s)",
+                     rCommDev->base.ibDevN, ibDev->devName);
+              });
+            }
+          }
+          if (!gpuFlushRegistered) {
+            std::call_once(gpuFlushRegWarnOnce[rCommDev->base.ibDevN], [&] {
+              WARN("NET/IB: GDR flush scratchpad registration failed on device %d (%s); flush falls back to "
+                   "reading the receive buffer, which does not fence relaxed-ordering writes",
+                   rCommDev->base.ibDevN, ibDev->devName);
+            });
           }
         }
 #endif
@@ -1884,7 +1937,7 @@ fail:
 }
 
 ncclResult_t ncclIbAccept(void* listenComm, void** recvComm, ncclNetDeviceHandle_t** recvDevComm) {
-  return ncclIbAcceptImpl(listenComm, recvComm, recvDevComm, ncclParamIbQpsPerConn());
+  return ncclIbAcceptImpl(listenComm, recvComm, recvDevComm, /*nQpsPerDev*/ 0);
 }
 
 ncclResult_t ncclIbCloseSend(void* sendComm) {

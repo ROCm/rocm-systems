@@ -17,6 +17,22 @@ target_include_directories(
     PRIVATE ${PROJECT_SOURCE_DIR}/source/lib ${CMAKE_BINARY_DIR}/source/lib
 )
 
+add_library(control-timeline-clock-tests OBJECT test_timeline.cpp)
+
+target_link_libraries(
+    control-timeline-clock-tests
+    PRIVATE
+        rocprofiler-systems-googletest-library
+        rocprofiler-systems-core-library
+        rocprofiler-systems-common-library
+        rocprofiler-systems-logger
+)
+
+target_include_directories(
+    control-timeline-clock-tests
+    PRIVATE ${PROJECT_SOURCE_DIR}/source/lib ${CMAKE_BINARY_DIR}/source/lib
+)
+
 add_library(control-steady-clock-tests OBJECT test_steady_clock.cpp)
 
 target_link_libraries(
@@ -46,5 +62,21 @@ target_link_libraries(
 
 target_include_directories(
     control-session-scope-tests
+    PRIVATE ${PROJECT_SOURCE_DIR}/source/lib ${CMAKE_BINARY_DIR}/source/lib
+)
+
+add_library(control-roctx-trigger-tests OBJECT test_roctx_trigger.cpp)
+
+target_link_libraries(
+    control-roctx-trigger-tests
+    PRIVATE
+        rocprofiler-systems-googletest-library
+        rocprofiler-systems-core-library
+        rocprofiler-systems-common-library
+        rocprofiler-systems-logger
+)
+
+target_include_directories(
+    control-roctx-trigger-tests
     PRIVATE ${PROJECT_SOURCE_DIR}/source/lib ${CMAKE_BINARY_DIR}/source/lib
 )

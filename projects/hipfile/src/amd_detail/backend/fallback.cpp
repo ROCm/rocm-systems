@@ -159,11 +159,11 @@ Fallback::_io_impl(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBu
             if (e.code().value() == EINTR) {
                 continue;
             }
-            Context<StatsCollection>::get()->error(type, StatsBackend::Fallback, size);
+            Context<StatsCollection>::get()->error(type, StatsBackend::Fallback, size, buffer->getGpuId());
             throw;
         }
         catch (...) {
-            Context<StatsCollection>::get()->error(type, StatsBackend::Fallback, size);
+            Context<StatsCollection>::get()->error(type, StatsBackend::Fallback, size, buffer->getGpuId());
             throw;
         }
 

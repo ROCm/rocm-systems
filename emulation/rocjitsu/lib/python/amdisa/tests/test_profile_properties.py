@@ -885,19 +885,19 @@ class TestCdna4Profile:
 
 
 class TestCdna1Profile:
-    """Cdna1Profile: no AccVGPR, GFX9_GLC coherency, sgpr_pair scratch."""
+    """Cdna1Profile: separate AccVGPR, GFX9_GLC coherency, sgpr_pair scratch."""
 
     def setup_method(self):
         self.p = Cdna1Profile()
 
-    def test_has_acc_vgpr_false(self):
-        assert self.p.has_acc_vgpr is False
+    def test_has_acc_vgpr_true(self):
+        assert self.p.has_acc_vgpr is True
 
-    def test_acc_vgpr_encoding_base_zero(self):
-        assert self.p.acc_vgpr_encoding_base == 0
+    def test_acc_vgpr_encoding_base(self):
+        assert self.p.acc_vgpr_encoding_base == 768
 
-    def test_max_acc_vgprs_zero(self):
-        assert self.p.max_acc_vgprs == 0
+    def test_max_acc_vgprs(self):
+        assert self.p.max_acc_vgprs == 256
 
     def test_coherency_model(self):
         assert self.p.coherency_model == MemoryCoherencyModel.GFX9_GLC
