@@ -9,9 +9,14 @@
 #include <sys/time.h>
 #include <time.h>
 
+#include "net_telemetry.h"  // RcclTelemetrySwSnapshot
+
 // Limits
 #define ACCL_MAX_CHANNELS 256
 #define ACCL_MAX_PROXY_OPS 256
+// NICs captured per network snapshot. A node has at most a handful; devices
+// past this are not recorded (their traffic is still in the telemetry JSON).
+#define ACCL_NET_MAX_DEVS 16
 
 static inline uint64_t acclGetTimeUs() {
   struct timespec ts;
@@ -113,6 +118,17 @@ struct acclCollInfo {
   int         nProxyOpsCompleted;
   int         proxyOpIndices[ACCL_MAX_PROXY_OPS];
 
+  // Network window: from the first proxy step that moves data (a send posted or
+  // received data landing) to the last proxy op stop.
+  // RCCL telemetry SW counters are captured at both ends (see
+  // acclNetCapture()); the difference is this collective's NIC traffic.
+  uint64_t    tsNetStartUs;
+  uint64_t    tsNetStopUs;
+  int         nNetDevsStart;
+  int         nNetDevsStop;
+  RcclTelemetrySwSnapshot netStart[ACCL_NET_MAX_DEVS];
+  RcclTelemetrySwSnapshot netStop[ACCL_NET_MAX_DEVS];
+
   // Comm info backpointer
   void*       commCtx;
 };
@@ -178,6 +194,20 @@ struct acclCompletedRecord {
 
   // Timing source
   int hasGpuTiming;
+
+  // Host CLOCK_MONOTONIC timestamps (us), for lining records up with the RCCL
+  // telemetry hw_samples series. execStart/execEnd span the first kernel or
+  // data-moving proxy step to the last kernel or proxy op stop; 0 when nothing
+  // was observed.
+  uint64_t    tsEnqueueUs;
+  uint64_t    tsExecStartUs;
+  uint64_t    tsExecEndUs;
+
+  // Per-NIC SW counter deltas over the network window (see acclCollInfo).
+  uint64_t    tsNetStartUs;
+  uint64_t    tsNetStopUs;
+  int         nNetDevs;
+  RcclTelemetrySwSnapshot netDelta[ACCL_NET_MAX_DEVS];
 };
 
 // Pool capacities (per communicator). Each pool starts with one chunk and adds
@@ -239,6 +269,7 @@ struct acclCommContext {
   int         nRanks;
   int         nNodes;
   char        commName[256];
+  char        hostname[256];
 
   // Output
   FILE*       outputFile;
