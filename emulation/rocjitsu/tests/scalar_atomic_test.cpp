@@ -5,6 +5,7 @@
 #include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory_access.h"
@@ -90,6 +91,7 @@ class ScalarAtomicTest : public ::testing::TestWithParam<std::tuple<rj_code_arch
 protected:
   static constexpr uint64_t kAddress = 0x1000;
   static constexpr uint64_t kProgram = 0x100000;
+  static constexpr uint32_t kNop = cdna3::build_sopp(cdna3::kSNopSopp)[0];
 
   void SetUp() override {
     ComputeUnitCore::Config config{};
@@ -226,7 +228,7 @@ TEST_P(ScalarAtomicTest, ImmediateRegisterAndCombinedOffsets) {
                                .glc = 1,
                                .imm = 1,
                                .offset = 8,
-                               .soffset = 124}};
+                               .soffset = kLegacyM0Selector}};
   for (size_t form = 0; form < fields.size(); ++form) {
     SCOPED_TRACE(form);
     // Low address bits are ignored separately for base and each offset.
@@ -265,7 +267,7 @@ TEST_P(ScalarAtomicTest, SourceAndAddressAreCapturedBeforeReturn) {
 TEST_P(ScalarAtomicTest, NamedScalarRegisterCanSupplyAndReceiveData) {
   memory.write32(kAddress, 4);
   wf->set_vcc(0x1234567800000009ull);
-  auto inst = prepare({.sdata = 106, .glc = 1, .imm = 1});
+  auto inst = prepare({.sdata = kVccSelectorFirst, .glc = 1, .imm = 1});
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(pipeline->issue(inst.release(), *wf), VmAccessOutcome::Complete);
   EXPECT_EQ(memory.read32(kAddress), 3u);
@@ -443,9 +445,10 @@ TEST_P(ScalarAtomicTest, ReturnedRegisterRequiresLgkmWait) {
           cdna3::build_smem(cdna3::kSAtomicDecSmem, {.sdata = 4, .glc = glc, .imm = 1});
       std::vector<uint32_t> words(atomic.begin(), atomic.end());
       // lgkmcnt(0), leaving vmcnt/expcnt unconstrained.
-      words.push_back(waited ? 0xbf8c007fu : 0xbf800000u);
-      words.push_back(0xbe850004u); // s_mov_b32 s5, s4
-      words.insert(words.end(), 4, 0xbf800000u);
+      const uint32_t wait = cdna3::build_sopp(cdna3::kSWaitcntSopp, {.simm16 = 0x007f})[0];
+      words.push_back(waited ? wait : kNop);
+      words.push_back(cdna3::build_sop1(cdna3::kSMovB32Sop1, {.ssrc0 = 4, .sdst = 5})[0]);
+      words.insert(words.end(), 4, kNop);
       for (size_t i = 0; i < words.size(); ++i)
         memory.write32(program + i * 4, words[i]);
       for (unsigned i = 0; i < 3; ++i)
@@ -491,8 +494,8 @@ TEST_P(ScalarAtomicTest, ReportsScalarReadModifyWriteToPlugins) {
         cdna3::build_smem(cdna3::kSAtomicDecSmem, {.sdata = 4, .glc = glc, .imm = 1});
     memory.write32(program, words[0]);
     memory.write32(program + 4, words[1]);
-    memory.write32(program + 8, 0xbf800000);
-    memory.write32(program + 12, 0xbf800000);
+    memory.write32(program + 8, kNop);
+    memory.write32(program + 12, kNop);
     (void)cu->step();
     ASSERT_FALSE(wf->is_halted());
     EXPECT_EQ(wf->pc, program + 8);

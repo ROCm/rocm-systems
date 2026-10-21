@@ -446,13 +446,6 @@ VmAccessOutcome execute_translated_scalar_atomic_rmw(ScalarMemState &d) {
 
 VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   auto &d = *inst.data_as<ScalarMemState>();
-  const auto atomic_mutation = [&](std::span<std::byte> target) {
-    uint32_t old;
-    std::memcpy(&old, target.data(), sizeof(old));
-    const uint32_t value = apply_int_atomic(d.atomic_op, old, d.store_data[0]);
-    std::memcpy(target.data(), &value, sizeof(value));
-    d.response_data[0] = old;
-  };
   if (d.atomic_op != AtomicOp::NONE && (d.elem_size != 4 || d.num_dwords != 1))
     return VmAccessOutcome::Malformed;
   // Masked loads still write the zero response, without taking a VM snapshot or
@@ -538,7 +531,11 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
     return wf.raw_cu().l2()->atomic_rmw(
         d.addr, d.elem_size,
         [&](uint8_t *line, uint32_t offset) {
-          atomic_mutation({reinterpret_cast<std::byte *>(line + offset), d.elem_size});
+          uint32_t old;
+          std::memcpy(&old, line + offset, sizeof(old));
+          const uint32_t value = apply_int_atomic(d.atomic_op, old, d.store_data[0]);
+          std::memcpy(line + offset, &value, sizeof(value));
+          d.response_data[0] = old;
         },
         wf.process_id());
   }
