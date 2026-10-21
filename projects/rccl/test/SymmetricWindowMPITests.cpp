@@ -643,8 +643,9 @@ protected:
         return (padded / align) * align;
     }
 
-    // Same rule as ncclDevrInitOnce: NCCL_WIN_STRIDE values of 1 or less mean
-    // "size the symmetric VA from the largest GPU", then round up to 4 GiB.
+    // Same rule as ncclDevrInitOnce: an unset, zero, or negative NCCL_WIN_STRIDE
+    // sizes the symmetric VA from the largest GPU. A positive stride, including 1,
+    // is the size itself. Either way, round up to 4 GiB.
     size_t symmetricVaLimit()
     {
         int64_t stride = -1;
@@ -655,7 +656,7 @@ protected:
         }
 
         size_t big = 1;
-        if (stride > 1) {
+        if (stride > 0) {
             big = static_cast<size_t>(stride);
         } else {
             size_t freeBytes = 0;
@@ -717,10 +718,16 @@ protected:
         return ncclCommWindowDeregister(comm, win);
     }
 
-    void assertBytesUsable(void* ptr, size_t bytes)
+    // Write the window's symmetric mapping. Deregister unmaps that VA and drops
+    // the backing reference; the ncclMemAlloc pointer stays mapped until ncclMemFree,
+    // so a memset of it would pass with the window registered or not.
+    void assertBytesUsable(ncclWindow_t win, size_t bytes, int rank)
     {
+        void* mapped = nullptr;
+        ASSERT_MPI_EQ(ncclSuccess, ncclGetPeerDevicePointer(win, 0, rank, &mapped));
+        ASSERT_MPI_NE(mapped, nullptr);
         hipStream_t stream = getActiveStream();
-        ASSERT_MPI_EQ(hipSuccess, hipMemsetAsync(ptr, 0x5a, bytes, stream));
+        ASSERT_MPI_EQ(hipSuccess, hipMemsetAsync(mapped, 0x5a, bytes, stream));
         ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
     }
 };
@@ -1809,14 +1816,14 @@ TEST_F(SymWin_WindowLifecycle, BackingReleasedAfterLastWindow)
 
     deregisterTrackedWindow(comm, first);
     assertWindowHonoursSize(second, slice, rank);
-    assertBytesUsable(secondPtr, slice);
+    assertBytesUsable(second, slice, rank);
 
     deregisterTrackedWindow(comm, second);
 
     ncclWindow_t again = registerWindow(comm, buf, allocSize);
     ASSERT_MPI_NE(again, nullptr);
     assertWindowHonoursSize(again, allocSize, rank);
-    assertBytesUsable(buf, slice);
+    assertBytesUsable(again, slice, rank);
 
     TEST_INFO("Rank %d: second slice stayed usable after the first was deregistered, "
               "and the allocation could be registered again after the last slice",
@@ -1849,7 +1856,7 @@ TEST_F(SymWin_WindowLifecycle, DuplicateExactRange)
 
     deregisterTrackedWindow(comm, first);
     assertWindowHonoursSize(second, bytes, rank);
-    assertBytesUsable(buf, bytes);
+    assertBytesUsable(second, bytes, rank);
 
     deregisterTrackedWindow(comm, second);
 
@@ -1863,8 +1870,8 @@ TEST_F(SymWin_WindowLifecycle, DuplicateExactRange)
 
 // Rank 0 drops every local backing. The other ranks keep one. The next
 // registration is still collective: every rank must take the same path.
-// A local cache decision deadlocks in that register. The runner entries bound
-// that hang with a 120s timeout.
+// A local cache decision deadlocks in that register. Single-node runner entries
+// bound that hang at 120s. The two-node suites keep their 600s budget.
 TEST_F(SymWin_WindowLifecycle, RankDivergentReregister)
 {
     if (!setupForAsymmetric()) {
@@ -1902,7 +1909,7 @@ TEST_F(SymWin_WindowLifecycle, RankDivergentReregister)
     ASSERT_MPI_NE(again, nullptr);
     registeredWins_.push_back({again, comm});
     assertWindowHonoursSize(again, bytes, rank);
-    assertBytesUsable(buf, bytes);
+    assertBytesUsable(again, bytes, rank);
 
     TEST_INFO("Rank %d: re-register completed with a divergent backing cache", rank);
 }
