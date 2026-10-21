@@ -46,7 +46,7 @@ RUN if ! pip show perfetto 2>&1 | tee pip_output.log | grep -q "WARNING"; then \
         exit 1; \
     fi
 
-ARG PYTHON_VERSIONS="8 9 10 11 12 13"
+ARG PYTHON_VERSIONS="8 9 10 11 12 13 14 15"
 
 # Install pytest test dependencies into each conda env
 COPY requirements.txt /tmp/requirements.txt

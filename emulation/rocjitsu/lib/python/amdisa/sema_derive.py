@@ -35,6 +35,7 @@ from amdisa.sema_effects import inline_binary_op_effects
 from amdisa.sema_properties import InstructionProperty, derive_properties
 from amdisa.semantics import (
     F16_INPUT_CONVERSION_DTYPES,
+    F32_INPUT_CONVERSION_DTYPES,
     F32_TO_INTEGER_DTYPES,
     is_float_relation,
 )
@@ -1107,6 +1108,17 @@ class _VectorUnary(_ScalarDeriver):
             body = _assign(_cast(_dst(0), SemaType.U32), result)
             return SemaBlock(sem.name, ExecModel.VECTOR, body)
 
+        if op == 'frexp_exp_f16':
+            src0 = _cast(_src(0, SemaType.F16), SemaType.F16)
+            result = SemaNode(
+                SemaNodeKind.CALL,
+                ty=SemaType.B32,
+                call_name='frexp_exp_f16',
+                children=(_id('frexp_exp_f16'), src0),
+            )
+            body = _assign(_cast(_dst(0), SemaType.B32), result)
+            return SemaBlock(sem.name, ExecModel.VECTOR, body)
+
         if op == 'frexp_mant_f32' and dtype == 'f64':
             src0 = _cast(_src(0, SemaType.F64), SemaType.F64)
             result = SemaNode(
@@ -1139,7 +1151,7 @@ class _VectorUnary(_ScalarDeriver):
                 src0 = _cast(_src(0, SemaType.F16), SemaType.F16)
                 if dtype == 'f32_f16':
                     call_name = 'cvt_f32_f16_valu'
-            elif dtype in F32_TO_INTEGER_DTYPES:
+            elif dtype in F32_INPUT_CONVERSION_DTYPES:
                 # Expose the floating source to VOP3 modifier enrichment, then
                 # pass register bits to the conversion helper.
                 src0 = SemaNode(
@@ -1151,20 +1163,26 @@ class _VectorUnary(_ScalarDeriver):
                         _cast(_src(0, SemaType.F32), SemaType.F32),
                     ),
                 )
-            if dtype in (
-                'f32_f16',
-                'f32_i32',
-                'f32_u32',
-                'f32_ubyte0',
-                'f32_ubyte1',
-                'f32_ubyte2',
-                'f32_ubyte3',
-            ):
+            float_result = {
+                'f32_f16': SemaType.F32,
+                'f32_i32': SemaType.F32,
+                'f32_u32': SemaType.F32,
+                'f32_ubyte0': SemaType.F32,
+                'f32_ubyte1': SemaType.F32,
+                'f32_ubyte2': SemaType.F32,
+                'f32_ubyte3': SemaType.F32,
+                'f64_i32': SemaType.F64,
+                'f64_u32': SemaType.F64,
+                'f64_f32': SemaType.F64,
+            }.get(dtype)
+            if float_result is not None:
                 # The conversion helper returns register bits. Expose the
                 # floating result so VOP3 output modifiers operate on its value.
+                is_f64 = float_result == SemaType.F64
+                bit_cast = 'std::bit_cast<double>' if is_f64 else 'std::bit_cast<float>'
                 result = SemaNode(
                     SemaNodeKind.CALL,
-                    ty=SemaType.B32,
+                    ty=SemaType.B64 if is_f64 else SemaType.B32,
                     call_name=call_name,
                     children=(_id(call_name), src0),
                 )
@@ -1172,12 +1190,12 @@ class _VectorUnary(_ScalarDeriver):
                     sem.name,
                     ExecModel.VECTOR,
                     _assign(
-                        _cast(_dst(0), SemaType.F32),
+                        _cast(_dst(0), float_result),
                         SemaNode(
                             SemaNodeKind.CALL,
-                            ty=SemaType.F32,
-                            call_name='std::bit_cast<float>',
-                            children=(_id('std::bit_cast<float>'), result),
+                            ty=float_result,
+                            call_name=bit_cast,
+                            children=(_id(bit_cast), result),
                         ),
                     ),
                 )

@@ -23,8 +23,19 @@ if TYPE_CHECKING:
 # Floating-source conversions that accept VOP3 ABS/NEG before integer conversion.
 F32_TO_INTEGER_DTYPES = frozenset({'i32_f32', 'u32_f32', 'rpi_i32_f32', 'flr_i32_f32'})
 
+# Mixed-type conversions that accept VOP3 ABS/NEG on an F32 source.
+F32_INPUT_CONVERSION_DTYPES = F32_TO_INTEGER_DTYPES | {'f64_f32'}
+
 # Mixed-type conversions that accept VOP3 ABS/NEG on a floating half source.
 F16_INPUT_CONVERSION_DTYPES = frozenset({'i16_f16', 'u16_f16', 'f32_f16'})
+
+# Floating-source operations with integer results; OMOD and CLAMP do not apply.
+# This covers operation-keyed cases only. F32-to-integer conversions use
+# F32_TO_INTEGER_DTYPES, and V_CVT_I16_F16/V_CVT_U16_F16 use
+# sema_enrich._NO_DST_MODIFIER_INSTRUCTIONS.
+INTEGER_RESULT_OPERATIONS = frozenset(
+    {'frexp_exp_f32', 'frexp_exp_f16', 'cvt_norm_i16_f16', 'cvt_norm_u16_f16'}
+)
 
 # Floating VOPC relations that read their sources; F and T/TRU are constants.
 FLOAT_COMPARE_RELATIONS = frozenset(
@@ -1791,6 +1802,26 @@ _SMEM_NARROW_LOAD_MAP = {
     'U16': (2, False),
 }
 
+# S_ATOMIC_* operations the CDNA ISAs define and the scalar pipeline supports.
+# Other flat atomic operations stay 'nop' even when the flat tables know them.
+_SMEM_ATOMIC_OPS = frozenset(
+    {
+        'swap',
+        'cmpswap',
+        'add',
+        'sub',
+        'smin',
+        'umin',
+        'smax',
+        'umax',
+        'and',
+        'or',
+        'xor',
+        'inc',
+        'dec',
+    }
+)
+
 
 def _derive_smem(name: str) -> InstructionSemantics | None:
     """Derive semantics for an SMEM (Scalar Memory) instruction."""
@@ -1818,12 +1849,23 @@ def _derive_smem(name: str) -> InstructionSemantics | None:
     if 'DCACHE' in upper or upper in ('S_ATC_PROBE', 'S_ATC_PROBE_BUFFER'):
         return InstructionSemantics(name, 'nop')
 
-    if upper == 'S_ATOMIC_DEC':
-        return InstructionSemantics(
-            name, 'smem_atomic', operation='dec', elem_size=4, num_elems=1
-        )
-    # Other scalar atomics are not currently simulated.
     if '_ATOMIC_' in upper:
+        if upper.startswith('S_ATOMIC_'):
+            suffix = upper[len('S_ATOMIC_') :]
+            is_x2 = suffix.endswith('_X2')
+            if is_x2:
+                suffix = suffix[:-3]
+            info = _derive_flat_atomic_info(suffix, is_x2)
+            if info and info[0] in _SMEM_ATOMIC_OPS:
+                op, elem_size, data_dw_actual = info
+                return InstructionSemantics(
+                    name,
+                    'smem_atomic',
+                    operation=op,
+                    elem_size=elem_size,
+                    num_elems=data_dw_actual,
+                )
+        # Scalar buffer atomics are not currently simulated.
         return InstructionSemantics(name, 'nop')
 
     is_store = '_STORE_' in upper or '_SCRATCH_STORE_' in upper
@@ -2560,13 +2602,28 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
     # DS_ADD_GS_REG_RTN / DS_SUB_GS_REG_RTN contain _ADD / _SUB.
     if upper in ('DS_ADD_GS_REG_RTN', 'DS_SUB_GS_REG_RTN'):
         return InstructionSemantics(name, 'nop')
-    # GWS (Global Wave Sync). INIT programs a resource's arrival count; the
-    # runtime issues it before any kernel that synchronizes. GWS state is not
-    # modeled, so INIT retires and the barrier and semaphore ops stay
-    # unimplemented rather than returning before the grid has synchronized.
-    if upper == 'DS_GWS_INIT':
-        return InstructionSemantics(name, 'true_nop')
+    # GWS (Global Wave Sync) classification. Map each of the six GWS DS opcodes
+    # to its per-mnemonic operation so the generator can decode the operands and
+    # the matching ComputeUnitCore hook can apply the right semantics.
+    _DS_GWS_MAP = {
+        'DS_GWS_INIT': 'init',
+        'DS_GWS_SEMA_V': 'sema_v',
+        'DS_GWS_SEMA_P': 'sema_p',
+        'DS_GWS_SEMA_BR': 'sema_br',
+        'DS_GWS_SEMA_RELEASE_ALL': 'sema_release_all',
+        'DS_GWS_BARRIER': 'barrier',
+    }
     if upper.startswith('DS_GWS_'):
+        for prefix, op in _DS_GWS_MAP.items():
+            if upper == prefix or upper.startswith(prefix + '_'):
+                return InstructionSemantics(
+                    name, 'ds_gws', operation=op, elem_size=4, num_elems=0
+                )
+        # An unrecognized DS_GWS_* mnemonic matches none of the six supported
+        # operations. Classify it as an explicit (unsimulated) nop here instead of
+        # letting control reach the generic DS-atomic fallback below: a name like
+        # DS_GWS_ADD_* contains '_ADD', so the fallback would otherwise mis-decode a
+        # GWS opcode as a read-modify-write atomic and give it memory semantics.
         return InstructionSemantics(name, 'nop')
     # GDS ordered count.
     if upper == 'DS_ORDERED_COUNT':
