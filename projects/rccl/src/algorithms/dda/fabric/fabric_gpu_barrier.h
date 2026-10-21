@@ -98,7 +98,7 @@ public:
   __device__ __forceinline__ void orderDestWrites() {
 #if defined(__gfx1250__)
     __atomic_signal_fence(__ATOMIC_SEQ_CST);
-    asm volatile("s_wait_storecnt 0x0" ::: "memory");
+    asm volatile("s_wait_loadcnt 0x0\n\ts_wait_storecnt 0x0" ::: "memory");
     __atomic_signal_fence(__ATOMIC_SEQ_CST);
 #else
     __threadfence_system();
