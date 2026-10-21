@@ -214,6 +214,17 @@ class AllocationScriptTest(TempWork):
         _, script = self.run_allocation("llama-3.1-405b-maxtext", {})
         self.assertNotIn("preflight_dns.sh", script)
 
+    def test_host_memory_released_before_each_sglang_phase(self):
+        _, script = self.run_allocation(WORKLOAD, {})
+        lines = script.splitlines()
+        release = next(i for i, line in enumerate(lines) if "release_host_memory.sh" in line)
+        self.assertLess(release, next(i for i, line in enumerate(lines)
+                                      if line.startswith("madengine run")))
+        self.assertIn('--ntasks="${SLURM_JOB_NUM_NODES}" --ntasks-per-node=1', lines[release])
+        self.assertTrue((self.work / "ab" / "release_host_memory.sh").is_file())
+        _, script = self.run_allocation("llama-3.1-405b-maxtext", {})
+        self.assertNotIn("release_host_memory.sh", script)
+
     def test_exclude_from_environment(self):
         cmd, _ = self.run_allocation(WORKLOAD, {"MADENGINE_SLURM_EXCLUDE": "n[01-02],n07"})
         self.assertEqual(cmd[cmd.index("--exclude") + 1], "n[01-02],n07")
