@@ -115,4 +115,64 @@ __launch_bounds__(512)
   }
 }
 
+// Peer-major copy loops keep this many 16 B loads in flight per thread.
+constexpr int kDdaA2APeerUnroll = 8;
+
+// Copies 16 B lines i = begin, begin + stride, ... < end of src to dst. Full groups of kDdaA2APeerUnroll lines
+// carry no per-line bounds check, so all their loads are issued before the first store; a predicated load per
+// line stops the compiler from batching them and costs ~25% of the bandwidth. Leftover lines go one at a time.
+template <typename T>
+__device__ __forceinline__ void ddaA2APeerCopy(T* dst, const T* src, size_t begin, size_t end, size_t stride) {
+  constexpr int kUnroll = kDdaA2APeerUnroll;
+  const uint4* s = reinterpret_cast<const uint4*>(src);
+  uint4* d = reinterpret_cast<uint4*>(dst);
+  size_t i = begin;
+  for (; i + (kUnroll - 1) * stride < end; i += kUnroll * stride) {
+    uint4 v[kUnroll];
+#pragma unroll
+    for (int u = 0; u < kUnroll; ++u) v[u] = s[i + u * stride];
+#pragma unroll
+    for (int u = 0; u < kUnroll; ++u) d[i + u * stride] = v[u];
+  }
+  for (; i < end; i += stride) d[i] = s[i];
+}
+
+// Peer-major push alltoall. The grid is nRanks * blocksPerPeer blocks; block b works only on peer
+// k = b / blocksPerPeer (rank (selfRank + k) % nRanks) and on slice b % blocksPerPeer of that peer's chunk, so
+// each block streams to one remote GPU instead of fanning out to all of them. The drain mirrors it: block b
+// reads the slot of rank (selfRank - k) % nRanks. Rank s' wrote that slot from its block with the same k and
+// slice, i.e. the same block index, so the sync pairs the write with the read. Every rank must launch the same
+// grid. Out of place only: a block drains into recvbuff slots that other blocks of this rank may still be
+// reading from sendbuff.
+// The mid-kernel sync is a two-rank handshake (push destination, drain source) rather than an all-rank barrier,
+// since a block only depends on those two ranks. Block group k == 0 pushes to this rank's own scratch like any
+// other peer, so every block takes part in the handshake and the flag slots stay paired.
+template <typename T>
+#if defined(USE_ROCM)
+__launch_bounds__(512)
+#endif
+  __global__ void ddaAllToAllFabricPushPeer(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
+                                            const T* __restrict__ sendbuff, int selfRank, int nRanks,
+                                            int blocksPerPeer, FabricGpuBarrier barrier) {
+  // A peer's scratch is free to overwrite once that peer's block has reached this op.
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
+
+  constexpr size_t countPerThread = sizeof(uint4) / sizeof(T);
+  const size_t nLines = count / countPerThread;
+  const int k = blockIdx.x / blocksPerPeer;
+  const size_t begin = (blockIdx.x % blocksPerPeer) * static_cast<size_t>(blockDim.x) + threadIdx.x;
+  const size_t stride = static_cast<size_t>(blocksPerPeer) * blockDim.x;
+
+  const int peer = (selfRank + k) % nRanks;
+  const int srcRank = (selfRank - k + nRanks) % nRanks;
+
+  ddaA2APeerCopy(ipcbuffs[peer] + static_cast<size_t>(selfRank) * count, sendbuff + static_cast<size_t>(peer) * count,
+                 begin, nLines, stride);
+
+  barrier.signalWaitPeer(peer, srcRank, blockIdx.x);
+
+  const size_t slot = static_cast<size_t>(srcRank) * count;
+  ddaA2APeerCopy(recvbuff + slot, ipcbuffs[selfRank] + slot, begin, nLines, stride);
+}
+
 } // namespace dda::common
