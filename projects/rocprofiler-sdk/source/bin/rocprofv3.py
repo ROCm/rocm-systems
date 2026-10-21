@@ -185,6 +185,37 @@ _BASH_COMPLETION_BOOLEAN_HELP = (
     ("false", "Disable explicitly"),
 )
 
+# Keep synchronized with source/lib/output/output_key.cpp.
+_BASH_COMPLETION_OUTPUT_SUBSTITUTIONS = (
+    ("%argv%", "", "Entire command line condensed into a single string"),
+    (
+        "%argt%",
+        "",
+        "Command line with the first argument reduced to its basename",
+    ),
+    ("%args%", "", "Application arguments condensed into a single string"),
+    ("%tag%", "", "Basename of the application executable"),
+    (
+        "%arg0%",
+        "",
+        "Application argument number 0; replace 0 with another index",
+    ),
+    ("%hostname%", "%h", "Network hostname"),
+    ("%pid%", "%p", "Process identifier"),
+    ("%ppid%", "", "Parent process identifier"),
+    ("%pgid%", "", "Process group identifier"),
+    ("%psid%", "", "Process session identifier"),
+    ("%psize%", "", "Number of sibling processes"),
+    ("%job%", "%j", "SLURM job identifier"),
+    ("%rank%", "%r", "SLURM or MPI rank"),
+    ("%size%", "%s", "MPI world size"),
+    ("%nid%", "", "Rank when available, otherwise process identifier"),
+    ("%cwd%", "", "Current working directory"),
+    ("%launch_date%", "", "Launch date using ROCPROF_DATE_FORMAT"),
+    ("%launch_time%", "", "Launch time using ROCPROF_TIME_FORMAT"),
+    ("%env{NAME}%", "", "Value of environment variable NAME"),
+)
+
 _BASH_COMPLETION_FILE_DIRECTIVE = "__ROCPROFV3_COMPLETE_FILE__"
 _BASH_COMPLETION_DIRECTORY_DIRECTIVE = "__ROCPROFV3_COMPLETE_DIRECTORY__"
 _BASH_COMPLETION_DELEGATE_DIRECTIVE = "__ROCPROFV3_COMPLETE_DELEGATE__"
@@ -1458,9 +1489,12 @@ def _bash_completion_description(value):
     return " ".join(str(value).replace("%%", "%").replace("\t", " ").split())
 
 
-def _bash_completion_record(value, description=""):
+def _bash_completion_record(value, description="", display=None):
+    display = value if display is None else display
     description = _bash_completion_description(description)
-    return f"{value}\t{description}" if description else value
+    if display != value or description:
+        return f"{value}\t{display}\t{description}"
+    return value
 
 
 def _bash_completion_value_help(action):
@@ -1486,8 +1520,53 @@ def _bash_completion_value_help(action):
     return tuple(ordered)
 
 
+def _bash_completion_output_substitutions(current, prefix=""):
+    if current.count("%") % 2 == 1:
+        substitution_start = current.rfind("%")
+        value_prefix = current[:substitution_start]
+        fragment = current[substitution_start:]
+    else:
+        if current and not current.endswith(("-", "_", ".", "/")):
+            return []
+        value_prefix = current
+        fragment = ""
+
+    records = []
+    for long_form, short_form, description in _BASH_COMPLETION_OUTPUT_SUBSTITUTIONS:
+        matching = [
+            value
+            for value in (long_form, short_form)
+            if value and value.startswith(fragment)
+        ]
+        if not matching:
+            continue
+
+        if short_form and short_form == fragment:
+            value = short_form
+        elif long_form in matching:
+            value = long_form
+        else:
+            value = matching[0]
+
+        value_base = f"{prefix}{value_prefix}"
+        if short_form:
+            display = f"{value_base}{short_form}, {value_base}{long_form}"
+        else:
+            display = f"{value_base}{long_form}"
+
+        records.append(
+            _bash_completion_record(f"{value_base}{value}", description, display)
+        )
+    return records
+
+
 def _bash_completion_for_action(action, current, prefix=""):
     records = []
+    if action.dest == "output_file" or (
+        action.dest == "output_directory" and (not current or current.count("%") % 2 == 1)
+    ):
+        records.extend(_bash_completion_output_substitutions(current, prefix))
+
     current_lower = current.lower()
     for value, description in _bash_completion_value_help(action):
         if value.lower().startswith(current_lower):
@@ -1507,17 +1586,54 @@ def _bash_completion_options(parser, current):
     if "--".startswith(current):
         records.append(
             _bash_completion_record(
-                "--", "Separate rocprofv3 options from the application command"
+                "--",
+                "Separate rocprofv3 options from the application command",
+                "--",
             )
         )
 
     for action in parser._actions:
         if action.help == argparse.SUPPRESS:
             continue
+
+        matching_options = [
+            option for option in action.option_strings if option.startswith(current)
+        ]
+        if not matching_options:
+            continue
+
+        long_options = [
+            option for option in action.option_strings if option.startswith("--")
+        ]
+        short_options = [
+            option
+            for option in action.option_strings
+            if option.startswith("-") and not option.startswith("--")
+        ]
+
+        if current == "-" and long_options:
+            value = long_options[0]
+        else:
+            value = matching_options[0]
+
+        if value.startswith("--"):
+            displayed_longs = [value, *(itr for itr in long_options if itr != value)]
+            displayed_shorts = short_options
+        else:
+            displayed_longs = long_options
+            displayed_shorts = [value, *(itr for itr in short_options if itr != value)]
+
+        if displayed_longs:
+            display = ", ".join(displayed_longs)
+            if current.startswith("--") and displayed_shorts:
+                display += f" ({', '.join(displayed_shorts)})"
+            elif displayed_shorts:
+                display = f"{', '.join(displayed_shorts)}, {display}"
+        else:
+            display = ", ".join(displayed_shorts)
+
         description = _bash_completion_description(action.help)
-        for option in action.option_strings:
-            if option.startswith(current):
-                records.append(_bash_completion_record(option, description))
+        records.append(_bash_completion_record(value, description, display))
     return records
 
 

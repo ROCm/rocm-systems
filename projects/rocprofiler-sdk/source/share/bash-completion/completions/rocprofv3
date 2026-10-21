@@ -44,8 +44,9 @@ _rocprofv3_set_replies()
     local tab=$'\t'
     local candidate
     local value
+    local details
+    local display
     local description
-    local display_value
     local padding
     local columns=${COLUMNS:-80}
     local max_description_length
@@ -60,8 +61,21 @@ _rocprofv3_set_replies()
 
     for candidate in "${candidates[@]}"; do
         value=${candidate%%"${tab}"*}
-        ((${#value} > longest)) && longest=${#value}
-        [[ ${candidate} == *"${tab}"* ]] && has_descriptions=true
+        display=${value}
+        description=
+        if [[ ${candidate} == *"${tab}"* ]]; then
+            details=${candidate#*"${tab}"}
+            if [[ ${details} == *"${tab}"* ]]; then
+                display=${details%%"${tab}"*}
+                description=${details#*"${tab}"}
+            else
+                description=${details}
+            fi
+        fi
+        ((${#display} > longest)) && longest=${#display}
+        if [[ ${display} != "${value}" || -n ${description} ]]; then
+            has_descriptions=true
+        fi
     done
 
     # Menu completion inserts candidates directly instead of displaying a list.
@@ -79,9 +93,16 @@ _rocprofv3_set_replies()
 
     for candidate in "${candidates[@]}"; do
         value=${candidate%%"${tab}"*}
+        display=${value}
         description=
         if [[ ${candidate} == *"${tab}"* ]]; then
-            description=${candidate#*"${tab}"}
+            details=${candidate#*"${tab}"}
+            if [[ ${details} == *"${tab}"* ]]; then
+                display=${details%%"${tab}"*}
+                description=${details#*"${tab}"}
+            else
+                description=${details}
+            fi
         fi
 
         if ((max_description_length <= 0)); then
@@ -94,10 +115,9 @@ _rocprofv3_set_replies()
             fi
         fi
 
-        display_value=${value}
-        padding_length=$((longest - ${#display_value} + 2))
+        padding_length=$((longest - ${#display} + 2))
         printf -v padding "%${padding_length}s" ""
-        COMPREPLY+=("${display_value}${padding}${description}")
+        COMPREPLY+=("${display}${padding}${description}")
     done
 }
 
@@ -143,6 +163,10 @@ _rocprofv3_resolve_executable()
 _rocprofv3()
 {
     local current=${COMP_WORDS[COMP_CWORD]-}
+    local before_cursor
+    local cur
+    local prev
+    local cword
     local executable
     local record
     local value
@@ -150,14 +174,32 @@ _rocprofv3()
     local path_current=${current}
     local path_type=
     local delegate_index=
+    local -i completion_cword=${COMP_CWORD}
     local -i index
+    local -a words=()
+    local -a completion_words=("${COMP_WORDS[@]}")
     local -a records=()
     local -a candidates=()
 
     COMPREPLY=()
 
-    for ((index = 1; index < COMP_CWORD; ++index)); do
-        if [[ ${COMP_WORDS[index]} == -- ]]; then
+    if declare -F _get_comp_words_by_ref >/dev/null &&
+        _get_comp_words_by_ref -n = cur prev words cword; then
+        current=${cur}
+        completion_cword=${cword}
+        completion_words=("${words[@]}")
+    else
+        before_cursor=${COMP_LINE:0:COMP_POINT}
+        if [[ ${before_cursor} == *[[:space:]] ]]; then
+            current=
+        else
+            current=${before_cursor##*[[:space:]]}
+        fi
+    fi
+    completion_words[completion_cword]=${current}
+
+    for ((index = 1; index < completion_cword; ++index)); do
+        if [[ ${completion_words[index]} == -- ]]; then
             _rocprofv3_complete_application "$((index + 1))"
             return
         fi
@@ -167,8 +209,8 @@ _rocprofv3()
     [[ -n ${executable} ]] || return
 
     mapfile -t records < <(
-        _ROCPROFV3_BASH_COMPLETE=1 "${executable}" "${COMP_CWORD}" \
-            "${COMP_WORDS[@]}" 2>/dev/null
+        _ROCPROFV3_BASH_COMPLETE=1 "${executable}" "${completion_cword}" \
+            "${completion_words[@]}" 2>/dev/null
     )
 
     for record in "${records[@]}"; do
