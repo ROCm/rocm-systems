@@ -1914,6 +1914,32 @@ HRR_TEST_CASE(Unit_HRR_ForkWhileWriterHoldsLock) {
 }
 
 /**
+ * Unit_HRR_ForkBeforeInit
+ * -----------------------
+ *   - With capture requested, a HIP call made before hip::init() goes through
+ *     its shim, which takes the writer's events mutex. fork() holds that mutex
+ *     from the moment the shims are installed, so a child forked while another
+ *     thread makes such calls does not inherit it locked. The workload fails
+ *     if a child does not exit within its deadline.
+ *   - No call in the workload initializes the runtime, so no archive is
+ *     opened: the calls really were made before hip::init().
+ */
+HRR_TEST_CASE(Unit_HRR_ForkBeforeInit) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_fork_before_init"};
+
+  {
+    hrr::test::SpawnProc proc(hrr_self_exe());
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.runWithTimeout("\"Unit_HRR_ForkBeforeInit_Direct\"", 300);
+    INFO("Capture exit code: " << ret);
+    REQUIRE(ret == 0);
+  }
+
+  CHECK(hrr_process_archives(cap.path).empty());
+}
+
+/**
  * Unit_HRR_CaptureCrashDuringFork
  * -------------------------------
  *   - A child forked while its parent's crash callback writes the manifest

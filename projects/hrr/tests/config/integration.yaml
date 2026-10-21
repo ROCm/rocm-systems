@@ -156,6 +156,8 @@ cases:
   Unit_HRR_FirstStreamCreate_Direct: {}
   Unit_HRR_ForkAfterCaptureShutdown: {}
   Unit_HRR_ForkAfterCaptureShutdown_Direct: {}
+  Unit_HRR_ForkBeforeInit: {}
+  Unit_HRR_ForkBeforeInit_Direct: {}
   Unit_HRR_ForkBetweenCaptureFlushAndClose: {}
   Unit_HRR_ForkBetweenCaptureFlushAndClose_Direct: {}
   Unit_HRR_ForkDuringBlobWrite: {}

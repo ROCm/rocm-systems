@@ -227,8 +227,8 @@ static void pinned_untrack(void* p) {
 
 // fork() takes g_pinned_mu before the writer's locks, the order a launch takes
 // them in, so a child never inherits it held by a snapshot on a thread it does
-// not have. Registered after writer::open() registers the writer's handlers:
-// prepare handlers run in reverse order of registration.
+// not have. Registered after the writer's handlers: prepare handlers run in
+// reverse order of registration.
 static void pinned_install_atfork() {
 #ifndef _WIN32
   static std::once_flag once;
@@ -2972,6 +2972,10 @@ thread_local bool t_installing = false;
 void install_runtime_shims_once() {
   static std::once_flag once;
   std::call_once(once, [] {
+    // A shim reaches the writer's mutexes before open() too, for a call made
+    // before hip::init(), so fork() must hold them from the moment one is live.
+    hrr_cap::writer::install_fork_handlers();
+    pinned_install_atfork();
     t_installing = true;
     hip_capture_build_table();
     pinned_wrap_table();
@@ -3050,7 +3054,6 @@ void hip_capture_init() {
       hip_capture_uninstall();
       return;
     }
-    pinned_install_atfork();
 
     // HIP_HRR_DEBUG_ARGS traces are emitted via LogPrintfInfo (amd::LOG_INFO).
     // ClPrint filters anything above AMD_LOG_LEVEL, so a user who set the trace
