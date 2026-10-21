@@ -23,24 +23,24 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 * Fixed an issue where HIP applications on MI300A and other APUs could fail during the first stream creation, `hipMemcpy`, `hipMemset`, or kernel launch, reporting out-of-memory or invalid-argument errors after device-memory AQL rings were enabled by default. The allocation logic has been updated to use Large BAR only when a valid CPU link and a discrete GPU agent are present. As a result, APUs continue to use system-memory AQL rings. On WSL/Windows, discrete GPUs also continue to access the GPU memory pool through the CPU path because link-hop information is not available in the same way as on native Linux.
 * A registered `__device__` global that is absent from the loaded code object no longer aborts the process. Symbol lookup now returns `hipErrorInvalidSymbol` from the runtime's variable materialization path (`hipGetSymbolAddress`, `hipLibraryGetGlobal`, and related entry points). `hipModuleGetGlobal` still reports `hipErrorNotFound` for a missing name.
 * Fixed `__hip_bfloat162` comparisons that ignored or misread the high lane. `__hbneu2` now returns true only when both lanes are unordered-not-equal, `__hgt2` and `__hisnan2` now return the per-lane result in `.y` instead of always 1.0, and the `<`, `<=`, `>`, `>=` operators now compare `.y` with `.y`. Code that relied on the previous results may see different values.
-* Resolved an issue where peer-to-peer `hipMemcpyAsync()` transfers with the `hipMemcpyDeviceToDeviceNoCU` flag could fail on certain multi-GPU systems. SDMA engine selection has been updated to ensure reliable P2P transfers.
+* Fixed an issue that could cause peer-to-peer (P2P) `hipMemcpyAsync()` transfers using the `hipMemcpyDeviceToDeviceNoCU` memcpy kind to fail on certain multi-GPU systems. SDMA engine selection has been improved to ensure reliable P2P transfer operation.
 * Resolved a performance issue affecting large host-to-device (H2D) transfers on integrated (unified-memory) GPUs, where HMM-based KFD userptr pinning could significantly reduce transfer throughput and appear to stall workloads. Large transfers are now routed through the existing staging-copy fallback, improving transfer performance.
-* Resolved a host-blocking issue in `hipMemcpyBatchAsync` when repeatedly issued on a stream containing a long-running kernel. The implementation now reserves only the total descriptor size required for a dispatch in the kernel argument pool, reducing memory overhead.
+* Fixed a host-blocking issue in `hipMemcpyBatchAsync` that could occur when the API was repeatedly issued on a stream containing a long-running kernel. The implementation now reserves only the total descriptor space required for each dispatch in the kernel argument pool, preventing pool exhaustion and eliminating unnecessary host waits for kernel completion.
 * Resolved a segmentation fault in `hipStreamEndCapture` during multi-stream capture caused by a bookkeeping cycle among capture participants. The fix tracks capture participants in a single origin-stream-owned set, eliminating recursive traversal of forked streams during capture finalization and improving stream capture stability.
+* Resolved a potential deadlock between `hipMallocAsync` and `hipEventSynchronize` during concurrent multi-threaded execution.
 
 ### Optimized
 
-* Improved the reliability of asynchronous memory management by eliminating a potential deadlock between `hipMallocAsync` and `hipEventSynchronize` during concurrent multi-threaded execution.
 * Enhanced graph execution update performance and scalability by reducing update overhead and eliminating quadratic scaling behavior in certain graph update scenarios.
 * Optimized memory allocation capacity on Windows by increasing the maximum aperture size to 4 TiB, enabling larger memory allocations and improving support for memory-intensive workloads.
-* Optimized the performance of `hipMemcpy3DBatchAsync` by reducing SDMA submission overhead. Previously, the application issued a separate SDMA submission for each operand, resulting in significant overhead for small transfers. For 4 KB copy operations, latency was approximately 9 µs per operand, with about 94% of the time attributable to submission overhead. This optimization improves the efficiency and performance of batched 3D memory copy operations.
+* Optimized the performance of `hipMemcpy3DBatchAsync` by reducing SDMA submission overhead. Previously, the runtime issued a separate SDMA submission for each operand, resulting in significant overhead for small transfers. For 4 KB copy operations, latency was approximately 9 µs per operand, with about 94% of the time attributable to submission overhead. This optimization improves the efficiency and performance of batched 3D memory copy operations.
 
 ### Changed
 
 * Stream priority is now disabled to avoid known queue-priority-related issues. Priority streams are currently not supported.
 * HRR capture feature is now disabled.
-* `hipMemAdvise` now aliases `hipMemAdvise_v2`. Applications requiring the legacy hipMemAdvise behavior can define `HIP_TARGET_API_VERSION` to a nonzero value less than 800.
-* `HIPRTC_USE_RUNTIME_UNBUNDLER` environment variable and its associated functionality is removed from the HIP runtime.
+* `hipMemAdvise` now aliases `hipMemAdvise_v2`, which uses a `hipMemLocation` parameter instead of a device ID. Applications using the legacy `hipMemAdvise` signature may require source updates to pass a `hipMemLocation` structure. To maintain compatibility with the previous API signature, define `HIP_TARGET_API_VERSION` to a nonzero value less than 800 (e.g. 700 = HIP 7.0, 717 = HIP 7.17) at compile time. By default, when `HIP_TARGET_API_VERSION` is undefined, the `hipMemAdvise_v2` interface is used.
+* The `HIPRTC_USE_RUNTIME_UNBUNDLER` environment variable and its associated functionality have been removed from the HIP runtime. The runtime unbundler path is now always used; setting this variable no longer has any effect.
 
 ### Known issues
 
