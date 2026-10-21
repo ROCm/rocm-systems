@@ -36,7 +36,8 @@ using namespace rocshmem;
  *
  * One-way non-blocking put using QP internals directly.  Pipelines multiple
  * put_nbi_single calls and quiets only at batch boundaries.  With poll set,
- * each quiet spins on the non-blocking try_quiet_until_single() instead.
+ * each quiet spins on the non-blocking try_quiet_until_single() instead, first
+ * on a target taken mid-batch and then on everything posted.
  *****************************************************************************/
 static __device__ void QpPutNbiQuiet(QueuePair &qp, bool poll) {
   if (!poll) {
@@ -72,10 +73,17 @@ __global__ void QpPutNbiTest(int loop, int skip, long long int *start_time,
     __builtin_amdgcn_s_waitcnt(0);
 #endif
 
+    uint64_t mid_target = 0;
+
     for (int i = 0; i < loop + skip; i++) {
       int slot = (start_slot + i) % batch;
 
       if (slot == 0) {
+        // Poll the older target while the WQEs posted after it may still be in flight
+        if (poll && mid_target != 0) {
+          while (!qp.try_quiet_until_single(mid_target)) {
+          }
+        }
         QpPutNbiQuiet(qp, poll);
         if (i == skip) {
           start_time[wg_id] = wall_clock64();
@@ -83,6 +91,9 @@ __global__ void QpPutNbiTest(int loop, int skip, long long int *start_time,
       }
 
       qp.put_nbi_single(&dest[slot * size], source, size);
+      if (poll && slot == batch / 2) {
+        mid_target = qp.quiet_target_single();
+      }
     }
 
     QpPutNbiQuiet(qp, poll);
