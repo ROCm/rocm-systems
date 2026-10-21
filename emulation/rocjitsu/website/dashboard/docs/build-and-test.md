@@ -71,6 +71,20 @@ If Chromium's system libraries are already installed, `npx playwright install ch
 installs just the browser without changing OS packages. Rerun browser installation
 after updating Playwright if its required browser version changes.
 
+## Dashboard-data Python tests
+
+Use a Python 3.12 environment with Node.js (as above), Bash, Git, jq, and coreutils
+(including `realpath`) on `PATH`. Publication tests use the real dashboard
+validator; no npm dependencies are required. From `emulation/rocjitsu/website/dashboard`:
+
+```bash
+python -m pip install -r scripts/dashboard-data/requirements-test.txt
+python -m pytest scripts/dashboard-data/tests
+```
+
+The `dashboard-data` CI job uses the same requirements file. These tests are
+separate from `npm run verify` and do not require the npm dependencies.
+
 ## Run locally
 
 ```bash
