@@ -38,7 +38,7 @@ on:
         type: string
         default: "10.2.0a20260928"
       parallel:
-        description: "Engine partitions, written as num_threads. rocJITsu has no --parallel flag. Empty leaves the config unchanged."
+        description: "ctest --parallel count for hip-tests, as in test_runner.py. Empty uses 1."
         type: string
         default: ""
       functional_quantum:
@@ -130,8 +130,8 @@ jobs:
       HIP_CTEST_LABEL: ${{ github.event_name == 'workflow_dispatch' && inputs.hip_ctest_label || github.event_name != 'workflow_dispatch' && '^smoke$' || '' }}
       ROCRTST_FILTER: ${{ github.event_name == 'workflow_dispatch' && inputs.rocrtst_filter || github.event_name != 'workflow_dispatch' && 'rocrtst.Test_Example:rocrtstFunc.MemoryAccessTests:rocrtstFunc.GroupMemoryAllocationTest:rocrtstFunc.MemoryAllocateAndFreeTest:rocrtstFunc.Memory_Alignment_Test:rocrtstFunc.Concurrent_Init_Test:rocrtstFunc.Concurrent_Init_Shutdown_Test:rocrtstFunc.Reference_Count:rocrtstFunc.Signal_Create_Concurrently:rocrtstFunc.Signal_Destroy_Concurrently:rocrtstFunc.IPC:rocrtstFunc.AgentProp_UUID:rocrtstFunc.Deallocation_Notifier_Test:rocrtstFunc.Memory_Atomic_Add_Test:rocrtstFunc.Memory_Atomic_Xchg_Test' || '' }}
       THEROCK_REF: 7440cb8578f4daae0d85a428fadd6645dc5464a0
-      # "0" must stay set. An empty dispatch string is falsy and means "no override".
-      ROCJITSU_PARALLEL: ${{ github.event_name == 'workflow_dispatch' && inputs.parallel || '' }}
+      # Empty dispatch strings are falsy. parallel falls back to ctest's serial default.
+      CTEST_PARALLEL: ${{ github.event_name == 'workflow_dispatch' && inputs.parallel || '1' }}
       ROCJITSU_FUNCTIONAL_QUANTUM: ${{ github.event_name == 'workflow_dispatch' && inputs.functional_quantum || '' }}
       ROCJITSU_CPU_DISPATCH_THREADS: ${{ github.event_name == 'workflow_dispatch' && inputs.cpu_dispatch_threads || '' }}
     steps:
@@ -164,14 +164,11 @@ jobs:
         run: |
           set -euo pipefail
           src="$PWD/emulation/rocjitsu/configs/gfx942_cdna3.json"
-          if [ -z "${ROCJITSU_PARALLEL}" ] && [ -z "${ROCJITSU_FUNCTIONAL_QUANTUM}" ] && [ -z "${ROCJITSU_CPU_DISPATCH_THREADS}" ]; then
+          if [ -z "${ROCJITSU_FUNCTIONAL_QUANTUM}" ] && [ -z "${ROCJITSU_CPU_DISPATCH_THREADS}" ]; then
             echo "ROCJITSU_CONFIG=$src" >> "$GITHUB_ENV"
             exit 0
           fi
           args=(--src "$src" --out "$PWD/rj-launch-config.json")
-          if [ -n "${ROCJITSU_PARALLEL}" ]; then
-            args+=(--num-threads "$ROCJITSU_PARALLEL")
-          fi
           if [ -n "${ROCJITSU_FUNCTIONAL_QUANTUM}" ]; then
             args+=(--functional-quantum "$ROCJITSU_FUNCTIONAL_QUANTUM")
           fi
@@ -179,7 +176,7 @@ jobs:
             args+=(--cpu-dispatch-threads "$ROCJITSU_CPU_DISPATCH_THREADS")
           fi
           python3 .github/scripts/rocjitsu_launch_config.py "${args[@]}"
-          echo "rocJITsu launch overrides: num_threads=${ROCJITSU_PARALLEL:-unchanged} functional_quantum=${ROCJITSU_FUNCTIONAL_QUANTUM:-unchanged} cpu_dispatch_threads=${ROCJITSU_CPU_DISPATCH_THREADS:-unchanged}"
+          echo "rocJITsu launch overrides: functional_quantum=${ROCJITSU_FUNCTIONAL_QUANTUM:-unchanged} cpu_dispatch_threads=${ROCJITSU_CPU_DISPATCH_THREADS:-unchanged}"
           "$PWD/rj-build/tools/rocjitsu/rocjitsu" --config "$PWD/rj-launch-config.json" --thread-budget-table
           echo "ROCJITSU_CONFIG=$PWD/rj-launch-config.json" >> "$GITHUB_ENV"
 
@@ -212,7 +209,7 @@ jobs:
           set -uo pipefail
           unset GTEST_FILTER || true
           mkdir -p logs
-          echo "hip-tests wrapper timeout 18000s, ctest per-test timeout 14400s"
+          echo "hip-tests wrapper timeout 18000s, ctest per-test timeout 14400s, test_runner.py --parallel ${CTEST_PARALLEL}"
           set +e
           python3 .github/scripts/rocjitsu_suite_runner.py \
             --rocjitsu "$PWD/rj-build/tools/rocjitsu/rocjitsu" \
@@ -222,14 +219,12 @@ jobs:
             --timeout-seconds 18000 \
             --log logs/hip-tests.log \
             -- \
-            ctest \
+            python3 "$GITHUB_WORKSPACE/.github/scripts/test_runner.py" \
+            --parallel "$CTEST_PARALLEL" \
             --test-dir "$ROCM_ROOT/share/hip/catch_tests" \
-            -L "$HIP_CTEST_LABEL" \
+            --label "$HIP_CTEST_LABEL" \
             --exclude-regex 'Unit_NonHost_Printf_(loop|multiple_Threads|BufferAvailability)' \
-            --output-on-failure \
-            --parallel 1 \
-            --timeout 14400 \
-            -V
+            --timeout 14400
           hip_status=$?
           set -e
           echo "$hip_status" > logs/hip-tests.exit

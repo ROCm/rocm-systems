@@ -15,7 +15,7 @@ import rocjitsu_launch_config  # noqa: E402
 
 
 class LaunchConfigTest(unittest.TestCase):
-    def test_parallel_sets_engine_threads_and_cu_quantum(self):
+    def test_dispatch_width_and_cu_quantum(self):
         config = {
             "thread_allocations": [{"num_threads": 1, "cpu_dispatch_threads": 1}],
             "topology": {
@@ -31,9 +31,9 @@ class LaunchConfigTest(unittest.TestCase):
             },
         }
         rocjitsu_launch_config.apply_overrides(
-            config, num_threads=5, functional_quantum=0, cpu_dispatch_threads=170
+            config, functional_quantum=0, cpu_dispatch_threads=170
         )
-        self.assertEqual(config["num_threads"], 5)
+        self.assertNotIn("num_threads", config)
         self.assertEqual(config["cpu_dispatch_threads"], 170)
         entries = config["topology"]["root"]["children"][0]["config"]
         self.assertEqual(
@@ -50,7 +50,7 @@ class LaunchConfigTest(unittest.TestCase):
             self.skipTest("gfx942 config is not in this checkout")
         config = json.loads(source.read_text(encoding="utf-8"))
         rocjitsu_launch_config.apply_overrides(
-            config, num_threads=5, functional_quantum=0, cpu_dispatch_threads=170
+            config, functional_quantum=0, cpu_dispatch_threads=170
         )
         units = []
 
