@@ -19,6 +19,12 @@ storage, and saves observations.
 Currently, ConSan implements one bounded analysis of LDS, the memory shared
 within a workgroup. It does not provide general GPU program coverage.
 
+The simulator also provides a separate [race detector](race-detector.md) that
+tracks in-flight memory events during simulated execution. ConSan obtains
+observations from inserted native ISA probes and diagnoses saved captures.
+Their evidence and supported operation sets differ, including when ConSan's
+instrumented kernel runs through the simulator.
+
 ## Design
 
 The three-stage split has three purposes:
@@ -288,6 +294,24 @@ names with input-error exit 2 before writing JSON; binary capture retains the
 original name bytes. ASCII and valid UTF-8 names keep their original spelling.
 
 ## Extending ConSan
+
+ConSan currently shares binary-instrumentation building blocks with general
+DBI: code-object patching, the entry prologue, kernarg wrappers, descriptor
+scanning, instruction builders, and text-layout helpers. Its LDS lowerer does
+not use `Instrumentor` or `TrampolineBuilder`. It owns instruction placement,
+branch rebinding, probe register reservation, and inline probe emission for a
+closed, acyclic CFG without probe calls. The general instrumentor currently
+admits only `BeforeInst` sites, limits its call-free inline path to a nop, and
+does not automatically grow SGPR allocations; it cannot directly express this
+lowering's entry, access, and exit probes.
+
+A common binary-instrumentation layer shared by ConSan and general DBI is a
+possible future direction. Evaluating it requires common contracts for
+instruction placement and branch relocation, register allocation and resource
+growth, guest-state preservation, and target-specific hazards. LDS operation
+qualification and observation semantics would remain with ConSan. The current
+reuse boundary is a starting point for that discussion, not a commitment to
+move ConSan into the existing instrumentor or to introduce another framework.
 
 A new analysis primarily extends **compiler facts/probes and offline diagnosis**
 together. Define its question, scope, required evidence, and behavior under loss:
