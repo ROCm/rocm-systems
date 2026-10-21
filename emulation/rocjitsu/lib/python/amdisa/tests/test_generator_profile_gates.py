@@ -7792,6 +7792,32 @@ def test_wide_scalar_load_contributes_two_counter_tokens():
 
 
 @pytest.mark.parametrize(
+    ('name', 'operation', 'elem_size', 'num_elems', 'tokens'),
+    [
+        ('S_ATOMIC_DEC', 'dec', 4, 1, 1),
+        ('S_ATOMIC_DEC_X2', 'dec', 8, 2, 2),
+        ('S_ATOMIC_CMPSWAP', 'cmpswap', 4, 2, 1),
+        ('S_ATOMIC_CMPSWAP_X2', 'cmpswap', 8, 4, 2),
+    ],
+)
+def test_scalar_atomic_counter_tokens_follow_access_width(
+    name, operation, elem_size, num_elems, tokens
+):
+    # The access width sets the count, so an X2 atomic with GLC=0 still takes two.
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(arch_name='cdna4', profile=Cdna4Profile())
+    sem = InstructionSemantics(
+        name,
+        'smem_atomic',
+        operation=operation,
+        elem_size=elem_size,
+        num_elems=num_elems,
+    )
+
+    assert codegen._memory_issue_counter_increment(sem, 'smem_atomic') == tokens
+
+
+@pytest.mark.parametrize(
     'arch',
     ['cdna1', 'cdna2', 'cdna3', 'cdna4', 'rdna1', 'rdna2', 'rdna3', 'rdna3_5'],
 )
@@ -8527,6 +8553,30 @@ def test_generated_atomic_def_use_follows_return_control(
         assert f'vdata_return({return_bits}, OperandType::OPR_VGPR' in cmpswap
         assert 'src_operands_[0] = &vdata;' in cmpswap
         assert 'dst_operands_[num_dst_++] = &vdata_return;' in cmpswap
+
+
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'cdna3', 'cdna4'])
+def test_generated_smem_cmpswap_defines_only_return_width(
+    amdgpu_generated_root: Path, arch: str
+):
+    smem = (amdgpu_generated_root / arch / 'smem.cpp').read_text()
+    for mnemonic, payload_bits, return_bits in (
+        ('SAtomicCmpswapSmem', 64, 32),
+        ('SAtomicCmpswapX2Smem', 128, 64),
+    ):
+        cmpswap = smem.split(f'{mnemonic}::{mnemonic}')[1]
+        cmpswap = cmpswap.split('namespace detail')[0]
+        assert f'sdata({payload_bits}, OperandType::OPR_SREG' in cmpswap
+        assert f'sdata_return({return_bits}, OperandType::OPR_SREG' in cmpswap
+        assert 'src_operands_[0] = &sdata;' in cmpswap
+        assert 'if (inst_.glc != 0)' in cmpswap
+        assert 'dst_operands_[num_dst_++] = &sdata_return;' in cmpswap
+        assert 'dst_operands_[num_dst_++] = &sdata;' not in cmpswap
+
+    add = smem.split('SAtomicAddSmem::SAtomicAddSmem')[1]
+    add = add.split('namespace detail')[0]
+    assert 'dst_operands_[num_dst_++] = &sdata;' in add
+    assert 'sdata_return' not in add
 
 
 def test_generated_cdna5_swmmac_tied_destination_metadata(

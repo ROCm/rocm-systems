@@ -1,6 +1,6 @@
 .. meta::
    :description: Install hipFile
-   :keywords: hipFile, install, ROCm, build, CMake, GPU I/O, AMD, direct storage
+   :keywords: hipFile, install, ROCm, build, CMake, GPU I/O, AMD, direct storage, P2PDMA, CONFIG_PCI_P2PDMA, kernel
 
 .. _hipfile-installation:
 
@@ -15,7 +15,16 @@ For source builds, CMake options, and sparse-checkout layout from ``rocm-systems
 see :doc:`./build-from-source`. For the Python bindings after the C library is on
 the machine, see :doc:`./python-bindings`.
 
-.. _hipfile-install-rocm:
+.. _hipfile-kernel-p2pdma:
+
+Linux kernel requirements
+=========================
+
+hipFile's fastpath requires a Linux kernel built with PCIe peer-to-peer DMA (P2PDMA) support. When no fastpath is available, hipFile uses the fallback path by default, resulting in lower than expected throughput.
+
+To check whether the running kernel supports P2PDMA, see
+:ref:`hipfile-check-p2pdma`. For the list of tested distribution kernels, see
+:doc:`/reference/hipFile-kernel-p2pdma-support`.
 
 Install the ROCm Core SDK
 =========================
@@ -90,10 +99,10 @@ Where:
 
 .. note::
 
-   hipFile has experimental support for NVMeoF and NFSoRDMA on Linux. 
+   hipFile has experimental support for NVMeoF and NFSoRDMA on Linux.
 
    ``amdgpu-dkms`` version 31.40 or later must be installed to use NVMeoF and NFSoRDMA.
-   
+
    NFSoRDMA requires ``HIPFILE_UNSUPPORTED_FILE_SYSTEMS=true``.
 
    See :doc:`/reference/hipFile-io-backends` for information on file type rules.
