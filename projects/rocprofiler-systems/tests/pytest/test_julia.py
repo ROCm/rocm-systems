@@ -43,6 +43,7 @@ def _resolve_julia_lib_paths(julia_binary: str) -> tuple[str, str] | None:
             capture_output=True,
             text=True,
             timeout=10,
+            check=False,
         )
 
         r2 = subprocess.run(
@@ -50,6 +51,7 @@ def _resolve_julia_lib_paths(julia_binary: str) -> tuple[str, str] | None:
             capture_output=True,
             text=True,
             timeout=10,
+            check=False,
         )
 
         if r1.returncode != 0 or r2.returncode != 0:

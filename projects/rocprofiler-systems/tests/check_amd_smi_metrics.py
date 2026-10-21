@@ -120,7 +120,9 @@ def _run_command(cmd: list[str], exit_on_failure: bool = True) -> str | None:
     If False, returns None on error (for graceful fallback).
     """
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=30, check=False
+        )
         if result.returncode != 0:
             if exit_on_failure:
                 print(

@@ -36,6 +36,7 @@ def _get_amdsmi_version_output(rocm_path: Path | None = None) -> str | None:
             capture_output=True,
             text=True,
             timeout=5,
+            check=False,
         )
         return (result.stdout or "") + " " + (result.stderr or "")
     except (subprocess.SubprocessError, OSError):
@@ -172,6 +173,7 @@ class SystemCapabilities:
                     capture_output=True,
                     text=True,
                     timeout=10,
+                    check=False,
                 )
                 return result.stdout if result.returncode == 0 else ""
             except (subprocess.SubprocessError, OSError):
@@ -205,6 +207,7 @@ class SystemCapabilities:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                check=False,
             )
             if result.returncode != 0:
                 return None
@@ -231,6 +234,7 @@ class SystemCapabilities:
                 capture_output=True,
                 text=True,
                 timeout=15,
+                check=False,
             )
             if result.returncode != 0:
                 return []
@@ -265,6 +269,7 @@ class SystemCapabilities:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                check=False,
             )
             if result.returncode != 0:
                 return None
@@ -299,6 +304,7 @@ class SystemCapabilities:
                 text=True,
                 timeout=10,
                 env=ucx_env,
+                check=False,
             )
             if result.returncode != 0:
                 return False
@@ -389,6 +395,7 @@ class SystemCapabilities:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                check=False,
             )
         except (subprocess.SubprocessError, OSError):
             return False
@@ -439,6 +446,7 @@ class SystemCapabilities:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                check=False,
             )
             if result.returncode != 0:
                 return False
@@ -477,6 +485,7 @@ class SystemCapabilities:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                check=False,
             )
             if result.returncode != 0:
                 return 0
@@ -590,6 +599,7 @@ class SystemCapabilities:
                 text=True,
                 timeout=10,
                 env=env,
+                check=False,
             )
             return result.returncode == 0
         except (subprocess.SubprocessError, OSError):
@@ -628,6 +638,7 @@ class SystemCapabilities:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                check=False,
             )
             if result.returncode != 0:
                 return None
@@ -666,7 +677,9 @@ class SystemCapabilities:
                     + extra
                     + ["-n", "1", probe_path, "--", "SENTINEL"]
                 )
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                result = subprocess.run(
+                    cmd, capture_output=True, text=True, timeout=30, check=False
+                )
                 if result.returncode == 0:
                     return result.stdout.strip() == "SENTINEL"
             return False
@@ -730,6 +743,7 @@ class SystemCapabilities:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                check=False,
             )
             if result.returncode != 0:
                 return False
@@ -775,6 +789,7 @@ def _get_python_version(executable: Path) -> str | None:
             capture_output=True,
             text=True,
             timeout=10,
+            check=False,
         )
         if result.returncode == 0:
             output = result.stdout.strip() or result.stderr.strip()

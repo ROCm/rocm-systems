@@ -552,10 +552,10 @@ def parse_args(args=None):
 # ---------------------------------------------------------------------------
 
 
-def run(*args, **kwargs):
+def run(*args, check=False, **kwargs):
     import subprocess
 
-    return subprocess.run(*args, **kwargs)
+    return subprocess.run(*args, check=check, **kwargs)
 
 
 def set_python_hints_from_cmake_args(cmake_args):

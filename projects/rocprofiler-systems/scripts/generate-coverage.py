@@ -173,7 +173,9 @@ def _gcovr_base_cmd(
 
 def _run(cmd: list[str], build_dir: Path) -> subprocess.CompletedProcess:
     print(f"Running: {' '.join(cmd)}")
-    result = subprocess.run([*cmd, str(build_dir)], capture_output=True, text=True)
+    result = subprocess.run(
+        [*cmd, str(build_dir)], capture_output=True, text=True, check=False
+    )
     if result.stdout:
         print(result.stdout)
     return result

@@ -65,7 +65,10 @@ def get_cat_command() -> list[str]:
     if cmake_exe:
         try:
             result = subprocess.run(
-                [cmake_exe, "-E", "cat", "--help"], capture_output=True, timeout=5
+                [cmake_exe, "-E", "cat", "--help"],
+                capture_output=True,
+                timeout=5,
+                check=False,
             )
             # cmake -E cat returns 0 even for --help
             if result.returncode == 0:
@@ -443,6 +446,7 @@ class TestPythonFrontend:
                 **(extra_env or {}),
             },
             timeout=self.TIMEOUT_SEC,
+            check=False,
         )
 
     def _run_probe(
@@ -458,6 +462,7 @@ class TestPythonFrontend:
                 **(extra_env or {}),
             },
             timeout=self.TIMEOUT_SEC,
+            check=False,
         )
         lines = result.stdout.splitlines()
         assert lines, f"probe produced no stdout; stderr:\n{result.stderr}"

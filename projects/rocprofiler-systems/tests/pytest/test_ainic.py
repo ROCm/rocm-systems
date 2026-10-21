@@ -138,6 +138,7 @@ class TestAINIC(RocprofsysTest):
             capture_output=True,
             text=True,
             timeout=15,
+            check=False,
         )
         assert result.returncode == 0, f"rocprof-sys-avail failed: {result.stderr}"
 

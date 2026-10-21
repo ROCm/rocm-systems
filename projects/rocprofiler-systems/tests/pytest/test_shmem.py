@@ -59,7 +59,9 @@ def shmem_validated(rocprof_config) -> tuple[bool, str]:
 
     cmd = [str(oshrun), "-n", str(_SHMEM_NP), str(hello)]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=10, check=False
+        )
     except (subprocess.SubprocessError, OSError):
         return False, f"Failed to run {' '.join(cmd)}"
 

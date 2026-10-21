@@ -158,6 +158,7 @@ def require_hipfile_collector(rocprof_config: RocprofsysConfig) -> None:
         capture_output=True,
         text=True,
         timeout=15,
+        check=False,
     )
     if result.returncode != 0:
         pytest.skip(f"rocprof-sys-avail failed: {result.stderr}")
@@ -194,6 +195,7 @@ class TestHipFileTelemetry(RocprofsysTest):
             capture_output=True,
             text=True,
             timeout=15,
+            check=False,
         )
         assert result.returncode == 0, f"rocprof-sys-avail failed: {result.stderr}"
 

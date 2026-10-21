@@ -209,6 +209,7 @@ def _run_validation_script(
             capture_output=True,
             text=True,
             timeout=timeout,
+            check=False,
         )
 
         if result.returncode == 0:

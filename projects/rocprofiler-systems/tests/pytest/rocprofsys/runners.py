@@ -275,6 +275,7 @@ class BaseRunner(ABC):
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     timeout=5,
+                    check=False,
                 )
                 if result.returncode == 0:
                     cmd.insert(1, "--oversubscribe")
@@ -328,6 +329,7 @@ class BaseRunner(ABC):
                 timeout=self.timeout,
                 env=self.env,
                 cwd=self.working_directory,
+                check=False,
             )
             duration = time.time() - start_time
             test_result = TestResult(
@@ -493,6 +495,7 @@ class BinaryRewriteRunner(BaseRunner):
                 timeout=self.timeout,
                 env=self.env,
                 cwd=self.config.rocprofsys_build_dir,
+                check=False,
             )
             duration = time.time() - start_time
             test_result = TestResult(

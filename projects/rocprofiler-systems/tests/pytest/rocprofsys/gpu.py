@@ -148,6 +148,7 @@ def run_rocminfo(rocm_path: Path | None = None) -> str | None:
             capture_output=True,
             text=True,
             timeout=30,
+            check=False,
         )
     except (subprocess.TimeoutExpired, OSError) as exc:
         raise RuntimeError(f"Failed to run rocminfo ({rocminfo}): {exc}") from exc
@@ -318,6 +319,7 @@ def get_offload_extractor(
                 capture_output=True,
                 text=True,
                 timeout=10,
+                check=False,
             )
             if version_result.returncode == 0:
                 version_match = re.search(r"version\s+(\d+)", version_result.stdout or "")
@@ -393,6 +395,7 @@ def get_target_gpu_arch(rocm_path: Path, target_path: Path) -> list[str]:
                     capture_output=True,
                     text=True,
                     timeout=30,
+                    check=False,
                 )
                 if result.returncode == 0:
                     for line in result.stdout.strip().split("\n"):
@@ -424,6 +427,7 @@ def get_target_gpu_arch(rocm_path: Path, target_path: Path) -> list[str]:
                 capture_output=True,
                 text=True,
                 timeout=30,
+                check=False,
             )
             if result.returncode == 0:
                 for line in result.stdout.strip().split("\n"):
@@ -460,6 +464,7 @@ def get_xnack_support(rocm_path: Path | None = None) -> bool:
             text=True,
             timeout=30,
             env=env,
+            check=False,
         )
         if result.returncode == 0:
             return "xnack+" in result.stdout
