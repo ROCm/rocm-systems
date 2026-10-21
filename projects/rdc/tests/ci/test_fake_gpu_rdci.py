@@ -11,6 +11,7 @@ Environment, besides test_fake_gpu.py's:
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -284,3 +285,15 @@ def test_embedded_rdc_refuses_undefined_policy_values(tools):
     env = dict(os.environ, LD_PRELOAD=tools[2], RDC_FAKE_GPUS="4")
     got = _api_child("embedded", "policy", env)
     assert set(got.values()) == {RDC_ST_BAD_PARAMETER}, got
+
+
+# ---------------------------------------------------------------------------
+# rdci topo: the help lists the options rdci topo takes
+# ---------------------------------------------------------------------------
+def test_topo_help_lists_the_options_it_takes(rdcd):
+    for flag in ("--help", "-h"):
+        r = rdcd.rdci("topo", flag)
+        assert r.returncode == RDC_ST_OK, (flag, r.stdout + r.stderr)
+        assert "--gpu_index" in r.stdout, r.stdout
+        assert not re.search(r"(?<![\w-])-g\b|--index\b|--reg\b", r.stdout), r.stdout
+    assert "Topology Information" in rdcd.ok("topo", "--gpu_index", "0")

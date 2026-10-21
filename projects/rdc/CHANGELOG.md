@@ -26,7 +26,7 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - `rdci policy` and `rdci config` exit with an error code when the request fails, instead of printing nothing or a success message and exiting with 0.
 
-- `rdci policy --help` prints its help and exits successfully.
+- `rdci policy --help` and `rdci topo --help` print their help and exit successfully, and the topo help lists the options `rdci topo` accepts.
 
 - `rdci health -s` on a GPU group that does not exist no longer leaves an unused field group in rdcd. Repeated failures filled the field group table, and commands that need a new field group, such as `rdci dmon`, then failed until rdcd was restarted.
 
