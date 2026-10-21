@@ -798,6 +798,10 @@ void Instrumentor::add_point_by_offset(uint64_t anchor_offset, InstrumentationKi
 }
 
 bool Instrumentor::ensure_blocks_built(std::string *error_out) {
+  if (!obj_.is_valid()) {
+    report(error_out, "cannot instrument an invalid code object");
+    return false;
+  }
   if (blocks_built_)
     return true;
   if (arch_ == ROCJITSU_CODE_ARCH_RV32I || arch_ == ROCJITSU_CODE_ARCH_RV64I) {
