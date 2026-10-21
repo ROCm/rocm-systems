@@ -71,7 +71,9 @@ bool rcclUseAinic() { return g_useAinic(); }
 
 static int DefaultPxnDisable(struct ncclComm*) { return 0; }
 std::function<int(struct ncclComm*)> g_pxnDisable = DefaultPxnDisable;
+#ifndef RCCL_TRANSPORT_STUBS_OMIT_ncclPxnDisable
 int ncclPxnDisable(struct ncclComm* comm) { return g_pxnDisable(comm); }
+#endif
 
 // src/proxy.cc: comm teardown stops the proxy through this, so it needs a working default, not a fail-loud one.
 static ncclResult_t DefaultNcclProxyStop(struct ncclComm*) { return ncclSuccess; }
@@ -83,8 +85,14 @@ static ncclResult_t DefaultTransportP2pSetup(struct ncclComm*, struct ncclTopoGr
 std::function<ncclResult_t(struct ncclComm*, struct ncclTopoGraph*, int, bool*)>
     g_ncclTransportP2pSetup = DefaultTransportP2pSetup;
 
-// src/transport.cc. Null slots: a test installs its own ncclTransport vtable.
-struct ncclTransport* ncclTransports[NTRANSPORTS] = {};
+// src/transport.cc's table. ncclTopoComputePaths asks P2P, then SHM, whether a peer is reachable; both say yes.
+static ncclResult_t ReachableCanConnect(int* ret, struct ncclComm*, struct ncclTopoGraph*, struct ncclPeerInfo*,
+                                        struct ncclPeerInfo*) {
+  *ret = 1;
+  return ncclSuccess;
+}
+static struct ncclTransport reachableTransport = {"fake", ReachableCanConnect};
+struct ncclTransport* ncclTransports[NTRANSPORTS] = {&reachableTransport, &reachableTransport};
 
 static ncclResult_t DefaultNetDeregBuffer(struct ncclComm*, struct ncclProxyConnector*, void*) {
   FailLoudUnfaked("transport_stubs", "ncclNetDeregBuffer");
@@ -221,7 +229,7 @@ void ResetTransportStubs() {
   g_ncclNvlsLocalRegisterBuffer = DefaultNvlsLocalRegisterBuffer;
   g_ncclNvlsGraphRegisterBuffer = DefaultNvlsGraphRegisterBuffer;
   g_ncclNvlsRegResourcesQuery = DefaultNvlsRegResourcesQuery;
-  std::fill(std::begin(ncclTransports), std::end(ncclTransports), nullptr);
+  std::fill(std::begin(ncclTransports), std::end(ncclTransports), &reachableTransport);
 }
 
 #ifndef RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
@@ -275,3 +283,4 @@ ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* 
 // a definition even though the code path that uses it is dead.
 #include "transport.h"
 struct ncclTransport netTransport = {};
+

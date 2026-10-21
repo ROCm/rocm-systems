@@ -75,6 +75,13 @@
       - | 0: Disable
         | 1: Enable
 
+    * - | ``HSA_ENABLE_SDMA_GPU_POLL``
+        | Windows only, and only meaningful on a native SDMA user queue, which the device capability decides. Selects who executes the dependency ``POLL_REGMEM`` packets the copy writes into the ring: the SDMA engine, or a host thread in the thunk that waits the signals out, strips the packets, and only then submits the span.
+        | Defaults to host-thread emulation. Set to 1 once the driver supports GPU-side polling.
+      - ``0``
+      - | 0: Emulate the polls on a host thread.
+        | 1: Let the SDMA engine execute the polls.
+
     * - | ``HSA_ENABLE_MWAITX``
         | When mwaitx is enabled, on AMD CPUs, runtime will hint to the CPU to go into lower power-states when doing busy loops by using the mwaitx instruction.
       - ``1``

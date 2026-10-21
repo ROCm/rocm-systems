@@ -2258,9 +2258,9 @@ typedef struct {
   /**
    * @brief Utilization
    */
-  uint16_t average_gfx_activity;                            //!< v2_4, v3_0
-  uint16_t average_mm_activity;                             //!< v2_4
-  uint16_t average_vcn_activity;                            //!< v3_0
+  uint16_t average_gfx_activity;                            //!< v2_4, v3_0 [%]
+  uint16_t average_mm_activity;                             //!< v2_4 [%]
+  uint16_t average_vcn_activity;                            //!< v3_0 [%]
   uint16_t average_ipu_activity[AMDSMI_APU_MAX_IPU];        //!< v3_0
   uint16_t average_core_c0_activity[AMDSMI_APU_MAX_CORES];  //!< v3_0
   uint16_t average_dram_reads;                              //!< v3_0 [MB/s]
@@ -3559,9 +3559,16 @@ amdsmi_status_t amdsmi_get_gpu_device_bdf(amdsmi_processor_handle processor_hand
                                           amdsmi_bdf_t* bdf);
 
 /**
- *  @brief Returns the UUID of the device
+ *  @brief Returns the legacy device UUID
  *
  *  @ingroup tagProcDiscovery
+ *
+ *  Superseded by ::amdsmi_get_gpu_cuid_info. This value is **not** a Component
+ *  Unified ID: it is built from the SMU unique ID, the PCI device ID and the KFD
+ *  partition index, so it names an addressable device and changes when the GPU
+ *  is repartitioned. A CUID names the physical component and carries the
+ *  partition in its UnitID field instead. Retained unchanged for consumers that
+ *  have already recorded its output; record a CUID for new work.
  *
  *  @platform{gpu_bm_linux} @platform{host} @platform{guest_1vf} @platform{guest_mvf}
  *  @platform{guest_windows}
@@ -3585,8 +3592,10 @@ amdsmi_status_t amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_han
  *
  *  @ingroup tagProcDiscovery
  *
- *  @platform{gpu_bm_linux} @platform{host} @platform{guest_1vf} @platform{guest_mvf}
- *  @platform{guest_windows}
+ *  The derived CUID that ::amdsmi_get_gpu_cuid_info reports, without its
+ *  provenance.
+ *
+ *  @platform{gpu_bm_linux}
  *
  *  @param[in] processor_handle Device which to query
  *
@@ -3601,6 +3610,190 @@ amdsmi_status_t amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_han
  */
 amdsmi_status_t amdsmi_get_gpu_device_cuid(amdsmi_processor_handle processor_handle,
                                            unsigned int* cuid_length, char* cuid);
+
+/**
+ *  @brief Source that answered a CUID lookup.
+ *
+ *  The staged lookup tries the driver, then its own computation. Only a
+ *  driver-sourced value is authoritative, because only the driver reads the
+ *  privileged identity.
+ *
+ *  libamdcuid records the answering stage through AMDCUID_QUERY_SOURCE, so
+ *  amd-smi reports DRIVER or LIBRARY, and UNKNOWN only when that query fails.
+ *  Treat ::AMDSMI_CUID_SOURCE_UNKNOWN as "not known to be driver-published"
+ *  rather than as "locally computed".
+ */
+typedef enum {
+  AMDSMI_CUID_SOURCE_UNKNOWN = 0,  //!< Source could not be determined
+  AMDSMI_CUID_SOURCE_DRIVER = 1,   //!< Published by the device driver
+  AMDSMI_CUID_SOURCE_LIBRARY = 3   //!< Computed by the CUID library
+} amdsmi_cuid_source_t;
+
+/**
+ *  @brief CUID Component Type, on the specification's on-wire values.
+ *
+ *  These are the values that appear in payload bits 118:121, so they can be
+ *  compared directly against a decoded CUID with no translation step. All
+ *  assigned values are named, so that a CUID from a component amd-smi does not
+ *  manage still arrives as a named value; 0xb through 0xe are reserved by the
+ *  specification and have no enumerator, so the assigned range is not
+ *  contiguous.
+ *
+ *  ::AMDSMI_CUID_COMPONENT_UNKNOWN is outside the range a 4-bit field can hold,
+ *  so the sentinel can never be mistaken for a Component Type. The values match
+ *  ::amdcuid_device_type_t one for one.
+ */
+typedef enum {
+  AMDSMI_CUID_COMPONENT_PLATFORM = 0x0,  //!< Platform (chassis, motherboard)
+  AMDSMI_CUID_COMPONENT_CPU = 0x1,       //!< CPU
+  AMDSMI_CUID_COMPONENT_GPU = 0x2,       //!< GPU
+  AMDSMI_CUID_COMPONENT_NIC = 0x3,       //!< Network interface controller
+  AMDSMI_CUID_COMPONENT_NPU = 0x4,       //!< Neural processing unit
+  AMDSMI_CUID_COMPONENT_STORAGE = 0x5,   //!< Storage device
+  AMDSMI_CUID_COMPONENT_MEMORY = 0x6,    //!< Memory device
+  AMDSMI_CUID_COMPONENT_GENPCIE = 0x7,   //!< Generic PCIe device
+  AMDSMI_CUID_COMPONENT_GENC = 0x8,      //!< Generic component
+  AMDSMI_CUID_COMPONENT_RACKTRAY = 0x9,  //!< Rack tray
+  AMDSMI_CUID_COMPONENT_RACK = 0xa,      //!< Rack
+  //! 0xb through 0xe are reserved by the specification and have no enumerator.
+  AMDSMI_CUID_COMPONENT_OTHER = 0xf,    //!< Any component none of the above names
+  AMDSMI_CUID_COMPONENT_UNKNOWN = 0xFF  //!< Not a value a 4-bit field can hold
+} amdsmi_cuid_component_type_t;
+
+/**
+ *  @brief A component's Component Unified ID and everything needed to trust it.
+ *
+ *  The fields describe one component and are returned together so that a caller
+ *  does not pair values from separate calls. They are filled from several
+ *  queries, so they are not an atomic snapshot under a concurrent re-key or
+ *  device rescan.
+ */
+typedef struct {
+  //! Canonical CUID as a UUIDv8 string. Empty when the caller lacks the
+  //! privilege to read it: the primary payload embeds the raw serial number, so
+  //! it is CAP_SYS_ADMIN-gated at the source. Also empty when the derived CUID
+  //! is temporary and the component has no primary. An empty primary is not an
+  //! error; the derived CUID below is still populated.
+  char primary[AMDSMI_GPU_CUID_SIZE];
+  //! Derived CUID as a UUIDv8 string. Names the component without
+  //! disclosing its serial, and is the value to record.
+  char derived[AMDSMI_GPU_CUID_SIZE];
+  //! Component Type field of the payload.
+  amdsmi_cuid_component_type_t component_type;
+  //! Which stage of the staged lookup answered.
+  amdsmi_cuid_source_t source;
+  //! Non-zero for a temporary CUID, payload bit 117: the identity was built
+  //! from the machine ID and world-readable device information, so it changes
+  //! when the machine ID changes and is not unique across nodes. Do not
+  //! record it in the same column as a canonical CUID. Meaningful only
+  //! on ::AMDSMI_STATUS_SUCCESS: there is no encoding for "undetermined", so a
+  //! call that cannot establish this flag fails rather than reporting zero.
+  uint8_t auxiliary;
+  //! Reserved. Eleven bytes rather than the seven the flags need, so that
+  //! `reserved` starts 8-byte aligned with no implicit padding ahead of it: a
+  //! compiler-inserted hole has to be reproduced by hand in every non-C binding.
+  uint8_t reserved_flags[11];
+  uint64_t reserved[8];
+} amdsmi_cuid_info_t;
+
+/**
+ *  @brief Returns the Component Unified ID of the device, with its provenance
+ *
+ *  @ingroup tagProcDiscovery
+ *
+ *  Prefer this over ::amdsmi_get_gpu_device_uuid, which returns a legacy device
+ *  UUID rather than a CUID.
+ *
+ *  The handle is resolved through its render node. A GPU in SPX reports the
+ *  whole GPU's CUID. In DPX and above each handle is a compute partition and
+ *  reports that partition's own CUID, never the whole GPU's; a partition
+ *  whose UnitID cannot be determined gets ::AMDSMI_STATUS_NOT_SUPPORTED.
+ *
+ *  On failure @p info comes back cleared, never partly filled: a caller that
+ *  may not read the auxiliary flag gets ::AMDSMI_STATUS_NO_PERM rather than a
+ *  zero it cannot distinguish from a determined "not auxiliary". A caller
+ *  privileged to read the primary CUID of a derived CUID that is not temporary
+ *  gets the failure that kept it from doing so, not an empty primary.
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @param[in] processor_handle Device which to query
+ *
+ *  @param[out] info Pointer to an ::amdsmi_cuid_info_t allocated by the caller
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
+ *          ::AMDSMI_STATUS_NOT_SUPPORTED when built without CUID support, when
+ *          no CUID exists for this device, for a partition the driver
+ *          publishes, or for a partition other than partition 0 whose driver
+ *          publishes nothing,
+ *          ::AMDSMI_STATUS_NO_PERM when this caller may not read
+ *          a field the snapshot must report, non-zero on other failures
+ */
+amdsmi_status_t amdsmi_get_gpu_cuid_info(amdsmi_processor_handle processor_handle,
+                                         amdsmi_cuid_info_t* info);
+
+/**
+ *  @brief One component of the node and its Component Unified ID.
+ */
+typedef struct {
+  //! The component's CUID, as ::amdsmi_get_gpu_cuid_info reports it for a GPU.
+  amdsmi_cuid_info_t info;
+  //! PCI address, "dddd:bb:dd.f", of a PCI component. A GPU partition has
+  //! the address amd-smi uses for it, as `amd-smi list` shows it, with the
+  //! partition index in the function number. Empty for the platform and for
+  //! CPUs.
+  char bdf[AMDSMI_MAX_STRING_LENGTH];
+  //! Sysfs path the component was found at, for example
+  //! /sys/devices/system/cpu/cpu0 for the first CPU package,
+  //! /sys/class/drm/renderD128 for a GPU, or a partition's xcp directory.
+  //! Empty for the platform.
+  char device_path[AMDSMI_MAX_STRING_LENGTH];
+  //! PCI or CPUID vendor ID. Zero for the platform.
+  uint16_t vendor_id;
+  uint16_t reserved_id;   //!< Reserved.
+  uint32_t reserved_pad;  //!< Reserved.
+  uint64_t reserved[4];   //!< Reserved.
+} amdsmi_cuid_component_t;
+
+/**
+ *  @brief Lists every component on the node that has a CUID
+ *
+ *  @ingroup tagProcDiscovery
+ *
+ *  The platform, each CPU package, each AMD GPU or GPU partition, each NPU,
+ *  and each NIC function, ordered by component type, then BDF, then device
+ *  path.
+ *  Unlike ::amdsmi_get_gpu_cuid_info this needs no processor handle, so it
+ *  also covers components amd-smi does not manage.
+ *
+ *  Every PCI function with a CUID is listed. A NIC's UnitID is its PCI
+ *  function number, so the functions of one card have distinct CUIDs even
+ *  where they report one serial number. Two components whose CUIDs coincide
+ *  anyway are both left out, since such a CUID identifies neither.
+ *
+ *  Every CUID is temporary (::amdsmi_cuid_info_t::auxiliary is set), so the
+ *  primary CUIDs are empty.
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @param[in,out] count As input, the number of entries @p components can
+ *                 hold. As output, the number of components on the node, even
+ *                 when that is more than were written.
+ *
+ *  @param[out] components Array of @p count entries allocated by the caller,
+ *              or nullptr to learn the count only.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, including
+ *          with *@p count set to 0 when the node has no components,
+ *          ::AMDSMI_STATUS_INVAL when @p count is null,
+ *          ::AMDSMI_STATUS_INSUFFICIENT_SIZE when @p components is too small
+ *          (the first N entries, N being the input *@p count, are written),
+ *          ::AMDSMI_STATUS_NO_PERM when this caller may not read a
+ *          component's auxiliary flag,
+ *          ::AMDSMI_STATUS_NOT_SUPPORTED when built without CUID support,
+ *          non-zero on other failures
+ */
+amdsmi_status_t amdsmi_get_cuid_components(uint32_t* count, amdsmi_cuid_component_t* components);
 
 /**
  *  @brief          Returns the Enumeration information for the device
@@ -5140,11 +5333,23 @@ amdsmi_status_t amdsmi_get_gpu_metrics_header_info(amdsmi_processor_handle proce
  *  including a GPU metrics table (v1.x) reported by an APU: the pointer
  *  tracks the table the device publishes, not whether the device is an APU.
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on
- *  fail. Returns ::AMDSMI_STATUS_NOT_SUPPORTED when the device reports a
- *  metrics revision this library does not model, and
- *  ::AMDSMI_STATUS_UNEXPECTED_SIZE when the table it hands back does not match
- *  the size its header declares.
+ *  GFX, MM and VCN activity are whole percent for every revision, in @p pgpu_metrics
+ *  and in its APU sub-struct alike. The APU sub-struct keeps its power fields in
+ *  milliwatts.
+ *
+ *  A field the reported revision does not carry reads back as the not-applicable
+ *  sentinel, the maximum value of its type. The sentinel is never scaled, so a
+ *  field marked not applicable stays recognizable as one at both levels.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail.
+ *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED the device reports a metrics revision
+ *  this library does not model, or publishes an empty metrics node.
+ *  @retval ::AMDSMI_STATUS_BUSY the device is resetting or suspended, so the
+ *  driver declined the read.
+ *  @retval ::AMDSMI_STATUS_NO_PERM the metrics node cannot be read with the
+ *  caller's privileges.
+ *  @retval ::AMDSMI_STATUS_UNEXPECTED_SIZE the read came up short of the size the
+ *  header declares, or the driver failed it without naming a device state.
  */
 amdsmi_status_t amdsmi_get_gpu_metrics_info(amdsmi_processor_handle processor_handle,
                                             amdsmi_gpu_metrics_t* pgpu_metrics);
@@ -5169,22 +5374,22 @@ amdsmi_status_t amdsmi_get_gpu_metrics_info(amdsmi_processor_handle processor_ha
  *  provided arguments.
  *
  *  **APU Metrics:**
- *  When APU-specific metrics are available (APU metrics table v2.1-v2.4 or
- *  v3.0; v2.0 is not supported),
- *  @p pgpu_metrics->apu_metrics will point to thread-local library-owned storage.
- *  This pointer is invalidated by ANY subsequent call to
- *  ::amdsmi_get_gpu_metrics_info or ::amdsmi_get_gpu_partition_metrics_info on
- *  the same thread, even for different devices. Callers must copy the entire
- *  ::amdsmi_apu_metrics_t structure immediately after the call to preserve the data.
- *  Every other table leaves @p pgpu_metrics->apu_metrics as nullptr,
- *  including a GPU metrics table (v1.x) reported by an APU: the pointer
- *  tracks the table the device publishes, not whether the device is an APU.
+ *  A partition metrics table never carries them. This call resolves only the XCP
+ *  partition revisions, so @p pgpu_metrics->apu_metrics is always nullptr here;
+ *  use ::amdsmi_get_gpu_metrics_info for a device that publishes an APU table.
+ *  This call does still invalidate an ::amdsmi_apu_metrics_t pointer obtained
+ *  earlier from that function on the same thread, so copy what it returned before
+ *  calling this one.
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on
- *  fail. Returns ::AMDSMI_STATUS_NOT_SUPPORTED when the device reports a
- *  metrics revision this library does not model, and
- *  ::AMDSMI_STATUS_UNEXPECTED_SIZE when the table it hands back does not match
- *  the size its header declares.
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail.
+ *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED the device reports a metrics revision
+ *  this library does not model, or publishes an empty metrics node.
+ *  @retval ::AMDSMI_STATUS_BUSY the device is resetting or suspended, so the
+ *  driver declined the read.
+ *  @retval ::AMDSMI_STATUS_NO_PERM the metrics node cannot be read with the
+ *  caller's privileges.
+ *  @retval ::AMDSMI_STATUS_UNEXPECTED_SIZE the read came up short of the size the
+ *  header declares, or the driver failed it without naming a device state.
  */
 amdsmi_status_t amdsmi_get_gpu_partition_metrics_info(amdsmi_processor_handle processor_handle,
                                                       amdsmi_gpu_metrics_t* pgpu_metrics);
@@ -10549,7 +10754,7 @@ amdsmi_status_t amdsmi_activate_ampp_profile(amdsmi_processor_handle processor_h
  *          ::AMDSMI_STATUS_NOT_SUPPORTED if the device has no app_modes/, or
  *          if the profile is not listed in config/writable_slot_mask,
  *          ::AMDSMI_STATUS_NO_PERM if the caller lacks write permission on
- *          app_modes/<profile_name>/config/* (typically requires
+ *          the files under app_modes/<profile_name>/config/ (typically requires
  *          root/CAP_SYS_ADMIN),
  *          ::AMDSMI_STATUS_INVAL if @p profile_name does not match any
  *          published profile_N, if @p fields contains a field name not
