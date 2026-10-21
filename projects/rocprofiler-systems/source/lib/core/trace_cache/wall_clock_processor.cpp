@@ -41,10 +41,10 @@ make_interval(const Sample& sample, std::string name)
              .end            = wall_clock_nanoseconds{ sample.end_timestamp } };
 }
 
-/// True for a worker thread created by the application that has already stopped. The
-/// main thread, internal threads and threads still running are excluded.
+/// True for a worker thread created by the application. The main thread and internal
+/// threads are excluded; threads still running at finalize were stopped then.
 bool
-is_finished_application_thread(const thread_info& info)
+is_application_worker_thread(const thread_info& info)
 {
     return info.index_data.has_value() && !info.is_offset &&
            info.index_data->sequent_value != 0 && info.get_stop() > info.get_start();
@@ -57,14 +57,13 @@ wall_clock_processor_t::wall_clock_processor_t(
 : m_metadata{ std::move(metadata) }
 , m_pid{ pid }
 , m_agents{ std::move(agents) }
-, m_options{ options }
-, m_report{ options.layout }
+, m_options{ std::move(options) }
 {}
 
 void
 wall_clock_processor_t::handle(const region_sample& sample)
 {
-    m_report.add_region(make_interval(sample, std::string{ sample.name }));
+    m_regions.push_back(make_interval(sample, std::string{ sample.name }));
 }
 
 void
@@ -75,7 +74,7 @@ wall_clock_processor_t::handle(const kernel_dispatch_sample& sample)
     {
         throw std::runtime_error("Kernel symbol is missing for kernel dispatch");
     }
-    m_report.add_gpu_activity(
+    m_gpu_activity.push_back(
         make_interval(sample, rocprofsys::utility::demangle(symbol->kernel_name)));
 }
 
@@ -84,7 +83,7 @@ wall_clock_processor_t::handle(const memory_copy_sample& sample)
 {
     auto const& src = m_agents->get_agent_by_handle(sample.src_agent_id_handle);
     auto const& dst = m_agents->get_agent_by_handle(sample.dst_agent_id_handle);
-    m_report.add_gpu_activity(
+    m_gpu_activity.push_back(
         make_interval(sample, fmt::format("memory_copy: {} -> {}", src.logical_node_id,
                                           dst.logical_node_id)));
 }
@@ -92,7 +91,7 @@ wall_clock_processor_t::handle(const memory_copy_sample& sample)
 void
 wall_clock_processor_t::handle(const scratch_memory_sample& sample)
 {
-    m_report.add_gpu_activity(make_interval(sample, std::string{ sample.name }));
+    m_gpu_activity.push_back(make_interval(sample, std::string{ sample.name }));
 }
 
 /// Threads created by the application are timed for their whole lifetime as
@@ -105,11 +104,11 @@ wall_clock_processor_t::add_thread_lifetimes()
     {
         const auto& info =
             thread_info::get(static_cast<std::int64_t>(registered.thread_id), SystemTID);
-        if(!info.has_value() || !is_finished_application_thread(*info))
+        if(!info.has_value() || !is_application_worker_thread(*info))
         {
             continue;
         }
-        m_report.add_region({ .thread_id      = registered.thread_id,
+        m_regions.push_back({ .thread_id      = registered.thread_id,
                               .name           = "start_thread",
                               .correlation_id = 0,
                               .begin = wall_clock_nanoseconds{ info->get_start() },
@@ -142,28 +141,30 @@ wall_clock_processor_t::write_file(std::string_view type, const auto& write)
 void
 wall_clock_processor_t::finalize_processing()
 {
-    if(m_report.empty())
+    if(m_regions.empty() && m_gpu_activity.empty())
     {
         LOG_DEBUG("No regions or kernels recorded for PID {}; no wall_clock report",
                   m_pid);
         return;
     }
     add_thread_lifetimes();
+    auto const report =
+        wall_clock_report{ m_options.layout, std::move(m_regions), m_gpu_activity };
 
     if(m_options.cout)
     {
         std::ostringstream table;
-        m_report.write_text(table);
+        report.write_text(table);
         LOG_INFO("\n{}", table.str());
     }
     if(m_options.text)
     {
-        write_file("txt", [this](std::ostream& out) { m_report.write_text(out); });
+        write_file("txt", [&report](std::ostream& out) { report.write_text(out); });
     }
     if(m_options.json)
     {
-        write_file("json", [this](std::ostream& out) {
-            m_report.write_json(out, m_options.rank, m_options.mpi_size);
+        write_file("json", [&](std::ostream& out) {
+            report.write_json(out, m_options.rank, m_options.mpi_size);
         });
     }
 }
