@@ -147,13 +147,18 @@ __device__ __forceinline__ void ddaA2APeerCopy(T* dst, const T* src, size_t begi
 // The mid-kernel sync is a two-rank handshake (push destination, drain source) rather than an all-rank barrier,
 // since a block only depends on those two ranks. Block group k == 0 pushes to this rank's own scratch like any
 // other peer, so every block takes part in the handshake and the flag slots stay paired.
-template <typename T>
+// kPipelined: the block's share of the chunk is cut into `pieces` runs of rows (a row is the block's stride loop
+// index, rounded to whole unroll groups). Step p pushes piece p, waits for the source's piece p - 1 and drains it
+// while piece p's remote stores are still in flight, then waits for its own stores and posts piece p. The flag slot
+// holds one token, so a post first waits for the destination to consume the previous piece, and every post is matched
+// by exactly one wait. The pieces land at their place in the chunk, so the scratch needed is unchanged.
+template <typename T, bool kPipelined>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
   __global__ void ddaAllToAllFabricPushPeer(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
                                             const T* __restrict__ sendbuff, int selfRank, int nRanks,
-                                            int blocksPerPeer, FabricGpuBarrier barrier) {
+                                            int blocksPerPeer, unsigned pieces, FabricGpuBarrier barrier) {
   // A peer's scratch is free to overwrite once that peer's block has reached this op.
   barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
 
@@ -166,13 +171,37 @@ __launch_bounds__(512)
   const int peer = (selfRank + k) % nRanks;
   const int srcRank = (selfRank - k + nRanks) % nRanks;
 
-  ddaA2APeerCopy(ipcbuffs[peer] + static_cast<size_t>(selfRank) * count, sendbuff + static_cast<size_t>(peer) * count,
-                 begin, nLines, stride);
-
-  barrier.signalWaitPeer(peer, srcRank, blockIdx.x);
-
+  T* const dst = ipcbuffs[peer] + static_cast<size_t>(selfRank) * count;
+  const T* const src = sendbuff + static_cast<size_t>(peer) * count;
   const size_t slot = static_cast<size_t>(srcRank) * count;
-  ddaA2APeerCopy(recvbuff + slot, ipcbuffs[selfRank] + slot, begin, nLines, stride);
+
+  if constexpr (!kPipelined) {
+    ddaA2APeerCopy(dst, src, begin, nLines, stride);
+
+    barrier.signalWaitPeer(peer, srcRank, blockIdx.x);
+
+    ddaA2APeerCopy(recvbuff + slot, ipcbuffs[selfRank] + slot, begin, nLines, stride);
+  } else {
+    // Every thread has at most nRows rows; pieces are whole unroll groups of rows. All ranks derive the same piece
+    // count, since it depends only on count, blocksPerPeer and blockDim.
+    const size_t nRows = (nLines + stride - 1) / stride;
+    const size_t perPiece = ((nRows + pieces - 1) / pieces + kDdaA2APeerUnroll - 1) / kDdaA2APeerUnroll * kDdaA2APeerUnroll;
+    const size_t nPieces = (nRows + perPiece - 1) / perPiece;
+    // Copies this thread's rows [p * perPiece, (p + 1) * perPiece) of a chunk.
+    auto piece = [&](T* d, const T* s, size_t p) {
+      const size_t lo = begin + p * perPiece * stride;
+      const size_t hi = begin + (p + 1) * perPiece * stride;
+      ddaA2APeerCopy(d, s, lo, hi < nLines ? hi : nLines, stride);
+    };
+    for (size_t p = 0; p <= nPieces; ++p) {
+      if (p < nPieces) piece(dst, src, p);
+      if (p > 0) {
+        barrier.waitPeer(srcRank);
+        piece(recvbuff + slot, ipcbuffs[selfRank] + slot, p - 1);
+      }
+      if (p < nPieces) barrier.postPeer(peer, blockIdx.x);
+    }
+  }
 }
 
 } // namespace dda::common
