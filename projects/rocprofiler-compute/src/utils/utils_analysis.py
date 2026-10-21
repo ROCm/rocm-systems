@@ -1593,7 +1593,7 @@ def process_ml_api_trace_output(
         console_warning(
             "No marker files with corresponding counter files found. "
             "Ensure profiling was done with ML API tracing enabled "
-            "(e.g., via '--torch-trace')."
+            "(e.g., via '--trace-ml-api')."
         )
         workload.ml_api_trace_pairs = []
         return
