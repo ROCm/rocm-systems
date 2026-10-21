@@ -490,7 +490,7 @@
       "binary": "host/rccl-UnitTestsMicroNetIbCastConnect",
       "num_ranks": 1,
       "num_nodes": 1,
-      "num_gpus": 1,
+      "num_gpus": 0,
       "timeout": 60,
       "tests": [
         {"name": "NetIbCastConnectMicrotests", "description": "Host-only net_ib_cast connect.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
@@ -501,7 +501,7 @@
       "binary": "host/rccl-UnitTestsMicroNetIbCastQpSharing",
       "num_ranks": 1,
       "num_nodes": 1,
-      "num_gpus": 1,
+      "num_gpus": 0,
       "timeout": 60,
       "tests": [
         {"name": "NetIbCastQpSharingMicrotests", "description": "Host-only net_ib_cast qp_sharing.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
