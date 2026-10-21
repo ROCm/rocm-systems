@@ -2073,7 +2073,7 @@ TEST(BinaryTranslatorE2E, RewriteDischargeIgnoresExplicitNonAllocatedRelocation)
   EXPECT_TRUE(result.rewrite_discharge_verified);
 }
 
-TEST(BinaryTranslatorE2E, RewriteDischargeIgnoresMalformedUnreferencedSymbolTable) {
+TEST(BinaryTranslatorE2E, RejectsMalformedUnreferencedSymbolTable) {
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   constexpr std::array<uint8_t, sizeof(Elf64_Sym) + 8> unused_symbols{};
 
@@ -2100,7 +2100,9 @@ TEST(BinaryTranslatorE2E, RewriteDischargeIgnoresMalformedUnreferencedSymbolTabl
     append_elf_section_for_test(image, irrelevant_symtab, unused_symbols);
 
     AmdGpuCodeObject source(image.data(), image.size());
-    ASSERT_TRUE(source.is_valid());
+    // Rewriting visits all symbol tables, so unsupported records are rejected
+    // even when no relocation refers to this particular table.
+    ASSERT_FALSE(source.is_valid());
     BinaryTranslatorOptions options;
     options.input_revision = ProcessorRevision::Gfx1250B0;
     options.output_revision = ProcessorRevision::Gfx1250A0;
@@ -2108,10 +2110,9 @@ TEST(BinaryTranslatorE2E, RewriteDischargeIgnoresMalformedUnreferencedSymbolTabl
     BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0, options);
     const auto result = translator.translate(source);
 
-    ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
-                                                            : result.diagnostics.front().message);
-    EXPECT_TRUE(result.rewrite_discharge_checked);
-    EXPECT_TRUE(result.rewrite_discharge_verified);
+    EXPECT_FALSE(result.ok());
+    EXPECT_FALSE(result.rewrite_discharge_checked);
+    ASSERT_FALSE(result.diagnostics.empty());
   }
 }
 
