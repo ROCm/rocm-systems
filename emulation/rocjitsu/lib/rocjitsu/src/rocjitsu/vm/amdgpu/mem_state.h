@@ -84,6 +84,8 @@ public:
   /// Architectural destination resolved and range-checked at issue time.
   ScalarRegisterRange dst_register;
   uint32_t num_dwords = 0;
+  /// Bytes per element. An atomic is one element of elem_size bytes, returned as
+  /// num_dwords dwords.
   uint32_t elem_size = 4;
   bool sign_extend = false;
   /// Loads and returning atomics write response_data to dst_register.
