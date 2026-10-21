@@ -1168,7 +1168,7 @@ class TestDeriveVectorUnary:
 
         assert 'inst_.clamp' in cpp
         assert 'util::fp8_e5m3_to_f32' in cpp
-        assert 'amdgpu::conversion::decode_fp8<amdgpu::conversion::Fp8>' in cpp
+        assert 'util::fp8_e4m3_to_f32' in cpp
         assert 'util::f32_to_f16_mode' not in cpp
 
     def test_cvt_f16_fp8_gfx1250_clamp_selects_e5m3_decode_and_fp16_ovfl(self):
@@ -1232,23 +1232,25 @@ class TestDeriveVectorUnary:
         assert sem.operation == op
 
         cpp = gen_vector_cvt_pk(['vdst'], ['src0'], sem.semantic_class, sem.operation)
-        if not needs_f16:
-            # F32 results decode the OCP bytes through shared/conversion.h.
-            layout = 'Fp8' if op.endswith('fp8') else 'Bf8'
-            decode = f'amdgpu::conversion::decode_fp8<amdgpu::conversion::{layout}>'
-            assert f'{decode}(half)' in cpp
-            assert f'{decode}(half >> 8)' in cpp
-            assert helper not in cpp
-        else:
-            assert helper in cpp
-            assert 'src_hi' in cpp
-            assert 'packed & 0xFFFFu' in cpp
-            assert 'half & 0xFFu' in cpp
-            assert '(half >> 8) & 0xFFu' in cpp
+        assert helper in cpp
+        assert 'src_hi' in cpp
+        assert 'packed & 0xFFFFu' in cpp
+        assert 'half & 0xFFu' in cpp
+        assert '(half >> 8) & 0xFFu' in cpp
         assert write_fn in cpp
         assert ('util::f32_to_f16_mode(lo, wf.fp16_ovfl())' in cpp) == needs_f16
         assert ('util::f32_to_f16_mode(hi, wf.fp16_ovfl())' in cpp) == needs_f16
         assert 'src1' not in cpp
+        if not needs_f16:
+            # RDNA4 decodes F32 results' OCP bytes through shared/conversion.h.
+            rdna4 = gen_vector_cvt_pk(
+                ['vdst'], ['src0'], sem.semantic_class, sem.operation, arch_name='rdna4'
+            )
+            layout = 'Fp8' if op.endswith('fp8') else 'Bf8'
+            decode = f'amdgpu::conversion::decode_fp8<amdgpu::conversion::{layout}>'
+            assert f'{decode}(half)' in rdna4
+            assert f'{decode}(half >> 8)' in rdna4
+            assert helper not in rdna4
 
     @pytest.mark.parametrize(
         ('name', 'op', 'helper', 'needs_src1', 'needs_f16', 'uses_fp16_ovfl'),
@@ -1298,18 +1300,24 @@ class TestDeriveVectorUnary:
         src = ['src0', 'src1'] if needs_src1 else ['src0']
         cpp = gen_vector_cvt_pk(['vdst'], src, sem.semantic_class, sem.operation)
         if uses_fp16_ovfl:
-            # F32 sources use the shared OCP stages, which read FP16_OVFL.
+            assert f'{helper}(s0, wf.fp16_ovfl())' in cpp
+            assert f'{helper}(s1, wf.fp16_ovfl())' in cpp
+            assert 'wf.fp16_ovfl()' in cpp
+            # RDNA4 F32 sources use the shared OCP stages, which read FP16_OVFL.
+            rdna4 = gen_vector_cvt_pk(
+                ['vdst'], src, sem.semantic_class, sem.operation, arch_name='rdna4'
+            )
             layout = 'Fp8' if op.startswith('fp8') else 'Bf8'
             stages = f'amdgpu::conversion_to_fp8<amdgpu::conversion::{layout}>(wf)'
-            assert f'const auto conversion = {stages};' in cpp
-            assert 'uint32_t packed = conversion(s0, s1);' in cpp
-            assert helper not in cpp
+            assert f'const auto conversion = {stages};' in rdna4
+            assert 'uint32_t packed = conversion(s0, s1);' in rdna4
+            assert helper not in rdna4
         else:
             assert f'{helper}(s0)' in cpp
             assert f'{helper}(s1)' in cpp
             assert 'wf.fp16_ovfl()' not in cpp
-            assert 'static_cast<uint32_t>(lo)' in cpp
-            assert 'static_cast<uint32_t>(hi) << 8' in cpp
+        assert 'static_cast<uint32_t>(lo)' in cpp
+        assert 'static_cast<uint32_t>(hi) << 8' in cpp
         assert 'write_vop3_true16_dst' in cpp
         assert ('src1' in cpp) == needs_src1
         assert ('util::f16_to_f32' in cpp) == needs_f16
@@ -1325,13 +1333,8 @@ class TestDeriveVectorUnary:
         )
 
         assert 'inst_.clamp' in cpp
-        # E5M3 encodes the same ABS/NEG-modified, input-flushed sources.
-        for i in range(2):
-            assert (
-                f'util::f32_to_fp8_e5m3_rne_mode(std::bit_cast<float>('
-                f'conversion.source(s{i}, {i})), wf.fp16_ovfl())'
-            ) in cpp
-        assert 'conversion(s0, s1)' in cpp
+        assert 'util::f32_to_fp8_e5m3_rne_mode(s0, wf.fp16_ovfl())' in cpp
+        assert 'util::f32_to_fp8_e4m3_rne_mode(s0, wf.fp16_ovfl())' in cpp
         assert 'inst_.opsel' in cpp
 
     def test_gfx1250_cvt_pk_fp8_f16_clamp_selects_e5m3_without_fp16_ovfl(self):
@@ -1366,11 +1369,8 @@ class TestDeriveVectorUnary:
         cpp = gen_cvt_fp8(ctx)
 
         assert 'inst_.clamp' in cpp
-        assert (
-            'util::f32_to_fp8_e5m3_sr_mode(std::bit_cast<float>('
-            'conversion.source(s0, 0)), seed, wf.fp16_ovfl())'
-        ) in cpp
-        assert 'conversion.stochastic(s0, seed)' in cpp
+        assert 'util::f32_to_fp8_e5m3_sr_mode(s0, seed, wf.fp16_ovfl())' in cpp
+        assert 'util::f32_to_fp8_e4m3_sr_mode(s0, seed, wf.fp16_ovfl())' in cpp
         assert 'inst_.opsel' in cpp
 
     def test_gfx1250_cvt_sr_fp8_f16_clamp_selects_e5m3_encoder(self):

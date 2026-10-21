@@ -39,6 +39,7 @@ from amdisa.semantics import (
     F32_TO_INTEGER_DTYPES,
     F64_TO_INTEGER_DTYPES,
     TO_FLOAT_CONVERSIONS,
+    conversion_formats,
     is_float_relation,
 )
 
@@ -55,14 +56,15 @@ FLOAT_MINMAX_CALL = 'float_minmax_'
 # followed by the conversion data type, e.g. conversion_f32_i32.
 CONVERSION_CALL = 'conversion_'
 
+# The semantic type of each semantics.conversion_formats format.
 _SEMA_FORMATS = {
-    'f16': SemaType.F16,
-    'f32': SemaType.F32,
-    'f64': SemaType.F64,
-    'i16': SemaType('I', 16),
-    'u16': SemaType('U', 16),
-    'i32': SemaType.I32,
-    'u32': SemaType.U32,
+    'F16': SemaType.F16,
+    'F32': SemaType.F32,
+    'F64': SemaType.F64,
+    'I16': SemaType('I', 16),
+    'U16': SemaType('U', 16),
+    'I32': SemaType.I32,
+    'U32': SemaType.U32,
 }
 
 
@@ -72,7 +74,7 @@ def _conversion(dtype: str) -> SemaBlock:
     The typed source and destination let enrichment attach VOP3 ABS/NEG and
     OMOD/CLAMP; lowering passes those fields to the shared conversion.
     """
-    result_name, source_name = dtype.split('_')[-2:]
+    source_name, result_name = conversion_formats(dtype)
     source_ty = _SEMA_FORMATS[source_name]
     result_ty = _SEMA_FORMATS[result_name]
     name = f'{CONVERSION_CALL}{dtype}'

@@ -31,6 +31,8 @@ from amdisa.codegen.execute.floating_policy import (
 )
 
 from amdisa.codegen.execute.cube import CUBE_OPERATIONS, cube_expression, cube_omod
+from amdisa.codegen.execute.fp8_formats import uses_shared_fp8
+from amdisa.semantics import F64_TO_INTEGER_DTYPES
 
 
 def _binary_f32_op(
@@ -3010,7 +3012,7 @@ def _simd_probe_line(
                 return None
             out_t, cpp_op = speccvtoutv3
             probe = f'  ROCJITSU_TRY_SIMD_CVT_F64_TO_B32({out_t}, {cpp_op});'
-            if base in ('v_cvt_i32_f64', 'v_cvt_u32_f64'):
+            if base.removeprefix('v_cvt_') in F64_TO_INTEGER_DTYPES:
                 # The glue carries no modifiers; the scalar body applies ABS/NEG.
                 return f'  if (!inst.inst_.abs && !inst.inst_.neg) {{\n  {probe}\n  }}'
             return probe
@@ -3144,8 +3146,8 @@ def _local_coverage_probe(
 ) -> str | None:
     """Emit local probes without conflating profile-specific result semantics.
 
-    ``arch_name`` selects the target's FP8/BF8 decoder; None means a target
-    that uses the shared OCP encodings.
+    ``arch_name`` selects the target's FP8/BF8 decoder through
+    fp8_formats.fp8_policy.
     """
 
     def call(arity: int, half_dst: bool, half_inputs: int, functor: str) -> str:
@@ -3229,7 +3231,7 @@ def _local_coverage_probe(
             e32_half_inputs=e32_half_inputs,
         )
     if template_name in ('v_cvt_f32_fp8_vop3', 'v_cvt_f32_bf8_vop3'):
-        if arch_name is not None and not conversion.uses_ocp_fp8(arch_name):
+        if not uses_shared_fp8(arch_name):
             # util's decoders, which the target's scalar body uses.
             convert = (
                 'util::bf8_e5m2_to_f32_simd(byte)'

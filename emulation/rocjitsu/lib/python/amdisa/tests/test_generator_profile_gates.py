@@ -3146,7 +3146,7 @@ def test_cdna4_fp8_cvt_keeps_ocp_helper_variant():
     )
 
     # CDNA4 keeps util's OCP helpers and its manual's FP16_OVFL rule; see
-    # conversion.uses_ocp_fp8.
+    # fp8_formats.fp8_policy.
     widen = gen_cvt_fp8(SimpleNamespace(**ctx.__dict__, op='pk_f32_fp8', has_abs=True))
     assert 'util::fp8_e4m3_to_f32' in widen
     assert 'amdgpu::conversion::decode_fp8' not in widen
@@ -6756,7 +6756,7 @@ def test_cdna4_generated_cvt_keeps_ocp_format(
     assert 'inline void execute_v_cvt_f32_bf8_vop1' not in shared
     assert 'inline void execute_v_cvt_f32_fp8_vop3' not in shared
     assert 'inline void execute_v_cvt_f32_bf8_vop3' not in shared
-    # CDNA4 keeps util's OCP helpers; see conversion.uses_ocp_fp8.
+    # CDNA4 keeps util's OCP helpers; see fp8_formats.fp8_policy.
     assert 'util::fp8_e4m3_to_f32' in cdna4_vop1
     assert 'util::bf8_e5m2_to_f32' in cdna4_vop1
     assert 'util::fp8_e4m3_to_f32' in cdna4_vop3
@@ -6920,7 +6920,7 @@ def test_gfx1250_generated_fp8_vop3_byte_select_uses_local_inst_member(
     assert 'amdgpu::vop3_opsel(inst_)' in body
     assert 'amdgpu::vop3_fp8_decode_e5m3(*this)' in body
     assert 'util::fp8_e5m3_to_f32' in body
-    assert 'amdgpu::conversion::decode_fp8<amdgpu::conversion::Fp8>' in body
+    assert 'util::fp8_e4m3_to_f32' in body
     # The local SIMD probe binds an instruction alias; scalar execution still
     # reads the encoding member directly.
     assert 'auto &inst = *this;' in body

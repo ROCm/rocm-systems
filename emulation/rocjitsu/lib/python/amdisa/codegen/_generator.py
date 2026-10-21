@@ -24,7 +24,7 @@ Execution semantics are provided by ``SemanticsSpec`` from
 import cgen
 
 from amdisa.codegen.execute import input_policy
-from amdisa.codegen.execute.conversion import is_integer_source, share_stages
+from amdisa.codegen.execute.conversion import share_stages
 from amdisa.codegen.execute.floating_policy import (
     F16_TRANSCENDENTAL_OPS,
     FLUSH_NEAREST_F32_OPS,
@@ -54,12 +54,14 @@ from amdisa.fieldless_policy import (
 )
 from amdisa.semantics import (
     F16_INPUT_CONVERSION_DTYPES,
-    F32_TO_INTEGER_DTYPES,
-    F64_TO_INTEGER_DTYPES,
+    INTEGER_RESULT_CONVERSIONS,
     INTEGER_RESULT_OPERATIONS,
+    INTEGER_SOURCE_CONVERSIONS,
     TO_FLOAT_CONVERSIONS,
     InstructionSemantics,
     SemanticsSpec,
+    takes_output_modifiers,
+    takes_source_modifiers,
 )
 from amdisa.isa_profile import DppOpcodeRule, FloatDotAccumulation
 
@@ -6670,55 +6672,31 @@ class CodeGenerator:
                     and dtype in ('b16', 'u16')
                 )
                 is_float_op = dtype in ('f16', 'f32', 'f64', 'bf16')
-                # Integer sources take no ABS/NEG, but the float result takes
-                # CLAMP and OMOD like any other VOP3 float result.
-                is_integer_to_float = cls == 'vector_unary' and (
-                    (dtype in TO_FLOAT_CONVERSIONS and is_integer_source(dtype))
-                    or dtype
-                    in (
-                        'f32_ubyte0',
-                        'f32_ubyte1',
-                        'f32_ubyte2',
-                        'f32_ubyte3',
-                        'f64_i32',
-                        'f64_u32',
-                    )
-                )
-                is_float_to_integer = cls == 'vector_unary' and dtype in (
-                    F32_TO_INTEGER_DTYPES | F64_TO_INTEGER_DTYPES
-                )
-                # Floating results take OMOD/CLAMP; floating sources also ABS/NEG.
-                is_to_float_conversion = (
-                    cls == 'vector_unary' and dtype in TO_FLOAT_CONVERSIONS
-                )
-                is_f16_input_conversion = (
-                    cls == 'vector_unary' and dtype in F16_INPUT_CONVERSION_DTYPES
+                is_conversion = cls == 'vector_unary' and dtype in (
+                    INTEGER_SOURCE_CONVERSIONS
+                    | INTEGER_RESULT_CONVERSIONS
+                    | TO_FLOAT_CONVERSIONS.keys()
+                    | F16_INPUT_CONVERSION_DTYPES
                 )
                 if (
                     is_vop3
-                    and (
-                        is_float_op
-                        or is_integer_to_float
-                        or is_float_to_integer
-                        or is_to_float_conversion
-                        or is_f16_input_conversion
-                    )
+                    and (is_float_op or is_conversion)
                     and not is_true16_mov
                     and cls != 'pseudo_scalar_unary'
                 ):
                     from amdisa.sema_enrich import enrich_block
 
-                    ef = set() if is_integer_to_float else {'neg'}
-                    if has_abs and not is_integer_to_float:
+                    source_modifiers = not is_conversion or takes_source_modifiers(
+                        dtype
+                    )
+                    ef = {'neg'} if source_modifiers else set()
+                    if has_abs and source_modifiers:
                         ef.add('abs')
                     inst_fields = getattr(self, '_current_inst_fields', set())
-                    integer_result = (
-                        is_float_to_integer or op in INTEGER_RESULT_OPERATIONS
-                    )
-                    if 'clamp' in inst_fields and not integer_result:
-                        ef.add('clamp')
-                    if 'omod' in inst_fields and not integer_result:
-                        ef.add('omod')
+                    if takes_output_modifiers(
+                        inst.name, dtype if is_conversion else '', op
+                    ):
+                        ef |= {'clamp', 'omod'} & inst_fields
                     sema_block = enrich_block(sema_block, enc_field_names=frozenset(ef))
                 # Preserve 6470's scalar_saveexec -> b64 dtype fix. Per-operand
                 # bit widths (op_widths) subsume the old src_width/dst_width name

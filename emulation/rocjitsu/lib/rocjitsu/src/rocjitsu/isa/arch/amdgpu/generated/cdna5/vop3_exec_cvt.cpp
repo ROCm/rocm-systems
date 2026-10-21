@@ -1424,9 +1424,9 @@ void VCvtF32Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (amdgpu::try_execute_words_simd<1, false, false, 0>(inst, wf, [&](auto a) {
         const uint32_t sel = amdgpu::vop3_opsel(inst.inst_);
         auto byte = (a >> ((((sel & 1u) << 1) | ((sel & 2u) >> 1)) * 8u)) & 0xffu;
-        return (amdgpu::vop3_fp8_decode_e5m3(inst)
-                    ? std::bit_cast<util::native<uint32_t>>(util::fp8_e5m3_to_f32_simd(byte))
-                    : amdgpu::conversion::decode_fp8<amdgpu::conversion::Fp8>(byte));
+        return std::bit_cast<util::native<uint32_t>>((amdgpu::vop3_fp8_decode_e5m3(inst)
+                                                          ? util::fp8_e5m3_to_f32_simd(byte)
+                                                          : util::fp8_e4m3_to_f32_simd(byte)));
       }))
     return;
   uint64_t exec = wf.exec();
@@ -1435,19 +1435,19 @@ void VCvtF32Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
         *this, wf, vdst, lane,
-        ((amdgpu::vop3_fp8_decode_e5m3(*this))
-             ? std::bit_cast<uint32_t>(util::fp8_e5m3_to_f32(
-                   static_cast<uint8_t>(((amdgpu::RegisterAccess(wf).read_lane(src0, lane) >>
-                                          ((((amdgpu::vop3_opsel(inst_) & 0x1u) << 1) |
-                                            ((amdgpu::vop3_opsel(inst_) & 0x2u) >> 1)) *
-                                           8u)) &
-                                         0xFFu))))
-             : amdgpu::conversion::decode_fp8<amdgpu::conversion::Fp8>(
-                   ((amdgpu::RegisterAccess(wf).read_lane(src0, lane) >>
-                     ((((amdgpu::vop3_opsel(inst_) & 0x1u) << 1) |
-                       ((amdgpu::vop3_opsel(inst_) & 0x2u) >> 1)) *
-                      8u)) &
-                    0xFFu))));
+        std::bit_cast<uint32_t>((amdgpu::vop3_fp8_decode_e5m3(*this))
+                                    ? util::fp8_e5m3_to_f32(static_cast<uint8_t>(
+                                          ((amdgpu::RegisterAccess(wf).read_lane(src0, lane) >>
+                                            ((((amdgpu::vop3_opsel(inst_) & 0x1u) << 1) |
+                                              ((amdgpu::vop3_opsel(inst_) & 0x2u) >> 1)) *
+                                             8u)) &
+                                           0xFFu)))
+                                    : util::fp8_e4m3_to_f32(static_cast<uint8_t>(
+                                          ((amdgpu::RegisterAccess(wf).read_lane(src0, lane) >>
+                                            ((((amdgpu::vop3_opsel(inst_) & 0x1u) << 1) |
+                                              ((amdgpu::vop3_opsel(inst_) & 0x2u) >> 1)) *
+                                             8u)) &
+                                           0xFFu)))));
   }
 }
 
@@ -1471,9 +1471,9 @@ RJ_NOINLINE void VCvtF32Fp8Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (amdgpu::try_execute_words_simd<1, false, false, 0>(inst, wf, [&](auto a) {
         const uint32_t sel = amdgpu::vop3_opsel(inst.inst_);
         auto byte = (a >> ((((sel & 1u) << 1) | ((sel & 2u) >> 1)) * 8u)) & 0xffu;
-        return (amdgpu::vop3_fp8_decode_e5m3(inst)
-                    ? std::bit_cast<util::native<uint32_t>>(util::fp8_e5m3_to_f32_simd(byte))
-                    : amdgpu::conversion::decode_fp8<amdgpu::conversion::Fp8>(byte));
+        return std::bit_cast<util::native<uint32_t>>((amdgpu::vop3_fp8_decode_e5m3(inst)
+                                                          ? util::fp8_e5m3_to_f32_simd(byte)
+                                                          : util::fp8_e4m3_to_f32_simd(byte)));
       }))
     return;
   uint64_t exec = wf.exec();
@@ -1482,19 +1482,19 @@ RJ_NOINLINE void VCvtF32Fp8Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
         *this, wf, vdst, lane,
-        ((amdgpu::vop3_fp8_decode_e5m3(*this))
-             ? std::bit_cast<uint32_t>(util::fp8_e5m3_to_f32(
-                   static_cast<uint8_t>(((amdgpu::RegisterAccess(wf).read_lane(src0, lane) >>
-                                          ((((amdgpu::vop3_opsel(inst_) & 0x1u) << 1) |
-                                            ((amdgpu::vop3_opsel(inst_) & 0x2u) >> 1)) *
-                                           8u)) &
-                                         0xFFu))))
-             : amdgpu::conversion::decode_fp8<amdgpu::conversion::Fp8>(
-                   ((amdgpu::RegisterAccess(wf).read_lane(src0, lane) >>
-                     ((((amdgpu::vop3_opsel(inst_) & 0x1u) << 1) |
-                       ((amdgpu::vop3_opsel(inst_) & 0x2u) >> 1)) *
-                      8u)) &
-                    0xFFu))));
+        std::bit_cast<uint32_t>((amdgpu::vop3_fp8_decode_e5m3(*this))
+                                    ? util::fp8_e5m3_to_f32(static_cast<uint8_t>(
+                                          ((amdgpu::RegisterAccess(wf).read_lane(src0, lane) >>
+                                            ((((amdgpu::vop3_opsel(inst_) & 0x1u) << 1) |
+                                              ((amdgpu::vop3_opsel(inst_) & 0x2u) >> 1)) *
+                                             8u)) &
+                                           0xFFu)))
+                                    : util::fp8_e4m3_to_f32(static_cast<uint8_t>(
+                                          ((amdgpu::RegisterAccess(wf).read_lane(src0, lane) >>
+                                            ((((amdgpu::vop3_opsel(inst_) & 0x1u) << 1) |
+                                              ((amdgpu::vop3_opsel(inst_) & 0x2u) >> 1)) *
+                                             8u)) &
+                                           0xFFu)))));
   }
   dpp_write_mask_scope_.restore();
 }
@@ -1508,7 +1508,7 @@ void VCvtF32Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (amdgpu::try_execute_words_simd<1, false, false, 0>(inst, wf, [&](auto a) {
         const uint32_t sel = amdgpu::vop3_opsel(inst.inst_);
         auto byte = (a >> ((((sel & 1u) << 1) | ((sel & 2u) >> 1)) * 8u)) & 0xffu;
-        return amdgpu::conversion::decode_fp8<amdgpu::conversion::Bf8>(byte);
+        return std::bit_cast<util::native<uint32_t>>(util::bf8_e5m2_to_f32_simd(byte));
       }))
     return;
   uint64_t exec = wf.exec();
@@ -1517,12 +1517,12 @@ void VCvtF32Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
         *this, wf, vdst, lane,
-        amdgpu::conversion::decode_fp8<amdgpu::conversion::Bf8>(
-            ((amdgpu::RegisterAccess(wf).read_lane(src0, lane) >>
-              ((((amdgpu::vop3_opsel(inst_) & 0x1u) << 1) |
-                ((amdgpu::vop3_opsel(inst_) & 0x2u) >> 1)) *
-               8u)) &
-             0xFFu)));
+        std::bit_cast<uint32_t>(util::bf8_e5m2_to_f32(
+            static_cast<uint8_t>(((amdgpu::RegisterAccess(wf).read_lane(src0, lane) >>
+                                   ((((amdgpu::vop3_opsel(inst_) & 0x1u) << 1) |
+                                     ((amdgpu::vop3_opsel(inst_) & 0x2u) >> 1)) *
+                                    8u)) &
+                                  0xFFu)))));
   }
 }
 
@@ -1546,7 +1546,7 @@ RJ_NOINLINE void VCvtF32Bf8Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (amdgpu::try_execute_words_simd<1, false, false, 0>(inst, wf, [&](auto a) {
         const uint32_t sel = amdgpu::vop3_opsel(inst.inst_);
         auto byte = (a >> ((((sel & 1u) << 1) | ((sel & 2u) >> 1)) * 8u)) & 0xffu;
-        return amdgpu::conversion::decode_fp8<amdgpu::conversion::Bf8>(byte);
+        return std::bit_cast<util::native<uint32_t>>(util::bf8_e5m2_to_f32_simd(byte));
       }))
     return;
   uint64_t exec = wf.exec();
@@ -1555,12 +1555,12 @@ RJ_NOINLINE void VCvtF32Bf8Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
         *this, wf, vdst, lane,
-        amdgpu::conversion::decode_fp8<amdgpu::conversion::Bf8>(
-            ((amdgpu::RegisterAccess(wf).read_lane(src0, lane) >>
-              ((((amdgpu::vop3_opsel(inst_) & 0x1u) << 1) |
-                ((amdgpu::vop3_opsel(inst_) & 0x2u) >> 1)) *
-               8u)) &
-             0xFFu)));
+        std::bit_cast<uint32_t>(util::bf8_e5m2_to_f32(
+            static_cast<uint8_t>(((amdgpu::RegisterAccess(wf).read_lane(src0, lane) >>
+                                   ((((amdgpu::vop3_opsel(inst_) & 0x1u) << 1) |
+                                     ((amdgpu::vop3_opsel(inst_) & 0x2u) >> 1)) *
+                                    8u)) &
+                                  0xFFu)))));
   }
   dpp_write_mask_scope_.restore();
 }
@@ -1571,13 +1571,15 @@ void VCvtPkF32Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t packed = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t half = (inst_.opsel & 1) ? (packed >> 16) : packed;
+    bool src_hi = inst_.opsel & 1;
+    uint32_t half = src_hi ? (packed >> 16) : (packed & 0xFFFFu);
+    float lo = util::fp8_e4m3_to_f32(static_cast<uint8_t>(half & 0xFFu));
+    float hi = util::fp8_e4m3_to_f32(static_cast<uint8_t>((half >> 8) & 0xFFu));
+    uint32_t lo_bits = std::bit_cast<uint32_t>(lo);
+    uint32_t hi_bits = std::bit_cast<uint32_t>(hi);
     amdgpu::sdwa::write_lane64<amdgpu::sdwa::ResultFormat::NONE>(
         *this, wf, vdst, lane,
-        static_cast<uint64_t>(amdgpu::conversion::decode_fp8<amdgpu::conversion::Fp8>(half)) |
-            (static_cast<uint64_t>(
-                 amdgpu::conversion::decode_fp8<amdgpu::conversion::Fp8>(half >> 8))
-             << 32));
+        static_cast<uint64_t>(lo_bits) | (static_cast<uint64_t>(hi_bits) << 32));
   }
 }
 
@@ -1587,13 +1589,15 @@ void VCvtPkF32Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t packed = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t half = (inst_.opsel & 1) ? (packed >> 16) : packed;
+    bool src_hi = inst_.opsel & 1;
+    uint32_t half = src_hi ? (packed >> 16) : (packed & 0xFFFFu);
+    float lo = util::bf8_e5m2_to_f32(static_cast<uint8_t>(half & 0xFFu));
+    float hi = util::bf8_e5m2_to_f32(static_cast<uint8_t>((half >> 8) & 0xFFu));
+    uint32_t lo_bits = std::bit_cast<uint32_t>(lo);
+    uint32_t hi_bits = std::bit_cast<uint32_t>(hi);
     amdgpu::sdwa::write_lane64<amdgpu::sdwa::ResultFormat::NONE>(
         *this, wf, vdst, lane,
-        static_cast<uint64_t>(amdgpu::conversion::decode_fp8<amdgpu::conversion::Bf8>(half)) |
-            (static_cast<uint64_t>(
-                 amdgpu::conversion::decode_fp8<amdgpu::conversion::Bf8>(half >> 8))
-             << 32));
+        static_cast<uint64_t>(lo_bits) | (static_cast<uint64_t>(hi_bits) << 32));
   }
 }
 
@@ -4247,21 +4251,17 @@ void VCvtPkFp8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  const auto conversion =
-      amdgpu::conversion_to_fp8<amdgpu::conversion::Fp8>(wf, inst_.abs, inst_.neg);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t packed = (inst_.clamp)
-                          ? (static_cast<uint32_t>(util::f32_to_fp8_e5m3_rne_mode(
-                                 std::bit_cast<float>(conversion.source(s0, 0)), wf.fp16_ovfl())) |
-                             (static_cast<uint32_t>(util::f32_to_fp8_e5m3_rne_mode(
-                                  std::bit_cast<float>(conversion.source(s1, 1)), wf.fp16_ovfl()))
-                              << 8))
-                          : conversion(s0, s1);
+    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    uint32_t lo = (inst_.clamp) ? util::f32_to_fp8_e5m3_rne_mode(s0, wf.fp16_ovfl())
+                                : util::f32_to_fp8_e4m3_rne_mode(s0, wf.fp16_ovfl());
+    uint32_t hi = (inst_.clamp) ? util::f32_to_fp8_e5m3_rne_mode(s1, wf.fp16_ovfl())
+                                : util::f32_to_fp8_e4m3_rne_mode(s1, wf.fp16_ovfl());
+    uint32_t packed = static_cast<uint32_t>(lo) | (static_cast<uint32_t>(hi) << 8);
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, (inst_.opsel) & 0x8u, packed, true);
   }
 }
@@ -4282,21 +4282,17 @@ RJ_NOINLINE void VCvtPkFp8F32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) 
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  const auto conversion =
-      amdgpu::conversion_to_fp8<amdgpu::conversion::Fp8>(wf, inst_.abs, inst_.neg);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t packed = (inst_.clamp)
-                          ? (static_cast<uint32_t>(util::f32_to_fp8_e5m3_rne_mode(
-                                 std::bit_cast<float>(conversion.source(s0, 0)), wf.fp16_ovfl())) |
-                             (static_cast<uint32_t>(util::f32_to_fp8_e5m3_rne_mode(
-                                  std::bit_cast<float>(conversion.source(s1, 1)), wf.fp16_ovfl()))
-                              << 8))
-                          : conversion(s0, s1);
+    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    uint32_t lo = (inst_.clamp) ? util::f32_to_fp8_e5m3_rne_mode(s0, wf.fp16_ovfl())
+                                : util::f32_to_fp8_e4m3_rne_mode(s0, wf.fp16_ovfl());
+    uint32_t hi = (inst_.clamp) ? util::f32_to_fp8_e5m3_rne_mode(s1, wf.fp16_ovfl())
+                                : util::f32_to_fp8_e4m3_rne_mode(s1, wf.fp16_ovfl());
+    uint32_t packed = static_cast<uint32_t>(lo) | (static_cast<uint32_t>(hi) << 8);
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, (inst_.opsel) & 0x8u, packed, true);
   }
   dpp_write_mask_scope_.restore();
@@ -4307,15 +4303,15 @@ void VCvtPkBf8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  const auto conversion =
-      amdgpu::conversion_to_fp8<amdgpu::conversion::Bf8>(wf, inst_.abs, inst_.neg);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t packed = conversion(s0, s1);
+    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    uint32_t lo = util::f32_to_bf8_e5m2_rne_mode(s0, wf.fp16_ovfl());
+    uint32_t hi = util::f32_to_bf8_e5m2_rne_mode(s1, wf.fp16_ovfl());
+    uint32_t packed = static_cast<uint32_t>(lo) | (static_cast<uint32_t>(hi) << 8);
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, (inst_.opsel) & 0x8u, packed, true);
   }
 }
@@ -4336,15 +4332,15 @@ RJ_NOINLINE void VCvtPkBf8F32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) 
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  const auto conversion =
-      amdgpu::conversion_to_fp8<amdgpu::conversion::Bf8>(wf, inst_.abs, inst_.neg);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t packed = conversion(s0, s1);
+    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    uint32_t lo = util::f32_to_bf8_e5m2_rne_mode(s0, wf.fp16_ovfl());
+    uint32_t hi = util::f32_to_bf8_e5m2_rne_mode(s1, wf.fp16_ovfl());
+    uint32_t packed = static_cast<uint32_t>(lo) | (static_cast<uint32_t>(hi) << 8);
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, (inst_.opsel) & 0x8u, packed, true);
   }
   dpp_write_mask_scope_.restore();
@@ -4355,22 +4351,20 @@ void VCvtSrFp8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  const auto conversion =
-      amdgpu::conversion_to_fp8<amdgpu::conversion::Fp8>(wf, inst_.abs, inst_.neg);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    float s0 = std::bit_cast<float>(
+        static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
     uint32_t seed = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t result =
-        (inst_.clamp) ? static_cast<uint32_t>(util::f32_to_fp8_e5m3_sr_mode(
-                            std::bit_cast<float>(conversion.source(s0, 0)), seed, wf.fp16_ovfl()))
-                      : conversion.stochastic(s0, seed);
-    uint32_t shift = ((inst_.opsel >> 2) & 0x3u) * 8u;
+    uint8_t result = (inst_.clamp) ? util::f32_to_fp8_e5m3_sr_mode(s0, seed, wf.fp16_ovfl())
+                                   : util::f32_to_fp8_e4m3_sr_mode(s0, seed, wf.fp16_ovfl());
+    uint32_t dst_byte = (inst_.opsel >> 2) & 0x3;
     uint32_t old = amdgpu::RegisterAccess(wf).read_lane(vdst, lane);
+    uint32_t mask = ~(0xFFu << (dst_byte * 8));
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
-        *this, wf, vdst, lane, (old & ~(0xFFu << shift)) | (result << shift));
+        *this, wf, vdst, lane, (old & mask) | (static_cast<uint32_t>(result) << (dst_byte * 8)));
   }
 }
 
@@ -4390,22 +4384,20 @@ RJ_NOINLINE void VCvtSrFp8F32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) 
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  const auto conversion =
-      amdgpu::conversion_to_fp8<amdgpu::conversion::Fp8>(wf, inst_.abs, inst_.neg);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    float s0 = std::bit_cast<float>(
+        static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
     uint32_t seed = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t result =
-        (inst_.clamp) ? static_cast<uint32_t>(util::f32_to_fp8_e5m3_sr_mode(
-                            std::bit_cast<float>(conversion.source(s0, 0)), seed, wf.fp16_ovfl()))
-                      : conversion.stochastic(s0, seed);
-    uint32_t shift = ((inst_.opsel >> 2) & 0x3u) * 8u;
+    uint8_t result = (inst_.clamp) ? util::f32_to_fp8_e5m3_sr_mode(s0, seed, wf.fp16_ovfl())
+                                   : util::f32_to_fp8_e4m3_sr_mode(s0, seed, wf.fp16_ovfl());
+    uint32_t dst_byte = (inst_.opsel >> 2) & 0x3;
     uint32_t old = amdgpu::RegisterAccess(wf).read_lane(vdst, lane);
+    uint32_t mask = ~(0xFFu << (dst_byte * 8));
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
-        *this, wf, vdst, lane, (old & ~(0xFFu << shift)) | (result << shift));
+        *this, wf, vdst, lane, (old & mask) | (static_cast<uint32_t>(result) << (dst_byte * 8)));
   }
   dpp_write_mask_scope_.restore();
 }
@@ -4415,19 +4407,19 @@ void VCvtSrBf8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  const auto conversion =
-      amdgpu::conversion_to_fp8<amdgpu::conversion::Bf8>(wf, inst_.abs, inst_.neg);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    float s0 = std::bit_cast<float>(
+        static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
     uint32_t seed = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t result = conversion.stochastic(s0, seed);
-    uint32_t shift = ((inst_.opsel >> 2) & 0x3u) * 8u;
+    uint8_t result = util::f32_to_bf8_e5m2_sr_mode(s0, seed, wf.fp16_ovfl());
+    uint32_t dst_byte = (inst_.opsel >> 2) & 0x3;
     uint32_t old = amdgpu::RegisterAccess(wf).read_lane(vdst, lane);
+    uint32_t mask = ~(0xFFu << (dst_byte * 8));
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
-        *this, wf, vdst, lane, (old & ~(0xFFu << shift)) | (result << shift));
+        *this, wf, vdst, lane, (old & mask) | (static_cast<uint32_t>(result) << (dst_byte * 8)));
   }
 }
 
@@ -4447,19 +4439,19 @@ RJ_NOINLINE void VCvtSrBf8F32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) 
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  const auto conversion =
-      amdgpu::conversion_to_fp8<amdgpu::conversion::Bf8>(wf, inst_.abs, inst_.neg);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    float s0 = std::bit_cast<float>(
+        static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
     uint32_t seed = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t result = conversion.stochastic(s0, seed);
-    uint32_t shift = ((inst_.opsel >> 2) & 0x3u) * 8u;
+    uint8_t result = util::f32_to_bf8_e5m2_sr_mode(s0, seed, wf.fp16_ovfl());
+    uint32_t dst_byte = (inst_.opsel >> 2) & 0x3;
     uint32_t old = amdgpu::RegisterAccess(wf).read_lane(vdst, lane);
+    uint32_t mask = ~(0xFFu << (dst_byte * 8));
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
-        *this, wf, vdst, lane, (old & ~(0xFFu << shift)) | (result << shift));
+        *this, wf, vdst, lane, (old & mask) | (static_cast<uint32_t>(result) << (dst_byte * 8)));
   }
   dpp_write_mask_scope_.restore();
 }

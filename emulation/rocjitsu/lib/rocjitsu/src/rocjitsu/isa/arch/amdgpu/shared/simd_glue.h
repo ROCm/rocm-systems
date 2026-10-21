@@ -837,6 +837,11 @@ template <typename Fmt> inline uint32_t fp_denorm_mode(const Wavefront &wf) {
                                              : wf.fp_denorm_mode_f16_f64();
 }
 
+/// @brief The input flush that MODE selects for a format Fmt source.
+template <typename Fmt> inline input_denormal::Policy input_denormal_policy(const Wavefront &wf) {
+  return input_denormal::Policy::make(fp_denorm_mode<Fmt>(wf));
+}
+
 /// @brief Resolve a conversion to a floating format from MODE and the instruction fields.
 /// @details Each format reads its own MODE fields: the source's input-denormal
 /// control and the destination's rounding, output-denormal and FP16_OVFL
@@ -853,7 +858,7 @@ inline conversion::ToFloat<From, To> conversion_to_float(const Wavefront &wf, ui
   stages.abs = abs;
   stages.neg = neg;
   if constexpr (!conversion::is_integer_v<From>)
-    stages.input = input_denormal::Policy::make(fp_denorm_mode<From>(wf));
+    stages.input = input_denormal_policy<From>(wf);
   stages.output = output_modifier_policy<To>(wf, omod, clamp);
   // OMOD treats a result that is tiny after rounding as zero, as disabled
   // output denormals do; output_modifier then makes it +0.
@@ -885,20 +890,20 @@ inline conversion::ToFloat<From, fp_format::F16> sdwa_conversion_to_f16(const In
 /// conversion::NearestI32) from the F32 input-denormal control and ABS/NEG.
 template <typename Op>
 inline Op conversion_f32_to_integer(const Wavefront &wf, uint32_t abs = 0, uint32_t neg = 0) {
-  return {abs, neg, input_denormal::Policy::make(wf.fp_denorm_mode_f32())};
+  return {abs, neg, input_denormal_policy<fp_format::F32>(wf)};
 }
 
 /// @brief Resolve V_CVT_PK_U8_F32, which rounds in the F32 MODE.FP_ROUND field.
 inline conversion::PackU8 conversion_pk_u8(const Wavefront &wf, uint32_t abs = 0,
                                            uint32_t neg = 0) {
-  return {abs, neg, input_denormal::Policy::make(wf.fp_denorm_mode_f32()),
+  return {abs, neg, input_denormal_policy<fp_format::F32>(wf),
           conversion::mode_rounding(wf.fp_round_mode_f32())};
 }
 
 /// @brief Resolve V_PACK_B32_F16 from MODE and the target's NaN quieting.
 inline conversion::PackB32F16 conversion_pack_b32_f16(const Wavefront &wf, uint32_t abs = 0,
                                                       uint32_t neg = 0) {
-  return {abs, neg, input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
+  return {abs, neg, input_denormal_policy<fp_format::F16>(wf),
           fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode())};
 }
 
@@ -906,7 +911,7 @@ inline conversion::PackB32F16 conversion_pack_b32_f16(const Wavefront &wf, uint3
 template <typename Fmt>
 inline conversion::ToFp8<Fmt> conversion_to_fp8(const Wavefront &wf, uint32_t abs = 0,
                                                 uint32_t neg = 0) {
-  return {abs, neg, input_denormal::Policy::make(wf.fp_denorm_mode_f32()), wf.fp16_ovfl()};
+  return {abs, neg, input_denormal_policy<fp_format::F32>(wf), wf.fp16_ovfl()};
 }
 
 /// @brief Resolve V_CVT_PK_RTZ_F16_F32: each F32 source rounds toward zero into one half.

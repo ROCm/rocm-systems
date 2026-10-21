@@ -17,9 +17,8 @@ from amdisa.codegen.execute.conversion import (
     pk_rtz_f16_expr,
     pk_u8_expr,
     to_fp8_expr,
-    uses_ocp_fp8,
 )
-from amdisa.codegen.execute.fp8_formats import fp8_helper_name
+from amdisa.codegen.execute.fp8_formats import fp8_helper_name, uses_shared_fp8
 from amdisa.codegen.execute.vop3_modifiers import (
     apply_output,
     output_policy_decl,
@@ -1549,7 +1548,7 @@ def gen_vector_cvt_pk(
             f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, conversion(s0, s1));'
         )
     elif cls == 'vector_cvt_pk':
-        if op in ('fp8_f32', 'bf8_f32') and uses_ocp_fp8(arch_name):
+        if op in ('fp8_f32', 'bf8_f32') and uses_shared_fp8(arch_name):
             _gen_ocp_pk_fp8(
                 L,
                 dst,
@@ -1561,7 +1560,7 @@ def gen_vector_cvt_pk(
                 e5m3_select=fp8_format_select if op == 'fp8_f32' else None,
                 e5m3_fn='util::f32_to_fp8_e5m3_rne_mode',
             )
-        elif op in ('f32_fp8', 'f32_bf8') and uses_ocp_fp8(arch_name):
+        elif op in ('f32_fp8', 'f32_bf8') and uses_shared_fp8(arch_name):
             _gen_ocp_pk_f32_fp8(L, dst, src, op[4:], opsel)
         elif op in ('fp8_f32', 'bf8_f32', 'fp8_f16', 'bf8_f16'):
             # RDNA4 data-conversion prose scopes FP16_OVFL for FP8/BF8
@@ -2187,7 +2186,7 @@ def gen_cvt_fp8(ctx) -> str:
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
 
-    if uses_ocp_fp8(ctx.arch_name) and op in (
+    if uses_shared_fp8(ctx.arch_name) and op in (
         'pk_fp8_f32',
         'pk_bf8_f32',
         'sr_fp8_f32',

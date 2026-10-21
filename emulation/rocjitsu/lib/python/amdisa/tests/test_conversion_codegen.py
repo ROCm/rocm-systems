@@ -5,12 +5,16 @@
 
 import pytest
 
-from amdisa.codegen.execute import conversion
+from amdisa.codegen.execute import conversion, fp8_formats
 from amdisa.codegen.execute.sema_lower import lower_sema_block
 from amdisa.codegen.execute.simd_codegen import local_coverage_probe, simd_probe_line
 from amdisa.sema_derive import derive_sema_block
 from amdisa.sema_enrich import enrich_block
-from amdisa.semantics import TO_FLOAT_CONVERSIONS, derive_semantics
+from amdisa.semantics import (
+    INTEGER_SOURCE_CONVERSIONS,
+    TO_FLOAT_CONVERSIONS,
+    derive_semantics,
+)
 
 
 def _formats(source, result):
@@ -25,12 +29,12 @@ def _formats(source, result):
 _INTEGER_TO_FLOAT = [
     (f'V_CVT_{dtype.upper()}', _formats(*formats))
     for dtype, formats in TO_FLOAT_CONVERSIONS.items()
-    if conversion.is_integer_source(dtype)
+    if dtype in INTEGER_SOURCE_CONVERSIONS
 ]
 _FLOAT_TO_FLOAT = [
     (f'V_CVT_{dtype.upper()}', _formats(*formats))
     for dtype, formats in TO_FLOAT_CONVERSIONS.items()
-    if not conversion.is_integer_source(dtype)
+    if dtype not in INTEGER_SOURCE_CONVERSIONS
 ]
 
 
@@ -154,30 +158,40 @@ def test_share_stages_hoists_the_scalar_declaration_above_the_probe():
 
 
 @pytest.mark.parametrize('name', ['fp8', 'bf8'])
-def test_fp8_decode_simd_probe_uses_the_shared_ocp_decoder(name):
+def test_fp8_decode_simd_probe_follows_the_target_policy(name):
     layout = 'Fp8' if name == 'fp8' else 'Bf8'
-    probe = local_coverage_probe(f'v_cvt_f32_{name}_vop3')
+    probe = local_coverage_probe(f'v_cvt_f32_{name}_vop3', arch_name='rdna4')
     assert (
         f'amdgpu::conversion::decode_fp8<amdgpu::conversion::{layout}>(byte)' in probe
     )
     assert ('util::fp8_e5m3_to_f32_simd' in probe) == (name == 'fp8')
     assert 'util::fp8_e4m3_to_f32_simd' not in probe
     assert 'util::bf8_e5m2_to_f32_simd' not in probe
-    # CDNA4's SIMD decode matches its scalar body's util helpers.
-    cdna4 = local_coverage_probe(f'v_cvt_f32_{name}_vop3', arch_name='cdna4')
-    assert 'amdgpu::conversion::decode_fp8' not in cdna4
+    # The SIMD decode matches the scalar body's util helpers elsewhere.
     helper = (
         'util::fp8_e4m3_to_f32_simd' if name == 'fp8' else 'util::bf8_e5m2_to_f32_simd'
     )
-    assert f'{helper}(byte)' in cdna4
+    for arch in ('cdna4', 'cdna5', None):
+        util = local_coverage_probe(f'v_cvt_f32_{name}_vop3', arch_name=arch)
+        assert 'amdgpu::conversion::decode_fp8' not in util
+        assert f'{helper}(byte)' in util
 
 
-def test_fp8_encodes_keep_util_helpers_on_cdna3_and_cdna4():
-    # CDNA3 uses FNUZ encodings; CDNA4 keeps its manual's FP16_OVFL rule.
-    for arch in ('cdna3', 'cdna4'):
-        assert not conversion.uses_ocp_fp8(arch)
-    for arch in ('cdna5', 'rdna4'):
-        assert conversion.uses_ocp_fp8(arch)
+def test_fp8_policy_selects_one_implementation_per_target():
+    # CDNA4 and CDNA5 keep their manuals' FP16_OVFL infinity rule.
+    assert fp8_formats.fp8_policy('cdna3') is fp8_formats.Fp8Policy.FNUZ
+    for arch in ('cdna4', 'cdna5'):
+        assert fp8_formats.fp8_policy(arch) is fp8_formats.Fp8Policy.OCP_UTIL
+    assert fp8_formats.fp8_policy('rdna4') is fp8_formats.Fp8Policy.OCP_SHARED
+    # Targets without FP8/BF8 conversions take the explicit default.
+    for arch in ('rdna3', 'cdna1', '', None):
+        assert fp8_formats.fp8_policy(arch) is fp8_formats.DEFAULT_FP8_POLICY
+    assert [
+        a
+        for a in ('cdna3', 'cdna4', 'cdna5', 'rdna4')
+        if fp8_formats.uses_shared_fp8(a)
+    ] == ['rdna4']
+    assert fp8_formats.uses_fnuz_fp8('cdna3') and not fp8_formats.uses_fnuz_fp8('cdna4')
     assert conversion.to_fp8_expr('bf8', True, False, 'inst_') == (
         'amdgpu::conversion_to_fp8<amdgpu::conversion::Bf8>(wf, 0u, inst_.neg)'
     )

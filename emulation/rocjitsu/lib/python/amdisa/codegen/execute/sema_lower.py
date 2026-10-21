@@ -29,7 +29,7 @@ from amdisa.codegen.execute import (
     vop3_modifiers,
 )
 from amdisa.codegen.execute.cube import CUBE_OPERATIONS, cube_expression, cube_omod
-from amdisa.codegen.execute.fp8_formats import fp8_helper_name
+from amdisa.codegen.execute.fp8_formats import fp8_helper_name, uses_shared_fp8
 from amdisa.sema_derive import CONVERSION_CALL, FLOAT_COMPARE_CALL, FLOAT_MINMAX_CALL
 from amdisa.sema_ast import (
     ExecModel,
@@ -2065,9 +2065,7 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
             arg = f'(({arg} >> (({ctx.fp8_byte_select}) * 8u)) & 0xFFu)'
         fp8_decode_fn = fp8_helper_name(ctx.arch_name, 'util::fp8_e4m3_to_f32')
         bf8_decode_fn = fp8_helper_name(ctx.arch_name, 'util::bf8_e5m2_to_f32')
-        if callee in ('cvt_f32_fp8', 'cvt_f32_bf8') and conversion.uses_ocp_fp8(
-            ctx.arch_name
-        ):
+        if callee in ('cvt_f32_fp8', 'cvt_f32_bf8') and uses_shared_fp8(ctx.arch_name):
             decoded = conversion.decode_fp8_expr(callee[-3:], arg)
             if ctx.fp8_decode_e5m3_select is not None and callee == 'cvt_f32_fp8':
                 e5m3 = f'util::fp8_e5m3_to_f32(static_cast<uint8_t>({arg}))'

@@ -46,16 +46,61 @@ TO_FLOAT_CONVERSIONS: dict[str, tuple[str, str]] = {
     'f64_f32': ('F32', 'F64'),
 }
 
+
+def conversion_formats(dtype: str) -> tuple[str, str]:
+    """Return the (source, destination) formats of a shared/conversion.h conversion."""
+    if dtype in F32_TO_INTEGER_CONVERSIONS:
+        return 'F32', 'I32'
+    return TO_FLOAT_CONVERSIONS[dtype]
+
+
 # Mixed-type conversions that accept VOP3 ABS/NEG on a floating half source.
 F16_INPUT_CONVERSION_DTYPES = frozenset({'i16_f16', 'u16_f16', 'f32_f16'})
 
+# Conversions with an integer source, which takes no VOP3 ABS/NEG: the
+# TO_FLOAT_CONVERSIONS entries with an integer source format, and the byte and
+# F64-result conversions not lowered through shared/conversion.h.
+INTEGER_SOURCE_CONVERSIONS = frozenset(
+    {
+        *(d for d, (source, _) in TO_FLOAT_CONVERSIONS.items() if source[0] in 'IU'),
+        'f32_ubyte0',
+        'f32_ubyte1',
+        'f32_ubyte2',
+        'f32_ubyte3',
+        'f64_i32',
+        'f64_u32',
+    }
+)
+
+# Conversions with an integer result, which takes no VOP3 OMOD/CLAMP.
+INTEGER_RESULT_CONVERSIONS = F32_TO_INTEGER_DTYPES | F64_TO_INTEGER_DTYPES
+
 # Floating-source operations with integer results; OMOD and CLAMP do not apply.
-# This covers operation-keyed cases only. F32/F64-to-integer conversions use
-# F32_TO_INTEGER_DTYPES/F64_TO_INTEGER_DTYPES, and V_CVT_I16_F16/V_CVT_U16_F16 use
-# sema_enrich._NO_DST_MODIFIER_INSTRUCTIONS.
+# This covers operation-keyed cases only; conversions are keyed by data type in
+# INTEGER_RESULT_CONVERSIONS and by instruction in NO_OUTPUT_MODIFIER_INSTRUCTIONS.
 INTEGER_RESULT_OPERATIONS = frozenset(
     {'frexp_exp_f32', 'frexp_exp_f16', 'cvt_norm_i16_f16', 'cvt_norm_u16_f16'}
 )
+
+# Instructions whose VOP3 encoding has OMOD/CLAMP fields the result ignores.
+NO_OUTPUT_MODIFIER_INSTRUCTIONS = frozenset(
+    {'V_CVT_F16_BF8', 'V_CVT_F16_FP8', 'V_CVT_I16_F16', 'V_CVT_U16_F16'}
+)
+
+
+def takes_source_modifiers(dtype: str) -> bool:
+    """Whether a vector conversion's source takes the VOP3 ABS/NEG fields."""
+    return dtype not in INTEGER_SOURCE_CONVERSIONS
+
+
+def takes_output_modifiers(name: str, dtype: str, operation: str | None) -> bool:
+    """Whether a VOP3 floating result takes the OMOD/CLAMP fields."""
+    return not (
+        dtype in INTEGER_RESULT_CONVERSIONS
+        or operation in INTEGER_RESULT_OPERATIONS
+        or name in NO_OUTPUT_MODIFIER_INSTRUCTIONS
+    )
+
 
 # Floating VOPC relations that read their sources; F and T/TRU are constants.
 FLOAT_COMPARE_RELATIONS = frozenset(

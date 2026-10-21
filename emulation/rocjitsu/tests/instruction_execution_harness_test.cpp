@@ -6648,11 +6648,12 @@ TEST(Gfx1250CvtFp8Test, Bf8OverflowHonorsFp16OvflMode) {
   EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5FC7Cu);
 
-  // FP16_OVFL saturates finite overflow only; infinities stay infinite, as on gfx1201.
+  // The CDNA5 manual's FP16_OVFL table saturates infinities as well as finite
+  // overflow; gfx1201 keeps infinities, but gfx1250 is uncaptured.
   wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
   cu->write_vgpr(vb + 2, 0, 0xA5A5BEEFu);
   EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
-  EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5FC7Cu);
+  EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5FB7Bu);
 
   cu->write_vgpr(vb + 5, 0, std::bit_cast<uint32_t>(70000.0f));
   cu->write_vgpr(vb + 6, 0, std::bit_cast<uint32_t>(-70000.0f));

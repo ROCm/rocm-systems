@@ -25,7 +25,7 @@
 /// Evidence: gfx1201 captures cover every operation here; gfx1100 captures cover
 /// all but the FP8/BF8 ones; gfx1030 captures cover ToFloat's F16/F32/F64 OMOD
 /// and MODE boundaries. Other targets share the code without measurement;
-/// CDNA3 and CDNA4 keep util's FP8/BF8 helpers.
+/// only RDNA4 uses the FP8/BF8 operations (see fp8_formats.py).
 /// Measured differences from the ISA manual's pseudocode or tables are marked
 /// "ISA manual discrepancy" below.
 
@@ -36,6 +36,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/round_increment.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/source_modifier.h"
 
+#include <cassert>
 #include <cstdint>
 #include <limits>
 #include <type_traits>
@@ -220,7 +221,8 @@ private:
 /// @brief Rounding into a floating destination, fixed before any lane is evaluated.
 /// @details Every value is rounded once, in the destination format:
 ///
-///   1. `direction` comes from the destination's MODE.FP_ROUND field.
+///   1. `direction` comes from the destination's MODE.FP_ROUND field, so it is
+///      one of the four MODE roundings; NEAREST_UP is rejected.
 ///   2. A value is tiny when, rounded to the destination precision with an
 ///      unbounded exponent, it stays below the smallest normal. With
 ///      `flush_tiny` a tiny result becomes a zero of the same sign, even when
@@ -238,6 +240,15 @@ struct FloatRounding {
   /// gfx1030 rounds first instead (see sdwa_conversion_to_f16).
   int32_t prescale = 0;
 };
+
+namespace detail {
+
+/// @brief Reject a rounding direction that only integer destinations define.
+constexpr void check_float_rounding([[maybe_unused]] const FloatRounding &policy) {
+  assert(policy.direction != Rounding::NEAREST_UP && "NEAREST_UP is for integer destinations");
+}
+
+} // namespace detail
 
 namespace detail {
 
@@ -346,6 +357,7 @@ constexpr V round_finite(V bits, const FloatRounding &policy) {
       detail::kExponentOrigin + (To::kExponentMax >> 1) - (From::kExponentMax >> 1);
   static_assert((From::kExponentMax >> 1) - (To::kExponentMax >> 1) < detail::kExponentOrigin);
   static_assert((From::kExponentMax >> 1) > (To::kExponentMax >> 1) + To::kMantissaBits + 2);
+  detail::check_float_rounding(policy);
 
   const V magnitude = bits & V(From::kMagnitude);
   const auto negative = (bits & V(From::kSign)) != V(L{0});
@@ -415,6 +427,7 @@ constexpr V from_integer(V magnitude, const Mask &negative, const FloatRounding 
   using L = detail::Lane<V>;
   using detail::choose;
   static_assert(fp_format::is_lane_v<To, V>);
+  detail::check_float_rounding(policy);
   constexpr unsigned kTopBit = 8 * sizeof(L) - 1;
   // Integers are at least one, so results are never tiny.
   const V top = fp_format::bit_width(magnitude | V(L{1})) - V(L{1});
@@ -483,6 +496,7 @@ private:
   template <typename V> constexpr V convert(V bits) const {
     using detail::choose;
     if constexpr (is_integer_v<From>) {
+      assert(abs == 0 && neg == 0 && "an integer source takes no ABS/NEG");
       constexpr Lane kMask = Lane(~Lane{0}) >> (8 * sizeof(Lane) - From::kWidth);
       constexpr Lane kTop = Lane{1} << (From::kWidth - 1);
       const V value = bits & V(kMask);
@@ -501,6 +515,7 @@ private:
       if constexpr (From::kMantissaBits > To::kMantissaBits) {
         return narrow<Source, Destination>(bits, rounding);
       } else {
+        assert(rounding.prescale == 0 && "widening is exact and applies no prescale");
         const V widened = widen<Source, Destination>(bits);
         if (quiet_nan)
           return widened;
@@ -565,8 +580,8 @@ template <typename Fmt, typename V> constexpr V finish_fp8(V bits, V magnitude, 
                     saturate ? V(L{Encoding::kLargest}) : overflow, magnitude);
   // ISA manual discrepancy: the manual's FP16_OVFL table also saturates an
   // infinity to the largest finite value, but gfx1201 gives the overflow
-  // encoding whatever FP16_OVFL says. Only gfx1201 is measured; CDNA4 keeps the
-  // table's rule.
+  // encoding whatever FP16_OVFL says. Only gfx1201 is measured; CDNA4 and CDNA5
+  // keep the table's rule.
   result = choose(f32_magnitude == V(F32::kInfinity), overflow, result);
   result = result | ((bits & V(F32::kSign)) >> 24);
   const L nan = std::is_same_v<Fmt, Fp8> ? kFp8Nan : kBf8Nan;

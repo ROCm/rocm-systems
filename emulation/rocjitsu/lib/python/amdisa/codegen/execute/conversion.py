@@ -12,7 +12,6 @@ rounding, OMOD and CLAMP, all on raw encodings.
 
 import re
 
-from amdisa.codegen.execute.fp8_formats import FNUZ_FP8_ARCHES
 from amdisa.semantics import F32_TO_INTEGER_CONVERSIONS, TO_FLOAT_CONVERSIONS
 
 # The per-instruction stage object declared before the scalar lane loop.
@@ -27,10 +26,6 @@ def _format(name: str) -> str:
     if name.startswith('F'):
         return f'amdgpu::fp_format::{name}'
     return f'amdgpu::conversion::{name}'
-
-
-def is_integer_source(dtype: str) -> bool:
-    return not TO_FLOAT_CONVERSIONS[dtype][0].startswith('F')
 
 
 def destination(dtype: str) -> str:
@@ -164,17 +159,9 @@ def pack_b32_f16_expr(is_vop3: bool, has_abs: bool, inst: str) -> str:
     )
 
 
-# OCP 8-bit float formats (shared/conversion.h); CDNA3 uses FNUZ helpers instead.
+# OCP 8-bit float formats in shared/conversion.h, for targets whose
+# fp8_formats.fp8_policy selects them.
 _FP8_FORMATS = {'fp8': 'amdgpu::conversion::Fp8', 'bf8': 'amdgpu::conversion::Bf8'}
-
-# OCP targets that keep util's FP8/BF8 helpers. The CDNA4 manual saturates an
-# infinity under FP16_OVFL, which gfx1201 does not, and gfx950 is uncaptured.
-_UTIL_OCP_FP8_ARCHES = frozenset({'cdna4'})
-
-
-def uses_ocp_fp8(arch_name: str) -> bool:
-    """Whether a target's FP8/BF8 conversions use the shared OCP encodings."""
-    return arch_name not in FNUZ_FP8_ARCHES | _UTIL_OCP_FP8_ARCHES
 
 
 def fp8_format(name: str) -> str:

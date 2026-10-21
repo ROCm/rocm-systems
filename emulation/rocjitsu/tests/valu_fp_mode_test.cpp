@@ -3,6 +3,8 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
@@ -3766,10 +3768,10 @@ std::vector<ArithmeticCase> fp8_cases() {
 
   // gfx950 is uncaptured. Its manual's FP16_OVFL rule saturates an infinity to
   // the largest finite value, unlike the gfx1201 PkFp8InfinityFp16Ovfl row.
-  const auto cdna4_pk = [&](const char *name, uint16_t op, uint32_t low, uint32_t result) {
-    const auto words = cdna4::build_vop3(op, {.vdst = 6, .src0 = 256, .src1 = 257});
+  const auto manual_pk = [&](const char *name, rj_code_arch_t arch, std::array<uint32_t, 2> words,
+                             uint32_t low, uint32_t result) {
     cases.push_back({name,
-                     ROCJITSU_CODE_ARCH_CDNA4,
+                     arch,
                      {words[0], words[1], 0u},
                      pair(low, 0u, 0u),
                      {{6, result}},
@@ -3779,9 +3781,21 @@ std::vector<ArithmeticCase> fp8_cases() {
                      0,
                      expect_simd_fallback()});
   };
+  const auto cdna4_pk = [&](const char *name, uint16_t op, uint32_t low, uint32_t result) {
+    manual_pk(name, ROCJITSU_CODE_ARCH_CDNA4,
+              cdna4::build_vop3(op, {.vdst = 6, .src0 = 256, .src1 = 257}), low, result);
+  };
   cdna4_pk("Gfx950PkFp8InfinityFp16Ovfl", cdna4::kVCvtPkFp8F32Vop3, 0x7f800000u, 0x7eu);
   cdna4_pk("Gfx950PkFp8NegInfinityFp16Ovfl", cdna4::kVCvtPkFp8F32Vop3, 0xff800000u, 0xfeu);
   cdna4_pk("Gfx950PkBf8InfinityFp16Ovfl", cdna4::kVCvtPkBf8F32Vop3, 0x7f800000u, 0x7bu);
+  // gfx1250 is uncaptured too; the CDNA5 manual's table gives the same rule.
+  const auto cdna5_pk = [&](const char *name, uint16_t op, uint32_t low, uint32_t result) {
+    manual_pk(name, ROCJITSU_CODE_ARCH_CDNA5,
+              cdna5::build_vop3(op, {.vdst = 6, .src0 = 256, .src1 = 257}), low, result);
+  };
+  cdna5_pk("Gfx1250PkFp8InfinityFp16Ovfl", cdna5::kVCvtPkFp8F32Vop3, 0x7f800000u, 0x7eu);
+  cdna5_pk("Gfx1250PkFp8NegInfinityFp16Ovfl", cdna5::kVCvtPkFp8F32Vop3, 0xff800000u, 0xfeu);
+  cdna5_pk("Gfx1250PkBf8InfinityFp16Ovfl", cdna5::kVCvtPkBf8F32Vop3, 0x7f800000u, 0x7bu);
   return cases;
 }
 
