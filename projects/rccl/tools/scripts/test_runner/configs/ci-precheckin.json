@@ -152,7 +152,7 @@
       "binary": "host/rccl-UnitTestsMicroCollectives",
       "num_ranks": 1,
       "num_nodes": 1,
-      "num_gpus": 1,
+      "num_gpus": 0,
       "timeout": 60,
       "tests": [
         {"name": "CollectivesMicrotests", "description": "Host-only collectives.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
@@ -163,7 +163,7 @@
       "binary": "host/rccl-UnitTestsMicroOnerank",
       "num_ranks": 1,
       "num_nodes": 1,
-      "num_gpus": 1,
+      "num_gpus": 0,
       "timeout": 60,
       "tests": [
         {"name": "OnerankMicrotests", "description": "Host-only onerank.cu microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
@@ -174,7 +174,7 @@
       "binary": "host/rccl-UnitTestsMicroMgmtTaskEnq",
       "num_ranks": 1,
       "num_nodes": 1,
-      "num_gpus": 1,
+      "num_gpus": 0,
       "timeout": 60,
       "tests": [
         {"name": "MgmtTaskEnqMicrotests", "description": "Host-only mgmt_task_enq.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
