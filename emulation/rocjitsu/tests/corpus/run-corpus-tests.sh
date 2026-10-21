@@ -233,6 +233,9 @@ run_pytest() {
   shift 8
   local pytest_environment=(env)
   if [[ "${suites}" == race ]]; then
+    # Use the same per-test deadline in the adapter and wrapper on both passes.
+    # The overall rerun budget separately bounds the complete pytest invocation.
+    pytest_environment+=("ROCJITSU_RACE_CASE_TIMEOUT=${timeout_seconds}")
     pytest_environment+=("ROCJITSU_RACE_CONFIG=${config_path}")
     # The race adapter materializes a private config for each GoogleTest case.
     config_path="{config}"
@@ -330,27 +333,23 @@ done
 
 if [[ "${race_tests}" == true ]]; then
   race_targets=(
-    # The pinned buffer-to-LDS race fixture allocates no LDS after optimization.
-    # Skip that case until its launch reserves storage in the corpus.
-    "gfx950 ${ROCJITSU_SOURCE_DIR}/tests/race-detector/race_test_config.json gfx950_skip_tests.json"
+    "gfx950 ${ROCJITSU_SOURCE_DIR}/tests/race-detector/race_test_config.json"
     "gfx1151 ${ROCJITSU_SOURCE_DIR}/configs/gfx1151.json"
   )
   export ROCJITSU_RACE_BUILD_ROOT="${corpus_work_dir}/.pytest-artifacts/race-build"
 
   for target in "${race_targets[@]}"; do
-    read -r name config_path skip_tests_config <<< "${target}"
+    read -r name config_path <<< "${target}"
     skip_tests_config_path=""
-    if [[ -n "${skip_tests_config}" ]]; then
-      skip_tests_config_path="${ROCJITSU_SOURCE_DIR}/tests/corpus/${skip_tests_config}"
-    fi
     echo "::group::(race-${name}) pytest"
     artifact_dir="${corpus_work_dir}/.pytest-artifacts/race-${name}"
     cache_dir="${corpus_work_dir}/.pytest-cache/race-${name}"
     junit_xml="${junit_dir}/race-${name}.xml"
 
     first_run_status=0
-    run_pytest "${soft_timeout_seconds}" 0 "${name}" "${config_path}" "${skip_tests_config_path}" \
-      "${artifact_dir}" "${cache_dir}" race --junitxml "${junit_xml}" || \
+    run_pytest "${soft_timeout_seconds}" 0 "${name}" "${config_path}" \
+      "${skip_tests_config_path}" "${artifact_dir}" "${cache_dir}" race \
+      --junitxml "${junit_xml}" || \
       first_run_status=$?
     if [[ -f "${junit_xml}" ]]; then
       junit_xml_paths+=("${junit_xml}")
@@ -371,7 +370,8 @@ if [[ "${race_tests}" == true ]]; then
 
     echo "::group::(race-${name}) pytest rerun failed tests"
     if run_pytest "${hard_timeout_seconds}" "${rerun_timeout_seconds}" \
-         "${name}" "${config_path}" "${skip_tests_config_path}" "${artifact_dir}" "${cache_dir}" race \
+         "${name}" "${config_path}" "${skip_tests_config_path}" \
+         "${artifact_dir}" "${cache_dir}" race \
          --last-failed --last-failed-no-failures=none; then
       echo "::endgroup::"
       echo "::warning::Retried race (${name}) tests passed."
