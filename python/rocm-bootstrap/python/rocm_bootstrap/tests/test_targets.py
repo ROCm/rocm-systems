@@ -86,10 +86,10 @@ class TestHierarchyStructure:
         """Sanity check: we have a reasonable number of targets."""
         # 8 (gfx9.0) + 1 (gfx9.4) + 1 (gfx9.5)
         # + 4 (gfx10.1) + 7 (gfx10.3)
-        # + 4 (gfx11.0) + 4 (gfx11.5)
+        # + 4 (gfx11.0) + 4 (gfx11.5) + 2 (gfx11.7)
         # + 2 (gfx12.0) + 3 (gfx12.5)
-        # = 34
-        assert len(ALL_TARGETS) == 34
+        # = 36
+        assert len(ALL_TARGETS) == 36
 
 
 # ---------------------------------------------------------------------------
@@ -114,6 +114,8 @@ class TestGfxTarget:
             ("gfx1010", 10, 1, 0),
             ("gfx1100", 11, 0, 0),
             ("gfx1151", 11, 5, 1),
+            ("gfx1170", 11, 7, 0),
+            ("gfx1171", 11, 7, 1),
             ("gfx1201", 12, 0, 1),
             ("gfx1250", 12, 5, 0),
         ],
@@ -222,6 +224,8 @@ class TestXnackClassification:
             "gfx1151",
             "gfx1152",
             "gfx1153",
+            "gfx1170",
+            "gfx1171",
         ],
     )
     def test_gfx11_targets_no_xnack(self, name):
@@ -271,7 +275,7 @@ class TestLookupBundle:
 
     @pytest.mark.parametrize(
         "alias,canonical_key",
-        [("gfx11_0", "gfx110x"), ("gfx11_5", "gfx115x")],
+        [("gfx11_0", "gfx110x"), ("gfx11_5", "gfx115x"), ("gfx11_7", "gfx117x")],
     )
     def test_legacy_sub_family_aliases(self, alias, canonical_key):
         assert lookup_bundle(alias) is lookup_bundle(canonical_key)
@@ -292,6 +296,7 @@ class TestPackagingChain:
         [
             ("gfx1151", "gfx115x", "gfx11"),
             ("gfx1100", "gfx110x", "gfx11"),
+            ("gfx1170", "gfx117x", "gfx11"),
             ("gfx942", "gfx9_4", "gfx9"),
             ("gfx950", "gfx9_5", "gfx9"),
             ("gfx90a", "gfx9_0", "gfx9"),
@@ -362,7 +367,7 @@ class TestAllBundles:
     def test_filter_sub_family(self):
         bundles = all_bundles(PackagingLevel.SUB_FAMILY)
         assert all(b.level == PackagingLevel.SUB_FAMILY for b in bundles)
-        assert len(bundles) == 9
+        assert len(bundles) == 10
 
     def test_filter_target(self):
         bundles = all_bundles(PackagingLevel.TARGET)
@@ -402,6 +407,10 @@ class TestLLVMGenericAssignments:
 
     def test_gfx115x_no_generic(self):
         assert lookup_bundle("gfx115x").llvm_generic is None
+
+    def test_gfx117x_has_gfx11_7_generic(self):
+        """GFX11.7 is not covered by gfx11-generic; it has its own."""
+        assert lookup_bundle("gfx117x").llvm_generic == "gfx11-7-generic"
 
     def test_gfx12_0_has_gfx12_generic(self):
         assert lookup_bundle("gfx12_0").llvm_generic == "gfx12-generic"
