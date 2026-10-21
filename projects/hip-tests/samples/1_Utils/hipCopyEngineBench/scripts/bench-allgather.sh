@@ -12,7 +12,14 @@ ITERATIONS="${ITERATIONS:-20}"
 # shellcheck source=benchmark-common.sh
 source "${script_dir}/benchmark-common.sh"
 
-ALLGATHER_BENCHMARK="${ALLGATHER_BENCHMARK:-${BUILD_DIR}/copy-engine-allgather}"
+# USE_MPI=1 runs the MPI build, one rank per GPU, under MPIRUN (default mpirun).
+USE_MPI="${USE_MPI:-0}"
+MPIRUN="${MPIRUN:-mpirun}"
+if [[ "${USE_MPI}" == 1 ]]; then
+  ALLGATHER_BENCHMARK="${ALLGATHER_BENCHMARK:-${BUILD_DIR}/copy-engine-allgather-mpi}"
+else
+  ALLGATHER_BENCHMARK="${ALLGATHER_BENCHMARK:-${BUILD_DIR}/copy-engine-allgather}"
+fi
 MIN_GPUS="${MIN_GPUS:-2}"
 MAX_GPUS="${MAX_GPUS:-8}"
 MIN_BYTES="${MIN_BYTES:-4096}"
@@ -26,8 +33,14 @@ echo "Running allgather sweeps from ${MIN_BYTES} to ${MAX_BYTES} bytes"
 for ((gpus = MIN_GPUS; gpus <= MAX_GPUS; gpus *= 2)); do
   result_csv="allgather_${gpus}gpus.csv"
   echo "  GPUs: ${gpus}"
-  command=("${ALLGATHER_BENCHMARK}"
-    --numGpus "${gpus}"
+  launcher=()
+  gpu_args=(--numGpus "${gpus}")
+  if [[ "${USE_MPI}" == 1 ]]; then
+    read -ra launcher <<<"${MPIRUN}"
+    launcher+=(-x DEBUG_CLR_ENABLE_ABCE -x GPU_MAX_SDMA_DEVICE_QUEUES -n "${gpus}")
+    gpu_args=()
+  fi
+  command=("${launcher[@]}" "${ALLGATHER_BENCHMARK}" "${gpu_args[@]}"
     --minBytes "${MIN_BYTES}"
     --maxBytes "${MAX_BYTES}"
     --warmup "${WARMUP}"

@@ -61,6 +61,29 @@ foreach(benchmark ${COPY_ENGINE_BENCHMARKS})
   endif()
 endforeach()
 
+# The allgather also builds as one MPI rank per GPU, like the reference, when MPI is available.
+find_package(MPI COMPONENTS CXX QUIET)
+if(MPI_CXX_FOUND)
+  set_source_files_properties(copy-engine-allgather.cpp PROPERTIES LANGUAGE HIP)
+  add_executable(copy-engine-allgather-mpi ${EXCLUDE_OPTION} copy-engine-allgather.cpp
+    copy_engine_bench_common.hpp)
+  set_target_properties(copy-engine-allgather-mpi PROPERTIES HIP_STANDARD 17 HIP_STANDARD_REQUIRED ON)
+  target_compile_definitions(copy-engine-allgather-mpi PRIVATE COPY_ENGINE_BENCH_MPI)
+  target_link_libraries(copy-engine-allgather-mpi PRIVATE hip::device MPI::MPI_CXX)
+  target_compile_options(copy-engine-allgather-mpi PRIVATE
+    --hip-path=${hip_DIR}/../../..
+    -Wall -Wextra)
+  if(UNIX)
+    set_target_properties(copy-engine-allgather-mpi PROPERTIES
+      BUILD_RPATH "${hip_DIR}/../.."
+      INSTALL_RPATH "${hip_DIR}/../.."
+    )
+  endif()
+  list(APPEND COPY_ENGINE_BENCHMARKS copy-engine-allgather-mpi)
+else()
+  message(STATUS "hipCopyEngineBench: MPI not found, not building copy-engine-allgather-mpi")
+endif()
+
 if(TARGET build_utils)
   add_dependencies(build_utils ${COPY_ENGINE_BENCHMARKS})
 endif()

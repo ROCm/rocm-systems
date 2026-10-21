@@ -12,6 +12,7 @@ allows it, and use nothing but that API: no rocm-xio, no HSA queue setup, no ABC
 | `copy-engine-bw` | Bandwidth of copies pushed from `--srcGpu` to one or more peer GPUs by warps of one kernel. |
 | `copy-engine-latency` | Submit-to-completion latency of one copy (or a few), split into submit and transfer time. |
 | `copy-engine-allgather` | In-place allgather across `--numGpus` GPUs (default all), one process, one kernel per GPU. |
+| `copy-engine-allgather-mpi` | The same allgather with one MPI rank per GPU, like the reference; built when CMake finds MPI. |
 
 ## Build
 
@@ -35,6 +36,7 @@ export DEBUG_CLR_ENABLE_ABCE=1 GPU_MAX_SDMA_DEVICE_QUEUES=16
 ./copy-engine-bw -b 1024 -e 4194304 -c 4 -d 7 --wgsPerDestination 2
 ./copy-engine-latency -b 256 -e 1048576 -c 1
 ./copy-engine-allgather -g 8 -b 4096 -e 268435456
+mpirun -x DEBUG_CLR_ENABLE_ABCE -x GPU_MAX_SDMA_DEVICE_QUEUES -n 8 ./copy-engine-allgather-mpi
 ```
 
 `--help` lists every option. Sizes sweep in powers of two from `-b` to `-e`. Each size is verified
@@ -64,7 +66,7 @@ already set.
 | `bench-bandwidth-multiproducer.sh` | work-groups per destination 2..32 (doubling), 7 destinations, 100 copies | `bench-bandwidth-multiproducer.sh` (its queues x work-groups-per-queue grid becomes total work-groups per destination) |
 | `bench-contention.sh` | work-groups sharing one destination: 16..304, 100 copies | `bench-contention-singlequeue.sh` |
 | `bench-latency.sh` | copy size 256 B..1 MiB, one run per size | `bench-latency.sh` (no `FINE_GRAINED`) |
-| `bench-allgather.sh` | GPU count 2..8 (doubling), total size 4 KiB..256 MiB | `sdma-ep-collectives` allgather, one run per GPU count in place of `mpirun -n` |
+| `bench-allgather.sh` | GPU count 2..8 (doubling), total size 4 KiB..256 MiB; `USE_MPI=1` runs the MPI build under `MPIRUN` | `sdma-ep-collectives` allgather, one run per GPU count in place of `mpirun -n` |
 
 Every setting is an environment override, named as in the reference where the setting exists
 (`MIN_COPY_SIZE`, `MAX_COPY_SIZE`, `NUM_COPY_COMMANDS`, `NUM_DESTINATIONS`, `SRC_GPU`, `DST_GPU`,
@@ -84,10 +86,18 @@ Every GPU's buffer holds one chunk per rank (`total / numGpus` bytes each, in pl
 kernel runs on each GPU with a warp per peer. That warp's first lane copies this GPU's chunk into
 the peer's buffer, queues a signal in the peer's memory behind the copy ("arrived") and one in its
 own ("sent"), then waits for the peer's chunk to arrive here and for its own send to finish. The
-signals carry a rising epoch and are never reset. Unlike the reference there is no MPI: one
-process sets up every GPU, launches one kernel on each in its own stream and times each GPU with
-events, reporting the mean and the maximum over GPUs. Each size is verified once before timing
-(every GPU must end up with every chunk).
+signals carry a rising epoch and are never reset. Each size is verified once before timing (every
+GPU must end up with every chunk).
+
+Two ways to run it, with the same kernel:
+
+- `copy-engine-allgather`: one process sets up every GPU, launches one kernel on each in its own
+  stream and times each GPU with events.
+- `copy-engine-allgather-mpi`: one MPI rank per GPU, as in the reference. Rank `i` drives GPU `i`
+  and reaches its peers' buffers and signals through IPC handles. Run it with `mpirun -n <GPUs>`;
+  `--numGpus` must be 0 or equal to the number of ranks.
+
+Both report the mean and the maximum over GPUs of the per-iteration event time.
 
 Output columns follow the reference's: total size, time, algorithm bandwidth (`total / time`) and
 bus bandwidth (`(n - 1) / n` of that), in GiB/s as in the reference, whose header says GB/s.
@@ -128,11 +138,19 @@ host chose, and every copy retires its own completion word. So:
 
 - On an 8x MI300X node, `copy-engine-bw -d 7` reached ~290 GB/s against ~41 GB/s for `-d 1`.
   Warps sharing a destination share one ring, while different destinations use different routes.
-- Allgather on 8 MI300X GPUs against `mpirun -n 8 sdma-ep-allgather`: both reach 724 us and 345
-  GiB/s at 256 MiB, and 99 - 103 us at 32 MiB. Small sizes are noisy in both: 4 KiB took 12 - 14
-  us in some runs and 25 - 31 us in others, for either tool, so no gap between them can be
-  claimed there. The HIP version needs a second submit for the "sent" signal (about 1.6 us), where
-  the reference packs its put, signal and counter into one reservation.
+- Allgather on 8 MI300X GPUs, three interleaved rounds of this tool as one process, this tool
+  under MPI, and the reference `sdma-ep-allgather` under MPI:
+  - 32 MiB and 256 MiB: all three reach 98 - 103 us and 693 - 725 us. The single-process run is 4%
+    faster at 256 MiB (693 against 724 us); both MPI runs, ours and the reference, are at 724.
+    Buffers opened through IPC may be mapped differently, but I did not check.
+  - 4 KiB to 1 MiB: both MPI runs sat at 14 - 31 us (4 KiB: 25 - 31 us in every round, ours and
+    the reference), the single process at 13.7 us in two rounds and 35 us in the third. MPI is not
+    what stabilises these sizes. The same variation showed up with 2 and 4 GPUs only as a
+    steady 12 us.
+  - Multi-millisecond stalls appeared in single iterations of the MPI runs (ours: 5.3 ms mean at
+    32 MiB once; the reference: 1.2 - 2.5 ms at 256 MiB in two rounds). I do not know the cause.
+  - The HIP version needs a second submit for the "sent" signal (about 1.6 us), where the
+    reference packs its put, signal and counter into one reservation.
 - A submit call costs about 2.8 us: reserve ring space, write the packets, ring the doorbell. That
   is the `Submit [us]` column.
 - Mean device latency of one copy, 5 interleaved runs against `sdma-ep-latency` (which reports one

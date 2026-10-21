@@ -4,15 +4,24 @@
  * SPDX-License-Identifier: MIT
  */
 
-// In-place allgather over the HIP copy-engine API, one process driving every GPU. Each GPU's
-// buffer holds one chunk per rank; a kernel on each GPU pushes its own chunk into every peer's
-// buffer, then waits until every peer's chunk has landed in its own. It mirrors the
-// device-initiated mode of rocm-xio's sdma-ep-collectives allgather.
+// In-place allgather over the HIP copy-engine API. Each GPU's buffer holds one chunk per rank; a
+// kernel on each GPU pushes its own chunk into every peer's buffer, then waits until every peer's
+// chunk has landed in its own. It mirrors the device-initiated mode of rocm-xio's
+// sdma-ep-collectives allgather.
+//
+// Built plain, one process drives every GPU. Built with COPY_ENGINE_BENCH_MPI, every MPI rank
+// drives the GPU of its own number and reaches its peers' buffers and signals through IPC handles,
+// like the reference.
 
 #include <chrono>
 #include <iomanip>
+#include <memory>
 
 #include "copy_engine_bench_common.hpp"
+
+#ifdef COPY_ENGINE_BENCH_MPI
+#include <mpi.h>
+#endif
 
 using namespace copy_engine_bench;
 
@@ -72,7 +81,40 @@ __global__ void AllgatherKernel(AllgatherArgs args, uint64_t epoch) {
   args.statuses[warp] = result;
 }
 
-// One GPU taking part.
+// The processes taking part. Without MPI that is this one, and every number reduces to itself.
+struct World {
+  int rank = 0;
+  int size = 1;
+
+  bool IsRoot() const { return rank == 0; }
+
+#ifdef COPY_ENGINE_BENCH_MPI
+  void Barrier() const { MPI_Barrier(MPI_COMM_WORLD); }
+  double Sum(double value) const {
+    double total = 0.0;
+    MPI_Allreduce(&value, &total, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+    return total;
+  }
+  double Max(double value) const {
+    double result = 0.0;
+    MPI_Allreduce(&value, &result, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+    return result;
+  }
+  size_t Sum(size_t value) const {
+    unsigned long long total = 0;
+    unsigned long long mine = value;
+    MPI_Allreduce(&mine, &total, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, MPI_COMM_WORLD);
+    return static_cast<size_t>(total);
+  }
+#else
+  void Barrier() const {}
+  double Sum(double value) const { return value; }
+  double Max(double value) const { return value; }
+  size_t Sum(size_t value) const { return value; }
+#endif
+};
+
+// One GPU this process drives.
 struct Rank {
   int device = 0;
   AllgatherArgs args{};
@@ -80,6 +122,8 @@ struct Rank {
   hipEvent_t start = nullptr;
   hipEvent_t stop = nullptr;
   uint64_t* arrivals = nullptr;
+  // Peer allocations mapped through IPC, closed at the end.
+  std::vector<void*> mapped;
 };
 
 uint32_t ExpectedWord(size_t rank, size_t index) { return static_cast<uint32_t>(rank + index); }
@@ -91,8 +135,8 @@ void LaunchAll(std::vector<Rank>& ranks, size_t chunk_bytes, uint64_t epoch) {
     int warp_size = 0;
     HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, rank.device));
     hipLaunchKernelGGL(AllgatherKernel, dim3(1),
-                       dim3(static_cast<unsigned>((ranks.size() - 1) * warp_size)), 0, rank.stream,
-                       rank.args, epoch);
+                       dim3(static_cast<unsigned>((rank.args.num_ranks - 1) * warp_size)), 0,
+                       rank.stream, rank.args, epoch);
   }
 }
 
@@ -101,81 +145,130 @@ void SyncAll(const std::vector<Rank>& ranks) {
     HIP_CHECK(hipSetDevice(rank.device));
     HIP_CHECK(hipStreamSynchronize(rank.stream));
     HIP_CHECK(hipGetLastError());
-    CheckStatuses(rank.args.statuses, ranks.size() - 1);
+    CheckStatuses(rank.args.statuses, rank.args.num_ranks - 1);
   }
 }
 
 // Gives every GPU a zeroed buffer holding only its own chunk, runs the collective once and checks
-// that every GPU ends up with every chunk. Returns the number of wrong words.
-size_t Verify(std::vector<Rank>& ranks, size_t chunk_bytes, uint64_t epoch) {
+// that every GPU ends up with every chunk. Returns the number of wrong words over all processes.
+size_t Verify(const World& world, std::vector<Rank>& ranks, size_t chunk_bytes, uint64_t epoch) {
+  const size_t num_ranks = ranks[0].args.num_ranks;
   const size_t words_per_chunk = chunk_bytes / sizeof(uint32_t);
-  const size_t total_bytes = chunk_bytes * ranks.size();
-  std::vector<uint32_t> expected(words_per_chunk * ranks.size());
-  for (size_t r = 0; r < ranks.size(); ++r) {
-    for (size_t i = 0; i < words_per_chunk; ++i)
+  const size_t total_bytes = chunk_bytes * num_ranks;
+  std::vector<uint32_t> expected(words_per_chunk * num_ranks);
+  for (size_t r = 0; r < num_ranks; ++r) {
+    for (size_t i = 0; i < words_per_chunk; ++i) {
       expected[r * words_per_chunk + i] = ExpectedWord(r, i);
+    }
   }
-  for (size_t r = 0; r < ranks.size(); ++r) {
-    HIP_CHECK(hipSetDevice(ranks[r].device));
-    HIP_CHECK(hipMemset(ranks[r].args.buffers[r], 0, total_bytes));
-    HIP_CHECK(hipMemcpy(ranks[r].args.buffers[r] + r * chunk_bytes,
-                        expected.data() + r * words_per_chunk, chunk_bytes, hipMemcpyHostToDevice));
-  }
-  for (const Rank& rank : ranks) {
+  for (Rank& rank : ranks) {
+    const size_t r = rank.args.rank;
     HIP_CHECK(hipSetDevice(rank.device));
+    HIP_CHECK(hipMemset(rank.args.buffers[r], 0, total_bytes));
+    HIP_CHECK(hipMemcpy(rank.args.buffers[r] + r * chunk_bytes,
+                        expected.data() + r * words_per_chunk, chunk_bytes, hipMemcpyHostToDevice));
     HIP_CHECK(hipDeviceSynchronize());
   }
+  world.Barrier();
   LaunchAll(ranks, chunk_bytes, epoch);
   SyncAll(ranks);
+  world.Barrier();
 
   size_t errors = 0;
   size_t reported = 0;
   std::vector<uint32_t> got(expected.size());
-  for (size_t r = 0; r < ranks.size(); ++r) {
-    HIP_CHECK(hipSetDevice(ranks[r].device));
-    HIP_CHECK(hipMemcpy(got.data(), ranks[r].args.buffers[r], total_bytes, hipMemcpyDeviceToHost));
+  for (Rank& rank : ranks) {
+    HIP_CHECK(hipSetDevice(rank.device));
+    HIP_CHECK(hipMemcpy(got.data(), rank.args.buffers[rank.args.rank], total_bytes,
+                        hipMemcpyDeviceToHost));
     for (size_t word = 0; word < got.size(); ++word) {
       if (got[word] == expected[word]) continue;
       ++errors;
       if (reported++ < 10) {
-        std::cerr << "mismatch on GPU " << ranks[r].device << " word " << word << ": expected 0x"
+        std::cerr << "mismatch on GPU " << rank.device << " word " << word << ": expected 0x"
                   << std::hex << expected[word] << ", got 0x" << got[word] << std::dec << "\n";
       }
     }
   }
-  return errors;
+  return world.Sum(errors);
 }
 
-int Run(const Params& params) {
+#ifdef COPY_ENGINE_BENCH_MPI
+// What a process tells the others about its allocations.
+struct Exported {
+  hipIpcMemHandle_t buffer;
+  hipIpcMemHandle_t arrivals;
+};
+
+// Fills |rank|'s peer pointers from every process' exports.
+void MapPeers(const World& world, Rank& rank) {
+  Exported mine{};
+  HIP_CHECK(hipIpcGetMemHandle(&mine.buffer, rank.args.buffers[world.rank]));
+  HIP_CHECK(hipIpcGetMemHandle(&mine.arrivals, rank.arrivals));
+  std::vector<Exported> all(world.size);
+  MPI_Allgather(&mine, sizeof(mine), MPI_BYTE, all.data(), sizeof(mine), MPI_BYTE, MPI_COMM_WORLD);
+  HIP_CHECK(hipSetDevice(rank.device));
+  for (int peer = 0; peer < world.size; ++peer) {
+    if (peer == world.rank) continue;
+    void* buffer = nullptr;
+    void* arrivals = nullptr;
+    HIP_CHECK(hipIpcOpenMemHandle(&buffer, all[peer].buffer, hipIpcMemLazyEnablePeerAccess));
+    HIP_CHECK(hipIpcOpenMemHandle(&arrivals, all[peer].arrivals, hipIpcMemLazyEnablePeerAccess));
+    rank.mapped.push_back(buffer);
+    rank.mapped.push_back(arrivals);
+    rank.args.buffers[peer] = static_cast<char*>(buffer);
+    rank.args.arrivals[peer] = static_cast<uint64_t*>(arrivals);
+  }
+}
+#endif
+
+int Run(const Params& params, const World& world) {
   int num_devices = 0;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
+#ifdef COPY_ENGINE_BENCH_MPI
+  const size_t num_gpus = static_cast<size_t>(world.size);
+  if (params.num_gpus != 0 && params.num_gpus != num_gpus) {
+    if (world.IsRoot()) std::cerr << "error: --numGpus is the number of MPI ranks; use mpirun -n\n";
+    return EXIT_FAILURE;
+  }
+#else
   const size_t num_gpus =
       params.num_gpus == 0 ? std::min<size_t>(num_devices, kMaxRanks) : params.num_gpus;
+#endif
   if (num_gpus < 2 || num_gpus > kMaxRanks || num_gpus > static_cast<size_t>(num_devices)) {
-    std::cerr << "error: --numGpus must be between 2 and "
-              << std::min<size_t>(num_devices, kMaxRanks) << "\n";
+    if (world.IsRoot()) {
+      std::cerr << "error: need between 2 and " << std::min<size_t>(num_devices, kMaxRanks)
+                << " GPUs\n";
+    }
     return EXIT_FAILURE;
   }
   if (params.max_bytes / num_gpus < sizeof(uint32_t)) {
-    std::cerr << "error: --maxBytes is too small for " << num_gpus << " GPUs\n";
+    if (world.IsRoot()) std::cerr << "error: --maxBytes is too small for " << num_gpus << " GPUs\n";
     return EXIT_FAILURE;
   }
 
-  std::vector<Rank> ranks(num_gpus);
-  for (size_t r = 0; r < num_gpus; ++r) ranks[r].device = static_cast<int>(r);
-  for (size_t src = 0; src < num_gpus; ++src) {
-    for (size_t dst = 0; dst < num_gpus; ++dst) {
-      if (src != dst && !EnablePeerAccess(static_cast<int>(src), static_cast<int>(dst))) {
+  // The GPUs this process drives: all of them, or the one of its MPI rank.
+  std::vector<Rank> ranks;
+#ifdef COPY_ENGINE_BENCH_MPI
+  ranks.resize(1);
+  ranks[0].args.rank = static_cast<uint32_t>(world.rank);
+#else
+  ranks.resize(num_gpus);
+  for (size_t r = 0; r < num_gpus; ++r) ranks[r].args.rank = static_cast<uint32_t>(r);
+#endif
+  for (Rank& rank : ranks) {
+    rank.device = static_cast<int>(rank.args.rank);
+    for (size_t peer = 0; peer < num_gpus; ++peer) {
+      if (peer != rank.args.rank && !EnablePeerAccess(rank.device, static_cast<int>(peer))) {
         return EXIT_FAILURE;
       }
     }
   }
 
   const size_t max_chunk = params.max_bytes / num_gpus / sizeof(uint32_t) * sizeof(uint32_t);
-  for (size_t r = 0; r < num_gpus; ++r) {
-    Rank& rank = ranks[r];
+  for (Rank& rank : ranks) {
+    const size_t r = rank.args.rank;
     if (!SelectSourceDevice(rank.device)) return EXIT_FAILURE;
-    rank.args.rank = static_cast<uint32_t>(r);
     rank.args.num_ranks = static_cast<uint32_t>(num_gpus);
     rank.args.buffers[r] = static_cast<char*>(AllocUncached(max_chunk * num_gpus));
     rank.arrivals = AllocSignals(num_gpus, SignalMemory::kDevice);
@@ -195,23 +288,31 @@ int Run(const Params& params) {
       rank.args.handles.handles[peer] = handle[0];
     }
   }
+#ifdef COPY_ENGINE_BENCH_MPI
+  MapPeers(world, ranks[0]);
+#else
   for (Rank& rank : ranks) {
     for (size_t peer = 0; peer < num_gpus; ++peer) {
       rank.args.buffers[peer] = ranks[peer].args.buffers[peer];
       rank.args.arrivals[peer] = ranks[peer].arrivals;
     }
   }
+#endif
 
-  std::cout << "GPUs: " << num_gpus << ", one block of " << (num_gpus - 1)
-            << " submitting warp(s) per GPU\n";
-  std::cout << std::left << std::setw(14) << "TotalBytes" << std::setw(12) << "ChunkBytes"
-            << std::setw(14) << "Device(us)" << std::setw(14) << "DevMax(us)" << std::setw(14)
-            << "Host(us)" << std::setw(14) << "AlgBW(GiB/s)" << std::setw(14) << "BusBW(GiB/s)"
-            << std::setw(8) << "Errors" << "\n";
-  CsvWriter csv(params.output_file);
-  csv.WriteHeader({"#GPUs", "Total Size [B]", "Chunk Size [B]", "Device Latency [us] (Mean)",
-                   "Device Latency [us] (Max)", "Host Latency [us]", "Algorithm Bandwidth [GiB/s]",
-                   "Bus Bandwidth [GiB/s]", "Errors"});
+  std::unique_ptr<CsvWriter> csv;
+  if (world.IsRoot()) {
+    std::cout << "GPUs: " << num_gpus << ", one block of " << (num_gpus - 1)
+              << " submitting warp(s) per GPU"
+              << (world.size > 1 ? ", one MPI rank per GPU" : ", one process") << "\n";
+    std::cout << std::left << std::setw(14) << "TotalBytes" << std::setw(12) << "ChunkBytes"
+              << std::setw(14) << "Device(us)" << std::setw(14) << "DevMax(us)" << std::setw(14)
+              << "Host(us)" << std::setw(14) << "AlgBW(GiB/s)" << std::setw(14) << "BusBW(GiB/s)"
+              << std::setw(8) << "Errors" << "\n";
+    csv = std::make_unique<CsvWriter>(params.output_file);
+    csv->WriteHeader({"#GPUs", "Total Size [B]", "Chunk Size [B]", "Device Latency [us] (Mean)",
+                      "Device Latency [us] (Max)", "Host Latency [us]",
+                      "Algorithm Bandwidth [GiB/s]", "Bus Bandwidth [GiB/s]", "Errors"});
+  }
 
   // Signals keep rising across sizes and launches, so they are never reset.
   uint64_t epoch = 0;
@@ -222,14 +323,12 @@ int Run(const Params& params) {
     const size_t total = chunk * num_gpus;
 
     size_t errors = 0;
-    bool verified = false;
-    if (!params.skip_verification) {
-      errors = Verify(ranks, chunk, ++epoch);
-      verified = true;
-    }
+    const bool verified = !params.skip_verification;
+    if (verified) errors = Verify(world, ranks, chunk, ++epoch);
 
     for (size_t i = 0; i < params.warmup; ++i) LaunchAll(ranks, chunk, ++epoch);
     SyncAll(ranks);
+    world.Barrier();
 
     for (Rank& rank : ranks) {
       HIP_CHECK(hipSetDevice(rank.device));
@@ -246,6 +345,7 @@ int Run(const Params& params) {
         std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - host_begin)
             .count() /
         static_cast<double>(params.iterations);
+    world.Barrier();
 
     double sum_us = 0.0;
     double max_us = 0.0;
@@ -256,25 +356,31 @@ int Run(const Params& params) {
       sum_us += us;
       max_us = std::max(max_us, us);
     }
-    const double device_us = sum_us / static_cast<double>(num_gpus);
+    const double device_us = world.Sum(sum_us) / static_cast<double>(num_gpus);
+    const double device_max_us = world.Max(max_us);
+    const double host_mean_us = world.Sum(host_us) / static_cast<double>(world.size);
     const double alg_bw = static_cast<double>(total) / kGiB / (device_us / 1.0e6);
     const double bus_bw =
         alg_bw * static_cast<double>(num_gpus - 1) / static_cast<double>(num_gpus);
 
-    std::cout << std::left << std::setw(14) << total << std::setw(12) << chunk << std::setw(14)
-              << device_us << std::setw(14) << max_us << std::setw(14) << host_us << std::setw(14)
-              << alg_bw << std::setw(14) << bus_bw << std::setw(8)
-              << (verified ? std::to_string(errors) : std::string("N/A")) << "\n";
-    csv.WriteRow(num_gpus, total, chunk, device_us, max_us, host_us, alg_bw, bus_bw,
-                 verified ? std::to_string(errors) : std::string("N/A"));
+    if (world.IsRoot()) {
+      const std::string error_text = verified ? std::to_string(errors) : std::string("N/A");
+      std::cout << std::left << std::setw(14) << total << std::setw(12) << chunk << std::setw(14)
+                << device_us << std::setw(14) << device_max_us << std::setw(14) << host_mean_us
+                << std::setw(14) << alg_bw << std::setw(14) << bus_bw << std::setw(8) << error_text
+                << "\n";
+      csv->WriteRow(num_gpus, total, chunk, device_us, device_max_us, host_mean_us, alg_bw, bus_bw,
+                    error_text);
+    }
     if (errors != 0) {
-      std::cerr << "Data verification failed\n";
+      if (world.IsRoot()) std::cerr << "Data verification failed\n";
       return EXIT_FAILURE;
     }
   }
 
   for (Rank& rank : ranks) {
     HIP_CHECK(hipSetDevice(rank.device));
+    for (void* mapped : rank.mapped) HIP_CHECK(hipIpcCloseMemHandle(mapped));
     HIP_CHECK(hipEventDestroy(rank.start));
     HIP_CHECK(hipEventDestroy(rank.stop));
     HIP_CHECK(hipStreamDestroy(rank.stream));
@@ -289,10 +395,18 @@ int Run(const Params& params) {
 }  // namespace
 
 int main(int argc, char** argv) {
+  World world;
+#ifdef COPY_ENGINE_BENCH_MPI
+  MPI_Init(&argc, &argv);
+  MPI_Comm_rank(MPI_COMM_WORLD, &world.rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &world.size);
+#endif
+
   Params params;
   ArgParser parser("copy-engine-allgather",
                    "In-place allgather across GPUs through the HIP copy-engine API.");
-  parser.AddOption("-g,--numGpus", &params.num_gpus, "GPUs taking part, 0 for all (at most 16)");
+  parser.AddOption("-g,--numGpus", &params.num_gpus,
+                   "GPUs taking part, 0 for all (at most 16); with MPI the number of ranks");
   parser.AddOption("-b,--minBytes", &params.min_bytes, "Smallest total buffer size in bytes");
   parser.AddOption("-e,--maxBytes", &params.max_bytes, "Largest total buffer size in bytes");
   parser.AddOption("-f,--stepFactor", &params.step_factor, "Factor between sizes");
@@ -302,12 +416,20 @@ int main(int argc, char** argv) {
   parser.AddOption("-o,--outputFile", &params.output_file, "Filename for CSV results");
 
   int exit_code = 0;
-  if (!parser.Parse(argc, argv, &exit_code)) return exit_code;
-
-  if (!ValidateSweep(params.min_bytes, params.max_bytes)) return 2;
-  if (params.step_factor < 2 || params.iterations == 0) {
+  int result = 0;
+  if (!parser.Parse(argc, argv, &exit_code)) {
+    result = exit_code;
+  } else if (!ValidateSweep(params.min_bytes, params.max_bytes)) {
+    result = 2;
+  } else if (params.step_factor < 2 || params.iterations == 0) {
     std::cerr << "error: --stepFactor must be at least 2 and --iterations non-zero\n";
-    return 2;
+    result = 2;
+  } else {
+    result = Run(params, world);
   }
-  return Run(params);
+#ifdef COPY_ENGINE_BENCH_MPI
+  if (result != 0) MPI_Abort(MPI_COMM_WORLD, result);
+  MPI_Finalize();
+#endif
+  return result;
 }
