@@ -357,7 +357,11 @@ def main():
     measure_only = False
     try:
         baseline, col = load_baseline(baseline_path, label)
-    except (KeyError, ValueError) as e:
+    except ValueError as e:
+        # Invalid baseline (e.g. no table with a 'File' column) — fatal.
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+    except KeyError as e:
         # No baseline column for this GPU — switch to measure-only mode.
         # All streams are still measured and saved to CSV so the results can
         # serve as a future baseline.
