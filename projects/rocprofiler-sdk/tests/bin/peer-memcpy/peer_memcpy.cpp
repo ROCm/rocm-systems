@@ -60,25 +60,40 @@ main()
     HIP_API_CALL(hipMalloc(&dev_0, num_bytes));
     HIP_API_CALL(hipMemcpy(dev_0, host_src.data(), num_bytes, hipMemcpyHostToDevice));
 
-    int can_access_peer = 0;
-    if(num_devices >= 2) HIP_API_CALL(hipDeviceCanAccessPeer(&can_access_peer, 1, 0));
+    int device_0_can_access_1 = 0;
+    int device_1_can_access_0 = 0;
+    if(num_devices >= 2)
+    {
+        HIP_API_CALL(hipDeviceCanAccessPeer(&device_0_can_access_1, 0, 1));
+        HIP_API_CALL(hipDeviceCanAccessPeer(&device_1_can_access_0, 1, 0));
+    }
 
-    if(can_access_peer != 0)
+    if(device_0_can_access_1 != 0 && device_1_can_access_0 != 0)
     {
         int* dev_1 = nullptr;
+        HIP_API_CALL(hipDeviceEnablePeerAccess(1, 0));
+
         HIP_API_CALL(hipSetDevice(1));
         HIP_API_CALL(hipMalloc(&dev_1, num_bytes));
         HIP_API_CALL(hipDeviceEnablePeerAccess(0, 0));
 
+        // Destination device current: CLR reverses the HSA agent arguments for SDMA routing.
         HIP_API_CALL(hipMemcpyPeer(dev_1, 1, dev_0, 0, num_bytes));
         HIP_API_CALL(hipDeviceSynchronize());
+
+        // Source device current: the HSA agent arguments already follow pointer direction.
+        HIP_API_CALL(hipSetDevice(0));
+        HIP_API_CALL(hipMemcpyPeer(dev_1, 1, dev_0, 0, num_bytes));
+        HIP_API_CALL(hipDeviceSynchronize());
+
+        HIP_API_CALL(hipSetDevice(1));
         HIP_API_CALL(hipMemcpy(host_dst.data(), dev_1, num_bytes, hipMemcpyDeviceToHost));
         HIP_API_CALL(hipFree(dev_1));
     }
     else
     {
-        printf("peer-memcpy: %i device(s), no peer access from device 1 to device 0, "
-               "skipping peer copy\n",
+        printf("peer-memcpy: %i device(s), bidirectional peer access unavailable, "
+               "skipping peer copies\n",
                num_devices);
         HIP_API_CALL(hipMemcpy(host_dst.data(), dev_0, num_bytes, hipMemcpyDeviceToHost));
     }
