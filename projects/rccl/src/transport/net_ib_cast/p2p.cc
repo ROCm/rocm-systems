@@ -527,7 +527,9 @@ ncclResult_t IbCastIsend(void* sendComm, void* data, size_t size, int tag, void*
     TIME_START(0);
     NCCLCHECK(IbCastMultiSend(comm, slot, nqps, startQpIndex, wrrSched, useWriteOp));
 
-    // Only the last Isend of a multi-send gets here; count all nreqs.
+    // Reached once per multi-send, when sendReqsCnt[slot] == nreqs, so every
+    // reqs[i] is set; fifoHead then moves on. Resiliency replays call
+    // IbCastMultiSend directly and are not counted again.
     if (rcclTelemetryOn()) {
       uint64_t sentBytes = 0;
       for (int i = 0; i < nreqs; i++) sentBytes += reqs[i]->send.size;
