@@ -514,11 +514,11 @@ Output: Dictionary with fields
 
 Field | Content
 ---|---
-`primary` | Canonical CUID as a UUIDv8 string. Empty when the caller lacks the privilege to read it, since the primary payload embeds the raw serial number. An empty value is not an error
-`derived` | Derived CUID as a UUIDv8 string. Names the component without disclosing its serial, and is the value to record
-`component_type` | On-wire Component Type by name: `PLATFORM`, `CPU`, `GPU`, `NIC`, `NPU`, `STORAGE`, `MEMORY`, `GENPCIE`, `GENC`, `RACKTRAY`, `RACK`, `OTHER`, or `UNKNOWN`
-`source` | Which stage of the staged lookup answered: `DRIVER`, `LIBRARY` or `UNKNOWN`
-`auxiliary` | `True` for a temporary CUID, built from the machine ID and world-readable device information. Such a value changes when the machine ID changes and is not unique across nodes
+`primary` | Primary CUID as a UUIDv8 string. Always empty in this release: a temporary CUID has no primary. An empty value is not an error
+`derived` | The component's CUID as a UUIDv8 string: its DerivedID when it has a permanent CUID, otherwise its temporary CUID (always, in this release). Names the component without disclosing its serial
+`component_type` | The component's type, reported beside the CUID rather than decoded from it, by name: `PLATFORM`, `CPU`, `GPU`, `NIC`, `NPU`, `STORAGE`, `MEMORY`, `GENPCIE`, `GENC`, `RACKTRAY`, `RACK`, `OTHER`, or `UNKNOWN`
+`source` | Which stage of the staged lookup answered: `DRIVER`, `LIBRARY` or `UNKNOWN`. Always `LIBRARY` in this release
+`auxiliary` | `True` for a temporary CUID (always, in this release; amd-smi shows it as `temporary`), built from the machine ID and world-readable device information. Such a value changes when the machine ID changes and is not unique across nodes
 
 Every CUID is temporary: built from the machine ID and world-readable device
 information. A handle of a GPU in SPX reports the whole GPU's CUID, and one for
@@ -550,7 +550,7 @@ try:
     else:
         for device in devices:
             info = amdsmi.amdsmi_get_gpu_cuid_info(device)
-            print("Derived CUID:", info['derived'])
+            print("CUID:", info['derived'])
             print("Component type:", info['component_type'])
             print("Source:", info['source'])
             print("Auxiliary:", info['auxiliary'])
@@ -573,11 +573,11 @@ Output: List of dictionaries, one per component, with fields; empty list if the 
 
 Field | Content
 ---|---
-`primary` | Primary CUID, or `""` without root
-`derived` | Derived CUID
+`primary` | Primary CUID; always `""` in this release
+`derived` | The component's CUID
 `component_type` | `PLATFORM`, `CPU`, `GPU`, `NIC`, ...
 `source` | `DRIVER`, `LIBRARY` or `UNKNOWN`
-`auxiliary` | `True` for a temporary CUID
+`auxiliary` | `True` for a temporary CUID (amd-smi: `temporary`)
 `bdf` | PCI address; for a GPU partition, the address amd-smi uses for it, as `amd-smi list` shows it; `""` for the platform and CPUs
 `device_path` | Sysfs path, or `""` for the platform
 `vendor_id` | PCI or CPUID vendor ID, `0` for the platform
