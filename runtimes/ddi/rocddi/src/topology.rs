@@ -88,27 +88,6 @@ impl CacheInfo {
             compute_unit_cache: false,
         }
     }
-
-    /// Returns the cache level.
-    #[must_use]
-    pub const fn level(&self) -> u32 {
-        self.level
-    }
-
-    /// Returns the cache capacity in bytes.
-    #[must_use]
-    pub const fn size_bytes(&self) -> u64 {
-        self.size_bytes
-    }
-
-    /// Returns the native cache-line size in bytes.
-    #[must_use]
-    pub const fn line_size_bytes(&self) -> u32 {
-        match self.line_size_bytes {
-            Some(bytes) => bytes,
-            None => 0,
-        }
-    }
 }
 
 /// Physical or logical interconnect kind reported by topology discovery.
@@ -129,85 +108,31 @@ pub enum MemoryLinkType {
     Unknown,
 }
 
-/// Immutable properties of one directed native topology link.
+/// Passive properties of one directed native topology link.
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct MemoryLinkInfo {
     /// Native minimum latency value for this direction.
-    pub(crate) minimum_latency: u32,
+    pub minimum_latency: u32,
     /// Native maximum latency value for this direction.
-    pub(crate) maximum_latency: u32,
+    pub maximum_latency: u32,
     /// Native minimum bandwidth value for this direction.
-    pub(crate) minimum_bandwidth: u32,
+    pub minimum_bandwidth: u32,
     /// Native maximum bandwidth value for this direction.
-    pub(crate) maximum_bandwidth: u32,
+    pub maximum_bandwidth: u32,
     /// Whether 32-bit atomics may cross this link.
-    pub(crate) atomic_support_32bit: bool,
+    pub atomic_support_32bit: bool,
     /// Whether 64-bit atomics may cross this link.
-    pub(crate) atomic_support_64bit: bool,
+    pub atomic_support_64bit: bool,
     /// Whether the link preserves coherent memory access.
-    pub(crate) coherent_support: bool,
+    pub coherent_support: bool,
     /// Native interconnect classification.
-    pub(crate) kind: MemoryLinkType,
+    pub kind: MemoryLinkType,
     /// Native NUMA weight used for relative distance queries.
-    pub(crate) numa_distance: u32,
+    pub numa_distance: u32,
 }
 
 impl MemoryLinkInfo {
-    #[doc(hidden)]
-    #[must_use]
-    pub const fn minimum_latency(self) -> u32 {
-        self.minimum_latency
-    }
-
-    #[doc(hidden)]
-    #[must_use]
-    pub const fn maximum_latency(self) -> u32 {
-        self.maximum_latency
-    }
-
-    #[doc(hidden)]
-    #[must_use]
-    pub const fn minimum_bandwidth(self) -> u32 {
-        self.minimum_bandwidth
-    }
-
-    #[doc(hidden)]
-    #[must_use]
-    pub const fn maximum_bandwidth(self) -> u32 {
-        self.maximum_bandwidth
-    }
-
-    #[doc(hidden)]
-    #[must_use]
-    pub const fn supports_32bit_atomics(self) -> bool {
-        self.atomic_support_32bit
-    }
-
-    #[doc(hidden)]
-    #[must_use]
-    pub const fn supports_64bit_atomics(self) -> bool {
-        self.atomic_support_64bit
-    }
-
-    #[doc(hidden)]
-    #[must_use]
-    pub const fn is_coherent(self) -> bool {
-        self.coherent_support
-    }
-
-    #[doc(hidden)]
-    #[must_use]
-    pub const fn kind(self) -> MemoryLinkType {
-        self.kind
-    }
-
-    #[doc(hidden)]
-    #[must_use]
-    pub const fn numa_distance(self) -> u32 {
-        self.numa_distance
-    }
-
     #[doc(hidden)]
     #[must_use]
     pub const fn hop_count(self) -> u32 {
@@ -449,12 +374,6 @@ pub struct Endpoint {
 }
 
 impl Endpoint {
-    /// Returns this endpoint's kind-specific capability record.
-    #[must_use]
-    pub const fn kind(&self) -> &EndpointKind {
-        &self.kind
-    }
-
     /// Returns GPU-specific information when this is a GPU endpoint.
     #[must_use]
     pub const fn gpu(&self) -> Option<&GpuInfo> {

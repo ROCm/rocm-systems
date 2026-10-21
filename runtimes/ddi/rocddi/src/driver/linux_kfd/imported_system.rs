@@ -65,7 +65,7 @@ fn validate_backing(vm: &DeviceVm, memory: &KfdVirtualMemory) -> Result<(), Erro
         .dma_buf_info(dma_buf.as_raw_fd())
         .map_err(|source| native_error("AMDKFD_IOC_GET_DMABUF_INFO", source))?;
     let kfd = details.info;
-    if kfd.gpu_id != vm.gpu_id() || kfd.flags & !uapi::PUBLIC != uapi::GTT {
+    if kfd.gpu_id != vm.gpu_id || kfd.flags & !uapi::PUBLIC != uapi::GTT {
         return Err(error(
             ErrorKind::Unsupported,
             "DMA-BUF is not same-device SYSTEM/GTT storage",
@@ -81,7 +81,7 @@ fn validate_backing(vm: &DeviceVm, memory: &KfdVirtualMemory) -> Result<(), Erro
     // A separate render file gives qualification its own GEM namespace. File
     // closure releases this temporary handle without touching any live VM
     // mapping, including an earlier import of the same physical backing.
-    let render = sysfs::open_render(vm.render_minor())
+    let render = sysfs::open_render(vm.render_minor)
         .map_err(|source| native_error("DMA-BUF qualification render open", source))?;
     let handle = drm::import_dma_buf(&render, dma_buf.as_raw_fd())
         .map_err(|source| native_error("DRM DMA-BUF qualification import", source))?;
@@ -142,7 +142,7 @@ impl DrmImportedSystem {
         alignment: u64,
         permissions: DeviceAccess,
     ) -> Result<Owned<Self>, Error> {
-        if !vm.supports_system_dma_buf_import() {
+        if !vm.system_dma_buf_import {
             return Err(error(
                 ErrorKind::Unsupported,
                 "DRM system import is unavailable",
@@ -278,7 +278,7 @@ impl DrmImportedSystem {
     }
 
     pub(crate) fn is_owned_by(&self, device: &Shared<DeviceVm>) -> bool {
-        self.owner.shares_kfd(device) && self.owner.gpu_id() == device.gpu_id()
+        self.owner.shares_kfd(device) && self.owner.gpu_id == device.gpu_id
     }
 
     pub(crate) fn export_dma_buf(&self) -> Result<DmaBuf, Error> {

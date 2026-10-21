@@ -766,7 +766,7 @@ fn ipc_export_encodes_the_native_share_handle_and_full_backing_extent() {
     );
     let mut allocation = fixture.create().unwrap();
     assert_eq!(
-        allocation.export_ipc_memory().unwrap().words(),
+        allocation.export_ipc_memory().unwrap().words,
         [1, 2, 3, 4, IPC_APERTURE_DGPU, 0, 16, 42]
     );
     allocation.free().unwrap();
@@ -2668,8 +2668,8 @@ fn runtime_enable_allows_recreation_and_late_distinct_device_activation() {
         .unwrap();
     assert!(Shared::ptr_eq(&first, &recreated));
     assert!(!Shared::ptr_eq(&first, &second));
-    assert_eq!(first.gpu_id(), 42);
-    assert_eq!(second.gpu_id(), 43);
+    assert_eq!(first.gpu_id, 42);
+    assert_eq!(second.gpu_id, 43);
     assert_eq!(acquisitions.load(Ordering::Relaxed), 2);
     drop(first);
     drop(recreated);
