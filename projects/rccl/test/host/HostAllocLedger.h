@@ -45,6 +45,16 @@ class HostAllocLedger {
   }
 
   bool Covers(const void* dst, size_t n) const { return RangeCovers(live, dst, n); }
+  template <typename CopyFn>
+  auto GuardHostCopies(CopyFn copy) {
+    return [this, copy](void* dst, const void* src, size_t n, hipMemcpyKind kind) mutable {
+      if (kind == hipMemcpyHostToHost && !Covers(dst, n)) {
+        ++refusedCopies;
+        return hipErrorInvalidValue;
+      }
+      return copy(dst, src, n, kind);
+    };
+  }
   bool Clean() const { return live.empty() && badFrees == 0 && refusedCopies == 0; }
   std::string Summary() const {
     return std::to_string(live.size()) + " host allocations live; " + std::to_string(badFrees) + " bad frees; " +
@@ -59,7 +69,7 @@ class HostAllocLedger {
 
   std::map<void*, size_t> live;  // live allocations -> size
   int badFrees = 0;
-  int refusedCopies = 0;  // bumped by tests that check host-bound copies against `live`
+  int refusedCopies = 0;  // bumped by GuardHostCopies when a destination is outside `live`
   size_t failBytes = 0;   // fail the next ncclCalloc of exactly this many bytes
 };
 
