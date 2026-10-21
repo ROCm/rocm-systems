@@ -4,7 +4,8 @@
 //! Passive hardware discovery records and topology relationships.
 //!
 //! An endpoint describes hardware discovered in one generation-consistent
-//! topology snapshot. It is inert: inspecting or cloning an endpoint does not
+//! topology snapshot. Optional information from other sources may be populated
+//! later on the same record. Inspecting or cloning an endpoint does not
 //! activate hardware, acquire an address space, or grant access to memory. An
 //! activated endpoint is represented separately by `crate::device::Device`.
 //!
@@ -203,6 +204,7 @@ pub struct GpuQueueCapabilities {
 /// GPU target and enabled compute geometry captured without activation.
 /// Required geometry fields must be complete and consistent before this record
 /// is published; opening an endpoint never substitutes guessed dimensions.
+/// Optional DRM facts may be populated later.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct GpuInfo {
     /// Native KFD GPU identity used to resolve imported allocation placement.
@@ -217,8 +219,12 @@ pub struct GpuInfo {
     pub unique_id: Option<u64>,
     /// AMD GPU hive identifier, or zero when the endpoint has no hive.
     pub hive_id: u64,
-    /// ASIC family identifier reported by the backend.
+    /// ASIC family identifier reported by KFD topology.
     pub asic_family_id: u32,
+    /// ASIC family reported by the matching DRM device, when available.
+    pub drm_asic_family_id: Option<u32>,
+    /// GPU timestamp frequency in hertz reported by DRM, when available.
+    pub counter_frequency_hz: Option<u64>,
     /// Target ASIC revision, not PCI configuration revision.
     pub asic_revision: u32,
     /// Maximum compute-engine clock in megahertz.
@@ -285,32 +291,6 @@ impl GpuInfo {
     }
 }
 
-/// Additional endpoint information queried through its owning driver.
-///
-/// The passive [`Endpoint`] keeps identity and discovered capabilities. This
-/// record may include optional information from other native sources without
-/// activating a device.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-#[non_exhaustive]
-pub struct EndpointDetails {
-    /// Optional product name for display to applications.
-    pub product_name: Option<String>,
-    /// Additional GPU facts, when the owning driver has a matching source.
-    /// `None` does not change the endpoint's kind or discovered capabilities.
-    pub gpu: Option<GpuDetails>,
-}
-
-/// Additional GPU facts obtained without activating an endpoint.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-#[non_exhaustive]
-pub struct GpuDetails {
-    /// ASIC family from an additional source, if reported. The passive GPU
-    /// record supplies the fallback.
-    pub asic_family_id: Option<u32>,
-    /// GPU timestamp frequency in hertz, if reported.
-    pub counter_frequency_hz: Option<u64>,
-}
-
 /// Kind-specific capabilities attached to one passive endpoint.
 ///
 /// The enum is intentionally open-ended. A backend publishes only a variant
@@ -333,7 +313,8 @@ pub enum EndpointKind {
 }
 
 /// Passive description tied to one native endpoint identity. Its kind and
-/// memory fields describe expected implemented services. Activation separately
+/// memory fields describe expected implemented services. Optional information
+/// may be populated later from other native sources. Activation separately
 /// qualifies the installed native interface and obtains usable address-space
 /// resources. Cloning this record neither activates a device nor grants access
 /// to backing.
@@ -343,6 +324,8 @@ pub struct Endpoint {
     pub id: [u8; 16],
     /// UTF-8 diagnostic name with NUL termination.
     pub name: [u8; 128],
+    /// Optional product name for display, populated from an additional source.
+    pub product_name: Option<String>,
     /// Optional PCI attachment and configuration identity. Endpoints connected
     /// through another bus or fabric report `None`.
     pub pci: Option<PciInfo>,
@@ -374,6 +357,20 @@ pub struct Endpoint {
 }
 
 impl Endpoint {
+    /// Compares all discovered facts while excluding optional information
+    /// populated later from other native sources.
+    pub(crate) fn matches_discovery(&self, other: &Self) -> bool {
+        let mut expected = self.clone();
+        expected.product_name.clone_from(&other.product_name);
+        if let (EndpointKind::Gpu { info: expected }, EndpointKind::Gpu { info: actual }) =
+            (&mut expected.kind, &other.kind)
+        {
+            expected.drm_asic_family_id = actual.drm_asic_family_id;
+            expected.counter_frequency_hz = actual.counter_frequency_hz;
+        }
+        expected == *other
+    }
+
     /// Returns GPU-specific information when this is a GPU endpoint.
     #[must_use]
     pub const fn gpu(&self) -> Option<&GpuInfo> {

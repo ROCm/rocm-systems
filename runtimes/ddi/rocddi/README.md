@@ -16,8 +16,9 @@ A `Session` is a frontend's scope for discovery, activation, and driver
 shutdown. Creating one constructs an instance of each compiled backend
 without activating a device or acquiring a GPU context. Session clones share
 those driver instances. Discovery returns passive `Endpoint` snapshots.
-`Session::query_endpoint_details` and `Session::activate` revalidate an
-endpoint; activation returns a `Device` that owns its driver state. GPU
+`Session::populate_endpoint` adds optional facts to the same endpoint record,
+then `Session::activate` returns a `Device` that owns its driver state. Both
+operations revalidate discovered facts. GPU
 operations require the checked `Device::gpu` view. Each discovery reads
 current backend topology; endpoint records can become stale. Separate sessions
 have independent driver identities. Sessions using
