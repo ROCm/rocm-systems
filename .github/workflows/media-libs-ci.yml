@@ -109,8 +109,6 @@ jobs:
         -DTHEROCK_ENABLE_SYSDEPS_AMD_MESA=ON
         -DTHEROCK_ENABLE_ROCDECODE=ON
         -DTHEROCK_ENABLE_ROCJPEG=ON
-      projects_to_test: ""
-      test_runs_on: ""
 
   therock-test-linux:
     name: "Test Media Libs"
