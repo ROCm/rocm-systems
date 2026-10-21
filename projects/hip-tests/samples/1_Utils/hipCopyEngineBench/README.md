@@ -1,0 +1,120 @@
+# hipCopyEngineBench
+
+Microbenchmarks for kernel-submitted copies through the HIP copy-engine API
+(`hip/hip_ext_copy_engine.h`: `hipExtCopyEngineGetDeviceHandles` on the host,
+`hipExtCopyEngineSubmitLinearOneLane` in the kernel). They mirror two of the tools in rocm-xio's `examples/sdma-ep-bench` (`sdma-ep-bw`, `sdma-ep-latency`)
+with the same options and CSV layout where the public HIP API allows it, and use nothing but that
+API: no rocm-xio, no HSA queue setup, no ABCE ring or packet-builder headers.
+
+| Tool | Measures |
+|---|---|
+| `copy-engine-bw` | Bandwidth of copies pushed from `--srcGpu` to one or more peer GPUs by warps of one kernel. |
+| `copy-engine-latency` | Submit-to-completion latency of one copy (or a few), split into submit and transfer time. |
+
+## Build
+
+Needs a HIP built with the kernel-side copy engine (`hip_ext_copy_engine.h`); the sample is skipped
+when that header is missing. Put that HIP first on `CMAKE_PREFIX_PATH`:
+
+```bash
+cmake -S projects/hip-tests/samples/1_Utils/hipCopyEngineBench -B build \
+  -DCMAKE_PREFIX_PATH="<hip-install>;/opt/rocm" -DCMAKE_CXX_COMPILER=amdclang++
+cmake --build build
+```
+
+Inside the full samples tree: `make build_utils`.
+
+## Run
+
+The runtime must publish kernel-side rings, otherwise each tool says so and exits with status 1:
+
+```bash
+export DEBUG_CLR_ENABLE_ABCE=1 GPU_MAX_SDMA_DEVICE_QUEUES=16
+./copy-engine-bw -b 1024 -e 4194304 -c 4 -d 7 --wgsPerDestination 2
+./copy-engine-latency -b 256 -e 1048576 -c 1
+```
+
+`--help` lists every option. Sizes sweep in powers of two from `-b` to `-e`. Each size is verified
+(every destination word must be `0xDEADBEEF`) unless `--skip-verification`. Results go to stdout and
+to the CSV file (`-o`). All timings are in microseconds; the device clock rate comes from
+`hipDeviceAttributeWallClockRate`, not a fixed 100 MHz.
+
+The host picks the copy engines before launch: each tool calls `hipExtCopyEngineGetDeviceHandles`
+for its source/destination pair and passes the handles to the kernel by value, so a submit does no
+lookups. A completion is a `hipExtCopyEngineSignalSet` on a word the kernel then polls; the word
+carries a rising epoch, so it is never reset.
+
+`--signalMemory device|host` picks where the per-copy completion words live (default `device`,
+uncached device memory). Host memory was measured slower: 8.5 us vs 6.9 us for a 256 B copy.
+
+## Sweep scripts
+
+`scripts/` has the sweep runners, each writing a timestamped `results_*` directory with one CSV per
+run, a merged `summary.csv` and `benchmark.log` (the exact commands). They look for the executables
+in `<sample>/build` by default; set `BUILD_DIR`, or `BENCHMARK` / `LATENCY_BENCHMARK`, to point
+elsewhere. They default `DEBUG_CLR_ENABLE_ABCE=1` and `GPU_MAX_SDMA_DEVICE_QUEUES=16` unless
+already set.
+
+| Script | Sweep | Reference script |
+|---|---|---|
+| `bench-bandwidth-single.sh` | destinations 1..7, copy sizes 1 KiB..1 GiB | `bench-bandwidth-single.sh` |
+| `bench-bandwidth-multiproducer.sh` | work-groups per destination 2..32 (doubling), 7 destinations, 100 copies | `bench-bandwidth-multiproducer.sh` (its queues x work-groups-per-queue grid becomes total work-groups per destination) |
+| `bench-contention.sh` | work-groups sharing one destination: 16..304, 100 copies | `bench-contention-singlequeue.sh` |
+| `bench-latency.sh` | copy size 256 B..1 MiB, one run per size | `bench-latency.sh` (no `FINE_GRAINED`) |
+
+Every setting is an environment override, named as in the reference where the setting exists
+(`MIN_COPY_SIZE`, `MAX_COPY_SIZE`, `NUM_COPY_COMMANDS`, `NUM_DESTINATIONS`, `SRC_GPU`, `DST_GPU`,
+`WARMUP`, `ITERATIONS`, `OUTPUT_ROOT`, ...; the top of each script lists them). The defaults are
+large, so use small overrides for a smoke run, for example
+`MAX_COPY_SIZE=65536 MAX_DESTINATIONS=2 scripts/bench-bandwidth-single.sh`.
+
+Not ported: `bench-bandwidth-single-device-triggered.sh` (no device-triggered mode), the
+packet-rate tool and its scripts (the public API has no poll or atomic packets or batched submits, so
+a rate run would only time the submit call that `copy-engine-latency` already reports in
+`Submit [us]`), and the three plot scripts, which read columns this port does not write (the
+reserve/build/atomic latency breakdown).
+
+## Engines and handles
+
+`hipExtCopyEngineGetDeviceHandles` returns the runtime's engines for a pair, best first.
+`copy-engine-latency --handleRank N` submits on the Nth and `copy-engine-bw
+--numOfQueuesPerDestination N` spreads a destination's work-groups over the best N.
+
+On an 8x MI300X node only the even ranks are usable from a kernel: a 16 KiB copy through rank 0, 2,
+4 or 6 takes about 7 us, through rank 1, 3, 5 or 7 about 340 ms. Check a rank with
+`copy-engine-latency --handleRank N -b 16384 -e 16384 -n 20` before trusting a multi-queue run;
+`--numOfQueuesPerDestination 2` and up currently includes a slow ring.
+
+## Differences from sdma-ep-bench
+
+The reference kernels drive SDMA queues directly. The HIP API submits whole copies on a ring the
+host chose, and every copy retires its own completion word. So:
+
+| Reference | Here |
+|---|---|
+| `sdma-ep-bw --no-queue-state`, `--device-triggered` | Not available: no queue-state object, no host-preprogrammed wait-then-put. |
+| `sdma-ep-bw --numOfQueuesPerDestination` | The same option; queues are the runtime's best N engines for the pair, not a count of queues the tool creates. |
+| `sdma-ep-bw --wgsPerQueue` | `--wgsPerDestination`: work-groups per destination, spread over its queues. |
+| `sdma-ep-bw` signals | One completion word per copy instead of one atomic per batch; a warp waits for all of its copies. |
+| `sdma-ep-latency --fine-grained` and the Reserve/Build/Submit/Atomic* columns | Replaced by two always-on columns: `Submit [us]` (mean per submit call, including ring reserve, packet build and doorbell) and `Transfer [us]` (last submit returned until every copy retired). |
+| Reference quirks | Not reproduced: `sdma-ep-bw` printed std in ms under a us label; `sdma-ep-latency` timed only its last iteration and always reported std 0. Both now report real per-iteration statistics in us. |
+| Output file defaults | `copy_engine_bw.csv`, `copy_engine_latency.csv`. |
+
+## Reading the results
+
+- On an 8x MI300X node, `copy-engine-bw -d 7` reached ~290 GB/s against ~41 GB/s for `-d 1`.
+  Warps sharing a destination share one ring, while different destinations use different routes.
+- A submit call costs about 2.8 us: reserve ring space, write the packets, ring the doorbell. That
+  is the `Submit [us]` column.
+- Mean device latency of one copy, 5 interleaved runs against `sdma-ep-latency` (which reports one
+  sample per size):
+
+  | Copy size | sdma-ep-latency | `copy-engine-latency` |
+  |---|---|---|
+  | 1 KiB | 6.4 - 7.2 us | 6.1 - 6.3 us |
+  | 64 KiB | 7.3 - 7.5 us | 7.0 - 7.7 us |
+  | 1 MiB | 26.9 - 27.4 us | 27.0 - 27.4 us |
+
+- Keep the completion argument of the submit a constant at each call site. Selecting between a
+  signal pointer and `nullptr` at run time (`last ? &completion : nullptr`) makes the compiler keep
+  the signal in memory and costs about 1.7 us per call; `SubmitBatchAndWait` branches instead.

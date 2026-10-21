@@ -4,5 +4,6 @@
 
 cmake_minimum_required(VERSION 3.21.3)
 add_custom_target(build_utils)
+add_subdirectory(hipCopyEngineBench)
 add_subdirectory(hipDispatchLatency)
 add_subdirectory(hipInfo)
