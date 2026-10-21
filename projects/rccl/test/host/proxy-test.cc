@@ -98,18 +98,26 @@ static void ProxyTestFree(void* p) {
   std::free(p);
 }
 static void* ProxyTestMalloc(size_t n) { return g_mallocCalls++ == g_mallocFailAt ? nullptr : std::malloc(n); }
+// Counts the service teardown's sync; hip_fakes.cc's hipDeviceSynchronize has no hook to count it.
+std::atomic<int> g_hipSyncs;
+static hipError_t ProxyTestHipDeviceSynchronize() {
+  g_hipSyncs++;
+  return hipDeviceSynchronize();
+}
 #undef ncclCalloc
 #define ncclCalloc(...) ProxyTestCalloc(__FILE__, __LINE__, __func__, __VA_ARGS__)
 #undef ncclRealloc
 #define ncclRealloc(ptr, o, n) ProxyTestRealloc(ptr, o, n, __FILE__, __LINE__, __func__)
 #define malloc(n) ProxyTestMalloc(n)
 #define free(p) ProxyTestFree(p)
+#define hipDeviceSynchronize ProxyTestHipDeviceSynchronize
 
 #include "fakes/param_redirect.h"
 #include PROXY_CC_PATH
 
 #undef malloc
 #undef free
+#undef hipDeviceSynchronize
 
 namespace {
 
@@ -121,6 +129,7 @@ class ProxyFixture : public ::testing::Test {
     ResetOsFakes();
     g_watchedFree = nullptr;
     g_watchedFreed = false;
+    g_hipSyncs = 0;
     g_hipSetDeviceResult = g_hipExportResult = g_hipIpcCloseResult = hipSuccess;
     g_hipSetDevices.clear();
     g_hipIpcClosed.clear();
@@ -2419,7 +2428,7 @@ TEST_F(ProxyServiceLoopMicrotest, Service_ServesAPeerUntilStopThenTearsEverythin
   EXPECT_EQ(Get<ncclProxyRpcResponseHeader>(c).opId, &op2_);
   EXPECT_TRUE(Closed(c));
   EXPECT_TRUE(ProxyLogged(NCCL_LOG_ATTN, "[Proxy Service] Failed to set CUDA device 2"));
-  EXPECT_EQ(ProxyLogCount("Cuda failure"), 1);  // the teardown's hipDeviceSynchronize
+  EXPECT_EQ(g_hipSyncs.load(), 1);  // the teardown ran
   EXPECT_EQ(g_tp.frees.size(), 1u);
   EXPECT_EQ(st().opsPool, nullptr);  // progress thread joined and ops pool unmapped
   EXPECT_FALSE(st().thread.joinable());
@@ -2561,7 +2570,7 @@ TEST_F(ProxyServiceLoopMicrotest, Service_KnownBug_TooManyConnectionsSkipsTeardo
   EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, ("Too many connections (" + std::to_string(NCCL_MAX_PROXY_CONNECTIONS) +
                                      " max)").c_str()));
   EXPECT_FALSE(g_watchedFreed);
-  EXPECT_EQ(ProxyLogCount("Cuda failure"), 0);
+  EXPECT_EQ(g_hipSyncs.load(), 0);
   for (int fd : ours) CloseUnlessClosed(fd);
   FreeListenSock();
 }
@@ -2576,7 +2585,7 @@ TEST_F(ProxyServiceLoopMicrotest, Service_StartupFailuresReturnWithoutServing) {
   g_sock.getFdFailAt = 0;
   ncclProxyService(&ps_);
   EXPECT_EQ(g_sock.getFds, 1);
-  EXPECT_EQ(ProxyLogCount("Cuda failure"), 0);
+  EXPECT_EQ(g_hipSyncs.load(), 0);
   FreeListenSock();
 }
 
@@ -2594,7 +2603,7 @@ TEST_F(ProxyServiceLoopMicrotest, Service_KnownBug_PollFailureSkipsTeardown) {
   EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "[Proxy Service] Poll failed"));
   EXPECT_EQ(g_sock.acceptFds.size(), 1u);  // the first poll failed, so the pending client was never accepted
   EXPECT_FALSE(g_watchedFreed);
-  EXPECT_EQ(ProxyLogCount("Cuda failure"), 0);
+  EXPECT_EQ(g_hipSyncs.load(), 0);
   CloseUnlessClosed(ours);
   FreeListenSock();
 }
