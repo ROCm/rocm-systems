@@ -420,8 +420,9 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* syst
   // explicit disable sentinel, not an allowed inter-rank path. This distinction
   // matters for ranks that share a DEV node (e.g. MLOPart partitions with
   // NCCL_TOPO_SPLIT_MLOPART=0) and therefore have a PATH_LOC path between them.
-  // For MNNVL clique peers (IFoE cross-node), no topology edge exists between the merged GPUs,
-  // so path->type is PATH_DIS. Treat them as PATH_NVL — fabric memory handles provide direct access.
+  // RCCL: MNNVL clique peers on another host always use P2P, as fabric memory handles give direct
+  // access. Peers on UALoE fabric hosts are PATH_NVL through the shared NVS anyway; peers without
+  // fabric entries are PATH_DIS and need this bypass.
   if (mnnvl || ((g1 == g2 || p2pLevel != PATH_LOC) && path->type <= p2pLevel)) *p2p = 1;
 
 #if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
@@ -1110,9 +1111,10 @@ ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* 
   NCCLCHECK(ncclCalloc(&domains, system->nodes[GPU].count));
   NCCLCHECKGOTO(ncclCalloc(&ids, system->nodes[GPU].count), ret, fail);
 
-  // TODO: Remove sameCliqueP2p once cross-node MNNVL pairs get PATH_NVL via the topology fix
-  // (ncclTopoAddMNNVLXmlLinks). At that point paths[GPU][p].type < PATH_NET is naturally true
-  // for clique peers and this block becomes redundant.
+  // RCCL: clique peers on hosts with UALoE fabric entries (fabric_supported=1) are PATH_NVL through
+  // the shared NVS (ncclTopoAddXGMI), so paths[GPU][p].type < PATH_NET already holds for them.
+  // sameCliqueP2p covers clique peers without fabric entries, which have no topology path.
+  // TODO: Remove sameCliqueP2p once every MNNVL clique reports fabric entries.
   {
     if (comm->MNNVL && comm->peerInfo != NULL) {
       INFO(NCCL_GRAPH, "ncclTopoTrimSystem: MNNVL enabled, checking clique membership for %d ranks (cliqueSize %d)",
@@ -1125,7 +1127,7 @@ ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* 
       ids[g] = gpu->id;
       for (int p = 0; p < g; p++) {
         bool sameCliqueP2p = false;
-        // MNNVL clique peers have no topology path (PATH_DIS) but are reachable via IFoE fabric.
+        // Clique peers without fabric entries have no topology path (PATH_DIS) but are reachable via IFoE fabric.
         // Treat them as same domain so they are not trimmed from the topology.
         if (comm->MNNVL && comm->peerInfo != NULL) {
           struct ncclTopoNode* peerGpu = system->nodes[GPU].nodes + p;
