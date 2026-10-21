@@ -6,6 +6,8 @@
 
 #include "mlx5dvwrap_fakes.h"
 
+#include <cerrno>
+
 #include "signature-drift.h"
 
 static ncclResult_t DefaultMlx5dvSymbols() { return ncclSystemError; }
@@ -29,6 +31,7 @@ std::function<ncclResult_t(struct ibv_mr**, struct ibv_pd*, uint64_t, size_t, ui
     g_mlx5dvRegDmaBufMr = DefaultMlx5dvRegDmaBufMr;
 
 static struct ibv_mr* DefaultMlx5dvDirectRegDmaBufMr(struct ibv_pd*, uint64_t, size_t, uint64_t, int, int, int) {
+  errno = EOPNOTSUPP;
   return nullptr;
 }
 std::function<struct ibv_mr*(struct ibv_pd*, uint64_t, size_t, uint64_t, int, int, int)>

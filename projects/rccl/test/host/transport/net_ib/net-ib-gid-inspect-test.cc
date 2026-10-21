@@ -152,7 +152,7 @@ TEST_F(NetIbGidInspectMicrotest, RecoveryAndProbingGidLookupsFindMatchingMateria
   ibv_qp recoveryQp{};
   ibv_qp probingQp{};
   resiliency.nPortRecoveryQps = 2;
-  resiliency.portRecoveryQps[0].devIndex = 0;
+  resiliency.portRecoveryQps[0].devIndex = 3;  // matching device, but no materialized QP
   resiliency.portRecoveryQps[1].devIndex = 3;
   resiliency.portRecoveryQps[1].qp = &recoveryQp;
   resiliency.portRecoveryQps[1].rtrAttr.localGidIndex = 7;

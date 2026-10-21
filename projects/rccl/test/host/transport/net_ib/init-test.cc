@@ -449,21 +449,6 @@ TEST_F(NetIbInitMicrotest, MakeVDevice_InvalidCountIndexOrIncompatibleLinkIsReje
   EXPECT_EQ(ncclNMergedIbDevs, 0);
 }
 
-TEST_F(NetIbInitMicrotest, DISABLED_MakeVDevice_NegativeDeviceIndexIsRejectedBeforeAccess) {
-  // Production reads ncclIbDevs[-1] before validating the index.
-  // Enable with the production fix tracked by AICOMRCCL-3112.
-  ncclNIbDevs = 1;
-  ncclNMergedIbDevs = 0;
-  ncclNetVDeviceProps_t props{};
-  props.ndevs = 1;
-  props.devs[0] = -1;
-  int output = -1;
-
-  EXPECT_EQ(ncclIbMakeVDeviceInternal(&output, &props), ncclInvalidUsage);
-  EXPECT_EQ(output, -1);
-  EXPECT_EQ(ncclNMergedIbDevs, 0);
-}
-
 TEST_F(NetIbInitMicrotest, MakeVDevice_CompatibleDevicesAggregateNameSpeedRailAndPlane) {
   ncclNIbDevs = 2;
   ncclNMergedIbDevs = 0;

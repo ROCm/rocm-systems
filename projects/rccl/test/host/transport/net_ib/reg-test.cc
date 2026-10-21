@@ -73,7 +73,7 @@ TEST_F(NetIbRegMicrotest, RegMrInternal_FirstHostRangeRegistersAlignedPagesAndCa
   ScopedHook reg(g_ibvRegMr, [&mr, page](ibv_mr** out, ibv_pd* pd, void* addr, size_t length, int flags) {
     EXPECT_EQ(pd, reinterpret_cast<ibv_pd*>(0x1000));
     EXPECT_EQ(reinterpret_cast<uintptr_t>(addr) % page, 0u);
-    EXPECT_GE(length, page);
+    EXPECT_EQ(length, 2 * page);
     EXPECT_EQ(flags, IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ |
                          IBV_ACCESS_REMOTE_ATOMIC);
     *out = &mr;
@@ -87,6 +87,7 @@ TEST_F(NetIbRegMicrotest, RegMrInternal_FirstHostRangeRegistersAlignedPagesAndCa
   EXPECT_EQ(handle, &mr);
   ASSERT_EQ(ncclIbDevs[0].mrCache.population, 1);
   EXPECT_EQ(ncclIbDevs[0].mrCache.slots[0].mr, &mr);
+  EXPECT_EQ(ncclIbDevs[0].mrCache.slots[0].pages, 2u);
   EXPECT_EQ(ncclIbDevs[0].mrCache.slots[0].refs, 1);
   EXPECT_EQ(reg.calls, 1);
 }

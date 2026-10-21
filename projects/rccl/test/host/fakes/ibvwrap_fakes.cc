@@ -8,6 +8,8 @@
 
 #include "ibvwrap_fakes.h"
 
+#include <cerrno>
+
 #include "ibvwrap.h"
 #include "signature-drift.h"
 
@@ -80,7 +82,7 @@ std::function<ncclResult_t(struct ibv_mr**, struct ibv_pd*, void*, size_t, int)>
 
 static ncclResult_t DefaultIbvRegMrIova2(struct ibv_mr** mr, struct ibv_pd*, void*, size_t, uint64_t, int) {
   if (mr) *mr = nullptr;
-  return ncclSystemError;
+  return ncclInternalError;
 }
 std::function<ncclResult_t(struct ibv_mr**, struct ibv_pd*, void*, size_t, uint64_t, int)> g_ibvRegMrIova2 =
     DefaultIbvRegMrIova2;
@@ -100,6 +102,7 @@ std::function<struct ibv_mr*(struct ibv_pd*, void*, size_t, uint64_t, int)> g_ib
     DefaultIbvDirectRegMrIova2;
 
 static struct ibv_mr* DefaultIbvDirectRegDmaBufMr(struct ibv_pd*, uint64_t, size_t, uint64_t, int, int) {
+  errno = EOPNOTSUPP;
   return nullptr;
 }
 std::function<struct ibv_mr*(struct ibv_pd*, uint64_t, size_t, uint64_t, int, int)> g_ibvDirectRegDmaBufMr =

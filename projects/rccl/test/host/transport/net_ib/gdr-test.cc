@@ -79,7 +79,7 @@ TEST_F(NetIbGdrMicrotest, GdrSupportInitOnce_ForceEnablePublishesModuleWithoutSc
   ScopedHook params(g_loadParam, [](const char* name, int64_t fallback) {
     return std::strcmp(name, "RCCL_FORCE_ENABLE_GDRDMA") == 0 ? int64_t{1} : fallback;
   });
-  ScopedHook scan(g_ncclIbScanDefaultPeerMemClients, [] { return 0; });
+  ScopedHook scan(g_ncclIbScanDefaultPeerMemClients, [] { return 1; });
 
   ibGdrSupportInitOnce();
 
@@ -109,12 +109,32 @@ TEST_F(NetIbGdrMicrotest, GdrSupportInitOnce_HyperVWithNumaBalancingAndStrictOrd
   ScopedHook params(g_loadParam, [](const char* name, int64_t fallback) {
     return std::strcmp(name, "IB_PCI_RELAXED_ORDERING") == 0 ? int64_t{0} : fallback;
   });
-  ScopedHook scan(g_ncclIbScanDefaultPeerMemClients, [] { return 0; });
+  ScopedHook scan(g_ncclIbScanDefaultPeerMemClients, [] { return 1; });
 
   ibGdrSupportInitOnce();
 
   EXPECT_EQ(ncclIbGdrModuleLoaded, 0);
   EXPECT_EQ(ncclIbGdrBlocklisted, 1);
+  EXPECT_EQ(topo.calls, 2);
+}
+
+TEST_F(NetIbGdrMicrotest, GdrSupportInitOnce_HyperVWithoutNumaBalancingKeepsDiscoveredModule) {
+  ncclIbGdrModuleLoaded = 0;
+  ncclIbGdrBlocklisted = 0;
+  int reads = 0;
+  ScopedHook topo(g_testTopoRead, [&reads](const char*, const char*, char* value, int size) {
+    std::snprintf(value, size, "%s", reads++ == 0 ? "Hyper-V UEFI Release v4.1" : "0");
+    return ncclSuccess;
+  });
+  ScopedHook params(g_loadParam, [](const char* name, int64_t fallback) {
+    return std::strcmp(name, "IB_PCI_RELAXED_ORDERING") == 0 ? int64_t{0} : fallback;
+  });
+  ScopedHook scan(g_ncclIbScanDefaultPeerMemClients, [] { return 1; });
+
+  ibGdrSupportInitOnce();
+
+  EXPECT_EQ(ncclIbGdrModuleLoaded, 1);
+  EXPECT_EQ(ncclIbGdrBlocklisted, 0);
   EXPECT_EQ(topo.calls, 2);
 }
 
@@ -135,9 +155,11 @@ TEST_F(NetIbGdrMicrotest, GdrSupport_PublicApiUsesRuntimeProbeFallback) {
           ++probes;
           return value == &context ? 1 : 0;
         };
-        const bool ok = ncclIbGdrSupport() == ncclSuccess && ncclIbGdrSupport() == ncclSuccess && scans == 1 &&
-                        probes == 1;
-        std::exit(ok ? 0 : 1);
+        if (ncclIbGdrSupport() != ncclSuccess) std::exit(1);
+        if (ncclIbGdrSupport() != ncclSuccess) std::exit(2);
+        if (scans != 1) std::exit(3);
+        if (probes != 1) std::exit(4);
+        std::exit(0);
       },
       ::testing::ExitedWithCode(0), "");
 }
@@ -159,9 +181,11 @@ TEST_F(NetIbGdrMicrotest, GdrSupport_PublicApiCachesProbeFailure) {
           ++probes;
           return 0;
         };
-        const bool ok = ncclIbGdrSupport() == ncclSystemError && ncclIbGdrSupport() == ncclSystemError &&
-                        scans == 1 && probes == 1;
-        std::exit(ok ? 0 : 1);
+        if (ncclIbGdrSupport() != ncclSystemError) std::exit(1);
+        if (ncclIbGdrSupport() != ncclSystemError) std::exit(2);
+        if (scans != 1) std::exit(3);
+        if (probes != 1) std::exit(4);
+        std::exit(0);
       },
       ::testing::ExitedWithCode(0), "");
 }
@@ -172,9 +196,10 @@ TEST_F(NetIbGdrMicrotest, PeerMemSupport_PublicApiReportsLoadedModule) {
         ncclIbPeerMemModuleLoaded = 0;
         g_accessResult = 0;
         g_accessCalls = 0;
-        const bool ok = ncclIbPeerMemSupport() == ncclSuccess && ncclIbPeerMemSupport() == ncclSuccess &&
-                        g_accessCalls == 1;
-        std::exit(ok ? 0 : 1);
+        if (ncclIbPeerMemSupport() != ncclSuccess) std::exit(1);
+        if (ncclIbPeerMemSupport() != ncclSuccess) std::exit(2);
+        if (g_accessCalls != 1) std::exit(3);
+        std::exit(0);
       },
       ::testing::ExitedWithCode(0), "");
 }
@@ -185,9 +210,10 @@ TEST_F(NetIbGdrMicrotest, PeerMemSupport_PublicApiCachesMissingModule) {
         ncclIbPeerMemModuleLoaded = 0;
         g_accessResult = -1;
         g_accessCalls = 0;
-        const bool ok = ncclIbPeerMemSupport() == ncclSystemError && ncclIbPeerMemSupport() == ncclSystemError &&
-                        g_accessCalls == 1;
-        std::exit(ok ? 0 : 1);
+        if (ncclIbPeerMemSupport() != ncclSystemError) std::exit(1);
+        if (ncclIbPeerMemSupport() != ncclSystemError) std::exit(2);
+        if (g_accessCalls != 1) std::exit(3);
+        std::exit(0);
       },
       ::testing::ExitedWithCode(0), "");
 }
@@ -274,10 +300,12 @@ TEST_F(NetIbGdrMicrotest, DmaBufSupport_PublicApiReturnsCachedCapability) {
           ++deallocs;
           return ncclSuccess;
         };
-        const bool ok = ncclIbDmaBufSupport(kMergedDev) == ncclSuccess &&
-                        ncclIbDmaBufSupport(kMergedDev) == ncclSuccess && allocs == 1 && probes == 1 &&
-                        deallocs == 1;
-        std::exit(ok ? 0 : 1);
+        if (ncclIbDmaBufSupport(kMergedDev) != ncclSuccess) std::exit(1);
+        if (ncclIbDmaBufSupport(kMergedDev) != ncclSuccess) std::exit(2);
+        if (allocs != 1) std::exit(3);
+        if (probes != 1) std::exit(4);
+        if (deallocs != 1) std::exit(5);
+        std::exit(0);
       },
       ::testing::ExitedWithCode(0), "");
 }
@@ -302,9 +330,10 @@ TEST_F(NetIbGdrMicrotest, DmaBufSupport_PublicApiCachesUnsupportedCapability) {
           return nullptr;
         };
         g_ibvDeallocPd = [](ibv_pd*) { return ncclSuccess; };
-        const bool ok = ncclIbDmaBufSupport(kMergedDev) == ncclSystemError &&
-                        ncclIbDmaBufSupport(kMergedDev) == ncclSystemError && probes == 1;
-        std::exit(ok ? 0 : 1);
+        if (ncclIbDmaBufSupport(kMergedDev) != ncclSystemError) std::exit(1);
+        if (ncclIbDmaBufSupport(kMergedDev) != ncclSystemError) std::exit(2);
+        if (probes != 1) std::exit(3);
+        std::exit(0);
       },
       ::testing::ExitedWithCode(0), "");
 }
