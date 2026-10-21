@@ -33,7 +33,8 @@ extern std::function<const char*(const union ncclSocketAddress*, char*, size_t, 
 
 void ResetSocketFakes();
 
-// Opt-in: resets, then installs a socket that always succeeds. Send, Recv and ncclFindInterfaces stay fail-loud.
+// Opt-in: resets, then installs a socket that always succeeds. Send, Recv, ncclFindInterfaces and
+// ncclSocketClose (os_fakes) stay fail-loud.
 void InstallSucceedingSocketFakes();
 ncclResult_t SucceedingSocketInit(struct ncclSocket* sock, const union ncclSocketAddress* addr, uint64_t magic,
                                   enum ncclSocketType type, volatile uint32_t* abortFlag, int asyncFlag,

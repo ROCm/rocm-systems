@@ -55,12 +55,6 @@ uint64_t RasTestClockNano();
 
 namespace {
 
-ncclResult_t DefaultSocketProgress(int, struct ncclSocket*, void*, int size, int* offset, bool* closed) {
-  *offset = size;
-  if (closed) *closed = false;
-  return ncclSuccess;
-}
-
 std::atomic<bool> g_initComplete{false};
 
 }  // namespace
@@ -137,7 +131,6 @@ class RasMicrotest : public ::testing::Test {
     ResetNcclFakes();
     ResetWholeFileSeams();
     g_initComplete.store(false, std::memory_order_relaxed);
-    g_ncclSocketProgress = DefaultSocketProgress;
     rasInitialized = false;
     rasInitRefCount = 0;
     rasNotificationPipe[0] = rasNotificationPipe[1] = NCCL_SOCKET_PAIR_INVALID;
@@ -156,7 +149,6 @@ class RasMicrotest : public ::testing::Test {
     ras_test::ResetNcclComms();
     rasInitialized = false;
     rasInitRefCount = 0;
-    g_ncclSocketProgress = DefaultSocketProgress;
     ResetWholeFileSeams();
     ResetSocketFakes();
     ResetOsFakes();
@@ -559,7 +551,6 @@ int RasTestAtexit(void (*)(void)) {
   return 0;
 }
 uint64_t RasTestClockNano() { return g_clockNano; }
-
 
 ncclResult_t ncclOsSocketPairCreate(ncclSocketPairDescriptor pair[2]) {
   if (g_socketPairCreateResult == ncclSuccess) {
