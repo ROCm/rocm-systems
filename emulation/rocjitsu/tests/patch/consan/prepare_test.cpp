@@ -102,6 +102,33 @@ TEST_F(ConSanPrepare, EntrySelectionIsIndependentOfTheExampleKernelName) {
   EXPECT_TRUE(prepare(bytes, *target_profile("gfx1100"), "lds_producer_consumer", error_).failed());
 }
 
+TEST_F(ConSanPrepare, EntryPrologueOffsetsMustMatchTheRuntimeWrapper) {
+  const FailureOr<InputProgram> input =
+      build_input_program(original_, *target_profile("gfx1100"), "lds_producer_consumer", error_);
+  ASSERT_TRUE(input.succeeded()) << error_.message;
+  const std::optional<KernargExtensionLayout> kernarg = make_kernarg_extension_layout(
+      input.value().kernel.descriptor.kernarg_size, kContextPointerPayloads);
+  ASSERT_TRUE(kernarg.has_value());
+  const DbiEntryPrologue &original = input.value().entry_plan.prologue;
+  EXPECT_TRUE(validate_entry_kernarg_layout(original, *kernarg, error_).succeeded());
+
+  for (const bool payload_offset : {true, false}) {
+    SCOPED_TRACE(payload_offset ? "context payload" : "original kernarg pointer");
+    DbiEntryPrologue mismatched = original;
+    if (payload_offset)
+      mismatched.payload_byte_offset += sizeof(uint64_t);
+    else
+      mismatched.original_kernarg_pointer_offset += sizeof(uint64_t);
+    EXPECT_TRUE(validate_entry_kernarg_layout(mismatched, *kernarg, error_).failed());
+    EXPECT_EQ(error_.code, InputErrorCode::UnsupportedEntry);
+    EXPECT_EQ(error_.message, "entry prologue and ConSan kernarg wrapper offsets disagree");
+  }
+
+  KernargExtensionLayout missing_payload = *kernarg;
+  missing_payload.payload_offsets.clear();
+  EXPECT_TRUE(validate_entry_kernarg_layout(original, missing_payload, error_).failed());
+}
+
 TEST_F(ConSanPrepare, EntryNamesMustBeUsableByTheShippedJsonAnalyzer) {
   constexpr std::string_view original_name = "lds_producer_consumer";
   for (const bool valid : {false, true}) {
