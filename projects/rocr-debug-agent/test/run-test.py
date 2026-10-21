@@ -686,8 +686,11 @@ def test_sigquit_resumes(*, name, args, patterns=(), **_):
     p.send_signal(signal.SIGQUIT)
     if not wait_for("err", b"End of disassembly"):
         return fail("no wave dump with disassembly after SIGQUIT")
-    p.stdin.write(b"go\n")
-    p.stdin.flush()
+    try:
+        p.stdin.write(b"go\n")
+        p.stdin.flush()
+    except BrokenPipeError:
+        return fail("the program exited before it was released")
     try:
         rc = p.wait(timeout=DEFAULT_TIMEOUT)
     except TimeoutExpired:
