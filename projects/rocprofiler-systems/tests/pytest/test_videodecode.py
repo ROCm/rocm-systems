@@ -67,14 +67,6 @@ def require_video_data(rocprof_config) -> None:
         )
 
 
-@pytest.fixture
-def require_video_decode_support(gpu_info) -> None:
-    """Skip on architectures where rocDecode VA-API is not yet supported."""
-    if gpu_info._is_gfx1250:
-        pytest.skip(
-            "Video decode not yet supported on gfx1250: "
-            "the current VA-API stack lacks rocDecode support for this GPU"
-        )
 
 # =============================================================================
 # Video decode tests
@@ -99,7 +91,6 @@ class TestVideoDecode(RocprofsysTest):
         video_decode_rules,
         get_run_args,
         require_video_data,
-        require_video_decode_support,
     ):
         result = self.run_test(
             mode,
