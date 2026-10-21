@@ -144,8 +144,7 @@ def git(directory: Path, *args: str) -> bytes:
         proc = subprocess.run(
             ["git", *args],
             cwd=directory,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             timeout=60,
             check=False,
         )
@@ -484,9 +483,7 @@ def select_edits(
                 if build_directory
                 else result.directory
             )
-            edits = tuple(
-                sorted(set(decode_replacement(item, directory) for item in raw))
-            )
+            edits = tuple(sorted({decode_replacement(item, directory) for item in raw}))
             if not all(in_scope(edit, states, diff_only) for edit in edits):
                 counts["outside_scope"] += 1
                 continue

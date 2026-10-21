@@ -49,21 +49,25 @@ def pthread_timemory_env(lock_env) -> dict[str, str]:
 
 class TestPthreads(RocprofsysTest):
     OVERHEAD_LOCKS_PASS_REGEX = [
-        r"wall_clock .*"
-        r"\|_pthread_create .* 4 .*"
-        r"\|_pthread_mutex_lock .* 1000 .*"
-        r"\|_pthread_mutex_unlock .* 1000 .*"
-        r"\|_pthread_mutex_lock .* 1000 .*"
-        r"\|_pthread_mutex_unlock .* 1000 .*"
-        r"\|_pthread_mutex_lock .* 1000 .*"
-        r"\|_pthread_mutex_unlock .* 1000 .*"
-        r"\|_pthread_mutex_lock .* 1000 .*"
-        r"\|_pthread_mutex_unlock .* 1000"
+        (
+            r"wall_clock .*"
+            r"\|_pthread_create .* 4 .*"
+            r"\|_pthread_mutex_lock .* 1000 .*"
+            r"\|_pthread_mutex_unlock .* 1000 .*"
+            r"\|_pthread_mutex_lock .* 1000 .*"
+            r"\|_pthread_mutex_unlock .* 1000 .*"
+            r"\|_pthread_mutex_lock .* 1000 .*"
+            r"\|_pthread_mutex_unlock .* 1000 .*"
+            r"\|_pthread_mutex_lock .* 1000 .*"
+            r"\|_pthread_mutex_unlock .* 1000"
+        )
     ]
     OVERHEAD_LOCKS_TIMEMORY_PASS_REGEX = [
-        r"start_thread (.*) 4 (.*) "
-        r"pthread_mutex_lock (.*) 4000 (.*) "
-        r"pthread_mutex_unlock (.*) 4000"
+        (
+            r"start_thread (.*) 4 (.*) "
+            r"pthread_mutex_lock (.*) 4000 (.*) "
+            r"pthread_mutex_unlock (.*) 4000"
+        )
     ]
 
     TIMEMORY_BINARY_REWRITE_ARGS = [

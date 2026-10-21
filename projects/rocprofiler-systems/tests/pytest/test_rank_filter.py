@@ -320,8 +320,10 @@ class TestRankFilter(RocprofsysTest):
             result,
             "sys_run",
             sys_run_pass_regex=[
-                r"--rank-filter-id requires one of the options: "
-                r"\[--rank-filter-logs, --rank-filter-output\]"
+                (
+                    r"--rank-filter-id requires one of the options: "
+                    r"\[--rank-filter-logs, --rank-filter-output\]"
+                )
             ],
         )
         assert (

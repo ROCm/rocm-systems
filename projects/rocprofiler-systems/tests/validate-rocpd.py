@@ -272,7 +272,8 @@ def validate_table(
                     cursor.execute(query)
                     result = cursor.fetchone()
 
-                    if result and "count" in result.keys():
+                    # sqlite3.Row: `in` tests values, so .keys() is required
+                    if result and "count" in result.keys():  # noqa: SIM118
                         actual_result = result["count"]
                     else:
                         actual_result = result[0] if result else None

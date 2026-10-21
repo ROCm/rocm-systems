@@ -239,7 +239,7 @@ def format_count(value: int) -> str:
 def format_duration(seconds: float) -> str:
     if seconds <= 0:
         return "0s"
-    rounded = int(round(seconds))
+    rounded = round(seconds)
     minutes, secs = divmod(rounded, 60)
     hours, minutes = divmod(minutes, 60)
     if hours:
@@ -287,8 +287,10 @@ def summary_row(summary: Summary) -> str:
 def build_failed_test_group(summary: Summary) -> list[str]:
     """Render one workflow group's failures as a collapsible <details> block."""
     lines = [
-        f"<details><summary>{summary.label} "
-        f"({format_count(len(summary.failed_tests))} failed)</summary>",
+        (
+            f"<details><summary>{summary.label} "
+            f"({format_count(len(summary.failed_tests))} failed)</summary>"
+        ),
         "",
         "| Artifact | Failed Test |",
         "|---|---|",

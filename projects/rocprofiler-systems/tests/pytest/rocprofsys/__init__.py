@@ -52,7 +52,7 @@ from .validators import (
     validate_unified_memory_outputs,
 )
 
-__all__ = [
+__all__ = [  # noqa: RUF022 keep the grouped layout
     # Config
     "RocprofsysConfig",
     "discover_build_config",

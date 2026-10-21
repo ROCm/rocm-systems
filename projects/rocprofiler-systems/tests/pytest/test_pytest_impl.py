@@ -528,7 +528,7 @@ def _make_runner(runner_class, output_dir, extra_kwargs=None):
     config.get_target_executable.return_value = Path("/usr/bin/true")
     config.get_library_path.return_value = ""
     config.get_preload_path.return_value = None
-    kwargs = dict(config=config, target="/usr/bin/true", output_dir=output_dir)
+    kwargs = {"config": config, "target": "/usr/bin/true", "output_dir": output_dir}
     if extra_kwargs:
         kwargs.update(extra_kwargs)
     return runner_class(**kwargs)

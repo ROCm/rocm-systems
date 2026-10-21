@@ -98,7 +98,7 @@ class throughput_point:
         return self.speedup == rhs.speedup
 
     def __neq__(self, rhs):
-        return not self == rhs
+        return self != rhs
 
     def __lt__(self, rhs):
         return self.speedup < rhs.speedup
@@ -129,7 +129,7 @@ class latency_point:
         return self.speedup == rhs.speedup
 
     def __neq__(self, rhs):
-        return not self == rhs
+        return self != rhs
 
     def __lt__(self, rhs):
         return self.speedup < rhs.speedup
@@ -197,7 +197,7 @@ class line_speedup:
         )
 
     def __neq__(self, rhs):
-        return not self == rhs
+        return self != rhs
 
     def __lt__(self, rhs):
         if self.name != rhs.name:
@@ -321,7 +321,11 @@ def process_data(data, _data, experiments, progress_points):
     return data
 
 
-def compute_speedups(runs, speedups=[], num_points=0, validate=[], debug=False):
+def compute_speedups(runs, speedups=None, num_points=0, validate=None, debug=False):
+    if validate is None:
+        validate = []
+    if speedups is None:
+        speedups = []
     out = pd.DataFrame()
     data = {}
     for workload in runs:
@@ -335,7 +339,7 @@ def compute_speedups(runs, speedups=[], num_points=0, validate=[], debug=False):
         ret = []
         for selected, pitr in _data.items():
             for progpt, ditr in pitr.items():
-                if 0 not in ditr.keys():
+                if 0 not in ditr:
                     print(f"missing baseline data for {progpt} in {selected}...")
                     continue
                 for speedup, itr in ditr.items():
@@ -558,12 +562,16 @@ def parse_files(
     files,
     experiments=".*",
     progress_points=".*",
-    speedups=[],
+    speedups=None,
     num_points=0,
-    validate=[],
+    validate=None,
     verbose=0,
     cli=False,
 ):
+    if validate is None:
+        validate = []
+    if speedups is None:
+        speedups = []
     result_df = pd.DataFrame()
     sample_df = pd.DataFrame()
 
@@ -812,12 +820,11 @@ def find_causal_files(workload_path, verbose, recursive):
                 with open(itr, "r") as f:
                     inp_data = json.load(f)
                     if (
-                        "rocprofsys" not in inp_data.keys()
-                        or "causal" not in inp_data["rocprofsys"].keys()
-                    ):
-                        if verbose >= 2:
-                            print(f"{itr} is not a causal profile")
-                            continue
+                        "rocprofsys" not in inp_data
+                        or "causal" not in inp_data["rocprofsys"]
+                    ) and verbose >= 2:
+                        print(f"{itr} is not a causal profile")
+                        continue
                 _input_files_tmp += [itr]
             elif os.path.isfile(itr) and itr.endswith(".coz"):
                 _input_files_tmp += [itr]

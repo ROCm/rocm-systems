@@ -1173,9 +1173,11 @@ def _emit_ctest_header_block() -> list[str]:
 def _emit_prerequisite_block() -> list[str]:
     """``rocprofiler-systems-pytest-config`` prerequisite test (global tmp fixture setup)."""
     return [
-        'add_test("rocprofiler-systems-pytest-config" "${_ROCPROFSYS_EXE}"'
-        ' "${_ROCPROFSYS_EXE_ARGS}"'
-        ' "${_ROCPROFSYS_NODEID_PFX}" "--show-config-only")',
+        (
+            'add_test("rocprofiler-systems-pytest-config" "${_ROCPROFSYS_EXE}"'
+            ' "${_ROCPROFSYS_EXE_ARGS}"'
+            ' "${_ROCPROFSYS_NODEID_PFX}" "--show-config-only")'
+        ),
         'set_tests_properties("rocprofiler-systems-pytest-config" PROPERTIES',
         '    FIXTURES_SETUP "rocprofsys-global-tmp-files"',
         '    LABELS "prerequisite;global"',
@@ -1188,9 +1190,11 @@ def _emit_prerequisite_block() -> list[str]:
 def _emit_cleanup_block() -> list[str]:
     """``rocprofiler-systems-test-cleanup`` (global tmp fixture cleanup)."""
     return [
-        'add_test("rocprofiler-systems-test-cleanup" "${_ROCPROFSYS_EXE}"'
-        ' "${_ROCPROFSYS_EXE_ARGS}"'
-        ' "${_ROCPROFSYS_NODEID_PFX}" "--ctest-mode" "cleanup")',
+        (
+            'add_test("rocprofiler-systems-test-cleanup" "${_ROCPROFSYS_EXE}"'
+            ' "${_ROCPROFSYS_EXE_ARGS}"'
+            ' "${_ROCPROFSYS_NODEID_PFX}" "--ctest-mode" "cleanup")'
+        ),
         'set_tests_properties("rocprofiler-systems-test-cleanup" PROPERTIES',
         '    FIXTURES_CLEANUP "rocprofsys-global-tmp-files"',
         '    LABELS "cleanup;global"',
@@ -1240,10 +1244,12 @@ def _emit_test_item_block(
             extra_args += f' "--python-versions={py_ver}"'
 
     lines_out: list[str] = [
-        f'add_test("{escaped_name}" "${{_ROCPROFSYS_EXE}}"'
-        f' "${{_ROCPROFSYS_EXE_ARGS}}"'
-        f' "${{_ROCPROFSYS_NODEID_PFX}}{escaped_nodeid}"'
-        f"{extra_args} ${{_ROCPROFSYS_EXTRA_ARGS}})"
+        (
+            f'add_test("{escaped_name}" "${{_ROCPROFSYS_EXE}}"'
+            f' "${{_ROCPROFSYS_EXE_ARGS}}"'
+            f' "${{_ROCPROFSYS_NODEID_PFX}}{escaped_nodeid}"'
+            f"{extra_args} ${{_ROCPROFSYS_EXTRA_ARGS}})"
+        )
     ]
     props: list[str] = []
     if labels:

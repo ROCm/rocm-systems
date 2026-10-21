@@ -81,8 +81,7 @@ def git(directory: Path, *args: str) -> bytes:
         proc = subprocess.run(
             ["git", *args],
             cwd=directory,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             timeout=60,
             check=False,
         )

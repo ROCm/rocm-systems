@@ -13,7 +13,7 @@ def get_project_version():
     with open(os.path.join(_cwd, "source", "VERSION"), "r") as f:
         data = f.read().replace("\n", "")
     # make sure is string
-    if isinstance(data, list) or isinstance(data, tuple):
+    if isinstance(data, (list, tuple)):
         return data[0]
     else:
         return data

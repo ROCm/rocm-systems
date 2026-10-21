@@ -117,7 +117,7 @@ class throughput_point:
         return self.speedup == rhs.speedup
 
     def __neq__(self, rhs):
-        return not self == rhs
+        return self != rhs
 
     def __lt__(self, rhs):
         return self.speedup < rhs.speedup
@@ -148,7 +148,7 @@ class latency_point:
         return self.speedup == rhs.speedup
 
     def __neq__(self, rhs):
-        return not self == rhs
+        return self != rhs
 
     def __lt__(self, rhs):
         return self.speedup < rhs.speedup
@@ -217,7 +217,7 @@ class line_speedup:
         )
 
     def __neq__(self, rhs):
-        return not self == rhs
+        return self != rhs
 
     def __lt__(self, rhs):
         if self.name != rhs.name:
@@ -349,7 +349,7 @@ def compute_speedups(_data, args):
     ret = []
     for selected, pitr in _data.items():
         for progpt, ditr in pitr.items():
-            if 0 not in ditr.keys():
+            if 0 not in ditr:
                 continue
             _baseline = ditr[0].mean()
             for speedup, itr in ditr.items():

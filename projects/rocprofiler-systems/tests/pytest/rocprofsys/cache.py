@@ -143,7 +143,7 @@ def _decode_dataclass(obj: dict) -> Any:
 _DECODERS: dict[str, Callable[[dict], Any]] = {
     "path": lambda obj: Path(obj["value"]),
     "tuple": lambda obj: tuple(decode(x) for x in obj["value"]),
-    "set": lambda obj: set(decode(x) for x in obj["value"]),
+    "set": lambda obj: {decode(x) for x in obj["value"]},
     "dict": lambda obj: {decode(k): decode(v) for k, v in obj["value"]},
     "dataclass": _decode_dataclass,
 }
