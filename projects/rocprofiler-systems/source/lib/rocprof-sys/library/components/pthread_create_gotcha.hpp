@@ -55,7 +55,6 @@ struct pthread_create_gotcha : tim::component::base<pthread_create_gotcha, void>
     // generate the gotcha wrappers
     static void configure();
     static void shutdown();
-    static void shutdown(std::int64_t);
 
     static void pause();
     static void resume();
@@ -71,7 +70,7 @@ private:
 
     static std::set<native_handle_t> get_native_handles();
 
-    // Gates only the pthread_create call's own timing bundle (see
+    // Gates only the pthread_create call's own region (see
     // operator()) - never the thread_info::init/sampler-setup path in
     // wrapper::wrap(), which must run for every real thread regardless of
     // control-session pause votes.

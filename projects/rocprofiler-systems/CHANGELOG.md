@@ -37,6 +37,15 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - Perfetto traces now contain a `system_info` packet with the host's system name, kernel
   release, kernel version, and machine, so trace readers can show them.
 
+### Changed
+
+- The `wall_clock` profile (`wall_clock.txt` and `wall_clock.json`) is now generated from
+  the trace cache instead of timemory. GPU kernels and memory copies are nested under the
+  API call that launched them, and each worker thread's tree starts at the top level
+  instead of under the `pthread_create` call that spawned it. The report is written
+  whenever `ROCPROFSYS_PROFILE` is enabled; `wall_clock` in
+  `ROCPROFSYS_TIMEMORY_COMPONENTS` is accepted but no longer needed.
+
 ### Resolved issues
 
 - Sampled PAPI hardware-counter tracks use the short description instead of the raw event symbol.
@@ -48,6 +57,8 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   exceptions from instrumentation setup are now caught in `main`, reported as
   `[rocprof-sys] error: ...`, and the process exits with status 1 instead of
   terminating.
+- Fixed GPU kernel and memory copy durations in the `wall_clock` profile, which were
+  reported several orders of magnitude too small.
 - Fixed a crash (`SIGSEGV`) in `rocprof-sys-instrument` when instrumenting Fortran+HIP
   programs compiled with `gfortran -g` or `-g -O0`. gfortran encodes assumed-shape and
   allocatable array bounds as DWARF location expression blocks rather than integer

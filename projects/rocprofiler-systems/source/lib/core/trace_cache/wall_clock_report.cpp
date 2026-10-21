@@ -19,6 +19,7 @@
 #include <ostream>
 #include <ranges>
 #include <ratio>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -36,6 +37,8 @@ constexpr std::string_view k_metric           = "wall_clock";
 constexpr std::string_view k_units            = "sec";
 constexpr std::string_view k_title          = "REAL-CLOCK TIMER (I.E. WALL-CLOCK TIMER)";
 constexpr std::uint64_t    k_no_correlation = 0;
+constexpr std::uint64_t    k_collapsed_thread    = 0;
+constexpr std::string_view k_collapsed_prefix    = ">>> ";
 constexpr std::size_t      k_narrow_column_width = 6;
 constexpr std::size_t      k_value_column_width  = 8;
 constexpr double           k_percent             = 100.0;
@@ -76,9 +79,9 @@ struct timing_stats
 struct call_node
 {
     std::string          name;
-    bool                 is_gpu = false;
-    timing_stats         data;
-    std::list<call_node> children;
+    bool                 is_gpu   = false;
+    timing_stats         data     = {};
+    std::list<call_node> children = {};
 
     /// Returns the child called `child_name`. With `merge`, an existing child is
     /// reused (linear search: fan-out per node is small, so a map would only lose
@@ -114,9 +117,18 @@ struct call_node
         return k_percent * (data.sum - cpu_children) / data.sum;
     }
 };
+}  // namespace
 
+struct wall_clock_thread_trees
+{
+    std::map<std::uint64_t, call_node> by_thread;
+    std::size_t                        thread_count = 0;
+};
+
+namespace
+{
 void
-validate_and_append(std::vector<wall_clock_interval>& into, wall_clock_interval interval)
+validate_interval(const wall_clock_interval& interval)
 {
     if(interval.end < interval.begin)
     {
@@ -124,7 +136,6 @@ validate_and_append(std::vector<wall_clock_interval>& into, wall_clock_interval 
             fmt::format("wall_clock report: '{}' ends ({}) before it begins ({})",
                         interval.name, interval.end.count(), interval.begin.count()));
     }
-    into.push_back(std::move(interval));
 }
 
 struct report_row
@@ -135,10 +146,9 @@ struct report_row
 };
 
 void
-flatten_tree_into_rows(std::vector<report_row>& rows, std::size_t thread_ordinal,
+flatten_tree_into_rows(std::vector<report_row>& rows, std::string_view prefix,
                        const call_node& parent, std::size_t depth)
 {
-    auto const prefix = fmt::format("|{}>>> ", thread_ordinal);
     for(const auto& kid : parent.children)
     {
         auto const label = depth == 0
@@ -146,23 +156,26 @@ flatten_tree_into_rows(std::vector<report_row>& rows, std::size_t thread_ordinal
                                : fmt::format("{}{:{}}|_{}", prefix, "",
                                              k_indent_per_depth * (depth - 1), kid.name);
         rows.push_back({ .label = label, .entry = &kid, .depth = depth });
-        flatten_tree_into_rows(rows, thread_ordinal, kid, depth + 1);
+        flatten_tree_into_rows(rows, prefix, kid, depth + 1);
     }
 }
 
 std::vector<report_row>
-rows_of(const std::map<std::uint64_t, call_node>& thread_trees)
+rows_of(const wall_clock_thread_trees& trees, const wall_clock_layout& layout)
 {
     std::vector<report_row> rows;
     std::size_t             thread_ordinal = 0;
-    for(const auto& [thread_id, root] : thread_trees)
+    for(const auto& [thread_id, root] : trees.by_thread)
     {
-        flatten_tree_into_rows(rows, thread_ordinal++, root, 0);
+        auto const prefix = layout.collapse_threads
+                                ? std::string{ k_collapsed_prefix }
+                                : fmt::format("|{}>>> ", thread_ordinal++);
+        flatten_tree_into_rows(rows, prefix, root, 0);
     }
     return rows;
 }
 
-std::map<std::uint64_t, call_node>
+wall_clock_thread_trees
 build_thread_trees(const wall_clock_layout&                layout,
                    std::vector<wall_clock_interval>&       regions,
                    const std::vector<wall_clock_interval>& gpu_activity)
@@ -175,8 +188,14 @@ build_thread_trees(const wall_clock_layout&                layout,
 
     auto const merge = !layout.timeline;
 
-    std::map<std::uint64_t, call_node>            thread_trees;
+    wall_clock_thread_trees                       trees;
+    std::set<std::uint64_t>                       threads;
     std::unordered_map<std::uint64_t, call_node*> launch_by_correlation_id;
+    // Collapsing merges every thread into one tree, as timemory's collapse_threads does
+    auto const tree_of = [&](std::uint64_t thread_id) -> call_node& {
+        threads.insert(thread_id);
+        return trees.by_thread[layout.collapse_threads ? k_collapsed_thread : thread_id];
+    };
     // Open regions of the current thread, outermost first
     std::vector<std::pair<call_node*, wall_clock_nanoseconds>> open_regions;
     auto open_regions_thread = std::optional<std::uint64_t>{};
@@ -191,9 +210,8 @@ build_thread_trees(const wall_clock_layout&                layout,
         std::erase_if(open_regions,
                       [&](const auto& open) { return region.begin >= open.second; });
         // Flat puts every row directly under its thread
-        auto& parent = (layout.flat || open_regions.empty())
-                           ? thread_trees[region.thread_id]
-                           : *open_regions.back().first;
+        auto& parent = (layout.flat || open_regions.empty()) ? tree_of(region.thread_id)
+                                                             : *open_regions.back().first;
         auto& entry  = parent.child(region.name, false, merge);
         entry.data.add(region.end - region.begin);
         open_regions.emplace_back(&entry, region.end);
@@ -208,59 +226,30 @@ build_thread_trees(const wall_clock_layout&                layout,
         auto const launch = launch_by_correlation_id.find(activity.correlation_id);
         auto&      parent = (launch != launch_by_correlation_id.end() && !layout.flat)
                                 ? *launch->second
-                                : thread_trees[activity.thread_id];
+                                : tree_of(activity.thread_id);
         parent.child(activity.name, true, merge).data.add(activity.end - activity.begin);
     }
-    return thread_trees;
+    trees.thread_count = threads.size();
+    return trees;
 }
 
 }  // namespace
 
-struct wall_clock_thread_trees
-{
-    std::map<std::uint64_t, call_node> by_thread;
-};
-
-wall_clock_report::wall_clock_report(wall_clock_layout layout)
+wall_clock_report::wall_clock_report(wall_clock_layout                       layout,
+                                     std::vector<wall_clock_interval>        regions,
+                                     const std::vector<wall_clock_interval>& gpu_activity)
 : m_layout{ layout }
-{}
-
-void
-wall_clock_report::add_region(wall_clock_interval region)
 {
-    validate_and_append(m_regions, std::move(region));
+    std::ranges::for_each(regions, validate_interval);
+    std::ranges::for_each(gpu_activity, validate_interval);
+    m_trees = std::make_shared<const wall_clock_thread_trees>(
+        build_thread_trees(m_layout, regions, gpu_activity));
 }
 
 void
-wall_clock_report::add_gpu_activity(wall_clock_interval activity)
+wall_clock_report::write_text(std::ostream& out) const
 {
-    validate_and_append(m_gpu_activity, std::move(activity));
-}
-
-bool
-wall_clock_report::empty() const noexcept
-{
-    return m_trees ? m_trees->by_thread.empty()
-                   : m_regions.empty() && m_gpu_activity.empty();
-}
-
-const wall_clock_thread_trees&
-wall_clock_report::trees()
-{
-    if(!m_trees)
-    {
-        m_trees = std::make_shared<const wall_clock_thread_trees>(wall_clock_thread_trees{
-            build_thread_trees(m_layout, m_regions, m_gpu_activity) });
-        std::vector<wall_clock_interval>{}.swap(m_regions);
-        std::vector<wall_clock_interval>{}.swap(m_gpu_activity);
-    }
-    return *m_trees;
-}
-
-void
-wall_clock_report::write_text(std::ostream& out)
-{
-    auto const rows = rows_of(trees().by_thread);
+    auto const rows = rows_of(*m_trees, m_layout);
     if(rows.empty())
     {
         return;
@@ -303,11 +292,12 @@ wall_clock_report::write_text(std::ostream& out)
 }
 
 void
-wall_clock_report::write_json(std::ostream& out, std::int32_t rank, std::int32_t mpi_size)
+wall_clock_report::write_json(std::ostream& out, std::int32_t rank,
+                              std::int32_t mpi_size) const
 {
-    const auto&           thread_trees     = trees().by_thread;
-    auto const            rows             = rows_of(thread_trees);
-    auto const            thread_count     = thread_trees.size();
+    const auto&           thread_trees     = *m_trees;
+    auto const            rows             = rows_of(thread_trees, m_layout);
+    auto const            thread_count     = thread_trees.thread_count;
     constexpr std::size_t k_single_process = 1;
     auto                  graph            = nlohmann::json::array();
     for(const auto& [label, entry, depth] : rows)

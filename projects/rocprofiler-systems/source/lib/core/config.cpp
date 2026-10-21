@@ -1264,8 +1264,8 @@ configure_settings(bool _init)
 
     ROCPROFSYS_CONFIG_SETTING(
         std::string, env_vars::TIMEMORY_COMPONENTS,
-        "List of components to collect via timemory (see `rocprof-sys-avail -C`)", "",
-        "timemory", "component");
+        "List of components to collect via timemory (see `rocprof-sys-avail -C`)",
+        "wall_clock", "timemory", "component");
 
     ROCPROFSYS_CONFIG_SETTING(std::string, env_vars::OUTPUT_FILE,
                               "[DEPRECATED] See ROCPROFSYS_PERFETTO_FILE", std::string{},
@@ -3744,6 +3744,13 @@ get_mpi_world_size_from_env()
 #else
     return std::nullopt;
 #endif
+}
+
+std::string
+get_output_process_suffix()
+{
+    return std::visit([](const auto& value) { return fmt::format("{}", value); },
+                      settings::default_process_suffix());
 }
 
 namespace output_filtering
