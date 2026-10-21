@@ -9,11 +9,11 @@ using namespace rocjitsu::matrix_test;
 
 TEST(RdnaSwmmacFloat, SparseIndicesAndModifiers) {
   // Nonuniform FP16 factors and indices; D=v29 overlaps index v32.
-  check(ROCJITSU_CODE_ARCH_RDNA4, 64, {0xcc50401du, 0x1c821100u}, 0xf0, float_input(64, 16, false),
-        kSwmmacF32F16);
+  check(ROCJITSU_CODE_ARCH_RDNA4, 64, {0xcc50401du, 0x1c821100u}, 0xf0,
+        float_input(64, 16, false, /*gfx12=*/true), kSwmmacF32F16);
   // Wave64 key 2 selects the third 8-bit index set.
-  check(ROCJITSU_CODE_ARCH_RDNA4, 64, {0xcc505018u, 0x1c821100u}, 0xf0, float_input(64, 16, false),
-        {{0, 0xcc879066u}, {255, 0x47832038u}});
+  check(ROCJITSU_CODE_ARCH_RDNA4, 64, {0xcc505018u, 0x1c821100u}, 0xf0,
+        float_input(64, 16, false, /*gfx12=*/true), {{0, 0xcc879066u}, {255, 0x47832038u}});
   // FP16 factors: key 1 and NEG_HI_B follow compressed product slots.
   check(ROCJITSU_CODE_ARCH_RDNA4, 32, {0xcc504a18u, 0x1c821100u}, 0x000000f0u,
         uniform_input({0xbc003c00u, 0x42004000u, 0xbf000000u, 0xbf000000u, 0xeeddc988u}),

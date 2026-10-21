@@ -1848,9 +1848,10 @@ void exec_wmma_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t 
     writes.set_lane(r.reg, r.lane, r.val);
 }
 
-// GFX11 F16/BF16 WMMA executes adjacent K pairs as DOT2, starting at K=0.
-// Packed outputs narrow after every pair. Preserve raw NaN bits and stage all
-// outputs before writes, including D overlap with A, B or C.
+// GFX11 F16/BF16 WMMA evaluates adjacent pairs as DOT2 in increasing k order,
+// starting at 0. Packed results narrow after each pair and preserve the other D half.
+// Preserve raw NaN bits.
+// Stage the whole result before writing D, which may overlap A, B, or C.
 template <bool Bf16, bool Packed = false>
 void exec_gfx11_wmma_dot2(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s0, uint32_t s1,
                           uint32_t s2, std::optional<uint32_t> const_acc, uint32_t neg,
