@@ -375,10 +375,10 @@ class OmniSoC_Base:
         """Bin-pack counters into perfmon buckets.
 
         Named *_ACCUM counters from rocprofiler-sdk (accumulate(BASE, HIGH_RES)
-        in sdk_config.yaml) cost two block slots alone (BASE + HIGH_RES). If
-        BASE is already in the same bucket, only +1 is charged; adding BASE
-        after its *_ACCUM charges 0. Legacy SQ_ACCUM_PREV_HIRES pairing and
-        dedicated accum buckets are not used.
+        in sdk_config.yaml) always cost two block slots. A named BASE next to
+        its ACCUM costs one more, so the pair uses three registers and leaves
+        headroom in an 8-deep SQ bucket. Legacy SQ_ACCUM_PREV_HIRES pairing
+        and dedicated accum buckets are not used.
 
         Single-pass metric packing is the only allocator. Every metric whose
         PMC set fits one CounterFile gets a full-bucket collection; counters
