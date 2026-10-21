@@ -4665,17 +4665,21 @@ void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data) {
               queue->base_address, errorMsg, status, host_tag.c_str(), dev->index(), kname);
     }
 
-    // Core dumps generally provide limited value for OOM or register overflow,
-    // so do not let DumpCoreFile() be the reason to abort in those cases. These
-    // errors should still honor HIP_SKIP_ABORT_ON_GPU_ERROR consistently.
+    // Core dumps generally provide limited value for OOM, register overflow,
+    // or device-side asserts, so do not let DumpCoreFile() be the reason to
+    // abort in those cases. These errors should still honor
+    // HIP_SKIP_ABORT_ON_GPU_ERROR consistently.
     const bool is_oom = (status == HSA_STATUS_ERROR_OUT_OF_RESOURCES);
     // HSA_STATUS_ERROR_INVALID_DISPATCH_PARAMETERS is a dispatch-time
     // failure (kernel exceeds hardware register limits), not a corruption.
     // Treat it as recoverable rather than aborting.
     const bool invalid_dispatch =
         (status == (hsa_status_t)HSA_STATUS_ERROR_INVALID_DISPATCH_PARAMETERS);
+    // Device asserts surface as HSA_STATUS_ERROR_EXCEPTION. Honor skip-abort
+    // the same way OOM and invalid dispatch do.
+    const bool is_device_exception = (status == HSA_STATUS_ERROR_EXCEPTION);
     const bool should_abort =
-      (is_oom || invalid_dispatch)
+      (is_oom || invalid_dispatch || is_device_exception)
         ? !HIP_SKIP_ABORT_ON_GPU_ERROR
         : (amd::Os::DumpCoreFile() || !HIP_SKIP_ABORT_ON_GPU_ERROR);
 
