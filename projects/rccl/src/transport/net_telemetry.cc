@@ -242,10 +242,10 @@ int rcclTelemetrySetupQps(int devIdx, int chIdx, const void* const* keys, const 
 /* ---- Periodic HW-counter sampler (time series for congestion) ------ */
 /* When RCCL_TELEMETRY_SAMPLE_MS > 0, a background thread samples a small
  * set of congestion-relevant IB-sysfs counters plus the atomic SW byte
- * counters at a fixed interval. Only cheap file reads + atomic loads are
- * done (no ethtool ioctl), so the hot path is undisturbed. The absolute
- * per-sample values are emitted as a "hw_samples" time series; rates are
- * computed offline by the trace merger. */
+ * counters at a fixed interval, and per-priority PFC plus NIC tx/rx bytes
+ * (one ETHTOOL_GSTATS on this thread). Only devices this process drives
+ * (snap_taken) are sampled. Absolute values go out as "hw_samples"; rates
+ * are computed offline. */
 
 /*
  * One sampled slot. `name` is a canonical json_name, the same vocabulary the
@@ -283,10 +283,24 @@ typedef struct {
   uint64_t tx_bytes;                    /* SW cumulative */
   uint64_t rx_bytes;
   int64_t  cong[RCCL_TEL_NUM_SAMPLED];  /* absolute HW counter values, -1 = N/A */
+  /* Absolute, -1 = N/A. Pause time can stay 0 while the frame counters move. */
+  int64_t  pfc_rx_pause_us[RCCL_TELEMETRY_NUM_PFC_PRIO];
+  int64_t  pfc_tx_pause_us[RCCL_TELEMETRY_NUM_PFC_PRIO];
+  int64_t  pfc_rx_frames[RCCL_TELEMETRY_NUM_PFC_PRIO];
+  int64_t  pfc_tx_frames[RCCL_TELEMETRY_NUM_PFC_PRIO];
+  int64_t  prio_rx_bytes[RCCL_TELEMETRY_NUM_PFC_PRIO];
+  int64_t  prio_tx_bytes[RCCL_TELEMETRY_NUM_PFC_PRIO];
+  int64_t  nic_tx_bytes;
+  int64_t  nic_rx_bytes;
+  int64_t  nic_tx_packets;
+  int64_t  nic_rx_packets;
 } RcclHwSample;
 
 static RcclHwSample* rcclTelemetrySamples = NULL;
 static int           rcclTelemetryNumSamples = 0;
+static int           rcclTelemetrySamplesTruncated = 0;
+/* Port speed in Gb/s per device, read at registration; 0 = unknown. */
+static double        rcclTelemetryLinkGbps[RCCL_TELEMETRY_MAX_DEVS];
 static int           rcclTelemetrySampleIntervalMs = 0;
 static pthread_t     rcclTelemetrySamplerThread;
 static int           rcclTelemetrySamplerRunning = 0;
@@ -323,6 +337,9 @@ typedef struct {
   const char* tx_frames_fmt;
   const char* rx_pause_us_fmt;
   const char* tx_pause_us_fmt;
+  /* Per-priority bytes, sampled only: tell which priority carries RCCL. */
+  const char* rx_bytes_fmt;
+  const char* tx_bytes_fmt;
 } RcclPfcPatterns;
 
 typedef struct {
@@ -344,6 +361,8 @@ typedef struct {
   int                      num_counters;
   RcclPfcPatterns          pfc;
   RcclDeltaPatterns        delta;
+  /* Sampler byte/packet source when it must differ from delta; unset = delta. */
+  RcclDeltaPatterns        sampled;
 } RcclHwConfig;
 
 /* Helpers for building counter tables without per-row boilerplate. */
@@ -465,11 +484,14 @@ static const RcclHwCounterDesc rcclHwcAinic[] = {
 
 RCCL_TEL_HW_CONFIG(rcclHwConfigAinic, rcclHwcAinic, "ainic",
   { "frames_rx_pri_%d",        "frames_tx_pri_%d",
-    "rx_pripause_%d_1us_count", "tx_pripause_%d_1us_count" },
+    "rx_pripause_%d_1us_count", "tx_pripause_%d_1us_count",
+    NULL,                       NULL },
   /* RoCE traffic only: the ethtool frames_*_ok keys are absent on this NIC, and
    * netdev-level byte counts miss RDMA traffic entirely. */
   { HWC_IB_SYSFS, "tx_rdma_ucast_bytes", "rx_rdma_ucast_bytes",
-                  "tx_rdma_ucast_pkts",  "rx_rdma_ucast_pkts" });
+                  "tx_rdma_ucast_pkts",  "rx_rdma_ucast_pkts" },
+  /* Samples use the delta counters. */
+  {});
 
 /* ------------------------------------------------------------------ */
 /* MLX5 (NVIDIA/Mellanox ConnectX, mlx5_core driver)                   */
@@ -533,12 +555,15 @@ static const RcclHwCounterDesc rcclHwcMlx5[] = {
 RCCL_TEL_HW_CONFIG(rcclHwConfigMlx5, rcclHwcMlx5, "mlx5",
   /* PFC per-priority pause frames + pause duration, from ethtool NIC stats. */
   { "rx_prio%d_pause",          "tx_prio%d_pause",
-    "rx_prio%d_pause_duration", "tx_prio%d_pause_duration" },
+    "rx_prio%d_pause_duration", "tx_prio%d_pause_duration",
+    "rx_prio%d_bytes",          "tx_prio%d_bytes" },
   /* RoCE bypasses the kernel netdev stack, so ethtool tx_bytes/rx_bytes miss
    * almost all of it. The vport RDMA counters track the IB port counters
    * exactly (port_xmit_data * 4 == tx_vport_rdma_unicast_bytes). */
   { HWC_ETHTOOL, "tx_vport_rdma_unicast_bytes", "rx_vport_rdma_unicast_bytes",
-                 "tx_vport_rdma_unicast_packets", "rx_vport_rdma_unicast_packets" });
+                 "tx_vport_rdma_unicast_packets", "rx_vport_rdma_unicast_packets" },
+  /* Samples use the delta counters. */
+  {});
 
 /* ------------------------------------------------------------------ */
 /* THOR2 (Broadcom ConnectX-class NIC, bnxt_re driver)                 */
@@ -598,9 +623,13 @@ static const RcclHwCounterDesc rcclHwcThor2[] = {
 RCCL_TEL_HW_CONFIG(rcclHwConfigThor2, rcclHwcThor2, "thor2",
   /* Broadcom bnxt per-priority PFC frames + pause duration via ethtool NIC stats. */
   { "rx_pfc_ena_frames_pri%d",  "tx_pfc_ena_frames_pri%d",
-    "pfc_pri%d_rx_duration_us",  "pfc_pri%d_tx_duration_us" },
+    "pfc_pri%d_rx_duration_us",  "pfc_pri%d_tx_duration_us",
+    "rx_bytes_pri%d",            "tx_bytes_pri%d" },
   /* bnxt_re exposes rx/tx_bytes + rx/tx_pkts in IB sysfs hw_counters. */
-  { HWC_IB_SYSFS, "tx_bytes", "rx_bytes", "tx_pkts", "rx_pkts" });
+  { HWC_IB_SYSFS, "tx_bytes", "rx_bytes", "tx_pkts", "rx_pkts" },
+  /* Samples use the port ethtool counters: the sysfs ones refresh irregularly,
+   * from ~10 ms to seconds apart. These count all traffic on the port. */
+  { HWC_ETHTOOL, "tx_bytes", "rx_bytes", "tx_total_frames", "rx_total_frames" });
 
 /* ------------------------------------------------------------------ */
 /* Driver name → HW config resolution                                  */
@@ -629,6 +658,7 @@ typedef struct {
 static void rcclTelemetryCollectHwCounters(RcclDeviceStats* dev);
 static int64_t rcclTelemetryReadSysfsCounter(const char* path);
 static int64_t rcclTelemetryReadHwCounter(const char* roce_device, const char* counter_name);
+static double rcclTelemetryReadLinkGbps(const char* roce_device);
 static void rcclTelemetryGetDriverName(const char* roce_device, char* driver_name, size_t size);
 static void rcclTelemetryGetEthDevice(const char* roce_device, char* eth_device, size_t eth_device_size);
 static int rcclTelemetryIsCounterEnabled(const char* counter_name);
@@ -1131,6 +1161,7 @@ int rcclTelemetryRegisterDevice(int device_id, const char* roce_device, const ch
   char driver_name[RCCL_TELEMETRY_DEV_NAME_MAX] = {0};
   rcclTelemetryGetDriverName(dev->roce_device, driver_name, sizeof(driver_name));
   dev->hw_config = rcclTelemetryResolveHw(driver_name);
+  rcclTelemetryLinkGbps[idx] = rcclTelemetryReadLinkGbps(dev->roce_device);
 
   /* No baseline yet — it is captured on first use (see snap_taken). Until then
    * every HW counter and delta reads as -1/N/A rather than as a value that
@@ -1402,6 +1433,18 @@ static void rcclTelemetryGetDriverName(const char* roce_device, char* driver_nam
   }
 }
 
+/* "400 Gb/sec (4X NDR)" -> 400; 0 when unknown. */
+static double rcclTelemetryReadLinkGbps(const char* roce_device) {
+  char path[RCCL_TEL_PATH_MAX];
+  snprintf(path, sizeof(path), "/sys/class/infiniband/%s/ports/1/rate", roce_device);
+  FILE* fp = fopen(path, "r");
+  if (fp == NULL) return 0;
+  double gbps = 0;
+  if (fscanf(fp, "%lf", &gbps) != 1) gbps = 0;
+  fclose(fp);
+  return gbps;
+}
+
 static int64_t rcclTelemetryReadHwCounter(const char* roce_device, const char* counter_name) {
   char path[RCCL_TEL_PATH_MAX];
   int64_t val;
@@ -1484,8 +1527,169 @@ static void rcclTelemetryWarnUnresolvedSampled(const int idx[][RCCL_TEL_NUM_SAMP
   }
 }
 
+/* Per-device ethtool reader: resolve keys to stat indices once, then one
+ * ETHTOOL_GSTATS per sample. n_stats is rechecked each sample; a grown set
+ * rebuilds the cache so GSTATS cannot write past the buffer. */
+typedef struct {
+  int                   state;     /* 0 = unresolved, 1 = ready, -1 = unavailable */
+  int                   fd;
+  unsigned int          n_stats;
+  struct ethtool_stats* stats;
+  int                   pfc_rx_idx[RCCL_TELEMETRY_NUM_PFC_PRIO];  /* -1 = not exposed */
+  int                   pfc_tx_idx[RCCL_TELEMETRY_NUM_PFC_PRIO];
+  int                   pfc_rx_frames_idx[RCCL_TELEMETRY_NUM_PFC_PRIO];
+  int                   pfc_tx_frames_idx[RCCL_TELEMETRY_NUM_PFC_PRIO];
+  int                   prio_rx_bytes_idx[RCCL_TELEMETRY_NUM_PFC_PRIO];
+  int                   prio_tx_bytes_idx[RCCL_TELEMETRY_NUM_PFC_PRIO];
+  int                   tx_bytes_idx;
+  int                   rx_bytes_idx;
+  int                   tx_packets_idx;
+  int                   rx_packets_idx;
+} RcclTelSamplerEthtool;
+
+static void rcclTelSamplerEthtoolReset(RcclTelSamplerEthtool* e) {
+  if (e->fd >= 0) close(e->fd);
+  free(e->stats);
+  memset(e, 0, sizeof(*e));
+  e->fd = -1;
+}
+
+static int rcclTelSamplerEthtoolNumStats(RcclTelSamplerEthtool* e, const char* eth_device, unsigned int* n) {
+  struct ifreq ifr;
+  memset(&ifr, 0, sizeof(ifr));
+  memcpy(ifr.ifr_name, eth_device, strlen(eth_device));
+  struct ethtool_drvinfo drvinfo;
+  memset(&drvinfo, 0, sizeof(drvinfo));
+  drvinfo.cmd = ETHTOOL_GDRVINFO;
+  ifr.ifr_data = (char*)&drvinfo;
+  if (ioctl(e->fd, SIOCETHTOOL, &ifr) != 0) return -1;
+  *n = drvinfo.n_stats;
+  return 0;
+}
+
+static void rcclTelSamplerEthtoolResolve(RcclTelSamplerEthtool* e, const RcclDeviceStats* dev,
+                                         const RcclHwConfig* hw) {
+  rcclTelSamplerEthtoolReset(e);
+  e->state = -1;
+  for (int p = 0; p < RCCL_TELEMETRY_NUM_PFC_PRIO; p++)
+    e->pfc_rx_idx[p] = e->pfc_tx_idx[p] = e->pfc_rx_frames_idx[p] = e->pfc_tx_frames_idx[p] =
+        e->prio_rx_bytes_idx[p] = e->prio_tx_bytes_idx[p] = -1;
+  e->tx_bytes_idx = e->rx_bytes_idx = e->tx_packets_idx = e->rx_packets_idx = -1;
+
+  const char* eth = dev->eth_device;
+  if (eth[0] == '\0' || strlen(eth) >= IFNAMSIZ) return;
+  e->fd = socket(AF_INET, SOCK_DGRAM, 0);
+  if (e->fd < 0) return;
+
+  unsigned int n = 0;
+  if (rcclTelSamplerEthtoolNumStats(e, eth, &n) != 0 || n == 0) return;
+
+  struct ethtool_gstrings* strings =
+      (struct ethtool_gstrings*)calloc(1, sizeof(*strings) + (size_t)n * ETH_GSTRING_LEN);
+  if (strings == NULL) return;
+  struct ifreq ifr;
+  memset(&ifr, 0, sizeof(ifr));
+  memcpy(ifr.ifr_name, eth, strlen(eth));
+  strings->cmd = ETHTOOL_GSTRINGS;
+  strings->string_set = ETH_SS_STATS;
+  strings->len = n;
+  ifr.ifr_data = (char*)strings;
+  if (ioctl(e->fd, SIOCETHTOOL, &ifr) != 0) {
+    free(strings);
+    return;
+  }
+
+  const RcclPfcPatterns* pfc = &hw->pfc;
+  const RcclDeltaPatterns* dp = hw->sampled.tx_bytes ? &hw->sampled : &hw->delta;
+  char key[RCCL_TEL_ETHTOOL_KEY_MAX];
+  for (unsigned int s = 0; s < n; s++) {
+    char name[ETH_GSTRING_LEN + 1];
+    memcpy(name, strings->data + (size_t)s * ETH_GSTRING_LEN, ETH_GSTRING_LEN);
+    name[ETH_GSTRING_LEN] = '\0';
+    for (int p = 0; p < RCCL_TELEMETRY_NUM_PFC_PRIO; p++) {
+      if (pfc->rx_pause_us_fmt) {
+        snprintf(key, sizeof(key), pfc->rx_pause_us_fmt, p);
+        if (strcmp(name, key) == 0) e->pfc_rx_idx[p] = (int)s;
+      }
+      if (pfc->tx_pause_us_fmt) {
+        snprintf(key, sizeof(key), pfc->tx_pause_us_fmt, p);
+        if (strcmp(name, key) == 0) e->pfc_tx_idx[p] = (int)s;
+      }
+      if (pfc->rx_frames_fmt) {
+        snprintf(key, sizeof(key), pfc->rx_frames_fmt, p);
+        if (strcmp(name, key) == 0) e->pfc_rx_frames_idx[p] = (int)s;
+      }
+      if (pfc->tx_frames_fmt) {
+        snprintf(key, sizeof(key), pfc->tx_frames_fmt, p);
+        if (strcmp(name, key) == 0) e->pfc_tx_frames_idx[p] = (int)s;
+      }
+      if (pfc->rx_bytes_fmt) {
+        snprintf(key, sizeof(key), pfc->rx_bytes_fmt, p);
+        if (strcmp(name, key) == 0) e->prio_rx_bytes_idx[p] = (int)s;
+      }
+      if (pfc->tx_bytes_fmt) {
+        snprintf(key, sizeof(key), pfc->tx_bytes_fmt, p);
+        if (strcmp(name, key) == 0) e->prio_tx_bytes_idx[p] = (int)s;
+      }
+    }
+    if (dp->source == HWC_ETHTOOL) {
+      if (strcmp(name, dp->tx_bytes) == 0) e->tx_bytes_idx = (int)s;
+      if (strcmp(name, dp->rx_bytes) == 0) e->rx_bytes_idx = (int)s;
+      if (strcmp(name, dp->tx_packets) == 0) e->tx_packets_idx = (int)s;
+      if (strcmp(name, dp->rx_packets) == 0) e->rx_packets_idx = (int)s;
+    }
+  }
+  free(strings);
+
+  /* Extra room: the stat set can grow between the n_stats check and GSTATS. */
+  e->stats = (struct ethtool_stats*)calloc(1, sizeof(*e->stats) + ((size_t)n + 256) * sizeof(uint64_t));
+  if (e->stats == NULL) return;
+  e->n_stats = n;
+  e->state = 1;
+}
+
+static void rcclTelSamplerReadEthtool(RcclTelSamplerEthtool* e, const RcclDeviceStats* dev,
+                                      const RcclHwConfig* hw, RcclHwSample* smp) {
+  if (e->state == 0) rcclTelSamplerEthtoolResolve(e, dev, hw);
+  if (e->state != 1) return;
+
+  unsigned int n = 0;
+  if (rcclTelSamplerEthtoolNumStats(e, dev->eth_device, &n) != 0) return;
+  if (n != e->n_stats) {
+    /* Stat set changed; indices are stale. Rebuild on the next sample. */
+    e->state = 0;
+    return;
+  }
+
+  struct ifreq ifr;
+  memset(&ifr, 0, sizeof(ifr));
+  memcpy(ifr.ifr_name, dev->eth_device, strlen(dev->eth_device));
+  e->stats->cmd = ETHTOOL_GSTATS;
+  e->stats->n_stats = e->n_stats;
+  ifr.ifr_data = (char*)e->stats;
+  if (ioctl(e->fd, SIOCETHTOOL, &ifr) != 0) return;
+
+  for (int p = 0; p < RCCL_TELEMETRY_NUM_PFC_PRIO; p++) {
+    if (e->pfc_rx_idx[p] >= 0) smp->pfc_rx_pause_us[p] = (int64_t)e->stats->data[e->pfc_rx_idx[p]];
+    if (e->pfc_tx_idx[p] >= 0) smp->pfc_tx_pause_us[p] = (int64_t)e->stats->data[e->pfc_tx_idx[p]];
+    if (e->pfc_rx_frames_idx[p] >= 0) smp->pfc_rx_frames[p] = (int64_t)e->stats->data[e->pfc_rx_frames_idx[p]];
+    if (e->pfc_tx_frames_idx[p] >= 0) smp->pfc_tx_frames[p] = (int64_t)e->stats->data[e->pfc_tx_frames_idx[p]];
+    if (e->prio_rx_bytes_idx[p] >= 0) smp->prio_rx_bytes[p] = (int64_t)e->stats->data[e->prio_rx_bytes_idx[p]];
+    if (e->prio_tx_bytes_idx[p] >= 0) smp->prio_tx_bytes[p] = (int64_t)e->stats->data[e->prio_tx_bytes_idx[p]];
+  }
+  if (e->tx_bytes_idx >= 0) smp->nic_tx_bytes = (int64_t)e->stats->data[e->tx_bytes_idx];
+  if (e->rx_bytes_idx >= 0) smp->nic_rx_bytes = (int64_t)e->stats->data[e->rx_bytes_idx];
+  if (e->tx_packets_idx >= 0) smp->nic_tx_packets = (int64_t)e->stats->data[e->tx_packets_idx];
+  if (e->rx_packets_idx >= 0) smp->nic_rx_packets = (int64_t)e->stats->data[e->rx_packets_idx];
+}
+
 static void* rcclTelemetrySamplerMain(void* arg) {
   (void)arg;
+  /* Per-device ethtool cache; lives as long as this thread. */
+  RcclTelSamplerEthtool* eth =
+      (RcclTelSamplerEthtool*)calloc(RCCL_TELEMETRY_MAX_DEVS, sizeof(RcclTelSamplerEthtool));
+  if (eth != NULL)
+    for (int i = 0; i < RCCL_TELEMETRY_MAX_DEVS; i++) eth[i].fd = -1;
   /* Per-device row a column resolves to, for the warning (-2 = not yet resolved). */
   int idx_cache[RCCL_TELEMETRY_MAX_DEVS][RCCL_TEL_NUM_SAMPLED];
   RcclTelSampledCol cols[RCCL_TELEMETRY_MAX_DEVS][RCCL_TEL_NUM_SAMPLED];
@@ -1501,9 +1705,17 @@ static void* rcclTelemetrySamplerMain(void* arg) {
     for (int i = 0; i < nd; i++) {
       RcclDeviceStats* dev = &rcclTelemetryDevs[i];
       if (dev->roce_device[0] == '\0' || dev->hw_config == NULL) continue;
+      /* Skip NICs this process never drove; they would fill the sample buffer. */
+      if (!__atomic_load_n(&dev->snap_taken, __ATOMIC_ACQUIRE)) continue;
+      const RcclHwConfig* hw = (const RcclHwConfig*)dev->hw_config;
 
       int s = rcclTelemetryNumSamples;
-      if (s >= RCCL_TEL_MAX_SAMPLES) return NULL;   /* buffer full: stop sampling */
+      if (s >= RCCL_TEL_MAX_SAMPLES) {
+        rcclTelemetrySamplesTruncated = 1;
+        fprintf(stderr, "RCCL NET_TELEMETRY: hw_samples buffer full (%d samples); sampling stopped. "
+                        "Raise RCCL_TELEMETRY_SAMPLE_MS for longer runs.\n", RCCL_TEL_MAX_SAMPLES);
+        goto done;
+      }
       RcclHwSample* smp = &rcclTelemetrySamples[s];
 
       smp->ts_us    = ts_us;
@@ -1518,6 +1730,21 @@ static void* rcclTelemetrySamplerMain(void* arg) {
         }
         smp->cong[c] = rcclTelemetrySampledColRead(i, col);
       }
+
+      for (int p = 0; p < RCCL_TELEMETRY_NUM_PFC_PRIO; p++)
+        smp->pfc_rx_pause_us[p] = smp->pfc_tx_pause_us[p] = smp->pfc_rx_frames[p] = smp->pfc_tx_frames[p] =
+            smp->prio_rx_bytes[p] = smp->prio_tx_bytes[p] = -1;
+      smp->nic_tx_bytes = smp->nic_rx_bytes = smp->nic_tx_packets = smp->nic_rx_packets = -1;
+      if (eth != NULL) {
+        rcclTelSamplerReadEthtool(&eth[i], dev, hw, smp);
+        const RcclDeltaPatterns* sp = hw->sampled.tx_bytes ? &hw->sampled : &hw->delta;
+        if (sp->source == HWC_IB_SYSFS) {
+          smp->nic_tx_bytes = rcclTelemetryReadHwCounter(dev->roce_device, sp->tx_bytes);
+          smp->nic_rx_bytes = rcclTelemetryReadHwCounter(dev->roce_device, sp->rx_bytes);
+          smp->nic_tx_packets = rcclTelemetryReadHwCounter(dev->roce_device, sp->tx_packets);
+          smp->nic_rx_packets = rcclTelemetryReadHwCounter(dev->roce_device, sp->rx_packets);
+        }
+      }
       rcclTelemetryNumSamples = s + 1;
     }
 
@@ -1527,6 +1754,11 @@ static void* rcclTelemetrySamplerMain(void* arg) {
     req.tv_sec  = rcclTelemetrySampleIntervalMs / 1000;
     req.tv_nsec = (long)(rcclTelemetrySampleIntervalMs % 1000) * 1000000L;
     nanosleep(&req, NULL);
+  }
+done:
+  if (eth != NULL) {
+    for (int i = 0; i < RCCL_TELEMETRY_MAX_DEVS; i++) rcclTelSamplerEthtoolReset(&eth[i]);
+    free(eth);
   }
   return NULL;
 }
@@ -1683,6 +1915,12 @@ static void rcclTelemetryWriteJson(FILE* fp) {
   const int sampled = sampleN > 1;
   if (sampled) fprintf(fp, "  \"latency_sample_interval\": %d,\n", sampleN);
 
+  fprintf(fp, "  \"clock\": \"CLOCK_MONOTONIC\",\n");
+  fprintf(fp, "  \"histogram_bucket_interval_ns\": %ld,\n", (long)rcclTelemetryCfg.histogram_bucket_interval_ns);
+  fprintf(fp, "  \"histogram_max_buckets\": %d,\n", rcclTelemetryCfg.histogram_max_buckets);
+  if (rcclTelemetrySampleIntervalMs > 0)
+    fprintf(fp, "  \"sample_interval_ms\": %d,\n", rcclTelemetrySampleIntervalMs);
+
   fprintf(fp, "  \"devices\": [\n");
 
   int devsPrinted = 0;
@@ -1709,6 +1947,7 @@ static void rcclTelemetryWriteJson(FILE* fp) {
     fprintf(fp, "      \"eth_device\": \"%s\",\n", dev->eth_device);
     fprintf(fp, "      \"hw_type\": \"%s\",\n",
             dev->hw_config ? ((const RcclHwConfig*)dev->hw_config)->name : "unsupported");
+    fprintf(fp, "      \"link_gbps\": %g,\n", rcclTelemetryLinkGbps[d]);
     fprintf(fp, "      \"tx_bytes\": %lu,\n", (unsigned long)dev->tx_bytes);
     fprintf(fp, "      \"rx_bytes\": %lu,\n", (unsigned long)dev->rx_bytes);
     fprintf(fp, "      \"num_cq_errors\": %lu,\n", (unsigned long)dev->num_cq_errors);
@@ -1850,6 +2089,7 @@ static void rcclTelemetryWriteJson(FILE* fp) {
 
   /* Periodic HW-counter time series (absolute values; rates computed offline). */
   if (rcclTelemetryNumSamples > 0 && rcclTelemetrySamples != NULL) {
+    if (rcclTelemetrySamplesTruncated) fprintf(fp, ",\n  \"hw_samples_truncated\": true");
     fprintf(fp, ",\n  \"hw_samples\": [\n");
     for (int i = 0; i < rcclTelemetryNumSamples; i++) {
       RcclHwSample* s = &rcclTelemetrySamples[i];
@@ -1860,7 +2100,21 @@ static void rcclTelemetryWriteJson(FILE* fp) {
               (unsigned long)s->tx_bytes, (unsigned long)s->rx_bytes);
       for (int c = 0; c < RCCL_TEL_NUM_SAMPLED; c++)
         fprintf(fp, ", \"%s\": %ld", rcclTelSampled[c].name, (long)s->cong[c]);
-      fprintf(fp, "}%s\n", (i < rcclTelemetryNumSamples - 1) ? "," : "");
+      fprintf(fp, ", \"nic_tx_bytes\": %ld, \"nic_rx_bytes\": %ld, \"nic_tx_packets\": %ld, \"nic_rx_packets\": %ld",
+              (long)s->nic_tx_bytes, (long)s->nic_rx_bytes, (long)s->nic_tx_packets, (long)s->nic_rx_packets);
+      fprintf(fp, ", \"pfc_rx_pause_us\": [");
+      for (int p = 0; p < RCCL_TELEMETRY_NUM_PFC_PRIO; p++)
+        fprintf(fp, "%s%ld", p == 0 ? "" : ", ", (long)s->pfc_rx_pause_us[p]);
+      const struct { const char* name; const int64_t* v; } arrs[] = {
+        {"pfc_tx_pause_us", s->pfc_tx_pause_us}, {"pfc_rx_frames", s->pfc_rx_frames},
+        {"pfc_tx_frames", s->pfc_tx_frames}, {"prio_rx_bytes", s->prio_rx_bytes},
+        {"prio_tx_bytes", s->prio_tx_bytes}};
+      for (const auto& a : arrs) {
+        fprintf(fp, "], \"%s\": [", a.name);
+        for (int p = 0; p < RCCL_TELEMETRY_NUM_PFC_PRIO; p++)
+          fprintf(fp, "%s%ld", p == 0 ? "" : ", ", (long)a.v[p]);
+      }
+      fprintf(fp, "]}%s\n", (i < rcclTelemetryNumSamples - 1) ? "," : "");
     }
     fprintf(fp, "  ]\n");
   } else {

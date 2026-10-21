@@ -10,6 +10,7 @@
 #include "accl_profiler.h"
 
 #include <ctype.h>
+#include <dlfcn.h>
 #include <errno.h>
 #include <limits.h>
 #include <stddef.h>
@@ -28,6 +29,13 @@ static ncclDebugLogger_t gLogFn;
 // NCCL_DEBUG_SUBSYS, and every warning here reports lost profiling data.
 #define ACCL_INFO(...)  do { if (gLogFn) gLogFn(4, 0x4000, __func__, __LINE__, __VA_ARGS__); } while(0)
 #define ACCL_WARN(...)  do { if (gLogFn) gLogFn(3, ~0UL, __func__, __LINE__, __VA_ARGS__); } while(0)
+
+// rcclTelemetrySwCapture() from librccl, or NULL when RCCL network telemetry is
+// unavailable (older librccl, ACCL_PROFILER_NET=0). Resolved once at first init.
+typedef int (*acclNetCaptureFn)(RcclTelemetrySwSnapshot* out, int maxDevs);
+static acclNetCaptureFn gNetCapture = NULL;
+static pthread_once_t gNetCaptureOnce = PTHREAD_ONCE_INIT;
+static void* gLogFnAddr = NULL;  // an address inside librccl, for dladdr()
 
 static inline const char* safeStr(const char* s) { return s ? s : ""; }
 
@@ -210,6 +218,7 @@ static void acclPoolRelease(struct acclPool* pool, int idx) {
 
 // Forward declarations for cross-referenced pool functions
 static void acclFreeProxyOp(struct acclCommContext* ctx, struct acclProxyOpInfo* op);
+static void acclNetDiff(const struct acclCollInfo* coll, struct acclCompletedRecord* rec);
 
 static void acclFreeCollProxyOps(struct acclCommContext* ctx,
                                  struct acclCollInfo* coll) {
@@ -454,7 +463,7 @@ static void acclWriteRecord(struct acclCommContext* ctx,
   double busBw = algoBw * acclBusBwFactor(rec->func, rec->nRanks);
 
   fprintf(ctx->outputFile,
-    "{\"header\":{\"rank\":%d,\"n_ranks\":%d},"
+    "{\"header\":{\"rank\":%d,\"n_ranks\":%d,\"host\":\"%s\",\"pid\":%d,\"comm_hash\":\"0x%lx\"},"
     "\"coll_perf\":{"
     "\"coll\":\"%s\",\"coll_sn\":%lu,\"coll_msg_size_bytes\":%zu,"
     "\"coll_algo\":\"%s\",\"coll_proto\":\"%s\","
@@ -465,7 +474,7 @@ static void acclWriteRecord(struct acclCommContext* ctx,
     "\"decomposition\":{"
       ACCL_DECOMP_FIELDS(ACCL_DECOMP_KEY, ACCL_DECOMP_KEY_LAST)
     "},",
-    rec->rank, rec->nRanks,
+    rec->rank, rec->nRanks, ctx->hostname, (int)getpid(), (unsigned long)ctx->commHash,
     safeStr(rec->func), (unsigned long)rec->seqNumber, rec->msgSizeBytes,
     safeStr(rec->algo), safeStr(rec->proto),
     rec->nChannels, rec->nChannelsRaw,
@@ -474,6 +483,38 @@ static void acclWriteRecord(struct acclCommContext* ctx,
     rec->hasGpuTiming ? "gpu_globaltimer" : "cpu_wallclock"
     ACCL_DECOMP_FIELDS(ACCL_DECOMP_ARG, ACCL_DECOMP_ARG)
   );
+
+  fprintf(ctx->outputFile,
+    "\"host_ts\":{\"clock\":\"CLOCK_MONOTONIC\",\"enqueue_us\":%lu,"
+    "\"exec_start_us\":%lu,\"exec_end_us\":%lu},",
+    (unsigned long)rec->tsEnqueueUs, (unsigned long)rec->tsExecStartUs,
+    (unsigned long)rec->tsExecEndUs);
+
+  // Per-NIC SW counter deltas. Only when telemetry was capturing and the
+  // collective went through the proxy (i.e. used the network).
+  if (rec->tsNetStartUs != 0 && rec->tsNetStopUs != 0) {
+    fprintf(ctx->outputFile,
+      "\"net\":{\"source\":\"rccl_telemetry_sw\",\"window_start_us\":%lu,"
+      "\"window_end_us\":%lu,\"devices\":[",
+      (unsigned long)rec->tsNetStartUs, (unsigned long)rec->tsNetStopUs);
+    for (int i = 0; i < rec->nNetDevs; i++) {
+      const RcclTelemetrySwSnapshot* d = &rec->netDelta[i];
+      fprintf(ctx->outputFile,
+        "%s{\"device_id\":%d,\"tx_bytes\":%lu,\"rx_bytes\":%lu,\"wqe_sent\":%lu,"
+        "\"recv_wqe\":%lu,\"wqe_rcvd\":%lu,\"wqe_completed\":%lu,\"wqe_sampled\":%lu,"
+        "\"cq_errors\":%lu,\"completion_hist\":[",
+        i > 0 ? "," : "", d->device_id,
+        (unsigned long)d->tx_bytes, (unsigned long)d->rx_bytes, (unsigned long)d->wqe_sent,
+        (unsigned long)d->recv_wqe, (unsigned long)d->wqe_rcvd, (unsigned long)d->wqe_completed,
+        (unsigned long)d->wqe_sampled, (unsigned long)d->num_cq_errors);
+      int last = RCCL_TELEMETRY_HISTOGRAM_SIZE - 1;
+      while (last >= 0 && d->wqe_completion_histogram[last] == 0) last--;
+      for (int h = 0; h <= last; h++)
+        fprintf(ctx->outputFile, "%s%lu", h > 0 ? "," : "", (unsigned long)d->wqe_completion_histogram[h]);
+      fprintf(ctx->outputFile, "]}");
+    }
+    fprintf(ctx->outputFile, "]},");
+  }
 
   // Kernel events array
   fprintf(ctx->outputFile, "\"event_trace_ts\":{\"kernel_events\":[");
@@ -582,6 +623,7 @@ static void acclFinalizeCollective(struct acclCollInfo* coll) {
   double sendGpuWait = 0, sendPeerWait = 0, sendNetwork = 0;
   double recvFlush = 0, recvGpuWait = 0, recvNetwork = 0;
   int nSend = 0, nRecv = 0;
+  uint64_t lastProxyStopUs = 0;
 
   for (int i = 0; i < coll->nProxyOps; i++) {
     int opIdx = coll->proxyOpIndices[i];
@@ -590,6 +632,7 @@ static void acclFinalizeCollective(struct acclCollInfo* coll) {
     // Under op->mutex: a step of this op can still be stopping and adding to
     // these accumulators, and that path writes them under the same lock.
     pthread_mutex_lock(&op->mutex);
+    if (op->tsStopUs > lastProxyStopUs) lastProxyStopUs = op->tsStopUs;
     if (op->isSend) {
       nSend++;
       sendGpuWait += (double)op->totalGpuWaitUs;
@@ -620,6 +663,17 @@ static void acclFinalizeCollective(struct acclCollInfo* coll) {
   rec.nSendOps = nSend;
   rec.nRecvOps = nRecv;
 
+  rec.tsEnqueueUs = coll->tsCollStartUs;
+  // Proxy op starts are left out on purpose (see acclPluginRecordEventState):
+  // the collective starts running when its kernel or its first data step does.
+  uint64_t firstNetUs = coll->tsNetStartUs ? coll->tsNetStartUs : UINT64_MAX;
+  uint64_t execStart = firstKernelCpuStartUs < firstNetUs ? firstKernelCpuStartUs : firstNetUs;
+  uint64_t execEnd = lastCpuStop > lastProxyStopUs ? lastCpuStop : lastProxyStopUs;
+  rec.tsExecStartUs = execStart != UINT64_MAX ? execStart : 0;
+  rec.tsExecEndUs = execEnd;
+
+  if (coll->tsNetStartUs != 0 && coll->tsNetStopUs != 0) acclNetDiff(coll, &rec);
+
   acclWriteRecord(ctx, &rec);
 }
 
@@ -642,6 +696,77 @@ static void acclFinalizeAndFree(struct acclCommContext* ctx,
 }
 
 // ============================================================================
+// RCCL network telemetry (per-collective SW counter snapshots)
+// ============================================================================
+
+// librccl exports rcclTelemetrySwCapture(), but RTLD_DEFAULT only finds it when
+// librccl is in the global symbol scope. A Python extension pulls librccl in
+// with RTLD_LOCAL, so look it up through the library that owns the logger
+// callback RCCL handed us first, and fall back to the global scope.
+static void acclNetCaptureResolve(void) {
+  const char* env = getenv("ACCL_PROFILER_NET");
+  if (env && atoi(env) == 0) return;
+
+  void* sym = NULL;
+  Dl_info info;
+  if (gLogFnAddr && dladdr(gLogFnAddr, &info) && info.dli_fname) {
+    void* lib = dlopen(info.dli_fname, RTLD_LAZY | RTLD_NOLOAD);
+    if (lib) {
+      sym = dlsym(lib, "rcclTelemetrySwCapture");
+      dlclose(lib);  // RTLD_NOLOAD took a reference; librccl stays loaded
+    }
+  }
+  if (!sym) sym = dlsym(RTLD_DEFAULT, "rcclTelemetrySwCapture");
+  gNetCapture = (acclNetCaptureFn)sym;
+  if (!gNetCapture) {
+    ACCL_INFO("ACCL Profiler: rcclTelemetrySwCapture not found; per-collective "
+              "network counters disabled");
+  }
+}
+
+// Capture the SW counters of every NIC RCCL telemetry tracks. Returns the
+// number of devices written; 0 when telemetry is off (RCCL_TELEMETRY_ENABLE
+// unset) or unavailable.
+static inline int acclNetCapture(RcclTelemetrySwSnapshot* out) {
+  return gNetCapture ? gNetCapture(out, ACCL_NET_MAX_DEVS) : 0;
+}
+
+// rec->netDelta = stop - start for each device present in both snapshots.
+// Devices with no traffic in the window are left out. Min/max completion times
+// are whole-run values in the snapshot and cannot be differenced, so they are
+// not carried over; the histogram is.
+static void acclNetDiff(const struct acclCollInfo* coll, struct acclCompletedRecord* rec) {
+  rec->nNetDevs = 0;
+  rec->tsNetStartUs = coll->tsNetStartUs;
+  rec->tsNetStopUs = coll->tsNetStopUs;
+  for (int i = 0; i < coll->nNetDevsStop; i++) {
+    const RcclTelemetrySwSnapshot* b = &coll->netStop[i];
+    const RcclTelemetrySwSnapshot* a = NULL;
+    for (int j = 0; j < coll->nNetDevsStart; j++) {
+      if (coll->netStart[j].device_id == b->device_id) { a = &coll->netStart[j]; break; }
+    }
+    if (!a) continue;
+    RcclTelemetrySwSnapshot* d = &rec->netDelta[rec->nNetDevs];
+    memset(d, 0, sizeof(*d));
+    d->device_id     = b->device_id;
+    d->tx_bytes      = b->tx_bytes - a->tx_bytes;
+    d->rx_bytes      = b->rx_bytes - a->rx_bytes;
+    d->num_cq_errors = b->num_cq_errors - a->num_cq_errors;
+    d->wqe_sent      = b->wqe_sent - a->wqe_sent;
+    d->recv_wqe      = b->recv_wqe - a->recv_wqe;
+    d->wqe_rcvd      = b->wqe_rcvd - a->wqe_rcvd;
+    d->wqe_completed = b->wqe_completed - a->wqe_completed;
+    d->wqe_sampled   = b->wqe_sampled - a->wqe_sampled;
+    for (int h = 0; h < RCCL_TELEMETRY_HISTOGRAM_SIZE; h++)
+      d->wqe_completion_histogram[h] = b->wqe_completion_histogram[h] - a->wqe_completion_histogram[h];
+    if (d->tx_bytes == 0 && d->rx_bytes == 0 && d->wqe_sent == 0 && d->recv_wqe == 0 &&
+        d->wqe_completed == 0 && d->num_cq_errors == 0)
+      continue;
+    rec->nNetDevs++;
+  }
+}
+
+// ============================================================================
 // Plugin callbacks
 // ============================================================================
 
@@ -650,6 +775,8 @@ __hidden ncclResult_t acclPluginInit(void** context, uint64_t commHash,
                                      int nNodes, int nRanks, int rank,
                                      ncclDebugLogger_t logfn) {
   gLogFn = logfn;
+  gLogFnAddr = (void*)logfn;
+  pthread_once(&gNetCaptureOnce, acclNetCaptureResolve);
 
   struct acclCommContext* ctx = (struct acclCommContext*)calloc(1, sizeof(*ctx));
   if (!ctx) return ncclSuccess;
@@ -703,8 +830,7 @@ __hidden ncclResult_t acclPluginInit(void** context, uint64_t commHash,
   // Empty as well as unset: "" would assemble a path at the filesystem root.
   if (!outDir || !outDir[0]) outDir = "/tmp";
 
-  char hostname[256] = {0};
-  gethostname(hostname, sizeof(hostname) - 1);
+  gethostname(ctx->hostname, sizeof(ctx->hostname) - 1);
 
   // fopen() below reports only ENOENT on the assembled filename, which does not
   // say the directory is the problem, so keep this errno to name the real cause.
@@ -712,7 +838,7 @@ __hidden ncclResult_t acclPluginInit(void** context, uint64_t commHash,
 
   int pathLen = snprintf(ctx->outputPath, sizeof(ctx->outputPath),
     "%s/accl_profiler_rank%d_%s_pid%d_0x%lx.jsonl",
-    outDir, rank, hostname, (int)getpid(), (unsigned long)commHash);
+    outDir, rank, ctx->hostname, (int)getpid(), (unsigned long)commHash);
   if (pathLen < 0 || (size_t)pathLen >= sizeof(ctx->outputPath)) {
     // Truncation cuts the rank/pid/hash suffix, so every rank in the job would
     // open one shared name and interleave records. Refuse the path instead.
@@ -741,8 +867,9 @@ __hidden ncclResult_t acclPluginInit(void** context, uint64_t commHash,
                    | ncclProfileProxyOp | ncclProfileProxyStep;
 
   ACCL_INFO("ACCL Profiler: init rank=%d nRanks=%d nNodes=%d "
-            "output=%s minSize=%zu",
-            rank, nRanks, nNodes, ctx->outputPath, ctx->minMsgSize);
+            "output=%s minSize=%zu netCounters=%s",
+            rank, nRanks, nNodes, ctx->outputPath, ctx->minMsgSize,
+            gNetCapture ? "on" : "off");
   return ncclSuccess;
 }
 
@@ -1114,6 +1241,12 @@ __hidden ncclResult_t acclPluginStopEvent(void* eHandle) {
         __atomic_add_fetch(&ctx->overflowProxyOps, 1, __ATOMIC_SEQ_CST);
         acclFreeProxyOp(ctx, op);
       }
+      // Closing the last outstanding op closes the network window. If more ops
+      // start afterwards, the next "last" overwrites this snapshot.
+      if (coll->nProxyOpsCompleted + 1 == coll->nProxyOpsStarted && coll->tsNetStartUs != 0) {
+        coll->nNetDevsStop = acclNetCapture(coll->netStop);
+        coll->tsNetStopUs = acclGetTimeUs();
+      }
       coll->nProxyOpsCompleted++;
       int shouldFinalize = acclShouldFinalize(coll);
       pthread_mutex_unlock(&coll->mutex);
@@ -1192,6 +1325,32 @@ __hidden ncclResult_t acclPluginRecordEventState(void* eHandle,
     acclProxyStepChargeState(step, step->prevState, now - step->lastStateTs);
     step->lastStateTs = now;
     step->prevState = (int)eState;
+
+    // The first step that moves data opens the collective's network window: a
+    // send posted to the NIC, or received data landing. Not the proxy op start:
+    // RCCL posts the ops of every queued collective at once, so op starts of
+    // back-to-back collectives all bunch up before any of them sends.
+    int moving = (int)eState == ncclProfilerProxyStepSendWait ||
+                 (int)eState == ncclProfilerProxyStepRecvFlushWait ||
+                 (int)eState == ncclProfilerProxyStepRecvGPUWait;
+    struct acclProxyOpInfo* op = (struct acclProxyOpInfo*)step->parentObj;
+    struct acclCollInfo* coll = NULL;
+    if (moving && op && gNetCapture) {
+      // Same tenancy check as at step stop: the op slot may have been reissued.
+      pthread_mutex_lock(&op->mutex);
+      if (op->generation == step->parentGen) coll = (struct acclCollInfo*)op->parentObj;
+      pthread_mutex_unlock(&op->mutex);
+    }
+    if (coll && coll->tsNetStartUs == 0) {
+      // Captured under the lock so a concurrent finalize can never read a
+      // half-written snapshot.
+      pthread_mutex_lock(&coll->mutex);
+      if (coll->tsNetStartUs == 0 && !coll->finalized) {
+        coll->nNetDevsStart = acclNetCapture(coll->netStart);
+        if (coll->nNetDevsStart > 0) coll->tsNetStartUs = acclGetTimeUs();
+      }
+      pthread_mutex_unlock(&coll->mutex);
+    }
     return ncclSuccess;
   }
 
