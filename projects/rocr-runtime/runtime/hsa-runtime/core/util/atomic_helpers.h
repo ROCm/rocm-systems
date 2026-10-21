@@ -161,10 +161,10 @@ void __atomic_compare_exchange(
     T* object, typename std::remove_volatile<T>::type* expected,
     typename std::remove_volatile<T>::type* val, int arg0, int arg1, int arg2) {
   if constexpr (sizeof(T) == 8) {
-    InterlockedCompareExchange64(reinterpret_cast<volatile LONG64*>(object),
+    *expected = InterlockedCompareExchange64(reinterpret_cast<volatile LONG64*>(object),
       *val, *expected);
   } else {
-    InterlockedCompareExchange(reinterpret_cast<volatile LONG*>(object),
+    *expected = InterlockedCompareExchange(reinterpret_cast<volatile LONG*>(object),
       *val, *expected);
   }
 }

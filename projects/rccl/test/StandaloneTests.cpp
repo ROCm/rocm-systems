@@ -25,10 +25,10 @@ namespace RcclUnitTesting
   // run in an isolated child and the GPU count comes from EnvVars' out-of-process probe.
   // Gate in the parent only: EnvVars reports 0 GPUs in a re-exec'd child, and a skipped
   // child is scored as a pass.
-  static bool ShouldSkipForNoGpu()
+  static bool ShouldSkipForNoGpu(int minGpus = 1)
   {
     if (std::getenv(ProcessIsolatedTestRunner::kReexecMarkerEnvVar) != nullptr) return false;
-    return EnvVars().maxGpus < 1;
+    return EnvVars().maxGpus < minGpus;
   }
 
   // Non-reduce FP8 collectives (e.g. AllToAll) compare against one reference, bit-exactly:
@@ -628,10 +628,7 @@ namespace RcclUnitTesting
    * ******************************************************************************************/
   TEST(Standalone, NvlsEnable_NoEffect)
   {
-    // Gated here rather than inside the isolated body: RUN_ISOLATED_TESTS ends in
-    // EXPECT_TRUE(), so a GTEST_SKIP() in the child is reported as a pass by the parent.
-    // EnvVars probes in a fresh process, keeping this parent HIP-free for later forks.
-    if (EnvVars().maxGpus < 2) {
+    if (ShouldSkipForNoGpu(2)) {
       GTEST_SKIP() << "This test requires at least 2 devices.";
     }
 

@@ -186,7 +186,10 @@ std::vector<uint32_t> make_copy_kernel(rj_code_arch_t arch, bool with_store) {
 // Seeds kSource, runs the copy kernel, and returns the destination dword, or
 // std::nullopt when no wave halted.
 std::optional<uint32_t> run_copy(const SimArch &target, bool with_store) {
-  DbiSim sim(target.name, target.wave_size);
+  DbiSim sim;
+  sim.initialize(target.name, target.wave_size);
+  if (testing::Test::HasFatalFailure())
+    return std::nullopt;
   std::array<uint8_t, sizeof(kSeed)> seed{};
   std::memcpy(seed.data(), &kSeed, sizeof(kSeed));
   sim.write_memory(kSource, seed);
@@ -217,7 +220,8 @@ void expect_destination_untouched_without_the_store(const SimArch &target) {
 // A DbiSim runs only its first dispatch, so a second one reads back nothing even
 // though its kernel would halt, rather than the first dispatch's memory.
 void expect_reuse_is_rejected(const SimArch &target) {
-  DbiSim sim(target.name, target.wave_size);
+  DbiSim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize(target.name, target.wave_size));
   const std::vector<uint32_t> halt{build_s_endpgm(target.arch)};
   ASSERT_TRUE(
       sim.run_and_read_memory(halt, /*private_bytes=*/0, kSource, sizeof(uint32_t)).has_value())
@@ -229,7 +233,8 @@ void expect_reuse_is_rejected(const SimArch &target) {
 // A kernel that never halts reads back nothing, so its untouched memory cannot
 // pass a "stays zero" control.
 void expect_no_read_back_without_a_halt(const SimArch &target) {
-  DbiSim sim(target.name, target.wave_size);
+  DbiSim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize(target.name, target.wave_size));
   // s_branch to itself.
   EXPECT_FALSE(sim.run_and_read_memory({build_s_branch(-1, target.arch)}, /*private_bytes=*/0,
                                        kSource, sizeof(uint32_t))

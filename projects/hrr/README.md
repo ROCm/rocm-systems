@@ -92,8 +92,9 @@ User-facing capture, replay, and validation knobs. Implementation details can be
 |----------|---------|---------|
 | `HIP_HRR_CAPTURE_OUTPUT` | *(unset)* | Enable capture; path to the `.hrr` archive directory. An empty or blank value leaves capture off. Ignored, with one line on stderr, when Linux starts the program in secure-execution mode (set-user-ID, set-group-ID, file capabilities or an LSM transition) |
 | `HIP_HRR_DEBUG_ARGS` | off | Dump every captured kernel arg to the log (debug / provenance). Only a Debug build of the HIP runtime (no `NDEBUG`) reads it; a release build ignores it. Either way capture says on stderr whether it reads it, whatever the log level |
+| `HIP_HRR_HOST_SNAPSHOTS` | on | Record the pinned host memory each kernel reads before the launch, so replay can write it back. `HIP_HRR_HOST_SNAPSHOT_MAX_MB` (default `64`) caps the allocation size. The archive then holds that host memory (see DESIGN.md, Pinned Host Snapshots) |
 
-On Linux the archive is readable only by the user who captured it (directories 0700, files 0600). If the archive cannot be set up, capture is disabled with a `[HRR capture] Capture disabled` message on stderr and the application runs normally.
+On Linux the archive is readable only by the user who captured it (directories 0700, files 0600). What an archive contains, which of it each capture mode records, and why replaying an archive means running its GPU code: [PRIVACY.md](PRIVACY.md). If the archive cannot be set up, capture is disabled with a `[HRR capture] Capture disabled` message on stderr and the application runs normally.
 
 ### `hrr-playback` CLI options
 
@@ -235,7 +236,16 @@ capture.hrr/
 - **code_objects/** — code objects, content-addressed by hash (device images
   extracted by the runtime, for `hipModuleLoad` too); a launch
   records the hash so kernels sharing a name (Triton emits many `triton_`)
-  still resolve to the code object they came from
+  still resolve to the code object they came from. Their `.comment` and
+  `.debug*` sections, which hold the compiler build and the build paths of
+  debug information, are zeroed and retyped `SHT_NOBITS` before they are
+  stored, as are those of uncompressed fat binaries, so a debugger on a
+  replay sees no debug information. What the GPU loads is not touched:
+  kernel names stay, and so does a string a kernel keeps, such as the
+  source path a device `assert()` prints. Compressed (`CCOB`) fat binaries
+  and `hipLinkAddData` inputs are stored as they were passed.
+- **manifest.json** — counts, versions and device properties; the GPU's PCI
+  address, UUID and LUID are written blank
 - **Complete: NO** — original run crashed before clean shutdown; reader still recovers complete events
 
 Code objects read back from the runtime must start with `\x7fELF`,

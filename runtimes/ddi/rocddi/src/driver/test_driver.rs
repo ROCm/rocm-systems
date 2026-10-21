@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 /// Test driver instance with only the common driver contract.
 pub(crate) struct TestDriver {
-    instance: u64,
+    instance: super::DriverInstanceId,
     id: [u8; 16],
     kind: EndpointKind,
     lifetime: DriverContextLifetime,
@@ -120,7 +120,7 @@ impl AddressSpaceInfo for TestDevice {
 impl Driver for TestDriver {
     type DeviceState = TestDevice;
 
-    fn driver_instance(&self) -> u64 {
+    fn driver_instance(&self) -> super::DriverInstanceId {
         self.instance
     }
 

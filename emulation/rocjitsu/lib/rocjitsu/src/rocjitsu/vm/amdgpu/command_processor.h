@@ -21,6 +21,7 @@
 /// href="https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/conceptual/command-processor.html">ROCm
 /// CP documentation</a>
 
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/vm/amdgpu/aql/aql_packet_processor.h"
 #include "rocjitsu/vm/amdgpu/aql/aql_packet_types.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
@@ -36,6 +37,7 @@
 #include "rocjitsu/vm/amdgpu/workgroup_key.h"
 
 #include "simdojo/sim/component.h"
+#include "util/diagnostic.h"
 
 #include <algorithm>
 #include <array>
@@ -61,7 +63,6 @@
 #endif
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
 #include "hsa/hsa.h"
 RJ_DIAGNOSTIC_POP
 
@@ -216,7 +217,7 @@ public:
   /// @brief Cancel DRM work before its frontend revokes the process VM binding.
   void unregister_drm_queues(uint32_t process_id);
   void unregister_drm_queue(uint32_t queue_id, uint32_t process_id);
-  /// @brief Enqueue a DRM submission; return false if the queue has faulted.
+  /// @brief Enqueue a DRM submission; return false if its queue is missing, non-DRM, or faulted.
   [[nodiscard]] bool submit_pm4(uint32_t queue_id, uint32_t process_id, Pm4Submission submission);
   /// @brief Remove the queue currently identified by the legacy routing tuple.
   void unregister_queue(uint32_t queue_id, uint32_t process_id);
@@ -448,6 +449,8 @@ public:
   const std::vector<ComputeUnitCore *> &compute_units() const { return cus_; }
 
   /// @brief Return LDS targets selected by a cluster multicast mask.
+  /// @details Resolve targets only after all cluster peers have been admitted.
+  /// Dispatch plugin callbacks may run before cluster admission is complete.
   std::vector<ClusterLdsTarget> cluster_lds_targets(uint32_t dispatch_id, uint32_t wg_id,
                                                     uint32_t mcast_mask);
 
@@ -559,7 +562,7 @@ private:
 
   struct KernelDescriptorReadResult {
     VmAccessOutcome outcome;
-    rocr::llvm::amdhsa::kernel_descriptor_t descriptor{};
+    rocjitsu::amdhsa::kernel_descriptor_t descriptor{};
   };
 
   class ClusterWorkgroupPlacement;
@@ -648,8 +651,9 @@ private:
                                      simdojo::Tick now);
   void fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchState &qs);
   void fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs, simdojo::Tick now);
-  void dispatch_pm4(const ComputeQueueRecord &queue, Pm4DispatchState &qs,
-                    const std::array<uint32_t, 4> &dimensions);
+  util::Result dispatch_pm4(const ComputeQueueRecord &queue, Pm4DispatchState &qs,
+                            const std::array<uint32_t, 4> &dimensions,
+                            util::DiagnosticEmitter emit_error);
   void service_command_streams(simdojo::Tick now);
   void service_pm4_ring(ComputeQueueRecord &queue, simdojo::Tick now);
 
