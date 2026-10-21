@@ -4330,7 +4330,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_SysmemSegmentBlocksCeRegistered) {
             [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
                struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
         ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
-                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool, bool) { return true; });
+                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
         ScopedHook ipcEligible(g_allReduceDdaIpcEligible,
                                [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
         ncclComm* comm = MakeCommWithArch("gfx942"); // gfx942: ddaVmmMax[AR]=8MiB, ceEnabledByArch=true
@@ -4361,7 +4361,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_RecvWinSysmemSegmentBlocksCeRegister
             [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
                struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
         ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
-                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool, bool) { return true; });
+                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
         ScopedHook ipcEligible(g_allReduceDdaIpcEligible,
                                [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
         ncclComm* comm = MakeCommWithArch("gfx942"); // gfx942: ddaVmmMax[AR]=8MiB, ceEnabledByArch=true
@@ -4799,7 +4799,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_DdaFabricLLChosenOnGfx1250) {
       "Wrap_SelectAllReduce_DdaFabricLLChosenOnGfx1250",
       []() {
         ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
-                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool, bool) { return true; });
+                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
         ScopedHook llEligible(g_allReduceDdaFabricLLEligible,
                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
         ncclComm* comm = MakeCommWithArch("gfx1250");
@@ -4904,7 +4904,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_DdaFabricLL128ChosenWhenLLNotEligibl
           return def;
         };
         ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
-                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool, bool) { return true; });
+                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
         ScopedHook ll128Eligible(g_allReduceDdaFabricLL128Eligible,
                                  [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
                                    return true;
@@ -4937,7 +4937,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_DdaFabricLL128ChosenAboveLegacyThres
           return def;
         };
         ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
-                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool, bool) { return true; });
+                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
         ScopedHook ll128Eligible(g_allReduceDdaFabricLL128Eligible,
                                  [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
                                    return true;
@@ -4966,7 +4966,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_DdaFabricVmmChosenWhenNeitherLLNorLL
       "Wrap_SelectAllReduce_DdaFabricVmmChosenWhenNeitherLLNorLL128Eligible",
       []() {
         ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
-                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool, bool) { return true; });
+                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
         ScopedHook vmmEligible(g_allReduceDdaFabricEligible,
                                [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
         // g_allReduceDdaFabricLLEligible / LL128Eligible left at their default (false).
@@ -4991,7 +4991,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_DdaIpcChosenOnNonGfx1250Arch) {
       "Wrap_SelectAllReduce_DdaIpcChosenOnNonGfx1250Arch",
       []() {
         ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
-                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool, bool) { return true; });
+                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
         ScopedHook ipcEligible(g_allReduceDdaIpcEligible,
                                [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
         ncclComm* comm = MakeCommWithArch("gfx942"); // not gfx1250
@@ -5359,7 +5359,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_ForceDdaChoosesDdaWhenEligible) {
       []() {
         g_loadParam = ForceParam("RCCL_FORCE_DDA", int64_t(1));
         ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
-                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool, bool) { return true; });
+                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
         ScopedHook llEligible(g_allReduceDdaFabricLLEligible,
                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
         ncclComm* comm = MakeCommWithArch("gfx1250");
@@ -6412,7 +6412,7 @@ using HookFor = ScopedHook<typename HookSig<Slot>::type>;
 // AllReduce DDA path taken and its LL tier eligible; ArVmmEligible adds the VMM tier.
 struct ArDdaHooks {
   HookFor<decltype(g_allReduceShouldTakeDdaPath)> shouldTakeDda{
-      g_allReduceShouldTakeDdaPath, [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool, bool) { return true; }};
+      g_allReduceShouldTakeDdaPath, [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; }};
   HookFor<decltype(g_allReduceDdaFabricLLEligible)> llEligible{
       g_allReduceDdaFabricLLEligible, [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; }};
 };
