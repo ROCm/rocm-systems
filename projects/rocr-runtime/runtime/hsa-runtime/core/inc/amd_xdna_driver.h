@@ -172,28 +172,29 @@ public:
 
   /// @brief Submits a contiguous range of UMQ packets to CERT and blocks until they are retired.
   /// Mirrors @ref SubmitCmdChain's caller contract (a batch of packets in, @p num_completed
-  /// packets' completion signals already released out, the failing packet and everything after it
-  /// left untouched on a failure) even though UMQ has no equivalent of KMQ's single ioctl that
-  /// chains a whole batch in the kernel: each packet gets its own doorbell ring and wait here,
-  /// one at a time. Confirmed necessary on real hardware: a full ELF that starts right after the
-  /// previous one finished produces corrupted output, because its array configuration is not safe
-  /// to apply over a run that has just ended (XRT's runlist corrupts the same way).
+  /// packets' completion signals already released out) even though UMQ has no equivalent of
+  /// KMQ's single ioctl that chains a whole batch in the kernel: every packet is translated and
+  /// readied here, then rung with one doorbell write for the whole batch.
+  ///
+  /// A translate failure is the one case this does not mirror: since nothing is rung until every
+  /// packet has translated, a bad packet partway through aborts the whole batch (@p num_completed
+  /// is 0), not just itself and what follows.
   ///
   /// @param[in,out] ring the queue's packet ring; each packet translated in place before it is
   /// submitted
   /// @param[in] ring_capacity number of packet slots in @p ring
   /// @param[in] queue_metadata this queue's UMQ metadata, as created by CreateUserModeQueue; its
   /// queue header's write_index is advanced as each packet is readied
-  /// @param[in] doorbell the mapped hardware doorbell to ring per packet
+  /// @param[in] doorbell the mapped hardware doorbell to ring once for the whole batch
   /// @param[in] first_pkt_idx index of the first packet in the queue
   /// @param[in] num_pkts number of packets to submit, starting at @p first_pkt_idx. Must be
   /// greater than 0.
   /// @param[in] agent agent that owns the queue
   /// @param[out] num_completed how many packets, counting from @p first_pkt_idx, executed and had
-  /// their completion signals released. @p num_pkts on success. On failure this is the prefix that
-  /// completed before the failure, so the caller can consume exactly those and leave the rest. If
-  /// the failure was the wait for a packet already handed to CERT, that packet may still run until
-  /// the hardware context is destroyed.
+  /// their completion signals released. @p num_pkts on success. On a translate failure this is 0.
+  /// On a wait failure this is the prefix that completed before it, so the caller can consume
+  /// exactly those and leave the rest; that failing packet may still run until the hardware
+  /// context is destroyed.
   hsa_status_t SubmitUmqPackets(hsa_amd_aie_kernel_dispatch_packet_t* ring, uint32_t ring_capacity,
                                 void* queue_metadata, volatile uint32_t* doorbell,
                                 uint64_t first_pkt_idx, uint64_t num_pkts,

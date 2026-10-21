@@ -2754,6 +2754,57 @@ TEST_F(FullElfDispatchTest, ElfMalformedPacketsRejected) {
   }
 }
 
+// aie4 only: SubmitUmqPackets rings one doorbell for a whole batch, so a malformed packet
+// anywhere in it is caught before any packet is rung, not just itself and what follows (see
+// XdnaDriver::SubmitUmqPackets). A malformed packet in the middle of three must therefore leave
+// all three outputs untouched, including the ones before it that a per-packet design would
+// already have run.
+TEST_F(FullElfDispatchTest, ElfMalformedPacketMidBatchAbortsWholeBatch) {
+  if (!is_aie4) {
+    GTEST_SKIP() << "tests UMQ's whole-batch admission, specific to aie4's SubmitUmqPackets";
+  }
+  constexpr std::uint32_t num_pkts = 3;
+  constexpr std::uint32_t bad_index = 1;
+  ASSERT_GE(min_queue_size, num_pkts);
+
+  dispatch_error err;
+  hsa_queue_t* queue = nullptr;
+  ASSERT_EQ(create_queue_with_error_callback(aie_agents.front(), min_queue_size, &err, &queue),
+            HSA_STATUS_SUCCESS);
+
+  vsadd_elf_buffers bufs;
+  constexpr std::uint32_t sentinel = 0xD0D0D0D0;
+  ASSERT_EQ(bufs.allocate(data_pool, kernarg_pool, num_pkts, 0, sentinel), HSA_STATUS_SUCCESS);
+
+  hsa_signal_t signal{};
+  ASSERT_EQ(hsa_signal_create(num_pkts, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
+  std::uint64_t wr_idx = 0;
+  for (std::uint32_t i = 0; i < num_pkts; ++i) {
+    wr_idx = aie_full_elf_kernel::dispatch_packet(
+        elf_kernel, bufs.in(i), bufs.out(i), bufs.args(i), signal, queue,
+        i == bad_index
+            ? std::function<void(hsa_amd_aie_kernel_dispatch_packet_t&)>(
+                  [](hsa_amd_aie_kernel_dispatch_packet_t& p) {
+                    p.kernel_object_low = 0;
+                    p.kernel_object_high = 0;
+                  })
+            : std::function<void(hsa_amd_aie_kernel_dispatch_packet_t&)>());
+  }
+  hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
+  ExpectRejected(err, queue, signal, num_pkts);
+
+  for (std::uint32_t i = 0; i < num_pkts; ++i) {
+    SCOPED_TRACE(i);
+    for (std::size_t e = 0; e < vsadd_elf_buffers::n; ++e) {
+      ASSERT_EQ(bufs.out(i)[e], sentinel)
+          << "packet " << i << " ran despite packet " << bad_index << " being malformed";
+    }
+  }
+
+  EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
+}
+
 // The full-ELF counterpart of DispatchTest.KernargSizeExceedsBufferRejected, with an outcome that
 // depends on the queue type. KMQ flushes [ptr, ptr + size) of every argument around the dispatch,
 // so a size larger than the argument's allocation would walk that flush off the end of the

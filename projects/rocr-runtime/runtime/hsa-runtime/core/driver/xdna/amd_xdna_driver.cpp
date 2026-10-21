@@ -1930,57 +1930,71 @@ hsa_status_t XdnaDriver::SubmitUmqPackets(hsa_amd_aie_kernel_dispatch_packet_t* 
                                           volatile uint32_t* doorbell, uint64_t first_pkt_idx,
                                           uint64_t num_pkts, const core::Agent& agent,
                                           uint64_t* num_completed) const {
-  // Every early return below only happens between packets, so this always reflects exactly how
-  // many of the batch's packets completed and were retired.
   *num_completed = 0;
 
   const auto& aie_agent = static_cast<const AieAgent&>(agent);
   host_queue_header* header = static_cast<UmqMetadata*>(queue_metadata)->header;
 
-  // One packet at a time, each rung and waited on individually, rather than the whole batch under
-  // one doorbell: CERT retiring a packet does not mean the array is safe to reconfigure for the
-  // next one, since a full ELF's control code does not reset its own memtile DMA channels before
-  // reusing them. The kernel owns that, via aiex.dma_channel_reset_for on its objectFifos
-  // (confirmed on real aie4 hardware to remove the requirement entirely, not just reduce it).
+  // Every packet in the batch is translated and readied before the doorbell is rung once for all
+  // of them: CERT does not act on write_index until the doorbell is rung (confirmed on real
+  // hardware -- a batch readied this way runs every packet correctly, in submission order), so
+  // nothing here is handed to CERT until the whole batch has translated cleanly. Each packet still
+  // gets its own control-code copy, since concurrent dispatches of the same kernel must not share
+  // one.
+  //
+  // Ready-then-ring changes the earlier per-packet design's failure contract for a translate
+  // failure specifically: since nothing is rung until every packet has translated, a bad packet
+  // partway through aborts the whole batch, not just itself and what follows, so num_completed
+  // stays 0 rather than counting packets that would have run before it.
+  std::vector<void*> ctrl_copies(num_pkts);
   for (uint64_t i = 0; i < num_pkts; ++i) {
     const uint64_t idx = first_pkt_idx + i;
     hsa_amd_aie_kernel_dispatch_packet_t& pkt = ring[idx % ring_capacity];
 
     const hsa_status_t translate_err = TranslateUmqPacket(pkt, agent);
     if (translate_err != HSA_STATUS_SUCCESS) {
-      // Rejected before reaching the device: nothing in this packet was readied, so it does not
-      // count towards num_completed, and the doorbell is never rung.
+      // None of this batch is rung, so nothing else will free the copies already made for the
+      // packets translated so far.
+      for (uint64_t j = 0; j < i; ++j) {
+        aie_agent.system_deallocator()(ctrl_copies[j]);
+      }
       return translate_err;
     }
+    // TranslateUmqPacket overwrote this packet's kernel_object with the address of a per-dispatch
+    // control-code copy it allocated through this same agent's system allocator.
+    ctrl_copies[i] = reinterpret_cast<void*>(
+        (static_cast<uint64_t>(pkt.kernel_object_high) << 32) | pkt.kernel_object_low);
 
     // CERT's own write_index is a monotonic count of readied packets, i.e. idx+1 itself (an index
     // one past the last readied packet). Each packet is its own singleton chain, so chain_flag
     // stays 0, which the application's opcode already leaves it at (see
     // HOST_QUEUE_PACKET_EXEC_BUF).
     atomic::Store(&header->write_index, idx + 1, std::memory_order_release);
-    store_fence();
-    // Hardware doorbell supports AQL semantics, the same as a GPU queue: the value rung is the
-    // index of the last readied packet, not a count.
-    *doorbell = static_cast<uint32_t>(idx);
+  }
+  store_fence();
+  // Hardware doorbell supports AQL semantics, the same as a GPU queue: the value rung is the
+  // index of the last readied packet, not a count, so one ring covers the whole batch.
+  *doorbell = static_cast<uint32_t>(first_pkt_idx + num_pkts - 1);
+
+  for (uint64_t i = 0; i < num_pkts; ++i) {
+    const uint64_t idx = first_pkt_idx + i;
+    hsa_amd_aie_kernel_dispatch_packet_t& pkt = ring[idx % ring_capacity];
 
     // Block until CERT actually retires this packet -- submission is synchronous on the calling
     // thread here, same as KMQ's per-batch ioctl (which blocks inside the kernel driver instead of
-    // here, but the caller-visible contract is identical). A failed wait stops the chain the same
+    // here, but the caller-visible contract is identical). A failed wait stops the batch the same
     // way a rejected packet does.
-    //
-    // TranslateUmqPacket overwrote this packet's kernel_object with the address of a per-dispatch
-    // control-code copy it allocated through this same agent's system allocator; freed here
-    // either way.
-    void* const ctrl_copy = reinterpret_cast<void*>(
-        (static_cast<uint64_t>(pkt.kernel_object_high) << 32) | pkt.kernel_object_low);
     const hsa_status_t wait_err = WaitUmqCmd(fd_, queue_metadata, idx);
-    aie_agent.system_deallocator()(ctrl_copy);
+    // Freed here either way: CERT may still be running the packet against this copy if the wait
+    // itself failed, but that only happens on a real driver/hardware error (not the EAGAIN/EINTR
+    // retries inside it), which already leaves the queue unusable, so this is freed rather than
+    // leaked.
+    aie_agent.system_deallocator()(ctrl_copies[i]);
     if (wait_err != HSA_STATUS_SUCCESS) {
       return wait_err;
     }
     // Retired is not the same as succeeded: a failed packet is retired too, so its return code
-    // decides. A failed packet is not retired here, so its completion signal is never decremented,
-    // and the packets after it are not run, the same as a rejected one.
+    // decides. A failed packet is not retired here, so its completion signal is never decremented.
     const auto& cert = reinterpret_cast<const host_queue_packet&>(pkt);
     const uint32_t return_code =
         *reinterpret_cast<const volatile uint32_t*>(&cert.completion_signal);
