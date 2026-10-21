@@ -12,7 +12,7 @@
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rdna_isa_base.h"
 
-#include "hsa/AMDHSAKernelDescriptor.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 
 #include <gtest/gtest.h>
 
@@ -29,7 +29,7 @@
 namespace rocjitsu {
 namespace {
 
-namespace kd = rocr::llvm::amdhsa;
+namespace kd = rocjitsu::amdhsa;
 using KD = kd::kernel_descriptor_t;
 
 uint32_t add_elf_name(std::vector<uint8_t> &names, std::string_view name) {
@@ -47,8 +47,8 @@ uint64_t align_up(uint64_t value, uint64_t alignment) {
 // `granulated`; everything else zero.
 KD make_kd(uint32_t granulated) {
   KD desc{};
-  AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                  granulated);
+  RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                     granulated);
   return desc;
 }
 

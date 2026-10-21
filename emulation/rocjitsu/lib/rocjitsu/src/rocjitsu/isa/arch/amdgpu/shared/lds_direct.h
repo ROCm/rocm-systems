@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -14,7 +15,7 @@ inline void execute_lds_direct_load(Instruction &inst, Wavefront &wf, uint32_t d
   if (!wf.exec())
     return;
   const uint32_t type = (wf.m0() >> 16) & 7, address = wf.m0() & 0xffff;
-  if ((address & 3) || type == 3 || type >= 6 || dst >= wf.num_vgprs()) {
+  if (!valid_lds_direct_operand(wf.m0()) || dst >= wf.num_vgprs()) {
     wf.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
@@ -25,9 +26,7 @@ inline void execute_lds_direct_load(Instruction &inst, Wavefront &wf, uint32_t d
   d->num_elems = 1;
   d->sign_extend = type & 4;
   d->wait_counter_type = WaitCounterType::EXPCNT;
-  for (uint32_t quad = 0; quad < wf.wf_size(); quad += 4)
-    if (wf.exec() & (uint64_t{15} << quad))
-      d->exec_mask |= uint64_t{15} << quad;
+  d->exec_mask = whole_active_quads(wf.exec());
   d->lane_mask = d->exec_mask;
   d->per_lane_addr.fill(wf.lds_base() + address);
   inst.set_data(std::move(d));

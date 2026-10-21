@@ -1,145 +1,55 @@
+<!-- Copyright (c) 2026 Advanced Micro Devices, Inc. -->
 <!-- SPDX-License-Identifier: MIT -->
 
 # rocddi
 
-rocddi is a private Rust device interface for ROCm runtime frontends. It
-models passive topology endpoints, explicit activation, memory, and resource
-ownership. GPU execution, PCI attachment, and operating-system handles enter
-through separate capabilities and platform modules.
+rocddi is the private Rust device layer used by
+[libamdf](../libamdf/README.md) and [libhsa](../libhsa/README.md). It owns
+hardware discovery, driver contexts, device activation, and native memory and
+queue resources. The frontends own their C APIs, public handles, and runtime
+policy. rocddi is an `rlib`; it exports no C API and promises no stable Rust
+interface.
 
-This crate belongs to the four-package `runtimes` Cargo workspace. The runtime
-components are early-access and outside the repository default installation. The `rocddi` crate is an `rlib`. It installs
-no headers, exports no C symbols, and promises no stable Rust ABI.
+## Runtime model
 
-The only native implementation is the Linux KFD/DRM GPU backend on x86-64
-and AArch64. Public topology and memory records keep Linux and GPU fields in
-kind- or platform-specific modules. Private driver traits separate provider,
-host allocation, general allocation, virtual memory, GPU queue, and GPU
-profiling services. The common provider session and host and device
-allocation owners accept a fake CPU provider in tests. Those tests cover
-discovery, activation, foreign endpoints, allocation, busy teardown, and
-failed cleanup without KFD, DRM, or PCI. Fake GPU queue and detached
-virtual-memory providers check foreign-session rejection, mapping occupancy,
-cleanup retry, and the order in which native owners and providers are dropped.
-The public `Session` selects the native backend for the build target. Both C
-frontends route Linux interop through platform modules. Another OS needs its
-own backend and frontend adapters.
+A `Session` is a frontend's scope for discovery, activation, and driver
+shutdown. Creating one constructs an instance of each compiled backend
+without activating a device or acquiring a GPU context. Session clones share
+those driver instances. Discovery returns passive `Endpoint` snapshots.
+`Session::query_endpoint_details` and `Session::activate` revalidate an
+endpoint; activation returns a `Device` that owns its driver state. GPU
+operations require the checked `Device::gpu` view. Each discovery reads
+current backend topology; endpoint records can become stale. Separate sessions
+have independent driver identities. Sessions using
+`DriverContextLifetime::Process` reuse the native primary KFD context.
 
-## Architecture
+`DriverContextLifetime::Process` permits a process-owned driver context to
+survive session shutdown; `DriverContextLifetime::Session` requires the context
+and its bindings to be released with the session. `Session::destroy` requires
+other session clones, devices, and driver-backed resources to be released
+first. Failed native cleanup retains its owners for retry or safe process
+teardown. See the [safety guide](docs/safety.md) for these ownership rules.
 
-The peer frontends and shared package are:
+The current backend is Linux KFD/DRM on x86-64 and AArch64. It discovers GPU
+endpoints; rocddi has no CPU or NPU device backend yet. Host-only memory works
+without an activated GPU. Availability of GPU operations depends on the
+discovered device and driver capabilities.
 
-- `ddi/libamdf`, which implements the AMDF v3 table ABI and builds
-  `libamdf.a`;
-- `hsa/libhsa`, which implements early-access HSA and AMD HSA extension
-  entry points;
-- the workspace-root `rocddi-frontends` package, which links both entry
-  point sets into one Linux shared object and packages it under AMDF and
-  HSA library names. It is the workspace's only shared release artifact.
+## Code layout
 
-Build the shared runtime with CMake from `runtimes` as shown below. Its
-`libamdf.so`, `libamdf.so.0`, and `libhsa_runtime64.so` aliases resolve to
-the same `libhsa-runtime64.so.1` image and one rocddi process context. The
-package retains its exact KFD and DRM file owners through process exit, so its
-shared object uses `NODELETE`. The last active frontend
-session disables KFD runtime enablement without closing the retained VM.
-The AMDF static library remains a separate build with its own process context.
-It is not a shared-process substitute for the shared image.
+- `session.rs` coordinates driver instances and their context lifetime;
+  `topology/` holds passive endpoint information.
+- `driver.rs` defines private backend contracts; `driver/linux_kfd/` implements
+  the current GPU backend.
+- `device/` owns activated devices, events, GPU queues, copies, and profiling.
+- `memory/storage/` owns runtime records; `memory/host.rs` provides host-only
+  backing; `memory/device/` owns device-qualified allocations, registrations,
+  and virtual mappings; `memory/interop/` holds platform sharing interfaces.
+- `os/` provides host services used by the core and the Linux backend.
 
-The frontends own public handles, statuses, callbacks, initialization and
-shutdown, ABI validation, loaders, and tooling semantics. rocddi owns only
-shared native mechanisms and their resource lifetimes. Neither frontend may
-depend on the other.
+## Build and verification
 
-The core source is organized by ownership domain:
-
-- `session.rs` owns the root session lifetime and cross-device coordination;
-- `topology/` owns passive endpoint metadata. `EndpointKind` separates CPU,
-  GPU, NPU, and future endpoint kinds; PCI attachment is optional, while
-  `topology::platform::linux` carries KFD and DRM identities and procfs/sysfs
-  host facts needed by Linux compatibility frontends;
-- `device.rs` owns explicitly activated endpoint state, core lifecycle checks,
-  and kind-neutral introspection. `gpu/` is the checked GPU capability view and
-  exposes GPU queues and profiling, with KFD events below `gpu::event::linux`;
-- `memory/` owns provider-generic allocation, address-reservation, and
-  mapping owners. `memory::interop::linux` contains DMA-BUF, KFD IPC, and KFD
-  SVM contracts used to exchange backing with Linux APIs and other processes;
-- `driver/` is the private downward-facing platform contract, with the current
-  Linux KFD and DRM implementation under `driver/builtin/linux_kfd/`. Linux
-  memory and event interop have separate driver contracts so future platform
-  backends do not need to implement file-descriptor or KFD event operations.
-
-The [safety boundary and resource state guide](docs/safety.md) records the
-native reachability rules shared by the core and both adapters.
-
-A topology endpoint is passive metadata. It is not an activated `Device` and
-does not authorize native execution or memory operations. The current backend
-publishes only GPU endpoints, but GPU geometry and queue capabilities live in
-the `Gpu` endpoint-kind payload instead of being mandatory universal fields.
-Likewise, Linux identities and sharing mechanisms stay in Linux-specific
-extensions rather than defining the core endpoint or memory contracts.
-
-### Ambiguous queue creation
-
-Native queue creation borrows frontend-owned GPU addresses. HSA supplies an
-inactive/error signal allocation and optional scratch allocation; AMDF may
-borrow a public scratch memory object. The core owns the ring, pointer and EOP
-backing, context storage, device VM, and KFD connection.
-
-Before a successful native CREATE, an ordinary error releases acquired core
-backing and the frontend drops its borrowed resources. If a later step fails
-with a known queue ID, the core destroys that queue before releasing backing.
-An EFAULT from CREATE can conceal a live queue ID, and a failed rollback
-DESTROY may leave the queue live. In either case the core reports
-`QueueBackingMayBeLive` for uncertain native ownership and retains its native
-dependency graph without replaying an unknown or possibly recycled ID.
-Both frontends pass external owners through `create_queue_with_dependencies`.
-The core protects those owners before invoking native creation. On an uncertain
-CREATE result or unwind, it retains them; on success it returns them with the
-queue for the frontend to keep through destruction.
-HSA supplies its signal event, signal storage, and scratch. AMDF supplies a
-scratch memory child borrow that prevents public memory destruction. HSA's
-installed KFD mailbox page has process lifetime. No public queue handle is
-issued after failed creation. If a later unpublished rollback fails or
-unwinds, `abandon_unpublished_with_dependencies` retains both the queue and
-external owners. Uncertain resources remain retained until process teardown
-unless a future recovery mechanism proves release.
-
-Scripted KFD tests in `src/driver/builtin/linux_kfd/tests/queue.rs` inject
-CREATE EFAULT and rollback DESTROY failures; a creation-closure panic covers
-an unwind. The tests verify that uncertain KFD outcomes retain native backing
-and the external owner, an unwind retains the external owner, certain failure
-releases that owner, and success returns it to the caller. Both frontends use
-these shared ownership operations. The
-[GFX1201 C ABI fault probes](tests/gpu/README.md) exercise ambiguous CREATE
-and failed rollback through both frontends.
-
-Public API declarations live separately under `../../api-headers/include`. The
-[runtime API headers README](../../api-headers/README.md) records their
-authoritative sources and synchronization rules.
-
-## Build and validation
-
-Run all commands in this section from `runtimes`:
-
-```sh
-cargo build --workspace --locked
-cargo build --workspace --release --locked
-cargo test --workspace --all-targets --all-features --locked
-cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-cargo fmt --all --check
-RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
-python3 ddi/libamdf/tests/abi/check_layout.py
-python3 hsa/libhsa/tests/abi/check_layout.py
-cmake -S . -B /tmp/rocddi-cmake -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build /tmp/rocddi-cmake
-```
-
-The CMake build from `runtimes/` stages the same combined shared image and
-AMDF static archive. Native allocations, virtual mappings, and frontend pools
-use the queried host page size, including on 64 KiB page hosts. GPU execution
-on a 64 KiB AArch64 KFD host remains a separate qualification step.
-
-The native C probes under `ddi/libamdf/tests/abi` and the GPU examples
-under `ddi/libamdf/examples` can be built directly when those checks are
-needed. GPU execution requires `/dev/kfd` and DRM render-node access.
+See the [workspace instructions](../../README.md) for CMake and Cargo commands.
+The Rust unit and integration tests cover host contracts. The ignored GPU CTS
+cases require a qualified host and do not run in the default suite. The runtime
+is early-access and is not part of the repository's default build or installation.

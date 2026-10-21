@@ -2,7 +2,21 @@
 # SPDX-License-Identifier: MIT
 
 include(rj_configure_target)
-include(rj_find_amdcxx)
+include(rj_configure_device_tests)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_test(
+        NAME cmake.hip_toolchain_failure
+        COMMAND
+            ${CMAKE_COMMAND} "-DRJ_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
+            "-DRJ_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/hip_toolchain_failure"
+            "-DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}"
+            "-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+            "-DGOOGLETEST_SOURCE_DIR=${googletest_SOURCE_DIR}"
+            "-DFLATBUFFERS_SOURCE_DIR=${flatbuffers_SOURCE_DIR}" -P
+            ${CMAKE_CURRENT_SOURCE_DIR}/check_hip_toolchain_failure.cmake
+    )
+endif()
 
 # Device kernels (compiled from HIP sources for simulator testing).
 add_subdirectory(kernels)
@@ -21,6 +35,7 @@ set(RJ_OBJECT_LIBS
     rocjitsu_plugin_logging
     rocjitsu_plugin_race_detector
     rocjitsu_plugin_throughput
+    rocjitsu_plugin_instruction_mix
     rocjitsu_plugin_loader
     rocjitsu_vm_risc_v
     rocjitsu_config
@@ -163,7 +178,9 @@ if(RJ_INSTALL_TESTS)
 
     install(FILES "${RJ_INSTALL_CTEST_FILE}" DESTINATION ${RJ_INSTALL_TEST_DIR})
     install(
-        FILES "${PROJECT_SOURCE_DIR}/cmake/rj_run_filtered_gtest.cmake"
+        FILES
+            "${PROJECT_SOURCE_DIR}/cmake/rj_run_filtered_gtest.cmake"
+            "${PROJECT_SOURCE_DIR}/cmake/rj_run_gtest_shard.cmake"
         DESTINATION ${RJ_INSTALL_TEST_DIR}
     )
     install(
@@ -421,6 +438,16 @@ rj_add_gtest_tests(rj_decode_fuzz_test)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(
+    NAME RocjitsuWaitCheckingCliTest
+    COMMAND
+        ${CMAKE_COMMAND} -E env RJ_ROCJITSU=$<TARGET_FILE:rocjitsu_bin>
+        RJ_SIM_CONFIG=${CMAKE_SOURCE_DIR}/configs/gfx1250_mi455x.json
+        RJ_DBT_CONFIG=${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_simulated_gfx942.json
+        ${Python3_EXECUTABLE} -B
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_wait_checking_cli.py -v
+)
+set_tests_properties(RocjitsuWaitCheckingCliTest PROPERTIES TIMEOUT 120)
+add_test(
     NAME DecodeDifferentialUnitTest
     COMMAND
         ${Python3_EXECUTABLE}
@@ -446,6 +473,12 @@ add_test(
         ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_pretranslate.py -v
 )
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_test(
+        NAME CorpusRunnerUnitTest
+        COMMAND
+            ${Python3_EXECUTABLE} -B
+            ${CMAKE_CURRENT_SOURCE_DIR}/corpus/test-run-corpus-tests.py -v
+    )
     add_test(
         NAME VfioGuestRunUnitTest
         COMMAND
@@ -505,7 +538,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             PRIVATE
                 ${ROCJITSU_INCLUDE_DIR}
                 ${ROCJITSU_SRC_DIR}
-                ${HSA_INCLUDE_DIR}
                 $<TARGET_PROPERTY:util,INTERFACE_INCLUDE_DIRECTORIES>
                 $<TARGET_PROPERTY:simdojo,INTERFACE_INCLUDE_DIRECTORIES>
         )
@@ -566,6 +598,7 @@ add_executable(
     cdna5_cluster_test.cpp
     cdna5_dispatch_memory_test.cpp
     cdna5_execution_test.cpp
+    numeric_encoding_regression_test.cpp
     cdna5_gfx1251_simulation_test.cpp
     cdna5_instruction_test.cpp
     cdna5_sdma_test.cpp
@@ -579,15 +612,20 @@ add_executable(
     sdma_packet_processor_test.cpp
     sdma_ring_consumer_test.cpp
     cdna5_tensor_dma_test.cpp
+    ds_memory_snapshot_test.cpp
+    ds_gws_test.cpp
+    buffer_lds_transfer_test.cpp
+    scalar_buffer_store_test.cpp
     lds_test.cpp
     lds_counter_test.cpp
     l2_cache_test.cpp
+    l2_maintenance_mutex_test.cpp
+    l2_shard_epoch_test.cpp
     instruction_cache_test.cpp
     async_mma_policy_test.cpp
     matrix_coexecution_test.cpp
     packed_fmac_constants_test.cpp
     matrix_coexecution_lifetime_test.cpp
-    scaling_thread_counts_test.cpp
     sparse_memory_test.cpp
     cpu_dispatch_pool_test.cpp
     simdojo_sim_test.cpp
@@ -600,12 +638,21 @@ add_executable(
     buffer_operand_test.cpp
     buffer_descriptor_vcc_test.cpp
     buffer_format_test.cpp
+    image_access_test.cpp
     image_resource_test.cpp
     smem_sbase_operand_test.cpp
     shared_infra_test.cpp
     scalar_buffer_test.cpp
+    scalar_cache_policy_test.cpp
     transcendental_test.cpp
     comparison_test.cpp
+    denormal_test.cpp
+    floating_operation_test.cpp
+    input_denormal_test.cpp
+    minmax_test.cpp
+    output_denormal_test.cpp
+    output_modifier_test.cpp
+    source_modifier_test.cpp
     amdgpu_elf_test_support.cpp
     analysis/liveness_test.cpp
     patch/spill_manager_test.cpp
@@ -613,6 +660,7 @@ add_executable(
     patch/instruction_builder_test.cpp
     patch/vector_builder_test.cpp
     patch/smem_builder_test.cpp
+    patch/entry_prologue_test.cpp
     patch/kernarg_extension_test.cpp
     patch/sidecar_metadata_test.cpp
     patch/trampoline_builder_test.cpp
@@ -625,6 +673,12 @@ add_executable(
     dbi/dbi_spill_sim_test.cpp
     dbi/dbi_arg_sim_test.cpp
     dbi/dbi_mask_sim_test.cpp
+    dbi/dbi_entry_prologue_sim_test.cpp
+    dbi/dbi_sim_memory_test.cpp
+    dbi/log_record_probe_test.cpp
+    dbi/scalar_builders_test.cpp
+    dbi/dbi_log_record_sim_test.cpp
+    dbi/kernarg_sgpr_slot_test.cpp
     code/code_object_target_id_test.cpp
     code/relocation_function_table_test.cpp
     dbt/semantic_scratch_test.cpp
@@ -654,11 +708,12 @@ add_executable(
     gfx12_dot_test.cpp
     packed_wmma_test.cpp
     atomic_semantics_and_decode_test.cpp
+    scalar_atomic_test.cpp
     isa_target_registry_test.cpp
     pseudo_scalar_exec_test.cpp
-    valu_fp_mode_test.cpp
     scalar_scc_test.cpp
     vskip_test.cpp
+    isa_diagnostics_test.cpp
     cdna3_predicate_mask_test.cpp
     scoped_temp_test.cpp
     wave_debug_test.cpp
@@ -728,13 +783,16 @@ add_executable(
     simd_correctness/vop3p_mov_b32_simd_correctness_test.cpp
     simd_correctness/vop3p_dot_simd_correctness_test.cpp
     execution_plugin_test.cpp
+    execution_plugin_register_test.cpp
+    execution_plugin_memory_test.cpp
+    execution_plugin_race_test.cpp
     plugin_config_resolver_test.cpp
     plugin_loader_test.cpp
     race-detector/race_detector_counter_capacity_tests.cpp
     race-detector/race_detector_event_registry_test.cpp
+    race-detector/race_detector_lds_history_test.cpp
     race-detector/race_detector_tests.cpp
     race-detector/interval_set_tests.cpp
-    race-detector/race_log_expectation_test.cpp
     big_int_test.cpp
     data_types_test.cpp
     drm_info_layout_test.cpp
@@ -814,6 +872,21 @@ target_link_libraries(
 )
 target_include_directories(rocjitsu_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 rj_configure_target(rocjitsu_tests TEST)
+# GCC 14.3, GCC 15.2, and GCC 16.0.1 (20260322) emit a false-positive
+# -Wstringop-overflow for an unreachable copy in the LDS backing boundary
+# test with _FORTIFY_SOURCE=3. Keep the warning visible without letting
+# -Werror reject this source, and retain the fortified reads.
+if(
+    CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+    AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "14"
+)
+    set_property(
+        SOURCE lds_test.cpp
+        APPEND
+        PROPERTY COMPILE_OPTIONS -Wno-error=stringop-overflow
+    )
+endif()
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_compile_definitions(
         rocjitsu_tests
@@ -839,16 +912,136 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         )
     endif()
 endif()
+set(_rj_l2_mutex_cases
+    ReaderRechecksAdmissionAfterWriterEnters
+    WriterWaitsAgainAfterNonzeroCounterWake
+    CoherenceDomainWritersUnderOuterLocks
+    FailedWriterTryReopensReaderAdmission
+    WriterExcludesReadersAndOtherWriters
+    ConcurrentReadersObserveCompleteWriterUpdates
+    PendingWriterClosesAdmissionAndWakesAfterLastReader
+    CollidingReadersOverlapAndWriterWaitsForTheLastOwner
+    ExclusiveUnlockWakesBlockingReaders
+    RepeatedMaintenanceWakesArrivingReaders
+)
+set(_rj_idle_wakeup_cases
+    TerminationTest.RequestExitRacingShutdownIsSafe
+    TerminationTest.IdleExitAndLastPrimaryReleaseWakeEveryWorkerMode
+    TerminationTest.QuiescentEngineDoesNotSpinTheHost
+    AsyncCausalityTest.StaleWakeDoesNotHideConcurrentPublication
+    AsyncCausalityTest.QuiescentPublicationsToEveryPartitionMakeProgress
+)
+# Exclude exactly the cases registered below, so future cases still participate
+# in normal discovery until they receive an explicit timeout registration.
+set(_rj_gtest_exclusions
+    "-*Benchmark*:*RequestExitWakesAllPartitions*:MatrixCoexecutionTest.SharedPoolMakesProgressUnderConcurrentHandoffs:*DispatchedWaitSurvivesAConcurrentFinalClose*:*EffectiveConfigTest.ReadsNativeLaunchConfigHandoff"
+)
+foreach(_idle_wakeup_case IN LISTS _rj_idle_wakeup_cases)
+    string(APPEND _rj_gtest_exclusions ":${_idle_wakeup_case}")
+endforeach()
+foreach(_l2_mutex_case IN LISTS _rj_l2_mutex_cases)
+    string(
+        APPEND _rj_gtest_exclusions
+        ":L2MaintenanceMutexTest.${_l2_mutex_case}"
+    )
+endforeach()
+
 # Benchmarks are timing tools, not correctness tests; keep them out of the
 # default ctest run (invoke them directly via
-# ./rocjitsu_tests --gtest_filter='*Benchmark*'). The request-exit stress test
-# and the concurrent-close wait test are registered separately so CTest can
-# bound a deadlocked child process.
-rj_add_gtest_tests(
-    rocjitsu_tests
-    TEST_FILTER
-        "-*Benchmark*:*RequestExitWakesAllPartitions*:*DispatchedWaitSurvivesAConcurrentFinalClose*:*EffectiveConfigTest.ReadsNativeLaunchConfigHandoff"
+# ./rocjitsu_tests --gtest_filter='*Benchmark*'). The idle-wakeup, request-exit,
+# SharedPool handoff, concurrent-close, and L2 mutex tests are registered separately so
+# CTest can bound a deadlocked child process, including helper destruction.
+rj_add_gtest_tests(rocjitsu_tests TEST_FILTER "${_rj_gtest_exclusions}")
+
+# Bound worker joins in the idle notification and CPU-use regressions.
+# Register explicitly so build-tree and installed tests have the same timeout.
+foreach(_idle_wakeup_case IN LISTS _rj_idle_wakeup_cases)
+    rj_add_test(
+        NAME "${_idle_wakeup_case}"
+        COMMAND
+            $<TARGET_FILE:rocjitsu_tests>
+            "--gtest_filter=${_idle_wakeup_case}"
+        TIMEOUT 30
+        INSTALL_COMMAND
+            "bin/rocjitsu_tests"
+            "--gtest_filter=${_idle_wakeup_case}"
+    )
+endforeach()
+
+# Register separately to bound handoffs and shutdown with an external timeout.
+# The test stresses handoffs for 20 seconds; CTest also bounds a lost wake while
+# joining issuers or destroying idle helpers.
+rj_add_test(
+    NAME "MatrixCoexecutionTest.SharedPoolMakesProgressUnderConcurrentHandoffs"
+    COMMAND
+        $<TARGET_FILE:rocjitsu_tests>
+        "--gtest_filter=MatrixCoexecutionTest.SharedPoolMakesProgressUnderConcurrentHandoffs"
+    RUN_SERIAL
+    TIMEOUT 40
+    INSTALL_COMMAND
+        "bin/rocjitsu_tests"
+        "--gtest_filter=MatrixCoexecutionTest.SharedPoolMakesProgressUnderConcurrentHandoffs"
 )
+
+# A failed assertion cannot bound a blocked join or jthread destructor. Give
+# each L2 mutex case its own process timeout in build-tree and installed tests.
+foreach(_l2_mutex_case IN LISTS _rj_l2_mutex_cases)
+    rj_add_test(
+        NAME "L2MaintenanceMutexTest.${_l2_mutex_case}"
+        COMMAND
+            $<TARGET_FILE:rocjitsu_tests>
+            "--gtest_filter=L2MaintenanceMutexTest.${_l2_mutex_case}"
+        TIMEOUT 30
+        INSTALL_COMMAND
+            "bin/rocjitsu_tests"
+            "--gtest_filter=L2MaintenanceMutexTest.${_l2_mutex_case}"
+    )
+endforeach()
+
+# GoogleTest registers every parameter before applying its filter. Keep the FP
+# matrices in their own executable so unrelated tests do not pay that cost.
+add_executable(rocjitsu_fp_mode_tests valu_fp_mode_test.cpp)
+target_link_libraries(
+    rocjitsu_fp_mode_tests
+    PRIVATE
+        ${RJ_OBJECT_LIBS}
+        util
+        flatbuffers
+        Threads::Threads
+        GTest::gtest_main
+)
+rj_configure_target(rocjitsu_fp_mode_tests TEST)
+if(RJ_INSTALL_TESTS)
+    rj_install_test_target(rocjitsu_fp_mode_tests)
+endif()
+
+# Batching amortizes registration, and GoogleTest assigns new cases to shards
+# automatically without maintaining per-case filters.
+set(_rj_fp_mode_shards 16)
+math(EXPR _rj_fp_mode_last_shard "${_rj_fp_mode_shards} - 1")
+foreach(_shard RANGE 0 ${_rj_fp_mode_last_shard})
+    set(_shard_env
+        "GTEST_TOTAL_SHARDS=${_rj_fp_mode_shards}"
+        "GTEST_SHARD_INDEX=${_shard}"
+    )
+    set(_shard_output "gtest-results/rocjitsu_fp_mode_${_shard}.xml")
+    rj_add_test(
+        NAME "ValuFpModeTest.Shard${_shard}"
+        COMMAND
+            "${CMAKE_COMMAND}"
+            "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_fp_mode_tests>"
+            "-DTEST_OUTPUT_FILE=${_shard_output}" -P
+            "${PROJECT_SOURCE_DIR}/cmake/rj_run_gtest_shard.cmake"
+        ENVIRONMENT ${_shard_env}
+        INSTALL_COMMAND
+            "${CMAKE_COMMAND}"
+            "-DTEST_EXECUTABLE=bin/rocjitsu_fp_mode_tests"
+            "-DTEST_OUTPUT_FILE=${_shard_output}" -P
+            "rj_run_gtest_shard.cmake"
+        INSTALL_ENVIRONMENT ${_shard_env}
+        LABELS fp-mode
+    )
+endforeach()
 
 # RequestExitWakesAllPartitions may require several runs to show regression
 # (deadlock). Run 30 times with a 10 second timeout to boost chances of seeing
@@ -1266,16 +1459,6 @@ rj_add_test(
         "bin/rj_decode_benchmark"
 )
 
-# --- Scaling test (standalone executable) ---
-
-add_executable(scaling_test scaling_test.cpp)
-target_link_libraries(
-    scaling_test
-    PRIVATE ${RJ_OBJECT_LIBS} util flatbuffers Threads::Threads
-)
-target_compile_options(scaling_test PRIVATE -O2)
-rj_configure_target(scaling_test TEST)
-
 # --- Interposer tests run through the rocjitsu CLI launcher ---
 # All tests that need the simulated GPU go through:
 #   rocjitsu --config <cfg> -- <test_binary> [args]
@@ -1338,6 +1521,7 @@ rj_add_test(
         ${CMAKE_SOURCE_DIR}/configs/gfx942_cdna3.json
         --cpu-thread-budget
         4
+        --wait-checking=off
         --
         $<TARGET_FILE:rocjitsu_tests>
         --gtest_filter=EffectiveConfigTest.ReadsNativeLaunchConfigHandoff
@@ -1349,6 +1533,7 @@ rj_add_test(
         "\${RJ_INSTALLED_CONFIG_DIR}/gfx942_cdna3.json"
         "--cpu-thread-budget"
         "4"
+        "--wait-checking=off"
         "--"
         "bin/rocjitsu_tests"
         "--gtest_filter=EffectiveConfigTest.ReadsNativeLaunchConfigHandoff"
@@ -1447,7 +1632,7 @@ set(RJ_KMD_PRELOAD_ENV
 add_executable(guest_kfd_test guest_kfd_test.cpp)
 target_include_directories(
     guest_kfd_test
-    PRIVATE ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include ${HSA_INCLUDE_DIR}
+    PRIVATE ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
 )
 target_link_libraries(guest_kfd_test PRIVATE Threads::Threads GTest::gtest_main)
 rj_configure_target(guest_kfd_test TEST)
@@ -1658,17 +1843,13 @@ target_include_directories(
         ${CMAKE_BINARY_DIR}/include
         ${GENERATED_DIR}
 )
-target_include_directories(
-    hsa_hooks_unit_test
-    SYSTEM
-    PRIVATE ${HSA_INCLUDE_DIR}
-)
 target_link_libraries(
     hsa_hooks_unit_test
     PRIVATE
         # Test-only hook variant: same objects as rocjitsu_hooks plus the
         # exported rj_hsa_dbt_set_topology_nodes_root_for_test seam.
         rocjitsu_hooks_testing
+        rocjitsu_hsa_tools_headers
         ${RJ_OBJECT_LIBS}
         util
         flatbuffers
@@ -1701,14 +1882,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
             ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
     )
-    target_include_directories(
-        hsa_hotswap_rocjitsu_unit_test
-        SYSTEM
-        PRIVATE ${HSA_INCLUDE_DIR}
-    )
     target_link_libraries(
         hsa_hotswap_rocjitsu_unit_test
-        PRIVATE hsa_hotswap_rocjitsu_testable GTest::gtest_main
+        PRIVATE
+            hsa_hotswap_rocjitsu_testable
+            rocjitsu_hsa_tools_headers
+            GTest::gtest_main
     )
     if(HAS_GFX1250_DBT_FIXTURE)
         target_compile_definitions(
@@ -1805,6 +1984,22 @@ target_compile_definitions(
 # --- Interposer loader initialization regression tests ---
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(standalone_plugin_abi_test standalone_plugin_abi_test.cpp)
+    # Keep this loader independent of core objects and librocjitsu.so so they
+    # cannot hide unresolved simulator symbols in the standalone module.
+    target_link_libraries(
+        standalone_plugin_abi_test
+        PRIVATE util simdojo_headers ${CMAKE_DL_LIBS}
+    )
+    rj_configure_target(standalone_plugin_abi_test TEST)
+    add_dependencies(standalone_plugin_abi_test rocjitsu_plugin_race_so)
+    add_test(
+        NAME ExecutionPluginAbi.StandaloneRaceModuleLoads
+        COMMAND
+            standalone_plugin_abi_test $<TARGET_FILE:rocjitsu_plugin_race_so>
+            race
+    )
+
     # Keep inline register accessors in a separate DSO without linking core
     # objects into it, so missing exports cannot be hidden by static linkage.
     add_library(register_observer_probe MODULE register_observer_probe.cpp)
@@ -1864,10 +2059,6 @@ rj_add_test(
 # and PM4 dispatch through the public driver interface.
 add_executable(interposer_dup_test interposer_dup_test.cpp)
 rj_configure_target(interposer_dup_test TEST)
-target_include_directories(
-    interposer_dup_test
-    PRIVATE ${CMAKE_SOURCE_DIR}/lib/rocjitsu/external_headers/hsa_headers
-)
 target_link_libraries(
     interposer_dup_test
     PRIVATE GTest::gtest_main ${CMAKE_DL_LIBS}
@@ -1978,9 +2169,29 @@ rj_add_interposer_test_suite(InterposerDupTest ${_rj_interposer_dup_tests})
 
 rj_add_interposer_test_suite(
     InterposerDrmTest
+    AllocationFailsWhenBackingDescriptorsAreExhausted
     CanonicalSysfsPathsRetainSimulatedDevice
+    CloseRangeOfAKfdExportLeavesTheRecycledDescriptorOrdinary
     DeviceInfoReportsActiveCuCount
+    DmabufExportKeepsADriverCpuMapping
+    DmabufExportKeepsAReservedCpuMapping
+    DmabufExportKeepsStoresMadeDuringTheExport
+    DmabufExportLeavesPagesPastAPartialMapping
+    DupRacingTheCloseOfAPrimeExportKeepsTheBoState
+    ExportOfAUserptrBufferFailsAndLeavesTheCallersMemoryAlone
+    GemMetadataRoundTripsOnABuffer
+    GemOpReportsTheCreateSize
+    GemOpSetPlacementChangesTheReportedDomain
+    IpcImportSharesThePagesOfTheExportedAllocation
+    KfdBufferKeepsItsMetadataAfterEveryHandleCloses
+    KfdExportFlagsSurviveDuplicationBeforeThePrimeImport
+    KfdExportKeepsItsMetadataAfterTheAllocationIsFreed
+    KfdImportsRetainMetadataAfterTheOriginalOwnerCloses
     OpensWithinCurrentDescriptorLimit
+    PrimeHandleToFdReturnsTheBuffer
+    PrimeImportKeepsTheBoStateAfterTheHandleCloses
+    PrimeImportRejectsADescriptorThatIsNotADmabuf
+    PrimeImportSharesTheBufferAndItsMetadata
     PrimaryNodePathHasCharacterDeviceMetadata
     RenderNodePathMetadataMatchesDescriptor
     TimestampUsesAdvertisedNanosecondClock
@@ -2335,15 +2546,11 @@ endif()
 find_library(HSA_RUNTIME64 hsa-runtime64 PATHS "${ROCM_PATH}" PATH_SUFFIXES lib)
 if(HSA_RUNTIME64)
     get_filename_component(RJ_HSA_LIBRARY_DIR "${HSA_RUNTIME64}" DIRECTORY)
-    get_filename_component(RJ_HSA_ROCM_ROOT "${RJ_HSA_LIBRARY_DIR}" DIRECTORY)
-    set(RJ_HSA_INCLUDE_DIR "${RJ_HSA_ROCM_ROOT}/include")
-
     add_executable(hsa_init_test hsa_init_test.cpp)
-    target_include_directories(
+    target_link_libraries(
         hsa_init_test
-        PRIVATE ${RJ_HSA_INCLUDE_DIR} ${HSA_INCLUDE_DIR}
+        PRIVATE rocm_runtime::runtime_headers ${HSA_RUNTIME64} GTest::gtest
     )
-    target_link_libraries(hsa_init_test PRIVATE ${HSA_RUNTIME64} GTest::gtest)
     target_link_options(hsa_init_test PRIVATE -Wl,-rpath,${RJ_HSA_LIBRARY_DIR})
     add_dependencies(hsa_init_test rocjitsu_bin rocjitsu_shared)
     if(RJ_INSTALL_TESTS)
@@ -2437,7 +2644,6 @@ if(HSA_RUNTIME64)
             PRIVATE
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
-                ${RJ_HSA_INCLUDE_DIR}
         )
         target_link_libraries(
             hsa_translate_test
@@ -2468,7 +2674,6 @@ if(HSA_RUNTIME64)
             PRIVATE
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
-                ${RJ_HSA_INCLUDE_DIR}
         )
         target_link_libraries(
             hsa_hooks_test
@@ -2558,7 +2763,6 @@ if(HSA_RUNTIME64)
             PRIVATE
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
-                ${RJ_HSA_INCLUDE_DIR}
         )
         target_link_libraries(
             ${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}
@@ -2709,7 +2913,6 @@ if(HSA_RUNTIME64)
             PRIVATE
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
-                ${RJ_HSA_INCLUDE_DIR}
         )
         target_link_libraries(
             hsa_dbi_nop_asm_test
@@ -3054,7 +3257,6 @@ if(HSA_RUNTIME64)
                 PRIVATE
                     ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
                     ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
-                    ${RJ_HSA_INCLUDE_DIR}
             )
             target_link_libraries(
                 hsa_dbi_nop_probe_test
@@ -3384,7 +3586,6 @@ endif()
 
 # --- HIP tests (requires amdclang++ + CLI launcher) ---
 
-rj_find_amdcxx(AMDCXX)
 set(RJ_ENABLE_HIP_TESTS ON)
 find_library(HIP_RUNTIME64 amdhip64 PATHS "${ROCM_PATH}" PATH_SUFFIXES lib)
 set(RJ_HIP_RUNTIME_SUPPORTS_TEST_ARCH FALSE)
@@ -3409,6 +3610,9 @@ endfunction()
 if(NOT AMDCXX)
     set(RJ_ENABLE_HIP_TESTS OFF)
     message(STATUS "HIP tests disabled (amdclang++ not found)")
+elseif(NOT RJ_HAS_HIP_KERNEL_TOOLCHAIN)
+    set(RJ_ENABLE_HIP_TESTS OFF)
+    message(STATUS "HIP tests disabled (HIP compilation probe failed)")
 elseif(NOT HSA_RUNTIME64)
     set(RJ_ENABLE_HIP_TESTS OFF)
     message(STATUS "HIP tests disabled (libhsa-runtime64 not found)")
@@ -3854,6 +4058,13 @@ if(RJ_ENABLE_HIP_TESTS)
     endif()
 
     if(RJ_HIP_RUNTIME_SUPPORTS_GFX950)
+        rj_add_hip_test(hip_hw_id_test ARCH gfx950)
+        rj_add_hip_test_case(
+            hip_hw_id_test
+            "HipHwIdTest.FourWaveWorkgroupPreservesSimdIdsAcrossBarrier"
+            TIMEOUT 120
+        )
+
         # This test exercises CDNA ACCVGPR/DS transpose instructions directly
         # in inline assembly, so it must stay on a CDNA target even when the
         # generic HIP smoke tests are built for a local RDNA host such as
@@ -3982,8 +4193,6 @@ if(RJ_ENABLE_HIP_TESTS)
                 "ROCJITSU_RUNTIME_DIR=${LOGGING_RUNTIME_DIR}"
                 "RJ_SINK_DIR=${LOGGING_SINK_DIR}"
         )
-
-        add_subdirectory(race-detector)
     else()
         message(
             STATUS

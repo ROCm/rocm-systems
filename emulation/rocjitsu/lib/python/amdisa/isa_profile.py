@@ -776,9 +776,13 @@ class IsaProfile(ABC):
         return {}
 
     @property
-    def ds_addtid_uses_m0_byte_base(self) -> bool:
-        """True when DS ADDTID addresses use M0 as a byte-address base."""
-        return False
+    def ds_addtid_m0_base_bits(self) -> int:
+        """Width of the ADDTID M0 byte base.
+
+        The 16-bit form adds OFFSET at that width before widening; the 20-bit
+        form widens OFFSET before addition. Lane offsets are added last.
+        """
+        return 16
 
     @property
     def ds_transpose_ignores_exec(self) -> bool:
@@ -788,6 +792,16 @@ class IsaProfile(ABC):
         writeback, not only to address formation.
         """
         return False
+
+    @property
+    def ds_b4_transpose_kind(self) -> int:
+        """CDNA4 contiguous sixteen-lane B4 transpose layout."""
+        return 8
+
+    @property
+    def ds_b6_transpose_kind(self) -> int:
+        """CDNA4 contiguous sixteen-lane B6 transpose layout."""
+        return 9
 
     @property
     def ds_b8_transpose_kind(self) -> int:
@@ -1194,8 +1208,18 @@ _FLAT_MODIFIERS_GLC = [
     EncodingModifier('slc'),
 ]
 
+# RDNA address helpers also accept 0x7f as a legacy no-offset sentinel;
+# CDNA5 reads EXEC_HI for that selector.
+_SMEM_REGISTER_OFFSET_CDNA5 = 'inst->soffset != OPR_SMEM_OFFSET_NULL'
+_SMEM_REGISTER_OFFSET_RDNA = _SMEM_REGISTER_OFFSET_CDNA5 + ' && inst->soffset != 0x7f'
+
 # GFX10/GFX11 (RDNA1/2/3/3.5): GLC+DLC+SLC; SMEM has no soffset_en/imm.
 _SMEM_MODIFIERS_GLC_DLC = [
+    EncodingModifier(
+        'offset',
+        is_offset=True,
+        condition=_SMEM_REGISTER_OFFSET_RDNA + ' && inst->offset',
+    ),
     EncodingModifier('glc'),
     EncodingModifier('dlc'),
 ]
@@ -1228,6 +1252,20 @@ _FLAT_MODIFIERS_GLC_DLC = [
 # GFX12 (RDNA4): encoding-specific modifiers beyond the data-driven SCOPE+TH
 # cache policy emitted for every encoding that carries op/scope/th fields.
 _SMEM_MODIFIERS_RDNA4 = [
+    EncodingModifier(
+        'ioffset',
+        is_offset=True,
+        condition=_SMEM_REGISTER_OFFSET_RDNA + ' && inst->ioffset',
+    ),
+    EncodingModifier('nv'),
+]
+
+_SMEM_MODIFIERS_CDNA5 = [
+    EncodingModifier(
+        'ioffset',
+        is_offset=True,
+        condition=_SMEM_REGISTER_OFFSET_CDNA5 + ' && inst->ioffset',
+    ),
     EncodingModifier('nv'),
 ]
 
@@ -1496,12 +1534,12 @@ class _AmdgpuProfileBase(IsaProfile):
 
     @property
     def has_acc_vgpr(self) -> bool:
-        """True if this ISA has AccVGPRs (CDNA2/3/4 only)."""
+        """True if this ISA has AccVGPRs (CDNA1-4)."""
         return False
 
     @property
     def acc_vgpr_encoding_base(self) -> int:
-        """Encoding index where AccVGPR range begins (512 for CDNA2, 768 for CDNA3/4)."""
+        """Encoding index where AccVGPR range begins (512 for CDNA2, 768 for CDNA1/3/4)."""
         return 0
 
     @property
@@ -1667,15 +1705,21 @@ class _AmdgpuProfileBase(IsaProfile):
 
         When ``None``, the ISA uses the three-field CDNA model:
         ``soffset_en``, ``imm``, and ``offset``/``soffset``.  When a
-        string (e.g. ``'offset'`` or ``'ioffset'``), the generated
-        ``make_smem_offset`` helper always returns
-        ``enc-><field>`` directly with no conditional logic.
+        string (e.g. ``'offset'`` or ``'ioffset'``), the ISA adds that
+        immediate to the independent ``soffset`` register. The operand
+        model exposes the register when present and renders the immediate
+        as an offset modifier; otherwise the immediate is the operand.
 
         CDNA1/2/3/4 → ``None`` (three-field model).
         RDNA1/2/3/3.5 → ``'offset'``.
-        RDNA4 → ``'ioffset'``.
+        RDNA4/CDNA5 → ``'ioffset'``.
         """
         return None
+
+    @property
+    def smem_register_offset_condition(self) -> str:
+        """C++ predicate shared by direct-offset operands and modifier rendering."""
+        return _SMEM_REGISTER_OFFSET_RDNA
 
     @property
     def global_addtid_offset_expr(self) -> str:
@@ -1940,7 +1984,7 @@ class Cdna1Profile(CdnaProfile):
     """ISA profile for CDNA1 (GFX908 / MI100).
 
     Differs from CDNA3/4 (the CdnaProfile defaults):
-    - No AccVGPRs.
+    - Separate accumulator VGPRs, with selectors starting at 768.
     - GFX9-style GLC-only coherency model.
     - Scratch base via SGPR pair (not HW register).
     - ENC_VOP3PX2 does not exist in CDNA1 XML.
@@ -1953,7 +1997,7 @@ class Cdna1Profile(CdnaProfile):
 
     @property
     def has_acc_vgpr(self) -> bool:
-        return False
+        return True
 
     @property
     def dpp_64bit_input_row_select_only(self) -> bool:
@@ -1961,11 +2005,11 @@ class Cdna1Profile(CdnaProfile):
 
     @property
     def acc_vgpr_encoding_base(self) -> int:
-        return 0
+        return 768
 
     @property
     def max_acc_vgprs(self) -> int:
-        return 0
+        return 256
 
     @property
     def descriptor_vgpr_count_granule_wave32(self) -> int:
@@ -2230,6 +2274,11 @@ class Rdna3Profile(_AmdgpuProfileBase):
       ``gen_vopd`` after XML parsing skips normal instruction generation.
     - Reserved field omissions (version 1.0.0): synthesized by the parser.
     """
+
+    def saddr_null_selector_expr(self, enc_name: str) -> str | None:
+        if enc_name.upper() == 'ENC_FLAT':
+            return '0x7C'
+        return super().saddr_null_selector_expr(enc_name)
 
     _FLAT_SEGMENTS = frozenset({'GLOBAL', 'SCRATCH'})
 
@@ -2861,6 +2910,15 @@ class Cdna5Profile(Rdna4Profile):
     """
 
     @property
+    def smem_register_offset_condition(self) -> str:
+        return _SMEM_REGISTER_OFFSET_CDNA5
+
+    def encoding_modifiers(self, enc_name: str) -> list[EncodingModifier]:
+        if enc_name.upper() == 'ENC_SMEM':
+            return _SMEM_MODIFIERS_CDNA5
+        return super().encoding_modifiers(enc_name)
+
+    @property
     def atomic_source_nan_first(self) -> bool:
         # Preserve the existing L2 policy until qualified on CDNA5 hardware.
         return False
@@ -2891,6 +2949,16 @@ class Cdna5Profile(Rdna4Profile):
         return 'cdna5'
 
     @property
+    def ds_b4_transpose_kind(self) -> int:
+        """CDNA5 interleaved source-lane B4 layout."""
+        return 1
+
+    @property
+    def ds_b6_transpose_kind(self) -> int:
+        """CDNA5 interleaved source-lane B6 layout."""
+        return 2
+
+    @property
     def ds_b8_transpose_kind(self) -> int:
         # gfx1250 groups source lanes by four rows and two eight-column halves.
         # Keep every mnemonic alias on the corresponding CDNA5 DS routing.
@@ -2908,18 +2976,8 @@ class Cdna5Profile(Rdna4Profile):
         return overrides
 
     @property
-    def semantic_class_overrides(self) -> dict[str, str]:
-        return {
-            'DS_STORE_ADDTID_B32': 'ds_write_addtid',
-            'DS_STOREXCHG_2ADDR_RTN_B32': 'ds_atomic2',
-            'DS_STOREXCHG_2ADDR_RTN_B64': 'ds_atomic2',
-            'DS_STOREXCHG_2ADDR_STRIDE64_RTN_B32': 'ds_atomic2',
-            'DS_STOREXCHG_2ADDR_STRIDE64_RTN_B64': 'ds_atomic2',
-        }
-
-    @property
-    def ds_addtid_uses_m0_byte_base(self) -> bool:
-        return True
+    def ds_addtid_m0_base_bits(self) -> int:
+        return 20
 
     @property
     def ds_transpose_ignores_exec(self) -> bool:

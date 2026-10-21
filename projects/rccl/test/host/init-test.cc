@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <csignal>
 #include <cstdint>
 #include <cstdio>
@@ -32,6 +33,7 @@
 #include <vector>
 
 #include "fakes/init_fakes.h"
+#include "fakes/amdsmi_fakes.h"                      // g_amdSmiFabricTelemetry{Acquire,Release}
 #include "fakes/sym_kernels_fakes.h"                 // g_symkFinalize
 #include "../common/LogCapture.hpp"                 // CaptureLog: assert on WARN/INFO text
 #include "../common/ProcessIsolatedTestRunner.hpp"  // fork+execv process isolation
@@ -1648,6 +1650,65 @@ TEST_F(InitMicrotest, GetAsyncError_GroupJobCompletes_AndClears) {
   EXPECT_EQ(nullptr, rc.get()->groupJob);  // completed -> cleared
 }
 
+// The shape that hung under NCCL_COMM_BLOCKING=0: a PyTorch watchdog and the application thread
+// both polling the same comm. Reading comm->groupJob and clearing it afterwards let both see the
+// same pointer and both reap it -- a second std::thread::join plus a second reference drop, which
+// freed the job under the thread still inside the first join. Claiming it with one exchange makes
+// the reap single-owner, so a link published N times is completed exactly N times. The link is
+// republished per round rather than once so a single run covers many interleavings.
+TEST_F(InitMicrotest, GetAsyncError_ConcurrentPollers_CompleteEachGroupJobLinkExactlyOnce) {
+  constexpr int kRounds = 2000;
+  ReadyComm rc;
+  auto gj = std::make_unique<ncclGroupJob>();
+
+  std::atomic<int> completions{0};
+  ScopedHook complete(g_ncclGroupJobComplete, [&](struct ncclGroupJob*) {
+    completions.fetch_add(1, std::memory_order_relaxed);
+    return ncclSuccess;
+  });
+
+  // Both pollers are released by the same round bump, so they enter the claim together. One call
+  // per release rather than a free-running loop keeps the recorder's label log bounded.
+  std::atomic<int> round{0};
+  std::atomic<bool> publishing{true};
+  auto poll = [&] {
+    int seen = 0;
+    while (true) {
+      while (round.load(std::memory_order_acquire) == seen) {
+        if (!publishing.load(std::memory_order_acquire)) return;
+      }
+      seen = round.load(std::memory_order_acquire);
+      ncclResult_t e = ncclInProgress;
+      (void)ncclCommGetAsyncError_impl(rc.get(), &e);
+    }
+  };
+  std::thread watchdog(poll);
+  std::thread application(poll);
+
+  // A lost claim shows up as a completion count above kRounds, not as a stall, but bound the wait
+  // anyway so a regression that stops clearing the link reports instead of hanging the suite.
+  int published = 0;
+  for (; published < kRounds; ++published) {
+    COMPILER_ATOMIC_STORE(&rc.get()->groupJob, gj.get(), std::memory_order_release);
+    round.fetch_add(1, std::memory_order_acq_rel);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (COMPILER_ATOMIC_LOAD(&rc.get()->groupJob, std::memory_order_acquire) != nullptr &&
+           std::chrono::steady_clock::now() < deadline) {
+    }
+    if (COMPILER_ATOMIC_LOAD(&rc.get()->groupJob, std::memory_order_acquire) != nullptr) break;
+  }
+  publishing.store(false, std::memory_order_release);
+  round.fetch_add(1, std::memory_order_acq_rel);  // release a poller parked on the round check
+  watchdog.join();
+  application.join();
+
+  ASSERT_EQ(kRounds, published) << "a published link was never claimed";
+  EXPECT_EQ(kRounds, completions.load(std::memory_order_acquire))
+    << "every published link must be reaped by exactly one poller";
+  EXPECT_EQ(nullptr, rc.get()->groupJob);
+  g_recorderLabels.clear();  // this test records thousands of labels; don't carry them forward
+}
+
 TEST_F(InitMicrotest, CheckHsaEnvSetting_AllSucceed_ReturnsSuccess) {
   ncclResult_t res = ncclUnhandledCudaError;
   const std::string log = RcclUnitTesting::CaptureLog([&] { res = checkHsaEnvSetting(); });
@@ -1763,6 +1824,32 @@ TEST_F(InitMicrotest, FillInfo_AllocOk_DmaBufSupported_EnablesGdrDirectly) {
   EXPECT_EQ(0, g_gdrSupportCalls);   // GDR fallback NOT called
 }
 
+// supportedGinTypeBitMask is what a new split's AllGather ANDs into
+// globalGinTypeBitMask, so it decides whether ncclGinSetDefaultBackend runs.
+TEST_F(InitMicrotest, FillInfo_LiveGinBackend_AdvertisesItsType) {
+  FillInfoComm c;
+  struct ncclGinState* ginState = &c.get()->sharedRes->ginState;
+  ginState->numActiveBackends = 1;
+  ginState->backends[0].ginType = NCCL_GIN_TYPE_PROXY;
+  ncclPeerInfo info{};
+  EXPECT_EQ(ncclSuccess, fillInfo(c.get(), &info, 0));
+  EXPECT_EQ(info.supportedGinTypeBitMask, BIT(NCCL_GIN_TYPE_PROXY));
+}
+
+// AICOMRCCL-2739: a sibling's host finalize keeps the backend records for
+// ncclGinFinalize. Advertising them would let a new shared split reconnect
+// through a ginInstance whose owning comm may already be freed.
+TEST_F(InitMicrotest, FillInfo_FinalizedGinBackends_AdvertiseNoType) {
+  FillInfoComm c;
+  struct ncclGinState* ginState = &c.get()->sharedRes->ginState;
+  ginState->numActiveBackends = 1;
+  ginState->backends[0].ginType = NCCL_GIN_TYPE_PROXY;
+  ginState->finalized = true;
+  ncclPeerInfo info{};
+  EXPECT_EQ(ncclSuccess, fillInfo(c.get(), &info, 0));
+  EXPECT_EQ(info.supportedGinTypeBitMask, 0u);
+}
+
 // MLOPart detection in fillInfo(). It exists for DPX/XCP/CPX, where HIP exposes each logical GPU as
 // PCI function .N of one physical device and typically only .0 exists in sysfs as a GPU.
 //
@@ -1818,11 +1905,14 @@ TEST_F(InitMicrotest, FillInfo_FunctionAboveMloPartMax_LeavesMloPartUndefined) {
   FillInfoComm c;
   c.get()->busId = kHighFnBusId;
   g_pciDeviceClass = "";  // no sysfs entry, so only the fn bound can reject the stamp
+  g_pciComputePartition = "DPX";
   ncclPeerInfo info{};
   EXPECT_EQ(ncclSuccess, fillInfo(c.get(), &info, 0));
   // 0xf does not fit the 3-bit overlay index, so it must not be stamped even though sysfs is empty.
   EXPECT_EQ(NCCL_TOPO_UNDEF, info.mloPart);
   EXPECT_EQ(0, g_pciDeviceClassCalls);
+  // The tuning request does not depend on the MLOPart bound: the mode is still read and used.
+  EXPECT_EQ(RCCL_TUNING_PARTITION_DPX, info.tuningPartition);
 }
 
 TEST_F(InitMicrotest, FillInfo_CpxPartitionZero_StampsMloPartZero) {
@@ -1882,6 +1972,179 @@ TEST_F(InitMicrotest, FillInfo_NoPartitionModeReported_FunctionZeroLeavesMloPart
   // The blind spot of the fallback: with no mode reported, partition 0 is indistinguishable from an
   // unpartitioned GPU, and staying undefined is the safe answer of the two.
   EXPECT_EQ(NCCL_TOPO_UNDEF, info.mloPart);
+}
+
+// RCCL_TUNING_PARTITION_MODE: each rank asks for the gfx1250 tuning table of the mode its GPU
+// reports, from the same sysfs read the MLOPart probe uses; only DPX asks for the DPX table. The
+// env var forces a table either way, and "auto" or an empty value follow the GPU.
+TEST_F(InitMicrotest, FillInfo_TuningPartitionRequest) {
+  struct Case {
+    const char* env;  // nullptr = unset
+    const char* gpu;
+    int want;
+  };
+  const Case cases[] = {{nullptr, "SPX", RCCL_TUNING_PARTITION_SPX},
+                        {nullptr, "DPX", RCCL_TUNING_PARTITION_DPX},
+                        {nullptr, "CPX", RCCL_TUNING_PARTITION_SPX},
+                        {nullptr, "", RCCL_TUNING_PARTITION_SPX},
+                        {"SPX", "DPX", RCCL_TUNING_PARTITION_SPX},
+                        {"DPX", "SPX", RCCL_TUNING_PARTITION_DPX},
+                        {"dpx", "", RCCL_TUNING_PARTITION_DPX},
+                        {"Auto", "DPX", RCCL_TUNING_PARTITION_DPX},
+                        {"", "DPX", RCCL_TUNING_PARTITION_DPX}};
+  for (const Case& tc : cases) {
+    const std::string label = std::string("env '") + (tc.env ? tc.env : "<unset>") + "', GPU '" + tc.gpu + "'";
+    SetMicroEnv("RCCL_TUNING_PARTITION_MODE", tc.env);
+    FillInfoComm c;
+    c.get()->busId = kAliasBusId;
+    g_pciComputePartition = tc.gpu;
+    g_pciComputePartitionCalls = 0;
+    ncclPeerInfo info{};
+    info.tuningPartition = -1;
+    ncclResult_t res = ncclInternalError;
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    const std::string log = RcclUnitTesting::CaptureLog([&] { res = fillInfo(c.get(), &info, 0); });
+    EXPECT_EQ(ncclSuccess, res);
+    EXPECT_EQ(tc.want, info.tuningPartition) << label;
+    EXPECT_EQ(1, g_pciComputePartitionCalls) << "one read serves MLOPart and tuning, " << label;
+    EXPECT_EQ("0000:11:00.0", g_lastPciComputePartitionBusId) << "the mode lives on function 0";
+    EXPECT_FALSE(LogHas(log, "RCCL_TUNING_PARTITION_MODE")) << "a valid value must not be reported:\n" << log;
+  }
+}
+
+// An unknown value is ignored with one notice per process, and the GPU's mode decides. Isolated:
+// the report-once flag is a function-local static.
+TEST_F(InitMicrotestIsolated, FillInfo_InvalidTuningPartitionMode_ReportsOnceAndFollowsGpuMode) {
+  RUN_ISOLATED_TEST(
+      "Init_FillInfo_InvalidTuningPartitionMode",
+      []() {
+        SetMicroEnv("RCCL_TUNING_PARTITION_MODE", "QPX");
+        g_pciComputePartition = "DPX";
+        FillInfoComm c;
+        c.get()->busId = kPhysGpuBusId;
+        ncclPeerInfo first{};
+        ncclPeerInfo second{};
+        ncclResult_t r1 = ncclInternalError;
+        ncclResult_t r2 = ncclInternalError;
+        ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+        const std::string log = RcclUnitTesting::CaptureLog([&] {
+          r1 = fillInfo(c.get(), &first, 0);
+          r2 = fillInfo(c.get(), &second, 0);
+        });
+        EXPECT_EQ(ncclSuccess, r1);
+        EXPECT_EQ(ncclSuccess, r2);
+        EXPECT_EQ(RCCL_TUNING_PARTITION_DPX, first.tuningPartition);
+        EXPECT_EQ(RCCL_TUNING_PARTITION_DPX, second.tuningPartition);
+        const std::string needle = "Invalid value QPX for RCCL_TUNING_PARTITION_MODE";
+        const size_t at = log.find(needle);
+        EXPECT_NE(std::string::npos, at) << "actual log:\n" << log;
+        EXPECT_EQ(std::string::npos, log.find(needle, at + needle.size())) << "reported twice:\n" << log;
+      });
+}
+
+namespace {
+// AllGather1 output for ranks that asked for `requests`.
+std::vector<ncclPeerInfo> PeersAsking(std::initializer_list<int> requests) {
+  std::vector<ncclPeerInfo> peers(requests.size());
+  size_t i = 0;
+  for (int request : requests) peers[i++].tuningPartition = request;
+  return peers;
+}
+
+rcclTuningPartition TuningPartitionFor(std::initializer_list<int> requests, bool* mixed) {
+  std::vector<ncclPeerInfo> peers = PeersAsking(requests);
+  return rcclTuningPartitionForComm(peers.data(), static_cast<int>(peers.size()), mixed);
+}
+
+// Distinct tables for the rcclGetArchThresholds fake to hand out, so a test sees which one a comm got.
+const rcclArchThresholds kFakeSpxTable{};
+const rcclArchThresholds kFakeDpxTable{};
+void InstallFakeTuningTables() {
+  g_archThresholdsTable[RCCL_TUNING_PARTITION_SPX] = &kFakeSpxTable;
+  g_archThresholdsTable[RCCL_TUNING_PARTITION_DPX] = &kFakeDpxTable;
+}
+}  // namespace
+
+// Every rank must read the same table, so the comm is DPX only when all ranks ask for DPX.
+TEST_F(InitMicrotest, TuningPartitionForComm_DpxOnlyWhenEveryRankAsks) {
+  constexpr int kSpx = RCCL_TUNING_PARTITION_SPX;
+  constexpr int kDpx = RCCL_TUNING_PARTITION_DPX;
+  bool mixed = true;
+  EXPECT_EQ(RCCL_TUNING_PARTITION_DPX, TuningPartitionFor({kDpx, kDpx, kDpx}, &mixed));
+  EXPECT_FALSE(mixed);
+  EXPECT_EQ(RCCL_TUNING_PARTITION_DPX, TuningPartitionFor({kDpx}, &mixed));
+  EXPECT_FALSE(mixed);
+  EXPECT_EQ(RCCL_TUNING_PARTITION_SPX, TuningPartitionFor({kSpx, kSpx}, &mixed));
+  EXPECT_FALSE(mixed);
+  EXPECT_EQ(RCCL_TUNING_PARTITION_SPX, TuningPartitionFor({kDpx, kSpx, kDpx}, &mixed));
+  EXPECT_TRUE(mixed);
+  EXPECT_EQ(RCCL_TUNING_PARTITION_SPX, TuningPartitionFor({kSpx, kDpx}, &mixed));
+  EXPECT_TRUE(mixed);
+}
+
+namespace {
+// A gfx1250 comm whose ranks asked for `requests`, as rcclSetTuningPartition sees it after AllGather1.
+struct TuningPartitionComm {
+  explicit TuningPartitionComm(std::initializer_list<int> requests, const char* arch = "gfx1250", int rank = 0)
+      : peers(PeersAsking(requests)) {
+    comm.get()->peerInfo = peers.data();
+    comm.get()->nRanks = static_cast<int>(peers.size());
+    comm.get()->rank = rank;
+    comm.get()->archName = const_cast<char*>(arch);
+    comm.get()->archThresholds = nullptr;
+    InstallFakeTuningTables();
+  }
+  ~TuningPartitionComm() {
+    comm.get()->peerInfo = nullptr;
+    comm.get()->archName = nullptr;
+    comm.get()->archThresholds = nullptr;
+  }
+  std::string Run() {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    return RcclUnitTesting::CaptureLog([&] { rcclSetTuningPartition(comm.get()); });
+  }
+  FillInfoComm comm;
+  std::vector<ncclPeerInfo> peers;
+};
+}  // namespace
+
+TEST_F(InitMicrotest, SetTuningPartition_AllDpxPicksTheDpxTable) {
+  TuningPartitionComm t({RCCL_TUNING_PARTITION_DPX, RCCL_TUNING_PARTITION_DPX});
+  const std::string log = t.Run();
+  EXPECT_EQ(&kFakeDpxTable, t.comm.get()->archThresholds);
+  EXPECT_EQ(1, g_archThresholdsCalls);
+  EXPECT_TRUE(LogHas(log, "gfx1250 tuning table: DPX")) << "actual log:\n" << log;
+  EXPECT_FALSE(LogHas(log, "ask for different tables")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, SetTuningPartition_MixedRanksUseSpxAndSayWhy) {
+  TuningPartitionComm t({RCCL_TUNING_PARTITION_DPX, RCCL_TUNING_PARTITION_SPX});
+  const std::string log = t.Run();
+  EXPECT_EQ(&kFakeSpxTable, t.comm.get()->archThresholds);
+  EXPECT_TRUE(LogHas(log, "ask for different tables (RCCL_TUNING_PARTITION_MODE")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "gfx1250 tuning table: SPX")) << "actual log:\n" << log;
+}
+
+// Only rank 0 of a gfx1250 comm logs, but every rank and arch still re-picks its table.
+TEST_F(InitMicrotest, SetTuningPartition_OnlyRankZeroOfGfx1250Logs) {
+  {
+    TuningPartitionComm t({RCCL_TUNING_PARTITION_DPX, RCCL_TUNING_PARTITION_DPX}, "gfx1250", /*rank=*/1);
+    const std::string log = t.Run();
+    EXPECT_EQ(&kFakeDpxTable, t.comm.get()->archThresholds);
+    EXPECT_FALSE(LogHas(log, "tuning table")) << "actual log:\n" << log;
+  }
+  {
+    TuningPartitionComm t({RCCL_TUNING_PARTITION_DPX, RCCL_TUNING_PARTITION_SPX}, "gfx1250", /*rank=*/1);
+    const std::string log = t.Run();
+    EXPECT_EQ(&kFakeSpxTable, t.comm.get()->archThresholds);
+    EXPECT_FALSE(LogHas(log, "tuning table")) << "a mixed comm is reported by rank 0 only:\n" << log;
+  }
+  {
+    TuningPartitionComm t({RCCL_TUNING_PARTITION_DPX, RCCL_TUNING_PARTITION_SPX}, "gfx950");
+    const std::string log = t.Run();
+    EXPECT_EQ(&kFakeSpxTable, t.comm.get()->archThresholds);
+    EXPECT_FALSE(LogHas(log, "tuning")) << "actual log:\n" << log;
+  }
 }
 
 TEST_F(InitMicrotest, CommInitAll_GetDeviceFault_StopsBeforeCount) {
@@ -2349,6 +2612,40 @@ TEST_F(InitMicrotest, CommCleanup_CommFreeFails_PropagatesError) {
   ASSERT_NO_FATAL_FAILURE(ReleaseUncleanedComm(c));
 }
 
+#ifdef USE_AMDSMI
+// --- fabric telemetry release sits ahead of every fallible step of teardown ---
+// Teardown is expected to fail on abort, and cudaSetDevice is the earliest step that
+// can bail. A release behind it would leave the sampler polling a GPU whose comm is
+// gone, so this pins it ahead of even that one.
+TEST_F(InitMicrotest, CommCleanup_TelemetryAcquired_ReleasesEvenWhenTeardownFails) {
+  ScopedHook acquire(g_amdSmiFabricTelemetryAcquire,
+                     [](uint32_t, uint64_t, int, bool* acquired) {
+                       *acquired = true;
+                       return ncclSuccess;
+                     });
+  ScopedHook release(g_amdSmiFabricTelemetryRelease, [](uint32_t) { return ncclSuccess; });
+  CleanupComm c;
+  ASSERT_NO_FATAL_FAILURE(MakeCleanupComm(c, /*withTuner=*/false));
+  ASSERT_TRUE(c.comm->fabricTelemetryAcquired) << "commAlloc never recorded the session ref";
+
+  ncclResult_t res = ncclSuccess;
+  std::string log;
+  {
+    // Scoped so the hook is back to normal before ReleaseUncleanedComm runs.
+    ScopedHook setDevice(g_hipSetDevice, [](int) { return hipErrorInvalidDevice; });
+    log = RcclUnitTesting::CaptureLog([&] { res = commCleanup(c.comm); });
+  }
+
+  EXPECT_EQ(ncclUnhandledCudaError, res);
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "HIP failure:"));  // the step really did fail
+  EXPECT_EQ(1, release.calls) << "a failing teardown stranded the device in the sampler's device list";
+  EXPECT_FALSE(c.comm->fabricTelemetryAcquired) << "a retried teardown would double-release";
+
+  ASSERT_NO_FATAL_FAILURE(ReleaseUncleanedComm(c));
+  EXPECT_EQ(1, release.calls) << "the retry released the same device twice";
+}
+#endif  // USE_AMDSMI
+
 // ===========================================================================
 // initTransportsRank's supporting cast: four helpers it calls that are already
 // compiled into this TU and need no seams. Every one computes a result, so the
@@ -2531,7 +2828,9 @@ struct PeerSpec {
   int mloPart = -1;     // -1 == NCCL_TOPO_UNDEF, i.e. not an MLOPart GPU
   int nvmlDev = -1;     // -1 = its own device; equal values collide for the :1482 check
   int uuidTag = -1;     // -1 = its own UUID; equal values (>=1) make two peers the same GPU
+  int64_t busId = 0;    // equal values are the same PCI function, i.e. the same partition
   int compCap = -1;     // -1 = same as self
+  int tuningPartition = -1;  // -1 = same as self
   ncclComm* comm = nullptr;  // only read for same-process peers (:1527, :1549)
 };
 
@@ -2570,10 +2869,12 @@ void InstallPeerInfoAllGather(TransportsRankComm& c, std::vector<PeerSpec> specs
       info[i].cuMemSupport = s.cuMemSupport;
       info[i].mloPart = s.mloPart;
       info[i].nvmlDev = s.nvmlDev < 0 ? 100 + i : s.nvmlDev;  // self is 0, so -1 never collides
+      info[i].busId = s.busId;  // defaults to 0, as does self's: fillInfo copies the zero-init comm->busId
       std::memset(&info[i].gpuUuid, 0, sizeof(info[i].gpuUuid));
       reinterpret_cast<unsigned char*>(&info[i].gpuUuid)[0] =
           static_cast<unsigned char>(s.uuidTag < 0 ? i + 1 : s.uuidTag);  // 1-based: never matches self's zeros
       info[i].cudaCompCap = s.compCap < 0 ? self.cudaCompCap : s.compCap;
+      info[i].tuningPartition = s.tuningPartition < 0 ? self.tuningPartition : s.tuningPartition;
       info[i].comm = s.comm;
     }
     return ncclSuccess;
@@ -2668,6 +2969,32 @@ TEST_F(InitMicrotest, InitTransportsRank_PeerWithMloPart_SetsHasMloPart) {
   EXPECT_TRUE(c.get()->hasMloPart);
 }
 
+// RCCL_TUNING_PARTITION_MODE: after AllGather1 the comm re-picks its tuning table from every
+// rank's request -- DPX only when all of them ask for it.
+TEST_F(InitMicrotest, InitTransportsRank_EveryRankAsksDpx_PicksTheDpxTable) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  g_pciComputePartition = "DPX";  // fillInfo's own slot asks for DPX; peers copy it
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  InstallFakeTuningTables();
+  c.get()->archThresholds = nullptr;
+  EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(&kFakeDpxTable, c.get()->archThresholds);
+  EXPECT_EQ(1, g_archThresholdsCalls);
+}
+
+// Rank 0 itself asks for DPX, so only counting every peer's slot can pick SPX.
+TEST_F(InitMicrotest, InitTransportsRank_OnePeerAsksSpx_PicksTheSpxTable) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  g_pciComputePartition = "DPX";
+  std::vector<PeerSpec> specs(4);
+  specs[2].tuningPartition = RCCL_TUNING_PARTITION_SPX;
+  InstallPeerInfoAllGather(c, specs);
+  InstallFakeTuningTables();
+  c.get()->archThresholds = &kFakeDpxTable;
+  EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(&kFakeSpxTable, c.get()->archThresholds);
+}
+
 TEST_F(InitMicrotest, InitTransportsRank_NoPeerWithMloPart_LeavesHasMloPartUnset) {
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
@@ -2688,6 +3015,85 @@ TEST_F(InitMicrotest, InitTransportsRank_HipOverlayMloPart0Fn0_LeavesHasMloPartU
   EXPECT_FALSE(c.get()->hasMloPart);
 }
 #endif
+
+// The GIN gate itself (:2593). initTransportsRank cannot be driven to that line from any rung here
+// -- it is ~380 lines past the rung-4 terminator, with ncclTopoComputeP2pChannels,
+// rcclCommSetP2pShiftSize, ncclProfilerPluginInit, ncclTransportCheckP2pType and ncclProxyCreate
+// still fail-loud in between -- so the condition is lifted into ginGateAllows() and asserted
+// directly. These are what make NCCL_GIN_MLOPART's effect detectable: without them, flipping the
+// parameter's meaning or dropping the hasMloPart term leaves the whole suite green. The helper
+// takes the communicator so the production call site cannot transpose cuMemGdrSupport and
+// hasMloPart; the fields below are the only ones it reads.
+
+// Heap-allocated: ncclComm's copy is deleted, and one value is already ~3.7 MiB, so two
+// locals in the veto case below blow an 8 MiB stack. Same shape as FreshComm.
+static std::unique_ptr<ncclComm> GinGateComm(bool cuMemGdrSupport, bool hasMloPart, int nNodes = 1) {
+  auto c = std::make_unique<ncclComm>();
+  c->cuMemGdrSupport = cuMemGdrSupport;
+  c->hasMloPart = hasMloPart;
+  c->nNodes = nNodes;
+  return c;
+}
+
+// The AICOMRCCL-2387 regression itself: a CPX partition carries mloPart, so with the parameter off
+// every partitioned rank loses GIN, on any shape.
+TEST_F(InitMicrotest, GinGate_PartitionedCommWithMloPartDisabled_RefusesGin) {
+  SetParams({{"GIN_MLOPART", 0}});
+  auto oneNode = GinGateComm(/*cuMemGdrSupport=*/true, /*hasMloPart=*/true, /*nNodes=*/1);
+  auto twoNode = GinGateComm(/*cuMemGdrSupport=*/true, /*hasMloPart=*/true, /*nNodes=*/2);
+  EXPECT_FALSE(ginGateAllows(/*ginTypeBitMask=*/UINT64_MAX, oneNode.get()));
+  EXPECT_FALSE(ginGateAllows(UINT64_MAX, twoNode.get()));
+}
+
+// The fix: an explicit 1 readmits them on any number of nodes. This is the opt-in a multi-node
+// partitioned deployment needs, since the default below stops at one node.
+TEST_F(InitMicrotest, GinGate_PartitionedCommWithMloPartEnabled_AllowsGin) {
+  SetParams({{"GIN_MLOPART", 1}});
+  auto oneNode = GinGateComm(/*cuMemGdrSupport=*/true, /*hasMloPart=*/true, /*nNodes=*/1);
+  auto twoNode = GinGateComm(/*cuMemGdrSupport=*/true, /*hasMloPart=*/true, /*nNodes=*/2);
+  EXPECT_TRUE(ginGateAllows(UINT64_MAX, oneNode.get()));
+  EXPECT_TRUE(ginGateAllows(UINT64_MAX, twoNode.get()));
+}
+
+// The parameter governs partitioned communicators only. An unpartitioned one keeps GIN even with
+// the parameter off, so a regression that widened the carve-out would show up here.
+TEST_F(InitMicrotest, GinGate_UnpartitionedCommIgnoresMloPartParam) {
+  SetParams({{"GIN_MLOPART", 0}});
+  auto c = GinGateComm(/*cuMemGdrSupport=*/true, /*hasMloPart=*/false, /*nNodes=*/2);
+  EXPECT_TRUE(ginGateAllows(UINT64_MAX, c.get()));
+}
+
+// The default, with no override installed: a partition on one node is admitted. This is the
+// verified shape -- 8 ranks across two OAMs of one host -- and it is the case the fix exists for,
+// so a default that refused it would put the AICOMRCCL-2387 failure back.
+TEST_F(InitMicrotest, GinGate_MloPartDefaultAllowsPartitionOnOneNode) {
+  auto c = GinGateComm(/*cuMemGdrSupport=*/true, /*hasMloPart=*/true, /*nNodes=*/1);
+  EXPECT_TRUE(ginGateAllows(UINT64_MAX, c.get()));
+}
+
+// The other half of the default, and the reason it is not a plain 1: past one node, admitting a
+// partition also reaches the hierarchical CE path, which nothing has run on partitioned hardware.
+// Deleting the node term leaves every other case in this suite green.
+TEST_F(InitMicrotest, GinGate_MloPartDefaultRefusesPartitionAcrossNodes) {
+  auto c = GinGateComm(/*cuMemGdrSupport=*/true, /*hasMloPart=*/true, /*nNodes=*/2);
+  EXPECT_FALSE(ginGateAllows(UINT64_MAX, c.get()));
+}
+
+// The node term is scoped to partitioned communicators: an ordinary multi-node comm is the case GIN
+// exists for and must keep it under the default.
+TEST_F(InitMicrotest, GinGate_MloPartDefaultIgnoresNodeCountWhenUnpartitioned) {
+  auto c = GinGateComm(/*cuMemGdrSupport=*/true, /*hasMloPart=*/false, /*nNodes=*/8);
+  EXPECT_TRUE(ginGateAllows(UINT64_MAX, c.get()));
+}
+
+// The other two terms still veto, with the parameter on, so the carve-out did not swallow them.
+TEST_F(InitMicrotest, GinGate_NoSupportedGinTypeOrNoCuMemGdr_RefusesGin) {
+  SetParams({{"GIN_MLOPART", 1}});
+  auto noType = GinGateComm(/*cuMemGdrSupport=*/true, /*hasMloPart=*/false);
+  auto noGdr = GinGateComm(/*cuMemGdrSupport=*/false, /*hasMloPart=*/false);
+  EXPECT_FALSE(ginGateAllows(/*ginTypeBitMask=*/0, noType.get()));
+  EXPECT_FALSE(ginGateAllows(UINT64_MAX, noGdr.get()));
+}
 
 // NOT ASSERTABLE FROM THIS RUNG, deliberately: the four `global*Support` accumulators at :1491-1494 are
 // function-locals first read at :2347-2363, ~700 lines past the terminator. They execute (so they count
@@ -2736,6 +3142,61 @@ TEST_F(InitMicrotest, InitTransportsRank_DuplicateGpuUuidDifferentHosts_IsAllowe
   // the ncclRemoteError sentinel (proves :1576 was reached) and the exit: call count.
   EXPECT_FALSE(LogHas(log, "Multiple Ranks are using the same GPU/Partition")) << "actual log:\n" << log;
   EXPECT_EQ(1, g_ncclOsCpuCountCalls);  // positive anchor: it really did reach exit:
+}
+
+// AICOMRCCL-2749. The CPX shape: one UUID, one bus/device, eight PCI functions. hipDeviceGetUuid
+// returns KFD's per-device unique_id, so every partition of an MI300X OAM reports the same UUID;
+// only the function nibble tells them apart. Measured on an MI300X node in CPX: 63
+// partitions, 8 distinct UUIDs and 63 distinct busIds. Dropping the busId conjunct
+// refuses this communicator, which is the whole bug -- one rank per partition is how CPX is run.
+TEST_F(InitMicrotest, InitTransportsRank_SameGpuUuidDifferentPciFunctions_IsAllowed) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  std::vector<PeerSpec> specs(4);
+  specs[1].uuidTag = 9;
+  specs[2].uuidTag = 9;
+  specs[1].busId = 0x1b001;  // 0000:1b:00.1 and .2: two CPX partitions of the OAM at 0000:1b:00
+  specs[2].busId = 0x1b002;
+  InstallPeerInfoAllGather(c, specs);
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));  // ran on to the topo seam
+  });
+  EXPECT_FALSE(LogHas(log, "Multiple Ranks are using the same GPU/Partition")) << "actual log:\n" << log;
+  EXPECT_EQ(1, g_ncclOsCpuCountCalls);  // positive anchor: it really did reach exit:
+}
+
+// The conjunct narrows the guard, it does not disable it: a genuine two-ranks-on-one-partition
+// misconfiguration matches on busId too and is still refused. Without this, the fix would be
+// indistinguishable from the NCCL_MULTI_RANK_GPU_ENABLE=1 workaround it is meant to replace.
+// The sibling test above drives the same guard with a nonzero busId, so neither case is passing
+// only because the harness leaves busId at 0.
+TEST_F(InitMicrotest, InitTransportsRank_SameGpuUuidSamePciFunction_StillRefused) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  std::vector<PeerSpec> specs(4);
+  specs[1].uuidTag = 9;
+  specs[2].uuidTag = 9;
+  specs[1].busId = 0x1b003;  // both ranks bound to 0000:1b:00.3
+  specs[2].busId = 0x1b003;
+  InstallPeerInfoAllGather(c, specs);
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    EXPECT_EQ(ncclInvalidUsage, initTransportsRank(c.get(), nullptr, c.timers()));
+  });
+  EXPECT_TRUE(LogHas(log, "Multiple Ranks are using the same GPU/Partition")) << "actual log:\n" << log;
+  EXPECT_EQ(0, g_ncclOsCpuCountCalls);  // the one return that skips exit:
+}
+
+// The NVIDIA MLOPart shape is the mirror image and must stay admitted: siblings share a BDF but
+// CUDA gives each partition its own UUID, so the UUID conjunct is what separates them there.
+TEST_F(InitMicrotest, InitTransportsRank_SamePciFunctionDifferentGpuUuids_IsAllowed) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  std::vector<PeerSpec> specs(4);
+  specs[1].busId = 0x1b000;  // same BDF, and uuidTag -1 leaves each peer its own UUID
+  specs[2].busId = 0x1b000;
+  InstallPeerInfoAllGather(c, specs);
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
+  });
+  EXPECT_FALSE(LogHas(log, "Multiple Ranks are using the same GPU/Partition")) << "actual log:\n" << log;
+  EXPECT_EQ(1, g_ncclOsCpuCountCalls);
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_DuplicateGpuUuid_MultiRankGpuEnabled_Continues) {
@@ -4304,7 +4765,9 @@ TEST_F(InitMicrotest, CommEnsureReady_AbortFlagSet_AbortsAndSkipsTheAsyncErrorQu
   EXPECT_EQ(ncclSuccess, ncclCommEnsureReady(rc.get()));
   EXPECT_EQ(1, abort.calls);
   EXPECT_EQ(gj.get(), aborted);
-  EXPECT_EQ(gj.get(), rc.get()->groupJob);
+  // The link is claimed, not merely read: abort consumes the reference it carries, so leaving the
+  // pointer behind would let a concurrent GetAsyncError reap the same link a second time.
+  EXPECT_EQ(nullptr, rc.get()->groupJob);
   // asyncResult is only ever read out (init.cc:4497), so it holds on both arms; the label is the discriminator.
   EXPECT_EQ(0, std::count(g_recorderLabels.begin(), g_recorderLabels.end(), "GetAsyncError"));
 }
@@ -6038,18 +6501,32 @@ TEST_F(InitMicrotest, CommFree_SingleNodeComm_ReleasesBothSizeArraysAndNullsTheP
   ::free(comm);
 }
 
-TEST_F(InitMicrotest, CommFree_MultiNodeComm_LeavesTheSizeArraysAlone) {
+TEST_F(InitMicrotest, CommFree_MultiNodeComm_ReleasesBothSizeArraysAndNullsThePointers) {
   ncclComm* comm = nullptr;
   uint32_t abortFlag = 0;
   int abortRef = 2;
   ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
   comm->nNodes = 2;
   int localSizes = 0;
+  long gatheredSizes = 0;
   comm->localSizes = &localSizes;
-  ScopedHook memFree(g_ncclMemFree, [](void*) { return ncclSuccess; });
+  comm->gatheredSizes = &gatheredSizes;
+  ASSERT_NE(comm->localSizes, comm->gatheredSizes);
 
+  std::vector<void*> released;
+  ScopedHook memFree(g_ncclMemFree, [&](void* p) {
+    released.push_back(p);
+    return ncclSuccess;
+  });
+
+  // commFree frees the comm struct. The spy keeps it alive so the pointer
+  // nulling below is still observable.
+  Teardown_DeviceFreeSpy spy(comm);
   EXPECT_EQ(ncclSuccess, commFree(comm));
-  EXPECT_EQ(0, memFree.calls);
+  EXPECT_EQ(std::vector<void*>({&localSizes, &gatheredSizes}), released);
+  EXPECT_EQ(nullptr, comm->localSizes);
+  EXPECT_EQ(nullptr, comm->gatheredSizes);
+  ::free(comm);
 }
 
 
@@ -6331,6 +6808,58 @@ TEST_F(InitMicrotest, CommFree_NoSymmetricSupport_SkipsSymmetricFinalize) {
 
   EXPECT_EQ(ncclSuccess, commFree(comm));
   EXPECT_EQ(0, symk.calls);
+}
+
+// AICOMRCCL-2739: a plugin finalize error is returned after the sharedRes frees.
+// Host finalize's error wins when both fail. RMA proxy finalize still aborts.
+TEST_F(InitMicrotest, CommFree_GinPluginFinalizeError_ReturnedAfterTeardown) {
+  ncclComm* comm = nullptr;
+  uint32_t abortFlag = 0;
+  int abortRef = 2;
+  ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
+  g_ncclGinFinalizeResult = ncclSystemError;
+
+  std::vector<int> ran;
+  Teardown_DtorNode node{};
+  node.base.fn = Teardown_RecordingDtor;
+  node.id = 1;
+  node.log = &ran;
+  node.result = ncclSuccess;
+  comm->destructorHead = &node.base;
+
+  EXPECT_EQ(ncclSystemError, commFree(comm));
+  EXPECT_EQ(1, g_ncclGinHostFinalizeCalls);
+  EXPECT_EQ(1, g_ncclGinFinalizeCalls);
+  EXPECT_EQ(std::vector<int>({1}), ran);
+}
+
+TEST_F(InitMicrotest, CommFree_GinHostFinalizeError_WinsOverPluginFinalizeError) {
+  ncclComm* comm = nullptr;
+  uint32_t abortFlag = 0;
+  int abortRef = 2;
+  ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
+  g_ncclGinHostFinalizeResult = ncclSystemError;
+  g_ncclGinFinalizeResult = ncclInternalError;
+
+  EXPECT_EQ(ncclSystemError, commFree(comm));
+  EXPECT_EQ(1, g_ncclGinHostFinalizeCalls);
+  EXPECT_EQ(1, g_ncclGinFinalizeCalls);
+}
+
+TEST_F(InitMicrotest, CommFree_RmaProxyFinalizeError_AbortsBeforePluginFinalize) {
+  ncclComm* comm = nullptr;
+  uint32_t abortFlag = 0;
+  int abortRef = 2;
+  ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
+  g_ncclGinHostFinalizeResult = ncclSystemError;
+  g_ncclRmaProxyFinalizeResult = ncclInternalError;
+
+  EXPECT_EQ(ncclInternalError, commFree(comm));
+  EXPECT_EQ(1, g_ncclGinHostFinalizeCalls);
+  EXPECT_EQ(1, g_ncclRmaProxyFinalizeCalls);
+  EXPECT_EQ(0, g_ncclGinFinalizeCalls);
+  EXPECT_EQ(2, abortRef);
+  free(comm);
 }
 
 TEST_F(InitMicrotest, CommFree_SymmetricFinalizeFails_PropagatesAndStopsTeardown) {
@@ -9034,6 +9563,7 @@ struct Tr_AllGatherInfo {
   int localRanks;
   int nc;
   int romeTopoModelIdx;
+  int treeCompact;
   bool pivotA2AEnabled;
   bool ll128Enabled;
   char hostname[128];

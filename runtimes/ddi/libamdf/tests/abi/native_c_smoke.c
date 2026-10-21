@@ -1,6 +1,7 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/* AMDF v3 negotiation and inert instance checks. No endpoint is activated. */
+/* AMDF v11 negotiation and inert instance checks. No endpoint is activated. */
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -24,7 +25,7 @@
 int main(void) {
   const amdf_api_t *api = NULL;
   CHECK(amdf_query_api(AMDF_ABI_VERSION_1, AMDF_ABI_VERSION_LATEST, &api) == AMDF_STATUS_OK);
-  CHECK(api != NULL && api->abi_version == AMDF_ABI_VERSION_3);
+  CHECK(api != NULL && api->abi_version == AMDF_ABI_VERSION_11);
   CHECK(api->structure_size >= sizeof(*api));
   amdf_api_t original;
   memcpy(&original, api, sizeof(original));
@@ -33,13 +34,16 @@ int main(void) {
   CHECK(again == api);
   CHECK(amdf_query_api(2, 2, &again) == API_ERROR(VERSION_MISMATCH));
   CHECK(again == api);
-  CHECK(amdf_query_api(3, 3, &again) == AMDF_STATUS_OK);
+  CHECK(amdf_query_api(3, 3, &again) == API_ERROR(VERSION_MISMATCH));
+  CHECK(again == api);
+  CHECK(amdf_query_api(5, 5, &again) == API_ERROR(VERSION_MISMATCH));
+  CHECK(amdf_query_api(11, 11, &again) == AMDF_STATUS_OK);
   CHECK(again == api);
   CHECK(amdf_query_api(2, 1, &again) == API_ERROR(INVALID_ARGUMENT));
   CHECK(again == api);
   CHECK(amdf_query_api(2, 2, NULL) == API_ERROR(INVALID_ARGUMENT));
-  /* Every v3 slot exists, including operations whose implementation reports
-   * Unsupported for this provider. New slots may only append to this table. */
+  /* Every negotiated v11 slot exists, including operations whose native
+   * backend reports Unsupported. New slots may only append to this table. */
   CHECK(api->instance_create != NULL);
   CHECK(api->instance_destroy != NULL);
   CHECK(api->endpoint_enumerate != NULL);
@@ -78,11 +82,23 @@ int main(void) {
   CHECK(api->user_queue_destroy != NULL);
   CHECK(api->memory_query_address != NULL);
   CHECK(api->memory_scope_query_pair_info != NULL);
+  CHECK(api->kernel_queue_refresh_status != NULL);
+  CHECK(api->kernel_queue_request_notification != NULL);
+  CHECK(api->device_query_memory_reservation_capabilities != NULL);
+  CHECK(api->instance_query_host_memory_reservation_capabilities != NULL);
+  CHECK(api->memory_reservation_create != NULL);
+  CHECK(api->memory_reservation_map != NULL);
+  CHECK(api->memory_reservation_query_access_info != NULL);
+  CHECK(api->memory_reservation_update != NULL);
+  CHECK(api->memory_reservation_detach != NULL);
+  CHECK(api->memory_reservation_destroy != NULL);
+  CHECK(api->kernel_queue_update_memory != NULL);
   const void *extension = NULL;
   CHECK(api->query_extension(AMDF_EXTENSION_GPU, 1, 1, &extension) == AMDF_STATUS_OK);
   CHECK(extension != NULL);
   const amdf_gpu_api_t *gpu = (const amdf_gpu_api_t *)extension;
-  CHECK(gpu->structure_size >= sizeof(*gpu) && gpu->extension_version == 1);
+  CHECK(gpu->structure_size == offsetof(amdf_gpu_api_t, device_query_queue_clock_info)
+        && gpu->extension_version == 1);
   CHECK(gpu->endpoint_query_info && gpu->device_create && gpu->device_query_info);
   CHECK(gpu->user_queue_create);
   CHECK(gpu->kernel_queue_create && gpu->kernel_queue_submit);
@@ -90,8 +106,12 @@ int main(void) {
   memcpy(&original_gpu, gpu, sizeof(original_gpu));
   CHECK(api->query_extension(UINT32_MAX, 1, 1, &extension) == API_ERROR(UNSUPPORTED));
   CHECK(extension == gpu);
-  CHECK(api->query_extension(AMDF_EXTENSION_GPU, 2, 2, &extension) == API_ERROR(VERSION_MISMATCH));
-  CHECK(extension == gpu);
+  CHECK(api->query_extension(AMDF_EXTENSION_GPU, 2, 2, &extension) == AMDF_STATUS_OK);
+  CHECK(((const amdf_gpu_api_t *)extension)->extension_version == 2);
+  CHECK(api->query_extension(AMDF_EXTENSION_GPU, 3, 3, &extension) == AMDF_STATUS_OK);
+  CHECK(((const amdf_gpu_api_t *)extension)->extension_version == 3);
+  CHECK(api->query_extension(AMDF_EXTENSION_OBSERVATION, 1, 1, &extension) == AMDF_STATUS_OK);
+  CHECK(((const amdf_observation_api_t *)extension)->query_host_clock != NULL);
 
   amdf_instance_create_info_t create;
   INIT(create, AMDF_STRUCTURE_TYPE_INSTANCE_CREATE_INFO);
