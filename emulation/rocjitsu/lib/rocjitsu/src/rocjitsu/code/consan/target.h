@@ -66,14 +66,14 @@ inline constexpr std::array kNativeLdsTargets = {
 };
 
 inline constexpr const TargetProfile *target_profile(uint32_t id) {
-  for (const auto &target : kNativeLdsTargets)
+  for (const TargetProfile &target : kNativeLdsTargets)
     if (target.id == id)
       return &target;
   return nullptr;
 }
 
 inline constexpr const TargetProfile *target_profile(std::string_view name) {
-  for (const auto &target : kNativeLdsTargets)
+  for (const TargetProfile &target : kNativeLdsTargets)
     if (target.name == name)
       return &target;
   return nullptr;

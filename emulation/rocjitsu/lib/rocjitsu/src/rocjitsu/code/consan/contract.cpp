@@ -201,7 +201,7 @@ Result validate_manifest(const Manifest &manifest, ContractError *error,
   if (encoded_bytes > limits.metadata_bytes)
     return reject(error, ContractErrorCode::ResourceLimit, "static facts exceed metadata budget");
 
-  const auto *target = target_profile(manifest.target);
+  const TargetProfile *target = target_profile(manifest.target);
   if (manifest.original.bytes == 0 || manifest.prepared.bytes == 0 || target == nullptr ||
       !supports_wave(*target, manifest.wave_size) || manifest.code_object_abi != 5 ||
       manifest.scope != ScopeKind::NativeLdsNoSynchronization ||
@@ -394,7 +394,8 @@ FailureOr<TransportImage> initialize_transport(const Manifest &manifest,
                                                uint32_t group_bytes, uint32_t private_bytes,
                                                uint64_t serial, uint64_t report_address,
                                                ContractError *error) {
-  const auto layout = plan_launch(manifest, dimensions, group_bytes, private_bytes, error);
+  const FailureOr<LaunchLayout> layout =
+      plan_launch(manifest, dimensions, group_bytes, private_bytes, error);
   if (layout.failed())
     return Result::failure();
   if (serial == 0 || report_address == 0 || (report_address % 64) != 0 ||

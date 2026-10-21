@@ -83,14 +83,14 @@ protected:
            test::TargetMode target_mode = {"gfx1100", 32}, uint32_t threads = 64,
            bool target_fixture = false) {
 #ifdef CONSAN_FIXTURE_DIR
-    const auto original =
+    const std::vector<uint8_t> original =
         test::read_fixture(target_fixture ? test::target_fixture_path(target_mode, fixture)
                                           : std::filesystem::path(CONSAN_FIXTURE_DIR) /
                                                 (std::string(fixture) + ".hsaco"));
     ASSERT_FALSE(original.empty());
-    const auto *profile = target_profile(target_mode.target);
+    const TargetProfile *profile = target_profile(target_mode.target);
     ASSERT_NE(profile, nullptr);
-    const auto arch = profile->arch;
+    const rj_code_arch_t arch = profile->arch;
     const uint32_t wave_count = (threads + target_mode.wave_size - 1) / target_mode.wave_size;
     InputError error;
     const FailureOr<InputProgram> analyzed = build_input_program(
@@ -102,7 +102,7 @@ protected:
     result.context_sgpr = input.entry_plan.storage.persistent_base;
     std::vector<uint8_t> image = original;
     if (mode == Bootstrap::Instrumented) {
-      const auto artifact =
+      const FailureOr<PreparedArtifact> artifact =
           prepare(original, *target_profile(target_mode.target), "lds_producer_consumer", error);
       ASSERT_TRUE(artifact.succeeded()) << error.message;
       image = artifact.value().image;
@@ -179,7 +179,7 @@ protected:
     std::memcpy(arguments.data() + 8, &kOutput, sizeof(kOutput));
     memory->load_image(arguments.data(), arguments.size(), kOriginalArguments);
     if (mode == Bootstrap::Instrumented) {
-      const auto transport =
+      const FailureOr<TransportImage> transport =
           initialize_transport(result.manifest,
                                {{threads, 1, 1},
                                 { threads,
@@ -315,8 +315,8 @@ TEST_F(ConSanBootstrapSim,
     EXPECT_EQ(instrumented.output, (std::array<uint32_t, 2>{7, 8}));
     EXPECT_EQ(instrumented.output, original.output);
     for (size_t wave = 0; wave < 2; ++wave) {
-      const auto &before = original.waves[wave];
-      const auto &after = instrumented.waves[wave];
+      const ::rocjitsu::test::WavefrontSnapshot &before = original.waves[wave];
+      const ::rocjitsu::test::WavefrontSnapshot &after = instrumented.waves[wave];
       EXPECT_EQ(after.exec, before.exec);
       EXPECT_EQ(after.vcc, before.vcc);
       EXPECT_EQ(after.status & 1, before.status & 1);
@@ -435,8 +435,8 @@ void expect_guest_state(const RunResult &before, const RunResult &after) {
   ASSERT_EQ(before.waves.size(), after.waves.size());
   EXPECT_EQ(before.full_output, after.full_output);
   for (size_t index = 0; index < before.waves.size(); ++index) {
-    const auto &a = before.waves[index];
-    const auto &b = after.waves[index];
+    const ::rocjitsu::test::WavefrontSnapshot &a = before.waves[index];
+    const ::rocjitsu::test::WavefrontSnapshot &b = after.waves[index];
     SCOPED_TRACE(index);
     EXPECT_EQ(a.wf_size, b.wf_size);
     EXPECT_EQ(a.exec, b.exec);
@@ -470,7 +470,7 @@ std::vector<ObservedAccess> published_accesses(const RunResult &result, bool exh
                                      : kCompletedRowStatus);
     EXPECT_EQ(wire::read_u32(result.report, row + wire::kRowLoss),
               exhausted && wave == 0 ? 1u : 0u);
-    for (const auto &site : result.manifest.sites) {
+    for (const SiteFacts &site : result.manifest.sites) {
       for (uint32_t address_group = 0; address_group < kAddressGroupsPerSite; ++address_group) {
         const size_t record =
             row + kRowHeaderBytes + (site.first_slot + address_group) * kAccessRecordBytes;
@@ -491,8 +491,8 @@ std::vector<ObservedAccess> published_accesses(const RunResult &result, bool exh
 }
 
 TEST_P(ConSanTargetSim, AssemblyAliasPreservesAllGuestRegistersAndPublishesBothWaves) {
-  const auto target = GetParam();
-  for (const auto *fixture : {"native-2", "native-6"}) {
+  const test::TargetMode target = GetParam();
+  for (const char *fixture : {"native-2", "native-6"}) {
     SCOPED_TRACE(fixture);
     RunResult before, after;
     run(fixture, Bootstrap::None, before, target, 2 * target.wave_size, true);
@@ -501,9 +501,9 @@ TEST_P(ConSanTargetSim, AssemblyAliasPreservesAllGuestRegistersAndPublishesBothW
     ASSERT_FALSE(HasFatalFailure());
     expect_guest_state(before, after);
     EXPECT_EQ(after.full_output, (std::vector<uint32_t>{7, 8}));
-    const auto records = published_accesses(after);
+    const std::vector<ObservedAccess> records = published_accesses(after);
     ASSERT_EQ(records.size(), 4u);
-    for (const auto &record : records) {
+    for (const ObservedAccess &record : records) {
       EXPECT_EQ(record.mask, 1u);
       EXPECT_EQ(record.offset, record.wave * 4);
     }
@@ -511,8 +511,8 @@ TEST_P(ConSanTargetSim, AssemblyAliasPreservesAllGuestRegistersAndPublishesBothW
 }
 
 TEST_P(ConSanTargetSim, HighLaneMasksAndEmptyExecHaveRealPublicationEvidence) {
-  const auto target = GetParam();
-  for (const auto *fixture : {"native-14", "native-12", "native-11", "native-4", "native-13"}) {
+  const test::TargetMode target = GetParam();
+  for (const char *fixture : {"native-14", "native-12", "native-11", "native-4", "native-13"}) {
     SCOPED_TRACE(fixture);
     RunResult after;
     run(fixture, Bootstrap::Instrumented, after, target, 2 * target.wave_size, true);
@@ -541,13 +541,13 @@ TEST_P(ConSanTargetSim, HighLaneMasksAndEmptyExecHaveRealPublicationEvidence) {
         }
       }
     }
-    const auto records = published_accesses(after, name == "native-11");
+    const std::vector<ObservedAccess> records = published_accesses(after, name == "native-11");
     ASSERT_EQ(records.size(), name == "native-14"   ? 2u
                               : name == "native-12" ? 0u
                               : name == "native-11" ? 4u
                                                     : 1u);
     for (size_t index = 0; index < records.size(); ++index) {
-      const auto &record = records[index];
+      const ObservedAccess &record = records[index];
       if (name == "native-14") {
         EXPECT_EQ(record.wave, index);
         EXPECT_EQ(record.mask, uint64_t{1} << (target.wave_size - 1));
@@ -563,7 +563,7 @@ TEST_P(ConSanTargetSim, HighLaneMasksAndEmptyExecHaveRealPublicationEvidence) {
 }
 
 TEST_P(ConSanTargetSim, ThreeWavesAndPartialTailUseDistinctRows) {
-  const auto target = GetParam();
+  const test::TargetMode target = GetParam();
   RunResult before, after;
   const uint32_t threads = 3 * target.wave_size + 1;
   run("native-2", Bootstrap::None, before, target, threads, true);
@@ -572,9 +572,9 @@ TEST_P(ConSanTargetSim, ThreeWavesAndPartialTailUseDistinctRows) {
   ASSERT_FALSE(HasFatalFailure());
   expect_guest_state(before, after);
   EXPECT_EQ(after.full_output, (std::vector<uint32_t>{7, 8, 9, 10}));
-  const auto records = published_accesses(after);
+  const std::vector<ObservedAccess> records = published_accesses(after);
   ASSERT_EQ(records.size(), 8u);
-  for (const auto &record : records) {
+  for (const ObservedAccess &record : records) {
     EXPECT_EQ(record.mask, 1u);
     EXPECT_EQ(record.offset, record.wave * 4);
   }
@@ -585,16 +585,16 @@ TEST_P(ConSanTargetSim, ThreeWavesAndPartialTailUseDistinctRows) {
 // admission tests require a precise rejection. Its native probes run above.
 class ConSanHipSim : public ConSanTargetSim {};
 TEST_P(ConSanHipSim, CompiledHipRaceDisjointAndReadReadExecuteTheirNativeSites) {
-  const auto target = GetParam();
-  for (const auto *fixture : {"hip-1", "hip-2", "hip-3"}) {
+  const test::TargetMode target = GetParam();
+  for (const char *fixture : {"hip-1", "hip-2", "hip-3"}) {
     SCOPED_TRACE(fixture);
     RunResult after;
     run(fixture, Bootstrap::Instrumented, after, target, 2 * target.wave_size, true);
     ASSERT_FALSE(HasFatalFailure());
-    const auto records = published_accesses(after);
+    const std::vector<ObservedAccess> records = published_accesses(after);
     ASSERT_EQ(records.size(), std::string_view(fixture) == "hip-2" ? 4u : 2u);
     uint32_t reads = 0, writes = 0;
-    for (const auto &record : records) {
+    for (const ObservedAccess &record : records) {
       EXPECT_EQ(record.mask, 1u);
       (after.manifest.sites[record.site].access == AccessKind::Read ? reads : writes)++;
     }

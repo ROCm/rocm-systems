@@ -32,7 +32,7 @@ int main(int argc, char **argv) {
     const std::string_view option(argv[index]);
     if (option == "--examples" && index + 1 < argc) {
       const std::string_view number(argv[++index]);
-      const auto parsed =
+      const std::from_chars_result parsed =
           std::from_chars(number.data(), number.data() + number.size(), options.examples);
       if (parsed.ec != std::errc{} || parsed.ptr != number.data() + number.size() ||
           options.examples > kMaxFindingExamples)

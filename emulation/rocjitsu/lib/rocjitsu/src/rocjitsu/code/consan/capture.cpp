@@ -42,8 +42,9 @@ bool valid_header(const CaptureHeader &header) {
 
 Result validate_execution(const Manifest &manifest, const CapturedExecution &execution,
                           ContractError *error, const CaptureLimits &limits) {
-  const auto layout = plan_launch(manifest, execution.dimensions, execution.group_bytes,
-                                  execution.private_bytes, error, limits.contract);
+  const FailureOr<LaunchLayout> layout =
+      plan_launch(manifest, execution.dimensions, execution.group_bytes, execution.private_bytes,
+                  error, limits.contract);
   if (layout.failed())
     return Result::failure();
   if (execution.arguments.size() > limits.argument_bytes)
@@ -56,8 +57,8 @@ Result validate_execution(const Manifest &manifest, const CapturedExecution &exe
       execution.private_bytes != layout.value().private_bytes)
     return reject(error, ContractErrorCode::InvalidFacts,
                   "invalid execution ownership, extent or completion");
-  const auto &context = execution.context;
-  const auto address = wire::read_u64(context, wire::kContextReportPointer);
+  const std::array<uint8_t, kContextBytes> &context = execution.context;
+  const std::optional<uint64_t> address = wire::read_u64(context, wire::kContextReportPointer);
   if (wire::read_u64(context, wire::kContextSerial) != execution.serial ||
       wire::read_u32(context, wire::kContextEntry) != manifest.entry.id ||
       !all_zero(std::span(context).subspan(12, 4)) || !address || *address == 0 ||
@@ -150,7 +151,7 @@ FailureOr<std::vector<uint8_t>> CaptureEncoder::start(const CaptureHeader &heade
   if (started_ || !valid_header(header))
     return reject(error, ContractErrorCode::InvalidFacts,
                   "capture already started or invalid run execution conditions/identity");
-  const auto facts = encode_manifest(header.manifest, error);
+  const FailureOr<std::vector<uint8_t>> facts = encode_manifest(header.manifest, error);
   if (facts.failed())
     return Result::failure();
   std::vector<uint8_t> prefix(kHeaderBytes + facts.value().size());
@@ -177,7 +178,8 @@ FailureOr<std::vector<uint8_t>> CaptureEncoder::append(const CapturedExecution &
     return reject(error, ContractErrorCode::ResourceLimit, "capture execution budget exceeded");
   if (validate_execution(header_.manifest, execution, error, limits).failed())
     return Result::failure();
-  const auto generation = generations_.find(execution.storage_slot);
+  const std::map<uint32_t, uint32_t>::iterator generation =
+      generations_.find(execution.storage_slot);
   if (generation != generations_.end() && execution.storage_generation <= generation->second)
     return reject(error, ContractErrorCode::InvalidFacts,
                   "storage generation was already captured");
@@ -231,7 +233,7 @@ FailureOr<Capture> decode_capture(std::span<const uint8_t> bytes, ContractError 
     return reject(error, ContractErrorCode::ResourceLimit, "capture facts budget exceeded");
   if (facts_bytes > bytes.size() - kHeaderBytes - kEndBytes)
     return reject(error, ContractErrorCode::InvalidEncoding, "capture facts extent is truncated");
-  const auto manifest =
+  const FailureOr<Manifest> manifest =
       decode_manifest(bytes.subspan(kHeaderBytes, facts_bytes), error, limits.contract);
   if (manifest.failed())
     return Result::failure();
@@ -243,7 +245,7 @@ FailureOr<Capture> decode_capture(std::span<const uint8_t> bytes, ContractError 
   if (!valid_header(capture.header))
     return reject(error, ContractErrorCode::InvalidFacts,
                   "unsupported run execution conditions or missing identity");
-  const auto end = bytes.last(kEndBytes);
+  const std::span<const uint8_t> end = bytes.last(kEndBytes);
   const uint64_t count = *wire::read_u64(end, 8);
   if (count > limits.executions)
     return reject(error, ContractErrorCode::ResourceLimit,
@@ -261,11 +263,12 @@ FailureOr<Capture> decode_capture(std::span<const uint8_t> bytes, ContractError 
     const uint64_t payload_bytes = *wire::read_u64(bytes, offset + 8);
     if (payload_bytes > bytes.size() - kEndBytes - offset - kFrameBytes)
       return reject(error, ContractErrorCode::InvalidEncoding, "truncated execution frame");
-    const auto payload = bytes.subspan(offset + kFrameBytes, payload_bytes);
+    const std::span<const uint8_t> payload = bytes.subspan(offset + kFrameBytes, payload_bytes);
     const Digest frame_hash = digest(payload);
     if (!std::equal(frame_hash.begin(), frame_hash.end(), bytes.begin() + offset + 16))
       return reject(error, ContractErrorCode::InvalidEncoding, "execution frame checksum mismatch");
-    auto execution = decode_execution(payload, capture.header.manifest, error, limits);
+    FailureOr<CapturedExecution> execution =
+        decode_execution(payload, capture.header.manifest, error, limits);
     if (execution.failed())
       return Result::failure();
     if (execution.value().serial != capture.executions.size() + 1 ||
