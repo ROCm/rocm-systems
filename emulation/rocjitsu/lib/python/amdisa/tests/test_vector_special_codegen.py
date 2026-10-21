@@ -11,7 +11,7 @@ import re
 import pytest
 
 from amdisa.codegen.execute import float_fract, float_ldexp
-from amdisa.codegen.execute.sema_lower import _INLINE_UNARY_OPS
+from amdisa.codegen.execute.sema_lower import _INLINE_UNARY_OPS, lower_sema_block
 from amdisa.codegen.execute.simd_codegen import (
     SIMD_VOP1_UNARY,
     local_coverage_probe,
@@ -38,6 +38,9 @@ from amdisa.codegen.config import CodegenConfig
 from amdisa.codegen._generator import CodeGenerator
 from amdisa.gpuisa import Instruction, Operand
 from amdisa.isa_profile import Cdna5Profile, Rdna3Profile, Rdna4Profile
+from amdisa.sema_derive import derive_sema_block
+from amdisa.sema_enrich import enrich_block
+from amdisa.semantics import derive_semantics
 from amdisa.semantics import derive_semantics
 
 
@@ -670,8 +673,8 @@ def test_true16_special_vop3_simd_routes_use_true16_glue():
     'name', ['v_cvt_pkrtz_f16_f32_vop3', 'v_cvt_pk_rtz_f16_f32_vop3']
 )
 def test_packed_rtz_simd_applies_source_modifiers(name):
-    stages = 'amdgpu::conversion_pk_rtz_f16(wf, inst.inst_.abs, inst.inst_.neg)'
-    probes = [simd_probe_line(name)]
+    # Every probe passes the scalar body's stage object, ABS/NEG included.
+    probes = [simd_probe_line(name), simd_probe_line(name.replace('_vop3', '_vop2'))]
     local = local_coverage_probe(name)
     if name == 'v_cvt_pkrtz_f16_f32_vop3':
         assert local is not None
@@ -679,10 +682,9 @@ def test_packed_rtz_simd_applies_source_modifiers(name):
     else:
         assert local is None
     for probe in probes:
-        assert stages in probe
+        assert 'conversion)' in probe
+        assert 'conversion_pk_rtz_f16' not in probe
         assert 'f32_to_f16_rtz_simd' not in probe
-    vop2 = simd_probe_line(name.replace('_vop3', '_vop2'))
-    assert 'amdgpu::conversion_pk_rtz_f16(wf)' in vop2
 
 
 @pytest.mark.parametrize('has_abs', [False, True])
@@ -743,20 +745,11 @@ def test_f64_to_integer_simd_defers_source_modifiers_to_scalar(name):
     ],
 )
 def test_floor_nearest_simd_uses_shared_raw_bit_conversion(name, operation):
-    policy = 'amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32())'
-    vop1 = simd_probe_line(f'{name}_vop1')
-    vop3 = simd_probe_line(f'{name}_vop3')
-    for probe in (vop1, vop3):
-        assert probe.startswith('  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t,')
-        assert f'amdgpu::conversion::{operation}{{{policy}}}' in probe
-        assert 'util::stdx::floor' not in probe
-    # The VOP3 form stays on the SIMD path and applies ABS/NEG to the raw bits.
-    assert 'if (!inst.inst_.abs' not in vop3
-    assert (
-        'source_modifier::apply<amdgpu::fp_format::F32>(a, 0, inst.inst_.abs, inst.inst_.neg)'
-        in vop3
-    )
-    assert 'inst_.abs' not in vop1
+    # Both forms pass the scalar body's FloorI32/NearestI32 stage object; for
+    # VOP3 it holds ABS/NEG, so a modified encoding stays on the SIMD path.
+    probe = '  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, conversion);'
+    assert simd_probe_line(f'{name}_vop1') == probe
+    assert simd_probe_line(f'{name}_vop3') == probe
 
 
 @pytest.mark.parametrize('dtype', ['f32', 'f16'])
@@ -841,9 +834,7 @@ def test_packed_u8_uses_the_shared_conversion(has_abs):
     assert 'conversion(s0, s1, s2)' in cpp
     assert 'std::clamp' not in cpp
     assert simd_probe_line('v_cvt_pk_u8_f32_vop3') == (
-        '  if (!inst.inst_.abs && !inst.inst_.neg) {\n'
-        '    ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(uint32_t, '
-        'amdgpu::conversion_pk_u8(wf));\n  }'
+        '  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(uint32_t, conversion);'
     )
     # V_CVT_PKACCUM_U8_F32 keeps its own body.
     accumulate = gen_vector_cvt_pk(
@@ -870,7 +861,4 @@ def test_pack_b32_f16_uses_the_shared_conversion(has_abs):
     )
     assert 'conversion(s0, s1)' in cpp
     probe = simd_probe_line('v_pack_b32_f16_vop3')
-    assert probe == (
-        '  ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC(uint32_t, '
-        'amdgpu::conversion_pack_b32_f16(wf, inst.inst_.abs, inst.inst_.neg));'
-    )
+    assert probe == '  ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC(uint32_t, conversion);'

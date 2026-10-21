@@ -235,12 +235,10 @@ void VCvtF16F32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto &inst = *this;
-  if (amdgpu::try_execute_words_simd<1, true, true, 0>(
-          inst, wf,
-          amdgpu::conversion_to_float<amdgpu::fp_format::F32, amdgpu::fp_format::F16>(wf)))
+  const auto conversion = amdgpu::sdwa_conversion_to_f16<amdgpu::fp_format::F32>(*this, wf);
+  if (amdgpu::try_execute_words_simd<1, true, true, 0>(inst, wf, conversion))
     return;
   uint64_t exec = wf.exec();
-  const auto conversion = amdgpu::sdwa_conversion_to_f16<amdgpu::fp_format::F32>(*this, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -267,12 +265,10 @@ RJ_NOINLINE void VCvtF16F32Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto &inst = *this;
-  if (amdgpu::try_execute_words_simd<1, true, true, 0>(
-          inst, wf,
-          amdgpu::conversion_to_float<amdgpu::fp_format::F32, amdgpu::fp_format::F16>(wf)))
+  const auto conversion = amdgpu::sdwa_conversion_to_f16<amdgpu::fp_format::F32>(*this, wf);
+  if (amdgpu::try_execute_words_simd<1, true, true, 0>(inst, wf, conversion))
     return;
   uint64_t exec = wf.exec();
-  const auto conversion = amdgpu::sdwa_conversion_to_f16<amdgpu::fp_format::F32>(*this, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -2066,12 +2062,10 @@ void VCvtF16U16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto &inst = *this;
-  if (amdgpu::try_execute_words_simd<1, true, true, 1>(
-          inst, wf,
-          amdgpu::conversion_to_float<amdgpu::conversion::U16, amdgpu::fp_format::F16>(wf)))
+  const auto conversion = amdgpu::sdwa_conversion_to_f16<amdgpu::conversion::U16>(*this, wf);
+  if (amdgpu::try_execute_words_simd<1, true, true, 1>(inst, wf, conversion))
     return;
   uint64_t exec = wf.exec();
-  const auto conversion = amdgpu::sdwa_conversion_to_f16<amdgpu::conversion::U16>(*this, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -2097,12 +2091,10 @@ RJ_NOINLINE void VCvtF16U16Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto &inst = *this;
-  if (amdgpu::try_execute_words_simd<1, true, true, 1>(
-          inst, wf,
-          amdgpu::conversion_to_float<amdgpu::conversion::U16, amdgpu::fp_format::F16>(wf)))
+  const auto conversion = amdgpu::sdwa_conversion_to_f16<amdgpu::conversion::U16>(*this, wf);
+  if (amdgpu::try_execute_words_simd<1, true, true, 1>(inst, wf, conversion))
     return;
   uint64_t exec = wf.exec();
-  const auto conversion = amdgpu::sdwa_conversion_to_f16<amdgpu::conversion::U16>(*this, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -2118,12 +2110,10 @@ void VCvtF16I16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto &inst = *this;
-  if (amdgpu::try_execute_words_simd<1, true, true, 1>(
-          inst, wf,
-          amdgpu::conversion_to_float<amdgpu::conversion::I16, amdgpu::fp_format::F16>(wf)))
+  const auto conversion = amdgpu::sdwa_conversion_to_f16<amdgpu::conversion::I16>(*this, wf);
+  if (amdgpu::try_execute_words_simd<1, true, true, 1>(inst, wf, conversion))
     return;
   uint64_t exec = wf.exec();
-  const auto conversion = amdgpu::sdwa_conversion_to_f16<amdgpu::conversion::I16>(*this, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -2149,12 +2139,10 @@ RJ_NOINLINE void VCvtF16I16Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto &inst = *this;
-  if (amdgpu::try_execute_words_simd<1, true, true, 1>(
-          inst, wf,
-          amdgpu::conversion_to_float<amdgpu::conversion::I16, amdgpu::fp_format::F16>(wf)))
+  const auto conversion = amdgpu::sdwa_conversion_to_f16<amdgpu::conversion::I16>(*this, wf);
+  if (amdgpu::try_execute_words_simd<1, true, true, 1>(inst, wf, conversion))
     return;
   uint64_t exec = wf.exec();
-  const auto conversion = amdgpu::sdwa_conversion_to_f16<amdgpu::conversion::I16>(*this, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;

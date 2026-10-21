@@ -24,6 +24,7 @@ Execution semantics are provided by ``SemanticsSpec`` from
 import cgen
 
 from amdisa.codegen.execute import input_policy
+from amdisa.codegen.execute.conversion import is_integer_source, share_stages
 from amdisa.codegen.execute.floating_policy import (
     F16_TRANSCENDENTAL_OPS,
     FLUSH_NEAREST_F32_OPS,
@@ -6671,23 +6672,23 @@ class CodeGenerator:
                 is_float_op = dtype in ('f16', 'f32', 'f64', 'bf16')
                 # Integer sources take no ABS/NEG, but the float result takes
                 # CLAMP and OMOD like any other VOP3 float result.
-                is_integer_to_float = cls == 'vector_unary' and dtype in (
-                    'f16_i16',
-                    'f16_u16',
-                    'f32_i32',
-                    'f32_u32',
-                    'f32_ubyte0',
-                    'f32_ubyte1',
-                    'f32_ubyte2',
-                    'f32_ubyte3',
-                    'f64_i32',
-                    'f64_u32',
+                is_integer_to_float = cls == 'vector_unary' and (
+                    (dtype in TO_FLOAT_CONVERSIONS and is_integer_source(dtype))
+                    or dtype
+                    in (
+                        'f32_ubyte0',
+                        'f32_ubyte1',
+                        'f32_ubyte2',
+                        'f32_ubyte3',
+                        'f64_i32',
+                        'f64_u32',
+                    )
                 )
                 is_float_to_integer = cls == 'vector_unary' and dtype in (
                     F32_TO_INTEGER_DTYPES | F64_TO_INTEGER_DTYPES
                 )
-                # Floating sources take ABS/NEG; floating results take OMOD/CLAMP.
-                is_float_to_float = (
+                # Floating results take OMOD/CLAMP; floating sources also ABS/NEG.
+                is_to_float_conversion = (
                     cls == 'vector_unary' and dtype in TO_FLOAT_CONVERSIONS
                 )
                 is_f16_input_conversion = (
@@ -6699,7 +6700,7 @@ class CodeGenerator:
                         is_float_op
                         or is_integer_to_float
                         or is_float_to_integer
-                        or is_float_to_float
+                        or is_to_float_conversion
                         or is_f16_input_conversion
                     )
                     and not is_true16_mov
@@ -13804,6 +13805,7 @@ class CodeGenerator:
                                 ),
                                 cmpx_writes_vcc=self.isa_spec.profile.cmpx_writes_vcc,
                                 result_writer=_mask_result_writer,
+                                arch_name=self.generated_dir_name,
                             )
                             if self.generated_dir_name in ('cdna5', 'cdna4', 'rdna4')
                             else None
@@ -13817,7 +13819,9 @@ class CodeGenerator:
                             or _renamed_vop3p_probe
                         )
                         _local_simd_probe_body = ''
-                        _local_scalar_body = _local_body
+                        _local_simd_probe, _local_scalar_body = share_stages(
+                            _local_simd_probe, _local_body
+                        )
                         _local_execute_body = _local_scalar_body
                         if _local_simd_probe:
                             _local_simd_body = (
@@ -15347,10 +15351,13 @@ class CodeGenerator:
                 f'[[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf'
                 f'{result_parameter}) {{'
             )
-            probe = simd_probe_line(
-                mnemonic,
-                true16_vop3=is_true16_vop3,
-                result_writer='commit_result' if uses_result_writer else None,
+            probe, prefixed_body = share_stages(
+                simd_probe_line(
+                    mnemonic,
+                    true16_vop3=is_true16_vop3,
+                    result_writer='commit_result' if uses_result_writer else None,
+                ),
+                prefixed_body,
             )
             if mnemonic.rsplit('_', 1)[0].upper() in FLUSH_NEAREST_F32_OPS:
                 # These mappings ignore guest rounding. Keep output scaling and clamp

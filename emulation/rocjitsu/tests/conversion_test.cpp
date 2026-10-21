@@ -41,29 +41,41 @@ TEST(ConversionTest, FloorAndNearestMatchExactRoundingOfFiniteValues) {
     const float value = std::bit_cast<float>(bits);
     if (std::isnan(value))
       continue;
-    ASSERT_EQ(conversion::FloorI32{kKeep}(bits), static_cast<uint32_t>(reference(value, false)))
+    ASSERT_EQ(conversion::FloorI32{.input = kKeep}(bits),
+              static_cast<uint32_t>(reference(value, false)))
         << std::hex << bits;
-    ASSERT_EQ(conversion::NearestI32{kKeep}(bits), static_cast<uint32_t>(reference(value, true)))
+    ASSERT_EQ(conversion::NearestI32{.input = kKeep}(bits),
+              static_cast<uint32_t>(reference(value, true)))
         << std::hex << bits;
   }
 }
 
 TEST(ConversionTest, FloorAndNearestSaturateNanBySign) {
   for (const uint32_t nan : {0x7fc00000u, 0x7f800001u, 0x7fffffffu}) {
-    EXPECT_EQ(conversion::FloorI32{kKeep}(nan), 0x7fffffffu);
-    EXPECT_EQ(conversion::FloorI32{kKeep}(nan | 0x80000000u), 0x80000000u);
-    EXPECT_EQ(conversion::NearestI32{kKeep}(nan), 0x7fffffffu);
-    EXPECT_EQ(conversion::NearestI32{kKeep}(nan | 0x80000000u), 0x80000000u);
+    EXPECT_EQ(conversion::FloorI32{.input = kKeep}(nan), 0x7fffffffu);
+    EXPECT_EQ(conversion::FloorI32{.input = kKeep}(nan | 0x80000000u), 0x80000000u);
+    EXPECT_EQ(conversion::NearestI32{.input = kKeep}(nan), 0x7fffffffu);
+    EXPECT_EQ(conversion::NearestI32{.input = kKeep}(nan | 0x80000000u), 0x80000000u);
   }
 }
 
 TEST(ConversionTest, InputFlushPrecedesRounding) {
-  EXPECT_EQ(conversion::FloorI32{kKeep}(0x80000001u), 0xffffffffu);
-  EXPECT_EQ(conversion::FloorI32{kFlush}(0x80000001u), 0u);
-  EXPECT_EQ(conversion::NearestI32{kFlush}(0x807fffffu), 0u);
+  EXPECT_EQ(conversion::FloorI32{.input = kKeep}(0x80000001u), 0xffffffffu);
+  EXPECT_EQ(conversion::FloorI32{.input = kFlush}(0x80000001u), 0u);
+  EXPECT_EQ(conversion::NearestI32{.input = kFlush}(0x807fffffu), 0u);
   // Ties round toward +infinity.
-  EXPECT_EQ(conversion::NearestI32{kKeep}(0xbfc00000u), 0xffffffffu); // -1.5 -> -1
-  EXPECT_EQ(conversion::NearestI32{kKeep}(0x3fc00000u), 2u);          // 1.5 -> 2
+  EXPECT_EQ(conversion::NearestI32{.input = kKeep}(0xbfc00000u), 0xffffffffu); // -1.5 -> -1
+  EXPECT_EQ(conversion::NearestI32{.input = kKeep}(0x3fc00000u), 2u);          // 1.5 -> 2
+}
+
+TEST(ConversionTest, FloorAndNearestApplySourceModifiersBeforeFlush) {
+  EXPECT_EQ((conversion::FloorI32{.abs = 1, .input = kKeep}(0xbfc00000u)), 1u);          // |-1.5|
+  EXPECT_EQ((conversion::FloorI32{.neg = 1, .input = kKeep}(0x3fc00000u)), 0xfffffffeu); // -1.5
+  EXPECT_EQ((conversion::NearestI32{.abs = 1, .neg = 1, .input = kKeep}(0x3fc00000u)),
+            0xffffffffu); // -|1.5| -> -1
+  // NEG makes the positive subnormal negative, and the flush keeps that sign.
+  EXPECT_EQ((conversion::FloorI32{.neg = 1, .input = kKeep}(0x00000001u)), 0xffffffffu);
+  EXPECT_EQ((conversion::FloorI32{.neg = 1, .input = kFlush}(0x00000001u)), 0u);
 }
 
 TEST(ConversionTest, SimdLanesMatchScalarLanes) {
@@ -72,11 +84,11 @@ TEST(ConversionTest, SimdLanesMatchScalarLanes) {
   for (int i = 0; i < 20000; ++i) {
     const V input([&](auto) { return static_cast<uint32_t>(random()); });
     for (const denorm::Policy policy : {kKeep, kFlush}) {
-      const V floor = conversion::FloorI32{policy}(input);
-      const V nearest = conversion::NearestI32{policy}(input);
+      const V floor = conversion::FloorI32{.input = policy}(input);
+      const V nearest = conversion::NearestI32{.input = policy}(input);
       for (std::size_t lane = 0; lane < V::size(); ++lane) {
-        ASSERT_EQ(floor[lane], conversion::FloorI32{policy}(uint32_t(input[lane])));
-        ASSERT_EQ(nearest[lane], conversion::NearestI32{policy}(uint32_t(input[lane])));
+        ASSERT_EQ(floor[lane], conversion::FloorI32{.input = policy}(uint32_t(input[lane])));
+        ASSERT_EQ(nearest[lane], conversion::NearestI32{.input = policy}(uint32_t(input[lane])));
       }
     }
   }

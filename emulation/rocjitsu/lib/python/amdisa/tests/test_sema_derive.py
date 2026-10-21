@@ -1021,17 +1021,25 @@ class TestDeriveVectorUnary:
         ],
     )
     def test_cvt_floor_nearest_lower_to_shared_conversion(self, name, operation):
-        sem = derive_semantics(name, 'ENC_VOP3')
-        fields = frozenset({'neg', 'abs'})
-        block = enrich_block(derive_sema_block(sem), enc_field_names=fields)
-        cpp = lower_sema_block(block)
-        call = (
-            f'amdgpu::conversion::{operation}{{'
-            'amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32())}('
-        )
-        assert call in cpp
-        assert cpp.index(call) < cpp.index('source_modifier::apply_to_float(sv, 0')
-        assert 'std::floor' not in cpp
+        # One stage object, resolved before the lane loop, applies ABS/NEG and
+        # the input flush to the raw source bits.
+        for enc, fields, args in (
+            ('ENC_VOP1', frozenset(), 'wf'),
+            ('ENC_VOP3', frozenset({'abs', 'neg'}), 'wf, inst_.abs, inst_.neg'),
+        ):
+            block = derive_sema_block(derive_semantics(name, enc))
+            if fields:
+                block = enrich_block(block, enc_field_names=fields)
+            cpp = lower_sema_block(block)
+            declaration = (
+                'const auto conversion = amdgpu::conversion_f32_to_integer<'
+                f'amdgpu::conversion::{operation}>({args});'
+            )
+            assert declaration in cpp
+            assert cpp.index(declaration) < cpp.index('for (uint32_t lane')
+            assert 'conversion(amdgpu::RegisterAccess(wf).read_lane(' in cpp
+            for host in ('apply_to_float', 'std::floor', 'Policy::make'):
+                assert host not in cpp
 
     @pytest.mark.parametrize('enc', ['ENC_VOP1', 'ENC_VOP3'])
     def test_cos_bf16_lowers_through_shared_transcendental(self, enc):

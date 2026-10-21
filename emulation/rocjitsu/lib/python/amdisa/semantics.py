@@ -20,8 +20,15 @@ if TYPE_CHECKING:
     from amdisa.isa_profile import IsaProfile
 
 
+# F32-to-integer conversions lowered through shared/conversion.h:
+# data type -> conversion.h operation.
+F32_TO_INTEGER_CONVERSIONS: dict[str, str] = {
+    'flr_i32_f32': 'FloorI32',
+    'rpi_i32_f32': 'NearestI32',
+}
+
 # Floating-source conversions that accept VOP3 ABS/NEG before integer conversion.
-F32_TO_INTEGER_DTYPES = frozenset({'i32_f32', 'u32_f32', 'rpi_i32_f32', 'flr_i32_f32'})
+F32_TO_INTEGER_DTYPES = frozenset({'i32_f32', 'u32_f32', *F32_TO_INTEGER_CONVERSIONS})
 
 # F64-source conversions that accept VOP3 ABS/NEG before integer conversion.
 F64_TO_INTEGER_DTYPES = frozenset({'i32_f64', 'u32_f64'})

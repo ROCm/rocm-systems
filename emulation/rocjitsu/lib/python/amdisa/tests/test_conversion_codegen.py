@@ -75,34 +75,26 @@ def test_integer_to_float_vop1_scales_f16_results_by_sdwa_omod(name, formats):
 
 
 @pytest.mark.parametrize('dtype', ['f32_i32', 'f32_u32'])
-def test_f32_integer_conversion_simd_defers_output_modifiers_to_scalar(dtype):
-    formats = _formats(*TO_FLOAT_CONVERSIONS[dtype])
-    probe = (
-        f'  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, '
-        f'amdgpu::conversion_to_float<{formats}>(wf));'
-    )
+def test_f32_integer_conversion_simd_passes_the_scalar_stage_object(dtype):
+    # The probe passes the scalar body's object, OMOD and CLAMP included, so a
+    # modified VOP3 encoding stays on the SIMD path.
+    probe = '  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, conversion);'
     assert simd_probe_line(f'v_cvt_{dtype}_vop1') == probe
-    # An integer source takes no ABS/NEG, so only OMOD and CLAMP gate the glue.
-    assert simd_probe_line(f'v_cvt_{dtype}_vop3') == (
-        f'  if (!inst.inst_.omod && !inst.inst_.clamp) {{\n  {probe}\n  }}'
-    )
+    assert simd_probe_line(f'v_cvt_{dtype}_vop3') == probe
 
 
 @pytest.mark.parametrize('dtype', ['f16_i16', 'f16_u16'])
 def test_f16_integer_conversion_simd_writes_true16_halves(dtype):
-    stages = conversion.stages_expr(dtype)
     vop3 = simd_probe_line(f'v_cvt_{dtype}_vop3', true16_vop3=True)
     assert vop3 == (
-        '  if (!inst.inst_.omod && !inst.inst_.clamp) {\n'
-        f'    if (amdgpu::try_execute_words_simd<1, false, true, 1>(inst, wf, {stages}))'
-        ' return;\n  }'
+        '  if (amdgpu::try_execute_words_simd<1, false, true, 1>(inst, wf, conversion))'
+        ' return;'
     )
     e32 = local_coverage_probe(
         f'v_cvt_{dtype}_vop1', e32=True, e32_half_dst=True, e32_half_inputs=1
     )
-    vop1_stages = conversion.stages_expr(dtype)
     assert e32 == (
-        f'  if (amdgpu::try_execute_words_simd<1, true, true, 1>(inst, wf, {vop1_stages})) return;'
+        '  if (amdgpu::try_execute_words_simd<1, true, true, 1>(inst, wf, conversion)) return;'
     )
     # Without true16 halves the result is written zero-extended.
     assert simd_probe_line(f'v_cvt_{dtype}_vop1').startswith(
@@ -129,22 +121,36 @@ def test_float_to_float_vop3_passes_every_modifier_to_one_stage_object(name, for
 
 def test_f64_conversion_simd_uses_raw_lane_glue():
     assert simd_probe_line('v_cvt_f32_f64_vop1') == (
-        '  ROCJITSU_TRY_SIMD_CONVERSION_FROM_F64(amdgpu::conversion_to_float<'
-        'amdgpu::fp_format::F64, amdgpu::fp_format::F32>(wf));'
+        '  ROCJITSU_TRY_SIMD_CONVERSION_FROM_F64(conversion);'
     )
-    # A floating source gates on all four fields; the scalar body applies them.
+    # A floating source's ABS/NEG/OMOD/CLAMP travel in the shared object.
     assert simd_probe_line('v_cvt_f64_f32_vop3') == (
-        '  if (!inst.inst_.abs && !inst.inst_.neg && !inst.inst_.omod && '
-        '!inst.inst_.clamp) {\n'
-        '    ROCJITSU_TRY_SIMD_CONVERSION_TO_F64(amdgpu::conversion_to_float<'
-        'amdgpu::fp_format::F32, amdgpu::fp_format::F64>(wf));\n  }'
+        '  ROCJITSU_TRY_SIMD_CONVERSION_TO_F64(conversion);'
     )
     f16 = simd_probe_line('v_cvt_f16_f32_vop3', true16_vop3=True)
-    assert f16.startswith(
-        '  if (!inst.inst_.abs && !inst.inst_.neg && !inst.inst_.omod && '
-        '!inst.inst_.clamp) {\n'
-        '    if (amdgpu::try_execute_words_simd<1, false, true, 0>('
+    assert f16 == (
+        '  if (amdgpu::try_execute_words_simd<1, false, true, 0>(inst, wf, conversion))'
+        ' return;'
     )
+
+
+def test_share_stages_hoists_the_scalar_declaration_above_the_probe():
+    declaration = (
+        '  const auto conversion = amdgpu::conversion_pk_u8(wf, inst_.abs, inst_.neg);'
+    )
+    body = f'  uint64_t exec = wf.exec();\n{declaration}\n  for (;;) {{}}\n'
+    probe = '  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(uint32_t, conversion);'
+    shared_probe, rest = conversion.share_stages(probe, body)
+    assert shared_probe == f'{declaration}\n{probe}'
+    assert rest == '  uint64_t exec = wf.exec();\n  for (;;) {}\n'
+    # Probes that resolve nothing shared are left alone.
+    other = (
+        '  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, amdgpu::conversion::Fp8{});'
+    )
+    assert conversion.share_stages(other, body) == (other, body)
+    assert conversion.share_stages(None, body) == (None, body)
+    with pytest.raises(ValueError, match='declares none'):
+        conversion.share_stages(probe, '  for (;;) {}\n')
 
 
 @pytest.mark.parametrize('name', ['fp8', 'bf8'])
@@ -157,11 +163,20 @@ def test_fp8_decode_simd_probe_uses_the_shared_ocp_decoder(name):
     assert ('util::fp8_e5m3_to_f32_simd' in probe) == (name == 'fp8')
     assert 'util::fp8_e4m3_to_f32_simd' not in probe
     assert 'util::bf8_e5m2_to_f32_simd' not in probe
+    # CDNA4's SIMD decode matches its scalar body's util helpers.
+    cdna4 = local_coverage_probe(f'v_cvt_f32_{name}_vop3', arch_name='cdna4')
+    assert 'amdgpu::conversion::decode_fp8' not in cdna4
+    helper = (
+        'util::fp8_e4m3_to_f32_simd' if name == 'fp8' else 'util::bf8_e5m2_to_f32_simd'
+    )
+    assert f'{helper}(byte)' in cdna4
 
 
-def test_fp8_encodes_keep_fnuz_helpers_on_cdna3():
-    assert not conversion.uses_ocp_fp8('cdna3')
-    for arch in ('cdna4', 'cdna5', 'rdna4'):
+def test_fp8_encodes_keep_util_helpers_on_cdna3_and_cdna4():
+    # CDNA3 uses FNUZ encodings; CDNA4 keeps its manual's FP16_OVFL rule.
+    for arch in ('cdna3', 'cdna4'):
+        assert not conversion.uses_ocp_fp8(arch)
+    for arch in ('cdna5', 'rdna4'):
         assert conversion.uses_ocp_fp8(arch)
     assert conversion.to_fp8_expr('bf8', True, False, 'inst_') == (
         'amdgpu::conversion_to_fp8<amdgpu::conversion::Bf8>(wf, 0u, inst_.neg)'

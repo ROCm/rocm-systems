@@ -217,14 +217,8 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
     'v_min_num_f16_vop2': ('uint32_t', float_minmax.simd_functor('f16', 'min_num')),
     # v_cvt_pkrtz_f16_f32 (both spellings): two F32 sources rounded toward
     # zero into packed halves by the shared/conversion.h stages.
-    'v_cvt_pkrtz_f16_f32_vop2': (
-        'uint32_t',
-        conversion.pk_rtz_f16_expr(False, False, 'inst.inst_'),
-    ),
-    'v_cvt_pk_rtz_f16_f32_vop2': (
-        'uint32_t',
-        conversion.pk_rtz_f16_expr(False, False, 'inst.inst_'),
-    ),
+    'v_cvt_pkrtz_f16_f32_vop2': ('uint32_t', conversion.STAGES),
+    'v_cvt_pk_rtz_f16_f32_vop2': ('uint32_t', conversion.STAGES),
     # --- f16 binary (low 16 bits f16, result zero-extended). These native-F32
     # functors are emitted only behind the guest/host rounding-and-denormal gate;
     # scalar lowering may evaluate through a wider intermediate. ---
@@ -318,13 +312,6 @@ def _flush_input_then(fmt: str, functor: str) -> str:
     return f'amdgpu::flush_input_then<amdgpu::fp_format::{fmt}>({policy}, {functor})'
 
 
-# Raw-bit F32 floor / nearest conversions from shared/conversion.h, with the
-# instruction's F32 input-flush policy.
-_F32_INPUT_POLICY = input_policy.policy_expr('f32')
-FLOOR_I32_F32 = f'amdgpu::conversion::FloorI32{{{_F32_INPUT_POLICY}}}'
-NEAREST_I32_F32 = f'amdgpu::conversion::NearestI32{{{_F32_INPUT_POLICY}}}'
-
-
 SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
     # --- bitwise / move (uint32, bit-identical) ---
     'v_mov_b32_vop1': ('uint32_t', 'uint32_t', '[](auto a) { return a; }'),
@@ -349,10 +336,10 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         '[](auto a) { return a & 0xFFFFu; }',
     ),
     # RDNA f32->i32 floor / nearest conversions (CDNA4 uses flr / rpi). The
-    # shared raw-bit operations flush MODE input denormals and saturate a NaN
-    # by its sign; see shared/conversion.h.
-    'v_cvt_floor_i32_f32_vop1': ('uint32_t', 'uint32_t', FLOOR_I32_F32),
-    'v_cvt_nearest_i32_f32_vop1': ('uint32_t', 'uint32_t', NEAREST_I32_F32),
+    # probe passes the scalar body's FloorI32/NearestI32 stage object, which
+    # applies ABS/NEG and the F32 input flush; see shared/conversion.h.
+    'v_cvt_floor_i32_f32_vop1': ('uint32_t', 'uint32_t', conversion.STAGES),
+    'v_cvt_nearest_i32_f32_vop1': ('uint32_t', 'uint32_t', conversion.STAGES),
     # --- bit-scan (SWAR, no stdx primitive) -----------------------------------
     # All return uint32_t. Most special-case the zero input to 0xFFFFFFFF,
     # matching the scalar bodies (std::countl_zero / countr_zero / popcount);
@@ -512,7 +499,6 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         '[](auto a) {'
         ' return util::stdx::static_simd_cast<util::native<float32_t>>((a >> 24) & 0xFFu); }',
     ),
-    # Integer-to-float conversions round in MODE; see conversion.simd_probe.
     # --- float rounding (bit-identical to std::* on host) ---
     'v_floor_f32_vop1': (
         'float32_t',
@@ -591,8 +577,8 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         'uint32_t',
         '[](auto s) { return ::rocjitsu::amdgpu::simd_cvt_u32_f32(s); }',
     ),
-    'v_cvt_flr_i32_f32_vop1': ('uint32_t', 'uint32_t', FLOOR_I32_F32),
-    'v_cvt_rpi_i32_f32_vop1': ('uint32_t', 'uint32_t', NEAREST_I32_F32),
+    'v_cvt_flr_i32_f32_vop1': ('uint32_t', 'uint32_t', conversion.STAGES),
+    'v_cvt_rpi_i32_f32_vop1': ('uint32_t', 'uint32_t', conversion.STAGES),
     # --- f16 (half) ops. The SIMD functors widen exact half encodings, evaluate,
     # then narrow to F16. Their wrappers own any required source flush, modifiers,
     # and output policy so eligibility matches the generated scalar contract.
@@ -1763,10 +1749,7 @@ SIMD_VOP3_BINARY_INT_EXTRA: dict[str, tuple[str, str]] = {
 SIMD_VOP3_BINARY_TRUE16_SRC: dict[str, tuple[str, str]] = {
     # True16 source selectors choose the f16 half of src0/src1, but these
     # instructions write a full packed b32 result.
-    'v_pack_b32_f16_vop3': (
-        'uint32_t',
-        conversion.pack_b32_f16_expr(True, True, 'inst.inst_'),
-    ),
+    'v_pack_b32_f16_vop3': ('uint32_t', conversion.STAGES),
     'v_cvt_pk_norm_i16_f16_vop3': (
         'uint32_t',
         '[](auto a, auto b) {'
@@ -2570,14 +2553,12 @@ def _simd_probe_line(
     ldexp_probe = float_ldexp.simd_probe(template_name, true16_vop3)
     if ldexp_probe is not None:
         return ldexp_probe
+    # Conversions to floating formats, which round in the destination's MODE.
     conversion_probe = conversion.simd_probe(template_name, true16_vop3=true16_vop3)
     if conversion_probe is not None:
         return conversion_probe
     if template_name == 'v_cvt_pk_u8_f32_vop3':
-        # The glue carries no modifiers; a modified encoding runs the scalar body.
-        stages = conversion.pk_u8_expr(False, False, 'inst.inst_')
-        probe = f'    ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(uint32_t, {stages});'
-        return f'  if (!inst.inst_.abs && !inst.inst_.neg) {{\n{probe}\n  }}'
+        return f'  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(uint32_t, {conversion.STAGES});'
     if template_name in SIMD_PACKED_FLOAT:
         op, bf16 = SIMD_PACKED_FLOAT[template_name]
         return f'  ROCJITSU_TRY_SIMD_PACKED_FLOAT({op}, {str(bf16).lower()});'
@@ -2933,8 +2914,7 @@ def _simd_probe_line(
         if spec2v3 is not None:
             cpp_t, cpp_op = spec2v3
             if template_name in _PACKED_RTZ_VOP3:
-                cpp_op = conversion.pk_rtz_f16_expr(True, True, 'inst.inst_')
-                return f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT({cpp_t}, {cpp_op});'
+                return f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT({cpp_t}, {conversion.STAGES});'
             if cpp_t == 'float32_t':
                 if base in ('v_add_f32', 'v_mul_f32', 'v_sub_f32', 'v_subrev_f32'):
                     operation = (
@@ -2995,21 +2975,6 @@ def _simd_probe_line(
                 cpp_op = _modified_conversion_op(cpp_op, bits=16, arity=1)
             probe = f'  ROCJITSU_TRY_SIMD_VOP1_UNARY({cpp_tin}, {cpp_tout}, {cpp_op});'
             if base in (
-                'v_cvt_rpi_i32_f32',
-                'v_cvt_flr_i32_f32',
-                'v_cvt_nearest_i32_f32',
-                'v_cvt_floor_i32_f32',
-            ):
-                # The raw-bit operation takes the source after ABS/NEG.
-                cpp_op = (
-                    f'[&inst, convert = {cpp_op}](auto a) {{ return convert('
-                    'amdgpu::source_modifier::apply<amdgpu::fp_format::F32>('
-                    'a, 0, inst.inst_.abs, inst.inst_.neg)); }'
-                )
-                return (
-                    f'  ROCJITSU_TRY_SIMD_VOP1_UNARY({cpp_tin}, {cpp_tout}, {cpp_op});'
-                )
-            if base in (
                 'v_cvt_i32_f32',
                 'v_cvt_u32_f32',
             ):
@@ -3029,10 +2994,11 @@ def _simd_probe_line(
                 return _mode_aware_f16_result_simd_probe(probe, ovfl_probe)
             return probe
         # VOP3 twins of the mixed-width f64<->b32 cvt ops. The f64->integer
-        # bodies apply ABS/NEG to the source, so their functor does too; they
-        # take no output modifiers. Retaining the raw shortcut for the other
-        # F64-source forms is not evidence that their VOP3 modifier fields are
-        # architecturally ignored. (A symmetric
+        # functors carry no modifiers, so an encoding with ABS/NEG set runs the
+        # scalar body, which applies them; these forms take no output modifiers.
+        # Retaining the raw shortcut for the other F64-source forms is not
+        # evidence that their VOP3 modifier fields are architecturally ignored.
+        # (A symmetric
         # SIMD_VOP1_UNARY_F64 fallback was considered but explicitly NOT added:
         # the f64-unary VOP3 forms apply modifiers via apply_vop3_*_mod_f64 —
         # routed through SIMD_VOP3_UNARY_FP64 above instead — and the rcp/rsq
@@ -3150,6 +3116,7 @@ def local_coverage_probe(
     result_writer: str | None = None,
     e32_half_dst: bool = True,
     e32_half_inputs: int = 1,
+    arch_name: str | None = None,
 ) -> str | None:
     probe = _local_coverage_probe(
         template_name,
@@ -3159,6 +3126,7 @@ def local_coverage_probe(
         result_writer=result_writer,
         e32_half_dst=e32_half_dst,
         e32_half_inputs=e32_half_inputs,
+        arch_name=arch_name,
     )
     return _guard_mode_arithmetic_probe(template_name, probe)
 
@@ -3172,8 +3140,13 @@ def _local_coverage_probe(
     result_writer: str | None = None,
     e32_half_dst: bool = True,
     e32_half_inputs: int = 1,
+    arch_name: str | None = None,
 ) -> str | None:
-    """Emit local probes without conflating profile-specific result semantics."""
+    """Emit local probes without conflating profile-specific result semantics.
+
+    ``arch_name`` selects the target's FP8/BF8 decoder; None means a target
+    that uses the shared OCP encodings.
+    """
 
     def call(arity: int, half_dst: bool, half_inputs: int, functor: str) -> str:
         functor = functor.replace('float32_t', 'float')
@@ -3228,9 +3201,7 @@ def _local_coverage_probe(
         'v_cvt_pkrtz_f16_f32_vop3',
     ):
         if template_name == 'v_cvt_pkrtz_f16_f32_vop3':
-            return call(
-                2, False, 0, conversion.pk_rtz_f16_expr(True, True, 'inst.inst_')
-            )
+            return call(2, False, 0, conversion.STAGES)
         if 'bf16' in template_name:
             convert = 'util::pack_bf16_simd({x}, wf.fp16_ovfl())'
         else:
@@ -3258,14 +3229,22 @@ def _local_coverage_probe(
             e32_half_inputs=e32_half_inputs,
         )
     if template_name in ('v_cvt_f32_fp8_vop3', 'v_cvt_f32_bf8_vop3'):
-        # Local probes cover OCP targets; see conversion.decode_fp8_expr.
-        decoded = conversion.decode_fp8_expr(template_name[10:13], 'byte')
-        if 'fp8' in template_name:
-            decoded = (
-                '(amdgpu::vop3_fp8_decode_e5m3(inst) ? '
-                'std::bit_cast<util::native<uint32_t>>(util::fp8_e5m3_to_f32_simd(byte)) : '
-                f'{decoded})'
+        if arch_name is not None and not conversion.uses_ocp_fp8(arch_name):
+            # util's decoders, which the target's scalar body uses.
+            convert = (
+                'util::bf8_e5m2_to_f32_simd(byte)'
+                if 'bf8' in template_name
+                else '(amdgpu::vop3_fp8_decode_e5m3(inst) ? util::fp8_e5m3_to_f32_simd(byte) : util::fp8_e4m3_to_f32_simd(byte))'
             )
+            decoded = f'std::bit_cast<util::native<uint32_t>>({convert})'
+        else:
+            decoded = conversion.decode_fp8_expr(template_name[10:13], 'byte')
+            if 'fp8' in template_name:
+                decoded = (
+                    '(amdgpu::vop3_fp8_decode_e5m3(inst) ? '
+                    'std::bit_cast<util::native<uint32_t>>(util::fp8_e5m3_to_f32_simd(byte)) : '
+                    f'{decoded})'
+                )
         return call(
             1,
             False,

@@ -195,17 +195,13 @@ void VCvtF16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto &inst = *this;
-  if (!inst.inst_.abs && !inst.inst_.neg && !inst.inst_.omod && !inst.inst_.clamp) {
-    if (amdgpu::try_execute_words_simd<1, false, true, 0>(
-            inst, wf,
-            amdgpu::conversion_to_float<amdgpu::fp_format::F32, amdgpu::fp_format::F16>(wf)))
-      return;
-  }
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const auto conversion =
       amdgpu::conversion_to_float<amdgpu::fp_format::F32, amdgpu::fp_format::F16>(
           wf, inst_.abs, inst_.neg, inst_.omod, inst_.clamp);
+  if (amdgpu::try_execute_words_simd<1, false, true, 0>(inst, wf, conversion))
+    return;
+  uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -234,17 +230,13 @@ RJ_NOINLINE void VCvtF16F32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto &inst = *this;
-  if (!inst.inst_.abs && !inst.inst_.neg && !inst.inst_.omod && !inst.inst_.clamp) {
-    if (amdgpu::try_execute_words_simd<1, false, true, 0>(
-            inst, wf,
-            amdgpu::conversion_to_float<amdgpu::fp_format::F32, amdgpu::fp_format::F16>(wf)))
-      return;
-  }
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const auto conversion =
       amdgpu::conversion_to_float<amdgpu::fp_format::F32, amdgpu::fp_format::F16>(
           wf, inst_.abs, inst_.neg, inst_.omod, inst_.clamp);
+  if (amdgpu::try_execute_words_simd<1, false, true, 0>(inst, wf, conversion))
+    return;
+  uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -755,17 +747,13 @@ void VCvtF16U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto &inst = *this;
-  if (!inst.inst_.omod && !inst.inst_.clamp) {
-    if (amdgpu::try_execute_words_simd<1, false, true, 1>(
-            inst, wf,
-            amdgpu::conversion_to_float<amdgpu::conversion::U16, amdgpu::fp_format::F16>(wf)))
-      return;
-  }
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const auto conversion =
       amdgpu::conversion_to_float<amdgpu::conversion::U16, amdgpu::fp_format::F16>(
           wf, 0u, 0u, inst_.omod, inst_.clamp);
+  if (amdgpu::try_execute_words_simd<1, false, true, 1>(inst, wf, conversion))
+    return;
+  uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -796,17 +784,13 @@ RJ_NOINLINE void VCvtF16U16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto &inst = *this;
-  if (!inst.inst_.omod && !inst.inst_.clamp) {
-    if (amdgpu::try_execute_words_simd<1, false, true, 1>(
-            inst, wf,
-            amdgpu::conversion_to_float<amdgpu::conversion::U16, amdgpu::fp_format::F16>(wf)))
-      return;
-  }
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const auto conversion =
       amdgpu::conversion_to_float<amdgpu::conversion::U16, amdgpu::fp_format::F16>(
           wf, 0u, 0u, inst_.omod, inst_.clamp);
+  if (amdgpu::try_execute_words_simd<1, false, true, 1>(inst, wf, conversion))
+    return;
+  uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -825,17 +809,13 @@ void VCvtF16I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto &inst = *this;
-  if (!inst.inst_.omod && !inst.inst_.clamp) {
-    if (amdgpu::try_execute_words_simd<1, false, true, 1>(
-            inst, wf,
-            amdgpu::conversion_to_float<amdgpu::conversion::I16, amdgpu::fp_format::F16>(wf)))
-      return;
-  }
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const auto conversion =
       amdgpu::conversion_to_float<amdgpu::conversion::I16, amdgpu::fp_format::F16>(
           wf, 0u, 0u, inst_.omod, inst_.clamp);
+  if (amdgpu::try_execute_words_simd<1, false, true, 1>(inst, wf, conversion))
+    return;
+  uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -866,17 +846,13 @@ RJ_NOINLINE void VCvtF16I16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto &inst = *this;
-  if (!inst.inst_.omod && !inst.inst_.clamp) {
-    if (amdgpu::try_execute_words_simd<1, false, true, 1>(
-            inst, wf,
-            amdgpu::conversion_to_float<amdgpu::conversion::I16, amdgpu::fp_format::F16>(wf)))
-      return;
-  }
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const auto conversion =
       amdgpu::conversion_to_float<amdgpu::conversion::I16, amdgpu::fp_format::F16>(
           wf, 0u, 0u, inst_.omod, inst_.clamp);
+  if (amdgpu::try_execute_words_simd<1, false, true, 1>(inst, wf, conversion))
+    return;
+  uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -3852,9 +3828,8 @@ void VPackB32F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC(
-      uint32_t, amdgpu::conversion_pack_b32_f16(wf, inst.inst_.abs, inst.inst_.neg));
   const auto conversion = amdgpu::conversion_pack_b32_f16(wf, inst_.abs, inst_.neg);
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC(uint32_t, conversion);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3885,9 +3860,8 @@ RJ_NOINLINE void VPackB32F16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC(
-      uint32_t, amdgpu::conversion_pack_b32_f16(wf, inst.inst_.abs, inst.inst_.neg));
   const auto conversion = amdgpu::conversion_pack_b32_f16(wf, inst_.abs, inst_.neg);
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC(uint32_t, conversion);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))

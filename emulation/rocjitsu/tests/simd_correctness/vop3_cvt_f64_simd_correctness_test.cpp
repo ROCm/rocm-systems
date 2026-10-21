@@ -7,9 +7,10 @@
 /// encodings are bit-identical to their VOP1 forms: the float-result pair
 /// shares one stage object with the scalar body (shared/conversion.h), and the
 /// integer-result forms reuse the try_execute_cvt_f64_to_b32_simd glue via a
-/// `_vop3 -> _vop1` fallback in simd_probe_line. Each takes its shortcut only
-/// when the modifier fields its operand types admit are inactive, so this file
-/// compares the unmodified encodings. The process runs one fixed execute mode
+/// `_vop3 -> _vop1` fallback in simd_probe_line. The float-result pair keeps
+/// its SIMD path with modifiers set; the integer-result forms run the scalar
+/// body when ABS or NEG is set. This file compares the unmodified encodings;
+/// valu_fp_mode_test covers the modified ones. The process runs one fixed execute mode
 /// (RJ_FORCE_SCALAR, immutable); each case runs TWICE in the same process -- once
 /// forcing the scalar body, once the SIMD fast path, with identical inputs/EXEC
 /// -- and the destination word pairs are asserted equal with EXPECT_EQ

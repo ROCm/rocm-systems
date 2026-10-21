@@ -35,6 +35,7 @@ from amdisa.sema_effects import inline_binary_op_effects
 from amdisa.sema_properties import InstructionProperty, derive_properties
 from amdisa.semantics import (
     F16_INPUT_CONVERSION_DTYPES,
+    F32_TO_INTEGER_CONVERSIONS,
     F32_TO_INTEGER_DTYPES,
     F64_TO_INTEGER_DTYPES,
     TO_FLOAT_CONVERSIONS,
@@ -71,7 +72,7 @@ def _conversion(dtype: str) -> SemaBlock:
     The typed source and destination let enrichment attach VOP3 ABS/NEG and
     OMOD/CLAMP; lowering passes those fields to the shared conversion.
     """
-    result_name, source_name = dtype.split('_')
+    result_name, source_name = dtype.split('_')[-2:]
     source_ty = _SEMA_FORMATS[source_name]
     result_ty = _SEMA_FORMATS[result_name]
     name = f'{CONVERSION_CALL}{dtype}'
@@ -1180,7 +1181,9 @@ class _VectorUnary(_ScalarDeriver):
             body = _assign(_cast(_dst(0, ty), ty), result)
             return SemaBlock(sem.name, ExecModel.VECTOR, body)
 
-        if op == 'cvt' and dtype in TO_FLOAT_CONVERSIONS:
+        if op == 'cvt' and (
+            dtype in TO_FLOAT_CONVERSIONS or dtype in F32_TO_INTEGER_CONVERSIONS
+        ):
             return SemaBlock(sem.name, ExecModel.VECTOR, _conversion(dtype))
 
         if op == 'cvt' and dtype:

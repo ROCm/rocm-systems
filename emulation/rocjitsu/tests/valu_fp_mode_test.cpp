@@ -3358,20 +3358,21 @@ std::vector<ArithmeticCase> integer_to_float_cases() {
   add("F32I32LargestTowardNegative", f32_i32, 0x7fffffffu, 0x4effffffu, 0xf6u, false);
   add("F32U32TowardZero", f32_u32, 0xffffffffu, 0x4f7fffffu, 0xf3u, false);
   add("F32U32NearestEven", f32_u32, 0xffffffffu, 0x4f800000u, 0xfcu, false);
-  // OMOD scales the result already rounded toward zero.
+  // OMOD scales the result already rounded toward zero. Modified VOP3 forms
+  // take the same SIMD paths, with the modifiers in the shared stage object.
   add("F32U32TowardZeroMul2", vop3(rdna4::kVCvtF32U32Vop3, {.omod = 1}), 0xffffffffu, 0x4fffffffu,
-      0xffu, false, expect_simd_fallback());
+      0xffu, false);
   add("F16U16OverflowTowardPositive", f16_u16, 0xfcafffffu, kHigh | 0x7c00u, 0xf6u, true);
   add("F16U16OverflowTowardNegative", f16_u16, 0xfcafffffu, kHigh | 0x7bffu, 0xf9u, true);
   add("F16U16TowardNegative", f16_u16, 0xb70d7fffu, kHigh | 0x77ffu, 0xf9u, true);
   add("F16U16Fp16Ovfl", f16_u16, 0xfd18fff0u, kHigh | 0x7bffu, 0x8000f0u, true);
   add("F16U16NoFp16Ovfl", f16_u16, 0xfd18fff0u, kHigh | 0x7c00u, 0xf0u, true);
   add("F16I16Clamp", vop3(rdna4::kVCvtF16I16Vop3, {.clamp = 1}), 0xd18f7fffu, kHigh | 0x3c00u,
-      0xf0u, true, expect_simd_fallback());
+      0xf0u, true);
   add("F16I16ClampNegative", vop3(rdna4::kVCvtF16I16Vop3, {.clamp = 1}), 0xc40affffu, kHigh, 0xf0u,
-      true, expect_simd_fallback());
+      true);
   add("F16I16Mul2Overflow", vop3(rdna4::kVCvtF16I16Vop3, {.omod = 1}), 0xed858001u, kHigh | 0xfc00u,
-      0xf0u, true, expect_simd_fallback());
+      0xf0u, true);
   // OP_SEL selects the source's high half and writes the destination's high half.
   add("F16I16HighHalves", vop3(rdna4::kVCvtF16I16Vop3, {.opsel = 9}), 0xb38b8000u, 0xf4c7a5a5u,
       0xffu, true);
@@ -3459,8 +3460,7 @@ std::vector<ArithmeticCase> float_to_float_cases() {
   const auto words = expect_simd_path(amdgpu::SimdFastPath::VOP_WORDS);
   const auto from_f64 = expect_simd_path_64(amdgpu::SimdFastPath::CVT_F64_TO_B32);
   const auto to_f64 = expect_simd_path_64(amdgpu::SimdFastPath::CVT_B32_TO_F64);
-  // A VOP3 encoding with any modifier its operand types admit runs the scalar body.
-  const auto scalar = expect_simd_fallback();
+  // Modified VOP3 encodings take the same paths: the stage object carries the fields.
   const auto vop1 = [](uint16_t op) {
     return std::array<uint32_t, 2>{rdna4::build_vop1(op, {.src0 = 256, .vdst = 6})[0], 0u};
   };
@@ -3500,11 +3500,11 @@ std::vector<ArithmeticCase> float_to_float_cases() {
   add("F16F32OverflowTowardZero", f16_f32, f32_half_dst(0x477ff000u), result(kHigh | 0x7bffu),
       0xfcu, words);
   add("F16F32Neg", vop3(rdna4::kVCvtF16F32Vop3, {.neg = 1}), f32_half_dst(0x7fc00000u),
-      result(kHigh | 0xfe00u), 0xf0u, scalar);
+      result(kHigh | 0xfe00u), 0xf0u, words);
   add("F16F32Mul2Overflow", vop3(rdna4::kVCvtF16F32Vop3, {.omod = 1}), f32_half_dst(0x477fe000u),
-      result(kHigh | 0x7c00u), 0xf0u, scalar);
+      result(kHigh | 0x7c00u), 0xf0u, words);
   add("F16F32Mul2Fp16Ovfl", vop3(rdna4::kVCvtF16F32Vop3, {.omod = 1}), f32_half_dst(0x477fe000u),
-      result(kHigh | 0x7bffu), 0x8000f0u, scalar);
+      result(kHigh | 0x7bffu), 0x8000f0u, words);
   add("F16F32HighHalfTowardZero", vop3(rdna4::kVCvtF16F32Vop3, {.opsel = 8}),
       f32_half_dst(0x3f800001u), result(0x3c00a5a5u), 0xffu, words);
 
@@ -3523,9 +3523,9 @@ std::vector<ArithmeticCase> float_to_float_cases() {
   add("F64F32SubnormalModeC0", f64_f32, f32(0x807fffffu), result64(0x8000000000000000u), 0xc0u,
       to_f64);
   add("F64F32Mul2NegativeZero", vop3(rdna4::kVCvtF64F32Vop3, {.omod = 1}), f32(0x80000000u),
-      result64(0u), 0xf0u, scalar);
+      result64(0u), 0xf0u, to_f64);
   add("F64F32Mul2Subnormal", vop3(rdna4::kVCvtF64F32Vop3, {.omod = 1}), f32(1u),
-      result64(0x36b0000000000000u), 0xf0u, scalar);
+      result64(0x36b0000000000000u), 0xf0u, to_f64);
 
   // gfx1100 quiets a widened signaling NaN only with MODE.IEEE set; the payload
   // survives either way. The VOP1 opcode is the same on RDNA3 and RDNA4.
@@ -3641,9 +3641,9 @@ std::vector<ArithmeticCase> normalized_and_byte_cases() {
   add("PkU8NanByte1", pk_u8(0, 0), bytes(0x7fc00000u, 1u, 1u), 1u, 0xf0u,
       expect_simd_path(amdgpu::SimdFastPath::VOP3_TERNARY));
   add("PkU8NegByte4IsByte0", pk_u8(0, 1), bytes(0x3f800000u, 4u, 1u), 0u, 0xf0u,
-      expect_simd_fallback());
+      expect_simd_path(amdgpu::SimdFastPath::VOP3_TERNARY));
   add("PkU8AbsByte1", pk_u8(1, 0), bytes(0xbfc00000u, 0x29u, 0xffffffe0u), 0xffff02e0u, 0xf0u,
-      expect_simd_fallback());
+      expect_simd_path(amdgpu::SimdFastPath::VOP3_TERNARY));
   return cases;
 }
 
@@ -3763,6 +3763,25 @@ std::vector<ArithmeticCase> fp8_cases() {
       {{6, 0xff80ffffu}}, 0xf0u, expect_simd_fallback());
   add("SrBf8Neg", sr(rdna4::kVCvtSrBf8F32Vop3, {.neg = 1}), pair(0x3f800000u, 1u, 0u), {{6, 0xbcu}},
       0xf0u, expect_simd_fallback());
+
+  // gfx950 is uncaptured. Its manual's FP16_OVFL rule saturates an infinity to
+  // the largest finite value, unlike the gfx1201 PkFp8InfinityFp16Ovfl row.
+  const auto cdna4_pk = [&](const char *name, uint16_t op, uint32_t low, uint32_t result) {
+    const auto words = cdna4::build_vop3(op, {.vdst = 6, .src0 = 256, .src1 = 257});
+    cases.push_back({name,
+                     ROCJITSU_CODE_ARCH_CDNA4,
+                     {words[0], words[1], 0u},
+                     pair(low, 0u, 0u),
+                     {{6, result}},
+                     0x800030u,
+                     FE_TONEAREST,
+                     0,
+                     0,
+                     expect_simd_fallback()});
+  };
+  cdna4_pk("Gfx950PkFp8InfinityFp16Ovfl", cdna4::kVCvtPkFp8F32Vop3, 0x7f800000u, 0x7eu);
+  cdna4_pk("Gfx950PkFp8NegInfinityFp16Ovfl", cdna4::kVCvtPkFp8F32Vop3, 0xff800000u, 0xfeu);
+  cdna4_pk("Gfx950PkBf8InfinityFp16Ovfl", cdna4::kVCvtPkBf8F32Vop3, 0x7f800000u, 0x7bu);
   return cases;
 }
 
@@ -3817,8 +3836,9 @@ std::vector<ArithmeticCase> conversion_mode_boundary_cases() {
   const auto f16 = expect_simd_path(amdgpu::SimdFastPath::VOP_WORDS);
   const auto from_f64 = expect_simd_path_64(amdgpu::SimdFastPath::CVT_F64_TO_B32);
   const auto to_f64 = expect_simd_path_64(amdgpu::SimdFastPath::CVT_B32_TO_F64);
-  // OMOD gates the SIMD glue off; these encodings run the scalar body.
-  const auto scalar = expect_simd_fallback();
+  // RDNA2 F16 results take the VOP1 path. OMOD and CLAMP travel in the stage
+  // object, so modified encodings take the same paths as unmodified ones.
+  const auto rdna2_f16 = expect_simd_path(amdgpu::SimdFastPath::VOP1_UNARY);
   constexpr auto kRdna4 = ROCJITSU_CODE_ARCH_RDNA4;
   constexpr uint32_t kDx10 = 1u << 8;
 
@@ -3839,29 +3859,29 @@ std::vector<ArithmeticCase> conversion_mode_boundary_cases() {
   };
   constexpr auto kRdna2 = ROCJITSU_CODE_ARCH_RDNA2;
   add("Gfx1201ClampQuietNanToZero", kRdna4, clamp_f16_f32(kRdna4), f32_source(0x7fc00000u),
-      half(0u), 0xf0u, scalar);
+      half(0u), 0xf0u, f16);
   add("Gfx1201ClampQuietNanToZeroNoDx10", kRdna4, clamp_f16_f32(kRdna4), f32_source(0x7fc00000u),
-      half(0u), 0xf0u | kDx10, scalar);
+      half(0u), 0xf0u | kDx10, f16);
   add("Gfx1201ClampSignalingNanToZero", kRdna4, clamp_f32_f64(kRdna4),
-      f64_source(0x7ff0000000000001ull), single(0u), 0xf0u, scalar);
+      f64_source(0x7ff0000000000001ull), single(0u), 0xf0u, from_f64);
   // The RDNA2 executors write an F16 result zero-extended where gfx1030 keeps
   // the destination's high half, so these start from a zero destination. That
   // half is the known RDNA1/2 discrepancy, not part of the CLAMP rule.
   const auto rdna2_f32_source = [](uint32_t bits) { return Pairs{{0, bits}, {6, 0u}}; };
   const auto low = [](uint32_t bits) { return Pairs{{6, bits}}; };
   add("Gfx1030ClampKeepsNanWithoutDx10", kRdna2, clamp_f16_f32(kRdna2),
-      rdna2_f32_source(0x7fc00000u), low(0x7e00u), 0xf0u, scalar);
+      rdna2_f32_source(0x7fc00000u), low(0x7e00u), 0xf0u, rdna2_f16);
   add("Gfx1030ClampNanToZeroWithDx10", kRdna2, clamp_f16_f32(kRdna2), rdna2_f32_source(0x7fc00000u),
-      low(0u), 0xf0u | kDx10, scalar);
+      low(0u), 0xf0u | kDx10, rdna2_f16);
   add("Gfx1030ClampKeepsNanPayloadWithoutDx10", kRdna2, clamp_f32_f64(kRdna2),
-      f64_source(0x7ff4000012345678ull), single(0x7fe00000u), 0xf0u, scalar);
+      f64_source(0x7ff4000012345678ull), single(0x7fe00000u), 0xf0u, from_f64);
   add("Gfx1030ClampNanPayloadToZeroWithDx10", kRdna2, clamp_f32_f64(kRdna2),
-      f64_source(0x7ff4000012345678ull), single(0u), 0xf0u | kDx10, scalar);
+      f64_source(0x7ff4000012345678ull), single(0u), 0xf0u | kDx10, from_f64);
   // CLAMP still maps -Inf to +0 and +Inf to 1.0 on both, with or without DX10_CLAMP.
   add("Gfx1030ClampNegativeInfinityToZero", kRdna2, clamp_f16_f32(kRdna2),
-      rdna2_f32_source(0xff800000u), low(0u), 0xf0u, scalar);
+      rdna2_f32_source(0xff800000u), low(0u), 0xf0u, rdna2_f16);
   add("Gfx1030ClampInfinityToOne", kRdna2, clamp_f16_f32(kRdna2), rdna2_f32_source(0x7f800000u),
-      low(0x3c00u), 0xf0u, scalar);
+      low(0x3c00u), 0xf0u, rdna2_f16);
 
   const auto f16_f32 = rdna4(rdna4::kVCvtF16F32Vop3);
   const auto f16_f32_mul2 = rdna4(rdna4::kVCvtF16F32Vop3, 1);
@@ -3876,17 +3896,16 @@ std::vector<ArithmeticCase> conversion_mode_boundary_cases() {
       f16);
   add("Gfx1201F16F32NegativeTinyRoundsUp", kRdna4, f16_f32, f32_source(0xb87fe800u), half(0x8400u),
       0xf0u, f16);
-  add("Gfx1201F16F32TinyMul2", kRdna4, f16_f32_mul2, f32_source(0x387fe800u), half(0u), 0xf0u,
-      scalar);
+  add("Gfx1201F16F32TinyMul2", kRdna4, f16_f32_mul2, f32_source(0x387fe800u), half(0u), 0xf0u, f16);
   add("Gfx1201F16F32NegativeTinyMul2", kRdna4, f16_f32_mul2, f32_source(0xb87fe800u), half(0u),
-      0xf0u, scalar);
+      0xf0u, f16);
   add("Gfx1201F16F32NegativeTinyMul2KeepOutputsOnly", kRdna4, f16_f32_mul2, f32_source(0xb87fe800u),
-      half(0u), 0xa0u, scalar);
+      half(0u), 0xa0u, f16);
   // At F16 precision this value reaches the smallest normal, so it is not tiny.
   add("Gfx1201F16F32BoundaryMul2", kRdna4, f16_f32_mul2, f32_source(0x387ff000u), half(0x0800u),
-      0xf0u, scalar);
+      0xf0u, f16);
   add("Gfx1201F16F32NegativeBoundaryMul2", kRdna4, f16_f32_mul2, f32_source(0xb87ff000u),
-      half(0x8800u), 0xf0u, scalar);
+      half(0x8800u), 0xf0u, f16);
 
   const auto f32_f64 = rdna4(rdna4::kVCvtF32F64Vop3);
   const auto f32_f64_mul2 = rdna4(rdna4::kVCvtF32F64Vop3, 1);
@@ -3906,11 +3925,11 @@ std::vector<ArithmeticCase> conversion_mode_boundary_cases() {
   add("Gfx1201F32F64TinyRoundsUp", kRdna4, f32_f64, f64_source(0x380fffffe8000000u),
       single(0x00800000u), 0xf0u, from_f64);
   add("Gfx1201F32F64TinyMul2", kRdna4, f32_f64_mul2, f64_source(0x380fffffe8000000u), single(0u),
-      0xf0u, scalar);
+      0xf0u, from_f64);
   add("Gfx1201F32F64NegativeTinyMul2", kRdna4, f32_f64_mul2, f64_source(0xb80fffffe8000000u),
-      single(0u), 0xf0u, scalar);
+      single(0u), 0xf0u, from_f64);
   add("Gfx1201F32F64NegativeBoundaryMul2", kRdna4, f32_f64_mul2, f64_source(0xb80ffffff0000000u),
-      single(0x81000000u), 0xf0u, scalar);
+      single(0x81000000u), 0xf0u, from_f64);
 
   const auto f64_f32 = rdna4(rdna4::kVCvtF64F32Vop3);
   add("Gfx1201F64F32KeepF32InputsOnly", kRdna4, f64_f32, Pairs{{0, 1u}}, wide(0x36a0000000000000u),
@@ -3943,9 +3962,9 @@ std::vector<ArithmeticCase> conversion_mode_boundary_cases() {
     const auto both = [&](const char *suffix, uint32_t mode, uint32_t h, uint32_t f) {
       add(name + "F16F32NegativeTinyMul2" + suffix, target.arch, target.f16_mul2,
           Pairs{{0, 0xb87fe800u}, {6, target.high | (target.high >> 16)}},
-          Pairs{{6, target.high | h}}, mode, scalar);
+          Pairs{{6, target.high | h}}, mode, expect_simd_path(target.f16_path));
       add(name + "F32F64NegativeTinyMul2" + suffix, target.arch, target.f32_mul2,
-          f64_source(0xb80fffffe8000000u), single(f), mode, scalar);
+          f64_source(0xb80fffffe8000000u), single(f), mode, from_f64);
     };
     both("FlushOutputs", 0x00u, 0u, 0u);
     both("KeepOutputsOnly", 0xa0u, 0x8400u, 0x80800000u);

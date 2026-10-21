@@ -881,6 +881,13 @@ inline conversion::ToFloat<From, fp_format::F16> sdwa_conversion_to_f16(const In
   return stages;
 }
 
+/// @brief Resolve V_CVT_FLOOR_I32_F32 or V_CVT_NEAREST_I32_F32 (conversion::FloorI32,
+/// conversion::NearestI32) from the F32 input-denormal control and ABS/NEG.
+template <typename Op>
+inline Op conversion_f32_to_integer(const Wavefront &wf, uint32_t abs = 0, uint32_t neg = 0) {
+  return {abs, neg, input_denormal::Policy::make(wf.fp_denorm_mode_f32())};
+}
+
 /// @brief Resolve V_CVT_PK_U8_F32, which rounds in the F32 MODE.FP_ROUND field.
 inline conversion::PackU8 conversion_pk_u8(const Wavefront &wf, uint32_t abs = 0,
                                            uint32_t neg = 0) {

@@ -1,23 +1,26 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Emit shared/conversion.h calls for VALU conversions to floating formats.
+"""Emit shared/conversion.h calls for VALU conversions.
 
-Scalar bodies and SIMD functors share one stage object, resolved before the
-lane loop by ``amdgpu::conversion_to_float<From, To>(wf, ...)``. It applies
-ABS/NEG and MODE input flushing to a floating source, rounds once in the
-destination format's MODE, then applies OMOD and CLAMP, all on raw encodings.
+Each instruction resolves one stage object, such as
+``amdgpu::conversion_to_float<From, To>(wf, ...)``, from MODE and its VOP3
+fields. The scalar body declares it and the SIMD probe passes the same object
+(see share_stages), so both paths apply the same ABS/NEG, MODE input flushing,
+rounding, OMOD and CLAMP, all on raw encodings.
 """
 
 import re
 
 from amdisa.codegen.execute.fp8_formats import FNUZ_FP8_ARCHES
-from amdisa.semantics import TO_FLOAT_CONVERSIONS
+from amdisa.semantics import F32_TO_INTEGER_CONVERSIONS, TO_FLOAT_CONVERSIONS
 
 # The per-instruction stage object declared before the scalar lane loop.
 STAGES = 'conversion'
 
 _TEMPLATE = re.compile(r'v_cvt_(?P<dtype>[a-z0-9]+_[a-z0-9]+)_(?P<encoding>vop1|vop3)')
+_DECLARATION = re.compile(rf'^ *const auto {STAGES} = [^\n]*;\n?', re.MULTILINE)
+_NAMES_STAGES = re.compile(rf'(?<![\w:]){STAGES}(?![\w:])')
 
 
 def _format(name: str) -> str:
@@ -51,11 +54,19 @@ def stages_expr(dtype: str, fields: tuple[str, ...] = ()) -> str:
 def declaration(dtype: str, fields: tuple[str, ...] | None = None) -> str:
     """Declare the scalar stage object once, before the lane loop.
 
-    ``fields`` are the VOP3 (ABS, NEG, OMOD, CLAMP) expressions. Without them
-    an F16 result takes the SDWA OMOD, which scales before rounding and is zero
-    for encodings without SDWA.
+    ``fields`` are the VOP3 (ABS, NEG, OMOD, CLAMP) expressions; an
+    F32-to-integer conversion uses only ABS and NEG. Without them an F16
+    result takes the SDWA OMOD, which scales before rounding and is zero for
+    encodings without SDWA.
     """
-    if fields is None and destination(dtype) == 'F16':
+    if dtype in F32_TO_INTEGER_CONVERSIONS:
+        operation = f'amdgpu::conversion::{F32_TO_INTEGER_CONVERSIONS[dtype]}'
+        modifiers = list((fields or ())[:2])
+        while modifiers and modifiers[-1] == '0u':
+            modifiers.pop()
+        args = ', '.join(['wf', *modifiers])
+        stages = f'amdgpu::conversion_f32_to_integer<{operation}>({args})'
+    elif fields is None and destination(dtype) == 'F16':
         source = _format(TO_FLOAT_CONVERSIONS[dtype][0])
         stages = f'amdgpu::sdwa_conversion_to_f16<{source}>(*this, wf)'
     else:
@@ -63,16 +74,19 @@ def declaration(dtype: str, fields: tuple[str, ...] | None = None) -> str:
     return f'  const auto {STAGES} = {stages};'
 
 
-def _vop3_guard(dtype: str) -> str:
-    """The condition under which a VOP3 form may take the raw SIMD glue.
+def share_stages(probe: str | None, body: str) -> tuple[str | None, str]:
+    """Move the scalar body's stage declaration above a probe that passes it.
 
-    The glue carries no modifiers, so an encoding that sets any field its
-    operand types admit runs the scalar body instead.
+    Returns the probe preceded by the declaration and the body without it.
+    A probe that does not name the stage object is returned unchanged.
     """
-    fields = ('omod', 'clamp')
-    if not is_integer_source(dtype):
-        fields = ('abs', 'neg', *fields)
-    return ' && '.join(f'!inst.inst_.{field}' for field in fields)
+    if probe is None or not _NAMES_STAGES.search(probe):
+        return probe, body
+    match = _DECLARATION.search(body)
+    if match is None:
+        raise ValueError(f'SIMD probe passes {STAGES!r}, but the body declares none')
+    hoisted = match.group(0).rstrip('\n')
+    return f'{hoisted}\n{probe}', body[: match.start()] + body[match.end() :]
 
 
 def needs_half_glue(template_name: str) -> bool:
@@ -94,69 +108,73 @@ def simd_probe(
 ) -> str | None:
     """Emit the SIMD probe for a conversion to a floating format, or None.
 
-    Every form passes the unmodified stage object to the raw-word glue; a VOP3
-    encoding takes it only when no modifier is active, and otherwise falls to
-    the scalar body. A true16 F16 result goes to the selected destination half,
-    keeping the other half.
+    The probe passes the scalar body's stage object, modifiers included, to
+    the raw-word glue. A true16 F16 result goes to the selected destination
+    half, keeping the other half.
     """
     match = _TEMPLATE.fullmatch(template_name)
     if match is None or match['dtype'] not in TO_FLOAT_CONVERSIONS:
         return None
     dtype = match['dtype']
     vop3 = match['encoding'] == 'vop3'
-    stages = stages_expr(dtype)
     half_dst = destination(dtype) == 'F16'
     half_source = int(dtype.endswith('16'))
     if e32 or (vop3 and true16_vop3 and half_dst):
         half_inputs = e32_half_inputs if e32 else half_source
         args = f'1, {str(e32).lower()}, {str(half_dst).lower()}, {half_inputs}'
-        probe = (
-            f'  if (amdgpu::try_execute_words_simd<{args}>(inst, wf, {stages})) return;'
+        return (
+            f'  if (amdgpu::try_execute_words_simd<{args}>(inst, wf, {STAGES})) return;'
         )
-    else:
-        source, result = TO_FLOAT_CONVERSIONS[dtype]
-        if source == 'F64':
-            probe = f'  ROCJITSU_TRY_SIMD_CONVERSION_FROM_F64({stages});'
-        elif result == 'F64':
-            probe = f'  ROCJITSU_TRY_SIMD_CONVERSION_TO_F64({stages});'
-        else:
-            probe = f'  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, {stages});'
-    if not vop3:
-        return probe
-    return f'  if ({_vop3_guard(dtype)}) {{\n  {probe}\n  }}'
+    source, result = TO_FLOAT_CONVERSIONS[dtype]
+    if source == 'F64':
+        return f'  ROCJITSU_TRY_SIMD_CONVERSION_FROM_F64({STAGES});'
+    if result == 'F64':
+        return f'  ROCJITSU_TRY_SIMD_CONVERSION_TO_F64({STAGES});'
+    return f'  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, {STAGES});'
+
+
+def _resolve_with_source_modifiers(
+    resolver: str, is_vop3: bool, has_abs: bool, inst: str
+) -> str:
+    """Call a stage resolver; a VOP3 form passes its ABS/NEG fields."""
+    if not is_vop3:
+        return f'{resolver}(wf)'
+    abs_field = f'{inst}.abs' if has_abs else '0u'
+    return f'{resolver}(wf, {abs_field}, {inst}.neg)'
 
 
 def pk_rtz_f16_expr(is_vop3: bool, has_abs: bool, inst: str) -> str:
-    """Resolve V_CVT_PK_RTZ_F16_F32's stages; VOP3 passes its ABS/NEG fields."""
-    if not is_vop3:
-        return 'amdgpu::conversion_pk_rtz_f16(wf)'
-    abs_field = f'{inst}.abs' if has_abs else '0u'
-    return f'amdgpu::conversion_pk_rtz_f16(wf, {abs_field}, {inst}.neg)'
+    """Resolve V_CVT_PK_RTZ_F16_F32's stages."""
+    return _resolve_with_source_modifiers(
+        'amdgpu::conversion_pk_rtz_f16', is_vop3, has_abs, inst
+    )
 
 
 def pk_u8_expr(is_vop3: bool, has_abs: bool, inst: str) -> str:
-    """Resolve V_CVT_PK_U8_F32's stages; VOP3 passes its ABS/NEG fields."""
-    if not is_vop3:
-        return 'amdgpu::conversion_pk_u8(wf)'
-    abs_field = f'{inst}.abs' if has_abs else '0u'
-    return f'amdgpu::conversion_pk_u8(wf, {abs_field}, {inst}.neg)'
+    """Resolve V_CVT_PK_U8_F32's stages."""
+    return _resolve_with_source_modifiers(
+        'amdgpu::conversion_pk_u8', is_vop3, has_abs, inst
+    )
 
 
 def pack_b32_f16_expr(is_vop3: bool, has_abs: bool, inst: str) -> str:
-    """Resolve V_PACK_B32_F16's stages; VOP3 passes its ABS/NEG fields."""
-    if not is_vop3:
-        return 'amdgpu::conversion_pack_b32_f16(wf)'
-    abs_field = f'{inst}.abs' if has_abs else '0u'
-    return f'amdgpu::conversion_pack_b32_f16(wf, {abs_field}, {inst}.neg)'
+    """Resolve V_PACK_B32_F16's stages."""
+    return _resolve_with_source_modifiers(
+        'amdgpu::conversion_pack_b32_f16', is_vop3, has_abs, inst
+    )
 
 
 # OCP 8-bit float formats (shared/conversion.h); CDNA3 uses FNUZ helpers instead.
 _FP8_FORMATS = {'fp8': 'amdgpu::conversion::Fp8', 'bf8': 'amdgpu::conversion::Bf8'}
 
+# OCP targets that keep util's FP8/BF8 helpers. The CDNA4 manual saturates an
+# infinity under FP16_OVFL, which gfx1201 does not, and gfx950 is uncaptured.
+_UTIL_OCP_FP8_ARCHES = frozenset({'cdna4'})
+
 
 def uses_ocp_fp8(arch_name: str) -> bool:
     """Whether a target's FP8/BF8 conversions use the shared OCP encodings."""
-    return arch_name not in FNUZ_FP8_ARCHES
+    return arch_name not in FNUZ_FP8_ARCHES | _UTIL_OCP_FP8_ARCHES
 
 
 def fp8_format(name: str) -> str:
@@ -165,12 +183,10 @@ def fp8_format(name: str) -> str:
 
 
 def to_fp8_expr(name: str, is_vop3: bool, has_abs: bool, inst: str) -> str:
-    """Resolve an F32-to-FP8/BF8 conversion; VOP3 passes its ABS/NEG fields."""
-    stages = f'amdgpu::conversion_to_fp8<{fp8_format(name)}>'
-    if not is_vop3:
-        return f'{stages}(wf)'
-    abs_field = f'{inst}.abs' if has_abs else '0u'
-    return f'{stages}(wf, {abs_field}, {inst}.neg)'
+    """Resolve an F32-to-FP8/BF8 conversion."""
+    return _resolve_with_source_modifiers(
+        f'amdgpu::conversion_to_fp8<{fp8_format(name)}>', is_vop3, has_abs, inst
+    )
 
 
 def decode_fp8_expr(name: str, byte: str) -> str:
