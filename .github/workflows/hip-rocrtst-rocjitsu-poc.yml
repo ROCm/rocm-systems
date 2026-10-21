@@ -130,6 +130,7 @@ jobs:
           sparse-checkout: |
             .github
             emulation/rocjitsu
+            runtimes/api-headers
           sparse-checkout-cone-mode: true
 
       - name: Build rocJITsu
