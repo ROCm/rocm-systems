@@ -229,11 +229,17 @@ namespace rocshmem
       int32_t* tempBuffer;
 
       // Index CPU agents
-      cpuAgents.clear();
+      // Skip nodes outside this process's cpuset (numa_set_preferred would
+      // fail silently and CheckPages() would then hard-abort on the mismatch).
+      cpuAgents.assign(numCpus, hsa_agent_t{0});
       for (int i = 0; i < numCpus; i++) {
+        if (!numa_bitmask_isbitset(numa_get_mems_allowed(), i)) {
+          LOG_WARN("Skipping CPU NUMA node %d: not in this process's allowed NUMA mems mask", i);
+          continue;
+        }
         ERR_CHECK(AllocateMemory({MEM_CPU, i}, 1024, (void**)&tempBuffer));
         CHECK_HSA(hsa_amd_pointer_info(tempBuffer, &info, NULL, NULL, NULL));
-        cpuAgents.push_back(info.agentOwner);
+        cpuAgents[i] = info.agentOwner;
         ERR_CHECK(DeallocateMemory(MEM_CPU, tempBuffer, 1024));
       }
 
@@ -310,6 +316,10 @@ namespace rocshmem
                                   int&        version)
   {
     char const* deviceName = ibv.get_device_name(context->device);
+    if (deviceName == nullptr || strchr(deviceName, '/') != nullptr) {
+      LOG_ERROR("Invalid IB device name: %s", deviceName ? deviceName : "(null)");
+      return -1;
+    }
     char gidRoceVerStr[16]      = {};
     char roceTypePath[PATH_MAX] = {};
     snprintf(roceTypePath, sizeof(roceTypePath),
@@ -1156,6 +1166,14 @@ namespace rocshmem
       for (int node = 0; node <= numa_max_node(); node++)
         if (numa_bitmask_isbitset(numa_get_mems_allowed(), node))
           remappingCpu.push_back(node);
+    }
+    if (origIdx < 0) {
+      return -1;  // never a valid node, no sensible fallback
+    }
+    // Unmapped under cgroup restriction, but still a real node id for the
+    // read-only distance/CPU-count queries below, so keep it as-is.
+    if (origIdx >= static_cast<int>(remappingCpu.size())) {
+      return origIdx;
     }
     return remappingCpu[origIdx];
   }

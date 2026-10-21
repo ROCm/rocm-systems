@@ -40,6 +40,17 @@ void rcclSetPipelining(struct ncclComm* comm, size_t const& nBytes, struct ncclT
   ++g_rcclSetPipeliningCalls;
   g_rcclSetPipelining(comm, nBytes, info);
 }
+int g_rcclUpdateCollectiveAlgorithmCalls = 0;
+bool g_rcclUpdateCollectiveAlgorithmBeforeProtocol = false;
+int g_rcclUpdateCollectiveChannelsCalls = 0;
+void rcclUpdateCollectiveAlgorithm(struct ncclComm*, size_t, struct ncclTaskColl*, float (*)[NCCL_NUM_PROTOCOLS]) {
+  ++g_rcclUpdateCollectiveAlgorithmCalls;
+  // Production requires the algorithm hook to run before the protocol hook.
+  g_rcclUpdateCollectiveAlgorithmBeforeProtocol = g_rcclUpdateCollectiveProtocolCalls == 0;
+}
+void rcclUpdateCollectiveChannels(struct ncclComm*, size_t, const struct ncclTaskColl*, int&) {
+  ++g_rcclUpdateCollectiveChannelsCalls;
+}
 void rcclUpdateThreadThreshold(struct ncclComm*, size_t const&, struct ncclTaskColl*, int&) {
   ++g_rcclUpdateThreadThresholdCalls;
 }
@@ -146,6 +157,10 @@ int64_t g_rcclParamHierarchicalAllGather = 1;      // RCCL_PARAM(HierarchicalAll
 int64_t rcclParamHierarchicalAllGather() { return g_rcclParamHierarchicalAllGather; }
 int64_t g_rcclParamHierarchicalReduceScatter = 0;  // RCCL_PARAM(HierarchicalReduceScatter) default
 int64_t rcclParamHierarchicalReduceScatter() { return g_rcclParamHierarchicalReduceScatter; }
+int64_t g_rcclParamCeAllReduce = -1;               // rccl_wrap.cc:65 RCCL_PARAM default
+int64_t rcclParamCeAllReduce() { return g_rcclParamCeAllReduce; }
+int64_t g_rcclParamCeArStagingBytes = -1;          // rccl_wrap.cc:70 RCCL_PARAM default
+int64_t rcclParamCeArStagingBytes() { return g_rcclParamCeArStagingBytes; }
 
 void ResetRcclWrapFakes() {
   g_rcclUpdateCollectiveProtocol = DefaultNoOpTune;
@@ -157,7 +172,12 @@ void ResetRcclWrapFakes() {
   g_rcclHierarchicalTempBufferSize = DefaultHierarchicalTempBufferSize;
   g_rcclParamHierarchicalAllGather = 1;
   g_rcclParamHierarchicalReduceScatter = 0;
+  g_rcclParamCeAllReduce = -1;
+  g_rcclParamCeArStagingBytes = -1;
   g_rcclUpdateCollectiveProtocolCalls = 0;
+  g_rcclUpdateCollectiveAlgorithmCalls = 0;
+  g_rcclUpdateCollectiveAlgorithmBeforeProtocol = false;
+  g_rcclUpdateCollectiveChannelsCalls = 0;
   g_rcclSetPipeliningCalls = 0;
   g_rcclUpdateThreadThresholdCalls = 0;
   g_rcclOptThreadBlockSizeCalls = 0;
@@ -213,6 +233,10 @@ ncclResult_t rcclCommSetP2pShiftSize(struct ncclComm*) {
 }
 int64_t rcclParamHierarchicalLazyInit() {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclParamHierarchicalLazyInit");
+}
+void rcclSetPxn(struct ncclComm*, int&) { FailLoudUnfaked("rccl_wrap_fakes", "rcclSetPxn"); }
+void rcclSetCeAllReduceFastPath(struct ncclComm*) {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclSetCeAllReduceFastPath");
 }
 int64_t g_rcclParamDirectReduceScatterThreshold = 8388608;     // rccl_wrap.cc:51 default
 int64_t rcclParamDirectReduceScatterThreshold() {              // rccl_wrap.cc:51

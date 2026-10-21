@@ -9,7 +9,10 @@
 #include "hrr/hrr_regions.h"
 
 #include <algorithm>
+#include <atomic>
+#include <new>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <vector>
@@ -17,12 +20,6 @@
 namespace fs = std::filesystem;
 
 namespace hrr {
-
-// payload_length is file-supplied. Without a ceiling, a corrupt header can ask
-// resize() for ~4 GiB and OOM the process. Captured kernel launches are far
-// smaller (the writer buffers 256 KiB and spills larger records to a direct
-// write); 64 MiB is well above any legitimate record.
-static constexpr uint32_t kMaxRecordBytes = 64u * 1024u * 1024u;
 
 // ---------------------------------------------------------------------------
 // Event move semantics
@@ -81,13 +78,20 @@ const char* event_type_name(uint16_t type) {
   return "UNKNOWN";
 }
 
+uint64_t pid_from_archive_dir_name(const std::string& name) {
+  if (name.size() <= 4 || name.compare(0, 4, "pid-") != 0 ||
+      name.find_first_not_of("0123456789", 4) != std::string::npos)
+    return 0;
+  return std::strtoull(name.c_str() + 4, nullptr, 10);
+}
+
 static std::vector<fs::path> find_pid_subarchives(const fs::path& root) {
   std::vector<fs::path> dirs;
   if (!fs::exists(root) || !fs::is_directory(root)) return dirs;
   for (const auto& ent : fs::directory_iterator(root)) {
     if (!ent.is_directory()) continue;
     const std::string name = ent.path().filename().string();
-    if (name.rfind("pid-", 0) == 0 && fs::exists(ent.path() / "events.bin"))
+    if (pid_from_archive_dir_name(name) != 0 && fs::exists(ent.path() / "events.bin"))
       dirs.push_back(ent.path());
   }
   std::sort(dirs.begin(), dirs.end());
@@ -227,8 +231,9 @@ static bool resolve_archive_path(const std::string& input, std::string& resolved
 //   [+12..23] block[3] (uint32_t[3])
 //   [+24..27] shared_mem (uint32_t)
 //   [+28..29] num_args (uint16_t)
-//   [+30..31] num_snapshots (uint16_t, always 0)
+//   [+30..31] num_snapshots (uint16_t)
 //   per arg: u8 value_kind, u16 size, <size> bytes data
+//   per snapshot (v10, 41 bytes): see BufferSnapshot; the attribute tail follows
 // ---------------------------------------------------------------------------
 
 static bool parse_kernel_launch(const uint8_t* data, size_t len,
@@ -287,7 +292,7 @@ static bool parse_kernel_launch(const uint8_t* data, size_t len,
     kl.args.push_back(std::move(arg));
   }
 
-  // buffer snapshots (always 0 in in-tree captures)
+  // pinned host snapshots
   for (uint16_t i = 0; i < num_snapshots; i++) {
     if (p + 41 > end) return false;
     BufferSnapshot snap;
@@ -324,9 +329,12 @@ bool load_archive(const std::string& path, Archive& archive) {
   // Read events sequentially. read_raw_record handles the framing and the
   // torn-tail recovery; a torn record means the capture was interrupted, and
   // everything parsed before it is kept. The clean-shutdown trailer
-  // (hrr_eof_record) explicitly marks a whole archive.
+  // (hrr_eof_record) explicitly marks a whole archive, and it ends the event
+  // stream.
   bool truncated = false;
   bool complete  = false;
+  bool trailer   = false;
+  uint64_t trailer_count = 0;
   const uint16_t hdr_size = static_cast<uint16_t>(sizeof(hrr_event_header));
   while (true) {
     Event ev;
@@ -349,8 +357,9 @@ bool load_archive(const std::string& path, Archive& archive) {
         total == static_cast<uint32_t>(sizeof(hrr_eof_record))) {
       const auto* er = reinterpret_cast<const hrr_eof_record*>(ev.raw_payload.data());
       if (er->eof_magic == HRR_EOF_MAGIC) {
-        complete = true;
-        continue;  // do not append trailer as a replay event
+        trailer = true;
+        trailer_count = er->total_events;
+        break;  // the trailer is not a replay event, and nothing after it is
       }
     }
 
@@ -595,14 +604,47 @@ bool load_archive(const std::string& path, Archive& archive) {
     #undef AS
     #undef SIZE_OK
 
+    if (archive.events.size() >= max_events()) {
+      fprintf(stderr,
+              "[HRR] Refusing %s: more than %llu events (--max-events); stopped "
+              "reading after %zu\n",
+              events_path.c_str(), (unsigned long long)max_events(),
+              archive.events.size());
+      fclose(f);
+      return false;
+    }
     archive.events.push_back(std::move(ev));
+  }
+
+  // A runtime older than the writer fix for it could append a few records
+  // after the trailer, from calls still in flight at shutdown. They are not in
+  // the trailer's count, so they are counted and left out of the replay.
+  if (trailer) {
+    std::vector<uint8_t> rest;
+    while (read_raw_record(f, rest) == RecordStatus::Ok)
+      ++archive.skipped_after_trailer;
+    if (archive.skipped_after_trailer)
+      fprintf(stderr,
+              "[HRR] Ignored %zu records after the clean-shutdown trailer\n",
+              archive.skipped_after_trailer);
   }
 
   fclose(f);
 
-  archive.complete  = complete;
-  archive.truncated = truncated;
-  if (!complete) {
+  if (trailer) {
+    complete = trailer_count == archive.events.size();
+    if (!complete)
+      fprintf(stderr,
+              "[HRR] Clean-shutdown trailer counts %llu events but %zu precede it; "
+              "the archive is not treated as complete\n",
+              static_cast<unsigned long long>(trailer_count), archive.events.size());
+  }
+
+  archive.complete       = complete;
+  archive.truncated      = truncated;
+  archive.trailer        = trailer;
+  archive.trailer_events = trailer_count;
+  if (!trailer) {
     fprintf(stderr,
             "[HRR] Archive has no clean-shutdown trailer (capture likely crashed); "
             "recovered %zu events%s\n",
@@ -655,21 +697,104 @@ bool load_archive(const std::string& path, Archive& archive) {
   return true;
 }
 
+// fseek takes a long, 32 bits on Windows, and an msvcrt fseek fails once the
+// file position passes 2 GiB even for a small relative offset. events.bin can
+// be larger than that, so the walk seeks with the 64-bit call.
+static int seek64(FILE* f, int64_t offset, int origin) {
+#ifdef _WIN32
+  return _fseeki64(f, offset, origin);
+#else
+  return fseeko(f, static_cast<off_t>(offset), origin);
+#endif
+}
+
+// The framing checks are read_raw_record's, so a record the loader takes as
+// torn ends the walk here too, and like the loader the walk stops at the first
+// trailer. A payload that runs past the end of the file needs no check of its
+// own: the seek succeeds and the next header read fails.
+bool has_clean_trailer(const std::string& archive_dir) {
+  FILE* f = fopen((fs::path(archive_dir) / "events.bin").string().c_str(), "rb");
+  if (!f) return false;
+  const uint32_t hdr_size = static_cast<uint32_t>(sizeof(hrr_event_header));
+  hrr_file_header fh{};
+  bool ok = fread(&fh, sizeof(fh), 1, f) == 1 && fh.magic == HRR_MAGIC &&
+            fh.version == HRR_VERSION;
+  uint64_t records = 0;
+  bool clean = false;
+  hrr_eof_record rec{};
+  while (ok && fread(&rec.hdr, hdr_size, 1, f) == 1) {
+    const uint32_t total = rec.hdr.payload_length;
+    if (total < hdr_size || total > kMaxRecordBytes) break;
+    if (rec.hdr.event_type == HRR_EOF_MARKER && total == sizeof(rec)) {
+      ok = fread(reinterpret_cast<char*>(&rec) + hdr_size, sizeof(rec) - hdr_size, 1, f) == 1;
+      if (ok && rec.eof_magic == HRR_EOF_MAGIC) {
+        clean = rec.total_events == records;
+        break;
+      }
+    } else {
+      ok = seek64(f, static_cast<int64_t>(total - hdr_size), SEEK_CUR) == 0;
+    }
+    ++records;
+  }
+  fclose(f);
+  return clean;
+}
+
 // ---------------------------------------------------------------------------
 // Blob / code object readers
 // ---------------------------------------------------------------------------
 
-static bool read_file(const std::string& file_path, std::vector<uint8_t>& data) {
+static std::atomic<uint64_t> g_max_file_bytes{kDefaultMaxFileBytes};
+static std::atomic<uint64_t> g_max_events{kDefaultMaxEvents};
+
+uint64_t max_events() { return g_max_events.load(std::memory_order_relaxed); }
+void set_max_events(uint64_t events) { g_max_events.store(events, std::memory_order_relaxed); }
+
+uint64_t max_file_bytes() { return g_max_file_bytes.load(std::memory_order_relaxed); }
+void set_max_file_bytes(uint64_t bytes) {
+  g_max_file_bytes.store(bytes, std::memory_order_relaxed);
+}
+
+bool read_file_capped(const std::string& file_path, std::vector<uint8_t>& data,
+                      std::string* error, bool* refused) {
+  if (refused) *refused = false;
+  auto fail = [&](const std::string& why) {
+    if (error) *error = why;
+    return false;
+  };
+  auto refuse = [&](const std::string& why) {
+    if (refused) *refused = true;
+    return fail(why);
+  };
+  std::error_code ec;
+  const uintmax_t size = std::filesystem::file_size(file_path, ec);
+  if (ec)
+    return fail("cannot stat " + file_path + ": " + ec.message());
+  const uint64_t cap = max_file_bytes();
+  if (size > cap)
+    return refuse("refusing to read " + file_path + ": " + std::to_string(size) +
+                " bytes exceeds the " + std::to_string(cap) +
+                "-byte file cap (--max-file-bytes)");
   FILE* f = fopen(file_path.c_str(), "rb");
-  if (!f) return false;
-  if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return false; }
-  long size = ftell(f);
-  if (size < 0) { fclose(f); return false; }
-  if (fseek(f, 0, SEEK_SET) != 0) { fclose(f); return false; }
-  data.resize(static_cast<size_t>(size));
+  if (!f) return fail("cannot open " + file_path);
+  try {
+    data.resize(static_cast<size_t>(size));
+  } catch (const std::bad_alloc&) {
+    fclose(f);
+    return refuse("out of memory reading " + file_path + " (" + std::to_string(size) + " bytes)");
+  }
+  // Read at most `size` bytes: a file that grew since the stat is not followed.
   bool ok = fread(data.data(), 1, data.size(), f) == data.size();
   fclose(f);
-  return ok;
+  if (!ok) return fail("short read of " + file_path);
+  return true;
+}
+
+static bool read_file(const std::string& file_path, std::vector<uint8_t>& data) {
+  std::string err;
+  if (read_file_capped(file_path, data, &err)) return true;
+  fprintf(stderr, "[HRR] %s\n", err.c_str());
+  return false;
 }
 
 bool read_blob(const Archive& archive, uint64_t hash_lo, uint64_t hash_hi,

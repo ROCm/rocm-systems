@@ -156,7 +156,15 @@ uint32_t unpack(uint32_t value, uint32_t width, Number n) {
   return std::bit_cast<uint32_t>(result);
 }
 
-uint32_t pack(uint32_t value, uint32_t width, Number n) {
+uint32_t pack(uint32_t value, uint32_t width, Number n, BufferFormatEncoding encoding) {
+  // Native gfx1100/gfx1201 integer stores saturate before narrowing, including D16 sources.
+  if (encoding == BufferFormatEncoding::Gfx11 && integer(n) && width < 32) {
+    if (n == Number::Uint)
+      return std::min(value, mask(width));
+    const int32_t maximum = static_cast<int32_t>(mask(width - 1));
+    return static_cast<uint32_t>(std::clamp(std::bit_cast<int32_t>(value), -maximum - 1, maximum)) &
+           mask(width);
+  }
   if (integer(n) || (n == Number::Float && width == 32))
     return value & mask(width);
   const float input = std::bit_cast<float>(value);
@@ -183,9 +191,12 @@ uint32_t pack(uint32_t value, uint32_t width, Number n) {
   double number = std::isnan(input) ? 0 : input;
   if (n == Number::Unorm)
     number = round_even(std::clamp(number, 0.0, 1.0) * mask(width));
-  else if (n == Number::Snorm)
-    number = round_even(std::clamp(number, -1.0, 1.0) * mask(width - 1));
-  else if (n == Number::Uscaled)
+  else if (n == Number::Snorm) {
+    number = std::clamp(number, -1.0, 1.0) * mask(width - 1);
+    // Native gfx1100/gfx1201 encode +/-0.5 as +/-1 in two-bit SNORM.
+    number = encoding == BufferFormatEncoding::Gfx11 && width == 2 ? std::round(number)
+                                                                   : round_even(number);
+  } else if (n == Number::Uscaled)
     number = std::trunc(std::clamp(number, 0.0, static_cast<double>(mask(width))));
   else
     number = std::trunc(std::clamp(number, -static_cast<double>(1u << (width - 1)),
@@ -224,24 +235,62 @@ std::array<uint32_t, 4> unpack_format(const Format &f, uint32_t selectors,
   return result;
 }
 
+// Native gfx1100/gfx1201 sweeps qualify exact selector patterns by memory
+// channel count. General DST_SEL routing is not an inverse of load swizzling.
+// CDNA1-4, RDNA1/2 and RDNA3.5 use this policy by extrapolation, without native
+// measurements. Rejection marks unsupported emulation, not a hardware fault.
+bool qualified_store_selectors(const Format &f, uint32_t selectors) {
+  constexpr uint32_t identity = 4 | (5 << 3) | (6 << 6) | (7 << 9);
+  constexpr uint32_t reversed = 7 | (6 << 3) | (5 << 6) | (4 << 9);
+  const uint32_t channels =
+      std::count_if(f.widths.begin(), f.widths.end(), [](uint32_t width) { return width != 0; });
+  if (channels == 4) {
+    constexpr uint32_t rgb = 4 | (5 << 3) | (6 << 6);
+    constexpr uint32_t bgra = 6 | (5 << 3) | (4 << 6) | (7 << 9);
+    return selectors == identity || selectors == reversed || selectors == bgra ||
+           selectors == rgb || selectors == (rgb | (1 << 9));
+  }
+  if (channels == 1 && (selectors == identity || selectors == reversed || selectors == (4 << 9)))
+    return true; // Single-channel identity, WZYX, and A8 views were measured.
+  if (!channels)
+    return false;
+  for (uint32_t channel = 0; channel < 4; ++channel) {
+    const uint32_t selector = (selectors >> (channel * 3)) & 7;
+    if (channel < channels ? selector != channel + 4 : selector > 1)
+      return false;
+  }
+  return true;
+}
+
 void pack_format(const Format &f, uint32_t selectors, std::span<const uint32_t> components,
-                 std::span<uint8_t> bytes) {
+                 std::span<uint8_t> bytes, BufferStoreMissingChannel missing,
+                 BufferFormatEncoding encoding) {
+  // Native Gfx11-format stores encode SCALED as NORM, unlike SCALED loads.
+  const auto number = encoding != BufferFormatEncoding::Gfx11 ? f.number
+                      : f.number == Number::Uscaled           ? Number::Unorm
+                      : f.number == Number::Sscaled           ? Number::Snorm
+                                                              : f.number;
   std::fill(bytes.begin(), bytes.end(), 0);
   uint32_t offset = 0;
   for (uint32_t i = 0; i < 4; ++i) {
     const uint32_t width = f.widths[i];
     if (!width)
       continue;
-    // Stores invert the descriptor's load mapping: an A8 view maps shader
-    // W to physical R, for example. Unprovided shader channels replicate X.
+    // Qualified permutations invert the load mapping (A8 maps W to R).
+    // Four-channel RGB0/RGB1 instead write a constant to physical alpha.
     uint32_t component = 0;
+    if (i == 3 && (selectors >> 9) == 1)
+      component = integer(f.number) ? 1u : 0x3f800000u;
     for (uint32_t shader = 0; shader < 4; ++shader) {
       if (((selectors >> (3 * shader)) & 7) == i + 4) {
-        component = components[shader < components.size() ? shader : 0];
+        if (shader < components.size())
+          component = components[shader];
+        else if (missing == BufferStoreMissingChannel::ReplicateFirst)
+          component = components[0];
         break;
       }
     }
-    const uint64_t bits = uint64_t{pack(component, width, f.number)} << (offset % 8);
+    const uint64_t bits = uint64_t{pack(component, width, number, encoding)} << (offset % 8);
     for (uint32_t b = offset / 8; b < (offset + width + 7) / 8; ++b)
       bytes[b] |= static_cast<uint8_t>(bits >> ((b - offset / 8) * 8));
     offset += width;
@@ -262,13 +311,28 @@ util::FailureOr<std::array<uint32_t, 4>> unpack_buffer_format(uint32_t format, u
 
 util::Result pack_buffer_format(uint32_t format, uint32_t selectors,
                                 std::span<const uint32_t> components, std::span<uint8_t> bytes,
-                                BufferFormatEncoding encoding) {
+                                BufferFormatEncoding encoding, BufferStoreMissingChannel missing) {
   const auto decoded = decode(format, encoding);
-  if (decoded.failed())
+  if (decoded.failed() || components.empty() ||
+      !qualified_store_selectors(decoded.value(), selectors))
     return util::Result::failure();
   const fp_mode::detail::ScopedFenv environment(0);
-  pack_format(decoded.value(), selectors, components, bytes);
+  pack_format(decoded.value(), selectors, components, bytes, missing, encoding);
   return util::Result::success();
+}
+
+util::FailureOr<bool> prepare_buffer_format_state(VectorMemState &d) {
+  const auto decoded = decode(d.buffer_format, d.buffer_format_encoding);
+  if (decoded.failed())
+    return util::Result::failure();
+  d.decoded_buffer_format = decoded.value();
+  uint32_t bits = 0;
+  for (uint32_t width : d.decoded_buffer_format.widths)
+    bits += width;
+  if (!bits)
+    return false;
+  d.elem_size = bits / 8;
+  return true;
 }
 
 util::FailureOr<bool> prepare_buffer_format(Wavefront &wf, VectorMemState &d, uint32_t resource,
@@ -298,20 +362,39 @@ util::FailureOr<bool> prepare_buffer_format(Wavefront &wf, VectorMemState &d, ui
           : (word3 >> 12) & (arch == ROCJITSU_CODE_ARCH_RDNA4 ? 63 : 127);
   if (resource_format == 0)
     return false;
-  const auto decoded = decode(d.buffer_format, d.buffer_format_encoding);
-  if (decoded.failed())
+  const auto prepared = prepare_buffer_format_state(d);
+  if (prepared.failed() || !prepared.value())
+    return prepared;
+  if (d.is_load && format < 0 && d.buffer_format_encoding == BufferFormatEncoding::Gfx11) {
+    // RDNA3/4 untyped loads wrap channel selectors to the memory format's
+    // channel count, for both ordinary and D16 destinations. Typed loads
+    // instead zero absent channels. RDNA3.5 shares the Gfx11 format policy.
+    const uint32_t channels =
+        std::count_if(d.decoded_buffer_format.widths.begin(), d.decoded_buffer_format.widths.end(),
+                      [](uint32_t width) { return width != 0; });
+    if (channels) {
+      uint32_t resolved = 0;
+      for (uint32_t i = 0; i < 4; ++i) {
+        uint32_t selector = (d.buffer_selectors >> (3 * i)) & 7;
+        if (selector >= 4)
+          selector = 4 + (selector - 4) % channels;
+        resolved |= selector << (3 * i);
+      }
+      d.buffer_selectors = resolved;
+    }
+  }
+  if (!d.is_load && format < 0 &&
+      !qualified_store_selectors(d.decoded_buffer_format, d.buffer_selectors))
     return util::Result::failure();
-  d.decoded_buffer_format = decoded.value();
-  uint32_t bits = 0;
-  for (uint32_t width : d.decoded_buffer_format.widths)
-    bits += width;
-  if (!bits)
-    return false;
-  d.elem_size = bits / 8;
   return true;
 }
 
 void capture_buffer_format_store(Wavefront &wf, VectorMemState &d, uint32_t data_base) {
+  // Native gfx1201 replicates X and gfx1100 zero-fills. Other families use the
+  // extrapolated zero-fill policy described by BufferStoreMissingChannel.
+  const auto missing = wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4
+                           ? BufferStoreMissingChannel::ReplicateFirst
+                           : BufferStoreMissingChannel::Zero;
   RegisterAccess regs(wf);
   const uint32_t registers = d.buffer_d16 ? (d.buffer_components + 1) / 2 : d.buffer_components;
   auto data = regs.read_vgpr_region(data_base, registers, d.lane_mask);
@@ -337,7 +420,8 @@ void capture_buffer_format_store(Wavefront &wf, VectorMemState &d, uint32_t data
               : std::bit_cast<uint32_t>(util::f16_to_f32(half));
     }
     pack_format(format, d.buffer_selectors, std::span(components).first(d.buffer_components),
-                std::span(d.store_data).subspan(lane * d.elem_size, d.elem_size));
+                std::span(d.store_data).subspan(lane * d.elem_size, d.elem_size), missing,
+                d.buffer_format_encoding);
   }
 }
 
@@ -347,8 +431,10 @@ void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const Vecto
     return;
   const auto &format = d.decoded_buffer_format;
   const fp_mode::detail::ScopedFenv environment(0);
+  const uint64_t lane_write_mask =
+      d.lds_dst ? lds_destination_write_mask(d, cu.arch()) : d.exec_mask;
   for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
-    if (!(d.exec_mask & (1ULL << lane)))
+    if (!(lane_write_mask & (1ULL << lane)))
       continue;
     const auto bytes = d.lane_mask & (1ULL << lane)
                            ? std::span(d.response_data).subspan(lane * d.elem_size, d.elem_size)
@@ -357,7 +443,9 @@ void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const Vecto
     for (uint32_t reg = 0; reg < registers; ++reg) {
       if (!d.buffer_d16) {
         if (d.lds_dst)
-          wf.lds().write(d.lds_base + (lane * registers + reg) * 4,
+          wf.lds().write((d.lds_per_lane_addr ? d.per_lane_lds_addr[lane]
+                                              : d.lds_base + lane * registers * 4) +
+                             reg * 4,
                          reinterpret_cast<const uint8_t *>(&values[reg]), 4);
         else
           cu.write_vgpr(d.dst_reg_base + reg, lane, values[reg]);
@@ -367,6 +455,13 @@ void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const Vecto
       for (uint32_t i = reg * 2; i < std::min(reg * 2 + 2, d.buffer_components); ++i) {
         const uint32_t shift = d.d16_hi ? 16 : (i % 2) * 16;
         uint16_t half = static_cast<uint16_t>(values[i]);
+        if (d.buffer_format_encoding == BufferFormatEncoding::Gfx11 && integer(format.number)) {
+          // Native RDNA3/4 typed and untyped D16 conversions saturate integers.
+          half = format.number == Number::Uint
+                     ? static_cast<uint16_t>(std::min(values[i], 0xffffu))
+                     : static_cast<uint16_t>(
+                           std::clamp(static_cast<int32_t>(values[i]), -32768, 32767));
+        }
         if (!integer(format.number)) {
           const float value = std::bit_cast<float>(values[i]);
           // Only FLOAT32 -> D16 truncates. Other conversions round to nearest even.
@@ -380,8 +475,10 @@ void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const Vecto
       if (write_mask != ~0u && !cu.sram_ecc() && !d.lds_dst)
         packed |= cu.read_vgpr_storage(d.dst_reg_base + reg, lane) & ~write_mask;
       if (d.lds_dst)
-        wf.lds().write(d.lds_base + (lane * registers + reg) * 4,
-                       reinterpret_cast<const uint8_t *>(&packed), 4);
+        wf.lds().write(
+            (d.lds_per_lane_addr ? d.per_lane_lds_addr[lane] : d.lds_base + lane * registers * 4) +
+                reg * 4,
+            reinterpret_cast<const uint8_t *>(&packed), 4);
       else
         cu.write_vgpr(d.dst_reg_base + reg, lane, packed);
     }

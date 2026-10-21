@@ -776,9 +776,13 @@ class IsaProfile(ABC):
         return {}
 
     @property
-    def ds_addtid_uses_m0_byte_base(self) -> bool:
-        """True when DS ADDTID addresses use M0 as a byte-address base."""
-        return False
+    def ds_addtid_m0_base_bits(self) -> int:
+        """Width of the ADDTID M0 byte base.
+
+        The 16-bit form adds OFFSET at that width before widening; the 20-bit
+        form widens OFFSET before addition. Lane offsets are added last.
+        """
+        return 16
 
     @property
     def ds_transpose_ignores_exec(self) -> bool:
@@ -788,6 +792,16 @@ class IsaProfile(ABC):
         writeback, not only to address formation.
         """
         return False
+
+    @property
+    def ds_b4_transpose_kind(self) -> int:
+        """CDNA4 contiguous sixteen-lane B4 transpose layout."""
+        return 8
+
+    @property
+    def ds_b6_transpose_kind(self) -> int:
+        """CDNA4 contiguous sixteen-lane B6 transpose layout."""
+        return 9
 
     @property
     def ds_b8_transpose_kind(self) -> int:
@@ -1096,10 +1110,14 @@ class IsaProfile(ABC):
     def unique_flat_segment(self, enc_name: str) -> int | None:
         """Segment required by retained opcodes absent from the parent FLAT table.
 
-        GLOBAL may define standalone opcodes. SCRATCH-only opcode numbers can
-        collide with GLOBAL and are not candidates for parent-table retention.
+        Segment-only opcodes share the FLAT layout but may require a secondary
+        dispatch on the segment when GLOBAL and SCRATCH reuse an opcode number.
         """
-        return 2 if enc_name in ('ENC_FLAT_GLBL', 'ENC_FLAT_GLOBAL') else None
+        if enc_name in ('ENC_FLAT_GLBL', 'ENC_FLAT_GLOBAL'):
+            return 2
+        if enc_name == 'ENC_FLAT_SCRATCH':
+            return 1
+        return None
 
     @abstractmethod
     def skip_inst_encoding(
@@ -1378,6 +1396,14 @@ class _AmdgpuProfileBase(IsaProfile):
             return MnemonicRule(use_flat_mnemonic=True)
         return MnemonicRule()
 
+    # FLAT encoding facts used by load execution and operand metadata.
+    legacy_flat_lds = False
+    legacy_flat_d16_lds = False
+    flat_offset_bits: int | None = None
+    flat_lds_m0_mask: int | None = None
+    scratch_has_vaddr_expr: str | None = None
+    flat_saddr_null_aliases: tuple[str, ...] = ()
+
     def saddr_null_selector_expr(self, enc_name: str) -> str | None:
         """Legacy FLAT reserves the all-ones 7-bit SADDR selector."""
         if enc_name.upper() == 'ENC_FLAT':
@@ -1520,12 +1546,12 @@ class _AmdgpuProfileBase(IsaProfile):
 
     @property
     def has_acc_vgpr(self) -> bool:
-        """True if this ISA has AccVGPRs (CDNA2/3/4 only)."""
+        """True if this ISA has AccVGPRs (CDNA1-4)."""
         return False
 
     @property
     def acc_vgpr_encoding_base(self) -> int:
-        """Encoding index where AccVGPR range begins (512 for CDNA2, 768 for CDNA3/4)."""
+        """Encoding index where AccVGPR range begins (512 for CDNA2, 768 for CDNA1/3/4)."""
         return 0
 
     @property
@@ -1761,6 +1787,10 @@ class CdnaProfile(_AmdgpuProfileBase):
       struct already spans the full instruction width.
     """
 
+    flat_offset_bits = 13
+    flat_lds_m0_mask = 0x3FFFC
+    scratch_has_vaddr_expr = 'inst_.lds != 0'
+
     @property
     def ds_compare_store_compare_first(self) -> bool:
         # CDNA1-4 / RDNA1-2 DS CMPST reverses the BUFFER operand order.
@@ -1970,12 +2000,17 @@ class Cdna1Profile(CdnaProfile):
     """ISA profile for CDNA1 (GFX908 / MI100).
 
     Differs from CDNA3/4 (the CdnaProfile defaults):
-    - No AccVGPRs.
+    - Separate accumulator VGPRs, with selectors starting at 768.
     - GFX9-style GLC-only coherency model.
     - Scratch base via SGPR pair (not HW register).
     - ENC_VOP3PX2 does not exist in CDNA1 XML.
     - The current runtime ISA trait leaves SRAM ECC disabled.
     """
+
+    legacy_flat_lds = True
+    scratch_has_vaddr_expr = 'inst_.saddr == 0x7F'
+
+    flat_lds_m0_mask = 0xFFFC
 
     @property
     def d16_loads_zero_unselected_half(self) -> bool:
@@ -1983,7 +2018,7 @@ class Cdna1Profile(CdnaProfile):
 
     @property
     def has_acc_vgpr(self) -> bool:
-        return False
+        return True
 
     @property
     def dpp_64bit_input_row_select_only(self) -> bool:
@@ -1991,11 +2026,11 @@ class Cdna1Profile(CdnaProfile):
 
     @property
     def acc_vgpr_encoding_base(self) -> int:
-        return 0
+        return 768
 
     @property
     def max_acc_vgprs(self) -> int:
-        return 0
+        return 256
 
     @property
     def descriptor_vgpr_count_granule_wave32(self) -> int:
@@ -2053,6 +2088,11 @@ class Cdna2Profile(CdnaProfile):
     - Scratch base via SGPR pair.
     - ENC_VOP3PX2 does not exist in CDNA2 XML.
     """
+
+    legacy_flat_lds = True
+    scratch_has_vaddr_expr = 'inst_.saddr == 0x7F'
+
+    flat_lds_m0_mask = 0xFFFC
 
     @property
     def acc_vgpr_encoding_base(self) -> int:
@@ -2132,6 +2172,19 @@ class Rdna1Profile(_AmdgpuProfileBase):
 
     _FLAT_SEGMENTS = frozenset({'GLBL', 'SCRATCH'})
     _SKIP_DPP_SDWA = True
+
+    legacy_flat_lds = True
+    legacy_flat_d16_lds = True
+    flat_offset_bits = 12
+    scratch_has_vaddr_expr = '(inst_.saddr == 0x7D || inst_.saddr == 0x7F)'
+
+    def saddr_null_selector_expr(self, enc_name: str) -> str | None:
+        if enc_name.upper() == 'ENC_FLAT':
+            return '0x7D'
+        return super().saddr_null_selector_expr(enc_name)
+
+    flat_lds_m0_mask = 0xFFFC
+    flat_saddr_null_aliases = ('127',)
 
     @property
     def vmem_writes_use_expcnt(self) -> bool:
@@ -2237,6 +2290,9 @@ class Rdna2Profile(Rdna1Profile):
     remain skipped (``_SKIP_DPP_SDWA = True``).
     """
 
+    # GFX10.3 assigns SADDR=127 to the immediate-only scratch form.
+    scratch_has_vaddr_expr = 'inst_.saddr == 0x7D'
+
 
 class Rdna3Profile(_AmdgpuProfileBase):
     """ISA profile for RDNA3 (GFX11, Navi3x).
@@ -2280,6 +2336,8 @@ class Rdna3Profile(_AmdgpuProfileBase):
         if enc_name.upper() == 'ENC_VINTERP' and field_name in ('src0', 'src1', 'src2'):
             return 'OPR_SRC_VGPR'
         return super().normalize_operand_type(enc_name, field_name, operand_type)
+
+    flat_saddr_null_aliases = ('127',)
 
     @property
     def has_gfx11_image_address_extension(self) -> bool:
@@ -2606,6 +2664,8 @@ class Rdna4Profile(_AmdgpuProfileBase):
             enc_name, enc_cond, unique_segment_opcode=unique_segment_opcode
         )
 
+    flat_saddr_null_aliases = ('127',)
+
     @property
     def extra_lane_selector_intervals(self) -> tuple[tuple[int, int], ...]:
         # READLANE masks the value to the wave width, not the selector encoding.
@@ -2895,6 +2955,8 @@ class Cdna5Profile(Rdna4Profile):
     C++ lives under ``amdgpu/cdna5`` in the ``cdna5`` namespace.
     """
 
+    flat_saddr_null_aliases = ()
+
     @property
     def smem_register_offset_condition(self) -> str:
         return _SMEM_REGISTER_OFFSET_CDNA5
@@ -2935,6 +2997,16 @@ class Cdna5Profile(Rdna4Profile):
         return 'cdna5'
 
     @property
+    def ds_b4_transpose_kind(self) -> int:
+        """CDNA5 interleaved source-lane B4 layout."""
+        return 1
+
+    @property
+    def ds_b6_transpose_kind(self) -> int:
+        """CDNA5 interleaved source-lane B6 layout."""
+        return 2
+
+    @property
     def ds_b8_transpose_kind(self) -> int:
         # gfx1250 groups source lanes by four rows and two eight-column halves.
         # Keep every mnemonic alias on the corresponding CDNA5 DS routing.
@@ -2952,14 +3024,8 @@ class Cdna5Profile(Rdna4Profile):
         return overrides
 
     @property
-    def semantic_class_overrides(self) -> dict[str, str]:
-        return {
-            'DS_STORE_ADDTID_B32': 'ds_write_addtid',
-        }
-
-    @property
-    def ds_addtid_uses_m0_byte_base(self) -> bool:
-        return True
+    def ds_addtid_m0_base_bits(self) -> int:
+        return 20
 
     @property
     def ds_transpose_ignores_exec(self) -> bool:

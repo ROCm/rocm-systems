@@ -296,6 +296,8 @@ SSetkillSopp::SSetkillSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  if (inst_.simm16 & 1u)
+    flags_ |= PROGRAM_TERMINATOR;
 }
 
 namespace detail {
