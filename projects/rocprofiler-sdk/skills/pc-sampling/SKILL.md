@@ -90,4 +90,4 @@ A brief overview of stall types and their causes is available in this skill's re
 
 The rocm-systems repository has several PC sampling documentation files in this folder: projects/rocprofiler-sdk/source/docs/how-to/. You may also access them here: https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/develop/how-to/cdna3-cdna4-pc-sampling.html
 
-Only one PC sampling configurations is supported at a time, so if exactly one valid configuration is reported then PC sampling is probably being actively used by another process.
+Only one PC sampling configuration can be used at a time, so if exactly one valid configuration is reported then PC sampling is probably being actively used by another process.
