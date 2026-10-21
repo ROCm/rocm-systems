@@ -292,7 +292,7 @@
       "binary": "host/rccl-UnitTestsMicroLinux",
       "num_ranks": 1,
       "num_nodes": 1,
-      "num_gpus": 1,
+      "num_gpus": 0,
       "timeout": 60,
       "tests": [
         {"name": "LinuxMicrotests", "description": "Host-only os/linux.cc, linux_ipcsocket.cc, linux_socket_pair.cc, misc/socket.cc, shmutils.cc and signals.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
