@@ -153,7 +153,7 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 # Dynamic library loading
 # ---------------------------------------------------------------------------
-# This wrapper supports three self-contained install paths:
+# This wrapper supports four self-contained install paths:
 #
 #   1. pip wheel
 #      The wheel ships ``libamd_smi_python.so`` next to this file.
@@ -167,6 +167,10 @@ from pathlib import Path
 #   3. relocatable ROCm tree (TheRock rocm-sdk wheels, portable tarball)
 #      Wrapper at ``<root>/share/amd_smi/amdsmi/``, library at
 #      ``<root>/lib/<SONAME>`` -- resolved by fixed relative path.
+#
+#   4. pip install beside TheRock's rocm-sdk wheels
+#      Wrapper at ``<site-packages>/amdsmi/``, library at
+#      ``<site-packages>/_rocm_sdk_core/lib/<SONAME>`` -- fixed relative path.
 #
 # A user installs ONE of these packages. We never combine paths
 # from them -- no ROCM_HOME / ROCM_PATH ladders, no walking up to a
@@ -198,7 +202,8 @@ def _load_library():
       1. ``AMDSMI_LIB_OVERRIDE`` env var (ABI-test escape hatch).
       2. ``libamd_smi_python.so`` next to this file (pip wheel).
       3. ``<root>/lib/<SONAME>`` relative to this file (relocatable ROCm tree).
-      4. SONAME via the dynamic linker (system rpm / deb); skipped when
+      4. ``_rocm_sdk_core/lib/<SONAME>`` in the same site-packages (TheRock).
+      5. SONAME via the dynamic linker (system rpm / deb); skipped when
          _AMDSMI_ALLOW_SYSTEM_FALLBACK is False (pip wheel).
     """
     mode = getattr(ctypes, "RTLD_LOCAL", 0)
@@ -228,6 +233,16 @@ def _load_library():
         if relocatable.exists():
             try:
                 return ctypes.CDLL(str(relocatable), mode=mode), str(relocatable)
+            except OSError:
+                pass
+
+    # TheRock rocm-sdk wheels: the library sits in the same site-packages.
+    # Found by path, not by importing rocm_sdk, which import guards reject.
+    if len(here.parents) > 1:
+        sdk_core = here.parents[1] / "_rocm_sdk_core" / "lib" / _AMDSMI_LIB_SONAME
+        if sdk_core.exists():
+            try:
+                return ctypes.CDLL(str(sdk_core), mode=mode), str(sdk_core)
             except OSError:
                 pass
 
