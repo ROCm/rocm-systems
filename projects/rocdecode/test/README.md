@@ -114,11 +114,17 @@ test/perf_regression.py [--perf-dir DIR] [--baseline FILE] [--tolerance PCT] [--
 
 ### GPU detection
 
-The local GPU is detected (via `amd-smi` market name, then `rocm-smi`, then KFD
-`gfx_target_version`) and mapped to the matching baseline column: `MI250X`, `MI300X`,
-`MI300A`, `MI350`, `MI355`, `Navi31`, or `Navi48`. Because MI300X/MI300A share `gfx942` and
-MI350/MI355 share `gfx950`, detection prefers the market name. Override with
-`ROCDECODE_PERF_GPU=<column>` if needed.
+The local GPU is detected and mapped to the matching baseline column: `MI250X`, `MI300X`,
+`MI300A`, `MI350`, `MI355`, `Navi31`, `Navi48`, or `780M`. Detection tries, in order:
+
+1. `amd-smi` market name (disambiguates parts sharing the same gfx target),
+2. `rocm-smi` product name / GFX version,
+3. `hipInfo` Name / gcnArchName (works on both Linux and Windows),
+4. KFD `gfx_target_version` (Linux only; unambiguous targets only).
+
+Because MI300X/MI300A share `gfx942` and MI350/MI355 share `gfx950`, detection prefers the
+market name. On Windows, `amd-smi` and `rocm-smi` may not work; the `hipInfo` fallback
+(step 3) handles this case. Override with `ROCDECODE_PERF_GPU=<column>` if needed.
 
 ### Perf stream + baseline location
 
@@ -182,7 +188,9 @@ Invoke it by typing `/validate` in a Claude Code session started from the projec
 ### `/perf-check` — performance regression check
 
 Defined in `.claude/skills/perf-check/SKILL.md`. Measures decode FPS and compares it to the
-GPU-specific baseline:
+GPU-specific baseline. Works on both Linux and Windows (Git Bash + MSVC).
+
+**Linux:**
 
 1. `test/perf_regression.py --check-rocm` — verify the ROCm toolchain (`ROCM_PATH`).
 2. `cmake -S samples/videoDecodePerf -B samples/videoDecodePerf/build` then
@@ -190,11 +198,19 @@ GPU-specific baseline:
 3. `test/perf_regression.py` — detect the GPU, run the perf test, compare to baseline, and
    report the summary.
 
+**Windows:**
+
+1. `python test/perf_regression.py --check-rocm` — verify `ROCM_PATH` exists.
+2. `cmake -S samples/videoDecodePerf -B samples/videoDecodePerf/build` then
+   `cmake --build samples/videoDecodePerf/build --config Release --parallel` — build the
+   performance sample (MSVC multi-config needs `--config Release`).
+3. `python test/perf_regression.py` — same regression check; GPU is detected via `hipInfo`.
+
 Invoke it by typing `/perf-check` in a Claude Code session started from the project root,
 or `/perf-check quick` for the fast one-stream-per-subfolder variant (`--quick`, ≤4K only).
-Requires
-`ROCDECODE_PERF_DIR` (streams + baseline) as described under
-[`perf_regression.py`](#perf_regressionpy--performance-regression-check) above.
+Requires `ROCDECODE_PERF_DIR` (streams + baseline) as described under
+[`perf_regression.py`](#perf_regressionpy--performance-regression-check) above. On Windows,
+`pandas` and `lxml` must be installed (`pip install pandas lxml`).
 
 <!-- Add future skills here as new "### /<skill-name> — <summary>" subsections. -->
 

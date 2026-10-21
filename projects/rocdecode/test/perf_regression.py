@@ -45,10 +45,24 @@ from pathlib import Path
 
 import pandas as pd
 
+# On Windows the default console encoding (cp1252) cannot handle the Unicode
+# box-drawing characters used by summary_box(). Force UTF-8 so the summary
+# renders correctly in Git Bash, Windows Terminal, and cmd.
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 # --- paths ---
 SCRIPT_DIR = Path(__file__).resolve().parent          # .../test
 PROJECT_ROOT = SCRIPT_DIR.parent                      # .../rocdecode
-PERF_EXE = PROJECT_ROOT / "samples" / "videoDecodePerf" / "build" / "videodecodeperf"
+IS_WINDOWS = sys.platform == "win32"
+# On Windows the MSVC multi-config generator puts the exe under build/Release/;
+# on Linux the single-config Makefile generator puts it directly under build/.
+if IS_WINDOWS:
+    PERF_EXE = PROJECT_ROOT / "samples" / "videoDecodePerf" / "build" / "Release" / "videodecodeperf.exe"
+else:
+    PERF_EXE = PROJECT_ROOT / "samples" / "videoDecodePerf" / "build" / "videodecodeperf"
+_DEFAULT_ROCM = "C:/opt/rocm" if IS_WINDOWS else "/opt/rocm"
 
 # (display name, stream subdirectory) in report order
 CODECS = [
@@ -74,7 +88,9 @@ MARKET_MAP = [
 ]
 # gfx targets that map unambiguously to a single column (MI300X/MI300A share
 # gfx942 and MI350/MI355 share gfx950, so those are intentionally omitted).
-GFX_MAP = {"gfx90a": "MI250X", "gfx1100": "Navi31", "gfx1201": "Navi48"}
+# gfx1103 is the 780M integrated GPU on the Windows dev machine.
+GFX_MAP = {"gfx90a": "MI250X", "gfx1100": "Navi31", "gfx1103": "780M",
+           "gfx1201": "Navi48"}
 
 
 def find_tool(name):
@@ -82,14 +98,28 @@ def find_tool(name):
     p = shutil.which(name)
     if p:
         return p
-    candidate = Path(os.environ.get("ROCM_PATH", "/opt/rocm")) / "bin" / name
+    candidate = Path(os.environ.get("ROCM_PATH", _DEFAULT_ROCM)) / "bin" / name
     return str(candidate) if candidate.is_file() else None
 
 
 def check_rocm():
     """Verify ROCM_PATH points at a usable ROCm toolchain (the sample build derives
     its compiler from it). Return (ok, message)."""
-    rp = os.environ.get("ROCM_PATH", "/opt/rocm")
+    rp = os.environ.get("ROCM_PATH", _DEFAULT_ROCM)
+
+    # On Windows the compiler is MSVC (no amdclang++); ROCM_PATH only selects the
+    # install tree that rocDecode is resolved from, so a dir-exists check suffices.
+    if IS_WINDOWS:
+        if Path(rp).is_dir():
+            return True, f"Using ROCM_PATH={rp} (Windows/MSVC)"
+        note = f"ROCM_PATH={rp}" if os.environ.get("ROCM_PATH") else \
+            "ROCM_PATH is unset; defaulting to C:/opt/rocm"
+        msg = (f"ERROR: ROCM_PATH does not exist: {rp}\n"
+               f"       ({note})\n"
+               "  Fix: point ROCM_PATH at your rocDecode install prefix (default C:/opt/rocm)\n"
+               "       and make sure its bin dirs are on PATH before launching Claude Code.")
+        return False, msg
+
     compiler = Path(rp) / "lib" / "llvm" / "bin" / "amdclang++"
     if compiler.is_file() and os.access(compiler, os.X_OK):
         return True, f"Using ROCM_PATH={rp} (amdclang++ found)"
@@ -122,32 +152,52 @@ def detect_gpu():
     if override:
         return override, f"ROCDECODE_PERF_GPU override = {override}"
 
-    # 1. amd-smi market name (disambiguates same-gfx parts)
-    amd_smi = find_tool("amd-smi")
-    if amd_smi:
-        out = _run([amd_smi, "static"]).stdout
-        m = re.search(r"MARKET_NAME:\s*(.+)", out)
-        if m:
-            market = m.group(1).strip()
-            for pat, label in MARKET_MAP:
-                if pat.search(market):
-                    return label, f"amd-smi MARKET_NAME='{market}'"
+    # 1-2. amd-smi / rocm-smi (Linux only). On Windows the system amd-smi
+    #       (C:\WINDOWS\system32\amd-smi) does not work ("Invalid platform")
+    #       and may trigger a UAC elevation prompt (diskpart.exe), so skip it.
+    if not IS_WINDOWS:
+        # 1. amd-smi market name (disambiguates same-gfx parts)
+        amd_smi = find_tool("amd-smi")
+        if amd_smi:
+            out = _run([amd_smi, "static"]).stdout
+            m = re.search(r"MARKET_NAME:\s*(.+)", out)
+            if m:
+                market = m.group(1).strip()
+                for pat, label in MARKET_MAP:
+                    if pat.search(market):
+                        return label, f"amd-smi MARKET_NAME='{market}'"
 
-    # 2. rocm-smi product name
-    rocm_smi = find_tool("rocm-smi")
-    if rocm_smi:
-        out = _run([rocm_smi, "--showproductname"]).stdout
-        m = re.search(r"Card Series:\s*(.+)", out)
+        # 2. rocm-smi product name
+        rocm_smi = find_tool("rocm-smi")
+        if rocm_smi:
+            out = _run([rocm_smi, "--showproductname"]).stdout
+            m = re.search(r"Card Series:\s*(.+)", out)
+            if m:
+                series = m.group(1).strip()
+                for pat, label in MARKET_MAP:
+                    if pat.search(series):
+                        return label, f"rocm-smi Card Series='{series}'"
+            m = re.search(r"GFX Version:\s*(gfx[0-9a-f]+)", out)
+            if m and m.group(1) in GFX_MAP:
+                return GFX_MAP[m.group(1)], f"rocm-smi GFX Version={m.group(1)}"
+
+    # 3. hipInfo (available on both Linux and Windows).
+    hip_info = find_tool("hipInfo.exe" if IS_WINDOWS else "hipInfo")
+    if hip_info:
+        out = _run([hip_info]).stdout
+        # Try market-name matching on the Name: field first.
+        m = re.search(r"^Name:\s*(.+)", out, re.M)
         if m:
-            series = m.group(1).strip()
+            name = m.group(1).strip()
             for pat, label in MARKET_MAP:
-                if pat.search(series):
-                    return label, f"rocm-smi Card Series='{series}'"
-        m = re.search(r"GFX Version:\s*(gfx[0-9a-f]+)", out)
+                if pat.search(name):
+                    return label, f"hipInfo Name='{name}'"
+        # Fall back to gfx target from gcnArchName.
+        m = re.search(r"^gcnArchName:\s*(gfx[0-9a-f]+)", out, re.M)
         if m and m.group(1) in GFX_MAP:
-            return GFX_MAP[m.group(1)], f"rocm-smi GFX Version={m.group(1)}"
+            return GFX_MAP[m.group(1)], f"hipInfo gcnArchName={m.group(1)}"
 
-    # 3. KFD topology gfx_target_version (unambiguous targets only)
+    # 4. KFD topology gfx_target_version (Linux only; unambiguous targets only)
     for props in sorted(Path("/sys/class/kfd/kfd/topology/nodes").glob("*/properties")):
         try:
             txt = props.read_text()
@@ -211,23 +261,30 @@ def build_stream_index(codec_dir):
     return idx
 
 
-def summary_box(rows, overall_ok):
+def summary_box(rows, overall_ok, measure_only=False):
     labels = [r[0] for r in rows] + ["Overall"]
-    width = max(len(x) for x in labels + ["rocDecode Performance Regression"])
+    title = "rocDecode Performance" + (" (measure only)" if measure_only else " Regression")
+    width = max(len(x) for x in labels + [title])
     inner = width + 12
     line = lambda l, f, r: l + f * inner + r
     status = {"PASSED": (GREEN, "✓ PASSED"), "REGRESSED": (RED, "✗ REGRESSED"),
-              "WARNING": (YELLOW, "⚠ WARNING"), "SKIPPED": (YELLOW, "- SKIPPED")}
+              "WARNING": (YELLOW, "⚠ WARNING"), "SKIPPED": (YELLOW, "- SKIPPED"),
+              "NO BASELINE": (YELLOW, "— NO BASELINE")}
     print()
     print(line("╔", "═", "╗"))
-    print("║  " + "rocDecode Performance Regression".ljust(inner - 2) + "║")
+    print("║  " + title.ljust(inner - 2) + "║")
     print(line("╠", "═", "╣"))
     for name, st in rows:
         color, lbl = status.get(st, (NC, st))
         pad = inner - len(lbl) - 3
         print(f"║  {name.ljust(pad)} {color}{lbl}{NC}  ║")
     print(line("╠", "═", "╣"))
-    color, lbl = (GREEN, "✓ PASSED") if overall_ok else (RED, "✗ REGRESSED")
+    if measure_only:
+        color, lbl = YELLOW, "— MEASURED"
+    elif overall_ok:
+        color, lbl = GREEN, "✓ PASSED"
+    else:
+        color, lbl = RED, "✗ REGRESSED"
     pad = inner - len(lbl) - 3
     print(f"║  {'Overall'.ljust(pad)} {color}{lbl}{NC}  ║")
     print(line("╚", "═", "╝"))
@@ -279,13 +336,23 @@ def main():
         print(f"ERROR: could not identify the GPU ({detail}).", file=sys.stderr)
         print("       Set ROCDECODE_PERF_GPU to a baseline column (e.g. Navi31).", file=sys.stderr)
         return 1
+    baseline = {}
+    col = None
+    measure_only = False
     try:
         baseline, col = load_baseline(baseline_path, label)
     except (KeyError, ValueError) as e:
-        print(f"ERROR: {e}", file=sys.stderr)
-        return 1
+        # No baseline column for this GPU — switch to measure-only mode.
+        # All streams are still measured and saved to CSV so the results can
+        # serve as a future baseline.
+        measure_only = True
+        print(f"WARNING: {e}", file=sys.stderr)
     print(f"GPU: {label}  ({detail})")
-    print(f"Baseline column: {col}  ({len(baseline)} streams)  tolerance: {tol}%")
+    if measure_only:
+        print(f"No baseline column for '{label}' — running in measure-only mode")
+        print("All streams will be measured and saved; no regression comparison.")
+    else:
+        print(f"Baseline column: {col}  ({len(baseline)} streams)  tolerance: {tol}%")
     if args.quick:
         print("Quick mode: one stream per leaf subfolder, capped at <=4K")
     print()
@@ -309,8 +376,12 @@ def main():
             continue
         print(f"=== Measuring {disp} ({codec_dir}) ===")
         index = build_stream_index(codec_dir)
-        # Baseline streams present in this codec dir, sorted for deterministic order.
-        candidates = sorted((n, p) for n, p in index.items() if n in baseline)
+        # In measure-only mode, run every stream; otherwise only those with a
+        # baseline entry. Sorted for deterministic order.
+        if measure_only:
+            candidates = sorted(index.items())
+        else:
+            candidates = sorted((n, p) for n, p in index.items() if n in baseline)
         if args.quick:
             # one stream per leaf subfolder, capped at <=4K -- the 8K streams
             # dominate runtime, so skip them for a fast sanity check
@@ -337,55 +408,68 @@ def main():
             summary_rows.append((disp, "WARNING"))
             continue
 
-        regressions = 0
-        compared = 0
-        for name, m_fps in measured.items():
-            compared += 1
-            b_fps = baseline[name]
-            delta = (m_fps - b_fps) / b_fps * 100.0
-            verdict = "OK"
-            note = ""
-            if delta < -tol:
-                # candidate regression -- confirm with an averaged re-run
-                confirmed = m_fps
-                if name in index:
-                    avg = measure_stream(index[name], args.runs, args.device)
-                    if avg is not None:
-                        confirmed = avg
-                        delta = (avg - b_fps) / b_fps * 100.0
-                        note = f"re-ran {args.runs}x"
-                m_fps = confirmed
-                if delta < -tol:
-                    verdict = "REGRESSED"
-                    regressions += 1
-                else:
-                    verdict = "OK*"  # recovered on re-run
-            detail_rows.append({
-                "Codec": disp, "File": name, "Baseline FPS": round(b_fps, 2),
-                "Measured FPS": round(m_fps, 2), "Delta %": round(delta, 2),
-                "Verdict": verdict, "Note": note,
-            })
-            tag = {"OK": GREEN, "OK*": YELLOW, "REGRESSED": RED}[verdict]
-            print(f"    {tag}{verdict:9}{NC} {name}  "
-                  f"{m_fps:8.1f} vs {b_fps:8.1f} fps  ({delta:+.1f}%){(' '+note) if note else ''}")
-
-        if compared == 0:
-            summary_rows.append((f"{disp} (0 matched)", "WARNING"))
-        elif regressions:
-            summary_rows.append((f"{disp} ({regressions}/{compared} regressed)", "REGRESSED"))
-            overall_ok = False
+        if measure_only:
+            # No baseline — just record the measured FPS for each stream.
+            for name, m_fps in measured.items():
+                detail_rows.append({
+                    "Codec": disp, "File": name, "Baseline FPS": "",
+                    "Measured FPS": round(m_fps, 2), "Delta %": "",
+                    "Verdict": "MEASURED", "Note": "",
+                })
+                print(f"    {GREEN}MEASURED {NC} {name}  {m_fps:8.1f} fps")
+            summary_rows.append((f"{disp} ({len(measured)} streams)", "NO BASELINE"))
         else:
-            summary_rows.append((f"{disp} ({compared} streams)", "PASSED"))
+            regressions = 0
+            compared = 0
+            for name, m_fps in measured.items():
+                compared += 1
+                b_fps = baseline[name]
+                delta = (m_fps - b_fps) / b_fps * 100.0
+                verdict = "OK"
+                note = ""
+                if delta < -tol:
+                    # candidate regression -- confirm with an averaged re-run
+                    confirmed = m_fps
+                    if name in index:
+                        avg = measure_stream(index[name], args.runs, args.device)
+                        if avg is not None:
+                            confirmed = avg
+                            delta = (avg - b_fps) / b_fps * 100.0
+                            note = f"re-ran {args.runs}x"
+                    m_fps = confirmed
+                    if delta < -tol:
+                        verdict = "REGRESSED"
+                        regressions += 1
+                    else:
+                        verdict = "OK*"  # recovered on re-run
+                detail_rows.append({
+                    "Codec": disp, "File": name, "Baseline FPS": round(b_fps, 2),
+                    "Measured FPS": round(m_fps, 2), "Delta %": round(delta, 2),
+                    "Verdict": verdict, "Note": note,
+                })
+                tag = {"OK": GREEN, "OK*": YELLOW, "REGRESSED": RED}[verdict]
+                print(f"    {tag}{verdict:9}{NC} {name}  "
+                      f"{m_fps:8.1f} vs {b_fps:8.1f} fps  ({delta:+.1f}%){(' '+note) if note else ''}")
+
+            if compared == 0:
+                summary_rows.append((f"{disp} (0 matched)", "WARNING"))
+            elif regressions:
+                summary_rows.append((f"{disp} ({regressions}/{compared} regressed)", "REGRESSED"))
+                overall_ok = False
+            else:
+                summary_rows.append((f"{disp} ({compared} streams)", "PASSED"))
 
     if detail_rows:
         out_dir.mkdir(parents=True, exist_ok=True)
         csv_path = out_dir / "perf_comparison.csv"
         pd.DataFrame(detail_rows).to_csv(csv_path, index=False)
-        summary_box(summary_rows, overall_ok)
+        summary_box(summary_rows, overall_ok, measure_only=measure_only)
         print(f"Results saved to: {out_dir}/")
+        if measure_only:
+            print("These measurements can serve as a future baseline for this GPU.")
     else:
-        summary_box(summary_rows, overall_ok)
-        print("No streams were compared (check ROCDECODE_PERF_DIR and the baseline).")
+        summary_box(summary_rows, overall_ok, measure_only=measure_only)
+        print("No streams were measured (check ROCDECODE_PERF_DIR and the baseline).")
     elapsed = int(time.time() - t0)
     print(f"Elapsed: {elapsed // 60}m {elapsed % 60}s")
     print()
