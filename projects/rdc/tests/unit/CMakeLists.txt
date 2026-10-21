@@ -359,6 +359,35 @@ install(
     COMPONENT ${TESTS_COMPONENT}
 )
 
+# rdc_watch_table_tests: watches of destroyed groups, samples for every job and
+# health watch that holds them, and job stats from process events and power
+# samples. It compiles RdcWatchTableImpl.cc, RdcGroupSettingsImpl.cc and
+# RdcCacheManagerImpl.cc instead of linking librdc and reads fields from a
+# recording telemetry module, so it needs no GPU; librdc_bootstrap provides the
+# logger.
+add_executable(
+    rdc_watch_table_tests
+    ${SRC_DIR}/test_watch_table.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcWatchTableImpl.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcGroupSettingsImpl.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcCacheManagerImpl.cc
+)
+target_include_directories(
+    rdc_watch_table_tests
+    PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/include ${AMD_SMI_INCLUDE_DIR}
+)
+target_link_libraries(rdc_watch_table_tests PRIVATE rdc_bootstrap GTest::gtest_main pthread)
+set_target_properties(
+    rdc_watch_table_tests
+    PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib"
+)
+add_test(NAME rdc_watch_table_tests COMMAND rdc_watch_table_tests)
+install(
+    TARGETS rdc_watch_table_tests
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
+    COMPONENT ${TESTS_COMPONENT}
+)
+
 # rdc_cache_bounds_tests: the retention limits of cached samples. It compiles
 # RdcCacheManagerImpl.cc instead of linking librdc, so it needs no GPU;
 # librdc_bootstrap provides the logger.

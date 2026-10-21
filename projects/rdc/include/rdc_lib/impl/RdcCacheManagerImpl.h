@@ -67,7 +67,7 @@ struct FieldSummaryStats {
 };
 
 struct GpuSummaryStats {
-  uint64_t energy_consumed;
+  double energy_consumed;  // joules
   uint64_t energy_last_time;
   uint64_t ecc_correct_init;                            // Init counter when job starts
   uint64_t ecc_uncorrect_init;                          // Init counter when job starts
@@ -85,6 +85,7 @@ struct RdcJobStatsCacheEntry {
   std::map<uint32_t, GpuSummaryStats> gpu_stats;
 
   uint32_t num_processes = 0;
+  bool processes_dropped = false;  // logged once, when a process does not fit
   std::array<rdc_process_status_info_t, RDC_MAX_NUM_PROCESSES_STATUS> processes{};
   std::map<uint32_t, uint32_t> pid_to_index;
 };

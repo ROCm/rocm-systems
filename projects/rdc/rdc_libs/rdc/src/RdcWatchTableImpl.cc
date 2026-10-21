@@ -229,8 +229,8 @@ bool RdcWatchTableImpl::stop_orphaned_job(const rdc_gpu_gauges_t& gpu_gauge) {
     if (group_settings_->rdc_group_gpu_get_info(job.group_id, &ginfo) == RDC_ST_GROUP_NOT_FOUND) {
       RDC_LOG(RDC_INFO,
               "Stopping job " << job.job_id << ", whose GPU group was destroyed, to make room");
-      // The unwatch fails while rdc_field_unwatch() cannot look the group up;
-      // the stats stop anyway.
+      // The stats stop even when the unwatch fails, for example because a
+      // client unwatched the group's job fields already.
       if (stop_job(job.job_id.c_str(), gpu_gauge) == RDC_ST_OK) {
         return true;
       }
@@ -424,77 +424,57 @@ rdc_status_t RdcWatchTableImpl::rdc_field_watch(rdc_gpu_group_t group_id,
   return RDC_ST_OK;
 }
 
-rdc_status_t RdcWatchTableImpl::update_field_in_table_when_unwatch(const RdcFieldGroupKey& entry) {
-  // Get individual fields for this unwatch
-  std::vector<RdcFieldKey> fields;
-  rdc_status_t result = get_fields_from_group(entry.first, entry.second, fields);
-  if (result != RDC_ST_OK) {
-    return result;
-  }
-
+void RdcWatchTableImpl::refresh_fields_to_watch() {
   // Unwatch will only impact the update_freq, but not the max_keep_age
   // and max_keep_samples. Walk through  watch_table_ to get new update
   // frequency for all fields and store it in update_frequencies
   std::map<RdcFieldKey, uint64_t> update_frequencies;
-  auto w_iter = watch_table_.begin();
-  for (; w_iter != watch_table_.end(); w_iter++) {
+  for (const auto& watch : watch_table_) {
     // Skip the table is not in watching status
-    if (w_iter->second.is_watching == false) {
+    if (watch.second.is_watching == false) {
       continue;
     }
 
-    // Get all fields in current table
+    // Get all fields in current table. A watch whose group or field group is gone holds none;
+    // it stays until it is unwatched, so that its unwatch works.
     std::vector<RdcFieldKey> watch_fields;
-    result = get_fields_from_group(w_iter->first.first, w_iter->first.second, watch_fields);
-    if (result != RDC_ST_OK) {
-      return result;
+    if (get_fields_from_group(watch.first.first, watch.first.second, watch_fields) != RDC_ST_OK) {
+      release_watch_listeners(watch.first);
+      continue;
     }
 
     // Get the update_freq
-    auto fields_in_table_iter = watch_fields.begin();
-    for (; fields_in_table_iter != watch_fields.end(); fields_in_table_iter++) {
-      auto f_in_freq_iter = update_frequencies.find(*fields_in_table_iter);
+    for (const auto& field : watch_fields) {
+      auto f_in_freq_iter = update_frequencies.find(field);
       if (f_in_freq_iter == update_frequencies.end()) {
-        update_frequencies.insert({*fields_in_table_iter, w_iter->second.update_freq});
+        update_frequencies.insert({field, watch.second.update_freq});
       } else {
-        f_in_freq_iter->second = std::min(f_in_freq_iter->second, w_iter->second.update_freq);
+        f_in_freq_iter->second = std::min(f_in_freq_iter->second, watch.second.update_freq);
       }
     }
   }
 
-  // Update the fields that impacted by this unwatch
-  auto fite = fields.begin();
+  // Update the watched fields, and stop watching the ones that no watch holds
   std::vector<rdc_gpu_field_t> unwatch_fields;
-  for (; fite != fields.end(); fite++) {
-    // Notification fields have no telemetry to unwatch; rdc_field_unwatch() removed their
-    // listeners.
-    if (notifications_->is_notification_event(fite->second)) {
-      continue;
-    }
-
-    auto f_in_table = fields_to_watch_.find((*fite));
-    if (f_in_table == fields_to_watch_.end()) {  // Not in fields_to_watch_
-      unwatch_fields.push_back({fite->first, fite->second});
-      continue;
-    }
-
-    auto freq_iter = update_frequencies.find(*fite);
-    if (freq_iter == update_frequencies.end()) {
-      f_in_table->second.is_watching = false;
-      unwatch_fields.push_back({fite->first, fite->second});
-    } else {
-      f_in_table->second.update_freq = freq_iter->second;
+  for (auto& field : fields_to_watch_) {
+    auto freq_iter = update_frequencies.find(field.first);
+    if (freq_iter != update_frequencies.end()) {
+      field.second.update_freq = freq_iter->second;
+    } else if (field.second.is_watching) {
+      field.second.is_watching = false;
+      // Notification fields have no telemetry to unwatch; their watches' listeners went with them.
+      if (!notifications_->is_notification_event(field.first.second)) {
+        unwatch_fields.push_back({field.first.first, field.first.second});
+      }
     }
   }
 
   // Notify the telemetry_module to unwatch those fields
-  // Not for an empty list (a watch of event fields only): &unwatch_fields[0] would be undefined.
+  // Not for an empty list: &unwatch_fields[0] would be undefined.
   auto rdc_telemetry = rdc_module_mgr_->get_telemetry_module();
   if (rdc_telemetry && !unwatch_fields.empty()) {
     rdc_telemetry->rdc_telemetry_fields_unwatch(&unwatch_fields[0], unwatch_fields.size());
   }
-
-  return RDC_ST_OK;
 }
 
 rdc_status_t RdcWatchTableImpl::rdc_field_unwatch(rdc_gpu_group_t group_id,
@@ -515,8 +495,10 @@ rdc_status_t RdcWatchTableImpl::rdc_field_unwatch(rdc_gpu_group_t group_id,
   ite->second.is_watching = false;
   ite->second.last_update_time = now;
 
-  // Update the fields_to_watch_
-  return update_field_in_table_when_unwatch(ite->first);
+  // Update the fields_to_watch_ from the watches that remain. That needs neither the group nor
+  // the field group of this watch, which may be gone.
+  refresh_fields_to_watch();
+  return RDC_ST_OK;
 }
 
 void RdcWatchTableImpl::release_watch_listeners(const RdcFieldGroupKey& key) {
@@ -1055,34 +1037,34 @@ rdc_status_t RdcWatchTableImpl::rdc_health_clear(rdc_gpu_group_t group_id) {
   return RDC_ST_OK;
 }
 
-bool RdcWatchTableImpl::is_job_watch_field(uint32_t gpu_index, rdc_field_t field_id,
-                                           std::string& job_id) const {
+std::vector<std::string> RdcWatchTableImpl::jobs_holding(uint32_t gpu_index,
+                                                         rdc_field_t field_id) const {
   RdcFieldKey key{gpu_index, field_id};
+  std::vector<std::string> jobs;
 
   for (auto ite = job_watch_table_.begin(); ite != job_watch_table_.end(); ite++) {
     auto& fields = ite->second.fields;
     if (std::find(fields.begin(), fields.end(), key) != fields.end()) {
-      job_id = ite->first;
-      return true;
+      jobs.push_back(ite->first);
     }
   }
 
-  return false;
+  return jobs;
 }
 
-bool RdcWatchTableImpl::is_health_watch_field(uint32_t gpu_index, rdc_field_t field_id,
-                                              rdc_gpu_group_t& group_id) const {
+std::vector<rdc_gpu_group_t> RdcWatchTableImpl::health_watches_holding(uint32_t gpu_index,
+                                                                       rdc_field_t field_id) const {
   RdcFieldKey key{gpu_index, field_id};
+  std::vector<rdc_gpu_group_t> groups;
 
   for (auto ite = health_watch_table_.begin(); ite != health_watch_table_.end(); ite++) {
     auto& fields = ite->second.fields;
     if (std::find(fields.begin(), fields.end(), key) != fields.end()) {
-      group_id = ite->first;
-      return true;
+      groups.push_back(ite->first);
     }
   }
 
-  return false;
+  return groups;
 }
 
 rdc_status_t RdcWatchTableImpl::handle_fields(rdc_gpu_field_value_t* values, uint32_t num_values,
@@ -1113,15 +1095,11 @@ rdc_status_t RdcWatchTableImpl::handle_fields(rdc_gpu_field_value_t* values, uin
     // Update the cache
     watchTable->cache_mgr_->rdc_update_cache(gpu_index, values[i].field_value);
 
-    // Update the job stats cache
-    std::string job_id;
-    if (watchTable->is_job_watch_field(gpu_index, field_id, job_id)) {
+    // Update the stats cache of every job, and of every health watch, that holds the field
+    for (const auto& job_id : watchTable->jobs_holding(gpu_index, field_id)) {
       watchTable->cache_mgr_->rdc_update_job_stats(gpu_index, job_id, values[i].field_value);
     }
-
-    // Update the health stats cache
-    rdc_gpu_group_t group_id;
-    if (watchTable->is_health_watch_field(gpu_index, field_id, group_id)) {
+    for (rdc_gpu_group_t group_id : watchTable->health_watches_holding(gpu_index, field_id)) {
       watchTable->cache_mgr_->rdc_update_health_stats(group_id, gpu_index, values[i].field_value);
     }
   }
@@ -1190,15 +1168,11 @@ rdc_status_t RdcWatchTableImpl::rdc_notif_update_cache(rdc_evnt_notification_t* 
     // Update the cache
     cache_mgr_->rdc_update_cache(gpu_index, events[i].field);
 
-    // Update the job stats cache
-    std::string job_id;
-    if (is_job_watch_field(gpu_index, field_id, job_id)) {
+    // Update the stats cache of every job, and of every health watch, that holds the field
+    for (const auto& job_id : jobs_holding(gpu_index, field_id)) {
       cache_mgr_->rdc_update_job_stats(gpu_index, job_id, events[i].field);
     }
-
-    // Update the health stats cache
-    rdc_gpu_group_t group_id;
-    if (is_health_watch_field(gpu_index, field_id, group_id)) {
+    for (rdc_gpu_group_t group_id : health_watches_holding(gpu_index, field_id)) {
       cache_mgr_->rdc_update_health_stats(group_id, gpu_index, events[i].field);
     }
   }
@@ -1223,6 +1197,9 @@ void RdcWatchTableImpl::clean_up() {
   struct timeval tv;
   gettimeofday(&tv, NULL);
   uint64_t now = static_cast<uint64_t>(tv.tv_sec) * 1000 + tv.tv_usec / 1000;
+
+  // The watches of a group or field group that is gone stop reading their fields.
+  refresh_fields_to_watch();
 
   // Clean the cache and the fields_to_watch_ table
   auto fite = fields_to_watch_.begin();
