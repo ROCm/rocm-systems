@@ -3,12 +3,14 @@
 
 """Unit tests for the short-term TCC channel rules."""
 
+import argparse
 import importlib
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import config
 from rocprof_compute_soc.counter_file import flat_counters_in_perfmon_file
 from rocprof_compute_soc.counter_grouping_buckets import (
     count_single_pass_metrics_split_across_buckets,
@@ -21,11 +23,8 @@ from rocprof_compute_soc.counter_grouping_tcc import (
     keep_copies_groups_still_need,
     tcc_channel_definition,
 )
-from tools.counter_grouping_inspector import (
-    get_default_config_dir,
-    run_soc_detect_and_coalesce,
-)
 from utils.mi_gpu_spec import mi_gpu_specs
+from utils.utils_common import is_tcc_channel_counter
 
 
 def load_arch_soc(arch, num_xcd):
@@ -40,6 +39,55 @@ def load_arch_soc(arch, num_xcd):
     )
     with patch("rocprof_compute_soc.soc_base.console_debug"):
         return soc_class(SimpleNamespace(), machine_spec)
+
+
+def _supported_counter_superset(counters):
+    """Treat channel counters as supported so coalesce does not warn."""
+    supported = set(counters)
+    for counter in counters:
+        if is_tcc_channel_counter(counter):
+            supported.add(counter.split("[", 1)[0])
+    return supported
+
+
+def detect_and_coalesce(arch, perfmon_config, workload_root):
+    """Detect and coalesce counters through the product SoC path.
+
+    The analysis config directory comes from the installed product package.
+    This test does not import the developer tools package.
+    """
+    machine_spec = SimpleNamespace(
+        rocminfo_lines=None,
+        num_xcd=1,
+        l2_banks=1,
+        gpu_arch=arch,
+        gpu_series=mi_gpu_specs.get_gpu_series(arch),
+    )
+    cli_args = argparse.Namespace(
+        output_directory=str(Path(workload_root).resolve()),
+        config_dir=str(config.analysis_configs_dir.resolve()),
+        filter_blocks=[],
+        membw_analysis=False,
+        set_selected=None,
+        roof_only=False,
+        no_roof=True,
+        device=0,
+    )
+    module = importlib.import_module(f"rocprof_compute_soc.soc_{arch}")
+    soc_class = getattr(module, f"{arch}_soc")
+    with patch("rocprof_compute_soc.soc_base.console_debug"):
+        soc = soc_class(cli_args, machine_spec)
+        soc.set_perfmon_config(perfmon_config)
+        counters, _filter_blocks = soc.detect_counters()
+        counters = counters - {"SQ_ACCUM_PREV_HIRES"}
+        soc.get_rocprof_supported_counters = lambda counters=counters: (
+            _supported_counter_superset(counters)
+        )
+        soc.perfmon_coalesce(counters)
+        files, _file_count, _accumulator_files = soc._allocate_perfmon_counter_files(
+            counters
+        )
+    return counters, files, soc
 
 
 def expanded_channel_count(soc, template):
@@ -367,13 +415,7 @@ def test_gfx950_channels_follow_its_reported_die_count():
 def test_gfx942_offline_layout_stays_fourteen_buckets():
     config = gfx942_perfmon_config()
     with tempfile.TemporaryDirectory() as tmp:
-        counters, files, soc = run_soc_detect_and_coalesce(
-            "gfx942",
-            get_default_config_dir(),
-            None,
-            config,
-            Path(tmp),
-        )
+        counters, files, soc = detect_and_coalesce("gfx942", config, Path(tmp))
     assert len(files) == 14
     assert (
         count_single_pass_metrics_split_across_buckets(files, soc, counters, config)
