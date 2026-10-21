@@ -168,6 +168,7 @@ function(rccl_define_micro_source_lists)
     fakes/dev_runtime_micro_fakes.cc
     fakes/ibvwrap_fakes.cc               # src/misc/ibvwrap.cc PD / MR registration seams
     fakes/nccl_fakes.cc
+    fakes/ipcsocket_fakes.cc             # ncclIpcFdClose for p2p.cc / dev_runtime.cc
     fakes/libc_fakes.cc
     fakes/ras_fakes.cc
     fakes/ras_net_fakes.cc

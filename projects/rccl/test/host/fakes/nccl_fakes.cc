@@ -28,7 +28,6 @@
 #include "comm.h"         // ncclCommGraphRegister / Deregister
 #include "strongstream.h" // ncclStrongStream*
 #include "mem_manager.h"  // ncclMemTrack / ncclMemUntrack / ncclDynMemMarkExportToPeer
-#include "ipcsocket.h"    // ncclIpcFd
 
 #include <algorithm>
 #include <functional>
@@ -219,12 +218,6 @@ ncclResult_t ncclProxyClientQueryFdBlocking(struct ncclComm*           comm,
 {
     return g_proxyClientQueryFdBlocking(comm, proxyConn, localFd, rmtFd);
 }
-
-// src/os/linux_ipcsocket.cc (NCCL 2.32): p2p.cc and dev_runtime.cc close
-// imported fds through this instead of close(2). A real close, as production
-// does, so suites that hand back a dup'd fd can still prove it was closed.
-// Weak: rccl-UnitTestsMicroLinux compiles the real one.
-__attribute__((weak)) int ncclIpcFdClose(ncclIpcFd fd) { return ::close(fd); }
 
 // --- Controllable seam: ncclRegLocalIsValid -----------------------------
 // Default preserves the old stub: report the record as not locally valid
