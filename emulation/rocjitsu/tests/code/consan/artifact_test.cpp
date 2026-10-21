@@ -19,7 +19,8 @@ protected:
     std::ifstream file(CONSAN_ORIGINAL_FIXTURE, std::ios::binary);
     original_ = {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
     ASSERT_FALSE(original_.empty());
-    auto loaded = load_artifact(CONSAN_ARTIFACT_FIXTURE, original_, "gfx1100", &error_);
+    FailureOr<LoadedArtifact> loaded =
+        load_artifact(CONSAN_ARTIFACT_FIXTURE, original_, "gfx1100", &error_);
     ASSERT_TRUE(loaded.succeeded()) << error_.message;
     artifact_ = std::move(loaded.value());
   }
@@ -59,7 +60,7 @@ TEST_F(ConSanArtifact, ChecksummedArtifactCannotLieAboutItsMetadataResources) {
 }
 
 TEST_F(ConSanArtifact, RecomputedImageDigestCannotHideAnInvalidDescriptorOrElfExtent) {
-  auto &image = artifact_.prepared;
+  std::vector<uint8_t> &image = artifact_.prepared;
   const size_t descriptor = artifact_.manifest.entry.prepared_descriptor_offset;
   // The first descriptor dword is the LDS extent. A valid hash cannot make
   // this disagree with its owning facts, even before HSA sees the image.
@@ -78,11 +79,50 @@ TEST_F(ConSanArtifact, RecomputedImageDigestCannotHideAnInvalidDescriptorOrElfEx
   EXPECT_NE(error_.message.find("tables"), std::string::npos);
 }
 
+TEST_F(ConSanArtifact, UnalignedElfTablesRemainReadableWithoutRelaxingEntrySizes) {
+  std::vector<uint8_t> &image = artifact_.prepared;
+  Elf64_Ehdr header{};
+  std::memcpy(&header, image.data(), sizeof(header));
+  const std::optional<std::vector<Elf64_Shdr>> sections =
+      read_elf_table<Elf64_Shdr>(image, header.e_shoff, header.e_shnum, header.e_shentsize);
+  const std::optional<std::vector<Elf64_Phdr>> segments =
+      read_elf_table<Elf64_Phdr>(image, header.e_phoff, header.e_phnum, header.e_phentsize);
+  ASSERT_TRUE(sections && segments);
+  while (image.size() % 8 != 1)
+    image.push_back(0);
+  header.e_shoff = image.size();
+  image.resize(image.size() + sections->size() * sizeof(Elf64_Shdr));
+  std::memcpy(image.data() + header.e_shoff, sections->data(),
+              sections->size() * sizeof(Elf64_Shdr));
+  ASSERT_EQ(image.size() % 8, 1u);
+  header.e_phoff = image.size();
+  image.resize(image.size() + segments->size() * sizeof(Elf64_Phdr));
+  std::memcpy(image.data() + header.e_phoff, segments->data(),
+              segments->size() * sizeof(Elf64_Phdr));
+  std::memcpy(image.data(), &header, sizeof(header));
+  artifact_.manifest.prepared.bytes = image.size();
+  rehash();
+  ASSERT_TRUE(verify_artifact_images(artifact_.manifest, original_, image, &error_).succeeded())
+      << error_.message;
+  for (const bool section_table : {true, false}) {
+    Elf64_Ehdr invalid = header;
+    if (section_table)
+      invalid.e_shentsize += 8;
+    else
+      invalid.e_phentsize += 8;
+    std::memcpy(image.data(), &invalid, sizeof(invalid));
+    rehash();
+    EXPECT_TRUE(verify_artifact_images(artifact_.manifest, original_, image, &error_).failed());
+    EXPECT_EQ(error_.code, ContractErrorCode::InvalidEncoding);
+    EXPECT_EQ(error_.message, "artifact ELF target, ABI or tables are inconsistent");
+  }
+}
+
 TEST_F(ConSanArtifact, ChecksummedEntryCoverageCannotSubstituteForTheWholeExecutableText) {
-  const auto saved = artifact_.prepared;
+  const std::vector<uint8_t> saved = artifact_.prepared;
   for (const uint64_t retained_after_entry : {4u, 8u, 128u}) {
     artifact_.prepared = saved;
-    auto &image = artifact_.prepared;
+    std::vector<uint8_t> &image = artifact_.prepared;
     Elf64_Ehdr header{};
     std::memcpy(&header, image.data(), sizeof(header));
     bool shortened = false;

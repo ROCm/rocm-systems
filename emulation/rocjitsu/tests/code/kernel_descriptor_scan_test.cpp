@@ -46,9 +46,9 @@ void rewrite_descriptor_entry(std::vector<uint8_t> &image, uint64_t descriptor_v
   std::vector<Elf64_Shdr> shdrs(ehdr.e_shnum);
   std::memcpy(shdrs.data(), image.data() + ehdr.e_shoff, shdrs.size() * sizeof(Elf64_Shdr));
 
-  const auto symtab = std::find_if(shdrs.begin(), shdrs.end(), [](const Elf64_Shdr &shdr) {
-    return shdr.sh_type == SHT_SYMTAB;
-  });
+  const std::vector<Elf64_Shdr>::iterator symtab =
+      std::find_if(shdrs.begin(), shdrs.end(),
+                   [](const Elf64_Shdr &shdr) { return shdr.sh_type == SHT_SYMTAB; });
   ASSERT_NE(symtab, shdrs.end());
   std::vector<Elf64_Sym> symbols(symtab->sh_size / sizeof(Elf64_Sym));
   std::memcpy(symbols.data(), image.data() + symtab->sh_offset, symbols.size() * sizeof(Elf64_Sym));
@@ -59,9 +59,10 @@ void rewrite_descriptor_entry(std::vector<uint8_t> &image, uint64_t descriptor_v
   const uint64_t descriptor_offset = owner.sh_offset + symbol.st_value - owner.sh_addr;
   ASSERT_LE(descriptor_offset + sizeof(KD), image.size());
 
-  const auto text = std::find_if(shdrs.begin(), shdrs.end(), [](const Elf64_Shdr &shdr) {
-    return (shdr.sh_flags & (SHF_ALLOC | SHF_EXECINSTR)) == (SHF_ALLOC | SHF_EXECINSTR);
-  });
+  const std::vector<Elf64_Shdr>::iterator text =
+      std::find_if(shdrs.begin(), shdrs.end(), [](const Elf64_Shdr &shdr) {
+        return (shdr.sh_flags & (SHF_ALLOC | SHF_EXECINSTR)) == (SHF_ALLOC | SHF_EXECINSTR);
+      });
   ASSERT_NE(text, shdrs.end());
   text->sh_addr = text_vaddr;
   owner.sh_addr = descriptor_vaddr;
@@ -78,8 +79,9 @@ void rewrite_descriptor_entry(std::vector<uint8_t> &image, uint64_t descriptor_v
 // The single fixture kernel is located with name, file offset, .text-relative
 // entry, and raw descriptor bytes all decoded correctly.
 TEST(KernelDescriptorScan, SingleKernelDecodesAllFields) {
-  const auto image = make_gfx950_kernel_elf({kMovV3V2, 0xbf810000u}, /*private_bytes=*/256);
-  const auto found = scan_via_text_section(image);
+  const std::vector<uint8_t> image =
+      make_gfx950_kernel_elf({kMovV3V2, 0xbf810000u}, /*private_bytes=*/256);
+  const std::vector<KernelDescriptorInfo> found = scan_via_text_section(image);
   ASSERT_EQ(found.size(), 1u);
   EXPECT_EQ(found[0].kernel_name, "test_kernel");
   EXPECT_EQ(found[0].entry_text_offset, 0u); // fixture entry is at .text offset 0
@@ -95,8 +97,9 @@ TEST(KernelDescriptorScan, SingleKernelDecodesAllFields) {
 // fixture descriptor's entry so it points at the descriptor's own (.rodata)
 // address instead of .text, then confirm the walk excludes it.
 TEST(KernelDescriptorScan, EntryOutsideTextIsDropped) {
-  auto image = make_gfx950_kernel_elf({kMovV3V2, 0xbf810000u}, /*private_bytes=*/64);
-  const auto located = scan_via_text_section(image);
+  std::vector<uint8_t> image =
+      make_gfx950_kernel_elf({kMovV3V2, 0xbf810000u}, /*private_bytes=*/64);
+  const std::vector<KernelDescriptorInfo> located = scan_via_text_section(image);
   ASSERT_EQ(located.size(), 1u);
 
   KD desc{};
@@ -116,7 +119,7 @@ TEST(KernelDescriptorScan, TooSmallImageReturnsEmpty) {
 // A descriptor symbol whose name runs to the end of its string table with no
 // in-bounds NUL terminator is rejected, not read past the table boundary.
 TEST(KernelDescriptorScan, UnterminatedDescriptorNameIsRejected) {
-  const auto image =
+  const std::vector<uint8_t> image =
       make_gfx950_unterminated_kd_name_elf({kMovV3V2, 0xbf810000u}, /*private_bytes=*/64);
   EXPECT_TRUE(scan_via_text_section(image).empty());
 }
@@ -124,7 +127,7 @@ TEST(KernelDescriptorScan, UnterminatedDescriptorNameIsRejected) {
 // .text (offset, size) from a pristine build, valid for a same-layout hostile
 // variant whose own headers cannot be trusted to resolve them.
 std::pair<uint64_t, uint64_t> clean_text_coords(const std::vector<uint32_t> &code) {
-  const auto image = make_gfx950_kernel_elf(code, /*private_bytes=*/64);
+  const std::vector<uint8_t> image = make_gfx950_kernel_elf(code, /*private_bytes=*/64);
   AmdGpuCodeObject obj(image.data(), image.size());
   EXPECT_TRUE(obj.is_valid());
   EXPECT_FALSE(obj.text_sections().empty());
@@ -137,7 +140,7 @@ std::pair<uint64_t, uint64_t> clean_text_coords(const std::vector<uint32_t> &cod
 TEST(KernelDescriptorScan, WrappingSectionHeaderTableIsRejected) {
   const std::vector<uint32_t> code = {kMovV3V2, 0xbf810000u};
   const auto [text_off, text_sz] = clean_text_coords(code);
-  const auto image = make_gfx950_wrapping_shoff_elf(code, /*private_bytes=*/64);
+  const std::vector<uint8_t> image = make_gfx950_wrapping_shoff_elf(code, /*private_bytes=*/64);
   EXPECT_TRUE(scan_kernel_descriptors({image.data(), image.size()}, text_off, text_sz).empty());
 }
 
@@ -146,17 +149,18 @@ TEST(KernelDescriptorScan, WrappingSectionHeaderTableIsRejected) {
 TEST(KernelDescriptorScan, WrappingSymtabRangeIsRejected) {
   const std::vector<uint32_t> code = {kMovV3V2, 0xbf810000u};
   const auto [text_off, text_sz] = clean_text_coords(code);
-  const auto image = make_gfx950_wrapping_symtab_elf(code, /*private_bytes=*/64);
+  const std::vector<uint8_t> image = make_gfx950_wrapping_symtab_elf(code, /*private_bytes=*/64);
   EXPECT_TRUE(scan_kernel_descriptors({image.data(), image.size()}, text_off, text_sz).empty());
 }
 
 TEST(KernelDescriptorScan, UnalignedImageSpanDoesNotRequireNativeElfAlignment) {
   const std::vector<uint32_t> code = {kMovV3V2, 0xbf810000u};
   const auto [text_off, text_sz] = clean_text_coords(code);
-  const auto image = make_gfx950_kernel_elf(code, 64);
+  const std::vector<uint8_t> image = make_gfx950_kernel_elf(code, 64);
   std::vector<uint8_t> storage(image.size() + 1);
   std::memcpy(storage.data() + 1, image.data(), image.size());
-  const auto found = scan_kernel_descriptors(std::span(storage).subspan(1), text_off, text_sz);
+  const std::vector<KernelDescriptorInfo> found =
+      scan_kernel_descriptors(std::span(storage).subspan(1), text_off, text_sz);
   ASSERT_EQ(found.size(), 1u);
   EXPECT_EQ(found.front().kernel_name, "test_kernel");
 }
@@ -164,12 +168,12 @@ TEST(KernelDescriptorScan, UnalignedImageSpanDoesNotRequireNativeElfAlignment) {
 TEST(KernelDescriptorScan, UnalignedSectionAndSymbolTablesAreReadAsBytes) {
   const std::vector<uint32_t> code = {kMovV3V2, 0xbf810000u};
   const auto [text_off, text_sz] = clean_text_coords(code);
-  auto image = make_gfx950_kernel_elf(code, 64);
+  std::vector<uint8_t> image = make_gfx950_kernel_elf(code, 64);
   Elf64_Ehdr header{};
   std::memcpy(&header, image.data(), sizeof(header));
   std::vector<Elf64_Shdr> sections(header.e_shnum);
   std::memcpy(sections.data(), image.data() + header.e_shoff, sections.size() * sizeof(Elf64_Shdr));
-  for (auto &section : sections) {
+  for (Elf64_Shdr &section : sections) {
     if (section.sh_type != SHT_SYMTAB)
       continue;
     const std::vector<uint8_t> symbols(image.begin() + section.sh_offset,
@@ -182,18 +186,19 @@ TEST(KernelDescriptorScan, UnalignedSectionAndSymbolTablesAreReadAsBytes) {
   while (image.size() % 8 != 1)
     image.push_back(0);
   header.e_shoff = image.size();
-  const auto bytes = std::as_bytes(std::span(sections));
+  const std::span<const std::byte> bytes = std::as_bytes(std::span(sections));
   image.insert(image.end(), reinterpret_cast<const uint8_t *>(bytes.data()),
                reinterpret_cast<const uint8_t *>(bytes.data()) + bytes.size());
   std::memcpy(image.data(), &header, sizeof(header));
   ASSERT_EQ(scan_kernel_descriptors(image, text_off, text_sz).size(), 1u);
 }
 
-TEST(KernelDescriptorScan, OverflowingDescriptorEntryDisplacementIsRejected) {
+TEST(KernelDescriptorScan, EntryDisplacementOutsideTextIsRejected) {
   const std::vector<uint32_t> code = {kMovV3V2, 0xbf810000u};
   const auto [text_off, text_sz] = clean_text_coords(code);
-  auto image = make_gfx950_kernel_elf(code, 64);
-  const auto original = scan_kernel_descriptors(image, text_off, text_sz);
+  std::vector<uint8_t> image = make_gfx950_kernel_elf(code, 64);
+  const std::vector<KernelDescriptorInfo> original =
+      scan_kernel_descriptors(image, text_off, text_sz);
   ASSERT_EQ(original.size(), 1u);
   KD descriptor = original.front().descriptor;
   descriptor.kernel_code_entry_byte_offset = INT64_MAX;
@@ -208,29 +213,33 @@ TEST(KernelDescriptorScan, OverflowingDescriptorEntryDisplacementIsRejected) {
 TEST(KernelDescriptorScan, DescriptorCrossingOwningSectionIsRejected) {
   const std::vector<uint32_t> code = {kMovV3V2, 0xbf810000u};
   const auto [text_off, text_sz] = clean_text_coords(code);
-  const auto image = make_gfx950_kd_crossing_section_elf(code, /*private_bytes=*/64);
+  const std::vector<uint8_t> image =
+      make_gfx950_kd_crossing_section_elf(code, /*private_bytes=*/64);
   EXPECT_TRUE(scan_kernel_descriptors({image.data(), image.size()}, text_off, text_sz).empty());
 }
 
 // When no section matches the requested (text_offset, text_size), the walk cannot
 // resolve .text's base address and returns nothing.
 TEST(KernelDescriptorScan, NoMatchingTextSectionReturnsEmpty) {
-  const auto image = make_gfx950_kernel_elf({kMovV3V2, 0xbf810000u}, /*private_bytes=*/64);
-  const auto found = scan_kernel_descriptors({image.data(), image.size()},
-                                             /*text_offset=*/0xDEAD, /*text_size=*/0x4);
+  const std::vector<uint8_t> image =
+      make_gfx950_kernel_elf({kMovV3V2, 0xbf810000u}, /*private_bytes=*/64);
+  const std::vector<KernelDescriptorInfo> found =
+      scan_kernel_descriptors({image.data(), image.size()},
+                              /*text_offset=*/0xDEAD, /*text_size=*/0x4);
   EXPECT_TRUE(found.empty());
 }
 
 // Forming the magnitude of INT64_MIN must avoid signed negation overflow while
 // still resolving the entry at the first .text byte.
 TEST(KernelDescriptorScan, Int64MinEntryOffsetResolvesWithoutSignedOverflow) {
-  auto image = make_gfx950_kernel_elf({kMovV3V2, 0xbf810000u}, /*private_bytes=*/64);
+  std::vector<uint8_t> image =
+      make_gfx950_kernel_elf({kMovV3V2, 0xbf810000u}, /*private_bytes=*/64);
   constexpr uint64_t kTextVaddr = 0x1000;
   constexpr uint64_t kDescriptorVaddr = (uint64_t{1} << 63) | kTextVaddr;
   rewrite_descriptor_entry(image, kDescriptorVaddr, kTextVaddr,
                            std::numeric_limits<int64_t>::min());
 
-  const auto found = scan_via_text_section(image);
+  const std::vector<KernelDescriptorInfo> found = scan_via_text_section(image);
   ASSERT_EQ(found.size(), 1u);
   EXPECT_EQ(found[0].entry_text_offset, 0u);
 }
@@ -238,7 +247,8 @@ TEST(KernelDescriptorScan, Int64MinEntryOffsetResolvesWithoutSignedOverflow) {
 // Unsigned addition would wrap this descriptor entry precisely into .text, so
 // only the explicit positive-overflow guard keeps the false descriptor out.
 TEST(KernelDescriptorScan, PositiveEntryOffsetOverflowIsRejected) {
-  auto image = make_gfx950_kernel_elf({kMovV3V2, 0xbf810000u}, /*private_bytes=*/64);
+  std::vector<uint8_t> image =
+      make_gfx950_kernel_elf({kMovV3V2, 0xbf810000u}, /*private_bytes=*/64);
   rewrite_descriptor_entry(image, std::numeric_limits<uint64_t>::max() - 0xfff, 0x1000, 0x2000);
   EXPECT_TRUE(scan_via_text_section(image).empty());
 }
@@ -246,7 +256,8 @@ TEST(KernelDescriptorScan, PositiveEntryOffsetOverflowIsRejected) {
 // Unsigned subtraction would wrap this descriptor entry precisely into .text,
 // so only the explicit negative-underflow guard keeps the false descriptor out.
 TEST(KernelDescriptorScan, NegativeEntryOffsetUnderflowIsRejected) {
-  auto image = make_gfx950_kernel_elf({kMovV3V2, 0xbf810000u}, /*private_bytes=*/64);
+  std::vector<uint8_t> image =
+      make_gfx950_kernel_elf({kMovV3V2, 0xbf810000u}, /*private_bytes=*/64);
   rewrite_descriptor_entry(image, 0x1000, std::numeric_limits<uint64_t>::max() - 0xffff, -0x11000);
   EXPECT_TRUE(scan_via_text_section(image).empty());
 }
@@ -254,7 +265,8 @@ TEST(KernelDescriptorScan, NegativeEntryOffsetUnderflowIsRejected) {
 // The raw descriptor scanner can read record prefixes from a larger stride,
 // but the code-object parser rejects layouts its patcher cannot preserve.
 TEST(KernelDescriptorScan, StridedSectionHeaderTableIsReadSafely) {
-  auto image = make_gfx950_kernel_elf({kMovV3V2, 0xbf810000u}, /*private_bytes=*/64);
+  std::vector<uint8_t> image =
+      make_gfx950_kernel_elf({kMovV3V2, 0xbf810000u}, /*private_bytes=*/64);
   Elf64_Ehdr ehdr{};
   std::memcpy(&ehdr, image.data(), sizeof(ehdr));
   std::vector<Elf64_Shdr> shdrs(ehdr.e_shnum);
@@ -281,14 +293,15 @@ TEST(KernelDescriptorScan, StridedSectionHeaderTableIsReadSafely) {
 // Raw descriptor discovery handles larger symbol strides safely, while the
 // code-object parser rejects tables its patcher cannot relocate.
 TEST(KernelDescriptorScan, StridedSymbolTableIsReadSafely) {
-  auto image = make_gfx950_kernel_elf({kMovV3V2, 0xbf810000u}, /*private_bytes=*/64);
+  std::vector<uint8_t> image =
+      make_gfx950_kernel_elf({kMovV3V2, 0xbf810000u}, /*private_bytes=*/64);
   Elf64_Ehdr ehdr{};
   std::memcpy(&ehdr, image.data(), sizeof(ehdr));
   std::vector<Elf64_Shdr> shdrs(ehdr.e_shnum);
   std::memcpy(shdrs.data(), image.data() + ehdr.e_shoff, shdrs.size() * sizeof(Elf64_Shdr));
-  const auto symbol_table = std::find_if(shdrs.begin(), shdrs.end(), [](const Elf64_Shdr &shdr) {
-    return shdr.sh_type == SHT_SYMTAB;
-  });
+  const std::vector<Elf64_Shdr>::iterator symbol_table =
+      std::find_if(shdrs.begin(), shdrs.end(),
+                   [](const Elf64_Shdr &shdr) { return shdr.sh_type == SHT_SYMTAB; });
   ASSERT_NE(symbol_table, shdrs.end());
   std::vector<Elf64_Sym> symbols(symbol_table->sh_size / symbol_table->sh_entsize);
   std::memcpy(symbols.data(), image.data() + symbol_table->sh_offset,

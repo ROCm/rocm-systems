@@ -5,6 +5,7 @@
 
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/consan/target.h"
+#include "util/bit.h"
 
 #include <algorithm>
 #include <cstring>
@@ -116,7 +117,7 @@ private:
 };
 
 const Value *field(const Value &value, std::string_view name) {
-  const auto found = value.map.find(name);
+  const std::map<std::string_view, Value>::const_iterator found = value.map.find(name);
   return found == value.map.end() ? nullptr : &found->second;
 }
 
@@ -150,18 +151,19 @@ std::optional<std::span<const uint8_t>> note(std::span<const uint8_t> image) {
   if (image.size() < sizeof(header))
     return std::nullopt;
   std::memcpy(&header, image.data(), sizeof(header));
-  if (header.e_shentsize != sizeof(Elf64_Shdr) || header.e_shoff > image.size() ||
-      uint64_t{header.e_shnum} * sizeof(Elf64_Shdr) > image.size() - header.e_shoff)
+  if (header.e_shentsize != sizeof(Elf64_Shdr))
+    return std::nullopt;
+  const std::optional<std::vector<Elf64_Shdr>> sections =
+      read_elf_table<Elf64_Shdr>(image, header.e_shoff, header.e_shnum, header.e_shentsize);
+  if (!sections)
     return std::nullopt;
   std::optional<std::span<const uint8_t>> result;
-  for (uint32_t index = 0; index < header.e_shnum; ++index) {
-    Elf64_Shdr section{};
-    std::memcpy(&section, image.data() + header.e_shoff + index * sizeof(section), sizeof(section));
+  for (const Elf64_Shdr &section : *sections) {
     if (section.sh_type != SHT_NOTE)
       continue;
-    if (section.sh_offset > image.size() || section.sh_size > image.size() - section.sh_offset)
+    if (!util::is_range_in_bounds(section.sh_offset, section.sh_size, image.size()))
       return std::nullopt;
-    const auto bytes = image.subspan(section.sh_offset, section.sh_size);
+    const std::span<const uint8_t> bytes = image.subspan(section.sh_offset, section.sh_size);
     for (size_t offset = 0; offset < bytes.size();) {
       if (bytes.size() - offset < 12)
         return std::nullopt;
@@ -194,12 +196,12 @@ bool parse(std::span<const uint8_t> image, const KernelDescriptorInfo &kernel, P
   if (image.size() < sizeof(header))
     return false;
   std::memcpy(&header, image.data(), sizeof(header));
-  const auto *target = target_profile(elf_mach_name(header.e_flags));
+  const TargetProfile *target = target_profile(elf_mach_name(header.e_flags));
   if (target == nullptr)
     return false;
   const uint32_t wave_size = kernel_wavefront_size(target->arch, kernel.descriptor);
   const uint32_t granule = descriptor_vgpr_granularity_for_wavefront(target->arch, wave_size);
-  const auto payload = note(image);
+  const std::optional<std::span<const uint8_t>> payload = note(image);
   if (!payload)
     return false;
   parsed.payload = *payload;
@@ -217,10 +219,10 @@ bool parse(std::span<const uint8_t> image, const KernelDescriptorInfo &kernel, P
     return false;
   parsed.kernel = &kernels->array.front();
   const Value &entry = *parsed.kernel;
-  const auto kernarg = integer(entry, ".kernarg_segment_size");
-  const auto alignment = integer(entry, ".kernarg_segment_align");
-  const auto sgprs = integer(entry, ".sgpr_count");
-  const auto vgprs = integer(entry, ".vgpr_count");
+  const std::optional<uint32_t> kernarg = integer(entry, ".kernarg_segment_size");
+  const std::optional<uint32_t> alignment = integer(entry, ".kernarg_segment_align");
+  const std::optional<uint32_t> sgprs = integer(entry, ".sgpr_count");
+  const std::optional<uint32_t> vgprs = integer(entry, ".vgpr_count");
   if (target->arch == ROCJITSU_CODE_ARCH_CDNA3 || target->arch == ROCJITSU_CODE_ARCH_CDNA4) {
     const uint32_t accumulator_base =
         (RJ_AMDHSA_BITS_GET(kernel.descriptor.compute_pgm_rsrc3,
@@ -239,7 +241,7 @@ bool parse(std::span<const uint8_t> image, const KernelDescriptorInfo &kernel, P
       integer(entry, ".group_segment_fixed_size") != kernel.descriptor.group_segment_fixed_size ||
       integer(entry, ".private_segment_fixed_size") != 0)
     return false;
-  const auto maximum = integer(entry, ".max_flat_workgroup_size");
+  const std::optional<uint32_t> maximum = integer(entry, ".max_flat_workgroup_size");
   if (!maximum || *maximum == 0 || *maximum > 1024)
     return false;
   const Value *dynamic_stack = field(entry, ".uses_dynamic_stack");
@@ -252,8 +254,8 @@ bool parse(std::span<const uint8_t> image, const KernelDescriptorInfo &kernel, P
     return false;
   uint64_t previous_end = 0;
   for (const Value &argument : arguments->array) {
-    const auto size = integer(argument, ".size");
-    const auto offset = integer(argument, ".offset");
+    const std::optional<uint32_t> size = integer(argument, ".size");
+    const std::optional<uint32_t> offset = integer(argument, ".offset");
     if (!size || *size == 0 || !offset || *offset < previous_end ||
         uint64_t{*offset} + *size > *kernarg ||
         (!text_equals(argument, ".value_kind", "by_value") &&

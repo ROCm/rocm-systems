@@ -363,6 +363,21 @@ struct Elf64_Rela {
   int64_t r_addend;
 };
 
+/// @brief Resolve a signed ELF displacement without wrapping the address.
+[[nodiscard]] inline std::optional<uint64_t> add_signed_offset(uint64_t base, int64_t offset) {
+  if (offset >= 0) {
+    const uint64_t positive = static_cast<uint64_t>(offset);
+    if (positive > std::numeric_limits<uint64_t>::max() - base)
+      return std::nullopt;
+    return base + positive;
+  }
+  // Form the magnitude without negating INT64_MIN.
+  const uint64_t magnitude = static_cast<uint64_t>(-(offset + 1)) + 1;
+  if (magnitude > base)
+    return std::nullopt;
+  return base - magnitude;
+}
+
 /// @brief Copy a possibly strided ELF record table from an unaligned image.
 /// @details The declared stride may include trailing bytes, but it must hold a
 /// complete record. The entire table is bounds checked before any record is
