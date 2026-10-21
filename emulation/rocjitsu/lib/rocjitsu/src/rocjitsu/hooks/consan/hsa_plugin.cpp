@@ -8,6 +8,7 @@
 #include "rocjitsu/code/consan/target.h"
 #include "rocjitsu/hooks/consan/api.h"
 #include "rocjitsu/hooks/consan/runtime_core.h"
+#include "rocjitsu/hooks/consan/testing.h"
 
 #include <atomic>
 #include <cerrno>

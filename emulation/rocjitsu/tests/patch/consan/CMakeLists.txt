@@ -196,11 +196,15 @@ if(RJ_BUILD_CONSAN_RUNTIME AND TARGET consan_original_fixtures)
             ${CMAKE_DL_LIBS}
     )
     rj_configure_target(consan_hsa_plugin_test PRIVATE_INCLUDES WARNINGS)
-    add_dependencies(consan_hsa_plugin_test hsa_consan consan_artifact_fixture)
+    add_dependencies(
+        consan_hsa_plugin_test
+        hsa_consan_testable
+        consan_artifact_fixture
+    )
     target_compile_definitions(
         consan_hsa_plugin_test
         PRIVATE
-            CONSAN_PLUGIN_FIXTURE="$<TARGET_FILE:hsa_consan>"
+            CONSAN_PLUGIN_FIXTURE="$<TARGET_FILE:hsa_consan_testable>"
             CONSAN_ORIGINAL_FIXTURE="${_fixture_dir}/race.hsaco"
             CONSAN_ARTIFACT_FIXTURE="${_artifact}"
     )
@@ -257,9 +261,9 @@ if(
                 $<TARGET_FILE:rj_consan_prepare> --runner
                 $<TARGET_FILE:consan_hsa_runner> --inspect
                 $<TARGET_FILE:consan_capture_inspect> --plugin
-                $<TARGET_FILE:hsa_consan> --fixtures ${_fixture_dir} --source
-                ${PROJECT_SOURCE_DIR} --root ${RJ_CONSAN_TEST_ARTIFACT_ROOT}
-                --case ${_case}
+                $<TARGET_FILE:hsa_consan_testable> --test-statistics --fixtures
+                ${_fixture_dir} --source ${PROJECT_SOURCE_DIR} --root
+                ${RJ_CONSAN_TEST_ARTIFACT_ROOT} --case ${_case}
         )
         set_tests_properties(
             ConSanRuntimeHardware.${_case}
@@ -306,9 +310,9 @@ if(
                     $<TARGET_FILE:rj_consan_prepare> --runner
                     $<TARGET_FILE:consan_hsa_runner> --inspect
                     $<TARGET_FILE:consan_capture_inspect> --plugin
-                    $<TARGET_FILE:hsa_consan> --analyze
-                    $<TARGET_FILE:rj_consan_analyze> --fixtures ${_fixture_dir}
-                    --source ${PROJECT_SOURCE_DIR} --root
+                    $<TARGET_FILE:hsa_consan_testable> --test-statistics
+                    --analyze $<TARGET_FILE:rj_consan_analyze> --fixtures
+                    ${_fixture_dir} --source ${PROJECT_SOURCE_DIR} --root
                     ${RJ_CONSAN_TEST_ARTIFACT_ROOT} --case ${_scenario}
                     ${_entry_options}
             )
@@ -335,10 +339,22 @@ if(RJ_BUILD_CONSAN_ANALYZER AND TARGET consan_hsa_runner)
         kind
         scenario
         threads
+        variant
     )
         set(_name
             ConSan${environment}E2E.${gpu}.wave${wave}.${kind}.${scenario}
         )
+        set(_plugin hsa_consan_testable)
+        set(_statistics --test-statistics)
+        if(variant STREQUAL "production")
+            set(_plugin hsa_consan)
+            set(_statistics)
+            set(_name
+                ConSan${environment}ProductionE2E.${gpu}.wave${wave}.${kind}.${scenario}
+            )
+        elseif(NOT variant STREQUAL "testable")
+            message(FATAL_ERROR "Unknown ConSan plugin variant: ${variant}")
+        endif()
         set(_case ${scenario})
         if(_case STREQUAL "partial")
             set(_case disjoint)
@@ -373,7 +389,7 @@ if(RJ_BUILD_CONSAN_ANALYZER AND TARGET consan_hsa_runner)
                 $<TARGET_FILE:rj_consan_prepare> --runner
                 $<TARGET_FILE:consan_hsa_runner> --inspect
                 $<TARGET_FILE:consan_capture_inspect> --plugin
-                $<TARGET_FILE:hsa_consan> --analyze
+                $<TARGET_FILE:${_plugin}> ${_statistics} --analyze
                 $<TARGET_FILE:rj_consan_analyze> --fixtures ${_fixture_dir}
                 --source ${PROJECT_SOURCE_DIR} --root
                 ${RJ_CONSAN_TEST_ARTIFACT_ROOT} --case ${_case} --target ${gpu}
@@ -415,21 +431,26 @@ if(RJ_BUILD_CONSAN_ANALYZER AND TARGET consan_hsa_runner)
         list(GET _parts 0 _gpu)
         list(GET _parts 1 _wave)
         math(EXPR _threads "2 * ${_wave}")
-        consan_add_target_e2e(Sim ${_gpu} ${_wave} assembly high_lane ${_threads})
+        consan_add_target_e2e(Sim ${_gpu} ${_wave} assembly high_lane ${_threads} testable)
         set(_kind hip)
         if(_gpu STREQUAL "gfx1250")
             set(_kind assembly)
         endif()
+        consan_add_target_e2e(Sim ${_gpu} ${_wave} ${_kind} disjoint ${_threads} production)
+        if(_gpu STREQUAL "gfx1250")
+            consan_add_target_e2e(Sim ${_gpu} ${_wave} assembly missing-statistics ${_threads} production)
+        endif()
         foreach(_scenario IN ITEMS race disjoint read_read)
-            consan_add_target_e2e(Sim ${_gpu} ${_wave} ${_kind} ${_scenario} ${_threads})
+            consan_add_target_e2e(Sim ${_gpu} ${_wave} ${_kind} ${_scenario} ${_threads} testable)
             if(_gpu STREQUAL "gfx1100")
-                consan_add_target_e2e(Physical ${_gpu} ${_wave} ${_kind} ${_scenario} ${_threads})
+                consan_add_target_e2e(Physical ${_gpu} ${_wave} ${_kind} ${_scenario} ${_threads} testable)
             endif()
         endforeach()
         if(_gpu STREQUAL "gfx1100")
-            consan_add_target_e2e(Physical ${_gpu} ${_wave} assembly high_lane ${_threads})
+            consan_add_target_e2e(Physical ${_gpu} ${_wave} ${_kind} disjoint ${_threads} production)
+            consan_add_target_e2e(Physical ${_gpu} ${_wave} assembly high_lane ${_threads} testable)
             math(EXPR _threads "3 * ${_wave} + 1")
-            consan_add_target_e2e(Physical ${_gpu} ${_wave} hip partial ${_threads})
+            consan_add_target_e2e(Physical ${_gpu} ${_wave} hip partial ${_threads} testable)
         endif()
     endforeach()
 endif()

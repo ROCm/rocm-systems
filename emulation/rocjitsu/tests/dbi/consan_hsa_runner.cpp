@@ -3,6 +3,7 @@
 
 #include "rocjitsu/code/consan/target.h"
 #include "rocjitsu/hooks/consan/api.h"
+#include "rocjitsu/hooks/consan/testing.h"
 
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
@@ -94,7 +95,7 @@ int run(int argc, char **argv) {
   if (argc < 5) {
     std::cerr << "Usage: consan_hsa_runner ORIGINAL ENTRY LAUNCHES defined|observe [--baseline] "
                  "[--bad-geometry] [--profiling] [--reuse-signal] [--target GPU] [--wave-size N] "
-                 "[--threads N]\n";
+                 "[--threads N] [--test-statistics]\n";
     return 3;
   }
   uint32_t launches = 0;
@@ -107,6 +108,7 @@ int run(int argc, char **argv) {
   std::string_view target = "gfx1100";
   uint32_t threads = 64, wave_size = 32;
   bool baseline = false, bad_geometry = false, profiling = false, reuse_signal = false;
+  bool test_statistics = false;
   for (int index = 5; index < argc; ++index) {
     const std::string_view option(argv[index]);
     if (option == "--baseline")
@@ -117,6 +119,8 @@ int run(int argc, char **argv) {
       profiling = true;
     else if (option == "--reuse-signal")
       reuse_signal = true;
+    else if (option == "--test-statistics")
+      test_statistics = true;
     else if (option == "--target" && index + 1 < argc)
       target = argv[++index];
     else if ((option == "--threads" || option == "--wave-size") && index + 1 < argc) {
@@ -134,7 +138,7 @@ int run(int argc, char **argv) {
     return 3;
   const uint32_t wave_count = (threads + wave_size - 1) / wave_size;
   const size_t output_bytes = std::max(wave_count, 2u) * sizeof(uint32_t);
-  if (baseline && (bad_geometry || profiling || reuse_signal))
+  if (baseline && (bad_geometry || profiling || reuse_signal || test_statistics))
     return 3;
   if (hsa_init() != HSA_STATUS_SUCCESS)
     return 77;
@@ -150,11 +154,16 @@ int run(int argc, char **argv) {
     if (plugin) {
       finish = reinterpret_cast<rj_consan_finish_fn>(::dlsym(plugin, "rj_consan_finish"));
       drain = reinterpret_cast<rj_consan_drain_fn>(::dlsym(plugin, "rj_consan_drain"));
-      statistics =
-          reinterpret_cast<rj_consan_statistics_fn>(::dlsym(plugin, "rj_consan_get_statistics"));
+      if (test_statistics)
+        statistics =
+            reinterpret_cast<rj_consan_statistics_fn>(::dlsym(plugin, "rj_consan_get_statistics"));
     }
-    if (!finish || !drain || !statistics || drain() != 0) {
+    if (!finish || !drain || drain() != 0) {
       std::cerr << "required ConSan plugin was not active before original load\n";
+      return 3;
+    }
+    if (test_statistics && !statistics) {
+      std::cerr << "required ConSan test statistics interface is unavailable\n";
       return 3;
     }
   }
@@ -306,7 +315,7 @@ int run(int argc, char **argv) {
   const int finish_status = finish ? finish() : 0;
   if (finish_status != 0 && result == 0)
     result = 22;
-  const auto stats = statistics ? statistics() : rj_consan_statistics{};
+  const rj_consan_statistics stats = statistics ? statistics() : rj_consan_statistics{};
   if (signal.handle && !require(hsa_signal_destroy(signal), "signal cleanup") && result == 0)
     result = 22;
   if (queue && !require(hsa_queue_destroy(queue), "queue cleanup") && result == 0)
@@ -326,10 +335,12 @@ int run(int argc, char **argv) {
   if (plugin)
     ::dlclose(plugin);
   std::cout << "{\"app_status\":" << result << ",\"finish_status\":" << finish_status
-            << ",\"completed\":" << completed << ",\"submitted\":" << stats.submitted
-            << ",\"forwarded\":" << stats.forwarded << ",\"copied\":" << stats.copied
-            << ",\"written\":" << stats.written << ",\"reused\":" << stats.reused
-            << ",\"profiling_status\":" << profiling_status << "}\n";
+            << ",\"completed\":" << completed;
+  if (statistics)
+    std::cout << ",\"submitted\":" << stats.submitted << ",\"forwarded\":" << stats.forwarded
+              << ",\"copied\":" << stats.copied << ",\"written\":" << stats.written
+              << ",\"reused\":" << stats.reused;
+  std::cout << ",\"profiling_status\":" << profiling_status << "}\n";
   return result;
 }
 
