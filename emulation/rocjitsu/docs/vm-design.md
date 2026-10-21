@@ -552,6 +552,7 @@ smin/umin, smax/umax, and, or, xor, inc, dec.
 **Cache management instructions:**
 
 - `s_dcache_inv` / `s_dcache_inv_vol` — invalidate the L1 scalar cache
+- `s_dcache_discard` / `s_dcache_discard_x2` — drop the addressed L1 scalar cache line(s)
 - `s_gl1_inv` — invalidate the L1 vector cache
 
 ---

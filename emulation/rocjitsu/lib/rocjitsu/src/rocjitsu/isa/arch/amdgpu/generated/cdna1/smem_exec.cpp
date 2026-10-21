@@ -474,13 +474,21 @@ void SAtcProbeBufferSmem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SDcacheDiscardSmem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto address = smem_calculate_address(inst_, wf);
+  if (!address)
+    return;
+  const uint64_t line = *address & ~uint64_t{amdgpu::L1ScalarCache::DISCARD_LINE_BYTES - 1};
+  wf.cu().l1_scalar().discard_line(line, wf.process_id());
 }
 
 void SDcacheDiscardX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto address = smem_calculate_address(inst_, wf);
+  if (!address)
+    return;
+  const uint64_t line = *address & ~uint64_t{amdgpu::L1ScalarCache::DISCARD_LINE_BYTES - 1};
+  wf.cu().l1_scalar().discard_line(line, wf.process_id());
+  wf.cu().l1_scalar().discard_line(line + amdgpu::L1ScalarCache::DISCARD_LINE_BYTES,
+                                   wf.process_id());
 }
 
 void SBufferAtomicSwapSmem::execute_impl(amdgpu::Wavefront &wf) {
