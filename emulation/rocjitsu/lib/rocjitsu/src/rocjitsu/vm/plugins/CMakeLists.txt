@@ -104,6 +104,23 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                 ${plugin_objects}
                 PRIVATE $<TARGET_PROPERTY:${object_lib},LINK_LIBRARIES>
             )
+            if(name STREQUAL "race")
+                # The shared wait decoder also uses simulator inline accessors,
+                # so its standalone copy needs the same vptr exemption.
+                rj_add_object_library(
+                    rocjitsu_wait_counter_policy_standalone
+                    ${ROCJITSU_SRC_DIR}/rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.cpp
+                )
+                target_compile_options(
+                    rocjitsu_wait_counter_policy_standalone
+                    PRIVATE -fno-sanitize=vptr
+                )
+                target_link_libraries(
+                    ${plugin_objects}
+                    INTERFACE
+                        $<TARGET_OBJECTS:rocjitsu_wait_counter_policy_standalone>
+                )
+            endif()
             target_compile_options(${plugin_objects} PRIVATE -fno-sanitize=vptr)
         endif()
         # Link the plugin's own logic. Any simulator code it references is
