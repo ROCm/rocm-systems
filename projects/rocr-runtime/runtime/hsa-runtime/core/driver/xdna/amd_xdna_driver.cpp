@@ -1946,18 +1946,24 @@ hsa_status_t XdnaDriver::SubmitUmqPackets(hsa_amd_aie_kernel_dispatch_packet_t* 
   // failure specifically: since nothing is rung until every packet has translated, a bad packet
   // partway through aborts the whole batch, not just itself and what follows, so num_completed
   // stays 0 rather than counting packets that would have run before it.
+  // Guards the copies made below until the doorbell is rung for the whole batch: a translate
+  // failure partway through means none of this batch is rung, so nothing else would free the
+  // copies already made for the packets translated so far. Dismissed once the doorbell is rung;
+  // the wait loop below then owns freeing each one explicitly.
   std::vector<void*> ctrl_copies(num_pkts);
+  MAKE_NAMED_SCOPE_GUARD(ctrl_copies_guard, [&] {
+    for (void* ctrl_copy : ctrl_copies) {
+      if (ctrl_copy != nullptr) {
+        aie_agent.system_deallocator()(ctrl_copy);
+      }
+    }
+  });
   for (uint64_t i = 0; i < num_pkts; ++i) {
     const uint64_t idx = first_pkt_idx + i;
     hsa_amd_aie_kernel_dispatch_packet_t& pkt = ring[idx % ring_capacity];
 
     const hsa_status_t translate_err = TranslateUmqPacket(pkt, agent);
     if (translate_err != HSA_STATUS_SUCCESS) {
-      // None of this batch is rung, so nothing else will free the copies already made for the
-      // packets translated so far.
-      for (uint64_t j = 0; j < i; ++j) {
-        aie_agent.system_deallocator()(ctrl_copies[j]);
-      }
       return translate_err;
     }
     // TranslateUmqPacket overwrote this packet's kernel_object with the address of a per-dispatch
@@ -1975,6 +1981,7 @@ hsa_status_t XdnaDriver::SubmitUmqPackets(hsa_amd_aie_kernel_dispatch_packet_t* 
   // Hardware doorbell supports AQL semantics, the same as a GPU queue: the value rung is the
   // index of the last readied packet, not a count, so one ring covers the whole batch.
   *doorbell = static_cast<uint32_t>(first_pkt_idx + num_pkts - 1);
+  ctrl_copies_guard.Dismiss();
 
   for (uint64_t i = 0; i < num_pkts; ++i) {
     const uint64_t idx = first_pkt_idx + i;
