@@ -12,9 +12,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
     - New `rocprofiler_configure_spm_device_counting_service` samples SPM counters on an agent for as long as the context is active, without tying samples to individual kernel dispatches.
     - Samples are delivered to a buffer as `rocprofiler_spm_counter_record_t` records with no dispatch information.
   - SPM support for gfx12 and gfx1250:
-    - aqlprofile handles the shader array (SA) and workgroup processor (WGP) topology, per-counter SPM depth, and sample-interval reporting for these architectures, and provides `aqlprofile_spm_decode_shader_engine` to decode the packed `shader_engine` value.
     - gfx1250 SPM samples report the shader array and WGP. Both are encoded in the counter instance ID together with XCC, shader engine, and instance.
-    - New `ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_REFCLK_CYCLES` parameter sets the SPM sample interval in reference-clock cycles. Only gfx1250 supports it; other agents return `ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT`. Agent configuration queries report shader-clock and reference-clock intervals separately.
+    - New `ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_REFCLK_CYCLES` parameter sets the SPM sample interval in reference-clock cycles. Only gfx1200, gfx1201, and gfx1250 support it; other agents return `ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT`. Agent configuration queries report shader-clock and reference-clock intervals separately.
   - New `ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE` thread trace parameter and `rocprofiler_thread_trace_resource_mode_t` enum, which control when thread trace resources are allocated:
     - `ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_CODE_OBJECT` creates the thread trace queue for a GPU only when the first code object is loaded on that GPU, so GPUs the application never uses get no queue. This is the default.
     - `ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_HSA` allocates resources at HSA initialization, as in previous releases.
@@ -27,7 +26,6 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 **Hardware and platform support:**
 
-  - gfx1170 and gfx1171 (gfx117x) support, covering architecture dispatch, counter definitions, and thread trace. Before this change, these agents had no counters.
   - Compute and profiling support on WSL2 for RDNA 3 (gfx11) GPUs, including `rocprofv3` counter collection and thread trace (`--att`). Agent topology is read through `librocdxg`, so `rocprofiler_query_available_agents` returns the same results whether or not HSA has been initialized.
   - CPU agents are now detected on ppc64le (POWER) systems. The `/proc/cpuinfo` parser previously handled only x86 fields.
 
@@ -43,7 +41,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
     - Exit code 0 (warnings only), 1 (at least one failure), 2 (tool error, an `--only` pattern matching no check, or a broken check with no failures).
     - Works with every ROCm installation layout, not only `/opt/rocm`: legacy system packages, TheRock system packages (`/opt/rocm/core-X.Y`), TheRock Python packages, tarballs, and custom prefixes. The inspected root, how it was found, and the installation type are reported, and remediation commands match the installation type.
   - New `--att-resource-mode` option (`default`, `hsa`, or `code-object`) sets when thread trace resources are allocated. The default is `code-object`.
-  - `--spm-sample-interval-unit` accepts the new `refclk_cycles` value, which sets `--spm-sample-interval` in reference-clock cycles. It works only on gfx1250.
+  - `--spm-sample-interval-unit` accepts the new `refclk_cycles` value, which sets `--spm-sample-interval` in reference-clock cycles. It works only on gfx1200, gfx1201, and gfx1250.
   - New `ROCPROF_FINALIZE_WAIT_TIMEOUT_SECONDS` environment variable (default: 10) sets how long finalization waits for child processes or an abort to finish.
 
 ### Changed
@@ -60,10 +58,10 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - `rocprofv3` now rejects multi-pass counter collection from an input file when combined with `--pid` or `--collection-period`. This already applied to multiple `--pmc` flags. The error message names what made the run multi-pass.
 - Extra counter YAML files passed with `-E`/`--extra-counters` are now validated before they are loaded. If a definition is malformed, `rocprofv3` reports the field that is wrong and exits with an error. It previously crashed or hung.
 - Environment variables whose names contain sensitive keywords, such as `password`, `secret`, `token`, or `key`, are no longer written to the rocPD database.
-- When collecting PMC counters on GPUs from gfx1100 up to but not including gfx1250, ROCprofiler-SDK warns if `power_dpm_force_performance_level` is `auto` or can't be read. Dynamic power and clock scaling can skew counter values. Set the level to `profile_standard` (or `low`, `high`, or `manual`) for stable results.
+- When collecting PMC counters on GPUs from gfx1100 up to but not including gfx1250, ROCprofiler-SDK warns if `power_dpm_force_performance_level` is not `profile_standard` or can't be read. Dynamic power and clock scaling can skew counter values. Set the level to `profile_standard` (for example, with `amd-smi set --perf-level STABLE_STD`) for stable results.
 - Queue interposition now issues a memory fence when writing packets to the ring buffer to protect against packets being read reordered or half-written.
 - Increased the PC sampling buffer size on MI300, MI350, and MI400 series GPUs. Many samples were dropped or invalid at reasonable sampling rates with the smaller buffer.
-- The thread trace decoder now loads the versioned library (`librocprof-trace-decoder.so.<major>.<minor>`) first and falls back to the unversioned name. This lets `rocprofv3 --att` work on installs that ship only the versioned library, such as TheRock runtime wheels.
+- The thread trace decoder now tries the versioned library names (`librocprof-trace-decoder.so.<major>`, then `.so.<major>.<minor>`, then `.so.<major>.<minor>.<patch>`) before falling back to the unversioned name. This lets `rocprofv3 --att` work on installs that ship only the versioned library, such as TheRock runtime wheels.
 - Tool lifecycle messages are now logged at info level instead of warning. Processes that load a rocprofiler-sdk tool with logging disabled no longer write these messages to stderr.
 
 ### Resolved issues
