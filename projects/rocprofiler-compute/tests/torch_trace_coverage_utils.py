@@ -4158,7 +4158,7 @@ def print_torch_trace_coverage_session_header(
         )
     print()
     reproduce_cmd = (
-        "pytest tests/integration/test_torch_trace_coverage.py -m torch_trace_coverage "
+        "pytest tests/integration/test_torch_trace_coverage.py "
         f"--coverage-seed={seed} --coverage-n={sample_budget}"
     )
     warnings.warn(
