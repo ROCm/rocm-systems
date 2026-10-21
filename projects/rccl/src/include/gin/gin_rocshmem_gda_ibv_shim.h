@@ -4,14 +4,14 @@
  * SPDX-License-Identifier: MIT
  ************************************************************************/
 
-#ifndef GIN_IBV_SHIM_H_
-#define GIN_IBV_SHIM_H_
+#ifndef GIN_ROCSHMEM_GDA_IBV_SHIM_H_
+#define GIN_ROCSHMEM_GDA_IBV_SHIM_H_
 
 #include <cstdint>
 #include <cstddef>
 #include <sys/types.h>
 
-// rccl-side IB verbs backend for the GIN QP factory. See gin_ibv_shim.cc for the
+// rccl-side IB verbs backend for the GIN QP factory. See gin_rocshmem_gda_ibv_shim.cc for the
 // full rationale; in short: (1) it supplies the extended verbs the factory needs
 // that rccl's wrap_ibv_* layer did not expose, and (2) it is the single seam that
 // lets the factory use rccl's ibv layer despite rccl's ibvcore.h and rocSHMEM's
@@ -70,4 +70,4 @@ ssize_t gin_ibv_query_gid_table(struct ibv_context* context, struct ibv_gid_entr
                                 uint32_t flags);
 int gin_ibv_is_dmabuf_supported(struct ibv_pd* pd);
 
-#endif  // GIN_IBV_SHIM_H_
+#endif  // GIN_ROCSHMEM_GDA_IBV_SHIM_H_

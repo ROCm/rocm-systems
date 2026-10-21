@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: MIT
  ************************************************************************/
 
-// gin_ibv_shim.cc — GIN QP factory's IB verbs backend, built on rccl's wrap_ibv_*.
+// gin_rocshmem_gda_ibv_shim.cc — GIN rocshmem-GDA QP factory's IB verbs backend,
+// built on rccl's wrap_ibv_*.
 //
 // WHY THIS FILE EXISTS
 // --------------------
@@ -27,9 +28,9 @@
 //
 // It also restores rocSHMEM's direct-return convention (pointer-or-NULL / int)
 // over rccl's out-param + ncclResult_t one, keeping the factory call sites a
-// mechanical `ibv.` -> `gin_ibv_` rename. See gin_ibv_shim.h.
+// mechanical `ibv.` -> `gin_ibv_` rename. See gin_rocshmem_gda_ibv_shim.h.
 
-#include "gin/gin_ibv_shim.h"
+#include "gin/gin_rocshmem_gda_ibv_shim.h"
 #include "ibvwrap.h"
 
 int gin_ibv_available(void) {
