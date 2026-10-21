@@ -37,6 +37,8 @@
 // The headers that declare the names renamed below, so this file satisfies its own ordering rule and a unit following
 // the recipe above cannot get it wrong by forgetting one. Include guards make the includer's own copies free.
 #include <dirent.h>
+#include <pthread.h>
+#include <time.h>
 #include <netdb.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
@@ -82,6 +84,10 @@ int micro_closedir(DIR*);
 ssize_t micro_readlink(const char*, char*, size_t);
 int micro_ioctl(int, unsigned long, ...);
 int micro_atexit(void (*)(void));
+int micro_clock_gettime(clockid_t, struct timespec*);
+int micro_posix_memalign(void**, size_t, size_t);
+int micro_pthread_create(pthread_t*, const pthread_attr_t*, void* (*)(void*), void*);
+int micro_nanosleep(const struct timespec*, struct timespec*);
 }  // extern "C"
 
 #define write micro_write
@@ -118,3 +124,7 @@ int micro_atexit(void (*)(void));
 #define readlink micro_readlink
 #define ioctl micro_ioctl
 #define atexit micro_atexit
+#define clock_gettime micro_clock_gettime
+#define posix_memalign micro_posix_memalign
+#define pthread_create micro_pthread_create
+#define nanosleep micro_nanosleep
