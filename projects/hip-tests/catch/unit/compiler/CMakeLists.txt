@@ -134,8 +134,7 @@ if(HIP_PLATFORM MATCHES "amd")
   add_dependencies(hipSpirvTest Catch2::Catch2)
   add_dependencies(CompilerTest hipSpirvTest)
 
-  # Install hipSpirvTest and register it with ctest.
-  set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_PROGRAMS
                ${CMAKE_CURRENT_BINARY_DIR}/hipSpirvTest${CMAKE_EXECUTABLE_SUFFIX})
   set(SPIRV_TEST_CTEST_FILE ${CMAKE_CURRENT_BINARY_DIR}/hipSpirvTest-spirv_include.cmake)
   file(WRITE ${SPIRV_TEST_CTEST_FILE}
