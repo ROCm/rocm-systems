@@ -16,6 +16,7 @@ from cpu_policy import (
     BENCHMARK_ALLOWED_CPUS,
     POLICY_CPUS,
     CPU_ROOT,
+    check_bpfland,
     check_policy,
     cpu_list,
     format_cpus,
@@ -62,10 +63,7 @@ def check_cpus() -> None:
 
 def check_scheduler() -> tuple[str, int]:
     sequence = int((SCHED_ROOT / 'enable_seq').read_text())
-    state = (SCHED_ROOT / 'state').read_text().strip()
-    name = (SCHED_ROOT / 'root/ops').read_text().strip()
-    if state != 'enabled' or not name.startswith('bpfland_'):
-        raise RuntimeError('Bpfland must be enabled')
+    name = check_bpfland(SCHED_ROOT)
     return name, sequence
 
 

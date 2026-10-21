@@ -4,6 +4,10 @@ Reduce benchmark noise with CPU reservation, fixed frequency, idle controls,
 and Bpfland. Configuration files are in
 [`scripts/benchmark-runner`](../scripts/benchmark-runner/).
 
+Provision every runner labeled `rocjitsu-benchmark` before enabling the updated
+workflow. Container jobs require the installed scripts, `benchmark.slice`, and
+Bpfland; the workflow doesn't install them.
+
 ## Prerequisites
 
 - A Linux host with systemd, cgroup v2, sched_ext support, Python 3.10 or newer, and
@@ -107,10 +111,19 @@ read-only so setup and validation use the same policy version. The container
 runs under `benchmark.slice`, inheriting its swap limit; the harness uses CPUs
 `0-15` and wrapped workloads use `16-63`.
 
-To deploy script or policy updates, stop the runner, reinstall the scripts and
-any changed systemd files, run `systemctl daemon-reload`, restart
-`rocjitsu-bpfland.service`, then start the runner. Checkout changes take effect
-after installation. Reboot if CPU allocation drop-ins changed.
+To deploy script or policy updates:
+
+1. Stop all runners labeled `rocjitsu-benchmark` before replacing installed files.
+2. Reinstall the scripts and any changed systemd files, run
+   `systemctl daemon-reload`, and restart `rocjitsu-bpfland.service`. Reboot if
+   CPU allocation drop-ins changed. Checkout changes take effect after installation.
+3. For changes to measurement conditions (CPU layout, frequency, idle controls,
+   or scheduler), bump `-stable-runner-vN` in the workflow's `--environment-id`.
+   Deploy the matching policy to every runner before resuming jobs. Keep runners
+   stopped until the installed policy and workflow label agree; cancel queued
+   runs using an older policy label rather than running them under new settings.
+
+Keep the version unchanged for refactors that preserve measurement conditions.
 
 ## Run benchmarks
 

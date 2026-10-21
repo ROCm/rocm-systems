@@ -39,17 +39,17 @@ class CpuPolicyTest(unittest.TestCase):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name)
-        self.put("online", "0-127")
-        for cpu in range(128):
-            physical = cpu % 64
+        self.put("online", cpu_policy.format_cpus(cpu_policy.ONLINE_CPUS))
+        for cpu in sorted(cpu_policy.ONLINE_CPUS):
+            physical = cpu % cpu_policy.PHYSICAL_CORE_COUNT
             self.put(
                 f"cpu{cpu}/topology/thread_siblings_list",
-                f"{physical},{physical + 64}",
+                f"{physical},{physical + cpu_policy.PHYSICAL_CORE_COUNT}",
             )
-        for cpu in range(64):
+        for cpu in range(cpu_policy.PHYSICAL_CORE_COUNT):
             self.put(f"cpu{cpu}/acpi_cppc/nominal_freq", "3200")
             for name, value in {
-                "related_cpus": f"{cpu} {cpu + 64}",
+                "related_cpus": f"{cpu} {cpu + cpu_policy.PHYSICAL_CORE_COUNT}",
                 "cpuinfo_min_freq": "1000000",
                 "cpuinfo_max_freq": "6000000",
                 "scaling_min_freq": "4000000",
@@ -216,10 +216,10 @@ class CpuPolicyTest(unittest.TestCase):
         cpu_policy.check_policy(self.root)
 
     def test_one_policy_per_logical_cpu(self):
-        for cpu in range(128):
-            if cpu >= 64:
+        for cpu in sorted(cpu_policy.ONLINE_CPUS):
+            if cpu >= cpu_policy.PHYSICAL_CORE_COUNT:
                 shutil.copytree(
-                    self.root / f"cpufreq/policy{cpu - 64}",
+                    self.root / f"cpufreq/policy{cpu - cpu_policy.PHYSICAL_CORE_COUNT}",
                     self.root / f"cpufreq/policy{cpu}",
                 )
                 self.put(f"cpu{cpu}/acpi_cppc/nominal_freq", "3200")
@@ -327,6 +327,77 @@ class CpuPolicyTest(unittest.TestCase):
                     text=True,
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
+
+
+class SchedulerTest(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+        (self.root / 'root').mkdir()
+        (self.root / 'enable_seq').write_text('7')
+        self.set_scheduler('enabled', 'bpfland_test')
+        scheduler_root = patch.object(benchmark_run, 'SCHED_ROOT', self.root)
+        scheduler_root.start()
+        self.addCleanup(scheduler_root.stop)
+
+    def set_scheduler(self, state: str, name: str):
+        (self.root / 'state').write_text(state)
+        (self.root / 'root/ops').write_text(name)
+
+    def test_readiness_accepts_bpfland(self):
+        host_setup.wait_ready(self.root)
+        self.assertEqual(benchmark_run.check_scheduler(), ('bpfland_test', 7))
+
+    def test_readiness_rejects_wrong_scheduler_or_state(self):
+        for state, name in (
+            ('enabled', 'scx_lavd_something'),
+            ('disabled', 'bpfland_test'),
+        ):
+            with self.subTest(state=state, name=name):
+                self.set_scheduler(state, name)
+                with patch.object(
+                    host_setup.time,
+                    'monotonic',
+                    side_effect=(0, host_setup.SCHEDULER_READY_TIMEOUT_SECONDS + 1),
+                ):
+                    with self.assertRaisesRegex(
+                        ValueError, 'Bpfland did not become ready'
+                    ):
+                        host_setup.wait_ready(self.root)
+                with self.assertRaisesRegex(RuntimeError, 'Bpfland must be enabled'):
+                    benchmark_run.check_scheduler()
+
+    def test_readiness_waits_for_bpfland(self):
+        self.set_scheduler('enabled', 'scx_lavd_something')
+        with patch.object(
+            host_setup.time,
+            'monotonic',
+            side_effect=(0, 0, host_setup.SCHEDULER_READY_TIMEOUT_SECONDS + 1),
+        ):
+            with patch.object(
+                host_setup.time,
+                'sleep',
+                side_effect=lambda _: self.set_scheduler('enabled', 'bpfland_test'),
+            ) as sleep:
+                host_setup.wait_ready(self.root)
+                sleep.assert_called_once_with(host_setup.SCHEDULER_READY_POLL_SECONDS)
+        self.assertEqual(benchmark_run.check_scheduler(), ('bpfland_test', 7))
+
+    def test_readiness_waits_for_scheduler_files(self):
+        (self.root / 'root/ops').unlink()
+        with patch.object(
+            host_setup.time,
+            'monotonic',
+            side_effect=(0, 0, host_setup.SCHEDULER_READY_TIMEOUT_SECONDS + 1),
+        ):
+            with patch.object(
+                host_setup.time,
+                'sleep',
+                side_effect=lambda _: self.set_scheduler('enabled', 'bpfland_test'),
+            ) as sleep:
+                host_setup.wait_ready(self.root)
+                sleep.assert_called_once_with(host_setup.SCHEDULER_READY_POLL_SECONDS)
 
 
 class CgroupTest(unittest.TestCase):

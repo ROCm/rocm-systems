@@ -7,16 +7,25 @@ from collections.abc import Iterable
 from pathlib import Path
 
 CPU_ROOT = Path('/sys/devices/system/cpu')
-ONLINE_CPUS = frozenset(range(128))
-BENCHMARK_CPUS = frozenset(range(16, 64))
-BENCHMARK_SIBLING_CPUS = frozenset(range(80, 128))
+PHYSICAL_CORE_COUNT = 64
+ONLINE_CPUS = frozenset(range(2 * PHYSICAL_CORE_COUNT))
+BENCHMARK_CPUS = frozenset(range(16, PHYSICAL_CORE_COUNT))
+BENCHMARK_SIBLING_CPUS = frozenset(cpu + PHYSICAL_CORE_COUNT for cpu in BENCHMARK_CPUS)
 POLICY_CPUS = BENCHMARK_CPUS | BENCHMARK_SIBLING_CPUS
-BENCHMARK_ALLOWED_CPUS = frozenset(range(64))
+BENCHMARK_ALLOWED_CPUS = frozenset(range(PHYSICAL_CORE_COUNT))
 IDLE_DISABLE_LATENCY_US = 10
 
 
 def read(path: Path) -> str:
     return path.read_text().strip()
+
+
+def check_bpfland(sched_root: Path) -> str:
+    state = read(sched_root / 'state')
+    name = read(sched_root / 'root/ops')
+    if state != 'enabled' or not name.startswith('bpfland_'):
+        raise RuntimeError('Bpfland must be enabled')
+    return name
 
 
 def cpu_list(path: Path) -> set[int]:
@@ -59,8 +68,9 @@ def policy_settings(cpu_root: Path) -> dict[Path, str]:
         )
     for cpu in sorted(ONLINE_CPUS):
         path = cpu_root / f'cpu{cpu}/topology/thread_siblings_list'
-        if cpu_list(path) != {cpu % 64, cpu % 64 + 64}:
-            raise ValueError(f'{path}: expected SMT siblings N,N+64')
+        physical = cpu % PHYSICAL_CORE_COUNT
+        if cpu_list(path) != {physical, physical + PHYSICAL_CORE_COUNT}:
+            raise ValueError(f'{path}: expected SMT siblings N,N+{PHYSICAL_CORE_COUNT}')
 
     settings = {}
     covered = set()

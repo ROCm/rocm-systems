@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 import time
 
-from cpu_policy import CPU_ROOT, check_policy, policy_settings, read
+from cpu_policy import CPU_ROOT, check_bpfland, check_policy, policy_settings, read
 
 SCHED_ROOT = Path('/sys/kernel/sched_ext')
 SCHEDULER_READY_TIMEOUT_SECONDS = 30
@@ -37,9 +37,9 @@ def wait_ready(sched_root: Path) -> None:
     deadline = time.monotonic() + SCHEDULER_READY_TIMEOUT_SECONDS
     while True:
         try:
-            if read(sched_root / 'state') == 'enabled':
-                return
-        except OSError:
+            check_bpfland(sched_root)
+            return
+        except (OSError, RuntimeError):
             pass
         if time.monotonic() >= deadline:
             raise ValueError(
