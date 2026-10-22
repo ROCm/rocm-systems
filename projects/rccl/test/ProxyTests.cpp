@@ -1032,9 +1032,8 @@ TEST(ProxyTests, ProxyServiceDoesNotHangOnExternalBadMagic)
             ncclProxyState proxyState = {};
             proxyState.listenSock = listenSock;
             proxyState.abortFlag = const_cast<uint32_t*>(&abortFlag);
-            // Avoid HIP device initialization latency; the proxy service
-            // continues with a warning when this deliberately invalid device
-            // is used by the host-only regression.
+            // Skip selecting a valid HIP device for this host-only regression;
+            // the proxy service continues after the expected warning.
             proxyState.cudaDev = -1;
 
             const int externalFd = socket(AF_INET, SOCK_STREAM, 0);
