@@ -176,12 +176,17 @@ class BannerLogsTest(unittest.TestCase):
                              ["decode_NODE2.log", "decode_NODE3.log",
                               "prefill_NODE0.log", "prefill_NODE1.log"])
             ok, msg = tm.verify_rccl_replacement(
-                run_dir, {"version": "2.32.3-develop:2b88119"})
+                run_dir, {"version": "2.32.3-develop:2b88119"}, 4)
             self.assertTrue(ok, msg)
             (logs / "decode_NODE3.log").write_text("died before init\n")
             ok, _ = tm.verify_rccl_replacement(
-                run_dir, {"version": "2.32.3-develop:2b88119"})
+                run_dir, {"version": "2.32.3-develop:2b88119"}, 4)
             self.assertFalse(ok)
+            (logs / "decode_NODE3.log").unlink()
+            ok, msg = tm.verify_rccl_replacement(
+                run_dir, {"version": "2.32.3-develop:2b88119"}, 4)
+            self.assertFalse(ok)
+            self.assertIn("node(s) 3 of 4", msg)
 
 
 class AllocationScriptTest(TempWork):
@@ -209,8 +214,12 @@ class AllocationScriptTest(TempWork):
         self.assertIn('--ntasks="${SLURM_JOB_NUM_NODES}" --ntasks-per-node=1', lines[cleanup])
         self.assertTrue(lines[cleanup].endswith(" ".join(images) + " || true"))
         self.assertTrue((self.work / "ab" / "cleanup_images.sh").is_file())
+        # Node workspaces are cleaned up even when no image was built; the
+        # stock base is only the helper, never removed.
         _, script = self.run_allocation(WORKLOAD, {})
-        self.assertNotIn("cleanup_images.sh", script)
+        cleanup = next(line for line in script.splitlines() if "cleanup_images.sh" in line)
+        self.assertTrue(cleanup.endswith(
+            "cleanup_images.sh " + tm.WORKLOAD_CONFIGS[WORKLOAD]["base_image"] + " || true"))
 
     def test_dns_preflight_for_sglang_only(self):
         _, script = self.run_allocation(WORKLOAD, {})

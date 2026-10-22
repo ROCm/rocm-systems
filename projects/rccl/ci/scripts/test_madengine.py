@@ -807,7 +807,7 @@ def verify_rccl_replacement(
     logged = {
         int(m.group(1))
         for log_file in node_logs
-        if (m := re.search(r"_node_(\d+)\.out$", log_file.name))
+        if (m := re.search(r"_(?:node_|NODE)(\d+)\.(?:out|log)$", log_file.name))
     }
     missing = sorted(set(range(nodes)) - logged)
     if missing:
