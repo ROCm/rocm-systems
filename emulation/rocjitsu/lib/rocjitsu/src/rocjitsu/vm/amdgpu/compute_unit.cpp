@@ -159,10 +159,7 @@ ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemo
       wf_size_(wf_size), vgpr_storage_lane_count_(vgpr_storage_lane_count),
       vgpr_allocation_block_size_(vgpr_allocation_block_size),
       scratch_slots_per_cu_(config.num_wf_slots),
-      setreg_vgpr_msb_fixup_(has_setreg_vgpr_msb_fixup(config)),
-      decoder_(config.target == ROCJITSU_CODE_TARGET_INVALID
-                   ? Decoder::create(config.arch)
-                   : Decoder::create(default_isa_target_registry(), config.target)),
+      setreg_vgpr_msb_fixup_(has_setreg_vgpr_msb_fixup(config)), decoder_(create_decoder(config)),
       l2_(l2), l1_scalar_(l2),
       l1_vector_(l2, memory ? memory->transaction_policy() : MemoryTransactionPolicy{}),
       lds_(config.lds_size_kb), scalar_mem_pipeline_(&l1_scalar_),
@@ -387,6 +384,8 @@ Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint6
        << std::hex << pc << std::dec << " wg=" << wg_id << " pid=" << wf->process_id();
   });
 
+  if (wave_launch_handler_)
+    wave_launch_handler_(*wf);
   schedule_work();
   return wf;
 }
@@ -2369,9 +2368,9 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
 }
 
 template <bool EnableAsync>
-[[gnu::always_inline]] inline bool ComputeUnitCore::step_impl(MmaAdmissionCache *admission,
-                                                              uint32_t async_wave_size,
-                                                              bool has_accvgprs) {
+[[gnu::always_inline]] inline bool
+ComputeUnitCore::step_impl(MmaAdmissionCache *admission, uint32_t async_wave_size,
+                           bool has_accvgprs, uint64_t selected_slots, uint64_t *issued) {
   // A wave reaching s_endpgm in this loop retires its workgroup; the guard sends
   // the CP its completion after the lock is released. See WaveStateGuard.
   WaveStateGuard wave_state_lock(*this);
@@ -2393,6 +2392,9 @@ template <bool EnableAsync>
         }
         wf->set_sleep_cycles(0);
       }
+      const uint64_t slot_bit = uint64_t{1} << wf->wf_id();
+      if ((selected_slots & slot_bit) == 0)
+        continue;
       const bool single_step = wf->debug_single_step();
       if constexpr (EnableAsync) {
         issue_async_instruction(wf.get(), admission, async_wave_size, has_accvgprs);
@@ -2403,6 +2405,8 @@ template <bool EnableAsync>
       } else {
         issue_instruction(wf.get());
       }
+      if (issued)
+        *issued |= slot_bit;
       if (single_step && !wf->in_trap_handler() && !wf->debug_halted() && single_step_handler_)
         single_step_handler_(*wf);
     }
@@ -2438,6 +2442,22 @@ template <bool EnableAsync>
 }
 
 bool ComputeUnitCore::step() { return step_impl<false>(); }
+
+std::unique_ptr<Decoder> ComputeUnitCore::create_decoder(const Config &config) {
+  return config.target == ROCJITSU_CODE_TARGET_INVALID
+             ? Decoder::create(config.arch)
+             : Decoder::create(default_isa_target_registry(), config.target);
+}
+
+uint64_t ComputeUnitCore::run_issue_cycle(uint64_t selected_slots) {
+  assert(wfs_.size() <= 64 && "issue-cycle slot masks cover at most 64 wave slots");
+  const InstructionFetchScope fetch_scope(*this);
+  // The clocked driver times each instruction itself, so it takes the
+  // ordinary issue path rather than the batched asynchronous MMA window.
+  uint64_t issued = 0;
+  (void)step_impl<false>(nullptr, 0, false, selected_slots, &issued);
+  return issued;
+}
 
 // Explicit template instantiations for all AMDGPU ISAs and execution modes.
 #define ROCJITSU_CU_INSTANTIATE(ISA_TYPE)                                                          \
