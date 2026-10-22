@@ -113,6 +113,43 @@ def test_attach_output_directory_is_not_validated_in_launcher_context(
         rocprofv3.run(app_args, args)
 
 
+def test_relative_output_directory_is_anchored_to_launcher_cwd(
+    rocprofv3, tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    args, app_args = rocprofv3.parse_arguments(
+        ["--kernel-trace", "-d", "results", "--", "/bin/true"]
+    )
+    args = rocprofv3.get_args(args, rocprofv3.dotdict({}))
+
+    class ApplicationLaunched(Exception):
+        pass
+
+    def application_launched(*_args, **_kwargs):
+        assert _kwargs["env"]["ROCPROF_OUTPUT_PATH"] == str(tmp_path / "results")
+        raise ApplicationLaunched
+
+    monkeypatch.setattr(rocprofv3, "resolve_library_path", lambda path, *_args: path)
+    monkeypatch.setattr(rocprofv3.os, "execvpe", application_launched)
+
+    with pytest.raises(ApplicationLaunched):
+        rocprofv3.run(app_args, args)
+
+
+def test_echo_skips_output_directory_validation(rocprofv3, tmp_path, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "results").write_text("echo mode does not create output\n")
+    args, app_args = rocprofv3.parse_arguments(
+        ["--kernel-trace", "--echo", "-d", "results", "--", "/bin/true"]
+    )
+    args = rocprofv3.get_args(args, rocprofv3.dotdict({}))
+    forbid_application_launch(rocprofv3, monkeypatch)
+    monkeypatch.setattr(rocprofv3, "resolve_library_path", lambda path, *_args: path)
+
+    assert rocprofv3.run(app_args, args) is None
+    assert "command: ['/bin/true']" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("invalid_pass", [1, 2])
 def test_multipass_output_directory_fails_before_launch(
     rocprofv3, tmp_path, capsys, monkeypatch, invalid_pass
@@ -224,6 +261,39 @@ def test_non_output_mpi_rank_does_not_validate_output_directory(
 
     with pytest.raises(ApplicationLaunched):
         rocprofv3.run(app_args, args)
+
+
+def test_selected_mpi_rank_validates_output_directory(
+    rocprofv3, tmp_path, capsys, monkeypatch
+):
+    output_path = tmp_path / "output"
+    output_path.write_text("not a directory\n")
+    monkeypatch.setenv("TEST_MPI_RANK", "0")
+    monkeypatch.setenv("TEST_MPI_SIZE", "2")
+    forbid_application_launch(rocprofv3, monkeypatch)
+
+    with pytest.raises(SystemExit) as exc_info:
+        rocprofv3.main(
+            [
+                "--kernel-trace",
+                "--profile-mpi-ranks",
+                "0",
+                "--mpi-world-rank-variable",
+                "TEST_MPI_RANK",
+                "--mpi-world-size-variable",
+                "TEST_MPI_SIZE",
+                "-d",
+                str(output_path),
+                "--",
+                "/bin/true",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    assert capsys.readouterr().err == (
+        f"[rocprofv3] Fatal error: Output path '{output_path}' already exists "
+        "and is not a directory\n"
+    )
 
 
 def test_existing_output_directory_is_accepted(rocprofv3, tmp_path):

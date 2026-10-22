@@ -109,6 +109,27 @@ def fatal_error(msg, *args, exit_code=1):
     sys.exit(exit_code)
 
 
+def is_output_path_prevalidatable(output_path):
+    """Return whether the frontend can validate an output path before launch.
+
+    Args:
+        output_path: Path-like output destination.
+
+    Returns:
+        True for a literal filesystem path, False for empty, stream, or
+        runtime-expanded destinations.
+    """
+    if output_path is None:
+        return False
+
+    output_path = os.fspath(output_path)
+    return bool(
+        output_path
+        and output_path not in ("stdout", "STDOUT", "stderr", "STDERR")
+        and not any(marker in output_path for marker in ("%", "{", "$"))
+    )
+
+
 def validate_output_directory(output_directory):
     """Reject structurally invalid output paths that can be checked before launch.
 
@@ -118,16 +139,10 @@ def validate_output_directory(output_directory):
     Args:
         output_directory: Path-like output destination to validate.
     """
-    if output_directory is None:
+    if not is_output_path_prevalidatable(output_directory):
         return
 
     output_directory = os.fspath(output_directory)
-    if (
-        not output_directory
-        or output_directory in ("stdout", "STDOUT", "stderr", "STDERR")
-        or any(marker in output_directory for marker in ("%", "{", "$"))
-    ):
-        return
 
     # Find the nearest existing component without creating the requested directory.
     existing_path = output_directory
@@ -181,6 +196,9 @@ def validate_output_directory(output_directory):
 def get_effective_output_paths(args, pass_id=None):
     """Resolve the base and optional per-pass output paths.
 
+    Literal relative paths for normal runs are anchored to the launcher's current
+    working directory so validation and target-side output use the same location.
+
     Args:
         args: Launcher arguments containing output_directory and sub_directory.
         pass_id: Optional multipass identifier appended to sub_directory.
@@ -192,6 +210,14 @@ def get_effective_output_paths(args, pass_id=None):
     output_path = (
         args.output_directory if args.output_directory is not None else os.getcwd()
     )
+    if (
+        not getattr(args, "pid", None)
+        and not getattr(args, "echo", False)
+        and is_output_path_prevalidatable(output_path)
+    ):
+        # Validate and propagate the same path even if the target later changes cwd.
+        output_path = os.path.abspath(output_path)
+
     pass_output_path = None
     if pass_id is not None and args.sub_directory is not None:
         pass_output_path = os.path.join(
@@ -202,6 +228,9 @@ def get_effective_output_paths(args, pass_id=None):
 
 def prevalidate_output_paths(args, pass_id=None, should_produce_output=None):
     """Validate output paths that can be resolved safely before launch.
+
+    Attach-mode paths are target-relative, and echo mode launches nothing, so both
+    bypass frontend validation.
 
     Args:
         args: Launcher arguments for the planned run.
@@ -214,9 +243,8 @@ def prevalidate_output_paths(args, pass_id=None, should_produce_output=None):
     """
     output_path, pass_output_path = get_effective_output_paths(args, pass_id)
 
-    # Attach-mode paths are resolved inside the target process, whose cwd and mount
-    # namespace can differ from the attaching process.
-    if args.pid:
+    # Attach paths resolve inside the target process. Echo mode launches nothing.
+    if args.pid or args.echo:
         return output_path, pass_output_path
 
     if should_produce_output is None:
