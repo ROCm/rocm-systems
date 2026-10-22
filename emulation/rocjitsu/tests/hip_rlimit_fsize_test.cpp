@@ -20,14 +20,17 @@ volatile sig_atomic_t file_size_signal = 0;
 void on_file_size_signal(int) { file_size_signal = 1; }
 
 __global__ void write_cookie(unsigned char *data) { data[0] = 0x37; }
+__global__ void copy_cookie(const unsigned char *source, unsigned char *result) {
+  result[0] = source[0];
+}
 
 #define CHECK_HIP(call) ASSERT_EQ((call), hipSuccess)
 
-void check_daemon_host_mapping(size_t bytes) {
+void check_daemon_host_mapping(size_t bytes, bool can_dispatch) {
   const long page_size = sysconf(_SC_PAGESIZE);
   ASSERT_GT(page_size, 0);
   const size_t page = static_cast<size_t>(page_size);
-  ASSERT_LE(2 * page, bytes);
+  ASSERT_LE(3 * page, bytes);
   unsigned char *host = nullptr;
   CHECK_HIP(hipHostMalloc(&host, bytes));
   std::memset(host, 0x5A, 2 * page);
@@ -42,6 +45,20 @@ void check_daemon_host_mapping(size_t bytes) {
         addr)
         << std::strerror(errno);
     EXPECT_EQ(std::memcmp(addr, expected.data(), page), 0);
+    if (can_dispatch) {
+      // Use an untouched page as the result so the kernel must read the remap.
+      auto *result = host + 2 * page;
+      addr[1] = 0xA5;
+      result[0] = 0;
+      copy_cookie<<<1, 1>>>(addr + 1, result);
+      CHECK_HIP(hipGetLastError());
+      CHECK_HIP(hipDeviceSynchronize());
+      EXPECT_EQ(result[0], 0xA5);
+      write_cookie<<<1, 1>>>(addr);
+      CHECK_HIP(hipGetLastError());
+      CHECK_HIP(hipDeviceSynchronize());
+      EXPECT_EQ(addr[0], 0x37);
+    }
   }
   CHECK_HIP(hipHostFree(host));
 }
@@ -130,7 +147,8 @@ void check_application_limit() {
   // COMGR's first-use compilation of HIP copy builtins writes temporary files,
   // independently of rocjitsu. Exercise startup/allocation under early zero;
   // late zero covers copies and dispatch after the runtime's compiler warmup.
-  if (limit.rlim_cur != 0 || (phase && std::strcmp(phase, "late") == 0)) {
+  const bool can_dispatch = limit.rlim_cur != 0 || (phase && std::strcmp(phase, "late") == 0);
+  if (can_dispatch) {
     std::vector<unsigned char> source(bytes, 0xA5), result(bytes);
     CHECK_HIP(hipMemcpy(device, source.data(), bytes, hipMemcpyHostToDevice));
     write_cookie<<<1, 1>>>(device);
@@ -143,7 +161,7 @@ void check_application_limit() {
   CHECK_HIP(hipFree(device));
   const char *mode = std::getenv("RJ_TEST_MODE");
   if (mode && std::strcmp(mode, "daemon") == 0)
-    check_daemon_host_mapping(bytes);
+    check_daemon_host_mapping(bytes, can_dispatch);
   const char *vmm = std::getenv("RJ_TEST_VMM");
   check_vmm(bytes, vmm && std::strcmp(vmm, "allow-rejection") == 0);
   CHECK_HIP(hipDeviceReset());

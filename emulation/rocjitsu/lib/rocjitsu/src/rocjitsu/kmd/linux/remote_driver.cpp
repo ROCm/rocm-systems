@@ -6,6 +6,7 @@
 
 #include "rocjitsu/kmd/linux/remote_driver.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
+#include "rocjitsu/kmd/linux/libc_passthrough.h"
 #include "rocjitsu/kmd/linux/linux_kfd.h"
 #include "rocjitsu/kmd/linux/memory_backing.h"
 #include "rocjitsu/kmd/linux/rpc.h"
@@ -49,6 +50,16 @@
 
 namespace rocjitsu {
 namespace {
+
+// Reply descriptors are temporary driver-owned aliases. Cleanup must preserve
+// the errno from a failed RPC, size check, or mapping without re-entering hooks.
+struct MmapReplyFdTraits : PassthroughFdTraits {
+  static void close(int fd) noexcept {
+    const int saved_errno = errno;
+    PassthroughFdTraits::close(fd);
+    errno = saved_errno;
+  }
+};
 
 constexpr bool has_embedded_pointers(unsigned long request) {
   switch (canonical_ioctl_request(request)) {
@@ -1388,9 +1399,8 @@ void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t o
   // Send the mmap RPC so the daemon creates its own mapping for GPU simulation.
   int memfd = -1;
   int rc = send_mmap(addr, length, prot, flags, offset, &memfd);
+  const util::BasicUniqueHandle<MmapReplyFdTraits> reply_fd{memfd};
   if (rc != 0) {
-    if (memfd >= 0)
-      syscall(SYS_close, memfd);
     // send_mmap() reports a negative errno, but only its transport failures
     // leave errno set as a side effect; the poison paths and the daemon's own
     // result do not, so without this the caller would read whatever errno this
@@ -1408,7 +1418,7 @@ void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t o
 
   // Resolve the memfd for this allocation: prefer the mmap response fd, fall
   // back to the stored ALLOC_MEMORY fd (same underlying file, different fd).
-  int mapping_memfd = memfd;
+  int mapping_memfd = reply_fd.get();
   uint64_t type = static_cast<uint64_t>(offset) & (0x3ULL << 62);
   if (mapping_memfd < 0 && type == 0) {
     uint64_t handle = static_cast<uint64_t>(offset) >> 12;
@@ -1458,14 +1468,10 @@ void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t o
     if (mapped != MAP_FAILED)
       syscall(SYS_madvise, mapped, length, MADV_POPULATE_WRITE);
 
-    if (memfd >= 0 && memfd != mapping_memfd)
-      syscall(SYS_close, memfd);
     return mapped;
   }
 
   // No memfd — anonymous fallback for doorbell/event pages.
-  if (memfd >= 0)
-    syscall(SYS_close, memfd);
   int mflags = MAP_ANONYMOUS | MAP_PRIVATE;
   if (flags & MAP_FIXED)
     mflags |= MAP_FIXED;
