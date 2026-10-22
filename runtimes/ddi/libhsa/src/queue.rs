@@ -2056,12 +2056,7 @@ pub unsafe extern "C" fn hsa_amd_profiling_get_async_copy_time(
             {
                 return ERROR;
             }
-            let Some(profile) = runtime
-                .signal_state
-                .async_signal_refs
-                .get(&(signal.handle as usize))
-                .and_then(|record| record.copy_profile)
-            else {
+            let Some(profile) = runtime.signal_state.copy_profile(signal) else {
                 return ERROR;
             };
             let device = match profile.clock {
