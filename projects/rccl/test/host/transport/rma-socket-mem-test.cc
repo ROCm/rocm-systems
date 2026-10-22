@@ -86,7 +86,15 @@ TEST_F(RmaSocketMemMicrotest, GdrPtr_InvalidHandleMappingOrRangeIsRejectedAndCle
 
   EXPECT_EQ(ncclRmaSocketProxyGdrPtr(nullptr, data.data(), 1, &result), ncclInternalError);
   EXPECT_EQ(result, nullptr);
+  result = reinterpret_cast<void*>(0x1);
+  handle.gdr.barPtr = bar.data();
+  EXPECT_EQ(ncclRmaSocketProxyGdrPtr(&handle, data.data(), 1, &result), ncclInternalError);
+  EXPECT_EQ(result, nullptr);
+  result = reinterpret_cast<void*>(0x1);
   handle.gdr.mapped = 1;
+  handle.gdr.barPtr = nullptr;
+  EXPECT_EQ(ncclRmaSocketProxyGdrPtr(&handle, data.data(), 1, &result), ncclInternalError);
+  EXPECT_EQ(result, nullptr);
   handle.gdr.barPtr = bar.data();
   const void* beforeBase = reinterpret_cast<const void*>(reinterpret_cast<uintptr_t>(data.data()) - 1);
   EXPECT_EQ(ncclRmaSocketProxyGdrPtr(&handle, beforeBase, 1, &result), ncclInvalidArgument);

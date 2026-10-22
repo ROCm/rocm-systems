@@ -17,7 +17,6 @@
 #include "ScopedHook.h"
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
-#include "fakes/os_fakes.h"
 #include "fakes/socket_fakes.h"
 #include "fakes/transport_net_socket_common_fakes.h"
 #include "fakes/transport_net_socket_fakes.h"
@@ -37,7 +36,6 @@ class RmaSocketMicrotest : public ::testing::Test {
     ResetTransportNetSocketCommonFakes();
     ResetTransportNetSocketFakes();
     ResetSocketFakes();
-    ResetOsFakes();
     ResetHipFakes();
     ResetNcclFakes();
   }
@@ -323,7 +321,7 @@ TEST_F(RmaSocketMicrotest, EnqueueRespondGetData_QueuesReplyWithRequestDestinati
   ncclRmaSocketProxyMrHandle handle{};
 
   ASSERT_EQ(ncclRmaSocketProxyEnqueueRespondGetData(&scene.senders[0], &request, ncclSuccess, &source,
-                                                    NCCL_PTR_HOST, &handle, sizeof(source)),
+                                                    NCCL_PTR_CUDA, &handle, sizeof(source)),
             ncclSuccess);
   const auto& task = scene.senders[0].tasks[0];
   EXPECT_EQ(task.controlMsg.type, ncclRmaSocketProxyMsgTypeRespondGetData);
@@ -332,6 +330,7 @@ TEST_F(RmaSocketMicrotest, EnqueueRespondGetData_QueuesReplyWithRequestDestinati
   EXPECT_EQ(task.controlMsg.dstOff, 3u);
   EXPECT_EQ(task.srcPtr, &source);
   EXPECT_EQ(task.srcHandle, &handle);
+  EXPECT_EQ(task.srcType, NCCL_PTR_CUDA);
   EXPECT_EQ(task.size, sizeof(source));
   EXPECT_EQ(ncclRmaSocketProxyEnqueueRespondGetData(nullptr, &request, 0, nullptr, 0, nullptr, 0),
             ncclInvalidArgument);
@@ -519,8 +518,8 @@ TEST_F(RmaSocketMicrotest, ValidatePutArgs_DataPutPublishesResolvedSourceAndDest
   Scene scene;
   std::array<unsigned char, 16> source{};
   std::array<unsigned char, 16> destination{};
-  auto src = scene.MakeMr(source.data(), source.size(), NCCL_PTR_HOST, 3);
-  auto dst = scene.MakeMr(destination.data(), destination.size(), NCCL_PTR_CUDA, 4);
+  auto src = scene.MakeMr(source.data(), source.size(), NCCL_PTR_CUDA, 3);
+  auto dst = scene.MakeMr(destination.data(), destination.size(), NCCL_PTR_HOST, 4);
   ncclRmaSocketProxyPutArgs args{};
 
   ASSERT_EQ(ncclRmaSocketProxyValidatePutArgs(scene.contexts.data(), 0, 2, &src, 5, 4, &dst, 1, false, 0,
@@ -529,7 +528,7 @@ TEST_F(RmaSocketMicrotest, ValidatePutArgs_DataPutPublishesResolvedSourceAndDest
   EXPECT_EQ(args.ctx, &scene.contexts[0]);
   EXPECT_EQ(args.srcPtr, source.data() + 2);
   EXPECT_EQ(args.srcHandle, &src);
-  EXPECT_EQ(args.srcType, NCCL_PTR_HOST);
+  EXPECT_EQ(args.srcType, NCCL_PTR_CUDA);
   EXPECT_EQ(args.dstMrId, 4u);
   EXPECT_EQ(args.dstOff, 4u);
   EXPECT_EQ(args.opFlags, 0u);
@@ -641,7 +640,7 @@ TEST_F(RmaSocketMicrotest, IPut_ValidRequestQueuesWireTaskAndReturnsCompletionOb
   Scene scene;
   std::array<unsigned char, 16> source{};
   std::array<unsigned char, 16> destination{};
-  auto src = scene.MakeMr(source.data(), source.size(), NCCL_PTR_HOST, 3);
+  auto src = scene.MakeMr(source.data(), source.size(), NCCL_PTR_CUDA, 3);
   auto dst = scene.MakeMr(destination.data(), destination.size(), NCCL_PTR_HOST, 4);
   void* request = nullptr;
 
@@ -655,6 +654,8 @@ TEST_F(RmaSocketMicrotest, IPut_ValidRequestQueuesWireTaskAndReturnsCompletionOb
   ASSERT_EQ(scene.senders[1].count, 1);
   const auto& task = scene.senders[1].tasks[0];
   EXPECT_EQ(task.srcPtr, source.data() + 2);
+  EXPECT_EQ(task.srcHandle, &src);
+  EXPECT_EQ(task.srcType, NCCL_PTR_CUDA);
   EXPECT_EQ(task.size, 5u);
   EXPECT_EQ(task.controlMsg.type, ncclRmaSocketProxyMsgTypeIput);
   EXPECT_EQ(task.controlMsg.mrId, 4u);
@@ -984,7 +985,16 @@ TEST_F(RmaSocketMicrotest, Progress_NullContextIsNoOpAndValidContextUsesOwningCo
 
   Scene scene;
   for (auto& receiver : scene.receivers) receiver.recvState = ncclRmaSocketProxyRecvStateClosed;
-  EXPECT_EQ(ncclRmaSocketProxyProgress(scene.contexts.data()), ncclSuccess);
+  scene.senders[1].count = 1;
+  ncclSocket* progressed = nullptr;
+  ScopedHook progress(g_ncclSocketProgress, [&progressed](int, ncclSocket* sock, void*, int, int*, bool*) {
+    progressed = sock;
+    return ncclRemoteError;
+  });
+
+  EXPECT_EQ(ncclRmaSocketProxyProgress(scene.contexts.data()), ncclRemoteError);
+  EXPECT_EQ(progressed, &scene.senders[1].sock);
+  EXPECT_EQ(scene.comm.lastError, ncclRemoteError);
 }
 
 TEST_F(RmaSocketMicrotest, QueryLastError_ReportsStoredTerminalError) {

@@ -48,6 +48,10 @@ static ncclResult_t DefaultSocketProgress(int, struct ncclSocket*, void*, int, i
   FailLoudUnfaked("socket_fakes", "ncclSocketProgress");
 }
 
+static ncclResult_t DefaultSocketClose(struct ncclSocket*, bool) {
+  FailLoudUnfaked("socket_fakes", "ncclSocketClose");
+}
+
 static void DefaultSocketMove(struct ncclSocket*, struct ncclSocket*) {
   FailLoudUnfaked("socket_fakes", "ncclSocketMove");
 }
@@ -102,6 +106,7 @@ std::function<ncclResult_t(struct ncclSocket*, void*, int)> g_ncclSocketSend = D
 std::function<ncclResult_t(struct ncclSocket*, void*, int)> g_ncclSocketRecv = DefaultSocketRecv;
 std::function<ncclResult_t(int, struct ncclSocket*, void*, int, int*, bool*)> g_ncclSocketProgress =
     DefaultSocketProgress;
+std::function<ncclResult_t(struct ncclSocket*, bool)> g_ncclSocketClose = DefaultSocketClose;
 std::function<void(struct ncclSocket*, struct ncclSocket*)> g_ncclSocketMove = DefaultSocketMove;
 std::function<ncclResult_t(struct ncclSocket*, ncclSocketDescriptor*)> g_ncclSocketGetFd =
     DefaultSocketGetFd;
@@ -119,6 +124,7 @@ ASSERT_HOOK_MATCHES_PROD(g_ncclSocketReady, ncclSocketReady);
 ASSERT_HOOK_MATCHES_PROD(g_ncclSocketSend, ncclSocketSend);
 ASSERT_HOOK_MATCHES_PROD(g_ncclSocketRecv, ncclSocketRecv);
 ASSERT_HOOK_MATCHES_PROD(g_ncclSocketProgress, ncclSocketProgress);
+ASSERT_HOOK_MATCHES_PROD(g_ncclSocketClose, ncclSocketClose);
 ASSERT_HOOK_MATCHES_PROD(g_ncclSocketMove, ncclSocketMove);
 ASSERT_HOOK_MATCHES_PROD(g_ncclSocketGetFd, ncclSocketGetFd);
 ASSERT_HOOK_MATCHES_PROD(g_ncclFindInterfaces, ncclFindInterfaces);
@@ -160,6 +166,8 @@ ncclResult_t ncclSocketProgress(int op, struct ncclSocket* sock, void* ptr, int 
   return g_ncclSocketProgress(op, sock, ptr, size, offset, closed);
 }
 
+ncclResult_t ncclSocketClose(struct ncclSocket* sock, bool wait) { return g_ncclSocketClose(sock, wait); }
+
 void ncclSocketMove(struct ncclSocket* dst, struct ncclSocket* src) { g_ncclSocketMove(dst, src); }
 
 ncclResult_t ncclSocketGetFd(struct ncclSocket* sock, ncclSocketDescriptor* fd) {
@@ -185,6 +193,7 @@ void ResetSocketFakes() {
   g_ncclSocketSend = DefaultSocketSend;
   g_ncclSocketRecv = DefaultSocketRecv;
   g_ncclSocketProgress = DefaultSocketProgress;
+  g_ncclSocketClose = DefaultSocketClose;
   g_ncclSocketMove = DefaultSocketMove;
   g_ncclSocketGetFd = DefaultSocketGetFd;
   g_ncclFindInterfaces = DefaultFindInterfaces;
