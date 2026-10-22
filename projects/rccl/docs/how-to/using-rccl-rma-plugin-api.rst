@@ -47,6 +47,12 @@ Version 15 added an ``optFlags`` argument to ``iput``, ``iputSignal`` and
   backend to aggregate compatible requests. This is a hint; it must not change
   the operation's data or ordering semantics.
 
+The GIN proxy sets the hint when that peer's next operation is already queued
+and will be issued in the same progress iteration (see
+``NCCL_GIN_PROXY_POLL_BATCH``). Each run ends with a data operation without the
+hint or with an ``iflush``, so a backend that holds hinted requests, for example
+by delaying a doorbell, should submit them on either.
+
 Compatibility with older plugins
 =================================
 
@@ -74,4 +80,7 @@ interface version and the backend assigned to the communicator.
 
 ``plugins/rma/example`` is a minimal v15 implementation that demonstrates the
 lifecycle, registration and data-operation callback signatures. RCCL loads it
-through the v15 compatibility wrapper.
+through the v15 compatibility wrapper. It reports the GIN proxy device type, so
+``NCCL_GIN_TYPE=2`` keeps it selected as the proxy backend, and at finalize it
+logs how many data operations it received and how many carried the aggregation
+hint.
