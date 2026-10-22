@@ -107,6 +107,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
           CUID_METADATA_STATUS: available
   ```
 
+- **Added Russian localization of the `amd-smi` CLI**.  
+  - Help, messages, and human-readable labels follow the system locale (e.g. `LANG=ru_RU.UTF-8`); `AMDSMI_LANG=en` forces English, and JSON/CSV output and English-locale output are unchanged.
+
 ### Changed
 
 - **Use fwupd daemon to read and write UMA carveout information**.  

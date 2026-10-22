@@ -46,6 +46,8 @@ repos:
     hooks:
     -   id: codespell
         args: ["-w", "--config", "projects/amdsmi/.codespellrc"]
+        # gettext catalogs: msgids mirror CLI keys verbatim (e.g. RENDERD) and msgstrs are not English.
+        exclude: \.(po|pot)$
 
 -   repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0

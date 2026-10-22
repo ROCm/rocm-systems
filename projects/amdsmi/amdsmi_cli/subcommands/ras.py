@@ -12,6 +12,15 @@ from amdsmi_cli_exceptions import AmdSmiInvalidCommandException, AmdSmiInvalidFi
 
 from amdsmi import amdsmi_exception
 
+try:
+    import amdsmi_i18n  # noqa: F401
+except ImportError:  # loaded by file path (e.g. unit tests): make the CLI dir importable
+    import os as _os
+    import sys as _sys
+
+    _sys.path.append(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+from amdsmi_i18n import gettext as _T, lazy as _L
+
 
 class RasCommands:
     def _build_afid_record(self, cper_file, afids=None, code=None):
@@ -57,9 +66,9 @@ class RasCommands:
         if args.afid:
             # Require exactly one of --cper-file / --folder under --afid.
             if bool(args.cper_file) == bool(args.folder):
-                message = (
-                    f"Command '{command}' requires exactly one of"
-                    " '--cper-file' or '--folder'. Run '--help' for more info."
+                message = _L(
+                    "Command '{command}' requires exactly one of '--cper-file' or '--folder'. Run '--help' for more info.",
+                    command=command,
                 )
                 raise AmdSmiInvalidCommandException(command, self.logger.format, message)
 
@@ -68,15 +77,15 @@ class RasCommands:
                 # Refuse to follow a symlinked folder (it could redirect the read
                 # into an arbitrary directory).
                 if folder.is_symlink():
-                    message = (
-                        f"Folder '{folder}' is a symlink; refusing to follow it for"
-                        " '--afid --folder'."
+                    message = _L(
+                        "Folder '{folder}' is a symlink; refusing to follow it for '--afid --folder'.",
+                        folder=folder,
                     )
                     raise AmdSmiInvalidFilePathException(command, self.logger.format, message)
                 if not folder.exists() or not folder.is_dir():
-                    message = (
-                        f"Folder '{folder}' does not exist or is not a directory."
-                        " '--afid --folder' requires a folder of pre-existing CPER records."
+                    message = _L(
+                        "Folder '{folder}' does not exist or is not a directory. '--afid --folder' requires a folder of pre-existing CPER records.",
+                        folder=folder,
                     )
                     raise AmdSmiInvalidFilePathException(command, self.logger.format, message)
         elif args.cper:
@@ -84,8 +93,9 @@ class RasCommands:
                 folder = Path(args.folder)
                 # Refuse to write into a symlinked folder.
                 if folder.is_symlink():
-                    message = (
-                        f"Folder '{folder}' is a symlink; refusing to write CPER files into it."
+                    message = _L(
+                        "Folder '{folder}' is a symlink; refusing to write CPER files into it.",
+                        folder=folder,
                     )
                     raise AmdSmiInvalidFilePathException(command, self.logger.format, message)
                 # Create the destination up front (and fail early if we cannot),
@@ -93,7 +103,9 @@ class RasCommands:
                 try:
                     folder.mkdir(parents=True, exist_ok=True)
                 except OSError as e:
-                    message = f"Unable to create or access folder '{folder}': {e}"
+                    message = _L(
+                        "Unable to create or access folder '{folder}': {e}", folder=folder, e=e
+                    )
                     raise AmdSmiInvalidFilePathException(command, self.logger.format, message)
 
     def _decode_afid_folder(self, args):
@@ -109,9 +121,9 @@ class RasCommands:
         cper_paths = sorted(folder.glob("*.cper"))
         if not cper_paths:
             command = " ".join(sys.argv[1:])
-            message = (
-                f"Folder '{folder}' contains no '.cper' files."
-                " '--afid --folder' requires a folder of pre-existing CPER records."
+            message = _L(
+                "Folder '{folder}' contains no '.cper' files. '--afid --folder' requires a folder of pre-existing CPER records.",
+                folder=folder,
             )
             raise AmdSmiInvalidFilePathException(command, self.logger.format, message)
 
@@ -205,7 +217,11 @@ class RasCommands:
                     raise AmdSmiInvalidFilePathException(
                         args.cper_file,
                         self.logger.format,
-                        f"Unable to read CPER file '{args.cper_file}': {e}",
+                        _L(
+                            "Unable to read CPER file '{cper_file}': {e}",
+                            cper_file=args.cper_file,
+                            e=e,
+                        ),
                     ) from e
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     self.helpers.record_or_raise(e)
@@ -279,7 +295,7 @@ class RasCommands:
             self.helpers._print_header(args.folder, self.logger)
             if args.follow:
                 # Always print to stdout so the user sees the prompt, even with --file.
-                print("Press CTRL + C to stop.")
+                print(_T("Press CTRL + C to stop."))
 
         # Shared 1-indexed counter for generated CPER filenames across all GPUs
         # and follow iterations within this invocation.

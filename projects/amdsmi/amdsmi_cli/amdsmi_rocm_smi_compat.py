@@ -18,6 +18,15 @@ import os
 import enum
 import logging
 
+try:
+    import amdsmi_i18n  # noqa: F401
+except ImportError:  # loaded by file path (e.g. unit tests): make the CLI dir importable
+    import os as _os
+    import sys as _sys
+
+    _sys.path.append(_os.path.dirname(_os.path.abspath(__file__)))
+from amdsmi_i18n import gettext as _T
+
 # Version information
 SMI_MAJ = 4
 SMI_MIN = 0
@@ -150,7 +159,7 @@ def initializeRsmi():
         amdsmi.amdsmi_init()
         return True
     except Exception as e:
-        logging.error(f"Failed to initialize AMD SMI: {e}")
+        logging.error(_T("Failed to initialize AMD SMI: {e}").format(e=e))
         return False
 
 
@@ -162,14 +171,14 @@ def listDevices():
         processors = amdsmi.amdsmi_get_processor_handles()
         return processors
     except Exception as e:
-        logging.error(f"Failed to get processor handles: {e}")
+        logging.error(_T("Failed to get processor handles: {e}").format(e=e))
         return []
 
 
 def checkAmdGpus(deviceList):
     """Check if AMD GPUs are present - equivalent to rocm_smi.checkAmdGpus()"""
     if not deviceList:
-        logging.warning("No AMD GPUs specified")
+        logging.warning(_T("No AMD GPUs specified"))
         return False
     return True
 
@@ -826,7 +835,7 @@ def showAllConcise(deviceList):
     import amdsmi
 
     if PRINT_JSON:
-        print("NOT_SUPPORTED: Cannot print JSON/CSV output for concise output")
+        print(_T("NOT_SUPPORTED: Cannot print JSON/CSV output for concise output"))
         sys.exit(int(RocmSmiCompatExitCode.ERROR))
 
     silent = True
@@ -1003,18 +1012,18 @@ def main():
     try:
         import amdsmi
     except ImportError:
-        print("ERROR: Could not import amdsmi module")
-        print("Install with: pip install amdsmi")
+        print(_T("ERROR: Could not import amdsmi module"))
+        print(_T("Install with: pip install amdsmi"))
         return int(RocmSmiCompatExitCode.ERROR)
 
     # Check if driver is initialized
     if not driverInitialized():
-        logging.error("Unable to detect amdgpu driver. Exiting...")
+        logging.error(_T("Unable to detect amdgpu driver. Exiting..."))
         return int(RocmSmiCompatExitCode.ERROR)
 
     # Initialize AMD SMI (equivalent to rocm_smi.initializeRsmi())
     if not initializeRsmi():
-        logging.error("Failed to initialize AMD SMI")
+        logging.error(_T("Failed to initialize AMD SMI"))
         return int(RocmSmiCompatExitCode.ERROR)
 
     try:
@@ -1022,17 +1031,19 @@ def main():
         deviceList = listDevices()
 
         if not deviceList:
-            logging.error("No AMD GPU devices found")
+            logging.error(_T("No AMD GPU devices found"))
             return int(RocmSmiCompatExitCode.ERROR)
 
         # Check AMD GPUs (equivalent to rocm_smi.checkAmdGpus())
         if not checkAmdGpus(deviceList):
-            logging.warning("No AMD GPUs specified")
+            logging.warning(_T("No AMD GPUs specified"))
 
         # Check runtime status (equivalent to rocm_smi.check_runtime_status())
         if not check_runtime_status():
             print(
-                "\nWARNING: AMD GPU device(s) is/are in a low-power state. Check power control/runtime_status\n"
+                _T(
+                    "\nWARNING: AMD GPU device(s) is/are in a low-power state. Check power control/runtime_status\n"
+                )
             )
 
         # Call showAllConcise (equivalent to rocm_smi.showAllConcise(deviceList))
