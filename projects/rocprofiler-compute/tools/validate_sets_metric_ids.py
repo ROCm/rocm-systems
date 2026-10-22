@@ -67,12 +67,12 @@ def load_analysis_configs(arch: str) -> dict[int, dict[str, Any]]:
         data = yaml.safe_load(config_path.read_text())
         panel = (data or {}).get("Panel Config", {})
         for source in panel.get("data source", []):
-            mt = source.get("metric_table", {})
-            table_id = mt.get("id")
+            metric_table = source.get("metric_table", {})
+            table_id = metric_table.get("id")
             if table_id is None:
                 continue
-            if mt.get("metric"):
-                result[table_id] = mt
+            if metric_table.get("metric"):
+                result[table_id] = metric_table
     return result
 
 

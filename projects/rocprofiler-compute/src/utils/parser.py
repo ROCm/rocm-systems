@@ -233,7 +233,9 @@ def _build_metric_table_df(
         values: list[Any] = [metric_idx, key]
         for k, v in entries.items():
             if is_simple_box and k == "expr":
-                values.extend(bv[0] + v + bv[1] for bv in simple_box.values())
+                values.extend(
+                    prefix + v + suffix for prefix, suffix in simple_box.values()
+                )
             elif k in value_keys:
                 values.append(v)
         expressions.extend(metric_expressions(data_config, entries))

@@ -894,11 +894,11 @@ def iter_analysis_config_metrics(
         metric_name metric key string
         expressions metric_expressions of the metric
     """
-    for ypath in sorted(config_root.glob("*.yaml")):
-        stem_id = ypath.name.split("_")[0]
+    for config_path in sorted(config_root.glob("*.yaml")):
+        stem_id = config_path.name.split("_")[0]
         if stem_id in exclude_file_ids:
             continue
-        with open(ypath, encoding="utf-8") as stream:
+        with open(config_path, encoding="utf-8") as stream:
             panel_config = yaml.safe_load(stream)["Panel Config"]
         for section in panel_config["data source"]:
             table = section.get("metric_table")
