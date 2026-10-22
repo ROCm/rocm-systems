@@ -1094,10 +1094,10 @@ endif()
 # ENABLE_ROCSHMEM: alltoall_wg offload.  Links librocshmem.a into librccl.so
 #   via -fgpu-rdc --hip-link.  Does not enable GIN plugins.
 # ENABLE_ROCSHMEM_GIN: GIN plugins (GDA, SDMA).  Device symbols (QueuePair)
-#   resolved via per-arch bitcode in the device linker pipeline +
-#   -mlink-builtin-bitcode for symmetric kernels.  Host symbols left unresolved
-#   (--allow-shlib-undefined), resolved at runtime from the executable.
-#   Does not enable alltoall_wg offload.
+#   resolved via per-arch bitcode in the device linker pipeline.  Host code is
+#   self-contained: the rocshmem host code GIN needs is compiled directly into
+#   librccl.so, so no host symbol is left unresolved.  Does not enable
+#   alltoall_wg offload.
 if (ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
   add_rocshmem_targets()
   # Ensure rocSHMEM is fully built/installed before compiling rccl
@@ -1738,54 +1738,15 @@ if(ENABLE_ROCSHMEM)
   list(REMOVE_DUPLICATES _rocshmem_offload_arch_flags)
   target_link_options(rccl PRIVATE -fgpu-rdc --hip-link ${_rocshmem_offload_arch_flags})
 elseif(ENABLE_ROCSHMEM_GIN)
-  # GIN device templates (Put/Flush/etc.) reference rocshmem device symbols.
-  # With the device linker (default), per-arch .bc files are injected directly
-  # into the per-arch device link step via DeviceLinker.cmake.
+  # GIN is self-contained: all rocshmem host code it needs is compiled directly
+  # into librccl.so (SDMA and the GDA factory + mlx5 provider via src/gin). So
+  # there is no rocshmem host-symbol extraction, no --exclude-libs, and no
+  # --allow-shlib-undefined — librccl leaves no rocshmem host symbol unresolved.
+  # GIN device templates still resolve rocshmem device symbols from the per-arch
+  # .bc injected by DeviceLinker.cmake.
   #
-  # Seed rocshmem host symbols needed by GDA into librccl.so.  SDMA factory
-  # symbols are compiled in directly (gin_anvil_sdma_factory.cc) and no longer
-  # need pulling from librocshmem.a.
-  set(_gin_rocshmem_syms
-    _ZN8rocshmem3ibvE)
-  set(_gin_rocshmem_undefine "")
-  foreach(_sym ${_gin_rocshmem_syms})
-    list(APPEND _gin_rocshmem_undefine -u ${_sym})
-  endforeach()
-
-  set(_gin_rocshmem_object "${CMAKE_CURRENT_BINARY_DIR}/rocshmem_host.o")
-  set(_gin_rocshmem_archive_name "librocshmem_gin_host.a")
-  set(_gin_rocshmem_archive "${CMAKE_CURRENT_BINARY_DIR}/${_gin_rocshmem_archive_name}")
-  if(TARGET rocshmem_static)
-    set(_gin_rocshmem_depends rocshmem_static)
-  else()
-    set(_gin_rocshmem_depends ${ROCSHMEM_LIBRARY})
-  endif()
-
-  add_custom_command(
-    OUTPUT  ${_gin_rocshmem_object}
-    COMMAND ${CMAKE_LINKER} -r ${_gin_rocshmem_undefine} ${ROCSHMEM_LIBRARY} -o ${_gin_rocshmem_object}
-    DEPENDS ${_gin_rocshmem_depends}
-    COMMENT "Extracting GIN host objects from librocshmem.a"
-    VERBATIM)
-
-  # An app linking rocshmem under -rdynamic would interpose our globals, so both
-  # modules would run destructors over one object and double free at exit.
-  # --exclude-libs keeps our copies local. It needs an archive, hence the wrapper.
-  add_custom_command(
-    OUTPUT  ${_gin_rocshmem_archive}
-    COMMAND ${CMAKE_COMMAND} -E rm -f ${_gin_rocshmem_archive}
-    COMMAND ${CMAKE_AR} rcs ${_gin_rocshmem_archive} ${_gin_rocshmem_object}
-    DEPENDS ${_gin_rocshmem_object}
-    COMMENT "Packaging GIN host objects into ${_gin_rocshmem_archive_name}"
-    VERBATIM)
-  add_custom_target(gin_rocshmem_host_objects DEPENDS ${_gin_rocshmem_archive})
-
-  add_dependencies(rccl gin_rocshmem_host_objects)
-  target_link_libraries(rccl PRIVATE ${_gin_rocshmem_archive})
-  target_link_options(rccl PRIVATE "LINKER:--exclude-libs,${_gin_rocshmem_archive_name}")
   # anvil.cpp calls hsaKmt* directly. hsa-runtime64 is already linked above.
   target_link_libraries(rccl PRIVATE ${HSAKMT_LIBRARY})
-  target_link_options(rccl PRIVATE "LINKER:--allow-shlib-undefined")
 endif()
 
 ## Set RCCL link options
