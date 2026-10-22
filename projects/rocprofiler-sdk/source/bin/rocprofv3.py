@@ -208,15 +208,18 @@ def get_effective_output_paths(args, pass_id=None):
         The per-pass path is None for a single-pass run.
     """
     output_path = (
-        args.output_directory if args.output_directory is not None else os.getcwd()
+        os.fspath(args.output_directory)
+        if args.output_directory is not None
+        else os.getcwd()
     )
     if (
         not getattr(args, "pid", None)
         and not getattr(args, "echo", False)
         and is_output_path_prevalidatable(output_path)
+        and not os.path.isabs(output_path)
     ):
-        # Validate and propagate the same path even if the target later changes cwd.
-        output_path = os.path.abspath(output_path)
+        # Anchor without normalizing: ".." after a symlink has runtime path semantics.
+        output_path = os.path.join(os.getcwd(), output_path)
 
     pass_output_path = None
     if pass_id is not None and args.sub_directory is not None:
@@ -244,7 +247,7 @@ def prevalidate_output_paths(args, pass_id=None, should_produce_output=None):
     output_path, pass_output_path = get_effective_output_paths(args, pass_id)
 
     # Attach paths resolve inside the target process. Echo mode launches nothing.
-    if args.pid or args.echo:
+    if getattr(args, "pid", None) or getattr(args, "echo", False):
         return output_path, pass_output_path
 
     if should_produce_output is None:
