@@ -11,3 +11,4 @@
 #include "fakes/nccl_fakes.h"
 
 int64_t ncclParamIbQpsPerConn() { return g_loadParam("IB_QPS_PER_CONNECTION", 1); }
+int64_t ncclParamIbTc() { return g_loadParam("IB_TC", -1); }
