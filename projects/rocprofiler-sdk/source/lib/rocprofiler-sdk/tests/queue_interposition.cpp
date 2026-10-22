@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
+#include "lib/common/scope_destructor.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
@@ -708,6 +709,17 @@ TEST_F(QueueInterpositionConsumerTransitionConcurrent,
     for(int i = 0; i < k_producers; ++i)
         threads.emplace_back(producer);
 
+    // Join producers on every exit (including ASSERT failure) so the vector
+    // destructor never sees joinable threads and calls std::terminate.
+    auto join_producers = common::scope_destructor{[&]() {
+        run.store(false, std::memory_order_relaxed);
+        pause.store(false, std::memory_order_release);
+        for(auto& t : threads)
+        {
+            if(t.joinable()) t.join();
+        }
+    }};
+
     const auto warm_deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
     while(__atomic_load_n(&g_stub_hw_wdid, __ATOMIC_ACQUIRE) < 256u &&
           std::chrono::steady_clock::now() < warm_deadline)
@@ -740,11 +752,6 @@ TEST_F(QueueInterpositionConsumerTransitionConcurrent,
     EXPECT_GE(scan, hw) << "scan/shadow behind HW after 0→1 with concurrent bypass producers"
                         << " (scan=" << scan << " hw=" << hw << " vwp=" << vwp << ")";
     EXPECT_GE(vwp, hw) << "virtual_wptr behind HW after 0→1 with concurrent bypass producers";
-
-    run.store(false, std::memory_order_relaxed);
-    pause.store(false, std::memory_order_release);
-    for(auto& t : threads)
-        t.join();
 
     notify_queue_interposition_consumer_context_stopped(&ctx);
     get_queue_registry().wlock([&](auto& registry) { registry.erase(queue_ptr); });
