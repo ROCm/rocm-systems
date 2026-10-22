@@ -143,7 +143,34 @@ the OS assigns new thread ids. The stitch key is the Function cell with
 ltid= removed: name, location, seqNr, tid, ftid, scope, args, and backend.
 function_ordinal is the 0-based occurrence of that stitch key in the pass,
 in marker order, assigned after join. Cross-pass collapse matches on stitch
-key and function_ordinal.
+key and function_ordinal. A stacked Function first token
+(`:#` or `@`) makes current analyze exit during parse.
+
+## Analyze path
+
+`--list-*-operators` / `--*-operator`:
+
+1. Pair each `ml_api_trace_*_marker_api_trace.csv` with its sibling
+   `_counter_collection.csv`.
+2. Rename on-disk `Correlation_Id` to `Correlation_ID`, then full-outer-join
+   unique dispatches to markers on `Correlation_ID` and `GUID`.
+3. Consolidate matching operator calls across passes on the stitch key plus
+   `function_ordinal`. Collapsed GPU time and kernel lists come from pass 0.
+4. Parse Function into name, file/line, `Backend`, `launcher_thread_id`
+   from `ltid=`, and args. `tid=` and `ftid=` stay on the Function cell
+   for stitch; they are not analyze columns.
+5. Nest marker intervals per `Thread_Id`. Adjacent ranges (`A.end == B.start`)
+   are siblings.
+6. Attach unlocated worker trees to the launcher using `ltid` and interval
+   containment.
+
+Integrity failures abort analyze before the tree: overlapping non-adjacent
+intervals on the same `Thread_Id`, a marker missing from the nested forest,
+unequal kernel-name and timestamp lists on a marker, or operator or kernel
+disagreement across passes. Coverage issues warn during join and attach, and
+the forest continues: unmatched dispatches, attach failures, and unlocated
+roots in `KNOWN_ML_API_BACKENDS` with no launcher thread. Plain analyze
+without those flags does not join and does not report those conditions.
 
 ## Plain-C interface
 
@@ -179,3 +206,9 @@ are private PyTorch interfaces. The accepted compatibility boundary is the
 validated 2.13/2.14 layout set, not an upstream ABI guarantee for every build
 of those minors. Extending this set requires real-header and runtime behavior
 validation. No exact wheel identity or paired ELF build-ID gate is used.
+
+## Tests
+
+Live profile covers torch, triton, and combined ML API traces, plus operator
+coverage against the native collector. Unit tests cover inject_roctx wraps,
+Function parse, join, nest, and operator list/filter.
