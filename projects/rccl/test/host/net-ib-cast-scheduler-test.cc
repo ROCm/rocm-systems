@@ -56,6 +56,12 @@ using RcclUnitTesting::LogHas;
 
 class NetIbCastSchedulerMicrotest : public ::testing::Test {
  protected:
+  // The weight and log path are raw getenv reads, so map them or the caller's environment leaks in.
+  void SetUp() override {
+    for (const char* name : {QP_SCHED_WEIGHT_ENV_VAR, QP_SCHED_WEIGHT_ENV_VAR_ALIAS, QP_SCHED_LOG_PATH_ENV_VAR,
+                             QP_SCHED_LOG_PATH_ENV_VAR_ALIAS})
+      SetMicroEnvAbsent(name);
+  }
   void TearDown() override {
     ResetEnvFakes();
     ResetLibcFakes();
@@ -236,6 +242,7 @@ TEST_F(NetIbCastSchedulerMicrotest, InitParms_KnownBug_WrrEnableZeroCannotTurnWr
 class NetIbCastSchedulerLogMicrotest : public NetIbCastSchedulerMicrotest {
  protected:
   void SetUp() override {
+    NetIbCastSchedulerMicrotest::SetUp();
     char tmpl[] = "/tmp/rccl-net-ib-cast-sched-XXXXXX";
     ASSERT_NE(mkdtemp(tmpl), nullptr);
     dir_ = tmpl;
@@ -400,6 +407,7 @@ INSTANTIATE_TEST_SUITE_P(Colls, NetIbCastSchedulerCollNameMicrotest,
 class NetIbCastSchedulerTxMicrotest : public NetIbCastSchedulerMicrotest {
  protected:
   void SetUp() override {
+    NetIbCastSchedulerMicrotest::SetUp();
     comm_ = std::make_unique<ncclIbSendComm>();
     comm_->base.nqps = 2;
   }

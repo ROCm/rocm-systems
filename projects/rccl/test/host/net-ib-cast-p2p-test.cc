@@ -245,7 +245,7 @@ TEST_F(NetIbCastP2pRequestMicrotest, RetrieveAsIndex_RejectsIndexesPastTheTable)
   const std::string log =
       CaptureLog([&] { res = IbCastRequestRetrieveAsIndex(send_->base.reqs, NET_IB_MAX_REQUESTS, &req); });
   EXPECT_EQ(res, ncclInternalError);
-  EXPECT_TRUE(LogHas(log, "Invalid request index 256")) << log;
+  EXPECT_TRUE(LogHas(log, ("Invalid request index " + std::to_string(NET_IB_MAX_REQUESTS)).c_str())) << log;
 }
 
 TEST_F(NetIbCastP2pRequestMicrotest, CtsFifoAccessors_ReadBothLayouts) {
