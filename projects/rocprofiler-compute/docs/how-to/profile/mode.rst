@@ -414,14 +414,15 @@ Choosing what to profile
 A profile run collects one of the following. Options from different groups can't
 be used together:
 
-* **Blocks:** ``-b``, ``--speed-of-light``, ``--memory-chart``, and ``--roofline``.
-  These can be combined, for example ``--speed-of-light --roofline`` is the same
-  as ``-b 2 4``.
+* **Blocks:** ``-b`` and its short forms ``--speed-of-light``, ``--memory-chart``,
+  and ``--roofline``, in any combination.
 * **A metric set:** ``--set``. See :ref:`profiling-metric-sets`.
 * **Only the roofline benchmark:** ``--roofline-bench-only``. It also can't be used
   with ``--no-roof``. See :ref:`roofline-bench-only`.
 
 Without any of these options, profile mode collects every block.
+
+.. _profile-filtering-options:
 
 Filtering options
 -----------------
@@ -751,8 +752,8 @@ a) If found, skips microbenchmark execution;
 
 b) Otherwise, profile mode runs microbenchmarks and collects roofline performance counters.
 
-``--roofline`` is the same as ``-b 4``. See :ref:`profile-selection-options` for the
-options it can be combined with.
+See :ref:`profile-selection-options` for the options ``--roofline`` can be combined
+with.
 
 Profile mode generates ``roofline.csv`` containing microbenchmark data. To generate
 roofline HTML plots, use ``rocprof-compute analyze`` on a profiling output directory
