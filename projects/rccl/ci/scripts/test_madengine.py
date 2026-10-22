@@ -30,6 +30,7 @@ import filecmp
 import hashlib
 import json
 import logging
+import math
 import os
 import re
 import shlex
@@ -719,7 +720,10 @@ def squash_log_spam(run_dir: Path) -> int:
     if not log_dir.is_dir():
         return 0
     saved = 0
-    for path in sorted(p for p in log_dir.rglob("*") if p.is_file()):
+    for path in sorted(
+        p for p in log_dir.rglob("*")
+        if p.suffix in (".out", ".err", ".log") and p.is_file()
+    ):
         dropped: dict[bytes, int] = {}
         tmp = path.with_name(path.name + ".squash")
         try:
@@ -781,13 +785,15 @@ def runtime_rccl_versions(work_dir: Path) -> list[str]:
 def verify_rccl_replacement(
     work_dir: Path,
     expected: dict,
+    nodes: int,
     slurm_job_id: str = "",
 ) -> tuple[bool, str]:
     """Verify that every node used the CI-built RCCL, not its bundled copy.
 
-    Checks every node's log (rccl_banner_logs) for ``RCCL version :`` and compares
-    against the expected fingerprint.  A library that reached only one node
-    still fails — this is the multi-node failure this job exists to catch.
+    Requires a banner log (rccl_banner_logs) from each of the *nodes* nodes,
+    checks all of them for ``RCCL version :`` and compares against the
+    expected fingerprint.  A library that reached only one node still fails —
+    this is the multi-node failure this job exists to catch.
 
     Returns (ok, message).  Generic across frameworks — any RCCL-based
     application prints the version string during init.
@@ -798,6 +804,17 @@ def verify_rccl_replacement(
     node_logs = rccl_banner_logs(work_dir)
     if not node_logs:
         return False, "No node logs found — cannot verify RCCL"
+    logged = {
+        int(m.group(1))
+        for log_file in node_logs
+        if (m := re.search(r"_node_(\d+)\.out$", log_file.name))
+    }
+    missing = sorted(set(range(nodes)) - logged)
+    if missing:
+        return False, (
+            f"no log from node(s) {', '.join(map(str, missing))} of {nodes} — "
+            f"cannot verify RCCL there"
+        )
 
     verified_nodes: list[str] = []
     for log_file in node_logs:
@@ -2005,8 +2022,35 @@ exit 0
 
 # Run on every node once the phases are done. The images are per-run tags that
 # no later run can reuse, and each is tens of GB on a node's local disk.
+#
+# The containers run as root, so the task's own `rm -rf` of its workspace leaves
+# whatever they wrote, and madengine's stale-workspace sweep only looks at this
+# user's directories. Only this job's workspaces are touched. Without sudo, rm
+# runs as root in whichever of this run's images the node has; never pulled, as
+# each is tens of GB. $1 is kept, the rest are removed.
 CLEANUP_IMAGES = """\
 #!/bin/bash
+helper="$1"; shift
+if [ -n "${SLURM_JOB_ID}" ]; then
+    for ws in "${SLURM_TMPDIR:-/tmp}"/madengine_job_"${SLURM_JOB_ID}"_* \\
+              /tmp/madengine_job_"${SLURM_JOB_ID}"_*; do
+        [ -d "$ws" ] || continue
+        rm -rf "$ws" 2>/dev/null || sudo -n rm -rf "$ws" 2>/dev/null
+        for image in "$helper" "$@"; do
+            [ -e "$ws" ] || break
+            [ -n "$image" ] || continue
+            args=(run --rm --pull never -u 0 -v "$(dirname "$ws"):/w"
+                  --entrypoint rm "$image" -rf "/w/$(basename "$ws")")
+            docker "${args[@]}" >/dev/null 2>&1 \\
+                || sudo -n docker "${args[@]}" >/dev/null 2>&1
+        done
+        if [ -e "$ws" ]; then
+            echo "  could not remove $(hostname -s) $ws"
+        else
+            echo "  removed $(hostname -s) $ws"
+        fi
+    done
+fi
 for image in "$@"; do
     if docker image rm -f "$image" >/dev/null 2>&1 \\
         || sudo -n docker image rm -f "$image" >/dev/null 2>&1; then
@@ -2045,8 +2089,8 @@ def run_ab_in_one_allocation(
     through srun instead of submitting its own sbatch (ROCm/madengine#213).
 
     *built_images* are the tags the nodes build for this run; they are removed
-    from every node once both phases are done. A run killed by the timeout
-    leaves them behind.
+    from every node once both phases are done, together with this job's node
+    workspaces. A run killed by the timeout leaves them behind.
 
     Returns ``{"exit_codes": {phase: int}, "job_id": str, "nodelist": str}``.
     """
@@ -2119,18 +2163,19 @@ def run_ab_in_one_allocation(
             "madengine run -m manifest.json -o perf.csv --live-output --verbose",
             "echo $? > " + shlex.quote(str(run_dir / "exit_code")),
         ]
-    if built_images:
-        cleanup = work_dir / "ab" / "cleanup_images.sh"
-        cleanup.parent.mkdir(parents=True, exist_ok=True)
-        cleanup.write_text(CLEANUP_IMAGES)
-        script_lines += [
-            "",
-            'echo "===== cleanup: this run\'s images on every allocated node ====="',
-            'srun --ntasks="${SLURM_JOB_NUM_NODES}" --ntasks-per-node=1 '
-            f"--overlap bash {shlex.quote(str(cleanup))} "
-            + " ".join(shlex.quote(i) for i in built_images)
-            + " || true",
-        ]
+    cleanup = work_dir / "ab" / "cleanup_images.sh"
+    cleanup.parent.mkdir(parents=True, exist_ok=True)
+    cleanup.write_text(CLEANUP_IMAGES)
+    script_lines += [
+        "",
+        'echo "===== cleanup: this run\'s workspaces and images on every node ====="',
+        'srun --ntasks="${SLURM_JOB_NUM_NODES}" --ntasks-per-node=1 '
+        f"--overlap bash {shlex.quote(str(cleanup))} "
+        + " ".join(
+            shlex.quote(i) for i in [workload_config["base_image"], *(built_images or [])]
+        )
+        + " || true",
+    ]
 
     script_path = work_dir / "ab" / "run_phases.sh"
     script_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2349,6 +2394,16 @@ def _row_precision(row: dict) -> str:
     return point.group(1) if point else ""
 
 
+def _usable_metric(val: float) -> bool:
+    """Whether a throughput can be scored.
+
+    NaN compares false against any threshold, so it would read as "no
+    regression", and a dropped row is what makes the A/B report the phase as
+    missing instead.
+    """
+    return math.isfinite(val) and val > 0
+
+
 def collect_phase_results(
     run_dir: Path,
     metric_key: str,
@@ -2395,6 +2450,10 @@ def collect_phase_results(
                 val = float(perf_val)
             except (ValueError, TypeError):
                 continue
+            if not _usable_metric(val):
+                log.warning("Ignoring structured result: %s %s = %r",
+                            precision, metric_key, val)
+                continue
             results.append({
                 "precision": precision,
                 "metric_value": val,
@@ -2428,6 +2487,10 @@ def collect_phase_results(
         for run in parse_live_log_metrics(run_dir):
             val = run.get("tokens_per_second_per_gpu")
             if val is None:
+                continue
+            if not _usable_metric(val):
+                log.warning("Ignoring live-log result: %s = %r",
+                            run.get("precision"), val)
                 continue
             results.append({
                 "precision": run.get("precision"),
@@ -2697,6 +2760,11 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+    # madengine runs a workload inside this allocation only when it spans more
+    # than one node; with one, each phase is its own sbatch and the two can land
+    # on different nodes.
+    if args.nodes < 2:
+        parser.error("--nodes must be at least 2 for a same-node A/B")
 
     workload_config = WORKLOAD_CONFIGS[args.workload]
     cluster_config = CLUSTER_CONFIGS[args.cluster]
@@ -2767,8 +2835,9 @@ def main() -> None:
 
     # The maxtext baseline cannot be the stock tag: that image ships MaxText
     # but no Primus, so run.sh would not find primus-cli and the baseline
-    # phase would die before step 0. Build base + Primus instead, which also
-    # makes the pair differ by the RCCL swap and nothing else.
+    # phase would die before step 0. Stage base + Primus instead, which also
+    # makes the pair differ by the RCCL swap and nothing else. Staged, not
+    # built: the nodes build both images of the pair, this host neither.
     if family == "maxtext":
         baseline_image = stage_maxtext_baseline(
             workload_config["base_image"], work_dir, primus_dir,
@@ -2867,7 +2936,7 @@ def main() -> None:
     rccl_verification_failed = False
     if rccl_fingerprint.get("version"):
         rccl_ok, rccl_msg = verify_rccl_replacement(
-            phase_dirs[CANDIDATE], rccl_fingerprint,
+            phase_dirs[CANDIDATE], rccl_fingerprint, args.nodes,
         )
         if rccl_ok:
             log.info("RCCL verification: %s", rccl_msg)
@@ -2961,6 +3030,9 @@ def main() -> None:
         "overlay_image": overlay_image,
         "nodelist": allocation["nodelist"],
         "slurm_job_id": allocation["job_id"],
+        # run_id names this test run; these name the RCCL binary it tested.
+        "artifact_run_id": os.environ.get("ARTIFACT_RUN_ID", ""),
+        "rccl_md5": rccl_fingerprint["md5"],
     }
     # baseline_image, not workload_config["base_image"]: for maxtext the
     # baseline is a locally built Primus image, and recording the stock tag
