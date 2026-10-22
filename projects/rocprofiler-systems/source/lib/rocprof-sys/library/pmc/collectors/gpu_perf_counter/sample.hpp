@@ -48,9 +48,11 @@ struct sample : trace_cache::cacheable_t
         {
             entries.resize(count);
         }
-        for(std::size_t idx = 0; idx < entries.size(); ++idx)
+        // Range-for: begin/end are read once. An index loop re-reads them after every
+        // entry, because a write through the uint8_t buffer may alias the vector.
+        for(auto& entry : entries)
         {
-            archive(entries[idx].counter_id, entries[idx].value);
+            archive(entry.counter_id, entry.value);
         }
     }
 };
