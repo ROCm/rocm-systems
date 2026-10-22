@@ -108,6 +108,12 @@ static int64_t DefaultParamP2pDisable() { return 0; }  // init.cc:137
 std::function<int64_t()> g_paramP2pDisable = DefaultParamP2pDisable;
 int64_t ncclParamP2pDisable() { return g_paramP2pDisable(); }
 
+// transport/net_ib/connect.cc owns RCCL_PARAM(IbGdrFlushFlag), but rccl_wrap.cc
+// reads it in rcclUpdateRemoteFlushAlgoProto.
+static int64_t DefaultParamIbGdrFlushFlag() { return 0; }  // transport/net_ib/connect.cc:116
+std::function<int64_t()> g_paramIbGdrFlushFlag = DefaultParamIbGdrFlushFlag;
+int64_t rcclParamIbGdrFlushFlag() { return g_paramIbGdrFlushFlag(); }
+
 // The settable env-var fake (SetMicroEnv/SetMicroEnvAbsent/ClearMicroEnv,
 // the bare-getenv() link-level interposer, and ncclGetEnv) is NOT defined
 // here: fakes/env_fakes.cc is the shared owner of src/misc/param.cc + getenv

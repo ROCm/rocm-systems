@@ -55,6 +55,10 @@ rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
   "int64_t g_paramMaxNchannels = -2;" "the MaxNchannels fake default")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/wrap_fakes.cc"
   "static int64_t DefaultParamForceCe() { return 1; }" "the ForceCe fake default")
+rccl_assert_source_line("${_rccl_src_root}/transport/net_ib/connect.cc"
+  "RCCL_PARAM(IbGdrFlushFlag, \"IB_GDR_FLUSH_FLAG\", 0);" "fakes/wrap_fakes.cc: rcclParamIbGdrFlushFlag()")
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/wrap_fakes.cc"
+  "static int64_t DefaultParamIbGdrFlushFlag() { return 0; }" "the IbGdrFlushFlag fake default")
 # gdr-probe-test.cc pins the GDR probe's registration flags to production's; these
 # keep its kRegAccessFlags and both reg.cc copies spelling the same set.
 set(_rccl_reg_access_flags

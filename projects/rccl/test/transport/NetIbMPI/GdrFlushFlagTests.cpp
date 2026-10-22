@@ -178,6 +178,14 @@ protected:
         return failed != 0;
     }
 
+    // Collective: true only when `ok` holds on every rank, so an ASSERT on the
+    // result returns from both ranks together instead of leaving one blocked.
+    static bool AllRanksOk(bool ok) {
+        int bad = ok ? 0 : 1;
+        MPI_Allreduce(MPI_IN_PLACE, &bad, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+        return bad == 0;
+    }
+
     // Rank 0 reports whether the recv comm negotiated the flag; both ranks
     // receive the answer so they leave the test together.
     bool FlagNegotiated(const ConnectionPair& pair, uint64_t** flags) {
@@ -337,11 +345,11 @@ TEST_F(GdrFlushFlagTest, Negotiated_FlagsZeroedAndHintDefaultsOff) {
 
     const size_t size = 65536 + 3;
     void* buffer = nullptr;
-    ASSERT_EQ(hipMalloc(&buffer, size), hipSuccess);
+    ASSERT_TRUE(AllRanksOk(hipMalloc(&buffer, size) == hipSuccess));
     auto bufGuard = makeDeviceBufferAutoGuard(buffer);
     void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
     void* mh = nullptr;
-    ASSERT_EQ(RegisterGdrMemory(comm, buffer, size, &mh), ncclSuccess);
+    ASSERT_TRUE(AllRanksOk(RegisterGdrMemory(comm, buffer, size, &mh) == ncclSuccess));
     NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
 
     std::string err;
@@ -383,11 +391,11 @@ TEST_F(GdrFlushFlagTest, Disabled_NoFlagAndHintIgnored) {
 
     const size_t size = 4097;
     void* buffer = nullptr;
-    ASSERT_EQ(hipMalloc(&buffer, size), hipSuccess);
+    ASSERT_TRUE(AllRanksOk(hipMalloc(&buffer, size) == hipSuccess));
     auto bufGuard = makeDeviceBufferAutoGuard(buffer);
     void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
     void* mh = nullptr;
-    ASSERT_EQ(RegisterGdrMemory(comm, buffer, size, &mh), ncclSuccess);
+    ASSERT_TRUE(AllRanksOk(RegisterGdrMemory(comm, buffer, size, &mh) == ncclSuccess));
     NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
 
     std::string err;
@@ -436,11 +444,11 @@ TEST_F(GdrFlushFlagTest, PerRequestGating_RandomHintsAndSizes) {
     const size_t kSizes[] = {1, 7, 4097, 65536 + 3, 1 << 20, (4 << 20) + 129};
     const size_t maxSize = *std::max_element(std::begin(kSizes), std::end(kSizes));
     void* buffer = nullptr;
-    ASSERT_EQ(hipMalloc(&buffer, maxSize), hipSuccess);
+    ASSERT_TRUE(AllRanksOk(hipMalloc(&buffer, maxSize) == hipSuccess));
     auto bufGuard = makeDeviceBufferAutoGuard(buffer);
     void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
     void* mh = nullptr;
-    ASSERT_EQ(RegisterGdrMemory(comm, buffer, maxSize, &mh), ncclSuccess);
+    ASSERT_TRUE(AllRanksOk(RegisterGdrMemory(comm, buffer, maxSize, &mh) == ncclSuccess));
     NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
 
     std::mt19937 rng(20261019);
@@ -518,11 +526,11 @@ TEST_F(GdrFlushFlagTest, OutstandingMixedHints_CtsIsolation) {
     const size_t slotBytes = *std::max_element(std::begin(kSizes), std::end(kSizes));
     const size_t total = slotBytes * kWindow * kMaxN;
     char* buffer = nullptr;
-    ASSERT_EQ(hipMalloc((void**)&buffer, total), hipSuccess);
+    ASSERT_TRUE(AllRanksOk(hipMalloc((void**)&buffer, total) == hipSuccess));
     auto bufGuard = makeDeviceBufferAutoGuard(buffer);
     void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
     void* mh = nullptr;
-    ASSERT_EQ(RegisterGdrMemory(comm, buffer, total, &mh), ncclSuccess);
+    ASSERT_TRUE(AllRanksOk(RegisterGdrMemory(comm, buffer, total, &mh) == ncclSuccess));
     NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
 
     struct Op {
@@ -600,7 +608,10 @@ TEST_F(GdrFlushFlagTest, OutstandingMixedHints_CtsIsolation) {
                     const uint64_t descBefore = ncclIbGetGpuFlushFlagSeq(pair.recvComm);
                     int done = 0;
                     int got[kMaxN] = {0};
-                    ASSERT_EQ(TestRequest(op.req, &done, got), ncclSuccess);
+                    if (TestRequest(op.req, &done, got) != ncclSuccess) {
+                        ADD_FAILURE() << "round " << round << " id " << op.id << ": test() failed";
+                        break;
+                    }
                     if (!done) {
                         i++;
                         continue;
@@ -619,22 +630,32 @@ TEST_F(GdrFlushFlagTest, OutstandingMixedHints_CtsIsolation) {
                             << ": " << err;
                     pending.erase(pending.begin() + i);
                 }
-                ASSERT_LT(std::chrono::steady_clock::now(), deadline)
-                    << "round " << round << ": " << pending.size() << " receives never completed";
+                if (std::chrono::steady_clock::now() >= deadline) {
+                    ADD_FAILURE() << "round " << round << ": " << pending.size() << " receives never completed";
+                    break;
+                }
             }
             const int bad = firstUnexpectedQpFlag(flags, lastSeq);
             EXPECT_EQ(bad, -1) << "round " << round << ": flag " << bad << " does not hold its QP's last flagged id + 1";
         } else {
             std::vector<void*> sreqs;
-            for (Op& op : ops) {
+            for (size_t w = 0; w < ops.size() && !HasFailure(); w++) {
+                Op& op = ops[w];
                 for (int r = op.n - 1; r >= 0; r--) {
                     void* sreq = nullptr;
-                    ASSERT_TRUE(TightSend(pair.sendComm, op.bufs[r], op.sizes[r], op.tags[r], mh, &sreq, &err))
-                        << "round " << round << " id " << op.id << ": " << err;
+                    if (!TightSend(pair.sendComm, op.bufs[r], op.sizes[r], op.tags[r], mh, &sreq, &err)) {
+                        ADD_FAILURE() << "round " << round << " id " << op.id << ": " << err;
+                        break;
+                    }
                     sreqs.push_back(sreq);
                 }
             }
-            for (void* sreq : sreqs) ASSERT_TRUE(TightWait(sreq, nullptr, &err)) << err;
+            for (void* sreq : sreqs) {
+                if (!TightWait(sreq, nullptr, &err)) {
+                    ADD_FAILURE() << "round " << round << ": " << err;
+                    break;
+                }
+            }
         }
         MPI_Barrier(MPI_COMM_WORLD);
     }
@@ -662,27 +683,33 @@ TEST_F(GdrFlushFlagTest, GpuObserver_PayloadVisibleOnceFlagSet) {
     const size_t kSizes[] = {1, 4097, (1 << 20) + 3, 16 << 20, (16 << 20) + 4099};
     const size_t maxSize = *std::max_element(std::begin(kSizes), std::end(kSizes));
     void* bufs[2] = {nullptr, nullptr};
-    ASSERT_EQ(hipMalloc(&bufs[0], maxSize), hipSuccess);
+    ASSERT_TRUE(AllRanksOk(hipMalloc(&bufs[0], maxSize) == hipSuccess));
     auto bufGuard0 = makeDeviceBufferAutoGuard(bufs[0]);
-    ASSERT_EQ(hipExtMallocWithFlags(&bufs[1], maxSize, hipDeviceMallocUncached), hipSuccess);
+    ASSERT_TRUE(AllRanksOk(hipExtMallocWithFlags(&bufs[1], maxSize, hipDeviceMallocUncached) == hipSuccess));
     auto bufGuard1 = makeDeviceBufferAutoGuard(bufs[1]);
     void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
     void* mhs[2] = {nullptr, nullptr};
-    ASSERT_EQ(RegisterGdrMemory(comm, bufs[0], maxSize, &mhs[0]), ncclSuccess);
+    ASSERT_TRUE(AllRanksOk(RegisterGdrMemory(comm, bufs[0], maxSize, &mhs[0]) == ncclSuccess));
     NetMHandleGuard mhGuard0(mhs[0], NetMHandleDeleter(net_, comm));
-    ASSERT_EQ(RegisterGdrMemory(comm, bufs[1], maxSize, &mhs[1]), ncclSuccess);
+    ASSERT_TRUE(AllRanksOk(RegisterGdrMemory(comm, bufs[1], maxSize, &mhs[1]) == ncclSuccess));
     NetMHandleGuard mhGuard1(mhs[1], NetMHandleDeleter(net_, comm));
 
     ObserverResult* res = nullptr;
     hipStream_t stream = nullptr;
     uint64_t timeoutTicks = 0;
+    bool observerReady = true;
     if (rank == 0) {
-        ASSERT_EQ(hipHostMalloc((void**)&res, sizeof(*res), hipHostMallocCoherent), hipSuccess);
-        ASSERT_EQ(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking), hipSuccess);
         int dev = 0, rateKHz = 0;
-        ASSERT_EQ(hipGetDevice(&dev), hipSuccess);
-        ASSERT_EQ(hipDeviceGetAttribute(&rateKHz, hipDeviceAttributeWallClockRate, dev), hipSuccess);
+        observerReady = hipHostMalloc((void**)&res, sizeof(*res), hipHostMallocCoherent) == hipSuccess &&
+                        hipStreamCreateWithFlags(&stream, hipStreamNonBlocking) == hipSuccess &&
+                        hipGetDevice(&dev) == hipSuccess &&
+                        hipDeviceGetAttribute(&rateKHz, hipDeviceAttributeWallClockRate, dev) == hipSuccess;
         timeoutTicks = (uint64_t)rateKHz * 1000 * 10;
+    }
+    if (!AllRanksOk(observerReady)) {
+        if (stream) (void)hipStreamDestroy(stream);
+        if (res) (void)hipHostFree(res);
+        FAIL() << "observer setup failed on rank 0";
     }
 
     const int count = expectedFlagCount();
@@ -754,19 +781,21 @@ TEST_F(GdrFlushFlagTest, Lifecycle_ReconnectFreshStateNoLeaks) {
     const int rank = MPIEnvironment::world_rank;
     const size_t size = 65536 + 5;
     void* buffer = nullptr;
-    ASSERT_EQ(hipMalloc(&buffer, size), hipSuccess);
+    ASSERT_TRUE(AllRanksOk(hipMalloc(&buffer, size) == hipSuccess));
     auto bufGuard = makeDeviceBufferAutoGuard(buffer);
 
     RdmaResourceCounts before;
     size_t freeBefore = 0, totalMem = 0;
-    constexpr int kCycles = 12;
+    // A leaked 64 KiB flag page per cycle must exceed `slack` below, even when
+    // the allocator hands pages out of larger cached fragments.
+    constexpr int kCycles = 64;
     std::string err;
     for (int cycle = 0; cycle <= kCycles; cycle++) {
         if (AnyRankFailed()) break;
         if (cycle == 1) {
             MPI_Barrier(MPI_COMM_WORLD);
             before = CaptureRdmaResources();
-            ASSERT_EQ(hipMemGetInfo(&freeBefore, &totalMem), hipSuccess);
+            ASSERT_TRUE(AllRanksOk(hipMemGetInfo(&freeBefore, &totalMem) == hipSuccess));
         }
         ConnectionPair pair;
         NetConnectionGuard connGuard(net_);
@@ -781,7 +810,7 @@ TEST_F(GdrFlushFlagTest, Lifecycle_ReconnectFreshStateNoLeaks) {
         }
         void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
         void* mh = nullptr;
-        ASSERT_EQ(RegisterGdrMemory(comm, buffer, size, &mh), ncclSuccess);
+        ASSERT_TRUE(AllRanksOk(RegisterGdrMemory(comm, buffer, size, &mh) == ncclSuccess));
         NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
 
         const bool hints[] = {true, false, true};
@@ -795,15 +824,26 @@ TEST_F(GdrFlushFlagTest, Lifecycle_ReconnectFreshStateNoLeaks) {
                 int rt[1] = {i};
                 void* rh[1] = {mh};
                 descBefore = ncclIbGetGpuFlushFlagSeq(pair.recvComm);
-                ASSERT_TRUE(PostFlaggedRecv(pair.recvComm, hints[i], 1, rb, rs, rt, rh, &req, &err)) << err;
-                ASSERT_TRUE(TightWait(req, nullptr, &err)) << "cycle " << cycle << ": " << err;
+                if (!PostFlaggedRecv(pair.recvComm, hints[i], 1, rb, rs, rt, rh, &req, &err)) {
+                    ADD_FAILURE() << "cycle " << cycle << ": " << err;
+                    break;
+                }
+                if (!TightWait(req, nullptr, &err)) {
+                    ADD_FAILURE() << "cycle " << cycle << ": " << err;
+                    break;
+                }
                 CheckCompletion(pair.recvComm, flags, snap, hints[i], i, descBefore, "lifecycle");
                 if (!hints[i]) EXPECT_TRUE(FlushAndWait(pair.recvComm, 1, rb, rs, rh, &err)) << err;
                 EXPECT_TRUE(VerifyPattern(buffer, size, seed, &err)) << "cycle " << cycle << ": " << err;
             } else {
-                ASSERT_EQ(initializeBufferWithPattern<uint8_t>(buffer, size, makeBytePattern(seed)), hipSuccess);
-                ASSERT_TRUE(TightSend(pair.sendComm, buffer, size, i, mh, &req, &err)) << err;
-                ASSERT_TRUE(TightWait(req, nullptr, &err)) << err;
+                if (initializeBufferWithPattern<uint8_t>(buffer, size, makeBytePattern(seed)) != hipSuccess) {
+                    ADD_FAILURE() << "cycle " << cycle << ": send buffer initialization failed";
+                    break;
+                }
+                if (!TightSend(pair.sendComm, buffer, size, i, mh, &req, &err) || !TightWait(req, nullptr, &err)) {
+                    ADD_FAILURE() << "cycle " << cycle << ": " << err;
+                    break;
+                }
             }
         }
         MPI_Barrier(MPI_COMM_WORLD);
@@ -813,8 +853,8 @@ TEST_F(GdrFlushFlagTest, Lifecycle_ReconnectFreshStateNoLeaks) {
     AssertNoRdmaLeaks(before, CaptureRdmaResources(), "flag lifecycle");
     size_t freeAfter = 0;
     ASSERT_EQ(hipMemGetInfo(&freeAfter, &totalMem), hipSuccess);
-    // One flag page per cycle would leak kCycles pages; allow allocator slack.
-    const size_t slack = 4u << 20;
+    // kCycles leaked flag pages are 4 MiB.
+    const size_t slack = 1u << 20;
     EXPECT_GE(freeAfter + slack, freeBefore)
         << "device memory dropped by " << (freeBefore - freeAfter) << " bytes over " << kCycles << " cycles";
 }
@@ -831,7 +871,7 @@ TEST_F(GdrFlushFlagTest, MultiThread_IndependentCommsKeepOwnState) {
 
     const int rank = MPIEnvironment::world_rank;
     int hipDev = 0;
-    ASSERT_EQ(hipGetDevice(&hipDev), hipSuccess);
+    ASSERT_TRUE(AllRanksOk(hipGetDevice(&hipDev) == hipSuccess));
     const int count = expectedFlagCount();
     constexpr int kThreads = 4;
     constexpr int kIters = 96;

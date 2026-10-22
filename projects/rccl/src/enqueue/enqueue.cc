@@ -3101,7 +3101,7 @@ static ncclResult_t topoGetAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* 
   if (!isTunerMatchFound && info->algorithm != NCCL_ALGO_PAT) {
     rcclUpdateCollectiveAlgorithm(comm, nBytes, info, table);
     rcclUpdateCollectiveProtocol(comm, nBytes, info);
-    rcclUpdateAllReduceAlgoProto(comm, nBytes, info, table);
+    rcclUpdateRemoteFlushAlgoProto(comm, nBytes, info, table);
   }
   rcclSetPipelining(comm, nBytes, info);
   if (simInfo) simInfo->estimatedTime = time;

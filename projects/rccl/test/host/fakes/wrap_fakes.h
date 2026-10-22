@@ -40,6 +40,7 @@ extern std::function<ncclResult_t(uint32_t, uint64_t*)> g_amdSmiGetFirmwareVersi
 // respective guards independently.
 extern std::function<int64_t()> g_paramForceCe;
 extern std::function<int64_t()> g_paramP2pDisable;
+extern std::function<int64_t()> g_paramIbGdrFlushFlag;
 
 // Deliberate reset opt-out: every mutable hook in this file is installed via
 // ScopedHook (or exercised in a forked RUN_ISOLATED_TEST child), so state is

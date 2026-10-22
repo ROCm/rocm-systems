@@ -647,7 +647,7 @@ static struct tuningModel tuning_model_6{
     {
       /*ReduceScatter*/
       {/*LL (min/max/factor/thread_threshold)*/ {0, 65536, 1, 16},
-       /*LL64/128 (min/max/factor/thread_threshold)*/ {65536, 6291456, 1, 64}},
+       /*LL64/128 (min/max/factor/thread_threshold)*/ {65536, 8388608, 1, 64}},
       /*AllGather*/
       {/*LL (min/max/factor/thread_threshold)*/ {0, 65536, 1, 16},
        /*LL64/128 (min/max/factor/thread_threshold)*/ {65536, 8388608, 1, 64}},
