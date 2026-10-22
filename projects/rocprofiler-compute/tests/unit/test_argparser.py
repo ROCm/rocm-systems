@@ -292,19 +292,18 @@ def test_deprecated_options_are_real_options():
 
 
 @pytest.mark.parametrize(
-    ("argv", "workload", "warned"),
+    ("argv", "warned"),
     [
-        (["profile", "--roof-only"], [], ["--roof-only"]),
-        (["profile", "--retain-rocpd-output=1"], [], ["--retain-rocpd-output"]),
+        (["profile", "--roof-only"], ["--roof-only"]),
+        (["profile", "--retain-rocpd-output=1"], ["--retain-rocpd-output"]),
         # Options of the workload belong to the workload
-        (["profile", "-n", "x", "--", "./app", "--device", "1"],
-         ["--", "./app", "--device", "1"], []),
-        (["profile", "--roofline-device", "1"], [], []),
+        (["profile", "-n", "x", "--", "./app", "--device", "1"], []),
+        (["profile", "--roofline-device", "1"], []),
     ],
     ids=["old_name", "equals_form", "workload_options", "new_name"],
 )  # fmt: skip
-def test_warn_deprecated_options(argv, workload, warned, caplog):
-    warn_deprecated_options(argv, workload)
+def test_warn_deprecated_options(argv, warned, caplog):
+    warn_deprecated_options(argv)
     for option in warned:
         assert f"{option} is deprecated" in caplog.text
     assert caplog.text.count("is deprecated") == len(warned)

@@ -23,9 +23,11 @@ DEPRECATED_OPTIONS = {
 }
 
 
-def warn_deprecated_options(argv: list[str], workload: list[str]) -> None:
-    """Warn about each deprecated option in argv, except in the trailing workload."""
-    for arg in argv[: len(argv) - len(workload)]:
+def warn_deprecated_options(argv: list[str]) -> None:
+    """Warn about each deprecated option in argv, up to the "--" before the workload."""
+    for arg in argv:
+        if arg == "--":
+            break
         option = arg.split("=", 1)[0]
         if option in DEPRECATED_OPTIONS:
             console_warning(

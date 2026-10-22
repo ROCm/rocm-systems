@@ -271,10 +271,7 @@ class RocProfCompute:
             experimental_requested,
         )
         self.__args = self.__parser.parse_args()
-        # The workload command after "--" may have options of its own
-        warn_deprecated_options(
-            sys.argv[1:], getattr(self.__args, "remaining", None) or []
-        )
+        warn_deprecated_options(sys.argv[1:])
 
         if self.__args.mode == "profile":
             self.handle_profile_args()
