@@ -1911,6 +1911,12 @@ protected:
         return rma_ == &ncclRmaIbProxy ? DoneOnFirstTest(req) : PollUntilDone(req);
     }
 
+    // IB-CAST posts no WR for a zero-size op, so it must be done on its first test().
+    bool ZeroSizeOpDone(void* req)
+    {
+        return rma_ == &IbCastRmaIbProxy ? DoneOnFirstTest(req) : PollUntilDone(req);
+    }
+
     // Like PollUntilDone, but returns test()'s error, or ncclInProgress on timeout.
     ncclResult_t PollStatus(void* req, int timeoutMs)
     {
@@ -2133,7 +2139,7 @@ TEST_F(RmaMultiSegmentPostMPITest, ZeroSizeOpsCompleteWithQueuedPredecessor)
         void* first   = post(OpKind::Put, srcMh_, dstMh_, chains[0]);
         void* zeroPut = post(OpKind::Put, srcMh_, dstMh_, none);
         void* zeroGet = post(OpKind::Get, dstMh_, srcMh_, none);
-        ok = PollUntilDone(zeroPut) && ok;
+        ok = ZeroSizeOpDone(zeroPut) && ok;
         ok = DoneBehindZeroSizeOp(first) && ok;
         ok = DoneOnFirstTest(zeroGet) && ok;
 
@@ -2282,7 +2288,7 @@ TEST_F(RmaMultiSegmentPostMPITest, RejectedOpsLeaveNoSlotOrSequenceGap)
         for (int i = 0; rejecter && i < kIbRequestSlots; i++) accepted += !rejected(i);
         EXPECT_EQ(accepted, 0) << "invalid ops were accepted";
         void* zero = post(MakeOp(OpKind::Put, srcMh_, dstMh_, Chain{}, 0, aggregate));
-        ok = PollUntilDone(zero) && ok;
+        ok = ZeroSizeOpDone(zero) && ok;
         ok = DoneBehindZeroSizeOp(first) && ok;
 
         std::vector<void*> reqs;

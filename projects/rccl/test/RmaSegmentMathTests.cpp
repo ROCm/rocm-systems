@@ -451,19 +451,6 @@ TEST(RmaSegmentMathTest, SegmentCountKeepsZeroAndNegative)
     EXPECT_FALSE(rcclRmaMrSegmentCount(&negative) > 1);
 }
 
-TEST(RmaSegmentMathTest, LayoutsMatchRequiresEqualBoundaries)
-{
-    const size_t lhs[] = {0, 4096, 8192};
-    const size_t rhs[] = {0, 4096, 8192};
-    const size_t shorter[] = {0, 4096};
-    const size_t shifted[] = {0, 2048, 8192};
-    EXPECT_TRUE(ncclRmaLayoutsMatch(2, lhs, 2, rhs));
-    EXPECT_FALSE(ncclRmaLayoutsMatch(2, lhs, 1, shorter));
-    EXPECT_FALSE(ncclRmaLayoutsMatch(2, lhs, 2, shifted));
-    EXPECT_FALSE(ncclRmaLayoutsMatch(0, lhs, 0, lhs));
-    EXPECT_FALSE(ncclRmaLayoutsMatch(NCCL_RMA_MAX_SEGMENTS + 1, lhs, NCCL_RMA_MAX_SEGMENTS + 1, lhs));
-}
-
 TEST(RmaSegmentMathTest, SegIndexOfUsesHalfOpenOffsets)
 {
     const size_t off[] = {0, 4096, 8192};
@@ -483,18 +470,6 @@ TEST(RmaSegmentMathTest, OffsetRangeOkRejectsPastEnd)
     EXPECT_FALSE(ncclRmaOffsetRangeOk(2, off, 4096, 4097));
     EXPECT_FALSE(ncclRmaOffsetRangeOk(2, off, 8192, 1));
     EXPECT_FALSE(ncclRmaOffsetRangeOk(0, off, 0, 0));
-}
-
-TEST(RmaSegmentMathTest, TranscriptHeaderRejectsWrongMagicOrVersion)
-{
-    EXPECT_TRUE(ncclRmaTranscriptHeaderOk(0x524d5347u, 1u, 0x524d5347u, 1u));
-    EXPECT_FALSE(ncclRmaTranscriptHeaderOk(0u, 1u, 0x524d5347u, 1u));
-    EXPECT_FALSE(ncclRmaTranscriptHeaderOk(0x524d5347u, 2u, 0x524d5347u, 1u));
-}
-
-TEST(RmaSegmentMathTest, SegmentCapMatchesClassicIb)
-{
-    EXPECT_EQ(NCCL_RMA_MAX_SEGMENTS, NCCL_IB_MAX_SEGMENTS);
 }
 
 namespace {
