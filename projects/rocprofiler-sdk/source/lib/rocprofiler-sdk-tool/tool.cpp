@@ -3968,6 +3968,51 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     if(tool_metadata->process_start_ns == 0)
         rocprofiler_get_timestamp(&(tool_metadata->process_start_ns));
 
+    // A fork() child without exec keeps this process's tool state. Give it its own identity so
+    // its output is not attributed to the parent and sibling children do not derive the same
+    // rocpd UUID from the parent's pid and start time. Also drop the records it inherits, which
+    // the parent already reports.
+    //
+    // Plain-fork child output is best-effort and requires traced API and marker producers to be
+    // quiescent at the fork boundary. The prepare handler drains records already buffered but
+    // does not stop another application thread from producing an SDK record before the kernel
+    // forks. Child attribution for records racing that boundary is unspecified. Applications
+    // requiring deterministic child profiling should use fork+exec/spawn or quiesce tracing
+    // activity before a plain fork.
+    static std::once_flag fork_handlers_once;
+    std::call_once(fork_handlers_once, []() {
+        const int status = pthread_atfork(
+            []() {
+                // Move records currently held by rocprofiler-sdk into the file buffers so a
+                // quiescent child does not deliver copies as its own records.
+                if(client_identifier)
+                {
+                    for(auto itr : get_buffers().as_array())
+                    {
+                        if(itr.handle == 0) continue;
+                        auto status = rocprofiler_flush_buffer(itr);
+                        ROCP_FATAL_IF(status != ROCPROFILER_STATUS_SUCCESS)
+                            << "failed to flush buffer " << itr.handle
+                            << " before fork: " << rocprofiler_get_status_string(status);
+                    }
+                }
+                tool::prepare_fork_file_buffers();
+            },
+            []() { tool::parent_fork_file_buffers(); },
+            []() {
+                common::reset_tid_after_fork();
+                if(tool_metadata)
+                {
+                    tool_metadata->process_id        = getpid();
+                    tool_metadata->parent_process_id = getppid();
+                    rocprofiler_get_timestamp(&(tool_metadata->process_start_ns));
+                }
+                tool::child_fork_file_buffers();
+            });
+        ROCP_FATAL_IF(status != 0)
+            << "failed to register rocprofv3 fork handlers: " << strerror(status);
+    });
+
     return 0;
 }
 
