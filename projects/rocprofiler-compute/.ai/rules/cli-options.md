@@ -63,11 +63,24 @@ becomes generally available, follow
 
 ## Arguments
 
-A list of values is passed as separate arguments, separated by spaces.
+To pass several values, list them after the flag, separated by spaces:
 
 ```text
 --roofline-data-types FP16 FP32 FP64
 ```
+
+Don't repeat the flag: `-b 2 -b 5` keeps only `5`. Use `-b 2 5` instead.
+
+The exception is analyze mode with several workloads. Repeat `-p` once per
+workload, and repeat `-k` or `-d` to pick kernels or dispatches for each workload
+in the same order:
+
+```text
+analyze -p run1 -k 0 1 -p run2 -k 3
+```
+
+This picks kernels 0 and 1 from `run1` and kernel 3 from `run2`. A single `-k` or
+`-d` applies to every workload.
 
 ## Help Messages
 
