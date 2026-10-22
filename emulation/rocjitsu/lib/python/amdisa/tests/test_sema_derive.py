@@ -1819,7 +1819,7 @@ class TestDeriveVectorBinop:
             call_names = [
                 n.call_name for n in block.body.walk() if n.kind == SemaNodeKind.CALL
             ]
-            assert f'std::f{op}' in call_names
+            assert f'float_minmax_legacy_{op}' in call_names
         for op in ['min', 'max']:
             sem = _FakeSem(f'V_{op.upper()}_I32', 'vector_binop', op, 'i32')
             block = derive_sema_block(sem)
