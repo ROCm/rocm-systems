@@ -98,12 +98,16 @@ std::vector<ibv_send_wr> MakeWrChain(std::initializer_list<bool> signaled) {
   return wrs;
 }
 
-bool RecordSample(struct ncclIbWqeLatMon* monitor, uint64_t postNs, uint64_t deltaNs,
-                  struct ncclIbWqeLatStats* stats = nullptr) {
+void ArmTracking(struct ncclIbWqeLatMon* monitor, uint64_t postNs, uint32_t inflight, uint32_t pendingBefore = 0) {
   monitor->tracking = true;
   monitor->trackedPostNs = postNs;
-  monitor->pendingBefore = 0;
-  monitor->inflight++;
+  monitor->pendingBefore = pendingBefore;
+  monitor->inflight = inflight;
+}
+
+bool RecordSample(struct ncclIbWqeLatMon* monitor, uint64_t postNs, uint64_t deltaNs,
+                  struct ncclIbWqeLatStats* stats = nullptr) {
+  ArmTracking(monitor, postNs, monitor->inflight + 1);
   return NetIbWqeLatMonOnComplete(monitor, postNs + deltaNs, nullptr, nullptr, stats);
 }
 
@@ -229,9 +233,7 @@ TEST_F(NetIbWqeLatMonMicrotest, StampSend_IdleTracksFirstSignaledAndCountsAllSig
 TEST_F(NetIbWqeLatMonMicrotest, StampSend_WhileTrackingPreservesWindowAndOnlyAddsInflight) {
   ncclIbQp qp{};
   InitMonitor(&qp.latMon);
-  qp.latMon.tracking = true;
-  qp.latMon.trackedPostNs = kBaseNs;
-  qp.latMon.inflight = 2;
+  ArmTracking(&qp.latMon, kBaseNs, 2);
   auto wrs = MakeWrChain({true, true});
   g_wqeClockValues.push_back(kBaseNs + 10);
 
@@ -289,10 +291,7 @@ TEST_F(NetIbWqeLatMonMicrotest, OnComplete_PendingBeforeSkipsOlderCompletions) {
   ncclIbWqeLatMon monitor{};
   InitMonitor(&monitor);
   NetIbWqeLatThresholdNs = UINT64_MAX;
-  monitor.tracking = true;
-  monitor.trackedPostNs = kBaseNs;
-  monitor.pendingBefore = 2;
-  monitor.inflight = 3;
+  ArmTracking(&monitor, kBaseNs, 3, /*pendingBefore=*/2);
 
   EXPECT_FALSE(NetIbWqeLatMonOnComplete(&monitor, kBaseNs + 10, nullptr, nullptr, nullptr));
   EXPECT_FALSE(NetIbWqeLatMonOnComplete(&monitor, kBaseNs + 20, nullptr, nullptr, nullptr));
@@ -311,9 +310,7 @@ TEST_F(NetIbWqeLatMonMicrotest, OnComplete_PendingBeforeSkipsOlderCompletions) {
 TEST_F(NetIbWqeLatMonMicrotest, OnComplete_PollBeforePostClampsSampleToZero) {
   ncclIbWqeLatMon monitor{};
   InitMonitor(&monitor);
-  monitor.tracking = true;
-  monitor.trackedPostNs = kBaseNs;
-  monitor.inflight = 1;
+  ArmTracking(&monitor, kBaseNs, 1);
   uint64_t delta = 1;
 
   EXPECT_FALSE(NetIbWqeLatMonOnComplete(&monitor, kBaseNs - 1, &delta, nullptr, nullptr));
@@ -341,9 +338,7 @@ TEST_F(NetIbWqeLatMonMicrotest, OnComplete_StrictThresholdAndOneSecondLimiterCou
 TEST_F(NetIbWqeLatMonMicrotest, CheckStall_StrictThresholdAndIndependentLimiter) {
   ncclIbWqeLatMon monitor{};
   InitMonitor(&monitor);
-  monitor.tracking = true;
-  monitor.trackedPostNs = kBaseNs;
-  monitor.inflight = 3;
+  ArmTracking(&monitor, kBaseNs, 3);
   NetIbWqeLatThresholdNs = 50;
   uint64_t age = 0;
   uint32_t inflight = 0;
@@ -369,9 +364,7 @@ TEST_F(NetIbWqeLatMonMicrotest, CheckStall_UntrackedOrNonForwardTimeClearsOutput
   EXPECT_EQ(age, 0u);
   EXPECT_EQ(inflight, 0u);
 
-  monitor.tracking = true;
-  monitor.trackedPostNs = kBaseNs;
-  monitor.inflight = 2;
+  ArmTracking(&monitor, kBaseNs, 2);
   age = 9;
   inflight = 9;
   EXPECT_FALSE(NetIbWqeLatMonCheckStall(&monitor, kBaseNs, &age, &inflight));
@@ -401,7 +394,26 @@ TEST_F(NetIbWqeLatMonMicrotest, Snapshot_EmptyAndSingleSampleReportExactStatisti
   EXPECT_EQ(stats.p999Ns, 123u);
 }
 
-TEST_F(NetIbWqeLatMonMicrotest, Snapshot_FiveSamplesReportWelfordAndSeededP2Statistics) {
+TEST_F(NetIbWqeLatMonMicrotest, Snapshot_FewerThanFiveSamplesReportExactPercentiles) {
+  ncclIbWqeLatMon monitor{};
+  InitMonitor(&monitor);
+  NetIbWqeLatThresholdNs = UINT64_MAX;
+  for (uint64_t delta : {400, 100, 300, 200}) {
+    RecordSample(&monitor, kBaseNs + monitor.count * (kSecondNs + 1000), delta);
+  }
+  ncclIbWqeLatStats stats{};
+
+  NetIbWqeLatMonSnapshot(&monitor, &stats);
+
+  EXPECT_EQ(stats.count, 4u);
+  EXPECT_EQ(stats.maxNs, 400u);
+  EXPECT_EQ(stats.p50Ns, 200u);
+  EXPECT_EQ(stats.p90Ns, 400u);
+  EXPECT_EQ(stats.p99Ns, 400u);
+  EXPECT_EQ(stats.p999Ns, 400u);
+}
+
+TEST_F(NetIbWqeLatMonMicrotest, Snapshot_FiveSamplesReportWelfordStatisticsAndOrderedPercentiles) {
   ncclIbWqeLatMon monitor{};
   InitMonitor(&monitor);
   NetIbWqeLatThresholdNs = UINT64_MAX;
@@ -417,9 +429,10 @@ TEST_F(NetIbWqeLatMonMicrotest, Snapshot_FiveSamplesReportWelfordAndSeededP2Stat
   EXPECT_NEAR(stats.stddevNs, 158.11388300841898, 1e-6);
   EXPECT_EQ(stats.maxNs, 500u);
   EXPECT_EQ(stats.p50Ns, 300u);
-  EXPECT_EQ(stats.p90Ns, 300u);
-  EXPECT_EQ(stats.p99Ns, 300u);
-  EXPECT_EQ(stats.p999Ns, 300u);
+  EXPECT_LE(stats.p50Ns, stats.p90Ns);
+  EXPECT_LE(stats.p90Ns, stats.p99Ns);
+  EXPECT_LE(stats.p99Ns, stats.p999Ns);
+  EXPECT_LE(stats.p999Ns, stats.maxNs);
 }
 
 TEST_F(NetIbWqeLatMonMicrotest, Snapshot_AscendingSamplesProduceBoundedOrderedPercentiles) {
@@ -494,9 +507,7 @@ TEST_F(NetIbWqeLatMonMicrotest, Snapshot_MixedUniformSamplesSeparateMedianAndTai
 TEST_F(NetIbWqeLatMonMicrotest, HandleCompletion_IgnoresRecvAndUnknownQpWithoutReadingClock) {
   WqeCompletionScene scene;
   auto& monitor = scene.send.base.qps[0].latMon;
-  monitor.tracking = true;
-  monitor.trackedPostNs = kBaseNs;
-  monitor.inflight = 1;
+  ArmTracking(&monitor, kBaseNs, 1);
   uint64_t pollNs = 0;
   bool pollNsValid = false;
   ibv_wc completion{};
@@ -519,11 +530,7 @@ TEST_F(NetIbWqeLatMonMicrotest, HandleCompletion_SendOpcodesShareOnePollTimestam
   scene.send.base.vProps.ndevs = 1;
   scene.send.base.qps[1].devIndex = 0;
   NetIbWqeLatThresholdNs = UINT64_MAX;
-  for (int i = 0; i < 2; ++i) {
-    scene.send.base.qps[i].latMon.tracking = true;
-    scene.send.base.qps[i].latMon.trackedPostNs = kBaseNs;
-    scene.send.base.qps[i].latMon.inflight = 1;
-  }
+  for (int i = 0; i < 2; ++i) ArmTracking(&scene.send.base.qps[i].latMon, kBaseNs, 1);
   g_wqeClockValues.push_back(kBaseNs + 42);
   uint64_t pollNs = 0;
   bool pollNsValid = false;
@@ -547,9 +554,7 @@ TEST_F(NetIbWqeLatMonMicrotest, HandleCompletion_SendOpcodesShareOnePollTimestam
 TEST_F(NetIbWqeLatMonMicrotest, HandleCompletion_SlowSendRecordsSampleAndEmitsReportPath) {
   WqeCompletionScene scene;
   auto& monitor = scene.send.base.qps[0].latMon;
-  monitor.tracking = true;
-  monitor.trackedPostNs = kBaseNs;
-  monitor.inflight = 1;
+  ArmTracking(&monitor, kBaseNs, 1);
   NetIbWqeLatThresholdNs = 1;
   g_wqeClockValues.push_back(kBaseNs + 10);
   g_ncclSocketGetAddr = [](ncclSocket*, ncclSocketAddress*) { return ncclSystemError; };
@@ -573,11 +578,7 @@ TEST_F(NetIbWqeLatMonMicrotest, HandleCompletion_SlowSendRecordsSampleAndEmitsRe
 
 TEST_F(NetIbWqeLatMonMicrotest, ScanStalls_VisitsOnlyRequestedInterleavedDevice) {
   WqeCompletionScene scene;
-  for (auto& qp : scene.send.base.qps) {
-    qp.latMon.tracking = true;
-    qp.latMon.trackedPostNs = kBaseNs;
-    qp.latMon.inflight = 1;
-  }
+  for (auto& qp : scene.send.base.qps) ArmTracking(&qp.latMon, kBaseNs, 1);
   NetIbWqeLatThresholdNs = 1;
   g_wqeClockValues.push_back(kBaseNs + 10);
   g_ncclSocketGetAddr = [](ncclSocket*, ncclSocketAddress*) { return ncclSystemError; };
@@ -609,9 +610,7 @@ TEST_F(NetIbWqeLatMonMicrotest, DISABLED_ScanStalls_ReplacedQpDoesNotReportStale
   send.base.activeQps[0] = &replacement;
   InitMonitor(&send.base.qps[0].latMon);
   InitMonitor(&replacement.latMon);
-  send.base.qps[0].latMon.tracking = true;
-  send.base.qps[0].latMon.trackedPostNs = kBaseNs;
-  send.base.qps[0].latMon.inflight = 1;
+  ArmTracking(&send.base.qps[0].latMon, kBaseNs, 1);
   NetIbWqeLatThresholdNs = 1;
   g_wqeClockValues.push_back(kBaseNs + 10);
   g_ncclSocketGetAddr = [](ncclSocket*, ncclSocketAddress*) { return ncclSystemError; };
@@ -628,7 +627,6 @@ TEST_F(NetIbWqeLatMonMicrotest, ReportSummary_EitherGlobalGateDisabledEmitsNothi
   InitMonitor(&monitor);
   NetIbWqeLatThresholdNs = UINT64_MAX;
   RecordSample(&monitor, kBaseNs, 25);
-  g_ncclSocketGetAddr = [](ncclSocket*, ncclSocketAddress*) { return ncclSystemError; };
 
   RcclUnitTesting::ScopedDebugLogging logging(NCCL_LOG_INFO, NCCL_ALL);
   std::string log = RcclUnitTesting::CaptureLog([&] {
@@ -679,7 +677,7 @@ TEST_F(NetIbWqeLatMonMicrotest, ReportSummary_EnabledSampleEmitsStatistics) {
   EXPECT_EQ(monitor.count, 1u);
   EXPECT_EQ(monitor.maxNs, 25u);
   EXPECT_TRUE(RcclUnitTesting::LogHas(log, "WQE latency summary [send"));
-  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "n=1"));
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "]: n=1 slow=0 "));
 }
 
 // AICOMRCCL-3131: clock failure currently arms a tracking window

@@ -89,21 +89,21 @@ void* TestGinMemcpy(void* dst, const void* src, size_t size) {
   return std::memcpy(dst, src, size);
 }
 
-std::function<ncclResult_t(ncclDebugLogger_t, ncclProfilerCallback_t)> g_ginInitDevices =
-    [](ncclDebugLogger_t, ncclProfilerCallback_t) { return ncclSystemError; };
-std::function<ncclResult_t()> g_ginFinalizeDevices = [] { return ncclSystemError; };
-std::function<ncclResult_t()> g_ginGdrSupport = [] { return ncclSystemError; };
-std::function<ncclResult_t()> g_ginPeerMemSupport = [] { return ncclSystemError; };
-std::function<ncclResult_t(int)> g_ginDmaBufSupport = [](int) { return ncclSystemError; };
+constexpr auto kGinHookFails = [](auto&&...) { return ncclSystemError; };
+constexpr auto kGinHookNoOp = [](auto&&...) {};
+
+std::function<ncclResult_t(ncclDebugLogger_t, ncclProfilerCallback_t)> g_ginInitDevices = kGinHookFails;
+std::function<ncclResult_t()> g_ginFinalizeDevices = kGinHookFails;
+std::function<ncclResult_t()> g_ginGdrSupport = kGinHookFails;
+std::function<ncclResult_t()> g_ginPeerMemSupport = kGinHookFails;
+std::function<ncclResult_t(int)> g_ginDmaBufSupport = kGinHookFails;
 std::function<ncclResult_t(void*, int, void*, void**, ncclNetDeviceHandle_t**, int, int)> g_ginConnect =
-    [](void*, int, void*, void**, ncclNetDeviceHandle_t**, int, int) { return ncclSystemError; };
-std::function<ncclResult_t(void*, void**, ncclNetDeviceHandle_t**, int)> g_ginAccept =
-    [](void*, void**, ncclNetDeviceHandle_t**, int) { return ncclSystemError; };
-std::function<void(void*, int)> g_ginSetTrafficClass = [](void*, int) {};
-std::function<ncclResult_t(ncclIbRecvComm*)> g_ginCreateFlushQp =
-    [](ncclIbRecvComm*) { return ncclSystemError; };
+    kGinHookFails;
+std::function<ncclResult_t(void*, void**, ncclNetDeviceHandle_t**, int)> g_ginAccept = kGinHookFails;
+std::function<void(void*, int)> g_ginSetTrafficClass = kGinHookNoOp;
+std::function<ncclResult_t(ncclIbRecvComm*)> g_ginCreateFlushQp = kGinHookFails;
 std::function<ncclResult_t(void*, void*, size_t, int, uint64_t, int, uint64_t, void**)> g_ginRegMrDmaBuf =
-    [](void*, void*, size_t, int, uint64_t, int, uint64_t, void**) { return ncclSystemError; };
+    kGinHookFails;
 
 ncclResult_t TestGinInitDevices(ncclDebugLogger_t logger, ncclProfilerCallback_t profiler) {
   return g_ginInitDevices(logger, profiler);
@@ -125,25 +125,18 @@ ncclResult_t TestGinRegMrDmaBuf(void* comm, void* data, size_t size, int type, u
                                 uint64_t flags, void** mhandle) {
   return g_ginRegMrDmaBuf(comm, data, size, type, offset, fd, flags, mhandle);
 }
-std::function<ncclResult_t(int, ncclNetProperties_t*)> g_ginNetGetProperties =
-    [](int, ncclNetProperties_t*) { return ncclSystemError; };
-std::function<ncclResult_t(void*, int, void*, void**)> g_ginNetListen =
-    [](void*, int, void*, void**) { return ncclSystemError; };
-std::function<ncclResult_t(void*, void*, size_t, int, void**)> g_ginNetRegMr =
-    [](void*, void*, size_t, int, void**) { return ncclSystemError; };
-std::function<ncclResult_t(void*, void*)> g_ginNetDeregMr =
-    [](void*, void*) { return ncclSystemError; };
-std::function<ncclResult_t(void*, void*, size_t, int, void*, void*, void**)> g_ginNetIsend =
-    [](void*, void*, size_t, int, void*, void*, void**) { return ncclSystemError; };
+std::function<ncclResult_t(int, ncclNetProperties_t*)> g_ginNetGetProperties = kGinHookFails;
+std::function<ncclResult_t(void*, int, void*, void**)> g_ginNetListen = kGinHookFails;
+std::function<ncclResult_t(void*, void*, size_t, int, void**)> g_ginNetRegMr = kGinHookFails;
+std::function<ncclResult_t(void*, void*)> g_ginNetDeregMr = kGinHookFails;
+std::function<ncclResult_t(void*, void*, size_t, int, void*, void*, void**)> g_ginNetIsend = kGinHookFails;
 std::function<ncclResult_t(void*, int, void**, size_t*, int*, void**, void**, void**)> g_ginNetIrecv =
-    [](void*, int, void**, size_t*, int*, void**, void**, void**) { return ncclSystemError; };
-std::function<ncclResult_t(void*, int*, int*)> g_ginNetTest =
-    [](void*, int*, int*) { return ncclSystemError; };
-std::function<ncclResult_t(void*)> g_ginNetCloseSend = [](void*) { return ncclSystemError; };
-std::function<ncclResult_t(void*)> g_ginNetCloseRecv = [](void*) { return ncclSystemError; };
-std::function<ncclResult_t(void*)> g_ginNetCloseListen = [](void*) { return ncclSystemError; };
-std::function<ncclResult_t(ncclGinIbCollComm*, void*, void*, size_t)> g_ginCollAllGather =
-    [](ncclGinIbCollComm*, void*, void*, size_t) { return ncclSystemError; };
+    kGinHookFails;
+std::function<ncclResult_t(void*, int*, int*)> g_ginNetTest = kGinHookFails;
+std::function<ncclResult_t(void*)> g_ginNetCloseSend = kGinHookFails;
+std::function<ncclResult_t(void*)> g_ginNetCloseRecv = kGinHookFails;
+std::function<ncclResult_t(void*)> g_ginNetCloseListen = kGinHookFails;
+std::function<ncclResult_t(ncclGinIbCollComm*, void*, void*, size_t)> g_ginCollAllGather = kGinHookFails;
 
 ncclResult_t GinNetGetProperties(int dev, ncclNetProperties_t* props) {
   return g_ginNetGetProperties(dev, props);
@@ -176,33 +169,27 @@ ncclResult_t GinCollAllGather(ncclGinIbCollComm* comm, void* src, void* dst, siz
 ncclNet_t g_testGinNet{};
 
 void ResetGinHooks() {
-  g_ginInitDevices = [](ncclDebugLogger_t, ncclProfilerCallback_t) { return ncclSystemError; };
-  g_ginFinalizeDevices = [] { return ncclSystemError; };
-  g_ginGdrSupport = [] { return ncclSystemError; };
-  g_ginPeerMemSupport = [] { return ncclSystemError; };
-  g_ginDmaBufSupport = [](int) { return ncclSystemError; };
-  g_ginConnect = [](void*, int, void*, void**, ncclNetDeviceHandle_t**, int, int) {
-    return ncclSystemError;
-  };
-  g_ginAccept = [](void*, void**, ncclNetDeviceHandle_t**, int) { return ncclSystemError; };
-  g_ginSetTrafficClass = [](void*, int) {};
-  g_ginCreateFlushQp = [](ncclIbRecvComm*) { return ncclSystemError; };
-  g_ginRegMrDmaBuf = [](void*, void*, size_t, int, uint64_t, int, uint64_t, void**) {
-    return ncclSystemError;
-  };
-  g_ginNetGetProperties = [](int, ncclNetProperties_t*) { return ncclSystemError; };
-  g_ginNetListen = [](void*, int, void*, void**) { return ncclSystemError; };
-  g_ginNetRegMr = [](void*, void*, size_t, int, void**) { return ncclSystemError; };
-  g_ginNetDeregMr = [](void*, void*) { return ncclSystemError; };
-  g_ginNetIsend = [](void*, void*, size_t, int, void*, void*, void**) { return ncclSystemError; };
-  g_ginNetIrecv = [](void*, int, void**, size_t*, int*, void**, void**, void**) {
-    return ncclSystemError;
-  };
-  g_ginNetTest = [](void*, int*, int*) { return ncclSystemError; };
-  g_ginNetCloseSend = [](void*) { return ncclSystemError; };
-  g_ginNetCloseRecv = [](void*) { return ncclSystemError; };
-  g_ginNetCloseListen = [](void*) { return ncclSystemError; };
-  g_ginCollAllGather = [](ncclGinIbCollComm*, void*, void*, size_t) { return ncclSystemError; };
+  g_ginInitDevices = kGinHookFails;
+  g_ginFinalizeDevices = kGinHookFails;
+  g_ginGdrSupport = kGinHookFails;
+  g_ginPeerMemSupport = kGinHookFails;
+  g_ginDmaBufSupport = kGinHookFails;
+  g_ginConnect = kGinHookFails;
+  g_ginAccept = kGinHookFails;
+  g_ginSetTrafficClass = kGinHookNoOp;
+  g_ginCreateFlushQp = kGinHookFails;
+  g_ginRegMrDmaBuf = kGinHookFails;
+  g_ginNetGetProperties = kGinHookFails;
+  g_ginNetListen = kGinHookFails;
+  g_ginNetRegMr = kGinHookFails;
+  g_ginNetDeregMr = kGinHookFails;
+  g_ginNetIsend = kGinHookFails;
+  g_ginNetIrecv = kGinHookFails;
+  g_ginNetTest = kGinHookFails;
+  g_ginNetCloseSend = kGinHookFails;
+  g_ginNetCloseRecv = kGinHookFails;
+  g_ginNetCloseListen = kGinHookFails;
+  g_ginCollAllGather = kGinHookFails;
   std::memset(&g_testGinNet, 0, sizeof(g_testGinNet));
   g_testGinNet.name = "test-gin-net";
   g_testGinNet.getProperties = GinNetGetProperties;
@@ -311,8 +298,7 @@ class NetIbGinMicrotest : public ::testing::Test {
     savedNIbDevs_ = ncclNIbDevs;
     savedNMergedIbDevs_ = ncclNMergedIbDevs;
     savedMergedDev_ = ncclIbMergedDevs[0];
-    savedProviders_[0] = ncclIbDevs[0].ibProvider;
-    savedProviders_[1] = ncclIbDevs[1].ibProvider;
+    for (size_t i = 0; i < savedProviders_.size(); ++i) savedProviders_[i] = ncclIbDevs[i].ibProvider;
     savedDevContext_ = ncclIbDevs[0].context;
     savedDevPd_ = ncclIbDevs[0].pd;
   }
@@ -321,8 +307,7 @@ class NetIbGinMicrotest : public ::testing::Test {
     ncclNIbDevs = savedNIbDevs_;
     ncclNMergedIbDevs = savedNMergedIbDevs_;
     ncclIbMergedDevs[0] = savedMergedDev_;
-    ncclIbDevs[0].ibProvider = savedProviders_[0];
-    ncclIbDevs[1].ibProvider = savedProviders_[1];
+    for (size_t i = 0; i < savedProviders_.size(); ++i) ncclIbDevs[i].ibProvider = savedProviders_[i];
     ncclIbDevs[0].context = savedDevContext_;
     ncclIbDevs[0].pd = savedDevPd_;
     g_ginPostedWrs.clear();
@@ -346,7 +331,7 @@ class NetIbGinMicrotest : public ::testing::Test {
   int savedNIbDevs_ = 0;
   int savedNMergedIbDevs_ = 0;
   ncclIbMergedDev savedMergedDev_{};
-  std::array<ncclIbProvider, 2> savedProviders_{};
+  std::array<ncclIbProvider, 3> savedProviders_{};
   ibv_context* savedDevContext_ = nullptr;
   ibv_pd* savedDevPd_ = nullptr;
 };
@@ -386,6 +371,8 @@ TEST_F(NetIbGinMicrotest, DevIsMlx5_RequiresValidMergedDeviceWithOnlyMlx5Members
 
   ncclIbDevs[1].ibProvider = IB_PROVIDER_NONE;
   EXPECT_FALSE(ncclNetIbDevIsMlx5(0));
+  ncclIbDevs[1].ibProvider = IB_PROVIDER_MLX5;
+  ncclIbDevs[2].ibProvider = IB_PROVIDER_MLX5;
   ncclIbMergedDevs[0].vProps.devs[1] = 2;
   EXPECT_FALSE(ncclNetIbDevIsMlx5(0));
 }
