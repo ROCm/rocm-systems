@@ -793,7 +793,7 @@ TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_IbHcaRailAndPlane_AreRecordedA
 }
 
 // The list is freed after enumeration but the pointer is kept, so a plane-index failure frees it
-// again on the fail: path. Pins AICOMRCCL-TBD; a fix flips this pin.
+// again on the fail: path. Pins AICOMRCCL-3143; a fix flips this pin.
 TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_KnownBug_TooManyPlanesFreesTheDeviceListTwice) {
   std::string hca;
   for (int i = 0; i < NCCL_IB_PLANE_MAX_INDEX; i++) {
