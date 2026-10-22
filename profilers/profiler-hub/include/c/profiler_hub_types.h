@@ -29,6 +29,12 @@ extern "C"
                                                  (out of memory). */
         PH_RESULT_CANCELLED,                 /**< The operation was cancelled through its
                                                  future before it finished. */
+        PH_RESULT_UNSUPPORTED_FILE,          /**< The file is not a format profiler-hub
+                                                     can read. */
+        PH_RESULT_INVALID_FILE,              /**< The file is missing, unreadable, or not
+                                                     a usable trace. */
+        PH_RESULT_UNSUPPORTED_SCHEMA_VERSION, /**< The trace schema version is recognized
+                                                  but not supported. */
     } ph_result_t;
 
     struct ph_ctx;
@@ -49,6 +55,24 @@ extern "C"
         uint32_t minor;
         uint32_t patch;
     } ph_version_t;
+
+    /** @brief Trace schema family found in a recognized file. */
+    typedef enum
+    {
+        PH_TRACE_SCHEMA_UNKNOWN,
+        PH_TRACE_SCHEMA_ROCPD,
+    } ph_trace_schema_t;
+
+    /**
+     * @brief Trace schema and schema version returned by ph_probe_file().
+     *        The probe outcome is the function's ph_result_t. Fields stay zero
+     *        when probing did not recognize them.
+     */
+    typedef struct
+    {
+        ph_trace_schema_t trace_schema;
+        ph_version_t      schema_version;
+    } ph_file_probe_t;
 
     /** @brief Distinguishes the identity columns a track was derived from. */
     typedef enum
@@ -91,8 +115,9 @@ extern "C"
         uint32_t    id;
         const char* track_name;
         uint32_t    nid;         /**< Node id this track belongs to. */
-        uint32_t    pid;         /**< Process id this track belongs to. */
-        uint32_t    tid;         /**< Thread id this track belongs to, or 0 if unknown. */
+        uint32_t    pid;         /**< OS process id. Not rocpd_info_process.id. */
+        uint32_t    tid;         /**< OS thread id, or 0 if this track has no thread.
+                                       Not rocpd_info_thread.id. */
         uint32_t    event_count; /**< Total events recorded on this track. */
         uint32_t    agent_id;    /**< Owning device (agent) id, or 0 if not
                                        device-specific. */
@@ -111,6 +136,10 @@ extern "C"
                                             at least one sample value. */
         uint32_t nesting_depth; /**< Largest ph_event_t::nesting_depth of the track's
                                       events; 0 for PMC tracks. */
+        uint64_t process_row_id; /**< rocpd_info_process.id. Not pid. 0 if this
+                                       track has no process. */
+        uint64_t thread_row_id;  /**< rocpd_info_thread.id. Not tid. 0 if this
+                                       track has no thread. */
     } ph_track_t;
 
     /**
@@ -148,7 +177,7 @@ extern "C"
      */
     typedef struct
     {
-        uint32_t             id;
+        uint32_t             id; /**< type_index. Not rocpd_info_agent.id. */
         const char*          agent_type;
         const char*          name;
         const char*          model_name;
@@ -159,6 +188,7 @@ extern "C"
         ph_optional_uint64_t absolute_index;
         ph_optional_uint64_t logical_index;
         ph_optional_uint64_t uuid;
+        uint64_t             row_id; /**< rocpd_info_agent.id. */
     } ph_agent_t;
 
     /** @brief A list of agents; same lifetime rule as ph_track_list_t. */
@@ -175,7 +205,7 @@ extern "C"
      */
     typedef struct
     {
-        uint32_t             id; /**< Process id. */
+        uint32_t             id; /**< OS process id. Not rocpd_info_process.id. */
         const char*          command;
         const char*          environment;
         const char*          extdata;
@@ -184,6 +214,7 @@ extern "C"
         ph_optional_uint64_t fini;
         ph_optional_uint64_t start;
         ph_optional_uint64_t end;
+        uint64_t             row_id; /**< rocpd_info_process.id. */
     } ph_process_t;
 
     /** @brief A list of processes; same lifetime rule as ph_track_list_t. */
@@ -199,12 +230,13 @@ extern "C"
      */
     typedef struct
     {
-        uint64_t             thread_id;
+        uint64_t             thread_id; /**< OS thread id. Not rocpd_info_thread.id. */
         const char*          name;
         const char*          extdata;
         ph_optional_uint64_t parent_process_id;
         ph_optional_uint64_t start;
         ph_optional_uint64_t end;
+        uint64_t             row_id; /**< rocpd_info_thread.id. */
     } ph_thread_t;
 
     /** @brief A list of threads; same lifetime rule as ph_track_list_t. */
@@ -223,6 +255,8 @@ extern "C"
         uint64_t    stream_id;
         const char* name;
         const char* extdata;
+        uint32_t    nid; /**< rocpd_info_node.id. */
+        uint32_t    pid; /**< rocpd_info_process.id. Not the OS pid. */
     } ph_stream_t;
 
     /** @brief A list of streams; same lifetime rule as ph_track_list_t. */
@@ -241,6 +275,8 @@ extern "C"
         uint64_t    queue_id;
         const char* name;
         const char* extdata;
+        uint32_t    nid; /**< rocpd_info_node.id. */
+        uint32_t    pid; /**< rocpd_info_process.id. Not the OS pid. */
     } ph_queue_t;
 
     /** @brief A list of queues; same lifetime rule as ph_track_list_t. */
@@ -272,6 +308,7 @@ extern "C"
         ph_optional_uint64_t instance_id;
         ph_optional_uint64_t is_constant;
         ph_optional_uint64_t is_derived;
+        uint64_t             id; /**< rocpd_info_pmc.id. Not a list index. */
     } ph_pmc_info_t;
 
     /** @brief A list of PMC descriptions; same lifetime rule as ph_track_list_t. */
@@ -340,10 +377,13 @@ extern "C"
      * @note name points into memory owned by the producing ph_ctx_t.
      * @note id is only unique together with type: every event type has its
      *       own id space.
-     * @note nesting_depth is the number of events of the same track, this one
-     *       included, that are active when this event starts (1 = not
-     *       overlapped). It is relative to the whole track, also for a
-     *       time-windowed request.
+     * @note nesting_depth is the lowest level of this track that is free when
+     *       the event starts (1 = nothing on the track overlaps it). A later
+     *       event reuses a lower level once that level no longer overlaps it.
+     *       The value is relative to the whole track, also for a time-windowed
+     *       request.
+     * @note track_id is ph_track_t::id of the event's track. Track ids start
+     *       at 0.
      */
     typedef struct
     {
@@ -353,6 +393,7 @@ extern "C"
         const char*     name;
         ph_event_type_t type;
         uint32_t        nesting_depth;
+        uint32_t        track_id;
     } ph_event_t;
 
     /** @brief A list of duration events; same lifetime rule as
@@ -362,6 +403,277 @@ extern "C"
         uint32_t    list_size;
         ph_event_t* events;
     } ph_event_list_t;
+
+    /** @brief Code-object address range for one call-stack frame.
+     *         Strings are owned by the producing ph_ctx_t. is_valid is 0 when
+     *         the frame has no address range. */
+    typedef struct
+    {
+        uint64_t    address_base;
+        uint64_t    address_low;
+        uint64_t    address_high;
+        const char* extdata;
+        uint32_t    is_valid;
+    } ph_address_range_t;
+
+    /** @brief Program-counter location for one call-stack frame.
+     *         Strings are owned by the producing ph_ctx_t. is_valid is 0 when
+     *         the frame has no program counter. line_number is valid only when
+     *         its is_valid flag is non-zero. event_id is the region row id of
+     *         the frame, the same value as ph_event_t::id, or 0 if unknown. */
+    typedef struct
+    {
+        uint64_t             event_id;
+        const char*          function;
+        const char*          filename;
+        ph_optional_uint64_t line_number;
+        const char*          extdata;
+        uint32_t             is_valid;
+    } ph_program_counter_t;
+
+    /** @brief One frame of a call stack.
+     *         Index 0 is the top of the stack, the most recent call.
+     *         extdata is owned by the producing ph_ctx_t. */
+    typedef struct
+    {
+        ph_program_counter_t program_counter;
+        ph_address_range_t   address_range;
+        const char*          extdata;
+    } ph_stack_frame_t;
+
+    /** @brief Call stack for one event; same lifetime rule as ph_event_list_t. */
+    typedef struct
+    {
+        uint32_t          list_size;
+        ph_stack_frame_t* frames;
+    } ph_call_stack_t;
+
+    /** @brief Common event metadata from event_data_t.
+     *         Strings are owned by the producing ph_ctx_t. is_valid is 0 when
+     *         the event row had no event metadata. */
+    typedef struct
+    {
+        uint32_t    is_valid;
+        uint64_t    stack_id;
+        uint64_t    parent_stack_id;
+        uint64_t    correlation_id;
+        const char* event_category;
+        const char* extdata;
+    } ph_event_data_t;
+
+    /** @brief node_info_t fields. is_valid is 0 when the detail has no node. */
+    typedef struct
+    {
+        uint32_t    is_valid;
+        uint64_t    node_id;
+        uint64_t    hash;
+        const char* machine_id;
+        const char* system_name;
+        const char* hostname;
+        const char* release;
+        const char* version;
+        const char* hardware_name;
+        const char* domain_name;
+    } ph_detail_node_t;
+
+    /** @brief process_info_t fields. id is rocpd_info_process.id. pid is the
+     *         OS process id. */
+    typedef struct
+    {
+        uint32_t             is_valid;
+        uint64_t             id;
+        uint64_t             pid;
+        ph_optional_uint64_t ppid;
+        ph_optional_uint64_t init;
+        ph_optional_uint64_t fini;
+        ph_optional_uint64_t start;
+        ph_optional_uint64_t end;
+        const char*          command;
+        const char*          environment;
+        const char*          extdata;
+    } ph_detail_process_t;
+
+    /** @brief thread_info_t fields. id is rocpd_info_thread.id. thread_id is
+     *         the OS thread id. */
+    typedef struct
+    {
+        uint32_t             is_valid;
+        uint64_t             id;
+        uint64_t             thread_id;
+        ph_optional_uint64_t parent_process_id;
+        ph_optional_uint64_t start;
+        ph_optional_uint64_t end;
+        const char*          name;
+        const char*          extdata;
+    } ph_detail_thread_t;
+
+    /** @brief agent_info_t fields. id is rocpd_info_agent.id. */
+    typedef struct
+    {
+        uint32_t             is_valid;
+        uint64_t             id;
+        uint64_t             type_index;
+        ph_optional_uint64_t absolute_index;
+        ph_optional_uint64_t logical_index;
+        ph_optional_uint64_t uuid;
+        const char*          agent_type;
+        const char*          name;
+        const char*          model_name;
+        const char*          vendor_name;
+        const char*          product_name;
+        const char*          user_name;
+        const char*          extdata;
+    } ph_detail_agent_t;
+
+    /** @brief stream_info_t fields. pid is rocpd_info_process.id, not the OS pid. */
+    typedef struct
+    {
+        uint32_t    is_valid;
+        uint64_t    stream_id;
+        uint64_t    nid;
+        uint64_t    pid;
+        const char* name;
+        const char* extdata;
+    } ph_detail_stream_t;
+
+    /** @brief queue_info_t fields. pid is rocpd_info_process.id, not the OS pid. */
+    typedef struct
+    {
+        uint32_t    is_valid;
+        uint64_t    queue_id;
+        uint64_t    nid;
+        uint64_t    pid;
+        const char* name;
+        const char* extdata;
+    } ph_detail_queue_t;
+
+    /** @brief code_object_info_t fields. */
+    typedef struct
+    {
+        uint32_t             is_valid;
+        uint64_t             id;
+        ph_optional_uint64_t load_base;
+        ph_optional_uint64_t load_size;
+        ph_optional_uint64_t load_delta;
+        const char*          uri;
+        const char*          storage_type;
+        const char*          extdata;
+    } ph_detail_code_object_t;
+
+    /** @brief kernel_symbol_info_t fields. */
+    typedef struct
+    {
+        uint32_t             is_valid;
+        uint64_t             id;
+        ph_optional_uint64_t kernel_object;
+        ph_optional_uint64_t kernarg_segment_size;
+        ph_optional_uint64_t kernarg_segment_alignment;
+        ph_optional_uint64_t group_segment_size;
+        ph_optional_uint64_t private_segment_size;
+        ph_optional_uint64_t sgpr_count;
+        ph_optional_uint64_t arch_vgpr_count;
+        ph_optional_uint64_t accum_vgpr_count;
+        const char*          name;
+        const char*          display_name;
+        const char*          extdata;
+    } ph_detail_kernel_symbol_t;
+
+    /** @brief One arg_data_t. */
+    typedef struct
+    {
+        uint64_t    position;
+        const char* type;
+        const char* name;
+        const char* value;
+        const char* extdata;
+    } ph_arg_data_t;
+
+    /** @brief region_data_t. is_valid is 0 when the event is not a region or
+     *         the row was not found. args is null when list_size is 0. */
+    typedef struct
+    {
+        uint32_t        is_valid;
+        uint64_t        start_timestamp;
+        uint64_t        end_timestamp;
+        const char*     name;
+        const char*     extdata;
+        ph_event_data_t event;
+        uint32_t        arg_count;
+        ph_arg_data_t*  args;
+    } ph_region_details_t;
+
+    /** @brief kernel_dispatch_data_t. is_valid is 0 when the event is not a
+     *         kernel dispatch or the row was not found. */
+    typedef struct
+    {
+        uint32_t                  is_valid;
+        uint64_t                  dispatch_id;
+        uint64_t                  start_timestamp;
+        uint64_t                  end_timestamp;
+        uint64_t                  private_segment_size;
+        uint64_t                  group_segment_size;
+        uint64_t                  workgroup_size_x;
+        uint64_t                  workgroup_size_y;
+        uint64_t                  workgroup_size_z;
+        uint64_t                  grid_size_x;
+        uint64_t                  grid_size_y;
+        uint64_t                  grid_size_z;
+        const char*               name;
+        const char*               extdata;
+        ph_event_data_t           event;
+        ph_detail_node_t          node_info;
+        ph_detail_process_t       process_info;
+        ph_detail_thread_t        thread_info;
+        ph_detail_agent_t         agent_info;
+        ph_detail_kernel_symbol_t kernel_symbol_info;
+        ph_detail_code_object_t   code_object_info;
+        ph_detail_stream_t        stream_info;
+        ph_detail_queue_t         queue_info;
+    } ph_kernel_dispatch_details_t;
+
+    /** @brief memory_copy_data_t. is_valid is 0 when the event is not a memory
+     *         copy or the row was not found. */
+    typedef struct
+    {
+        uint32_t             is_valid;
+        uint64_t             start_timestamp;
+        uint64_t             end_timestamp;
+        ph_optional_uint64_t dst_address;
+        ph_optional_uint64_t src_address;
+        uint64_t             size;
+        const char*          name;
+        const char*          region_name;
+        const char*          extdata;
+        ph_event_data_t      event;
+        ph_detail_agent_t    dst_agent_id;
+        ph_detail_agent_t    src_agent_id;
+        ph_detail_node_t     node_info;
+        ph_detail_process_t  process_info;
+        ph_detail_thread_t   thread_info;
+        ph_detail_stream_t   stream_info;
+        ph_detail_queue_t    queue_info;
+    } ph_memory_copy_details_t;
+
+    /** @brief memory_alloc_data_t. is_valid is 0 when the event is not a memory
+     *         allocation or the row was not found. */
+    typedef struct
+    {
+        uint32_t             is_valid;
+        uint64_t             start_timestamp;
+        uint64_t             end_timestamp;
+        ph_optional_uint64_t address;
+        uint64_t             size;
+        const char*          type;
+        const char*          level;
+        const char*          extdata;
+        ph_event_data_t      event;
+        ph_detail_node_t     node_info;
+        ph_detail_process_t  process_info;
+        ph_detail_thread_t   thread_info;
+        ph_detail_agent_t    agent_info;
+        ph_detail_stream_t   stream_info;
+        ph_detail_queue_t    queue_info;
+    } ph_memory_alloc_details_t;
 
     /** @brief A single PMC/counter sample (instantaneous value). */
     typedef struct
@@ -377,6 +689,43 @@ extern "C"
         uint32_t     list_size;
         ph_sample_t* samples;
     } ph_sample_list_t;
+
+    /**
+     * @brief One histogram bucket.
+     *        For a duration track, event_count is the number of overlapping
+     *        events and value is their overlap in nanoseconds. For a PMC
+     *        track, event_count is the sample count and value is the average
+     *        sample value. A PMC gap has event_count 0 and the previous value.
+     */
+    typedef struct
+    {
+        uint32_t bucket_index;
+        uint64_t event_count;
+        double   value;
+    } ph_histogram_bucket_t;
+
+    /** @brief Histogram buckets for one track. buckets may be null when
+     *         list_size is 0. */
+    typedef struct
+    {
+        uint32_t               track_id;
+        uint32_t               list_size;
+        ph_histogram_bucket_t* buckets;
+    } ph_track_histogram_t;
+
+    /**
+     * @brief Histograms for every track, aligned to one time grid.
+     *        Bucket 0 begins at origin_ts and each bucket is bucket_size
+     *        nanoseconds wide. Missing duration buckets read as zero.
+     */
+    typedef struct
+    {
+        uint64_t              origin_ts;
+        uint64_t              bucket_size;
+        uint32_t              bucket_count;
+        uint32_t              track_count;
+        ph_track_histogram_t* tracks;
+    } ph_histogram_t;
 
     typedef ph_version_t ph_library_version_t;
     typedef ph_version_t ph_schema_version_t;

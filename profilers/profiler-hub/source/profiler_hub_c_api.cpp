@@ -1,9 +1,12 @@
+#include "file_probe_failure.hpp"
 #include "ph_ctx.hpp"
 #include "ph_future.hpp"
 #include "profiler-hub/c/profiler_hub.h"
+#include "profiler-hub/cpp/reader.hpp"
 
 #include <functional>
 #include <memory>
+#include <string>
 #include <tuple>
 #include <utility>
 
@@ -45,7 +48,89 @@ run_operation(ph_ctx_t ctx, ph_future_t future, std::function<ph_result_t()> ope
     }
     return PH_RESULT_SUCCESS;
 }
+
+void
+copy_probe_result(const profiler_hub::reader_types::file_probe_result_t& result,
+                  ph_file_probe_t*                                       probe)
+{
+    probe->trace_schema =
+        result.trace_schema == profiler_hub::reader_types::trace_schema_t::rocpd
+            ? PH_TRACE_SCHEMA_ROCPD
+            : PH_TRACE_SCHEMA_UNKNOWN;
+    probe->schema_version = { result.schema_version.major,
+                              result.schema_version.minor,
+                              result.schema_version.patch };
+}
+
+bool
+is_duration_event_type(ph_event_type_t type)
+{
+    switch(type)
+    {
+        case PH_EVENT_TYPE_REGION:
+        case PH_EVENT_TYPE_KERNEL_DISPATCH:
+        case PH_EVENT_TYPE_MEMORY_COPY:
+        case PH_EVENT_TYPE_MEMORY_ALLOCATE: return true;
+    }
+    return false;
+}
+
+template <typename Details, typename Fetch>
+ph_result_t
+get_event_details(ph_ctx_t        ctx,
+                  ph_event_t*     event,
+                  Details*        details,
+                  ph_future_t     future,
+                  ph_event_type_t expected_type,
+                  Fetch           fetch)
+{
+    if(details != nullptr)
+    {
+        *details = {};
+    }
+    if(ctx == nullptr)
+    {
+        return PH_RESULT_INVALID_CONTEXT;
+    }
+    if(details == nullptr || event == nullptr || event->type != expected_type)
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+
+    const uint64_t event_id = event->id;
+    return run_operation(
+        ctx, future, [ctx, event, event_id, expected_type, details, fetch]() -> ph_result_t {
+            if(const auto ready = ctx->wait_until_ready(); ready != PH_RESULT_SUCCESS)
+            {
+                return ready;
+            }
+            *details = fetch(ctx, event_id);
+            if(const auto track_id = ctx->track_id_of(event_id, expected_type);
+               track_id.has_value())
+            {
+                event->track_id = track_id.value();
+            }
+            return PH_RESULT_SUCCESS;
+        });
+}
 }  // namespace
+
+ph_result_t
+ph_probe_file(const char* file_path, ph_file_probe_t* probe)
+{
+    if(file_path == nullptr || probe == nullptr)
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+
+    *probe = {};
+    return guard_call([file_path, probe]() {
+        const profiler_hub::reader_types::file_probe_result_t result =
+            profiler_hub::probe_file(file_path);
+        copy_probe_result(result, probe);
+        return result.status;
+    });
+}
 
 ph_result_t
 ph_ctx_create(ph_ctx_t* ctx, const char* file_path, ph_future_t future)
@@ -77,6 +162,9 @@ ph_ctx_create(ph_ctx_t* ctx, const char* file_path, ph_future_t future)
         {
             return PH_RESULT_INVALID_ARGUMENT;
         }
+    } catch(const profiler_hub::file_probe_failure& failure)
+    {
+        return failure.result().status;
     } catch(...)
     {
         return PH_RESULT_CONTEXT_ALLOCATION_FAILED;
@@ -230,6 +318,144 @@ ph_get_track_events(ph_ctx_t         ctx,
 }
 
 ph_result_t
+ph_get_correlated_events(ph_ctx_t          ctx,
+                         const ph_event_t* event,
+                         ph_event_list_t*  events,
+                         ph_future_t       future)
+{
+    if(events != nullptr)
+    {
+        *events = ph_event_list_t{ .list_size = 0, .events = nullptr };
+    }
+
+    if(ctx == nullptr)
+    {
+        return PH_RESULT_INVALID_CONTEXT;
+    }
+
+    if(events == nullptr || event == nullptr || !is_duration_event_type(event->type))
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+
+    const uint64_t        event_id   = event->id;
+    const ph_event_type_t event_type = event->type;
+    return run_operation(
+        ctx, future, [ctx, event_id, event_type, events]() -> ph_result_t {
+            if(const auto ready = ctx->wait_until_ready(); ready != PH_RESULT_SUCCESS)
+            {
+                return ready;
+            }
+
+            const auto correlated = ctx->get_correlated_events(event_id, event_type);
+            if(!correlated.has_value())
+            {
+                return PH_RESULT_INTERNAL_ERROR;
+            }
+            *events = correlated.value();
+            return PH_RESULT_SUCCESS;
+        });
+}
+
+ph_result_t
+ph_get_call_stack(ph_ctx_t          ctx,
+                  const ph_event_t* event,
+                  ph_call_stack_t*  call_stack,
+                  ph_future_t       future)
+{
+    if(call_stack != nullptr)
+    {
+        *call_stack = ph_call_stack_t{ .list_size = 0, .frames = nullptr };
+    }
+
+    if(ctx == nullptr)
+    {
+        return PH_RESULT_INVALID_CONTEXT;
+    }
+
+    if(call_stack == nullptr || event == nullptr || !is_duration_event_type(event->type))
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+
+    const uint64_t        event_id   = event->id;
+    const ph_event_type_t event_type = event->type;
+    return run_operation(
+        ctx, future, [ctx, event_id, event_type, call_stack]() -> ph_result_t {
+            if(const auto ready = ctx->wait_until_ready(); ready != PH_RESULT_SUCCESS)
+            {
+                return ready;
+            }
+
+            *call_stack = ctx->get_call_stack(event_id, event_type);
+            return PH_RESULT_SUCCESS;
+        });
+}
+
+ph_result_t
+ph_get_region_details(ph_ctx_t             ctx,
+                      ph_event_t*          event,
+                      ph_region_details_t* details,
+                      ph_future_t          future)
+{
+    return get_event_details(
+        ctx,
+        event,
+        details,
+        future,
+        PH_EVENT_TYPE_REGION,
+        [](ph_ctx_t context, uint64_t id) { return context->get_region_details(id); });
+}
+
+ph_result_t
+ph_get_kernel_dispatch_details(ph_ctx_t                      ctx,
+                               ph_event_t*                   event,
+                               ph_kernel_dispatch_details_t* details,
+                               ph_future_t                   future)
+{
+    return get_event_details(ctx,
+                             event,
+                             details,
+                             future,
+                             PH_EVENT_TYPE_KERNEL_DISPATCH,
+                             [](ph_ctx_t context, uint64_t id) {
+                                 return context->get_kernel_dispatch_details(id);
+                             });
+}
+
+ph_result_t
+ph_get_memory_copy_details(ph_ctx_t                  ctx,
+                           ph_event_t*               event,
+                           ph_memory_copy_details_t* details,
+                           ph_future_t               future)
+{
+    return get_event_details(ctx,
+                             event,
+                             details,
+                             future,
+                             PH_EVENT_TYPE_MEMORY_COPY,
+                             [](ph_ctx_t context, uint64_t id) {
+                                 return context->get_memory_copy_details(id);
+                             });
+}
+
+ph_result_t
+ph_get_memory_alloc_details(ph_ctx_t                   ctx,
+                            ph_event_t*                event,
+                            ph_memory_alloc_details_t* details,
+                            ph_future_t                future)
+{
+    return get_event_details(ctx,
+                             event,
+                             details,
+                             future,
+                             PH_EVENT_TYPE_MEMORY_ALLOCATE,
+                             [](ph_ctx_t context, uint64_t id) {
+                                 return context->get_memory_alloc_details(id);
+                             });
+}
+
+ph_result_t
 ph_get_track_samples(ph_ctx_t          ctx,
                      uint32_t          track_id,
                      uint64_t          start_ts,
@@ -263,6 +489,32 @@ ph_get_track_samples(ph_ctx_t          ctx,
 
             return PH_RESULT_SUCCESS;
         });
+}
+
+ph_result_t
+ph_get_histogram(ph_ctx_t        ctx,
+                 uint32_t        max_buckets,
+                 ph_histogram_t* histogram,
+                 ph_future_t     future)
+{
+    if(ctx == nullptr)
+    {
+        return PH_RESULT_INVALID_CONTEXT;
+    }
+    if(histogram == nullptr || max_buckets == 0)
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+    *histogram = {};
+
+    return run_operation(ctx, future, [ctx, max_buckets, histogram]() -> ph_result_t {
+        if(const auto ready = ctx->wait_until_ready(); ready != PH_RESULT_SUCCESS)
+        {
+            return ready;
+        }
+        ctx->build_histogram(max_buckets, *histogram);
+        return PH_RESULT_SUCCESS;
+    });
 }
 
 ph_result_t

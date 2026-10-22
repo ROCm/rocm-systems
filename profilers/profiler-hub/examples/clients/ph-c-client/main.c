@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #ifdef _WIN32
 #    include <windows.h>
 #else
@@ -259,10 +260,12 @@ print_events(const ph_event_list_t* events, uint32_t limit)
 {
     for(uint32_t i = 0; i < events->list_size && i < limit; ++i)
     {
-        printf("id: %lu, type: %s, nesting_depth: %u, start: %lu, end: %lu, name: %s\n",
+        printf("id: %lu, type: %s, nesting_depth: %u, track_id: %u, start: %lu, end: "
+               "%lu, name: %s\n",
                (unsigned long) events->events[i].id,
                event_type_name(events->events[i].type),
                (unsigned) events->events[i].nesting_depth,
+               (unsigned) events->events[i].track_id,
                (unsigned long) events->events[i].start,
                (unsigned long) events->events[i].end,
                events->events[i].name);
@@ -482,9 +485,60 @@ on_load_finished(ph_future_t future, ph_future_status_t status, ph_result_t resu
     printf("loading trace finished: status %d, result %d\n", (int) status, (int) result);
 }
 
+static const char*
+probe_result_name(ph_result_t result)
+{
+    switch(result)
+    {
+        case PH_RESULT_SUCCESS: return "success";
+        case PH_RESULT_UNSUPPORTED_FILE: return "unsupported_file";
+        case PH_RESULT_INVALID_FILE: return "invalid_file";
+        case PH_RESULT_UNSUPPORTED_SCHEMA_VERSION: return "unsupported_schema_version";
+        case PH_RESULT_INVALID_ARGUMENT: return "invalid_argument";
+        case PH_RESULT_INTERNAL_ERROR: return "internal_error";
+        default: return "error";
+    }
+}
+
+static const char*
+trace_schema_name(ph_trace_schema_t schema)
+{
+    return schema == PH_TRACE_SCHEMA_ROCPD ? "rocpd" : "unknown";
+}
+
+static int
+probe_files(int count, char** paths)
+{
+    int failed = 0;
+    for(int i = 0; i < count; ++i)
+    {
+        ph_file_probe_t   probe  = { 0 };
+        const ph_result_t result = ph_probe_file(paths[i], &probe);
+        printf("%s: result=%s schema=%s version=%u.%u.%u\n",
+               paths[i],
+               probe_result_name(result),
+               trace_schema_name(probe.trace_schema),
+               probe.schema_version.major,
+               probe.schema_version.minor,
+               probe.schema_version.patch);
+        if(result != PH_RESULT_SUCCESS) failed = 1;
+    }
+    return failed;
+}
+
 int
 main(int argc, char** argv)
 {
+    if(argc > 1 && strcmp(argv[1], "--probe") == 0)
+    {
+        if(argc < 3)
+        {
+            fprintf(stderr, "usage: %s --probe DATABASE [DATABASE ...]\n", argv[0]);
+            return 2;
+        }
+        return probe_files(argc - 2, argv + 2);
+    }
+
     const char* trace_path = argc > 1 ? argv[1] : "/home/amd/test_dbs/rocpd-3930708-0.db";
     ph_ctx_t    ctx        = NULL;
     ph_future_t load_future = NULL;

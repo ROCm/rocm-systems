@@ -69,6 +69,8 @@ struct reader_t::impl
 
     [[nodiscard]] size_t get_event_count(const reader_types::event_filter_t& filter);
 
+    [[nodiscard]] reader_types::histogram_t get_histogram(size_t max_buckets);
+
     // Event detail queries
     [[nodiscard]] std::optional<reader_types::region_data_t> get_region_details(
         const reader_types::timeline_event_t& event);
@@ -81,6 +83,10 @@ struct reader_t::impl
 
     [[nodiscard]] std::optional<reader_types::memory_alloc_data_t>
     get_memory_alloc_details(const reader_types::timeline_event_t& event);
+
+    // Track the same placement ph_get_track_events uses for this row.
+    [[nodiscard]] reader_types::track_info_ptr_t track_of(
+        const reader_types::timeline_event_t& event);
 
     // Event property queries
     [[nodiscard]] reader_types::call_stack_t get_call_stack(
@@ -102,7 +108,7 @@ struct reader_t::impl
 
 private:
     // Resolve event metadata from event-specific table by db_id and type.
-    // Returns event_id_result containing event_id + stack_id + call_stack JSON etc.
+    // Returns event_id_result containing event_id + stack_id + source context etc.
     [[nodiscard]] std::optional<data_storage::schema_v3::event_id_result>
     resolve_event_metadata(const reader_types::timeline_event_t& event);
 

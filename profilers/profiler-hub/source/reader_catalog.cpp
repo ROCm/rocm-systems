@@ -81,6 +81,7 @@ reader_catalog_t::build_processes(data_storage::schema_v3::read_statements& stmt
     for(const auto& process_info : process_info_list)
     {
         auto process_info_ptr         = std::make_shared<reader_types::process_info_t>();
+        process_info_ptr->id          = process_info.id;
         process_info_ptr->ppid        = process_info.ppid;
         process_info_ptr->pid         = process_info.pid;
         process_info_ptr->init        = process_info.init;
@@ -112,6 +113,7 @@ reader_catalog_t::build_threads(data_storage::schema_v3::read_statements& stmts)
     for(const auto& thread_info : thread_info_list)
     {
         auto thread_info_ptr = std::make_shared<reader_types::thread_info_t>();
+        thread_info_ptr->id  = thread_info.id;
         thread_info_ptr->parent_process_id = thread_info.ppid;
         thread_info_ptr->thread_id         = thread_info.tid;
         thread_info_ptr->name              = thread_info.name.value_or("");
@@ -154,6 +156,7 @@ reader_catalog_t::build_agents(data_storage::schema_v3::read_statements& stmts)
         }
 
         auto agent_info_ptr            = std::make_shared<reader_types::agent_info_t>();
+        agent_info_ptr->id             = agent_info.id;
         agent_info_ptr->agent_type     = agent_info.type.value();
         agent_info_ptr->type_index     = agent_info.type_index.value();
         agent_info_ptr->absolute_index = agent_info.absolute_index;
@@ -264,7 +267,7 @@ reader_catalog_t::build_tracks(data_storage::schema_v3::read_statements& stmts)
     {
         auto track_info_ptr         = std::make_shared<reader_types::track_info_t>();
         track_info_ptr->id          = next_id++;
-        track_info_ptr->name        = fmt::format("Thread {} (Sample)", stats.tid);
+        track_info_ptr->name        = fmt::format("Thread {}", stats.tid);
         track_info_ptr->category    = reader_types::track_kind_t::thread_sample;
         track_info_ptr->event_count = stats.count;
         if(stats.has_range)
@@ -273,7 +276,7 @@ reader_catalog_t::build_tracks(data_storage::schema_v3::read_statements& stmts)
             track_info_ptr->end_ts   = stats.max_end;
         }
 
-        link_owner(*track_info_ptr, stats.nid, stats.pid, stats.tid);
+        link_owner(*track_info_ptr, stats.nid, stats.pid, stats.thread_row_id);
 
         tracks.push_back(track_info_ptr);
         db_id_by_track.emplace(track_info_ptr, sample_track_id);
@@ -340,6 +343,8 @@ reader_catalog_t::add_category_tracks(data_storage::schema_v3::read_statements& 
         link_owner(*track_ptr, nid);
 
         tracks.push_back(track_ptr);
+        agent_queue_track_by_key.emplace(
+            agent_queue_track_key_t{ kind, nid, agent_id, queue_id }, track_ptr);
     };
 
     auto add_stream_track = [&](reader_types::track_kind_t kind,
@@ -363,6 +368,7 @@ reader_catalog_t::add_category_tracks(data_storage::schema_v3::read_statements& 
         link_owner(*track_ptr, nid, pid);
 
         tracks.push_back(track_ptr);
+        stream_track_by_key.emplace(stream_track_key_t{ nid, pid, stream_id }, track_ptr);
     };
 
     const auto& category_statements = stmts.track_category_statements();
@@ -371,6 +377,30 @@ reader_catalog_t::add_category_tracks(data_storage::schema_v3::read_statements& 
         [&](reader_types::track_kind_t kind, std::string_view label, const auto& rows) {
             for(const auto& row : rows)
             {
+                // A NULL id is read as 0, so the NULL group and the 0 group
+                // share this key. Fold the later group into the track already
+                // created for it.
+                const agent_queue_track_key_t key{ kind,
+                                                   row.nid,
+                                                   row.agent_id,
+                                                   row.queue_id };
+                if(const auto existing = agent_queue_track_by_key.find(key);
+                   existing != agent_queue_track_by_key.end() && existing->second)
+                {
+                    auto& track = *existing->second;
+                    track.event_count += row.count;
+                    if(row.min_start.has_value() &&
+                       (track.start_ts == 0 || row.min_start.value() < track.start_ts))
+                    {
+                        track.start_ts = row.min_start.value();
+                    }
+                    if(row.max_end.has_value() && row.max_end.value() > track.end_ts)
+                    {
+                        track.end_ts = row.max_end.value();
+                    }
+                    continue;
+                }
+
                 add_agent_queue_track(
                     kind,
                     fmt::format("{} [{}] Queue {}", label, row.agent_id, row.queue_id),
@@ -422,51 +452,6 @@ reader_catalog_t::add_category_tracks(data_storage::schema_v3::read_statements& 
 
 namespace
 {
-
-struct stream_track_key_t
-{
-    size_t nid{};
-    size_t pid{};
-    size_t stream_id{};
-
-    bool operator==(const stream_track_key_t&) const = default;
-};
-
-struct stream_track_key_hash_t
-{
-    size_t operator()(const stream_track_key_t& key) const
-    {
-        size_t hash = std::hash<size_t>{}(key.nid);
-        hash ^= std::hash<size_t>{}(key.pid) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
-        hash ^=
-            std::hash<size_t>{}(key.stream_id) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
-        return hash;
-    }
-};
-
-struct agent_queue_track_key_t
-{
-    reader_types::track_kind_t category{};
-    size_t                     nid{};
-    size_t                     agent_id{};
-    size_t                     queue_id{};
-
-    bool operator==(const agent_queue_track_key_t&) const = default;
-};
-
-struct agent_queue_track_key_hash_t
-{
-    size_t operator()(const agent_queue_track_key_t& key) const
-    {
-        size_t hash = std::hash<int>{}(static_cast<int>(key.category));
-        hash ^= std::hash<size_t>{}(key.nid) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
-        hash ^=
-            std::hash<size_t>{}(key.agent_id) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
-        hash ^=
-            std::hash<size_t>{}(key.queue_id) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
-        return hash;
-    }
-};
 
 bool
 is_agent_queue_track(reader_types::track_kind_t category)
@@ -542,14 +527,11 @@ reader_catalog_t::build_stream_hardware_links(
                 link.stream_track = stream_it->second;
             }
 
-            if(row.agent_id.has_value() && row.queue_id.has_value())
+            if(const auto hardware_it = hardware_tracks.find(agent_queue_track_key_t{
+                   kind, row.nid, row.agent_id.value_or(0), row.queue_id.value_or(0) });
+               hardware_it != hardware_tracks.end())
             {
-                if(const auto hardware_it = hardware_tracks.find(agent_queue_track_key_t{
-                       kind, row.nid, row.agent_id.value(), row.queue_id.value() });
-                   hardware_it != hardware_tracks.end())
-                {
-                    link.hardware_track = hardware_it->second;
-                }
+                link.hardware_track = hardware_it->second;
             }
 
             stream_hardware_links.push_back(std::move(link));
@@ -602,10 +584,19 @@ reader_catalog_t::discover_thread_sample_tracks(
     auto accumulate = [&](const auto& statement) {
         for(const auto& row : statement().to_vector())
         {
-            auto& stats = track_stats[row.sample_track_id];
-            stats.nid   = row.nid;
-            stats.pid   = row.pid.value_or(0);
-            stats.tid   = row.tid.value_or(0);
+            // Event-table tid is rocpd_info_thread.id. The track name wants
+            // the OS tid, which lives on the catalogued thread.
+            const size_t thread_row_id = row.tid.value_or(0);
+            auto&        stats         = track_stats[row.sample_track_id];
+            stats.nid                  = row.nid;
+            stats.pid                  = row.pid.value_or(0);
+            stats.thread_row_id        = thread_row_id;
+            stats.tid                  = thread_row_id;
+            if(const auto thread_it = threads_by_id.find(thread_row_id);
+               thread_it != threads_by_id.end() && thread_it->second)
+            {
+                stats.tid = thread_it->second->thread_id;
+            }
             stats.count += row.count;
             stats.merge(row.min_start, row.max_end);
         }
@@ -727,6 +718,8 @@ reader_catalog_t::build_streams(data_storage::schema_v3::read_statements& stmts)
     {
         auto stream_info_ptr       = std::make_shared<reader_types::stream_info_t>();
         stream_info_ptr->stream_id = stream_info.id;
+        stream_info_ptr->nid       = stream_info.nid;
+        stream_info_ptr->pid       = stream_info.pid;
         stream_info_ptr->name      = stream_info.name.value_or("");
         stream_info_ptr->extdata   = stream_info.extdata;
 
@@ -757,6 +750,8 @@ reader_catalog_t::build_queues(data_storage::schema_v3::read_statements& stmts)
     {
         auto queue_info_ptr      = std::make_shared<reader_types::queue_info_t>();
         queue_info_ptr->queue_id = queue_info.id;
+        queue_info_ptr->nid      = queue_info.nid;
+        queue_info_ptr->pid      = queue_info.pid;
         queue_info_ptr->name     = queue_info.name.value_or("");
         queue_info_ptr->extdata  = queue_info.extdata;
 
@@ -786,6 +781,7 @@ reader_catalog_t::build_pmc_infos(data_storage::schema_v3::read_statements& stmt
     for(const auto& pmc_info : pmc_info_list)
     {
         auto pmc_info_ptr  = std::make_shared<reader_types::pmc_info_t>();
+        pmc_info_ptr->id   = pmc_info.id;
         pmc_info_ptr->name = pmc_info.name;
 
         pmc_info_ptr->target_arch      = pmc_info.target_arch.value_or("");

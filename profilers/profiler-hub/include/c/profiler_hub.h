@@ -19,9 +19,26 @@ extern "C"
 #endif
 
     /**
+     * @brief Detects whether @p file_path is a trace file and schema that
+     *        profiler-hub supports, without loading the trace.
+     * @param file_path Existing file to inspect.
+     * @param probe Out parameter receiving the trace schema and schema version.
+     *        Zeroed before probing.
+     * @return PH_RESULT_SUCCESS when the file is a supported trace,
+     *         PH_RESULT_UNSUPPORTED_FILE when it is not a supported format,
+     *         PH_RESULT_INVALID_FILE when it is missing, unreadable, or not a
+     *         usable trace, PH_RESULT_UNSUPPORTED_SCHEMA_VERSION when the schema
+     *         version is recognized but not supported, PH_RESULT_INVALID_ARGUMENT
+     *         if an argument is null, PH_RESULT_INTERNAL_ERROR on an unexpected
+     *         failure.
+     * @note The file is opened read-only and is not created or modified.
+     */
+    ph_result_t ph_probe_file(const char* file_path, ph_file_probe_t* probe);
+
+    /**
      * @brief Opens a trace file and creates a context for it.
      * @param ctx Out parameter receiving the new context. Must not be null.
-     * @param file_path Path to the trace database to open. Must not be null.
+     * @param file_path Path to the trace file to open. Must not be null.
      * @param future Null to read the trace before returning. Otherwise a future
      *        from ph_future_create() that was not passed to an operation yet: the
      *        call returns at once with the context and the trace is read in the
@@ -31,6 +48,9 @@ extern "C"
      * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
      *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p file_path is null
      *         or @p future already serves an operation,
+     *         PH_RESULT_UNSUPPORTED_FILE, PH_RESULT_INVALID_FILE, or
+     *         PH_RESULT_UNSUPPORTED_SCHEMA_VERSION
+     *         when the file is not a supported trace,
      *         PH_RESULT_CONTEXT_ALLOCATION_FAILED if the context could not be
      *         created or, without a future, the trace could not be read.
      * @note On success, the caller owns @p *ctx and must release it with
@@ -151,6 +171,9 @@ extern "C"
      *       function does NOT invalidate an earlier one's result, and the
      *       arrays are safe to read concurrently from multiple calls
      *       (including calls made through a future).
+     * @note ph_event_t::track_id is @p track_id. A host thread omits rows
+     *       that resolve to a device queue or stream. A stream or queue
+     *       track keeps the rows its own query selected.
      * @note A request for a whole track (@p start_ts and @p end_ts both 0)
      *       is answered from memory after the first call: repeated calls for
      *       the same track return the same storage, so the arrays must be
@@ -165,6 +188,143 @@ extern "C"
                                     uint64_t         end_ts,
                                     ph_event_list_t* events,
                                     ph_future_t      future);
+
+    /**
+     * @brief Retrieves events correlated with @p event by matching stack id.
+     *        The event itself is not included. A missing stack id, a stack id
+     *        of 0, or an id that is not in the trace yields an empty list.
+     *        A region reaches regions, kernel dispatches, memory copies, and
+     *        memory allocations. A kernel dispatch reaches regions and kernel
+     *        dispatches. A memory copy reaches regions and memory copies. A
+     *        memory allocation reaches regions.
+     * @param ctx Context to query.
+     * @param event Event returned by ph_get_track_events(). Only @p event->id and
+     *        @p event->type are used. The object does not need to stay alive
+     *        after this call returns.
+     * @param events Out parameter receiving the correlated events; it is set to
+     *        an empty list before any other work, so it is valid on failure.
+     * @param future Null to run the call before returning. Otherwise a future from
+     *        ph_future_create() that was not passed to an operation yet: the call
+     *        returns at once with PH_RESULT_SUCCESS, and the work runs in the
+     *        background. The future ends with the ph_result_t the call would have
+     *        returned (see ph_future_result()), or with PH_FUTURE_CANCELLED. The
+     *        out parameter may be read only after the future ended with
+     *        PH_FUTURE_FINISHED. A future that already serves an operation gives
+     *        PH_RESULT_INVALID_ARGUMENT.
+     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
+     *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p event or
+     *         @p events is null or @p event->type is not a duration event,
+     *         PH_RESULT_INTERNAL_ERROR on failure.
+     * @note @p events->events and every ph_event_t::name in it point into
+     *       memory owned by @p ctx and remain valid until @p ctx is freed.
+     *       A later call does not invalidate an earlier result. Each call gets
+     *       its own storage, safe to read concurrently.
+     * @note ph_event_t::nesting_depth is the depth of that event on its own
+     *       track, the same value ph_get_track_events() reports.
+     *       ph_event_t::track_id is ph_track_t::id of that track. The track is
+     *       loaded if it was not loaded already. A result is not returned when
+     *       an event cannot be placed on a track.
+     */
+    ph_result_t ph_get_correlated_events(ph_ctx_t          ctx,
+                                         const ph_event_t* event,
+                                         ph_event_list_t*  events,
+                                         ph_future_t       future);
+
+    /**
+     * @brief Reconstructs the overlapping-region call stack for @p event.
+     *        A region event is the top frame, followed by the active caller
+     *        regions on its track. The name of each region is the frame
+     *        function. Optional source context in rocpd_event.line_info
+     *        supplies file and line data. A non-region event or an id that is
+     *        not in the trace yields an empty list.
+     * @param ctx Context to query.
+     * @param event Event returned by ph_get_track_events(). Only @p event->id
+     *        and @p event->type are used. The object does not need to stay
+     *        alive after this call returns.
+     * @param call_stack Out parameter receiving the frames; it is set to an
+     *        empty list before any other work, so it is valid on failure.
+     *        Index 0 is the top of the stack, the most recent call.
+     * @param future Same contract as ph_get_correlated_events().
+     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
+     *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p event or
+     *         @p call_stack is null or @p event->type is not a duration event.
+     * @note @p call_stack->frames and every string in those frames point into
+     *       memory owned by @p ctx and remain valid until @p ctx is freed.
+     *       A later call does not invalidate an earlier result.
+     */
+    ph_result_t ph_get_call_stack(ph_ctx_t          ctx,
+                                  const ph_event_t* event,
+                                  ph_call_stack_t*  call_stack,
+                                  ph_future_t       future);
+
+    /**
+     * @brief Retrieves region_data_t for @p event.
+     * @param event Event identified by id and type. On success, track_id is set
+     *        to the track this row is placed on. The object must stay alive
+     *        until the call, or the future, has finished.
+     * @param details Out parameter. is_valid is 0 before the call returns and
+     *        stays 0 when the event is not a region or the row is missing.
+     * @param future Same contract as ph_get_correlated_events().
+     * @return PH_RESULT_SUCCESS on success, including a missing row.
+     *         PH_RESULT_INVALID_CONTEXT if @p ctx is null.
+     *         PH_RESULT_INVALID_ARGUMENT if @p event or @p details is null or
+     *         @p event->type is not PH_EVENT_TYPE_REGION.
+     * @note String pointers and @p details->args point into memory owned by
+     *       @p ctx and remain valid until @p ctx is freed. A later call does
+     *       not invalidate an earlier result.
+     */
+    ph_result_t ph_get_region_details(ph_ctx_t             ctx,
+                                      ph_event_t*          event,
+                                      ph_region_details_t* details,
+                                      ph_future_t          future);
+
+    /**
+     * @brief Retrieves kernel_dispatch_data_t for @p event.
+     * @param details Out parameter. is_valid stays 0 when the event is not a
+     *        kernel dispatch or the row is missing.
+     * @param future Same contract as ph_get_correlated_events().
+     * @return PH_RESULT_SUCCESS on success, including a missing row.
+     *         PH_RESULT_INVALID_ARGUMENT if @p event->type is not
+     *         PH_EVENT_TYPE_KERNEL_DISPATCH.
+     * @note String pointers point into memory owned by @p ctx until
+     *       ph_ctx_free(). A later call does not invalidate an earlier result.
+     */
+    ph_result_t ph_get_kernel_dispatch_details(ph_ctx_t                      ctx,
+                                               ph_event_t*                   event,
+                                               ph_kernel_dispatch_details_t* details,
+                                               ph_future_t                   future);
+
+    /**
+     * @brief Retrieves memory_copy_data_t for @p event.
+     * @param details Out parameter. is_valid stays 0 when the event is not a
+     *        memory copy or the row is missing.
+     * @param future Same contract as ph_get_correlated_events().
+     * @return PH_RESULT_SUCCESS on success, including a missing row.
+     *         PH_RESULT_INVALID_ARGUMENT if @p event->type is not
+     *         PH_EVENT_TYPE_MEMORY_COPY.
+     * @note String pointers point into memory owned by @p ctx until
+     *       ph_ctx_free(). A later call does not invalidate an earlier result.
+     */
+    ph_result_t ph_get_memory_copy_details(ph_ctx_t                  ctx,
+                                           ph_event_t*               event,
+                                           ph_memory_copy_details_t* details,
+                                           ph_future_t               future);
+
+    /**
+     * @brief Retrieves memory_alloc_data_t for @p event.
+     * @param details Out parameter. is_valid stays 0 when the event is not a
+     *        memory allocation or the row is missing.
+     * @param future Same contract as ph_get_correlated_events().
+     * @return PH_RESULT_SUCCESS on success, including a missing row.
+     *         PH_RESULT_INVALID_ARGUMENT if @p event->type is not
+     *         PH_EVENT_TYPE_MEMORY_ALLOCATE.
+     * @note String pointers point into memory owned by @p ctx until
+     *       ph_ctx_free(). A later call does not invalidate an earlier result.
+     */
+    ph_result_t ph_get_memory_alloc_details(ph_ctx_t                   ctx,
+                                            ph_event_t*                event,
+                                            ph_memory_alloc_details_t* details,
+                                            ph_future_t                future);
 
     /**
      * @brief Retrieves PMC/counter samples for a track within an optional
@@ -211,6 +371,25 @@ extern "C"
                                      uint64_t          end_ts,
                                      ph_sample_list_t* samples,
                                      ph_future_t       future);
+
+    /**
+     * @brief Builds one histogram per track on a shared time grid.
+     * @param ctx Context to query.
+     * @param max_buckets Upper bound on the number of buckets. Must be non-zero.
+     *        The grid never has more buckets than this. A short trace has fewer.
+     * @param histogram Out parameter. It is cleared before any other work.
+     * @param future Null to run the call before returning. Otherwise a future
+     *        from ph_future_create() that was not passed to an operation yet.
+     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
+     *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p histogram is
+     *         null or @p max_buckets is 0, PH_RESULT_INTERNAL_ERROR on failure.
+     * @note Returned arrays are owned by @p ctx, remain valid until @p ctx is
+     *       freed, and are not invalidated by a later call.
+     */
+    ph_result_t ph_get_histogram(ph_ctx_t        ctx,
+                                 uint32_t        max_buckets,
+                                 ph_histogram_t* histogram,
+                                 ph_future_t     future);
 
     /**
      * @brief Creates a future that can be passed to an API call to run it

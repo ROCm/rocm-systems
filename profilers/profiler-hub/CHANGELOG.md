@@ -22,6 +22,59 @@ downstream consumer of the library.
 
 ### Added
 
+- `ph_pmc_info_t.id` is `rocpd_info_pmc.id`, not the index of the counter in
+  the PMC list. `reader_types::pmc_info_t` carries the same id.
+- `reader_types::agent_info_t::id` is `rocpd_info_agent.id`, and
+  `reader_types::process_info_t::id` is `rocpd_info_process.id`.
+  `ph_agent_t.row_id` and `ph_process_t.row_id` carry the same values.
+  `ph_agent_t.id` remains `type_index`, and `ph_process_t.id` remains the OS
+  process id.
+- `reader_types::thread_info_t::id` is `rocpd_info_thread.id`.
+  `ph_thread_t.row_id` carries the same value. `ph_thread_t.thread_id` remains
+  the OS thread id.
+- `ph_stream_t` and `ph_queue_t` carry `nid` (`rocpd_info_node.id`) and `pid`
+  (`rocpd_info_process.id`, not the OS process id).
+- `reader_t::get_histogram()` and `ph_get_histogram()` return one histogram per
+  track on a shared time grid. `max_buckets` is an upper bound: the grid never
+  has more buckets than requested, and a short trace has fewer. Duration tracks
+  count events that overlap each
+  bucket and sum that overlap. PMC tracks average the samples in each bucket
+  and hold the previous value across empty buckets between samples. Bucket 0
+  starts at the earliest track timestamp.
+- `ph_get_region_details()`, `ph_get_kernel_dispatch_details()`,
+  `ph_get_memory_copy_details()`, and `ph_get_memory_alloc_details()` return
+  the fields of `region_data_t`, `kernel_dispatch_data_t`, `memory_copy_data_t`,
+  and `memory_alloc_data_t`. A missing row returns `PH_RESULT_SUCCESS` with
+  `is_valid` 0. A mismatched event type returns `PH_RESULT_INVALID_ARGUMENT`.
+  String pointers remain valid until `ph_ctx_free()`.
+- `ph_get_call_stack()` returns the frames `reader_t::get_call_stack()` stores
+  for one duration event. The event is identified by `ph_event_t::id` and
+  `ph_event_t::type`. Index 0 is the top of the stack. An event with no call
+  stack yields an empty list. String pointers remain valid until
+  `ph_ctx_free()`.
+- `ph_get_correlated_events()` returns the events `reader_t::get_correlated_events()`
+  finds for one duration event. The source event is identified by
+  `ph_event_t::id` and `ph_event_t::type`. The source event is excluded, and
+  an event with no stack id yields an empty list. `ph_event_t::nesting_depth`
+  is the depth of that event on its own track. The track is loaded when the
+  depth is read. `ph_event_t::track_id` is `ph_track_t::id` of
+  `timeline_event_t::track`, or of the track that supplied the depth when that
+  pointer is null. A kernel, memory copy, or memory allocation uses its
+  agent+queue track when that track exists, then its stream track, instead of
+  the host thread track.
+- `probe_file()` and the C equivalent `ph_probe_file()` detect a SQLite
+  database, its `rocpd_metadata_<uuid>` table, and the schema version before a
+  reader is opened. A trace that only has the `schema_version` tag is accepted
+  when its value is a major number such as `3`, `major.minor` such as `3.0`, or
+  `major.minor.patch` such as `3.0.1`. They do not create or modify the file.
+  `ph_probe_file()` reports that outcome with `ph_result_t`. `ph_file_probe_t`
+  carries the trace schema and schema version. `ph-c-client
+  --probe` runs the C probe against one or more existing trace files. Schema 3
+  is accepted. `ph_ctx_create()` returns `PH_RESULT_UNSUPPORTED_FILE`,
+  `PH_RESULT_INVALID_FILE`, or `PH_RESULT_UNSUPPORTED_SCHEMA_VERSION` instead
+  of opening an unsupported trace. Another file format is added by
+  registering a detector, and another schema by registering the versions its
+  reader accepts.
 - `ph_get_node()` returns `stream_hardware_links`: one entry per distinct
   stream-to-hardware relationship in kernel-dispatch, memory-allocate, and
   memory-copy rows. `reader_t::get_stream_hardware_links()` returns the same
@@ -94,6 +147,10 @@ downstream consumer of the library.
 
 ### Changed
 
+- `storage_t::get_storage_version()` uses the same schema-version rules as
+  `probe_file()`. All three split tags are required, otherwise
+  `schema_version` must be `major`, `major.minor`, or `major.minor.patch`.
+  A partial set of split tags is not a version.
 - **Breaking:** `ph_process_t` now carries `ppid`, `init`, `fini`, `start`, `end`,
   `environment`, and `extdata` from the trace. The new numeric fields are
   `ph_optional_uint64_t`.

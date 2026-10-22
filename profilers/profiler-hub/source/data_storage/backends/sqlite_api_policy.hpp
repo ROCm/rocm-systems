@@ -44,6 +44,17 @@ struct sqlite_api_policy
         return sqlite3_open_v2(path, out_db, flags, nullptr);
     }
 
+    /** Opens an existing database without creating or writing it. */
+    static int open_readonly(const char* path, database_t* out_db) noexcept
+    {
+#if defined(PH_USE_NOMUTEX_OPTIMIZATION)
+        constexpr int flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX;
+#else
+        constexpr int flags = SQLITE_OPEN_READONLY;
+#endif
+        return sqlite3_open_v2(path, out_db, flags, nullptr);
+    }
+
     static int close(database_t db) noexcept { return sqlite3_close(db); }
 
     static int exec(database_t db, const char* sql) noexcept

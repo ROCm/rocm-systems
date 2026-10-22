@@ -23,6 +23,15 @@ class connection_pool;
 class thread_pool;
 }  // namespace common
 
+/**
+ * @brief Detects whether a reader can open @p path.
+ *        Opens a recognized file read-only and does not create or modify it.
+ *        Another format is added by registering a detector; another schema by
+ *        registering the versions its reader accepts.
+ */
+[[nodiscard]] reader_types::file_probe_result_t
+probe_file(const std::string& path);
+
 // ============================================================================
 // Reader Interface
 // ============================================================================
@@ -226,6 +235,14 @@ struct reader_t
     get_memory_alloc_details(const reader_types::timeline_event_t& event) const;
 
     /**
+     * @brief Track this event is placed on
+     * @param event Timeline event identified by id and type
+     * @return The track resolve_track would choose, or null when the row is missing
+     */
+    [[nodiscard]] reader_types::track_info_ptr_t track_of(
+        const reader_types::timeline_event_t& event) const;
+
+    /**
      * @brief Get full sample details for a timeline event
      * @param event Timeline event to fetch details for
      * @return Sample data, or nullopt if type mismatch or not found
@@ -248,9 +265,12 @@ struct reader_t
      */
 
     /**
-     * @brief Get call stack for an event
+     * @brief Reconstruct the overlapping-region call stack for an event
      * @param event Timeline event to fetch call stack for
-     * @return Call stack data (empty if not available in database)
+     * @return Region frames from the event outward to its active callers.
+     *         The event name is the frame function. Optional source context
+     *         from rocpd_event.line_info supplies file and line data. Empty
+     *         for non-region events or an event not in the database.
      */
     [[nodiscard]] reader_types::call_stack_t get_call_stack(
         const reader_types::timeline_event_t& event) const;
@@ -275,7 +295,11 @@ struct reader_t
      * @brief Get correlated events via stack_id matching
      * @param event Timeline event to find correlations for
      * @return List of related events (e.g., CPU region -> GPU kernel correlation)
-     * @note Finds events where stack_id matches and id differs (excludes self)
+     * @note A stack id of 0 does not correlate, and the source event is
+     *       excluded. A region reaches regions, kernel dispatches, memory
+     *       copies, and memory allocations. A kernel dispatch reaches regions
+     *       and kernel dispatches. A memory copy reaches regions and memory
+     *       copies. A memory allocation reaches regions.
      */
     [[nodiscard]] reader_types::timeline_event_list_t get_correlated_events(
         const reader_types::timeline_event_t& event) const;
@@ -308,6 +332,16 @@ struct reader_t
      * @brief Get time range of all data in the database
      * @return Time window spanning all events
      */
+    /**
+     * @brief Histogram for every track on one shared time grid.
+     * @param max_buckets Upper bound on the number of buckets. Must be non-zero.
+     *        The grid never has more buckets than this. A short trace has fewer.
+     *        Duration tracks count overlapping events and sum the overlap.
+     *        PMC tracks average sample values and hold the last value across
+     *        empty buckets between samples.
+     */
+    [[nodiscard]] reader_types::histogram_t get_histogram(size_t max_buckets = 500) const;
+
     [[nodiscard]] reader_types::time_window_t get_data_time_range() const;
 
     /**

@@ -41,6 +41,19 @@ to_list_size(size_t size)
     return static_cast<std::uint32_t>(size);
 }
 
+std::optional<std::size_t>
+event_type_index(ph_event_type_t type)
+{
+    switch(type)
+    {
+        case PH_EVENT_TYPE_REGION: return 0;
+        case PH_EVENT_TYPE_KERNEL_DISPATCH: return 1;
+        case PH_EVENT_TYPE_MEMORY_COPY: return 2;
+        case PH_EVENT_TYPE_MEMORY_ALLOCATE: return 3;
+    }
+    return std::nullopt;
+}
+
 ph_event_type_t
 to_ph_event_type(reader_types::event_type_t type)
 {
@@ -59,15 +72,17 @@ to_ph_event_type(reader_types::event_type_t type)
 }
 
 ph_event_t
-to_ph_event(const reader_types::timeline_event_t& event)
+to_ph_event(const reader_types::timeline_event_t& event, uint32_t track_id)
 {
-    return ph_event_t{ .id    = event.unique_identifier.id,
-                       .start = event.start_timestamp,
-                       .end   = event.end_timestamp,
-                       .name =
-                           event.display_name.empty() ? "" : event.display_name.data(),
-                       .type          = to_ph_event_type(event.unique_identifier.type),
-                       .nesting_depth = 0 };
+    return ph_event_t{
+        .id            = event.unique_identifier.id,
+        .start         = event.start_timestamp,
+        .end           = event.end_timestamp,
+        .name          = event.display_name.empty() ? "" : event.display_name.data(),
+        .type          = to_ph_event_type(event.unique_identifier.type),
+        .nesting_depth = 0,
+        .track_id      = track_id
+    };
 }
 
 ph_sample_t
@@ -77,13 +92,25 @@ to_ph_sample(const reader_types::counter_timeline_event_t& sample)
 }
 
 std::vector<ph_event_t>
-to_ph_events(const reader_types::timeline_event_list_t& events)
+to_ph_events(const reader_types::timeline_event_list_t&    events,
+             const reader_types::track_info_ptr_t&         track)
 {
+    const auto track_id = static_cast<uint32_t>(track->id);
+    // A host thread query also selects device events on that thread.
+    // resolve_track places those on the queue or stream, so they do not
+    // belong here. Stream and queue tracks keep every row their own query
+    // selected.
+    const bool host_thread = track->category == reader_types::track_kind_t::thread;
     std::vector<ph_event_t> converted;
     converted.reserve(events.size());
     for(const auto& event : events)
     {
-        converted.push_back(to_ph_event(event));
+        if(host_thread && event.track &&
+           static_cast<uint32_t>(event.track->id) != track_id)
+        {
+            continue;
+        }
+        converted.push_back(to_ph_event(event, track_id));
     }
     return converted;
 }
@@ -239,6 +266,38 @@ cached_track_reader::nesting_depth(const reader_types::track_info_ptr_t& track)
     return deepest == whole.end() ? 0 : deepest->nesting_depth;
 }
 
+std::optional<uint32_t>
+cached_track_reader::nesting_depth_of(const reader_types::track_info_ptr_t& track,
+                                      uint64_t                              id,
+                                      ph_event_type_t                       type)
+{
+    const auto type_index = event_type_index(type);
+    if(!track || !type_index.has_value() ||
+       track->category == reader_types::track_kind_t::pmc_agent)
+    {
+        return std::nullopt;
+    }
+
+    const auto             whole = events(track, 0, 0);
+    const std::scoped_lock lock{ m_depth_mutex };
+    auto&                  index = m_event_depths[static_cast<size_t>(track->id)];
+    std::call_once(index.once, [&] {
+        if(whole.events == nullptr) return;
+        for(uint32_t event_index = 0; event_index < whole.list_size; ++event_index)
+        {
+            const auto& event      = whole.events[event_index];
+            const auto  event_slot = event_type_index(event.type);
+            if(!event_slot.has_value()) continue;
+            index.by_type[event_slot.value()].emplace(event.id, event.nesting_depth);
+        }
+    });
+
+    const auto& depths = index.by_type[type_index.value()];
+    const auto  found  = depths.find(id);
+    if(found == depths.end()) return std::nullopt;
+    return found->second;
+}
+
 ph_sample_list_t
 cached_track_reader::samples(const reader_types::track_info_ptr_t& track,
                              uint64_t                              start_ts,
@@ -281,7 +340,7 @@ cached_track_reader::build_sorted_events(track_row_reader&                     r
         return merged;
     }
 
-    auto sorted = to_ph_events(reader.events_for_track(track, {}));
+    auto sorted = to_ph_events(reader.events_for_track(track, {}), track);
     sort_by_start(sorted);
     assign_depths(sorted);
     return sorted;
@@ -314,18 +373,20 @@ cached_track_reader::read_thread_track_in_parts(
         return share + share / 8 + 16;
     };
 
-    const auto visitor = [](void*                                    context,
+    const uint32_t track_id = static_cast<uint32_t>(track->id);
+    const auto     visitor  = [](void*                                    context,
                             reader_types::unique_timeline_event_id_t id,
                             reader_types::timestamp_ns_t             start,
                             reader_types::timestamp_ns_t             end,
                             std::string_view                         name) {
         static_cast<std::vector<ph_event_t>*>(context)->push_back(
             ph_event_t{ .id            = id.id,
-                        .start         = start,
-                        .end           = end,
-                        .name          = name.empty() ? "" : name.data(),
-                        .type          = to_ph_event_type(id.type),
-                        .nesting_depth = 0 });
+                             .start         = start,
+                             .end           = end,
+                             .name          = name.empty() ? "" : name.data(),
+                             .type          = to_ph_event_type(id.type),
+                             .nesting_depth = 0,
+                             .track_id      = 0 });
     };
 
     std::atomic<size_t> next{ 0 };
@@ -346,6 +407,10 @@ cached_track_reader::read_thread_track_in_parts(
                                                        ranges[i].end,
                                                        visitor,
                                                        &events);
+                for(auto& event : events)
+                {
+                    event.track_id = track_id;
+                }
                 outputs[i] = std::move(events);
             }
         } catch(...)

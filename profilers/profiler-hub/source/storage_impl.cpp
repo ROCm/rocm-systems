@@ -7,12 +7,15 @@
 #include "profiler-hub/cpp/version.hpp"
 
 #include "data_storage/backends/sqlite_backend.hpp"
+#include "data_storage/schema_version.hpp"
 
 #include <fmt/format.h>
 
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace profiler_hub
@@ -83,8 +86,8 @@ storage_t::impl::get_storage_version() const
 
     const auto table = fmt::format("rocpd_metadata_{}", backend->get_uuid());
     const auto query = fmt::format("SELECT tag, value FROM {} WHERE tag IN "
-                                   "('schema_version_major', 'schema_version_minor', "
-                                   "'schema_version_patch')",
+                                   "('schema_version', 'schema_version_major', "
+                                   "'schema_version_minor', 'schema_version_patch')",
                                    table);
 
     profiler_hub::version_t version{ .major = 0, .minor = 0, .patch = 0 };
@@ -93,20 +96,37 @@ storage_t::impl::get_storage_version() const
         auto executor = backend->create_read_statement_executor<metadata_row_t>(
             query, &metadata_row_t::tag, &metadata_row_t::value);
 
+        std::optional<std::string> version_text;
+        std::optional<std::string> major;
+        std::optional<std::string> minor;
+        std::optional<std::string> patch;
         for(const auto& row : executor().to_vector())
         {
-            if(row.tag == "schema_version_major")
-            {
-                version.major = static_cast<std::uint32_t>(std::stoul(row.value));
-            }
+            if(row.tag == "schema_version")
+                version_text = row.value;
+            else if(row.tag == "schema_version_major")
+                major = row.value;
             else if(row.tag == "schema_version_minor")
-            {
-                version.minor = static_cast<std::uint32_t>(std::stoul(row.value));
-            }
+                minor = row.value;
             else if(row.tag == "schema_version_patch")
-            {
-                version.patch = static_cast<std::uint32_t>(std::stoul(row.value));
-            }
+                patch = row.value;
+        }
+        const auto text_view = [](const std::optional<std::string>& text) {
+            return text.has_value() ? std::optional<std::string_view>{ *text }
+                                    : std::nullopt;
+        };
+        const data_storage::schema_version_resolution_t resolved =
+            data_storage::resolve_schema_version({ text_view(version_text),
+                                                   text_view(major),
+                                                   text_view(minor),
+                                                   text_view(patch) });
+        if(resolved.status == data_storage::schema_version_status_t::resolved)
+        {
+            version = resolved.version;
+        }
+        else
+        {
+            LOG_ERROR("Failed to resolve schema version from '{}'", table);
         }
     } catch(const std::exception& err)
     {

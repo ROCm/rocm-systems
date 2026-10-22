@@ -205,10 +205,13 @@ database_backend<SqlitePolicy>::discover_uuids()
     {
         std::string uuid;
     };
+    // The uuid is the suffix of rocpd_metadata_<uuid>. It may itself contain
+    // underscores (hyphens in the guid are stored as underscores), so it cannot
+    // be taken as the text after the last underscore of an arbitrary table.
     auto uuid_query_executor = create_read_statement_executor<uuid_result>(
-        "SELECT DISTINCT replace(name, rtrim(name, replace(name, '_', '')), '') "
-        "AS guid "
-        "FROM sqlite_master WHERE type='table' AND name LIKE 'rocpd_%';",
+        "SELECT substr(name, length('rocpd_metadata_') + 1) "
+        "FROM sqlite_master WHERE type = 'table' "
+        "AND name LIKE 'rocpd_metadata\\_%' ESCAPE '\\'",
         &uuid_result::uuid);
 
     auto result = uuid_query_executor().to_vector();
