@@ -199,7 +199,7 @@ pub extern "C" fn hsa_amd_ipc_memory_detach(mapped_pointer: *mut c_void) -> Stat
             .ipc_allocations
             .get(&key)
             .map_or(key, |memory| memory.description.agent_base);
-        if copy_borrowed(runtime, base) {
+        if runtime.memory_state.copy_borrowed(base) {
             return OUT_OF_RESOURCES;
         }
         let Some(mut memory) = runtime.memory_state.ipc_allocations.remove(&key) else {
@@ -815,8 +815,7 @@ pub unsafe extern "C" fn hsa_amd_memory_unlock(host_ptr: *mut c_void) -> Status 
         else {
             return INVALID_ARGUMENT;
         };
-        if copy_borrowed(
-            runtime,
+        if runtime.memory_state.copy_borrowed(
             runtime.memory_state.locked_allocations[index]
                 .description
                 .agent_base,
@@ -1047,7 +1046,7 @@ pub extern "C" fn hsa_amd_interop_unmap_buffer(pointer: *mut c_void) -> Status {
             .interop_allocations
             .get(&key)
             .map_or(key, |memory| memory.description.agent_base);
-        if copy_borrowed(runtime, base) {
+        if runtime.memory_state.copy_borrowed(base) {
             return OUT_OF_RESOURCES;
         }
         if let Some(mut memory) = runtime.memory_state.interop_allocations.remove(&key) {

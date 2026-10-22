@@ -551,7 +551,10 @@ pub extern "C" fn hsa_amd_vmem_unmap(address: *mut c_void, size: usize) -> Statu
             Ok(bases) => bases,
             Err(status) => return status,
         };
-        if bases.iter().any(|&base| copy_borrowed(runtime, base)) {
+        if bases
+            .iter()
+            .any(|&base| runtime.memory_state.copy_borrowed(base))
+        {
             return OUT_OF_RESOURCES;
         }
         for base in bases {
@@ -663,7 +666,10 @@ pub unsafe extern "C" fn hsa_amd_vmem_set_access(
             Ok(bases) => bases,
             Err(status) => return status,
         };
-        if bases.iter().any(|&base| copy_borrowed(runtime, base)) {
+        if bases
+            .iter()
+            .any(|&base| runtime.memory_state.copy_borrowed(base))
+        {
             return OUT_OF_RESOURCES;
         }
         for base in bases {
