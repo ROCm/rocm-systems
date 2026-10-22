@@ -653,8 +653,8 @@ class TestLowerVectorAdd:
             in result
         )
 
-    @pytest.mark.parametrize('modifier_bits', [None, 'F16'])
-    def test_cndmask_b16_source_modifiers_flip_half_sign_bits(self, modifier_bits):
+    @pytest.mark.parametrize('modifier_format', [None, 'F16'])
+    def test_cndmask_b16_source_modifiers_flip_half_sign_bits(self, modifier_format):
         u16 = SemaType('U', 16)
         cond = SemaNode(
             SemaNodeKind.ARRAYDEREF,
@@ -680,7 +680,7 @@ class TestLowerVectorAdd:
             enc_field_names=frozenset({'neg', 'abs'}),
         )
         ctx = LoweringContext(
-            exec_model=ExecModel.VECTOR, source_modifier_bits=modifier_bits
+            exec_model=ExecModel.VECTOR, source_modifier_format=modifier_format
         )
 
         result = lower_sema_block(block, ctx)
@@ -689,7 +689,7 @@ class TestLowerVectorAdd:
         # whose sign bit they modify. No float conversion is involved.
         helper = 'amdgpu::source_modifier::apply<amdgpu::fp_format::F16>('
         assert 'apply_to_float' not in result
-        if modifier_bits is None:
+        if modifier_format is None:
             assert helper not in result
         else:
             assert result.count(helper) == 2

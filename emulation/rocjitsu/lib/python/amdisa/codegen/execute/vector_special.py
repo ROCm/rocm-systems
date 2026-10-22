@@ -401,8 +401,9 @@ def gen_vector_mullit(
 ) -> str:
     """Generate V_MULLIT_F32 (the legacy lighting multiply).
 
-    Stages: ABS/NEG, fp_mode::mullit_f32 (input flush, special cases, legacy
-    product with MODE rounding and output flush), then OMOD and CLAMP.
+    Stages: ABS/NEG, fp_mode::mullit_f32 (input flush and special cases; a zero
+    factor gives +0 by the legacy rule, other factors use the architectural F32
+    multiply with MODE rounding, tininess and output flush), then OMOD and CLAMP.
     """
     L = []
     if is_vop3:
@@ -423,9 +424,11 @@ def gen_vector_mullit(
                 f'{read}, {i}, {abs_field}, inst_.neg)'
             )
         L.append(f'    const uint32_t s{i} = {read};')
+    # An effective OMOD flushes a tiny product before scaling, as for V_MUL_F32.
+    force_flush = 'output_policy.omod != 0' if is_vop3 else 'false'
     result = (
         'amdgpu::fp_mode::mullit_f32(s0, s1, s2, wf.fp_round_mode_f32(), '
-        'wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode())'
+        f'wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode(), {force_flush})'
     )
     if is_vop3:
         result = apply_output('f32', result)

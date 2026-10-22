@@ -184,7 +184,8 @@ def test_mullit_and_trig_preop_preserve_special_fp_rules():
     assert (
         'amdgpu::output_modifier::apply<amdgpu::fp_format::F32>('
         'amdgpu::fp_mode::mullit_f32(s0, s1, s2, wf.fp_round_mode_f32(), '
-        'wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode()), output_policy)'
+        'wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode(), '
+        'output_policy.omod != 0), output_policy)'
     ) in mullit
     assert 'std::isnan' not in mullit
     assert '0xA2F983u' in trig
@@ -328,8 +329,12 @@ def test_vop3_f16_simd_probes_split_true16_from_generic():
 
     assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(false,' in add_generic
     assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(true,' in add_true16
-    assert add_generic.endswith('amdgpu::fp_mode::Arithmetic::ADD, -1);')
-    assert add_true16.endswith('amdgpu::fp_mode::Arithmetic::ADD, -1);')
+    assert add_generic.endswith(
+        'amdgpu::fp_mode::Arithmetic::ADD, amdgpu::NegatedSource::NONE);'
+    )
+    assert add_true16.endswith(
+        'amdgpu::fp_mode::Arithmetic::ADD, amdgpu::NegatedSource::NONE);'
+    )
     assert 'if (!wf.fp16_ovfl())' not in rcp_generic
     assert 'ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16' in rcp_generic
     assert 'if (!wf.fp16_ovfl())' not in rcp_true16
@@ -380,7 +385,7 @@ def test_vop3_f16_simd_probes_split_true16_from_generic():
 
 
 @pytest.mark.parametrize('true16', [False, True])
-@pytest.mark.parametrize(('mnemonic', 'negated'), [('sub', 1), ('subrev', 0)])
+@pytest.mark.parametrize(('mnemonic', 'negated'), [('sub', 'SRC1'), ('subrev', 'SRC0')])
 def test_vop3_f16_subtraction_uses_mode_aware_add_route(mnemonic, negated, true16):
     probe = simd_probe_line(f'v_{mnemonic}_f16_vop3', true16_vop3=true16)
 
@@ -388,8 +393,39 @@ def test_vop3_f16_subtraction_uses_mode_aware_add_route(mnemonic, negated, true1
     # ABS/NEG; no native-environment gate or host subtraction remains.
     assert probe == (
         '  ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16('
-        f'{str(true16).lower()}, amdgpu::fp_mode::Arithmetic::ADD, {negated});'
+        f'{str(true16).lower()}, amdgpu::fp_mode::Arithmetic::ADD, '
+        f'amdgpu::NegatedSource::{negated});'
     )
+
+
+@pytest.mark.parametrize(
+    'template',
+    [
+        'v_add_f32_vop2',
+        'v_sub_f32_vop2',
+        'v_subrev_f32_vop2',
+        'v_mul_f32_vop2',
+        'v_fmac_f32_vop2',
+        'v_fmaak_f32_vop2',
+        'v_fmamk_f32_vop2',
+        'v_mac_f32_vop2',
+        'v_add_f32_vop3',
+        'v_sub_f32_vop3',
+        'v_subrev_f32_vop3',
+        'v_mul_f32_vop3',
+        'v_fma_f32_vop3',
+        'v_fmac_f32_vop3',
+    ],
+)
+def test_f32_mode_aware_probes_share_one_guest_environment_policy(template):
+    probe = simd_probe_line(template)
+
+    # One ungated probe: the helpers scope the guest environment themselves.
+    assert probe.count('ROCJITSU_TRY_SIMD_') == 1
+    assert probe.lstrip().startswith('ROCJITSU_TRY_SIMD_')
+    assert 'ScopedEnvironment' not in probe
+    assert 'native_arithmetic_matches' not in probe
+    assert 'amdgpu::fma_f32_simd(' in probe or 'amdgpu::binary_f32_simd<' in probe
 
 
 def test_true16_vop3_simd_probe_leaves_unsupported_b16_scalar():

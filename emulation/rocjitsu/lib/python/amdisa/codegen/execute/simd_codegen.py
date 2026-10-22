@@ -55,13 +55,13 @@ def _binary_f32_op(name: str, *, modifiers: bool = False) -> str:
 
 
 # F16 VOP3 arithmetic with explicit MODE flushing and post-rounding modifiers:
-# template_name -> (operation, negated source or -1). SUB and SUBREV add the
+# template_name -> (operation, amdgpu::NegatedSource). SUB and SUBREV add the
 # negated subtrahend in operand order, as in scalar lowering.
 SIMD_VOP3_BINARY_MODE_FP16 = {
-    'v_add_f16_vop3': ('ADD', -1),
-    'v_sub_f16_vop3': ('ADD', 1),
-    'v_subrev_f16_vop3': ('ADD', 0),
-    'v_mul_f16_vop3': ('MUL', -1),
+    'v_add_f16_vop3': ('ADD', 'NONE'),
+    'v_sub_f16_vop3': ('ADD', 'SRC1'),
+    'v_subrev_f16_vop3': ('ADD', 'SRC0'),
+    'v_mul_f16_vop3': ('MUL', 'NONE'),
 }
 
 # template_name -> (cpp_element_type, cpp_binary_op_functor)
@@ -2502,37 +2502,14 @@ def _guard_mode_arithmetic_probe(template_name: str, probe: str | None) -> str |
     dtype = next((field for field in fields if field in ('f16', 'f32', 'f64')), None)
     if dtype is None:
         return probe
-    if dtype == 'f32' and fields[1] in ('sub', 'subrev'):
-        # Reuse the checked SIMD views and share MODE setup for ordinary
-        # operands. Observers and delegates retain their existing path and host
-        # environment; they can execute user code during register access.
-        # The functor applies MODE denormals itself, so it also serves a host
-        # environment that already matches MODE.
-        source1 = 'inst.vsrc1' if fields[-1] == 'vop2' else 'inst.src1'
-        return (
-            '  if (wf.exec() != 0 && !amdgpu::simd_force_scalar() && '
-            '!wf.cu().observes_register_access() && '
-            '!wf.cu().debug_active() && !inst.src0.delegate() && '
-            f'!{source1}.delegate() && !inst.vdst.delegate()) {{\n'
-            '    amdgpu::fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());\n'
-            f'{_indent_probe(probe)}\n'
-            '  }\n'
-            '  if (amdgpu::fp_mode::native_arithmetic_matches(wf.fp_round_mode_f32(), '
-            f'wf.fp_denorm_mode_f32())) {{\n{probe}\n  }}'
-        )
     if (
         dtype == 'f32'
         and 'dx9' not in fields
         and ('amdgpu::fma_f32_simd(' in probe or 'amdgpu::binary_f32_simd<' in probe)
     ):
-        # This helper applies guest denormal controls explicitly. Establish MODE
-        # once for the wave, including its output scaling and clamp operations.
-        return (
-            '  {\n'
-            '    amdgpu::fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());\n'
-            f'{_indent_probe(probe)}\n'
-            '  }'
-        )
+        # The helpers scope the guest environment to their arithmetic and output
+        # scaling is raw-bit, so callbacks keep the caller's FP state in every MODE.
+        return probe
     if dtype in ('f16', 'f64') and fields[1] in ('fma', 'fmac', 'fmaak', 'fmamk'):
         return probe
     mode = 'f32' if dtype == 'f32' else 'f16_f64'
@@ -2555,7 +2532,7 @@ def _simd_probe_line(
         return (
             '  ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16('
             f'{str(true16_vop3).lower()}, amdgpu::fp_mode::Arithmetic::{operation}, '
-            f'{negated_source});'
+            f'amdgpu::NegatedSource::{negated_source});'
         )
     minmax_probe = float_minmax.simd_probe(template_name, true16_vop3)
     if minmax_probe is not None:

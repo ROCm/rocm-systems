@@ -287,11 +287,9 @@ template <bool Extended, typename Slot>
   };
   if (!matches_mode(x) || !matches_mode(y))
     return false;
-  // Matching controls still permit arithmetic to raise host exception flags.
-  // Preserve the caller's environment just as the scalar arithmetic path does.
-  std::optional<fp_mode::ScopedEnvironment> environment;
-  if (is_arithmetic(x) || is_arithmetic(y))
-    environment.emplace(0);
+  // Matching controls still permit arithmetic to raise host exception flags. The
+  // MODE-aware F32 helpers scope their own arithmetic; the remaining host multiply
+  // scopes itself. Register access, which can run callbacks, stays outside both.
   struct Results {
     alignas(util::native<uint32_t>) uint32_t words[64]{};
     alignas(util::native<uint64_t>) uint64_t pairs[64]{};
@@ -312,6 +310,7 @@ template <bool Extended, typename Slot>
         for (uint32_t base = 0; base < wf.wf_size(); base += W) {
           if (!((exec >> base) & util::mask<uint64_t>(W)))
             continue;
+          fp_mode::ScopedEnvironment environment(0);
           auto load = [&](const auto &view, unsigned i) {
             U bits = view.template load_native<uint64_t>(base);
             if (slot.neg & (1u << i))
@@ -393,16 +392,23 @@ template <bool Extended, typename Slot>
         result = std::bit_cast<U>(binary_f32_simd<fp_mode::Arithmetic::ADD>(af, bf, wf));
         break;
       case 5:
-        result = std::bit_cast<U>(af - bf);
+        // SUB/SUBREV add the negated subtrahend in operand order, as VOP2 does.
+        result = std::bit_cast<U>(binary_f32_simd<fp_mode::Arithmetic::ADD>(
+            af, std::bit_cast<F>(bv ^ U(0x80000000u)), wf));
         break;
       case 6:
-        result = std::bit_cast<U>(bf - af);
+        result = std::bit_cast<U>(binary_f32_simd<fp_mode::Arithmetic::ADD>(
+            std::bit_cast<F>(av ^ U(0x80000000u)), bf, wf));
         break;
-      case 7:
+      case 7: {
+        // The only slot operation still multiplying on the host; scope the
+        // environment so its exception flags stay out of the caller's.
+        fp_mode::ScopedEnvironment environment(0);
         result = std::bit_cast<U>(af * bf);
         util::stdx::where(((av & U(0x7fffffffu)) == U(0)) || ((bv & U(0x7fffffffu)) == U(0)),
                           result) = U(0);
         break;
+      }
       case 8:
         result = av;
         break;
@@ -490,6 +496,7 @@ template <bool Extended, typename Slot>
   };
   store(x, xr);
   store(y, yr);
+  detail::record_simd_fast_path(SimdFastPath::VOPD);
   return true;
 }
 

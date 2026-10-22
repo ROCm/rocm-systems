@@ -2180,7 +2180,9 @@ class CodeGenerator:
                     ('VopdSubF32',),
                     '''
                     {
-                      float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::SUB>(std::bit_cast<float>(src0), std::bit_cast<float>(src1), 0.0f, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32());
+                      // The ISA defines VOPD by the VOP2 instructions (16.11): add the
+                      // negated subtrahend, keeping the sources in operand order.
+                      float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::ADD>(std::bit_cast<float>(src0), std::bit_cast<float>(src1 ^ 0x80000000u), 0.0f, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
                       return std::bit_cast<uint32_t>(result);
                     }
                     ''',
@@ -2189,7 +2191,7 @@ class CodeGenerator:
                     ('VopdSubrevF32',),
                     '''
                     {
-                      float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::SUB>(std::bit_cast<float>(src1), std::bit_cast<float>(src0), 0.0f, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32());
+                      float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::ADD>(std::bit_cast<float>(src0 ^ 0x80000000u), std::bit_cast<float>(src1), 0.0f, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
                       return std::bit_cast<uint32_t>(result);
                     }
                     ''',
@@ -6783,7 +6785,7 @@ class CodeGenerator:
                         )
                     # ABS/NEG modify the selected half's sign bit, as for F16.
                     # Measured on gfx1201 and gfx1100; RDNA3.5 and CDNA5 inherit it.
-                    lctx.source_modifier_bits = 'F16'
+                    lctx.source_modifier_format = 'F16'
                 true16_special_vop3_ops = {
                     'V_ASHRREV_I16': (
                         2,

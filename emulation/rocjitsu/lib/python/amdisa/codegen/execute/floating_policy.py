@@ -33,6 +33,11 @@ SDWA_ROUNDED_F16_OPS = frozenset(
 )
 
 
+# F32 TRANS results ignore MODE.FP_ROUND, so their OMOD overflow rounds to
+# nearest even (infinity); other F32 results round OMOD overflow by MODE.
+TRANS_F32_OPS = FLUSH_NEAREST_F32_OPS | frozenset({'V_SIN_F32', 'V_RCP_IFLAG_F32'})
+
+
 @dataclass(frozen=True)
 class F16TransOperation:
     """Source policy and helper spellings for an F16 TRANS operation.

@@ -762,29 +762,16 @@ inline float finalize_omod_f32(float value, uint32_t omod) {
   return std::bit_cast<float>(bits);
 }
 
-/// @brief Scale an F32 host result in the caller's rounding environment.
-/// @details Live scalar/SDWA helper outside the shared raw-bit output stage;
-/// see output_modifier.h for migration scope.
-/// Zeros and tiny arithmetic results become +0 before scaling; a normal result
-/// that becomes tiny when halved retains its sign and flushes before packing.
-inline float apply_omod_f32(float value, uint32_t omod) {
-  if (omod == 0)
-    return value;
-  const uint32_t bits = std::bit_cast<uint32_t>(value);
-  const uint32_t magnitude = bits & 0x7fffffffu;
-  if (magnitude > 0x7f800000u)
-    return value;
-  if (magnitude < 0x00800000u)
-    return 0.0f;
-  if (omod == 3 && magnitude < 0x01000000u)
-    return std::bit_cast<float>(bits & 0x80000000u);
-  if (omod == 1)
-    value *= 2.0f;
-  else if (omod == 2)
-    value *= 4.0f;
-  else if (omod == 3)
-    value *= 0.5f;
-  return value;
+/// @brief Scale an F32 result by OMOD through the shared raw-bit stage.
+/// @details Zeros and tiny results become +0 before scaling; a normal result that
+/// becomes tiny when halved keeps its sign as a zero. Overflow rounds by
+/// `round_mode` (MODE.FP_ROUND); TRANS callers pass nearest-even.
+inline float apply_omod_f32(float value, uint32_t omod, uint32_t round_mode) {
+  output_modifier::Policy policy;
+  policy.omod = omod;
+  policy.round_mode = round_mode;
+  return std::bit_cast<float>(
+      output_modifier::scale<fp_format::F32>(std::bit_cast<uint32_t>(value), policy));
 }
 
 /// @brief Scale an already rounded half result represented in F32.
@@ -817,7 +804,9 @@ inline double finalize_omod_f64(double value, uint32_t omod) {
 }
 
 /// @brief Ordinary VALU arithmetic operations governed by MODE.
-enum class Arithmetic : uint8_t { ADD, SUB, MUL, FMA, MUL_LEGACY, FMA_DX9_ZERO };
+/// @details Subtraction is ADD of the negated subtrahend: host subtraction would keep a NaN
+/// subtrahend's sign, unlike the hardware.
+enum class Arithmetic : uint8_t { ADD, MUL, FMA, MUL_LEGACY, FMA_DX9_ZERO };
 
 namespace detail {
 
@@ -836,8 +825,6 @@ inline Float evaluate_arithmetic(Float lhs, Float rhs, Float addend) {
   volatile Float accumulator = addend;
   if constexpr (operation == Arithmetic::ADD)
     return left + right;
-  else if constexpr (operation == Arithmetic::SUB)
-    return left - right;
   else if constexpr (operation == Arithmetic::MUL)
     return left * right;
   else if constexpr (operation == Arithmetic::MUL_LEGACY)
@@ -910,11 +897,13 @@ inline float arithmetic(float lhs, float rhs, float addend, uint32_t round_mode,
 /// gives -MAX_FLOAT. Otherwise a zero factor gives +0, as in the legacy multiply,
 /// even with an infinite or NaN S0. Other products use the architectural F32
 /// multiply: MODE rounding, tininess before F32 exponent packing, and quiets_nan
-/// for a NaN S0.
+/// for a NaN S0. `force_output_flush` is set by an effective OMOD, which flushes a
+/// tiny product before scaling, as for V_MUL_F32.
 /// Measured on gfx1201 and gfx1100 (IEEE=0 and 1); other targets with
 /// V_MULLIT_F32 inherit these rules without measurement.
 inline uint32_t mullit_f32(uint32_t s0, uint32_t s1, uint32_t s2, uint32_t round_mode,
-                           uint32_t denorm_mode, rj_code_arch_t arch, bool ieee_mode) {
+                           uint32_t denorm_mode, rj_code_arch_t arch, bool ieee_mode,
+                           bool force_output_flush) {
   using F32 = fp_format::F32;
   constexpr uint32_t kNegativeMax = F32::kSign | (F32::kInfinity - 1);
   const auto input = input_denormal::Policy::make(denorm_mode);
@@ -930,7 +919,7 @@ inline uint32_t mullit_f32(uint32_t s0, uint32_t s1, uint32_t s2, uint32_t round
     return 0;
   return std::bit_cast<uint32_t>(
       arithmetic<Arithmetic::MUL>(std::bit_cast<float>(s0), std::bit_cast<float>(s1), 0.0f,
-                                  round_mode, denorm_mode, arch, ieee_mode));
+                                  round_mode, denorm_mode, arch, ieee_mode, force_output_flush));
 }
 
 /// @brief Evaluate prepared F16 arithmetic operands in F64.
