@@ -192,7 +192,8 @@ ncclResult_t ncclIpcSocketSendMsg(ncclIpcSocket*, void* hdr, int hdrLen, ncclIpc
 }
 ncclResult_t ncclIpcSocketRecvMsg(ncclIpcSocket*, void* hdr, int hdrLen, ncclIpcFd* recvFd) {
   if (g_ipc.onRecv) g_ipc.onRecv();
-  std::memcpy(hdr, g_ipc.recvBytes.data(), std::min<size_t>(hdrLen, g_ipc.recvBytes.size()));
+  size_t n = std::min<size_t>(hdrLen, g_ipc.recvBytes.size());
+  if (n > 0) std::memcpy(hdr, g_ipc.recvBytes.data(), n);  // hdr and data() may be null when n is 0
   if (recvFd) *recvFd = g_ipc.recvFd;
   return g_ipc.recvResult;
 }

@@ -27,6 +27,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <thread>
 #include <tuple>
@@ -93,11 +94,36 @@ static ncclResult_t ProxyTestRealloc(T** ptr, size_t oldNelem, size_t nelem, con
 // Fail-path tests free what the unit left behind only if the unit did not free it itself.
 void* g_watchedFree;
 std::atomic<bool> g_watchedFreed;
+// Response buffers and async ops the unit has not freed yet; FreeUnitLeftovers() releases them.
+std::mutex g_leftoverMutex;
+std::set<void*> g_leftovers;
+static void Track(void* p) {
+  std::lock_guard<std::mutex> lock(g_leftoverMutex);
+  if (p != nullptr) g_leftovers.insert(p);
+}
 static void ProxyTestFree(void* p) {
   if (p != nullptr && p == g_watchedFree) g_watchedFreed = true;
+  {
+    std::lock_guard<std::mutex> lock(g_leftoverMutex);
+    g_leftovers.erase(p);
+  }
   std::free(p);
 }
-static void* ProxyTestMalloc(size_t n) { return g_mallocCalls++ == g_mallocFailAt ? nullptr : std::malloc(n); }
+static void* ProxyTestMalloc(size_t n) {
+  void* p = g_mallocCalls++ == g_mallocFailAt ? nullptr : std::malloc(n);
+  Track(p);
+  return p;
+}
+static ncclResult_t ProxyTestCalloc(const char* file, int line, const char* fn, ncclProxyAsyncOp** op, int n) {
+  ncclResult_t res = ProxyTestCalloc<ncclProxyAsyncOp**, int>(file, line, fn, std::move(op), std::move(n));
+  if (res == ncclSuccess) Track(*op);
+  return res;
+}
+static void FreeUnitLeftovers() {
+  std::lock_guard<std::mutex> lock(g_leftoverMutex);
+  for (void* p : g_leftovers) std::free(p);
+  g_leftovers.clear();
+}
 // Counts the service teardown's sync; hip_fakes.cc's hipDeviceSynchronize has no hook to count it.
 std::atomic<int> g_hipSyncs;
 static hipError_t ProxyTestHipDeviceSynchronize() {
@@ -129,6 +155,7 @@ class ProxyFixture : public ::testing::Test {
     ResetOsFakes();
     g_watchedFree = nullptr;
     g_watchedFreed = false;
+    g_leftovers.clear();
     g_hipSyncs = 0;
     g_hipSetDeviceResult = g_hipExportResult = g_hipIpcCloseResult = hipSuccess;
     g_hipSetDevices.clear();
@@ -1856,6 +1883,7 @@ TEST_F(ProxyCallMicrotest, Poll_OtherResponseAllocationOrRecvFailures) {
   Reply(theirs, &other, ncclSuccess, &value, sizeof(value));
   g_sock.recvFailAt = 0;
   EXPECT_EQ(ncclPollProxyResponse(comm_.get(), &conn_, &out, this), ncclRemoteError);
+  FreeUnitLeftovers();  // the failed recv returns without freeing the buffer it allocated
 }
 
 TEST_F(ProxyCallMicrotest, Poll_UnexpectedOpIdsFail) {
@@ -2168,6 +2196,7 @@ class ProxyServiceFixture : public ProxyFixture {
     ps_.tpRank = 1;
   }
   void TearDown() override {
+    FreeListenSock();
     if (st().opsPool) {
       EXPECT_EQ(ncclProxyProgressDestroy(&ps_), ncclSuccess);
       proxyOpsFree(&ps_);
@@ -2179,11 +2208,12 @@ class ProxyServiceFixture : public ProxyFixture {
     ProxyFixture::TearDown();
   }
   ncclProxyProgressState& st() { return ps_.progressState; }
-  // After a run that may have ended on a fail path: release what the unit did not.
+  // Releases the listen socket unless the unit did (only the service's normal exit frees it).
   void FreeListenSock() {
-    if (g_watchedFreed) return;
+    if (ps_.listenSock == nullptr || g_watchedFreed) return;
     if (ps_.listenSock->socketDescriptor >= 0) close(ps_.listenSock->socketDescriptor);
     free(ps_.listenSock);
+    ps_.listenSock = nullptr;
   }
   static void CloseUnlessClosed(int fd) {
     if (std::find(g_closedFds.begin(), g_closedFds.end(), fd) == g_closedFds.end()) close(fd);
@@ -2451,7 +2481,7 @@ TEST_F(ProxyServiceLoopMicrotest, Service_ClosedOrFailingPeersAreDroppedWhileOth
   g_sock.acceptFds.push_back(hup[0]);  // POLLHUP without POLLIN
   ASSERT_EQ(write(listenW_, "c", 1), 1);
   Put(closer, (int)ncclProxyMsgClose);
-  Put(unknown, 99);
+  Put(unknown, 0);  // ncclProxyMsgTypeStr's own "Unknown"; past its end the INFO line would read out of bounds
   close(gone);
   fds_.erase(std::find(fds_.begin(), fds_.end(), gone));
   Request(badConn, ncclProxyMsgSetup, 5, nullptr, 0, 0, &op1_);
@@ -2464,11 +2494,12 @@ TEST_F(ProxyServiceLoopMicrotest, Service_ClosedOrFailingPeersAreDroppedWhileOth
   ncclProxyService(&ps_);
   EXPECT_EQ(Response<ncclProxyInitResp>(pending, &op1_).connId, 0);
   for (int fd : {quiet, closer, unknown, badConn, pending, stopper}) EXPECT_TRUE(Closed(fd)) << fd;
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_ATTN, "Unknown command 99"));
+  EXPECT_TRUE(ProxyLogged(NCCL_LOG_ATTN, "Unknown command 0"));
   EXPECT_FALSE(ProxyLogged(NCCL_LOG_ATTN, "Unknown command 6"));  // Close is a command, not an unknown one
   EXPECT_TRUE(ProxyLogged(NCCL_LOG_INFO, "Connection closed by localRank"));
   EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "Failed to execute operation Setup"));
   EXPECT_TRUE(ProxyLogged(NCCL_LOG_INFO, "Force closing peer=0"));
+  FreeUnitLeftovers();  // force-closing a peer at stop does not drain its queued setup
 }
 
 TEST_F(ProxyServiceLoopMicrotest, Service_ClosingAPeerDrainsAllItsPendingOps) {
@@ -2572,7 +2603,6 @@ TEST_F(ProxyServiceLoopMicrotest, Service_KnownBug_TooManyConnectionsSkipsTeardo
   EXPECT_FALSE(g_watchedFreed);
   EXPECT_EQ(g_hipSyncs.load(), 0);
   for (int fd : ours) CloseUnlessClosed(fd);
-  FreeListenSock();
 }
 
 TEST_F(ProxyServiceLoopMicrotest, Service_StartupFailuresReturnWithoutServing) {
@@ -2586,7 +2616,6 @@ TEST_F(ProxyServiceLoopMicrotest, Service_StartupFailuresReturnWithoutServing) {
   ncclProxyService(&ps_);
   EXPECT_EQ(g_sock.getFds, 1);
   EXPECT_EQ(g_hipSyncs.load(), 0);
-  FreeListenSock();
 }
 
 // A poll failure jumps past the teardown, so the listen socket is never freed.
@@ -2605,7 +2634,6 @@ TEST_F(ProxyServiceLoopMicrotest, Service_KnownBug_PollFailureSkipsTeardown) {
   EXPECT_FALSE(g_watchedFreed);
   EXPECT_EQ(g_hipSyncs.load(), 0);
   CloseUnlessClosed(ours);
-  FreeListenSock();
 }
 
 class ProxyCpusetMicrotest : public ProxyFixture {};
@@ -2638,10 +2666,6 @@ class ProxyUdsServiceMicrotest : public ProxyServiceFixture {
     fds_.push_back(p[1]);
     udsW_ = p[1];
     ps_.ipcSock.fd = p[0];
-  }
-  void TearDown() override {
-    FreeListenSock();
-    ProxyServiceFixture::TearDown();
   }
   void Hdr(int type, uint64_t data, void* opId, int rank = 2) {
     ncclIpcHdr h = {};
