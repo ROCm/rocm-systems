@@ -213,6 +213,10 @@ L2 Cache Hit Rate:
     The ratio of cache line requests that hit in the last-level on-chip cache.
 ```
 
+Several collectables may be added, or divided, after each has been evaluated on
+its own pass. That composition uses each collectable's finished value from the
+pass that collected it.
+
 #### Scope in this LLD
 
 This stage defines the collectable **schema and config structure** so that
