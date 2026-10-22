@@ -26,8 +26,10 @@ enum class DbiLoadDecision : uint8_t {
   ProbeTargetMismatch,    ///< The probe was built for a different target than the object.
   NotSingleKernel,        ///< The object has zero or several kernels.
   UnsupportedControlFlow, ///< The kernel makes a call or has unresolved control flow.
+  PcRelativeAddress,      ///< The kernel reads the PC, so it may address data patching moves.
   NoSites,                ///< No reachable block has an instruction that can anchor a site.
   PatchFailed,            ///< The Instrumentor refused the object; see the errors.
+  GrowsScratch,           ///< A probe call spills, growing scratch the dispatch would not allocate.
   Count,                  ///< Number of decisions; not a decision.
 };
 
@@ -59,6 +61,11 @@ struct DbiInstrumentation {
 /// and skipped. Only single-kernel objects on a target DBI is validated on are
 /// instrumented, and only when the kernel makes no call and has no unresolved
 /// control flow, because the liveness the trampolines rely on follows neither.
+/// The kernel must not read the PC either: patching grows .text and moves the
+/// sections after it, and an address built from the PC is not rebased. Nor may
+/// patching grow the kernel's scratch, as a spilling probe call does: HIP sizes
+/// a dispatch's scratch from the code object's metadata, which patching does
+/// not update.
 /// Patching is all-or-nothing, so one refused site leaves the whole object
 /// unpatched.
 ///

@@ -10,6 +10,7 @@
 #include "dbi_test_util.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
+#include "scalar_builders.h"
 
 #include <gtest/gtest.h>
 
@@ -42,23 +43,18 @@ const SitesTarget &kGfx950 = kTargets[1];
 const SitesTarget &kGfx1200 = kTargets[2];
 
 // Three blocks: 0x00 [v_mov, s_cbranch_scc0 -> 0x0c], 0x08 [s_endpgm],
-// 0x0c [s_getpc_b64, v_mov, v_mov, s_endpgm]. The middle block has nothing to
-// anchor at; the last cannot anchor at its first instruction and has two
-// candidates after it.
+// 0x0c [v_mov, v_mov, s_endpgm]. The middle block has nothing to anchor at;
+// the last has two candidates, and only the first gets a site.
 std::vector<uint32_t> three_block_text(const SitesTarget &target) {
-  return {kMovV2Zero,
-          target.s_cbranch_scc0_plus1,
-          build_s_endpgm(target.arch),
-          build_s_getpc_b64(/*s[0:1]=*/0, target.arch),
-          kMovV3V2,
-          kMovV2Zero,
-          build_s_endpgm(target.arch)};
+  return {kMovV2Zero, target.s_cbranch_scc0_plus1, build_s_endpgm(target.arch), kMovV3V2,
+          kMovV2Zero, build_s_endpgm(target.arch)};
 }
 
 std::vector<uint8_t> kernel(const SitesTarget &target, const std::vector<uint32_t> &text,
-                            uint32_t granulated_sgpr_count = 3, uint64_t entry_text_offset = 0) {
+                            uint32_t granulated_sgpr_count = 3, uint64_t entry_text_offset = 0,
+                            uint32_t private_bytes = 0) {
   return test::make_amdgpu_kernel_elf(
-      text, /*private_bytes=*/0, granulated_sgpr_count, target.e_flags,
+      text, private_bytes, granulated_sgpr_count, target.e_flags,
       /*granulated_vgpr_count=*/0, /*accum_offset=*/0, /*unterminated_kd_name=*/false,
       /*wrap_section_header_table=*/false, /*wrap_symtab_range=*/false,
       /*kd_crosses_section=*/false, /*wave32=*/false, /*kernarg_segment_ptr=*/false,
@@ -70,6 +66,12 @@ std::vector<uint8_t> probe(const SitesTarget &target,
   return test::make_amdgpu_probe_elf(kProbeSymbol,
                                      {build_s_setpc_b64(/*s[30:31]=*/30, target.arch)},
                                      target.e_flags, leading_words);
+}
+
+// A probe that runs @p body and returns.
+std::vector<uint8_t> probe_running(const SitesTarget &target, std::vector<uint32_t> body) {
+  body.push_back(build_s_setpc_b64(/*s[30:31]=*/30, target.arch));
+  return test::make_amdgpu_probe_elf(kProbeSymbol, body, target.e_flags);
 }
 
 // A function stub, then the zero words a linker pads the next function's
@@ -113,7 +115,7 @@ TEST_P(DbiRuntimeSitesTargetTest, CallsTheProbeAtTheFirstAnchorOfEachBlock) {
   constexpr uint32_t kSoppOpcodeMask = 0xFFFF0000u;
   const uint32_t branch_opcode = build_s_branch(0, target.arch) & kSoppOpcodeMask;
   for (size_t index = 0; index < original.size(); ++index) {
-    if (index == 0 || index == 4)
+    if (index == 0 || index == 3)
       EXPECT_EQ(words[index] & kSoppOpcodeMask, branch_opcode) << "word " << index;
     else
       EXPECT_EQ(words[index], original[index]) << "word " << index;
@@ -123,6 +125,39 @@ TEST_P(DbiRuntimeSitesTargetTest, CallsTheProbeAtTheFirstAnchorOfEachBlock) {
   const std::vector<uint32_t> cave(words.begin() + static_cast<ptrdiff_t>(original.size()),
                                    words.end());
   EXPECT_NE(std::find(cave.begin(), cave.end(), build_s_setpc_b64(30, target.arch)), cave.end());
+}
+
+TEST_P(DbiRuntimeSitesTargetTest, LeavesKernelThatReadsThePcUnpatched) {
+  // The address 0x1000 bytes past the s_add_u32, built the way a compiler
+  // builds a global's.
+  const SitesTarget &target = GetParam();
+  const std::vector<uint32_t> text = {build_s_getpc_b64(/*s[4:5]=*/4, target.arch),
+                                      build_s_add_u32(4, 4, test::kScalarSrcLiteral, target.arch),
+                                      0x1000u,
+                                      build_s_addc_u32(5, 5, test::kScalarSrcLiteral, target.arch),
+                                      0u,
+                                      kMovV2Zero,
+                                      build_s_endpgm(target.arch)};
+  const DbiInstrumentation result = instrument(kernel(target, text), probe(target));
+  EXPECT_EQ(result.decision, DbiLoadDecision::PcRelativeAddress);
+  EXPECT_TRUE(result.elf_bytes.empty());
+}
+
+TEST_P(DbiRuntimeSitesTargetTest, LeavesKernelWhoseScratchWouldGrowUnpatched) {
+  // v2 is live at the only site, so a probe that writes it makes the call spill.
+  const SitesTarget &target = GetParam();
+  const std::vector<uint8_t> guest =
+      kernel(target, {kMovV3V2, build_s_endpgm(target.arch)}, /*granulated_sgpr_count=*/3,
+             /*entry_text_offset=*/0, /*private_bytes=*/64);
+  const DbiInstrumentation spilling = instrument(guest, probe_running(target, {kMovV2Zero}));
+  EXPECT_EQ(spilling.decision, DbiLoadDecision::GrowsScratch)
+      << (spilling.errors.empty() ? std::string{} : spilling.errors.front());
+  EXPECT_TRUE(spilling.elf_bytes.empty());
+
+  // Scratch alone is no reason to refuse.
+  const DbiInstrumentation clean = instrument(guest, probe(target));
+  EXPECT_EQ(clean.decision, DbiLoadDecision::Instrumented)
+      << (clean.errors.empty() ? std::string{} : clean.errors.front());
 }
 
 INSTANTIATE_TEST_SUITE_P(AllDbiTargets, DbiRuntimeSitesTargetTest, ::testing::ValuesIn(kTargets),
@@ -181,6 +216,20 @@ TEST(DbiRuntimeSites, LeavesKernelThatMakesACallUnpatched) {
   const rj_code_arch_t arch = kGfx950.arch;
   const std::vector<uint32_t> text = {build_s_call_b64(/*s[30:31]=*/30, /*offset_dwords=*/2, arch),
                                       kMovV2Zero, build_s_endpgm(arch), kMovV3V2,
+                                      build_s_setpc_b64(/*s[30:31]=*/30, arch)};
+  const DbiInstrumentation result = instrument(kernel(kGfx950, text), probe(kGfx950));
+  EXPECT_EQ(result.decision, DbiLoadDecision::UnsupportedControlFlow);
+  EXPECT_TRUE(result.elf_bytes.empty());
+}
+
+TEST(DbiRuntimeSites, ReportsACallBeforeAPcRead) {
+  // LeavesKernelThatMakesACallUnpatched's kernel behind an s_getpc_b64.
+  const rj_code_arch_t arch = kGfx950.arch;
+  const std::vector<uint32_t> text = {build_s_getpc_b64(/*s[4:5]=*/4, arch),
+                                      build_s_call_b64(/*s[30:31]=*/30, /*offset_dwords=*/2, arch),
+                                      kMovV2Zero,
+                                      build_s_endpgm(arch),
+                                      kMovV3V2,
                                       build_s_setpc_b64(/*s[30:31]=*/30, arch)};
   const DbiInstrumentation result = instrument(kernel(kGfx950, text), probe(kGfx950));
   EXPECT_EQ(result.decision, DbiLoadDecision::UnsupportedControlFlow);

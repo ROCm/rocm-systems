@@ -1876,8 +1876,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         COMMAND
             ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
             -DHOOK_LIBRARY=$<TARGET_FILE:rocjitsu_hooks>
-            -DTEST_HOOK_LIBRARY=$<TARGET_FILE:rocjitsu_hooks_testing> -P
-            ${CMAKE_CURRENT_SOURCE_DIR}/check_hsa_hooks_symbols.cmake
+            -DTEST_HOOK_LIBRARY=$<TARGET_FILE:rocjitsu_hooks_testing>
+            -DHOOK_EXPORTS=OnLoad,OnUnload
+            -DTEST_HOOK_EXPORTS=OnLoad,OnUnload,rj_hsa_dbt_set_topology_nodes_root_for_test
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/check_hsa_hooks_symbols.cmake
     )
 endif()
 
@@ -2004,6 +2006,53 @@ target_link_libraries(
 )
 rj_configure_target(dbi_runtime_unit_test TEST)
 gtest_discover_tests(dbi_runtime_unit_test)
+
+# The DBI runtime hook against a fake HSA API table, through the hook's test-only
+# library. Linux only, as that library is: the hook reads code-object files with
+# POSIX calls and limits its exports with a linker version script. The test
+# computes its expected bytes with instrument_each_block(), so the site selection
+# is compiled in here too.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(
+        dbi_runtime_hook_unit_test
+        dbi/hsa_dbi_runtime_hook_test.cpp
+        ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src/rocjitsu/hooks/dbi_runtime_sites.cpp
+    )
+    target_include_directories(
+        dbi_runtime_hook_unit_test
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}
+            ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
+            ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
+            ${CMAKE_BINARY_DIR}/include
+            ${GENERATED_DIR}
+    )
+    target_link_libraries(
+        dbi_runtime_hook_unit_test
+        PRIVATE
+            rocjitsu_dbi_runtime_testing
+            rocjitsu_hsa_tools_headers
+            ${RJ_OBJECT_LIBS}
+            util
+            flatbuffers
+            Threads::Threads
+            GTest::gtest_main
+    )
+    rj_configure_target(dbi_runtime_hook_unit_test TEST)
+    gtest_discover_tests(dbi_runtime_hook_unit_test)
+
+    add_dependencies(dbi_runtime_hook_unit_test rocjitsu_dbi_runtime)
+    add_test(
+        NAME DbiRuntimeAbi.SymbolBoundary
+        COMMAND
+            ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
+            -DHOOK_LIBRARY=$<TARGET_FILE:rocjitsu_dbi_runtime>
+            -DTEST_HOOK_LIBRARY=$<TARGET_FILE:rocjitsu_dbi_runtime_testing>
+            -DHOOK_EXPORTS=OnLoad,OnUnload
+            -DTEST_HOOK_EXPORTS=OnLoad,OnUnload,rj_test_dbi_set_probe,rj_test_dbi_loads,rj_test_dbi_unknown_readers,rj_test_dbi_decisions,rj_test_dbi_sites,rj_test_dbi_retained_buffer_count,rj_test_dbi_reset
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/check_hsa_hooks_symbols.cmake
+    )
+endif()
 
 # A separate loadable module is the only way to observe the force-scalar gate's
 # per-module scope: the gate is an inline variable with hidden visibility, so
