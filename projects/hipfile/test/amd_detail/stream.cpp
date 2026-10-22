@@ -140,8 +140,18 @@ TEST_F(HipFileStream, register_default_stream_is_noop)
 
 TEST_F(HipFileStream, deregister_default_stream_is_noop)
 {
-    stream_map.deregisterStream(nullptr);
-    stream_map.deregisterStream(hipStreamPerThread);
+    EXPECT_EQ(stream_map.deregisterStream(nullptr), nullptr);
+    EXPECT_EQ(stream_map.deregisterStream(hipStreamPerThread), nullptr);
+}
+
+TEST_F(HipFileStream, deregister_returns_removed_stream)
+{
+    EXPECT_CALL(mhip, hipStreamGetDevice);
+    stream_map.registerStream(nonnull_stream, 0);
+    auto removed = stream_map.deregisterStream(nonnull_stream);
+    ASSERT_NE(removed, nullptr);
+    EXPECT_EQ(removed->getHipStream(), nonnull_stream);
+    EXPECT_THROW(stream_map.deregisterStream(nonnull_stream), std::invalid_argument);
 }
 
 TEST(HipFileStreamDestructor, destructor_with_streams_in_use_logs)
@@ -177,6 +187,8 @@ TEST_F(HipFileStreamExternal, register_and_deregister_with_valid_stream_works)
 {
     EXPECT_CALL(mhip, hipStreamGetDevice);
     ASSERT_EQ(hipFileStreamRegister(nonnull_stream, 0), HIPFILE_SUCCESS);
+    // Deregistering a registered stream drains its in-flight IO before freeing its signal slot.
+    EXPECT_CALL(mhip, hipStreamSynchronize(nonnull_stream));
     ASSERT_EQ(hipFileStreamDeregister(nonnull_stream), HIPFILE_SUCCESS);
 }
 
