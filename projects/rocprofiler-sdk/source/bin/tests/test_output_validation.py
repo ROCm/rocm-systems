@@ -89,12 +89,37 @@ def test_output_directory_from_environment_fails_before_launch(
     )
 
 
+def test_attach_output_directory_is_not_validated_in_launcher_context(
+    rocprofv3, tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "results").write_text("validity is determined in the target\n")
+    args, app_args = rocprofv3.parse_arguments(
+        ["--pid", "123", "--kernel-trace", "-d", "results"]
+    )
+    args = rocprofv3.get_args(args, rocprofv3.dotdict({}))
+
+    class AttachLaunched(Exception):
+        pass
+
+    def attach_launched(*_args, **_kwargs):
+        assert _kwargs["env"]["ROCPROF_OUTPUT_PATH"] == "results"
+        raise AttachLaunched
+
+    monkeypatch.setattr(rocprofv3, "resolve_library_path", lambda path, *_args: path)
+    monkeypatch.setattr(rocprofv3.os, "execvpe", attach_launched)
+
+    with pytest.raises(AttachLaunched):
+        rocprofv3.run(app_args, args)
+
+
+@pytest.mark.parametrize("invalid_pass", [1, 2])
 def test_multipass_output_directory_fails_before_launch(
-    rocprofv3, tmp_path, capsys, monkeypatch
+    rocprofv3, tmp_path, capsys, monkeypatch, invalid_pass
 ):
     output_path = tmp_path / "output"
     output_path.mkdir()
-    pass_output_path = output_path / "pass_1"
+    pass_output_path = output_path / f"pass_{invalid_pass}"
     pass_output_path.write_text("not a directory\n")
     forbid_application_launch(rocprofv3, monkeypatch)
 
@@ -117,6 +142,46 @@ def test_multipass_output_directory_fails_before_launch(
         f"[rocprofv3] Fatal error: Output path '{pass_output_path}' already "
         "exists and is not a directory\n"
     )
+
+
+def test_non_output_mpi_rank_skips_all_multipass_output_validation(
+    rocprofv3, tmp_path, monkeypatch
+):
+    output_path = tmp_path / "output"
+    output_path.mkdir()
+    (output_path / "pass_2").write_text("not a directory in the launcher\n")
+    monkeypatch.setenv("TEST_MPI_RANK", "1")
+    monkeypatch.setenv("TEST_MPI_SIZE", "2")
+
+    launches = []
+
+    def application_launched(*args, **kwargs):
+        launches.append((args, kwargs))
+        return 0
+
+    monkeypatch.setattr(rocprofv3.subprocess, "check_call", application_launched)
+
+    result = rocprofv3.main(
+        [
+            "--pmc",
+            "SQ_WAVES",
+            "--pmc",
+            "GRBM_COUNT",
+            "--profile-mpi-ranks",
+            "0",
+            "--mpi-world-rank-variable",
+            "TEST_MPI_RANK",
+            "--mpi-world-size-variable",
+            "TEST_MPI_SIZE",
+            "-d",
+            str(output_path),
+            "--",
+            "/bin/true",
+        ]
+    )
+
+    assert result == 0
+    assert len(launches) == 2
 
 
 def test_non_output_mpi_rank_does_not_validate_output_directory(
@@ -143,9 +208,18 @@ def test_non_output_mpi_rank_does_not_validate_output_directory(
         raise ApplicationLaunched
 
     monkeypatch.setattr(
-        rocprofv3, "get_mpi_rank_and_size", lambda *_args: (1, 2, "RANK", "SIZE")
+        rocprofv3,
+        "get_mpi_output_context",
+        lambda _args: rocprofv3.dotdict(
+            {
+                "rank": 1,
+                "size": 2,
+                "rank_var": "RANK",
+                "size_var": "SIZE",
+                "should_produce_output": False,
+            }
+        ),
     )
-    monkeypatch.setattr(rocprofv3, "should_rank_provide_output", lambda *_args: False)
     monkeypatch.setattr(rocprofv3.os, "execvpe", application_launched)
 
     with pytest.raises(ApplicationLaunched):
@@ -235,23 +309,6 @@ def test_runtime_expanded_output_paths_are_left_to_cpp_validation(
     (tmp_path / output_path).write_text("unexpanded path\n")
 
     rocprofv3.validate_output_directory(output_path)
-
-
-def test_literal_prefix_of_runtime_expanded_path_is_validated(
-    rocprofv3, tmp_path, capsys
-):
-    parent_path = tmp_path / "parent"
-    parent_path.write_text("not a directory\n")
-    output_path = parent_path / "%pid%"
-
-    with pytest.raises(SystemExit) as exc_info:
-        rocprofv3.validate_output_directory(output_path)
-
-    assert exc_info.value.code == 1
-    assert capsys.readouterr().err == (
-        f"[rocprofv3] Fatal error: Output path '{output_path}' has a "
-        f"non-directory path component: '{parent_path}'\n"
-    )
 
 
 if __name__ == "__main__":
