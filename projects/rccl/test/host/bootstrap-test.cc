@@ -4,8 +4,9 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host-only microtests for src/bootstrap.cc. Ranks run as threads over the in-memory socket layer and net
-// plugin in fakes/bootstrap_micro_fakes.cc, so the root rendezvous, both rings and the collectives run for real.
+// Host-only microtests for src/bootstrap.cc. Ranks run as threads over socket_fakes.cc's in-memory socket layer
+// and the net plugin in fakes/bootstrap_micro_fakes.cc, so the root rendezvous, both rings and the collectives
+// run for real.
 
 #include <gtest/gtest.h>
 
@@ -40,6 +41,7 @@
 #include "socket.h"
 #include "utils.h"
 
+#include "ScopedHook.h"
 #include "fakes/bootstrap_micro_fakes.h"
 #include "fakes/env_fakes.h"
 #include "fakes/nccl_fakes.h"
@@ -50,6 +52,7 @@
 namespace {
 
 using namespace bootstrap_micro;
+using namespace in_memory_sockets;
 
 struct Rank {
   std::unique_ptr<ncclComm> comm = std::make_unique<ncclComm>();
@@ -1180,6 +1183,12 @@ TEST_F(BootstrapMicrotest, Grow_KnownBug_NetBidirReverseRingNeverConnectsSoInitH
 // Plain sends complete without the receiver, so one thread can fix the order connections arrive in.
 TEST_F(BootstrapMicrotest, SendRecv_OutOfOrderConnectionsAreParkedUntilAsked) {
   ASSERT_EQ(ncclSuccess, InitRanks(3));
+  std::atomic<int> waitedCloses{0};  // only bootstrapRecv waits for the sender's close
+  auto close = g_ncclSocketClose;
+  ScopedHook closeHook(g_ncclSocketClose, [&](struct ncclSocket* sock, bool wait) {
+    waitedCloses += wait;
+    return close(sock, wait);
+  });
   char got[3] = {};
   for (const char* tag : {"1", "2", "3"}) ASSERT_EQ(ncclSuccess, bootstrapSend(State(0), 1, tag[0], (void*)tag, 2));
   EXPECT_EQ(ncclSuccess, bootstrapRecv(State(1), 0, '3', got, 2));  // parks 1 and 2
@@ -1202,6 +1211,7 @@ TEST_F(BootstrapMicrotest, SendRecv_OutOfOrderConnectionsAreParkedUntilAsked) {
   EXPECT_STREQ("b", got);
   EXPECT_EQ(ncclSuccess, bootstrapRecv(State(1), -1, 8, got, 2));  // any peer, from the parked list
   EXPECT_STREQ("a", got);
+  EXPECT_EQ(7, waitedCloses.load());
   EXPECT_TRUE(AllOk(CloseRanks()));
 }
 

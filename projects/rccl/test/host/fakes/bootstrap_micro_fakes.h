@@ -5,23 +5,18 @@
  ************************************************************************/
 
 // Externals src/bootstrap.cc reaches, for rccl-UnitTestsMicroBootstrap, which compiles it. Distinct from
-// bootstrap_stubs.cc, which fakes bootstrap.cc itself. Ranks run as threads over the in-memory socket layer
-// and net plugin here; misc/utils.cc is the real one, and logging and g_loadParam, ncclGetEnv and linux.cc
-// come from nccl_fakes.cc, env_fakes.cc and os_fakes.cc.
+// bootstrap_stubs.cc, which fakes bootstrap.cc itself. Ranks run as threads over socket_fakes.cc's in-memory
+// socket layer and the net plugin here; misc/utils.cc is the real one, and logging and g_loadParam, ncclGetEnv
+// and linux.cc come from nccl_fakes.cc, env_fakes.cc and os_fakes.cc.
 
 #ifndef RCCL_TEST_HOST_BOOTSTRAP_MICRO_FAKES_H_
 #define RCCL_TEST_HOST_BOOTSTRAP_MICRO_FAKES_H_
 
 #include <atomic>
-#include <chrono>
-#include <condition_variable>
 #include <cstdint>
 #include <deque>
 #include <functional>
 #include <map>
-#include <memory>
-#include <mutex>
-#include <set>
 #include <string>
 #include <vector>
 
@@ -29,6 +24,7 @@
 #include "net.h"
 #include "ras.h"
 #include "socket.h"
+#include "socket_fakes.h"
 
 extern bool g_encrypted;  // what ncclGetCryptConnectionMode reports
 
@@ -45,42 +41,10 @@ extern int g_rasCommInits;
 extern ncclResult_t g_rasCommInitResult;
 extern std::vector<rasRankInit> g_rasAdded;
 extern ncclResult_t g_rasAddRanksResult;
-extern int g_ifCount;
-extern union ncclSocketAddress g_subnetRemote;
 
-// In-memory socket layer: a listener is a port with a queue of pending connections, a connection is
-// two endpoints whose inbound byte queues the other side appends to. Blocking calls honour the
-// socket's abort flag and fail the test instead of hanging.
-using Clock = std::chrono::steady_clock;
-constexpr int kEndpointFd = 10000;
-constexpr int kListenFd = 20000;
-struct FakeEndpoint {
-  std::deque<char> in;
-  int peer = -1;
-  bool open = true;
-  uint64_t magic = 0;  // the connector's, checked by accept
-};
-struct FakeListener {
-  uint16_t port = 0;
-  uint64_t magic = 0;
-  bool open = true;
-  bool root = false;
-  std::deque<int> pending;
-};
-extern std::mutex g_sockMu;
-extern std::condition_variable g_sockCv;
-extern std::deque<FakeListener> g_listeners;
-extern std::set<int> g_openFds;
-extern bool g_sockShutdown;
+// bootstrapCreateRoot threads still running: ncclSetThreadName("NCCL BootstrapR") counts one up and the
+// close of its listener counts it down. ResetSeams() installs that close over socket_fakes.cc's in-memory one.
 extern int g_liveRoots;
-extern std::chrono::milliseconds g_waitLimit;
-// Mirrors socket.cc: ncclSocketAccept(retry=false) hands back a rejected peer as Accepting, not BadHandshake.
-extern ncclSocketState g_rejectedState;
-extern int g_readyPolls;  // ncclSocketReady says "not yet" this many times first
-extern std::atomic<int> g_multiOps;  // only the bidirectional socket ring uses ncclSocketMultiOp
-using SockFaultFn = std::function<ncclResult_t(const char* /*op*/, struct ncclSocket*)>;
-void SetSockFault(SockFaultFn fn);
-uint16_t PortOf(const union ncclSocketAddress& addr);
 
 // In-memory net plugin. listen() writes a listener id into the handle; connect() queues a connection
 // on it that accept() picks up. isend copies into the connection at once; irecv matches by tag.

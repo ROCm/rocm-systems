@@ -229,9 +229,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     driven through the heap half of `fakes/libc_seam.h`.
 - **`rccl-UnitTestsMicroBootstrap`**: `bootstrap.cc` (via `BOOTSTRAP_CC_PATH`, from
   `bootstrap-test.cc`); suites `Bootstrap*Microtest.*`. Ranks run as threads over the
-  in-memory socket layer and net plugin in `fakes/bootstrap_micro_fakes.cc`. Its own binary
-  because those seams replace `misc/socket.cc` wholesale, and other binaries link
-  `bootstrap_stubs.cc` for this unit's symbols. See `test_categories_micro_bootstrap.yaml`.
+  in-memory socket layer in `fakes/socket_fakes.cc` and the net plugin in
+  `fakes/bootstrap_micro_fakes.cc`. Its own binary because it compiles the real
+  `bootstrap.cc`, which `bootstrap_stubs.cc` fakes for the other binaries. See
+  `test_categories_micro_bootstrap.yaml`.
 - **`rccl-UnitTestsMicroEnqueue`** — `enqueue.cc` (via `ENQUEUE_CC_PATH`); suite
   `EnqueueMicrotest.*`. All tests live in `enqueue-test.cc`, grouped by unit under
   test; several fixtures are reused by later groups, so the order within the file
