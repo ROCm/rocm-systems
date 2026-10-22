@@ -2,21 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 /// @file vop2_minmax_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs scalar body) for the float
-/// min/max VOP2 ops: v_max_f32 (11), v_min_f32 (10), v_max_f16 (45),
-/// v_min_f16 (46). These use std::fmax/std::fmin in the scalar body; the SIMD
-/// path uses util::stdx::fmax/fmin, which is bit-exact for finite/Inf and the
-/// signed-zero tie cases. NaN-input lanes (and signed-zero ties) can differ in
-/// payload/sign between the scalar and SIMD bodies — an accepted divergence — so
-/// those lanes are excluded from the per-lane comparison (the skip condition is
-/// computed from the inputs, identical in both runs, so both runs skip the same
-/// lanes and the comparison stays meaningful on the rest). Each op runs TWICE
-/// in the same process -- once forcing the scalar body, once the SIMD fast path,
-/// with identical seed/inputs/EXEC -- and the two result arrays are asserted
-/// equal per active, non-skipped lane (util::set_force_scalar_for_testing flips
-/// the gate in-process). The inputs deliberately pair up
-/// ±0 and NaN in both operand orders on the low lanes — the corner cases the
-/// earlier (reverted) f16 min/max shipped without and silently diverged on.
+/// @brief Bit-identity check for scalar and SIMD float min/max VOP2 execution.
+/// @details Identical mixed-lane inputs and EXEC masks must produce identical
+/// results, including NaN payloads, signed-zero ties and inactive lanes.
 
 #include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
@@ -51,11 +39,6 @@ constexpr uint32_t vop2_encode(uint32_t opcode, uint32_t vdst, uint32_t vsrc1, u
   return ((opcode & 0x3F) << 25) | ((vdst & 0xFF) << 17) | ((vsrc1 & 0xFF) << 9) | (src0 & 0x1FF);
 }
 
-bool is_f32_nan(uint32_t u) { return ((u >> 23) & 0xFFu) == 0xFFu && (u & 0x7FFFFFu) != 0u; }
-bool is_f16_nan(uint32_t u) { return ((u >> 10) & 0x1Fu) == 0x1Fu && (u & 0x3FFu) != 0u; }
-bool is_f32_zero(uint32_t u) { return (u & 0x7FFFFFFFu) == 0u; }
-bool is_f16_zero(uint32_t u) { return (u & 0x7FFFu) == 0u; }
-
 // Edge operand pairs (src0, vsrc1) for the low lanes.
 // - kEdgesF32 entries are f32 bit patterns.
 // - kEdgesF16 entries are f16 bit patterns stored in the low 16 bits.
@@ -71,9 +54,9 @@ const std::array<Pair, 14> kEdgesF32 = {{
     {0x3F800000u, 0xBF800000u}, // 1.0, -1.0
     {0x7F800000u, 0x3F800000u}, // +Inf, 1.0
     {0xFF800000u, 0x3F800000u}, // -Inf, 1.0
-    {0x7FC00000u, 0x3F800000u}, // QNaN, 1.0  (skipped)
-    {0x3F800000u, 0x7FC00000u}, // 1.0, QNaN  (skipped)
-    {0x7F800001u, 0x40000000u}, // SNaN, 2.0  (skipped)
+    {0x7FC00000u, 0x3F800000u}, // QNaN, 1.0
+    {0x3F800000u, 0x7FC00000u}, // 1.0, QNaN
+    {0x7F800001u, 0x40000000u}, // SNaN, 2.0
     {0x00800000u, 0x00000001u}, // smallest normal, smallest denormal
     {0x007FFFFFu, 0x80000000u}, // largest denormal, -0
     {0x7F7FFFFFu, 0xFF7FFFFFu}, // FLT_MAX, -FLT_MAX
@@ -87,9 +70,9 @@ const std::array<Pair, 14> kEdgesF16 = {{
     {0x00003C00u, 0x0000BC00u}, // 1.0, -1.0
     {0x00007C00u, 0x00003C00u}, // +Inf, 1.0
     {0x0000FC00u, 0x00003C00u}, // -Inf, 1.0
-    {0x00007E00u, 0x00003C00u}, // QNaN, 1.0  (skipped)
-    {0x00003C00u, 0x00007E00u}, // 1.0, QNaN  (skipped)
-    {0x00007D00u, 0x00004000u}, // SNaN, 2.0  (skipped)
+    {0x00007E00u, 0x00003C00u}, // QNaN, 1.0
+    {0x00003C00u, 0x00007E00u}, // 1.0, QNaN
+    {0x00007D00u, 0x00004000u}, // SNaN, 2.0
     {0x00000400u, 0x00000001u}, // smallest normal, smallest denormal
     {0x000003FFu, 0x00008000u}, // largest denormal, -0
     {0x00007BFFu, 0x0000FBFFu}, // HALF_MAX, -HALF_MAX
@@ -116,9 +99,8 @@ struct Fixture {
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
 
-  std::array<bool, WF_SIZE> seed_inputs(uint64_t seed, bool is_f16, uint64_t exec) {
+  void seed_inputs(uint64_t seed, bool is_f16, uint64_t exec) {
     std::mt19937_64 rng(seed);
-    std::array<bool, WF_SIZE> nan_lane{};
     uint32_t vbase = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       uint32_t r0, r1;
@@ -138,14 +120,8 @@ struct Fixture {
       cu->write_vgpr(vbase + 0, lane, r0);
       cu->write_vgpr(vbase + 1, lane, r1);
       cu->write_vgpr(vbase + 2, lane, DST_SENTINEL);
-      auto nan = [&](uint32_t v) { return is_f16 ? is_f16_nan(v & 0xFFFFu) : is_f32_nan(v); };
-      auto zero = [&](uint32_t v) { return is_f16 ? is_f16_zero(v & 0xFFFFu) : is_f32_zero(v); };
-      // Skip a lane when its result may legitimately differ: a NaN input (NaN
-      // payload) or a signed-zero tie (-0 vs +0). Both are accepted divergences.
-      nan_lane[lane] = nan(r0) || nan(r1) || (zero(r0) && zero(r1));
     }
     wf->set_exec(exec);
-    return nan_lane;
   }
 
   std::array<uint32_t, WF_SIZE> snapshot_dst() const {
@@ -183,11 +159,7 @@ void check_case(const MinMaxCase &c, uint64_t exec) {
 
   constexpr uint64_t SEED = 0x3E12'7777'1234ULL;
 
-  std::array<bool, WF_SIZE> nan_lane{};
-
-  // Run the same instruction with identical seed/inputs/EXEC in both execute
-  // modes. The accepted-divergence (NaN-payload / signed-zero tie) lane set is
-  // computed from the inputs, identical in both runs.
+  // Run both execution paths with identical inputs and EXEC.
   auto run_mode = [&](bool force_scalar) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
@@ -197,7 +169,7 @@ void check_case(const MinMaxCase &c, uint64_t exec) {
     uint32_t words[4] = {enc, 0u, 0u, 0u};
     Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.label << ": decode failed";
-    nan_lane = fx.seed_inputs(SEED, c.is_f16, exec);
+    fx.seed_inputs(SEED, c.is_f16, exec);
     EXPECT_TRUE(fx.cu->execute_instruction(inst, *fx.wf).succeeded());
     auto out = fx.snapshot_dst();
     delete inst;
@@ -207,12 +179,7 @@ void check_case(const MinMaxCase &c, uint64_t exec) {
   const auto scalar_out = run_mode(/*force_scalar=*/true);
   const auto simd_out = run_mode(/*force_scalar=*/false);
 
-  // Core A/B equivalence per active, non-skipped lane: accepted-divergence
-  // lanes (NaN-payload / signed-zero tie) are excluded identically in both runs.
   for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
-    const bool active = (exec >> lane) & 1ULL;
-    if (active && nan_lane[lane])
-      continue;
     EXPECT_EQ(scalar_out[lane], simd_out[lane])
         << c.label << " (exec=0x" << std::hex << exec << "): SIMD path diverged from scalar body "
         << "at lane " << std::dec << lane;

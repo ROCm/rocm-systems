@@ -99,6 +99,7 @@ enum class SimdFastPath : uint8_t {
   VOP3_UNARY_FP16,
   VOP3_LDEXP_RAW,
   VOP3_TERNARY_FP16,
+  VOP3_TERNARY_RAW_FP,
   VOP3_TERNARY_TRUE16_RAW_FP16,
   VOP3_FMA_FP16,
   VOP_WORDS,
@@ -3886,6 +3887,11 @@ enum class PackedFloatOp { ADD, MUL, FMA, MIN, MAX, MINIMUM, MAXIMUM };
 /// F16 and BF16 sums retain a residual when their terms exceed F64 precision.
 template <PackedFloatOp Op, bool Bf16, typename U>
 inline U packed_float_half_simd(U a_bits, U b_bits, U c_bits, Wavefront &wf, bool clamp) {
+  if constexpr (!Bf16 && (Op == PackedFloatOp::MIN || Op == PackedFloatOp::MAX)) {
+    return fp_mode::packed_minmax_f16<Op == PackedFloatOp::MIN>(
+        a_bits, b_bits, wf.fp_denorm_mode_f16_f64(), clamp, floating_clamp_nan_to_zero(wf),
+        wf.cu().arch(), wf.ieee_mode());
+  }
   using D = util::native<double>;
   constexpr bool Select = Op == PackedFloatOp::MIN || Op == PackedFloatOp::MAX ||
                           Op == PackedFloatOp::MINIMUM || Op == PackedFloatOp::MAXIMUM;
@@ -5175,8 +5181,11 @@ template <bool Vop3, typename Inst>
 /// the same functor contract as ROCJITSU_TRY_SIMD_VOP3_BINARY_RAW_FP.
 #define ROCJITSU_TRY_SIMD_VOP3_TERNARY_RAW_FP(Fmt, ...)                                            \
   if (::rocjitsu::amdgpu::try_execute_ternary_vop3_simd<uint32_t>(                                 \
-          inst, wf, ::rocjitsu::amdgpu::vop3_float_operation<Fmt>(inst, wf, __VA_ARGS__)))         \
-  return
+          inst, wf, ::rocjitsu::amdgpu::vop3_float_operation<Fmt>(inst, wf, __VA_ARGS__))) {       \
+    ::rocjitsu::amdgpu::detail::record_simd_fast_path(                                             \
+        ::rocjitsu::amdgpu::SimdFastPath::VOP3_TERNARY_RAW_FP);                                    \
+    return;                                                                                        \
+  }
 #define ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_RAW_FP16(Fmt, ...)                                   \
   if (::rocjitsu::amdgpu::try_execute_ternary_vop3_true16_simd<uint32_t>(                          \
           inst, wf, ::rocjitsu::amdgpu::vop3_float_operation<Fmt>(inst, wf, __VA_ARGS__))) {       \

@@ -3978,12 +3978,18 @@ def test_generated_f16_sdwa_keeps_unmigrated_ordering(
 
 
 @pytest.mark.parametrize(
-    'instruction,encoding', [('V_FRACT_F16', 'vop1'), ('V_LDEXP_F16', 'vop2')]
+    'instruction,encoding',
+    [
+        ('V_FRACT_F16', 'vop1'),
+        ('V_LDEXP_F16', 'vop2'),
+        ('V_MIN_F16', 'vop2'),
+        ('V_MAX_F16', 'vop2'),
+    ],
 )
 def test_generated_f16_sdwa_rounds_before_omod(
     generated_f16_sdwa_consumers, instruction, encoding
 ):
-    """gfx1030 SDWA captures: the body rounds; the SDWA store applies OMOD."""
+    """FRACT/LDEXP round and MIN/MAX select; the SDWA store applies OMOD."""
     route, output = generated_f16_sdwa_consumers
     if route == 'shared':
         source = (output / 'shared' / 'execute_shared.h').read_text()

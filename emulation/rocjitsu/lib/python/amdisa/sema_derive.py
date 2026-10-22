@@ -514,6 +514,8 @@ class _ScalarBinop(_ScalarDeriver):
             # SALU float min/max match their VALU counterparts (RDNA4 ISA 6.8);
             # gfx1201 captures agree, including the VALU ISA discrepancies.
             result = _float_minmax(op, ty, src0, src1)
+        elif ty.base == 'F' and op in ('min', 'max'):
+            result = _float_minmax(f'legacy_{op}', ty, src0, src1)
         elif op in ('min', 'max', 'min_num', 'max_num', 'minimum', 'maximum'):
             fn = f'std::{op}' if op in ('min', 'max') else op
             result = SemaNode(
@@ -1354,6 +1356,8 @@ class _VectorBinop(_ScalarDeriver):
             result = _float_minmax(op, ty, src0, src1)
         elif op in ('min', 'max') and ty.base == 'F' and '_num_' in name_lower:
             result = _float_minmax(f'{op}_num', ty, src0, src1)
+        elif op in ('min', 'max') and ty.base == 'F':
+            result = _float_minmax(f'legacy_{op}', ty, src0, src1)
         else:
             result = _vec_binop_expr(op, src0, src1, ty)
         body = _assign(_cast(_dst(0), ty), result)
@@ -1437,6 +1441,8 @@ class _VectorTernary(_ScalarDeriver):
             result = _float_minmax(op, ty, src0, src1, src2)
         elif op in ('min3', 'max3', 'med3') and '_NUM_F' in sem.name:
             result = _float_minmax(f'{op}_num', ty, src0, src1, src2)
+        elif ty.base == 'F' and op in ('min3', 'max3', 'med3', 'minmax', 'maxmin'):
+            result = _float_minmax(f'legacy_{op}', ty, src0, src1, src2)
         else:
             result = SemaNode(
                 SemaNodeKind.CALL,
