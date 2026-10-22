@@ -15,6 +15,11 @@ use rocelf::{Layout, read_u16, read_u32};
 use crate::Error;
 
 const AMDGPU_MACHINE_MASK: u32 = 0xff;
+const AMDGPU_MACHINE_GFX908: u32 = 0x30;
+const AMDGPU_MACHINE_GFX90A: u32 = 0x3f;
+const AMDGPU_MACHINE_GFX942: u32 = 0x4c;
+const AMDGPU_MACHINE_GFX950: u32 = 0x4f;
+const AMDGPU_MACHINE_GFX9_4_GENERIC: u32 = 0x5f;
 const AMDGPU_MACHINE_GFX1200: u32 = 0x48;
 const AMDGPU_MACHINE_GFX1250: u32 = 0x49;
 const AMDGPU_MACHINE_GFX1201: u32 = 0x4e;
@@ -23,8 +28,12 @@ const AMDGPU_MACHINE_GFX12_5_GENERIC: u32 = 0x5b;
 const AMDGPU_MACHINE_GFX1250_STRICT: u32 = 0xeb;
 const AMDGPU_XNACK_MASK: u32 = 0x300;
 const AMDGPU_XNACK_ANY: u32 = 0x100;
+const AMDGPU_XNACK_OFF: u32 = 0x200;
+const AMDGPU_XNACK_ON: u32 = 0x300;
 const AMDGPU_SRAMECC_MASK: u32 = 0xc00;
 const AMDGPU_SRAMECC_ANY: u32 = 0x400;
+const AMDGPU_SRAMECC_OFF: u32 = 0x800;
+const AMDGPU_SRAMECC_ON: u32 = 0xc00;
 const AMDGPU_GENERIC_VERSION_SHIFT: u32 = 24;
 
 /// GFX identity and ASIC revision of one activated GPU.
@@ -38,6 +47,10 @@ pub struct Target {
     pub gfx_stepping: u32,
     /// ASIC revision used by the gfx1250 compatibility rule.
     pub asic_revision: u32,
+    /// Active process XNACK mode, or `None` when it was not queried.
+    pub xnack_enabled: Option<bool>,
+    /// SRAM ECC mode from GPU topology, or `None` for targets without it.
+    pub sram_ecc_enabled: Option<bool>,
 }
 
 impl From<&GpuInfo> for Target {
@@ -47,6 +60,8 @@ impl From<&GpuInfo> for Target {
             gfx_minor: info.gfx_minor,
             gfx_stepping: info.gfx_stepping,
             asic_revision: info.asic_revision,
+            xnack_enabled: None,
+            sram_ecc_enabled: (info.gfx_major == 9).then_some(info.sram_ecc_enabled),
         }
     }
 }
@@ -161,6 +176,11 @@ fn code_object_version(layout: Layout) -> Result<u32, Error> {
 #[must_use]
 fn code_object_target(machine: u32) -> Option<(&'static str, u64)> {
     match machine & AMDGPU_MACHINE_MASK {
+        AMDGPU_MACHINE_GFX908 => Some(("gfx908", 0)),
+        AMDGPU_MACHINE_GFX90A => Some(("gfx90a", 0)),
+        AMDGPU_MACHINE_GFX942 => Some(("gfx942", 0)),
+        AMDGPU_MACHINE_GFX950 => Some(("gfx950", 0)),
+        AMDGPU_MACHINE_GFX9_4_GENERIC => Some(("gfx9-4-generic", 1)),
         AMDGPU_MACHINE_GFX1200 => Some(("gfx1200", 0)),
         AMDGPU_MACHINE_GFX1250 => Some(("gfx1250", 0)),
         AMDGPU_MACHINE_GFX1201 => Some(("gfx1201", 0)),
@@ -171,7 +191,17 @@ fn code_object_target(machine: u32) -> Option<(&'static str, u64)> {
     }
 }
 
-/// Checks code-object flags against the selected gfx12 GPU.
+fn feature_matches(value: u32, any: u32, off: u32, on: u32, enabled: Option<bool>) -> bool {
+    match value {
+        0 => true,
+        value if value == any => true,
+        value if value == off => enabled != Some(true),
+        value if value == on => enabled != Some(false),
+        _ => false,
+    }
+}
+
+/// Checks code-object flags against the selected GPU.
 ///
 /// # Errors
 /// Returns `InvalidTarget` for unknown machine IDs, `InvalidObject` for
@@ -183,6 +213,11 @@ fn validate_target(layout: Layout, target: Target) -> Result<(), Error> {
     };
     let gfx = (target.gfx_major, target.gfx_minor, target.gfx_stepping);
     let matches_gpu = match layout.flags & AMDGPU_MACHINE_MASK {
+        AMDGPU_MACHINE_GFX908 => gfx == (9, 0, 8),
+        AMDGPU_MACHINE_GFX90A => gfx == (9, 0, 10),
+        AMDGPU_MACHINE_GFX942 => gfx == (9, 4, 2),
+        AMDGPU_MACHINE_GFX950 => gfx == (9, 5, 0),
+        AMDGPU_MACHINE_GFX9_4_GENERIC => matches!(gfx, (9, 4, 2) | (9, 5, 0)),
         AMDGPU_MACHINE_GFX1200 => gfx == (12, 0, 0),
         AMDGPU_MACHINE_GFX1201 => gfx == (12, 0, 1),
         AMDGPU_MACHINE_GFX12_GENERIC => (gfx.0, gfx.1) == (12, 0) && matches!(gfx.2, 0 | 1),
@@ -192,7 +227,31 @@ fn validate_target(layout: Layout, target: Target) -> Result<(), Error> {
         _ => false,
     };
     let features_supported = if version == 3 {
-        layout.flags & (AMDGPU_XNACK_MASK | AMDGPU_SRAMECC_MASK) == 0
+        if target.gfx_major == 9 {
+            let xnack = layout.flags & 0x100 != 0;
+            let sram_ecc = layout.flags & 0x200 != 0;
+            target.xnack_enabled.is_none_or(|enabled| enabled == xnack)
+                && target
+                    .sram_ecc_enabled
+                    .is_none_or(|enabled| enabled == sram_ecc)
+                && layout.flags & 0xc00 == 0
+        } else {
+            layout.flags & (AMDGPU_XNACK_MASK | AMDGPU_SRAMECC_MASK) == 0
+        }
+    } else if target.gfx_major == 9 {
+        feature_matches(
+            layout.flags & AMDGPU_XNACK_MASK,
+            AMDGPU_XNACK_ANY,
+            AMDGPU_XNACK_OFF,
+            AMDGPU_XNACK_ON,
+            target.xnack_enabled,
+        ) && feature_matches(
+            layout.flags & AMDGPU_SRAMECC_MASK,
+            AMDGPU_SRAMECC_ANY,
+            AMDGPU_SRAMECC_OFF,
+            AMDGPU_SRAMECC_ON,
+            target.sram_ecc_enabled,
+        )
     } else {
         matches!(layout.flags & AMDGPU_XNACK_MASK, 0 | AMDGPU_XNACK_ANY)
             && matches!(layout.flags & AMDGPU_SRAMECC_MASK, 0 | AMDGPU_SRAMECC_ANY)

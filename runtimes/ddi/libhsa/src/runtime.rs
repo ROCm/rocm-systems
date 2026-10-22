@@ -289,8 +289,12 @@ impl LogWork {
     }
 }
 
+pub(crate) fn gfx_target_name(major: u32, minor: u32, stepping: u32) -> String {
+    format!("gfx{major}{minor}{stepping:x}")
+}
+
 fn gpu_agent_name(gpu: &GpuInfo) -> String {
-    format!("gfx{}{}{}", gpu.gfx_major, gpu.gfx_minor, gpu.gfx_stepping)
+    gfx_target_name(gpu.gfx_major, gpu.gfx_minor, gpu.gfx_stepping)
 }
 
 fn hdp_flush_pointers(address: Option<usize>) -> [usize; 2] {
@@ -545,6 +549,8 @@ pub(crate) struct Gpu {
     pub(crate) endpoint: Endpoint,
     /// Cached hardware facts from passive discovery.
     pub(crate) info: GpuInfo,
+    /// Process-wide recoverable page-fault mode observed at activation.
+    pub(crate) xnack_enabled: bool,
     /// Activated native device and its driver resources.
     pub(crate) device: Device,
     /// HSA-visible short target name.
@@ -973,6 +979,14 @@ impl HsaState {
                 PRIMARY_CONTEXT_USED.store(true, Ordering::Release);
             }
             let device = session.activate(&endpoint).map_err(map_error)?;
+            let xnack_enabled = if info.gfx_major == 9 {
+                device
+                    .gpu()
+                    .and_then(|gpu| gpu.xnack_enabled())
+                    .map_err(map_error)?
+            } else {
+                false
+            };
             let product_name = endpoint
                 .product_name
                 .clone()
@@ -991,6 +1005,7 @@ impl HsaState {
             pending.gpus.push(Gpu {
                 endpoint,
                 info,
+                xnack_enabled,
                 device,
                 name: name.into_boxed_str(),
                 product_name: product_name.into_boxed_str(),
@@ -1085,14 +1100,7 @@ impl HsaState {
         let index = usize::try_from(offset / ISA_COUNT_PER_GPU).ok()?;
         let variant = offset % ISA_COUNT_PER_GPU;
         let gpu = self.gpus.get(index)?;
-        super::isa_name(
-            gpu.info.gfx_major,
-            gpu.info.gfx_minor,
-            gpu.info.gfx_stepping,
-            gpu.info.asic_revision,
-            variant,
-        )
-        .map(|_| (index, variant))
+        super::isa_name(&gpu.info, gpu.xnack_enabled, variant).map(|_| (index, variant))
     }
 
     pub(crate) fn isa_index(&self, isa: HsaIsa) -> Option<usize> {

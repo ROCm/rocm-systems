@@ -422,16 +422,17 @@ fn parse_and_load(
 fn code_object_isa(runtime: &HsaState, object: &LoaderCodeObject<'_>) -> Result<HsaIsa, Status> {
     let (target, variant) = object.target().map_err(map_loader_error)?;
     for (index, gpu) in runtime.gpus.iter().enumerate() {
-        let Some(name) = crate::isa_name(
-            gpu.info.gfx_major,
-            gpu.info.gfx_minor,
-            gpu.info.gfx_stepping,
-            gpu.info.asic_revision,
-            variant,
-        ) else {
+        let Some(name) = crate::isa_name(&gpu.info, gpu.xnack_enabled, variant) else {
             continue;
         };
-        if name.strip_prefix("amdgcn-amd-amdhsa--") == Some(target) {
+        let mut active = Target::from(&gpu.info);
+        active.xnack_enabled = Some(gpu.xnack_enabled);
+        if name
+            .strip_prefix("amdgcn-amd-amdhsa--")
+            .and_then(|name| name.split(':').next())
+            == Some(target)
+            && object.validate_target(active).is_ok()
+        {
             return Ok(crate::isa_handle(index, variant));
         }
     }
