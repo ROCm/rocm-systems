@@ -11,6 +11,7 @@
 
 add_executable(hrr-unit-tests
   hrr_format_test.cc
+  hrr_host_rect_test.cc
   hrr_limits_test.cc
   hrr_recovery_test.cc
   hrr_repair_test.cc
