@@ -61,8 +61,8 @@ CompletionTracker::drain_completions(std::vector<ComputeQueueRecord> &queues) {
     qs.publication_retry_pending = false;
 
   for (auto &qs : queues) {
-    // Cancellation can remove a failed kernel ahead of a synchronization
-    // marker. Retiring that marker would report success for incomplete work.
+    // Queue faults cancel all outstanding dispatches. Neither trailing barriers
+    // nor queue-idle publication may report that cancelled work as successful.
     if (qs.faulted)
       continue;
     const bool idle_generation_stale =

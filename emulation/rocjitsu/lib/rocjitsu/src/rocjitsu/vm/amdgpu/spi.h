@@ -273,7 +273,7 @@ public:
   /// Includes reservations whose waves have not launched or were already aborted.
   void release_wgp_dispatch(uint32_t dispatch_id) {
     std::erase_if(resident_wgp_workgroups_, [&](const auto &resident) {
-      if (static_cast<uint32_t>(resident.first >> 32) != dispatch_id)
+      if (wg_key_dispatch_id(resident.first) != dispatch_id)
         return false;
       release_wgp_reservation(resident.second.wgp_index);
       return true;
