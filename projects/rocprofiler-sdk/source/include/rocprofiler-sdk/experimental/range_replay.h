@@ -59,6 +59,8 @@ typedef enum rocprofiler_range_replay_status_t  // NOLINT(performance-enum-size)
                                                           ///< agent inside the range
     ROCPROFILER_RANGE_REPLAY_STATUS_PROGRAM_TOO_LARGE,    ///< Range exceeded the record budget
     ROCPROFILER_RANGE_REPLAY_STATUS_SNAPSHOT_FAILED,      ///< Device-memory snapshot was incomplete
+                                                          ///< or does not cover memory a kernel
+                                                          ///< argument points at
     ROCPROFILER_RANGE_REPLAY_STATUS_STAGING_FAILED,  ///< Kernarg staging or signal setup failed
     ROCPROFILER_RANGE_REPLAY_STATUS_ALLOCATION_CHANGED_IN_RANGE,  ///< A device allocation was made
                                                                   ///< or freed inside the range
@@ -101,7 +103,10 @@ typedef enum rocprofiler_range_replay_status_t  // NOLINT(performance-enum-size)
  * while it is open. Repeatability rests on the same
  * device-memory snapshot kernel replay uses (coarse-grained device allocations owned by the agent
  * plus module-scope @c __device__ / @c __constant__ variables), so unified/managed memory, host and
- * fine-grained memory, and virtual-memory-mapped allocations are not restored between passes.
+ * fine-grained memory, and virtual-memory-mapped allocations are not restored between passes. A
+ * range whose explicit kernel arguments point at such memory is declined
+ * (@c ROCPROFILER_RANGE_REPLAY_STATUS_SNAPSHOT_FAILED); a pointer stored inside other memory is
+ * not seen.
  * Replayed passes are serialized dispatch-by-dispatch, so concurrency-sensitive measurements differ
  * from pass 0. Host state is not rewound at all: a range whose kernels consume values the host
  * recomputed inside the range is not a candidate for replay.
