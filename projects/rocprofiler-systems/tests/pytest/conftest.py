@@ -1694,6 +1694,14 @@ def _build_rocprofsys_config_header() -> list[str]:
         ]
     )
 
+    papi_nic_events = cap.papi_nic_events.split() if cap.papi_nic_events else []
+    papi_nic_rows = (
+        [_row("PAPI NIC events:", papi_nic_events[0])]
+        + [_row("", e) for e in papi_nic_events[1:]]
+        if papi_nic_events
+        else [_row("PAPI NIC events:", "None")]
+    )
+
     header = [
         "",
         "=" * 70,
@@ -1744,13 +1752,7 @@ def _build_rocprofsys_config_header() -> list[str]:
         _row("PAPI available:", cap.papi_availability),
         _row("AI NIC devices:", cap.ai_nic_devices),
         _row("Default NIC:", cap.default_nic),
-        *(
-            lambda evts: (
-                [_row("PAPI NIC events:", evts[0])] + [_row("", e) for e in evts[1:]]
-                if evts
-                else [_row("PAPI NIC events:", "None")]
-            )
-        )(cap.papi_nic_events.split() if cap.papi_nic_events else []),
+        *papi_nic_rows,
         "-" * 70,
         "GPU Information:",
         _row("Available:", gpu_info.available),
