@@ -604,24 +604,41 @@ protected:
       wf->halt();
   }
 
-  DecodeResult decode(bool load, bool r128 = false) {
+  DecodeResult decode(bool load, bool r128 = false, uint8_t dim = 1, bool a16 = false,
+                      bool nsa = true) {
     if (GetParam() == ROCJITSU_CODE_ARCH_RDNA3) {
-      const auto base = rdna3::build_mimg(
-          load ? rdna3::kImageLoadMimg : rdna3::kImageStoreMimg,
-          {.nsa = 1, .dim = 1, .unorm = 1, .dmask = 1, .r128 = r128, .vaddr = 2, .vdata = 8});
+      const auto base =
+          rdna3::build_mimg(load ? rdna3::kImageLoadMimg : rdna3::kImageStoreMimg, {.nsa = nsa,
+                                                                                    .dim = dim,
+                                                                                    .unorm = 1,
+                                                                                    .dmask = 1,
+                                                                                    .r128 = r128,
+                                                                                    .a16 = a16,
+                                                                                    .vaddr = 2,
+                                                                                    .vdata = 8});
+      if (!nsa)
+        return decoder->decode(base.data());
       const std::array<uint32_t, 3> words{base[0], base[1], 6};
       return decoder->decode(words.data());
     }
     if (GetParam() == ROCJITSU_CODE_ARCH_RDNA3_5) {
       const auto base = rdna3_5::build_mimg(
-          load ? rdna3_5::kImageLoadMimg : rdna3_5::kImageStoreMimg,
-          {.nsa = 1, .dim = 1, .unorm = 1, .dmask = 1, .r128 = r128, .vaddr = 2, .vdata = 8});
+          load ? rdna3_5::kImageLoadMimg : rdna3_5::kImageStoreMimg, {.nsa = nsa,
+                                                                      .dim = dim,
+                                                                      .unorm = 1,
+                                                                      .dmask = 1,
+                                                                      .r128 = r128,
+                                                                      .a16 = a16,
+                                                                      .vaddr = 2,
+                                                                      .vdata = 8});
+      if (!nsa)
+        return decoder->decode(base.data());
       const std::array<uint32_t, 3> words{base[0], base[1], 6};
       return decoder->decode(words.data());
     }
     const auto words = rdna4::build_vimage(
         load ? rdna4::kImageLoadVimage : rdna4::kImageStoreVimage,
-        {.dim = 1, .r128 = r128, .dmask = 1, .vdata = 8, .vaddr0 = 2, .vaddr1 = 6});
+        {.dim = dim, .r128 = r128, .a16 = a16, .dmask = 1, .vdata = 8, .vaddr0 = 2, .vaddr1 = 6});
     return decoder->decode(words.data());
   }
 
@@ -670,6 +687,33 @@ TEST_P(RdnaDecodedImageAccessTest,
   EXPECT_EQ(cu->read_vgpr(vb + 8, 0), 0x11111111u);
   EXPECT_EQ(cu->read_vgpr(vb + 8, 1), 0xdeadbeefu);
   EXPECT_EQ(cu->read_vgpr(vb + 8, 2), 0x33333333u);
+}
+
+TEST_P(RdnaDecodedImageAccessTest, NonNsaAddressWidthFollowsDimAndA16) {
+  if (GetParam() == ROCJITSU_CODE_ARCH_RDNA4)
+    GTEST_SKIP() << "RDNA4 VIMAGE encodes address registers individually";
+
+  struct Case {
+    uint8_t dim;
+    bool a16;
+    uint32_t expected_bits;
+  };
+  for (const Case test : {Case{.dim = 0, .a16 = false, .expected_bits = 32},
+                          Case{.dim = 0, .a16 = true, .expected_bits = 32},
+                          Case{.dim = 1, .a16 = false, .expected_bits = 64},
+                          Case{.dim = 1, .a16 = true, .expected_bits = 32}}) {
+    for (bool load : {false, true}) {
+      SCOPED_TRACE(testing::Message()
+                   << "dim=" << unsigned{test.dim} << " a16=" << test.a16 << " load=" << load);
+      auto decoded = decode(load, false, test.dim, test.a16, false);
+      ASSERT_TRUE(decoded.succeeded());
+      const std::unique_ptr<Instruction> inst = std::move(decoded).value();
+      ASSERT_NE(inst, nullptr);
+      const Operand *vaddr = inst->src_operand(load ? 0 : 1);
+      ASSERT_NE(vaddr, nullptr);
+      EXPECT_EQ(vaddr->size_bits(), test.expected_bits);
+    }
+  }
 }
 
 TEST_P(RdnaDecodedImageAccessTest, R128LoadAndStoreReportUnimplemented) {

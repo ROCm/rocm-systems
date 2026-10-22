@@ -5662,12 +5662,13 @@ class CodeGenerator:
         if (
             self._issues_image_memory(inst_name)
             and opnd_name == 'vaddr'
-            and not self.isa_spec.profile.renders_gfx11_image_syntax
+            and not self.isa_spec.profile.has_gfx11_image_address_extension
         ):
-            # GFX9 dimensions come from T#, unavailable at decode time.
-            # Three coordinates cover every supported load/store shape.
+            # GFX9 MIMG has no DIM field: dimensions come from T#, which is
+            # unavailable at decode time. Three coordinates cover every
+            # supported load/store shape.
             return '(reinterpret_cast<const OpEncoding *>(inst)->a16 ? 64 : 96)'
-        if not self.isa_spec.profile.renders_gfx11_image_syntax:
+        if not self.isa_spec.profile.has_gfx11_image_address_extension:
             return None
         if opnd_name == 'vdata':
             fixed_words = self.isa_spec.profile.gfx11_mimg_fixed_vdata_words.get(
@@ -14551,7 +14552,7 @@ class CodeGenerator:
                     )
                 elif (
                     enc.enc_name.upper() == 'ENC_MIMG'
-                    and self.isa_spec.profile.renders_gfx11_image_syntax
+                    and self.isa_spec.profile.has_gfx11_image_address_extension
                 ):
                     class_func_impls.model.insert(
                         0, cgen.Line(self._emit_gfx11_mimg_helpers())

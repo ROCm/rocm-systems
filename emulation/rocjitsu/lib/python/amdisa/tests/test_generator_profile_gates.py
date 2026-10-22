@@ -4788,6 +4788,21 @@ def test_generated_rdna3_5_fuzz_disassembly_rules(amdgpu_generated_root: Path):
     )
 
 
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna3_5'])
+def test_generated_gfx11_image_address_width_uses_dim(
+    amdgpu_generated_root: Path, arch: str
+):
+    mimg = (amdgpu_generated_root / _generated_dir_name(arch) / 'mimg.cpp').read_text()
+    for class_name in ('ImageLoadMimg', 'ImageStoreMimg'):
+        constructor = _generated_constructor_body(mimg, class_name)
+        assert (
+            'mimg_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)' in constructor
+        )
+        assert '(reinterpret_cast<const OpEncoding *>(inst)->a16 ? 64 : 96)' not in (
+            constructor
+        )
+
+
 def test_gfx1250_compact_literal_policy_precedes_extension_sizing(
     gfx1250_generated_root: Path,
 ):
