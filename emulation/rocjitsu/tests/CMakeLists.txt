@@ -411,6 +411,7 @@ add_executable(
     dbi/kernarg_sgpr_slot_test.cpp
     code/code_object_target_id_test.cpp
     code/executable_test.cpp
+    code/file_loading_test.cpp
     code/relocation_function_table_test.cpp
     dbt/semantic_scratch_test.cpp
     dbt/waitcnt_translator_test.cpp
@@ -918,6 +919,26 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
     rj_configure_target(cache_allocation_failure_test WARNINGS)
     rj_add_gtest_tests(cache_allocation_failure_test)
+
+    # Isolate the process-wide replacement operator new from rocjitsu_tests.
+    add_executable(
+        file_loading_allocation_failure_test
+        code/file_loading_allocation_failure_test.cpp
+    )
+    target_include_directories(
+        file_loading_allocation_failure_test
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_link_libraries(
+        file_loading_allocation_failure_test
+        PRIVATE
+            rocjitsu_dbt_internal
+            rocjitsu_cdna5_model_registry
+            simdojo_headers
+            GTest::gtest_main
+    )
+    rj_configure_target(file_loading_allocation_failure_test PRIVATE_INCLUDES WARNINGS)
+    rj_add_gtest_tests(file_loading_allocation_failure_test)
 
     # Exercise the model ISA contract in a decoder-only final link.
     add_executable(rocjitsu_model_only_test model_only_isa_test.cpp)
