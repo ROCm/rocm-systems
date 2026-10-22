@@ -89,9 +89,10 @@ TEST_F(DdaAlltoallFabricLL128Microtest, Eligible_BaselineFp32) {
   EXPECT_TRUE(Eligible(4));
 }
 
-TEST_F(DdaAlltoallFabricLL128Microtest, Eligible_DdaLLZeroRejects) {
+// LL128 is gated by RCCL_DDA_LL128 alone; RCCL_DDA_LL only controls the LL tier.
+TEST_F(DdaAlltoallFabricLL128Microtest, Eligible_DdaLLZeroDoesNotGateLL128) {
   params_["RCCL_DDA_LL"] = 0;
-  EXPECT_FALSE(Eligible(4));
+  EXPECT_TRUE(Eligible(4));
 }
 
 TEST_F(DdaAlltoallFabricLL128Microtest, Eligible_NeedsCommAndBootstrap) {
@@ -185,7 +186,7 @@ TEST_F(DdaAlltoallFabricLL128Microtest, Launch_PassesBuffersPerPeerBytesAndEpoch
   EXPECT_EQ(comm().addonStopEvent, nullptr);
   EXPECT_EQ(launch.sharedMemBytes, 0u);
   EXPECT_EQ(launch.flags, 0u);
-  ASSERT_EQ(launch.args.size(), 8u);
+  ASSERT_EQ(launch.args.size(), 9u);
   EXPECT_EQ(launch.Arg<int8_t**>(0), comm().ddaPeerPtrsDev);
   EXPECT_EQ(launch.Arg<int8_t*>(1), kRecvbuff);
   EXPECT_EQ(launch.Arg<const int8_t*>(2), kSendbuff);
@@ -193,6 +194,7 @@ TEST_F(DdaAlltoallFabricLL128Microtest, Launch_PassesBuffersPerPeerBytesAndEpoch
   EXPECT_EQ(launch.Arg<int>(4), 2);
   EXPECT_EQ(launch.Arg<uint32_t*>(6), comm().ddaLLEpochDev);
   EXPECT_EQ(launch.Arg<int>(7), comm().ddaLLEpochLen);
+  EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(8).flag, comm().abortFlagDev);
 }
 
 // One block per peer up to 4 lines per peer, then one per 4 lines, at most 8 per peer.

@@ -15,7 +15,7 @@ handle is known to have stopped. The intended owner transitions are:
 | State | Reachability and owner rule |
 | --- | --- |
 | Prepared | Allocate owner metadata and external backing before a native call can publish their addresses. No public handle exists. |
-| Active | The core owns native ring, control, VM, and connection state. The adapter owns public handles and any signal, scratch, or allocator backing borrowed by native state. |
+| Active | The core owns native ring, control, VM, and connection state. Direct queues also retain the adapter-supplied signal and scratch backing through their core queue owner. The adapter owns public handles and producer policy. |
 | Stopping | Stop producers and callback workers, then inactivate or destroy native state. Keep all backing while any step can fail or report unfinished work. |
 | Released | Drop backing only after native cleanup proves that no device or worker can reach it. |
 | Quarantined | An ambiguous CREATE, failed rollback, uncertain DESTROY, or unwind retains the complete dependency graph. Where recovery cannot prove release, the process intentionally retains that graph. |
@@ -24,20 +24,20 @@ The core's queue creation transaction accepts external dependencies before it
 calls KFD. HSA passes inactive and error signal storage plus scratch; AMDF
 passes a scratch-memory borrow. A proved rejection releases them. An ambiguous
 CREATE, failed rollback, or unwind retains them with the native dependencies.
-After successful creation, the adapter keeps the returned dependencies through
-queue destruction. An unpublished queue with failed cleanup is retained with
-its external owners. HSA stages the public queue record's capacity, doorbell
+After successful creation, the core queue owner keeps those dependencies
+through native destruction. An unpublished queue with failed cleanup is retained
+with its external owners. HSA stages public queue capacity and doorbell
 storage, event state, and CU-mask copy before CREATE. Until publication, a
 successful native queue remains paired with its signal and scratch owners even
 if frontend setup unwinds.
 
 HSA scratch fault recovery has a separate transaction. It retains the old
-scratch and stages each candidate allocation in the queue record before
-rewriting its control block. A successful stopped-queue update makes the
-candidate current before releasing the inactive signal. A failed or unwound
-update leaves the candidate in the record because the command processor may
-have observed its address. Candidates remain owned through native queue
-teardown.
+scratch and stages each candidate allocation in the core queue's dependency
+bundle before rewriting its control block. A successful stopped-queue update
+makes the candidate current before releasing the inactive signal. Failed or
+unwound updates leave the candidate in the bundle because the command
+processor may have observed its address. Candidates remain owned through
+native queue teardown.
 
 HSA batch queue creation reads descriptor input fields without referencing the
 output-only queue field, which may be uninitialized. It copies a caller CU mask
@@ -73,13 +73,14 @@ queue header.
 Memory-fault notification stops calling handlers when one requests shutdown;
 the worker then exits without treating the interrupted notification as an
 unhandled fault. Shutdown events still notify every registered handler.
-The core owns each KFD signal-event page passed to event creation. It marks
-the page offered after native preflight, just before ioctl dispatch. KFD may
-install an offered page before CREATE_EVENT returns an error, so that page
-remains live through KFD process teardown even after a failed first event.
+The core signal-event service prepares and owns each KFD page passed to event
+creation. It marks the page offered after native preflight, just before ioctl
+dispatch. KFD may install an offered page before CREATE_EVENT returns an error,
+so the page remains live through KFD process teardown after a failed first
+event.
 Explicit transfer detaches its allocation metadata; failed transfer or unwind
-retains the complete owner. HSA retries without the page handle only after
-the first call offered the page. A pre-dispatch failure leaves a new page
+retains the complete owner. The service retries without the page handle only
+after the first call offered the page. A pre-dispatch failure leaves a new page
 reusable or releasable. If no event succeeds after an offer, HSA quarantines
 its runtime registry: a later runtime cannot reuse the page handle from the
 old KFD session.

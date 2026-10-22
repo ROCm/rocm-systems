@@ -52,7 +52,10 @@ use rocddi::session::{DriverContextLifetime, Session};
 use rocddi::topology::{MemoryLinkInfo, MemoryLinkType};
 
 use crate::ffi::*;
-use crate::runtime::{HsaState, InFlightGeneration, boundary, initialized_mut, lock, map_error};
+use crate::runtime::{
+    HsaState, InFlightGeneration, boundary, cache_handles_in_level_order, initialized_mut, lock,
+    map_error,
+};
 use crate::signal::{AsyncCopyClock, AsyncCopyProfile};
 
 const GPU_POOL_COARSE: u64 = 1;
@@ -818,9 +821,12 @@ pub(crate) fn signal_batch_pool(
     let uncached =
         kind == GPU_POOL_EXTENDED && gpu.info.gfx_major == 9 && matches!(gpu.info.gfx_minor, 4 | 5);
     let coarse = kind == GPU_POOL_COARSE && gpu.info.gfx_major == 12 && gpu.info.gfx_minor >= 5;
-    let host_atomic_link = gpu.endpoint.memory_link_from_host().is_some_and(|link| {
-        link.kind() == MemoryLinkType::Xgmi && link.is_coherent() && link.supports_64bit_atomics()
-    });
+    let host_atomic_link = runtime
+        .topology
+        .route_from_host(&gpu.endpoint)
+        .is_some_and(|link| {
+            link.kind == MemoryLinkType::Xgmi && link.coherent_support && link.atomic_support_64bit
+        });
     (gpu_pool_host_visible(runtime, index) && (uncached || coarse)).then_some(
         SignalBatchPool::Device {
             index,
@@ -834,10 +840,10 @@ fn gpu_pcie_dmabuf_supported(runtime: &HsaState, index: usize) -> bool {
     // Full VRAM visibility supplies a large BAR. A CPU-to-GPU XGMI link is
     // the other route that can satisfy a requested PCIe DMA-BUF mapping.
     gpu_pool_host_visible(runtime, index)
-        || runtime.gpus[index]
-            .endpoint
-            .memory_link_from_host()
-            .is_some_and(|link| link.kind() == MemoryLinkType::Xgmi)
+        || runtime
+            .topology
+            .route_from_host(&runtime.gpus[index].endpoint)
+            .is_some_and(|link| link.kind == MemoryLinkType::Xgmi)
 }
 
 fn gpu_pool_coherent(pool_kind: u64, uncached: bool, pcie: bool) -> bool {
@@ -863,21 +869,39 @@ fn agent_pool_relationship(
     let link = if same {
         None
     } else if agent.handle == CPU_AGENT {
-        owner_gpu.and_then(|index| runtime.gpus[index].endpoint.memory_link_from_host())
+        owner_gpu.and_then(|index| {
+            runtime
+                .topology
+                .route_from_host(&runtime.gpus[index].endpoint)
+        })
     } else if let Some(requester) = requester_gpu {
         if matches!(storage, PoolStorage::System) {
-            runtime.gpus[requester].endpoint.memory_link_to_host()
+            runtime
+                .topology
+                .route_to_host(&runtime.gpus[requester].endpoint)
         } else {
             owner_gpu.and_then(|owner| {
-                runtime.gpus[requester]
-                    .endpoint
-                    .memory_link_to(&runtime.gpus[owner].endpoint)
+                runtime.topology.route_between(
+                    &runtime.gpus[requester].endpoint,
+                    &runtime.gpus[owner].endpoint,
+                )
             })
         }
     } else {
         None
     };
-    let linked = same || link.is_some_and(|link| link.hop_count() != 0);
+    let linked = same
+        || match (requester_gpu, owner_gpu) {
+            (Some(requester), Some(owner))
+                if matches!(storage, PoolStorage::LocalCoarse | PoolStorage::LocalFine) =>
+            {
+                runtime.session.can_access_local_memory(
+                    &runtime.gpus[requester].endpoint,
+                    &runtime.gpus[owner].endpoint,
+                )
+            }
+            _ => link.is_some_and(|link| link.hop_count() != 0),
+        };
     let cpu_cannot_access_local = agent.handle == CPU_AGENT
         && owner_gpu.is_some_and(|index| !gpu_pool_host_visible(runtime, index))
         && matches!(storage, PoolStorage::LocalCoarse | PoolStorage::LocalFine);
@@ -904,15 +928,15 @@ fn pool_link_info(link: Option<MemoryLinkInfo>) -> PoolLinkInfo {
         };
     };
     PoolLinkInfo {
-        min_latency: link.minimum_latency(),
-        max_latency: link.maximum_latency(),
-        min_bandwidth: link.minimum_bandwidth(),
-        max_bandwidth: link.maximum_bandwidth(),
-        atomic_support_32bit: link.supports_32bit_atomics(),
-        atomic_support_64bit: link.supports_64bit_atomics(),
-        coherent_support: link.is_coherent(),
-        link_type: hsa_link_type(link.kind()),
-        numa_distance: link.numa_distance(),
+        min_latency: link.minimum_latency,
+        max_latency: link.maximum_latency,
+        min_bandwidth: link.minimum_bandwidth,
+        max_bandwidth: link.maximum_bandwidth,
+        atomic_support_32bit: link.atomic_support_32bit,
+        atomic_support_64bit: link.atomic_support_64bit,
+        coherent_support: link.coherent_support,
+        link_type: hsa_link_type(link.kind),
+        numa_distance: link.numa_distance,
     }
 }
 
@@ -1083,15 +1107,7 @@ pub unsafe extern "C" fn hsa_agent_iterate_caches(
             let Some(_) = callback else {
                 return INVALID_ARGUMENT;
             };
-            runtime
-                .caches
-                .iter()
-                .enumerate()
-                .filter(|(_, cache)| cache.agent == agent)
-                .map(|(index, _)| HsaCache {
-                    handle: CACHE_BASE + index as u64,
-                })
-                .collect::<Vec<_>>()
+            cache_handles_in_level_order(&runtime.caches, agent)
         };
         let Some(callback) = callback else {
             return INVALID_ARGUMENT;

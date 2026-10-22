@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-//! Linux implementation of the shared profiling clock.
+//! Linux implementation of the host profiling clock.
 
 #![allow(unsafe_code)]
 
