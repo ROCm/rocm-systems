@@ -89,15 +89,25 @@ void ncclDebugLog(ncclDebugLogLevel /*level*/,
     std::fputc('\n', stderr);
 }
 
-// Every param sits at its default. The NCCL_PARAM bodies that p2p-test.cc redirects through g_loadParam bypass this.
-int64_t ncclLoadParam(char const*, int64_t deftVal, int64_t, int64_t* cache, int8_t* noCache) {
-  if (cache) {
-    *cache = deftVal;
-  }
-  if (noCache) {
-    *noCache = 0;
-  }
-  return deftVal;
+// src/debug.cc, same owner as the logging symbols above. A no-op rather than a
+// recorder: the name is cosmetic, so nothing a microtest asserts can depend on it.
+void ncclSetThreadName(std::thread& /*thread*/, const char* /*fmt*/, ...) {}
+
+// Every param sits at its compile-time default. The NCCL_PARAM bodies that
+// p2p-test.cc redirects through g_loadParam bypass this entirely.
+int64_t ncclLoadParam(char const* /*env*/,
+                      int64_t     deftVal,
+                      int64_t     /*uninitialized*/,
+                      int64_t*    cache,
+                      int8_t*     noCache)
+{
+    if (cache) {
+        *cache = deftVal;
+    }
+    if (noCache) {
+        *noCache = 0;
+    }
+    return deftVal;
 }
 
 // Default returns deftVal verbatim -- preserves the pre-hook contract that
