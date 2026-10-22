@@ -23,7 +23,6 @@ THE SOFTWARE.
 #define INCLUDE_RDC_LIB_IMPL_RDCMODULEMGRIMPL_H_
 
 #include <list>
-#include <mutex>  // NOLINT(build/c++11)
 
 #include "rdc_lib/RdcMetricFetcher.h"
 #include "rdc_lib/RdcModuleMgr.h"
@@ -56,10 +55,6 @@ class RdcModuleMgrImpl : public RdcModuleMgr {
   rdc_status_t insert_modules(std::shared_ptr<T> ptr);
 
   //  Function module
-  // Built on the first request that needs it. rdcd calls the getters from its request threads, so
-  // each getter holds this mutex for its whole body: two first requests must not race on a member
-  // or build one module twice.
-  std::mutex module_mutex_;
   RdcTelemetryPtr rdc_telemetry_module_;
   RdcDiagnosticPtr rdc_diagnostic_module_;
 
