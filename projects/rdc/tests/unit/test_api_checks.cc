@@ -21,8 +21,8 @@ THE SOFTWARE.
 */
 
 // Checks in the RDC library that need no GPU: the C API rejects job IDs and
-// names that do not fit it before it uses its handle, and the cache gives each
-// value it returns a status.
+// names that do not fit it, and outputs it cannot write, before it uses its
+// handle, and the cache gives each value it returns a status.
 
 #include <gtest/gtest.h>
 #include <stdio.h>
@@ -33,6 +33,7 @@ THE SOFTWARE.
 #include <cstring>
 #include <functional>
 #include <string>
+#include <utility>
 
 #include "rdc/rdc.h"
 #include "rdc_lib/impl/RdcCacheManagerImpl.h"
@@ -96,6 +97,42 @@ TEST(ApiChecks, GroupsRejectNamesThatDoNotFit) {
     EXPECT_EQ(rdc_group_field_create(kBadHandle, 1, fields, too_long.c_str(), &field_group_id),
               RDC_ST_BAD_PARAMETER);
   });
+}
+
+// An output the call cannot write is a bad parameter, rejected before the handle
+// is used.
+TEST(ApiChecks, CallsRejectOutputsTheyCannotWrite) {
+  uint32_t count = 0;
+  rdc_policy_t policies[RDC_MAX_POLICY_SETTINGS] = {};
+  const std::pair<const char*, std::function<rdc_status_t()>> calls[] = {
+      {"rdc_job_get_stats", [] { return rdc_job_get_stats(kBadHandle, "job", nullptr); }},
+      {"rdc_group_gpu_create",
+       [] { return rdc_group_gpu_create(kBadHandle, RDC_GROUP_EMPTY, "group", nullptr); }},
+      {"rdc_device_get_all", [&] { return rdc_device_get_all(kBadHandle, nullptr, &count); }},
+      {"rdc_group_field_get_info", [] { return rdc_group_field_get_info(kBadHandle, 1, nullptr); }},
+      {"rdc_group_get_all_ids", [&] { return rdc_group_get_all_ids(kBadHandle, nullptr, &count); }},
+      {"rdc_group_field_get_all_ids",
+       [&] { return rdc_group_field_get_all_ids(kBadHandle, nullptr, &count); }},
+      {"rdc_diagnostic_run",
+       [] {
+         return rdc_diagnostic_run(kBadHandle, 1, RDC_DIAG_LVL_SHORT, nullptr, 0, nullptr, nullptr);
+       }},
+      {"rdc_test_case_run",
+       [] {
+         return rdc_test_case_run(kBadHandle, 1, RDC_DIAG_COMPUTE_PROCESS, nullptr, 0, nullptr,
+                                  nullptr);
+       }},
+      {"rdc_health_get", [] { return rdc_health_get(kBadHandle, 1, nullptr); }},
+      {"rdc_health_check", [] { return rdc_health_check(kBadHandle, 1, nullptr); }},
+      {"rdc_policy_get count", [&] { return rdc_policy_get(kBadHandle, 1, nullptr, policies); }},
+      {"rdc_policy_get policies", [&] { return rdc_policy_get(kBadHandle, 1, &count, nullptr); }},
+      {"rdc_device_topology_get", [] { return rdc_device_topology_get(kBadHandle, 0, nullptr); }},
+      {"rdc_link_status_get", [] { return rdc_link_status_get(kBadHandle, nullptr); }},
+  };
+  for (const auto& call : calls) {
+    SCOPED_TRACE(call.first);
+    in_child([&] { EXPECT_EQ(call.second(), RDC_ST_BAD_PARAMETER); });
+  }
 }
 
 // Values the cache returns carry RDC_ST_OK and all of their data, also into a
