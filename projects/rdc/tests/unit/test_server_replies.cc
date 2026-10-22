@@ -513,7 +513,9 @@ TEST(ServerReplies, FieldStringsStayWithinTheirBuffers) {
 TEST(ServerReplies, FieldStringsSinceATimeLoseTheirTrailingSpaces) {
   const std::pair<std::string, std::string> cases[] = {
       {"abc   ", "abc"}, {"a b", "a b"}, {"    ", ""}, {"x", "x"}};
-  for (const auto& [value, sent] : cases) {
+  for (const auto& c : cases) {
+    const std::string& value = c.first;
+    const std::string& sent = c.second;
     g_field_str = value;
     in_child([&] {
       g_fill = Fill::kNothing;
