@@ -806,8 +806,9 @@ def prepare_phase_dir(work_dir: Path, phase: str) -> Path:
 #
 # The containers run as root, so the task's own `rm -rf` of its workspace leaves
 # whatever they wrote, and madengine's stale-workspace sweep only looks at this
-# user's directories. Only this job's workspaces are touched. $1 is an image the
-# node already has, for when sudo is not available.
+# user's directories. Only this job's workspaces are touched. Without sudo, rm
+# runs as root in whichever of this run's images the node has; never pulled, as
+# each is tens of GB. $1 is kept, the rest are removed.
 CLEANUP_IMAGES = """\
 #!/bin/bash
 helper="$1"; shift
@@ -816,12 +817,14 @@ if [ -n "${SLURM_JOB_ID}" ]; then
               /tmp/madengine_job_"${SLURM_JOB_ID}"_*; do
         [ -d "$ws" ] || continue
         rm -rf "$ws" 2>/dev/null || sudo -n rm -rf "$ws" 2>/dev/null
-        if [ -e "$ws" ] && [ -n "$helper" ]; then
-            args=(run --rm -u 0 -v "$(dirname "$ws"):/w" --entrypoint rm
-                  "$helper" -rf "/w/$(basename "$ws")")
+        for image in "$helper" "$@"; do
+            [ -e "$ws" ] || break
+            [ -n "$image" ] || continue
+            args=(run --rm --pull never -u 0 -v "$(dirname "$ws"):/w"
+                  --entrypoint rm "$image" -rf "/w/$(basename "$ws")")
             docker "${args[@]}" >/dev/null 2>&1 \\
                 || sudo -n docker "${args[@]}" >/dev/null 2>&1
-        fi
+        done
         if [ -e "$ws" ]; then
             echo "  could not remove $(hostname -s) $ws"
         else
