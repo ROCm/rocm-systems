@@ -1054,6 +1054,7 @@ TEST(ProxyTests, ProxyServiceDoesNotHangOnExternalBadMagic)
             ASSERT_EQ(pthread_getcpuclockid(serviceThread.native_handle(), &serviceClock), 0);
             struct timespec cpuBefore = {};
             ASSERT_EQ(clock_gettime(serviceClock, &cpuBefore), 0);
+            const auto wallBefore = std::chrono::steady_clock::now();
 
             // Connect only after the service is already polling. Otherwise
             // the peer sits in the listen backlog and the service spends this
@@ -1085,11 +1086,18 @@ TEST(ProxyTests, ProxyServiceDoesNotHangOnExternalBadMagic)
             std::this_thread::sleep_for(std::chrono::milliseconds(250));
             struct timespec cpuAfter = {};
             ASSERT_EQ(clock_gettime(serviceClock, &cpuAfter), 0);
+            const auto wallAfter = std::chrono::steady_clock::now();
             const double cpuMs =
                 (cpuAfter.tv_sec - cpuBefore.tv_sec) * 1e3 +
                 (cpuAfter.tv_nsec - cpuBefore.tv_nsec) / 1e6;
-            EXPECT_LT(cpuMs, 125.0)
-                << "proxy service busy-spun after bad magic (CPU time " << cpuMs << " ms)";
+            const double wallMs =
+                std::chrono::duration<double, std::milli>(wallAfter - wallBefore).count();
+            ASSERT_GT(wallMs, 200.0)
+                << "proxy CPU measurement window was too short (" << wallMs << " ms)";
+            const double cpuRatio = cpuMs / wallMs;
+            EXPECT_LT(cpuRatio, 0.5)
+                << "proxy service busy-spun after bad magic (CPU time " << cpuMs
+                << " ms, wall time " << wallMs << " ms, ratio " << cpuRatio << ")";
 
             __atomic_store_n(&abortFlag, 1, __ATOMIC_RELEASE);
 
