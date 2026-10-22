@@ -41,6 +41,7 @@ class RuntimeIntegration(unittest.TestCase):
                 threads=128,
                 launcher=None,
                 test_statistics=False,
+                amd_signals=False,
             )
             driver = Driver(args)
             with mock.patch.object(

@@ -149,6 +149,7 @@ protected:
     core_.hsa_signal_store_screlease_fn = store_signal;
     core_.hsa_signal_subtract_screlease_fn = subtract_signal;
     core_.hsa_signal_wait_scacquire_fn = wait_signal;
+    amd_.hsa_amd_signal_create_fn = create_amd_signal;
     core_.hsa_iterate_agents_fn = [](hsa_status_t (*callback)(hsa_agent_t, void *), void *data) {
       return callback(hsa_agent_t{2}, data);
     };
@@ -218,13 +219,16 @@ protected:
            core_.hsa_executable_freeze_fn({7}, nullptr) == HSA_STATUS_SUCCESS;
   }
 
-  bool create_queue_and_signal() {
+  bool create_queue_and_signal(bool amd_signal = false) {
     hsa_queue_t *queue = nullptr;
     if (core_.hsa_queue_create_fn({1}, 128, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr, 0, 0,
                                   &queue) != HSA_STATUS_SUCCESS ||
         queue != &queue_)
       return false;
-    return core_.hsa_signal_create_fn(1, 0, nullptr, &signal_) == HSA_STATUS_SUCCESS;
+    const hsa_status_t status = amd_signal
+                                    ? amd_.hsa_amd_signal_create_fn(1, 0, nullptr, 0, &signal_)
+                                    : core_.hsa_signal_create_fn(1, 0, nullptr, &signal_);
+    return status == HSA_STATUS_SUCCESS;
   }
 
   hsa_kernel_dispatch_packet_t dispatch_packet(hsa_signal_t completion, uint32_t grid = 64,
@@ -441,6 +445,17 @@ protected:
     current_->signal_values_.erase(signal.handle);
     return HSA_STATUS_SUCCESS;
   }
+  static hsa_status_t create_amd_signal(hsa_signal_value_t value, uint32_t consumers,
+                                        const hsa_agent_t *agents, uint64_t attributes,
+                                        hsa_signal_t *signal) {
+    current_->amd_signal_value_ = value;
+    current_->amd_signal_consumers_ = consumers;
+    current_->amd_signal_agents_ = agents;
+    current_->amd_signal_attributes_ = attributes;
+    if (current_->amd_signal_status_ != HSA_STATUS_SUCCESS)
+      return current_->amd_signal_status_;
+    return create_signal(value, consumers, agents, signal);
+  }
   static hsa_signal_value_t load_signal(hsa_signal_t signal) {
     std::lock_guard lock(current_->fake_mutex_);
     return current_->signal_values_.at(signal.handle);
@@ -562,6 +577,11 @@ protected:
   uint32_t allocation_calls_ = 0, fail_allocation_ = 0, published_packets_ = 0,
            forwarding_calls_ = 0;
   uint32_t row_status_ = UINT32_MAX;
+  hsa_status_t amd_signal_status_ = HSA_STATUS_SUCCESS;
+  hsa_signal_value_t amd_signal_value_ = 0;
+  uint32_t amd_signal_consumers_ = 0;
+  const hsa_agent_t *amd_signal_agents_ = nullptr;
+  uint64_t amd_signal_attributes_ = 0;
   bool installed_ = false, preserve_ = false, fail_proxy_ = false, auto_complete_ = true;
   bool throw_reader_ = false, throw_report_free_ = false, throw_pointer_info_ = false,
        throw_wait_ = false;
@@ -855,6 +875,170 @@ TEST_F(ConSanHsaPlugin, InvalidGeometryFailsBeforeAllocation) {
   EXPECT_EQ(allocation_calls_, 0u);
   EXPECT_EQ(load_signal(signal_), -1);
   EXPECT_NE(finish_(), 0);
+}
+
+TEST_F(ConSanHsaPlugin, AmdSignalsCompleteAdmittedDispatches) {
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal(true));
+  submit();
+  ASSERT_EQ(published_packets_, 1u);
+  ASSERT_EQ(drain_(), 0);
+  EXPECT_EQ(load_signal(signal_), 0);
+  EXPECT_EQ(statistics_().forwarded, 1u);
+  EXPECT_EQ(core_.hsa_signal_destroy_fn(signal_), HSA_STATUS_SUCCESS);
+  signal_ = {};
+  ASSERT_EQ(amd_.hsa_amd_signal_create_fn(1, 0, nullptr, 0, &signal_), HSA_STATUS_SUCCESS);
+  submit();
+  ASSERT_EQ(drain_(), 0);
+  EXPECT_EQ(load_signal(signal_), 0);
+  EXPECT_EQ(statistics_().forwarded, 2u);
+  EXPECT_EQ(finish_(), 0);
+}
+
+TEST_F(ConSanHsaPlugin, AmdSignalCreationPreservesArgumentsAndFailedOutputsRemainUntracked) {
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal());
+  const hsa_agent_t consumer{2};
+  hsa_signal_t extra{};
+  ASSERT_EQ(amd_.hsa_amd_signal_create_fn(7, 1, &consumer, HSA_AMD_SIGNAL_IPC, &extra),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(amd_signal_value_, 7);
+  EXPECT_EQ(amd_signal_consumers_, 1u);
+  EXPECT_EQ(amd_signal_agents_, &consumer);
+  EXPECT_EQ(amd_signal_attributes_, uint64_t{HSA_AMD_SIGNAL_IPC});
+  ASSERT_EQ(core_.hsa_signal_destroy_fn(extra), HSA_STATUS_SUCCESS);
+
+  // A failing create may leave the output untouched. It must not register a
+  // pre-existing handle obtained outside either intercepted creation API.
+  ASSERT_EQ(create_signal(1, 0, nullptr, &extra), HSA_STATUS_SUCCESS);
+  amd_signal_status_ = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  EXPECT_EQ(amd_.hsa_amd_signal_create_fn(1, 0, nullptr, 0, &extra), amd_signal_status_);
+  submit(128);
+  hsa_barrier_and_packet_t barrier{};
+  barrier.header = HSA_PACKET_TYPE_BARRIER_AND;
+  barrier.completion_signal = extra;
+  handler_(&barrier, 1, 0, handler_context_, barrier_writer);
+  EXPECT_EQ(load_signal(extra), 1);
+  EXPECT_EQ(published_packets_, 0u);
+  EXPECT_NE(finish_(), 0);
+}
+
+TEST_F(ConSanHsaPlugin, RejectedAmdDispatchNotifiesItsCompletion) {
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal(true));
+  submit(128);
+  EXPECT_EQ(load_signal(signal_), -1);
+  EXPECT_EQ(published_packets_, 0u);
+  EXPECT_EQ(allocation_calls_, 0u);
+  EXPECT_NE(finish_(), 0);
+}
+
+TEST_F(ConSanHsaPlugin, RejectedBatchesNotifyAmdDispatchAndBarrierCompletions) {
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal(true));
+  for (const uint16_t type : {HSA_PACKET_TYPE_BARRIER_AND, HSA_PACKET_TYPE_BARRIER_OR}) {
+    hsa_signal_t second{}, completed{};
+    ASSERT_EQ(amd_.hsa_amd_signal_create_fn(1, 0, nullptr, 0, &second), HSA_STATUS_SUCCESS);
+    ASSERT_EQ(amd_.hsa_amd_signal_create_fn(1, 0, nullptr, 0, &completed), HSA_STATUS_SUCCESS);
+    hsa_barrier_and_packet_t barrier{};
+    barrier.header = type;
+    barrier.dep_signal[0] = second;
+    barrier.completion_signal = completed;
+    std::array packets{dispatch_packet(signal_), hsa_kernel_dispatch_packet_t{},
+                       dispatch_packet(second)};
+    std::memcpy(&packets[1], &barrier, sizeof(barrier));
+    handler_(packets.data(), packets.size(), 0, handler_context_, completing_barrier_writer);
+    EXPECT_EQ(load_signal(signal_), -1);
+    EXPECT_EQ(load_signal(second), -1);
+    EXPECT_EQ(load_signal(completed), -1);
+  }
+  EXPECT_EQ(published_packets_, 0u);
+  EXPECT_EQ(allocation_calls_, 0u);
+  EXPECT_NE(finish_(), 0);
+}
+
+TEST_F(ConSanHsaPlugin, AmdBarriersAfterADispatchRejectionReceiveFailureNotifications) {
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal(true));
+  submit(128);
+  for (const bool batch : {false, true}) {
+    std::array<hsa_barrier_and_packet_t, 2> packets{};
+    packets[0].header = HSA_PACKET_TYPE_BARRIER_AND;
+    packets[1].header = HSA_PACKET_TYPE_BARRIER_OR;
+    for (hsa_barrier_and_packet_t &packet : packets) {
+      ASSERT_EQ(amd_.hsa_amd_signal_create_fn(1, 0, nullptr, 0, &packet.completion_signal),
+                HSA_STATUS_SUCCESS);
+      packet.dep_signal[0] = signal_;
+    }
+    if (batch)
+      handler_(packets.data(), packets.size(), 0, handler_context_, completing_barrier_writer);
+    else
+      for (const hsa_barrier_and_packet_t &packet : packets)
+        handler_(&packet, 1, 0, handler_context_, completing_barrier_writer);
+    for (const hsa_barrier_and_packet_t &packet : packets)
+      EXPECT_EQ(load_signal(packet.completion_signal), -1);
+  }
+  EXPECT_EQ(published_packets_, 0u);
+  EXPECT_NE(finish_(), 0);
+}
+
+TEST_F(ConSanHsaPlugin, RejectedAmdBarrierCannotOverwritePendingDispatchCompletion) {
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal(true));
+  auto_complete_ = false;
+  submit();
+  ASSERT_EQ(published_packets_, 1u);
+  const hsa_signal_t proxy = published_.completion_signal;
+  hsa_signal_t rejected{};
+  ASSERT_EQ(amd_.hsa_amd_signal_create_fn(1, 0, nullptr, 0, &rejected), HSA_STATUS_SUCCESS);
+  hsa_barrier_and_packet_t barrier{};
+  barrier.header = HSA_PACKET_TYPE_BARRIER_AND;
+  barrier.completion_signal = signal_;
+  std::array packets{dispatch_packet(rejected), hsa_kernel_dispatch_packet_t{}};
+  std::memcpy(&packets[1], &barrier, sizeof(barrier));
+  handler_(packets.data(), packets.size(), 0, handler_context_, barrier_writer);
+  EXPECT_EQ(load_signal(signal_), 1);
+  EXPECT_EQ(load_signal(rejected), -1);
+  EXPECT_EQ(published_packets_, 1u);
+  EXPECT_TRUE(published_barriers_.empty());
+  store_signal(proxy, 0);
+  EXPECT_NE(finish_(), 0);
+  EXPECT_EQ(load_signal(signal_), 0);
+  EXPECT_EQ(statistics_().forwarded, 1u);
+}
+
+TEST_F(ConSanHsaPlugin, UntrackedBarriersAfterARejectionRetainTheirSignalsWithoutPublication) {
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal());
+  submit(128);
+  for (const uint16_t type : {HSA_PACKET_TYPE_BARRIER_AND, HSA_PACKET_TYPE_BARRIER_OR}) {
+    hsa_barrier_and_packet_t barrier{};
+    barrier.header = type;
+    ASSERT_EQ(create_signal(1, 0, nullptr, &barrier.completion_signal), HSA_STATUS_SUCCESS);
+    handler_(&barrier, 1, 0, handler_context_, completing_barrier_writer);
+    EXPECT_EQ(core_.hsa_signal_wait_scacquire_fn(barrier.completion_signal, HSA_SIGNAL_CONDITION_LT,
+                                                 1, 1000000, HSA_WAIT_STATE_BLOCKED),
+              1);
+  }
+  EXPECT_EQ(published_packets_, 0u);
+  EXPECT_NE(finish_(), 0);
+}
+
+TEST_F(ConSanHsaPlugin, MissingAmdSignalCreationKeepsCoreSignalSupportAvailable) {
+  (void)finish_();
+  unload_();
+  installed_ = false;
+  initialize_api();
+  amd_.hsa_amd_signal_create_fn = nullptr;
+  installed_ = load_(&table_, 0, 0, nullptr);
+  ASSERT_TRUE(installed_);
+  EXPECT_EQ(amd_.hsa_amd_signal_create_fn, nullptr);
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal());
+  submit();
+  EXPECT_EQ(drain_(), 0);
+  EXPECT_EQ(load_signal(signal_), 0);
+  EXPECT_EQ(finish_(), 0);
 }
 
 TEST_F(ConSanHsaPlugin, RejectedBatchNotifiesEveryDiscardedDispatch) {
@@ -1157,6 +1341,9 @@ TEST_F(ConSanHsaPlugin, ExistingAmdTablePrefixIsBoundedAndRestored) {
     installed_ = true;
     EXPECT_TRUE(bind());
     EXPECT_TRUE(create_queue_and_signal());
+    hsa_signal_t completion{};
+    EXPECT_EQ(prefix->hsa_amd_signal_create_fn(1, 0, nullptr, 0, &completion), HSA_STATUS_SUCCESS);
+    EXPECT_EQ(core_.hsa_signal_destroy_fn(completion), HSA_STATUS_SUCCESS);
     EXPECT_EQ(finish_(), 0);
     unload_();
     installed_ = false;
@@ -1165,6 +1352,7 @@ TEST_F(ConSanHsaPlugin, ExistingAmdTablePrefixIsBoundedAndRestored) {
               amd_.hsa_amd_profiling_set_profiler_enabled_fn);
     EXPECT_EQ(prefix->hsa_amd_queue_intercept_register_fn,
               amd_.hsa_amd_queue_intercept_register_fn);
+    EXPECT_EQ(prefix->hsa_amd_signal_create_fn, create_amd_signal);
   }
   table_.amd_ext_ = &amd_;
 }
@@ -1175,12 +1363,16 @@ TEST_F(ConSanHsaPlugin, UnloadRestoresOurHooksWithoutOverwritingLaterCoreOrExten
   const auto later_reader =
       +[](hsa_file_t, hsa_code_object_reader_t *) { return HSA_STATUS_ERROR; };
   const auto later_profiling = +[](hsa_queue_t *, int) { return HSA_STATUS_ERROR; };
+  const auto later_signal = +[](hsa_signal_value_t, uint32_t, const hsa_agent_t *, uint64_t,
+                                hsa_signal_t *) { return HSA_STATUS_ERROR; };
   core_.hsa_code_object_reader_create_from_file_fn = later_reader;
   amd_.hsa_amd_profiling_set_profiler_enabled_fn = later_profiling;
+  amd_.hsa_amd_signal_create_fn = later_signal;
   unload_();
   installed_ = false;
   EXPECT_EQ(core_.hsa_code_object_reader_create_from_file_fn, later_reader);
   EXPECT_EQ(amd_.hsa_amd_profiling_set_profiler_enabled_fn, later_profiling);
+  EXPECT_EQ(amd_.hsa_amd_signal_create_fn, later_signal);
   EXPECT_EQ(core_.hsa_code_object_reader_create_from_memory_fn, create_reader);
   EXPECT_EQ(core_.hsa_signal_create_fn, create_signal);
   const auto handler =

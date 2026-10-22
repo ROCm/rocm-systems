@@ -46,6 +46,14 @@ def required_names():
         'ConSanRuntimeIntegration.Guards',
         'ConSanRuntime.SymbolBoundary',
         'ConSanHsaPlugin.RuntimeConfigurationRequiresBothPrefixedPaths',
+        'ConSanHsaPlugin.AmdSignalsCompleteAdmittedDispatches',
+        'ConSanHsaPlugin.AmdSignalCreationPreservesArgumentsAndFailedOutputsRemainUntracked',
+        'ConSanHsaPlugin.RejectedAmdDispatchNotifiesItsCompletion',
+        'ConSanHsaPlugin.RejectedBatchesNotifyAmdDispatchAndBarrierCompletions',
+        'ConSanHsaPlugin.AmdBarriersAfterADispatchRejectionReceiveFailureNotifications',
+        'ConSanHsaPlugin.RejectedAmdBarrierCannotOverwritePendingDispatchCompletion',
+        'ConSanHsaPlugin.UntrackedBarriersAfterARejectionRetainTheirSignalsWithoutPublication',
+        'ConSanHsaPlugin.MissingAmdSignalCreationKeepsCoreSignalSupportAvailable',
         'ConSanSimProductionE2E.gfx1250.wave32.assembly.missing-statistics',
         'ConSanContract.TargetWaveFactsRoundTripAndRowsFollowActualGeometry',
         'ConSanAnalysis.Wave64HighLanesAndFullMasksRetainExactLanePairCounts',
@@ -85,6 +93,9 @@ def required_names():
             'batch-barrier-or',
             'late-barrier-and',
             'late-barrier-or',
+            'amd-signals',
+            'amd-late-barrier-and',
+            'amd-late-barrier-or',
         ):
             names.add(f'ConSanSimProductionE2E.{gpu}.wave{wave}.{kind}.{case}')
         for case in (

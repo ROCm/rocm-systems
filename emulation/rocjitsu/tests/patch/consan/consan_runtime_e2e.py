@@ -94,6 +94,8 @@ class Driver:
                 '--threads',
                 str(self.args.threads),
             ]
+            if self.args.amd_signals:
+                argv.append('--amd-signals')
             if self.args.launcher:
                 argv = [
                     str(self.args.launcher),
@@ -424,6 +426,7 @@ class Driver:
 
 def add_target_arguments(parser):
     parser.add_argument('--test-statistics', action='store_true')
+    parser.add_argument('--amd-signals', action='store_true')
     parser.add_argument(
         '--target',
         default='gfx1100',

@@ -282,11 +282,21 @@ if(TARGET consan_hsa_runner)
         )
         set(_case ${scenario})
         set(_entry_options)
+        set(_signal_options)
         if(_case STREQUAL "partial")
             set(_case disjoint)
         elseif(_case STREQUAL "utf8_entry")
             set(_case disjoint)
             set(_entry_options --utf8-entry)
+        elseif(_case STREQUAL "amd-signals")
+            set(_case disjoint)
+            set(_signal_options --amd-signals)
+        elseif(_case STREQUAL "amd-late-barrier-and")
+            set(_case late-barrier-and)
+            set(_signal_options --amd-signals)
+        elseif(_case STREQUAL "amd-late-barrier-or")
+            set(_case late-barrier-or)
+            set(_signal_options --amd-signals)
         endif()
         set(_execution_options)
         if(environment STREQUAL "Sim")
@@ -321,7 +331,7 @@ if(TARGET consan_hsa_runner)
                 --fixtures ${_fixture_dir} --source ${PROJECT_SOURCE_DIR} --root
                 ${RJ_CONSAN_TEST_ARTIFACT_ROOT} --case ${_case} --target ${gpu}
                 --wave-size ${wave} --threads ${threads} --fixture-kind ${kind}
-                ${_entry_options} ${_execution_options}
+                ${_entry_options} ${_signal_options} ${_execution_options}
         )
         set_tests_properties(${_name} PROPERTIES TIMEOUT 120)
         if(environment STREQUAL "Sim")
@@ -412,6 +422,9 @@ if(TARGET consan_hsa_runner)
                         batch-barrier-or
                         late-barrier-and
                         late-barrier-or
+                        amd-signals
+                        amd-late-barrier-and
+                        amd-late-barrier-or
                 )
                     consan_add_target_e2e(${_environment} ${_gpu} ${_wave} ${_kind}
                         ${_scenario} ${_threads} production analysis
