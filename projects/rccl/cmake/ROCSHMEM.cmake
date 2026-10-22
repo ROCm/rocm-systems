@@ -86,6 +86,17 @@ function(add_rocshmem_targets)
         endif()
     endif()
 
+    # Acquiring the rocSHMEM *library* (pre-built find or build-from-source) is
+    # only for ENABLE_ROCSHMEM, which links librocshmem.a into librccl.so. A GIN
+    # build needs nothing from that library: its host code is compiled in from
+    # ROCSHMEM_SOURCE_DIR (set above) and routed through rccl's own shims, and its
+    # device code is header-only (no rocshmem device bitcode). So GIN skips both
+    # paths below — no find_package, no ExternalProject, no librocshmem build.
+    if(NOT ENABLE_ROCSHMEM)
+        set(ROCSHMEM_SOURCE_DIR "${ROCSHMEM_SOURCE_DIR}" CACHE INTERNAL "rocSHMEM source directory")
+        return()
+    endif()
+
     # -----------------------------------------------------------------
     # Path 1: Pre-built rocSHMEM installation (ROCSHMEM_INSTALL_DIR)
     # -----------------------------------------------------------------

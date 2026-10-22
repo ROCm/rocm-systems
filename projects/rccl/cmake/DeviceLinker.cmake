@@ -445,19 +445,20 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
   target_link_libraries(${_dev_target} PRIVATE rccl_device_defs)
 
   add_dependencies(${_dev_target} hipify_all copy_nccl_device_headers)
-  if((ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN) AND TARGET rocshmem_static)
+  if(ENABLE_ROCSHMEM AND TARGET rocshmem_static)
     add_dependencies(${_dev_target} rocshmem_static)
   endif()
-  if(ENABLE_ROCSHMEM_GIN AND TARGET copy_rocshmem_headers)
-    add_dependencies(${_dev_target} copy_rocshmem_headers)
-  endif()
-  # Pass rocshmem device bitcode to per-kernel compiles so rocshmem device
-  # symbols resolve during the per-arch device.elf link step.
-  # ENABLE_ROCSHMEM: rocshmem_n_pes, alltoall_wg, etc.
-  # ENABLE_ROCSHMEM_GIN: QueuePair::put_nbi, atomic_add, etc.
-  if((ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN) AND ROCSHMEM_INSTALL_DIR)
+  # Pass rocshmem device bitcode to per-kernel compiles so the full-rocshmem
+  # collectives (AlltoAllGda etc., gated on ENABLE_ROCSHMEM) resolve rocshmem
+  # device symbols (rocshmem_n_pes, alltoall_wg) at the per-arch device.elf link.
+  # NOT for ENABLE_ROCSHMEM_GIN: its device code is purely header, no bc.
+  if(ENABLE_ROCSHMEM AND ROCSHMEM_INSTALL_DIR)
     set(_rocshmem_bc "${ROCSHMEM_INSTALL_DIR}/lib/librocshmem_device_${DL_GPU_TARGET}.bc")
     target_compile_options(${_dev_target} PRIVATE --rocshmem-bitcode=${_rocshmem_bc})
+  endif()
+
+  if(ENABLE_ROCSHMEM_GIN AND TARGET copy_rocshmem_headers)
+    add_dependencies(${_dev_target} copy_rocshmem_headers)
   endif()
 
   # =========================================================================
@@ -1337,9 +1338,10 @@ add_dependencies(device_linker_build hipify_all copy_nccl_device_headers)
 if(ENABLE_ROCSHMEM_GIN AND TARGET copy_rocshmem_headers)
   add_dependencies(device_linker_build copy_rocshmem_headers)
 endif()
-if((ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN) AND TARGET rocshmem_static)
-  # The fat objects above include GIN device headers, which pull in rocSHMEM
-  # headers installed to ext/rocshmem/include by the ExternalProject.
+if(ENABLE_ROCSHMEM AND TARGET rocshmem_static)
+  # ENABLE_ROCSHMEM links librocshmem.a's device bitcode into the device ELF, so
+  # the library must be built first. GIN needs no rocshmem library (header-only
+  # device code), so no such dependency there.
   add_dependencies(device_linker_build rocshmem_static)
 endif()
 
