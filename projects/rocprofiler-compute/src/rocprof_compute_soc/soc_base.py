@@ -10,7 +10,6 @@ import shutil
 from abc import abstractmethod
 from collections.abc import Iterator
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, Optional
 
 import config
@@ -914,28 +913,3 @@ def iter_analysis_config_metrics(
                     metric_name,
                     metric_expressions(table, metric),
                 )
-
-
-def offline_soc(
-    config_dir: Path, gpu_arch: str, filter_blocks: list[str], membw_analysis: bool
-) -> OmniSoC_Base:
-    """OmniSoC_Base that detects counters from the analysis configs in config_dir
-    without a GPU. With one XCD and one L2 bank, each TCC channel template
-    expands to channel 0 only."""
-    args = SimpleNamespace(
-        config_dir=config_dir,
-        filter_blocks=filter_blocks,
-        membw_analysis=membw_analysis,
-        roof_only=False,
-        set_selected=None,
-    )
-    machine_specs = SimpleNamespace(
-        gpu_arch=gpu_arch,
-        gpu_series=mi_gpu_specs.get_gpu_series(gpu_arch),
-        l2_banks=1,
-        num_xcd=1,
-        rocminfo_lines=None,
-    )
-    soc = OmniSoC_Base(args, machine_specs)
-    soc.set_arch(gpu_arch)
-    return soc

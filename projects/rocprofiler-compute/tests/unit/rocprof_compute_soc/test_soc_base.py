@@ -25,9 +25,13 @@ from rocprof_compute_soc.soc_base import (
     _rebuild_tcc_channel_file_map,
     _trial_counter_file_with_extra,
     flat_counters_in_perfmon_file,
-    offline_soc,
 )
-from utils.utils_common import canonical_config_arch, convert_metric_id_to_panel_info
+from utils.mi_gpu_spec import mi_gpu_specs
+from utils.utils_common import (
+    MEMBW_ANALYSIS_PANEL_ID,
+    canonical_config_arch,
+    convert_metric_id_to_panel_info,
+)
 from utils.utils_counter_defs import extract_counters_and_variables
 
 # =============================================================================
@@ -93,6 +97,39 @@ Panel Config:
   metrics_description:
     SQ_METRIC_NAME_COUNTER: Uses SQ_DESCRIPTION_COUNTER.
 """
+
+# One arch per analysis config directory (gfx115x parts share one).
+CONFIG_ARCHS = sorted(
+    {
+        canonical_config_arch(arch): arch for arch in mi_gpu_specs.get_gpu_series_dict()
+    }.values()
+)
+
+
+def offline_soc(
+    config_dir: Path, gpu_arch: str, filter_blocks: list[str], membw_analysis: bool
+) -> OmniSoC_Base:
+    """OmniSoC_Base that detects counters from the analysis configs in config_dir
+    without a GPU. With one XCD and one L2 bank, each TCC channel template
+    expands to channel 0 only."""
+    args = SimpleNamespace(
+        config_dir=config_dir,
+        filter_blocks=filter_blocks,
+        membw_analysis=membw_analysis,
+        roof_only=False,
+        set_selected=None,
+    )
+    machine_specs = SimpleNamespace(
+        gpu_arch=gpu_arch,
+        gpu_series=mi_gpu_specs.get_gpu_series(gpu_arch),
+        l2_banks=1,
+        num_xcd=1,
+        rocminfo_lines=None,
+    )
+    with patch("rocprof_compute_soc.soc_base.console_debug"):
+        soc = OmniSoC_Base(args, machine_specs)
+    soc.set_arch(gpu_arch)
+    return soc
 
 
 @pytest.fixture
@@ -774,6 +811,28 @@ def test_detect_counters_reads_only_metric_expressions(
     )
     formula_counters |= {"SQ_LEVEL_WAVES_ACCUM", "SQ_BUSY_CYCLES"}
     assert counters == formula_counters
+
+
+@pytest.mark.parametrize("gpu_arch", CONFIG_ARCHS)
+def test_panel_counters_add_up_to_full_profile(gpu_arch: str) -> None:
+    """On the shipped configs, the counters of each panel (-b <panel>) add up to
+    the default profile, and with panel 30 to --membw-analysis."""
+    config_dir = config.analysis_configs_dir
+    counters_by_file: dict[str, set[str]] = {}
+    for path in (config_dir / canonical_config_arch(gpu_arch)).glob("*.yaml"):
+        file_id = path.name.split("_")[0]
+        panel = str(int(file_id) // 100)
+        soc = offline_soc(config_dir, gpu_arch, [panel], membw_analysis=True)
+        counters_by_file[file_id], _ = soc.detect_counters()
+    membw_file = str(MEMBW_ANALYSIS_PANEL_ID)
+
+    default, _ = offline_soc(config_dir, gpu_arch, [], False).detect_counters()
+    membw, _ = offline_soc(config_dir, gpu_arch, [], True).detect_counters()
+
+    assert default == set().union(
+        *(counters for file, counters in counters_by_file.items() if file != membw_file)
+    )
+    assert membw == set().union(*counters_by_file.values())
 
 
 # =============================================================================

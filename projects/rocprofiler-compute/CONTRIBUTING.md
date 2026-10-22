@@ -233,24 +233,8 @@ If your PR modifies **metric configurations** — panel YAMLs under `src/rocprof
 1. Edit the relevant panel YAMLs.
 2. Validate them with `python tools/config_management/master_config_workflow_script.py --validate-only`.
 3. Refresh the hash DB with `python tools/config_management/hash_manager.py --compute-all src/rocprof_compute_soc/analysis_configs` and confirm CI tests pass.
-4. If the change alters which counters are profiled, refresh the [profiled counter snapshot](#profiled-counter-snapshot).
 
 For full details, see the [metric config management README](./tools/config_management/README.md).
-
-## Profiled Counter Snapshot
-
-Profile mode collects the counters that the panel YAML metric equations use.
-[`tools/config_management/.profiled_counters.json`](tools/config_management/.profiled_counters.json)
-lists them per architecture and panel file, so any change to the profiled
-counters shows up in review. When the `profiled-counters-check` pre-commit hook
-lists added or removed counters, check that the change is intended, then
-regenerate the snapshot and commit it:
-
-```bash
-python tools/config_management/counter_snapshot.py --update
-```
-
-Do not edit the snapshot by hand.
 
 ## Memory Chart Layouts
 
