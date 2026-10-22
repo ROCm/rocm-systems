@@ -241,7 +241,7 @@ namespace envvar {
         "auto-sets the tile to use all LDS available per block", 0);
     const var<size_t> threshold("THRESHOLD",
         "TDM transfer size threshold in bytes; transfers smaller than this use "
-        "the normal (non-TDM) copy path instead", 4096);
+        "the normal (non-TDM) copy path instead", 16384);
   }  // namespace tdm
 
   namespace _detail {

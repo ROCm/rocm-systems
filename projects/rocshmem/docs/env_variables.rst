@@ -276,5 +276,5 @@ control the behavior of rocSHMEM.
         | put/get on gfx1250 (requires ``USE_TDM`` build option). Transfers
         | smaller than this use the normal (non-TDM) copy path instead, since
         | TDM's issue latency isn't amortized for small transfers.
-      - ``4096``
+      - ``16384``
       - Size in bytes.
