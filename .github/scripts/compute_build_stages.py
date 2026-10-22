@@ -80,10 +80,12 @@ FULL_BUILD_PROJECTS = {
 # applied only when resolving against the topology, after the full-build check,
 # so the alias target's FULL_BUILD_PROJECTS entry does not apply to them.
 #
-# hrr: projects/clr/hipamd/src/hrr/CMakeLists.txt compiles the capture sources
-# into amdhip64 on every platform and includes projects/hrr/include, so an
-# hrr-only change needs exactly what HIP's artifact (core-hip) needs, Windows
-# included.
+# hrr: the only part of projects/hrr that TheRock builds is projects/hrr/include,
+# which projects/clr/hipamd/src/hrr/CMakeLists.txt compiles into amdhip64 with
+# the capture sources on every platform. So an hrr-only change needs what HIP's
+# artifact (core-hip) needs, Windows included. The playback library
+# (projects/hrr/playback) is not in TheRock's topology and is built by no stage,
+# so building every stage did not cover it either.
 TOPOLOGY_ALIASES = {
     "hrr": "clr",
 }
