@@ -2202,6 +2202,15 @@ compute units. If this geometry disagrees with the component hierarchy, the
 loader warns once per GPU and leaves the shader-array width unknown. Reads
 with unknown or unrepresentable geometry issue an <code>s_getreg_b32</code> warning and
 write zero.</p>
+<p>CDNA3/4 <code>HW_ID</code> exposes resident WAVE_ID/SIMD_ID and backed CU_ID/SE_ID
+fields; SH_ID reads zero as specified by the ISA. CU_ID requires a known,
+single-array geometry with 1–16 CUs per shader engine. SE_ID must fit in
+three bits. <code>XCC_ID</code> reads the XCD index within its SoC after topology
+initialization and requires an index in 0–15. Other HW_ID fields remain
+unsupported. Any HW_ID slice touching an unsupported bit rejects the entire
+read; the default 32-bit HW_ID read therefore still warns and writes zero.
+Unknown or unrepresentable identity fields likewise issue an <code>s_getreg_b32</code>
+warning and write zero.</p>
 <p>Omitted geometry fields inherit defaults selected by <code>gfx_target_version</code>.
 For a smaller topology, set both <code>num_cu_per_sh</code> and
 <code>num_shader_arrays_per_engine</code> to match its CU groups; for example, two arrays
@@ -2285,6 +2294,9 @@ reads. Older checkpoints lack this geometry, so WGP-ID reads after restoring
 them issue an <code>s_getreg_b32</code> warning and write zero; the simulator cannot infer a
 shader-array-local ID from the shader-engine CU count alone. Saving such a restored
 checkpoint again preserves that unknown geometry.</p>
+<p>CDNA3/4 identity reads reuse restored resident slots and CU geometry. XCC_ID
+becomes readable after the restored SoC initializes its topology. Older
+checkpoints without shader-array geometry keep CU_ID unsupported.</p>
 <h2 id="multi-gpu">Multi-GPU<a class="headerlink" href="#multi-gpu" title="Permanent link">&para;</a></h2>
 <p>Multi-GPU configs define multiple SoCs with distinct GPU IDs and
 location IDs. Each GPU gets its own command processor, memory, and
