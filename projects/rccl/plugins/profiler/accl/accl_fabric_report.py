@@ -396,6 +396,7 @@ class Lane:
     share: float = 0.0              # share of the used NICs' bytes on that priority
     other_pause: Dict[int, float] = field(default_factory=dict)  # pause on other priorities
     all_zero: bool = False          # PFC counters exist and never moved, any priority
+    no_pfc: bool = False            # the NICs have PFC counters, but none for this priority
 
 
 def _sum_prio(tels, used, key, p):
@@ -412,13 +413,15 @@ def pick_lane(tels: Dict[Tuple[str, int], Telemetry], used: Dict[Tuple[str, int]
               override: Optional[int] = None) -> Lane:
     nbytes = [sum(_sum_prio(tels, used, k, p)[0] for k in ("prio_tx_bytes", "prio_rx_bytes"))
               for p in range(NUM_PFC_PRIO)]
-    pause, seen = [], False
+    pause, seen, seen_p = [], False, []
     for p in range(NUM_PFC_PRIO):
-        tot = 0.0
+        tot, sp = 0.0, False
         for k in ("pfc_rx_pause_us", "pfc_tx_pause_us", "pfc_rx_frames", "pfc_tx_frames"):
             v, s = _sum_prio(tels, used, k, p)
-            tot, seen = tot + v, seen or s
+            tot, sp = tot + v, sp or s
         pause.append(tot)
+        seen_p.append(sp)
+        seen = seen or sp
     if override is not None:
         prio, source = override, "given"
     elif any(nbytes):
@@ -431,7 +434,8 @@ def pick_lane(tels: Dict[Tuple[str, int], Telemetry], used: Dict[Tuple[str, int]
         return Lane(None, "none")
     share = nbytes[prio] / sum(nbytes) if prio is not None and sum(nbytes) else 0.0
     other = {p: v for p, v in enumerate(pause) if v and p != prio}
-    return Lane(prio, source, share, other, all_zero=seen and not any(pause))
+    return Lane(prio, source, share, other, all_zero=seen and not any(pause),
+                no_pfc=prio is not None and seen and not seen_p[prio])
 
 
 def pause_unit(dev: Device, prio: int) -> Optional[str]:
@@ -812,7 +816,9 @@ def job_summary(results: List[GroupResult], lane: Lane, thr: Optional["Threshold
                                                + reasons[:2])
         else:
             msg = "CLEAN: no fabric signal in any counter"
-            if lane.all_zero:
+            if lane.no_pfc:
+                msg += f" (no PFC on priority {lane.prio}: congestion shows only as loss or CNPs)"
+            elif lane.all_zero:
                 msg += " (PFC counters zero on every priority: no pauses, or PFC is disabled)"
         if lane.source == "most-paused" and (cong or bp):
             msg += f" [priority {lane.prio} unconfirmed, see header]"
@@ -823,6 +829,10 @@ def job_summary(results: List[GroupResult], lane: Lane, thr: Optional["Threshold
 # ============================================================================
 # Text report
 # ============================================================================
+
+def _fmt_secs(sec: float) -> str:
+    return f"{sec * 1000:.0f} ms" if sec < 1 else f"{sec:.1f} s"
+
 
 def _fmt_num(v: float, unit: Optional[str]) -> str:
     return f"{v:.1f}%" if unit == "%" else f"{v:.0f}{unit or ''}"
@@ -881,7 +891,10 @@ def print_report(results: List[GroupResult], lane: Lane, thr: Thresholds, per_ni
     if lane.other_pause:
         print("  Pause on other priorities (does not slow RCCL's): " +
               ", ".join(f"prio {p}" for p in sorted(lane.other_pause)))
-    if lane.all_zero:
+    if lane.no_pfc:
+        print(f"  These NICs have no PFC pause counters for priority {lane.prio}: PFC is not enabled on it,")
+        print("  so RCCL's traffic is lossy. Congestion shows as loss and CNPs, never as pause.")
+    elif lane.all_zero:
         print("  Every PFC counter stayed zero: either nothing paused or PFC is disabled, so a")
         print("  CLEAN result cannot rule out a lossy fabric on its own; check the loss columns.")
     print(f"Thresholds: pause {thr.pause_pct:g}% of wall time (or {thr.pause_fps:g} frames/s where the NIC "
@@ -1195,9 +1208,10 @@ def load(args):
                 slow.append((r, interval))
     if slow:
         lo, hi = min(r for r, _ in slow) / 1e6, max(r for r, _ in slow) / 1e6
-        warnings.append(f"{len(slow)} NIC(s) refresh their counters only every {lo:.2f}-{hi:.2f} s, slower "
+        every = _fmt_secs(hi) if _fmt_secs(lo) == _fmt_secs(hi) else f"{_fmt_secs(lo)} to {_fmt_secs(hi)}"
+        warnings.append(f"{len(slow)} NIC(s) refresh their counters only every {every}, slower "
                         f"than the {slow[0][1] / 1000:.0f} ms sampling, so counts cannot be placed finer than "
-                        f"that. For a firm result run each collective size for at least ~{5 * hi:.0f} s.")
+                        f"that. For a firm result run each collective size for at least ~{_fmt_secs(5 * hi)}.")
     return recs, tels, used, pick_lane(tels, used, args.pfc_prio), warnings
 
 
