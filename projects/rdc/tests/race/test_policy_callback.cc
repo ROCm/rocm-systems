@@ -117,10 +117,13 @@ int callback(rdc_policy_callback_response_t*) {
 
 }  // namespace
 
-// Fakes for the calls RdcPolicyImpl.cc makes to reset a GPU; no policy here resets one.
+// Fakes for the calls RdcPolicyImpl.cc makes to reset a GPU; no policy here resets one. The
+// handle lookup is weak: another race test in this binary that needs a working lookup defines
+// it, and its definition is then the one linked.
 namespace amd {
 namespace rdc {
-amdsmi_status_t get_processor_handle_from_id(uint32_t, amdsmi_processor_handle*) {
+__attribute__((weak)) amdsmi_status_t get_processor_handle_from_id(uint32_t,
+                                                                   amdsmi_processor_handle*) {
   return AMDSMI_STATUS_NOT_SUPPORTED;
 }
 }  // namespace rdc
