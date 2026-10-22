@@ -122,6 +122,11 @@ WDDMDevice::WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_i
 
 WDDMDevice::~WDDMDevice() {
   if (init_status_ == kDeviceSuccess ) {
+#if defined(__linux__)
+    if (irq_barrier_event_id_ != 0) {
+      DestroyEvent(irq_barrier_event_id_, irq_barrier_efd_, irq_barrier_syncobj_);
+    }
+#endif
     DestroyPagingQueue();
     SetPowerOptimization(true);
     DestroyDevice();
@@ -760,6 +765,21 @@ bool WDDMDevice::DestroyEvent(uint32_t event_id, int efd, D3DKMT_HANDLE syncobj)
   // Recycle the id only once KMD has dropped the registration.
   FreeEventIdLocked(id);
   return ret;
+}
+
+// ================================================================================================
+bool WDDMDevice::GetIrqBarrierEvent(uint64_t* mailbox, uint32_t* event_id) {
+  std::lock_guard<std::mutex> lock(irq_barrier_lock_);
+  if ((irq_barrier_event_id_ == 0) &&
+      !CreateEvent(&irq_barrier_efd_, HSA_EVENTTYPE_SIGNAL, &irq_barrier_event_id_,
+                   &irq_barrier_mailbox_, &irq_barrier_syncobj_)) {
+    pr_err("IRQ barrier event creation failed\n");
+    return false;
+  }
+
+  *mailbox = irq_barrier_mailbox_;
+  *event_id = irq_barrier_event_id_;
+  return true;
 }
 #endif
 

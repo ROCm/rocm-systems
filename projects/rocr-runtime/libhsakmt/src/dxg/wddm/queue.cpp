@@ -359,6 +359,20 @@ ComputeQueue::ComputeQueue(WDDMDevice* device, void* ring, uint64_t ring_size,
   doorbell_ptr_ = reinterpret_cast<uint64_t*>(doorbell_mem->GpuAddress());
   *doorbell_ptr_ = 0;
 
+#if defined(__linux__)
+  uint64_t mailbox = 0;
+  uint32_t irq_event_id = 0;
+  if (native_aql_ && device->GetIrqBarrierEvent(&mailbox, &irq_event_id)) {
+    // The doorbell uses only its first 8 bytes, so the barrier signal shares its page.
+    irq_barrier_signal_ = reinterpret_cast<amd_signal_t*>(
+        reinterpret_cast<char*>(doorbell_ptr_) + kIrqBarrierSignalOffset);
+    memset(irq_barrier_signal_, 0, sizeof(*irq_barrier_signal_));
+    irq_barrier_signal_->kind = AMD_SIGNAL_KIND_USER;
+    irq_barrier_signal_->event_mailbox_ptr = mailbox;
+    irq_barrier_signal_->event_id = irq_event_id;
+  }
+#endif
+
   // Native AQL submission bypasses the PM4 translation thread.
   if (!native_aql_) {
     aql_to_pm4_thread_ = std::thread(AqlToPm4Thread, this);
@@ -692,7 +706,75 @@ hsa_status_t ComputeQueue::Init(void) {
   return ret;
 }
 
-hsa_status_t ComputeQueue::Fini(void) { return use_hws ? HwsFini() : SwsFini(); }
+hsa_status_t ComputeQueue::Fini(void) {
+#if defined(__linux__)
+  if (native_aql_) {
+    // KMD advances the HwQueue progress fence only on an EOP interrupt, and DestroyHwQueue
+    // waits for that fence, so end with a barrier whose completion signal raises one.
+    SubmitIrqBarrier();
+    return HwsFini();
+  }
+#endif
+  return use_hws ? HwsFini() : SwsFini();
+}
+
+#if defined(__linux__)
+void ComputeQueue::SubmitIrqBarrier(void) {
+  amd_signal_t* signal = irq_barrier_signal_;
+  if (signal == nullptr) return;
+
+  rocr::atomic::Store(&signal->value, int64_t{1}, std::memory_order_release);
+  if (!SubmitIrqBarrierPacket(reinterpret_cast<uint64_t>(signal))) return;
+
+  constexpr auto kSpinTime = std::chrono::microseconds(100);
+  constexpr auto kTimeout = std::chrono::milliseconds(6000);
+  constexpr auto kMaxSleep = std::chrono::milliseconds(1);
+  const auto start = std::chrono::steady_clock::now();
+  const auto spin_end = start + kSpinTime;
+  const auto deadline = start + kTimeout;
+  std::chrono::microseconds sleep_time(100);
+  while (rocr::atomic::Load(&signal->value, std::memory_order_acquire) != 0) {
+    const auto now = std::chrono::steady_clock::now();
+    if (now < spin_end) continue;
+    if (now >= deadline) {
+      pr_err("IRQ barrier timed out, wptr=%" PRIx64 " rptr=%" PRIx64 "\n",
+             ring_wptr->load(), ring_rptr->load());
+      break;
+    }
+    std::this_thread::sleep_for(sleep_time);
+    sleep_time = std::min<std::chrono::microseconds>(sleep_time * 2, kMaxSleep);
+  }
+}
+
+bool ComputeQueue::SubmitIrqBarrierPacket(uint64_t completion_signal) {
+  uint64_t index = ring_wptr->load(std::memory_order_acquire);
+  if ((index - ring_rptr->load(std::memory_order_acquire)) >= ring_size) {
+    pr_err("no ring slot for IRQ barrier, wptr=%" PRIx64 "\n", index);
+    return false;
+  }
+  if (!ring_wptr->compare_exchange_strong(index, index + 1, std::memory_order_acq_rel)) {
+    pr_err("ring wptr moved during queue destroy, wptr=%" PRIx64 "\n", index);
+    return false;
+  }
+
+  auto* packet = reinterpret_cast<hsa_barrier_and_packet_t*>(
+      static_cast<char*>(ring) + (index % ring_size) * sizeof(hsa_barrier_and_packet_t));
+  // Leave the header for last so the CP never sees a half-written packet.
+  memset(reinterpret_cast<char*>(packet) + sizeof(uint32_t), 0,
+         sizeof(*packet) - sizeof(uint32_t));
+  packet->completion_signal.handle = completion_signal;
+
+  const uint32_t header =
+      (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE) |
+      (1 << HSA_PACKET_HEADER_BARRIER) |
+      (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
+      (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+  rocr::atomic::Store(reinterpret_cast<uint32_t*>(packet), header, std::memory_order_release);
+
+  RingDoorbell(index);
+  return true;
+}
+#endif
 
 hsa_status_t ComputeQueue::PreSubmit(void) {
   if (!device->WaitPagingFence(this)) return HSA_STATUS_ERROR;

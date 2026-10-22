@@ -200,6 +200,10 @@ public:
   bool CreateEvent(int *efd, uint32_t type, uint32_t *event_id, uint64_t *mailbox,
                    D3DKMT_HANDLE *syncobj);
   bool DestroyEvent(uint32_t event_id, int efd, D3DKMT_HANDLE syncobj);
+
+  // Lazily creates the KMD event shared by every queue of this process for destroy-time
+  // interrupt barriers.
+  bool GetIrqBarrierEvent(uint64_t *mailbox, uint32_t *event_id);
 #endif
 
   bool CreateQueue(WDDMQueue *queue, uint64_t debugger_data = 0);
@@ -346,6 +350,15 @@ private:
 
   //! Guards alloced_events_, base_mailbox_va_ and event create/register/unregister.
   mutable std::mutex event_lock_;
+
+#if defined(__linux__)
+  //! Guards lazy creation of the irq_barrier_* event fields.
+  std::mutex irq_barrier_lock_;
+  int irq_barrier_efd_ = -1;
+  D3DKMT_HANDLE irq_barrier_syncobj_ = 0;
+  uint32_t irq_barrier_event_id_ = 0;
+  uint64_t irq_barrier_mailbox_ = 0;
+#endif
 };
 
 NTSTATUS WDDMCreateDevices(std::vector<WDDMDevice *> &devices);
