@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Run required ConSan coverage, rejecting absent registrations and skipped cases."""
+"""Check physical registrations and run required ConSan coverage without skips."""
 
 import argparse
 import json
@@ -85,6 +85,70 @@ def validate_selected(tests):
         )
 
 
+def physical_names():
+    names = set()
+    for gpu, wave in MODES:
+        kind = 'assembly' if gpu == 'gfx1250' else 'hip'
+        prefix = f'{gpu}.wave{wave}'
+        for case in ('race', 'disjoint', 'read_read', 'partial'):
+            names.add(f'ConSanPhysicalE2E.{prefix}.{kind}.{case}')
+        names.add(f'ConSanPhysicalE2E.{prefix}.assembly.high_lane')
+        for case in (
+            'disjoint',
+            'batch-barrier-and',
+            'batch-barrier-or',
+            'late-barrier-and',
+            'late-barrier-or',
+        ):
+            names.add(f'ConSanPhysicalProductionE2E.{prefix}.{kind}.{case}')
+    return names
+
+
+def validate_physical_registrations(tests):
+    available = {test['name']: test for test in tests}
+    expected = physical_names()
+    missing = expected - available.keys()
+    if missing:
+        raise ValueError(
+            'Physical ConSan registrations missing:\n' + '\n'.join(sorted(missing))
+        )
+    for name in sorted(expected):
+        _, gpu, wave, kind, scenario = name.split('.')
+        wave_size = int(wave.removeprefix('wave'))
+        test = available[name]
+        properties = {
+            item['name']: item['value'] for item in test.get('properties', [])
+        }
+        labels = properties.get('LABELS', [])
+        if (
+            'physical-gpu' not in labels
+            or 'simulator' in labels
+            or properties.get('DISABLED', False)
+            or properties.get('SKIP_RETURN_CODE') != 77
+            or properties.get('RESOURCE_LOCK') != [f'consan-{gpu}']
+        ):
+            raise ValueError(f'{name}: invalid physical execution properties')
+        command = test.get('command', [])
+        if '--launcher' in command or '--require-agent' in command:
+            raise ValueError(f'{name}: physical test requests simulator execution')
+        options = {
+            '--target': gpu,
+            '--wave-size': str(wave_size),
+            '--fixture-kind': kind,
+            '--threads': str(
+                3 * wave_size + 1 if scenario == 'partial' else 2 * wave_size
+            ),
+            '--case': 'disjoint' if scenario == 'partial' else scenario,
+        }
+        for option, value in options.items():
+            if (
+                option not in command
+                or command.index(option) + 1 >= len(command)
+                or command[command.index(option) + 1] != value
+            ):
+                raise ValueError(f'{name}: expected {option} {value}')
+
+
 def validate_results(root):
     cases = root.findall('.//testcase')
     missing = required_names() - {case.attrib['name'] for case in cases}
@@ -104,6 +168,21 @@ def main():
     parser.add_argument('--jobs', type=int, default=4)
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
+    registrations = subprocess.run(
+        [
+            'ctest',
+            '--test-dir',
+            str(args.build),
+            '-R',
+            '^ConSan',
+            '--show-only=json-v1',
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    (args.output / 'registrations.json').write_text(registrations.stdout)
+    validate_physical_registrations(json.loads(registrations.stdout)['tests'])
     selection = [
         'ctest',
         '--test-dir',
