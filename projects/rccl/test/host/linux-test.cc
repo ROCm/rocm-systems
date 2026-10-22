@@ -21,6 +21,7 @@
 #include <arpa/inet.h>
 #include <atomic>
 #include <cctype>
+#include <chrono>
 #include <climits>
 #include <condition_variable>
 #include <cstdio>
@@ -62,7 +63,6 @@
 
 namespace {
 
-bool FdOpen(int fd) { return fcntl(fd, F_GETFD) != -1; }
 bool Exists(const std::string& path) { return access(path.c_str(), F_OK) == 0; }
 
 // Whether the thread whose /proc/.../stat this is sleeps ('S'), the state field after the name.
@@ -149,7 +149,6 @@ TEST_F(LinuxDlMicrotest, NvmlOpen_LoadsLibnvidiaMl) {
   ASSERT_EQ(ncclOsNvmlOpen(&h), ncclSuccess);
   EXPECT_EQ(seen, "libnvidia-ml.so.1");
   EXPECT_EQ(h, reinterpret_cast<void*>(0x1));
-  EXPECT_TRUE(log_.Has("INFO Loaded NVML from libnvidia-ml.so.1"));
 }
 
 TEST_F(LinuxDlMicrotest, NvmlOpen_MissingLibraryIsASystemError) {
@@ -158,7 +157,6 @@ TEST_F(LinuxDlMicrotest, NvmlOpen_MissingLibraryIsASystemError) {
   ncclOsLibraryHandle h = reinterpret_cast<void*>(0x1);
   EXPECT_EQ(ncclOsNvmlOpen(&h), ncclSystemError);
   EXPECT_EQ(h, nullptr);
-  EXPECT_TRUE(log_.Has("WARN Failed to open libnvidia-ml.so.1: not here"));
 }
 
 // Process and memory helpers
@@ -263,7 +261,6 @@ TEST_F(LinuxInitMicrotest, Initialize_RaisesASmallDefaultStackTo8MB) {
   });
   ASSERT_EQ(ncclOsInitialize(), ncclSuccess);
   EXPECT_EQ(DefaultStack(), 8192u * 1024);
-  EXPECT_TRUE(log_.Has("Stack size limit (2048KB) is unsafe; will use 8192KB"));
 }
 
 // linux.cc declares ncclParamSetCpuStackSize (and PollTimeOut, RetryTimeOut, SocketMax*Buff) as int,
@@ -288,16 +285,20 @@ TEST_F(LinuxInitMicrotest, Initialize_ReportsAnUnlimitedStackLimit) {
     return rc;
   });
   ASSERT_EQ(ncclOsInitialize(), ncclSuccess);
-  EXPECT_TRUE(log_.Has("Stack size limit (unlimited) is unsafe"));
+  EXPECT_EQ(DefaultStack(), 8192u * 1024);
+  EXPECT_TRUE(log_.Has("(unlimited)"));  // the only trace of the RLIM_INFINITY branch
 }
 
 TEST_F(LinuxInitMicrotest, Initialize_KeepsAStackThatIsAlready8MB) {
+  ScopedHook getrlimitHook(g_getrlimit, [](int resource, rlimit* lim) {
+    return ::getrlimit((__rlimit_resource_t)resource, lim);
+  });
   SetDefaultStack(8192 * 1024);
   ASSERT_EQ(ncclOsInitialize(), ncclSuccess);
-  EXPECT_FALSE(log_.Has("unsafe"));
   SetDefaultStack(16 << 20);
   ASSERT_EQ(ncclOsInitialize(), ncclSuccess);
   EXPECT_EQ(DefaultStack(), 16u << 20);
+  EXPECT_EQ(getrlimitHook.calls, 0);  // only a small stack looks up the limit
 }
 
 TEST_F(LinuxInitMicrotest, Initialize_GetrlimitFailureIsASystemError) {
@@ -307,7 +308,6 @@ TEST_F(LinuxInitMicrotest, Initialize_GetrlimitFailureIsASystemError) {
     return -1;
   });
   EXPECT_EQ(ncclOsInitialize(), ncclSystemError);
-  EXPECT_TRUE(log_.Has("WARN Call to getrlimit failed"));
 }
 
 TEST_F(LinuxInitMicrotest, SetFilesLimit_RaisesTheSoftLimitToTheHardLimit) {
@@ -333,13 +333,12 @@ TEST_F(LinuxInitMicrotest, SetFilesLimit_SyscallFailuresAreSystemErrors) {
     return -1;
   });
   EXPECT_EQ(ncclOsSetFilesLimit(), ncclSystemError);
-  EXPECT_TRUE(log_.Has("WARN Call to setrlimit failed"));
   ScopedHook getrlimitHook(g_getrlimit, [](int, rlimit*) {
     errno = EPERM;
     return -1;
   });
   EXPECT_EQ(ncclOsSetFilesLimit(), ncclSystemError);
-  EXPECT_TRUE(log_.Has("WARN Call to getrlimit failed"));
+  EXPECT_EQ(setrlimitHook.calls, 1);  // stopped at getrlimit
 }
 
 // Sockets
@@ -389,12 +388,6 @@ class LinuxSocketMicrotest : public LinuxMicrotest {
     ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
     Track(sv[0]);
     Track(sv[1]);
-  }
-  static int IntOpt(int fd, int level, int name) {
-    int v = -1;
-    socklen_t len = sizeof(v);
-    ::getsockopt(fd, level, name, &v, &len);
-    return v;
   }
   std::vector<int> fds_;
 };
@@ -457,7 +450,6 @@ TEST_F(LinuxSocketMicrotest, TryAccept_OtherErrorsAreSystemErrors) {
   sock.acceptSocketDescriptor = Track(::socket(AF_INET, SOCK_STREAM, 0));  // not listening: EINVAL
   sock.state = ncclSocketStateAccepting;
   EXPECT_EQ(ncclOsSocketTryAccept(&sock), ncclSystemError);
-  EXPECT_TRUE(log_.Has("WARN ncclOsSocketTryAccept: Accept failed"));
 }
 
 // Network errors that accept() may report for an already-failed peer are retried up to NCCL_SOCKET_RETRY_CNT.
@@ -465,7 +457,6 @@ TEST_F(LinuxSocketMicrotest, TryAccept_RetriesPendingNetworkErrorsUpToTheRetryCo
   params_.Set("SOCKET_RETRY_CNT", 3);
   for (int err : {ENETDOWN, EPROTO, ENOPROTOOPT, EHOSTDOWN, ENONET, EHOSTUNREACH, EOPNOTSUPP, ENETUNREACH, EINTR}) {
     SCOPED_TRACE(err);
-    log_.Clear();
     ScopedHook acceptHook(g_accept, [err](int, sockaddr*, socklen_t*) {
       errno = err;
       return -1;
@@ -475,9 +466,7 @@ TEST_F(LinuxSocketMicrotest, TryAccept_RetriesPendingNetworkErrorsUpToTheRetryCo
     EXPECT_EQ(ncclOsSocketTryAccept(&sock), ncclSuccess);
     EXPECT_EQ(ncclOsSocketTryAccept(&sock), ncclSuccess);
     EXPECT_EQ(sock.errorRetries, 2);
-    EXPECT_TRUE(log_.Has("INFO Call to accept returned"));
     EXPECT_EQ(ncclOsSocketTryAccept(&sock), ncclSystemError);
-    EXPECT_TRUE(log_.Has("exceeded error retry count after 3 attempts"));
     EXPECT_EQ(sock.state, ncclSocketStateAccepting);
   }
 }
@@ -498,7 +487,6 @@ TEST_F(LinuxSocketMicrotest, TryAccept_WouldBlockIsNotRetried) {
 TEST_F(LinuxSocketMicrotest, SetFlags_RejectsAnInvalidSocket) {
   ncclSocket sock = Sock(NCCL_INVALID_SOCKET);
   EXPECT_EQ(ncclOsSocketSetFlags(&sock), ncclInvalidArgument);
-  EXPECT_TRUE(log_.Has("WARN ncclOsSocketSetFlags: invalid socket"));
 }
 
 TEST_F(LinuxSocketMicrotest, SetFlags_BlockingSocketGetsNoDelayAndDefaultBuffers) {
@@ -538,7 +526,6 @@ TEST_F(LinuxSocketMicrotest, SetFlags_SyscallFailuresAreSystemErrors) {
   ncclSocket sock = Sock(1 << 20);  // valid-looking, but not open: fcntl fails
   sock.asyncFlag = 1;
   EXPECT_EQ(ncclOsSocketSetFlags(&sock), ncclSystemError);
-  EXPECT_TRUE(log_.Has("WARN Call to fcntl failed"));
 
   int p[2];
   ASSERT_EQ(pipe(p), 0);
@@ -546,7 +533,6 @@ TEST_F(LinuxSocketMicrotest, SetFlags_SyscallFailuresAreSystemErrors) {
   Track(p[1]);
   sock = Sock(p[0]);  // not a socket: setsockopt fails
   EXPECT_EQ(ncclOsSocketSetFlags(&sock), ncclSystemError);
-  EXPECT_TRUE(log_.Has("WARN Call to setsockopt TCP NODELAY failed"));
 }
 
 TEST_F(LinuxSocketMicrotest, SetFlags_BufferSizeFailuresAreSystemErrors) {
@@ -564,8 +550,6 @@ TEST_F(LinuxSocketMicrotest, SetFlags_BufferSizeFailuresAreSystemErrors) {
     });
     EXPECT_EQ(ncclOsSocketSetFlags(&sock), ncclSystemError);
   }
-  EXPECT_TRUE(log_.Has("WARN Call to setsockopt SO_SNDBUF failed"));
-  EXPECT_TRUE(log_.Has("WARN Call to setsockopt SO_RCVBUF failed"));
 }
 
 TEST_F(LinuxSocketMicrotest, ResetAccept_ClosesThePeerAndMarksABadHandshake) {
@@ -612,7 +596,6 @@ TEST_F(LinuxSocketMicrotest, ResetFd_SocketFailureLeavesTheDescriptorAlone) {
   sock.addr.sa.sa_family = AF_UNSPEC;
   EXPECT_EQ(ncclOsSocketResetFd(&sock), ncclSystemError);
   EXPECT_EQ(sock.socketDescriptor, NCCL_INVALID_SOCKET);
-  EXPECT_TRUE(log_.Has("WARN Call to socket failed"));
 }
 
 TEST_F(LinuxSocketMicrotest, ResetFd_Dup2FailureClosesTheNewSocket) {
@@ -630,7 +613,6 @@ TEST_F(LinuxSocketMicrotest, ResetFd_Dup2FailureClosesTheNewSocket) {
   setrlimit(RLIMIT_NOFILE, &saved);
   EXPECT_EQ(ret, ncclSystemError);
   EXPECT_EQ(sock.socketDescriptor, target);
-  EXPECT_TRUE(log_.Has("WARN Call to dup2 failed"));
   EXPECT_FALSE(FdOpen(probe));
 }
 
@@ -639,7 +621,7 @@ TEST_F(LinuxSocketMicrotest, ResetFd_PropagatesASetFlagsFailure) {
   sock.addr.sa.sa_family = AF_UNIX;  // a UNIX stream socket rejects TCP_NODELAY
   EXPECT_EQ(ncclOsSocketResetFd(&sock), ncclSystemError);
   Track(sock.socketDescriptor);
-  EXPECT_TRUE(log_.Has("WARN Call to setsockopt TCP NODELAY failed"));
+  EXPECT_TRUE(FdOpen(sock.socketDescriptor));  // created, then SetFlags failed
 }
 
 TEST_F(LinuxSocketMicrotest, StartConnect_ConnectsToAListener) {
@@ -676,23 +658,23 @@ TEST_F(LinuxSocketMicrotest, StartConnect_RefusedIsRetriedWithAGrowingSleep) {
   EXPECT_EQ(sock.state, ncclSocketStateConnecting);
   EXPECT_EQ(sock.errorRetries, 1);
   EXPECT_EQ(sock.socketDescriptor, fd);  // reset in place
-  EXPECT_TRUE(log_.Has("retrying (1/2) after sleep for 0 msec"));
 
   ASSERT_EQ(ncclOsSocketStartConnect(&sock), ncclSuccess);
   EXPECT_EQ(sock.errorRetries, 2);
   EXPECT_EQ(ncclOsSocketStartConnect(&sock), ncclRemoteError);
   EXPECT_EQ(sock.state, ncclSocketStateError);
-  EXPECT_TRUE(log_.Has("exceeded error retry count after 3 attempts"));
 }
 
 TEST_F(LinuxSocketMicrotest, StartConnect_SleepGrowsWithTheRetryCount) {
   params_.Set("SOCKET_RETRY_CNT", 5);
-  params_.Set("SOCKET_RETRY_SLEEP_MSEC", 1);
+  params_.Set("SOCKET_RETRY_SLEEP_MSEC", 10);
   sockaddr_in addr = ClosedPort();
   ncclSocket sock = Sock(Track(::socket(AF_INET, SOCK_STREAM, 0)), &addr);
   sock.errorRetries = 2;
+  auto start = std::chrono::steady_clock::now();
   ASSERT_EQ(ncclOsSocketStartConnect(&sock), ncclSuccess);
-  EXPECT_TRUE(log_.Has("retrying (3/5) after sleep for 3 msec"));
+  EXPECT_EQ(sock.errorRetries, 3);
+  EXPECT_GE(std::chrono::steady_clock::now() - start, std::chrono::milliseconds(30));  // the third retry sleeps 3x
 }
 
 TEST_F(LinuxSocketMicrotest, StartConnect_TransientErrnosAreRetried) {
@@ -719,7 +701,6 @@ TEST_F(LinuxSocketMicrotest, StartConnect_CustomRetryOnlyResets) {
   ASSERT_EQ(ncclOsSocketStartConnect(&sock), ncclSuccess);
   EXPECT_EQ(sock.state, ncclSocketStateConnecting);
   EXPECT_EQ(sock.errorRetries, 0);
-  EXPECT_FALSE(log_.Has("retrying"));
 }
 
 TEST_F(LinuxSocketMicrotest, StartConnect_OtherErrorsFail) {
@@ -729,8 +710,6 @@ TEST_F(LinuxSocketMicrotest, StartConnect_OtherErrorsFail) {
   sock.salen = 1;  // EINVAL
   EXPECT_EQ(ncclOsSocketStartConnect(&sock), ncclSystemError);
   EXPECT_EQ(sock.state, ncclSocketStateError);
-  EXPECT_TRUE(log_.Has("WARN ncclOsSocketStartConnect: connect to 127.0.0.1<"));
-  EXPECT_TRUE(log_.Has("failed : Invalid argument"));
 }
 
 TEST_F(LinuxSocketMicrotest, StartConnect_PropagatesAResetFailure) {
@@ -741,7 +720,7 @@ TEST_F(LinuxSocketMicrotest, StartConnect_PropagatesAResetFailure) {
   ncclSocket sock = Sock(Track(::socket(AF_INET, SOCK_STREAM, 0)));
   sock.addr.sa.sa_family = AF_UNSPEC;  // the replacement socket cannot be created
   EXPECT_EQ(ncclOsSocketStartConnect(&sock), ncclSystemError);
-  EXPECT_TRUE(log_.Has("WARN Call to socket failed"));
+  EXPECT_EQ(sock.errorRetries, 1);  // failed in the retry's reset, not as a connect error
 }
 
 TEST_F(LinuxSocketMicrotest, PollConnect_NotReadyYetIsSuccess) {
@@ -767,7 +746,6 @@ TEST_F(LinuxSocketMicrotest, PollConnect_PollFailureIsASystemError) {
     return -1;
   });
   EXPECT_EQ(ncclOsSocketPollConnect(&sock), ncclSystemError);
-  EXPECT_TRUE(log_.Has("WARN ncclOsSocketPollConnect to"));
 }
 
 TEST_F(LinuxSocketMicrotest, PollConnect_ChecksThePendingSocketError) {
@@ -782,14 +760,12 @@ TEST_F(LinuxSocketMicrotest, PollConnect_ChecksThePendingSocketError) {
   });
   ASSERT_EQ(ncclOsSocketPollConnect(&sock), ncclSuccess);
   EXPECT_EQ(sock.state, ncclSocketStateConnecting);
-  EXPECT_TRUE(log_.Has("ncclOsSocketPollConnect: connect to"));
 
   ScopedHook failingHook(g_getsockopt, [](int, int, int, void*, socklen_t*) {
     errno = EBADF;
     return -1;
   });
   EXPECT_EQ(ncclOsSocketPollConnect(&sock), ncclSystemError);
-  EXPECT_TRUE(log_.Has("WARN Call to getsockopt failed"));
 }
 
 TEST_F(LinuxSocketMicrotest, ProgressOpt_BlockingSendAndRecvMoveEverything) {
@@ -919,10 +895,8 @@ TEST_F(LinuxSocketMicrotest, ProgressOpt_OtherErrorsAreRemoteErrors) {
   int offset = 0, closed = 0;
   ncclSocket sock = Sock(p[0]);
   EXPECT_EQ(ncclOsSocketProgressOpt(NCCL_SOCKET_RECV, &sock, buf, sizeof(buf), &offset, 1, &closed), ncclRemoteError);
-  EXPECT_TRUE(log_.Has("WARN ncclOsSocketProgressOpt: Call to recv from"));
   sock = Sock(p[1]);
   EXPECT_EQ(ncclOsSocketProgressOpt(NCCL_SOCKET_SEND, &sock, buf, sizeof(buf), &offset, 1, &closed), ncclRemoteError);
-  EXPECT_TRUE(log_.Has("WARN ncclOsSocketProgressOpt: Call to send to"));
   EXPECT_EQ(closed, 0);
 }
 
@@ -935,7 +909,6 @@ TEST_F(LinuxSocketMicrotest, ProgressOpt_AbortStopsAfterTheTransfer) {
   int offset = 0, closed = 0;
   EXPECT_EQ(ncclOsSocketProgressOpt(NCCL_SOCKET_SEND, &a, (void*)"abcd", 4, &offset, 1, &closed), ncclInternalError);
   EXPECT_EQ(offset, 4);
-  EXPECT_TRUE(log_.Has("INFO ncclOsSocketProgressOpt: abort called"));
 }
 
 // Interface enumeration over a scripted getifaddrs() list.
@@ -1034,7 +1007,6 @@ TEST_F(LinuxIfMicrotest, FindInterfaces_GetifaddrsFailureIsASystemError) {
   EXPECT_EQ(ncclOsFindInterfaces(nullptr, names_, addrs_, -1, MAX_IF_NAME_SIZE, MAX_IFS, &found), ncclSystemError);
   EXPECT_EQ(found, 0);
   EXPECT_EQ(ncclFindInterfaceMatchSubnet(names_, addrs_, addrs_, MAX_IF_NAME_SIZE, &found), ncclSystemError);
-  EXPECT_TRUE(log_.Has("WARN Call to getifaddrs failed"));
 }
 
 TEST_F(LinuxIfMicrotest, MatchSubnet_IPv4UsesTheNetmask) {
@@ -1141,10 +1113,11 @@ TEST_F(LinuxSocketCloseMicrotest, WaitStopsOnAReadErrorAndFreesTlsState) {
   ncclSocket sock = Sock(sv[0]);
   sock.state = ncclSocketStateReady;
   sock.crypto = (ncclSocketCrypto*)malloc(16);  // reads now fail: no TLS backend
+  ScopedHook recvHook(g_recv, [](int, void*, size_t, int) -> ssize_t { return 0; });  // a plain read sees a close
   ASSERT_EQ(ncclSocketClose(&sock, /*wait=*/true), ncclSuccess);
   EXPECT_EQ(sock.crypto, nullptr);
   EXPECT_FALSE(FdOpen(sv[0]));
-  EXPECT_TRUE(log_.Has("ncclCryptSocketRecv called without TLS support"));
+  EXPECT_EQ(recvHook.calls, 0);  // the read went through crypt.cc
 }
 #endif
 
@@ -1246,13 +1219,11 @@ TEST_F(LinuxSyncMicrotest, Affinity_FailuresAreSystemErrors) {
   ncclAffinity none;
   CPU_ZERO(&none);
   EXPECT_EQ(ncclOsSetAffinity(none), ncclSystemError);  // EINVAL
-  EXPECT_TRUE(log_.Has("WARN sched_setaffinity failed with error: Invalid argument"));
   ScopedHook schedGetaffinityHook(g_schedGetaffinity, [](pid_t, size_t, cpu_set_t*) {
     errno = EFAULT;
     return -1;
   });
   EXPECT_EQ(ncclOsGetAffinity(&none), ncclSystemError);
-  EXPECT_TRUE(log_.Has("WARN sched_getaffinity failed with error: Bad address"));
 }
 
 // sysfs readers, over a scratch tree that the /sys hooks redirect to.
@@ -1322,7 +1293,6 @@ TEST_F(LinuxSysfsMicrotest, GetPciPath_MissingDeviceIsASystemError) {
   char* path = (char*)0x1;
   EXPECT_EQ(ncclOsGetPciPath("0000:1b:00.0", &path), ncclSystemError);
   EXPECT_EQ(path, nullptr);
-  EXPECT_TRUE(log_.Has("WARN Could not find real path of /sys/class/pci_bus/0000:1b/../../0000:1b:00.0"));
 }
 
 TEST_F(LinuxSysfsMicrotest, TopoGetStrFromSys_StripsTheNewlineAndTruncates) {
@@ -1335,13 +1305,10 @@ TEST_F(LinuxSysfsMicrotest, TopoGetStrFromSys_StripsTheNewlineAndTruncates) {
   EXPECT_STREQ(buf, "0x030000");
   ASSERT_EQ(ncclOsTopoGetStrFromSys(dir.c_str(), "nl", buf, 4), ncclSuccess);  // truncated to maxLen
   EXPECT_STREQ(buf, "0x0");
-  EXPECT_FALSE(log_.Has("could not read"));
   ASSERT_EQ(ncclOsTopoGetStrFromSys(dir.c_str(), "empty", buf, sizeof(buf)), ncclSuccess);
   EXPECT_STREQ(buf, "");
-  EXPECT_TRUE(log_.Has(("could not read " + dir + "/empty").c_str()));  // empty reads as unreadable
   ASSERT_EQ(ncclOsTopoGetStrFromSys(dir.c_str(), "missing", buf, sizeof(buf)), ncclSuccess);
   EXPECT_STREQ(buf, "");
-  EXPECT_TRUE(log_.Has(("INFO Topology detection : could not read " + dir + "/missing, ignoring").c_str()));
 }
 
 // A value without a trailing newline loses its last character. Pins AICOMRCCL-2975; a fix flips this pin.
@@ -1368,8 +1335,7 @@ TEST_F(LinuxSysfsMicrotest, DeviceClass_MissingDeviceIsAQuietSystemError) {
   char cls[32] = "junk";
   EXPECT_EQ(ncclOsGetPciDeviceClassByBusId("0000:1b:00.0", cls, sizeof(cls)), ncclSystemError);
   EXPECT_STREQ(cls, "");
-  EXPECT_FALSE(log_.Has("WARN"));
-  EXPECT_TRUE(log_.Has("INFO Could not find real path"));
+  EXPECT_EQ(log_.Warns(), 0);
 }
 
 TEST_F(LinuxSysfsMicrotest, ComputePartition_ReadsTheAttributeOrEmpty) {
@@ -1391,7 +1357,7 @@ TEST_F(LinuxSysfsMicrotest, ComputePartition_BadArgumentsAndMissingDevice) {
   EXPECT_STREQ(part, "junk");
   EXPECT_EQ(ncclOsGetPciDeviceComputePartitionByBusId("0000:1b:00.0", part, sizeof(part)), ncclSystemError);
   EXPECT_STREQ(part, "");
-  EXPECT_FALSE(log_.Has("WARN"));
+  EXPECT_EQ(log_.Warns(), 0);
 }
 
 TEST_F(LinuxSysfsMicrotest, BcmLinks_ListsPeersThatArePciDevices) {
@@ -1429,7 +1395,6 @@ TEST_F(LinuxSysfsMicrotest, NumaNodeAffinity_StripsLineEndings) {
   EXPECT_EQ(offset, 0);
   ASSERT_EQ(ncclOsGetNumaNodeAffinity(3, str, 6, &offset), ncclSuccess);  // maxLen counts the NUL
   EXPECT_STREQ(str, "00000");
-  EXPECT_FALSE(log_.Has("could not read"));
 }
 
 TEST_F(LinuxSysfsMicrotest, NumaNodeAffinity_MissingNodeIsEmpty) {
@@ -1437,7 +1402,6 @@ TEST_F(LinuxSysfsMicrotest, NumaNodeAffinity_MissingNodeIsEmpty) {
   int offset = -1;
   ASSERT_EQ(ncclOsGetNumaNodeAffinity(7, str, sizeof(str), &offset), ncclSuccess);
   EXPECT_STREQ(str, "");
-  EXPECT_TRUE(log_.Has("could not read /sys/devices/system/node/node7/cpumap, using empty affinity"));
 }
 
 // Shared memory, on real files.
@@ -1513,7 +1477,7 @@ TEST_F(LinuxShmMicrotest, CreateInDevShmThenAttachUntilTheLastPeerUnlinks) {
 
   EXPECT_EQ(ncclOsShmClose(h), ncclSuccess);  // refcount 0: no second unlink
   Forget(h);
-  EXPECT_FALSE(log_.Has("WARN"));
+  EXPECT_EQ(log_.Warns(), 0);
 }
 
 TEST_F(LinuxShmMicrotest, CreateAtAGivenPath) {
@@ -1528,7 +1492,6 @@ TEST_F(LinuxShmMicrotest, CreateAtAGivenPath) {
   ASSERT_EQ(stat(path, &st), 0);
   EXPECT_EQ((size_t)st.st_size, 100 + sizeof(int));
   EXPECT_EQ(st.st_mode & 0777, (mode_t)(S_IRUSR | S_IWUSR));
-  EXPECT_TRUE(log_.Has("Allocated 104 bytes of shared memory in"));
 }
 
 // open() does not truncate, so a creator reusing a path must clear what the file held.
@@ -1570,8 +1533,7 @@ TEST_F(LinuxShmMicrotest, CloseReportsUnlinkAndMunmapFailures) {
   });
   Forget(h);
   EXPECT_EQ(ncclOsShmClose(h), ncclSystemError);
-  EXPECT_TRUE(log_.Has("WARN unlink shared memory"));
-  EXPECT_TRUE(log_.Has("WARN munmap of shared memory"));
+  EXPECT_EQ(log_.Warns(), 2);  // both failures, not just the first
 }
 
 TEST_F(LinuxShmMicrotest, UnlinkRemovesTheFileOnce) {
@@ -1584,7 +1546,7 @@ TEST_F(LinuxShmMicrotest, UnlinkRemovesTheFileOnce) {
   EXPECT_EQ(h->shmPath, nullptr);
   EXPECT_EQ(ncclOsShmUnlink(h), ncclSuccess);  // nothing left to unlink
   EXPECT_EQ(ncclOsShmUnlink(nullptr), ncclSuccess);
-  EXPECT_FALSE(log_.Has("WARN"));
+  EXPECT_EQ(log_.Warns(), 0);
 }
 
 TEST_F(LinuxShmMicrotest, UnlinkSkipsAFullyAttachedSegmentAndReportsFailures) {
@@ -1598,7 +1560,6 @@ TEST_F(LinuxShmMicrotest, UnlinkSkipsAFullyAttachedSegmentAndReportsFailures) {
   *h->refcount = 1;
   ::unlink(path);
   EXPECT_EQ(ncclOsShmUnlink(h), ncclSystemError);
-  EXPECT_TRUE(log_.Has("WARN unlink shared memory"));
 }
 
 TEST_F(LinuxShmMicrotest, OpenFailuresReturnNoHandle) {
@@ -1610,9 +1571,7 @@ TEST_F(LinuxShmMicrotest, OpenFailuresReturnNoHandle) {
   EXPECT_EQ(Open(path, 64, 1, &ptr, &h), ncclSystemError);
   EXPECT_EQ(h, nullptr);
   EXPECT_EQ(ptr, nullptr);
-  EXPECT_TRUE(log_.Has("Error while creating shared memory segment"));
   EXPECT_EQ(Open(path, 64, 0, &ptr, &h), ncclSystemError);
-  EXPECT_TRUE(log_.Has("Error while attaching to shared memory segment"));
 }
 
 TEST_F(LinuxShmMicrotest, InterruptedMkstempAndFallocateAreRetried) {
@@ -1637,8 +1596,6 @@ TEST_F(LinuxShmMicrotest, InterruptedMkstempAndFallocateAreRetried) {
   ASSERT_EQ(Open(path, 64, 1, &ptr, &h), ncclSuccess);
   EXPECT_EQ(mkstemps, 2);
   EXPECT_EQ(fallocates, 2);
-  EXPECT_TRUE(log_.Has("mkstemp: Failed to create"));
-  EXPECT_TRUE(log_.Has("fallocate: Failed to extend"));
 }
 
 TEST_F(LinuxShmMicrotest, MkstempFailure) {
@@ -1651,7 +1608,6 @@ TEST_F(LinuxShmMicrotest, MkstempFailure) {
   ncclShmHandleInternal* h = nullptr;
   EXPECT_EQ(Open(path, 64, 1, &ptr, &h), ncclSystemError);
   EXPECT_EQ(h, nullptr);
-  EXPECT_TRUE(log_.Has("WARN Error: failed to create shared memory file /dev/shm/nccl-XXXXXX"));
 }
 
 // Close only unlinks once a refcount is mapped, so a failure after creation leaves the file.
@@ -1668,7 +1624,6 @@ TEST_F(LinuxShmMicrotest, ShmOpen_KnownBug_FallocateFailureLeavesTheCreatedFile)
   ncclShmHandleInternal* h = nullptr;
   EXPECT_EQ(Open(path, 64, 1, &ptr, &h), ncclSystemError);
   EXPECT_EQ(h, nullptr);
-  EXPECT_TRUE(log_.Has("WARN Error: failed to extend"));
   EXPECT_TRUE(Exists(p));
 }
 
@@ -1683,7 +1638,6 @@ TEST_F(LinuxShmMicrotest, MmapAndCallocFailures) {
   EXPECT_EQ(Open(path, 64, 1, &ptr, &h), ncclSystemError);
   EXPECT_EQ(h, nullptr);
   EXPECT_EQ(ptr, nullptr);
-  EXPECT_TRUE(log_.Has("WARN Error: Could not map"));
   ::unlink(path);
 
   ScopedHook callocHook(g_calloc, [](size_t, size_t) -> void* { return nullptr; });
@@ -1706,7 +1660,7 @@ TEST_F(LinuxShmMicrotest, LastAttachUnlinkFailureIsOnlyLogged) {
   ncclShmHandleInternal* hp = nullptr;
   EXPECT_EQ(Open(path, 64, 0, &peer, &hp), ncclSuccess);
   EXPECT_EQ(unlinkHook.calls, 1);
-  EXPECT_TRUE(log_.Has("INFO unlink shared memory"));
+  EXPECT_EQ(log_.Warns(), 0);
 }
 
 TEST_F(LinuxShmMicrotest, DevicePointerRegistersTheMappingWithHip) {

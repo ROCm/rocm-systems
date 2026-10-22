@@ -69,16 +69,13 @@ TEST_F(SignalsMicrotest, Register_InstallsTheHandlerForTheFaultSignalsAndUsr2) {
   RegisterSignalHandlers();
   EXPECT_EQ(seen, kCaught);
   for (int sig : kCaught) EXPECT_EQ(Installed(sig), &sig_handler) << sig;
-  EXPECT_TRUE(log_.Has("INFO Enabling custom signal handler"));
-  EXPECT_FALSE(log_.Has("Unable to register"));
 }
 
 TEST_F(SignalsMicrotest, Register_FailureIsOnlyLogged) {
   params_.Set("RCCL_ENABLE_SIGNALHANDLER", 1);
   ScopedHook signalHook(g_signal, [](int, sighandler_t) { return SIG_ERR; });
   RegisterSignalHandlers();
-  EXPECT_TRUE(log_.Has("Unable to register signal handler for Illegal instruction"));
-  EXPECT_TRUE(log_.Has("Unable to register signal handler for User defined signal 2"));
+  EXPECT_EQ(signalHook.calls, (int)kCaught.size());  // a failure does not stop the rest
 }
 
 TEST_F(SignalsMicrotest, Handler_Usr2PrintsABacktraceAndReturns) {

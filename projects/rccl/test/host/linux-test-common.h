@@ -4,15 +4,17 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Shared by the rccl-UnitTestsMicroLinux test TUs: the base fixture, a log recorder and a scripted
-// getifaddrs() list, all over the shared libc, nccl, env and HIP fakes.
+// Shared by the rccl-UnitTestsMicroLinux test TUs: descriptor helpers, the base fixture, a log recorder
+// and a scripted getifaddrs() list, all over the shared libc, nccl, env and HIP fakes.
 #pragma once
 
 #include <gtest/gtest.h>
 
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <ifaddrs.h>
 #include <net/if.h>
+#include <sys/socket.h>
 
 #include <cstring>
 #include <deque>
@@ -26,9 +28,22 @@
 #include "fakes/libc_fakes.h"
 #include "fakes/nccl_fakes.h"
 
+inline bool FdOpen(int fd) { return ::fcntl(fd, F_GETFD) != -1; }
+
+inline int IntOpt(int fd, int level, int name) {
+  int v = -1;
+  socklen_t len = sizeof(v);
+  ::getsockopt(fd, level, name, &v, &len);
+  return v;
+}
+
 // What production logged, from any thread, as "WARN|INFO|ATTN <message>\n" lines.
 class LogRecord {
  public:
+  int Warns() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return warns_;
+  }
   bool Has(const std::string& needle) const {
     std::lock_guard<std::mutex> lock(mutex_);
     return text_.find(needle) != std::string::npos;
@@ -40,6 +55,7 @@ class LogRecord {
   void Clear() {
     std::lock_guard<std::mutex> lock(mutex_);
     text_.clear();
+    warns_ = 0;
   }
 
  private:
@@ -47,9 +63,11 @@ class LogRecord {
     const char* tag = level == NCCL_LOG_WARN ? "WARN" : level == NCCL_LOG_ATTN ? "ATTN" : "INFO";
     std::lock_guard<std::mutex> lock(mutex_);
     text_ += std::string(tag) + " " + msg + "\n";
+    if (level == NCCL_LOG_WARN) ++warns_;
   }
   mutable std::mutex mutex_;
   std::string text_;
+  int warns_ = 0;
   RcclUnitTesting::ScopedDebugLogging everyLevel_{-1, ~uint64_t(0)};
   ScopedHook<void(ncclDebugLogLevel, unsigned long, const char*, int, const char*)> hook_{
       g_ncclDebugLog,

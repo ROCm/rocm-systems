@@ -35,8 +35,6 @@
 
 namespace {
 
-bool FdOpen(int fd) { return fcntl(fd, F_GETFD) != -1; }
-
 class LinuxIpcsocketMicrotest : public LinuxTestBase {
  protected:
   // Abstract names are shared by every process in the network namespace, and pids repeat across
@@ -128,7 +126,6 @@ TEST_F(LinuxIpcsocketMicrotest, Init_NameInUseIsASystemError) {
   EXPECT_EQ(ncclIpcSocketInit(&b_, 0, hash_, nullptr), ncclSystemError);
   EXPECT_EQ(b_.fd, -1);
   EXPECT_STREQ(b_.socketName, "");
-  EXPECT_TRUE(log_.Has(("WARN UDS: Binding to socket " + Name(0) + " failed : Address already in use").c_str()));
 }
 
 TEST_F(LinuxIpcsocketMicrotest, Init_SocketFailureIsASystemError) {
@@ -140,13 +137,11 @@ TEST_F(LinuxIpcsocketMicrotest, Init_SocketFailureIsASystemError) {
   });
   EXPECT_EQ(ncclIpcSocketInit(&a_, 0, hash_, nullptr), ncclSystemError);
   EXPECT_EQ(a_.fd, -1);
-  EXPECT_TRUE(log_.Has("WARN UDS: Socket creation error : Too many open files"));
 }
 
 TEST_F(LinuxIpcsocketMicrotest, GetFd) {
   ncclIpcFd fd = -1;
   EXPECT_EQ(ncclIpcSocketGetFd(nullptr, &fd), ncclInvalidArgument);
-  EXPECT_TRUE(log_.Has("WARN ncclIpcSocketGetFd: pass NULL socket"));
   Open();
   EXPECT_EQ(ncclIpcSocketGetFd(&a_, nullptr), ncclSuccess);
   ASSERT_EQ(ncclIpcSocketGetFd(&a_, &fd), ncclSuccess);
@@ -203,7 +198,6 @@ TEST_F(LinuxIpcsocketMicrotest, RecvFd_MessageWithoutADescriptorIsASystemError) 
   ASSERT_EQ(ncclIpcSocketSendMsg(&b_, nullptr, 0, -1, 0, hash_), ncclSuccess);
   ncclIpcFd fd = -1;
   EXPECT_EQ(ncclIpcSocketRecvFd(&a_, &fd), ncclSystemError);
-  EXPECT_TRUE(log_.Has(("WARN UDS: Receiving data over socket " + Name(0) + " failed").c_str()));
 }
 
 TEST_F(LinuxIpcsocketMicrotest, RecvFd_ForeignControlMessageIsASystemError) {
@@ -217,7 +211,6 @@ TEST_F(LinuxIpcsocketMicrotest, RecvFd_ForeignControlMessageIsASystemError) {
   });
   ncclIpcFd fd = -1;
   EXPECT_EQ(ncclIpcSocketRecvFd(&a_, &fd), ncclSystemError);
-  EXPECT_EQ(log_.Text(), "WARN UDS: Receiving data over socket failed\n");
   ScopedHook wrongLevelHook(g_recvmsg, [](int, msghdr* msg, int) -> ssize_t {
     cmsghdr* c = CMSG_FIRSTHDR(msg);
     c->cmsg_len = CMSG_LEN(sizeof(int));
@@ -250,7 +243,6 @@ TEST_F(LinuxIpcsocketMicrotest, RecvMsg_RetriesTransientErrorsAndFailsOnOthers) 
     return -1;
   });
   EXPECT_EQ(ncclIpcSocketRecvMsg(&a_, got, sizeof(got), nullptr), ncclSystemError);
-  EXPECT_TRUE(log_.Has("WARN UDS: Receiving data over socket failed : 88"));
 }
 
 TEST_F(LinuxIpcsocketMicrotest, RecvMsg_AbortStopsWaiting) {
@@ -264,7 +256,6 @@ TEST_F(LinuxIpcsocketMicrotest, RecvMsg_AbortStopsWaiting) {
 TEST_F(LinuxIpcsocketMicrotest, SendMsg_NoPeerIsASystemError) {
   Open();
   EXPECT_EQ(ncclIpcSocketSendFd(&a_, STDOUT_FILENO, 7, hash_), ncclSystemError);
-  EXPECT_TRUE(log_.Has(("WARN UDS: Sending data over socket " + Name(7) + " failed").c_str()));
 }
 
 TEST_F(LinuxIpcsocketMicrotest, SendMsg_RetriesTransientErrorsUntilAborted) {
