@@ -3,7 +3,17 @@
 
 //! HSA C ABI entry points for this domain.
 
-use super::*;
+use std::ffi::{c_char, c_void};
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
+use crate::api_trace;
+use crate::ffi::{self, *};
+use crate::runtime::{boundary, lock, map_error};
+use crate::{
+    HSA_RUNTIME_VERSION_MINOR, host_alloc_dmabuf_supported, image_gfx12, runtime, write_value,
+};
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64", not(test))))]
+use crate::{image_abi, loader, pc_sampling};
 
 /// # Safety
 /// Any non-null `value` must address aligned, writable storage for the type

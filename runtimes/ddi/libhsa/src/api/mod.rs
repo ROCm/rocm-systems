@@ -3,8 +3,6 @@
 
 //! Public HSA entry points grouped by the contract they implement.
 
-use crate::*;
-
 pub(crate) mod agent;
 pub(crate) mod amd;
 pub(crate) mod isa;

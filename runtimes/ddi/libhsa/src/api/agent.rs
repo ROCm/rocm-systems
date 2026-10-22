@@ -7,7 +7,15 @@ use super::system::{
     extension_mask, legacy_agent_extension_supported, major_agent_extension_supported,
     valid_extension,
 };
-use super::*;
+use std::ffi::c_void;
+
+use crate::ffi::*;
+use crate::runtime::{boundary, lock, map_error};
+use crate::{
+    CLUSTER_MAX_DIM, KERNEL_CLUSTER_MAX_DIM, KERNEL_CLUSTER_MAX_SIZE, agent_uuid,
+    cpu_rejects_amd_agent_info, host_alloc_dmabuf_supported, image_gfx12, isa_handle,
+    nearest_cpu_agent, platform, runtime, write_bytes, write_value,
+};
 
 /// # Safety
 /// The callback must be callable with the C ABI; `data` must remain valid for

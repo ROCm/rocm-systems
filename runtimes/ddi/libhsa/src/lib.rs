@@ -25,7 +25,7 @@
     clippy::wildcard_imports
 )]
 
-use std::ffi::{CStr, c_char, c_void};
+use std::ffi::c_void;
 
 // Unit-test executables call the Rust entry points directly. They do not
 // export the shared library's versioned ABI symbols.
@@ -54,11 +54,8 @@ mod runtime;
 mod signal;
 mod tool_events;
 
-use callback_arg::CallbackArg;
 use ffi::*;
-use runtime::{
-    HsaState, InFlightToken, LifecycleTransition, boundary, initialized_mut, lock, map_error,
-};
+use runtime::{HsaState, LifecycleTransition, lock};
 
 fn complete_deferred_shutdown(runtime: HsaState, generation: u64) {
     let mut transition = LifecycleTransition::stopping(generation);
@@ -202,7 +199,7 @@ use api::{agent::*, amd::*, isa::*, system::*};
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use std::ffi::CStr;
+    use std::ffi::{CStr, c_char};
 
     #[test]
     fn extension_metadata_matches_implemented_capabilities() {
