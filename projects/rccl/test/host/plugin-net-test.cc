@@ -360,9 +360,8 @@ TEST_F(PluginNetMicrotest, ListNoneOrEmptyLeavesOnlyInternals) {
   }
 }
 
-// NCCL_NET_MAX_PLUGINS less the two internals leaves room for 14, but the log claims 13.
-// Pins AICOMRCCL-2986; a fix flips this pin.
-TEST_F(PluginNetMicrotest, List_KnownBug_KeepsFourteenExternalsButLogsThirteen) {
+// NCCL_NET_MAX_PLUGINS less the two internals leaves room for 14, and the log says 13.
+TEST_F(PluginNetMicrotest, List_KeepsFourteenExternalsButLogsThirteen) {
   constexpr int kExternals = NCCL_NET_MAX_PLUGINS - 2;
   std::string list;
   for (int i = 0; i < NCCL_NET_MAX_PLUGINS; i++) list += (i ? ",p" : "p") + std::to_string(i);

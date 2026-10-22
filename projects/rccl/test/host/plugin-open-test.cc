@@ -177,9 +177,8 @@ TEST_F(PluginOpenMicrotest, PathsAndFullLibraryNamesAreTriedOnlyAsGiven) {
   }
 }
 
-// Despite the comment, only a name with both "lib" and ".so" skips the prefixed retry.
-// Pins AICOMRCCL-2990; a fix flips this pin.
-TEST_F(PluginOpenMicrotest, OpenPluginLib_KnownBug_AHalfLibraryNameIsStillRetriedWithThePrefix) {
+// Only a name with both "lib" and ".so" skips the prefixed retry.
+TEST_F(PluginOpenMicrotest, OpenPluginLib_AHalfLibraryNameIsStillRetriedWithThePrefix) {
   EXPECT_EQ(ncclOpenNetPluginLib("x.so"), nullptr);
   EXPECT_EQ(ncclOpenNetPluginLib("libx"), nullptr);
   EXPECT_EQ(g_dl.opened, (std::vector<std::string>{"x.so", "librccl-net-x.so.so", "libx", "librccl-net-libx.so"}));
