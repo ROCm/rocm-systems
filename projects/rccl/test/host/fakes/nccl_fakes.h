@@ -20,10 +20,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <initializer_list>
-#include <string>
-#include <utility>
-#include <vector>
 
 #include "nccl.h"
 #include "strongstream.h"
@@ -127,18 +123,6 @@ extern std::function<ncclResult_t(struct ncclMemManager*, void*, struct ncclMemU
 // already-compiled TUs.
 extern std::function<int64_t(const char* /*env*/, int64_t /*deftVal*/)>
     g_loadParam;
-
-// A g_loadParam that answers the listed env names and leaves the rest at their defaults.
-inline std::function<int64_t(const char*, int64_t)> ParamOverride(
-    std::initializer_list<std::pair<const char*, int64_t>> kv) {
-    std::vector<std::pair<std::string, int64_t>> table(kv.begin(), kv.end());
-    return [table](const char* env, int64_t deft) {
-        for (const auto& [name, value] : table) {
-            if (name == env) return value;
-        }
-        return deft;
-    };
-}
 
 // The two device ids and the isXGMI out-parameter; the topo system and the inter-GPU knobs are dropped.
 // maxInter is carried because init.cc:1834 passes an explicit 1 where graph.h:90 defaults to MAX_XGMI_INTER_GPUS.
