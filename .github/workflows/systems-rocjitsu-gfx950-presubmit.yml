@@ -1,0 +1,156 @@
+name: Systems gfx950 HW vs rocJITsu quick presubmit
+
+on:
+  workflow_dispatch:
+    inputs:
+      rocm_version:
+        type: string
+        default: '10.2.0a20260928'
+        description: Pinned gfx950 runtime and tests
+  push:
+    branches: [users/sa-faizal/gfx950-presubmit-01a16468]
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    paths:
+      - 'emulation/rocjitsu/**'
+      - 'projects/rocdbgapi/**'
+      - 'projects/rocr-debug-agent/**'
+      - 'projects/rocprofiler*/**'
+      - '.github/scripts/systems_quick_parity.py'
+      - '.github/scripts/compare_junit_results.py'
+      - '.github/workflows/systems-rocjitsu-gfx950-presubmit.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: systems-gfx950-parity-${{ github.event.number || github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  quick:
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:rocjitsu')
+    name: ${{ matrix.mode }} gfx950 systems quick
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mode: emu
+            runner: aws-linux-scale-rocm-large
+            image: ubuntu:24.04
+          - mode: hw
+            runner: linux-gfx950-1gpu-ccs-ossci-rocm
+            image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 360
+    container:
+      image: ${{ matrix.image }}
+      options: >-
+        ${{ matrix.mode == 'hw' && '--ipc host --ulimit memlock=-1:-1 --ulimit nofile=1048576:1048576 --security-opt seccomp=unconfined --group-add video --device /dev/kfd --device /dev/dri --group-add 993 --group-add 992 --group-add 110 --env-file /etc/podinfo/gha-gpu-isolation-settings -e ROCR_VISIBLE_DEVICES -e KUBE_CPU_REQUEST --user 0:0 --cap-add=SYS_PTRACE --cap-add=PERFMON' || '--user 0:0' }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      ROCM_VERSION: ${{ inputs.rocm_version || '10.2.0a20260928' }}
+      MODE: ${{ matrix.mode }}
+      DEBIAN_FRONTEND: noninteractive
+    steps:
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential ca-certificates cmake curl git ninja-build pkg-config python3 python3-pip python3-venv libelf-dev libnuma1 libdw1 libtinfo6 libgomp1 libxml2 openmpi-bin libopenmpi-dev
+          python3 -m venv /tmp/parity-venv
+          echo /tmp/parity-venv/bin >> "$GITHUB_PATH"
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            .github
+            emulation/rocjitsu
+            shared/machine-readable-isa
+            runtimes/api-headers
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/TheRock
+          ref: 488e66e7c2220df926c2762e9b97a50becfb4239
+          path: TheRock
+          sparse-checkout: build_tools/github_actions
+      - name: Install identical gfx950 runtime and test artifacts
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/rocm-gfx950-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$root" cache logs
+          base=https://nightly.repo.amd.com/rocm/core/tarball
+          for suffix in '' '-tests'; do
+            curl -fL --retry 3 -o "cache/artifact${suffix}.tar.gz" "$base/therock-dist-linux-gfx950-dcgpu${suffix}-${ROCM_VERSION}.tar.gz"
+            tar -xzf "cache/artifact${suffix}.tar.gz" -C "$root"
+          done
+          echo "ROCM_ROOT=$root" >> "$GITHUB_ENV"
+          echo "THEROCK_BIN_DIR=$root/bin" >> "$GITHUB_ENV"
+          if [ "$MODE" = hw ]; then
+            test -e /dev/kfd
+            LD_LIBRARY_PATH="$root/lib" "$root/bin/rocminfo" > logs/rocminfo.txt
+            grep -E 'gfx950' logs/rocminfo.txt
+          fi
+      - name: Build current rocJITsu head
+        if: matrix.mode == 'emu'
+        run: |
+          cmake -S emulation/rocjitsu -B rj-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DRJ_LOG_GROUPS=OFF
+          cmake --build rj-build --target rocjitsu_bin rocjitsu_shared -j"$(nproc)"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          config = json.loads(Path('emulation/rocjitsu/configs/gfx950_mi355x.json').read_text())
+          config.pop('thread_allocations', None)
+          config['cpu_dispatch_threads'] = 170
+          config['num_threads'] = 8
+          config['async_helper_threads'] = 0
+          def tune(node):
+              if isinstance(node, dict):
+                  if node.get('type') == 'compute_unit':
+                      node.setdefault('config', []).append({'key': 'functional_quantum', 'value': '0'})
+                  for value in node.values():
+                      tune(value)
+              elif isinstance(node, list):
+                  for value in node:
+                      tune(value)
+          tune(config)
+          Path('gfx950-parity.json').write_text(json.dumps(config))
+          PY
+      - name: Run all systems quick suites and capture failures
+        run: |
+          extra=()
+          if [ "$MODE" = emu ]; then
+            extra=(--rocjitsu "$PWD/rj-build/tools/rocjitsu/rocjitsu" --config "$PWD/gfx950-parity.json")
+          fi
+          python3 .github/scripts/systems_quick_parity.py --root "$ROCM_ROOT" --logs logs "${extra[@]}"
+      - uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2
+        if: always()
+        with:
+          name: systems-gfx950-${{ matrix.mode }}-quick
+          path: logs/
+  compare:
+    name: Compare all gfx950 systems quick results
+    if: always() && needs.quick.result != 'skipped'
+    needs: quick
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/scripts
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: systems-gfx950-emu-quick
+          path: comparison/emu
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: systems-gfx950-hw-quick
+          path: comparison/hardware
+      - name: Compare JUnit cases
+        run: |
+          python3 .github/scripts/compare_junit_results.py comparison/emu comparison/hardware
+          cat comparison/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2
+        if: always()
+        with:
+          name: systems-gfx950-quick-comparison
+          path: comparison/
