@@ -1349,8 +1349,13 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
 
   if (request == AMDKFD_IOC_EXPORT_DMABUF && resp->result == 0) {
     auto *export_args = static_cast<kfd_ioctl_export_dmabuf_args *>(arg);
-    if (num_fds > 0 && received_fds[0] >= 0)
-      export_args->dmabuf_fd = received_fds[0];
+    // A descriptor number in the payload belongs to the daemon. Without an
+    // SCM_RIGHTS transfer it could name an unrelated object in this process.
+    if (num_fds == 0 || received_fds[0] < 0) {
+      export_args->dmabuf_fd = static_cast<uint32_t>(-1);
+      return -EPROTO;
+    }
+    export_args->dmabuf_fd = received_fds[0];
   }
 
   if (request == AMDKFD_IOC_FREE_MEMORY_OF_GPU && resp->result == 0) {

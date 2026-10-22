@@ -22,6 +22,41 @@ __global__ void write_cookie(unsigned char *data) { data[0] = 0x37; }
 
 #define CHECK_HIP(call) ASSERT_EQ((call), hipSuccess)
 
+void check_vmm(size_t bytes, bool allow_rejection) {
+  hipMemAllocationProp property{};
+  property.type = hipMemAllocationTypePinned;
+  property.location.type = hipMemLocationTypeDevice;
+  property.location.id = 0;
+  property.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
+  size_t granularity = 0;
+  CHECK_HIP(
+      hipMemGetAllocationGranularity(&granularity, &property, hipMemAllocationGranularityMinimum));
+  const size_t allocation_size = (bytes + granularity - 1) / granularity * granularity;
+  hipMemGenericAllocationHandle_t allocation{}, imported{};
+  const auto created = hipMemCreate(&allocation, allocation_size, &property, 0);
+  if (created != hipSuccess) {
+    EXPECT_TRUE(allow_rejection) << hipGetErrorString(created);
+    return;
+  }
+  int shared_fd = -1;
+  const auto exported =
+      hipMemExportToShareableHandle(&shared_fd, allocation, hipMemHandleTypePosixFileDescriptor, 0);
+  if (exported != hipSuccess) {
+    EXPECT_TRUE(allow_rejection) << hipGetErrorString(exported);
+    CHECK_HIP(hipMemRelease(allocation));
+    return;
+  }
+  EXPECT_EQ(lseek(shared_fd, 0, SEEK_END), allocation_size);
+  EXPECT_EQ(lseek64(shared_fd, 0, SEEK_END), allocation_size);
+  EXPECT_EQ(lseek(shared_fd, 0, SEEK_SET), 0);
+  CHECK_HIP(hipMemImportFromShareableHandle(
+      &imported, reinterpret_cast<void *>(static_cast<intptr_t>(shared_fd)),
+      hipMemHandleTypePosixFileDescriptor));
+  CHECK_HIP(hipMemRelease(imported));
+  CHECK_HIP(hipMemRelease(allocation));
+  close(shared_fd);
+}
+
 void check_application_limit() {
   const char *phase = std::getenv("RJ_TEST_PHASE");
   if (phase && std::strcmp(phase, "late") == 0) {
@@ -35,6 +70,21 @@ void check_application_limit() {
   const int file = mkstemp(path);
   ASSERT_GE(file, 0);
   ASSERT_EQ(unlink(path), 0);
+  // The exported seek aliases must preserve native file and pipe behavior.
+  EXPECT_EQ(lseek(file, 17, SEEK_SET), 17);
+  EXPECT_EQ(lseek64(file, 0, SEEK_CUR), 17);
+  int pipe_fds[2];
+  ASSERT_EQ(pipe(pipe_fds), 0);
+  EXPECT_EQ(lseek(pipe_fds[0], 0, SEEK_END), -1);
+  EXPECT_EQ(errno, ESPIPE);
+  EXPECT_EQ(lseek64(pipe_fds[0], 0, SEEK_END), -1);
+  EXPECT_EQ(errno, ESPIPE);
+  close(pipe_fds[0]);
+  close(pipe_fds[1]);
+  EXPECT_EQ(lseek(-1, 0, SEEK_SET), -1);
+  EXPECT_EQ(errno, EBADF);
+  EXPECT_EQ(lseek64(-1, 0, SEEK_SET), -1);
+  EXPECT_EQ(errno, EBADF);
   struct sigaction action {};
   action.sa_handler = on_file_size_signal;
   sigemptyset(&action.sa_mask);
@@ -67,31 +117,8 @@ void check_application_limit() {
     EXPECT_EQ(result, source);
   }
   CHECK_HIP(hipFree(device));
-  if (const char *vmm = std::getenv("RJ_TEST_VMM"); vmm && std::strcmp(vmm, "1") == 0) {
-    hipMemAllocationProp property{};
-    property.type = hipMemAllocationTypePinned;
-    property.location.type = hipMemLocationTypeDevice;
-    property.location.id = 0;
-    property.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
-    size_t granularity = 0;
-    CHECK_HIP(hipMemGetAllocationGranularity(&granularity, &property,
-                                             hipMemAllocationGranularityMinimum));
-    const size_t allocation_size = (bytes + granularity - 1) / granularity * granularity;
-    hipMemGenericAllocationHandle_t allocation{}, imported{};
-    CHECK_HIP(hipMemCreate(&allocation, allocation_size, &property, 0));
-    int shared_fd = -1;
-    CHECK_HIP(hipMemExportToShareableHandle(&shared_fd, allocation,
-                                            hipMemHandleTypePosixFileDescriptor, 0));
-    EXPECT_EQ(lseek(shared_fd, 0, SEEK_END), allocation_size);
-    EXPECT_EQ(lseek64(shared_fd, 0, SEEK_END), allocation_size);
-    EXPECT_EQ(lseek(shared_fd, 0, SEEK_SET), 0);
-    CHECK_HIP(hipMemImportFromShareableHandle(
-        &imported, reinterpret_cast<void *>(static_cast<intptr_t>(shared_fd)),
-        hipMemHandleTypePosixFileDescriptor));
-    CHECK_HIP(hipMemRelease(imported));
-    CHECK_HIP(hipMemRelease(allocation));
-    close(shared_fd);
-  }
+  const char *vmm = std::getenv("RJ_TEST_VMM");
+  check_vmm(bytes, vmm && std::strcmp(vmm, "allow-rejection") == 0);
   CHECK_HIP(hipDeviceReset());
   EXPECT_EQ(file_size_signal, 0);
 

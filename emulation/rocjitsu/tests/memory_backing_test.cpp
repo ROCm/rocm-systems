@@ -12,7 +12,9 @@
 #include <cstring>
 #include <fcntl.h>
 #include <poll.h>
+#include <string>
 #include <sys/mman.h>
+#include <sys/prctl.h>
 #include <sys/resource.h>
 #include <sys/shm.h>
 #include <sys/socket.h>
@@ -337,7 +339,10 @@ pid_t token_keeper(int fd) {
 volatile sig_atomic_t child_signal = 0;
 void observe_child_signal(int) { child_signal = 1; }
 
-void check_helper_lifecycle() {
+void check_helper_lifecycle(bool subreaper = false) {
+  if (subreaper) {
+    ASSERT_EQ(prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0), 0);
+  }
   const rlimit zero{};
   ASSERT_EQ(setrlimit(RLIMIT_FSIZE, &zero), 0);
   struct sigaction action {};
@@ -349,8 +354,12 @@ void check_helper_lifecycle() {
   const pid_t helper = token_keeper(fd);
   ASSERT_GT(helper, 0);
   int status = 0;
-  EXPECT_EQ(waitpid(-1, &status, WNOHANG), -1);
-  EXPECT_EQ(errno, ECHILD);
+  if (subreaper) {
+    EXPECT_EQ(waitpid(-1, &status, WNOHANG), 0);
+  } else {
+    EXPECT_EQ(waitpid(-1, &status, WNOHANG), -1);
+    EXPECT_EQ(errno, ECHILD);
+  }
   EXPECT_EQ(child_signal, 0);
 
   rlimit original{}, limited{};
@@ -373,9 +382,12 @@ void check_helper_lifecycle() {
   ASSERT_EQ(poll(&exited, 1, 2000), 1);
   close(pidfd);
   close(fd);
+  if (subreaper) {
+    ASSERT_EQ(waitpid(helper, &status, 0), helper);
+  }
   EXPECT_EQ(waitpid(-1, &status, WNOHANG), -1);
   EXPECT_EQ(errno, ECHILD);
-  EXPECT_EQ(child_signal, 0);
+  EXPECT_EQ(child_signal, subreaper ? 1 : 0);
   next = backing::create(kSize);
   ASSERT_GE(next, 0) << strerror(errno);
   EXPECT_NE(token_keeper(next), helper);
@@ -389,6 +401,35 @@ TEST(MemoryBackingDeathTest, HelperDoesNotChangeChildWaitsAndRecoversAfterFailur
         _exit(::testing::Test::HasFailure() ? 1 : 0);
       },
       ::testing::ExitedWithCode(0), "");
+}
+
+TEST(MemoryBackingDeathTest, SubreaperWarnsAboutChildWaitsAndRecoversAfterFailure) {
+  // GTest captures stderr in a regular file, which cannot accept the warning
+  // under hard FSIZE=0. A pipe observes it without relaxing the file limit.
+  int diagnostics[2];
+  ASSERT_EQ(pipe2(diagnostics, O_CLOEXEC), 0);
+  EXPECT_EXIT(
+      {
+        close(diagnostics[0]);
+        if (dup2(diagnostics[1], STDERR_FILENO) < 0)
+          _exit(2);
+        close(diagnostics[1]);
+        check_helper_lifecycle(true);
+        _exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+  close(diagnostics[1]);
+  std::string output;
+  char buffer[1024];
+  ssize_t bytes;
+  while ((bytes = read(diagnostics[0], buffer, sizeof(buffer))) > 0)
+    output.append(buffer, bytes);
+  close(diagnostics[0]);
+  const std::string warning = "Memory keeper child-wait isolation is unsupported for child "
+                              "subreapers";
+  const auto first = output.find(warning);
+  ASSERT_NE(first, std::string::npos) << output;
+  EXPECT_EQ(output.find(warning, first + warning.size()), std::string::npos) << output;
 }
 
 void check_group_signal() {
@@ -466,6 +507,69 @@ TEST(MemoryBackingDeathTest, ReplacedLeasePreservesOtherDescriptorsAndTokens) {
   ASSERT_EXIT(
       {
         check_lease_replacement();
+        _exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
+void check_credential_retirement(gid_t alternate) {
+  const gid_t original = getegid();
+  const rlimit zero{};
+  ASSERT_EQ(setrlimit(RLIMIT_FSIZE, &zero), 0);
+  const int retained = backing::create(kSize);
+  ASSERT_GE(retained, 0);
+  const int retained_pidfd = syscall(SYS_pidfd_open, token_keeper(retained), 0);
+  ASSERT_GE(retained_pidfd, 0);
+  int previous_pidfd = -1;
+  for (unsigned iteration = 0; iteration < 4; ++iteration) {
+    ASSERT_EQ(setegid(iteration % 2 ? original : alternate), 0);
+    const int next = backing::create(kSize);
+    ASSERT_GE(next, 0) << strerror(errno);
+    if (previous_pidfd >= 0) {
+      pollfd exited{previous_pidfd, POLLIN, 0};
+      EXPECT_EQ(poll(&exited, 1, 2000), 1) << "retired credential helper survived";
+      close(previous_pidfd);
+    }
+    previous_pidfd = syscall(SYS_pidfd_open, token_keeper(next), 0);
+    ASSERT_GE(previous_pidfd, 0);
+    close(next);
+    unsigned leases = 0;
+    for (int fd = 3; fd < 256; ++fd) {
+      char path[64], target[128]{};
+      std::snprintf(path, sizeof(path), "/proc/self/fd/%d", fd);
+      if (readlink(path, target, sizeof(target) - 1) > 0 &&
+          std::strstr(target, "memfd:rocjitsu-owner"))
+        ++leases;
+    }
+    EXPECT_EQ(leases, 1u);
+  }
+  close(previous_pidfd);
+  // Retiring the owner's lease must preserve independently exported tokens.
+  pollfd retained_exited{retained_pidfd, POLLIN, 0};
+  EXPECT_EQ(poll(&retained_exited, 1, 0), 0);
+  const int alias = backing::reopen(retained, O_RDONLY);
+  ASSERT_GE(alias, 0);
+  void *view = backing::map(nullptr, kSize, PROT_READ, MAP_SHARED, alias, 0);
+  ASSERT_NE(view, MAP_FAILED);
+  EXPECT_EQ(munmap(view, kSize), 0);
+  close(alias);
+  close(retained);
+  EXPECT_EQ(poll(&retained_exited, 1, 2000), 1);
+  close(retained_pidfd);
+}
+
+TEST(MemoryBackingDeathTest, CredentialChangesRetireLeasesAndPreserveTokens) {
+  gid_t real, effective, saved;
+  ASSERT_EQ(getresgid(&real, &effective, &saved), 0);
+  gid_t alternate = real != effective ? real : saved;
+  if (alternate == effective) {
+    if (geteuid() != 0)
+      GTEST_SKIP() << "requires root or a distinct real/saved group (setgid test executable)";
+    alternate = effective == 0 ? 1 : 0;
+  }
+  ASSERT_EXIT(
+      {
+        check_credential_retirement(alternate);
         _exit(::testing::Test::HasFailure() ? 1 : 0);
       },
       ::testing::ExitedWithCode(0), "");

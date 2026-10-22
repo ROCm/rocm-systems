@@ -583,6 +583,8 @@ std::string keeper_path() {
   startup_failed(5, errno);
 }
 
+std::atomic<pid_t> warned_subreaper{};
+
 class Keeper {
 public:
   const pid_t owner = getpid();
@@ -593,8 +595,13 @@ public:
     return owner == getpid() && user == geteuid() && group == getegid();
   }
 
-  int allocate(size_t size, int sized_file = -1) {
+  int allocate(size_t size, int sized_file, bool &retry) {
     std::lock_guard lock(mutex_);
+    // A caller may have obtained this pointer just before a credential change
+    // replaced it. Never restart an unreachable helper after retirement.
+    retry = retired_;
+    if (retry)
+      return -1;
     for (unsigned attempt = 0; attempt < 2; ++attempt) {
       if (!has_lease()) {
         release_lease();
@@ -623,6 +630,18 @@ public:
     __builtin_unreachable();
   }
 
+  void retire() {
+    if (owner != getpid()) {
+      // A forked child must not lock a mutex held by a vanished parent thread.
+      release_lease();
+      return;
+    }
+    std::lock_guard lock(mutex_);
+    retired_ = true;
+    release_lease();
+  }
+
+private:
   void release_lease() {
     // close_range/dup2 may have closed or replaced the application's lease.
     // Never close an unrelated descriptor that reused its number.
@@ -632,7 +651,6 @@ public:
     lease_inode_ = 0;
   }
 
-private:
   bool has_lease() const {
     struct stat info {};
     return lease_ >= 0 && lease_inode_ && host_call(SYS_fstat, lease_, &info) == 0 &&
@@ -657,6 +675,12 @@ private:
   int launch(const char *path) {
     if (host_call(SYS_faccessat, AT_FDCWD, path, X_OK) != 0)
       return -1;
+    int subreaper = 0;
+    if (host_call(SYS_prctl, PR_GET_CHILD_SUBREAPER, &subreaper, 0, 0, 0) == 0 && subreaper &&
+        warned_subreaper.exchange(owner, std::memory_order_relaxed) != owner)
+      util::Logger::warn("Memory keeper child-wait isolation is unsupported for child "
+                         "subreapers; wait for known application child PIDs instead of all "
+                         "children, and expect keeper SIGCHLD notifications");
     uint64_t nonce = 0;
     long random_bytes;
     do {
@@ -705,8 +729,8 @@ private:
     lease_device_ = info.st_dev;
     char owner_text[32];
     std::snprintf(owner_text, sizeof(owner_text), "%d", owner);
-    // Only this short-lived bootstrap is our child. It never execs, so its
-    // zero exit signal survives and ordinary application waits cannot reap it.
+    // The bootstrap never execs, so ordinary waits cannot reap it. Its helper
+    // is detached unless the owner is a child subreaper (diagnosed above).
     const long bootstrap = host_call(SYS_clone, CLONE_UNTRACED, nullptr, nullptr, nullptr, 0);
     if (bootstrap == 0) {
       close_fd(leases[0]);
@@ -760,6 +784,7 @@ private:
   ino_t lease_inode_ = 0;
   dev_t lease_device_ = 0;
   bool warned_ = false;
+  bool retired_ = false;
 };
 
 // Intentionally process-lifetime: the keeper watches its owner pidfd and an
@@ -781,11 +806,23 @@ Keeper *get_keeper() {
         return current;
       }
     }
-    if (current && current->owner != getpid())
-      current->release_lease();
+    if (current)
+      current->retire();
     current = candidate;
   }
   return current;
+}
+
+int allocate_backing(size_t size, int sized_file = -1) {
+  for (;;) {
+    auto *current = get_keeper();
+    if (!current)
+      return -1;
+    bool retry = false;
+    const int result = current->allocate(size, sized_file, retry);
+    if (!retry)
+      return result;
+  }
 }
 
 } // namespace
@@ -799,8 +836,7 @@ int create(size_t size) {
     errno = EINVAL;
     return -1;
   }
-  auto *current = get_keeper();
-  return current ? current->allocate(size) : -1;
+  return allocate_backing(size);
 }
 
 int populate_file(int fd, const void *data, size_t size) {
@@ -810,10 +846,7 @@ int populate_file(int fd, const void *data, size_t size) {
     errno = EFBIG;
     return -1;
   }
-  auto *current = get_keeper();
-  if (!current)
-    return -1;
-  const int resized = current->allocate(size, fd);
+  const int resized = allocate_backing(size, fd);
   if (resized < 0)
     return -1;
   close_fd(resized);

@@ -3842,9 +3842,10 @@ if(RJ_ENABLE_HIP_TESTS)
             set(_test_vmm 1)
             if(_mode STREQUAL "daemon")
                 set(_daemon_arg --daemon)
-                # The existing daemon VMM export path is not yet supported.
-                # Allocation/copy/dispatch still exercise its backing transfer.
-                set(_test_vmm 0)
+                # Daemon VMM export lacks SCM_RIGHTS and is rejected to avoid
+                # using an unrelated client descriptor. Require either an
+                # explicit VMM error or an export of exactly the requested size.
+                set(_test_vmm allow-rejection)
             endif()
             foreach(_phase early late inherited fork)
                 foreach(_limit zero hard soft soft-zero)

@@ -3920,19 +3920,24 @@ template <typename Stat> static void finish_backing_stat(int fd, Stat *buf) {
 extern "C" {
 
 RJ_INTERPOSER_EXPORT off_t lseek(int fd, off_t offset, int whence) {
-  off_t result;
-  if (rocjitsu::memory_backing::seek_token(fd, offset, whence, result))
-    return result;
   const auto real = rocjitsu::libc_passthrough().lseek_fn;
-  return real ? real(fd, offset, whence) : ::syscall(SYS_lseek, fd, offset, whence);
+  off_t result = real ? real(fd, offset, whence) : ::syscall(SYS_lseek, fd, offset, whence);
+  if (result == -1 && errno == ESPIPE &&
+      !rocjitsu::memory_backing::seek_token(fd, offset, whence, result))
+    errno = ESPIPE;
+  return result;
 }
 
 RJ_INTERPOSER_EXPORT off64_t lseek64(int fd, off64_t offset, int whence) {
-  off_t result;
-  if (rocjitsu::memory_backing::seek_token(fd, offset, whence, result))
-    return result;
   const auto real = rocjitsu::libc_passthrough().lseek64_fn;
-  return real ? real(fd, offset, whence) : ::syscall(SYS_lseek, fd, offset, whence);
+  const off64_t result = real ? real(fd, offset, whence) : ::syscall(SYS_lseek, fd, offset, whence);
+  if (result == -1 && errno == ESPIPE) {
+    off_t token_result;
+    if (rocjitsu::memory_backing::seek_token(fd, offset, whence, token_result))
+      return token_result;
+    errno = ESPIPE;
+  }
+  return result;
 }
 
 static std::string redirect_sysfs_path(const char *path);

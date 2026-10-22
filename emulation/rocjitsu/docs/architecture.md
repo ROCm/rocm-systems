@@ -313,6 +313,14 @@ files must fit that helper's hard file limit. Topology population failures emit
 a warning identifying the file. Application writes, including runtime compiler
 temporary files, continue to obey the application's current limit.
 
+Changing effective user or group credentials retires the previous helper's
+lease before using a new helper; previously exported tokens remain valid.
+Child-wait isolation is unsupported when the owner enables
+`PR_SET_CHILD_SUBREAPER`: Linux reparents the detached helper to that owner.
+rocjitsu warns once per process when it detects this setting. Such owners
+must wait for known application child PIDs, handle the helper's `SIGCHLD`, and
+avoid waiting for all children while the helper still serves their process.
+
 ### Code — Executable Loading & Analysis (`code/`)
 
 - **Executable** — Loads x86 HIP fat binaries, extracts Clang offload

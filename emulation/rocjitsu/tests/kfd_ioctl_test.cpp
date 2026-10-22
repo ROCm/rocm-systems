@@ -6721,6 +6721,56 @@ TEST_F(DbgTrapDaemonTest, QueueControlReconstructsRequestedIdsAndReportsInvalidQ
 // way, so there is nothing to hand-roll.
 using CloseOnScopeExit = util::UniqueHandle;
 
+TEST(RemoteDriverExportTest, ExportRequiresTransferredDescriptor) {
+  constexpr size_t bytes = 4 * 1024 * 1024;
+  const CloseOnScopeExit backing{static_cast<int>(syscall(SYS_memfd_create, "export", 0))};
+  ASSERT_TRUE(backing);
+  ASSERT_EQ(ftruncate(backing.get(), bytes), 0);
+  const CloseOnScopeExit unrelated{::open("/dev/null", O_RDONLY)};
+  ASSERT_TRUE(unrelated);
+  for (const bool transfer : {false, true}) {
+    SCOPED_TRACE(transfer);
+    int sv[2];
+    ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
+    std::jthread server([&, server_fd = sv[1]] {
+      const CloseOnScopeExit closer{server_fd};
+      rocjitsu::RpcHeader header{};
+      ASSERT_TRUE(rocjitsu::rpc_recv_exact(server_fd, &header, sizeof(header)));
+      std::vector<uint8_t> request(header.payload_bytes);
+      ASSERT_TRUE(rocjitsu::rpc_recv_exact(server_fd, request.data(), request.size()));
+      kfd_ioctl_export_dmabuf_args exported{};
+      // A daemon fd number may happen to identify a valid, unrelated client fd.
+      exported.dmabuf_fd = unrelated.get();
+      rocjitsu::RpcHeader response{};
+      response.opcode = rocjitsu::RPC_IOCTL;
+      response.request_id = header.request_id;
+      response.payload_bytes = sizeof(exported);
+      if (transfer) {
+        const int fd = backing.get();
+        ASSERT_EQ(rocjitsu::rpc_send_msg(server_fd, &response, sizeof(response), &fd, 1),
+                  sizeof(response));
+      } else {
+        ASSERT_TRUE(rocjitsu::rpc_send_exact(server_fd, &response, sizeof(response)));
+      }
+      ASSERT_TRUE(rocjitsu::rpc_send_exact(server_fd, &exported, sizeof(exported)));
+    });
+    rocjitsu::RemoteDriver driver(sv[0]);
+    kfd_ioctl_export_dmabuf_args exported{};
+    EXPECT_EQ(driver.ioctl(AMDKFD_IOC_EXPORT_DMABUF, &exported), transfer ? 0 : -EPROTO);
+    if (transfer) {
+      const CloseOnScopeExit received{static_cast<int>(exported.dmabuf_fd)};
+      EXPECT_NE(received.get(), unrelated.get());
+      struct stat info {};
+      ASSERT_EQ(fstat(received.get(), &info), 0);
+      EXPECT_EQ(info.st_size, bytes);
+    } else {
+      EXPECT_EQ(static_cast<int>(exported.dmabuf_fd), -1);
+    }
+    EXPECT_GE(fcntl(unrelated.get(), F_GETFD), 0);
+    server.join();
+  }
+}
+
 // Inspect the request header and rewrite the arg struct the reply echoes back,
 // so one stand-in can model a daemon that reports different outputs than the
 // caller requested.
