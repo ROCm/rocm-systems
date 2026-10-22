@@ -338,8 +338,7 @@ TEST_F(nic_traits_register_agents_test_interface,
     const agent& by_type_second =
         mgr.get_agent_by_type_index(nic_before + 1, agent_type::nic);
 
-    expect_nic_agent_fields(by_type_first, k_hw_nic_device_id_7, "rdma0",
-                            nic_before);
+    expect_nic_agent_fields(by_type_first, k_hw_nic_device_id_7, "rdma0", nic_before);
     expect_nic_agent_fields(by_type_second, k_hw_nic_device_id_9, "rdma1",
                             nic_before + 1);
 
