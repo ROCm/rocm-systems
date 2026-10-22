@@ -325,22 +325,18 @@ jobs:
       artifact_run_id: ${{ inputs.artifact_run_id || github.run_id }}
       nodes: ${{ inputs.accl_profiler_nodes || '2' }}
 
-  # Its own job rather than a third entry in the matrix above, for two reasons
-  # that both come down to this workload running on a different schedule:
-  #
-  #  * The weekly gate has to be a job-level `if:`, and the `matrix` context is
-  #    not available there -- so a per-entry condition cannot be expressed.
-  #  * It is fixed at 4 nodes, while the matrix entries take the caller's
-  #    madengine_nodes.
-  #
-  # WORK_DIR already carries inputs.workload, so this job and the matrix ones
-  # do not collide even though they share run_id and run_attempt.
+  # Still its own job only because the weekly matrix above gained per-entry
+  # nodes after this was written; #13728 folds it in. Until then: WORK_DIR
+  # carries inputs.workload, so this job and the matrix ones do not collide
+  # even though they share run_id and run_attempt.
   therock-test-madengine-405b:
     name: "Test MADEngine MaxText 405B (weekly)"
-    # test_scope == 'all' is what the Saturday cron in therock-rccl-ci.yml
-    # sets. A 4-node exclusive allocation held across both A/B phases is a
-    # much larger claim on the shared partition than the 2-node workloads,
-    # so it rides that schedule rather than running every night.
+    # The madengine suite carries the family and the nightly-or-dispatch
+    # scoping, so gating on it is what keeps an accl-profiler-only dispatch
+    # from taking four exclusive nodes for hours. test_scope == 'all' narrows
+    # that further to the weekly run: a 4-node allocation held across both A/B
+    # phases is a much larger claim on the shared partition than the 2-node
+    # workloads, so it does not ride the nightly.
     #
     # `needs` the other madengine jobs for ORDER ONLY, never for success.
     # max-parallel: 1 serialises the weekly matrix's own legs, because each
@@ -351,8 +347,8 @@ jobs:
     # failed or skipped leg from skipping this job in turn: the workloads are
     # independent, and a 70B failure must not hide a 405B result or the
     # reverse.
-    if: ${{ !cancelled() && (needs.therock-build-linux.result == 'success' || needs.therock-build-linux.result == 'skipped') && inputs.amdgpu_families == 'gfx950-dcgpu' && inputs.test_scope == 'all' && (inputs.event_name == 'schedule' || inputs.event_name == 'workflow_dispatch') }}
-    needs: [therock-build-linux, therock-test-madengine, therock-test-madengine-weekly]
+    if: ${{ !cancelled() && contains(fromJSON(needs.test-plan.outputs.suites || '[]'), 'madengine') && inputs.test_scope == 'all' }}
+    needs: [test-plan, therock-test-madengine, therock-test-madengine-weekly]
     permissions:
       contents: read
       id-token: write
