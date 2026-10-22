@@ -5,8 +5,8 @@
 
 `sdma-copy.c`, `sdma-local-round-trip.c`, `pm4-local-round-trip.c`,
 `sdma-registered-copy.c`, `aql-copy-add.c`, and `device-producer.c` are
-execution-qualified AMDF
-consumers. They use only the imported AMDF core-v5 and GPU-v1 tables, create fresh queues, publish directly
+execution-qualified AMDF consumers. They negotiate the v12 core table and use
+GPU-v1 extension slots, create fresh queues, publish directly
 to mapped rings, distinguish application completion from queue consumption,
 validate results, and release every public child before its parent.
 `sdma-dmabuf-copy.c` exercises the qualified SYSTEM DMA-BUF import capability.
