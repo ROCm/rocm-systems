@@ -729,11 +729,10 @@ rdc_status_t RdcCacheManagerImpl::rdc_update_health_stats(rdc_gpu_group_t group_
     return RDC_ST_NOT_FOUND;
   }
 
-  // Check HEALTH_MAX_KEEP_SAMPLES
+  // Keep at most HEALTH_MAX_KEEP_SAMPLES, counting the new one.
   auto& cache_values = samples_ite->second;
-  int item_remove = cache_values.size() - HEALTH_MAX_KEEP_SAMPLES + 1;
-  if (item_remove > 0) {
-    cache_values.erase(cache_values.begin(), cache_values.begin() + item_remove);
+  if (cache_values.size() >= HEALTH_MAX_KEEP_SAMPLES) {
+    cache_values.erase(cache_values.begin(), cache_values.end() - (HEALTH_MAX_KEEP_SAMPLES - 1));
   }
 
   RdcCacheEntry entry;

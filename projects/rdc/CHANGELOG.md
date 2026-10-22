@@ -9,6 +9,9 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - **`rdc_health_get()` returns `RDC_ST_GROUP_NOT_FOUND` for a GPU group that does not exist**.
   - It returned `RDC_ST_OK` with no health watches, so `rdci health -f` showed every watch as Off and exited successfully, and `rdci health -c` failed asking for watches to be enabled. Both commands now fail with a message that the group does not exist.
 
+- **`rdci health -c` reports a health check that did not complete instead of passing it**.
+  - A watched component whose check cannot read the GPU, for example one that the GPU does not support, gets a Warning with the new code `RDC_FR_HEALTH_CHECK_NOT_RUN`.
+
 - RDC stops listening for a GPU's process start and end events once no job or watch on that GPU uses them. Before, they stayed enabled after a job stopped.
 
 - **RDC keeps at most 256 jobs, running or stopped**.
@@ -24,6 +27,10 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 ### Resolved Issues
 
 - `rdci health -s` on a GPU group that does not exist no longer leaves an unused field group in rdcd. Repeated failures filled the field group table, and commands that need a new field group, such as `rdci dmon`, then failed until rdcd was restarted.
+
+- `rdci health --clear` and `rdci health -s` drop the earlier health watch of a group even when its field watch cannot stop, and a failed `rdci health -s` leaves nothing behind. Before, rdcd kept their field groups, and `rdci health -s` kept the old components.
+
+- `rdci health -c` no longer reports huge numbers of PCIe replays, throttling events or retired pages after a GPU counter restarts, for example after a GPU reset.
 
 - `rdc_status_string()` now describes `RDC_ST_DISABLED_MODULE`. It returned "Unknown", so the rdcd log reported a disabled module as an unknown error.
 

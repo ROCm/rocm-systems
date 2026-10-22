@@ -359,6 +359,30 @@ install(
     COMPONENT ${TESTS_COMPONENT}
 )
 
+# rdc_health_tests: what the health calls leave behind and report. It compiles
+# RdcWatchTableImpl.cc, RdcGroupSettingsImpl.cc and RdcCacheManagerImpl.cc
+# instead of linking librdc and reads GPU values from a stub, so it needs no GPU;
+# librdc_bootstrap provides the logger.
+add_executable(
+    rdc_health_tests
+    ${SRC_DIR}/test_health.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcWatchTableImpl.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcGroupSettingsImpl.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcCacheManagerImpl.cc
+)
+target_include_directories(
+    rdc_health_tests
+    PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/include ${AMD_SMI_INCLUDE_DIR}
+)
+target_link_libraries(rdc_health_tests PRIVATE rdc_bootstrap GTest::gtest_main pthread)
+set_target_properties(rdc_health_tests PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib")
+add_test(NAME rdc_health_tests COMMAND rdc_health_tests)
+install(
+    TARGETS rdc_health_tests
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
+    COMPONENT ${TESTS_COMPONENT}
+)
+
 # rdc_cache_bounds_tests: the retention limits of cached samples. It compiles
 # RdcCacheManagerImpl.cc instead of linking librdc, so it needs no GPU;
 # librdc_bootstrap provides the logger.
