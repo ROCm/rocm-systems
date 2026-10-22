@@ -205,7 +205,7 @@ impl DoorbellPeer {
         let result = self
             .vm
             .kfd()
-            .transfer(handle, &[self.vm.gpu_id()], completed, map);
+            .transfer(handle, &[self.vm.gpu_id], completed, map);
         if result.as_ref().err().is_some_and(|source| {
             source.kind() == std::io::ErrorKind::InvalidData
                 || source.raw_os_error() == Some(errno::EFAULT)
@@ -374,7 +374,7 @@ impl DoorbellMapping {
         let mut args = uapi::AllocMemory {
             va: self.address()? as u64,
             size: DOORBELL_SLICE as u64,
-            gpu_id: vm.gpu_id(),
+            gpu_id: vm.gpu_id,
             flags: uapi::DOORBELL | uapi::WRITABLE | uapi::COHERENT | uapi::NO_SUBSTITUTE,
             ..uapi::AllocMemory::default()
         };
@@ -555,7 +555,7 @@ impl Doorbells {
             *mapping = Some(DoorbellMapping {
                 storage: Some(storage),
                 offset: base,
-                gpu_id: vm.gpu_id(),
+                gpu_id: vm.gpu_id,
                 handle: None,
                 gpu_mapping: DoorbellGpuMapping::Unmapped,
                 peers: Vec::new(),
@@ -712,10 +712,10 @@ impl QueuePeerMapping {
                 "queue peer mapping has an invalid transfer state",
             ));
         };
-        let result =
-            self.vm
-                .kfd()
-                .transfer(self.handles[index], &[self.vm.gpu_id()], completed, map);
+        let result = self
+            .vm
+            .kfd()
+            .transfer(self.handles[index], &[self.vm.gpu_id], completed, map);
         if result.as_ref().err().is_some_and(|source| {
             source.kind() == std::io::ErrorKind::InvalidData
                 || source.raw_os_error() == Some(errno::EFAULT)
@@ -1383,7 +1383,12 @@ fn pm4_control(native: &sysfs::KfdNode) -> Option<Pm4Control> {
     {
         return None;
     }
-    let cache_line = usize::try_from(crate::cpu_cache::cache_line_size().ok()?).ok()?;
+    let cache_line = usize::try_from(
+        crate::host::cache::CacheMaintenance::qualify(crate::host::cache::CachePolicy::WriteBack)
+            .ok()?
+            .line_size_bytes()?,
+    )
+    .ok()?;
     if cache_line < size_of::<u64>() || !cache_line.is_power_of_two() || cache_line > 4096 / 3 {
         return None;
     }
@@ -1462,7 +1467,7 @@ impl QueueContext {
         let mut attributes = [
             uapi::SvmAttribute {
                 attribute_type: uapi::SVM_ATTR_PREFETCH_LOCATION,
-                value: vm.gpu_id(),
+                value: vm.gpu_id,
             },
             uapi::SvmAttribute {
                 attribute_type: uapi::SVM_ATTR_PREFERRED_LOCATION,
@@ -1478,7 +1483,7 @@ impl QueueContext {
             },
             uapi::SvmAttribute {
                 attribute_type: uapi::SVM_ATTR_ACCESS,
-                value: vm.gpu_id(),
+                value: vm.gpu_id,
             },
             uapi::SvmAttribute {
                 attribute_type: uapi::SVM_ATTR_GRANULARITY,
@@ -1752,7 +1757,7 @@ impl KfdQueue {
             write_pointer: pointer_device_address + write_offset as u64,
             read_pointer: pointer_device_address + read_offset as u64,
             ring_size: request.ring_size,
-            gpu_id: vm.gpu_id(),
+            gpu_id: vm.gpu_id,
             queue_type: request.queue_type,
             sdma_engine_id: selected_sdma_engine_id.unwrap_or(0),
             percentage: 100,

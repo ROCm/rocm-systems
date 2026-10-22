@@ -13,7 +13,7 @@ use crate::device::{Device, DeviceResources};
 use crate::driver::{self, DriverInstance};
 use crate::memory::storage::Shared;
 use crate::memory::storage::TryPush;
-use crate::topology::{Endpoint, EndpointDetails};
+use crate::topology::Endpoint;
 use crate::{Error, ErrorKind};
 
 /// Maximum lifetime allowed for a driver context acquired through a session.
@@ -74,31 +74,40 @@ impl Clone for Session {
 }
 
 impl Session {
-    /// Queries optional information from the endpoint's owning driver.
-    /// Identity and discovered capabilities remain in [`Endpoint`]. This
-    /// query reopens the endpoint without activating it and rejects a snapshot
-    /// whose metadata has already changed.
+    /// Populates optional information on an endpoint from its owning driver.
+    /// The query reopens the endpoint without activating it and rejects a
+    /// snapshot whose discovered metadata has changed. A failed query leaves
+    /// the caller's endpoint unchanged.
     ///
     /// # Errors
-    /// Rejects an endpoint owned by another session, a closed session, or a
-    /// snapshot whose metadata changed, and propagates any driver query error.
-    pub fn query_endpoint_details(&self, endpoint: &Endpoint) -> Result<EndpointDetails, Error> {
+    /// Rejects an endpoint owned by another session, a closed session, a
+    /// changed snapshot or a driver mutation of discovered facts, and
+    /// propagates any driver query error.
+    pub fn populate_endpoint(&self, endpoint: &mut Endpoint) -> Result<(), Error> {
         self.ensure_open()?;
         let Some(driver) = self.driver_for_endpoint(endpoint) else {
             return Err(Error::Operation {
                 kind: ErrorKind::InvalidArgument,
-                detail: "endpoint details require an endpoint in this session",
+                detail: "endpoint population requires an endpoint in this session",
             });
         };
-        let current = driver.open_endpoint(endpoint.id)?;
+        let mut current = driver.open_endpoint(endpoint.id)?;
         Self::validate_opened_endpoint(driver, endpoint.id, &current)?;
-        if &current != endpoint {
+        if !endpoint.matches_discovery(&current) {
             return Err(Error::Operation {
                 kind: ErrorKind::DeviceLost,
-                detail: "endpoint metadata changed before details query",
+                detail: "endpoint metadata changed before population",
             });
         }
-        driver.query_endpoint_details(&current)
+        driver.populate_endpoint(&mut current)?;
+        if !endpoint.matches_discovery(&current) {
+            return Err(Error::Operation {
+                kind: ErrorKind::InvalidData,
+                detail: "driver changed discovered endpoint facts during population",
+            });
+        }
+        *endpoint = current;
+        Ok(())
     }
 
     /// Selects the driver named by a passive endpoint snapshot without
@@ -415,7 +424,7 @@ mod tests {
     use crate::memory::{
         DeviceAccess, DeviceIntervals, DriverVirtualAddress, HostIntervals, MemoryKind,
     };
-    use crate::topology::{EndpointDetailsKind, EndpointKind};
+    use crate::topology::{EndpointKind, GpuInfo};
     use std::sync::atomic::Ordering;
 
     #[test]
@@ -538,21 +547,20 @@ mod tests {
         assert_eq!(endpoints[1].id, ids[1]);
         assert_eq!(endpoints[2].id, ids[2]);
         assert_eq!(session.open_endpoint(ids[1]).unwrap(), endpoints[1]);
-        for endpoint in &endpoints {
-            let details = session.query_endpoint_details(endpoint).unwrap();
-            assert_eq!(details.product_name, None);
-            assert_eq!(details.kind, EndpointDetailsKind::Other);
+        for endpoint in &mut endpoints {
+            session.populate_endpoint(endpoint).unwrap();
+            assert_eq!(endpoint.product_name.as_deref(), Some("Test endpoint"));
         }
         let mut stale = endpoints[0].clone();
         stale.name[0] = b'!';
         assert_eq!(
-            session.query_endpoint_details(&stale).unwrap_err().kind(),
+            session.populate_endpoint(&mut stale).unwrap_err().kind(),
             ErrorKind::DeviceLost
         );
         let (mut other_session, _) = test_session(&ids);
         assert_eq!(
             other_session
-                .query_endpoint_details(&endpoints[0])
+                .populate_endpoint(&mut endpoints[0])
                 .unwrap_err()
                 .kind(),
             ErrorKind::InvalidArgument
@@ -564,6 +572,7 @@ mod tests {
         other_session.destroy().unwrap();
         let first = session.activate(&endpoints[0]).unwrap();
         let second = session.activate(&endpoints[1]).unwrap();
+        assert_eq!(first.endpoint().product_name, endpoints[0].product_name);
         assert!(!first.shares_address_domain(&second));
         assert_eq!(first.address_range(), (0x1000, 0xffff));
         assert_eq!(first.gpu().err().unwrap().kind(), ErrorKind::Unsupported);
@@ -600,7 +609,7 @@ mod tests {
         );
         assert_eq!(
             session
-                .query_endpoint_details(&endpoints[0])
+                .populate_endpoint(&mut endpoints[0])
                 .unwrap_err()
                 .kind(),
             ErrorKind::Unsupported
@@ -613,6 +622,57 @@ mod tests {
         assert_eq!(probes[0].shutdowns.load(Ordering::Relaxed), 1);
         assert_eq!(probes[1].shutdowns.load(Ordering::Relaxed), 2);
         assert_eq!(probes[2].shutdowns.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn populated_gpu_endpoint_keeps_discovery_identity_for_activation() {
+        let id = [0x34; 16];
+        let driver = TestDriver::new(
+            id,
+            EndpointKind::Gpu {
+                info: GpuInfo {
+                    asic_family_id: 11,
+                    ..GpuInfo::default()
+                },
+            },
+            DriverContextLifetime::Session,
+        );
+        let mut session = Session::from_drivers(
+            vec![DriverInstance::Test(Shared::new(driver).unwrap())],
+            DriverContextLifetime::Session,
+        )
+        .unwrap();
+        let mut endpoint = session.open_endpoint(id).unwrap();
+        assert_eq!(endpoint.product_name, None);
+        assert_eq!(endpoint.gpu().unwrap().drm_asic_family_id, None);
+        session.populate_endpoint(&mut endpoint).unwrap();
+        assert_eq!(endpoint.product_name.as_deref(), Some("Test endpoint"));
+        assert_eq!(endpoint.gpu().unwrap().asic_family_id, 11);
+        assert_eq!(endpoint.gpu().unwrap().drm_asic_family_id, Some(42));
+        assert_eq!(
+            endpoint.gpu().unwrap().counter_frequency_hz,
+            Some(1_000_000)
+        );
+        session.populate_endpoint(&mut endpoint).unwrap();
+        let device = session.activate(&endpoint).unwrap();
+        assert_eq!(device.endpoint(), &endpoint);
+
+        let mut stale = endpoint.clone();
+        if let EndpointKind::Gpu { info } = &mut stale.kind {
+            info.asic_family_id = 12;
+        }
+        let unchanged = stale.clone();
+        assert_eq!(
+            session.populate_endpoint(&mut stale).unwrap_err().kind(),
+            ErrorKind::DeviceLost
+        );
+        assert_eq!(stale, unchanged);
+        assert_eq!(
+            session.activate(&stale).err().unwrap().kind(),
+            ErrorKind::InvalidArgument
+        );
+        drop(device);
+        session.destroy().unwrap();
     }
 
     #[test]
