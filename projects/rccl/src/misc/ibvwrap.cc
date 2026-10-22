@@ -519,8 +519,21 @@ ncclResult_t wrap_ibv_event_type_str(char** ret, enum ibv_event_type event) {
 
 ncclResult_t wrap_ibv_create_cq_ex(struct ibv_cq_ex** ret, struct ibv_context* context,
                                    struct ibv_cq_init_attr_ex* cq_attr) {
-  IBV_PTR_CHECK_ERRNO(ibvSymbols, ibv_internal_create_cq_ex, ibv_internal_create_cq_ex(context, cq_attr), *ret, NULL,
-                      "ibv_create_cq_ex");
+  // ibv_create_cq_ex() is an inline in rdma-core's verbs.h that dispatches
+  // through the provider's verbs_context op table — not a dlsym'able libibverbs
+  // symbol. Mirror that inline here via verbs_get_ctx_op.
+  struct verbs_context* vctx = verbs_get_ctx_op(context, create_cq_ex);
+  if (vctx == NULL) {
+    errno = EOPNOTSUPP;
+    WARN("Call to ibv_create_cq_ex failed: provider does not support extended CQ creation");
+    return ncclSystemError;
+  }
+  *ret = vctx->create_cq_ex(context, cq_attr);
+  if (*ret == NULL) {
+    WARN("Call to ibv_create_cq_ex failed with error %s", strerror(errno));
+    return ncclSystemError;
+  }
+  return ncclSuccess;
 }
 
 struct ibv_cq* wrap_ibv_cq_ex_to_cq(struct ibv_cq_ex* cq) {
@@ -531,8 +544,21 @@ struct ibv_cq* wrap_ibv_cq_ex_to_cq(struct ibv_cq_ex* cq) {
 
 ncclResult_t wrap_ibv_alloc_parent_domain(struct ibv_pd** ret, struct ibv_context* context,
                                           struct ibv_parent_domain_init_attr* attr) {
-  IBV_PTR_CHECK_ERRNO(ibvSymbols, ibv_internal_alloc_parent_domain,
-                      ibv_internal_alloc_parent_domain(context, attr), *ret, NULL, "ibv_alloc_parent_domain");
+  // ibv_alloc_parent_domain() is an inline in rdma-core's verbs.h, not a
+  // dlsym'able libibverbs symbol — it dispatches through the provider's
+  // verbs_context op table. Mirror that inline here via verbs_get_ctx_op.
+  struct verbs_context* vctx = verbs_get_ctx_op(context, alloc_parent_domain);
+  if (vctx == NULL) {
+    errno = EOPNOTSUPP;
+    WARN("Call to ibv_alloc_parent_domain failed: provider does not support parent domains");
+    return ncclSystemError;
+  }
+  *ret = vctx->alloc_parent_domain(context, attr);
+  if (*ret == NULL) {
+    WARN("Call to ibv_alloc_parent_domain failed with error %s", strerror(errno));
+    return ncclSystemError;
+  }
+  return ncclSuccess;
 }
 
 ncclResult_t wrap_ibv_create_qp_ex(struct ibv_qp** ret, struct ibv_context* context,

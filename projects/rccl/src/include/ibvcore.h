@@ -1166,7 +1166,42 @@ struct verbs_context {
 	int (*query_port)(struct ibv_context *context, uint8_t port_num,
 			  struct ibv_port_attr *port_attr,
 			  size_t port_attr_len);
-	int (*_reserved[25]) (void);
+	/* The 25 vtable slots between query_port and priv (upstream's
+	 * verbs_context layout). They must stay in this exact order and count so
+	 * verbs_get_ctx_op(ctx, <op>) resolves the right entry — the GIN QP factory
+	 * dispatches alloc_parent_domain / create_cq_ex through this table (both are
+	 * rdma-core verbs.h inlines, not dlsym'able libibverbs symbols). Only the two
+	 * ops rccl actually calls carry real signatures; the rest are opaque function
+	 * pointers (all entries are 8-byte fn-ptrs, so the ABI offsets are preserved)
+	 * to avoid pulling in verbs types rccl's ibvcore.h does not vendor. The
+	 * original names from upstream are kept in comments for traceability. */
+	void (*advise_mr)(void);
+	void (*alloc_null_mr)(void);
+	void (*read_counters)(void);
+	void (*attach_counters_point_flow)(void);
+	void (*create_counters)(void);
+	void (*destroy_counters)(void);
+	void (*reg_dm_mr)(void);
+	void (*alloc_dm)(void);
+	void (*free_dm)(void);
+	void (*modify_flow_action_esp)(void);
+	void (*destroy_flow_action)(void);
+	void (*create_flow_action_esp)(void);
+	void (*modify_qp_rate_limit)(void);
+	struct ibv_pd *(*alloc_parent_domain)(struct ibv_context *context,
+					      struct ibv_parent_domain_init_attr *attr);
+	void (*dealloc_td)(void);
+	void (*alloc_td)(void);
+	void (*modify_cq)(void);
+	void (*post_srq_ops)(void);
+	void (*destroy_rwq_ind_table)(void);
+	void (*create_rwq_ind_table)(void);
+	void (*destroy_wq)(void);
+	void (*modify_wq)(void);
+	void (*create_wq)(void);
+	void (*query_rt_values)(void);
+	struct ibv_cq_ex *(*create_cq_ex)(struct ibv_context *context,
+					  struct ibv_cq_init_attr_ex *init_attr);
 	struct verbs_ex_private *priv;
 	int (*query_device_ex)(struct ibv_context *context,
 			       const struct ibv_query_device_ex_input *input,

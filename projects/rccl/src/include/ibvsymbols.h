@@ -51,14 +51,13 @@ struct ncclIbvSymbols {
   int (*ibv_internal_query_ece)(struct ibv_qp* qp, struct ibv_ece* ece);
   int (*ibv_internal_set_ece)(struct ibv_qp* qp, struct ibv_ece* ece);
   int (*ibv_internal_query_port_speed)(struct ibv_context* context, uint8_t port_num, uint64_t* speed);
-  /* Extended verbs used by the GIN QP factory. Optional: left NULL when the
-   * loaded libibverbs does not export them. */
-  struct ibv_cq_ex* (*ibv_internal_create_cq_ex)(struct ibv_context* context,
-                                                 struct ibv_cq_init_attr_ex* cq_attr);
-  struct ibv_pd* (*ibv_internal_alloc_parent_domain)(struct ibv_context* context,
-                                                    struct ibv_parent_domain_init_attr* attr);
-  /* Exported as "_ibv_query_gid_table" (leading underscore) with a trailing
-   * entry-size argument; the public ibv_query_gid_table() is a header inline. */
+  /* Extended verb used by the GIN QP factory. ibv_create_cq_ex and
+   * ibv_alloc_parent_domain are intentionally absent: they are rdma-core verbs.h
+   * inlines dispatched through the provider's verbs_context op table (handled in
+   * ibvwrap.cc), not dlsym'able symbols.
+   * query_gid_table IS exported as "_ibv_query_gid_table" (leading underscore)
+   * with a trailing entry-size argument; the public ibv_query_gid_table() is a
+   * header inline. */
   ssize_t (*ibv_internal_query_gid_table)(struct ibv_context* context, struct ibv_gid_entry* entries,
                                           size_t max_entries, uint32_t flags, size_t entry_size);
 };
