@@ -241,13 +241,13 @@ int open_proc_maps_snapshot(const char *path, int flags) {
   return snapshot;
 }
 
-/// @brief Connect to the daemon for this invocation's per-PID runtime directory.
-/// @details Connects to <runtime_dir>/daemon.sock. Only when that per-PID
-/// directory does not exist (attach / daemon-only clients that share the
-/// well-known location) does it fall back to rpc_default_socket_path(). The
-/// fallback is gated on dir-absence rather than connect-failure so a daemon-mode
-/// app is never silently cross-connected to an unrelated daemon at the shared
-/// well-known socket if its own daemon's socket is transiently unavailable.
+/// @brief Connect to the daemon for this invocation's resolved runtime directory.
+/// @details Connects to <runtime_dir>/daemon.sock. Only when that directory does
+/// not exist (legacy attach / daemon-only clients that share the well-known
+/// location) does it fall back to rpc_default_socket_path(). The fallback is
+/// gated on dir-absence rather than connect-failure so a daemon-mode app is
+/// never silently cross-connected to an unrelated daemon at the shared well-known
+/// socket if its own daemon's socket is transiently unavailable.
 int connect_to_daemon(const std::string &runtime_dir) {
   int sock = try_connect(runtime_dir + "/daemon.sock");
   if (sock >= 0)
@@ -471,7 +471,7 @@ public:
     // (including grandchildren spawned through wrappers like ctest, whose PID
     // differs from the launcher's) inherits the exact directory holding
     // config_path/daemon.sock. Fall back to this process's PID-scoped default for
-    // attach mode, where no launcher set the variable.
+    // direct users or legacy attach launches where no launcher set the variable.
     // Assigned before resolve() (which flips real().ready() true, the gate every
     // interposed entry point checks) so no reader can observe an empty value.
     // Treat an unset OR empty $ROCJITSU_INVOCATION_DIR as "no launcher dir": an

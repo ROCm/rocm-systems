@@ -263,7 +263,7 @@ load_dbt_guest_config_from_runtime_config(util::DiagnosticEmitter emit_error) {
   //      init(); an empty value would otherwise build "/config_path".
   //   2. this process's PID-scoped path (execvp preserves the launcher's PID for the
   //      direct child) — also the fallback if the env var is set but stale/misdirected.
-  //   3. the well-known location for attach / daemon-only scenarios.
+  //   3. the well-known location for direct daemon-only or legacy attach scenarios.
   // Falling straight from tier 1 to tier 3 (skipping tier 2) would miss a valid
   // per-PID handoff when the env var is set but its config_path is absent.
   std::vector<std::string> candidates;
