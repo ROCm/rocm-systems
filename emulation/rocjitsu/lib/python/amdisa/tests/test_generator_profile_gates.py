@@ -5988,6 +5988,9 @@ def test_generated_vopc_dpp_is_explicitly_unsupported(
 ):
     vopc_model = (amdgpu_generated_root / arch / 'vopc.cpp').read_text()
     vopc_exec = (amdgpu_generated_root / arch / 'vopc_exec.cpp').read_text()
+    assert 'SRC_SDWA' in vopc_exec
+    assert 'SRC_DPP' not in vopc_exec
+    assert 'is_src_dpp8' not in vopc_exec
     assert 'amdgpu::dpp::apply_dpp' not in vopc_exec
     assert 'dpp_write_mask' not in vopc_exec
     assert 'throw util::UnimplementedInst' not in vopc_exec
