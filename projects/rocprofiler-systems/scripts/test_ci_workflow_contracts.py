@@ -714,14 +714,23 @@ def run_ci_command(
     )
 
 
-def _load_run_ci_module():
-    """Import run-ci.py as a module (its filename isn't a valid identifier,
-    so it can't use a normal `import`) to unit test its pure functions
-    directly, without a subprocess."""
-    spec = importlib.util.spec_from_file_location("run_ci", RUN_CI)
+def _load_script(name: str, path: Path):
+    """Import a script whose filename isn't a valid identifier as a module.
+
+    The module is registered in sys.modules before it runs so dataclasses can
+    resolve postponed (``from __future__ import annotations``) annotations.
+    """
+    spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _load_run_ci_module():
+    """Import run-ci.py to unit test its pure functions directly, without a
+    subprocess."""
+    return _load_script("run_ci", RUN_CI)
 
 
 def _gzip_base64_value(text: str) -> str:
@@ -904,12 +913,8 @@ def check_run_ci_skipped_tests_summary(verbose: bool) -> None:
 
 
 def _load_summary_module():
-    """Import summarize-junit-results.py as a module (its filename isn't a
-    valid identifier) to unit test its pure functions directly."""
-    spec = importlib.util.spec_from_file_location("summarize_junit", SUMMARY_SCRIPT)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    """Import summarize-junit-results.py to unit test its pure functions directly."""
+    return _load_script("summarize_junit", SUMMARY_SCRIPT)
 
 
 def check_summarize_junit_results_unit(verbose: bool) -> None:
