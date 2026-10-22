@@ -143,7 +143,7 @@ __device__ void rocshmem_query_thread(int *provided) {
 }
 
 __device__ size_t rocshmem_query_tdm_lds_bytes() {
-#if defined(USE_TDM)
+#if ROCSHMEM_TDM_ENABLED
   return tdm::lds_bytes_for_tile(constmem.tdm_tile_bytes);
 #else
   return 0;
@@ -152,7 +152,7 @@ __device__ size_t rocshmem_query_tdm_lds_bytes() {
 
 __device__ void rocshmem_set_tdm_lds([[maybe_unused]] void *lds,
                                      [[maybe_unused]] size_t lds_bytes) {
-#if defined(USE_TDM) && defined(__gfx1250__)
+#if ROCSHMEM_TDM_ENABLED
   tdm::set_lds(lds, lds_bytes);
 #endif
 }
@@ -1322,7 +1322,7 @@ __device__ __forceinline__ void direct_destroy_ctx(rocshmem_ctx_t *ctx) {
 
 __device__ int rocshmem_wg_ctx_create(long options, rocshmem_ctx_t *ctx) {
   LOGD_API("device::wg_ctx_create (options=%ld)", options);
-#if defined(USE_TDM) && defined(__gfx1250__)
+#if ROCSHMEM_TDM_ENABLED
   tdm::set_lds(nullptr, 0);
 #endif
   bool result{true};

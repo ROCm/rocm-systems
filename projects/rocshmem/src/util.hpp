@@ -605,11 +605,13 @@ constexpr int TdmStorePolicy = tdm::make_cache_policy(
 template <MemcpyKind Kind = MemcpyKind::Put>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_wg_tdm(void* dst, void* src,
                                                                 size_t size) {
-#if defined(USE_TDM) && defined(__gfx1250__) && HIP_HAVE_TDM_INTRINSICS
+#if ROCSHMEM_TDM_ENABLED
   const tdm::LdsRegistration reg = tdm::get_lds();
   // A minimum of 16 bytes (2 x 8-byte element, for double buffering) is
   // required for one usable TDM tile; anything less isn't worth staging.
-  if (reg.ptr != nullptr && reg.bytes >= 16) {
+  // Below ROCSHMEM_TDM_THRESHOLD, TDM's issue latency isn't amortized, so
+  // the normal copy path is cheaper (same idea as the SDMA threshold).
+  if (reg.ptr != nullptr && reg.bytes >= 16 && size >= constmem.tdm_threshold) {
     constexpr uint32_t element_bytes = 1u << tdm::FlatCopyElementLog2;
     uint32_t tile_bytes = static_cast<uint32_t>(
         min(static_cast<size_t>(constmem.tdm_tile_bytes), reg.bytes / 2));

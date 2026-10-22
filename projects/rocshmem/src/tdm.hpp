@@ -51,8 +51,32 @@
 #define HIP_HAVE_TDM_INTRINSICS 0
 #endif
 
+// Single switch for "TDM is actually usable here": the build opted in, the
+// target arch supports it, and the compiler exposes the intrinsics. Nothing
+// below that only makes sense under TDM should exist unless this is true.
+#if defined(USE_TDM) && (defined(__gfx1250__) || defined(__gfx1250_strict__)) && \
+    HIP_HAVE_TDM_INTRINSICS
+#define ROCSHMEM_TDM_ENABLED 1
+#else
+#define ROCSHMEM_TDM_ENABLED 0
+#endif
+
 namespace rocshmem {
 namespace tdm {
+
+// LDS bytes needed for a double-buffered copy_region call with this tile
+// size. Called from host-only code (constmem.cpp, rocshmem.cpp) whenever
+// USE_TDM is set, independent of which device arch is being compiled --
+// gate on that alone, not ROCSHMEM_TDM_ENABLED (its arch macros are never
+// defined during a host-only compilation pass, which would make the
+// function disappear there).
+#if defined(USE_TDM)
+__host__ __device__ constexpr size_t lds_bytes_for_tile(uint32_t tile_bytes) {
+  return 2 * static_cast<size_t>(tile_bytes);
+}
+#endif  // USE_TDM
+
+#if ROCSHMEM_TDM_ENABLED
 
 // ==============================================================================
 // VECTOR TYPES
@@ -67,10 +91,6 @@ using i32x8 = int32_t __attribute__((ext_vector_type(8)));
 // ==============================================================================
 
 enum class DataSize : uint32_t { Bits8 = 0, Bits16 = 1, Bits32 = 2, Bits64 = 3 };
-
-constexpr uint32_t data_size_bytes(DataSize d) {
-  return 1u << static_cast<uint32_t>(d);
-}
 
 // ==============================================================================
 // CACHE POLICY (the `cachepolicy` immediate argument of the TDM intrinsics)
@@ -177,8 +197,6 @@ __device__ __forceinline__ Descriptor2D make_descriptor_2d(
   return d;
 }
 
-#if HIP_HAVE_TDM_INTRINSICS
-
 // ==============================================================================
 // RAW INTRINSIC WRAPPERS
 // ==============================================================================
@@ -218,8 +236,6 @@ __device__ __forceinline__ void store_from_lds(const Descriptor2D &d) {
   store_from_lds<CachePolicy>(d.group0, d.group1);
 }
 
-#endif  // HIP_HAVE_TDM_INTRINSICS
-
 // ==============================================================================
 // BULK TILE-COPY HELPERS: flat global<->global byte copies staged through
 // LDS, tiled as 2D descriptors with 8-byte elements. Must be called from
@@ -240,8 +256,6 @@ __device__ __forceinline__ size_t covered_bytes(size_t total_bytes, uint32_t til
   }
   return (total_bytes / tile_bytes_cap) * static_cast<size_t>(tile_bytes_cap);
 }
-
-#if HIP_HAVE_TDM_INTRINSICS
 
 // Copies covered_bytes(bytes, tile_bytes_cap) bytes tile by tile through
 // lds_scratch. double_buffered overlaps load(tile N+1) with store(tile N)
@@ -271,7 +285,6 @@ __device__ inline void copy_region(void *dst, const void *src, size_t bytes, voi
   const auto *src_bytes = static_cast<const char *>(src);
   auto *lds_base = static_cast<uint8_t *>(lds_scratch);
 
-#if defined(__gfx1250__)
   if (double_buffered) {
     uintptr_t ping = reinterpret_cast<uintptr_t>(lds_base);
     uintptr_t pong = reinterpret_cast<uintptr_t>(lds_base + tile_bytes);
@@ -303,9 +316,7 @@ __device__ inline void copy_region(void *dst, const void *src, size_t bytes, voi
     }
     // Drain the last in-flight load+store pair.
     wait<0>();
-  } else
-#endif
-  {
+  } else {
     const uintptr_t lds_addr = reinterpret_cast<uintptr_t>(lds_base);
     for (size_t i = 0; i < full_tiles; ++i) {
       const size_t offset = i * tile_bytes;
@@ -327,12 +338,10 @@ __device__ inline void copy_region(void *dst, const void *src, size_t bytes, voi
 // always both in flight. Tiles issue in pairs (load/store alternating
 // even/odd, buffer chosen by parity); each op is issued exactly two slots
 // after the op it depends on, so wait<1>() before op N guarantees op N-2
-// has completed. Falls back to copy_region's single-buffered path on
-// non-gfx1250 builds.
+// has completed.
 template <int LoadCachePolicy, int StoreCachePolicy>
 __device__ inline void copy_region_pipelined(void *dst, const void *src, size_t bytes,
                                              void *lds_scratch, uint32_t tile_bytes_cap) {
-#if defined(__gfx1250__)
   const size_t covered = covered_bytes(bytes, tile_bytes_cap);
   if (covered == 0) return;
   const uint32_t tile_bytes =
@@ -394,13 +403,7 @@ __device__ inline void copy_region_pipelined(void *dst, const void *src, size_t 
 
   // Drain everything still in flight before returning.
   wait<0>();
-#else
-  copy_region<LoadCachePolicy, StoreCachePolicy>(dst, src, bytes, lds_scratch, tile_bytes_cap,
-                          /*double_buffered=*/false);
-#endif
 }
-
-#endif  // HIP_HAVE_TDM_INTRINSICS
 
 // ==============================================================================
 // LDS REGISTRATION: backs rocshmem_set_tdm_lds()/rocshmem_query_tdm_lds_bytes().
@@ -408,11 +411,6 @@ __device__ inline void copy_region_pipelined(void *dst, const void *src, size_t 
 // arguments are used, but its internal barrier needs every thread to reach
 // it -- before any work-group put/get in that kernel that should use TDM.
 // ==============================================================================
-
-// LDS bytes needed for a double-buffered copy_region call with this tile size.
-__host__ __device__ constexpr size_t lds_bytes_for_tile(uint32_t tile_bytes) {
-  return 2 * static_cast<size_t>(tile_bytes);
-}
 
 // Each workgroup gets its own private LDS, and set_lds() always runs earlier
 // in the same kernel dispatch than any get_lds() that reads it back, so no
@@ -434,6 +432,8 @@ __device__ __forceinline__ void set_lds(void* ptr, size_t bytes) {
 __device__ __forceinline__ LdsRegistration get_lds() {
   return lds_registration;
 }
+
+#endif  // ROCSHMEM_TDM_ENABLED
 
 }  // namespace tdm
 }  // namespace rocshmem

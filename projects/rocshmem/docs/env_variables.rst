@@ -270,3 +270,11 @@ control the behavior of rocSHMEM.
         | a warning. If the requested size (doubled) doesn't fit in this
         | device's shared memory per block, falls back to the auto-sized
         | value instead.
+
+    * - | ``ROCSHMEM_TDM_THRESHOLD``
+        | Minimum transfer size in bytes to route through TDM for work-group
+        | put/get on gfx1250 (requires ``USE_TDM`` build option). Transfers
+        | smaller than this use the normal (non-TDM) copy path instead, since
+        | TDM's issue latency isn't amortized for small transfers.
+      - ``4096``
+      - Size in bytes.
