@@ -30,6 +30,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
