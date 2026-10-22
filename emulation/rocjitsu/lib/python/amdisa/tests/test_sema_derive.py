@@ -1819,7 +1819,7 @@ class TestDeriveVectorBinop:
             call_names = [
                 n.call_name for n in block.body.walk() if n.kind == SemaNodeKind.CALL
             ]
-            assert f'std::f{op}' in call_names
+            assert f'float_minmax_legacy_{op}' in call_names
         for op in ['min', 'max']:
             sem = _FakeSem(f'V_{op.upper()}_I32', 'vector_binop', op, 'i32')
             block = derive_sema_block(sem)
@@ -2272,14 +2272,28 @@ _SCALAR_ATOMIC_OPS = (
 )
 
 
+# Compare-swap carries its compare value after the source, doubling its data.
+_IMPLEMENTED_SCALAR_ATOMICS = {
+    f'S_ATOMIC_{op}{width}': (
+        op.lower(),
+        elem_size,
+        2 * num_elems if op == 'CMPSWAP' else num_elems,
+    )
+    for op in _SCALAR_ATOMIC_OPS
+    for width, elem_size, num_elems in (('', 4, 1), ('_X2', 8, 2))
+}
+
+
 class TestDeriveSmemAtomic:
-    def test_dec_derives_scalar_atomic(self):
-        sem = derive_semantics('S_ATOMIC_DEC', 'ENC_SMEM')
+    @pytest.mark.parametrize('name', sorted(_IMPLEMENTED_SCALAR_ATOMICS))
+    def test_implemented_scalar_atomics_derive_operation_and_widths(self, name):
+        operation, elem_size, num_elems = _IMPLEMENTED_SCALAR_ATOMICS[name]
+        sem = derive_semantics(name, 'ENC_SMEM')
         assert sem is not None
         assert sem.semantic_class == 'smem_atomic'
-        assert sem.operation == 'dec'
-        assert sem.elem_size == 4
-        assert sem.num_elems == 1
+        assert sem.operation == operation
+        assert sem.elem_size == elem_size
+        assert sem.num_elems == num_elems
 
     @pytest.mark.parametrize(
         'name',
@@ -2288,10 +2302,27 @@ class TestDeriveSmemAtomic:
             for prefix in ('S_ATOMIC_', 'S_BUFFER_ATOMIC_')
             for op in _SCALAR_ATOMIC_OPS
             for width in ('', '_X2')
-            if f'{prefix}{op}{width}' != 'S_ATOMIC_DEC'
+            if f'{prefix}{op}{width}' not in _IMPLEMENTED_SCALAR_ATOMICS
         ],
     )
     def test_unimplemented_scalar_atomics_stay_nop(self, name):
+        sem = derive_semantics(name, 'ENC_SMEM')
+        assert sem is not None
+        assert sem.semantic_class == 'nop'
+
+    # No CDNA ISA defines these. The flat atomic tables know their operations,
+    # so they pin that scalar support comes from the allowlist, not that table.
+    @pytest.mark.parametrize(
+        'name',
+        [
+            'S_ATOMIC_ADD_F32',
+            'S_ATOMIC_FMIN',
+            'S_ATOMIC_PK_ADD_F16',
+            'S_ATOMIC_CSUB',
+            'S_ATOMIC_COND_SUB_U32',
+        ],
+    )
+    def test_scalar_atomic_operations_outside_allowlist_stay_nop(self, name):
         sem = derive_semantics(name, 'ENC_SMEM')
         assert sem is not None
         assert sem.semantic_class == 'nop'

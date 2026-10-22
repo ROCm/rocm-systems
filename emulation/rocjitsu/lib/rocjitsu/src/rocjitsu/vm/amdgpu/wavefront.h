@@ -52,6 +52,7 @@ enum class WfState : uint8_t {
 /// @brief Simulator execution failures that are not architectural wave state.
 enum class InstructionExecutionError : uint8_t {
   None,
+  InvalidInstructionEncoding,
   UnsupportedOperandValue,
   UnimplementedInstruction,
 };
@@ -728,7 +729,7 @@ public:
   /// @brief Record a fail-closed instruction execution error.
   /// @details Execution callbacks use this for inputs whose architectural
   /// behavior is not implemented. Callers must not treat it as a hardware trap.
-  void report_instruction_execution_error(InstructionExecutionError error) {
+  void report_instruction_execution_error(InstructionExecutionError error) const {
     instruction_execution_error_ = error;
   }
 
@@ -1107,7 +1108,7 @@ protected:
   std::shared_ptr<Pm4FailureState> pm4_failure_; ///< Null for AQL launches.
   std::shared_ptr<uint32_t> scratch_lease_;      ///< Resident PM4 scratch slot.
   uint32_t queue_id_ = 0; ///< KFD queue ID that launched this wave (debugger correlation).
-  InstructionExecutionError instruction_execution_error_ = InstructionExecutionError::None;
+  mutable InstructionExecutionError instruction_execution_error_ = InstructionExecutionError::None;
   uint32_t lds_base_ = 0;     ///< Per-WG LDS base offset (set per dispatch).
   uint32_t lds_size_ = 0;     ///< Aligned per-WG LDS allocation size.
   Lds *lds_ = nullptr;        ///< Placement-selected LDS backing; nullptr means CU-local LDS.

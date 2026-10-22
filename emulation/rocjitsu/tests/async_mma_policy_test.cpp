@@ -10,22 +10,29 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
+#include "rocjitsu/isa/target_provider.h"
 #include "rocjitsu/vm/amdgpu/async_scoreboard.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/amdgpu/pm4/pm4.h"
+#include "util/except.h"
 
 #include <gtest/gtest.h>
 
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <memory>
 #include <semaphore>
 #include <thread>
+#include <vector>
 
 namespace {
 using namespace rocjitsu;
@@ -166,6 +173,153 @@ TEST(AsyncMmaPolicyTest, ScaledWmmaOffloadsVectorAndInlineScalesButKeepsScalarSc
       window.drain();
     }
   }
+}
+
+TEST(AsyncMmaPolicyTest, UnsupportedAsyncWmmaHaltsWithoutHostException) {
+  constexpr uint64_t kPc = 0x200000;
+  amdgpu::GpuMemory memory("unsupported_async_wmma_memory");
+  amdgpu::L2Cache l2("unsupported_async_wmma_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 256;
+  config.async_resources = std::make_shared<mc::ExecutionResources>(1);
+  auto cu = amdgpu::ComputeUnitCore::create("unsupported_async_wmma_cu", config, &memory, &l2);
+  const auto &production_backend = cdna5::execution_backend();
+  std::vector<Instruction::ExecuteFn> callbacks(production_backend.instruction_callbacks,
+                                                production_backend.instruction_callbacks +
+                                                    production_backend.instruction_callback_count);
+  callbacks[static_cast<size_t>(cdna5::InstructionExecutionId::VWmmaF3232x16x128F4Vop3p)] =
+      [](Instruction &, void *) { throw util::UnimplementedInst("test async execution failure"); };
+  const IsaExecutionBackend throwing_backend{
+      .instruction_callbacks = callbacks.data(),
+      .instruction_callback_count = callbacks.size(),
+      .operand_backend = production_backend.operand_backend,
+  };
+  cu->replace_decoder_for_test(make_isa_decoder<cdna5::Isa>(&throwing_backend));
+  auto *wave = cu->dispatch_wf(0, kPc, 106, 256);
+  ASSERT_NE(wave, nullptr);
+  wave->set_exec(0xffffffff);
+
+  const auto first =
+      cdna5::build_vop3p(cdna5::kVWmmaF3232x16x128F4Vop3p,
+                         {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3});
+  const auto second =
+      cdna5::build_vop3p(cdna5::kVWmmaF3232x16x128F4Vop3p,
+                         {.vdst = 96, .src0 = 256, .src1 = 288, .src2 = 352, .opsel_hi = 3});
+  for (size_t index = 0; index != first.size(); ++index) {
+    memory.write32(kPc + index * sizeof(uint32_t), first[index]);
+    memory.write32(kPc + (index + first.size()) * sizeof(uint32_t), second[index]);
+  }
+  memory.write32(kPc + (first.size() + second.size()) * sizeof(uint32_t),
+                 cdna5::build_sopp(cdna5::kSEndpgmSopp)[0]);
+
+  testing::internal::CaptureStderr();
+  EXPECT_NO_THROW(cu->step());
+  const std::string output = testing::internal::GetCapturedStderr();
+  EXPECT_TRUE(wave->is_halted());
+  EXPECT_NE(output.find("asynchronous v_wmma"), std::string::npos) << output;
+  EXPECT_NE(output.find("pc=0x200000"), std::string::npos) << output;
+  EXPECT_NE(output.find("unimplemented instruction"), std::string::npos) << output;
+  EXPECT_NE(output.find("test async execution failure"), std::string::npos) << output;
+}
+
+struct FaultDrainState {
+  std::binary_semaphore worker_started{0};
+  std::binary_semaphore release_worker{0};
+  std::binary_semaphore fault_reached{0};
+  std::binary_semaphore failure_published{0};
+  std::atomic<bool> worker_done{false};
+};
+
+FaultDrainState *fault_drain_state = nullptr;
+
+TEST(AsyncMmaPolicyTest, TerminalMemoryFaultDrainsPendingMmaBeforePublishingFailure) {
+  constexpr uint64_t kPc = 0x200000;
+  FaultDrainState state;
+  amdgpu::GpuMemory memory("fault_drain_memory");
+  amdgpu::L2Cache l2("fault_drain_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 256;
+  config.async_resources = std::make_shared<mc::ExecutionResources>(1);
+  auto cu = amdgpu::ComputeUnitCore::create("fault_drain_cu", config, &memory, &l2);
+  const auto &production_backend = cdna5::execution_backend();
+  std::vector<Instruction::ExecuteFn> callbacks(production_backend.instruction_callbacks,
+                                                production_backend.instruction_callbacks +
+                                                    production_backend.instruction_callback_count);
+  callbacks[static_cast<size_t>(cdna5::InstructionExecutionId::VWmmaF3232x16x128F4Vop3p)] =
+      [](Instruction &, void *) {
+        fault_drain_state->worker_started.release();
+        fault_drain_state->release_worker.acquire();
+        fault_drain_state->worker_done.store(true, std::memory_order_release);
+      };
+  callbacks[static_cast<size_t>(cdna5::InstructionExecutionId::VWmmaF3216x16x64Fp8Fp8Vop3p)] =
+      [](Instruction &, void *) {};
+  callbacks[static_cast<size_t>(cdna5::InstructionExecutionId::GlobalLoadB32Vglobal)] =
+      [](Instruction &inst, void *) {
+        auto data = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+        data->lane_mask = data->exec_mask = 1;
+        data->wf_size = 32;
+        data->elem_size = 4;
+        data->num_elems = 1;
+        data->scratch_swizzle = data->requires_scratch_backing = true;
+        data->scratch_lane_mask = 1;
+        inst.set_data(std::move(data));
+        fault_drain_state->fault_reached.release();
+      };
+  const IsaExecutionBackend fault_backend{
+      .instruction_callbacks = callbacks.data(),
+      .instruction_callback_count = callbacks.size(),
+      .operand_backend = production_backend.operand_backend,
+  };
+  cu->replace_decoder_for_test(make_isa_decoder<cdna5::Isa>(&fault_backend));
+  auto *wave = cu->dispatch_wf(0, kPc, 106, 256);
+  ASSERT_NE(wave, nullptr);
+  wave->set_exec(0xffffffff);
+  auto failure = std::make_shared<amdgpu::Pm4FailureState>();
+  bool finished_before_failure = false;
+  failure->wake = [&] {
+    finished_before_failure = state.worker_done.load(std::memory_order_acquire);
+    state.failure_published.release();
+  };
+  wave->set_pm4_failure(failure);
+
+  uint64_t address = kPc;
+  const auto emit = [&](auto words) {
+    for (uint32_t word : words) {
+      memory.write32(address, word);
+      address += sizeof(word);
+    }
+  };
+  emit(cdna5::build_vop3p(cdna5::kVWmmaF3232x16x128F4Vop3p,
+                          {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3}));
+  emit(cdna5::build_vop3p(cdna5::kVWmmaF3216x16x64Fp8Fp8Vop3p,
+                          {.vdst = 96, .src0 = 256, .src1 = 288, .src2 = 352, .opsel_hi = 3}));
+  emit(cdna5::build_vglobal(cdna5::kGlobalLoadB32Vglobal, {.saddr = 124, .vdst = 128, .vaddr = 0}));
+  emit(cdna5::build_sopp(cdna5::kSEndpgmSopp));
+
+  bool observed_fault = false;
+  bool published_before_release = false;
+  fault_drain_state = &state;
+  std::thread release([&] {
+    state.worker_started.acquire();
+    observed_fault = state.fault_reached.try_acquire_for(std::chrono::seconds(2));
+    published_before_release =
+        state.failure_published.try_acquire_for(std::chrono::milliseconds(200));
+    state.release_worker.release();
+  });
+  EXPECT_NO_THROW(cu->step());
+  release.join();
+  fault_drain_state = nullptr;
+  EXPECT_TRUE(observed_fault);
+  EXPECT_FALSE(published_before_release);
+  EXPECT_TRUE(failure->failed.load());
+  EXPECT_TRUE(finished_before_failure);
+  EXPECT_TRUE(wave->is_halted());
 }
 
 struct BlockedMmaState {
