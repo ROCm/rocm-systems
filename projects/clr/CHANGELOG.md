@@ -39,7 +39,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 * Stream priority is now disabled to avoid known queue-priority-related issues. Priority streams are currently not supported.
 * HRR capture feature is now disabled.
-* `hipMemAdvise` now aliases `hipMemAdvise_v2`, which uses a `hipMemLocation` parameter instead of a device ID. Applications using the legacy `hipMemAdvise` signature may require source updates to pass a `hipMemLocation` structure. To maintain compatibility with the previous API signature, define `HIP_TARGET_API_VERSION` to a nonzero value less than 800 (e.g. 700 = HIP 7.0, 717 = HIP 7.17) at compile time. By default, when `HIP_TARGET_API_VERSION` is undefined, the `hipMemAdvise_v2` interface is used.
+* `hipMemAdvise` now aliases `hipMemAdvise_v2`, which uses a `hipMemLocation` parameter instead of a device ID. Applications using the legacy `hipMemAdvise` signature may require source updates to pass a `hipMemLocation` structure. To maintain compatibility with the previous API signature, define `HIP_TARGET_API_VERSION` to a nonzero value less than 800 (for example, 700 for HIP 7.0 or 717 for HIP 7.17) at compile time. By default, `hipMemAdvise` alias to the `hipMemAdvise_v2` interface.
 * The `HIPRTC_USE_RUNTIME_UNBUNDLER` environment variable and its associated functionality have been removed from the HIP runtime. The runtime unbundler path is now always used; setting this variable no longer has any effect.
 
 ### Known issues
