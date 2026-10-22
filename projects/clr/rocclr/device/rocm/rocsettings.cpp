@@ -10,6 +10,8 @@
 #include "rocsettings.hpp"
 #include "device/rocm/rocglinterop.hpp"
 
+#include <limits>
+
 namespace amd::roc {
 
 // ================================================================================================
@@ -96,10 +98,18 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
 
   customHostAllocator_ = false;
 
-  // On MI300A staging is two local memcpys (no PCIe leg), so keep 1 MiB threshold.
-  if (isAPU && flagIsDefault(GPU_PINNED_MIN_XFER_SIZE) &&
-      gfxipMajor == 9 && gfxipMinor == 4 && gfxStepping == 2) {
-    pinnedMinXferSize_ = 1 * Mi;
+  // gfx942 pins only above 1 MiB; pinning below that causes performance drops (ROCM-27725).
+  // gfx1151 does not pin at any size, using the memcpy path is faster (ROCM-28901).
+  // Other APUs keep the default threshold.
+  if (isAPU && flagIsDefault(GPU_PINNED_MIN_XFER_SIZE)) {
+    constexpr size_t kNeverPinXferSize = std::numeric_limits<size_t>::max();
+    const bool isGfx1151 = (gfxipMajor == 11 && gfxipMinor == 5 && gfxStepping == 1);
+    const bool isGfx942 = (gfxipMajor == 9 && gfxipMinor == 4 && gfxStepping == 2);
+    if (isGfx1151) {
+      pinnedMinXferSize_ = kNeverPinXferSize;
+    } else if (isGfx942) {
+      pinnedMinXferSize_ = 1 * Mi;
+    }
   }
 
   if (fullProfile) {
