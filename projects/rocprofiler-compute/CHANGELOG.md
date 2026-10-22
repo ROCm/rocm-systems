@@ -55,10 +55,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * The profile and analyze help is easier to read. Each option shows what value it takes, the values it accepts, and its default.
 
-* The `-b` block alias `roof` is now `roofline`. For example, use `-b roofline` instead of `-b roof`.
-
-* Roofline metric ids such as `-b 4.1` now count as selecting roofline, like `-b 4` and `-b roofline`. In profile mode they run the roofline benchmark, and in analyze mode they show the roofline plot.
-
 * `-m/--roofline-mem-level` now accepts `ALL`, which is also its default.
 
 * `--specs-correction` takes `name:value` pairs separated by spaces instead of commas, for example `--specs-correction num_xcd:4 cu_per_gpu:64`.
@@ -76,6 +72,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * In profile mode, `--roofline` now works the same as `-b 4`:
   * It can be combined with `-b`. For example, `-b 2 --roofline` profiles blocks 2 and 4.
   * On gfx908, it collects the roofline counters and skips the roofline benchmark, which gfx908 does not support.
+
+* The `-b` block alias `roof` is now `roofline`. For example, use `-b roofline` instead of `-b roof`.
+
+* Roofline metric ids such as `-b 4.1` now count as selecting roofline, like `-b 4` and `-b roofline`. In profile mode they run the roofline benchmark, and in analyze mode they show the roofline section.
 
 ### Removed
 
