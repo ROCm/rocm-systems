@@ -127,6 +127,23 @@ TEST_F(HipFileStream, deregister_with_unregistered_stream_throws)
     ASSERT_THROW(stream_map.deregisterStream(nonnull_stream), std::invalid_argument);
 }
 
+TEST_F(HipFileStream, register_default_stream_is_noop)
+{
+    stream_map.registerStream(nullptr, 0);
+    stream_map.registerStream(hipStreamPerThread, 0);
+    EXPECT_CALL(mhip, hipStreamGetDevice).Times(2);
+    auto null_stream = stream_map.getStream(nullptr);
+    auto per_thread  = stream_map.getStream(hipStreamPerThread);
+    EXPECT_FALSE(null_stream->isManaged());
+    EXPECT_FALSE(per_thread->isManaged());
+}
+
+TEST_F(HipFileStream, deregister_default_stream_is_noop)
+{
+    stream_map.deregisterStream(nullptr);
+    stream_map.deregisterStream(hipStreamPerThread);
+}
+
 TEST(HipFileStreamDestructor, destructor_with_streams_in_use_logs)
 {
     StrictMock<MHip>         mhip;
@@ -163,9 +180,15 @@ TEST_F(HipFileStreamExternal, register_and_deregister_with_valid_stream_works)
     ASSERT_EQ(hipFileStreamDeregister(nonnull_stream), HIPFILE_SUCCESS);
 }
 
-TEST_F(HipFileStreamExternal, deregister_exception_returns_error)
+TEST_F(HipFileStreamExternal, deregister_unregistered_stream_returns_error)
 {
-    ASSERT_EQ(hipFileStreamDeregister(nullptr), HipFileOpError(hipFileInvalidValue));
+    ASSERT_EQ(hipFileStreamDeregister(nonnull_stream), HipFileOpError(hipFileInvalidValue));
+}
+
+TEST_F(HipFileStreamExternal, register_and_deregister_default_stream_succeed)
+{
+    ASSERT_EQ(hipFileStreamRegister(nullptr, 0), HIPFILE_SUCCESS);
+    ASSERT_EQ(hipFileStreamDeregister(nullptr), HIPFILE_SUCCESS);
 }
 
 TEST_F(HipFileStream, registered_stream_is_managed_with_signal_slot)
