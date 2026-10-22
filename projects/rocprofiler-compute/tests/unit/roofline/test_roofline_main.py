@@ -37,7 +37,7 @@ class MockMspec:
 
 def make_roofline(datatypes: List[str], **run_parameters: object) -> Roofline:
     """A Roofline for the unit tests. It never reads its ``args`` on the
-    cli_generate_plot / generate_plot paths, so a bare Namespace suffices."""
+    generate_plot path, so a bare Namespace suffices."""
     parameters: Dict[str, object] = {
         "workload_dir": "",
         "device_id": 0,
@@ -108,13 +108,6 @@ def is_whole_decade(value: float) -> bool:
         return False
     exponent = math.log10(value)
     return math.isclose(exponent, round(exponent))
-
-
-@pytest.mark.parametrize("dtype", ["FP32", "INVALID_DATATYPE"])
-def test_cli_generate_plot_returns_nothing_without_usable_input(dtype: str) -> None:
-    """A datatype this arch cannot be profiled for, and a datatype with no AI
-    data, are both declined rather than half-plotted."""
-    assert make_roofline(["FP32"]).cli_generate_plot(dtype, ai_data={}) is None
 
 
 @pytest.mark.parametrize(
@@ -550,6 +543,21 @@ def test_combined_document_embeds_the_plotly_frame(benchmarked_roofline) -> None
     layout_frame = layout_bounds(figure)
     assert embedded_frame["x"] == pytest.approx(layout_frame[0])
     assert embedded_frame["y"] == pytest.approx(layout_frame[1])
+
+
+def test_save_html_files_returns_the_written_path(
+    benchmarked_roofline, tmp_path: Path
+) -> None:
+    """The returned path is the HTML document written into the workload dir."""
+    roofline = benchmarked_roofline(["FP64"])
+    figures = roofline.construct_plotly_figures(
+        {"ai_hbm": [[0.5], [2000.0]], "kernelNames": ["slow"]}, datatypes=["FP64"]
+    )
+
+    path = roofline.save_html_files(*figures)
+
+    assert path == f"{tmp_path}/empirRoof_gpu-0.html"
+    assert Path(path).is_file()
 
 
 @pytest.mark.parametrize("source_key", ["FLOP", "OP"])
