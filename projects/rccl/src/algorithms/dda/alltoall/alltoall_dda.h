@@ -15,12 +15,13 @@
 
 namespace dda::common {
 
-template <typename T, int NRANKS, bool hasAcc, bool kStagingCopyInKernel = false>
+template <typename T, int NRANKS, bool hasAcc, bool kStagingCopyInKernel = false, bool kChunkedStaging = false>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
   __global__ void ddaAllToAllIpc(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
                                  const T* __restrict__ sendbuff, int selfRank, IpcGpuBarrier barrier) {
+  static_assert(!kChunkedStaging || kStagingCopyInKernel, "chunked AllToAll staging is an in-kernel copy");
   // use uint4 to do 16-byte loads to maximize memory efficiency
   // We assume that count % countPerThread == 0. This assumption is enforced
   // before kernel launch
@@ -34,13 +35,24 @@ __launch_bounds__(512)
   const auto idxStride = gridDim.x * blockDim.x * countPerThread;
 
   if constexpr (kStagingCopyInKernel) {
-    // Small messages: fuse sendbuff -> scratch copy into the kernel to avoid
-    // cudaMemcpyAsync launch overhead on ROCm.
-    const size_t copyCount = count * NRANKS;
-    copyFromSrcToDest<T>(sendbuff, ipcbuffs[selfRank], idxStart, copyCount, idxStride);
+    if constexpr (kChunkedStaging) {
+      // syncOnSameBlockIdx orders this block index across ranks, not the other
+      // blocks. Copy this block's index set in every chunk so a peer block can
+      // read any chunk after the barrier. A flat copy of the whole send does
+      // not, once the 24-block cap makes the stride not divide the chunk.
+#pragma unroll NRANKS
+      for (int s = 0; s < NRANKS; ++s) {
+        const size_t off = static_cast<size_t>(s) * countPerRank;
+        copyFromSrcToDest<T>(sendbuff + off, ipcbuffs[selfRank] + off, idxStart, idxEnd, idxStride);
+      }
+    } else {
+      // One block owns every index, so a flat copy covers the whole send.
+      const size_t copyCount = count * NRANKS;
+      copyFromSrcToDest<T>(sendbuff, ipcbuffs[selfRank], idxStart, copyCount, idxStride);
+    }
     barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
   } else {
-    // Large messages: host enqueues cudaMemcpyAsync into ddaScratch before launch.
+    // Host enqueued cudaMemcpyAsync into ddaScratch before launch.
     barrier.syncOnSameBlockIdx<false /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
   }
 

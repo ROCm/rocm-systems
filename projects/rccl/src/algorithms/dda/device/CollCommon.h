@@ -219,12 +219,30 @@ inline uint32_t divRoundUp(size_t a, size_t b) {
 }
 
 // True if per-rank data fits in one CUDA block (512 threads, 16-byte loads per thread).
-// Same threshold as getGridAndBlockDims(). DDA AlltoAll uses it to choose in-kernel
-// staging copy for small messages vs pre-kernel cudaMemcpyAsync for larger ones.
+// Same threshold as getGridAndBlockDims().
 inline bool ddaAlltoAllSingleBlockGrid(size_t count, int typeSize) {
   constexpr uint32_t kThreadsPerBlock = 512;
   const uint32_t elementsPerThread = 16 / typeSize;
   return count < elementsPerThread * kThreadsPerBlock;
+}
+
+// AllToAll IPC copies the whole send inside the kernel at or below this total,
+// so the kernel that records doneEvent is not preceded by hipMemcpyAsync. HIP
+// does not skip that kernel's system-scope fence when a copy was just queued
+// on the stream. Above this the host pre-copy stays. The kernel does not
+// re-derive the cutoff.
+constexpr size_t kDdaAlltoAllIpcKernelCopyMaxBytes = 4ULL * 1024 * 1024;
+
+enum class DdaAlltoAllIpcStaging {
+  InKernel,    // kernel copies sendbuff into scratch
+  HostPreCopy, // host cudaMemcpyAsync before launch
+};
+
+inline DdaAlltoAllIpcStaging ddaAlltoAllIpcStaging(size_t totalBytes) {
+  if (totalBytes <= kDdaAlltoAllIpcKernelCopyMaxBytes) {
+    return DdaAlltoAllIpcStaging::InKernel;
+  }
+  return DdaAlltoAllIpcStaging::HostPreCopy;
 }
 
 // copyFromSrcToDest loads user buffers as uint4, so both pointers have to be
