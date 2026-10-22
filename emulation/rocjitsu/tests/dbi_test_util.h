@@ -19,13 +19,8 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/code_object.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
-
-#include "rocjitsu/base/rj_compiler.h"
-RJ_DIAGNOSTIC_PUSH
-RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
-RJ_DIAGNOSTIC_POP
 
 #include <array>
 #include <cstdint>
@@ -164,7 +159,7 @@ inline std::vector<uint8_t> make_amdgpu_kernel_elf(
     bool unterminated_kd_name = false, bool wrap_section_header_table = false,
     bool wrap_symtab_range = false, bool kd_crosses_section = false, bool wave32 = false,
     bool kernarg_segment_ptr = false, uint32_t kernarg_size = 0, uint64_t entry_text_offset = 0) {
-  namespace kd = rocr::llvm::amdhsa;
+  namespace kd = rocjitsu::amdhsa;
   using KD = kd::kernel_descriptor_t;
 
   constexpr uint64_t text_offset = 0x100;
@@ -243,27 +238,27 @@ inline std::vector<uint8_t> make_amdgpu_kernel_elf(
   desc.private_segment_fixed_size = private_bytes;
   desc.kernel_code_entry_byte_offset =
       static_cast<int64_t>(text_vaddr + entry_text_offset) - static_cast<int64_t>(rodata_vaddr);
-  AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                  granulated_sgpr_count);
-  AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                  granulated_vgpr_count);
-  AMDHSA_BITS_SET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, accum_offset);
+  RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                     granulated_sgpr_count);
+  RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                     granulated_vgpr_count);
+  RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
+                     accum_offset);
   // RDNA opts into Wave32 through this bit; a clear bit is Wave64. CDNA has no
   // such field, so setting it there would describe a kernel that cannot exist.
-  // Braced deliberately: AMDHSA_BITS_SET expands to two unbraced statements, so
-  // an unbraced `if` would run the second one unconditionally.
+  // RDNA uses this bit only for Wave32 descriptors.
   if (wave32) {
-    AMDHSA_BITS_SET(desc.kernel_code_properties, kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
-                    1);
+    RJ_AMDHSA_BITS_SET(desc.kernel_code_properties,
+                       kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, 1);
   }
   // The kernarg pointer is the only enabled user-SGPR property, so it occupies
   // s[0:1] and USER_SGPR_COUNT is 2. Both halves matter: the prologue reads the
   // pointer out of the slot the enable bits imply, and it treats the user-SGPR
   // count as the floor its reserved storage must sit above.
   if (kernarg_segment_ptr) {
-    AMDHSA_BITS_SET(desc.kernel_code_properties,
-                    kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
-    AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+    RJ_AMDHSA_BITS_SET(desc.kernel_code_properties,
+                       kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+    RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
     desc.kernarg_size = kernarg_size;
   }
   std::memcpy(image.data() + rodata_offset, &desc, sizeof(desc));
@@ -377,14 +372,15 @@ inline std::vector<uint8_t> make_gfx1200_wave32_kernel_elf(const std::vector<uin
 // Target ELF for any of the three DBI-supported ISAs whose descriptor advertises a
 // kernarg segment pointer. The entry prologue rejects a kernel without one, so this
 // is the only builder here that reaches prologue placement rather than a rejection
-// path.
-inline std::vector<uint8_t> make_kernarg_kernel_elf(const std::vector<uint32_t> &text_words,
-                                                    uint32_t private_bytes, uint32_t e_flags,
-                                                    uint32_t kernarg_size, bool wave32 = false,
-                                                    uint32_t granulated_sgpr_count = 3,
-                                                    uint64_t entry_text_offset = 0) {
+// path. The VGPR defaults leave v0..v3 ordinary on CDNA, as make_amdgpu_kernel_elf's
+// do; a probe taking more argument dwords needs a wider window.
+inline std::vector<uint8_t>
+make_kernarg_kernel_elf(const std::vector<uint32_t> &text_words, uint32_t private_bytes,
+                        uint32_t e_flags, uint32_t kernarg_size, bool wave32 = false,
+                        uint32_t granulated_sgpr_count = 3, uint64_t entry_text_offset = 0,
+                        uint32_t granulated_vgpr_count = 0, uint32_t accum_offset = 0) {
   return make_amdgpu_kernel_elf(text_words, private_bytes, granulated_sgpr_count, e_flags,
-                                /*granulated_vgpr_count=*/0, /*accum_offset=*/0,
+                                granulated_vgpr_count, accum_offset,
                                 /*unterminated_kd_name=*/false,
                                 /*wrap_section_header_table=*/false, /*wrap_symtab_range=*/false,
                                 /*kd_crosses_section=*/false, wave32,
@@ -442,7 +438,7 @@ make_gfx950_kd_crossing_section_elf(const std::vector<uint32_t> &text_words,
 inline std::vector<uint8_t> make_gfx950_two_kernel_elf(const std::vector<uint32_t> &text_words,
                                                        uint32_t private_bytes,
                                                        uint32_t granulated_sgpr_count = 3) {
-  namespace kd = rocr::llvm::amdhsa;
+  namespace kd = rocjitsu::amdhsa;
   using KD = kd::kernel_descriptor_t;
 
   constexpr uint64_t text_offset = 0x100;
@@ -522,8 +518,9 @@ inline std::vector<uint8_t> make_gfx950_two_kernel_elf(const std::vector<uint32_
     desc.private_segment_fixed_size = private_bytes;
     desc.kernel_code_entry_byte_offset =
         static_cast<int64_t>(text_vaddr) - static_cast<int64_t>(kd_vaddr);
-    AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                    granulated_sgpr_count);
+    RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc1,
+                       kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                       granulated_sgpr_count);
     std::memcpy(image.data() + rodata_offset + i * sizeof(KD), &desc, sizeof(desc));
   }
   std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());
