@@ -56,7 +56,7 @@ For example:
   }
 
 
-``rocJpegGetImageInfo()`` is thread safe. It doesn't wait for decodes running on the same ``RocJpegHandle``, so it can be called from another thread while a decode is in progress, for example to prepare the next batch of images. Don't call it on a stream handle that is being parsed at the same time.
+``rocJpegGetImageInfo()`` is thread safe. It doesn't wait for decodes running on the same ``RocJpegHandle``. Because of this it can be called from another thread while a decode is in progress, for example when it's preparing for the next batch of images. It can't be called on a stream handle that is being parsed at the same time.
 
 .. note::
 
