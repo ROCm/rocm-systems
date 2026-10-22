@@ -770,9 +770,9 @@ pub unsafe extern "C" fn hsa_agent_get_info(
             .as_ref()
             .and_then(rocddi::topology::Endpoint::memory_link_from_host)
             .is_some_and(|link| {
-                link.kind() == rocddi::topology::MemoryLinkType::Xgmi
-                    && link.is_coherent()
-                    && link.supports_64bit_atomics()
+                link.kind == rocddi::topology::MemoryLinkType::Xgmi
+                    && link.coherent_support
+                    && link.atomic_support_64bit
             });
         let gpu_only = gpu.is_some();
         let image_gpu = gpu.is_some_and(image_gfx12::supported_gpu);
@@ -867,8 +867,10 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                         endpoint
                             .caches()
                             .iter()
-                            .find(|cache| cache.level() == 2 && cache.line_size_bytes() != 0)
-                            .map_or(256, rocddi::topology::CacheInfo::line_size_bytes)
+                            .filter(|cache| cache.level == 2)
+                            .filter_map(|cache| cache.line_size_bytes)
+                            .find(|line| *line != 0)
+                            .unwrap_or(256)
                     }),
                 ),
                 AMD_AGENT_INFO_COMPUTE_UNIT_COUNT

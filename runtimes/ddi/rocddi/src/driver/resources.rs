@@ -231,6 +231,14 @@ impl AllocationState {
         }
     }
 
+    pub(crate) fn remaining_backing_byte_length(&self) -> u64 {
+        match self {
+            Self::LinuxKfd(allocation) => allocation.driver_state().remaining_backing_byte_length(),
+            #[cfg(test)]
+            Self::Test(_) => 0,
+        }
+    }
+
     pub(crate) fn check(&self) -> Result<(), Error> {
         match self {
             Self::LinuxKfd(allocation) => allocation.check(),
