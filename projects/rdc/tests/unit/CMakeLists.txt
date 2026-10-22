@@ -178,6 +178,36 @@ install(
     COMPONENT ${TESTS_COMPONENT}
 )
 
+# rdc_smi_diag_tests: the AMD SMI checks of rdci diag (compute processes, node
+# topology, GPU parameters) and the diagnostic module that runs them. Compiles
+# RdcSmiDiagnosticImpl.cc and RdcDiagnosticModule.cc into the test, which defines
+# the amdsmi calls they make and the two SmiUtils functions they call
+# (get_processor_handle_from_id, Smi2RdcError), so it links neither librdc nor
+# amd_smi and runs on GPU-less CI. librdc_bootstrap provides the logger.
+add_executable(
+    rdc_smi_diag_tests
+    ${SRC_DIR}/test_smi_diag.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcSmiDiagnosticImpl.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcDiagnosticModule.cc
+)
+target_include_directories(
+    rdc_smi_diag_tests
+    PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/include ${AMD_SMI_INCLUDE_DIR}
+)
+target_link_libraries(rdc_smi_diag_tests PRIVATE rdc_bootstrap GTest::gtest_main pthread)
+# The compute process check leaves out the process that runs it: the test's
+# getpid() returns an ID no fake process has (test_smi_diag.cc, kOwnPid). The
+# wrap covers every object linked into this binary (GoogleTest's too when it is
+# static); code here that needs the real ID would call __real_getpid().
+target_link_options(rdc_smi_diag_tests PRIVATE "LINKER:--wrap=getpid")
+set_target_properties(rdc_smi_diag_tests PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib")
+add_test(NAME rdc_smi_diag_tests COMMAND rdc_smi_diag_tests)
+install(
+    TARGETS rdc_smi_diag_tests
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
+    COMPONENT ${TESTS_COMPONENT}
+)
+
 # rdc_unit_tests: hardware-aware SmiUtils tests. Links librdc (flat table,
 # partition helpers) and amd_smi. Provides its own main() to init amdsmi once.
 # Hardware-dependent tests self-skip when no AMD GPU is present.
