@@ -1074,7 +1074,7 @@ class P2pResiliencyRecoveryAinicFlowMicrotest : public P2pResiliencyRecoveryMicr
   // An ACK as received on device dev, carrying the peer's new QPNs after the GRH.
   void AckWithQpns(int dev, std::vector<RecoveryQpnEntry> entries) {
     uint8_t* payload = res_->devs[dev].portRecoveryGrhBuf + NCCL_IB_UD_GRH_SIZE;
-    std::memcpy(payload, entries.data(), entries.size() * sizeof(RecoveryQpnEntry));
+    if (!entries.empty()) std::memcpy(payload, entries.data(), entries.size() * sizeof(RecoveryQpnEntry));
     scene_.PushCqe(ctx_->recoveryCq,
                    P2pResiliencyWc(0, IBV_WC_SUCCESS, IBV_WC_RECV, NCCL_IB_RESILIENCY_PORT_RECOVERY_ACK_MSG_ID,
                                    NCCL_IB_UD_GRH_SIZE + entries.size() * sizeof(RecoveryQpnEntry)));
