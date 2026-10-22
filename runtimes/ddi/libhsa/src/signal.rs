@@ -22,10 +22,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::platform::event::{
-    ProcessSignalEventPageGuard, SignalEvent, SignalEventPage, create_signal_event,
-    lock_process_signal_event_page,
-};
+use crate::platform::event::{SignalEvent, SignalEventAddressing, SignalEventService};
 use crate::platform::memory::{self as linux_interop, KfdIpcMemoryHandle};
 use rocddi::memory::device::{Allocation, DeviceAccess, MemoryKind};
 use rocddi::session::DriverContextLifetime;
@@ -41,7 +38,6 @@ const SIGNAL_BYTES: usize = 64;
 const SIGNALS_PER_SLAB: usize = 1024;
 const MAX_POOLED_SIGNAL_EVENTS: usize = 256;
 const BLOCKED_SPIN_BUDGET: Duration = Duration::from_micros(200);
-const SIGNAL_EVENT_PAGE_BYTES: u64 = 4096 * 8;
 const IPC_SIGNAL_ALLOCATION_BYTES: u64 = 4096;
 const SHARED_SIGNAL_ID: u64 = 0x71fc_ca6a_3d5d_5276;
 static SYSTEM_FREQUENCY_HZ: AtomicU64 = AtomicU64::new(0);
@@ -85,12 +81,6 @@ pub(crate) fn flush_signal_timestamps(signal: &AmdSignal) {
         fence(Ordering::SeqCst);
         let _ = signal.end_ts.load(Ordering::Relaxed);
     }
-}
-
-struct PreparedSignalEventPage {
-    host: usize,
-    install: bool,
-    mappings: Vec<([u8; 16], u64)>,
 }
 
 pub(crate) fn set_system_frequency(frequency: u64) {
@@ -470,10 +460,8 @@ pub(crate) struct SignalState {
     /// Contiguous batch backing and each member's owning batch ID.
     batches: HashMap<u64, SignalBatchStorage>,
     batch_members: HashMap<usize, u64>,
-    /// Process event page shared by interrupt-backed signals.
-    signal_event_page: Option<SignalEventPage>,
-    /// Whether the native event page has been conclusively established.
-    signal_event_page_confirmed: bool,
+    /// Native page preparation and first-event transaction.
+    event_service: SignalEventService,
     /// Native events attached to public interrupt signals.
     interrupt_signals: HashMap<usize, Option<SignalEvent>>,
     /// Native signal events available for reuse.
@@ -505,14 +493,13 @@ impl SignalState {
         SUCCESS
     }
 
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(lifetime: DriverContextLifetime) -> Self {
         Self {
             signal_slabs: Vec::new(),
             recycled_signals: Vec::new(),
             batches: HashMap::new(),
             batch_members: HashMap::new(),
-            signal_event_page: None,
-            signal_event_page_confirmed: false,
+            event_service: SignalEventService::new(lifetime),
             interrupt_signals: HashMap::new(),
             signal_event_pool: Vec::new(),
             owned_ipc_signals: HashMap::new(),
@@ -564,19 +551,6 @@ impl SignalState {
         self.async_dispatcher
             .as_ref()
             .map_or(ERROR, |dispatcher| dispatcher.send(request))
-    }
-}
-
-fn retry_unconfirmed_event_page<T, E>(
-    first: Result<T, E>,
-    page_offered: bool,
-    confirmed: bool,
-    retry_without_page: impl FnOnce() -> Result<T, E>,
-) -> Result<T, E> {
-    match first {
-        Ok(event) => Ok(event),
-        Err(_) if page_offered && !confirmed => retry_without_page(),
-        Err(error) => Err(error),
     }
 }
 
@@ -762,159 +736,33 @@ impl HsaState {
         Ok((batch, signals))
     }
 
-    fn ensure_signal_event_page(
-        &mut self,
-        process: Option<&ProcessSignalEventPageGuard>,
-    ) -> Result<PreparedSignalEventPage, Status> {
-        if let Some(host) = process.and_then(ProcessSignalEventPageGuard::host_address) {
-            if self.gpus.iter().any(|gpu| {
-                process.and_then(|page| page.device_address(gpu.device.endpoint().id))
-                    != Some(host as u64)
-            }) {
-                return Err(OUT_OF_RESOURCES);
-            }
-            return Ok(PreparedSignalEventPage {
-                host,
-                install: false,
-                mappings: Vec::new(),
-            });
-        }
-        if process.is_none() && self.signal_state.signal_event_page_confirmed {
-            let host = self
-                .signal_state
-                .signal_event_page
-                .as_ref()
-                .and_then(SignalEventPage::host_address)
-                .ok_or(OUT_OF_RESOURCES)?;
-            return Ok(PreparedSignalEventPage {
-                host,
-                install: false,
-                mappings: Vec::new(),
-            });
-        }
-        if self.signal_state.signal_event_page.is_none() {
-            let allocation = {
-                let (gpu, peers) = self.gpus.split_first().ok_or(OUT_OF_RESOURCES)?;
-                let peers = peers.iter().map(|peer| &peer.device).collect::<Vec<_>>();
-                gpu.device
-                    .allocate_with_peers(
-                        &peers,
-                        MemoryKind::System,
-                        SIGNAL_EVENT_PAGE_BYTES.max(self.host_page_size as u64),
-                        self.host_page_size as u64,
-                        DeviceAccess::READ | DeviceAccess::WRITE,
-                    )
-                    .map_err(map_error)?
-            };
-            let info = allocation.info();
-            let host = info.host_address.ok_or(OUT_OF_RESOURCES)?;
-            if info.device_address != host as u64 || info.size < SIGNAL_EVENT_PAGE_BYTES {
-                return Err(OUT_OF_RESOURCES);
-            }
-            self.signal_state.signal_event_page = Some(SignalEventPage::new(allocation));
-        }
-        let host = self
-            .signal_state
-            .signal_event_page
-            .as_ref()
-            .and_then(SignalEventPage::host_address)
-            .ok_or(OUT_OF_RESOURCES)?;
-        let page = self
-            .signal_state
-            .signal_event_page
-            .as_ref()
-            .ok_or(OUT_OF_RESOURCES)?;
-        let mut mappings = Vec::new();
-        mappings
-            .try_reserve_exact(self.gpus.len())
-            .map_err(|_| OUT_OF_RESOURCES)?;
-        for gpu in &self.gpus {
-            let address = page.device_address(&gpu.device).map_err(map_error)?;
-            if address != host as u64 {
-                return Err(OUT_OF_RESOURCES);
-            }
-            mappings.push((gpu.device.endpoint().id, address));
-        }
-        Ok(PreparedSignalEventPage {
-            host,
-            install: true,
-            mappings,
-        })
-    }
-
     pub(crate) fn create_signal_event(
         &mut self,
     ) -> Option<(crate::platform::event::SignalEvent, usize, u32)> {
-        let mut process = if self.lifetime == DriverContextLifetime::Process {
-            Some(lock_process_signal_event_page().ok()?)
-        } else {
-            None
-        };
-        let PreparedSignalEventPage {
-            host: page_host,
-            install: install_page,
-            mappings,
-        } = self.ensure_signal_event_page(process.as_ref()).ok()?;
-        let gpu = self.gpus.first()?;
-        let device = gpu.device.gpu().ok()?;
-        let first = if install_page {
-            create_signal_event(device, Some(self.signal_state.signal_event_page.as_mut()?))
-        } else {
-            create_signal_event(device, None)
-        };
-        let page_offered = self
+        let (gpu, rest) = self.gpus.split_first()?;
+        let peers = rest.iter().map(|peer| &peer.device).collect::<Vec<_>>();
+        let (event, mailbox) = self
             .signal_state
-            .signal_event_page
-            .as_ref()
-            .is_some_and(SignalEventPage::was_offered);
-        // An attempted CREATE_EVENT can install the page before reporting an
-        // error. Retry without its handle only after the ioctl was dispatched.
-        if install_page && page_offered {
-            if let Some(process) = process.as_mut() {
-                process.record_offer(page_host, mappings).ok()?;
-            }
-        }
-        let created = retry_unconfirmed_event_page(
-            first,
-            install_page && page_offered,
-            process
-                .as_ref()
-                .map_or(self.signal_state.signal_event_page_confirmed, |page| {
-                    page.is_confirmed()
-                }),
-            || create_signal_event(device, None),
-        );
-        let event = created.ok()?;
-        if let Some(process) = process.as_mut() {
-            process.confirm();
-        }
-        self.signal_state.signal_event_page_confirmed = true;
-        let info = event.info();
-        let offset = usize::try_from(info.event_page_slot_index)
-            .ok()?
-            .checked_mul(8)?;
-        let mailbox = page_host.checked_add(offset)?;
-        Some((event, mailbox, info.kfd_event_id))
+            .event_service
+            .create(&gpu.device, &peers, SignalEventAddressing::Identity)
+            .ok()?;
+        let id = event.info().kfd_event_id;
+        Some((event, mailbox.host, id))
     }
 
     fn acquire_signal_event(&mut self) -> Option<(SignalEvent, usize, u32)> {
         // Reuse the KFD event after its previous signal has been destroyed.
         // The stable process event page supplies the same mailbox address.
-        if let Some(event) = self.signal_state.signal_event_pool.pop() {
-            let page = if self.lifetime == DriverContextLifetime::Process {
-                lock_process_signal_event_page().ok()?.host_address()?
-            } else {
-                self.signal_state
-                    .signal_event_page
-                    .as_ref()?
-                    .host_address()?
-            };
-            let info = event.info();
-            let offset = usize::try_from(info.event_page_slot_index)
-                .ok()?
-                .checked_mul(8)?;
-            let mailbox = page.checked_add(offset)?;
-            return Some((event, mailbox, info.kfd_event_id));
+        if let Some(event) = self.signal_state.signal_event_pool.last() {
+            let gpu = self.gpus.first()?;
+            let mailbox = self
+                .signal_state
+                .event_service
+                .mailbox(&gpu.device, event)
+                .ok()?;
+            let id = event.info().kfd_event_id;
+            let event = self.signal_state.signal_event_pool.pop()?;
+            return Some((event, mailbox.host, id));
         }
         self.create_signal_event()
     }
@@ -1018,7 +866,7 @@ impl HsaState {
                 &self.session,
                 &devices,
                 &devices,
-                KfdIpcMemoryHandle::from_words(words),
+                KfdIpcMemoryHandle { words },
                 IPC_SIGNAL_ALLOCATION_BYTES,
             )
             .map_err(|error| match error.kind() {
@@ -1153,7 +1001,7 @@ impl SignalState {
             })
             .ok_or(INVALID_ARGUMENT)?;
         linux_interop::export_kfd_ipc_memory(allocation)
-            .map(KfdIpcMemoryHandle::words)
+            .map(|handle| handle.words)
             .map_err(map_error)
     }
 
@@ -1277,18 +1125,15 @@ impl SignalState {
                 }
             }
         }
-        let unresolved_page = self
-            .signal_event_page
-            .as_ref()
-            .is_some_and(SignalEventPage::was_offered)
-            && !self.signal_event_page_confirmed;
-        if let Some(mut page) = self.signal_event_page.take() {
-            if let Err(error) = page.retain_for_process() {
+        let unresolved_page = match self.event_service.release() {
+            Ok(unresolved) => unresolved,
+            Err(error) => {
                 if status == SUCCESS {
                     status = map_error(error);
                 }
+                false
             }
-        }
+        };
         // An unsuccessful CREATE_EVENT cannot tell us whether KFD installed
         // the page. Another runtime would have its address but not its handle.
         // Quarantine this process instead of reinitializing over that state.
@@ -2967,7 +2812,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let batch = HsaAmdSignalBatch { handle: 42 };
-        let mut state = SignalState::new();
+        let mut state = SignalState::new(DriverContextLifetime::Process);
         for signal in &signals {
             state
                 .batch_members
@@ -3058,31 +2903,6 @@ mod tests {
         assert!(batch_needs_flush(range.0));
         assert_eq!(state.destroy_batch(batch), SUCCESS);
         assert!(!batch_needs_flush(range.0));
-    }
-
-    #[test]
-    fn first_event_retries_only_after_the_page_was_offered() {
-        let mut retries = 0;
-        let result = retry_unconfirmed_event_page(Err::<u32, ()>(()), true, false, || {
-            retries += 1;
-            Ok(7)
-        });
-        assert_eq!(result, Ok(7));
-        assert_eq!(retries, 1);
-
-        let result = retry_unconfirmed_event_page(Err::<u32, ()>(()), false, false, || {
-            retries += 1;
-            Ok(8)
-        });
-        assert_eq!(result, Err(()));
-        assert_eq!(retries, 1);
-
-        let result = retry_unconfirmed_event_page(Err::<u32, ()>(()), true, true, || {
-            retries += 1;
-            Ok(9)
-        });
-        assert_eq!(result, Err(()));
-        assert_eq!(retries, 1);
     }
 
     unsafe extern "C" fn count_rearmed_handler(_value: SignalValue, arg: *mut c_void) -> bool {
