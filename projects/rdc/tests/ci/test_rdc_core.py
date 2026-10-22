@@ -11,7 +11,7 @@ import subprocess
 import time
 import pytest
 
-from conftest import run_rdci
+from conftest import create_gpu_group, created_id, gpu_indexes, run_rdci
 
 
 # ---------------------------------------------------------------------------
@@ -181,21 +181,23 @@ class TestGPUGroup:
     """Verify GPU group create / add / list / delete lifecycle."""
 
     def test_group_create_list_delete(self, rdci_path, rdcd_server):
-        r = run_rdci(rdci_path, "group", "-c", "ci_test_group")
-        assert r.returncode == 0, f"group create failed: {r.stderr}"
-
+        gid = created_id(run_rdci(rdci_path, "group", "-c", "ci_test_group"))
+        try:
+            r = run_rdci(rdci_path, "group", "-l")
+            assert r.returncode == 0, f"group list failed: {r.stdout}"
+            assert "ci_test_group" in r.stdout
+        finally:
+            r = run_rdci(rdci_path, "group", "-d", gid)
+        assert r.returncode == 0, f"group delete failed: {r.stdout}"
         r = run_rdci(rdci_path, "group", "-l")
-        assert r.returncode == 0
-        assert "ci_test_group" in r.stdout
-
-        r = run_rdci(rdci_path, "group", "-d", "ci_test_group")
-        assert r.returncode == 0 or "not found" in r.stderr.lower()
+        assert r.returncode == 0, f"group list failed: {r.stdout}"
+        assert "ci_test_group" not in r.stdout
 
     def test_group_add_gpu(self, rdci_path, rdcd_server):
-        run_rdci(rdci_path, "group", "-c", "ci_add_test")
-        r = run_rdci(rdci_path, "group", "-a", "ci_add_test", "-g", "0")
-        assert r.returncode == 0, f"group add GPU failed: {r.stderr}"
-        run_rdci(rdci_path, "group", "-d", "ci_add_test")
+        gpu = gpu_indexes(rdci_path)[0]
+        gid = create_gpu_group(rdci_path, "ci_add_test", [gpu])
+        r = run_rdci(rdci_path, "group", "-d", gid)
+        assert r.returncode == 0, f"group delete failed: {r.stdout}"
 
 
 # ---------------------------------------------------------------------------
@@ -205,15 +207,14 @@ class TestFieldGroup:
     """Verify field group create / list / delete."""
 
     def test_fieldgroup_lifecycle(self, rdci_path, rdcd_server):
-        r = run_rdci(rdci_path, "fieldgroup", "-c", "ci_fg", "-f", "100,101,140")
-        assert r.returncode == 0, f"fieldgroup create failed: {r.stderr}"
-
-        r = run_rdci(rdci_path, "fieldgroup", "-l")
-        assert r.returncode == 0
-        assert "ci_fg" in r.stdout
-
-        r = run_rdci(rdci_path, "fieldgroup", "-d", "ci_fg")
-        assert r.returncode == 0 or "not found" in r.stderr.lower()
+        fgid = created_id(run_rdci(rdci_path, "fieldgroup", "-c", "ci_fg", "-f", "100,101,201"))
+        try:
+            r = run_rdci(rdci_path, "fieldgroup", "-l")
+            assert r.returncode == 0, f"fieldgroup list failed: {r.stdout}"
+            assert "ci_fg" in r.stdout
+        finally:
+            r = run_rdci(rdci_path, "fieldgroup", "-d", fgid)
+        assert r.returncode == 0, f"fieldgroup delete failed: {r.stdout}"
 
 
 # ---------------------------------------------------------------------------
@@ -223,9 +224,13 @@ class TestDmon:
     """Verify dmon metric streaming."""
 
     def test_dmon_short_run(self, rdci_path, rdcd_server):
-        r = run_rdci(rdci_path, "dmon", "-f", "100,140", "-c", "3", "-d", "1000", timeout=30)
-        assert r.returncode == 0, f"dmon failed: {r.stderr}"
-        assert len(r.stdout.strip()) > 0, "dmon produced no output"
+        gpu = gpu_indexes(rdci_path)[0]
+        r = run_rdci(
+            rdci_path, "dmon", "-e", "100,201", "-i", gpu, "-c", "3", "-d", "1000", timeout=30
+        )
+        assert r.returncode == 0, f"dmon failed: {r.stdout}"
+        samples = [line for line in r.stdout.splitlines() if line.split()[:1] == [gpu]]
+        assert len(samples) == 3, f"expected 3 samples for GPU {gpu}:\n{r.stdout}"
 
 
 # ---------------------------------------------------------------------------
@@ -236,20 +241,23 @@ class TestJobStats:
 
     def test_job_stats_lifecycle(self, rdci_path, rdcd_server):
         job_id = "ci_test_job_001"
+        gid = create_gpu_group(rdci_path, "ci_job_group", [gpu_indexes(rdci_path)[0]])
+        try:
+            r = run_rdci(rdci_path, "stats", "-s", job_id, "-g", gid)
+            assert r.returncode == 0, f"stats start failed: {r.stdout}"
 
-        r = run_rdci(rdci_path, "stats", "-s", job_id)
-        assert r.returncode == 0, f"stats start failed: {r.stderr}"
+            time.sleep(2)
 
-        time.sleep(2)
+            r = run_rdci(rdci_path, "stats", "-j", job_id)
+            assert r.returncode == 0, f"stats get failed: {r.stdout}"
 
-        r = run_rdci(rdci_path, "stats", "-j", job_id)
-        assert r.returncode == 0, f"stats get failed: {r.stderr}"
+            r = run_rdci(rdci_path, "stats", "-x", job_id)
+            assert r.returncode == 0, f"stats stop failed: {r.stdout}"
 
-        r = run_rdci(rdci_path, "stats", "-x", job_id)
-        assert r.returncode == 0, f"stats stop failed: {r.stderr}"
-
-        r = run_rdci(rdci_path, "stats", "-r", job_id)
-        assert r.returncode == 0 or "not found" in r.stderr.lower()
+            r = run_rdci(rdci_path, "stats", "-r", job_id)
+            assert r.returncode == 0, f"stats remove failed: {r.stdout}"
+        finally:
+            run_rdci(rdci_path, "group", "-d", gid)
 
 
 # ---------------------------------------------------------------------------
