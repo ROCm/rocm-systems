@@ -415,7 +415,7 @@ std::function<hipError_t(void*, int, size_t)> g_hipMemset = DefaultHipMemset;
 #if defined(RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED)
 static hipError_t DefaultHipMemGetHandleForAddressRange(void*, hipDeviceptr_t, size_t, hipMemRangeHandleType,
                                                         unsigned long long) {
-    return hipErrorNotSupported;
+    return hipErrorInvalidValue;
 }
 std::function<hipError_t(void*, hipDeviceptr_t, size_t, hipMemRangeHandleType, unsigned long long)>
     g_hipMemGetHandleForAddressRange = DefaultHipMemGetHandleForAddressRange;

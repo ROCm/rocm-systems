@@ -1431,6 +1431,10 @@ if(NOT BUILD_TESTS)
     set(_MICRO_DMABUF_EXPORT_DEF RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED)
   endif()
 endif()
+# The test redirects rocmwrap.cc's DmaBufEnable param; keep the name and default in step.
+foreach(_f "${CMAKE_CURRENT_LIST_DIR}/../../src/misc/rocmwrap.cc" "${CMAKE_CURRENT_LIST_DIR}/gin-host-proxy-test.cc")
+  rccl_assert_source_line("${_f}" "NCCL_PARAM(DmaBufEnable, \"DMABUF_ENABLE\", 1)" "gin-host-proxy-test.cc")
+endforeach()
 rccl_add_micro_binary(rccl-UnitTestsMicroGinHostProxy
   SOURCES ${TEST_MICRO_GIN_HOST_PROXY_SOURCE_FILES}
   EXTRA_INCLUDES

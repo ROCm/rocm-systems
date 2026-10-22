@@ -311,7 +311,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   deep-path symbols the tests never reach. See `test_categories_micro_init.yaml`.
 - **`rccl-UnitTestsMicroGinHostProxy`** — `gin/gin_host_proxy.cc` and the three
   `gin/proxy_gpucontext/` writers (`GIN_HOST_PROXY_CC_PATH`, `GPUCONTEXT{,_V1,_V2}_CC_PATH`,
-  from `gin-host-proxy-test.cc`); suites `GinHostProxy*`. Its own binary:
+  from `gin-host-proxy-test.cc`); suites `GinHostProxy*`, against the scripted RMA plugin in
+  `fakes/rma_vtable_fake.h`. Its own binary:
   `gin-plugin-init-test.cc` in `rccl-UnitTestsMicro` defines `ncclGinProxy` and
   `ncclGinProxyVersion`. See `test_categories_micro_gin_host_proxy.yaml`.
 - **`rccl-UnitTestsMicroWarpSpeed`** — `allgatherv_sched.cc` +

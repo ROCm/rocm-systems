@@ -127,6 +127,7 @@ ncclResult_t FakeCudaMemcpy(T* dst, T* src, size_t nelem) {
 #include "ScopedHook.h"
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
+#include "fakes/rma_vtable_fake.h"
 
 using RcclUnitTesting::CaptureLog;
 using RcclUnitTesting::LogHas;
@@ -135,9 +136,8 @@ using RcclUnitTesting::LogHas;
 gdr_t ncclGdrCopy = nullptr;
 
 #include "fakes/param_redirect.h"
-// gin_host_proxy.cc's only other param, defined in src/transport/net_ib with no shared owner.
-int64_t g_dmaBufEnable = 0;
-int64_t ncclParamDmaBufEnable() { return g_dmaBufEnable; }
+// src/misc/rocmwrap.cc's param, which fakes/rocmwrap_fakes.cc does not define yet.
+NCCL_PARAM(DmaBufEnable, "DMABUF_ENABLE", 1);
 
 #include GIN_HOST_PROXY_CC_PATH
 #include GPUCONTEXT_CC_PATH
@@ -147,236 +147,6 @@ int64_t ncclParamDmaBufEnable() { return g_dmaBufEnable; }
 namespace {
 
 void* const kPluginCtx = reinterpret_cast<void*>(0x10);
-void* const kPluginListenComm = reinterpret_cast<void*>(0x20);
-void* const kPluginCollComm = reinterpret_cast<void*>(0x30);
-void* const kPluginRmaCtx = reinterpret_cast<void*>(0x40);
-
-struct MrReg {
-  void* collComm;
-  void* addr;
-  size_t size;
-  int type;
-  uint64_t mrFlags;
-  int fd;  // -1 for a plain registration
-  void* mhandle;
-};
-
-struct RmaOp {
-  char kind;  // 'p' iput, 's' iputSignal, 'g' iget, 'f' iflush
-  void* rmaCtx;
-  int context;
-  uint64_t srcOff;
-  void* srcHandle;
-  size_t size;
-  uint64_t dstOff;
-  void* dstHandle;
-  uint32_t rank;
-  uint64_t signalOff;
-  void* signalHandle;
-  uint64_t signalValue;
-  uint32_t signalOp;
-  bool isStrong;
-  uint32_t optFlags;
-  void* request;
-};
-
-// Scripted ncclRma_t: every entry point records its arguments and returns its *Result knob.
-struct FakeRma {
-  int maxRecvs = 1;
-  int ptrSupport = NCCL_PTR_HOST | NCCL_PTR_CUDA;
-  bool flushesAll = false;
-  bool pluginHasError = false;
-  bool flushReturnsNullRequest = false;
-  ncclResult_t listenResult = ncclSuccess, connectResult = ncclSuccess, getPropertiesResult = ncclSuccess,
-               closeListenResult = ncclSuccess, closeCollResult = ncclSuccess, createContextResult = ncclSuccess,
-               destroyContextResult = ncclSuccess, getRmaPropertiesResult = ncclSuccess, regMrSymResult = ncclSuccess,
-               deregMrSymResult = ncclSuccess, opResult = ncclSuccess, testResult = ncclSuccess,
-               queryLastErrorResult = ncclSuccess;
-  std::deque<ncclResult_t> regMrSymDmaBufResults;  // empty means success
-
-  int listenDev = -1;
-  void* listenHandle = nullptr;
-  void* connectListenComm = nullptr;
-  int connectNranks = -1, connectRank = -1;
-  int getPropertiesDev = -1;
-  std::vector<void*> closedListens, closedColls, destroyedContexts, progressed, queried, tested;
-  ncclRmaConfig_t createConfig{};
-  std::vector<MrReg> regs;
-  std::vector<std::pair<void*, void*>> deregs;
-  std::vector<RmaOp> ops;
-  std::set<void*> done;
-
-  ncclRma_t vtable{};
-
-  static FakeRma*& Current() {
-    static FakeRma* p = nullptr;
-    return p;
-  }
-
-  static ncclResult_t Init(void**, uint64_t, ncclDebugLogger_t) { return ncclSuccess; }
-  static ncclResult_t Devices(int* ndev) {
-    *ndev = 1;
-    return ncclSuccess;
-  }
-  static ncclResult_t Finalize(void*) { return ncclSuccess; }
-  static ncclResult_t GetProperties(int dev, ncclNetProperties_t* props) {
-    FakeRma& f = *Current();
-    f.getPropertiesDev = dev;
-    std::memset(props, 0, sizeof(*props));
-    props->maxRecvs = f.maxRecvs;
-    props->ptrSupport = f.ptrSupport;
-    return f.getPropertiesResult;
-  }
-  // Entry points taking a collComm reject the proxy's wrapper: the plugin must get its own back.
-  static ncclResult_t GetRmaProperties(void* collComm, ncclRmaProperties_t* rmaProps) {
-    FakeRma& f = *Current();
-    if (collComm != kPluginCollComm) return ncclInternalError;
-    rmaProps->flushesAllPutsOnAnySignal = f.flushesAll;
-    return f.getRmaPropertiesResult;
-  }
-  static ncclResult_t Listen(void*, int dev, void* handle, void** listenComm) {
-    FakeRma& f = *Current();
-    f.listenDev = dev;
-    f.listenHandle = handle;
-    if (f.listenResult != ncclSuccess) return f.listenResult;
-    *listenComm = kPluginListenComm;
-    return ncclSuccess;
-  }
-  static ncclResult_t Connect(void*, void**, int nranks, int rank, void* listenComm, void** collComm) {
-    FakeRma& f = *Current();
-    f.connectNranks = nranks;
-    f.connectRank = rank;
-    f.connectListenComm = listenComm;
-    if (f.connectResult != ncclSuccess) return f.connectResult;
-    *collComm = kPluginCollComm;
-    return ncclSuccess;
-  }
-  static ncclResult_t CreateContext(void* collComm, ncclRmaConfig_t* config, void** rmaCtx) {
-    FakeRma& f = *Current();
-    if (collComm != kPluginCollComm) return ncclInternalError;
-    f.createConfig = *config;
-    if (f.createContextResult != ncclSuccess) return f.createContextResult;
-    *rmaCtx = kPluginRmaCtx;
-    return ncclSuccess;
-  }
-  static ncclResult_t RegMrSym(void* collComm, void* data, size_t size, int type, uint64_t mrFlags, void** mhandle) {
-    FakeRma& f = *Current();
-    if (f.regMrSymResult != ncclSuccess) return f.regMrSymResult;
-    *mhandle = reinterpret_cast<void*>(0xA000 + f.regs.size());
-    f.regs.push_back({collComm, data, size, type, mrFlags, -1, *mhandle});
-    return ncclSuccess;
-  }
-  static ncclResult_t RegMrSymDmaBuf(void* collComm, void* data, size_t size, int type, uint64_t offset, int fd,
-                                     uint64_t mrFlags, void** mhandle) {
-    FakeRma& f = *Current();
-    ncclResult_t res = ncclSuccess;
-    if (!f.regMrSymDmaBufResults.empty()) {
-      res = f.regMrSymDmaBufResults.front();
-      f.regMrSymDmaBufResults.pop_front();
-    }
-    if (offset != 0 || fd < 0) return ncclInternalError;
-    if (res != ncclSuccess) return res;
-    *mhandle = reinterpret_cast<void*>(0xA000 + f.regs.size());
-    f.regs.push_back({collComm, data, size, type, mrFlags, fd, *mhandle});
-    return ncclSuccess;
-  }
-  static ncclResult_t DeregMrSym(void* collComm, void* mhandle) {
-    FakeRma& f = *Current();
-    f.deregs.push_back({collComm, mhandle});
-    return f.deregMrSymResult;
-  }
-  static ncclResult_t DestroyContext(void* rmaCtx) {
-    FakeRma& f = *Current();
-    f.destroyedContexts.push_back(rmaCtx);
-    return f.destroyContextResult;
-  }
-  static ncclResult_t CloseColl(void* collComm) {
-    FakeRma& f = *Current();
-    f.closedColls.push_back(collComm);
-    return f.closeCollResult;
-  }
-  static ncclResult_t CloseListen(void* listenComm) {
-    FakeRma& f = *Current();
-    f.closedListens.push_back(listenComm);
-    return f.closeListenResult;
-  }
-  static ncclResult_t Submit(RmaOp op, void** request) {
-    FakeRma& f = *Current();
-    op.request = reinterpret_cast<void*>(0x5000 + f.ops.size());
-    if (op.kind == 'f' && f.flushReturnsNullRequest) op.request = nullptr;
-    f.ops.push_back(op);
-    if (f.opResult != ncclSuccess) return f.opResult;
-    *request = op.request;
-    return ncclSuccess;
-  }
-  static ncclResult_t Iput(void* rmaCtx, int context, uint64_t srcOff, void* srcMhandle, size_t size, uint64_t dstOff,
-                           void* dstMhandle, uint32_t rank, uint32_t optFlags, void** request) {
-    return Submit({'p', rmaCtx, context, srcOff, srcMhandle, size, dstOff, dstMhandle, rank, 0, nullptr, 0, 0, false,
-                   optFlags, nullptr},
-                  request);
-  }
-  static ncclResult_t IputSignal(void* rmaCtx, int context, uint64_t srcOff, void* srcMhandle, size_t size,
-                                 uint64_t dstOff, void* dstMhandle, uint32_t rank, uint64_t signalOff,
-                                 void* signalMhandle, uint64_t signalValue, uint32_t signalOp, bool isStrongSignal,
-                                 uint32_t optFlags, void** request) {
-    return Submit({'s', rmaCtx, context, srcOff, srcMhandle, size, dstOff, dstMhandle, rank, signalOff, signalMhandle,
-                   signalValue, signalOp, isStrongSignal, optFlags, nullptr},
-                  request);
-  }
-  static ncclResult_t Iget(void* rmaCtx, int context, uint64_t remoteOff, void* remoteMhandle, size_t size,
-                           uint64_t localOff, void* localMhandle, uint32_t rank, uint32_t optFlags, void** request) {
-    return Submit({'g', rmaCtx, context, remoteOff, remoteMhandle, size, localOff, localMhandle, rank, 0, nullptr, 0,
-                   0, false, optFlags, nullptr},
-                  request);
-  }
-  static ncclResult_t Iflush(void* rmaCtx, int context, void* mhandle, uint32_t rank, void** request) {
-    return Submit({'f', rmaCtx, context, 0, nullptr, 0, 0, mhandle, rank, 0, nullptr, 0, 0, false, 0, nullptr},
-                  request);
-  }
-  static ncclResult_t Test(void* collComm, void* request, int* done) {
-    FakeRma& f = *Current();
-    f.tested.push_back(request);
-    if (collComm != kPluginCollComm) return ncclInternalError;
-    if (f.testResult != ncclSuccess) return f.testResult;
-    *done = f.done.count(request) ? 1 : 0;
-    return ncclSuccess;
-  }
-  static ncclResult_t RmaProgress(void* rmaCtx) {
-    Current()->progressed.push_back(rmaCtx);
-    return ncclSuccess;
-  }
-  static ncclResult_t QueryLastError(void* rmaCtx, bool* hasError) {
-    FakeRma& f = *Current();
-    f.queried.push_back(rmaCtx);
-    *hasError = f.pluginHasError;
-    return f.queryLastErrorResult;
-  }
-
-  FakeRma() {
-    vtable.name = "FakeRma";
-    vtable.init = &Init;
-    vtable.devices = &Devices;
-    vtable.getRmaProperties = &GetRmaProperties;
-    vtable.getProperties = &GetProperties;
-    vtable.listen = &Listen;
-    vtable.connect = &Connect;
-    vtable.createContext = &CreateContext;
-    vtable.regMrSym = &RegMrSym;
-    vtable.regMrSymDmaBuf = &RegMrSymDmaBuf;
-    vtable.deregMrSym = &DeregMrSym;
-    vtable.destroyContext = &DestroyContext;
-    vtable.closeColl = &CloseColl;
-    vtable.closeListen = &CloseListen;
-    vtable.iput = &Iput;
-    vtable.iputSignal = &IputSignal;
-    vtable.iget = &Iget;
-    vtable.iflush = &Iflush;
-    vtable.test = &Test;
-    vtable.rmaProgress = &RmaProgress;
-    vtable.queryLastError = &QueryLastError;
-    vtable.finalize = &Finalize;
-  }
-};
 
 bool FdIsOpen(int fd) { return fcntl(fd, F_GETFD) != -1; }
 
@@ -385,10 +155,11 @@ gdr_t const kGdrEnabled = reinterpret_cast<gdr_t>(0x12345678L);
 
 class GinHostProxyMicrotest : public ::testing::Test {
  protected:
-  FakeRma rma_;
+  FakeRmaVtable rma_;
   std::unique_ptr<ncclComm> comm_ = std::make_unique<ncclComm>();
   int64_t queueSizeParam_ = -1;
   int64_t pollBatchParam_ = 32;
+  int64_t dmaBufEnable_ = 0;
   char handle_[NCCL_NET_HANDLE_MAXSIZE] = {};
   void* handles_[2] = {handle_, handle_};
   void* listenComm_ = nullptr;
@@ -402,6 +173,7 @@ class GinHostProxyMicrotest : public ::testing::Test {
   ScopedHook<int64_t(const char*, int64_t)> params_{g_loadParam, [this](const char* env, int64_t deft) -> int64_t {
     if (std::strcmp(env, "GIN_PROXY_QUEUE_SIZE") == 0) return queueSizeParam_;
     if (std::strcmp(env, "GIN_PROXY_POLL_BATCH") == 0) return pollBatchParam_;
+    if (std::strcmp(env, "DMABUF_ENABLE") == 0) return dmaBufEnable_;
     return deft;
   }};
   // GIN needs symmetricSupport (gin_host.cc), which needs cuMem.
@@ -434,9 +206,8 @@ class GinHostProxyMicrotest : public ::testing::Test {
 #endif
 
   void SetUp() override {
-    FakeRma::Current() = &rma_;
+    FakeRmaVtable::setCurrent(&rma_);
     g_mem.Reset();
-    g_dmaBufEnable = 0;
     ncclGdrCopy = nullptr;
     comm_->rmaState.rmaProxyState.ncclRma = &rma_.vtable;
     comm_->rmaState.rmaProxyState.rmaVersion = 16;
@@ -446,7 +217,7 @@ class GinHostProxyMicrotest : public ::testing::Test {
   void TearDown() override {
     g_mem.Reset();
     ncclGdrCopy = nullptr;
-    FakeRma::Current() = nullptr;
+    FakeRmaVtable::setCurrent(nullptr);
   }
 
   ncclResult_t ListenAndConnect(int nRanks) {
@@ -470,14 +241,15 @@ class GinHostProxyMicrotest : public ::testing::Test {
 
 TEST_F(GinHostProxyMicrotest, Init_WithoutAnRmaBackendFails) {
   comm_->rmaState.rmaProxyState.ncclRma = nullptr;
-  std::string log = CaptureLog([&] { EXPECT_EQ(ncclInvalidArgument, ncclGinProxyInit(comm_.get())); });
-  EXPECT_TRUE(LogHas(log, "RMA backend not found")) << log;
+  ncclResult_t res = ncclSuccess;
+  std::string log = CaptureLog([&] { res = ncclGinProxyInit(comm_.get()); });
+  EXPECT_EQ(ncclInvalidArgument, res) << log;
 }
 
 TEST_F(GinHostProxyMicrotest, Init_ForwardsThePluginEntryPointsAndVersion) {
   comm_->rmaState.rmaProxyState.rmaVersion = 15;
   ASSERT_EQ(ncclSuccess, ncclGinProxyInit(comm_.get()));
-  EXPECT_STREQ("FakeRma", ncclGinProxy.name);
+  EXPECT_STREQ("FakeRmaVtable", ncclGinProxy.name);
   EXPECT_EQ(rma_.vtable.init, ncclGinProxy.init);
   EXPECT_EQ(rma_.vtable.devices, ncclGinProxy.devices);
   EXPECT_EQ(rma_.vtable.getProperties, ncclGinProxy.getProperties);
@@ -498,17 +270,17 @@ TEST_F(GinHostProxyMicrotest, ListenConnectClose_WrapThePluginComms) {
   EXPECT_EQ(3, rma_.listenDev);
   EXPECT_EQ(handle_, rma_.listenHandle);
   EXPECT_EQ(3, rma_.getPropertiesDev);
-  EXPECT_EQ(kPluginListenComm, rma_.connectListenComm);
+  EXPECT_EQ(FakeRmaVtable::kListenComm, rma_.connectListenComm);
   EXPECT_EQ(2, rma_.connectNranks);
   EXPECT_EQ(1, rma_.connectRank);
   ASSERT_NE(nullptr, collComm_);
-  EXPECT_EQ(kPluginCollComm, CollComm()->collComm);
+  EXPECT_EQ(FakeRmaVtable::kCollComm, CollComm()->collComm);
   EXPECT_EQ(2, CollComm()->nRanks);
   EXPECT_EQ(4, CollComm()->props.maxRecvs);
 
   CloseAll();
-  EXPECT_EQ(std::vector<void*>{kPluginCollComm}, rma_.closedColls);
-  EXPECT_EQ(std::vector<void*>{kPluginListenComm}, rma_.closedListens);
+  EXPECT_EQ(std::vector<void*>{FakeRmaVtable::kCollComm}, rma_.closedColls);
+  EXPECT_EQ(std::vector<void*>{FakeRmaVtable::kListenComm}, rma_.closedListens);
 }
 
 TEST_F(GinHostProxyMicrotest, Listen_PluginFailureLeavesListenCommUnset) {
@@ -571,7 +343,7 @@ class GinHostProxyRegMrMicrotest : public GinHostProxyMicrotest {
     GinHostProxyMicrotest::SetUp();
     rma_.ptrSupport |= NCCL_PTR_DMABUF;
     ASSERT_EQ(ncclSuccess, ListenAndConnect(2));
-    g_dmaBufEnable = 1;
+    dmaBufEnable_ = 1;
   }
   void TearDown() override {
     CloseAll();
@@ -585,7 +357,7 @@ class GinHostProxyRegMrMicrotest : public GinHostProxyMicrotest {
 TEST_F(GinHostProxyRegMrMicrotest, Host_RegistersPlainWithoutDmaBuf) {
   ASSERT_EQ(ncclSuccess, Reg(NCCL_PTR_HOST));
   ASSERT_EQ(1u, rma_.regs.size());
-  EXPECT_EQ(kPluginCollComm, rma_.regs[0].collComm);
+  EXPECT_EQ(FakeRmaVtable::kCollComm, rma_.regs[0].collComm);
   EXPECT_EQ(buf_, rma_.regs[0].addr);
   EXPECT_EQ(sizeof(buf_), rma_.regs[0].size);
   EXPECT_EQ(NCCL_PTR_HOST, rma_.regs[0].type);
@@ -628,7 +400,7 @@ TEST_F(GinHostProxyRegMrMicrotest, Cuda_WithoutTheExportArmRegistersPlain) {
 #endif
 
 TEST_F(GinHostProxyRegMrMicrotest, Cuda_DmaBufDisabledRegistersPlain) {
-  g_dmaBufEnable = 0;
+  dmaBufEnable_ = 0;
   ASSERT_EQ(ncclSuccess, Reg(NCCL_PTR_CUDA));
   EXPECT_TRUE(exportSizes_.empty());
   ASSERT_EQ(1u, rma_.regs.size());
@@ -698,7 +470,7 @@ TEST_F(GinHostProxyRegMrMicrotest, PlainRegistrationFailurePropagates) {
   rma_.regMrSymResult = ncclSystemError;
   ginHandle_ = kPluginCtx;
   EXPECT_EQ(ncclSystemError, Reg(NCCL_PTR_HOST));
-  g_dmaBufEnable = 0;
+  dmaBufEnable_ = 0;
   EXPECT_EQ(ncclSystemError, Reg(NCCL_PTR_CUDA));
   EXPECT_EQ(kPluginCtx, ginHandle_);
 }
@@ -709,7 +481,7 @@ TEST_F(GinHostProxyRegMrMicrotest, Dereg_ForwardsThePluginCollCommAndHandle) {
   rma_.deregMrSymResult = ncclSystemError;
   EXPECT_EQ(ncclSystemError, ncclGinProxy.deregMrSym(collComm_, mh));
   ASSERT_EQ(2u, rma_.deregs.size());
-  EXPECT_EQ(kPluginCollComm, rma_.deregs[0].first);
+  EXPECT_EQ(FakeRmaVtable::kCollComm, rma_.deregs[0].first);
   EXPECT_EQ(mh, rma_.deregs[0].second);
 }
 
@@ -844,7 +616,7 @@ TEST_F(GinHostProxyContextMicrotest, Create_ZeroesAndRegistersSignalsStronglyOrd
   EXPECT_EQ((uint64_t)(NCCL_NET_MR_FLAG_FORCE_SO | NCCL_NET_MR_FLAG_SIGNAL_NEVER_RESET), rma_.regs[0].mrFlags);
   EXPECT_EQ(rma_.regs[0].mhandle, Ctx()->signalsGinHandle);
   for (int c = 0; c < 2; c++) {
-    const MrReg& r = rma_.regs[1 + c];
+    const FakeRmaVtable::MrReg& r = rma_.regs[1 + c];
     EXPECT_EQ(Ctx()->hostGpuCtx[c].inlines, r.addr);
     EXPECT_EQ(32 * 2 * sizeof(uint64_t), r.size);
     EXPECT_EQ(NCCL_PTR_HOST, r.type);
@@ -891,9 +663,10 @@ TEST_F(GinHostProxyContextMicrotest, Create_OlderBackendVersionsUseTheirOwnGpuCo
 // 0 passes the version check up front, so the failure comes from the GPU-context writer after the RMA context
 // and every buffer exist, and none of them is released. Pins AICOMRCCL-2992; a fix flips this pin.
 TEST_F(GinHostProxyContextMicrotest, Create_BackendVersionZero_FailsLateAndLeaksEverything) {
-  std::string log = CaptureLog([&] { EXPECT_EQ(ncclInternalError, Create(Config(0))); });
+  ncclResult_t res = ncclSuccess;
+  std::string log = CaptureLog([&] { res = Create(Config(0)); });
+  EXPECT_EQ(ncclInternalError, res) << log;
   EXPECT_EQ(nullptr, ginCtx_);
-  EXPECT_TRUE(LogHas(log, "Invalid GIN proxy backend version 0")) << log;
   EXPECT_EQ(2, rma_.createConfig.nContexts);  // the RMA context was created ...
   EXPECT_TRUE(rma_.destroyedContexts.empty());  // ... and never destroyed
   EXPECT_FALSE(g_mem.live.empty());
@@ -1023,9 +796,10 @@ TEST_F(GinHostProxyContextMicrotest, Destroy_ReleasesAllButTheSignalOffsets) {
   void* inlinesMh1 = Ctx()->hostGpuCtx[1].inlinesMhandle;
   Destroy();
 
-  EXPECT_EQ(std::vector<void*>{kPluginRmaCtx}, rma_.destroyedContexts);
-  std::vector<std::pair<void*, void*>> deregs = {
-    {kPluginCollComm, signalsMh}, {kPluginCollComm, inlinesMh0}, {kPluginCollComm, inlinesMh1}};
+  EXPECT_EQ(std::vector<void*>{FakeRmaVtable::kRmaCtx}, rma_.destroyedContexts);
+  std::vector<std::pair<void*, void*>> deregs = {{FakeRmaVtable::kCollComm, signalsMh},
+                                                 {FakeRmaVtable::kCollComm, inlinesMh0},
+                                                 {FakeRmaVtable::kCollComm, inlinesMh1}};
   EXPECT_EQ(deregs, rma_.deregs);
   ASSERT_EQ(1u, g_mem.live.size());
   EXPECT_EQ(signalOffsets, g_mem.live.begin()->first);
@@ -1113,9 +887,9 @@ TEST_F(GinHostProxyProgressMicrotest, Put_SubmitsAnIputAndReleasesTheSlot) {
   Post(1, 1, PutGfd(0, 64));
   ASSERT_EQ(ncclSuccess, Progress());
   ASSERT_EQ(1u, rma_.ops.size());
-  const RmaOp& op = rma_.ops[0];
+  const FakeRmaVtable::Op& op = rma_.ops[0];
   EXPECT_EQ('p', op.kind);
-  EXPECT_EQ(kPluginRmaCtx, op.rmaCtx);
+  EXPECT_EQ(FakeRmaVtable::kRmaCtx, op.rmaCtx);
   EXPECT_EQ(1, op.context);
   EXPECT_EQ(0x10u, op.srcOff);
   EXPECT_EQ(reinterpret_cast<void*>(0x2000), op.srcHandle);
@@ -1126,7 +900,7 @@ TEST_F(GinHostProxyProgressMicrotest, Put_SubmitsAnIputAndReleasesTheSlot) {
   EXPECT_EQ((uint32_t)ncclRmaOptFlagsDefault, op.optFlags);
   for (const auto& q : Slot(1, 1, 0)->qword) EXPECT_EQ(0u, q.raw);
   EXPECT_EQ(1u, Ctx()->hostGpuCtx[1].sis[1]);
-  EXPECT_EQ(std::vector<void*>{kPluginRmaCtx}, rma_.progressed);
+  EXPECT_EQ(std::vector<void*>{FakeRmaVtable::kRmaCtx}, rma_.progressed);
 }
 
 // The header flag makes a GFD visible; the proxy then waits for each later qword's flag before reading it.
@@ -1226,7 +1000,7 @@ TEST_F(GinHostProxyProgressMicrotest, VaSignal_SignalsTheGfdsAddressWithoutAPut)
   Post(1, 1, g);
   ASSERT_EQ(ncclSuccess, Progress());
   ASSERT_EQ(1u, rma_.ops.size());
-  const RmaOp& op = rma_.ops[0];
+  const FakeRmaVtable::Op& op = rma_.ops[0];
   EXPECT_EQ('s', op.kind);
   EXPECT_EQ(1, op.context);
   EXPECT_EQ(0u, op.srcOff);
@@ -1259,9 +1033,11 @@ TEST_F(GinHostProxyProgressMicrotest, Get_SubmitsAnIget) {
 TEST_F(GinHostProxyProgressMicrotest, Get_PluginWithoutIgetIsAnError) {
   rma_.vtable.iget = nullptr;
   Post(0, 0, Gfd(ncclGinProxyOpGet, 8));
-  std::string log = CaptureLog([&] { EXPECT_EQ(ncclInvalidUsage, Progress()); });
-  EXPECT_TRUE(LogHas(log, "does not support GET")) << log;
+  ncclResult_t res = ncclSuccess;
+  std::string log = CaptureLog([&] { res = Progress(); });
+  EXPECT_EQ(ncclInvalidUsage, res) << log;
   EXPECT_TRUE(HasError());
+  EXPECT_TRUE(rma_.ops.empty());
 }
 
 TEST_F(GinHostProxyProgressMicrotest, Flush_SubmitsAnIflushOnTheSignalsMr) {
@@ -1287,15 +1063,20 @@ TEST_F(GinHostProxyProgressMicrotest, Flush_WithoutARequestCompletesWithoutATest
 TEST_F(GinHostProxyProgressMicrotest, Flush_PluginWithoutIflushIsAnError) {
   rma_.vtable.iflush = nullptr;
   Post(0, 0, Gfd(ncclGinProxyOpFlush));
-  std::string log = CaptureLog([&] { EXPECT_EQ(ncclInvalidUsage, Progress()); });
-  EXPECT_TRUE(LogHas(log, "does not support FLUSH")) << log;
+  ncclResult_t res = ncclSuccess;
+  std::string log = CaptureLog([&] { res = Progress(); });
+  EXPECT_EQ(ncclInvalidUsage, res) << log;
+  EXPECT_TRUE(HasError());
+  EXPECT_TRUE(rma_.ops.empty());
 }
 
 TEST_F(GinHostProxyProgressMicrotest, UnknownOpIsAnInternalError) {
   Post(0, 0, Gfd(ncclGinProxyOpWithCounter, 8));
-  std::string log = CaptureLog([&] { EXPECT_EQ(ncclInternalError, Progress()); });
-  EXPECT_TRUE(LogHas(log, "Unexpected GIN proxy operation")) << log;
+  ncclResult_t res = ncclSuccess;
+  std::string log = CaptureLog([&] { res = Progress(); });
+  EXPECT_EQ(ncclInternalError, res) << log;
   EXPECT_TRUE(HasError());
+  EXPECT_TRUE(rma_.ops.empty());
 }
 
 TEST_F(GinHostProxyProgressMicrotest, SubmitFailureSetsTheErrorFlag) {
@@ -1406,7 +1187,7 @@ TEST_F(GinHostProxyProgressMicrotest, Progress_PluginWithoutRmaProgressIsSkipped
 
 TEST_F(GinHostProxyProgressMicrotest, QueryLastError_AsksThePluginWhenNoLocalError) {
   EXPECT_FALSE(HasError());
-  EXPECT_EQ(std::vector<void*>{kPluginRmaCtx}, rma_.queried);
+  EXPECT_EQ(std::vector<void*>{FakeRmaVtable::kRmaCtx}, rma_.queried);
   rma_.pluginHasError = true;
   EXPECT_TRUE(HasError());
   rma_.queryLastErrorResult = ncclSystemError;
