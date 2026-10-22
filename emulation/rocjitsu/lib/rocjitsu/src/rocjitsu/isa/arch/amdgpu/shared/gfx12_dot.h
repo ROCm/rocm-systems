@@ -52,6 +52,7 @@ using Fp8Factor = FactorFormat<4, 3, true>;
 using Bf8Factor = FactorFormat<5, 2>;
 template <bool Bf16> using HalfFactor = std::conditional_t<Bf16, Bf16Factor, F16Factor>;
 
+// Decode raw input fields without converting through a host floating-point type.
 template <typename Format> struct Factor {
   static constexpr unsigned kMantissaBits = Format::kMantissaBits;
   static constexpr unsigned kMantissaMask = (1u << kMantissaBits) - 1;
@@ -299,6 +300,10 @@ inline uint32_t gfx12_dot4_f32_fp8(uint32_t src0, uint32_t src1, uint32_t acc) {
 
 /// @brief One GFX12 FP8/BF8 WMMA step: eight native FP8 (E4M3) or BF8 (E5M2)
 /// products plus F32 C, returning raw F32 bits.
+/// @details Products align in groups of four before adding C and round to
+/// nearest-even independently of guest MODE and host rounding controls. Factor
+/// NaNs and invalid products yield 0xffc00a3d; otherwise an accumulator NaN
+/// retains its payload.
 /// @tparam Src0Fp8 Selects FP8 for src0, and BF8 otherwise; likewise Src1Fp8.
 template <bool Src0Fp8, bool Src1Fp8>
 inline uint32_t gfx12_dot8_f32(const std::array<uint8_t, 8> &src0,
