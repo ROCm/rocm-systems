@@ -61,7 +61,6 @@ private:
 class TokenGenerator : public NaviTokenGenerator
 {
 public:
-    // Headerless token streams can opt out of reading the trace configuration.
     TokenGenerator(
         const uint8_t* _buffer, size_t size, int64_t _globaltime, int64_t _base_time, bool read_header = true
     );
