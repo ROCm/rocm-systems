@@ -68,71 +68,20 @@ const char* ncclGetPluginLibName(ncclPluginType) { return ""; }
 
 #include GIN_CC_PATH
 
+#include "fakes/gin_vtable_fake.h"
+
 namespace {
-
-struct FakeGin {
-  int initCalls = 0;
-  int devicesCalls = 0;
-  int finalizeCalls = 0;
-  ncclResult_t initResult = ncclSuccess;
-  ncclResult_t devicesResult = ncclSuccess;
-  int ndev = 0;
-  void* lastCtx = nullptr;
-  bool initNullFn = false;
-
-  static FakeGin*& currentPtr() {
-    static FakeGin* p = nullptr;
-    return p;
-  }
-  static FakeGin& current() { return *currentPtr(); }
-  static void setCurrent(FakeGin* p) { currentPtr() = p; }
-
-  static ncclResult_t Init(void** ctx, uint64_t /*commId*/, ncclDebugLogger_t) {
-    FakeGin& self = current();
-    ++self.initCalls;
-    if (self.initResult != ncclSuccess) return self.initResult;
-    // Match the NVIDIA leak: ncclGinIbInitType calloc'd an 8-byte config.
-    self.lastCtx = std::malloc(8);
-    if (ctx) *ctx = self.lastCtx;
-    return ncclSuccess;
-  }
-
-  static ncclResult_t Devices(int* ndev) {
-    FakeGin& self = current();
-    ++self.devicesCalls;
-    if (self.devicesResult != ncclSuccess) return self.devicesResult;
-    if (ndev) *ndev = self.ndev;
-    return ncclSuccess;
-  }
-
-  static ncclResult_t Finalize(void* ctx) {
-    FakeGin& self = current();
-    ++self.finalizeCalls;
-    std::free(ctx);
-    if (self.lastCtx == ctx) self.lastCtx = nullptr;
-    return ncclSuccess;
-  }
-
-  ncclGin_t vtable() {
-    ncclGin_t gin{};
-    gin.name = "GinInitLeakStub";
-    gin.init = initNullFn ? nullptr : &Init;
-    gin.devices = &Devices;
-    gin.finalize = &Finalize;
-    return gin;
-  }
-};
 
 class GinPluginInitTest : public ::testing::Test {
  protected:
-  FakeGin fake_;
+  FakeGinVtable fake_;
   ncclGin_t gin_{};
   ginPluginLib_t pluginLib_{};
   ncclComm comm_{};
   void* ctx_ = nullptr;
 
   void SetUp() override {
-    FakeGin::setCurrent(&fake_);
+    FakeGinVtable::setCurrent(&fake_);
     gin_ = fake_.vtable();
     pluginLib_.ncclGin = &gin_;
     pluginLib_.state = ncclGinPluginStateInitReady;
@@ -147,7 +96,7 @@ class GinPluginInitTest : public ::testing::Test {
       std::free(fake_.lastCtx);
       fake_.lastCtx = nullptr;
     }
-    FakeGin::setCurrent(nullptr);
+    FakeGinVtable::setCurrent(nullptr);
   }
 
   ncclResult_t runInit() { return ncclGinPluginInit(&comm_, &pluginLib_, &ctx_); }
@@ -209,7 +158,8 @@ TEST_F(GinPluginInitTest, DoesNotFinalizeWhenInitPointerIsNull) {
 //
 // The other half of the pairing -- ncclGinHostFinalize preserving these records
 // and marking backends closed -- lives in gin-host-finalize-test.cc
-// (rccl-UnitTestsMicroGinHost). gin_host.cc cannot join this binary because
+// (rccl-UnitTestsMicroGinHostFinalize). Both suites use fakes/gin_vtable_fake.h.
+// gin_host.cc cannot join this binary because
 // dev_runtime_micro_fakes.cc already defines the GIN host entry points for
 // dev-runtime-test.cc. GinMPIDeviceTests.CommDestroy_FreesAnvilInitContext
 // covers the Anvil init-context path end to end.

@@ -58,7 +58,8 @@ __launch_bounds__(512)
                                         uint32_t* __restrict__ epochDev, // per-block LL epoch cells
                                         int epochLen, // number of cells in epochDev
                                         size_t slicesTotal, // slices this call actually uses
-                                        size_t bankSize) { // scratch bank size (from host)
+                                        size_t bankSize, // scratch bank size (from host)
+                                        DdaKernelParams params) {
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
 
@@ -121,8 +122,10 @@ __launch_bounds__(512)
       for (int u = 0; u < kDdaLL128WordsPerThread; ++u) {
         acc[u] = self[u];
       }
-    } else {
-      ddaLL128PollWire(gatherBase + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, acc, flag, lane);
+    } else if (!ddaLL128PollWire(gatherBase + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, acc, flag, lane,
+                                 params)) {
+      ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag32);
+      return;
     }
     for (int peer = 1; peer < nRanks; ++peer) {
       // On a flag lane the odd words hold flags rather than payload, so the sums
@@ -137,7 +140,11 @@ __launch_bounds__(512)
       } else {
         const uint64_t* gatherSlot = gatherBase + (uint64_t)peer * (uint64_t)slotWords;
         uint64_t vr[kDdaLL128WordsPerThread];
-        ddaLL128PollWire(gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, vr, flag, lane);
+        if (!ddaLL128PollWire(gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, vr, flag, lane,
+                              params)) {
+          ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag32);
+          return;
+        }
 #pragma unroll
         for (int u = 0; u < kDdaLL128WordsPerThread; ++u) {
           acc[u] = ddaLL128AddWord<T>(acc[u], vr[u]);

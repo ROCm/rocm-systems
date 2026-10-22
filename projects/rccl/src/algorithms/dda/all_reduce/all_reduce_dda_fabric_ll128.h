@@ -51,7 +51,8 @@ __launch_bounds__(1024)
                                         int selfRank, int nRanksRt,
                                         uint32_t* __restrict__ epochDev, // per-block LL epoch cells (shared AG+AR)
                                         int epochLen, // number of cells in epochDev
-                                        size_t slotStrideLines) { // per-call lines/slot (from host)
+                                        size_t slotStrideLines, // per-call lines/slot (from host)
+                                        DdaKernelParams params) {
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const size_t bytes = count * sizeof(T);
@@ -112,7 +113,9 @@ __launch_bounds__(1024)
       } else {
         LLLine128* src = myBase + (size_t)peer * slot;
         // All 16 lanes poll the shared flag word (broadcast); unfenced.
-        while (ddaLL128LoadWord(&src[ln].w[kDdaLL128FlagElem]) != (uint64_t)flag) {
+        if (!ddaLL128WaitFlag(&src[ln].w[kDdaLL128FlagElem], (uint64_t)flag, params)) {
+          ddaSetLLEpoch(epochDev, epochLen, flatBlockId, total, flag);
+          return;
         }
         if (hasWord) {
           d = ddaLL128LoadWord(&src[ln].w[lane]);

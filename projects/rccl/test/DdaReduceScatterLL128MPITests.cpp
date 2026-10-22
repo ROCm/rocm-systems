@@ -22,6 +22,7 @@
 
 #ifdef MPI_TESTS_ENABLED
 
+#include "DdaMPITestHelpers.hpp"
 #include "DeviceBufferHelpers.hpp"
 #include "MPIHelpers.hpp"
 #include "MPITestBase.hpp"
@@ -51,13 +52,6 @@ constexpr char kNearCapMaxBlocks[] = "32";
 constexpr int  kLl128Threads       = 512;
 constexpr char kLl128PathNeedle[]   = "taking DDA fabric LL128 path";
 constexpr char kLl128LaunchNeedle[] = "DDA fabric ReduceScatter LL128:";
-
-bool isGfx1250Device()
-{
-    hipDeviceProp_t props{};
-    return hipGetDeviceProperties(&props, 0) == hipSuccess
-        && std::string(props.gcnArchName).find("gfx1250") != std::string::npos;
-}
 
 bool logContains(const MPIHelpers::TestLogAssertionContext& logCtx, const char* needle)
 {
@@ -165,7 +159,7 @@ protected:
 
         if(!validateTestPrerequisites(kMinProcessesForMPI))
             GTEST_SKIP() << "Need at least 2 MPI ranks";
-        if(!isGfx1250Device())
+        if(!DdaMPITestHelpers::isGfx1250Device())
             GTEST_SKIP() << "DDA fabric ReduceScatter LL128 requires gfx1250";
 
         ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());

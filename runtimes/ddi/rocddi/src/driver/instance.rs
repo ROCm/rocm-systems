@@ -20,7 +20,7 @@ use crate::device::gpu::profiling::{
 };
 use crate::memory::storage::Shared;
 use crate::session::DriverContextLifetime;
-use crate::topology::{Endpoint, EndpointDetails};
+use crate::topology::Endpoint;
 use crate::{Error, ErrorKind};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -127,14 +127,11 @@ impl DriverInstance {
         }
     }
 
-    pub(crate) fn query_endpoint_details(
-        &self,
-        endpoint: &Endpoint,
-    ) -> Result<EndpointDetails, Error> {
+    pub(crate) fn populate_endpoint(&self, endpoint: &mut Endpoint) -> Result<(), Error> {
         match self {
-            Self::LinuxKfd(driver) => driver.query_endpoint_details(endpoint),
+            Self::LinuxKfd(driver) => driver.populate_endpoint(endpoint),
             #[cfg(test)]
-            Self::Test(driver) => driver.query_endpoint_details(endpoint),
+            Self::Test(driver) => driver.populate_endpoint(endpoint),
         }
     }
 

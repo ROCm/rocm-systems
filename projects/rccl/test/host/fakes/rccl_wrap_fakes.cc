@@ -235,6 +235,9 @@ int64_t rcclParamHierarchicalLazyInit() {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclParamHierarchicalLazyInit");
 }
 void rcclSetPxn(struct ncclComm*, int&) { FailLoudUnfaked("rccl_wrap_fakes", "rcclSetPxn"); }
+void rcclSetCeAllReduceFastPath(struct ncclComm*) {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclSetCeAllReduceFastPath");
+}
 int64_t g_rcclParamDirectReduceScatterThreshold = 8388608;     // rccl_wrap.cc:51 default
 int64_t rcclParamDirectReduceScatterThreshold() {              // rccl_wrap.cc:51
   return g_rcclParamDirectReduceScatterThreshold;
