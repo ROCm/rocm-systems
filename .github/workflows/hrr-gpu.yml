@@ -225,6 +225,7 @@ jobs:
       # The prebuilt rocJitsu and the capture-enabled amdhip64 load libdrm at run
       # time. The container runs as root, so this does not use sudo.
       - name: Install libdrm
+        shell: bash
         run: |
           set -euo pipefail
           apt-get update
