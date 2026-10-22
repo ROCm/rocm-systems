@@ -44,6 +44,7 @@ FACTOR = float(os.environ.get("RDC_TEST_TIME_FACTOR", "1"))
 FAKE_NAME = "librdc_fake_amdsmi.so"
 NUM_GPUS = 4
 DMON_FIELDS = [100, 101, 200, 201, 300, 500, 501, 502]
+RDC_EVNT_NOTIF_VMFAULT = 2000
 # rdcd refuses to start while either lock is held (it takes the first as root).
 RDCD_LOCKS = ("/var/run/rdcd.lock", "/tmp/rdcd.lock")
 
@@ -64,7 +65,6 @@ UNREACHED_APIS = {
     "amdsmi_set_gpu_clk_limit": "rdci config has no --host option",
     "amdsmi_set_gpu_perf_level": "rdci config has no --host option",
     "amdsmi_reset_gpu": "policy reset action needs a breached threshold",
-    "amdsmi_stop_gpu_event_notification": "rdci offers no notification event field",
 }
 
 # test_fake_gpu_session.py fails amdsmi_init(); amdsmi_shut_down() has no failure
@@ -624,7 +624,9 @@ def reach(tools, tmp_path_factory):
     d = Rdcd(tools, tmp_path_factory.mktemp("reach")).start()
     last, at_start, in_commands = {}, {}, {}
     try:
-        commands = _workload_commands(sorted(_field_names(d)))
+        # `rdci dmon -l` lists no event field (they are not displayed), so add one, VM page
+        # fault: dmon watches it and, as it exits, unwatches it, which stops the GPUs' events.
+        commands = _workload_commands(sorted(_field_names(d)) + [RDC_EVNT_NOTIF_VMFAULT])
         gid = _all_gpus_group(d, "work")
         for api, gpu, _ in d.calls():
             last[api] = -1

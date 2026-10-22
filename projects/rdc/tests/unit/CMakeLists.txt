@@ -246,6 +246,35 @@ install(
     COMPONENT ${TESTS_COMPONENT}
 )
 
+# rdc_notification_tests: the GPU events RdcNotificationImpl reports and the event mask each
+# GPU gets from its listeners, against fake AMD SMI event calls, and RdcWatchTableImpl's
+# listeners. Compiles RdcNotificationImpl.cc, RdcWatchTableImpl.cc and RdcGroupSettingsImpl.cc;
+# test_notifications.cc defines the AMD SMI calls, the SmiUtils.cc lookups and
+# ModifyCapability() they use, so it needs neither librdc nor amd_smi nor a GPU.
+# librdc_bootstrap provides the logger, strncpy_with_null() and the entity codec.
+add_executable(
+    rdc_notification_tests
+    ${SRC_DIR}/test_notifications.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcNotificationImpl.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcWatchTableImpl.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcGroupSettingsImpl.cc
+)
+target_include_directories(
+    rdc_notification_tests
+    PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/include ${AMD_SMI_INCLUDE_DIR}
+)
+target_link_libraries(rdc_notification_tests PRIVATE rdc_bootstrap GTest::gtest_main pthread)
+set_target_properties(
+    rdc_notification_tests
+    PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib"
+)
+add_test(NAME rdc_notification_tests COMMAND rdc_notification_tests)
+install(
+    TARGETS rdc_notification_tests
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
+    COMPONENT ${TESTS_COMPONENT}
+)
+
 # rdc_status_tests: the statuses the health calls return for a GPU group that does
 # not exist, and rdc_status_string(). It compiles RdcWatchTableImpl.cc and
 # RdcGroupSettingsImpl.cc instead of linking librdc, so it needs no GPU;

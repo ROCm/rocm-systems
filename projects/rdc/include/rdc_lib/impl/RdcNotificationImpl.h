@@ -22,9 +22,11 @@ THE SOFTWARE.
 #ifndef INCLUDE_RDC_LIB_IMPL_RDCNOTIFICATIONIMPL_H_
 #define INCLUDE_RDC_LIB_IMPL_RDCNOTIFICATIONIMPL_H_
 
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <vector>
 
 #include "rdc/rdc.h"
@@ -40,14 +42,32 @@ class RdcNotificationImpl : public RdcNotification {
   ~RdcNotificationImpl();
 
   bool is_notification_event(rdc_field_t field) const override;
-  rdc_status_t set_listen_events(const std::vector<RdcFieldKey> fk_arr) override;
+  rdc_status_t add_event_listeners(const std::vector<RdcFieldKey>& fields) override;
+  rdc_status_t remove_event_listeners(const std::vector<RdcFieldKey>& fields) override;
   // Blocking
   rdc_status_t listen(rdc_evnt_notification_t* events, uint32_t* num_events,
                       uint32_t timeout_ms) override;
-  rdc_status_t stop_listening(uint32_t gpu_id) override;
 
  private:
-  std::map<uint32_t, uint64_t> gpu_evnt_notif_masks_;
+  // One GPU's listeners, and the event mask that RDC last left AMD SMI with for the GPU: 0 for
+  // none, all bits set when RDC does not know it (kMaskUnknown).
+  struct GpuListeners {
+    std::map<rdc_field_t, uint32_t> listeners;  // event field -> listener count
+    uint64_t mask = 0;
+    // The last try for the GPU failed. Whether calls that do not name the GPU try it depends on
+    // this only while it has listeners, and then every try is for a nonzero mask.
+    bool failed = false;
+  };
+
+  // Gives GPUs the mask their listeners want: those in gpu_ids, and the others unless their last
+  // try failed and they still have listeners. Returns the first error for a GPU in gpu_ids.
+  rdc_status_t apply_masks_locked(const std::set<uint32_t>& gpu_ids);
+  // named: the call names the GPU. A lookup error is logged as an error, except in the tries that
+  // calls not naming the GPU make of a GPU without listeners (every call makes one).
+  rdc_status_t apply_mask_locked(uint32_t gpu_id, GpuListeners* gpu, bool named);
+
+  std::map<uint32_t, GpuListeners> gpus_;
+  uint64_t last_event_ts_ = 0;  // the timestamp listen() gave the last event, in ms
   std::mutex notif_mutex_;
 };
 

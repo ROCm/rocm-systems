@@ -106,6 +106,16 @@ class RdcWatchTableImpl : public RdcWatchTable {
   //!< Helper function to clean up the watch table and cache
   void clean_up();
 
+  //!< Removes the event listeners that the watch of key added. The caller holds watch_mutex_.
+  void release_watch_listeners(const RdcFieldGroupKey& key);
+
+  //!< Removes the event listeners that the start of the job added. Takes watch_mutex_.
+  void release_job_listeners(const std::string& job_id);
+
+  //!< Erases the job from job_watch_table_ and, in the same critical section, takes the record
+  //!< of the event listeners that its start added, then removes them. Takes watch_mutex_.
+  void erase_job(const std::string& job_id);
+
   //!< Helper function for debug information in watch table and cache
   void debug_status();
 
@@ -156,6 +166,11 @@ class RdcWatchTableImpl : public RdcWatchTable {
 
   //!< <job_id, gpu_group_id> pairs
   std::map<std::string, JobWatchTableEntry> job_watch_table_;
+
+  //!< The event fields that each watch, and each job's start, added as listeners
+  //!< (RdcNotification::add_event_listeners()): its unwatch, or the job's stop, removes them.
+  std::map<RdcFieldGroupKey, std::vector<RdcFieldKey>> watch_listeners_;
+  std::map<std::string, std::vector<RdcFieldKey>> job_listeners_;
 
   //!< The settings for each field can be deduced from watch_table. But every
   //!< rdc_field_update_all() call needs to deduce them. To improve the

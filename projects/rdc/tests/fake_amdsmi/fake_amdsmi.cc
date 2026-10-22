@@ -106,7 +106,13 @@ struct GpuState {
   uint64_t power_cap_uw = 750ULL * 1000 * 1000;
   uint64_t gfx_clk_limit[2] = {500, 2100};
   amdsmi_dev_perf_level_t perf_level = AMDSMI_DEV_PERF_LEVEL_AUTO;
-  uint64_t event_mask = 0;
+};
+
+// A processor's event file, as amd-smi keeps one per GPU: opened by
+// amdsmi_init_gpu_event_notification(), closed by amdsmi_stop_gpu_event_notification().
+struct EventFile {
+  bool open = false;
+  uint64_t mask = 0;  // the events this processor sends, AMDSMI_EVENT_MASK_FROM_INDEX bits
 };
 
 // One RDC_FAKE_EVENTS entry.
@@ -131,6 +137,7 @@ struct Config {
   int64_t cper_count = -1;          // CPER entries to report, -1 = none
   std::vector<EventSpec> events;    // events delivered once
   int64_t events_count = -1;        // event count to report, -1 = events.size()
+  bool event_masks = false;         // an event waits for its processor's open file and mask
   int64_t num_freq = -1;            // levels in every clock frequency table, -1 = normal
   uint32_t procs = 0;               // simulated compute processes
   bool procs_grow = false;          // one more process on every process-list call
@@ -145,6 +152,7 @@ int g_init_refs = 0;
 FakeProc g_procs[kMaxGpus * kMaxParts];
 FakeSocket g_sockets[kMaxGpus];
 GpuState g_state[kMaxGpus];
+EventFile g_event_files[kMaxGpus * kMaxParts];                 // by processor index
 std::map<uint64_t, std::pair<uint32_t, uint64_t>> g_counters;  // handle -> (gpu, start ms)
 uint64_t g_next_counter = 1;
 FILE* g_log = nullptr;
@@ -156,7 +164,8 @@ const auto g_start = std::chrono::steady_clock::now();
 static_assert(sizeof(uintptr_t) == 8, "handles hold a 32-bit generation above a 32-bit index");
 std::atomic<uint64_t> g_generation{1};
 std::vector<bool> g_fail_once_fired;       // one flag per RDC_FAKE_FAIL_ONCE rule
-size_t g_events_next = 0;                  // RDC_FAKE_EVENTS: the next event to deliver
+std::vector<bool> g_event_delivered;       // RDC_FAKE_EVENTS: one flag per event
+bool g_events_count_reported = false;      // RDC_FAKE_EVENTS count: reported once
 std::atomic<uint32_t> g_process_calls{0};  // RDC_FAKE_PROCS_GROW: process-list calls so far
 std::atomic<uint64_t> g_arm_ms{0};  // 1 + now_ms() when RDC_FAKE_ARM first existed, 0 = not yet
 amdsmi_cper_hdr_t g_cper_hdr;       // the header of every simulated CPER entry
@@ -321,6 +330,7 @@ void load_config_locked() {
   c.delay = parse_rules("RDC_FAKE_DELAY_MS", AMDSMI_STATUS_SUCCESS, last, true);
   c.cper_count = env_int("RDC_FAKE_CPER_COUNT", -1, 0, 1 << 20);
   parse_events(getenv("RDC_FAKE_EVENTS"), &c);
+  c.event_masks = env_int("RDC_FAKE_EVENT_MASKS", 0, 0, 1) != 0;
   c.num_freq = env_int("RDC_FAKE_NUM_FREQ", -1, 0, AMDSMI_MAX_NUM_FREQUENCIES);
   c.procs = static_cast<uint32_t>(env_int("RDC_FAKE_PROCS", 0, 0, 1024));
   c.procs_grow = env_int("RDC_FAKE_PROCS_GROW", 0, 0, 1) != 0;
@@ -333,6 +343,7 @@ void load_config_locked() {
   c.version_build_null = env_int("RDC_FAKE_VERSION_BUILD_NULL", 0, 0, 1) != 0;
   g_cfg = c;
   g_fail_once_fired.assign(g_cfg.fail_once.size(), false);
+  g_event_delivered.assign(g_cfg.events.size(), false);
   memcpy(g_cper_hdr.signature, "CPER", 4);
   g_cper_hdr.signature_end = 0xFFFFFFFF;
   g_cper_hdr.error_severity = AMDSMI_CPER_SEV_NON_FATAL_CORRECTED;
@@ -524,8 +535,12 @@ amdsmi_status_t amdsmi_init(uint64_t init_flags) {
 amdsmi_status_t amdsmi_shut_down(void) {
   std::lock_guard<std::mutex> lock(g_mutex);
   write_log_locked("amdsmi_shut_down", -1, false);
-  // Every processor and socket handle is stale now. Counter handles survive, as amd-smi's do.
-  if (g_init_refs > 0 && --g_init_refs == 0) ++g_generation;
+  // Every processor and socket handle is stale now, and amd-smi's event files are closed.
+  // Counter handles survive, as amd-smi's do.
+  if (g_init_refs > 0 && --g_init_refs == 0) {
+    ++g_generation;
+    for (auto& f : g_event_files) f = EventFile{};
+  }
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -1193,7 +1208,12 @@ amdsmi_status_t amdsmi_get_gpu_compute_process_gpus(uint32_t pid, uint32_t* dv_i
 
 amdsmi_status_t amdsmi_init_gpu_event_notification(amdsmi_processor_handle processor_handle) {
   const FakeProc* p;
-  return done(enter(__func__, processor_handle, &p));
+  if (auto st = enter(__func__, processor_handle, &p)) return done(st);
+  std::lock_guard<std::mutex> lock(g_mutex);
+  // As amd-smi: an open event file stays as it is, mask included.
+  EventFile& f = g_event_files[p->flat];
+  if (!f.open) f = EventFile{true, 0};
+  return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t amdsmi_set_gpu_event_notification_mask(amdsmi_processor_handle processor_handle,
@@ -1201,8 +1221,20 @@ amdsmi_status_t amdsmi_set_gpu_event_notification_mask(amdsmi_processor_handle p
   const FakeProc* p;
   if (auto st = enter(__func__, processor_handle, &p)) return done(st);
   std::lock_guard<std::mutex> lock(g_mutex);
-  g_state[p->gpu].event_mask = mask;
+  EventFile& f = g_event_files[p->flat];
+  // amd-smi writes the mask to the open event file, replacing the previous one.
+  if (g_cfg.event_masks && !f.open) return AMDSMI_STATUS_NOT_INIT;
+  f.mask = mask;
   return AMDSMI_STATUS_SUCCESS;
+}
+
+// Whether an RDC_FAKE_EVENTS event can be delivered now. With RDC_FAKE_EVENT_MASKS, an event of a
+// simulated processor waits until its event file is open and its mask has the event's bit, as
+// the driver sends only enabled events; an event with handle x has no file to wait for.
+bool event_deliverable_locked(const EventSpec& e) {
+  if (!g_cfg.event_masks || e.gpu < 0) return true;
+  const EventFile& f = g_event_files[e.gpu];
+  return f.open && e.event >= 1 && ((f.mask >> (e.event - 1)) & 1) != 0;
 }
 
 amdsmi_status_t amdsmi_get_gpu_event_notification(int timeout_ms, uint32_t* num_elem,
@@ -1211,27 +1243,38 @@ amdsmi_status_t amdsmi_get_gpu_event_notification(int timeout_ms, uint32_t* num_
   // amd-smi rejects a call without room for an event.
   if (num_elem == nullptr || data == nullptr || *num_elem == 0) return AMDSMI_STATUS_INVAL;
   if (!g_cfg.events.empty() && armed()) {
-    // RDC_FAKE_EVENTS: once armed, each event is delivered once, as many per call as *num_elem
-    // has room for, like amd-smi. With count= the first call that delivers reports that count
-    // instead, which breaks the contract: amd-smi reports only the events it wrote.
+    // RDC_FAKE_EVENTS: once armed, each event is delivered once, in order, as many per call as
+    // *num_elem has room for, like amd-smi; an event that cannot be delivered yet
+    // (RDC_FAKE_EVENT_MASKS) does not hold back the others. With count= the first call that
+    // delivers reports that count instead, which breaks the contract: amd-smi reports only the
+    // events it wrote.
     std::lock_guard<std::mutex> lock(g_mutex);
-    const size_t first = g_events_next;
-    const size_t n = std::min<size_t>(g_cfg.events.size() - first, *num_elem);
-    if (n > 0) {
-      g_events_next += n;
-      for (size_t i = 0; i < n; ++i) {
-        const EventSpec& e = g_cfg.events[first + i];
-        amdsmi_evt_notification_data_t& d = data[i];
-        memset(&d, 0, sizeof(d));
-        // gpu -1 (x): a handle from generation 0, which this fake never hands out.
-        d.processor_handle = e.gpu >= 0
-                                 ? make_proc_handle(static_cast<uint64_t>(e.gpu))
-                                 : reinterpret_cast<amdsmi_processor_handle>(uintptr_t{0xDEAD});
-        d.event = static_cast<amdsmi_evt_notification_type_t>(e.event);
+    uint32_t n = 0;
+    for (size_t i = 0; i < g_cfg.events.size() && n < *num_elem; ++i) {
+      const EventSpec& e = g_cfg.events[i];
+      if (g_event_delivered[i] || !event_deliverable_locked(e)) continue;
+      g_event_delivered[i] = true;
+      amdsmi_evt_notification_data_t& d = data[n++];
+      memset(&d, 0, sizeof(d));
+      // gpu -1 (x): a handle from generation 0, which this fake never hands out.
+      d.processor_handle = e.gpu >= 0
+                               ? make_proc_handle(static_cast<uint64_t>(e.gpu))
+                               : reinterpret_cast<amdsmi_processor_handle>(uintptr_t{0xDEAD});
+      d.event = static_cast<amdsmi_evt_notification_type_t>(e.event);
+      if (e.event == AMDSMI_EVT_NOTIF_PROCESS_START || e.event == AMDSMI_EVT_NOTIF_PROCESS_END) {
+        // amd-smi's format, which RDC's job statistics read; pid 1000 + the processor index.
+        snprintf(d.message, sizeof(d.message), "PID: %lld  task: fake",
+                 static_cast<long long>(1000 + e.gpu));
+      } else {
         snprintf(d.message, sizeof(d.message), "fake event %u", e.event);
       }
-      *num_elem = static_cast<uint32_t>(
-          first == 0 && g_cfg.events_count >= 0 ? static_cast<uint64_t>(g_cfg.events_count) : n);
+    }
+    if (n > 0) {
+      *num_elem = n;
+      if (g_cfg.events_count >= 0 && !g_events_count_reported) {
+        g_events_count_reported = true;
+        *num_elem = static_cast<uint32_t>(g_cfg.events_count);
+      }
       return AMDSMI_STATUS_SUCCESS;
     }
   }
@@ -1243,7 +1286,11 @@ amdsmi_status_t amdsmi_get_gpu_event_notification(int timeout_ms, uint32_t* num_
 
 amdsmi_status_t amdsmi_stop_gpu_event_notification(amdsmi_processor_handle processor_handle) {
   const FakeProc* p;
-  return done(enter(__func__, processor_handle, &p));
+  // A stop that a rule fails changes nothing, as when amd-smi fails it before closing the file.
+  if (auto st = enter(__func__, processor_handle, &p)) return done(st);
+  std::lock_guard<std::mutex> lock(g_mutex);
+  g_event_files[p->flat] = EventFile{};
+  return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t amdsmi_gpu_counter_group_supported(amdsmi_processor_handle processor_handle,

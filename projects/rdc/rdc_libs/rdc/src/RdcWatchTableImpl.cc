@@ -116,7 +116,23 @@ rdc_status_t RdcWatchTableImpl::rdc_job_start_stats(rdc_gpu_group_t group_id, co
     proc_events.emplace_back(gpu, RDC_EVNT_NOTIF_PROCESS_START);
     proc_events.emplace_back(gpu, RDC_EVNT_NOTIF_PROCESS_END);
   }
-  result = notifications_->set_listen_events(proc_events);
+  result = notifications_->add_event_listeners(proc_events);
+  // Recorded whatever the result: the listeners stay added, and the job's stop removes them.
+  std::vector<RdcFieldKey> to_remove;
+  do {  //< lock guard for thread safe
+    std::lock_guard<std::mutex> guard(watch_mutex_);
+    if (job_watch_table_.find(job_id) == job_watch_table_.end()) {
+      // A stop erased the job meanwhile and does not know these listeners: remove them now.
+      to_remove = proc_events;
+    } else {
+      std::vector<RdcFieldKey>& record = job_listeners_[job_id];
+      to_remove.swap(record);  // a record left by an earlier start, if any
+      record = proc_events;
+    }
+  } while (0);
+  if (!to_remove.empty()) {
+    notifications_->remove_event_listeners(to_remove);
+  }
   return result;
 }
 
@@ -132,15 +148,17 @@ rdc_status_t RdcWatchTableImpl::rdc_job_stop_stats(const char job_id[64],
     job_group_id = job->second.group_id;
   } while (0);
 
+  // Before the unwatch, so that a stop that fails still releases the job's process events.
+  release_job_listeners(job_id);
+
   rdc_status_t result = rdc_field_unwatch(job_group_id, JOB_FIELD_ID);
   if (result != RDC_ST_OK) {
     return result;
   }
 
-  do {  //< lock guard for thread safe
-    std::lock_guard<std::mutex> guard(watch_mutex_);
-    job_watch_table_.erase(job_id);
-  } while (0);
+  // Also removes the listeners of a start of this job that recorded them after the release
+  // above, while the job was still in the table.
+  erase_job(job_id);
 
   result = cache_mgr_->rdc_job_stop_stats(job_id, gpu_gauge);
 
@@ -228,11 +246,24 @@ rdc_status_t RdcWatchTableImpl::rdc_field_watch(rdc_gpu_group_t group_id,
     return result;
   }
 
-  // See if any of the fields are notification fields, and
-  // set them up, if so.
-  result = notifications_->set_listen_events(fields_in_watch);
-  if (result != RDC_ST_OK) {
-    RDC_LOG(RDC_DEBUG, "Error in configuring for event notification. Return " << result);
+  // See if any of the fields are notification fields, and listen for them, if so. The unwatch
+  // removes exactly these listeners, whatever happens to the group meanwhile.
+  std::vector<RdcFieldKey> event_fields;
+  for (const auto& field : fields_in_watch) {
+    if (notifications_->is_notification_event(field.second)) {
+      event_fields.push_back(field);
+    }
+  }
+  // A record left by an earlier watch of the key, if any. There is none today: a key that is
+  // watching returned RDC_ST_CONFLICT above, and rdc_field_unwatch() releases the record before
+  // the watch stops. This guards code that would drop a watch without unwatching it.
+  release_watch_listeners(gkey);
+  if (!event_fields.empty()) {
+    result = notifications_->add_event_listeners(event_fields);
+    if (result != RDC_ST_OK) {
+      RDC_LOG(RDC_DEBUG, "Error in configuring for event notification. Return " << result);
+    }
+    watch_listeners_[gkey] = std::move(event_fields);
   }
   // Skip not supported fields
   uint32_t unsupported_fields = 0;
@@ -298,7 +329,10 @@ rdc_status_t RdcWatchTableImpl::rdc_field_watch(rdc_gpu_group_t group_id,
         fields.push_back({fields_to_watch_iter->first.first, fields_to_watch_iter->first.second});
       }
     }
-    rdc_telemetry->rdc_telemetry_fields_watch(&fields[0], fields.size());
+    // Not for an empty list: &fields[0] would be undefined, and there is nothing to watch.
+    if (!fields.empty()) {
+      rdc_telemetry->rdc_telemetry_fields_watch(&fields[0], fields.size());
+    }
   }
 
   return RDC_ST_OK;
@@ -346,9 +380,9 @@ rdc_status_t RdcWatchTableImpl::update_field_in_table_when_unwatch(const RdcFiel
   auto fite = fields.begin();
   std::vector<rdc_gpu_field_t> unwatch_fields;
   for (; fite != fields.end(); fite++) {
-    // Turn off any notification fields
+    // Notification fields have no telemetry to unwatch; rdc_field_unwatch() removed their
+    // listeners.
     if (notifications_->is_notification_event(fite->second)) {
-      notifications_->stop_listening(fite->first);
       continue;
     }
 
@@ -368,8 +402,9 @@ rdc_status_t RdcWatchTableImpl::update_field_in_table_when_unwatch(const RdcFiel
   }
 
   // Notify the telemetry_module to unwatch those fields
+  // Not for an empty list (a watch of event fields only): &unwatch_fields[0] would be undefined.
   auto rdc_telemetry = rdc_module_mgr_->get_telemetry_module();
-  if (rdc_telemetry) {
+  if (rdc_telemetry && !unwatch_fields.empty()) {
     rdc_telemetry->rdc_telemetry_fields_unwatch(&unwatch_fields[0], unwatch_fields.size());
   }
 
@@ -383,6 +418,9 @@ rdc_status_t RdcWatchTableImpl::rdc_field_unwatch(rdc_gpu_group_t group_id,
   uint64_t now = static_cast<uint64_t>(tv.tv_sec) * 1000 + tv.tv_usec / 1000;
 
   std::lock_guard<std::mutex> guard(watch_mutex_);
+  // First, so that the watch's event listeners go whatever happens next.
+  release_watch_listeners(RdcFieldGroupKey({group_id, field_group_id}));
+
   // Set is_watching = false
   auto ite = watch_table_.find(RdcFieldGroupKey({group_id, field_group_id}));
   if (ite == watch_table_.end()) {
@@ -393,6 +431,56 @@ rdc_status_t RdcWatchTableImpl::rdc_field_unwatch(rdc_gpu_group_t group_id,
 
   // Update the fields_to_watch_
   return update_field_in_table_when_unwatch(ite->first);
+}
+
+void RdcWatchTableImpl::release_watch_listeners(const RdcFieldGroupKey& key) {
+  auto record = watch_listeners_.find(key);
+  if (record == watch_listeners_.end()) {
+    return;
+  }
+  std::vector<RdcFieldKey> fields = std::move(record->second);
+  watch_listeners_.erase(record);
+  rdc_status_t result = notifications_->remove_event_listeners(fields);
+  if (result != RDC_ST_OK) {
+    RDC_LOG(RDC_DEBUG, "Error in stopping event notification. Return " << result);
+  }
+}
+
+void RdcWatchTableImpl::release_job_listeners(const std::string& job_id) {
+  std::vector<RdcFieldKey> fields;
+  do {  //< lock guard for thread safe
+    std::lock_guard<std::mutex> guard(watch_mutex_);
+    auto record = job_listeners_.find(job_id);
+    if (record == job_listeners_.end()) {
+      return;
+    }
+    fields = std::move(record->second);
+    job_listeners_.erase(record);
+  } while (0);
+  rdc_status_t result = notifications_->remove_event_listeners(fields);
+  if (result != RDC_ST_OK) {
+    RDC_LOG(RDC_DEBUG, "Error in stopping event notification. Return " << result);
+  }
+}
+
+void RdcWatchTableImpl::erase_job(const std::string& job_id) {
+  std::vector<RdcFieldKey> fields;
+  do {  //< lock guard for thread safe
+    std::lock_guard<std::mutex> guard(watch_mutex_);
+    job_watch_table_.erase(job_id);
+    // A start records its listeners only while its job is in the table, so a record found now
+    // is this job's; a start of the same id after the erase records its own, for its own stop.
+    auto record = job_listeners_.find(job_id);
+    if (record == job_listeners_.end()) {
+      return;
+    }
+    fields = std::move(record->second);
+    job_listeners_.erase(record);
+  } while (0);
+  rdc_status_t result = notifications_->remove_event_listeners(fields);
+  if (result != RDC_ST_OK) {
+    RDC_LOG(RDC_DEBUG, "Error in stopping event notification. Return " << result);
+  }
 }
 
 rdc_status_t RdcWatchTableImpl::create_health_field_group(unsigned int components,
