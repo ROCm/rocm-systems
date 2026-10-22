@@ -18,8 +18,8 @@ For more information, refer to `<https://github.com/ROCm/rocm_smi_lib>`__.
 
    AMD SMI will replace ``rocm_smi_lib`` over time. We recommend that users transition to AMD SMI.
 
-   As of ROCm 10.0, ROCm SMI is no longer included in TheRock builds. It can still be built from source if desired
-   (see the :doc:`installation guide <./install/install>`), but new deployments should use AMD SMI.
+   ROCm SMI was left out of TheRock builds for ROCm 10.1 and is included again starting with ROCm 10.2. It remains
+   deprecated, and new deployments should use AMD SMI.
 
    For more information, refer to `<https://github.com/ROCm/amdsmi>`__ and the :doc:`AMD SMI documentation <amdsmi:index>`.
 

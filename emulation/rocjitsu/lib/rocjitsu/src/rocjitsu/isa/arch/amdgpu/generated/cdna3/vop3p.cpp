@@ -1059,7 +1059,7 @@ VMfmaF3216x16x8Xf32Vop3pMfma::VMfmaF3216x16x8Xf32Vop3pMfma(const MachineInst *in
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 1u)
+  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
     flags_ |= INVALID_MFMA_BROADCAST;
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
@@ -1111,7 +1111,7 @@ VMfmaF3232x32x4Xf32Vop3pMfma::VMfmaF3232x32x4Xf32Vop3pMfma(const MachineInst *in
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 1u)
+  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
     flags_ |= INVALID_MFMA_BROADCAST;
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
@@ -1163,7 +1163,7 @@ VMfmaF3232x32x12bF32Vop3pMfma::VMfmaF3232x32x12bF32Vop3pMfma(const MachineInst *
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 2u)
+  if ((1u << inst_.cbsz) > 2u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
     flags_ |= INVALID_MFMA_BROADCAST;
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
@@ -1215,7 +1215,7 @@ VMfmaF3216x16x14bF32Vop3pMfma::VMfmaF3216x16x14bF32Vop3pMfma(const MachineInst *
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 4u)
+  if ((1u << inst_.cbsz) > 4u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
     flags_ |= INVALID_MFMA_BROADCAST;
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
@@ -1267,7 +1267,7 @@ VMfmaF324x4x116bF32Vop3pMfma::VMfmaF324x4x116bF32Vop3pMfma(const MachineInst *in
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 16u)
+  if ((1u << inst_.cbsz) > 16u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
     flags_ |= INVALID_MFMA_BROADCAST;
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
@@ -1319,7 +1319,7 @@ VMfmaF3232x32x2F32Vop3pMfma::VMfmaF3232x32x2F32Vop3pMfma(const MachineInst *inst
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 1u)
+  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
     flags_ |= INVALID_MFMA_BROADCAST;
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
@@ -1371,7 +1371,7 @@ VMfmaF3216x16x4F32Vop3pMfma::VMfmaF3216x16x4F32Vop3pMfma(const MachineInst *inst
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 1u)
+  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
     flags_ |= INVALID_MFMA_BROADCAST;
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
@@ -1423,7 +1423,7 @@ VMfmaF3232x32x42bF16Vop3pMfma::VMfmaF3232x32x42bF16Vop3pMfma(const MachineInst *
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 2u)
+  if ((1u << inst_.cbsz) > 2u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
     flags_ |= INVALID_MFMA_BROADCAST;
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
@@ -1475,7 +1475,7 @@ VMfmaF3216x16x44bF16Vop3pMfma::VMfmaF3216x16x44bF16Vop3pMfma(const MachineInst *
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 4u)
+  if ((1u << inst_.cbsz) > 4u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
     flags_ |= INVALID_MFMA_BROADCAST;
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
@@ -1527,7 +1527,7 @@ VMfmaF324x4x416bF16Vop3pMfma::VMfmaF324x4x416bF16Vop3pMfma(const MachineInst *in
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 16u)
+  if ((1u << inst_.cbsz) > 16u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
     flags_ |= INVALID_MFMA_BROADCAST;
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
@@ -1579,7 +1579,7 @@ VMfmaF3232x32x8F16Vop3pMfma::VMfmaF3232x32x8F16Vop3pMfma(const MachineInst *inst
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 1u)
+  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
     flags_ |= INVALID_MFMA_BROADCAST;
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
@@ -1631,7 +1631,7 @@ VMfmaF3216x16x16F16Vop3pMfma::VMfmaF3216x16x16F16Vop3pMfma(const MachineInst *in
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 1u)
+  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
     flags_ |= INVALID_MFMA_BROADCAST;
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
@@ -1683,7 +1683,7 @@ VMfmaI3232x32x42bI8Vop3pMfma::VMfmaI3232x32x42bI8Vop3pMfma(const MachineInst *in
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 2u)
+  if ((1u << inst_.cbsz) > 2u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
     flags_ |= INVALID_MFMA_BROADCAST;
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
@@ -1735,7 +1735,7 @@ VMfmaI3216x16x44bI8Vop3pMfma::VMfmaI3216x16x44bI8Vop3pMfma(const MachineInst *in
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 4u)
+  if ((1u << inst_.cbsz) > 4u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
     flags_ |= INVALID_MFMA_BROADCAST;
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
@@ -1787,7 +1787,7 @@ VMfmaI324x4x416bI8Vop3pMfma::VMfmaI324x4x416bI8Vop3pMfma(const MachineInst *inst
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 16u)
+  if ((1u << inst_.cbsz) > 16u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
     flags_ |= INVALID_MFMA_BROADCAST;
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
@@ -1839,7 +1839,7 @@ VMfmaI3232x32x16I8Vop3pMfma::VMfmaI3232x32x16I8Vop3pMfma(const MachineInst *inst
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 1u)
+  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
     flags_ |= INVALID_MFMA_BROADCAST;
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
@@ -1891,7 +1891,7 @@ VMfmaI3216x16x32I8Vop3pMfma::VMfmaI3216x16x32I8Vop3pMfma(const MachineInst *inst
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 1u)
+  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
     flags_ |= INVALID_MFMA_BROADCAST;
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
@@ -1943,7 +1943,7 @@ VMfmaF3232x32x42bBf16Vop3pMfma::VMfmaF3232x32x42bBf16Vop3pMfma(const MachineInst
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 2u)
+  if ((1u << inst_.cbsz) > 2u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
     flags_ |= INVALID_MFMA_BROADCAST;
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
@@ -1995,7 +1995,7 @@ VMfmaF3216x16x44bBf16Vop3pMfma::VMfmaF3216x16x44bBf16Vop3pMfma(const MachineInst
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 4u)
+  if ((1u << inst_.cbsz) > 4u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
     flags_ |= INVALID_MFMA_BROADCAST;
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
@@ -2047,7 +2047,7 @@ VMfmaF324x4x416bBf16Vop3pMfma::VMfmaF324x4x416bBf16Vop3pMfma(const MachineInst *
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 16u)
+  if ((1u << inst_.cbsz) > 16u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
     flags_ |= INVALID_MFMA_BROADCAST;
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
@@ -2099,7 +2099,7 @@ VMfmaF3232x32x8Bf16Vop3pMfma::VMfmaF3232x32x8Bf16Vop3pMfma(const MachineInst *in
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 1u)
+  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
     flags_ |= INVALID_MFMA_BROADCAST;
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
@@ -2151,7 +2151,7 @@ VMfmaF3216x16x16Bf16Vop3pMfma::VMfmaF3216x16x16Bf16Vop3pMfma(const MachineInst *
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 1u)
+  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
     flags_ |= INVALID_MFMA_BROADCAST;
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
@@ -2597,7 +2597,7 @@ VMfmaF3216x16x32Bf8Bf8Vop3pMfma::VMfmaF3216x16x32Bf8Bf8Vop3pMfma(const MachineIn
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 1u)
+  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
     flags_ |= INVALID_MFMA_BROADCAST;
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
@@ -2649,7 +2649,7 @@ VMfmaF3216x16x32Bf8Fp8Vop3pMfma::VMfmaF3216x16x32Bf8Fp8Vop3pMfma(const MachineIn
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 1u)
+  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
     flags_ |= INVALID_MFMA_BROADCAST;
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
@@ -2701,7 +2701,7 @@ VMfmaF3216x16x32Fp8Bf8Vop3pMfma::VMfmaF3216x16x32Fp8Bf8Vop3pMfma(const MachineIn
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 1u)
+  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
     flags_ |= INVALID_MFMA_BROADCAST;
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
@@ -2753,7 +2753,7 @@ VMfmaF3216x16x32Fp8Fp8Vop3pMfma::VMfmaF3216x16x32Fp8Fp8Vop3pMfma(const MachineIn
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 1u)
+  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
     flags_ |= INVALID_MFMA_BROADCAST;
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
@@ -2805,7 +2805,7 @@ VMfmaF3232x32x16Bf8Bf8Vop3pMfma::VMfmaF3232x32x16Bf8Bf8Vop3pMfma(const MachineIn
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 1u)
+  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
     flags_ |= INVALID_MFMA_BROADCAST;
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
@@ -2857,7 +2857,7 @@ VMfmaF3232x32x16Bf8Fp8Vop3pMfma::VMfmaF3232x32x16Bf8Fp8Vop3pMfma(const MachineIn
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 1u)
+  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
     flags_ |= INVALID_MFMA_BROADCAST;
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
@@ -2909,7 +2909,7 @@ VMfmaF3232x32x16Fp8Bf8Vop3pMfma::VMfmaF3232x32x16Fp8Bf8Vop3pMfma(const MachineIn
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 1u)
+  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
     flags_ |= INVALID_MFMA_BROADCAST;
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
@@ -2961,7 +2961,7 @@ VMfmaF3232x32x16Fp8Fp8Vop3pMfma::VMfmaF3232x32x16Fp8Fp8Vop3pMfma(const MachineIn
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
-  if ((1u << inst_.cbsz) > 1u)
+  if ((1u << inst_.cbsz) > 1u || (inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz)))
     flags_ |= INVALID_MFMA_BROADCAST;
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MFMA;
