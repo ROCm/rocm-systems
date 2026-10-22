@@ -2059,6 +2059,39 @@ rj_add_interposer_test_suite(
     RenderNodePathMetadataMatchesDescriptor
     TimestampUsesAdvertisedNanosecondClock
 )
+# Keep the partial-aperture regression on the shipped gfx1250 topology while
+# leaving its KFD visibility default unchanged. Reconfigure when that source
+# config changes, and install the generated variant with installed tests.
+set(_rj_gfx1250_config "${CMAKE_SOURCE_DIR}/configs/gfx1250_mi455x.json")
+set_property(
+    DIRECTORY
+    APPEND
+    PROPERTY CMAKE_CONFIGURE_DEPENDS "${_rj_gfx1250_config}"
+)
+file(READ "${_rj_gfx1250_config}" _rj_gfx1250_json)
+string(
+    JSON _rj_partial_vram_json
+    SET "${_rj_gfx1250_json}"
+    vm
+    gpu
+    pci
+    "{\"vram_aperture_bytes\":268435456}"
+)
+set(_rj_partial_vram_config
+    "${CMAKE_CURRENT_BINARY_DIR}/gfx1250_mi455x_partial_vram_test.json"
+)
+file(WRITE "${_rj_partial_vram_config}" "${_rj_partial_vram_json}\n")
+if(RJ_INSTALL_TESTS)
+    install(
+        FILES "${_rj_partial_vram_config}"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/rocjitsu/configs"
+    )
+endif()
+rj_add_interposer_test_suite(
+    InterposerDrmTest
+    CONFIG "${_rj_partial_vram_config}"
+    PartialVramApertureLimitsCpuAccessibleQueries
+)
 
 set(_rj_interposer_pm4_tests
     SparseReplacementPreservesResidentTail

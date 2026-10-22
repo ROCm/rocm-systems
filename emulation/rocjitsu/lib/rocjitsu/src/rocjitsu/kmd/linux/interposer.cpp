@@ -4874,7 +4874,7 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
         if (info->return_size >= sizeof(drm_amdgpu_info_vram_gtt)) {
           auto *vg = static_cast<drm_amdgpu_info_vram_gtt *>(out);
           vg->vram_size = gpu->local_mem_size;
-          vg->vram_cpu_accessible_size = gpu->local_mem_size;
+          vg->vram_cpu_accessible_size = gpu->visible_vram_size;
           vg->gtt_size = gpu->local_mem_size;
         }
         return 0;
@@ -4884,8 +4884,12 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
           auto *m = static_cast<drm_amdgpu_memory_info *>(out);
           m->vram.total_heap_size = gpu->local_mem_size;
           m->vram.usable_heap_size = gpu->local_mem_size;
+          m->vram.heap_usage = 0;
           m->vram.max_allocation = gpu->local_mem_size;
           m->cpu_accessible_vram = m->vram;
+          m->cpu_accessible_vram.total_heap_size = gpu->visible_vram_size;
+          m->cpu_accessible_vram.usable_heap_size = gpu->visible_vram_size;
+          m->cpu_accessible_vram.max_allocation = gpu->visible_vram_size;
           m->gtt = m->vram;
         }
         return 0;
