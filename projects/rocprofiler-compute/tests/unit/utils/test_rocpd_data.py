@@ -508,11 +508,11 @@ def test_ml_api_trace_output_same_for_rocpd_and_csv():
     common.clean_output_dir(True, csv_dir)
 
 
-# ---- Backend column unpacking in save_ml_api_trace_inputs ----
+# ---- Backend column in process_ml_api_trace_output ----
 
 
 def test_process_ml_api_trace_output_defaults_backend_for_untagged(tmp_path):
-    """Untagged rows default to Backend='torch' in the consolidated df."""
+    """Rows without a Backend column default to torch."""
     workload_dir = str(tmp_path)
     write_rocpd_layout(workload_dir)
 
@@ -523,14 +523,10 @@ def test_process_ml_api_trace_output_defaults_backend_for_untagged(tmp_path):
 
 
 def test_process_ml_api_trace_output_preserves_per_row_backend(tmp_path):
-    """A pre-stripped + tagged CSV (as produced by _augment_marker_csv)
-    surfaces the per-row Backend value into the consolidated dataframe.
-    """
+    """A Backend column on the marker CSV is preserved in the consolidated table."""
     workload_dir = str(tmp_path)
     write_rocpd_layout(workload_dir)
 
-    # Overwrite the fixture with what save_ml_api_trace_inputs would produce:
-    # Function has prefixes stripped, Backend carries per-row attribution.
     marker_path = Path(workload_dir) / "ml_api_trace_run0_marker_api_trace.csv.gz"
     df = pd.read_csv(marker_path)
     df["Backend"] = ["torch", "torch", "triton"]
