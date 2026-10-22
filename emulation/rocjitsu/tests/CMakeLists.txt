@@ -634,6 +634,7 @@ add_executable(
     simulated_kfd_test.cpp
     kfd_events_test.cpp
     decode_smoke_test.cpp
+    rdna4_dot_dpp_test.cpp
     readlane_selector_test.cpp
     decoder_c_api_test.cpp
     buffer_operand_test.cpp
@@ -651,6 +652,7 @@ add_executable(
     denormal_test.cpp
     floating_operation_test.cpp
     input_denormal_test.cpp
+    legacy_minmax_test.cpp
     minmax_test.cpp
     output_denormal_test.cpp
     output_modifier_test.cpp
@@ -4086,11 +4088,31 @@ if(RJ_ENABLE_HIP_TESTS)
         )
     endif()
 
+    if(RJ_HIP_RUNTIME_SUPPORTS_GFX942)
+        rj_add_hip_test(hip_hw_id_gfx942_test ARCH gfx942 SOURCE hip_hw_id_test.cpp)
+        rj_add_hip_test_case(
+            hip_hw_id_gfx942_test
+            "HipHwIdTest.MultiXcdDispatchReportsConsistentLocation"
+            NAME "HipHwIdTest.MultiXcdDispatchReportsConsistentLocation.Gfx942"
+            CONFIG ${RJ_CDNA3_KMD_CONFIG}
+            ENVIRONMENT "RJ_HW_ID_XCDS=8" "RJ_HW_ID_SHADER_ENGINES=4" "RJ_HW_ID_CUS_PER_SE=10"
+            TIMEOUT 120
+        )
+    endif()
+
     if(RJ_HIP_RUNTIME_SUPPORTS_GFX950)
         rj_add_hip_test(hip_hw_id_test ARCH gfx950)
         rj_add_hip_test_case(
             hip_hw_id_test
             "HipHwIdTest.FourWaveWorkgroupPreservesSimdIdsAcrossBarrier"
+            TIMEOUT 120
+        )
+
+        rj_add_hip_test_case(
+            hip_hw_id_test
+            "HipHwIdTest.MultiXcdDispatchReportsConsistentLocation"
+            NAME "HipHwIdTest.MultiXcdDispatchReportsConsistentLocation.Gfx950"
+            ENVIRONMENT "RJ_HW_ID_XCDS=8" "RJ_HW_ID_SHADER_ENGINES=4" "RJ_HW_ID_CUS_PER_SE=9"
             TIMEOUT 120
         )
 

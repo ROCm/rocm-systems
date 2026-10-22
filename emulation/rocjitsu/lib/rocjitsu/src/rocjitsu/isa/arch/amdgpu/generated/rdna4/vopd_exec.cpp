@@ -182,8 +182,11 @@ uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t la
 }
 
 void Vopd::execute_impl(amdgpu::Wavefront &wf) {
-  if (wf.wf_size() != 32)
-    throw util::UnimplementedInst("VOPD requires Wave32");
+  if (wf.wf_size() != 32) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::InvalidInstructionEncoding);
+    return;
+  }
   if (amdgpu::try_execute_vopd_integer_pair_simd<kVopdMovB32, kVopdAddNcU32, kVopdLshlrevB32>(
           wf, x_, y_))
     return;

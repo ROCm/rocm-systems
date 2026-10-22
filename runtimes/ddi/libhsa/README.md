@@ -21,6 +21,12 @@ runtime workers. On Linux KFD, a primary process context may remain after
 shutdown; later runtime generations use an instance-owned context when KFD
 supports it.
 
+The single HSA CPU agent is frontend policy built from rocddi's passive host
+topology snapshot. It does not activate a CPU device. HSA prefers CPU cache
+records from OS NUMA node zero and uses the system scan when that node is
+absent. Cache handles, names, callback order, and agent attributes belong to
+libhsa.
+
 The CMake build stages `libhsa-runtime64.so.1` with `ROCR_1` symbol versions.
 Its `libamdf.so` alias exports AMDF from the same image. The two ABIs have
 separate frontend lifecycles and rocddi sessions; process-lifetime KFD context

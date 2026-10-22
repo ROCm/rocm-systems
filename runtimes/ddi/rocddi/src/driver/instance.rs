@@ -20,7 +20,7 @@ use crate::device::gpu::profiling::{
 };
 use crate::memory::storage::Shared;
 use crate::session::DriverContextLifetime;
-use crate::topology::{Endpoint, EndpointDetails};
+use crate::topology::{Endpoint, TopologySnapshot};
 use crate::{Error, ErrorKind};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -105,11 +105,40 @@ impl DriverInstance {
         }
     }
 
+    pub(crate) fn contribute_topology(&self, snapshot: &mut TopologySnapshot) -> Result<(), Error> {
+        match self {
+            Self::LinuxKfd(driver) => driver.contribute_topology(snapshot),
+            #[cfg(test)]
+            Self::Test(driver) => driver.contribute_topology(snapshot),
+        }
+    }
+
+    pub(crate) fn can_access_local_memory(&self, consumer: &Endpoint, owner: &Endpoint) -> bool {
+        if consumer.driver_instance != self.instance_id()
+            || owner.driver_instance != self.instance_id()
+        {
+            return false;
+        }
+        match self {
+            Self::LinuxKfd(driver) => driver.can_access_local_memory(consumer, owner),
+            #[cfg(test)]
+            Self::Test(driver) => driver.can_access_local_memory(consumer, owner),
+        }
+    }
+
     pub(crate) fn open_endpoint(&self, id: [u8; 16]) -> Result<Endpoint, Error> {
         match self {
             Self::LinuxKfd(driver) => driver.open_endpoint(id),
             #[cfg(test)]
             Self::Test(driver) => driver.open_endpoint(id),
+        }
+    }
+
+    pub(crate) fn probe_endpoint(&self, id: [u8; 16]) -> Result<Option<Endpoint>, Error> {
+        match self {
+            Self::LinuxKfd(driver) => driver.probe_endpoint(id),
+            #[cfg(test)]
+            Self::Test(driver) => driver.probe_endpoint(id),
         }
     }
 
@@ -127,14 +156,11 @@ impl DriverInstance {
         }
     }
 
-    pub(crate) fn query_endpoint_details(
-        &self,
-        endpoint: &Endpoint,
-    ) -> Result<EndpointDetails, Error> {
+    pub(crate) fn populate_endpoint(&self, endpoint: &mut Endpoint) -> Result<(), Error> {
         match self {
-            Self::LinuxKfd(driver) => driver.query_endpoint_details(endpoint),
+            Self::LinuxKfd(driver) => driver.populate_endpoint(endpoint),
             #[cfg(test)]
-            Self::Test(driver) => driver.query_endpoint_details(endpoint),
+            Self::Test(driver) => driver.populate_endpoint(endpoint),
         }
     }
 
@@ -172,6 +198,24 @@ pub(crate) enum DeviceDriverState {
 }
 
 impl DeviceDriverState {
+    /// Uses the retained activation driver to check its cached local-memory
+    /// access policy for two devices of that same driver instance.
+    pub(crate) fn can_access_local_memory(
+        &self,
+        other: &Self,
+        consumer: &Endpoint,
+        owner: &Endpoint,
+    ) -> bool {
+        if !self.shares_driver_instance(other) {
+            return false;
+        }
+        match self {
+            Self::LinuxKfd { driver, .. } => driver.can_access_local_memory(consumer, owner),
+            #[cfg(test)]
+            Self::Test { driver, .. } => driver.can_access_local_memory(consumer, owner),
+        }
+    }
+
     /// Reports whether this driver can register host pages for an endpoint.
     pub(crate) fn supports_host_registration(&self, endpoint: &Endpoint) -> bool {
         match self {
@@ -299,11 +343,21 @@ impl EventSubscription {
 /// checks the driver instance and reopens the endpoint before using it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum EndpointSelector {
-    /// KFD node identity captured during passive discovery.
-    LinuxKfd(linux_kfd::LinuxSelector),
+    /// KFD node identity and cached native peer-access evidence.
+    LinuxKfd {
+        native: linux_kfd::LinuxSelector,
+        access_targets: Option<Shared<Vec<KfdAccessTarget>>>,
+    },
     /// Driver-private selector for a future non-KFD backend.
     #[allow(dead_code)]
     Opaque(u64),
+}
+
+/// KFD node and GPU identity used only for driver-qualified access policy.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct KfdAccessTarget {
+    pub node: u32,
+    pub gpu_id: u32,
 }
 
 #[cfg(not(all(
