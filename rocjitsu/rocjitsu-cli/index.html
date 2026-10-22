@@ -892,6 +892,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../rccl-scaleout/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Two-node RCCL NET smoke
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../race-detector/" class="md-nav__link">
         
   
@@ -2268,9 +2296,9 @@ the simulated GPU. It operates in four modes:</p>
   communicate with the daemon via RPC over a Unix domain socket. GPU memory
   is shared using memfds passed via SCM_RIGHTS.</li>
 <li><strong>Attach mode</strong>: Launches an application against an already-running daemon.</li>
-<li><strong>VFIO-user mode</strong>: Serves one configured PCI function to an external VMM
-  through an AF_UNIX socket. This mode is available only in builds configured
-  with <code>ROCJITSU_ENABLE_VFIO=ON</code>.</li>
+<li><strong>VFIO-user mode</strong>: Serves each configured local GPU as a PCI function to an
+  external VMM through its own AF_UNIX socket. This mode is available only in
+  builds configured with <code>ROCJITSU_ENABLE_VFIO=ON</code>.</li>
 </ul>
 <p>Daemon mode supports vLLM's multiprocessing spawn, torchrun, torch.distributed,
 and NCCL --- workloads where multiple processes share a single simulated GPU.</p>
@@ -2296,7 +2324,7 @@ a cooperative API contract; interposition does not prevent raw syscalls or
 receiving real GPU descriptors over a Unix socket.</p>
 <h2 id="command-line-options">Command-Line Options<a class="headerlink" href="#command-line-options" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>Usage: rocjitsu --config &lt;config.json&gt; [--daemon|--attach] -- &lt;app&gt; [args...]
-       rocjitsu --config &lt;config.json&gt; --vfio-socket &lt;path&gt;
+       rocjitsu --config &lt;config.json&gt; [--node &lt;id&gt;] --vfio-socket &lt;path&gt; [--vfio-socket &lt;path&gt; ...]
 </code></pre></div>
 <table>
 <thead>
@@ -2311,6 +2339,10 @@ receiving real GPU descriptors over a Unix socket.</p>
 <td>Path to simulation config JSON (required)</td>
 </tr>
 <tr>
+<td><code>--node &lt;id&gt;</code></td>
+<td>Select a local node from a multi-node system manifest. Legacy <code>vm.gpu.num_gpus</code> configs need no node selector.</td>
+</tr>
+<tr>
 <td><code>--daemon</code></td>
 <td>Run in daemon mode: fork a daemon process hosting the simulation engine, then launch the application with the interposer. Without <code>-- &lt;app&gt;</code>, runs the daemon server only.</td>
 </tr>
@@ -2320,7 +2352,7 @@ receiving real GPU descriptors over a Unix socket.</p>
 </tr>
 <tr>
 <td><code>--vfio-socket &lt;path&gt;</code></td>
-<td>Serve the configured GPU as a PCI function over VFIO-user. The VMM must share guest RAM through mmap-able file descriptors.</td>
+<td>Serve a local GPU as a PCI function over VFIO-user. Repeat once per local GPU in ordinal order for a multi-GPU node. The number of sockets must match the selected node's local GPU count, and paths must be distinct. The VMM must share guest RAM through mmap-able file descriptors.</td>
 </tr>
 <tr>
 <td><code>--check-vfio-user</code></td>
@@ -2356,6 +2388,11 @@ rocjitsu<span class="w"> </span>--attach<span class="w"> </span>--config<span cl
 <span class="c1"># Serve the gfx1250 PCI function to a VMM</span>
 rocjitsu<span class="w"> </span>--config<span class="w"> </span>configs/gfx1250_mi455x.json<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--vfio-socket<span class="w"> </span>/tmp/rocjitsu-vfio/vfio-user.sock
+
+<span class="c1"># Argument-order example: this fixture has synthetic PCI IDs and is not a guest profile</span>
+rocjitsu<span class="w"> </span>--config<span class="w"> </span>tests/fixtures/fabric_node_projection.json<span class="w"> </span>--node<span class="w"> </span>tray7<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--vfio-socket<span class="w"> </span>/tmp/rocjitsu-vfio/gpu0.sock<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--vfio-socket<span class="w"> </span>/tmp/rocjitsu-vfio/gpu1.sock
 </code></pre></div>
 <p>See <a href="../qemu-vfio/">QEMU VFIO-user compute</a> for the supported guest contract and
 launcher.</p>
@@ -2418,7 +2455,7 @@ destroys the topology root (VirtualMachine), which destroys the driver.</p>
 </tr>
 <tr>
 <td>VFIO-user server</td>
-<td><code>rocjitsu --config ... --vfio-socket ...</code></td>
+<td><code>rocjitsu --config ... --vfio-socket ...</code> (repeat per local GPU)</td>
 <td>Guest AMDGPU driver through PCI/VFIO</td>
 <td>rocJITsu process</td>
 </tr>

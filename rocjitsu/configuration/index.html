@@ -16,7 +16,7 @@
         <link rel="prev" href="../rocjitsu-cli/">
       
       
-        <link rel="next" href="../race-detector/">
+        <link rel="next" href="../rccl-scaleout/">
       
       
         
@@ -635,6 +635,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rccl-scaleout/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Two-node RCCL NET smoke
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1813,6 +1841,10 @@ DBT guest configs select the guest and host targets and execution backend.</p>
 <td>Four MI455X GPUs (multi-GPU daemon mode)</td>
 </tr>
 <tr>
+<td><code>gfx1250_mi455x_kmd_2node_net.json</code></td>
+<td>Schematic two-node, one-GPU-per-node RCCL NET fixture</td>
+</tr>
+<tr>
 <td><code>gfx1251_synthetic.json</code></td>
 <td>Minimal synthetic gfx1251 topology for functional simulation; not a product model</td>
 </tr>
@@ -1841,6 +1873,18 @@ the device contract beyond the compute functionality modeled here.</p>
 guest kernel and initramfs artifacts. See
 <a href="../qemu-vfio/">QEMU VFIO-user compute</a> for the supported guest contract, the
 complete launch command, GEMM qualification criteria, and troubleshooting.</p>
+<p>For a two-node launch recipe with reference and NET-channel checks, see
+<a href="../rccl-scaleout/">Two-node RCCL NET smoke</a>. That gfx1250 daemon control is
+currently unqualified. A manifest's network or local fabric edges describe
+reachability; they do not grant peer memory access. Legacy replicated-GPU
+configs retain their XGMI links, hive ID, and XGMI SDMA count for
+compatibility. A manifest with those same GPUs suppresses the advertisement
+until its local peer routes can execute, so converting a legacy config to a
+manifest changes what ROCr discovers. Legacy single-GPU drivers also keep the
+old render-node routing: they claim any render minor even when their config
+advertises a different one. Manifest drivers select only their configured
+render minors. The daemon handshake carries this policy to remote clients, so
+an unmatched manifest render node can never be claimed as a synthetic GPU.</p>
 <h2 id="dbt-guest-configs">DBT guest configs<a class="headerlink" href="#dbt-guest-configs" title="Permanent link">&para;</a></h2>
 <p>The checked-in <a href="../rocjitsu_dbt_guest/">DBT guest-mode</a> configs cover hardware
 and simulated host execution:</p>
@@ -2332,7 +2376,13 @@ cache hierarchy. The daemon manages all GPUs and routes KFD ioctls
 to the correct device based on <code>gpu_id</code>.</p>
 <p><code>configs/gfx950_mi355x_kmd_2gpu.json</code> is the default multi-GPU
 configuration for RCCL tests. <code>configs/gfx1250_mi455x_kmd_4gpu.json</code>
-provides a four-GPU daemon topology for explicit multi-GPU runs.</p>
+provides a four-GPU daemon topology for explicit multi-GPU runs.
+When the selected ROCm compiler parses <code>gfx1250</code>, its HIP runtime advertises
+that target, and its RCCL library exists, the build also produces
+<code>tests/hip_rccl_gfx1250_test</code>. This is a compilation gate for the numerically
+checked CDNA5 rank workload; its runtime payload and data checks need separate
+qualification. The registered daemon RCCL CTests still use the <code>gfx950</code>
+binary and configuration.</p>
 <h2 id="gws-wait-budget">GWS wait budget<a class="headerlink" href="#gws-wait-budget" title="Permanent link">&para;</a></h2>
 <p>The compute-unit option <code>gws_wait_limit</code> defaults to 1,000,000 unpaused CU
 steps without instruction progress from the waiting process. Executing an
