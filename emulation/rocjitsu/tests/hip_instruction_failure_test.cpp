@@ -9,8 +9,10 @@
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
+#include <fcntl.h>
 #include <hip/hip_runtime.h>
 #include <thread>
+#include <unistd.h>
 
 #include <gtest/gtest.h>
 
@@ -28,18 +30,18 @@ bool native_instruction_failure(int status) {
          ::testing::KilledBySignal(SIGABRT)(status);
 }
 
-struct DaemonFailureDiagnostic {
+class DaemonFailureDiagnostic {
+public:
   using is_gtest_matcher = void;
-  const int &status;
-  FailureKind kind;
+  DaemonFailureDiagnostic(const int &status, FailureKind kind) : status_(status), kind_(kind) {}
 
   bool MatchAndExplain(const std::string &output, ::testing::MatchResultListener *listener) const {
     // Match the diagnostic to the actual exit, so an unrelated abort cannot
     // pass merely because the disconnect monitor also printed its message.
     const char *pattern = "rocjitsu: daemon connection lost";
-    if (::testing::KilledBySignal(SIGABRT)(status))
-      pattern = kind == FailureKind::Decode ? "Queue error: HSA_STATUS_ERROR_ILLEGAL_INSTRUCTION:"
-                                            : "Queue error: HSA_STATUS_ERROR_EXCEPTION:";
+    if (::testing::KilledBySignal(SIGABRT)(status_))
+      pattern = kind_ == FailureKind::Decode ? "Queue error: HSA_STATUS_ERROR_ILLEGAL_INSTRUCTION:"
+                                             : "Queue error: HSA_STATUS_ERROR_EXCEPTION:";
     const ::testing::Matcher<const std::string &> diagnostic = ::testing::ContainsRegex(pattern);
     return diagnostic.MatchAndExplain(output, listener);
   }
@@ -51,6 +53,10 @@ struct DaemonFailureDiagnostic {
   void DescribeNegationTo(std::ostream *stream) const {
     *stream << "does not contain the daemon diagnostic matching its exit";
   }
+
+private:
+  const int &status_;
+  FailureKind kind_;
 };
 } // namespace
 
@@ -60,6 +66,8 @@ __global__ void unsupported_instruction() {
 }
 
 __global__ void undecodable_instruction() { asm volatile(".long 0xbfff0000"); }
+
+__global__ void valid_instruction(int *output) { *output = 17; }
 
 [[noreturn]] void wait_for_instruction_failure(FailureKind kind) {
   if (hipInit(0) != hipSuccess)
@@ -114,6 +122,38 @@ TEST(HipDaemonInstructionFailureTest, UnsupportedInstructionExitsWithFailure) {
 TEST(HipDaemonInstructionFailureTest, DecodeFailureExitsWithFailure) {
   GTEST_FLAG_SET(death_test_style, "threadsafe");
   expect_daemon_instruction_failure(FailureKind::Decode);
+}
+
+TEST(HipDaemonInstructionFailureTest, ValidClientExitsWhenAnotherClientFails) {
+  const char *ready_path = std::getenv("ROCJITSU_TEST_CLIENT_READY");
+  if (!ready_path)
+    GTEST_SKIP() << "requires a second client controlled by the daemon fixture";
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  const auto run_valid_client = [&] {
+    int *device_output = nullptr;
+    if (hipInit(0) != hipSuccess || hipMalloc(&device_output, sizeof(int)) != hipSuccess)
+      std::_Exit(kInitializationFailure);
+    valid_instruction<<<1, 1>>>(device_output);
+    if (hipGetLastError() != hipSuccess || hipDeviceSynchronize() != hipSuccess)
+      std::_Exit(kLaunchFailure);
+    int output = 0;
+    if (hipMemcpy(&output, device_output, sizeof(output), hipMemcpyDeviceToHost) != hipSuccess ||
+        output != 17)
+      std::_Exit(kSynchronizationReturned);
+    // Only release the faulting client after this one completed valid work.
+    const int ready = ::open(ready_path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+    if (ready < 0 || ::close(ready) != 0)
+      std::_Exit(kInitializationFailure);
+    for (;;) {
+      valid_instruction<<<1, 1>>>(device_output);
+      if (hipGetLastError() != hipSuccess || hipDeviceSynchronize() != hipSuccess) {
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+        std::_Exit(kSynchronizationReturned);
+      }
+    }
+  };
+  EXPECT_EXIT(run_valid_client(), ::testing::ExitedWithCode(EXIT_FAILURE),
+              "rocjitsu: daemon connection lost");
 }
 
 int main(int argc, char **argv) {

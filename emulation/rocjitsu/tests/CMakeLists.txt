@@ -4134,6 +4134,7 @@ if(RJ_ENABLE_HIP_TESTS)
             set(RJ_DAEMON_FAILURE_TESTS
                 DaemonTest.HipUnsupportedInstructionExitsWithFailure
                 DaemonTest.HipDecodeFailureExitsWithFailure
+                DaemonTest.HipFatalDecodeDisconnectsValidClient
             )
             list(APPEND RJ_DAEMON_HSA_TESTS ${RJ_DAEMON_FAILURE_TESTS})
         endif()
