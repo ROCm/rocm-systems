@@ -5,9 +5,10 @@
 
 use std::ffi::{CStr, c_char, c_void};
 
+use super::output::write_value;
 use crate::ffi::*;
+use crate::isa::{isa_handle, isa_name, wavefront_handle};
 use crate::runtime::{boundary, lock};
-use crate::{isa_handle, isa_name, wavefront_handle, write_value};
 
 /// # Safety
 /// The callback must be callable with the C ABI; `data` must remain valid for

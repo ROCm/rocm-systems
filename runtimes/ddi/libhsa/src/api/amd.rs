@@ -8,7 +8,9 @@ use std::ffi::c_void;
 use crate::callback_arg::CallbackArg;
 use crate::ffi::*;
 use crate::runtime::{InFlightToken, boundary, initialized_mut, lock, map_error};
-use crate::{AMD_AGENT_PRELOAD_SKIP_BLITS, memory, runtime};
+use crate::{memory, runtime};
+
+const AMD_AGENT_PRELOAD_SKIP_BLITS: u64 = 1 << 1;
 
 /// # Safety
 /// `flags` must address eight readable bytes for the duration of this call.

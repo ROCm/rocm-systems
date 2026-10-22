@@ -5,16 +5,17 @@
 
 use std::ffi::{c_char, c_void};
 
+use super::host_alloc_dmabuf_supported;
+use super::output::write_value;
 #[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
 use crate::api_trace;
 use crate::ffi::{self, *};
 use crate::runtime::{boundary, lock, map_error};
-use crate::{
-    HSA_RUNTIME_VERSION_MINOR, host_alloc_dmabuf_supported, image_gfx12, runtime, write_value,
-};
 #[cfg(not(all(target_os = "linux", target_arch = "x86_64", not(test))))]
 use crate::{image_abi, loader, pc_sampling};
+use crate::{image_gfx12, runtime};
 
+pub(crate) const HSA_RUNTIME_VERSION_MINOR: u16 = 21;
 /// # Safety
 /// Any non-null `value` must address aligned, writable storage for the type
 /// selected by `attribute`.
