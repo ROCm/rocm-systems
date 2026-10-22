@@ -3978,12 +3978,18 @@ def test_generated_f16_sdwa_keeps_unmigrated_ordering(
 
 
 @pytest.mark.parametrize(
-    'instruction,encoding', [('V_FRACT_F16', 'vop1'), ('V_LDEXP_F16', 'vop2')]
+    'instruction,encoding',
+    [
+        ('V_FRACT_F16', 'vop1'),
+        ('V_LDEXP_F16', 'vop2'),
+        ('V_MIN_F16', 'vop2'),
+        ('V_MAX_F16', 'vop2'),
+    ],
 )
 def test_generated_f16_sdwa_rounds_before_omod(
     generated_f16_sdwa_consumers, instruction, encoding
 ):
-    """gfx1030 SDWA captures: the body rounds; the SDWA store applies OMOD."""
+    """FRACT/LDEXP round and MIN/MAX select; the SDWA store applies OMOD."""
     route, output = generated_f16_sdwa_consumers
     if route == 'shared':
         source = (output / 'shared' / 'execute_shared.h').read_text()
@@ -8209,6 +8215,7 @@ def test_gfx1250_cluster_load_generators_force_request_l1_bypass():
 
     cluster = SimpleNamespace(
         name='CLUSTER_LOAD_B32',
+        semantic_class='flat_load',
         elem_size=4,
         num_elems=1,
         sign_extend=False,
@@ -8217,6 +8224,7 @@ def test_gfx1250_cluster_load_generators_force_request_l1_bypass():
     )
     ordinary = SimpleNamespace(
         name='GLOBAL_LOAD_B32',
+        semantic_class='flat_load',
         elem_size=4,
         num_elems=1,
         sign_extend=False,
@@ -9113,4 +9121,22 @@ def test_sdwa_conversion_result_formats():
         assert semantics is not None
         assert CodeGenerator._sdwa_result_format(semantics) == (
             f'amdgpu::sdwa::ResultFormat::{expected}'
+        )
+
+
+@pytest.mark.parametrize(
+    'arch,profile_type', [('cdna3', CdnaProfile), ('cdna4', Cdna4Profile)]
+)
+def test_scratch_lds_and_global_lds_share_opcode_dispatch(arch, profile_type):
+    spec = Parser(str(_mrisa_dir() / f'amdgpu_isa_{arch}.xml'), profile_type()).parse()
+    semantics = derive_all_semantics(spec)
+    flat = spec.encoding_map['ENC_FLAT']
+    for opcode in range(38, 43):
+        instructions = [inst for inst in flat.insts if inst.opcode == opcode]
+        assert {inst.required_flat_segment for inst in instructions} == {1, 2}
+        scratch = next(inst for inst in instructions if inst.required_flat_segment == 1)
+        assert semantics.instructions[scratch.name].semantic_class == 'scratch_load_lds'
+        assert any(
+            entry and f'decodeFlatSegment{opcode}' in (entry.sub_decode_funcs or [])
+            for entry in spec.primary_decode_table
         )

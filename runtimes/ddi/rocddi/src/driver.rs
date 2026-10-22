@@ -23,7 +23,7 @@ mod tests;
 
 pub(crate) use instance::{
     DeviceDriverState, DriverInstance, DriverInstanceId, EndpointSelector, EventSubscription,
-    GpuDriverRef, KfdAllocation, KfdDeviceState, new_driver_instance,
+    GpuDriverRef, KfdAccessTarget, KfdAllocation, KfdDeviceState, new_driver_instance,
 };
 pub(crate) use linux_kfd::KfdEventSubscription;
 #[cfg(all(
@@ -51,7 +51,7 @@ use crate::memory::{
     VirtualMemoryInfo,
 };
 use crate::session::DriverContextLifetime;
-use crate::topology::{Endpoint, EndpointDetails};
+use crate::topology::{Endpoint, NativeNodeId, NodeKind, SourceKind, TopologySnapshot};
 use crate::{Error, ErrorKind};
 
 /// Inert constructors for the driver backends compiled into this target.
@@ -128,13 +128,42 @@ pub(crate) trait Driver: Send + Sync {
         &self,
         visitor: &mut dyn FnMut(Endpoint) -> Result<(), Error>,
     ) -> Result<(), Error>;
+    /// Adds one generation-consistent contributor to a candidate snapshot.
+    /// Generic drivers report one opaque node per endpoint until they expose
+    /// a richer passive topology source.
+    fn contribute_topology(&self, snapshot: &mut TopologySnapshot) -> Result<(), Error> {
+        let source =
+            snapshot.add_source(SourceKind::Driver, None, true, Some(self.driver_instance()))?;
+        let mut ordinal = 0_u64;
+        self.enumerate(&mut |endpoint| {
+            let node = snapshot.add_node(source, NativeNodeId::Driver(ordinal), NodeKind::Other)?;
+            ordinal = ordinal.checked_add(1).ok_or(Error::Operation {
+                kind: ErrorKind::ResourceExhausted,
+                detail: "too many driver topology nodes",
+            })?;
+            snapshot.add_endpoint(endpoint, node)
+        })
+    }
+    /// Driver-qualified access policy for a passive endpoint pair. A mapping
+    /// operation remains authoritative for a particular allocation.
+    fn can_access_local_memory(&self, consumer: &Endpoint, owner: &Endpoint) -> bool {
+        consumer.id == owner.id
+            && consumer.driver_instance == self.driver_instance()
+            && owner.driver_instance == self.driver_instance()
+    }
     /// Re-reads an endpoint by its driver-assigned ID without activating it.
     fn open_endpoint(&self, id: [u8; 16]) -> Result<Endpoint, Error>;
-    /// Queries optional information about a passive endpoint without
-    /// activating it. Kind-specific details must match the endpoint kind.
-    /// Drivers with no additional source return empty details.
-    fn query_endpoint_details(&self, endpoint: &Endpoint) -> Result<EndpointDetails, Error> {
-        Ok(EndpointDetails::empty_for(endpoint))
+    /// Resolves an ID without enumerating this driver's other endpoints.
+    /// `None` means this driver does not recognize the ID; a recognized but
+    /// stale ID remains an error from `open_endpoint`.
+    fn probe_endpoint(&self, id: [u8; 16]) -> Result<Option<Endpoint>, Error> {
+        self.open_endpoint(id).map(Some)
+    }
+    /// Populates optional endpoint and kind-specific information from
+    /// additional sources without activating the endpoint. Drivers with no
+    /// additional source leave the endpoint unchanged.
+    fn populate_endpoint(&self, _endpoint: &mut Endpoint) -> Result<(), Error> {
+        Ok(())
     }
     /// Revalidates an endpoint and acquires its device state.
     fn activate(&self, endpoint: &Endpoint) -> Result<Self::DeviceState, Error>;
