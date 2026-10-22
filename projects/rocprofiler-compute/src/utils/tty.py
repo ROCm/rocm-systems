@@ -351,7 +351,6 @@ def format_node_stats(node: CallTreeNode) -> str:
     """Format operator-node stats (calls, dispatches, total, dispatch_mean/min/max).
 
     dispatch_mean / dispatch_min / dispatch_max are per kernel dispatch.
-    The "calls:" segment is omitted when invocation_ids is empty.
     """
     mean_ms = (
         node.mean_dispatch_ns * NS_TO_MS if node.mean_dispatch_ns is not None else None
