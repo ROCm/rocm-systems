@@ -1110,10 +1110,14 @@ class IsaProfile(ABC):
     def unique_flat_segment(self, enc_name: str) -> int | None:
         """Segment required by retained opcodes absent from the parent FLAT table.
 
-        GLOBAL may define standalone opcodes. SCRATCH-only opcode numbers can
-        collide with GLOBAL and are not candidates for parent-table retention.
+        Segment-only opcodes share the FLAT layout but may require a secondary
+        dispatch on the segment when GLOBAL and SCRATCH reuse an opcode number.
         """
-        return 2 if enc_name in ('ENC_FLAT_GLBL', 'ENC_FLAT_GLOBAL') else None
+        if enc_name in ('ENC_FLAT_GLBL', 'ENC_FLAT_GLOBAL'):
+            return 2
+        if enc_name == 'ENC_FLAT_SCRATCH':
+            return 1
+        return None
 
     @abstractmethod
     def skip_inst_encoding(
@@ -1391,6 +1395,14 @@ class _AmdgpuProfileBase(IsaProfile):
         if upper == 'ENC_FLAT':
             return MnemonicRule(use_flat_mnemonic=True)
         return MnemonicRule()
+
+    # FLAT encoding facts used by load execution and operand metadata.
+    legacy_flat_lds = False
+    legacy_flat_d16_lds = False
+    flat_offset_bits: int | None = None
+    flat_lds_m0_mask: int | None = None
+    scratch_has_vaddr_expr: str | None = None
+    flat_saddr_null_aliases: tuple[str, ...] = ()
 
     def saddr_null_selector_expr(self, enc_name: str) -> str | None:
         """Legacy FLAT reserves the all-ones 7-bit SADDR selector."""
@@ -1775,6 +1787,10 @@ class CdnaProfile(_AmdgpuProfileBase):
       struct already spans the full instruction width.
     """
 
+    flat_offset_bits = 13
+    flat_lds_m0_mask = 0x3FFFC
+    scratch_has_vaddr_expr = 'inst_.lds != 0'
+
     @property
     def ds_compare_store_compare_first(self) -> bool:
         # CDNA1-4 / RDNA1-2 DS CMPST reverses the BUFFER operand order.
@@ -1991,6 +2007,11 @@ class Cdna1Profile(CdnaProfile):
     - The current runtime ISA trait leaves SRAM ECC disabled.
     """
 
+    legacy_flat_lds = True
+    scratch_has_vaddr_expr = 'inst_.saddr == 0x7F'
+
+    flat_lds_m0_mask = 0xFFFC
+
     @property
     def d16_loads_zero_unselected_half(self) -> bool:
         return False
@@ -2067,6 +2088,11 @@ class Cdna2Profile(CdnaProfile):
     - Scratch base via SGPR pair.
     - ENC_VOP3PX2 does not exist in CDNA2 XML.
     """
+
+    legacy_flat_lds = True
+    scratch_has_vaddr_expr = 'inst_.saddr == 0x7F'
+
+    flat_lds_m0_mask = 0xFFFC
 
     @property
     def acc_vgpr_encoding_base(self) -> int:
@@ -2146,6 +2172,19 @@ class Rdna1Profile(_AmdgpuProfileBase):
 
     _FLAT_SEGMENTS = frozenset({'GLBL', 'SCRATCH'})
     _SKIP_DPP_SDWA = True
+
+    legacy_flat_lds = True
+    legacy_flat_d16_lds = True
+    flat_offset_bits = 12
+    scratch_has_vaddr_expr = '(inst_.saddr == 0x7D || inst_.saddr == 0x7F)'
+
+    def saddr_null_selector_expr(self, enc_name: str) -> str | None:
+        if enc_name.upper() == 'ENC_FLAT':
+            return '0x7D'
+        return super().saddr_null_selector_expr(enc_name)
+
+    flat_lds_m0_mask = 0xFFFC
+    flat_saddr_null_aliases = ('127',)
 
     @property
     def vmem_writes_use_expcnt(self) -> bool:
@@ -2251,6 +2290,9 @@ class Rdna2Profile(Rdna1Profile):
     remain skipped (``_SKIP_DPP_SDWA = True``).
     """
 
+    # GFX10.3 assigns SADDR=127 to the immediate-only scratch form.
+    scratch_has_vaddr_expr = 'inst_.saddr == 0x7D'
+
 
 class Rdna3Profile(_AmdgpuProfileBase):
     """ISA profile for RDNA3 (GFX11, Navi3x).
@@ -2294,6 +2336,8 @@ class Rdna3Profile(_AmdgpuProfileBase):
         if enc_name.upper() == 'ENC_VINTERP' and field_name in ('src0', 'src1', 'src2'):
             return 'OPR_SRC_VGPR'
         return super().normalize_operand_type(enc_name, field_name, operand_type)
+
+    flat_saddr_null_aliases = ('127',)
 
     @property
     def has_gfx11_image_address_extension(self) -> bool:
@@ -2620,6 +2664,8 @@ class Rdna4Profile(_AmdgpuProfileBase):
             enc_name, enc_cond, unique_segment_opcode=unique_segment_opcode
         )
 
+    flat_saddr_null_aliases = ('127',)
+
     @property
     def extra_lane_selector_intervals(self) -> tuple[tuple[int, int], ...]:
         # READLANE masks the value to the wave width, not the selector encoding.
@@ -2908,6 +2954,8 @@ class Cdna5Profile(Rdna4Profile):
     logical target used by parser/codegen rules while generated and handwritten
     C++ lives under ``amdgpu/cdna5`` in the ``cdna5`` namespace.
     """
+
+    flat_saddr_null_aliases = ()
 
     @property
     def smem_register_offset_condition(self) -> str:
