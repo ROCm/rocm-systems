@@ -203,7 +203,7 @@
       ROCm/rocm-systems
       <ul class="md-source__facts">
         <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 539 · build snapshot" aria-label="Stars: 539">539</li>
-        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 462 · build snapshot" aria-label="Forks: 462">462</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 463 · build snapshot" aria-label="Forks: 463">463</li>
       </ul>
     </div>
   </a>
@@ -256,7 +256,7 @@
       ROCm/rocm-systems
       <ul class="md-source__facts">
         <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 539 · build snapshot" aria-label="Stars: 539">539</li>
-        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 462 · build snapshot" aria-label="Forks: 462">462</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 463 · build snapshot" aria-label="Forks: 463">463</li>
       </ul>
     </div>
   </a>
@@ -1403,6 +1403,11 @@
 <td>Full or empty effective EXEC, including wave32 with unused upper EXEC bits</td>
 </tr>
 <tr>
+<td>Nonempty, partial EXEC on LDS transpose loads; misaligned effective addresses on their B64 forms</td>
+<td>CDNA4</td>
+<td>Full or empty EXEC; eight-byte-aligned combined addresses; ordinary DS operations; CDNA5 LDS transpose loads</td>
+</tr>
+<tr>
 <td>VOPD source-bank/scalar-input limits</td>
 <td>RDNA3, RDNA3.5, RDNA4, CDNA5</td>
 <td>GFX12 same-register/same-width sharing and MOV/MOV routing; unused sources; unqualified cross-operation dependencies and older EXEC/SCC budgets</td>
@@ -1451,6 +1456,14 @@ region; they do not infer lane-mask widths from generic operand metadata.</p>
 conflicts with LLVM's deliberate single-cycle pairing, while CDNA5's restriction
 depends on product-specific multi-cycle execution. Neither supports an
 unconditional warning with the available qualification.</p>
+<p>CDNA4 LDS transpose address checks include the immediate byte offset and report
+the first misaligned active lane once per instruction. Empty EXEC issues no
+address requests and stays silent, consistently with global transpose loads.
+The B96 packed-six-bit form shares the full-EXEC requirement, but its numerical
+address alignment remains unqualified: the manual says to align to the data
+size without explaining how that applies to a 96-bit payload. The checker does
+not infer a twelve- or sixteen-byte rule. CDNA5 LDS transpose instructions ignore
+EXEC and do not inherit the CDNA4 restrictions.</p>
 <p>This is a qualified set of checks, not a complete ISA validator. An access beyond
 an allocation is not sufficient evidence of undefined behavior: the manuals
 define zero-filled LDS reads, discarded LDS writes, register-source substitution
