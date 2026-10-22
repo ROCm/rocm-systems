@@ -120,6 +120,10 @@ To deploy script or policy updates:
 3. Restart the runners after the matching configuration is installed on every
    runner.
 
+Record when measurement settings change. The dashboard doesn't separate results
+by installed host policy, so comparisons across the change can appear as
+code-performance changes.
+
 ## Run benchmarks
 
 Run the wrapper inside the Actions runner service context. Set `INSTALL_DIR`
