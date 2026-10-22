@@ -1891,7 +1891,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
           return ncclSuccess;
         }
         // Small-message fast lane: LL protocol (no GPU barrier).
-        if (ncclAllReduceDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
+        if (arDdaLLMax > 0 && ncclAllReduceDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
           rcclCollDecision cand = *decision;
           cand.algo = RCCL_DDA_FABRIC_LL; cand.protocol = NCCL_PROTO_LL;
           cand.nMaxChannels = ncclAllReduceDdaFabricLLBlocks(comm, count, datatype);
