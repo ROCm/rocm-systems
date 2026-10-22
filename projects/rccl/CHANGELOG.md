@@ -32,6 +32,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * `RCCL_TUNING_PARTITION_MODE` (`auto`, `SPX` or `DPX`; default `auto`): selects the gfx1250 tuning table for the GPU's compute-partition mode. `auto` uses the DPX table when the GPU reports DPX, and the SPX table otherwise. A communicator uses the DPX table only when every rank selects it. The DPX table is currently a copy of the SPX table, so tuning is unchanged.
 
 ### Changed
+* `NCCL_MULTI_SEGMENT_REGISTER` default changed `1` -> `0` on HIP and stays `1` on other builds. On HIP, multi-segment registration stays off until a job sets the variable, so an unset variable keeps the previous registration path. Set `1` to register one DMA-BUF memory region per physical segment.
 * `install.sh --all_unrolls` (`-DBUILD_ALL_UNROLLS=ON`) now adds the unroll factors the multi-arch default skips (8 and 16) on top of each architecture's existing set. It no longer replaces that set or clears the gfx1250 pin on unroll 32. The flag stays off by default, so a normal build does not compile unroll 8 or 16.
 * Host-side device API declarations (`ncclDevCommCreate`, `ncclDevCommDestroy`, `ncclCommQueryProperties`, `ncclGetPeerDevicePointer`, the `*CreateRequirement` helpers, the `ncclDevCommRequirements` and `ncclCommProperties` structs and their initializers) moved to `nccl_device/host.h`. `nccl_device.h` still includes it; code that includes individual `nccl_device/*.h` headers directly must also include `nccl_device/host.h`.
 * Profiler `ncclProfileKernelPhase` events are emitted only by symmetric kernels, matching NCCL 2.32. Regular and P2P kernels report only `ncclProfileKernelCh` start and stop.
@@ -53,6 +54,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
   * DDA VMM `ncclAllReduce` and `ncclReduceScatter` launch 2048 / nRanks blocks, clamped to 32 to 128 and never more than before.
 * `fp8_e4m3` and `fp8_e5m2` sum reductions on gfx1250 convert eight elements per instruction using the packed conversion instructions, instead of two. Results are unchanged. Other architectures and reduction operators are unaffected.
 * The rocSHMEM GDA GIN backend (`NCCL_GIN_TYPE=6`) now sets the RoCE traffic class of its queue pairs from `NCCL_GIN_IB_TC`, then `NCCL_IB_TC`, then the communicator traffic class, matching the IB proxy backend. It previously read `ROCSHMEM_GDA_TRAFFIC_CLASS`, which no longer affects these queue pairs. The default remains traffic class 0 when none of these is set.
+* The AMD Pensando 'ionic' RDMA provider for the rocSHMEM GDA GIN backend (`NCCL_GIN_TYPE=6`) now properly enforces the required support for creation of 'collapsed' single-entry completion queues. If network driver and firmware support for this feature is unavailable, an initialization failure will occur rather than a silent fallback to plain completion queues.
 
 ### Removed
 * `NCCL_TOPO_SCATTER_START_NET`, which selected how the first network device was scattered across GPUs. Rail and plane assignment replaces it.

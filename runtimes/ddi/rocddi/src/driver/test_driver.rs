@@ -78,6 +78,7 @@ impl TestDriver {
         Endpoint {
             id: self.id,
             name,
+            product_name: None,
             pci: None,
             kind: self.kind,
             local_memory_bytes: 0,
@@ -156,8 +157,17 @@ impl Driver for TestDriver {
         Ok(self.endpoint())
     }
 
+    fn populate_endpoint(&self, endpoint: &mut Endpoint) -> Result<(), Error> {
+        endpoint.product_name = Some("Test endpoint".to_owned());
+        if let EndpointKind::Gpu { info } = &mut endpoint.kind {
+            info.drm_asic_family_id = Some(42);
+            info.counter_frequency_hz = Some(1_000_000);
+        }
+        Ok(())
+    }
+
     fn activate(&self, endpoint: &Endpoint) -> Result<TestDevice, Error> {
-        if endpoint != &self.endpoint() {
+        if !endpoint.matches_discovery(&self.endpoint()) {
             return Err(Error::Operation {
                 kind: ErrorKind::InvalidArgument,
                 detail: "foreign test endpoint",
