@@ -45,6 +45,8 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - RDC's log reports a field that fails to read with its AMD SMI status, and with the RDC status converted once, as `rdc.h` now documents for `rdc_field_value.status`. Some lines printed an RDC status as an AMD SMI one, or a status converted twice.
 
+- A counter that RDC starts for an XGMI event field (`RDC_EVNT_XGMI_*`) is released when it fails to start or to stop, instead of staying open until RDC exits.
+
 - `RDC_FI_GPU_MEMORY_CUR_BANDWIDTH` no longer reports zero under DMA or copy-only memory traffic on GPUs whose instantaneous UMC activity does not reflect DMA transfers. It now derives memory activity from the `mem_activity_acc` accumulator over firmware time, and falls back to the instantaneous `umc_activity` reading when the accumulator or firmware timestamp is unavailable.
 
 - `rdci topo` and `rdc_device_topology_get()` now report the links of the requested GPU. They reported links between other GPU pairs, which showed the wrong link types on systems where GPU pairs are not all linked the same way, such as XGMI hives joined by PCIe.

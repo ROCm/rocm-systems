@@ -733,19 +733,23 @@ std::shared_ptr<FieldSMIData> RdcMetricFetcherImpl::get_smi_data(RdcFieldKey key
 rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_field_t field_id,
                                                     rdc_field_value* value,
                                                     amdsmi_processor_handle& processor_handle) {
-  std::shared_ptr<FieldSMIData> smi_data;
+  amdsmi_counter_value_t counter_val = {};
   amdsmi_status_t ret = AMDSMI_STATUS_INVAL;
 
   auto read_smi_counter = [&](void) {
     RdcFieldKey f_key(gpu_index, field_id);
-    smi_data = get_smi_data(f_key);
+    std::shared_ptr<FieldSMIData> smi_data = get_smi_data(f_key);
     if (smi_data == nullptr) {
       value->status = AMDSMI_STATUS_NOT_SUPPORTED;
       return;
     }
 
-    value->status = amdsmi_gpu_read_counter(smi_data->evt_handle, &smi_data->counter_val);
-    value->value.l_int = smi_data->counter_val.value;
+    value->status = amdsmi_gpu_read_counter(smi_data->evt_handle, &counter_val);
+    // Only a read that succeeds gives a value.
+    if (value->status != AMDSMI_STATUS_SUCCESS) {
+      return;
+    }
+    value->value.l_int = counter_val.value;
     value->type = INTEGER;
   };
 
@@ -1325,8 +1329,8 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       double coll_time_sec = 0;
       read_smi_counter();
       if (value->status == AMDSMI_STATUS_SUCCESS) {
-        if (smi_data->counter_val.time_running > 0) {
-          coll_time_sec = static_cast<double>(smi_data->counter_val.time_running) / kGig;
+        if (counter_val.time_running > 0) {
+          coll_time_sec = static_cast<double>(counter_val.time_running) / kGig;
           value->value.l_int = (value->value.l_int * 32) / coll_time_sec;
         } else {
           value->value.l_int = 0;
@@ -2134,12 +2138,20 @@ static rdc_status_t init_smi_counter(RdcFieldKey fk, amdsmi_event_group_t grp,
   // Release DAC capability
   sc.Relinquish();
 
+  rdc_status_t result = Smi2RdcError(ret);
   if (sc.error()) {
     RDC_LOG(RDC_ERROR, "Failed to relinquish capabilities. Errno " << sc.error());
-    return RDC_ST_PERM_ERROR;
+    result = RDC_ST_PERM_ERROR;
   }
-
-  return Smi2RdcError(ret);
+  if (result != RDC_ST_OK) {
+    // The caller keeps no handle of a counter that failed: stop it if it started, and
+    // destroy it.
+    if (ret == AMDSMI_STATUS_SUCCESS) {
+      amdsmi_gpu_control_counter(*handle, AMDSMI_CNTR_CMD_STOP, nullptr);
+    }
+    amdsmi_gpu_destroy_counter(*handle);
+  }
+  return result;
 }
 
 rdc_status_t RdcMetricFetcherImpl::delete_smi_handle(RdcFieldKey fk) {
@@ -2166,22 +2178,18 @@ rdc_status_t RdcMetricFetcherImpl::delete_smi_handle(RdcFieldKey fk) {
       }
 
       h = smi_data_[fk]->evt_handle;
+      smi_data_.erase(fk);
 
       // Stop counting.
       ret = amdsmi_gpu_control_counter(h, AMDSMI_CNTR_CMD_STOP, nullptr);
       if (ret != AMDSMI_STATUS_SUCCESS) {
-        smi_data_.erase(fk);
-
         RDC_LOG(RDC_ERROR, "Error in stopping event counter: " << Smi2RdcError(ret));
-        return Smi2RdcError(ret);
       }
 
       // Release all resources (e.g., counter and memory resources) associated
-      // with evnt_handle.
-      ret = amdsmi_gpu_destroy_counter(h);
-
-      smi_data_.erase(fk);
-      return Smi2RdcError(ret);
+      // with evnt_handle, also when it did not stop: the field is no longer watched.
+      const amdsmi_status_t destroyed = amdsmi_gpu_destroy_counter(h);
+      return Smi2RdcError(ret != AMDSMI_STATUS_SUCCESS ? ret : destroyed);
     }
     default:
       return RDC_ST_NOT_SUPPORTED;
