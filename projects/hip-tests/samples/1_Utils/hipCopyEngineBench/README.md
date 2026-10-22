@@ -101,6 +101,18 @@ Two ways to run it, with the same kernel:
 
 Both report the mean and the maximum over GPUs of the per-iteration event time.
 
+Every collective starts with a barrier over all ranks (`--skip-barrier` leaves it out), like the
+reference's `crossGpuBarrier`: each warp stores the epoch into its peer's barrier word and waits for
+the peer's, then the block syncs. Each copy then carries two signals, one in the peer's memory
+("arrived") and one in the sender's ("sent"):
+
+- `--submit fused` (default) queues copy and both signals in one submit with
+  `hipExtCopyEngineSubmitLinearTwoCompletionsOneLane`, one reservation like the reference's
+  `putSignalCounter`. `--submit separate` queues the "sent" signal as a second submit.
+- `--signalOp add` (default) adds 1, one atomic packet, as the reference does; `set` stores the
+  epoch, which is two fence packets on gfx9. Add needs SDMA atomics, otherwise the submit returns
+  `hipErrorNotSupported`.
+
 Output columns follow the reference's: total size, time, algorithm bandwidth (`total / time`) and
 bus bandwidth (`(n - 1) / n` of that), in GiB/s as in the reference, whose header says GB/s.
 
@@ -140,20 +152,33 @@ host chose, and every copy retires its own completion word. So:
 
 - On an 8x MI300X node, `copy-engine-bw -d 7` reached ~290 GB/s against ~41 GB/s for `-d 1`.
   Warps sharing a destination share one ring, while different destinations use different routes.
-- Allgather on 8 MI300X GPUs under MPI. **Bind the ranks**: `mpirun --bind-to core --map-by numa`
-  puts ranks 0-3 on cores of package 0 and 4-7 on package 1. Open MPI's default placement gave
-  4 KiB times that varied from run to run (11 - 34 us for the reference `sdma-ep-allgather`, 13 - 33
-  us for this tool, identical settings); with the binding every run was stable: reference
-  11 - 12 us, this tool 13.2 - 13.3 us. The cause of the variation is a gap of 2.5 to 35 us between
-  consecutive kernels of a rank that depends on where the process runs (the kernel itself takes
-  about 10 us and the host launch call 1.4 - 2.2 us); I did not find which part of the placement
+- Allgather on 8 MI300X GPUs under MPI, validation on, in microseconds per collective (mean over
+  GPUs; three interleaved rounds, the range is over rounds). **Bind the ranks**:
+  `mpirun --bind-to core --map-by numa` puts ranks 0-3 on cores of package 0 and 4-7 on package 1;
+  with Open MPI's default placement the 4 KiB time varied between 11 and 34 us from run to run for
+  the reference and for this tool alike (the kernel itself takes about 10 us; what varied was a
+  gap of 2.5 to 35 us between consecutive kernels). I did not find which part of the placement
   matters.
-  - This tool bound, 8 ranks, `--skip-verification`: 13.3 us at 4 KiB, 14 us at 64 KiB, 16 us at
-    1 MiB, 98 us at 32 MiB, 692 us at 256 MiB (345 GiB/s). The reference at 256 MiB: 724 us.
-  - The 1.5 - 2 us gap at 4 KiB is the second submit this tool needs for the "sent" signal (about
-    1.6 us), where the reference packs its put, signal and counter into one reservation.
-  - `--repeats N` runs N collectives per kernel launch, which leaves the gap between kernels out;
-    the reference has no such option.
+
+  | | 4 KiB | 64 KiB | 1 MiB |
+  |---|---|---|---|
+  | reference, no barrier | 11.8 - 12.0 | 11.7 - 11.8 | 14.6 - 14.7 |
+  | `--skip-barrier --signalOp add` (fused or separate) | 11.7 - 13.5 | 12.2 - 12.8 | 15.3 - 16.3 |
+  | `--skip-barrier --signalOp set` (fused or separate) | 12.9 - 13.6 | 13.5 - 14.4 | 16.4 - 17.7 |
+  | reference with `crossGpuBarrier` | 13.0 - 13.3 | 12.8 - 12.9 | 15.7 - 15.9 |
+  | defaults (barrier, fused, add) | 13.1 - 13.5 | 13.4 - 13.9 | 16.9 - 17.1 |
+  | barrier, separate, set | 14.8 - 15.2 | 15.3 - 16.2 | 18.5 - 19.1 |
+
+  - The signal operation matters most: add is about 1.5 us faster than set, because a set is two
+    fence packets where an add is one atomic. The reference uses atomic increments.
+  - Fusing the second signal into the copy's submit makes no measurable difference with add and
+    saves up to 0.5 us with set: the second submit overlaps with the copy already running on the
+    engine.
+  - The barrier costs about 1.2 us, in this tool and in the reference.
+  - With add, this tool matches the reference at 4 KiB and is 0.4 - 1.5 us above it at 64 KiB and
+    1 MiB. At 32 MiB and 256 MiB all variants agree (about 100 us and 724 us, 345 GiB/s).
+  - Single iterations occasionally stall for milliseconds in any variant (for example 2.8 ms mean
+    at 256 MiB in one run); the cause is unknown.
 - A submit call costs about 2.8 us: reserve ring space, write the packets, ring the doorbell. That
   is the `Submit [us]` column.
 - Mean device latency of one copy, 5 interleaved runs against `sdma-ep-latency` (which reports one

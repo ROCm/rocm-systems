@@ -34,8 +34,10 @@ struct Params {
   size_t step_factor = 2;
   size_t warmup = 5;
   size_t iterations = 20;
-  size_t repeats = 1;
   bool skip_verification = false;
+  bool skip_barrier = false;
+  std::string submit = "fused";
+  std::string signal_op = "add";
   std::string output_file = "copy_engine_allgather.csv";
 };
 
@@ -47,40 +49,65 @@ struct AllgatherArgs {
   char* buffers[kMaxRanks];       // every rank's result buffer
   uint64_t* arrivals[kMaxRanks];  // every rank's words, one per sender
   uint64_t* sends_done;           // this GPU's words, one per receiver
+  uint64_t* barriers[kMaxRanks];  // every rank's words, one per rank
+  bool barrier;                   // start every collective with a barrier over all ranks
+  bool add;                       // signals add 1 instead of setting the epoch
   hipError_t* statuses;           // one per submitting warp
   uint64_t chunk_bytes;
   uint32_t rank;
   uint32_t num_ranks;
 };
 
-// Warp w of the single block serves peer w (skipping this rank). Its first lane copies this rank's
-// chunk to the peer and queues two signals behind it on the same engine: one in the peer's memory
-// that says the chunk landed, one in this GPU's memory that says it was sent. Then it waits for the
-// peer's chunk to land here. Signals carry a rising epoch so they are never reset, and a peer that
-// runs an iteration ahead can only raise them.
-__global__ void AllgatherKernel(AllgatherArgs args, uint64_t epoch, uint32_t repeats) {
+// Warp w of the single block serves peer w (skipping this rank). Optionally every collective
+// starts with a barrier: each warp stores the epoch into its peer's barrier word for this rank and
+// waits for the peer's, then the block syncs, so no copy starts before every rank has arrived.
+// Then the warp's first lane copies this rank's chunk to the peer and queues two signals behind
+// it on the same engine: one in the peer's memory that says the chunk landed, one in this GPU's
+// memory that says it was sent. With Fused both signals ride in the copy's submit, otherwise the
+// second is a submit of its own. Finally it waits for the peer's chunk to land here. Signals carry
+// a rising epoch so they are never reset, and a peer that runs an iteration ahead can only raise
+// them.
+template <bool Fused> __global__ void AllgatherKernel(AllgatherArgs args, uint64_t epoch) {
   const uint32_t warp = threadIdx.x / warpSize;
-  if (threadIdx.x % warpSize != 0 || warp + 1 >= args.num_ranks) return;
+  const bool submitting_lane = threadIdx.x % warpSize == 0 && warp + 1 < args.num_ranks;
   const uint32_t peer = warp < args.rank ? warp : warp + 1;
+  bool barrier_met = true;
+  if (args.barrier) {
+    if (submitting_lane) {
+      __hip_atomic_store(args.barriers[peer] + args.rank, epoch, __ATOMIC_RELAXED,
+                         __HIP_MEMORY_SCOPE_SYSTEM);
+      barrier_met = WaitForSignal(args.barriers[args.rank] + peer, epoch, kMaxSpins);
+    }
+    __syncthreads();
+  }
+  if (!submitting_lane) return;
+
   const uint64_t offset = uint64_t{args.rank} * args.chunk_bytes;
   const hipExtCopyEngineDeviceHandle* handle = &args.handles.handles[peer];
+  const uint32_t op = args.add ? hipExtCopyEngineSignalAdd : hipExtCopyEngineSignalSet;
+  const uint64_t value = args.add ? 1 : epoch;
+  const hipExtCopyEngineSignal arrived{reinterpret_cast<uint64_t>(args.arrivals[peer] + args.rank),
+                                       value, op, 0};
+  const hipExtCopyEngineSignal sent{reinterpret_cast<uint64_t>(args.sends_done + peer), value, op,
+                                    0};
 
-  hipError_t result = hipSuccess;
-  for (uint32_t repeat = 0; repeat < repeats && result == hipSuccess; ++repeat, ++epoch) {
-    const hipExtCopyEngineSignal arrived{
-        reinterpret_cast<uint64_t>(args.arrivals[peer] + args.rank), epoch,
-        hipExtCopyEngineSignalSet, 0};
-    const hipExtCopyEngineSignal sent{reinterpret_cast<uint64_t>(args.sends_done + peer), epoch,
-                                      hipExtCopyEngineSignalSet, 0};
-    result = hipExtCopyEngineSubmitLinearOneLane(handle, args.buffers[peer] + offset,
-                                                 args.buffers[args.rank] + offset, args.chunk_bytes,
-                                                 &arrived);
-    if (result == hipSuccess) result = hipExtCopyEngineSubmitSignalOneLane(handle, &sent);
-    if (result == hipSuccess) {
-      const bool landed = WaitForSignal(args.arrivals[args.rank] + peer, epoch, kMaxSpins);
-      const bool sent_done = WaitForSignal(args.sends_done + peer, epoch, kMaxSpins);
-      if (!landed || !sent_done) result = hipErrorNotReady;
+  hipError_t result = barrier_met ? hipSuccess : hipErrorNotReady;
+  if (result == hipSuccess) {
+    if constexpr (Fused) {
+      result = hipExtCopyEngineSubmitLinearTwoCompletionsOneLane(
+          handle, args.buffers[peer] + offset, args.buffers[args.rank] + offset, args.chunk_bytes,
+          &arrived, &sent);
+    } else {
+      result = hipExtCopyEngineSubmitLinearOneLane(handle, args.buffers[peer] + offset,
+                                                   args.buffers[args.rank] + offset,
+                                                   args.chunk_bytes, &arrived);
+      if (result == hipSuccess) result = hipExtCopyEngineSubmitSignalOneLane(handle, &sent);
     }
+  }
+  if (result == hipSuccess) {
+    const bool landed = WaitForSignal(args.arrivals[args.rank] + peer, epoch, kMaxSpins);
+    const bool sent_done = WaitForSignal(args.sends_done + peer, epoch, kMaxSpins);
+    if (!landed || !sent_done) result = hipErrorNotReady;
   }
   args.statuses[warp] = result;
 }
@@ -126,6 +153,7 @@ struct Rank {
   hipEvent_t start = nullptr;
   hipEvent_t stop = nullptr;
   uint64_t* arrivals = nullptr;
+  uint64_t* barriers = nullptr;
   // Peer allocations mapped through IPC, closed at the end.
   std::vector<void*> mapped;
 };
@@ -138,17 +166,19 @@ std::string Fixed2(double value) {
 
 uint32_t ExpectedWord(size_t rank, size_t index) { return static_cast<uint32_t>(rank + index); }
 
-// Launches one kernel per GPU that runs the collective |repeats| times, with epochs |epoch| to
-// |epoch| + |repeats| - 1.
-void LaunchAll(std::vector<Rank>& ranks, size_t chunk_bytes, uint64_t epoch, uint32_t repeats = 1) {
+// Launches one kernel per GPU that runs the collective once with signal value |epoch|.
+void LaunchAll(std::vector<Rank>& ranks, size_t chunk_bytes, uint64_t epoch, bool fused) {
   for (Rank& rank : ranks) {
     HIP_CHECK(hipSetDevice(rank.device));
     rank.args.chunk_bytes = chunk_bytes;
     int warp_size = 0;
     HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, rank.device));
-    hipLaunchKernelGGL(AllgatherKernel, dim3(1),
-                       dim3(static_cast<unsigned>((rank.args.num_ranks - 1) * warp_size)), 0,
-                       rank.stream, rank.args, epoch, repeats);
+    const dim3 block(static_cast<unsigned>((rank.args.num_ranks - 1) * warp_size));
+    if (fused) {
+      hipLaunchKernelGGL(AllgatherKernel<true>, dim3(1), block, 0, rank.stream, rank.args, epoch);
+    } else {
+      hipLaunchKernelGGL(AllgatherKernel<false>, dim3(1), block, 0, rank.stream, rank.args, epoch);
+    }
   }
 }
 
@@ -163,7 +193,8 @@ void SyncAll(const std::vector<Rank>& ranks) {
 
 // Gives every GPU a zeroed buffer holding only its own chunk, runs the collective once and checks
 // that every GPU ends up with every chunk. Returns the number of wrong words over all processes.
-size_t Verify(const World& world, std::vector<Rank>& ranks, size_t chunk_bytes, uint64_t epoch) {
+size_t Verify(const World& world, std::vector<Rank>& ranks, size_t chunk_bytes, uint64_t epoch,
+              bool fused) {
   const size_t num_ranks = ranks[0].args.num_ranks;
   const size_t words_per_chunk = chunk_bytes / sizeof(uint32_t);
   const size_t total_bytes = chunk_bytes * num_ranks;
@@ -182,7 +213,7 @@ size_t Verify(const World& world, std::vector<Rank>& ranks, size_t chunk_bytes, 
     HIP_CHECK(hipDeviceSynchronize());
   }
   world.Barrier();
-  LaunchAll(ranks, chunk_bytes, epoch);
+  LaunchAll(ranks, chunk_bytes, epoch, fused);
   SyncAll(ranks);
   world.Barrier();
 
@@ -210,6 +241,7 @@ size_t Verify(const World& world, std::vector<Rank>& ranks, size_t chunk_bytes, 
 struct Exported {
   hipIpcMemHandle_t buffer;
   hipIpcMemHandle_t arrivals;
+  hipIpcMemHandle_t barriers;
 };
 
 // Fills |rank|'s peer pointers from every process' exports.
@@ -217,6 +249,7 @@ void MapPeers(const World& world, Rank& rank) {
   Exported mine{};
   HIP_CHECK(hipIpcGetMemHandle(&mine.buffer, rank.args.buffers[world.rank]));
   HIP_CHECK(hipIpcGetMemHandle(&mine.arrivals, rank.arrivals));
+  HIP_CHECK(hipIpcGetMemHandle(&mine.barriers, rank.barriers));
   std::vector<Exported> all(world.size);
   MPI_Allgather(&mine, sizeof(mine), MPI_BYTE, all.data(), sizeof(mine), MPI_BYTE, MPI_COMM_WORLD);
   HIP_CHECK(hipSetDevice(rank.device));
@@ -224,12 +257,16 @@ void MapPeers(const World& world, Rank& rank) {
     if (peer == world.rank) continue;
     void* buffer = nullptr;
     void* arrivals = nullptr;
+    void* barriers = nullptr;
     HIP_CHECK(hipIpcOpenMemHandle(&buffer, all[peer].buffer, hipIpcMemLazyEnablePeerAccess));
     HIP_CHECK(hipIpcOpenMemHandle(&arrivals, all[peer].arrivals, hipIpcMemLazyEnablePeerAccess));
+    HIP_CHECK(hipIpcOpenMemHandle(&barriers, all[peer].barriers, hipIpcMemLazyEnablePeerAccess));
     rank.mapped.push_back(buffer);
     rank.mapped.push_back(arrivals);
+    rank.mapped.push_back(barriers);
     rank.args.buffers[peer] = static_cast<char*>(buffer);
     rank.args.arrivals[peer] = static_cast<uint64_t*>(arrivals);
+    rank.args.barriers[peer] = static_cast<uint64_t*>(barriers);
   }
 }
 #endif
@@ -285,6 +322,10 @@ int Run(const Params& params, const World& world) {
     rank.args.buffers[r] = static_cast<char*>(AllocUncached(max_chunk * num_gpus));
     rank.arrivals = AllocSignals(num_gpus, SignalMemory::kDevice);
     rank.args.arrivals[r] = rank.arrivals;
+    rank.barriers = AllocSignals(num_gpus, SignalMemory::kDevice);
+    rank.args.barriers[r] = rank.barriers;
+    rank.args.barrier = !params.skip_barrier;
+    rank.args.add = params.signal_op == "add";
     rank.args.sends_done = AllocSignals(num_gpus, SignalMemory::kDevice);
     HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&rank.args.statuses),
                             num_gpus * sizeof(hipError_t)));
@@ -307,6 +348,7 @@ int Run(const Params& params, const World& world) {
     for (size_t peer = 0; peer < num_gpus; ++peer) {
       rank.args.buffers[peer] = ranks[peer].args.buffers[peer];
       rank.args.arrivals[peer] = ranks[peer].arrivals;
+      rank.args.barriers[peer] = ranks[peer].barriers;
     }
   }
 #endif
@@ -328,6 +370,7 @@ int Run(const Params& params, const World& world) {
 
   // Signals keep rising across sizes and launches, so they are never reset.
   uint64_t epoch = 0;
+  const bool fused = params.submit == "fused";
   constexpr double kGiB = 1024.0 * 1024.0 * 1024.0;
   for (size_t size = params.min_bytes; size <= params.max_bytes; size *= params.step_factor) {
     const size_t chunk = size / num_gpus / sizeof(uint32_t) * sizeof(uint32_t);
@@ -336,13 +379,9 @@ int Run(const Params& params, const World& world) {
 
     size_t errors = 0;
     const bool verified = !params.skip_verification;
-    if (verified) errors = Verify(world, ranks, chunk, ++epoch);
+    if (verified) errors = Verify(world, ranks, chunk, ++epoch, fused);
 
-    const auto repeats = static_cast<uint32_t>(params.repeats);
-    for (size_t i = 0; i < params.warmup; ++i) {
-      LaunchAll(ranks, chunk, epoch + 1, repeats);
-      epoch += repeats;
-    }
+    for (size_t i = 0; i < params.warmup; ++i) LaunchAll(ranks, chunk, ++epoch, fused);
     SyncAll(ranks);
     world.Barrier();
 
@@ -351,10 +390,7 @@ int Run(const Params& params, const World& world) {
       HIP_CHECK(hipEventRecord(rank.start, rank.stream));
     }
     const auto host_begin = std::chrono::steady_clock::now();
-    for (size_t i = 0; i < params.iterations; ++i) {
-      LaunchAll(ranks, chunk, epoch + 1, repeats);
-      epoch += repeats;
-    }
+    for (size_t i = 0; i < params.iterations; ++i) LaunchAll(ranks, chunk, ++epoch, fused);
     for (Rank& rank : ranks) {
       HIP_CHECK(hipSetDevice(rank.device));
       HIP_CHECK(hipEventRecord(rank.stop, rank.stream));
@@ -363,7 +399,7 @@ int Run(const Params& params, const World& world) {
     const double host_us =
         std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - host_begin)
             .count() /
-        static_cast<double>(params.iterations * params.repeats);
+        static_cast<double>(params.iterations);
     world.Barrier();
 
     double sum_us = 0.0;
@@ -371,7 +407,7 @@ int Run(const Params& params, const World& world) {
     for (const Rank& rank : ranks) {
       float ms = 0.0f;
       HIP_CHECK(hipEventElapsedTime(&ms, rank.start, rank.stop));
-      const double us = ms * 1000.0 / static_cast<double>(params.iterations * params.repeats);
+      const double us = ms * 1000.0 / static_cast<double>(params.iterations);
       sum_us += us;
       max_us = std::max(max_us, us);
     }
@@ -405,6 +441,7 @@ int Run(const Params& params, const World& world) {
     HIP_CHECK(hipStreamDestroy(rank.stream));
     HIP_CHECK(hipHostFree(rank.args.statuses));
     FreeSignals(rank.arrivals, SignalMemory::kDevice);
+    FreeSignals(rank.barriers, SignalMemory::kDevice);
     FreeSignals(rank.args.sends_done, SignalMemory::kDevice);
     HIP_CHECK(hipFree(rank.args.buffers[rank.args.rank]));
   }
@@ -430,10 +467,15 @@ int main(int argc, char** argv) {
   parser.AddOption("-e,--maxBytes", &params.max_bytes, "Largest total buffer size in bytes");
   parser.AddOption("-f,--stepFactor", &params.step_factor, "Factor between sizes");
   parser.AddOption("-w,--warmup", &params.warmup, "Warmup iterations");
-  parser.AddOption("-n,--iterations", &params.iterations, "Measured kernel launches");
-  parser.AddOption("-r,--repeats", &params.repeats,
-                   "Collectives each launch runs back to back; above 1 the time leaves out the gap "
-                   "between kernels");
+  parser.AddOption("-n,--iterations", &params.iterations, "Measured iterations");
+  parser.AddOption("--submit", &params.submit,
+                   "How each copy's two signals are queued: separate (a second submit) or fused "
+                   "(hipExtCopyEngineSubmitLinearTwoCompletions)");
+  parser.AddOption(
+      "--signalOp", &params.signal_op,
+      "Signal operation: add (1, one atomic packet) or set (the epoch, two fences on gfx9)");
+  parser.AddFlag("--skip-barrier", &params.skip_barrier,
+                 "Do not start every collective with a barrier over all ranks");
   parser.AddFlag("--skip-verification", &params.skip_verification, "Skip verification");
   parser.AddOption("-o,--outputFile", &params.output_file, "Filename for CSV results");
 
@@ -443,8 +485,14 @@ int main(int argc, char** argv) {
     result = exit_code;
   } else if (!ValidateSweep(params.min_bytes, params.max_bytes)) {
     result = 2;
-  } else if (params.step_factor < 2 || params.iterations == 0 || params.repeats == 0) {
-    std::cerr << "error: --stepFactor must be at least 2 and --iterations and --repeats non-zero\n";
+  } else if (params.signal_op != "set" && params.signal_op != "add") {
+    std::cerr << "error: --signalOp must be 'set' or 'add'\n";
+    result = 2;
+  } else if (params.submit != "separate" && params.submit != "fused") {
+    std::cerr << "error: --submit must be 'separate' or 'fused'\n";
+    result = 2;
+  } else if (params.step_factor < 2 || params.iterations == 0) {
+    std::cerr << "error: --stepFactor must be at least 2 and --iterations non-zero\n";
     result = 2;
   } else {
     result = Run(params, world);
