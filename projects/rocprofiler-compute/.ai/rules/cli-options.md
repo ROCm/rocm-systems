@@ -92,8 +92,6 @@ option description, starting with `Values: `. An argument with a default states
 it at the end of the description as `(Default: value)`.
 
 ```text
---roofline-data-types <types>...   Selects data <type>s to present in roofline (Default: FP32).
-                                    Values: <value1>, <value2>, ..., <valueN>.
---list-blocks [arch]               List all available blocks for analysis on specified GPU <arch> (Default: current GPU arch).
-                                    Values: <value1>, <value2>, ..., <valueN>
+--option <arg>   Description of the option (Default: value).
+                 Values: <value1>, <value2>, ..., <valueN>
 ```
