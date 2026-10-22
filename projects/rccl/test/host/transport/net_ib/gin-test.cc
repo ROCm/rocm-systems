@@ -22,6 +22,7 @@
 #include <unistd.h>
 
 #include "ScopedHook.h"
+#include "fakes/ibv_ops_fakes.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/param_redirect.h"
 #include "fakes/socket_fakes.h"
@@ -204,55 +205,6 @@ void ResetGinHooks() {
   g_testGinNet.closeListen = GinNetCloseListen;
 }
 
-struct GinPostedWr {
-  ibv_wr_opcode opcode{};
-  int sendFlags = 0;
-  uint64_t wrId = 0;
-  uint64_t remoteAddress = 0;
-  uint32_t rkey = 0;
-  uint64_t compareAdd = 0;
-  ibv_sge sge{};
-};
-
-std::vector<GinPostedWr> g_ginPostedWrs;
-std::deque<ibv_wc> g_ginCompletions;
-int g_ginPostResult = 0;
-int g_ginPollResult = 0;
-
-int GinPostSend(ibv_qp*, ibv_send_wr* wr, ibv_send_wr** badWr) {
-  if (g_ginPostResult != 0) {
-    if (badWr) *badWr = wr;
-    return g_ginPostResult;
-  }
-  for (auto* current = wr; current != nullptr; current = current->next) {
-    GinPostedWr copy{};
-    copy.opcode = current->opcode;
-    copy.sendFlags = current->send_flags;
-    copy.wrId = current->wr_id;
-    if (current->opcode == IBV_WR_ATOMIC_FETCH_AND_ADD) {
-      copy.remoteAddress = current->wr.atomic.remote_addr;
-      copy.rkey = current->wr.atomic.rkey;
-      copy.compareAdd = current->wr.atomic.compare_add;
-    } else {
-      copy.remoteAddress = current->wr.rdma.remote_addr;
-      copy.rkey = current->wr.rdma.rkey;
-    }
-    if (current->num_sge == 1 && current->sg_list) copy.sge = *current->sg_list;
-    g_ginPostedWrs.push_back(copy);
-  }
-  return 0;
-}
-
-int GinPollCq(ibv_cq*, int count, ibv_wc* completions) {
-  if (g_ginPollResult < 0) return g_ginPollResult;
-  int n = std::min<int>(count, g_ginCompletions.size());
-  for (int i = 0; i < n; ++i) {
-    completions[i] = g_ginCompletions.front();
-    g_ginCompletions.pop_front();
-  }
-  return n;
-}
-
 }  // namespace
 
 #undef ncclIbMalloc
@@ -310,10 +262,7 @@ class NetIbGinMicrotest : public ::testing::Test {
     for (size_t i = 0; i < savedProviders_.size(); ++i) ncclIbDevs[i].ibProvider = savedProviders_[i];
     ncclIbDevs[0].context = savedDevContext_;
     ncclIbDevs[0].pd = savedDevPd_;
-    g_ginPostedWrs.clear();
-    g_ginCompletions.clear();
-    g_ginPostResult = 0;
-    g_ginPollResult = 0;
+    ResetIbvOpsFakes();
     g_ginAllocCalls = 0;
     g_ginAllocFailCall = -1;
     g_ginSelfCopies = 0;
@@ -1028,8 +977,8 @@ struct GinDataScene {
   GinDataScene() {
     std::strncpy(device.name, "test-hca", sizeof(device.name) - 1);
     verbsContext.device = &device;
-    verbsContext.ops.post_send = GinPostSend;
-    verbsContext.ops.poll_cq = GinPollCq;
+    verbsContext.ops.post_send = FakeIbvPostSend;
+    verbsContext.ops.poll_cq = FakeIbvPollCq;
     pd.context = &verbsContext;
     dataQp.context = &verbsContext;
     flushQp.context = &verbsContext;
@@ -1086,10 +1035,10 @@ TEST_F(NetIbGinMicrotest, ReserveWrs_QpSwitchPostsPendingChainBeforeChangingQp) 
   wr->sg_list = sge;
   wr->num_sge = 1;
   ASSERT_EQ(ncclRmaIbProxyCommitWrs(&scene.context, 1, true), ncclSuccess);
-  ASSERT_TRUE(g_ginPostedWrs.empty());
+  ASSERT_TRUE(g_ibvPostedSends.empty());
 
   ASSERT_EQ(ncclRmaIbProxyReserveWrs(&scene.context, &otherQp, 1, &wr, &sge), ncclSuccess);
-  ASSERT_EQ(g_ginPostedWrs.size(), 1u);
+  ASSERT_EQ(g_ibvPostedSends.size(), 1u);
   EXPECT_EQ(scene.context.batch.qp, &otherQp);
   EXPECT_EQ(scene.context.batch.nWrs, 0);
 }
@@ -1106,7 +1055,7 @@ TEST_F(NetIbGinMicrotest, CommitWrs_AggregatePostsWhenNextMaximumOperationWouldN
 
   ASSERT_EQ(ncclRmaIbProxyCommitWrs(&scene.context, 1, true), ncclSuccess);
 
-  ASSERT_EQ(g_ginPostedWrs.size(), 1u);
+  ASSERT_EQ(g_ibvPostedSends.size(), 1u);
   EXPECT_EQ(scene.context.batch.nWrs, 0);
   EXPECT_EQ(scene.context.batch.qp, nullptr);
 }
@@ -1123,7 +1072,7 @@ TEST_F(NetIbGinMicrotest, CommitWrs_AggregateDefersWhenNextMaximumOperationExact
 
   ASSERT_EQ(ncclRmaIbProxyCommitWrs(&scene.context, 1, true), ncclSuccess);
 
-  EXPECT_TRUE(g_ginPostedWrs.empty());
+  EXPECT_TRUE(g_ibvPostedSends.empty());
   EXPECT_EQ(scene.context.batch.nWrs, 1);
   EXPECT_EQ(scene.context.batch.qp, &scene.dataQp);
 }
@@ -1142,7 +1091,7 @@ TEST_F(NetIbGinMicrotest, DataApis_UnconnectedPeersRejectWithoutRequestOrPost) {
             ncclInvalidUsage);
   EXPECT_EQ(ncclRmaIbProxyIFlush(&scene.context, 0, &scene.dstHandle, 1, &request), ncclInvalidUsage);
   EXPECT_EQ(request, nullptr);
-  EXPECT_TRUE(g_ginPostedWrs.empty());
+  EXPECT_TRUE(g_ibvPostedSends.empty());
   EXPECT_EQ(scene.send.ginSeq.posted, 0u);
   EXPECT_EQ(scene.recv.ginSeq.posted, 0u);
 }
@@ -1155,14 +1104,14 @@ TEST_F(NetIbGinMicrotest, IPut_PostsExactWriteAndPublishesRequest) {
                               &request),
             ncclSuccess);
   ASSERT_NE(request, nullptr);
-  ASSERT_EQ(g_ginPostedWrs.size(), 1u);
-  EXPECT_EQ(g_ginPostedWrs[0].opcode, IBV_WR_RDMA_WRITE);
-  EXPECT_NE(g_ginPostedWrs[0].sendFlags & IBV_SEND_SIGNALED, 0);
-  EXPECT_EQ(g_ginPostedWrs[0].remoteAddress, 0x4005u);
-  EXPECT_EQ(g_ginPostedWrs[0].rkey, 0x21u);
-  EXPECT_EQ(g_ginPostedWrs[0].sge.addr, 0x1003u);
-  EXPECT_EQ(g_ginPostedWrs[0].sge.length, 16u);
-  EXPECT_EQ(g_ginPostedWrs[0].sge.lkey, 0x31u);
+  ASSERT_EQ(g_ibvPostedSends.size(), 1u);
+  EXPECT_EQ(g_ibvPostedSends[0].opcode, IBV_WR_RDMA_WRITE);
+  EXPECT_NE(g_ibvPostedSends[0].sendFlags & IBV_SEND_SIGNALED, 0);
+  EXPECT_EQ(g_ibvPostedSends[0].remoteAddress, 0x4005u);
+  EXPECT_EQ(g_ibvPostedSends[0].rkey, 0x21u);
+  EXPECT_EQ(g_ibvPostedSends[0].sge.addr, 0x1003u);
+  EXPECT_EQ(g_ibvPostedSends[0].sge.length, 16u);
+  EXPECT_EQ(g_ibvPostedSends[0].sge.lkey, 0x31u);
   auto* req = static_cast<ncclIbRequest*>(request);
   EXPECT_EQ(req->type, NCCL_NET_IB_REQ_GIN_IPUT);
   EXPECT_EQ(req->iput.rank, 1u);
@@ -1177,13 +1126,13 @@ TEST_F(NetIbGinMicrotest, IGet_PostsExactReadAndPublishesRequest) {
                               &request),
             ncclSuccess);
   ASSERT_NE(request, nullptr);
-  ASSERT_EQ(g_ginPostedWrs.size(), 1u);
-  EXPECT_EQ(g_ginPostedWrs[0].opcode, IBV_WR_RDMA_READ);
-  EXPECT_EQ(g_ginPostedWrs[0].remoteAddress, 0x2007u);
-  EXPECT_EQ(g_ginPostedWrs[0].rkey, 0x11u);
-  EXPECT_EQ(g_ginPostedWrs[0].sge.addr, 0x3009u);
-  EXPECT_EQ(g_ginPostedWrs[0].sge.length, 32u);
-  EXPECT_EQ(g_ginPostedWrs[0].sge.lkey, 0x41u);
+  ASSERT_EQ(g_ibvPostedSends.size(), 1u);
+  EXPECT_EQ(g_ibvPostedSends[0].opcode, IBV_WR_RDMA_READ);
+  EXPECT_EQ(g_ibvPostedSends[0].remoteAddress, 0x2007u);
+  EXPECT_EQ(g_ibvPostedSends[0].rkey, 0x11u);
+  EXPECT_EQ(g_ibvPostedSends[0].sge.addr, 0x3009u);
+  EXPECT_EQ(g_ibvPostedSends[0].sge.length, 32u);
+  EXPECT_EQ(g_ibvPostedSends[0].sge.lkey, 0x41u);
   EXPECT_EQ(static_cast<ncclIbRequest*>(request)->type, NCCL_NET_IB_REQ_GIN_IGET);
 }
 
@@ -1195,16 +1144,16 @@ TEST_F(NetIbGinMicrotest, IPutSignal_PutAndAddPostOrderedWriteThenAtomic) {
                                     &scene.dstHandle, 9, NCCL_NET_SIGNAL_OP_ADD, false, 0, &request),
             ncclSuccess);
   ASSERT_NE(request, nullptr);
-  ASSERT_EQ(g_ginPostedWrs.size(), 2u);
-  EXPECT_EQ(g_ginPostedWrs[0].opcode, IBV_WR_RDMA_WRITE);
-  EXPECT_EQ(g_ginPostedWrs[0].sendFlags & IBV_SEND_SIGNALED, 0);
-  EXPECT_EQ(g_ginPostedWrs[0].remoteAddress, 0x4002u);
-  EXPECT_EQ(g_ginPostedWrs[1].opcode, IBV_WR_ATOMIC_FETCH_AND_ADD);
-  EXPECT_EQ(g_ginPostedWrs[1].remoteAddress, 0x4008u);
-  EXPECT_EQ(g_ginPostedWrs[1].rkey, 0x21u);
-  EXPECT_EQ(g_ginPostedWrs[1].compareAdd, 9u);
-  EXPECT_EQ(g_ginPostedWrs[1].sge.addr, reinterpret_cast<uintptr_t>(&scene.send.putSignalScratchpad));
-  EXPECT_NE(g_ginPostedWrs[1].sendFlags & IBV_SEND_SIGNALED, 0);
+  ASSERT_EQ(g_ibvPostedSends.size(), 2u);
+  EXPECT_EQ(g_ibvPostedSends[0].opcode, IBV_WR_RDMA_WRITE);
+  EXPECT_EQ(g_ibvPostedSends[0].sendFlags & IBV_SEND_SIGNALED, 0);
+  EXPECT_EQ(g_ibvPostedSends[0].remoteAddress, 0x4002u);
+  EXPECT_EQ(g_ibvPostedSends[1].opcode, IBV_WR_ATOMIC_FETCH_AND_ADD);
+  EXPECT_EQ(g_ibvPostedSends[1].remoteAddress, 0x4008u);
+  EXPECT_EQ(g_ibvPostedSends[1].rkey, 0x21u);
+  EXPECT_EQ(g_ibvPostedSends[1].compareAdd, 9u);
+  EXPECT_EQ(g_ibvPostedSends[1].sge.addr, reinterpret_cast<uintptr_t>(&scene.send.putSignalScratchpad));
+  EXPECT_NE(g_ibvPostedSends[1].sendFlags & IBV_SEND_SIGNALED, 0);
 }
 
 TEST_F(NetIbGinMicrotest, IPutSignal_SignalOnlyIncrementPostsOneAtomicWithValueOne) {
@@ -1215,11 +1164,11 @@ TEST_F(NetIbGinMicrotest, IPutSignal_SignalOnlyIncrementPostsOneAtomicWithValueO
                                     NCCL_NET_SIGNAL_OP_INC, false, 0, &request),
             ncclSuccess);
   ASSERT_NE(request, nullptr);
-  ASSERT_EQ(g_ginPostedWrs.size(), 1u);
-  EXPECT_EQ(g_ginPostedWrs[0].opcode, IBV_WR_ATOMIC_FETCH_AND_ADD);
-  EXPECT_EQ(g_ginPostedWrs[0].remoteAddress, 0x4008u);
-  EXPECT_EQ(g_ginPostedWrs[0].compareAdd, 1u);
-  EXPECT_NE(g_ginPostedWrs[0].sendFlags & IBV_SEND_SIGNALED, 0);
+  ASSERT_EQ(g_ibvPostedSends.size(), 1u);
+  EXPECT_EQ(g_ibvPostedSends[0].opcode, IBV_WR_ATOMIC_FETCH_AND_ADD);
+  EXPECT_EQ(g_ibvPostedSends[0].remoteAddress, 0x4008u);
+  EXPECT_EQ(g_ibvPostedSends[0].compareAdd, 1u);
+  EXPECT_NE(g_ibvPostedSends[0].sendFlags & IBV_SEND_SIGNALED, 0);
 }
 
 TEST_F(NetIbGinMicrotest, IPutSignal_UnsupportedOperationIsRejectedBeforeRequestOrPost) {
@@ -1230,7 +1179,7 @@ TEST_F(NetIbGinMicrotest, IPutSignal_UnsupportedOperationIsRejectedBeforeRequest
                                     99, false, 0, &request),
             ncclInvalidArgument);
   EXPECT_EQ(request, nullptr);
-  EXPECT_TRUE(g_ginPostedWrs.empty());
+  EXPECT_TRUE(g_ibvPostedSends.empty());
   EXPECT_EQ(scene.send.ginSeq.posted, 0u);
 }
 
@@ -1244,7 +1193,7 @@ TEST_F(NetIbGinMicrotest, DISABLED_IPutSignal_UnalignedSignalIsRejectedBeforeReq
                                     NCCL_NET_SIGNAL_OP_INC, false, 0, &request),
             ncclInvalidArgument);
   EXPECT_EQ(request, nullptr);
-  EXPECT_TRUE(g_ginPostedWrs.empty());
+  EXPECT_TRUE(g_ibvPostedSends.empty());
   EXPECT_EQ(scene.send.ginSeq.posted, 0u);
 }
 
@@ -1254,17 +1203,17 @@ TEST_F(NetIbGinMicrotest, AggregatedPut_DefersDoorbellUntilTestAndCompletesReque
   ASSERT_EQ(ncclRmaIbProxyIPut(&scene.context, 0, 0, &scene.srcHandle, 8, 0, &scene.dstHandle, 1,
                               ncclRmaOptFlagsAggregateRequests, &request),
             ncclSuccess);
-  EXPECT_TRUE(g_ginPostedWrs.empty());
+  EXPECT_TRUE(g_ibvPostedSends.empty());
   auto* req = static_cast<ncclIbRequest*>(request);
   ibv_wc completion{};
   completion.status = IBV_WC_SUCCESS;
   completion.wr_id = req - scene.send.base.reqs;
-  g_ginCompletions.push_back(completion);
+  g_ibvCompletions.push_back(completion);
   int done = 0;
 
   ASSERT_EQ(ncclRmaIbProxyTest(nullptr, request, &done), ncclSuccess);
   EXPECT_EQ(done, 1);
-  EXPECT_EQ(g_ginPostedWrs.size(), 1u);
+  EXPECT_EQ(g_ibvPostedSends.size(), 1u);
   EXPECT_EQ(req->type, NCCL_NET_IB_REQ_UNUSED);
   EXPECT_EQ(scene.send.ginSeq.completed, req->id);
 }
@@ -1277,7 +1226,7 @@ TEST_F(NetIbGinMicrotest, Test_AlreadyCompletedSequenceFreesWithoutPolling) {
             ncclSuccess);
   auto* req = static_cast<ncclIbRequest*>(request);
   scene.send.ginSeq.completed = req->id;
-  g_ginPollResult = -EIO;
+  g_ibvPollResult = -EIO;
   int done = 0;
 
   ASSERT_EQ(ncclRmaIbProxyTest(nullptr, request, &done), ncclSuccess);
@@ -1295,7 +1244,7 @@ TEST_F(NetIbGinMicrotest, Test_ErrorCompletionReturnsRemoteErrorWithoutCompletin
   ibv_wc completion{};
   completion.status = IBV_WC_REM_ACCESS_ERR;
   completion.wr_id = req - scene.send.base.reqs;
-  g_ginCompletions.push_back(completion);
+  g_ibvCompletions.push_back(completion);
   g_ncclSocketGetAddr = [](ncclSocket*, ncclSocketAddress* addr) {
     std::memset(addr, 0, sizeof(*addr));
     return ncclSuccess;
@@ -1319,7 +1268,7 @@ TEST_F(NetIbGinMicrotest, Test_PollFailurePropagatesWithoutCompletingRequest) {
                               &request),
             ncclSuccess);
   auto* req = static_cast<ncclIbRequest*>(request);
-  g_ginPollResult = -EIO;
+  g_ibvPollResult = -EIO;
   int done = 0;
 
   EXPECT_EQ(ncclRmaIbProxyTest(nullptr, request, &done), ncclSystemError);
@@ -1338,12 +1287,12 @@ TEST_F(NetIbGinMicrotest, IFlush_UsesLocalRankRegistrationAndFlushQp) {
 
   ASSERT_EQ(ncclRmaIbProxyIFlush(&scene.context, 0, &scene.dstHandle, 1, &request), ncclSuccess);
   ASSERT_NE(request, nullptr);
-  ASSERT_EQ(g_ginPostedWrs.size(), 1u);
-  EXPECT_EQ(g_ginPostedWrs[0].opcode, IBV_WR_RDMA_READ);
-  EXPECT_EQ(g_ginPostedWrs[0].remoteAddress, 0x3000u);
-  EXPECT_EQ(g_ginPostedWrs[0].rkey, 0x20u);
-  EXPECT_EQ(g_ginPostedWrs[0].sge.addr, 0x9000u);
-  EXPECT_NE(g_ginPostedWrs[0].sendFlags & IBV_SEND_SIGNALED, 0);
+  ASSERT_EQ(g_ibvPostedSends.size(), 1u);
+  EXPECT_EQ(g_ibvPostedSends[0].opcode, IBV_WR_RDMA_READ);
+  EXPECT_EQ(g_ibvPostedSends[0].remoteAddress, 0x3000u);
+  EXPECT_EQ(g_ibvPostedSends[0].rkey, 0x20u);
+  EXPECT_EQ(g_ibvPostedSends[0].sge.addr, 0x9000u);
+  EXPECT_NE(g_ibvPostedSends[0].sendFlags & IBV_SEND_SIGNALED, 0);
 }
 
 TEST_F(NetIbGinMicrotest, IFlush_CompletionAdvancesReceiveSequenceAndFreesRequest) {
@@ -1355,7 +1304,7 @@ TEST_F(NetIbGinMicrotest, IFlush_CompletionAdvancesReceiveSequenceAndFreesReques
   ibv_wc completion{};
   completion.status = IBV_WC_SUCCESS;
   completion.wr_id = req - scene.recv.base.reqs;
-  g_ginCompletions.push_back(completion);
+  g_ibvCompletions.push_back(completion);
   int done = 0;
 
   ASSERT_EQ(ncclRmaIbProxyTest(nullptr, request, &done), ncclSuccess);
@@ -1368,7 +1317,7 @@ TEST_F(NetIbGinMicrotest, IFlush_CompletionAdvancesReceiveSequenceAndFreesReques
 // retained batch state allocated for an operation that never reached hardware.
 TEST_F(NetIbGinMicrotest, DISABLED_IPut_PostFailureRollsBackRequestSequenceAndBatch) {
   GinDataScene scene;
-  g_ginPostResult = EIO;
+  g_ibvPostSendResult = EIO;
   void* request = nullptr;
 
   EXPECT_EQ(ncclRmaIbProxyIPut(&scene.context, 0, 0, &scene.srcHandle, 8, 0, &scene.dstHandle, 1, 0,
@@ -1384,7 +1333,7 @@ TEST_F(NetIbGinMicrotest, DISABLED_IPut_PostFailureRollsBackRequestSequenceAndBa
 // AICOMRCCL-3094: every RMA entry point must roll back request ownership and
 // sequence/batch state when its hardware post fails.
 TEST_F(NetIbGinMicrotest, DISABLED_OtherDataApis_PostFailureRollsBackRequestSequenceAndBatch) {
-  g_ginPostResult = EIO;
+  g_ibvPostSendResult = EIO;
   {
     GinDataScene scene;
     void* request = nullptr;
@@ -1470,12 +1419,12 @@ TEST_F(NetIbGinMicrotest, DISABLED_IFlush_DisabledFlushStillDrainsAggregatedBatc
   ASSERT_EQ(ncclRmaIbProxyIPut(&scene.context, 0, 0, &scene.srcHandle, 8, 0, &scene.dstHandle, 1,
                               ncclRmaOptFlagsAggregateRequests, &putRequest),
             ncclSuccess);
-  ASSERT_TRUE(g_ginPostedWrs.empty());
+  ASSERT_TRUE(g_ibvPostedSends.empty());
   void* flushRequest = reinterpret_cast<void*>(0x1);
 
   ASSERT_EQ(ncclRmaIbProxyIFlush(&scene.context, 0, &scene.dstHandle, 1, &flushRequest), ncclSuccess);
   EXPECT_EQ(flushRequest, nullptr);
-  EXPECT_EQ(g_ginPostedWrs.size(), 1u);
+  EXPECT_EQ(g_ibvPostedSends.size(), 1u);
 }
 
 TEST_F(NetIbGinMicrotest, RmaVtable_ExportsProxyBackendContract) {
