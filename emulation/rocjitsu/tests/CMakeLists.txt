@@ -697,6 +697,7 @@ add_executable(
     mtype_flags_test.cpp
     sysfs_test.cpp
     kfd_ioctl_test.cpp
+    memory_backing_test.cpp
     waitcnt_counter_test.cpp
     wait_hazard_test.cpp
     memory_wait_scoreboard_test.cpp
@@ -3830,6 +3831,42 @@ if(RJ_ENABLE_HIP_TESTS)
     endfunction()
 
     if(RJ_HIP_RUNTIME_SUPPORTS_TEST_ARCH)
+        get_filename_component(
+            RJ_HIP_TEST_CONFIG_NAME
+            "${RJ_HIP_TEST_CONFIG}"
+            NAME
+        )
+        rj_add_hip_test(hip_rlimit_fsize_test ARCH ${RJ_HIP_TEST_ARCH})
+        foreach(_mode local daemon)
+            set(_daemon_arg)
+            if(_mode STREQUAL "daemon")
+                set(_daemon_arg --daemon)
+            endif()
+            foreach(_phase early late inherited)
+                foreach(_limit zero hard soft)
+                    if(
+                        _phase STREQUAL "inherited"
+                        AND NOT _limit STREQUAL "hard"
+                    )
+                        continue()
+                    endif()
+                    rj_add_test(
+                        NAME "HipFileSizeLimitTest.${_mode}.${_phase}.${_limit}"
+                        COMMAND ${RJ_CLI} ${_daemon_arg}
+                            --config ${RJ_HIP_TEST_CONFIG}
+                            -- ${CMAKE_CURRENT_BINARY_DIR}/hip_rlimit_fsize_test
+                        ENVIRONMENT "RJ_TEST_LIMIT=${_limit}" "RJ_TEST_PHASE=${_phase}"
+                            "ROCJITSU_RUNTIME_DIR=runtime/fsize-${_mode}-${_phase}-${_limit}"
+                        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                        TIMEOUT 120
+                        INSTALL_COMMAND "\${RJ_INSTALLED_BINDIR}/rocjitsu" ${_daemon_arg}
+                            --config "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_HIP_TEST_CONFIG_NAME}"
+                            -- bin/hip_rlimit_fsize_test
+                        INSTALL_ENVIRONMENT "RJ_TEST_LIMIT=${_limit}" "RJ_TEST_PHASE=${_phase}"
+                    )
+                endforeach()
+            endforeach()
+        endforeach()
         rj_add_hip_test(hip_memcpy_test ARCH ${RJ_HIP_TEST_ARCH})
         rj_add_hip_test_case(
             hip_memcpy_test

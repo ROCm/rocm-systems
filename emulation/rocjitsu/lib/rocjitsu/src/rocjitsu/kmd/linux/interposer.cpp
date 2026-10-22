@@ -22,6 +22,7 @@
 #include "rocjitsu/kmd/linux/host_mapping_lock.h"
 #include "rocjitsu/kmd/linux/libc_passthrough.h"
 #include "rocjitsu/kmd/linux/linux_kfd.h"
+#include "rocjitsu/kmd/linux/memory_backing.h"
 #include "rocjitsu/kmd/linux/remote_driver.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
@@ -230,9 +231,7 @@ int open_proc_maps_snapshot(const char *path, int flags) {
   int snapshot = libc.memfd_create("rocjitsu_proc_maps", MFD_CLOEXEC);
   if (snapshot < 0)
     return -1;
-  if (libc.write(snapshot, contents.data(), contents.size()) !=
-          static_cast<ssize_t>(contents.size()) ||
-      lseek(snapshot, 0, SEEK_SET) < 0) {
+  if (rocjitsu::memory_backing::populate_file(snapshot, contents.data(), contents.size()) != 0) {
     int saved_errno = errno;
     libc.close(snapshot);
     errno = saved_errno;
@@ -497,6 +496,12 @@ public:
       std::fprintf(stderr, "rocjitsu: cannot register fork child initialization: %s\n",
                    std::strerror(fork_error));
     real().resolve();
+    // Keep generated topology and proc snapshots independent of limits lowered
+    // by application code before its first GPU call. Inherited hard limits on
+    // GPU backing are handled by the keeper's shared-RAM fallback.
+    const int warmup = rocjitsu::memory_backing::create(1);
+    if (warmup >= 0)
+      real().close(warmup);
   }
 
   /// @brief Conservatively detect real GPU descriptors inherited outside this backend.
@@ -1284,14 +1289,14 @@ public:
       // CPU access through a public dma-buf fd does not restrict the BO's GPU
       // mapping or the importing DRM file's GEM_MMAP view.
       int reopened = -1;
-      if (require_readwrite && (real().fcntl(source, F_GETFL, 0) & O_ACCMODE) != O_RDWR) {
-        const auto path = std::format("/proc/self/fd/{}", source);
-        reopened = real().openat(AT_FDCWD, path.c_str(), O_RDWR | O_CLOEXEC, 0);
+      if (require_readwrite &&
+          (rocjitsu::memory_backing::fcntl(source, F_GETFL, 0) & O_ACCMODE) != O_RDWR) {
+        reopened = rocjitsu::memory_backing::reopen(source, O_RDWR | O_CLOEXEC);
         if (reopened < 0)
           return {};
         source = reopened;
       }
-      const int fd = real().fcntl(source, F_DUPFD_CLOEXEC, SimulatedKfd::kBackingFdMin);
+      const int fd = duplicate_backing(source);
       if (reopened >= 0)
         real().close(reopened);
       if (fd < 0)
@@ -1324,7 +1329,7 @@ public:
       const auto it = owned_.find(target);
       if (it == owned_.end())
         return operation();
-      const int relocated = real().fcntl(target, F_DUPFD_CLOEXEC, SimulatedKfd::kBackingFdMin);
+      const int relocated = duplicate_backing(target);
       if (relocated < 0)
         return -1;
       auto *owner = it->second;
@@ -1343,6 +1348,13 @@ public:
     }
 
   private:
+    static int duplicate_backing(int source) {
+      int fd = real().fcntl(source, F_DUPFD_CLOEXEC, SimulatedKfd::kBackingFdMin);
+      if (fd < 0 && errno == EINVAL)
+        fd = real().fcntl(source, F_DUPFD_CLOEXEC, 0);
+      return fd;
+    }
+
     int fd_ = -1;
     static inline std::mutex mutex_;
     static inline std::unordered_map<int, PrivateDrmFd *> owned_;
@@ -2494,17 +2506,11 @@ public:
         (request.domains & ~domains))
       return -EINVAL;
     uint64_t size = (request.bo_size + 4095) & ~uint64_t{4095};
-    int fd = real().memfd_create("rocjitsu_gem", MFD_CLOEXEC | MFD_ALLOW_SEALING);
+    int fd = rocjitsu::memory_backing::create(size);
     if (fd < 0)
       return -errno;
-    if (ftruncate(fd, static_cast<off_t>(size)) != 0) {
-      int error = errno;
-      real().close(fd);
-      return -error;
-    }
-    const bool sealed_ram = real().fcntl(fd, F_ADD_SEALS, F_SEAL_SHRINK) == 0;
     auto object = std::make_shared<GemObject>();
-    if (struct stat st{}; real().fstat_fn(fd, &st) == 0) {
+    if (struct stat st{}; rocjitsu::memory_backing::stat(fd, &st) == 0) {
       object->device = st.st_dev;
       object->inode = st.st_ino;
     }
@@ -2523,7 +2529,7 @@ public:
       candidate = next_gem_handle_++;
     GemEntry entry{};
     entry.dmabuf_fd = std::move(backing);
-    entry.sealed_ram = sealed_ram;
+    entry.sealed_ram = true;
     entry.drm_file_id = file->id;
     entry.size = size;
     entry.mmap_offset = next_gem_mmap_offset_;
@@ -2937,8 +2943,9 @@ public:
       if (!size || size > entry.size - relative)
         break;
       auto mapping_lock = rocjitsu::host_mapping_lock().lock_exclusive();
-      return entry.dmabuf_fd->use(
-          [&](int fd) { return real().mmap(address, size, prot, flags, fd, relative); });
+      return entry.dmabuf_fd->use([&](int fd) {
+        return rocjitsu::memory_backing::map(address, size, prot, flags, fd, relative);
+      });
     }
     errno = EINVAL;
     return MAP_FAILED;
@@ -2947,7 +2954,7 @@ public:
   /// @brief Attach existing BO metadata to a newly created KFD dma-buf import.
   void retain_kfd_import_state(int dmabuf_fd, SimulatedKfd &driver) {
     struct stat st {};
-    if (real().fstat_fn(dmabuf_fd, &st) != 0)
+    if (rocjitsu::memory_backing::stat(dmabuf_fd, &st) != 0)
       return;
     std::lock_guard lock(fd_mutex_);
     (void)driver.retain_bo_state(st, shared_gem_object_locked(st));
@@ -3065,7 +3072,7 @@ public:
     gem.drm_file_id = drm_file->id;
     gem.size = size;
     struct stat st {};
-    const bool identified = real().fstat_fn(dmabuf_fd, &st) == 0;
+    const bool identified = rocjitsu::memory_backing::stat(dmabuf_fd, &st) == 0;
     if (identified)
       gem.object = shared_gem_object_locked(st);
     if (!gem.object) {
@@ -3091,7 +3098,8 @@ public:
     if (identified)
       exported_gem_objects_[dmabuf_fd] = gem.object;
     if (gem.object->prime_access_mode < 0)
-      gem.object->prime_access_mode = real().fcntl(dmabuf_fd, F_GETFL, 0) & O_ACCMODE;
+      gem.object->prime_access_mode =
+          rocjitsu::memory_backing::fcntl(dmabuf_fd, F_GETFL, 0) & O_ACCMODE;
     // The first export or import fixes the buffer's flags; later imports of any
     // descriptor to it map with the same cache policy.
     if (flags_exported && !gem.object->has_alloc_flags) {
@@ -3149,9 +3157,8 @@ public:
     int exported = -1;
     int error = 0;
     entry.dmabuf_fd->use([&](int fd) {
-      const auto path = std::format("/proc/self/fd/{}", fd);
       const int open_flags = access_mode | ((flags & DRM_CLOEXEC) ? O_CLOEXEC : 0);
-      exported = real().openat(AT_FDCWD, path.c_str(), open_flags, 0);
+      exported = rocjitsu::memory_backing::reopen(fd, open_flags);
       error = errno;
       return exported;
     });
@@ -3227,7 +3234,8 @@ public:
     }
     if (!prt && !gem.cpu_ptr) {
       void *p = gem.dmabuf_fd->use([&](int fd) {
-        return real().mmap(nullptr, gem.size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+        return rocjitsu::memory_backing::map(nullptr, gem.size, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                             fd, 0);
       });
       if (p == MAP_FAILED)
         return -EINVAL;
@@ -3896,6 +3904,18 @@ template <typename F> auto with_host_mapping_held(F &&syscall) {
   return syscall();
 }
 } // namespace
+
+template <typename Stat> static void finish_backing_stat(int fd, Stat *buf) {
+  if (!rocjitsu::memory_backing::contains(fd))
+    return;
+  struct stat backing {};
+  if (rocjitsu::memory_backing::stat(fd, &backing) == 0) {
+    buf->st_dev = backing.st_dev;
+    buf->st_ino = backing.st_ino;
+    buf->st_mode = backing.st_mode;
+    buf->st_size = backing.st_size;
+  }
+}
 
 extern "C" {
 
@@ -4709,7 +4729,7 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
       // number is reused.
       struct stat kind {};
       if (InterposerContext::ctx.is_interposer_fd(prime->fd) ||
-          InterposerContext::real().fstat_fn(prime->fd, &kind) != 0 || !S_ISREG(kind.st_mode)) {
+          rocjitsu::memory_backing::stat(prime->fd, &kind) != 0 || !S_ISREG(kind.st_mode)) {
         errno = EINVAL;
         return -1;
       }
@@ -4719,7 +4739,7 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
       // (not the interposed one) so we don't re-enter our own hook.
       uint64_t sz = 0;
       struct stat st {};
-      if (InterposerContext::real().fstat_fn(prime->fd, &st) == 0 && st.st_size > 0) {
+      if (rocjitsu::memory_backing::stat(prime->fd, &st) == 0 && st.st_size > 0) {
         sz = static_cast<uint64_t>(st.st_size);
       } else {
         // No size means a later GEM_VA MAP on this handle will fail (EINVAL);
@@ -5135,7 +5155,7 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
   // discovery identity is aliased below, but it must never submit to hardware.
   if (_IOC_TYPE(request) == kDrmIoctlType) {
     struct stat info {};
-    if (InterposerContext::real().fstat_fn(fd, &info) == 0 && S_ISCHR(info.st_mode) &&
+    if (rocjitsu::memory_backing::stat(fd, &info) == 0 && S_ISCHR(info.st_mode) &&
         synthetic_alias_for_host_drm(info.st_rdev)) {
       errno = ENODEV;
       return -1;
@@ -5394,6 +5414,10 @@ namespace {
 // ABI, so InterposerContext::real().fcntl services both.
 int fcntl_impl(int fd, int cmd, void *ptr_arg, int int_arg) {
   FcntlArgKind kind = fcntl_arg_kind(cmd);
+  if (cmd == F_GETFL || cmd == F_GET_SEALS || cmd == F_ADD_SEALS) {
+    if (rocjitsu::memory_backing::contains(fd))
+      return rocjitsu::memory_backing::fcntl(fd, cmd, int_arg);
+  }
   // Gate here rather than in fcntl()/fcntl64(): both funnel through this, and the
   // F_DUPFD paths below touch inherited dup and DRM tracking.
   if (!rj_owns_interposer_state()) {
@@ -5535,7 +5559,7 @@ static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, o
       return MAP_FAILED;
     // A forked child owns none of this state, and the mapping lock is inherited
     // like any other: its holder may not exist here. Straight to libc.
-    return InterposerContext::real().mmap(addr, length, prot, flags, fd, offset);
+    return rocjitsu::memory_backing::map(addr, length, prot, flags, fd, offset);
   }
 
   assert(InterposerContext::real().ready());
@@ -5610,10 +5634,14 @@ static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, o
         // memfd_out is a caller-owned dup; close it once we are done. Its
         // validity is independent of a concurrent RemoteDriver teardown/close.
         auto total = static_cast<off_t>(length) + memfd_offset;
-        [[maybe_unused]] auto ft_rc = ftruncate(memfd_out, total);
-        fallocate(memfd_out, 0, memfd_offset, static_cast<off_t>(length));
+        if (rocjitsu::memory_backing::ensure_size(memfd_out, total) != 0) {
+          const int error = errno;
+          InterposerContext::real().close(memfd_out);
+          errno = error;
+          return MAP_FAILED;
+        }
         auto *raw = with_host_mapping_held([&] {
-          return InterposerContext::real().mmap(
+          return rocjitsu::memory_backing::map(
               addr, length, prot, (flags & ~MAP_ANONYMOUS) | MAP_SHARED, memfd_out, memfd_offset);
         });
         // Preserve the mmap errno across close() (which may set its own).
@@ -5639,7 +5667,7 @@ static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, o
       return driver->mmap_replacing_client_doorbell_views(addr, length, prot, flags, fd, offset);
   }
   return with_host_mapping_held(
-      [&] { return InterposerContext::real().mmap(addr, length, prot, flags, fd, offset); });
+      [&] { return rocjitsu::memory_backing::map(addr, length, prot, flags, fd, offset); });
 }
 
 RJ_INTERPOSER_EXPORT int mprotect(void *addr, size_t length, int prot) {
@@ -5746,7 +5774,7 @@ RJ_INTERPOSER_EXPORT FILE *fopen(const char *path, const char *mode) {
     struct stat st {};
     const int fd = fileno(stream);
     if (fd >= 0 && InterposerContext::real().fstat_fn &&
-        InterposerContext::real().fstat_fn(fd, &st) == 0 && rj_is_gpu_device_stat(st)) {
+        rocjitsu::memory_backing::stat(fd, &st) == 0 && rj_is_gpu_device_stat(st)) {
       fclose(stream);
       errno = ENODEV;
       return nullptr;
@@ -5805,7 +5833,7 @@ RJ_INTERPOSER_EXPORT FILE *freopen(const char *path, const char *mode, FILE *str
     struct stat st {};
     const int fd = fileno(reopened);
     if (fd >= 0 && InterposerContext::real().fstat_fn &&
-        InterposerContext::real().fstat_fn(fd, &st) == 0 && rj_is_gpu_device_stat(st)) {
+        rocjitsu::memory_backing::stat(fd, &st) == 0 && rj_is_gpu_device_stat(st)) {
       fclose(reopened);
       errno = ENODEV;
       return nullptr;
@@ -6133,8 +6161,8 @@ RJ_INTERPOSER_EXPORT int fstat(int fd, struct stat *buf) {
     return fn ? fn(fd, buf) : -1;
   }
   if (!rj_owns_interposer_state())
-    return InterposerContext::real().fstat_fn(fd, buf);
-  int rc = InterposerContext::real().fstat_fn(fd, buf);
+    return rocjitsu::memory_backing::stat(fd, buf);
+  int rc = rocjitsu::memory_backing::stat(fd, buf);
   if (rc == 0)
     finish_drm_fd_stat(fd, &buf->st_mode, &buf->st_rdev);
   return rc;
@@ -6150,6 +6178,8 @@ RJ_INTERPOSER_EXPORT int fstat64(int fd, struct stat64 *buf) {
     return -1;
   }
   int rc = real.fstat64_fn(fd, buf);
+  if (rc == 0)
+    finish_backing_stat(fd, buf);
   // Gate BEFORE is_drm(), which takes fd_mutex_. No lazy static above this point:
   // its initialization guard could be inherited mid-init by a forked child.
   if (rc != 0 || !real.ready() || !rj_owns_interposer_state())
@@ -6168,6 +6198,8 @@ RJ_INTERPOSER_EXPORT int __fxstat(int ver, int fd, struct stat *buf) {
     return -1;
   }
   int rc = real.fxstat_fn(ver, fd, buf);
+  if (rc == 0)
+    finish_backing_stat(fd, buf);
   // Gate BEFORE is_drm(), which takes fd_mutex_. No lazy static above this point:
   // its initialization guard could be inherited mid-init by a forked child.
   if (rc != 0 || !real.ready() || !rj_owns_interposer_state())
@@ -6186,6 +6218,8 @@ RJ_INTERPOSER_EXPORT int __fxstat64(int ver, int fd, struct stat64 *buf) {
     return -1;
   }
   int rc = real.fxstat64_fn(ver, fd, buf);
+  if (rc == 0)
+    finish_backing_stat(fd, buf);
   // Gate BEFORE is_drm(), which takes fd_mutex_. No lazy static above this point:
   // its initialization guard could be inherited mid-init by a forked child.
   if (rc != 0 || !real.ready() || !rj_owns_interposer_state())

@@ -1063,6 +1063,13 @@ TEST(InterposerDrmTest, OpensWithinCurrentDescriptorLimit) {
   EXPECT_EQ(close(drm), 0);
   drm_amdgpu_info_device device{};
   EXPECT_TRUE(query_drm_device_info(duplicate, &device));
+  drm_amdgpu_gem_create create{};
+  create.in.bo_size = 4096;
+  create.in.domains = AMDGPU_GEM_DOMAIN_GTT;
+  ASSERT_EQ(ioctl(duplicate, DRM_IOCTL_AMDGPU_GEM_CREATE, &create), 0);
+  drm_gem_close release{};
+  release.handle = create.out.handle;
+  EXPECT_EQ(ioctl(duplicate, DRM_IOCTL_GEM_CLOSE, &release), 0);
   EXPECT_EQ(close(duplicate), 0);
   EXPECT_EQ(close(kfd), 0);
 }

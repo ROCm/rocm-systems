@@ -262,7 +262,32 @@ Emulates the AMDKFD kernel driver via LD_PRELOAD interposition:
 - **RemoteDriver** — Client-side RPC stub for daemon mode. Forwards
   ioctls over a Unix socket to the daemon's SimulatedDriver.
 - **EventState** — KFD event lifecycle (create, set, reset, wait,
-  destroy). Signal page shared via memfd between daemon and client.
+  destroy). Signal page uses the same shared backing as GPU allocations.
+
+GPU allocations, doorbells, event pages, and GEM objects use `memory_backing`.
+The private `rocjitsu-memory` helper creates fixed-size memfds within its own
+inherited file limit. If that limit cannot accommodate an allocation, it uses
+System V shared RAM instead. This also supports a finite inherited hard
+`RLIMIT_FSIZE` without changing the application's limits or signal disposition.
+Internal scratch that has no exportable handle uses anonymous memory directly.
+
+Shared RAM is retained by opaque Unix socket descriptors. Kernel descriptor
+references preserve it across duplication, fork, and `SCM_RIGHTS` transfer.
+The helper holds an attachment to each segment, marks it for removal, and drops
+that attachment when the final token closes. Mapped views can outlive all
+handles. Mapping adapters use `shmat` and zero-old-size `mremap` aliases, retain
+read-only permissions, and support partial and fixed mappings without copying
+live buffer contents. These fallback descriptors require rocjitsu's mapping and
+metadata adapters; importing them into a different IPC namespace fails with
+`EXDEV`. Ordinary memfds retain their native Linux behavior.
+
+The helper execs with an independent address space and watches its owner's
+pidfd. It exits once the owner and exported tokens are gone, without retaining
+application descriptors or mappings. The interposer starts it before application
+code can lower file limits. Generated topology files and proc-maps snapshots
+are sized there and populated through mappings; these small metadata files must
+fit the helper's startup file limit. Application writes, including runtime
+compiler temporary files, continue to obey the application's current limit.
 
 ### Code — Executable Loading & Analysis (`code/`)
 

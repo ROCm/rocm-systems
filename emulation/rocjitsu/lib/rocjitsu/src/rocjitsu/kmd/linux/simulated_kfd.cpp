@@ -8,6 +8,7 @@
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 #include "rocjitsu/kmd/linux/kfd_topology.h"
 #include "rocjitsu/kmd/linux/libc_passthrough.h"
+#include "rocjitsu/kmd/linux/memory_backing.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_queue_binding_factory.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -242,7 +243,7 @@ namespace {
 /// it reaches this lock, so widening the region would invert the two orders.
 void *safe_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
   auto mapping_lock = rocjitsu::host_mapping_lock().lock_exclusive();
-  return libc_passthrough().mmap(addr, length, prot, flags, fd, offset);
+  return memory_backing::map(addr, length, prot, flags, fd, offset);
 }
 
 /// @brief munmap via the real libc, with the mapping layout held still.
@@ -334,7 +335,7 @@ private:
 /// is_drm()). Routing through the passthrough table keeps "the driver never
 /// re-enters the interposer" total and avoids acquiring fd_mutex_ under a held
 /// per-process lock (alloc_mutex_/etc.).
-int safe_fstat(int fd, struct stat *st) { return libc_passthrough().fstat_fn(fd, st); }
+int safe_fstat(int fd, struct stat *st) { return memory_backing::stat(fd, st); }
 
 /// @brief fcntl via the real libc, bypassing the interposer.
 /// @details The interposer's fcntl hook takes fd_mutex_ on F_DUPFD paths; calling
@@ -342,7 +343,7 @@ int safe_fstat(int fd, struct stat *st) { return libc_passthrough().fstat_fn(fd,
 /// inversion. The passthrough table's fcntl is variadic; the int-arg forms
 /// (F_DUPFD_CLOEXEC, F_ADD_SEALS, F_GETFL/no-arg) used here forward cleanly.
 template <typename... Args> int safe_fcntl(int fd, int cmd, Args... args) {
-  return libc_passthrough().fcntl(fd, cmd, args...);
+  return memory_backing::fcntl(fd, cmd, args...);
 }
 
 constexpr auto kDebugNotificationWriteTimeout = std::chrono::milliseconds(250);
@@ -1955,7 +1956,7 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
       if (source_doorbell_fd < 0) {
         // Local-mode ROCr can request a doorbell mmap without first allocating a
         // KFD doorbell object. Give that path the same persistent shared backing.
-        created_source.reset(memfd_create("rocjitsu_doorbell", MFD_CLOEXEC | MFD_ALLOW_SEALING));
+        created_source.reset(memory_backing::create(length));
         if (!created_source)
           return MAP_FAILED;
         source_doorbell_fd = created_source.get();
@@ -1985,14 +1986,7 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
       return MAP_FAILED;
     }
 
-    off_t cur_size = 0;
-    {
-      struct stat st {};
-      if (safe_fstat(doorbell_fd, &st) == 0)
-        cur_size = st.st_size;
-    }
-    if (static_cast<off_t>(length) > cur_size &&
-        ftruncate(doorbell_fd, static_cast<off_t>(length)) != 0) {
+    if (memory_backing::ensure_size(doorbell_fd, length) != 0) {
       int saved_errno = errno;
       new_doorbell_fd.reset();
       errno = saved_errno;
@@ -2116,7 +2110,7 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
     // different fds to different callers -- leaving one polling an object that
     // never receives event updates -- besides racing the field itself.
     const int events_fd = proc.event_state_.ensure_backing(length, [&](size_t size) -> int {
-      auto raw_events_fd = memfd_create("rocjitsu_events", MFD_CLOEXEC | MFD_ALLOW_SEALING);
+      auto raw_events_fd = memory_backing::create(size);
       if (raw_events_fd < 0)
         return -1;
       int backing = safe_fcntl(raw_events_fd, F_DUPFD_CLOEXEC, kBackingFdMin);
@@ -2128,17 +2122,6 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
         std::lock_guard<std::mutex> lk(owned_fds_mutex_);
         owned_fds_.insert(backing);
       }
-      if (ftruncate(backing, static_cast<off_t>(size)) != 0) {
-        const int ftruncate_errno = errno; // preserve across close() below
-        {
-          std::lock_guard<std::mutex> lk(owned_fds_mutex_);
-          owned_fds_.erase(backing);
-        }
-        libc_passthrough().close(backing);
-        errno = ftruncate_errno;
-        return -1;
-      }
-      fallocate(backing, 0, 0, static_cast<off_t>(size));
       {
         auto *init_ptr =
             static_cast<uint8_t *>(safe_mmap(nullptr, size, PROT_WRITE, MAP_SHARED, backing, 0));
@@ -2148,7 +2131,6 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
           safe_munmap(init_ptr, size);
         }
       }
-      safe_fcntl(backing, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW);
       return backing;
     });
     if (events_fd < 0)
@@ -2181,7 +2163,7 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
 
   if (alloc.memfd >= 0) {
     if (length > alloc.size) {
-      if (ftruncate(alloc.memfd, static_cast<off_t>(length)) != 0) {
+      if (memory_backing::ensure_size(alloc.memfd, length) != 0) {
         errno = ENOMEM;
         return MAP_FAILED;
       }
@@ -2521,16 +2503,10 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
   } else if (!is_doorbell) {
     // Every allocation on this path retains one backing descriptor, even if
     // it is never exported. Fail allocation if that backing cannot be created
-    // or sized. Caller-VA backing stays sparse until first touch.
-    const bool sparse_backing = !daemon_mode_ && user_provided_va;
-    auto raw_fd = memfd_create("rocjitsu_alloc", MFD_CLOEXEC | MFD_ALLOW_SEALING);
+    // with its full size. Backing stays sparse until first touch.
+    auto raw_fd = memory_backing::create(alloc.size);
     if (raw_fd < 0)
       return -errno;
-    if (ftruncate(raw_fd, static_cast<off_t>(alloc.size)) != 0) {
-      const int error = errno;
-      libc_passthrough().close(raw_fd);
-      return -error;
-    }
     alloc.memfd = safe_fcntl(raw_fd, F_DUPFD_CLOEXEC, kBackingFdMin);
     if (alloc.memfd < 0)
       alloc.memfd = raw_fd;
@@ -2540,9 +2516,6 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
       std::lock_guard<std::mutex> lk(owned_fds_mutex_);
       owned_fds_.insert(alloc.memfd);
     }
-    if (!sparse_backing)
-      fallocate(alloc.memfd, 0, 0, static_cast<off_t>(alloc.size));
-    safe_fcntl(alloc.memfd, F_ADD_SEALS, F_SEAL_SHRINK);
     if (daemon_mode_) {
       auto *mapped =
           safe_mmap(nullptr, alloc.size, PROT_READ | PROT_WRITE, MAP_SHARED, alloc.memfd, 0);
@@ -2630,45 +2603,13 @@ bool SimulatedKfd::allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va
     missing.emplace_back(cursor, static_cast<size_t>(end - cursor));
 
   for (const auto &[range_va, range_size] : missing) {
-    auto raw_fd = memfd_create("rocjitsu_scratch", MFD_CLOEXEC);
-    if (raw_fd < 0)
+    auto *host_ptr =
+        safe_mmap(nullptr, range_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (host_ptr == MAP_FAILED)
       return false;
-
-    int memfd = safe_fcntl(raw_fd, F_DUPFD_CLOEXEC, kBackingFdMin);
-    if (memfd < 0)
-      memfd = raw_fd;
-    else
-      libc_passthrough().close(raw_fd);
-    {
-      std::lock_guard<std::mutex> lk(owned_fds_mutex_);
-      owned_fds_.insert(memfd);
-    }
-
-    if (ftruncate(memfd, static_cast<off_t>(range_size)) != 0) {
-      {
-        std::lock_guard<std::mutex> lk(owned_fds_mutex_);
-        owned_fds_.erase(memfd);
-      }
-      libc_passthrough().close(memfd);
-      return false;
-    }
-    auto *host_ptr = safe_mmap(nullptr, range_size, PROT_READ | PROT_WRITE, MAP_SHARED, memfd, 0);
-    if (host_ptr == MAP_FAILED) {
-      {
-        std::lock_guard<std::mutex> lk(owned_fds_mutex_);
-        owned_fds_.erase(memfd);
-      }
-      libc_passthrough().close(memfd);
-      return false;
-    }
-    {
-      std::lock_guard<std::mutex> lk(owned_fds_mutex_);
-      owned_fds_.erase(memfd);
-    }
-    libc_passthrough().close(memfd);
     std::memset(host_ptr, 0, range_size);
     // Driver-owned for the same reason as the allocation path: the backing is a
-    // memfd this function created and mapped read-write.
+    // private region this function created and mapped read-write.
     proc->map_pages(range_va, host_ptr, range_size, amdgpu::Mtype::RW,
                     KfdProcess::HostExtentOwner::Driver);
 
@@ -3309,11 +3250,9 @@ int SimulatedKfd::share_allocation_locked(KfdProcess &proc, KfdProcess::GpuAlloc
   if (backing < 0)
     return -EINVAL;
   // IPC may retain a writable private alias for a read-only public dma-buf.
-  const int exported =
-      alloc.export_access_mode >= 0
-          ? libc_passthrough().openat(AT_FDCWD, std::format("/proc/self/fd/{}", backing).c_str(),
-                                      alloc.export_access_mode | O_CLOEXEC, 0)
-          : safe_fcntl(backing, F_DUPFD_CLOEXEC, 0);
+  const int exported = alloc.export_access_mode >= 0
+                           ? memory_backing::reopen(backing, alloc.export_access_mode | O_CLOEXEC)
+                           : safe_fcntl(backing, F_DUPFD_CLOEXEC, 0);
   if (exported < 0)
     return -errno;
   // Publish the KFD sharing policy only after retaining the export succeeds.
@@ -3412,8 +3351,7 @@ int SimulatedKfd::ipc_import_handle_ioctl(KfdProcess &proc, void *arg) {
     return -errno;
   const int public_mode = original_flags & O_ACCMODE;
   if (public_mode != O_RDWR) {
-    const auto path = std::format("/proc/self/fd/{}", backing.get());
-    const int writable = libc_passthrough().openat(AT_FDCWD, path.c_str(), O_RDWR | O_CLOEXEC, 0);
+    const int writable = memory_backing::reopen(backing.get(), O_RDWR | O_CLOEXEC);
     if (writable < 0)
       return -errno;
     backing = UniqueDriverFd(writable);

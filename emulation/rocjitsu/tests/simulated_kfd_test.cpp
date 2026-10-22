@@ -6,6 +6,7 @@
 
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/kmd/linux/guest_kfd.h"
+#include "rocjitsu/kmd/linux/memory_backing.h"
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
@@ -272,12 +273,14 @@ TEST_F(SimulatedKfdTest, ImportedDmabufReexportKeepsTheOriginalBacking) {
   ASSERT_EQ(driver->ioctl(AMDKFD_IOC_EXPORT_DMABUF, &reexported), 0);
   struct stat original {
   }, again{};
-  ASSERT_EQ(::fstat(exported.dmabuf_fd, &original), 0);
-  ASSERT_EQ(::fstat(reexported.dmabuf_fd, &again), 0);
+  ASSERT_EQ(rocjitsu::memory_backing::stat(exported.dmabuf_fd, &original), 0);
+  ASSERT_EQ(rocjitsu::memory_backing::stat(reexported.dmabuf_fd, &again), 0);
   EXPECT_EQ(again.st_dev, original.st_dev);
   EXPECT_EQ(again.st_ino, original.st_ino);
-  void *source = ::mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, exported.dmabuf_fd, 0);
-  void *view = ::mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, reexported.dmabuf_fd, 0);
+  void *source = rocjitsu::memory_backing::map(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                               exported.dmabuf_fd, 0);
+  void *view = rocjitsu::memory_backing::map(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                             reexported.dmabuf_fd, 0);
   ASSERT_NE(source, MAP_FAILED);
   ASSERT_NE(view, MAP_FAILED);
   *static_cast<uint32_t *>(source) = 0xaaaa;

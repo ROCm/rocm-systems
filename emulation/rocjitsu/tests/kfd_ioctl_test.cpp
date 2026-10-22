@@ -9,6 +9,7 @@
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/kmd/linux/cwsr.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
+#include "rocjitsu/kmd/linux/memory_backing.h"
 #include "rocjitsu/kmd/linux/remote_driver.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
@@ -3702,7 +3703,8 @@ TEST_F(KfdIoctlTest, DaemonQueueControlUsesSharedUserptrBacking) {
 
   const int memfd = daemon_driver.get_mmap_memfd(process_id, allocation.mmap_offset);
   ASSERT_GE(memfd, 0);
-  void *client_mapping = mmap(nullptr, kPageSize, PROT_READ | PROT_WRITE, MAP_SHARED, memfd, 0);
+  void *client_mapping = rocjitsu::memory_backing::map(nullptr, kPageSize, PROT_READ | PROT_WRITE,
+                                                       MAP_SHARED, memfd, 0);
   ASSERT_NE(client_mapping, MAP_FAILED) << ::strerror(errno);
   auto *queue = static_cast<amd_queue_t *>(client_mapping);
   queue->read_dispatch_id = 3;

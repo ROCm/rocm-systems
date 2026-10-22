@@ -1,0 +1,806 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#include "rocjitsu/kmd/linux/memory_backing.h"
+
+#include "rocjitsu/kmd/linux/libc_passthrough.h"
+
+#include <atomic>
+#include <cerrno>
+#include <climits>
+#include <csignal>
+#include <cstdio>
+#include <cstring>
+#include <dlfcn.h>
+#include <fcntl.h>
+#include <filesystem>
+#include <limits>
+#include <mutex>
+#include <new>
+#include <sched.h>
+#include <string>
+#include <sys/epoll.h>
+#include <sys/mman.h>
+#include <sys/prctl.h>
+#include <sys/resource.h>
+#include <sys/shm.h>
+#include <sys/socket.h>
+#include <sys/syscall.h>
+#include <sys/un.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+// The CI base image has older libc/kernel headers than its running kernel.
+// These recent syscall numbers are shared by all architectures ROCm targets.
+#ifndef SYS_pidfd_open
+#ifdef __NR_pidfd_open
+#define SYS_pidfd_open __NR_pidfd_open
+#else
+#define SYS_pidfd_open 434
+#endif
+#endif
+#ifndef SYS_close_range
+#ifdef __NR_close_range
+#define SYS_close_range __NR_close_range
+#else
+#define SYS_close_range 436
+#endif
+#endif
+
+namespace rocjitsu::memory_backing {
+namespace {
+
+template <typename... Args> long host_call(long number, Args... args) {
+  auto call = libc_passthrough().syscall;
+  return call ? call(number, args...) : ::syscall(number, args...);
+}
+
+void close_fd(int fd) {
+  if (fd >= 0)
+    host_call(SYS_close, fd);
+}
+
+constexpr uint64_t kMagic = 0x314d41525553544a;
+struct Identity {
+  uint64_t magic = kMagic;
+  uint64_t size = 0;
+  uint64_t object = 0;
+  uint64_t token = 0;
+  uint64_t ipc_namespace = 0;
+  int32_t shmid = -1;
+  int32_t mode = O_RDWR;
+};
+
+uint64_t ipc_namespace() {
+  struct stat info {};
+  if (host_call(SYS_newfstatat, AT_FDCWD, "/proc/self/ns/ipc", &info, 0) != 0)
+    return 0;
+  return info.st_ino;
+}
+
+bool identify(int fd, Identity &identity) {
+  const int saved_errno = errno;
+  sockaddr_un address{};
+  socklen_t length = sizeof(address);
+  bool found = host_call(SYS_getsockname, fd, &address, &length) == 0 &&
+               length == offsetof(sockaddr_un, sun_path) + 1 + sizeof(identity) &&
+               address.sun_family == AF_UNIX && address.sun_path[0] == 0;
+  if (found) {
+    std::memcpy(&identity, address.sun_path + 1, sizeof(identity));
+    found = identity.magic == kMagic && identity.size > 0 && identity.shmid >= 0 &&
+            (identity.mode == O_RDONLY || identity.mode == O_RDWR);
+  }
+  errno = saved_errno;
+  return found;
+}
+
+enum class Operation : uint32_t { Backing, SizeFile };
+
+struct Request {
+  uint64_t size;
+  int32_t mode;
+  Operation operation;
+};
+
+int send_descriptor(int socket, const void *data, size_t size, int fd) {
+  iovec buffer{const_cast<void *>(data), size};
+  alignas(cmsghdr) char control[CMSG_SPACE(sizeof(int))]{};
+  msghdr message{};
+  message.msg_iov = &buffer;
+  message.msg_iovlen = 1;
+  if (fd >= 0) {
+    message.msg_control = control;
+    message.msg_controllen = sizeof(control);
+    auto *header = CMSG_FIRSTHDR(&message);
+    header->cmsg_level = SOL_SOCKET;
+    header->cmsg_type = SCM_RIGHTS;
+    header->cmsg_len = CMSG_LEN(sizeof(fd));
+    std::memcpy(CMSG_DATA(header), &fd, sizeof(fd));
+  }
+  long sent;
+  do {
+    sent = host_call(SYS_sendmsg, socket, &message, MSG_NOSIGNAL | MSG_DONTWAIT);
+  } while (sent < 0 && errno == EINTR);
+  if (sent == static_cast<long>(size))
+    return 0;
+  if (sent >= 0)
+    errno = EIO;
+  return -1;
+}
+
+long receive_descriptor(int socket, void *data, size_t size, int &fd, int flags = 0) {
+  iovec buffer{data, size};
+  alignas(cmsghdr) char control[CMSG_SPACE(4 * sizeof(int))]{};
+  msghdr message{};
+  message.msg_iov = &buffer;
+  message.msg_iovlen = 1;
+  message.msg_control = control;
+  message.msg_controllen = sizeof(control);
+  long received;
+  do {
+    received = host_call(SYS_recvmsg, socket, &message, flags | MSG_CMSG_CLOEXEC);
+  } while (received < 0 && errno == EINTR);
+  fd = -1;
+  unsigned descriptors = 0;
+  if (received <= 0)
+    return received;
+  for (auto *header = CMSG_FIRSTHDR(&message); header; header = CMSG_NXTHDR(&message, header)) {
+    if (header->cmsg_level != SOL_SOCKET || header->cmsg_type != SCM_RIGHTS)
+      continue;
+    const auto count = (header->cmsg_len - CMSG_LEN(0)) / sizeof(int);
+    for (size_t index = 0; index < count; ++index) {
+      int incoming;
+      std::memcpy(&incoming, CMSG_DATA(header) + index * sizeof(int), sizeof(incoming));
+      if (++descriptors == 1)
+        fd = incoming;
+      else
+        close_fd(incoming);
+    }
+  }
+  if (descriptors > 1 || (message.msg_flags & (MSG_TRUNC | MSG_CTRUNC))) {
+    close_fd(fd);
+    fd = -1;
+    errno = EPROTO;
+    return -1;
+  }
+  return received;
+}
+
+struct Region {
+  Identity identity;
+  void *mapping;
+  size_t tokens;
+};
+
+struct Token {
+  Region *region;
+  int socket;
+};
+
+template <typename T> T *allocate_record() {
+  auto result = host_call(SYS_mmap, nullptr, sizeof(T), PROT_READ | PROT_WRITE,
+                          MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (result == -1)
+    return nullptr;
+  return new (reinterpret_cast<void *>(result)) T{};
+}
+
+template <typename T> void free_record(T *record) { host_call(SYS_munmap, record, sizeof(T)); }
+
+void release_region(Region *region) {
+  host_call(SYS_shmdt, region->mapping);
+  free_record(region);
+}
+
+Region *create_region(size_t size) {
+  auto *region = allocate_record<Region>();
+  if (!region)
+    return nullptr;
+  const int shmid = host_call(SYS_shmget, IPC_PRIVATE, size, IPC_CREAT | SHM_NORESERVE | 0600);
+  if (shmid < 0) {
+    const int error = errno;
+    free_record(region);
+    errno = error;
+    return nullptr;
+  }
+  region->identity.size = size;
+  region->identity.ipc_namespace = ipc_namespace();
+  region->identity.shmid = shmid;
+  region->mapping = reinterpret_cast<void *>(host_call(SYS_shmat, shmid, nullptr, 0));
+  const int attach_error = errno;
+  // The keeper attachment, and later client mappings, own the segment. Even a
+  // killed keeper leaves no named IPC object behind.
+  const int removed = host_call(SYS_shmctl, shmid, IPC_RMID, nullptr);
+  if (removed != 0 && region->mapping != reinterpret_cast<void *>(-1)) {
+    const int error = errno;
+    release_region(region);
+    errno = error;
+    return nullptr;
+  }
+  if (region->mapping == reinterpret_cast<void *>(-1)) {
+    free_record(region);
+    errno = attach_error;
+    return nullptr;
+  }
+  long random_bytes;
+  do {
+    random_bytes = host_call(SYS_getrandom, &region->identity.object, sizeof(uint64_t), 0);
+  } while (random_bytes < 0 && errno == EINTR);
+  if (random_bytes != sizeof(uint64_t)) {
+    const int error = random_bytes < 0 ? errno : EIO;
+    release_region(region);
+    errno = error;
+    return nullptr;
+  }
+  return region;
+}
+
+// The keeper has its own file limit. Prefer ordinary exportable files when
+// that limit permits; unlike the application, it never runs application code
+// that can lower the limit concurrently with sizing a file. An inherited hard
+// limit is handled by shared RAM below, without raising any limit.
+int create_file(size_t size) {
+  rlimit limit{};
+  if (host_call(SYS_prlimit64, 0, RLIMIT_FSIZE, nullptr, &limit) != 0)
+    return -1;
+  if (size > limit.rlim_cur) {
+    errno = EFBIG;
+    return -1;
+  }
+  const int fd = host_call(SYS_memfd_create, "rocjitsu_backing", MFD_CLOEXEC | MFD_ALLOW_SEALING);
+  if (fd < 0)
+    return -1;
+  if (host_call(SYS_ftruncate, fd, size) != 0 ||
+      host_call(SYS_fcntl, fd, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL) != 0) {
+    const int error = errno;
+    close_fd(fd);
+    errno = error;
+    return -1;
+  }
+  return fd;
+}
+
+int create_token(int epoll, Region *region, int mode, uint64_t serial) {
+  auto *token = allocate_record<Token>();
+  if (!token)
+    return -1;
+  int sockets[2];
+  if (host_call(SYS_socketpair, AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, sockets) != 0) {
+    const int error = errno;
+    free_record(token);
+    errno = error;
+    return -1;
+  }
+  Identity identity = region->identity;
+  identity.mode = mode;
+  identity.token = serial;
+  sockaddr_un address{};
+  address.sun_family = AF_UNIX;
+  std::memcpy(address.sun_path + 1, &identity, sizeof(identity));
+  token->socket = sockets[0];
+  token->region = region;
+  epoll_event event{};
+  event.events = EPOLLIN | EPOLLRDHUP;
+  event.data.ptr = token;
+  if (host_call(SYS_bind, sockets[1], &address,
+                offsetof(sockaddr_un, sun_path) + 1 + sizeof(identity)) != 0 ||
+      host_call(SYS_epoll_ctl, epoll, EPOLL_CTL_ADD, sockets[0], &event) != 0) {
+    const int error = errno;
+    close_fd(sockets[0]);
+    close_fd(sockets[1]);
+    free_record(token);
+    errno = error;
+    return -1;
+  }
+  ++region->tokens;
+  return sockets[1];
+}
+
+// Runs in a fresh executable, with no inherited application mappings or locks.
+[[noreturn]] void keep_regions(int listener, pid_t owner) {
+  host_call(SYS_prctl, PR_SET_NAME, "rj-memory", 0, 0, 0);
+  // Avoid invoking application handlers in the keeper. The kernel closes its
+  // sockets and drops its marked-for-removal attachments on termination.
+  struct sigaction action {};
+  action.sa_handler = SIG_DFL;
+  sigemptyset(&action.sa_mask);
+  for (int signal = 1; signal < NSIG; ++signal)
+    if (signal != SIGKILL && signal != SIGSTOP)
+      sigaction(signal, &action, nullptr);
+  // This process only sizes internal backing files. Ignore its own size-limit
+  // signal so even an external prlimit racing create_file falls back to RAM.
+  action.sa_handler = SIG_IGN;
+  sigaction(SIGXFSZ, &action, nullptr);
+  sigset_t mask;
+  sigemptyset(&mask);
+  sigprocmask(SIG_SETMASK, &mask, nullptr);
+
+  const int parent = host_call(SYS_pidfd_open, owner, 0);
+  const int epoll = host_call(SYS_epoll_create1, EPOLL_CLOEXEC);
+  Token listener_event{}, parent_event{};
+  epoll_event event{};
+  event.events = EPOLLIN;
+  event.data.ptr = &listener_event;
+  if (parent < 0 || epoll < 0 ||
+      host_call(SYS_epoll_ctl, epoll, EPOLL_CTL_ADD, listener, &event) != 0)
+    host_call(SYS_exit_group, 1);
+  event.data.ptr = &parent_event;
+  if (host_call(SYS_epoll_ctl, epoll, EPOLL_CTL_ADD, parent, &event) != 0)
+    host_call(SYS_exit_group, 1);
+  size_t tokens = 0;
+  uint64_t serial = 0;
+  auto retire = [&](Token *token) {
+    host_call(SYS_epoll_ctl, epoll, EPOLL_CTL_DEL, token->socket, nullptr);
+    close_fd(token->socket);
+    if (token->region) {
+      if (--token->region->tokens == 0)
+        release_region(token->region);
+      --tokens;
+    }
+    free_record(token);
+  };
+  bool owner_alive = true;
+  while (owner_alive || tokens != 0) {
+    epoll_event events[32];
+    const int count = host_call(SYS_epoll_wait, epoll, events, 32, -1);
+    if (count < 0) {
+      if (errno == EINTR)
+        continue;
+      break;
+    }
+    for (int index = 0; index < count; ++index) {
+      auto *token = static_cast<Token *>(events[index].data.ptr);
+      if (token == &parent_event) {
+        owner_alive = false;
+        host_call(SYS_epoll_ctl, epoll, EPOLL_CTL_DEL, parent, nullptr);
+        host_call(SYS_epoll_ctl, epoll, EPOLL_CTL_DEL, listener, nullptr);
+        close_fd(parent);
+        close_fd(listener);
+        continue;
+      }
+      if (token == &listener_event) {
+        if (!owner_alive)
+          continue;
+        const int socket = host_call(SYS_accept4, listener, nullptr, nullptr, SOCK_CLOEXEC);
+        if (socket < 0)
+          continue;
+        ucred peer{};
+        socklen_t peer_size = sizeof(peer);
+        if (host_call(SYS_getsockopt, socket, SOL_SOCKET, SO_PEERCRED, &peer, &peer_size) != 0 ||
+            peer.pid != owner || peer.uid != geteuid() || peer.gid != getegid()) {
+          close_fd(socket);
+          continue;
+        }
+        auto *connection = allocate_record<Token>();
+        if (!connection) {
+          close_fd(socket);
+          continue;
+        }
+        connection->socket = socket;
+        event.events = EPOLLIN | EPOLLRDHUP;
+        event.data.ptr = connection;
+        if (host_call(SYS_epoll_ctl, epoll, EPOLL_CTL_ADD, socket, &event) != 0) {
+          close_fd(socket);
+          free_record(connection);
+        }
+        continue;
+      }
+      const int socket = token->socket;
+      Request request{};
+      int reply = -1;
+      const long received =
+          receive_descriptor(socket, &request, sizeof(request), reply, MSG_DONTWAIT);
+      if (received == 0 || (received < 0 && errno != EAGAIN && errno != EWOULDBLOCK)) {
+        retire(token);
+        continue;
+      }
+      if (received != sizeof(request) || reply < 0) {
+        close_fd(reply);
+        continue;
+      }
+      int result = EINVAL;
+      int descriptor = -1;
+      if (!token->region && request.operation == Operation::SizeFile) {
+        char byte = 0;
+        if (receive_descriptor(reply, &byte, 1, descriptor, MSG_DONTWAIT) == 1 && descriptor >= 0)
+          result = host_call(SYS_ftruncate, descriptor, request.size) == 0 ? 0 : errno;
+      } else if (request.operation == Operation::Backing &&
+                 (request.mode == O_RDONLY || request.mode == O_RDWR) &&
+                 (token->region || (request.size && request.size <= SIZE_MAX))) {
+        if (!token->region) {
+          descriptor = create_file(request.size);
+          result = descriptor >= 0 ? 0 : errno;
+        }
+        if (token->region || result == EFBIG) {
+          Region *region = token->region ? token->region : create_region(request.size);
+          if (region) {
+            descriptor = create_token(epoll, region, request.mode, ++serial);
+            result = descriptor >= 0 ? 0 : errno;
+            if (descriptor >= 0)
+              ++tokens;
+            else if (!token->region)
+              release_region(region);
+          } else {
+            result = errno;
+          }
+        }
+      }
+      send_descriptor(reply, &result, sizeof(result), descriptor);
+      close_fd(descriptor);
+      close_fd(reply);
+      if (!token->region)
+        retire(token);
+    }
+  }
+  host_call(SYS_exit_group, 0);
+  __builtin_unreachable();
+}
+
+int request_backing(int socket, size_t size, int mode, int sized_file = -1) {
+  int reply[2];
+  if (host_call(SYS_socketpair, AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, reply) != 0)
+    return -1;
+  const Request request{size, mode, sized_file >= 0 ? Operation::SizeFile : Operation::Backing};
+  int result = 0;
+  if (sized_file >= 0) {
+    const char byte = 0;
+    result = send_descriptor(reply[0], &byte, 1, sized_file);
+  }
+  if (result == 0)
+    result = send_descriptor(socket, &request, sizeof(request), reply[1]);
+  int error = result == 0 ? 0 : errno;
+  close_fd(reply[1]);
+  int descriptor = -1;
+  if (result == 0) {
+    int response = EIO;
+    const long received = receive_descriptor(reply[0], &response, sizeof(response), descriptor);
+    error = received < 0 ? errno : (received == sizeof(response) ? response : EIO);
+    if (error == 0 && descriptor < 0)
+      error = EIO;
+  }
+  close_fd(reply[0]);
+  if (error) {
+    close_fd(descriptor);
+    errno = error;
+    return -1;
+  }
+  return descriptor;
+}
+
+std::string keeper_path() {
+  Dl_info info{};
+  if (dladdr(reinterpret_cast<void *>(&create), &info) && info.dli_fname) {
+    std::error_code error;
+    const auto library = std::filesystem::canonical(info.dli_fname, error);
+    if (!error) {
+      // The same object is linked into the interposer, CLI, and unit tests.
+      // Resolve each supported installed layout relative to that object.
+      for (const char *relative : {RJ_MEMORY_KEEPER_INSTALL_PATH, RJ_MEMORY_KEEPER_BIN_INSTALL_PATH,
+                                   RJ_MEMORY_KEEPER_TEST_INSTALL_PATH}) {
+        const auto installed = library.parent_path() / relative;
+        if (host_call(SYS_faccessat, AT_FDCWD, installed.c_str(), X_OK) == 0)
+          return installed.string();
+      }
+    }
+  }
+  return RJ_MEMORY_KEEPER_BUILD_PATH;
+}
+
+// The child executes only async-signal-safe syscalls before exec. In particular,
+// it must not use the C++ allocator, application atfork hooks, or stdio locks.
+[[noreturn]] void exec_keeper(int control, const char *path, const char *owner, rlim_t nofile) {
+  if (control != 3) {
+    if (host_call(SYS_dup3, control, 3, 0) < 0)
+      host_call(SYS_exit_group, 1);
+  } else {
+    host_call(SYS_fcntl, 3, F_SETFD, 0);
+  }
+  for (int fd = 0; fd < 3; ++fd)
+    close_fd(fd);
+  if (host_call(SYS_close_range, 4u, UINT_MAX, 0u) != 0) {
+    for (uint64_t fd = 4; fd < nofile && fd <= INT_MAX; ++fd)
+      close_fd(static_cast<int>(fd));
+  }
+  char *arguments[] = {const_cast<char *>(path), const_cast<char *>(owner), nullptr};
+  // LD_PRELOAD and application configuration must not initialize a simulator
+  // inside the keeper. Its loader dependencies use the executable's RPATH.
+  char *environment[] = {nullptr};
+  host_call(SYS_execve, path, arguments, environment);
+  host_call(SYS_exit_group, 1);
+  __builtin_unreachable();
+}
+
+class Keeper {
+public:
+  const pid_t owner = getpid();
+  const uid_t user = geteuid();
+  const gid_t group = getegid();
+
+  bool owns_current_process() const {
+    return owner == getpid() && user == geteuid() && group == getegid();
+  }
+
+  int allocate(size_t size, int sized_file = -1) {
+    std::lock_guard lock(mutex_);
+    if (child_ < 0) {
+      const std::string path = keeper_path();
+      if (host_call(SYS_faccessat, AT_FDCWD, path.c_str(), X_OK) != 0)
+        return -1;
+      uint64_t nonce = 0;
+      long random_bytes;
+      do {
+        random_bytes = host_call(SYS_getrandom, &nonce, sizeof(nonce), 0);
+      } while (random_bytes < 0 && errno == EINTR);
+      if (random_bytes != sizeof(nonce)) {
+        if (random_bytes >= 0)
+          errno = EIO;
+        return -1;
+      }
+      address_.sun_family = AF_UNIX;
+      const int name_length = std::snprintf(address_.sun_path + 1, sizeof(address_.sun_path) - 1,
+                                            "rocjitsu-memory-%d-%016lx", owner, nonce);
+      length_ = offsetof(sockaddr_un, sun_path) + 1 + name_length;
+      const int listener = host_call(SYS_socket, AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
+      if (listener < 0)
+        return -1;
+      if (host_call(SYS_bind, listener, &address_, length_) != 0 ||
+          host_call(SYS_listen, listener, SOMAXCONN) != 0) {
+        const int error = errno;
+        close_fd(listener);
+        errno = error;
+        return -1;
+      }
+      char owner_text[32];
+      std::snprintf(owner_text, sizeof(owner_text), "%d", owner);
+      rlimit nofile{};
+      if (host_call(SYS_prlimit64, 0, RLIMIT_NOFILE, nullptr, &nofile) != 0) {
+        const int error = errno;
+        close_fd(listener);
+        errno = error;
+        return -1;
+      }
+      // No exit signal: this implementation process must not appear in the
+      // application's ordinary waitpid(-1) calls or generate SIGCHLD.
+      // Do not expose this non-thread clone as a new application thread to GDB.
+      const long child = host_call(SYS_clone, CLONE_UNTRACED, nullptr, nullptr, nullptr, 0);
+      if (child == 0)
+        exec_keeper(listener, path.c_str(), owner_text, nofile.rlim_max);
+      const int error = errno;
+      close_fd(listener);
+      if (child < 0) {
+        errno = error;
+        return -1;
+      }
+      child_ = child;
+    }
+    // No persistent client descriptor: dup2/close_range in the application
+    // cannot overwrite the keeper connection or accidentally retain it on exec.
+    const int socket = host_call(SYS_socket, AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
+    if (socket < 0)
+      return -1;
+    int descriptor = -1;
+    if (host_call(SYS_connect, socket, &address_, length_) == 0)
+      descriptor = request_backing(socket, size, O_RDWR, sized_file);
+    const int error = errno;
+    close_fd(socket);
+    if (descriptor < 0) {
+      const auto reaped = host_call(SYS_wait4, child_, nullptr, WNOHANG | __WCLONE, nullptr);
+      if (reaped == child_ || (reaped < 0 && errno == ECHILD))
+        child_ = -1;
+    }
+    errno = error;
+    return descriptor;
+  }
+
+private:
+  std::mutex mutex_;
+  sockaddr_un address_{};
+  socklen_t length_ = 0;
+  pid_t child_ = -1;
+};
+
+// Intentionally process-lifetime: the keeper watches its owner's pidfd and
+// exits when both the owner and externally held descriptors are gone.
+// A forked child never locks a mutex inherited from the parent's threads.
+std::atomic<Keeper *> keeper{};
+
+Keeper *get_keeper() {
+  auto *current = keeper.load(std::memory_order_acquire);
+  if (!current || !current->owns_current_process()) {
+    auto *candidate = new (std::nothrow) Keeper;
+    if (!candidate) {
+      errno = ENOMEM;
+      return nullptr;
+    }
+    while (!keeper.compare_exchange_weak(current, candidate, std::memory_order_acq_rel)) {
+      if (current && current->owns_current_process()) {
+        delete candidate;
+        return current;
+      }
+    }
+    current = candidate;
+  }
+  return current;
+}
+
+} // namespace
+
+[[noreturn]] void run_keeper(int listener, pid_t owner) { keep_regions(listener, owner); }
+
+int create(size_t size) {
+  if (!size || size > static_cast<size_t>(std::numeric_limits<off_t>::max())) {
+    errno = EINVAL;
+    return -1;
+  }
+  auto *current = get_keeper();
+  return current ? current->allocate(size) : -1;
+}
+
+int populate_file(int fd, const void *data, size_t size) {
+  if (!size)
+    return 0;
+  if (size > static_cast<size_t>(std::numeric_limits<off_t>::max())) {
+    errno = EFBIG;
+    return -1;
+  }
+  auto *current = get_keeper();
+  if (!current)
+    return -1;
+  const int resized = current->allocate(size, fd);
+  if (resized < 0)
+    return -1;
+  close_fd(resized);
+  // Even overwriting an already sized file with write() checks RLIMIT_FSIZE.
+  // Populate through its shared mapping instead; these are private setup
+  // mappings that have never been published to a simulated GPU.
+  const long view = host_call(SYS_mmap, nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+  if (view == -1)
+    return -1;
+  std::memcpy(reinterpret_cast<void *>(view), data, size);
+  host_call(SYS_munmap, view, size);
+  return 0;
+}
+
+bool contains(int fd) {
+  Identity identity;
+  return identify(fd, identity);
+}
+
+int stat(int fd, struct stat *result) {
+  const auto fstat_fn = libc_passthrough().fstat_fn;
+  if ((fstat_fn ? fstat_fn(fd, result) : host_call(SYS_fstat, fd, result)) != 0)
+    return -1;
+  Identity identity;
+  if (identify(fd, identity)) {
+    result->st_dev = 0;
+    result->st_ino = identity.object;
+    result->st_mode = S_IFREG | 0600;
+    result->st_size = identity.size;
+  }
+  return 0;
+}
+
+int fcntl(int fd, int command, uintptr_t argument) {
+  Identity identity;
+  if (identify(fd, identity)) {
+    switch (command) {
+    case F_GETFL:
+      return identity.mode;
+    case F_GET_SEALS:
+      return F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL;
+    case F_ADD_SEALS:
+      errno = EPERM;
+      return -1;
+    }
+  }
+  return host_call(SYS_fcntl, fd, command, argument);
+}
+
+int reopen(int fd, int access_mode) {
+  Identity identity;
+  if (identify(fd, identity)) {
+    const int reopened = request_backing(fd, 0, access_mode & O_ACCMODE);
+    if (reopened >= 0 && !(access_mode & O_CLOEXEC))
+      host_call(SYS_fcntl, reopened, F_SETFD, 0);
+    return reopened;
+  }
+  char path[64];
+  std::snprintf(path, sizeof(path), "/proc/self/fd/%d", fd);
+  return host_call(SYS_openat, AT_FDCWD, path, access_mode, 0);
+}
+
+int ensure_size(int fd, size_t size) {
+  struct stat info {};
+  if (stat(fd, &info) != 0)
+    return -1;
+  if (info.st_size >= 0 && size <= static_cast<uint64_t>(info.st_size))
+    return 0;
+  errno = EINVAL;
+  return -1;
+}
+
+void *map(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
+  Identity identity;
+  if (fd < 0 || (flags & MAP_ANONYMOUS) || !identify(fd, identity)) {
+    auto mmap_fn = libc_passthrough().mmap;
+    return mmap_fn ? mmap_fn(addr, length, prot, flags, fd, offset)
+                   : ::mmap(addr, length, prot, flags, fd, offset);
+  }
+  // A shmid can name unrelated memory in another IPC namespace. Reject that
+  // transfer explicitly instead of attaching an accidentally matching id.
+  if (!identity.ipc_namespace || identity.ipc_namespace != ipc_namespace()) {
+    errno = EXDEV;
+    return MAP_FAILED;
+  }
+  const size_t page = static_cast<size_t>(sysconf(_SC_PAGESIZE));
+  if (!length || offset < 0 || static_cast<uint64_t>(offset) % page ||
+      length > SIZE_MAX - (page - 1) || identity.size > SIZE_MAX - (page - 1) ||
+      (flags & MAP_TYPE) != MAP_SHARED) {
+    errno = EINVAL;
+    return MAP_FAILED;
+  }
+  const size_t mapped_size = (length + page - 1) & ~(page - 1);
+  const size_t region_size = (identity.size + page - 1) & ~(page - 1);
+  if (static_cast<uint64_t>(offset) >= region_size || mapped_size > region_size - offset) {
+    errno = EINVAL;
+    return MAP_FAILED;
+  }
+  if (identity.mode == O_RDONLY && (prot & PROT_WRITE)) {
+    errno = EACCES;
+    return MAP_FAILED;
+  }
+  if ((flags & (MAP_FIXED | MAP_FIXED_NOREPLACE)) &&
+      (reinterpret_cast<uintptr_t>(addr) % page ||
+       reinterpret_cast<uintptr_t>(addr) > UINTPTR_MAX - mapped_size)) {
+    errno = EINVAL;
+    return MAP_FAILED;
+  }
+  if (flags & MAP_FIXED_NOREPLACE) {
+    const long reservation = host_call(SYS_mmap, addr, mapped_size, PROT_NONE,
+                                       MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+    if (reservation == -1)
+      return MAP_FAILED;
+    flags |= MAP_FIXED;
+  }
+  // An unmapped MAP_FIXED target may itself be selected by shmat. Keep
+  // overlapping temporary attachments until another attachment lies outside
+  // the target. At most two disjoint regions of this size can overlap it.
+  void *attachments[3]{};
+  unsigned count = 0;
+  void *source = nullptr;
+  do {
+    source = reinterpret_cast<void *>(
+        host_call(SYS_shmat, identity.shmid, nullptr, identity.mode == O_RDONLY ? SHM_RDONLY : 0));
+    if (source == reinterpret_cast<void *>(-1)) {
+      const int error = errno;
+      for (unsigned index = 0; index < count; ++index)
+        host_call(SYS_shmdt, attachments[index]);
+      if (flags & MAP_FIXED_NOREPLACE)
+        host_call(SYS_munmap, addr, mapped_size);
+      errno = error;
+      return MAP_FAILED;
+    }
+    attachments[count++] = source;
+    const auto target = reinterpret_cast<uintptr_t>(addr);
+    const auto start = reinterpret_cast<uintptr_t>(source);
+    if (!(flags & MAP_FIXED) || target >= start + region_size || start >= target + mapped_size)
+      break;
+  } while (count < 3);
+  // Drop overlapping attachments before replacing the target. Detaching their
+  // old addresses afterwards could detach the newly installed alias instead.
+  for (unsigned index = 0; index + 1 < count; ++index)
+    host_call(SYS_shmdt, attachments[index]);
+  void *view = static_cast<char *>(source) + offset;
+  long mapped = -1;
+  if (host_call(SYS_mprotect, view, mapped_size, prot) == 0)
+    mapped = host_call(SYS_mremap, view, 0, mapped_size,
+                       MREMAP_MAYMOVE | ((flags & MAP_FIXED) ? MREMAP_FIXED : 0), addr);
+  const int error = errno;
+  host_call(SYS_shmdt, source);
+  if (mapped == -1 && (flags & MAP_FIXED_NOREPLACE))
+    host_call(SYS_munmap, addr, mapped_size);
+  errno = error;
+  return reinterpret_cast<void *>(mapped);
+}
+
+} // namespace rocjitsu::memory_backing

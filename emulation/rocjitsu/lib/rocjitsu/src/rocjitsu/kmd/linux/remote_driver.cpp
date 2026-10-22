@@ -7,6 +7,7 @@
 #include "rocjitsu/kmd/linux/remote_driver.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 #include "rocjitsu/kmd/linux/linux_kfd.h"
+#include "rocjitsu/kmd/linux/memory_backing.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "util/log.h"
 #include "util/unique_handle.h"
@@ -205,13 +206,9 @@ PtracerGrantVerdict authorize_daemon_address_space_access(int socket) {
   return verdict;
 }
 
-/// @brief Safe wrapper around syscall(SYS_mmap, ...) that avoids UB from
-/// casting negative return values through uintptr_t/pointer types.
+/// @brief Map driver backing without re-entering the interposer.
 void *safe_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
-  long rc = syscall(SYS_mmap, addr, length, prot, flags, fd, offset);
-  if (rc < 0)
-    return MAP_FAILED;
-  return reinterpret_cast<void *>(static_cast<uintptr_t>(rc));
+  return memory_backing::map(addr, length, prot, flags, fd, offset);
 }
 
 Sysfs::GpuInfo gpu_info_from_rpc(const RpcGpuInfo &src) {
@@ -429,7 +426,7 @@ RemoteDriver::MemfdLookup RemoteDriver::find_memfd_for_addr(void *addr, size_t l
       // descriptor whose lifetime is independent of this RemoteDriver. Without
       // this, a concurrent last-close -> RemoteDriver::close() (which closes the
       // stored handle_memfds_ fds) could close the fd between this return and the
-      // caller's ftruncate/fallocate/mmap, operating on a closed/reused fd. The
+      // caller's backing lookup/mmap, operating on a closed/reused fd. The
       // dup is taken under rpc_mutex_, the same lock close() holds, so the stored
       // fd is guaranteed still open here. The caller MUST close the returned fd.
       int dup_fd = static_cast<int>(syscall(SYS_fcntl, r.memfd, F_DUPFD_CLOEXEC, 0));
@@ -586,7 +583,9 @@ int RemoteDriver::reissue_synthetic_kfd_fd() {
     if (marker_fd < 0)
       return -1;
     constexpr size_t kMarkerSize = 4096;
-    if (syscall(SYS_ftruncate, marker_fd, kMarkerSize) == 0) {
+    // PROT_NONE is only a pathname marker; mapping beyond EOF needs no file
+    // growth and remains valid even when RLIMIT_FSIZE is zero.
+    {
       void *marker = reinterpret_cast<void *>(
           syscall(SYS_mmap, nullptr, kMarkerSize, PROT_NONE, MAP_SHARED, marker_fd, 0));
       if (marker != MAP_FAILED) {
@@ -1298,9 +1297,6 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
     auto *va = reinterpret_cast<void *>(va_addr);
     auto length = static_cast<size_t>(size);
 
-    [[maybe_unused]] auto ft_rc = ftruncate(memfd, static_cast<off_t>(length));
-    fallocate(memfd, 0, 0, static_cast<off_t>(length));
-
     constexpr size_t page_size = 4096;
     size_t num_pages = (length + page_size - 1) / page_size;
     std::vector<uint8_t> resident(num_pages);
@@ -1345,7 +1341,7 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
     if (num_fds > 0 && received_fds[0] >= 0) {
       uint64_t size = 0;
       struct stat st {};
-      if (fstat(received_fds[0], &st) == 0)
+      if (memory_backing::stat(received_fds[0], &st) == 0)
         size = static_cast<uint64_t>(st.st_size);
       register_allocation(import_args->handle, import_args->va_addr, size, received_fds[0]);
     }
@@ -1415,7 +1411,8 @@ void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t o
       mapping_memfd = it->second;
   }
   if (mapping_memfd >= 0) {
-    [[maybe_unused]] auto ft_rc2 = ftruncate(mapping_memfd, static_cast<off_t>(length));
+    if (memory_backing::ensure_size(mapping_memfd, length) != 0)
+      return MAP_FAILED;
 
     // Pre-copy committed pages (code objects) from the existing anonymous
     // reservation into the memfd before MAP_FIXED replaces them. Uses a temp
