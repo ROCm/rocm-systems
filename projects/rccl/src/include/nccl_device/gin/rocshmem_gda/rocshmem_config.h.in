@@ -1,0 +1,45 @@
+/******************************************************************************
+ * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * SPDX-License-Identifier: MIT
+ *****************************************************************************/
+
+/*
+ * rccl-owned rocshmem_config.h for the GIN rocshmem-GDA device path.
+ *
+ * The copied rocSHMEM GDA QueuePair headers include "rocshmem/rocshmem_config.h".
+ * Historically rccl copied that header from a rocSHMEM *build*, which tied rccl's
+ * GIN build to running rocSHMEM's CMake. This template lets rccl generate the
+ * header itself (configure_file from projects/rccl/src/CMakeLists.txt), so the
+ * GIN header path needs no rocSHMEM build.
+ *
+ * Only the macros the GIN headers actually consult are emitted. Everything else
+ * in rocSHMEM's full config (USE_GDA/USE_SDMA/USE_IPC/USE_RO, the HAVE_* probes,
+ * BUILD_DEBUG_TRACE_*, the version/vendor strings) is unused by the copied GIN
+ * host+device headers and intentionally omitted.
+ *
+ * Fixed by rccl's design, not discovered at build time:
+ *   - GDA_IONIC/GDA_BNXT/GDA_MLX5: rccl builds all three providers.
+ *   - GDA_MUX: multi-provider runtime dispatch. INVARIANT: GDA_MUX must be ON
+ *     whenever more than one provider is enabled — queue_pair_provider.hpp's
+ *     #elif chain otherwise silently aliases QueuePair to the first-listed
+ *     provider (IONIC>BNXT>MLX5), which is wrong on the other NICs. rccl always
+ *     builds all three, so GDA_MUX is always ON here.
+ *   - USE_CONSTMEM: OFF — the GIN device dispatch reads the provider from the
+ *     QueuePair instance, not __constant__ constmem (see queue_pair_mux.hpp).
+ *   - BUILD_DEBUG_DEVICE / USE_FUNC_CALL: OFF — device debug prints / noinline
+ *     toggles, perf/debug only.
+ */
+
+#ifndef RCCL_GIN_ROCSHMEM_CONFIG_H_
+#define RCCL_GIN_ROCSHMEM_CONFIG_H_
+
+#cmakedefine GDA_IONIC
+#cmakedefine GDA_BNXT
+#cmakedefine GDA_MLX5
+#cmakedefine GDA_MUX
+#cmakedefine USE_CONSTMEM
+#cmakedefine BUILD_DEBUG_DEVICE
+#cmakedefine USE_FUNC_CALL
+
+#endif  // RCCL_GIN_ROCSHMEM_CONFIG_H_

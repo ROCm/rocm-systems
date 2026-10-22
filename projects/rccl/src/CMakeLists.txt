@@ -1138,36 +1138,38 @@ if (ENABLE_ROCSHMEM_GIN)
   add_custom_target(copy_rocshmem_headers)
   add_dependencies(rccl copy_rocshmem_headers)
 
-  if (ROCSHMEM_INCLUDE_DIR)
-    # Copy rocSHMEM public include headers (primarily rocshmem_config.h) into RCCL.
-    set(ROCSHMEM_INCLUDE_HEADERS rocshmem/rocshmem_config.h)
-    copy_files(
-      ROCSHMEM_INCLUDE_HEADERS
-      "${ROCSHMEM_INCLUDE_DIR}"
-      "${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda"
-      GIN_GDA_ROCSHMEM_INCLUDE_HEADERS
-    )
-    # Turn USE_CONSTMEM OFF in rccl's copy of the config: the GIN QueuePair device
-    # path reads the provider from the QueuePair instance, not __constant__ constmem,
-    # so a consumer kernel that includes these headers inherits no device global.
-    # rocSHMEM's own build keeps USE_CONSTMEM ON; only this copied config differs.
-    set(_rccl_rocshmem_config "${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda/rocshmem/rocshmem_config.h")
-    set(_use_constmem_stamp "${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda/rocshmem/.use_constmem_off.stamp")
-    add_custom_command(
-      OUTPUT "${_use_constmem_stamp}"
-      COMMAND sed -i "s|^#define USE_CONSTMEM\\b|/* USE_CONSTMEM disabled for the rccl GIN device path (provider is per-QP) */|" "${_rccl_rocshmem_config}"
-      COMMAND ${CMAKE_COMMAND} -E touch "${_use_constmem_stamp}"
-      DEPENDS ${GIN_GDA_ROCSHMEM_INCLUDE_HEADERS}
-      COMMENT "Disabling USE_CONSTMEM in rccl's copied rocshmem_config.h"
-      VERBATIM)
-    add_custom_target(copy_rocshmem_include_headers
-      DEPENDS ${GIN_GDA_ROCSHMEM_INCLUDE_HEADERS} "${_use_constmem_stamp}")
-    # Ensure rocSHMEM is fully built/installed before copying installed headers
-    if (TARGET rocshmem_ext)
-      add_dependencies(copy_rocshmem_include_headers rocshmem_ext)
+  # rccl owns the rocshmem_config.h the copied GIN QueuePair headers include,
+  # generated from projects/rccl/src/include/nccl_device/gin/rocshmem_gda/
+  # rocshmem_config.h.in. This decouples the GIN header path from a rocSHMEM
+  # *build* — only the macros the GIN host+device headers actually consult are
+  # emitted. The GDA provider set and GDA_MUX are fixed by rccl's design (all
+  # three providers, runtime mux); USE_CONSTMEM is OFF (GIN reads the provider
+  # from the QueuePair instance); BUILD_DEBUG_DEVICE / USE_FUNC_CALL stay OFF.
+  set(GDA_IONIC ON)
+  set(GDA_BNXT  ON)
+  set(GDA_MLX5  ON)
+  # GDA_MUX must be ON whenever >1 provider is enabled (else queue_pair_provider.hpp
+  # silently aliases QueuePair to the first-listed provider). Derive it so the
+  # invariant holds if the provider set ever changes.
+  set(_gda_provider_count 0)
+  foreach(_p GDA_IONIC GDA_BNXT GDA_MLX5)
+    if(${_p})
+      math(EXPR _gda_provider_count "${_gda_provider_count} + 1")
     endif()
-    add_dependencies(copy_rocshmem_headers copy_rocshmem_include_headers)
+  endforeach()
+  if(_gda_provider_count GREATER 1)
+    set(GDA_MUX ON)
+  else()
+    set(GDA_MUX OFF)
   endif()
+  # USE_CONSTMEM / BUILD_DEBUG_DEVICE / USE_FUNC_CALL intentionally left unset.
+  configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/nccl_device/gin/rocshmem_gda/rocshmem_config.h.in"
+    "${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda/rocshmem/rocshmem_config.h"
+    @ONLY)
+  add_custom_target(copy_rocshmem_include_headers
+    DEPENDS "${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda/rocshmem/rocshmem_config.h")
+  add_dependencies(copy_rocshmem_headers copy_rocshmem_include_headers)
 
   if (ROCSHMEM_SOURCE_DIR)
     # Copy rocSHMEM QueuePair device headers into RCCL
