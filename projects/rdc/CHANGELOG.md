@@ -24,7 +24,6 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
   - `rdci link` now prints an error and exits with a nonzero status when it cannot get the link status, instead of printing nothing and exiting with 0.
 
 - The `RDC_FI_GPU_MEMORY_CUR_BANDWIDTH` fix for zero readings under DMA or copy-only memory traffic is now included.
-  - The ROCm 10.1.0 release notes listed this fix, but ROCm 10.1.0 does not include it.
 
 - `rdci topo` and `rdc_device_topology_get()` now report the links of the requested GPU. They reported links between other GPU pairs, which showed the wrong link types on systems where GPU pairs are not all linked the same way, such as XGMI hives joined by PCIe.
   - `rdci topo` now exits with an error code when the GPU index is out of range or the topology query fails, instead of exiting 0, and `rdc_device_topology_get()` reports link types RDC does not define as `RDC_IOLINK_TYPE_UNDEFINED`.
