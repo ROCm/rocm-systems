@@ -45,7 +45,6 @@
 #include <gda/queue_pair_provider.hpp>
 #include "gin/gin_rocshmem_gda_debug_ibv.h"
 #include <gda/gda_enums.hpp>
-#include <envvar.hpp>
 #include <bit.hpp>
 #include <util.hpp>
 #include <constants.hpp>
@@ -189,7 +188,20 @@ struct rocshmem_gin_qp_set {
   uint64_t fetch_atomic_dummy;
   struct ibv_mr* fetch_atomic_dummy_mr = nullptr;
 
-  uint32_t sq_size = envvar::gda::sq_size;
+  // SQ depth (max_send_wr; also sizes the CQ at 2x). Fixed like the other GIN
+  // backends — no env var. Matches GDAKI's send QP depth, which is
+  //   2 * NET_IB_MAX_REQUESTS = 2 * (NCCL_NET_MAX_REQUESTS * NCCL_NET_IB_MAX_RECVS)
+  //   = 2 * (32 * 8) = 512
+  // (net_ib connect.cc maxSendWorkRequest). The 2x covers the two messages a
+  // send uses (RDMA Write + RDMA Write-with-Immediate). Value inlined because
+  // NET_IB_MAX_REQUESTS lives in net_ib-internal headers not included here.
+  //
+  // Must be a power of two: the provider QP device logic indexes the SQ ring
+  // with a bitmask (mlx5 `wqe_idx & sq.depth_mask`, ionic `pos & sq.mask`), so a
+  // non-power-of-two depth would corrupt wraparound.
+  static constexpr uint32_t kSqSize = 512;
+  static_assert((kSqSize & (kSqSize - 1)) == 0, "GIN GDA SQ size must be a power of two (ring index uses a bitmask)");
+  uint32_t sq_size = kSqSize;
   uint8_t traffic_class = 0;
 };
 
@@ -1121,10 +1133,6 @@ int rocshmem_gin_qp_set::initialize_host_gpu_qp(QueuePair* host_gpu_qp, int idx)
 int rocshmem_gin_create_qps(int nRanks, int myRank, int (*allgather)(void* ctx, void* buf, size_t size),
                             void* allgather_ctx, int traffic_class, const char* preferred_nic_name,
                             rocshmem_gin_qp_set_t* out_qp_set, void*** out_gpu_qps) {
-  // Note: log_pe_number and device-side logd_constants must be initialized
-  // by the consumer binary (e.g. rccl-tests) which links rocshmem's device
-  // bitcode and can resolve HIP_SYMBOL(logd_constants).
-
   auto* set = new rocshmem_gin_qp_set();
   set->nRanks = nRanks;
   set->myRank = myRank;
