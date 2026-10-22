@@ -172,14 +172,16 @@ void compare(const std::vector<const Observation *> &first,
   result.cross_wave_lane_pairs += first_lanes * second_lanes;
   if (second.empty())
     return;
-  for (const Observation *a : first) {
+  for (const Observation *first_observation : first) {
     if (result.cross_wave_examples.size() >= examples)
       break;
-    for (const Observation *b : second) {
+    for (const Observation *second_observation : second) {
       if (result.cross_wave_examples.size() >= examples)
         break;
-      result.cross_wave_examples.push_back({LdsRaceFindingKind::CrossWave, a->participant,
-                                            b->participant, uint64_t{a->lanes()} * b->lanes()});
+      result.cross_wave_examples.push_back(
+          {LdsRaceFindingKind::CrossWave, first_observation->participant,
+           second_observation->participant,
+           uint64_t{first_observation->lanes()} * second_observation->lanes()});
     }
   }
 }
