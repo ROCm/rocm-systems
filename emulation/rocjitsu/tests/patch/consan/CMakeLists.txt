@@ -411,7 +411,7 @@ if(RJ_BUILD_CONSAN_ANALYZER AND TARGET consan_hsa_runner)
                 PROPERTIES
                     LABELS "consan;physical-gpu"
                     SKIP_RETURN_CODE 77
-                    RESOURCE_LOCK consan-gfx1100
+                    RESOURCE_LOCK consan-${gpu}
             )
         endif()
     endfunction()
@@ -451,31 +451,25 @@ if(RJ_BUILD_CONSAN_ANALYZER AND TARGET consan_hsa_runner)
                 consan_add_target_e2e(Sim ${_gpu} ${_wave} assembly ${_barrier} ${_threads} production)
             endforeach()
         endif()
-        if(_gpu STREQUAL "gfx1100")
-            foreach(
-                _barrier
-                IN
-                ITEMS
-                    batch-barrier-and
-                    batch-barrier-or
-                    late-barrier-and
-                    late-barrier-or
-            )
-                consan_add_target_e2e(Physical ${_gpu} ${_wave} ${_kind} ${_barrier} ${_threads} production)
-            endforeach()
-        endif()
+        foreach(
+            _barrier
+            IN
+            ITEMS
+                batch-barrier-and
+                batch-barrier-or
+                late-barrier-and
+                late-barrier-or
+        )
+            consan_add_target_e2e(Physical ${_gpu} ${_wave} ${_kind} ${_barrier} ${_threads} production)
+        endforeach()
         foreach(_scenario IN ITEMS race disjoint read_read)
             consan_add_target_e2e(Sim ${_gpu} ${_wave} ${_kind} ${_scenario} ${_threads} testable)
-            if(_gpu STREQUAL "gfx1100")
-                consan_add_target_e2e(Physical ${_gpu} ${_wave} ${_kind} ${_scenario} ${_threads} testable)
-            endif()
+            consan_add_target_e2e(Physical ${_gpu} ${_wave} ${_kind} ${_scenario} ${_threads} testable)
         endforeach()
-        if(_gpu STREQUAL "gfx1100")
-            consan_add_target_e2e(Physical ${_gpu} ${_wave} ${_kind} disjoint ${_threads} production)
-            consan_add_target_e2e(Physical ${_gpu} ${_wave} assembly high_lane ${_threads} testable)
-            math(EXPR _threads "3 * ${_wave} + 1")
-            consan_add_target_e2e(Physical ${_gpu} ${_wave} hip partial ${_threads} testable)
-        endif()
+        consan_add_target_e2e(Physical ${_gpu} ${_wave} ${_kind} disjoint ${_threads} production)
+        consan_add_target_e2e(Physical ${_gpu} ${_wave} assembly high_lane ${_threads} testable)
+        math(EXPR _threads "3 * ${_wave} + 1")
+        consan_add_target_e2e(Physical ${_gpu} ${_wave} ${_kind} partial ${_threads} testable)
     endforeach()
 endif()
 
