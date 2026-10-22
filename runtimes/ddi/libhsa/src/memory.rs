@@ -821,9 +821,12 @@ pub(crate) fn signal_batch_pool(
     let uncached =
         kind == GPU_POOL_EXTENDED && gpu.info.gfx_major == 9 && matches!(gpu.info.gfx_minor, 4 | 5);
     let coarse = kind == GPU_POOL_COARSE && gpu.info.gfx_major == 12 && gpu.info.gfx_minor >= 5;
-    let host_atomic_link = gpu.endpoint.memory_link_from_host().is_some_and(|link| {
-        link.kind == MemoryLinkType::Xgmi && link.coherent_support && link.atomic_support_64bit
-    });
+    let host_atomic_link = runtime
+        .topology
+        .route_from_host(&gpu.endpoint)
+        .is_some_and(|link| {
+            link.kind == MemoryLinkType::Xgmi && link.coherent_support && link.atomic_support_64bit
+        });
     (gpu_pool_host_visible(runtime, index) && (uncached || coarse)).then_some(
         SignalBatchPool::Device {
             index,
@@ -837,9 +840,9 @@ fn gpu_pcie_dmabuf_supported(runtime: &HsaState, index: usize) -> bool {
     // Full VRAM visibility supplies a large BAR. A CPU-to-GPU XGMI link is
     // the other route that can satisfy a requested PCIe DMA-BUF mapping.
     gpu_pool_host_visible(runtime, index)
-        || runtime.gpus[index]
-            .endpoint
-            .memory_link_from_host()
+        || runtime
+            .topology
+            .route_from_host(&runtime.gpus[index].endpoint)
             .is_some_and(|link| link.kind == MemoryLinkType::Xgmi)
 }
 
@@ -866,21 +869,39 @@ fn agent_pool_relationship(
     let link = if same {
         None
     } else if agent.handle == CPU_AGENT {
-        owner_gpu.and_then(|index| runtime.gpus[index].endpoint.memory_link_from_host())
+        owner_gpu.and_then(|index| {
+            runtime
+                .topology
+                .route_from_host(&runtime.gpus[index].endpoint)
+        })
     } else if let Some(requester) = requester_gpu {
         if matches!(storage, PoolStorage::System) {
-            runtime.gpus[requester].endpoint.memory_link_to_host()
+            runtime
+                .topology
+                .route_to_host(&runtime.gpus[requester].endpoint)
         } else {
             owner_gpu.and_then(|owner| {
-                runtime.gpus[requester]
-                    .endpoint
-                    .memory_link_to(&runtime.gpus[owner].endpoint)
+                runtime.topology.route_between(
+                    &runtime.gpus[requester].endpoint,
+                    &runtime.gpus[owner].endpoint,
+                )
             })
         }
     } else {
         None
     };
-    let linked = same || link.is_some_and(|link| link.hop_count() != 0);
+    let linked = same
+        || match (requester_gpu, owner_gpu) {
+            (Some(requester), Some(owner))
+                if matches!(storage, PoolStorage::LocalCoarse | PoolStorage::LocalFine) =>
+            {
+                runtime.session.can_access_local_memory(
+                    &runtime.gpus[requester].endpoint,
+                    &runtime.gpus[owner].endpoint,
+                )
+            }
+            _ => link.is_some_and(|link| link.hop_count() != 0),
+        };
     let cpu_cannot_access_local = agent.handle == CPU_AGENT
         && owner_gpu.is_some_and(|index| !gpu_pool_host_visible(runtime, index))
         && matches!(storage, PoolStorage::LocalCoarse | PoolStorage::LocalFine);
