@@ -1,45 +1,18 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-//! Owned GPU native events and KFD signal-page preparation.
+//! Public GPU native events over the shared KFD signal-page service.
 
 use crate::generated::amdf::*;
-use crate::instance::{self, Device, EventPageState};
+use crate::instance::{self, Device};
 use crate::support::*;
-use rocddi::device::gpu::event::linux::{
-    self, SignalEvent, SignalEventPage, lock_process_signal_event_page,
-};
-use rocddi::memory::device::{DeviceAccess, MemoryKind};
+use rocddi::device::gpu::event::linux::{SignalEvent, SignalEventAddressing};
 use rocddi::memory::storage::Owned;
 
 struct Event {
     native: SignalEvent,
     device: *mut Device,
     info: amdf_gpu_event_info_t,
-}
-
-unsafe fn prepare_page(device: &Device) -> Result<EventPageState, u64> {
-    // SAFETY: A live device borrows its endpoint and instance.
-    let instance = unsafe { instance::device_instance(device) };
-    let page_size = instance.host_page_size;
-    let length = 32_768_u64.div_ceil(page_size) * page_size;
-    let allocation = device
-        .native
-        .allocate(
-            MemoryKind::System,
-            length,
-            page_size,
-            DeviceAccess::READ | DeviceAccess::WRITE,
-        )
-        .map_err(|error| device.native_error_status(&error))?;
-    let address = allocation.info().device_address;
-    let host_address = allocation.info().host_address.ok_or(UNSUPPORTED)?;
-    Ok(EventPageState {
-        page: SignalEventPage::new(allocation),
-        endpoint_id: device.native.endpoint().id,
-        address,
-        host_address,
-    })
 }
 
 pub(crate) unsafe extern "C" fn create(
@@ -58,62 +31,16 @@ pub(crate) unsafe extern "C" fn create(
         if !instance.process_lifetime || instance.process_id != std::process::id() {
             return Err(UNSUPPORTED);
         }
-        let gpu = device
-            .native
-            .gpu()
-            .map_err(|error| device.native_error_status(&error))?;
         let reset_epoch = device.current_reset_epoch();
-        let slot = Owned::<Event>::try_new_uninit().map_err(|_| EXHAUSTED)?;
+        let slot = instance.owner_slot::<Event>()?;
         register(&device.events)?;
         let result = (|| {
-            let mut process = lock_process_signal_event_page().map_err(|_| INTERNAL)?;
-            let mut guard = instance.event_page.lock().map_err(|_| INTERNAL)?;
-            let endpoint_id = device.native.endpoint().id;
-            let (event, address) = if let Some(address) = process.device_address(endpoint_id) {
-                (linux::create_signal_event(gpu, None), address)
-            } else if process.host_address().is_some() {
-                return Err(UNSUPPORTED);
-            } else {
-                if guard.as_ref().is_some_and(|state| {
-                    state.endpoint_id != endpoint_id && !state.page.was_offered()
-                }) {
-                    // No native call could have installed the old candidate.
-                    *guard = None;
-                }
-                if guard.is_none() {
-                    *guard = Some(prepare_page(device)?);
-                }
-                let state = guard.as_mut().ok_or(INTERNAL)?;
-                if state.endpoint_id != endpoint_id {
-                    return Err(UNSUPPORTED);
-                }
-                let mut mappings = Vec::new();
-                mappings.try_reserve_exact(1).map_err(|_| EXHAUSTED)?;
-                mappings.push((endpoint_id, state.address));
-                let first = linux::create_signal_event(gpu, Some(&mut state.page));
-                let offered = state.page.was_offered();
-                if offered {
-                    process
-                        .record_offer(state.host_address, mappings)
-                        .map_err(|error| device.native_error_status(&error))?;
-                }
-                let event = match first {
-                    Err(_) if offered && !process.is_confirmed() => {
-                        linux::create_signal_event(gpu, None)
-                    }
-                    result => result,
-                };
-                (event, state.address)
-            };
-            let event = event.map_err(|error| device.native_error_status(&error))?;
-            if process.host_address().is_none() {
-                return Err(INTERNAL);
-            }
-            process.confirm();
-            let mailbox = address
-                .checked_add(u64::from(event.info().event_page_slot_index) * 8)
-                .ok_or(RANGE)?;
-            Ok((event, mailbox))
+            instance
+                .event_service
+                .lock()
+                .map_err(|_| INTERNAL)?
+                .create(&device.native, &[], SignalEventAddressing::Mapped)
+                .map_err(|error| device.native_error_status(&error))
         })();
         let (mut event, mailbox) = match result {
             Ok(value) => value,
@@ -134,7 +61,7 @@ pub(crate) unsafe extern "C" fn create(
                 format: AMDF_GPU_EVENT_FORMAT_KFD_SIGNAL,
                 format_version: 1,
                 publication_modes: AMDF_QUEUE_PUBLICATION_MODE_USER,
-                mailbox_address: mailbox,
+                mailbox_address: mailbox.device,
                 trigger_data: event.info().kfd_event_id,
                 interrupt_context: event.info().kfd_event_id,
                 ..Default::default()

@@ -1148,16 +1148,18 @@ def _lower_dst_write(
     """Lower a destination operand write."""
     idx = _get_operand_index(lhs_node)
     # Lower clamp(omod(minmax(...))) directly on destination bits, avoiding a
-    # conversion to host float and back. These forms only exist on targets
-    # without SDWA, so bypassing SDWA's F16 output modifiers is safe here.
+    # conversion to host float and back. Legacy vector F16 selection leaves
+    # SDWA output modifiers to the store; scalar and *_NUM forms have no SDWA.
     selection_node, output_fields = _unwrap_output_modifiers(rhs_node)
     writes_bits = _is_float_minmax(selection_node)
     if writes_bits:
-        _, rhs = _float_minmax_selection(
-            selection_node,
-            ctx,
-            output_fields if selection_node is not rhs_node else None,
-        )
+        fields = output_fields if selection_node is not rhs_node else None
+        if ctx.exec_model == ExecModel.VECTOR and selection_node.call_name in (
+            f'{FLOAT_MINMAX_CALL}legacy_min',
+            f'{FLOAT_MINMAX_CALL}legacy_max',
+        ):
+            _require_sdwa_rounded_store(selection_node, ctx, fields)
+        _, rhs = _float_minmax_selection(selection_node, ctx, fields)
         needs_bitcast = 0
     elif _is_vector_fract(selection_node, ctx):
         writes_bits = True
@@ -1819,8 +1821,10 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     ' return std::numeric_limits<decltype(a)>::quiet_NaN();'
     ' auto ab = (a == b) ? (std::signbit(a) ? b : a) : (a > b ? a : b);'
     ' return (ab == c) ? (std::signbit(ab) ? c : ab) : (ab > c ? ab : c); }}()',
-    'maxmin': 'std::fmin(std::fmax({0}, {1}), {2})',
-    'minmax': 'std::fmax(std::fmin({0}, {1}), {2})',
+    'maxmin_f': 'std::fmin(std::fmax({0}, {1}), {2})',
+    'minmax_f': 'std::fmax(std::fmin({0}, {1}), {2})',
+    'maxmin_i': 'std::min(std::max({0}, {1}), {2})',
+    'minmax_i': 'std::max(std::min({0}, {1}), {2})',
     'maxmin_num': 'std::fmin(std::fmax({0}, {1}), {2})',
     'minmax_num': 'std::fmax(std::fmin({0}, {1}), {2})',
     'maximumminimum': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
@@ -2134,7 +2138,7 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
             inline_op.template if isinstance(inline_op, InlineBinaryOp) else inline_op
         )
         return template.format(args[0], args[1])
-    if callee in ('min3', 'max3', 'med3'):
+    if callee in ('min3', 'max3', 'med3', 'maxmin', 'minmax'):
         suffix = '_f' if node.ty and node.ty.base == 'F' else '_i'
         return _INLINE_TERNARY_OPS[callee + suffix].format(args[0], args[1], args[2])
     if len(args) == 3 and callee in _INLINE_TERNARY_OPS:
