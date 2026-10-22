@@ -510,6 +510,7 @@ add_executable(
     scalar_scc_test.cpp
     vskip_test.cpp
     isa_diagnostics_test.cpp
+    clocked_issue_cycle_test.cpp
     cdna3_predicate_mask_test.cpp
     scoped_temp_test.cpp
     wave_debug_test.cpp
