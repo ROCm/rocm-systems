@@ -28,7 +28,7 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@488e66e7c2220df926c2762e9b97a50becfb4239 # 2026-10-21
+    uses: amontoison/TheRock/.github/workflows/setup_multi_arch.yml@a71b0b0b8aa99ca338eda2e18c312e5e5278713d # TEST ONLY: ROCm/TheRock#9446 on top of 488e66e7
     with:
       build_variant: "asan"
       # Python/PyTorch/JAX builds are not supported with ASAN yet
@@ -36,8 +36,8 @@ jobs:
       build_pytorch: false
       build_jax: false
       linux_amdgpu_families: "gfx94X,gfx950,gfx125X"
-      repository: ROCm/TheRock
-      ref: 488e66e7c2220df926c2762e9b97a50becfb4239 # 2026-10-21
+      repository: amontoison/TheRock
+      ref: a71b0b0b8aa99ca338eda2e18c312e5e5278713d # TEST ONLY: ROCm/TheRock#9446 on top of 488e66e7
       # event_name tells TheRock's skip filter this is a scheduled run with no
       # meaningful diff, so it always runs CI instead of trying to diff files.
       external_repo: >-
@@ -71,7 +71,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@488e66e7c2220df926c2762e9b97a50becfb4239 # 2026-10-21
+    uses: amontoison/TheRock/.github/workflows/multi_arch_ci_linux.yml@a71b0b0b8aa99ca338eda2e18c312e5e5278713d # TEST ONLY: ROCm/TheRock#9446 on top of 488e66e7
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
@@ -80,8 +80,8 @@ jobs:
       rocm_rpm_package_version: ${{ needs.setup.outputs.rocm_rpm_package_version }}
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
-      repository: ROCm/TheRock
-      ref: 488e66e7c2220df926c2762e9b97a50becfb4239 # 2026-10-21
+      repository: amontoison/TheRock
+      ref: a71b0b0b8aa99ca338eda2e18c312e5e5278713d # TEST ONLY: ROCm/TheRock#9446 on top of 488e66e7
     permissions:
       contents: read
       id-token: write
@@ -97,8 +97,8 @@ jobs:
       - name: Checkout TheRock repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: "ROCm/TheRock"
-          ref: 488e66e7c2220df926c2762e9b97a50becfb4239 # 2026-10-21
+          repository: "amontoison/TheRock"
+          ref: a71b0b0b8aa99ca338eda2e18c312e5e5278713d # TEST ONLY: ROCm/TheRock#9446 on top of 488e66e7
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
