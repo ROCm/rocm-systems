@@ -979,7 +979,7 @@ unsafe fn create_hardware_queue(
             0,
         )
     } else {
-        (size, callback, data, private_segment_size)
+        (size.max(64), callback, data, private_segment_size)
     };
     let Some(ring_size_bytes) = u64::from(size).checked_mul(AQL_PACKET_BYTES as u64) else {
         return INVALID_QUEUE_CREATION;
@@ -1545,8 +1545,9 @@ pub unsafe extern "C" fn hsa_queue_create(
                     runtime.prepare_log(
                         AMD_LOG_FLAG_INFO,
                         format_args!(
-                            "created AQL queue id={id} agent=0x{:x} address=0x{public:x} packets={size}",
-                            agent.handle
+                            "created AQL queue id={id} agent=0x{:x} address=0x{public:x} packets={}",
+                            agent.handle,
+                            size.max(64)
                         ),
                     )
                 })

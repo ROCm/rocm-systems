@@ -404,6 +404,12 @@ pub(crate) enum GpuDriverRef<'a> {
 
 /// Routes GPU-only operations through a checked GPU driver projection.
 impl GpuDriverRef<'_> {
+    pub(crate) fn xnack_enabled(&self) -> Result<bool, Error> {
+        match self {
+            Self::LinuxKfd { driver, state } => driver.xnack_enabled(state),
+        }
+    }
+
     pub(crate) fn supports_expert_scheduling(&self) -> Result<bool, Error> {
         match self {
             Self::LinuxKfd { driver, state } => driver.supports_expert_scheduling(state),
