@@ -895,7 +895,7 @@ TEST_F(NetIbP2pMicrotest, Test_NoCompletionsReturnsNotDoneWithoutSpinning) {
 
   EXPECT_EQ(NetIbP2pTest(&request, &done, nullptr), ncclSuccess);
   EXPECT_EQ(done, 0);
-  EXPECT_TRUE(g_ibvCompletions.empty());
+  EXPECT_EQ(g_ibvPolledCqs, std::vector<ibv_cq*>{&verbs.cq});
 }
 
 TEST_F(NetIbP2pMicrotest, Test_PollFailureMarksRequestConnectionAndDeviceFatal) {
