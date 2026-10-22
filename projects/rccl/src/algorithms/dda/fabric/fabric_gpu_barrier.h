@@ -158,6 +158,55 @@ public:
     __syncthreads();
   }
 
+  // Epoch flags of the peer-major push alltoall (own region; the toggle flags are untouched): a post stores a growing
+  // value and never waits, a wait polls for at least a value, so every wave can poll one slot. A block's launch uses
+  // epoch .. epoch + pieces + 1 (entry posts epoch, piece p posts epoch + 2 + p); epoch is the block's cell, advanced by
+  // epochEnd, so it survives CUDA graph replays. Scratch accesses are system-scope: no fence besides orderDestWrites().
+  __device__ __forceinline__ FlagType epochBegin() const { return epochCell()[blockIdx.x] + 1; }
+  // Must be called by every thread of the block after its last use of the epoch flags.
+  __device__ __forceinline__ void epochEnd(FlagType epoch, unsigned pieces) {
+    __syncthreads();
+    if (threadIdx.x == 0) epochCell()[blockIdx.x] = epoch + pieces + 1;
+  }
+  // Entry handshake: posts epoch to rank `to` and waits for rank `from` to post at least epoch.
+  __device__ __forceinline__ void epochSignalWait(int to, int from, FlagType epoch) {
+    orderDestWrites();
+    __syncthreads();
+    if (threadIdx.x == 0) {
+      __scoped_atomic_store_n(peerFlags_[to] + getEpochFlagIdx(selfRank_, blockIdx.x), epoch, __ATOMIC_RELEASE,
+                              __MEMORY_SCOPE_SYSTEM);
+      const FlagType* flag = epochFlagFrom(from);
+      while (static_cast<int32_t>(__scoped_atomic_load_n(flag, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM) - epoch) < 0) {
+      }
+      __atomic_thread_fence(__ATOMIC_ACQUIRE);
+    }
+    __syncthreads();
+  }
+  // Posts value to rank `to` once every store of the block has completed.
+  __device__ __forceinline__ void epochPost(int to, FlagType value) {
+    orderDestWrites();
+    __syncthreads();
+    if (threadIdx.x == 0) {
+      __scoped_atomic_store_n(peerFlags_[to] + getEpochFlagIdx(selfRank_, blockIdx.x), value, __ATOMIC_RELAXED,
+                              __MEMORY_SCOPE_SYSTEM);
+    }
+  }
+  // Piece `piece` of a launch is posted as epoch + 2 + piece. Every thread calls epochWaitPiece and polls the slot
+  // itself (`ready` is epochFlagFrom(source)), so a wave continues as soon as the piece is there, with no block-wide sync.
+  __device__ __forceinline__ void epochPostPiece(int to, FlagType epoch, unsigned piece) {
+    epochPost(to, epoch + 2 + piece);
+  }
+  __device__ __forceinline__ void epochWaitPiece(const FlagType* ready, FlagType epoch, unsigned piece) {
+    const FlagType want = epoch + 2 + piece;
+    while (static_cast<int32_t>(__scoped_atomic_load_n(ready, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM) - want) < 0) {
+    }
+    __atomic_signal_fence(__ATOMIC_SEQ_CST);
+  }
+  // The slot rank `from` posts to from this block index, in this rank's buffer. Every wave polls it.
+  __device__ __forceinline__ const FlagType* epochFlagFrom(int from) const {
+    return peerFlags_[selfRank_] + getEpochFlagIdx(from, blockIdx.x);
+  }
+
 private:
   int nBlocks_{-1};
   int selfRank_{-1};
@@ -172,6 +221,14 @@ private:
 
   __device__ inline int getFlagIdx(int rank, int block) {
     return block * nRanks_ + rank;
+  }
+
+  // Buffer layout: [0, n * b) toggle flags, [n * b, 2 * n * b) epoch flags, then b epoch cells (n ranks, b blocks).
+  __device__ inline int getEpochFlagIdx(int rank, int block) const {
+    return nBlocks_ * nRanks_ + block * nRanks_ + rank;
+  }
+  __device__ inline FlagType* epochCell() const {
+    return peerFlags_[selfRank_] + 2 * nBlocks_ * nRanks_;
   }
 };
 
