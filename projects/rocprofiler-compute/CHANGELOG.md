@@ -68,16 +68,16 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Operator call trees now show each operator's arguments.
   * `--trace-ml-api triton` does not capture the Triton kernels that `torch.compile` generates. Use `--trace-ml-api torch` for those kernels.
 
-* Renamed the roofline options to start with `--roofline`. The old names still work for now but print a warning, so update your commands:
-  * `--roof-only` → `--roofline`
-  * `--bench-only` → `--roofline-bench-only`
-  * `--device` → `--roofline-device`
-
 * The profile and analyze help is easier to read. Each option shows what value it takes, the values it accepts, and its default.
 
 * Top-level options such as `--list-metrics` can no longer be abbreviated (for example `--list-metr`), matching profile and analyze options.
 
 * `--specs-correction` takes `name:value` pairs separated by spaces, for example `--specs-correction num_xcd:4 cu_per_gpu:64`.
+
+* Renamed the roofline options to start with `--roofline`. The old names still work for now but print a warning, so update your commands:
+  * `--roof-only` → `--roofline`
+  * `--bench-only` → `--roofline-bench-only`
+  * `--device` → `--roofline-device`
 
 ### Removed
 
