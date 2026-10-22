@@ -92,8 +92,6 @@ option description, starting with `Values: `. An argument with a default states
 it at the end of the description as `(Default: value)`.
 
 ```text
---output-format <format>   Specify output format (Default: stdout).
-                            Values: stdout, txt, csv, db.
---list-blocks [arch]       List all available blocks for analysis on specified GPU <arch> (Default: current GPU arch).
-                            Values: gfx908, gfx90a, gfx940, gfx941, gfx942, gfx950, gfx1151
+--option <arg>   Description of the option (Default: value).
+                 Values: <value1>, <value2>, ..., <valueN>
 ```
