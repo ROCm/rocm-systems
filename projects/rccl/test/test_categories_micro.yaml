@@ -118,6 +118,7 @@ test_categories:
       # ce_coll.cc (rccl-UnitTestsMicroCe)
       - "CeCollMicrotest.*"
       - "LaunchPaths/CeAlltoAllvSyncMicrotest.*"
+      - "CeBatchOpsMicrotest.*"
       # graph/rccl_graph_gen.cc
       - "GraphGenPermuteTest.*"
       - "GraphGenIsPrimeTest.*"
