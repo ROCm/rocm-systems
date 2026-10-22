@@ -107,6 +107,8 @@ std::string_view instruction_execution_error_name(InstructionExecutionError erro
   switch (error) {
   case InstructionExecutionError::None:
     return "none";
+  case InstructionExecutionError::InvalidInstructionEncoding:
+    return "invalid instruction encoding";
   case InstructionExecutionError::UnsupportedOperandValue:
     return "unsupported operand value";
   case InstructionExecutionError::UnimplementedInstruction:
@@ -1022,7 +1024,7 @@ void Wavefront::report_undefined_behavior(std::string_view reason) const {
 void ComputeUnitCore::report_static_isa_diagnostics(const Instruction &inst, const Wavefront &wf) {
   const uint64_t flags = inst.flags();
   if (flags & INVALID_MFMA_BROADCAST)
-    report_undefined_behavior(wf, "MFMA broadcast group exceeds the instruction block count");
+    report_undefined_behavior(wf, "invalid MFMA CBSZ/ABID broadcast controls");
   // RDNA3/3.5 skip VOPD in wave64; only diagnose the qualified wave32 execution.
   if ((flags & INVALID_VOPD_OPERANDS) && wf.wf_size() == 32 && wf.exec())
     report_undefined_behavior(wf, "invalid VOPD operand combination");
@@ -1643,6 +1645,29 @@ matrix_coexecution::SharedPool &ComputeUnitCore::async_pool() {
   return *async_pool_;
 }
 
+void ComputeUnitCore::fail_wave_instruction(Wavefront &wf, std::string_view instruction,
+                                            uint64_t pc, InstructionExecutionError error,
+                                            std::string_view failure_detail) {
+  std::string reason(instruction_execution_error_name(error));
+  if (!failure_detail.empty())
+    reason += std::format(" ({})", failure_detail);
+  const std::string failure = std::format("CU {}: wf{} could not execute {} at pc={:#x}: {}",
+                                          this->name(), wf.wf_id(), instruction, pc, reason);
+  util::Logger::warn(failure);
+  if (!wf.fail_pm4_submission()) {
+    // Notify the queue owner without hiding the simulator's failure status.
+    // WaveStateGuard flushes deferred notifications before this step returns,
+    // even after request_exit records the terminal engine result.
+    const bool claimed =
+        execution_failure_handler_ && execution_failure_handler_(wf, /*retain_wave=*/true);
+    if (auto *sim_engine = this->engine())
+      sim_engine->request_exit(failure, /*code=*/1);
+    if (claimed)
+      return;
+  }
+  wf.halt();
+}
+
 void AsyncInstructionWindow::materialize() {
   if (materialized_)
     return;
@@ -1701,6 +1726,24 @@ void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCac
     } while (++issued < async_execution::issue_limit() && storage.window->pending() &&
              !storage.window->stopped() && active->state() == WfState::RUNNING);
     storage.window->drain();
+  } catch (const util::UnimplementedInst &error) {
+    // Helper threads execute the same guest callbacks as the inline path. Join
+    // the remaining jobs before translating an unsupported guest combination
+    // into the wave-owned execution failure used by synchronous execution.
+    if (storage.window)
+      storage.window->abandon();
+    active->report_instruction_execution_error(InstructionExecutionError::UnimplementedInstruction);
+    const std::string instruction =
+        storage.window && !storage.window->failed_mnemonic().empty()
+            ? std::format("asynchronous {}", storage.window->failed_mnemonic())
+            : std::string("asynchronous instruction");
+    const uint64_t failure_pc = storage.window && !storage.window->failed_mnemonic().empty()
+                                    ? storage.window->failed_pc()
+                                    : active->pc;
+    fail_wave_instruction(*active, instruction, failure_pc, active->instruction_execution_error(),
+                          error.what());
+    async_execution::stats.flush();
+    return;
   } catch (...) {
     if (storage.window)
       storage.window->abandon();
@@ -1846,6 +1889,19 @@ template <bool EnableAsync>
   Instruction *inst = decoded.value().get();
   DecodedInstructionCache::ScopedReturn return_decoded(decoded_inst_cache_, decoded.value(),
                                                        active->pc, vmid, words, reuse_decoded);
+  std::string execution_failure_detail;
+  const auto fail_current_instruction = [&]() {
+    return_decoded.discard();
+    if constexpr (EnableAsync) {
+      if (window)
+        window->drain();
+    }
+    fail_wave_instruction(*active, inst->mnemonic(), active->pc,
+                          active->instruction_execution_error(), execution_failure_detail);
+  };
+  // Operand resolution outside execute_instruction() participates in the same
+  // per-instruction failure contract as the generated execution callback.
+  active->clear_instruction_execution_error();
 
   int inst_size_signed = inst->size();
   assert(inst_size_signed > 0 && "instruction size must be positive");
@@ -2043,6 +2099,10 @@ template <bool EnableAsync>
       const Operand *target_operand = inst->src_operand(0);
       assert(target_operand && "indirect PC instruction must have a target operand");
       uint64_t target = RegisterAccess(*active).read_scalar64(*target_operand);
+      if (active->instruction_execution_failed()) [[unlikely]] {
+        fail_current_instruction();
+        return;
+      }
       if (target == 0) {
         active->halt();
         return;
@@ -2055,31 +2115,11 @@ template <bool EnableAsync>
   const bool was_in_trap_handler = active->in_trap_handler();
 
   const uint32_t executing_process = active->process_id();
-  const util::Result execution_result = execute_instruction(inst, *active);
+  const util::Result execution_result =
+      execute_instruction(inst, *active, &execution_failure_detail);
 
   if (execution_result.failed()) [[unlikely]] {
-    return_decoded.discard();
-    if constexpr (EnableAsync) {
-      if (window)
-        window->drain();
-    }
-    const InstructionExecutionError error = active->instruction_execution_error();
-    const std::string failure = std::format("CU {}: wf{} could not execute {} at pc={:#x}: {}",
-                                            this->name(), active->wf_id(), inst->mnemonic(),
-                                            active->pc, instruction_execution_error_name(error));
-    util::Logger::warn(failure);
-    if (!active->fail_pm4_submission()) {
-      // Notify the queue owner without hiding the simulator's failure status.
-      // WaveStateGuard flushes deferred notifications before this step returns,
-      // even after request_exit records the terminal engine result.
-      const bool claimed =
-          execution_failure_handler_ && execution_failure_handler_(*active, /*retain_wave=*/true);
-      if (auto *sim_engine = this->engine())
-        sim_engine->request_exit(failure, /*code=*/1);
-      if (claimed)
-        return;
-    }
-    active->halt();
+    fail_current_instruction();
     return;
   }
 
@@ -2128,6 +2168,7 @@ template <bool EnableAsync>
       return;
     }
     if (tensor_outcome != VmAccessOutcome::Complete) {
+      drain_async_window();
       util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(),
                        " HALT(TensorDmaVmAccess) pc=0x", std::hex, active->pc, std::dec,
                        " vmid=", vmid, " outcome=", static_cast<unsigned>(tensor_outcome));
@@ -2262,6 +2303,9 @@ template <bool EnableAsync>
           request_functional_yield();
           return;
         }
+        // Ordinary memory instructions may overlap independent matrix work.
+        // Join that work before a terminal fault releases the wave's registers.
+        drain_async_window();
         util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(DataVmAccess) pc=0x",
                          std::hex, active->pc, std::dec, " vmid=", vmid,
                          " outcome=", static_cast<unsigned>(memory_outcome));

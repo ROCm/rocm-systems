@@ -49,7 +49,12 @@ util::FailureOr<Format> decode(uint32_t id, BufferFormatEncoding encoding) {
       return Format{{}, Number::Uint};
     if (dfmt >= widths.size() || nfmt > 7 || nfmt == 6)
       return util::Result::failure();
-    return Format{widths[dfmt], nfmt == 7 ? Number::Float : static_cast<Number>(nfmt)};
+    Format format{widths[dfmt], nfmt == 7 ? Number::Float : static_cast<Number>(nfmt)};
+    if (format.number == Number::Float && std::ranges::any_of(format.widths, [](uint32_t width) {
+          return width != 0 && width != 10 && width != 11 && width != 16 && width != 32;
+        }))
+      return util::Result::failure();
+    return format;
   }
   if (encoding == BufferFormatEncoding::Rdna1 || encoding == BufferFormatEncoding::Rdna2) {
     if (id > 77 || (encoding == BufferFormatEncoding::Rdna2 &&

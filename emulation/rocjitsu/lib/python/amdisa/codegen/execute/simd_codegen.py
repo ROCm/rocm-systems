@@ -2269,11 +2269,7 @@ SIMD_VOP3_TERNARY_INT: dict[str, tuple[str, str]] = {
         'uint32_t',
         '[](auto a, auto b, auto c) { return util::perm_b32_simd(a, b, c); }',
     ),
-    # min3/max3/med3 (integer). The scalar body uses std::max/std::min for the
-    # 16/32-bit forms (and the minmax/maxmin scalar bodies use std::fmax/fmin on
-    # *integers* — order-preserving and exactly representable, so the integer
-    # min/max here matches for every input; this is the correct SIMD form, NOT
-    # the std::fmin-on-int pattern flagged in project_pr6470_review_findings).
+    # Integer min/max scalar bodies use signed or unsigned integer comparisons.
     # 32-bit: signed lane type for i32 (signed compare), unsigned for u32.
     # max3 = max(max(a,b),c); min3 = min(min(a,b),c);
     # med3 = max(min(max(a,b),c), min(a,b)).
@@ -2305,12 +2301,22 @@ SIMD_VOP3_TERNARY_INT: dict[str, tuple[str, str]] = {
         ' return util::stdx::max(util::stdx::min(util::stdx::max(a, b), c),'
         ' util::stdx::min(a, b)); }',
     ),
-    # NOTE: integer v_minmax/v_maxmin i32/u32 are intentionally NOT wired. Unlike
-    # min3/max3 (whose scalar uses std::max/std::min), the minmax/maxmin scalar
-    # bodies use std::fmax/std::fmin on *ints* and write the double result back
-    # through a double->uint32 conversion that saturates negatives to 0xFFFFFFFF
-    # (x86 cvttsd2si overflow). That scalar is UB and the integer SIMD min/max
-    # cannot match it — left scalar-authoritative (see project_pr6470 findings).
+    'v_maxmin_i32_vop3': (
+        'int32_t',
+        '[](auto a, auto b, auto c) { return util::stdx::min(util::stdx::max(a, b), c); }',
+    ),
+    'v_minmax_i32_vop3': (
+        'int32_t',
+        '[](auto a, auto b, auto c) { return util::stdx::max(util::stdx::min(a, b), c); }',
+    ),
+    'v_maxmin_u32_vop3': (
+        'uint32_t',
+        '[](auto a, auto b, auto c) { return util::stdx::min(util::stdx::max(a, b), c); }',
+    ),
+    'v_minmax_u32_vop3': (
+        'uint32_t',
+        '[](auto a, auto b, auto c) { return util::stdx::max(util::stdx::min(a, b), c); }',
+    ),
     # 16-bit: the scalar body sign-/zero-extends the low 16 bits, takes the
     # min/max, then truncates to uint16 and zero-extends to uint32. SIMD lane is
     # the raw uint32; i16 sign-extends via (cast<int32> << 16) >> 16 (same

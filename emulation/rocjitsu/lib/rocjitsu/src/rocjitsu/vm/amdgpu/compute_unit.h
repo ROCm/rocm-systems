@@ -30,6 +30,7 @@
 #include "simdojo/components/register_file.h"
 #include "simdojo/components/vector_reg.h"
 #include "util/bit.h"
+#include "util/except.h"
 #include "util/log.h"
 #include "util/result.h"
 
@@ -1209,11 +1210,14 @@ public:
   /// thread or from single-threaded test contexts only.
   /// @param inst The decoded instruction.
   /// @param wf The wavefront executing the instruction.
+  /// @param failure_detail Receives `UnimplementedInst::what()` when that legacy
+  /// exception is translated; otherwise the pointed-to string is unchanged.
   /// @returns Failure for an unimplemented instruction stub or a reported operand
   /// failure. The wavefront retains the reason for caller-owned diagnostics.
   /// Each call clears the previous error; a failed call does not halt the wavefront.
-  /// Validation inside implemented instructions can still raise exceptions.
-  util::Result execute_instruction(Instruction *inst, Wavefront &wf) {
+  /// Other host failures inside implemented instructions still raise exceptions.
+  util::Result execute_instruction(Instruction *inst, Wavefront &wf,
+                                   std::string *failure_detail = nullptr) {
     assert(inst->execute && "instruction execution backend is not linked");
     wf.clear_instruction_execution_error();
     const bool drop_set_vgpr_msb = wf.consume_setreg_vgpr_msb_hazard();
@@ -1221,7 +1225,16 @@ public:
       return util::Result::success();
     check_static_isa_diagnostics(*inst, wf);
     // The decoded instruction already selects its ISA execution callback.
-    inst->execute(*inst, &wf);
+    try {
+      inst->execute(*inst, &wf);
+    } catch (const util::UnimplementedInst &error) {
+      // Some implemented instructions reject particular operand or mode
+      // combinations through the legacy exception path. Treat those guest
+      // encodings like generated unimplemented stubs at the CU boundary.
+      wf.report_instruction_execution_error(InstructionExecutionError::UnimplementedInstruction);
+      if (failure_detail)
+        *failure_detail = error.what();
+    }
     return wf.instruction_execution_failed() ? util::Result::failure() : util::Result::success();
   }
 
@@ -1272,6 +1285,9 @@ protected:
   /// @brief Issue a bounded MMA window and drain it before returning to scheduling.
   void issue_async_instruction(Wavefront *wf, MmaAdmissionCache *admission, uint32_t wave_size,
                                bool has_accvgprs);
+  /// @brief Convert a guest instruction execution failure into wave termination.
+  void fail_wave_instruction(Wavefront &wf, std::string_view instruction, uint64_t pc,
+                             InstructionExecutionError error, std::string_view failure_detail = {});
   struct NoAsyncWindow {};
   /// @brief Share ordinary instruction execution with the optional scoreboard adapter.
   template <bool EnableAsync>
