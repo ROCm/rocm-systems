@@ -188,6 +188,52 @@ TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_ReduceScatter_SizesNBytesAcro
   EXPECT_EQ(kTwoRanks * kCount * kFloatSize, in.nBytes);
 }
 
+// At rank 0 an in-place AllGather also has sendbuff == recvbuff, so only the other ranks pin the rank offset.
+TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_AllGatherSendingFromItsOwnSlice_IsInPlaceAtEveryRank) {
+  for (int rank = 0; rank < kRanks; ++rank) {
+    TaskPrepScene scene(kRanks, rank);
+    struct ncclRawTask* raw = scene.NewColl(ncclFuncAllGather);
+    raw->coll.sendbuff = static_cast<char*>(raw->coll.recvbuff) + rank * kCollSendBytes;
+    ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
+
+    ASSERT_EQ(ncclSuccess, fillCollTuningInput(scene.comm(), &raw->coll, &in));
+
+    EXPECT_EQ(1, in.inPlace) << "rank " << rank;
+  }
+}
+
+// Slice 0 is the start of recvbuff: a bare sendbuff == recvbuff check would call rank 2 in place there.
+TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_AllGatherNotSendingFromItsOwnSlice_IsNotInPlace) {
+  constexpr int kRank = 2;
+  constexpr int kSeparateSendBuffer = -1;
+  for (int sendSlice : {kSeparateSendBuffer, 0, 1, 3}) {
+    TaskPrepScene scene(kRanks, kRank);
+    struct ncclRawTask* raw = scene.NewColl(ncclFuncAllGather);
+    if (sendSlice != kSeparateSendBuffer) {
+      raw->coll.sendbuff = static_cast<char*>(raw->coll.recvbuff) + sendSlice * kCollSendBytes;
+    }
+    ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
+
+    ASSERT_EQ(ncclSuccess, fillCollTuningInput(scene.comm(), &raw->coll, &in));
+
+    EXPECT_EQ(0, in.inPlace) << "send slice " << sendSlice;
+  }
+}
+
+// At rank 0 an aliased buffer also matches the AllGather layout, so only the func check keeps these at 0.
+TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_InPlaceCollOtherThanAllGather_IsNotInPlace) {
+  for (ncclFunc_t func : {ncclFuncBroadcast, ncclFuncReduce, ncclFuncAllReduce, ncclFuncReduceScatter}) {
+    TaskPrepScene scene(kRanks, 0);
+    struct ncclRawTask* raw = scene.NewColl(func);
+    raw->coll.sendbuff = raw->coll.recvbuff;
+    ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
+
+    ASSERT_EQ(ncclSuccess, fillCollTuningInput(scene.comm(), &raw->coll, &in));
+
+    EXPECT_EQ(0, in.inPlace) << "func " << func;
+  }
+}
+
 TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_FindWindowFails_PropagatesForEitherBuffer) {
   for (int failingCall : {1, 2}) {
     TaskPrepScene scene;
