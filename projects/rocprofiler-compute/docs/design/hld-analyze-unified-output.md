@@ -99,7 +99,7 @@ and neither writes the roofline HTML.
 | ID | Requirement |
 |---|---|
 | FR-1 | Every analyze run other than a listing run creates one new run folder. It holds the analysis DB, the full text report, and one folder per workload with the workload CSVs and one folder per kernel. When the data exists, the run also writes the roofline HTML, memory-chart HTML, PC-sampling files, and ML API trace export. |
-| FR-2 | `--output-format` and `-b/--block` stay for one release as deprecated no-ops: `(DEPRECATED)` in help, a warning when used, value ignored. They are removed in the following release. |
+| FR-2 | `--output-format` stays for one release as a deprecated no-op: `(DEPRECATED)` in help, a warning when used, value ignored. It is removed in the following release. `-b/--block` remains functional and adds the requested analysis blocks to the CLI display alongside the standard CLI sections (FR-26). It does not narrow calculations or other output artifacts. |
 | FR-3 | New analyze option `-d/--output-directory <dir>` names the parent of the run folder. It defaults to the current directory, takes a plain path with no placeholder expansion, and is created with its missing parents. |
 | FR-4 | `-o/--output-name <name>` names the run folder and must match `[A-Za-z0-9_-]+`. If the folder already exists, the run errors before any calculation. |
 | FR-5 | Without `-o`, the run folder is `rocprof_compute_analyze_<YYYYMMDD_HHMMSS>` in local time. If that folder exists, `_1`, `_2`, … is appended until the name is free. |
@@ -133,8 +133,8 @@ and neither writes the roofline HTML.
 
 | ID | Requirement |
 |---|---|
-| FR-26 | The terminal shows a fixed summary: system info, top kernels, top dispatches, and speed-of-light. Then it lists the artifacts written and ends with the FR-10 line. Comparison runs apply today's comparison display rules to these sections. |
-| FR-27 | `report.txt` at the run-folder root holds every section of today's report. It combines DB rows with the layout from the run's metric configs. With more than one `-p`, it is the comparison report, and each workload folder also gets a `report.txt` for that workload alone. `--decimal`, `--time-unit`, bandwidth scaling, table hiding, and the comparison and baseline display rules apply to the terminal summary and the reports and nowhere else. NULL prints as `N/A`. |
+| FR-26 | The terminal shows the standard sections—system info, top kernels, top dispatches, and speed-of-light—plus any analysis blocks requested with `-b/--block`. Then it lists the artifacts written and ends with the FR-10 line. Comparison runs apply today's comparison display rules to these sections. |
+| FR-27 | `report.txt` at the run-folder root holds every section of today's report, regardless of `--block`. It combines DB rows with the layout from the run's metric configs. With more than one `-p`, it is the comparison report, and each workload folder also gets a `report.txt` for that workload alone. `--decimal`, `--time-unit`, bandwidth scaling, table hiding, and the comparison and baseline display rules apply to the terminal summary and the reports and nowhere else. NULL prints as `N/A`. |
 | FR-28 | The top-stats table lists only the filtered kernels and has no `*` selection marker. |
 | FR-29 | Operator options do not change the calculation. The report adds the operator tree and, clearly labelled, the per-kernel rows of matching kernels. Workload tables are not narrowed by operator. The trace is exported to `ml-api-trace.csv` in the workload folder. |
 | FR-30 | Baseline and comparison differences are calculated at render time from per-workload rows. |
@@ -338,7 +338,7 @@ Migration for existing scripts:
 | `--output-format csv --output-name X` → `./X/*.csv` | `./X/1-wl/*.csv` and `./X/1-wl/kernel-*/` |
 | `--output-format txt` → `./<name>.txt` | `<run-folder>/report.txt` |
 | Rerun with the same `--output-name` replaces files | error; choose a new name or omit `-o` |
-| `-b <block>` narrows the report | ignored with a warning; all sections are in `report.txt` |
+| `-b <block>` adds selected blocks to the CLI report | requested blocks appear alongside the standard CLI sections; `report.txt` and exported data still contain every block |
 | `<workload>/empirRoof_gpu-0_<k>.html` | `<run-folder>/<pos>-<workload>/roofline-gpu-0.html` |
 | `<workload>/pmc_kernel_top.csv`, `pmc_dispatch_info.csv` | not written |
 | `<workload>/ml_api_trace/consolidated.csv` | `<run-folder>/<pos>-<workload>/ml-api-trace.csv` |
@@ -363,11 +363,12 @@ Torch and Triton operator patterns do not change the calculation or the DB. The 
 operator tree and the per-kernel rows of matching kernels, which are already in the DB. Workload
 tables still cover every selected kernel.
 
-### Deprecating `--output-format` and `-b/--block`
+### Deprecating `--output-format`
 
-Both options stay for one release as no-ops. `--output-format` warns that every artifact is
-always written. `-b` warns that `report.txt` holds every section. This follows the profile
-`--path` → `--output-directory` precedent.
+`--output-format` stays for one release as a no-op and warns that every artifact is always
+written. `-b/--block` remains functional: it adds requested analysis blocks to the standard CLI
+sections, while `report.txt` and exported data continue to contain every block. This follows the
+profile `--path` → `--output-directory` precedent for the output-format migration.
 
 ## Implementation phases
 
@@ -376,16 +377,17 @@ always written. `-b` warns that `report.txt` holds every section. This follows t
    the filtered workload total, and the recorded options. It fixes D1–D4, D6 and D9, covers D5,
    D7 and D8a, and bumps the schema to 2.4.0.
    *User value:* `--output-format db` and `csv` output becomes correct and complete.
-2. **Render everything from the DB** (FR-11, FR-27–FR-33). The report, roofline plot and HTML,
+2. **Render everything from the DB** (FR-11, FR-26–FR-33). The report, roofline plot and HTML,
    and memory-chart HTML are rendered from DB rows. Comparison differences, the PC-sampling top-N,
    and the roofline limiter and percent of roofline are derived at render time. The separate CLI
-   calculation is deleted, while `--output-format` still selects which files are written.
+   calculation is deleted, while `--block` controls the additional CLI sections rendered from DB
+   rows.
    *User value:* the terminal and the DB can no longer disagree.
 3. **One run, one folder** (FR-1–FR-10, FR-26, FR-34, NFR-1, NFR-2). This phase adds
    `-d/--output-directory`, `-o`, timestamped run folders, the workload and kernel layout,
-   `report.txt`, the terminal summary, read-only workloads, the `--output-format` and `-b`
-   deprecations, and the end-of-run line. Docs, skills and the CHANGELOG (with the migration
-   table) are updated in the same phase.
+   `report.txt`, the terminal summary, additive CLI block display, read-only workloads, the
+   `--output-format` deprecation, and the end-of-run line. Docs, skills and the CHANGELOG (with
+   the migration table) are updated in the same phase.
    *User value:* one run produces every artifact in one known place, organized by workload and
    kernel.
 
@@ -405,11 +407,11 @@ always written. `-b` warns that `report.txt` holds every section. This follows t
 | 8 | Read-only and untouched workload | Analysis of a read-only workload succeeds; a workload directory's existing files are unchanged after a run, including one whose run folder lies inside it | integration | FR-7, FR-8 |
 | 9 | Layout | Expected files and names for single, comparison, PC-sampling and operator runs; kernel folders in top-stats order with demangled names truncated to 64 characters; `kernels.csv` maps every folder | integration | FR-1, FR-9, FR-31, FR-32, FR-34 |
 | 10 | Schema | `schema_version` is 2.4.0; 2.3.1 queries on existing tables and views succeed; schema diagrams regenerated | unit | FR-21, FR-23, FR-24 |
-| 11 | Deprecations | `--output-format` and `-b` values ignored, warnings printed, `(DEPRECATED)` in help | CLI | FR-2 |
+| 11 | Deprecation and block behavior | `--output-format` is ignored with a warning and `(DEPRECATED)` in help; `--block` remains functional without a deprecation marker or warning | CLI | FR-2 |
 | 12 | Write failure | Fault injected while writing leaves the partial run folder, and the error names it | unit | NFR-1 |
-| 13 | Terminal summary and end-of-run line | Summary has exactly the fixed sections; last line is the absolute path; comparison runs list the workload-folder mapping | integration | FR-10, FR-26 |
+| 13 | Terminal summary and end-of-run line | Standard sections remain visible with or without `--block`; requested blocks are added to the CLI; last line is the absolute path; comparison runs list the workload-folder mapping | integration | FR-10, FR-26 |
 | 14 | Calculation rulings | NULL stored for unavailable values; per-kernel rows for every filtered kernel; only filtered kernels and dispatches stored; workload total and Pct; membw rows; ceiling rows for every positive benchmark mean; recorded options; PC samples narrowed by `-k` with the stated note | unit | FR-15, FR-17, FR-19–FR-25 |
-| 15 | Rendering rules | Top-stats without `*`; operator tree plus labelled per-kernel rows with workload tables unchanged; comparison differences derived from rows; per-workload `report.txt` only with more than one `-p`; PC-sampling top-N per kernel; limiter and percent of roofline equal today's for the same `-R`; memory-chart HTML present per workload | integration | FR-27–FR-33 |
+| 15 | Rendering rules | Requested CLI blocks are additive; `report.txt` and exports retain all blocks; top-stats without `*`; operator tree plus labelled per-kernel rows with workload tables unchanged; comparison differences derived from rows; per-workload `report.txt` only with more than one `-p`; PC-sampling top-N per kernel; limiter and percent of roofline equal today's for the same `-R`; memory-chart HTML present per workload | integration | FR-27–FR-33 |
 
 ### Security
 
@@ -428,7 +430,7 @@ always written. `-b` warns that `report.txt` holds every section. This follows t
 | Risk | Mitigation |
 |---|---|
 | Evaluating every kernel on every run slows analysis of workloads with many unique kernels | Measure in phase 1 and report the numbers |
-| Scripts relying on `./X.db`, `./X/kernel.csv`, `./X.txt`, `-b`, the full stdout report, or rerunning with the same `--output-name` break | Migration table in the CHANGELOG and docs; one-release deprecation of `--output-format` and `-b` |
+| Scripts relying on `./X.db`, `./X/kernel.csv`, `./X.txt`, the full stdout report, or rerunning with the same `--output-name` break | Migration table in the CHANGELOG and docs; one-release deprecation of `--output-format` |
 | Last-decimal changes on Bytes/s Percent of Peak rows | Listed in NFR-2 and the CHANGELOG |
 | Kernel names in both folder and file names make long paths that can exceed Windows path limits when results are copied | Names truncated to 64 characters; full names in `kernels.csv` |
 | PC-sampling files and per-kernel metrics are filtered differently while D10 is deferred | Stated in the terminal summary, `report.txt` and `pc-sampling-summary.csv` |
