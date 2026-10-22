@@ -37,7 +37,7 @@ else:
             del frame
         elif _locs_ is None:
             _locs_ = _globs_
-        exec("""exec _code_ in _globs_, _locs_""")
+        exec("""exec _code_ in _globs_, _locs_""")  # noqa: S102
 
 
 def _file(back=2, only_basename=True, use_dirname=False, noquotes=True):
