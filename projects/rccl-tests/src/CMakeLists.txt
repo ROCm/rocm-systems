@@ -146,14 +146,10 @@ add_rccl_test(all_gather)
 add_rccl_test(all_reduce)
 add_rccl_test(alltoall)
 # ENABLE_ROCSHMEM_GIN is defined project-wide (add_definitions in the top-level
-# CMakeLists), so GIN perf targets need no per-target define.
-if (ENABLE_ROCSHMEM_GIN)
-    target_compile_options(alltoall_perf PRIVATE $<$<CONFIG:Debug>:-ggdb -O0>)
-
-    if (ENABLE_DEVICE_API)
-      target_compile_definitions(all_gather_perf PRIVATE ENABLE_DEVICE_API)
-    endif()
-    target_compile_options(all_gather_perf PRIVATE $<$<CONFIG:Debug>:-ggdb -O0>)
+# CMakeLists), so GIN perf targets need no per-target define — only the extra
+# ENABLE_DEVICE_API gate for the all_gather hybrid kernel.
+if (ENABLE_ROCSHMEM_GIN AND ENABLE_DEVICE_API)
+    target_compile_definitions(all_gather_perf PRIVATE ENABLE_DEVICE_API)
 endif()
 if (ENABLE_ROCSHMEM_GIN AND RCCL_SOURCE_DIR)
     add_executable(gin_rocshmem_gda_factory_test ${CMAKE_CURRENT_SOURCE_DIR}/gin_rocshmem_gda_factory_test.cu)
@@ -177,9 +173,6 @@ if (ENABLE_ROCSHMEM_GIN AND RCCL_SOURCE_DIR)
 endif()
 add_rccl_test(alltoallv)
 add_rccl_test(broadcast)
-if (ENABLE_ROCSHMEM_GIN)
-    target_compile_options(broadcast_perf PRIVATE $<$<CONFIG:Debug>:-ggdb -O0>)
-endif()
 add_rccl_test(gather)
 add_rccl_test(hypercube)
 add_rccl_test(reduce_scatter)
