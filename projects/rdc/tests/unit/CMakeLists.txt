@@ -97,6 +97,26 @@ target_link_libraries(rdc_topology_tests PRIVATE rdc_bootstrap GTest::gtest_main
 set_target_properties(rdc_topology_tests PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib")
 add_test(NAME rdc_topology_tests COMMAND rdc_topology_tests)
 
+# rdc_api_checks_tests: the C API's argument checks (with a handle it must not
+# use) and the cache's values (RdcCacheManagerImpl.cc compiled in). Needs no GPU.
+add_executable(
+    rdc_api_checks_tests
+    ${SRC_DIR}/test_api_checks.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcCacheManagerImpl.cc
+)
+target_include_directories(rdc_api_checks_tests PRIVATE ${PROJECT_SOURCE_DIR}/include)
+target_link_libraries(rdc_api_checks_tests PRIVATE rdc_bootstrap GTest::gtest_main pthread)
+set_target_properties(
+    rdc_api_checks_tests
+    PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib"
+)
+add_test(NAME rdc_api_checks_tests COMMAND rdc_api_checks_tests)
+install(
+    TARGETS rdc_api_checks_tests
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
+    COMPONENT ${TESTS_COMPONENT}
+)
+
 # rdc_client_tests: standalone (client) mode as rdci uses it. rdc_connect()
 # dlopens librdc_client.so (gRPC); needs no GPU and no rdcd. Built only when the
 # client library is.
@@ -143,6 +163,50 @@ if(TARGET rdc_client)
     add_test(NAME rdc_client_replies_tests COMMAND rdc_client_replies_tests)
     install(
         TARGETS rdc_client_replies_tests
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
+        COMPONENT ${TESTS_COMPONENT}
+    )
+
+    # rdc_server_replies_tests: rdcd's gRPC service (rdc_api_service.cc) against
+    # link-time fakes of the RDC C API, which replace librdc_bootstrap, so it is
+    # not linked. Links librdc_client for the generated gRPC service and messages,
+    # like rdc_client_replies_tests. The server is built with -fclang-abi-compat=17
+    # under clang 18 and later (server/CMakeLists.txt); so is this test.
+    # common/rdc_fields_supported.cc is compiled in, with the source root on
+    # the include path, so that the service links when it checks field IDs.
+    add_executable(
+        rdc_server_replies_tests
+        ${SRC_DIR}/test_server_replies.cc
+        ${PROJECT_SOURCE_DIR}/server/src/rdc_api_service.cc
+        ${PROJECT_SOURCE_DIR}/rdc_libs/bootstrap/src/RdcLogger.cc
+        ${PROJECT_SOURCE_DIR}/common/rdc_fields_supported.cc
+    )
+    target_include_directories(
+        rdc_server_replies_tests
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}
+            ${PROJECT_SOURCE_DIR}/include
+            ${PROJECT_SOURCE_DIR}/server/include
+            ${PROTOB_OUT_DIR}
+            ${AMD_SMI_INCLUDE_DIR}
+    )
+    if(
+        CMAKE_CXX_COMPILER_ID STREQUAL "Clang"
+        AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 18.0.0
+    )
+        target_compile_options(rdc_server_replies_tests PRIVATE -fclang-abi-compat=17)
+    endif()
+    target_link_libraries(
+        rdc_server_replies_tests
+        PRIVATE rdc_client gRPC::grpc++ GTest::gtest_main pthread
+    )
+    set_target_properties(
+        rdc_server_replies_tests
+        PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib:\$ORIGIN/../../../lib/rdc/grpc/lib"
+    )
+    add_test(NAME rdc_server_replies_tests COMMAND rdc_server_replies_tests)
+    install(
+        TARGETS rdc_server_replies_tests
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
         COMPONENT ${TESTS_COMPONENT}
     )

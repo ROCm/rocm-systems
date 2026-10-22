@@ -15,6 +15,9 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - **`rdc_health_get()` returns `RDC_ST_GROUP_NOT_FOUND` for a GPU group that does not exist**.
   - It returned `RDC_ST_OK` with no health watches, so `rdci health -f` showed every watch as Off and exited successfully, and `rdci health -c` failed asking for watches to be enabled. Both commands now fail with a message that the group does not exist.
 
+- **The RDC job and group calls reject IDs and names that do not fit their buffers.** `rdc_job_start_stats()`, `rdc_job_get_stats()`, `rdc_job_stop_stats()` and `rdc_job_remove()` return `RDC_ST_BAD_PARAMETER` for a job ID of 64 bytes or more or with a control character, and `rdc_group_gpu_create()` and `rdc_group_field_create()` for a name of 256 bytes or more; `rdcd` rejects the same, and IDs or names with a NUL inside, from any gRPC client.
+  - The job ID parameter is a `char[64]`, but RDC accepted longer job IDs and stored them whole, and cut longer names. `rdci stats` with such a job ID, and `rdci group -c` and `rdci fieldgroup -c` with such a name, now fail.
+
 ### Removed
 
 - Removed the unused `GetBlockNameStr()` test helper and its GPU block name map. Nothing called it, and its `static_assert` on `AMDSMI_GPU_BLOCK_LAST` broke the RDC build whenever AMD SMI added an IP block (#10949).
@@ -85,6 +88,10 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - `rdcd` exits at once, with status 1, on a second SIGTERM or SIGINT, or on one that arrives while it shuts down, so another stop request ends a stalled shutdown.
 
 - `rdci policy --reg` no longer uses a whole CPU core once rdcd goes away, and no longer reads freed memory as it exits. With a connection to rdcd, `rdc_policy_unregister()` and `rdc_disconnect()` now wait for a running policy callback to return, and `rdc_policy_register()` works again for a group that was unregistered; it used to return `RDC_ST_CONFLICT` for that group until the connection was closed.
+
+- `rdcd` no longer sends uninitialized memory, or memory past a buffer, in its replies when the RDC library returns less than a reply holds: device names, component versions, group and field group information, field values, job statistics, policies, health checks, topology, link status and diagnostic results. It sends counts no larger than the entries it sends, and strings no longer than their buffers.
+
+- `rdc_field_get_latest_value()` and `rdc_field_get_value_since()` set the `status` of the value they return, and `rdc_field_get_value_since()` returns all of a `BLOB` value instead of its first 8 bytes. Through `rdcd`, a string or `BLOB` value since a time is sent without its trailing spaces and without a NUL in place of the first of them.
 
 ## RDC 1.3.1 for ROCm 7.14.0
 

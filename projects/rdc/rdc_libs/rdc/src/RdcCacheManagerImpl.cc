@@ -66,9 +66,10 @@ rdc_status_t RdcCacheManagerImpl::rdc_field_get_value_since(uint32_t gpu_index,
       if (value->type == STRING) {
         strncpy_with_null(value->value.str, cache_value->value.str, RDC_MAX_STR_LENGTH);
       } else {
-        value->value.l_int = cache_value->value.l_int;
+        value->value = cache_value->value;
       }
       value->field_id = field_id;
+      value->status = RDC_ST_OK;
       return RDC_ST_OK;
     }
   }
@@ -130,6 +131,7 @@ rdc_status_t RdcCacheManagerImpl::rdc_field_get_latest_value(uint32_t gpu_index,
   value->type = cache_value.type;
   value->value = cache_value.value;
   value->field_id = field_id;
+  value->status = RDC_ST_OK;
 
   return RDC_ST_OK;
 }
