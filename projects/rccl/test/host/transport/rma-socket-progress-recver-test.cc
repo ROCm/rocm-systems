@@ -378,8 +378,19 @@ TEST_F(RmaSocketProgressRecverMicrotest, HandleRespondGetData_ValidResponseResol
 
 TEST_F(RmaSocketProgressRecverMicrotest, HandleRespondGetData_ErrorOrInvalidPayloadIsRejected) {
   Scene scene;
-  auto& msg = scene.receivers[0].controlMsg;
+  std::array<unsigned char, 8> data{};
+  std::array<unsigned char, 8> staging{};
+  // The MR claims more than INT_MAX bytes so the size guard, not the range check, rejects oversize replies.
+  std::vector<ncclRmaSocketProxyMrHandle> handles{
+      scene.MakeMr(data.data(), static_cast<size_t>(INT_MAX) + 1, NCCL_PTR_HOST, 8)};
+  scene.LinkMrs(handles);
+  auto& receiver = scene.receivers[0];
+  receiver.buffer = staging.data();
+  auto& msg = receiver.controlMsg;
+  msg.mrId = 8;
+
   msg.status = ncclRemoteError;
+  msg.size = 1;
   EXPECT_EQ(ncclRmaSocketProxyHandleRespondGetData(&scene.comm, 0), ncclRemoteError);
   msg.status = ncclSuccess;
   msg.size = 0;
@@ -389,6 +400,8 @@ TEST_F(RmaSocketProgressRecverMicrotest, HandleRespondGetData_ErrorOrInvalidPayl
   msg.size = 1;
   msg.opFlags = 1;
   EXPECT_EQ(ncclRmaSocketProxyHandleRespondGetData(&scene.comm, 0), ncclRemoteError);
+  EXPECT_EQ(handles[0].recvActiveOps, 0);
+  EXPECT_NE(receiver.recvState, ncclRmaSocketProxyRecvStatePayload);
 }
 
 TEST_F(RmaSocketProgressRecverMicrotest, HandleRespondGetData_MissingStagingBufferIsRejectedAfterResolvingMr) {
