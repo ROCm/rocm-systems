@@ -238,8 +238,6 @@ def _build_metric_table_df(
                 values.append(v)
         expressions.extend(metric_expressions(data_config, entries))
 
-        if "alias" in entries:
-            values.append(entries["alias"])
         if "metrics_description" in panel:
             values.append(panel["metrics_description"].get(key, ""))
 

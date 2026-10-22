@@ -122,8 +122,8 @@ BLOCK_REMAP: dict[str, str] = {"SQC": "SQ", "SP": "SQ"}
 
 def metric_value_keys(table: dict[str, Any]) -> set[str]:
     """Metric keys whose values are columns of a metric_table: the header's
-    keys except metric, expr, and the display-only coll_level and alias."""
-    return set(table["header"]) - {"metric", "expr", "coll_level", "alias"}
+    keys except metric and expr."""
+    return set(table["header"]) - {"metric", "expr"}
 
 
 def metric_expressions(table: dict[str, Any], metric: dict[str, Any]) -> list[str]:

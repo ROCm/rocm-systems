@@ -75,7 +75,7 @@ FIXTURE_COUNTERS = {BASELINE_COUNTER, TABLE_3012_COUNTER, TABLE_3013_COUNTER}
 HBM_TRAFFIC_METRIC_NAMES = {"HBM Read Traffic", "HBM Write and Atomic Traffic"}
 
 # Every counter name outside the expressions is unique, so any leak from a
-# comment, description, metric name or coll_level shows up in the result.
+# comment, title, description or metric name shows up in the result.
 PROSE_ANALYSIS_CONFIG = """\
 # SQ_COMMENT_COUNTER in a comment
 Panel Config:
@@ -93,7 +93,6 @@ Panel Config:
         SQ_METRIC_NAME_COUNTER:
           avg: SUM(SQ_LEVEL_WAVES_ACCUM) / SUM(SQ_BUSY_CYCLES)  # SQ_TRAILING_COUNTER
           unit: Wavefronts
-          coll_level: SQ_LEVEL_WAVES
   metrics_description:
     SQ_METRIC_NAME_COUNTER: Uses SQ_DESCRIPTION_COUNTER.
 """
@@ -796,8 +795,8 @@ def test_membw_analysis_counter_selection(
 def test_detect_counters_reads_only_metric_expressions(
     membw_analysis_soc: OmniSoC_Base, filter_blocks: list[str]
 ) -> None:
-    """Comments, titles, descriptions, metric names and coll_level add no
-    counters, whichever way the metric is selected."""
+    """Comments, titles, descriptions and metric names add no counters,
+    whichever way the metric is selected."""
     config_root = Path(membw_analysis_soc.get_args().config_dir) / "gfx950"
     (config_root / "0200_baseline.yaml").write_text(
         PROSE_ANALYSIS_CONFIG, encoding="utf-8"

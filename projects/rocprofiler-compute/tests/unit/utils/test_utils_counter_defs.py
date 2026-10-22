@@ -135,7 +135,6 @@ class TestMetricExpressions:
         metric = {
             "avg": "SUM(SQ_WAVES)",
             "unit": "Waves",
-            "coll_level": "SQ_LEVEL_WAVES",
             "tips": "See SQ_BUSY_CYCLES",
         }
         assert metric_expressions(table, metric) == ["SUM(SQ_WAVES)", "Waves"]
