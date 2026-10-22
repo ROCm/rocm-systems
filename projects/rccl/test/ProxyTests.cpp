@@ -1059,9 +1059,13 @@ TEST(ProxyTests, ProxyServiceDoesNotHangOnExternalBadMagic)
             ASSERT_EQ(clock_gettime(serviceClock, &cpuBefore), 0);
 
             // Simulate an unrelated external TCP client. It completes the TCP
-            // connection and sends a wrong NCCL magic, but no NCCL type.
+            // connection and sends a complete hello with a wrong NCCL magic.
             const uint64_t badMagic = kProxyMagic ^ 1ULL;
-            const ssize_t sent = send(externalFd, &badMagic, sizeof(badMagic), MSG_NOSIGNAL);
+            char hello[NCCL_SOCKET_PLAIN_HELLO_BYTES] = {};
+            enum ncclSocketType helloType = ncclSocketTypeProxy;
+            memcpy(hello, &badMagic, sizeof(badMagic));
+            memcpy(hello + sizeof(badMagic), &helloType, sizeof(helloType));
+            const ssize_t sent = send(externalFd, hello, sizeof(hello), MSG_NOSIGNAL);
             close(externalFd);
 
             // The fixed service returns to poll(). The pre-fix service keeps
@@ -1094,7 +1098,7 @@ TEST(ProxyTests, ProxyServiceDoesNotHangOnExternalBadMagic)
             }
 
             serviceThread.join();
-            EXPECT_EQ(sent, static_cast<ssize_t>(sizeof(badMagic)))
+            EXPECT_EQ(sent, static_cast<ssize_t>(sizeof(hello)))
                 << "external client failed to send the malformed handshake";
             TEST_INFO("ProxyServiceDoesNotHangOnExternalBadMagic PASSED");
         });
