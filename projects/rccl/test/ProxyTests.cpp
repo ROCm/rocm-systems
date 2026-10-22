@@ -1013,7 +1013,6 @@ TEST(ProxyTests, ProxyServiceDoesNotHangOnExternalBadMagic)
         ProcessIsolatedTestRunner::TestConfig(
             "ProxyServiceDoesNotHangOnExternalBadMagic",
             []() {
-            constexpr uint64_t kProxyMagic = 0x13579bdf2468ace0ULL;
             volatile uint32_t abortFlag = 0;
 
             auto* listenSock = static_cast<ncclSocket*>(calloc(1, sizeof(ncclSocket)));
@@ -1024,7 +1023,7 @@ TEST(ProxyTests, ProxyServiceDoesNotHangOnExternalBadMagic)
             listenAddr.sin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
             listenAddr.sin.sin_port = 0;
 
-            ASSERT_EQ(ncclSocketInit(listenSock, &listenAddr, kProxyMagic, ncclSocketTypeProxy,
+            ASSERT_EQ(ncclSocketInit(listenSock, &listenAddr, NCCL_SOCKET_MAGIC, ncclSocketTypeProxy,
                                      &abortFlag),
                       ncclSuccess);
             ASSERT_EQ(ncclSocketListen(listenSock), ncclSuccess);
@@ -1072,7 +1071,7 @@ TEST(ProxyTests, ProxyServiceDoesNotHangOnExternalBadMagic)
 
             // Simulate an unrelated external TCP client. It completes the TCP
             // connection and sends a complete hello with a wrong NCCL magic.
-            const uint64_t badMagic = kProxyMagic ^ 1ULL;
+            const uint64_t badMagic = NCCL_SOCKET_MAGIC ^ 1ULL;
             char hello[NCCL_SOCKET_PLAIN_HELLO_BYTES] = {};
             enum ncclSocketType helloType = ncclSocketTypeProxy;
             memcpy(hello, &badMagic, sizeof(badMagic));
