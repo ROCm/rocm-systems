@@ -149,6 +149,676 @@ TEST_F(SimulatedKfdTest, OpenAndClose) {
   EXPECT_EQ(ret, 0);
 }
 
+TEST_F(SimulatedKfdTest, PrivateVramKeepsFullGpuBackingAcrossProtectedPartialView) {
+  util::StringDiagnostic diagnostic;
+  auto result = create_test_vm(diagnostic.emitter());
+  ASSERT_TRUE(result.succeeded()) << diagnostic.message();
+  auto vm = std::move(result).value();
+  auto *driver = vm.driver();
+  ASSERT_GE(driver->open(), 0);
+
+  constexpr size_t kPage = rocjitsu::KfdProcess::kPageSize;
+  kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+  alloc.size = 2 * kPage;
+  alloc.gpu_id = driver->gpu_id();
+  alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
+  auto process = driver->find_process(driver->local_process_id());
+  ASSERT_NE(process, nullptr);
+  const auto &backing = process->allocations_.at(alloc.handle);
+  using MappingKind = rocjitsu::KfdProcess::GpuAllocation::HostMappingKind;
+  ASSERT_EQ(backing.host_mapping_kind, MappingKind::InternalBacking);
+  void *initial = backing.host_ptr;
+
+  const auto access = vm.soc()->gpu_vm().snapshot_vmid(driver->local_process_id());
+  ASSERT_TRUE(access);
+  uint32_t head = 0x12345678, tail = 0x87654321;
+  ASSERT_EQ(access->write(alloc.va_addr, std::as_bytes(std::span(&head, 1))),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  ASSERT_EQ(access->write(alloc.va_addr + kPage, std::as_bytes(std::span(&tail, 1))),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+
+  void *view =
+      driver->mmap(nullptr, kPage, PROT_NONE, MAP_SHARED, static_cast<off_t>(alloc.mmap_offset));
+  ASSERT_NE(view, MAP_FAILED);
+  EXPECT_EQ(process->allocations_.at(alloc.handle).host_ptr, initial);
+  head = tail = 0;
+  EXPECT_EQ(access->read(alloc.va_addr, std::as_writable_bytes(std::span(&head, 1))),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(access->read(alloc.va_addr + kPage, std::as_writable_bytes(std::span(&tail, 1))),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(head, 0x12345678u);
+  EXPECT_EQ(tail, 0x87654321u);
+  ASSERT_EQ(driver->munmap(view, kPage), 0);
+  std::array<uint8_t, 2> resident{};
+  EXPECT_EQ(::mincore(initial, 2 * kPage, resident.data()), 0);
+
+  kfd_ioctl_free_memory_of_gpu_args freed{};
+  freed.handle = alloc.handle;
+  EXPECT_EQ(driver->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &freed), 0);
+  errno = 0;
+  EXPECT_EQ(::mincore(initial, kPage, resident.data()), -1);
+  EXPECT_EQ(errno, ENOMEM);
+  EXPECT_EQ(driver->close(), 0);
+}
+
+TEST_F(SimulatedKfdTest, PartialPrivateVramViewUnmapKeepsOnlyLiveFragments) {
+  constexpr size_t kPage = rocjitsu::KfdProcess::kPageSize;
+  for (const auto &[first_page, length] :
+       {std::pair{0u, kPage + 1}, std::pair{1u, kPage}, std::pair{2u, kPage}}) {
+    SCOPED_TRACE(first_page);
+    util::StringDiagnostic diagnostic;
+    auto result = create_test_vm(diagnostic.emitter());
+    ASSERT_TRUE(result.succeeded()) << diagnostic.message();
+    auto vm = std::move(result).value();
+    auto *driver = vm.driver();
+    ASSERT_GE(driver->open(), 0);
+
+    kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+    alloc.size = 3 * kPage;
+    alloc.gpu_id = driver->gpu_id();
+    alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+    ASSERT_EQ(driver->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
+    auto process = driver->find_process(driver->local_process_id());
+    ASSERT_NE(process, nullptr);
+    auto *backing = static_cast<uint8_t *>(process->allocations_.at(alloc.handle).host_ptr);
+    ASSERT_NE(backing, nullptr);
+    errno = 0;
+    EXPECT_EQ(driver->munmap(backing + kPage, kPage), -1);
+    EXPECT_EQ(errno, EPERM);
+    auto *view =
+        static_cast<uint8_t *>(driver->mmap(nullptr, 3 * kPage, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                            static_cast<off_t>(alloc.mmap_offset)));
+    ASSERT_NE(view, MAP_FAILED);
+
+    const auto access = vm.soc()->gpu_vm().snapshot_vmid(driver->local_process_id());
+    ASSERT_TRUE(access);
+    uint32_t sentinel = 0x12345678;
+    ASSERT_EQ(access->write(alloc.va_addr + kPage, std::as_bytes(std::span(&sentinel, 1))),
+              rocjitsu::amdgpu::VmAccessOutcome::Complete);
+
+    auto *hole = view + first_page * kPage;
+    errno = 0;
+    EXPECT_EQ(driver->munmap(view + 1, kPage), -1);
+    EXPECT_EQ(errno, EINVAL);
+    ASSERT_EQ(driver->munmap(hole, length), 0);
+    const size_t hole_bytes = (length + kPage - 1) & ~(kPage - 1);
+    const auto &fragments = process->allocations_.at(alloc.handle).client_views;
+    EXPECT_EQ(fragments.size(), first_page == 1 ? 2u : 1u);
+    sentinel = 0;
+    EXPECT_EQ(access->read(alloc.va_addr + kPage, std::as_writable_bytes(std::span(&sentinel, 1))),
+              rocjitsu::amdgpu::VmAccessOutcome::Complete);
+    EXPECT_EQ(sentinel, 0x12345678u);
+
+    ASSERT_EQ(::mmap(hole, hole_bytes, PROT_READ | PROT_WRITE,
+                     MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0),
+              hole);
+    *hole = 0x5a;
+    ASSERT_EQ(driver->close(), 0);
+    unsigned char residency = 0;
+    EXPECT_EQ(::mincore(hole, kPage, &residency), 0);
+    EXPECT_EQ(*hole, 0x5a);
+    for (size_t page = 0; page < 3; ++page) {
+      if (page >= first_page && page * kPage < first_page * kPage + hole_bytes)
+        continue;
+      errno = 0;
+      EXPECT_EQ(::mincore(view + page * kPage, kPage, &residency), -1);
+      EXPECT_EQ(errno, ENOMEM);
+    }
+    EXPECT_EQ(::munmap(hole, hole_bytes), 0);
+  }
+}
+
+TEST_F(SimulatedKfdTest, FixedReplacementRetiresPrivateVramClientView) {
+  util::StringDiagnostic diagnostic;
+  auto result = create_test_vm(diagnostic.emitter());
+  ASSERT_TRUE(result.succeeded()) << diagnostic.message();
+  auto vm = std::move(result).value();
+  auto *driver = vm.driver();
+  ASSERT_GE(driver->open(), 0);
+  constexpr size_t kPage = rocjitsu::KfdProcess::kPageSize;
+
+  kfd_ioctl_alloc_memory_of_gpu_args first{};
+  first.size = 3 * kPage;
+  first.gpu_id = driver->gpu_id();
+  first.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &first), 0);
+  auto *view =
+      static_cast<uint8_t *>(driver->mmap(nullptr, first.size, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                          static_cast<off_t>(first.mmap_offset)));
+  ASSERT_NE(view, MAP_FAILED);
+
+  kfd_ioctl_alloc_memory_of_gpu_args second = first;
+  second.handle = 0;
+  second.va_addr = 0;
+  second.mmap_offset = 0;
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &second), 0);
+  errno = 0;
+  EXPECT_EQ(driver->mmap(view, second.size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                         static_cast<off_t>(second.mmap_offset)),
+            MAP_FAILED);
+  EXPECT_EQ(errno, EINVAL);
+
+  EXPECT_EQ(
+      driver->mmap_replacing_client_doorbell_views(view + kPage, kPage, PROT_READ | PROT_WRITE,
+                                                   MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0),
+      view + kPage);
+  auto process = driver->find_process(driver->local_process_id());
+  ASSERT_NE(process, nullptr);
+  const auto &fragments = process->allocations_.at(first.handle).client_views;
+  ASSERT_EQ(fragments.size(), 2u);
+  EXPECT_EQ(fragments[0].ptr, view);
+  EXPECT_EQ(fragments[0].size, kPage);
+  EXPECT_EQ(fragments[1].ptr, view + 2 * kPage);
+  EXPECT_EQ(fragments[1].size, kPage);
+  view[kPage] = 0x5a;
+  EXPECT_EQ(driver->close(), 0);
+  unsigned char residency = 0;
+  EXPECT_EQ(::mincore(view + kPage, kPage, &residency), 0);
+  EXPECT_EQ(view[kPage], 0x5a);
+  for (size_t page : {0u, 2u}) {
+    errno = 0;
+    EXPECT_EQ(::mincore(view + page * kPage, kPage, &residency), -1);
+    EXPECT_EQ(errno, ENOMEM);
+  }
+  EXPECT_EQ(::munmap(view + kPage, kPage), 0);
+}
+
+TEST_F(SimulatedKfdTest, FixedPrivateVramViewCannotSeedOverGpuWrittenData) {
+  util::StringDiagnostic diagnostic;
+  auto result = create_test_vm(diagnostic.emitter());
+  ASSERT_TRUE(result.succeeded()) << diagnostic.message();
+  auto vm = std::move(result).value();
+  auto *driver = vm.driver();
+  ASSERT_GE(driver->open(), 0);
+
+  constexpr size_t kPage = rocjitsu::KfdProcess::kPageSize;
+  void *reserved =
+      ::mmap(nullptr, kPage, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(reserved, MAP_FAILED);
+  *static_cast<uint32_t *>(reserved) = 0xbad0bad0;
+  kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+  alloc.va_addr = reinterpret_cast<uint64_t>(reserved);
+  alloc.size = kPage;
+  alloc.gpu_id = driver->gpu_id();
+  alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
+  const auto access = vm.soc()->gpu_vm().snapshot_vmid(driver->local_process_id());
+  ASSERT_TRUE(access);
+  uint32_t value = 0x13572468;
+  ASSERT_EQ(access->write(alloc.va_addr, std::as_bytes(std::span(&value, 1))),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  ASSERT_EQ(driver->mmap(reserved, kPage, PROT_NONE, MAP_SHARED | MAP_FIXED,
+                         static_cast<off_t>(alloc.mmap_offset)),
+            reserved);
+  value = 0;
+  EXPECT_EQ(access->read(alloc.va_addr, std::as_writable_bytes(std::span(&value, 1))),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(value, 0x13572468u);
+  EXPECT_EQ(*static_cast<uint32_t *>(reserved), 0x13572468u);
+  *static_cast<uint32_t *>(reserved) = 0x24681357;
+  value = 0;
+  EXPECT_EQ(access->read(alloc.va_addr, std::as_writable_bytes(std::span(&value, 1))),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(value, 0x24681357u);
+
+  kfd_ioctl_free_memory_of_gpu_args freed{};
+  freed.handle = alloc.handle;
+  EXPECT_EQ(driver->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &freed), 0);
+  uint8_t resident = 0;
+  EXPECT_EQ(::mincore(reserved, kPage, &resident), 0);
+  EXPECT_EQ(::munmap(reserved, kPage), 0);
+  EXPECT_EQ(driver->close(), 0);
+}
+
+TEST_F(SimulatedKfdTest, UserptrUsesCpuAddressIndependentOfGpuVa) {
+  util::StringDiagnostic diagnostic;
+  auto result = create_test_vm(diagnostic.emitter());
+  ASSERT_TRUE(result.succeeded()) << diagnostic.message();
+  auto vm = std::move(result).value();
+  auto *driver = vm.driver();
+  ASSERT_GE(driver->open(), 0);
+  auto process = driver->find_process(driver->local_process_id());
+  ASSERT_NE(process, nullptr);
+  const size_t original_count = process->allocations_.size();
+
+  kfd_ioctl_alloc_memory_of_gpu_args missing{};
+  missing.va_addr = 0x500000000ULL;
+  missing.size = 4096;
+  missing.gpu_id = driver->gpu_id();
+  missing.flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  EXPECT_EQ(driver->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &missing), -EINVAL);
+  EXPECT_EQ(process->allocations_.size(), original_count);
+
+  alignas(4096) std::array<uint32_t, 1024> cpu{};
+  cpu[0] = 0x12345678;
+  auto alloc = missing;
+  alloc.mmap_offset = reinterpret_cast<uint64_t>(cpu.data());
+  ASSERT_NE(alloc.va_addr, alloc.mmap_offset);
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
+  const auto access = vm.soc()->gpu_vm().snapshot_vmid(driver->local_process_id());
+  ASSERT_TRUE(access);
+  uint32_t value = 0;
+  EXPECT_EQ(access->read(alloc.va_addr, std::as_writable_bytes(std::span(&value, 1))),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(value, cpu[0]);
+  kfd_ioctl_free_memory_of_gpu_args freed{};
+  freed.handle = alloc.handle;
+  EXPECT_EQ(driver->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &freed), 0);
+  EXPECT_EQ(driver->close(), 0);
+}
+
+TEST_F(SimulatedKfdTest, PartialUserptrUnmapAndFixedReuseRetireOnlyAffectedGpuPages) {
+  util::StringDiagnostic diagnostic;
+  auto result = create_test_vm(diagnostic.emitter());
+  ASSERT_TRUE(result.succeeded()) << diagnostic.message();
+  auto vm = std::move(result).value();
+  auto *driver = vm.driver();
+  ASSERT_GE(driver->open(), 0);
+  constexpr size_t kPage = rocjitsu::KfdProcess::kPageSize;
+  auto *cpu = static_cast<uint8_t *>(
+      ::mmap(nullptr, 3 * kPage, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+  ASSERT_NE(cpu, MAP_FAILED);
+  *reinterpret_cast<uint32_t *>(cpu) = 0x11111111;
+  *reinterpret_cast<uint32_t *>(cpu + kPage) = 0x22222222;
+  *reinterpret_cast<uint32_t *>(cpu + 2 * kPage) = 0x33333333;
+
+  kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+  alloc.va_addr = 0x500000000ULL;
+  alloc.mmap_offset = reinterpret_cast<uint64_t>(cpu);
+  alloc.size = 3 * kPage;
+  alloc.gpu_id = driver->gpu_id();
+  alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
+  auto process = driver->find_process(driver->local_process_id());
+  ASSERT_NE(process, nullptr);
+  const auto access = vm.soc()->gpu_vm().snapshot_vmid(driver->local_process_id());
+  ASSERT_TRUE(access);
+
+  errno = 0;
+  EXPECT_EQ(driver->mmap_replacing_client_doorbell_views(cpu + kPage, kPage, PROT_READ | PROT_WRITE,
+                                                         MAP_SHARED | MAP_FIXED, -1, 0),
+            MAP_FAILED);
+  EXPECT_EQ(errno, EBADF);
+  uint32_t value = 0;
+  EXPECT_EQ(access->read(alloc.va_addr + kPage, std::as_writable_bytes(std::span(&value, 1))),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(value, 0x22222222u);
+
+  ASSERT_EQ(driver->munmap(cpu + kPage, kPage), 0);
+  const auto &fragments = process->allocations_.at(alloc.handle).client_views;
+  ASSERT_EQ(fragments.size(), 2u);
+  EXPECT_EQ(fragments[0].ptr, cpu);
+  EXPECT_EQ(fragments[1].ptr, cpu + 2 * kPage);
+  value = 0;
+  EXPECT_EQ(access->read(alloc.va_addr + 2 * kPage, std::as_writable_bytes(std::span(&value, 1))),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(value, 0x33333333u);
+  EXPECT_NE(access->read(alloc.va_addr + kPage, std::as_writable_bytes(std::span(&value, 1))),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+
+  ASSERT_EQ(driver->mmap_replacing_client_doorbell_views(
+                cpu, kPage, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0),
+            cpu);
+  *reinterpret_cast<uint32_t *>(cpu) = 0x55555555;
+  EXPECT_NE(access->read(alloc.va_addr, std::as_writable_bytes(std::span(&value, 1))),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = alloc.handle;
+  map.n_devices = 1;
+  EXPECT_EQ(driver->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  EXPECT_NE(access->read(alloc.va_addr, std::as_writable_bytes(std::span(&value, 1))),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(access->read(alloc.va_addr + 2 * kPage, std::as_writable_bytes(std::span(&value, 1))),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(value, 0x33333333u);
+
+  // A failed fixed replacement must not recreate a translation previously
+  // withdrawn by KFD while its CPU view and allocation record remain live.
+  kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+  unmap.handle = alloc.handle;
+  unmap.n_devices = 1;
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), 0);
+  errno = 0;
+  EXPECT_EQ(driver->mmap_replacing_client_doorbell_views(
+                cpu + 2 * kPage, kPage, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, -1, 0),
+            MAP_FAILED);
+  EXPECT_EQ(errno, EBADF);
+  EXPECT_NE(access->read(alloc.va_addr + 2 * kPage, std::as_writable_bytes(std::span(&value, 1))),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+
+  kfd_ioctl_free_memory_of_gpu_args freed{};
+  freed.handle = alloc.handle;
+  EXPECT_EQ(driver->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &freed), 0);
+  EXPECT_EQ(driver->close(), 0);
+  unsigned char residency = 0;
+  EXPECT_EQ(::mincore(cpu, kPage, &residency), 0);
+  EXPECT_EQ(*reinterpret_cast<uint32_t *>(cpu), 0x55555555u);
+  EXPECT_EQ(::mincore(cpu + 2 * kPage, kPage, &residency), 0);
+  EXPECT_EQ(::munmap(cpu, 3 * kPage), 0);
+}
+
+TEST_F(SimulatedKfdTest, AsanHeaderReplacementAndReturnPreserveSurvivingViews) {
+  constexpr size_t kPage = rocjitsu::KfdProcess::kPageSize;
+  for (uint32_t flags : {uint32_t{KFD_IOC_ALLOC_MEM_FLAGS_GTT},
+                         uint32_t{KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC},
+                         uint32_t{KFD_IOC_ALLOC_MEM_FLAGS_VRAM}}) {
+    SCOPED_TRACE(flags);
+    util::StringDiagnostic diagnostic;
+    auto result = create_test_vm(diagnostic.emitter());
+    ASSERT_TRUE(result.succeeded()) << diagnostic.message();
+    auto vm = std::move(result).value();
+    auto *driver = vm.driver();
+    ASSERT_GE(driver->open(), 0);
+    kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+    alloc.size = 3 * kPage;
+    alloc.gpu_id = driver->gpu_id();
+    alloc.flags = flags | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+    ASSERT_EQ(driver->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
+    auto *view =
+        static_cast<uint8_t *>(driver->mmap(nullptr, alloc.size, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                            static_cast<off_t>(alloc.mmap_offset)));
+    ASSERT_NE(view, MAP_FAILED);
+    auto process = driver->find_process(driver->local_process_id());
+    ASSERT_NE(process, nullptr);
+    const int backing_fd = process->allocations_.at(alloc.handle).memfd;
+    ASSERT_GE(backing_fd, 0);
+
+    // libhsakmt replaces the header with anonymous system memory, then
+    // restores a shared view of the BO at the same address.
+    ASSERT_EQ(driver->mmap_replacing_client_doorbell_views(view, kPage, PROT_READ | PROT_WRITE,
+                                                           MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED,
+                                                           -1, 0),
+              view);
+    ASSERT_EQ(driver->mmap_replacing_client_doorbell_views(view, kPage, PROT_READ | PROT_WRITE,
+                                                           MAP_SHARED | MAP_FIXED, backing_fd, 0),
+              view);
+    const auto &fragments = process->allocations_.at(alloc.handle).client_views;
+    ASSERT_EQ(fragments.size(), 1u);
+    EXPECT_EQ(fragments.front().ptr, view + kPage);
+    EXPECT_EQ(fragments.front().size, 2 * kPage);
+
+    view[0] = 0x5a;
+    EXPECT_EQ(driver->close(), 0);
+    unsigned char residency = 0;
+    EXPECT_EQ(::mincore(view, kPage, &residency), 0);
+    EXPECT_EQ(view[0], 0x5a);
+    errno = 0;
+    EXPECT_EQ(::mincore(view + kPage, kPage, &residency), -1);
+    EXPECT_EQ(errno, ENOMEM);
+    EXPECT_EQ(::munmap(view, kPage), 0);
+  }
+}
+
+TEST_F(SimulatedKfdTest, ShortHeaderReturnRetiresTailGpuBackingAfterAddressReuse) {
+  constexpr size_t kPage = rocjitsu::KfdProcess::kPageSize;
+  for (uint32_t flags : {uint32_t{KFD_IOC_ALLOC_MEM_FLAGS_GTT},
+                         uint32_t{KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC},
+                         uint32_t{KFD_IOC_ALLOC_MEM_FLAGS_VRAM}}) {
+    SCOPED_TRACE(flags);
+    util::StringDiagnostic diagnostic;
+    auto result = create_test_vm(diagnostic.emitter());
+    ASSERT_TRUE(result.succeeded()) << diagnostic.message();
+    auto vm = std::move(result).value();
+    auto *driver = vm.driver();
+    ASSERT_GE(driver->open(), 0);
+
+    kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+    alloc.va_addr = 0x500000000ULL;
+    alloc.size = 3 * kPage;
+    alloc.gpu_id = driver->gpu_id();
+    alloc.flags = flags | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+    ASSERT_EQ(driver->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
+    auto *view =
+        static_cast<uint8_t *>(driver->mmap(nullptr, alloc.size, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                            static_cast<off_t>(alloc.mmap_offset)));
+    ASSERT_NE(view, MAP_FAILED);
+    const auto access = vm.soc()->gpu_vm().snapshot_vmid(driver->local_process_id());
+    ASSERT_TRUE(access);
+    uint32_t tail = 0x12345678;
+    ASSERT_EQ(access->write(alloc.va_addr + kPage, std::as_bytes(std::span(&tail, 1))),
+              rocjitsu::amdgpu::VmAccessOutcome::Complete);
+
+    // Return the anonymous replacement through the KFD mmap path. The tail
+    // still has its original CPU mapping and, for direct backing, GPU record.
+    ASSERT_EQ(driver->mmap_replacing_client_doorbell_views(view, kPage, PROT_READ | PROT_WRITE,
+                                                           MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED,
+                                                           -1, 0),
+              view);
+    ASSERT_EQ(driver->mmap(view, kPage, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                           static_cast<off_t>(alloc.mmap_offset)),
+              view);
+    uint32_t value = 0;
+    EXPECT_EQ(access->read(alloc.va_addr + kPage, std::as_writable_bytes(std::span(&value, 1))),
+              rocjitsu::amdgpu::VmAccessOutcome::Complete);
+    EXPECT_EQ(value, tail);
+
+    ASSERT_EQ(driver->munmap(view, alloc.size), 0);
+    ASSERT_EQ(driver->mmap_replacing_client_doorbell_views(view, alloc.size, PROT_READ | PROT_WRITE,
+                                                           MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED,
+                                                           -1, 0),
+              view);
+    *reinterpret_cast<uint32_t *>(view + kPage) = 0xDEADBEEF;
+    value = 0;
+    const auto after_unmap =
+        access->read(alloc.va_addr + kPage, std::as_writable_bytes(std::span(&value, 1)));
+    if (flags == KFD_IOC_ALLOC_MEM_FLAGS_VRAM) {
+      EXPECT_EQ(after_unmap, rocjitsu::amdgpu::VmAccessOutcome::Complete);
+      EXPECT_EQ(value, tail);
+    } else {
+      EXPECT_NE(after_unmap, rocjitsu::amdgpu::VmAccessOutcome::Complete);
+    }
+
+    kfd_ioctl_free_memory_of_gpu_args freed{};
+    freed.handle = alloc.handle;
+    ASSERT_EQ(driver->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &freed), 0);
+    value = 0;
+    EXPECT_NE(access->read(alloc.va_addr + kPage, std::as_writable_bytes(std::span(&value, 1))),
+              rocjitsu::amdgpu::VmAccessOutcome::Complete);
+    EXPECT_EQ(driver->close(), 0);
+    EXPECT_EQ(::munmap(view, alloc.size), 0);
+  }
+}
+
+TEST_F(SimulatedKfdTest, FixedRemapOverTailRetiresItsPreviousGpuTranslation) {
+  constexpr size_t kPage = rocjitsu::KfdProcess::kPageSize;
+  for (uint32_t flags : {uint32_t{KFD_IOC_ALLOC_MEM_FLAGS_GTT},
+                         uint32_t{KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC}}) {
+    SCOPED_TRACE(flags);
+    util::StringDiagnostic diagnostic;
+    auto result = create_test_vm(diagnostic.emitter());
+    ASSERT_TRUE(result.succeeded()) << diagnostic.message();
+    auto vm = std::move(result).value();
+    auto *driver = vm.driver();
+    ASSERT_GE(driver->open(), 0);
+
+    kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+    alloc.va_addr = 0x500000000ULL;
+    alloc.size = 2 * kPage;
+    alloc.gpu_id = driver->gpu_id();
+    alloc.flags = flags | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+    ASSERT_EQ(driver->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
+    auto *original =
+        static_cast<uint8_t *>(driver->mmap(nullptr, alloc.size, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                            static_cast<off_t>(alloc.mmap_offset)));
+    ASSERT_NE(original, MAP_FAILED);
+    const auto access = vm.soc()->gpu_vm().snapshot_vmid(driver->local_process_id());
+    ASSERT_TRUE(access);
+    uint32_t tail = 0x12345678;
+    ASSERT_EQ(access->write(alloc.va_addr + kPage, std::as_bytes(std::span(&tail, 1))),
+              rocjitsu::amdgpu::VmAccessOutcome::Complete);
+
+    // A new short view makes the original tail a separate backing record.
+    void *prefix = driver->mmap(nullptr, kPage, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                static_cast<off_t>(alloc.mmap_offset));
+    ASSERT_NE(prefix, MAP_FAILED);
+    ASSERT_EQ(driver->mmap(original + kPage, kPage, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                           static_cast<off_t>(alloc.mmap_offset)),
+              original + kPage);
+    uint32_t value = 0;
+    EXPECT_NE(access->read(alloc.va_addr + kPage, std::as_writable_bytes(std::span(&value, 1))),
+              rocjitsu::amdgpu::VmAccessOutcome::Complete);
+
+    ASSERT_EQ(driver->munmap(original + kPage, kPage), 0);
+    ASSERT_EQ(driver->mmap_replacing_client_doorbell_views(
+                  original + kPage, kPage, PROT_READ | PROT_WRITE,
+                  MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0),
+              original + kPage);
+    *reinterpret_cast<uint32_t *>(original + kPage) = 0xDEADBEEF;
+    EXPECT_NE(access->read(alloc.va_addr + kPage, std::as_writable_bytes(std::span(&value, 1))),
+              rocjitsu::amdgpu::VmAccessOutcome::Complete);
+
+    kfd_ioctl_free_memory_of_gpu_args freed{};
+    freed.handle = alloc.handle;
+    ASSERT_EQ(driver->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &freed), 0);
+    EXPECT_NE(access->read(alloc.va_addr + kPage, std::as_writable_bytes(std::span(&value, 1))),
+              rocjitsu::amdgpu::VmAccessOutcome::Complete);
+    EXPECT_EQ(driver->close(), 0);
+    EXPECT_EQ(::munmap(original + kPage, kPage), 0);
+  }
+}
+
+TEST_F(SimulatedKfdTest, PartialFixedReplacementOfCallerVramAndGttRetiresGpuPages) {
+  constexpr size_t kPage = rocjitsu::KfdProcess::kPageSize;
+  for (uint32_t flags : {uint32_t{KFD_IOC_ALLOC_MEM_FLAGS_GTT},
+                         uint32_t{KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC}}) {
+    SCOPED_TRACE(flags);
+    util::StringDiagnostic diagnostic;
+    auto result = create_test_vm(diagnostic.emitter());
+    ASSERT_TRUE(result.succeeded()) << diagnostic.message();
+    auto vm = std::move(result).value();
+    auto *driver = vm.driver();
+    ASSERT_GE(driver->open(), 0);
+    auto *cpu = static_cast<uint8_t *>(
+        ::mmap(nullptr, 3 * kPage, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+    ASSERT_NE(cpu, MAP_FAILED);
+    *reinterpret_cast<uint32_t *>(cpu) = 0x12345678;
+    *reinterpret_cast<uint32_t *>(cpu + 2 * kPage) = 0x87654321;
+
+    kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+    alloc.va_addr = 0x500000000ULL;
+    alloc.size = 3 * kPage;
+    alloc.gpu_id = driver->gpu_id();
+    alloc.flags = flags | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+    ASSERT_EQ(driver->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
+    ASSERT_EQ(driver->mmap(cpu, alloc.size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                           static_cast<off_t>(alloc.mmap_offset)),
+              cpu);
+    const auto access = vm.soc()->gpu_vm().snapshot_vmid(driver->local_process_id());
+    ASSERT_TRUE(access);
+    uint32_t value = 0;
+    ASSERT_EQ(access->read(alloc.va_addr, std::as_writable_bytes(std::span(&value, 1))),
+              rocjitsu::amdgpu::VmAccessOutcome::Complete);
+    EXPECT_EQ(value, 0x12345678u);
+
+    ASSERT_EQ(driver->mmap_replacing_client_doorbell_views(
+                  cpu + kPage, kPage, PROT_READ | PROT_WRITE,
+                  MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0),
+              cpu + kPage);
+    auto process = driver->find_process(driver->local_process_id());
+    ASSERT_NE(process, nullptr);
+    const auto &fragments = process->allocations_.at(alloc.handle).client_views;
+    ASSERT_EQ(fragments.size(), 2u);
+    EXPECT_EQ(fragments[0].ptr, cpu);
+    EXPECT_EQ(fragments[1].ptr, cpu + 2 * kPage);
+    EXPECT_NE(access->read(alloc.va_addr + kPage, std::as_writable_bytes(std::span(&value, 1))),
+              rocjitsu::amdgpu::VmAccessOutcome::Complete);
+    EXPECT_EQ(access->read(alloc.va_addr + 2 * kPage, std::as_writable_bytes(std::span(&value, 1))),
+              rocjitsu::amdgpu::VmAccessOutcome::Complete);
+    EXPECT_EQ(value, 0x87654321u);
+
+    EXPECT_EQ(driver->close(), 0);
+    unsigned char residency = 0;
+    EXPECT_EQ(::mincore(cpu + kPage, kPage, &residency), 0);
+    EXPECT_EQ(::munmap(cpu, 3 * kPage), 0);
+  }
+}
+
+TEST_F(SimulatedKfdTest, IpcImportRetainsBackingAcrossViewAndReleasesItOnFree) {
+  util::StringDiagnostic diagnostic;
+  auto result = create_test_vm(diagnostic.emitter());
+  ASSERT_TRUE(result.succeeded()) << diagnostic.message();
+  auto vm = std::move(result).value();
+  auto *driver = vm.driver();
+  ASSERT_GE(driver->open(), 0);
+  constexpr size_t kPage = rocjitsu::KfdProcess::kPageSize;
+  kfd_ioctl_alloc_memory_of_gpu_args source{};
+  source.size = 2 * kPage;
+  source.gpu_id = driver->gpu_id();
+  source.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &source), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = source.handle;
+  exported.gpu_id = driver->gpu_id();
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  kfd_ioctl_ipc_import_handle_args imported{};
+  std::memcpy(imported.share_handle, exported.share_handle, sizeof(exported.share_handle));
+  imported.gpu_id = driver->gpu_id();
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_IPC_IMPORT_HANDLE, &imported), 0);
+  auto process = driver->find_process(driver->local_process_id());
+  ASSERT_NE(process, nullptr);
+  const auto &backing = process->allocations_.at(imported.handle);
+  const uint64_t imported_va = backing.gpu_va;
+  void *internal = backing.host_ptr;
+  const auto access = vm.soc()->gpu_vm().snapshot_vmid(driver->local_process_id());
+  ASSERT_TRUE(access);
+  uint32_t value = 0x12345678;
+  ASSERT_EQ(access->write(imported_va + kPage, std::as_bytes(std::span(&value, 1))),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  void *view =
+      driver->mmap(nullptr, kPage, PROT_NONE, MAP_SHARED, static_cast<off_t>(imported.mmap_offset));
+  ASSERT_NE(view, MAP_FAILED);
+  value = 0;
+  EXPECT_EQ(access->read(imported_va + kPage, std::as_writable_bytes(std::span(&value, 1))),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(value, 0x12345678u);
+  uint8_t resident = 0;
+  EXPECT_EQ(::mincore(internal, kPage, &resident), 0);
+
+  kfd_ioctl_free_memory_of_gpu_args freed{};
+  freed.handle = imported.handle;
+  EXPECT_EQ(driver->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &freed), 0);
+  errno = 0;
+  EXPECT_EQ(::mincore(internal, kPage, &resident), -1);
+  EXPECT_EQ(errno, ENOMEM);
+  // The imported backing and its driver-created client view are released at
+  // BO free; caller-owned fixed views remain the caller's responsibility.
+  errno = 0;
+  EXPECT_EQ(::mincore(view, kPage, &resident), -1);
+  EXPECT_EQ(errno, ENOMEM);
+  freed.handle = source.handle;
+  EXPECT_EQ(driver->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &freed), 0);
+  EXPECT_EQ(driver->close(), 0);
+}
+
+TEST_F(SimulatedKfdTest, DaemonBackingIsReleasedOnFree) {
+  util::StringDiagnostic diagnostic;
+  auto result = create_test_vm(diagnostic.emitter());
+  ASSERT_TRUE(result.succeeded()) << diagnostic.message();
+  auto vm = std::move(result).value();
+  rocjitsu::SimulatedKfd daemon(*vm.soc(), true);
+  daemon.setup_topology(vm.loaded.device, vm.soc()->num_xcds(), vm.loaded.pci);
+  const uint32_t process_id = daemon.open_process();
+  ASSERT_NE(process_id, 0u);
+  kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+  alloc.size = 4096;
+  alloc.gpu_id = daemon.gpu_id();
+  alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(daemon.ioctl(process_id, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
+  auto process = daemon.find_process(process_id);
+  ASSERT_NE(process, nullptr);
+  void *backing = process->allocations_.at(alloc.handle).host_ptr;
+  uint8_t resident = 0;
+  ASSERT_EQ(::mincore(backing, alloc.size, &resident), 0);
+  kfd_ioctl_free_memory_of_gpu_args freed{};
+  freed.handle = alloc.handle;
+  EXPECT_EQ(daemon.ioctl(process_id, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &freed), 0);
+  errno = 0;
+  EXPECT_EQ(::mincore(backing, alloc.size, &resident), -1);
+  EXPECT_EQ(errno, ENOMEM);
+  EXPECT_EQ(daemon.close(process_id), 0);
+}
+
 TEST_F(SimulatedKfdTest, ExportedVramKeepsCoherenceAcrossMappings) {
   util::StringDiagnostic t_diagnostic;
   auto t_result = create_test_vm(t_diagnostic.emitter());
@@ -611,6 +1281,7 @@ TEST_F(SimulatedKfdTest, FixedAllocationMmapWaitsForInFlightHostAccesses) {
 
   kfd_ioctl_alloc_memory_of_gpu_args alloc{};
   alloc.va_addr = reinterpret_cast<uint64_t>(target);
+  alloc.mmap_offset = reinterpret_cast<uint64_t>(target);
   alloc.size = page_size;
   alloc.gpu_id = driver->gpu_id();
   alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
@@ -662,6 +1333,7 @@ TEST_F(SimulatedKfdTest, AllocationMunmapWaitsForInFlightHostAccesses) {
 
   kfd_ioctl_alloc_memory_of_gpu_args alloc{};
   alloc.va_addr = reinterpret_cast<uint64_t>(target);
+  alloc.mmap_offset = reinterpret_cast<uint64_t>(target);
   alloc.size = page_size;
   alloc.gpu_id = driver->gpu_id();
   alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
@@ -987,6 +1659,7 @@ TEST_F(SimulatedKfdTest, ContainingDoorbellUnmapRejectsAdjacentAllocation) {
     void *allocation = static_cast<char *>(region) + page_size + (userptr ? 64 : 0);
     kfd_ioctl_alloc_memory_of_gpu_args alloc{};
     alloc.va_addr = userptr ? reinterpret_cast<uint64_t>(allocation) : 0;
+    alloc.mmap_offset = userptr ? reinterpret_cast<uint64_t>(allocation) : 0;
     alloc.size = page_size;
     alloc.gpu_id = driver->gpu_id();
     alloc.flags = (userptr ? KFD_IOC_ALLOC_MEM_FLAGS_USERPTR : KFD_IOC_ALLOC_MEM_FLAGS_GTT) |
@@ -1025,6 +1698,40 @@ TEST_F(SimulatedKfdTest, ContainingDoorbellUnmapRejectsAdjacentAllocation) {
     EXPECT_EQ(value, 41u);
     EXPECT_EQ(driver->close(), 0);
     EXPECT_EQ(::munmap(region, 3 * page_size), 0);
+  }
+  // The second page of an oversized BO view is outside the BO's logical
+  // size, but unmapping it with the adjacent doorbell must still be rejected.
+  for (bool caller_owned : {false, true}) {
+    SCOPED_TRACE(caller_owned);
+    util::StringDiagnostic diagnostic;
+    auto result = create_test_vm(diagnostic.emitter());
+    ASSERT_TRUE(result.succeeded()) << diagnostic.message();
+    auto vm = std::move(result).value();
+    auto *driver = vm.driver();
+    ASSERT_GE(driver->open(), 0);
+    constexpr size_t kPage = rocjitsu::KfdProcess::kPageSize;
+    void *region =
+        ::mmap(nullptr, 4 * kPage, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    ASSERT_NE(region, MAP_FAILED);
+    kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+    alloc.va_addr = caller_owned ? reinterpret_cast<uint64_t>(region) : 0;
+    alloc.size = kPage;
+    alloc.gpu_id = driver->gpu_id();
+    alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+    ASSERT_EQ(driver->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
+    ASSERT_EQ(driver->mmap(region, 2 * kPage, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                           static_cast<off_t>(alloc.mmap_offset)),
+              region);
+    void *doorbell = static_cast<char *>(region) + 2 * kPage;
+    const off_t offset = static_cast<off_t>(rocjitsu::KFD_MMAP_TYPE_DOORBELL |
+                                            rocjitsu::kfd_mmap_gpu_id(driver->gpu_id()));
+    ASSERT_EQ(driver->mmap(doorbell, kPage, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, offset),
+              doorbell);
+    errno = 0;
+    EXPECT_EQ(driver->munmap(static_cast<char *>(region) + kPage, 2 * kPage), -1);
+    EXPECT_EQ(errno, EINVAL);
+    EXPECT_EQ(driver->close(), 0);
+    EXPECT_EQ(::munmap(region, 4 * kPage), 0);
   }
 }
 

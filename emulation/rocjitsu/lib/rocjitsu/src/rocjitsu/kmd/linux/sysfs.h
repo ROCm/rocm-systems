@@ -8,6 +8,7 @@
 #define ROCJITSU_KMD_LINUX_SYSFS_H_
 
 #include "rocjitsu/config/kfd_device_config.h"
+#include "rocjitsu/config/pci_device_config.h"
 
 #include <cstdint>
 #include <string>
@@ -58,6 +59,9 @@ public:
 
     // Memory
     uint64_t local_mem_size = 0;
+    uint64_t visible_vram_size = 0;  ///< CPU-visible VRAM; an explicit PCI aperture can limit it.
+    uint32_t control_stack_size = 0; ///< Control stack bytes per XCC.
+    uint32_t context_save_size = 0;  ///< Context save area bytes per XCC.
     uint32_t vram_type = 6;
     uint32_t lds_size_kb = 64;
     uint32_t mem_width = 4096;   // HBM interface width in bits
@@ -168,7 +172,8 @@ private:
 };
 
 /// @brief Convert a parsed KFD device config into generated sysfs GPU metadata.
-Sysfs::GpuInfo gpu_info_from_config(const config::KfdDeviceConfig &dev, uint32_t num_xcc);
+Sysfs::GpuInfo gpu_info_from_config(const config::KfdDeviceConfig &dev, uint32_t num_xcc,
+                                    const config::PciDeviceConfig &pci = {});
 
 } // namespace rocjitsu
 
