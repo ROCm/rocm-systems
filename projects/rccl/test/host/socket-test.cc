@@ -646,7 +646,8 @@ TEST_F(SocketMicrotest, Init_FailuresCloseTheSocket) {
 TEST_F(SocketMicrotest, Init_SocketCreationFailureClosesNothing) {
   rlimit saved;
   ASSERT_EQ(getrlimit(RLIMIT_NOFILE, &saved), 0);
-  int lowest = dup(0);
+  int lowest = open("/dev/null", O_RDONLY);  // not dup(0): stdin may be closed
+  ASSERT_GE(lowest, 0);
   ::close(lowest);
   rlimit tight = saved;
   tight.rlim_cur = lowest;  // the next descriptor would exceed the limit

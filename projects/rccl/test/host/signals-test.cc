@@ -103,9 +103,13 @@ TEST_F(SignalsMicrotest, Handler_RaisedUsr2ReturnsToTheProgram) {
 }
 
 TEST_F(SignalsMicrotest, Handler_FaultSignalsExitWithMinusOne) {
+  // A fresh process, so LeakSanitizer's exit check finds no leaks from earlier tests and keeps the code.
+  const std::string style = ::testing::GTEST_FLAG(death_test_style);
+  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
   for (int sig : {SIGILL, SIGBUS, SIGFPE, SIGSEGV}) {
     EXPECT_EXIT(sig_handler(sig), ::testing::ExitedWithCode(255), "") << sig;
   }
+  ::testing::GTEST_FLAG(death_test_style) = style;
 }
 
 }  // namespace

@@ -14,6 +14,7 @@
 #include <fcntl.h>
 #include <functional>
 #include <inttypes.h>
+#include <random>
 #include <string>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -38,9 +39,18 @@ bool FdOpen(int fd) { return fcntl(fd, F_GETFD) != -1; }
 
 class LinuxIpcsocketMicrotest : public LinuxTestBase {
  protected:
-  void SetUp() override { hash_ = ((uint64_t)getpid() << 20) ^ ++counter_; }  // unique across concurrent runs
+  // Abstract names are shared by every process in the network namespace, and pids repeat across
+  // containers, so each process draws a random token.
+  void SetUp() override {
+    static const uint64_t token = ((uint64_t)std::random_device{}() << 32 | std::random_device{}()) & ~0xffffull;
+    hash_ = token | (++counter_ & 0xffff);
+    // Close skips descriptor 0, so with stdin closed a socket must not land on it.
+    if (!FdOpen(0)) devNull_ = open("/dev/null", O_RDONLY);
+    ASSERT_TRUE(FdOpen(0));
+  }
   void TearDown() override {
     for (auto* s : {&a_, &b_}) ncclIpcSocketClose(s);
+    if (devNull_ >= 0) close(devNull_);
   }
   std::string Name(int rank) {
     char name[NCCL_IPC_SOCKNAME_LEN];
@@ -71,6 +81,7 @@ class LinuxIpcsocketMicrotest : public LinuxTestBase {
   }
   static uint64_t counter_;
   uint64_t hash_ = 0;
+  int devNull_ = -1;
   ncclIpcSocket a_ = {-1, "", nullptr}, b_ = {-1, "", nullptr};
 };
 uint64_t LinuxIpcsocketMicrotest::counter_ = 0;
