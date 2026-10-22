@@ -205,11 +205,6 @@
           "test_filter": "UBR_MultiSegment.Generic_Reuse"
         },
         {
-          "name": "UBR_MultiSegment_Symmetric_Lsa",
-          "description": "Multi-segment registration on the symmetric-window LSA path (ncclCommWindowRegister, NCCL_WIN_COLL_SYMMETRIC)",
-          "test_filter": "UBR_MultiSegment.Symmetric_Lsa"
-        },
-        {
           "name": "UBR_MultiSegment_Symmetric_Elastic_Lsa",
           "description": "LSA-only elastic buffer: symmetric window with a host-backed trailing segment (NCCL_ELASTIC_BUFFER_REGISTER=1)",
           "test_filter": "UBR_MultiSegment.Symmetric_Elastic_Lsa"
@@ -3116,6 +3111,52 @@
       ]
     },
 
+    "revoke_mpi_tests_dda_ipc": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "IncompleteCollective_DdaIpcAllReduce",
+          "description": "Rank 7 skips DDA-IPC AllReduce so ranks 0-6 wait in IpcGpuBarrier; asserts DDA-IPC via rcclGetCollImplInfo; revoke must unblock stream sync then shrink",
+          "test_filter": "RevokeDdaIpcMPITest.IncompleteCollective_DdaIpcAllReduce"
+        },
+        {
+          "name": "IncompleteCollective_DdaIpcAllReduceTree",
+          "description": "Rank 7 skips a 512 KiB DDA-IPC AllReduce so ranks 0-6 wait in the tree kernel's IpcGpuBarrier; asserts DDA-IPC via rcclGetCollImplInfo; revoke must unblock stream sync then shrink",
+          "test_filter": "RevokeDdaIpcMPITest.IncompleteCollective_DdaIpcAllReduceTree"
+        },
+        {
+          "name": "IncompleteCollective_DdaIpcAllGather",
+          "description": "Rank 7 skips DDA-IPC AllGather so ranks 0-6 wait in IpcGpuBarrier; asserts DDA-IPC via rcclGetCollImplInfo; revoke must unblock stream sync then shrink",
+          "test_filter": "RevokeDdaIpcMPITest.IncompleteCollective_DdaIpcAllGather"
+        },
+        {
+          "name": "IncompleteCollective_DdaIpcReduceScatter",
+          "description": "Rank 7 skips DDA-IPC ReduceScatter so ranks 0-6 wait in IpcGpuBarrier; asserts DDA-IPC via rcclGetCollImplInfo; revoke must unblock stream sync then shrink",
+          "test_filter": "RevokeDdaIpcMPITest.IncompleteCollective_DdaIpcReduceScatter"
+        },
+        {
+          "name": "IncompleteCollective_DdaIpcAlltoAll",
+          "description": "Rank 7 skips DDA-IPC AlltoAll so ranks 0-6 wait in IpcGpuBarrier; asserts DDA-IPC via rcclGetCollImplInfo; revoke must unblock stream sync then shrink",
+          "test_filter": "RevokeDdaIpcMPITest.IncompleteCollective_DdaIpcAlltoAll"
+        },
+        {
+          "name": "ShrinkAbort_DisablesDdaOnParent",
+          "description": "NCCL_SHRINK_ABORT on an 8-rank DDA-IPC parent: the parent stops selecting DDA and the 7-rank child AllReduce succeeds",
+          "test_filter": "RevokeDdaIpcMPITest.ShrinkAbort_DisablesDdaOnParent"
+        }
+      ]
+    },
+
     "revoke_mpi_tests_multinode": {
       "extends": "default",
       "is_gtest": true,
@@ -3634,6 +3675,96 @@
       ]
     },
 
+    "ce_allreduce_lsa_guard": {
+      "extends": "ce_base",
+      "num_ranks": 4,
+      "num_gpus": 4,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_LSA_TEAM_SIZE": "2",
+        "RCCL_CE_ALLREDUCE": "1",
+        "RCCL_FORCE_CE_ALLREDUCE": "1"
+      },
+      "tests": [
+        {
+          "name": "CE_AllReduce_LsaGuard_SplitLsaTeam",
+          "description": "One node, 4 ranks, LSA team of 2: ncclCeAllReduce rejects before staging or launch (single-step and pipelined), the comm stays usable, and forced CE AllReduce is never selected",
+          "test_filter": "CeAllReduceLsaGuardTest.*"
+        }
+      ]
+    },
+    "ce_allreduce_spanning_lsa": {
+      "extends": "ce_base",
+      "num_ranks": 4,
+      "num_gpus": 4,
+      "timeout": 300,
+      "env_variables": {
+        "RCCL_CE_ALLREDUCE": "1",
+        "RCCL_FORCE_CE_ALLREDUCE": "1"
+      },
+      "tests": [
+        {
+          "name": "CE_AllReduce_SpanningLsa_ForcedUnregistered",
+          "description": "One node, 4 ranks, one LSA team: forced CE AllReduce on unregistered buffers selects CE before staging exists, allocates staging, and returns the correct sum",
+          "test_filter": "CeAllReduceSpanningLsaTest.*"
+        }
+      ]
+    },
+    "ce_allreduce_lsa_guard_multinode": {
+      "extends": "ce_base",
+      "num_ranks": 4,
+      "num_nodes": 2,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_IB_DISABLE": "0",
+        "RCCL_CE_ALLREDUCE": "1",
+        "RCCL_FORCE_CE_ALLREDUCE": "1"
+      },
+      "tests": [
+        {
+          "name": "CE_AllReduce_LsaGuard_MultiNode",
+          "description": "Two nodes, 2 ranks each: ncclCeAllReduce rejects before staging or launch (single-step and pipelined), the comm stays usable, and forced CE AllReduce is never selected",
+          "test_filter": "CeAllReduceLsaGuardTest.*"
+        }
+      ]
+    },
+    "ce_allreduce_recv_offset": {
+      "extends": "ce_base",
+      "num_ranks": 2,
+      "num_gpus": 2,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_DEBUG_SUBSYS": "INIT,COLL,REG",
+        "NCCL_LOCAL_REGISTER": "1",
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "NCCL_WIN_ENABLE": "1",
+        "RCCL_CE_ALLREDUCE": "1",
+        "RCCL_FORCE_CE_ALLREDUCE": "1"
+      },
+      "tests": [
+        {
+          "name": "CE_RecvOffset_Symmetric_Lsa",
+          "description": "Registered CE AllReduce into a multi-segment symmetric window at a non-zero receive offset uses the window-relative offset",
+          "test_filter": "UBR_MultiSegment.Symmetric_Lsa"
+        },
+        {
+          "name": "CE_RecvOffset_BeforeLegacyRecvOffsetCorruptsResult",
+          "description": "BEFORE control: fault injection restores the legacy base-relative offset and the result must be corrupted (ENABLE_FAULT_INJECTION build)",
+          "test_filter": "UBR_MultiSegment.Symmetric_Lsa_BeforeLegacyRecvOffsetCorruptsResult"
+        },
+        {
+          "name": "CE_RecvOffset_RecvRangePastWindowFallsBack",
+          "description": "Receive range past the window tail disables the registered CE fast path and falls back to staging",
+          "test_filter": "UBR_MultiSegment.Symmetric_Lsa_RecvRangePastWindowFallsBack"
+        },
+        {
+          "name": "CE_RecvOffset_RecvRangePastWindowChunkedFallback",
+          "description": "Chunked registered CE AllReduce whose receive range runs past the window tail falls back to staging for every chunk",
+          "test_filter": "UBR_MultiSegment.Symmetric_Lsa_RecvRangePastWindowChunkedFallback"
+        }
+      ]
+    },
     "ce_fault_injection": {
       "extends": "ce_base",
       "num_ranks": 2,
@@ -5441,6 +5572,12 @@
       "enabled": true
     },
     {
+      "name": "Revoke MPI Tests - DDA IPC (8-rank, single-node)",
+      "description": "ncclCommRevoke unblocks ranks spinning in the DDA-IPC IpcGpuBarrier for AllReduce, AllGather, ReduceScatter and AlltoAll when one rank skips the collective",
+      "config": "revoke_mpi_tests_dda_ipc",
+      "enabled": true
+    },
+    {
       "name": "Revoke MPI Tests - Multi-Node (4-rank, 2-node)",
       "description": "ncclCommRevoke multi-node scenarios: asymmetric shrink across nodes (ring-only topology after revoke) and repeated revoke/shrink generations to verify no leaked resources",
       "config": "revoke_mpi_tests_multinode",
@@ -5522,6 +5659,30 @@
       "name": "CE Internal Tests (white-box, Debug build only)",
       "description": "White-box CE internal function tests (ncclCeInit, ncclPrepUCSync, ncclCeLaunchBatchOps). Requires Debug build for symbol visibility. Skips on unsupported driver version.",
       "config": "ce_internal",
+      "enabled": true
+    },
+    {
+      "name": "CE AllReduce LSA Guard (split LSA team, single node)",
+      "description": "ncclCeAllReduce must reject a comm whose LSA team does not span it before staging or any launch. Runs on one node with NCCL_LSA_TEAM_SIZE=2 at 4 ranks.",
+      "config": "ce_allreduce_lsa_guard",
+      "enabled": true
+    },
+    {
+      "name": "CE AllReduce Spanning LSA (forced unregistered, single node)",
+      "description": "One node, 4 ranks, one LSA team: forced CE AllReduce on unregistered buffers selects CE before staging exists, allocates staging, and returns the correct sum",
+      "config": "ce_allreduce_spanning_lsa",
+      "enabled": true
+    },
+    {
+      "name": "CE AllReduce LSA Guard (multi-node)",
+      "description": "ncclCeAllReduce must reject a comm spanning two nodes before staging or any launch; forced CE AllReduce must never be selected.",
+      "config": "ce_allreduce_lsa_guard_multinode",
+      "enabled": true
+    },
+    {
+      "name": "CE AllReduce Receive Offset (registered CE, single node)",
+      "description": "Registered CE AllReduce into multi-segment symmetric windows: receive-offset AFTER/BEFORE regression and past-window staging fallback.",
+      "config": "ce_allreduce_recv_offset",
       "enabled": true
     },
     {

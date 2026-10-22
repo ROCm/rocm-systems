@@ -10,6 +10,7 @@
 
 use super::{madvise, page_size};
 use crate::os::linux::{invalid_data, process_identity::check_process};
+use crate::os::native_error;
 use libc::{
     MADV_DONTFORK, MAP_ANONYMOUS, MAP_FIXED, MAP_NORESERVE, MAP_PRIVATE, MAP_SHARED, PROT_NONE,
     PROT_READ, PROT_WRITE, mmap, munmap,
@@ -309,6 +310,12 @@ impl Reservation {
         self.length != 0
     }
 
+    /// Whether this owner still holds a writable CPU mapping, rather than an
+    /// inaccessible address reservation or a view into another owner.
+    pub(crate) fn has_writable_mapping(&self) -> bool {
+        self.is_live() && self.writable && !self.restore_on_release
+    }
+
     /// Prevents a live mapping from being inherited across `fork`.
     pub(crate) fn dont_fork(&self) -> io::Result<()> {
         check_process(self.process)?;
@@ -537,7 +544,20 @@ impl Drop for Reservation {
         // The resource owner forgets this reservation if GPU cleanup fails.
         // Reaching this destructor means only CPU address ownership remains.
         if self.length != 0 || self.restore_on_release {
-            let _ = self.release();
+            if let Err(source) = self.release() {
+                // An unpublished reservation can be discarded during an AMDF
+                // memory constructor. Its failed unmap is independent of the
+                // construction error and must reach the release record.
+                let payload = if self.has_writable_mapping() {
+                    u64::try_from(self.size).unwrap_or(u64::MAX)
+                } else {
+                    0
+                };
+                crate::memory::device::record_rollback(
+                    native_error("reservation rollback munmap", source),
+                    payload,
+                );
+            }
         }
     }
 }

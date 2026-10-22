@@ -34,7 +34,7 @@ pub unsafe extern "C" fn hsa_amd_ipc_memory_create(
             return INVALID_ARGUMENT;
         };
         let exported = match linux_interop::export_kfd_ipc_memory(&memory.allocation) {
-            Ok(handle) => handle.words(),
+            Ok(handle) => handle.words,
             Err(error) => return map_error(error),
         };
         // SAFETY: The caller supplied writable output storage and publication
@@ -132,7 +132,7 @@ pub unsafe extern "C" fn hsa_amd_ipc_memory_attach(
                 &runtime.session,
                 &devices,
                 &mapping_devices,
-                IpcMemoryHandle::from_words(words),
+                IpcMemoryHandle { words },
                 size as u64,
             ) {
                 Ok(allocation) => allocation,

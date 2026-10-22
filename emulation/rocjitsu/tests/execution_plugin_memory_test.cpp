@@ -46,7 +46,8 @@ public:
 };
 
 TEST(ExecutionPluginTest, MemoryPipelineCompletionDoesNotObserveInstructionWrite) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -77,7 +78,8 @@ TEST(ExecutionPluginTest, MemoryPipelineCompletionDoesNotObserveInstructionWrite
 }
 
 TEST(ExecutionPluginTest, MemoryPipelineWideDwordCompletionWritesSparseLanesDirectly) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -127,7 +129,8 @@ TEST(ExecutionPluginTest, MemoryPipelineWideDwordCompletionWritesSparseLanesDire
 }
 
 TEST(ExecutionPluginTest, FlatStoreDwordx4ReportsEverySourceRegisterAndActiveLane) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -169,7 +172,8 @@ TEST(ExecutionPluginTest, FlatStoreDwordx4ReportsEverySourceRegisterAndActiveLan
 }
 
 TEST(ExecutionPluginTest, MemoryPipelineHoldsDecodedCountersUntilCompletion) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *wf = f.cu()->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
   ASSERT_NE(wf, nullptr);
 
@@ -186,7 +190,8 @@ TEST(ExecutionPluginTest, MemoryPipelineHoldsDecodedCountersUntilCompletion) {
 }
 
 TEST(ExecutionPluginTest, MemoryPipelineHoldsDecodedStoreCountersUntilCompletion) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *wf = f.cu()->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
   ASSERT_NE(wf, nullptr);
 
@@ -209,7 +214,8 @@ TEST(ExecutionPluginTest, MemoryPipelineHoldsDecodedStoreCountersUntilCompletion
 }
 
 TEST(ExecutionPluginTest, MemoryPipelineHonorsWideScalarCounterIncrement) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *wf = f.cu()->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
   ASSERT_NE(wf, nullptr);
 
@@ -227,8 +233,9 @@ TEST(ExecutionPluginTest, MemoryPipelineHonorsWideScalarCounterIncrement) {
 
 TEST(ExecutionPluginTest, MemoryPipelineCompletionDoesNotCrossWaveVgprBlock) {
   constexpr uint32_t kVgprsPerWave = 16;
-  PluginFixture f(/*num_wf_slots=*/2, /*arch=*/"rdna4", /*wavefront_size=*/32,
-                  /*sgprs_per_wf=*/128, kVgprsPerWave);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/2, /*arch=*/"rdna4", /*wavefront_size=*/32,
+                                       /*sgprs_per_wf=*/128, kVgprsPerWave));
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/128, kVgprsPerWave, 32);
   auto *adjacent = cu->dispatch_wf(1, 0, /*sgprs=*/128, kVgprsPerWave, 32);
@@ -263,8 +270,9 @@ TEST(ExecutionPluginTest, MemoryPipelineCompletionDoesNotCrossWaveVgprBlock) {
 
 TEST(ExecutionPluginTest, DualOffsetCompletionRejectsBothDestinationsBeforeWriteback) {
   constexpr uint32_t kVgprsPerWave = 16;
-  PluginFixture f(/*num_wf_slots=*/2, /*arch=*/"rdna4", /*wavefront_size=*/32,
-                  /*sgprs_per_wf=*/128, kVgprsPerWave);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/2, /*arch=*/"rdna4", /*wavefront_size=*/32,
+                                       /*sgprs_per_wf=*/128, kVgprsPerWave));
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/128, kVgprsPerWave, 32);
   auto *adjacent = cu->dispatch_wf(1, 0, /*sgprs=*/128, kVgprsPerWave, 32);
@@ -312,8 +320,9 @@ TEST(ExecutionPluginTest, DualOffsetLoadsPreserveSparsePhysicalDestinations) {
   for (const auto arch : {std::string_view{"cdna4"}, std::string_view{"cdna5"}}) {
     const uint32_t wave = arch == "cdna4" ? 64 : 32;
     const uint64_t wave_mask = wave == 64 ? ~uint64_t{0} : 0xffffffffull;
-    PluginFixture f(/*num_wf_slots=*/1, arch, wave, /*sgprs_per_wf=*/104,
-                    /*vgprs_per_wf=*/256);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1, arch, wave, /*sgprs_per_wf=*/104,
+                                         /*vgprs_per_wf=*/256));
     auto *cu = f.cu();
     auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256, wave);
     ASSERT_NE(wf, nullptr);
@@ -377,8 +386,9 @@ TEST(ExecutionPluginTest, DualOffsetLoadsRejectThePhysicalBlockBoundary) {
   constexpr uint32_t kSentinel = 0xa55a'3cc3u;
   for (const auto arch : {std::string_view{"cdna4"}, std::string_view{"cdna5"}}) {
     const uint32_t wave = arch == "cdna4" ? 64 : 32;
-    PluginFixture f(/*num_wf_slots=*/2, arch, wave, /*sgprs_per_wf=*/104,
-                    /*vgprs_per_wf=*/256);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/2, arch, wave, /*sgprs_per_wf=*/104,
+                                         /*vgprs_per_wf=*/256));
     auto *cu = f.cu();
     auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256, wave);
     auto *adjacent = cu->dispatch_wf(1, 0, /*sgprs=*/104, /*vgprs=*/256, wave);
@@ -419,8 +429,9 @@ TEST(ExecutionPluginTest, EmptyDualLoadDoesNotMaterializeSecondDestination) {
     for (uint32_t bank : {0u, 256u}) {
       if (arch != "cdna4" && bank != 0)
         continue;
-      PluginFixture f(/*num_wf_slots=*/1, arch, wave, /*sgprs_per_wf=*/104,
-                      /*vgprs_per_wf=*/256);
+      PluginFixture f;
+      ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1, arch, wave, /*sgprs_per_wf=*/104,
+                                           /*vgprs_per_wf=*/256));
       using Cu = IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, Isa>;
       auto *cu = static_cast<Cu *>(f.cu());
       auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256, wave);
@@ -458,7 +469,8 @@ TEST(ExecutionPluginTest, EmptyDualLoadDoesNotMaterializeSecondDestination) {
 }
 
 TEST(ExecutionPluginTest, ScalarMemoryCompletionDoesNotObserveInstructionWrite) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -515,7 +527,9 @@ TEST(ExecutionPluginTest, ScalarMemoryCompletionDoesNotObserveInstructionWrite) 
 
 TEST(ExecutionPluginTest, Gfx1250ScalarMemoryRoutesSpecialSelectorsAtNonzeroSgprBase) {
   constexpr uint32_t kSgprsPerWave = 128;
-  PluginFixture f(/*num_wf_slots=*/2, /*arch=*/"cdna5", /*wavefront_size=*/32, kSgprsPerWave);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(
+      f.initialize(/*num_wf_slots=*/2, /*arch=*/"cdna5", /*wavefront_size=*/32, kSgprsPerWave));
   auto *cu = f.cu();
   auto *first = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, kSgprsPerWave, /*vgprs=*/32);
   auto *wf = cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0, kSgprsPerWave, /*vgprs=*/32);
@@ -598,7 +612,8 @@ TEST(ExecutionPluginTest, Gfx1250ScalarMemoryRoutesSpecialSelectorsAtNonzeroSgpr
 }
 
 TEST(ExecutionPluginTest, ScalarMemoryRejectsDestinationThatCrossesTtmpFile) {
-  PluginFixture f(/*num_wf_slots=*/2);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/2));
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
   auto *adjacent = cu->dispatch_wf(1, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -625,7 +640,8 @@ TEST(ExecutionPluginTest, ScalarMemoryRejectsDestinationThatCrossesTtmpFile) {
 }
 
 TEST(ExecutionPluginTest, MemoryPipelinesSnapshotDispatchIdentityAtIssue) {
-  PluginFixture f(/*num_wf_slots=*/4);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/4));
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf_at(/*wf_id=*/3, /*wg_id=*/17, /*pc=*/0, /*num_sgprs=*/104,
                                 /*num_vgprs=*/256);
@@ -651,7 +667,9 @@ TEST(ExecutionPluginTest, MemoryPipelinesSnapshotDispatchIdentityAtIssue) {
 }
 
 TEST(ExecutionPluginTest, D16MemoryCompletionPreservesHalfWithoutObservation) {
-  PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"rdna4", /*wavefront_size=*/32);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(
+      f.initialize(/*num_wf_slots=*/1, /*arch=*/"rdna4", /*wavefront_size=*/32));
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -697,6 +715,7 @@ TEST(ExecutionPluginTest, D16MemoryCompletionPreservesHalfWithoutObservation) {
 
 TEST(RoutedMemoryObservationTest, AScalarAccessCarriesItsFullIdentity) {
   PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize());
   auto *plugin = fixture.attach_memory_observation_plugin();
   auto *cu = fixture.cu();
   auto *wave = cu->dispatch_wf_at(/*wf_id=*/3, /*wg_id=*/17, /*pc=*/0x240,
@@ -752,6 +771,7 @@ TEST(RoutedMemoryObservationTest, AFlatAccessToTheSharedApertureIsSeenAsTheLdsAc
   // counter changed. An observer that looked before routing would charge it
   // against the vector cache, at an address the memory system never uses.
   PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize());
   auto *plugin = fixture.attach_memory_observation_plugin();
   auto *cu = fixture.cu();
   constexpr uint64_t kSharedBase = 0x1000'0000;
@@ -803,8 +823,9 @@ TEST(RoutedMemoryObservationTest, AFlatAccessToTheSharedApertureIsSeenAsTheLdsAc
 }
 
 TEST(RoutedMemoryObservationTest, AFlatAccessSeparatesDdsFromLdsLanes) {
-  PluginFixture fixture(/*num_wf_slots=*/2, /*arch=*/"cdna5", /*wavefront_size=*/32,
-                        /*sgprs_per_wf=*/128);
+  PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/2, /*arch=*/"cdna5",
+                                             /*wavefront_size=*/32, /*sgprs_per_wf=*/128));
   auto *plugin = fixture.attach_memory_observation_plugin();
   auto *cu = fixture.cu();
   constexpr uint64_t kSharedBase = 0x1234'0000'0000'0000;
@@ -865,6 +886,7 @@ TEST(RoutedMemoryObservationTest, MixedFlatReportsEffectiveAddressesWithoutChang
   for (uint32_t global_lane : {0u, 1u}) {
     SCOPED_TRACE(global_lane);
     PluginFixture fixture;
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize());
     auto *plugin = fixture.attach_memory_observation_plugin();
     auto *cu = fixture.cu();
     constexpr uint64_t kSharedBase = 0x1000'0000;
@@ -919,6 +941,7 @@ TEST(RoutedMemoryObservationTest, MixedFlatReportsEffectiveAddressesWithoutChang
 
 TEST(RoutedMemoryObservationTest, AnExplicitGlobalAccessIgnoresTheSharedAperture) {
   PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize());
   auto *plugin = fixture.attach_memory_observation_plugin();
   auto *cu = fixture.cu();
   constexpr uint64_t kSharedBase = 0x1000'0000;
@@ -951,7 +974,8 @@ TEST(RoutedMemoryObservationTest, AnExplicitGlobalAccessIgnoresTheSharedAperture
 
 TEST(RoutedMemoryObservationTest, DecodedDirectLdsLoadsReportBroadcastMaskAndWidth) {
   for (auto arch : {"rdna3", "rdna3_5", "rdna4"}) {
-    PluginFixture fixture(1, arch, 32);
+    PluginFixture fixture;
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize(1, arch, 32));
     auto *plugin = fixture.attach_memory_observation_plugin();
     auto *cu = fixture.cu();
     // Seed the whole stream before the CU fills its instruction cache.
@@ -996,6 +1020,7 @@ TEST(RoutedMemoryObservationTest, AnLdsAccessThatWasAlwaysLdsIsNotMarkedNormaliz
   // The counterpart to the case above: a consumer separating "traffic that is
   // really LDS" from "traffic rewritten into LDS" needs the two to differ.
   PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize());
   auto *plugin = fixture.attach_memory_observation_plugin();
   auto *cu = fixture.cu();
   auto *wave = cu->dispatch_wf(/*wg_id=*/5, /*pc=*/0x400, /*sgprs=*/104, /*vgprs=*/256);
@@ -1037,6 +1062,7 @@ TEST(RoutedMemoryObservationTest, AnLdsAccessThatWasAlwaysLdsIsNotMarkedNormaliz
 
 TEST(RoutedMemoryObservationTest, AGlobalAtomicReportsItsOperationScratchAndPolicy) {
   PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize());
   auto *plugin = fixture.attach_memory_observation_plugin();
   auto *cu = fixture.cu();
   auto *wave = cu->dispatch_wf_at(/*wf_id=*/2, /*wg_id=*/11, /*pc=*/0x380,
@@ -1090,6 +1116,7 @@ TEST(RoutedMemoryObservationTest, AGlobalAtomicReportsItsOperationScratchAndPoli
 
 TEST(RoutedMemoryObservationTest, DedicatedScratchIsDistinctFromFlatScratch) {
   PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize());
   auto *plugin = fixture.attach_memory_observation_plugin();
   auto *cu = fixture.cu();
   auto *wave = cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0x3C0, /*sgprs=*/104, /*vgprs=*/256);
@@ -1124,6 +1151,7 @@ TEST(RoutedMemoryObservationTest, ANonScratchAccessReportsNoSwizzleStride) {
   // scratch_addr_stride is left set by whatever last used the state, so the
   // observation has to gate it on the swizzle flag rather than copy it.
   PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize());
   auto *plugin = fixture.attach_memory_observation_plugin();
   auto *cu = fixture.cu();
   auto *wave = cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0x500, /*sgprs=*/104, /*vgprs=*/256);
@@ -1153,7 +1181,9 @@ TEST(RoutedMemoryObservationTest, TheLaneCountIsTheWavefrontsOwn) {
   // VectorMemState's wf_size defaults to 64 whatever the target, so a
   // wave32 access would otherwise be reported with thirty-two lanes of
   // whatever the array happened to hold.
-  PluginFixture fixture(/*num_wf_slots=*/1, /*arch=*/"rdna4", /*wavefront_size=*/32);
+  PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(
+      fixture.initialize(/*num_wf_slots=*/1, /*arch=*/"rdna4", /*wavefront_size=*/32));
   auto *plugin = fixture.attach_memory_observation_plugin();
   auto *cu = fixture.cu();
   auto *wave = cu->dispatch_wf(/*wg_id=*/5, /*pc=*/0x440, /*sgprs=*/104, /*vgprs=*/256);
@@ -1185,6 +1215,7 @@ TEST(RoutedMemoryObservationTest, ATransposeLoadRequestsFromFewerLanesThanItFill
   // through the low half, so a model that charged traffic per valid lane would
   // double it. Its effective all-lane execution must not erase incoming EXEC.
   PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize());
   auto *plugin = fixture.attach_memory_observation_plugin();
   auto *cu = fixture.cu();
   auto *wave = cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0x700, /*sgprs=*/104, /*vgprs=*/256);
@@ -1215,6 +1246,7 @@ TEST(RoutedMemoryObservationTest, TheTransposeRequestMaskUsesTheWavefrontsWidth)
   // routing, so it can still hold whatever the last user left. The wavefront
   // is the authority; the state is not.
   PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize());
   auto *plugin = fixture.attach_memory_observation_plugin();
   auto *cu = fixture.cu();
   auto *wave = cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0x740, /*sgprs=*/104, /*vgprs=*/256);
@@ -1242,6 +1274,7 @@ TEST(RoutedMemoryObservationTest, PerElementBoundsAndCachePolicyAreCarried) {
   // not moves fewer bytes than its element count suggests, and the cache
   // policy decides which levels it even touches. Both travel with the access.
   PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize());
   auto *plugin = fixture.attach_memory_observation_plugin();
   auto *cu = fixture.cu();
   auto *wave = cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0x780, /*sgprs=*/104, /*vgprs=*/256);
@@ -1279,6 +1312,7 @@ TEST(RoutedMemoryObservationTest, ASingleAccessCarriesNoSecondAddressSet) {
   // an empty second set rather than a stale array of zeroes, which a consumer
   // would otherwise take for sixty-four accesses to address zero.
   PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize());
   auto *plugin = fixture.attach_memory_observation_plugin();
   auto *cu = fixture.cu();
   auto *wave = cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0x7C0, /*sgprs=*/104, /*vgprs=*/256);
@@ -1306,6 +1340,7 @@ TEST(RoutedMemoryObservationTest, APluginThatDoesNotWantTheHookDoesNotPayForIt) 
   // plugin that never implements the hook -- which is every plugin in the tree
   // but one -- should not be charged for it.
   PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize());
   auto *ordering = fixture.attach_ordering_plugin();
   ASSERT_NE(ordering, nullptr);
   EXPECT_FALSE(fixture.plugin_group().observes_memory_routing());
@@ -1322,6 +1357,7 @@ TEST(RoutedMemoryObservationTest, APluginThatDoesNotWantTheHookDoesNotPayForIt) 
   // this, deleting the guard and building an observation for every memory
   // instruction would pass the whole suite.
   PluginFixture declining;
+  ASSERT_NO_FATAL_FAILURE(declining.initialize());
   auto *quiet = declining.attach_memory_observation_plugin(/*wants_hook=*/false);
   EXPECT_FALSE(declining.plugin_group().observes_memory_routing());
   auto *cu = declining.cu();
@@ -1365,6 +1401,7 @@ TEST(RoutedMemoryObservationTest, AnUnroutableAccessIsReportedRatherThanDropped)
   // model counting a kernel's memory traffic has to be able to see that there
   // was an access it cannot account for.
   PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize());
   auto *plugin = fixture.attach_memory_observation_plugin();
   auto *cu = fixture.cu();
   auto *wave = cu->dispatch_wf(/*wg_id=*/2, /*pc=*/0x600, /*sgprs=*/104, /*vgprs=*/256);
@@ -1409,7 +1446,9 @@ TEST(ExecutionPluginTest, MemoryPipelineFlatCountersFollowRoutedRequests) {
           const bool cdna_legacy = arch == "cdna2" || arch == "cdna4";
           const bool split = arch == "rdna4" || arch == "cdna5";
           const uint32_t wave_size = cdna_legacy ? 64 : 32;
-          PluginFixture f(1, std::string(arch), wave_size, cdna_legacy ? 104 : 128);
+          PluginFixture f;
+          ASSERT_NO_FATAL_FAILURE(
+              f.initialize(1, std::string(arch), wave_size, cdna_legacy ? 104 : 128));
           auto *observer = f.attach_memory_observation_plugin();
           auto *cu = f.cu();
           constexpr uint64_t shared = 0x0001'0000'0000'0000ULL;
