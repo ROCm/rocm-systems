@@ -745,6 +745,40 @@ intended for debugging and development purposes.
         | ``ALL``: disable caching for every parameter except
           ``NCCL_NO_CACHE``.
 
+Graph capture
+=============
+
+RCCL operations can be captured into HIP graphs. Mixing captured and
+non-captured operations on a communicator is supported only when the
+communicator is configured for it, which is not the default.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40,60
+
+    * - **Environment variable**
+      - **Values**
+
+    * - | ``NCCL_GRAPH_MIXING_SUPPORT``
+        | Enables or disables support for graph mixing: launching several
+          graphs that use the same communicator concurrently, or issuing a
+          non-captured RCCL operation while a graph launch on that
+          communicator is outstanding. Communicators that share resources
+          through ``ncclCommSplit`` count as the same communicator. Mixing is
+          supported only when every communicator involved has
+          ``graphUsageMode`` set to ``2`` in ``ncclConfig_t``.
+        | When set, this variable overrides ``graphUsageMode`` on every
+          communicator. Do not combine ``1`` with
+          ``NCCL_GRAPH_STREAM_ORDERING=0``.
+      - | ``0``: Disabled. Sets ``graphUsageMode`` to ``0``, under which
+          capturing RCCL operations is not supported.
+        | ``1``: Enabled. Sets ``graphUsageMode`` to ``2``.
+        | Default: unset. Each communicator's ``graphUsageMode`` applies,
+          which defaults to ``0``, so mixing is disabled. Other values are
+          ignored.
+        | To use graphs without mixing, leave this variable unset and set
+          ``graphUsageMode`` to ``1``.
+
 Multi-communicator ordering
 ===========================
 

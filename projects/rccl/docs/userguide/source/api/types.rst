@@ -301,18 +301,16 @@ ncclConfig_t
 
   Set the graph usage mode for the communicator: 0 (no graphs), 1 (one graph)
   or 2 (either multiple graphs or a mix of graph and non-graph). In RCCL the
-  default is 0; upstream NCCL defaults to 2.
+  default is 0.
 
   Only 2 turns on graph mixing support, and only when every communicator
   involved uses it. :ref:`NCCL_GRAPH_MIXING_SUPPORT` describes what that
   support covers and how the variable, when set to ``0`` or ``1``, overrides
   this field.
 
-  Capturing collectives in mode 0 is accepted by the API but not supported:
-  RCCL logs an INFO message (visible with ``NCCL_DEBUG=INFO``) for each
-  captured call, saying that it violates ``graphUsageMode`` and can lead to
-  hangs. A communicator used from CUDA graphs should therefore set 1 (one
-  graph at a time) or 2.
+  Capturing collectives in mode 0 is accepted by the API but not supported and
+  can lead to hangs. A communicator used from graphs should therefore set 1
+  (one graph at a time) or 2.
 
   Mode 2 cannot be combined with capture-time stream ordering disabled; see
   :c:macro:`graphStreamOrdering`.
@@ -333,14 +331,13 @@ ncclConfig_t
   ``0`` or ``1`` overrides this field.
 
   ``graphStreamOrdering=0`` requires ``graphUsageMode`` ``0`` or ``1``
-  (mixing **off**). If it is combined with ``graphUsageMode=2``, NCCL logs an
+  (mixing **off**). If it is combined with ``graphUsageMode=2``, RCCL logs an
   INFO message (visible with ``NCCL_DEBUG=INFO``) and forces ``graphStreamOrdering`` to ``1``; communicator creation
-  still succeeds. See :ref:`NCCL_GRAPH_STREAM_ORDERING`. NCCL applies this
-  fallback when it parses a communicator's config, and within that
-  communicator only. A child created with a ``NULL`` config by
-  ``ncclCommSplit``, ``ncclCommShrink`` or ``ncclCommGrow`` inherits its
-  parent's resolved values instead, so with :ref:`NCCL_GRAPH_STREAM_ORDERING`
-  ``0`` it can end up in the unsupported combination undiagnosed. Communicators
+  still succeeds. See :ref:`NCCL_GRAPH_STREAM_ORDERING`. Do not rely on this
+  fallback: keep the two settings apart on every communicator, including those
+  created by ``ncclCommSplit``, ``ncclCommShrink`` or ``ncclCommGrow`` without
+  a config, which inherit their parent's settings. RCCL enforces this
+  compatibility fallback within a single communicator only. Communicators
   created by ``ncclCommSplit`` with ``splitShare`` share one internal
   serialization event with their parent, so ordering ``0`` on one and
   ``graphUsageMode=2`` on another that shares those resources is equally

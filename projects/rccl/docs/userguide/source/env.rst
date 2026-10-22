@@ -1804,17 +1804,16 @@ leaves the field in effect.
 
 ``graphUsageMode=2`` cannot be combined with :ref:`NCCL_GRAPH_STREAM_ORDERING`
 ``0`` (see :c:macro:`graphStreamOrdering <ncclConfig_t.graphStreamOrdering>`).
-NCCL falls back to ``graphStreamOrdering=1`` when it parses a communicator's
-config. A child created with a ``NULL`` config by ``ncclCommSplit``,
-``ncclCommShrink`` or ``ncclCommGrow`` inherits its parent's resolved values
-instead, so with ``NCCL_GRAPH_STREAM_ORDERING=0`` it can end up in that
-combination without a diagnostic.
+Do not rely on the fallback described there: keep the two settings apart on
+every communicator, including those created by ``ncclCommSplit``,
+``ncclCommShrink`` or ``ncclCommGrow`` without a config, which inherit their
+parent's settings.
 
 Value accepted
 ^^^^^^^^^^^^^^
 0 or 1. Unset by default, in which case the communicator's ``graphUsageMode``
 applies. In RCCL that defaults to ``0``, so graph mixing support is
-**disabled** by default (upstream NCCL enables it).
+**disabled** by default.
 
 .. _NCCL_GRAPH_STREAM_ORDERING:
 
@@ -1831,7 +1830,7 @@ CUDA graph capture.
 .. warning::
 
    ``NCCL_GRAPH_STREAM_ORDERING=0`` together with **graph mixing** (communicator
-   ``graphUsageMode=2``; see :ref:`ncclconfig`) is **not supported**. NCCL logs
+   ``graphUsageMode=2``; see :ref:`ncclconfig`) is **not supported**. RCCL logs
    an INFO message (visible with ``NCCL_DEBUG=INFO``), forces ``graphStreamOrdering`` to ``1``, and continues communicator
    creation successfully. If stream ordering is disabled for a communicator,
    **graph mixing must be off**—use ``graphUsageMode`` ``0`` or ``1`` (and note
