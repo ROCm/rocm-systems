@@ -640,6 +640,9 @@ RocJpegStatus RocJpegDecoder::DecodeBatchedSync(RocJpegImage *destinations, int 
  * This function retrieves the number of components, chroma subsampling, widths, and heights
  * of the image from the given JPEG stream.
  *
+ * Only the parsed parameters of the stream handle are read, never decoder state, so no lock is taken and
+ * the query does not wait behind a decode on the same handle.
+ *
  * @param jpeg_stream_handle The handle to the JPEG stream.
  * @param num_components Pointer to store the number of components in the image.
  * @param subsampling Pointer to store the chroma subsampling of the image.
@@ -650,7 +653,6 @@ RocJpegStatus RocJpegDecoder::DecodeBatchedSync(RocJpegImage *destinations, int 
  */
 RocJpegStatus RocJpegDecoder::GetImageInfo(RocJpegStreamHandle jpeg_stream_handle, uint8_t *num_components, RocJpegChromaSubsampling *subsampling, uint32_t *widths, uint32_t *heights){
     FunctionEntryLogWithArgs(g_rocjpeg_logger, RocJpegFmtPtr(jpeg_stream_handle) + ", " + RocJpegFmtPtr(num_components) + ", " + RocJpegFmtPtr(subsampling) + ", " + RocJpegFmtPtr(widths) + ", " + RocJpegFmtPtr(heights));
-    std::lock_guard<std::mutex> lock(mutex_);
     if (jpeg_stream_handle == nullptr || num_components == nullptr || subsampling == nullptr || widths == nullptr || heights == nullptr) {
         CriticalLog(g_rocjpeg_logger, "Null pointer");
         FunctionExitLog(g_rocjpeg_logger);
