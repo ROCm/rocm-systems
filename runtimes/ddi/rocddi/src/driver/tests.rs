@@ -61,6 +61,7 @@ impl FakeDriver {
         Endpoint {
             id: ID,
             name,
+            product_name: None,
             pci: None,
             kind: EndpointKind::Cpu,
             local_memory_bytes: 0,

@@ -14,10 +14,12 @@ use crate::platform::IntoRawFd;
 use crate::platform::memory as linux_interop;
 use crate::reservation::Reservation;
 use crate::support::*;
+use rocddi::host::cache::{CacheMaintenance, CachePolicy};
 use rocddi::memory;
-use rocddi::memory::storage::Owned;
 use rocddi::memory::storage::TryPush;
+use rocddi::memory::storage::{Allocator, Owned, OwnerVec};
 use std::ffi::c_void;
+use std::ops::Deref;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 const BACKING_FLAGS: u64 = AMDF_MEMORY_FLAG_HOST_VISIBLE
@@ -84,12 +86,16 @@ struct Access {
 pub(crate) struct Memory {
     /// Host or endpoint namespace that created this object.
     scope: *mut Scope,
+    /// Policy retained for public mapping metadata.
+    host_allocator: Allocator,
     /// Native allocation, host storage, registration, or borrowed view.
     backing: Backing,
+    /// Whether this attachment owns payload capacity rather than foreign pages.
+    allocated_backing: bool,
     /// Public allocation facts fixed at creation.
     info: amdf_memory_info_t,
     /// Device access established before publication.
-    access: Vec<Access>,
+    access: OwnerVec<Access>,
     /// Mapped CPU address when this memory is host visible.
     host: Option<usize>,
     /// Public host cacheability classification.
@@ -102,6 +108,119 @@ pub(crate) struct Memory {
     host_backing_next: AtomicUsize,
     /// Whether this object currently appears in that alias list.
     listed_host_backing: bool,
+}
+
+/// Publishes cleanup disposition without taking ownership of a public handle.
+unsafe fn publish_release(out: *mut amdf_memory_release_info_t, value: amdf_memory_release_info_t) {
+    if !out.is_null() {
+        // SAFETY: The caller supplies a writable release record when non-null.
+        unsafe { out.write(value) };
+    }
+}
+
+fn release_gpu(
+    mut allocation: memory::device::Allocation,
+    device: *mut Device,
+    allocated_backing: bool,
+) -> amdf_memory_release_info_t {
+    match allocation.free() {
+        Ok(()) => amdf_memory_release_info_t::default(),
+        Err(error) => {
+            let status = if device.is_null() {
+                native(&error)
+            } else {
+                // SAFETY: The allocation borrows this device throughout release.
+                unsafe { (*device).native_error_status(&error) }
+            };
+            let abandoned_byte_length = if allocated_backing {
+                allocation.remaining_backing_byte_length()
+            } else {
+                0
+            };
+            // Explicit AMDF cleanup consumes the attachment. A second native
+            // release could replay an ambiguous detach, so retain its owner.
+            std::mem::forget(allocation);
+            amdf_memory_release_info_t {
+                status,
+                abandoned_byte_length,
+            }
+        }
+    }
+}
+
+impl Memory {
+    fn release_native(&mut self) -> amdf_memory_release_info_t {
+        let device = self
+            .access
+            .first()
+            .map_or(std::ptr::null_mut(), |a| a.device);
+        let backing = std::mem::replace(&mut self.backing, Backing::Registered);
+        match backing {
+            Backing::Gpu(allocation) => release_gpu(allocation, device, self.allocated_backing),
+            Backing::Host(mut allocation) => match allocation.free() {
+                Ok(()) => amdf_memory_release_info_t::default(),
+                Err(error) => {
+                    let status = native(&error);
+                    let abandoned_byte_length = self.info.native_allocation_byte_length;
+                    std::mem::forget(allocation);
+                    amdf_memory_release_info_t {
+                        status,
+                        abandoned_byte_length,
+                    }
+                }
+            },
+            Backing::Registered | Backing::Alias { .. } => amdf_memory_release_info_t::default(),
+        }
+    }
+}
+
+/// Native allocation held only during construction, before a public Memory
+/// owner exists. Dropping it reports failed rollback independently.
+struct PendingGpu {
+    allocation: Option<memory::device::Allocation>,
+    device: *mut Device,
+    allocated_backing: bool,
+    out_release_info: *mut amdf_memory_release_info_t,
+}
+
+impl PendingGpu {
+    fn new(
+        allocation: memory::device::Allocation,
+        device: *mut Device,
+        allocated_backing: bool,
+        out_release_info: *mut amdf_memory_release_info_t,
+    ) -> Self {
+        Self {
+            allocation: Some(allocation),
+            device,
+            allocated_backing,
+            out_release_info,
+        }
+    }
+
+    fn into_inner(mut self) -> memory::device::Allocation {
+        // SAFETY: Construction sets Some and only this consuming call removes it.
+        unsafe { self.allocation.take().unwrap_unchecked() }
+    }
+}
+
+impl Deref for PendingGpu {
+    type Target = memory::device::Allocation;
+
+    fn deref(&self) -> &Self::Target {
+        // SAFETY: Borrowing precedes the sole consuming into_inner call.
+        unsafe { self.allocation.as_ref().unwrap_unchecked() }
+    }
+}
+
+impl Drop for PendingGpu {
+    fn drop(&mut self) {
+        if let Some(allocation) = self.allocation.take() {
+            let result = release_gpu(allocation, self.device, self.allocated_backing);
+            // SAFETY: The call's optional output remains writable until return.
+            unsafe { publish_release(self.out_release_info, result) };
+        }
+    }
 }
 
 /// Recognizes the exact provider-owned host range before asking KFD to create
@@ -214,6 +333,8 @@ struct Mapping {
     owner: MappingOwner,
     /// Host address, extent, and cache facts returned to callers.
     info: amdf_host_mapping_info_t,
+    /// Recipe selected from this mapping's cache policy and retained with it.
+    maintenance: Option<CacheMaintenance>,
 }
 
 fn rounded(value: u64, granularity: u64) -> Result<u64, u64> {
@@ -407,7 +528,7 @@ unsafe fn profile(
     // mode; AMDF represents unavailable maintenance separately from mapping.
     if host_visible
         && (!registered || endpoint.is_some())
-        && (instance.host_cache_line.is_none()
+        && (instance.host_write_back_cache.is_none()
             || (local && unsafe { (*scope.endpoint).native.host_local_cacheability }.is_none()))
     {
         return Err(UNSUPPORTED);
@@ -649,7 +770,7 @@ unsafe fn joint_profile(
 ) -> Result<
     (
         amdf_memory_profile_t,
-        Vec<amdf_memory_access_capabilities_t>,
+        OwnerVec<amdf_memory_access_capabilities_t>,
     ),
     u64,
 > {
@@ -666,7 +787,10 @@ unsafe fn joint_profile(
                 false,
             )?
         };
-        return Ok((profile, Vec::new()));
+        return Ok((
+            profile,
+            OwnerVec::with_allocator(unsafe { (*scope.instance).host_allocator }),
+        ));
     }
     if !scope.endpoint.is_null() {
         let owner = unsafe { &*scope.endpoint };
@@ -681,7 +805,8 @@ unsafe fn joint_profile(
         return Err(UNSUPPORTED);
     }
     let mut capabilities =
-        rocddi::memory::storage::try_vec_with_capacity(accesses.len()).map_err(|_| EXHAUSTED)?;
+        OwnerVec::try_with_allocator(unsafe { (*scope.instance).host_allocator }, accesses.len())
+            .map_err(|_| EXHAUSTED)?;
     let mut selected = None;
     let mut common = (0, u64::MAX);
     for access in accesses {
@@ -860,8 +985,9 @@ pub(crate) unsafe extern "C" fn device_profile(
         if !uniform_requirements(accesses.iter().map(|access| access.requirements)) {
             return Err(UNSUPPORTED);
         }
-        let mut staged = rocddi::memory::storage::try_vec_with_capacity(count as usize)
-            .map_err(|_| EXHAUSTED)?;
+        let mut staged =
+            OwnerVec::try_with_allocator((*scope.instance).host_allocator, count as usize)
+                .map_err(|_| EXHAUSTED)?;
         for access in accesses {
             let device = object(access.device.cast::<Device>())?;
             staged
@@ -874,7 +1000,7 @@ pub(crate) unsafe extern "C" fn device_profile(
                 .map_err(|_| EXHAUSTED)?;
         }
         let (profile, capabilities) = joint_profile(scope, ordinal, &staged)?;
-        for (index, capability) in capabilities.into_iter().enumerate() {
+        for (index, capability) in capabilities.iter().copied().enumerate() {
             output(
                 caps.add(index),
                 AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES,
@@ -894,8 +1020,14 @@ pub(crate) unsafe extern "C" fn create(
     pointer: *mut amdf_memory_scope_t,
     info: *const amdf_memory_create_info_t,
     out: *mut *mut amdf_memory_t,
+    out_release_info: *mut amdf_memory_release_info_t,
 ) -> u64 {
     crate::support::boundary(|| {
+        if !out_release_info.is_null() {
+            output_pointer(out_release_info)?;
+            // SAFETY: A valid optional output is written on every call.
+            unsafe { publish_release(out_release_info, amdf_memory_release_info_t::default()) };
+        }
         // SAFETY: The C caller retains this provider-owned scope for the call.
         let scope = unsafe { object(pointer.cast::<Scope>()) }?;
         output_pointer(out)?;
@@ -934,7 +1066,7 @@ pub(crate) unsafe extern "C" fn create(
         if !uniform_requirements(accesses.iter().map(|access| access.requirements)) {
             return Err(UNSUPPORTED);
         }
-        let mut staged = rocddi::memory::storage::try_vec_with_capacity(accesses.len())
+        let mut staged = OwnerVec::try_with_allocator(instance.host_allocator, accesses.len())
             .map_err(|_| EXHAUSTED)?;
         for access in accesses {
             // SAFETY: These handles were admitted above and remain live.
@@ -1028,11 +1160,12 @@ pub(crate) unsafe extern "C" fn create(
         } else {
             (None, 0, rounded(create.byte_length, page)?)
         };
-        let slot = Owned::<Memory>::try_new_uninit().map_err(|_| EXHAUSTED)?;
-        let mut access_records = rocddi::memory::storage::try_vec_with_capacity(accesses.len())
-            .map_err(|_| EXHAUSTED)?;
+        let slot = instance.owner_slot::<Memory>()?;
+        let mut access_records =
+            OwnerVec::try_with_allocator(instance.host_allocator, accesses.len())
+                .map_err(|_| EXHAUSTED)?;
         let mut peer_devices =
-            rocddi::memory::storage::try_vec_with_capacity(accesses.len().saturating_sub(1))
+            OwnerVec::try_with_allocator(instance.host_allocator, accesses.len().saturating_sub(1))
                 .map_err(|_| EXHAUSTED)?;
         for (index, access) in accesses.iter().enumerate() {
             if index == owner_index {
@@ -1130,30 +1263,54 @@ pub(crate) unsafe extern "C" fn create(
             };
             let permissions =
                 memory::device::DeviceAccess::from_bits(request.access).ok_or(UNSUPPORTED)?;
-            let native_allocation = if let Some(address) = registered_address {
-                // SAFETY: The AMDF REGISTER owner borrows the caller's
-                // host pages until native destruction succeeds. An
-                // uncertain native result retains that owner.
-                unsafe {
-                    device.native.register_host_with_peers(
-                        peer_devices.as_slice(),
-                        address,
-                        memory::device::HostMappingPolicy::Fine,
-                        native_length,
-                        alignment.max(page),
-                        permissions,
-                    )
+            let (native_allocation, rollback) =
+                memory::device::with_rollback_report(!registered, || {
+                    if let Some(address) = registered_address {
+                        // SAFETY: The AMDF REGISTER owner borrows the caller's
+                        // host pages until native destruction succeeds. An
+                        // uncertain native result retains that owner.
+                        unsafe {
+                            device.native.register_host_with_peers(
+                                peer_devices.as_slice(),
+                                address,
+                                memory::device::HostMappingPolicy::Fine,
+                                native_length,
+                                alignment.max(page),
+                                permissions,
+                            )
+                        }
+                    } else {
+                        device.native.allocate_with_peers(
+                            peer_devices.as_slice(),
+                            kind,
+                            native_length,
+                            alignment.max(page),
+                            permissions,
+                        )
+                    }
+                });
+            if native_allocation.is_err() {
+                if let Some(error) = rollback.status {
+                    // SAFETY: The optional record remains writable until return.
+                    unsafe {
+                        publish_release(
+                            out_release_info,
+                            amdf_memory_release_info_t {
+                                status: device.native_error_status(&error),
+                                abandoned_byte_length: rollback.abandoned_byte_length,
+                            },
+                        );
+                    }
                 }
-            } else {
-                device.native.allocate_with_peers(
-                    peer_devices.as_slice(),
-                    kind,
-                    native_length,
-                    alignment.max(page),
-                    permissions,
-                )
             }
-            .map_err(|e| device.native_error_status(&e))?;
+            let native_allocation =
+                native_allocation.map_err(|e| device.native_error_status(&e))?;
+            let native_allocation = PendingGpu::new(
+                native_allocation,
+                std::ptr::from_ref(device).cast_mut(),
+                !registered,
+                out_release_info,
+            );
             let addresses = native_allocation.info();
             if profile.guaranteed_flags & AMDF_MEMORY_FLAG_SHAREABLE != 0 {
                 let dma_buf = linux_interop::export_dma_buf(&native_allocation)
@@ -1188,7 +1345,7 @@ pub(crate) unsafe extern "C" fn create(
                     .map_err(|_| EXHAUSTED)?;
             }
             (
-                Backing::Gpu(native_allocation),
+                Backing::Gpu(native_allocation.into_inner()),
                 addresses.host_address,
                 if local && visible {
                     match device.native.endpoint().host_local_cacheability {
@@ -1212,13 +1369,28 @@ pub(crate) unsafe extern "C" fn create(
                 create.registered_host_cacheability,
             )
         } else {
-            let native_allocation =
+            let (native_allocation, rollback) = memory::device::with_rollback_report(true, || {
                 if create.required_flags & AMDF_MEMORY_FLAG_HOST_MAPPING_SOURCE != 0 {
                     memory::host::HostAllocation::allocate_remappable(native_length, alignment)
                 } else {
                     memory::host::HostAllocation::allocate(native_length, alignment)
                 }
-                .map_err(|e| native(&e))?;
+            });
+            if native_allocation.is_err() {
+                if let Some(error) = rollback.status {
+                    // SAFETY: The optional record remains writable until return.
+                    unsafe {
+                        publish_release(
+                            out_release_info,
+                            amdf_memory_release_info_t {
+                                status: native(&error),
+                                abandoned_byte_length: rollback.abandoned_byte_length,
+                            },
+                        );
+                    }
+                }
+            }
+            let native_allocation = native_allocation.map_err(|e| native(&e))?;
             let address = native_allocation.info().host_address;
             (
                 Backing::Host(native_allocation),
@@ -1243,7 +1415,9 @@ pub(crate) unsafe extern "C" fn create(
             && matches!(backing, Backing::Gpu(_));
         let mut owner = slot.write(Memory {
             scope: pointer.cast(),
+            host_allocator: instance.host_allocator,
             backing,
+            allocated_backing: !registered,
             host,
             access: access_records,
             cacheability,
@@ -1266,7 +1440,12 @@ pub(crate) unsafe extern "C" fn create(
             listed_host_backing,
         });
         if listed_host_backing {
-            list_host_backing(instance, &mut owner)?;
+            if let Err(status) = list_host_backing(instance, &mut owner) {
+                let result = owner.release_native();
+                // SAFETY: The optional output belongs to this call.
+                unsafe { publish_release(out_release_info, result) };
+                return Err(status);
+            }
         }
         // SAFETY: The output slot was validated before native acquisition;
         // ownership transfers only after every creation step succeeds.
@@ -1345,17 +1524,22 @@ pub(crate) unsafe extern "C" fn map(
         }
         range(map.byte_offset, map.byte_length, memory.info.byte_length).map_err(|_| INVALID)?;
         let host = memory.host.ok_or(UNSUPPORTED)?;
-        let slot = Owned::<Mapping>::try_new_uninit().map_err(|_| EXHAUSTED)?;
-        let (line, flush, invalidate) =
+        let slot = {
+            let _scope = memory.host_allocator.scope();
+            Owned::<Mapping>::try_new_uninit().map_err(|_| EXHAUSTED)?
+        };
+        let (maintenance, line, flush, invalidate) =
             host_transitions(&*(*memory.scope).instance, memory.cacheability)?;
+        let address = host
+            .checked_add(usize::try_from(map.byte_offset).map_err(|_| RANGE)?)
+            .ok_or(RANGE)?;
         register(&memory.children)?;
         let owner = slot.write(Mapping {
             owner: MappingOwner::Memory(pointer.cast()),
             info: amdf_host_mapping_info_t {
                 flags: 3,
                 cacheability: memory.cacheability,
-                pointer: (host + usize::try_from(map.byte_offset).map_err(|_| RANGE)?)
-                    as *mut c_void,
+                pointer: address as *mut c_void,
                 memory_byte_offset: map.byte_offset,
                 byte_length: map.byte_length,
                 byte_offset_granularity: 1,
@@ -1370,6 +1554,7 @@ pub(crate) unsafe extern "C" fn map(
                 invalidate,
                 ..Default::default()
             },
+            maintenance,
         });
         out.write(owner.into_raw().cast());
         Ok(())
@@ -1407,8 +1592,9 @@ pub(crate) unsafe fn map_reservation(
         return Err(UNSUPPORTED);
     }
     let instance = unsafe { object(reservation.instance)? };
-    let (line, flush, invalidate) = host_transitions(instance, AMDF_HOST_CACHEABILITY_WRITE_BACK)?;
-    let slot = Owned::<Mapping>::try_new_uninit().map_err(|_| EXHAUSTED)?;
+    let (maintenance, line, flush, invalidate) =
+        host_transitions(instance, AMDF_HOST_CACHEABILITY_WRITE_BACK)?;
+    let slot = instance.owner_slot::<Mapping>()?;
     let address = reservation
         .info
         .address
@@ -1432,6 +1618,7 @@ pub(crate) unsafe fn map_reservation(
             invalidate,
             ..Default::default()
         },
+        maintenance,
     });
     // SAFETY: The ABI output slot was validated by reservation::map.
     unsafe { out.write(owner.into_raw().cast()) };
@@ -1490,12 +1677,11 @@ pub(crate) unsafe extern "C" fn cache_control(
             AMDF_CACHE_TRANSITION_KIND_NONE => return Ok(()),
             _ => {}
         }
-        memory::host::host_cache_control(
-            mapping.info.pointer as usize + usize::try_from(offset).map_err(|_| RANGE)?,
-            length,
-            mapping.info.cache_line_size,
-        )
-        .map_err(|e| native(&e))?;
+        let maintenance = mapping.maintenance.ok_or(UNSUPPORTED)?;
+        let address = (mapping.info.pointer as usize)
+            .checked_add(usize::try_from(offset).map_err(|_| RANGE)?)
+            .ok_or(RANGE)?;
+        maintenance.apply(address, length).map_err(|e| native(&e))?;
         Ok(())
     })
 }
@@ -1512,9 +1698,16 @@ pub(crate) unsafe extern "C" fn unmap(pointer: *mut amdf_host_mapping_t) -> u64 
     })
 }
 
-pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_memory_t) -> u64 {
+pub(crate) unsafe extern "C" fn destroy(
+    pointer: *mut amdf_memory_t,
+    out_release_info: *mut amdf_memory_release_info_t,
+) -> u64 {
     crate::support::boundary(|| {
         unsafe {
+            if !out_release_info.is_null() {
+                output_pointer(out_release_info)?;
+                publish_release(out_release_info, amdf_memory_release_info_t::default());
+            }
             // The caller has ended every device use before requesting free.
             // Child counts cover explicit host mappings and queue scratch.
             // They cannot find memory references embedded in packets or kernel
@@ -1534,22 +1727,17 @@ pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_memory_t) -> u64 {
                 return Err(BUSY);
             }
             memory.freeing = true;
-            let result = match &mut memory.backing {
-                Backing::Host(allocation) => allocation.free(),
-                Backing::Gpu(allocation) => allocation.free(),
-                Backing::Registered | Backing::Alias { .. } => Ok(()),
-            }
-            .map_err(|error| {
-                memory.access.first().map_or_else(
-                    || native(&error),
-                    |access| (&*access.device).native_error_status(&error),
-                )
-            });
+            let release = memory.release_native();
+            publish_release(out_release_info, release);
             // The ABI consumes the public memory handle even when a native
             // release fails. Dropping the internal owner finishes safe cleanup
             // or lets the native owner retain uncertain state for process exit.
             drop(Owned::from_raw(pointer.cast::<Memory>()));
-            result
+            if release.status == 0 {
+                Ok(())
+            } else {
+                Err(release.status)
+            }
         }
     })
 }
@@ -1682,8 +1870,13 @@ pub(crate) unsafe extern "C" fn import(
     info: *const amdf_memory_import_info_t,
     external_pointer: *mut amdf_external_memory_t,
     out: *mut *mut amdf_memory_t,
+    out_release_info: *mut amdf_memory_release_info_t,
 ) -> u64 {
     crate::support::boundary(|| unsafe {
+        if !out_release_info.is_null() {
+            output_pointer(out_release_info)?;
+            publish_release(out_release_info, amdf_memory_release_info_t::default());
+        }
         let scope = object(scope_pointer.cast::<Scope>())?;
         let info = input(info, AMDF_STRUCTURE_TYPE_MEMORY_IMPORT_INFO)?;
         output_pointer(out)?;
@@ -1712,9 +1905,9 @@ pub(crate) unsafe extern "C" fn import(
         if !uniform_requirements(accesses.iter().map(|access| access.requirements)) {
             return Err(UNSUPPORTED);
         }
-        let mut staged = rocddi::memory::storage::try_vec_with_capacity(accesses.len())
+        let mut staged = OwnerVec::try_with_allocator(instance.host_allocator, accesses.len())
             .map_err(|_| EXHAUSTED)?;
-        let mut devices = rocddi::memory::storage::try_vec_with_capacity(accesses.len())
+        let mut devices = OwnerVec::try_with_allocator(instance.host_allocator, accesses.len())
             .map_err(|_| EXHAUSTED)?;
         for access in accesses {
             let device = object(access.device.cast::<Device>())?;
@@ -1752,24 +1945,44 @@ pub(crate) unsafe extern "C" fn import(
             return Err(UNSUPPORTED);
         }
         let descriptor = i32::try_from(external.payload.file_descriptor).map_err(|_| INVALID)?;
-        let slot = Owned::<Memory>::try_new_uninit().map_err(|_| EXHAUSTED)?;
-        let mut access_records = rocddi::memory::storage::try_vec_with_capacity(accesses.len())
-            .map_err(|_| EXHAUSTED)?;
+        let slot = instance.owner_slot::<Memory>()?;
+        let mut access_records =
+            OwnerVec::try_with_allocator(instance.host_allocator, accesses.len())
+                .map_err(|_| EXHAUSTED)?;
         let permissions = memory::device::DeviceAccess::from_bits(accesses[0].requirements.access)
             .ok_or(UNSUPPORTED)?;
-        let native_allocation = linux_interop::import_system_dma_buf(
-            &instance.native,
-            devices.as_slice(),
-            descriptor,
-            external.source_byte_offset,
-            external.byte_length,
-            alignment,
-            permissions,
-        )
-        .map_err(|error| {
+        let (native_allocation, rollback) = memory::device::with_rollback_report(false, || {
+            linux_interop::import_system_dma_buf(
+                &instance.native,
+                devices.as_slice(),
+                descriptor,
+                external.source_byte_offset,
+                external.byte_length,
+                alignment,
+                permissions,
+            )
+        });
+        if native_allocation.is_err() {
+            if let Some(error) = rollback.status {
+                publish_release(
+                    out_release_info,
+                    amdf_memory_release_info_t {
+                        status: native(&error),
+                        abandoned_byte_length: 0,
+                    },
+                );
+            }
+        }
+        let native_allocation = native_allocation.map_err(|error| {
             let device = &*accesses[0].device.cast::<Device>();
             device.native_error_status(&error)
         })?;
+        let native_allocation = PendingGpu::new(
+            native_allocation,
+            accesses[0].device.cast(),
+            false,
+            out_release_info,
+        );
         let native_info = native_allocation.info();
         if has_identity(external.physical_backing_id.words)
             && external.physical_backing_id.words != native_info.physical_backing_id
@@ -1803,7 +2016,9 @@ pub(crate) unsafe extern "C" fn import(
         }
         let mut owner = slot.write(Memory {
             scope: scope_pointer.cast(),
-            backing: Backing::Gpu(native_allocation),
+            host_allocator: instance.host_allocator,
+            backing: Backing::Gpu(native_allocation.into_inner()),
+            allocated_backing: false,
             info: amdf_memory_info_t {
                 memory_profile_ordinal: profile.ordinal,
                 memory_class: profile.memory_class,
@@ -1827,7 +2042,11 @@ pub(crate) unsafe extern "C" fn import(
             host_backing_next: AtomicUsize::new(0),
             listed_host_backing: true,
         });
-        list_host_backing(instance, &mut owner)?;
+        if let Err(status) = list_host_backing(instance, &mut owner) {
+            let result = owner.release_native();
+            publish_release(out_release_info, result);
+            return Err(status);
+        }
         // The independently retained native descriptor permits the exported
         // payload to be released before the public memory handle is published.
         let consumed = external_pointer.replace(amdf_external_memory_t::default());
@@ -1970,11 +2189,21 @@ struct Site {
 fn host_transitions(
     instance: &Instance,
     cacheability: amdf_host_cacheability_t,
-) -> Result<(u32, amdf_cache_transition_t, amdf_cache_transition_t), u64> {
-    let (line, flush) = match cacheability {
+) -> Result<
+    (
+        Option<CacheMaintenance>,
+        u32,
+        amdf_cache_transition_t,
+        amdf_cache_transition_t,
+    ),
+    u64,
+> {
+    let (maintenance, line, flush) = match cacheability {
         AMDF_HOST_CACHEABILITY_WRITE_BACK => {
-            let line = instance.host_cache_line.ok_or(UNSUPPORTED)?;
+            let maintenance = instance.host_write_back_cache.ok_or(UNSUPPORTED)?;
+            let line = maintenance.line_size_bytes().ok_or(INTERNAL)?;
             (
+                Some(maintenance),
                 line,
                 amdf_cache_transition_t {
                     kind: AMDF_CACHE_TRANSITION_KIND_RANGE,
@@ -1988,24 +2217,29 @@ fn host_transitions(
                 },
             )
         }
-        AMDF_HOST_CACHEABILITY_WRITE_COMBINED => (
-            0,
-            amdf_cache_transition_t {
-                kind: AMDF_CACHE_TRANSITION_KIND_GLOBAL,
-                executor: AMDF_CACHE_TRANSITION_EXECUTOR_HOST_DIRECT,
-                host_operation: AMDF_HOST_CACHE_OPERATION_FLUSH,
-                host_fence_after: AMDF_HOST_CACHE_FENCE_X86_MFENCE,
-                ..Default::default()
-            },
-        ),
-        AMDF_HOST_CACHEABILITY_UNCACHED => (0, no_transition()),
-        _ => (0, amdf_cache_transition_t::default()),
+        AMDF_HOST_CACHEABILITY_WRITE_COMBINED => {
+            let maintenance = CacheMaintenance::qualify(CachePolicy::WriteCombined)
+                .map_err(|error| native(&error))?;
+            (
+                Some(maintenance),
+                0,
+                amdf_cache_transition_t {
+                    kind: AMDF_CACHE_TRANSITION_KIND_GLOBAL,
+                    executor: AMDF_CACHE_TRANSITION_EXECUTOR_HOST_DIRECT,
+                    host_operation: AMDF_HOST_CACHE_OPERATION_FLUSH,
+                    host_fence_after: AMDF_HOST_CACHE_FENCE_X86_MFENCE,
+                    ..Default::default()
+                },
+            )
+        }
+        AMDF_HOST_CACHEABILITY_UNCACHED => (None, 0, no_transition()),
+        _ => (None, 0, amdf_cache_transition_t::default()),
     };
     let mut invalidate = flush;
     if invalidate.executor == AMDF_CACHE_TRANSITION_EXECUTOR_HOST_DIRECT {
         invalidate.host_operation = AMDF_HOST_CACHE_OPERATION_INVALIDATE;
     }
-    Ok((line, flush, invalidate))
+    Ok((maintenance, line, flush, invalidate))
 }
 
 fn describe_pair(producer: &Site, consumer: &Site) -> Result<amdf_memory_pair_info_t, u64> {
@@ -2173,7 +2407,7 @@ unsafe fn profile_site(
             } else {
                 AMDF_HOST_CACHEABILITY_WRITE_BACK
             };
-            let (_, release, acquire) =
+            let (_, _, release, acquire) =
                 host_transitions(unsafe { &*scope.instance }, cacheability)?;
             Ok(Site {
                 memory: std::ptr::null_mut(),
@@ -2221,8 +2455,9 @@ pub(crate) unsafe extern "C" fn scope_pair_info(
         if !unique_devices(accesses) {
             return Err(INVALID);
         }
-        let mut staged = rocddi::memory::storage::try_vec_with_capacity(accesses.len())
-            .map_err(|_| EXHAUSTED)?;
+        let mut staged =
+            OwnerVec::try_with_allocator((*scope.instance).host_allocator, accesses.len())
+                .map_err(|_| EXHAUSTED)?;
         for access in accesses {
             requirements(access.requirements)?;
             let device = object(access.device.cast::<Device>())?;
