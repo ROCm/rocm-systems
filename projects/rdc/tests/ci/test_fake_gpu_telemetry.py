@@ -51,8 +51,13 @@ def test_more_gpus_and_partitions_than_rdc_lists(tools, tmp_path):
     try:
         out = d.ok("discovery", "-l")
         assert f"{RDC_MAX_NUM_DEVICES} GPUs found" in out, out
-        logged = f"RDC lists {RDC_MAX_NUM_DEVICES} of the 256 GPUs and GPU partitions"
-        assert logged in d.output(), d.output()
+        # Logged by the handler, or first by a GPU table that keeps only the first
+        # RDC_MAX_NUM_DEVICES, so that the handler never sees more.
+        logged = (
+            f"RDC lists {RDC_MAX_NUM_DEVICES} of the 256 GPUs and GPU partitions",
+            f"AMD SMI lists more than {RDC_MAX_NUM_DEVICES} GPUs; RDC uses the first of them",
+        )
+        assert any(line in d.output() for line in logged), d.output()
         listed = re.findall(r"^(\d+)\s+Fake ", out, re.M)
         assert listed == [str(i) for i in range(RDC_MAX_NUM_DEVICES)], out
         gid = _created_id(d.ok("group", "-c", "big_job"))
