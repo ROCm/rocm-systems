@@ -1269,8 +1269,8 @@ inline util::native<float> pkf32_neg(util::native<float> v, bool do_neg) {
 }
 
 /// @brief Run an instruction's chunk loop, optionally under one guest FP environment.
-/// @details Call after the register views exist, so the plugin callbacks their
-/// acquisition fires stay outside the scope. Returns false when the destination
+/// @details Call after the register views exist, so callbacks fired while
+/// acquiring those views stay outside the scope. Returns false when the destination
 /// has no VGPR storage: that store path notifies plugins per chunk and must not
 /// run inside the scope, so the caller leaves the instruction to the scalar body.
 /// Amortizes one save/set/restore over every chunk instead of one per chunk.
@@ -1588,8 +1588,8 @@ template <bool ReadCarry, typename Inst, typename CarryOp, typename WriteResult>
 /// try_execute_ternary_vop2_acc_simd below so register observation follows the
 /// instruction-visible read set exactly.
 ///
-/// F32 operations use fma_f32_simd to preserve architectural NaN payloads.
-/// `Scoped` takes one guest FP environment for the instruction through
+/// F32 operations use fma_f32_simd_unscoped to preserve architectural NaN
+/// payloads. `Scoped` takes one guest FP environment for the instruction through
 /// run_instruction_chunks, for functors using the unscoped arithmetic cores.
 template <typename T, bool Scoped = false, typename Inst, typename FmaOp>
   requires(util::has_stdx_simd)

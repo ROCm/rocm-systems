@@ -934,6 +934,8 @@ inline double arithmetic_f16_unscoped(float lhs, float rhs, float addend) {
                                                 static_cast<double>(addend));
 }
 
+/// @brief arithmetic_f16_unscoped under its own guest FP environment.
+/// @details Installs `round_mode` and delegates, for callers that own no scope.
 template <Arithmetic operation>
 inline double arithmetic_f16(float lhs, float rhs, float addend, uint32_t round_mode) {
   detail::ScopedFenv environment(round_mode);
@@ -957,6 +959,8 @@ inline uint16_t finish_arithmetic_f16_unscoped(double value, uint32_t round_mode
   return finalize_omod_f16(result, omod);
 }
 
+/// @brief finish_arithmetic_f16_unscoped under its own nearest-even environment.
+/// @details Installs the environment and delegates, for callers that own no scope.
 inline uint16_t finish_arithmetic_f16(double value, uint32_t round_mode, uint32_t denorm_mode,
                                       bool fp16_ovfl, uint32_t omod = 0) {
   detail::ScopedFenv environment(0);
