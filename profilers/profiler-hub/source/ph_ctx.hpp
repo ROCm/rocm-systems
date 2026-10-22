@@ -60,6 +60,10 @@ struct ph_ctx
      *         cancelled, PH_RESULT_INVALID_CONTEXT if it failed.
      */
     [[nodiscard]] ph_result_t wait_until_ready();
+    [[nodiscard]] const std::shared_ptr<profiler_hub::reader_catalog_t>& catalog() const
+    {
+        return m_catalog;
+    }
 
     [[nodiscard]] ph_schema_version_t get_schema_version();
     [[nodiscard]] ph_track_list_t     get_track_list();

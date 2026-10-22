@@ -1,3 +1,4 @@
+#include "event_query.hpp"
 #include "file_probe_failure.hpp"
 #include "ph_ctx.hpp"
 #include "ph_future.hpp"
@@ -584,4 +585,134 @@ ph_future_free(ph_future_t future)
         return future->release_user_reference() ? PH_RESULT_SUCCESS
                                                 : PH_RESULT_INVALID_ARGUMENT;
     });
+}
+
+extern "C" struct ph_event_query
+{
+    profiler_hub::resolved_event_query query;
+};
+
+namespace
+{
+bool
+known_event_type(uint32_t type)
+{
+    return type == PH_EVENT_TYPE_REGION || type == PH_EVENT_TYPE_KERNEL_DISPATCH ||
+           type == PH_EVENT_TYPE_MEMORY_COPY || type == PH_EVENT_TYPE_MEMORY_ALLOCATE;
+}
+
+std::optional<uint64_t>
+copied_id(ph_optional_uint64_t value)
+{
+    if(value.is_valid == 0)
+    {
+        return std::nullopt;
+    }
+    return value.value;
+}
+
+ph_result_t
+copy_event_filter(const ph_event_filter_t& filter, profiler_hub::resolved_event_query& query)
+{
+    if(filter.size < sizeof(ph_event_filter_t))
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+    if((filter.track_count > 0 && filter.tracks == nullptr) ||
+       (filter.event_type_count > 0 && filter.event_types == nullptr) ||
+       (filter.string_filter.search_strings_count > 0 &&
+        filter.string_filter.search_strings == nullptr))
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+
+    if(filter.time.is_valid != 0)
+    {
+        query.time = profiler_hub::time_window{ filter.time.start, filter.time.end };
+    }
+    query.node_id          = copied_id(filter.node_id);
+    query.agent_id         = copied_id(filter.agent_id);
+    query.process_id       = copied_id(filter.process_id);
+    query.thread_id        = copied_id(filter.thread_id);
+    query.include_category = filter.string_filter.include_category != 0;
+
+    if(filter.track_count > 0)
+    {
+        query.tracks.assign(filter.tracks, filter.tracks + filter.track_count);
+    }
+    query.event_types.reserve(filter.event_type_count);
+    for(uint32_t index = 0; index < filter.event_type_count; ++index)
+    {
+        if(!known_event_type(filter.event_types[index]))
+        {
+            return PH_RESULT_INVALID_ARGUMENT;
+        }
+        query.event_types.push_back(filter.event_types[index]);
+    }
+
+    query.search_strings.reserve(filter.string_filter.search_strings_count);
+    for(uint32_t index = 0; index < filter.string_filter.search_strings_count; ++index)
+    {
+        const char* text = filter.string_filter.search_strings[index];
+        if(text == nullptr || text[0] == '\0')
+        {
+            return PH_RESULT_INVALID_ARGUMENT;
+        }
+        query.search_strings.emplace_back(text);
+    }
+    return PH_RESULT_SUCCESS;
+}
+}  // namespace
+
+ph_result_t
+ph_event_query_create(ph_ctx_t ctx, const ph_event_filter_t* filter, ph_event_query_t* query)
+{
+    if(query != nullptr)
+    {
+        *query = nullptr;
+    }
+    if(ctx == nullptr)
+    {
+        return PH_RESULT_INVALID_CONTEXT;
+    }
+    if(filter == nullptr || query == nullptr)
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+
+    return guard_call([ctx, filter, query]() {
+        if(const auto ready = ctx->wait_until_ready(); ready != PH_RESULT_SUCCESS)
+        {
+            return ready;
+        }
+        if(ctx->catalog() == nullptr)
+        {
+            return PH_RESULT_INVALID_CONTEXT;
+        }
+
+        auto resolved = std::make_unique<ph_event_query>();
+        if(const auto copied = copy_event_filter(*filter, resolved->query);
+           copied != PH_RESULT_SUCCESS)
+        {
+            return copied;
+        }
+        profiler_hub::resolve_event_query_strings(
+            *ctx->catalog(),
+            resolved->query,
+            filter->string_filter.include_substring != 0,
+            filter->string_filter.partial_matching != 0);
+        *query = resolved.release();
+        return PH_RESULT_SUCCESS;
+    });
+}
+
+ph_result_t
+ph_event_query_free(ph_event_query_t query)
+{
+    if(query == nullptr)
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+    delete query;
+    return PH_RESULT_SUCCESS;
 }

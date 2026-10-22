@@ -451,6 +451,34 @@ extern "C"
      */
     ph_result_t ph_future_free(ph_future_t future);
 
+    /**
+     * @brief Resolves @p filter against the open trace.
+     *        Search strings are matched in the loaded string table and kernel
+     *        symbol names. Later table reads use those ids.
+     * @param ctx Context whose catalog supplies the string table.
+     * @param filter Filter filled by the caller. filter->size must be
+     *        sizeof(ph_event_filter_t).
+     * @param query Out parameter. Set to null on failure. The caller releases
+     *        a successful query with ph_event_query_free().
+     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
+     *         @p ctx is null or the trace is not loaded, PH_RESULT_INVALID_ARGUMENT
+     *         if @p filter or @p query is null, @p filter->size is too small, or
+     *         a list pointer is null while its count is non-zero,
+     *         PH_RESULT_CANCELLED if loading the trace was cancelled.
+     * @note Does not read event rows. A string filter that matches nothing is
+     *       still success; the query then selects no rows.
+     */
+    ph_result_t ph_event_query_create(ph_ctx_t                 ctx,
+                                      const ph_event_filter_t* filter,
+                                      ph_event_query_t*        query);
+
+    /**
+     * @brief Releases a query from ph_event_query_create().
+     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_ARGUMENT if
+     *         @p query is null.
+     */
+    ph_result_t ph_event_query_free(ph_event_query_t query);
+
 #ifdef __cplusplus
 }
 #endif

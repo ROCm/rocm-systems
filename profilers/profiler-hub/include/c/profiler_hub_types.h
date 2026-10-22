@@ -39,11 +39,13 @@ extern "C"
 
     struct ph_ctx;
     struct ph_future;
+    struct ph_event_query;
 
     /** @brief Opaque handle to a trace context. Created by ph_ctx_create(),
      *         released by ph_ctx_free(). */
-    typedef struct ph_ctx*   ph_ctx_t;
-    typedef struct ph_trace* ph_trace_t;
+    typedef struct ph_ctx*         ph_ctx_t;
+    typedef struct ph_trace*       ph_trace_t;
+    typedef struct ph_event_query* ph_event_query_t;
     /** @brief Opaque handle to an asynchronous operation. Created by
      *         ph_future_create(), released by ph_future_free(). */
     typedef struct ph_future* ph_future_t;
@@ -103,6 +105,16 @@ extern "C"
         uint64_t value;
         uint32_t is_valid;
     } ph_optional_uint64_t;
+
+    /** @brief A start/end window that may be absent.
+     *         @p start and @p end are only meaningful when @p is_valid is
+     *         non-zero. */
+    typedef struct
+    {
+        uint64_t start;
+        uint64_t end;
+        uint32_t is_valid;
+    } ph_time_filter_t;
 
     /**
      * @brief A single track in a trace.
@@ -403,6 +415,51 @@ extern "C"
         uint32_t    list_size;
         ph_event_t* events;
     } ph_event_list_t;
+
+    /**
+     * @brief Text match against the trace string table and kernel symbol names.
+     *        Profiler-hub resolves @p search_strings itself. The caller does
+     *        not pass string ids.
+     * @note Matching is case-insensitive. include_substring non-zero selects a
+     *       substring match; zero selects the whole string. partial_matching
+     *       non-zero keeps a string when any term matches; zero keeps it only
+     *       when every term matches. include_category non-zero applies the
+     *       same matches to category columns as well as names.
+     * @note search_strings is read only during ph_event_query_create().
+     */
+    typedef struct
+    {
+        const char* const* search_strings;
+        uint32_t           search_strings_count;
+        uint32_t           include_substring;
+        uint32_t           include_category;
+        uint32_t           partial_matching;
+    } ph_string_filter_t;
+
+    /**
+     * @brief Constraints for one table or search query.
+     * @note Set @p size to sizeof(ph_event_filter_t). A zero count leaves that
+     *       list unconstrained. time, node_id, agent_id, process_id, and
+     *       thread_id constrain the query only when is_valid is non-zero.
+     * @note process_id is rocpd_info_process.id, not the OS pid. thread_id is
+     *       rocpd_info_thread.id, not the OS tid. tracks are ph_track_t::id.
+     *       event_types are ph_event_type_t values.
+     * @note Pointers are read only during ph_event_query_create().
+     */
+    typedef struct
+    {
+        uint32_t             size;
+        ph_time_filter_t     time;
+        const uint32_t*      tracks;
+        uint32_t             track_count;
+        const uint32_t*      event_types;
+        uint32_t             event_type_count;
+        ph_optional_uint64_t node_id;
+        ph_optional_uint64_t agent_id;
+        ph_optional_uint64_t process_id;
+        ph_optional_uint64_t thread_id;
+        ph_string_filter_t   string_filter;
+    } ph_event_filter_t;
 
     /** @brief Code-object address range for one call-stack frame.
      *         Strings are owned by the producing ph_ctx_t. is_valid is 0 when
