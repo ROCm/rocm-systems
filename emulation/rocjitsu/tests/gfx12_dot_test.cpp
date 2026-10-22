@@ -18,6 +18,7 @@
 #include "util/simd_test_hooks.h"
 
 #include <array>
+#include <bit>
 #include <cfenv>
 #include <cstdint>
 #include <gtest/gtest.h>
@@ -56,8 +57,9 @@ public:
   ~DotMachine() { wave->halt(); }
   void set(uint32_t reg, uint32_t lane, uint32_t bits) { cu->write_vgpr(base + reg, lane, bits); }
   uint32_t get(uint32_t reg, uint32_t lane) { return cu->read_vgpr(base + reg, lane); }
-  void execute(std::array<uint32_t, 2> encoding) {
-    std::array<uint32_t, 4> words{encoding[0], encoding[1], 0, 0};
+  template <size_t N> void execute(std::array<uint32_t, N> encoding) {
+    std::array<uint32_t, 4> words{};
+    std::copy(encoding.begin(), encoding.end(), words.begin());
     auto result = decoder->decode(words.data());
     ASSERT_TRUE(result.succeeded());
     auto instruction = std::move(result).value();
@@ -407,4 +409,71 @@ TEST(Gfx12Dot, NativeF8SpecialValues) {
   std::array<uint8_t, 8> fp8_nan;
   fp8_nan.fill(0x7f);
   EXPECT_EQ((rocjitsu::amdgpu::gfx12_dot8_f32<true, true>(fp8_nan, fp8, 0)), 0xffc00a3du);
+}
+
+TEST(Gfx12Dot, FloatingDotDppPermutesSnapshotAndPreservesInactiveDestinations) {
+  HostState restore;
+  struct Case {
+    uint16_t op;
+    uint32_t a, b, sign;
+    float terms;
+  };
+  const std::array<Case, 6> cases{{
+      {rdna4::kVDot2F32F16Vop3p, 0x3c003c00, 0x3c003c00, 0x80008000, 2},
+      {rdna4::kVDot2F32Bf16Vop3p, 0x3f803f80, 0x3f803f80, 0x80008000, 2},
+      {rdna4::kVDot4F32Fp8Fp8Vop3p, 0x38383838, 0x38383838, 0x80808080, 4},
+      {rdna4::kVDot4F32Fp8Bf8Vop3p, 0x38383838, 0x3c3c3c3c, 0x80808080, 4},
+      {rdna4::kVDot4F32Bf8Fp8Vop3p, 0x3c3c3c3c, 0x38383838, 0x80808080, 4},
+      {rdna4::kVDot4F32Bf8Bf8Vop3p, 0x3c3c3c3c, 0x3c3c3c3c, 0x80808080, 4},
+  }};
+  for (uint32_t width : {32u, 64u}) {
+    DotMachine machine(ROCJITSU_CODE_ARCH_RDNA4, width);
+    for (bool scalar : {false, true}) {
+      util::set_force_scalar_for_testing(scalar);
+      for (const auto &c : cases) {
+        for (uint32_t mode : {0u, 1u, 2u}) {
+          const bool dpp8 = mode == 2;
+          for (uint8_t dst : {uint8_t(0), uint8_t(1), uint8_t(2), uint8_t(16)}) {
+            for (uint64_t mask : {~uint64_t{0}, uint64_t{0xa55a5aa55aa5a55a}}) {
+              const uint64_t exec = width == 64 ? mask : mask & 0xffffffffu;
+              machine.wave->set_exec(exec);
+              std::array<uint32_t, 64> old_dst{};
+              for (uint32_t lane = 0; lane < width; ++lane) {
+                machine.set(0, lane, c.a ^ ((lane & 1) ? c.sign : 0));
+                machine.set(1, lane, c.b);
+                machine.set(2, lane, std::bit_cast<uint32_t>(float(lane)));
+                machine.set(16, lane, 0xfeedface);
+                old_dst[lane] = machine.get(dst, lane);
+              }
+              const auto base = rdna4::build_vop3p(c.op, {.vdst = dst,
+                                                          .src0 = uint16_t(mode == 0 ? 256
+                                                                           : dpp8    ? 0xea
+                                                                                     : 0xfa),
+                                                          .src1 = 257,
+                                                          .src2 = 258,
+                                                          .opsel_hi = 3});
+              // DPP8 reverses each group of eight; DPP16 shifts within a row.
+              const uint32_t extension = dpp8 ? 0x05397700u : 0x3d0d1100u;
+              machine.execute(std::array<uint32_t, 3>{base[0], base[1], extension});
+              for (uint32_t lane = 0; lane < width; ++lane) {
+                const bool writes =
+                    (exec & (uint64_t{1} << lane)) &&
+                    (mode == 0 || dpp8 ||
+                     (((3u >> (lane / 16)) & 1) && ((13u >> ((lane % 16) / 4)) & 1)));
+                const uint32_t source = mode == 0 ? lane : dpp8 ? (lane ^ 7) : lane - 1;
+                const float dot = mode == 1 && lane % 16 == 0 ? 0
+                                  : (source & 1)              ? -c.terms
+                                                              : c.terms;
+                const auto expected =
+                    writes ? std::bit_cast<uint32_t>(float(lane) + dot) : old_dst[lane];
+                EXPECT_EQ(machine.get(dst, lane), expected)
+                    << "op=" << c.op << " width=" << width << " dpp8=" << dpp8
+                    << " dst=" << unsigned(dst) << " lane=" << lane;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 }
