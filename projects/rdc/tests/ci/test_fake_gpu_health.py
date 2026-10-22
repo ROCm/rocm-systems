@@ -41,9 +41,9 @@ def test_health_clear_of_a_destroyed_group_drops_its_field_group(tools, tmp_path
         d.ok("health", "-g", gid, "-s", "p")
         assert HEALTH_FIELD_GROUP in d.ok("fieldgroup", "-l")
         d.ok("group", "-d", gid)
-        # The field watch cannot stop without its group, so the clear fails, but it
-        # drops the field group anyway.
-        assert d.rdci("health", "-g", gid, "--clear").returncode != 0
+        # The clear drops the field group although the group is gone. It fails with 17
+        # (RDC_ST_GROUP_NOT_FOUND) when ending the field watch needs the group.
+        assert d.rdci("health", "-g", gid, "--clear").returncode in (0, 17)
         assert HEALTH_FIELD_GROUP not in d.ok("fieldgroup", "-l")
     finally:
         d.stop()

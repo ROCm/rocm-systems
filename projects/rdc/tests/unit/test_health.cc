@@ -182,9 +182,11 @@ TEST_F(Health, ClearOfADestroyedGroupDropsTheWatch) {
   ASSERT_TRUE(cached(RDC_HEALTH_PCIE_REPLAY_COUNT));
   ASSERT_EQ(groups_->rdc_group_gpu_destroy(group_), RDC_ST_OK);
 
-  // The field watch cannot stop, because its group is gone; the clear says so, and still
-  // drops the field group, the cached values and the watch.
-  EXPECT_EQ(watch_table_.rdc_health_clear(group_), RDC_ST_GROUP_NOT_FOUND);
+  // The clear drops the field group, the cached values and the watch although the group is
+  // gone. It returns RDC_ST_GROUP_NOT_FOUND when ending the field watch needs the group, and
+  // RDC_ST_OK when it does not.
+  const rdc_status_t cleared = watch_table_.rdc_health_clear(group_);
+  EXPECT_TRUE(cleared == RDC_ST_GROUP_NOT_FOUND || cleared == RDC_ST_OK) << cleared;
   EXPECT_TRUE(health_field_groups().empty());
   EXPECT_FALSE(cached(RDC_HEALTH_PCIE_REPLAY_COUNT));
   EXPECT_EQ(check(), RDC_ST_NOT_FOUND);

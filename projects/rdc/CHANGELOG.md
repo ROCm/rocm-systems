@@ -28,7 +28,7 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - `rdci health -s` on a GPU group that does not exist no longer leaves an unused field group in rdcd. Repeated failures filled the field group table, and commands that need a new field group, such as `rdci dmon`, then failed until rdcd was restarted.
 
-- `rdci health --clear` and `rdci health -s` drop the earlier health watch of a group even when its field watch cannot stop, for example because the group was destroyed, and a failed `rdci health -s` leaves nothing behind. Before, rdcd kept their field groups, and `rdci health -s` kept the old components.
+- `rdci health --clear` and `rdci health -s` drop the earlier health watch of a group even when its field watch cannot stop, and a failed `rdci health -s` leaves nothing behind. Before, rdcd kept their field groups, and `rdci health -s` kept the old components.
 
 - `rdci health -c` no longer reports huge numbers of PCIe replays, throttling events or retired pages after a GPU counter restarts, for example after a GPU reset.
 

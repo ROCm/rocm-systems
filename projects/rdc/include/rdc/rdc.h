@@ -1796,9 +1796,8 @@ rdc_status_t rdc_health_check(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_i
 /**
  *  @brief clear the health watch
  *
- *  @details For each group, clear the setting. If the watch of its fields cannot stop, for
- *  example because the group was destroyed, the setting is cleared anyway and that error is
- *  returned.
+ *  @details For each group, clear the setting. If the watch of its fields cannot stop, the
+ *  setting is cleared anyway and that error is returned.
  *
  *  @param[in] p_rdc_handle The RDC handler.
  *
