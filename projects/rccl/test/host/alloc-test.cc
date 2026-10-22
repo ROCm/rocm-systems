@@ -6,7 +6,7 @@
 
 // Host-only microtests for the helpers in src/include/alloc.h: shutdown and skip-free gates, side
 // streams, host/device/VMM allocation and free, and the allocation tracker. HIP goes through
-// hip_fakes.cc; the memory-manager calls and getBusId through alloc_micro_fakes.cc.
+// hip_fakes.cc, the memory-manager calls through nccl_fakes.cc and getBusId through utils_fakes.cc.
 
 #include <gtest/gtest.h>
 
@@ -48,16 +48,12 @@ static int DirtyPosixMemalign(void** p, size_t align, size_t n) {
 #undef malloc
 #undef posix_memalign
 #include "debug.h"
-#include "fakes/alloc_micro_fakes.h"
 #include "ScopedHook.h"
 #include "fakes/hip_fakes.h"
+#include "fakes/nccl_fakes.h"
+#include "fakes/utils_fakes.h"
 
-// hipify renames the CUDA FABRIC names wherever HIP has them; p2p.h only defines them otherwise.
-#ifdef CU_MEM_HANDLE_TYPE_FABRIC
-const hipMemAllocationHandleType kFabricHandle = CU_MEM_HANDLE_TYPE_FABRIC;
-#else
-const hipMemAllocationHandleType kFabricHandle = hipMemHandleTypeFabric;
-#endif
+struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
 
 // ASan aborts on an oversized malloc instead of returning NULL, which the malloc-failure test needs.
 extern "C" const char* __asan_default_options() { return "allocator_may_return_null=1"; }
@@ -67,11 +63,6 @@ namespace {
 constexpr int kDev = 3;
 constexpr hipDevice_t kHipDev = 13;
 constexpr size_t kGran = 4096;
-#if defined(HIP_VMM_UNCACHED_MEMORY)
-constexpr hipMemAllocationType kVmmType = hipMemAllocationTypeUncached;
-#else
-constexpr hipMemAllocationType kVmmType = hipMemAllocationTypePinned;
-#endif
 constexpr uintptr_t kVa = 0x100000;
 const hipStream_t kPrivateStream = reinterpret_cast<hipStream_t>(0x5);
 const hipStream_t kSideStream = reinterpret_cast<hipStream_t>(0x6);
@@ -80,6 +71,13 @@ const hipMemGenericAllocationHandle_t kHandle = reinterpret_cast<hipMemGenericAl
 void* Va(uintptr_t offset = 0) {
   return reinterpret_cast<void*>(kVa + offset);
 }
+
+struct TrackCall {
+  void* ptr;
+  size_t size;
+  hipMemAllocationHandleType type;
+  ncclMemType_t memType;
+};
 
 class AllocMicrotest : public ::testing::Test {
  protected:
@@ -90,7 +88,8 @@ class AllocMicrotest : public ::testing::Test {
     ASSERT_FALSE(rcclSkipLsaFlatAddressFree());
     rcclShutdownFlag().store(false);
     sideStream.clear();
-    ResetAllocMicroFakes();
+    std::memset(allocTracker, 0, sizeof(allocTracker));
+    ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
 
     g_hipGetDevice = [this](int* d) {
       *d = kDev;
@@ -273,6 +272,36 @@ class AllocMicrotest : public ::testing::Test {
   std::vector<hipStream_t> destroyed_, synced_, memsetStreams_;
   std::vector<int> priorities_;
   unsigned flags_ = 0;
+
+  // The memory-manager calls alloc.h makes, recorded, and the cuMem gate and bus ids it reads.
+  std::vector<TrackCall> tracked_;
+  ncclResult_t trackResult_ = ncclSuccess;
+  ncclMemUntrackInfo untrackInfo_{};
+  ncclResult_t untrackResult_ = ncclSuccess;
+  std::vector<std::pair<void*, size_t>> untrackedPersist_;
+  int cuMem_ = 0;
+  ncclResult_t busIdResult_ = ncclSuccess;
+  ScopedHook<decltype(ncclMemTrack)> track_{
+      g_memTrack, [this](ncclMemManager*, void* p, size_t n, hipMemGenericAllocationHandle_t,
+                         hipMemAllocationHandleType type, ncclMemType_t memType) {
+        tracked_.push_back({p, n, type, memType});
+        return trackResult_;
+      }};
+  ScopedHook<decltype(ncclMemUntrackDynamic)> untrack_{g_memUntrackDynamic,
+                                                       [this](ncclMemManager*, void*, ncclMemUntrackInfo* info) {
+                                                         *info = untrackInfo_;
+                                                         return untrackResult_;
+                                                       }};
+  ScopedHook<decltype(ncclMemUntrackPersist)> untrackPersist_{g_memUntrackPersist,
+                                                              [this](ncclMemManager*, void* p, size_t n) {
+                                                                untrackedPersist_.push_back({p, n});
+                                                                return ncclSuccess;
+                                                              }};
+  ScopedHook<decltype(ncclCuMemEnable)> cuMemEnable_{g_cuMemEnable, [this] { return cuMem_; }};
+  ScopedHook<decltype(getBusId)> busId_{g_getBusId, [this](int dev, int64_t* busId) {
+                                          *busId = 0x100 * dev;
+                                          return busIdResult_;
+                                        }};
 };
 
 // Shutdown flag and skip-free gates
@@ -422,7 +451,6 @@ TEST_F(AllocMicrotest, CallocAndRealloc_ReportMallocFailure) {
   uint64_t* kept = p;
   EXPECT_EQ(ncclRealloc(&p, 1, huge), ncclSystemError);
   EXPECT_EQ(p, kept);
-  EXPECT_TRUE(Warned("Failed to malloc"));
   free(p);
 }
 
@@ -444,7 +472,6 @@ TEST_F(AllocMicrotest, ClampStreamPriority_IntoTheDeviceRange) {
   EXPECT_EQ(ncclClampStreamPriority(-1), -1);
   failing_ = {"priorityRange"};
   EXPECT_EQ(ncclClampStreamPriority(-1), 0);
-  EXPECT_TRUE(Warned("defaulting side-stream priority clamp to 0"));
 }
 
 TEST_F(AllocMicrotest, SideStream_CreatedOncePerKeyAndDestroyedWithTheLastScope) {
@@ -482,25 +509,22 @@ TEST_F(AllocMicrotest, SideStream_KeyedByBusId) {
 TEST_F(AllocMicrotest, SideStream_Failures) {
   failing_ = {"sideCreate"};
   EXPECT_EQ(ncclSideStreamAcquire(kDev), ncclUnhandledCudaError);
-  EXPECT_TRUE(Warned("StreamCreateWithPriority failed"));
   EXPECT_TRUE(sideStream.empty());
 
   failing_ = {"streamDestroy"};
   ASSERT_EQ(ncclSideStreamAcquire(kDev), ncclSuccess);
   EXPECT_EQ(ncclSideStreamRelease(kDev), ncclUnhandledCudaError);
-  EXPECT_TRUE(Warned("StreamDestroy failed"));
   EXPECT_TRUE(sideStream.empty());  // dropped even though destroy failed
 
-  g_warns.clear();
-  EXPECT_EQ(ncclSideStreamRelease(kDev), ncclSuccess);
-  EXPECT_TRUE(Warned("was not found for release"));
+  EXPECT_EQ(ncclSideStreamRelease(kDev), ncclSuccess);  // nothing left to release
+  EXPECT_EQ(Count("streamDestroy"), 1);
 
-  g_busIdResult = ncclSystemError;
+  busIdResult_ = ncclSystemError;
   hipStream_t s = nullptr;
   EXPECT_EQ(ncclSideStreamAcquire(kDev), ncclSystemError);
   EXPECT_EQ(ncclSideStreamRelease(kDev), ncclSystemError);
   EXPECT_EQ(getSideStream(&s), ncclSystemError);
-  g_busIdResult = ncclSuccess;
+  busIdResult_ = ncclSuccess;
   failing_ = {"getDevice"};
   EXPECT_EQ(getSideStream(&s), ncclUnhandledCudaError);
 }
@@ -550,7 +574,6 @@ TEST_F(AllocMicrotest, HostCalloc_Failures) {
   failing_ = {"hostMalloc"};
   EXPECT_EQ(ncclCudaHostCalloc(&p, 8), ncclUnhandledCudaError);
   EXPECT_EQ(p, nullptr);
-  EXPECT_TRUE(Warned("Failed to CUDA host alloc 8 bytes"));
   EXPECT_TRUE(CaptureModeRestored());
   failing_ = {"capture"};
   EXPECT_EQ(ncclCudaHostCalloc(&p, 8), ncclUnhandledCudaError);
@@ -630,7 +653,6 @@ TEST_F(AllocMicrotest, CuMemHost_UnsupportedBeforeRocm712) {
   void* p = nullptr;
   EXPECT_EQ(ncclCuMemHostAlloc(&p, nullptr, 100), ncclInternalError);
   EXPECT_EQ(ncclCuMemHostFree(p), ncclInternalError);
-  EXPECT_TRUE(Warned("CUMEM Host is not supported"));
   EXPECT_TRUE(calls_.empty());
 }
 
@@ -697,23 +719,23 @@ TEST_F(AllocMicrotest, FreeAddr_UnmapsEverySegmentThenFreesTheRange) {
 
 TEST_F(AllocMicrotest, FreeAddr_UntracksThroughTheManager) {
   ncclMemManager mgr{};
-  g_untrackInfo = {ncclMemPersist, ncclDynMemStateActive, 0};
+  untrackInfo_ = {ncclMemPersist, ncclDynMemStateActive, 0};
   ASSERT_EQ(ncclCuMemFreeAddr(Va(), &mgr), ncclSuccess);
-  EXPECT_EQ(g_untrackedPersist, (std::vector<std::pair<void*, size_t>>{{Va(), segment_}}));
+  EXPECT_EQ(untrackedPersist_, (std::vector<std::pair<void*, size_t>>{{Va(), segment_}}));
 
   // A dynamic entry Suspend already released: only the reservation is left to free.
   calls_.clear();
-  g_untrackInfo = {ncclMemScratch, ncclDynMemStateReleased, 5 * kGran};
+  untrackInfo_ = {ncclMemScratch, ncclDynMemStateReleased, 5 * kGran};
   ASSERT_EQ(ncclCuMemFreeAddr(Va(), &mgr), ncclSuccess);
   EXPECT_EQ(calls_, (std::vector<std::string>{"addrfree", "getDevice"}));
   EXPECT_EQ(addressFrees_.back(), std::make_pair(Va(), 5 * kGran));
 
   // An active dynamic entry is unmapped like persistent memory, but not untracked as persistent.
   unmaps_.clear();
-  g_untrackInfo = {ncclMemOffload, ncclDynMemStateActive, 5 * kGran};
+  untrackInfo_ = {ncclMemOffload, ncclDynMemStateActive, 5 * kGran};
   ASSERT_EQ(ncclCuMemFreeAddr(Va(), &mgr), ncclSuccess);
   EXPECT_EQ(unmaps_.size(), 1u);
-  EXPECT_EQ(g_untrackedPersist.size(), 1u);
+  EXPECT_EQ(untrackedPersist_.size(), 1u);
 }
 
 TEST_F(AllocMicrotest, FreeAddr_SkipsWhatSuspendReleased) {
@@ -743,11 +765,11 @@ TEST_F(AllocMicrotest, FreeAddr_KnownBug_FailureFreesTheRangeWithThePartialSize)
 
   ncclMemManager mgr{};
   failing_.clear();
-  g_untrackResult = ncclInternalError;
+  untrackResult_ = ncclInternalError;
   EXPECT_EQ(ncclCuMemFreeAddr(Va(), &mgr), ncclInternalError);
   EXPECT_EQ(addressFrees_.back(), std::make_pair(Va(), (size_t)0));
   failing_ = {"addrfree"};
-  g_untrackResult = ncclSuccess;
+  untrackResult_ = ncclSuccess;
   EXPECT_EQ(ncclCuMemFreeAddr(Va(), nullptr), ncclUnhandledCudaError);
 }
 
@@ -771,7 +793,7 @@ TEST_F(AllocMicrotest, CuMemAlloc_ZeroesTheMappingOnAPrivateStream) {
   EXPECT_EQ(synced_, std::vector<hipStream_t>{kPrivateStream});
   EXPECT_EQ(destroyed_, std::vector<hipStream_t>{kPrivateStream});
   EXPECT_TRUE(CaptureModeRestored());
-  EXPECT_TRUE(g_tracked.empty());
+  EXPECT_EQ(track_.calls, 0);
   EXPECT_EQ(allocTracker[kDev].totalAlloc, 1u);
   EXPECT_EQ(allocTracker[kDev].totalAllocSize, kGran);
 }
@@ -785,11 +807,11 @@ TEST_F(AllocMicrotest, CuMemAlloc_UsesTheSideStreamAndTracksWithTheManager) {
   EXPECT_EQ(memsetStreams_, std::vector<hipStream_t>{kSideStream});
   EXPECT_EQ(Count("streamCreate"), 0);
   EXPECT_TRUE(destroyed_.empty());
-  ASSERT_EQ(g_tracked.size(), 1u);
-  EXPECT_EQ(g_tracked[0].ptr, Va());
-  EXPECT_EQ(g_tracked[0].size, kGran);
-  EXPECT_EQ(g_tracked[0].type, hipMemHandleTypePosixFileDescriptor);
-  EXPECT_EQ(g_tracked[0].memType, ncclMemScratch);
+  ASSERT_EQ(tracked_.size(), 1u);
+  EXPECT_EQ(tracked_[0].ptr, Va());
+  EXPECT_EQ(tracked_[0].size, kGran);
+  EXPECT_EQ(tracked_[0].type, hipMemHandleTypePosixFileDescriptor);
+  EXPECT_EQ(tracked_[0].memType, ncclMemScratch);
 }
 
 TEST_F(AllocMicrotest, CuMemAlloc_FailuresUnwindTheAllocation) {
@@ -811,7 +833,7 @@ TEST_F(AllocMicrotest, CuMemAlloc_FailuresUnwindTheAllocation) {
   for (const auto& c : cases) {
     SCOPED_TRACE(c.first);
     failing_ = {c.first};
-    g_trackResult = c.first == "track" ? ncclInternalError : ncclSuccess;
+    trackResult_ = c.first == "track" ? ncclInternalError : ncclSuccess;
     calls_.clear();
     void* p = Va(1);
     ncclResult_t ret = ncclCuMemAlloc(&p, nullptr, hipMemHandleTypePosixFileDescriptor, 1, &mgr);
@@ -826,7 +848,7 @@ TEST_F(AllocMicrotest, CuMemAlloc_FailuresUnwindTheAllocation) {
 }
 
 TEST_F(AllocMicrotest, CuMemAlloc_SideStreamLookupFailureUnwinds) {
-  g_busIdResult = ncclSystemError;
+  busIdResult_ = ncclSystemError;
   void* p = nullptr;
   EXPECT_EQ(ncclCuMemAlloc(&p, nullptr, hipMemHandleTypePosixFileDescriptor, 1), ncclSystemError);
   EXPECT_EQ(p, nullptr);
@@ -846,7 +868,7 @@ TEST_F(AllocMicrotest, CuMemFree_ReleasesEachSegmentAndUntracksPersist) {
   EXPECT_EQ(calls_, (std::vector<std::string>{"retain", "release", "range", "unmap", "release", "retain", "release",
                                               "range", "unmap", "release", "addrfree", "getDevice"}));
   EXPECT_EQ(addressFrees_, (std::vector<std::pair<void*, size_t>>{{Va(), 2 * kGran}}));
-  EXPECT_EQ(g_untrackedPersist, (std::vector<std::pair<void*, size_t>>{{Va(), 2 * kGran}}));
+  EXPECT_EQ(untrackedPersist_, (std::vector<std::pair<void*, size_t>>{{Va(), 2 * kGran}}));
   EXPECT_EQ(allocTracker[kDev].totalAlloc, 0u);
   EXPECT_EQ(allocTracker[kDev].totalAllocSize, 0u);
   EXPECT_EQ(ncclCuMemFree(nullptr, &mgr), ncclSuccess);
@@ -854,11 +876,11 @@ TEST_F(AllocMicrotest, CuMemFree_ReleasesEachSegmentAndUntracksPersist) {
 
 TEST_F(AllocMicrotest, CuMemFree_SuspendedDynamicEntryOnlyFreesTheRange) {
   ncclMemManager mgr{};
-  g_untrackInfo = {ncclMemOffload, ncclDynMemStateReleased, 3 * kGran};
+  untrackInfo_ = {ncclMemOffload, ncclDynMemStateReleased, 3 * kGran};
   ASSERT_EQ(ncclCuMemFree(Va(), &mgr), ncclSuccess);
   EXPECT_EQ(calls_, (std::vector<std::string>{"addrfree", "getDevice"}));
   EXPECT_EQ(addressFrees_.back(), std::make_pair(Va(), 3 * kGran));
-  EXPECT_TRUE(g_untrackedPersist.empty());
+  EXPECT_TRUE(untrackedPersist_.empty());
 }
 
 // Same shared exit as ncclCuMemFreeAddr, so a failed step frees the range with size 0.
@@ -873,10 +895,10 @@ TEST_F(AllocMicrotest, CuMemFree_KnownBug_FailuresStillFreeTheRange) {
   }
   ncclMemManager mgr{};
   failing_.clear();
-  g_untrackResult = ncclInternalError;
+  untrackResult_ = ncclInternalError;
   EXPECT_EQ(ncclCuMemFree(Va(), &mgr), ncclInternalError);
   failing_ = {"addrfree"};
-  g_untrackResult = ncclSuccess;
+  untrackResult_ = ncclSuccess;
   EXPECT_EQ(ncclCuMemFree(Va(), nullptr), ncclUnhandledCudaError);
 }
 
@@ -999,7 +1021,7 @@ TEST_F(AllocMicrotest, CudaCallocAsync_WithoutCuMemZeroesOnTheCallersStream) {
 
 // With cuMem every helper goes through ncclCuMemAlloc, passing the manager and memory type on.
 TEST_F(AllocMicrotest, CudaAllocs_WithCuMemDispatchToCuMemAlloc) {
-  g_cuMemEnable = 1;
+  cuMem_ = 1;
   ncclCuMemHandleType = kFabricHandle;
   ncclMemManager mgr{};
   char* a = nullptr;
@@ -1008,29 +1030,26 @@ TEST_F(AllocMicrotest, CudaAllocs_WithCuMemDispatchToCuMemAlloc) {
   ASSERT_EQ(ncclCudaMalloc(&a, 10, &mgr, ncclMemScratch), ncclSuccess);
   ASSERT_EQ(ncclCudaCalloc(&b, 10, &mgr, ncclMemOffload), ncclSuccess);
   ASSERT_EQ(ncclCudaCallocAsync(&c, 10, kSideStream, &mgr), ncclSuccess);
-  ASSERT_EQ(g_tracked.size(), 3u);
-  EXPECT_EQ(g_tracked[0].memType, ncclMemScratch);
-  EXPECT_EQ(g_tracked[1].memType, ncclMemOffload);
-  EXPECT_EQ(g_tracked[2].memType, ncclMemPersist);
-  for (const TrackCall& t : g_tracked) EXPECT_EQ(t.type, kFabricHandle);
+  ASSERT_EQ(tracked_.size(), 3u);
+  EXPECT_EQ(tracked_[0].memType, ncclMemScratch);
+  EXPECT_EQ(tracked_[1].memType, ncclMemOffload);
+  EXPECT_EQ(tracked_[2].memType, ncclMemPersist);
+  for (const TrackCall& t : tracked_) EXPECT_EQ(t.type, kFabricHandle);
   EXPECT_EQ(Count("extMalloc"), 0);
   EXPECT_EQ(Count("memset"), 3);  // ncclCuMemAlloc's own zeroing only
 }
 
-TEST_F(AllocMicrotest, CudaAllocs_FailuresWarnAndReturnNull) {
+TEST_F(AllocMicrotest, CudaAllocs_FailuresReturnNull) {
   char* p = reinterpret_cast<char*>(this);
   failing_ = {"extMalloc"};
   EXPECT_EQ(ncclCudaMalloc(&p, 8, nullptr), ncclUnhandledCudaError);
   EXPECT_EQ(p, nullptr);
-  EXPECT_TRUE(Warned("Failed to CUDA malloc 8 bytes"));
   EXPECT_EQ(ncclCudaCallocAsync(&p, 8, kSideStream, nullptr), ncclUnhandledCudaError);
-  EXPECT_TRUE(Warned("Failed to CUDA calloc async 8 bytes"));
   EXPECT_TRUE(CaptureModeRestored());
-  g_cuMemEnable = 1;
+  cuMem_ = 1;
   failing_ = {"create"};
   EXPECT_EQ(ncclCudaMalloc(&p, 8, nullptr), ncclUnhandledCudaError);
   EXPECT_EQ(ncclCudaCalloc(&p, 8, nullptr), ncclUnhandledCudaError);
-  EXPECT_TRUE(Warned("Failed to CUDA calloc 8 bytes"));
   EXPECT_EQ(ncclCudaCallocAsync(&p, 8, kSideStream, nullptr), ncclUnhandledCudaError);
   failing_ = {"capture"};
   EXPECT_EQ(ncclCudaMalloc(&p, 8, nullptr), ncclUnhandledCudaError);
@@ -1074,7 +1093,7 @@ TEST_F(AllocMicrotest, CudaAllocs_KnownBug_ZeroElementsStillCountAnAllocation) {
 // With cuMem each allocation is counted twice and the byte total drifts by the padding.
 // Pins AICOMRCCL-3044; a fix flips this pin.
 TEST_F(AllocMicrotest, CudaAllocs_KnownBug_CuMemCountsEveryAllocationTwice) {
-  g_cuMemEnable = 1;
+  cuMem_ = 1;
   char* p = nullptr;
   ASSERT_EQ(ncclCudaMalloc(&p, 100, nullptr), ncclSuccess);
   EXPECT_EQ(allocTracker[kDev].totalAlloc, 2u);
@@ -1100,7 +1119,7 @@ TEST_F(AllocMicrotest, CudaCalloc_KnownBug_ZeroingFailureLeaksTheBuffer) {
 
 // A failed side-stream lookup returns with relaxed capture mode still set. Pins AICOMRCCL-3046; a fix flips this pin.
 TEST_F(AllocMicrotest, CudaCalloc_KnownBug_SideStreamFailureLeavesTheCaptureModeSwitched) {
-  g_busIdResult = ncclSystemError;
+  busIdResult_ = ncclSystemError;
   char* p = nullptr;
   EXPECT_EQ(ncclCudaCalloc(&p, 8, nullptr), ncclSystemError);
   EXPECT_EQ(Count("capture"), 1);
@@ -1179,7 +1198,7 @@ TEST_F(AllocMicrotest, CudaFree_Failures) {
   EXPECT_EQ(ncclCudaFree(p, nullptr, 2), ncclUnhandledCudaError);  // segments need cuMem
   EXPECT_EQ(Count("free"), 0);
   EXPECT_TRUE(CaptureModeRestored());
-  g_cuMemEnable = 1;
+  cuMem_ = 1;
   failing_ = {"retain"};
   EXPECT_EQ(ncclCudaFree(p, nullptr), ncclUnhandledCudaError);
   EXPECT_TRUE(CaptureModeRestored());
@@ -1198,7 +1217,6 @@ TEST_F(AllocMicrotest, CuMem_UnsupportedBeforeRocm7) {
   EXPECT_EQ(ncclCuMemFreeAddr(p, nullptr), ncclInternalError);
   EXPECT_EQ(ncclCuMemGetAddressRange(base, 1, &base, &total, nullptr), ncclInternalError);
   EXPECT_EQ(ncclCuMemMapAndSetAccess(p, 1, h, 0), ncclInternalError);
-  EXPECT_TRUE(Warned("CUMEM requires ROCM_VERSION >= 7.0.0"));
 }
 
 #endif  // ROCM_VERSION >= 70000

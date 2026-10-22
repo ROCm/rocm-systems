@@ -31,6 +31,7 @@
 #include "debug.h"
 #include "group.h"
 #include "ScopedHook.h"
+#include "fakes/bootstrap_stubs.h"
 #include "fakes/hip_fakes.h"
 #include "fakes/mem_manager_micro_fakes.h"
 
@@ -51,22 +52,13 @@ void* MemManagerMalloc(size_t n) {
 #include MEM_MANAGER_CC_PATH
 #undef malloc
 
-// hipify renames the CUDA FABRIC names wherever HIP has them; p2p.h only defines them otherwise.
-#ifdef CU_MEM_HANDLE_TYPE_FABRIC
-const hipMemAllocationHandleType kFabricHandle = CU_MEM_HANDLE_TYPE_FABRIC;
-#else
-const hipMemAllocationHandleType kFabricHandle = hipMemHandleTypeFabric;
-#endif
+// mem_manager.cc allocates its jobs with new (std::nothrow); the watch catches a double delete of one.
+#include "WatchedDelete.h"
 
 namespace {
 
 constexpr int kDev = 2;
 constexpr size_t kSize = 1 << 16;
-#if defined(HIP_VMM_UNCACHED_MEMORY)
-constexpr hipMemAllocationType kVmmType = hipMemAllocationTypeUncached;
-#else
-constexpr hipMemAllocationType kVmmType = hipMemAllocationTypePinned;
-#endif
 
 hipMemGenericAllocationHandle_t Handle(uintptr_t v) {
   return reinterpret_cast<hipMemGenericAllocationHandle_t>(v);
@@ -90,7 +82,6 @@ class MemManagerMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
     ResetHipFakes();
-    g_warns.clear();
     g_closedFds.clear();
     g_rearch = 0;
     g_asyncError = ncclSuccess;
@@ -102,24 +93,24 @@ class MemManagerMicrotest : public ::testing::Test {
       auto it = params_.find(env);
       return it == params_.end() ? deftVal : it->second;
     };
-    g_barrier = [this](int tag, int) {
+    g_bootstrapBarrier = [this](void*, int, int, int tag) {
       barriers_.push_back(tag);
       return barrierResult_.count(tag) ? barrierResult_[tag] : ncclSuccess;
     };
-    g_allGather = [this](void* data, int size) {
+    g_bootstrapAllGather = [this](void*, void* data, int size) {
       EXPECT_EQ(size, (int)sizeof(int));
       int* counts = static_cast<int*>(data);
       for (int r = 0; r < comm_->nRanks; r++)
         if (r != comm_->rank) counts[r] = (int)inbox_[r].size();
       return allGatherResult_;
     };
-    g_send = [this](int peer, int tag, void* data, int size) {
+    g_bootstrapSend = [this](void*, int peer, int tag, void* data, int size) {
       EXPECT_EQ(tag, 0xFEED);
       auto* infos = static_cast<ncclDynMemP2pHandleInfo*>(data);
       sent_[peer].assign(infos, infos + size / sizeof(ncclDynMemP2pHandleInfo));
       return sendResult_;
     };
-    g_recv = [this](int peer, int tag, void* data, int size) {
+    g_bootstrapRecv = [this](void*, int peer, int tag, void* data, int size) {
       EXPECT_EQ(tag, 0xFEED);
       EXPECT_EQ((size_t)size, inbox_[peer].size() * sizeof(ncclDynMemP2pHandleInfo));
       std::memcpy(data, inbox_[peer].data(), size);
@@ -209,7 +200,9 @@ class MemManagerMicrotest : public ::testing::Test {
     ncclIntruQueueConstruct(&comm_->resumeTaskQueue);
     for (auto* t : tasks_) free(t);
     ncclGroupCommHead[ncclGroupTaskTypeSymRegister] = nullptr;
-    g_watchedDelete = nullptr;
+    g_deleteWatchPtr = nullptr;
+    g_deleteWatchKeeps = false;
+    ResetBootstrapStubs();
     ResetHipFakes();
   }
 
@@ -1109,22 +1102,23 @@ TEST_F(MemManagerMicrotest, SuspendImpl_JobReportsSetDeviceFailure) {
 // Pins AICOMRCCL-3038; a fix flips this pin.
 TEST_F(MemManagerMicrotest, Impl_KnownBug_RejectedJobIsDeletedTwiceBySuspend) {
   g_rearch = 1;
+  g_deleteWatchKeeps = true;
   ScopedHook enqueue(g_mgmtEnqueue, [](ncclAsyncJob* job, ncclResult_t (*)(ncclAsyncJob*), void (*destructor)(void*)) {
-    g_watchedDelete = job;
+    g_deleteWatchPtr = job;
     destructor(job);
     return ncclInvalidArgument;
   });
-  g_watchedDeletes = 0;
+  g_deleteWatchHits = 0;
   EXPECT_EQ(ncclCommSuspend_impl(comm_.get(), NCCL_SUSPEND_MEM), ncclInvalidArgument);
-  EXPECT_EQ(g_watchedDeletes, 2);
-  std::free(g_watchedDelete);
+  EXPECT_EQ(g_deleteWatchHits, 2);
+  std::free(const_cast<void*>(g_deleteWatchPtr));
 
   mgr_->released = 1;
-  g_watchedDeletes = 0;
+  g_deleteWatchHits = 0;
   EXPECT_EQ(ncclCommResume_impl(comm_.get()), ncclInvalidArgument);
-  EXPECT_EQ(g_watchedDeletes, 1);
-  std::free(g_watchedDelete);
-  g_watchedDelete = nullptr;
+  EXPECT_EQ(g_deleteWatchHits, 1);
+  std::free(const_cast<void*>(g_deleteWatchPtr));
+  g_deleteWatchPtr = nullptr;
   EXPECT_EQ(groupErrors_, (std::vector<ncclResult_t>{ncclInvalidArgument, ncclInvalidArgument}));
 }
 

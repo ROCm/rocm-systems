@@ -73,6 +73,7 @@ ASSERT_HOOK_MATCHES_PROD(g_hipFreeAsync,                  hipFreeAsync);
 ASSERT_HOOK_MATCHES_PROD(g_hipDeviceSynchronize,          hipDeviceSynchronize);
 ASSERT_HOOK_MATCHES_PROD(g_hipDeviceGetStreamPriorityRange, hipDeviceGetStreamPriorityRange);
 ASSERT_HOOK_MATCHES_PROD(g_hipStreamCreateWithPriority,   hipStreamCreateWithPriority);
+ASSERT_HOOK_MATCHES_PROD(g_hipDrvGetErrorString,         hipDrvGetErrorString);
 #define RCCL_ASSERT_INTERCEPTOR_HOOK(name, params) ASSERT_HOOK_MATCHES_PROD(g_##name, name);
 RCCL_HIP_PROFILE_INTERCEPTORS_HOOKED(RCCL_ASSERT_INTERCEPTOR_HOOK)
 #undef RCCL_ASSERT_INTERCEPTOR_HOOK
@@ -465,6 +466,13 @@ std::function<hipError_t(void)> g_hipDeviceSynchronize = DefaultHipDeviceSynchro
 std::function<hipError_t(int*, int*)> g_hipDeviceGetStreamPriorityRange = DefaultHipDeviceGetStreamPriorityRange;
 std::function<hipError_t(hipStream_t*, unsigned, int)> g_hipStreamCreateWithPriority =
     DefaultHipStreamCreateWithPriority;
+// Hands back the same text hipGetErrorString does.
+static hipError_t DefaultHipDrvGetErrorString(hipError_t, const char** str)
+{
+    if (str) *str = "[hip_fake] stub error";
+    return hipSuccess;
+}
+std::function<hipError_t(hipError_t, const char**)> g_hipDrvGetErrorString = DefaultHipDrvGetErrorString;
 std::function<hipError_t(void*, int, size_t)> g_hipMemset = DefaultHipMemset;
 std::function<hipError_t(hipStream_t*, unsigned)> g_hipStreamCreateWithFlags = DefaultHipStreamCreateWithFlags;
 std::function<hipError_t(hipStream_t)> g_hipStreamSynchronize = DefaultHipStreamSynchronize;
@@ -732,6 +740,7 @@ void ResetHipFakes()
     g_hipDeviceSynchronize          = DefaultHipDeviceSynchronize;
     g_hipDeviceGetStreamPriorityRange = DefaultHipDeviceGetStreamPriorityRange;
     g_hipStreamCreateWithPriority   = DefaultHipStreamCreateWithPriority;
+    g_hipDrvGetErrorString          = DefaultHipDrvGetErrorString;
     g_hipMemset                     = DefaultHipMemset;
     g_hipStreamCreateWithFlags      = DefaultHipStreamCreateWithFlags;
     g_hipStreamSynchronize          = DefaultHipStreamSynchronize;
@@ -894,6 +903,7 @@ hipError_t hipGetDevice(int* deviceId) { return g_hipGetDevice(deviceId); }
 hipError_t hipGetDeviceCount(int* count) { return g_hipGetDeviceCount(count); }
 
 const char* hipGetErrorString(hipError_t) { return "[hip_fake] stub error"; }
+hipError_t hipDrvGetErrorString(hipError_t err, const char** str) { return g_hipDrvGetErrorString(err, str); }
 
 hipError_t hipGetLastError(void) { return g_hipGetLastError(); }
 

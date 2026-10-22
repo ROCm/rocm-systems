@@ -328,7 +328,7 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
 - **`rccl-UnitTestsMicroMemManager`** — `mem_manager.cc` (via `MEM_MANAGER_CC_PATH`, from
   `mem-manager-test.cc`); suite `MemManager*`. Its own binary: `nccl_fakes.cc` defines
   `ncclMemTrack` and `ncclMemTrackImportFromPeer`, and `collective_stubs.cc` defines
-  `ncclCommMemSuspend`; `mem_manager.cc` defines all three. Its externals are in
+  `ncclCommMemSuspend`; `mem_manager.cc` defines all three. Its other externals are in
   `fakes/mem_manager_micro_fakes.cc`. See `test_categories_micro_mem_manager.yaml`.
 - **`rccl-UnitTestsMicroAllocator`** — `allocator.cc` (via `ALLOCATOR_CC_PATH`, from
   `allocator-test.cc`); suite `Allocator*`. Its own binary because every other binary that
@@ -338,9 +338,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   suite `Mnnvl*`. Its own binary: `nccl_stubs.cc`, which most targets link, defines
   `ncclMnnvlCheck`, and `mnnvl.cc` defines it too. See `test_categories_micro_mnnvl.yaml`.
 - **`rccl-UnitTestsMicroAlloc`** — header-only `include/alloc.h` (from `alloc-test.cc`); suite
-  `Alloc*`. Its own binary because it records the memory-manager calls `nccl_fakes.cc` defines
-  without recording. Allocator, Mnnvl and Alloc share `fakes/alloc_micro_fakes.cc` for
-  `getBusId`, `ncclCuMemEnable`, those calls and logging. See `test_categories_micro_alloc.yaml`.
+  `Alloc*`. Its own binary: `alloc.h`'s inline side-stream map and shutdown and skip-free state
+  would be shared with every other unit in `rccl-UnitTestsMicro`. See
+  `test_categories_micro_alloc.yaml`.
 - **`rccl-UnitTestsMicroTaskPrep`** — `src/enqueue/task_prep/task_prep.cc` (via
   `TASK_PREP_CC_PATH`, suite `TaskPrepMicrotest.*`),
   `src/enqueue/task_prep/task_classify.cc` (via `TASK_CLASSIFY_CC_PATH`, suite
@@ -622,7 +622,6 @@ symbol.
 | `src/init_nvtx.cc` | `fakes/init_nvtx_fakes.cc` |
 | `src/mem_manager.cc` | `fakes/mem_manager_fakes.cc`; `ncclMemTrack*` / `ncclMemUntrack*` in `fakes/nccl_fakes.cc` |
 | externals `src/mem_manager.cc` reaches (`rccl-UnitTestsMicroMemManager`, which compiles it) | `fakes/mem_manager_micro_fakes.cc` |
-| externals `include/alloc.h`'s helpers reach (`rccl-UnitTestsMicroAlloc`, `-Allocator`, `-Mnnvl`) | `fakes/alloc_micro_fakes.cc` |
 | `src/misc/amdsmi_wrap.cc` | `fakes/amdsmi_fakes.cc` |
 | `src/misc/api_trace.cc` (`NCCL_API` dispatch) | `fakes/api_trace_fakes.cc` |
 | `src/misc/ibvwrap.cc` (PD / MR registration wrappers) | `fakes/ibvwrap_fakes.cc` |

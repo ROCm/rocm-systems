@@ -435,6 +435,7 @@ function(rccl_define_micro_source_lists)
   set(TEST_MICRO_MEM_MANAGER_SOURCE_FILES
     mem-manager-test.cc
     fakes/mem_manager_micro_fakes.cc
+    fakes/bootstrap_stubs.cc
     fakes/hip_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
@@ -443,9 +444,9 @@ function(rccl_define_micro_source_lists)
   # ncclShadowPoolToHost links allocator_fakes.cc instead.
   set(TEST_MICRO_ALLOCATOR_SOURCE_FILES
     allocator-test.cc
-    fakes/alloc_micro_fakes.cc
-    fakes/rocmwrap_fakes.cc
     fakes/hip_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/rocmwrap_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -453,18 +454,20 @@ function(rccl_define_micro_source_lists)
   # ncclMnnvlCheck, and mnnvl.cc defines it too.
   set(TEST_MICRO_MNNVL_SOURCE_FILES
     mnnvl-test.cc
-    fakes/alloc_micro_fakes.cc
     fakes/hip_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/utils_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroAlloc -- src/include/alloc.h. Own binary: it records the memory-manager calls
-  # nccl_fakes.cc defines without recording.
+  # rccl-UnitTestsMicroAlloc -- src/include/alloc.h. Own binary: alloc.h's inline side-stream map and
+  # shutdown and skip-free state would be shared with every other unit in rccl-UnitTestsMicro.
   set(TEST_MICRO_ALLOC_SOURCE_FILES
     alloc-test.cc
-    fakes/alloc_micro_fakes.cc
-    fakes/os_fakes.cc
     fakes/hip_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/os_fakes.cc
+    fakes/utils_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 

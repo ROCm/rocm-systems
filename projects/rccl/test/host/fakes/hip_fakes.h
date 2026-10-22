@@ -193,6 +193,21 @@ extern std::function<hipError_t(int* /*least*/, int* /*greatest*/)> g_hipDeviceG
 extern std::function<hipError_t(hipStream_t* /*stream*/, unsigned /*flags*/, int /*priority*/)>
     g_hipStreamCreateWithPriority;
 
+// mnnvl.cc's FABRIC probe reads the export error's text through this. Defaults to the stub text and hipSuccess.
+extern std::function<hipError_t(hipError_t /*error*/, const char** /*str*/)> g_hipDrvGetErrorString;
+
+// The FABRIC handle type (p2p.h spells it 0x8 where HIP lacks it) and the VMM allocation type alloc.h requests.
+#ifdef HIP_FABRIC_API
+const hipMemAllocationHandleType kFabricHandle = hipMemHandleTypeFabric;
+#else
+const hipMemAllocationHandleType kFabricHandle = (hipMemAllocationHandleType)0x8;
+#endif
+#if defined(HIP_VMM_UNCACHED_MEMORY)
+constexpr hipMemAllocationType kVmmType = hipMemAllocationTypeUncached;
+#else
+constexpr hipMemAllocationType kVmmType = hipMemAllocationTypePinned;
+#endif
+
 extern std::function<hipError_t(hipStream_t* /*stream*/, unsigned /*flags*/)> g_hipStreamCreateWithFlags;
 extern std::function<hipError_t(hipStream_t /*stream*/)> g_hipStreamSynchronize;
 extern std::function<hipError_t(hipStream_t /*stream*/)> g_hipStreamDestroy;

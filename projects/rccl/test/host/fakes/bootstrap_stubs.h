@@ -32,6 +32,12 @@ extern bool g_bootstrapNetInitFail;
 
 // A std::function, not a result code: tests must write the allgathered (color, key) table into allData.
 extern std::function<ncclResult_t(void* /*commState*/, void* /*allData*/, int /*size*/)> g_bootstrapAllGather;
+// Fail-loud by default.
+extern std::function<ncclResult_t(void* /*commState*/, int /*rank*/, int /*nRanks*/, int /*tag*/)> g_bootstrapBarrier;
+extern std::function<ncclResult_t(void* /*commState*/, int /*peer*/, int /*tag*/, void* /*data*/, int /*size*/)>
+    g_bootstrapSend;
+extern std::function<ncclResult_t(void* /*commState*/, int /*peer*/, int /*tag*/, void* /*data*/, int /*size*/)>
+    g_bootstrapRecv;
 
 extern ncclResult_t g_bootstrapGetUniqueIdResult;
 extern int g_bootstrapGetUniqueIdCalls;

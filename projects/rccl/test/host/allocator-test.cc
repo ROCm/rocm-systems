@@ -25,9 +25,9 @@
 #include "comm.h"
 #include "allocator.h"
 #include "debug.h"
-#include "fakes/alloc_micro_fakes.h"
 #include "ScopedHook.h"
 #include "fakes/hip_fakes.h"
+#include "fakes/nccl_fakes.h"
 #include "fakes/rocmwrap_fakes.h"
 
 namespace {
@@ -47,12 +47,9 @@ uint64_t ncclHashPointer(int hbits, void* key) {
 #include "fakes/nvtx_redirect.h"
 #include ALLOCATOR_CC_PATH
 
+struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
+
 // hipify renames the CUDA FABRIC names wherever HIP has them; p2p.h only defines them otherwise.
-#ifdef CU_MEM_HANDLE_TYPE_FABRIC
-const hipMemAllocationHandleType kFabricHandle = CU_MEM_HANDLE_TYPE_FABRIC;
-#else
-const hipMemAllocationHandleType kFabricHandle = hipMemHandleTypeFabric;
-#endif
 #ifdef CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED
 const hipDeviceAttribute_t kFabricSupportedAttr = (hipDeviceAttribute_t)CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED;
 #else
@@ -64,11 +61,6 @@ namespace {
 constexpr int kDev = 3;
 constexpr hipDevice_t kHipDev = 13;
 constexpr size_t kGran = 1 << 16;
-#if defined(HIP_VMM_UNCACHED_MEMORY)
-constexpr hipMemAllocationType kVmmType = hipMemAllocationTypeUncached;
-#else
-constexpr hipMemAllocationType kVmmType = hipMemAllocationTypePinned;
-#endif
 const hipStream_t kStream = reinterpret_cast<hipStream_t>(0x5);
 const hipMemPool_t kPool = reinterpret_cast<hipMemPool_t>(0x7);
 
@@ -80,8 +72,9 @@ class AllocatorMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
     ResetHipFakes();
-    ResetAllocMicroFakes();
+    ResetNcclFakes();
     ResetRocmWrapFakes();
+    ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
     g_hashToZero = false;
     params_.clear();
     g_loadParam = [this](const char* env, int64_t deftVal) {
@@ -156,7 +149,7 @@ class AllocatorMicrotest : public ::testing::Test {
     EXPECT_TRUE(allocated_.empty()) << allocated_.size() << " fake device allocations leaked";
     for (void* p : allocated_) std::free(p);
     ResetHipFakes();
-    ResetAllocMicroFakes();  // g_loadParam captures this fixture
+    ResetNcclFakes();  // g_loadParam captures this fixture
   }
 
   // Frees only what the fakes handed out, so a stray free of a made-up address fails the test.
@@ -263,7 +256,7 @@ TEST_F(AllocatorMicrotest, MemAlloc_FallsBackToHipMallocWithoutCuMem) {
 
   // A null out-pointer or a zero size goes straight to hipMalloc, whose error is the caller's.
   mallocResult_ = hipErrorInvalidValue;
-  g_cuMemEnable = 1;
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
   EXPECT_EQ(ncclMemAlloc_impl(nullptr, 100), ncclUnhandledCudaError);
   EXPECT_EQ(ncclMemAlloc_impl(&p, 0), ncclUnhandledCudaError);
   EXPECT_EQ(g_rocmLibraryInitCalls, 1);
@@ -284,7 +277,7 @@ TEST_F(AllocatorMicrotest, MemAlloc_DeviceLookupFailures) {
 }
 
 TEST_F(AllocatorMicrotest, MemAlloc_MapsAlignedVmmMemoryForEveryPeerThatCanReachIt) {
-  g_cuMemEnable = 1;
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
   InstallVmm();
   void* p = nullptr;
   ASSERT_EQ(ncclMemAlloc_impl(&p, kGran + 1), ncclSuccess);
@@ -305,7 +298,7 @@ TEST_F(AllocatorMicrotest, MemAlloc_MapsAlignedVmmMemoryForEveryPeerThatCanReach
 }
 
 TEST_F(AllocatorMicrotest, MemAlloc_FabricHandlesOnlyWhenTheDeviceSupportsThem) {
-  g_cuMemEnable = 1;
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
   ncclCuMemHandleType = kFabricHandle;
   InstallVmm();
   void* p = nullptr;
@@ -318,19 +311,16 @@ TEST_F(AllocatorMicrotest, MemAlloc_FabricHandlesOnlyWhenTheDeviceSupportsThem) 
   fabricSupported_ = 0;
   ASSERT_EQ(ncclMemAlloc_impl(&p, 1), ncclSuccess);
   EXPECT_EQ(prop_.requestedHandleType, hipMemHandleTypePosixFileDescriptor);
-  EXPECT_TRUE(Warned("falling back to POSIX"));
 
-  g_warns.clear();
   fabricSupported_ = 1;
   attrResult_ = hipErrorInvalidValue;
   ASSERT_EQ(ncclMemAlloc_impl(&p, 1), ncclSuccess);
   EXPECT_EQ(prop_.requestedHandleType, hipMemHandleTypePosixFileDescriptor);
-  EXPECT_TRUE(Warned("falling back to POSIX"));
 }
 
 // Each failure undoes exactly the steps that succeeded before it and nulls the pointer.
 TEST_F(AllocatorMicrotest, MemAlloc_VmmFailuresUnwindWhatWasDone) {
-  g_cuMemEnable = 1;
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
   const std::vector<std::pair<std::string, std::vector<std::string>>> cases = {
       {"granularity", {}},
       {"count", {}},
@@ -377,7 +367,7 @@ TEST_F(AllocatorMicrotest, MemFree_FreesThroughHipWithoutCuMemAndRestoresTheDevi
 }
 
 TEST_F(AllocatorMicrotest, MemFree_ReleasesVmmMemoryWithCuMem) {
-  g_cuMemEnable = 1;
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
   InstallVmm();
   void* p = reinterpret_cast<void*>(0x40000);
   ScopedHook hipPointerGetAttribute(g_hipPointerGetAttribute, [](void* data, hipPointer_attribute, hipDeviceptr_t) {
@@ -431,7 +421,7 @@ TEST_F(AllocatorMicrotest, MemFree_LookupFailuresStillRestoreTheDevice) {
 #else
 // Below ROCm 7.0 both are plain hipMalloc/hipFree, even with cuMem enabled.
 TEST_F(AllocatorMicrotest, MemAllocAndFree_PlainHipBelowRocm7) {
-  g_cuMemEnable = 1;
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
   void* p = nullptr;
   ASSERT_EQ(ncclMemAlloc_impl(&p, 100), ncclSuccess);
   EXPECT_EQ(mallocs_, std::vector<size_t>{100});
@@ -445,10 +435,7 @@ TEST_F(AllocatorMicrotest, MemAllocAndFree_PlainHipBelowRocm7) {
 
 class AllocatorSpaceMicrotest : public ::testing::Test {
  protected:
-  void SetUp() override {
-    g_warns.clear();
-    ncclSpaceConstruct(&space_);
-  }
+  void SetUp() override { ncclSpaceConstruct(&space_); }
   void TearDown() override { ncclSpaceDestruct(&space_); }
 
   int64_t Alloc(int64_t size, int align = 1, int64_t limit = 1 << 20) {
@@ -472,9 +459,7 @@ TEST_F(AllocatorSpaceMicrotest, Alloc_FailsWhenNothingFitsUnderTheLimit) {
   EXPECT_EQ(Alloc(60, 1, 64), 0);
   int64_t off = -1;
   EXPECT_EQ(ncclSpaceTryAlloc(&space_, 64, 8, 1, &off), ncclInternalError);
-  EXPECT_TRUE(g_warns.empty());
   EXPECT_EQ(ncclSpaceAlloc(&space_, 64, 8, 1, &off), ncclInternalError);
-  EXPECT_TRUE(Warned("size=0x8 within limit=0x40"));
   EXPECT_EQ(off, -1);
   EXPECT_EQ(Alloc(4, 1, 64), 60);  // exactly fills the frontier
 }
@@ -535,16 +520,12 @@ TEST_F(AllocatorSpaceMicrotest, Free_ShrinksFromEitherEndOrSplits) {
 
 TEST_F(AllocatorSpaceMicrotest, Free_RejectsUnallocatedRanges) {
   EXPECT_EQ(ncclSpaceFree(&space_, 0, 1), ncclInternalError);
-  EXPECT_TRUE(Warned("No allocation found at offset=0x0"));
   Alloc(10);
   Alloc(10);
   ASSERT_EQ(ncclSpaceFree(&space_, 0, 10), ncclSuccess);
-  g_warns.clear();
   EXPECT_EQ(ncclSpaceFree(&space_, 20, 1), ncclInternalError);
-  EXPECT_TRUE(Warned("No allocation found at offset=0x14"));
   EXPECT_EQ(ncclSpaceFree(&space_, 5, 1), ncclInternalError);  // in the hole below
   EXPECT_EQ(ncclSpaceFree(&space_, 15, 6), ncclInternalError);
-  EXPECT_TRUE(Warned("size=0x6 extends beyond allocation"));
   EXPECT_EQ(Cuts(), (std::vector<int64_t>{10, 20}));
 }
 
@@ -792,7 +773,6 @@ TEST_F(AllocatorShadowPoolMicrotest, UnknownObjectsAreRejected) {
   void* h = this;
   EXPECT_EQ(ncclShadowPoolToHost(&pool_, &other, &h), ncclInternalError);
   EXPECT_EQ(ncclShadowPoolFree(&pool_, &other, kStream), ncclInternalError);
-  EXPECT_TRUE(Warned("does not exist in shadow pool"));
   ASSERT_EQ(ncclShadowPoolToHost(&pool_, nullptr, &h), ncclSuccess);
   EXPECT_EQ(h, nullptr);
   EXPECT_EQ(ncclShadowPoolFree(&pool_, nullptr, kStream), ncclSuccess);

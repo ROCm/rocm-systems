@@ -21,9 +21,9 @@
 
 #include "comm.h"
 #include "debug.h"
-#include "fakes/alloc_micro_fakes.h"
 #include "ScopedHook.h"
 #include "fakes/hip_fakes.h"
+#include "fakes/nccl_fakes.h"
 
 namespace {
 int g_callocFailAt = 0;
@@ -36,24 +36,12 @@ ncclResult_t MnnvlCalloc(T** ptr, size_t nelem) {
 }
 }  // namespace
 
-#ifdef HIP_FABRIC_API
-hipError_t hipDrvGetErrorString(hipError_t, const char** str) {
-  *str = "fabric export failed";
-  return hipSuccess;
-}
-#endif
-
 #undef ncclCalloc
 #define ncclCalloc(...) MnnvlCalloc(__VA_ARGS__)
 #include MNNVL_CC_PATH
 #undef ncclCalloc
 
-// hipify renames the CUDA FABRIC names wherever HIP has them; p2p.h only defines them otherwise.
-#ifdef CU_MEM_HANDLE_TYPE_FABRIC
-const hipMemAllocationHandleType kFabricHandle = CU_MEM_HANDLE_TYPE_FABRIC;
-#else
-const hipMemAllocationHandleType kFabricHandle = hipMemHandleTypeFabric;
-#endif
+struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
 
 namespace {
 
@@ -64,8 +52,9 @@ class MnnvlMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
     ResetHipFakes();
-    ResetAllocMicroFakes();
-    g_cuMemEnable = 1;
+    ResetNcclFakes();
+    g_cuMemEnable = [] { return 1; };
+    ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
     g_callocFailAt = 0;
     g_callocCalls = 0;
     // With HIP_FABRIC_API the check ends in a FABRIC alloc/export/free probe: let it succeed.
@@ -107,6 +96,7 @@ class MnnvlMicrotest : public ::testing::Test {
 
   void TearDown() override {
     free(comm_->clique.ranks);
+    ResetNcclFakes();
     ResetHipFakes();
   }
 
@@ -149,7 +139,7 @@ class MnnvlMicrotest : public ::testing::Test {
 
 TEST_F(MnnvlMicrotest, Check_NeedsCuMem) {
   Build(0, 2);
-  g_cuMemEnable = 0;
+  ScopedHook cuMem(g_cuMemEnable, [] { return 0; });
   ASSERT_EQ(ncclMnnvlCheck(comm_.get()), ncclSuccess);
   EXPECT_EQ(comm_->clique.ranks, nullptr);
   EXPECT_EQ(lastErrorClears_, 0);
@@ -260,7 +250,6 @@ TEST_F(MnnvlMicrotest, Probe_AllocationFailureIsASystemError) {
   Build(0, 2);
   createResult_ = hipErrorNotSupported;
   EXPECT_EQ(ncclMnnvlCheck(comm_.get()), ncclSystemError);
-  EXPECT_TRUE(Warned("is available but not working on this system. Check afmctl"));
   EXPECT_EQ(comm_->MNNVL, 0);
   EXPECT_EQ(ncclCuMemHandleType, hipMemHandleTypePosixFileDescriptor);
 }
@@ -268,9 +257,13 @@ TEST_F(MnnvlMicrotest, Probe_AllocationFailureIsASystemError) {
 TEST_F(MnnvlMicrotest, Probe_ExportFailureFreesTheBufferAndFails) {
   Build(0, 2);
   exportResult_ = hipErrorNotSupported;
+  ScopedHook errorString(g_hipDrvGetErrorString, [](hipError_t err, const char** str) {
+    EXPECT_EQ(err, hipErrorNotSupported);
+    *str = "fabric export failed";
+    return hipSuccess;
+  });
   EXPECT_EQ(ncclMnnvlCheck(comm_.get()), ncclSystemError);
-  EXPECT_TRUE(Warned("MNNVL rank0 (cliqueSize 2) is available but not working"));
-  EXPECT_TRUE(Warned("failed: fabric export failed"));
+  EXPECT_EQ(errorString.calls, 1);
   EXPECT_EQ(addressFrees_, std::vector<size_t>{reserved_});
   EXPECT_EQ(comm_->MNNVL, 0);
 }

@@ -55,6 +55,7 @@ ASSERT_HOOK_MATCHES_PROD(g_commGraphDeregister,       ncclCommGraphDeregister);
 ASSERT_HOOK_MATCHES_PROD(g_memTrackImportFromPeer,    ncclMemTrackImportFromPeer);
 ASSERT_HOOK_MATCHES_PROD(g_memTrack,                  ncclMemTrack);
 ASSERT_HOOK_MATCHES_PROD(g_memUntrackDynamic,         ncclMemUntrackDynamic);
+ASSERT_HOOK_MATCHES_PROD(g_memUntrackPersist,         ncclMemUntrackPersist);
 ASSERT_HOOK_MATCHES_PROD(g_dynMemMarkExportToPeer,    ncclDynMemMarkExportToPeer);
 
 #undef ASSERT_HOOK_MATCHES_PROD
@@ -526,11 +527,16 @@ ncclResult_t ncclMemUntrackDynamic(struct ncclMemManager* manager, void* ptr, st
     return g_memUntrackDynamic(manager, ptr, info);
 }
 
-ncclResult_t ncclMemUntrackPersist(struct ncclMemManager* /*manager*/,
-                                   void*                  /*ptr*/,
-                                   size_t                 /*size*/)
+// --- Controllable seam: ncclMemUntrackPersist --------------------------
+static ncclResult_t DefaultMemUntrackPersist(struct ncclMemManager*, void*, size_t)
 {
     return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclMemManager*, void*, size_t)> g_memUntrackPersist = DefaultMemUntrackPersist;
+
+ncclResult_t ncclMemUntrackPersist(struct ncclMemManager* manager, void* ptr, size_t size)
+{
+    return g_memUntrackPersist(manager, ptr, size);
 }
 
 // --- Controllable seam: ncclDynMemMarkExportToPeer ----------------------
@@ -602,6 +608,7 @@ void ResetNcclFakes()
     g_memTrackImportFromPeer       = DefaultMemTrackImportFromPeer;
     g_memTrack                     = DefaultMemTrack;
     g_memUntrackDynamic            = DefaultMemUntrackDynamic;
+    g_memUntrackPersist            = DefaultMemUntrackPersist;
     g_dynMemMarkExportToPeer       = DefaultDynMemMarkExportToPeer;
     g_ncclTopoGetLinkType          = DefaultTopoGetLinkType;
     g_ncclTopoGetLinkTypeCalls     = 0;
