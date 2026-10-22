@@ -1,5 +1,5 @@
 # Instruction coverage
 
-The current implementation provides gfx12 Wave32 FP16 WMMA with FP32 output
-and FP16 FMA, in loose semantics with default instruction and guest controls.
-Strict exact semantics are rejected without modifying outputs.
+The two gfx12 Wave32 instructions support loose and empirical bit-exact numeric
+results with default controls. FP16 FMA status reporting is not yet implemented;
+mode 3 is rejected before outputs are changed. WMMA has no FP-status output.
