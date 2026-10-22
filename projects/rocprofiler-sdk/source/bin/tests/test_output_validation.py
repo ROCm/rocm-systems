@@ -24,6 +24,8 @@
 
 """GPU-free tests for rocprofv3 output-directory validation."""
 
+import json
+
 import pytest
 
 
@@ -89,6 +91,28 @@ def test_output_directory_from_environment_fails_before_launch(
     )
 
 
+def test_relative_output_directory_from_environment_is_anchored(
+    rocprofv3, tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ROCPROF_OUTPUT_PATH", "results")
+    args, app_args = rocprofv3.parse_arguments(["--kernel-trace", "--", "/bin/true"])
+    args = rocprofv3.get_args(args, rocprofv3.dotdict({}))
+
+    class ApplicationLaunched(Exception):
+        pass
+
+    def application_launched(*_args, **_kwargs):
+        assert _kwargs["env"]["ROCPROF_OUTPUT_PATH"] == str(tmp_path / "results")
+        raise ApplicationLaunched
+
+    monkeypatch.setattr(rocprofv3, "resolve_library_path", lambda path, *_args: path)
+    monkeypatch.setattr(rocprofv3.os, "execvpe", application_launched)
+
+    with pytest.raises(ApplicationLaunched):
+        rocprofv3.run(app_args, args)
+
+
 def test_attach_output_directory_is_not_validated_in_launcher_context(
     rocprofv3, tmp_path, monkeypatch
 ):
@@ -136,6 +160,39 @@ def test_relative_output_directory_is_anchored_to_launcher_cwd(
         rocprofv3.run(app_args, args)
 
 
+def test_relative_path_anchor_preserves_symlink_parent_semantics(
+    rocprofv3, tmp_path, monkeypatch
+):
+    target_path = tmp_path / "real" / "nested"
+    target_path.mkdir(parents=True)
+    (tmp_path / "link").symlink_to(target_path, target_is_directory=True)
+    monkeypatch.chdir(tmp_path)
+    args, _ = rocprofv3.parse_arguments(
+        ["--kernel-trace", "-d", "link/../results", "--", "/bin/true"]
+    )
+    args = rocprofv3.get_args(args, rocprofv3.dotdict({}))
+
+    output_path, _ = rocprofv3.get_effective_output_paths(args)
+
+    assert output_path == str(tmp_path / "link" / ".." / "results")
+    assert rocprofv3.os.path.realpath(output_path) == str(tmp_path / "real" / "results")
+
+
+def test_absolute_output_directory_does_not_require_cwd(rocprofv3, tmp_path, monkeypatch):
+    output_path = str(tmp_path / "results")
+    args = rocprofv3.argparse.Namespace(output_directory=output_path, sub_directory=None)
+
+    def unexpected_getcwd():
+        pytest.fail("absolute output path unexpectedly queried the launcher cwd")
+
+    monkeypatch.setattr(rocprofv3.os, "getcwd", unexpected_getcwd)
+
+    effective_path, pass_output_path = rocprofv3.get_effective_output_paths(args)
+
+    assert effective_path == output_path
+    assert pass_output_path is None
+
+
 def test_echo_skips_output_directory_validation(rocprofv3, tmp_path, capsys, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "results").write_text("echo mode does not create output\n")
@@ -179,6 +236,42 @@ def test_multipass_output_directory_fails_before_launch(
         f"[rocprofv3] Fatal error: Output path '{pass_output_path}' already "
         "exists and is not a directory\n"
     )
+
+
+def test_later_per_job_output_directory_fails_before_any_launch(
+    rocprofv3, tmp_path, capsys, monkeypatch
+):
+    first_output_path = tmp_path / "first-output"
+    invalid_output_path = tmp_path / "invalid-output"
+    invalid_output_path.write_text("not a directory\n")
+    input_path = tmp_path / "input.json"
+    input_path.write_text(
+        json.dumps(
+            {
+                "jobs": [
+                    {
+                        "pmc": ["SQ_WAVES"],
+                        "output_directory": str(first_output_path),
+                    },
+                    {
+                        "pmc": ["GRBM_COUNT"],
+                        "output_directory": str(invalid_output_path),
+                    },
+                ]
+            }
+        )
+    )
+    forbid_application_launch(rocprofv3, monkeypatch)
+
+    with pytest.raises(SystemExit) as exc_info:
+        rocprofv3.main(["-i", str(input_path), "--", "/bin/true"])
+
+    assert exc_info.value.code == 1
+    assert capsys.readouterr().err == (
+        f"[rocprofv3] Fatal error: Output path '{invalid_output_path}' already "
+        "exists and is not a directory\n"
+    )
+    assert not first_output_path.exists()
 
 
 def test_non_output_mpi_rank_skips_all_multipass_output_validation(
@@ -298,6 +391,17 @@ def test_selected_mpi_rank_validates_output_directory(
 
 def test_existing_output_directory_is_accepted(rocprofv3, tmp_path):
     rocprofv3.validate_output_directory(tmp_path)
+
+
+def test_prevalidation_accepts_args_without_optional_fields(rocprofv3, tmp_path):
+    args = rocprofv3.argparse.Namespace(output_directory=tmp_path, sub_directory=None)
+
+    output_path, pass_output_path = rocprofv3.prevalidate_output_paths(
+        args, should_produce_output=True
+    )
+
+    assert output_path == str(tmp_path)
+    assert pass_output_path is None
 
 
 def test_missing_output_directory_is_not_created_during_validation(rocprofv3, tmp_path):
