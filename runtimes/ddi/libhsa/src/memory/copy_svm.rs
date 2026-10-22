@@ -787,13 +787,7 @@ fn finish_async_copy_signal(
     let profile = if success { profile } else { None };
     let mut guard = lock().ok();
     if let Some(runtime) = guard.as_mut().and_then(|guard| guard.as_mut()) {
-        if let Some(record) = runtime
-            .signal_state
-            .async_signal_refs
-            .get_mut(&(completion.handle as usize))
-        {
-            record.copy_profile = profile;
-        }
+        runtime.signal_state.set_copy_profile(completion, profile);
     }
     // SAFETY: Submission retains this signal until the worker exits, and
     // shutdown keeps its storage mapped until all workers have joined. The

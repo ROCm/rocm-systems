@@ -338,7 +338,7 @@ pub(crate) struct SignalState {
     /// IPC signals imported from another process.
     imported_ipc_signals: HashMap<usize, ImportedIpcSignal>,
     /// Async-handler references keeping signal slots alive.
-    pub(crate) async_signal_refs: HashMap<usize, AsyncSignalRecord>,
+    async_signal_refs: HashMap<usize, AsyncSignalRecord>,
     /// Public signal groups and their member signals.
     signal_groups: HashMap<u64, Vec<HsaSignal>>,
     /// Background dispatcher for asynchronous signal handlers.
@@ -637,6 +637,24 @@ impl HsaState {
 }
 
 impl SignalState {
+    /// Publish or clear copy timing only while the runtime registry is locked.
+    pub(crate) fn set_copy_profile(
+        &mut self,
+        signal: HsaSignal,
+        profile: Option<AsyncCopyProfile>,
+    ) {
+        if let Some(record) = self.async_signal_refs.get_mut(&(signal.handle as usize)) {
+            record.copy_profile = profile;
+        }
+    }
+
+    /// Return timing retained with a completed asynchronous signal.
+    pub(crate) fn copy_profile(&self, signal: HsaSignal) -> Option<AsyncCopyProfile> {
+        self.async_signal_refs
+            .get(&(signal.handle as usize))
+            .and_then(|record| record.copy_profile)
+    }
+
     pub(crate) fn owns_signal(&self, signal: HsaSignal) -> bool {
         let address = signal.handle as usize;
         if self
