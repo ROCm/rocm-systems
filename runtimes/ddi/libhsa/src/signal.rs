@@ -401,10 +401,15 @@ impl Drop for SignalBatchStorage {
 
 impl SignalSlab {
     fn create(runtime: &HsaState) -> Result<Self, Status> {
-        let gpu = runtime.gpus.first().ok_or(OUT_OF_RESOURCES)?;
+        let (gpu, other_gpus) = runtime.gpus.split_first().ok_or(OUT_OF_RESOURCES)?;
+        let peers = other_gpus
+            .iter()
+            .map(|peer| &peer.device)
+            .collect::<Vec<_>>();
         let allocation = gpu
             .device
-            .allocate(
+            .allocate_with_peers(
+                &peers,
                 MemoryKind::System,
                 (SIGNAL_BYTES * SIGNALS_PER_SLAB).max(runtime.host_page_size) as u64,
                 runtime.host_page_size as u64,

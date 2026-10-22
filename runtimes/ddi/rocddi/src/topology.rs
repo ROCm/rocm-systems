@@ -183,6 +183,10 @@ pub struct GpuQueueCapabilities {
 /// Required geometry fields must be complete and consistent before this record
 /// is published; opening an endpoint never substitutes guessed dimensions.
 /// Optional DRM facts may be populated later.
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "GPU topology reports independent native capabilities as flags"
+)]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct GpuInfo {
     /// Native KFD GPU identity used to resolve imported allocation placement.
@@ -239,6 +243,8 @@ pub struct GpuInfo {
     pub iommu_v2_supported: bool,
     /// Device-local memory can be coherently accessed by the host.
     pub coherent_host_access: bool,
+    /// SRAM ECC mode reported by the native GPU topology.
+    pub sram_ecc_enabled: bool,
     /// Packet processor firmware revision reported by the backend.
     pub packet_processor_firmware_version: u32,
     /// SDMA firmware revision reported by the backend.
