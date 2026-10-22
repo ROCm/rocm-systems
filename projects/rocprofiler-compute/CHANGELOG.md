@@ -22,10 +22,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
-* Merged the metric listing options into `--list-metrics`, which now shows the alias of each block and the unit and description of each metric. Per-channel metrics are no longer listed.
-  * The GPU architecture is optional. Without it, `--list-metrics` lists the metrics of the current GPU.
-  * Use `-b/--block` to list only some blocks or metrics, for example `rocprof-compute --list-metrics gfx950 -b sol 12.1`.
-
 * `--triton-trace` no longer captures the Triton kernels that `torch.compile` generates. Use `--torch-trace` for those kernels.
 
 * The PyTorch and Triton operator call trees now show each operator's arguments. `--torch-operator` and `--triton-operator` can now be used together.
@@ -52,6 +48,12 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * `GPU_ID` in analyze output and the `--gpu-id` filter count every GPU on the node in topology order, not only the GPUs that ran kernels. A run on only the fourth GPU now reports and filters as `GPU_ID` 3 instead of 0.
 
 * Renamed the PC sampling analyze table columns `count_issued` and `count_stalled` to `issue_count` and `stall_count`, so the terminal table uses the same column names as `pc_sampling_summary.csv` and `compute_pc_sampling_summary_view`.
+
+* `--list-metrics` now does what `--list-blocks` and `--list-available-metrics` did, for the current GPU. It no longer takes a GPU architecture.
+  * On its own, it shows a table of blocks and their aliases.
+  * Add block or metric IDs or aliases, or `all`, to list those metrics with their units and descriptions, for example `rocprof-compute --list-metrics sol 12.1`.
+  * `rocprof-compute analyze -p <workload> --list-metrics` lists only the blocks that the workload profiled.
+  * Per-channel metrics are no longer listed.
 
 ### Removed
 
