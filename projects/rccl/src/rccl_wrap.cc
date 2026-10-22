@@ -1816,7 +1816,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   }
 
   if (!cs.bestPreferredFound && cs.preferred != RCCL_BACKEND_ALL) {
-    WARN("rcclSelectAllReduce: preferred backend (mask=0x%x) unavailable, falling back",
+    ATTN("preferred backend (mask=0x%x) unavailable, falling back",
          (unsigned)cs.preferred);
   }
   if (!cs.bestPreferredFound && cs.bestFallbackFound) *decision = cs.bestFallback;
