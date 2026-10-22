@@ -84,7 +84,7 @@ constexpr int8_t ncclIbCastUDMAHigh = (int8_t)IONIC_UDMA_MASK_HIGH;
 
 static ncclIbCastUDMAPolicy ncclIbCastGetUDMAPolicy() {
   int64_t policy = rcclParamIbCastUDMAPolicy();
-  if (policy < (int64_t)ncclIbCastUDMAPolicy::First || policy > (int64_t)ncclIbCastUDMAPolicy::Last) {
+  if (!ncclIbCastUDMAPolicyIsValid(policy)) {
     return ncclIbCastUDMAPolicy::ChannelAffinity;
   }
   return (ncclIbCastUDMAPolicy)policy;
@@ -97,6 +97,8 @@ static int8_t ncclIbCastSelectUDMA(const struct ncclIbQpCreateAttr* createQpAttr
   }
 
   if (policy == ncclIbCastUDMAPolicy::SplitConnection) {
+    // qpIdx only alternates with >= 2 QPs per device per connection; otherwise
+    // it is always 0 and only the channel-id parity varies.
     const bool highUd = __builtin_parity(static_cast<unsigned>(createQpAttrs->channelId)) ^
                         (createQpAttrs->qpIdx & 1);
     return highUd ? ncclIbCastUDMAHigh : ncclIbCastUDMALow;

@@ -606,6 +606,22 @@ in the following table.
       - | Integer value in bytes (default: ``128``)
         | ``N``: Split only when message size >= N bytes
 
+    * - | ``RCCL_IB_UDMA_POLICY``
+        | Selects how queue pairs (QPs) are assigned to the two uDMA pipelines
+          of an AINIC. Applies only to AINIC with the ``IB-CAST`` transport.
+          With QP sharing enabled, the sharing groups choose the pipeline in
+          place of the per-channel assignment of ``0`` and ``1``.
+      - | ``0``: Pin all QPs of a channel to one pipeline, alternating
+          pipelines as channels are first used (default).
+        | ``1``: Round-robin P2P QPs across the pipelines in creation order,
+          send and receive QPs separately. Collective QPs behave as with ``0``.
+        | ``2``: Leave the pipeline choice to the driver.
+        | ``3``: Split each connection across both pipelines. This needs at
+          least two QPs per device per connection; with one, every QP of a
+          channel uses the same pipeline. Raise the QP count with
+          ``NCCL_IB_QPS_PER_CONNECTION``, or ``RCCL_IB_QPS_PER_P2P`` for P2P.
+        | Other values log a warning and fall back to ``0``.
+
     * - | ``NCCL_NCHANNELS_PER_NET_PEER``
         | Sets the number of channels used per network (remote) peer.
         | This overrides the value of the ``nChannelsPerNetPeer`` field in
