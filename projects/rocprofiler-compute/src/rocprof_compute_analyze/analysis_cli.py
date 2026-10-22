@@ -364,8 +364,6 @@ class cli_analysis(OmniAnalyze_Base):
                 self._output,
             )
         else:
-            roof_plot = None
-
             # Generate roofline plot for single-path, compatible architectures
             if (len(args.path)) == 1:
                 if gpu_arch in ROOFLINE_SUPPORTED:
@@ -410,19 +408,15 @@ class cli_analysis(OmniAnalyze_Base):
                             arch_config=arch_config,
                         )
 
-                        # NOTE: using default data type
-                        roof_plot = roof_obj.cli_generate_plot(
-                            dtype=roof_obj.get_dtype()[0],
-                            ai_data=ai_data,
-                        )
-
                         (
                             ops_fig,
                             flops_fig,
                             ops_dt,
                             flops_dt,
                         ) = roof_obj.construct_plotly_figures(ai_data=ai_data)
-                        roof_obj.save_html_files(ops_fig, flops_fig, ops_dt, flops_dt)
+                        workload.roofline_html_path = roof_obj.save_html_files(
+                            ops_fig, flops_fig, ops_dt, flops_dt
+                        )
                     else:
                         console_warning(
                             "roofline",
@@ -436,7 +430,6 @@ class cli_analysis(OmniAnalyze_Base):
                 arch_config,
                 self._output,
                 self._profiling_config,
-                roof_plot=roof_plot,
             )
 
     def list_operators(

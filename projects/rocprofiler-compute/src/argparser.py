@@ -1012,7 +1012,7 @@ Examples:
         help=(
             "\t\tTTY output view. "
             "table: force plain tables and ignore cli_style from YAML "
-            "(e.g. mem_chart, Roofline charts as tables). "
+            "(e.g. mem_chart, per-kernel Roofline layout as tables). "
             "Additional views may be added in future releases."
         ),
     )
