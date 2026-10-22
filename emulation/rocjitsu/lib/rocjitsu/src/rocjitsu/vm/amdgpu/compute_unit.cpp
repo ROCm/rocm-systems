@@ -44,6 +44,13 @@
 
 namespace rocjitsu {
 namespace amdgpu {
+
+std::optional<uint32_t> ComputeUnitCore::xcc_id() const {
+  if (!cp_)
+    return std::nullopt;
+  return cp_->xcc_id();
+}
+
 bool InstructionComputeUnitView::signal_queue_exception(
     uint32_t queue_id, uint32_t process_id, uint64_t status, bool clear_debug_stop_on_success,
     bool retain_failure_for_debugger, QueueExceptionDeliveryPolicy delivery_policy,
