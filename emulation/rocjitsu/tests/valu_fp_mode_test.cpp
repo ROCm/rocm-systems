@@ -5477,27 +5477,29 @@ struct ForceScalarGuard {
   ~ForceScalarGuard() { util::set_force_scalar_for_testing(original); }
 };
 
-// A VOPD pair mixing arithmetic with MAX: the RDNA3 MIN/MAX SIMD slot computes on
-// host floats, whose comparison and fmax both raise invalid on a signaling NaN,
-// and scopes them so the caller's flags survive. The scalar VOPD slot calls
-// std::fmax unscoped, like the other scalar host min/max bodies, so this checks
-// the SIMD route only. mxcsr_mask makes the harness assert the flags survive,
-// and the harness only asserts it where MXCSR exists, as _MM_EXCEPT_MASK does.
+// A VOPD pair of an inexact ADD and a signaling-NaN MAX. The ADD raises inexact
+// on the host, so the caller's flags survive only if its slot is scoped; the
+// RDNA3 MAX selects on raw bits and raises nothing. mxcsr_mask makes the harness
+// assert the flags survive, which it does only where MXCSR exists.
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
-TEST(ValuFpModeHelpers, VopdMixedMaxSimdKeepsHostFlags) {
-  if (!util::has_stdx_simd)
-    GTEST_SKIP() << "std::experimental::simd unavailable";
+TEST(ValuFpModeHelpers, VopdMixedMaxKeepsHostFlags) {
+  const ArithmeticCase test{
+      "gfx1100VopdInexactAddSignalingNanMaxKeepsHostFlags",
+      ROCJITSU_CODE_ARCH_RDNA3,
+      {0xc9140300u, 0x06060702u},
+      {{0, 0x3f800000u}, {1, 0x33800001u}, {2, 0x7f800001u}, {3, 0x3f800000u}},
+      {{6, 0x3f800001u}, {7, 0x3f800000u}},
+      240u,
+      FE_TONEAREST,
+      _MM_EXCEPT_MASK,
+      0u,
+      expect_simd_path(amdgpu::SimdFastPath::VOPD)};
   ForceScalarGuard guard;
-  util::set_force_scalar_for_testing(false);
-  expect_arithmetic_case({"gfx1100VopdMixedMaxSignalingNanKeepsHostFlags",
-                          ROCJITSU_CODE_ARCH_RDNA3,
-                          {0xc9140300u, 0x06060702u},
-                          {{0, 0x3f800000u}, {1, 0x3f800000u}, {2, 0x7f800001u}, {3, 0x3f800000u}},
-                          {{6, 0x40000000u}, {7, 0x3f800000u}},
-                          240u,
-                          FE_TONEAREST,
-                          _MM_EXCEPT_MASK},
-                         expect_simd_path(amdgpu::SimdFastPath::VOPD));
+  for (const bool scalar : {true, false}) {
+    SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
+    util::set_force_scalar_for_testing(scalar);
+    expect_arithmetic_case(test, simd_expectation_for_run(test, scalar));
+  }
 }
 #endif
 
