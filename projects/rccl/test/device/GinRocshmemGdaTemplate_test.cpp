@@ -792,7 +792,7 @@ constexpr size_t kNeverDrains = ~size_t{0};
 
 static void setQueue(GdaEnv& env, int peer, size_t busyPolls, size_t pendingWqes) {
   rocshmem::QueuePair* qp = env.qp.ptr + peer;
-  HIP_CHECK(hipMemcpy(&qp->try_quiet_busy, &busyPolls, sizeof(busyPolls), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(&qp->busy_polls, &busyPolls, sizeof(busyPolls), hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(&qp->pending_wqes, &pendingWqes, sizeof(pendingWqes), hipMemcpyHostToDevice));
 }
 

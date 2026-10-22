@@ -54,10 +54,10 @@ public:
   static __device__ inline size_t amo_count{0};
   static __device__ inline size_t quiet_count{0};
 
-  // Per queue pair. try_quiet_until_single() reports busy for try_quiet_busy polls, then treats all but the
+  // Per queue pair. poll_cq_once() reports busy for busy_polls polls, then treats all but the
   // newest pending_wqes of the posted WQEs as complete.
   size_t posted{0};
-  size_t try_quiet_busy{0};
+  size_t busy_polls{0};
   size_t pending_wqes{0};
   size_t polls{0};
 
@@ -96,9 +96,9 @@ public:
 
   __device__ __forceinline__ void quiet_single();
 
-  __device__ __forceinline__ uint64_t quiet_target_single();
+  __device__ __forceinline__ uint64_t cq_target();
 
-  __device__ __forceinline__ bool try_quiet_until_single(uint64_t target);
+  __device__ __forceinline__ bool poll_cq_once(uint64_t target);
 
 
   /**
@@ -300,15 +300,15 @@ __device__ __forceinline__ void QueuePairMock::quiet_single() {
   __scoped_atomic_fetch_add(&quiet_count, 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
 }
 
-__device__ __forceinline__ uint64_t QueuePairMock::quiet_target_single() {
+__device__ __forceinline__ uint64_t QueuePairMock::cq_target() {
   return posted;
 }
 
-__device__ __forceinline__ bool QueuePairMock::try_quiet_until_single(uint64_t target) {
+__device__ __forceinline__ bool QueuePairMock::poll_cq_once(uint64_t target) {
   quiet_single();
   ++polls;
-  if (try_quiet_busy != 0) {
-    --try_quiet_busy;
+  if (busy_polls != 0) {
+    --busy_polls;
     return false;
   }
   return target + pending_wqes <= posted;

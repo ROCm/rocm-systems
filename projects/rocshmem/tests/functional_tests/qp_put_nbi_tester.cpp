@@ -36,7 +36,7 @@ using namespace rocshmem;
  *
  * One-way non-blocking put using QP internals directly.  Pipelines multiple
  * put_nbi_single calls and quiets only at batch boundaries.  With poll set,
- * each quiet spins on the non-blocking try_quiet_until_single() instead, first
+ * each quiet spins on the non-blocking poll_cq_once() instead, first
  * on a target taken mid-batch and then on everything posted.
  *****************************************************************************/
 static __device__ void QpPutNbiQuiet(QueuePair &qp, bool poll) {
@@ -44,8 +44,8 @@ static __device__ void QpPutNbiQuiet(QueuePair &qp, bool poll) {
     qp.quiet_single();
     return;
   }
-  uint64_t target = qp.quiet_target_single();
-  while (!qp.try_quiet_until_single(target)) {
+  uint64_t target = qp.cq_target();
+  while (!qp.poll_cq_once(target)) {
   }
 }
 
@@ -81,7 +81,7 @@ __global__ void QpPutNbiTest(int loop, int skip, long long int *start_time,
       if (slot == 0) {
         // Poll the older target while the WQEs posted after it may still be in flight
         if (poll && mid_target != 0) {
-          while (!qp.try_quiet_until_single(mid_target)) {
+          while (!qp.poll_cq_once(mid_target)) {
           }
         }
         QpPutNbiQuiet(qp, poll);
@@ -92,7 +92,7 @@ __global__ void QpPutNbiTest(int loop, int skip, long long int *start_time,
 
       qp.put_nbi_single(&dest[slot * size], source, size);
       if (poll && slot == batch / 2) {
-        mid_target = qp.quiet_target_single();
+        mid_target = qp.cq_target();
       }
     }
 

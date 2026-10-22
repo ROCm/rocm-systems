@@ -90,9 +90,9 @@ public:
 
   __device__ __noinline__ void quiet_single();
 
-  __device__ __forceinline__ uint64_t quiet_target_single();
+  __device__ __forceinline__ uint64_t cq_target();
 
-  __device__ __noinline__ bool try_quiet_until_single(uint64_t target);
+  __device__ __forceinline__ bool poll_cq_once(uint64_t target);
 
 private:
   __device__ void ring_doorbell(uint32_t slot_idx);
@@ -409,12 +409,12 @@ __device__ inline __noinline__ void QueuePairBNXT::quiet_single() {
   poll_cq_until(sq.depth);
 }
 
-__device__ __forceinline__ uint64_t QueuePairBNXT::quiet_target_single() {
+__device__ __forceinline__ uint64_t QueuePairBNXT::cq_target() {
   return __scoped_atomic_load_n(&sq.posted, __ATOMIC_SEQ_CST, __MEMORY_SCOPE_DEVICE);
 }
 
 // Only reads queue state, so lanes sharing a queue pair can call it.
-__device__ inline __noinline__ bool QueuePairBNXT::try_quiet_until_single(uint64_t target) {
+__device__ __forceinline__ bool QueuePairBNXT::poll_cq_once(uint64_t target) {
   struct bnxt_re_req_cqe *cqe = (struct bnxt_re_req_cqe *) cq.buf;
   uint32_t sq_depth = sq.depth;
 
@@ -423,10 +423,23 @@ __device__ inline __noinline__ bool QueuePairBNXT::try_quiet_until_single(uint64
   uint64_t posted  = __scoped_atomic_load_n(&sq.posted, __ATOMIC_SEQ_CST, __MEMORY_SCOPE_DEVICE);
   uint32_t sq_tail = static_cast<uint32_t>(posted % sq_depth);
 
+#ifdef BUILD_DEBUG_DEVICE
+  uint32_t flg_val =
+      __scoped_atomic_load_n(static_cast<uint32_t*>(
+          __builtin_assume_aligned((char*)cqe + sizeof(struct bnxt_re_req_cqe)
+                                              + offsetof(struct bnxt_re_bcqe, flg_st_typ_ph),
+                                   4)),
+          __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
+  uint8_t status = (flg_val >> BNXT_RE_BCQE_STATUS_SHIFT) & BNXT_RE_BCQE_STATUS_MASK;
+  if (status != BNXT_RE_REQ_ST_OK) {
+    print_cqe_error(status);
+  }
+#endif
+
   uint32_t sq_head = (((cqe->con_indx & 0xFFFF) * GDA_BNXT_WQE_SLOT_COUNT) % sq_depth);
 
-  uint32_t in_flight = (sq_tail - sq_head + sq_depth) % sq_depth;
-  return in_flight <= posted - target;
+  uint32_t consumed_slots = (sq_tail - sq_head + sq_depth) % sq_depth;
+  return consumed_slots <= posted - target;
 }
 
 // precondition: called with all active lanes using different QPs

@@ -102,9 +102,9 @@ public:
 
   __device__ __noinline__ void quiet_single();
 
-  __device__ __forceinline__ uint64_t quiet_target_single();
+  __device__ __forceinline__ uint64_t cq_target();
 
-  __device__ __noinline__ bool try_quiet_until_single(uint64_t target);
+  __device__ __forceinline__ bool poll_cq_once(uint64_t target);
 
 private:
 #if GDA_MLX5_LOCK_USE_S_WAKEUP
@@ -339,12 +339,14 @@ __device__ inline __noinline__ void QueuePairMLX5::quiet_single() {
   poll_cq_until(sq.depth);
 }
 
-__device__ __forceinline__ uint64_t QueuePairMLX5::quiet_target_single() {
+__device__ __forceinline__ uint64_t QueuePairMLX5::cq_target() {
   return __scoped_atomic_load_n(&sq.post, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_DEVICE);
 }
 
+// Follows one poll_cq_until() iteration, but checks the WQEs before target instead of the free slots.
 // Only reads queue state, so lanes sharing a queue pair can call it.
-__device__ inline __noinline__ bool QueuePairMLX5::try_quiet_until_single(uint64_t target) {
+__device__ __forceinline__ bool QueuePairMLX5::poll_cq_once(uint64_t target) {
+  // nothing was posted before target
   if (target == 0) {
     return true;
   }
@@ -352,18 +354,34 @@ __device__ inline __noinline__ bool QueuePairMLX5::try_quiet_until_single(uint64
   // Read sq_post before the CQE, so completions that land in between can only make this report not yet
   uint64_t sq_post = __scoped_atomic_load_n(&sq.post, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_DEVICE);
 
-  uint32_t wqecnt_sig_op_own = __scoped_atomic_load_n(reinterpret_cast<uint32_t*>(&cq.buf->wqe_counter),
+  struct mlx5_cqe64* cqe = cq.buf;
+
+  uint32_t wqecnt_sig_op_own = __scoped_atomic_load_n(reinterpret_cast<uint32_t*>(&cqe->wqe_counter),
                                                       __ATOMIC_ACQUIRE, __MEMORY_SCOPE_SYSTEM);
+  __be16 be_wqe_counter = static_cast<__be16>(wqecnt_sig_op_own);
   uint8_t opcode = static_cast<uint8_t>(wqecnt_sig_op_own >> 28);
+  uint16_t sq_head = endian::from_be(be_wqe_counter);
+
+  uint16_t sq_tail = static_cast<uint16_t>(sq_post);
+
   if (opcode == MLX5_CQE_INVALID) {
     return false;
   }
 
-  __be16 be_wqe_counter = static_cast<__be16>(wqecnt_sig_op_own);
-  uint16_t completed = endian::from_be(be_wqe_counter) + 1;
-  uint16_t in_flight = static_cast<uint16_t>(sq_post) - completed;
+#if defined(BUILD_DEBUG_DEVICE)
+  if (opcode != MLX5_CQE_REQ) {
+    uint8_t owner = static_cast<uint8_t>(wqecnt_sig_op_own >> 24) & MLX5_CQE_OWNER_MASK;
+    print_cqe_error(cqe, opcode, owner);
+  }
+#endif  // BUILD_DEBUG_DEVICE
 
-  return in_flight <= sq_post - target;
+  uint16_t posted    = sq_tail;
+  uint16_t completed = sq_head + 1;
+
+  uint16_t consumed_slots = posted - completed;
+
+  // In-flight WQEs are the newest ones, so all WQEs before target are done once at most sq_post - target remain
+  return consumed_slots <= sq_post - target;
 }
 
 // precondition: called with all active lanes using different QPs
