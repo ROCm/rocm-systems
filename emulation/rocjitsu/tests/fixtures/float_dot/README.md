@@ -11,6 +11,7 @@ tests consume the captured bits directly and require no GPU.
 | `rdna_f8_samples.h` | Selected RDNA4 FP8/BF8 WMMA output words. |
 | `rdna_integer_samples.h` | Selected RDNA integer WMMA/SWMMAC output words. |
 | `gfx1100_cases.h` | GFX11 FP32-output DOT2 cases and a WMMA matrix. |
+| `gfx1201_dot4_cases.h` | 256 native FP8/BF8 DOT4 outputs from 64 raw A/B/C triples. |
 | `gfx1201_cases.h` | GFX12 FP32-output DOT2 cases and WMMA matrices. |
 | `packed_operand_cases.h` | 440 packed WMMA instruction/operand captures for modifiers, selectors and inline constants. |
 | `packed_wmma_cases.h` | Seven F16/BF16 matrix inputs with packed outputs for both architectures and wave sizes. |
@@ -129,3 +130,7 @@ source permutation from destination masking. The decoded regressions cover
 both wave sizes, inactive destinations, row/bank masks and overlapping sources.
 The four-term FP8/BF8 model uses the same group alignment as the eight-term
 matrix model, with a single group of four products.
+
+The DOT4 arithmetic fixture uses xorshift32 seed `0x713fa225` and retains all
+256 hardware outputs. It checks input format selection, NaN precedence and
+rounding, including independence from the host floating-point rounding mode.
