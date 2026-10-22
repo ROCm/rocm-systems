@@ -9943,6 +9943,10 @@ TEST_F(KfdIoctlCdna5Test, DbgTrapHandlerExceptionReportsExactMaskBeforeExplicitC
   (void)vm_write32(kKernelAddress, kSTrapBreakpoint, driver_->local_process_id());
   for (uint32_t offset = 0; offset < peer_page.size(); offset += sizeof(uint32_t))
     (void)vm_write32(kPeerAddress + offset, kSNop, driver_->local_process_id());
+  // The CWSR restore below edits the PC past this handler. Keep that continuation
+  // valid so resuming the wave tests restoration without a decode failure.
+  for (uint32_t offset = 0; offset < trap_handler_page.size(); offset += sizeof(uint32_t))
+    (void)vm_write32(kTrapHandlerAddress + offset, kSNop, driver_->local_process_id());
   const uint32_t trap_handler[] = {
       0x806C846Cu,              // s_add_u32 ttmp0, ttmp0, 4
       0x826D806Du,              // s_addc_u32 ttmp1, ttmp1, 0
