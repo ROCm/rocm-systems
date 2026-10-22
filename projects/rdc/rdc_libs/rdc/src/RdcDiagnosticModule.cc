@@ -200,8 +200,8 @@ RdcDiagnosticModule::RdcDiagnosticModule(std::list<RdcDiagnosticPtr> diagnostic_
       // The only line that explains the tests missing from `rdci diag`: the module's own loader
       // may have logged nothing, and the query made for each client request stays silent. The
       // dispatcher is built once, so one failing module logs one line.
-      RDC_LOG(RDC_ERROR, "A diagnostic module's test list could not be read ("
-                             << rdc_status_string(status) << "); its tests are not run.");
+      RDC_LOG(RDC_ERROR, "A diagnostic module's test list could not be read (status "
+                             << status << "); its tests are not run.");
     }
   }
 }

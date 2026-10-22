@@ -1574,6 +1574,7 @@ TEST(SmiDiagModule, AModuleWhoseQueryFailsIsLogged) {
   EXPECT_EQ(errors, 1u) << log;
   EXPECT_NE(log.find("A diagnostic module's test list could not be read"), std::string::npos)
       << log;
-  EXPECT_NE(log.find(rdc_status_string(RDC_ST_NOT_SUPPORTED)), std::string::npos) << log;
+  EXPECT_NE(log.find("(status " + std::to_string(RDC_ST_NOT_SUPPORTED) + ")"), std::string::npos)
+      << log;
   EXPECT_NE(log.find("its tests are not run"), std::string::npos) << log;
 }
