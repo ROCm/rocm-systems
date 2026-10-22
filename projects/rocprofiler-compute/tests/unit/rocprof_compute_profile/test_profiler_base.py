@@ -38,7 +38,6 @@ def _make_sanitize_args(remaining, trace_ml_api=None, **overrides):
     defaults = dict(
         filter_blocks=[],
         set_selected=None,
-        roof_only=False,
         output_directory="/tmp/test_workload",
         no_native_tool=False,
         iteration_multiplexing=None,
