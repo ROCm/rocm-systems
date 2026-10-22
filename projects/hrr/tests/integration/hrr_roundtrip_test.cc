@@ -649,6 +649,30 @@ HRR_TEST_CASE(Unit_HRR_ZeroInitRoundtrip) {
   CHECK(d2h_fail == 0);
 }
 
+/**
+ * Test Description
+ * ----------------
+ *   - CPU-only check of hrr_d2h_mismatch_exit, the rule under which a Windows
+ *     roundtrip accepts a non-zero hrr-playback exit: D2H mismatches explain
+ *     it, nothing else does.  A fatal HIP error aborts before the summary
+ *     line, so its exit 1 must not pass, or a replay handler that stopped
+ *     working would go unnoticed on Windows while Linux catches it.
+ */
+HRR_TEST_CASE(Unit_HRR_D2HMismatchExit) {
+  const std::string mismatch =
+      "[HRR]   D2H checks     : 3 pass (3 exact, 0 within tol), 1 fail, 0 skipped\n";
+  const std::string clean =
+      "[HRR]   D2H checks     : 4 pass (4 exact, 0 within tol), 0 fail, 0 skipped\n";
+
+  CHECK(hrr_d2h_mismatch_exit(1, mismatch));
+  CHECK(hrr_d2h_mismatch_exit(2, ""));  // divergence guard, no summary
+
+  CHECK_FALSE(hrr_d2h_mismatch_exit(1, ""));     // fatal HIP error
+  CHECK_FALSE(hrr_d2h_mismatch_exit(1, clean));  // failed for another reason
+  CHECK_FALSE(hrr_d2h_mismatch_exit(0, clean));
+  CHECK_FALSE(hrr_d2h_mismatch_exit(134, mismatch));  // crash
+}
+
 // The expected blobs of the hipMemcpy readbacks in `cap`. Playback reads blobs
 // by name without re-hashing them, so replay compares against an edited one.
 static std::vector<fs::path> hrr_memcpy_d2h_blobs(const fs::path& cap) {
