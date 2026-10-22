@@ -63,10 +63,12 @@ struct ArithmeticCase {
                  std::vector<std::pair<uint32_t, uint32_t>> sources_,
                  std::vector<std::pair<uint32_t, uint32_t>> expected_, uint32_t mode_,
                  int host_rounding_, uint32_t mxcsr_mask_ = 0, uint32_t mxcsr_bits_ = 0,
-                 SimdPathExpectation simd_ = {})
+                 SimdPathExpectation simd_ = {},
+                 std::vector<std::pair<uint32_t, uint32_t>> scalar_sources_ = {})
       : name(std::move(name_)), arch(arch_), words(words_), sources(std::move(sources_)),
         expected(std::move(expected_)), mode(mode_), host_rounding(host_rounding_),
-        mxcsr_mask(mxcsr_mask_), mxcsr_bits(mxcsr_bits_), simd(simd_) {}
+        mxcsr_mask(mxcsr_mask_), mxcsr_bits(mxcsr_bits_), simd(simd_),
+        scalar_sources(std::move(scalar_sources_)) {}
 
   std::string name;
   rj_code_arch_t arch;
@@ -78,6 +80,8 @@ struct ArithmeticCase {
   uint32_t mxcsr_mask = 0;
   uint32_t mxcsr_bits = 0;
   SimdPathExpectation simd;
+  // SGPR index and value pairs, written before execution.
+  std::vector<std::pair<uint32_t, uint32_t>> scalar_sources;
 };
 
 void PrintTo(const ArithmeticCase &test, std::ostream *stream) { *stream << test.name; }
@@ -3989,6 +3993,241 @@ std::vector<ArithmeticCase> conversion_mode_boundary_cases() {
   return cases;
 }
 
+// SUB and SUBREV add the negated subtrahend, keeping the sources in operand
+// order: a NaN subtrahend comes out with its sign flipped, and with two NaNs
+// src0's NaN wins. Lanes and MODE values are gfx1201 captures, plus gfx1100
+// IEEE=0 captures, where signaling NaNs stay unquieted. F16 sources keep their
+// captured high halves; the destination's high half stays.
+std::vector<ArithmeticCase> subtraction_nan_cases() {
+  struct Lane {
+    const char *name;
+    uint32_t src0;
+    uint32_t src1;
+    uint32_t result;
+  };
+  struct Form {
+    rj_code_arch_t arch;
+    const char *name;
+    std::array<uint32_t, 2> words;
+    std::array<uint32_t, 2> modes;
+    std::vector<Lane> lanes;
+  };
+  const auto vop2 = [](uint16_t op) {
+    return std::array<uint32_t, 2>{rdna4::build_vop2(op, {.src0 = 256, .vsrc1 = 1, .vdst = 6})[0],
+                                   0u};
+  };
+  const auto vop3 = [](uint16_t op, uint8_t neg) {
+    return rdna4::build_vop3(op, {.vdst = 6, .src0 = 256, .src1 = 257, .neg = neg});
+  };
+  // The E32 captures cover MODE 0x30 and 0xc0; the E64 ones cover 0x00 and 0xf0.
+  // llvm-mc gives gfx1100 the same VOP2 F32 SUB/SUBREV encodings as gfx1201.
+  constexpr rj_code_arch_t kGfx1201 = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr rj_code_arch_t kGfx1100 = ROCJITSU_CODE_ARCH_RDNA3;
+  const std::array<Form, 10> forms = {{
+      {kGfx1201,
+       "SubF32E32",
+       vop2(rdna4::kVSubF32Vop2),
+       {0x30u, 0xc0u},
+       {{"NanSubtrahend", 0x80000000u, 0x7fc00000u, 0xffc00000u},
+        {"SignalingSubtrahend", 0x00000000u, 0x7f800001u, 0xffc00001u},
+        {"TwoNans", 0x7fc00000u, 0x7fc00000u, 0x7fc00000u}}},
+      {kGfx1201,
+       "SubrevF32E32",
+       vop2(rdna4::kVSubrevF32Vop2),
+       {0x30u, 0xc0u},
+       {{"NanSubtrahend", 0x7fc00000u, 0x80000000u, 0xffc00000u},
+        {"SignalingSubtrahend", 0x7f800001u, 0x00000000u, 0xffc00001u},
+        {"TwoNans", 0x7fc00000u, 0x7fc00000u, 0xffc00000u}}},
+      {kGfx1201,
+       "SubF16E32",
+       vop2(rdna4::kVSubF16Vop2),
+       {0x30u, 0xc0u},
+       {{"NanSubtrahend", 0xedc48000u, 0x1b937e00u, 0xa5a5fe00u},
+        {"SignalingSubtrahend", 0x7a990000u, 0x0e867c01u, 0xa5a5fe01u},
+        {"TwoNans", 0x034c7e00u, 0x4ec77e00u, 0xa5a57e00u}}},
+      {kGfx1201,
+       "SubrevF16E32",
+       vop2(rdna4::kVSubrevF16Vop2),
+       {0x30u, 0xc0u},
+       {{"NanSubtrahend", 0x6fb27e00u, 0xd04c8000u, 0xa5a5fe00u},
+        {"SignalingSubtrahend", 0xa4e67c01u, 0x42b40000u, 0xa5a5fe01u},
+        {"TwoNans", 0xbc067e00u, 0x926d7e00u, 0xa5a5fe00u}}},
+      // NEG on the subtrahend cancels the subtraction's sign flip.
+      {kGfx1201,
+       "SubF32E64Neg1",
+       vop3(rdna4::kVSubF32Vop3, 2),
+       {0x00u, 0xf0u},
+       {{"NanSubtrahend", 0x80000000u, 0x7fc00000u, 0x7fc00000u}}},
+      {kGfx1201,
+       "SubrevF32E64Neg0",
+       vop3(rdna4::kVSubrevF32Vop3, 1),
+       {0x00u, 0xf0u},
+       {{"NanSubtrahend", 0x7fc00000u, 0x80000000u, 0x7fc00000u}}},
+      {kGfx1201,
+       "SubF16E64Neg1",
+       vop3(rdna4::kVSubF16Vop3, 2),
+       {0x00u, 0xf0u},
+       {{"NanSubtrahend", 0x913b8000u, 0x72617e00u, 0xa5a57e00u}}},
+      {kGfx1201,
+       "SubrevF16E64Neg0",
+       vop3(rdna4::kVSubrevF16Vop3, 1),
+       {0x00u, 0xf0u},
+       {{"NanSubtrahend", 0x6c027e00u, 0x840c8000u, 0xa5a57e00u}}},
+      {kGfx1100,
+       "SubF32E32",
+       vop2(rdna4::kVSubF32Vop2),
+       {0x30u, 0xc0u},
+       {{"NanSubtrahend", 0x00000000u, 0x7fc00000u, 0xffc00000u},
+        {"SignalingSubtrahend", 0x00000000u, 0x7f800001u, 0xff800001u},
+        {"TwoNans", 0x7fc00000u, 0x7fc00000u, 0x7fc00000u}}},
+      {kGfx1100,
+       "SubrevF32E32",
+       vop2(rdna4::kVSubrevF32Vop2),
+       {0x30u, 0xc0u},
+       {{"NanSubtrahend", 0x7fc00000u, 0x00000000u, 0xffc00000u},
+        {"SignalingSubtrahend", 0x7f800001u, 0x00000000u, 0xff800001u},
+        {"TwoNans", 0x7fc00000u, 0x7fc00000u, 0xffc00000u}}},
+  }};
+  constexpr uint32_t kHigh = 0xa5a50000u;
+  std::vector<ArithmeticCase> cases;
+  for (const Form &form : forms) {
+    const bool half = std::string_view(form.name).find("F16") != std::string_view::npos;
+    // VOP3 F16 SUB/SUBREV share ADD's MODE-aware SIMD route, including NEG.
+    const SimdPathExpectation simd =
+        std::string_view(form.name).find("F16E64") != std::string_view::npos
+            ? expect_simd_path(amdgpu::SimdFastPath::VOP3_BINARY_MODE_FP16)
+            : SimdPathExpectation{};
+    for (const Lane &lane : form.lanes) {
+      for (const uint32_t mode : form.modes) {
+        std::vector<std::pair<uint32_t, uint32_t>> sources{{0, lane.src0}, {1, lane.src1}};
+        if (half)
+          sources.emplace_back(6, kHigh);
+        cases.push_back(
+            {std::format("{}{}{}Mode{:02X}", form.arch == kGfx1100 ? "Gfx1100" : "Gfx1201",
+                         form.name, lane.name, mode),
+             form.arch,
+             {form.words[0], form.words[1], 0u},
+             std::move(sources),
+             {{6, lane.result}},
+             mode,
+             FE_TONEAREST,
+             0u,
+             0u,
+             simd});
+      }
+    }
+  }
+  return cases;
+}
+
+// High source/destination halves and ABS then NEG stay on the F16 SIMD route.
+// The arithmetic result is +/-32768; mul:2 overflows and FP16_OVFL saturates
+// it to +/-MAX_F16. The low destination half must retain its prior value.
+std::vector<ArithmeticCase> subtraction_simd_boundary_cases() {
+  struct Form {
+    const char *name;
+    uint16_t op;
+    uint32_t result;
+  };
+  constexpr std::array<Form, 2> forms = {{
+      {"SubF16HighAbsNegOmodOvfl", rdna4::kVSubF16Vop3, 0xfbff1357u},
+      {"SubrevF16HighAbsNegOmodOvfl", rdna4::kVSubrevF16Vop3, 0x7bff1357u},
+  }};
+  std::vector<ArithmeticCase> cases;
+  for (const Form &form : forms) {
+    const auto words = rdna4::build_vop3(
+        form.op,
+        {.vdst = 6, .abs = 1, .opsel = 0xb, .src0 = 256, .src1 = 257, .omod = 1, .neg = 1});
+    cases.push_back({form.name,
+                     ROCJITSU_CODE_ARCH_RDNA4,
+                     {words[0], words[1], 0u},
+                     {{0, 0xf4003c00u}, {1, 0x74004000u}, {6, 0xdead1357u}},
+                     {{6, form.result}},
+                     0x8000f0u,
+                     FE_TONEAREST,
+                     0u,
+                     0u,
+                     expect_simd_path(amdgpu::SimdFastPath::VOP3_BINARY_MODE_FP16)});
+  }
+  return cases;
+}
+
+// gfx1201 captures for MODE fields that the NaN cases change together. 0x50 keeps
+// F16 inputs and flushes outputs and 0xa0 does the reverse (VOP3); 0x40/0x80
+// split the same bits for VOP2. 0xff rounds toward zero, and 0xca rounds an
+// exact cancellation down to -0. VOP3 nearest-even cases take the MODE-aware
+// F16 SIMD route; directed rounding falls back to scalar execution.
+std::vector<ArithmeticCase> subtraction_mode_cases() {
+  struct Lane {
+    const char *name;
+    std::array<uint32_t, 2> words;
+    uint32_t src0;
+    uint32_t src1;
+    std::array<std::pair<uint32_t, uint32_t>, 2> mode_results;
+  };
+  const auto vop2 = [](uint16_t op) {
+    return std::array<uint32_t, 2>{rdna4::build_vop2(op, {.src0 = 256, .vsrc1 = 1, .vdst = 6})[0],
+                                   0u};
+  };
+  const auto vop3 = [](uint16_t op) {
+    return rdna4::build_vop3(op, {.vdst = 6, .src0 = 256, .src1 = 257});
+  };
+  const std::array<Lane, 6> lanes = {{
+      {"SubF16E64DenormSplit",
+       vop3(rdna4::kVSubF16Vop3),
+       0x376083ffu,
+       0x9dfb8000u,
+       {{{0x50u, 0xa5a58000u}, {0xa0u, 0xa5a50000u}}}},
+      {"SubrevF16E64DenormSplit",
+       vop3(rdna4::kVSubrevF16Vop3),
+       0xefb403ffu,
+       0xd0430000u,
+       {{{0x50u, 0xa5a58000u}, {0xa0u, 0xa5a50000u}}}},
+      {"SubF16E64TowardZero",
+       vop3(rdna4::kVSubF16Vop3),
+       0x47ee3c00u,
+       0x7a3c0001u,
+       {{{0xf0u, 0xa5a53c00u}, {0xffu, 0xa5a53bffu}}}},
+      {"SubrevF16E64TowardZero",
+       vop3(rdna4::kVSubrevF16Vop3),
+       0x5c263c00u,
+       0xd07f0001u,
+       {{{0xf0u, 0xa5a5bc00u}, {0xffu, 0xa5a5bbffu}}}},
+      {"SubF16E32DenormSplit",
+       vop2(rdna4::kVSubF16Vop2),
+       0x767283ffu,
+       0xd5ab8000u,
+       {{{0x40u, 0xa5a58000u}, {0x80u, 0xa5a50000u}}}},
+      {"SubF16E32CancellationDown",
+       vop2(rdna4::kVSubF16Vop2),
+       0x89f00000u,
+       0x87a60000u,
+       {{{0xf0u, 0xa5a50000u}, {0xcau, 0xa5a58000u}}}},
+  }};
+  std::vector<ArithmeticCase> cases;
+  for (const Lane &lane : lanes) {
+    const bool vop3_form = std::string_view(lane.name).find("E64") != std::string_view::npos;
+    for (const auto &[mode, result] : lane.mode_results) {
+      const bool nearest = ((mode >> 2) & 3u) == 0;
+      const SimdPathExpectation simd =
+          !vop3_form ? SimdPathExpectation{}
+          : nearest  ? expect_simd_path(amdgpu::SimdFastPath::VOP3_BINARY_MODE_FP16)
+                     : expect_simd_fallback();
+      cases.push_back({std::format("{}Mode{:02X}", lane.name, mode),
+                       ROCJITSU_CODE_ARCH_RDNA4,
+                       {lane.words[0], lane.words[1], 0u},
+                       {{0, lane.src0}, {1, lane.src1}, {6, 0xa5a50000u}},
+                       {{6, result}},
+                       mode,
+                       FE_TONEAREST,
+                       0u,
+                       0u,
+                       simd});
+    }
+  }
+  return cases;
+}
+
 // SDWA V_LDEXP_F16/V_FRACT_F16 lanes from a gfx1030 probe, where SDWA and VOP3
 // agree bit for bit for every OMOD. OMOD applies only with IEEE=0 and F16
 // output denormals flushed (MODE 0); the operation rounds first, so LDEXP
@@ -4364,6 +4603,62 @@ std::vector<ArithmeticCase> dot2_packed16_cases() {
   return cases;
 }
 
+// V_CNDMASK_B16 applies ABS/NEG to the selected half's sign bit, without
+// flushing or quieting it. Lanes are captures of
+// v_cndmask_b16 v6, -v0, |v1|, s[10:11]: gfx1201 gave the same result under all
+// 16 MODE denormal settings, and all 8,192 gfx1100 IEEE=0 lanes at MODE 0xf0
+// follow the same rule. llvm-mc gives both targets the same encoding. The
+// selector picks the captured source in every lane.
+std::vector<ArithmeticCase> cndmask_b16_modifier_cases() {
+  struct Lane {
+    rj_code_arch_t arch;
+    const char *name;
+    uint32_t src0;
+    uint32_t src1;
+    bool select_src1;
+    uint32_t result;
+  };
+  constexpr rj_code_arch_t kGfx1201 = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr rj_code_arch_t kGfx1100 = ROCJITSU_CODE_ARCH_RDNA3;
+  constexpr std::array<Lane, 10> lanes = {{
+      {kGfx1201, "NegSubnormal", 0x7ac50200u, 0xe8ea0000u, false, 0xa5a58200u},
+      {kGfx1201, "NegNegativeSubnormal", 0x2eff83ffu, 0xc24b0000u, false, 0xa5a503ffu},
+      {kGfx1201, "NegSignalingNan", 0xe9eb7d55u, 0xed760000u, false, 0xa5a5fd55u},
+      {kGfx1201, "AbsNegativeSubnormal", 0x0c140000u, 0x56f883ffu, true, 0xa5a503ffu},
+      {kGfx1201, "AbsNegativeNan", 0x24ed8000u, 0x2835fe00u, true, 0xa5a57e00u},
+      {kGfx1100, "NegNegativeSubnormal", 0x2eff83ffu, 0xc24b0000u, false, 0xa5a503ffu},
+      {kGfx1100, "NegNegativeSignalingNan", 0xa66dfc01u, 0x00ed0000u, false, 0xa5a57c01u},
+      {kGfx1100, "NegNegativeZero", 0x68688000u, 0x14df0001u, false, 0xa5a50000u},
+      {kGfx1100, "AbsNegativeSubnormal", 0x0c140000u, 0x56f883ffu, true, 0xa5a503ffu},
+      {kGfx1100, "AbsNegativeSignalingNan", 0xa26e8000u, 0xa9e3fc01u, true, 0xa5a57c01u},
+  }};
+  constexpr uint32_t kHigh = 0xa5a50000u;
+  std::vector<ArithmeticCase> cases;
+  const auto words =
+      rdna4::build_vop3(rdna4::kVCndmaskB16Vop3,
+                        {.vdst = 6, .abs = 2, .src0 = 256, .src1 = 257, .src2 = 10, .neg = 1});
+  for (const Lane &lane : lanes) {
+    const uint32_t selector = lane.select_src1 ? ~0u : 0u;
+    const bool gfx1100 = lane.arch == kGfx1100;
+    for (const uint32_t mode :
+         gfx1100 ? std::vector<uint32_t>{0xf0u} : std::vector<uint32_t>{0x00u, 0x30u, 0xc0u}) {
+      cases.push_back(
+          {std::format("{}{}Mode{:02X}", gfx1100 ? "Gfx1100" : "Gfx1201", lane.name, mode),
+           lane.arch,
+           {words[0], words[1], 0u},
+           {{0, lane.src0}, {1, lane.src1}, {6, kHigh}},
+           {{6, lane.result}},
+           mode,
+           FE_TONEAREST,
+           0u,
+           0u,
+           gfx1100 ? SimdPathExpectation{} : expect_simd_path(amdgpu::SimdFastPath::VOP_WORDS),
+           {{10, selector}, {11, selector}}});
+    }
+  }
+  return cases;
+}
+
 // VOP3P modifier fields; op_sel_hi defaults to the assembler's [1,1,1].
 struct DotModifiers {
   uint8_t neg = 0;
@@ -4575,6 +4870,227 @@ std::vector<ArithmeticCase> dot_family_cases() {
   return cases;
 }
 
+// OP_SEL selects the high halves of both sources and the destination; ABS/NEG
+// then modify the selected half's sign bit. The unused low source halves hold
+// NaNs and the low destination half must keep its prior bits. llvm-mc encodes
+// v_cndmask_b16 v6.h, -v0.h, |v1.h|, s[10:11] identically for gfx1100 and gfx1201.
+// The expectations apply the captured sign-bit rule; this form is not captured.
+std::vector<ArithmeticCase> cndmask_b16_half_selection_cases() {
+  constexpr std::array<uint32_t, 2> kWords = {0xd65d5a06u, 0x202a0300u};
+  std::vector<ArithmeticCase> cases;
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4}) {
+    const bool gfx1201 = arch == ROCJITSU_CODE_ARCH_RDNA4;
+    for (const bool select_src1 : {false, true}) {
+      const uint32_t selector = select_src1 ? ~0u : 0u;
+      cases.push_back(
+          {std::format("{}{}", gfx1201 ? "Gfx1201" : "Gfx1100",
+                       select_src1 ? "AbsHighSrc1" : "NegHighSrc0"),
+           arch,
+           {kWords[0], kWords[1], 0u},
+           {{0, 0x83ff7e00u}, {1, 0xfe003c00u}, {6, 0xdead1357u}},
+           {{6, select_src1 ? 0x7e001357u : 0x03ff1357u}},
+           0xf0u,
+           FE_TONEAREST,
+           0u,
+           0u,
+           gfx1201 ? expect_simd_path(amdgpu::SimdFastPath::VOP_WORDS) : SimdPathExpectation{},
+           {{10, selector}, {11, selector}}});
+    }
+  }
+  return cases;
+}
+
+// V_MULLIT_F32 flushes its sources and its product under the F32 MODE
+// denormal field, then applies OMOD and CLAMP. A subnormal S2 flushed to zero
+// selects -MAX_FLOAT. Lanes are gfx1201 captures, each under two MODE values.
+// 0x30 keeps F32 denormals and 0xc0 flushes them, so reading the F16/F64
+// field fails. The mixed modes distinguish input and output flushing (0x10
+// keeps F32 inputs only, 0x20 outputs only), and 0xf3/0xfc set only the F32 or
+// the F16/F64 rounding field.
+std::vector<ArithmeticCase> mullit_cases() {
+  struct Lane {
+    const char *name;
+    uint8_t clamp;
+    uint8_t omod;
+    uint8_t neg;
+    std::array<uint32_t, 3> sources;
+    std::array<std::pair<uint32_t, uint32_t>, 2> mode_results;
+  };
+  constexpr std::array<Lane, 12> lanes = {{
+      // min_normal * min_normal underflows to +0 unless S2 = 2^-149 is flushed.
+      {"S2Subnormal",
+       0,
+       0,
+       0,
+       {0x00800000u, 0x00800000u, 1u},
+       {{{0x30u, 0u}, {0xc0u, 0xff7fffffu}}}},
+      // 0.5 * min_normal is subnormal; output flushing gives +0.
+      {"SubnormalProduct",
+       0,
+       0,
+       0,
+       {0x3f000000u, 0x00800000u, 0x00800000u},
+       {{{0x30u, 0x00400000u}, {0xc0u, 0u}}}},
+      {"S2SubnormalMixed",
+       0,
+       0,
+       0,
+       {0x00800000u, 0x00800000u, 1u},
+       {{{0x10u, 0u}, {0x20u, 0xff7fffffu}}}},
+      {"SubnormalProductMixed",
+       0,
+       0,
+       0,
+       {0x3f000000u, 0x00800000u, 0x00800000u},
+       {{{0x10u, 0u}, {0x20u, 0x00400000u}}}},
+      // A flushed S0 is a zero factor, which gives +0, not -0.
+      {"S0Subnormal",
+       0,
+       0,
+       0,
+       {0x807fffffu, 0x00800000u, 0x00800000u},
+       {{{0x30u, 0x80000000u}, {0xc0u, 0u}}}},
+      {"RoundTowardZero",
+       0,
+       0,
+       0,
+       {0x2d1d4000u, 0x49032148u, 0x44630000u},
+       {{{0xf0u, 0x36a11863u}, {0xffu, 0x36a11862u}}}},
+      // min_normal * (1 - 2^-24) stays below min_normal at F32 precision, so it
+      // is tiny although its subnormal encoding rounds up; flushing gives +0.
+      // The MULLIT capture lacks this product; gfx1201 V_MUL_DX9_ZERO_F32
+      // captures of the same factors give these results.
+      {"TinyProductRoundsToMinNormal",
+       0,
+       0,
+       0,
+       {0x00800000u, 0x3f7fffffu, 0x3f800000u},
+       {{{0x00u, 0u}, {0xf0u, 0x00800000u}}}},
+      {"RoundTowardZeroF32Field",
+       0,
+       0,
+       0,
+       {0x2d1d4000u, 0x49032148u, 0x44630000u},
+       {{{0xf3u, 0x36a11862u}, {0xfcu, 0x36a11863u}}}},
+      // OMOD and CLAMP apply to -MAX_FLOAT as to a product.
+      {"ClampS2Subnormal",
+       1,
+       0,
+       0,
+       {0x3f800000u, 0x00800000u, 1u},
+       {{{0xf0u, 0x00800000u}, {0x00u, 0u}}}},
+      {"Mul2S2Subnormal",
+       0,
+       1,
+       0,
+       {0x00800000u, 0x00800000u, 1u},
+       {{{0xf0u, 0u}, {0x00u, 0xff800000u}}}},
+      {"Div2S2Subnormal",
+       0,
+       3,
+       0,
+       {0x00800000u, 0x00800000u, 1u},
+       {{{0xf0u, 0u}, {0x00u, 0xfeffffffu}}}},
+      // NEG makes S2 = 1.0 negative.
+      {"NegS2",
+       0,
+       0,
+       4,
+       {0x00800000u, 0x00800000u, 0x3f800000u},
+       {{{0xf0u, 0xff7fffffu}, {0x00u, 0xff7fffffu}}}},
+  }};
+  std::vector<ArithmeticCase> cases;
+  for (const Lane &lane : lanes) {
+    const auto words = rdna4::build_vop3(rdna4::kVMullitF32Vop3, {.vdst = 6,
+                                                                  .clamp = lane.clamp,
+                                                                  .src0 = 256,
+                                                                  .src1 = 257,
+                                                                  .src2 = 258,
+                                                                  .omod = lane.omod,
+                                                                  .neg = lane.neg});
+    for (const auto &[mode, result] : lane.mode_results)
+      cases.push_back({std::format("{}Mode{:02X}", lane.name, mode),
+                       ROCJITSU_CODE_ARCH_RDNA4,
+                       {words[0], words[1], 0u},
+                       {{0, lane.sources[0]}, {1, lane.sources[1]}, {2, lane.sources[2]}},
+                       {{6, result}},
+                       mode,
+                       FE_TONEAREST});
+  }
+  return cases;
+}
+
+// A signaling-NaN S0 reaching the product is quieted on gfx1201 and on gfx1100
+// with IEEE=1, but returned unchanged on gfx1100 with IEEE=0. S1/S2 NaNs still
+// select -MAX_FLOAT, and a flushed subnormal S1 still gives +0. Lanes are
+// captures from gfx1201 and both gfx1100 IEEE settings; MODE bit 9 (0x200) is
+// IEEE. llvm-mc encodes v_mullit_f32 v6, [-]v0, v1, v2 identically for both.
+std::vector<ArithmeticCase> mullit_signaling_nan_cases() {
+  struct Lane {
+    const char *name;
+    bool neg0;
+    std::array<uint32_t, 3> sources;
+    uint32_t mode;
+    uint32_t quieted;
+    uint32_t unquieted;
+  };
+  constexpr std::array<Lane, 6> lanes = {{
+      {"S0Signaling",
+       false,
+       {0x7f800001u, 0x00800000u, 0x00800000u},
+       0x00u,
+       0x7fc00001u,
+       0x7f800001u},
+      {"NegS0Signaling",
+       true,
+       {0x7f800001u, 0x00800000u, 0x00800000u},
+       0x00u,
+       0xffc00001u,
+       0xff800001u},
+      {"S0SignalingS1Subnormal",
+       false,
+       {0x7f800001u, 1u, 0x00800000u},
+       0xf0u,
+       0x7fc00001u,
+       0x7f800001u},
+      {"S0SignalingS1Flushed", false, {0x7f800001u, 1u, 0x00800000u}, 0x00u, 0u, 0u},
+      {"S0SignalingS1Nan",
+       false,
+       {0x7f800001u, 0x7fc00000u, 0x00800000u},
+       0x00u,
+       0xff7fffffu,
+       0xff7fffffu},
+      {"NegS0SignalingS1Nan",
+       true,
+       {0x7f800001u, 0x7fc00000u, 0x00800000u},
+       0xf0u,
+       0xff7fffffu,
+       0xff7fffffu},
+  }};
+  struct Target {
+    const char *name;
+    rj_code_arch_t arch;
+    uint32_t ieee;
+    bool quiets;
+  };
+  constexpr std::array<Target, 3> targets = {{
+      {"Gfx1100Ieee0", ROCJITSU_CODE_ARCH_RDNA3, 0u, false},
+      {"Gfx1100Ieee1", ROCJITSU_CODE_ARCH_RDNA3, 0x200u, true},
+      {"Gfx1201", ROCJITSU_CODE_ARCH_RDNA4, 0u, true},
+  }};
+  std::vector<ArithmeticCase> cases;
+  for (const Target &target : targets)
+    for (const Lane &lane : lanes)
+      cases.push_back({std::format("{}{}Mode{:02X}", target.name, lane.name, lane.mode),
+                       target.arch,
+                       {0xd6180006u, lane.neg0 ? 0x240a0300u : 0x040a0300u, 0u},
+                       {{0, lane.sources[0]}, {1, lane.sources[1]}, {2, lane.sources[2]}},
+                       {{6, target.quiets ? lane.quieted : lane.unquieted}},
+                       lane.mode | target.ieee,
+                       FE_TONEAREST});
+  return cases;
+}
+
 SimdPathExpectation simd_expectation_for_run(const ArithmeticCase &test, bool force_scalar) {
   if (!util::has_stdx_simd || !test.simd.checked)
     return {};
@@ -4610,6 +5126,8 @@ void expect_arithmetic_case(const ArithmeticCase &test, SimdPathExpectation simd
     for (const std::pair<uint32_t, uint32_t> &source : test.sources)
       for (uint32_t lane = 0; lane < wave->wf_size(); ++lane)
         cu->write_vgpr(base + source.first, lane, source.second);
+    for (const std::pair<uint32_t, uint32_t> &source : test.scalar_sources)
+      cu->write_sgpr(wave->sgpr_alloc().base + source.first, source.second);
     std::fenv_t saved_environment;
     ASSERT_EQ(std::fegetenv(&saved_environment), 0);
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
@@ -4824,6 +5342,114 @@ TEST_P(ValuF16BinaryModifierTest, MatchesPolicyWithSimdEnabledAndForcedScalar) {
 
 INSTANTIATE_TEST_SUITE_P(F16BinaryModifiers, ValuF16BinaryModifierTest,
                          testing::ValuesIn(f16_binary_modifier_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+class ValuSubtractionNanTest : public testing::TestWithParam<ArithmeticCase> {};
+
+TEST_P(ValuSubtractionNanTest, MatchesCapturesWithSimdEnabledAndForcedScalar) {
+  ForceScalarGuard guard;
+  for (const bool scalar : {true, false}) {
+    SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
+    util::set_force_scalar_for_testing(scalar);
+    expect_arithmetic_case(GetParam(), simd_expectation_for_run(GetParam(), scalar));
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(Captures, ValuSubtractionNanTest,
+                         testing::ValuesIn(subtraction_nan_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+class ValuSubtractionSimdBoundaryTest : public testing::TestWithParam<ArithmeticCase> {};
+
+TEST_P(ValuSubtractionSimdBoundaryTest, MatchesBoundaryWithSimdEnabledAndForcedScalar) {
+  ForceScalarGuard guard;
+  for (const bool scalar : {true, false}) {
+    SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
+    util::set_force_scalar_for_testing(scalar);
+    expect_arithmetic_case(GetParam(), simd_expectation_for_run(GetParam(), scalar));
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(Gfx1201, ValuSubtractionSimdBoundaryTest,
+                         testing::ValuesIn(subtraction_simd_boundary_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+class ValuSubtractionModeTest : public testing::TestWithParam<ArithmeticCase> {};
+
+TEST_P(ValuSubtractionModeTest, MatchesCapturesWithSimdEnabledAndForcedScalar) {
+  ForceScalarGuard guard;
+  for (const bool scalar : {true, false}) {
+    SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
+    util::set_force_scalar_for_testing(scalar);
+    expect_arithmetic_case(GetParam(), simd_expectation_for_run(GetParam(), scalar));
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(Gfx1201, ValuSubtractionModeTest,
+                         testing::ValuesIn(subtraction_mode_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+class ValuCndmaskB16ModifierTest : public testing::TestWithParam<ArithmeticCase> {};
+
+TEST_P(ValuCndmaskB16ModifierTest, MatchesCapturesWithSimdEnabledAndForcedScalar) {
+  ForceScalarGuard guard;
+  for (const bool scalar : {true, false}) {
+    SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
+    util::set_force_scalar_for_testing(scalar);
+    expect_arithmetic_case(GetParam(), simd_expectation_for_run(GetParam(), scalar));
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(Captures, ValuCndmaskB16ModifierTest,
+                         testing::ValuesIn(cndmask_b16_modifier_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+class ValuCndmaskB16HalfSelectionTest : public testing::TestWithParam<ArithmeticCase> {};
+
+TEST_P(ValuCndmaskB16HalfSelectionTest, AppliesModifiersToSelectedHalves) {
+  ForceScalarGuard guard;
+  for (const bool scalar : {true, false}) {
+    SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
+    util::set_force_scalar_for_testing(scalar);
+    expect_arithmetic_case(GetParam(), simd_expectation_for_run(GetParam(), scalar));
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(OpSel, ValuCndmaskB16HalfSelectionTest,
+                         testing::ValuesIn(cndmask_b16_half_selection_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+class ValuMullitModeTest : public testing::TestWithParam<ArithmeticCase> {};
+
+// V_MULLIT_F32 has no SIMD path; both settings check that it stays scalar-correct.
+TEST_P(ValuMullitModeTest, MatchesCapturesWithSimdEnabledAndForcedScalar) {
+  ForceScalarGuard guard;
+  for (const bool scalar : {true, false}) {
+    SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
+    util::set_force_scalar_for_testing(scalar);
+    expect_arithmetic_case(GetParam());
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(Gfx1201, ValuMullitModeTest, testing::ValuesIn(mullit_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(SignalingNan, ValuMullitModeTest,
+                         testing::ValuesIn(mullit_signaling_nan_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });
