@@ -5,6 +5,7 @@
 /// @brief GFX12 dot arithmetic and operand regression tests.
 
 #include "fixtures/float_dot/gfx1201_cases.h"
+#include "fixtures/float_dot/gfx1201_dot4_cases.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h"
@@ -475,5 +476,31 @@ TEST(Gfx12Dot, FloatingDotDppPermutesSnapshotAndPreservesInactiveDestinations) {
         }
       }
     }
+  }
+}
+
+TEST(Gfx12Dot, DecodedDot4MatchesNativeFormatAndRoundingCases) {
+  HostState restore;
+  DotMachine machine(ROCJITSU_CODE_ARCH_RDNA4);
+  constexpr std::array<uint16_t, 4> ops{rdna4::kVDot4F32Fp8Fp8Vop3p, rdna4::kVDot4F32Fp8Bf8Vop3p,
+                                        rdna4::kVDot4F32Bf8Fp8Vop3p, rdna4::kVDot4F32Bf8Bf8Vop3p};
+  for (int round : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
+    std::fesetround(round);
+    for (size_t op = 0; op < ops.size(); ++op) {
+      for (size_t offset = 0; offset < kGfx12Dot4Cases.size(); offset += 32) {
+        for (uint32_t lane = 0; lane < 32; ++lane) {
+          const auto &c = kGfx12Dot4Cases[offset + lane];
+          machine.set(0, lane, c.a);
+          machine.set(1, lane, c.b);
+          machine.set(2, lane, c.c);
+        }
+        machine.execute(rdna4::build_vop3p(
+            ops[op], {.vdst = 16, .src0 = 256, .src1 = 257, .src2 = 258, .opsel_hi = 3}));
+        for (uint32_t lane = 0; lane < 32; ++lane)
+          EXPECT_EQ(machine.get(16, lane), kGfx12Dot4Cases[offset + lane].expected[op])
+              << "op=" << ops[op] << " case=" << offset + lane << " round=" << round;
+      }
+    }
+    EXPECT_EQ(std::fegetround(), round);
   }
 }
