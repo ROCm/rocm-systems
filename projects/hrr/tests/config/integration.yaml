@@ -102,6 +102,7 @@ cases:
   Unit_HRR_ContextRoundtrip: {}
   Unit_HRR_Context_Direct: {}
   Unit_HRR_D2HExactByDefaultRoundtrip: {}
+  Unit_HRR_D2HMismatchExit: {}
   Unit_HRR_D2HShortBlobRoundtrip: {}
   Unit_HRR_DenseOffsetD2HRoundtrip: {}
   Unit_HRR_DenseOffsetD2H_Direct: {}
