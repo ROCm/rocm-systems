@@ -1802,6 +1802,26 @@ _SMEM_NARROW_LOAD_MAP = {
     'U16': (2, False),
 }
 
+# S_ATOMIC_* operations the CDNA ISAs define and the scalar pipeline supports.
+# Other flat atomic operations stay 'nop' even when the flat tables know them.
+_SMEM_ATOMIC_OPS = frozenset(
+    {
+        'swap',
+        'cmpswap',
+        'add',
+        'sub',
+        'smin',
+        'umin',
+        'smax',
+        'umax',
+        'and',
+        'or',
+        'xor',
+        'inc',
+        'dec',
+    }
+)
+
 
 def _derive_smem(name: str) -> InstructionSemantics | None:
     """Derive semantics for an SMEM (Scalar Memory) instruction."""
@@ -1819,6 +1839,10 @@ def _derive_smem(name: str) -> InstructionSemantics | None:
     # Cache invalidation / writeback instructions.
     if upper in ('S_DCACHE_INV', 'S_DCACHE_INV_VOL'):
         return InstructionSemantics(name, 'dcache_inv')
+    if upper in ('S_DCACHE_DISCARD', 'S_DCACHE_DISCARD_X2'):
+        return InstructionSemantics(
+            name, 'dcache_discard', num_elems=2 if upper.endswith('_X2') else 1
+        )
     if upper in ('S_DCACHE_WB', 'S_DCACHE_WB_VOL'):
         return InstructionSemantics(name, 'dcache_wb')
     if upper == 'S_GL1_INV':
@@ -1836,7 +1860,7 @@ def _derive_smem(name: str) -> InstructionSemantics | None:
             if is_x2:
                 suffix = suffix[:-3]
             info = _derive_flat_atomic_info(suffix, is_x2)
-            if info and upper in ('S_ATOMIC_DEC',):
+            if info and info[0] in _SMEM_ATOMIC_OPS:
                 op, elem_size, data_dw_actual = info
                 return InstructionSemantics(
                     name,
@@ -1845,7 +1869,7 @@ def _derive_smem(name: str) -> InstructionSemantics | None:
                     elem_size=elem_size,
                     num_elems=data_dw_actual,
                 )
-        # Other scalar atomics are not currently simulated.
+        # Scalar buffer atomics are not currently simulated.
         return InstructionSemantics(name, 'nop')
 
     is_store = '_STORE_' in upper or '_SCRATCH_STORE_' in upper
@@ -2052,6 +2076,18 @@ def _derive_flat_atomic_info(suffix: str, is_x2: bool) -> tuple[str, int, int] |
 def _derive_flat(name: str) -> InstructionSemantics | None:
     """Derive semantics for a FLAT (Flat/Global/Scratch memory) instruction."""
     upper = name.upper()
+    if upper.startswith('SCRATCH_LOAD_LDS_'):
+        suffix = upper.removeprefix('SCRATCH_LOAD_LDS_')
+        info = _FLAT_DATA_MAP.get(suffix)
+        if info is not None and info[1] == 1:
+            size, count, signed = info
+            return InstructionSemantics(
+                name,
+                'scratch_load_lds',
+                elem_size=size,
+                num_elems=1,
+                sign_extend=signed,
+            )
     if upper == 'GLOBAL_INV':
         return InstructionSemantics(name, 'gl1_inv')
     if upper == 'GLOBAL_WB':

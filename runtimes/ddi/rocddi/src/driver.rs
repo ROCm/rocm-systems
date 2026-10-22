@@ -51,7 +51,7 @@ use crate::memory::{
     VirtualMemoryInfo,
 };
 use crate::session::DriverContextLifetime;
-use crate::topology::{Endpoint, EndpointDetails};
+use crate::topology::Endpoint;
 use crate::{Error, ErrorKind};
 
 /// Inert constructors for the driver backends compiled into this target.
@@ -130,11 +130,11 @@ pub(crate) trait Driver: Send + Sync {
     ) -> Result<(), Error>;
     /// Re-reads an endpoint by its driver-assigned ID without activating it.
     fn open_endpoint(&self, id: [u8; 16]) -> Result<Endpoint, Error>;
-    /// Queries optional information about a passive endpoint without
-    /// activating it. Kind-specific details must match the endpoint kind.
-    /// Drivers with no additional source return empty details.
-    fn query_endpoint_details(&self, endpoint: &Endpoint) -> Result<EndpointDetails, Error> {
-        Ok(EndpointDetails::empty_for(endpoint))
+    /// Populates optional endpoint and kind-specific information from
+    /// additional sources without activating the endpoint. Drivers with no
+    /// additional source leave the endpoint unchanged.
+    fn populate_endpoint(&self, _endpoint: &mut Endpoint) -> Result<(), Error> {
+        Ok(())
     }
     /// Revalidates an endpoint and acquires its device state.
     fn activate(&self, endpoint: &Endpoint) -> Result<Self::DeviceState, Error>;

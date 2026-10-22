@@ -104,6 +104,7 @@ if(TARGET hrr-playback AND NOT WIN32)
     hrr_blob_refusal_test.cc
     hrr_access_policy_window_test.cc
     hrr_stream_resolve_test.cc
+    hrr_unmapped_note_test.cc
   )
 
   add_executable(hrr-handler-tests

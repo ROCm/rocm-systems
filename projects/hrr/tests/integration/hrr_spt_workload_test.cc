@@ -188,21 +188,20 @@ TEST_CASE("Unit_HRR_MemcpySpt_Direct", "[.][hrr-direct]") {
 // D2H.  Pointing all four at one buffer would leave only the last writer
 // observable.
 //
-// Pattern choice.  When the replayed and captured bytes are not identical the
-// D2H validator falls back to float tolerance (atol=rtol=1e-3), trying
-// f32/bf16/f16/f64 and accepting the first encoding with no out-of-tolerance
-// element.  So an expected value has to decode above atol/(1-rtol) = 1.001e-3
-// in EVERY candidate encoding before a zero-initialised replay buffer is
-// reported as a mismatch.  As a repeated byte, the smallest decode is always
-// the f16 one and the largest the f64 one:
+// Pattern choice.  D2H validation is byte-exact by default, but a replay can
+// opt into a float tolerance (HIP_HRR_D2H_TOL, say atol=rtol=1e-3) in any of
+// f32/bf16/f16/f64.  So an expected value has to decode above
+// atol/(1-rtol) = 1.001e-3 in EVERY candidate encoding before a
+// zero-initialised replay buffer is reported as a mismatch under any opt-in.
+// As a repeated byte, the smallest decode is always the f16 one and the
+// largest the f64 one:
 //   0x41 -> f16 2.63  f32 1.21e1  bf16 1.21e1  f64 2.26e6
 //   0x42 -> f16 3.13  f32 4.86e1  bf16 4.85e1  f64 1.57e11
 //   0x44 -> f16 4.27  f32 7.85e2  bf16 7.84e2  f64 7.48e20
 //   0x4C -> f16 17.2  f32 5.36e7  bf16 5.35e7  f64 3.55e59
 // A small-magnitude pattern would not do: 0x2A, for instance, decodes to
 // 1.51e-13 as f32, well inside the tolerance, so an all-zero replay buffer
-// would be accepted.  Unit_HRR_MemsetSptRoundtrip additionally pins
-// HIP_HRR_D2H_EXACT=1; the patterns keep the workload falsifiable without it.
+// would be accepted.
 // Distinct per-API patterns also make a swapped destination pointer visible.
 // Every workload in this file follows the same rule for the same reason.
 // Final blobs: 0x41414141 / 0x42424242 / 0x44444444 / 0x4C4C4C4C.

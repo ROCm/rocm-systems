@@ -32,6 +32,7 @@
 #pragma GCC diagnostic pop
 #endif
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -845,7 +846,7 @@ static void decode_kernel_args(
         auto& storage = arg_storage.back();
         if (value_kind == 1 && arg_size >= 8) {  // whole-arg GPU pointer
             uint64_t rec_ptr; memcpy(&rec_ptr, data, 8);
-            void* live = ctx.translate_ptr(rec_ptr);
+            void* live = ctx.lookup_ptr(rec_ptr);
             // Nothing in the archive covers this address. If a producer said a
             // segment lived there, HIP was bypassed for it — back it now and
             // translate into it. Asked here rather than when the segment was
@@ -918,7 +919,7 @@ static void decode_kernel_args(
                 if (!va_shaped(rec_ptr) &&
                     !(flagged && ctx.in_pinned_host(rec_ptr)))
                     return false;
-                void* live = ctx.translate_ptr(rec_ptr);
+                void* live = ctx.lookup_ptr(rec_ptr);
                 // Same bypassed-segment materialisation as a whole-pointer
                 // argument: a struct field pointing into memory HIP never saw
                 // resolves in no map until the segment is backed. Only an
@@ -1000,7 +1001,7 @@ static void decode_kernel_args(
                 // to tell apart here.
                 void* live = nullptr;
                 if (va_shaped(rec)) {
-                    live = ctx.translate_ptr(rec);
+                    live = ctx.lookup_ptr(rec);
                     if (!live && ctx.regions_enabled)
                         live = ctx.regions.materialize_for(ctx, rec);
                     if (live)
@@ -2848,7 +2849,7 @@ static void* hrr_block_guard_relocate(PlaybackContext& ctx, RegionLaunchState& r
         return live;
     }
 
-    void* live_base = ctx.translate_ptr(blk_base);
+    void* live_base = ctx.lookup_ptr(blk_base);
     if (!live_base) return live;
 
     HrrBlockGuard g{};
@@ -3232,7 +3233,7 @@ hipError_t playback_hipMallocHost(PlaybackContext& ctx, const uint8_t* pl) {
 
 hipError_t playback_hipFreeHost(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipFreeHost*>(pl);
-    void* live = ctx.translate_ptr(a->ptr);
+    void* live = ctx.lookup_ptr(a->ptr);
     if (!live) return hipSuccess;
     hipError_t r = hipFreeHost(live);
     if (r == hipSuccess) ctx.remove_alloc(a->ptr);
@@ -3309,7 +3310,7 @@ hipError_t playback_hipHostRegister(PlaybackContext& ctx, const uint8_t* pl) {
 hipError_t playback_hipHostUnregister(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipHostUnregister*>(pl);
 
-    // Retrieve the backing buffer regardless of whether translate_ptr succeeds —
+    // Retrieve the backing buffer regardless of whether lookup_ptr succeeds —
     // we must free it even if the alloc_map entry was already removed.
     void* buf = nullptr;
     {
@@ -3321,7 +3322,7 @@ hipError_t playback_hipHostUnregister(PlaybackContext& ctx, const uint8_t* pl) {
         }
     }
 
-    void* live = buf ? buf : ctx.translate_ptr(a->hostPtr);
+    void* live = buf ? buf : ctx.lookup_ptr(a->hostPtr);
     if (!live) return hipSuccess;
 
     hipError_t r = hipHostUnregister(live);
@@ -3389,7 +3390,7 @@ hipError_t playback_hipHostGetDevicePointer(PlaybackContext& ctx, const uint8_t*
 
 hipError_t playback_hipFree(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipFree*>(pl);
-    void* live = ctx.translate_ptr(a->ptr);
+    void* live = ctx.lookup_ptr(a->ptr);
     if (!live) return hipSuccess;
     if (!ctx.in_graph_capture && hrr_free_needs_sync(ctx, live))
         if (hipError_t sr = hipDeviceSynchronize(); sr != hipSuccess) return sr;
@@ -3404,7 +3405,7 @@ hipError_t playback_hipFree(PlaybackContext& ctx, const uint8_t* pl) {
 
 hipError_t playback_hipFreeAsync(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a  = reinterpret_cast<const hrr_args_hipFreeAsync*>(pl);
-    void*       live   = ctx.translate_ptr(a->dev_ptr);
+    void*       live   = ctx.lookup_ptr(a->dev_ptr);
     hipStream_t stream = ctx.translate_stream(a->stream);
     if (!live) return hipSuccess;
     if (hrr_is_placed(ctx, live)) {
@@ -3429,38 +3430,49 @@ hipError_t playback_hipFreeAsync(PlaybackContext& ctx, const uint8_t* pl) {
 // is_async: true  -> call hipMemcpyAsync(stream) regardless of whether stream is null
 //           false -> call synchronous hipMemcpy (no stream argument)
 // ---------------------------------------------------------------------------
-// D2H validation with numeric tolerance.
+// D2H validation.
 //
-// A byte-exact memcmp is the wrong oracle for buffers produced by GPU kernels
-// that use non-associative reductions (atomicAdd in backward passes, split-K
-// GEMM accumulation, etc.): those are nondeterministic at the ULP level, so a
-// faithful replay legitimately produces slightly different bytes than capture.
-// (Verified by a replay-vs-replay control: the same recording replayed twice
-// produces different bytes for the same tensors, so the nondeterminism is in
-// the kernels, not in HRR.) Reporting that as "FAIL" is misleading.
+// The default oracle is byte-exact. A recorded blob carries no element type, so
+// a tolerance has to guess one, and a guess turns integers into floats: any
+// int32 below about 9.8e8 reads as an f32 within 1e-3 of zero, so a replay that
+// left the buffer zeroed would match it, and a handler that does nothing would
+// pass its own round-trip.
 //
-// Instead we classify a mismatch numerically: a buffer passes if every element
-// is within  |actual - expected| <= atol + rtol*|expected|. The recorded blob
-// carries no dtype, so we try candidate float encodings (fp32, bf16, fp16,
-// fp64) and accept if any encoding fits — a wrong encoding turns small diffs
-// into garbage/inf and is rejected, so the true dtype is the one that fits.
-// Genuine corruption (wrong pointer, shifted/zeroed data) produces large,
-// structured differences that fit no encoding and still FAILs.
-//
-// Tunable via HIP_HRR_D2H_ATOL / HIP_HRR_D2H_RTOL; HIP_HRR_D2H_EXACT=1 forces
-// the old byte-exact behavior.
-struct HrrD2HTol { double atol; double rtol; bool exact_only; };
-static const HrrD2HTol& hrr_d2h_tol() {
-    static const HrrD2HTol t = [] {
-        HrrD2HTol d{};
-        const char* a = std::getenv("HIP_HRR_D2H_ATOL");
-        const char* r = std::getenv("HIP_HRR_D2H_RTOL");
-        d.atol = a ? std::atof(a) : 1e-3;
-        d.rtol = r ? std::atof(r) : 1e-3;
-        d.exact_only = std::getenv("HIP_HRR_D2H_EXACT") != nullptr;
-        return d;
-    }();
-    return t;
+// Some buffers do hold floats that a faithful replay cannot reproduce bit for
+// bit: kernels with non-associative reductions (atomicAdd in backward passes,
+// split-K GEMM accumulation) are nondeterministic at the ULP level, and two
+// replays of the same recording differ there too. For those the caller names
+// the type and the tolerance, HIP_HRR_D2H_TOL=<type>:<atol>:<rtol>, and a
+// mismatching buffer passes if every element is within
+// |actual - expected| <= atol + rtol*|expected|. Such passes are counted apart
+// from exact ones in the summary.
+bool hrr_parse_d2h_tol(const char* spec, HrrD2HTol* out) {
+    static const struct { const char* name; HrrD2HTol::Type type; } kTypes[] = {
+        {"f32", HrrD2HTol::kF32}, {"bf16", HrrD2HTol::kBF16},
+        {"f16", HrrD2HTol::kF16}, {"f64", HrrD2HTol::kF64}};
+    if (!spec) return false;
+    const char* colon = std::strchr(spec, ':');
+    if (!colon) return false;
+    HrrD2HTol t;
+    bool known = false;
+    for (const auto& k : kTypes)
+        if (std::strlen(k.name) == static_cast<size_t>(colon - spec) &&
+            std::strncmp(spec, k.name, colon - spec) == 0) {
+            t.type = k.type;
+            known = true;
+        }
+    if (!known) return false;
+    char* end = nullptr;
+    t.atol = std::strtod(colon + 1, &end);
+    if (end == colon + 1 || *end != ':') return false;
+    const char* r = end + 1;
+    t.rtol = std::strtod(r, &end);
+    if (end == r || *end != '\0') return false;
+    // An infinite tolerance would accept every finite value.
+    if (!std::isfinite(t.atol) || !std::isfinite(t.rtol) || t.atol < 0 || t.rtol < 0)
+        return false;
+    *out = t;
+    return true;
 }
 
 static inline float hrr_half_to_float(uint16_t h) {
@@ -3511,8 +3523,8 @@ static HrrD2HScan hrr_scan_elems(const uint8_t* a, const uint8_t* e, size_t n,
 }
 
 // Validate one D2H buffer: updates ctx counters and emits a message only for a
-// genuine (out-of-tolerance) failure. Returns true if the buffer is acceptable
-// (byte-exact or within tolerance).
+// failure. Returns true if the buffer is acceptable (byte-exact, or within the
+// HIP_HRR_D2H_TOL tolerance when one is set).
 static bool hrr_d2h_validate(PlaybackContext& ctx, const char* tag, uint64_t seq,
                              const uint8_t* actual, const uint8_t* expected, size_t n) {
     if (n == 0 || memcmp(actual, expected, n) == 0) {
@@ -3522,60 +3534,61 @@ static bool hrr_d2h_validate(PlaybackContext& ctx, const char* tag, uint64_t seq
         return true;
     }
 
-    const HrrD2HTol& tol = hrr_d2h_tol();
+    const HrrD2HTol& tol = ctx.d2h_tol;
     size_t ndiff_bytes = 0;
     for (size_t i = 0; i < n; i++) if (actual[i] != expected[i]) ndiff_bytes++;
     size_t first_diff = 0;
     while (first_diff < n && actual[first_diff] == expected[first_diff]) ++first_diff;
 
-    if (!tol.exact_only) {
-        // Try candidate float encodings; accept on the first that fits, tracking
-        // the best (fewest out-of-tolerance elements) for the failure report.
-        auto dec_f32 = [](const uint8_t* p) { float v; memcpy(&v, p, 4); return (double)v; };
-        auto dec_f64 = [](const uint8_t* p) { double v; memcpy(&v, p, 8); return v; };
-        auto dec_bf16 = [](const uint8_t* p) {
-            uint16_t h; memcpy(&h, p, 2); uint32_t u = (uint32_t)h << 16;
-            float v; memcpy(&v, &u, 4); return (double)v; };
-        auto dec_f16 = [](const uint8_t* p) {
-            uint16_t h; memcpy(&h, p, 2); return (double)hrr_half_to_float(h); };
+    auto dec_f32 = [](const uint8_t* p) { float v; memcpy(&v, p, 4); return (double)v; };
+    auto dec_f64 = [](const uint8_t* p) { double v; memcpy(&v, p, 8); return v; };
+    auto dec_bf16 = [](const uint8_t* p) {
+        uint16_t h; memcpy(&h, p, 2); uint32_t u = (uint32_t)h << 16;
+        float v; memcpy(&v, &u, 4); return (double)v; };
+    auto dec_f16 = [](const uint8_t* p) {
+        uint16_t h; memcpy(&h, p, 2); return (double)hrr_half_to_float(h); };
 
-        struct Cand { const char* name; size_t esz; };
-        const Cand cands[] = { {"f32", 4}, {"bf16", 2}, {"f16", 2}, {"f64", 8} };
-        HrrD2HScan best{0, SIZE_MAX, 0.0, 0.0}; const char* best_name = "?";
-        for (const auto& c : cands) {
-            if (n % c.esz != 0) continue;
-            HrrD2HScan s;
-            if (c.esz == 4)      s = hrr_scan_elems(actual, expected, n, 4, dec_f32, tol.atol, tol.rtol);
-            else if (c.esz == 8) s = hrr_scan_elems(actual, expected, n, 8, dec_f64, tol.atol, tol.rtol);
-            else if (c.name[0] == 'b') s = hrr_scan_elems(actual, expected, n, 2, dec_bf16, tol.atol, tol.rtol);
-            else                 s = hrr_scan_elems(actual, expected, n, 2, dec_f16, tol.atol, tol.rtol);
-            if (s.n_bad < best.n_bad) { best = s; best_name = c.name; }
-            if (s.n_bad == 0) {  // fits this encoding → numerically equivalent
-                ctx.d2h_pass++;
-                ctx.d2h_pass_tol++;
-                if (ctx.verbose)
-                    fprintf(stderr,
-                            "[HRR] %s D2H validate: %zu bytes ~OK within tol as %s "
-                            "(%zu elems differ, max|d|=%.3g maxrel=%.3g, atol=%g rtol=%g)\n",
-                            tag, n, c.name, s.n_diff, s.max_abs, s.max_rel,
-                            tol.atol, tol.rtol);
-                return true;
-            }
+    const char* type_name = nullptr;
+    size_t esz = 0;
+    switch (tol.type) {
+    case HrrD2HTol::kF32:  type_name = "f32";  esz = 4; break;
+    case HrrD2HTol::kBF16: type_name = "bf16"; esz = 2; break;
+    case HrrD2HTol::kF16:  type_name = "f16";  esz = 2; break;
+    case HrrD2HTol::kF64:  type_name = "f64";  esz = 8; break;
+    case HrrD2HTol::kExact: break;
+    }
+    // A buffer that is not a whole number of elements is not of the named type.
+    if (esz && n % esz == 0) {
+        HrrD2HScan s;
+        switch (tol.type) {
+        case HrrD2HTol::kF32:  s = hrr_scan_elems(actual, expected, n, 4, dec_f32, tol.atol, tol.rtol); break;
+        case HrrD2HTol::kBF16: s = hrr_scan_elems(actual, expected, n, 2, dec_bf16, tol.atol, tol.rtol); break;
+        case HrrD2HTol::kF16:  s = hrr_scan_elems(actual, expected, n, 2, dec_f16, tol.atol, tol.rtol); break;
+        default:               s = hrr_scan_elems(actual, expected, n, 8, dec_f64, tol.atol, tol.rtol); break;
         }
-        // No encoding fit — a real divergence.
+        if (s.n_bad == 0) {
+            ctx.d2h_pass++;
+            ctx.d2h_pass_tol++;
+            if (ctx.verbose)
+                fprintf(stderr,
+                        "[HRR] %s D2H validate: %zu bytes ~OK within tol as %s "
+                        "(%zu elems differ, max|d|=%.3g maxrel=%.3g, atol=%g rtol=%g)\n",
+                        tag, n, type_name, s.n_diff, s.max_abs, s.max_rel,
+                        tol.atol, tol.rtol);
+            return true;
+        }
         ctx.note_d2h_fail(seq);
         fprintf(stderr,
                 "[HRR] %s D2H FAIL seq=%llu: %zu bytes, %zu/%zu bytes differ (%.2f%%), "
-                "first@%zu (got 0x%02x exp 0x%02x); best fit %s: %zu/%zu elems exceed "
+                "first@%zu (got 0x%02x exp 0x%02x); as %s: %zu/%zu elems exceed "
                 "tol (atol=%g rtol=%g), max|d|=%.4g maxrel=%.4g\n",
                 tag, (unsigned long long)seq, n, ndiff_bytes, n,
                 100.0 * (double)ndiff_bytes / (double)n, first_diff,
-                actual[first_diff], expected[first_diff], best_name,
-                best.n_bad, best.n_diff, tol.atol, tol.rtol, best.max_abs, best.max_rel);
+                actual[first_diff], expected[first_diff], type_name,
+                s.n_bad, s.n_diff, tol.atol, tol.rtol, s.max_abs, s.max_rel);
         return false;
     }
 
-    // Exact-only mode: any byte mismatch is a failure.
     ctx.note_d2h_fail(seq);
     fprintf(stderr,
             "[HRR] %s D2H FAIL seq=%llu (exact): %zu bytes, %zu/%zu bytes differ, "
@@ -3585,15 +3598,30 @@ static bool hrr_d2h_validate(PlaybackContext& ctx, const char* tag, uint64_t seq
     return false;
 }
 
+// A linear copy's blob is the whole copy. One shorter than that holds only a
+// prefix of it, which says nothing about the rest, so the check is skipped
+// rather than passed on the prefix; an archive whose every check is skipped
+// fails the replay.
+static bool hrr_d2h_blob_short(const char* tag, size_t copy_sz, size_t blob_sz) {
+    if (blob_sz >= copy_sz) return false;
+    fprintf(stderr,
+            "[HRR] %s D2H: expected blob holds %zu of the %zu bytes copied (truncated), "
+            "not validated\n",
+            tag, blob_sz, copy_sz);
+    return true;
+}
+
 // Translate, and if nothing in the archive covers the address, back a
 // sidecar-declared segment and translate into that — what the whole-pointer
 // kernel-argument path already does. A copy can be the first touch of an
 // allocation HIP never saw, and dispatch_event advances the region timeline
 // before every handler precisely so that memcpys see the same view as a launch.
 static void* translate_or_materialize(PlaybackContext& ctx, uint64_t rec_addr) {
-    void* live = ctx.translate_ptr(rec_addr);
+    void* live = ctx.lookup_ptr(rec_addr);
     if (!live && rec_addr != 0 && ctx.regions_enabled)
         live = ctx.regions.materialize_for(ctx, rec_addr);
+    // Unmapped only once the region has had its chance.
+    if (!live && rec_addr != 0) PlaybackContext::note_unmapped(rec_addr);
     return live;
 }
 
@@ -3634,9 +3662,12 @@ static hipError_t replay_memcpy_impl(PlaybackContext& ctx,
                                      uint64_t size, int32_t kind,
                                      bool is_async, hipStream_t stream,
                                      uint64_t hash_lo, uint64_t hash_hi) {
-    void*      dst = translate_or_materialize(ctx, dst_rec);
+    // Only the kinds that write device memory translate dst. A D2H dst is a
+    // host buffer replay never uses (validation reads back into its own), and
+    // translating it would report every pageable destination as unmapped.
+    const bool dev_dst = kind == hipMemcpyHostToDevice || kind == hipMemcpyDeviceToDevice;
+    void*      dst = dev_dst ? translate_or_materialize(ctx, dst_rec) : nullptr;
     hipError_t r   = hipSuccess;
-
 
     if (kind == hipMemcpyHostToDevice && (hash_lo || hash_hi)) {
         size_t blob_sz = 0;
@@ -3709,8 +3740,7 @@ static hipError_t replay_memcpy_impl(PlaybackContext& ctx,
             if (!expected) {
                 fprintf(stderr, "[HRR] D2H validate FAIL: expected blob not found in archive\n");
                 ctx.note_d2h_fail(hrr_dispatch_seq);
-            } else {
-                copy_sz = std::min(copy_sz, blob_sz);
+            } else if (!hrr_d2h_blob_short("kernarg", copy_sz, blob_sz)) {
                 hrr::ScopedCharge readback(ctx.host_budget, copy_sz);
                 if (!readback.ok()) {
                     ctx.report_host_refusal(copy_sz, "D2H validation buffer");
@@ -3824,10 +3854,9 @@ hipError_t playback_hipMemcpyDtoH(PlaybackContext& ctx,
         if (!expected) {
             fprintf(stderr, "[HRR] D2H validate FAIL: expected blob not found in archive\n");
             ctx.note_d2h_fail(hrr_dispatch_seq);
-        } else {
-            size_t cmp_sz = std::min(sz, blob_sz);
+        } else if (!hrr_d2h_blob_short("DtoH", sz, blob_sz)) {
             hrr_d2h_validate(ctx, "DtoH", hrr_dispatch_seq, actual.data(),
-                             static_cast<const uint8_t*>(expected), cmp_sz);
+                             static_cast<const uint8_t*>(expected), sz);
         }
     }
     return hipSuccess;
@@ -3868,10 +3897,9 @@ hipError_t playback_hipMemcpyDtoHAsync(PlaybackContext& ctx,
         if (!expected) {
             fprintf(stderr, "[HRR] D2H validate FAIL: expected blob not found in archive\n");
             ctx.note_d2h_fail(hrr_dispatch_seq);
-        } else {
-            size_t cmp_sz = std::min(sz, blob_sz);
+        } else if (!hrr_d2h_blob_short("DtoHAsync", sz, blob_sz)) {
             hrr_d2h_validate(ctx, "DtoHAsync", hrr_dispatch_seq, actual.data(),
-                             static_cast<const uint8_t*>(expected), cmp_sz);
+                             static_cast<const uint8_t*>(expected), sz);
         }
     }
     return hipSuccess;
@@ -5230,7 +5258,13 @@ hipError_t playback_hipMemRelease(PlaybackContext& ctx, const uint8_t* pl) {
 hipError_t playback_hipMemMap(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipMemMap*>(pl);
     void* live_va = ctx.translate_vmm_va(a->ptr);
-    if (!live_va) return hipSuccess;  // VA not tracked, skip
+    if (!live_va) {
+        // Not a reservation base. An address in no reservation or allocation
+        // at all is an unmapped pointer for the policy, so translate_ptr notes
+        // it; one inside a reservation is skipped as before.
+        (void)ctx.translate_ptr(a->ptr);
+        return hipSuccess;
+    }
     hipMemGenericAllocationHandle_t live_handle = ctx.translate_vmm_handle(a->handle);
     if (!live_handle) return hipSuccess;  // handle not tracked, skip
     return hipMemMap(live_va,

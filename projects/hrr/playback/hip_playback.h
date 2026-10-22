@@ -52,6 +52,22 @@ inline bool hrr_zero_init_needs_drain(bool zero_init_enabled,
     return zero_init_enabled && !in_graph_capture;
 }
 
+// How D2H validation compares a read-back with its recorded blob. Byte-exact by
+// default: a recorded blob carries no element type, and reading arbitrary bytes
+// as floats lets small integers match zero. HIP_HRR_D2H_TOL=<type>:<atol>:<rtol>
+// opts a replay whose outputs really are floats of <type> (f32, bf16, f16, f64)
+// into |actual - expected| <= atol + rtol*|expected| for every element.
+struct HrrD2HTol {
+    enum Type { kExact, kF32, kBF16, kF16, kF64 };
+    Type   type = kExact;
+    double atol = 0.0;
+    double rtol = 0.0;
+};
+
+// Parses a HIP_HRR_D2H_TOL value. False, leaving *out alone, for anything but a
+// known type and two finite non-negative tolerances.
+bool hrr_parse_d2h_tol(const char* spec, HrrD2HTol* out);
+
 // ---- Capture-address placement (DESIGN.md, "GPU Allocator Address
 // Non-Determinism"). Half-open [base, end).
 struct HrrVaRange { uint64_t base = 0, end = 0; };
@@ -122,6 +138,40 @@ struct HrrHeldRanges {
 // ---------------------------------------------------------------------------
 // PlaybackContext — central replay state
 // ---------------------------------------------------------------------------
+
+// ---- Unmapped-pointer policy ----
+// A recorded pointer argument that resolves in no allocation, VMM reservation
+// or region is memory replay does not know, most often a buffer a framework
+// carved out of its own pool without HIP seeing it. One such pointer used to
+// cost the whole replay, every later event included, and the handlers did not
+// agree on it: some skipped the call, most aborted.
+//
+// The policy, the same for every handler: PlaybackContext::translate_ptr
+// notes the miss here, and dispatch_event, not the handler, decides. By
+// default the event's result is discarded and the replay goes on: the event is
+// reported with its index, API and recorded pointer, and counted on the
+// summary's "Unmapped" line. The handler still ran, with null in place of the
+// pointer, so it did either nothing (HIP refuses a null destination, and most
+// handlers refuse before calling HIP) or the part of the call that needed no
+// translation. --strict-unmapped aborts the replay at that event instead. A
+// handler never turns an unmapped pointer into success or failure on its own.
+//
+// What this guarantees: a replay whose summary shows no Unmapped line ran
+// every recorded call with each of its pointers translated. One that shows it
+// did not replay that many events as recorded, and the D2H checks still judge
+// whatever output those events would have touched. The count alone does not
+// fail the run; use --strict-unmapped when such an event must not pass.
+//
+// Not covered: kernel-argument words, which are pointers only by shape and
+// have their own count (untranslated_ptr_args); releases (hipFree and its
+// kin), which have nothing to do for memory replay never had and use
+// lookup_ptr; and handles of other kinds (streams, events, modules).
+struct HrrUnmappedNote {
+    uint64_t first = 0;  // first recorded pointer the event could not translate
+    unsigned count = 0;  // how many it met
+};
+// Per thread, because each replay thread dispatches its own events.
+inline thread_local HrrUnmappedNote hrr_unmapped_note;
 
 // How an alloc_map entry's live_ptr was obtained — determines which API must
 // release it at teardown. Mixing them up (e.g. hipFree on a host pointer)
@@ -252,6 +302,7 @@ struct PlaybackContext {
     bool audit_host_args = false;
     bool verbose           = false;
     bool validate_d2h      = false;  // perform D2H validation against captured expected data
+    HrrD2HTol d2h_tol;               // byte-exact unless HIP_HRR_D2H_TOL opts a float type in
     // The archive header has HRR_FILE_FLAG_PACKED_HOST_RECTS: the host blobs of
     // the pitched copies hold only the copied rows, packed end to end.
     bool packed_host_rects = false;
@@ -340,10 +391,10 @@ struct PlaybackContext {
     double              total_kernel_ms  = 0.0;  // guarded by map_mutex when ctx.timing
     double              total_graph_ms   = 0.0;  // guarded by map_mutex when ctx.timing
     std::atomic<size_t> d2h_pass{0};
-    // Subset of d2h_pass that were NOT byte-exact but matched within numeric
-    // tolerance (benign floating-point nondeterminism from non-associative GPU
-    // reductions). Tracked separately so the summary can distinguish exact
-    // replay fidelity from "numerically equivalent".
+    // Subset of d2h_pass that were NOT byte-exact but matched within the
+    // HIP_HRR_D2H_TOL tolerance (floating-point nondeterminism from
+    // non-associative GPU reductions). Tracked separately so the summary can
+    // distinguish exact replay fidelity from "numerically equivalent".
     std::atomic<size_t> d2h_pass_tol{0};
     std::atomic<size_t> d2h_fail{0};
     // Incremented for every D2H event that had a captured blob hash (i.e., validation
@@ -436,6 +487,12 @@ struct PlaybackContext {
     bool warn_untranslated_args = false;
     std::atomic<uint64_t> untranslated_ptr_args{0};
 
+    // Events not replayed as recorded because a pointer argument was unmapped,
+    // and whether such an event aborts the replay instead. See
+    // "Unmapped-pointer policy" above.
+    bool strict_unmapped = false;
+    std::atomic<size_t> unmapped_events{0};
+
     // ---- Guard pages ----
     // Both off by default: they trade the exact memory layout the replay
     // otherwise reproduces for the ability to make an out-of-bounds access
@@ -525,9 +582,23 @@ struct PlaybackContext {
     }
 
     // ---- Pointer translation ----
-    // Translates a recorded GPU address to a live pointer.
-    // Checks alloc_map (exact + range) then vmm_va_map (exact + range).
+    // Translates a recorded GPU address to a live pointer, and notes a miss
+    // for the unmapped-pointer policy (see above PlaybackContext). Every
+    // handler translating an API pointer argument uses this one.
     void* translate_ptr(uint64_t rec) const {
+        void* live = lookup_ptr(rec);
+        if (!live && rec != 0) note_unmapped(rec);
+        return live;
+    }
+    static void note_unmapped(uint64_t rec) {
+        if (hrr_unmapped_note.count++ == 0) hrr_unmapped_note.first = rec;
+    }
+
+    // The same lookup without the note, for callers to whom a miss is an
+    // answer rather than a lost pointer: kernel-argument scans, releases,
+    // diagnostics. Checks alloc_map (exact + range) then vmm_va_map (exact +
+    // range).
+    void* lookup_ptr(uint64_t rec) const {
         if (rec == 0) return nullptr;
         std::shared_lock lk(map_mutex);
         auto it = alloc_map.find(rec);
@@ -675,7 +746,7 @@ struct PlaybackContext {
         std::string out;
         uint64_t rbase = 0; size_t rsize = 0;
         if (is_recorded_va(v, &rbase, &rsize)) {
-            void* live = translate_ptr(rbase);
+            void* live = lookup_ptr(rbase);
             snprintf(buf, sizeof(buf),
                      "recorded allocation 0x%llx+%zu (live base %p)",
                      (unsigned long long)rbase, rsize, live);
