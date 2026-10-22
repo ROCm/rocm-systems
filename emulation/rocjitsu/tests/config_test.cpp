@@ -497,6 +497,120 @@ TEST(ConfigLoaderTest, Gfx1250WgpIdsAreLocalToShaderArray) {
     check_build(build);
 }
 
+TEST(ConfigLoaderTest, CdnaLocationsSurviveTopologyInitializationAndCheckpoint) {
+  for (const char *arch : {"cdna3", "cdna4"}) {
+    SCOPED_TRACE(arch);
+    std::string json = R"({
+      "num_threads": 1,
+      "vm": {"arch": "cdna3", "gpu": {"device": {
+        "num_sdma_engines": 0, "num_cu_per_sh": 2, "num_shader_arrays_per_engine": 1
+      }}},
+      "topology": {"root": {"name": "soc", "type": "soc", "children": [
+        {"name": "vram", "type": "gpu_memory"},
+        {"name": "xcd[0:2]", "type": "xcd", "children": [
+          {"name": "l2", "type": "l2_cache"},
+          {"name": "cp", "type": "command_processor"},
+          {"name": "se[0:2]", "type": "shader_engine", "children": [
+            {"name": "cu[0:2]", "type": "compute_unit"}
+          ]}
+        ]}
+      ]}, "links": []}
+    })";
+    ASSERT_TRUE(replace_exactly_once(json, "cdna3", arch));
+    config::LoadedConfig source;
+    ASSERT_TRUE(test::load_valid_config_from_string(json, source));
+    auto *soc = source.soc();
+    ASSERT_NE(soc, nullptr);
+    soc->set_dispatch_threads(1);
+    simdojo::SimulationEngine engine(source.engine_config);
+    engine.topology().set_root(source.take_root());
+    source.wire_links(engine.topology());
+    engine.create();
+    constexpr uint32_t kSlot = 7;
+    for (auto *xcd : soc->xcds())
+      for (auto *se : xcd->shader_engines())
+        for (auto *cu : se->compute_units())
+          ASSERT_NE(cu->dispatch_wf_at(kSlot, 0, 0, 32, 8), nullptr);
+
+    auto check_locations = [](SoC *machine) {
+      ASSERT_EQ(machine->num_xcds(), 2u);
+      for (uint32_t xcc_id = 0; xcc_id < 2; ++xcc_id) {
+        auto *xcd = machine->xcd(xcc_id);
+        ASSERT_EQ(xcd->num_shader_engines(), 2u);
+        for (uint32_t se_id = 0; se_id < 2; ++se_id) {
+          auto *se = xcd->shader_engine(se_id);
+          ASSERT_EQ(se->num_compute_units(), 2u);
+          for (uint32_t cu_id = 0; cu_id < 2; ++cu_id) {
+            auto *wf = se->compute_unit(cu_id)->wf(kSlot);
+            ASSERT_NE(wf, nullptr);
+            ASSERT_FALSE(wf->is_halted());
+            // Slot 7 means WAVE_ID 1 and SIMD_ID 3. SH_ID is always zero.
+            for (const auto &[field, expected] : std::array<std::pair<uint16_t, uint32_t>, 3>{
+                     {{4u | (5u << 11), 0x31u},
+                      {4u | (8u << 6) | (7u << 11), cu_id | (se_id << 5)},
+                      {20u | (31u << 11), xcc_id}}}) {
+              uint32_t value = UINT32_MAX;
+              EXPECT_EQ(amdgpu::read_hwreg_field(*wf, field, value),
+                        amdgpu::HwregAccessResult::Success);
+              EXPECT_EQ(value, expected);
+            }
+          }
+        }
+      }
+    };
+    check_locations(soc);
+    test::ScopedTempFile checkpoint("rocjitsu-cdna-location-");
+    config::save_checkpoint(checkpoint.path(), *soc, 0, source.engine_config, 1);
+    auto restored = config::restore_checkpoint(checkpoint.path());
+    auto *restored_soc = restored.soc();
+    restored_soc->set_dispatch_threads(1);
+    simdojo::SimulationEngine restored_engine(restored.engine_config);
+    restored_engine.topology().set_root(restored.take_root());
+    restored.wire_links(restored_engine.topology());
+    restored_engine.create();
+    check_locations(restored_soc);
+  }
+}
+
+TEST(ConfigLoaderTest, CdnaMultiArrayGeometryKeepsCuIdUnsupported) {
+  for (const char *arch : {"cdna3", "cdna4"}) {
+    SCOPED_TRACE(arch);
+    std::string json = R"({
+      "num_threads": 1,
+      "vm": {"arch": "cdna3", "gpu": {"device": {
+        "num_sdma_engines": 0, "num_cu_per_sh": 2, "num_shader_arrays_per_engine": 2
+      }}},
+      "topology": {"root": {"name": "soc", "type": "soc", "children": [
+        {"name": "vram", "type": "gpu_memory"},
+        {"name": "xcd0", "type": "xcd", "children": [
+          {"name": "l2", "type": "l2_cache"},
+          {"name": "cp", "type": "command_processor"},
+          {"name": "se0", "type": "shader_engine", "children": [
+            {"name": "cu[0:4]", "type": "compute_unit"}
+          ]}
+        ]}
+      ]}, "links": []}
+    })";
+    ASSERT_TRUE(replace_exactly_once(json, "cdna3", arch));
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
+    for (auto *xcd : loaded.build_result.xcds)
+      for (auto *se : xcd->shader_engines()) {
+        ASSERT_EQ(se->num_compute_units(), 4u);
+        for (auto *cu : se->compute_units()) {
+          auto *wf = cu->dispatch_wf(0, 0, 32, 8);
+          ASSERT_NE(wf, nullptr);
+          uint32_t value = UINT32_MAX;
+          constexpr uint16_t kCuId = 4 | (8 << 6) | (3 << 11);
+          EXPECT_EQ(amdgpu::read_hwreg_field(*wf, kCuId, value),
+                    amdgpu::HwregAccessResult::Unsupported);
+          EXPECT_EQ(value, 0u);
+          wf->halt();
+        }
+      }
+  }
+}
+
 TEST(ConfigLoaderTest, MismatchedShaderArrayGeometryKeepsWgpIdUnsupported) {
   for (const char *filename : {"gfx1250_mi455x.json", "gfx1250_mi455x_kmd_4gpu.json"}) {
     SCOPED_TRACE(filename);

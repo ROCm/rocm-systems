@@ -180,6 +180,12 @@ public:
   /// @param peers All XCD command processors of the SoC, in XCD index order.
   void set_xcd_topology(uint32_t rank, std::vector<CommandProcessor *> peers);
 
+  /// @brief Return the physical XCC rank, or nullopt before topology assignment.
+  /// @details This is the rank from set_xcd_topology(), independent of scratch overrides.
+  std::optional<uint32_t> xcc_id() const {
+    return xcd_peers_.empty() ? std::nullopt : std::optional<uint32_t>(xcd_rank_);
+  }
+
   [[nodiscard]] uint64_t register_pm4_queue(Pm4QueueConfig config);
   [[nodiscard]] QueuePrepareCloseStatus
   prepare_unregister_pm4_queue_registration(uint64_t registration_id) noexcept;
