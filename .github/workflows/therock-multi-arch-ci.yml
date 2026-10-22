@@ -91,12 +91,30 @@ concurrency:
   # queued and in-progress runs for the same PR (presubmit) or commit
   # (postsubmit). The workflow name is prepended to avoid conflicts between
   # different workflows.
-  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  #
+  # Adding or removing a label the CI does not read gets a group of its own, so
+  # it cancels nothing, and its run skips configure and everything after it.
+  # The CI reads ci:, test:, test_filter: and test_runner: labels; the same
+  # list is in configure's `if`.
+  group: >-
+    ${{ github.workflow }}-${{ github.event.number || github.sha }}${{
+      github.event.label
+      && !startsWith(github.event.label.name, 'ci:')
+      && !startsWith(github.event.label.name, 'test:')
+      && !startsWith(github.event.label.name, 'test_filter:')
+      && !startsWith(github.event.label.name, 'test_runner:')
+      && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 jobs:
   configure:
     name: Configure Changed Projects
+    if: >-
+      !github.event.label
+      || startsWith(github.event.label.name, 'ci:')
+      || startsWith(github.event.label.name, 'test:')
+      || startsWith(github.event.label.name, 'test_filter:')
+      || startsWith(github.event.label.name, 'test_runner:')
     runs-on: ubuntu-24.04
     outputs:
       changed_projects: ${{ steps.build_stages.outputs.changed_projects }}
@@ -266,7 +284,8 @@ jobs:
       id-token: write
 
   multi_arch_ci_summary:
-    name: Multi-Arch CI Summary
+    # A run that skipped configure must not post the required check's name.
+    name: ${{ needs.configure.result == 'skipped' && 'Multi-Arch CI (label ignored)' || 'Multi-Arch CI Summary' }}
     if: always()
     needs:
       - configure
