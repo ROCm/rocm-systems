@@ -3507,7 +3507,6 @@ bool VirtualGPU::waitAllEngines(CommandBatch* cb) {
 }
 
 void VirtualGPU::waitEventLock(CommandBatch* cb) {
-  bool earlyDone = true;
   GpuEvent eventsCopy[AllEngines];
 
   {
@@ -3515,11 +3514,11 @@ void VirtualGPU::waitEventLock(CommandBatch* cb) {
 
     GpuEvent* events = (cb == nullptr) ? events_ : cb->events_;
 
-    // The first loop is to flush all engines and/or check if
-    // engines are idle already
+    // The first loop is to flush all engines and retire the events
+    // of any engine that is idle already
     for (uint i = 0; i < AllEngines; ++i) {
       eventsCopy[i] = events[i];
-      earlyDone &= isDone(&events[i]);
+      isDone(&events[i]);
     }
 
     // Release all pinned memory
@@ -3541,14 +3540,11 @@ void VirtualGPU::waitEventLock(CommandBatch* cb) {
 
   // Find the timestamp object of the last command in the batch
   if (cb->lastTS_ != nullptr) {
-    // If earlyDone is TRUE, then CPU didn't wait for GPU.
-    // Thus the sync point between CPU and GPU is unclear and runtime
-    // will use an older adjustment value to maintain the same timeline
-    if (!earlyDone ||
-        //! \note Workaround for APU(s).
-        //! GPU-CPU timelines may go off too much, thus always
-        //! force calibration with the last batch in the list
-        (cbQueue_.size() <= 1) || (readjustTimeGPU_ == 0)) {
+    // Calibrate once and keep that adjustment for the lifetime of this virtual
+    // GPU. Recalibrating shifts the GPU to CPU mapping between collections, so
+    // an interval whose two commands are collected either side of the change
+    // is reported against two different timelines.
+    if (readjustTimeGPU_ == 0) {
       uint64_t startTimeStampGPU = 0;
       uint64_t endTimeStampGPU = 0;
 
@@ -3584,6 +3580,7 @@ bool VirtualGPU::allocConstantBuffers() {
 }
 
 void VirtualGPU::profilingBegin(amd::Command& command) {
+  profileTs_ = nullptr;
   // Is profiling enabled?
   if (command.profilingInfo().enabled_) {
     // Allocate a timestamp object from the cache

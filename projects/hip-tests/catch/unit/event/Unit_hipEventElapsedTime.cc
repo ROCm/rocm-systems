@@ -221,6 +221,114 @@ HIP_TEST_CASE(Unit_hipEventElapsedTime_Verify_Capture) {
 }
 
 /**
+ * Test Description
+ * ------------------------
+ *  - Validates that the reported interval reflects the recorded GPU work and
+ *    not the moment the host happened to collect the result. The same
+ *    fixed-duration kernel is timed twice, once synchronizing immediately and
+ *    once after the host has slept well past the kernel's completion. Both
+ *    measurements must report the kernel duration.
+ * Test source
+ * ------------------------
+ *  - unit/event/Unit_hipEventElapsedTime.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.2
+ */
+HIP_TEST_CASE(Unit_hipEventElapsedTime_DeferredCollection) {
+  constexpr std::chrono::milliseconds kWork{200};
+  constexpr std::chrono::milliseconds kHostDelay{400};
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  hipEvent_t start, stop;
+  HIP_CHECK(hipEventCreate(&start));
+  HIP_CHECK(hipEventCreate(&stop));
+
+  const auto measure = [&](bool deferCollection) {
+    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipEventRecord(start, stream));
+    LaunchDelayKernel(kWork, stream);
+    HIP_CHECK(hipEventRecord(stop, stream));
+    if (deferCollection) {
+      std::this_thread::sleep_for(kHostDelay);
+    }
+    HIP_CHECK(hipEventSynchronize(stop));
+    float ms = 0.0f;
+    HIP_CHECK(hipEventElapsedTime(&ms, start, stop));
+    return ms;
+  };
+
+  const float immediate = measure(false);
+  const float deferred = measure(true);
+
+  // A result that tracked collection time would pick up kHostDelay, and one
+  // built from an overwritten timestamp would collapse towards zero.
+  const float lower = kWork.count() / 2.0f;
+  REQUIRE(immediate > lower);
+  REQUIRE(immediate < kWork.count() * 2.0f);
+  REQUIRE(deferred > lower);
+  REQUIRE(deferred < immediate + kHostDelay.count() / 4.0f);
+
+  HIP_CHECK(hipEventDestroy(start));
+  HIP_CHECK(hipEventDestroy(stop));
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Validates that an event whose batch carries no GPU work is still
+ *    comparable with one that does. Two events are recorded on an idle stream
+ *    with nothing enqueued between them, then a third after a known amount of
+ *    GPU work. Both intervals must stay on the same time base.
+ * Test source
+ * ------------------------
+ *  - unit/event/Unit_hipEventElapsedTime.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.2
+ */
+HIP_TEST_CASE(Unit_hipEventElapsedTime_EmptyBatch) {
+  constexpr std::chrono::milliseconds kWork{200};
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  hipEvent_t first, second, third;
+  HIP_CHECK(hipEventCreate(&first));
+  HIP_CHECK(hipEventCreate(&second));
+  HIP_CHECK(hipEventCreate(&third));
+
+  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipEventRecord(first, stream));
+  HIP_CHECK(hipEventSynchronize(first));
+  HIP_CHECK(hipEventRecord(second, stream));
+  HIP_CHECK(hipEventSynchronize(second));
+
+  LaunchDelayKernel(kWork, stream);
+  HIP_CHECK(hipEventRecord(third, stream));
+  HIP_CHECK(hipEventSynchronize(third));
+
+  float emptyToEmpty = 0.0f;
+  float emptyToWork = 0.0f;
+  HIP_CHECK(hipEventElapsedTime(&emptyToEmpty, first, second));
+  HIP_CHECK(hipEventElapsedTime(&emptyToWork, second, third));
+
+  // Timestamps drawn from different time bases would differ by seconds.
+  REQUIRE(emptyToEmpty >= 0.0f);
+  REQUIRE(emptyToEmpty < kWork.count());
+  REQUIRE(emptyToWork >= kWork.count() / 2.0f);
+  REQUIRE(emptyToWork < kWork.count() * 2.0f);
+
+  HIP_CHECK(hipEventDestroy(first));
+  HIP_CHECK(hipEventDestroy(second));
+  HIP_CHECK(hipEventDestroy(third));
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+
+/**
  * End doxygen group EventTest.
  * @}
  */
