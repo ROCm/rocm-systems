@@ -283,6 +283,8 @@ inline uint16_t gfx12_dot2_packed16(uint16_t src0_lo, uint16_t src1_lo, uint16_t
 
 /// @brief GFX12 V_DOT4_F32_{FP8,BF8}_{FP8,BF8}: four OCP FP8 (E4M3) or BF8 (E5M2)
 /// products from packed bytes plus an F32 accumulator.
+/// Uses the grouped rounding, host/MODE independence and NaN precedence of
+/// gfx12_dot8_f32, with one group of four products.
 /// @tparam Src0Fp8 Selects FP8 for src0, and BF8 otherwise; likewise Src1Fp8.
 template <bool Src0Fp8, bool Src1Fp8>
 inline uint32_t gfx12_dot4_f32_fp8(uint32_t src0, uint32_t src1, uint32_t acc) {

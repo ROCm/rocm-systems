@@ -42,6 +42,9 @@ util::FailureOr<std::array<uint32_t, 4>>
 unpack_buffer_format(uint32_t format, uint32_t selectors, std::span<const uint8_t> bytes,
                      BufferFormatEncoding encoding = BufferFormatEncoding::Gfx11);
 /// Packs an untyped descriptor-selected store, including DST_SEL qualification.
+/// A single-channel FLOAT32 buffer store with all-zero DST_SEL stores source X
+/// on gfx1201. This rule is extrapolated to the other supported targets, including
+/// gfx1100, and does not apply to image stores.
 util::Result
 pack_buffer_format(uint32_t format, uint32_t selectors, std::span<const uint32_t> components,
                    std::span<uint8_t> bytes,

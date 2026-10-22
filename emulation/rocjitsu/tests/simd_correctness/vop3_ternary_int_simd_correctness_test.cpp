@@ -124,7 +124,7 @@ struct Fixture {
   std::unique_ptr<Decoder> decoder;
   amdgpu::Wavefront *wf = nullptr;
 
-  explicit Fixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4, uint32_t width = WF_SIZE)
+  explicit Fixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4, uint32_t width = 0)
       : gpu_mem("vop3_tern_int_mem"), l2("vop3_tern_int_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
     cfg.arch = arch;
@@ -245,12 +245,13 @@ TEST(Vop3TernaryIntSimdCorrectness, Cdna5IntegerMinmaxGoldenResults) {
     util::set_force_scalar_for_testing(force_scalar);
     for (const auto &test_case : cases) {
       Fixture fixture(ROCJITSU_CODE_ARCH_CDNA5);
+      ASSERT_NE(fixture.wf, nullptr);
       const auto words = cdna5::build_vop3(
           test_case.opcode, {.vdst = kDstVgpr, .src0 = 256, .src1 = 257, .src2 = 258});
       std::unique_ptr<Instruction> instruction(decode_valid(*fixture.decoder, words.data()));
       ASSERT_NE(instruction, nullptr);
       const uint32_t base = fixture.wf->vgpr_alloc().base;
-      for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+      for (uint32_t lane = 0; lane < fixture.wf->wf_size(); ++lane) {
         fixture.cu->write_vgpr(base, lane, test_case.src0);
         fixture.cu->write_vgpr(base + 1, lane, test_case.src1);
         fixture.cu->write_vgpr(base + 2, lane, test_case.src2);
@@ -338,9 +339,9 @@ TEST(Vop3TernaryIntSimdCorrectness, IntegerMinmaxPreservesSignedAndUnsignedBits)
             const uint32_t a = kVals[lane % kVals.size()];
             const uint32_t b = kVals[(lane + rot) % kVals.size()];
             const uint32_t c = kVals[(lane + 2 * rot) % kVals.size()];
-            const bool maxmin = op == 610 || op == 612;
+            const bool maxmin = op == rdna4::kVMaxminU32Vop3 || op == rdna4::kVMaxminI32Vop3;
             uint32_t expected;
-            if (op >= 612) {
+            if (op == rdna4::kVMaxminI32Vop3 || op == rdna4::kVMinmaxI32Vop3) {
               const int32_t x = static_cast<int32_t>(a), y = static_cast<int32_t>(b),
                             z = static_cast<int32_t>(c);
               expected = maxmin ? std::min(std::max(x, y), z) : std::max(std::min(x, y), z);
