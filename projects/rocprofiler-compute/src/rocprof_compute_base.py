@@ -269,10 +269,7 @@ class RocProfCompute:
             experimental_requested(sys.argv[1:]),
         )
         self.__args = self.__parser.parse_args()
-        # The workload command after "--" may have options of its own
-        warn_deprecated_options(
-            sys.argv[1:], getattr(self.__args, "remaining", None) or []
-        )
+        warn_deprecated_options(sys.argv[1:])
         # --list-metrics-gfx-id <arch> on its own lists the blocks of <arch>
         if self.__args.list_metrics_gfx_id and self.__args.list_metrics is None:
             self.__args.list_metrics = []
