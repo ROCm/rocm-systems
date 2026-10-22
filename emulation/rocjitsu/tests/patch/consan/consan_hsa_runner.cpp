@@ -159,7 +159,7 @@ int run(int argc, char **argv) {
   rj_consan_drain_fn drain = nullptr;
   rj_consan_statistics_fn statistics = nullptr;
   if (!baseline) {
-    const char *path = std::getenv("CONSAN_PLUGIN_PATH");
+    const char *path = std::getenv("RJ_CONSAN_PLUGIN_PATH");
     if (path)
       plugin = ::dlopen(path, RTLD_NOW | RTLD_NOLOAD);
     if (plugin) {

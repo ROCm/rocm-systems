@@ -227,16 +227,16 @@ consan_config="$consan_source/configs/gfx1250_mi455x.json"
 consan_example=$(mktemp -d "${TMPDIR:-/tmp}/consan-example.XXXXXX")
 
 export HSA_TOOLS_LIB="$consan_plugin"
-export CONSAN_PLUGIN_PATH="$consan_plugin"
-export CONSAN_ARTIFACT_DIR="$consan_example/artifact"
-export CONSAN_CAPTURE_PATH="$consan_example/capture.bin"
+export RJ_CONSAN_PLUGIN_PATH="$consan_plugin"
+export RJ_CONSAN_ARTIFACT_DIR="$consan_example/artifact"
+export RJ_CONSAN_CAPTURE_PATH="$consan_example/capture.bin"
 ```
 
 ### 1. Offline preparation
 
 ```bash
 "$consan_prepare" \
-  "$consan_original" gfx1250 lds_producer_consumer "$CONSAN_ARTIFACT_DIR"
+  "$consan_original" gfx1250 lds_producer_consumer "$RJ_CONSAN_ARTIFACT_DIR"
 ```
 
 The artifact destination must be new. The runtime verifies that this artifact
@@ -255,13 +255,13 @@ The runner loads the **original** image; the plugin supplies the replacement.
 The ConSan plugin produces the capture inside this simulated application run.
 The runner calls [rj_consan_finish()](../lib/rocjitsu/src/rocjitsu/hooks/consan/api.h)
 before HSA teardown; no separate finish command is needed. Successful execution
-and capture return runner exit 0 and publish `CONSAN_CAPTURE_PATH`. Existing
+and capture return runner exit 0 and publish `RJ_CONSAN_CAPTURE_PATH`. Existing
 capture files are not overwritten.
 
 ### 3. Offline diagnosis
 
 ```bash
-"$consan_analyze" "$CONSAN_CAPTURE_PATH" --examples 1
+"$consan_analyze" "$RJ_CONSAN_CAPTURE_PATH" --examples 1
 ```
 
 The analyzer writes JSON to stdout. For this race example, exit 1 means a

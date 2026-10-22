@@ -1114,10 +1114,10 @@ bool install(HsaApiTable *table) {
       !amd.hsa_amd_queue_intercept_create_fn || !amd.hsa_amd_queue_intercept_register_fn ||
       !amd.hsa_amd_profiling_set_profiler_enabled_fn)
     return false;
-  const char *artifacts = std::getenv("CONSAN_ARTIFACT_DIR");
-  const char *capture = std::getenv("CONSAN_CAPTURE_PATH");
+  const char *artifacts = std::getenv("RJ_CONSAN_ARTIFACT_DIR");
+  const char *capture = std::getenv("RJ_CONSAN_CAPTURE_PATH");
   if (!artifacts || !*artifacts || !capture || !*capture) {
-    diagnostic("CONSAN_ARTIFACT_DIR and CONSAN_CAPTURE_PATH are required");
+    diagnostic("RJ_CONSAN_ARTIFACT_DIR and RJ_CONSAN_CAPTURE_PATH are required");
     return false;
   }
   runtime = std::make_unique<Runtime>(core, amd, artifacts, capture);

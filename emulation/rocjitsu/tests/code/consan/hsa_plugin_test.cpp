@@ -58,13 +58,13 @@ protected:
     ASSERT_NE(created, nullptr);
     directory_ = created;
     preserve_ = root != nullptr;
-    for (const char *name : {"CONSAN_ARTIFACT_DIR", "CONSAN_CAPTURE_PATH"}) {
+    for (const char *name : {"RJ_CONSAN_ARTIFACT_DIR", "RJ_CONSAN_CAPTURE_PATH"}) {
       const char *value = std::getenv(name);
       environment_[name] = value ? std::optional<std::string>(value) : std::nullopt;
     }
-    ASSERT_EQ(::setenv("CONSAN_ARTIFACT_DIR", CONSAN_ARTIFACT_FIXTURE, 1), 0);
+    ASSERT_EQ(::setenv("RJ_CONSAN_ARTIFACT_DIR", CONSAN_ARTIFACT_FIXTURE, 1), 0);
     capture_ = directory_ / "capture.bin";
-    ASSERT_EQ(::setenv("CONSAN_CAPTURE_PATH", capture_.c_str(), 1), 0);
+    ASSERT_EQ(::setenv("RJ_CONSAN_CAPTURE_PATH", capture_.c_str(), 1), 0);
     library_ = ::dlopen(CONSAN_PLUGIN_FIXTURE, RTLD_NOW | RTLD_LOCAL);
     ASSERT_NE(library_, nullptr) << ::dlerror();
     load_ = reinterpret_cast<bool (*)(HsaApiTable *, uint64_t, uint64_t, const char *const *)>(
@@ -679,6 +679,30 @@ TEST_F(ConSanHsaPluginDeathTest, FinishExceptionTerminatesInsteadOfReturningInva
     }
     (void)finish_();
   });
+}
+
+TEST_F(ConSanHsaPlugin, RuntimeConfigurationRequiresBothPrefixedPaths) {
+  (void)finish_();
+  unload_();
+  installed_ = false;
+  for (const char *name : {"RJ_CONSAN_ARTIFACT_DIR", "RJ_CONSAN_CAPTURE_PATH"}) {
+    SCOPED_TRACE(name);
+    const std::string saved = std::getenv(name);
+    for (const char *value : {static_cast<const char *>(nullptr), ""}) {
+      if (value)
+        ASSERT_EQ(::setenv(name, value, 1), 0);
+      else
+        ASSERT_EQ(::unsetenv(name), 0);
+      installed_ = load_(&table_, 0, 0, nullptr);
+      ASSERT_FALSE(installed_);
+      EXPECT_EQ(core_.hsa_code_object_reader_create_from_memory_fn, create_reader);
+    }
+    ASSERT_EQ(::setenv(name, saved.c_str(), 1), 0);
+  }
+  installed_ = load_(&table_, 0, 0, nullptr);
+  ASSERT_TRUE(installed_);
+  ASSERT_TRUE(bind());
+  EXPECT_EQ(finish_(), 0);
 }
 
 TEST_F(ConSanHsaPlugin, NormalReaderLoadUsesPreparedBytesAndProjectsTheOriginalArgumentAbi) {
