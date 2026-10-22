@@ -172,15 +172,19 @@ if(TARGET rdc_client)
     # not linked. Links librdc_client for the generated gRPC service and messages,
     # like rdc_client_replies_tests. The server is built with -fclang-abi-compat=17
     # under clang 18 and later (server/CMakeLists.txt); so is this test.
+    # common/rdc_fields_supported.cc is compiled in, with the source root on
+    # the include path, so that the service links when it checks field IDs.
     add_executable(
         rdc_server_replies_tests
         ${SRC_DIR}/test_server_replies.cc
         ${PROJECT_SOURCE_DIR}/server/src/rdc_api_service.cc
         ${PROJECT_SOURCE_DIR}/rdc_libs/bootstrap/src/RdcLogger.cc
+        ${PROJECT_SOURCE_DIR}/common/rdc_fields_supported.cc
     )
     target_include_directories(
         rdc_server_replies_tests
         PRIVATE
+            ${PROJECT_SOURCE_DIR}
             ${PROJECT_SOURCE_DIR}/include
             ${PROJECT_SOURCE_DIR}/server/include
             ${PROTOB_OUT_DIR}

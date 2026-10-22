@@ -405,6 +405,15 @@ void overfull(Handler<Request, Reply> handler, const Request& request,
   });
 }
 
+// A request for a field rdcd knows, so that a handler that checks the field ID before it calls
+// the library still calls it.
+template <typename Request>
+Request a_field_request() {
+  Request request;
+  request.set_field_id(RDC_FI_GPU_CLOCK);
+  return request;
+}
+
 std::string all_a(size_t length) { return std::string(length, 'A'); }
 
 using amd::rdc::RdcAPIServiceImpl;
@@ -475,14 +484,16 @@ TEST(ServerReplies, FieldGroupInfoStaysWithinItsArrays) {
 
 TEST(ServerReplies, FieldValuesAreEmptyWhenTheLibraryWritesNothing) {
   unfilled<::rdc::GetLatestFieldValueRequest, ::rdc::GetLatestFieldValueResponse>(
-      &RdcAPIServiceImpl::GetLatestFieldValue, {}, [](const auto& reply) {
+      &RdcAPIServiceImpl::GetLatestFieldValue, a_field_request<::rdc::GetLatestFieldValueRequest>(),
+      [](const auto& reply) {
         EXPECT_EQ(reply.rdc_status(), RDC_ST_OK);
         EXPECT_EQ(reply.ts(), 0u);
         EXPECT_EQ(reply.field_id(), 0u);
         EXPECT_EQ(reply.l_int(), 0);
       });
   unfilled<::rdc::GetFieldSinceRequest, ::rdc::GetFieldSinceResponse>(
-      &RdcAPIServiceImpl::GetFieldSince, {}, [](const auto& reply) {
+      &RdcAPIServiceImpl::GetFieldSince, a_field_request<::rdc::GetFieldSinceRequest>(),
+      [](const auto& reply) {
         EXPECT_EQ(reply.rdc_status(), RDC_ST_OK);
         EXPECT_EQ(reply.next_since_time_stamp(), 0u);
         EXPECT_EQ(reply.ts(), 0u);
@@ -492,10 +503,10 @@ TEST(ServerReplies, FieldValuesAreEmptyWhenTheLibraryWritesNothing) {
 
 TEST(ServerReplies, FieldStringsStayWithinTheirBuffers) {
   overfull<::rdc::GetLatestFieldValueRequest, ::rdc::GetLatestFieldValueResponse>(
-      &RdcAPIServiceImpl::GetLatestFieldValue, {},
+      &RdcAPIServiceImpl::GetLatestFieldValue, a_field_request<::rdc::GetLatestFieldValueRequest>(),
       [](const auto& reply) { EXPECT_EQ(reply.str(), all_a(RDC_MAX_STR_LENGTH)); });
   overfull<::rdc::GetFieldSinceRequest, ::rdc::GetFieldSinceResponse>(
-      &RdcAPIServiceImpl::GetFieldSince, {},
+      &RdcAPIServiceImpl::GetFieldSince, a_field_request<::rdc::GetFieldSinceRequest>(),
       [](const auto& reply) { EXPECT_EQ(reply.str(), all_a(RDC_MAX_STR_LENGTH)); });
 }
 
@@ -508,7 +519,7 @@ TEST(ServerReplies, FieldStringsSinceATimeLoseTheirTrailingSpaces) {
       g_fill = Fill::kNothing;
       RdcAPIServiceImpl service;
       ::grpc::ServerContext context;
-      ::rdc::GetFieldSinceRequest request;
+      const auto request = a_field_request<::rdc::GetFieldSinceRequest>();
       ::rdc::GetFieldSinceResponse reply;
       ASSERT_TRUE(service.GetFieldSince(&context, &request, &reply).ok());
       EXPECT_EQ(reply.str(), sent) << "for \"" << value << "\"";
