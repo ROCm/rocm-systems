@@ -1079,8 +1079,7 @@ TEST_F(AllocMicrotest, CudaCalloc_ZeroingFailuresWithoutCuMem) {
 }
 
 // Zero elements allocate nothing but count an allocation that freeing never takes back.
-// Pins AICOMRCCL-3044; a fix flips this pin.
-TEST_F(AllocMicrotest, CudaAllocs_KnownBug_ZeroElementsStillCountAnAllocation) {
+TEST_F(AllocMicrotest, CudaAllocs_ZeroElementsCountAnAllocation) {
   char* p = reinterpret_cast<char*>(this);
   ASSERT_EQ(ncclCudaMalloc(&p, 0, nullptr), ncclSuccess);
   EXPECT_EQ(p, nullptr);
@@ -1093,8 +1092,7 @@ TEST_F(AllocMicrotest, CudaAllocs_KnownBug_ZeroElementsStillCountAnAllocation) {
 }
 
 // With cuMem each allocation is counted twice and the byte total drifts by the padding.
-// Pins AICOMRCCL-3044; a fix flips this pin.
-TEST_F(AllocMicrotest, CudaAllocs_KnownBug_CuMemCountsEveryAllocationTwice) {
+TEST_F(AllocMicrotest, CudaAllocs_CuMemCountsEveryAllocationTwice) {
   cuMem_ = 1;
   char* p = nullptr;
   ASSERT_EQ(ncclCudaMalloc(&p, 100, nullptr), ncclSuccess);
