@@ -21,6 +21,7 @@ extern "C" {
 // Instruction flags must be zero. Only CPU-level and semantics fields (with supported
 // values) and RJ_ARITH_FP16_OVFL are accepted; all other flag bits are rejected.
 // RJ_ARITH_FP16_OVFL is accepted but has no effect on the FP32 result.
+// This instruction has no FP-status output: mode 3 accepts the same numeric contract as mode 2.
 int rj_arith_v_wmma_f32_16x16x16_f16_w32_gfx12(uint64_t flags, uint64_t instruction_flags,
                                                uint32_t *const *d, const uint32_t *const *a,
                                                const uint32_t *const *b, const uint32_t *const *c);

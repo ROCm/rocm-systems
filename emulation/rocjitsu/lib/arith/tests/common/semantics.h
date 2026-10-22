@@ -12,9 +12,10 @@
 
 namespace rocjitsu::arith::test {
 
-// Return all defined semantics modes supported at this stage.
-inline std::vector<uint64_t> semantics_modes() {
-  return {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE};
+// Return the supported FMA modes without FP-status reporting.
+inline std::vector<uint64_t> fma_semantics_modes() {
+  return {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE,
+          RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS};
 }
 
 } // namespace rocjitsu::arith::test
