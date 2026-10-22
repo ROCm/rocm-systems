@@ -46,17 +46,7 @@ struct sample : trace_cache::cacheable_t
     template <typename Archive>
     void serialize(Archive& archive)
     {
-        // metrics::query_failed is deliberately not carried: cache_policy::store_sample
-        // drops a failed query before it reaches the buffer, so every stored sample has
-        // it false and the default-constructed value round-trips correctly.
-        archive(enabled_metric.value, device_id, timestamp, metric_values.read_bytes,
-                metric_values.write_bytes, metric_values.read_ops,
-                metric_values.write_ops, metric_values.fastpath_reads,
-                metric_values.fastpath_writes, metric_values.fallback_reads,
-                metric_values.fallback_writes, metric_values.unaligned_reads,
-                metric_values.unaligned_writes, metric_values.read_errors,
-                metric_values.write_errors, metric_values.read_bandwidth,
-                metric_values.write_bandwidth);
+        archive(enabled_metric, device_id, timestamp, metric_values);
     }
 };
 

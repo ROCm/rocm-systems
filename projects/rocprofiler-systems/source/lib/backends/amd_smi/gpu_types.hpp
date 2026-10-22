@@ -88,6 +88,17 @@ struct metrics
 
     std::uint32_t gfx_clock_mhz = 0;  // current_gfxclk (MHz)
     std::uint32_t mem_clock_mhz = 0;  // current_uclk (MHz)
+
+    template <typename Archive>
+    void serialize(Archive& archive)
+    {
+        archive(average_socket_power, current_socket_power, memory_usage,
+                hotspot_temperature, edge_temperature, gfx_activity, umc_activity,
+                mm_activity, xcp_stats, vcn_activity, jpeg_activity, xgmi.link.width,
+                xgmi.link.speed, xgmi.data_acc.read, xgmi.data_acc.write, pcie.link.width,
+                pcie.link.speed, pcie.bandwidth.acc, pcie.bandwidth.inst, sdma_usage,
+                gfx_clock_mhz, mem_clock_mhz);
+    }
 };
 
 template <typename T>

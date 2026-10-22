@@ -45,12 +45,7 @@ struct sample : trace_cache::cacheable_t
     void serialize(Archive& archive)
     {
         std::string_view name_view = device_name;
-        archive(enabled_metric.value, device_id, name_view, timestamp,
-                metric_values.rx_rdma_ucast_bytes, metric_values.tx_rdma_ucast_bytes,
-                metric_values.rx_rdma_ucast_pkts, metric_values.tx_rdma_ucast_pkts,
-                metric_values.rx_rdma_cnp_pkts, metric_values.tx_rdma_cnp_pkts,
-                metric_values.tx_rdma_ack_timeout, metric_values.resp_tx_pkt_seq_err,
-                metric_values.req_rx_pkt_seq_err, metric_values.req_rx_impl_nak_seq_err);
+        archive(enabled_metric, device_id, name_view, timestamp, metric_values);
         if constexpr(Archive::k_is_loading)
         {
             device_name = std::string(name_view);

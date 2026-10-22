@@ -20,6 +20,11 @@ namespace rocprofsys::trace_cache
 static_assert(std::is_same_v<std::size_t, std::uint64_t>,
               "trace cache format assumes size_t is std::uint64_t");
 
+/** A value (a record or a nested struct) that lists its own fields in serialize(). */
+template <typename Type, typename Archive>
+concept archive_serializable =
+    requires(Type& value, Archive& archive) { value.serialize(archive); };
+
 /** Sums the encoded size of the fields a record passes to it. */
 struct binary_size_archive
 {
@@ -29,7 +34,22 @@ struct binary_size_archive
     template <typename... Types>
     void operator()(const Types&... values)
     {
-        size += (std::size_t{ 0 } + ... + utility::get_size(values));
+        (size_one(values), ...);
+    }
+
+private:
+    template <typename Type>
+    void size_one(const Type& value)
+    {
+        if constexpr(archive_serializable<Type, binary_size_archive>)
+        {
+            // Recurse into a nested struct; it is only read through serialize().
+            const_cast<Type&>(value).serialize(*this);
+        }
+        else
+        {
+            size += utility::get_size(value);
+        }
     }
 };
 
@@ -43,7 +63,22 @@ struct binary_write_archive
     template <typename... Types>
     void operator()(const Types&... values)
     {
-        (utility::store_value(values, buffer, position), ...);
+        (write_one(values), ...);
+    }
+
+private:
+    template <typename Type>
+    void write_one(const Type& value)
+    {
+        if constexpr(archive_serializable<Type, binary_write_archive>)
+        {
+            // Recurse into a nested struct; it is only read through serialize().
+            const_cast<Type&>(value).serialize(*this);
+        }
+        else
+        {
+            utility::store_value(value, buffer, position);
+        }
     }
 };
 
@@ -66,7 +101,11 @@ private:
     template <typename Type>
     void read_one(Type& value)
     {
-        if constexpr(std::is_same_v<Type, std::span<const std::byte>>)
+        if constexpr(archive_serializable<Type, binary_read_archive>)
+        {
+            value.serialize(*this);
+        }
+        else if constexpr(std::is_same_v<Type, std::span<const std::byte>>)
         {
             std::size_t byte_count = 0;
             std::memcpy(&byte_count, cursor, sizeof(std::size_t));

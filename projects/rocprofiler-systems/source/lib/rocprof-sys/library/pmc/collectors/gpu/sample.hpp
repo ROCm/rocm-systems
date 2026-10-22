@@ -39,18 +39,7 @@ struct sample : trace_cache::cacheable_t
     template <typename Archive>
     void serialize(Archive& archive)
     {
-        archive(enabled_metric.value, device_id, timestamp,
-                metric_values.average_socket_power, metric_values.current_socket_power,
-                metric_values.memory_usage, metric_values.hotspot_temperature,
-                metric_values.edge_temperature, metric_values.gfx_activity,
-                metric_values.umc_activity, metric_values.mm_activity,
-                metric_values.xcp_stats, metric_values.vcn_activity,
-                metric_values.jpeg_activity, metric_values.xgmi.link.width,
-                metric_values.xgmi.link.speed, metric_values.xgmi.data_acc.read,
-                metric_values.xgmi.data_acc.write, metric_values.pcie.link.width,
-                metric_values.pcie.link.speed, metric_values.pcie.bandwidth.acc,
-                metric_values.pcie.bandwidth.inst, metric_values.sdma_usage,
-                metric_values.gfx_clock_mhz, metric_values.mem_clock_mhz);
+        archive(enabled_metric, device_id, timestamp, metric_values);
     }
 };
 

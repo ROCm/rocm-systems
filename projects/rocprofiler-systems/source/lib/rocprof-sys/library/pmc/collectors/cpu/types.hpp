@@ -42,6 +42,12 @@ union enabled_metrics
         std::uint32_t kernel_time  : 1;
     } bits;
     std::uint32_t value = 0;
+
+    template <typename Archive>
+    void serialize(Archive& archive)
+    {
+        archive(value);
+    }
 };
 
 /// All 9 CPU metrics enabled (bits 0-8).
@@ -71,6 +77,13 @@ struct process_metrics
     std::int64_t page_faults      = 0;  // count (major + minor)
     std::int64_t user_mode_time   = 0;  // microseconds
     std::int64_t kernel_mode_time = 0;  // microseconds
+
+    template <typename Archive>
+    void serialize(Archive& archive)
+    {
+        archive(page_rss, virt_mem, peak_rss, context_switches, page_faults,
+                user_mode_time, kernel_mode_time);
+    }
 };
 
 /**

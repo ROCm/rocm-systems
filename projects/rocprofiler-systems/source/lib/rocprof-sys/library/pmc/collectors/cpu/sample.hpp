@@ -47,10 +47,7 @@ struct sample : trace_cache::cacheable_t
     template <typename Archive>
     void serialize(Archive& archive)
     {
-        archive(enabled_metric.value, device_id, timestamp, process_data.page_rss,
-                process_data.virt_mem, process_data.peak_rss,
-                process_data.context_switches, process_data.page_faults,
-                process_data.user_mode_time, process_data.kernel_mode_time, freqs, loads);
+        archive(enabled_metric, device_id, timestamp, process_data, freqs, loads);
     }
 };
 

@@ -32,6 +32,7 @@ enum class test_record_id : std::uint32_t
     span_test            = 5,
     derived_test         = 6,
     counted_entries_test = 7,
+    nested_test          = 8,
 };
 
 struct scalar_record
@@ -155,6 +156,33 @@ struct counted_entries_record
         {
             archive(entries[idx].id, entries[idx].value);
         }
+    }
+};
+
+struct inner_values
+{
+    std::uint32_t alpha = 0;
+    double        beta  = 0.0;
+
+    template <typename Archive>
+    void serialize(Archive& archive)
+    {
+        archive(alpha, beta);
+    }
+};
+
+struct nested_record
+{
+    static constexpr auto type_identifier = test_record_id::nested_test;
+
+    std::uint64_t head = 0;
+    inner_values  inner;
+    std::uint16_t tail = 0;
+
+    template <typename Archive>
+    void serialize(Archive& archive)
+    {
+        archive(head, inner, tail);
     }
 };
 
@@ -352,6 +380,37 @@ TEST(archive, is_loading_branch_for_counted_entries)
     EXPECT_EQ(read_empty.device, 2U);
     EXPECT_EQ(read_empty.entries.size(), 0U);
     EXPECT_EQ(read_buffer - buffer.data(), static_cast<std::ptrdiff_t>(size_empty));
+}
+
+TEST(archive, nested_struct_serializes_itself)
+{
+    std::array<std::uint8_t, k_buffer_size> buffer{};
+    nested_record                           orig;
+    orig.head        = 1111ULL;
+    orig.inner.alpha = 2222U;
+    orig.inner.beta  = 3.33;
+    orig.tail        = 4444U;
+
+    const std::size_t size = record_size(orig);
+    record_write(buffer.data(), orig);
+
+    std::uint8_t*       read_buffer = buffer.data();
+    const nested_record read        = record_read<nested_record>(read_buffer);
+
+    EXPECT_EQ(read.head, 1111ULL);
+    EXPECT_EQ(read.inner.alpha, 2222U);
+    EXPECT_DOUBLE_EQ(read.inner.beta, 3.33);
+    EXPECT_EQ(read.tail, 4444U);
+    EXPECT_EQ(read_buffer - buffer.data(), static_cast<std::ptrdiff_t>(size));
+
+    EXPECT_EQ(size,
+              utility::get_size(orig.head, orig.inner.alpha, orig.inner.beta, orig.tail));
+
+    std::array<std::uint8_t, k_buffer_size> other_buffer{};
+    utility::store_value(other_buffer.data(), orig.head, orig.inner.alpha,
+                         orig.inner.beta, orig.tail);
+
+    EXPECT_EQ(std::memcmp(buffer.data(), other_buffer.data(), size), 0);
 }
 
 }  // namespace rocprofsys::trace_cache
