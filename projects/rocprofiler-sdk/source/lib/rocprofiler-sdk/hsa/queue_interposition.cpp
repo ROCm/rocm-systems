@@ -2230,8 +2230,8 @@ notify_queue_interposition_consumer_context_stopped(const context::context* ctx)
     while(cur > 0)
     {
         // Last consumer: fence doorbell workers, drop the count so new dispatches
-        // bypass, then drain the completion monitor so in-flight kernels still
-        // emit records before bypass fully re-engages (avoids empty PGLE traces).
+        // bypass. The completion monitor stays up and drains remaining signals
+        // asynchronously; Stop does not wait on it.
         if(cur == 1 && s_intercept_installed.load(std::memory_order_acquire))
         {
             auto lk = std::lock_guard<std::mutex>{s_consumer_transition_mutex};
@@ -2245,11 +2245,9 @@ notify_queue_interposition_consumer_context_stopped(const context::context* ctx)
                        cur, cur - 1, std::memory_order_acq_rel, std::memory_order_acquire))
                 {
                     // Consumers is already 0, so new doorbells bypass without the
-                    // transition flag. Clear it before the completion-monitor drain:
-                    // that drain can run on the record-emitter path, and holding
-                    // force-bypass across it can deadlock Stop against the emitter.
+                    // transition flag. Clear it before return so force-bypass is
+                    // not held across unrelated work on the Stop path.
                     s_consumer_transition_in_progress.store(false, std::memory_order_release);
-                    interposition_sync();
                     return;
                 }
                 s_consumer_transition_in_progress.store(false, std::memory_order_release);
