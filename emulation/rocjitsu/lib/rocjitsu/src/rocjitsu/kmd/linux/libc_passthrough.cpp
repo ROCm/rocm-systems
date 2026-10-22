@@ -42,6 +42,8 @@ void LibcPassthrough::resolve() {
   stat = util::lookup_symbol<decltype(stat)>(handle, "stat");
   lstat = util::lookup_symbol<decltype(lstat)>(handle, "lstat");
   access = util::lookup_symbol<decltype(access)>(handle, "access");
+  lseek_fn = util::lookup_symbol<decltype(lseek_fn)>(handle, "lseek");
+  lseek64_fn = util::lookup_symbol<decltype(lseek64_fn)>(handle, "lseek64");
   fstat_fn = util::lookup_symbol<decltype(fstat_fn)>(handle, "fstat");
   // Legacy aliases, resolved eagerly so no wrapper needs a lazy static (see the
   // declarations for why that matters across fork).

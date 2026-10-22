@@ -173,8 +173,8 @@ sharing (same pattern as QEMU vhost-user and CRIU).
 
 Two RPC operations carry memfds:
 
-- `RPC_IOCTL` (ALLOC_MEMORY response) --- allocation backing memfd
-- `RPC_MMAP` (response) --- doorbell and event page memfds
+- `RPC_IOCTL` (ALLOC_MEMORY response) --- allocation backing descriptor
+- `RPC_MMAP` (response) --- doorbell and event page descriptors
 
 ### Thread Safety
 
@@ -184,8 +184,8 @@ a shutdown `eventfd` between daemon timeout=0 polls, avoiding mutex starvation.
 
 ## Memory Sharing (Same-VA Architecture)
 
-Both client and daemon map every memfd at the **same virtual address** using
-MAP_FIXED. GPU VAs are in the GPUVM aperture (`0x1000000000` - `0x3FFFFFFFFFFF`),
+Both client and daemon map shared backing at the **same virtual address** using
+`memory_backing::map` with `MAP_FIXED`. GPU VAs are in the GPUVM aperture (`0x1000000000` - `0x3FFFFFFFFFFF`),
 which doesn't collide with either process's normal address space.
 
 This means `reinterpret_cast<void*>(gpu_va)` works in both processes ---
@@ -202,9 +202,9 @@ Client                                     Daemon
 
 2. ROCR: hsaKmtAllocMemory()
    RemoteDriver::send_ioctl(ALLOC)  ---->  alloc_memory_ioctl()
-                                            memfd_create + ftruncate + fallocate
-                                            MAP_FIXED memfd at VA (proactive)
-                                    <----  response + memfd (SCM_RIGHTS)
+                                            memory_backing::create via rocjitsu-memory
+                                            MAP_FIXED backing at VA (proactive)
+                                    <----  response + backing fd (SCM_RIGHTS)
    [USERPTR: mincore+copy, MAP_FIXED]
 
 3. ROCR: fmm_map_to_cpu()
@@ -212,6 +212,14 @@ Client                                     Daemon
    interposer routes DRM fd     ---->     mmap() -> already mapped, return
                                     <----  response
 ```
+
+The private helper sizes ordinary memfds when its inherited hard file limit
+allows. Larger allocations use System V shared RAM retained by Unix socket
+tokens, which travel through the same `SCM_RIGHTS` path. The mapping and metadata
+adapters support both representations; tokens require those adapters and do not
+support `pread`/`pwrite`. The PCI `VramStore` uses separate file-backed storage.
+See [the KMD architecture](architecture.md#kmd--kernel-mode-driver-emulation-kmdlinux) for the
+fallback's same-UID trust assumption and namespace-wide shared-memory budgets.
 
 ### Proactive Mapping
 
@@ -222,8 +230,8 @@ pointers before the client's fmm_map_to_cpu RPC arrives.
 ### USERPTR Sharing
 
 For USERPTR allocations (ring buffer, rptr/wptr), the client receives the
-daemon's memfd, copies committed pages via mincore, then MAP_FIXED replaces
-the anonymous pages with the shared memfd. The interposer suppresses
+daemon's backing descriptor, copies committed pages via mincore, then MAP_FIXED
+replaces the anonymous pages with shared backing. The interposer suppresses
 MADV_HUGEPAGE and MADV_DONTFORK on GPUVM addresses to prevent kernel 6.17
 shmem fault failures.
 

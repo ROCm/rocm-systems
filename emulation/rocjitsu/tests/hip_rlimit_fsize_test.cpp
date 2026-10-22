@@ -10,6 +10,7 @@
 #include <cstring>
 #include <fcntl.h>
 #include <sys/resource.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include <vector>
 
@@ -21,7 +22,7 @@ __global__ void write_cookie(unsigned char *data) { data[0] = 0x37; }
 
 #define CHECK_HIP(call) ASSERT_EQ((call), hipSuccess)
 
-TEST(HipFileSizeLimitTest, PreservesApplicationLimit) {
+void check_application_limit() {
   const char *phase = std::getenv("RJ_TEST_PHASE");
   if (phase && std::strcmp(phase, "late") == 0) {
     void *warmup = nullptr;
@@ -42,8 +43,10 @@ TEST(HipFileSizeLimitTest, PreservesApplicationLimit) {
   rlimit limit{};
   ASSERT_EQ(getrlimit(RLIMIT_FSIZE, &limit), 0);
   const char *kind = std::getenv("RJ_TEST_LIMIT");
-  limit.rlim_cur = kind && std::strcmp(kind, "zero") == 0 ? 0 : 2 * 1024 * 1024;
-  if (!kind || std::strcmp(kind, "soft") != 0)
+  limit.rlim_cur = kind && (std::strcmp(kind, "zero") == 0 || std::strcmp(kind, "soft-zero") == 0)
+                       ? 0
+                       : 2 * 1024 * 1024;
+  if (!kind || (std::strcmp(kind, "soft") != 0 && std::strcmp(kind, "soft-zero") != 0))
     limit.rlim_max = limit.rlim_cur;
   ASSERT_EQ(setrlimit(RLIMIT_FSIZE, &limit), 0);
 
@@ -64,6 +67,31 @@ TEST(HipFileSizeLimitTest, PreservesApplicationLimit) {
     EXPECT_EQ(result, source);
   }
   CHECK_HIP(hipFree(device));
+  if (const char *vmm = std::getenv("RJ_TEST_VMM"); vmm && std::strcmp(vmm, "1") == 0) {
+    hipMemAllocationProp property{};
+    property.type = hipMemAllocationTypePinned;
+    property.location.type = hipMemLocationTypeDevice;
+    property.location.id = 0;
+    property.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
+    size_t granularity = 0;
+    CHECK_HIP(hipMemGetAllocationGranularity(&granularity, &property,
+                                             hipMemAllocationGranularityMinimum));
+    const size_t allocation_size = (bytes + granularity - 1) / granularity * granularity;
+    hipMemGenericAllocationHandle_t allocation{}, imported{};
+    CHECK_HIP(hipMemCreate(&allocation, allocation_size, &property, 0));
+    int shared_fd = -1;
+    CHECK_HIP(hipMemExportToShareableHandle(&shared_fd, allocation,
+                                            hipMemHandleTypePosixFileDescriptor, 0));
+    EXPECT_EQ(lseek(shared_fd, 0, SEEK_END), allocation_size);
+    EXPECT_EQ(lseek64(shared_fd, 0, SEEK_END), allocation_size);
+    EXPECT_EQ(lseek(shared_fd, 0, SEEK_SET), 0);
+    CHECK_HIP(hipMemImportFromShareableHandle(
+        &imported, reinterpret_cast<void *>(static_cast<intptr_t>(shared_fd)),
+        hipMemHandleTypePosixFileDescriptor));
+    CHECK_HIP(hipMemRelease(imported));
+    CHECK_HIP(hipMemRelease(allocation));
+    close(shared_fd);
+  }
   CHECK_HIP(hipDeviceReset());
   EXPECT_EQ(file_size_signal, 0);
 
@@ -83,19 +111,30 @@ TEST(HipFileSizeLimitTest, PreservesApplicationLimit) {
   EXPECT_EQ(file_size_signal, 1);
   close(file);
 }
+TEST(HipFileSizeLimitTest, PreservesApplicationLimit) {
+  const char *phase = std::getenv("RJ_TEST_PHASE");
+  if (!phase || std::strcmp(phase, "fork") != 0) {
+    check_application_limit();
+    return;
+  }
+  rlimit limit{};
+  ASSERT_EQ(getrlimit(RLIMIT_FSIZE, &limit), 0);
+  limit.rlim_cur = 0;
+  ASSERT_EQ(setrlimit(RLIMIT_FSIZE, &limit), 0);
+  const pid_t child = fork();
+  ASSERT_GE(child, 0);
+  if (child == 0) {
+    check_application_limit();
+    _exit(::testing::Test::HasFailure() ? 1 : 0);
+  }
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+  ASSERT_TRUE(WIFEXITED(status));
+  EXPECT_EQ(WEXITSTATUS(status), 0);
+}
 } // namespace
 
 int main(int argc, char **argv) {
-  const char *phase = std::getenv("RJ_TEST_PHASE");
-  if (phase && std::strcmp(phase, "inherited") == 0 && !std::getenv("RJ_TEST_LIMIT_INHERITED")) {
-    // Re-exec so both the interposer constructor and its keeper inherit the
-    // finite hard limit, as when the shell starts rocjitsu under ulimit -f.
-    const rlimit limit{2 * 1024 * 1024, 2 * 1024 * 1024};
-    if (setrlimit(RLIMIT_FSIZE, &limit) != 0 || setenv("RJ_TEST_LIMIT_INHERITED", "1", 1) != 0)
-      return 2;
-    execv("/proc/self/exe", argv);
-    return 3;
-  }
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }

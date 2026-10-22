@@ -4,6 +4,7 @@
 #include "rocjitsu/kmd/linux/memory_backing.h"
 
 #include "rocjitsu/kmd/linux/libc_passthrough.h"
+#include "util/log.h"
 
 #include <atomic>
 #include <cerrno>
@@ -17,9 +18,12 @@
 #include <limits>
 #include <mutex>
 #include <new>
+#include <poll.h>
+#include <pthread.h>
 #include <sched.h>
 #include <string>
 #include <sys/epoll.h>
+#include <sys/eventfd.h>
 #include <sys/mman.h>
 #include <sys/prctl.h>
 #include <sys/resource.h>
@@ -238,7 +242,7 @@ Region *create_region(size_t size) {
 // The keeper has its own file limit. Prefer ordinary exportable files when
 // that limit permits; unlike the application, it never runs application code
 // that can lower the limit concurrently with sizing a file. An inherited hard
-// limit is handled by shared RAM below, without raising any limit.
+// limit is handled by shared RAM below, without changing application limits.
 int create_file(size_t size) {
   rlimit limit{};
   if (host_call(SYS_prlimit64, 0, RLIMIT_FSIZE, nullptr, &limit) != 0)
@@ -296,8 +300,27 @@ int create_token(int epoll, Region *region, int mode, uint64_t serial) {
   return sockets[1];
 }
 
+struct LeaseWatch {
+  int file;
+  int event;
+};
+
+void *watch_lease(void *argument) {
+  const auto watch = *static_cast<const LeaseWatch *>(argument);
+  struct flock lock {};
+  lock.l_type = F_WRLCK;
+  lock.l_whence = SEEK_SET;
+  // POSIX record locks belong to a process, not its open-file description.
+  // Forked children do not retain this lock when the owner closes it on exec.
+  while (host_call(SYS_fcntl, watch.file, F_SETLKW, &lock) < 0 && errno == EINTR) {
+  }
+  const uint64_t ready = 1;
+  host_call(SYS_write, watch.event, &ready, sizeof(ready));
+  return nullptr;
+}
+
 // Runs in a fresh executable, with no inherited application mappings or locks.
-[[noreturn]] void keep_regions(int listener, pid_t owner) {
+[[noreturn]] void keep_regions(int listener, int lease, int startup, pid_t owner) {
   host_call(SYS_prctl, PR_SET_NAME, "rj-memory", 0, 0, 0);
   // Avoid invoking application handlers in the keeper. The kernel closes its
   // sockets and drops its marked-for-removal attachments on termination.
@@ -315,18 +338,46 @@ int create_token(int epoll, Region *region, int mode, uint64_t serial) {
   sigemptyset(&mask);
   sigprocmask(SIG_SETMASK, &mask, nullptr);
 
+  // Only the helper changes its limits. A low application soft limit need not
+  // constrain metadata files or the number of simultaneously retained tokens.
+  for (const int resource : {RLIMIT_FSIZE, RLIMIT_NOFILE}) {
+    rlimit limit{};
+    if (host_call(SYS_prlimit64, 0, resource, nullptr, &limit) != 0)
+      host_call(SYS_exit_group, 1);
+    limit.rlim_cur = limit.rlim_max;
+    if (host_call(SYS_prlimit64, 0, resource, &limit, nullptr) != 0)
+      host_call(SYS_exit_group, 1);
+  }
+
   const int parent = host_call(SYS_pidfd_open, owner, 0);
   const int epoll = host_call(SYS_epoll_create1, EPOLL_CLOEXEC);
-  Token listener_event{}, parent_event{};
+  const int lease_eventfd = host_call(SYS_eventfd2, 0, EFD_CLOEXEC);
+  Token listener_event{}, parent_event{}, lease_event{};
   epoll_event event{};
   event.events = EPOLLIN;
   event.data.ptr = &listener_event;
-  if (parent < 0 || epoll < 0 ||
+  if (parent < 0 || epoll < 0 || lease_eventfd < 0 ||
       host_call(SYS_epoll_ctl, epoll, EPOLL_CTL_ADD, listener, &event) != 0)
     host_call(SYS_exit_group, 1);
   event.data.ptr = &parent_event;
   if (host_call(SYS_epoll_ctl, epoll, EPOLL_CTL_ADD, parent, &event) != 0)
     host_call(SYS_exit_group, 1);
+  event.data.ptr = &lease_event;
+  if (host_call(SYS_epoll_ctl, epoll, EPOLL_CTL_ADD, lease_eventfd, &event) != 0)
+    host_call(SYS_exit_group, 1);
+  LeaseWatch watch{lease, lease_eventfd};
+  pthread_t watcher;
+  const int started = pthread_create(&watcher, nullptr, watch_lease, &watch);
+  if (started != 0) {
+    const int error = -started;
+    send_descriptor(startup, &error, sizeof(error), -1);
+    host_call(SYS_exit_group, 1);
+  }
+  pthread_detach(watcher);
+  const int ready = getpid();
+  if (send_descriptor(startup, &ready, sizeof(ready), -1) != 0)
+    host_call(SYS_exit_group, 1);
+  close_fd(startup);
   size_t tokens = 0;
   uint64_t serial = 0;
   auto retire = [&](Token *token) {
@@ -350,10 +401,13 @@ int create_token(int epoll, Region *region, int mode, uint64_t serial) {
     }
     for (int index = 0; index < count; ++index) {
       auto *token = static_cast<Token *>(events[index].data.ptr);
-      if (token == &parent_event) {
+      if (token == &parent_event || token == &lease_event) {
+        if (!owner_alive)
+          continue;
         owner_alive = false;
         host_call(SYS_epoll_ctl, epoll, EPOLL_CTL_DEL, parent, nullptr);
         host_call(SYS_epoll_ctl, epoll, EPOLL_CTL_DEL, listener, nullptr);
+        host_call(SYS_epoll_ctl, epoll, EPOLL_CTL_DEL, lease_eventfd, nullptr);
         close_fd(parent);
         close_fd(listener);
         continue;
@@ -436,7 +490,8 @@ int create_token(int epoll, Region *region, int mode, uint64_t serial) {
   __builtin_unreachable();
 }
 
-int request_backing(int socket, size_t size, int mode, int sized_file = -1) {
+int request_backing(int socket, size_t size, int mode, int sized_file = -1,
+                    bool *disconnected = nullptr) {
   int reply[2];
   if (host_call(SYS_socketpair, AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, reply) != 0)
     return -1;
@@ -449,11 +504,15 @@ int request_backing(int socket, size_t size, int mode, int sized_file = -1) {
   if (result == 0)
     result = send_descriptor(socket, &request, sizeof(request), reply[1]);
   int error = result == 0 ? 0 : errno;
+  if (disconnected && (error == EPIPE || error == ECONNRESET))
+    *disconnected = true;
   close_fd(reply[1]);
   int descriptor = -1;
   if (result == 0) {
     int response = EIO;
     const long received = receive_descriptor(reply[0], &response, sizeof(response), descriptor);
+    if (disconnected && received != sizeof(response))
+      *disconnected = true;
     error = received < 0 ? errno : (received == sizeof(response) ? response : EIO);
     if (error == 0 && descriptor < 0)
       error = EIO;
@@ -486,28 +545,42 @@ std::string keeper_path() {
   return RJ_MEMORY_KEEPER_BUILD_PATH;
 }
 
-// The child executes only async-signal-safe syscalls before exec. In particular,
-// it must not use the C++ allocator, application atfork hooks, or stdio locks.
-[[noreturn]] void exec_keeper(int control, const char *path, const char *owner, rlim_t nofile) {
+// The bootstrap and its child execute only async-signal-safe syscalls. They
+// must not enter the C++ allocator, application atfork hooks, or stdio locks.
+[[noreturn]] void startup_failed(int channel, int error) {
+  const int result = -error;
+  send_descriptor(channel, &result, sizeof(result), -1);
+  host_call(SYS_exit_group, 1);
+  __builtin_unreachable();
+}
+
+[[noreturn]] void exec_keeper(int control, int lease, int startup, const char *path,
+                              const char *owner, rlim_t nofile) {
+  // Preserve the incoming descriptors before moving them into fixed slots.
+  const int saved_lease = host_call(SYS_fcntl, lease, F_DUPFD_CLOEXEC, 6);
+  const int saved_startup = host_call(SYS_fcntl, startup, F_DUPFD_CLOEXEC, 6);
+  if (saved_lease < 0 || saved_startup < 0)
+    startup_failed(startup, errno);
   if (control != 3) {
     if (host_call(SYS_dup3, control, 3, 0) < 0)
-      host_call(SYS_exit_group, 1);
+      startup_failed(saved_startup, errno);
   } else {
     host_call(SYS_fcntl, 3, F_SETFD, 0);
   }
+  if (host_call(SYS_dup3, saved_lease, 4, 0) < 0 || host_call(SYS_dup3, saved_startup, 5, 0) < 0)
+    startup_failed(saved_startup, errno);
   for (int fd = 0; fd < 3; ++fd)
     close_fd(fd);
-  if (host_call(SYS_close_range, 4u, UINT_MAX, 0u) != 0) {
-    for (uint64_t fd = 4; fd < nofile && fd <= INT_MAX; ++fd)
+  if (host_call(SYS_close_range, 6u, UINT_MAX, 0u) != 0) {
+    for (uint64_t fd = 6; fd < nofile && fd <= INT_MAX; ++fd)
       close_fd(static_cast<int>(fd));
   }
   char *arguments[] = {const_cast<char *>(path), const_cast<char *>(owner), nullptr};
-  // LD_PRELOAD and application configuration must not initialize a simulator
-  // inside the keeper. Its loader dependencies use the executable's RPATH.
+  // The helper links its C++ runtime statically. Application preload and loader
+  // configuration must not initialize a simulator inside the helper.
   char *environment[] = {nullptr};
   host_call(SYS_execve, path, arguments, environment);
-  host_call(SYS_exit_group, 1);
-  __builtin_unreachable();
+  startup_failed(5, errno);
 }
 
 class Keeper {
@@ -522,85 +595,175 @@ public:
 
   int allocate(size_t size, int sized_file = -1) {
     std::lock_guard lock(mutex_);
-    if (child_ < 0) {
-      const std::string path = keeper_path();
-      if (host_call(SYS_faccessat, AT_FDCWD, path.c_str(), X_OK) != 0)
-        return -1;
-      uint64_t nonce = 0;
-      long random_bytes;
-      do {
-        random_bytes = host_call(SYS_getrandom, &nonce, sizeof(nonce), 0);
-      } while (random_bytes < 0 && errno == EINTR);
-      if (random_bytes != sizeof(nonce)) {
-        if (random_bytes >= 0)
-          errno = EIO;
-        return -1;
+    for (unsigned attempt = 0; attempt < 2; ++attempt) {
+      if (!has_lease()) {
+        release_lease();
+        if (start() != 0)
+          return -1;
       }
-      address_.sun_family = AF_UNIX;
-      const int name_length = std::snprintf(address_.sun_path + 1, sizeof(address_.sun_path) - 1,
-                                            "rocjitsu-memory-%d-%016lx", owner, nonce);
-      length_ = offsetof(sockaddr_un, sun_path) + 1 + name_length;
-      const int listener = host_call(SYS_socket, AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
-      if (listener < 0)
+      const int socket = host_call(SYS_socket, AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
+      if (socket < 0)
         return -1;
-      if (host_call(SYS_bind, listener, &address_, length_) != 0 ||
-          host_call(SYS_listen, listener, SOMAXCONN) != 0) {
-        const int error = errno;
-        close_fd(listener);
-        errno = error;
-        return -1;
-      }
-      char owner_text[32];
-      std::snprintf(owner_text, sizeof(owner_text), "%d", owner);
-      rlimit nofile{};
-      if (host_call(SYS_prlimit64, 0, RLIMIT_NOFILE, nullptr, &nofile) != 0) {
-        const int error = errno;
-        close_fd(listener);
-        errno = error;
-        return -1;
-      }
-      // No exit signal: this implementation process must not appear in the
-      // application's ordinary waitpid(-1) calls or generate SIGCHLD.
-      // Do not expose this non-thread clone as a new application thread to GDB.
-      const long child = host_call(SYS_clone, CLONE_UNTRACED, nullptr, nullptr, nullptr, 0);
-      if (child == 0)
-        exec_keeper(listener, path.c_str(), owner_text, nofile.rlim_max);
+      int descriptor = -1;
+      bool disconnected = false;
+      if (host_call(SYS_connect, socket, &address_, length_) == 0)
+        descriptor = request_backing(socket, size, O_RDWR, sized_file, &disconnected);
+      else
+        disconnected = errno == ECONNREFUSED;
       const int error = errno;
-      close_fd(listener);
-      if (child < 0) {
+      close_fd(socket);
+      if (descriptor >= 0 || !disconnected || attempt != 0) {
         errno = error;
-        return -1;
+        return descriptor;
       }
-      child_ = child;
+      // Retry only when the helper transport was lost. Resource errors such as
+      // EMFILE must not forget a live helper and leak its process.
+      release_lease();
     }
-    // No persistent client descriptor: dup2/close_range in the application
-    // cannot overwrite the keeper connection or accidentally retain it on exec.
-    const int socket = host_call(SYS_socket, AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
-    if (socket < 0)
-      return -1;
-    int descriptor = -1;
-    if (host_call(SYS_connect, socket, &address_, length_) == 0)
-      descriptor = request_backing(socket, size, O_RDWR, sized_file);
-    const int error = errno;
-    close_fd(socket);
-    if (descriptor < 0) {
-      const auto reaped = host_call(SYS_wait4, child_, nullptr, WNOHANG | __WCLONE, nullptr);
-      if (reaped == child_ || (reaped < 0 && errno == ECHILD))
-        child_ = -1;
-    }
-    errno = error;
-    return descriptor;
+    __builtin_unreachable();
+  }
+
+  void release_lease() {
+    // close_range/dup2 may have closed or replaced the application's lease.
+    // Never close an unrelated descriptor that reused its number.
+    if (has_lease())
+      close_fd(lease_);
+    lease_ = -1;
+    lease_inode_ = 0;
   }
 
 private:
+  bool has_lease() const {
+    struct stat info {};
+    return lease_ >= 0 && lease_inode_ && host_call(SYS_fstat, lease_, &info) == 0 &&
+           info.st_ino == lease_inode_ && info.st_dev == lease_device_;
+  }
+
+  int start() {
+    const std::string path = keeper_path();
+    const int result = launch(path.c_str());
+    if (result != 0) {
+      const int error = errno;
+      release_lease();
+      if (!warned_) {
+        util::Logger::warn("Cannot start memory keeper '{}': {}", path, std::strerror(error));
+        warned_ = true;
+      }
+      errno = error;
+    }
+    return result;
+  }
+
+  int launch(const char *path) {
+    if (host_call(SYS_faccessat, AT_FDCWD, path, X_OK) != 0)
+      return -1;
+    uint64_t nonce = 0;
+    long random_bytes;
+    do {
+      random_bytes = host_call(SYS_getrandom, &nonce, sizeof(nonce), 0);
+    } while (random_bytes < 0 && errno == EINTR);
+    if (random_bytes != sizeof(nonce)) {
+      if (random_bytes >= 0)
+        errno = EIO;
+      return -1;
+    }
+    address_.sun_family = AF_UNIX;
+    const int name_length = std::snprintf(address_.sun_path + 1, sizeof(address_.sun_path) - 1,
+                                          "rocjitsu-memory-%d-%016lx", owner, nonce);
+    length_ = offsetof(sockaddr_un, sun_path) + 1 + name_length;
+    const int listener = host_call(SYS_socket, AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
+    if (listener < 0)
+      return -1;
+    int leases[2] = {-1, -1};
+    rlimit nofile{};
+    if (host_call(SYS_bind, listener, &address_, length_) != 0 ||
+        host_call(SYS_listen, listener, SOMAXCONN) != 0 ||
+        host_call(SYS_prlimit64, 0, RLIMIT_NOFILE, nullptr, &nofile) != 0 ||
+        host_call(SYS_socketpair, AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, leases) != 0) {
+      const int error = errno;
+      close_fd(listener);
+      errno = error;
+      return -1;
+    }
+    lease_ = host_call(SYS_memfd_create, "rocjitsu-owner", MFD_CLOEXEC);
+    struct flock lock {};
+    lock.l_type = F_WRLCK;
+    lock.l_whence = SEEK_SET;
+    struct stat info {};
+    if (lease_ < 0 || host_call(SYS_fstat, lease_, &info) != 0 ||
+        host_call(SYS_fcntl, lease_, F_SETLK, &lock) != 0) {
+      const int error = errno;
+      close_fd(lease_);
+      lease_ = -1;
+      close_fd(leases[0]);
+      close_fd(leases[1]);
+      close_fd(listener);
+      errno = error;
+      return -1;
+    }
+    lease_inode_ = info.st_ino;
+    lease_device_ = info.st_dev;
+    char owner_text[32];
+    std::snprintf(owner_text, sizeof(owner_text), "%d", owner);
+    // Only this short-lived bootstrap is our child. It never execs, so its
+    // zero exit signal survives and ordinary application waits cannot reap it.
+    const long bootstrap = host_call(SYS_clone, CLONE_UNTRACED, nullptr, nullptr, nullptr, 0);
+    if (bootstrap == 0) {
+      close_fd(leases[0]);
+      if (host_call(SYS_setsid) < 0)
+        startup_failed(leases[1], errno);
+      const long child =
+          host_call(SYS_clone, CLONE_UNTRACED | SIGCHLD, nullptr, nullptr, nullptr, 0);
+      if (child < 0)
+        startup_failed(leases[1], errno);
+      if (child == 0)
+        exec_keeper(listener, lease_, leases[1], path, owner_text, nofile.rlim_max);
+      host_call(SYS_exit_group, 0);
+      __builtin_unreachable();
+    }
+    const int error = errno;
+    close_fd(listener);
+    close_fd(leases[1]);
+    if (bootstrap < 0) {
+      close_fd(leases[0]);
+      errno = error;
+      return -1;
+    }
+    while (host_call(SYS_wait4, bootstrap, nullptr, __WCLONE, nullptr) < 0 && errno == EINTR) {
+    }
+    pollfd startup{leases[0], POLLIN, 0};
+    long ready;
+    do {
+      ready = host_call(SYS_poll, &startup, 1, 10000);
+    } while (ready < 0 && errno == EINTR);
+    if (ready <= 0) {
+      close_fd(leases[0]);
+      if (ready == 0)
+        errno = ETIMEDOUT;
+      return -1;
+    }
+    int response = 0, descriptor = -1;
+    const long received = receive_descriptor(leases[0], &response, sizeof(response), descriptor);
+    close_fd(leases[0]);
+    close_fd(descriptor);
+    if (received != sizeof(response) || response <= 0) {
+      errno = response < 0 ? -response : EIO;
+      return -1;
+    }
+    return 0;
+  }
+
   std::mutex mutex_;
   sockaddr_un address_{};
   socklen_t length_ = 0;
-  pid_t child_ = -1;
+  int lease_ = -1;
+  ino_t lease_inode_ = 0;
+  dev_t lease_device_ = 0;
+  bool warned_ = false;
 };
 
-// Intentionally process-lifetime: the keeper watches its owner's pidfd and
-// exits when both the owner and externally held descriptors are gone.
+// Intentionally process-lifetime: the keeper watches its owner pidfd and an
+// exec-sensitive lease, then exits once externally held tokens are gone.
 // A forked child never locks a mutex inherited from the parent's threads.
 std::atomic<Keeper *> keeper{};
 
@@ -618,6 +781,8 @@ Keeper *get_keeper() {
         return current;
       }
     }
+    if (current && current->owner != getpid())
+      current->release_lease();
     current = candidate;
   }
   return current;
@@ -625,7 +790,9 @@ Keeper *get_keeper() {
 
 } // namespace
 
-[[noreturn]] void run_keeper(int listener, pid_t owner) { keep_regions(listener, owner); }
+[[noreturn]] void run_keeper(int listener, int lease, int startup, pid_t owner) {
+  keep_regions(listener, lease, startup, owner);
+}
 
 int create(size_t size) {
   if (!size || size > static_cast<size_t>(std::numeric_limits<off_t>::max())) {
@@ -670,14 +837,32 @@ int stat(int fd, struct stat *result) {
   const auto fstat_fn = libc_passthrough().fstat_fn;
   if ((fstat_fn ? fstat_fn(fd, result) : host_call(SYS_fstat, fd, result)) != 0)
     return -1;
-  Identity identity;
-  if (identify(fd, identity)) {
-    result->st_dev = 0;
-    result->st_ino = identity.object;
-    result->st_mode = S_IFREG | 0600;
-    result->st_size = identity.size;
-  }
+  if (S_ISSOCK(result->st_mode))
+    stat_token(fd, result);
   return 0;
+}
+
+bool stat_token(int fd, struct stat *result) {
+  Identity identity;
+  if (!identify(fd, identity))
+    return false;
+  result->st_dev = 0;
+  result->st_ino = identity.object;
+  result->st_mode = S_IFREG | 0600;
+  result->st_size = identity.size;
+  return true;
+}
+
+bool seek_token(int fd, off_t offset, int whence, off_t &result) {
+  Identity identity;
+  if (!identify(fd, identity))
+    return false;
+  result = -1;
+  if (offset != 0 || (whence != SEEK_SET && whence != SEEK_END))
+    errno = EINVAL;
+  else
+    result = whence == SEEK_END ? static_cast<off_t>(identity.size) : 0;
+  return true;
 }
 
 int fcntl(int fd, int command, uintptr_t argument) {

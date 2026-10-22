@@ -53,6 +53,8 @@ public:
   int (*stat)(const char *, struct stat *) = nullptr;
   int (*lstat)(const char *, struct stat *) = nullptr;
   int (*access)(const char *, int) = nullptr;
+  off_t (*lseek_fn)(int, off_t, int) = nullptr;
+  off64_t (*lseek64_fn)(int, off64_t, int) = nullptr;
   int (*fstat_fn)(int, struct stat *) = nullptr;
   ssize_t (*readlink_fn)(const char *, char *, size_t) = nullptr;
   char *(*realpath_fn)(const char *, char *) = nullptr;

@@ -3906,10 +3906,10 @@ template <typename F> auto with_host_mapping_held(F &&syscall) {
 } // namespace
 
 template <typename Stat> static void finish_backing_stat(int fd, Stat *buf) {
-  if (!rocjitsu::memory_backing::contains(fd))
+  if (!S_ISSOCK(buf->st_mode))
     return;
   struct stat backing {};
-  if (rocjitsu::memory_backing::stat(fd, &backing) == 0) {
+  if (rocjitsu::memory_backing::stat_token(fd, &backing)) {
     buf->st_dev = backing.st_dev;
     buf->st_ino = backing.st_ino;
     buf->st_mode = backing.st_mode;
@@ -3918,6 +3918,22 @@ template <typename Stat> static void finish_backing_stat(int fd, Stat *buf) {
 }
 
 extern "C" {
+
+RJ_INTERPOSER_EXPORT off_t lseek(int fd, off_t offset, int whence) {
+  off_t result;
+  if (rocjitsu::memory_backing::seek_token(fd, offset, whence, result))
+    return result;
+  const auto real = rocjitsu::libc_passthrough().lseek_fn;
+  return real ? real(fd, offset, whence) : ::syscall(SYS_lseek, fd, offset, whence);
+}
+
+RJ_INTERPOSER_EXPORT off64_t lseek64(int fd, off64_t offset, int whence) {
+  off_t result;
+  if (rocjitsu::memory_backing::seek_token(fd, offset, whence, result))
+    return result;
+  const auto real = rocjitsu::libc_passthrough().lseek64_fn;
+  return real ? real(fd, offset, whence) : ::syscall(SYS_lseek, fd, offset, whence);
+}
 
 static std::string redirect_sysfs_path(const char *path);
 static std::string redirect_sys_dev_char(const char *path);

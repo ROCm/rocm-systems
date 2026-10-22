@@ -2603,8 +2603,8 @@ bool SimulatedKfd::allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va
     missing.emplace_back(cursor, static_cast<size_t>(end - cursor));
 
   for (const auto &[range_va, range_size] : missing) {
-    auto *host_ptr =
-        safe_mmap(nullptr, range_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    auto *host_ptr = safe_mmap(nullptr, range_size, PROT_READ | PROT_WRITE,
+                               MAP_SHARED | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
     if (host_ptr == MAP_FAILED)
       return false;
     std::memset(host_ptr, 0, range_size);

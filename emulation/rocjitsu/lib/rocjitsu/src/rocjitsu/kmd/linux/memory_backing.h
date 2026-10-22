@@ -18,13 +18,13 @@ namespace rocjitsu::memory_backing {
 /// All functions use errno on failure.
 int create(size_t size);
 
-/// @brief Populate a newly created metadata file using the keeper's startup limit.
+/// @brief Populate a newly created metadata file using the keeper's inherited hard limit.
 /// @details The caller owns this unpublished regular file; its offset stays at zero.
-/// Unlike GPU backing, metadata files must fit the keeper's inherited file limit.
+/// Unlike GPU backing, metadata files must fit the keeper's inherited hard file limit.
 int populate_file(int fd, const void *data, size_t size);
 
 /// @brief Entry point for the private memory keeper executable.
-[[noreturn]] void run_keeper(int listener, pid_t owner);
+[[noreturn]] void run_keeper(int listener, int lease, int startup, pid_t owner);
 
 /// @brief Recognize a shared-RAM descriptor without consulting process-local state.
 bool contains(int fd);
@@ -36,6 +36,14 @@ void *map(void *addr, size_t length, int prot, int flags, int fd, off_t offset);
 
 /// @brief Inspect RAM size and identity, or pass through for ordinary files.
 int stat(int fd, struct stat *result);
+/// @brief Overlay token metadata on an already obtained host stat result.
+/// @details Returns false for ordinary descriptors; callers can skip non-sockets.
+bool stat_token(int fd, struct stat *result);
+
+/// @brief Apply dma-buf seek semantics to a token, returning false for other fds.
+/// @details The result is -1 with errno set for unsupported token seek operations.
+bool seek_token(int fd, off_t offset, int whence, off_t &result);
+
 int fcntl(int fd, int command, uintptr_t argument = 0);
 
 /// @brief Reopen a backing with an independently retained access mode.

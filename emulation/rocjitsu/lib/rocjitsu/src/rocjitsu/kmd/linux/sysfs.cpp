@@ -9,6 +9,7 @@
 #include "rocjitsu/kmd/linux/libc_passthrough.h"
 #include "rocjitsu/kmd/linux/memory_backing.h"
 #include "rocjitsu/kmd/linux/rpc.h"
+#include "util/log.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "uapi/linux/kfd_sysfs.h"
@@ -18,6 +19,7 @@ RJ_DIAGNOSTIC_POP
 #include <charconv>
 #include <csignal>
 #include <cstdlib>
+#include <cstring>
 #include <fcntl.h>
 #include <filesystem>
 #include <fstream>
@@ -154,9 +156,12 @@ void Sysfs::write_file(const std::string &path, const std::string &content) {
   constexpr int flags = O_RDWR | O_CREAT | O_TRUNC | O_CLOEXEC;
   const int fd = libc.openat ? libc.openat(AT_FDCWD, path.c_str(), flags, 0666)
                              : ::open(path.c_str(), flags, 0666);
-  if (fd < 0)
+  if (fd < 0) {
+    util::Logger::warn("Cannot create topology file '{}': {}", path, std::strerror(errno));
     return;
-  (void)memory_backing::populate_file(fd, content.data(), content.size());
+  }
+  if (memory_backing::populate_file(fd, content.data(), content.size()) != 0)
+    util::Logger::warn("Cannot populate topology file '{}': {}", path, std::strerror(errno));
   if (libc.close)
     libc.close(fd);
   else

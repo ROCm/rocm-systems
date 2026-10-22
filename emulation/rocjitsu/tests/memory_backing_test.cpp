@@ -7,7 +7,9 @@
 
 #include <atomic>
 #include <cerrno>
+#include <csignal>
 #include <cstdio>
+#include <cstring>
 #include <fcntl.h>
 #include <poll.h>
 #include <sys/mman.h>
@@ -166,13 +168,11 @@ void check_DescriptorSurvivesCreatingProcessExit() {
     if (view == MAP_FAILED)
       _exit(3);
     view[0] = 0x9A;
-    char children_path[128];
-    std::snprintf(children_path, sizeof(children_path), "/proc/self/task/%d/children", getpid());
-    FILE *children = std::fopen(children_path, "r");
-    pid_t helper = -1;
-    if (!children || std::fscanf(children, "%d", &helper) != 1)
+    ucred peer{};
+    socklen_t peer_size = sizeof(peer);
+    if (getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &peer, &peer_size) != 0)
       _exit(4);
-    std::fclose(children);
+    pid_t helper = peer.pid;
     iovec data{&helper, sizeof(helper)};
     alignas(cmsghdr) char control[CMSG_SPACE(sizeof(fd))]{};
     msghdr message{};
@@ -323,6 +323,292 @@ TEST(MemoryBackingDeathTest, ConcurrentLimitChangesDoNotAffectAllocations) {
   ASSERT_EXIT(
       {
         check_concurrent_limits();
+        _exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
+pid_t token_keeper(int fd) {
+  ucred peer{};
+  socklen_t size = sizeof(peer);
+  return getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &peer, &size) == 0 ? peer.pid : -1;
+}
+
+volatile sig_atomic_t child_signal = 0;
+void observe_child_signal(int) { child_signal = 1; }
+
+void check_helper_lifecycle() {
+  const rlimit zero{};
+  ASSERT_EQ(setrlimit(RLIMIT_FSIZE, &zero), 0);
+  struct sigaction action {};
+  action.sa_handler = observe_child_signal;
+  sigemptyset(&action.sa_mask);
+  ASSERT_EQ(sigaction(SIGCHLD, &action, nullptr), 0);
+  const int fd = backing::create(kSize);
+  ASSERT_GE(fd, 0);
+  const pid_t helper = token_keeper(fd);
+  ASSERT_GT(helper, 0);
+  int status = 0;
+  EXPECT_EQ(waitpid(-1, &status, WNOHANG), -1);
+  EXPECT_EQ(errno, ECHILD);
+  EXPECT_EQ(child_signal, 0);
+
+  rlimit original{}, limited{};
+  ASSERT_EQ(getrlimit(RLIMIT_NOFILE, &original), 0);
+  limited = original;
+  limited.rlim_cur = 5;
+  ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &limited), 0);
+  EXPECT_EQ(backing::create(kSize), -1);
+  EXPECT_EQ(errno, EMFILE);
+  ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &original), 0);
+  int next = backing::create(kSize);
+  ASSERT_GE(next, 0);
+  EXPECT_EQ(token_keeper(next), helper);
+  close(next);
+
+  const int pidfd = syscall(SYS_pidfd_open, helper, 0);
+  ASSERT_GE(pidfd, 0);
+  ASSERT_EQ(kill(helper, SIGKILL), 0);
+  pollfd exited{pidfd, POLLIN, 0};
+  ASSERT_EQ(poll(&exited, 1, 2000), 1);
+  close(pidfd);
+  close(fd);
+  EXPECT_EQ(waitpid(-1, &status, WNOHANG), -1);
+  EXPECT_EQ(errno, ECHILD);
+  EXPECT_EQ(child_signal, 0);
+  next = backing::create(kSize);
+  ASSERT_GE(next, 0) << strerror(errno);
+  EXPECT_NE(token_keeper(next), helper);
+  close(next);
+}
+
+TEST(MemoryBackingDeathTest, HelperDoesNotChangeChildWaitsAndRecoversAfterFailure) {
+  ASSERT_EXIT(
+      {
+        check_helper_lifecycle();
+        _exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
+void check_group_signal() {
+  ASSERT_GE(setsid(), 0);
+  ASSERT_NE(signal(SIGINT, SIG_IGN), SIG_ERR);
+  const rlimit zero{};
+  ASSERT_EQ(setrlimit(RLIMIT_FSIZE, &zero), 0);
+  const int fd = backing::create(kSize);
+  ASSERT_GE(fd, 0);
+  ASSERT_EQ(kill(0, SIGINT), 0);
+  void *view = backing::map(nullptr, kSize, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+  ASSERT_NE(view, MAP_FAILED);
+  const int reopened = backing::reopen(fd, O_RDONLY);
+  ASSERT_GE(reopened, 0);
+  const int next = backing::create(kSize);
+  ASSERT_GE(next, 0);
+  EXPECT_EQ(token_keeper(next), token_keeper(fd));
+  close(next);
+  close(reopened);
+  close(fd);
+  munmap(view, kSize);
+}
+
+TEST(MemoryBackingDeathTest, GroupSignalsPreserveUnmappedTokens) {
+  ASSERT_EXIT(
+      {
+        check_group_signal();
+        _exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
+void check_lease_replacement() {
+  const rlimit zero{};
+  ASSERT_EQ(setrlimit(RLIMIT_FSIZE, &zero), 0);
+  int fd = backing::create(kSize);
+  ASSERT_GE(fd, 0);
+  const pid_t first_helper = token_keeper(fd);
+  int lease = -1;
+  for (int candidate = 3; candidate < 256; ++candidate) {
+    char path[64], target[128]{};
+    std::snprintf(path, sizeof(path), "/proc/self/fd/%d", candidate);
+    const auto length = readlink(path, target, sizeof(target) - 1);
+    if (length > 0 && std::strstr(target, "memfd:rocjitsu-owner")) {
+      lease = candidate;
+      break;
+    }
+  }
+  ASSERT_GE(lease, 0);
+  const int replacement = syscall(SYS_memfd_create, "lease-replacement", MFD_CLOEXEC);
+  ASSERT_GE(replacement, 0);
+  struct stat before {
+  }, after{};
+  ASSERT_EQ(fstat(replacement, &before), 0);
+  ASSERT_EQ(dup2(replacement, lease), lease);
+  close(replacement);
+  const int next = backing::create(kSize);
+  ASSERT_GE(next, 0);
+  EXPECT_NE(token_keeper(next), first_helper);
+  ASSERT_EQ(fstat(lease, &after), 0);
+  EXPECT_EQ(before.st_ino, after.st_ino);
+  // Closing the owner's lease must not invalidate separately held tokens.
+  const int alias = backing::reopen(fd, O_RDONLY);
+  ASSERT_GE(alias, 0);
+  void *view = backing::map(nullptr, kSize, PROT_READ, MAP_SHARED, alias, 0);
+  ASSERT_NE(view, MAP_FAILED);
+  munmap(view, kSize);
+  close(alias);
+  close(next);
+  close(fd);
+  close(lease);
+}
+
+TEST(MemoryBackingDeathTest, ReplacedLeasePreservesOtherDescriptorsAndTokens) {
+  ASSERT_EXIT(
+      {
+        check_lease_replacement();
+        _exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
+void check_exec_retirement() {
+  int control[2], idle_lifetime[2];
+  ASSERT_EQ(socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, control), 0);
+  ASSERT_EQ(pipe2(idle_lifetime, O_CLOEXEC), 0);
+  const pid_t child = fork();
+  ASSERT_GE(child, 0);
+  if (child == 0) {
+    close(control[0]);
+    close(idle_lifetime[1]);
+    const rlimit zero{};
+    if (setrlimit(RLIMIT_FSIZE, &zero) != 0)
+      _exit(1);
+    const int fd = backing::create(kSize);
+    const pid_t helper = token_keeper(fd);
+    if (fd < 0 || helper <= 0)
+      _exit(2);
+    close(fd);
+    // This child keeps the inherited lease descriptor while its parent execs.
+    // A socket-only lease would retain the helper until this child also exits.
+    const pid_t idle = fork();
+    if (idle < 0)
+      _exit(3);
+    if (idle == 0) {
+      close(control[1]);
+      char done;
+      _exit(read(idle_lifetime[0], &done, 1) == 0 ? 0 : 1);
+    }
+    close(idle_lifetime[0]);
+    const pid_t children[] = {helper, idle};
+    if (write(control[1], children, sizeof(children)) != sizeof(children))
+      _exit(4);
+    char go;
+    if (read(control[1], &go, 1) != 1)
+      _exit(5);
+    execl("/bin/sleep", "sleep", "5", nullptr);
+    _exit(6);
+  }
+  close(control[1]);
+  close(idle_lifetime[0]);
+  pid_t children[2]{};
+  ASSERT_EQ(read(control[0], children, sizeof(children)), sizeof(children));
+  const int pidfd = syscall(SYS_pidfd_open, children[0], 0);
+  const int idle_pidfd = syscall(SYS_pidfd_open, children[1], 0);
+  ASSERT_GE(pidfd, 0);
+  ASSERT_GE(idle_pidfd, 0);
+  ASSERT_EQ(write(control[0], "x", 1), 1);
+  close(control[0]);
+  pollfd exited{pidfd, POLLIN, 0};
+  EXPECT_EQ(poll(&exited, 1, 2000), 1) << "helper survived its owner's exec";
+  close(pidfd);
+  pollfd idle_exited{idle_pidfd, POLLIN, 0};
+  EXPECT_EQ(poll(&idle_exited, 1, 0), 0) << "forked descriptor holder must still be alive";
+  close(idle_lifetime[1]);
+  EXPECT_EQ(poll(&idle_exited, 1, 2000), 1);
+  close(idle_pidfd);
+  int status = 0;
+  EXPECT_EQ(waitpid(child, &status, WNOHANG), 0) << "owner must still be alive";
+  kill(child, SIGKILL);
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+}
+
+TEST(MemoryBackingDeathTest, ExecRetiresUnusedHelperWhileOwnerLives) {
+  ASSERT_EXIT(
+      {
+        check_exec_retirement();
+        _exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
+void check_nofile_headroom() {
+  rlimit original{};
+  ASSERT_EQ(getrlimit(RLIMIT_NOFILE, &original), 0);
+  ASSERT_GE(original.rlim_max, 256);
+  rlimit limited = original;
+  limited.rlim_cur = 64;
+  ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &limited), 0);
+  const rlimit zero{};
+  ASSERT_EQ(setrlimit(RLIMIT_FSIZE, &zero), 0);
+  std::vector<int> descriptors{backing::create(kSize)};
+  ASSERT_GE(descriptors.front(), 0);
+  ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &original), 0);
+  for (unsigned count = 1; count < 96; ++count) {
+    const int fd = backing::create(kSize);
+    ASSERT_GE(fd, 0) << count << ": " << strerror(errno);
+    EXPECT_EQ(token_keeper(fd), token_keeper(descriptors.front()));
+    descriptors.push_back(fd);
+  }
+  for (const int fd : descriptors)
+    close(fd);
+}
+
+TEST(MemoryBackingDeathTest, HelperUsesHardDescriptorLimit) {
+  ASSERT_EXIT(
+      {
+        check_nofile_headroom();
+        _exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
+TEST(MemoryBackingDeathTest, StartupFailureNamesHelper) {
+  if (getuid() == 0)
+    GTEST_SKIP() << "RLIMIT_NPROC does not constrain root";
+  ASSERT_EXIT(
+      {
+        const rlimit zero{};
+        if (setrlimit(RLIMIT_NPROC, &zero) != 0)
+          _exit(2);
+        const int fd = backing::create(kSize);
+        _exit(fd == -1 && errno == EAGAIN ? 0 : 1);
+      },
+      ::testing::ExitedWithCode(0), "Cannot start memory keeper.*Resource temporarily unavailable");
+}
+
+void check_seek_contract() {
+  const rlimit zero{};
+  ASSERT_EQ(setrlimit(RLIMIT_FSIZE, &zero), 0);
+  const int fd = backing::create(kSize);
+  ASSERT_GE(fd, 0);
+  off_t result = -1;
+  EXPECT_TRUE(backing::seek_token(fd, 0, SEEK_END, result));
+  EXPECT_EQ(result, kSize);
+  EXPECT_TRUE(backing::seek_token(fd, 0, SEEK_SET, result));
+  EXPECT_EQ(result, 0);
+  EXPECT_TRUE(backing::seek_token(fd, 1, SEEK_SET, result));
+  EXPECT_EQ(result, -1);
+  EXPECT_EQ(errno, EINVAL);
+  EXPECT_TRUE(backing::seek_token(fd, 0, SEEK_CUR, result));
+  EXPECT_EQ(result, -1);
+  EXPECT_EQ(errno, EINVAL);
+  close(fd);
+}
+
+TEST(MemoryBackingDeathTest, TokenSupportsDmaBufSeekContract) {
+  ASSERT_EXIT(
+      {
+        check_seek_contract();
         _exit(::testing::Test::HasFailure() ? 1 : 0);
       },
       ::testing::ExitedWithCode(0), "");

@@ -8474,6 +8474,20 @@ TEST_F(KfdIoctlCdna5Test, ScratchGrowthPreservesSpillsFromOverlappingDispatches)
               amdgpu::VmAccessOutcome::Complete);
   }
 
+  // Exercise the actual driver-owned scratch mapping across fork. Private
+  // anonymous backing would copy this store instead of sharing it with us.
+  const pid_t child = fork();
+  ASSERT_GE(child, 0);
+  if (child == 0) {
+    spill_pages.front()[0] ^= 0xFF;
+    _exit(0);
+  }
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+  ASSERT_TRUE(WIFEXITED(status));
+  ASSERT_EQ(WEXITSTATUS(status), 0);
+  EXPECT_EQ(spill_pages.front()[0], static_cast<uint8_t>(kSentinel ^ 0xFF));
+
   for (uint32_t i = 0; i < cps.size(); ++i)
     EXPECT_TRUE(cps[i]->unregister_queue_registration(registrations[i]));
   soc_->set_plugin_group(nullptr);
