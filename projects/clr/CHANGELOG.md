@@ -18,7 +18,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ### Resolved issues
 
-* Fixed a regression where HIP applications on MI300A and other APUs failed at the first stream creation, `hipMemcpy`, `hipMemset`, or kernel launch with out-of-memory or invalid-argument errors after device-memory AQL rings were enabled by default (`DEBUG_CLR_AQL_DEV_QUEUE=1`). Large BAR now requires a real CPU link and a discrete agent, so APUs keep system-memory rings. WSL/Windows still uses CPU access to the GPU pool for discrete GPUs, because that path does not report link hops the way KFD does. Workaround before the fix: `DEBUG_CLR_AQL_DEV_QUEUE=0`.
+* Resolved a regression on MI300A and other APUs that could cause the first stream creation, `hipMemcpy`, `hipMemset`, or kernel launch to fail with out-of-memory or invalid-argument errors. The runtime now correctly uses system-memory AQL rings on APUs, which share memory with the host and do not provide a discrete device-memory path.
 * Resolved a memory leak in `VirtualGPU::ManagedBuffer` that could occur during stream creation when signal initialization failed. The runtime now properly cleans up partially created resources on error paths.
 * Resolved an issue in `hipLaunchKernel` where invalid or unloaded kernel handles could cause a segmentation fault. Invalid handles are now properly validated and return an appropriate error.
 * A registered `__device__` global that is absent from the loaded code object no longer aborts the process. Symbol lookup now returns `hipErrorInvalidSymbol` from the runtime's variable materialization path (`hipGetSymbolAddress`, `hipLibraryGetGlobal`, and related entry points). `hipModuleGetGlobal` still reports `hipErrorNotFound` for a missing name.
