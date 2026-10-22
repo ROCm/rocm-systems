@@ -2766,8 +2766,11 @@ void DsCondxchg32RtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsGwsSemaReleaseAllDs::execute_impl(amdgpu::Wavefront &wf) {
-  if (!inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (!inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::InvalidInstructionEncoding);
+    return;
+  }
   uint64_t exec = wf.exec();
   if (exec) {
     uint32_t rid =
@@ -2784,8 +2787,11 @@ void DsGwsSemaReleaseAllDs::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsGwsInitDs::execute_impl(amdgpu::Wavefront &wf) {
-  if (!inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (!inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::InvalidInstructionEncoding);
+    return;
+  }
   uint64_t exec = wf.exec();
   if (exec) {
     uint32_t rid =
@@ -2806,8 +2812,11 @@ void DsGwsInitDs::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsGwsSemaVDs::execute_impl(amdgpu::Wavefront &wf) {
-  if (!inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (!inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::InvalidInstructionEncoding);
+    return;
+  }
   uint64_t exec = wf.exec();
   if (exec) {
     uint32_t rid =
@@ -2824,8 +2833,11 @@ void DsGwsSemaVDs::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsGwsSemaBrDs::execute_impl(amdgpu::Wavefront &wf) {
-  if (!inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (!inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::InvalidInstructionEncoding);
+    return;
+  }
   uint64_t exec = wf.exec();
   if (exec) {
     uint32_t rid =
@@ -2846,8 +2858,11 @@ void DsGwsSemaBrDs::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsGwsSemaPDs::execute_impl(amdgpu::Wavefront &wf) {
-  if (!inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (!inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::InvalidInstructionEncoding);
+    return;
+  }
   uint64_t exec = wf.exec();
   if (exec) {
     uint32_t rid =
@@ -2864,8 +2879,11 @@ void DsGwsSemaPDs::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsGwsBarrierDs::execute_impl(amdgpu::Wavefront &wf) {
-  if (!inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (!inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::InvalidInstructionEncoding);
+    return;
+  }
   uint64_t exec = wf.exec();
   if (exec) {
     uint32_t rid =

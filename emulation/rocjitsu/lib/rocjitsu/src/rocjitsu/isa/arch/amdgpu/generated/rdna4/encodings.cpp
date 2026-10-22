@@ -1443,7 +1443,10 @@ bool Vop3::has_dpp16() {
   return (((inst_.src0 == 250) && (inst_.src1 != 255)) && (inst_.src2 != 255));
 }
 
-bool Vop3p::supports_dpp_opcode() const { return (inst_.op >= 32 && inst_.op <= 34); }
+bool Vop3p::supports_dpp_opcode() const {
+  return inst_.op == 19 || inst_.op == 26 || (inst_.op >= 32 && inst_.op <= 34) ||
+         (inst_.op >= 36 && inst_.op <= 39);
+}
 
 bool Vop3p::has_encoded_dpp() const {
   return supports_dpp_opcode() && inst_.src0 == amdgpu::SRC_DPP;

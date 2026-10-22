@@ -178,6 +178,9 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VDot4I32Iu8Vop3p : public Vop3p {
@@ -228,6 +231,9 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VPkMinNumF16Vop3p : public Vop3p {
@@ -315,6 +321,9 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VDot4F32Bf8Fp8Vop3p : public Vop3p {
@@ -325,6 +334,9 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VDot4F32Fp8Fp8Vop3p : public Vop3p {
@@ -335,6 +347,9 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VDot4F32Bf8Bf8Vop3p : public Vop3p {
@@ -345,6 +360,9 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VWmmaF3216x16x16F16Vop3p : public Vop3p {
