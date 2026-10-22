@@ -13373,11 +13373,6 @@ class CodeGenerator:
                                             f'{_legacy_dpp_write_mask_lines("dpp_write_mask_")}'
                                             '  }\n'
                                         )
-                                elif _dpp_struct:
-                                    _dpp_preamble += (
-                                        '  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))\n'
-                                        '    throw util::UnimplementedInst(mnemonic());\n'
-                                    )
                             elif _modern_dpp_compare:
                                 _dpp_preamble += (
                                     '  uint64_t dpp_old_exec_ = wf.exec();\n'
@@ -13415,27 +13410,24 @@ class CodeGenerator:
                             # DPP/SDWA stage the named architectural source into
                             # an execution-local proxy. Swap-style ops
                             # (vector_swap / permlane*_swap) read every output;
-                            # DPP on those lane-crossing operations is not a
-                            # modeled/legal combination, so fail loudly.
+                            # they do not support DPP extensions, so keep their
+                            # architectural sources unstaged.
                             _reads_all_outputs = (
                                 sem is not None
                                 and sem.semantic_class in self._READS_ALL_OUTPUT_CLASSES
                             )
+                            assert not (
+                                _reads_all_outputs
+                                and (_supports_dpp_encoding or _supports_dpp8)
+                            ), f'{inst.name}: reads-all-output semantics do not support DPP/DPP8'
                             _semantic_stages_src0 = (
                                 sem is not None
                                 and sem.semantic_class == 'vector_movrel'
                                 and sem.operation in ('src', 'srcdst', 'srcdst2')
                             )
-                            if _reads_all_outputs and (
-                                _supports_dpp_encoding or _supports_dpp8
-                            ):
-                                _dpp_preamble += (
-                                    '  if (inst_.src0 == amdgpu::SRC_DPP ||\n'
-                                    '      amdgpu::dpp::is_src_dpp8(inst_.src0))\n'
-                                    '    throw util::UnimplementedInst(mnemonic());\n'
-                                )
-                            elif (
-                                not _semantic_stages_src0
+                            if (
+                                not _reads_all_outputs
+                                and not _semantic_stages_src0
                                 and _dpp_struct
                                 and _supports_dpp_encoding
                                 and _src0_name
