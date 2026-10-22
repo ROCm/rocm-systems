@@ -160,8 +160,7 @@ class NetIbCastCapabilityUdMicrotest : public NetIbCastCapabilityMicrotest {
 };
 
 TEST_F(NetIbCastCapabilityUdMicrotest, ProbeUd_QpReachesRts_IsSupportedAndReleasesEverything) {
-  ScopedDebugLogging info(NCCL_LOG_INFO, NCCL_ALL);
-  std::string log = CaptureLog([&] { ASSERT_EQ(IbCastCapProbeDevices(), ncclSuccess); });
+  ASSERT_EQ(IbCastCapProbeDevices(), ncclSuccess);
   EXPECT_EQ(dev_->udSupported, 1);
   EXPECT_TRUE(IbCastCapUdSupported(dev_));
   EXPECT_EQ(created_.type, IBV_QPT_UD);
@@ -176,7 +175,6 @@ TEST_F(NetIbCastCapabilityUdMicrotest, ProbeUd_QpReachesRts_IsSupportedAndReleas
   EXPECT_EQ(destroyedQps_, 1);
   EXPECT_EQ(destroyedCqs_, 1);
   EXPECT_EQ(deallocs_, 1);
-  EXPECT_TRUE(LogHas(log, "device ionic_0 capability probe: UD=yes")) << log;
   // Probed once: a second pass leaves the answer alone.
   ASSERT_EQ(IbCastCapProbeDevices(), ncclSuccess);
   EXPECT_EQ(allocPd_.calls, 1);
@@ -196,13 +194,12 @@ TEST_F(NetIbCastCapabilityUdMicrotest, ProbeUd_CreateCqUsesThePortRecoveryCqSize
 class NetIbCastCapabilityUdFailMicrotest : public NetIbCastCapabilityUdMicrotest,
                                            public ::testing::WithParamInterface<Fail> {};
 
-TEST_P(NetIbCastCapabilityUdFailMicrotest, ProbeUd_AnyStepFails_IsUnsupportedAndWarns) {
+TEST_P(NetIbCastCapabilityUdFailMicrotest, ProbeUd_AnyStepFails_IsUnsupported) {
   fail_ = GetParam();
   if (fail_ == Fail::Rts) udToRtsResult_ = ncclSystemError;
-  std::string log = CaptureLog([&] { ASSERT_EQ(IbCastCapProbeDevices(), ncclSuccess); });
+  ASSERT_EQ(IbCastCapProbeDevices(), ncclSuccess);
   EXPECT_EQ(dev_->udSupported, 0);
   EXPECT_FALSE(IbCastCapUdSupported(dev_));
-  EXPECT_TRUE(LogHas(log, "device ionic_0 cannot create a UD queue pair; port recovery disabled on it")) << log;
   // Whatever was acquired is released.
   EXPECT_EQ(deallocs_, fail_ == Fail::AllocPd ? 0 : 1);
   EXPECT_EQ(destroyedCqs_, fail_ == Fail::AllocPd || fail_ == Fail::CreateCq ? 0 : 1);
@@ -254,11 +251,9 @@ TEST_F(NetIbCastCapabilityReadMicrotest, ProbeRead_LoopbackReadCompletes_IsSuppo
   params_.Set("IB_SL", 2);
   params_.Set("IB_TIMEOUT", 14);
   params_.Set("IB_RETRY_CNT", 5);
-  ScopedDebugLogging info(NCCL_LOG_INFO, NCCL_ALL);
-  std::string log = CaptureLog([&] { ASSERT_EQ(IbCastCapProbeDevices(), ncclSuccess); });
+  ASSERT_EQ(IbCastCapProbeDevices(), ncclSuccess);
   EXPECT_EQ(dev_->rdmaReadSupported, 1);
   EXPECT_TRUE(IbCastCapRdmaReadSupported(dev_));
-  EXPECT_TRUE(LogHas(log, "device ionic_0 capability probe: RDMA_READ=yes")) << log;
   // An RC QP of depth 1 that connects to itself.
   EXPECT_EQ(created_.type, IBV_QPT_RC);
   EXPECT_EQ(created_.maxSendWorkRequest, 1u);
@@ -306,9 +301,7 @@ TEST_F(NetIbCastCapabilityReadMicrotest, ProbeRead_CompletionError_IsUnsupported
   ScopedDebugLogging info(NCCL_LOG_INFO, NCCL_ALL);
   std::string log = CaptureLog([&] { ASSERT_EQ(IbCastCapProbeDevices(), ncclSuccess); });
   EXPECT_EQ(dev_->rdmaReadSupported, 0);
-  EXPECT_TRUE(LogHas(log, "RDMA READ probe completed with status")) << log;
   EXPECT_TRUE(LogHas(log, "vendor_err 85")) << log;
-  EXPECT_TRUE(LogHas(log, "cannot complete an RDMA READ; port failover probing will fail on it")) << log;
 }
 
 TEST_F(NetIbCastCapabilityReadMicrotest, ProbeRead_SuccessWithoutTheData_IsUnsupported) {

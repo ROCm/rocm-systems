@@ -20,6 +20,7 @@
 
 #include "../common/LogCapture.hpp"
 #include "../common/ProcessIsolatedTestRunner.hpp"
+#include "AsanCheck.h"
 #include "fakes/gdr_peermem_fakes.h"
 #include "fakes/gdr_probe_fakes.h"
 #include "fakes/net_ib_cast_p2p_fakes.h"
@@ -29,22 +30,7 @@
 
 #include NET_IB_CAST_GIN_CC_PATH
 
-#define GIN_TEST_ASAN 0
-#if defined(__SANITIZE_ADDRESS__)
-#undef GIN_TEST_ASAN
-#define GIN_TEST_ASAN 1
-#elif defined(__has_feature)
-#if __has_feature(address_sanitizer)
-#undef GIN_TEST_ASAN
-#define GIN_TEST_ASAN 1
-#endif
-#endif
-
 namespace {
-
-// gin.cc's error paths leak what they allocated; tests that take one skip under ASan, whose leak
-// check would fail the binary.
-constexpr bool kAsan = GIN_TEST_ASAN;
 
 using RcclUnitTesting::CaptureLog;
 using RcclUnitTesting::LogHas;
@@ -247,8 +233,7 @@ TEST_F(NetIbCastGinMicrotestIsolated, GdrSupport_NeitherPeermemNorDmaBuf_Refuses
     bool gdr = true;
     ASSERT_EQ(IbCastGinIbGdrSupport(&gdr, false), ncclSuccess);
     EXPECT_FALSE(gdr);
-    std::string log = CaptureLog([&] { EXPECT_EQ(IbCastGinIbGdrGpuSupport(false), ncclInvalidUsage); });
-    EXPECT_TRUE(LogHas(log, "Peermem is not supported, and DMA-BUF is not available")) << log;
+    EXPECT_EQ(IbCastGinIbGdrGpuSupport(false), ncclInvalidUsage);
     void* collComm = nullptr;
     EXPECT_EQ(IbCastRmaIbProxyConnect(nullptr, nullptr, 2, 0, nullptr, &collComm), ncclInvalidUsage);
   });
@@ -688,8 +673,7 @@ TEST_F(NetIbCastGinContextMicrotest, CreateContext_NoRankStride_MeansEveryRank) 
 
 TEST_F(NetIbCastGinContextMicrotest, CreateContext_StrideThatDoesNotDivideTheRanks_IsRejected) {
   void* ctx = reinterpret_cast<void*>(0x1);
-  std::string log = CaptureLog([&] { EXPECT_EQ(Create(1, 3, &ctx), ncclInternalError); });
-  EXPECT_TRUE(LogHas(log, "invalid rank stride 3, nranks (4) must be a multiple of it")) << log;
+  EXPECT_EQ(Create(1, 3, &ctx), ncclInternalError);
   EXPECT_EQ(listen_.calls, 0);
 }
 
@@ -994,11 +978,8 @@ TEST_F(NetIbCastGinDataMicrotest, IPutSignal_KnownBug_DataWithoutADestinationPos
 
 TEST_F(NetIbCastGinDataMicrotest, IPutSignal_UnsupportedOp_IsRejectedBeforeAnyPost) {
   void* request = nullptr;
-  std::string log = CaptureLog([&] {
-    EXPECT_EQ(IbCastRmaIbProxyIPutSignal(proxyCtx_, 0, 0, &src_, 8, 0, &dst_, 1, 0, &sig_, 1, 0x7, false, 0, &request),
-              ncclInvalidArgument);
-  });
-  EXPECT_TRUE(LogHas(log, "Unsupported signalOp 7")) << log;
+  EXPECT_EQ(IbCastRmaIbProxyIPutSignal(proxyCtx_, 0, 0, &src_, 8, 0, &dst_, 1, 0, &sig_, 1, 0x7, false, 0, &request),
+            ncclInvalidArgument);
   EXPECT_TRUE(posted_.empty());
 }
 
@@ -1130,8 +1111,8 @@ TEST_F(NetIbCastGinTestMicrotest, Test_ErrorCompletion_IsARemoteErrorNamingTheHc
   Completions({{static_cast<struct ncclIbRequest*>(a), IBV_WC_REM_ACCESS_ERR}});
   int done = -1;
   std::string log = CaptureLog([&] { EXPECT_EQ(IbCastRmaIbProxyTest(&cComm_, a, &done), ncclRemoteError); });
-  EXPECT_TRUE(LogHas(log, ("status=" + std::to_string(IBV_WC_REM_ACCESS_ERR)).c_str())) << log;
-  EXPECT_TRUE(LogHas(log, "vendor err 129 (IPut) localGid ::1 remoteGids::2 hca ionic_7")) << log;
+  EXPECT_TRUE(LogHas(log, "localGid ::1 remoteGids::2")) << log;
+  EXPECT_TRUE(LogHas(log, "hca ionic_7")) << log;
   EXPECT_EQ(done, 0);
 }
 

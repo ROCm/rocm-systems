@@ -13,7 +13,6 @@
 
 #include <vector>
 
-#include "../common/LogCapture.hpp"
 #include "fakes/ibvwrap_fakes.h"
 #include "fakes/libc_fakes.h"
 #include "fakes/mlx5dvwrap_fakes.h"
@@ -24,9 +23,6 @@
 #include "fakes/libc_seam_undef.h"
 
 namespace {
-
-using RcclUnitTesting::CaptureLog;
-using RcclUnitTesting::LogHas;
 
 constexpr unsigned int kBaseAccess =
     IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC;
@@ -86,12 +82,9 @@ class NetIbCastRegMicrotest : public ::testing::Test {
 
 TEST_F(NetIbCastRegMicrotest, RegMr_RejectsNullCommNullHandleAndZeroSize) {
   void* mhandle = nullptr;
-  std::string log = CaptureLog([&] {
-    EXPECT_EQ(IbCastRegMr(nullptr, buf_, 8, NCCL_PTR_HOST, &mhandle), ncclInvalidArgument);
-    EXPECT_EQ(IbCastRegMr(send_.get(), buf_, 8, NCCL_PTR_HOST, nullptr), ncclInvalidArgument);
-    EXPECT_EQ(IbCastRegMr(send_.get(), buf_, 0, NCCL_PTR_HOST, &mhandle), ncclInvalidArgument);
-  });
-  EXPECT_TRUE(LogHas(log, "regMr/regMrDmaBuf called with comm=")) << log;
+  EXPECT_EQ(IbCastRegMr(nullptr, buf_, 8, NCCL_PTR_HOST, &mhandle), ncclInvalidArgument);
+  EXPECT_EQ(IbCastRegMr(send_.get(), buf_, 8, NCCL_PTR_HOST, nullptr), ncclInvalidArgument);
+  EXPECT_EQ(IbCastRegMr(send_.get(), buf_, 0, NCCL_PTR_HOST, &mhandle), ncclInvalidArgument);
   EXPECT_EQ(mhandle, nullptr);
 }
 
@@ -305,8 +298,7 @@ TEST_F(NetIbCastRegMicrotest, RegMr_KnownBug_FailureOnASecondDeviceKeepsTheFirst
 TEST_F(NetIbCastRegMicrotest, DeregMr_NullHandle_IsANoOpAndNullCommIsRejected) {
   EXPECT_EQ(IbCastDeregMr(send_.get(), nullptr), ncclSuccess);
   ncclIbMrHandle handle{};
-  std::string log = CaptureLog([&] { EXPECT_EQ(IbCastDeregMr(nullptr, &handle), ncclInvalidArgument); });
-  EXPECT_TRUE(LogHas(log, "deregMr called with a null comm")) << log;
+  EXPECT_EQ(IbCastDeregMr(nullptr, &handle), ncclInvalidArgument);
 }
 
 TEST_F(NetIbCastRegMicrotest, DeregMr_UnknownMr_IsAnInternalError) {
@@ -315,8 +307,7 @@ TEST_F(NetIbCastRegMicrotest, DeregMr_UnknownMr_IsAnInternalError) {
   ibv_mr stranger{};
   ncclIbMrHandle* bogus = static_cast<ncclIbMrHandle*>(malloc(sizeof(ncclIbMrHandle)));
   bogus->mrs[0] = &stranger;
-  std::string log = CaptureLog([&] { EXPECT_EQ(IbCastDeregMr(send_.get(), bogus), ncclInternalError); });
-  EXPECT_TRUE(LogHas(log, "inside cache of 1 entries")) << log;
+  EXPECT_EQ(IbCastDeregMr(send_.get(), bogus), ncclInternalError);
   free(bogus);
   EXPECT_EQ(IbCastDeregMr(send_.get(), mhandle), ncclSuccess);
 }

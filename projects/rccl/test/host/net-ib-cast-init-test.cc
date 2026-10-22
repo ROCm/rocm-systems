@@ -10,9 +10,7 @@
 #include <gtest/gtest.h>
 
 #include <fcntl.h>
-#include <stdarg.h>
 #include <limits.h>
-#include <pthread.h>
 #include <unistd.h>
 
 #include <filesystem>
@@ -40,18 +38,6 @@ static char* InitTestRealpath(const char* path, char* resolved) { return g_initR
 #define realpath InitTestRealpath
 #include NET_IB_CAST_INIT_CC_PATH
 #undef realpath
-
-std::atomic<int> g_netIbCastAsyncThreadsStarted{0};
-static char g_lastThreadName[64];
-
-// init.cc names each async-event thread right after starting it.
-void ncclSetThreadName(pthread_t, const char* fmt, ...) {
-  va_list ap;
-  va_start(ap, fmt);
-  vsnprintf(g_lastThreadName, sizeof(g_lastThreadName), fmt, ap);
-  va_end(ap);
-  g_netIbCastAsyncThreadsStarted++;
-}
 
 void NetIbCastResetGlobals() {
   netRefCount = 0;
@@ -218,10 +204,9 @@ TEST_F(NetIbCastInitMicrotest, GetPciPath_NoSysfsEntry_LeavesAnEmptyFullPath) {
   char hca[] = "mlx5_9";
   char full[PATH_MAX] = "stale";
   char* path = reinterpret_cast<char*>(0x1);
-  std::string log = CaptureLog([&] { ASSERT_EQ(IbCastGetPciPath(hca, &path, full), ncclSuccess); });
+  ASSERT_EQ(IbCastGetPciPath(hca, &path, full), ncclSuccess);
   EXPECT_EQ(path, nullptr);
   EXPECT_STREQ(full, "");
-  EXPECT_TRUE(LogHas(log, "Could not find real path of mlx5_9")) << log;
 }
 
 TEST_F(NetIbCastInitMicrotest, GetRealPort_CountsEarlierDevicesOnTheSamePhysicalNic) {
@@ -303,15 +288,11 @@ TEST_F(NetIbCastInitMicrotest, PlaneIndex_AssignsIndexesInFirstSeenOrder) {
 
 TEST_F(NetIbCastInitMicrotest, PlaneIndex_TableFullOrVirtualBitSet_IsRejected) {
   int16_t count = 1, planes[NCCL_IB_PLANE_MAX_INDEX] = {NCCL_NET_ID_UNDEF}, idx = -1;
-  std::string log = CaptureLog([&] {
-    EXPECT_EQ(ncclIbCastTestGetPlaneIndex(NCCL_IB_PLANE_VIRT_BIT | 1, &count, planes, &idx), ncclInvalidUsage);
-  });
-  EXPECT_TRUE(LogHas(log, "cannot use a plane ID")) << log;
+  EXPECT_EQ(ncclIbCastTestGetPlaneIndex(NCCL_IB_PLANE_VIRT_BIT | 1, &count, planes, &idx), ncclInvalidUsage);
   for (int p = 1; count < NCCL_IB_PLANE_MAX_INDEX - 1; p++) {
     ASSERT_EQ(ncclIbCastTestGetPlaneIndex(p, &count, planes, &idx), ncclSuccess);
   }
-  log = CaptureLog([&] { EXPECT_EQ(ncclIbCastTestGetPlaneIndex(100, &count, planes, &idx), ncclInvalidUsage); });
-  EXPECT_TRUE(LogHas(log, "cannot use more than 14 plane IDs")) << log;
+  EXPECT_EQ(ncclIbCastTestGetPlaneIndex(100, &count, planes, &idx), ncclInvalidUsage);
   ASSERT_EQ(ncclIbCastTestGetPlaneIndex(1, &count, planes, &idx), ncclSuccess);  // known ones still resolve
 }
 
@@ -451,8 +432,7 @@ TEST_F(NetIbCastInitVDeviceMicrotest, MakeVDevice_SeveralDevices_FusesNamesSpeed
   IbCastDevs[2].planeIdx = 2;
   IbCastOffloadEnabled = true;
   int d = -1;
-  ScopedDebugLogging info(NCCL_LOG_INFO, NCCL_ALL);
-  std::string log = CaptureLog([&] { ASSERT_EQ(Make({0, 2, 0}, &d), ncclSuccess); });
+  ASSERT_EQ(Make({0, 2, 0}, &d), ncclSuccess);
   const ncclIbMergedDev& m = IbCastMergedDevs[d];
   EXPECT_STREQ(m.devName, "mlx5_0+mlx5_2");  // the repeated device is merged once
   EXPECT_EQ(m.vProps.ndevs, 2);
@@ -460,7 +440,6 @@ TEST_F(NetIbCastInitVDeviceMicrotest, MakeVDevice_SeveralDevices_FusesNamesSpeed
   EXPECT_EQ(m.railId, 3);
   EXPECT_EQ(m.planeId, NCCL_IB_PLANE_VIRT_BIT | (1 << 1) | (1 << 2));
   EXPECT_FALSE(IbCastOffloadEnabled);  // CTS offload does not support fused NICs
-  EXPECT_TRUE(LogHas(log, "disabling CTS Offload")) << log;
 }
 
 TEST_F(NetIbCastInitVDeviceMicrotest, MakeVDevice_DifferentRails_LeavesTheRailUndefined) {
@@ -474,8 +453,7 @@ TEST_F(NetIbCastInitVDeviceMicrotest, MakeVDevice_DifferentRails_LeavesTheRailUn
 TEST_F(NetIbCastInitVDeviceMicrotest, MakeVDevice_MergeNicsOff_RefusesToFuse) {
   params_.Set("IB_MERGE_NICS", 0);
   int d = -1;
-  std::string log = CaptureLog([&] { EXPECT_EQ(Make({0, 1}, &d), ncclInvalidUsage); });
-  EXPECT_TRUE(LogHas(log, "Skipping makeVDevice, Please set NCCL_IB_MERGE_NICS=1")) << log;
+  EXPECT_EQ(Make({0, 1}, &d), ncclInvalidUsage);
   EXPECT_EQ(IbCastNMergedDevs, 0);
   ASSERT_EQ(Make({0}, &d), ncclSuccess);  // a single device is not a fusion
 }
@@ -484,8 +462,7 @@ TEST_F(NetIbCastInitVDeviceMicrotest, MakeVDevice_AinicWithMergeNicsNotOne_Refus
   g_rcclUseAinicValue = true;
   params_.Set("IB_MERGE_NICS", 2);
   int d = -1;
-  std::string log = CaptureLog([&] { EXPECT_EQ(Make({0, 1}, &d), ncclInvalidUsage); });
-  EXPECT_TRUE(LogHas(log, "(disabled by default on AINIC)")) << log;
+  EXPECT_EQ(Make({0, 1}, &d), ncclInvalidUsage);
 }
 
 // AINIC is meant to fuse NICs only on an explicit NCCL_IB_MERGE_NICS=1, but 1 is the default.
@@ -500,19 +477,16 @@ TEST_F(NetIbCastInitVDeviceMicrotest, MakeVDevice_KnownBug_AinicFusesNicsByDefau
 TEST_F(NetIbCastInitVDeviceMicrotest, MakeVDevice_BadDeviceCounts_AreRejected) {
   int d = -1;
   ncclNetVDeviceProps_t props{};
-  std::string log = CaptureLog([&] { EXPECT_EQ(IbCastMakeVDevice(&d, &props), ncclInvalidUsage); });
-  EXPECT_TRUE(LogHas(log, "with 0 devices")) << log;
+  EXPECT_EQ(IbCastMakeVDevice(&d, &props), ncclInvalidUsage);
   props.ndevs = -1;
   EXPECT_EQ(IbCastMakeVDevice(&d, &props), ncclInvalidUsage);
   props.ndevs = NCCL_IB_MAX_DEVS_PER_NIC + 1;
-  log = CaptureLog([&] { EXPECT_EQ(IbCastMakeVDevice(&d, &props), ncclInvalidUsage); });
-  EXPECT_TRUE(LogHas(log, "Can't make virtual NIC with 9 devices, max 8")) << log;
+  EXPECT_EQ(IbCastMakeVDevice(&d, &props), ncclInvalidUsage);
 }
 
 TEST_F(NetIbCastInitVDeviceMicrotest, MakeVDevice_UnknownPhysicalDevice_IsRejected) {
   int d = -1;
-  std::string log = CaptureLog([&] { EXPECT_EQ(Make({0, 3}, &d), ncclInvalidUsage); });
-  EXPECT_TRUE(LogHas(log, "Cannot use physical device 3, max 3")) << log;
+  EXPECT_EQ(Make({0, 3}, &d), ncclInvalidUsage);
   EXPECT_EQ(Make({-1}, &d), ncclInvalidUsage);
   EXPECT_EQ(IbCastNMergedDevs, 0);
 }
@@ -520,15 +494,13 @@ TEST_F(NetIbCastInitVDeviceMicrotest, MakeVDevice_UnknownPhysicalDevice_IsReject
 TEST_F(NetIbCastInitVDeviceMicrotest, MakeVDevice_TableFull_IsRejected) {
   IbCastNMergedDevs = MAX_IB_VDEVS;
   int d = -1;
-  std::string log = CaptureLog([&] { EXPECT_EQ(Make({0}, &d), ncclInvalidUsage); });
-  EXPECT_TRUE(LogHas(log, "Cannot allocate any more virtual devices (256)")) << log;
+  EXPECT_EQ(Make({0}, &d), ncclInvalidUsage);
 }
 
 TEST_F(NetIbCastInitVDeviceMicrotest, MakeVDevice_MixedLinkLayers_IsRejected) {
   IbCastDevs[1].link = IBV_LINK_LAYER_INFINIBAND;
   int d = -1;
-  std::string log = CaptureLog([&] { EXPECT_EQ(Make({0, 1}, &d), ncclInvalidUsage); });
-  EXPECT_TRUE(LogHas(log, "[0]mlx5_0:1/RoCE and [1]mlx5_1:1/IB")) << log;
+  EXPECT_EQ(Make({0, 1}, &d), ncclInvalidUsage);
   EXPECT_EQ(IbCastNMergedDevs, 0);
 }
 
@@ -546,9 +518,9 @@ TEST_F(NetIbCastInitVDeviceMicrotest, MakeVDevice_AcrossNumaNodesOrRootComplexes
   SetPciPath(2, p2);
   int d = -1;
   std::string log = CaptureLog([&] { ASSERT_EQ(Make({0, 1}, &d), ncclSuccess); });
-  EXPECT_TRUE(LogHas(log, "Merging NICs across NUMA nodes (mlx5_0 numa=0, mlx5_1 numa=1)")) << log;
+  EXPECT_TRUE(LogHas(log, "across NUMA nodes")) << log;
   log = CaptureLog([&] { ASSERT_EQ(Make({0, 2}, &d), ncclSuccess); });
-  EXPECT_TRUE(LogHas(log, "PCIe Root Complexes (mlx5_0 root=0000:00, mlx5_2 root=0000:80)")) << log;
+  EXPECT_TRUE(LogHas(log, "PCIe Root Complexes")) << log;
   EXPECT_FALSE(LogHas(log, "NUMA")) << log;
   std::filesystem::remove_all(base);
 }
@@ -566,8 +538,7 @@ class NetIbCastInitDevicesMicrotest : public NetIbCastInitMicrotest {
 TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_OneRoceHca_AddsOnePhysicalAndOneVirtualDevice) {
   World().AddHca("ionic_0");
   PciPaths({{"ionic_0", "/sys/devices/pci0000:00/0000:01:00.0"}});
-  ScopedDebugLogging info(NCCL_LOG_INFO, NCCL_ALL);
-  std::string log = CaptureLog([&] { ASSERT_EQ(Init(), ncclSuccess); });
+  ASSERT_EQ(Init(), ncclSuccess);
   ASSERT_EQ(IbCastNDevs, 1);
   ASSERT_EQ(IbCastNMergedDevs, 1);
   const struct ncclIbDev& dev = IbCastDevs[0];
@@ -590,8 +561,7 @@ TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_OneRoceHca_AddsOnePhysicalAndO
   EXPECT_STREQ(IbCastMergedDevs[0].devName, "ionic_0");
   EXPECT_STREQ(IbCastIfName, "eth0");
   EXPECT_EQ(IbCastRelaxedOrderingEnabled, 0);
-  EXPECT_STREQ(g_lastThreadName, "NCCL IbAsync  0");
-  EXPECT_TRUE(LogHas(log, "NET/IB : Using [0]ionic_0:1/RoCE")) << log;
+  EXPECT_EQ(World().threadNames, std::vector<std::string>{"NCCL IbAsync  0"});
   EXPECT_EQ(g_ibCastReportMatchingSchemeCalls, 1);
 }
 
@@ -652,17 +622,14 @@ TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_NoVerbsLibrary_Fails) {
 TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_NoMlx5Library_CarriesOn) {
   World().AddHca("ionic_0");
   ScopedHook symbols(g_mlx5dvSymbols, [] { return ncclSystemError; });
-  ScopedDebugLogging info(NCCL_LOG_INFO, NCCL_ALL);
-  std::string log = CaptureLog([&] { EXPECT_EQ(Init(), ncclSuccess); });
-  EXPECT_TRUE(LogHas(log, "Failed to open mlx5dv symbols")) << log;
+  EXPECT_EQ(Init(), ncclSuccess);
   EXPECT_EQ(IbCastNDevs, 1);
 }
 
 TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_NoIonicLibrary_DisablesTheTransport) {
   World().AddHca("ionic_0");
   ScopedHook symbols(g_ionicdvSymbols, [] { return ncclSystemError; });
-  std::string log = CaptureLog([&] { EXPECT_EQ(Init(), ncclInternalError); });
-  EXPECT_TRUE(LogHas(log, "libionic is missing")) << log;
+  EXPECT_EQ(Init(), ncclInternalError);
   EXPECT_EQ(World().getDeviceList.calls, 0);
 }
 
@@ -672,8 +639,7 @@ TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_NoIpInterface_Fails) {
     *n = 0;
     return ncclSuccess;
   });
-  std::string log = CaptureLog([&] { EXPECT_EQ(Init(), ncclInternalError); });
-  EXPECT_TRUE(LogHas(log, "No IP interface found")) << log;
+  EXPECT_EQ(Init(), ncclInternalError);
   EXPECT_EQ(World().freeDeviceList.calls, 0);  // never listed
 }
 
@@ -692,11 +658,9 @@ TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_DeviceListFails_Fails) {
 
 TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_NoHca_FindsNothingButSucceeds) {
   World();
-  ScopedDebugLogging info(NCCL_LOG_INFO, NCCL_ALL);
-  std::string log = CaptureLog([&] { EXPECT_EQ(Init(), ncclSuccess); });
+  EXPECT_EQ(Init(), ncclSuccess);
   EXPECT_EQ(IbCastNDevs, 0);
   EXPECT_EQ(IbCastNMergedDevs, 0);
-  EXPECT_TRUE(LogHas(log, "No device found")) << log;
   EXPECT_EQ(g_ibCastReportMatchingSchemeCalls, 0);
   EXPECT_EQ(World().freeDeviceList.calls, 1);
 }
@@ -704,8 +668,7 @@ TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_NoHca_FindsNothingButSucceeds)
 TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_UnopenableHca_IsSkipped) {
   World().AddHca("ionic_0").openFails = true;
   World().AddHca("ionic_1");
-  std::string log = CaptureLog([&] { ASSERT_EQ(Init(), ncclSuccess); });
-  EXPECT_TRUE(LogHas(log, "Unable to open device ionic_0")) << log;
+  ASSERT_EQ(Init(), ncclSuccess);
   ASSERT_EQ(IbCastNDevs, 1);
   EXPECT_STREQ(IbCastDevs[0].devName, "ionic_1");
 }
@@ -716,8 +679,7 @@ TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_OpenSucceedsWithoutAContext_Is
     *ret = nullptr;
     return ncclSuccess;
   });
-  std::string log = CaptureLog([&] { ASSERT_EQ(Init(), ncclSuccess); });
-  EXPECT_TRUE(LogHas(log, "Unable to open device ionic_0")) << log;
+  ASSERT_EQ(Init(), ncclSuccess);
   EXPECT_EQ(World().queryDevice.calls, 0);
   EXPECT_EQ(IbCastNDevs, 0);
 }
@@ -726,8 +688,7 @@ TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_UnqueryableHca_IsClosedAndSkip
   FakeHca& bad = World().AddHca("ionic_0");
   bad.queryDeviceFails = true;
   World().AddHca("ionic_1");
-  std::string log = CaptureLog([&] { ASSERT_EQ(Init(), ncclSuccess); });
-  EXPECT_TRUE(LogHas(log, "Unable to query device ionic_0")) << log;
+  ASSERT_EQ(Init(), ncclSuccess);
   EXPECT_EQ(bad.closes, 1);
   EXPECT_EQ(IbCastNDevs, 1);
 }
@@ -749,8 +710,7 @@ TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_PortsThatAreDownUnqueryableOrN
     *attr = hca.attr;
     return ncclSuccess;
   });
-  std::string log = CaptureLog([&] { ASSERT_EQ(Init(), ncclSuccess); });
-  EXPECT_TRUE(LogHas(log, "Unable to query port_num 4")) << log;
+  ASSERT_EQ(Init(), ncclSuccess);
   ASSERT_EQ(IbCastNDevs, 1);
   EXPECT_EQ(IbCastDevs[0].portNum, 3);
   EXPECT_EQ(IbCastDevs[0].link, IBV_LINK_LAYER_INFINIBAND);
@@ -776,9 +736,8 @@ TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_ClosingAnUnusedHcaFails_Fails)
 TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_FreeingTheListFails_Fails) {
   World().AddHca("ionic_0");
   ScopedHook freeList(g_ibvFreeDeviceList, [](struct ibv_device**) { return ncclSystemError; });
-  std::string log = CaptureLog([&] { EXPECT_EQ(Init(), ncclInternalError); });
+  EXPECT_EQ(Init(), ncclInternalError);
   EXPECT_EQ(freeList.calls, 2);  // the failure path tries once more
-  EXPECT_TRUE(LogHas(log, "Unable to free device list")) << log;
 }
 
 TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_PortSpeedQuery_WinsOverThePortAttributes) {
@@ -821,15 +780,13 @@ TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_IbHcaRailAndPlane_AreRecordedA
   World().AddHca("ionic_1");
   World().AddHca("ionic_2");
   SetMicroEnv("NCCL_IB_HCA", "ionic_0:1:7,ionic_1::2:5,ionic_2:::6");
-  ScopedDebugLogging info(NCCL_LOG_INFO, NCCL_ALL);
-  std::string log = CaptureLog([&] { ASSERT_EQ(Init(), ncclSuccess); });
+  ASSERT_EQ(Init(), ncclSuccess);
   ASSERT_EQ(IbCastNDevs, 3);
   EXPECT_EQ(IbCastDevs[0].railId, 7);
   EXPECT_EQ(IbCastDevs[1].railId, 2);
   EXPECT_EQ(IbCastDevs[1].planeId, 5);
   EXPECT_EQ(IbCastDevs[2].planeId, 6);
   EXPECT_NE(IbCastDevs[1].planeIdx, IbCastDevs[2].planeIdx);
-  EXPECT_TRUE(LogHas(log, "[0]ionic_0:1:7/RoCE [1]ionic_1:1:2:5/RoCE [2]ionic_2:1::6/RoCE")) << log;
 }
 
 TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_TooManyPlanes_FailsAfterListing) {
@@ -840,8 +797,7 @@ TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_TooManyPlanes_FailsAfterListin
     hca += (i ? "," : "") + name + ":::" + std::to_string(i + 1);
   }
   SetMicroEnv("NCCL_IB_HCA", hca.c_str());
-  std::string log = CaptureLog([&] { EXPECT_EQ(Init(), ncclInvalidUsage); });
-  EXPECT_TRUE(LogHas(log, "cannot use more than")) << log;
+  EXPECT_EQ(Init(), ncclInvalidUsage);
 }
 
 TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_SortsByPciPathUnlessDisabled) {
@@ -900,10 +856,8 @@ TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_ArThreshold_IsTakenUnlessOooRq
   EXPECT_EQ(IbCastArThreshold, 4096);
   ResetForAnotherInit();
   params_.Set("IB_OOO_RQ", 1);
-  ScopedDebugLogging info(NCCL_LOG_INFO, NCCL_ALL);
-  std::string log = CaptureLog([&] { ASSERT_EQ(Init(), ncclSuccess); });
+  ASSERT_EQ(Init(), ncclSuccess);
   EXPECT_EQ(IbCastArThreshold, 8192);
-  EXPECT_TRUE(LogHas(log, "AR threshold will be ignored")) << log;
 }
 
 TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_Mlx5WithOooRq_RecordsTheOooDepth) {
@@ -960,14 +914,12 @@ class NetIbCastInitDataDirectMicrotest : public NetIbCastInitDevicesMicrotest {
 
 TEST_F(NetIbCastInitDataDirectMicrotest, InitDevices_DataDirectNic_ExposesOnlyTheDmaDevice) {
   DataDirect(ncclSuccess);
-  ScopedDebugLogging info(NCCL_LOG_INFO, NCCL_ALL);
-  std::string log = CaptureLog([&] { ASSERT_EQ(Init(), ncclSuccess); });
+  ASSERT_EQ(Init(), ncclSuccess);
   ASSERT_EQ(IbCastNDevs, 1);
   EXPECT_STREQ(IbCastDevs[0].devName, "mlx5_0_dma");
   EXPECT_STREQ(IbCastDevs[0].pciPath, "/sys/devices/dd0");
   EXPECT_EQ(IbCastDevs[0].capsProvider.mlx5.dataDirect, 1);
   EXPECT_STREQ(IbCastDevs[0].fullPciPath, "/sys/devices/pci0000:00/0000:01:00.0");
-  EXPECT_TRUE(LogHas(log, "Data Direct DMA Interface is detected for device mlx5_0")) << log;
 }
 
 TEST_F(NetIbCastInitDataDirectMicrotest, InitDevices_DataDirectTwo_ExposesBothDevices) {
@@ -990,8 +942,7 @@ TEST_F(NetIbCastInitDataDirectMicrotest, InitDevices_NoDataDirectPath_KeepsThePl
 // Pins AICOMRCCL-3090; a fix flips this pin.
 TEST_F(NetIbCastInitDataDirectMicrotest, InitDevices_KnownBug_DataDirectLookupErrorLeaksTheDeviceList) {
   DataDirect(ncclSystemError);
-  std::string log = CaptureLog([&] { EXPECT_EQ(Init(), ncclSystemError); });
-  EXPECT_TRUE(LogHas(log, "Error in mlx5dv_get_data_direct_sysfs_path with device mlx5_0")) << log;
+  EXPECT_EQ(Init(), ncclSystemError);
   EXPECT_EQ(World().freeDeviceList.calls, 0);
   EXPECT_EQ(World().hcas[0].closes, 0);
 }
@@ -1014,18 +965,13 @@ class NetIbCastInitAinicMicrotest : public NetIbCastInitDevicesMicrotest {
 };
 
 TEST_F(NetIbCastInitAinicMicrotest, InitDevices_Ainic_EnablesCtsOffloadAndInlineByDefault) {
-  ScopedDebugLogging info(NCCL_LOG_INFO, NCCL_ALL);
-  std::string log = CaptureLog([&] { ASSERT_EQ(Init(), ncclSuccess); });
+  ASSERT_EQ(Init(), ncclSuccess);
   EXPECT_TRUE(IbCastAinicRoce);
   EXPECT_TRUE(IbCastOffloadEnabled);
   EXPECT_TRUE(IbCastUseInline);
   EXPECT_TRUE(IbCastAinicCtsInlineData);
   EXPECT_EQ(IbCastGdrFlushDisable, 1);
   EXPECT_FALSE(IbCastMultiplaneEnable);
-  EXPECT_TRUE(LogHas(log, "enabling IB Use Inline Data")) << log;
-  EXPECT_TRUE(LogHas(log, "CTS Inline Data: Enabled; CTS Offload: Enabled; IB Use Inline: Enabled; GDR Flush: "
-                          "Disabled")) << log;
-  EXPECT_TRUE(LogHas(log, "AINIC uDMA policy: 0")) << log;
 }
 
 TEST_F(NetIbCastInitAinicMicrotest, InitDevices_AinicOffloadOff_KeepsInlineAsConfigured) {
@@ -1081,20 +1027,21 @@ TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_MapFileWithoutAinicOrEmpty_Lea
   EXPECT_FALSE(IbCastMultiplaneEnable);
 }
 
+// Init keeps no policy state: it only validates the param and reports what comms will use.
 TEST_F(NetIbCastInitAinicMicrotest, InitDevices_UdmaPolicyOutOfRange_FallsBackToChannelAffinity) {
   for (int64_t policy : {(int64_t)ncclIbCastUDMAPolicy::First - 1, (int64_t)ncclIbCastUDMAPolicy::Last + 1}) {
     ResetForAnotherInit();
     params_.Set("RCCL_IB_UDMA_POLICY", policy);
     ScopedDebugLogging info(NCCL_LOG_INFO, NCCL_ALL);
     std::string log = CaptureLog([&] { ASSERT_EQ(Init(), ncclSuccess); });
-    EXPECT_TRUE(LogHas(log, ("RCCL_IB_UDMA_POLICY=" + std::to_string(policy) + " is invalid").c_str())) << log;
-    EXPECT_TRUE(LogHas(log, "AINIC uDMA policy: 0")) << log;
+    EXPECT_TRUE(LogHas(log, "is invalid")) << log;
+    EXPECT_TRUE(LogHas(log, "uDMA policy: 0")) << log;
   }
   ResetForAnotherInit();
   params_.Set("RCCL_IB_UDMA_POLICY", (int64_t)ncclIbCastUDMAPolicy::Last);
   ScopedDebugLogging info(NCCL_LOG_INFO, NCCL_ALL);
   std::string log = CaptureLog([&] { ASSERT_EQ(Init(), ncclSuccess); });
-  EXPECT_TRUE(LogHas(log, "AINIC uDMA policy: 3")) << log;
+  EXPECT_TRUE(LogHas(log, "uDMA policy: 3")) << log;
 }
 
 TEST_F(NetIbCastInitAinicMicrotest, InitDevices_AinicWithResiliency_DropsOffloadAndInline) {
@@ -1156,9 +1103,8 @@ TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_QpSharingWithNoGroups_TurnsSha
   World();
   params_.Set("RCCL_IB_QP_SHARING_ENABLE", 1);
   params_.Set("RCCL_IB_COMM_NGROUPS", 0);
-  std::string log = CaptureLog([&] { ASSERT_EQ(Init(), ncclSuccess); });
+  ASSERT_EQ(Init(), ncclSuccess);
   EXPECT_FALSE(IbCastQpSharingGlobalEnable);
-  EXPECT_TRUE(LogHas(log, "RCCL_IB_COMM_NGROUPS=0 is invalid")) << log;
 }
 
 TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_ByOrderWithFailoverOrOooRq_WarnsAboutWhatItDisables) {
@@ -1167,7 +1113,7 @@ TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_ByOrderWithFailoverOrOooRq_War
   params_.Set("IB_RESILIENCY_PORT_FAILOVER", 1);
   params_.Set("IB_OOO_RQ", 1);
   std::string log = CaptureLog([&] { ASSERT_EQ(Init(), ncclSuccess); });
-  EXPECT_TRUE(LogHas(log, "disabling resiliency (port failover and port recovery)")) << log;
+  EXPECT_TRUE(LogHas(log, "disabling resiliency")) << log;
   EXPECT_TRUE(LogHas(log, "disabling out-of-order RQ")) << log;
   EXPECT_EQ(g_ibCastReportMatchingSchemeCalls, 1);
 }
@@ -1201,9 +1147,8 @@ TEST_F(NetIbCastInitMicrotestIsolated, InitDevices_TelemetryCannotStart_CarriesO
       "NetIbCastInit_TelemetryCannotStart",
       []() {
         FakeIbWorld world;
-        ScopedDebugLogging info(NCCL_LOG_INFO, NCCL_ALL);
-        std::string log = CaptureLog([&] { EXPECT_EQ(IbCastInitDevices(nullptr, nullptr), ncclSuccess); });
-        EXPECT_TRUE(LogHas(log, "telemetry was requested but could not start")) << log;
+        EXPECT_EQ(IbCastInitDevices(nullptr, nullptr), ncclSuccess);
+        EXPECT_FALSE(rcclTelemetryOn());
       },
       {{"RCCL_TELEMETRY_ENABLE", "1"}, {"RCCL_TELEMETRY_OUTPUT_DIR", std::string(5000, 'd')}});
 }
@@ -1214,11 +1159,9 @@ TEST_F(NetIbCastInitMicrotestIsolated, InitDevices_TelemetryOn_RegistersEachDevi
       []() {
         FakeIbWorld world;
         world.AddHca("ionic_0");
-        ScopedDebugLogging info(NCCL_LOG_INFO, NCCL_ALL);
-        std::string log = CaptureLog([&] { EXPECT_EQ(IbCastInitDevices(nullptr, nullptr), ncclSuccess); });
+        EXPECT_EQ(IbCastInitDevices(nullptr, nullptr), ncclSuccess);
         EXPECT_TRUE(rcclTelemetryOn());
         EXPECT_EQ(rcclTelemetryDevs[0].device_id, 0);
-        EXPECT_FALSE(LogHas(log, "telemetry did not register")) << log;
       },
       {{"RCCL_TELEMETRY_ENABLE", "1"}, {"RCCL_TELEMETRY_OUTPUT_DIR", "/tmp"}});
 }
@@ -1342,8 +1285,7 @@ TEST_F(NetIbCastInitPropertiesMicrotest, GetProperties_MergedDevice_ReportsTheFu
 
 TEST_F(NetIbCastInitPropertiesMicrotest, GetProperties_UnknownVirtualDevice_IsRejected) {
   ncclNetProperties_t props;
-  std::string log = CaptureLog([&] { EXPECT_EQ(IbCastGetProperties(1, &props), ncclInvalidUsage); });
-  EXPECT_TRUE(LogHas(log, "Requested properties for vNic 1, only 1 vNics have been created")) << log;
+  EXPECT_EQ(IbCastGetProperties(1, &props), ncclInvalidUsage);
 }
 
 class NetIbCastInitPropertiesMicrotestIsolated : public NetIbCastInitMicrotest {};

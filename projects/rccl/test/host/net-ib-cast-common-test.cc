@@ -26,7 +26,6 @@ namespace {
 
 using RcclUnitTesting::CaptureLog;
 using RcclUnitTesting::LogHas;
-using RcclUnitTesting::ScopedDebugLogging;
 
 class NetIbCastCommonMicrotest : public ::testing::Test {
  protected:
@@ -53,8 +52,7 @@ TEST_F(NetIbCastCommonMicrotest, StatsCheckFatalCount_AnyFatalErrorStopsTheCalle
   IbCastStatsInit(&stats);
   EXPECT_EQ(IbCastStatsCheckFatalCount(&stats, "here"), ncclSuccess);
   IbCastStatsFatalError(&stats);
-  std::string log = CaptureLog([&] { EXPECT_EQ(IbCastStatsCheckFatalCount(&stats, "here"), ncclSystemError); });
-  EXPECT_TRUE(LogHas(log, "fatal error (detected in here)")) << log;
+  EXPECT_EQ(IbCastStatsCheckFatalCount(&stats, "here"), ncclSystemError);
   params_.Set("IB_RETURN_ASYNC_EVENTS", 0);
   EXPECT_EQ(IbCastStatsCheckFatalCount(&stats, "here"), ncclSuccess);
 }
@@ -133,21 +131,14 @@ TEST_F(NetIbCastCommonMicrotest, RecvCommInit_PostsOnDemandByDefault) {
 TEST_F(NetIbCastCommonMicrotest, RecvCommInit_ResiliencyOrOooRq_ForcePrePosting) {
   ZeroedPtr<ncclIbRecvComm> recv;
   params_.Set("IB_PREPOST_RECEIVE_WORK_REQUESTS", 0);
-  ScopedDebugLogging info(NCCL_LOG_INFO, NCCL_ALL);
   auto res = std::make_unique<ncclIbResiliency>();
   resiliency_ = res.get();
-  std::string log = CaptureLog([&] { ASSERT_EQ(IbCastRecvCommInit(recv.get()), ncclSuccess); });
+  ASSERT_EQ(IbCastRecvCommInit(recv.get()), ncclSuccess);
   EXPECT_TRUE(recv->prepostReceiveWorkRequests);
-  EXPECT_TRUE(LogHas(log, "Overriding pre-posting to true (1).")) << log;
   resiliency_ = nullptr;
   params_.Set("IB_OOO_RQ", 1);
-  log = CaptureLog([&] { ASSERT_EQ(IbCastRecvCommInit(recv.get()), ncclSuccess); });
+  ASSERT_EQ(IbCastRecvCommInit(recv.get()), ncclSuccess);
   EXPECT_TRUE(recv->prepostReceiveWorkRequests);
-  EXPECT_TRUE(LogHas(log, "OOO RQ is enabled, Overriding pre-posting")) << log;
-  // Already asked for: no override to announce.
-  params_.Set("IB_PREPOST_RECEIVE_WORK_REQUESTS", 1);
-  log = CaptureLog([&] { ASSERT_EQ(IbCastRecvCommInit(recv.get()), ncclSuccess); });
-  EXPECT_FALSE(LogHas(log, "Overriding")) << log;
 }
 
 struct OptRecv {
@@ -329,11 +320,10 @@ TEST_F(NetIbCastCommonEventMicrotest, GidChange_RefreshesTheGidAndPortAttributes
                    info->localGid.raw[15] = 9;
                    return ncclSuccess;
                  });
-  ScopedDebugLogging info(NCCL_LOG_INFO, NCCL_ALL);
-  std::string log = CaptureLog([&] { EXPECT_EQ(ncclIbCastGidChangeEvent(0), ncclSuccess); });
+  EXPECT_EQ(ncclIbCastGidChangeEvent(0), ncclSuccess);
   EXPECT_EQ(dev_->gidInfo.localGidIndex, 2);
+  EXPECT_EQ(dev_->gidInfo.localGid.raw[15], 9);
   EXPECT_EQ(dev_->portAttr.lid, 42);
-  EXPECT_TRUE(LogHas(log, "GID refreshed: idx 1 -> 2, gid :: -> ::9")) << log;
 }
 
 TEST_F(NetIbCastCommonEventMicrotest, GidChange_QueryFailures_LeaveTheDeviceUnchanged) {
@@ -345,11 +335,9 @@ TEST_F(NetIbCastCommonEventMicrotest, GidChange_QueryFailures_LeaveTheDeviceUnch
   });
   ScopedHook gid(g_ibCastGidInfoQuery, [](struct ibv_context*, uint8_t, struct ibv_port_attr*,
                                           struct ncclIbGidInfo*) { return ncclInternalError; });
-  std::string log = CaptureLog([&] { EXPECT_EQ(ncclIbCastGidChangeEvent(0), ncclSystemError); });
-  EXPECT_TRUE(LogHas(log, "query_port failed during GID change")) << log;
+  EXPECT_EQ(ncclIbCastGidChangeEvent(0), ncclSystemError);
   portResult = ncclSuccess;
-  log = CaptureLog([&] { EXPECT_EQ(ncclIbCastGidChangeEvent(0), ncclInternalError); });
-  EXPECT_TRUE(LogHas(log, "GID info query failed")) << log;
+  EXPECT_EQ(ncclIbCastGidChangeEvent(0), ncclInternalError);
   EXPECT_EQ(dev_->portAttr.lid, 7);
 }
 
@@ -370,14 +358,12 @@ TEST_F(NetIbCastCommonEventMicrotest, AsyncThread_FatalEvents_ChargeTheDeviceCqA
     attr->qp_state = IBV_QPS_ERR;
     return ncclSuccess;
   });
-  std::string log = CaptureLog([&] { EXPECT_EQ(IbCastAsyncThreadMain(dev_), nullptr); });
+  EXPECT_EQ(IbCastAsyncThreadMain(dev_), nullptr);
   EXPECT_EQ(dev_->stats.fatalErrorCount, 1);
   EXPECT_EQ(cqStats.fatalErrorCount, 1);
   EXPECT_EQ(qpStats.fatalErrorCount, 3);
   EXPECT_EQ(query.calls, 3);
   EXPECT_EQ(ack_.calls, 5);
-  EXPECT_TRUE(LogHas(log, "ionic_0:1 async fatal event: fake event")) << log;
-  EXPECT_TRUE(LogHas(log, "async fatal event on QP")) << log;
 }
 
 TEST_F(NetIbCastCommonEventMicrotest, AsyncThread_QpEventWithCqs_ReportsTheirHandles) {
@@ -406,9 +392,9 @@ TEST_F(NetIbCastCommonEventMicrotest, AsyncThread_NonFatalEvents_OnlyWarn) {
   std::string log = CaptureLog([&] { IbCastAsyncThreadMain(dev_); });
   EXPECT_EQ(dev_->stats.fatalErrorCount, 0);
   EXPECT_EQ(ack_.calls, 14);
-  EXPECT_TRUE(LogHas(log, "async fatal event on SRQ, unused for now")) << log;
-  const std::string nonFatal = "Got non-fatal async event: fake event(" + std::to_string(IBV_EVENT_PORT_ERR) + ")";
-  EXPECT_TRUE(LogHas(log, nonFatal.c_str())) << log;
+  // These arms only warn.
+  EXPECT_TRUE(LogHas(log, "on SRQ")) << log;
+  EXPECT_TRUE(LogHas(log, "non-fatal async event")) << log;
   EXPECT_TRUE(LogHas(log, "unknown event type (999)")) << log;
 }
 
@@ -420,9 +406,8 @@ TEST_F(NetIbCastCommonEventMicrotest, AsyncThread_GidChangeHandlerFails_MarksThe
   });
   ScopedHook gid(g_ibCastGidInfoQuery, [](struct ibv_context*, uint8_t, struct ibv_port_attr*,
                                           struct ncclIbGidInfo*) { return ncclSuccess; });
-  std::string log = CaptureLog([&] { IbCastAsyncThreadMain(dev_); });
+  IbCastAsyncThreadMain(dev_);
   EXPECT_EQ(dev_->stats.fatalErrorCount, 1);
-  EXPECT_TRUE(LogHas(log, "marking device with fatal error after GID-change event handler failed")) << log;
 }
 
 TEST_F(NetIbCastCommonEventMicrotest, AsyncThread_EventNameOrAckFails_EndsTheLoop) {

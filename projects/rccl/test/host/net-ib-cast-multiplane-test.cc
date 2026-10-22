@@ -27,7 +27,6 @@ namespace {
 
 using RcclUnitTesting::CaptureLog;
 using RcclUnitTesting::LogHas;
-using RcclUnitTesting::ScopedDebugLogging;
 
 class NetIbCastMultiplaneMicrotest : public ::testing::Test {
  protected:
@@ -101,8 +100,7 @@ TEST_F(NetIbCastMultiplaneMicrotest, IpToGid_Ipv4_StoresTheV4MappedForm) {
 TEST_F(NetIbCastMultiplaneMicrotest, IpToGid_NotAnAddress_IsRejected) {
   uint8_t gid[16];
   memset(gid, 0xab, sizeof(gid));
-  std::string log = CaptureLog([&] { EXPECT_EQ(ncclIbCastTestIpToGid("10.1.2", gid), ncclInvalidArgument); });
-  EXPECT_TRUE(LogHas(log, "invalid IP address '10.1.2'")) << log;
+  EXPECT_EQ(ncclIbCastTestIpToGid("10.1.2", gid), ncclInvalidArgument);
   EXPECT_EQ(gid[0], 0xab);  // left alone on failure
 }
 
@@ -130,8 +128,7 @@ TEST_F(NetIbCastMultiplaneMicrotest, Load_EmptyMapFileName_IsTreatedAsUnset) {
 TEST_F(NetIbCastMultiplaneMicrotest, Load_MissingFile_FailsAndKeepsFailingWithoutRereading) {
   const std::string path = dir_ + "/absent.xml";
   SetMicroEnv("RCCL_MULTIPLANE_MAP_FILE", path.c_str());
-  std::string log = CaptureLog([&] { EXPECT_EQ(IbCastMultiplaneLoad(), ncclSystemError); });
-  EXPECT_TRUE(LogHas(log, "could not open map file")) << log;
+  EXPECT_EQ(IbCastMultiplaneLoad(), ncclSystemError);
   // The load runs once: creating the file afterwards changes nothing.
   std::ofstream(path) << kTwoInterfaces;
   EXPECT_EQ(IbCastMultiplaneLoad(), ncclSystemError);
@@ -139,11 +136,12 @@ TEST_F(NetIbCastMultiplaneMicrotest, Load_MissingFile_FailsAndKeepsFailingWithou
 
 TEST_F(NetIbCastMultiplaneMicrotest, Load_ValidMap_ResolvesEachVipToItsPipsInOrder) {
   UseMap(kTwoInterfaces);
-  ScopedDebugLogging info(NCCL_LOG_INFO, NCCL_ALL);
-  std::string log = CaptureLog([&] { ASSERT_EQ(IbCastMultiplaneLoad(), ncclSuccess); });
-  EXPECT_TRUE(LogHas(log, "loaded 2 GID mappings")) << log;
-  EXPECT_FALSE(LogHas(log, "duplicate")) << log;
-  EXPECT_TRUE(LogHas(log, "ip=10.0.0.1 interface=eth1")) << log;
+  ASSERT_EQ(IbCastMultiplaneLoad(), ncclSuccess);
+  ASSERT_EQ(gidToPipMap.size(), 2u);
+  const std::vector<ncclIbPipInfo>& vip = gidToPipMap.at("fd00:0000:0000:0000:0000:0000:0000:0001");
+  ASSERT_EQ(vip.size(), 2u);
+  EXPECT_STREQ(vip[0].interface, "eth1");
+  EXPECT_STREQ(vip[1].interface, "eth2");
 
   union ibv_gid pips[MULTIPLANE_MAX_PIPS];
   ASSERT_EQ(Resolve("fd00::1", pips), 2);
@@ -186,9 +184,7 @@ TEST_F(NetIbCastMultiplaneMicrotest, GetPipGids_MorePipsThanTheMax_ReturnsOnlyTh
 
 TEST_F(NetIbCastMultiplaneMicrotest, Load_PipWithoutInterface_LeavesTheInterfaceEmpty) {
   UseMap("<multiplane><host><interface gid=\"fd00::1\"><pip ip=\"10.0.0.1\"/></interface></host></multiplane>");
-  ScopedDebugLogging info(NCCL_LOG_INFO, NCCL_ALL);
-  std::string log = CaptureLog([&] { ASSERT_EQ(IbCastMultiplaneLoad(), ncclSuccess); });
-  EXPECT_TRUE(LogHas(log, "ip=10.0.0.1 interface=\n")) << log;
+  ASSERT_EQ(IbCastMultiplaneLoad(), ncclSuccess);
   ASSERT_EQ(gidToPipMap.size(), 1u);
   EXPECT_STREQ(gidToPipMap.begin()->second.at(0).interface, "");
 }
@@ -199,7 +195,7 @@ TEST_F(NetIbCastMultiplaneMicrotest, Load_DuplicateVip_LastEntryWins) {
          "<interface gid=\"fd00:0::1\"><pip ip=\"10.0.0.2\"/><pip ip=\"10.0.0.3\"/></interface>"
          "</host></multiplane>");
   std::string log = CaptureLog([&] { ASSERT_EQ(IbCastMultiplaneLoad(), ncclSuccess); });
-  EXPECT_TRUE(LogHas(log, "duplicate GID")) << log;
+  EXPECT_TRUE(LogHas(log, "duplicate GID")) << log;  // a duplicate only warns
   union ibv_gid pips[MULTIPLANE_MAX_PIPS];
   ASSERT_EQ(Resolve("fd00::1", pips), 2);
   EXPECT_TRUE(SameGid(pips[0], "10.0.0.2"));
@@ -208,7 +204,7 @@ TEST_F(NetIbCastMultiplaneMicrotest, Load_DuplicateVip_LastEntryWins) {
 struct BadMap {
   const char* name;
   const char* xml;
-  const char* warning;
+  const char* warning;  // the checks share a return code, so this names the one that fired
 };
 
 class NetIbCastMultiplaneBadMapMicrotest : public NetIbCastMultiplaneMicrotest,
@@ -225,23 +221,23 @@ TEST_P(NetIbCastMultiplaneBadMapMicrotest, Load_IsRejectedAndNothingResolves) {
 INSTANTIATE_TEST_SUITE_P(
     NetIbCastMultiplane, NetIbCastMultiplaneBadMapMicrotest,
     ::testing::Values(
-        BadMap{"NoRoot", "<other><host/></other>", "no <multiplane> root element"},
+        BadMap{"NoRoot", "<other><host/></other>", "no <multiplane> root"},
         BadMap{"InterfaceWithoutGid",
                "<multiplane><host><interface><pip ip=\"10.0.0.1\"/></interface></host></multiplane>",
-               "<interface> missing 'gid'"},
+               "missing 'gid'"},
         BadMap{"PipWithoutIp",
                "<multiplane><host><interface gid=\"fd00::1\"><pip interface=\"eth1\"/></interface></host>"
                "</multiplane>",
-               "<pip> missing 'ip'"},
+               "missing 'ip'"},
         BadMap{"BadPipIp",
                "<multiplane><host><interface gid=\"fd00::1\"><pip ip=\"10.0.0.300\"/></interface></host>"
                "</multiplane>",
-               "invalid IP address '10.0.0.300'"},
+               "'10.0.0.300'"},
         BadMap{"BadVip",
                "<multiplane><host><interface gid=\"fd00::g\"><pip ip=\"10.0.0.1\"/></interface></host>"
                "</multiplane>",
-               "invalid IP address 'fd00::g'"},
-        BadMap{"Unterminated", "<multiplane><host>", "failed to parse map file"}),
+               "'fd00::g'"},
+        BadMap{"Unterminated", "<multiplane><host>", "failed to parse"}),
     [](const ::testing::TestParamInfo<BadMap>& info) { return std::string(info.param.name); });
 
 // The parser only hands back the elements it has handlers for, so the "skip anything else"

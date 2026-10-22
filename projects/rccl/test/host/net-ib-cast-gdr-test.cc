@@ -23,32 +23,23 @@
 #include "fakes/gdr_probe_fakes.h"
 #include "fakes/ibvwrap_fakes.h"
 #include "fakes/libc_fakes.h"
+#include "fakes/os_fakes.h"
 #include "gdr_peermem.h"
 #include "net-ib-cast-test-common.h"
 #include "fakes/param_redirect.h"
 
-// os_fakes.cc answers every sysfs read with one fixed string; the Hyper-V override needs per-file
-// answers, so gdr.cc's reads are renamed onto this TU's seam.
-static std::function<ncclResult_t(const char*, const char*, char*, int)> g_gdrSysfsRead =
-    [](const char*, const char*, char*, int) { return ncclSystemError; };
-static ncclResult_t GdrTestSysfsRead(const char* path, const char* file, char* value, int maxLen) {
-  return g_gdrSysfsRead(path, file, value, maxLen);
-}
-
-#define ncclOsTopoGetStrFromSys GdrTestSysfsRead
 #include "fakes/libc_seam.h"
 #include NET_IB_CAST_GDR_CC_PATH
 #include "fakes/libc_seam_undef.h"
-#undef ncclOsTopoGetStrFromSys
 
 namespace {
 
 using RcclUnitTesting::CaptureLog;
 using RcclUnitTesting::LogHas;
 
-// Answers bios_version and numa_balancing; an absent answer is a failed read.
-void SysfsAnswers(const char* bios, const char* numaBalancing) {
-  g_gdrSysfsRead = [=](const char*, const char* file, char* value, int maxLen) {
+// A g_ncclOsTopoGetStrFromSys that answers bios_version and numa_balancing; an absent answer is a failed read.
+auto SysfsAnswers(const char* bios, const char* numaBalancing) {
+  return [=](const char*, const char* file, char* value, int maxLen) {
     const char* answer = strcmp(file, "bios_version") == 0 ? bios : strcmp(file, "numa_balancing") == 0 ? numaBalancing
                                                                                                           : nullptr;
     if (answer == nullptr) return ncclSystemError;
@@ -73,7 +64,7 @@ TEST_F(NetIbCastGdrMicrotestIsolated, GdrSupport_ForceEnable_SucceedsWithoutScan
 
 TEST_F(NetIbCastGdrMicrotestIsolated, GdrSupport_PeermemClientFound_SucceedsWithoutProbing) {
   RUN_ISOLATED_TEST("NetIbCastGdr_PeermemFound", []() {
-    SysfsAnswers("Generic BIOS", "1");
+    ScopedHook sysfs(g_ncclOsTopoGetStrFromSys, SysfsAnswers("Generic BIOS", "1"));
     ScopedHook scan(g_ncclIbScanDefaultPeerMemClients, [] { return 1; });
     ScopedHook probe(g_ncclIbProbeGdrSupport, [](struct ibv_context*, int) { return 0; });
     EXPECT_EQ(IbCastGdrSupport(), ncclSuccess);
@@ -128,7 +119,7 @@ TEST_F(NetIbCastGdrMicrotestIsolated, GdrSupport_HyperVWithNumaBalancingAndNoRel
   RUN_ISOLATED_TEST("NetIbCastGdr_HyperVBlocklisted", []() {
     ParamScript params;
     params.Set("IB_PCI_RELAXED_ORDERING", 0);
-    SysfsAnswers(kHyperV, "1");
+    ScopedHook sysfs(g_ncclOsTopoGetStrFromSys, SysfsAnswers(kHyperV, "1"));
     ScopedHook scan(g_ncclIbScanDefaultPeerMemClients, [] { return 1; });
     ScopedHook probe(g_ncclIbProbeGdrSupport, [](struct ibv_context*, int) { return 1; });
     EXPECT_EQ(IbCastGdrSupport(), ncclSystemError);
@@ -149,7 +140,7 @@ TEST_P(NetIbCastGdrHyperVMicrotestIsolated, GdrSupport_HyperVWithoutTheOtherCond
   RUN_ISOLATED_TEST((std::string("NetIbCastGdr_HyperV_") + c.name).c_str(), [c]() {
     ParamScript params;
     params.Set("IB_PCI_RELAXED_ORDERING", c.relaxedOrdering);
-    SysfsAnswers(kHyperV, c.numaBalancing);
+    ScopedHook sysfs(g_ncclOsTopoGetStrFromSys, SysfsAnswers(kHyperV, c.numaBalancing));
     ScopedHook scan(g_ncclIbScanDefaultPeerMemClients, [] { return 1; });
     EXPECT_EQ(IbCastGdrSupport(), ncclSuccess);
   });
@@ -166,7 +157,7 @@ TEST_F(NetIbCastGdrMicrotestIsolated, GdrSupport_BiosUnreadable_SkipsTheHyperVCh
   RUN_ISOLATED_TEST("NetIbCastGdr_BiosUnreadable", []() {
     ParamScript params;
     params.Set("IB_PCI_RELAXED_ORDERING", 0);
-    SysfsAnswers(nullptr, "1");
+    ScopedHook sysfs(g_ncclOsTopoGetStrFromSys, SysfsAnswers(nullptr, "1"));
     ScopedHook scan(g_ncclIbScanDefaultPeerMemClients, [] { return 1; });
     EXPECT_EQ(IbCastGdrSupport(), ncclSuccess);
   });

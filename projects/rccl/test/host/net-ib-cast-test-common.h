@@ -40,8 +40,6 @@
 // Puts every net_ib_cast global back to its load-time value. Defined in
 // net-ib-cast-init-test.cc, the TU that can reach init.cc's file-scope state.
 void NetIbCastResetGlobals();
-// IbCastInitDevices starts one async-event thread per device it adds; this counts them.
-extern std::atomic<int> g_netIbCastAsyncThreadsStarted;
 
 namespace {
 
@@ -113,12 +111,11 @@ struct FakeHca {
 // since they read hooks and IbCastDevs that the test is about to reset.
 class FakeIbWorld {
  public:
-  FakeIbWorld() : asyncThreadsBefore_(g_netIbCastAsyncThreadsStarted.load()) {}
   ~FakeIbWorld() { Quiesce(); }
 
   // Waits until every async-event thread started so far has read its event and left.
   void Quiesce() {
-    const int started = g_netIbCastAsyncThreadsStarted.load() - asyncThreadsBefore_;
+    const int started = setThreadName.calls.load();
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
     while (asyncExits_.load() < started && std::chrono::steady_clock::now() < deadline) std::this_thread::yield();
     EXPECT_EQ(asyncExits_.load(), started) << "async-event threads still running";
@@ -160,13 +157,16 @@ class FakeIbWorld {
 
   std::deque<FakeHca> hcas;
   std::vector<struct ibv_device*> list;
+  // IbCastInitDevices names each async-event thread it starts, so the hook also counts them.
+  std::vector<std::string> threadNames;
 
  private:
-  int asyncThreadsBefore_;
   std::atomic<int> asyncExits_{0};
   std::vector<struct ibv_device*> listed_;
 
  public:
+  HookOf<decltype(g_ncclSetThreadName)> setThreadName{
+      g_ncclSetThreadName, [this](pthread_t, const char* name) { threadNames.push_back(name); }};
   HookOf<decltype(g_ibvSymbols)> ibvSymbols{g_ibvSymbols, [] { return ncclSuccess; }};
   HookOf<decltype(g_mlx5dvSymbols)> mlx5Symbols{g_mlx5dvSymbols, [] { return ncclSuccess; }};
   HookOf<decltype(g_ionicdvSymbols)> ionicSymbols{g_ionicdvSymbols, [] { return ncclSuccess; }};
