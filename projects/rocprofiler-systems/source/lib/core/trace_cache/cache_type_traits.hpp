@@ -9,9 +9,7 @@
 #include <optional>
 #include <span>
 #include <string_view>
-#include <tuple>
 #include <type_traits>
-#include <variant>
 #include <vector>
 
 namespace rocprofsys::trace_cache
@@ -19,15 +17,6 @@ namespace rocprofsys::trace_cache
 
 namespace type_traits
 {
-
-template <typename T>
-struct tuple_to_variant;
-
-template <typename... Types>
-struct tuple_to_variant<std::tuple<Types...>>
-{
-    using type = std::variant<Types...>;
-};
 
 template <typename T>
 struct is_span : std::false_type

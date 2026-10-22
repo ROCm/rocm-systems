@@ -12,6 +12,7 @@
 #include <map>
 #include <optional>
 #include <utility>
+#include <variant>
 
 namespace rocprofsys::trace_cache
 {
