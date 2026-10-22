@@ -282,7 +282,8 @@ inline uint16_t gfx12_dot2_packed16(uint16_t src0_lo, uint16_t src1_lo, uint16_t
 
 /// @brief GFX12 V_DOT4_F32_{FP8,BF8}_{FP8,BF8}: four OCP FP8 (E4M3) or BF8 (E5M2)
 /// products from packed bytes plus an F32 accumulator.
-template <bool Src0Bf8, bool Src1Bf8>
+/// @tparam Src0Fp8 Selects FP8 for src0, and BF8 otherwise; likewise Src1Fp8.
+template <bool Src0Fp8, bool Src1Fp8>
 inline uint32_t gfx12_dot4_f32_fp8(uint32_t src0, uint32_t src1, uint32_t acc) {
   using namespace gfx12_dot_detail;
   const auto bytes = [](uint32_t packed_bits) {
@@ -290,14 +291,15 @@ inline uint32_t gfx12_dot4_f32_fp8(uint32_t src0, uint32_t src1, uint32_t acc) {
         uint16_t(packed_bits & 0xff), uint16_t((packed_bits >> 8) & 0xff),
         uint16_t((packed_bits >> 16) & 0xff), uint16_t(packed_bits >> 24)};
   };
-  using Src0Format = std::conditional_t<Src0Bf8, Bf8Factor, Fp8Factor>;
-  using Src1Format = std::conditional_t<Src1Bf8, Bf8Factor, Fp8Factor>;
+  using Src0Format = std::conditional_t<Src0Fp8, Fp8Factor, Bf8Factor>;
+  using Src1Format = std::conditional_t<Src1Fp8, Fp8Factor, Bf8Factor>;
   return gfx12_dot_terms<Src0Format, Src1Format, kFp8Dot4Products, false>(bytes(src0), bytes(src1),
                                                                           acc);
 }
 
 /// @brief One GFX12 FP8/BF8 WMMA step: eight native FP8 (E4M3) or BF8 (E5M2)
 /// products plus F32 C, returning raw F32 bits.
+/// @tparam Src0Fp8 Selects FP8 for src0, and BF8 otherwise; likewise Src1Fp8.
 template <bool Src0Fp8, bool Src1Fp8>
 inline uint32_t gfx12_dot8_f32(const std::array<uint8_t, 8> &src0,
                                const std::array<uint8_t, 8> &src1, uint32_t acc) {

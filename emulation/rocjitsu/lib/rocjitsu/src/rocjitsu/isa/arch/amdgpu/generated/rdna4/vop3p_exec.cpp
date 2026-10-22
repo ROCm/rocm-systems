@@ -1451,7 +1451,7 @@ void VDot4F32Fp8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     raw1 = amdgpu::select_packed_halves(raw1, inst_.opsel, inst_.opsel_hi, 1);
     uint32_t acc = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
     acc = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(acc, 2, inst_.neg_hi, inst_.neg);
-    const uint32_t result = amdgpu::gfx12_dot4_f32_fp8<false, true>(raw0, raw1, acc);
+    const uint32_t result = amdgpu::gfx12_dot4_f32_fp8<true, false>(raw0, raw1, acc);
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, result);
   }
 }
@@ -1482,7 +1482,7 @@ RJ_NOINLINE void VDot4F32Fp8Bf8Vop3p::execute_modifier_impl(amdgpu::Wavefront &w
     raw1 = amdgpu::select_packed_halves(raw1, inst_.opsel, inst_.opsel_hi, 1);
     uint32_t acc = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
     acc = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(acc, 2, inst_.neg_hi, inst_.neg);
-    const uint32_t result = amdgpu::gfx12_dot4_f32_fp8<false, true>(raw0, raw1, acc);
+    const uint32_t result = amdgpu::gfx12_dot4_f32_fp8<true, false>(raw0, raw1, acc);
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, result);
   }
   dpp_write_mask_scope_.restore();
@@ -1503,7 +1503,7 @@ void VDot4F32Bf8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     raw1 = amdgpu::select_packed_halves(raw1, inst_.opsel, inst_.opsel_hi, 1);
     uint32_t acc = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
     acc = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(acc, 2, inst_.neg_hi, inst_.neg);
-    const uint32_t result = amdgpu::gfx12_dot4_f32_fp8<true, false>(raw0, raw1, acc);
+    const uint32_t result = amdgpu::gfx12_dot4_f32_fp8<false, true>(raw0, raw1, acc);
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, result);
   }
 }
@@ -1534,7 +1534,7 @@ RJ_NOINLINE void VDot4F32Bf8Fp8Vop3p::execute_modifier_impl(amdgpu::Wavefront &w
     raw1 = amdgpu::select_packed_halves(raw1, inst_.opsel, inst_.opsel_hi, 1);
     uint32_t acc = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
     acc = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(acc, 2, inst_.neg_hi, inst_.neg);
-    const uint32_t result = amdgpu::gfx12_dot4_f32_fp8<true, false>(raw0, raw1, acc);
+    const uint32_t result = amdgpu::gfx12_dot4_f32_fp8<false, true>(raw0, raw1, acc);
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, result);
   }
   dpp_write_mask_scope_.restore();
@@ -1555,7 +1555,7 @@ void VDot4F32Fp8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     raw1 = amdgpu::select_packed_halves(raw1, inst_.opsel, inst_.opsel_hi, 1);
     uint32_t acc = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
     acc = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(acc, 2, inst_.neg_hi, inst_.neg);
-    const uint32_t result = amdgpu::gfx12_dot4_f32_fp8<false, false>(raw0, raw1, acc);
+    const uint32_t result = amdgpu::gfx12_dot4_f32_fp8<true, true>(raw0, raw1, acc);
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, result);
   }
 }
@@ -1586,7 +1586,7 @@ RJ_NOINLINE void VDot4F32Fp8Fp8Vop3p::execute_modifier_impl(amdgpu::Wavefront &w
     raw1 = amdgpu::select_packed_halves(raw1, inst_.opsel, inst_.opsel_hi, 1);
     uint32_t acc = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
     acc = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(acc, 2, inst_.neg_hi, inst_.neg);
-    const uint32_t result = amdgpu::gfx12_dot4_f32_fp8<false, false>(raw0, raw1, acc);
+    const uint32_t result = amdgpu::gfx12_dot4_f32_fp8<true, true>(raw0, raw1, acc);
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, result);
   }
   dpp_write_mask_scope_.restore();
@@ -1607,7 +1607,7 @@ void VDot4F32Bf8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     raw1 = amdgpu::select_packed_halves(raw1, inst_.opsel, inst_.opsel_hi, 1);
     uint32_t acc = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
     acc = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(acc, 2, inst_.neg_hi, inst_.neg);
-    const uint32_t result = amdgpu::gfx12_dot4_f32_fp8<true, true>(raw0, raw1, acc);
+    const uint32_t result = amdgpu::gfx12_dot4_f32_fp8<false, false>(raw0, raw1, acc);
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, result);
   }
 }
@@ -1638,7 +1638,7 @@ RJ_NOINLINE void VDot4F32Bf8Bf8Vop3p::execute_modifier_impl(amdgpu::Wavefront &w
     raw1 = amdgpu::select_packed_halves(raw1, inst_.opsel, inst_.opsel_hi, 1);
     uint32_t acc = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
     acc = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(acc, 2, inst_.neg_hi, inst_.neg);
-    const uint32_t result = amdgpu::gfx12_dot4_f32_fp8<true, true>(raw0, raw1, acc);
+    const uint32_t result = amdgpu::gfx12_dot4_f32_fp8<false, false>(raw0, raw1, acc);
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, result);
   }
   dpp_write_mask_scope_.restore();

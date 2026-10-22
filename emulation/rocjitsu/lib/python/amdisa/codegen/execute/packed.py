@@ -1431,12 +1431,12 @@ def _append_dot_source_halves(L: list[str], opsel_exprs: tuple[str, str]) -> Non
         )
 
 
-# FP8 DOT4 semantic operation -> (src0 is BF8, src1 is BF8).
-_FP8_DOT4_BF8_SOURCES = {
-    'fp8_fp8': ('false', 'false'),
-    'fp8_bf8': ('false', 'true'),
-    'bf8_fp8': ('true', 'false'),
-    'bf8_bf8': ('true', 'true'),
+# FP8 DOT4 semantic operation -> (src0 is FP8, src1 is FP8), as for FP8 WMMA.
+_FP8_DOT4_FP8_SOURCES = {
+    'fp8_fp8': ('true', 'true'),
+    'fp8_bf8': ('true', 'false'),
+    'bf8_fp8': ('false', 'true'),
+    'bf8_bf8': ('false', 'false'),
 }
 
 
@@ -1505,9 +1505,9 @@ def gen_dot4(
         # Only RDNA4 has these; gfx1201 runs them through its DOT datapath.
         if dot_accumulation is not FloatDotAccumulation.GFX12:
             raise ValueError(f'{cls} needs the GFX12 DOT accumulation model')
-        if operation not in _FP8_DOT4_BF8_SOURCES:
+        if operation not in _FP8_DOT4_FP8_SOURCES:
             raise ValueError(f'unhandled FP8 dot4 operation: {operation}')
-        src0_bf8, src1_bf8 = _FP8_DOT4_BF8_SOURCES[operation]
+        src0_fp8, src1_fp8 = _FP8_DOT4_FP8_SOURCES[operation]
         L.append(
             f'    uint32_t acc = amdgpu::RegisterAccess(wf).read_lane({s2}, lane);'
         )
@@ -1516,7 +1516,7 @@ def gen_dot4(
             '    acc = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(acc, 2, inst_.neg_hi, inst_.neg);'
         )
         L.append(
-            f'    const uint32_t result = amdgpu::gfx12_dot4_f32_fp8<{src0_bf8}, {src1_bf8}>(raw0, raw1, acc);'
+            f'    const uint32_t result = amdgpu::gfx12_dot4_f32_fp8<{src0_fp8}, {src1_fp8}>(raw0, raw1, acc);'
         )
         L.append(f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, result);')
     else:  # dot4_u32_u8

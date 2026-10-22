@@ -391,11 +391,11 @@ def test_dot2_true16_rejects_host_float_accumulation():
 def test_rdna4_fp8_dot4_uses_the_gfx12_dot_model():
     from amdisa.semantics import derive_semantics
 
-    for instruction, src0_bf8, src1_bf8 in (
-        ('V_DOT4_F32_FP8_FP8', 'false', 'false'),
-        ('V_DOT4_F32_FP8_BF8', 'false', 'true'),
-        ('V_DOT4_F32_BF8_FP8', 'true', 'false'),
-        ('V_DOT4_F32_BF8_BF8', 'true', 'true'),
+    for instruction, src0_fp8, src1_fp8 in (
+        ('V_DOT4_F32_FP8_FP8', 'true', 'true'),
+        ('V_DOT4_F32_FP8_BF8', 'true', 'false'),
+        ('V_DOT4_F32_BF8_FP8', 'false', 'true'),
+        ('V_DOT4_F32_BF8_BF8', 'false', 'false'),
     ):
         sem = derive_semantics(instruction, 'ENC_VOP3P')
         assert sem.semantic_class == 'dot4_f32_fp8'
@@ -407,7 +407,7 @@ def test_rdna4_fp8_dot4_uses_the_gfx12_dot_model():
             dot_accumulation=FloatDotAccumulation.GFX12,
         )
         assert (
-            f'amdgpu::gfx12_dot4_f32_fp8<{src0_bf8}, {src1_bf8}>(raw0, raw1, acc)'
+            f'amdgpu::gfx12_dot4_f32_fp8<{src0_fp8}, {src1_fp8}>(raw0, raw1, acc)'
             in cpp
         )
         assert (
