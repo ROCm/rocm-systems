@@ -60,11 +60,12 @@ float hostSum(const std::vector<float>& selfSend, const std::vector<float>& inco
   return sum;
 }
 
-void runReduceCase(bool staged, size_t elemStart, size_t nVec, int rank, int nRanks) {
+void runReduceCase(bool staged, size_t elemStart, size_t nVec, int rank, int nRanks, size_t extraStrideElems = 0) {
   constexpr int W = static_cast<int>(sizeof(uint4) / sizeof(float));
   const size_t chunkElems = nVec * static_cast<size_t>(W);
   const size_t elemEnd = elemStart + chunkElems;
-  const size_t strideElems = staged ? chunkElems : elemEnd;
+  // Production passes slotBytes or perRankBytes, which exceed the last chunk.
+  const size_t strideElems = (staged ? chunkElems : elemEnd) + extraStrideElems;
   const size_t incomingStride = strideElems * sizeof(float);
 
   std::vector<float> selfSend(elemEnd, 0.f);
@@ -104,7 +105,7 @@ void runReduceCase(bool staged, size_t elemStart, size_t nVec, int rank, int nRa
     if (got[elem] != exp) ++wrong;
   }
   EXPECT_EQ(wrong, 0u) << "staged=" << staged << " elemStart=" << elemStart << " nVec=" << nVec << " rank=" << rank
-                       << " nRanks=" << nRanks;
+                       << " nRanks=" << nRanks << " strideElems=" << strideElems;
 
   HIP_OK(hipFree(dSelf));
   HIP_OK(hipFree(dIncoming));
@@ -125,4 +126,7 @@ TEST(GinScatterReduceGpu, ChunkMatchesHostSum) {
   runReduceCase(/*staged=*/true, /*elemStart=*/256, overlapping, /*rank=*/0, /*nRanks=*/4);
   runReduceCase(/*staged=*/false, /*elemStart=*/0, /*nVec=*/100, /*rank=*/0, /*nRanks=*/2);
   runReduceCase(/*staged=*/true, /*elemStart=*/64, /*nVec=*/100, /*rank=*/1, /*nRanks=*/3);
+  // Stride strictly larger than the chunk, matching a last-chunk slot or column.
+  runReduceCase(/*staged=*/true, /*elemStart=*/256, overlapping, /*rank=*/0, /*nRanks=*/4, /*extraStrideElems=*/64);
+  runReduceCase(/*staged=*/false, /*elemStart=*/0, /*nVec=*/100, /*rank=*/1, /*nRanks=*/4, /*extraStrideElems=*/32);
 }

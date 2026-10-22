@@ -11,6 +11,7 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
+#include <cstdint>
 
 #include "algorithms/gin/gin_all_reduce_policy.h"
 
@@ -271,6 +272,43 @@ TEST(GinAllReducePolicy, GinScatterChunksTilePerRankBytes) {
             uniformBytes * static_cast<size_t>(nChunks - 1));
   EXPECT_EQ(ginAllReduceGinScatterChunkSize(0, nChunks, uniformBytes, lastBytes), uniformBytes);
   EXPECT_EQ(ginAllReduceGinScatterChunkSize(nChunks - 1, nChunks, uniformBytes, lastBytes), lastBytes);
+}
+
+TEST(GinAllReducePolicy, GinScatterChunksTilePerRankBytesUnstaged) {
+  const int nRanks = 4;
+  const size_t perRank = 128ull * kMiB;
+  const size_t scratch = 512ull * kMiB;
+  EXPECT_FALSE(ginAllReduceGinScatterStaged(perRank, nRanks, scratch));
+  int nChunks = 0;
+  int nPhases = 0;
+  size_t uniformBytes = 0;
+  size_t lastBytes = 0;
+  ginAllReduceGinScatterChunkPlan(perRank, nRanks, scratch, &nChunks, &uniformBytes, &lastBytes, &nPhases);
+  EXPECT_EQ(nChunks, 2);
+  EXPECT_EQ(nPhases, 1);
+  EXPECT_EQ(uniformBytes, 64ull * kMiB);
+  EXPECT_EQ(lastBytes, 64ull * kMiB);
+  const bool overlap = (nChunks > 1) && !(ginAllReduceGinScatterStaged(perRank, nRanks, scratch) && nPhases <= 1);
+  EXPECT_TRUE(overlap);
+}
+
+TEST(GinAllReducePolicy, GinScatterScratchLayout) {
+  constexpr int nRanks = 4;
+  constexpr int rank = 2;
+  constexpr int slot = 1;
+  constexpr size_t slotBytes = 32;
+  constexpr size_t scratchOff = 64;
+  constexpr size_t perRank = 1000;
+  constexpr size_t chunkOff = 16;
+  EXPECT_EQ(ginScatterPutDestOff(scratchOff, rank, nRanks, perRank, slotBytes, slot, chunkOff, false),
+            scratchOff + static_cast<size_t>(rank) * perRank + chunkOff);
+  EXPECT_EQ(ginScatterPutDestOff(scratchOff, rank, nRanks, perRank, slotBytes, slot, chunkOff, true),
+            scratchOff + static_cast<size_t>(slot) * nRanks * slotBytes + static_cast<size_t>(rank) * slotBytes);
+  const auto base = reinterpret_cast<const char*>(static_cast<uintptr_t>(0x10000));
+  EXPECT_EQ(ginScatterIncomingBase(base, nRanks, slotBytes, slot, false), base);
+  const char* staged = ginScatterIncomingBase(base, nRanks, slotBytes, slot, true);
+  EXPECT_EQ(static_cast<uintptr_t>(staged),
+            static_cast<uintptr_t>(base) + static_cast<size_t>(slot) * nRanks * slotBytes);
 }
 
 TEST(GinAllReducePolicy, GinScatterScratchIsIncomingSlots) {

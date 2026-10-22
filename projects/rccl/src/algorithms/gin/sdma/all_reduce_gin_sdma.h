@@ -338,23 +338,6 @@ __device__ __forceinline__ void ginScatterPutRemoteChunk(ncclGin& gin, ncclTeam 
   }
 }
 
-__device__ __forceinline__ size_t ginScatterPutDestOff(size_t scratchOff, int rank, int nRanks, size_t perRankBytes,
-                                                       size_t slotBytes, int slot, size_t chunkOff, bool staged) {
-  if (!staged) {
-    return scratchOff + static_cast<size_t>(rank) * perRankBytes + chunkOff;
-  }
-  return scratchOff + static_cast<size_t>(slot) * static_cast<size_t>(nRanks) * slotBytes +
-         static_cast<size_t>(rank) * slotBytes;
-}
-
-__device__ __forceinline__ const char* ginScatterIncomingBase(const char* scratchBase, int nRanks, size_t slotBytes,
-                                                             int slot, bool staged) {
-  if (!staged) {
-    return scratchBase;
-  }
-  return scratchBase + static_cast<size_t>(slot) * static_cast<size_t>(nRanks) * slotBytes;
-}
-
 __device__ __forceinline__ void ginScatterIssuePut(ncclGin& gin, ncclTeam world, int rank, int nRanks,
                                                   ncclWindow_t scratchWin, size_t scratchOff, ncclWindow_t sendWin,
                                                   size_t sendOff, size_t perRankBytes, size_t slotBytes,
@@ -378,9 +361,11 @@ __device__ __forceinline__ void ginScatterWaitThread0(ncclGin& gin, unsigned sig
 }
 
 // Thread 0 waits until every other rank's own signal has advanced by `add`.
-// `baseline` is this thread's snapshot and is only valid on thread 0.
-__device__ __forceinline__ void ginScatterWaitPeersThread0(ncclGin& gin, unsigned base, const uint64_t* baseline,
-                                                           int rank, int nRanks, uint64_t add) {
+// `baseline` is the CTA-shared snapshot. A reference keeps HIP's shared address
+// space; a plain uint64_t* cannot bind a __shared__ array.
+template <typename Baseline>
+__device__ __forceinline__ void ginScatterWaitPeersThread0(ncclGin& gin, unsigned base, Baseline& baseline, int rank,
+                                                           int nRanks, uint64_t add) {
   if (threadIdx.x != 0) return;
   for (int peer = 0; peer < nRanks; ++peer) {
     if (peer == rank) continue;
@@ -427,6 +412,12 @@ __launch_bounds__(512)
                                                       size_t scratchBytes, uint32_t* intraGpuCtaBar) {
   constexpr int ginContext = 0;
 
+  // Thread 0 of CTA 0 snapshots these. One shared copy per CTA, not a
+  // private array on every thread.
+  __shared__ uint64_t scatterBase[kGinAllReduceMaxRanks];
+  __shared__ uint64_t doneBase[kGinAllReduceMaxRanks];
+  __shared__ uint64_t agValue;
+
   // gin/ginBar must outlive the first put; only CTA 0 snapshots signals and world-syncs.
   // Pipeline steps use per-peer waitSignal / WeakSignalInc, not a shared counter.
   ncclGin gin{devComm, ginContext};
@@ -450,10 +441,6 @@ __launch_bounds__(512)
   const size_t slotBytes = staged ? ginAllReduceGinScatterFitSlot(scratchBytes, nRanks, nPhases) : perRankBytes;
   const size_t incomingStride = staged ? slotBytes : perRankBytes;
   const bool overlap = (nChunks > 1) && !(staged && nPhases <= 1);
-
-  uint64_t scatterBase[kGinAllReduceMaxRanks] = {};
-  uint64_t doneBase[kGinAllReduceMaxRanks] = {};
-  uint64_t agValue = 0;
 
   // One world acquire so every rank snapshots per-peer baselines before any put.
   // Later pipeline steps are per-peer waitSignal doorbells, not ginBar.sync.
