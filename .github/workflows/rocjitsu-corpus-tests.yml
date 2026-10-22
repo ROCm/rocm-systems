@@ -331,6 +331,10 @@ jobs:
           )
           TSAN_EXCLUDED_TESTS=(
             "${COMMON_SANITIZER_EXCLUDED_TESTS[@]}"
+            # The identity assertions pass, but ROCr's uninstrumented SDMA
+            # completion wait hides the happens-before edge between result
+            # readback and host validation. Other lanes retain both cases.
+            "^HipHwIdTest\.MultiXcdDispatchReportsConsistentLocation\.(Gfx942|Gfx950)$"
             # Hardware dispatch reports a TSan race while ROCr tears down its
             # async-event bookkeeping, outside rocjitsu-owned code.
             "HsaTranslateTest\.TranslateAndDispatchVectorAdd"
