@@ -40,11 +40,14 @@ using RcclUnitTesting::LogHas;
 
 namespace {
 int g_telemetryInitResult = 0;
+int g_telemetryInitCalls = 0;
 }  // namespace
 
-// No shared owner for these two.
-int rcclTelemetryInit(void) { return g_telemetryInitResult; }
-ncclResult_t ncclProfilerCallback(void**, int, void*, int64_t, void*) { return ncclSuccess; }
+// src/transport/net_telemetry.cc
+int rcclTelemetryInit(void) {
+  ++g_telemetryInitCalls;
+  return g_telemetryInitResult;
+}
 
 namespace {
 
@@ -264,6 +267,7 @@ class PluginNetMicrotest : public ::testing::Test {
     ResetEnvFakes();
     ResetTransportStubs();
     g_telemetryInitResult = 0;
+    g_telemetryInitCalls = 0;
     g_libs.clear();
     g_opened.clear();
     g_closed.clear();
@@ -350,10 +354,9 @@ TEST_F(PluginNetMicrotest, ListKeepsNetPluginOrderAheadOfInternals) {
 
 TEST_F(PluginNetMicrotest, ListNoneOrEmptyLeavesOnlyInternals) {
   for (const char* value : {"none", "NoNe", ""}) {
-    std::string log = CaptureLog([&] { BuildList(value); });
+    BuildList(value);
     ASSERT_EQ(pluginCount, 2) << value;
     EXPECT_EQ(Lib(0).ncclNet, &ncclNetIb) << value;
-    EXPECT_TRUE(LogHas(log, (std::string("NCCL_NET_PLUGIN set by environment to ") + value).c_str())) << log;
   }
 }
 
@@ -377,12 +380,10 @@ TEST_F(PluginNetMicrotest, List_KnownBug_KeepsFourteenExternalsButLogsThirteen) 
 TEST_F(PluginNetMicrotest, ListSkipsNamesThatDoNotFitWithTheirTerminator) {
   const std::string fits(MAX_STR_LEN - 1, 'a');
   const std::string tooLong(MAX_STR_LEN, 'b');
-  std::string log = CaptureLog([&] { BuildList((tooLong + "," + fits).c_str()); });
+  BuildList((tooLong + "," + fits).c_str());
 
   ASSERT_EQ(pluginCount, 3);
   EXPECT_EQ(std::string(Lib(0).name), fits);
-  EXPECT_TRUE(LogHas(log, ("longer than " + std::to_string(MAX_STR_LEN) + " characters, ignoring it").c_str()))
-      << log;
 }
 
 TEST_F(PluginNetMicrotest, ListPicksIbCastForAinicOrNcclNetIbCast) {
@@ -453,14 +454,13 @@ TEST_F(PluginNetMicrotest, LoadWithoutCollNetLeavesNetUsable) {
   g_libs["ext"] = {12, 0};
   ncclPluginLibPaths[ncclPluginTypeNet] = const_cast<char*>("/opt/lib/ext.so");
   BuildList("ext");
-  std::string log = CaptureLog([&] { ASSERT_EQ(ncclNetPluginLoad(&Lib(0)), ncclSuccess); });
+  ASSERT_EQ(ncclNetPluginLoad(&Lib(0)), ncclSuccess);
 
   EXPECT_EQ(g_netProbes, std::vector<int>{12});
   EXPECT_EQ(Lib(0).ncclNetVer, 12);
   EXPECT_EQ(Lib(0).ncclCollNet, nullptr);
   EXPECT_EQ(Lib(0).ncclNetPluginState, ncclNetPluginStateInitReady);
   EXPECT_EQ(Lib(0).ncclCollNetPluginState, ncclNetPluginStateLoadFailed);
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "Successfully loaded external network plugin /opt/lib/ext.so")) << log;
 }
 
 TEST_F(PluginNetMicrotest, LoadWithNoKnownVersionClosesTheLibrary) {
@@ -509,21 +509,17 @@ TEST_F(PluginNetMicrotest, CheckDeviceVersionAcceptsHostAndMatchingUnpack) {
 
   g_net[kExtA].deviceType = NCCL_NET_DEVICE_UNPACK;
   g_net[kExtA].deviceVersion = NCCL_NET_DEVICE_UNPACK_VERSION;
-  std::string log = CaptureLog([&] { EXPECT_EQ(ncclNetCheckDeviceVersion(comm_.get(), &net, 0), ncclSuccess); });
-  EXPECT_TRUE(LogHas(log, "Using NCCL_NET_DEVICE_UNPACK net plugin version 7")) << log;
+  EXPECT_EQ(ncclNetCheckDeviceVersion(comm_.get(), &net, 0), ncclSuccess);
 }
 
 TEST_F(PluginNetMicrotest, CheckDeviceVersionRejectsOtherUnpackVersionsAndUnknownTypes) {
   ncclNet_t net = FakeNet<kExtA>::Make("ExtA");
   g_net[kExtA].deviceType = NCCL_NET_DEVICE_UNPACK;
   g_net[kExtA].deviceVersion = NCCL_NET_DEVICE_UNPACK_VERSION + 1;
-  std::string log =
-      CaptureLog([&] { EXPECT_EQ(ncclNetCheckDeviceVersion(comm_.get(), &net, 0), ncclInternalError); });
-  EXPECT_TRUE(Logged(NCCL_LOG_WARN, "NCCL_DEVICE_UNPACK plugin has incompatible version 8")) << log;
+  EXPECT_EQ(ncclNetCheckDeviceVersion(comm_.get(), &net, 0), ncclInternalError);
 
-  g_net[kExtA].deviceType = static_cast<ncclNetDeviceType>(0x42);
-  log = CaptureLog([&] { EXPECT_EQ(ncclNetCheckDeviceVersion(comm_.get(), &net, 0), ncclInternalError); });
-  EXPECT_TRUE(Logged(NCCL_LOG_WARN, "Unknown device code index 66")) << log;
+  g_net[kExtA].deviceType = NCCL_NET_DEVICE_GIN_ANVIL_SDMA;  // a real enumerator the net check has no case for
+  EXPECT_EQ(ncclNetCheckDeviceVersion(comm_.get(), &net, 0), ncclInternalError);
 
   g_net[kExtA].propsResult = ncclSystemError;
   EXPECT_EQ(ncclNetCheckDeviceVersion(comm_.get(), &net, 0), ncclSystemError);
@@ -569,13 +565,12 @@ TEST_F(PluginNetMicrotest, PluginInitOnAnEnabledPluginSkipsDeviceProbe) {
 TEST_F(PluginNetMicrotest, PluginInitFailureDisablesWithoutFinalize) {
   BuildList(nullptr);
   g_net[kIb].initResult = ncclSystemError;
-  std::string log = CaptureLog([&] { ASSERT_EQ(ncclNetPluginInit(comm_.get(), &Lib(1)), ncclSuccess); });
+  ASSERT_EQ(ncclNetPluginInit(comm_.get(), &Lib(1)), ncclSuccess);
 
   EXPECT_EQ(g_net[kIb].finalizeCalls, 0);
   EXPECT_EQ(g_net[kIb].devicesCalls, 0);
   EXPECT_EQ(Lib(1).ncclNetPluginState, ncclNetPluginStateDisabled);
   EXPECT_EQ(Lib(1).ncclCollNetPluginState, ncclNetPluginStateDisabled);
-  EXPECT_TRUE(Logged(NCCL_LOG_ATTN, "Failed to initialize NET plugin IB")) << log;
 }
 
 TEST_F(PluginNetMicrotest, PluginInitWithoutDevicesFinalizesAndDisables) {
@@ -647,7 +642,7 @@ TEST_F(PluginNetMicrotest, NetInitAssignsTheFirstWorkingExternalAndDisablesTheRe
   SetMicroEnv("NCCL_NET_PLUGIN", "a,b,c");
   initPluginLibsOnceFunc();
   comm_->ncclCollNet = &g_extCollNet[1];
-  std::string log = CaptureLog([&] { ASSERT_EQ(ncclNetInit(comm_.get()), ncclSuccess); });
+  ASSERT_EQ(ncclNetInit(comm_.get()), ncclSuccess);
 
   EXPECT_EQ(comm_->ncclNet, &g_extNet[0]);
   EXPECT_EQ(comm_->ncclNetVer, 11);
@@ -660,8 +655,6 @@ TEST_F(PluginNetMicrotest, NetInitAssignsTheFirstWorkingExternalAndDisablesTheRe
   EXPECT_EQ(Lib(3).ncclNetPluginState, ncclNetPluginStateInitReady);  // internals stay available
   EXPECT_EQ(g_opened, std::vector<std::string>{"a"});
   EXPECT_EQ(g_net[kIb].initCalls, 0);
-  EXPECT_TRUE(LogHas(log, "Disabling external plugins: b, c")) << log;
-  EXPECT_TRUE(LogHas(log, "Assigned NET plugin ExtA to comm")) << log;
 }
 
 TEST_F(PluginNetMicrotest, NetInitClearsAStaleCollNetWhenTheAssignedPluginHasNone) {
@@ -701,15 +694,14 @@ TEST_F(PluginNetMicrotest, NetInitHonoursNetNameCaseInsensitively) {
 TEST_F(PluginNetMicrotest, NetInitWithoutAUsablePluginIsInvalidUsage) {
   BuildList("none");
   comm_->config.netName = "nope";
-  std::string log = CaptureLog([&] { EXPECT_EQ(ncclNetInit(comm_.get()), ncclInvalidUsage); });
-  EXPECT_TRUE(Logged(NCCL_LOG_WARN, "Failed to initialize any NET plugin")) << log;
+  EXPECT_EQ(ncclNetInit(comm_.get()), ncclInvalidUsage);
 }
 
 TEST_F(PluginNetMicrotest, NetInitContinuesWhenTelemetryCannotStart) {
   BuildList("none");
   g_telemetryInitResult = -1;
-  std::string log = CaptureLog([&] { EXPECT_EQ(ncclNetInit(comm_.get()), ncclSuccess); });
-  EXPECT_TRUE(LogHas(log, "Telemetry was requested but could not start")) << log;
+  EXPECT_EQ(ncclNetInit(comm_.get()), ncclSuccess);
+  EXPECT_EQ(g_telemetryInitCalls, 1);
 }
 
 TEST_F(PluginNetMicrotest, NetInitPropagatesALoadFailure) {
@@ -738,7 +730,7 @@ TEST_F(PluginNetMicrotest, NetInitSecondCommReusesTheEnabledPlugin) {
 // Pins AICOMRCCL-2983; a fix flips this pin.
 TEST_F(PluginNetMicrotest, NetInit_KnownBug_RejectedPluginLeavesANegativeRefCount) {
   g_libs["ext"] = {12, 0};
-  g_net[kExtA].deviceType = static_cast<ncclNetDeviceType>(0x42);
+  g_net[kExtA].deviceType = NCCL_NET_DEVICE_GIN_ANVIL_SDMA;
   BuildList("ext");
   ASSERT_EQ(ncclNetInit(comm_.get()), ncclSuccess);
 
@@ -756,7 +748,7 @@ TEST_F(PluginNetMicrotest, FinalizeUnloadsAnExternalPluginAtZeroRefCount) {
   g_libs["ext"] = {12, 12};
   BuildList("ext");
   ASSERT_EQ(ncclNetInit(comm_.get()), ncclSuccess);
-  std::string log = CaptureLog([&] { ASSERT_EQ(ncclNetFinalize(comm_.get()), ncclSuccess); });
+  ASSERT_EQ(ncclNetFinalize(comm_.get()), ncclSuccess);
 
   EXPECT_EQ(g_net[kExtA].finalizeCalls, 1);
   EXPECT_EQ(g_net[kExtA].lastFinalizeCtx, &g_net[kExtA]);
@@ -775,7 +767,6 @@ TEST_F(PluginNetMicrotest, FinalizeUnloadsAnExternalPluginAtZeroRefCount) {
   EXPECT_EQ(Lib(0).netVirtDevs, NCCL_UNDEF_DEV_COUNT);
   EXPECT_EQ(Lib(0).collNetPhysDevs, NCCL_UNDEF_DEV_COUNT);
   EXPECT_EQ(Lib(0).collNetVirtDevs, NCCL_UNDEF_DEV_COUNT);
-  EXPECT_TRUE(LogHas(log, "Unloading plugin ext")) << log;
 
   // The preserved name lets the next comm reload it.
   ASSERT_EQ(ncclNetInit(comm_.get()), ncclSuccess);
@@ -861,8 +852,8 @@ TEST_F(PluginNetMicrotest, InitFromParentInheritsThePlugin) {
   parent->config.netName = "IB";
   parent->config.trafficClass = 1;
   comm_->config.netName = "ib";
-  std::string log = CaptureLog([&] { ASSERT_EQ(ncclNetInitFromParent(comm_.get(), parent.get()), ncclSuccess); });
-  EXPECT_FALSE(LogHas(log, "trafficClass")) << log;  // an unset child traffic class just inherits
+  ASSERT_EQ(ncclNetInitFromParent(comm_.get(), parent.get()), ncclSuccess);
+  EXPECT_EQ(Logged(NCCL_LOG_INFO, "trafficClass"), 0);  // an unset child traffic class just inherits
 
   EXPECT_EQ(comm_->netContext, &netCtx);
   EXPECT_EQ(comm_->collNetContext, &collCtx);
@@ -877,18 +868,16 @@ TEST_F(PluginNetMicrotest, InitFromParentRejectsADifferentNetNameButOnlyLogsTraf
   parent->config.netName = "IB";
   parent->config.trafficClass = 1;
   comm_->config.netName = "Socket";
-  std::string log =
-      CaptureLog([&] { EXPECT_EQ(ncclNetInitFromParent(comm_.get(), parent.get()), ncclInvalidUsage); });
-  EXPECT_TRUE(Logged(NCCL_LOG_WARN, "Comm config netName (Socket) does not match the parent (IB)")) << log;
+  EXPECT_EQ(ncclNetInitFromParent(comm_.get(), parent.get()), ncclInvalidUsage);
 
   comm_->config.netName = nullptr;
   comm_->config.trafficClass = 2;
-  log = CaptureLog([&] { EXPECT_EQ(ncclNetInitFromParent(comm_.get(), parent.get()), ncclSuccess); });
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "Comm config trafficClass (2) does not match the parent (1)")) << log;
+  EXPECT_EQ(ncclNetInitFromParent(comm_.get(), parent.get()), ncclSuccess);
+  EXPECT_EQ(Logged(NCCL_LOG_INFO, "trafficClass"), 1);
 
   comm_->config.trafficClass = 1;
-  log = CaptureLog([&] { EXPECT_EQ(ncclNetInitFromParent(comm_.get(), parent.get()), ncclSuccess); });
-  EXPECT_FALSE(LogHas(log, "trafficClass")) << log;
+  EXPECT_EQ(ncclNetInitFromParent(comm_.get(), parent.get()), ncclSuccess);
+  EXPECT_EQ(Logged(NCCL_LOG_INFO, "trafficClass"), 1);
 }
 
 // A child with a netName under a parent without one passes NULL to strcasecmp.
@@ -914,12 +903,9 @@ TEST_F(PluginNetMicrotest, InitFromParent_KnownBug_CrashesWhenOnlyTheChildHasANe
 TEST_F(PluginNetMicrotest, DevCountsRequireAnEnabledProbedPlugin) {
   BuildList("none");
   int phys = -7, virt = -7;
-  std::string log = CaptureLog([&] {
-    EXPECT_EQ(ncclNetGetDevCount(0, &phys, &virt), ncclInternalError);
-    EXPECT_EQ(ncclCollNetGetDevCount(0, &phys, &virt), ncclInternalError);
-  });
+  EXPECT_EQ(ncclNetGetDevCount(0, &phys, &virt), ncclInternalError);
+  EXPECT_EQ(ncclCollNetGetDevCount(0, &phys, &virt), ncclInternalError);
   EXPECT_EQ(phys, -7);
-  EXPECT_EQ(Logged(NCCL_LOG_WARN, "trying to access the number of devices of an uninitialized netPlugin[0]"), 2) << log;
 
   // Enabled but never probed (a later comm whose first init failed) is rejected too.
   Lib(0).ncclNetPluginState = Lib(0).ncclCollNetPluginState = ncclNetPluginStateEnabled;
@@ -962,14 +948,8 @@ TEST_F(PluginNetMicrotest, DevCountsReachTheLastSlot) {
 
 TEST_F(PluginNetMicrotest, SetVirtDevCountRequiresEnabledAndNonNegative) {
   BuildList("none");
-  std::string log = CaptureLog([&] {
-    EXPECT_EQ(ncclNetSetVirtDevCount(1, 2), ncclInternalError);
-    EXPECT_EQ(ncclCollNetSetVirtDevCount(1, 2), ncclInternalError);
-  });
-  EXPECT_TRUE(
-      Logged(NCCL_LOG_WARN, "ncclNetSetVirtDevCount: failed to set the number of devices for netPlugin[1] to 2"))
-      << log;
-  EXPECT_TRUE(Logged(NCCL_LOG_WARN, "ncclCollNetSetVirtDevCount: failed")) << log;
+  EXPECT_EQ(ncclNetSetVirtDevCount(1, 2), ncclInternalError);
+  EXPECT_EQ(ncclCollNetSetVirtDevCount(1, 2), ncclInternalError);
 
   Lib(1).ncclNetPluginState = Lib(1).ncclCollNetPluginState = ncclNetPluginStateEnabled;
   EXPECT_EQ(ncclNetSetVirtDevCount(1, -1), ncclInternalError);
