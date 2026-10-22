@@ -75,6 +75,11 @@ Every setting is an environment override, named as in the reference where the se
 large, so use small overrides for a smoke run, for example
 `MAX_COPY_SIZE=65536 MAX_DESTINATIONS=2 scripts/bench-bandwidth-single.sh`.
 
+`scripts/plot-allgather.py` draws latency and bus bandwidth against size as an SVG from the
+`copy-engine-allgather` CSVs (and from the reference's output converted to the same columns), with
+the Python standard library only. Several CSVs per label give the median per size, or the best with
+`--statistic min`.
+
 Not ported: `bench-bandwidth-single-device-triggered.sh` (no device-triggered mode), the
 packet-rate tool and its scripts (the public API has no poll or atomic packets or batched submits, so
 a rate run would only time the submit call that `copy-engine-latency` already reports in
