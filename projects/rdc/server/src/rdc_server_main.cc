@@ -34,6 +34,7 @@ THE SOFTWARE.
 #include <unistd.h>
 
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <csignal>
 #include <cstring>
@@ -246,8 +247,32 @@ bool RDCServer::Run() {
   return true;
 }
 
+// Writes "<text><sig>\n" with write(2): a signal handler cannot use iostreams.
+static void WriteFromSignalHandler(int fd, const char* text, size_t text_len, int sig) {
+  char buf[64];
+  char digits[12];  // more than the 10 digits of a 32-bit unsigned int
+  size_t len = 0;
+  while (len < text_len && len < sizeof(buf) - sizeof(digits) - 1) {
+    buf[len] = text[len];
+    len++;
+  }
+  size_t n = 0;
+  unsigned int value = static_cast<unsigned int>(sig);
+  do {
+    digits[n++] = static_cast<char>('0' + value % 10);
+    value /= 10;
+  } while (value != 0 && n < sizeof(digits));
+  while (n > 0) {
+    buf[len++] = digits[--n];
+  }
+  buf[len++] = '\n';
+  ssize_t written = write(fd, buf, len);
+  (void)written;  // nothing to do about a failed write here
+}
+
 static void HandleSignal(int sig) {
-  std::cout << "Caught signal " << sig << std::endl;
+  static const char kCaught[] = "Caught signal ";
+  WriteFromSignalHandler(STDOUT_FILENO, kCaught, sizeof(kCaught) - 1, sig);
 
   // For most signals, we will want to exit, so make that the default case
   // Handle the other signals specifically.
@@ -264,7 +289,8 @@ static void HandleSignal(int sig) {
       // SIGHUP (restart) is not handled: gRPC does not restart a server well.
 
     default:
-      std::cerr << "Unexpected signal caught" << std::endl;
+      static const char kUnexpected[] = "Unexpected signal caught: ";
+      WriteFromSignalHandler(STDERR_FILENO, kUnexpected, sizeof(kUnexpected) - 1, sig);
   }
 }
 
@@ -272,6 +298,21 @@ static void InitializeSignalHandling(void) {
   // signal(SIGHUP, HandleSignal);
   signal(SIGINT, HandleSignal);
   signal(SIGTERM, HandleSignal);
+}
+
+// The name of a user; the number if it has no (usable) passwd entry.
+static std::string UserName(uid_t uid) {
+  struct passwd pw;
+  struct passwd* result = nullptr;
+  long buf_size = sysconf(_SC_GETPW_R_SIZE_MAX);  // a hint; entries can be larger
+  std::vector<char> buf(buf_size > 0 ? buf_size : 1024);
+  int ret;
+
+  while ((ret = getpwuid_r(uid, &pw, buf.data(), buf.size(), &result)) == ERANGE &&
+         buf.size() < (1 << 20)) {
+    buf.resize(buf.size() * 2);
+  }
+  return (ret == 0 && result) ? pw.pw_name : std::to_string(uid);
 }
 
 static int FileOwner(const char* fn, std::string* owner) {
@@ -287,20 +328,7 @@ static int FileOwner(const char* fn, std::string* owner) {
     perror("Failed to stat lock file");
     return errno;
   }
-  struct passwd pw;
-  struct passwd* result = nullptr;
-  long buf_size = sysconf(_SC_GETPW_R_SIZE_MAX);  // a hint; entries can be larger
-  std::vector<char> buf(buf_size > 0 ? buf_size : 1024);
-
-  while ((ret = getpwuid_r(info.st_uid, &pw, buf.data(), buf.size(), &result)) == ERANGE &&
-         buf.size() < (1 << 20)) {
-    buf.resize(buf.size() * 2);
-  }
-  if (ret && ret != ERANGE) {
-    return ret;
-  }
-  // A uid without a (usable) passwd entry is shown as the number.
-  *owner = (ret == 0 && result) ? pw.pw_name : std::to_string(info.st_uid);
+  *owner = UserName(info.st_uid);
   return 0;
 }
 
@@ -345,10 +373,10 @@ static bool FileIsLocked(std::string fn) {
 
   (void)memset(&fl, 0, sizeof(struct flock));
   errno = 0;
-  fh = open(fn.c_str(), O_RDONLY);
+  fh = open(fn.c_str(), O_RDONLY | O_CLOEXEC | O_NONBLOCK);  // O_NONBLOCK: a FIFO does not block
   if (fh == -1) {
-    if (errno == ENOENT) {
-      // In this case, there was no previous lock.
+    if (errno == ENOENT || errno == EACCES) {
+      // No previous lock, or one this user cannot see: it does not stop this rdcd.
       return false;
     }
     perror(("Failed to open lock file " + fn).c_str());
@@ -370,33 +398,43 @@ static bool FileIsLocked(std::string fn) {
   return true;
 }
 
+[[noreturn]] static void ExitAlreadyRunning(const char* lock_file) {
+  std::cerr << "File " << lock_file << " is locked. Is rdcd already running?" << std::endl;
+  exit(1);
+}
+
+// A root rdcd takes kDaemonLockFileRoot. Any other rdcd takes kDaemonLockFile, which any local
+// user can create, so a root rdcd does not look at it; another user's rdcd stops for a running
+// root rdcd whose lock file it can read.
 static void ExitIfAlreadyRunning(bool is_root) {
-  const char* lock_fn;
+  const char* lock_fn = is_root ? kDaemonLockFileRoot : kDaemonLockFile;
   int lock_fh;
-  std::string lf_user(kDaemonLockFile);
-  std::string lf_root(kDaemonLockFileRoot);
   ssize_t fsz;
 
-  auto chk_if_locked = [&](std::string lock_file) {
-    bool is_locked = FileIsLocked(lock_file);
-
-    if (is_locked) {
-      std::cerr << "File " << lock_file << " is locked. Is rdcd already running?" << std::endl;
-      exit(1);
-    }
-  };
-
-  chk_if_locked(lf_root);
-  chk_if_locked(lf_user);
-
-  if (is_root) {
-    lock_fn = kDaemonLockFileRoot;
-  } else {
-    lock_fn = kDaemonLockFile;
+  if (!is_root && FileIsLocked(kDaemonLockFileRoot)) {
+    ExitAlreadyRunning(kDaemonLockFileRoot);
   }
+
   // Temporarily adjust file-mask to create file with right permissions
   umask(023);
-  lock_fh = open(lock_fn, O_RDWR | O_CREAT, 0644);
+  // Never through a symbolic link (ELOOP), never a directory (EISDIR) or socket (ENXIO), and only
+  // a regular file of rdcd's own user with no other name: rdcd writes into it, and a hard link
+  // could name another file of that user.
+  lock_fh = open(lock_fn, O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0644);
+  bool refused = lock_fh < 0 && (errno == ELOOP || errno == EISDIR || errno == ENXIO);
+  struct stat info;
+  if (lock_fh >= 0 && (fstat(lock_fh, &info) != 0 || !S_ISREG(info.st_mode) ||
+                       info.st_uid != geteuid() || info.st_nlink != 1)) {
+    refused = true;
+  }
+  if (refused) {
+    std::cerr << "Lock file " << lock_fn << " must be a regular file owned by "
+              << UserName(geteuid())
+              << " with no other link; if no rdcd uses it, remove it (as its owner or root), "
+                 "then start rdcd again."
+              << std::endl;
+    exit(1);
+  }
 
   if (lock_fh < 0) {
     std::string user;
@@ -414,12 +452,15 @@ static void ExitIfAlreadyRunning(bool is_root) {
   }
 
   if (lockf(lock_fh, F_TLOCK, 0) < 0) {
-    std::cerr << "Daemon already running. Exiting this instance." << std::endl;
-    exit(0);
+    ExitAlreadyRunning(lock_fn);
   }
   umask(kRSMIUMask);
 
   std::string pid_str = std::to_string(getpid());
+  // Best effort: if this fails, digits of an earlier, longer pid may follow this one.
+  if (ftruncate(lock_fh, 0) != 0) {
+    perror(("Failed to truncate lock file " + std::string(lock_fn)).c_str());
+  }
   fsz = write(lock_fh, pid_str.c_str(), pid_str.size());
   assert(static_cast<unsigned int>(fsz) == pid_str.size());
 }
@@ -465,24 +506,28 @@ static void MakeDaemon(bool is_root) {
   // open descriptors.
   if (getrlimit(RLIMIT_NOFILE, &max_files) < 0) {
     std::cerr << kDaemonName << ": can't get file limit" << std::endl;
+    max_files.rlim_max = 1024;
   }
 
-  // Close files
+  // Close files; leave stdin, stdout and stderr open
   if (max_files.rlim_max > 1024) {
     max_files.rlim_max = 1024;
   }
-  close(0);  // close stdin; leave stdout and stderr open
   for (uint32_t i = 3; i < max_files.rlim_max; i++) {
     close(i);
   }
 
-  // Direct stdin to /dev/null.
+  // Direct stdin to /dev/null, whatever descriptor 0 was (closed, or in use).
   fd0 = open("/dev/null", O_RDWR);
-  if (fd0 != 0) {
-    std::cerr << "unexpected fildes: " << fd0 << std::endl;
+  if (fd0 < 0 || (fd0 != 0 && dup2(fd0, 0) < 0)) {
+    perror("Failed to open /dev/null as stdin");
     exit(1);
   }
+  if (fd0 != 0) {
+    close(fd0);
+  }
 
+  // After the close loop: closing a descriptor of the lock file would drop the lock.
   ExitIfAlreadyRunning(is_root);
 
   InitializeSignalHandling();
@@ -576,10 +621,9 @@ uint32_t ProcessCmdline(RdcdCmdLineOpts* cmdl_opts, int arg_cnt, char** arg_list
         PrintHelp();
         exit(0);
 
-      default:
-        std::cout << "Unknown command line option: \"" << a << "\". Ignoring..." << std::endl;
+      default:  // getopt_long() has named the unknown option or the missing argument
         PrintHelp();
-        return 0;
+        return -1;
     }
   }
 

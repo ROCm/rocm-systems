@@ -9,6 +9,10 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - **`rdc_health_get()` returns `RDC_ST_GROUP_NOT_FOUND` for a GPU group that does not exist**.
   - It returned `RDC_ST_OK` with no health watches, so `rdci health -f` showed every watch as Off and exited successfully, and `rdci health -c` failed asking for watches to be enabled. Both commands now fail with a message that the group does not exist.
 
+- `rdcd` exits with status 1 for an unknown option or a missing option argument, instead of ignoring it and starting, and whenever it finds another `rdcd` running; it exited with status 0 when two started at the same time.
+
+- A non-root `rdcd` no longer refuses to start when it cannot read the lock file of the root `rdcd`, `/var/run/rdcd.lock`. It still stops when it can read that file and the root `rdcd` holds it.
+
 ### Removed
 
 - Removed the unused `GetBlockNameStr()` test helper and its GPU block name map. Nothing called it, and its `static_assert` on `AMDSMI_GPU_BLOCK_LAST` broke the RDC build whenever AMD SMI added an IP block (#10949).
@@ -55,6 +59,8 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - `rdcd` names the owner of a lock file that it cannot open, instead of reporting "Numerical result out of range". It no longer reports "Bad file descriptor" for a lock file that does not exist, and prints the path of a lock file that it cannot read.
 
 - `rdcd` exits at once, with status 1, on a second SIGTERM or SIGINT, or on one that arrives while it shuts down, so another stop request ends a stalled shutdown.
+
+- `rdcd` no longer follows a symbolic link at its lock file path or writes into a file that belongs to another user or has another name, and a root `rdcd` no longer refuses to start because of a `/tmp/rdcd.lock` that another user created and locked. For a lock file it refuses to use, `rdcd` exits with an error that names it.
 
 ## RDC 1.3.1 for ROCm 7.14.0
 
