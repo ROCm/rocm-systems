@@ -144,3 +144,23 @@ ssize_t gin_ibv_query_gid_table(struct ibv_context* context, struct ibv_gid_entr
 int gin_ibv_is_dmabuf_supported(struct ibv_pd* pd) {
   return wrap_ibv_is_dmabuf_supported(pd);
 }
+
+struct ibv_ah* gin_ibv_create_ah(struct ibv_pd* pd, struct ibv_ah_attr* attr) {
+  struct ibv_ah* ah = nullptr;
+  if (wrap_ibv_create_ah(&ah, pd, attr) != ncclSuccess) return nullptr;
+  return ah;
+}
+
+int gin_ibv_destroy_ah(struct ibv_ah* ah) {
+  return wrap_ibv_destroy_ah(ah) == ncclSuccess ? 0 : -1;
+}
+
+uint16_t gin_ibv_flow_label_to_udp_sport(uint32_t flow_label) {
+  // Standalone reimplementation of libibverbs' ibv_flow_label_to_udp_sport inline
+  // (verbs.h). We cannot include verbs.h here — its struct ibv_* tags clash with
+  // rccl's ibvcore.h. The arithmetic is fixed by the RoCEv2 spec (RFC 6438 style
+  // hashing into the IANA-ephemeral UDP source-port range 0xC000..0xFFFF).
+  uint32_t fl_low = flow_label & 0x03FFF;
+  uint32_t fl_high = (flow_label & 0xFC000) >> 14;
+  return static_cast<uint16_t>((fl_low ^ fl_high) | 0xC000);
+}

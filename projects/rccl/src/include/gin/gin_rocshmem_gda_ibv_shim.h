@@ -38,6 +38,18 @@ struct ibv_gid_entry;
 struct ibv_cq_init_attr_ex;
 struct ibv_qp_init_attr_ex;
 struct ibv_parent_domain_init_attr;
+struct ibv_ah;
+struct ibv_ah_attr;
+
+// GRH flow-label field mask (20 bits). A rocSHMEM-ism (not a standard libibverbs
+// macro) needed by provider_gda_mlx5.cpp's host-side mlx5_calc_flow_label(); it
+// reaches that file through this shim (which replaces its rocSHMEM ibv_wrapper
+// include). Kept here, out of the installed ibv_core.hpp that user device code
+// sees. This header is private (never installed), so defining it cannot pollute
+// consumer code.
+#ifndef IB_GRH_FLOWLABEL_MASK
+#define IB_GRH_FLOWLABEL_MASK (0x000FFFFF)
+#endif
 
 // True once rccl's libibverbs symbols have been loaded successfully.
 int gin_ibv_available(void);
@@ -69,5 +81,10 @@ struct ibv_qp* gin_ibv_create_qp_ex(struct ibv_context* context, struct ibv_qp_i
 ssize_t gin_ibv_query_gid_table(struct ibv_context* context, struct ibv_gid_entry* entries, size_t max_entries,
                                 uint32_t flags);
 int gin_ibv_is_dmabuf_supported(struct ibv_pd* pd);
+
+// Address handle + RoCE helpers (used by the compiled-in mlx5 provider).
+struct ibv_ah* gin_ibv_create_ah(struct ibv_pd* pd, struct ibv_ah_attr* attr);
+int gin_ibv_destroy_ah(struct ibv_ah* ah);
+uint16_t gin_ibv_flow_label_to_udp_sport(uint32_t flow_label);
 
 #endif  // GIN_ROCSHMEM_GDA_IBV_SHIM_H_

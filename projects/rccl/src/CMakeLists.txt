@@ -642,6 +642,7 @@ if(ENABLE_ROCSHMEM_GIN)
   # GIN shim headers: in SRC_FILES so hipify copies them to the build tree.
   list(APPEND SRC_FILES
     src/include/gin/gin_rocshmem_gda_ibv_shim.h
+    src/include/gin/gin_rocshmem_gda_host_utils.h
     src/include/gin/gin_rocshmem_gda_debug_ibv.h
     src/include/nccl_device/gin/rocshmem_gda/log.hpp
     src/include/nccl_device/gin/rocshmem_gda/util.hpp
@@ -1275,6 +1276,51 @@ if (ENABLE_ROCSHMEM_GIN)
     endforeach()
     add_custom_target(copy_sdma_device_headers DEPENDS ${_SDMA_DEV_OUTPUTS})
     add_dependencies(copy_rocshmem_headers copy_sdma_device_headers)
+
+    # Compile rocSHMEM's mlx5 provider (provider_gda_mlx5.cpp) into librccl.so.
+    # It is the only provider with out-of-line QP construction (ionic/bnxt are
+    # header-only + dlsym'd), and the last rocshmem host-symbol dependency on the
+    # GIN device path. A build-time sed rewrites its includes and ibv calls to
+    # rccl's own shims; the result follows rccl's target-wide visibility.
+    set(_GIN_MLX5_DIR "${PROJECT_BINARY_DIR}/gin/mlx5")
+    add_custom_command(
+      OUTPUT "${_GIN_MLX5_DIR}/provider_gda_mlx5.cpp"
+      COMMAND ${CMAKE_COMMAND} -E make_directory "${_GIN_MLX5_DIR}"
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${ROCSHMEM_SOURCE_DIR}/src/gda/mlx5/provider_gda_mlx5.cpp"
+        "${_GIN_MLX5_DIR}/provider_gda_mlx5.cpp"
+      # Redirect the two rocshmem includes: ibv_wrapper.hpp (the extern IBVWrapper
+      # ibv link dep) -> rccl's verbs shim; util.hpp -> the private host-utils
+      # header. util.hpp is used ONLY for the CHECK_* abort macros, which must not
+      # live in rccl's INSTALLED util.hpp (a public device header) or their generic
+      # names would pollute consumer TUs.
+      COMMAND sed -i
+        "s|#include \"gda/ibv_wrapper\\.hpp\"|#include \"gin/gin_rocshmem_gda_ibv_shim.h\"|g;s|#include \"util\\.hpp\"|#include \"gin/gin_rocshmem_gda_host_utils.h\"|g"
+        "${_GIN_MLX5_DIR}/provider_gda_mlx5.cpp"
+      # dmabuf probe: rccl's gin_ibv_is_dmabuf_supported takes a PD, but the
+      # rocshmem original's did not. Thread qp.pd (in scope at the create_qp call)
+      # down into mlx5_umem_reg, and give the probe that PD arg.
+      COMMAND sed -i
+        "s|struct ibv_context \\*ctx, void\\* addr, size_t size) {|struct ibv_context *ctx, struct ibv_pd* pd, void* addr, size_t size) {|;s|mlx5_umem_reg(mlx5dv, qp.ctx, umem_buffer|mlx5_umem_reg(mlx5dv, qp.ctx, qp.pd, umem_buffer|;s|ibv\\.is_dmabuf_supported()|ibv.is_dmabuf_supported(pd)|"
+        "${_GIN_MLX5_DIR}/provider_gda_mlx5.cpp"
+      # Route every remaining ibv.<method>( call to the matching gin_ibv_<method>(
+      # shim entry point (create_ah, destroy_ah, flow_label_to_udp_sport,
+      # is_dmabuf_supported). \bibv\. is unambiguous here — the only matches are
+      # these verbs calls.
+      COMMAND sed -i "s|\\bibv\\.|gin_ibv_|g"
+        "${_GIN_MLX5_DIR}/provider_gda_mlx5.cpp"
+      DEPENDS "${ROCSHMEM_SOURCE_DIR}/src/gda/mlx5/provider_gda_mlx5.cpp"
+      COMMENT "Copying + shimming provider_gda_mlx5.cpp -> ${_GIN_MLX5_DIR}/provider_gda_mlx5.cpp"
+      VERBATIM)
+    add_custom_target(copy_rocshmem_mlx5_provider
+      DEPENDS "${_GIN_MLX5_DIR}/provider_gda_mlx5.cpp")
+    add_dependencies(copy_rocshmem_headers copy_rocshmem_mlx5_provider)
+    # Follows rccl's target-wide visibility (hidden in normal builds; default only
+    # in the coverage/MPI-test fixtures, which export everything on purpose). No
+    # per-file override: the old double-free concern is moot now that librccl
+    # duplicates no stateful rocshmem host global (ibv access goes through
+    # wrap_ibv_*), and this TU exports only functions, which cannot double-free.
+    target_sources(rccl PRIVATE "${_GIN_MLX5_DIR}/provider_gda_mlx5.cpp")
   endif()
 
   # Add rule to install ibvcore.h so that it can be found by ibv_core.hpp
