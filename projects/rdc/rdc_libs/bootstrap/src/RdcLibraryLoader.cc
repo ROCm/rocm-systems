@@ -42,13 +42,17 @@ rdc_status_t RdcLibraryLoader::load(const char* filename, int dlopen_flags) {
     RDC_LOG(RDC_ERROR, "RdcLibraryLoader: " << filename_ << " is loaded, cannot load " << filename);
     return RDC_ST_FAIL_LOAD_MODULE;
   }
+  dlerror();  // so that what is read below is this call's error and not an older one
   libHandler_ = dlopen(filename, dlopen_flags);
   if (!libHandler_) {
-    char* error = dlerror();
-    throw RdcException(
-        RDC_ST_FAIL_LOAD_MODULE,
-        std::string("Fail to open ") + std::string(filename) + ": " + std::string(error));
-    return RDC_ST_FAIL_LOAD_MODULE;
+    // dlerror() can be null here, and a std::string built from a null pointer throws.
+    const char* error = dlerror();
+    std::string message = std::string("Fail to open ") + filename;
+    if (error != nullptr) {
+      message += ": ";
+      message += error;
+    }
+    throw RdcException(RDC_ST_FAIL_LOAD_MODULE, message);
   }
   filename_ = filename;
 

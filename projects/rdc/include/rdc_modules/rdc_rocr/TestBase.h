@@ -26,53 +26,93 @@ THE SOFTWARE.
 #include <string>
 #include <vector>
 
+#include "rdc_modules/rdc_rocr/GpuOutcome.h"
 #include "rdc_modules/rdc_rocr/RdcRocrBase.h"
+#include "rdc_modules/rdc_rocr/RocrHandles.h"
 
 namespace amd {
 namespace rdc {
 
+// A step of a check, bracketed in the log by two debug lines: "GPU <entity> <step>: start." when
+// the step begins and "GPU <entity> <step>: done." when it ends, whatever ended it, so that the
+// two lines are always a pair. The steps are the pools' allocations, the kernel loads, the
+// accesses the memory checks make and each memory copy and dispatch, with its wait.
+class LoggedStep {
+ public:
+  LoggedStep(uint32_t entity, const std::string& step);
+  ~LoggedStep();
+
+  LoggedStep(const LoggedStep&) = delete;
+  LoggedStep& operator=(const LoggedStep&) = delete;
+
+ private:
+  const uint32_t entity_;
+  const std::string step_;
+};
+
 class TestBase : public RdcRocrBase {
  public:
-  explicit TestBase(uint32_t gpu_index);
+  // The GPU's entity id, which names it in a text or a log line, its KFD node,
+  // which names its agent, and the outcome this object's sentences go into, which
+  // outlives it: a release that fails runs in its destructor.
+  TestBase(uint32_t gpu_index, uint32_t node_id, GpuOutcome* outcome);
 
   virtual ~TestBase(void);
 
-  enum VerboseLevel { VERBOSE_MIN = 0, VERBOSE_STANDARD, VERBOSE_PROGRESS };
+  // @Brief: Takes this object's reference to ROCr. It is called from the constructor
+  // and Close() from the destructor, where an override of a derived class would not
+  // run, so neither is virtual.
+  hsa_status_t SetUp(void);
 
-  // @Brief: Before run the core measure codes, do something to set up
-  // i.e. init runtime, prepare packet...
-  virtual hsa_status_t SetUp(void);
+  // @Brief: Releases this object's reference to ROCr. It never throws: a failure is
+  // logged and is that GPU's failure, as a throw here would end the process.
+  void Close(void);
 
-  // @Brief: Core measurement codes executing here
-  virtual void Run(void);
+  // The GPU agent whose KFD node is the given one, which is how a check finds the GPU
+  // it was asked about: HSA lists the agents in the KFD topology's order, which is not
+  // RDC's. It throws a SkipException when no agent carries that node, and the
+  // iteration's failure when a call fails.
+  void get_agent_by_node_id(uint32_t node_id, hsa_agent_t* agent);
 
-  // @Brief: Do something clean up
-  virtual void Close(void);
+  // What this sub-test found, in the sentence the GPU's report reads: a sub-test that
+  // checks several things, as the System memory check does its pools, says what each of
+  // them came to rather than one sentence for all of them.
+  void say(rdc_diag_result_t outcome, const std::string& sentence);
 
-  // @Brief: Display the results
-  virtual void DisplayResults(void) const;
+  // Where this object's holders report a release that failed, and the flag they read:
+  // once work on the GPU could not be stopped, nothing that work can touch is released.
+  ReleaseContext* release_context(void) { return &release_context_; }
+  void abandon(void) { release_context_.abandon(); }
+  bool abandoned(void) const { return release_context_.abandoned(); }
 
-  // @Brief: Display information about the test
-  virtual void DisplayTestInfo(void);
+  // The hint each wait carries, a tenth of a second in the ticks ROCr counts a wait's timeout
+  // in, read once per test object: a frequency ROCr cannot report, or one of 0, is this GPU's
+  // failure naming the call.
+  uint64_t wait_hint(void);
 
-  const std::string& description(void) const { return description_; }
+  // What a check does just before it makes a packet ready: an error ROCr reported earlier
+  // suspended the queue, so the dispatch would never complete, and that error is this GPU's
+  // failure before the doorbell; the hint above is read here too, while nothing is dispatched.
+  void before_doorbell(const QueueStatus* status);
 
-  void set_description(std::string d);
-
-  const std::string& get_gpu_info() const { return gpu_info_; }
-  const std::string& get_per_gpu_info() const { return per_gpu_info_; }
-
-  hsa_status_t FindGPUIndex(hsa_agent_t agent, void* data);
-  // Return the agent by GPU index in amd_smi
-  hsa_status_t get_agent_by_gpu_index(uint32_t gpu_index, hsa_agent_t* agent);
+  // The wait for a dispatch, which ends on an error of its queue as well, and the wait for a
+  // memory copy, which runs on ROCr's own path and so ends only on its own signal. Each waits
+  // in hints until the signal is below 1, until the signal reports a failure of its own, which
+  // is this GPU's failure, or until the deadline passes, which abandons the work.
+  void wait_for_kernel(hsa_signal_t signal, const QueueStatus* status);
+  void wait_for_copy(hsa_signal_t signal);
 
  protected:
-  uint32_t gpu_index_;
-  std::string gpu_info_;
-  std::string per_gpu_info_;
+  uint32_t gpu_index_;  // the entity id of the GPU this object checks
+  uint32_t node_id_;    // its KFD node, the agent's key
+  ReleaseContext release_context_;
 
  private:
-  std::string description_;
+  // The wait both of the above are, and the error of a queue read where there is one.
+  void wait_for(hsa_signal_t signal, const QueueStatus* status, bool kernel);
+  void check_queue_error(const QueueStatus* status);
+
+  uint64_t wait_hint_ = 0;  // 0 until the system timestamp frequency has been read
 };
 
 }  // namespace rdc

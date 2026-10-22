@@ -23,218 +23,113 @@ THE SOFTWARE.
 #include "rdc_modules/rdc_rocr/base_rocr_utils.h"
 
 #include <assert.h>
+#include <dlfcn.h>
 #include <fcntl.h>
 #include <libgen.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
+#include <algorithm>
+#include <atomic>
+#include <memory>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include "hsa/hsa.h"
 #include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/rdc_common.h"
+#if RDC_ROCR_TEST_HOOKS
+#include "rdc_modules/rdc_rocr/RocrTestHooks.h"
+#endif
 
 namespace amd {
 namespace rdc {
 
-// Clean up some of the common handles and memory used by RdcRocrBase code, then
-// shut down hsa. Restore HSA_ENABLE_INTERRUPT to original value, if necessary
-hsa_status_t CommonCleanUp(RdcRocrBase* test) {
-  hsa_status_t err;
+// The deadline of each wait on a kernel or a memory copy, which a test replaces through the hook
+// at the end of this file.
+static const uint64_t kWaitDeadlineMs = 10 * 1000;
+static uint64_t s_wait_deadline_ms = kWaitDeadlineMs;
 
-  assert(test != nullptr);
+uint64_t wait_deadline_ms(void) { return s_wait_deadline_ms; }
 
-  if (nullptr != test->kernarg_buffer()) {
-    err = hsa_amd_memory_pool_free(test->kernarg_buffer());
-    throw_if_error(err);
-    test->set_kernarg_buffer(nullptr);
-  }
+// The packets a check's queue holds. One dispatch at a time needs very few, where the largest
+// queue an agent allows is 0x20000 packets, 8 MiB of ring, on ROCr.
+static const uint32_t kCheckQueuePackets = 128;
 
-  if (nullptr != test->main_queue()) {
-    err = hsa_queue_destroy(test->main_queue());
-    throw_if_error(err);
-    test->set_main_queue(nullptr);
-  }
-
-  if (test->aql().completion_signal.handle != 0) {
-    err = hsa_signal_destroy(test->aql().completion_signal);
-    throw_if_error(err);
-  }
-
-  err = hsa_shut_down();
-  throw_if_error(err);
-
-  std::string intr_val;
-
-  if (test->orig_hsa_enable_interrupt() == nullptr) {
-    intr_val = "";
-  } else {
-    intr_val = test->orig_hsa_enable_interrupt();
-  }
-
-  SetEnv("HSA_ENABLE_INTERRUPT", intr_val.c_str());
-
-  return err;
+// The agent's name, read into a buffer of the 64 bytes ROCr writes and kept to at most those
+// 64 characters: ROCr clears the buffer and copies at most 63 characters of the name
+// (amd_gpu_agent.cpp), but a name that fills the buffer leaves no NUL in it.
+std::string read_agent_name(hsa_agent_t agent) {
+  char name[64] = {};
+  const hsa_status_t err = hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, name);
+  throw_if_error(err, "Fail to read the name of the GPU's agent.");
+  return std::string(name, strnlen(name, sizeof(name)));
 }
 
-static const char* PROFILE_STR[] = {
-    "HSA_PROFILE_BASE",
-    "HSA_PROFILE_FULL",
-};
+// The CPU agent a check runs its host side on, the first one ROCr lists.
+hsa_agent_t get_cpu_agent(void) {
+  std::vector<hsa_agent_t> cpus;
+  const hsa_status_t err = hsa_iterate_agents(IterateCPUAgents, &cpus);
+  throw_if_error(err, "Fail to iterate agents.");
+  if (cpus.empty()) {
+    throw_failure("No CPU agent.");
+  }
+  return cpus[0];
+}
 
-/// Verify that the machine running the test has the required profile.
-/// This function will verify that the execution machine meets any specific
-/// test requirement for a profile (HSA_PROFILE_BASE or HSA_PROFILE_FULL).
-/// \param[in] test Test that provides profile requirements.
-/// \returns bool
-///          - true Machine meets test requirements
-///          - false Machine does not meet test requirements
-bool CheckProfileAndInform(RdcRocrBase* test) {
-  if (test->verbosity() > 0) {
-    RDC_LOG(RDC_DEBUG, "Target HW Profile is " << PROFILE_STR[test->profile()]);
+// The packets a check's queue holds: what the check needs, at most what the agent allows. ROCr
+// reports a maximum of 0x20000 and a minimum of 64 for every GPU and refuses a size below that
+// minimum, so this is 128 there and never below it.
+uint32_t get_queue_packets(hsa_agent_t agent) {
+  uint32_t maximum = 0;
+  const hsa_status_t err = hsa_agent_get_info(agent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &maximum);
+  throw_if_error(err,
+                 "Fail to call hsa_agent_get_info() for the size of the agent's largest queue.");
+  return std::min<uint32_t>(kCheckQueuePackets, maximum);
+}
+
+// The kernel's argument segment, checked against the pool it would come from before anything is
+// allocated for it, so that a kernel the check cannot serve costs no allocation and no dispatch.
+void check_kernarg_segment(hsa_amd_memory_pool_t pool, uint32_t* alignment, uint32_t size,
+                           size_t arguments) {
+  if (*alignment == 0) {
+    *alignment = 16;  // what the loader gives a kernel that reports none
   }
 
-  if (test->requires_profile() == -1) {
-    if (test->verbosity() > 0) {
-      RDC_LOG(RDC_DEBUG, "Test can run on any profile. OK.");
-    }
-    return true;
-  } else {
-    RDC_LOG(RDC_DEBUG, "Test requires " << PROFILE_STR[test->requires_profile()] << ". ");
-    if (test->requires_profile() != test->profile()) {
-      RDC_LOG(RDC_DEBUG, "Not Running.");
-      return false;
-    } else {
-      RDC_LOG(RDC_DEBUG, "OK.");
-      return true;
-    }
+  size_t pool_alignment = 0;
+  const hsa_status_t err = hsa_amd_memory_pool_get_info(
+      pool, HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALIGNMENT, &pool_alignment);
+  throw_if_error(err, "Fail to read the alignment of the kernel argument pool.");
+
+  // ROCr hands out whole pages from a page-aligned block, so the pool's own alignment is all a
+  // kernel can be promised, and a value that is not a power of two is not an alignment at all.
+  const bool power_of_two = (*alignment & (*alignment - 1)) == 0;
+  if (!power_of_two || *alignment > pool_alignment) {
+    throw_failure("The kernel asks for an argument segment aligned to " +
+                  std::to_string(*alignment) + " bytes, which the check cannot give it.");
+  }
+
+  if (size < arguments) {
+    throw_failure("The kernel's argument segment is " + std::to_string(size) +
+                  " bytes, shorter than its arguments.");
   }
 }
 
-/// Helper function to process error returned from
-///  iterate function like hsa_amd_agent_iterate_memory_pools
-/// \param[in] Error returned from iterate call
-/// \returns HSA_STATUS_SUCCESS iff iterate call succeeds in finding
-///  what was being searched for
-static hsa_status_t ProcessIterateError(hsa_status_t err) {
-  if (err == HSA_STATUS_INFO_BREAK) {
-    err = HSA_STATUS_SUCCESS;
-  } else if (err == HSA_STATUS_SUCCESS) {
-    // This actually means no pool was found.
-    err = HSA_STATUS_ERROR;
-  }
-  return err;
-}
-
-// Find pools for cpu, gpu and for kernel arguments. These pools have
-// common basic requirements, but are not suitable for all cases. In
-// that case, set cpu_pool(), device_pool() and/or kern_arg_pool()
-// yourself instead of using this function.
-hsa_status_t SetPoolsTypical(RdcRocrBase* test) {
-  hsa_status_t err;
-  if (test->profile() == HSA_PROFILE_FULL) {
-    err = hsa_amd_agent_iterate_memory_pools(*test->cpu_device(), FindAPUStandardPool,
-                                             &test->cpu_pool());
-    throw_if_error(ProcessIterateError(err));
-
-    err = hsa_amd_agent_iterate_memory_pools(*test->cpu_device(), FindAPUStandardPool,
-                                             &test->device_pool());
-    throw_if_error(ProcessIterateError(err));
-
-    err = hsa_amd_agent_iterate_memory_pools(*test->cpu_device(), FindAPUStandardPool,
-                                             &test->kern_arg_pool());
-    throw_if_error(ProcessIterateError(err));
-
-  } else {
-    err = hsa_amd_agent_iterate_memory_pools(*test->cpu_device(), FindStandardPool,
-                                             &test->cpu_pool());
-    throw_if_error(ProcessIterateError(err));
-
-    err = hsa_amd_agent_iterate_memory_pools(*test->gpu_device1(), FindStandardPool,
-                                             &test->device_pool());
-    throw_if_error(ProcessIterateError(err));
-
-    err = hsa_amd_agent_iterate_memory_pools(*test->cpu_device(), FindKernArgPool,
-                                             &test->kern_arg_pool());
-    throw_if_error(ProcessIterateError(err));
-  }
-
-  return HSA_STATUS_SUCCESS;
-}
-
-// Enable interrupts if necessary, and call hsa_init()
-hsa_status_t InitAndSetupHSA(RdcRocrBase* test) {
-  hsa_status_t err;
-
-  if (test->enable_interrupt()) {
-    SetEnv("HSA_ENABLE_INTERRUPT", "1");
-  }
-
-  err = hsa_init();
-  throw_if_error(err);
-
-  return HSA_STATUS_SUCCESS;
-}
-
-// Attempt to find and set test->cpu_device and test->gpu_device1
-hsa_status_t SetDefaultAgents(RdcRocrBase* test) {
-  hsa_agent_t gpu_device1;
-  hsa_agent_t cpu_device;
-  hsa_status_t err;
-
-  gpu_device1.handle = 0;
-  err = hsa_iterate_agents(FindGPUDevice, &gpu_device1);
-  throw_if_error(ProcessIterateError(err));
-  test->set_gpu_device1(gpu_device1);
-
-  cpu_device.handle = 0;
-  err = hsa_iterate_agents(FindCPUDevice, &cpu_device);
-  throw_if_error(ProcessIterateError(err));
-  test->set_cpu_device(cpu_device);
-
-  if (0 == gpu_device1.handle) {
-    RDC_LOG(RDC_ERROR, "GPU Device is not Created properly!");
-    throw_if_error(HSA_STATUS_ERROR, "GPU Device is not Created properly!");
-  }
-
-  if (0 == cpu_device.handle) {
-    RDC_LOG(RDC_ERROR, "CPU Device is not Created properly!");
-    throw_if_error(HSA_STATUS_ERROR, "CPU Device is not Created properly!");
-  }
-
-  if (test->verbosity() > 0) {
-    char name[64] = {0};
-    err = hsa_agent_get_info(gpu_device1, HSA_AGENT_INFO_NAME, name);
-    throw_if_error(err);
-    RDC_LOG(RDC_DEBUG, "The gpu device name is " << name);
-  }
-
-  hsa_profile_t profile;
-  err = hsa_agent_get_info(gpu_device1, HSA_AGENT_INFO_PROFILE, &profile);
-  throw_if_error(err);
-  test->set_profile(profile);
-
-  if (!CheckProfileAndInform(test)) {
-    return HSA_STATUS_ERROR;
-  }
-  return HSA_STATUS_SUCCESS;
-}
-
-// See if the profile of the target matches any required profile by the
-// test program.
-bool CheckProfile(RdcRocrBase const* test) {
-  if (test->requires_profile() == -1) {
-    return true;
-  } else {
-    return (test->requires_profile() == test->profile());
+// The address the pool handed out for a kernel argument buffer.
+void check_kernarg_address(const void* address, uint32_t alignment) {
+  if ((reinterpret_cast<uintptr_t>(address) & (alignment - 1)) != 0) {
+    throw_failure("The kernel argument buffer is not aligned to " + std::to_string(alignment) +
+                  " bytes.");
   }
 }
+
 // Load the specified kernel code from the specified file, inspect and fill
 // in RdcRocrBase member variables related to the kernel and executable.
 // Required Input RdcRocrBase member variables:
-// - gpu_device1()
 // - kernel_file_name()
 // - kernel_name()
 //
@@ -244,179 +139,80 @@ bool CheckProfile(RdcRocrBase const* test) {
 //  -group_segment_size()
 //  -kernarg_size()
 //  -kernarg_align()
-hsa_status_t LoadKernelFromObjFile(RdcRocrBase* test, hsa_agent_t* agent) {
+void LoadKernelFromObjFile(RdcRocrBase* test, hsa_agent_t* agent, CodeObjectReaderHolder* reader,
+                           ExecutableHolder* executable) {
   hsa_status_t err;
   hsa_code_object_reader_t code_obj_rdr = {0};
-  hsa_executable_t executable = {0};
+  hsa_executable_t executable_handle = {0};
 
   assert(test != nullptr);
-  if (agent == nullptr) {
-    agent = test->gpu_device1();  // Assume GPU agent for now
-  }
+  assert(agent != nullptr);
+  assert(reader != nullptr);
+  assert(executable != nullptr);
 
   // if agent name is not set, then set the agent name
   if (!test->get_agent_name().size()) {
-    char agent_name[64];
-    err = hsa_agent_get_info(*agent, HSA_AGENT_INFO_NAME, agent_name);
-    throw_if_error(err);
-    test->set_agent_name(agent_name);
+    test->set_agent_name(read_agent_name(*agent));
   }
 
   std::string kern_name = test->kernel_name();
-  std::string obj_file =
-      search_hsaco_full_path(test->kernel_file_name().c_str(), test->get_agent_name().c_str());
-  if (obj_file == "") {
-    RDC_LOG(RDC_ERROR, "failed to find " << test->kernel_file_name() << " at line " << __LINE__
-                                         << ", errno: " << errno);
-    std::string msg("fail to open ");
-    msg += test->kernel_file_name();
-    throw_if_skip(msg);
-    return HSA_STATUS_ERROR;
+
+  // The descriptor the search opened is the one the reader is made from, so that the file that is
+  // loaded is the file that was found. It is held so that every path out of this function closes
+  // it, and it is closed as soon as the reader has been made, whatever that call returned.
+  FileDescriptorHolder kernel_file =
+      open_kernel_file(test->kernel_file_name(), test->get_agent_name());
+
+  err = hsa_code_object_reader_create_from_file(kernel_file.get(), &code_obj_rdr);
+  kernel_file.reset();
+  if (err == HSA_STATUS_SUCCESS) {
+    reader->reset(code_obj_rdr);
   }
-
-  hsa_file_t file_handle = open(obj_file.c_str(), O_RDONLY);
-
-  if (file_handle == -1) {
-    RDC_LOG(RDC_ERROR, "failed to open " << obj_file.c_str() << " at line " << __LINE__
-                                         << ", file: " << __FILE__);
-    return (hsa_status_t)errno;
-  }
-
-  err = hsa_code_object_reader_create_from_file(file_handle, &code_obj_rdr);
-  throw_if_error(err);
-  close(file_handle);
+  throw_if_error(err, "Fail to read the kernel file.");
 
   err = hsa_executable_create_alt(HSA_PROFILE_FULL, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT, NULL,
-                                  &executable);
-  throw_if_error(err);
-  err = hsa_executable_load_agent_code_object(executable, *agent, code_obj_rdr, NULL, NULL);
-  throw_if_error(err);
-  err = hsa_executable_freeze(executable, NULL);
-  throw_if_error(err);
+                                  &executable_handle);
+  if (err == HSA_STATUS_SUCCESS) {
+    executable->reset(executable_handle);
+  }
+  throw_if_error(err, "Fail to create the kernel's executable.");
+  err = hsa_executable_load_agent_code_object(executable->get(), *agent, reader->get(), NULL, NULL);
+  throw_if_error(err, "Fail to load the kernel.");
+  err = hsa_executable_freeze(executable->get(), NULL);
+  throw_if_error(err, "Fail to freeze the kernel's executable.");
 
   hsa_executable_symbol_t kern_sym;
-  err = hsa_executable_get_symbol(executable, NULL, (kern_name + ".kd").c_str(), *agent, 0,
+  err = hsa_executable_get_symbol(executable->get(), NULL, (kern_name + ".kd").c_str(), *agent, 0,
                                   &kern_sym);
-  throw_if_error(err);
+  throw_if_error(err, "Fail to find the kernel in its executable.");
 
   uint64_t codeHandle;
   err = hsa_executable_symbol_get_info(kern_sym, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT,
                                        &codeHandle);
-  throw_if_error(err);
+  throw_if_error(err, "Fail to read the kernel's code handle.");
   test->set_kernel_object(codeHandle);
 
   uint32_t val;
   err = hsa_executable_symbol_get_info(
       kern_sym, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE, &val);
-  throw_if_error(err);
+  throw_if_error(err, "Fail to read the kernel's private segment size.");
   test->set_private_segment_size(val);
 
   err = hsa_executable_symbol_get_info(kern_sym,
                                        HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE, &val);
-  throw_if_error(err);
+  throw_if_error(err, "Fail to read the kernel's group segment size.");
   test->set_group_segment_size(val);
 
   // Remaining queries only supported on code object v3.
   err = hsa_executable_symbol_get_info(
       kern_sym, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE, &val);
-  throw_if_error(err);
+  throw_if_error(err, "Fail to read the kernel's argument segment size.");
   test->set_kernarg_size(val);
 
   err = hsa_executable_symbol_get_info(
       kern_sym, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_ALIGNMENT, &val);
-  throw_if_error(err);
-  assert(val >= 16 && "Reported kernarg size is too small.");
-  val = (val == 0) ? 16 : val;
+  throw_if_error(err, "Fail to read the kernel's argument segment alignment.");
   test->set_kernarg_align(val);
-
-  return HSA_STATUS_SUCCESS;
-}
-
-hsa_status_t CreateQueue(hsa_agent_t device, hsa_queue_t** queue, uint32_t num_pkts) {
-  hsa_status_t err;
-
-  if (num_pkts == 0) {
-    err = hsa_agent_get_info(device, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &num_pkts);
-    throw_if_error(err);
-  }
-
-  err = hsa_queue_create(device, num_pkts, HSA_QUEUE_TYPE_MULTI, NULL, NULL, UINT32_MAX, UINT32_MAX,
-                         queue);
-  throw_if_error(err);
-
-  return HSA_STATUS_SUCCESS;
-}
-// Initialize the provided aql packet with standard default values, and
-// values from provided RdcRocrBase object.
-hsa_status_t InitializeAQLPacket(const RdcRocrBase* test, hsa_kernel_dispatch_packet_t* aql) {
-  hsa_status_t err;
-
-  assert(aql != nullptr);
-
-  if (aql == nullptr) {
-    return HSA_STATUS_ERROR;
-  }
-
-  // Initialize Packet type as Invalid
-  // Update packet type to Kernel Dispatch
-  // right before ringing doorbell
-  aql->header = 1;
-
-  aql->setup = 1;
-  aql->workgroup_size_x = 256;
-  aql->workgroup_size_y = 1;
-  aql->workgroup_size_z = 1;
-
-  aql->grid_size_x = (uint64_t)256;  // manual_input*group_input; workg max sz
-  aql->grid_size_y = 1;
-  aql->grid_size_z = 1;
-
-  aql->private_segment_size = test->private_segment_size();
-
-  aql->group_segment_size = test->group_segment_size();
-
-  // Pin kernel code and the kernel argument buffer to the aql packet->
-  aql->kernel_object = test->kernel_object();
-
-  // aql->kernarg_address may be filled in by AllocAndSetKernArgs() if it is
-  // called before this function, so we don't want overwrite it, therefore
-  // we ignore it in this function.
-
-  err = hsa_signal_create(1, 0, NULL, &aql->completion_signal);
-
-  return err;
-}
-
-// Copy RdcRocrBase aql object values to the RdcRocrBase object queue in the
-// specified queue position (ind)
-hsa_kernel_dispatch_packet_t* WriteAQLToQueue(RdcRocrBase* test, uint64_t* ind) {
-  assert(test);
-  assert(test->main_queue());
-
-  void* queue_base = test->main_queue()->base_address;
-  const uint32_t queue_mask = test->main_queue()->size - 1;
-  uint64_t que_idx = hsa_queue_add_write_index_relaxed(test->main_queue(), 1);
-  *ind = que_idx;
-
-  hsa_kernel_dispatch_packet_t* staging_aql_packet = &test->aql();
-  hsa_kernel_dispatch_packet_t* queue_aql_packet;
-
-  queue_aql_packet =
-      &(reinterpret_cast<hsa_kernel_dispatch_packet_t*>(queue_base))[que_idx & queue_mask];
-
-  queue_aql_packet->workgroup_size_x = staging_aql_packet->workgroup_size_x;
-  queue_aql_packet->workgroup_size_y = staging_aql_packet->workgroup_size_y;
-  queue_aql_packet->workgroup_size_z = staging_aql_packet->workgroup_size_z;
-  queue_aql_packet->grid_size_x = staging_aql_packet->grid_size_x;
-  queue_aql_packet->grid_size_y = staging_aql_packet->grid_size_y;
-  queue_aql_packet->grid_size_z = staging_aql_packet->grid_size_z;
-  queue_aql_packet->private_segment_size = staging_aql_packet->private_segment_size;
-  queue_aql_packet->group_segment_size = staging_aql_packet->group_segment_size;
-  queue_aql_packet->kernel_object = staging_aql_packet->kernel_object;
-  queue_aql_packet->kernarg_address = staging_aql_packet->kernarg_address;
-  queue_aql_packet->completion_signal = staging_aql_packet->completion_signal;
-
-  return queue_aql_packet;
 }
 
 void WriteAQLToQueueLoc(hsa_queue_t* queue, uint64_t indx, hsa_kernel_dispatch_packet_t* aql_pkt) {
@@ -441,60 +237,31 @@ void WriteAQLToQueueLoc(hsa_queue_t* queue, uint64_t indx, hsa_kernel_dispatch_p
   queue_aql_packet->kernel_object = aql_pkt->kernel_object;
   queue_aql_packet->kernarg_address = aql_pkt->kernarg_address;
   queue_aql_packet->completion_signal = aql_pkt->completion_signal;
-}
 
-// Allocate a buffer in the kern_arg_pool for the kernel arguments and write
-// the arguments to buffer
-hsa_status_t AllocAndSetKernArgs(RdcRocrBase* test, void* args, size_t arg_size) {
-  void* kern_arg_buf = nullptr;
-  hsa_status_t err;
-  size_t buf_size;
-  size_t req_align;
-  assert(args != nullptr);
-  assert(test != nullptr);
-
-  req_align = test->kernarg_align();
-  // Allocate enough extra space for alignment adjustments if necessary
-  buf_size = arg_size + (req_align << 1);
-
-  err = hsa_amd_memory_pool_allocate(test->kern_arg_pool(), buf_size, 0,
-                                     reinterpret_cast<void**>(&kern_arg_buf));
-  throw_if_error(err);
-
-  test->set_kernarg_buffer(kern_arg_buf);
-
-  void* adj_kern_arg_buf = AlignUp(kern_arg_buf, req_align);
-
-  assert(arg_size >= test->kernarg_size());
-  assert(((uintptr_t)adj_kern_arg_buf + arg_size) < ((uintptr_t)kern_arg_buf + buf_size));
-
-  hsa_agent_t ag_list[2] = {*test->gpu_device1(), *test->cpu_device()};
-  err = hsa_amd_agents_allow_access(2, ag_list, NULL, kern_arg_buf);
-  throw_if_error(err);
-
-  err = hsa_memory_copy(adj_kern_arg_buf, args, arg_size);
-  throw_if_error(err);
-
-  test->aql().kernarg_address = adj_kern_arg_buf;
-
-  return HSA_STATUS_SUCCESS;
+  // reserved0 and reserved2 must be 0 (hsa.h), and ROCr leaves the packet contents of a new ring
+  // uninitialized, so they are written from the staging packet, which starts zeroed.
+  queue_aql_packet->reserved0 = aql_pkt->reserved0;
+  queue_aql_packet->reserved2 = aql_pkt->reserved2;
 }
 
 std::string get_lib_dir(const char* lib_name) {
   std::string result;
   char line[1024 * 8];
 
-  FILE* file = fopen("/proc/self/maps", "r");
-  if (file == NULL) return result;
+  // The map is opened with O_CLOEXEC ("e"), so that a program that execs while it is open
+  // does not hand the descriptor on, and the holder closes it on every path out of this
+  // function: the string work below can throw.
+  const std::unique_ptr<FILE, int (*)(FILE*)> file(fopen("/proc/self/maps", "re"), &fclose);
+  if (!file) return result;
   std::string lib_path = "/";
   lib_path += lib_name;
   // 7f4eacb46000 r-xp 00000 08:01 17183106 /lib/x86_64-linux-gnu/libc-2.27.so
-  while (fgets(line, sizeof(line), file)) {
+  while (fgets(line, sizeof(line), file.get())) {
     char* end = strstr(line, lib_path.c_str());
     if (end != NULL) {
       char* start = end;
       while (start > line) {
-        if (isspace(*start)) {
+        if (isspace(static_cast<unsigned char>(*start))) {
           start++;
           break;
         }
@@ -504,7 +271,6 @@ std::string get_lib_dir(const char* lib_name) {
       break;
     }
   }
-  fclose(file);
 
   return result;
 }
@@ -519,28 +285,257 @@ std::string get_app_dir() {
   return "";
 }
 
-std::string search_hsaco_full_path(const char* hsaco_file_name, const char* agent_name) {
-  const std::string lib_dir = get_lib_dir("librdc_rocr.so");
-  const std::string app_dir = get_app_dir();
+#if RDC_ROCR_TEST_HOOKS
+// The directories a test told the module to search, which take the place of the list below. The
+// module's own build does not compile the hook that fills them.
+static std::vector<std::string>& test_kernel_directories(void) {
+  static std::vector<std::string> directories;
+  return directories;
+}
+#endif
 
-  std::vector<std::string> path_to_search;
-  path_to_search.push_back(std::string("./") + hsaco_file_name);
-  path_to_search.push_back(app_dir + "/" + hsaco_file_name);
-  path_to_search.push_back(lib_dir + "/" + hsaco_file_name);
-  path_to_search.push_back(lib_dir + "/rdc/hsaco/" + agent_name + "/" + hsaco_file_name);
-  path_to_search.push_back(lib_dir + "/hsaco/" + agent_name + "/" + hsaco_file_name);
-  // for dev structure
-  path_to_search.push_back(lib_dir + "/../../rdc_libs/rdc_modules/kernels/hsaco/" + agent_name +
-                           "/" + hsaco_file_name);
-  for (std::size_t i = 0; i < path_to_search.size(); i++) {
-    if (::access(path_to_search[i].c_str(), F_OK) == 0) {
-      RDC_LOG(RDC_DEBUG, "Use the file " << path_to_search[i]);
-      return path_to_search[i];
+// One place a kernel file may be: the directory, which the module does not always know, and the
+// path of the file within it.
+struct KernelCandidate {
+  std::string directory;
+  std::string suffix;
+  const char* unknown;  // what names the directory in a log line when the module has none
+};
+
+// The places the module looks for a kernel file, in the order it tries them: the program's own
+// directory, the module's directory, the two trees of kernels under it and the build tree's
+// kernels directory, which is what a module run from a build tree loads from. The working
+// directory is not among them: it is usually root's when the daemon runs, and a file left there
+// would be loaded and run on the GPU. An entry whose directory the module does not know is
+// passed over, so that nothing is looked up at the filesystem root.
+static std::vector<KernelCandidate> kernel_candidates(const std::string& file_name,
+                                                      const std::string& agent_name) {
+  std::vector<KernelCandidate> candidates;
+
+#if RDC_ROCR_TEST_HOOKS
+  if (!test_kernel_directories().empty()) {
+    for (const std::string& directory : test_kernel_directories()) {
+      candidates.push_back({directory, file_name, "<a directory a test named>"});
     }
-    RDC_LOG(RDC_DEBUG, "Skip not exists file " << path_to_search[i]);
+    return candidates;
   }
-  return "";
+#endif
+
+  const std::string app_dir = get_app_dir();
+  const std::string lib_dir = get_lib_dir("librdc_rocr.so");
+  const std::string of_agent = agent_name + "/" + file_name;
+  const char* const module_dir = "<the module's directory>";
+
+  candidates.push_back({app_dir, file_name, "<the program's directory>"});
+  candidates.push_back({lib_dir, file_name, module_dir});
+  candidates.push_back({lib_dir, "rdc/hsaco/" + of_agent, module_dir});
+  candidates.push_back({lib_dir, "hsaco/" + of_agent, module_dir});
+  candidates.push_back(
+      {lib_dir, "../../rdc_libs/rdc_modules/kernels/hsaco/" + of_agent, module_dir});
+  return candidates;
+}
+
+FileDescriptorHolder open_kernel_file(const std::string& file_name, const std::string& agent_name) {
+  // The first reason a candidate gave that is not "there is no such name": a kernel file that is
+  // there but cannot be read is a failure to report, where a name that is not there is not.
+  int first_errno = 0;
+
+  for (const KernelCandidate& candidate : kernel_candidates(file_name, agent_name)) {
+    if (candidate.directory.empty()) {
+      RDC_LOG(RDC_DEBUG, "Kernel file candidate " << candidate.unknown << "/" << candidate.suffix
+                                                  << ": its directory is not known.");
+      continue;
+    }
+
+    const std::string path = candidate.directory + "/" + candidate.suffix;
+    // O_NONBLOCK so that a FIFO or a device node of that name cannot hold the check up, which it
+    // does not change for a regular file, and O_CLOEXEC so that no process the daemon starts is
+    // given the descriptor.
+    FileDescriptorHolder file(open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NONBLOCK));
+    if (file.empty()) {
+      const int reason = errno;
+      if (first_errno == 0 && reason != ENOENT && reason != ENOTDIR) {
+        first_errno = reason;
+      }
+      RDC_LOG(RDC_DEBUG, "Kernel file candidate " << path << ": errno " << reason << ".");
+      continue;
+    }
+
+    struct stat about = {};
+    if (fstat(file.get(), &about) != 0) {
+      const int reason = errno;
+      if (first_errno == 0 && reason != ENOENT && reason != ENOTDIR) {
+        first_errno = reason;
+      }
+      RDC_LOG(RDC_DEBUG, "Kernel file candidate " << path << ": fstat errno " << reason << ".");
+      continue;
+    }
+    if (!S_ISREG(about.st_mode)) {
+      RDC_LOG(RDC_DEBUG, "Kernel file candidate " << path << ": not a regular file.");
+      continue;
+    }
+
+    RDC_LOG(RDC_DEBUG, "Kernel file candidate " << path << ": opened.");
+    return file;
+  }
+
+  if (first_errno != 0) {
+    throw_failure("Fail to open " + file_name + " for " + agent_name + ", errno " +
+                  std::to_string(first_errno) + ".");
+  }
+
+  // A kernel that is not installed for this agent is what the sub-test reports, so the log keeps
+  // it at debug level: an installation without this agent's kernels is not an error of the run.
+  RDC_LOG(RDC_DEBUG, "No " << file_name << " is installed for " << agent_name << ".");
+  throw_if_skip("No " + file_name + " is installed for " + agent_name + ".");
+  return FileDescriptorHolder();
+}
+
+std::string wait_deadline_text(uint64_t deadline_ms) {
+  if (deadline_ms < 1000) {
+    return std::to_string(deadline_ms) + " ms";
+  }
+  return std::to_string(deadline_ms / 1000) + " s";
+}
+
+namespace {
+
+// The record of the GPUs whose work a check could not stop: one slot per GPU, each claimed once
+// and never cleared, so that the checks stay disabled for the life of the process. Eight covers
+// the runs that can be in flight when the first of them abandons its work.
+constexpr size_t kAbandonedSlots = 8;
+constexpr uint64_t kFreeSlot = UINT64_MAX;
+std::atomic<uint64_t> s_abandoned_gpus[kAbandonedSlots] = {{kFreeSlot}, {kFreeSlot}, {kFreeSlot},
+                                                           {kFreeSlot}, {kFreeSlot}, {kFreeSlot},
+                                                           {kFreeSlot}, {kFreeSlot}};
+
+// The queue's error, which ROCr reports from a thread of its own. The callback only stores the
+// status, which each wait and the check before each doorbell read, and it never throws.
+void queue_error_reported(hsa_status_t status, hsa_queue_t*, void* data) noexcept {
+  if (data == nullptr) {
+    return;
+  }
+  static_cast<QueueStatus*>(data)->store(status, std::memory_order_release);
+}
+
+// The module keeps itself mapped for the life of the process: the callback above and the record
+// must stay where they are after the loader has closed the module, which it does when a program
+// that embeds RDC stops it. dladdr names the file this code is in and a dlopen of that file with
+// RTLD_NOLOAD takes a reference that is never closed. Where this code is part of an executable,
+// which is never unmapped, that dlopen answers nothing and the line below says so.
+void pin_the_module(uint32_t entity) {
+  Dl_info about = {};
+  if (::dladdr(reinterpret_cast<const void*>(&pin_the_module), &about) == 0 ||
+      about.dli_fname == nullptr || about.dli_fname[0] == '\0') {
+    RDC_LOG(RDC_ERROR, "Cannot pin the module: dladdr gave no file; the record of GPU "
+                           << entity << " lasts while the module stays mapped.");
+    return;
+  }
+
+  // An error another call left pending is cleared first, so that what is read below is this
+  // dlopen's own, and that text is used only where there is one: a null pointer streamed into
+  // std::cout would leave it bad and silence every later line of the process.
+  (void)::dlerror();
+  if (::dlopen(about.dli_fname, RTLD_LAZY | RTLD_NOLOAD | RTLD_NODELETE) != nullptr) {
+    return;
+  }
+  const char* const reported = ::dlerror();
+  std::string line = "Cannot pin " + std::string(about.dli_fname) +
+                     " with dlopen; the record of GPU " + std::to_string(entity) +
+                     " lasts while the module stays mapped.";
+  if (reported != nullptr) {
+    line += " ";
+    line += reported;
+  }
+  RDC_LOG(RDC_ERROR, line);
+}
+
+}  // namespace
+
+void abandon_gpu(uint32_t entity) {
+  try {
+    // A GPU that is in the record already spends no second slot, so that two runs which abandon
+    // their work on the same GPU leave one entry and the texts name it once.
+    const uint64_t recorded = entity;
+    for (std::atomic<uint64_t>& slot : s_abandoned_gpus) {
+      if (slot.load(std::memory_order_acquire) == recorded) {
+        return;
+      }
+    }
+
+    // The module is pinned before the claim below publishes the entity, so that nothing can read
+    // the record while the code that holds it could still be unmapped; a GPU the scan above
+    // found is already covered by the pin the run that recorded it took.
+    pin_the_module(entity);
+
+    for (std::atomic<uint64_t>& slot : s_abandoned_gpus) {
+      uint64_t free_slot = kFreeSlot;
+      if (slot.compare_exchange_strong(free_slot, recorded, std::memory_order_release,
+                                       std::memory_order_acquire)) {
+        return;
+      }
+      if (free_slot == recorded) {
+        // Another run recorded this GPU while this one was looking for a slot.
+        return;
+      }
+    }
+    RDC_LOG(RDC_ERROR, "The ROCr checks could not stop their work on GPU "
+                           << entity
+                           << " and have no slot left to record it; the checks are disabled for "
+                              "the GPUs that are recorded.");
+  } catch (...) {
+    // This runs on a destructor's path as well: a line that cannot be put together is dropped
+    // rather than ending the process.
+  }
+}
+
+std::vector<uint32_t> abandoned_gpus(void) {
+  std::vector<uint32_t> entities;
+  for (const std::atomic<uint64_t>& slot : s_abandoned_gpus) {
+    const uint64_t recorded = slot.load(std::memory_order_acquire);
+    if (recorded != kFreeSlot) {
+      entities.push_back(static_cast<uint32_t>(recorded));
+    }
+  }
+  return entities;
+}
+
+hsa_status_t create_check_queue(hsa_agent_t agent, QueueStatusHolder* status, QueueHolder* queue) {
+  // The block is this queue's own and is made before it, so that the callback has somewhere to
+  // write from the moment ROCr can call it.
+  status->reset(new QueueStatus(HSA_STATUS_SUCCESS));
+
+  hsa_queue_t* made = nullptr;
+  const hsa_status_t err = hsa_queue_create(agent, get_queue_packets(agent), HSA_QUEUE_TYPE_MULTI,
+                                            queue_error_reported, status->get(), 0, 0, &made);
+  if (err == HSA_STATUS_SUCCESS) {
+    queue->reset(made);
+  }
+  return err;
 }
 
 }  // namespace rdc
 }  // namespace amd
+
+#if RDC_ROCR_TEST_HOOKS
+// The hooks of RocrTestHooks.h, which only the unit tests' build of these sources defines. A test
+// calls them before a run; nothing else reads what they write.
+void rdc_rocr_test_set_kernel_directories(const char* const* directories, size_t count) {
+  std::vector<std::string>& named = amd::rdc::test_kernel_directories();
+  named.clear();
+  if (directories == nullptr) {
+    return;
+  }
+  for (size_t i = 0; i < count; i++) {
+    if (directories[i] != nullptr) {
+      named.push_back(directories[i]);
+    }
+  }
+}
+
+uint64_t rdc_rocr_test_set_wait_deadline_ms(uint64_t deadline_ms) {
+  const uint64_t replaced = amd::rdc::s_wait_deadline_ms;
+  amd::rdc::s_wait_deadline_ms = deadline_ms;
+  return replaced;
+}
+#endif

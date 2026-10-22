@@ -71,10 +71,19 @@ rdc_status_t RdcLibraryLoader::load_symbol(T* func_handler, const char* func_nam
     return RDC_ST_FAIL_LOAD_MODULE;
   }
 
+  dlerror();  // so that what is read below is this call's error and not an older one
   *reinterpret_cast<void**>(func_handler) = dlsym(libHandler_, func_name);
   if (*func_handler == nullptr) {
-    char* error = dlerror();
-    RDC_LOG(RDC_ERROR, "RdcLibraryLoader: Fail to load the symbol " << func_name << ": " << error);
+    // A symbol whose value is 0 resolves to nothing with no error to report, and a
+    // null one streamed into the log would leave std::cout bad for the rest of the
+    // process.
+    const char* error = dlerror();
+    std::string message = std::string("RdcLibraryLoader: Fail to load the symbol ") + func_name;
+    if (error != nullptr) {
+      message += ": ";
+      message += error;
+    }
+    RDC_LOG(RDC_ERROR, message);
     return RDC_ST_FAIL_LOAD_MODULE;
   }
 

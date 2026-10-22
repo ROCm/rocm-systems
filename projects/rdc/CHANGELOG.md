@@ -15,7 +15,18 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - `rdci diag`'s compute process lines cover only the GPUs of the group, and leave out the process that runs the check (`rdcd`, or the program that embeds RDC), which can stay listed on a GPU after the ROCr diagnostics have used it.
 
-- `rdci diag` cuts a compute process, node topology or GPU parameters detail too long to show after a whole sentence, GPU pair or process ID and ends it with "(N more not shown)".
+- `rdci diag` cuts a compute process, node topology, GPU parameters, Compute Queue or System memory detail too long to show after a whole sentence, GPU pair or process ID and ends it with "(N more not shown)".
+
+- `rdci diag` skips the Compute Queue and System memory checks on a GPU it cannot match to a GPU that ROCr lists, for example when AMD SMI cannot report the GPU's KFD node or ROCR_VISIBLE_DEVICES hides it, instead of testing whichever GPU ROCr lists in that position.
+
+- `rdci diag`'s Compute Queue and System memory checks no longer spend about 0.75 seconds of CPU time per GPU in an unused timer (more on CPUs with a lower base clock).
+
+- `rdci diag`'s Compute Queue and System memory checks report a GPU, or a part of a check, that they could not run as skipped, with the reason, instead of passed.
+
+- `rdci diag`'s System memory check uses much less GPU memory and time.
+  - It allocates and frees up to 64 MiB in each GPU memory pool that allows allocation instead of half of the pool, has the CPU write and read back 8 KiB of each GPU's memory instead of about 2 MB, and reports a pool without free memory as skipped instead of failed.
+
+- The GPU memory that ROCr reserves for each GPU's queue in `rdci diag`'s Compute Queue and System memory checks, by default about 140 MiB, is now held until the check has finished the whole group, instead of being released after each GPU, where no other part of RDC is using ROCr.
 
 ### Removed
 
@@ -81,6 +92,31 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - `rdci diag` no longer shows the results of an earlier run for a check that did not run.
 
 - `rdcd` no longer logs an error for each diagnostic run with a custom configuration.
+
+- `rdci diag`'s Compute Queue and System memory checks run on the GPU each result names, report a result and a line for each GPU, and name each GPU in their progress lines.
+
+- `rdci diag` reports correct per-GPU results for groups with GPU partitions.
+
+- `rdci diag`'s Compute Queue and System memory checks keep working after a check on one GPU stops early, for example on a GPU without a compute queue kernel, and no longer leave GPU memory allocated after it.
+  - Before, they failed on every later run until `rdcd` restarted, and `rdcd`'s profiler fields, when first read after such a check, had no values until then; in an `rdcd` that had read a profiler field first, each such check instead left GPU memory allocated until `rdcd` stopped.
+
+- `rdcd` no longer stops when a Compute Queue or System memory check fails to clean up.
+
+- `rdci diag`'s Compute Queue and System memory checks no longer clear the `HSA_ENABLE_INTERRUPT` environment variable of the process that runs them.
+
+- Fixed memory-safety issues in `rdci diag`'s Compute Queue and System memory checks.
+
+- `rdci diag`'s Compute Queue check fails a GPU whose kernel returns a wrong search result; before, it reported such a run as passed.
+
+- A diagnostic GPU kernel or memory copy that does not finish in 10 seconds fails its GPU's check instead of holding the diagnostic run, and a diagnostic queue that cannot be destroyed fails its GPU's check, where its failure was ignored.
+  - Until the process that runs them (`rdcd`, or a program that embeds RDC) restarts, later runs report that GPU as failed and every other GPU of the Compute Queue and System memory checks as skipped, and the GPU memory the stopped check had reserved, by default about 140 MiB on each GPU it had reached, stays reserved.
+
+- RDC no longer loads diagnostic kernels from the working directory of the process that runs them (`rdcd`, or a program that embeds RDC).
+
+- `rdci diag`'s System memory check reports a value mismatch as its GPU's failure; `rdcd` logs it at debug level instead of always printing it to its standard output.
+
+- The `rdc_diag_kernel_tests` program of the RDC test package starts from its installed location.
+  - It now also checks the diagnostic kernels installed under `lib/rdc/hsaco`; before, it checked only the build machine's source tree and reported its checks as skipped when that tree was absent.
 
 ## RDC 1.3.1 for ROCm 7.14.0
 

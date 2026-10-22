@@ -30,6 +30,7 @@ THE SOFTWARE.
 
 #include "hsa/hsa.h"
 #include "rdc_modules/rdc_rocr/RdcRocrBase.h"
+#include "rdc_modules/rdc_rocr/RocrHandles.h"
 #include "rdc_modules/rdc_rocr/common.h"
 
 namespace amd {
@@ -37,45 +38,53 @@ namespace rdc {
 
 /// Open binary kernel object file and set all member data related to the
 /// kernel. Assumes that input test already has the kernel file name,
-/// agent name and kernel function specified
+/// agent name and kernel function specified. The caller owns the code object
+/// reader and the executable, which must live until the dispatch is done:
+/// destroying the executable would make the kernel object it reports invalid.
 /// \param[in] test Test for which the kernel will be loaded.
 /// \param[in] agent for which the kernel will be loaded .
-/// \returns HSA_STATUS_SUCCESS if no errors
-hsa_status_t LoadKernelFromObjFile(RdcRocrBase* test, hsa_agent_t* agent);
+/// \param[out] reader Holder that takes the code object reader
+/// \param[out] executable Holder that takes the executable
+/// A call that fails is this GPU's failure, named with its status, and a kernel that is not
+/// installed for the agent is this sub-test's skip: both leave by throwing.
+void LoadKernelFromObjFile(RdcRocrBase* test, hsa_agent_t* agent, CodeObjectReaderHolder* reader,
+                           ExecutableHolder* executable);
 
-/// Do initialization tasks for HSA test program.
-/// \param[in] test Test to initialize
-/// \returns HSA_STATUS_SUCCESS if no errors
-hsa_status_t InitAndSetupHSA(RdcRocrBase* test);
+/// The agent's name, read into a buffer of the 64 bytes ROCr writes and kept to at most those
+/// 64 characters: ROCr clears the buffer and copies at most 63 characters, but a name that fills
+/// it leaves no NUL, which a reader of the buffer must not run past.
+/// \param[in] agent Agent whose name is read
+/// \returns The agent's name, at most 64 characters long
+std::string read_agent_name(hsa_agent_t agent);
 
-/// Find and set the cpu and gpu agent member variables. Also checks that
-/// gpu agent meets test requirements (e.g., FULL profile vs. BASE profile).
-hsa_status_t SetDefaultAgents(RdcRocrBase* test);
+/// The CPU agent a check runs its host side on, the first one ROCr lists. A host that lists none
+/// is that GPU's failure, "No CPU agent.".
+/// \returns The CPU agent
+hsa_agent_t get_cpu_agent(void);
 
-/// For the provided device agent, create an AQL queue
-/// \param[in] device Device for which a queue is to be created
-/// \param[out] queue Address to which created queue pointer will be written
-/// \param[in] num_pkts Size of the queue to create
-/// \param[in] do_profile [Optional] Specify whether profiled queue should
-///  be created
-/// \returns  HSA_STATUS_SUCCESS if no errors encountered
-hsa_status_t CreateQueue(hsa_agent_t device, hsa_queue_t** queue, uint32_t num_pkts = 0);
+/// The packets a check's queue holds: what the check needs, at most what the agent allows. A
+/// failed query is that GPU's failure, naming the call.
+/// \param[in] agent Agent the queue will be created on
+/// \returns The number of packets to ask for
+uint32_t get_queue_packets(hsa_agent_t agent);
 
-/// This function sets some reasonable default values for an AQL packet.
-/// Override any field as necessary after calling this function.
-/// \param[in] test Test from which information to populate aql packet can
-/// be drawn.
-/// \param[inout] aql Caller provided pointer to aql packet that will be
-/// populated
-/// \returns Appropriate hsa_status_t
-hsa_status_t InitializeAQLPacket(const RdcRocrBase* test, hsa_kernel_dispatch_packet_t* aql);
+/// The kernel's argument segment, as the loaded symbol reports it, checked before anything is
+/// allocated for it: the loader takes an alignment of 0 as 16, an alignment that is not a power
+/// of two or is above what the pool promises cannot be met, and a segment shorter than the
+/// arguments the check writes would leave the kernel reading bytes nobody wrote. Either is that
+/// GPU's failure, so that the check allocates nothing and dispatches nothing.
+/// \param[in] pool Pool the kernel argument buffer would be allocated from
+/// \param[inout] alignment The kernel's argument segment alignment, 0 being taken as 16
+/// \param[in] size The kernel's argument segment size
+/// \param[in] arguments The bytes of arguments the check writes into that segment
+void check_kernarg_segment(hsa_amd_memory_pool_t pool, uint32_t* alignment, uint32_t size,
+                           size_t arguments);
 
-/// This function writes all of the aql packet fields to the queue besides
-/// "setup" and "header". This assumes all the aql fields have be set
-/// appropriately.
-/// \param[in] test Test containing the queue and aql packet to be written.
-/// \returns Pointer to dispatch packet in queue that was written to
-hsa_kernel_dispatch_packet_t* WriteAQLToQueue(RdcRocrBase* test, uint64_t* ind);
+/// The address the pool handed out for a kernel argument buffer, which must meet the kernel's
+/// alignment: a misaligned one is that GPU's failure, with no dispatch.
+/// \param[in] address The address the pool handed out
+/// \param[in] alignment The alignment the kernel asks for
+void check_kernarg_address(const void* address, uint32_t alignment);
 
 void WriteAQLToQueueLoc(hsa_queue_t* queue, uint64_t indx, hsa_kernel_dispatch_packet_t* aql_pkt);
 /// This function writes the first 32 bits of an aql packet to the provided
@@ -92,64 +101,6 @@ inline void AtomicSetPacketHeader(uint16_t header, uint16_t setup,
                    __ATOMIC_RELEASE);
 }
 
-/// Perform common operations to clean up after executing a test. Specifically,
-/// hsa_shut_down() is called and environment variables that were changed are
-/// reset to their original values.
-/// \param[in] test Test for which clean up with be performed
-/// \returns HSA_STATUS_SUCCESS if everything cleaned up ok, or appropriate HSA
-///   error code otherwise.
-hsa_status_t CommonCleanUp(RdcRocrBase* test);
-
-///  Check to see if target machine has the necessary profile to run the
-///  provided test.
-///  \param[1] test The test that specifies the required profile.
-bool CheckProfile(RdcRocrBase const* test);
-
-/// Allocate memory from the kernel args pool and write the provided argument
-/// data to the kernel arg memory. Assumes kern_arg memory pool has been
-/// assigned. The amount of memory allocated will actually be \p arg_size
-/// plus the alignment required by the kernel arguments. The argument will
-/// be written with the proper alignment within the allocated buffer.
-/// \p test kernarg_buffer() will point to the allocated buffer, and it should
-/// be freed when the kernel is no longer being used.
-/// \param test Test from which to find kern_arg pool to write arguments
-/// \param args pointer to block of data containing kernel arguments to be
-///  written. Arguments are assumed to be of the correct placement, length,
-///  and with any padding that is expected by the OpenCL kernel
-/// \param arg_size Size of the kernel arg data (including padding) to be
-/// written
-/// \returns HSA_STATUS_SUCCESS if no errors
-hsa_status_t AllocAndSetKernArgs(RdcRocrBase* test, void* args, size_t arg_size);
-
-/// Verify that the machine running the test has the required profile.
-/// This function will verify that the execution machine meets any specific
-/// test requirement for a profile (HSA_PROFILE_BASE or HSA_PROFILE_FULL).
-/// \param[in] test Test that provides profile requirements.
-/// \returns bool
-///          - true Machine meets test requirements
-///          - false Machine does not meet test requirements
-bool CheckProfileAndInform(RdcRocrBase* test);
-
-/// This function will set the cpu and gpu memory pools to the type used in
-/// many applications.
-/// \param[in] test Test that provides profile requirements.
-/// \returns HSA_STATUS_SUCCESS if everything cleaned up ok, or appropriate HSA
-///   error code otherwise.
-hsa_status_t SetPoolsTypical(RdcRocrBase* test);
-
-/// Work-around for hsa_amd_memory_fill, which is currently broken.
-/// \param[in] ptr Pointer to start of memory location to be filled
-/// \param[in] value Value to write to each byte of input buffer
-/// \param[in] count Size of buffer to fill
-/// \param[in] dst_ag Agent owning the buffer to be filled
-/// \param[in] src_ag Agent wanting to do the fill
-/// \param[in] test Test that has handles to cpu and gpu agents that can own
-/// either source or destination of fill
-/// \returns HSA_STATUS_OK if not errors
-hsa_status_t hsa_memory_fill_workaround_gen(void* ptr, uint32_t value, size_t count,
-                                            hsa_agent_t dst_ag, hsa_agent_t src_ag,
-                                            RdcRocrBase* test);
-
 /// Get the library directory which is loaded by current process.
 /// It will search /proc/self/maps for it.
 /// return empty string if fail.
@@ -158,9 +109,40 @@ std::string get_lib_dir(const char* lib_name);
 /// Get the app dir by looking at link of /proc/self/exe
 std::string get_app_dir();
 
-// Search multiple folder for the hsaco file
-// Return empty if cannot find it.
-std::string search_hsaco_full_path(const char* hsaco_file_name, const char* agent_name);
+/// The kernel file for the agent, open. Each directory the module searches is tried in order
+/// and the file in it opened, so that the file the reader is made from is the file that was
+/// found; a candidate that does not open, or that is not a regular file, is passed over with a
+/// debug line. A file that is installed nowhere is the sub-test's skip, "No <file> is installed
+/// for <agent>."; a candidate that failed to open for a reason of its own, anything but a name
+/// that is not there, is that GPU's failure, naming the errno.
+/// \param[in] file_name The kernel file's name
+/// \param[in] agent_name The agent the kernel is for, which names a directory and the skip
+/// \returns The descriptor of the file that opened, which the caller owns
+FileDescriptorHolder open_kernel_file(const std::string& file_name, const std::string& agent_name);
+
+/// The deadline of each wait on a kernel or a memory copy, in milliseconds. A test replaces it
+/// through the hook of RocrTestHooks.h; the module's own build has the constant.
+uint64_t wait_deadline_ms(void);
+
+/// The deadline as a failure names it: the seconds it stands for, or milliseconds where a test
+/// hook set one under a second.
+/// \param[in] deadline_ms The deadline in force, in milliseconds
+/// \returns The deadline as the GPU's failure names it
+std::string wait_deadline_text(uint64_t deadline_ms);
+
+/// A queue for one of the checks, with an error callback and a status block of its own. ROCr
+/// reports an error of a queue, an invalid packet or scratch it cannot allocate, only through
+/// that callback, and suspends the queue, so that a dispatch on a queue without one never
+/// completes. The block is made just before the queue and held by the holder that is released
+/// after the queue's, so that an error ROCr reports late writes into memory that was not freed.
+/// The queue holds the packets the check needs, at most the agent's largest queue: a failed
+/// query of that maximum throws, naming hsa_agent_get_info() and its status, rather than
+/// returning it as the status below.
+/// \param[in] agent Agent the queue is created on
+/// \param[out] status Holder that takes the queue's status block
+/// \param[out] queue Holder that takes the queue
+/// \returns What hsa_queue_create answered
+hsa_status_t create_check_queue(hsa_agent_t agent, QueueStatusHolder* status, QueueHolder* queue);
 
 }  // namespace rdc
 }  // namespace amd

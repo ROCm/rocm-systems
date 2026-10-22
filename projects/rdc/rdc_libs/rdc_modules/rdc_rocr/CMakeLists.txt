@@ -19,15 +19,21 @@ set(RDC_ROCR_LIB_SRC_LIST
 )
 
 set(RDC_ROCR_LIB_INC_LIST
+    "${INC_DIR}/ComputeQueueTest.h"
+    "${INC_DIR}/GpuOutcome.h"
     "${INC_DIR}/MemoryAccess.h"
     "${INC_DIR}/MemoryTest.h"
     "${INC_DIR}/RdcRocrBase.h"
+    "${INC_DIR}/RocrHandles.h"
+    "${INC_DIR}/RocrTestHooks.h"
     "${INC_DIR}/TestBase.h"
     "${INC_DIR}/base_rocr_utils.h"
     "${INC_DIR}/common.h"
     "${PROJECT_SOURCE_DIR}/include/rdc/rdc.h"
+    "${RDC_LIB_INC_DIR}/DiagText.h"
     "${RDC_LIB_INC_DIR}/RdcLogger.h"
     "${RDC_LIB_INC_DIR}/RdcDiagnosticLibInterface.h"
+    "${RDC_LIB_INC_DIR}/impl/SmiUtils.h"
     "${RDC_LIB_INC_DIR}/rdc_common.h"
 )
 

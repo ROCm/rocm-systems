@@ -754,7 +754,7 @@ typedef struct {
  * @brief details of the per gpu diagnostic results
  */
 typedef struct {
-  uint32_t gpu_index;            //!< The GPU index
+  uint32_t gpu_index;            //!< The group entity the result is for, a GPU or a GPU partition
   rdc_diag_detail_t gpu_result;  //!< The detail results
 } rdc_diag_per_gpu_result_t;
 

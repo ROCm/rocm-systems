@@ -61,6 +61,12 @@ amdsmi_status_t get_processor_count(uint32_t& all_processor_count);
 amdsmi_status_t get_socket_handles(std::vector<amdsmi_socket_handle>& sockets);
 amdsmi_status_t get_processor_handles(amdsmi_socket_handle socket,
                                       std::vector<amdsmi_processor_handle>& processors);
+// The KFD node of a GPU, which is the key ROCr lists its agents by, for an entity id
+// (flat or partition). AMDSMI_STATUS_NOT_FOUND when AMD SMI does not know the entity,
+// AMDSMI_STATUS_NOT_SUPPORTED when it reports no KFD node for it, AMDSMI_STATUS_INVAL
+// for a null node_id, and amd-smi's own status for any other failure of the call.
+// Nothing is cached: a node id goes stale across a partition change.
+amdsmi_status_t get_kfd_node_id(uint32_t entity_id, uint32_t* node_id);
 amdsmi_status_t get_kfd_partition_id(amdsmi_processor_handle proc, uint32_t* partition_id);
 amdsmi_status_t get_num_partition(uint32_t index, uint16_t* num_partition);
 
