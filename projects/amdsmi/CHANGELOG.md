@@ -4,6 +4,13 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ***All information listed below is for reference and subject to change.***
 
+## amd_smi_lib for ROCm 10.3.0
+
+### Added
+
+- **Added CPU read APIs for APB status, XGMI link width, and DF P-state range**.
+  - New C/Python APIs: `amdsmi_get_cpu_apb_status()`, `amdsmi_get_cpu_xgmi_width()`, and `amdsmi_get_cpu_df_pstate_range()` along with respective `amd-smi metric` flags for AMD EPYC CPUs.
+
 ## amd_smi_lib for ROCm 10.2.0
 
 ### Added

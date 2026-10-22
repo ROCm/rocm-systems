@@ -164,7 +164,7 @@ names lets a feature line up across both suites. Adapt them as the APIs warrant.
 
 | Component | Suggested feature subdirectories |
 | :--- | :--- |
-| `cpu/` | `clock/`, `dimm/`, `energy/`, `hsmp/`, `identity/`, `power/`, `thermal/` |
+| `cpu/` | `clock/`, `dimm/`, `energy/`, `hsmp/`, `identity/`, `power/`, `pstate/`, `thermal/`, `xgmi/` |
 | `nic/` | `discovery/`, `identity/` |
 | `ifoe/` | `fabric/`, `identity/` |
 
@@ -355,6 +355,8 @@ tests/python/
 │
 ├── unit/                              # No hardware required — pure logic tests only
 │   ├── __init__.py
+│   ├── cpu/
+│   │   └── test_cli_metric_cpu_flags.py   # amd-smi metric --cpu-* flag rendering (mock-based, stubs amdsmi)
 │   ├── gpu/
 │   │   ├── test_apu_metrics.py            # APU metrics interface helpers (unit conversions, N/A parity)
 │   │   └── test_cli_metric_partition.py   # amd-smi metric --partition clock assembly (mock-based, stubs amdsmi)
@@ -386,7 +388,9 @@ tests/python/
 │   │   ├── test_hsmp.py               # hsmp_driver_version, hsmp_proto_ver, esmi_err_msg
 │   │   ├── test_identity.py           # CPU socket identity
 │   │   ├── test_power.py              # socket_power, power_cap get/set, boostlimit set
+│   │   ├── test_pstate.py             # apb enable/disable/status, df_pstate_range get/set
 │   │   ├── test_thermal.py            # socket_temperature, prochot_status
+│   │   ├── test_xgmi.py               # xgmi_width get/set
 │   │   └── test_benchmark.py          # per-API latency benchmarks with timing assertions
 │   ├── nic/
 │   │   ├── test_discovery.py          # NIC and switch BDF/device discovery (live enumeration)
