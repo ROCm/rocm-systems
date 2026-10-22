@@ -25,6 +25,7 @@ THE SOFTWARE.
 #include <string.h>
 #include <sys/time.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -42,6 +43,15 @@ THE SOFTWARE.
 
 namespace amd {
 namespace rdc {
+
+// Copies a string from AMD SMI into a field value: up to its first NUL, at most
+// RDC_MAX_STR_LENGTH - 1 bytes, then a NUL.
+template <size_t N>
+static void copy_smi_string(char (&dest)[RDC_MAX_STR_LENGTH], const char (&src)[N]) {
+  const size_t length = strnlen(src, std::min(N, sizeof(dest) - 1));
+  memcpy(dest, src, length);
+  dest[length] = '\0';
+}
 
 static const std::unordered_map<rdc_field_t, amdsmi_event_type_t> rdc_evnt_2_smi_field = {
     {RDC_EVNT_XGMI_0_NOP_TX, AMDSMI_EVNT_XGMI_0_NOP_TX},
@@ -201,7 +211,7 @@ void RdcMetricFetcherImpl::get_ecc(uint32_t gpu_index, rdc_field_t field_id,
     return;
   }
 
-  amdsmi_error_count_t ec;
+  amdsmi_error_count_t ec = {};
   err = amdsmi_get_gpu_ecc_count(processor_handle, gpu_block, &ec);
   if (err != AMDSMI_STATUS_SUCCESS) {
     RDC_LOG(RDC_ERROR, "Error in ecc count [" << gpu_block << "]:" << err);
@@ -264,6 +274,8 @@ void RdcMetricFetcherImpl::get_afid(uint32_t gpu_index, rdc_field_value* value) 
     value->status = err;
     return;
   }
+  // No more entries than the headers buffer holds, whatever the library reports.
+  entry_count = std::min<uint64_t>(entry_count, cper_hdrs.size());
 
   std::string result;
   for (uint64_t i = 0; i < entry_count; ++i) {
@@ -321,7 +333,7 @@ void RdcMetricFetcherImpl::get_ecc_total(uint32_t gpu_index, rdc_field_t field_i
       continue;
     }
 
-    amdsmi_error_count_t ec;
+    amdsmi_error_count_t ec = {};
     err = amdsmi_get_gpu_ecc_count(processor_handle, static_cast<amdsmi_gpu_block_t>(b), &ec);
 
     if (err == AMDSMI_STATUS_SUCCESS) {
@@ -409,7 +421,7 @@ void RdcMetricFetcherImpl::get_ecc_deferred(uint32_t gpu_index, rdc_field_t fiel
     return;
   }
 
-  amdsmi_error_count_t ec;
+  amdsmi_error_count_t ec = {};
   err = amdsmi_get_gpu_ecc_count(processor_handle, gpu_block, &ec);
   if (err != AMDSMI_STATUS_SUCCESS) {
     value->status = err;
@@ -435,7 +447,7 @@ void RdcMetricFetcherImpl::get_ecc_deferred_total(uint32_t gpu_index, rdc_field_
         amdsmi_get_gpu_ecc_status(processor_handle, static_cast<amdsmi_gpu_block_t>(b), &err_state);
     if (err != AMDSMI_STATUS_SUCCESS) continue;
 
-    amdsmi_error_count_t ec;
+    amdsmi_error_count_t ec = {};
     err = amdsmi_get_gpu_ecc_count(processor_handle, static_cast<amdsmi_gpu_block_t>(b), &ec);
     if (err == AMDSMI_STATUS_SUCCESS) {
       deferred_count += ec.deferred_count;
@@ -573,7 +585,7 @@ rdc_status_t RdcMetricFetcherImpl::bulk_fetch_smi_fields(
   auto cur_time = now();
   auto ite = bulk_fields.begin();
   for (; ite != bulk_fields.end(); ite++) {
-    amdsmi_gpu_metrics_t gpu_metrics;
+    amdsmi_gpu_metrics_t gpu_metrics = {};
     amdsmi_processor_handle processor_handle = nullptr;
     if (get_processor_handle_from_id(ite->first, &processor_handle) != AMDSMI_STATUS_SUCCESS) {
       continue;  // an unavailable GPU: its fields are fetched one by one and read nothing
@@ -586,7 +598,7 @@ rdc_status_t RdcMetricFetcherImpl::bulk_fetch_smi_fields(
     }
     for (uint32_t j = 0; j < ite->second.size(); j++) {
       auto field_id = ite->second[j];
-      rdc_gpu_field_value_t value;
+      rdc_gpu_field_value_t value = {};
       value.gpu_index = ite->first;
       value.field_value.field_id = field_id;
       value.field_value.type = INTEGER;
@@ -701,7 +713,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
   };
 
   auto read_gpu_metrics_uint64_t = [&]() {
-    amdsmi_gpu_metrics_t gpu_metrics;
+    amdsmi_gpu_metrics_t gpu_metrics = {};
     value->status = amdsmi_get_gpu_metrics_info(processor_handle, &gpu_metrics);
     RDC_LOG(RDC_DEBUG, "Read the gpu metrics:" << value->status);
     if (value->status != AMDSMI_STATUS_SUCCESS) {
@@ -776,7 +788,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       break;
     }
     case RDC_FI_GPU_MEMORY_ACTIVITY: {
-      amdsmi_engine_usage_t engine_usage;
+      amdsmi_engine_usage_t engine_usage = {};
       value->status = amdsmi_get_gpu_activity(processor_handle, &engine_usage);
       value->type = INTEGER;
       if (value->status == AMDSMI_STATUS_SUCCESS) {
@@ -785,7 +797,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       break;
     }
     case RDC_FI_GPU_MEMORY_MAX_BANDWIDTH: {
-      amdsmi_vram_info_t vram_info;
+      amdsmi_vram_info_t vram_info = {};
 
       value->status = amdsmi_get_gpu_vram_info(processor_handle, &vram_info);
       value->type = INTEGER;
@@ -795,8 +807,8 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       break;
     }
     case RDC_FI_GPU_MEMORY_CUR_BANDWIDTH: {
-      amdsmi_gpu_metrics_t gpu_metrics;
-      amdsmi_vram_info_t vram_info;
+      amdsmi_gpu_metrics_t gpu_metrics = {};
+      amdsmi_vram_info_t vram_info = {};
       value->type = INTEGER;
 
       // A single PMFW metrics snapshot provides both the instantaneous UMC
@@ -941,7 +953,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       }
     } break;
     case RDC_FI_KFD_ID: {
-      amdsmi_kfd_info_t kfd_info;
+      amdsmi_kfd_info_t kfd_info = {};
       value->status = amdsmi_get_gpu_kfd_info(processor_handle, &kfd_info);
       value->type = INTEGER;
       if (value->status == AMDSMI_STATUS_SUCCESS) {
@@ -1037,7 +1049,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       break;
     }
     case RDC_FI_GPU_UTIL: {
-      amdsmi_engine_usage_t engine_usage;
+      amdsmi_engine_usage_t engine_usage = {};
       value->status = amdsmi_get_gpu_activity(processor_handle, &engine_usage);
       value->type = INTEGER;
       if (value->status == AMDSMI_STATUS_SUCCESS) {
@@ -1047,11 +1059,11 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
     }
     case RDC_FI_DEV_NAME: {
       // source values from asic_info
-      amdsmi_asic_info_t asic_info;
+      amdsmi_asic_info_t asic_info = {};
       value->status = amdsmi_get_gpu_asic_info(processor_handle, &asic_info);
       value->type = STRING;
       if (value->status == AMDSMI_STATUS_SUCCESS) {
-        memcpy(value->value.str, asic_info.market_name, sizeof(asic_info.market_name));
+        copy_smi_string(value->value.str, asic_info.market_name);
       }
       break;
     }
@@ -1097,7 +1109,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
     case RDC_FI_TARGET_GRAPHICS_VERSION:
     case RDC_FI_NUM_OF_COMPUTE_UNITS:
     case RDC_FI_UUID: {
-      amdsmi_asic_info_t asic_info;
+      amdsmi_asic_info_t asic_info = {};
       value->status = amdsmi_get_gpu_asic_info(processor_handle, &asic_info);
       value->type = INTEGER;
       if (value->status != AMDSMI_STATUS_SUCCESS) {
@@ -1128,7 +1140,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
         }
       } else if (field_id == RDC_FI_UUID) {
         value->type = STRING;
-        memcpy(value->value.str, asic_info.asic_serial, sizeof(asic_info.asic_serial));
+        copy_smi_string(value->value.str, asic_info.asic_serial);
       } else {
         // this should never happen as all fields are handled above
         RDC_LOG(RDC_ERROR, "Unexpected field id: " << field_id);
@@ -1143,7 +1155,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
     }
     case RDC_FI_GPU_MM_DEC_UTIL: {
       constexpr uint32_t kUTILIZATION_COUNTERS(1);
-      amdsmi_utilization_counter_t utilization_counters[kUTILIZATION_COUNTERS];
+      amdsmi_utilization_counter_t utilization_counters[kUTILIZATION_COUNTERS] = {};
       utilization_counters[0].type = AMDSMI_COARSE_DECODER_ACTIVITY;
       uint64_t timestamp = 0;
 
@@ -1299,7 +1311,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       break;
     }
     case RDC_HEALTH_PCIE_REPLAY_COUNT: {
-      amdsmi_pcie_info_t pcie_info;
+      amdsmi_pcie_info_t pcie_info = {};
       ret = amdsmi_get_pcie_info(processor_handle, &pcie_info);
       value->status = Smi2RdcError(ret);
       value->type = INTEGER;
@@ -1355,6 +1367,8 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
     }
     case RDC_HEALTH_EEPROM_CONFIG_VALID: {
       ret = amdsmi_gpu_validate_ras_eeprom(processor_handle);
+      value->type = INTEGER;
+      value->value.l_int = (ret == AMDSMI_STATUS_SUCCESS) ? 1 : 0;
       value->status = Smi2RdcError(ret);
       break;
     }
@@ -1378,7 +1392,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
     case RDC_HEALTH_LOW_UTIL_PCT:
     case RDC_HEALTH_GFX_CLK_LMT_TOTAL_ACC:
     case RDC_HEALTH_GFX_CLK_LMT_TOTAL_PCT: {
-      amdsmi_violation_status_t violation_status;
+      amdsmi_violation_status_t violation_status = {};
       ret = amdsmi_get_violation_status(processor_handle, &violation_status);
       value->status = Smi2RdcError(ret);
       value->type = INTEGER;
@@ -1535,18 +1549,17 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_partition_field_(uint32_t gpu_index
       uint32_t vc = static_cast<uint32_t>(valid_clocks.size());
       uint32_t pCount = static_cast<uint32_t>(num_partitions);
       uint32_t partIdx = info.instance_index;
-      if (valid_clocks.empty() || vc < num_partitions) {
-        RDC_LOG(RDC_ERROR, "No valid clocks, or less than total partitions");
+      // The partition count can drop to the partition's index or below while it
+      // is watched (a profile read that is not supported reports one partition),
+      // and with fewer valid clocks than partitions a partition has no share.
+      // Past this check, chunk_size is at least 1.
+      if (partIdx >= pCount || vc < pCount) {
+        RDC_LOG(RDC_ERROR, "No valid clocks for partition " << partIdx << " of " << pCount);
         return RDC_ST_NO_DATA;
       }
 
-      if (vc == num_partitions) {
-        value->value.l_int = static_cast<int64_t>(clock_array[info.instance_index]) * 1000000;
-        value->type = INTEGER;
-        value->status = RDC_ST_OK;
-        return RDC_ST_OK;
-      }
-
+      // Each partition averages its share of the valid clocks: one each when there
+      // are as many valid clocks as partitions.
       uint32_t chunk_size = vc / pCount;
       uint32_t start_idx = partIdx * chunk_size;
       uint32_t end_idx = start_idx + chunk_size;
@@ -1556,11 +1569,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_partition_field_(uint32_t gpu_index
       for (uint32_t i = start_idx; i < end_idx; i++) {
         sum += valid_clocks[i];
       }
-      uint32_t count = end_idx - start_idx;
-      if (count == 0) {
-        return RDC_ST_NO_DATA;
-      }
-      uint64_t avg_clock = sum / count;
+      uint64_t avg_clock = sum / chunk_size;
 
       value->value.l_int = avg_clock * 1000000;
       value->type = INTEGER;
@@ -1867,6 +1876,13 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
   if (!value) {
     return RDC_ST_BAD_PARAMETER;
   }
+  // A defined value on every path, the early returns included: an integer 0, not
+  // available, with no timestamp before the dispatch by device type (RdcSmiLib
+  // drops a value whose fetch returned before that).
+  *value = {};
+  value->field_id = field_id;
+  value->type = INTEGER;
+  value->status = AMDSMI_STATUS_NOT_SUPPORTED;
 
   amdsmi_processor_handle processor_handle = {};
   rdc_status_t status = RDC_ST_UNKNOWN_ERROR;
@@ -1936,8 +1952,6 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
   }
 
   value->ts = now();
-  value->field_id = field_id;
-  value->status = AMDSMI_STATUS_NOT_SUPPORTED;
   if (info.device_type == RDC_DEVICE_TYPE_CPU) {
 // don't care about partition for CPUs
 #ifdef ENABLE_ESMI_LIB

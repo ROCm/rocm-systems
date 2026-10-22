@@ -481,7 +481,7 @@ typedef enum {
   RDC_HEALTH_RETIRED_PAGE_NUM,       //!< Retired page number
   RDC_HEALTH_PENDING_PAGE_NUM,       //!< Pending page number
   RDC_HEALTH_RETIRED_PAGE_LIMIT,     //!< the threshold of retired page number
-  RDC_HEALTH_EEPROM_CONFIG_VALID,    //!< Reads the EEPROM and verifies the checksums
+  RDC_HEALTH_EEPROM_CONFIG_VALID,    //!< Reads the EEPROM and verifies the checksums: 1 if valid
   RDC_HEALTH_POWER_THROTTLE_TIME,    //!< Power throttle status counter
   RDC_HEALTH_THERMAL_THROTTLE_TIME,  //!< Total time in thermal throttle status (microseconds)
   RDC_HEALTH_VIOLATION_COUNTER,      //!< Accumulated violation counter

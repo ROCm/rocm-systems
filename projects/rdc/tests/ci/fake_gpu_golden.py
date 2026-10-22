@@ -58,6 +58,7 @@ FIELDS = {
     500: ("GFX_ACTIVITY_PCT", 1),  # RDC_FI_GPU_UTIL, percent
     501: ("VRAM_USED_GIB", GIB),  # RDC_FI_GPU_MEMORY_USAGE, bytes
     502: ("VRAM_TOTAL_GIB", GIB),  # RDC_FI_GPU_MEMORY_TOTAL, bytes
+    504: ("VCN_ACTIVITY_PCT", 1),  # RDC_FI_GPU_MM_DEC_UTIL, percent
 }
 
 

@@ -136,6 +136,8 @@ struct Config {
   bool procs_grow = false;          // one more process on every process-list call
   bool counter_reset = false;       // accumulated counters restart when armed
   bool version_build_null = false;  // amdsmi_get_lib_version() build string is NULL
+  bool long_strings = false;        // ASIC info names fill their buffers, no NUL
+  uint32_t gfxclk_holes = 0;        // leading current_gfxclks[] entries not available
 };
 
 std::mutex g_mutex;  // guards everything below that is not atomic
@@ -331,6 +333,9 @@ void load_config_locked() {
     abort();
   }
   c.version_build_null = env_int("RDC_FAKE_VERSION_BUILD_NULL", 0, 0, 1) != 0;
+  c.long_strings = env_int("RDC_FAKE_LONG_STRINGS", 0, 0, 1) != 0;
+  c.gfxclk_holes =
+      static_cast<uint32_t>(env_int("RDC_FAKE_GFXCLK_HOLES", 0, 0, AMDSMI_MAX_NUM_GFX_CLKS));
   g_cfg = c;
   g_fail_once_fired.assign(g_cfg.fail_once.size(), false);
   memcpy(g_cper_hdr.signature, "CPER", 4);
@@ -595,6 +600,11 @@ amdsmi_status_t amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handl
   snprintf(info->market_name, sizeof(info->market_name), "Fake AMD Instinct GPU %u", p->gpu);
   snprintf(info->vendor_name, sizeof(info->vendor_name), "Advanced Micro Devices, Inc.");
   snprintf(info->asic_serial, sizeof(info->asic_serial), "FAKE%04X", p->gpu);
+  if (g_cfg.long_strings) {
+    // RDC_FAKE_LONG_STRINGS breaks the contract: amd-smi terminates these strings.
+    memset(info->market_name, 'M', sizeof(info->market_name));
+    memset(info->asic_serial, 'S', sizeof(info->asic_serial));
+  }
   info->vendor_id = 0x1002;
   info->subvendor_id = 0x1002;
   info->device_id = 0x74a1;
@@ -886,7 +896,10 @@ amdsmi_status_t amdsmi_get_gpu_metrics_info(amdsmi_processor_handle processor_ha
     m.xgmi_read_data_acc[i] = acc * (p->gpu + 1) * (i + 1);
     m.xgmi_write_data_acc[i] = acc * (p->gpu + 1) * (i + 2);
   }
-  for (uint32_t i = 0; i < AMDSMI_MAX_NUM_GFX_CLKS; ++i) m.current_gfxclks[i] = m.current_gfxclk;
+  for (uint32_t i = 0; i < AMDSMI_MAX_NUM_GFX_CLKS; ++i) {
+    m.current_gfxclks[i] = i < g_cfg.gfxclk_holes ? UINT16_MAX : m.current_gfxclk;
+  }
+  m.vcn_activity[0] = V(kVCN_ACTIVITY_PCT, p->gpu);  // one decoder, the others not available
   m.num_partition = static_cast<uint16_t>(g_cfg.parts);
   m.vram_max_bandwidth = 5300;
   m.pcie_nak_sent_count_acc = p->gpu;
@@ -1322,7 +1335,11 @@ amdsmi_status_t amdsmi_get_utilization_count(amdsmi_processor_handle processor_h
   const uint64_t t = now_ms();
   const uint64_t acc = counter_ms();
   for (uint32_t i = 0; i < count; ++i) {
-    utilization_counters[i].value = acc * (p->gpu + 1);
+    // As in amd-smi, the decoder activity is the average of the GPU metrics' VCN activities
+    // that are available, a percentage: here vcn_activity[0] alone. The other counters
+    // accumulate.
+    const bool decoder = utilization_counters[i].type == AMDSMI_COARSE_DECODER_ACTIVITY;
+    utilization_counters[i].value = decoder ? V(kVCN_ACTIVITY_PCT, p->gpu) : acc * (p->gpu + 1);
     utilization_counters[i].fine_value_count = 0;
   }
   *timestamp = t * 1000000;

@@ -41,6 +41,8 @@ a value shown for the wrong GPU or the wrong field fails the comparison.
 | `RDC_FAKE_PROCS_GROW=1` | one more process on every `amdsmi_get_gpu_compute_process_info` call, as when processes start between the count call and the fill call; `amdsmi_get_gpu_compute_process_gpus` knows the processes of the last list (the first `RDC_FAKE_PROCS` before any list call) |
 | `RDC_FAKE_COUNTER_RESET=1` | the energy, activity, PCIe bandwidth, XGMI data, utilization and violation accumulators and the XGMI event counters restart from 0 when the `RDC_FAKE_ARM` file first exists, as after a GPU reset; needs `RDC_FAKE_ARM` |
 | `RDC_FAKE_VERSION_BUILD_NULL=1` | `amdsmi_get_lib_version` returns a NULL build string |
+| `RDC_FAKE_LONG_STRINGS=1` | `amdsmi_get_gpu_asic_info` fills the whole market name and ASIC serial buffers, with no NUL |
+| `RDC_FAKE_GFXCLK_HOLES=n` | the first `n` (0 to 8) `current_gfxclks` of `amdsmi_get_gpu_metrics_info` are not available (`UINT16_MAX`); the others hold the GPU's clock |
 | `RDC_FAKE_EVENT_WAIT_MS=ms` | upper bound for the event-notification wait (default 100), so `rdcd` stops promptly |
 | `RDC_FAKE_LOG=path` | append `api gpu` for every call (`-1` for calls without a GPU), plus ` !` when a rule failed the call, except a call rejected for its processor handle (the source handle, in calls that take two) or because the library is not initialized; `amdsmi_init`, `amdsmi_get_lib_version` and `amdsmi_shut_down` are always logged |
 
@@ -55,26 +57,30 @@ over.
 A malformed rule (`FAIL`, `FAIL_ONCE`, `UNFILLED`, `DELAY_MS`, `SENTINEL`), a
 rule whose `@gpu` is not a simulated processor, a malformed or out-of-range
 value of `CPER_COUNT`, `EVENTS`, `NUM_FREQ`, `PROCS`, `PROCS_GROW`,
-`COUNTER_RESET` or `VERSION_BUILD_NULL`, `COUNTER_RESET` without `ARM` and a
-`LOG` file that cannot be opened abort the process, so a typo in a value cannot
-turn into a test that passes without its fault. A rule for an API that nothing
-calls still never fires. `GPUS`, `PARTITIONS`, `HIVES`, `POISON` and
-`EVENT_WAIT_MS` are clamped to their ranges.
+`COUNTER_RESET`, `VERSION_BUILD_NULL`, `LONG_STRINGS` or `GFXCLK_HOLES`,
+`COUNTER_RESET` without `ARM` and a `LOG` file that cannot be opened abort the
+process, so a typo in a value cannot turn into a test that passes without its
+fault. A rule for an API that nothing calls still never fires. `GPUS`,
+`PARTITIONS`, `HIVES`, `POISON` and `EVENT_WAIT_MS` are clamped to their ranges.
 
 `CPER_COUNT` past the caller's capacity, `count` in `EVENTS` past what the call
-wrote, `NUM_FREQ=0` and `VERSION_BUILD_NULL` break amd-smi's output contract on
-purpose: amd-smi stops at the caller's capacity (for CPER entries with
-`AMDSMI_STATUS_MORE_DATA`, or `AMDSMI_STATUS_OUT_OF_RESOURCES` when none fit,
-and with header pointers into the caller's buffer), reports only the events it
-wrote, fails the call instead of returning an empty frequency table, and never
-returns a NULL build string. They check that RDC does not trust its library
-blindly; a defect that only they reproduce is a hardening fix, not one users can
-hit with amd-smi.
+wrote, `NUM_FREQ=0`, `VERSION_BUILD_NULL` and `LONG_STRINGS` break amd-smi's
+output contract on purpose: amd-smi stops at the caller's capacity (for CPER
+entries with `AMDSMI_STATUS_MORE_DATA`, or `AMDSMI_STATUS_OUT_OF_RESOURCES` when
+none fit, and with header pointers into the caller's buffer), reports only the
+events it wrote, fails the call instead of returning an empty frequency table,
+never returns a NULL build string and terminates the strings it returns. They
+check that RDC does not trust its library blindly; a defect that only they
+reproduce is a hardening fix, not one users can hit with amd-smi.
 
-[`tests/ci/test_fake_gpu_fake.py`](../ci/test_fake_gpu_fake.py) checks the
-knobs above from `RDC_FAKE_FAIL_ONCE` down to `RDC_FAKE_VERSION_BUILD_NULL`,
-and the handle rules below. `RDC_FAKE_EVENT_WAIT_MS` and `RDC_FAKE_LOG` are
-used by [`tests/ci/test_fake_gpu.py`](../ci/test_fake_gpu.py).
+[`tests/ci/test_fake_gpu_fake.py`](../ci/test_fake_gpu_fake.py) checks the knobs
+above from `RDC_FAKE_FAIL_ONCE` down to `RDC_FAKE_VERSION_BUILD_NULL`, and the
+handle rules below.
+[`tests/unit/test_field_values.cc`](../unit/test_field_values.cc) checks
+`RDC_FAKE_LONG_STRINGS` and `RDC_FAKE_GFXCLK_HOLES` before it uses them, and
+`test_fake_gpu_fake.py` that malformed values of both abort.
+`RDC_FAKE_EVENT_WAIT_MS` and `RDC_FAKE_LOG` are used by
+[`tests/ci/test_fake_gpu.py`](../ci/test_fake_gpu.py).
 
 ## Handles
 
