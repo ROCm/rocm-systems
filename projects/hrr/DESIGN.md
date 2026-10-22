@@ -1165,6 +1165,21 @@ passes many sub-pointers as kernel arguments, this scan becomes O(N) per pointer
 kernel dispatch. For archives with thousands of allocations and tight kernel launch
 loops this can make replay significantly slower than the original.
 
+### Unmapped Pointer Arguments
+
+A recorded pointer argument in no allocation, VMM reservation or region (memory
+a framework carved out of its own pool, or a destination from a playback no-op
+such as `hipMemAllocPitch`) is handled the same way by every handler, generated
+or manual: `translate_ptr` notes the miss and `dispatch_event` applies one
+policy. By default the event's result is discarded, the event is reported as
+`[HRR] Unmapped: T<tid> Event <index> (<API>): recorded pointer 0x<addr> ...`,
+and the summary shows `Unmapped : N event(s) not replayed as recorded`; the
+count alone does not fail the run. `--strict-unmapped` ends the replay at the
+first such event instead. The rationale and the resulting fidelity guarantee
+are written above `HrrUnmappedNote` in `playback/hip_playback.h`. Kernel
+arguments (pointers only by shape, counted as `Untranslated`) and releases such
+as `hipFree` use `lookup_ptr` and are outside the policy.
+
 ### GPU Allocator Address Non-Determinism
 
 Recorded device pointers are the GPU virtual addresses from the original run. At
