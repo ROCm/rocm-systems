@@ -8463,7 +8463,6 @@ rocprofiler-sdk:
             - gfx12
             - gfx1200
             - gfx1201
-            - gfx1250
             - gfx9
             - gfx900
             - gfx906
@@ -8503,10 +8502,6 @@ rocprofiler-sdk:
         - architectures:
             - gfx90a
             - gfx908
-            - gfx12
-            - gfx1200
-            - gfx1201
-            - gfx1250
           block: TA
           event: 32
         - architectures:
