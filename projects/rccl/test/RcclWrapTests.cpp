@@ -2436,6 +2436,9 @@ static void CreateCeAllReduceEligibleComm(
     mockComm->nNodes             = 1;
     mockComm->symmetricSupport   = 1;
     mockComm->config.CTAPolicy   = NCCL_CTA_POLICY_ZERO;
+    // Preset LSA state so ncclDevrIsOneLsaTeam does not walk the absent rankToNode.
+    mockComm->devrState.bigSize  = 1;
+    mockComm->devrState.lsaSize  = nRanks;
 }
 
 // A count of float32 divisible by the 8 mock ranks; well within RCCL_CE_AR_2SHOT_MAX_BYTES.
@@ -2741,8 +2744,8 @@ TEST(Rcclwrap, SymEligible_YieldsToSymmetricKernel)
 
 // ---------------------------------------------------------------------------
 // rcclCollectiveMustUseEnqueuePath: DDA/CE/GIN early-returns skip ncclEnqueueCheck.
-// NCCL_CHECK_MODE and a suspended communicator must divert to enqueue so pointer
-// checks and the suspend guard still run. Named Rcclwrap so fixtures-debug CI
+// NCCL_CHECK_MODE, a suspended communicator and a revoked one must divert to
+// enqueue so pointer checks, the suspend guard and the revoked rejection still run. Named Rcclwrap so fixtures-debug CI
 // selects them (Rcclwrap.* is the listed prefix for this file).
 // ---------------------------------------------------------------------------
 
@@ -2774,6 +2777,14 @@ TEST(Rcclwrap, EnqueueGuards_SuspendedForcesEnqueue)
     ncclMemManager mgr{};
     comm.memManager = &mgr;
     __atomic_store_n(&mgr.released, 1, __ATOMIC_RELAXED);
+    EXPECT_TRUE(rcclCollectiveMustUseEnqueuePath(&comm));
+}
+
+TEST(Rcclwrap, EnqueueGuards_RevokedForcesEnqueue)
+{
+    ncclComm comm{};
+    comm.checkMode = ncclCheckModeDefault;
+    __atomic_store_n(&comm.revokedFlag, 1u, __ATOMIC_RELAXED);
     EXPECT_TRUE(rcclCollectiveMustUseEnqueuePath(&comm));
 }
 

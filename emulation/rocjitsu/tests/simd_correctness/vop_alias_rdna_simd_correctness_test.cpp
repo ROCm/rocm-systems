@@ -20,10 +20,10 @@
 ///     v_mov_b16 / v_not_b16   (low-16 forms)
 ///     v_cvt_i32_i16 / v_cvt_u32_u16  (sign/zero-extend low 16)
 ///     v_cvt_floor_i32_f32 / v_cvt_nearest_i32_f32  (aliases for flr / rpi)
-///   VOP3 (8):
+///   VOP3 (10):
 ///     same 6 VOP1 ops in their VOP3 form (all route via the `_vop3` ->
 ///     SIMD_VOP1_UNARY twin fallback since the scalar body of each ignores
-///     modifiers — verified inline in the regen for this slice) + 2 ints
+///     modifiers — verified inline in the regen for this slice) + 4 ints
 ///     missing from CDNA4 (v_minmax / v_maxmin u32/i32 are RDNA3+ only).
 
 #include "decode_test_util.h"
@@ -176,13 +176,11 @@ const VopCase kCases[] = {
     {"v_cvt_u32_u16_vop3", VopCase::Kind::VOP3_UNARY, 491},
     {"v_cvt_nearest_i32_f32_vop3", VopCase::Kind::VOP3_UNARY, 396},
     {"v_cvt_floor_i32_f32_vop3", VopCase::Kind::VOP3_UNARY, 397},
-    // VOP3 ternary int minmax / maxmin remain scalar-only: their scalar bodies
-    // use std::fmin/fmax on ints and write back through a double->uint32 cast
-    // that saturates negatives to 0xFFFFFFFF (x86 overflow), which the integer
-    // SIMD min/max cannot match. The fp minmax/maxmin f32/f16 forms ARE wired
-    // (SIMD_VOP3_TERNARY_FP32/_FP16, same fmax/fmin as the verified min3/max3),
-    // but are not exercised here: this fixture's values alias to f32 NaNs and
-    // the comparison has no NaN skip.
+    // RDNA3-only integer minmax/maxmin VOP3 forms.
+    {"v_maxmin_u32_vop3", VopCase::Kind::VOP3_TERNARY, 610},
+    {"v_minmax_u32_vop3", VopCase::Kind::VOP3_TERNARY, 611},
+    {"v_maxmin_i32_vop3", VopCase::Kind::VOP3_TERNARY, 612},
+    {"v_minmax_i32_vop3", VopCase::Kind::VOP3_TERNARY, 613},
 };
 
 const uint64_t kVccPatterns[] = {
