@@ -61,6 +61,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * `RCCL_DDA_LL128_RS_THREADS` removed (was default `1024`): reduce-scatter LL128 now launches a fixed 512-thread block, one warp per slice, so the thread count is no longer a tuning knob.
 
 ### Resolved issues
+* Fixed GPU memory registration crashing in `ibv_reg_mr_iova2` on mlx5 NICs whose rdma-core does not export `mlx5dv_reg_dmabuf_mr`. A missing symbol is no longer treated as missing kernel DMA-BUF support, so registration stays on `ibv_reg_dmabuf_mr`. When data-direct registration itself fails, RCCL falls back to `ibv_reg_dmabuf_mr` and reports that once per device.
 * Fixed topology GPU indices that followed the HIP device order instead of the PCI order. This reordered rings and NIC selection, causing an `ncclGather` performance regression on multi-node MI355X systems, and made communicator initialization fail when each rank sees only its own GPU.
 * Fixed profiler overhead when no profiler plugin is loaded or only kernel-channel events are enabled.
 * Fixed profiler API events reporting rank 0 instead of the originating communicator rank.
