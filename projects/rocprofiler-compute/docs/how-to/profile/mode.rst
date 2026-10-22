@@ -732,8 +732,7 @@ b) Otherwise, profile mode runs microbenchmarks and collects roofline performanc
 
 .. note::
 
-  * ``--roofline`` cannot be used with ``--block``, ``--set``, or ``--roofline-bench-only``.
-  * ``--roof-only`` is the old name. It still works, but shows a warning.
+  ``--roofline`` cannot be used with ``--block``, ``--set``, or ``--roofline-bench-only``.
 
 Profile mode generates ``roofline.csv`` containing microbenchmark data. To generate
 roofline HTML plots, use ``rocprof-compute analyze`` on a profiling output directory
@@ -756,7 +755,6 @@ Roofline options (profile)
 ``--roofline-device <gpu_id>``
    Allows you to specify a device ID to collect performance data from when
    running a roofline benchmark on your system.
-   ``--device`` is the old name. It still works, but shows a warning.
 
 ``-k``, ``--kernel <kernel-substr>``
    Allows for kernel filtering. See :ref:`profiling-kernel-filtering`.
@@ -838,9 +836,8 @@ This is useful for:
 
 .. note::
 
-  * ``--roofline-bench-only`` cannot be used with ``--block``, ``--set``, ``--roofline``,
-    or ``--no-roof``.
-  * ``--bench-only`` is the old name. It still works, but shows a warning.
+  ``--roofline-bench-only`` cannot be used with ``--block``, ``--set``, ``--roofline``,
+  or ``--no-roof``.
 
 .. code-block:: shell-session
 
