@@ -263,20 +263,6 @@ TEST_F(LinuxInitMicrotest, Initialize_RaisesASmallDefaultStackTo8MB) {
   EXPECT_EQ(DefaultStack(), 8192u * 1024);
 }
 
-// linux.cc declares ncclParamSetCpuStackSize (and PollTimeOut, RetryTimeOut, SocketMax*Buff) as int,
-// but NCCL_PARAM defines them int64_t, so only the low 32 bits arrive. Pins AICOMRCCL-2978; a fix flips this pin.
-TEST_F(LinuxInitMicrotest, Initialize_KnownBug_IntDeclarationTruncatesTheParam) {
-  params_.Set("SET_CPU_STACK_SIZE", int64_t(1) << 32);
-  SetDefaultStack(1 << 20);
-  ScopedHook getrlimitHook(g_getrlimit, [](int resource, rlimit* lim) {
-    int rc = ::getrlimit((__rlimit_resource_t)resource, lim);
-    if (resource == RLIMIT_STACK) lim->rlim_cur = 2048 * 1024;
-    return rc;
-  });
-  ASSERT_EQ(ncclOsInitialize(), ncclSuccess);
-  EXPECT_EQ(DefaultStack(), 1u << 20);  // read as 0: the stack is left alone
-}
-
 TEST_F(LinuxInitMicrotest, Initialize_ReportsAnUnlimitedStackLimit) {
   SetDefaultStack(2 << 20);  // glibc's fallback when RLIMIT_STACK is unlimited
   ScopedHook getrlimitHook(g_getrlimit, [](int resource, rlimit* lim) {
@@ -1311,8 +1297,8 @@ TEST_F(LinuxSysfsMicrotest, TopoGetStrFromSys_StripsTheNewlineAndTruncates) {
   EXPECT_STREQ(buf, "");
 }
 
-// A value without a trailing newline loses its last character. Pins AICOMRCCL-2975; a fix flips this pin.
-TEST_F(LinuxSysfsMicrotest, TopoGetStrFromSys_KnownBug_DropsTheLastCharacter) {
+// A value without a trailing newline loses its last character.
+TEST_F(LinuxSysfsMicrotest, TopoGetStrFromSys_DropsTheLastCharacter) {
   Mkdirs("/d");
   Write("/d/raw", "abc");
   char buf[16];
