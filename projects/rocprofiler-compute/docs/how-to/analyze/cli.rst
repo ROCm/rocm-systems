@@ -143,16 +143,74 @@ To print the block as tables instead of the diagram, see :ref:`cli-view-table`.
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze -p workloads/vcopy/MI200/ -b 4
+   $ rocprof-compute analyze -p workloads/rocflop/MI350/ -b 4
 
-.. image:: ../../data/analyze/cli/roofline_chart.png
-   :align: left
-   :alt: Roofline
+   --------------------------------------------------------------------------------
+   4. Roofline
+
+   Interactive roofline plot saved to /home/user/workloads/rocflop/MI350/empirRoof_gpu-0.html
+
+   (4.1) Per-Kernel Roofline Metrics and (4.2) AI Plot Points
+
+   Kernel 0: matmul_fp32_throughput(float*, float
+   __vector(4)*, int) (25.8%)
+     |
+     ├─ 4.1 Roofline Rate Metrics:
+     |   ╒═════════════╤════════════════════╤═══════════╤═════════╤════════════════════╕
+     |   │ Metric_ID   │ Metric             │     Value │ Unit    │   Peak (Empirical) │
+     |   ╞═════════════╪════════════════════╪═══════════╪═════════╪════════════════════╡
+     |   │ 4.1.0       │ VALU FLOPs (F16)   │      0.00 │ GFLOP/s │          142403.81 │
+     |   ├─────────────┼────────────────────┼───────────┼─────────┼────────────────────┤
+     |   │ 4.1.1       │ VALU FLOPs (F32)   │      0.02 │ GFLOP/s │          139518.41 │
+     |   ├─────────────┼────────────────────┼───────────┼─────────┼────────────────────┤
+     |   │ 4.1.2       │ VALU FLOPs (F64)   │      0.00 │ GFLOP/s │           70917.90 │
+     |   ├─────────────┼────────────────────┼───────────┼─────────┼────────────────────┤
+     |   │ 4.1.3       │ MFMA FLOPs (F64)   │      0.00 │ GFLOP/s │           71377.49 │
+     |   ├─────────────┼────────────────────┼───────────┼─────────┼────────────────────┤
+     |   │ 4.1.4       │ MFMA FLOPs (F32)   │ 136977.38 │ GFLOP/s │          142150.19 │
+     |   ├─────────────┼────────────────────┼───────────┼─────────┼────────────────────┤
+     |   │ 4.1.5       │ MFMA FLOPs (F16)   │      0.00 │ GFLOP/s │         1697415.60 │
+     |   ├─────────────┼────────────────────┼───────────┼─────────┼────────────────────┤
+     |   │ 4.1.6       │ MFMA FLOPs (BF16)  │      0.00 │ GFLOP/s │         1938708.14 │
+     |   ├─────────────┼────────────────────┼───────────┼─────────┼────────────────────┤
+     |   │ 4.1.7       │ MFMA FLOPs (F8)    │      0.00 │ GFLOP/s │         2090034.29 │
+     |   ├─────────────┼────────────────────┼───────────┼─────────┼────────────────────┤
+     |   │ 4.1.8       │ MFMA FLOPs (MXF8)  │      0.00 │ GFLOP/s │         4361892.90 │
+     |   ├─────────────┼────────────────────┼───────────┼─────────┼────────────────────┤
+     |   │ 4.1.9       │ MFMA FLOPs (F6F4)  │      0.00 │ GFLOP/s │         7601929.39 │
+     |   ├─────────────┼────────────────────┼───────────┼─────────┼────────────────────┤
+     |   │ 4.1.10      │ MFMA IOPs (Int8)   │      0.00 │ GIOP/s  │         4034547.20 │
+     |   ├─────────────┼────────────────────┼───────────┼─────────┼────────────────────┤
+     |   │ 4.1.11      │ HBM Bandwidth      │      0.11 │ GB/s    │            6964.63 │
+     |   ├─────────────┼────────────────────┼───────────┼─────────┼────────────────────┤
+     |   │ 4.1.12      │ L2 Cache Bandwidth │      0.18 │ GB/s    │           31643.80 │
+     |   ├─────────────┼────────────────────┼───────────┼─────────┼────────────────────┤
+     |   │ 4.1.13      │ L1 Cache Bandwidth │      0.23 │ GB/s    │           34846.58 │
+     |   ├─────────────┼────────────────────┼───────────┼─────────┼────────────────────┤
+     |   │ 4.1.14      │ LDS Bandwidth      │      0.00 │ GB/s    │           57018.43 │
+     |   ╘═════════════╧════════════════════╧═══════════╧═════════╧════════════════════╛
+     ├─ 4.2 Roofline AI Plot Points:
+     |   ╒═════════════╤══════════════════════╤════════════════════╤════════════╕
+     |   │ Metric_ID   │ Metric               │ Value              │ Unit       │
+     |   ╞═════════════╪══════════════════════╪════════════════════╪════════════╡
+     |   │ 4.2.0       │ AI HBM               │ 1198230.6258325255 │ FLOPs/Byte │
+     |   ├─────────────┼──────────────────────┼────────────────────┼────────────┤
+     |   │ 4.2.1       │ AI L2                │ 762602.760461121   │ FLOPs/Byte │
+     |   ├─────────────┼──────────────────────┼────────────────────┼────────────┤
+     |   │ 4.2.2       │ AI L1                │ 599186.8145721277  │ FLOPs/Byte │
+     |   ├─────────────┼──────────────────────┼────────────────────┼────────────┤
+     |   │ 4.2.3       │ AI LDS               │ N/A                │ FLOPs/Byte │
+     |   ├─────────────┼──────────────────────┼────────────────────┼────────────┤
+     |   │ 4.2.4       │ Performance (GFLOPs) │ 136977.40092136632 │ GFLOP/s    │
+     |   ╘═════════════╧══════════════════════╧════════════════════╧════════════╛
+
+   ...
+
+Open the saved HTML file in a browser for the interactive roofline plot. See :ref:`roofline-html-generation`.
 
 .. note::
-   * Visualized memory chart and Roofline chart are only supported in single run analysis. In multiple runs comparison mode, both are switched back to basic table view.
+   * Visualized memory chart is only supported in single run analysis. In multiple runs comparison mode, it is switched back to basic table view.
    * Visualized memory chart is drawn at a fixed width and needs a wide terminal. See :ref:`cli-memory-chart-viewing` if it wraps.
-   * Visualized Roofline chart is adapted to the initial terminal size only. If it is not clear, you may need to adjust the terminal size and regenerate it to check the display effect. Roofline analysis provides detailed, structured table output with measured empirical peak values for comparison.
 
 .. _cli-list-available-metrics:
 
@@ -445,7 +503,7 @@ More analysis options
 
 **TTY output view (plain tables)**
 
-Use ``--view table`` to force plain tabular output for all sections and ignore ``cli_style`` from the analysis YAML (for example, memory charts and Roofline charts are shown as tables). Additional ``--view`` values may be added in future releases.
+Use ``--view table`` to force plain tabular output for all sections and ignore ``cli_style`` from the analysis YAML (for example, memory charts and the per-kernel Roofline layout are shown as tables). Additional ``--view`` values may be added in future releases.
 
 .. code-block:: shell
 
@@ -619,7 +677,6 @@ Roofline visualization options (available only in analyze mode):
 * ``--sort``: Overlay top kernels or top dispatches (default: kernels)
 * ``--mem-level``: Filter by memory level -- HBM, L2, vL1D, L0, LDS (default: ALL)
 * ``--roofline-data-type``: Choose datatypes for roofline visualization (default: FP32)
-   * CLI only supports visualizing one precision at a time. Visualizing multiple data types on one plot is available in the Interactive Roofline HTML file.
 
 Example with multiple ``--mem-level`` and ``--roofline-data-type`` options:
 
@@ -795,6 +852,10 @@ PyTorch operator analysis
    use ``rocprof-compute analyze ... --experimental`` with
    ``--list-torch-operators`` or ``--torch-operator`` as needed.
 
+These options work only with the default ``--output-format stdout``. If you
+combine ``--list-torch-operators`` with ``--torch-operator``, rocprof-compute
+lists all operators and ignores the filter.
+
 
 List all operators
 ---------------------
@@ -807,17 +868,16 @@ Display all PyTorch operators captured during profiling:
 
    ================================================================================
    PyTorch Operator Call Tree: ./workload
-   Grouped by source location, sorted by total GPU kernel duration.
+   Sorted by total GPU kernel duration.
    ================================================================================
 
-   main.py:60 (dispatches: 90, total: 42.80 ms, dispatch_mean: 0.48 ms, dispatch_min: 0.01 ms, dispatch_max: 2.10 ms)
-   └─ nn.Module.Net.forward (calls: 10, dispatches: 90, total: 42.80 ms, dispatch_mean: 0.48 ms, dispatch_min: 0.01 ms, dispatch_max: 2.10 ms)
-      ├─ torch.nn.functional.conv2d (calls: 20)
-      |  └─ conv2d_fwd (dispatches: 40, total: 27.08 ms)
-      ├─ torch.nn.functional.linear (calls: 20)
-      |  └─ gemm (dispatches: 20, total: 15.41 ms)
-      └─ torch.nn.functional.relu (calls: 40)
-         └─ relu_kernel (dispatches: 30, total: 0.31 ms)
+   nn.Module.Net.forward main.py:60 (calls: 10, dispatches: 90, total: 42.80 ms, dispatch_mean: 0.48 ms, dispatch_min: 0.01 ms, dispatch_max: 2.10 ms)
+      ├─ aten::convolution (calls: 20)
+      |  └─ conv2d_fwd (id 0) (dispatches: 40, total: 27.08 ms)
+      ├─ aten::addmm (calls: 20)
+      |  └─ gemm (id 1) (dispatches: 20, total: 15.41 ms)
+      └─ aten::relu (calls: 40)
+         └─ relu_kernel (id 2) (dispatches: 30, total: 0.31 ms)
 
    Operator summary (Min/Max/Mean are per-dispatch over the subtree; sorted by Total):
    ╒══════════════════════════════════════════════════╤═════════╤══════════════╤══════════╤═══════════╤═════════════╤═════════╤═════════╤═════════╕
@@ -825,26 +885,26 @@ Display all PyTorch operators captured during profiling:
    ╞══════════════════════════════════════════════════╪═════════╪══════════════╪══════════╪═══════════╪═════════════╪═════════╪═════════╪═════════╡
    │ nn.Module.Net.forward                            │      10 │           90 │ 42.80 ms │    100.00 │     4.28 ms │ 0.48 ms │ 0.01 ms │ 2.10 ms │
    ├──────────────────────────────────────────────────┼─────────┼──────────────┼──────────┼───────────┼─────────────┼─────────┼─────────┼─────────┤
-   │ nn.Module.Net.forward/torch.nn.functional.conv2d │      20 │           40 │ 27.08 ms │     63.27 │     1.35 ms │ 0.68 ms │ 0.21 ms │ 2.10 ms │
+   │ nn.Module.Net.forward/aten::convolution          │      20 │           40 │ 27.08 ms │     63.27 │     1.35 ms │ 0.68 ms │ 0.21 ms │ 2.10 ms │
    ├──────────────────────────────────────────────────┼─────────┼──────────────┼──────────┼───────────┼─────────────┼─────────┼─────────┼─────────┤
-   │ nn.Module.Net.forward/torch.nn.functional.linear │      20 │           20 │ 15.41 ms │     36.00 │     0.77 ms │ 0.77 ms │ 0.13 ms │ 1.82 ms │
+   │ nn.Module.Net.forward/aten::addmm                │      20 │           20 │ 15.41 ms │     36.00 │     0.77 ms │ 0.77 ms │ 0.13 ms │ 1.82 ms │
    ├──────────────────────────────────────────────────┼─────────┼──────────────┼──────────┼───────────┼─────────────┼─────────┼─────────┼─────────┤
-   │ nn.Module.Net.forward/torch.nn.functional.relu   │      40 │           30 │  0.31 ms │      0.72 │     7.70 us │ 0.01 ms │ 0.01 ms │ 0.02 ms │
+   │ nn.Module.Net.forward/aten::relu                 │      40 │           30 │  0.31 ms │      0.72 │     7.70 us │ 0.01 ms │ 0.01 ms │ 0.02 ms │
    ╘══════════════════════════════════════════════════╧═════════╧══════════════╧══════════╧═══════════╧═════════════╧═════════╧═════════╧═════════╛
 
-Output is grouped by source location (``file:line``) and shows full operator
-hierarchy (``/``-separated) and kernel stats. A consolidated CSV
-(``ml_api_trace/consolidated.csv``) is written with all operator/kernel data;
-see :ref:`torch-operator-profiling` for details.
+The call tree is sorted by GPU time. Repeated calls that ran the same
+operators and kernels are shown once, with their combined counts. Each
+operator shows the source file and line it was called from, when available,
+and each kernel appears under the operator that launched it. See
+:ref:`torch-operator-profiling` for how operators are captured.
 
 The flat **Operator summary** table below the call tree has one row per
 operator that ran at least one GPU kernel. Time cells auto-switch between
 milliseconds and microseconds per cell; missing values render as ``N/A``.
 
-* **Operator** — full operator path (for example
-  ``aten::matmul/aten::mm``).
-* **Calls** — how many times the operator was invoked. ``N/A`` when the
-  trace did not include ``Context_Id`` information to count invocations.
+* **Operator** — the operator's full call path (for example
+  ``nn.Module.Net.forward/aten::addmm``).
+* **Calls** — how many times the operator was called.
 * **Dispatches** — how many GPU kernels ran while the operator was on the
   call stack (kernels launched by operators it called also count).
 * **Total** — total GPU time spent while the operator was on the call
@@ -865,23 +925,37 @@ line ``Operator summary: (no operators with recorded dispatches)``.
 Filtering by Operator
 ---------------------
 
-``--torch-operator`` uses shell-style glob patterns (``fnmatch``) to select
-operators. Operator hierarchies are ``/``-separated (e.g.
-``nn.Module.Net.forward/torch.nn.functional.relu``); ``*``, ``?``, and
-``[seq]`` cross hierarchy levels, and matching is case-sensitive:
+``--torch-operator`` selects PyTorch operators with shell-style glob patterns.
+A pattern can match an operator's name or its full call path, such as
+``nn.Module.Net.forward/aten::addmm``. Matching is case-sensitive.
 
-* **Wildcard** — ``*relu`` (ends with relu), ``*conv*`` (contains conv)
-* **Exact** — ``torch.nn.functional.relu``
-* **Multi-level** — ``*/torch.nn.functional.relu``, ``*/*functional*/*``
+* **Wildcard** — ``*relu*`` matches any operator whose name contains ``relu``.
+* **Call path** — ``*/aten::addmm`` matches ``aten::addmm`` when another
+  operator calls it.
+* **Exact** — ``aten::addmm``
 * **Match all** — no arguments, ``all``, ``*``, or ``**``
+
+rocprof-compute prints the call tree of the matching operators. The metric
+tables then cover only the kernels that those operators launched. To narrow
+the metric tables further:
+
+* ``-k`` keeps only the listed kernels. Use the ``(id N)`` shown next to each
+  kernel in the operator tree.
+* ``-d`` keeps only the listed dispatches that the matching operators
+  launched.
+* ``--list-stats`` lists only the kernels that the matching operators
+  launched.
+
+These options do not change the printed operator tree. Kernel IDs depend on
+``-d``, so use the same ``-d`` when you look up a kernel ID.
 
 .. code-block:: shell-session
 
    # Wildcard match
-   $ rocprof-compute analyze --experimental --torch-operator "*relu" --path ./workload
+   $ rocprof-compute analyze --experimental --torch-operator "*relu*" --path ./workload
 
-   # Exact match
-   $ rocprof-compute analyze --experimental --torch-operator torch.nn.functional.relu --path ./workload
+   # Path match
+   $ rocprof-compute analyze --experimental --torch-operator "*/aten::addmm" --path ./workload
 
    # Match all operators (no arguments)
    $ rocprof-compute analyze --experimental --torch-operator --path ./workload
@@ -891,7 +965,7 @@ operators. Operator hierarchies are ``/``-separated (e.g.
 .. code-block:: shell-session
 
    $ rocprof-compute analyze --experimental \
-       --torch-operator "*relu,*conv*,*linear" --path ./workload
+       --torch-operator "*relu*,*addmm*" --path ./workload
 
 
 Triton operator analysis
@@ -904,11 +978,9 @@ Triton operator analysis
    ``rocprof-compute analyze ... --experimental`` with
    ``--list-triton-operators`` or ``--triton-operator`` as needed.
 
-Triton kernels can be analyzed similar to PyTorch operators. You can use the
-``--list-triton-operators`` and ``--triton-operator`` options. Both options read the
-same ``ml_api_trace/consolidated.csv`` and select rows where the ``Backend`` column is
-``triton``. As a result, Triton kernels are reported independently even if PyTorch
-operators appear in the same run.
+Triton kernels are analyzed the same way as PyTorch operators.
+``--list-triton-operators`` and ``--triton-operator`` report only the kernels
+that Triton launched, even when the same run also captured PyTorch operators.
 
 List all captured Triton kernels
 ---------------------------------
@@ -921,40 +993,38 @@ Display all Triton kernels captured during profiling:
 
    ================================================================================
    Triton Operator Call Tree: ./workload
-   Grouped by source location, sorted by total GPU kernel duration.
+   Sorted by total GPU kernel duration.
    ================================================================================
 
-   torch_compile_triton.py:26 (dispatches: 39, total: 4.22 ms, dispatch_mean: 0.11 ms, dispatch_min: 0.05 ms, dispatch_max: 0.81 ms)
-   └─ torch.compile.fused (calls: 1)
-      └─ triton.CompiledKernel.triton_poi_fused_add_mul_relu_0 (calls: 3)
-         └─ triton_poi_fused_add_mul_relu_0 (id 0) (dispatches: 39, total: 4.22 ms)
+   triton.JITFunction.matmul_kernel triton_ffn.py:120 (calls: 1, dispatches: 2, total: 0.03 ms, dispatch_mean: 0.01 ms, dispatch_min: 4.40 us, dispatch_max: 0.02 ms)
+   └─ triton.CompiledKernel.matmul_kernel triton_ffn.py:120 (calls: 1, dispatches: 2, total: 0.03 ms, dispatch_mean: 0.01 ms, dispatch_min: 4.40 us, dispatch_max: 0.02 ms)
+      ├─ matmul_kernel (id 0) (dispatches: 1, total: 0.02 ms)
+      └─ __amd_rocclr_initHeap (id 7) (dispatches: 1, total: 4.40 us)
+
+   ...
 
    Operator summary (Min/Max/Mean are per-dispatch over the subtree; sorted by Total):
-   ╒══════════════════════════════════════════════════════════════════════════╤═════════╤══════════════╤═════════╤═══════════╤═════════════╤═════════╤═════════╤═════════╕
-   │ Operator                                                                 │   Calls │   Dispatches │   Total │   % Total │   Mean/Call │    Mean │     Min │     Max │
-   ╞══════════════════════════════════════════════════════════════════════════╪═════════╪══════════════╪═════════╪═══════════╪═════════════╪═════════╪═════════╪═════════╡
-   │ torch.compile.fused                                                      │       1 │           39 │ 4.22 ms │    100.00 │     4.22 ms │ 0.11 ms │ 0.05 ms │ 0.81 ms │
-   ├──────────────────────────────────────────────────────────────────────────┼─────────┼──────────────┼─────────┼───────────┼─────────────┼─────────┼─────────┼─────────┤
-   │ torch.compile.fused/triton.CompiledKernel.triton_poi_fused_add_mul_relu_ │       3 │           39 │ 4.22 ms │    100.00 │     1.41 ms │ 0.11 ms │ 0.05 ms │ 0.81 ms │
-   │ 0                                                                        │         │              │         │           │             │         │         │         │
-   ╘══════════════════════════════════════════════════════════════════════════╧═════════╧══════════════╧═════════╧═══════════╧═════════════╧═════════╧═════════╧═════════╛
+   ╒════════════════════════════════════════════════════════════════════════╤═════════╤══════════════╤═════════╤═══════════╤═════════════╤═════════╤═════════╤═════════╕
+   │ Operator                                                               │   Calls │   Dispatches │   Total │   % Total │   Mean/Call │    Mean │     Min │     Max │
+   ╞════════════════════════════════════════════════════════════════════════╪═════════╪══════════════╪═════════╪═══════════╪═════════════╪═════════╪═════════╪═════════╡
+   │ triton.JITFunction.matmul_kernel                                       │     9.0 │         10.0 │ 0.30 ms │     88.81 │     0.03 ms │ 0.03 ms │ 4.40 us │ 0.06 ms │
+   ├────────────────────────────────────────────────────────────────────────┼─────────┼──────────────┼─────────┼───────────┼─────────────┼─────────┼─────────┼─────────┤
+   │ triton.JITFunction.matmul_kernel/triton.CompiledKernel.matmul_kernel   │     9.0 │         10.0 │ 0.30 ms │     88.81 │     0.03 ms │ 0.03 ms │ 4.40 us │ 0.06 ms │
+   ├────────────────────────────────────────────────────────────────────────┼─────────┼──────────────┼─────────┼───────────┼─────────────┼─────────┼─────────┼─────────┤
+   │ ...                                                                    │         │              │         │           │             │         │         │         │
+   ╘════════════════════════════════════════════════════════════════════════╧═════════╧══════════════╧═════════╧═══════════╧═════════════╧═════════╧═════════╧═════════╛
 
 Filter the Triton kernels
 -------------------------
 
-``--triton-operator`` uses the same shell-style glob matching as
-``--torch-operator``; see :ref:`operator-filtering` for the full pattern syntax.
+``--triton-operator`` uses the same patterns and options as
+``--torch-operator``; see :ref:`operator-filtering`.
 
 .. code-block:: shell-session
 
    # Wildcard match
-   $ rocprof-compute analyze --experimental --triton-operator "*matmul*" --path ./workload
+   $ rocprof-compute analyze --experimental --triton-operator "*rmsnorm_kernel*" --path ./workload
 
    # Filter multiple kernels (space or comma separated)
    $ rocprof-compute analyze --experimental \
-       --triton-operator "*matmul*,*softmax*" --path ./workload
-
-.. note::
-
-   ``--torch-operator`` and ``--triton-operator`` are mutually exclusive; use
-   one operator filter per analysis run.
+       --triton-operator "*matmul*,*rmsnorm_kernel*" --path ./workload

@@ -83,9 +83,32 @@ backend remains a trailing marker token, and profile preserves the Function
 cell unchanged.
 
 The wire syntax and storage contract are detailed in the
-[low-level design](lld-torch-trace-collector.md). Consumers of the earlier
-stacked labels need the one-level parser; the collector does not translate
-between those formats.
+[low-level design](lld-torch-trace-collector.md). The collector does not
+translate stacked labels. A stacked Function first token (`:#` or `@`)
+makes analyze exit during parse.
+
+## Analysis path
+
+Profile copies marker CSVs unchanged. `--list-*-operators` / `--*-operator`
+rename on-disk `Correlation_Id` to `Correlation_ID` and join each pass on
+`Correlation_ID` and `GUID`, parse Function, then nest marker intervals
+per `Thread_Id`.
+
+Coverage issues warn during join and attach, before the call tree is
+printed. Integrity failures abort analyze, so no tree is printed. Plain
+analyze without those flags does not join and does not report those
+warnings.
+
+Collapsed GPU time and kernel lists come from pass 0 (collapse, not fold).
+Printed identical sibling fold is display-only and does not mutate the forest.
+Operator flags confine the forest by backend, then glob on that view.
+
+Adjacent ranges (`A.end == B.start`) are siblings. Analysis also uses the
+launcher id and interval containment to attach worker ranges to the
+launcher's call.
+
+Join steps and the warn-versus-abort split are in the
+[low-level design](lld-torch-trace-collector.md).
 
 ## Build and runtime compatibility
 
@@ -110,8 +133,18 @@ to interpret dtype differences is separate from that acceptance policy.
 
 ## Validation and extension points
 
+Native validation links real libtorch and compares the shim's layouts and
+behavior with upstream headers. `ROCPROFCOMPUTE_TORCH_ROOT` selects that test
+dependency; it is not needed to build the production collector. Loader tests
+cover generic-artifact discovery, accepted and rejected minors, the plain-C
+revision, runtime symbol promotion, and fallback. Marker and integration tests
+cover arguments, scopes, balanced ranges, and launcher propagation.
+
 Adding another supported PyTorch minor requires validating the private layouts
 and symbol behavior before extending the loader's supported set. Changes to
 the marker fields or encoding must be coordinated with the analysis consumer
 and both Python and native producers. The generic artifact and profile CSV
 layout remain independent of those future extensions.
+
+Analyze tests cover Function parse, join, consolidate, nest, and operator
+list/filter on the copied marker and counter CSVs.

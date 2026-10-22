@@ -35,6 +35,7 @@ from amdisa.sema_effects import inline_binary_op_effects
 from amdisa.sema_properties import InstructionProperty, derive_properties
 from amdisa.semantics import (
     F16_INPUT_CONVERSION_DTYPES,
+    F32_INPUT_CONVERSION_DTYPES,
     F32_TO_INTEGER_DTYPES,
     is_float_relation,
 )
@@ -513,6 +514,8 @@ class _ScalarBinop(_ScalarDeriver):
             # SALU float min/max match their VALU counterparts (RDNA4 ISA 6.8);
             # gfx1201 captures agree, including the VALU ISA discrepancies.
             result = _float_minmax(op, ty, src0, src1)
+        elif ty.base == 'F' and op in ('min', 'max'):
+            result = _float_minmax(f'legacy_{op}', ty, src0, src1)
         elif op in ('min', 'max', 'min_num', 'max_num', 'minimum', 'maximum'):
             fn = f'std::{op}' if op in ('min', 'max') else op
             result = SemaNode(
@@ -1150,7 +1153,7 @@ class _VectorUnary(_ScalarDeriver):
                 src0 = _cast(_src(0, SemaType.F16), SemaType.F16)
                 if dtype == 'f32_f16':
                     call_name = 'cvt_f32_f16_valu'
-            elif dtype in F32_TO_INTEGER_DTYPES:
+            elif dtype in F32_INPUT_CONVERSION_DTYPES:
                 # Expose the floating source to VOP3 modifier enrichment, then
                 # pass register bits to the conversion helper.
                 src0 = SemaNode(
@@ -1172,6 +1175,7 @@ class _VectorUnary(_ScalarDeriver):
                 'f32_ubyte3': SemaType.F32,
                 'f64_i32': SemaType.F64,
                 'f64_u32': SemaType.F64,
+                'f64_f32': SemaType.F64,
             }.get(dtype)
             if float_result is not None:
                 # The conversion helper returns register bits. Expose the
@@ -1352,6 +1356,8 @@ class _VectorBinop(_ScalarDeriver):
             result = _float_minmax(op, ty, src0, src1)
         elif op in ('min', 'max') and ty.base == 'F' and '_num_' in name_lower:
             result = _float_minmax(f'{op}_num', ty, src0, src1)
+        elif op in ('min', 'max') and ty.base == 'F':
+            result = _float_minmax(f'legacy_{op}', ty, src0, src1)
         else:
             result = _vec_binop_expr(op, src0, src1, ty)
         body = _assign(_cast(_dst(0), ty), result)
@@ -1435,6 +1441,8 @@ class _VectorTernary(_ScalarDeriver):
             result = _float_minmax(op, ty, src0, src1, src2)
         elif op in ('min3', 'max3', 'med3') and '_NUM_F' in sem.name:
             result = _float_minmax(f'{op}_num', ty, src0, src1, src2)
+        elif ty.base == 'F' and op in ('min3', 'max3', 'med3', 'minmax', 'maxmin'):
+            result = _float_minmax(f'legacy_{op}', ty, src0, src1, src2)
         else:
             result = SemaNode(
                 SemaNodeKind.CALL,

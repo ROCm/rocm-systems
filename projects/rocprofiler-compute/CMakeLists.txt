@@ -414,9 +414,29 @@ add_test(
 add_test(
     NAME test_profile_torch_trace
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -m torch_trace
-        --junitxml=tests/test_profile_torch_trace.xml ${COV_OPTION}
-        tests/integration/test_profile_torch_trace.py ${WORKING_DIR_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_profile_torch_trace.xml
+        ${COV_OPTION} tests/integration/test_profile_torch_trace.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_profile_triton_trace
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_profile_triton_trace.xml
+        ${COV_OPTION} tests/integration/test_profile_triton_trace.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_profile_ml_api_trace
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_profile_ml_api_trace.xml
+        ${COV_OPTION} tests/integration/test_profile_ml_api_trace.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_torch_trace_coverage
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_torch_trace_coverage.xml
+        ${COV_OPTION} tests/integration/test_torch_trace_coverage.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -443,6 +463,9 @@ set_tests_properties(
     test_profile_iteration_multiplexing_2
     test_profile_iteration_multiplexing_stochastic
     test_profile_torch_trace
+    test_profile_triton_trace
+    test_profile_ml_api_trace
+    test_torch_trace_coverage
     test_profile_membw
     PROPERTIES LABELS "profile" RESOURCE_GROUPS gpus:1 TIMEOUT 1800
 )
@@ -856,6 +879,38 @@ add_test(
 # Torch trace tests
 # -----------------------------------
 
+if(TARGET test-torch-trace-collector)
+    if(TEST_FROM_INSTALL)
+        set(_ttc_test_cmd tests/test-torch-trace-collector)
+    else()
+        set(_ttc_test_cmd $<TARGET_FILE:test-torch-trace-collector>)
+    endif()
+    add_test(
+        NAME test-torch-trace-collector
+        COMMAND ${_ttc_test_cmd} --gtest_filter=-TorchTraceCollectorBeforeInstall.*
+    )
+    add_test(
+        NAME test-torch-trace-collector-before-install
+        COMMAND ${_ttc_test_cmd} --gtest_filter=TorchTraceCollectorBeforeInstall.*
+    )
+    sanitizer_runtime_env(_ttc_test_env)
+    # Installed tests inherit LD_LIBRARY_PATH; callers must include torch/lib
+    # and any required ROCm lib/host-math/lib directory.
+    if(NOT TEST_FROM_INSTALL)
+        get_target_property(
+            _ttc_ld_path
+            test-torch-trace-collector
+            ROCPROF_TEST_LD_LIBRARY_PATH
+        )
+        list(APPEND _ttc_test_env "LD_LIBRARY_PATH=${_ttc_ld_path}:$ENV{LD_LIBRARY_PATH}")
+    endif()
+    set_tests_properties(
+        test-torch-trace-collector
+        test-torch-trace-collector-before-install
+        PROPERTIES LABELS "profile" ENVIRONMENT "${_ttc_test_env}"
+    )
+endif()
+
 add_test(
     NAME test_rocpd_data
     COMMAND
@@ -870,6 +925,31 @@ add_test(
         ${COV_OPTION} tests/unit/utils/inject_roctx/test_inject_roctx_package.py
         ${WORKING_DIR_OPTION}
 )
+
+add_test(
+    NAME test_inject_roctx_torch_trace_collector
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_inject_roctx_torch_trace_collector.xml ${COV_OPTION}
+        tests/unit/utils/inject_roctx/_backends/test_torch_trace_collector.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_inject_roctx_torch
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_inject_roctx_torch.xml
+        ${COV_OPTION} tests/unit/utils/inject_roctx/test_torch.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_inject_roctx_torch_gpu
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_inject_roctx_torch_gpu.xml
+        ${COV_OPTION} tests/integration/test_inject_roctx_torch_gpu.py
+        ${WORKING_DIR_OPTION}
+)
+set_tests_properties(test_inject_roctx_torch_gpu PROPERTIES RESOURCE_GROUPS gpus:1)
 
 # ---------------------------------------
 # Pure csv compatibility layer for pandas
@@ -1071,7 +1151,13 @@ if(${ENABLE_COVERAGE})
         test_report_shell
         test_rocpd_data
         test_profile_torch_trace
+        test_profile_triton_trace
+        test_profile_ml_api_trace
+        test_torch_trace_coverage
         test_inject_roctx_package
+        test_inject_roctx_torch
+        test_inject_roctx_torch_trace_collector
+        test_inject_roctx_torch_gpu
         test_analysis_db
         test_analysis_base
         test_analysis_orm

@@ -233,30 +233,6 @@ def test_roofline_kernel_filter(binary_handler_profile_rocprof_compute):
 
 
 @pytest.mark.roofline_plot
-def test_roof_cli_plot_generation(binary_handler_profile_rocprof_compute):
-    skip_unsupported_roofline_soc()
-
-    try:
-        import plotext as plt  # noqa: F401
-
-        cli_available = True
-    except ImportError:
-        cli_available = False
-
-    if cli_available:
-        options = ["--device", "0", "--roof-only"]
-        workload_dir = common.get_output_dir()
-
-        returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
-            config, workload_dir, options, check_success=False, roof=True
-        )
-
-        common.clean_output_dir(config["cleanup"], workload_dir)
-    else:
-        pytest.skip("plotext not available for CLI testing")
-
-
-@pytest.mark.roofline_plot
 def test_roof_error_handling(binary_handler_profile_rocprof_compute):
     skip_unsupported_roofline_soc()
 

@@ -3,9 +3,9 @@
 
 """ROCTX instrumentation backend for Triton.
 
-Wraps the Triton kernel-launch entry points (``JITFunction.run`` and
-``CompiledKernel.run`` / ``CompiledKernel.__call__``) so that Triton and
-Inductor kernel launches appear in ROCTX markers.
+Wraps JITFunction.run and CompiledKernel.run or CompiledKernel.__call__
+so @triton.jit launches appear as ROCTX markers. Inductor fused kernels
+that use PyTorch's static launcher are not wrapped.
 """
 
 import importlib.util

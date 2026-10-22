@@ -9,15 +9,89 @@ use crate::driver::{self, AddressSpaceInfo, AllocationOperations, CachedInfo};
 use crate::memory::storage::TryPush;
 use crate::memory::storage::{Owned, Shared};
 use crate::{Error, ErrorKind};
+use std::cell::Cell;
+use std::marker::PhantomData;
+use std::rc::Rc;
+
+/// Native cleanup observed while a construction call rolls back.
+///
+/// The original construction error remains the operation result. This record
+/// carries only the first independent cleanup error and a conservative
+/// allocation-owned payload charge.
+#[derive(Default)]
+pub struct RollbackReport {
+    /// First native release failure, if any.
+    pub status: Option<Error>,
+    /// Payload bytes whose native release was not established.
+    pub abandoned_byte_length: u64,
+    charge_backing: bool,
+}
+
+thread_local! {
+    static CURRENT_ROLLBACK: Cell<*mut RollbackReport> = const { Cell::new(std::ptr::null_mut()) };
+}
+
+struct RollbackScope {
+    previous: *mut RollbackReport,
+    _not_send: PhantomData<Rc<()>>,
+}
+
+impl Drop for RollbackScope {
+    fn drop(&mut self) {
+        CURRENT_ROLLBACK.with(|current| current.set(self.previous));
+    }
+}
+
+/// Captures cleanup failures from native owners discarded during construction.
+/// The scope is thread-local to the synchronous native call and never becomes
+/// instance or session state.
+pub fn with_rollback_report<R>(
+    charge_backing: bool,
+    body: impl FnOnce() -> R,
+) -> (R, RollbackReport) {
+    let mut report = RollbackReport {
+        charge_backing,
+        ..RollbackReport::default()
+    };
+    let scope = RollbackScope {
+        previous: CURRENT_ROLLBACK.with(|current| current.replace(&raw mut report)),
+        _not_send: PhantomData,
+    };
+    let result = body();
+    drop(scope);
+    (result, report)
+}
+
+#[allow(unsafe_code)]
+pub(crate) fn record_rollback(error: Error, abandoned_byte_length: u64) {
+    CURRENT_ROLLBACK.with(|current| {
+        let report = current.get();
+        if !report.is_null() {
+            // SAFETY: The pointer belongs to the active synchronous capture
+            // scope on this thread and is restored before that scope returns.
+            let report = unsafe { &mut *report };
+            if report.status.is_none() {
+                report.status = Some(error);
+            }
+            if report.charge_backing {
+                report.abandoned_byte_length = report
+                    .abandoned_byte_length
+                    .saturating_add(abandoned_byte_length);
+            }
+        }
+    });
+}
 
 /// Allocation owner and cached facts shared by drivers that can allocate
 /// device-accessible backing. The driver remains live through native cleanup.
 pub(crate) struct DriverAllocation<D: AllocationOperations> {
+    /// Native allocation whose cleanup runs before the driver is released.
     inner: Owned<D::Allocation>,
-    // A live allocation keeps its driver open even after the creating device
-    // is dropped. Drop releases the native owner before this reference.
+    /// Keeps the creating driver alive after the device handle is dropped.
     driver: Shared<D>,
+    /// Copyable address and extent facts retained across cleanup.
     info: AllocationInfo,
+    /// Prevents replay of a completed native release.
     released: bool,
 }
 
@@ -42,6 +116,10 @@ impl<D: AllocationOperations> DriverAllocation<D> {
 
     pub(crate) fn info(&self) -> AllocationInfo {
         self.info
+    }
+
+    pub(crate) fn shares_driver_instance(&self, driver: &Shared<D>) -> bool {
+        Shared::ptr_eq(&self.driver, driver)
     }
 
     pub(crate) fn check(&self) -> Result<(), Error> {
@@ -82,18 +160,21 @@ impl<D: AllocationOperations> Drop for DriverAllocation<D> {
 /// Validates and applies a replacement access set for any allocation driver.
 pub(crate) fn set_device_access_for<D, F>(
     allocation: &mut DriverAllocation<D>,
-    driver_instance: u64,
     origin: &Device,
     devices: &[&Device],
     state_of: F,
 ) -> Result<(), Error>
 where
     D: AllocationOperations,
-    F: for<'a> Fn(&'a Device) -> Option<&'a D::DeviceState>,
+    F: for<'a> Fn(&'a Device) -> Option<(&'a Shared<D>, &'a D::DeviceState)>,
 {
     let mut states = crate::memory::storage::try_vec_with_capacity(devices.len())?;
     for device in devices {
-        if driver_instance != device.endpoint.driver_instance {
+        let (driver, state) = state_of(device).ok_or(Error::Operation {
+            kind: ErrorKind::InvalidArgument,
+            detail: "access device belongs to another allocation session",
+        })?;
+        if !allocation.shares_driver_instance(driver) {
             return Err(Error::Operation {
                 kind: ErrorKind::InvalidArgument,
                 detail: "access device belongs to another allocation session",
@@ -107,10 +188,7 @@ where
                 detail: "access device has no qualified route to local memory",
             });
         }
-        states.try_push(state_of(device).ok_or(Error::Operation {
-            kind: ErrorKind::Unsupported,
-            detail: "access device has no matching allocation driver",
-        })?)?;
+        states.try_push(state)?;
     }
 
     D::set_allocation_access(allocation.driver_state_mut(), states.as_slice())
@@ -120,16 +198,17 @@ where
 /// Explicit free reports failures. If final Drop cannot complete cleanup, it
 /// retains potentially reachable native backing instead of recycling its VA.
 pub struct Allocation {
+    /// Concrete owner and driver selected when the allocation was created.
     pub(crate) inner: driver::AllocationState,
-    pub(crate) driver_instance: u64,
 }
 
 impl Allocation {
-    pub(crate) fn new(inner: driver::AllocationState, driver_instance: u64) -> Self {
-        Self {
-            inner,
-            driver_instance,
-        }
+    pub(crate) fn new(inner: driver::AllocationState) -> Self {
+        Self { inner }
+    }
+
+    pub(crate) fn shares_driver_instance(&self, device: &Device) -> bool {
+        self.inner.shares_driver_instance(&device.driver_state)
     }
 
     /// Returns creation-time addresses and extent without touching the driver.
@@ -138,6 +217,13 @@ impl Allocation {
     #[must_use]
     pub fn info(&self) -> AllocationInfo {
         self.inner.info()
+    }
+
+    /// Reports allocation-owned payload still tied to a native backing handle
+    /// or a live host mapping. Imported and borrowed backing reports zero.
+    #[must_use]
+    pub fn remaining_backing_byte_length(&self) -> u64 {
+        self.inner.remaining_backing_byte_length()
     }
     /// Checks native loss and whether this allocation still permits access.
     /// No mapping is added and no cached address is refreshed.
@@ -157,7 +243,7 @@ impl Allocation {
     /// device has no mapping, `DeviceLost` for a latched native loss, or the
     /// native error from the availability check.
     pub fn device_address(&self, device: &Device) -> Result<u64, Error> {
-        if self.driver_instance != device.endpoint.driver_instance {
+        if !self.shares_driver_instance(device) {
             return Err(Error::Operation {
                 kind: ErrorKind::InvalidArgument,
                 detail: "device belongs to another allocation session",
@@ -183,16 +269,14 @@ impl Allocation {
                 detail: "origin device does not own this allocation",
             });
         }
-        self.inner
-            .set_device_access(self.driver_instance, origin, devices)
+        self.inner.set_device_access(origin, devices)
     }
 
     /// Returns whether this allocation's physical backing originated on the
     /// supplied device. Devices from another session never match.
     #[must_use]
     pub fn originates_from(&self, device: &Device) -> bool {
-        self.driver_instance == device.endpoint.driver_instance
-            && self.inner.originates_from(&device.driver_state)
+        self.shares_driver_instance(device) && self.inner.originates_from(&device.driver_state)
     }
 
     /// Returns opaque driver metadata retained with an imported native
@@ -241,13 +325,8 @@ impl Device {
         alignment: u64,
         permissions: DeviceAccess,
     ) -> Result<Allocation, Error> {
-        self.driver_state.allocate_owned(
-            self.endpoint.driver_instance,
-            kind,
-            size,
-            alignment,
-            permissions,
-        )
+        self.driver_state
+            .allocate_owned(kind, size, alignment, permissions)
     }
 
     /// Registers caller-owned host pages for device access.
@@ -283,10 +362,7 @@ impl Device {
             backing: None,
         };
         // SAFETY: The caller preserves the complete registered page cover.
-        unsafe {
-            self.driver_state
-                .register_host(self.endpoint.driver_instance, request)
-        }
+        unsafe { self.driver_state.register_host(request) }
     }
 
     /// Creates one owned allocation mapped into this device and every
@@ -403,5 +479,36 @@ impl Device {
             states.try_push(peer_state)?;
         }
         Ok(states)
+    }
+}
+
+#[cfg(test)]
+mod rollback_tests {
+    use super::*;
+
+    #[test]
+    fn rollback_capture_keeps_first_error_and_charges_only_owned_payload() {
+        let failure = || Error::Operation {
+            kind: ErrorKind::Busy,
+            detail: "injected release failure",
+        };
+        let (result, report) = with_rollback_report(true, || {
+            record_rollback(failure(), 4096);
+            record_rollback(failure(), 1024);
+            7
+        });
+        assert_eq!(result, 7);
+        assert_eq!(
+            report.status.as_ref().map(Error::kind),
+            Some(ErrorKind::Busy)
+        );
+        assert_eq!(report.abandoned_byte_length, 5120);
+
+        let ((), borrowed) = with_rollback_report(false, || record_rollback(failure(), 4096));
+        assert_eq!(
+            borrowed.status.as_ref().map(Error::kind),
+            Some(ErrorKind::Busy)
+        );
+        assert_eq!(borrowed.abandoned_byte_length, 0);
     }
 }

@@ -914,10 +914,9 @@ processor_loop()
         process_batch(proc, *_batch);
         st.pipe.pop();
 
-        // Retained-start eviction and recycled-slot disambiguation are both
-        // stream-driven inside process_batch (eviction at its top, watermarked by
-        // each batch's own copy time; ambiguous same-key starts dropped during
-        // pairing), so there is no per-loop purge or wall-clock timer here.
+        // Retained-start eviction is stream-driven inside process_batch (at its
+        // top, watermarked by each batch's own copy time), so there is no per-loop
+        // purge or wall-clock timer here.
     }
 
     // Drain whatever the reader published on its way out.
@@ -935,15 +934,13 @@ processor_loop()
         ROCP_WARNING << fmt::format(
             "KFD dispatch-log pairing census (gpu_id={}): {} START record(s) drained, {} EOP "
             "record(s) drained, {} EOP(s) unmatched, {} START(s) overwritten on a live key, {} "
-            "ambiguous EOP(s) dropped, {} equal-tick EOP(s) dropped, {} stale EOP(s) dropped, {} "
-            "START(s) evicted stale, {} START(s) evicted by the size cap, {} START(s) still "
-            "retained at exit",
+            "equal-tick EOP(s) dropped, {} stale EOP(s) dropped, {} START(s) evicted stale, {} "
+            "START(s) evicted by the size cap, {} START(s) still retained at exit",
             _gpu_itr.first,
             _p.starts_seen,
             _p.eops_seen,
             _p.unmatched_eops,
             _p.starts_overwritten,
-            _p.ambiguous_pairs,
             _p.equal_tick_drops,
             _p.stale_eop_drops,
             _p.starts_evicted,
