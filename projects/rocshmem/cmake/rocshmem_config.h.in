@@ -42,6 +42,7 @@
 #cmakedefine GDA_BNXT
 #cmakedefine GDA_MLX5
 #cmakedefine GDA_MUX
+#cmakedefine USE_CONSTMEM
 #cmakedefine HAVE_EXTERNAL_MPI
 #cmakedefine HAVE_DEVICE_MALLOC_UNCACHED
 

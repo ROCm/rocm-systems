@@ -92,6 +92,13 @@ endif()
 option(GDA_MUX "Build provider multiplexer with runtime dispatch to hardware-specific provider"
        ${GDA_MUX_DEFAULT})
 
+# Gate the QueuePair device provider dispatch on __constant__ constmem. Always ON
+# for rocSHMEM's own build; consumers that embed only the GDA QueuePair headers
+# (e.g. RCCL's GIN path) set it OFF so device dispatch reads a per-instance
+# provider member instead, carrying no __constant__ global. Internal, not a
+# user-facing option — do not expose in ccmake.
+set(USE_CONSTMEM ON CACHE INTERNAL "QueuePair device dispatch reads __constant__ constmem (internal)")
+
 if(USE_GDA)
   if(GDA_PROVIDER_COUNT EQUAL 0)
     message(WARNING "GDA support requested, but no GDA provider enabled - disabling GDA")
