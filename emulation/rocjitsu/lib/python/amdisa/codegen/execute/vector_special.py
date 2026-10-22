@@ -1383,8 +1383,6 @@ def _gen_ocp_pk_fp8(
     *,
     is_vop3: bool,
     has_abs: bool,
-    e5m3_select: str | None = None,
-    e5m3_fn: str | None = None,
 ) -> None:
     """Pack two F32 sources as OCP FP8/BF8 into the OPSEL[3] word, keeping the other."""
     L.insert(
@@ -1392,16 +1390,7 @@ def _gen_ocp_pk_fp8(
     )
     L.append(f'    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);')
     L.append(f'    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane);')
-    packed = 'conversion(s0, s1)'
-    if e5m3_select is not None and e5m3_fn is not None:
-        # CDNA5's E5M3 encoding takes the same prepared sources.
-        e5m3 = [
-            f'static_cast<uint32_t>({e5m3_fn}('
-            f'std::bit_cast<float>(conversion.source(s{i}, {i})), wf.fp16_ovfl()))'
-            for i in range(2)
-        ]
-        packed = f'({e5m3_select}) ? ({e5m3[0]} | ({e5m3[1]} << 8)) : {packed}'
-    L.append(f'    uint32_t packed = {packed};')
+    L.append('    uint32_t packed = conversion(s0, s1);')
     L.append(
         f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst[0]}, wf, lane, ({opsel}) & 0x8u, packed, true);'
     )
@@ -1557,8 +1546,6 @@ def gen_vector_cvt_pk(
                 opsel,
                 is_vop3=is_vop3,
                 has_abs=has_abs,
-                e5m3_select=fp8_format_select if op == 'fp8_f32' else None,
-                e5m3_fn='util::f32_to_fp8_e5m3_rne_mode',
             )
         elif op in ('f32_fp8', 'f32_bf8') and uses_shared_fp8(arch_name):
             _gen_ocp_pk_f32_fp8(L, dst, src, op[4:], opsel)
@@ -2205,8 +2192,6 @@ def gen_cvt_fp8(ctx) -> str:
                 opsel,
                 is_vop3=is_vop3,
                 has_abs=ctx.has_abs,
-                e5m3_select=fp8_format_select if op == 'pk_fp8_f32' else None,
-                e5m3_fn='util::f32_to_fp8_e5m3_rne_mode',
             )
         else:
             _gen_ocp_sr_fp8(
@@ -2217,8 +2202,6 @@ def gen_cvt_fp8(ctx) -> str:
                 opsel,
                 is_vop3=is_vop3,
                 has_abs=ctx.has_abs,
-                e5m3_select=fp8_format_select if op == 'sr_fp8_f32' else None,
-                e5m3_fn='util::f32_to_fp8_e5m3_sr_mode',
             )
     elif op == 'pk_fp8_f32':
         _gen_pk_narrow_fp8(
@@ -2354,8 +2337,6 @@ def _gen_ocp_sr_fp8(
     *,
     is_vop3: bool,
     has_abs: bool,
-    e5m3_select: str | None = None,
-    e5m3_fn: str | None = None,
 ) -> None:
     """One F32 source to OCP FP8/BF8 with stochastic rounding, into the OPSEL[3:2] byte."""
     L.insert(
@@ -2365,15 +2346,7 @@ def _gen_ocp_sr_fp8(
     L.append(
         f'    uint32_t seed = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane);'
     )
-    result = 'conversion.stochastic(s0, seed)'
-    if e5m3_select is not None and e5m3_fn is not None:
-        # CDNA5's E5M3 encoding takes the same prepared source.
-        e5m3 = (
-            f'static_cast<uint32_t>({e5m3_fn}('
-            'std::bit_cast<float>(conversion.source(s0, 0)), seed, wf.fp16_ovfl()))'
-        )
-        result = f'({e5m3_select}) ? {e5m3} : {result}'
-    L.append(f'    uint32_t result = {result};')
+    L.append('    uint32_t result = conversion.stochastic(s0, seed);')
     L.append(f'    uint32_t shift = (({opsel} >> 2) & 0x3u) * 8u;')
     L.append(
         f'    uint32_t old = amdgpu::RegisterAccess(wf).read_lane({dst[0]}, lane);'

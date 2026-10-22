@@ -6686,11 +6686,11 @@ class CodeGenerator:
                 ):
                     from amdisa.sema_enrich import enrich_block
 
-                    source_modifiers = not is_conversion or takes_source_modifiers(
-                        dtype
+                    allows_source_modifiers = (
+                        not is_conversion or takes_source_modifiers(dtype)
                     )
-                    ef = {'neg'} if source_modifiers else set()
-                    if has_abs and source_modifiers:
+                    ef = {'neg'} if allows_source_modifiers else set()
+                    if has_abs and allows_source_modifiers:
                         ef.add('abs')
                     inst_fields = getattr(self, '_current_inst_fields', set())
                     if takes_output_modifiers(

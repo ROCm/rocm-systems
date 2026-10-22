@@ -673,7 +673,6 @@ template <typename Fmt> struct ToFp8 {
   }
 
   /// @brief Source `index` after ABS/NEG and the F32 input flush.
-  /// @details Also feeds encodings not modeled here, such as CDNA5's E5M3 form.
   template <typename V> constexpr V source(V bits, unsigned index) const {
     bits = source_modifier::apply<fp_format::F32>(bits, index, abs, neg);
     return input_denormal::flush_input<fp_format::F32>(bits, input);
