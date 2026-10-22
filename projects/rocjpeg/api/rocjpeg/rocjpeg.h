@@ -499,7 +499,7 @@ RocJpegStatus ROCJPEGAPI rocJpegDecodeSync(RocJpegHandle handle, RocJpegImage *d
  * for the decodes to complete or copying the results to the destination buffers. The caller must
  * subsequently call rocJpegDecodeBatchedSync() on the same handle to wait for completion and
  * retrieve the decoded output. The intended usage is a producer/consumer model where one thread calls
- * rocJpegDecodeBatchedAsync() and a separate thread calls rocJpegDecodeBatchedSync(); the two threads can
+ * rocJpegDecodeBatchedAsync() and a separate thread calls rocJpegDecodeBatchedSync(). The two threads can
  * run these calls at the same time on the same handle. The decode submit functions (rocJpegDecode(),
  * rocJpegDecodeBatched(), rocJpegDecodeAsync(), and rocJpegDecodeBatchedAsync()) must not be called from
  * more than one thread at the same time on the same handle.
