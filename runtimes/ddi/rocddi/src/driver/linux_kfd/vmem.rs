@@ -430,7 +430,7 @@ impl KfdVirtualMemory {
         };
         vm.check()?;
 
-        let gpu_id = vm.gpu_id();
+        let gpu_id = vm.gpu_id;
 
         let owner = Owned::try_new_uninit()?;
         let reservation =
@@ -459,7 +459,7 @@ impl KfdVirtualMemory {
             .vm
             .as_ref()
             .ok_or_else(|| error(ErrorKind::Internal, "virtual memory lost its owner VM"))?
-            .gpu_id();
+            .gpu_id;
         let mut args = uapi::AllocMemory {
             va: memory
                 .reservation
@@ -611,7 +611,7 @@ impl KfdVirtualMemory {
         vm.check()?;
         let path = format!(
             "/sys/class/drm/renderD{}/device/ualink/accel_state",
-            vm.render_minor()
+            vm.render_minor
         );
         Ok(std::fs::read_to_string(path)
             .is_ok_and(|state| matches!(state.trim(), "ready" | "active")))
@@ -639,7 +639,7 @@ impl KfdVirtualMemory {
         }
         // GEM handles are scoped to a DRM file. A dedicated file makes the
         // temporary PRIME import close even if export fails.
-        let render = super::sysfs::open_render(vm.render_minor())
+        let render = super::sysfs::open_render(vm.render_minor)
             .map_err(|source| native_error("fabric render open", source))?;
         let dma_buf = self.dma_buf()?;
         let gem = drm::import_dma_buf(&render, dma_buf.as_raw_fd())

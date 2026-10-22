@@ -103,6 +103,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Known issues
 
+- Thread trace can produce an incorrect binary (.att) size in gfx115x.
+
 ### Removed
 
 ## ROCprofiler-SDK 1.4.1 for ROCm release 10.0.1

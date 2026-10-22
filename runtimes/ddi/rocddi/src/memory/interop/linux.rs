@@ -250,21 +250,7 @@ pub fn ais_transfer(
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct KfdIpcMemoryHandle {
     /// Opaque words carried unchanged across the KFD IPC ABI.
-    words: [u32; 8],
-}
-
-impl KfdIpcMemoryHandle {
-    /// Wraps the eight words supplied by a KFD-compatible public API.
-    #[must_use]
-    pub const fn from_words(words: [u32; 8]) -> Self {
-        Self { words }
-    }
-
-    /// Returns the eight words carried by the KFD IPC contract.
-    #[must_use]
-    pub const fn words(self) -> [u32; 8] {
-        self.words
-    }
+    pub words: [u32; 8],
 }
 
 /// Location value accepted by Linux KFD SVM attribute operations.

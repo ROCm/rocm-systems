@@ -16,6 +16,7 @@
 #include <cmath>
 #include <cstdint>
 #include <random>
+#include <type_traits>
 #include <vector>
 
 namespace {
@@ -24,6 +25,26 @@ namespace denorm = rocjitsu::amdgpu::input_denormal;
 namespace fmt = rocjitsu::amdgpu::fp_format;
 namespace mm = rocjitsu::amdgpu::minmax;
 using mm::Nan;
+
+// Legacy selection must not silently use a default CDNA/non-IEEE policy, and
+// modern operations must not accept a legacy policy they would ignore.
+template <typename Op>
+concept HasModernOperation = requires { typename mm::Operation<fmt::F32, Op>; };
+template <typename Op>
+concept HasLegacyOperation = requires { typename mm::LegacyOperation<fmt::F32, Op>; };
+template <typename Op>
+concept HasModernBinaryEvaluation =
+    requires { mm::evaluate<fmt::F32, Op>(denorm::Policy{}, uint32_t{}, uint32_t{}); };
+static_assert(HasModernOperation<mm::MinNum> && HasModernOperation<mm::Med3Num>);
+static_assert(!HasModernOperation<mm::LegacyMin> && !HasModernOperation<mm::LegacyMin3> &&
+              !HasModernOperation<mm::LegacyMed3>);
+static_assert(HasLegacyOperation<mm::LegacyMin> && HasLegacyOperation<mm::LegacyMin3> &&
+              HasLegacyOperation<mm::LegacyMed3>);
+static_assert(!HasLegacyOperation<mm::MinNum> && !HasLegacyOperation<mm::Min3Num> &&
+              !HasLegacyOperation<mm::Med3Num>);
+static_assert(HasModernBinaryEvaluation<mm::MinNum> && !HasModernBinaryEvaluation<mm::LegacyMin>);
+static_assert(
+    !std::is_constructible_v<mm::LegacyOperation<fmt::F32, mm::LegacyMin>, denorm::Policy>);
 
 constexpr denorm::Policy kKeep{false};
 constexpr denorm::Policy kFlush{true};
