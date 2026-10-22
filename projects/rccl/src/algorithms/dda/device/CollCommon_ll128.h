@@ -139,11 +139,9 @@ __device__ __forceinline__ void ddaLL128Store16B(uint64_t* dst, uint64_t lo, uin
 #else
   __builtin_nontemporal_store(u.v, (v4u_gptr)dst);
 #endif
-  asm volatile("" ::: "memory");
 }
 
 __device__ __forceinline__ void ddaLL128Load16B(const uint64_t* src, uint64_t& lo, uint64_t& hi) {
-  asm volatile("" ::: "memory");
   union {
     v4u v;
     uint64_t w[2];
@@ -169,7 +167,6 @@ __device__ __forceinline__ void ddaLL128StoreAtomic16B(uint64_t* dst, uint64_t l
   u.w[1] = hi;
   __builtin_amdgcn_cooperative_atomic_store_8x16B(
     (v4i_gptr)dst, u.v, __ATOMIC_RELAXED, RCCL_SYSTEM_SYNCSCOPE);
-  asm volatile("" ::: "memory");
 #else
   ddaLL128Store16B(dst, lo, hi);
 #endif
@@ -177,7 +174,6 @@ __device__ __forceinline__ void ddaLL128StoreAtomic16B(uint64_t* dst, uint64_t l
 
 __device__ __forceinline__ void ddaLL128LoadAtomic16B(const uint64_t* src, uint64_t& lo, uint64_t& hi) {
 #if RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS
-  asm volatile("" ::: "memory");
   union {
     v4i v;
     uint64_t w[2];
@@ -187,6 +183,9 @@ __device__ __forceinline__ void ddaLL128LoadAtomic16B(const uint64_t* src, uint6
   lo = u.w[0];
   hi = u.w[1];
 #else
+  // Plain loads are not atomic, so without this the compiler may hoist a poll's
+  // read out of its loop.
+  asm volatile("" ::: "memory");
   ddaLL128Load16B(src, lo, hi);
 #endif
 }
@@ -267,11 +266,10 @@ __device__ __forceinline__ bool ddaLL128PollWire(const uint64_t* wire, uint64_t 
 }
 
 // ddaLL128PollWire over N slices at once: every slice's loads are issued before any
-// flag is checked, so their reads are in flight together. With cooperative loads
-// each 128-byte line is read as one unit, so a line whose flag matched already holds
-// its payload and is not read again; plain 16-byte loads can tear across a line's
-// lanes, so they re-read it. Returns false if the comm abort flag is set so the
-// kernel can leave the wait.
+// flag is checked, so their reads are in flight together. A line whose flag matched
+// is not read again, which relies on cooperative loads reading each 128-byte line as
+// one unit; plain 16-byte loads can tear across a line's lanes. Returns false if the
+// comm abort flag is set so the kernel can leave the wait.
 template <int N>
 __device__ __forceinline__ bool ddaLL128PollWireN(const uint64_t* const (&wire)[N],
                                                   uint64_t (&vr)[N][kDdaLL128WordsPerThread], uint64_t flag,
@@ -295,14 +293,6 @@ __device__ __forceinline__ bool ddaLL128PollWireN(const uint64_t* const (&wire)[
         needReload |= flagLane && (vr[k][u + 1] != flag);
     }
   } while (__any(needReload));
-#if !RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS
-#pragma unroll
-  for (int k = 0; k < N; ++k) {
-#pragma unroll
-    for (int u = 0; u < kDdaLL128WordsPerThread; u += 2)
-      ddaLL128LoadAtomic16B(wire[k] + u * kDdaLL128Warp, vr[k][u], vr[k][u + 1]);
-  }
-#endif
   return true;
 }
 
