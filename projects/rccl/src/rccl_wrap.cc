@@ -1986,11 +1986,11 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     // symk query failed — fall through to next candidate
   }
 
-  if (!cs.bestPreferredFound && cs.bestFallbackFound) {
+  if (!cs.bestPreferredFound && cs.preferred != RCCL_BACKEND_ALL) {
     WARN("rcclSelectAllReduce: preferred backend (mask=0x%x) unavailable, falling back",
          (unsigned)cs.preferred);
-    *decision = cs.bestFallback;
   }
+  if (!cs.bestPreferredFound && cs.bestFallbackFound) *decision = cs.bestFallback;
   if (cs.bestPreferredFound || cs.bestFallbackFound) return ncclSuccess;
 
   // (6) Standard ring/tree/pat kernel. Fill algo/protocol/channels for reporting
