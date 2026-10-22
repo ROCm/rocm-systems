@@ -125,15 +125,14 @@ static_assert((NCCL_IB_MAX_QPS + NCCL_GDR_FLUSH_MAX_WAIT_QPS - 1) * NCCL_GDR_FLU
 static_assert(NCCL_IB_MAX_QPS < 256, "per-QP GDR flush flag first index and count are packed in 8 bits each");
 
 // The RO=0 flag write is only ordered behind the payload posted ahead of it on
-// the same QP of one NIC, delivered in order: no NIC fusion, no adaptive
-// routing, no out-of-order receive queues (ID-based matching) and no
-// resiliency retransmits.
-bool ncclIbGdrFlushFlagOrdered(int64_t oooRq, int64_t portFailover, int64_t matchingScheme, int nMergedDevs,
-                               const int* mergedNdevs, int nDevs, const int* adaptiveRouting) {
-  if (nMergedDevs == 0 || oooRq != 0 || portFailover != 0) return false;
+// the same QP, delivered in order: no adaptive routing, no out-of-order receive
+// queues (ID-based matching) and no resiliency retransmits. NIC fusion is
+// checked per connection at accept: fused vNICs are only created by the
+// topology search, after the init all-gather.
+bool ncclIbGdrFlushFlagOrdered(int64_t oooRq, int64_t portFailover, int64_t matchingScheme, int nDevs,
+                               const int* adaptiveRouting) {
+  if (nDevs == 0 || oooRq != 0 || portFailover != 0) return false;
   if (matchingScheme != -2 && matchingScheme != BY_INDEX) return false;
-  for (int d = 0; d < nMergedDevs; d++)
-    if (mergedNdevs[d] != 1) return false;
   for (int d = 0; d < nDevs; d++)
     if (adaptiveRouting[d]) return false;
   return true;
@@ -141,12 +140,10 @@ bool ncclIbGdrFlushFlagOrdered(int64_t oooRq, int64_t portFailover, int64_t matc
 
 bool ncclIbGdrFlushFlagLocalSupport() {
   if (rcclParamIbGdrFlushFlag() == 0) return false;
-  int mergedNdevs[MAX_IB_VDEVS], adaptiveRouting[MAX_IB_DEVS];
-  for (int d = 0; d < ncclNMergedIbDevs; d++) mergedNdevs[d] = ncclIbMergedDevs[d].vProps.ndevs;
+  int adaptiveRouting[MAX_IB_DEVS];
   for (int d = 0; d < ncclNIbDevs; d++) adaptiveRouting[d] = ncclIbDevs[d].ar;
   return ncclIbGdrFlushFlagOrdered(ncclParamIbOooRq(), ncclParamIbResiliencyPortFailover(),
-                                   ncclParamIbReceiverSideMatchingScheme(), ncclNMergedIbDevs, mergedNdevs,
-                                   ncclNIbDevs, adaptiveRouting);
+                                   ncclParamIbReceiverSideMatchingScheme(), ncclNIbDevs, adaptiveRouting);
 }
 
 void ncclIbSetGdrFlushFlag(void* netContext, int enable) {
@@ -2056,7 +2053,9 @@ ib_recv:
       COMPILER_ATOMIC_LOAD(&ncclIbDevs[rCommDev->base.ibDevN].currSpeed, std::memory_order_relaxed);
     rComm->lastSentSpeeds[i] = (uint16_t)(meta.devs[i].currSpeed / 1000);
   }
-  if (lComm->gdrFlushFlag && rComm->flushEnabled) {
+  // The flag WR carries devs[0]'s keys, so both sides must use a single NIC
+  // (nDataQps is the larger NIC count of the two).
+  if (lComm->gdrFlushFlag && rComm->flushEnabled && rComm->base.nDataQps == 1) {
     int nQpsPerRequest = 0;
     NCCLCHECKGOTO(ncclIbCommBaseGetNqpsPerRequest(&rComm->base, &nQpsPerRequest), ret, fail);
     if (nQpsPerRequest <= NCCL_GDR_FLUSH_MAX_WAIT_QPS)

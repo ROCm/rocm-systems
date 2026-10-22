@@ -160,7 +160,7 @@ protected:
         if (!flagEnvEnabled()) why = "requires RCCL_IB_GDR_FLUSH_FLAG=1";
         else if (net_ != &ncclNetIb) why = "the flag is ncclNetIb only";
         else if (!ncclIbGdrFlushFlagLocalSupport())
-            why = "NIC fusion, adaptive routing, out-of-order RQ or resiliency rules the flag out";
+            why = "adaptive routing, out-of-order RQ, ID-based matching or resiliency rules the flag out";
         else if (!gdrPtrSupport()) why = "no GDR backend (neither peermem nor dma-buf) on this device";
         else if (expectedFlagCount() > kMaxWaitQps) why = "the flag needs at most 8 QPs per request";
         int skip = why.empty() ? 0 : 1;
@@ -333,24 +333,21 @@ protected:
 };
 
 // Each setting that breaks RO=0 ordering behind the payload rules the flag out
-// on its own: out-of-order RQ, port-failover resiliency, ID-based matching, a
-// fused (multi-NIC) device, adaptive routing on any device, or no device.
+// on its own: out-of-order RQ, port-failover resiliency, ID-based matching,
+// adaptive routing on any device, or no device. NIC fusion is per connection
+// (Enabled_FusedNicKeepsRdmaReadFlush).
 TEST_F(GdrFlushFlagTest, Ordering_EachDisqualifierRulesTheFlagOut) {
     constexpr int64_t kAutoMatching = -2, kByIndex = 0, kById = 1;
-    const int single[2] = {1, 1}, fused[2] = {1, 2};
     const int noAr[2] = {0, 0}, oneAr[2] = {0, 1};
 
-    EXPECT_TRUE(ncclIbGdrFlushFlagOrdered(0, 0, kAutoMatching, 2, single, 2, noAr));
-    EXPECT_TRUE(ncclIbGdrFlushFlagOrdered(0, 0, kByIndex, 2, single, 2, noAr));
+    EXPECT_TRUE(ncclIbGdrFlushFlagOrdered(0, 0, kAutoMatching, 2, noAr));
+    EXPECT_TRUE(ncclIbGdrFlushFlagOrdered(0, 0, kByIndex, 2, noAr));
 
-    EXPECT_FALSE(ncclIbGdrFlushFlagOrdered(1, 0, kAutoMatching, 2, single, 2, noAr)) << "NCCL_IB_OOO_RQ";
-    EXPECT_FALSE(ncclIbGdrFlushFlagOrdered(0, 1, kAutoMatching, 2, single, 2, noAr))
-        << "NCCL_IB_RESILIENCY_PORT_FAILOVER";
-    EXPECT_FALSE(ncclIbGdrFlushFlagOrdered(0, 0, kById, 2, single, 2, noAr))
-        << "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=1";
-    EXPECT_FALSE(ncclIbGdrFlushFlagOrdered(0, 0, kAutoMatching, 2, fused, 2, noAr)) << "NIC fusion";
-    EXPECT_FALSE(ncclIbGdrFlushFlagOrdered(0, 0, kAutoMatching, 2, single, 2, oneAr)) << "adaptive routing";
-    EXPECT_FALSE(ncclIbGdrFlushFlagOrdered(0, 0, kAutoMatching, 0, single, 0, noAr)) << "no IB device";
+    EXPECT_FALSE(ncclIbGdrFlushFlagOrdered(1, 0, kAutoMatching, 2, noAr)) << "NCCL_IB_OOO_RQ";
+    EXPECT_FALSE(ncclIbGdrFlushFlagOrdered(0, 1, kAutoMatching, 2, noAr)) << "NCCL_IB_RESILIENCY_PORT_FAILOVER";
+    EXPECT_FALSE(ncclIbGdrFlushFlagOrdered(0, 0, kById, 2, noAr)) << "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=1";
+    EXPECT_FALSE(ncclIbGdrFlushFlagOrdered(0, 0, kAutoMatching, 2, oneAr)) << "adaptive routing";
+    EXPECT_FALSE(ncclIbGdrFlushFlagOrdered(0, 0, kAutoMatching, 0, noAr)) << "no IB device";
 }
 
 // Enabled: the flag page starts zeroed with a clear descriptor, and a
@@ -454,6 +451,63 @@ TEST_F(GdrFlushFlagTest, Disabled_NoFlagAndHintIgnored) {
             EXPECT_TRUE(TightSend(pair.sendComm, buffer, size, 20 + it, mh, &req, &err)) << err;
             EXPECT_TRUE(TightWait(req, nullptr, &err)) << err;
         }
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
+// Enabled for the communicator, but over a fused (two-NIC) device: the flag WR
+// would carry one NIC's keys on the other NIC's QPs, so the connection keeps
+// the RDMA read flush and a flagged hint has no effect.
+TEST_F(GdrFlushFlagTest, Enabled_FusedNicKeepsRdmaReadFlush) {
+    if (!validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                   false, kMinGpusPerNode, kNoNodeLimit))
+        GTEST_SKIP() << "requires exactly " << kExactTwoProcesses << " ranks";
+    int ndev = 0;
+    AssertInitAndGetDevices(&ndev);
+    if (!AllRanksOk(ndev >= 2)) GTEST_SKIP() << "requires 2 IB devices on every rank to fuse";
+    const std::string why = EnableFlagForComm();
+    if (!why.empty()) GTEST_SKIP() << why;
+
+    ncclNetVDeviceProps_t vProps = {};
+    vProps.ndevs = 2;
+    vProps.devs[0] = 0;
+    vProps.devs[1] = 1;
+    int vdev = -1;
+    ASSERT_TRUE(AllRanksOk(MakeVirtualDevice(&vdev, &vProps) == ncclSuccess && vdev >= 0))
+        << "failed to fuse devices 0 and 1";
+
+    const int rank = MPIEnvironment::world_rank;
+    ConnectionPair pair;
+    NetConnectionGuard connGuard(net_);
+    SetupConnectionWithGuard(vdev, pair, connGuard);
+    EXPECT_FALSE(FlagSetUp(pair, nullptr)) << "the flag was set up over a fused NIC";
+
+    const size_t size = 65536 + 3;
+    void* buffer = nullptr;
+    ASSERT_TRUE(AllRanksOk(hipMalloc(&buffer, size) == hipSuccess));
+    auto bufGuard = makeDeviceBufferAutoGuard(buffer);
+    void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+    void* mh = nullptr;
+    ASSERT_TRUE(AllRanksOk(RegisterGdrMemory(comm, buffer, size, &mh) == ncclSuccess));
+    NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
+
+    std::string err;
+    void* req = nullptr;
+    const int seed = 60;
+    if (rank == 0) {
+        void* bufs[1] = {buffer};
+        size_t sizes[1] = {size};
+        int tags[1] = {60};
+        void* mhs[1] = {mh};
+        EXPECT_TRUE(PostFlaggedRecv(pair.recvComm, /*flag=*/true, 1, bufs, sizes, tags, mhs, &req, &err)) << err;
+        EXPECT_TRUE(req && TightWait(req, nullptr, &err)) << err;
+        EXPECT_EQ(ncclIbGetGpuFlushFlagSeq(pair.recvComm), 0u) << "descriptor published without the flag";
+        EXPECT_TRUE(FlushAndWait(pair.recvComm, 1, bufs, sizes, mhs, &err)) << err;
+        EXPECT_TRUE(VerifyPattern(buffer, size, seed, &err)) << err;
+    } else {
+        EXPECT_EQ(initializeBufferWithPattern<uint8_t>(buffer, size, makeBytePattern(seed)), hipSuccess);
+        EXPECT_TRUE(TightSend(pair.sendComm, buffer, size, 60, mh, &req, &err)) << err;
+        EXPECT_TRUE(TightWait(req, nullptr, &err)) << err;
     }
     MPI_Barrier(MPI_COMM_WORLD);
 }

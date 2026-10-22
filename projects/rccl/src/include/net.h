@@ -51,10 +51,10 @@ bool ncclIbGdrFlushFlagLocalSupport();
 void ncclIbSetGdrFlushFlag(void* netContext, int enable);
 // The ordering part of ncclIbGdrFlushFlagLocalSupport, over explicit settings:
 // NCCL_IB_OOO_RQ, NCCL_IB_RESILIENCY_PORT_FAILOVER,
-// NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME, the NIC count of each merged device
-// and the adaptive routing state of each IB device.
-bool ncclIbGdrFlushFlagOrdered(int64_t oooRq, int64_t portFailover, int64_t matchingScheme, int nMergedDevs,
-                               const int* mergedNdevs, int nDevs, const int* adaptiveRouting);
+// NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME and the adaptive routing state of each
+// IB device.
+bool ncclIbGdrFlushFlagOrdered(int64_t oooRq, int64_t portFailover, int64_t matchingScheme, int nDevs,
+                               const int* adaptiveRouting);
 // GPU-visible per-QP flags of an ncclNetIb recv comm (NULL if this connection
 // keeps the RDMA read flush), and the packed gdrFlushSeq entry (see device.h)
 // the GPU waits on for the last completed receive.
