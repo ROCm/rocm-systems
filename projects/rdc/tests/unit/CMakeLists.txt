@@ -289,3 +289,25 @@ install(
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
     COMPONENT ${TESTS_COMPONENT}
 )
+
+# rdc_config_tests: rdc_config_set(), rdc_config_get(), rdc_config_clear() and
+# the thread that re-applies the settings. It compiles RdcConfigSettingsImpl.cc
+# instead of linking librdc, so it needs no GPU; librdc_bootstrap provides the
+# logger.
+add_executable(
+    rdc_config_tests
+    ${SRC_DIR}/test_config.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcConfigSettingsImpl.cc
+)
+target_include_directories(
+    rdc_config_tests
+    PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/include ${AMD_SMI_INCLUDE_DIR}
+)
+target_link_libraries(rdc_config_tests PRIVATE rdc_bootstrap GTest::gtest_main pthread)
+set_target_properties(rdc_config_tests PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib")
+add_test(NAME rdc_config_tests COMMAND rdc_config_tests)
+install(
+    TARGETS rdc_config_tests
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
+    COMPONENT ${TESTS_COMPONENT}
+)

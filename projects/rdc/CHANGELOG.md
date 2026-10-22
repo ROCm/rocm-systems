@@ -48,6 +48,15 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - Stopping `rdcd`, or embedded RDC with `rdc_stop_embedded()`, no longer hangs. Rarely, the stop never returned and the process had to be killed.
 
+- `rdci config --set` no longer reports success when a setting was not applied to every GPU of the group.
+  - An empty group, an unknown setting type and a power limit too large to apply are rejected, and when one GPU of the group rejects a setting, the GPUs that already took it get their previous setting back.
+
+- `rdci config --clear` no longer stops at the first GPU it cannot reset. It resets the other GPUs of the group and reports the failure.
+
+- `rdcd` now restores a configured clock limit that a GPU lost even when it cannot read that GPU's power cap.
+
+- `rdcd` no longer stops unexpectedly when configuration settings are set and cleared at the same time.
+
 ## RDC 1.3.1 for ROCm 7.14.0
 
 ### Added
