@@ -27,7 +27,7 @@
                 {
                     "comparison": "equals",
                     "description": "Verify that '[fib][builtin.py:12]' has a total of 885 calls.",
-                    "error_message": "'[fib][builtin.py:13]' does not have 885 total calls, as expected (5 iterations of naive fib(10) = 5 * 177 frames).",
+                    "error_message": "'[fib][builtin.py:12]' does not have 885 total calls, as expected (5 iterations of naive fib(10) = 5 * 177 frames).",
                     "expected_result": 885,
                     "query": "SELECT total_calls FROM top WHERE name = '[fib][builtin.py:12]';"
                 },
