@@ -48,13 +48,13 @@ inline uint16_t random_f16_bits(std::minstd_rand &random) {
 }
 
 // Match NaNs by classification. Loose semantics compare signed infinities
-// exactly and finite values with atol/rtol. Mode 1 currently falls back to loose.
+// exactly and finite values with atol/rtol; other semantics compare bits.
+// The caller must expect exact execution for fallback/compatibility modes.
 inline void expect_f32(uint32_t actual, float expected, uint64_t semantics, double atol,
                        double rtol) {
   if (std::isnan(expected)) {
     EXPECT_TRUE(std::isnan(std::bit_cast<float>(actual)));
-  } else if (semantics != RJ_ARITH_SEMANTICS_LOOSE &&
-             semantics != RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE) {
+  } else if (semantics != RJ_ARITH_SEMANTICS_LOOSE) {
     EXPECT_EQ(actual, std::bit_cast<uint32_t>(expected));
   } else if (std::isinf(expected)) {
     EXPECT_EQ(std::bit_cast<float>(actual), expected);
