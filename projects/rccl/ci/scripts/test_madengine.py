@@ -785,8 +785,8 @@ def verify_rccl_replacement(
 ) -> tuple[bool, str]:
     """Verify that every node used the CI-built RCCL, not its bundled copy.
 
-    Requires a ``*_node_<i>.out`` log from each of the *nodes* nodes; a library
-    that reached only some of them fails.
+    Requires a banner log (rccl_banner_logs) from each of the *nodes* nodes;
+    a library that reached only some of them fails.
 
     Returns (ok, message).  Generic across frameworks — any RCCL-based
     application prints the version string during init.
@@ -800,7 +800,7 @@ def verify_rccl_replacement(
     logged = {
         int(m.group(1))
         for log_file in node_logs
-        if (m := re.search(r"_node_(\d+)\.out$", log_file.name))
+        if (m := re.search(r"_(?:node_|NODE)(\d+)\.(?:out|log)$", log_file.name))
     }
     missing = sorted(set(range(nodes)) - logged)
     if missing:
@@ -2387,10 +2387,6 @@ def parse_live_log_metrics(work_dir: Path) -> list[dict]:
     return runs
 
 
-def _usable_metric(val: float) -> bool:
-    """Whether a throughput can be scored; NaN would pass any threshold."""
-    return math.isfinite(val) and val > 0
-
 _SWEEP_POINT_RE = re.compile(r"_(isl\d+_osl\d+_con\d+)$")
 
 
@@ -2409,6 +2405,11 @@ def _row_precision(row: dict) -> str:
     return point.group(1) if point else ""
 
 
+def _usable_metric(val: float) -> bool:
+    """Whether a throughput can be scored; NaN would pass any threshold."""
+    return math.isfinite(val) and val > 0
+
+
 def collect_phase_results(
     run_dir: Path,
     metric_key: str,
@@ -2416,12 +2417,7 @@ def collect_phase_results(
     extra_tflops_aliases: set[str] | None = None,
     only: list[str] | None = None,
 ) -> list[dict]:
-    """Per-precision metrics for one phase: structured output, else the live log."""
-    """Per-precision metrics for one phase.
-
-    Prefers madengine's structured output and falls back to scraping the live
-    log.  Each entry carries precision, metric value and a pass/fail status, so
-    the A/B comparison and the datastore writes are driven from one list.
+    """Per-precision metrics for one phase: structured output, else the live log.
 
     *only* keeps the rows of those precisions (sweep points) and drops the rest.
     """
