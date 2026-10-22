@@ -12,6 +12,9 @@
 
 #undef access
 #undef gethostname
+#undef free
+#undef calloc
+#undef malloc
 #undef fprintf
 #undef exit
 #undef perror

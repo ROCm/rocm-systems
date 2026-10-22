@@ -517,12 +517,6 @@ class GinHostFixture : public ::testing::Test {
     gs->backends[0].ginInstance = &fake_.instanceHandle;
   }
 
-  // ncclGinHostFinalize memsets the GIN state, which ends the C++ lifetime of
-  // its std::thread and std::atomic members. Any test that lets a finalize run
-  // to completion has to start a fresh state in place before the fixture's
-  // teardown (and ~ncclSharedResources) touch those members again.
-  void restoreGinStateAfterFinalize() { new (gin()) ncclGinState{}; }
-
   void joinProgressThreads() {
     auto* gs = gin();
     gs->proxyThreadStopSignal.store(true);
@@ -1726,8 +1720,8 @@ TEST_F(GinHostFinalizeMicrotest, HostFinalize_CommNeverConnected_TouchesNoPlugin
   EXPECT_EQ(0, fake_.closeCollCalls);
 }
 
-// Finalize closes every connection and wipes the GIN state, so a later
-// ncclGinConnectOnce starts from scratch.
+// Finalize closes every connection and clears the per-comm GIN state, so a later
+// ncclGinConnectOnce cannot reuse a released connection.
 TEST_F(GinHostFinalizeMicrotest, HostFinalize_ConnectedComm_ClosesEveryConnectionAndClearsTheState) {
   nthreadsParam_ = 2;
   ASSERT_EQ(ncclSuccess, connectOnce());
@@ -1737,8 +1731,10 @@ TEST_F(GinHostFinalizeMicrotest, HostFinalize_ConnectedComm_ClosesEveryConnectio
 
   EXPECT_EQ(2, fake_.closeCollCalls);
   EXPECT_FALSE(gin()->connected);
-  EXPECT_EQ(0, gin()->numActiveBackends);
-  restoreGinStateAfterFinalize();
+  EXPECT_TRUE(gin()->backends[0].closed);
+  // AICOMRCCL-2739: numActiveBackends and ginInstance deliberately survive, so the
+  // last sharedRes reference can still reach the plugin's finalize().
+  EXPECT_EQ(1, gin()->numActiveBackends);
 }
 
 // A progress-thread slot that was never spawned is skipped rather than joined.
@@ -1748,7 +1744,6 @@ TEST_F(GinHostFinalizeMicrotest, HostFinalize_ProgressThreadSlotNeverSpawned_Ski
   ASSERT_FALSE(gin()->thread[0].joinable());
 
   EXPECT_EQ(ncclSuccess, ncclGinHostFinalize(comm()));
-  restoreGinStateAfterFinalize();
 }
 
 // A connection slot that is already empty is skipped instead of being closed a
@@ -1760,24 +1755,24 @@ TEST_F(GinHostFinalizeMicrotest, HostFinalize_ConnectionSlotAlreadyClosed_SkipsI
 
   ASSERT_EQ(ncclSuccess, ncclGinHostFinalize(comm()));
   EXPECT_EQ(1, fake_.closeCollCalls);
-  restoreGinStateAfterFinalize();
 }
 
 // A close that fails surfaces to the caller instead of being swallowed by the
-// teardown path, and finalize stops there rather than wiping the state behind
-// a connection it could not release.
-TEST_F(GinHostFinalizeMicrotest, HostFinalize_CloseCollFails_PropagatesTheStatusAndLeavesTheStateIntact) {
-  nthreadsParam_ = 2;  // a second connection, to show the walk stopped
+// teardown path, but teardown still runs to the end: the remaining connections
+// are closed and the state is cleared, because there is no second chance to
+// release them.
+TEST_F(GinHostFinalizeMicrotest, HostFinalize_CloseCollFails_PropagatesTheStatusAndStillFinishesTheTeardown) {
+  nthreadsParam_ = 2;  // a second connection, to show the walk continued
   ASSERT_EQ(ncclSuccess, connectOnce());
   ASSERT_EQ(2, gin()->backends[0].ginCommCount);
   fake_.failCloseColl = {ncclSystemError, 1};
 
   EXPECT_EQ(ncclSystemError, ncclGinHostFinalize(comm()));
 
-  EXPECT_EQ(1, fake_.closeCollCalls);
-  EXPECT_NE(nullptr, gin()->backends[0].ginComms[0]);  // the slot is not cleared
-  EXPECT_TRUE(gin()->connected);                       // ... and the state is not wiped
-  EXPECT_EQ(1, gin()->numActiveBackends);
+  EXPECT_EQ(2, fake_.closeCollCalls);                   // the second handle is still closed
+  EXPECT_EQ(nullptr, gin()->backends[0].ginComms[0]);   // ... and every slot is cleared
+  EXPECT_FALSE(gin()->connected);                       // ... and the state is still reset
+  EXPECT_TRUE(gin()->finalized);
 }
 
 // HostFinalize joins every progress thread before it returns. A worker held
@@ -1812,7 +1807,6 @@ TEST_F(GinHostFinalizeMicrotest, HostFinalize_WorkerInsideGinProgress_WaitsForEv
   ScopeExit finalizeGuard([&] {
     fake_.holdProgress.store(0, std::memory_order_release);
     if (fin.joinable()) fin.join();
-    restoreGinStateAfterFinalize();
     std::free(dc);
   });
 
@@ -1833,6 +1827,7 @@ class GinHostRegisterMicrotest : public GinHostFixture {
  protected:
   void* hostWins_[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS] = {};
   ncclGinWindow_t devWins_[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS] = {};
+  uint32_t winGenerations_[NCCL_GIN_MAX_ACTIVE_BACKENDS] = {};
   char buffer_[64] = {};
 
   void SetUp() override {
@@ -1861,8 +1856,11 @@ class GinHostRegisterMicrotest : public GinHostFixture {
   }
 
   ncclResult_t registerWindow(int winFlags = 0, bool multiSegment = false, int memType = NCCL_PTR_CUDA) {
-    return ncclGinRegister(comm(), buffer_, sizeof(buffer_), hostWins_, devWins_, winFlags, multiSegment, memType);
+    return ncclGinRegister(comm(), buffer_, sizeof(buffer_), hostWins_, devWins_, winGenerations_, winFlags,
+                           multiSegment, memType);
   }
+
+  ncclResult_t deregisterWindow() { return ncclGinDeregister(comm(), hostWins_, winGenerations_); }
 };
 
 // Every connection of every active backend gets its own registration, and the
@@ -1953,7 +1951,7 @@ TEST_F(GinHostRegisterMicrotest, Deregister_PopulatedSlots_DeregistersEachOne) {
   void* const win0 = hostWins_[0];
   void* const win1 = hostWins_[1];
 
-  ASSERT_EQ(ncclSuccess, ncclGinDeregister(comm(), hostWins_));
+  ASSERT_EQ(ncclSuccess, deregisterWindow());
 
   ASSERT_EQ(2u, fake_.deregMrCalls.size());
   EXPECT_EQ(std::make_pair(collCommFor(0, 0), win0), fake_.deregMrCalls[0]);
@@ -1971,7 +1969,7 @@ TEST_F(GinHostRegisterMicrotest, Deregister_MultipleActiveBackends_DeregistersEa
   void* const backend1Win = hostWins_[NCCL_GIN_MAX_CONNECTIONS];
   ASSERT_NE(nullptr, backend1Win);
 
-  ASSERT_EQ(ncclSuccess, ncclGinDeregister(comm(), hostWins_));
+  ASSERT_EQ(ncclSuccess, deregisterWindow());
 
   ASSERT_EQ(3u, fake_.deregMrCalls.size());
   EXPECT_EQ(std::make_pair(collCommFor(0, 0), win0), fake_.deregMrCalls[0]);
@@ -1986,10 +1984,32 @@ TEST_F(GinHostRegisterMicrotest, Deregister_EmptySlot_IsNotDeregistered) {
   void* const win1 = hostWins_[1];
   hostWins_[0] = nullptr;
 
-  ASSERT_EQ(ncclSuccess, ncclGinDeregister(comm(), hostWins_));
+  ASSERT_EQ(ncclSuccess, deregisterWindow());
 
   ASSERT_EQ(1u, fake_.deregMrCalls.size());
   EXPECT_EQ(win1, fake_.deregMrCalls[0].second);
+}
+
+// Registration records the connection generation its windows belong to, so a
+// later deregister can tell whether those handles are still the live ones.
+TEST_F(GinHostRegisterMicrotest, Register_Succeeds_StampsTheBackendsCurrentConnectGeneration) {
+  gin()->backends[0].connectGeneration = 7;
+
+  ASSERT_EQ(ncclSuccess, registerWindow());
+
+  EXPECT_EQ(7u, winGenerations_[0]);
+}
+
+// A backend that reconnected after the window was registered has handles from a
+// connection the plugin already closed, so its slots are left alone rather than
+// deregistered against the new comms.
+TEST_F(GinHostRegisterMicrotest, Deregister_BackendReconnectedSinceRegistration_SkipsItsSlots) {
+  ASSERT_EQ(ncclSuccess, registerWindow());
+  gin()->backends[0].connectGeneration++;
+
+  ASSERT_EQ(ncclSuccess, deregisterWindow());
+
+  EXPECT_TRUE(fake_.deregMrCalls.empty());
 }
 
 // A failing deregistration surfaces the plugin's status and stops the walk
@@ -1998,7 +2018,7 @@ TEST_F(GinHostRegisterMicrotest, Deregister_DeregistrationFails_PropagatesTheSta
   ASSERT_EQ(ncclSuccess, registerWindow());
   fake_.failDeregMrSym = {ncclSystemError, 1};
 
-  EXPECT_EQ(ncclSystemError, ncclGinDeregister(comm(), hostWins_));
+  EXPECT_EQ(ncclSystemError, deregisterWindow());
 
   EXPECT_EQ(1u, fake_.deregMrCalls.size());  // the second slot is left registered
 }

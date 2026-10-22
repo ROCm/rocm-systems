@@ -53,6 +53,8 @@ ASSERT_HOOK_MATCHES_PROD(g_regLocalIsValid,           ncclRegLocalIsValid);
 ASSERT_HOOK_MATCHES_PROD(g_commGraphRegister,         ncclCommGraphRegister);
 ASSERT_HOOK_MATCHES_PROD(g_commGraphDeregister,       ncclCommGraphDeregister);
 ASSERT_HOOK_MATCHES_PROD(g_memTrackImportFromPeer,    ncclMemTrackImportFromPeer);
+ASSERT_HOOK_MATCHES_PROD(g_memTrack,                  ncclMemTrack);
+ASSERT_HOOK_MATCHES_PROD(g_memUntrackDynamic,         ncclMemUntrackDynamic);
 ASSERT_HOOK_MATCHES_PROD(g_dynMemMarkExportToPeer,    ncclDynMemMarkExportToPeer);
 
 #undef ASSERT_HOOK_MATCHES_PROD
@@ -91,14 +93,21 @@ void ncclDebugLog(ncclDebugLogLevel /*level*/,
 // recorder: the name is cosmetic, so nothing a microtest asserts can depend on it.
 void ncclSetThreadName(std::thread& /*thread*/, const char* /*fmt*/, ...) {}
 
-void ncclLoadParam(char const* /*env*/,
-                   int64_t     /*deftVal*/,
-                   int64_t     /*uninitialized*/,
-                   int64_t*    /*cache*/)
+// Every param sits at its compile-time default. The NCCL_PARAM bodies that
+// p2p-test.cc redirects through g_loadParam bypass this entirely.
+int64_t ncclLoadParam(char const* /*env*/,
+                      int64_t     deftVal,
+                      int64_t     /*uninitialized*/,
+                      int64_t*    cache,
+                      int8_t*     noCache)
 {
-    // No-op: leaves cache untouched so NCCL_PARAM callers in non-shimmed
-    // TUs see the default. The NCCL_PARAM bodies that p2p-test.cc
-    // redirects through g_loadParam bypass this entirely.
+    if (cache) {
+        *cache = deftVal;
+    }
+    if (noCache) {
+        *noCache = 0;
+    }
+    return deftVal;
 }
 
 // Default returns deftVal verbatim -- preserves the pre-hook contract that
@@ -264,6 +273,8 @@ static ncclResult_t DefaultTopoCheckP2p(int /*rank1*/, int /*rank2*/, int* p2p,
 std::function<ncclResult_t(int, int, int*, int*, int*, int*, int*)>
     g_ncclTopoCheckP2p = DefaultTopoCheckP2p;
 
+// rccl-UnitTestsMicroGraph links the real src/graph/paths.cc and search.cc, which define these.
+#ifndef RCCL_NCCL_FAKES_OMIT_GRAPH
 ncclResult_t ncclTopoCheckP2p(struct ncclComm*       /*comm*/,
                               struct ncclTopoSystem* /*system*/,
                               int                    rank1,
@@ -280,6 +291,7 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm*       /*comm*/,
     if (isCrossClique) *isCrossClique = 0;
     return g_ncclTopoCheckP2p(rank1, rank2, p2p, read, intermediateRank, cudaP2p, isCrossClique);
 }
+#endif
 
 // --- Controllable seam: ncclTopoCheckNet ----------------------------------
 // Default preserves the old stub: report NET is not better (net = 0).
@@ -291,6 +303,7 @@ static ncclResult_t DefaultTopoCheckNet(int /*rank1*/, int /*rank2*/, int* net)
 std::function<ncclResult_t(int, int, int*)>
     g_ncclTopoCheckNet = DefaultTopoCheckNet;
 
+#ifndef RCCL_NCCL_FAKES_OMIT_GRAPH
 ncclResult_t ncclTopoCheckNet(struct ncclTopoSystem* /*system*/,
                               int                    rank1,
                               int                    rank2,
@@ -298,6 +311,7 @@ ncclResult_t ncclTopoCheckNet(struct ncclTopoSystem* /*system*/,
 {
     return g_ncclTopoCheckNet(rank1, rank2, net);
 }
+#endif
 
 // --- Controllable seam: ncclCommGraphRegister ---------------------------
 // Default preserves the old stub: fail with a null handle. Graph-register
@@ -422,17 +436,19 @@ ncclResult_t DefaultTopoGetLinkType(int, int, bool* isXGMI, int)
 std::function<ncclResult_t(int, int, bool*, int)> g_ncclTopoGetLinkType = DefaultTopoGetLinkType;
 int g_ncclTopoGetLinkTypeCalls = 0;
 
+#ifndef RCCL_NCCL_FAKES_OMIT_GRAPH
 ncclResult_t ncclTopoGetLinkType(struct ncclTopoSystem* /*system*/,
-                                 int                    cudaDev1,
-                                 int                    cudaDev2,
+                                 int                    dev1,
+                                 int                    dev2,
                                  bool*                  isXGMI,
                                  int                    maxInter,
                                  int                    /*nInter*/,
                                  int*                   /*inter*/)
 {
     g_ncclTopoGetLinkTypeCalls++;
-    return g_ncclTopoGetLinkType(cudaDev1, cudaDev2, isXGMI, maxInter);
+    return g_ncclTopoGetLinkType(dev1, dev2, isXGMI, maxInter);
 }
+#endif
 
 // ---------------------------------------------------------------------------
 // Memory-manager tracking stubs.
@@ -441,17 +457,27 @@ ncclResult_t ncclTopoGetLinkType(struct ncclTopoSystem* /*system*/,
 // import/export paths in alloc.h, which now route allocations through the
 // ncclMemManager tracking layer. None of the microtests exercise real HIP
 // allocation (the ncclCudaCallocAsync macro is shimmed away), so these are
-// pure no-ops that satisfy the linker and report success.
+// pure no-ops, except ncclMemTrack / ncclMemUntrackDynamic, which the DDA tests drive as seams.
 // ---------------------------------------------------------------------------
 
-ncclResult_t ncclMemTrack(struct ncclMemManager* /*manager*/,
-                          void*                            /*ptr*/,
-                          size_t                           /*size*/,
-                          hipMemGenericAllocationHandle_t  /*handle*/,
-                          hipMemAllocationHandleType       /*handleType*/,
-                          ncclMemType_t                    /*memType*/)
+// --- Controllable seam: ncclMemTrack ------------------------------------
+static ncclResult_t DefaultMemTrack(struct ncclMemManager*, void*, size_t, hipMemGenericAllocationHandle_t,
+                                    hipMemAllocationHandleType, ncclMemType_t)
 {
     return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclMemManager*, void*, size_t, hipMemGenericAllocationHandle_t,
+                           hipMemAllocationHandleType, ncclMemType_t)>
+    g_memTrack = DefaultMemTrack;
+
+ncclResult_t ncclMemTrack(struct ncclMemManager*          manager,
+                          void*                           ptr,
+                          size_t                          size,
+                          hipMemGenericAllocationHandle_t handle,
+                          hipMemAllocationHandleType      handleType,
+                          ncclMemType_t                   memType)
+{
+    return g_memTrack(manager, ptr, size, handle, handleType, memType);
 }
 
 // --- Controllable seam: ncclMemTrackImportFromPeer ----------------------
@@ -492,9 +518,8 @@ ncclResult_t ncclMemUntrack(struct ncclMemManager* /*manager*/,
     return ncclSuccess;
 }
 
-ncclResult_t ncclMemUntrackDynamic(struct ncclMemManager* /*manager*/,
-                                   void*                  /*ptr*/,
-                                   struct ncclMemUntrackInfo* info)
+// --- Controllable seam: ncclMemUntrackDynamic ---------------------------
+static ncclResult_t DefaultMemUntrackDynamic(struct ncclMemManager*, void*, struct ncclMemUntrackInfo* info)
 {
     if (info) {
         info->memType = ncclMemPersist;
@@ -502,6 +527,13 @@ ncclResult_t ncclMemUntrackDynamic(struct ncclMemManager* /*manager*/,
         info->dynMemSize = 0;
     }
     return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclMemManager*, void*, struct ncclMemUntrackInfo*)> g_memUntrackDynamic =
+    DefaultMemUntrackDynamic;
+
+ncclResult_t ncclMemUntrackDynamic(struct ncclMemManager* manager, void* ptr, struct ncclMemUntrackInfo* info)
+{
+    return g_memUntrackDynamic(manager, ptr, info);
 }
 
 ncclResult_t ncclMemUntrackPersist(struct ncclMemManager* /*manager*/,
@@ -578,6 +610,8 @@ void ResetNcclFakes()
     g_proxyClientQueryFdBlocking   = DefaultProxyClientQueryFdBlocking;
     g_proxyClientBatchQueryFdBlocking = DefaultProxyClientBatchQueryFdBlocking;
     g_memTrackImportFromPeer       = DefaultMemTrackImportFromPeer;
+    g_memTrack                     = DefaultMemTrack;
+    g_memUntrackDynamic            = DefaultMemUntrackDynamic;
     g_dynMemMarkExportToPeer       = DefaultDynMemMarkExportToPeer;
     g_ncclTopoGetLinkType          = DefaultTopoGetLinkType;
     g_ncclTopoGetLinkTypeCalls     = 0;

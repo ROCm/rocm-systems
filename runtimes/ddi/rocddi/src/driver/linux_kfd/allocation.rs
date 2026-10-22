@@ -17,9 +17,13 @@ use crate::memory::storage::{Owned, Shared};
 use crate::memory::{AllocationDesc, AllocationInfo, DeviceAccess};
 use crate::{Error, ErrorKind};
 
+/// Allocation ownership selected by the native backing and import path.
 pub(crate) enum LinuxAllocation {
+    /// KFD allocation with its retained VM mappings.
     Kfd(Owned<KfdAllocation>),
+    /// Borrowed or runtime-owned host pages registered through DRM USERPTR.
     DrmRegisteredHost(Owned<DrmRegisteredHost>),
+    /// Imported system-memory DMA-BUF mapped through the render VM.
     DrmImportedSystem(Owned<DrmImportedSystem>),
 }
 
@@ -197,6 +201,13 @@ impl LinuxAllocation {
             Self::Kfd(allocation) => allocation.free(),
             Self::DrmRegisteredHost(allocation) => allocation.free(),
             Self::DrmImportedSystem(allocation) => allocation.free(),
+        }
+    }
+
+    pub(crate) fn remaining_backing_byte_length(&self) -> u64 {
+        match self {
+            Self::Kfd(allocation) => allocation.remaining_backing_byte_length(),
+            Self::DrmRegisteredHost(_) | Self::DrmImportedSystem(_) => 0,
         }
     }
 
