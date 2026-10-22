@@ -3660,9 +3660,8 @@ static ncclResult_t calcCollChunking(struct ncclComm* comm, struct ncclTaskColl*
         }
       }
     } else if (info->algorithm == NCCL_ALGO_RING) {
-      // AMD's ring AllGather kernel does not implement net offload; its proxy
-      // must keep the ordinary chunk schedule used by the device.
-#if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
+      // Use the large-step schedule only when the device can select the matching kernel specialization.
+#if NCCL_ALLGATHER_NET_OFFLOAD_SUPPORTED
       if (proxyOp->isOneRPN && info->func == ncclFuncAllGather) {
         proxyOp->chunkSize = NCCL_MAX_NET_SIZE;
         proxyOp->sliceSize = NCCL_MAX_NET_SIZE;
