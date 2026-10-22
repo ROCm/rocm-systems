@@ -352,6 +352,7 @@ Examples:
             "Alternatively, specify block alias(es) for filtering.\n"
             "Aliases are arch-specific; run --list-blocks <arch> to see\n"
             "all valid block ids and aliases.\n"
+            "Give all ids after one -b; a repeated -b keeps only the last list.\n"
             "Cannot be used with --set, --roof-only or --bench-only."
         ),
     )
@@ -746,7 +747,9 @@ Examples:
         nargs="+",
         type=block_token_or_alias,
         help=(
-            "Specify metric id(s) or block alias(es) from --list-metrics for filtering."
+            "Specify metric id(s) or block alias(es) from --list-metrics "
+            "for filtering.\n"
+            "Give all ids after one -b; a repeated -b keeps only the last list."
         ),
     )
     analyze_group.add_argument(
