@@ -436,19 +436,21 @@ public:
   /// one record per queued point in insertion order and `errors` is empty.
   [[nodiscard]] ValidationResult validate_points();
 
-  /// @brief The blocks of the kernel entered at @p entry, in .text order.
+  /// @brief The blocks of the kernel entered at @p entry_text_offset, in .text
+  ///        order.
   ///
-  /// Returns the blocks reachable_kernel_blocks() walks from the decoded block
-  /// that starts at @p entry, taken from the same blocks validation and
-  /// patching use.
+  /// @p entry_text_offset is a byte offset within .text, as in
+  /// KernelDescriptorInfo::entry_text_offset. Returns the blocks
+  /// reachable_kernel_blocks() walks from the decoded block that starts there,
+  /// taken from the same blocks validation and patching use.
   ///
   /// Returns nullopt and sets *error_out when decoding fails, the object does
   /// not have exactly one .text section, or no decoded block starts at
-  /// @p entry.
+  /// @p entry_text_offset.
   ///
   /// Queues nothing and does not spend the single patch attempt.
   [[nodiscard]] std::optional<std::vector<const BasicBlock *>>
-  kernel_blocks(uint64_t entry, std::string *error_out = nullptr);
+  kernel_blocks(uint64_t entry_text_offset, std::string *error_out = nullptr);
 
   /// @brief The first instruction in @p block a point can anchor at, if any.
   ///

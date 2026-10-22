@@ -56,12 +56,13 @@ std::vector<uint32_t> three_block_text(const SitesTarget &target) {
 }
 
 std::vector<uint8_t> kernel(const SitesTarget &target, const std::vector<uint32_t> &text,
-                            uint32_t granulated_sgpr_count = 3, uint64_t entry_text_offset = 0) {
+                            uint32_t granulated_sgpr_count = 3, uint64_t entry_text_offset = 0,
+                            bool wave32 = false) {
   return test::make_amdgpu_kernel_elf(
       text, /*private_bytes=*/0, granulated_sgpr_count, target.e_flags,
       /*granulated_vgpr_count=*/0, /*accum_offset=*/0, /*unterminated_kd_name=*/false,
       /*wrap_section_header_table=*/false, /*wrap_symtab_range=*/false,
-      /*kd_crosses_section=*/false, /*wave32=*/false, /*kernarg_segment_ptr=*/false,
+      /*kd_crosses_section=*/false, wave32, /*kernarg_segment_ptr=*/false,
       /*kernarg_size=*/0, entry_text_offset);
 }
 
@@ -172,6 +173,16 @@ TEST(DbiRuntimeSites, LeavesObjectWithTwoKernelsUnpatched) {
       instrument(test::make_gfx950_two_kernel_elf(three_block_text(kGfx950), /*private_bytes=*/0),
                  probe(kGfx950));
   EXPECT_EQ(result.decision, DbiLoadDecision::NotSingleKernel);
+  EXPECT_TRUE(result.elf_bytes.empty());
+}
+
+TEST(DbiRuntimeSites, LeavesWave32KernelUnpatched) {
+  // CallsTheProbeAtTheFirstAnchorOfEachBlock instruments the same kernel in wave64.
+  const DbiInstrumentation result =
+      instrument(kernel(kGfx1200, three_block_text(kGfx1200), /*granulated_sgpr_count=*/3,
+                        /*entry_text_offset=*/0, /*wave32=*/true),
+                 probe(kGfx1200));
+  EXPECT_EQ(result.decision, DbiLoadDecision::Wave32);
   EXPECT_TRUE(result.elf_bytes.empty());
 }
 
