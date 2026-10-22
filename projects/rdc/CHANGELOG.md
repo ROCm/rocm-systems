@@ -118,6 +118,18 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - The `rdc_diag_kernel_tests` program of the RDC test package starts from its installed location.
   - It now also checks the diagnostic kernels installed under `lib/rdc/hsaco`; before, it checked only the build machine's source tree and reported its checks as skipped when that tree was absent.
 
+- The compute process check of `rdci diag` now finds the processes on GPU partitions.
+
+- The compute process check of `rdci diag` is now skipped, instead of passed, when it can find none of the group's GPUs.
+
+- The compute process check of `rdci diag` now reports a process that holds GPU memory while it runs no kernel.
+  - A process that holds no GPU memory and runs no kernel is no longer reported.
+
+- `rdc_test_case_run()` now returns the test's result when the test cannot read the GPU data it needs or is not available on the host.
+  - It returns `RDC_ST_OK` with that result. Through `rdcd`, the caller received no result, which read as a pass.
+
+- `rdcd`, or a program that embeds RDC, now logs an error when a diagnostic module's test list cannot be read, which explains the tests missing from `rdci diag`.
+
 ## RDC 1.3.1 for ROCm 7.14.0
 
 ### Added

@@ -100,7 +100,8 @@ rdc_status_t RdcDiagnosticModule::rdc_test_case_run(rdc_diag_test_cases_t test_c
   auto ite = testcases_to_module_.find(test_case);
   if (ite == testcases_to_module_.end()) {
     strncpy_with_null(result->info, "Not implemented", MAX_DIAG_MSG_LENGTH);
-    return RDC_ST_NOT_SUPPORTED;
+    // The Skip result says so; rdcd sends no result for any other status.
+    return RDC_ST_OK;
   }
 
   // gpu_index holds a group's entities, at most RDC_GROUP_MAX_ENTITIES.
@@ -195,6 +196,12 @@ RdcDiagnosticModule::RdcDiagnosticModule(std::list<RdcDiagnosticPtr> diagnostic_
           testcases_to_module_.insert({test_cases[index], ite});
         }
       }
+    } else {
+      // The only line that explains the tests missing from `rdci diag`: the module's own loader
+      // may have logged nothing, and the query made for each client request stays silent. The
+      // dispatcher is built once, so one failing module logs one line.
+      RDC_LOG(RDC_ERROR, "A diagnostic module's test list could not be read (status "
+                             << status << "); its tests are not run.");
     }
   }
 }

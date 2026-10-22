@@ -27,19 +27,23 @@ THE SOFTWARE.
 // - GPU parameters reports each GPU under its own entry, reads the critical
 //   voltage limits with the GPU's handle, compares no limit that reads as 0, and
 //   skips a GPU that compared nothing;
-// - compute processes asks AMD SMI for each process's GPUs with a real list
-//   (AMD SMI rejects a NULL one), retries a process list that grew between its
-//   count and its fill, bounds the count, reports only the group's GPUs, and
-//   leaves out the process that runs it;
+// - compute processes places each process through the slot each entity of the
+//   group maps to, so that a partition's processes are found as well, counts a
+//   process only on evidence that it uses a GPU (a vram_usage or a cu_occupancy
+//   above 0 that AMD SMI could read), asks AMD SMI for each process's GPUs with
+//   a real list (AMD SMI rejects a NULL one), retries a process list that grew
+//   between its count and its fill, bounds the count, reports only the group's
+//   GPUs, and leaves out the process that runs it;
 // - every text is cut after a whole sentence or entry and says how many are left out;
-// - a group without GPUs, and a module that returns without a result, give Skip;
+// - a group without GPUs, a group of which no GPU can be found, and a module
+//   that returns without a result, give Skip;
 // - the module bounds the test cases it gathers and the group size, and logs a
 //   custom-config run at debug level only.
 //
 // This binary builds RdcSmiDiagnosticImpl.cc and RdcDiagnosticModule.cc itself,
 // with the AMD SMI calls they make replaced by the fakes below, so it needs
-// neither a GPU nor librdc. It uses no symbol the files did not have before, so
-// it also builds against the old code. It is linked with --wrap=getpid (see
+// neither a GPU nor librdc. It defines the calls of the old code and of the new
+// one alike, so it builds against either. It is linked with --wrap=getpid (see
 // kOwnPid).
 
 #include <gtest/gtest.h>
@@ -86,6 +90,37 @@ int gpu_of(amdsmi_processor_handle handle) {
     if (handle == &g_gpus[i]) return static_cast<int>(i);
   }
   return -1;
+}
+
+// Each partition entity a case built and the slot it holds. A physical GPU is
+// its own slot, because AMD SMI builds its GPUs in rocm_smi's order; a
+// partition's slot is the one its case gave it.
+std::map<uint32_t, uint32_t> g_partition_slots;
+int g_handle_calls = 0;  // calls of get_processor_handle_from_id
+int g_slot_calls = 0;    // calls of get_gpu_slot_from_entity
+
+// The slot a partition entity holds, and the id itself for every other entity.
+uint32_t slot_of_entity(uint32_t entity_id) {
+  const auto partition = g_partition_slots.find(entity_id);
+  return partition == g_partition_slots.end() ? entity_id : partition->second;
+}
+
+// The entity id of the partition (socket, processor), as RDC's lookups read
+// one. It maps to no slot, so the fakes answer NOT_FOUND for it.
+uint32_t partition_on_no_slot(uint32_t socket, uint32_t processor) {
+  rdc_entity_info_t info = {};
+  info.device_index = socket;
+  info.instance_index = processor;
+  info.entity_role = RDC_DEVICE_ROLE_PARTITION_INSTANCE;
+  info.device_type = RDC_DEVICE_TYPE_GPU;
+  return rdc_get_entity_index_from_info(info);
+}
+
+// The same, on the given slot of the fake GPU table.
+uint32_t partition_on_slot(uint32_t socket, uint32_t processor, uint32_t slot) {
+  const uint32_t entity_id = partition_on_no_slot(socket, processor);
+  g_partition_slots[entity_id] = slot;
+  return entity_id;
 }
 
 // What one metric read returns. A key with no entry reads as NOT_SUPPORTED.
@@ -183,6 +218,9 @@ void add_process(uint32_t pid, std::vector<uint32_t> gpus) {
 
 void reset_fake(size_t gpus) {
   g_gpus.assign(gpus, FakeGpu{});
+  g_partition_slots.clear();
+  g_handle_calls = 0;
+  g_slot_calls = 0;
   g_temps.clear();
   g_volts.clear();
   g_volt_calls_without_handle = 0;
@@ -301,10 +339,40 @@ namespace amd {
 namespace rdc {
 amdsmi_status_t get_processor_handle_from_id(uint32_t gpu_id,
                                              amdsmi_processor_handle* processor_handle) {
-  if (gpu_id >= g_gpus.size() || !g_gpus[gpu_id].available) {
+  ++g_handle_calls;
+  // A partition's handle is its slot's, as AMD SMI gives both the same
+  // processor; every other id is a slot of its own.
+  const uint32_t slot = slot_of_entity(gpu_id);
+  if (slot >= g_gpus.size() || !g_gpus[slot].available) {
     return AMDSMI_STATUS_NOT_FOUND;
   }
-  *processor_handle = &g_gpus[gpu_id];
+  *processor_handle = &g_gpus[slot];
+  return AMDSMI_STATUS_SUCCESS;
+}
+// F1a's contract: a physical GPU (type GPU, role physical, instance 0) is its
+// own slot while the table holds it, a partition is the slot its case gave it,
+// and everything else maps to nothing. Availability is not looked at.
+amdsmi_status_t get_gpu_slot_from_entity(uint32_t entity_id, uint32_t* slot) {
+  ++g_slot_calls;
+  if (slot == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+  const rdc_entity_info_t info = rdc_get_info_from_entity_index(entity_id);
+  if (info.device_type != RDC_DEVICE_TYPE_GPU) {
+    return AMDSMI_STATUS_NOT_FOUND;
+  }
+  if (info.entity_role == RDC_DEVICE_ROLE_PHYSICAL && info.instance_index == 0) {
+    if (info.device_index >= g_gpus.size()) {
+      return AMDSMI_STATUS_NOT_FOUND;
+    }
+    *slot = info.device_index;
+    return AMDSMI_STATUS_SUCCESS;
+  }
+  const auto partition = g_partition_slots.find(entity_id);
+  if (partition == g_partition_slots.end()) {
+    return AMDSMI_STATUS_NOT_FOUND;
+  }
+  *slot = partition->second;
   return AMDSMI_STATUS_SUCCESS;
 }
 rdc_status_t Smi2RdcError(amdsmi_status_t status) {
@@ -435,11 +503,13 @@ TEST(SmiDiagTopology, NoAvailablePairToCheck) {
   EXPECT_TRUE(g_weight_calls.empty());
 }
 
+// Admission case (F3): an unreadable link weight keeps its Fail result, and the
+// check returns RDC_ST_OK, so that rdcd sends the result instead of dropping it.
 TEST(SmiDiagTopology, AWeightErrorNamesBothGpus) {
   reset_fake(3);
   g_failing_pair = {2, 1};
   auto r = topology({1, 2});
-  EXPECT_EQ(g_check_status, RDC_ST_SMI_ERROR);
+  EXPECT_EQ(g_check_status, RDC_ST_OK);
   EXPECT_EQ(r->status, RDC_DIAG_RESULT_FAIL);
   EXPECT_EQ(r->details.code, static_cast<uint32_t>(AMDSMI_STATUS_UNKNOWN_ERROR));
   EXPECT_EQ(text(r->details.msg), "amdsmi_topo_get_link_weight(2,1, &weight) fail");
@@ -482,6 +552,29 @@ TEST(SmiDiagTopology, SixtyFourGpusAreCutAfterAWholePair) {
     pos = end == std::string::npos ? kept.size() : end + 1;
   }
   EXPECT_EQ(pairs + static_cast<size_t>(dropped), 64u * 63u);
+}
+
+// Admission case (F2): each position of the group is looked up once, before the
+// pairs are walked. The old check looks both GPUs of every ordered pair up,
+// which is 2n(n-1) lookups where n would do.
+TEST(SmiDiagTopology, EachGpuIsLookedUpOnce) {
+  reset_fake(3);
+  auto r = topology({0, 1, 2});
+  EXPECT_EQ(r->status, RDC_DIAG_RESULT_PASS);
+  EXPECT_EQ(g_handle_calls, 3);
+}
+
+// Guard (F2): a GPU that cannot be looked up has no link to check, so its pairs
+// are left out and the others are still checked. It kills the T2 mutation that
+// drops F2's nullptr skip, which would read link weights with a null handle.
+TEST(SmiDiagTopology, AnUnavailableGpuSkipsItsPairs) {
+  reset_fake(3);
+  g_gpus[1].available = false;
+  auto r = topology({0, 1, 2});
+  EXPECT_EQ(g_check_status, RDC_ST_OK);
+  EXPECT_EQ(r->status, RDC_DIAG_RESULT_PASS);
+  EXPECT_EQ(g_weight_calls, (std::vector<std::pair<int, int>>{{0, 2}, {2, 0}}));
+  EXPECT_EQ(info(*r), "0=>2 weight:15 2=>0 weight:15");
 }
 
 // ---------------------------------------------------------------------------
@@ -693,12 +786,14 @@ TEST(SmiDiagProcesses, NoProcessIsAPass) {
   EXPECT_TRUE(g_fill_capacities.empty());
 }
 
+// Admission case (F3): a count call that fails keeps its Skip result and its
+// text, and the check returns RDC_ST_OK, so that rdcd sends the result.
 TEST(SmiDiagProcesses, AFailedCountIsSkippedWithItsText) {
   reset_fake(1);
   add_process(100, {0});
   g_plist.count_status = AMDSMI_STATUS_UNKNOWN_ERROR;
   auto r = processes({0});
-  EXPECT_EQ(g_check_status, RDC_ST_SMI_ERROR);
+  EXPECT_EQ(g_check_status, RDC_ST_OK);
   EXPECT_EQ(r->status, RDC_DIAG_RESULT_SKIP);
   EXPECT_EQ(info(*r), "Fail to retrieve process information from amd_smi_lib");
   EXPECT_TRUE(g_fill_capacities.empty());
@@ -844,12 +939,14 @@ TEST(SmiDiagProcesses, ACountOfUint32MaxIsRefusedWithoutAllocating) {
       << "child status " << status << (WIFSIGNALED(status) ? " (signal)" : "");
 }
 
+// Admission case (F3): a fill that fails keeps its Skip result and its text,
+// and the check returns RDC_ST_OK, so that rdcd sends the result.
 TEST(SmiDiagProcesses, AFillThatFailsOtherwiseIsSkippedWithItsText) {
   reset_fake(1);
   add_process(100, {0});
   g_plist.fill_status = AMDSMI_STATUS_UNKNOWN_ERROR;
   auto r = processes({0});
-  EXPECT_EQ(g_check_status, RDC_ST_SMI_ERROR);
+  EXPECT_EQ(g_check_status, RDC_ST_OK);
   EXPECT_EQ(r->status, RDC_DIAG_RESULT_SKIP);
   EXPECT_EQ(info(*r), "Fail to retrieve process information from amd_smi_lib");
 }
@@ -1027,21 +1124,39 @@ TEST(SmiDiagProcesses, NoReadableGpuListIsSkipped) {
   EXPECT_EQ(r->per_gpu_result_count, 0u);
 }
 
+// Guard (F1, A): a process that holds memory is reported, and the values AMD
+// SMI could not read print as "n/a". It kills the T2 mutation that drops the
+// vram_usage half of the evidence rule, which would leave this process out.
 TEST(SmiDiagProcesses, ValuesAmdSmiCannotReadPrintAsNotAvailable) {
   reset_fake(1);
   add_process(100, {0});
-  g_plist.procs[0].cu_occupancy = UINT32_MAX;
-  g_plist.procs[0].vram_usage = UINT64_MAX;
+  g_plist.procs[0].vram_usage = 4096;
   g_plist.procs[0].sdma_usage = UINT64_MAX;
+  g_plist.procs[0].cu_occupancy = UINT32_MAX;
   auto r = processes({0});
   EXPECT_EQ(r->status, RDC_DIAG_RESULT_FAIL);
-  EXPECT_EQ(info(*r), "Process: 100, vram_usage: n/a, sdma_usage: n/a, cu_occupancy: n/a.");
+  EXPECT_EQ(info(*r), "Process: 100, vram_usage: 4096, sdma_usage: n/a, cu_occupancy: n/a.");
+}
+
+// Guard (F1, A): a process that occupies CUs is reported, and a vram_usage AMD
+// SMI could not read prints as "n/a". It kills the T2 mutation that drops the
+// cu_occupancy half of the evidence rule, which would leave this process out.
+TEST(SmiDiagProcesses, AnUnreadableVramUsagePrintsAsNotAvailable) {
+  reset_fake(1);
+  add_process(100, {0});
+  g_plist.procs[0].vram_usage = UINT64_MAX;
+  g_plist.procs[0].sdma_usage = UINT64_MAX;
+  g_plist.procs[0].cu_occupancy = 7;
+  auto r = processes({0});
+  EXPECT_EQ(r->status, RDC_DIAG_RESULT_FAIL);
+  EXPECT_EQ(info(*r), "Process: 100, vram_usage: n/a, sdma_usage: n/a, cu_occupancy: 7.");
 }
 
 TEST(SmiDiagProcesses, AListReportedLongerThanWrittenAddsNoProcess) {
   // Hardening: a library that reports more than it wrote, or more than the room.
-  // An entry it did not write reads as process 0 with a CU occupancy of 0, which
-  // is skipped: were it not, the GPU list below would place it on GPU 0.
+  // An entry it did not write reads as process 0 with no memory and no CU
+  // occupancy, which is no evidence that it uses a GPU and is left out: were it
+  // not, the GPU list below would place it on GPU 0.
   reset_fake(1);
   add_process(100, {0});
   g_gpu_lists[0].gpus = {0};
@@ -1058,6 +1173,160 @@ TEST(SmiDiagProcesses, AListReportedLongerThanWrittenAddsNoProcess) {
   r = processes({0});
   EXPECT_EQ(entries(*r),
             (std::vector<std::pair<uint32_t, std::string>>{{0, "Running process: 100"}}));
+}
+
+// Admission case (F1): a partition's processes are found, because the process
+// is placed through the slot the partition entity maps to. The old check
+// compares the entity id with a rocm_smi index, which a partition id never
+// equals, so the partition gets no row and the check passes.
+TEST(SmiDiagProcesses, AProcessOnAPartitionIsReported) {
+  reset_fake(2);
+  const uint32_t partition = partition_on_slot(0, 1, 1);
+  add_process(100, {1});  // on rocm_smi index 1, which is slot 1
+  auto r = processes({partition});
+  EXPECT_EQ(g_check_status, RDC_ST_OK);
+  EXPECT_EQ(r->status, RDC_DIAG_RESULT_FAIL);
+  EXPECT_EQ(entries(*r),
+            (std::vector<std::pair<uint32_t, std::string>>{{partition, "Running process: 100"}}));
+  EXPECT_EQ(info(*r), "Process: 100, vram_usage: 4096, sdma_usage: 0, cu_occupancy: 1.");
+}
+
+// Admission case (F1): two entities of one slot both get the row, each under
+// its own entity id. The old check gives the row to the physical GPU only.
+TEST(SmiDiagProcesses, APhysicalGpuAndAPartitionOnOneSlotBothGetTheRow) {
+  reset_fake(2);
+  const uint32_t partition = partition_on_slot(0, 1, 1);
+  add_process(100, {1});
+  auto r = processes({1, partition});
+  EXPECT_EQ(r->status, RDC_DIAG_RESULT_FAIL);
+  EXPECT_EQ(entries(*r), (std::vector<std::pair<uint32_t, std::string>>{
+                             {1, "Running process: 100"}, {partition, "Running process: 100"}}));
+  EXPECT_EQ(info(*r), "Process: 100, vram_usage: 4096, sdma_usage: 0, cu_occupancy: 1.");
+}
+
+// Admission case (F1): a group that holds an entity twice maps it once, so that
+// the slot lookup costs one call per distinct entity. The old check maps
+// nothing.
+TEST(SmiDiagProcesses, EachDistinctEntityIsMappedOnce) {
+  reset_fake(2);
+  const uint32_t partition = partition_on_slot(0, 1, 1);
+  add_process(100, {1});
+  auto r = processes({0, 1, 1, partition, partition});
+  EXPECT_EQ(r->status, RDC_DIAG_RESULT_FAIL);
+  EXPECT_EQ(g_slot_calls, 3);  // 0, 1 and the partition
+}
+
+// Admission case (F1): a group of which no GPU can be found is skipped before
+// the process list is read, so that its result does not depend on processes
+// elsewhere on the host. The old check reads the list and passes.
+TEST(SmiDiagProcesses, AGroupWithNoGpuThatCanBeFoundIsSkippedWithoutReadingTheList) {
+  reset_fake(2);
+  const uint32_t missing = partition_on_no_slot(5, 1);
+  add_process(100, {0});  // on a GPU outside the group
+  auto r = processes({missing});
+  EXPECT_EQ(g_check_status, RDC_ST_OK);
+  EXPECT_EQ(r->status, RDC_DIAG_RESULT_SKIP);
+  EXPECT_EQ(info(*r), "No GPU of the group could be found.");
+  EXPECT_EQ(r->per_gpu_result_count, 0u);
+  EXPECT_EQ(g_plist_calls, 0);
+}
+
+// Admission case (F1, rule A): a process that holds GPU memory between kernels
+// counts, whatever its CU occupancy. The old check skips an occupancy of 0.
+TEST(SmiDiagProcesses, AProcessHoldingMemoryWithoutOccupancyIsReported) {
+  reset_fake(1);
+  add_process(100, {0});
+  g_plist.procs[0].vram_usage = 4096;
+  g_plist.procs[0].cu_occupancy = 0;
+  auto r = processes({0});
+  EXPECT_EQ(r->status, RDC_DIAG_RESULT_FAIL);
+  EXPECT_EQ(entries(*r),
+            (std::vector<std::pair<uint32_t, std::string>>{{0, "Running process: 100"}}));
+  EXPECT_EQ(info(*r), "Process: 100, vram_usage: 4096, sdma_usage: 0, cu_occupancy: 0.");
+}
+
+// Admission case (F1, rule A): a process that holds no GPU memory and whose
+// occupancy AMD SMI cannot read is no workload, as an idle ollama server on
+// lsttdev6's GPUs is. The old check reports it, because its occupancy is not 0.
+TEST(SmiDiagProcesses, AProcessWithoutMemoryOrReadableOccupancyIsLeftOut) {
+  reset_fake(1);
+  add_process(100, {0});
+  g_plist.procs[0].vram_usage = 0;
+  g_plist.procs[0].cu_occupancy = UINT32_MAX;
+  auto r = processes({0});
+  EXPECT_EQ(g_check_status, RDC_ST_OK);
+  EXPECT_EQ(r->status, RDC_DIAG_RESULT_PASS);
+  EXPECT_EQ(info(*r), "No processes running on the group's GPUs.");
+  EXPECT_EQ(r->per_gpu_result_count, 0u);
+}
+
+// Admission case (F1, rule A): a field at its own type's maximum is a value AMD
+// SMI could not read, not use of a GPU. The old check reports the second
+// process, whose occupancy is not 0.
+TEST(SmiDiagProcesses, UnreadableValuesAreNoEvidence) {
+  reset_fake(1);
+  add_process(100, {0});
+  g_plist.procs[0].vram_usage = UINT64_MAX;
+  g_plist.procs[0].cu_occupancy = 0;
+  auto r = processes({0});
+  EXPECT_EQ(r->status, RDC_DIAG_RESULT_PASS);
+  EXPECT_EQ(info(*r), "No processes running on the group's GPUs.");
+
+  reset_fake(1);
+  add_process(101, {0});
+  g_plist.procs[0].vram_usage = UINT64_MAX;
+  g_plist.procs[0].cu_occupancy = UINT32_MAX;
+  r = processes({0});
+  EXPECT_EQ(g_check_status, RDC_ST_OK);
+  EXPECT_EQ(r->status, RDC_DIAG_RESULT_PASS);
+  EXPECT_EQ(info(*r), "No processes running on the group's GPUs.");
+  EXPECT_EQ(r->per_gpu_result_count, 0u);
+}
+
+// Guard (F1a): a GPU that AMD SMI cannot hand a handle for right now keeps its
+// slot and its row, as it does today. It kills the T2 mutation that adds an
+// availability check to the mapping in check_smi_process_info; T1b's
+// placeholder cases kill the ones inside get_gpu_slot_from_entity.
+TEST(SmiDiagProcesses, AProcessOnAnUnavailablePhysicalGpuKeepsItsRow) {
+  reset_fake(2);
+  g_gpus[1].available = false;
+  add_process(100, {1});
+  auto r = processes({0, 1});
+  EXPECT_EQ(r->status, RDC_DIAG_RESULT_FAIL);
+  EXPECT_EQ(entries(*r),
+            (std::vector<std::pair<uint32_t, std::string>>{{1, "Running process: 100"}}));
+}
+
+// Guard (F1): an entity that maps to nothing gets no row and no sentence, and
+// the check goes on with the others. It kills the T2 mutation that replaces the
+// "no entity maps" condition with "some entity does not map", which would skip
+// this group.
+TEST(SmiDiagProcesses, AGpuThatCannotBeFoundLeavesTheOthersChecked) {
+  reset_fake(2);
+  const uint32_t missing = partition_on_no_slot(5, 1);
+  add_process(100, {0});
+  auto r = processes({0, missing});
+  EXPECT_EQ(g_check_status, RDC_ST_OK);
+  EXPECT_EQ(r->status, RDC_DIAG_RESULT_FAIL);
+  EXPECT_EQ(entries(*r),
+            (std::vector<std::pair<uint32_t, std::string>>{{0, "Running process: 100"}}));
+  EXPECT_EQ(info(*r), "Process: 100, vram_usage: 4096, sdma_usage: 0, cu_occupancy: 1.");
+  EXPECT_GT(g_plist_calls, 0);
+}
+
+// Guard (F1, rule A): a process that runs a kernel without memory of its own is
+// reported. It kills the T2 mutation that drops the cu_occupancy half of the
+// evidence rule.
+TEST(SmiDiagProcesses, AProcessRunningWithoutMemoryIsReported) {
+  reset_fake(1);
+  add_process(100, {0});
+  g_plist.procs[0].vram_usage = 0;
+  g_plist.procs[0].cu_occupancy = 5;
+  auto r = processes({0});
+  EXPECT_EQ(r->status, RDC_DIAG_RESULT_FAIL);
+  EXPECT_EQ(entries(*r),
+            (std::vector<std::pair<uint32_t, std::string>>{{0, "Running process: 100"}}));
+  EXPECT_EQ(info(*r), "Process: 100, vram_usage: 0, sdma_usage: 0, cu_occupancy: 5.");
 }
 
 // ---------------------------------------------------------------------------
@@ -1214,8 +1483,10 @@ TEST(SmiDiagModule, EntriesAModuleReportsButDoesNotWriteAreSkipped) {
   uint32_t ids[RDC_MAX_NUM_DEVICES] = {};
   diag.rdc_test_case_run(RDC_DIAG_COMPUTE_PROCESS, ids, 1, nullptr, 0, result.get(), nullptr);
   EXPECT_EQ(second->gpu_counts.size(), 1u);
+  // Admission case (F3): a test case no module offers keeps its Skip result and
+  // the dispatcher returns RDC_ST_OK.
   EXPECT_EQ(diag.rdc_test_case_run(RDC_DIAG_TEST_LAST, ids, 1, nullptr, 0, result.get(), nullptr),
-            RDC_ST_NOT_SUPPORTED);
+            RDC_ST_OK);
   EXPECT_TRUE(first->gpu_counts.empty());
 }
 
@@ -1230,9 +1501,11 @@ TEST(SmiDiagModule, AModuleWhoseQueryFailsAddsNoTestCase) {
   EXPECT_EQ(cases[0], RDC_DIAG_COMPUTE_PROCESS);
   auto result = std::make_unique<rdc_diag_test_result_t>();
   uint32_t ids[RDC_MAX_NUM_DEVICES] = {};
+  // Admission case (F3): the failing module's test case is offered by no module,
+  // so it is skipped and the dispatcher returns RDC_ST_OK.
   EXPECT_EQ(
       diag.rdc_test_case_run(RDC_DIAG_COMPUTE_QUEUE, ids, 1, nullptr, 0, result.get(), nullptr),
-      RDC_ST_NOT_SUPPORTED);
+      RDC_ST_OK);
   EXPECT_TRUE(failing->gpu_counts.empty());
 }
 
@@ -1265,4 +1538,43 @@ TEST(SmiDiagModule, ACustomRunLogsNothingAtErrorLevel) {
   size_t errors = 0;
   for (size_t pos = 0; (pos = log.find(" ERROR ", pos)) != std::string::npos; ++pos) ++errors;
   EXPECT_EQ(errors, 0u) << log;
+}
+
+// Admission case (F3): a test case no module offers is skipped, with its text,
+// and the dispatcher returns RDC_ST_OK, so that rdcd sends the result instead
+// of dropping it. The old dispatcher returns RDC_ST_NOT_SUPPORTED.
+TEST(SmiDiagModule, ATestNoModuleOffersIsSkippedWithRdcStOk) {
+  auto module =
+      std::make_shared<FakeModule>(std::vector<rdc_diag_test_cases_t>{RDC_DIAG_COMPUTE_QUEUE});
+  amd::rdc::RdcDiagnosticModule diag({module});
+  auto result = std::make_unique<rdc_diag_test_result_t>();
+  std::memset(result.get(), 0xA5, sizeof(*result));
+  uint32_t ids[RDC_MAX_NUM_DEVICES] = {};
+  EXPECT_EQ(
+      diag.rdc_test_case_run(RDC_DIAG_NODE_TOPOLOGY, ids, 1, nullptr, 0, result.get(), nullptr),
+      RDC_ST_OK);
+  EXPECT_EQ(result->test_case, RDC_DIAG_NODE_TOPOLOGY);
+  EXPECT_EQ(result->status, RDC_DIAG_RESULT_SKIP);
+  EXPECT_EQ(text(result->info), "Not implemented");
+  EXPECT_EQ(result->per_gpu_result_count, 0u);
+  EXPECT_TRUE(module->gpu_counts.empty());
+}
+
+// Admission case (F3): a module whose test list cannot be read leaves its tests
+// out of `rdci diag`, which only this line explains. The old dispatcher logs
+// nothing. Single-threaded: the capture is the whole process's stdout.
+TEST(SmiDiagModule, AModuleWhoseQueryFailsIsLogged) {
+  auto failing = std::make_shared<FakeModule>(cases_from(1, 1), UINT32_MAX, RDC_ST_NOT_SUPPORTED);
+  auto working = std::make_shared<FakeModule>(cases_from(0, 1));
+  testing::internal::CaptureStdout();
+  amd::rdc::RdcDiagnosticModule diag({failing, working});
+  const std::string log = testing::internal::GetCapturedStdout();
+  size_t errors = 0;
+  for (size_t pos = 0; (pos = log.find(" ERROR ", pos)) != std::string::npos; ++pos) ++errors;
+  EXPECT_EQ(errors, 1u) << log;
+  EXPECT_NE(log.find("A diagnostic module's test list could not be read"), std::string::npos)
+      << log;
+  EXPECT_NE(log.find("(status " + std::to_string(RDC_ST_NOT_SUPPORTED) + ")"), std::string::npos)
+      << log;
+  EXPECT_NE(log.find("its tests are not run"), std::string::npos) << log;
 }
