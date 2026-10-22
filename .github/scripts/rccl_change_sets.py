@@ -3,9 +3,8 @@
 
 """Shared path criteria for RCCL CI gating.
 
-Facts about changed paths only: no git, argparse or GITHUB_OUTPUT. Each gate
-(rccl_detect_coco_changes.py, rccl_detect_perf_changes.py) decides what to do
-with them.
+Facts about changed paths only: no git, argparse or GITHUB_OUTPUT.
+rccl_detect_coco_changes.py decides what to do with them.
 
 All patterns are fnmatch: `*` also spans `/`. This is not the glob dialect of a
 workflow's `paths:` block, where `*` stops at `/` and `**` spans it.
