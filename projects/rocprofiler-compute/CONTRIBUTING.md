@@ -226,6 +226,14 @@ python tools/format_yaml.py --fix src/rocprof_compute_soc/analysis_configs/gfx95
 
 For instructions on building and testing changes to files under the `docs/` folder, see the [ROCm documentation contributing guide](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
 
+## Writing for Users
+
+Customers read `docs/how-to/`, `CHANGELOG.md`, and the CLI help.
+
+- Write short, complete sentences in plain English. Say what the user sees and what to do.
+- Leave out internals such as marker formats, class names, and processing steps. Put those in `docs/design/`.
+- Add a changelog entry only for a change users can notice: a new or changed option, output, or requirement, or a fixed bug they could hit. Skip tests, samples, refactors, and dropped support for older workloads.
+
 ## Metrics Management
 
 If your PR modifies **metric configurations** — panel YAMLs under `src/rocprof_compute_soc/analysis_configs/gfx<arch>/*.yaml` or metric descriptions in `tools/per_arch_metric_definitions/gfx<arch>_metrics_description.yaml` — follow the metric management workflow:

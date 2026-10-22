@@ -319,22 +319,14 @@ class RocProfCompute:
                     "Remove the --output-format option or drop the operator flags.",
                 )
 
-            if operator_filter:
-                if args.list_stats:
-                    console_warning(
-                        "ml api trace",
-                        "Operator filters are ignored by --list-stats; the "
-                        "full kernel stats table will be shown regardless "
-                        "of the operator filter.",
-                    )
-                if operator_listing:
-                    console_warning(
-                        "ml api trace",
-                        "Operator filters are ignored when a --list-*-operators "
-                        "flag is used; the full operator tree will be shown. "
-                        "Drop the listing flag to apply the operator filter, or "
-                        "drop the filter to list all operators.",
-                    )
+            if operator_filter and operator_listing:
+                console_warning(
+                    "ml api trace",
+                    "Operator filters are ignored when a --list-*-operators "
+                    "flag is used; the full operator tree will be shown. "
+                    "Drop the listing flag to apply the operator filter, or "
+                    "drop the filter to list all operators.",
+                )
 
     @demarcate
     def handle_list_args(self) -> None:
