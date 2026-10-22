@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/code/rj_code.h"
 #include "scoped_temp.h"
 
@@ -46,8 +47,9 @@ void *operator new(std::size_t size) {
   }
 }
 
-void operator delete(void *memory) noexcept { std::free(memory); }
-void operator delete(void *memory, std::size_t) noexcept { std::free(memory); }
+// Inlining free into new/delete callers triggers GCC's mismatched-new-delete warning.
+RJ_NOINLINE void operator delete(void *memory) noexcept { std::free(memory); }
+RJ_NOINLINE void operator delete(void *memory, std::size_t) noexcept { std::free(memory); }
 
 // Keep nothrow allocations paired with our free-based delete under ASan.
 // GoogleTest's std::stable_sort buffer would otherwise use ASan's nothrow new.
@@ -59,7 +61,9 @@ void *operator new(std::size_t size, const std::nothrow_t &) noexcept {
   }
 }
 
-void operator delete(void *memory, const std::nothrow_t &) noexcept { ::operator delete(memory); }
+RJ_NOINLINE void operator delete(void *memory, const std::nothrow_t &) noexcept {
+  ::operator delete(memory);
+}
 
 TEST(FileLoadingAllocationFailureTest, TranslatesImageAllocationFailure) {
   constexpr size_t kImageSize = 65536;
