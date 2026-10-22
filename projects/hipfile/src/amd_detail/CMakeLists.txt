@@ -8,10 +8,7 @@ set(HIPFILE_SOURCES
     "${HIPFILE_SRC_COMMON_PATH}/hipfile-common.cpp"
     api_trace/api-dispatch-interface.cpp
     api_trace/api-trace.cpp
-    async.cpp
     backend.cpp
-    backend/asyncop-fallback.cpp
-    backend/memcpy-kernel.hip
     backend/fallback.cpp
     backend/fastpath.cpp
     batch/batch.cpp

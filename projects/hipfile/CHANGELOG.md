@@ -26,6 +26,8 @@
 
 ### Removed
 
+* Removed the `HIPFILE_ASYNC_BUFFER_SIZE` environment variable. It sized a per-stream host bounce buffer that asynchronous I/O no longer uses.
+
 ### Known issues
 
 * The bandwidth reported by `ais-stats` and the Stats API is derived from the sum of the per-operation latencies instead of the elapsed wall-clock time, so when several threads issue I/O concurrently, the reported bandwidth is understated by roughly the number of concurrent threads. See [issue #11919](https://github.com/ROCm/rocm-systems/issues/11919).

@@ -200,27 +200,6 @@ TEST_F(HipFileDriverAdmin, CloseDeregistersBuffer)
     ASSERT_EQ(hipFileUseCount(), 1);
 }
 
-// Ensure hipFileReadAsync():
-// * Returns hipFileInvalidValue when called w/o a driver init
-// * Initializes the driver and returns a reference count of 1 (like cuFile)
-TEST_F(HipFileDriverAdmin, ReadAsyncInitsDriver)
-{
-    ASSERT_EQ(hipFileReadAsync(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr),
-              HipFileOpError(hipFileInvalidValue));
-    ASSERT_EQ(hipFileUseCount(), 1);
-}
-
-// Ensure hipFileWriteAsync():
-// * Returns hipFileInvalidValue when called w/o a driver init
-// * Initializes the driver and returns a reference count of 1 (like cuFile)
-TEST_F(HipFileDriverAdmin, WriteAsyncInitsDriver)
-{
-    // Error value matches cuFile
-    ASSERT_EQ(hipFileWriteAsync(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr),
-              HipFileOpError(hipFileInvalidValue));
-    ASSERT_EQ(hipFileUseCount(), 1);
-}
-
 // Ensure hipFileRead():
 // * Returns -1 (like cuFile) when called w/o a driver init
 // * Does NOT initialize the driver and returns a reference count of 0
