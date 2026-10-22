@@ -1082,6 +1082,7 @@ fn read_node(
                 gws_count,
                 iommu_v2_supported: capability & (1 << 1) != 0,
                 coherent_host_access: capability & (1 << 28) != 0,
+                sram_ecc_enabled: capability & 0x0400_0000 != 0,
                 packet_processor_firmware_version: p.optional_u32("fw_version")?.unwrap_or(0)
                     & 0x3ff,
                 sdma_firmware_version: p.optional_u32("sdma_fw_version")?.unwrap_or(0) & 0x3ff,
