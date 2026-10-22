@@ -122,6 +122,12 @@ Hip::hipExtMallocWithFlags(size_t size, unsigned int flags) const
 }
 
 void
+Hip::hipFree(void *ptr) const
+{
+    (void)throwOnHipError<Hip::RuntimeError>(::hipFree(ptr));
+}
+
+void
 Hip::hipHostFree(void *ptr) const
 {
     (void)throwOnHipError<Hip::RuntimeError>(::hipHostFree(ptr));

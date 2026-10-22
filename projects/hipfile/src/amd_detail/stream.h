@@ -25,7 +25,21 @@ public:
     virtual bool                         fixedIOSize() const       = 0;
     virtual bool                         pageAligned() const       = 0;
     virtual std::unique_lock<std::mutex> getLock()                 = 0;
+
+    virtual bool      isManaged() const             = 0;
+    virtual bool      isRetired() const             = 0;
+    virtual bool      canUseStreamWaitValue() const = 0;
+    virtual uint64_t *signalSlot() const            = 0;
+    virtual uint64_t  nextSignalTarget()            = 0;
+    virtual uint64_t  releaseSignalTarget()         = 0;
+    virtual void      drainAndRelease()             = 0;
 };
+
+struct SignalSlotDeleter {
+    int  device_id{0};
+    void operator()(uint64_t *slot) const noexcept;
+};
+using SignalSlot = std::unique_ptr<uint64_t, SignalSlotDeleter>;
 
 class StreamMap;
 
@@ -41,7 +55,15 @@ public:
     virtual bool                         pageAligned() const override;
     virtual std::unique_lock<std::mutex> getLock() override;
 
-    Stream(const hipStream_t hip_stream, uint32_t flags, const PassKey<StreamMap> &k);
+    bool      isManaged() const override;
+    bool      isRetired() const override;
+    bool      canUseStreamWaitValue() const override;
+    uint64_t *signalSlot() const override;
+    uint64_t  nextSignalTarget() override;
+    uint64_t  releaseSignalTarget() override;
+    void      drainAndRelease() override;
+
+    Stream(const hipStream_t hip_stream, uint32_t flags, bool managed, const PassKey<StreamMap> &k);
 
 private:
     Stream(const Stream &)             = delete;
@@ -55,7 +77,12 @@ private:
     bool        fixed_file_offset;
     bool        fixed_io_size;
     bool        page_aligned;
-    std::mutex  mutex;
+    bool        managed;
+    bool        can_use_stream_wait_value;
+    bool        retired{false};
+    std::mutex  mutex;       // Guards retired and signal_counter.
+    SignalSlot  signal_slot; // Device signal memory; freed by drainAndRelease (caller thread) or dtor.
+    uint64_t    signal_counter{0};
 };
 
 class StreamMap {
