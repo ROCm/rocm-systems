@@ -149,12 +149,14 @@ install(
 )
 
 # rdc_rdci_helper_tests: the text checks that keep control characters out of rdci's output and
-# out of new names (rdc_lib/rdc_common.h), and the partition IDs rdci discovery prints
-# (common/rdc_utils.cc, compiled in). Needs no GPU and no RDC library.
+# out of new names (rdc_lib/rdc_common.h), the partition IDs rdci discovery prints
+# (common/rdc_utils.cc, compiled in), and the field ID checks (rdc_lib/rdc_common.h and
+# common/rdc_fields_supported.cc, compiled in). Needs no GPU and no RDC library.
 add_executable(
     rdc_rdci_helper_tests
     ${SRC_DIR}/test_rdci_helpers.cc
     ${PROJECT_SOURCE_DIR}/common/rdc_utils.cc
+    ${PROJECT_SOURCE_DIR}/common/rdc_fields_supported.cc
 )
 target_include_directories(
     rdc_rdci_helper_tests

@@ -345,7 +345,7 @@ rdc_status_t RdcStandaloneHandler::rdc_group_field_create(uint32_t num_field_ids
 
   request.set_field_group_name(field_group_name);
   for (uint32_t i = 0; i < num_field_ids; i++) {
-    request.add_field_ids(field_ids[i]);
+    request.add_field_ids(rdc_field_id_number(field_ids[i]));  // rdcd checks it
   }
 
   ::grpc::Status status = stub_->CreateFieldGroup(&context, request, &reply);
@@ -363,7 +363,7 @@ rdc_status_t RdcStandaloneHandler::rdc_group_field_add_field(rdc_field_grp_t rdc
   ::grpc::ClientContext context;
 
   request.set_field_group_id(rdc_field_group_id);
-  request.set_field_id(field_id);
+  request.set_field_id(rdc_field_id_number(field_id));
   ::grpc::Status status = stub_->AddFieldToFieldGroup(&context, request, &reply);
   rdc_status_t err_status = error_handle(status, reply.status());
 
@@ -526,7 +526,7 @@ rdc_status_t RdcStandaloneHandler::rdc_field_get_latest_value(uint32_t gpu_index
   ::grpc::ClientContext context;
 
   request.set_gpu_index(gpu_index);
-  request.set_field_id(field);
+  request.set_field_id(rdc_field_id_number(field));
   ::grpc::Status status = stub_->GetLatestFieldValue(&context, request, &reply);
   rdc_status_t err_status = error_handle(status, reply.status());
   if (err_status != RDC_ST_OK) return err_status;
@@ -559,7 +559,7 @@ rdc_status_t RdcStandaloneHandler::rdc_field_get_value_since(uint32_t gpu_index,
   ::grpc::ClientContext context;
 
   request.set_gpu_index(gpu_index);
-  request.set_field_id(field);
+  request.set_field_id(rdc_field_id_number(field));
   request.set_since_time_stamp(since_time_stamp);
   ::grpc::Status status = stub_->GetFieldSince(&context, request, &reply);
   rdc_status_t err_status = error_handle(status, reply.status());

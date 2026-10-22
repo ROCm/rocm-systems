@@ -176,7 +176,12 @@ void RdciDmonSubSystem::parse_cmd_opts(int argc, char** argv) {
           }
           field_ids_.push_back(field_id);
         } else {
-          field_ids_.push_back(static_cast<rdc_field_t>(std::stoi(vec_id)));
+          // Checked as a number: an ID that RDC does not know is not a value of rdc_field_t.
+          rdc_field_t field_id = RDC_FI_INVALID;
+          if (!amd::rdc::get_field_id_from_number(vec_id, &field_id)) {
+            throw RdcException(RDC_ST_BAD_PARAMETER, "Field " + vec_id + " is not supported");
+          }
+          field_ids_.push_back(field_id);
         }
       }
     }

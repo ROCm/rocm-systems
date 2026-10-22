@@ -35,6 +35,7 @@ from test_fake_gpu import (  # noqa: E402, F401 (rdcd and tools are fixtures)
 CLIENT_NAME = "librdc_fake_client.so"
 # rdc.h's rdc_status_t, which rdci also exits with.
 RDC_ST_OK = 0
+RDC_ST_NOT_SUPPORTED = 1
 RDC_ST_BAD_PARAMETER = 5
 RDC_ST_NOT_FOUND = 6
 
@@ -248,6 +249,12 @@ lib.rdc_group_field_create.argtypes = [ctypes.c_void_p, ctypes.c_uint32,
                                        ctypes.POINTER(ctypes.c_uint32)]
 lib.rdc_policy_set.argtypes = [ctypes.c_void_p, ctypes.c_uint32, Policy]
 lib.rdc_policy_delete.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_int]
+lib.rdc_group_field_add_field.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32]
+lib.rdc_field_get_latest_value.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32,
+                                           ctypes.c_void_p]
+lib.rdc_field_get_value_since.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32,
+                                          ctypes.c_uint64, ctypes.POINTER(ctypes.c_uint64),
+                                          ctypes.c_void_p]
 handle = ctypes.c_void_p()
 lib.rdc_init(0)
 if target == "embedded":
@@ -268,6 +275,21 @@ if check == "policy":
     # Last: on a tree without the check, the policy thread reads this far below its table.
     got["most negative type"] = lib.rdc_policy_set(handle, group.value,
                                                    Policy(-2**31, 1, 0))
+elif check == "fields":
+    # Field IDs that rdc_field_t does not define, as any C caller can pass them.
+    out = ctypes.c_uint32()
+    known = (ctypes.c_uint32 * 1)(100)
+    assert lib.rdc_group_field_create(handle, 1, known, b"known", ctypes.byref(out)) == 0
+    value = ctypes.create_string_buffer(4096)  # an rdc_field_value, with room to spare
+    since = ctypes.c_uint64()
+    for fid in (99999, 2**31, 2**32 - 1):
+        ids = (ctypes.c_uint32 * 2)(100, fid)
+        got[f"create {fid}"] = lib.rdc_group_field_create(handle, 2, ids, b"unknown",
+                                                         ctypes.byref(ctypes.c_uint32()))
+        got[f"add {fid}"] = lib.rdc_group_field_add_field(handle, out.value, fid)
+        got[f"latest {fid}"] = lib.rdc_field_get_latest_value(handle, 0, fid, value)
+        got[f"since {fid}"] = lib.rdc_field_get_value_since(handle, 0, fid, 0,
+                                                           ctypes.byref(since), value)
 else:
     fields = (ctypes.c_uint32 * 1)(100)
     for name in json.loads(sys.argv[5]):
@@ -311,6 +333,35 @@ def test_embedded_rdc_refuses_undefined_policy_values(tools):
     env = dict(os.environ, LD_PRELOAD=tools[2], RDC_FAKE_GPUS="4")
     got = _api_child("embedded", "policy", env)
     assert set(got.values()) == {RDC_ST_BAD_PARAMETER}, got
+
+
+# ---------------------------------------------------------------------------
+# rdci, rdcd and librdc check a field ID as a number before it becomes an rdc_field_t
+# ---------------------------------------------------------------------------
+def test_dmon_refuses_a_field_id_that_rdc_does_not_know(rdcd):
+    r = _rdci(rdcd, "dmon", "-e", "99999", "-i", "0", "-c", "1", "-d", "100")
+    assert r.returncode == RDC_ST_BAD_PARAMETER, _text(r)
+    assert "Field 99999 is not supported" in _text(r), _text(r)
+
+
+def test_fieldgroup_refuses_a_field_id_past_int_max(rdcd):
+    # std::stoi() threw out of rdci's handlers for these.
+    for fid in ("4294967296", "99999999999999999999999"):
+        r = _rdci(rdcd, "fieldgroup", "-c", "too_big", "-f", fid)
+        assert r.returncode == RDC_ST_BAD_PARAMETER, _text(r)
+        assert f"Field {fid} is not supported" in _text(r), _text(r)
+
+
+def test_rdcd_refuses_unknown_field_ids(rdcd):
+    got = _api_child(f"127.0.0.1:{rdcd.port}", "fields", dict(os.environ))
+    rdcd.check_alive("unknown field IDs")
+    assert set(got.values()) == {RDC_ST_NOT_SUPPORTED}, got
+
+
+def test_embedded_rdc_refuses_unknown_field_ids(tools):
+    env = dict(os.environ, LD_PRELOAD=tools[2], RDC_FAKE_GPUS="4")
+    got = _api_child("embedded", "fields", env)
+    assert set(got.values()) == {RDC_ST_NOT_SUPPORTED}, got
 
 
 # ---------------------------------------------------------------------------
