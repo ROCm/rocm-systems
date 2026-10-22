@@ -27,6 +27,7 @@ THE SOFTWARE.
 #include <future>
 #include <limits>
 
+#include "common/rdc_fields_supported.h"
 #include "rdc.grpc.pb.h"  // NOLINT
 #include "rdc.pb.h"
 #include "rdc/rdc.h"
@@ -173,16 +174,22 @@ void set_timeout(::grpc::ClientContext* context, std::chrono::seconds timeout) {
   context->set_deadline(std::chrono::system_clock::now() + timeout);
 }
 
-// Copies a field value from a GetLatestFieldValue or GetFieldSince reply. A value
-// of a type the C API does not have is a client error, and leaves *value as it was.
+// Copies a field value from a GetLatestFieldValue or GetFieldSince reply for field. A
+// value of another field, or of a type the C API does not have, is a client error, and
+// leaves *value as it was.
 template <typename Reply>
-rdc_status_t copy_field_value(const Reply& reply, rdc_field_value* value) {
+rdc_status_t copy_field_value(const Reply& reply, rdc_field_t field, rdc_field_value* value) {
+  if (reply.field_id() != static_cast<uint32_t>(field)) {
+    RDC_LOG(RDC_ERROR, "rdcd replied with a value of field "
+                           << reply.field_id() << " to a request for field " << field);
+    return RDC_ST_CLIENT_ERROR;
+  }
   const uint32_t type = reply.type();
   if (type != INTEGER && type != DOUBLE && type != STRING && type != BLOB) {
     RDC_LOG(RDC_ERROR, "rdcd replied with a field value of unknown type " << type);
     return RDC_ST_CLIENT_ERROR;
   }
-  value->field_id = static_cast<rdc_field_t>(reply.field_id());
+  value->field_id = field;
   value->status = reply.rdc_status();
   value->ts = reply.ts();
   value->type = static_cast<rdc_field_type_t>(type);
@@ -194,6 +201,15 @@ rdc_status_t copy_field_value(const Reply& reply, rdc_field_value* value) {
     strncpy_with_null(value->value.str, reply.str().c_str(), RDC_MAX_STR_LENGTH);
   }
   return RDC_ST_OK;
+}
+
+// A field of a field group that rdcd sent. A field that this client does not know, such
+// as one that a newer rdcd added, is RDC_FI_INVALID: an rdc_field_t holds only fields
+// that it defines.
+rdc_field_t field_from_reply(uint32_t id) {
+  const fld_id2name_map_t& fields = get_field_id_description_from_id();
+  if (id == RDC_FI_INVALID || fields.find(id) == fields.end()) return RDC_FI_INVALID;
+  return static_cast<rdc_field_t>(id);
 }
 
 }  // namespace
@@ -542,7 +558,7 @@ rdc_status_t RdcStandaloneHandler::rdc_group_field_get_info(
   strncpy_with_null(field_group_info->group_name, reply.filed_group_name().c_str(),
                     RDC_MAX_STR_LENGTH);
   for (int i = 0; i < reply.field_ids_size(); i++) {
-    field_group_info->field_ids[i] = static_cast<rdc_field_t>(reply.field_ids(i));
+    field_group_info->field_ids[i] = field_from_reply(reply.field_ids(i));
   }
 
   return RDC_ST_OK;
@@ -689,7 +705,7 @@ rdc_status_t RdcStandaloneHandler::rdc_field_get_latest_value(uint32_t gpu_index
   rdc_status_t err_status = error_handle(status, reply.status());
   if (err_status != RDC_ST_OK) return err_status;
 
-  err_status = copy_field_value(reply, value);
+  err_status = copy_field_value(reply, field, value);
   if (err_status != RDC_ST_OK) return err_status;
 
   return RDC_ST_OK;
@@ -715,7 +731,7 @@ rdc_status_t RdcStandaloneHandler::rdc_field_get_value_since(uint32_t gpu_index,
   rdc_status_t err_status = error_handle(status, reply.status());
   if (err_status != RDC_ST_OK) return err_status;
 
-  err_status = copy_field_value(reply, value);
+  err_status = copy_field_value(reply, field, value);
   if (err_status != RDC_ST_OK) return err_status;
   *next_since_time_stamp = reply.next_since_time_stamp();
 

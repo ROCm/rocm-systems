@@ -1378,6 +1378,9 @@ rdc_status_t rdc_group_field_add_field(rdc_handle_t p_rdc_handle,
  *  @details Get detail information about a field group created by
  *  rdc_group_field_create
  *
+ *  On a handle from rdc_connect(), a field that this library does not know,
+ *  such as one that a newer rdcd added, reads as ::RDC_FI_INVALID.
+ *
  *  @param[in] p_rdc_handle The RDC handler.
  *
  *  @param[in] rdc_field_group_id The field group handler created by
@@ -1471,8 +1474,8 @@ rdc_status_t rdc_field_watch(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  *  @retval ::RDC_ST_CLIENT_ERROR On a handle from rdc_connect(): rdcd cannot
- *  be reached, does not answer in time, or sent a value of a type that
- *  rdc_field_type_t does not have.
+ *  be reached, does not answer in time, or sent a value of another field or
+ *  of a type that rdc_field_type_t does not have.
  */
 rdc_status_t rdc_field_get_latest_value(rdc_handle_t p_rdc_handle, uint32_t gpu_index,
                                         rdc_field_t field, rdc_field_value* value);
@@ -1498,8 +1501,8 @@ rdc_status_t rdc_field_get_latest_value(rdc_handle_t p_rdc_handle, uint32_t gpu_
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  *  @retval ::RDC_ST_CLIENT_ERROR On a handle from rdc_connect(): rdcd cannot
- *  be reached, does not answer in time, or sent a value of a type that
- *  rdc_field_type_t does not have.
+ *  be reached, does not answer in time, or sent a value of another field or
+ *  of a type that rdc_field_type_t does not have.
  */
 rdc_status_t rdc_field_get_value_since(rdc_handle_t p_rdc_handle, uint32_t gpu_index,
                                        rdc_field_t field, uint64_t since_time_stamp,
