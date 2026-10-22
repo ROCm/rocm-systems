@@ -63,8 +63,6 @@ class Profiler:
         return False
 
     def __init__(self, **kwargs):
-        """ """
-
         self._original_function = (
             sys.getprofile() if sys.getprofile() != _profiler_function else None
         )
