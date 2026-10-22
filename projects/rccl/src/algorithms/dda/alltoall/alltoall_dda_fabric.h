@@ -118,41 +118,47 @@ __launch_bounds__(512)
 // Peer-major copy loops keep this many 16 B loads in flight per thread.
 constexpr int kDdaA2APeerUnroll = 8;
 
-// Copies 16 B lines i = begin, begin + stride, ... < end of src to dst. Full groups of kDdaA2APeerUnroll lines
-// carry no per-line bounds check, so all their loads are issued before the first store; a predicated load per
-// line stops the compiler from batching them and costs ~25% of the bandwidth. Leftover lines go one at a time.
-template <typename T>
+// Copies 16 B lines i = begin, begin + stride, ... < end, loading each full group of kDdaA2APeerUnroll lines first.
+// SysLoad / SysStore use system-scope loads / stores, so data shared with other GPUs needs no cache flush.
+template <bool SysLoad, bool SysStore, typename T>
 __device__ __forceinline__ void ddaA2APeerCopy(T* dst, const T* src, size_t begin, size_t end, size_t stride) {
   constexpr int kUnroll = kDdaA2APeerUnroll;
   const uint4* s = reinterpret_cast<const uint4*>(src);
   uint4* d = reinterpret_cast<uint4*>(dst);
+
+  auto load = [&](size_t line, uint4& v) {
+    if constexpr (SysLoad) {
+      ddaLLLoadLineB128(reinterpret_cast<const uint32_t*>(s + line), v.x, v.y, v.z, v.w);
+    } else {
+      v = s[line];
+    }
+  };
+  auto store = [&](size_t line, const uint4& v) {
+    if constexpr (SysStore) {
+      ddaLLStoreLineB128(reinterpret_cast<uint32_t*>(d + line), v.x, v.y, v.z, v.w);
+    } else {
+      d[line] = v;
+    }
+  };
   size_t i = begin;
   for (; i + (kUnroll - 1) * stride < end; i += kUnroll * stride) {
     uint4 v[kUnroll];
 #pragma unroll
-    for (int u = 0; u < kUnroll; ++u) v[u] = s[i + u * stride];
+    for (int u = 0; u < kUnroll; ++u) load(i + u * stride, v[u]);
 #pragma unroll
-    for (int u = 0; u < kUnroll; ++u) d[i + u * stride] = v[u];
+    for (int u = 0; u < kUnroll; ++u) store(i + u * stride, v[u]);
   }
-  for (; i < end; i += stride) d[i] = s[i];
+  for (; i < end; i += stride) {
+    uint4 v;
+    load(i, v);
+    store(i, v);
+  }
 }
 
-// Peer-major push alltoall. The grid is nRanks * blocksPerPeer blocks; block b works only on peer
-// k = b / blocksPerPeer (rank (selfRank + k) % nRanks) and on slice b % blocksPerPeer of that peer's chunk, so
-// each block streams to one remote GPU instead of fanning out to all of them. The drain mirrors it: block b
-// reads the slot of rank (selfRank - k) % nRanks. Rank s' wrote that slot from its block with the same k and
-// slice, i.e. the same block index, so the sync pairs the write with the read. Every rank must launch the same
-// grid. Out of place only: a block drains into recvbuff slots that other blocks of this rank may still be
-// reading from sendbuff.
-// The mid-kernel sync is a two-rank handshake (push destination, drain source) rather than an all-rank barrier,
-// since a block only depends on those two ranks. Block group k == 0 pushes to this rank's own scratch like any
-// other peer, so every block takes part in the handshake and the flag slots stay paired.
-// pieces >= 1 (the host never passes 0): the block's share of the chunk is cut into `pieces` runs of rows (a row is the block's stride loop
-// index, rounded to whole unroll groups). Step p pushes piece p, waits for the source's piece p - 1 and drains it
-// while piece p's remote stores are still in flight, then waits for its own stores and posts piece p. The flag slot
-// holds one token, so a post first waits for the destination to consume the previous piece, and every post is matched
-// by exactly one wait. The pieces land at their place in the chunk, so the scratch needed is unchanged. One piece
-// pushes the whole share, posts, waits and drains: no overlap.
+// Peer-major push alltoall, out of place: block b pushes its slice of the chunk to peer (self + k) % nRanks, with
+// k = b / blocksPerPeer, and drains the slot of rank (self - k) % nRanks (written by that rank's block b).
+// The share is cut into `pieces` runs of rows: step p pushes piece p, drains the source's piece p - 1, then posts p.
+// Flags are epoch flags (see FabricGpuBarrier); scratch accesses are system-scope, so posts and waits need no fence.
 template <typename T>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
@@ -174,7 +180,8 @@ __launch_bounds__(512)
   const size_t slot = static_cast<size_t>(srcRank) * count;
 
   // Entry handshake instead of a full barrier: only peer reads the slot this block writes, so wait for peer alone.
-  if (k != 0) barrier.signalWaitPeer(srcRank, peer, blockIdx.x);
+  const uint32_t epoch = barrier.epochBegin();
+  if (k != 0) barrier.epochSignalWait(srcRank, peer, epoch);
 
   {
     // The host never passes pieces == 0, so the kernel does not guard it. Adding a check inside the kernel (for example
@@ -185,21 +192,28 @@ __launch_bounds__(512)
     const size_t nRows = (nLines + stride - 1) / stride;
     const size_t perPiece = ((nRows + pieces - 1) / pieces + kDdaA2APeerUnroll - 1) / kDdaA2APeerUnroll * kDdaA2APeerUnroll;
     const size_t nPieces = (nRows + perPiece - 1) / perPiece;
-    // Copies this thread's rows [p * perPiece, (p + 1) * perPiece) of a chunk.
-    auto piece = [&](T* d, const T* s, size_t p) {
+    // This thread's line range [lo, hi) of piece p: rows [p * perPiece, (p + 1) * perPiece).
+    auto piece = [&](size_t p) -> std::pair<size_t, size_t> {
       const size_t lo = begin + p * perPiece * stride;
       const size_t hi = begin + (p + 1) * perPiece * stride;
-      ddaA2APeerCopy(d, s, lo, hi < nLines ? hi : nLines, stride);
+      return {lo, hi < nLines ? hi : nLines};
     };
+
+    const FabricGpuBarrier::FlagType* const ready = barrier.epochFlagFrom(srcRank);
     for (size_t p = 0; p <= nPieces; ++p) {
-      if (p < nPieces) piece(dst, src, p);
-      if (p > 0) {
-        barrier.waitPeer(srcRank);
-        piece(recvbuff + slot, ipcbuffs[selfRank] + slot, p - 1);
+      if (p < nPieces) {
+         auto [lo, hi] = piece(p);
+         ddaA2APeerCopy<false, true>(dst, src, lo, hi, stride);
       }
-      if (p < nPieces) barrier.postPeer(peer, blockIdx.x);
+      if (p > 0) {
+        barrier.epochWaitPiece(ready, epoch, static_cast<unsigned>(p - 1));
+        auto [lo, hi] = piece(p - 1);
+        ddaA2APeerCopy<true, false>(recvbuff + slot, ipcbuffs[selfRank] + slot, lo, hi, stride);
+      }
+      if (p < nPieces) barrier.epochPostPiece(peer, epoch, static_cast<unsigned>(p));
     }
   }
+  barrier.epochEnd(epoch, pieces);
 }
 
 } // namespace dda::common
