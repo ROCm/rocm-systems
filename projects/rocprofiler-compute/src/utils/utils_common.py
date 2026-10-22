@@ -607,6 +607,11 @@ def parse_pmc_perf(pmc_perf_file: str) -> list[str]:
     return jobs[0].get("pmc") or []
 
 
+def is_pc_sampling_collected(filter_blocks: list[str]) -> bool:
+    """Return True if the requested blocks include PC sampling."""
+    return any(block in PC_SAMPLING_BLOCK_IDS for block in filter_blocks)
+
+
 def is_only_pc_sampling(filter_blocks: list[str]) -> bool:
     """Return True if all requested blocks are PC sampling (block 21 or the
     ``pc_sampling`` alias)."""
@@ -774,7 +779,7 @@ def _iter_metric_table_rows(
     if block_id != "0":
         yield block_id, (panel["title"], "", "")
 
-    table_id = f"{data_config['id'] // 100}.{data_config['id'] % 100}"
+    table_id = format_table_id(data_config["id"])
     yield table_id, (data_config["title"], "", "")
 
     descriptions = panel.get("metrics_description") or {}
@@ -802,6 +807,11 @@ def _is_same_id_branch(metric_id: str, selected_id: str) -> bool:
         or metric_id.startswith(f"{selected_id}.")
         or selected_id.startswith(f"{metric_id}.")
     )
+
+
+def format_table_id(config_id: int) -> str:
+    """Return the "block.table" id of a metric_table config id, e.g. 1802 -> "18.2"."""
+    return f"{config_id // 100}.{config_id % 100}"
 
 
 def build_metric_details(
@@ -913,6 +923,40 @@ def convert_metric_id_to_panel_info(
         metric_id_int = int(tokens[2])
 
     return (file_id, panel_id, metric_id_int)
+
+
+def metric_passes_filter(
+    metric_id: str,
+    panel_id: int,
+    data_source_idx: str,
+    user_metric_filter: Optional[list[str]],
+    profile_panel_filter: set[int],
+) -> bool:
+    """Return True if a metric or table identified by metric_id passes the
+    active filter. metric_id is the file-level id for raw_csv / pc_sampling
+    tables, or the per-metric id (e.g. "2.1.0") for metric_table rows.
+    """
+    if panel_id <= 100 or data_source_idx == "0":
+        return True
+    if user_metric_filter is None and not profile_panel_filter:
+        return True
+    if user_metric_filter and (
+        metric_id in user_metric_filter
+        or data_source_idx in user_metric_filter
+        or str(panel_id // 100) in user_metric_filter
+    ):
+        return True
+    if profile_panel_filter:
+        file_id, _, _ = convert_metric_id_to_panel_info(metric_id)
+        return int(file_id) in profile_panel_filter
+    return False
+
+
+def is_membw_panel_unprofiled(panel_id: int, profiling_config: dict[str, Any]) -> bool:
+    """Return True for block 30, which profile only collects with --membw-analysis."""
+    return panel_id == MEMBW_ANALYSIS_PANEL_ID and not profiling_config.get(
+        "membw_analysis", False
+    )
 
 
 def load_yaml(filepath: Union[str, os.PathLike]) -> dict[str, Any]:
