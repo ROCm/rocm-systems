@@ -52,8 +52,6 @@ struct constmem_t {
 extern __constant__ constmem_t constmem;
 void init_constant_memory(void);
 
-extern uint32_t tdm_resolved_tile_bytes;
-
 }  // namespace rocshmem
 
 #endif  // LIBRARY_SRC_CONSTMEM_HPP_

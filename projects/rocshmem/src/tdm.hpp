@@ -53,7 +53,8 @@
 
 // Single switch for "TDM is actually usable here" (build opted in, arch
 // supports it, compiler exposes the intrinsics). Everything below that's
-// TDM-specific is gated on this.
+// TDM-specific is gated on this. Strictly gfx1250 (regular and -strict
+// build variants) -- not a wildcard match for other gfx12xx parts.
 #if defined(USE_TDM) && (defined(__gfx1250__) || defined(__gfx1250_strict__)) && \
     HIP_HAVE_TDM_INTRINSICS
 #define ROCSHMEM_TDM_ENABLED 1

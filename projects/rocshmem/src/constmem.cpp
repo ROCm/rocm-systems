@@ -14,8 +14,6 @@ namespace rocshmem {
 
 extern Backend *backend;
 
-uint32_t tdm_resolved_tile_bytes = 0;
-
 void init_constant_memory(void) {
   std::string envstr;
   constmem_t constmem_values;
@@ -118,7 +116,7 @@ void init_constant_memory(void) {
       }
     }
   }
-  tdm_resolved_tile_bytes = constmem_values.tdm_tile_bytes;
+  backend->tdm_resolved_tile_bytes = constmem_values.tdm_tile_bytes;
 #endif
 
   constmem_values.backend_type = backend->get_type();
