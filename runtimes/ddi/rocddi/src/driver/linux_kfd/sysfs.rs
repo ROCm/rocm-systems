@@ -9,53 +9,80 @@
 //! Parsers reject incomplete, duplicate, overflowing, or internally inconsistent
 //! properties rather than filling important device facts with defaults.
 use super::{errno, error, native_error, sys};
+use crate::driver::{DriverInstanceId, KfdAccessTarget};
 use crate::memory::storage::Shared;
 use crate::memory::storage::TryPush;
 use crate::memory::{DeviceAccess, HostCacheability};
 use crate::topology::{
-    CacheInfo, Endpoint, EndpointKind, GpuInfo, GpuQueueCapabilities, MemoryLink, MemoryLinkInfo,
-    MemoryLinkType, PciInfo, TopologyKey,
+    CacheInfo, CacheKind, Endpoint, EndpointKind, GpuInfo, GpuQueueCapabilities, MemoryLinkInfo,
+    MemoryLinkType, MemoryLocation, MemoryLocationKind, NativeNodeId, NodeKind, PciInfo,
+    SourceKind, TopologyCache, TopologySnapshot,
 };
 use crate::{Error, ErrorKind};
 use std::fmt::{self, Write as _};
-use std::fs::{File, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read as _};
 use std::path::Path;
 
 /// Stable KFD and DRM identity and capabilities for one topology node.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct KfdNode {
+    /// Sysfs topology node number.
     pub node: u32,
+    /// Native KFD GPU identifier used by ioctls.
     pub gpu_id: u32,
+    /// DRM render node minor, when this node has one.
     pub render_minor: Option<u32>,
+    /// Stable hardware identifier when reported by KFD.
     pub unique_id: Option<u64>,
+    /// Endpoint identity used to detect topology changes.
     pub identity: [u8; 16],
+    /// Queue and shader geometry qualified for this node.
     pub queues: KfdQueueProperties,
+    /// Total local device memory in bytes.
     pub local_memory_bytes: u64,
+    /// Host-visible local memory in bytes.
     pub public_memory_bytes: u64,
 }
 
 /// Queue and shader properties required to qualify KFD transports.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct KfdQueueProperties {
+    /// Encoded GFX target reported by KFD.
     pub gfx_target: u32,
+    /// Enabled compute-unit count.
     pub compute_units: u32,
+    /// Maximum resident waves per compute unit.
     pub maximum_wave_count_per_compute_unit: u32,
+    /// Maximum scratch waves per compute unit.
     pub maximum_scratch_wave_count_per_compute_unit: u32,
+    /// Hardware lanes per wavefront.
     pub wavefront_size: u32,
+    /// Number of shader XCCs exposed to this process.
     pub xcc_count: u32,
+    /// Shader engines per XCC.
     pub shader_engine_count_per_xcc: u32,
+    /// Native context-save allocation size.
     pub context_size: u32,
+    /// Native control-stack allocation size.
     pub control_stack_size: u32,
+    /// Number of ordinary SDMA engines.
     pub sdma_engines: u32,
+    /// Number of SDMA engines for XGMI links.
     pub sdma_xgmi_engines: u32,
+    /// Available global wave synchronization slots.
     pub gws_count: u32,
+    /// Maximum native compute queues.
     pub compute_queues: u32,
+    /// SDMA queue support validated against native properties.
     pub sdma_qualified: bool,
 }
 
+/// Bounded path builder for sysfs records discovered without allocation.
 struct StackPath {
+    /// UTF-8 path bytes written so far.
     bytes: [u8; 512],
+    /// Length of the initialized byte prefix.
     len: usize,
 }
 impl StackPath {
@@ -120,6 +147,7 @@ fn parse_number(text: &str) -> Result<u64, Error> {
     };
     result.map_err(|_| error(ErrorKind::InvalidData, "invalid numeric sysfs property"))
 }
+/// Validated key-value lines from one native sysfs properties record.
 struct Properties<'a>(&'a str);
 impl<'a> Properties<'a> {
     fn new(text: &'a str) -> Result<Self, Error> {
@@ -177,7 +205,7 @@ impl<'a> Properties<'a> {
     }
 }
 
-fn cache_properties(text: &str) -> Result<CacheInfo, Error> {
+fn cache_properties(text: &str) -> Result<(CacheInfo, u32), Error> {
     let mut sibling_map = false;
     for (index, line) in text.lines().enumerate() {
         let mut parts = line.split_whitespace();
@@ -221,18 +249,42 @@ fn cache_properties(text: &str) -> Result<CacheInfo, Error> {
     let _ = properties.u32("cache_lines_per_tag")?;
     let _ = properties.u32("association")?;
     let _ = properties.u32("latency")?;
+    let native_kind = properties.u32("type")?;
+    let kind = match (native_kind & 1 != 0, native_kind & 2 != 0) {
+        (true, true) => CacheKind::Unified,
+        (true, false) => CacheKind::Data,
+        (false, true) => CacheKind::Instruction,
+        (false, false) => CacheKind::Other,
+    };
     // KFD reports cache capacity in KiB; driver facts use bytes.
-    Ok(CacheInfo {
-        level: properties.u32("level")?,
-        size_bytes: u64::from(properties.u32("size")?) * 1024,
-        line_size_bytes,
-        kind: properties.u32("type")?,
-    })
+    Ok((
+        CacheInfo {
+            level: properties.u32("level")?,
+            size_bytes: u64::from(properties.u32("size")?) * 1024,
+            line_size_bytes: (line_size_bytes != 0).then_some(line_size_bytes),
+            kind,
+            compute_unit_cache: native_kind & (1 << 3) != 0,
+        },
+        properties
+            .optional_u32("persisting_cache_size_max")?
+            .unwrap_or(0),
+    ))
 }
 
-fn caches(root: &str, node: u32, count: u32) -> Result<Option<Shared<Vec<CacheInfo>>>, Error> {
+/// Cache records and the largest reported persisting-L2 reservation.
+struct DiscoveredCaches {
+    /// Cache records ordered by native ordinal when any are present.
+    records: Option<Shared<Vec<CacheInfo>>>,
+    /// Maximum persisting L2 size reported by the device.
+    persisting_l2_cache_size_max: u32,
+}
+
+fn caches(root: &str, node: u32, count: u32) -> Result<DiscoveredCaches, Error> {
     if count == 0 {
-        return Ok(None);
+        return Ok(DiscoveredCaches {
+            records: None,
+            persisting_l2_cache_size_max: 0,
+        });
     }
     let capacity = usize::try_from(count)
         .map_err(|_| error(ErrorKind::ResourceExhausted, "native cache count overflow"))?;
@@ -270,10 +322,19 @@ fn caches(root: &str, node: u32, count: u32) -> Result<Option<Shared<Vec<CacheIn
         ));
     }
     let mut cache_info = crate::memory::storage::try_vec_with_capacity(capacity)?;
-    for (_, cache) in records {
+    let mut persisting_l2_cache_size_max = 0;
+    for (_, (cache, persisting_cache_size_max)) in records {
+        if cache.level == 2 && persisting_l2_cache_size_max == 0 {
+            persisting_l2_cache_size_max = persisting_cache_size_max;
+        }
         cache_info.try_push(cache)?;
     }
-    Shared::new(cache_info).map(Some).map_err(Into::into)
+    Shared::new(cache_info)
+        .map(|records| DiscoveredCaches {
+            records: Some(records),
+            persisting_l2_cache_size_max,
+        })
+        .map_err(Into::into)
 }
 
 fn memory_bank_properties(text: &str) -> Result<Option<(u32, u32)>, Error> {
@@ -340,23 +401,81 @@ fn memory_bus(root: &str, node: u32, count: u32) -> Result<(u32, u32), Error> {
     Ok(selected)
 }
 
-pub(super) fn enumerate(
+struct DiscoveredEndpoint {
+    endpoint: Endpoint,
+    caches: Option<Shared<Vec<CacheInfo>>>,
+    links: Option<Shared<Vec<KfdReportedLink>>>,
+}
+
+/// One directed KFD node report, before resolution into snapshot node IDs.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct KfdReportedLink {
+    source: KfdAccessTarget,
+    target: KfdAccessTarget,
+    source_is_host: bool,
+    target_is_host: bool,
+    info: MemoryLinkInfo,
+    peer_dma_allowed: bool,
+}
+
+struct DiscoveredNode {
+    node: u32,
+    gpu_id: u32,
+    endpoint: Option<Endpoint>,
+    caches: Option<Shared<Vec<CacheInfo>>>,
+    links: Option<Shared<Vec<KfdReportedLink>>>,
+}
+
+struct DiscoveredTopology {
+    generation: Option<u64>,
+    nodes: Vec<DiscoveredNode>,
+}
+
+fn read_all(
     root: &str,
     drm: &str,
-    visitor: &mut dyn FnMut(Endpoint) -> Result<(), Error>,
-) -> Result<(), Error> {
+    driver_instance: DriverInstanceId,
+    include_host_facts: bool,
+) -> Result<DiscoveredTopology, Error> {
     for _ in 0..3 {
         let before = match scalar(format_args!("{root}/generation_id")) {
             Ok(value) => value,
-            Err(e) if e.native_error_code() == Some(errno::ENOENT) => return Ok(()),
+            Err(e) if e.native_error_code() == Some(errno::ENOENT) => {
+                return Ok(DiscoveredTopology {
+                    generation: None,
+                    nodes: Vec::new(),
+                });
+            }
             Err(e) => return Err(e),
         };
         let mut records = Vec::new();
         let nodes = StackPath::new(format_args!("{root}/nodes"))?;
         let result = sys::numeric_directories(nodes.path(), &mut |node| {
-            if let Some(endpoint) = read_node(root, drm, node)? {
-                records.try_push(endpoint)?;
-            }
+            let gpu_id = u32::try_from(scalar(format_args!("{root}/nodes/{node}/gpu_id"))?)
+                .map_err(|_| error(ErrorKind::InvalidData, "GPU ID exceeds u32"))?;
+            let record = if gpu_id == 0 && include_host_facts {
+                read_host_node(root, node)?
+            } else if gpu_id == 0 {
+                DiscoveredNode {
+                    node,
+                    gpu_id,
+                    endpoint: None,
+                    caches: None,
+                    links: None,
+                }
+            } else {
+                let endpoint = read_node(root, drm, driver_instance, node)?.ok_or_else(|| {
+                    error(ErrorKind::InvalidData, "native GPU node lost its GPU ID")
+                })?;
+                DiscoveredNode {
+                    node,
+                    gpu_id,
+                    endpoint: Some(endpoint.endpoint),
+                    caches: endpoint.caches,
+                    links: endpoint.links,
+                }
+            };
+            records.try_push(record)?;
             Ok(())
         });
         let after = scalar(format_args!("{root}/generation_id"))?;
@@ -364,11 +483,11 @@ pub(super) fn enumerate(
             continue;
         }
         result?;
-        records.sort_unstable_by_key(|record| record.topology_key.group);
-        for endpoint in records {
-            visitor(endpoint)?;
-        }
-        return Ok(());
+        records.sort_unstable_by_key(|record| record.node);
+        return Ok(DiscoveredTopology {
+            generation: Some(before),
+            nodes: records,
+        });
     }
     Err(error(
         ErrorKind::ConcurrentModification,
@@ -376,10 +495,100 @@ pub(super) fn enumerate(
     ))
 }
 
-pub(super) fn open_endpoint(root: &str, drm: &str, id: [u8; 16]) -> Result<Endpoint, Error> {
+pub(super) fn enumerate(
+    root: &str,
+    drm: &str,
+    driver_instance: DriverInstanceId,
+    visitor: &mut dyn FnMut(Endpoint) -> Result<(), Error>,
+) -> Result<(), Error> {
+    let discovered = read_all(root, drm, driver_instance, false)?;
+    for record in discovered.nodes {
+        if let Some(endpoint) = record.endpoint {
+            visitor(endpoint)?;
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn contribute_topology(
+    root: &str,
+    drm: &str,
+    driver_instance: DriverInstanceId,
+    snapshot: &mut TopologySnapshot,
+) -> Result<(), Error> {
+    let discovered = read_all(root, drm, driver_instance, true)?;
+    let source = snapshot.add_source(
+        SourceKind::LinuxKfd,
+        discovered.generation,
+        true,
+        Some(driver_instance),
+    )?;
+    let mut nodes = Vec::new();
+    for record in &discovered.nodes {
+        let id = snapshot.add_node(
+            source,
+            NativeNodeId::LinuxKfd(record.node),
+            if record.gpu_id == 0 {
+                NodeKind::KfdHost
+            } else {
+                NodeKind::KfdGpu
+            },
+        )?;
+        nodes.try_push((record.node, record.gpu_id, id))?;
+    }
+    for record in discovered.nodes {
+        let node = nodes
+            .iter()
+            .find(|(native, _, _)| *native == record.node)
+            .map(|(_, _, id)| *id)
+            .ok_or_else(|| error(ErrorKind::InvalidData, "KFD endpoint has no topology node"))?;
+        if let Some(caches) = &record.caches {
+            for cache in caches.iter() {
+                snapshot
+                    .caches
+                    .try_push(TopologyCache { node, info: *cache })?;
+            }
+        }
+        if let Some(links) = &record.links {
+            for link in links.iter() {
+                let resolve = |key: KfdAccessTarget| {
+                    nodes
+                        .iter()
+                        .find(|(native, gpu, _)| *native == key.node && *gpu == key.gpu_id)
+                        .map(|(_, _, id)| *id)
+                        .ok_or_else(|| {
+                            error(ErrorKind::InvalidData, "KFD route names an unknown node")
+                        })
+                };
+                snapshot.add_route(resolve(link.source)?, resolve(link.target)?, link.info)?;
+            }
+        }
+        if let Some(endpoint) = record.endpoint {
+            let local = endpoint.local_memory_bytes;
+            let visible = endpoint.host_visible_local_memory_bytes;
+            snapshot.add_endpoint(endpoint, node)?;
+            if local != 0 {
+                snapshot.add_memory_location(MemoryLocation {
+                    node,
+                    kind: MemoryLocationKind::DeviceLocal,
+                    capacity_bytes: Some(local),
+                    host_visible_bytes: Some(visible),
+                })?;
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn open_endpoint(
+    root: &str,
+    drm: &str,
+    driver_instance: DriverInstanceId,
+    id: [u8; 16],
+) -> Result<Endpoint, Error> {
     let node = u32::from_le_bytes([id[0], id[1], id[2], id[3]]);
     let before = scalar(format_args!("{root}/generation_id"))?;
-    let endpoint = read_node(root, drm, node)?
+    let endpoint = read_node(root, drm, driver_instance, node)?
         .ok_or_else(|| error(ErrorKind::DeviceLost, "native GPU endpoint disappeared"))?;
     let after = scalar(format_args!("{root}/generation_id"))?;
     if before != after {
@@ -388,13 +597,85 @@ pub(super) fn open_endpoint(root: &str, drm: &str, id: [u8; 16]) -> Result<Endpo
             "native endpoint changed during read",
         ));
     }
-    if endpoint.id != id {
+    if endpoint.endpoint.id != id {
         return Err(error(
             ErrorKind::DeviceLost,
             "native endpoint identity changed",
         ));
     }
-    Ok(endpoint)
+    Ok(endpoint.endpoint)
+}
+
+/// Distinguishes an unrecognized native ID from a failure while reading an
+/// existing node. Only the node directory and its identity fields participate
+/// in the probe; missing cache, link, or DRM metadata remains an open error.
+pub(super) fn probe_endpoint(
+    root: &str,
+    drm: &str,
+    driver_instance: DriverInstanceId,
+    id: [u8; 16],
+) -> Result<Option<Endpoint>, Error> {
+    let node = u32::from_le_bytes([id[0], id[1], id[2], id[3]]);
+    let requested_gpu = u32::from_le_bytes([id[4], id[5], id[6], id[7]]);
+    let requested_tail = u64::from_le_bytes(id[8..].try_into().map_err(|_| {
+        error(
+            ErrorKind::InvalidData,
+            "native endpoint ID has no identity tail",
+        )
+    })?);
+    let before = match scalar(format_args!("{root}/generation_id")) {
+        Ok(generation) => generation,
+        Err(error) if error.native_error_code() == Some(errno::ENOENT) => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let path = StackPath::new(format_args!("{root}/nodes/{node}"))?;
+    let exists = match fs::metadata(path.path()) {
+        Ok(metadata) if metadata.is_dir() => true,
+        Ok(_) => {
+            return Err(error(
+                ErrorKind::InvalidData,
+                "native node is not a directory",
+            ));
+        }
+        Err(source) if source.kind() == io::ErrorKind::NotFound => false,
+        Err(source) => return Err(native_error("native node lookup", source)),
+    };
+    let identity = if exists {
+        let gpu_id = u32::try_from(scalar(format_args!("{root}/nodes/{node}/gpu_id"))?)
+            .map_err(|_| error(ErrorKind::InvalidData, "GPU ID exceeds u32"))?;
+        if gpu_id == 0 || gpu_id != requested_gpu {
+            None
+        } else {
+            let path = StackPath::new(format_args!("{root}/nodes/{node}/properties"))?;
+            let mut bytes = [0; 16384];
+            let properties = Properties::new(read(path.path(), &mut bytes)?)?;
+            let unique_id = properties
+                .optional("unique_id")?
+                .filter(|value| *value != 0);
+            let domain = properties.u32("domain")?;
+            let location = properties.u32("location_id")?;
+            Some(unique_id.unwrap_or((u64::from(domain) << 32) | u64::from(location)))
+        }
+    } else {
+        None
+    };
+    let after = scalar(format_args!("{root}/generation_id"))?;
+    if before != after {
+        return Err(error(
+            ErrorKind::ConcurrentModification,
+            "native endpoint changed during identity probe",
+        ));
+    }
+    if identity.is_none() {
+        return Ok(None);
+    }
+    if identity != Some(requested_tail) {
+        return Err(error(
+            ErrorKind::DeviceLost,
+            "native endpoint identity changed",
+        ));
+    }
+    open_endpoint(root, drm, driver_instance, id).map(Some)
 }
 
 fn kfd_link(
@@ -403,20 +684,45 @@ fn kfd_link(
     target: u32,
     target_gpu_id: u32,
     info: MemoryLinkInfo,
-) -> MemoryLink {
-    MemoryLink {
-        source: TopologyKey {
-            group: node,
-            member: gpu_id,
-        },
-        target: TopologyKey {
-            group: target,
-            member: target_gpu_id,
+    peer_dma_allowed: bool,
+) -> KfdReportedLink {
+    KfdReportedLink {
+        source: KfdAccessTarget { node, gpu_id },
+        target: KfdAccessTarget {
+            node: target,
+            gpu_id: target_gpu_id,
         },
         source_is_host: gpu_id == 0,
         target_is_host: target_gpu_id == 0,
         info,
+        peer_dma_allowed,
     }
+}
+
+fn read_host_node(root: &str, node: u32) -> Result<DiscoveredNode, Error> {
+    let path = StackPath::new(format_args!("{root}/nodes/{node}/properties"))?;
+    let mut bytes = [0; 16384];
+    let properties = Properties::new(read(path.path(), &mut bytes)?)?;
+    let caches = caches(
+        root,
+        node,
+        properties.optional_u32("caches_count")?.unwrap_or(0),
+    )?
+    .records;
+    let links = memory_links(
+        root,
+        node,
+        0,
+        properties.optional_u32("io_links_count")?.unwrap_or(0),
+        properties.optional_u32("p2p_links_count")?.unwrap_or(0),
+    )?;
+    Ok(DiscoveredNode {
+        node,
+        gpu_id: 0,
+        endpoint: None,
+        caches,
+        links,
+    })
 }
 
 fn node_memory_links(
@@ -425,8 +731,7 @@ fn node_memory_links(
     gpu_id: u32,
     io_link_count: u32,
     p2p_link_count: u32,
-    target_filter: Option<u32>,
-) -> Result<Vec<MemoryLink>, Error> {
+) -> Result<Vec<KfdReportedLink>, Error> {
     const OVERRIDE: u32 = 1;
     const NON_COHERENT: u32 = 1 << 1;
     const NO_ATOMICS_32: u32 = 1 << 2;
@@ -436,7 +741,7 @@ fn node_memory_links(
         .ok()
         .and_then(|count| count.checked_add(p2p_link_count as usize))
         .ok_or_else(|| error(ErrorKind::ResourceExhausted, "native link count overflow"))?;
-    let mut links: Vec<MemoryLink> = crate::memory::storage::try_vec_with_capacity(capacity)?;
+    let mut links: Vec<KfdReportedLink> = crate::memory::storage::try_vec_with_capacity(capacity)?;
     for (directory, expected) in [("io_links", io_link_count), ("p2p_links", p2p_link_count)] {
         if expected == 0 {
             continue;
@@ -462,9 +767,6 @@ fn node_memory_links(
                     "native link source does not match its node",
                 ));
             }
-            if target_filter.is_some_and(|target| target != to) {
-                return Ok(());
-            }
             let target_gpu_id = u32::try_from(scalar(format_args!("{root}/nodes/{to}/gpu_id"))?)
                 .map_err(|_| error(ErrorKind::InvalidData, "peer GPU ID exceeds u32"))?;
             let (kind, default_capabilities) = match kind {
@@ -475,10 +777,8 @@ fn node_memory_links(
                 11 => (MemoryLinkType::Xgmi, true),
                 _ => (MemoryLinkType::Unknown, false),
             };
-            if flags & OVERRIDE != 0 && flags & NO_PEER_TO_PEER_DMA != 0 {
-                return Ok(());
-            }
             let overridden = flags & OVERRIDE != 0;
+            let peer_dma_allowed = !overridden || flags & NO_PEER_TO_PEER_DMA == 0;
             let info = MemoryLinkInfo {
                 minimum_latency: properties.optional_u32("min_latency")?.unwrap_or(0),
                 maximum_latency: properties.optional_u32("max_latency")?.unwrap_or(0),
@@ -502,7 +802,7 @@ fn node_memory_links(
                 kind,
                 numa_distance: properties.optional_u32("weight")?.unwrap_or(0),
             };
-            let link = kfd_link(node, gpu_id, to, target_gpu_id, info);
+            let link = kfd_link(node, gpu_id, to, target_gpu_id, info, peer_dma_allowed);
             if let Some(existing) = links
                 .iter_mut()
                 .find(|existing| existing.source == link.source && existing.target == link.target)
@@ -529,44 +829,8 @@ fn memory_links(
     gpu_id: u32,
     io_link_count: u32,
     p2p_link_count: u32,
-) -> Result<Option<Shared<Vec<MemoryLink>>>, Error> {
-    let mut links = node_memory_links(root, node, gpu_id, io_link_count, p2p_link_count, None)?;
-    let outgoing_count = links.len();
-    let mut host_nodes = crate::memory::storage::try_vec_with_capacity(outgoing_count)?;
-    for link in links.iter().take(outgoing_count) {
-        if link.target_is_host && !host_nodes.contains(&link.target.group) {
-            host_nodes.try_push(link.target.group)?;
-        }
-    }
-    for host_node in host_nodes {
-        let path = StackPath::new(format_args!("{root}/nodes/{host_node}/properties"))?;
-        let mut bytes = [0; 16384];
-        let properties = Properties::new(read(path.path(), &mut bytes)?)?;
-        let incoming = node_memory_links(
-            root,
-            host_node,
-            0,
-            properties.optional_u32("io_links_count")?.unwrap_or(0),
-            properties.optional_u32("p2p_links_count")?.unwrap_or(0),
-            Some(node),
-        )?;
-        for link in incoming {
-            if link.target.member != gpu_id {
-                return Err(error(
-                    ErrorKind::InvalidData,
-                    "native reverse link target does not match its GPU",
-                ));
-            }
-            if let Some(existing) = links
-                .iter_mut()
-                .find(|existing| existing.source == link.source && existing.target == link.target)
-            {
-                *existing = link;
-            } else {
-                links.try_push(link)?;
-            }
-        }
-    }
+) -> Result<Option<Shared<Vec<KfdReportedLink>>>, Error> {
+    let links = node_memory_links(root, node, gpu_id, io_link_count, p2p_link_count)?;
     if links.is_empty() {
         Ok(None)
     } else {
@@ -578,7 +842,12 @@ fn memory_links(
     clippy::too_many_lines,
     reason = "all immutable native facts share one identity and generation bracket"
 )]
-fn read_node(root: &str, drm: &str, node: u32) -> Result<Option<Endpoint>, Error> {
+fn read_node(
+    root: &str,
+    drm: &str,
+    driver_instance: DriverInstanceId,
+    node: u32,
+) -> Result<Option<DiscoveredEndpoint>, Error> {
     let gpu_id = u32::try_from(scalar(format_args!("{root}/nodes/{node}/gpu_id"))?)
         .map_err(|_| error(ErrorKind::InvalidData, "GPU ID exceeds u32"))?;
     if gpu_id == 0 {
@@ -642,8 +911,31 @@ fn read_node(root: &str, drm: &str, node: u32) -> Result<Option<Endpoint>, Error
     let gws_count = p.optional_u32("num_gws")?.unwrap_or(0);
     let io_link_count = p.optional_u32("io_links_count")?.unwrap_or(0);
     let p2p_link_count = p.optional_u32("p2p_links_count")?.unwrap_or(0);
-    let caches = caches(root, node, p.optional_u32("caches_count")?.unwrap_or(0))?;
+    let DiscoveredCaches {
+        records: caches,
+        persisting_l2_cache_size_max,
+    } = caches(root, node, p.optional_u32("caches_count")?.unwrap_or(0))?;
     let memory_links = memory_links(root, node, gpu_id, io_link_count, p2p_link_count)?;
+    let mut access_targets = Vec::new();
+    if let Some(links) = &memory_links {
+        for link in links.iter() {
+            if link.source.node == node
+                && link.source.gpu_id == gpu_id
+                && !link.source_is_host
+                && !link.target_is_host
+                && link.peer_dma_allowed
+                && link.info.hop_count() != 0
+                && !access_targets.contains(&link.target)
+            {
+                access_targets.try_push(link.target)?;
+            }
+        }
+    }
+    let local_access_targets = if access_targets.is_empty() {
+        None
+    } else {
+        Some(Shared::new(access_targets)?)
+    };
     let identity_tail = unique_id.unwrap_or((u64::from(domain) << 32) | u64::from(location));
     let mut id = [0; 16];
     id[..4].copy_from_slice(&node.to_le_bytes());
@@ -673,10 +965,10 @@ fn read_node(root: &str, drm: &str, node: u32) -> Result<Option<Endpoint>, Error
     }
     let sdma_ip = sdma_version(drm, render)?;
     // This transport publishes monotonic 64-bit byte indices and 64-bit
-    // doorbells across the already supported GFX10.1–GFX12.0 native targets.
+    // doorbells across the supported GFX10.1–GFX12 native targets.
     // Commands remain target-specific and caller-owned; a discovered SDMA IP
     // does not change any frontend's advertised transport revision.
-    let sdma_qualified = (100_100..=120_001).contains(&gfx)
+    let sdma_qualified = ((100_100..=120_001).contains(&gfx) || gfx == 120_500)
         && sdma.unwrap_or(0) != 0
         && sdma_queues.unwrap_or(0) != 0;
 
@@ -756,18 +1048,22 @@ fn read_node(root: &str, drm: &str, node: u32) -> Result<Option<Endpoint>, Error
     }
     let supports_aql = super::queue::supports_aql(&native);
     let supports_pm4 = super::queue::supports_pm4(&native);
-    Ok(Some(Endpoint {
+    let endpoint = Endpoint {
         id,
         name,
+        product_name: None,
         pci: Some(pci),
         kind: EndpointKind::Gpu {
             info: GpuInfo {
+                native_gpu_id: gpu_id,
                 gfx_major: gfx / 10000,
                 gfx_minor: (gfx / 100) % 100,
                 gfx_stepping: gfx % 100,
                 unique_id,
                 hive_id,
                 asic_family_id: family_id,
+                drm_asic_family_id: None,
+                counter_frequency_hz: None,
                 asic_revision: (capability & 0x03c0_0000) >> 22,
                 maximum_engine_clock_mhz,
                 memory_bus_width_bits,
@@ -789,36 +1085,31 @@ fn read_node(root: &str, drm: &str, node: u32) -> Result<Option<Endpoint>, Error
                 packet_processor_firmware_version: p.optional_u32("fw_version")?.unwrap_or(0)
                     & 0x3ff,
                 sdma_firmware_version: p.optional_u32("sdma_fw_version")?.unwrap_or(0) & 0x3ff,
-                persisting_l2_cache_size_max: p
-                    .optional_u32("persisting_cache_size_max")?
-                    .unwrap_or(0),
+                persisting_l2_cache_size_max,
+                fabric_handles_supported: StackPath::new(format_args!(
+                    "{drm}/renderD{render}/device/ualink"
+                ))
+                .is_ok_and(|path| File::open(path.path()).is_ok()),
                 queues: GpuQueueCapabilities {
                     aql: supports_aql,
-                    // System-scope AQL packet fences and a kernel-issued system
-                    // release are execution-qualified only on the initial
-                    // GFX1201/x86-64 target.
+                    // GFX12 shares the AQL system-scope cache protocol.
                     aql_system_cache_control: cfg!(target_arch = "x86_64")
                         && supports_aql
-                        && gfx == 120_001,
+                        && matches!(gfx, 120_000 | 120_001 | 120_500),
                     pm4: supports_pm4,
                     kernel_pm4: supports_pm4,
-                    // The initial PM4 profile uses the GFX12 ACQUIRE_MEM GCR
-                    // encoding and is execution-qualified on the same exact target
-                    // as construction.
+                    // PM4 uses the GFX12 ACQUIRE_MEM GCR encoding.
                     pm4_system_cache_control: supports_pm4,
                     sdma: sdma_qualified,
                     kernel_sdma: cfg!(target_arch = "x86_64")
                         && sdma_qualified
-                        && gfx == 120_001
-                        && sdma_ip == Some((7, 0, 1)),
-                    // The first execution-qualified path follows ROCr's GFX12
-                    // USER_GCR protocol on SDMA 7.0.1. Keep this narrower than
-                    // queue construction: neither a nearby GFX version nor missing
-                    // IP data proves that protocol.
+                        && ((matches!(gfx, 120_000 | 120_001) && sdma_ip == Some((7, 0, 1)))
+                            || (gfx == 120_500 && sdma_ip == Some((7, 1, 0)))),
+                    // USER_GCR requires the matching target-specific SDMA packet format.
                     sdma_system_cache_control: cfg!(target_arch = "x86_64")
                         && sdma_qualified
-                        && gfx == 120_001
-                        && sdma_ip == Some((7, 0, 1)),
+                        && ((matches!(gfx, 120_000 | 120_001) && sdma_ip == Some((7, 0, 1)))
+                            || (gfx == 120_500 && sdma_ip == Some((7, 1, 0)))),
                     sdma_engine_count: if sdma_qualified { sdma.unwrap_or(0) } else { 0 },
                 },
             },
@@ -827,22 +1118,47 @@ fn read_node(root: &str, drm: &str, node: u32) -> Result<Option<Endpoint>, Error
         host_visible_local_memory_bytes: public,
         host_local_cacheability: (cfg!(target_arch = "x86_64")
             && public != 0
-            && (100_100..=120_001).contains(&gfx))
-        .then_some(HostCacheability::WriteCombined),
+            && ((100_100..=120_001).contains(&gfx) || gfx == 120_500))
+            .then_some(HostCacheability::WriteCombined),
         allocation_granularity: 4096,
         address_bit_count: bits,
         minimum_address: 65536,
         maximum_address: (1u64 << bits) - 1,
         supported_permissions: DeviceAccess::READ | DeviceAccess::WRITE | DeviceAccess::EXECUTE,
-        caches,
-        memory_links,
-        topology_key: TopologyKey {
-            group: node,
-            member: gpu_id,
+        driver_instance,
+        selector: crate::driver::EndpointSelector::LinuxKfd {
+            native,
+            access_targets: local_access_targets,
         },
-        driver_instance: 0,
-        selector: crate::driver::EndpointSelector::LinuxKfd(native),
+    };
+    Ok(Some(DiscoveredEndpoint {
+        endpoint,
+        caches,
+        links: memory_links,
     }))
+}
+
+/// KFD-qualified passive access evidence. A native mapping still decides
+/// whether a particular allocation can actually be made accessible.
+pub(super) fn can_access_local_memory(consumer: &Endpoint, owner: &Endpoint) -> bool {
+    let (
+        crate::driver::EndpointSelector::LinuxKfd {
+            native: from,
+            access_targets,
+        },
+        crate::driver::EndpointSelector::LinuxKfd { native: to, .. },
+    ) = (&consumer.selector, &owner.selector)
+    else {
+        return false;
+    };
+    consumer.driver_instance == owner.driver_instance
+        && ((from.node == to.node && from.gpu_id == to.gpu_id)
+            || access_targets.as_ref().is_some_and(|targets| {
+                targets.contains(&KfdAccessTarget {
+                    node: to.node,
+                    gpu_id: to.gpu_id,
+                })
+            }))
 }
 
 fn sdma_version(drm: &str, render: u32) -> Result<Option<(u32, u32, u32)>, Error> {
@@ -919,6 +1235,29 @@ pub(super) fn open_render(minor: u32) -> io::Result<File> {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU32, Ordering};
+
+    fn enumerate(
+        root: &str,
+        drm: &str,
+        visitor: &mut dyn FnMut(Endpoint) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        super::enumerate(root, drm, DriverInstanceId::TEST, visitor)
+    }
+
+    fn open_endpoint(root: &str, drm: &str, id: [u8; 16]) -> Result<Endpoint, Error> {
+        super::open_endpoint(root, drm, DriverInstanceId::TEST, id)
+    }
+
+    fn probe_endpoint(root: &str, drm: &str, id: [u8; 16]) -> Result<Option<Endpoint>, Error> {
+        super::probe_endpoint(root, drm, DriverInstanceId::TEST, id)
+    }
+
+    fn topology(root: &str, drm: &str) -> TopologySnapshot {
+        let mut snapshot = TopologySnapshot::new(crate::topology::host::snapshot()).unwrap();
+        super::contribute_topology(root, drm, DriverInstanceId::TEST, &mut snapshot).unwrap();
+        snapshot
+    }
+
     static NEXT: AtomicU32 = AtomicU32::new(0);
     struct Fixture(std::path::PathBuf);
     impl Fixture {
@@ -978,26 +1317,6 @@ mod tests {
     }
 
     #[test]
-    fn persisting_l2_limit_comes_from_the_gpu_node() {
-        let fixture = Fixture::new();
-        let properties = fixture.0.join("topology/nodes/1/properties");
-        let mut contents = std::fs::read_to_string(&properties).unwrap();
-        contents.push_str("persisting_cache_size_max 1048576\n");
-        std::fs::write(&properties, contents).unwrap();
-        let (root, drm) = fixture.roots();
-        let endpoint = open_endpoint(
-            &root,
-            &drm,
-            [1, 0, 0, 0, 42, 0, 0, 0, 123, 0, 0, 0, 0, 0, 0, 0],
-        )
-        .unwrap();
-        assert_eq!(
-            endpoint.gpu().unwrap().persisting_l2_cache_size_max,
-            1_048_576
-        );
-    }
-
-    #[test]
     fn memory_bus_facts_come_from_nonempty_vram_banks() {
         let fixture = Fixture::new();
         let properties = fixture.0.join("topology/nodes/1/properties");
@@ -1045,7 +1364,8 @@ mod tests {
         })
         .unwrap();
         let endpoint = found.unwrap();
-        let linux = endpoint.linux_kfd_drm_info().unwrap();
+        assert_eq!(endpoint.driver_instance, DriverInstanceId::TEST);
+        let linux = crate::topology::platform::linux::kfd_drm_info(&endpoint).unwrap();
         assert_eq!(linux.node_id, 1);
         assert_eq!(linux.gpu_id, 42);
         let gpu = endpoint.gpu().unwrap();
@@ -1098,7 +1418,52 @@ mod tests {
     }
 
     #[test]
-    fn topology_link_access_follows_rocr_types_flags_and_distance() {
+    fn probe_distinguishes_unknown_ids_from_incomplete_known_nodes() {
+        const ID: [u8; 16] = [1, 0, 0, 0, 42, 0, 0, 0, 123, 0, 0, 0, 0, 0, 0, 0];
+        let fixture = Fixture::new();
+        let (root, drm) = fixture.roots();
+        let mut unknown = ID;
+        unknown[0] = 2;
+        assert!(probe_endpoint(&root, &drm, unknown).unwrap().is_none());
+        let mut stale = ID;
+        stale[8] += 1;
+        assert_eq!(
+            probe_endpoint(&root, &drm, stale).unwrap_err().kind(),
+            ErrorKind::DeviceLost
+        );
+        assert_eq!(probe_endpoint(&root, &drm, ID).unwrap().unwrap().id, ID);
+
+        let properties = fixture.0.join("topology/nodes/1/properties");
+        let contents = std::fs::read_to_string(&properties).unwrap();
+        std::fs::write(
+            &properties,
+            contents.replace("caches_count 0", "caches_count 1"),
+        )
+        .unwrap();
+        assert!(probe_endpoint(&root, &drm, ID).is_err());
+
+        std::fs::write(
+            &properties,
+            contents.replace("io_links_count 0", "io_links_count 1"),
+        )
+        .unwrap();
+        let link = fixture.0.join("topology/nodes/1/io_links/0");
+        std::fs::create_dir_all(&link).unwrap();
+        std::fs::write(
+            link.join("properties"),
+            "type 2\nnode_from 1\nnode_to 2\nflags 1\n",
+        )
+        .unwrap();
+        assert_eq!(
+            probe_endpoint(&root, &drm, ID)
+                .unwrap_err()
+                .native_error_code(),
+            Some(errno::ENOENT)
+        );
+    }
+
+    #[test]
+    fn topology_link_access_follows_rocr_types_flags_and_distance() -> Result<(), Error> {
         let fixture = Fixture::new();
         let properties = fixture.0.join("topology/nodes/1/properties");
         let contents = std::fs::read_to_string(&properties).unwrap();
@@ -1142,42 +1507,44 @@ mod tests {
         )
         .unwrap();
         let mut owner = endpoint.clone();
-        assert!(endpoint.can_access_local_memory(&owner));
-        owner.driver_instance = 1;
-        assert!(!endpoint.can_access_local_memory(&owner));
+        assert!(super::can_access_local_memory(&endpoint, &owner));
+        owner.driver_instance = crate::driver::new_driver_instance();
+        assert!(!super::can_access_local_memory(&endpoint, &owner));
         owner.driver_instance = endpoint.driver_instance;
-        owner.topology_key.member += 1;
-        assert!(!endpoint.can_access_local_memory(&owner));
-        owner.topology_key = TopologyKey {
-            group: 2,
-            member: 53,
+        let crate::driver::EndpointSelector::LinuxKfd {
+            mut native,
+            access_targets,
+        } = owner.selector.clone()
+        else {
+            return Err(error(ErrorKind::InvalidData, "test endpoint is not KFD"));
         };
-        assert!(endpoint.can_access_local_memory(&owner));
-        owner.topology_key = TopologyKey {
-            group: 3,
-            member: 64,
+        native.gpu_id += 1;
+        owner.selector = crate::driver::EndpointSelector::LinuxKfd {
+            native,
+            access_targets: access_targets.clone(),
         };
-        assert!(endpoint.can_access_local_memory(&owner));
-        owner.topology_key = TopologyKey {
-            group: 4,
-            member: 75,
-        };
-        assert!(!endpoint.can_access_local_memory(&owner));
-        owner.topology_key = TopologyKey {
-            group: 5,
-            member: 86,
-        };
-        assert!(endpoint.can_access_local_memory(&owner));
-        owner.topology_key = TopologyKey {
-            group: 6,
-            member: 97,
-        };
-        assert!(endpoint.can_access_local_memory(&owner));
+        assert!(!super::can_access_local_memory(&endpoint, &owner));
+        for (node, gpu_id, expected) in [
+            (2, 53, true),
+            (3, 64, true),
+            (4, 75, false),
+            (5, 86, true),
+            (6, 97, true),
+        ] {
+            native.node = node;
+            native.gpu_id = gpu_id;
+            owner.selector = crate::driver::EndpointSelector::LinuxKfd {
+                native,
+                access_targets: access_targets.clone(),
+            };
+            assert_eq!(super::can_access_local_memory(&endpoint, &owner), expected);
+        }
+        Ok(())
     }
 
     #[test]
     fn endpoint_from_one_driver_cannot_activate_in_another_session() {
-        use crate::driver::Driver;
+        use crate::driver::{Driver, DriverInstance};
 
         let fixture = Fixture::new();
         let (root, drm) = fixture.roots();
@@ -1191,7 +1558,13 @@ mod tests {
             crate::session::Session::new(crate::session::DriverContextLifetime::Process).unwrap();
         let second =
             crate::session::Session::new(crate::session::DriverContextLifetime::Process).unwrap();
-        endpoint.driver_instance = first.linux_kfd().unwrap().driver_instance();
+        endpoint.driver_instance = first
+            .installed_drivers()
+            .unwrap()
+            .iter()
+            .find_map(DriverInstance::linux_kfd)
+            .unwrap()
+            .driver_instance();
         assert_eq!(
             second.activate(&endpoint).err().unwrap().kind(),
             ErrorKind::InvalidArgument
@@ -1236,35 +1609,145 @@ mod tests {
         .unwrap();
 
         let (root, drm) = fixture.roots();
-        let endpoint = open_endpoint(
-            &root,
-            &drm,
-            [1, 0, 0, 0, 42, 0, 0, 0, 123, 0, 0, 0, 0, 0, 0, 0],
-        )
-        .unwrap();
-        let to_host = endpoint.memory_link_to_host().unwrap();
-        assert_eq!(to_host.kind(), MemoryLinkType::Pcie);
-        assert_eq!(to_host.minimum_latency(), 1);
-        assert_eq!(to_host.maximum_latency(), 2);
-        assert_eq!(to_host.minimum_bandwidth(), 3);
-        assert_eq!(to_host.maximum_bandwidth(), 64_000);
-        assert!(to_host.supports_32bit_atomics());
-        assert!(to_host.supports_64bit_atomics());
-        assert!(to_host.is_coherent());
-        assert_eq!(to_host.numa_distance(), 20);
+        let snapshot = topology(&root, &drm);
+        let endpoint = &snapshot.endpoints[0];
+        assert_eq!(snapshot.sources.last().unwrap().generation, Some(1));
+        assert!(snapshot.nodes.iter().any(|node| {
+            node.native_id == NativeNodeId::LinuxKfd(0) && node.kind == NodeKind::KfdHost
+        }));
+        let to_host = snapshot.route_to_host(endpoint).unwrap();
+        assert_eq!(to_host.kind, MemoryLinkType::Pcie);
+        assert_eq!(to_host.minimum_latency, 1);
+        assert_eq!(to_host.maximum_latency, 2);
+        assert_eq!(to_host.minimum_bandwidth, 3);
+        assert_eq!(to_host.maximum_bandwidth, 64_000);
+        assert!(to_host.atomic_support_32bit);
+        assert!(to_host.atomic_support_64bit);
+        assert!(to_host.coherent_support);
+        assert_eq!(to_host.numa_distance, 20);
         assert_eq!(to_host.hop_count(), 1);
 
-        let from_host = endpoint.memory_link_from_host().unwrap();
-        assert_eq!(from_host.kind(), MemoryLinkType::Pcie);
-        assert_eq!(from_host.minimum_latency(), 4);
-        assert_eq!(from_host.maximum_latency(), 5);
-        assert_eq!(from_host.minimum_bandwidth(), 6);
-        assert_eq!(from_host.maximum_bandwidth(), 63_000);
-        assert!(from_host.supports_32bit_atomics());
-        assert!(from_host.supports_64bit_atomics());
-        assert!(!from_host.is_coherent());
-        assert_eq!(from_host.numa_distance(), 21);
+        let from_host = snapshot.route_from_host(endpoint).unwrap();
+        assert_eq!(from_host.kind, MemoryLinkType::Pcie);
+        assert_eq!(from_host.minimum_latency, 4);
+        assert_eq!(from_host.maximum_latency, 5);
+        assert_eq!(from_host.minimum_bandwidth, 6);
+        assert_eq!(from_host.maximum_bandwidth, 63_000);
+        assert!(from_host.atomic_support_32bit);
+        assert!(from_host.atomic_support_64bit);
+        assert!(!from_host.coherent_support);
+        assert_eq!(from_host.numa_distance, 21);
         assert_eq!(from_host.hop_count(), 1);
+    }
+
+    #[test]
+    fn host_facts_include_caches_and_one_way_native_routes() {
+        let fixture = Fixture::new();
+        for node in [0, 2] {
+            let path = fixture.0.join(format!("topology/nodes/{node}"));
+            std::fs::create_dir_all(&path).unwrap();
+            std::fs::write(path.join("gpu_id"), "0\n").unwrap();
+            std::fs::write(
+                path.join("properties"),
+                if node == 0 {
+                    "caches_count 1\nio_links_count 2\np2p_links_count 0\n"
+                } else {
+                    "caches_count 0\nio_links_count 0\np2p_links_count 0\n"
+                },
+            )
+            .unwrap();
+        }
+        let cache = fixture.0.join("topology/nodes/0/caches/0");
+        std::fs::create_dir_all(&cache).unwrap();
+        std::fs::write(
+            cache.join("properties"),
+            concat!(
+                "processor_id_low 0\nlevel 3\nsize 512\ncache_line_size 64\n",
+                "cache_lines_per_tag 1\nassociation 16\nlatency 1\n",
+                "type 3\nsibling_map 1,0,0,0\n"
+            ),
+        )
+        .unwrap();
+        for (ordinal, target) in [(0, 1), (1, 2)] {
+            let link = fixture
+                .0
+                .join(format!("topology/nodes/0/io_links/{ordinal}"));
+            std::fs::create_dir_all(&link).unwrap();
+            std::fs::write(
+                link.join("properties"),
+                format!("type 2\nnode_from 0\nnode_to {target}\nweight 20\nflags 1\n"),
+            )
+            .unwrap();
+        }
+        let (root, drm) = fixture.roots();
+        let snapshot = topology(&root, &drm);
+        let host = snapshot
+            .nodes
+            .iter()
+            .find(|node| node.native_id == NativeNodeId::LinuxKfd(0))
+            .unwrap();
+        let peer_host = snapshot
+            .nodes
+            .iter()
+            .find(|node| node.native_id == NativeNodeId::LinuxKfd(2))
+            .unwrap();
+        assert!(snapshot.caches.iter().any(|cache| {
+            cache.node == host.id && cache.info.level == 3 && cache.info.size_bytes == 512 * 1024
+        }));
+        assert!(
+            snapshot
+                .routes
+                .iter()
+                .any(|route| route.source == host.id && route.target == peer_host.id)
+        );
+        assert!(snapshot.route_from_host(&snapshot.endpoints[0]).is_some());
+        assert!(snapshot.route_to_host(&snapshot.endpoints[0]).is_none());
+        assert_eq!(snapshot.sources.last().unwrap().generation, Some(1));
+    }
+
+    #[test]
+    fn restricted_peer_route_is_reported_without_granting_local_access() {
+        let fixture = Fixture::new();
+        let first_properties = fixture.0.join("topology/nodes/1/properties");
+        let properties = std::fs::read_to_string(&first_properties).unwrap();
+        std::fs::write(
+            &first_properties,
+            properties.replace("p2p_links_count 0", "p2p_links_count 1"),
+        )
+        .unwrap();
+        let second = fixture.0.join("topology/nodes/2");
+        std::fs::create_dir_all(&second).unwrap();
+        std::fs::write(second.join("gpu_id"), "43\n").unwrap();
+        std::fs::write(second.join("name"), "second GPU\n").unwrap();
+        std::fs::write(
+            second.join("properties"),
+            properties.replace("unique_id 123", "unique_id 124"),
+        )
+        .unwrap();
+        let link = fixture.0.join("topology/nodes/1/p2p_links/0");
+        std::fs::create_dir_all(&link).unwrap();
+        std::fs::write(
+            link.join("properties"),
+            "type 2\nnode_from 1\nnode_to 2\nweight 20\nflags 17\n",
+        )
+        .unwrap();
+        let (root, drm) = fixture.roots();
+        let snapshot = topology(&root, &drm);
+        let first = snapshot
+            .endpoints
+            .iter()
+            .find(|endpoint| endpoint.id[0] == 1)
+            .unwrap();
+        let second = snapshot
+            .endpoints
+            .iter()
+            .find(|endpoint| endpoint.id[0] == 2)
+            .unwrap();
+        assert_eq!(
+            snapshot.route_between(first, second).unwrap().kind,
+            MemoryLinkType::Pcie
+        );
+        assert!(!super::can_access_local_memory(first, second));
     }
 
     #[test]
@@ -1294,30 +1777,28 @@ mod tests {
             .unwrap();
         }
         let (root, drm) = fixture.roots();
-        let endpoint = open_endpoint(
-            &root,
-            &drm,
-            [1, 0, 0, 0, 42, 0, 0, 0, 123, 0, 0, 0, 0, 0, 0, 0],
-        )
-        .unwrap();
-        assert_eq!(endpoint.caches().len(), 4);
-        assert_eq!(endpoint.caches()[0].level(), 1);
-        assert_eq!(endpoint.caches()[0].size_bytes(), 32_768);
-        assert!(crate::device::gpu::is_compute_data_cache(
-            &endpoint.caches()[0]
-        ));
-        assert!(!crate::device::gpu::is_compute_data_cache(
-            &endpoint.caches()[1]
-        ));
-        assert!(!crate::device::gpu::is_compute_data_cache(
-            &endpoint.caches()[2]
-        ));
-        assert!(crate::device::gpu::is_compute_data_cache(
-            &endpoint.caches()[3]
-        ));
-        assert_eq!(endpoint.caches()[3].level(), 2);
-        assert_eq!(endpoint.caches()[3].size_bytes(), 262_144);
-        assert_eq!(endpoint.caches()[3].line_size_bytes(), 64);
+        let snapshot = topology(&root, &drm);
+        let endpoint = &snapshot.endpoints[0];
+        assert!(snapshot.memory_locations.iter().any(|location| {
+            location.kind == MemoryLocationKind::DeviceLocal
+                && location.capacity_bytes == Some(endpoint.local_memory_bytes)
+                && location.host_visible_bytes == Some(endpoint.host_visible_local_memory_bytes)
+        }));
+        let caches = snapshot
+            .caches_for_endpoint(endpoint)
+            .copied()
+            .collect::<Vec<_>>();
+        assert_eq!(caches.len(), 4);
+        assert_eq!(caches[0].level, 1);
+        assert_eq!(caches[0].size_bytes, 32_768);
+        assert!(crate::device::gpu::is_compute_data_cache(&caches[0]));
+        assert!(!crate::device::gpu::is_compute_data_cache(&caches[1]));
+        assert!(!crate::device::gpu::is_compute_data_cache(&caches[2]));
+        assert!(crate::device::gpu::is_compute_data_cache(&caches[3]));
+        assert_eq!(caches[3].level, 2);
+        assert_eq!(caches[3].size_bytes, 262_144);
+        assert_eq!(caches[3].line_size_bytes, Some(64));
+        assert_eq!(endpoint.gpu().unwrap().persisting_l2_cache_size_max, 0);
     }
 
     #[test]
@@ -1391,7 +1872,7 @@ mod tests {
 
     #[test]
     fn compute_cache_control_requires_the_qualified_target() {
-        for gfx in [120_001, 120_000] {
+        for gfx in [120_000, 120_001, 120_500, 110_000] {
             let fixture = Fixture::new();
             let path = fixture.0.join("topology/nodes/1/properties");
             let properties = std::fs::read_to_string(&path).unwrap();
@@ -1412,16 +1893,17 @@ mod tests {
             .unwrap();
             let endpoint = found.unwrap();
             let queues = endpoint.gpu().unwrap().queues;
+            let supported = matches!(gfx, 120_000 | 120_001 | 120_500);
             assert!(queues.aql);
             assert_eq!(
                 queues.aql_system_cache_control,
-                cfg!(target_arch = "x86_64") && gfx == 120_001
+                cfg!(target_arch = "x86_64") && supported
             );
             assert_eq!(
                 queues.pm4_system_cache_control,
-                cfg!(target_arch = "x86_64") && gfx == 120_001
+                cfg!(target_arch = "x86_64") && supported
             );
-            assert_eq!(queues.pm4, cfg!(target_arch = "x86_64") && gfx == 120_001);
+            assert_eq!(queues.pm4, cfg!(target_arch = "x86_64") && supported);
         }
     }
 
@@ -1439,13 +1921,24 @@ mod tests {
                 Some(HostCacheability::WriteCombined),
             ),
             (
+                120_000,
+                0x7550,
+                268_435_456,
+                Some(HostCacheability::WriteCombined),
+            ),
+            (
                 120_001,
                 0x7550,
                 268_435_456,
                 Some(HostCacheability::WriteCombined),
             ),
             (120_001, 0x7550, 0, None),
-            (120_500, 0x7550, 268_435_456, None),
+            (
+                120_500,
+                0x7550,
+                268_435_456,
+                Some(HostCacheability::WriteCombined),
+            ),
         ] {
             let fixture = Fixture::new();
             let path = fixture.0.join("topology/nodes/1/properties");
@@ -1500,8 +1993,11 @@ mod tests {
             Ok(())
         })
         .unwrap();
-        assert_eq!(callbacks.allocations.load(Ordering::Relaxed), 1);
-        assert_eq!(callbacks.frees.load(Ordering::Relaxed), 1);
+        assert!(callbacks.allocations.load(Ordering::Relaxed) >= 1);
+        assert_eq!(
+            callbacks.allocations.load(Ordering::Relaxed),
+            callbacks.frees.load(Ordering::Relaxed)
+        );
         let session =
             crate::session::Session::new(crate::session::DriverContextLifetime::Session).unwrap();
         assert_eq!(
@@ -1586,5 +2082,37 @@ mod tests {
             ErrorKind::InvalidData
         );
         assert!(!visited);
+    }
+
+    #[test]
+    fn persisting_l2_limit_comes_from_the_gpu_node() {
+        let fixture = Fixture::new();
+        let properties = fixture.0.join("topology/nodes/1/properties");
+        let mut contents = std::fs::read_to_string(&properties).unwrap();
+        contents = contents.replace("caches_count 0", "caches_count 3");
+        contents.push_str("persisting_cache_size_max 2097152\n");
+        std::fs::write(&properties, contents).unwrap();
+        for (ordinal, level, max) in [(0, 1, 4_194_304), (1, 2, 0), (2, 2, 1_048_576)] {
+            let directory = fixture.0.join(format!("topology/nodes/1/caches/{ordinal}"));
+            std::fs::create_dir_all(&directory).unwrap();
+            std::fs::write(
+                directory.join("properties"),
+                format!(
+                    "processor_id_low 0\nlevel {level}\nsize 256\ncache_line_size 64\ncache_lines_per_tag 1\nassociation 16\nlatency 1\ntype 8\npersisting_cache_size_max {max}\nsibling_map 1,0,0,0\n"
+                ),
+            )
+            .unwrap();
+        }
+        let (root, drm) = fixture.roots();
+        let endpoint = open_endpoint(
+            &root,
+            &drm,
+            [1, 0, 0, 0, 42, 0, 0, 0, 123, 0, 0, 0, 0, 0, 0, 0],
+        )
+        .unwrap();
+        assert_eq!(
+            endpoint.gpu().unwrap().persisting_l2_cache_size_max,
+            1_048_576
+        );
     }
 }

@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 #include "aql_queue.h"
+#include "config_test_util.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/kmd/linux/cwsr.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
@@ -18,6 +20,7 @@
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/virtual_machine.h"
 #include "scoped_temp.h"
+#include "util/diagnostic.h"
 
 #include "embedded_schema.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
@@ -28,11 +31,9 @@
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
 #include "hsa/amd_hsa_queue.h"
 #include "hsa/hsa.h"
 RJ_DIAGNOSTIC_POP
-#include <hsa/amd_hsa_queue.h>
 
 #include <gtest/gtest.h>
 
@@ -267,7 +268,14 @@ int daemon_debug_enable(rocjitsu::SimulatedKfd &daemon, uint32_t debugger,
 }
 
 uint32_t query_gb_addr_config(const std::string &config_path, uint32_t gpu_id) {
-  auto loaded = rocjitsu::config::load_config(config_path.c_str(), rocjitsu::kEmbeddedSchema);
+  util::StringDiagnostic loaded_diagnostic;
+  auto loaded_result = rocjitsu::config::load_config(config_path.c_str(), rocjitsu::kEmbeddedSchema,
+                                                     loaded_diagnostic.emitter());
+  if (loaded_result.failed()) {
+    ADD_FAILURE() << loaded_diagnostic.message();
+    return 0;
+  }
+  auto loaded = std::move(loaded_result).value();
   auto root = loaded.take_root();
   auto *soc = dynamic_cast<rocjitsu::SoC *>(root.get());
   if (!soc)
@@ -305,7 +313,14 @@ uint32_t query_gb_addr_config(const std::string &config_path, uint32_t gpu_id) {
 }
 
 std::unique_ptr<rocjitsu::SoC> load_standalone_soc(const std::string &config_path) {
-  auto loaded = rocjitsu::config::load_config(config_path.c_str(), rocjitsu::kEmbeddedSchema);
+  util::StringDiagnostic loaded_diagnostic;
+  auto loaded_result = rocjitsu::config::load_config(config_path.c_str(), rocjitsu::kEmbeddedSchema,
+                                                     loaded_diagnostic.emitter());
+  if (loaded_result.failed()) {
+    ADD_FAILURE() << loaded_diagnostic.message();
+    return nullptr;
+  }
+  auto loaded = std::move(loaded_result).value();
   auto root = loaded.take_root();
   auto *soc = dynamic_cast<rocjitsu::SoC *>(root.get());
   if (!soc)
@@ -322,7 +337,7 @@ protected:
   // has to stay void-returning and be called directly from SetUp().
   void SetUpWithConfig(const std::string &config_path) {
     setenv("RJ_CONFIG", config_path.c_str(), 1);
-    loaded_ = rocjitsu::config::load_config(config_path.c_str(), rocjitsu::kEmbeddedSchema);
+    ASSERT_TRUE(rocjitsu::test::load_valid_config(config_path.c_str(), loaded_));
     auto root = loaded_.take_root();
     auto *soc = dynamic_cast<rocjitsu::SoC *>(root.get());
     ASSERT_NE(soc, nullptr);
@@ -661,6 +676,38 @@ protected:
   int kfd_fd_ = -1;
   std::vector<int> debug_fds_;
 };
+
+TEST_F(KfdIoctlTest, ReportsImplementedKfdUapiVersion) {
+  kfd_ioctl_get_version_args version{};
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_GET_VERSION, &version), 0);
+  EXPECT_EQ(version.major_version, 1u);
+  EXPECT_EQ(version.minor_version, 18u);
+  EXPECT_EQ(KFD_IOCTL_MINOR_VERSION, 19)
+      << "Shared KFD header changed; audit new fields and ioctls before updating the simulator's "
+         "reported UAPI version";
+}
+
+TEST_F(KfdIoctlTest, RejectsUnsupportedMetadataRingQueueCreation) {
+  alignas(4096) std::array<std::byte, 8192> ring{};
+  alignas(64) std::array<uint64_t, 8> ptrs{};
+
+  kfd_ioctl_create_queue_args args{};
+  args.gpu_id = kGpuId;
+  args.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  args.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  args.ring_size = static_cast<uint32_t>(ring.size());
+  args.read_pointer_address = reinterpret_cast<uint64_t>(&ptrs[0]);
+  args.write_pointer_address = reinterpret_cast<uint64_t>(&ptrs[1]);
+  args.queue_percentage = 100;
+  args.metadata_ring_size = 4096;
+
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &args), -EINVAL);
+  args.metadata_ring_size = 0;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &args), 0);
+  kfd_ioctl_destroy_queue_args destroy{};
+  destroy.queue_id = args.queue_id;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+}
 
 TEST_F(KfdIoctlTest, CloseReleasesProcessAfterCompletedOrAbortedInstructionExecution) {
   for (const bool abort : {false, true}) {
@@ -1040,7 +1087,7 @@ protected:
 };
 
 TEST_P(KfdCuMaskPlacementTest, CuMaskSelectsOnlyTheRequestedPhysicalUnits) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   const CuMaskPlacementCase &test = GetParam();
   const bool rdna = soc_->arch() == ROCJITSU_CODE_ARCH_RDNA4;
   const uint32_t wave_size = rdna ? 32u : 64u;
@@ -1050,8 +1097,8 @@ TEST_P(KfdCuMaskPlacementTest, CuMaskSelectsOnlyTheRequestedPhysicalUnits) {
   kernel_descriptor_t kd{};
   kd.kernel_code_entry_byte_offset = sizeof(kd);
   kd.group_segment_fixed_size = 128 * 1024;
-  AMDHSA_BITS_SET(kd.kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, rdna);
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE, rdna);
+  RJ_AMDHSA_BITS_SET(kd.kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, rdna);
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE, rdna);
   std::memcpy(code.data(), &kd, sizeof(kd));
   const uint32_t endpgm = rocjitsu::build_s_endpgm(soc_->arch());
   std::memcpy(code.data() + sizeof(kd), &endpgm, sizeof(endpgm));
@@ -4510,7 +4557,26 @@ TEST_F(KfdIoctlTest, DbgTrapCompetingNotifierWriterCannotBlockPublisher) {
   ASSERT_EQ(::poll(&pfd, 1, 1000), 1);
   ASSERT_EQ(::read(notifier, &notifications, sizeof(notifications)),
             static_cast<ssize_t>(sizeof(notifications)));
-  EXPECT_EQ(notifications, 1u);
+  // A retry can write successfully but miss its reap deadline under load,
+  // leaving another wakeup for the same retained event. Check delivery rather
+  // than the eventfd's accumulated retry count.
+  EXPECT_GE(notifications, 1u);
+
+  kfd_ioctl_dbg_trap_args query{};
+  query.pid = static_cast<uint32_t>(getpid());
+  query.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;
+  int query_result = -EAGAIN;
+  for (int attempt = 0; attempt < 200 && query_result == -EAGAIN; ++attempt) {
+    query.query_debug_event.exception_mask = kException;
+    query_result = driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query);
+    if (query_result == -EAGAIN)
+      static_cast<void>(::poll(nullptr, 0, 10));
+  }
+  ASSERT_EQ(query_result, 0);
+  EXPECT_EQ(query.query_debug_event.queue_id, create.queue_id);
+  EXPECT_EQ(query.query_debug_event.exception_mask & kException, kException);
+  query.query_debug_event.exception_mask = kException;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), -EAGAIN);
 
   // Stop fixture threads before fork so their temporary allocations are not
   // orphaned in the child. The process-lifetime notification reaper stays alive.
@@ -8286,7 +8352,7 @@ TEST_F(KfdIoctlCdna5Test, ScratchScoreboardSlotsRestartOnEachShaderEngine) {
 
 TEST_F(KfdIoctlCdna5Test, ScratchGrowthPreservesSpillsFromOverlappingDispatches) {
   using namespace rocjitsu;
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   constexpr uint64_t kCodeAddress = 0x10000;
   constexpr uint64_t kScratchPool = 0x1'0000'0000ULL;
   constexpr uint32_t kSentinel = 0x12345678;

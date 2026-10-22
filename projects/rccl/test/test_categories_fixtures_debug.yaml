@@ -47,6 +47,7 @@ test_categories:
       - "GinAllReduceEligibilityTest.*"
       - "NetSocketTests.*"
       - "NetBootstrapInterfaceTest.*"
+      - "BcmLinksTest.*"
       - "SocketPollTimeout.*"
       - "Ipcsocket.*"
       - "XmlTest.*"
@@ -59,6 +60,7 @@ test_categories:
       - "TopoNicFusionTests.*"
       - "P2pMaxNchannels.*"
       - "ChannelDefaults.*"
+      - "NetIbCastUdma.*"
     exclude_windows:
       - "*"
     labels:
