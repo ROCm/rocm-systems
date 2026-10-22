@@ -29,6 +29,7 @@ from utils.utils_common import (
     format_time,
     get_job_rank_and_size,
     is_only_pc_sampling,
+    is_roofline_only,
     print_status,
 )
 from utils.utils_exceptions import (
@@ -476,7 +477,8 @@ class RocProfCompute_Base:
             )
 
         msg = "Collecting Performance Counters"
-        status_msg = f"{msg} (Roofline Only)" if self.__args.roof_only else msg
+        roofline_only = is_roofline_only(self.__args.filter_blocks)
+        status_msg = f"{msg} (Roofline Only)" if roofline_only else msg
         print_status(status_msg)
 
         if total_runs:
