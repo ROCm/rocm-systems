@@ -1451,7 +1451,9 @@ rdc_status_t rdc_group_field_destroy(rdc_handle_t p_rdc_handle, rdc_field_grp_t 
  *
  *  @details Note that the first update of the field will not occur
  *  until the next field update cycle. To force a field update cycle,
- *  user must call rdc_field_update_all(1)
+ *  user must call rdc_field_update_all(1). Event fields (RDC_EVNT_*) are not
+ *  read: RDC caches their events, within these limits, while a watch holds
+ *  them.
  *
  *  @param[in] p_rdc_handle The RDC handler.
  *
@@ -1511,7 +1513,9 @@ rdc_status_t rdc_field_get_latest_value(rdc_handle_t p_rdc_handle, uint32_t gpu_
  *  milliseconds since 1970.
  *
  *  @param[out] next_since_time_stamp Timestamp to use for sinceTimestamp
- *  on next call to this function
+ *  on next call to this function. It is later than the returned value's
+ *  timestamp, so a sample with the same timestamp as the returned one is
+ *  skipped.
  *
  *  @param[out] value  The field value got from cache.
  *

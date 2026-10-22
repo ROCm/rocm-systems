@@ -103,6 +103,10 @@ class RdcCacheManagerImpl : public RdcCacheManager {
   // may hold one job more until evict_jobs() removes the job that stopped first.
   static constexpr size_t kMaxJobs = 256;
 
+  // Above this many field samples, the cache logs an error, at most once a minute.
+  static constexpr uint64_t kWarnSamples = 4000000;
+  explicit RdcCacheManagerImpl(uint64_t warn_samples = kWarnSamples);
+
   rdc_status_t rdc_field_get_latest_value(uint32_t gpu_index, rdc_field_t field,
                                           rdc_field_value* value) override;
   rdc_status_t rdc_field_get_value_since(uint32_t gpu_index, rdc_field_t field,
@@ -150,6 +154,11 @@ class RdcCacheManagerImpl : public RdcCacheManager {
   uint64_t job_starts_ = 0;
   RdcHealthStatsCache cache_health_;
   std::mutex cache_mutex_;
+  // The samples in cache_samples_, the number above which the cache warns, and when it last
+  // did, in milliseconds since 1970. Guarded by cache_mutex_.
+  uint64_t num_samples_ = 0;
+  const uint64_t warn_samples_;
+  uint64_t last_warning_ms_ = 0;
 };
 
 }  // namespace rdc

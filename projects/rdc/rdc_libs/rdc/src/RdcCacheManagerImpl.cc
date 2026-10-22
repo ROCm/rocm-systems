@@ -34,6 +34,8 @@ THE SOFTWARE.
 namespace amd {
 namespace rdc {
 
+RdcCacheManagerImpl::RdcCacheManagerImpl(uint64_t warn_samples) : warn_samples_(warn_samples) {}
+
 rdc_status_t RdcCacheManagerImpl::rdc_field_get_value_since(uint32_t gpu_index,
                                                             rdc_field_t field_id,
                                                             uint64_t since_time_stamp,
@@ -54,11 +56,15 @@ rdc_status_t RdcCacheManagerImpl::rdc_field_get_value_since(uint32_t gpu_index,
   const auto& cache_values = cache_samples_ite->second;
   for (auto cache_value = cache_values.begin(); cache_value != cache_values.end(); cache_value++) {
     if (cache_value->last_time >= since_time_stamp) {
-      // move to next potential timestamp
+      // The next call starts after this sample's millisecond, so that a loop always advances;
+      // a later sample with the same timestamp is skipped.
       auto next_iter = std::next(cache_value);
+      while (next_iter != cache_values.end() && next_iter->last_time <= cache_value->last_time) {
+        ++next_iter;
+      }
       if (next_iter != cache_values.end()) {
         *next_since_time_stamp = next_iter->last_time;
-      } else {  // Last item, set it to the future by adding 1us
+      } else {  // Last item, set it to the future by adding 1 ms
         *next_since_time_stamp = cache_value->last_time + 1;
       }
       value->ts = cache_value->last_time;
@@ -91,6 +97,7 @@ rdc_status_t RdcCacheManagerImpl::evict_cache(uint32_t gpu_index, rdc_field_t fi
   // Check max_keep_samples: drop the oldest samples beyond the limit. The limit
   // is below size() here, so it fits std::ptrdiff_t.
   auto& cache_values = cache_samples_ite->second;
+  const size_t samples_before = cache_values.size();
   if (cache_values.size() > max_keep_samples) {
     cache_values.erase(cache_values.begin(),
                        cache_values.end() - static_cast<std::ptrdiff_t>(max_keep_samples));
@@ -110,6 +117,7 @@ rdc_status_t RdcCacheManagerImpl::evict_cache(uint32_t gpu_index, rdc_field_t fi
     }
   }
 
+  num_samples_ -= samples_before - cache_values.size();
   return RDC_ST_OK;
 }
 
@@ -172,6 +180,19 @@ rdc_status_t RdcCacheManagerImpl::rdc_update_cache(uint32_t gpu_index,
     cache_samples_.insert({field, ve});
   } else {
     cache_samples_ite->second.push_back(entry);
+  }
+
+  num_samples_++;
+  if (num_samples_ > warn_samples_) {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    const uint64_t now = static_cast<uint64_t>(tv.tv_sec) * 1000 + tv.tv_usec / 1000;
+    if (last_warning_ms_ == 0 || now - last_warning_ms_ >= 60000) {
+      last_warning_ms_ = now;
+      RDC_LOG(RDC_ERROR, "The cache holds more than "
+                             << warn_samples_ << " samples (" << num_samples_
+                             << "); lower max_keep_samples or max_keep_age of the field watches");
+    }
   }
 
   return RDC_ST_OK;
