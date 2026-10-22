@@ -304,6 +304,7 @@ class NetIbCastConnectMicrotest : public ::testing::Test {
     d.ar = 0;
     d.oooRqSize = 0;
     d.ibProvider = IB_PROVIDER_NONE;
+    memset(&d.capsProvider, 0, sizeof(d.capsProvider));
     snprintf(d.devName, sizeof(d.devName), "fake%d", i);
     memset(&d.portAttr, 0, sizeof(d.portAttr));
     d.portAttr.link_layer = linkLayer;
@@ -313,6 +314,12 @@ class NetIbCastConnectMicrotest : public ::testing::Test {
     d.gidInfo.link_layer = linkLayer;
     d.gidInfo.localGidIndex = kGidIndex;
     d.gidInfo.localGid = V4Gid(i == 0 ? "10.0.0.1" : i == 1 ? "10.0.1.1" : "10.0.2.1");
+  }
+
+  // AINIC as IbCastInitDevices leaves it: each device holds its normalized uDMA engine count.
+  void Ainic(uint8_t udmaCount = 2) {
+    IbCastAinicRoce = true;
+    for (int i = 0; i < kNDevs; i++) IbCastDevs[i].capsProvider.ionic.udmaCount = udmaCount;
   }
 
   void SetMerged(int m, std::vector<int> devs) {
@@ -1321,7 +1328,7 @@ TEST_F(NetIbCastConnectUdmaMicrotest, OutOfRangePolicy_MeansChannelAffinity) {
   }
 }
 
-TEST_F(NetIbCastConnectUdmaMicrotest, SplitConnection_ChannelParityXorQpIndex) {
+TEST_F(NetIbCastConnectUdmaMicrotest, SplitConnection_ChannelParityPlusQpIndex) {
   Param("RCCL_IB_UDMA_POLICY", static_cast<int>(ncclIbCastUDMAPolicy::SplitConnection));
   EXPECT_EQ(Mask(0b11, true, 0), kLow);   // even parity
   EXPECT_EQ(Mask(0b11, true, 1), kHigh);
@@ -1348,12 +1355,75 @@ TEST_F(NetIbCastConnectUdmaMicrotest, SharedQps_FollowTheGroupOrTheQpIndexWithOn
   EXPECT_EQ(Mask(5, true, 2, 0, 0), kLow);
 }
 
+TEST_F(NetIbCastConnectUdmaMicrotest, Ainic_EveryPolicyCyclesThroughTheDevicesEngines) {
+  Ainic(4);
+  IbCastDevs[1].capsProvider.ionic.udmaCount = 3;
+  for (int ch : {1, 2, 3, 4, 5}) EXPECT_EQ(Mask(ch, true), 1 << ((ch - 1) % 4)) << ch;
+  EXPECT_EQ(Mask(5, true, 0, 0, -1, 1), 1 << 0);
+  EXPECT_EQ(Mask(6, true, 0, 0, -1, 1), 1 << 1);
+  EXPECT_EQ(Mask(7, true, 0, 0, -1, 1), 1 << 2);
+  EXPECT_EQ(Mask(8, true, 0, 0, -1, 1), 1 << 0);
+  EXPECT_EQ(Mask(5, true, 0, 0, 3), 1 << 3);
+  Param("RCCL_IB_COMM_NGROUPS", 1);
+  EXPECT_EQ(Mask(5, true, 6, 0, 0), 1 << 2);
+  Param("RCCL_IB_UDMA_POLICY", static_cast<int>(ncclIbCastUDMAPolicy::SplitConnection));
+  EXPECT_EQ(Mask(0b111, true, 2), 1 << 3);  // odd parity + 2
+  EXPECT_EQ(Mask(0b111, true, 3), 1 << 0);
+  Param("RCCL_IB_UDMA_POLICY", static_cast<int>(ncclIbCastUDMAPolicy::P2pRoundRobin));
+  for (int i = 0; i < 5; i++) EXPECT_EQ(Mask(5, true, 0, 1), 1 << (i % 4)) << i;
+}
+
+TEST_F(NetIbCastConnectUdmaMicrotest, NotAinic_KeepsTwoEnginesWhateverTheDeviceHolds) {
+  IbCastDevs[0].capsProvider.ionic.udmaCount = 4;
+  EXPECT_EQ(Mask(1, true), kLow);
+  EXPECT_EQ(Mask(2, true), kHigh);
+  EXPECT_EQ(Mask(3, true), kLow);
+}
+
+TEST_F(NetIbCastConnectUdmaMicrotest, Inspect_ReportsTheCountRoundRobinAndPerQpEngines) {
+  Ainic(4);
+  EXPECT_EQ(ncclIbCastTestGetDevUdmaCount(0), 4);
+  EXPECT_EQ(ncclIbCastTestGetDevUdmaCount(-1), 0);
+  IbCastNDevs = 1;
+  EXPECT_EQ(ncclIbCastTestGetDevUdmaCount(1), 0);
+  IbCastNDevs = kNDevs;
+
+  uint8_t masks[5];
+  ASSERT_EQ(ncclIbCastTestUdmaRoundRobin(3, 5, masks), ncclSuccess);
+  EXPECT_EQ(std::vector<uint8_t>(masks, masks + 5), (std::vector<uint8_t>{1, 2, 4, 1, 2}));
+  EXPECT_EQ(ncclIbCastTestUdmaRoundRobin(3, 5, nullptr), ncclInvalidArgument);
+  EXPECT_EQ(ncclIbCastTestUdmaRoundRobin(0, 5, masks), ncclInvalidArgument);
+  EXPECT_EQ(ncclIbCastTestUdmaRoundRobin(3, 0, masks), ncclInvalidArgument);
+
+  auto* s = NewComm<ncclIbSendComm>();
+  s->base.isSend = true;
+  s->devs[0].base.ibDevN = 1;
+  IbCastDevs[1].capsProvider.ionic.udmaCount = 3;
+  ncclIbQp a = Qp(), b = Qp(), noQp = {};
+  s->base.activeQps[0] = &a;
+  s->base.activeQps[1] = &noQp;
+  s->base.activeQps[2] = &b;
+  s->base.nqps = 3;
+  // b's driver cannot answer.
+  ScopedHook idx(g_ionicdvQpGetUdmaIdx, [&](ibv_qp* qp) -> uint8_t { return qp == a.qp ? 2 : 0xFF; });
+  ncclIbCastUdmaState st;
+  ASSERT_EQ(ncclIbCastGetUdmaState(s, &st), ncclSuccess);
+  EXPECT_EQ(st.nqps, 3);
+  EXPECT_EQ(st.udmaCount, 3);
+  EXPECT_EQ(st.udmaIdx[0], 2);
+  EXPECT_EQ(std::vector<bool>(st.queryOk, st.queryOk + 3), (std::vector<bool>{true, false, false}));
+  EXPECT_EQ(idx.calls, 2);
+  EXPECT_EQ(ncclIbCastGetUdmaState(nullptr, &st), ncclInvalidArgument);
+  EXPECT_EQ(ncclIbCastGetUdmaState(s, nullptr), ncclInvalidArgument);
+  free(s);
+}
+
 TEST_F(NetIbCastConnectQpMicrotest, BuildDataQpCreateAttr_SizesSendAndReceiveQueues) {
   auto* s = NewComm<ncclIbSendComm>();
   s->base.isSend = true;
   s->base.isP2p = 1;
   s->devs[1].base = {2, &pd_, &cq_};
-  IbCastAinicRoce = true;
+  Ainic();
   ncclIbQpCreateAttr a;
   memset(&a, 0x5a, sizeof(a));
   IbCastBuildDataQpCreateAttr(&s->base, 1, &a);
@@ -1440,7 +1510,7 @@ TEST_F(NetIbCastConnectQpMicrotest, DestroyBase_CqFailureKeepsThePdReference) {
 TEST_F(NetIbCastConnectMicrotest, MatchingScheme_FollowsOffloadSharingOooRqFailoverThenTheParam) {
   EXPECT_EQ(IbCastResolveRecvMatchingScheme(true), BY_ORDER);
   EXPECT_EQ(IbCastResolveRecvMatchingScheme(false), BY_INDEX);
-  IbCastAinicRoce = true;
+  Ainic();
   EXPECT_EQ(IbCastResolveRecvMatchingScheme(false), BY_ORDER);
   Param("IB_RECEIVER_SIDE_MATCHING_SCHEME", BY_INDEX);
   EXPECT_EQ(IbCastResolveRecvMatchingScheme(false), BY_INDEX);
@@ -1974,7 +2044,7 @@ TEST_F(NetIbCastConnectHandshakeMicrotest, Telemetry_ClassifiesSenderDataAndRece
 
 TEST_F(NetIbCastConnectHandshakeMicrotest, Telemetry_AinicCarriesTheChannelId) {
   rcclTelemetryEnabled = 1;
-  IbCastAinicRoce = true;
+  Ainic();
   ncclNet_ctxt_t sendCtx = {12}, recvCtx = {12};
   void* lc = nullptr;
   ncclIbHandle h = Listen(3, &lc);
@@ -2759,7 +2829,7 @@ TEST_F(NetIbCastConnectSharingMicrotest, FirstConnection_MakesEachSideAPrimaryOw
 
 TEST_F(NetIbCastConnectSharingMicrotest, Ainic_ScalesSharedQpDepthByTheMultiplierTheCqAchieved) {
   ASSERT_GT(rcclParamIbCastQpDepthMultiplier(), 3);
-  IbCastAinicRoce = true;
+  Ainic();
   cqeCap_ = 3 * NET_IB_MAX_REQUESTS * ncclParamIbCastQpsPerConn() * 3;  // the device grants 3x, less than asked
   ncclIbSendComm* s = nullptr;
   ncclIbRecvComm* r = nullptr;
