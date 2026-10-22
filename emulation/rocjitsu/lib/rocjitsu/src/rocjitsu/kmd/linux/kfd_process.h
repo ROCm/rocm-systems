@@ -28,6 +28,7 @@
 #include <memory>
 #include <memory_resource>
 #include <mutex>
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -114,11 +115,29 @@ public:
     bool imported = false;
     bool shared = false; ///< Simulator cache policy; does not alter requested ABI flags.
     int dmabuf_fd = -1;
-    // True when the driver created host_ptr (mmap it itself) and must munmap it
-    // on teardown. False for caller-owned pages (e.g. reused MAP_FIXED pages
-    // from the thunk) that the driver must never unmap, since unmapping them
-    // races with the owning process still accessing the memory.
-    bool host_ptr_owned = false;
+    enum class HostMappingKind {
+      None,
+      Caller,          ///< Caller owns the address; BO teardown leaves it mapped.
+      DriverView,      ///< Driver owns the client view; BO teardown unmaps it.
+      InternalBacking, ///< Driver owns stable GPU backing until BO free.
+    };
+    // host_ptr is GPU backing; an internal backing stays mapped across client views.
+    HostMappingKind host_mapping_kind = HostMappingKind::None;
+    // Full mapped extent, including pages beyond the BO's logical size.
+    size_t host_mapping_size = 0;
+    /// @brief Remaining fragment of an application-visible host mapping.
+    struct ClientView {
+      void *ptr = nullptr;
+      size_t size = 0;
+      // Caller fragments remain mapped at BO teardown; DriverView fragments
+      // are unmapped then. Partial munmap can split either kind into fragments.
+      HostMappingKind kind = HostMappingKind::None;
+      // A surviving fragment of direct GPU backing carries its GPU start.
+      // Aliases of InternalBacking have no GPU translation of their own.
+      std::optional<uint64_t> backing_gpu_va;
+    };
+    // Views include internal-backing aliases and fragments of direct backing.
+    std::vector<ClientView> client_views;
     // DRM BO state (create info, placement, UMD metadata) for this backing. The
     // kernel BO keeps it after every GEM handle and dmabuf fd closes.
     std::shared_ptr<GemObject> bo_state;
