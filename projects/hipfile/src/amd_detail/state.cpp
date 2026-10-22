@@ -171,8 +171,15 @@ DriverState::registerStream(const hipStream_t hip_stream, uint32_t flags)
 void
 DriverState::deregisterStream(const hipStream_t hip_stream)
 {
-    unique_lock<shared_mutex> ulock{state_mutex};
-    stream_map->deregisterStream(hip_stream);
+    shared_ptr<IStream> stream;
+    {
+        unique_lock<shared_mutex> ulock{state_mutex};
+        stream = stream_map->deregisterStream(hip_stream);
+    }
+    // Drain outside state_mutex: it waits on in-flight IO, which must not hold the global lock.
+    if (stream) {
+        stream->drainAndRelease();
+    }
 }
 
 shared_ptr<IStream>

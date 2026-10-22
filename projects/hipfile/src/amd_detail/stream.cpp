@@ -160,11 +160,11 @@ StreamMap::registerStream(hipStream_t hip_stream, uint32_t flags)
     StreamMap::from_ptr[hip_stream] = stream;
 }
 
-void
+std::shared_ptr<IStream>
 StreamMap::deregisterStream(hipStream_t hip_stream)
 {
     if (isDefaultStream(hip_stream)) {
-        return;
+        return nullptr;
     }
 
     auto itr = StreamMap::from_ptr.find(hip_stream);
@@ -172,7 +172,9 @@ StreamMap::deregisterStream(hipStream_t hip_stream)
         throw std::invalid_argument("Stream is not registered");
     }
 
-    StreamMap::from_ptr.erase(hip_stream);
+    auto stream = std::move(itr->second);
+    StreamMap::from_ptr.erase(itr);
+    return stream;
 }
 
 std::shared_ptr<IStream>

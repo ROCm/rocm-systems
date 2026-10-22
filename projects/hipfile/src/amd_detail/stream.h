@@ -96,7 +96,9 @@ public:
 
     /// @brief Deregisters a stream from use
     /// @param hip_stream A HIP stream
-    void deregisterStream(const hipStream_t hip_stream);
+    /// @return The removed stream, for the caller to drain after releasing its lock; null for the
+    ///         default stream, which is never registered
+    std::shared_ptr<IStream> deregisterStream(const hipStream_t hip_stream);
 
     /// @brief Lookup a stream using the hipStream
     /// @param hip_stream A HIP stream
