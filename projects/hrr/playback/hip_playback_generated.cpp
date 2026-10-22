@@ -2280,7 +2280,8 @@ static hipError_t playback_hipHostAlloc(PlaybackContext& ctx, const uint8_t* pay
 static hipError_t playback_hipHostFree(PlaybackContext& ctx, const uint8_t* payload) {
   const auto* a = reinterpret_cast<const hrr_args_hipHostFree*>(payload);
   uint64_t _rec_ptr = a->ptr;
-  void*    _live_ptr = ctx.translate_ptr(_rec_ptr);
+  void*    _live_ptr = ctx.lookup_ptr(_rec_ptr);
+  if (_live_ptr == nullptr) return hipSuccess;
   hipError_t _r = (hipError_t)hipHostFree(_live_ptr);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipHostFree", a->ret);
@@ -2336,10 +2337,16 @@ static hipError_t playback_hipInit(PlaybackContext& ctx, const uint8_t* payload)
 
 static hipError_t playback_hipIpcCloseMemHandle(PlaybackContext& ctx, const uint8_t* payload) {
   const auto* a = reinterpret_cast<const hrr_args_hipIpcCloseMemHandle*>(payload);
-  hipError_t _r = (hipError_t)hipIpcCloseMemHandle(ctx.translate_ptr(a->devPtr));
+  uint64_t _rec_ptr = a->devPtr;
+  void*    _live_ptr = ctx.lookup_ptr(_rec_ptr);
+  if (_live_ptr == nullptr) return hipSuccess;
+  hipError_t _r = (hipError_t)hipIpcCloseMemHandle(_live_ptr);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipIpcCloseMemHandle", a->ret);
     return hipSuccess;
+  }
+  if (_r == hipSuccess) {
+    ctx.remove_alloc(_rec_ptr);
   }
   return _r;
 }
@@ -3455,19 +3462,7 @@ static hipError_t playback_hipStreamWaitValue64(PlaybackContext& ctx, const uint
 
 static hipError_t playback_hipStreamWriteValue32(PlaybackContext& ctx, const uint8_t* payload) {
   const auto* a = reinterpret_cast<const hrr_args_hipStreamWriteValue32*>(payload);
-  void* _live_dst = ctx.translate_ptr(a->ptr);
-  if (_live_dst == nullptr) {
-    static bool warned = false;
-    if (!warned) {
-      warned = true;
-      fprintf(stderr, "[HRR] hipStreamWriteValue32: recorded destination 0x%llx "
-              "is not in the alloc map (memory HRR does not track); "
-              "skipping this write. Results may differ from capture.\n",
-              (unsigned long long)a->ptr);
-    }
-    return hipSuccess;
-  }
-  hipError_t _r = (hipError_t)hipStreamWriteValue32((hipStream_t)ctx.translate_stream(a->stream), _live_dst, (uint32_t)a->value, (unsigned int)a->flags);
+  hipError_t _r = (hipError_t)hipStreamWriteValue32((hipStream_t)ctx.translate_stream(a->stream), ctx.translate_ptr(a->ptr), (uint32_t)a->value, (unsigned int)a->flags);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipStreamWriteValue32", a->ret);
     return hipSuccess;
@@ -3477,19 +3472,7 @@ static hipError_t playback_hipStreamWriteValue32(PlaybackContext& ctx, const uin
 
 static hipError_t playback_hipStreamWriteValue64(PlaybackContext& ctx, const uint8_t* payload) {
   const auto* a = reinterpret_cast<const hrr_args_hipStreamWriteValue64*>(payload);
-  void* _live_dst = ctx.translate_ptr(a->ptr);
-  if (_live_dst == nullptr) {
-    static bool warned = false;
-    if (!warned) {
-      warned = true;
-      fprintf(stderr, "[HRR] hipStreamWriteValue64: recorded destination 0x%llx "
-              "is not in the alloc map (memory HRR does not track); "
-              "skipping this write. Results may differ from capture.\n",
-              (unsigned long long)a->ptr);
-    }
-    return hipSuccess;
-  }
-  hipError_t _r = (hipError_t)hipStreamWriteValue64((hipStream_t)ctx.translate_stream(a->stream), _live_dst, (uint64_t)a->value, (unsigned int)a->flags);
+  hipError_t _r = (hipError_t)hipStreamWriteValue64((hipStream_t)ctx.translate_stream(a->stream), ctx.translate_ptr(a->ptr), (uint64_t)a->value, (unsigned int)a->flags);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipStreamWriteValue64", a->ret);
     return hipSuccess;
@@ -4789,19 +4772,7 @@ static hipError_t playback_hipModuleGetFunctionCount(PlaybackContext& ctx, const
 
 static hipError_t playback_hipMemsetD2D8(PlaybackContext& ctx, const uint8_t* payload) {
   const auto* a = reinterpret_cast<const hrr_args_hipMemsetD2D8*>(payload);
-  void* _live_dst = ctx.translate_ptr(a->dst);
-  if (!_live_dst) {
-    static bool warned = false;
-    if (!warned) {
-      warned = true;
-      fprintf(stderr, "[HRR] hipMemsetD2D8: dst 0x%llx has no alloc_map entry "
-              "(its allocation was not replayed), so this call is skipped; the "
-              "destination buffer will differ from capture.\n",
-              (unsigned long long)a->dst);
-    }
-    return hipSuccess;
-  }
-  hipError_t _r = (hipError_t)hipMemsetD2D8((hipDeviceptr_t)_live_dst, (size_t)a->dstPitch, (unsigned char)a->value, (size_t)a->width, (size_t)a->height);
+  hipError_t _r = (hipError_t)hipMemsetD2D8((hipDeviceptr_t)ctx.translate_ptr(a->dst), (size_t)a->dstPitch, (unsigned char)a->value, (size_t)a->width, (size_t)a->height);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipMemsetD2D8", a->ret);
     return hipSuccess;
@@ -4811,19 +4782,7 @@ static hipError_t playback_hipMemsetD2D8(PlaybackContext& ctx, const uint8_t* pa
 
 static hipError_t playback_hipMemsetD2D8Async(PlaybackContext& ctx, const uint8_t* payload) {
   const auto* a = reinterpret_cast<const hrr_args_hipMemsetD2D8Async*>(payload);
-  void* _live_dst = ctx.translate_ptr(a->dst);
-  if (!_live_dst) {
-    static bool warned = false;
-    if (!warned) {
-      warned = true;
-      fprintf(stderr, "[HRR] hipMemsetD2D8Async: dst 0x%llx has no alloc_map entry "
-              "(its allocation was not replayed), so this call is skipped; the "
-              "destination buffer will differ from capture.\n",
-              (unsigned long long)a->dst);
-    }
-    return hipSuccess;
-  }
-  hipError_t _r = (hipError_t)hipMemsetD2D8Async((hipDeviceptr_t)_live_dst, (size_t)a->dstPitch, (unsigned char)a->value, (size_t)a->width, (size_t)a->height, (hipStream_t)ctx.translate_stream(a->stream));
+  hipError_t _r = (hipError_t)hipMemsetD2D8Async((hipDeviceptr_t)ctx.translate_ptr(a->dst), (size_t)a->dstPitch, (unsigned char)a->value, (size_t)a->width, (size_t)a->height, (hipStream_t)ctx.translate_stream(a->stream));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipMemsetD2D8Async", a->ret);
     return hipSuccess;
@@ -4833,19 +4792,7 @@ static hipError_t playback_hipMemsetD2D8Async(PlaybackContext& ctx, const uint8_
 
 static hipError_t playback_hipMemsetD2D16(PlaybackContext& ctx, const uint8_t* payload) {
   const auto* a = reinterpret_cast<const hrr_args_hipMemsetD2D16*>(payload);
-  void* _live_dst = ctx.translate_ptr(a->dst);
-  if (!_live_dst) {
-    static bool warned = false;
-    if (!warned) {
-      warned = true;
-      fprintf(stderr, "[HRR] hipMemsetD2D16: dst 0x%llx has no alloc_map entry "
-              "(its allocation was not replayed), so this call is skipped; the "
-              "destination buffer will differ from capture.\n",
-              (unsigned long long)a->dst);
-    }
-    return hipSuccess;
-  }
-  hipError_t _r = (hipError_t)hipMemsetD2D16((hipDeviceptr_t)_live_dst, (size_t)a->dstPitch, (unsigned short)a->value, (size_t)a->width, (size_t)a->height);
+  hipError_t _r = (hipError_t)hipMemsetD2D16((hipDeviceptr_t)ctx.translate_ptr(a->dst), (size_t)a->dstPitch, (unsigned short)a->value, (size_t)a->width, (size_t)a->height);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipMemsetD2D16", a->ret);
     return hipSuccess;
@@ -4855,19 +4802,7 @@ static hipError_t playback_hipMemsetD2D16(PlaybackContext& ctx, const uint8_t* p
 
 static hipError_t playback_hipMemsetD2D16Async(PlaybackContext& ctx, const uint8_t* payload) {
   const auto* a = reinterpret_cast<const hrr_args_hipMemsetD2D16Async*>(payload);
-  void* _live_dst = ctx.translate_ptr(a->dst);
-  if (!_live_dst) {
-    static bool warned = false;
-    if (!warned) {
-      warned = true;
-      fprintf(stderr, "[HRR] hipMemsetD2D16Async: dst 0x%llx has no alloc_map entry "
-              "(its allocation was not replayed), so this call is skipped; the "
-              "destination buffer will differ from capture.\n",
-              (unsigned long long)a->dst);
-    }
-    return hipSuccess;
-  }
-  hipError_t _r = (hipError_t)hipMemsetD2D16Async((hipDeviceptr_t)_live_dst, (size_t)a->dstPitch, (unsigned short)a->value, (size_t)a->width, (size_t)a->height, (hipStream_t)ctx.translate_stream(a->stream));
+  hipError_t _r = (hipError_t)hipMemsetD2D16Async((hipDeviceptr_t)ctx.translate_ptr(a->dst), (size_t)a->dstPitch, (unsigned short)a->value, (size_t)a->width, (size_t)a->height, (hipStream_t)ctx.translate_stream(a->stream));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipMemsetD2D16Async", a->ret);
     return hipSuccess;
@@ -4877,19 +4812,7 @@ static hipError_t playback_hipMemsetD2D16Async(PlaybackContext& ctx, const uint8
 
 static hipError_t playback_hipMemsetD2D32(PlaybackContext& ctx, const uint8_t* payload) {
   const auto* a = reinterpret_cast<const hrr_args_hipMemsetD2D32*>(payload);
-  void* _live_dst = ctx.translate_ptr(a->dst);
-  if (!_live_dst) {
-    static bool warned = false;
-    if (!warned) {
-      warned = true;
-      fprintf(stderr, "[HRR] hipMemsetD2D32: dst 0x%llx has no alloc_map entry "
-              "(its allocation was not replayed), so this call is skipped; the "
-              "destination buffer will differ from capture.\n",
-              (unsigned long long)a->dst);
-    }
-    return hipSuccess;
-  }
-  hipError_t _r = (hipError_t)hipMemsetD2D32((hipDeviceptr_t)_live_dst, (size_t)a->dstPitch, (unsigned int)a->value, (size_t)a->width, (size_t)a->height);
+  hipError_t _r = (hipError_t)hipMemsetD2D32((hipDeviceptr_t)ctx.translate_ptr(a->dst), (size_t)a->dstPitch, (unsigned int)a->value, (size_t)a->width, (size_t)a->height);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipMemsetD2D32", a->ret);
     return hipSuccess;
@@ -4899,19 +4822,7 @@ static hipError_t playback_hipMemsetD2D32(PlaybackContext& ctx, const uint8_t* p
 
 static hipError_t playback_hipMemsetD2D32Async(PlaybackContext& ctx, const uint8_t* payload) {
   const auto* a = reinterpret_cast<const hrr_args_hipMemsetD2D32Async*>(payload);
-  void* _live_dst = ctx.translate_ptr(a->dst);
-  if (!_live_dst) {
-    static bool warned = false;
-    if (!warned) {
-      warned = true;
-      fprintf(stderr, "[HRR] hipMemsetD2D32Async: dst 0x%llx has no alloc_map entry "
-              "(its allocation was not replayed), so this call is skipped; the "
-              "destination buffer will differ from capture.\n",
-              (unsigned long long)a->dst);
-    }
-    return hipSuccess;
-  }
-  hipError_t _r = (hipError_t)hipMemsetD2D32Async((hipDeviceptr_t)_live_dst, (size_t)a->dstPitch, (unsigned int)a->value, (size_t)a->width, (size_t)a->height, (hipStream_t)ctx.translate_stream(a->stream));
+  hipError_t _r = (hipError_t)hipMemsetD2D32Async((hipDeviceptr_t)ctx.translate_ptr(a->dst), (size_t)a->dstPitch, (unsigned int)a->value, (size_t)a->width, (size_t)a->height, (hipStream_t)ctx.translate_stream(a->stream));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipMemsetD2D32Async", a->ret);
     return hipSuccess;
