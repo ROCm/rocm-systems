@@ -207,36 +207,9 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
         'uint32_t',
         '[](auto a, auto b) { return util::stdx::min(a & 0xFFFFu, b & 0xFFFFu); }',
     ),
-    # --- float min/max. util::stdx::fmax/fmin match the scalar std::fmax/fmin
-    # used by the generated bodies for all finite/Inf inputs. Two accepted
-    # divergences (per project direction): (1) NaN inputs may differ in NaN
-    # payload; (2) a signed-zero tie returns the opposite-signed zero — scalar
-    # std::fmax/fmin returns the first operand, the packed vmaxps/vminps the
-    # second, so e.g. fmax(-0,+0) is -0 (scalar) vs +0 (SIMD). Both are
-    # numerically equal results; the guard tests skip NaN-input and zero-tie
-    # lanes (UtilSimd.Fmax/Fmin_VectorMatchesScalar_BitExact). All other inputs
-    # are bit-exact. (The earlier "not reproducible" note conflated these two
-    # accepted corners with a hard blocker.) ---
-    'v_max_f32_vop2': (
-        'float32_t',
-        '[](auto a, auto b) { return util::stdx::fmax(a, b); }',
-    ),
-    'v_min_f32_vop2': (
-        'float32_t',
-        '[](auto a, auto b) { return util::stdx::fmin(a, b); }',
-    ),
-    'v_max_f16_vop2': (
-        'uint32_t',
-        '[](auto a, auto b) {'
-        ' return util::f32_to_f16_simd('
-        'util::stdx::fmax(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b))); }',
-    ),
-    'v_min_f16_vop2': (
-        'uint32_t',
-        '[](auto a, auto b) {'
-        ' return util::f32_to_f16_simd('
-        'util::stdx::fmin(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b))); }',
-    ),
+    # Legacy selection shares the raw-bit operation with scalar execution.
+    'v_max_f16_vop2': ('uint32_t', float_minmax.simd_functor('f16', 'legacy_max')),
+    'v_min_f16_vop2': ('uint32_t', float_minmax.simd_functor('f16', 'legacy_min')),
     # IEEE-2019 *_NUM forms use the same selection rules as the scalar path.
     # float_minmax.simd_probe routes the other IEEE-2019 forms, VOP3 included.
     'v_max_num_f16_vop2': ('uint32_t', float_minmax.simd_functor('f16', 'max_num')),
@@ -1944,17 +1917,11 @@ SIMD_VOP3_UNARY_INT_EXTRA: dict[str, tuple[str, str, str]] = {
 # still use apply_vop3_src_mod_f64 / apply_vop3_dst_mod_f64.
 # The VOPC table key convention is preserved: dict[name] -> functor string.
 #
-# For v_max_f64 / v_min_f64, stdx::fmax / stdx::fmin match scalar std::fmax /
-# std::fmin for all finite/Inf inputs except (a) NaN payload and (b) signed-zero
-# tie (matching the f32 finding) — accepted divergences, with the A/B test
-# skipping NaN-input and zero-tie lanes (same convention as v_max_f32 / v_min_f32
-# in SIMD_VOP2_BINARY).
+# Legacy min/max also route through the shared raw-bit selection stage.
 # The IEEE-2019 min/max forms read raw encodings; see float_minmax.simd_probe.
 SIMD_VOP3_BINARY_FP64: dict[str, str] = {
     'v_add_f64_vop3': '[](auto a, auto b) { return a + b; }',
     'v_mul_f64_vop3': '[](auto a, auto b) { return a * b; }',
-    'v_max_f64_vop3': '[](auto a, auto b) { return util::stdx::fmax(a, b); }',
-    'v_min_f64_vop3': '[](auto a, auto b) { return util::stdx::fmin(a, b); }',
 }
 
 # Their host result is already rounded in the MODE the caller checked, so the
@@ -2063,22 +2030,10 @@ SIMD_VOP3_TERNARY_FP32: dict[str, str] = {
     'v_fma_f32_vop3': '[&inst, &wf](auto a, auto b, auto c) { return amdgpu::fma_f32_simd(a, b, c, wf, amdgpu::effective_vop3_omod_f32(wf, inst.inst_.omod)); }',
     'v_mad_f32_vop3': '[](auto a, auto b, auto c) { return a * b + c; }',
     'v_mad_legacy_f32_vop3': '[](auto a, auto b, auto c) { return a * b + c; }',
-    # min3/max3/med3 (f32): the scalar body composes std::fmax/std::fmin
-    # (max3 = fmax(fmax(a,b),c); min3 = fmin(fmin(a,b),c);
-    # med3 = fmax(fmin(fmax(a,b),c), fmin(a,b))). stdx::fmax/fmin match scalar
-    # for all finite/Inf inputs except NaN-payload and signed-zero tie (same
-    # accepted carve-out as v_max_f32 / v_min_f32; the A/B test skips NaN-input
-    # lanes and uses no ±0 inputs). omod/clamp applied by the glue.
     # DX9 FMA has zero-product and mandatory flushing rules distinct from FMA.
     'v_fma_dx9_zero_f32_vop3': (
         '[&wf](auto a, auto b, auto c) { return amdgpu::fma_dx9_zero_f32_simd(a, b, c, wf); }'
     ),
-    'v_max3_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmax(a, b), c); }',
-    'v_min3_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmin(a, b), c); }',
-    'v_med3_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmin(util::stdx::fmax(a, b), c), util::stdx::fmin(a, b)); }',
-    # minmax = max(min(a,b),c); maxmin = min(max(a,b),c). (RDNA3+.)
-    'v_minmax_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmin(a, b), c); }',
-    'v_maxmin_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmax(a, b), c); }',
     # Cube applies OMOD itself; false leaves only CLAMP to the operand glue.
     **{
         f'v_{op}_f32_vop3': (
@@ -2096,20 +2051,12 @@ SIMD_VOP3_TERNARY_FP32: dict[str, str] = {
 }
 
 # Non-fused F16 ternaries: widen -> ABS/NEG -> evaluate -> round F16 -> OMOD/CLAMP.
-# MAD and older min/max forms retain their existing MODE and NaN-policy gaps;
-# matching scalar output order does not establish hardware correctness.
+# MAD retains its existing MODE policy; selection uses the shared raw-bit stage.
 # DIV_FIXUP explicitly retains modifiers before narrowing. Fused FMA uses the
 # MODE-aware native<double> route selected by SIMD_VOP3_FMA_MODE_FP16 below.
 SIMD_VOP3_TERNARY_FP16: dict[str, str] = {
     'v_mad_f16_vop3': '[](auto a, auto b, auto c) { return a * b + c; }',
     'v_mad_legacy_f16_vop3': '[](auto a, auto b, auto c) { return a * b + c; }',
-    # min3/max3/med3 (f16): widened to f32 by the glue; same fmax/fmin
-    # composition as the f32 forms (see SIMD_VOP3_TERNARY_FP32).
-    'v_max3_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmax(a, b), c); }',
-    'v_min3_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmin(a, b), c); }',
-    'v_med3_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmin(util::stdx::fmax(a, b), c), util::stdx::fmin(a, b)); }',
-    'v_minmax_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmin(a, b), c); }',
-    'v_maxmin_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmax(a, b), c); }',
     'v_div_fixup_f16_vop3': (
         '[&wf](auto p, auto b, auto c) { return '
         '::rocjitsu::amdgpu::div_fixup_f16_promoted_simd('

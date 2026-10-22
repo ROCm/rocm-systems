@@ -422,16 +422,14 @@ template <bool Extended, typename Slot>
                                  : minmax::evaluate<fp_format::F32, minmax::MinNum>(policy, av, bv);
           break;
         }
-        F selected = bf;
-        if (slot.op == 10)
-          util::stdx::where(af > bf, selected) = af;
-        else
-          util::stdx::where(af < bf, selected) = af;
-        for (uint32_t i = 0; i < W; ++i)
-          if (std::isnan(af[i]) || std::isnan(bf[i]) || (af[i] == 0 && bf[i] == 0))
-            selected[i] = slot.op == 10 ? std::fmax(float(af[i]), float(bf[i]))
-                                        : std::fmin(float(af[i]), float(bf[i]));
-        result = std::bit_cast<U>(selected);
+        const auto input_policy = input_denormal::Policy::make(wf.fp_denorm_mode_f32());
+        const auto nan_policy = fp_mode::legacy_minmax_policy(arch, wf.ieee_mode());
+        result =
+            slot.op == 10
+                ? minmax::LegacyOperation<fp_format::F32, minmax::LegacyMax>{input_policy,
+                                                                             nan_policy}(av, bv)
+                : minmax::LegacyOperation<fp_format::F32, minmax::LegacyMin>{input_policy,
+                                                                             nan_policy}(av, bv);
         break;
       }
       case 16:

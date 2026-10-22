@@ -875,6 +875,31 @@ class TestLowerVectorAdd:
         name = 'V_FRACT_F16' if kind == SemaNodeKind.FRACT else 'V_LDEXP_F16'
         assert lower_sema_block(SemaBlock(name, ExecModel.VECTOR, body))
 
+    @pytest.mark.parametrize('operation', ['min', 'max'])
+    def test_raw_f16_selection_requires_the_sdwa_rounded_store(self, operation):
+        call = f'float_minmax_legacy_{operation}'
+        value = SemaNode(
+            SemaNodeKind.CALL,
+            call_name=call,
+            ty=SemaType.F16,
+            children=(
+                SemaNode(SemaNodeKind.ID, id_name=call),
+                _cast(_src(0), SemaType.F16),
+                _cast(_src(1), SemaType.F16),
+            ),
+        )
+        body = SemaNode(
+            SemaNodeKind.ASSIGN, children=(_cast(_dst(0), SemaType.F16), value)
+        )
+        with pytest.raises(ValueError, match='SDWA_ROUNDED_F16_OPS'):
+            lower_sema_block(SemaBlock('V_UNLISTED_F16', ExecModel.VECTOR, body))
+        name = f'V_{operation.upper()}_F16'
+        assert lower_sema_block(SemaBlock(name, ExecModel.VECTOR, body))
+        # Scalar selection has no SDWA output stage to require.
+        assert lower_sema_block(
+            SemaBlock(f'S_{operation.upper()}_F16', ExecModel.SCALAR, body)
+        )
+
     @pytest.mark.parametrize(
         ('ty', 'template', 'policy'),
         [

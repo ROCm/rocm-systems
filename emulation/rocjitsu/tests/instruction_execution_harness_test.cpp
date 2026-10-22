@@ -10310,26 +10310,34 @@ TEST(SdwaOutputScalingTest, HonorsFormatModesAndDestinationPlacement) {
     uint16_t packed_fmac_f16;
     uint16_t mov_b32;
     uint16_t frexp_exp_f32;
+    uint16_t min_f16;
+    uint16_t max_f16;
   };
   constexpr std::array kArchitectures{
       ArchCase{ROCJITSU_CODE_ARCH_CDNA4, cdna4::kVAddF32Vop2, cdna4::kVAddF16Vop2,
                cdna4::kVMulF32Vop2, cdna4::kVMulF16Vop2, cdna4::kVRcpF32Vop1, cdna4::kVRcpF16Vop1,
-               cdna4::kVPkFmacF16Vop2, cdna4::kVMovB32Vop1, cdna4::kVFrexpExpI32F32Vop1},
+               cdna4::kVPkFmacF16Vop2, cdna4::kVMovB32Vop1, cdna4::kVFrexpExpI32F32Vop1,
+               cdna4::kVMinF16Vop2, cdna4::kVMaxF16Vop2},
       ArchCase{ROCJITSU_CODE_ARCH_CDNA3, cdna3::kVAddF32Vop2, cdna3::kVAddF16Vop2,
                cdna3::kVMulF32Vop2, cdna3::kVMulF16Vop2, cdna3::kVRcpF32Vop1, cdna3::kVRcpF16Vop1,
-               cdna3::kVPkFmacF16Vop2, cdna3::kVMovB32Vop1, cdna3::kVFrexpExpI32F32Vop1},
+               cdna3::kVPkFmacF16Vop2, cdna3::kVMovB32Vop1, cdna3::kVFrexpExpI32F32Vop1,
+               cdna3::kVMinF16Vop2, cdna3::kVMaxF16Vop2},
       ArchCase{ROCJITSU_CODE_ARCH_CDNA2, cdna2::kVAddF32Vop2, cdna2::kVAddF16Vop2,
                cdna2::kVMulF32Vop2, cdna2::kVMulF16Vop2, cdna2::kVRcpF32Vop1, cdna2::kVRcpF16Vop1,
-               cdna2::kVPkFmacF16Vop2, cdna2::kVMovB32Vop1, cdna2::kVFrexpExpI32F32Vop1},
+               cdna2::kVPkFmacF16Vop2, cdna2::kVMovB32Vop1, cdna2::kVFrexpExpI32F32Vop1,
+               cdna2::kVMinF16Vop2, cdna2::kVMaxF16Vop2},
       ArchCase{ROCJITSU_CODE_ARCH_CDNA1, cdna1::kVAddF32Vop2, cdna1::kVAddF16Vop2,
                cdna1::kVMulF32Vop2, cdna1::kVMulF16Vop2, cdna1::kVRcpF32Vop1, cdna1::kVRcpF16Vop1,
-               cdna1::kVPkFmacF16Vop2, cdna1::kVMovB32Vop1, cdna1::kVFrexpExpI32F32Vop1},
+               cdna1::kVPkFmacF16Vop2, cdna1::kVMovB32Vop1, cdna1::kVFrexpExpI32F32Vop1,
+               cdna1::kVMinF16Vop2, cdna1::kVMaxF16Vop2},
       ArchCase{ROCJITSU_CODE_ARCH_RDNA2, rdna2::kVAddF32Vop2, rdna2::kVAddF16Vop2,
                rdna2::kVMulF32Vop2, rdna2::kVMulF16Vop2, rdna2::kVRcpF32Vop1, rdna2::kVRcpF16Vop1,
-               rdna2::kVPkFmacF16Vop2, rdna2::kVMovB32Vop1, rdna2::kVFrexpExpI32F32Vop1},
+               rdna2::kVPkFmacF16Vop2, rdna2::kVMovB32Vop1, rdna2::kVFrexpExpI32F32Vop1,
+               rdna2::kVMinF16Vop2, rdna2::kVMaxF16Vop2},
       ArchCase{ROCJITSU_CODE_ARCH_RDNA1, rdna1::kVAddF32Vop2, rdna1::kVAddF16Vop2,
                rdna1::kVMulF32Vop2, rdna1::kVMulF16Vop2, rdna1::kVRcpF32Vop1, rdna1::kVRcpF16Vop1,
-               rdna1::kVPkFmacF16Vop2, rdna1::kVMovB32Vop1, rdna1::kVFrexpExpI32F32Vop1},
+               rdna1::kVPkFmacF16Vop2, rdna1::kVMovB32Vop1, rdna1::kVFrexpExpI32F32Vop1,
+               rdna1::kVMinF16Vop2, rdna1::kVMaxF16Vop2},
   };
   struct ValueCase {
     uint16_t opcode;
@@ -10372,6 +10380,23 @@ TEST(SdwaOutputScalingTest, HonorsFormatModesAndDestinationPlacement) {
         ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x3c00u, 1, 0, 0x4400u},
         ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x3c00u, 2, 0, 0x4800u},
         ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x3c00u, 3, 0, 0x3c00u},
+        ValueCase{architecture.max_f16, false, true, 0x3c00u, 0x4000u, 1, 0, 0x4400u},
+        ValueCase{architecture.min_f16, false, true, 0x3c00u, 0x4000u, 2, 0, 0x4400u},
+        ValueCase{architecture.max_f16, false, true, 0x3c00u, 0x4000u, 3, 0, 0x3c00u},
+        ValueCase{architecture.min_f16, false, true, 0x3c00u, 0x4000u, 1, 0, 0x4000u},
+        ValueCase{architecture.max_f16, false, true, 0x3c00u, 0x4000u, 2, 0, 0x4800u},
+        ValueCase{architecture.min_f16, false, true, 0x3c00u, 0x4000u, 3, 0, 0x3800u},
+        // OMOD uses the F16/F64 denormal field and is suppressed by IEEE.
+        ValueCase{architecture.max_f16, false, true, 0x3c00u, 0x4000u, 1, 2u << 6, 0x4000u},
+        ValueCase{architecture.min_f16, false, true, 0x3c00u, 0x4000u, 2, 2u << 4, 0x4400u},
+        ValueCase{architecture.max_f16, false, true, 0x3c00u, 0x4000u, 1,
+                  amdgpu::Wavefront::IEEE_BIT, 0x4000u},
+        ValueCase{architecture.min_f16, false, true, 0x3c00u, 0x4000u, 2,
+                  amdgpu::Wavefront::IEEE_BIT, 0x3c00u},
+        ValueCase{architecture.max_f16, false, true, 0x3c00u, 0x4000u, 1, 0, 0x4400beefu,
+                  amdgpu::sdwa::WORD_1},
+        ValueCase{architecture.min_f16, false, true, 0x3c00u, 0x4000u, 2, 0, 0x3c00u,
+                  amdgpu::sdwa::DWORD, true},
         // Current emulator SDWA behavior, not capture-backed: scaling and
         // directed guest rounding apply to the same wide result.
         ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x1000u, 1, 1u << 2, 0x4001u},
