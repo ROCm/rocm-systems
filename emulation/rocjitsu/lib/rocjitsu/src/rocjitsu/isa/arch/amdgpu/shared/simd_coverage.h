@@ -124,6 +124,7 @@ template <unsigned Arity, bool E32, bool HalfDst, unsigned HalfInputs, typename 
       result = (result & U(0xffffu)) << (high_dst ? 16 : 0);
     dst.template store_native<uint32_t>(base, result, chunk);
   }
+  detail::record_simd_fast_path(SimdFastPath::VOP_WORDS);
   return true;
 }
 
@@ -412,16 +413,23 @@ template <bool Extended, typename Slot>
       }
       case 10:
       case 11: {
-        F selected = bf;
-        if (slot.op == 10)
-          util::stdx::where(af > bf, selected) = af;
-        else
-          util::stdx::where(af < bf, selected) = af;
-        for (uint32_t i = 0; i < W; ++i)
-          if (std::isnan(af[i]) || std::isnan(bf[i]) || (af[i] == 0 && bf[i] == 0))
-            selected[i] = slot.op == 10 ? std::fmax(float(af[i]), float(bf[i]))
-                                        : std::fmin(float(af[i]), float(bf[i]));
-        result = std::bit_cast<U>(selected);
+        // RDNA3 names these V_DUAL_MAX_F32/V_DUAL_MIN_F32; later targets have
+        // the IEEE maximumNumber/minimumNumber forms.
+        const rj_code_arch_t arch = wf.cu().arch();
+        if (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5) {
+          const auto policy = input_denormal::Policy::make(wf.fp_denorm_mode_f32());
+          result = slot.op == 10 ? minmax::evaluate<fp_format::F32, minmax::MaxNum>(policy, av, bv)
+                                 : minmax::evaluate<fp_format::F32, minmax::MinNum>(policy, av, bv);
+          break;
+        }
+        const auto input_policy = input_denormal::Policy::make(wf.fp_denorm_mode_f32());
+        const auto nan_policy = fp_mode::legacy_minmax_policy(arch, wf.ieee_mode());
+        result =
+            slot.op == 10
+                ? minmax::LegacyOperation<fp_format::F32, minmax::LegacyMax>{input_policy,
+                                                                             nan_policy}(av, bv)
+                : minmax::LegacyOperation<fp_format::F32, minmax::LegacyMin>{input_policy,
+                                                                             nan_policy}(av, bv);
         break;
       }
       case 16:

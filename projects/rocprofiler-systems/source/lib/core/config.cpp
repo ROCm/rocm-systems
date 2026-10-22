@@ -16,7 +16,7 @@
 #include "logger/logger.hpp"
 #include "mproc.hpp"
 #include "perf.hpp"
-#include "perfetto.hpp"
+#include "perfetto/category_registry.hpp"
 #include "sdk/tracing-config-deps.hpp"
 #include "sdk/tracing-config.hpp"
 #include "utility.hpp"
@@ -789,14 +789,6 @@ configure_settings(bool _init)
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::TRACE,
                               "Enable perfetto backend for tracing", false, "backend",
                               "perfetto");
-
-    ROCPROFSYS_CONFIG_SETTING(bool, env_vars::TRACE_LEGACY,
-                              "[DEPRECATED] The new default option is to use data from "
-                              "cached buffer. When set to true system will use "
-                              "legacy direct mode for perfetto tracing instead of "
-                              "deferred trace generation. When false (default), uses "
-                              "cached mode with minimal runtime overhead.",
-                              false, "backend", "perfetto");
 
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_PERFETTO,
                               "[DEPRECATED] Renamed to ROCPROFSYS_TRACE", false,
@@ -1807,8 +1799,6 @@ configure_settings(bool _init)
                               std::string{ env_vars::LOG_LEVEL });
     handle_deprecated_setting(std::string{ env_vars::VERBOSE },
                               std::string{ env_vars::LOG_LEVEL });
-    handle_deprecated_setting(std::string{ env_vars::TRACE_LEGACY },
-                              std::string{ env_vars::TRACE });
     handle_deprecated_setting(std::string{ env_vars::USE_SHMEM },
                               std::string{ env_vars::USE_OPENSHMEM });
 
@@ -1926,17 +1916,18 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
 #if defined(ROCPROFSYS_BUILD_HIPFILE) && ROCPROFSYS_BUILD_HIPFILE == 1
     if(_config->get<bool>(std::string{ env_vars::USE_HIPFILE }))
     {
-        // hipFile already defaults HIPFILE_STATS_LEVEL to 1, so injecting "1" here is a
-        // no-op. Do not override an explicit 0 either: that is the user's choice to turn
-        // hipFile's stats server off. Warn, because the combination produces empty
-        // telemetry despite ROCPROFSYS_USE_HIPFILE=ON.
+        // hipFile already defaults HIPFILE_STATS_LEVEL to 1. An explicit 0 is the
+        // user's choice to turn the statistics server off; do not override it.
+        // hipFileGetStatsL3 still returns success and a zero-filled snapshot in that
+        // mode, so the collector has to be turned off or those zeros are stored.
         if(rocprofsys::get_env<int>(env_vars::HIPFILE_STATS_LEVEL, 1) == 0)
         {
             LOG_WARNING("ROCPROFSYS_USE_HIPFILE=ON but HIPFILE_STATS_LEVEL=0; hipFile's "
                         "statistics server is disabled, so no hipFile telemetry will be "
                         "recorded. Unset HIPFILE_STATS_LEVEL or set it to 1 or higher");
+            _set(env_vars::USE_HIPFILE, false);
         }
-        if(!_config->get<bool>(std::string{ env_vars::USE_PROCESS_SAMPLING }))
+        else if(!_config->get<bool>(std::string{ env_vars::USE_PROCESS_SAMPLING }))
         {
             LOG_WARNING(
                 "ROCPROFSYS_USE_HIPFILE=ON but ROCPROFSYS_USE_PROCESS_SAMPLING=OFF; "
@@ -2702,17 +2693,6 @@ get_verbose()
 }
 
 bool&
-get_use_perfetto()
-{
-    static auto const _trace_setting  = get_config()->at(env_vars::TRACE);
-    static auto const _legacy_setting = get_config()->at(env_vars::TRACE_LEGACY);
-    auto const&       _trace = static_cast<tim::tsettings<bool>&>(*_trace_setting).get();
-    auto const& _legacy      = static_cast<tim::tsettings<bool>&>(*_legacy_setting).get();
-    static bool _v           = _trace && _legacy;
-    return _v;
-}
-
-bool&
 get_use_timemory()
 {
     static auto const _v = get_config()->find(std::string{ env_vars::PROFILE });
@@ -3403,14 +3383,6 @@ get_use_tmp_files()
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
-bool
-get_merge_perfetto_files()
-{
-    static auto const _v =
-        get_config()->find(std::string{ env_vars::MERGE_PERFETTO_FILES });
-    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
-}
-
 std::string
 get_tmpdir()
 {
@@ -3650,10 +3622,9 @@ get_ump_absolute_path()
     }
 
     // Co-locate UMP output with the active backend: rocpd's .db dir when
-    // rocpd is on and trace-cache Perfetto is not; otherwise the Perfetto
-    // file's dir (covers both trace-cache and legacy Perfetto).
+    // rocpd is on and Perfetto is not; otherwise the Perfetto file's dir.
     const auto source =
-        (get_use_rocpd() && !get_caching_perfetto())
+        (get_use_rocpd() && !get_use_perfetto())
             ? get_database_absolute_path("rocpd", std::to_string(process::get_id()))
             : get_perfetto_output_filename();
     return path::parent_path(source);
@@ -3674,13 +3645,11 @@ get_use_unified_memory_profiling()
 }
 
 bool&
-get_caching_perfetto()
+get_use_perfetto()
 {
-    static auto const _trace_setting  = get_config()->at(env_vars::TRACE);
-    static auto const _legacy_setting = get_config()->at(env_vars::TRACE_LEGACY);
+    static auto const _trace_setting = get_config()->at(env_vars::TRACE);
     auto const&       _trace = static_cast<tim::tsettings<bool>&>(*_trace_setting).get();
-    auto const& _legacy      = static_cast<tim::tsettings<bool>&>(*_legacy_setting).get();
-    static bool _v           = _trace && !_legacy;
+    static bool       _v     = _trace;
     return _v;
 }
 

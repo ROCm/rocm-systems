@@ -3,15 +3,8 @@
 (function () {
   "use strict";
 
-  var modelEl = document.getElementById("roofline-model");
-  if (!modelEl) {
-    return;
-  }
-
-  var model;
-  try {
-    model = JSON.parse(modelEl.textContent);
-  } catch (err) {
+  var model = window.HtmlReport.readModel("roofline-model");
+  if (!model) {
     return;
   }
 
@@ -85,7 +78,6 @@
   var applyingFrame = false;
   var rangeOperationCounter = 0;
   var activeRangeOperation = 0;
-  var themeIsReaderChoice = false;
 
   // ---- Data initialized from the model -------------------------------------
   var kernels = model.kernels;
@@ -154,10 +146,11 @@
   var state = {
     precisions: new Set(defaultPrecisions),
     peak: model.defaultPeak || ALL_PEAKS_VALUE,
-    selected: new Set(),
     isolatedRoofs: new Set(),
     runtimeThreshold: Infinity,
   };
+  var kernelPanel = null;
+  var selectedKernelKeys = new Set();
 
   function isMultiSelectEvent(event) {
     return !!(event && (event.ctrlKey || event.metaKey));
@@ -198,7 +191,7 @@
     return Math.min(Math.max(value, minimum), maximum);
   }
 
-  function setRowState(item, selected, dimmed) {
+  function setRoofRowState(item, selected, dimmed) {
     item.classList.toggle("selected", selected);
     item.classList.toggle("dimmed", dimmed);
   }
@@ -207,20 +200,8 @@
     return "(" + shown + " / " + total + ")";
   }
 
-  function eachKernelRow(fn) {
-    if (!kernelList) {
-      return;
-    }
-    Array.prototype.forEach.call(kernelList.children, function (item) {
-      var kernel = kernels[Number(item.dataset.index)];
-      if (kernel) {
-        fn(item, kernel);
-      }
-    });
-  }
-
   function isSingleKernelIsolated() {
-    return state.selected.size === 1;
+    return selectedKernelKeys.size === 1;
   }
 
   function effectivePeak() {
@@ -264,7 +245,7 @@
     if (!withinThreshold(kernel)) {
       return false;
     }
-    return state.selected.size === 0 || state.selected.has(kernel.index);
+    return selectedKernelKeys.size === 0 || selectedKernelKeys.has(kernel.index);
   }
 
   function kernelIsDrawn(kernel) {
@@ -288,7 +269,7 @@
   }
 
   function isSoleSelected(kernel) {
-    return isSingleKernelIsolated() && state.selected.has(kernel.index);
+    return isSingleKernelIsolated() && selectedKernelKeys.has(kernel.index);
   }
 
   function pointsForCurrentPeak(kernel) {
@@ -510,12 +491,12 @@
 
   function readPlotTheme() {
     return {
-      paper: themeColor("--roofline-surface"),
+      paper: themeColor("--report-surface"),
       area: themeColor("--roofline-plot-area"),
       grid: themeColor("--roofline-plot-grid"),
-      text: themeColor("--roofline-text"),
-      overlay: themeColor("--roofline-bg-soft"),
-      overlayBorder: themeColor("--roofline-border"),
+      text: themeColor("--report-text"),
+      overlay: themeColor("--report-bg-soft"),
+      overlayBorder: themeColor("--report-border"),
       markerOutline: themeColor("--roofline-marker-outline"),
     };
   }
@@ -541,45 +522,6 @@
         { "marker.line.color": theme.markerOutline },
         kernelTraceIndices
       );
-    }
-  }
-
-  function themeIsDark() {
-    return document.documentElement.classList.contains("roofline-theme-dark");
-  }
-
-  function syncThemeToggle() {
-    if (!themeToggleBtn) {
-      return;
-    }
-    var dark = themeIsDark();
-    themeToggleBtn.textContent = dark ? "Light mode" : "Dark mode";
-    themeToggleBtn.setAttribute("aria-pressed", String(dark));
-    themeToggleBtn.title = dark
-      ? "Switch the page and chart to light colors"
-      : "Switch the page and chart to dark colors";
-  }
-
-  function setTheme(dark) {
-    document.documentElement.classList.toggle("roofline-theme-dark", dark);
-    syncThemeToggle();
-    applyPlotTheme();
-  }
-
-  function watchSystemTheme() {
-    if (typeof window.matchMedia !== "function") {
-      return;
-    }
-    var query = window.matchMedia("(prefers-color-scheme: dark)");
-    var onChange = function (event) {
-      if (!themeIsReaderChoice) {
-        setTheme(event.matches);
-      }
-    };
-    if (typeof query.addEventListener === "function") {
-      query.addEventListener("change", onChange);
-    } else if (typeof query.addListener === "function") {
-      query.addListener(onChange);
     }
   }
 
@@ -1380,70 +1322,34 @@
     });
   }
 
-  function toggleKernel(index, event) {
-    var multi = isMultiSelectEvent(event);
-    if (multi && state.selected.size === 0) {
-      kernels.forEach(function (kernel) {
-        state.selected.add(kernel.index);
-      });
-      state.selected.delete(index);
-    } else {
-      toggleSelection(state.selected, index, multi);
-    }
-    render();
-    if (isSingleKernelIsolated()) {
-      scrollKernelIntoView(index);
-    }
-  }
-
-  function scrollKernelIntoView(index) {
-    eachKernelRow(function (item, kernel) {
-      if (kernel.index === index) {
-        item.scrollIntoView({ block: "nearest" });
-      }
-    });
-  }
-
-  function createPanelRow(opts) {
+  function createRoofPanelRow(roof) {
     var item = document.createElement("li");
-    item.className = "roofline-panel-item";
-    Object.keys(opts.dataset).forEach(function (key) {
-      item.dataset[key] = opts.dataset[key];
-    });
+    item.className = "report-panel-item";
+    item.dataset.trace = String(roof.traceIndex);
+    item.dataset.level = roof.level;
 
     var action = document.createElement("button");
     action.type = "button";
-    action.className = "roofline-panel-action";
-    if (opts.title) {
-      action.setAttribute("aria-label", opts.title);
-    }
+    action.className = "report-panel-action";
 
     var swatch = document.createElement("span");
-    swatch.className = opts.swatchClass || "roofline-swatch";
-    swatch.style.backgroundColor = opts.color || FALLBACK_COLOR;
+    swatch.className = "report-swatch roofline-roof-swatch";
+    swatch.style.backgroundColor = peakColors[roof.level] || FALLBACK_COLOR;
 
     var label = document.createElement("span");
-    label.className = opts.labelClass || "roofline-panel-name";
-    label.textContent = opts.label;
-    if (opts.title) {
-      RooflineKernelListTooltip.attachTooltipToKernelRow(action, label, opts.title);
-    }
+    label.className = "report-panel-name";
+    label.textContent = roof.level;
+
+    var aiaxis = document.createElement("span");
+    aiaxis.className = "roofline-roof-aiaxis";
 
     action.appendChild(swatch);
     action.appendChild(label);
-    opts.actionExtras.forEach(function (node) {
-      action.appendChild(node);
-    });
+    action.appendChild(aiaxis);
     action.addEventListener("click", function (event) {
-      if (opts.title) {
-        RooflineKernelListTooltip.hide();
-      }
-      opts.onClick(event);
+      isolateRoof(roof.traceIndex, isMultiSelectEvent(event));
     });
     item.appendChild(action);
-    opts.siblingControls.forEach(function (node) {
-      item.appendChild(node);
-    });
     return item;
   }
 
@@ -1520,34 +1426,46 @@
     return badge;
   }
 
+  function buildRuntimePct(kernel) {
+    var pct = document.createElement("span");
+    pct.className = "roofline-kernel-pct";
+    pct.textContent = kernel.pctRuntime.toFixed(1) + "%";
+    pct.title = "Percent of GPU resident time";
+    return pct;
+  }
+
   function buildKernelPanel() {
-    if (!kernelList) {
-      return;
-    }
-    kernelIndicesByRuntime().forEach(function (index) {
+    var items = kernelIndicesByRuntime().map(function (index) {
       var kernel = kernels[index];
-      var actionExtras = [];
-      if (kernelHasRuntime(kernel)) {
-        var pct = document.createElement("span");
-        pct.className = "roofline-kernel-pct";
-        pct.textContent = kernel.pctRuntime.toFixed(1) + "%";
-        pct.title = "Percent of GPU resident time";
-        actionExtras.push(pct);
-      }
-      kernelList.appendChild(
-        createPanelRow({
-          color: kernel.color,
-          label: kernel.label,
-          title: kernel.name,
-          labelClass: "roofline-panel-name roofline-kernel-name",
-          dataset: { index: String(index) },
-          actionExtras: actionExtras,
-          siblingControls: [buildOffPlotBadge(kernel)],
-          onClick: function (event) {
-            toggleKernel(kernel.index, event);
-          },
-        })
-      );
+      return {
+        key: index,
+        label: kernel.label,
+        title: kernel.name,
+        color: kernel.color,
+      };
+    });
+    kernelPanel = window.HtmlReport.createKernelList({
+      list: kernelList,
+      showAllButton: showAllBtn,
+      countElement: kernelCountEl,
+      items: items,
+      mode: "multi",
+      decorateRow: function (row, item) {
+        var kernel = kernels[item.key];
+        row.querySelector(".report-panel-name").classList.add(
+          "roofline-kernel-name"
+        );
+        if (kernelHasRuntime(kernel)) {
+          row.querySelector(".report-panel-action").appendChild(
+            buildRuntimePct(kernel)
+          );
+        }
+        row.appendChild(buildOffPlotBadge(kernel));
+      },
+      onChange: function (keys) {
+        selectedKernelKeys = keys;
+        render();
+      },
     });
   }
 
@@ -1556,21 +1474,7 @@
       return;
     }
     rooflineTraces.forEach(function (roof) {
-      var aiaxis = document.createElement("span");
-      aiaxis.className = "roofline-roof-aiaxis";
-      roofList.appendChild(
-        createPanelRow({
-          color: peakColors[roof.level] || FALLBACK_COLOR,
-          label: roof.level,
-          swatchClass: "roofline-swatch roofline-roof-swatch",
-          dataset: { trace: String(roof.traceIndex), level: roof.level },
-          actionExtras: [aiaxis],
-          siblingControls: [],
-          onClick: function (event) {
-            isolateRoof(roof.traceIndex, isMultiSelectEvent(event));
-          },
-        })
-      );
+      roofList.appendChild(createRoofPanelRow(roof));
     });
   }
 
@@ -1581,7 +1485,7 @@
       Array.prototype.forEach.call(roofList.children, function (item) {
         var idx = Number(item.dataset.trace);
         var isolated = state.isolatedRoofs.has(idx);
-        setRowState(item, isolated, isolating && !isolated);
+        setRoofRowState(item, isolated, isolating && !isolated);
         var aiaxis = item.querySelector(".roofline-roof-aiaxis");
         if (aiaxis) {
           aiaxis.textContent = item.dataset.level === axisPeak ? "(AI axis)" : "";
@@ -1610,13 +1514,11 @@
   }
 
   function updatePanel() {
-    var filtering = state.selected.size > 0;
     var offPlotKernelCount = 0;
-    eachKernelRow(function (item, kernel) {
-      var selected = state.selected.has(kernel.index);
-      setRowState(item, selected, filtering && !selected);
+    kernelPanel.applyRowStates(function (item, entry) {
+      var kernel = kernels[entry.key];
       item.classList.toggle("filtered", !withinThreshold(kernel));
-      var swatch = item.querySelector(".roofline-swatch");
+      var swatch = item.querySelector(".report-swatch");
       if (swatch) {
         var colors = kernelPointColors(kernel, kernel.points);
         var banded = colors.some(function (color) {
@@ -1636,12 +1538,7 @@
       }
     });
     var drawnKernelCount = kernels.filter(kernelIsDrawn).length;
-    if (kernelCountEl) {
-      kernelCountEl.textContent = formatCount(
-        drawnKernelCount,
-        kernels.length
-      );
-    }
+    kernelPanel.setCountText(formatCount(drawnKernelCount, kernels.length));
     if (offPlotCountEl) {
       offPlotCountEl.hidden = offPlotKernelCount === 0;
       offPlotCountEl.textContent =
@@ -1654,9 +1551,6 @@
     }
     if (fitDataBtn) {
       fitDataBtn.disabled = drawnKernelCount === 0;
-    }
-    if (showAllBtn) {
-      showAllBtn.disabled = !filtering;
     }
   }
 
@@ -1698,12 +1592,6 @@
         render();
       });
     }
-    if (showAllBtn) {
-      showAllBtn.addEventListener("click", function () {
-        state.selected.clear();
-        render();
-      });
-    }
     if (showAllRoofsBtn) {
       showAllRoofsBtn.addEventListener("click", function () {
         state.isolatedRoofs.clear();
@@ -1726,12 +1614,6 @@
     }
     if (exportPngBtn) {
       exportPngBtn.addEventListener("click", exportPng);
-    }
-    if (themeToggleBtn) {
-      themeToggleBtn.addEventListener("click", function () {
-        themeIsReaderChoice = true;
-        setTheme(!themeIsDark());
-      });
     }
     if (gd && typeof gd.on === "function") {
       gd.on("plotly_doubleclick", resetView);
@@ -1759,7 +1641,7 @@
         if (position < 0 || !kernels[position]) {
           return;
         }
-        toggleKernel(kernels[position].index, data.event);
+        kernelPanel.select(kernels[position].index, data.event);
       });
     }
   }
@@ -1828,7 +1710,7 @@
 
   function init() {
     document.documentElement.style.setProperty(
-      "--roofline-kernel-font",
+      "--report-kernel-font",
       KERNEL_NAME_FONT_FAMILY
     );
     buildPeakOptions();
@@ -1840,8 +1722,7 @@
       runtimeFilterEl.style.display = "none";
     }
     initRuntimeSlider();
-    syncThemeToggle();
-    watchSystemTheme();
+    window.HtmlReport.initTheme(themeToggleBtn, applyPlotTheme);
     whenPlotReady(function () {
       wireEvents();
       observePlotContainer();

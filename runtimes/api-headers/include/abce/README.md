@@ -624,8 +624,10 @@ cannot: which engine, how many engines, and which direction across the fabric.
 
 The SDMA packet processor consumes a ring strictly in order and does not tolerate the write
 index moving out of reservation order. `abce_ring_t` is therefore single-consumer,
-multi-producer, with the protocol in `abce_ring_core.h` shared verbatim with the (not yet
-landed) device ring. The core takes its read-index and publish steps as function pointers bundled
+multi-producer, with the protocol in `abce_ring_core.h` shared verbatim with the device ring
+(`abce_ring_device.h`). A ring's producers are all on one side — host threads, or the waves of the
+one device that owns a device ring — so the host and kernels never submit to the same ring, and a
+device ring's cursors live in device memory at agent scope. The core takes its read-index and publish steps as function pointers bundled
 with one context pointer (`abce_ring_producer_t` for the reserve side, `abce_ring_publisher_t` for
 the commit side) where the C++ version took them as template parameters instantiated on lambdas:
 
@@ -637,12 +639,33 @@ the commit side) where the C++ version took them as template parameters instanti
    advance the hardware write pointer and ring the doorbell, then release the next producer. The
    doorbell is thus monotone even when producers finish writing out of order.
 
+On device, publish and the commit hand-off use store waits, not release fences: the ring is
+uncached and the queue words are written through, so no L2 writeback is needed. The caller
+releases the buffers a copy names.
+
+A producer may keep the engine read index it last loaded (`abce_ring_control_t::cached_read_index`)
+and read the engine's own word only when that value says the ring is full; the read index only
+grows, so a stale value can understate free space but never overstate it. The device ring does
+this, because the queue's read pointer is in system memory and reading it costs a kernel about a
+microsecond, a quarter of a submit.
+
 A payload that would straddle the physical ring end is handled by reserving and publishing the
 wrap tail as a *separate* NOP region, then retrying the payload at offset zero. Keeping the
 padding separate means any payload smaller than the ring can still make progress once the ring
 drains, even when padding plus payload exceeds the ring size. Verified on a 256-byte ring: a
 200-byte reservation at offset 0, then a 100-byte reservation lands at monotonic 256 (offset 0)
 after a 56-byte NOP pad, leaving the doorbell at 356.
+
+The device ring folds the padding into the payload's reservation instead (`publish_padding` left
+null): the tail becomes counted NOPs and the payload is written at offset zero, all under one publish.
+That saves a second turn on the commit cursor, at the cost of a frame being at most half the ring.
+
+Device producers still publish in turn. Publishing in batches instead (each producer marks its frame
+written and leaves; whoever is at the head publishes every written frame with one doorbell) was
+measured on MI300X: it raised a lone submit from 2.5 to 4 us and lost throughput with hundreds of
+concurrent producers, because marking, claiming and walking the marks are device-memory round
+trips. What does pay is fewer publishes: lanes of a wave on one ring share one reservation and one
+publish, and a route can hand out several rings.
 
 Attaching to an already-in-use queue seeds the cursors from the queue's current write pointer,
 so the first acquire cannot hand out bytes the engine still owns.
@@ -737,26 +760,21 @@ descriptor leaves the `reserved3` coordination word intact.
 
 ## 12. Known gaps
 
-- **No tests in tree.** There is no CMake target either: `runtimes/api-headers` exports none yet,
-  so a consumer adds this directory to its include path and builds as C11, or C++17 for
-  `abce_cxx.h`. Everything verified for this draft was throwaway. Given the library is pure logic over plain memory, a
-  GPU-free unit suite (emit a frame, walk it with `abce_decode.h`, assert the packet sequence
-  and byte count) is both cheap and the main argument for the design; it should land with or
-  before any integration.
-- **`abce_device.h` does not exist, and the device annotations are gone.** The reserve/commit core
-  is still written to be shared with a device producer — its atomics and backoff select
-  `__hip_atomic_*` / `s_sleep` under device compilation — but the C conversion dropped the
-  `ABCE_HD` (`__host__ __device__`) annotations the C++ headers put on the builders and the ring
-  core, and the comments no longer name a device header. So the sharing is now a property of how
-  the code is written rather than something the headers declare; a device-side producer landing
-  later has to put the annotations back.
+- **Tests are GPU-free only.** `tests/abce` (see its `TEST_PLAN.md`) covers packet fields,
+  validation, the ring protocol, golden frames and per-ISA sizing/submit invariants; build it with
+  `-DABCE_BUILD_TESTS=ON`. The device header, the HSA wrapper and hardware round-trips are still
+  untested.
+- **The device header works without annotations.** The C conversion dropped the `ABCE_HD`
+  (`__host__ __device__`) annotations; `abce_device.h` instead wraps itself and the ABCE headers
+  it includes in `#pragma clang force_cuda_host_device`. A HIP translation unit therefore has to
+  include it before any other ABCE header, or the functions stay host-only.
 - **Windows is further away than it was.** Three things in the public header chain are not MSVC
   constructs. The KFD sysfs reader is at least gated behind `ABCE_HAS_KFD_TOPOLOGY` (Linux-only,
   since it walks `/sys/class/kfd` with `opendir`) and bit counting falls back to a portable loop
   off GCC/Clang, but: `abce_host.h` includes `<pthread.h>` unconditionally for the per-thread
   packet scratch's key and destructor; `abce_ring_core.h` includes `<sched.h>` for the host
   spin-wait's `sched_yield()`, where the C++ version used `std::this_thread::yield()`; and there
-  are thirteen uses of the GCC/Clang `__atomic_*` builtins — eight in `abce_ring_core.h`, four in
+  are fourteen uses of the GCC/Clang `__atomic_*` builtins — nine in `abce_ring_core.h`, four in
   `abce_host.h` (the cached environment knobs, arming the coordination word, stamping the
   execution descriptor) and one in `abce_ring_host.h` (the release fence before the doorbell) —
   which Clang accepts on Windows but MSVC does not. Closing that needs a decision, not a

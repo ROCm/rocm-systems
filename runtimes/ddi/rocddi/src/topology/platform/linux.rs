@@ -4,9 +4,8 @@
 //! Linux KFD and DRM identities associated with a discovered endpoint.
 
 use crate::topology::Endpoint;
-
-/// Linux host facts obtained from procfs and sysfs.
-pub mod host;
+use crate::topology::host::attached_numa_node_for_render;
+use std::path::Path;
 
 /// Linux-native identities retained for KFD and DRM interoperability.
 ///
@@ -23,21 +22,32 @@ pub struct KfdDrmEndpointInfo {
     pub render_minor: Option<u32>,
 }
 
-impl Endpoint {
-    /// Returns the Linux KFD/DRM identity associated with this endpoint.
-    ///
-    /// Portable callers should not use this extension. It exists for Linux API
-    /// frontends that must translate rocddi objects to an established KFD or
-    /// DRM contract.
-    #[must_use]
-    pub fn linux_kfd_drm_info(&self) -> Option<KfdDrmEndpointInfo> {
-        match &self.selector {
-            crate::driver::EndpointSelector::LinuxKfd(native) => Some(KfdDrmEndpointInfo {
-                node_id: native.node,
-                gpu_id: native.gpu_id,
-                render_minor: native.render_minor,
-            }),
-            crate::driver::EndpointSelector::Opaque(_) => None,
-        }
+/// Returns the Linux KFD/DRM identity associated with an endpoint.
+///
+/// Linux API frontends use this when translating rocddi objects to an
+/// established KFD or DRM contract. Portable code uses [`Endpoint::id`].
+#[must_use]
+pub fn kfd_drm_info(endpoint: &Endpoint) -> Option<KfdDrmEndpointInfo> {
+    match &endpoint.selector {
+        crate::driver::EndpointSelector::LinuxKfd(native) => Some(KfdDrmEndpointInfo {
+            node_id: native.node,
+            gpu_id: native.gpu_id,
+            render_minor: native.render_minor,
+        }),
+        crate::driver::EndpointSelector::Opaque(_) => None,
     }
+}
+
+/// Returns the OS NUMA node at a DRM endpoint's attachment when it has an
+/// online host CPU. This is a best-effort host locality hint, not a KFD node
+/// identity, execution permission, or part of endpoint activation identity.
+#[must_use]
+pub fn host_numa_node(endpoint: &Endpoint) -> Option<u32> {
+    let minor = kfd_drm_info(endpoint)?.render_minor?;
+    attached_numa_node_for_render(
+        Path::new("/sys/class/drm"),
+        Path::new("/sys/devices/system/node"),
+        Path::new("/sys/devices/system/cpu/online"),
+        minor,
+    )
 }

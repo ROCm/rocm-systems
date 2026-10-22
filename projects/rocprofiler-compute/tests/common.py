@@ -10,6 +10,8 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
+import uuid
 from pathlib import Path
 from threading import Thread
 from typing import Set
@@ -138,6 +140,12 @@ def get_output_dir(suffix="_output", clean_existing=True, param_id=None):
         if Path(output_dir).exists():
             shutil.rmtree(output_dir)
     return output_dir
+
+
+def unique_output_param_id(prefix):
+    """Return a get_output_dir param_id that no other pytest worker or run uses."""
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
+    return f"{prefix}_{worker}_{os.getpid()}_{threading.get_ident()}_{uuid.uuid4().hex}"
 
 
 def clean_output_dir(cleanup, output_dir):
