@@ -20,8 +20,30 @@ MODES = (
 )
 
 
+RUNTIME_CASES = (
+    'race',
+    'disjoint',
+    'read_read',
+    'collision',
+    'single_lane',
+    'repeat',
+    'alias',
+    'immediate',
+    'four_ranges',
+    'exhausted',
+    'empty',
+    'branched',
+    'wrong-artifact',
+    'bad-geometry',
+    'profiling',
+    'reused-signal',
+)
+ANALYSIS_CASES = (*RUNTIME_CASES, 'repeat_race', 'utf8_entry')
+
+
 def required_names():
     names = {
+        'ConSanRuntimeIntegration.Guards',
         'ConSanRuntime.SymbolBoundary',
         'ConSanSimProductionE2E.gfx1250.wave32.assembly.missing-statistics',
         'ConSanContract.TargetWaveFactsRoundTripAndRowsFollowActualGeometry',
@@ -50,6 +72,20 @@ def required_names():
     }
     for gpu, wave in MODES:
         suffix = f'{gpu}Wave{wave}'
+        for case in RUNTIME_CASES:
+            names.add(f'ConSanSimRuntimeE2E.{gpu}.wave{wave}.named-assembly.{case}')
+        for case in ANALYSIS_CASES:
+            names.add(f'ConSanSimE2E.{gpu}.wave{wave}.named-assembly.{case}')
+        kind = 'assembly' if gpu == 'gfx1250' else 'hip'
+        names.add(f'ConSanSimE2E.{gpu}.wave{wave}.{kind}.partial')
+        for case in (
+            'missing-statistics',
+            'batch-barrier-and',
+            'batch-barrier-or',
+            'late-barrier-and',
+            'late-barrier-or',
+        ):
+            names.add(f'ConSanSimProductionE2E.{gpu}.wave{wave}.{kind}.{case}')
         for case in (
             'EquivalentMetadataEnvironmentsPreserveTargetAndAbiValidation',
             'AssemblyLoweringPreservesConcreteIdentityAndLoadableImages',
@@ -86,22 +122,23 @@ def validate_selected(tests):
 
 
 def physical_names():
-    names = set()
-    for gpu, wave in MODES:
-        kind = 'assembly' if gpu == 'gfx1250' else 'hip'
-        prefix = f'{gpu}.wave{wave}'
-        for case in ('race', 'disjoint', 'read_read', 'partial'):
-            names.add(f'ConSanPhysicalE2E.{prefix}.{kind}.{case}')
-        names.add(f'ConSanPhysicalE2E.{prefix}.assembly.high_lane')
-        for case in (
-            'disjoint',
-            'batch-barrier-and',
-            'batch-barrier-or',
-            'late-barrier-and',
-            'late-barrier-or',
-        ):
-            names.add(f'ConSanPhysicalProductionE2E.{prefix}.{kind}.{case}')
-    return names
+    return {
+        name.replace('ConSanSim', 'ConSanPhysical', 1)
+        for name in required_names()
+        if name.startswith('ConSanSim')
+    }
+
+
+def simulator_application_command(test):
+    command = list(test.get('command', []))
+    for option, count in (('--launcher', 2), ('--config', 2), ('--require-agent', 1)):
+        if command.count(option) != 1:
+            raise ValueError(f"{test['name']}: expected one {option}")
+        index = command.index(option)
+        if index + count > len(command):
+            raise ValueError(f"{test['name']}: missing {option} value")
+        del command[index : index + count]
+    return command
 
 
 def validate_physical_registrations(tests):
@@ -112,10 +149,25 @@ def validate_physical_registrations(tests):
         raise ValueError(
             'Physical ConSan registrations missing:\n' + '\n'.join(sorted(missing))
         )
-    for name in sorted(expected):
-        _, gpu, wave, kind, scenario = name.split('.')
-        wave_size = int(wave.removeprefix('wave'))
+    physical = {
+        test['name']
+        for test in tests
+        if 'physical-gpu'
+        in next(
+            (
+                item['value']
+                for item in test.get('properties', [])
+                if item['name'] == 'LABELS'
+            ),
+            [],
+        )
+        or test['name'].startswith('ConSanPhysical')
+    }
+    for name in sorted(expected | physical):
         test = available[name]
+        if not name.startswith('ConSanPhysical'):
+            raise ValueError(f'{name}: physical test has no simulator twin')
+        _, gpu, _, _, _ = name.split('.')
         properties = {
             item['name']: item['value'] for item in test.get('properties', [])
         }
@@ -129,24 +181,31 @@ def validate_physical_registrations(tests):
         ):
             raise ValueError(f'{name}: invalid physical execution properties')
         command = test.get('command', [])
-        if '--launcher' in command or '--require-agent' in command:
+        if any(
+            option in command
+            for option in ('--launcher', '--config', '--require-agent')
+        ):
             raise ValueError(f'{name}: physical test requests simulator execution')
-        options = {
-            '--target': gpu,
-            '--wave-size': str(wave_size),
-            '--fixture-kind': kind,
-            '--threads': str(
-                3 * wave_size + 1 if scenario == 'partial' else 2 * wave_size
-            ),
-            '--case': 'disjoint' if scenario == 'partial' else scenario,
+        twin_name = name.replace('ConSanPhysical', 'ConSanSim', 1)
+        if twin_name not in available:
+            raise ValueError(f'{name}: required simulator twin missing')
+        twin = available[twin_name]
+        twin_properties = {
+            item['name']: item['value'] for item in twin.get('properties', [])
         }
-        for option, value in options.items():
-            if (
-                option not in command
-                or command.index(option) + 1 >= len(command)
-                or command[command.index(option) + 1] != value
-            ):
-                raise ValueError(f'{name}: expected {option} {value}')
+        twin_labels = twin_properties.get('LABELS', [])
+        if (
+            'simulator' not in twin_labels
+            or 'required-consan' not in twin_labels
+            or 'physical-gpu' in twin_labels
+            or twin_properties.get('DISABLED', False)
+            or 'SKIP_RETURN_CODE' in twin_properties
+        ):
+            raise ValueError(f'{twin_name}: invalid required simulator properties')
+        if command != simulator_application_command(twin):
+            raise ValueError(
+                f'{name}: command differs from required simulator twin {twin_name}'
+            )
 
 
 def validate_results(root):

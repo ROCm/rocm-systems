@@ -34,16 +34,30 @@ foreach(
         foreach(
             _case
             IN
-            ITEMS 1 2 3 4 6 11 12 13 14 unknown-environment
+            ITEMS 1 2 3 4 6 11 12 13 14 unknown-environment ${_names}
         )
             set(_case_number ${_case})
             set(_metadata_target "amdgcn-amd-amdhsa--${_gpu}")
+            set(_fixture_name native-${_case})
+            set(_group_options -DCONSAN_GROUP_BYTES=128)
+            list(FIND _names ${_case} _named_index)
+            if(NOT _named_index EQUAL -1)
+                if(_case STREQUAL "barrier" OR _case STREQUAL "wide")
+                    # These rejection-only inputs are not executable scenarios.
+                    continue()
+                endif()
+                math(EXPR _case_number "${_named_index} + 1")
+                set(_fixture_name ${_case})
+                # Preserve the named controls' original LDS extents and code,
+                # including accesses at the end of the eight-byte allocation.
+                set(_group_options)
+            endif()
             if(_case STREQUAL "unknown-environment")
                 set(_case_number 1)
                 set(_metadata_target "amdgcn-amd-amdhsa-unknown-${_gpu}")
             endif()
-            set(_object ${_directory}/native-${_case}.o)
-            set(_image ${_directory}/native-${_case}.hsaco)
+            set(_object ${_directory}/${_fixture_name}.o)
+            set(_image ${_directory}/${_fixture_name}.hsaco)
             add_custom_command(
                 OUTPUT ${_object}
                 COMMAND
@@ -54,7 +68,7 @@ foreach(
                     -DCONSAN_METADATA_TARGET="${_metadata_target}"
                     -DCONSAN_WAVE_SIZE=${_wave} -DCONSAN_LEGACY=${_legacy}
                     -DCONSAN_GFX12=${_gfx12} -DCONSAN_CASE=${_case_number}
-                    -DCONSAN_GROUP_BYTES=128 -c
+                    ${_group_options} -c
                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/native_lds.s -o
                     ${_object}
                 DEPENDS fixtures/native_lds.s ${AMDCXX}

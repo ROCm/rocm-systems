@@ -142,8 +142,11 @@ class Driver:
             'late-barrier-and': 'disjoint',
             'late-barrier-or': 'disjoint',
         }.get(args.case, args.case)
-        if args.fixture_kind == 'legacy-assembly':
-            fixture = args.fixtures / f'{fixture_name}.hsaco'
+        fixture_directory = (
+            args.fixtures / 'targets' / args.target / f'wave{args.wave_size}'
+        )
+        if args.fixture_kind == 'named-assembly':
+            fixture = fixture_directory / f'{fixture_name}.hsaco'
         else:
             case_number = {
                 'race': 1,
@@ -153,13 +156,7 @@ class Driver:
                 'high_lane': 14,
             }[fixture_name]
             prefix = 'hip' if args.fixture_kind == 'hip' else 'native'
-            fixture = (
-                args.fixtures
-                / 'targets'
-                / args.target
-                / f'wave{args.wave_size}'
-                / f'{prefix}-{case_number}.hsaco'
-            )
+            fixture = fixture_directory / f'{prefix}-{case_number}.hsaco'
         if args.launcher:
             binaries.append(args.launcher)
             assert args.config.is_file()
@@ -181,7 +178,15 @@ class Driver:
         )
         defined = fixture_name in ('disjoint', 'alias')
         mode = 'defined' if defined else 'observe'
-        if defined and args.case in ('disjoint', 'alias', 'repeat'):
+        # The missing-statistics diagnostic precedes device admission in the
+        # runner. Check the requested agent first so an unavailable physical
+        # target cannot pass that control without a matching device.
+        if defined and args.case in (
+            'disjoint',
+            'alias',
+            'repeat',
+            'missing-statistics',
+        ):
             self.run(
                 'original-baseline',
                 [args.runner, original, entry, launches, mode, '--baseline'],
@@ -249,7 +254,7 @@ class Driver:
         )
         if args.case == 'wrong-artifact':
             # A different, valid original image safely exercises exact matching.
-            wrong = args.fixtures / 'disjoint.hsaco'
+            wrong = fixture_directory / 'disjoint.hsaco'
             self.inputs['mismatched-original'] = identity(wrong)
             shutil.copyfile(wrong, original)
         output = self.run(
@@ -428,8 +433,8 @@ def add_target_arguments(parser):
     parser.add_argument('--threads', type=int, default=64)
     parser.add_argument(
         '--fixture-kind',
-        choices=('legacy-assembly', 'assembly', 'hip'),
-        default='legacy-assembly',
+        choices=('named-assembly', 'assembly', 'hip'),
+        default='named-assembly',
     )
     parser.add_argument('--launcher', type=lambda value: Path(value).resolve())
     parser.add_argument('--config', type=lambda value: Path(value).resolve())
