@@ -966,6 +966,61 @@ make -j $(nproc) rccl-UnitTestsMicro
 # Coverage: see the Coverage section (run under LLVM_PROFILE_FILE, then llvm-cov).
 ```
 
+### `rccl-UnitTestsHostAll` — one front door for every host binary
+
+The host tree builds many small binaries on purpose (see
+[Why a separate test binary](#why-a-separate-test-binary)), and every new unit
+under test tends to add another. Anything outside this directory that wants to
+*run* them therefore ends up keeping its own copy of the binary list, and those
+copies drift: a new binary silently goes unrun, and its coverage silently goes
+unreported.
+
+`rccl-UnitTestsHostAll` (`host_test_dispatch.cc`) removes the lists. It is not
+a test binary; it is a gtest-shaped front door that discovers its
+`rccl-UnitTestsMicro*` siblings **at run time** and forks the ones that own a
+selected case:
+
+```bash
+# Everything, as one report:
+./build/release/test/host/rccl-UnitTestsHostAll --gtest_output=xml:host.xml
+
+# What it can run (the union of every binary's cases):
+./build/release/test/host/rccl-UnitTestsHostAll --gtest_list_tests
+
+# One suite, wherever it lives:
+./build/release/test/host/rccl-UnitTestsHostAll --gtest_filter='*RmaCeInitTest.*'
+```
+
+Case names are qualified with the owning binary's suffix — 
+`MicroInitUncached/InitMicrotest.Case` — because the multi-arm binaries
+(`-uncached`, `-faultinj`, `-devlinker`, `-roctx`) publish identical
+`Suite.Case` names and would otherwise collide into one identity when they all
+report through one front door. The dashes are folded away (`MicroInitUncached`,
+not `MicroInit-uncached`) because gtest splits a `--gtest_filter` at its first
+`-`, so a qualifier carrying one could never be named by a positive pattern.
+
+The filter itself is resolved by **gtest**, not by the dispatcher: it registers
+the qualified names as empty tests and reads back `should_run()`. gtest exposes
+no matcher any other way (`UnitTestOptions::FilterMatchesTest` is declared only
+in `src/gtest-internal-inl.h`, which is not installed), and a reimplementation
+drifts — the first one here selected `DISABLED_` cases that gtest would not have
+run. So every filter you can write against a single binary behaves identically
+against the front door.
+
+For coverage, each child inherits `LLVM_PROFILE_FILE` and drops its own
+`.profraw` as usual. What a harness cannot know is which binaries those
+profiles came from — `llvm-cov` needs an `--object` per binary and silently
+discards a profile whose object is missing — so the dispatcher appends every
+binary it ran to `coverage-objects.txt` in the profile directory. That file,
+not a list maintained in the harness, is the object set.
+
+Adding a host test binary therefore needs no change outside this directory.
+
+`run_host_tests.sh` keeps driving the binaries individually: it writes each
+one's profiles into its own `coverage/<binary>/` subdirectory to produce the
+per-binary reports CI publishes, which a single shared profile directory could
+not reconstruct.
+
 ## Standalone host-only build (no full librccl build)
 
 `test/host/CMakeLists.txt` is dual-mode. Alongside the in-RCCL-build target
