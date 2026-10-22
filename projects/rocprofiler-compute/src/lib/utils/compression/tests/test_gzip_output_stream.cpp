@@ -188,3 +188,37 @@ TEST_F(TestGzipOutputStream, UnwritablePath_FailsRatherThanCrashing)
     EXPECT_FALSE(stream.write("data"));
     EXPECT_FALSE(stream.close());
 }
+
+TEST_F(TestGzipOutputStream, BeforeClose_ThePathHoldsNothing)
+{
+    GzipFileOutputStream stream(m_path.string());
+    ASSERT_TRUE(stream.write("rows\n"));
+
+    EXPECT_FALSE(std::filesystem::exists(m_path));
+
+    ASSERT_TRUE(stream.close());
+    EXPECT_TRUE(std::filesystem::exists(m_path));
+}
+
+TEST_F(TestGzipOutputStream, Close_LeavesNoTemporaryFileBehind)
+{
+    GzipFileOutputStream stream(m_path.string());
+    ASSERT_TRUE(stream.write("rows\n"));
+    ASSERT_TRUE(stream.close());
+
+    EXPECT_FALSE(std::filesystem::exists(m_path.string() + ".tmp"));
+}
+
+TEST_F(TestGzipOutputStream, FailedStream_PublishesNothing)
+{
+    GzipFileOutputStream stream(m_path.string());
+    ASSERT_TRUE(stream.write("rows\n"));
+    ASSERT_TRUE(stream.close());
+    // Writing after close fails the stream, so the second close discards.
+    ASSERT_FALSE(stream.write("late"));
+
+    std::filesystem::remove(m_path);
+    EXPECT_FALSE(stream.close());
+    EXPECT_FALSE(std::filesystem::exists(m_path));
+    EXPECT_FALSE(std::filesystem::exists(m_path.string() + ".tmp"));
+}

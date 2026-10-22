@@ -30,22 +30,11 @@ from utils.utils_common import canonical_config_arch
 config = {}
 config["kernel_name_1"] = "vecCopy"
 config["app_1"] = ["./tests/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
-config["app_occupancy"] = ["./tests/occupancy"]
 config["app_mat_mul_max"] = ["./tests/mat_mul_max"]
 config["app_hip_dynamic_shared"] = ["./tests/hip_dynamic_shared"]
 config["app_laplace_eqn"] = ["./tests/laplace_eqn", "-i", "5000"]
 config["app_laplace_eqn_iter"] = ["./tests/laplace_eqn", "-i", "15000"]
 config["app_laplace_eqn_insufficient"] = ["./tests/laplace_eqn", "-i", "3"]
-config["app_vcopy_multikernel_iter"] = [
-    "./tests/vcopy",
-    "-n",
-    "1048576",
-    "-b",
-    "256",
-    "-i",
-    "500",
-    "--multikernel",
-]
 config["app_mpi_aware_laplace_eqn"] = ["./tests/mpi_aware_laplace_eqn", "-i", "5"]
 config["rocflop"] = ["./tests/rocflop", "--device", "0", "--fp16"]
 config["torch_test_app"] = ["python3", "./tests/simple_net.py"]
@@ -274,6 +263,29 @@ def require_pc_sampling_gpu(is_stochastic=False):
     if not soc:
         pytest.skip("GPU not supported")
     skip_unsupported_pc_sampling_soc(is_stochastic=is_stochastic)
+
+
+def is_pc_sampling_not_supported(output):
+    """Check whether profiling output indicates PC sampling is not supported.
+
+    To be called with the combined stdout + stderr after profiling.
+    """
+    return any(
+        marker in output
+        for marker in (
+            # rocprof-compute's own pre-flight check against the agent configs
+            "is not supported on any of the agents on this system",
+            # rocprofiler-sdk, when it accepts the run and then rejects the config
+            "Given PC sampling configuration is not supported",
+        )
+    )
+
+
+def skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir):
+    """Skip the test if profiling output indicates PC sampling is not supported."""
+    if is_pc_sampling_not_supported(f"{stdout}\n{stderr}"):
+        common.clean_output_dir(config["cleanup"], workload_dir)
+        pytest.skip("PC sampling is not supported")
 
 
 def inject_mpirun(command, num_ranks):

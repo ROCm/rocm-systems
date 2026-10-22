@@ -32,7 +32,11 @@ communicator and window setup. The validated AMD path is ``GIN_IB_PROXY``:
    export NCCL_GIN_TYPE=2
    export NCCL_CUMEM_ENABLE=1
    export NCCL_DMABUF_ENABLE=1
-   export NCCL_IB_MERGE_NICS=0
+
+NIC fusion does not have to be disabled, and enabling it has no effect on GIN
+either way: GIN and the host RMA proxy build no vNICs of their own and keep
+using the physical devices, so fusion aggregates bandwidth for the regular
+transport only.
 
 The ROCm runtime and NIC driver must support exporting and registering VMM
 allocations. ``NCCL_DMABUF_ENABLE=1`` is the validated registration path;
@@ -94,10 +98,17 @@ request; use the value returned in ``devComm.ginContextCount`` when assigning
 work to contexts.
 
 ``ginTrafficClass`` overrides the host communicator traffic class for this
-device communicator. ``NCCL_IB_SL`` independently overrides the InfiniBand
-service level, and ``NCCL_IB_TC`` independently overrides the RoCE traffic
-class. Set ``reqs.ginTrafficClass`` only when the fabric administrator provides
-an appropriate value.
+device communicator. The service level of the GIN connections comes from
+``NCCL_IB_SL`` when it is set, otherwise from ``ginTrafficClass`` or the host
+communicator. Their RoCE traffic class comes from ``NCCL_GIN_IB_TC`` when it is
+set, then from ``NCCL_IB_TC``, and only then from ``ginTrafficClass`` or the
+host communicator. Setting ``NCCL_GIN_IB_TC`` moves GIN traffic to its own RoCE
+traffic class while the collective and point-to-point connections keep
+``NCCL_IB_TC``. InfiniBand link layers don't carry the traffic class, so
+``NCCL_GIN_IB_TC`` has no effect there; GIN traffic can be separated only
+through the service level, by setting ``ginTrafficClass`` and leaving
+``NCCL_IB_SL`` unset. Set these values only when the fabric administrator
+provides appropriate values.
 
 Device code creates an ``ncclGin`` object for one returned context:
 
@@ -243,6 +254,14 @@ available since NCCL 2.30.5. RCCL accepts compatible layouts within the 2.30
 family, but applications using pre-2.30 GIN device code must be rebuilt with
 compatible RCCL headers. The runtime rejects pre-2.30 requirements that request
 indexed GIN resources.
+
+``NCCL_GIN_IB_TC``, added in upstream NCCL 2.30.7, applies to the connections
+of the IB proxy backend (``NCCL_GIN_TYPE=2``). The one-sided host RMA
+operations run on the same backend and use the same traffic class. The
+rocSHMEM GDA backend (``NCCL_GIN_TYPE=6``) doesn't read ``NCCL_GIN_IB_TC``,
+``NCCL_IB_TC``, or ``ginTrafficClass``; its queue pairs take their traffic
+class from ``ROCSHMEM_GDA_TRAFFIC_CLASS``. Anvil SDMA (``NCCL_GIN_TYPE=7``)
+moves data within a node without a NIC, so traffic class doesn't apply to it.
 
 The 128-byte, versioned GIN proxy descriptor and per-context proxy progress are
 internal implementation details and require no application configuration.

@@ -35,10 +35,8 @@
 #include "platform/interop_d3d11.hpp"
 #endif
 
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
 #include "device/rocm/rocurilocator.hpp"
-#endif
 #endif
 
 #if defined(__linux__)
@@ -125,7 +123,7 @@ bool NullDevice::create(const amd::Isa& isa) {
   std::stringstream ss;
   ss << AMD_BUILD_STRING " (HSA,LC) [Offline]";
   ::strncpy(info_.driverVersion_, ss.str().c_str(), sizeof(info_.driverVersion_) - 1);
-  info_.version_ = "OpenCL " OPENCL_VERSION_STR " ";
+  info_.version_ = "OpenCL " OPENCL_VERSION_STR " " AMD_PLATFORM_INFO;
   return true;
 }
 
@@ -203,6 +201,12 @@ void Device::setupCpuAgent() {
   link_attrs.push_back(std::make_pair(LinkAttribute::kLinkLinkType, 0));
   if (findLinkInfo(cpu_agents_[0].fine_grain_pool, &link_attrs)) {
     isXgmi_ = (link_attrs[0].second == HSA_AMD_LINK_INFO_TYPE_XGMI);
+    // findLinkInfo stores -1 when there are zero hops. kLinkHopCount is a
+    // NUMA-distance estimate and is 0 when that distance is below one hop.
+    const bool cpu_link = link_attrs[0].second >= 0;
+    info_.largeBar_ = ROC_ENABLE_LARGE_BAR && cpu_link && !isAPU_;
+  } else {
+    info_.largeBar_ = false;
   }
 
   preferred_numa_node_ = index;
@@ -656,6 +660,10 @@ bool Device::create() {
     return false;
   }
 
+  // Query before Settings::create() since the threshold selection depends on it,
+  // and before setupCpuAgent() so large BAR can exclude APUs.
+  isAPU_ = agentIsAPU(bkendDevice_);
+
   setupCpuAgent();
 
   // Get Agent HDP Flush Register Memory
@@ -669,9 +677,6 @@ bool Device::create() {
 
   info_.hdpMemFlushCntl = hdpInfo.HDP_MEM_FLUSH_CNTL;
   info_.hdpRegFlushCntl = hdpInfo.HDP_REG_FLUSH_CNTL;
-
-  // Query before Settings::create() since the threshold selection depends on it.
-  isAPU_ = agentIsAPU(bkendDevice_);
 
   // Create HSA settings
   assert(!settings_);
@@ -860,14 +865,15 @@ hsa_status_t Device::iterateGpuMemoryPoolCallback(hsa_amd_memory_pool_t pool, vo
         } else if ((global_flag & HSA_REGION_GLOBAL_FLAG_COARSE_GRAINED) != 0) {
           dev->gpuvm_segment_ = pool;
 
-          // If cpu agent cannot access this pool, the device does not support large bar.
+          // WSL/Windows does not report CPU link hops the way KFD does. CPU
+          // access to this pool is the large-BAR signal there. An APU can
+          // access the pool because the memory is shared, so that stays false.
           hsa_amd_memory_pool_access_t tmp{};
           Hsa::agent_memory_pool_get_info(dev->cpu_agent_info_->agent, pool,
                                           HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS, &tmp);
-
           if (tmp == HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED) {
             dev->info_.largeBar_ = false;
-          } else {
+          } else if (!dev->isAPU_) {
             dev->info_.largeBar_ = ROC_ENABLE_LARGE_BAR;
           }
 
@@ -1449,12 +1455,12 @@ bool Device::populateOCLDeviceConstants() {
     info_.version_ =
         "OpenCL " /*OPENCL_VERSION_STR*/
         "2.0"
-        " ";
+        " " AMD_PLATFORM_INFO;
   } else {
     info_.version_ =
         "OpenCL " /*OPENCL_VERSION_STR*/
         "1.2"
-        " ";
+        " " AMD_PLATFORM_INFO;
   }
 
   info_.builtInKernels_ = "";
@@ -2126,7 +2132,12 @@ Memory* Device::getRocMemory(amd::Memory* mem) const {
 }
 
 // ================================================================================================
-device::Memory* Device::createMemory(amd::Memory& owner) const {
+device::Memory* Device::createMemory(
+    amd::Memory& owner, amd::Memory::ErrorCode* errorCode) const {
+  if (errorCode != nullptr) {
+    *errorCode = amd::Memory::kErrorUnknown;
+  }
+
   roc::Memory* memory = nullptr;
   if (owner.asBuffer()) {
     memory = new roc::Buffer(*this, owner);
@@ -2140,7 +2151,7 @@ device::Memory* Device::createMemory(amd::Memory& owner) const {
     return nullptr;
   }
 
-  bool result = memory->create();
+  bool result = memory->create(false, errorCode);
 
   if (!result) {
     LogError("Failed creating memory");
@@ -2180,7 +2191,8 @@ device::Memory* Device::createMemory(amd::Memory& owner) const {
       return nullptr;
     }
 
-    if (devImageView != nullptr && !devImageView->createView(static_cast<roc::Image&>(*memory))) {
+    if (devImageView != nullptr &&
+        !devImageView->createView(static_cast<roc::Image&>(*memory), errorCode)) {
       LogError("[OCL] Fail to create device mem object for the view");
       delete devImageView;
       imageView->release();
@@ -2223,7 +2235,7 @@ device::Memory* Device::createMemory(amd::Memory& owner) const {
 device::Memory* Device::createMemory(size_t size, size_t alignment) const {
   auto buffer = new roc::Buffer(*this, size);
   static constexpr bool LocalAlloc = true;
-  if ((buffer == nullptr) || !buffer->create(LocalAlloc)) {
+  if ((buffer == nullptr) || !buffer->create(LocalAlloc, nullptr)) {
     LogError("Couldn't allocate memory on device!");
     return nullptr;
   }
@@ -2470,6 +2482,54 @@ uint64_t Device::hostVmemAlloc(size_t size, uint64_t flags, int numaNode) const 
   }
 
   return hsa_vmem_handle.handle;
+}
+
+bool Device::getVmmAllocInfo(amd::Memory& amd_mem_obj, amd::Device::VmmLocationType* location_type,
+                             int* device_id, size_t* size) const {
+  if (location_type == nullptr || device_id == nullptr || size == nullptr) return false;
+
+  const uint64_t hsa_handle = amd_mem_obj.getUserData().hsa_handle;
+  if (hsa_handle == 0) return false;
+
+  // Enhancement entry point: an older ROCr does not export it. Report failure so
+  // the caller keeps its legacy device/size-zero behaviour.
+  if (!Hsa::vmem_get_vmem_info_available()) return false;
+
+  hsa_amd_vmem_alloc_handle_t handle{hsa_handle};
+  hsa_amd_vmem_handle_info_t info{};
+  info.size = sizeof(info);
+
+  // Fails for an import whose placement ROCr could not recover, which is the
+  // case the caller's fallback exists for.
+  if (Hsa::vmem_get_vmem_info(handle, &info) != HSA_STATUS_SUCCESS || info.agent.handle == 0) {
+    return false;
+  }
+
+  // Ask the owning agent what it is. The allocation's pool is deliberately not
+  // consulted: for an imported handle it names a placement class, not the pool
+  // the exporter allocated from.
+  hsa_device_type_t dev_type{};
+  if (Hsa::agent_get_info(info.agent, HSA_AGENT_INFO_DEVICE, &dev_type) != HSA_STATUS_SUCCESS) {
+    return false;
+  }
+
+  *size = info.alloc_size;
+  *location_type = (dev_type == HSA_DEVICE_TYPE_CPU) ? amd::Device::VmmLocationType::kHost
+                                                     : amd::Device::VmmLocationType::kDevice;
+
+  // Host memory is not device-indexed. For device memory report the owning GPU
+  // rather than whichever device the importing thread happens to have current.
+  *device_id = static_cast<int>(amd::InvalidDeviceId);
+  if (*location_type == amd::Device::VmmLocationType::kDevice) {
+    for (auto& device : devices()) {
+      if (static_cast<Device*>(device)->getBackendDevice().handle == info.agent.handle) {
+        *device_id = static_cast<int>(device->index());
+        break;
+      }
+    }
+    if (*device_id == static_cast<int>(amd::InvalidDeviceId)) return false;
+  }
+  return true;
 }
 
 void* Device::reserveMemory(size_t size, size_t alignment) const {
@@ -4531,10 +4591,8 @@ void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data) {
 }
 
 // ================================================================================================
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
 device::UriLocator* Device::createUriLocator() const { return new roc::UriLocator(); }
-#endif
 #endif
 
 // ================================================================================================

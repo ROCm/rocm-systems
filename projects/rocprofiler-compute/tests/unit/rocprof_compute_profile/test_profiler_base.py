@@ -347,7 +347,6 @@ def test_attach_library_resolution_with_fallback():
         iteration_multiplexing=None,
         attach_pid=12345,
         attach_duration_msec=None,
-        kokkos_trace=False,
         kernel=None,
         kernel_iteration_range=None,
         torch_trace=False,
@@ -399,7 +398,6 @@ def test_sdk_profiler_options_preserve_ld_preload_and_set_env(tmp_path, monkeypa
         iteration_multiplexing=None,
         attach_pid=None,
         attach_duration_msec=None,
-        kokkos_trace=False,
         kernel=None,
         kernel_iteration_range=None,
         torch_trace=False,
@@ -430,7 +428,6 @@ def test_rocprofv3_live_attach_uses_sync_output():
         ["/bin/true"],
         attach_pid="12345",
         attach_duration_msec="500",
-        kokkos_trace=False,
     )
     args.remaining = "-- /bin/true"
     profiler = rocprof_v3_profiler(args, profiler_mode="rocprofv3", soc=None)
@@ -452,7 +449,6 @@ def test_kernel_iteration_range_translated_for_both_backends(tmp_path):
         kernel_iteration_range=["1", "3:5"],
         output_directory=str(tmp_path),
         rocprofiler_sdk_tool_path="sdk_tool",
-        kokkos_trace=False,
     )
     args.remaining = "-- /bin/true"
 
@@ -495,7 +491,6 @@ def test_sdk_pc_sampling_options(
         output_directory=str(tmp_path),
         pc_sampling_method=method,
         pc_sampling_interval=1000,
-        kokkos_trace=False,
     )
     args.remaining = "/bin/true"
     profiler = rocprofiler_sdk_profiler(args, profiler_mode="rocprofiler-sdk", soc=None)
@@ -574,6 +569,8 @@ def _make_rpc_args(
     membw_analysis=False,
     experimental=False,
     mode="profile",
+    list_stats=False,
+    output_format="stdout",
 ) -> argparse.Namespace:
     """Build a minimal Namespace for sanitize() unit tests."""
     return argparse.Namespace(
@@ -605,6 +602,15 @@ def _make_rpc_args(
         ml_api_trace=False,
         kernel_iteration_range=None,
         remaining=["--", "./myapp"],
+        list_stats=list_stats,
+        output_format=output_format,
+        debug_options=[],
+        verify_deps=False,
+        view=None,
+        torch_operator=None,
+        triton_operator=None,
+        list_torch_operators=False,
+        list_triton_operators=False,
     )
 
 
@@ -744,6 +750,38 @@ def test_sanitize_membw_analysis_injects_block_30(
     assert args.filter_blocks == expected_filter_blocks
 
 
+@pytest.mark.parametrize(
+    "output_format, expect_error",
+    [("stdout", False), ("txt", False), ("csv", True), ("db", True)],
+)
+@pytest.mark.parametrize(
+    "selectors",
+    [
+        [],
+        ["single-metric"],
+        ["verify-deps"],
+        ["table-view", "ignore-amd-smi", "single-metric", "verify-deps"],
+    ],
+)
+def test_handle_analyze_args_list_stats_output_format(
+    output_format, expect_error, selectors
+):
+    """--list-stats is rejected with csv and db output."""
+    args = _make_rpc_args(mode="analyze", list_stats=True, output_format=output_format)
+    args.debug_options = selectors
+    instance = _make_rpc_with_args(args)
+    if expect_error:
+        with pytest.raises(SystemExit):
+            instance.handle_analyze_args()
+    else:
+        instance.handle_analyze_args()
+
+    assert args.debug == ("single-metric" in selectors)
+    assert args.verify_deps == ("verify-deps" in selectors)
+    assert args.ignore_amd_smi == ("ignore-amd-smi" in selectors)
+    assert args.view == ("table" if "table-view" in selectors else None)
+
+
 # ---------------------------------------------------------------------------
 # pre_processing(): memory-bandwidth configuration persistence
 # ---------------------------------------------------------------------------
@@ -765,7 +803,6 @@ def test_pre_processing_persists_membw_analysis_config(
     mock_soc = Mock()
     mock_soc._mspec = SimpleNamespace()
     mock_soc.profiling_setup.return_value = effective_filter_blocks
-    mock_soc.get_compatible_profilers.return_value = ["rocprofv3"]
     profiler = rocprof_v3_profiler(
         profiling_args,
         profiler_mode="rocprofv3",
@@ -810,7 +847,6 @@ def test_pre_processing_pmc_power_gating_warning(
     mock_soc = Mock()
     mock_soc._mspec = SimpleNamespace(perf_level=perf_level)
     mock_soc.profiling_setup.return_value = []
-    mock_soc.get_compatible_profilers.return_value = ["rocprofv3"]
     profiler = rocprof_v3_profiler(
         profiling_args,
         profiler_mode="rocprofv3",

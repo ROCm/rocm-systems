@@ -145,6 +145,11 @@ bool SkipOnWsl(const char* reason) {
   return SkipCurrentTest(reason);
 }
 
+bool SkipIfNotWsl(const char* reason) {
+  if (isWslEnvironment()) return false;
+  return SkipCurrentTest(reason);
+}
+
 bool PlatformDetector::isFFMEnvironment() {
   static bool checked = false;
   static bool is_ffm = false;
@@ -429,6 +434,11 @@ hsa_status_t FindGlobalPool(hsa_amd_memory_pool_t pool, void* data) {
 hsa_status_t FindAPUStandardPool(hsa_amd_memory_pool_t pool, void* data) {
   return FindPool(pool, data, HSA_AMD_SEGMENT_GLOBAL, POOL_PROP_DONT_CARE,
                                           POOL_PROP_DONT_CARE, POOL_PROP_DONT_CARE);
+}
+
+hsa_status_t FindFineGrainedPool(hsa_amd_memory_pool_t pool, void* data) {
+  return FindPool(pool, data, HSA_AMD_SEGMENT_GLOBAL, POOL_PROP_DONT_CARE,
+                                          POOL_PROP_OFF, POOL_PROP_ON);
 }
 
 // Populate the vector with handles to all agents and pools

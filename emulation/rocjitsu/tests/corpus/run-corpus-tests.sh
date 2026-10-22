@@ -15,12 +15,14 @@
 #   --hard-timeout N     Per-test timeout for failed-test reruns (default: 60)
 #   --rerun-timeout N    Overall failed-test rerun budget (default: 1200)
 #   --sanitizer MODE     Launcher instrumentation: none, clang-asan, or gcc-asan
+#   --race-tests         Also run the RocJITsu race-detector HIP corpus
 #   --rerun-failed       Rerun only tests that failed the soft-timeout pass
 #   --warn-perf          Warn about passing tests close to the soft timeout
 #
 # Environment variables:
 #   ROCM_PATH            Required ROCm installation root
 #   ROCJITSU_SOURCE_DIR  Required rocjitsu source directory
+#   ROCJITSU_CPU_THREAD_BUDGET  Execution threads per simulator (default: 0, auto)
 #
 # Outputs:
 #   .pytest-artifacts/<target>/           Corpus harness logs and artifacts
@@ -32,6 +34,12 @@ set -euo pipefail
 : "${ROCM_PATH:?ROCM_PATH must be set}"
 : "${ROCJITSU_SOURCE_DIR:?ROCJITSU_SOURCE_DIR must be set}"
 
+cpu_thread_budget="${ROCJITSU_CPU_THREAD_BUDGET:-0}"
+if [[ ! "${cpu_thread_budget}" =~ ^(0|[1-9][0-9]*)$ ]]; then
+  echo "ROCJITSU_CPU_THREAD_BUDGET requires a nonnegative integer" >&2
+  exit 1
+fi
+
 worker_count=8
 soft_timeout_seconds=30
 hard_timeout_seconds=60
@@ -39,10 +47,11 @@ rerun_timeout_seconds=1200
 rerun_failed=false
 warn_perf=false
 sanitizer_mode=none
+race_tests=false
 
 usage() {
   echo "Usage: $0 [--workers N] [--soft-timeout N] [--hard-timeout N] [--rerun-timeout N]" \
-    "[--sanitizer none|clang-asan|gcc-asan] [--rerun-failed] [--warn-perf]" >&2
+    "[--sanitizer none|clang-asan|gcc-asan] [--race-tests] [--rerun-failed] [--warn-perf]" >&2
 }
 
 targets=(
@@ -109,6 +118,10 @@ while (( $# )); do
       ;;
     --rerun-failed)
       rerun_failed=true
+      shift
+      ;;
+    --race-tests)
+      race_tests=true
       shift
       ;;
     --warn-perf)
@@ -203,7 +216,8 @@ if [[ "${sanitizer_mode}" == clang-asan ]]; then
   # does not construct the expected shared-runtime/interposer preload order.
   preflight_config="${ROCJITSU_SOURCE_DIR}/configs/gfx942_cdna3.json"
   "${run_wrapper_prefix[@]}" \
-    "${rocjitsu_launcher}" --config "${preflight_config}" -- \
+    "${rocjitsu_launcher}" --config "${preflight_config}" \
+    --cpu-thread-budget "${cpu_thread_budget}" -- \
     "${child_command_prefix[@]}" true
 fi
 
@@ -215,7 +229,14 @@ run_pytest() {
   local skip_config_path="$5"
   local target_artifact_dir="$6"
   local target_cache_dir="$7"
-  shift 7
+  local suites="$8"
+  shift 8
+  local pytest_environment=(env)
+  if [[ "${suites}" == race ]]; then
+    pytest_environment+=("ROCJITSU_RACE_CONFIG=${config_path}")
+    # The race adapter materializes a private config for each GoogleTest case.
+    config_path="{config}"
+  fi
   # The run-wrapper timeout owns the per-test deadline and preserves the
   # command's captured diagnostics. Foreground mode keeps timeout and its child
   # in the supervisor-owned process group. Pytest gets cleanup headroom as a failsafe.
@@ -227,6 +248,7 @@ run_pytest() {
     timeout --foreground --signal=TERM --kill-after=5s "${timeout_seconds}s"
     "${rocjitsu_launcher}"
     --config "${config_path}"
+    --cpu-thread-budget "${cpu_thread_budget}"
     --
     "${child_command_prefix[@]}"
   )
@@ -236,9 +258,8 @@ run_pytest() {
   local pytest_cmd=(
     pytest tests/test_corpus.py
     --target "${target_name}"
-    --suite "iree,kernels,cts"
+    --suite "${suites}"
     --run-wrapper "${run_wrapper_command% }"
-    --skip-tests-config "${skip_config_path}"
     --artifact-directory "${target_artifact_dir}"
     --durations=0
     -vv
@@ -248,12 +269,15 @@ run_pytest() {
     -o "timeout_func_only=true"
     -o "junit_duration_report=call"
   )
+  if [[ -n "${skip_config_path}" ]]; then
+    pytest_cmd+=(--skip-tests-config "${skip_config_path}")
+  fi
   if (( overall_timeout_seconds > 0 )); then
     timeout --signal=TERM --kill-after=10s "${overall_timeout_seconds}s" \
-      "${pytest_cmd[@]}" --timeout "${pytest_timeout_seconds}" "$@"
+      "${pytest_environment[@]}" "${pytest_cmd[@]}" --timeout "${pytest_timeout_seconds}" "$@"
     return
   fi
-  "${pytest_cmd[@]}" --timeout "${pytest_timeout_seconds}" "$@"
+  "${pytest_environment[@]}" "${pytest_cmd[@]}" --timeout "${pytest_timeout_seconds}" "$@"
 }
 
 for target in "${targets[@]}"; do
@@ -269,7 +293,7 @@ for target in "${targets[@]}"; do
   # Only the soft-timeout run is configured to output a JUnit XML report.
   first_run_status=0
   run_pytest "${soft_timeout_seconds}" 0 "${name}" "${rocjitsu_config_path}" \
-    "${skip_tests_config_path}" "${artifact_dir}" "${cache_dir}" \
+    "${skip_tests_config_path}" "${artifact_dir}" "${cache_dir}" "iree,kernels,cts" \
     --junitxml "${junit_xml}" || first_run_status=$?
   if [[ -f "${junit_xml}" ]]; then
     junit_xml_paths+=("${junit_xml}")
@@ -296,13 +320,66 @@ for target in "${targets[@]}"; do
   echo "::group::(${name}) pytest rerun failed tests"
   if run_pytest "${hard_timeout_seconds}" "${rerun_timeout_seconds}" "${name}" \
        "${rocjitsu_config_path}" "${skip_tests_config_path}" "${artifact_dir}" \
-       "${cache_dir}" --last-failed --last-failed-no-failures=none; then
+       "${cache_dir}" "iree,kernels,cts" --last-failed --last-failed-no-failures=none; then
     echo "::endgroup::"
     echo "::warning::Retried (${name}) tests passed."
     continue
   fi
   echo "::endgroup::"
 done
+
+if [[ "${race_tests}" == true ]]; then
+  race_targets=(
+    # The pinned buffer-to-LDS race fixture allocates no LDS after optimization.
+    # Skip that case until its launch reserves storage in the corpus.
+    "gfx950 ${ROCJITSU_SOURCE_DIR}/tests/race-detector/race_test_config.json gfx950_skip_tests.json"
+    "gfx1151 ${ROCJITSU_SOURCE_DIR}/configs/gfx1151.json"
+  )
+  export ROCJITSU_RACE_BUILD_ROOT="${corpus_work_dir}/.pytest-artifacts/race-build"
+
+  for target in "${race_targets[@]}"; do
+    read -r name config_path skip_tests_config <<< "${target}"
+    skip_tests_config_path=""
+    if [[ -n "${skip_tests_config}" ]]; then
+      skip_tests_config_path="${ROCJITSU_SOURCE_DIR}/tests/corpus/${skip_tests_config}"
+    fi
+    echo "::group::(race-${name}) pytest"
+    artifact_dir="${corpus_work_dir}/.pytest-artifacts/race-${name}"
+    cache_dir="${corpus_work_dir}/.pytest-cache/race-${name}"
+    junit_xml="${junit_dir}/race-${name}.xml"
+
+    first_run_status=0
+    run_pytest "${soft_timeout_seconds}" 0 "${name}" "${config_path}" "${skip_tests_config_path}" \
+      "${artifact_dir}" "${cache_dir}" race --junitxml "${junit_xml}" || \
+      first_run_status=$?
+    if [[ -f "${junit_xml}" ]]; then
+      junit_xml_paths+=("${junit_xml}")
+    fi
+
+    if (( first_run_status == 0 )); then
+      echo "::endgroup::"
+      echo "All race (${name}) tests passed."
+      continue
+    fi
+
+    corpus_test_status=1
+    echo "::endgroup::"
+    echo "::error::Some race (${name}) tests failed."
+    if [[ "${rerun_failed}" == false ]]; then
+      continue
+    fi
+
+    echo "::group::(race-${name}) pytest rerun failed tests"
+    if run_pytest "${hard_timeout_seconds}" "${rerun_timeout_seconds}" \
+         "${name}" "${config_path}" "${skip_tests_config_path}" "${artifact_dir}" "${cache_dir}" race \
+         --last-failed --last-failed-no-failures=none; then
+      echo "::endgroup::"
+      echo "::warning::Retried race (${name}) tests passed."
+      continue
+    fi
+    echo "::endgroup::"
+  done
+fi
 
 # The reporting script's return code does not affect the corpus test status.
 if [[ "${warn_perf}" == true ]]; then

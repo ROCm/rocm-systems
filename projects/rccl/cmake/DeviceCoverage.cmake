@@ -10,8 +10,13 @@ set(RCCL_DEVICE_PROFILE_RUNTIME_RELPATHS
     "lib/amdgcn-amd-amdhsa/libclang_rt.profile.a"
     "lib/linux/libclang_rt.profile-amdgcn.a")
 
-set(RCCL_HOST_ROCM_PROFILE_RUNTIME_NAME
-    "libclang_rt.profile_rocm.a")
+# Host ROCm profile runtime archive names, in priority order: the per-target
+# runtime layout (lib/<triple>/) first, then the legacy arch-suffixed layout
+# (lib/linux/) that compilers built without LLVM_ENABLE_PER_TARGET_RUNTIME_DIR use.
+cmake_host_system_information(RESULT _rccl_host_arch QUERY OS_PLATFORM)
+set(RCCL_HOST_ROCM_PROFILE_RUNTIME_NAMES
+    "libclang_rt.profile_rocm.a"
+    "libclang_rt.profile_rocm-${_rccl_host_arch}.a")
 
 
 # Report whether <compiler> accepts the device coverage instrumentation flags.
@@ -91,18 +96,20 @@ endfunction()
 # compiler-rt packages. Older packages include the ROCm collection objects in
 # the generic profile runtime, so an absent archive is not an error.
 function(rccl_find_host_rocm_profile_runtime compiler output_runtime)
-  execute_process(
-    COMMAND "${compiler}" "-print-file-name=${RCCL_HOST_ROCM_PROFILE_RUNTIME_NAME}"
-    OUTPUT_VARIABLE runtime
-    ERROR_QUIET
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    RESULT_VARIABLE runtime_result)
+  foreach(_name IN LISTS RCCL_HOST_ROCM_PROFILE_RUNTIME_NAMES)
+    execute_process(
+      COMMAND "${compiler}" "-print-file-name=${_name}"
+      OUTPUT_VARIABLE runtime
+      ERROR_QUIET
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      RESULT_VARIABLE runtime_result)
 
-  if(runtime_result EQUAL 0 AND IS_ABSOLUTE "${runtime}" AND EXISTS "${runtime}")
-    set(${output_runtime} "${runtime}" PARENT_SCOPE)
-  else()
-    set(${output_runtime} "" PARENT_SCOPE)
-  endif()
+    if(runtime_result EQUAL 0 AND IS_ABSOLUTE "${runtime}" AND EXISTS "${runtime}")
+      set(${output_runtime} "${runtime}" PARENT_SCOPE)
+      return()
+    endif()
+  endforeach()
+  set(${output_runtime} "" PARENT_SCOPE)
 endfunction()
 
 

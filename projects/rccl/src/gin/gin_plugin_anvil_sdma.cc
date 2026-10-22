@@ -225,13 +225,6 @@ static uint32_t ginAnvilFusedSignalFromEnv() {
   return atoi(e) != 0 ? 1u : 0u;
 }
 
-static uint32_t ginAnvilIpcAgentFenceFromEnv() {
-  const char* e = getenv("NCCL_GIN_ANVIL_SDMA_IPC_AGENT_FENCE");
-  if (!e || !e[0]) return 0;
-  if (e[0] == '0' && e[1] == '\0') return 0;
-  return atoi(e) != 0 ? 1u : 0u;
-}
-
 static uint32_t ginAnvilIpcSignalPeerFromEnv() {
   const char* e = getenv("NCCL_GIN_ANVIL_SDMA_SIGNAL_IPC");
   if (!e || !e[0]) return 0;
@@ -291,6 +284,13 @@ static ncclResult_t ginAnvilCloseListen(void* listenComm) {
 static ncclResult_t ginAnvilCloseColl(void* collComm) {
   ginAnvilCollCtx* cctx = (ginAnvilCollCtx*)collComm;
   if (cctx) {
+    // Erase here, not in finalize: ncclGinHostFinalize closeColls then memsets
+    // ginState before ncclGinFinalize, so plugin finalize never runs for a live
+    // GIN backend and a recycled ncclComm* would otherwise skip the gate.
+    if (cctx->comm) {
+      std::lock_guard<std::mutex> lock(pluginMutex);
+      ginAnvilConnCheckedComms.erase(cctx->comm);
+    }
     if (cctx->sdma) gin_anvil_sdma_destroy(cctx->sdma);
     delete cctx;
   }
@@ -298,12 +298,7 @@ static ncclResult_t ginAnvilCloseColl(void* collComm) {
 }
 
 static ncclResult_t ginAnvilFinalize(void* ctx) {
-  ginAnvilInitCtx* ictx = (ginAnvilInitCtx*)ctx;
-  if (ictx && ictx->comm) {
-    std::lock_guard<std::mutex> lock(pluginMutex);
-    ginAnvilConnCheckedComms.erase(ictx->comm);
-  }
-  delete ictx;
+  delete (ginAnvilInitCtx*)ctx;
   return ncclSuccess;
 }
 
@@ -898,7 +893,6 @@ static ncclResult_t ginAnvilCreateContext(void* collComm, ncclGinConfig_t* confi
                                                              : (uint32_t)thr;
   }
   ctx->gpuCtxHost.fusedSdmaSignal = ginAnvilFusedSignalFromEnv();
-  ctx->gpuCtxHost.ipcAgentFence = ginAnvilIpcAgentFenceFromEnv();
   ctx->gpuCtxHost.ipcSignalPeer = ginAnvilIpcSignalPeerFromEnv();
   ctx->gpuCtxHost.signals = nullptr;
   ctx->gpuCtxHost.signal_remote_addrs = nullptr;
@@ -937,10 +931,10 @@ static ncclResult_t ginAnvilCreateContext(void* collComm, ncclGinConfig_t* confi
   *outGinCtx = ctx;
   *outDevHandle = ctx->devHandle;
   INFO(NCCL_INIT,
-       "GIN anvil-sdma: context created (v%d, %d signals, %d counters, signalSlot=%d, sdmaThreshold=%u, "
+       "GIN anvil-sdma: context created (v%d, %d signals, %d counters, sdmaThreshold=%u, %d channels, "
        "spread=%d, fusedSignal=%u)",
-       NCCL_GIN_ANVIL_SDMA_NET_VERSION, config->nSignals, config->nCounters, ctx->signalSlot,
-       ctx->gpuCtxHost.sdmaThreshold, ctx->gpuCtxHost.sdmaChannelStride, ctx->gpuCtxHost.fusedSdmaSignal);
+       NCCL_GIN_ANVIL_SDMA_NET_VERSION, config->nSignals, config->nCounters, ctx->gpuCtxHost.sdmaThreshold,
+       ctx->numChannels, ctx->gpuCtxHost.sdmaChannelStride, ctx->gpuCtxHost.fusedSdmaSignal);
   return ncclSuccess;
 
 fail:

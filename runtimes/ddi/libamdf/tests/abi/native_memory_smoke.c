@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 /* CPU CREATE/REGISTER and explicit subrange mapping; optional GPU allocation.
  * Set AMDF_REQUIRE_GPU=1 to require native GPU memory qualification. */
 #define _POSIX_C_SOURCE 200809L

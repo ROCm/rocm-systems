@@ -38,6 +38,7 @@ test_categories:
       - test_roofline_calc
       - test_roofline_analyze
       - test_roofline_main
+      - test_report_shell
       - test_num_xcds_spec_class
       - test_profiler_base
       - test_pc_sampling_profile
@@ -49,13 +50,12 @@ test_categories:
       - test_utils_profile_csv
       - test_csv_compression
       - test_inject_roctx_package
-      - test_torch_cpp_loader
       - test_conftest
-      - test_mem_chart_common
-      - test_mem_chart_gfx9
-      - test_mem_chart_gfx11
-      - test_mem_chart_gfx1250
+      - test_memory_chart_loader
+      - test_memory_chart_units
+      - test_memory_chart_render
       - test_membw_engine
+      - test_membw_summary
       - test_membw_guidance
       - test_membw_metric_extract
       - test_membw_pipeline
@@ -67,7 +67,7 @@ test_categories:
       - test_soc_base
       - test-pc-sampling-collector
       - test-compression
-      - test-torch-trace-collector
+      - test-csv
     therock_ci_exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
@@ -79,23 +79,14 @@ test_categories:
       - "smoke"
 
   standard:
-    description: "Core functionality - Run on every PR (target: < 30 min)"
+    description: "Core functionality - Run on every PR (target: < 30 min). Slow profile tests (>150s on gfx1151) are covered by nightly full runs."
     test_patterns:
-      - test_profile_dispatch
       - test_profile_kernel_execution
-      - test_profile_misc
-      - test_profile_path
       - test_profile_membw
       - test_pc_sampling
-      - test_profile_roofline_dir
       - test_profile_roofline_bench
-      - test_profile_roofline_plot
-      - test_profile_roofline_validation
-      - test_profile_section
       - test_profile_sets_func
-      - test_profile_sort
       - test_profile_iteration_multiplexing_1
-      - test_profile_iteration_multiplexing_2
       - test_profile_iteration_multiplexing_stochastic
       - test_aggregation
       - test_expression
@@ -124,8 +115,8 @@ test_categories:
       - test_roofline_calc
       - test_roofline_analyze
       - test_roofline_main
+      - test_report_shell
       - test_rocpd_data
-      - test_torch_trace_coverage
       - test_conftest
       - test_profile_multi_rank
       - test_analysis_db
@@ -140,15 +131,14 @@ test_categories:
       - test_utils_profile_csv
       - test_csv_compression
       - test_inject_roctx_package
-      - test_torch_cpp_loader
       - test_profiler_base
       - test_pc_sampling_profile
       - test_rocprofv3_avail_interface
-      - test_mem_chart_common
-      - test_mem_chart_gfx9
-      - test_mem_chart_gfx11
-      - test_mem_chart_gfx1250
+      - test_memory_chart_loader
+      - test_memory_chart_units
+      - test_memory_chart_render
       - test_membw_engine
+      - test_membw_summary
       - test_membw_guidance
       - test_membw_metric_extract
       - test_membw_pipeline
@@ -160,9 +150,8 @@ test_categories:
       - test_soc_base
       - test-pc-sampling-collector
       - test-compression
-      - test-torch-trace-collector
+      - test-csv
       - test_profile_torch_trace
-      - test_profile_triton_trace
       - test_profile_live_attach_detach
       - test_metric_validation
     therock_ci_exclude:
@@ -221,8 +210,8 @@ test_categories:
       - test_roofline_calc
       - test_roofline_analyze
       - test_roofline_main
+      - test_report_shell
       - test_rocpd_data
-      - test_torch_trace_coverage
       - test_conftest
       - test_profile_multi_rank
       - test_analysis_db
@@ -237,15 +226,14 @@ test_categories:
       - test_utils_profile_csv
       - test_csv_compression
       - test_inject_roctx_package
-      - test_torch_cpp_loader
       - test_profiler_base
       - test_pc_sampling_profile
       - test_rocprofv3_avail_interface
-      - test_mem_chart_common
-      - test_mem_chart_gfx9
-      - test_mem_chart_gfx11
-      - test_mem_chart_gfx1250
+      - test_memory_chart_loader
+      - test_memory_chart_units
+      - test_memory_chart_render
       - test_membw_engine
+      - test_membw_summary
       - test_membw_guidance
       - test_membw_metric_extract
       - test_membw_pipeline
@@ -257,9 +245,8 @@ test_categories:
       - test_soc_base
       - test-pc-sampling-collector
       - test-compression
-      - test-torch-trace-collector
+      - test-csv
       - test_profile_torch_trace
-      - test_profile_triton_trace
       - test_profile_live_attach_detach
       - test_metric_validation
     therock_ci_exclude:
@@ -318,8 +305,8 @@ test_categories:
       - test_roofline_calc
       - test_roofline_analyze
       - test_roofline_main
+      - test_report_shell
       - test_rocpd_data
-      - test_torch_trace_coverage
       - test_conftest
       - test_profile_multi_rank
       - test_analysis_db
@@ -334,15 +321,14 @@ test_categories:
       - test_utils_profile_csv
       - test_csv_compression
       - test_inject_roctx_package
-      - test_torch_cpp_loader
       - test_profiler_base
       - test_pc_sampling_profile
       - test_rocprofv3_avail_interface
-      - test_mem_chart_common
-      - test_mem_chart_gfx9
-      - test_mem_chart_gfx11
-      - test_mem_chart_gfx1250
+      - test_memory_chart_loader
+      - test_memory_chart_units
+      - test_memory_chart_render
       - test_membw_engine
+      - test_membw_summary
       - test_membw_guidance
       - test_membw_metric_extract
       - test_membw_pipeline
@@ -354,9 +340,8 @@ test_categories:
       - test_soc_base
       - test-pc-sampling-collector
       - test-compression
-      - test-torch-trace-collector
+      - test-csv
       - test_profile_torch_trace
-      - test_profile_triton_trace
       - test_profile_live_attach_detach
       - test_metric_validation
     therock_ci_exclude:
@@ -374,6 +359,7 @@ test_categories:
       - test-rocprofiler-compute-tool
       - test-pc-sampling-collector
       - test-compression
+      - test-csv
     labels:
       - "sanitizer"
 

@@ -202,7 +202,6 @@ def test_analyze_debug_help(capsys):
         "single-metric",
         "verify-deps",
         "--specs-correction",
-        "--report-diff",
     ]:
         assert option in debug_help
     assert "--normal-unit" not in debug_help

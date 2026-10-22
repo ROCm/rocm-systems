@@ -62,6 +62,9 @@ extern "C" {
 
   __device__ void rocshmem_int_put_signal(int*, const int*, size_t,
                                           uint64_t*, uint64_t, int, int);
+  __device__ void rocshmem_signal_add(uint64_t*, uint64_t, int);
+  __device__ void rocshmem_signal_set(uint64_t*, uint64_t, int);
+  __device__ uint64_t rocshmem_signal_wait_until(uint64_t*, int, uint64_t);
   __device__ void rocshmem_int_wait_until(int*, int, int);
   __device__ size_t rocshmem_int_wait_until_any_vector(int*, size_t, const int*, int, int*);
   __device__ void rocshmem_int_wait_until_all_vector(int*, size_t, const int*, int, int*);
@@ -243,6 +246,23 @@ extern "C" __global__ void test_typed_int64_p(
     int next_pe = (my_pe + 1) % n_pes;
     rocshmem_int64_p(sym_buf, (int64_t)my_pe * 1000000LL + 12345LL, next_pe);
     rocshmem_barrier_all();
+  }
+}
+
+extern "C" __global__ void test_signal_ops(
+    uint64_t *sym_signal, uint64_t *observed, int my_pe, int n_pes)
+{
+  if (threadIdx.x == 0 && blockIdx.x == 0) {
+    int next_pe = (my_pe + 1) % n_pes;
+    int previous_pe = (my_pe - 1 + n_pes) % n_pes;
+
+    rocshmem_signal_set(sym_signal, 10, next_pe);
+    rocshmem_barrier_all();
+
+    rocshmem_signal_add(sym_signal, static_cast<uint64_t>(my_pe + 1), next_pe);
+    uint64_t expected = 10 + static_cast<uint64_t>(previous_pe + 1);
+    *observed = rocshmem_signal_wait_until(
+        sym_signal, 0 /* ROCSHMEM_CMP_EQ */, expected);
   }
 }
 

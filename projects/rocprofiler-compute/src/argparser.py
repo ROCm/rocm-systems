@@ -270,9 +270,6 @@ Examples:
         ),
     )
     profile_group.add_argument(
-        "--target", type=str, default=None, help=argparse.SUPPRESS
-    )
-    profile_group.add_argument(
         "--attach-pid",
         type=str,
         dest="attach_pid",
@@ -329,15 +326,6 @@ Examples:
             "\t\t\tinstead of mixing runs. Use a fresh directory per run;\n"
             "\t\t\tpass this flag only to re-profile in place."
         ),
-    )
-    profile_group.add_argument(
-        "--kokkos-trace",
-        dest="kokkos_trace",
-        required=False,
-        default=False,
-        action="store_true",
-        help=argparse.SUPPRESS,
-        # help="\t\t\tKokkos trace, traces Kokkos API calls.",
     )
     profile_group.add_argument(
         "--torch-trace",
@@ -688,7 +676,10 @@ Examples:
     analyze_group.add_argument(
         "--list-stats",
         action="store_true",
-        help="\t\tList all detected kernels and kernel dispatches.",
+        help=(
+            "\t\tList all detected kernels and kernel dispatches.\n"
+            "\t\tCannot be used with --output-format csv or db."
+        ),
     )
     analyze_group.add_argument(
         "--list-available-metrics",
@@ -1023,22 +1014,6 @@ Examples:
         choices=["table"],  # future: e.g. "bar" for additional TTY views
         default=None,
         help=argparse.SUPPRESS,
-    )
-    analyze_advanced_group.add_argument(
-        "--dependency",
-        action="store_true",
-        help="\t\tList the installation dependency.",
-    )
-    analyze_debug_group.add_argument(
-        "--report-diff",
-        default=0,
-        nargs="?",
-        type=int,
-        metavar="percent",
-        help=(
-            "\t\tWarn when metric differences exceed <percent>.\n"
-            "\t\tZero disables threshold warnings (Default: 0)."
-        ),
     )
     analyze_debug_group.add_argument(
         "--specs-correction",

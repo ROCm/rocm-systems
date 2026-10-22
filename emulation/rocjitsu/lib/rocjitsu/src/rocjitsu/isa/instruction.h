@@ -7,6 +7,7 @@
 #ifndef ROCJITSU_ISA_INSTRUCTION_H_
 #define ROCJITSU_ISA_INSTRUCTION_H_
 
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/memory_issue.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/result.h"
@@ -69,10 +70,26 @@ enum InstFlags : uint64_t {
   MEMORY_WAIT_PRODUCER = (1ULL << 16),
   /// @brief Instruction contains an embedded memory-completion wait field.
   EMBEDDED_MEMORY_WAIT = (1ULL << 17),
-  /// @brief This execution skipped a conditional memory-counter register result.
-  MEMORY_WAIT_RESULT_SUPPRESSED = (1ULL << 18),
   /// @brief Non-control-flow instruction that implicitly drains gfx1250 XCNT.
-  XCNT_DRAIN = (1ULL << 19)
+  XCNT_DRAIN = (1ULL << 19),
+  /// @brief This ISA suppresses issue of this instruction while MODE.VSKIP is set.
+  VSKIP_AFFECTED = (1ULL << 20),
+  /// @brief Listed operands cover all possible VGPR accesses, including partial writes.
+  DIRECT_REGISTER_ACCESSES = (1ULL << 21),
+  /// @brief Unconditional full-dword memory results described by the decoded destinations.
+  SIMPLE_MEMORY_RESULT = (1ULL << 22),
+  /// @brief Memory result lanes depend on controls beyond EXEC and issue masking.
+  CONDITIONAL_MEMORY_LANES = (1ULL << 24),
+  /// @brief Matrix execution accesses register lanes independently of EXEC.
+  MATRIX_REGISTER_ACCESSES = (1ULL << 25),
+  /// @brief Decoded MFMA broadcast size exceeds its architectural block count.
+  INVALID_MFMA_BROADCAST = (1ULL << 26),
+  /// @brief Decoded VOPD operands violate a qualified bank or source restriction.
+  INVALID_VOPD_OPERANDS = (1ULL << 27),
+  /// @brief IU DOT/WMMA has undefined NEG[2] or NEG_HI modifiers.
+  INVALID_IU_MODIFIERS = (1ULL << 28),
+  /// @brief A qualified scalar data tuple violates its ISA alignment requirement.
+  MISALIGNED_SCALAR_DATA = (1ULL << 29)
 };
 
 class BasicBlock;
@@ -112,9 +129,10 @@ public:
   virtual ~Instruction() = default;
 
   /// @brief Pool allocator hooks, set by the decoder's enable_pool().
-  /// @details Pool users must allocate and free on the bound thread, with the
-  /// decoder outliving its pooled instructions. CU execution instead forces
-  /// heap allocation so instructions can survive quanta and worker migration.
+  /// @details Pool users must allocate and free on the bound thread while their
+  /// pool is active, with the decoder outliving its pooled instructions.
+  /// CU execution instead forces heap allocation so instructions can survive
+  /// quanta and worker migration.
   using AllocFn = void *(*)(void *pool, size_t size);
   using DeallocFn = void (*)(void *pool, void *ptr);
   static thread_local inline AllocFn alloc_fn_;
@@ -209,8 +227,7 @@ public:
   /// EXEC and other execution state from the current context, and restore any
   /// temporary operand delegates before returning. Put persistent per-issue
   /// state in DynamicInstState; its presence excludes decoded reuse. Any
-  /// per-execution member flags must be assigned on every execution, as with
-  /// set_memory_wait_result_written().
+  /// per-execution member flags must be assigned on every execution.
   const ExecuteFn execute;
 
   /// @brief Access the attached dynamic state, or nullptr if none.
@@ -304,18 +321,10 @@ public:
   /// @retval true The instruction has the MEMORY_OP flag set.
   /// @retval false The instruction is not a memory operation.
   bool is_memory_op() const { return flags_ & MEMORY_OP; }
+  /// @brief Whether MODE.VSKIP prevents this instruction from being issued.
+  bool is_vskip_affected() const { return flags_ & VSKIP_AFFECTED; }
   /// @brief Whether this instruction can increment a memory completion counter.
   bool is_memory_wait_producer() const { return flags_ & MEMORY_WAIT_PRODUCER; }
-  /// @brief Record whether a conditional producer wrote its result this time.
-  /// @details Conditional executors set this on every execution, including reuse.
-  void set_memory_wait_result_written(bool written) {
-    if (written)
-      flags_ &= ~MEMORY_WAIT_RESULT_SUPPRESSED;
-    else
-      flags_ |= MEMORY_WAIT_RESULT_SUPPRESSED;
-  }
-  bool memory_wait_result_written() const { return !(flags_ & MEMORY_WAIT_RESULT_SUPPRESSED); }
-
   /// @brief Whether the instruction includes a memory completion wait field.
   bool has_embedded_memory_wait() const { return flags_ & EMBEDDED_MEMORY_WAIT; }
 
@@ -362,6 +371,9 @@ public:
   /// instruction's lifetime.
   virtual void implicit_use_operands(std::vector<const Operand *> & /*operands*/) const {}
 
+  /// @brief Query already-decoded modifiers only when a register may be pending.
+  virtual void amdgpu_register_modifiers(amdgpu::RegisterModifiers & /*modifiers*/) const {}
+
   /// @brief Add registers implicitly written by this instruction.
   virtual void implicit_defs(RegisterSet & /*defs*/) const {}
 
@@ -393,7 +405,7 @@ public:
       bool first = true;
       // TODO: Include explicit fieldless operands (and/or implicit ones too).
       for (uint8_t operand_index = 0; operand_index < num_dst_; ++operand_index) {
-        if (dst_operands_[operand_index]->is_fieldless())
+        if (!should_print_dst_operand(operand_index))
           continue;
         disassembly_ += (first ? " " : ", ");
         append_dst_operand(disassembly_, operand_index);
@@ -406,7 +418,8 @@ public:
         if (omit_repeated_destination_sources_) {
           bool repeats_dst = false;
           for (uint8_t dst_index = 0; dst_index < num_dst_; ++dst_index)
-            repeats_dst |= src_operands_[operand_index] == dst_operands_[dst_index];
+            repeats_dst |= should_print_dst_operand(dst_index) &&
+                           src_operands_[operand_index] == dst_operands_[dst_index];
           if (repeats_dst)
             continue;
         }
@@ -466,6 +479,11 @@ protected:
   /// Overridden by encoding bases that have instruction attributes to display.
   /// Default: no modifiers. Called lazily by disassemble().
   virtual void build_modifiers(std::string & /*out*/) const {}
+  /// @brief Whether a destination has its own textual operand.
+  /// Analysis-only result views may share an encoded source operand.
+  virtual bool should_print_dst_operand(uint8_t operand_index) const {
+    return !dst_operands_[operand_index]->is_fieldless();
+  }
   /// @brief Append one destination operand to textual disassembly.
   virtual void append_dst_operand(std::string &out, uint8_t operand_index) const {
     out += dst_operands_[operand_index]->name();

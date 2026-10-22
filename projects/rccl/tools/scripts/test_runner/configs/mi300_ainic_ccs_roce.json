@@ -589,6 +589,158 @@
       ]
     },
 
+    "net_ib_cast_multiplane_unit": {
+      "extends": "gtest_base",
+      "binary": "rccl-UnitTestsFixturesDebug",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 120,
+      "description": "Pure host-side unit tests for the multiplane VIP-to-PIP mapping module. Synthetic GIDs and temp XML files, no MPI/verbs/NIC required.",
+      "tests": [
+        {
+          "name": "A20_Multiplane_IpToGidIPv4",
+          "description": "ibCastIpToGid converts IPv4 to IPv4-mapped IPv6 GID bytes.",
+          "test_filter": "NetIbCastMultiplane.IpToGidIPv4"
+        },
+        {
+          "name": "A20_Multiplane_IpToGidIPv6",
+          "description": "ibCastIpToGid converts native IPv6 to GID bytes.",
+          "test_filter": "NetIbCastMultiplane.IpToGidIPv6"
+        },
+        {
+          "name": "A20_Multiplane_IpToGidInvalid",
+          "description": "ibCastIpToGid rejects invalid IP strings.",
+          "test_filter": "NetIbCastMultiplane.IpToGidInvalid"
+        },
+        {
+          "name": "A20_Multiplane_GidToStringRoundTrip",
+          "description": "GID-to-string produces correct colon-hex for IPv4-mapped GID.",
+          "test_filter": "NetIbCastMultiplane.GidToStringRoundTrip"
+        },
+        {
+          "name": "A20_Multiplane_GidToStringAllZeros",
+          "description": "GID-to-string handles all-zero GID.",
+          "test_filter": "NetIbCastMultiplane.GidToStringAllZeros"
+        },
+        {
+          "name": "A20_Multiplane_EnabledWhenGlobalSet",
+          "description": "IbCastMultiplaneEnabled returns true when the init-time global is set.",
+          "test_filter": "MultiplaneLoadTest.EnabledWhenGlobalSet"
+        },
+        {
+          "name": "A20_Multiplane_DisabledByDefault",
+          "description": "IbCastMultiplaneEnabled returns false after reset (default state).",
+          "test_filter": "MultiplaneLoadTest.DisabledByDefault"
+        },
+        {
+          "name": "A20_Multiplane_LoadAndResolvePips",
+          "description": "Load a valid XML and resolve VIP to correct PIP GIDs.",
+          "test_filter": "MultiplaneLoadTest.LoadValidXmlAndResolvePips"
+        },
+        {
+          "name": "A20_Multiplane_SecondHostResolution",
+          "description": "PIP resolution works for second host in multi-host XML.",
+          "test_filter": "MultiplaneLoadTest.LoadValidXmlSecondHost"
+        },
+        {
+          "name": "A20_Multiplane_UnknownVipZeroPips",
+          "description": "Unknown VIP GID returns nPips=0 without error.",
+          "test_filter": "MultiplaneLoadTest.UnknownVipReturnsZeroPips"
+        },
+        {
+          "name": "A20_Multiplane_DisabledZeroPips",
+          "description": "When disabled, GetPipGids returns 0 for any GID.",
+          "test_filter": "MultiplaneLoadTest.DisabledReturnsZeroPips"
+        },
+        {
+          "name": "A20_Multiplane_MissingFileError",
+          "description": "ibCastMultiplaneLoad returns error for nonexistent file.",
+          "test_filter": "MultiplaneLoadTest.MissingFileReturnsError"
+        },
+        {
+          "name": "A20_Multiplane_FourPips",
+          "description": "4-PIP interface resolves all four PIPs correctly.",
+          "test_filter": "MultiplaneLoadTest.FourPipsResolved"
+        },
+        {
+          "name": "A20_Multiplane_MultipleInterfaces",
+          "description": "Multiple interfaces on the same host resolve independently.",
+          "test_filter": "MultiplaneLoadTest.MultipleInterfacesSameHost"
+        },
+        {
+          "name": "A20_Multiplane_IPv6Pips",
+          "description": "IPv6 PIP addresses resolve correctly.",
+          "test_filter": "MultiplaneLoadTest.IPv6PipResolution"
+        },
+        {
+          "name": "A20_Multiplane_Ipv4MappedGidBytes",
+          "description": "IPv4-mapped GID bytes match expected binary layout.",
+          "test_filter": "MultiplaneLoadTest.Ipv4MappedGidBytesMatch"
+        },
+        {
+          "name": "A20_Multiplane_GidStringMatchesXmlKey",
+          "description": "GID string canonical format matches XML key lookup.",
+          "test_filter": "MultiplaneLoadTest.GidStringMatchesXmlKey"
+        }
+      ]
+    },
+
+    "cast_multiplane_mpi": {
+      "extends": "gtest_base",
+      "timeout": 600,
+      "description": "AINIC multiplane PUEC route smoke tests. Require RCCL_MULTIPLANE_MAP_FILE and NIC multiplane (PUEC) support. Tests skip cleanly when multiplane is not available.",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST",
+        "RCCL_MULTIPLANE_MAP_FILE": "${RCCL_MULTIPLANE_MAP_FILE:-}"
+      },
+      "tests": [
+        {
+          "name": "A21_Cast_MultiplaneConnectionSmoke",
+          "description": "Multiplane PUEC route programming + data-integrity transfer. Validates that per-plane routes are programmed at QP RTR and traffic flows correctly.",
+          "test_filter": "NetIbMPITest.CastMultiplaneConnectionSmoke"
+        },
+        {
+          "name": "A21_Cast_MultiplaneMultiSizeTransfer",
+          "description": "Multiplane data integrity across multiple message sizes (64B to 4MB).",
+          "test_filter": "NetIbMPITest.CastMultiplaneMultiSizeTransfer"
+        }
+      ]
+    },
+
+    "cast_multiplane_disabled": {
+      "extends": "gtest_base",
+      "timeout": 600,
+      "description": "Backward-compatibility guard: with RCCL_MULTIPLANE_MAP_FILE empty, the multiplane code path must be completely inert. This suite explicitly clears the map file env var.",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST",
+        "RCCL_MULTIPLANE_MAP_FILE": ""
+      },
+      "tests": [
+        {
+          "name": "A21_Cast_MultiplaneDisabledNoRegression",
+          "description": "With RCCL_MULTIPLANE_MAP_FILE unset, connection setup and data transfer are identical to non-multiplane path.",
+          "test_filter": "NetIbMPITest.CastMultiplaneDisabledNoRegression"
+        }
+      ]
+    },
+
+    "cast_multiplane_perf": {
+      "extends": "rccl_tests_base",
+      "timeout": 600,
+      "description": "AINIC multiplane performance sweep. CAST, WRR ON, CTS OFF. Requires RCCL_MULTIPLANE_MAP_FILE and NIC multiplane (PUEC) support.",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST",
+        "RCCL_IB_QP_SCHED_ENABLE": "1",
+        "RCCL_IB_P2P_DISABLE_CTS": "1",
+        "RCCL_MULTIPLANE_MAP_FILE": "${RCCL_MULTIPLANE_MAP_FILE:-}"
+      },
+      "tests": [
+        { "name": "B13_alltoall_CAST_multiplane", "binary": "alltoall_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "CAST WRR ON / CTS OFF + multiplane PUEC routes: alltoall 1K-16G." },
+        { "name": "B13_allreduce_CAST_multiplane", "binary": "all_reduce_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "CAST WRR ON / CTS OFF + multiplane PUEC routes: allreduce 1K-16G." }
+      ]
+    },
+
     "ionic_counters": {
       "extends": "rccl_tests_base",
       "timeout": 600,
@@ -621,6 +773,9 @@
     { "config": "bootstrap_socket_poll", "enabled": true, "smoke": true },
     { "config": "net_ib_cast_plane_subnet", "enabled": true, "smoke": true },
     { "config": "a_netib_multithread",   "enabled": true, "smoke": true },
+    { "config": "net_ib_cast_multiplane_unit", "enabled": true, "smoke": true },
+    { "config": "cast_multiplane_mpi",      "enabled": true },
+    { "config": "cast_multiplane_disabled", "enabled": true },
 
     { "config": "ib_baseline",           "enabled": true, "smoke": true },
     { "config": "cast_alltoall_full",    "enabled": true, "smoke": true },
@@ -635,6 +790,8 @@
     { "config": "cts_force_override",    "enabled": true, "smoke": true },
     { "config": "alltoall_fullrange_guard", "enabled": true, "smoke": true },
 
-    { "config": "ionic_counters",        "enabled": true }
+    { "config": "ionic_counters",        "enabled": true },
+
+    { "config": "cast_multiplane_perf",  "enabled": true }
   ]
 }

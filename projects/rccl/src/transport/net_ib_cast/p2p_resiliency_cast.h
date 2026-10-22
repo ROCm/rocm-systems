@@ -92,6 +92,7 @@ struct ncclIbResiliency {
   // QPs used for recovery protocol messages (UD — connectionless, survives link failures).
   struct ncclIbQp portRecoveryQps[NCCL_IB_MAX_DEVS_PER_NIC];
   struct ibv_ah* portRecoveryAh[NCCL_IB_MAX_DEVS_PER_NIC];
+  struct ibv_ah_attr portRecoveryAhAttr[NCCL_IB_MAX_DEVS_PER_NIC];
   uint32_t portRecoveryRemoteQpn[NCCL_IB_MAX_DEVS_PER_NIC];
   int nPortRecoveryQps;
 
@@ -232,6 +233,12 @@ ncclResult_t IbCastResiliencySenderQpsToRts(struct ncclIbResiliency* resCtx, str
 ncclResult_t IbCastResiliencyReceiverQpsCreateToRts(struct ncclIbResiliency* resCtx,
                                                     struct ncclIbConnectionMetadata* remInfo,
                                                     struct ncclIbResiliencyInfo* localResiliencyInfo);
+
+ncclResult_t IbCastResiliencyQpsReconfigure(struct ncclIbResiliency* resCtx, int devIndex, bool* success);
+
+// Reconfigure a single QP through RESET -> INIT -> ECE -> RTR -> RTS.
+ncclResult_t IbCastResiliencyQpReconfigure(struct ncclIbResiliency* resCtx, struct ncclIbQp* qp,
+                                           struct ncclIbNetCommDevBase* devBase, int devIndex, bool* success);
 
 ncclResult_t IbCastResiliencyClose(struct ncclIbResiliency* resCtx);
 
