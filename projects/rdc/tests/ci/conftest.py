@@ -123,11 +123,7 @@ def terminate_process(proc, timeout=10):
 
 
 class RdcdServer:
-    """The rdcd that the rdcd_server fixture runs for the test session.
-
-    rdcd holds rdcd.lock, so only one rdcd can run on a host. A test that starts
-    its own rdcd stops this one first and starts it again when it is done.
-    """
+    """The session rdcd. Only one rdcd can run per host (rdcd.lock)."""
 
     def __init__(self, rdcd_path):
         self.rdcd_path = rdcd_path

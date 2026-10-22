@@ -143,7 +143,7 @@ class TestDaemonResilience:
         port = 50099
         env = os.environ.copy()
 
-        # Only one rdcd can run on a host, so stop the session rdcd until this test is done.
+        # Only one rdcd can run per host.
         rdcd_server.stop()
         proc = None
         try:
