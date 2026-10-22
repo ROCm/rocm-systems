@@ -70,7 +70,7 @@ jobs:
   # PR, or this job failed) run the full gate.
   changes:
     name: Detect perf gate changes
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     # Runs PR-authored code, so no write scope.
     permissions:
@@ -102,7 +102,11 @@ jobs:
     # arbitrary code execution on our infrastructure. Scope to same-repo PRs
     # only; workflow_dispatch is unaffected (it already requires repo write
     # access to trigger).
-    # Runs even if `changes` failed; only an explicit run_gate=false skips it.
+    # Skipped when:
+    # - the run is cancelled;
+    # - a PR comes from a fork (head repo != this repo), per the note above;
+    # - `changes` reports run_gate=false. An empty output (not a PR, or the
+    #   `changes` job failed) still runs the gate.
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && needs.changes.outputs.run_gate != 'false')) }}
     # Separate lock from the detect job below: build never touches the pinned
     # nodes, so it shouldn't queue behind another PR's in-flight A/B run.
@@ -170,6 +174,7 @@ jobs:
   detect:
     needs: build
     # Explicit status check: the implicit success() also requires `changes`.
+    # Same fork rule as `build`: same-repo PRs only.
     if: ${{ !cancelled() && needs.build.result == 'success' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     # Serialise: the pinned calibration nodes can host only one A/B job at a
     # time, and thresholds are only valid there. Do NOT cancel in-progress (a
