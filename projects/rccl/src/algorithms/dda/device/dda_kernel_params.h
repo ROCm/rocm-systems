@@ -20,7 +20,10 @@ constexpr int kDdaSpinsBeforeCheckAbort = 10000;
 
 // Communicator state a DDA kernel needs at run time, currently its abort flag.
 // Passed by value as a kernel argument and held by FabricGpuBarrier /
-// IpcGpuBarrier; new per-launch values go here rather than as extra arguments.
+// IpcGpuBarrier. As a lone pointer it is passed as a pointer argument, which
+// gfx1250 preloads into SGPRs; a second member makes it an aggregate that is
+// read from the kernarg segment and ends the preload of every later argument.
+// Pass further per-launch values as separate scalar arguments.
 struct DdaKernelParams {
   const uint32_t* flag; // comm->abortFlagDev; null never reports an abort
 
@@ -36,5 +39,6 @@ struct DdaKernelParams {
     return aborted();
   }
 };
+static_assert(sizeof(DdaKernelParams) == sizeof(void*), "DdaKernelParams must stay one pointer (kernarg preload)");
 
 } // namespace dda::common
