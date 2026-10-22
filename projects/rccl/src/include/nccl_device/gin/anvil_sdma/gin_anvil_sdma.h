@@ -272,7 +272,9 @@ NCCL_DEVICE_INLINE ncclResult_t waitFlushed(::sdma_anvil::SdmaQueueDeviceHandle*
   using nccl::utility::testAbort;
   uint32_t steps = 0;
   while (!::sdma_anvil::isFlushed(*handle, target)) {
-    if (HasTimeout && clock64() - startCycle >= timeoutCycles) return ncclTimeout;
+    if NCCL_IF_CONSTEXPR (HasTimeout) {
+      if (clock64() - startCycle >= timeoutCycles) return ncclTimeout;
+    }
     if (testAbort(abortFlag, steps)) return ncclSuccess;
   }
   return ncclSuccess;

@@ -96,9 +96,9 @@ public:
 
   __device__ __noinline__ void quiet_single();
 
-  __device__ __forceinline__ uint64_t quiet_target_single();
+  __device__ __forceinline__ uint64_t cq_target();
 
-  __device__ __noinline__ bool try_quiet_until_single(uint64_t target);
+  __device__ __forceinline__ bool poll_cq_once(uint64_t target);
 
 private:
   /**
@@ -417,12 +417,12 @@ __device__ inline __noinline__ void QueuePairIONIC::quiet_single() {
   quiet_internal_ccqe_single(sq.pos);
 }
 
-__device__ __forceinline__ uint64_t QueuePairIONIC::quiet_target_single() {
+__device__ __forceinline__ uint64_t QueuePairIONIC::cq_target() {
   return __scoped_atomic_load_n(&sq.pos, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
 }
 
 // Only reads queue state, so lanes sharing a queue pair can call it.
-__device__ inline __noinline__ bool QueuePairIONIC::try_quiet_until_single(uint64_t target) {
+__device__ __forceinline__ bool QueuePairIONIC::poll_cq_once(uint64_t target) {
   volatile struct ionic_v1_cqe *cqe = &cq.buf[0];
   uint32_t qtf_be = cqe->qid_type_flags;
   uint32_t msn = endian::from_be(cqe->send.msg_msn);

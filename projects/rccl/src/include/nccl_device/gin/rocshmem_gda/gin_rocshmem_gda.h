@@ -32,19 +32,21 @@ NCCL_DEVICE_INLINE rocshmem::QueuePair* peerQp(ncclGinCtx ctx, int peer) {
 
 // Only a load, so lanes sharing a queue pair can call it without grouping.
 NCCL_DEVICE_INLINE uint64_t quietTarget(ncclGinCtx ctx, int peer) {
-  return peerQp(ctx, peer)->quiet_target_single();
+  return peerQp(ctx, peer)->cq_target();
 }
 
-// Polls instead of calling quiet() so untimed callers still return on abort. Each lane polls its own
-// queue pair, since lanes with the same peer can hold different GIN contexts.
+// Polls instead of calling quiet(), which also waits for work posted after target and can't return on abort.
+// Each lane polls its own queue pair, since lanes with the same peer can hold different GIN contexts.
 template <bool HasTimeout>
 NCCL_DEVICE_INLINE ncclResult_t quietPeer(ncclGinCtx ctx, int peer, uint64_t target, uint32_t* abortFlag,
                                           uint64_t startCycle, uint64_t timeoutCycles) {
   using nccl::utility::testAbort;
   rocshmem::QueuePair* qp = peerQp(ctx, peer);
   uint32_t steps = 0;
-  while (!qp->try_quiet_until_single(target)) {
-    if (HasTimeout && clock64() - startCycle >= timeoutCycles) return ncclTimeout;
+  while (!qp->poll_cq_once(target)) {
+    if NCCL_IF_CONSTEXPR (HasTimeout) {
+      if (clock64() - startCycle >= timeoutCycles) return ncclTimeout;
+    }
     if (testAbort(abortFlag, steps)) return ncclSuccess;
   }
   return ncclSuccess;
