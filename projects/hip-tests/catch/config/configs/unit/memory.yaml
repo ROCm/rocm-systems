@@ -1121,8 +1121,8 @@ memory:
   Unit_hipMemVmm_Basic:
     <<: *level_default
     disabled:
-      targets: [amd_windows, amd_linux]
-      reason: "AIRUNTIME-2291 - temporarily disabled because it hangs in CI 942; hipMemMap returns an invalid error (SWDEV-396616); re-triage on amd_linux is still pending. amd_windows re-disabled (AIRUNTIME-2892): test passes but the full suite exceeds the 120min CI timeout with these tests enabled; improve test runtimes or raise the TheRock total timeout."
+      targets: [amd_windows]
+      reason: "amd_windows disabled (AIRUNTIME-2892): test passes but the full suite exceeds the 120min CI timeout with these tests enabled; improve test runtimes or raise the TheRock total timeout."
     tags: [virtualMemoryManagement, P1]
   Unit_hipMemVmm_Uncached:
     <<: *level_default
@@ -2344,8 +2344,8 @@ memory:
   Unit_hipMemAdvise_TstAccessedByFlg4:
     <<: *level_default
     disabled:
-      targets: [amd_windows, amd_wsl, amd_linux]
-      reason: "AIRUNTIME-2291 - temporarily disabled because it hangs in CI 942; also disabled on Windows, where gfx1201 (amd_windows) and gfx1201 (amd_wsl) self-skip because the GPU does not support managed memory; re-triage on amd_linux is still pending."
+      targets: [amd_windows, amd_wsl]
+      reason: "disabled on Windows, where gfx1201 (amd_windows) and gfx1201 (amd_wsl) self-skip because the GPU does not support managed memory"
     tags: [query, P1, managed_memory]
   Unit_hipMemAdvise_TstAlignedAllocMem:
     <<: *level_default
