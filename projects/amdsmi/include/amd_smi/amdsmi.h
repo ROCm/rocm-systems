@@ -3232,6 +3232,71 @@ typedef struct {
 } amdsmi_nic_telemetry_t;
 
 /**
+ * @brief Unit of an hwmon-backed metric value.
+ *
+ * Numeric values match the host library; only the units the NIC sensors report are defined.
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef enum {
+  AMDSMI_METRIC_UNIT_MILLIVOLT = 5,
+  AMDSMI_METRIC_UNIT_MILLIDEGREE_CELSIUS = 15,
+  AMDSMI_METRIC_UNIT_MICROWATT = 16,
+} amdsmi_metric_unit_t;
+
+/**
+ * @brief Category of an hwmon-backed metric.
+ *
+ * Numeric values match the host library; only the categories the NIC sensors report are defined.
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef enum {
+  AMDSMI_METRIC_CATEGORY_TEMPERATURE = 3,
+  AMDSMI_METRIC_CATEGORY_POWER = 4,
+  AMDSMI_METRIC_CATEGORY_VOLTAGE = 14,
+} amdsmi_metric_category_t;
+
+/**
+ * @brief hwmon attribute a NIC sensor record carries.
+ *
+ * The category of the record disambiguates, for example, a temperature @c max from a power
+ * @c max. The alarm attributes are not reported.
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef enum {
+  AMDSMI_NIC_SENSOR_NAME_UNKNOWN = 0,
+  AMDSMI_NIC_SENSOR_NAME_INPUT = 1,
+  AMDSMI_NIC_SENSOR_NAME_MIN = 2,
+  AMDSMI_NIC_SENSOR_NAME_MAX = 3,
+  AMDSMI_NIC_SENSOR_NAME_LCRIT = 4,
+  AMDSMI_NIC_SENSOR_NAME_CRIT = 5,
+  AMDSMI_NIC_SENSOR_NAME_EMERGENCY = 6,
+  AMDSMI_NIC_SENSOR_NAME_SHUTDOWN = 7,
+  AMDSMI_NIC_SENSOR_NAME_CAP = 8,
+} amdsmi_nic_sensor_name_t;
+
+/**
+ * @brief One hwmon attribute of a NIC sensor.
+ *
+ * Each record is one sysfs file under the NIC's hwmon node. @c instance scopes @c channel, so
+ * @c temp1 of two hwmon nodes of one NIC stays distinguishable. Group records that share
+ * @c instance, @c category and @c channel to rebuild a sensor with its thresholds.
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+  amdsmi_metric_category_t category;
+  amdsmi_nic_sensor_name_t name;
+  amdsmi_metric_unit_t unit;
+  uint32_t channel;                      //!< the N in tempN_, inN_, powerN_
+  uint32_t instance;                     //!< the N in hwmon<N>
+  char label[AMDSMI_MAX_STRING_LENGTH];  //!< driver label, "" when the driver gives none
+  int64_t value;                         //!< raw hwmon integer in @c unit
+} amdsmi_nic_sensor_t;
+
+/**
  * @brief NIC port information
  *
  * Integer fields are set to the maximum value of their type (0xFF / 0xFFFF /
@@ -10690,6 +10755,32 @@ amdsmi_status_t amdsmi_get_nic_fw_info(amdsmi_processor_handle processor_handle,
  */
 amdsmi_status_t amdsmi_get_nic_telemetry(amdsmi_processor_handle processor_handle,
                                          amdsmi_nic_telemetry_t* info);
+
+/**
+ *  @brief Retrieve every hwmon sensor attribute of a NIC (temperature, voltage and power
+ *  with their thresholds).
+ *
+ *  @ingroup tagNicInfo
+ *
+ *  @platform{host} @platform{gpu_bm_linux}
+ *
+ *  @details One record is returned per readable hwmon attribute (input, min, max, lcrit, crit,
+ *  emergency, cap). Values are the raw hwmon integers in the record's unit. A NIC with no hwmon
+ *  node reports zero records and ::AMDSMI_STATUS_SUCCESS.
+ *
+ *  @param[in] processor_handle NIC for which to query
+ *
+ *  @param[in,out] num_sensors As input, the number of ::amdsmi_nic_sensor_t entries @p sensors
+ *  can hold. On return, the number of records available, which can exceed the input.
+ *
+ *  @param[out] sensors Array to fill, or NULL to only query the record count. When the array is
+ *  too small, as many records as fit are written and ::AMDSMI_STATUS_INSUFFICIENT_SIZE is
+ *  returned.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_nic_hwmon_sensors(amdsmi_processor_handle processor_handle,
+                                             uint32_t* num_sensors, amdsmi_nic_sensor_t* sensors);
 
 /**
  *  @brief Retrieve PORT statistics for the specified NIC port
