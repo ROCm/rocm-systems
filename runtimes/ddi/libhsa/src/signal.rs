@@ -23,7 +23,6 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::platform::event::{SignalEvent, SignalEventAddressing, SignalEventService};
-use crate::platform::memory::{self as linux_interop, KfdIpcMemoryHandle};
 use rocddi::memory::device::{Allocation, DeviceAccess, MemoryKind};
 use rocddi::session::DriverContextLifetime;
 
@@ -34,12 +33,13 @@ use crate::runtime::{
     CallbackScope, HsaState, InFlightToken, boundary, initialized_mut, lock, map_error,
 };
 
+mod ipc;
+use ipc::{ImportedIpcSignal, OwnedIpcSignal};
+
 const SIGNAL_BYTES: usize = 64;
 const SIGNALS_PER_SLAB: usize = 1024;
 const MAX_POOLED_SIGNAL_EVENTS: usize = 256;
 const BLOCKED_SPIN_BUDGET: Duration = Duration::from_micros(200);
-const IPC_SIGNAL_ALLOCATION_BYTES: u64 = 4096;
-const SHARED_SIGNAL_ID: u64 = 0x71fc_ca6a_3d5d_5276;
 static SYSTEM_FREQUENCY_HZ: AtomicU64 = AtomicU64::new(0);
 static HAS_FLUSH_BATCHES: AtomicBool = AtomicBool::new(false);
 static FLUSH_BATCHES: Mutex<Vec<(usize, usize)>> = Mutex::new(Vec::new());
@@ -219,59 +219,6 @@ const _: () = {
     assert!(std::mem::offset_of!(AmdSignal, kind) == 0);
     assert!(std::mem::offset_of!(AmdSignal, value) == 8);
 };
-
-/// Cross-process signal record stored in shareable system memory.
-#[repr(C, align(64))]
-struct SharedSignal {
-    /// Standard public signal prefix.
-    signal: AmdSignal,
-    /// SDMA start timestamp in shared storage.
-    sdma_start_ts: u64,
-    /// Native core-signal reference; zero for this IPC layout.
-    core_signal: u64,
-    /// Signature distinguishing this shared signal layout.
-    id: u64,
-    reserved: [u8; 8],
-    /// SDMA end timestamp in shared storage.
-    sdma_end_ts: u64,
-    reserved2: [u8; 24],
-}
-
-impl SharedSignal {
-    fn ipc(value: SignalValue) -> Self {
-        Self {
-            signal: AmdSignal::user(value),
-            sdma_start_ts: 0,
-            core_signal: 0,
-            id: SHARED_SIGNAL_ID,
-            reserved: [0; 8],
-            sdma_end_ts: 0,
-            reserved2: [0; 24],
-        }
-    }
-
-    fn is_ipc(&self) -> bool {
-        self.core_signal == 0 && self.id == SHARED_SIGNAL_ID
-    }
-}
-
-const _: () = assert!(size_of::<SharedSignal>() == 128);
-
-/// Original IPC signal allocation retained until its exporting handle dies.
-pub(crate) struct OwnedIpcSignal {
-    /// Original shareable allocation retained by the exporter.
-    allocation: Allocation,
-}
-
-/// Imported IPC signal mapping and its local public-reference count.
-pub(crate) struct ImportedIpcSignal {
-    /// Imported GPU-visible signal backing.
-    allocation: Allocation,
-    /// Native token needed to release the import.
-    ipc_handle: [u32; 8],
-    /// Number of local public signal handles sharing this import.
-    references: u32,
-}
 
 /// Work accepted by the single asynchronous callback dispatcher.
 #[derive(Clone, Copy)]
@@ -803,113 +750,6 @@ impl HsaState {
         }
         Ok(signal)
     }
-
-    fn create_ipc_signal(&mut self, value: SignalValue) -> Result<HsaSignal, Status> {
-        let allocation = {
-            let (gpu, peers) = self.gpus.split_first().ok_or(OUT_OF_RESOURCES)?;
-            let peers = peers.iter().map(|peer| &peer.device).collect::<Vec<_>>();
-            gpu.device
-                .allocate_with_peers(
-                    &peers,
-                    MemoryKind::System,
-                    IPC_SIGNAL_ALLOCATION_BYTES.max(self.host_page_size as u64),
-                    self.host_page_size as u64,
-                    DeviceAccess::READ | DeviceAccess::WRITE,
-                )
-                .map_err(map_error)?
-        };
-        let info = allocation.info();
-        let host = info.host_address.ok_or(OUT_OF_RESOURCES)?;
-        if info.device_address != host as u64 {
-            return Err(OUT_OF_RESOURCES);
-        }
-        self.signal_state
-            .owned_ipc_signals
-            .try_reserve(1)
-            .map_err(|_| OUT_OF_RESOURCES)?;
-        // SAFETY: The dedicated allocation is writable, page-sized, and retained
-        // by owned_ipc_signals for the complete public signal lifetime.
-        unsafe {
-            std::ptr::write_bytes(host as *mut u8, 0, IPC_SIGNAL_ALLOCATION_BYTES as usize);
-            (host as *mut SharedSignal).write(SharedSignal::ipc(value));
-        }
-        match self.signal_state.owned_ipc_signals.entry(host) {
-            Entry::Vacant(entry) => {
-                entry.insert(OwnedIpcSignal { allocation });
-            }
-            Entry::Occupied(_) => return Err(OUT_OF_RESOURCES),
-        }
-        Ok(HsaSignal {
-            handle: host as u64,
-        })
-    }
-
-    unsafe fn attach_ipc_signal(&mut self, words: [u32; 8]) -> Result<HsaSignal, Status> {
-        if let Some((address, imported)) = self
-            .signal_state
-            .imported_ipc_signals
-            .iter_mut()
-            .find(|(_, signal)| signal.ipc_handle == words)
-        {
-            imported.references = imported.references.checked_add(1).ok_or(OUT_OF_RESOURCES)?;
-            let address = *address;
-            if let Some(record) = self.signal_state.async_signal_refs.get_mut(&address) {
-                if record.references == 0 && record.retired.load(Ordering::Acquire) {
-                    self.signal_state.async_signal_refs.remove(&address);
-                } else {
-                    record.revive();
-                }
-            }
-            return Ok(HsaSignal {
-                handle: address as u64,
-            });
-        }
-
-        let allocation = {
-            let devices = self.gpus.iter().map(|gpu| &gpu.device).collect::<Vec<_>>();
-            linux_interop::import_kfd_ipc_memory(
-                &self.session,
-                &devices,
-                &devices,
-                KfdIpcMemoryHandle { words },
-                IPC_SIGNAL_ALLOCATION_BYTES,
-            )
-            .map_err(|error| match error.kind() {
-                rocddi::ErrorKind::InvalidArgument | rocddi::ErrorKind::Unsupported => {
-                    INVALID_ARGUMENT
-                }
-                rocddi::ErrorKind::ResourceExhausted => OUT_OF_RESOURCES,
-                _ => ERROR,
-            })?
-        };
-        let info = allocation.info();
-        let host = info.host_address.ok_or(INVALID_ARGUMENT)?;
-        if info.device_address != host as u64 {
-            return Err(INVALID_ARGUMENT);
-        }
-        // SAFETY: A successful IPC import mapped at least one page at host.
-        let shared = unsafe { &*(host as *const SharedSignal) };
-        if !shared.is_ipc() {
-            return Err(INVALID_ARGUMENT);
-        }
-        self.signal_state
-            .imported_ipc_signals
-            .try_reserve(1)
-            .map_err(|_| OUT_OF_RESOURCES)?;
-        match self.signal_state.imported_ipc_signals.entry(host) {
-            Entry::Vacant(entry) => {
-                entry.insert(ImportedIpcSignal {
-                    allocation,
-                    ipc_handle: words,
-                    references: 1,
-                });
-            }
-            Entry::Occupied(_) => return Err(OUT_OF_RESOURCES),
-        }
-        Ok(HsaSignal {
-            handle: host as u64,
-        })
-    }
 }
 
 impl SignalState {
@@ -988,26 +828,6 @@ impl SignalState {
         } else if record.copy_profile.is_none() {
             self.async_signal_refs.remove(&address);
         }
-    }
-
-    fn export_ipc_signal(&self, signal: HsaSignal) -> Result<[u32; 8], Status> {
-        let address = signal.handle as usize;
-        if !self.owns_signal(signal) {
-            return Err(INVALID_ARGUMENT);
-        }
-        let allocation = self
-            .owned_ipc_signals
-            .get(&address)
-            .map(|signal| &signal.allocation)
-            .or_else(|| {
-                self.imported_ipc_signals
-                    .get(&address)
-                    .map(|signal| &signal.allocation)
-            })
-            .ok_or(INVALID_ARGUMENT)?;
-        linux_interop::export_kfd_ipc_memory(allocation)
-            .map(|handle| handle.words)
-            .map_err(map_error)
     }
 
     fn destroy_signal(&mut self, signal: HsaSignal) -> Status {
@@ -1301,7 +1121,11 @@ pub unsafe extern "C" fn hsa_amd_signal_create(
             Err(status) => return status,
         };
         let created = match if attributes & AMD_SIGNAL_IPC != 0 {
-            runtime.create_ipc_signal(initial_value)
+            runtime.signal_state.create_ipc_signal(
+                &runtime.gpus,
+                runtime.host_page_size,
+                initial_value,
+            )
         } else {
             runtime.create_signal(initial_value, interrupt)
         } {
@@ -1469,7 +1293,11 @@ pub unsafe extern "C" fn hsa_amd_ipc_signal_attach(
         // SAFETY: The caller supplied a readable IPC handle.
         let words = unsafe { handle.read() }.handle;
         // SAFETY: attach_ipc_signal validates the imported mapping and shared header.
-        let attached = match unsafe { runtime.attach_ipc_signal(words) } {
+        let attached = match unsafe {
+            runtime
+                .signal_state
+                .attach_ipc_signal(&runtime.session, &runtime.gpus, words)
+        } {
             Ok(signal) => signal,
             Err(status) => return status,
         };
@@ -3164,27 +2992,6 @@ mod tests {
             hsa_amd_ipc_signal_create;
         let _: unsafe extern "C" fn(*const HsaAmdIpcSignal, *mut HsaSignal) -> Status =
             hsa_amd_ipc_signal_attach;
-    }
-
-    #[test]
-    fn ipc_signal_storage_matches_the_rocr_shared_layout() {
-        assert_eq!(size_of::<HsaAmdIpcSignal>(), 32);
-        assert_eq!(align_of::<HsaAmdIpcSignal>(), 4);
-        assert_eq!(size_of::<SharedSignal>(), 128);
-        assert_eq!(align_of::<SharedSignal>(), 64);
-        assert_eq!(std::mem::offset_of!(SharedSignal, signal), 0);
-        assert_eq!(std::mem::offset_of!(SharedSignal, sdma_start_ts), 64);
-        assert_eq!(std::mem::offset_of!(SharedSignal, core_signal), 72);
-        assert_eq!(std::mem::offset_of!(SharedSignal, id), 80);
-        assert_eq!(std::mem::offset_of!(SharedSignal, sdma_end_ts), 96);
-
-        let signal = SharedSignal::ipc(17);
-        assert!(signal.is_ipc());
-        assert_eq!(
-            signal.signal.kind.load(Ordering::Relaxed),
-            AMD_SIGNAL_KIND_USER
-        );
-        assert_eq!(signal.signal.value.load(Ordering::Relaxed), 17);
     }
 
     #[test]
