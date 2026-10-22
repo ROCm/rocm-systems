@@ -38,6 +38,7 @@ use rocddi::topology::{Endpoint, GpuInfo, TopologySnapshot};
 use crate::callback_arg::CallbackArg;
 use crate::ffi::*;
 use crate::image_abi::ImageState;
+use crate::isa::isa_name;
 use crate::loader::LoaderState;
 use crate::memory::MemoryState;
 use crate::pc_sampling::PcSamplingState;
@@ -47,7 +48,7 @@ use crate::signal::SignalState;
 mod agent;
 mod clock;
 mod events;
-pub(crate) use agent::{Cache, Gpu, cache_handles_in_level_order, gfx_target_name};
+pub(crate) use agent::{Cache, Gpu, cache_handles_in_level_order};
 use agent::{
     cache_sizes, decode_cache_handle, decode_gpu_pool_handle, full_profile_platform,
     gpu_agent_name, hdp_flush_pointers, pc_sampling_supported_by_query, selected_cpu_caches,
@@ -462,7 +463,7 @@ impl HsaState {
         let index = usize::try_from(offset / ISA_COUNT_PER_GPU).ok()?;
         let variant = offset % ISA_COUNT_PER_GPU;
         let gpu = self.gpus.get(index)?;
-        super::isa_name(&gpu.info, gpu.xnack_enabled, variant).map(|_| (index, variant))
+        isa_name(&gpu.info, gpu.xnack_enabled, variant).map(|_| (index, variant))
     }
 
     pub(crate) fn isa_index(&self, isa: HsaIsa) -> Option<usize> {
