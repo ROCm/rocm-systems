@@ -98,12 +98,27 @@ Hip::hipStreamDestroy(hipStream_t stream) const
     (void)throwOnHipError<Hip::RuntimeError>(::hipStreamDestroy(stream));
 }
 
+void
+Hip::hipStreamWaitValue64(hipStream_t stream, uint64_t *ptr, uint64_t value, unsigned int flags,
+                          uint64_t mask) const
+{
+    (void)throwOnHipError<Hip::RuntimeError>(::hipStreamWaitValue64(stream, ptr, value, flags, mask));
+}
+
 void *
 Hip::hipHostMalloc(size_t size, unsigned int flags) const
 {
     void *host_ptr;
     (void)throwOnHipError<Hip::RuntimeError>(::hipHostMalloc(&host_ptr, size, flags));
     return host_ptr;
+}
+
+void *
+Hip::hipExtMallocWithFlags(size_t size, unsigned int flags) const
+{
+    void *dev_ptr;
+    (void)throwOnHipError<Hip::RuntimeError>(::hipExtMallocWithFlags(&dev_ptr, size, flags));
+    return dev_ptr;
 }
 
 void
