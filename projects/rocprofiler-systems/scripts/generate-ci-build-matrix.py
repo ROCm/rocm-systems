@@ -44,7 +44,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def load_matrix(path: Path) -> dict[str, list[dict[str, Any]]]:
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
-        raise ValueError(f"{path} must contain a JSON object")
+        raise TypeError(f"{path} must contain a JSON object")
     return {
         "primary": list(data.get("primary", [])),
         "system_deps": list(data.get("system_deps", [])),
