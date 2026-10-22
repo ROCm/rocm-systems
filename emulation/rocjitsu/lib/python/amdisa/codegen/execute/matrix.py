@@ -174,23 +174,52 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         L.append(f'  uint32_t vb = wf.vgpr_alloc().base;')
         if ctx.profile.uses_vgpr_msb_indexing:
             L.append(
-                f'  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, {d}.opr_type_, '
+                f'  auto dst_off = Isa::resolved_vgpr_offset(wf, {d}.opr_type_, '
                 f'{d}.encoding_value_, {d}.vgpr_msb_role());'
             )
+            L.append('  if (!dst_off) {')
+            L.append('    wf.report_instruction_execution_error(')
             L.append(
-                f'  uint32_t s0b = vb + *Isa::resolved_vgpr_offset(wf, {s0}.opr_type_, '
+                '        amdgpu::InstructionExecutionError::UnsupportedOperandValue);'
+            )
+            L.append('    return;')
+            L.append('  }')
+            L.append('  uint32_t dst = vb + *dst_off;')
+            L.append(
+                f'  auto s0b_off = Isa::resolved_vgpr_offset(wf, {s0}.opr_type_, '
                 f'{s0}.encoding_value_, {s0}.vgpr_msb_role());'
             )
+            L.append('  if (!s0b_off) {')
+            L.append('    wf.report_instruction_execution_error(')
             L.append(
-                f'  uint32_t s1b = vb + *Isa::resolved_vgpr_offset(wf, {s1}.opr_type_, '
+                '        amdgpu::InstructionExecutionError::UnsupportedOperandValue);'
+            )
+            L.append('    return;')
+            L.append('  }')
+            L.append('  uint32_t s0b = vb + *s0b_off;')
+            L.append(
+                f'  auto s1b_off = Isa::resolved_vgpr_offset(wf, {s1}.opr_type_, '
                 f'{s1}.encoding_value_, {s1}.vgpr_msb_role());'
             )
+            L.append('  if (!s1b_off) {')
+            L.append('    wf.report_instruction_execution_error(')
+            L.append(
+                '        amdgpu::InstructionExecutionError::UnsupportedOperandValue);'
+            )
+            L.append('    return;')
+            L.append('  }')
+            L.append('  uint32_t s1b = vb + *s1b_off;')
             L.append(
                 f'  auto index_off = Isa::resolved_vgpr_offset(wf, {s2}.opr_type_, '
                 f'{s2}.encoding_value_, {s2}.vgpr_msb_role());'
             )
-            L.append(f'  if (!index_off)')
-            L.append(f'    throw util::UnimplementedInst(mnemonic());')
+            L.append('  if (!index_off) {')
+            L.append('    wf.report_instruction_execution_error(')
+            L.append(
+                '        amdgpu::InstructionExecutionError::UnsupportedOperandValue);'
+            )
+            L.append('    return;')
+            L.append('  }')
             L.append(f'  uint32_t idx = vb + *index_off;')
         else:
             if 'acc_cd' in ctx.enc_field_names:
@@ -386,17 +415,35 @@ def gen_mfma(ctx: ExecuteContext) -> str:
     swmmac_index_entries = 32 if is_swmmac and K >= 128 and in_bits <= 8 else 16
     if ctx.profile.uses_vgpr_msb_indexing:
         L.append(
-            f'  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, {d}.opr_type_, '
+            f'  auto dst_off = Isa::resolved_vgpr_offset(wf, {d}.opr_type_, '
             f'{d}.encoding_value_, {d}.vgpr_msb_role());'
         )
+        L.append('  if (!dst_off) {')
+        L.append('    wf.report_instruction_execution_error(')
+        L.append('        amdgpu::InstructionExecutionError::UnsupportedOperandValue);')
+        L.append('    return;')
+        L.append('  }')
+        L.append('  uint32_t dst = vb + *dst_off;')
         L.append(
-            f'  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, {s0}.opr_type_, '
+            f'  auto src0_base_off = Isa::resolved_vgpr_offset(wf, {s0}.opr_type_, '
             f'{s0}.encoding_value_, {s0}.vgpr_msb_role());'
         )
+        L.append('  if (!src0_base_off) {')
+        L.append('    wf.report_instruction_execution_error(')
+        L.append('        amdgpu::InstructionExecutionError::UnsupportedOperandValue);')
+        L.append('    return;')
+        L.append('  }')
+        L.append('  uint32_t src0_base = vb + *src0_base_off;')
         L.append(
-            f'  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, {s1}.opr_type_, '
+            f'  auto src1_base_off = Isa::resolved_vgpr_offset(wf, {s1}.opr_type_, '
             f'{s1}.encoding_value_, {s1}.vgpr_msb_role());'
         )
+        L.append('  if (!src1_base_off) {')
+        L.append('    wf.report_instruction_execution_error(')
+        L.append('        amdgpu::InstructionExecutionError::UnsupportedOperandValue);')
+        L.append('    return;')
+        L.append('  }')
+        L.append('  uint32_t src1_base = vb + *src1_base_off;')
         src0_base_expr = 'src0_base'
         src1_base_expr = 'src1_base'
         if uses_supported_swmmac_layout:
@@ -407,8 +454,13 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 f'  auto index_off = Isa::resolved_vgpr_offset(wf, {s2}.opr_type_, '
                 f'{s2}.encoding_value_, {s2}.vgpr_msb_role());'
             )
-            L.append(f'  if (!index_off)')
-            L.append(f'    throw util::UnimplementedInst(mnemonic());')
+            L.append('  if (!index_off) {')
+            L.append('    wf.report_instruction_execution_error(')
+            L.append(
+                '        amdgpu::InstructionExecutionError::UnsupportedOperandValue);'
+            )
+            L.append('    return;')
+            L.append('  }')
             L.append(f'  uint32_t index_base = vb + *index_off;')
             L.append(f'  uint32_t index_key = {swmmac_index_key_expr};')
             index_base_expr = 'index_base'
@@ -623,8 +675,13 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 f' amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));'
             )
             L.append(f'      }});')
-            L.append(f'  if (!dispatched)')
-            L.append(f'    throw util::UnimplementedInst(mnemonic());')
+            L.append('  if (!dispatched) {')
+            L.append('    wf.report_instruction_execution_error(')
+            L.append(
+                '        amdgpu::InstructionExecutionError::UnsupportedOperandValue);'
+            )
+            L.append('    return;')
+            L.append('  }')
             return '\n'.join(L)
 
         if uses_rdna_swmmac_arithmetic:
@@ -812,8 +869,13 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 f'                               dst, s0b, s1b, s2, ea, eb, const_acc);'
             )
             L.append('      });')
-            L.append('  if (!dispatched)')
-            L.append('    throw util::UnimplementedInst(mnemonic());')
+            L.append('  if (!dispatched) {')
+            L.append('    wf.report_instruction_execution_error(')
+            L.append(
+                '        amdgpu::InstructionExecutionError::UnsupportedOperandValue);'
+            )
+            L.append('    return;')
+            L.append('  }')
         elif uses_gfx11_wmma_layout and result_type in ('F16', 'BF16'):
             exec_fn = (
                 'exec_gfx11_wmma_f16'

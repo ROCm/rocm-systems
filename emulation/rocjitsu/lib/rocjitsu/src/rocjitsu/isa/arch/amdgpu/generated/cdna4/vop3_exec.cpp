@@ -2778,8 +2778,11 @@ void VCvtScalef32SrPkFp4F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
   auto data_src_off = Isa::resolved_vgpr_offset(src0.opr_type_, src0.encoding_value_);
-  if (!data_src_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!data_src_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t data_src_base = vb + amdgpu::apply_gpr_idx(wf, *data_src_off, src0.vgpr_msb_role());
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -3369,16 +3372,25 @@ void VCvtScalef322xpk16Fp6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
   auto vdst_off = Isa::resolved_vgpr_offset(vdst.opr_type_, vdst.encoding_value_);
-  if (!vdst_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!vdst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t vdst_base = vb + amdgpu::apply_gpr_idx(wf, *vdst_off, vdst.vgpr_msb_role());
   auto src0_off = Isa::resolved_vgpr_offset(src0.opr_type_, src0.encoding_value_);
-  if (!src0_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!src0_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t src0_base = vb + amdgpu::apply_gpr_idx(wf, *src0_off, src0.vgpr_msb_role());
   auto src1_off = Isa::resolved_vgpr_offset(src1.opr_type_, src1.encoding_value_);
-  if (!src1_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!src1_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t src1_base = vb + amdgpu::apply_gpr_idx(wf, *src1_off, src1.vgpr_msb_role());
   auto rd = [&](uint32_t base, uint32_t lane, uint32_t dw) -> uint32_t {
     return amdgpu::RegisterAccess(cu).read_vgpr(base + dw, lane);
@@ -3571,16 +3583,25 @@ void VCvtScalef322xpk16Bf6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
   auto vdst_off = Isa::resolved_vgpr_offset(vdst.opr_type_, vdst.encoding_value_);
-  if (!vdst_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!vdst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t vdst_base = vb + amdgpu::apply_gpr_idx(wf, *vdst_off, vdst.vgpr_msb_role());
   auto src0_off = Isa::resolved_vgpr_offset(src0.opr_type_, src0.encoding_value_);
-  if (!src0_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!src0_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t src0_base = vb + amdgpu::apply_gpr_idx(wf, *src0_off, src0.vgpr_msb_role());
   auto src1_off = Isa::resolved_vgpr_offset(src1.opr_type_, src1.encoding_value_);
-  if (!src1_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!src1_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t src1_base = vb + amdgpu::apply_gpr_idx(wf, *src1_off, src1.vgpr_msb_role());
   auto rd = [&](uint32_t base, uint32_t lane, uint32_t dw) -> uint32_t {
     return amdgpu::RegisterAccess(cu).read_vgpr(base + dw, lane);
@@ -3773,12 +3794,18 @@ void VCvtScalef32SrPk32Fp6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
   auto vdst_off = Isa::resolved_vgpr_offset(vdst.opr_type_, vdst.encoding_value_);
-  if (!vdst_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!vdst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t vdst_base = vb + amdgpu::apply_gpr_idx(wf, *vdst_off, vdst.vgpr_msb_role());
   auto src0_off = Isa::resolved_vgpr_offset(src0.opr_type_, src0.encoding_value_);
-  if (!src0_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!src0_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t src0_base = vb + amdgpu::apply_gpr_idx(wf, *src0_off, src0.vgpr_msb_role());
   auto rd = [&](uint32_t base, uint32_t lane, uint32_t dw) -> uint32_t {
     return amdgpu::RegisterAccess(cu).read_vgpr(base + dw, lane);
@@ -4004,12 +4031,18 @@ void VCvtScalef32SrPk32Bf6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
   auto vdst_off = Isa::resolved_vgpr_offset(vdst.opr_type_, vdst.encoding_value_);
-  if (!vdst_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!vdst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t vdst_base = vb + amdgpu::apply_gpr_idx(wf, *vdst_off, vdst.vgpr_msb_role());
   auto src0_off = Isa::resolved_vgpr_offset(src0.opr_type_, src0.encoding_value_);
-  if (!src0_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!src0_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t src0_base = vb + amdgpu::apply_gpr_idx(wf, *src0_off, src0.vgpr_msb_role());
   auto rd = [&](uint32_t base, uint32_t lane, uint32_t dw) -> uint32_t {
     return amdgpu::RegisterAccess(cu).read_vgpr(base + dw, lane);
@@ -4235,12 +4268,18 @@ void VCvtScalef32Pk32F32Fp6Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
   auto vdst_off = Isa::resolved_vgpr_offset(vdst.opr_type_, vdst.encoding_value_);
-  if (!vdst_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!vdst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t vdst_base = vb + amdgpu::apply_gpr_idx(wf, *vdst_off, vdst.vgpr_msb_role());
   auto src0_off = Isa::resolved_vgpr_offset(src0.opr_type_, src0.encoding_value_);
-  if (!src0_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!src0_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t src0_base = vb + amdgpu::apply_gpr_idx(wf, *src0_off, src0.vgpr_msb_role());
   auto rd = [&](uint32_t base, uint32_t lane, uint32_t dw) -> uint32_t {
     return amdgpu::RegisterAccess(cu).read_vgpr(base + dw, lane);
@@ -4369,12 +4408,18 @@ void VCvtScalef32Pk32F32Bf6Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
   auto vdst_off = Isa::resolved_vgpr_offset(vdst.opr_type_, vdst.encoding_value_);
-  if (!vdst_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!vdst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t vdst_base = vb + amdgpu::apply_gpr_idx(wf, *vdst_off, vdst.vgpr_msb_role());
   auto src0_off = Isa::resolved_vgpr_offset(src0.opr_type_, src0.encoding_value_);
-  if (!src0_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!src0_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t src0_base = vb + amdgpu::apply_gpr_idx(wf, *src0_off, src0.vgpr_msb_role());
   auto rd = [&](uint32_t base, uint32_t lane, uint32_t dw) -> uint32_t {
     return amdgpu::RegisterAccess(cu).read_vgpr(base + dw, lane);
@@ -4503,12 +4548,18 @@ void VCvtScalef32Pk32Fp6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
   auto vdst_off = Isa::resolved_vgpr_offset(vdst.opr_type_, vdst.encoding_value_);
-  if (!vdst_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!vdst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t vdst_base = vb + amdgpu::apply_gpr_idx(wf, *vdst_off, vdst.vgpr_msb_role());
   auto src0_off = Isa::resolved_vgpr_offset(src0.opr_type_, src0.encoding_value_);
-  if (!src0_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!src0_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t src0_base = vb + amdgpu::apply_gpr_idx(wf, *src0_off, src0.vgpr_msb_role());
   auto rd = [&](uint32_t base, uint32_t lane, uint32_t dw) -> uint32_t {
     return amdgpu::RegisterAccess(cu).read_vgpr(base + dw, lane);
@@ -4685,12 +4736,18 @@ void VCvtScalef32Pk32Fp6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
   auto vdst_off = Isa::resolved_vgpr_offset(vdst.opr_type_, vdst.encoding_value_);
-  if (!vdst_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!vdst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t vdst_base = vb + amdgpu::apply_gpr_idx(wf, *vdst_off, vdst.vgpr_msb_role());
   auto src0_off = Isa::resolved_vgpr_offset(src0.opr_type_, src0.encoding_value_);
-  if (!src0_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!src0_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t src0_base = vb + amdgpu::apply_gpr_idx(wf, *src0_off, src0.vgpr_msb_role());
   auto rd = [&](uint32_t base, uint32_t lane, uint32_t dw) -> uint32_t {
     return amdgpu::RegisterAccess(cu).read_vgpr(base + dw, lane);
@@ -4867,12 +4924,18 @@ void VCvtScalef32Pk32Bf6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
   auto vdst_off = Isa::resolved_vgpr_offset(vdst.opr_type_, vdst.encoding_value_);
-  if (!vdst_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!vdst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t vdst_base = vb + amdgpu::apply_gpr_idx(wf, *vdst_off, vdst.vgpr_msb_role());
   auto src0_off = Isa::resolved_vgpr_offset(src0.opr_type_, src0.encoding_value_);
-  if (!src0_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!src0_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t src0_base = vb + amdgpu::apply_gpr_idx(wf, *src0_off, src0.vgpr_msb_role());
   auto rd = [&](uint32_t base, uint32_t lane, uint32_t dw) -> uint32_t {
     return amdgpu::RegisterAccess(cu).read_vgpr(base + dw, lane);
@@ -5049,12 +5112,18 @@ void VCvtScalef32Pk32Bf6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
   auto vdst_off = Isa::resolved_vgpr_offset(vdst.opr_type_, vdst.encoding_value_);
-  if (!vdst_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!vdst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t vdst_base = vb + amdgpu::apply_gpr_idx(wf, *vdst_off, vdst.vgpr_msb_role());
   auto src0_off = Isa::resolved_vgpr_offset(src0.opr_type_, src0.encoding_value_);
-  if (!src0_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!src0_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t src0_base = vb + amdgpu::apply_gpr_idx(wf, *src0_off, src0.vgpr_msb_role());
   auto rd = [&](uint32_t base, uint32_t lane, uint32_t dw) -> uint32_t {
     return amdgpu::RegisterAccess(cu).read_vgpr(base + dw, lane);
@@ -5231,12 +5300,18 @@ void VCvtScalef32SrPk32Fp6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
   auto vdst_off = Isa::resolved_vgpr_offset(vdst.opr_type_, vdst.encoding_value_);
-  if (!vdst_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!vdst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t vdst_base = vb + amdgpu::apply_gpr_idx(wf, *vdst_off, vdst.vgpr_msb_role());
   auto src0_off = Isa::resolved_vgpr_offset(src0.opr_type_, src0.encoding_value_);
-  if (!src0_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!src0_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t src0_base = vb + amdgpu::apply_gpr_idx(wf, *src0_off, src0.vgpr_msb_role());
   auto rd = [&](uint32_t base, uint32_t lane, uint32_t dw) -> uint32_t {
     return amdgpu::RegisterAccess(cu).read_vgpr(base + dw, lane);
@@ -5446,12 +5521,18 @@ void VCvtScalef32SrPk32Fp6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
   auto vdst_off = Isa::resolved_vgpr_offset(vdst.opr_type_, vdst.encoding_value_);
-  if (!vdst_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!vdst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t vdst_base = vb + amdgpu::apply_gpr_idx(wf, *vdst_off, vdst.vgpr_msb_role());
   auto src0_off = Isa::resolved_vgpr_offset(src0.opr_type_, src0.encoding_value_);
-  if (!src0_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!src0_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t src0_base = vb + amdgpu::apply_gpr_idx(wf, *src0_off, src0.vgpr_msb_role());
   auto rd = [&](uint32_t base, uint32_t lane, uint32_t dw) -> uint32_t {
     return amdgpu::RegisterAccess(cu).read_vgpr(base + dw, lane);
@@ -5661,12 +5742,18 @@ void VCvtScalef32SrPk32Bf6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
   auto vdst_off = Isa::resolved_vgpr_offset(vdst.opr_type_, vdst.encoding_value_);
-  if (!vdst_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!vdst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t vdst_base = vb + amdgpu::apply_gpr_idx(wf, *vdst_off, vdst.vgpr_msb_role());
   auto src0_off = Isa::resolved_vgpr_offset(src0.opr_type_, src0.encoding_value_);
-  if (!src0_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!src0_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t src0_base = vb + amdgpu::apply_gpr_idx(wf, *src0_off, src0.vgpr_msb_role());
   auto rd = [&](uint32_t base, uint32_t lane, uint32_t dw) -> uint32_t {
     return amdgpu::RegisterAccess(cu).read_vgpr(base + dw, lane);
@@ -5876,12 +5963,18 @@ void VCvtScalef32SrPk32Bf6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
   auto vdst_off = Isa::resolved_vgpr_offset(vdst.opr_type_, vdst.encoding_value_);
-  if (!vdst_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!vdst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t vdst_base = vb + amdgpu::apply_gpr_idx(wf, *vdst_off, vdst.vgpr_msb_role());
   auto src0_off = Isa::resolved_vgpr_offset(src0.opr_type_, src0.encoding_value_);
-  if (!src0_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!src0_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t src0_base = vb + amdgpu::apply_gpr_idx(wf, *src0_off, src0.vgpr_msb_role());
   auto rd = [&](uint32_t base, uint32_t lane, uint32_t dw) -> uint32_t {
     return amdgpu::RegisterAccess(cu).read_vgpr(base + dw, lane);
@@ -6091,12 +6184,18 @@ void VCvtScalef32Pk32F16Fp6Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
   auto vdst_off = Isa::resolved_vgpr_offset(vdst.opr_type_, vdst.encoding_value_);
-  if (!vdst_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!vdst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t vdst_base = vb + amdgpu::apply_gpr_idx(wf, *vdst_off, vdst.vgpr_msb_role());
   auto src0_off = Isa::resolved_vgpr_offset(src0.opr_type_, src0.encoding_value_);
-  if (!src0_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!src0_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t src0_base = vb + amdgpu::apply_gpr_idx(wf, *src0_off, src0.vgpr_msb_role());
   auto rd = [&](uint32_t base, uint32_t lane, uint32_t dw) -> uint32_t {
     return amdgpu::RegisterAccess(cu).read_vgpr(base + dw, lane);
@@ -6241,12 +6340,18 @@ void VCvtScalef32Pk32Bf16Fp6Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
   auto vdst_off = Isa::resolved_vgpr_offset(vdst.opr_type_, vdst.encoding_value_);
-  if (!vdst_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!vdst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t vdst_base = vb + amdgpu::apply_gpr_idx(wf, *vdst_off, vdst.vgpr_msb_role());
   auto src0_off = Isa::resolved_vgpr_offset(src0.opr_type_, src0.encoding_value_);
-  if (!src0_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!src0_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t src0_base = vb + amdgpu::apply_gpr_idx(wf, *src0_off, src0.vgpr_msb_role());
   auto rd = [&](uint32_t base, uint32_t lane, uint32_t dw) -> uint32_t {
     return amdgpu::RegisterAccess(cu).read_vgpr(base + dw, lane);
@@ -6391,12 +6496,18 @@ void VCvtScalef32Pk32F16Bf6Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
   auto vdst_off = Isa::resolved_vgpr_offset(vdst.opr_type_, vdst.encoding_value_);
-  if (!vdst_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!vdst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t vdst_base = vb + amdgpu::apply_gpr_idx(wf, *vdst_off, vdst.vgpr_msb_role());
   auto src0_off = Isa::resolved_vgpr_offset(src0.opr_type_, src0.encoding_value_);
-  if (!src0_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!src0_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t src0_base = vb + amdgpu::apply_gpr_idx(wf, *src0_off, src0.vgpr_msb_role());
   auto rd = [&](uint32_t base, uint32_t lane, uint32_t dw) -> uint32_t {
     return amdgpu::RegisterAccess(cu).read_vgpr(base + dw, lane);
@@ -6541,12 +6652,18 @@ void VCvtScalef32Pk32Bf16Bf6Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
   auto vdst_off = Isa::resolved_vgpr_offset(vdst.opr_type_, vdst.encoding_value_);
-  if (!vdst_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!vdst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t vdst_base = vb + amdgpu::apply_gpr_idx(wf, *vdst_off, vdst.vgpr_msb_role());
   auto src0_off = Isa::resolved_vgpr_offset(src0.opr_type_, src0.encoding_value_);
-  if (!src0_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!src0_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t src0_base = vb + amdgpu::apply_gpr_idx(wf, *src0_off, src0.vgpr_msb_role());
   auto rd = [&](uint32_t base, uint32_t lane, uint32_t dw) -> uint32_t {
     return amdgpu::RegisterAccess(cu).read_vgpr(base + dw, lane);

@@ -2064,6 +2064,9 @@ def test_matrix_resolved_dense_operands_support_vgpr_and_inline_accumulators():
         'auto src2_off = Isa::resolved_vgpr_offset(wf, src2.opr_type_, '
         'src2.encoding_value_, src2.vgpr_msb_role());'
     ) in body
+    for base in ('dst', 'src0_base', 'src1_base'):
+        assert body.index(f'if (!{base}_off)') < body.index(f'vb + *{base}_off')
+    assert 'InstructionExecutionError::UnsupportedOperandValue' in body
     assert 'const_acc = amdgpu::ACC_FROM_VGPR;' in body
     assert 's2 = vb + *src2_off;' in body
     assert 'const_acc = amdgpu::RegisterAccess(wf).read_scalar(src2);' in body
@@ -2089,7 +2092,10 @@ def test_matrix_resolved_sparse_index_rejects_missing_vgpr_offset():
         'auto index_off = Isa::resolved_vgpr_offset(wf, src2.opr_type_, '
         'src2.encoding_value_, src2.vgpr_msb_role());'
     ) in body
-    assert 'if (!index_off)\n    throw util::UnimplementedInst(mnemonic());' in body
+    assert 'if (!index_off) {' in body
+    assert 'InstructionExecutionError::UnsupportedOperandValue' in body
+    assert 'throw util::UnimplementedInst' not in body
+    assert body.index('if (!index_off)') < body.index('uint32_t index_base')
     assert 'uint32_t index_base = vb + *index_off;' in body
     assert (
         'amdgpu::exec_gfx12_swmmac_dot4<false>(cu, wf.wf_size(), dst, src0_base, '
@@ -2274,7 +2280,7 @@ def test_runtime_wave_swmmac_layout_does_not_depend_on_arch_name(
 
     if uses_vgpr_msb_indexing:
         assert (
-            'uint32_t dst = vb + *Isa::resolved_vgpr_offset('
+            'auto dst_off = Isa::resolved_vgpr_offset('
             'wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());'
         ) in body
     else:
@@ -2544,8 +2550,8 @@ def test_every_matrix_executor_uses_profile_selected_operand_bases(
     if is_standalone_smfmac:
         expected_operands = 'dst, s0b, s1b, idx'
         if uses_vgpr_msb_indexing:
-            assert 'uint32_t s0b = vb + *Isa::resolved_vgpr_offset' in body
-            assert 'uint32_t s1b = vb + *Isa::resolved_vgpr_offset' in body
+            assert 'uint32_t s0b = vb + *s0b_off;' in body
+            assert 'uint32_t s1b = vb + *s1b_off;' in body
             assert 'uint32_t idx = vb + *index_off;' in body
         else:
             assert 'uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);' in body
@@ -2555,8 +2561,8 @@ def test_every_matrix_executor_uses_profile_selected_operand_bases(
     else:
         if uses_vgpr_msb_indexing:
             expected_operands = 'dst, src0_base, src1_base, s2'
-            assert 'uint32_t src0_base = vb + *Isa::resolved_vgpr_offset' in body
-            assert 'uint32_t src1_base = vb + *Isa::resolved_vgpr_offset' in body
+            assert 'uint32_t src0_base = vb + *src0_base_off;' in body
+            assert 'uint32_t src1_base = vb + *src1_base_off;' in body
         else:
             expected_operands = 'dst, src0_base, src1_base, s2'
             assert (
@@ -2615,11 +2621,11 @@ def test_matrix_f64_resolved_sources_use_normalized_base_expressions():
     body = _gen_mfma(inst, 'rdna4', profile)
 
     assert (
-        'uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, '
+        'auto src0_base_off = Isa::resolved_vgpr_offset(wf, '
         'src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());'
     ) in body
     assert (
-        'uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, '
+        'auto src1_base_off = Isa::resolved_vgpr_offset(wf, '
         'src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());'
     ) in body
     assert '                 src0_base,\n                 src1_base,' in body
