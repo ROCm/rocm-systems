@@ -3074,7 +3074,33 @@ void GraphExecBase::UpdateStreams(hip::Stream* launch_stream) {
     streams_.push_back(stream);
   }
 }
-
+// ================================================================================================
+GraphExecBase::ResolvedExecNode GraphExecBase::ResolveClonedNode(Node node) {
+  if (node == nullptr) {
+    return {};
+  }
+  // Depth 0: the node belongs directly to the graph this exec was instantiated from.
+  auto it = clonedNodes_.find(node);
+  if (it != clonedNodes_.end()) {
+    return {it->second, this};
+  }
+  // Depth >= 1: the node may live inside a child graph. Its parent graph is then the
+  // caller-visible ChildGraphNode; resolve that one level up, then translate within it.
+  auto* parentChildNode = dynamic_cast<ChildGraphNode*>(node->GetParentGraph());
+  if (parentChildNode == nullptr) {
+    return {};  // not a member of any child graph -> not part of this exec
+  }
+  ResolvedExecNode resolvedParent = ResolveClonedNode(parentChildNode);
+  if (!resolvedParent) {
+    return {};
+  }
+  auto* execChildNode = static_cast<ChildGraphNode*>(resolvedParent.node);
+  Node cloned = execChildNode->GetClonedNode(node);
+  if (cloned == nullptr) {
+    return {};
+  }
+  return {cloned, execChildNode};
+}
 // ================================================================================================
 hipError_t Graph::RunOneNode(Node node) {
   // Clear the storage of the wait nodes
