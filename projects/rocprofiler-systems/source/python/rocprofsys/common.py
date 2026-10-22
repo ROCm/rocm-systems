@@ -45,7 +45,7 @@ def _file(back=2, only_basename=True, use_dirname=False, noquotes=True):
     Returns the file name
     """
 
-    from os.path import basename, dirname
+    from os.path import basename, dirname, join
 
     def get_fcode(back):
         fname = "<module>"

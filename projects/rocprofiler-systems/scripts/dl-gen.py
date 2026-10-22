@@ -144,7 +144,7 @@ if __name__ == "__main__":
                 if os.path.exists(itr):
                     funcs += run(itr)
                 else:
-                    printf(f"No file matched {itr}")
+                    print(f"No file matched {itr}", file=sys.stderr)
 
     if funcs:
         print("\n##### declaration:\n")
