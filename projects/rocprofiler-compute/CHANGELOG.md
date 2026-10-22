@@ -73,6 +73,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * It can be combined with `-b`. For example, `-b 2 --roofline` profiles blocks 2 and 4.
   * On gfx908, it collects the roofline counters and skips the roofline benchmark, which gfx908 does not support.
 
+* The `-b` block alias `roof` is now `roofline`. For example, use `-b roofline` instead of `-b roof`.
+
+* Roofline metric ids such as `-b 4.1` now count as selecting roofline, like `-b 4` and `-b roofline`. In profile mode they run the roofline benchmark, and in analyze mode they show the roofline section.
+
 ### Removed
 
 * Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or `--output-format db` to explore results in ROCm Optiq.
@@ -111,6 +115,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Upcoming changes
 
 * The old roofline option names (`--roof-only`, `--bench-only`, `--device`, `--sort`, `--mem-level`, and `--roofline-data-type`) will be removed in a future release. Use the new `--roofline-*` names instead.
+
+* `--no-roof` is deprecated and will be removed in a future release. To skip roofline, select blocks with `-b` or `--set` that do not include block 4.
 
 ### Known issues
 

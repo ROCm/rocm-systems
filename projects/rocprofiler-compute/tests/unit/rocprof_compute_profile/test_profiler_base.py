@@ -39,7 +39,6 @@ def _make_sanitize_args(remaining, torch_trace=False, **overrides):
     defaults = dict(
         filter_blocks=[],
         set_selected=None,
-        roof_only=False,
         output_directory="/tmp/test_workload",
         no_native_tool=False,
         iteration_multiplexing=None,
@@ -807,6 +806,38 @@ def test_pre_processing_persists_membw_analysis_config(
     )
     assert profiling_config["membw_analysis"] is True
     assert profiling_config["filter_blocks"] == effective_filter_blocks
+
+
+@pytest.mark.parametrize(
+    ("selected_blocks", "no_roof", "skip_roof"),
+    [(["2"], False, True), (["2", "4"], False, False), ([], False, False),
+     ([], True, True)],
+    ids=["no_roofline_block", "roofline_block", "full_profile", "no_roof"],
+)  # fmt: skip
+def test_pre_processing_records_roofline_in_sysinfo_only_when_selected(
+    tmp_path: Path, selected_blocks, no_roof, skip_roof
+) -> None:
+    """sysinfo.csv lists roofline only when the selected blocks collect it."""
+    profiling_args = argparse.Namespace(
+        attach_pid=None,
+        config_dir=tmp_path / "analysis_configs",
+        filter_blocks=[],
+        no_roof=no_roof,
+        output_directory=str(tmp_path),
+        remaining="./app",
+    )
+    mock_soc = Mock()
+    mock_soc._mspec = SimpleNamespace()
+    mock_soc.profiling_setup.return_value = selected_blocks
+    mock_soc.get_compatible_profilers.return_value = ["rocprofv3"]
+    profiler = rocprof_v3_profiler(
+        profiling_args, profiler_mode="rocprofv3", soc=mock_soc
+    )
+
+    with patch("rocprof_compute_profile.profiler_base.gen_sysinfo") as mock_sysinfo:
+        profiler.pre_processing()
+
+    assert mock_sysinfo.call_args.kwargs["skip_roof"] is skip_roof
 
 
 @pytest.mark.parametrize(

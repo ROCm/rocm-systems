@@ -7,7 +7,7 @@ import shlex
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import console_log, demarcate
-from utils.utils_common import PROFILE_OUTPUT_FORMAT
+from utils.utils_common import PROFILE_OUTPUT_FORMAT, is_roofline_only
 from utils.utils_profile import pc_sampling_unit
 
 
@@ -113,7 +113,7 @@ class rocprof_v3_profiler(RocProfCompute_Base):
     @demarcate
     def run_profiling(self, version: str, prog: str) -> None:
         """Run profiling."""
-        if self.get_args().roof_only:
+        if is_roofline_only(self.get_args().filter_blocks):
             console_log("roofline", "Profiling roofline counters only.")
 
         # Log profiling options and setup filtering
