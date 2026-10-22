@@ -189,6 +189,11 @@ class StatCO : public CodeObject {
   // pointer to the alocated managed memory has to be copied to the address of symbol
   hipError_t InitManagedVarDevicePtr(int deviceId);
 
+  // A device reset purges the allocations backing managed variables, which
+  // unmaps their host VA. Drop the stale pointers and the cached init state so
+  // the next kernel launch re-establishes them instead of leaving them dangling.
+  void ResetManagedVarDevicePtr();
+
   // Find a deferred managed var whose mmap address equals ptr
   Var* FindDeferredManagedVar(const void* ptr);
 

@@ -691,6 +691,33 @@ hipError_t StatCO::InitManagedVarDevicePtr(int deviceId) {
 }
 
 // ================================================================================================
+void StatCO::ResetManagedVarDevicePtr() {
+  std::scoped_lock lock(sclock_);
+  // Device::Reset() ran amd::MemObjMap::Purge(), releasing the amd::Memory that
+  // backs every __managed__ global. Those were created with use_host_ptr, so the
+  // host VA is now unmapped while the compiler-emitted pointer slot still refers
+  // to it. Without this, allocFlag_ and managedVarsDevicePtrInitialized_ stay set
+  // and nothing ever re-allocates, so a host read of the global segfaults.
+  for (auto& [_, managed_vars] : managedVars_) {
+    for (auto& managed_var : managed_vars) {
+      if (auto** slot = static_cast<void**>(managed_var->GetManagedVarPtr())) {
+        *slot = nullptr;
+      }
+      managed_var->SetAllocFlag(false);
+      managed_var->ClearDeviceVars();
+    }
+  }
+  // Cleared for every device, not just the one being reset: a managed allocation
+  // lives on a single-device context, so resetting that device invalidates it for
+  // all devices in the process. Release pairs with the acquire in
+  // InitManagedVarDevicePtr() so the clears above are visible before a reader
+  // observes the flag going false.
+  for (size_t i = 0; i < managedVarsDevicePtrInitializedSize_; ++i) {
+    managedVarsDevicePtrInitialized_[i].store(false, std::memory_order_release);
+  }
+}
+
+// ================================================================================================
 Var* StatCO::FindDeferredManagedVar(const void* ptr) {
   std::scoped_lock lock(sclock_);
   for (const auto& [_, vars] : managedVars_) {

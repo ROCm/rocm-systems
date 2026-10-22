@@ -150,6 +150,10 @@ void Device::Reset() {
   dev->ClearHostcallMemories();
   amd::MemObjMap::Purge(dev);
   Create();
+  // The purge above released the allocations backing __managed__ globals, which
+  // unmaps their host VA. Re-arm lazy init so the host-side pointers are not
+  // left dangling for the rest of the process.
+  PlatformState::Instance().StatCO().ResetManagedVarDevicePtr();
 }
 
 // ================================================================================================
