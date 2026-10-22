@@ -66,6 +66,21 @@ def is_gfx1250(gpu_arch: Optional[str]) -> bool:
     return gpu_arch == "gfx1250"
 
 
+def panel_index(config_id: int) -> str:
+    """The panel number of a panel or table id, e.g. 300 or 301 -> "3"."""
+    return str(config_id // 100)
+
+
+def table_index(table_id: int) -> str:
+    """The dotted id of a metric table, e.g. 301 -> "3.1"."""
+    return f"{panel_index(table_id)}.{table_id % 100}"
+
+
+def format_metric_id(table_id: int, position: int) -> str:
+    """The id of the metric at *position* in a table, e.g. (301, 5) -> "3.1.5"."""
+    return f"{table_index(table_id)}.{position}"
+
+
 def canonical_config_arch(gpu_arch: Optional[str]) -> Optional[str]:
     """Map GPU architectures to the shared analysis-config directory name."""
     if gpu_arch is None:
@@ -772,20 +787,19 @@ def build_metric_list(
         for data_source in panel["data source"]:
             for type_key, data_config in data_source.items():
                 if type_key == "metric_table":
-                    data_source_idx = str(data_config["id"] // 100)
+                    data_source_idx = panel_index(data_config["id"])
                     if data_source_idx != "0":
                         metric_list[data_source_idx] = panel["title"]
 
-                    table_idx = f"{data_config['id'] // 100}.{data_config['id'] % 100}"
-                    metric_list[table_idx] = data_config["title"]
+                    metric_list[table_index(data_config["id"])] = data_config["title"]
 
                     for i, (key, entries) in enumerate(data_config["metric"].items()):
-                        metric_idx = f"{table_idx}.{i}"
+                        metric_idx = format_metric_id(data_config["id"], i)
                         if _metric_has_valid_expr(entries, data_config):
                             metric_list[metric_idx] = key
 
                 elif type_key in ("raw_csv_table", "pc_sampling_table"):
-                    data_source_idx = str(data_config["id"] // 100)
+                    data_source_idx = panel_index(data_config["id"])
                     metric_list[data_source_idx] = panel["title"]
 
     return metric_list

@@ -37,20 +37,6 @@ if str(PROJECT_ROOT) not in sys.path:
 from config_management import utils_ruamel as cm_utils  # noqa: E402
 
 
-def normalize_panel_id(panel_id: Optional[int]) -> Optional[int]:
-    """Normalize panel ID by dividing by 100 if needed."""
-    if panel_id is None:
-        return None
-    return panel_id // 100 if panel_id >= 100 else panel_id
-
-
-def normalize_table_id(table_id: Optional[int]) -> Optional[int]:
-    """Normalize table ID using modulo 100."""
-    if table_id is None:
-        return None
-    return table_id % 100
-
-
 def parse_panel_config(yaml_file: Path) -> Optional[dict[str, Any]]:
     """
     Parse a single panel YAML file and extract template-relevant info.
@@ -95,7 +81,7 @@ def parse_panel_config(yaml_file: Path) -> Optional[dict[str, Any]]:
         )
         return None
 
-    panel_id = normalize_panel_id(raw_panel_id)
+    panel_id = cm_utils.normalize_panel_id(raw_panel_id)
 
     # Extract and normalize data sources
     data_sources: list[dict[str, Any]] = []
@@ -113,7 +99,7 @@ def parse_panel_config(yaml_file: Path) -> Optional[dict[str, Any]]:
             continue
         for key, value in ds.items():
             if isinstance(value, dict) and "id" in value and "title" in value:
-                norm_id = normalize_table_id(value["id"])
+                norm_id = cm_utils.normalize_table_id(value["id"])
                 data_sources.append({
                     "type": key,
                     "id": norm_id,

@@ -32,6 +32,7 @@ from utils.utils_common import (
     canonical_config_arch,
     convert_metric_id_to_panel_info,
     create_temp_rocprofiler_metrics_path,
+    format_metric_id,
     get_arch_alias_to_panel_id,
     is_only_pc_sampling,
     is_tcc_channel_counter,
@@ -374,7 +375,7 @@ class OmniSoC_Base:
         files = list(output_files)
 
         # -- Build priority keys from grouping policy YAML --
-        priority_keys: set[tuple[str, Any, int]] = set()
+        priority_keys: set[tuple[str, int, int]] = set()
         for token in self._same_bucket_priority_metric_ids():
             tid = token.strip()
             if not METRIC_ID_RE.match(tid):
@@ -401,9 +402,8 @@ class OmniSoC_Base:
             if not counters:
                 continue
             tier = 0 if (stem_id, panel_id, metric_idx) in priority_keys else 1
-            panel_s = str(panel_id) if panel_id is not None else ""
-            sort_key = (tier, -len(counters), stem_id, panel_s, metric_idx)
-            label = f"{stem_id}.{panel_s}.{metric_idx} ({metric_name})"
+            sort_key = (tier, -len(counters), stem_id, panel_id, metric_idx)
+            label = f"{format_metric_id(panel_id, metric_idx)} ({metric_name})"
             rows.append((sort_key, counters, label))
         rows.sort(key=lambda r: r[0])
 
@@ -590,12 +590,12 @@ class OmniSoC_Base:
 
     def _iter_arch_analysis_yaml_metrics(
         self,
-    ) -> Iterator[tuple[str, Any, int, str, str]]:
+    ) -> Iterator[tuple[str, int, int, str, str]]:
         """Iterate analysis_configs/<arch> YAML metric_table rows.
 
         Yields:
-            stem_id     YAML filename prefix (e.g. "2" from "2_SQ.yaml")
-            panel_id    metric_table "id" field (may be None)
+            stem_id     YAML filename prefix (e.g. "0200" from "0200_sq.yaml")
+            panel_id    metric_table "id" field (e.g. 201)
             metric_idx  zero-based index of the metric within its table
             metric_name metric key string
             metric_yaml metric body serialised as YAML text
@@ -635,9 +635,9 @@ class OmniSoC_Base:
                 if not isinstance(mt, dict):
                     continue
                 metrics = mt.get("metric")
-                if not isinstance(metrics, dict):
-                    continue
                 panel_id = mt.get("id")
+                if not isinstance(metrics, dict) or not isinstance(panel_id, int):
+                    continue
                 for idx, (metric_name, metric_body) in enumerate(metrics.items()):
                     try:
                         metric_text = yaml.dump(

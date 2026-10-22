@@ -29,7 +29,10 @@ from utils.utils_common import (
     convert_filter_blocks_to_panel_ids,
     convert_metric_id_to_panel_info,
     expand_placeholder_ranges,
+    format_metric_id,
     normalize_filter_to_str_list,
+    panel_index,
+    table_index,
 )
 
 # ------------------------------------------------------------------------------
@@ -101,7 +104,7 @@ def build_dfs(
         for data_source in panel["data source"]:
             for table_type, data_config in data_source.items():
                 table_id = data_config["id"]
-                file_data_source_idx = str(table_id // 100)
+                file_data_source_idx = panel_index(table_id)
 
                 if table_type == "metric_table":
                     df, expressions = _build_metric_table_df(
@@ -176,7 +179,7 @@ def _metric_passes_filter(
     if user_metric_filter and (
         metric_id in user_metric_filter
         or data_source_idx in user_metric_filter
-        or str(panel_id // 100) in user_metric_filter
+        or panel_index(panel_id) in user_metric_filter
     ):
         return True
     if profile_panel_filter:
@@ -197,7 +200,7 @@ def _build_metric_table_df(
     data_config, dropping rows the active filter excludes.
     """
     table_id = data_config["id"]
-    table_data_source_idx = f"{table_id // 100}.{table_id % 100}"
+    table_data_source_idx = table_index(table_id)
     is_simple_box = data_config.get("cli_style") == "simple_box"
 
     headers: list[str] = ["Metric_ID", data_config["header"]["metric"]]
@@ -218,7 +221,7 @@ def _build_metric_table_df(
     expressions: list[str] = []
     metric_entries = data_config["metric"]
     for i, (key, entries) in enumerate(metric_entries.items()):
-        metric_idx = f"{table_data_source_idx}.{i}"
+        metric_idx = format_metric_id(table_id, i)
 
         if not _metric_passes_filter(
             metric_id=metric_idx,
