@@ -1007,9 +1007,10 @@ TEST(ProxyTests, ProxyConnectionPoolBoundsCheck)
 // ncclSocketAccept(..., false), which returns after rejecting the peer.
 TEST(ProxyTests, ProxyServiceDoesNotHangOnExternalBadMagic)
 {
-    RUN_ISOLATED_TEST(
-        "ProxyServiceDoesNotHangOnExternalBadMagic",
-        []() {
+    RUN_ISOLATED_TESTS(
+        ProcessIsolatedTestRunner::TestConfig(
+            "ProxyServiceDoesNotHangOnExternalBadMagic",
+            []() {
             constexpr uint64_t kProxyMagic = 0x13579bdf2468ace0ULL;
             volatile uint32_t abortFlag = 0;
 
@@ -1039,10 +1040,8 @@ TEST(ProxyTests, ProxyServiceDoesNotHangOnExternalBadMagic)
             const int externalFd = socket(AF_INET, SOCK_STREAM, 0);
             ASSERT_GE(externalFd, 0);
 
-            std::atomic<bool> serviceExited{false};
             std::thread serviceThread([&]() {
                 ncclProxyService(&proxyState);
-                serviceExited.store(true, std::memory_order_release);
             });
 
             // Let ncclProxyService enter its poll loop before delivering the
@@ -1099,27 +1098,12 @@ TEST(ProxyTests, ProxyServiceDoesNotHangOnExternalBadMagic)
                 << " ms, wall time " << wallMs << " ms, ratio " << cpuRatio << ")";
 
             __atomic_store_n(&abortFlag, 1, __ATOMIC_RELEASE);
-
-            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
-            while (!serviceExited.load(std::memory_order_acquire) &&
-                   std::chrono::steady_clock::now() < deadline) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
-            }
-
-            if (!serviceExited.load(std::memory_order_acquire)) {
-                TEST_INFO("ncclProxyService did not return after rejecting a bad-magic peer");
-                fflush(nullptr);
-                // The pre-fix proxy is blocked in its internal accept retry.
-                // Exit this isolated child so the parent reports a bounded
-                // failure rather than leaving a test thread behind.
-                _exit(1);
-            }
-
             serviceThread.join();
             EXPECT_EQ(sent, static_cast<ssize_t>(sizeof(hello)))
                 << "external client failed to send the malformed handshake";
             TEST_INFO("ProxyServiceDoesNotHangOnExternalBadMagic PASSED");
-        });
+            })
+            .withTimeout(std::chrono::seconds(10)));
 }
 
 // std::mutex / std::condition_variable modernization coverage.
