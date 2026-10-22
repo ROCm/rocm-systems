@@ -340,6 +340,68 @@ TEST_F(EnqueueMicrotest, ShmemDynamicSize_DeviceLinker_IsAlwaysZero) {
 #endif
 
 // ===========================================================================
+// rcclP2pTaskParts (enqueue.cc:1333) and rcclP2pPolicyChannels (enqueue.cc:1342)
+//
+// Multi-node AINIC Scatter takes the most power-of-two parts whose nRanks - 1
+// flows fit p2pnChannels, at most p2pnChannelsPerPeer; everything else takes
+// p2pnChannelsPerPeer. Both ends of a pair must get the same answer, so it may
+// depend only on comm-wide fields.
+// ===========================================================================
+
+namespace {
+std::unique_ptr<ncclComm> P2pPartsComm(int nNodes, int nRanks, int p2pnChannels, int perPeer) {
+  std::unique_ptr<ncclComm> comm{new ncclComm{}};
+  comm->nNodes = nNodes;
+  comm->nRanks = nRanks;
+  comm->p2pnChannels = p2pnChannels;
+  comm->p2pnChannelsPerPeer = perPeer;
+  comm->config.nChannelsPerNetPeer = NCCL_CONFIG_UNDEF_INT;
+  return comm;
+}
+}  // namespace
+
+TEST_F(EnqueueMicrotest, P2pTaskParts_AinicScatterTakesThePartsWhoseFlowsFitThePool) {
+  g_rcclUseAinicValue = true;
+  struct Case {
+    int nNodes, nRanks, p2pnChannels, perPeer, scatterParts;
+  };
+  // 8 GPUs per node with the MI355X pools, the pool boundary (16 peers x 2 parts fill 32 channels,
+  // 17 peers do not), power-of-two rounding (64 / 19 = 3) and the one-part floor (64 / 127 = 0).
+  for (Case k : {Case{2, 16, 32, 2, 2}, Case{3, 24, 64, 4, 2}, Case{4, 32, 32, 2, 1}, Case{8, 64, 64, 2, 1},
+                 Case{2, 17, 32, 2, 2}, Case{2, 18, 32, 2, 1}, Case{3, 20, 64, 8, 2}, Case{16, 128, 64, 2, 1}}) {
+    auto comm = P2pPartsComm(k.nNodes, k.nRanks, k.p2pnChannels, k.perPeer);
+    EXPECT_EQ(k.scatterParts, rcclP2pTaskParts(comm.get(), ncclFuncScatter))
+      << k.nRanks << " ranks, " << k.p2pnChannels << " channels";
+    for (ncclFunc_t f : {ncclFuncSendRecv, ncclFuncSend, ncclFuncRecv, ncclFuncAlltoAll, ncclFuncGather,
+                         ncclFuncAlltoAllv}) {
+      EXPECT_EQ(k.perPeer, rcclP2pTaskParts(comm.get(), f)) << "collAPI=" << int(f);
+    }
+  }
+}
+
+TEST_F(EnqueueMicrotest, P2pTaskParts_ScatterKeepsPerPeerOutsideMultiNodeAinicOrWithAUserCount) {
+  auto comm = P2pPartsComm(/*nNodes=*/4, /*nRanks=*/32, /*p2pnChannels=*/32, /*perPeer=*/2);
+  g_rcclUseAinicValue = false;
+  EXPECT_EQ(2, rcclP2pTaskParts(comm.get(), ncclFuncScatter)) << "not AINIC";
+  g_rcclUseAinicValue = true;
+  comm->config.nChannelsPerNetPeer = 2;
+  EXPECT_EQ(2, rcclP2pTaskParts(comm.get(), ncclFuncScatter)) << "NCCL_NCHANNELS_PER_NET_PEER set";
+  comm->config.nChannelsPerNetPeer = NCCL_CONFIG_UNDEF_INT;
+  comm->nNodes = 1;
+  EXPECT_EQ(2, rcclP2pTaskParts(comm.get(), ncclFuncScatter)) << "single node";
+}
+
+TEST_F(EnqueueMicrotest, P2pPolicyChannels_ScatterBelowPerPeerReturnsItsParts) {
+  // Returns before the arch policy table, so comm->topo is never read.
+  g_rcclUseAinicValue = true;
+  auto comm = P2pPartsComm(/*nNodes=*/4, /*nRanks=*/32, /*p2pnChannels=*/32, /*perPeer=*/2);
+  ncclTaskP2p task{};
+  task.collAPI = ncclFuncScatter;
+  EXPECT_EQ(1, rcclP2pPolicyChannels(comm.get(), &task));
+  EXPECT_EQ(-1, rcclP2pPolicyChannels(comm.get(), nullptr));
+}
+
+// ===========================================================================
 // calcP2pChannelCount (enqueue.cc:1550)
 //
 // DEAD CODE: repo-wide grep finds exactly one occurrence -- its own definition.
@@ -2190,6 +2252,48 @@ TEST_F(EnqueueMicrotest, AddonLaunch_LaunchFailed_RecordsNothingAndLeavesTheTag)
 
   EXPECT_EQ(0, record.calls);
   EXPECT_EQ(0u, ac.c()->lastStreamTag);
+}
+
+// ROCM-33092: an addon collective never reaches ncclEnqueueCheck, so the info overload is what keeps
+// comm->opCount in step with the native path.
+TEST_F(EnqueueMicrotest, AddonLaunch_WithInfo_AdvancesOpCountOnSuccess) {
+  AddonComm ac;
+  ScopedHook notCapturing(g_cudaGetCapturingGraph,
+                          [](struct ncclCudaGraph* graph, hipStream_t, int mode) {
+                            if (graph) *graph = ncclCudaGraphNone(mode);
+                            return ncclSuccess;
+                          });
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipSuccess; });
+  int localRankToRank[1] = {0};
+  ac.c()->localRankToRank = localRankToRank;
+  ac.c()->opCount = 7;
+
+  struct ncclInfo info = {};
+  info.opName = "ReduceScatter";
+  info.comm = ac.c();
+  info.stream = kAddonStream;
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(info, [] { return ncclSuccess; }));
+  EXPECT_EQ(8u, ac.c()->opCount);
+}
+
+TEST_F(EnqueueMicrotest, AddonLaunch_WithInfo_LaunchFailedLeavesOpCount) {
+  AddonComm ac;
+  ScopedHook notCapturing(g_cudaGetCapturingGraph,
+                          [](struct ncclCudaGraph* graph, hipStream_t, int mode) {
+                            if (graph) *graph = ncclCudaGraphNone(mode);
+                            return ncclSuccess;
+                          });
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipErrorInvalidValue; });
+  int localRankToRank[1] = {0};
+  ac.c()->localRankToRank = localRankToRank;
+  ac.c()->opCount = 7;
+
+  struct ncclInfo info = {};
+  info.opName = "ReduceScatter";
+  info.comm = ac.c();
+  info.stream = kAddonStream;
+  EXPECT_EQ(ncclInternalError, rcclAddonLaunch(info, [] { return ncclInternalError; }));
+  EXPECT_EQ(7u, ac.c()->opCount);
 }
 
 // ===========================================================================

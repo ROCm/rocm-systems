@@ -524,13 +524,18 @@ inline bool checkConcurrentKernels(int num_devices) {
   return true;
 }
 
+// The runtime reports pageable memory access iff XNACK is on; stall-only XNACK GPUs never
+// report xnack+ in gcnArchName.
 inline bool isXnackOn() {
-  hipDeviceProp_t prop;
+#if HT_AMD
   int device = 0;
+  int pageable = 0;
   HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&prop, device));
-  std::string gfxName(prop.gcnArchName);
-  return gfxName.find("xnack+") != std::string::npos;
+  HIP_CHECK(hipDeviceGetAttribute(&pageable, hipDeviceAttributePageableMemoryAccess, device));
+  return pageable != 0;
+#else
+  return false;
+#endif
 }
 
 inline bool areWarpMatchFunctionsSupported() {
@@ -608,6 +613,11 @@ inline constexpr char const kApiUnsupportedOnNvidia[] =
     "API is not supported on NVIDIA.";
 inline constexpr char const kTextureGatherUnsupportedAmd[] =
     "texture gather arrays are not supported on AMD backend.";
+inline constexpr char const kPitch2DSamplerModesSupportedOnNvidia[] =
+    "Pitch2D normalized coordinates / linear filtering are supported on NVIDIA.";
+inline constexpr char const kPitch2DMismatchedPitchAmdOnly[] =
+    "mismatched-but-aligned Pitch2D row pitch rejection (HSA pitch-unsupported) is AMD-specific "
+    "and ASIC-dependent; the exact addrlib rowPitch varies per GPU.";
 inline constexpr char const kGlewInitFailed[] = "GLEW initialization failed.";
 inline constexpr char const kAssertionsDisabled[] =
     "assertions are disabled in this build.";
