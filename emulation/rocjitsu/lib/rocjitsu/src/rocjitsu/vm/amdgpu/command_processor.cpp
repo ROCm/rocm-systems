@@ -983,31 +983,11 @@ void CommandProcessor::drain_dispatch_fault_inbox() {
   }
   for (const DispatchFaultNotification &fault : faults) {
     if (!fault.on_cancelled) {
-      (void)fault_dispatch_local(fault.queue_id, fault.process_id, fault.dispatch_id);
+      (void)fault_queue_local(fault.queue_id, fault.process_id,
+                              static_cast<uint32_t>(fault.dispatch_id));
       continue;
     }
-    {
-      std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-      auto queue = std::ranges::find_if(compute_queues_, [&](const ComputeQueueRecord &candidate) {
-        return candidate.queue_id == fault.queue_id && candidate.process_id == fault.process_id;
-      });
-      if (queue != compute_queues_.end()) {
-        queue->faulted = true;
-        for (auto &entry : queue->entries) {
-          entry.terminal_faulted = true;
-          if (entry.grid_completion)
-            entry.grid_completion->mark_faulted();
-        }
-        // Share queue cancellation with PM4/forced close: cancel resident waves,
-        // release cluster pins and SPI reservations, then fail native submissions
-        // before the last replica acknowledges cancellation and stops the engine.
-        fail_pm4_queue(*queue, queue->dispatches);
-        for (const auto &entry : queue->entries)
-          dispatch_launch_metadata_.erase(entry.dispatch_id);
-        queue->entries.clear();
-        queue->next_dispatch_idx = 0;
-      }
-    }
+    (void)fault_queue_local(fault.queue_id, fault.process_id);
     fault.on_cancelled();
   }
 }
@@ -2672,26 +2652,28 @@ bool CommandProcessor::drain_completions() {
   return !stop_processing;
 }
 
-bool CommandProcessor::fault_dispatch_local(uint32_t queue_id, uint32_t process_id,
-                                            uint64_t dispatch_id) {
-  bool found = false;
+bool CommandProcessor::fault_queue_local(uint32_t queue_id, uint32_t process_id,
+                                         std::optional<uint32_t> failed_dispatch_id) {
+  bool found_in_transit = false;
   {
-    // A shard may still be in transit from its owner. Remove it under the leaf
-    // inbox lock without taking the queue lock, preserving the existing
-    // cross-CP lock ordering.
+    // Cancel in-transit shards as well as admitted work. Keep the leaf inbox
+    // lock separate from the queue lock to preserve cross-CP lock ordering.
     std::lock_guard<std::mutex> lock(fanout_inbox_mutex_);
-    const size_t old_size = fanout_inbox_.size();
-    std::erase_if(fanout_inbox_, [&](DispatchEntry &entry) {
-      if (entry.queue_id != queue_id || entry.process_id != process_id ||
-          entry.dispatch_id != dispatch_id)
-        return false;
-      entry.terminal_faulted = true;
-      if (entry.grid_completion)
-        entry.grid_completion->mark_faulted();
-      fanout_launch_metadata_inbox_.erase(entry.dispatch_id);
-      return true;
-    });
-    found = fanout_inbox_.size() != old_size;
+    found_in_transit =
+        !failed_dispatch_id || std::ranges::any_of(fanout_inbox_, [&](const auto &entry) {
+          return entry.queue_id == queue_id && entry.process_id == process_id &&
+                 entry.dispatch_id == *failed_dispatch_id;
+        });
+    if (found_in_transit)
+      std::erase_if(fanout_inbox_, [&](DispatchEntry &entry) {
+        if (entry.queue_id != queue_id || entry.process_id != process_id)
+          return false;
+        entry.terminal_faulted = true;
+        if (entry.grid_completion)
+          entry.grid_completion->mark_faulted();
+        fanout_launch_metadata_inbox_.erase(entry.dispatch_id);
+        return true;
+      });
   }
 
   std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
@@ -2702,41 +2684,29 @@ bool CommandProcessor::fault_dispatch_local(uint32_t queue_id, uint32_t process_
   if (queue == compute_queues_.end())
     return false;
   ComputeQueueRecord &state = *queue;
-
-  size_t index = 0;
-  for (std::deque<DispatchEntry>::iterator entry = state.entries.begin();
-       entry != state.entries.end();) {
-    if (entry->dispatch_id != dispatch_id) {
-      ++entry;
-      ++index;
-      continue;
-    }
-    found = true;
-    entry->terminal_faulted = true;
-    if (entry->grid_completion)
-      entry->grid_completion->mark_faulted();
-    if (index < state.next_dispatch_idx)
-      --state.next_dispatch_idx;
-    entry = state.entries.erase(entry);
-  }
-  if (!found)
+  // Queue IDs can be reused after teardown. A delayed dispatch fault must not
+  // cancel a new registration which never admitted that dispatch. Shards still
+  // in transit are discarded by drain_fanout_inbox once this queue is faulted.
+  if (failed_dispatch_id && !found_in_transit &&
+      !std::ranges::any_of(state.entries, [&](const DispatchEntry &entry) {
+        return entry.dispatch_id == *failed_dispatch_id;
+      }))
     return false;
 
-  dispatch_launch_metadata_.erase(static_cast<uint32_t>(dispatch_id));
-  queue->faulted = true;
-  // A peer fault can cancel an AQL entry while its vendor PM4 stream is blocked.
-  // Release that stream and its VM snapshot along with the owning dispatch.
-  if (state.packet_format == QueuePacketFormat::Aql && !state.commands.submissions.empty())
-    fail_pm4_queue(state, state.dispatches);
-  util::Logger::cp([&](auto &os) {
-    os << std::format("{}: terminal dispatch failure pid={} qid={} dispatch={}", name(), process_id,
-                      queue_id, dispatch_id);
-  });
-  erase_cluster_workgroups(static_cast<uint32_t>(dispatch_id));
-  for (ComputeUnitCore *cu : cus_)
-    cu->abort_dispatch(static_cast<uint32_t>(dispatch_id));
-  for (auto *spi : spis_)
-    spi->release_wgp_dispatch(static_cast<uint32_t>(dispatch_id));
+  for (DispatchEntry &entry : state.entries) {
+    entry.terminal_faulted = true;
+    if (entry.grid_completion)
+      entry.grid_completion->mark_faulted();
+  }
+  // Faulted queues cannot retire synchronization markers. Cancel every
+  // outstanding dispatch, including earlier admitted kernels, so none can
+  // halt normally while its dispatch completion is permanently suppressed.
+  // This also releases cluster pins, SPI reservations and blocked vendor PM4.
+  fail_pm4_queue(state, state.dispatches);
+  for (const DispatchEntry &entry : state.entries)
+    dispatch_launch_metadata_.erase(entry.dispatch_id);
+  state.entries.clear();
+  state.next_dispatch_idx = 0;
   return true;
 }
 
@@ -2756,7 +2726,11 @@ void CommandProcessor::notify_dispatch_failure(uint32_t queue_id, uint32_t proce
   if (dispatch_id > std::numeric_limits<uint32_t>::max())
     return;
 
-  if (!fault_dispatch_local(queue_id, process_id, dispatch_id))
+  util::Logger::cp([&](auto &os) {
+    os << std::format("{}: terminal dispatch failure pid={} qid={} dispatch={}", name(), process_id,
+                      queue_id, dispatch_id);
+  });
+  if (!fault_queue_local(queue_id, process_id, static_cast<uint32_t>(dispatch_id)))
     return;
   // A fault can originate on any shard. Cross-XCD delivery uses a leaf inbox
   // and the peer's event thread, exactly like dispatch fan-out, so this path
