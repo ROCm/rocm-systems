@@ -204,7 +204,11 @@ rdc_status_t RdcCacheManagerImpl::rdc_update_job_stats(uint32_t gpu_index,
   if (value.field_id == RDC_EVNT_NOTIF_PROCESS_START ||
       value.field_id == RDC_EVNT_NOTIF_PROCESS_END) {
     rdc_process_status_info_t info{};
-    sscanf(value.value.str, "PID: %u  task: %255s", &info.pid, info.process_name);
+    // Without a process ID there is no process to record; the task name may be empty.
+    if (sscanf(value.value.str, "PID: %u  task: %255s", &info.pid, info.process_name) < 1) {
+      RDC_LOG(RDC_DEBUG, "Job " << job_id << ": a process event without a process ID");
+      return RDC_ST_BAD_PARAMETER;
+    }
 
     uint64_t ts_us = value.ts * 1000;
     if (value.field_id == RDC_EVNT_NOTIF_PROCESS_START) {
@@ -220,6 +224,11 @@ rdc_status_t RdcCacheManagerImpl::rdc_update_job_stats(uint32_t gpu_index,
         je.processes[slot] = info;
         je.pid_to_index[info.pid] = slot;
         je.num_processes = slot + 1;
+      } else if (!je.processes_dropped) {
+        je.processes_dropped = true;
+        RDC_LOG(RDC_ERROR, "Job " << job_id << " has more than " << RDC_MAX_NUM_PROCESSES_STATUS
+                                  << " processes; its stats list the first "
+                                  << RDC_MAX_NUM_PROCESSES_STATUS);
       }
     } else {
       auto& entry = je.processes[pit->second];
@@ -256,10 +265,12 @@ rdc_status_t RdcCacheManagerImpl::rdc_update_job_stats(uint32_t gpu_index,
     fsummary->second.old_m = fsummary->second.new_m = value.value.l_int;
     return RDC_ST_OK;
   }
-  if (value.field_id == RDC_FI_POWER_USAGE) {
-    uint64_t time_elapsed = value.ts - gpu_iter->second.energy_last_time;
-    // Stored in cache as microseconds and microwats
-    gpu_iter->second.energy_consumed += (time_elapsed * value.value.l_int) / (1000.0 * 1000000);
+  // Energy needs a power reading and a sample newer than the last one; times are in
+  // milliseconds and power in microwatts.
+  if (value.field_id == RDC_FI_POWER_USAGE && value.value.l_int >= 0 &&
+      value.ts > gpu_iter->second.energy_last_time) {
+    const double seconds = (value.ts - gpu_iter->second.energy_last_time) / 1000.0;
+    gpu_iter->second.energy_consumed += seconds * static_cast<double>(value.value.l_int) / 1e6;
     gpu_iter->second.energy_last_time = value.ts;
   }
   fsummary->second.max_value =
@@ -351,7 +362,7 @@ rdc_status_t RdcCacheManagerImpl::rdc_job_get_stats(const char jobId[64],
     gpu_info.gpu_id = gpus->first;  // Explicit assignment
     gpu_info.start_time = summary_info.start_time;
     gpu_info.end_time = summary_info.end_time;
-    gpu_info.energy_consumed = gpus->second.energy_consumed;
+    gpu_info.energy_consumed = static_cast<uint64_t>(gpus->second.energy_consumed);
     summary_info.energy_consumed += gpu_info.energy_consumed;
 
     if (is_job_stopped) {

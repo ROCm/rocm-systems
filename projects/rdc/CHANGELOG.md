@@ -17,6 +17,11 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - **`rdc_field_watch()` documents that a `max_keep_samples` or `max_keep_age` of 0 keeps no samples**.
   - The documentation said 0 meant no limit. To keep every sample, pass a large value, such as `UINT32_MAX`.
 
+- **A job lists at most 64 processes**.
+  - `rdc.h` documents this limit of `rdc_job_get_stats()`, and rdcd now logs once when a job has more processes.
+
+- `rdc.h` documents field value timestamps (`rdc_field_value.ts`) and the timestamps of `rdc_field_get_value_since()` in milliseconds. It said microseconds.
+
 ### Removed
 
 - Removed the unused `GetBlockNameStr()` test helper and its GPU block name map. Nothing called it, and its `static_assert` on `AMDSMI_GPU_BLOCK_LAST` broke the RDC build whenever AMD SMI added an IP block (#10949).
@@ -87,6 +92,14 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - Two `rdc_job_start_stats()` calls with the same job ID at the same time no longer both succeed. One of the two GPU groups then kept a watch that failed its later jobs with `RDC_ST_CONFLICT`.
 
 - Field watches with a `max_keep_samples` above 2147483647, such as `UINT32_MAX`, no longer crash `rdcd` or the process that embeds RDC.
+
+- Watches of a destroyed GPU group or field group no longer make every later unwatch fail: `rdci stats -x` and `rdci health --clear` failed with "Group not found", and `rdci dmon` left its fields being read after it ended. RDC also stops reading the fields of the destroyed group.
+
+- Two jobs, or two health watches, on GPU groups that share a GPU both get that GPU's samples. Only one of them did, so `rdci stats -j` showed no samples for that GPU in the other job.
+
+- `rdci stats -j` no longer reports a huge energy after a power sample with an earlier timestamp or a negative power reading, and no longer drops energy below one joule per sample, which made it 0 at low power or short update intervals.
+
+- Job stats no longer list a process with ID 0 for a process event that names no process.
 
 ## RDC 1.3.1 for ROCm 7.14.0
 

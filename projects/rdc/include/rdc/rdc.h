@@ -625,6 +625,9 @@ typedef struct {
 
 /**
  * @brief The structure to hold the job stats
+ *
+ * @details processes holds the first RDC_MAX_NUM_PROCESSES_STATUS processes of
+ * the job; rdcd logs once when a job has more.
  */
 typedef struct {
   uint32_t num_gpus;                                    //!< Number of GPUs used by job
@@ -651,7 +654,7 @@ typedef union {
 typedef struct {
   rdc_field_t field_id;        //!< The field id of the value
   int status;                  //!< RDC_ST_OK or error status
-  uint64_t ts;                 //!< Timestamp in usec since 1970
+  uint64_t ts;                 //!< Timestamp in milliseconds since 1970
   rdc_field_type_t type;       //!< The field type
   rdc_field_value_data value;  //!< Value of the field. Value type
                                //!< depends on the field type.
@@ -1334,7 +1337,9 @@ rdc_status_t rdc_group_get_all_ids(rdc_handle_t p_rdc_handle, rdc_gpu_group_t gr
 /**
  *  @brief Destroy GPU group represented by p_rdc_group_id
  *
- *  @details Delete the logic group represented by p_rdc_group_id
+ *  @details Delete the logic group represented by p_rdc_group_id. Its
+ *  watches stop updating their fields within a second; rdc_field_unwatch(),
+ *  rdc_job_stop_stats() and rdc_health_clear() on them still work.
  *
  *  @param[in] p_rdc_handle The RDC handler.
  *
@@ -1427,7 +1432,9 @@ rdc_status_t rdc_group_field_get_all_ids(rdc_handle_t p_rdc_handle,
 /**
  *  @brief Destroy field group represented by rdc_field_group_id
  *
- *  @details Delete the logic group represented by rdc_field_group_id
+ *  @details Delete the logic group represented by rdc_field_group_id. Its
+ *  watches stop updating their fields within a second; rdc_field_unwatch()
+ *  on them still works.
  *
  *  @param[in] p_rdc_handle The RDC handler.
  *
@@ -1501,7 +1508,7 @@ rdc_status_t rdc_field_get_latest_value(rdc_handle_t p_rdc_handle, uint32_t gpu_
  *  @param[in] field  The field id
  *
  *  @param[in] since_time_stamp  Timestamp to request values since in
- *  usec since 1970.
+ *  milliseconds since 1970.
  *
  *  @param[out] next_since_time_stamp Timestamp to use for sinceTimestamp
  *  on next call to this function
