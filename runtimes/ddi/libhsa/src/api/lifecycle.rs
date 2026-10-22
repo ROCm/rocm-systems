@@ -3,7 +3,11 @@
 
 //! HSA C ABI entry points for this domain.
 
-use super::*;
+#[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
+use crate::api_trace;
+use crate::ffi::*;
+use crate::runtime::{HsaState, LifecycleTransition, boundary, lock};
+use crate::{complete_deferred_shutdown, runtime, signal};
 
 #[cfg_attr(
     all(target_arch = "x86_64", not(test)),
