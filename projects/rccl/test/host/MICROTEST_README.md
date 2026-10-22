@@ -408,6 +408,19 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   memory stack. The suite drives the public lifecycle --
   `ncclRmaProxyCreateContext` / `ncclRmaProxyDestroyContext` -- so production
   owns the context and its cleanup. See `test_categories_micro_rma_proxy.yaml`.
+- **`rccl-UnitTestsMicroRmaIbProxy`** — `src/transport/net_ib/gin.cc` (via
+  `NET_IB_GIN_CC_PATH`, from `rma-ib-proxy-test.cc`); suites
+  `RmaIbProxyDoorbellTest.*` (which WRs share one `ibv_post_send` under
+  `ncclRmaOptFlagsAggregateRequests` and `NCCL_RMA_IB_WR_BATCHSIZE`) and
+  `RmaIbProxyCompletionTest.*` (only the last WR of a doorbell is signaled, and
+  one CQE completes every request before it). The tests drive the real
+  `ncclRmaIbProxy*` context, data-path and `Test` entry points against a fake
+  NIC: an `ibv_context` whose `post_send` / `poll_cq` ops record each doorbell
+  and raise one CQE per signaled WR. Its own binary because the test TU defines
+  the net_ib symbols `gin.cc` links against (`ncclNetIb`, `ncclIbDevs`,
+  `ncclIbConnectImpl` / `ncclIbAcceptImpl`, the request pool) in place of
+  compiling the rest of `src/transport/net_ib/`. See
+  `test_categories_micro_rma_ib_proxy.yaml`.
 - **`rccl-UnitTestsMicroRoctxNvml`** (+ **`-roctx`**) — `src/misc/roctx.cc` and
   `src/misc/nvmlwrap_stub.cc` (via `ROCTX_CC_PATH` / `NVMLWRAP_STUB_CC_PATH`,
   from `roctx-nvml-stub-test.cc`); suites `RoctxNvml*`. Its own binary because
@@ -627,7 +640,7 @@ symbol.
 | `src/rma/*.cc` | `fakes/rma_fakes.cc` |
 | `src/scheduler/*.cc`'s own public entry points (targets that don't compile the real files, e.g. `rccl-UnitTestsMicroEnqueue`) and the deep launch paths | `fakes/sched_stubs.cc` |
 | `src/sym_kernels.cc` | `fakes/sym_kernels_fakes.cc` |
-| `src/transport/net_ib/connect.cc` params (`ncclParamIbQpsPerConn`) | `fakes/transport_net_ib_fakes.cc` |
+| `src/transport/net_ib/connect.cc` params (`ncclParamIbQpsPerConn`, `ncclParamIbTc`) | `fakes/transport_net_ib_fakes.cc` |
 | generated `sym_kernels_host.cc` (targets that do not compile it) | `fakes/sym_kernels_index_fakes.cc` |
 | rocSHMEM host API | `fakes/rocshmem_fakes.cc` |
 | `src/transport/p2p.cc` shareable-buffer entry points (`rccl-UnitTestsMicroDiagnostics`) | `fakes/transport_p2p_fakes.cc` |
@@ -975,8 +988,8 @@ can be configured **directly** to build every host binary — `rccl-HostUnitTest
 `rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker]`,
 `rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroGinHostFinalize`, `rccl-UnitTestsMicroDdaIpc`, `rccl-UnitTestsMicroCe`, `rccl-UnitTestsMicroDiagnostics`,
 `rccl-UnitTestsMicroGraph`, `rccl-UnitTestsMicroDiagnostics`, `rccl-UnitTestsMicroDda`,
-`rccl-UnitTestsMicroSymKernels`, `rccl-UnitTestsMicroTaskPrep` and
-`rccl-UnitTestsMicroRmaProxy` — **without configuring/building all of
+`rccl-UnitTestsMicroSymKernels`, `rccl-UnitTestsMicroTaskPrep`,
+`rccl-UnitTestsMicroRmaProxy` and `rccl-UnitTestsMicroRmaIbProxy` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test
 sources.
 
@@ -1036,6 +1049,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroCe                 # src/ce_coll.cc tests
 ./build/rccl-UnitTestsMicroProfiler           # src/plugin/profiler.cc + profiler_v1..v7.cc
 ./build/rccl-UnitTestsMicroRmaProxy           # src/rma/rma_proxy.cc tests
+./build/rccl-UnitTestsMicroRmaIbProxy         # src/transport/net_ib/gin.cc RMA_IB_PROXY tests
 ./build/rccl-UnitTestsMicroDda                # src/algorithms/dda/ tests
 ./build/rccl-HostUnitTests
 ./build/rccl-UnitTestsMicroRoctxNvml          # misc/roctx.cc + misc/nvmlwrap_stub.cc tests

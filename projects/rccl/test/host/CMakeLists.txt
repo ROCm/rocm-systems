@@ -49,6 +49,11 @@ rccl_assert_source_line("${_rccl_src_root}/transport/net_ib/connect.cc"
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/transport_net_ib_fakes.cc"
   "int64_t ncclParamIbQpsPerConn() { return g_loadParam(\"IB_QPS_PER_CONNECTION\", 1); }"
   "the IbQpsPerConn fake default")
+rccl_assert_source_line("${_rccl_src_root}/transport/net_ib/connect.cc"
+  "NCCL_PARAM(IbTc, \"IB_TC\", -1)" "fakes/transport_net_ib_fakes.cc: ncclParamIbTc()")
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/transport_net_ib_fakes.cc"
+  "int64_t ncclParamIbTc() { return g_loadParam(\"IB_TC\", -1); }"
+  "the IbTc fake default")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
   "int64_t g_paramMinNchannels = -2;" "the MinNchannels fake default")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
@@ -418,6 +423,16 @@ function(rccl_define_micro_source_lists)
     fakes/rma_fakes.cc
     fakes/rocmwrap_fakes.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroRmaIbProxy -- REAL src/transport/net_ib/gin.cc (the RMA_IB_PROXY backend).
+  set(TEST_MICRO_RMA_IB_PROXY_SOURCE_FILES
+    rma-ib-proxy-test.cc
+    fakes/hip_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/os_fakes.cc                    # ncclOsGetPageSize (ncclIbMalloc)
+    fakes/transport_net_ib_fakes.cc      # src/transport/net_ib/connect.cc params
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -1388,6 +1403,18 @@ rccl_add_micro_binary(rccl-UnitTestsMicroRmaProxy
     ${_MICRO_MODE_DEFS}
     RMA_PROXY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_rma_proxy.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroRmaIbProxy
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroRmaIbProxy
+  SOURCES ${TEST_MICRO_RMA_IB_PROXY_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    # gin_tmp.cc, not gin.cc: src/CMakeLists.txt lists plugin/gin.cc first, so
+    # add_file_unique() renames this one. Re-check after any source-list reorder.
+    NET_IB_GIN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/gin_tmp.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_rma_ib_proxy.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroWarpSpeed -- tests for ENABLE_WARP_SPEED
