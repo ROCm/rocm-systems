@@ -178,10 +178,11 @@ int main(int argc, char **argv) {
             if (++i == argc) {
                 ShowHelpAndExit("-m");
             }
-            mem_type = static_cast<OutputSurfaceMemoryType>(atoi(argv[i]));
-            if (mem_type < OUT_SURFACE_MEM_DEV_INTERNAL || mem_type > OUT_SURFACE_MEM_NOT_MAPPED) {
+            int mem_type_arg = atoi(argv[i]);
+            if (mem_type_arg < OUT_SURFACE_MEM_DEV_INTERNAL || mem_type_arg > OUT_SURFACE_MEM_NOT_MAPPED) {
                 ShowHelpAndExit(argv[i]);
             }
+            mem_type = static_cast<OutputSurfaceMemoryType>(mem_type_arg);
             continue;
         }
         if (!strcmp(argv[i], "-backend")) {
