@@ -104,9 +104,9 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
     if (!loaded.devices.empty())
       s->vm->driver()->setup_topology(loaded.devices, num_xcds,
                                       !loaded.system_graph.explicit_manifest,
-                                      loaded.system_graph.explicit_manifest);
+                                      loaded.system_graph.explicit_manifest, loaded.pci);
     else
-      s->vm->driver()->setup_topology(loaded.device, num_xcds);
+      s->vm->driver()->setup_topology(loaded.device, num_xcds, loaded.pci);
     s->vm->driver()->open();
   }
 
@@ -589,6 +589,9 @@ rj_status_t rj_vm_gpu_info_at(rj_vm_t *vm, uint32_t ordinal, rj_vm_gpu_info_t *i
   info->num_xcc = gpu.num_xcc;
   info->max_slots_scratch_cu = gpu.max_slots_scratch_cu;
   info->local_mem_size = gpu.local_mem_size;
+  info->visible_vram_size = gpu.visible_vram_size;
+  info->control_stack_size = gpu.control_stack_size;
+  info->context_save_size = gpu.context_save_size;
   info->vram_type = gpu.vram_type;
   info->lds_size_kb = gpu.lds_size_kb;
   info->mem_width = gpu.mem_width;
