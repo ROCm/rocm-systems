@@ -33,18 +33,6 @@ def parse_profile_args(options: list[str]) -> argparse.Namespace:
 
 
 @pytest.mark.parametrize(
-    ("options", "expected_roof_only"),
-    [(["--roofline"], True), (["--roofline", "-b", "2"], False)],
-    ids=["roofline_alone", "with_block"],
-)
-def test_handle_profile_args_roof_only(options, expected_roof_only):
-    """--roofline is applied as block 4 before roof_only is computed."""
-    args = parse_profile_args(options)
-    make_rpc_with_args(args).handle_profile_args()
-    assert args.roof_only is expected_roof_only
-
-
-@pytest.mark.parametrize(
     ("options", "error"),
     [
         (["-b", "2", "--roofline"], None),
