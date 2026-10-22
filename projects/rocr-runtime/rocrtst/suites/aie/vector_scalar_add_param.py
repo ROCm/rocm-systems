@@ -23,8 +23,7 @@ PROBLEM_SIZE = 1024
 MEM_TILE_WIDTH = 64
 AIE_TILE_WIDTH = 32
 
-# Full ELF only: a scratchpad parameter reaches the cores through the full ELF's control
-# scratchpad, which the PDI + instruction sequence path has no counterpart for.
+# Full ELF only: scratchpad parameters need the full ELF's control scratchpad.
 positional = [a for a in sys.argv[1:] if not a.startswith("--")]
 if not positional or positional[0] != "npu2":
     raise ValueError("[ERROR] Expected the device name 'npu2'")
@@ -44,8 +43,8 @@ def my_vector_param_add():
     # Set by the host before each dispatch, in the control scratchpad.
     bias = ScratchpadParameter("bias", np.int32)
 
-    # Runs once per dispatch rather than forever: the sequence below restarts the core, and a core
-    # that looped would read the parameter for its next pass before the next dispatch had set it.
+    # Not while_true: the sequence restarts the core each dispatch, and a looping core would read
+    # the parameter before the next dispatch set it.
     def core_body(of_in1, of_out0, bias):
         b = bias.read()
         for _ in range_(PROBLEM_SIZE // AIE_TILE_WIDTH):
@@ -59,15 +58,14 @@ def my_vector_param_add():
     worker = Worker(core_body, fn_args=[of_in1.cons(), of_out0.prod(), bias], while_true=False)
 
     def sequence(inTensor, outTensor, in_handle, out_handle):
-        # Loading the empty device first forces the array to reconfigure, so the core starts afresh
-        # every dispatch (see vector_scalar_add.py for why a full ELF loads its own PDI at all).
+        # Loading the empty device first forces a reconfiguration, so the core restarts.
         npu_load_pdi(device_ref="empty")
         npu_load_pdi(device_ref="main")
         sync_parameters()
         in_handle.fill(inTensor)
         out_handle.drain(outTensor, wait=True)
-        # Unloading the design again, as MLIR-AIR's sequences do: on aie2p firmware, without it the
-        # next dispatch's sync_parameters delivers this dispatch's value instead of its own.
+        # Without unloading the design again, the next dispatch's sync_parameters reads this
+        # dispatch's value instead of its own.
         npu_load_pdi(device_ref="empty")
 
     rt = Runtime(

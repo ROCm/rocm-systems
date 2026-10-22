@@ -529,9 +529,8 @@ std::vector<std::uint32_t> RelocationsNaming(const std::vector<std::uint8_t>& im
 }
 
 TEST(AieElfParse, ParsesScratchpadAsExternalSymbol) {
-  // The scratchpad is not an argument and not a PDI: the application allocates it, so the reader
-  // records where its address goes and how many bytes the control code reads there, for the
-  // loader to resolve against the variable the application defined.
+  // The scratchpad is neither an argument nor a PDI. The reader records its sites and size for the
+  // loader to resolve.
   const auto image = ReadFile(kParamElf);
   if (image.empty()) GTEST_SKIP() << "scratchpad full-ELF artifact not built";
 
@@ -552,7 +551,7 @@ TEST(AieElfParse, ParsesScratchpadAsExternalSymbol) {
   for (std::size_t i = 0; i < relocs.size(); ++i) {
     EXPECT_EQ(it->second.sites[i].offset, RelocationOffset(image, relocs[i]));
   }
-  // The scratchpad's sites are not also taken for a PDI's, and the arguments are unaffected.
+  // Its sites are not PDI sites, and the argument count is unchanged.
   for (const auto& pdi : k.pdis) {
     for (const auto& site : it->second.sites) {
       EXPECT_EQ(std::count(pdi.patch_offsets.begin(), pdi.patch_offsets.end(), site.offset), 0);
@@ -562,8 +561,7 @@ TEST(AieElfParse, ParsesScratchpadAsExternalSymbol) {
 }
 
 TEST(AieElfParse, RejectsExternalSymbolWithAnotherScheme) {
-  // An external symbol's address is stored, like a PDI's; any other scheme would need the loader
-  // to know how to fold it in, so the reader refuses it rather than guess.
+  // Only Address64 is defined for an external symbol.
   auto image = ReadFile(kParamElf);
   if (image.empty()) GTEST_SKIP() << "scratchpad full-ELF artifact not built";
 
@@ -587,7 +585,7 @@ TEST(AieElfParse, RejectsExternalSymbolWithAnotherScheme) {
 }
 
 TEST(AieElfParse, RejectsExternalSymbolPatchSiteOutOfRange) {
-  // A 64-bit address is stored at the site, so the whole of it must lie in the control code.
+  // The 8-byte store must lie inside the control code.
   auto image = ReadFile(kParamElf);
   if (image.empty()) GTEST_SKIP() << "scratchpad full-ELF artifact not built";
 

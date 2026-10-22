@@ -147,8 +147,7 @@ struct AieKernelDescriptor {
     uint32_t bo_handle;
   };
   /// @brief Variables the control code reaches only through the addresses the loader wrote into
-  /// it. A dispatch lists their BOs to keep them resident and flushes them from the CPU cache, so
-  /// the host's writes before the dispatch are what the device reads.
+  /// it. Each dispatch lists their BOs and flushes them from the CPU cache.
   std::vector<ExternalVariable> external_variables;
 };
 

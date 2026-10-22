@@ -318,8 +318,7 @@ hsa_status_t Parse(const void* image_data, size_t image_size, std::string_view a
 
       uint32_t arg_index = 0;
       if (!ParseArgIndex(sym_name, &arg_index)) {
-        // A buffer the ELF does not carry, such as the control scratchpad. The application defines
-        // it before loading; the loader refuses the ELF if it does not.
+        // An external variable, such as the control scratchpad, resolved by the loader.
         if (site.scheme != PatchScheme::kAddress64) {
           return fail(std::string("unsupported patch scheme for external symbol ") + sym_name);
         }
@@ -400,7 +399,7 @@ hsa_status_t Parse(const void* image_data, size_t image_size, std::string_view a
     if (ext_it != group_ext_sites.end()) {
       for (const auto& [name, ext] : ext_it->second) {
         for (const PatchSite& site : ext.sites) {
-          // A 64-bit address is written here, as for a PDI.
+          // A 64-bit address is stored here.
           if (site.offset % sizeof(uint32_t) != 0 ||
               site.offset + sizeof(uint64_t) > k.ctrl_code.size()) {
             return fail("external symbol patch site does not fit the control code");

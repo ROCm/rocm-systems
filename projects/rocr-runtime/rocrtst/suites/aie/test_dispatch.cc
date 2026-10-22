@@ -2675,11 +2675,8 @@ TEST_F(FullElfDispatchTest, ElfMalformedPacketsRejected) {
 // ---------------------------------------------------------------------------
 // External variables: the control scratchpad
 //
-// A full ELF can reference a buffer it does not carry, such as the control scratchpad a design
-// reads runtime parameters from. The application allocates it and defines it with
-// hsa_executable_agent_global_variable_define before loading; the loader writes its device address
-// into the control code, and each dispatch flushes it, so the host can change a parameter between
-// dispatches with an ordinary store.
+// The control scratchpad is defined with hsa_executable_agent_global_variable_define before
+// loading, and the host writes parameters into it between dispatches.
 // ---------------------------------------------------------------------------
 class ExternalVariableTest : public FullElfDispatchTest {
  protected:
@@ -2709,8 +2706,7 @@ class ExternalVariableTest : public FullElfDispatchTest {
 };
 
 TEST_F(ExternalVariableTest, LoadRefusesAnUndefinedScratchpad) {
-  // Without a definition there is no address to write into the control code; dispatching it would
-  // hang rather than fault, so the load fails, as for a GPU code object's undefined symbol.
+  // Without a definition there is no address to write into the control code.
   hsa_executable_t executable{};
   hsa_code_object_reader_t reader{};
   EXPECT_EQ(TryLoad(read_hsaco(kParamElfHsacoPath), aie_agents.front(), &executable, &reader),
@@ -2718,7 +2714,7 @@ TEST_F(ExternalVariableTest, LoadRefusesAnUndefinedScratchpad) {
 }
 
 TEST_F(ExternalVariableTest, LoadRefusesAScratchpadOutsideAieMemory) {
-  // The NPU can only reach memory the driver knows, so a host allocation is refused at load.
+  // Plain host memory is not reachable by the NPU.
   std::vector<std::uint32_t> host(1024);
   hsa_executable_t executable{};
   hsa_code_object_reader_t reader{};
@@ -2740,13 +2736,11 @@ TEST_F(ExternalVariableTest, LoadRefusesAScratchpadPastTheEndOfItsAllocation) {
 }
 
 TEST_F(ExternalVariableTest, ScratchpadParameterChangesBetweenDispatches) {
-  // One loaded kernel, dispatched repeatedly with a different parameter each time. Each value is
-  // written with a plain store and no explicit flush: the dispatch flushes the scratchpad, as it
-  // does the arguments. A runtime that did not would run later dispatches with a stale value.
+  // One loaded kernel, dispatched with a different parameter each time. The test writes each
+  // value with a plain store and no flush; the runtime flushes the scratchpad per dispatch.
   constexpr std::size_t n = aie_full_elf_kernel::element_count;
 
-  // From the dev pool: the command processor copies the scratchpad in itself, and it reaches only
-  // the device heap. A scratchpad in the data pool fails the dispatch.
+  // The command processor reads the scratchpad itself, which works only from the dev pool.
   pool_buffer scratchpad, input, output, kernargs;
   ASSERT_EQ(scratchpad.allocate(dev_pool, 4096), HSA_STATUS_SUCCESS);
   std::memset(scratchpad.get(), 0, 4096);
@@ -2785,8 +2779,7 @@ TEST_F(ExternalVariableTest, ScratchpadParameterChangesBetweenDispatches) {
     const auto wr_idx = aie_full_elf_kernel::dispatch_packet(
         kernel_object, in, out, kernargs.as<std::uint64_t>(), signal, queue);
     hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
-    // A failed dispatch leaves the signal negative, so wait for it to drop below 1 rather than to
-    // reach 0, which would hang the test instead of failing it.
+    // A failed dispatch leaves the signal negative, so wait for < 1 rather than == 0.
     const hsa_signal_value_t done = hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1,
                                                               UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
     EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);

@@ -1896,8 +1896,8 @@ static hsa_status_t BuildFullElfCommand(int fd, const void* heap_base,
   // command still has to list them for the driver to keep them resident. The loader refuses a
   // full-ELF kernel that loads no PDI, so there is always at least one.
   bo_handles->insert(bo_handles->end(), desc.pdi_bo_handles.begin(), desc.pdi_bo_handles.end());
-  // The same holds for the application's external variables, which the host writes between
-  // dispatches; flushing them here is what makes those writes visible, as for the arguments.
+  // External variables are also reached only through the control code. The host writes them
+  // between dispatches, so they are flushed like the arguments.
   for (const auto& var : desc.external_variables) {
     FlushCpuCache(var.va, 0, var.size);
     bo_handles->push_back(var.bo_handle);
