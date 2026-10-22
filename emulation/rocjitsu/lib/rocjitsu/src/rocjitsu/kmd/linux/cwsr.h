@@ -19,6 +19,7 @@
 #define ROCJITSU_KMD_LINUX_CWSR_H_
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/config/kfd_device_config.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 
 #include <array>
@@ -69,31 +70,104 @@ constexpr bool cwsr_layout_modelled(rj_code_arch_t arch) {
   return cwsr_layout_kind(arch) != CwsrLayoutKind::Unsupported;
 }
 
-/// @brief The same question as cwsr_layout_modelled(), asked of a GPU named the
-/// way KFD names one.
-/// @details The two predicates exist because their callers hold different
-/// identities. The DBG_TRAP paths have a SoC and so an arch enum; the KFD
-/// topology paths only ever see a @c gfx_target_version, which they translate to
-/// the GC hardware IP version the amdkfd driver keys on. Kept adjacent so the
-/// two architecture spellings cannot be updated apart --
-/// KfdTopologyTest.ArchAndGcSpellingsOfTheCwsrGateAgree pins them together.
+/// @brief Each modelled CDNA XCC has its own queue save area.
+constexpr uint32_t cwsr_area_count(rj_code_arch_t arch, uint32_t num_xcc) {
+  return cwsr_layout_modelled(arch) && num_xcc != 0 ? num_xcc : 1u;
+}
+
+/// @brief Area holding a queue whose owner is @p xcc_id.
+constexpr uint32_t cwsr_area_for_xcc(rj_code_arch_t arch, uint32_t xcc_id) {
+  return cwsr_layout_modelled(arch) ? xcc_id : 0u;
+}
+
+/// @brief Select the codec architecture from the GC version used by KFD.
+/// @details DBG_TRAP has a SoC architecture, while topology receives a
+/// gfx_target_version and translates it to the GC version. Keep those
+/// spellings adjacent; KfdTopologyTest.ArchAndGcSpellingsOfTheCwsrGateAgree
+/// pins their exact agreement.
 /// \NPI update this alongside cwsr_layout_modelled() when the codec learns a
 /// new record layout.
 /// @param gc_ip_version Packed GC hardware IP version, as
 ///        gc_ip_version_for_gfx_target_version() produces.
-/// @returns True if serialize/deserialize produce an image dbgapi can decode.
+/// @returns The exact modelled architecture, or INVALID for unsupported ones.
+constexpr rj_code_arch_t cwsr_arch_for_gc_ip_version(uint32_t gc_ip_version) {
+  if (gc_ip_version == make_gc_ip_version(9, 4, 3)) // gfx942
+    return ROCJITSU_CODE_ARCH_CDNA3;
+  if (gc_ip_version == make_gc_ip_version(9, 5, 0)) // gfx950
+    return ROCJITSU_CODE_ARCH_CDNA4;
+  if (gc_ip_version == make_gc_ip_version(12, 1, 0)) // gfx1250
+    return ROCJITSU_CODE_ARCH_CDNA5;
+  return ROCJITSU_CODE_ARCH_INVALID;
+}
+
+/// @brief The same layout selection as cwsr_layout_kind(), for KFD topology.
 constexpr CwsrLayoutKind cwsr_layout_kind_for_gc_ip_version(uint32_t gc_ip_version) {
-  if (gc_ip_version == make_gc_ip_version(9, 4, 3) || // gfx942 (CDNA3)
-      gc_ip_version == make_gc_ip_version(9, 5, 0))   // gfx950 (CDNA4)
-    return CwsrLayoutKind::Gfx9_4;
-  if (gc_ip_version == make_gc_ip_version(12, 1, 0)) // gfx1250 (CDNA5)
-    return CwsrLayoutKind::Gfx12_5;
-  return CwsrLayoutKind::Unsupported;
+  return cwsr_layout_kind(cwsr_arch_for_gc_ip_version(gc_ip_version));
 }
 
 constexpr bool cwsr_layout_modelled_for_gc_ip_version(uint32_t gc_ip_version) {
   return cwsr_layout_kind_for_gc_ip_version(gc_ip_version) != CwsrLayoutKind::Unsupported;
 }
+
+// The saved VGPR and LDS field encodings define these layout granules. The
+// serializer and its advertised capacity must round with the same widths.
+inline constexpr uint32_t kCwsrGfx94VgprGranule = 8;
+inline constexpr uint32_t kCwsrGfx1250VgprGranule = 16;
+inline constexpr uint32_t kCwsrGfx942LdsGranuleBytes = 512;
+inline constexpr uint32_t kCwsrGfx950LdsGranuleBytes = 1280;
+inline constexpr uint32_t kCwsrGfx1250LdsGranuleBytes = 1024;
+
+/// @brief Bytes represented by one encoded LDS unit, or zero if unsupported.
+constexpr uint32_t cwsr_lds_granule_bytes(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return kCwsrGfx942LdsGranuleBytes;
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return kCwsrGfx950LdsGranuleBytes;
+  case ROCJITSU_CODE_ARCH_CDNA5:
+    return kCwsrGfx1250LdsGranuleBytes;
+  default:
+    return 0;
+  }
+}
+
+/// @brief Largest live LDS allocation representable in one save record.
+/// @returns Zero for unsupported architectures.
+constexpr uint32_t cwsr_max_encoded_lds_bytes(rj_code_arch_t arch) {
+  switch (cwsr_layout_kind(arch)) {
+  case CwsrLayoutKind::Gfx9_4:
+    return 0xFFu * cwsr_lds_granule_bytes(arch);
+  case CwsrLayoutKind::Gfx12_5:
+    return 0x1FFu * cwsr_lds_granule_bytes(arch);
+  default:
+    return 0;
+  }
+}
+
+/// @brief Whether a device has the geometry needed for an @p arch capacity.
+/// @details The caller separately decides whether this device is published.
+constexpr bool cwsr_capacity_eligible_device(const config::KfdDeviceConfig &device,
+                                             rj_code_arch_t arch) {
+  return device.simd_count != 0 && device.simd_per_cu != 0 && device.max_waves_per_simd != 0 &&
+         cwsr_arch_for_gc_ip_version(
+             gc_ip_version_for_gfx_target_version(device.gfx_target_version)) == arch;
+}
+
+/// @brief Page-aligned queue context storage, in bytes per XCC.
+struct CwsrCapacity {
+  uint32_t control_stack_size = 0;
+  uint32_t context_save_size = 0;
+};
+
+/// @brief Bound the implemented serializer's resident-wave image for one XCC.
+/// @details One high-VGPR wave can make every wave's record use that stride.
+/// The bound includes CU-local LDS capacity with per-group record rounding,
+/// debugger step area, and every simulated wave slot in one XCC.
+/// Unsupported layouts receive nonzero queue storage for runtimes that require
+/// it, but that fallback does not enable CWSR serialization. Invalid topology
+/// receives zero sizes.
+[[nodiscard]] CwsrCapacity cwsr_capacity_for_device(const config::KfdDeviceConfig &device,
+                                                    uint32_t num_xcc);
 
 /// @brief Number of scalar slots in a saved SGPR block (gfx9.4 sgpr_count).
 /// @details The block is a fixed 112 slots regardless of how many scalars the
@@ -284,10 +358,13 @@ CwsrLayout serialize_queue_cwsr_bulk(
 /// @param ctx_base Context-save-restore GPU virtual address (from the queue).
 /// @param area_size Context-save-restore area size in bytes (from the queue).
 /// @param waves In: each element supplies the wave geometry (@ref
-///        CwsrWaveState::num_sgprs / @ref CwsrWaveState::num_vgprs) and ordering
-///        used to reproduce the exact layout; Out: filled with the values
-///        currently stored in the area. The count and geometry must match the
-///        @ref serialize_queue_cwsr call that produced the area.
+///        CwsrWaveState::num_sgprs / @ref CwsrWaveState::num_vgprs), each
+///        leader's live @ref CwsrWaveState::lds length, @ref
+///        CwsrWaveState::is_first_in_group, and ordering used to reproduce the
+///        exact layout; Out: filled with the values currently stored in the
+///        area. The count and geometry must match the @ref serialize_queue_cwsr
+///        call that produced the area. LDS record padding is skipped, not
+///        returned as live data.
 /// @param read32 Callback that reads one dword from a GPU virtual address.
 /// @returns True on success; false if the waves do not fit the area (in which
 ///          case @p waves is left unchanged).

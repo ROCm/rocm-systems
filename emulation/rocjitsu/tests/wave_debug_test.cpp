@@ -1208,7 +1208,8 @@ struct ParsedWave {
 
 // Walk the CWSR area exactly as rocm-dbgapi's control_stack_iterate +
 // register_address do, asserting the contiguity invariants dbgapi enforces.
-std::vector<ParsedWave> parse_cwsr(const std::map<uint64_t, uint32_t> &mem, uint64_t base) {
+std::vector<ParsedWave> parse_cwsr(const std::map<uint64_t, uint32_t> &mem, uint64_t base,
+                                   rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4) {
   auto rd = [&](uint64_t va) -> uint32_t {
     auto it = mem.find(va);
     return it == mem.end() ? 0u : it->second;
@@ -1243,7 +1244,9 @@ std::vector<ParsedWave> parse_cwsr(const std::map<uint64_t, uint32_t> &mem, uint
     const uint32_t vgpr_count = (accum + 1) * 4;
     const uint32_t acc = (vgprs_field + 1) * 8 - vgpr_count;
     const uint32_t sgpr_count = (sgprs_field + 1) * 16 - 16;
-    const uint32_t lds_size = ((state >> 9) & 0xFF) * 1280;
+    // gfx942 inherits gfx90a's 512-byte unit; gfx950 overrides it to 1280.
+    const uint32_t lds_size =
+        ((state >> 9) & 0xFF) * (arch == ROCJITSU_CODE_ARCH_CDNA3 ? 512u : 1280u);
 
     const uint64_t save = last_wave_area - 64;
     const uint64_t register_area_end = save - ((rl & (1u << 17)) ? lds_size : 0);
@@ -1409,8 +1412,7 @@ TEST(WaveDebugTest, Gfx1250CwsrMatchesDbgapiWave32LayoutAndRoundTrips) {
   EXPECT_EQ(restored.wave_in_group, wave.wave_in_group);
   EXPECT_EQ(restored.queue_packet_id, wave.queue_packet_id);
   EXPECT_EQ(restored.trap_id, wave.trap_id);
-  ASSERT_EQ(restored.lds.size(), 1024u);
-  EXPECT_TRUE(std::ranges::equal(wave.lds, std::span(restored.lds).first(wave.lds.size())));
+  EXPECT_EQ(restored.lds, wave.lds);
   for (uint32_t r = 0; r < wave.num_vgprs; ++r)
     for (uint32_t lane = 0; lane < 32; ++lane)
       EXPECT_EQ(restored.vgprs[r * 64 + lane], wave.vgprs[r * 64 + lane]);
@@ -1531,6 +1533,45 @@ TEST(WaveDebugTest, CwsrSerializationRoundTripsThroughDbgapiLayout) {
                                          ROCJITSU_CODE_ARCH_CDNA4)
                    .ok);
   EXPECT_EQ(mem, original_mem);
+}
+
+// rocm-dbgapi applies each COMPUTE_RELAUNCH state to following wave words.
+// A large LDS group must not make unrelated groups consume the same stride.
+TEST(WaveDebugTest, CwsrUsesGroupLdsStateChanges) {
+  constexpr uint64_t kCtxBase = 0x400000000ULL;
+  constexpr uint32_t kAreaSize = 0x4000;
+  for (const auto arch :
+       {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    SCOPED_TRACE(static_cast<int>(arch));
+    std::vector<kmd::CwsrWaveState> waves = {make_wave(1, 0x1000), make_wave(2, 0x2000),
+                                             make_wave(3, 0x3000)};
+    for (size_t i = 0; i < waves.size(); ++i)
+      waves[i].group_ids[0] = static_cast<uint32_t>(i + 1);
+    waves[0].lds.resize(4096, 0x5a);
+
+    std::map<uint64_t, uint32_t> mem;
+    auto write32 = [&](uint64_t address, uint32_t value) { mem[address] = value; };
+    auto read32 = [&](uint64_t address) -> uint32_t {
+      auto it = mem.find(address);
+      return it == mem.end() ? 0u : it->second;
+    };
+    const auto layout = kmd::serialize_queue_cwsr(kCtxBase, kAreaSize, waves, write32, arch);
+    ASSERT_TRUE(layout.ok);
+    const uint32_t state_words = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 2 : 1;
+    EXPECT_EQ(layout.control_stack_size, (2 + 2 * state_words + waves.size()) * sizeof(uint32_t));
+    if (arch != ROCJITSU_CODE_ARCH_CDNA5) {
+      const auto parsed = parse_cwsr(mem, kCtxBase, arch);
+      ASSERT_EQ(parsed.size(), waves.size());
+      EXPECT_EQ(parsed[0].lds.size(), arch == ROCJITSU_CODE_ARCH_CDNA3 ? 4096u : 5120u);
+      EXPECT_TRUE(parsed[1].lds.empty());
+      EXPECT_TRUE(parsed[2].lds.empty());
+    }
+    ASSERT_TRUE(kmd::deserialize_queue_cwsr(kCtxBase, kAreaSize, waves, read32, arch));
+    EXPECT_EQ(waves[0].lds.size(), 4096u);
+    EXPECT_TRUE(waves[1].lds.empty());
+    EXPECT_TRUE(waves[2].lds.empty());
+    EXPECT_EQ(waves[0].lds[0], 0x5a);
+  }
 }
 
 // rocm-dbgapi carves 32-byte instruction buffers out of a per-queue "debugger

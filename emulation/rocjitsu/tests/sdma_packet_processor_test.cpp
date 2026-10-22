@@ -205,6 +205,36 @@ std::array<uint32_t, 13> linear_rect_packet(bool gfx12_rect, uint64_t source, ui
   return packet;
 }
 
+TEST(SdmaPacketProcessorTest, DwordFillCompletesEveryEncodedElement) {
+  constexpr uint64_t kDestination = 0x200;
+  constexpr uint32_t kPattern = 0x44332211;
+  constexpr uint32_t kSentinel = 0xaabbccdd;
+  for (const auto dialect :
+       {SdmaPacketDialect::Legacy, SdmaPacketDialect::LegacyExtendedCount,
+        SdmaPacketDialect::Gfx11Plus, SdmaPacketDialect::Rdna4, SdmaPacketDialect::Gfx1250}) {
+    for (uint32_t count_field : {0u, 4u}) {
+      SCOPED_TRACE(static_cast<int>(dialect));
+      SCOPED_TRACE(count_field);
+      PacketProcessorFixture fixture;
+      ASSERT_TRUE(fixture.access);
+      const uint64_t trailing = kDestination + count_field + sizeof(uint32_t);
+      fixture.memory->store<uint32_t>(trailing, kSentinel);
+      const std::array<uint32_t, 5> packet = {11u | (2u << 30), static_cast<uint32_t>(kDestination),
+                                              0u, kPattern, count_field};
+      SdmaPacketProcessor processor(dialect);
+      const auto result = processor.process({.available_dwords = packet,
+                                             .access = *fixture.access,
+                                             .continuation = fixture.continuation});
+      ASSERT_EQ(result.packet.status, PacketProcessStatus::Complete);
+      EXPECT_EQ(fixture.memory->load<uint32_t>(kDestination), kPattern);
+      if (count_field == 4) {
+        EXPECT_EQ(fixture.memory->load<uint32_t>(kDestination + 4), kPattern);
+      }
+      EXPECT_EQ(fixture.memory->load<uint32_t>(trailing), kSentinel);
+    }
+  }
+}
+
 TEST(SdmaPacketProcessorTest, ExtendedCountCopiesBeyondFourMiB) {
   constexpr uint64_t kSource = 0x1000;
   constexpr uint64_t kDestination = 0x500000;
