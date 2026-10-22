@@ -35,6 +35,18 @@ SDWA_ROUNDED_F16_OPS = frozenset(
 
 # F32 TRANS results ignore MODE.FP_ROUND, so their OMOD overflow rounds to
 # nearest even (infinity); other F32 results round OMOD overflow by MODE.
+#
+# Scope: VOP3 OMOD overflow rounding only, on both the scalar lowering and the
+# unary SIMD route, which take the rounding from this set. It does not select
+# denormal flushing; FLUSH_NEAREST_F32_OPS does that, and the two sets differ by
+# SIN and RCP_IFLAG. SDWA keys its output policy off FLUSH_NEAREST_F32_OPS alone,
+# so SIN and RCP_IFLAG round OMOD overflow by MODE through SDWA and to nearest
+# even through VOP3. On RDNA2 with IEEE=0, MODE=0x003, source 0x00800000 and
+# mul:4, RCP_IFLAG gives 0x7f800000 through VOP3 and 0x7f7fffff through SDWA.
+# Only the VOP3 rounding is capture-backed, on gfx1100 and gfx1201; migrating
+# SDWA needs its own hardware validation and must select overflow rounding
+# separately from flushing, since adding these two to FLUSH_NEAREST_F32_OPS would
+# also change their flush policy.
 TRANS_F32_OPS = FLUSH_NEAREST_F32_OPS | frozenset({'V_SIN_F32', 'V_RCP_IFLAG_F32'})
 
 

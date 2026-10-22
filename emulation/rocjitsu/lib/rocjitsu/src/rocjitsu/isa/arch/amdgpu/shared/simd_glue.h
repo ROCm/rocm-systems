@@ -1938,8 +1938,8 @@ template <bool True16, typename Inst>
     else
       raw = raw & util::broadcast<T>(0xffffu);
     const auto src = apply_vop3_src_mod_f32<0>(cvt_f32_f16_mode_simd(raw, wf), abs, neg);
-    // A widened F16 value cannot overflow F32 under OMOD.
-    const auto result = apply_vop3_dst_mod_f32(src, omod, clamp, floating_clamp_nan_to_zero(wf), 0);
+    const auto result = apply_vop3_dst_mod_f32(src, omod, clamp, floating_clamp_nan_to_zero(wf),
+                                               wf.fp_round_mode_f32());
     dst.template store_native<T>(base, std::bit_cast<util::native<T>>(result), chunk);
   }
   return true;
@@ -3449,11 +3449,13 @@ template <typename Inst, typename Op>
 /// and Tout are both float32_t (the plain int/cvt unary VOP3 forms apply no
 /// modifiers and reuse the VOP1 unary path directly). The modifier helpers are
 /// bit-exact, so the fast path stays correct with modifiers set; no bail.
-/// OMOD overflow gives infinity: TRANS results ignore MODE rounding.
+/// `round_mode` rounds OMOD overflow. Callers pass MODE.FP_ROUND, or nearest-even
+/// for the TRANS results that ignore it; both come from the generator's policy sets.
 template <typename Tin, typename Tout, typename Inst, typename UnOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_unary_vop3_fp_simd(Inst &inst, Wavefront &wf, UnOp un_op,
-                                                         bool force_output_flush = false) {
+                                                         bool force_output_flush,
+                                                         uint32_t round_mode) {
   if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
       !inst.vdst.simd_capable())
     return false;
@@ -3472,8 +3474,8 @@ template <typename Tin, typename Tout, typename Inst, typename UnOp>
     if (chunk == 0)
       continue;
     const auto a = apply_vop3_src_mod_f32<0>(src0.template load_native<Tin>(base), abs, neg);
-    const auto r = apply_vop3_dst_mod_f32(un_op(a), omod, clamp, floating_clamp_nan_to_zero(wf),
-                                          /*round_mode=*/0);
+    const auto r =
+        apply_vop3_dst_mod_f32(un_op(a), omod, clamp, floating_clamp_nan_to_zero(wf), round_mode);
     dst.template store_native<Tout>(base, r, chunk);
   }
   return true;
@@ -3481,7 +3483,7 @@ template <typename Tin, typename Tout, typename Inst, typename UnOp>
 
 /// Unconstrained fallback for the VOP3 f32 unary path.
 template <typename Tin, typename Tout, typename Inst, typename UnOp>
-[[nodiscard]] bool try_execute_unary_vop3_fp_simd(Inst &, Wavefront &, UnOp, bool = false) {
+[[nodiscard]] bool try_execute_unary_vop3_fp_simd(Inst &, Wavefront &, UnOp, bool, uint32_t) {
   return false;
 }
 

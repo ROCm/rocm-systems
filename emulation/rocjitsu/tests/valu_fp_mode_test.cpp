@@ -4130,8 +4130,8 @@ std::vector<ArithmeticCase> subtraction_nan_cases() {
 std::vector<ArithmeticCase> vopd_subtraction_cases() {
   struct Lane {
     const char *name;
-    uint32_t a;
-    uint32_t b;
+    uint32_t src0;
+    uint32_t src1;
     uint32_t sub;
     uint32_t subrev;
   };
@@ -4190,7 +4190,7 @@ std::vector<ArithmeticCase> vopd_subtraction_cases() {
             {std::format("{}{}{}Mode{:03X}", target.name, pair.name, lane.name, target.mode),
              target.arch,
              {pair.first_word, 0x06060702u, 0u},
-             {{0, lane.a}, {1, lane.b}, {2, lane.a}, {3, lane.b}},
+             {{0, lane.src0}, {1, lane.src1}, {2, lane.src0}, {3, lane.src1}},
              {{6, pair.sub_in_x ? lane.sub : lane.subrev},
               {7, pair.sub_in_x ? lane.subrev : lane.sub}},
              target.mode,
@@ -5175,8 +5175,8 @@ std::vector<ArithmeticCase> rdna3_minmax_omod_overflow_cases() {
   }};
   struct Lane {
     const char *name;
-    uint32_t a;
-    uint32_t b;
+    uint32_t src0;
+    uint32_t src1;
     bool max;
     std::array<uint32_t, 4> by_mode;
   };
@@ -5212,7 +5212,7 @@ std::vector<ArithmeticCase> rdna3_minmax_omod_overflow_cases() {
         cases.push_back({std::format("Gfx1100{}{}Mode{:02X}", form.name, lane.name, mode),
                          ROCJITSU_CODE_ARCH_RDNA3,
                          {words[0], words[1], 0u},
-                         {{0, lane.a}, {1, lane.b}},
+                         {{0, lane.src0}, {1, lane.src1}},
                          {{6, lane.by_mode[mode]}},
                          mode,
                          FE_TONEAREST});

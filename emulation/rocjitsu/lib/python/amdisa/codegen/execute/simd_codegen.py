@@ -27,6 +27,7 @@ from amdisa.codegen.execute.floating_policy import (
     F16_FLUSHED_SOURCE_OPS,
     FLUSH_NEAREST_F32_OPS,
     INPUT_FLUSHED_ROUNDING,
+    TRANS_F32_OPS,
     F16_TRANSCENDENTAL_OPS,
 )
 
@@ -2943,11 +2944,13 @@ def _simd_probe_line(
             if base in _VOP3_UNARY_FP_F32:
                 if base.split('_')[1] in ('ceil', 'floor', 'trunc', 'rndne'):
                     return f'  ROCJITSU_TRY_SIMD_VOP3_UNARY_ROUNDED_FP32({cpp_op});'
-                modifier_args = (
-                    ', true /* force_output_flush */'
-                    if base.upper() in FLUSH_NEAREST_F32_OPS
-                    else ''
+                flush = 'true' if base.upper() in FLUSH_NEAREST_F32_OPS else 'false'
+                # TRANS results ignore MODE.FP_ROUND, so their OMOD overflow
+                # rounds to nearest even; the scalar lowering selects the same way.
+                omod_round = (
+                    '0' if base.upper() in TRANS_F32_OPS else 'wf.fp_round_mode_f32()'
                 )
+                modifier_args = f', {flush} /* force_output_flush */, {omod_round} /* omod overflow */'
                 return f'  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP(float32_t, float32_t, {cpp_op}{modifier_args});'
             if base in ('v_cvt_i16_f16', 'v_cvt_u16_f16'):
                 cpp_op = _modified_conversion_op(cpp_op, bits=16, arity=1)

@@ -10777,7 +10777,7 @@ inline void execute_v_exp_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
       [&wf](auto a) {
         return util::exp_f32_simd(a, amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
       },
-      true /* force_output_flush */);
+      true /* force_output_flush */, 0 /* omod overflow */);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -12095,11 +12095,14 @@ inline void execute_v_frexp_mant_f32_vop1([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_frexp_mant_f32_vop3([[maybe_unused]] Inst &inst,
                                           [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP(float32_t, float32_t, [&wf](auto a) {
-    return util::native<float>([&](auto i) {
-      return amdgpu::frexp_f32(static_cast<float>(a[i]), wf.fp_denorm_mode_f32()).mantissa;
-    });
-  });
+  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP(
+      float32_t, float32_t,
+      [&wf](auto a) {
+        return util::native<float>([&](auto i) {
+          return amdgpu::frexp_f32(static_cast<float>(a[i]), wf.fp_denorm_mode_f32()).mantissa;
+        });
+      },
+      false /* force_output_flush */, wf.fp_round_mode_f32() /* omod overflow */);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -12415,7 +12418,7 @@ inline void execute_v_log_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
       [&wf](auto a) {
         return util::log_f32_simd(a, amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
       },
-      true /* force_output_flush */);
+      true /* force_output_flush */, 0 /* omod overflow */);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -16805,7 +16808,7 @@ inline void execute_v_rcp_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
       [&wf](auto a) {
         return util::rcp_f32_simd(a, amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
       },
-      true /* force_output_flush */);
+      true /* force_output_flush */, 0 /* omod overflow */);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -16906,8 +16909,9 @@ inline void execute_v_rcp_iflag_f32_vop3([[maybe_unused]] Inst &inst,
   uint32_t alu_causes = classify_rcp_iflag_f32_exceptions(inst, wf);
   wf.set_trapsts(wf.trapsts() | alu_causes);
   if (!alu_exception_trap_enables(wf)) {
-    ROCJITSU_TRY_SIMD_VOP3_UNARY_FP(float32_t, float32_t,
-                                    [](auto a) { return util::rcp_f32_simd(a); });
+    ROCJITSU_TRY_SIMD_VOP3_UNARY_FP(
+        float32_t, float32_t, [](auto a) { return util::rcp_f32_simd(a); },
+        false /* force_output_flush */, 0 /* omod overflow */);
   }
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -17155,7 +17159,7 @@ inline void execute_v_rsq_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
       [&wf](auto a) {
         return util::rsq_f32_simd(a, amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
       },
-      true /* force_output_flush */);
+      true /* force_output_flush */, 0 /* omod overflow */);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -17624,7 +17628,7 @@ inline void execute_v_sqrt_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
           return util::sqrt_f32_simd(a,
                                      amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
         },
-        true /* force_output_flush */);
+        true /* force_output_flush */, 0 /* omod overflow */);
   }
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
