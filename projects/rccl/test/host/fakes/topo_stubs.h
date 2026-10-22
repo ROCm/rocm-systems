@@ -45,17 +45,9 @@ extern std::function<ncclResult_t(int*)> g_ncclGetUserP2pLevel;
 extern int g_ncclTopoComputePathsCalls;
 extern int g_ncclTopoComputePathsFailAt;   // -1 = never fail; 0 = the :1591 call, 1 = the :1596 one
 extern ncclResult_t g_ncclTopoTrimSystemResult;
-extern ncclResult_t g_ncclTopoSearchInitResult;
-extern ncclResult_t g_ncclTopoComputeCommCPUResult;
 extern ncclResult_t g_ncclTopoPrintResult;
 extern std::function<ncclResult_t(struct ncclTopoSystem*, int, ncclAffinity*)> g_ncclTopoGetCpuAffinity;
 extern int g_ncclTopoGetCpuAffinityLastRank;
-// A std::function, not a result knob: rung 3 needs it to succeed AND write graph->nChannels, which
-// :1671-1672 read back to size the tree graph. Defaults to failing, so it stays the rung-2 terminator.
-extern std::function<ncclResult_t(struct ncclTopoSystem*, struct ncclTopoGraph*)> g_ncclTopoCompute;
-extern int g_ncclTopoComputeCalls;
-// Every ncclTopoGraph* handed to ncclTopoCompute, in call order; [0] is the :1648 ring compute.
-extern std::vector<struct ncclTopoGraph*> g_ncclTopoComputeGraphs;
 
 // -------------------------------------------------------------------------
 // Rung 3: the graph block (init.cc:1649-1774). ncclTopoComputeP2pChannelsPerPeer terminates this rung
@@ -63,21 +55,12 @@ extern std::vector<struct ncclTopoGraph*> g_ncclTopoComputeGraphs;
 // share: a rung-3 test that forgot to arm g_ncclTopoCompute would stop at :1648 and return
 // ncclRemoteError, which no rung-3 assertion accepts.
 // -------------------------------------------------------------------------
-extern ncclResult_t g_ncclTopoPrintGraphResult;
-extern std::vector<struct ncclTopoGraph*> g_ncclTopoPrintGraphGraphs;  // pairs 1:1 with the computes
-extern ncclResult_t g_ncclTopoDumpGraphsResult;
-extern int g_ncclTopoDumpGraphsCalls;
-// The ngraphs :1764 passed. -1 until the dump runs; assert this rather than the vector length,
-// which the fake clamps to the caller's array capacity.
-extern int g_ncclTopoDumpGraphsNgraphs;
-extern std::vector<struct ncclTopoGraph*> g_ncclTopoDumpGraphsArray;
 extern ncclResult_t g_ncclTopoComputeP2pChannelsPerPeerResult;
 
 // -------------------------------------------------------------------------
 // Rung 4: AllGather3 (init.cc:1786-2213). ncclTopoPostset ends it with ncclInvalidUsage, not rung 3's
 // ncclTimeout. Each default is deterministic: the UUT marshals it into allGather3Data.
 // -------------------------------------------------------------------------
-extern std::function<ncclResult_t(struct ncclComm*, bool*)> g_ncclTopoCheckNicFused;
 extern std::function<ncclResult_t(struct ncclTopoSystem*, int, float*)> g_ncclTopoGetMinNetBw;
 extern std::function<ncclResult_t(struct ncclTopoSystem*, int, int*, float*)> g_ncclTopoGetLocalNetCountByBw;
 // (system, rank, channelId, id, dev): the channel's local NIC. Default picks net device 0.

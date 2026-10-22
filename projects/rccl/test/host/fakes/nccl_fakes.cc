@@ -449,27 +449,6 @@ ncclResult_t ncclStreamWaitStream(hipStream_t a, hipStream_t b, hipEvent_t ev)
     return g_ncclStreamWaitStream(a, b, ev);
 }
 
-ncclResult_t DefaultTopoGetLinkType(int, int, bool* isXGMI, int)
-{
-    if (isXGMI) *isXGMI = false;
-    return ncclSuccess;
-}
-std::function<ncclResult_t(int, int, bool*, int)> g_ncclTopoGetLinkType = DefaultTopoGetLinkType;
-int g_ncclTopoGetLinkTypeCalls = 0;
-
-#ifndef RCCL_NCCL_FAKES_OMIT_GRAPH
-ncclResult_t ncclTopoGetLinkType(struct ncclTopoSystem* /*system*/,
-                                 int                    dev1,
-                                 int                    dev2,
-                                 bool*                  isXGMI,
-                                 int                    maxInter,
-                                 int                    /*nInter*/,
-                                 int*                   /*inter*/)
-{
-    g_ncclTopoGetLinkTypeCalls++;
-    return g_ncclTopoGetLinkType(dev1, dev2, isXGMI, maxInter);
-}
-#endif
 
 // ---------------------------------------------------------------------------
 // Memory-manager tracking stubs.
@@ -634,8 +613,6 @@ void ResetNcclFakes()
     g_memTrack                     = DefaultMemTrack;
     g_memUntrackDynamic            = DefaultMemUntrackDynamic;
     g_dynMemMarkExportToPeer       = DefaultDynMemMarkExportToPeer;
-    g_ncclTopoGetLinkType          = DefaultTopoGetLinkType;
-    g_ncclTopoGetLinkTypeCalls     = 0;
     g_ncclTopoCheckP2p             = DefaultTopoCheckP2p;
     g_ncclTopoCheckNet             = DefaultTopoCheckNet;
     g_regLocalIsValid              = DefaultRegLocalIsValid;
