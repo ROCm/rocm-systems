@@ -38,7 +38,7 @@ _CONFIG_OPTION_MAP = {
 
 # Python 3.x compatibility utils: execfile
 try:
-    execfile
+    execfile  # noqa: B018 probing for the Python 2 builtin
 except NameError:
     # Python 3.x doesn't have 'execfile' builtin
     import builtins

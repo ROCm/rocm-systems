@@ -442,7 +442,7 @@ class TestCache(RocprofsysTest):
                 return object()
 
         with pytest.raises(cache.SerializationError):
-            BadProp().value
+            _ = BadProp().value
 
     def test_dataclass_round_trips(self, cache_store) -> None:
         """Dataclasses (de)serialize automatically, with no to_cache/from_cache.
