@@ -145,21 +145,15 @@ endif()
 add_rccl_test(all_gather)
 add_rccl_test(all_reduce)
 add_rccl_test(alltoall)
+# ENABLE_ROCSHMEM_GIN is defined project-wide (add_definitions in the top-level
+# CMakeLists), so GIN perf targets need no per-target define.
 if (ENABLE_ROCSHMEM_GIN)
-    target_compile_definitions(alltoall_perf PRIVATE ENABLE_ROCSHMEM_GIN)
-    target_compile_options(alltoall_perf PRIVATE -fgpu-rdc $<$<CONFIG:Debug>:-ggdb -O0>)
-    # librccl.so is self-contained for GIN (no unresolved rocshmem host symbols),
-    # so the test needs neither --whole-archive roc::rocshmem nor -rdynamic. Keep
-    # -fgpu-rdc --hip-link for the GIN device kernels.
-    target_link_options(alltoall_perf PRIVATE -fgpu-rdc --hip-link)
+    target_compile_options(alltoall_perf PRIVATE $<$<CONFIG:Debug>:-ggdb -O0>)
 
-    # GIN-SDMA hybrid AllGather (all_gather_perf -D 3): same device-RDC link as
-    # alltoall_perf so the GinHybridAllGatherKernel resolves the GIN device backend.
     if (ENABLE_DEVICE_API)
       target_compile_definitions(all_gather_perf PRIVATE ENABLE_DEVICE_API)
     endif()
-    target_compile_options(all_gather_perf PRIVATE -fgpu-rdc $<$<CONFIG:Debug>:-ggdb -O0>)
-    target_link_options(all_gather_perf PRIVATE -fgpu-rdc --hip-link)
+    target_compile_options(all_gather_perf PRIVATE $<$<CONFIG:Debug>:-ggdb -O0>)
 endif()
 if (ENABLE_ROCSHMEM_GIN AND RCCL_SOURCE_DIR)
     add_executable(gin_rocshmem_gda_factory_test ${CMAKE_CURRENT_SOURCE_DIR}/gin_rocshmem_gda_factory_test.cu)
@@ -168,7 +162,7 @@ if (ENABLE_ROCSHMEM_GIN AND RCCL_SOURCE_DIR)
         ${ROCM_PATH}/include
         ${RCCL_SOURCE_DIR}/src/include
     )
-    target_compile_options(gin_rocshmem_gda_factory_test PRIVATE -fgpu-rdc -xhip)
+    target_compile_options(gin_rocshmem_gda_factory_test PRIVATE -xhip)
     # The GIN QP C-API (rocshmem_gin_*) and all QP device headers resolve from
     # roc::rccl (its installed nccl_device/gin/rocshmem_gda/ tree). Do NOT add the
     # rocSHMEM source/install include dirs: they ship rocshmem_config.h with
@@ -179,18 +173,12 @@ if (ENABLE_ROCSHMEM_GIN AND RCCL_SOURCE_DIR)
     target_link_libraries(gin_rocshmem_gda_factory_test PRIVATE
         roc::rccl
         $<TARGET_NAME_IF_EXISTS:MPI::MPI_CXX>)
-    target_link_options(gin_rocshmem_gda_factory_test PRIVATE -fgpu-rdc --hip-link)
     set_target_properties(gin_rocshmem_gda_factory_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 endif()
 add_rccl_test(alltoallv)
 add_rccl_test(broadcast)
 if (ENABLE_ROCSHMEM_GIN)
-    # GIN-SDMA hybrid Broadcast (broadcast_perf -D 3): same device-RDC link as
-    # alltoall_perf/all_gather_perf so the Gin*BroadcastKernel variants resolve
-    # the GIN device backend (SDMA puts + LSA/LL peer stores).
-    target_compile_definitions(broadcast_perf PRIVATE ENABLE_ROCSHMEM_GIN)
-    target_compile_options(broadcast_perf PRIVATE -fgpu-rdc $<$<CONFIG:Debug>:-ggdb -O0>)
-    target_link_options(broadcast_perf PRIVATE -fgpu-rdc --hip-link)
+    target_compile_options(broadcast_perf PRIVATE $<$<CONFIG:Debug>:-ggdb -O0>)
 endif()
 add_rccl_test(gather)
 add_rccl_test(hypercube)
