@@ -49,8 +49,8 @@ There are three high-level GPU analysis views:
 
 .. tip::
 
-   ``--speed-of-light``, ``--memory-chart``, and ``--roofline`` are short forms of
-   ``-b 2``, ``-b 3``, and ``-b 4``. They can be combined with each other and with ``-b``.
+   ``--speed-of-light``, ``--memory-chart``, and ``--roofline`` work the same as in
+   profile mode. See :ref:`profile-filtering-options`.
 
 .. image:: ../../data/analyze/cli/system_speed_of_light.png
    :align: left
