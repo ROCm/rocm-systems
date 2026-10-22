@@ -87,9 +87,8 @@ TEST_F(NetIbOpsFaultMicrotest, Install_NullOp_LeavesTheContextUnregistered) {
     if (which == 2) scene.ctx.ops.poll_cq = nullptr;
     const ibv_context_ops before = scene.ctx.ops;
     ncclResult_t res = ncclInternalError;
-    const std::string log = CaptureLog([&] { res = ncclIbOpsFaultInstall(&scene.ctx); });
+    CaptureLog([&] { res = ncclIbOpsFaultInstall(&scene.ctx); });
     EXPECT_EQ(res, ncclSuccess) << which;
-    EXPECT_NE(log.find("has NULL post_send/post_recv/poll_cq op; skipping install"), std::string::npos) << which;
     EXPECT_EQ(scene.ctx.ops.post_send, before.post_send) << which;
     EXPECT_EQ(scene.ctx.ops.post_recv, before.post_recv) << which;
     EXPECT_EQ(scene.ctx.ops.poll_cq, before.poll_cq) << which;

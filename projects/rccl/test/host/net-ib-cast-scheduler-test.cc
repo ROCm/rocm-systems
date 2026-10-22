@@ -37,11 +37,12 @@
 #include "fakes/param_redirect.h"
 
 // The RTT bookkeeping reads CLOCK_MONOTONIC; route it through a hook so a sample's age is exact.
-static std::function<int(clockid_t, struct timespec*)> g_clockGettime = ::clock_gettime;
+static std::function<int(clockid_t, struct timespec*)> g_schedClockGettime = ::clock_gettime;
 
 #include "fakes/libc_seam.h"
 #undef send  // ncclIbRequest::send, not the socket call
-#define clock_gettime(clk, ts) g_clockGettime((clk), (ts))
+#undef clock_gettime  // this TU's hook wins over any libc_seam.h mapping
+#define clock_gettime(clk, ts) g_schedClockGettime((clk), (ts))
 #include NET_IB_CAST_SCHEDULER_CC_PATH
 #undef clock_gettime
 #include "fakes/libc_seam_undef.h"
@@ -485,7 +486,7 @@ class NetIbCastSchedulerTxStatsMicrotest : public NetIbCastSchedulerTxMicrotest 
     remap_.tx.startTimeNs = 1000;
   }
   void SampleAt(uint64_t nowNs) {
-    ScopedHook clock(g_clockGettime, [nowNs](clockid_t clk, timespec* ts) {
+    ScopedHook clock(g_schedClockGettime, [nowNs](clockid_t clk, timespec* ts) {
       EXPECT_EQ(clk, CLOCK_MONOTONIC);
       ts->tv_sec = nowNs / NSEC_PER_SEC;
       ts->tv_nsec = nowNs % NSEC_PER_SEC;
@@ -528,7 +529,7 @@ TEST_F(NetIbCastSchedulerTxStatsMicrotest, UpdateTxStats_UntimedSampleOrClockFai
   EXPECT_EQ(stats().numMeasurements, 0u);
 
   remap_.tx.startTimeNs = 1000;
-  ScopedHook clock(g_clockGettime, [](clockid_t, timespec*) { return -1; });
+  ScopedHook clock(g_schedClockGettime, [](clockid_t, timespec*) { return -1; });
   IbCastQpSchedUpdateTxStats(&remap_, &base());
   EXPECT_EQ(stats().numMeasurements, 0u);
 }

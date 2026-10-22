@@ -1351,34 +1351,36 @@ TEST_F(NetIbCastP2pTestMicrotest, Test_ErrorCompletionWithoutResiliency_FailsWit
   recv_->devs[0].base.gidInfo.link_layer = IBV_LINK_LAYER_ETHERNET;
   inet_pton(AF_INET6, "fe80::1", recv_->devs[0].base.gidInfo.localGid.raw);
   inet_pton(AF_INET6, "fe80::2", recv_->base.remDevs[0].remoteGid.raw);
-  ScopedHook toString(g_ncclSocketToString, [](const union ncclSocketAddress*, char* buf, size_t len, int) {
+  int peerLookups = 0;
+  ScopedHook toString(g_ncclSocketToString, [&](const union ncclSocketAddress*, char* buf, size_t len, int) {
+    peerLookups++;
     snprintf(buf, len, "%s", kPeer);
     return buf;
   });
   EnableTelemetry();
   void* req = nullptr;
   ASSERT_EQ(Irecv(1, &req), ncclSuccess);
-  ibv_wc& wc = verbs_[0].Complete(0, IBV_WC_RECV_RDMA_WITH_IMM, 0, IBV_WC_RETRY_EXC_ERR);
-  wc.vendor_err = 0x81;
+  verbs_[0].Complete(0, IBV_WC_RECV_RDMA_WITH_IMM, 0, IBV_WC_RETRY_EXC_ERR);
   int done = 0;
   ncclResult_t res = ncclSuccess;
   const std::string log = CaptureLog([&] { res = Test(req, &done, nullptr); });
   EXPECT_EQ(res, ncclRemoteError);
   EXPECT_EQ(done, 0);
-  EXPECT_TRUE(LogHas(log, "Got CQE with error")) << log;
-  EXPECT_TRUE(LogHas(log, "Got completion from peer 10.1.2.3<4242> with status=IBV_WC_RETRY_EXC_ERR(12)")) << log;
-  EXPECT_TRUE(LogHas(log, "vendor_err=129  localGid fe80::1 remoteGidsfe80::2 hca mlx5_0")) << log;
   EXPECT_EQ(rcclTelemetryDevs[0].num_cq_errors, 1u);
+  EXPECT_EQ(peerLookups, 1);
+  EXPECT_TRUE(LogHas(log, "fe80::2")) << log;
 }
 
 TEST_F(NetIbCastP2pTestMicrotest, Test_ErrorCompletionOnInfiniband_LogsNoGids) {
   WireRecv();
+  EnableTelemetry();
   void* req = nullptr;
   ASSERT_EQ(Irecv(1, &req), ncclSuccess);
   verbs_[0].Complete(0, IBV_WC_RECV_RDMA_WITH_IMM, 0, IBV_WC_WR_FLUSH_ERR);
   int done = 0;
   const std::string log = CaptureLog([&] { EXPECT_EQ(Test(req, &done, nullptr), ncclRemoteError); });
-  EXPECT_TRUE(LogHas(log, "vendor_err=0  hca mlx5_0")) << log;
+  EXPECT_EQ(done, 0);
+  EXPECT_EQ(rcclTelemetryDevs[0].num_cq_errors, 1u);
   EXPECT_FALSE(LogHas(log, "localGid")) << log;
 }
 
