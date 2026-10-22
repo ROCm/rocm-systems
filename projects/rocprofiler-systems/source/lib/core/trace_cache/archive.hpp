@@ -179,7 +179,11 @@ template <archive_record T>
 [[nodiscard]] __attribute__((flatten)) T
 record_read(std::uint8_t*& buffer)
 {
-    T                   record{};
+    // Default-initialized, not value-initialized: zeroing the whole record first keeps it
+    // in memory, and the copy into its final place (a variant) then stalls on the 8-byte
+    // stores. Every stored field is read below; the others keep their member
+    // initializers.
+    T                   record;
     binary_read_archive archive{ .cursor = buffer };
     record.serialize(archive);
     buffer = archive.cursor;
