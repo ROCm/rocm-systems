@@ -1076,6 +1076,14 @@ TEST(ProxyTests, ProxyServiceDoesNotHangOnExternalBadMagic)
             memcpy(hello, &badMagic, sizeof(badMagic));
             memcpy(hello + sizeof(badMagic), &helloType, sizeof(helloType));
             const ssize_t sent = send(externalFd, hello, sizeof(hello), MSG_NOSIGNAL);
+            if (sent != static_cast<ssize_t>(sizeof(hello))) {
+                close(externalFd);
+                __atomic_store_n(&abortFlag, 1, __ATOMIC_RELEASE);
+                serviceThread.join();
+                ASSERT_EQ(sent, static_cast<ssize_t>(sizeof(hello)))
+                    << "external client failed to send the malformed handshake";
+                return;
+            }
             close(externalFd);
 
             // The fixed service returns to poll(). The pre-fix service keeps
@@ -1099,8 +1107,6 @@ TEST(ProxyTests, ProxyServiceDoesNotHangOnExternalBadMagic)
 
             __atomic_store_n(&abortFlag, 1, __ATOMIC_RELEASE);
             serviceThread.join();
-            EXPECT_EQ(sent, static_cast<ssize_t>(sizeof(hello)))
-                << "external client failed to send the malformed handshake";
             TEST_INFO("ProxyServiceDoesNotHangOnExternalBadMagic PASSED");
             })
             .withTimeout(std::chrono::seconds(10)));
