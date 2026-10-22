@@ -4,6 +4,7 @@
 //! Code-object parsing, symbols, and legacy HSA code-object calls.
 
 use super::*;
+use crate::isa::{isa_handle, isa_name};
 
 /// HSA code-symbol metadata staged before receiving an opaque handle.
 struct ParsedCodeSymbol {
@@ -222,7 +223,7 @@ pub(super) fn parse_and_load(
 fn code_object_isa(runtime: &HsaState, object: &LoaderCodeObject<'_>) -> Result<HsaIsa, Status> {
     let (target, variant) = object.target().map_err(map_loader_error)?;
     for (index, gpu) in runtime.gpus.iter().enumerate() {
-        let Some(name) = crate::isa_name(&gpu.info, gpu.xnack_enabled, variant) else {
+        let Some(name) = isa_name(&gpu.info, gpu.xnack_enabled, variant) else {
             continue;
         };
         let mut active = Target::from(&gpu.info);
@@ -233,7 +234,7 @@ fn code_object_isa(runtime: &HsaState, object: &LoaderCodeObject<'_>) -> Result<
             == Some(target)
             && object.validate_target(active).is_ok()
         {
-            return Ok(crate::isa_handle(index, variant));
+            return Ok(isa_handle(index, variant));
         }
     }
     Err(INVALID_ISA_NAME)

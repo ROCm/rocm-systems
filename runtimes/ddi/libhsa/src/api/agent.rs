@@ -3,6 +3,8 @@
 
 //! HSA C ABI entry points for this domain.
 
+use super::host_alloc_dmabuf_supported;
+use super::output::{write_bytes, write_value};
 use super::system::{
     extension_mask, legacy_agent_extension_supported, major_agent_extension_supported,
     valid_extension,
@@ -10,12 +12,60 @@ use super::system::{
 use std::ffi::c_void;
 
 use crate::ffi::*;
+use crate::isa::isa_handle;
 use crate::runtime::{boundary, lock, map_error};
-use crate::{
-    CLUSTER_MAX_DIM, KERNEL_CLUSTER_MAX_DIM, KERNEL_CLUSTER_MAX_SIZE, agent_uuid,
-    cpu_rejects_amd_agent_info, host_alloc_dmabuf_supported, image_gfx12, isa_handle,
-    nearest_cpu_agent, platform, runtime, write_bytes, write_value,
+use crate::{image_gfx12, platform, runtime};
+
+pub(crate) const KERNEL_CLUSTER_MAX_DIM: HsaAmdDim3 = HsaAmdDim3 {
+    x: i32::MAX as u64,
+    y: 65_535,
+    z: 65_535,
 };
+pub(crate) const CLUSTER_MAX_DIM: HsaAmdDim3 = HsaAmdDim3 { x: 1, y: 1, z: 1 };
+pub(crate) const KERNEL_CLUSTER_MAX_SIZE: u64 =
+    KERNEL_CLUSTER_MAX_DIM.x * KERNEL_CLUSTER_MAX_DIM.y * KERNEL_CLUSTER_MAX_DIM.z;
+
+pub(crate) fn agent_uuid(gpu: Option<&rocddi::topology::GpuInfo>) -> String {
+    match gpu {
+        None => "CPU-XX".to_owned(),
+        Some(gpu) => gpu.unique_id.map_or_else(
+            || "GPU-XX".to_owned(),
+            |unique_id| format!("GPU-{unique_id:016x}"),
+        ),
+    }
+}
+
+pub(crate) fn cpu_rejects_amd_agent_info(attribute: u32) -> bool {
+    matches!(
+        attribute,
+        AMD_AGENT_INFO_MEMORY_WIDTH
+            | AMD_AGENT_INFO_MEMORY_MAX_FREQUENCY
+            | AMD_AGENT_INFO_COOPERATIVE_QUEUES
+            | AMD_AGENT_INFO_COOPERATIVE_COMPUTE_UNIT_COUNT
+            | AMD_AGENT_INFO_MEMORY_AVAIL
+            | AMD_AGENT_INFO_PM4_EMULATION
+            | AMD_AGENT_INFO_LUID
+            | AMD_AGENT_INFO_HAS_EXPERT_SCHED_MODE
+            | AMD_AGENT_INFO_CUID
+            | AMD_AGENT_INFO_KERNEL_WG_MAX_SIZE
+            | AMD_AGENT_INFO_KERNEL_CLUSTER_MAX_DIM
+            | AMD_AGENT_INFO_KERNEL_CLUSTER_MAX_SIZE
+            | AMD_AGENT_INFO_CLUSTER_MAX_DIM
+            | AMD_AGENT_INFO_CLUSTER_MAX_SIZE
+            | AMD_AGENT_INFO_KERNEL_WG_MAX_DIM
+            | AMD_AGENT_INFO_REQUEST_PERSISTING_L2_CACHE_SIZE
+            | AMD_AGENT_INFO_MAX_PERSISTING_L2_CACHE_SIZE
+            | AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH
+            | AMD_AGENT_INFO_HOST_ATOMICS_SUPPORTED
+            | AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED
+    )
+}
+
+pub(crate) fn nearest_cpu_agent(gpu_only: bool) -> HsaAgent {
+    HsaAgent {
+        handle: if gpu_only { CPU_AGENT } else { 0 },
+    }
+}
 
 /// # Safety
 /// The callback must be callable with the C ABI; `data` must remain valid for

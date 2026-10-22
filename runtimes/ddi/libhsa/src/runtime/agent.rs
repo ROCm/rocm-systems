@@ -4,6 +4,7 @@
 //! HSA agent facts and cache projections over rocddi topology.
 
 use super::*;
+use crate::isa::gfx_target_name;
 
 /// A transient native query failure leaves support undecided so public calls
 /// can retry after the underlying condition clears.
@@ -14,10 +15,6 @@ pub(super) fn pc_sampling_supported_by_query(
         Ok(configurations) => !configurations.is_empty(),
         Err(error) => error.kind() != rocddi::ErrorKind::Unsupported,
     }
-}
-
-pub(crate) fn gfx_target_name(major: u32, minor: u32, stepping: u32) -> String {
-    format!("gfx{major}{minor}{stepping:x}")
 }
 
 pub(super) fn gpu_agent_name(gpu: &GpuInfo) -> String {

@@ -7,7 +7,20 @@
 use crate::api_trace;
 use crate::ffi::*;
 use crate::runtime::{HsaState, LifecycleTransition, boundary, lock};
-use crate::{complete_deferred_shutdown, runtime, signal};
+use crate::{runtime, signal};
+
+fn complete_deferred_shutdown(runtime: HsaState, generation: u64) {
+    let mut transition = LifecycleTransition::stopping(generation);
+    let status = runtime.stop();
+    #[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
+    api_trace::unload();
+    if let Ok(mut guard) = lock() {
+        if guard.finish_shutdown(generation, status).is_ok() {
+            transition.disarm();
+        }
+    }
+    signal::set_system_frequency(0);
+}
 
 #[cfg_attr(
     all(target_arch = "x86_64", not(test)),
