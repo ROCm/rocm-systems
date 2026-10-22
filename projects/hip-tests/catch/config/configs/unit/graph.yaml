@@ -567,6 +567,15 @@ graph:
   Unit_hipGraphExecUpdate_CapturedMemcpyAndKernel:
     <<: *level_default
     tags: [exec]
+  Unit_hipGraphExecUpdate_KernargReclaim_MemoryStable:
+    <<: *level_default
+    tags: [exec]
+  Unit_hipGraphExecUpdate_KernargReclaim_InflightLaunchesKeepArgs:
+    <<: *level_default
+    tags: [exec]
+  Unit_hipGraphExecUpdate_KernargReclaim_SlidingWindow:
+    <<: *level_default
+    tags: [exec]
   Unit_hipGraphExecEventRecordNodeSetEvent_Functional:
     <<: *level_default
     tags: [exec]

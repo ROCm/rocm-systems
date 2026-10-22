@@ -1548,6 +1548,221 @@ HIP_TEST_CASE(Unit_hipGraphExecUpdate_RebuildWithDisabledNodeKeepsSync) {
   HIP_CHECK(hipGraphDestroy(graph));
 }
 
+// Kernel-argument slot reclamation across exec updates
+// (https://github.com/ROCm/rocm-systems/issues/10713).
+namespace {
+// Spins before storing, so a launch can outlive the next update.
+__global__ void StoreAfterSpin(int* out, int index, int value, long long spin) {
+  const long long start = clock64();
+  while (clock64() - start < spin) {
+  }
+  out[index] = value;
+}
+
+enum class UpdateApi { kExecKernelNodeSetParams, kExecUpdate };
+
+struct SingleKernelGraph {
+  int* out;
+  int index = 0;
+  int value = 0;
+  long long spin = 0;
+  void* args[4] = {&out, &index, &value, &spin};
+  hipKernelNodeParams params{};
+  hipGraph_t graph{};
+  hipGraphNode_t node{};
+  hipGraphExec_t exec{};
+  UpdateApi api;
+
+  SingleKernelGraph(int* d_out, UpdateApi update_api) : out(d_out), api(update_api) {
+    params.func = reinterpret_cast<void*>(StoreAfterSpin);
+    params.gridDim = dim3(1);
+    params.blockDim = dim3(1);
+    params.kernelParams = args;
+    HIP_CHECK(hipGraphCreate(&graph, 0));
+    HIP_CHECK(hipGraphAddKernelNode(&node, graph, nullptr, 0, &params));
+    HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+  }
+  ~SingleKernelGraph() {
+    static_cast<void>(hipGraphExecDestroy(exec));
+    static_cast<void>(hipGraphDestroy(graph));
+  }
+  void Update(int new_index, int new_value, long long new_spin) {
+    index = new_index;
+    value = new_value;
+    spin = new_spin;
+    if (api == UpdateApi::kExecKernelNodeSetParams) {
+      HIP_CHECK(hipGraphExecKernelNodeSetParams(exec, node, &params));
+      return;
+    }
+    HIP_CHECK(hipGraphKernelNodeSetParams(node, &params));
+    hipGraphNode_t error_node{};
+    hipGraphExecUpdateResult result{};
+    HIP_CHECK(hipGraphExecUpdate(exec, graph, &error_node, &result));
+  }
+};
+
+size_t FreeDeviceMemory() {
+  size_t free_bytes = 0, total_bytes = 0;
+  HIP_CHECK(hipMemGetInfo(&free_bytes, &total_bytes));
+  return free_bytes;
+}
+
+// A page or two of drift; a leak per update is far more.
+constexpr size_t kAllowedDrift = size_t{1} << 20;
+
+// Integrated GPUs keep graph kernargs in system memory.
+bool KernargsInDeviceMemory() {
+  int integrated = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&integrated, hipDeviceAttributeIntegrated, 0));
+  return integrated == 0;
+}
+}  // namespace
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Updates and launches one executable graph many times, synchronizing after
+ *    each launch. Each update replaces the node's kernel-argument slot; without
+ *    reclamation the replaced slots pile up until the exec is destroyed, so
+ *    device memory shrinks with every update. Free memory must stay flat after
+ *    warm-up, and every launch must observe its own update.
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGraphExecUpdate.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.0
+ */
+HIP_TEST_CASE(Unit_hipGraphExecUpdate_KernargReclaim_MemoryStable) {
+  const auto api = GENERATE(UpdateApi::kExecKernelNodeSetParams, UpdateApi::kExecUpdate);
+  int* d_out{nullptr};
+  HIP_CHECK(hipMalloc(&d_out, sizeof(int)));
+  {
+    SingleKernelGraph g(d_out, api);
+    constexpr int kWarmup = 1000;
+    constexpr int kIters = 30000;
+    size_t free_after_warmup = 0;
+    for (int i = 0; i < kIters; ++i) {
+      g.Update(0, i, 0);
+      HIP_CHECK(hipGraphLaunch(g.exec, nullptr));
+      int seen = -1;
+      HIP_CHECK(hipMemcpy(&seen, d_out, sizeof(int), hipMemcpyDeviceToHost));
+      REQUIRE(seen == i);
+      if (i == kWarmup) free_after_warmup = FreeDeviceMemory();
+    }
+    if (KernargsInDeviceMemory()) {
+      REQUIRE(FreeDeviceMemory() + kAllowedDrift >= free_after_warmup);
+    }
+  }
+  HIP_CHECK(hipFree(d_out));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Keeps several launches of one executable graph in flight and updates it
+ *    between them. A replaced kernel-argument slot may be reused only once no
+ *    launch that can still read it is running: each launch must store the
+ *    value it was launched with, and memory must still not grow.
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGraphExecUpdate.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.0
+ */
+HIP_TEST_CASE(Unit_hipGraphExecUpdate_KernargReclaim_InflightLaunchesKeepArgs) {
+  const auto api = GENERATE(UpdateApi::kExecKernelNodeSetParams, UpdateApi::kExecUpdate);
+  constexpr int kDepth = 4;  // launches kept in flight before synchronizing
+  constexpr int kWarmup = 100;
+  constexpr int kRounds = 1000;
+  constexpr long long kSpin = 200000;
+  int* d_out{nullptr};
+  HIP_CHECK(hipMalloc(&d_out, kDepth * sizeof(int)));
+  {
+    SingleKernelGraph g(d_out, api);
+    size_t free_after_warmup = 0;
+    for (int round = 0; round < kRounds; ++round) {
+      if (round == kWarmup) free_after_warmup = FreeDeviceMemory();
+      HIP_CHECK(hipMemset(d_out, 0xff, kDepth * sizeof(int)));
+      for (int d = 0; d < kDepth; ++d) {
+        g.Update(d, round * kDepth + d + 1, kSpin);
+        HIP_CHECK(hipGraphLaunch(g.exec, nullptr));
+      }
+      int seen[kDepth];
+      HIP_CHECK(hipMemcpy(seen, d_out, sizeof(seen), hipMemcpyDeviceToHost));
+      for (int d = 0; d < kDepth; ++d) {
+        INFO("round " << round << " launch " << d);
+        REQUIRE(seen[d] == round * kDepth + d + 1);
+      }
+    }
+    if (KernargsInDeviceMemory()) {
+      REQUIRE(FreeDeviceMemory() + kAllowedDrift >= free_after_warmup);
+    }
+  }
+  HIP_CHECK(hipFree(d_out));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Keeps a sliding window of launches in flight: each round waits only for
+ *    the oldest launch, updates the graph and launches again, so the exec
+ *    never becomes idle. Replaced slots must still be reclaimed once the
+ *    launches that could read them finish, and every launch must store the
+ *    value it was launched with.
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGraphExecUpdate.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.0
+ */
+HIP_TEST_CASE(Unit_hipGraphExecUpdate_KernargReclaim_SlidingWindow) {
+  const auto api = GENERATE(UpdateApi::kExecKernelNodeSetParams, UpdateApi::kExecUpdate);
+  constexpr int kWindow = 2;  // launches kept in flight; the exec never drains
+  constexpr int kWarmup = 200;
+  constexpr int kRounds = 5000;
+  // Keeps the other launch running at every update.
+  constexpr long long kSpin = 2000000;
+  int* d_out{nullptr};
+  HIP_CHECK(hipMalloc(&d_out, kWindow * sizeof(int)));
+  // Non-blocking: the null-stream readbacks must not drain it.
+  hipStream_t stream{};
+  HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+  hipEvent_t done[kWindow];
+  for (auto& event : done) {
+    HIP_CHECK(hipEventCreateWithFlags(&event, hipEventDisableTiming));
+  }
+  {
+    SingleKernelGraph g(d_out, api);
+    size_t free_after_warmup = 0;
+    for (int round = 0; round < kRounds; ++round) {
+      const int slot = round % kWindow;
+      if (round >= kWindow) {
+        HIP_CHECK(hipEventSynchronize(done[slot]));
+        int seen = -1;
+        HIP_CHECK(hipMemcpy(&seen, d_out + slot, sizeof(seen), hipMemcpyDeviceToHost));
+        INFO("round " << round - kWindow);
+        REQUIRE(seen == round - kWindow + 1);
+      }
+      if (round == kWarmup) free_after_warmup = FreeDeviceMemory();
+      g.Update(slot, round + 1, kSpin);
+      HIP_CHECK(hipGraphLaunch(g.exec, stream));
+      HIP_CHECK(hipEventRecord(done[slot], stream));
+    }
+    HIP_CHECK(hipStreamSynchronize(stream));
+    if (KernargsInDeviceMemory()) {
+      REQUIRE(FreeDeviceMemory() + kAllowedDrift >= free_after_warmup);
+    }
+  }
+  for (auto& event : done) {
+    HIP_CHECK(hipEventDestroy(event));
+  }
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(d_out));
+}
+
 /**
  * End doxygen group GraphTest.
  * @}
