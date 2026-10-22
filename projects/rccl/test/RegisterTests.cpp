@@ -23,6 +23,10 @@
 
 #include "common/ErrCode.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
+#include "p2p.h"  // ncclIpcRegInfo, for the segment count of a buffer's IPC import
+// p2p.h pulls in RCCL's internal NCCLCHECK, which `return`s; the void tests here use the
+// non-returning one from StandaloneUtils.hpp instead.
+#undef NCCLCHECK
 #include "StandaloneUtils.hpp"
 #include "register.h"
 
@@ -614,8 +618,18 @@ static int segReuseRunRank(int rank, int numSegments, P2pCollShared* shared)
             return CHILD_FAIL;
         }
     }
-    const bool ipcReg = reg && (static_cast<ncclReg*>(reg)->state & IPC_REG_COMPLETE);
-    if (!ipcReg) {
+    // Each rank registers its buffer for the peer, which imports it (src/enqueue/enqueue.cc). This rank's record
+    // holds that import, and its segment count says which registration branch ran.
+    const ncclReg* r = static_cast<const ncclReg*>(reg);
+    const int peer = 1 - rank;
+    const ncclIpcRegInfo* imported =
+        (r && (r->state & IPC_REG_COMPLETE) && peer < r->ipcInfosSize) ? r->ipcInfos[peer] : nullptr;
+    if (imported && imported->impInfo.numSegments != numSegments) {
+        printf("[rank %d] the peer's import of this buffer covers %d segment(s), expected %d\n", rank,
+               imported->impInfo.numSegments, numSegments);
+        return CHILD_FAIL;
+    }
+    if (!imported) {
         // RCCL keeps cuMem on only with VMM support, a cuMem-capable HIP driver and Linux >= 6.8
         // (src/misc/rocmwrap.cc). With all three in place, the transfer took no P2P read/write path.
         int vmm = 0, driver = 0;
@@ -627,7 +641,7 @@ static int segReuseRunRank(int rank, int numSegments, P2pCollShared* shared)
                driver, os.release);
     }
     CHILD_NC(ncclCommDestroy(comm));
-    return ipcReg ? CHILD_OK : CHILD_SKIP_NO_IPC;
+    return imported ? CHILD_OK : CHILD_SKIP_NO_IPC;
 }
 
 static void testP2pIpcSegmentReuse(int numSegments)
@@ -643,7 +657,7 @@ static void testP2pIpcSegmentReuse(int numSegments)
         ASSERT_GE(pids[r], 0) << "fork() failed for rank " << r;
         if (pids[r] == 0) _exit(segReuseRunRank(r, numSegments, shared));
     }
-    bool noGpus = false, noIpc = false;
+    bool noGpus = false, noIpc[2] = {false, false};
     for (int n = 0; n < 2; n++) {
         int status = 0;
         const pid_t pid = waitpid(-1, &status, 0);
@@ -654,7 +668,7 @@ static void testP2pIpcSegmentReuse(int numSegments)
         const int r = pid == pids[0] ? 0 : 1;
         const int code = WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
         noGpus |= code == CHILD_SKIP;
-        noIpc |= code == CHILD_SKIP_NO_IPC;
+        noIpc[r] = code == CHILD_SKIP_NO_IPC;
         if (code == CHILD_OK || code == CHILD_SKIP || code == CHILD_SKIP_NO_IPC) continue;
         ADD_FAILURE() << "Rank " << r << " failed with exit code " << code << " (128 + signal if killed)";
         if (n == 0) kill(pids[1 - r], SIGKILL); // the peer of a faulted rank blocks in the transfer
@@ -662,7 +676,12 @@ static void testP2pIpcSegmentReuse(int numSegments)
     munmap(shared, sizeof(P2pCollShared));
     if (::testing::Test::HasFailure()) return;
     if (noGpus) GTEST_SKIP() << "Needs 2 GPUs with cuMem VMM (gfx942, gfx950 or gfx1250).";
-    if (noIpc)
+    // Under P2P write (pinned below) the data goes through the import of rank 1's buffer, whatever became of
+    // rank 0's registration; with neither registered, this host cannot IPC-register at all.
+    if (noIpc[1] && !noIpc[0])
+        FAIL() << "Rank 1's buffer, whose import carries the data under P2P write, was not IPC-registered, "
+                  "though rank 0's was.";
+    if (noIpc[1])
         GTEST_SKIP() << "Buffer not IPC-registered: cuMem is off, or the transfer took no P2P read/write path. "
                         "Each rank printed its VMM attribute, HIP driver version and kernel release.";
 }
@@ -806,6 +825,7 @@ TEST(Register, P2pIpcSegmentReuse)
     auto config = [](const char* name, int numSegments) {
         return makeEnabledConfig(name, [numSegments]() { testP2pIpcSegmentReuse(numSegments); })
             .setVariable("NCCL_CUMEM_ENABLE", "1").setVariable("NCCL_MULTI_SEGMENT_REGISTER", "1")
+            .setVariable("NCCL_P2P_READ_ENABLE", "0") // P2P write: the receiver's import carries the data
             .withNumGpus(2).withTimeout(std::chrono::seconds(120));
     };
     RUN_ISOLATED_TESTS(config("P2pIpcSegmentReuse_MultiSegment", 2),
