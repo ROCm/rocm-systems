@@ -139,10 +139,31 @@ gdr_t ncclGdrCopy = nullptr;
 // src/misc/rocmwrap.cc's param, which fakes/rocmwrap_fakes.cc does not define yet.
 NCCL_PARAM(DmaBufEnable, "DMABUF_ENABLE", 1);
 
+// CreateContext frees nothing on its error paths; Create() records its host allocations to release them.
+namespace {
+bool g_trackCreate = false;
+std::set<void*> g_createAllocs;
+}  // namespace
+template <typename T>
+ncclResult_t GinTestCalloc(T** ptr, size_t nelem, const char* file, int line, const char* fn, bool log) {
+  ncclResult_t res = ncclCallocDebug(ptr, nelem, file, line, fn, log);
+  if (res == ncclSuccess && g_trackCreate) g_createAllocs.insert(*ptr);
+  return res;
+}
+// Whatever the unit frees itself is not freed again, so cleanup added to those paths cannot double free.
+static void GinTestFree(void* p) {
+  g_createAllocs.erase(p);
+  std::free(p);
+}
+#undef ncclCalloc
+#define ncclCalloc(...) GinTestCalloc(__VA_ARGS__, __FILE__, __LINE__, __func__, true)
+#define free(p) GinTestFree(p)
+
 #include GIN_HOST_PROXY_CC_PATH
 #include GPUCONTEXT_CC_PATH
 #include GPUCONTEXT_V1_CC_PATH
 #include GPUCONTEXT_V2_CC_PATH
+#undef free
 
 namespace {
 
@@ -511,7 +532,14 @@ class GinHostProxyContextMicrotest : public GinHostProxyMicrotest {
     return c;
   }
   ncclResult_t Create(ncclGinConfig_t config) {
-    return ncclGinProxy.createContext(collComm_, &config, &ginCtx_, &devHandle_);
+    g_createAllocs.clear();
+    g_trackCreate = true;
+    ncclResult_t res = ncclGinProxy.createContext(collComm_, &config, &ginCtx_, &devHandle_);
+    g_trackCreate = false;
+    if (res != ncclSuccess)
+      for (void* p : g_createAllocs) std::free(p);
+    g_createAllocs.clear();
+    return res;
   }
   void Destroy() {
     ASSERT_EQ(ncclSuccess, ncclGinProxy.destroyContext(ginCtx_));
