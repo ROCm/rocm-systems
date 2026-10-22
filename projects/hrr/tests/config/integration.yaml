@@ -133,6 +133,7 @@ cases:
   Unit_HRR_DrvMemcpy3D_Direct: {}
   Unit_HRR_DrvMemcpyRoundtrip: {}
   Unit_HRR_DrvMemcpy_Direct: {}
+  Unit_HRR_ElidedStreamRoundtrip: {}
   Unit_HRR_EmbeddedPtrRoundtrip: {}
   Unit_HRR_EmbeddedPtrStruct_Direct: {}
   Unit_HRR_ExtMallocRoundtrip: {}
@@ -286,6 +287,7 @@ cases:
   Unit_HRR_StreamCaptureBeginSpt_Direct: {}
   Unit_HRR_StreamCaptureQuerySptRoundtrip: {}
   Unit_HRR_StreamCaptureQuerySpt_Direct: {}
+  Unit_HRR_StreamElision_Direct: {}
   Unit_HRR_StreamQuerySptRoundtrip: {}
   Unit_HRR_StreamQuerySpt_Direct: {}
   Unit_HRR_StreamWaitEventSptRoundtrip: {}
