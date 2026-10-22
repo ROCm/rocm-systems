@@ -49,6 +49,15 @@ class ClassifyTest(unittest.TestCase):
         rows = rpt.classify_jobs(JOBS)
         self.assertEqual(rpt.missing_families(FAMILIES, rows), ["gfx110x"])
 
+    def test_skipped_matrix_job_with_unexpanded_name_is_dropped(self):
+        rows = rpt.classify_jobs(
+            [
+                {"name": "GPU / Integration (${{ matrix.family }})", "conclusion": "skipped"},
+                {"name": "GPU / Integration (gfx94x)", "conclusion": "success"},
+            ]
+        )
+        self.assertEqual([(r["kind"], r["name"]) for r in rows], [("Integration", "gfx94x")])
+
     def test_queued_job_reports_status(self):
         rows = rpt.classify_jobs([{"name": "gpu / Integration (gfx90a)", "status": "queued"}])
         self.assertEqual(rows[0]["conclusion"], "queued")

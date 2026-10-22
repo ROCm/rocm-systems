@@ -48,6 +48,9 @@ def classify_jobs(jobs: list[dict]) -> list[dict]:
     """HRR jobs from the run's job list, as {kind, name, conclusion, url}."""
     rows = []
     for job in jobs:
+        # A skipped matrix job keeps its unexpanded name; it is no family.
+        if "${{" in job.get("name", ""):
+            continue
         for kind, pattern in JOB_PATTERNS:
             match = pattern.search(job.get("name", ""))
             if match:
