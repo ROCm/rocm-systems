@@ -47,13 +47,15 @@ int g_ifCount = 1;
 union ncclSocketAddress g_subnetRemote;
 }  // namespace bootstrap_micro
 
-// On success the proxy owns the listen socket, as in production.
+// The proxy owns both address arrays from the call on, and the listen socket on success, as in production.
 ncclResult_t ncclProxyInit(struct ncclComm* comm, struct ncclSocket* sock, union ncclSocketAddress* peerAddresses,
                            uint64_t* peerUDS) {
   {
     std::lock_guard<std::mutex> lock(g_seamMu);
     g_proxyInits[comm] = {std::vector<ncclSocketAddress>(peerAddresses, peerAddresses + comm->nRanks),
                           std::vector<uint64_t>(peerUDS, peerUDS + comm->nRanks), sock->addr};
+    free(peerAddresses);
+    free(peerUDS);
     if (g_proxyInitResult != ncclSuccess) return g_proxyInitResult;
   }
   (void)ncclSocketClose(sock);
@@ -356,6 +358,7 @@ struct FakeNetReq {
 std::mutex g_netMu;
 std::deque<FakeNetListener> g_netListens;
 std::vector<std::unique_ptr<FakeNetConn>> g_netConns;
+std::deque<FakeNetReq> g_netReqs;  // kept until ResetSeams: failure paths abandon pending requests
 std::vector<std::string> g_netDevs = {"mlx5_0"};
 std::atomic<int> g_netDeferConnect{0}, g_netDeferIsend{0}, g_netDeferIrecv{0}, g_netDeferTest{0};
 std::atomic<int> g_netRegs{0}, g_netDeregs{0}, g_netCloses{0};
@@ -432,14 +435,17 @@ ncclResult_t FakeNetIsend(void* sendComm, void* data, size_t size, int tag, void
   if (Defer(g_netDeferIsend)) return ncclSuccess;
   std::lock_guard<std::mutex> lock(g_netMu);
   static_cast<FakeNetConn*>(sendComm)->msgs.emplace_back(tag, std::string((char*)data, size));
-  *request = new FakeNetReq{true, nullptr, nullptr, 0, tag};
+  g_netReqs.push_back({true, nullptr, nullptr, 0, tag});
+  *request = &g_netReqs.back();
   return ncclSuccess;
 }
 ncclResult_t FakeNetIrecv(void* recvComm, int, void** data, size_t* sizes, int* tags, void**, void**, void** request) {
   if (ncclResult_t res = NetFault("irecv")) return res;
   *request = nullptr;
   if (Defer(g_netDeferIrecv)) return ncclSuccess;
-  *request = new FakeNetReq{false, static_cast<FakeNetConn*>(recvComm), data[0], sizes[0], tags[0]};
+  std::lock_guard<std::mutex> lock(g_netMu);
+  g_netReqs.push_back({false, static_cast<FakeNetConn*>(recvComm), data[0], sizes[0], tags[0]});
+  *request = &g_netReqs.back();
   return ncclSuccess;
 }
 ncclResult_t FakeNetTest(void* request, int* done, int*) {
@@ -452,11 +458,11 @@ ncclResult_t FakeNetTest(void* request, int* done, int*) {
     auto& msgs = req->conn->msgs;
     auto it = std::find_if(msgs.begin(), msgs.end(), [&](const auto& m) { return m.first == req->tag; });
     if (it == msgs.end()) return ncclSuccess;
-    std::memcpy(req->data, it->second.data(), std::min(req->size, it->second.size()));
+    size_t n = std::min(req->size, it->second.size());
+    if (n > 0) std::memcpy(req->data, it->second.data(), n);  // a zero-size recv may pass a null buffer
     msgs.erase(it);
   }
   *done = 1;
-  delete req;
   return ncclSuccess;
 }
 ncclResult_t FakeNetClose(void*) {
@@ -511,6 +517,7 @@ void ResetSeams() {
     std::lock_guard<std::mutex> lock(g_netMu);
     g_netListens.clear();
     g_netConns.clear();
+    g_netReqs.clear();
     g_netListenDevs.clear();
   }
   g_netDevs = {"mlx5_0"};

@@ -685,7 +685,9 @@ TEST_F(BootstrapMicrotest, Root_KnownBug_StrayPeerWithTheWrongMagicMakesTheRootE
   ASSERT_EQ(ncclSuccess, ncclSocketInit(&stray, &handle_.addr, handle_.magic + 1, ncclSocketTypeBootstrap));
   ASSERT_EQ(ncclSuccess, ncclSocketConnect(&stray));
   WaitRoots();
+  // A valid one-rank check-in: a fixed root still listening then finishes, rather than dividing by nroots 0.
   struct extInfo info = {};
+  info.nranks = info.nroots = 1;
   EXPECT_EQ(ncclRemoteError, sendToRoot(&handle_, self_.comm.get(), &info));
   (void)ncclSocketClose(&stray);
 }
