@@ -674,12 +674,8 @@ Output: Dictionary with fields
 
 Field | Content
 ---|---
-``driver_name`` |  driver name
-``driver_kernel_version`` | amdgpu kernel source version, such as ``6.19.14``
-``amdgpu_driver_version`` | amdgpu module version, such as ``31400000``
-``driver_version`` | driver version, such as ``6.19.14.31400000``
-``driver_build_version`` | active DKMS build version, such as ``2370381``
-``driver_full_version`` | composed version, such as ``6.19.14.31400000-2370381``
+`driver_name` |  driver name
+`driver_version` |  driver_version
 ``driver_date`` | driver date, such as ``2015/01/01 00:00``, or ``N/A`` when the kernel does not report one
 
 Exceptions that can be thrown by `amdsmi_get_gpu_driver_info` function:
