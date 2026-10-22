@@ -101,7 +101,7 @@ kernel. To compare many kernels, write the
 
 | Cause | What to do |
 |---|---|
-| Profiled with `--no-roof`, or `-b`/`--set` without block 4 | re-profile without `--no-roof`, adding `--roofline` to the selection |
+| Profiled with `--no-roof`, or `-b`/`--set` without block 4 | re-profile without `--no-roof`; add `--roofline` to `-b`, or replace `--set` with `-b` blocks plus `--roofline` (no set includes block 4) |
 | Architecture has no microbenchmark support | use Speed-of-Light and the `rocprof-compute-memory` skill instead |
 | `roofline.csv` absent from the workload directory | the benchmark did not complete; check the profile log |
 
