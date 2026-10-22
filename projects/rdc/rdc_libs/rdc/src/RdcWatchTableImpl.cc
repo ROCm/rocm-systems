@@ -55,6 +55,7 @@ RdcWatchTableImpl::RdcWatchTableImpl(const RdcGroupSettingsPtr& group_settings,
 rdc_status_t RdcWatchTableImpl::rdc_job_start_stats(rdc_gpu_group_t group_id, const char job_id[64],
                                                     uint64_t update_freq,
                                                     const rdc_gpu_gauges_t& gpu_gauges) {
+  std::lock_guard<std::mutex> job_guard(job_mutex_);
   do {  //< lock guard for thread safe
     std::lock_guard<std::mutex> guard(watch_mutex_);
     if (job_watch_table_.find(job_id) != job_watch_table_.end()) {
@@ -86,12 +87,6 @@ rdc_status_t RdcWatchTableImpl::rdc_job_start_stats(rdc_gpu_group_t group_id, co
     fields_in_watch.emplace_back(gpu, RDC_EVNT_NOTIF_PROCESS_END);
   }
 
-  JobWatchTableEntry jentry{group_id, fields_in_watch};
-  do {  //< lock guard for thread safe
-    std::lock_guard<std::mutex> guard(watch_mutex_);
-    job_watch_table_.insert({job_id, jentry});
-  } while (0);
-
   rdc_field_group_info_t finfo;
 
   result = group_settings_->rdc_group_field_get_info(JOB_FIELD_ID, &finfo);
@@ -99,29 +94,71 @@ rdc_status_t RdcWatchTableImpl::rdc_job_start_stats(rdc_gpu_group_t group_id, co
     return result;
   }
 
+  // RDC watches the job fields of a group for one job at a time. Checked
+  // before the job takes room, so a start that conflicts changes nothing;
+  // rdc_field_watch() checks again below.
+  do {  //< lock guard for thread safe
+    std::lock_guard<std::mutex> guard(watch_mutex_);
+    auto watch = watch_table_.find({group_id, JOB_FIELD_ID});
+    if (watch != watch_table_.end() && watch->second.is_watching) {
+      return RDC_ST_CONFLICT;
+    }
+  } while (0);
+
+  // Fails when the cache holds the most jobs it keeps and all of them run.
   result = cache_mgr_->rdc_job_start_stats(job_id, ginfo, finfo, gpu_gauges);
+  if (result == RDC_ST_MAX_LIMIT && stop_orphaned_job(gpu_gauges)) {
+    // stop_orphaned_job() passes over at most one running job per live group,
+    // its last, and RDC keeps at most RDC_MAX_NUM_GROUPS groups, so 256
+    // running jobs always include one to stop: clients do not get
+    // RDC_ST_MAX_LIMIT.
+    result = cache_mgr_->rdc_job_start_stats(job_id, ginfo, finfo, gpu_gauges);
+  }
   if (result != RDC_ST_OK) {
     return result;
   }
+
+  JobWatchTableEntry jentry{group_id, fields_in_watch, next_start_order_++};
+  do {  //< lock guard for thread safe
+    std::lock_guard<std::mutex> guard(watch_mutex_);
+    job_watch_table_.insert({job_id, jentry});
+  } while (0);
 
   // At last, when every thing sets up, starts to watch the fields.
   result = rdc_field_watch(group_id, JOB_FIELD_ID, update_freq, 0, 0);
+  if (result == RDC_ST_OK) {
+    std::vector<RdcFieldKey> proc_events;
+    for (uint32_t ix = 0; ix < ginfo.count; ++ix) {
+      uint32_t gpu = ginfo.entity_ids[ix];
+      proc_events.emplace_back(gpu, RDC_EVNT_NOTIF_PROCESS_START);
+      proc_events.emplace_back(gpu, RDC_EVNT_NOTIF_PROCESS_END);
+    }
+    result = notifications_->set_listen_events(proc_events);
+    if (result != RDC_ST_OK) {
+      // Only the watch is undone: GPUs that already listen for process
+      // events keep listening, as they do after a job stops.
+      rdc_field_unwatch(group_id, JOB_FIELD_ID);
+    }
+  }
   if (result != RDC_ST_OK) {
+    // A job that fails to start leaves nothing behind. rdc_field_watch() fails
+    // with RDC_ST_CONFLICT when the group's job fields are watched already,
+    // for example by another job; that watch stays.
+    drop_job(job_id);
     return result;
   }
-
-  std::vector<RdcFieldKey> proc_events;
-  for (uint32_t ix = 0; ix < ginfo.count; ++ix) {
-    uint32_t gpu = ginfo.entity_ids[ix];
-    proc_events.emplace_back(gpu, RDC_EVNT_NOTIF_PROCESS_START);
-    proc_events.emplace_back(gpu, RDC_EVNT_NOTIF_PROCESS_END);
-  }
-  result = notifications_->set_listen_events(proc_events);
-  return result;
+  // Only a job that started makes room, by removing a stopped job.
+  cache_mgr_->evict_jobs();
+  return RDC_ST_OK;
 }
 
 rdc_status_t RdcWatchTableImpl::rdc_job_stop_stats(const char job_id[64],
                                                    const rdc_gpu_gauges_t& gpu_gauge) {
+  std::lock_guard<std::mutex> job_guard(job_mutex_);
+  return stop_job(job_id, gpu_gauge);
+}
+
+rdc_status_t RdcWatchTableImpl::stop_job(const char job_id[64], const rdc_gpu_gauges_t& gpu_gauge) {
   uint32_t job_group_id;
   do {  //< lock guard for thread safe
     std::lock_guard<std::mutex> guard(watch_mutex_);
@@ -136,24 +173,81 @@ rdc_status_t RdcWatchTableImpl::rdc_job_stop_stats(const char job_id[64],
   if (result != RDC_ST_OK) {
     return result;
   }
+  return stop_job_stats(job_id, gpu_gauge);
+}
 
+rdc_status_t RdcWatchTableImpl::stop_job_stats(const char job_id[64],
+                                               const rdc_gpu_gauges_t& gpu_gauge) {
   do {  //< lock guard for thread safe
     std::lock_guard<std::mutex> guard(watch_mutex_);
     job_watch_table_.erase(job_id);
   } while (0);
-
-  result = cache_mgr_->rdc_job_stop_stats(job_id, gpu_gauge);
-
-  return result;
+  return cache_mgr_->rdc_job_stop_stats(job_id, gpu_gauge);
 }
 
-rdc_status_t RdcWatchTableImpl::rdc_job_remove(const char job_id[64]) {
-  rdc_gpu_gauges_t gpu_gauge;
-  rdc_job_stop_stats(job_id, gpu_gauge);
+rdc_status_t RdcWatchTableImpl::drop_job(const char job_id[64]) {
+  do {  //< lock guard for thread safe
+    std::lock_guard<std::mutex> guard(watch_mutex_);
+    job_watch_table_.erase(job_id);
+  } while (0);
   return cache_mgr_->rdc_job_remove(job_id);
 }
 
+bool RdcWatchTableImpl::stop_orphaned_job(const rdc_gpu_gauges_t& gpu_gauge) {
+  // Running jobs without a group of their own: a group can be destroyed while
+  // its job runs, and once a client unwatches a group's job fields, another
+  // job can start on the group, and the group's earlier jobs share its watch.
+  // They run until a client stops or removes them.
+  struct RunningJob {
+    uint64_t start_order;
+    std::string job_id;
+    rdc_gpu_group_t group_id;
+  };
+  std::vector<RunningJob> running;
+  std::map<rdc_gpu_group_t, uint64_t> last_start;
+  do {  //< lock guard for thread safe
+    std::lock_guard<std::mutex> guard(watch_mutex_);
+    for (const auto& job : job_watch_table_) {
+      running.push_back({job.second.start_order, job.first, job.second.group_id});
+      uint64_t& last = last_start[job.second.group_id];
+      last = std::max(last, job.second.start_order);
+    }
+  } while (0);
+  std::sort(running.begin(), running.end(),
+            [](const RunningJob& a, const RunningJob& b) { return a.start_order < b.start_order; });
+
+  for (const auto& job : running) {
+    if (job.start_order < last_start[job.group_id]) {
+      RDC_LOG(RDC_INFO,
+              "Stopping job " << job.job_id << ", whose GPU group runs a later job, to make room");
+      // Only its stats: its watch is the later job's.
+      return stop_job_stats(job.job_id.c_str(), gpu_gauge) == RDC_ST_OK;
+    }
+    rdc_group_info_t ginfo{};
+    if (group_settings_->rdc_group_gpu_get_info(job.group_id, &ginfo) == RDC_ST_GROUP_NOT_FOUND) {
+      RDC_LOG(RDC_INFO,
+              "Stopping job " << job.job_id << ", whose GPU group was destroyed, to make room");
+      // The unwatch fails while rdc_field_unwatch() cannot look the group up;
+      // the stats stop anyway.
+      if (stop_job(job.job_id.c_str(), gpu_gauge) == RDC_ST_OK) {
+        return true;
+      }
+      return stop_job_stats(job.job_id.c_str(), gpu_gauge) == RDC_ST_OK;
+    }
+  }
+  return false;
+}
+
+rdc_status_t RdcWatchTableImpl::rdc_job_remove(const char job_id[64]) {
+  std::lock_guard<std::mutex> job_guard(job_mutex_);
+  rdc_gpu_gauges_t gpu_gauge;
+  stop_job(job_id, gpu_gauge);
+  // The job goes even when it cannot be stopped.
+  return drop_job(job_id);
+}
+
 rdc_status_t RdcWatchTableImpl::rdc_job_remove_all() {
+  std::lock_guard<std::mutex> job_guard(job_mutex_);
   // Get all the job ids;
   std::vector<std::string> v;
   do {  //< lock guard for thread safe
@@ -166,9 +260,14 @@ rdc_status_t RdcWatchTableImpl::rdc_job_remove_all() {
   // Stop them
   for (auto job = v.begin(); job != v.end(); job++) {
     rdc_gpu_gauges_t gpu_gauge;
-    rdc_job_stop_stats(const_cast<char*>(job->c_str()), gpu_gauge);
+    stop_job(job->c_str(), gpu_gauge);
   }
 
+  // The jobs go even when they cannot be stopped.
+  do {  //< lock guard for thread safe
+    std::lock_guard<std::mutex> guard(watch_mutex_);
+    job_watch_table_.clear();
+  } while (0);
   return cache_mgr_->rdc_job_remove_all();
 }
 

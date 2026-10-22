@@ -1066,6 +1066,21 @@ rdc_status_t rdc_disconnect(rdc_handle_t p_rdc_handle);
  *  In RDC_OPERATION_MODE_MANUAL, user must call rdc_field_update_all(1)
  *  at least once, before call rdc_job_get_stats()
  *
+ *  RDC watches the job fields of a group for one job at a time. RDC keeps
+ *  at most 256 jobs, running or stopped. A start of a new job ID that
+ *  succeeds when RDC keeps 256 removes the job that stopped first, whose
+ *  stats are then lost; a start that fails removes no other job. When RDC
+ *  keeps 256 jobs and none has stopped, a start on a group whose job fields
+ *  are not watched first stops the running job, started first, whose group
+ *  was destroyed while the job ran (rdc_group_gpu_destroy() does not stop a
+ *  job) or runs a later job (one that started after rdc_field_unwatch() of
+ *  the group's job fields), even if the start then fails; if there is no
+ *  such job, the start fails. Remove the jobs you no longer need with
+ *  rdc_job_remove(). Starting a stopped job again replaces its stats. A
+ *  start that fails because, when it begins, the job runs or its group does
+ *  not exist, has no GPU or has its job fields watched changes nothing; a
+ *  start that fails later does not keep the job, even one that ran before.
+ *
  *  @param[in] p_rdc_handle The RDC handler.
  *
  *  @param[in] group_id The group of GPUs to be watched.
@@ -1075,6 +1090,13 @@ rdc_status_t rdc_disconnect(rdc_handle_t p_rdc_handle);
  *  @param[in] update_freq  How often to update this field in usec.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_ALREADY_EXIST is returned if the job is running.
+ *  @retval ::RDC_ST_GROUP_NOT_FOUND is returned if the group does not exist.
+ *  @retval ::RDC_ST_NOT_FOUND is returned if the group has no GPU.
+ *  @retval ::RDC_ST_CONFLICT is returned if the job fields of the group are
+ *  watched already, for example by another job.
+ *  @retval ::RDC_ST_MAX_LIMIT is returned if 256 jobs run, none of them on a
+ *  destroyed group or on a group that runs a later job.
  */
 rdc_status_t rdc_job_start_stats(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                                  const char job_id[64], uint64_t update_freq);
@@ -1093,6 +1115,9 @@ rdc_status_t rdc_job_start_stats(rdc_handle_t p_rdc_handle, rdc_gpu_group_t grou
  *  successful call, the value will contain the stats of the job.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_NOT_FOUND is returned if RDC has no such job: it never
+ *  started, was removed, or made room for another job (see
+ *  rdc_job_start_stats()).
  */
 rdc_status_t rdc_job_get_stats(rdc_handle_t p_rdc_handle, const char job_id[64],
                                rdc_job_info_t* p_job_info);
@@ -1109,6 +1134,8 @@ rdc_status_t rdc_job_get_stats(rdc_handle_t p_rdc_handle, const char job_id[64],
  *  @param[in] job_id The name of the job.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_NOT_FOUND is returned if the job is not running, or if
+ *  its job fields are no longer watched; rdc_job_remove() removes such a job.
  */
 rdc_status_t rdc_job_stop_stats(rdc_handle_t p_rdc_handle, const char job_id[64]);
 
@@ -1117,7 +1144,8 @@ rdc_status_t rdc_job_stop_stats(rdc_handle_t p_rdc_handle, const char job_id[64]
  *
  *  @details After this call, you will no longer be able to call
  *  rdc_job_get_stats() on this job_id. But you will be able to reuse
- *  the job_id after this call.
+ *  the job_id after this call. A running job is stopped first. Removing
+ *  a job makes room for another (see rdc_job_start_stats()).
  *
  *  @param[in] p_rdc_handle The RDC handler.
  *
