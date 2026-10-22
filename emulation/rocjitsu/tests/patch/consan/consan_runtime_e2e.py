@@ -76,9 +76,9 @@ class Driver:
         self.environment = os.environ.copy()
         for name in (
             'HSA_TOOLS_LIB',
-            'CONSAN_PLUGIN_PATH',
-            'CONSAN_ARTIFACT_DIR',
-            'CONSAN_CAPTURE_PATH',
+            'RJ_CONSAN_PLUGIN_PATH',
+            'RJ_CONSAN_ARTIFACT_DIR',
+            'RJ_CONSAN_CAPTURE_PATH',
             'CONSAN_PROCESS_MAPS',
         ):
             self.environment.pop(name, None)
@@ -197,9 +197,9 @@ class Driver:
         capture = self.directory / 'capture.bin'
         environment = self.environment | {
             'HSA_TOOLS_LIB': str(args.plugin),
-            'CONSAN_PLUGIN_PATH': str(args.plugin),
-            'CONSAN_ARTIFACT_DIR': str(artifact),
-            'CONSAN_CAPTURE_PATH': str(capture),
+            'RJ_CONSAN_PLUGIN_PATH': str(args.plugin),
+            'RJ_CONSAN_ARTIFACT_DIR': str(artifact),
+            'RJ_CONSAN_CAPTURE_PATH': str(capture),
             'CONSAN_PROCESS_MAPS': str(self.directory / 'process-maps.txt'),
         }
         options = {

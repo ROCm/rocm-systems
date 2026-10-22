@@ -45,6 +45,7 @@ def required_names():
     names = {
         'ConSanRuntimeIntegration.Guards',
         'ConSanRuntime.SymbolBoundary',
+        'ConSanHsaPlugin.RuntimeConfigurationRequiresBothPrefixedPaths',
         'ConSanSimProductionE2E.gfx1250.wave32.assembly.missing-statistics',
         'ConSanContract.TargetWaveFactsRoundTripAndRowsFollowActualGeometry',
         'ConSanAnalysis.Wave64HighLanesAndFullMasksRetainExactLanePairCounts',
