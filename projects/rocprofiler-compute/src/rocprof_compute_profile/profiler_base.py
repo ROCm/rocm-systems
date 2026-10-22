@@ -31,6 +31,7 @@ from utils.utils_common import (
     is_only_pc_sampling,
     is_roofline_only,
     print_status,
+    selects_roofline,
 )
 from utils.utils_exceptions import (
     ExecutableNotFoundError,
@@ -377,7 +378,7 @@ class RocProfCompute_Base:
         gen_sysinfo(
             workload_dir=args.output_directory,
             app_cmd=args.remaining,
-            skip_roof=args.no_roof,
+            skip_roof=args.no_roof or not selects_roofline(args.filter_blocks),
             mspec=self._soc._mspec,
         )
 
