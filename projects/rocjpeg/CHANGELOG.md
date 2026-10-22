@@ -3,7 +3,7 @@
 Documentation for rocJPEG is available at
 [https://rocm.docs.amd.com/projects/rocJPEG/en/latest/](https://rocm.docs.amd.com/projects/rocJPEG/en/latest/)
 
-## rocJPEG 1.13.0 for therock-10.2
+## rocJPEG 1.13.0 for ROCm 10.2
 
 ### Added
 
