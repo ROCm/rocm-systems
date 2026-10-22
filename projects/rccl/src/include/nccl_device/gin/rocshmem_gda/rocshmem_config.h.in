@@ -27,8 +27,9 @@
  *     builds all three, so GDA_MUX is always ON here.
  *   - USE_CONSTMEM: OFF — the GIN device dispatch reads the provider from the
  *     QueuePair instance, not __constant__ constmem (see queue_pair_mux.hpp).
- *   - BUILD_DEBUG_DEVICE / USE_FUNC_CALL: OFF — device debug prints / noinline
- *     toggles, perf/debug only.
+ *   - BUILD_DEBUG_DEVICE: OFF for now — gates device debug prints in the provider
+ *     QP headers. Retained as a toggle (set BUILD_DEBUG_DEVICE in rccl's CMake to
+ *     re-enable) so the feature can be turned back on later.
  */
 
 #ifndef RCCL_GIN_ROCSHMEM_CONFIG_H_
@@ -40,6 +41,5 @@
 #cmakedefine GDA_MUX
 #cmakedefine USE_CONSTMEM
 #cmakedefine BUILD_DEBUG_DEVICE
-#cmakedefine USE_FUNC_CALL
 
 #endif  // RCCL_GIN_ROCSHMEM_CONFIG_H_

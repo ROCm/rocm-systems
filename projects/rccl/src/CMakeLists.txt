@@ -1162,7 +1162,13 @@ if (ENABLE_ROCSHMEM_GIN)
   else()
     set(GDA_MUX OFF)
   endif()
-  # USE_CONSTMEM / BUILD_DEBUG_DEVICE / USE_FUNC_CALL intentionally left unset.
+  # BUILD_DEBUG_DEVICE: enable the device-side GIN debug printf in Debug builds
+  # (install.sh --debug sets CMAKE_BUILD_TYPE=Debug). Emits constmem-free device
+  # printf from the provider QP headers via the LOGD shim. USE_CONSTMEM stays off.
+  if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(BUILD_DEBUG_DEVICE ON)
+  endif()
+  # USE_CONSTMEM intentionally left unset.
   configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/include/nccl_device/gin/rocshmem_gda/rocshmem_config.h.in"
     "${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda/rocshmem/rocshmem_config.h"
