@@ -377,11 +377,21 @@ def create_df_pmc(
     any, and from the rocpd result artifacts otherwise. Bad profiling output
     stops the run instead of producing a partial frame.
     """
+    df, _slot_to_id = create_df_pmc_with_slot_ids(raw_data_dir, verbose)
+    return df
+
+
+@demarcate
+def create_df_pmc_with_slot_ids(
+    raw_data_dir: str,
+    verbose: int,
+) -> tuple[pd.DataFrame, dict[tuple, int]]:
+    """Read pmc counters and the map from process_rocpd_csv group keys to 1..N ids."""
     counter_rows = _read_counter_rows(Path(raw_data_dir))
     if counter_rows.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(), {}
 
-    df = utils_analysis.process_rocpd_csv(counter_rows)
+    df, slot_to_id = utils_analysis.process_rocpd_csv(counter_rows)
 
     utils_analysis.add_unit_counter(df)
 
@@ -389,7 +399,7 @@ def create_df_pmc(
         frame_info = io.StringIO()
         df.info(buf=frame_info)
         console_debug(f"pmc_raw_data final_single_df\n{frame_info.getvalue()}")
-    return df
+    return df, slot_to_id
 
 
 def _read_counter_rows(workload_dir: Path) -> pd.DataFrame:
