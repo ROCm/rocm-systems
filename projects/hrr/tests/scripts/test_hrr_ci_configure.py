@@ -413,7 +413,19 @@ class DecideTest(unittest.TestCase):
         )
         self.assertNotIn("gfx103x", family_keys(d))
 
-    def test_fork_skips_gpu(self):
+    def test_fork_still_runs_the_simulator(self):
+        d = decide(
+            "pull_request",
+            ["projects/hrr/playback/x.cpp"],
+            is_fork=True,
+            config=cfg.parse_config(config_data()),
+        )
+        self.assertTrue(d.run_cpu)
+        self.assertTrue(d.run_gpu)
+        self.assertTrue(d.families)
+        self.assertTrue(all(row["backend"] == "simulator" for row in d.families))
+
+    def test_fork_skips_the_real_gpu_backend(self):
         d = decide("pull_request", ["projects/hrr/playback/x.cpp"], is_fork=True)
         self.assertTrue(d.run_cpu)
         self.assertFalse(d.run_gpu)
@@ -675,7 +687,7 @@ class ForkTest(unittest.TestCase):
     def test_only_pull_requests_are_forks(self):
         self.assertFalse(cfg.is_fork("push", "", self.REPO))
 
-    def test_main_skips_gpu_for_a_deleted_head_repository(self):
+    def test_main_skips_real_gpu_for_a_deleted_head_repository(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
             cfg, "list_pr_files", return_value=["projects/hrr/playback/x.cpp"]
         ), mock.patch.object(
@@ -684,7 +696,7 @@ class ForkTest(unittest.TestCase):
             os.environ, {"GITHUB_OUTPUT": ""}
         ):
             path = Path(tmp) / "ci.yaml"
-            path.write_text(yaml.safe_dump(config_data()))
+            path.write_text(yaml.safe_dump(gpu_data()))
             out = io.StringIO()
             with redirect_stdout(out):
                 status = cfg.main(

@@ -525,12 +525,16 @@ def decide(
     run_cpu = run_cpu or capture
     if not capture:
         return Decision(run_cpu, False, why)
-    if is_fork:
+    # A fork pull request gets no secrets and cannot use the real GPU runners,
+    # but the simulator jobs need neither (hrr-gpu.yml has read-only
+    # permissions), so only the gpu backend is refused.
+    resolved = resolve_backend(event, config, backend)
+    if is_fork and resolved == "gpu":
         return Decision(
             run_cpu, False, why + "; GPU suite skipped for a fork pull request"
         )
 
-    if resolve_backend(event, config, backend) == "simulator":
+    if resolved == "simulator":
         families, skipped = select_simulator(config, requested, labels, matrix)
     else:
         families, skipped = select_families(
