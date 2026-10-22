@@ -27,6 +27,14 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - RDC no longer reports another GPU's XGMI link states, or garbage values that could crash `rdcd`, for a GPU whose link status AMD SMI cannot read. That GPU now reports no links.
   - `rdci link` now prints an error and exits with a nonzero status when it cannot get the link status, instead of printing nothing and exiting with 0.
 
+- `rdcd` no longer crashes reading `RDC_FI_GPU_CLOCK` or `RDC_FI_MEM_CLOCK` when AMD SMI reports no current clock level, as it does for a power-gated clock domain on some APUs. The field is N/A then.
+
+- Fields that AMD SMI cannot read are N/A instead of AMD SMI's "not available" value, such as 4294967295 for `RDC_FI_GPU_GFX_BUSY_INST` or 65535 for `RDC_FI_GPU_VCN_BUSY_INST` on Radeon GPUs. This covers the utilization and clock fields, the `RDC_FI_GPU_*_BUSY_INST` fields, and the `RDC_HEALTH_*` throttle and residency counters.
+
+- `RDC_FI_ECC_CORRECT_TOTAL`, `RDC_FI_ECC_UNCORRECT_TOTAL`, and `RDC_FI_ECC_DEFERRED_TOTAL` are N/A on GPUs without ECC, like the per-block ECC fields, instead of 0. The memory health check still checks such a GPU's retired pages.
+
+- `RDC_FI_GPU_MEMORY_CUR_BANDWIDTH` is N/A instead of 0 when the GPU reports no memory activity.
+
 - `RDC_FI_GPU_MEMORY_CUR_BANDWIDTH` no longer reports zero under DMA or copy-only memory traffic on GPUs whose instantaneous UMC activity does not reflect DMA transfers. It now derives memory activity from the `mem_activity_acc` accumulator over firmware time, and falls back to the instantaneous `umc_activity` reading when the accumulator or firmware timestamp is unavailable.
 
 - `rdci topo` and `rdc_device_topology_get()` now report the links of the requested GPU. They reported links between other GPU pairs, which showed the wrong link types on systems where GPU pairs are not all linked the same way, such as XGMI hives joined by PCIe.
