@@ -6159,23 +6159,23 @@ def test_generated_dpp_commit_separates_modern_source_and_destination_masks(
         assert 'amdgpu::dpp::dpp_compare_result(' in body
 
 
-def test_rdna1_2_generated_vopc_dpp_is_explicitly_unsupported(
-    amdgpu_generated_root: Path,
+@pytest.mark.parametrize('arch', ('cdna1', 'cdna2', 'cdna3', 'cdna4', 'rdna1', 'rdna2'))
+def test_generated_vopc_dpp_is_explicitly_unsupported(
+    amdgpu_generated_root: Path, arch
 ):
-    for arch in ('rdna1', 'rdna2'):
-        vopc_model = (amdgpu_generated_root / arch / 'vopc.cpp').read_text()
-        vopc_exec = (amdgpu_generated_root / arch / 'vopc_exec.cpp').read_text()
-        assert 'amdgpu::dpp::apply_dpp' not in vopc_exec, arch
-        assert 'dpp_write_mask' not in vopc_exec, arch
-
-        ctor = _generated_decode_body(vopc_model, 'VCmpEqU32Vopc')
-        assert 'emit_error.emit() << "V_CMP_EQ_U32 does not support DPP"' in ctor, arch
-        assert 'amdgpu::dpp::is_src_dpp8(' in ctor, arch
-        assert 'reinterpret_cast<const Vop1VopDpp16MachineInst *>' not in ctor, arch
-
-        body = _generated_method_body(vopc_exec, 'VCmpEqU32Vopc', 'VCmpLeU32Vopc')
-        assert 'throw util::UnimplementedInst(mnemonic());' in body, arch
-        assert 'amdgpu::dpp::is_src_dpp8(inst_.src0)' in body, arch
+    vopc_model = (amdgpu_generated_root / arch / 'vopc.cpp').read_text()
+    vopc_exec = (amdgpu_generated_root / arch / 'vopc_exec.cpp').read_text()
+    assert 'SRC_SDWA' in vopc_exec
+    assert 'SRC_DPP' not in vopc_exec
+    assert 'is_src_dpp8' not in vopc_exec
+    assert 'amdgpu::dpp::apply_dpp' not in vopc_exec
+    assert 'dpp_write_mask' not in vopc_exec
+    assert 'throw util::UnimplementedInst' not in vopc_exec
+    ctor = _generated_decode_body(vopc_model, 'VCmpEqU32Vopc')
+    assert 'emit_error.emit() << "V_CMP_EQ_U32 does not support DPP"' in ctor
+    if arch in ('rdna1', 'rdna2'):
+        assert 'amdgpu::dpp::is_src_dpp8(' in ctor
+        assert 'reinterpret_cast<const Vop1VopDpp16MachineInst *>' not in ctor
 
 
 def test_generated_cmpx_dpp_cleanup_applies_arch_compare_rules(
