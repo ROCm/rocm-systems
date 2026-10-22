@@ -736,6 +736,30 @@ class AmdSmiNicType(IntEnum):
     OTHER = amdsmi_wrapper.AMDSMI_NIC_TYPE_OTHER
 
 
+class AmdSmiMetricCategory(IntEnum):
+    TEMPERATURE = amdsmi_wrapper.AMDSMI_METRIC_CATEGORY_TEMPERATURE
+    POWER = amdsmi_wrapper.AMDSMI_METRIC_CATEGORY_POWER
+    VOLTAGE = amdsmi_wrapper.AMDSMI_METRIC_CATEGORY_VOLTAGE
+
+
+class AmdSmiMetricUnit(IntEnum):
+    MILLIVOLT = amdsmi_wrapper.AMDSMI_METRIC_UNIT_MILLIVOLT
+    MILLIDEGREE_CELSIUS = amdsmi_wrapper.AMDSMI_METRIC_UNIT_MILLIDEGREE_CELSIUS
+    MICROWATT = amdsmi_wrapper.AMDSMI_METRIC_UNIT_MICROWATT
+
+
+class AmdSmiNicSensorName(IntEnum):
+    UNKNOWN = amdsmi_wrapper.AMDSMI_NIC_SENSOR_NAME_UNKNOWN
+    INPUT = amdsmi_wrapper.AMDSMI_NIC_SENSOR_NAME_INPUT
+    MIN = amdsmi_wrapper.AMDSMI_NIC_SENSOR_NAME_MIN
+    MAX = amdsmi_wrapper.AMDSMI_NIC_SENSOR_NAME_MAX
+    LCRIT = amdsmi_wrapper.AMDSMI_NIC_SENSOR_NAME_LCRIT
+    CRIT = amdsmi_wrapper.AMDSMI_NIC_SENSOR_NAME_CRIT
+    EMERGENCY = amdsmi_wrapper.AMDSMI_NIC_SENSOR_NAME_EMERGENCY
+    SHUTDOWN = amdsmi_wrapper.AMDSMI_NIC_SENSOR_NAME_SHUTDOWN
+    CAP = amdsmi_wrapper.AMDSMI_NIC_SENSOR_NAME_CAP
+
+
 class AmdSmiRegType(IntEnum):
     XGMI = amdsmi_wrapper.AMDSMI_REG_XGMI
     WAFL = amdsmi_wrapper.AMDSMI_REG_WAFL
@@ -2823,6 +2847,53 @@ def amdsmi_get_nic_telemetry(
             "split_count": _u(telem.port_split.split_count, 0xFF),
         },
     }
+
+
+def _nic_sensor_enum_name(enum_cls: type, value: int) -> str:
+    # A newer library can report a value past the enum this module knows; degrade to UNKNOWN
+    # instead of raising a ValueError that is not an AmdSmiException.
+    try:
+        return enum_cls(value).name
+    except ValueError:
+        return "UNKNOWN"
+
+
+def amdsmi_get_nic_hwmon_sensors(
+    processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
+) -> List[Dict[str, Any]]:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    num_sensors = ctypes.c_uint32(0)
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_nic_hwmon_sensors(
+            processor_handle, ctypes.byref(num_sensors), None
+        )
+    )
+
+    if num_sensors.value == 0:
+        return []
+
+    sensors = (amdsmi_wrapper.amdsmi_nic_sensor_t * num_sensors.value)()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_nic_hwmon_sensors(
+            processor_handle, ctypes.byref(num_sensors), sensors
+        )
+    )
+
+    # Raw hwmon integers in the record's unit; callers scale for display.
+    return [
+        {
+            "category": _nic_sensor_enum_name(AmdSmiMetricCategory, sensors[i].category),
+            "attribute": _nic_sensor_enum_name(AmdSmiNicSensorName, sensors[i].name),
+            "unit": _nic_sensor_enum_name(AmdSmiMetricUnit, sensors[i].unit),
+            "channel": sensors[i].channel,
+            "instance": sensors[i].instance,
+            "label": sensors[i].label.decode("utf-8", errors="replace"),
+            "value": sensors[i].value,
+        }
+        for i in range(min(num_sensors.value, len(sensors)))
+    ]
 
 
 def amdsmi_get_nic_port_info(

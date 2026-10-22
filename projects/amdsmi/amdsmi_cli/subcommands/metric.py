@@ -33,6 +33,16 @@ def _flatten_with_prefix(node: dict, prefix: str) -> dict:
     return flat
 
 
+# hwmon native integer -> (divisor, display unit); shown as C, V and W like `sensors`.
+_NIC_SENSOR_DISPLAY = {
+    "MILLIDEGREE_CELSIUS": (1000, "C"),
+    "MILLIVOLT": (1000, "V"),
+    "MICROWATT": (1_000_000, "W"),
+}
+# INPUT is the reading; every other attribute is a threshold and keeps its own name.
+_NIC_SENSOR_READING = "INPUT"
+
+
 class MetricCommands:
     def metric_gpu(
         self,
@@ -3308,6 +3318,44 @@ class MetricCommands:
         if not self.logger.is_json_format():
             self.logger.print_output(multiple_device_enabled=multiple_devices_csv_override)
 
+    def _format_nic_sensor_value(self, record):
+        divisor, unit = _NIC_SENSOR_DISPLAY.get(record["unit"], (1, ""))
+        value = round(record["value"] / divisor, 3)
+        if self.logger.is_json_format():
+            return {"value": value, "unit": unit}
+        if self.logger.is_human_readable_format():
+            degree = "\N{DEGREE SIGN}" if unit == "C" else ""
+            return f"{value} {degree}{unit}".rstrip()
+        return value
+
+    def _nic_sensors(self, nic_handle, nic_id):
+        """One SENSOR_<n> block per hwmon sensor of a NIC, grouping its records and thresholds."""
+        try:
+            records = amdsmi_interface.amdsmi_get_nic_hwmon_sensors(nic_handle)
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            logging.debug("Failed to get hwmon sensors for nic %s | %s", nic_id, e.get_error_info())
+            return {}
+
+        groups = {}
+        for record in records:
+            key = (record["instance"], record["category"], record["channel"])
+            groups.setdefault(key, []).append(record)
+
+        sensors = {}
+        for index, ((instance, category, channel), group) in enumerate(groups.items()):
+            sensor = {
+                "LABEL": group[0]["label"] or "N/A",
+                "CATEGORY": category,
+                "INSTANCE": instance,
+                "CHANNEL": channel,
+            }
+            for record in group:
+                is_reading = record["attribute"] == _NIC_SENSOR_READING
+                attribute = "VALUE" if is_reading else record["attribute"]
+                sensor[attribute] = self._format_nic_sensor_value(record)
+            sensors[f"SENSOR_{index}"] = sensor
+        return sensors
+
     def _nic_rdma_ports(self, nic_handle, requested_index, nic_id):
         """RDMA port blocks for one NIC. The index counts RDMA ports across the NIC's RDMA devices.
 
@@ -3418,6 +3466,17 @@ class MetricCommands:
                     temperatures[name] = value
             telemetry["temperature"] = temperatures
         values.update(telemetry)
+
+        if getattr(args, "sensors", False):
+            sensors = self._nic_sensors(args.nic, nic_id)
+            if sensors and self.logger.is_csv_format():
+                values.update(_flatten_with_prefix(sensors, ""))
+            elif sensors:
+                values["SENSORS"] = sensors
+            elif not self.logger.is_json_format():
+                values["SENSORS"] = "No sensors found for this NIC"
+            else:
+                values["SENSORS"] = {}
 
         requested_port = getattr(args, "port", None)
         if requested_port is not None:

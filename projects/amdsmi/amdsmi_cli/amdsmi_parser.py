@@ -2304,6 +2304,10 @@ class AMDSMIParser(argparse.ArgumentParser):
                 "    The index counts the NIC's RDMA ports from 0, across its RDMA devices.\n"
                 "    List the ports with 'static --nic'; it numbers them per device."
             )
+            sensors_help = (
+                "Show every hwmon sensor of the selected NIC with its thresholds\n"
+                "    (temperature, voltage and power), like the sensors command."
+            )
 
             nic_stats_group = metric_parser.add_argument_group("NIC Arguments")
             nic_stats_group.add_argument(
@@ -2323,6 +2327,9 @@ class AMDSMIParser(argparse.ArgumentParser):
                 default=None,
                 required=False,
                 help=rdma_help,
+            )
+            nic_stats_group.add_argument(
+                "--sensors", action="store_true", required=False, help=sensors_help
             )
             nic_stats_group.add_argument(
                 "--extended", action="store_true", required=False, help=extended_help

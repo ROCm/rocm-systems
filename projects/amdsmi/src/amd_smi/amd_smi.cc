@@ -62,6 +62,7 @@
 #include "rocm_smi/rocm_smi_npm.h"
 #include "rocm_smi/rocm_smi_utils.h"
 #include "smi_nic.h"
+#include "smi_nic_hwmon.h"
 #include "smi_nic_telemetry.h"
 
 // a global instance of std::mutex to protect data passed during threads
@@ -986,6 +987,63 @@ amdsmi_status_t amdsmi_get_nic_telemetry(amdsmi_processor_handle processor_handl
   info->port_split.splittable = snap.port_split.splittable;
   info->port_split.split_count = snap.port_split.split_count;
   return AMDSMI_STATUS_SUCCESS;
+}
+
+namespace {
+namespace hw = amd::smi::nic::hwmon;
+
+// The internal records carry the public enumerators' numeric values; a drift breaks the build.
+static_assert(static_cast<uint32_t>(hw::Category_t::Temperature) ==
+              static_cast<uint32_t>(AMDSMI_METRIC_CATEGORY_TEMPERATURE));
+static_assert(static_cast<uint32_t>(hw::Category_t::Power) ==
+              static_cast<uint32_t>(AMDSMI_METRIC_CATEGORY_POWER));
+static_assert(static_cast<uint32_t>(hw::Category_t::Voltage) ==
+              static_cast<uint32_t>(AMDSMI_METRIC_CATEGORY_VOLTAGE));
+static_assert(static_cast<uint32_t>(hw::Unit_t::MilliVolt) ==
+              static_cast<uint32_t>(AMDSMI_METRIC_UNIT_MILLIVOLT));
+static_assert(static_cast<uint32_t>(hw::Unit_t::MilliDegreeCelsius) ==
+              static_cast<uint32_t>(AMDSMI_METRIC_UNIT_MILLIDEGREE_CELSIUS));
+static_assert(static_cast<uint32_t>(hw::Unit_t::MicroWatt) ==
+              static_cast<uint32_t>(AMDSMI_METRIC_UNIT_MICROWATT));
+static_assert(static_cast<uint32_t>(hw::Attribute_t::Input) ==
+              static_cast<uint32_t>(AMDSMI_NIC_SENSOR_NAME_INPUT));
+static_assert(static_cast<uint32_t>(hw::Attribute_t::Min) ==
+              static_cast<uint32_t>(AMDSMI_NIC_SENSOR_NAME_MIN));
+static_assert(static_cast<uint32_t>(hw::Attribute_t::Max) ==
+              static_cast<uint32_t>(AMDSMI_NIC_SENSOR_NAME_MAX));
+static_assert(static_cast<uint32_t>(hw::Attribute_t::LCrit) ==
+              static_cast<uint32_t>(AMDSMI_NIC_SENSOR_NAME_LCRIT));
+static_assert(static_cast<uint32_t>(hw::Attribute_t::Crit) ==
+              static_cast<uint32_t>(AMDSMI_NIC_SENSOR_NAME_CRIT));
+static_assert(static_cast<uint32_t>(hw::Attribute_t::Emergency) ==
+              static_cast<uint32_t>(AMDSMI_NIC_SENSOR_NAME_EMERGENCY));
+static_assert(static_cast<uint32_t>(hw::Attribute_t::Shutdown) ==
+              static_cast<uint32_t>(AMDSMI_NIC_SENSOR_NAME_SHUTDOWN));
+static_assert(static_cast<uint32_t>(hw::Attribute_t::Cap) ==
+              static_cast<uint32_t>(AMDSMI_NIC_SENSOR_NAME_CAP));
+}  // namespace
+
+amdsmi_status_t amdsmi_get_nic_hwmon_sensors(amdsmi_processor_handle processor_handle,
+                                             uint32_t* num_sensors, amdsmi_nic_sensor_t* sensors) {
+  AMDSMI_CHECK_INIT();
+  if (num_sensors == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  amd::smi::AMDSmiAINICDevice::AINICInfo ainic_info = {};
+  amdsmi_status_t status = amdsmi_get_ainic_info(processor_handle, &ainic_info);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    return status;
+  }
+
+  std::vector<hw::SensorRecord_t> records;
+  const smi_nic_status_t nic_status = smi_get_nic_hwmon_sensors(
+      amd::smi::AMDSmiSystem::getInstance().get_ainic_ctx(), ainic_info.bus.bdf.as_uint, &records);
+  if (nic_status != SMI_NIC_STATUS_SUCCESS) {
+    return amd::smi::ainic_to_amdsmi_status(nic_status);
+  }
+
+  return amd::smi::copy_nic_sensors(records, num_sensors, sensors);
 }
 
 amdsmi_status_t amdsmi_get_nic_device_bdf(amdsmi_processor_handle processor_handle,

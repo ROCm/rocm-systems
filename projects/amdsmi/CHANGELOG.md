@@ -37,6 +37,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Added ``amd-smi metric --nic --rdma [idx]`` and the Python ``amdsmi_get_nic_rdma_port_statistics()``**.  
   - Prints the RDMA hardware counters of each RDMA port of an AI-NIC. The Python function returns a dictionary of counter name to value.
 
+- **Added ``amd-smi metric --nic --sensors`` and ``amdsmi_get_nic_hwmon_sensors()``**.  
+  - Shows every temperature, voltage and power sensor of a NIC with its limits, as the ``sensors`` command does. Also available from Python.
+
+- **Added Broadcom ``bng_en`` NICs to NIC discovery**.  
+  - Broadcom NICs bound to the newer ``bng_en`` driver, such as the BCM57708, are now listed and report their sensors, statistics, health and RDMA ports like ``bnxt_en`` NICs.
+
 - **Added NPM (Node Power Management) power limit setting**.  
   - New `amd-smi set --node-power-limit`/`-n` to set the node-level power limit in watts (node-wide, not per-GPU).
   - New API: `amdsmi_set_npm_limit()`.
@@ -263,6 +269,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed ``amd-smi static --nic`` printing ``4294967295 Mb/s`` for a link that is down**.  
   - A link speed, MTU, FEC mode or carrier the NIC could not report now reads ``N/A``.
+
+- **Fixed the NIC ``ASIC`` temperature showing the board temperature**.  
+  - ``amd-smi metric --nic`` now reports the die temperature as ``ASIC`` and the board temperature as ``BOARD`` on AI-NICs, where ``BOARD`` was ``N/A``.
 
 - **Fixed the ``CAPABILITY`` list in ``amd-smi static --nic`` and ``list --nic`` being misaligned**.  
   - A list item without a colon is now indented one level under its key at any depth in human-readable output.

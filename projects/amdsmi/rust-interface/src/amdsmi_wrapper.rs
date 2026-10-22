@@ -3744,6 +3744,63 @@ const _: () = {
     ["Offset of field: AmdsmiNicTelemetryT::port_split"]
         [::std::mem::offset_of!(AmdsmiNicTelemetryT, port_split) - 80usize];
 };
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiMetricUnitT {
+    AmdsmiMetricUnitMillivolt = 5,
+    AmdsmiMetricUnitMillidegreeCelsius = 15,
+    AmdsmiMetricUnitMicrowatt = 16,
+}
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiMetricCategoryT {
+    AmdsmiMetricCategoryTemperature = 3,
+    AmdsmiMetricCategoryPower = 4,
+    AmdsmiMetricCategoryVoltage = 14,
+}
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiNicSensorNameT {
+    AmdsmiNicSensorNameUnknown = 0,
+    AmdsmiNicSensorNameInput = 1,
+    AmdsmiNicSensorNameMin = 2,
+    AmdsmiNicSensorNameMax = 3,
+    AmdsmiNicSensorNameLcrit = 4,
+    AmdsmiNicSensorNameCrit = 5,
+    AmdsmiNicSensorNameEmergency = 6,
+    AmdsmiNicSensorNameShutdown = 7,
+    AmdsmiNicSensorNameCap = 8,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct AmdsmiNicSensorT {
+    pub category: AmdsmiMetricCategoryT,
+    pub name: AmdsmiNicSensorNameT,
+    pub unit: AmdsmiMetricUnitT,
+    pub channel: u32,
+    pub instance: u32,
+    pub label: [::std::os::raw::c_char; 256usize],
+    pub value: i64,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of AmdsmiNicSensorT"][::std::mem::size_of::<AmdsmiNicSensorT>() - 288usize];
+    ["Alignment of AmdsmiNicSensorT"][::std::mem::align_of::<AmdsmiNicSensorT>() - 8usize];
+    ["Offset of field: AmdsmiNicSensorT::category"]
+        [::std::mem::offset_of!(AmdsmiNicSensorT, category) - 0usize];
+    ["Offset of field: AmdsmiNicSensorT::name"]
+        [::std::mem::offset_of!(AmdsmiNicSensorT, name) - 4usize];
+    ["Offset of field: AmdsmiNicSensorT::unit"]
+        [::std::mem::offset_of!(AmdsmiNicSensorT, unit) - 8usize];
+    ["Offset of field: AmdsmiNicSensorT::channel"]
+        [::std::mem::offset_of!(AmdsmiNicSensorT, channel) - 12usize];
+    ["Offset of field: AmdsmiNicSensorT::instance"]
+        [::std::mem::offset_of!(AmdsmiNicSensorT, instance) - 16usize];
+    ["Offset of field: AmdsmiNicSensorT::label"]
+        [::std::mem::offset_of!(AmdsmiNicSensorT, label) - 20usize];
+    ["Offset of field: AmdsmiNicSensorT::value"]
+        [::std::mem::offset_of!(AmdsmiNicSensorT, value) - 280usize];
+};
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct AmdsmiNicPortT {
@@ -5843,6 +5900,13 @@ extern "C" {
     pub fn amdsmi_get_nic_telemetry(
         processor_handle: AmdsmiProcessorHandle,
         info: *mut AmdsmiNicTelemetryT,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_get_nic_hwmon_sensors(
+        processor_handle: AmdsmiProcessorHandle,
+        num_sensors: *mut u32,
+        sensors: *mut AmdsmiNicSensorT,
     ) -> AmdsmiStatusT;
 }
 extern "C" {

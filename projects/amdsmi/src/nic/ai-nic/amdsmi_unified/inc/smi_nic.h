@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "smi_nic_hwmon.h"
 #include "smi_nic_stats.h"
 #include "smi_nic_transport.h"
 #include "smi_nic_vpd.h"
@@ -240,12 +241,19 @@ class SmiNic {
   /**
    * Absolute path of the hwmon `tempN_input` file (millidegrees C) backing
    * `sensor`, or nullopt if this NIC has no such sensor. The base performs
-   * generic hwmon discovery under the PCI device, which covers standard NIC
-   * drivers (e.g. bnxt_en) for the ASIC sensor; a vendor whose sensors live
-   * elsewhere overrides this. (Health reporters are enumerated over devlink and
-   * need no per-vendor mapping, so there is no reporter-name resolver here.)
+   * generic hwmon discovery under the PCI device: Asic is the channel labelled
+   * "die" (temp1 for a driver that labels nothing, e.g. bnxt_en) and Board is the
+   * channel labelled "board"; a vendor whose sensors live elsewhere overrides
+   * this. (Health reporters are enumerated over devlink and need no per-vendor
+   * mapping, so there is no reporter-name resolver here.)
    */
   virtual std::optional<std::string> hwmon_temp_path(NicTempSensor sensor) const;
+
+  /**
+   * One record per readable hwmon attribute under the telemetry function (see
+   * amd::smi::nic::hwmon::scan_sensors). Empty when the NIC has no hwmon node.
+   */
+  std::vector<amd::smi::nic::hwmon::SensorRecord_t> hwmon_sensors() const;
 
  protected:
   std::string iface_;

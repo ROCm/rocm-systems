@@ -5,9 +5,13 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <cctype>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <string>
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
@@ -90,9 +94,77 @@ void TestNicTelemetryRead::Run(void) {
     }
   }
 
+  // ── amdsmi_get_nic_hwmon_sensors: count call, fetch call, short buffer ──
+  {
+    uint32_t count = 0;
+    ASSERT_EQ(amdsmi_get_nic_hwmon_sensors(nic, &count, nullptr), AMDSMI_STATUS_SUCCESS);
+    if (count == 0) {
+      // A NIC without an hwmon node (for example a UALoE endpoint) reports no sensors.
+      IF_VERB(STANDARD) { std::cout << "\t**NIC exposes no hwmon sensors.**\n"; }
+    } else {
+      std::vector<amdsmi_nic_sensor_t> sensors(count);
+      uint32_t fetched = count;
+      ASSERT_EQ(amdsmi_get_nic_hwmon_sensors(nic, &fetched, sensors.data()), AMDSMI_STATUS_SUCCESS);
+      EXPECT_EQ(fetched, count);
+
+      for (const amdsmi_nic_sensor_t& sensor : sensors) {
+        EXPECT_TRUE((sensor.category == AMDSMI_METRIC_CATEGORY_TEMPERATURE) ||
+                    (sensor.category == AMDSMI_METRIC_CATEGORY_POWER) ||
+                    (sensor.category == AMDSMI_METRIC_CATEGORY_VOLTAGE))
+            << "unexpected category " << sensor.category;
+        EXPECT_NE(sensor.name, AMDSMI_NIC_SENSOR_NAME_UNKNOWN);
+        EXPECT_LT(strnlen(sensor.label, sizeof(sensor.label)), sizeof(sensor.label));
+        const bool is_temperature_input = (sensor.category == AMDSMI_METRIC_CATEGORY_TEMPERATURE) &&
+                                          (sensor.name == AMDSMI_NIC_SENSOR_NAME_INPUT);
+        if (is_temperature_input) {
+          // milli-degrees Celsius: a plausible silicon reading, not a value in whole degrees
+          EXPECT_GT(sensor.value, -50000) << sensor.label;
+          EXPECT_LT(sensor.value, 150000) << sensor.label;
+        }
+      }
+
+      // The telemetry temperatures come from the same hwmon labels, so they must agree with the
+      // labelled sensors. Skipped for a NIC that labels no die or board sensor.
+      amdsmi_nic_telemetry_t telem;
+      ASSERT_EQ(amdsmi_get_nic_telemetry(nic, &telem), AMDSMI_STATUS_SUCCESS);
+      constexpr int kMaxDriftC = 3;  // the two calls read the sensor at different moments
+      auto expect_matches_labelled_input = [&](uint16_t telemetry_temp_c, const char* word) {
+        if (telemetry_temp_c == UINT16_MAX) {
+          return;
+        }
+        for (const amdsmi_nic_sensor_t& sensor : sensors) {
+          std::string label(sensor.label);
+          std::transform(label.begin(), label.end(), label.begin(),
+                         [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+          const bool is_labelled_input = (sensor.category == AMDSMI_METRIC_CATEGORY_TEMPERATURE) &&
+                                         (sensor.name == AMDSMI_NIC_SENSOR_NAME_INPUT) &&
+                                         (label.find(word) != std::string::npos);
+          if (is_labelled_input) {
+            const int sensor_temp_c = static_cast<int>(sensor.value / 1000);
+            EXPECT_LE(std::abs(static_cast<int>(telemetry_temp_c) - sensor_temp_c), kMaxDriftC)
+                << word << " telemetry " << telemetry_temp_c << " C vs sensor '" << sensor.label
+                << "' " << sensor_temp_c << " C";
+            return;
+          }
+        }
+      };
+      expect_matches_labelled_input(telem.temperature.asic_temp_c, "die");
+      expect_matches_labelled_input(telem.temperature.board_temp_c, "board");
+
+      if (count > 1) {
+        amdsmi_nic_sensor_t one;
+        uint32_t too_small = 1;
+        EXPECT_EQ(amdsmi_get_nic_hwmon_sensors(nic, &too_small, &one),
+                  AMDSMI_STATUS_INSUFFICIENT_SIZE);
+        EXPECT_EQ(too_small, count);
+      }
+    }
+  }
+
   // ── null output pointers are rejected ───────────────────────────────────
   {
     EXPECT_EQ(amdsmi_get_nic_telemetry(nic, nullptr), AMDSMI_STATUS_INVAL);
     EXPECT_EQ(amdsmi_get_nic_fw_info(nic, nullptr), AMDSMI_STATUS_INVAL);
+    EXPECT_EQ(amdsmi_get_nic_hwmon_sensors(nic, nullptr, nullptr), AMDSMI_STATUS_INVAL);
   }
 }

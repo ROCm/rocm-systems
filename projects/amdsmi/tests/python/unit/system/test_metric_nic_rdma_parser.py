@@ -110,3 +110,26 @@ class TestMetricNicRdmaParser(unittest.TestCase):
         with mock.patch.object(self.parser, "exit", side_effect=SystemExit(2)):
             with self.assertRaises(SystemExit):
                 self._parse("--rdma", "--extended")
+
+
+class TestMetricNicSensorsParser(unittest.TestCase):
+    def setUp(self):
+        self.parser = _metric_parser()
+
+    def _parse(self, *argv):
+        namespace, _ = self.parser.parse_known_args(list(argv))
+        return namespace
+
+    def test_sensors_defaults_to_off(self):
+        self.assertFalse(self._parse().sensors)
+
+    def test_sensors_turns_on_without_a_value(self):
+        self.assertTrue(self._parse("--sensors").sensors)
+
+    def test_sensors_combines_with_port_and_rdma(self):
+        namespace = self._parse("--sensors", "--port", "--rdma")
+        self.assertEqual((namespace.sensors, namespace.port, namespace.rdma), (True, -1, -1))
+
+    def test_help_says_it_shows_thresholds(self):
+        action = next(a for a in self.parser._actions if "--sensors" in a.option_strings)
+        self.assertIn("thresholds", action.help)
