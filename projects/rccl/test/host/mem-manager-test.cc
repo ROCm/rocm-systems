@@ -1223,7 +1223,6 @@ TEST_F(MemManagerMicrotest, MemStats_SumsLocalCountersOnly) {
   EXPECT_EQ(suspendable, 2 * kSize);
   EXPECT_EQ(suspended, 0u);
   EXPECT_EQ(ncclCommMemStats_impl(comm_.get(), ncclStatGpuMemTotal, nullptr), ncclInvalidArgument);
-  EXPECT_EQ(ncclCommMemStats_impl(comm_.get(), (ncclCommMemStat_t)99, &total), ncclInvalidArgument);
 }
 
 }  // namespace

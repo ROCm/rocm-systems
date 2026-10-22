@@ -83,7 +83,9 @@ class AllocMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
     ResetHipFakes();
-    // Memoized per process (gfx942 from the default fakes: no skip); settle it before calls are logged.
+    // Memoized per process (gfx942 from the default fakes: no skip); settle it before calls are logged,
+    // without the caller's NCCL_CUMEM_SKIP_FREE.
+    unsetenv("NCCL_CUMEM_SKIP_FREE");
     ASSERT_FALSE(rcclSkipCuMemFree());
     ASSERT_FALSE(rcclSkipLsaFlatAddressFree());
     rcclShutdownFlag().store(false);
