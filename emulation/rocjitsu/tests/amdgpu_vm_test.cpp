@@ -293,6 +293,7 @@ public:
   uint32_t halts = 0;
   uint32_t completed_workgroups = 0;
   uint32_t completed_dispatches = 0;
+  std::vector<amdgpu::InstructionExecutionError> cancellation_errors;
   std::function<void(amdgpu::Wavefront &)> on_launch;
 
   void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wave) override {
@@ -303,6 +304,7 @@ public:
   void onAmdgpuWavefrontCancelled(amdgpu::Wavefront &wave) override {
     EXPECT_FALSE(wave.is_halted());
     EXPECT_GT(wave.num_sgprs(), 0u);
+    cancellation_errors.push_back(wave.instruction_execution_error());
     ++cancellations;
   }
   void onAmdgpuWavefrontHalted(amdgpu::Wavefront &) override { ++halts; }
@@ -9117,26 +9119,6 @@ TEST(AqlDispatchTest, UnimplementedInstructionReportsFailureThroughEngineStep) {
 }
 
 TEST(AqlDispatchTest, InstructionFailuresDoNotCompleteDispatchOrBarrier) {
-  struct CancellationProbe final : ExecutionPlugin {
-    CancellationProbe() : ExecutionPlugin("cancellation_probe") {}
-    void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &) override { ++launched; }
-    void onAmdgpuWavefrontHalted(amdgpu::Wavefront &) override { ++halted; }
-    void onAmdgpuWavefrontCancelled(amdgpu::Wavefront &wf) override {
-      EXPECT_FALSE(wf.is_halted());
-      EXPECT_GT(wf.sgpr_alloc().count, 0u);
-      EXPECT_GT(wf.dispatch_id(), 0u);
-      ++cancelled;
-      failed += wf.instruction_execution_failed();
-    }
-    void onAmdgpuWorkgroupCompleted(uint32_t, uint32_t) override { ++completed_workgroups; }
-    void onAmdgpuDispatchExecutionEnd(uint32_t) override { ++completed_dispatches; }
-    uint32_t launched = 0;
-    uint32_t halted = 0;
-    uint32_t cancelled = 0;
-    uint32_t failed = 0;
-    uint32_t completed_workgroups = 0;
-    uint32_t completed_dispatches = 0;
-  };
   struct InstructionCase {
     uint32_t word;
     std::string_view detail;
@@ -9156,7 +9138,7 @@ TEST(AqlDispatchTest, InstructionFailuresDoNotCompleteDispatchOrBarrier) {
           ASSERT_NO_FATAL_FAILURE(f.initialize(arch, /*num_cus=*/2));
           f.cp()->set_dispatch_threads(threads);
           auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
-          auto probe = std::make_unique<CancellationProbe>();
+          auto probe = std::make_unique<CancellationLifecyclePlugin>();
           auto *observations = probe.get();
           ASSERT_TRUE(group->add(std::move(probe)));
           f.soc_ptr->set_plugin_group(group);
@@ -9188,10 +9170,12 @@ TEST(AqlDispatchTest, InstructionFailuresDoNotCompleteDispatchOrBarrier) {
           EXPECT_FALSE(f.cp()->has_dispatch_for_test(1, 0, dispatch_id));
           EXPECT_EQ(completion_signal_value(f.mem(), kCompletionSignal), 1);
           EXPECT_EQ(completion_signal_value(f.mem(), kBarrierSignal), 1);
-          EXPECT_GT(observations->launched, 0u);
-          EXPECT_EQ(observations->cancelled, observations->launched);
-          EXPECT_GT(observations->failed, 0u);
-          EXPECT_EQ(observations->halted, 0u);
+          EXPECT_GT(observations->launches, 0u);
+          EXPECT_EQ(observations->cancellations, observations->launches);
+          EXPECT_TRUE(std::ranges::any_of(observations->cancellation_errors, [](auto error) {
+            return error != amdgpu::InstructionExecutionError::None;
+          }));
+          EXPECT_EQ(observations->halts, 0u);
           EXPECT_EQ(observations->completed_workgroups, 0u);
           EXPECT_EQ(observations->completed_dispatches, 0u);
           for (uint32_t cu = 0; cu < 2; ++cu) {
@@ -9245,13 +9229,19 @@ TEST(AqlDispatchTest, RuntimeDecodeClaimStillFailsDispatchAndPreservesBarrier) {
   ASSERT_TRUE(group->add(std::move(lifecycle)));
   f.soc_ptr->set_plugin_group(group);
   uint32_t handled = 0;
-  for (uint32_t cu = 0; cu < 2; ++cu)
+  uint32_t queue_aborts = 0;
+  for (uint32_t cu = 0; cu < 2; ++cu) {
+    f.cu(cu)->set_execution_failure_handler([&](amdgpu::Wavefront &, bool) {
+      ++queue_aborts;
+      return true;
+    });
     f.cu(cu)->set_illegal_inst_handler([&](amdgpu::Wavefront &wave) {
       ++handled;
       // Queue-owner publication pauses waves without an architectural debug halt.
       wave.set_debug_suspended(true);
       return true;
     });
+  }
   const uint64_t kernel = f.write_kernel(0x1000, &kUndecodable, sizeof(kUndecodable));
   test::AqlQueue queue(f.mem(), f.cp());
   init_completion_signal(f.mem(), 0x3000);
@@ -9265,6 +9255,7 @@ TEST(AqlDispatchTest, RuntimeDecodeClaimStillFailsDispatchAndPreservesBarrier) {
   queue.submit(raw);
   f.engine->run();
   EXPECT_EQ(handled, 1u);
+  EXPECT_EQ(queue_aborts, 0u);
   EXPECT_EQ(f.engine->last_exit().code, 1);
   EXPECT_TRUE(f.cp()->queue_faulted_for_test(1, 0));
   EXPECT_FALSE(f.cp()->has_dispatch_for_test(1, 0, 1));
@@ -9275,6 +9266,136 @@ TEST(AqlDispatchTest, RuntimeDecodeClaimStillFailsDispatchAndPreservesBarrier) {
   EXPECT_EQ(observed->halts, 0u);
   EXPECT_EQ(observed->completed_workgroups, 0u);
   EXPECT_EQ(observed->completed_dispatches, 0u);
+  EXPECT_EQ(std::ranges::count(observed->cancellation_errors,
+                               amdgpu::InstructionExecutionError::DecodeFailure),
+            1);
+}
+
+TEST(AqlDispatchTest, FatalFailureUsesNonRetainingExceptionDelivery) {
+  VmFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize("cdna4"));
+  bool retention_requested = true;
+  bool delivered = false;
+  amdgpu::Wavefront *failed_wave = nullptr;
+  fixture.cu()->set_execution_failure_handler([&](amdgpu::Wavefront &wave, bool retain_wave) {
+    failed_wave = &wave;
+    retention_requested = retain_wave;
+    return wave.cu().signal_queue_exception(
+        wave.queue_id(), wave.process_id(), 1, false, false,
+        retain_wave ? amdgpu::QueueExceptionDeliveryPolicy::PublishOrFail
+                    : amdgpu::QueueExceptionDeliveryPolicy::PublishAndCancel,
+        retain_wave);
+  });
+  fixture.cu()->set_queue_exception_handler(
+      [&](uint32_t, uint32_t, uint64_t, bool, amdgpu::QueueExceptionDeliveryPolicy policy) {
+        delivered = true;
+        EXPECT_EQ(policy, amdgpu::QueueExceptionDeliveryPolicy::PublishAndCancel);
+        EXPECT_TRUE(failed_wave->is_halted());
+        return true;
+      });
+  constexpr uint32_t kUnsupportedInstruction = 0xb8000000;
+  const uint64_t kernel =
+      fixture.write_kernel(0x1000, &kUnsupportedInstruction, sizeof(kUnsupportedInstruction));
+  init_completion_signal(fixture.mem(), 0x3000);
+  test::AqlQueue queue(fixture.mem(), fixture.cp());
+  queue.submit(make_dispatch_packet(kernel, 0x3000, 32, 32));
+  fixture.engine->run();
+  ASSERT_TRUE(delivered);
+  EXPECT_FALSE(retention_requested);
+  EXPECT_EQ(failed_wave->trap_runtime_exception_status(), 0u);
+  EXPECT_EQ(fixture.engine->last_exit().code, 1);
+  EXPECT_EQ(completion_signal_value(fixture.mem(), 0x3000), 1);
+}
+
+TEST(AqlDispatchTest, DelayedDispatchFaultDoesNotCancelRecreatedQueue) {
+  VmFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize("cdna4", 1, 1));
+  const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
+  const uint64_t kernel = fixture.write_kernel(0x1000, code, sizeof(code));
+  fixture.cu()->set_functional_quantum(1);
+  test::AqlQueue queue(fixture.mem(), fixture.cp());
+  queue.dispatch(kernel, 32, 32);
+  ASSERT_TRUE(fixture.engine->step());
+  const uint32_t old_dispatch = fixture.cu()->wf(0)->dispatch_id();
+  fixture.cp()->unregister_queue(1, 0);
+  ASSERT_TRUE(fixture.cu()->is_idle());
+
+  init_completion_signal(fixture.mem(), 0x3000);
+  test::AqlQueue replacement(fixture.mem(), fixture.cp());
+  replacement.submit(make_dispatch_packet(kernel, 0x3000, 32, 32));
+  ASSERT_TRUE(fixture.engine->step());
+  const uint32_t new_dispatch = fixture.cu()->wf(0)->dispatch_id();
+  ASSERT_NE(old_dispatch, new_dispatch);
+  fixture.cp()->notify_dispatch_vm_fault(1, 0, old_dispatch, amdgpu::VmAccessOutcome::Faulted);
+  EXPECT_FALSE(fixture.cp()->queue_faulted_for_test(1, 0));
+  EXPECT_TRUE(fixture.cp()->has_dispatch_for_test(1, 0, new_dispatch));
+  for (uint32_t iteration = 0;
+       iteration < 100 && completion_signal_value(fixture.mem(), 0x3000) != 0; ++iteration)
+    (void)fixture.engine->step();
+  EXPECT_EQ(completion_signal_value(fixture.mem(), 0x3000), 0);
+}
+
+TEST(AqlDispatchTest, LaterVmFaultCancelsEarlierAdmittedDispatchAndPreservesBarrier) {
+  for (uint32_t threads : {1u, 2u}) {
+    SCOPED_TRACE(threads);
+    VmFixture fixture;
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize("cdna4", 2, 1));
+    fixture.cp()->set_dispatch_threads(threads);
+    auto plugin = std::make_unique<CancellationLifecyclePlugin>();
+    auto *observed = plugin.get();
+    auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    ASSERT_TRUE(group->add(std::move(plugin)));
+    fixture.soc_ptr->set_plugin_group(group);
+    for (uint32_t index = 0; index < 2; ++index)
+      fixture.cu(index)->set_functional_quantum(1);
+    std::array<uint32_t, 41> code;
+    code.fill(SOPP_S_NOP);
+    code.back() = SOPP_S_ENDPGM;
+    const uint64_t kernel = fixture.write_kernel(0x1000, code.data(), sizeof(code));
+    for (uint64_t signal : {0x3000, 0x4000, 0x5000, 0x6000})
+      init_completion_signal(fixture.mem(), signal);
+    test::AqlQueue queue(fixture.mem(), fixture.cp());
+    queue.submit(make_dispatch_packet(kernel, 0x3000, 32, 32));
+    queue.submit(make_dispatch_packet(kernel, 0x4000, 32, 32));
+    queue.submit(make_dispatch_packet(kernel, 0, 32, 32));
+    hsa_kernel_dispatch_packet_t barrier{};
+    barrier.header = HSA_PACKET_TYPE_BARRIER_AND | (1u << HSA_PACKET_HEADER_BARRIER);
+    barrier.completion_signal.handle = 0x5000;
+    queue.submit(barrier);
+    ASSERT_TRUE(fixture.engine->step());
+    ASSERT_EQ(observed->launches, 2u);
+    ASSERT_TRUE(fixture.cp()->has_dispatch_for_test(1, 0, 1));
+    ASSERT_TRUE(fixture.cp()->has_dispatch_for_test(1, 0, 2));
+    fixture.cp()->notify_dispatch_vm_fault(1, 0, 2, amdgpu::VmAccessOutcome::Faulted);
+    EXPECT_TRUE(fixture.cp()->queue_faulted_for_test(1, 0));
+    EXPECT_FALSE(fixture.cp()->has_dispatch_for_test(1, 0, 1));
+    EXPECT_FALSE(fixture.cp()->has_dispatch_for_test(1, 0, 2));
+    EXPECT_FALSE(fixture.cp()->has_dispatch_for_test(1, 0, 3));
+    fixture.cp()->notify_dispatch_vm_fault(1, 0, 2, amdgpu::VmAccessOutcome::Faulted);
+    EXPECT_EQ(observed->cancellations, observed->launches);
+    EXPECT_EQ(observed->halts, 0u);
+    EXPECT_EQ(observed->completed_dispatches, 0u);
+    for (uint32_t index = 0; index < 2; ++index) {
+      EXPECT_TRUE(fixture.cu(index)->is_idle());
+      EXPECT_TRUE(fixture.cu(index)->can_accept_workgroup(1, 64 * 1024));
+    }
+    for (uint64_t signal : {0x3000, 0x4000, 0x5000})
+      EXPECT_EQ(completion_signal_value(fixture.mem(), signal), 1);
+
+    // A recoverable VM fault must not strand another queue or its CU resources.
+    test::AqlQueue independent(fixture.mem(), fixture.cp(), 0xf1000000, 4096, 0xf1010000,
+                               0xf1010008, 0xf1010010, false, 2);
+    independent.submit(make_dispatch_packet(kernel, 0x6000, 32, 32));
+    for (uint32_t iteration = 0;
+         iteration < 1000 && completion_signal_value(fixture.mem(), 0x6000) != 0; ++iteration)
+      (void)fixture.engine->step();
+    EXPECT_EQ(fixture.engine->last_exit().code, 0);
+    EXPECT_EQ(completion_signal_value(fixture.mem(), 0x6000), 0);
+    EXPECT_EQ(observed->launches, 3u);
+    EXPECT_EQ(observed->halts, 1u);
+    EXPECT_EQ(observed->completed_dispatches, 1u);
+    EXPECT_EQ(completion_signal_value(fixture.mem(), 0x5000), 1);
+  }
 }
 
 class ThrowingIssuePlugin final : public ExecutionPlugin {
@@ -10338,7 +10459,8 @@ TEST(AmdgpuVmTest, LaterHostProducerCompletesParkedAqlConsumer) {
 }
 
 TEST(AmdgpuVmTest, FanoutWaitTimeoutAbortsEveryShard) {
-  struct CancellationCounts final : ExecutionPlugin {
+  class CancellationCounts final : public ExecutionPlugin {
+  public:
     CancellationCounts() : ExecutionPlugin("gws_cancellation_counts") {}
     std::atomic<uint32_t> launched = 0;
     std::atomic<uint32_t> cancelled = 0;

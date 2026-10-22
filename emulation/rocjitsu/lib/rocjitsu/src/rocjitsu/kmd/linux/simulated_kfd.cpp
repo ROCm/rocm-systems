@@ -4879,11 +4879,12 @@ bool SimulatedKfd::on_wave_illegal_instruction(amdgpu::Wavefront &wave) {
     if (!has_runtime_signal)
       return false;
     return defer_wave_exception_to_runtime(wave, kException,
-                                           /*suspend_while_pending=*/true,
+                                           /*suspend_while_pending=*/false,
                                            /*clear_debug_stop_on_success=*/false,
                                            /*runtime_already_reserved=*/false,
                                            /*runtime_failure_debuggable=*/false,
-                                           amdgpu::QueueExceptionDeliveryPolicy::PublishOrFail);
+                                           amdgpu::QueueExceptionDeliveryPolicy::PublishAndCancel,
+                                           /*retain_wave=*/false);
   }
   constexpr uint32_t kTrapstsIllegalInst = 1u << 11;
   const auto saved = wave.debug_stop_state();
@@ -4895,10 +4896,12 @@ bool SimulatedKfd::on_wave_illegal_instruction(amdgpu::Wavefront &wave) {
                            /*retain_on_rejection=*/true, &runtime_failure_debuggable)) {
     wave.restore_debug_stop_state(saved);
     return defer_wave_exception_to_runtime(wave, kException,
-                                           /*suspend_while_pending=*/true,
+                                           /*suspend_while_pending=*/false,
                                            /*clear_debug_stop_on_success=*/false,
                                            /*runtime_already_reserved=*/true,
-                                           runtime_failure_debuggable);
+                                           runtime_failure_debuggable,
+                                           amdgpu::QueueExceptionDeliveryPolicy::PublishAndCancel,
+                                           /*retain_wave=*/false);
   }
   return true;
 }
