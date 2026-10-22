@@ -497,8 +497,9 @@ int main(int argc, char **argv) {
         std::cout << "Average decoded images per sec (Images/Sec): " << total_images_per_sec << std::endl;
         std::cout << "Average decoded images size (Mpixels/Sec): " << total_image_size_in_mpixels_per_sec << std::endl;
         // Unlike the averages above, which count only the time during which a batch is being decoded, this includes
-        // the time the decoder waits for file I/O and parsing.
-        std::cout << "Overall throughput including file I/O and parsing (Images/Sec): " << total_decoded_images / total_wall_time_in_sec << std::endl;
+        // the time the decoder waits for file I/O and parsing. The unit is not written as "Images/Sec", which tools such
+        // as rocjpeg_benchmark.py read as the decode rate above.
+        std::cout << "Overall throughput including file I/O and parsing (images per sec): " << total_decoded_images / total_wall_time_in_sec << std::endl;
     }
 
     if (total_wall_time_in_sec >= 3600) {
