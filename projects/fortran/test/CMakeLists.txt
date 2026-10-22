@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-# Runtime tests: they build anywhere but need a GPU to pass.
+# The binding tests. The HIP ones build anywhere but need a GPU to pass.
 
 # The Intel compilers skip .f03 and .f08 sources unless -Tf precedes them.
 if(CMAKE_Fortran_COMPILER_ID MATCHES "Intel")
@@ -21,6 +21,31 @@ endif()
 # CMake 3.27 passes to LLVMFlang as a bare --gc-sections.
 if(NOT APPLE AND NOT WIN32)
     add_link_options(-Wl,--gc-sections)
+endif()
+
+# ROCTx: one test, no GPU needed. The parent found rocprofiler-sdk-roctx.
+if(TARGET roctx_fortran AND _ROCTX_clients)
+    if(ROCTX_FORTRAN_NEEDS_C_PACKAGE)
+        set_source_files_properties(roctx.f03 PROPERTIES LANGUAGE Fortran)
+        add_executable(roctx_fortran_test_roctx roctx.f03)
+        set_target_properties(
+            roctx_fortran_test_roctx
+            PROPERTIES LINKER_LANGUAGE Fortran
+        )
+        target_link_libraries(roctx_fortran_test_roctx PRIVATE roctx_fortran)
+        add_test(NAME roctx_fortran_roctx COMMAND roctx_fortran_test_roctx)
+    else()
+        message(
+            STATUS
+            "ROCTx: rocprofiler-sdk-roctx was not found, skipping the Fortran binding "
+            "test (it links it). Point CMAKE_PREFIX_PATH at an installed ROCm to "
+            "build it."
+        )
+    endif()
+endif()
+
+if(NOT TARGET hip_fortran OR NOT _HIP_clients)
+    return()
 endif()
 
 # The parent found hip; the tests link its runtime.

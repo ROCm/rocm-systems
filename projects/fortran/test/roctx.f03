@@ -32,7 +32,8 @@ program test_roctx
   character(kind=c_char), dimension(6), target :: msg = &
       [c_char_"r", c_char_"o", c_char_"c", c_char_"t", c_char_"x", c_null_char]
   integer(c_int64_t), target :: agent = 0
-  integer(c_int64_t) :: tid, id1, id2
+  integer(c_int64_t), target :: tid
+  integer(c_int64_t) :: id1, id2
   integer(c_int) :: ret
 
   write(*,"(a)",advance="no") "-- Running test 'roctx' (Fortran 2003 interfaces) - "
@@ -49,6 +50,11 @@ program test_roctx
      stop 1
   end if
 
+  ! The typed forms take a Fortran string, NUL-terminated by the caller.
+  call roctxMark(c_char_"roctx"//c_null_char)
+  call check(roctxRangePush(c_char_"roctx"//c_null_char), 0, "typed roctxRangePush")
+  call check(roctxRangePop(), 0, "typed roctxRangePop")
+
   id1 = roctxRangeStart(c_loc(msg))
   id2 = roctxRangeStart(c_loc(msg))
   if (id1 == id2) then
@@ -59,7 +65,7 @@ program test_roctx
   call roctxRangeStop(id1)
 
   tid = 0
-  ret = roctxGetThreadId(tid)
+  ret = roctxGetThreadId(c_loc(tid))
   if (ret == 0 .and. tid == 0) then
      write(*,*) "FAILED! roctxGetThreadId succeeded but left the thread id at 0"
      stop 1
