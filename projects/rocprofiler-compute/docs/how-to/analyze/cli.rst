@@ -143,16 +143,74 @@ To print the block as tables instead of the diagram, see :ref:`cli-view-table`.
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze -p workloads/vcopy/MI200/ -b 4
+   $ rocprof-compute analyze -p workloads/rocflop/MI350/ -b 4
 
-.. image:: ../../data/analyze/cli/roofline_chart.png
-   :align: left
-   :alt: Roofline
+   --------------------------------------------------------------------------------
+   4. Roofline
+
+   Interactive roofline plot saved to /home/user/workloads/rocflop/MI350/empirRoof_gpu-0.html
+
+   (4.1) Per-Kernel Roofline Metrics and (4.2) AI Plot Points
+
+   Kernel 0: matmul_fp32_throughput(float*, float
+   __vector(4)*, int) (25.8%)
+     |
+     ├─ 4.1 Roofline Rate Metrics:
+     |   ╒═════════════╤════════════════════╤═══════════╤═════════╤════════════════════╕
+     |   │ Metric_ID   │ Metric             │     Value │ Unit    │   Peak (Empirical) │
+     |   ╞═════════════╪════════════════════╪═══════════╪═════════╪════════════════════╡
+     |   │ 4.1.0       │ VALU FLOPs (F16)   │      0.00 │ GFLOP/s │          142403.81 │
+     |   ├─────────────┼────────────────────┼───────────┼─────────┼────────────────────┤
+     |   │ 4.1.1       │ VALU FLOPs (F32)   │      0.02 │ GFLOP/s │          139518.41 │
+     |   ├─────────────┼────────────────────┼───────────┼─────────┼────────────────────┤
+     |   │ 4.1.2       │ VALU FLOPs (F64)   │      0.00 │ GFLOP/s │           70917.90 │
+     |   ├─────────────┼────────────────────┼───────────┼─────────┼────────────────────┤
+     |   │ 4.1.3       │ MFMA FLOPs (F64)   │      0.00 │ GFLOP/s │           71377.49 │
+     |   ├─────────────┼────────────────────┼───────────┼─────────┼────────────────────┤
+     |   │ 4.1.4       │ MFMA FLOPs (F32)   │ 136977.38 │ GFLOP/s │          142150.19 │
+     |   ├─────────────┼────────────────────┼───────────┼─────────┼────────────────────┤
+     |   │ 4.1.5       │ MFMA FLOPs (F16)   │      0.00 │ GFLOP/s │         1697415.60 │
+     |   ├─────────────┼────────────────────┼───────────┼─────────┼────────────────────┤
+     |   │ 4.1.6       │ MFMA FLOPs (BF16)  │      0.00 │ GFLOP/s │         1938708.14 │
+     |   ├─────────────┼────────────────────┼───────────┼─────────┼────────────────────┤
+     |   │ 4.1.7       │ MFMA FLOPs (F8)    │      0.00 │ GFLOP/s │         2090034.29 │
+     |   ├─────────────┼────────────────────┼───────────┼─────────┼────────────────────┤
+     |   │ 4.1.8       │ MFMA FLOPs (MXF8)  │      0.00 │ GFLOP/s │         4361892.90 │
+     |   ├─────────────┼────────────────────┼───────────┼─────────┼────────────────────┤
+     |   │ 4.1.9       │ MFMA FLOPs (F6F4)  │      0.00 │ GFLOP/s │         7601929.39 │
+     |   ├─────────────┼────────────────────┼───────────┼─────────┼────────────────────┤
+     |   │ 4.1.10      │ MFMA IOPs (Int8)   │      0.00 │ GIOP/s  │         4034547.20 │
+     |   ├─────────────┼────────────────────┼───────────┼─────────┼────────────────────┤
+     |   │ 4.1.11      │ HBM Bandwidth      │      0.11 │ GB/s    │            6964.63 │
+     |   ├─────────────┼────────────────────┼───────────┼─────────┼────────────────────┤
+     |   │ 4.1.12      │ L2 Cache Bandwidth │      0.18 │ GB/s    │           31643.80 │
+     |   ├─────────────┼────────────────────┼───────────┼─────────┼────────────────────┤
+     |   │ 4.1.13      │ L1 Cache Bandwidth │      0.23 │ GB/s    │           34846.58 │
+     |   ├─────────────┼────────────────────┼───────────┼─────────┼────────────────────┤
+     |   │ 4.1.14      │ LDS Bandwidth      │      0.00 │ GB/s    │           57018.43 │
+     |   ╘═════════════╧════════════════════╧═══════════╧═════════╧════════════════════╛
+     ├─ 4.2 Roofline AI Plot Points:
+     |   ╒═════════════╤══════════════════════╤════════════════════╤════════════╕
+     |   │ Metric_ID   │ Metric               │ Value              │ Unit       │
+     |   ╞═════════════╪══════════════════════╪════════════════════╪════════════╡
+     |   │ 4.2.0       │ AI HBM               │ 1198230.6258325255 │ FLOPs/Byte │
+     |   ├─────────────┼──────────────────────┼────────────────────┼────────────┤
+     |   │ 4.2.1       │ AI L2                │ 762602.760461121   │ FLOPs/Byte │
+     |   ├─────────────┼──────────────────────┼────────────────────┼────────────┤
+     |   │ 4.2.2       │ AI L1                │ 599186.8145721277  │ FLOPs/Byte │
+     |   ├─────────────┼──────────────────────┼────────────────────┼────────────┤
+     |   │ 4.2.3       │ AI LDS               │ N/A                │ FLOPs/Byte │
+     |   ├─────────────┼──────────────────────┼────────────────────┼────────────┤
+     |   │ 4.2.4       │ Performance (GFLOPs) │ 136977.40092136632 │ GFLOP/s    │
+     |   ╘═════════════╧══════════════════════╧════════════════════╧════════════╛
+
+   ...
+
+Open the saved HTML file in a browser for the interactive roofline plot. See :ref:`roofline-html-generation`.
 
 .. note::
-   * Visualized memory chart and Roofline chart are only supported in single run analysis. In multiple runs comparison mode, both are switched back to basic table view.
+   * Visualized memory chart is only supported in single run analysis. In multiple runs comparison mode, it is switched back to basic table view.
    * Visualized memory chart is drawn at a fixed width and needs a wide terminal. See :ref:`cli-memory-chart-viewing` if it wraps.
-   * Visualized Roofline chart is adapted to the initial terminal size only. If it is not clear, you may need to adjust the terminal size and regenerate it to check the display effect. Roofline analysis provides detailed, structured table output with measured empirical peak values for comparison.
 
 .. _cli-list-available-metrics:
 
@@ -445,7 +503,7 @@ More analysis options
 
 **TTY output view (plain tables)**
 
-Use ``--view table`` to force plain tabular output for all sections and ignore ``cli_style`` from the analysis YAML (for example, memory charts and Roofline charts are shown as tables). Additional ``--view`` values may be added in future releases.
+Use ``--view table`` to force plain tabular output for all sections and ignore ``cli_style`` from the analysis YAML (for example, memory charts and the per-kernel Roofline layout are shown as tables). Additional ``--view`` values may be added in future releases.
 
 .. code-block:: shell
 
@@ -619,7 +677,6 @@ Roofline visualization options (available only in analyze mode):
 * ``--sort``: Overlay top kernels or top dispatches (default: kernels)
 * ``--mem-level``: Filter by memory level -- HBM, L2, vL1D, L0, LDS (default: ALL)
 * ``--roofline-data-type``: Choose datatypes for roofline visualization (default: FP32)
-   * CLI only supports visualizing one precision at a time. Visualizing multiple data types on one plot is available in the Interactive Roofline HTML file.
 
 Example with multiple ``--mem-level`` and ``--roofline-data-type`` options:
 
