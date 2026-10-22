@@ -49,16 +49,16 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Renamed the PC sampling analyze table columns `count_issued` and `count_stalled` to `issue_count` and `stall_count`, so the terminal table uses the same column names as `pc_sampling_summary.csv` and `compute_pc_sampling_summary_view`.
 
-* Renamed the roofline options to start with `--roofline`. The old names still work for now but print a warning, so update your commands:
-  * `--roof-only` → `--roofline`
-  * `--bench-only` → `--roofline-bench-only`
-  * `--device` → `--roofline-device`
-
 * The profile and analyze help is easier to read. Each option shows what value it takes, the values it accepts, and its default.
 
 * Top-level options such as `--list-metrics` can no longer be abbreviated (for example `--list-metr`), matching profile and analyze options.
 
 * `--specs-correction` takes `name:value` pairs separated by spaces instead of commas, for example `--specs-correction num_xcd:4 cu_per_gpu:64`.
+
+* Renamed the roofline options to start with `--roofline`. The old names still work for now but print a warning, so update your commands:
+  * `--roof-only` → `--roofline`
+  * `--bench-only` → `--roofline-bench-only`
+  * `--device` → `--roofline-device`
 
 ### Removed
 
