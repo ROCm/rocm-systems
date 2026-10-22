@@ -123,7 +123,7 @@ def test_instmix_section_global_write_kernel(binary_handler_profile_rocprof_comp
 
 
 def test_list_metrics(binary_handler_profile_rocprof_compute):
-    options = ["--list-metrics", "gfx90a"]
+    options = ["--list-metrics-gfx-id", "gfx90a"]
     workload_dir = common.get_output_dir()
     _ = binary_handler_profile_rocprof_compute(
         config, workload_dir, options, check_success=True, roof=False
@@ -133,20 +133,17 @@ def test_list_metrics(binary_handler_profile_rocprof_compute):
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-def test_list_metrics_with_block(binary_handler_profile_rocprof_compute, capsys):
-    options = ["--list-metrics", "gfx90a", "--block", "10"]
+def test_list_metrics_with_block(binary_handler_profile_rocprof_compute):
+    options = ["--list-metrics-gfx-id", "gfx90a", "--block", "10"]
     workload_dir = common.get_output_dir()
-    _ = binary_handler_profile_rocprof_compute(
-        config, workload_dir, options, check_success=True, roof=False
+    code = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=False
     )
+    # Should return code 1 since --block cannot be used with --list-metrics
+    assert code == 1
     # workload dir should not exist
     assert not Path(workload_dir).exists()
     common.clean_output_dir(config["cleanup"], workload_dir)
-
-    # --block filters the listing to block 10
-    output = capsys.readouterr().out
-    assert "10 -> Compute Units - Instruction Mix" in output
-    assert "2 -> System Speed-of-Light" not in output
 
 
 def test_list_available_metrics(binary_handler_profile_rocprof_compute, capsys):
