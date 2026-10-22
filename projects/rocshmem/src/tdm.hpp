@@ -69,6 +69,8 @@ namespace tdm {
 // not ROCSHMEM_TDM_ENABLED -- its arch macros aren't defined when
 // compiling host-only code, which would make this disappear there.
 #if defined(USE_TDM)
+constexpr uint32_t FlatCopyElementLog2 = 3;  // 8 bytes/element
+
 __host__ __device__ constexpr size_t lds_bytes_for_tile(uint32_t tile_bytes) {
   return 2 * static_cast<size_t>(tile_bytes);
 }
@@ -239,8 +241,6 @@ __device__ __forceinline__ void store_from_lds(const Descriptor2D &d) {
 // exactly one lane; callers own that gating and any tail bytes left
 // uncovered by covered_bytes().
 // ==============================================================================
-
-constexpr uint32_t FlatCopyElementLog2 = 3;  // 8 bytes/element
 
 // Bytes of [0, total_bytes) actually moved for a given tile_bytes_cap: the
 // largest multiple of tile_bytes_cap not exceeding total_bytes, or a single

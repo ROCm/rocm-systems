@@ -589,18 +589,18 @@ template <MemcpyKind Kind = MemcpyKind::Put, int Unroll = 8>
   }
 }
 
-// Non-temporal + system scope: correct either direction (peer may be remote).
-constexpr int TdmLoadPolicy = tdm::make_cache_policy(
-    tdm::LoadTemporalHint::NonTemporal, tdm::Scope::System);
-constexpr int TdmStorePolicy = tdm::make_cache_policy(
-    tdm::StoreTemporalHint::NonTemporal, tdm::Scope::System);
-
 // Thread 0 drives TDM into the registered LDS buffer; the rest of the block
 // covers what TDM doesn't. Falls back to memcpy_wg if TDM isn't available.
 template <MemcpyKind Kind = MemcpyKind::Put>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_wg_tdm(void* dst, void* src,
                                                                 size_t size) {
 #if ROCSHMEM_TDM_ENABLED
+  // Non-temporal + system scope: correct either direction (peer may be remote).
+  constexpr int TdmLoadPolicy = tdm::make_cache_policy(
+    tdm::LoadTemporalHint::NonTemporal, tdm::Scope::System);
+  constexpr int TdmStorePolicy = tdm::make_cache_policy(
+    tdm::StoreTemporalHint::NonTemporal, tdm::Scope::System);
+
   // Below threshold, TDM doesn't pay off (like the SDMA threshold); size
   // is small enough here that Unroll=4 is plenty.
   if (size < constmem.tdm_threshold) {
