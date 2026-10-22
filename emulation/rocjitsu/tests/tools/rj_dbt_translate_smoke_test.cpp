@@ -37,6 +37,9 @@ namespace {
 
 std::filesystem::path g_translate_tool;
 std::filesystem::path g_decode_benchmark;
+#if defined(__linux__)
+std::filesystem::path g_pretranslate_tool;
+#endif
 
 rocjitsu::tools::ToolResult<rocjitsu::tools::TranslateOutput>
 capture_gfx1251_targets(const rocjitsu::tools::TranslateOptions &options) {
@@ -669,6 +672,63 @@ TEST(RjDbtTranslate, RequiresRevisionsOnlyForGfx1250) {
   EXPECT_TRUE(contains(read_text_file(error), "gfx1250 A0-to-B0 translation is not supported"));
 }
 
+#if defined(__linux__)
+TEST(RjPretranslate, SharedParserWritesReusesAndForcesTranslationStore) {
+  const auto &tool = g_pretranslate_tool;
+  ASSERT_TRUE(std::filesystem::exists(tool));
+  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_pretranslate_cli_");
+  const std::filesystem::path temp_path(temp_dir.path());
+  const auto input = temp_path / "gfx1250.co";
+  const auto output = temp_path / "stdout.txt";
+  const auto error = temp_path / "stderr.txt";
+  const auto store = temp_path / "store";
+  {
+    const auto image = make_gfx1250_smoke_code_object();
+    std::ofstream out(input, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(image.data()),
+              static_cast<std::streamsize>(image.size()));
+  }
+  for (int pass = 0; pass < 3; ++pass) {
+    const std::string command =
+        shell_quote(tool.string()) +
+        " --store-root /unused/previous-value --store-root=" + shell_quote(store.string()) +
+        " --portable" + (pass == 2 ? " --force" : "") + " -- " + shell_quote(input.string()) +
+        " > " + shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+    ASSERT_TRUE(command_succeeded(std::system(command.c_str()))) << read_text_file(error);
+    EXPECT_TRUE(
+        contains(read_text_file(output), pass == 1 ? "written=0 held=1" : "written=1 held=0"))
+        << read_text_file(output);
+  }
+}
+#endif
+
+TEST(RjDbtTranslate, SharedParserPreservesHexBoundsOmissionAndLastValue) {
+  for (bool explicit_vgpr : {false, true}) {
+    std::vector<std::string> arguments{"rj_dbt_translate",        "--input-target=gfx1251",
+                                       "--output-target=gfx1251", "--output-mode=code-object",
+                                       "--output-mode=disasm",    "--code-object-index=0X2a"};
+    if (explicit_vgpr)
+      arguments.push_back("--debug-conservative-liveness=0xffff");
+    arguments.insert(arguments.end(), {"--", explicit_vgpr ? "explicit.co" : "omitted.co"});
+    std::vector<char *> argv;
+    for (auto &argument : arguments)
+      argv.push_back(argument.data());
+    auto check = [](const rocjitsu::tools::TranslateOptions &options)
+        -> rocjitsu::tools::ToolResult<rocjitsu::tools::TranslateOutput> {
+      EXPECT_EQ(options.code_object_index, 42u);
+      EXPECT_EQ(options.disassembly, rocjitsu::tools::DisassemblyMode::Translated);
+      if (options.input_path == "explicit.co")
+        EXPECT_EQ(options.debug_min_free_vgpr, UINT16_MAX);
+      else
+        EXPECT_FALSE(options.debug_min_free_vgpr);
+      return {};
+    };
+    EXPECT_EQ(rocjitsu::tools::detail::run_dbt_translate_cli(static_cast<int>(argv.size()),
+                                                             argv.data(), check),
+              0);
+  }
+}
+
 TEST(RjDbtTranslate, AcceptsGfx1251WithoutGfx1250Revisions) {
   std::array arguments = {
       std::string("rj_dbt_translate"), std::string("synthetic.co"),
@@ -1119,6 +1179,13 @@ int main(int argc, char **argv) {
 
   g_translate_tool = argv[1];
   g_decode_benchmark = argv[2];
+#if defined(__linux__)
+  if (argc < 4) {
+    std::cerr << "Linux smoke tests also require the rj_pretranslate path\n";
+    return 2;
+  }
+  g_pretranslate_tool = argv[3];
+#endif
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }

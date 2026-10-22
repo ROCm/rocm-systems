@@ -47,6 +47,7 @@ target_link_libraries(
         util
         flatbuffers
         Threads::Threads
+        rocjitsu_cli
         rocjitsu_cli_launch_preload
         rocjitsu_version
 )
@@ -69,3 +70,21 @@ rj_configure_target(rocjitsu_bin TOOL)
 # entrypoint for driving emulation when mirage is not present).
 include(GNUInstallDirs)
 install(TARGETS rocjitsu_bin RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+if(BUILD_TESTING)
+    add_executable(
+        rocjitsu_launch_flags_test
+        ../../tests/tools/launch_flags_test.cpp
+    )
+    target_include_directories(
+        rocjitsu_launch_flags_test
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_link_libraries(
+        rocjitsu_launch_flags_test
+        PRIVATE rocjitsu_cli flatbuffers GTest::gtest_main
+    )
+    rj_configure_target(rocjitsu_launch_flags_test TOOL)
+    include(GoogleTest)
+    gtest_discover_tests(rocjitsu_launch_flags_test TEST_PREFIX "cli.")
+endif()
