@@ -101,25 +101,15 @@ jobs:
             exit 1
           fi
 
-      # The pool is not uniform -- 3.10, 3.12, and one machine with no pip at
-      # all -- and the compute nodes run another distro again, yet they run
-      # madengine from this environment through the inherited PATH.
-      # setup-python's build needs glibc 2.35 and the runner's own libssl, so
-      # it does not start there; a conda-forge interpreter needs glibc 2.17
-      # and carries its libraries. It lives under WORK_DIR, which the nodes
-      # see, and the cleanup step deletes it: these runners are shared and
-      # long-lived.
+      # Conda-forge Python under WORK_DIR: the compute nodes (another distro, older
+      # glibc) run madengine from it via PATH, where setup-python's build won't start.
       - name: Create Python environment
         env:
           MINIFORGE_VERSION: "26.7.2-0"
           MINIFORGE_SHA256: "281b0ac7d550802efc81af633225a5e6116d29ae72f3ab4eae7168c3931a4c05"
         run: |
-          # The runner account's home is a small quota shared with every other
-          # job of that account, and conda will not finish without writing
-          # there: the installer creates ~/.conda, and conda create registers
-          # the env in it and caches notices in ~/.cache. A full home failed
-          # this step with EDQUOT. Inside the conda prefix, the cleanup step
-          # deletes it; only for this step, so the nodes keep the real home.
+          # conda must write to $HOME, a small shared quota; redirect it into the
+          # conda prefix for this step only, so the nodes keep the real home.
           export HOME="${WORK_DIR}/conda/home"
           echo "PIP_CACHE_DIR=${HOME}/.cache/pip" >> "$GITHUB_ENV"
           mkdir -p "${WORK_DIR}"
@@ -234,12 +224,8 @@ jobs:
                  "${WORK_DIR}/env" "${WORK_DIR}/overlay_ctx" \
                  "${WORK_DIR}/docker_builds" "${WORK_DIR}/ab"
 
-          # Nothing on this host builds or pulls an image any more; the nodes
-          # build them. Earlier versions did both, under per-run tags nothing
-          # removed, and every runner on this host shares its Docker disk: a
-          # pull of the sglang base ran it out of space. Remove those tags and
-          # the bases they were built from, but not -f, so an image a container
-          # still uses stays. Layers of a failed pull have no name and stay too.
+          # Remove per-run tags and bases left by earlier versions of this job on
+          # the shared Docker disk; no -f, so images a container still uses stay.
           docker system df || true
           {
             docker images --format '{{.Repository}}:{{.Tag}}' \
