@@ -47,6 +47,19 @@ enum class AtomicOp : uint8_t {
   BARRIER_ARRIVE, ///< LDS barrier-arrive state update.
 };
 
+/// @brief Whether each lane supplies a second operand after its source (data[1]).
+constexpr bool atomic_uses_two_sources(AtomicOp op) {
+  return op == AtomicOp::CMPSWAP || op == AtomicOp::FCMPSWAP || op == AtomicOp::MSKOR ||
+         op == AtomicOp::WRAP;
+}
+
+/// @brief Whether the operation follows the scalar floating-point atomic contract.
+/// @details Packed 16-bit additions have their own evaluator and are excluded.
+constexpr bool atomic_uses_scalar_fp(AtomicOp op) {
+  return op == AtomicOp::FADD || op == AtomicOp::FMIN || op == AtomicOp::FMAX ||
+         op == AtomicOp::FCMPSWAP;
+}
+
 /// @brief Apply an integer atomic RMW operation (32-bit or 64-bit).
 template <typename T> T apply_int_atomic(AtomicOp op, T old_val, T src_val, T cmp_val = 0) {
   using S = std::make_signed_t<T>;
