@@ -109,8 +109,8 @@ class OneGpuGroups : public amd::rdc::RdcGroupSettings {
 }  // namespace
 
 // Fakes for what RdcConfigSettingsImpl.cc calls. Another race test that defines
-// get_processor_handle_from_id() too must drop its copy: these tests need a
-// handle for every GPU, and fail if they get none.
+// get_processor_handle_from_id() too must make its copy weak or drop it: these
+// tests need a handle for every GPU, and fail if they get none.
 namespace amd {
 namespace rdc {
 amdsmi_status_t get_processor_handle_from_id(uint32_t gpu_id,
