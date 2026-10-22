@@ -49,9 +49,12 @@
 #endif
 #endif
 
-// GIN rocshmem device templates (GDA, SDMA) gate on ENABLE_ROCSHMEM_GIN.
+// GIN rocshmem device templates (GDA, SDMA) are AMD-only and enabled only when
+// their device header is present — these headers ship solely in an
+// ENABLE_ROCSHMEM_GIN build. A consumer needs no opt-in define; a build that did
+// not ship them gets 0 here, so gin_device_api.h never #includes the absent tree.
 #ifndef NCCL_GIN_ROCSHMEM_GDA_ENABLE
-#if defined(__HIP_PLATFORM_AMD__) && defined(ENABLE_ROCSHMEM_GIN)
+#if defined(__HIP_PLATFORM_AMD__) && __has_include("rocshmem_gda/gin_rocshmem_gda.h")
 #define NCCL_GIN_ROCSHMEM_GDA_ENABLE 1
 #else
 #define NCCL_GIN_ROCSHMEM_GDA_ENABLE 0
@@ -59,7 +62,7 @@
 #endif
 
 #ifndef NCCL_GIN_ANVIL_SDMA_ENABLE
-#if defined(__HIP_PLATFORM_AMD__) && defined(ENABLE_ROCSHMEM_GIN)
+#if defined(__HIP_PLATFORM_AMD__) && __has_include("anvil_sdma/gin_anvil_sdma.h")
 #define NCCL_GIN_ANVIL_SDMA_ENABLE 1
 #else
 #define NCCL_GIN_ANVIL_SDMA_ENABLE 0

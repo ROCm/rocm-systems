@@ -262,12 +262,6 @@ set(SRC_FILES
   include/nccl_device/coop.h
   include/nccl_device/core.h
   include/nccl_device/gin.h
-  include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_copy.h
-  include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_table.h
-  include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_table_device.h
-  include/nccl_device/gin/anvil_sdma/gin_anvil_sdma.h
-  include/nccl_device/gin/anvil_sdma/gin_anvil_sdma_put_policy.h
-  include/nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h
   include/nccl_device/gin/gdaki/gin_gdaki.h
   include/nccl_device/gin/gdaki/gin_gdaki_device_host_common.h
   include/nccl_device/gin/gin_device_api.h
@@ -275,8 +269,8 @@ set(SRC_FILES
   include/nccl_device/gin/gin_device_host_common.h
   include/nccl_device/gin/proxy/gin_proxy.h
   include/nccl_device/gin/proxy/gin_proxy_device_host_common.h
-  include/nccl_device/gin/rocshmem_gda/gin_rocshmem_device_host_common_gda.h
-  include/nccl_device/gin/rocshmem_gda/gin_rocshmem_gda.h
+  # rocshmem GDA + Anvil SDMA device headers are GIN-only: appended in the
+  # ENABLE_ROCSHMEM_GIN block below, not shipped by a non-GIN build.
   include/nccl_device/gin_barrier.h
   include/nccl_device/host.h
   include/nccl_device/impl/barrier__funcs.h
@@ -649,6 +643,18 @@ if(ENABLE_ROCSHMEM_GIN)
     src/include/nccl_device/gin/rocshmem_gda/containers/free_list.hpp
     src/include/nccl_device/gin/rocshmem_gda/gda/ibv_core.hpp
     src/include/nccl_device/gin/rocshmem_gda/rocshmem/rocshmem_common.hpp
+    # rocshmem GDA + Anvil SDMA device entry/support headers: GIN-only, so they
+    # are hipified + installed solely in this build. gin_device_api.h reaches them
+    # only under #if NCCL_GIN_{ROCSHMEM_GDA,ANVIL_SDMA}_ENABLE, which self-detect
+    # the headers' presence via __has_include (gin_device_common.h).
+    src/include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_copy.h
+    src/include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_table.h
+    src/include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_table_device.h
+    src/include/nccl_device/gin/anvil_sdma/gin_anvil_sdma.h
+    src/include/nccl_device/gin/anvil_sdma/gin_anvil_sdma_put_policy.h
+    src/include/nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h
+    src/include/nccl_device/gin/rocshmem_gda/gin_rocshmem_device_host_common_gda.h
+    src/include/nccl_device/gin/rocshmem_gda/gin_rocshmem_gda.h
   )
   # anvil.cpp is compiled from rocshmem source via target_sources after
   # add_library (bypasses SRC_FILES/hipify). See block after add_library.
