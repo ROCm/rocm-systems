@@ -17,8 +17,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fcntl.h>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -377,6 +379,71 @@ TEST_F(DaemonTest, HipDecodeFailureExitsWithFailure) {
   auto r = run_hip_test(hip_instruction_failure_bin(),
                         "HipDaemonInstructionFailureTest.DecodeFailureExitsWithFailure");
   EXPECT_EQ(r.exit_code, 0) << r.output;
+}
+
+TEST_F(DaemonTest, HipFatalDecodeDisconnectsValidClient) {
+  const std::string ready_path = tmp_dir_ + "/valid-client-ready";
+  const std::string output_path = tmp_dir_ + "/valid-client.log";
+  const pid_t valid_client = fork();
+  ASSERT_GE(valid_client, 0);
+  if (valid_client == 0) {
+    // Kill the death-test child along with its launcher if the regression hangs.
+    if (setpgid(0, 0) != 0)
+      _exit(127);
+    const int output = open(output_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (output < 0 || dup2(output, STDOUT_FILENO) < 0 || dup2(output, STDERR_FILENO) < 0)
+      _exit(127);
+    close(output);
+    setenv("XDG_RUNTIME_DIR", tmp_dir_.c_str(), 1);
+    setenv("ROCJITSU_RUNTIME_DIR", runtime_dir_.c_str(), 1);
+    setenv("ROCJITSU_TEST_CLIENT_READY", ready_path.c_str(), 1);
+    const std::string preload = std::string(sanitizer_preload()) + preload_lib();
+    setenv("LD_PRELOAD", preload.c_str(), 1);
+    execl(hip_instruction_failure_bin(), hip_instruction_failure_bin(),
+          "--gtest_filter=HipDaemonInstructionFailureTest.ValidClientExitsWhenAnotherClientFails",
+          nullptr);
+    _exit(127);
+  }
+  class ClientGuard {
+  public:
+    explicit ClientGuard(pid_t pid) : pid_(pid) {}
+    ~ClientGuard() {
+      if (pid_ > 0) {
+        kill(-pid_, SIGKILL);
+        waitpid(pid_, nullptr, 0);
+      }
+    }
+    void reaped() { pid_ = -1; }
+
+  private:
+    pid_t pid_;
+  } guard(valid_client);
+  const auto ready_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  while (!std::filesystem::exists(ready_path) && std::chrono::steady_clock::now() < ready_deadline)
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  ASSERT_TRUE(std::filesystem::exists(ready_path)) << "valid client did not complete its kernel";
+
+  expected_daemon_exit_ = EXIT_FAILURE;
+  const ProcessResult faulting =
+      run_hip_test(hip_instruction_failure_bin(),
+                   "HipDaemonInstructionFailureTest.DecodeFailureExitsWithFailure");
+  EXPECT_EQ(faulting.exit_code, 0) << faulting.output;
+  int status = 0;
+  pid_t exited = 0;
+  const auto exit_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  do {
+    exited = waitpid(valid_client, &status, WNOHANG);
+    if (exited == valid_client || (exited < 0 && errno != EINTR))
+      break;
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  } while (std::chrono::steady_clock::now() < exit_deadline);
+  ASSERT_EQ(exited, valid_client) << "valid client did not exit after shared engine failure";
+  guard.reaped();
+  std::ifstream output_file(output_path);
+  const std::string output((std::istreambuf_iterator<char>(output_file)),
+                           std::istreambuf_iterator<char>());
+  ASSERT_TRUE(WIFEXITED(status)) << output;
+  EXPECT_EQ(WEXITSTATUS(status), 0) << output;
 }
 #endif
 
