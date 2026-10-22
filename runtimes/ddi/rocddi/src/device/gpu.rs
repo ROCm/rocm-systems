@@ -74,6 +74,14 @@ pub struct GpuSurfaceConfig {
 }
 
 impl GpuDevice<'_> {
+    /// Queries the active KFD process's recoverable page-fault mode.
+    ///
+    /// # Errors
+    /// Returns a native or device-lifetime failure when the mode is unavailable.
+    pub fn xnack_enabled(&self) -> Result<bool, Error> {
+        self.driver.xnack_enabled()
+    }
+
     /// Returns the GPU target, geometry, and transport capabilities captured at
     /// endpoint activation.
     #[must_use]
