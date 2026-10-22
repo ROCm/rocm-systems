@@ -968,6 +968,17 @@ bool rcclForceCeScratchEnabled(const ncclComm* comm) {
   return table == nullptr || table->forceCeScratch;
 }
 
+// Symmetric windows have equal offsets on every rank and a min-size bound, so all ranks agree.
+void rcclSetCeAllReduceFastPath(struct ncclComm* comm) {
+  for (struct ncclTaskColl* task = ncclIntruQueueHead(&comm->planner.collCeTaskQueue); task != nullptr;
+       task = task->next) {
+    const size_t totalBytes = task->count * ncclTypeSize(task->datatype);
+    task->ceAllReduceFastPath = task->func == ncclFuncAllReduce && task->recvWin != nullptr &&
+                                (task->recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC) &&
+                                ncclCeRecvRangeContainedInWindow(task->recvWin, task->recvbuff, totalBytes) != 0;
+  }
+}
+
 inline size_t rcclCeNonRegMinTab(const rcclArchThresholds* table, ncclFunc_t func) {
   const int64_t param = (func == ncclFuncAllReduce) ? rcclParamCeArMinMsgBytes() : rcclParamCeCollMinBytes();
   if (param >= 0) return (size_t)param;
@@ -1215,6 +1226,10 @@ bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold,
     if (!query && prefix) INFO(NCCL_TUNING, "%s DDA disqualified: RCCL_DDA_ENABLE=%d launchOrderImplicit=%d ncclGroupDepth=%d", prefix, (int)rcclParamDdaEnable(), comm->config.launchOrderImplicit, ncclGroupDepth);
     return false;
   }
+  if (comm->ddaDisabledAfterAbort) {
+    if (!query && prefix) INFO(NCCL_TUNING, "%s DDA disqualified: comm was shrunk with NCCL_SHRINK_ABORT", prefix);
+    return false;
+  }
   if (IsArchMatch(comm->archName, "gfx1250")) {
     // gfx1250 has no nRanks floor.
   } else if (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950")) {
@@ -1429,6 +1444,17 @@ bool rcclUseCeAr2Shot(struct ncclComm* comm, size_t count, ncclDataType_t dataty
   // Float8 types require specialised handling not yet implemented for CE AR.
   if (datatype == ncclFloat8e4m3 || datatype == ncclFloat8e5m2) {
     WARN("Skipping CE AllReduce: unsupported datatype: Float8");
+    return false;
+  }
+
+  // Staged CE still addresses every peer by LSA rank, so it needs the same
+  // runtime and topology as registered CE; only the window checks differ.
+  if (!ncclCeImplemented(ncclFuncAllReduce, ncclDevSum, datatype)) {
+    INFO(NCCL_TUNING, "Skipping CE AllReduce: CE is not supported by this driver");
+    return false;
+  }
+  if (!ncclDevrIsOneLsaTeam(comm)) {
+    INFO(NCCL_TUNING, "Skipping CE AllReduce: LSA team does not span the comm");
     return false;
   }
 
@@ -1694,6 +1720,8 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // Reproduce taskAppend()'s AllReduce CE decision exactly so both agree.
   // Under ZERO (ceRegZero) CE wins over an eligible symk at any size; ceRegForce (force without ZERO) yields to symk and ceRegMax.
   // ceAvailable is the conjunction of the sub-conditions below; split out so the disqualification log can name the blocker.
+  // Forced CE on unregistered buffers (!symkRequested, as in (3)) also uses this
+  // path before ceARTmpBuf has been initialized (ceStagedUnregistered).
   const bool ceBufferOk          = !ceCapturing && ncclCeAvailable(comm, ncclFuncAllReduce, (int)op, datatype, winRegType, sendWin, recvWin);
   const bool ceAllReduceOpSupported = (op == ncclSum || op == ncclProd || op == ncclMin || op == ncclMax);
   const bool ceCountDivisible    = (count % (size_t)comm->nRanks == 0);
@@ -1711,7 +1739,9 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   const bool ceRegEnvCapOk = rcclParamCeArRegMaxMsgBytes() < 0 || ceRegInWindow;
   const bool ceRegZero = ceZeroPolicy && ceArRegMax != 0 && ceRegEnvCapOk;
   const bool ceRegForce = force && !symEligible && ceRegInWindow;
-  if (ceAvailable && !hasSysmemSegment && (ceRegZero || ceRegForce)) {
+  const bool ceStagedUnregistered = !symkRequested && ncclGroupDepth == 0 && force &&
+      ceArGraphAllowed && ceAr2ShotEligible && twoShotWindow;
+  if (!hasSysmemSegment && ((ceAvailable && (ceRegZero || ceRegForce)) || ceStagedUnregistered)) {
     decision->algo = RCCL_CE_REGISTERED;
     decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, count / comm->nRanks);
     return ncclSuccess;

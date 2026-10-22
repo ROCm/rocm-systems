@@ -64,7 +64,7 @@
 /projects/rocprof-trace-decoder/                                      @ROCm/rocm-devtools-team
 
 # Media Libs
-/projects/rocdecode/                                                  @kiritigowda @AryanSalmanpour @rrawther
+/projects/rocdecode/                                                  @kiritigowda @AryanSalmanpour @rrawther @jeffqjiangNew
 /projects/rocjpeg/                                                    @kiritigowda @AryanSalmanpour @rrawther
 
 # Experimental

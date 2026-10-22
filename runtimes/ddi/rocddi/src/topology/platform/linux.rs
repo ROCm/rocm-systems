@@ -4,9 +4,8 @@
 //! Linux KFD and DRM identities associated with a discovered endpoint.
 
 use crate::topology::Endpoint;
-
-/// Linux host facts obtained from procfs and sysfs.
-pub mod host;
+use crate::topology::host::attached_numa_node_for_render;
+use std::path::Path;
 
 /// Linux-native identities retained for KFD and DRM interoperability.
 ///
@@ -37,4 +36,18 @@ pub fn kfd_drm_info(endpoint: &Endpoint) -> Option<KfdDrmEndpointInfo> {
         }),
         crate::driver::EndpointSelector::Opaque(_) => None,
     }
+}
+
+/// Returns the OS NUMA node at a DRM endpoint's attachment when it has an
+/// online host CPU. This is a best-effort host locality hint, not a KFD node
+/// identity, execution permission, or part of endpoint activation identity.
+#[must_use]
+pub fn host_numa_node(endpoint: &Endpoint) -> Option<u32> {
+    let minor = kfd_drm_info(endpoint)?.render_minor?;
+    attached_numa_node_for_render(
+        Path::new("/sys/class/drm"),
+        Path::new("/sys/devices/system/node"),
+        Path::new("/sys/devices/system/cpu/online"),
+        minor,
+    )
 }
