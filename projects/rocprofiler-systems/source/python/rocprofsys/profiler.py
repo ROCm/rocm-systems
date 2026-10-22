@@ -44,8 +44,6 @@ def _default_functor():
 class Profiler:
     """Provides decorators and context-manager for the rocprof-sys profilers"""
 
-    global _default_functor
-
     # static variable
     _conditional_functor = _default_functor
 
