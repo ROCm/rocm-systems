@@ -806,9 +806,6 @@ class GpuAgent : public GpuAgentInt {
   // @brief Setup GWS accessing queue.
   void InitGWS();
 
-  // @brief True if this agent can provide the shared HSA_QUEUE_TYPE_COOPERATIVE queue.
-  bool CooperativeQueuesSupported() const;
-
   // @brief Set-up memory allocators
   void InitAllocators();
 

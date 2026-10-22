@@ -2082,11 +2082,9 @@ void AqlQueue::InitScratchSRD() {
 }
 
 hsa_status_t AqlQueue::EnableGWS(int gws_slot_count) {
-  if (gws_slot_count > 0) {
-    uint32_t discard;
-    auto status = agent_->driver().AllocQueueGWS(queue_id_, gws_slot_count, &discard);
-    if (status != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-  }
+  uint32_t discard;
+  auto status = agent_->driver().AllocQueueGWS(queue_id_, gws_slot_count, &discard);
+  if (status != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   amd_queue_.hsa_queue.type = HSA_QUEUE_TYPE_COOPERATIVE;
   return HSA_STATUS_SUCCESS;
 }

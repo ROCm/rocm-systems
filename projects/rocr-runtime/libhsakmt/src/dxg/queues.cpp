@@ -249,8 +249,16 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAllocQueueGWS(HSA_QUEUEID QueueId, HSAuint32 nGWS,
   if (!queue_)
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
-  // WKMI has no per-queue GWS allocation.
-  return HSAKMT_STATUS_NOT_SUPPORTED;
+  // Only marks the queue cooperative; there is no GWS to hand out.
+  if (!dxg_runtime->coop_queue_ || queue_->device->Major() < 11)
+    return HSAKMT_STATUS_NOT_SUPPORTED;
+
+  if (queue_->SetCooperative() != HSA_STATUS_SUCCESS)
+    return HSAKMT_STATUS_ERROR;
+
+  if (firstGWS)
+    *firstGWS = 0;
+  return HSAKMT_STATUS_SUCCESS;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtQueueRingDoorbell(HSA_QUEUEID QueueId, uint64_t value) {

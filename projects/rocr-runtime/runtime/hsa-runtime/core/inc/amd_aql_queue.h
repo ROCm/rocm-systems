@@ -240,8 +240,7 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   /// @brief Provide information about the queue
   hsa_status_t GetInfo(hsa_queue_info_attribute_t attribute, void* value) override;
 
-  /// @brief Mark this queue cooperative and allocate @p gws_slot_count GWS slots to it.
-  /// A count of 0 makes the queue cooperative without GWS.
+  /// @brief Enable use of GWS from this queue.
   hsa_status_t EnableGWS(int gws_slot_count);
 
   /// @brief Update internal scratch limits based on agent limits. If current allocated scratch are
