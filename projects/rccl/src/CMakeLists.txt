@@ -1115,10 +1115,11 @@ if (ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
     target_include_directories(rccl PRIVATE ${ROCSHMEM_INCLUDE_DIR})
   endif()
 
-  # GDA factory (gin_rocshmem_gda_factory.cc) directly includes rocshmem
-  # host headers (ibv_wrapper, topology, envvar, debug_gda) that are not
-  # yet shimmed or copied. These paths will be removed when GDA host
-  # dependencies are severed (like SDMA was).
+  # GIN pulls a few rocshmem headers (and the mlx5 provider .cpp) straight from
+  # the rocshmem source tree; the GDA factory's former host-header dependencies
+  # (ibv_wrapper, topology, envvar, debug_gda) are now shimmed with rccl-native
+  # equivalents, so only the source include paths for the copied GIN headers
+  # remain. No rocshmem *install* (built library) is on the GIN path.
   if (ROCSHMEM_SOURCE_DIR)
     target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/src)
     target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/include)
@@ -1748,8 +1749,8 @@ elseif(ENABLE_ROCSHMEM_GIN)
   # into librccl.so (SDMA and the GDA factory + mlx5 provider via src/gin). So
   # there is no rocshmem host-symbol extraction, no --exclude-libs, and no
   # --allow-shlib-undefined — librccl leaves no rocshmem host symbol unresolved.
-  # GIN device templates still resolve rocshmem device symbols from the per-arch
-  # .bc injected by DeviceLinker.cmake.
+  # GIN device code is header-only (no rocshmem device bitcode), so unlike
+  # ENABLE_ROCSHMEM this branch links no rocshmem library at all.
   #
   # anvil.cpp calls hsaKmt* directly. hsa-runtime64 is already linked above.
   target_link_libraries(rccl PRIVATE ${HSAKMT_LIBRARY})
