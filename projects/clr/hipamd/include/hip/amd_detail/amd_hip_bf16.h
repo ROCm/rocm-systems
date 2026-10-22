@@ -1305,12 +1305,7 @@ __BF16_HOST_DEVICE_STATIC__ bool __hneu(const __hip_bfloat16 a, const __hip_bflo
  * \brief Compare two bfloat162 values - return max
  */
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hmax(const __hip_bfloat16 a, const __hip_bfloat16 b) {
-  auto a_nan = __hisnan(a), b_nan = __hisnan(b);
-  if (a_nan || b_nan) {
-    if (a_nan && b_nan) return HIPRT_NAN_BF16;  // return canonical NaN
-    return a_nan ? b : a;
-  }
-  return (__bf16)a > (__bf16)b ? a : b;
+  return __builtin_elementwise_maximumnum((__bf16)a, (__bf16)b);
 }
 
 /**
@@ -1318,12 +1313,7 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hmax(const __hip_bfloat16 a, const 
  * \brief Compare two bfloat162 values - return min
  */
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hmin(const __hip_bfloat16 a, const __hip_bfloat16 b) {
-  auto a_nan = __hisnan(a), b_nan = __hisnan(b);
-  if (a_nan || b_nan) {
-    if (a_nan && b_nan) return HIPRT_NAN_BF16;  // return canonical NaN
-    return a_nan ? b : a;
-  }
-  return (__bf16)a < (__bf16)b ? a : b;
+  return __builtin_elementwise_minimumnum((__bf16)a, (__bf16)b);
 }
 
 /**

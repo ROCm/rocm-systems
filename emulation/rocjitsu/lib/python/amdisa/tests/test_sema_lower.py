@@ -19,6 +19,7 @@ from amdisa.codegen.execute.sema_lower import (
     _INLINE_TERNARY_OPS,
     _lower_apply_clamp,
     _lower_apply_omod,
+    _lower_call,
     InlineBinaryOp,
     LoweringContext,
     OperandBinding,
@@ -57,6 +58,32 @@ def test_scc_shift_add_inline_operations_do_not_read_scc(name):
 
 def test_non_scc_inline_operation_has_no_scc_effect():
     assert not isinstance(_INLINE_BINARY_OPS['add_co'], InlineBinaryOp)
+
+
+@pytest.mark.parametrize(
+    ('callee', 'ty', 'expected', 'unexpected'),
+    [
+        ('maxmin', SemaType.I32, 'std::min(std::max(', 'std::fmin'),
+        ('minmax', SemaType.U32, 'std::max(std::min(', 'std::fmax'),
+        ('maxmin', SemaType.F32, 'std::fmin(std::fmax(', 'std::min'),
+        ('minmax', SemaType.F32, 'std::fmax(std::fmin(', 'std::max'),
+    ],
+)
+def test_minmax_ternary_lowering_uses_result_type(callee, ty, expected, unexpected):
+    node = SemaNode(
+        SemaNodeKind.CALL,
+        call_name=callee,
+        ty=ty,
+        children=(
+            SemaNode(SemaNodeKind.ID, id_name=callee),
+            SemaNode(SemaNodeKind.LIT, lit_value='a', ty=ty),
+            SemaNode(SemaNodeKind.LIT, lit_value='b', ty=ty),
+            SemaNode(SemaNodeKind.LIT, lit_value='c', ty=ty),
+        ),
+    )
+    result = _lower_call(node, LoweringContext(exec_model=ExecModel.VECTOR))
+    assert expected in result
+    assert unexpected not in result
 
 
 def test_packed_byte_inline_operations_match_isa_special_cases():
@@ -847,6 +874,31 @@ class TestLowerVectorAdd:
             lower_sema_block(SemaBlock('V_UNLISTED_F16', ExecModel.VECTOR, body))
         name = 'V_FRACT_F16' if kind == SemaNodeKind.FRACT else 'V_LDEXP_F16'
         assert lower_sema_block(SemaBlock(name, ExecModel.VECTOR, body))
+
+    @pytest.mark.parametrize('operation', ['min', 'max'])
+    def test_raw_f16_selection_requires_the_sdwa_rounded_store(self, operation):
+        call = f'float_minmax_legacy_{operation}'
+        value = SemaNode(
+            SemaNodeKind.CALL,
+            call_name=call,
+            ty=SemaType.F16,
+            children=(
+                SemaNode(SemaNodeKind.ID, id_name=call),
+                _cast(_src(0), SemaType.F16),
+                _cast(_src(1), SemaType.F16),
+            ),
+        )
+        body = SemaNode(
+            SemaNodeKind.ASSIGN, children=(_cast(_dst(0), SemaType.F16), value)
+        )
+        with pytest.raises(ValueError, match='SDWA_ROUNDED_F16_OPS'):
+            lower_sema_block(SemaBlock('V_UNLISTED_F16', ExecModel.VECTOR, body))
+        name = f'V_{operation.upper()}_F16'
+        assert lower_sema_block(SemaBlock(name, ExecModel.VECTOR, body))
+        # Scalar selection has no SDWA output stage to require.
+        assert lower_sema_block(
+            SemaBlock(f'S_{operation.upper()}_F16', ExecModel.SCALAR, body)
+        )
 
     @pytest.mark.parametrize(
         ('ty', 'template', 'policy'),
