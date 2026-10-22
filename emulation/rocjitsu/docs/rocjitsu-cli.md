@@ -10,7 +10,7 @@ the simulated GPU. It operates in four modes:
 - **Daemon mode**: Spawns a daemon child process that hosts the simulation
   engine, then `LD_PRELOAD` + `execve`s the target. Client processes
   communicate with the daemon via RPC over a Unix domain socket. GPU memory
-  is shared using memfds passed via SCM_RIGHTS.
+  is shared using backing descriptors passed via SCM_RIGHTS.
 - **Attach mode**: Launches an application against an already-running daemon.
 - **VFIO-user mode**: Serves one configured PCI function to an external VMM
   through an AF_UNIX socket. This mode is available only in builds configured
@@ -161,8 +161,8 @@ All messages use a fixed 16-byte header followed by an opcode-specific payload:
 
 ### Opcodes
 
-| Opcode | Direction | Payload | Memfd |
-|--------|-----------|---------|-------|
+| Opcode | Direction | Payload | Backing descriptor |
+|--------|-----------|---------|--------------------|
 | `RPC_HANDSHAKE` | C->D->C | `RpcHandshakeResponse` + topology path | No |
 | `RPC_CLOSE` | C->D->C | None | No |
 | `RPC_MMAP` | C->D->C | `RpcMmapRequest` / `RpcMmapResponse` | Optional |
@@ -179,14 +179,19 @@ client saves and restores original pointers across the RPC round-trip.
 
 ### File Descriptor Passing
 
-Memfds are passed via `sendmsg()`/`recvmsg()` with `SCM_RIGHTS` ancillary
-data. This is the standard Unix mechanism for cross-process file descriptor
+Backing descriptors (memfds or fallback socket tokens) are passed via
+`sendmsg()`/`recvmsg()` with `SCM_RIGHTS` ancillary data.
+This is the standard Unix mechanism for cross-process file descriptor
 sharing (same pattern as QEMU vhost-user and CRIU).
 
-Two RPC operations carry memfds:
+Two RPC response forms carry backing descriptors with different lifetimes:
 
-- `RPC_IOCTL` (ALLOC_MEMORY response) --- allocation backing descriptor
-- `RPC_MMAP` (response) --- doorbell and event page descriptors
+- `RPC_IOCTL` (`ALLOC_MEMORY` and `IPC_IMPORT_HANDLE` responses): the client
+  stores the allocation or import descriptor until free or driver cleanup.
+- `RPC_MMAP` responses: temporary aliases of allocation, doorbell, or event-page
+  backing. `RemoteDriver::mmap` closes the received alias on every exit, including
+  size-check and mapping failures. If the reply has no descriptor, it borrows
+  the stored allocation or import descriptor and leaves that descriptor open.
 
 ### Thread Safety
 
@@ -217,12 +222,14 @@ Client                                     Daemon
                                             memory_backing::create via rocjitsu-memory
                                             MAP_FIXED backing at VA (proactive)
                                     <----  response + backing fd (SCM_RIGHTS)
+   [store fd until free or driver cleanup]
    [USERPTR: mincore+copy, MAP_FIXED]
 
 3. ROCR: fmm_map_to_cpu()
    mmap(drm_fd, MAP_FIXED, offset)
    interposer routes DRM fd     ---->     mmap() -> already mapped, return
-                                    <----  response
+                                    <----  response + temporary backing fd (SCM_RIGHTS)
+   [map backing; close reply fd on every exit]
 ```
 
 The private helper sizes ordinary memfds when its inherited hard file limit
