@@ -28,6 +28,7 @@
 #include "util/diagnostic.h"
 
 #include "embedded_schema.h"
+#include "launch_flags.h"
 #include "launch_preload.h"
 #include "rocm_visibility.h"
 
@@ -373,45 +374,14 @@ dbt_execution_gpu_ordinals(const std::string &dbt_config_path,
   return rocjitsu::cli::enumerate_kfd_gpus(gpus);
 }
 
-void print_usage() {
-  std::cerr
-      << "Usage: rocjitsu --config <config.json> [--daemon|--attach] -- <app> [args...]\n"
-         "\n"
-         "Modes:\n"
-         "  rocjitsu --config foo.json -- ./app          Local mode (in-process simulation)\n"
-         "  rocjitsu --daemon --config foo.json -- ./app Daemon mode (fork daemon + launch app)\n"
-         "  rocjitsu --daemon --config foo.json          Daemon-only (run server)\n"
-         "  rocjitsu --attach --config foo.json -- ./app Attach to running daemon\n"
-         "  rocjitsu --config foo.json --vfio-socket <path>\n"
-         "                                               Serve a PCI device to a VMM\n"
-         "\n"
-         "Options:\n"
-         "  --config <path>   Simulation config JSON (required)\n"
-         "  --cpu-thread-budget <n>, --cpu-thread-budget=<n>\n"
-         "                    Replace cpu_thread_budget for this launch only; the\n"
-         "                    config file is left unchanged. Zero selects automatic\n"
-         "                    sizing. Not available with --attach.\n"
-         "  --wait-checking <mode>, --wait-checking=<mode>\n"
-         "                    Override every CU and GPU for this launch:\n"
-         "                    on = ordinary checks, off = no wait checks,\n"
-         "                    all = ordinary plus gfx1250 XCNT.\n"
-         "                    Omission keeps JSON settings and defaults. The source\n"
-         "                    config is unchanged. Not available with --attach.\n"
-         "  --vfio-socket <path>\n"
-         "                    Serve the configured GPU as a PCI function to a VMM over\n"
-         "                    the vfio-user protocol on this AF_UNIX socket, instead of\n"
-         "                    launching an application. Requires a build with\n"
-         "                    ROCJITSU_ENABLE_VFIO.\n"
-         "                    The VMM must share guest RAM through an mmap-able\n"
-         "                    descriptor or the device cannot reach it; with QEMU that\n"
-         "                    means -object\n"
-         "                    memory-backend-memfd,id=mem,size=<N>,share=on together\n"
-         "                    with -machine memory-backend=mem.\n"
-         "  --thread-budget-table\n"
-         "                    Print engine / dispatch allocations without running a VM\n"
-         "  --check-vfio-user Report whether this binary includes VFIO-user support\n"
-         "  --version, -v     Print version and exit\n"
-         "  --help, -h        Print this help and exit\n";
+void print_usage(const cli::Command &command) {
+  std::cerr << cli::format_help(command)
+            << "\nApplication arguments must follow --. Examples:\n"
+               "  rocjitsu --config foo.json -- ./app\n"
+               "  rocjitsu --daemon --config foo.json -- ./app\n"
+               "  rocjitsu --daemon --config foo.json\n"
+               "  rocjitsu --attach --config foo.json -- ./app\n"
+               "  rocjitsu --config foo.json --vfio-socket /tmp/gpu.sock\n";
 }
 
 } // namespace
@@ -419,93 +389,50 @@ void print_usage() {
 int main(int argc, char *argv[]) {
   std::signal(SIGPIPE, SIG_IGN);
 
-  const char *config_path = nullptr;
-  const char *vfio_socket = nullptr;
-  bool thread_budget_table = false;
-  config::LaunchOverrides overrides;
-  int vfio_ready_fd = -1;
-  bool daemon_mode = false;
-  bool attach_mode = false;
-  int separator_idx = -1;
-
-  for (int i = 1; i < argc; ++i) {
-    std::string_view arg(argv[i]);
-    if (arg == "--") {
-      separator_idx = i;
-      break;
-    }
-    if (arg == "--config" && i + 1 < argc) {
-      config_path = argv[++i];
-    } else if (arg == "--cpu-thread-budget" || arg.starts_with("--cpu-thread-budget=")) {
-      // Both spellings are accepted because wrappers that forward a single opaque
-      // token cannot pass a flag and its value as two arguments.
-      const size_t equals = arg.find('=');
-      std::string_view value;
-      if (equals != std::string_view::npos) {
-        value = arg.substr(equals + 1);
-      } else if (i + 1 < argc) {
-        value = argv[++i];
-      } else {
-        std::cerr << "rocjitsu: --cpu-thread-budget requires a value\n";
-        return 1;
-      }
-      overrides.cpu_thread_budget = config::parse_uint32(value);
-      if (!overrides.cpu_thread_budget) {
-        std::cerr << "rocjitsu: --cpu-thread-budget requires an unsigned integer\n";
-        return 1;
-      }
-    } else if (arg == "--wait-checking" || arg.starts_with("--wait-checking=")) {
-      const size_t equals = arg.find('=');
-      std::string_view value;
-      if (equals != std::string_view::npos)
-        value = arg.substr(equals + 1);
-      else if (i + 1 < argc)
-        value = argv[++i];
-      overrides.wait_checking = config::parse_wait_checking(value);
-      if (!overrides.wait_checking) {
-        std::cerr << "rocjitsu: --wait-checking requires on, off, or all\n";
-        return 1;
-      }
-    } else if (arg == "--vfio-socket" && i + 1 < argc) {
-      vfio_socket = argv[++i];
-    } else if (arg == "--thread-budget-table") {
-      thread_budget_table = true;
-    } else if (arg == "--vfio-ready-fd" && i + 1 < argc) {
-      std::string_view value(argv[++i]);
-      auto [ptr, error] = std::from_chars(value.data(), value.data() + value.size(), vfio_ready_fd);
-      if (error != std::errc{} || ptr != value.data() + value.size() || vfio_ready_fd < 0) {
-        std::cerr << "rocjitsu: --vfio-ready-fd requires a nonnegative descriptor\n";
-        return 1;
-      }
-    } else if (arg == "--daemon") {
-      daemon_mode = true;
-    } else if (arg == "--attach") {
-      attach_mode = true;
-    } else if (arg == "--check-vfio-user") {
-#if defined(RJ_ENABLE_VFIO_USER)
-      std::cout << "vfio-user support enabled\n";
-      return 0;
-#else
-      std::cerr << "rocjitsu: this build has no vfio-user support; reconfigure with "
-                   "-DROCJITSU_ENABLE_VFIO=ON\n";
-      return 1;
-#endif
-    } else if (arg == "--help" || arg == "-h") {
-      print_usage();
-      return 0;
-    } else if (arg == "--version" || arg == "-v") {
-      std::cout << rj_get_version_string() << "\n";
-      return 0;
-    } else {
-      std::cerr << std::format("rocjitsu: unknown option: {}\n", arg);
-      print_usage();
-      return 1;
-    }
+  cli::Command command{"rocjitsu", cli::PositionalMode::AfterSeparator};
+  cli::LaunchFlags flags;
+  auto report = [](std::string_view message) { std::cerr << message << '\n'; };
+  util::DiagnosticEmitter diagnostic(report);
+  if (flags.register_flags(command, diagnostic).failed())
+    return 1;
+  std::vector<std::string_view> arguments(argv + 1, argv + argc);
+  auto parsed = cli::parse(command, arguments, diagnostic);
+  if (parsed.failed())
+    return 1;
+  if (flags.help->value()) {
+    print_usage(command);
+    return 0;
   }
+  if (flags.version->value()) {
+    std::cout << rj_get_version_string() << '\n';
+    return 0;
+  }
+  if (flags.check_vfio->value()) {
+#if defined(RJ_ENABLE_VFIO_USER)
+    std::cout << "vfio-user support enabled\n";
+    return 0;
+#else
+    std::cerr << "rocjitsu: this build has no vfio-user support; reconfigure with "
+                 "-DROCJITSU_ENABLE_VFIO=ON\n";
+    return 1;
+#endif
+  }
+  const char *config_path = flags.config->value().empty() ? nullptr : flags.config->value().c_str();
+  const char *vfio_socket =
+      flags.vfio_socket->value().empty() ? nullptr : flags.vfio_socket->value().c_str();
+  const bool thread_budget_table = flags.thread_table->value();
+  config::LaunchOverrides overrides;
+  overrides.cpu_thread_budget = flags.cpu_budget->value();
+  overrides.wait_checking = flags.wait->value();
+  const int vfio_ready_fd =
+      flags.vfio_ready_fd->value() ? static_cast<int>(*flags.vfio_ready_fd->value()) : -1;
+  const bool daemon_mode = flags.daemon->value();
+  const bool attach_mode = flags.attach->value();
+  const bool has_app = !parsed.value().positional.empty();
 
   if (!config_path) {
     std::cerr << "rocjitsu: --config is required\n";
-    print_usage();
+    print_usage(command);
     return 1;
   }
 
@@ -539,7 +466,8 @@ int main(int argc, char *argv[]) {
   };
 
   if (thread_budget_table) {
-    if (vfio_socket || vfio_ready_fd >= 0 || daemon_mode || attach_mode || separator_idx >= 0) {
+    if (vfio_socket || vfio_ready_fd >= 0 || daemon_mode || attach_mode ||
+        parsed.value().saw_separator) {
       std::cerr << "rocjitsu: --thread-budget-table cannot be combined with a launch mode\n";
       return 1;
     }
@@ -608,7 +536,7 @@ int main(int argc, char *argv[]) {
   // this is dispatched before the parse that builds one here -- not because no
   // machine is needed, but because the one it needs is assembled differently.
   if (vfio_socket != nullptr) {
-    if (daemon_mode || attach_mode || (separator_idx >= 0 && separator_idx + 1 < argc)) {
+    if (daemon_mode || attach_mode || (has_app)) {
       std::cerr << "rocjitsu: --vfio-socket serves a VMM and cannot be combined with "
                    "--daemon, --attach, or an application\n";
       return 1;
@@ -664,18 +592,20 @@ int main(int argc, char *argv[]) {
   if (!write_config_for_this_launch())
     return 1;
 
-  bool has_app = (separator_idx >= 0 && separator_idx + 1 < argc);
-
   if (daemon_mode && !has_app)
     return run_daemon_server(abs_config.c_str());
 
   if (!has_app) {
     std::cerr << "rocjitsu: no application specified after --\n";
-    print_usage();
+    print_usage(command);
     return 1;
   }
 
-  char **app_argv = &argv[separator_idx + 1];
+  std::vector<char *> application_arguments;
+  for (auto &argument : parsed.value().positional)
+    application_arguments.push_back(argument.data());
+  application_arguments.push_back(nullptr);
+  char **app_argv = application_arguments.data();
 
   auto lib_path = find_interposer_lib();
   if (lib_path.empty()) {
