@@ -11,3 +11,6 @@
   under `<libdir>/fortran/<compiler>` and the `.mod` files under `<includedir>/fortran/<compiler>`.
   The archive has one section per procedure: link with `-Wl,--gc-sections` to keep only the wrappers
   you call.
+* Generated Fortran bindings for the ROCTx API, as a single `roctx` module: `use roctx`, link
+  `roc::roctx_fortran`, found with `find_package(roctx-fortran)`. Built and installed with the HIP
+  bindings, against an installed `rocprofiler-sdk-roctx`.
