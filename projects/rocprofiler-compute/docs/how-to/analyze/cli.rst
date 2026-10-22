@@ -269,7 +269,8 @@ Open the saved HTML file in a browser for the interactive roofline plot. See :re
    for how those fields affect metric normalization.
 
 3. Choose your own customized subset of metrics with the ``-b`` (or ``--block``)
-   option. Or, build your own configuration following
+   option. Pass all ids after one ``-b``, for example ``-b 2 5``; a repeated ``-b``
+   keeps only the last list. Or, build your own configuration following
    `config_template <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-compute/src/rocprof_compute_soc/analysis_configs/panel_config_template.yaml>`_.
    The following snippet shows how to generate a report containing only metric 2
    (:doc:`System Speed-of-Light </conceptual/cdna/system-speed-of-light>`).
@@ -675,7 +676,7 @@ Two-step workflow:
 Roofline visualization options (available only in analyze mode):
 
 * ``--sort``: Overlay top kernels or top dispatches (default: kernels)
-* ``--mem-level``: Filter by memory level -- HBM, L2, vL1D, L0, LDS (default: ALL)
+* ``--mem-level``: Filter by memory level -- ALL, HBM, L2, vL1D, L0, LDS (default: ALL)
 * ``--roofline-data-type``: Choose datatypes for roofline visualization (default: FP32)
 
 Example with multiple ``--mem-level`` and ``--roofline-data-type`` options:
