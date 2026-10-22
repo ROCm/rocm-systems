@@ -1819,8 +1819,10 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     ' return std::numeric_limits<decltype(a)>::quiet_NaN();'
     ' auto ab = (a == b) ? (std::signbit(a) ? b : a) : (a > b ? a : b);'
     ' return (ab == c) ? (std::signbit(ab) ? c : ab) : (ab > c ? ab : c); }}()',
-    'maxmin': 'std::fmin(std::fmax({0}, {1}), {2})',
-    'minmax': 'std::fmax(std::fmin({0}, {1}), {2})',
+    'maxmin_f': 'std::fmin(std::fmax({0}, {1}), {2})',
+    'minmax_f': 'std::fmax(std::fmin({0}, {1}), {2})',
+    'maxmin_i': 'std::min(std::max({0}, {1}), {2})',
+    'minmax_i': 'std::max(std::min({0}, {1}), {2})',
     'maxmin_num': 'std::fmin(std::fmax({0}, {1}), {2})',
     'minmax_num': 'std::fmax(std::fmin({0}, {1}), {2})',
     'maximumminimum': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
@@ -2134,7 +2136,7 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
             inline_op.template if isinstance(inline_op, InlineBinaryOp) else inline_op
         )
         return template.format(args[0], args[1])
-    if callee in ('min3', 'max3', 'med3'):
+    if callee in ('min3', 'max3', 'med3', 'maxmin', 'minmax'):
         suffix = '_f' if node.ty and node.ty.base == 'F' else '_i'
         return _INLINE_TERNARY_OPS[callee + suffix].format(args[0], args[1], args[2])
     if len(args) == 3 and callee in _INLINE_TERNARY_OPS:
