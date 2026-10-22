@@ -14349,7 +14349,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GCEA_RDRAM_SIZE_REQ,sum)
     - name: GCEA_RRET_VLD
-      description: Read returns
+      description: Read returns of GCEA VLD
       properties: []
       definitions:
         - architectures:
@@ -14362,7 +14362,7 @@ rocprofiler-sdk:
           event: 66
     - name: GCEA_RRET_VLD_sum
       description: >-
-        Sum across all GCEA instances: Read returns
+        Sum across all GCEA instances: Read returns of GCEA VLD
       properties: []
       definitions:
         - architectures:
@@ -14445,7 +14445,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GCEA_SARB_REQ_PER_VC,sum)
     - name: GCEA_SARB_STALLED
-      description: Stalled
+      description: GCEA to SARB communication is stalled
       properties: []
       definitions:
         - architectures:
@@ -14458,7 +14458,7 @@ rocprofiler-sdk:
           event: 63
     - name: GCEA_SARB_STALLED_sum
       description: >-
-        Sum across all GCEA instances: Stalled
+        Sum across all GCEA instances: GCEA to SARB communication is stalled
       properties: []
       definitions:
         - architectures:
