@@ -604,24 +604,24 @@ protected:
       wf->halt();
   }
 
-  DecodeResult decode(bool load) {
+  DecodeResult decode(bool load, bool r128 = false) {
     if (GetParam() == ROCJITSU_CODE_ARCH_RDNA3) {
-      const auto base =
-          rdna3::build_mimg(load ? rdna3::kImageLoadMimg : rdna3::kImageStoreMimg,
-                            {.nsa = 1, .dim = 1, .unorm = 1, .dmask = 1, .vaddr = 2, .vdata = 8});
+      const auto base = rdna3::build_mimg(
+          load ? rdna3::kImageLoadMimg : rdna3::kImageStoreMimg,
+          {.nsa = 1, .dim = 1, .unorm = 1, .dmask = 1, .r128 = r128, .vaddr = 2, .vdata = 8});
       const std::array<uint32_t, 3> words{base[0], base[1], 6};
       return decoder->decode(words.data());
     }
     if (GetParam() == ROCJITSU_CODE_ARCH_RDNA3_5) {
-      const auto base =
-          rdna3_5::build_mimg(load ? rdna3_5::kImageLoadMimg : rdna3_5::kImageStoreMimg,
-                              {.nsa = 1, .dim = 1, .unorm = 1, .dmask = 1, .vaddr = 2, .vdata = 8});
+      const auto base = rdna3_5::build_mimg(
+          load ? rdna3_5::kImageLoadMimg : rdna3_5::kImageStoreMimg,
+          {.nsa = 1, .dim = 1, .unorm = 1, .dmask = 1, .r128 = r128, .vaddr = 2, .vdata = 8});
       const std::array<uint32_t, 3> words{base[0], base[1], 6};
       return decoder->decode(words.data());
     }
-    const auto words =
-        rdna4::build_vimage(load ? rdna4::kImageLoadVimage : rdna4::kImageStoreVimage,
-                            {.dim = 1, .dmask = 1, .vdata = 8, .vaddr0 = 2, .vaddr1 = 6});
+    const auto words = rdna4::build_vimage(
+        load ? rdna4::kImageLoadVimage : rdna4::kImageStoreVimage,
+        {.dim = 1, .r128 = r128, .dmask = 1, .vdata = 8, .vaddr0 = 2, .vaddr1 = 6});
     return decoder->decode(words.data());
   }
 
@@ -670,6 +670,29 @@ TEST_P(RdnaDecodedImageAccessTest,
   EXPECT_EQ(cu->read_vgpr(vb + 8, 0), 0x11111111u);
   EXPECT_EQ(cu->read_vgpr(vb + 8, 1), 0xdeadbeefu);
   EXPECT_EQ(cu->read_vgpr(vb + 8, 2), 0x33333333u);
+}
+
+TEST_P(RdnaDecodedImageAccessTest, R128LoadAndStoreReportUnimplemented) {
+  const uint32_t sb = wf->sgpr_alloc().base;
+  const uint32_t vb = wf->vgpr_alloc().base;
+  for (uint32_t reg = 4; reg < 8; ++reg)
+    cu->write_sgpr(sb + reg, 0xffffffffu);
+  memory.write32(kBase, 0x12345678u);
+  cu->write_vgpr(vb + 8, 0, 0xdeadbeefu);
+
+  for (bool load : {false, true}) {
+    SCOPED_TRACE(testing::Message() << "load=" << load);
+    auto decoded = decode(load, true);
+    ASSERT_TRUE(decoded.succeeded());
+    std::unique_ptr<Instruction> inst = std::move(decoded).value();
+    ASSERT_NE(inst, nullptr);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).failed());
+    EXPECT_EQ(wf->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    EXPECT_EQ(inst->data(), nullptr);
+    EXPECT_EQ(memory.read32(kBase), 0x12345678u);
+    EXPECT_EQ(cu->read_vgpr(vb + 8, 0), 0xdeadbeefu);
+  }
 }
 
 INSTANTIATE_TEST_SUITE_P(RdnaArchitectures, RdnaDecodedImageAccessTest,

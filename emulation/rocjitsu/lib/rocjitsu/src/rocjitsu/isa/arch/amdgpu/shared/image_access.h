@@ -24,6 +24,7 @@ struct ImageFields {
   uint32_t dmask = 0;
   bool a16 = false;
   bool d16 = false;
+  bool r128 = false;
   bool lwe = false;
   bool da = false;
   bool unorm = false;
@@ -87,6 +88,8 @@ inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
   state.elem_size = 1;
   state.buffer_d16 = fields.d16;
   state.buffer_components = static_cast<uint32_t>(std::popcount(fields.dmask & 15u));
+  if (fields.r128)
+    return fail(InstructionExecutionError::UnimplementedInstruction);
   if (fields.lwe)
     return fail(InstructionExecutionError::UnimplementedInstruction);
   if (state.buffer_components == 0 || (!state.is_load && !fields.unorm))

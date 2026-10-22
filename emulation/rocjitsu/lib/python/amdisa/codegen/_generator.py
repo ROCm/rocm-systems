@@ -8041,7 +8041,8 @@ class CodeGenerator:
                 address_registers = 'amdgpu::gfx12_image_address_registers(inst_)'
                 image_fields = (
                     '{.dmask = inst_.dmask, .a16 = bool(inst_.a16), '
-                    '.d16 = bool(inst_.d16), .lwe = false, .da = true, '
+                    '.d16 = bool(inst_.d16), .r128 = bool(inst_.r128), '
+                    '.lwe = false, .da = true, '
                     '.unorm = true}'
                 )
             else:
@@ -8057,9 +8058,15 @@ class CodeGenerator:
                     if self.isa_spec.arch_name.startswith('rdna')
                     else 'bool(inst_.da)'
                 )
+                r128 = (
+                    'bool(inst_.r128)'
+                    if self.isa_spec.arch_name.startswith('rdna')
+                    else 'false'
+                )
                 image_fields = (
                     '{.dmask = inst_.dmask, .a16 = bool(inst_.a16), '
-                    '.d16 = bool(inst_.d16), .lwe = bool(inst_.lwe), '
+                    f'.d16 = bool(inst_.d16), .r128 = {r128}, '
+                    '.lwe = bool(inst_.lwe), '
                     f'.da = {da}, .unorm = bool(inst_.unorm)}}'
                 )
             L.append(
