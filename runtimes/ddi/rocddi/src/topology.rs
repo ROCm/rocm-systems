@@ -1,25 +1,31 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-//! Passive hardware discovery records and topology relationships.
+//! Passive hardware facts and source-qualified topology relationships.
 //!
-//! An endpoint describes hardware discovered in one generation-consistent
-//! topology snapshot. Optional information from other sources may be populated
-//! later on the same record. Inspecting or cloning an endpoint does not
-//! activate hardware, acquire an address space, or grant access to memory. An
-//! activated endpoint is represented separately by `crate::device::Device`.
+//! The records defined here describe hardware independently of a topology
+//! graph: an endpoint can be opened directly, and cache, link, PCI, and GPU
+//! information can be used without a node ID. `model` defines the sources,
+//! nodes, and relationships that bind those facts into one snapshot. Its public
+//! types are re-exported here so callers have one topology interface.
 //!
-//! Endpoint-kind variants carry only the capabilities meaningful to that kind.
-//! A backend publishes a variant only when it can populate and activate that
-//! endpoint faithfully; an activated device remains a separate session-owned
-//! state object.
+//! An endpoint is a passive discovery record. Optional facts from other
+//! sources may be populated later. Inspecting or cloning one does not activate
+//! hardware, acquire an address space, or grant memory access; an activated
+//! endpoint is a separate session-owned `crate::device::Device`. Endpoint-kind
+//! variants contain only capabilities meaningful to that kind.
 
 use crate::driver;
-use crate::memory::storage::Shared;
 use crate::memory::{DeviceAccess, HostCacheability};
 
 pub mod host;
+mod model;
 pub mod platform;
+pub use model::{
+    AttachmentKind, EndpointAttachment, MemoryLocation, MemoryLocationKind, NativeNodeId, NodeId,
+    NodeKind, ReportedRoute, SourceId, SourceKind, TopologyCache, TopologyNode, TopologySnapshot,
+    TopologySource,
+};
 
 /// Exact PCI function and configuration identity reported by the OS.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -92,7 +98,6 @@ impl CacheInfo {
 }
 
 /// Physical or logical interconnect kind reported by topology discovery.
-#[doc(hidden)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MemoryLinkType {
     /// `HyperTransport` link.
@@ -110,7 +115,6 @@ pub enum MemoryLinkType {
 }
 
 /// Passive properties of one directed native topology link.
-#[doc(hidden)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct MemoryLinkInfo {
     /// Native minimum latency value for this direction.
@@ -134,36 +138,11 @@ pub struct MemoryLinkInfo {
 }
 
 impl MemoryLinkInfo {
-    #[doc(hidden)]
+    /// Number of native hops implied by the reported distance weight.
     #[must_use]
     pub const fn hop_count(self) -> u32 {
         if self.numa_distance == 0 { 0 } else { 1 }
     }
-}
-
-/// Driver-local node identity used to relate discovered topology records.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct TopologyKey {
-    /// Native topology node or group number.
-    pub(crate) group: u32,
-    /// Native member identity within that group.
-    pub(crate) member: u32,
-}
-
-/// Driver-local directed link. Host classification is explicit rather than
-/// inferred from an operating-system node or GPU identifier.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct MemoryLink {
-    /// Topology key at the directed link's origin.
-    pub(crate) source: TopologyKey,
-    /// Topology key at the directed link's destination.
-    pub(crate) target: TopologyKey,
-    /// The origin represents host memory rather than a device.
-    pub(crate) source_is_host: bool,
-    /// The destination represents host memory rather than a device.
-    pub(crate) target_is_host: bool,
-    /// Native latency, bandwidth, and coherency facts for this direction.
-    pub(crate) info: MemoryLinkInfo,
 }
 
 /// Queue transports qualified for one AMD GPU endpoint.
@@ -205,6 +184,10 @@ pub struct GpuQueueCapabilities {
 /// Required geometry fields must be complete and consistent before this record
 /// is published; opening an endpoint never substitutes guessed dimensions.
 /// Optional DRM facts may be populated later.
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "GPU topology reports independent native capabilities as flags"
+)]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct GpuInfo {
     /// Native KFD GPU identity used to resolve imported allocation placement.
@@ -261,6 +244,8 @@ pub struct GpuInfo {
     pub iommu_v2_supported: bool,
     /// Device-local memory can be coherently accessed by the host.
     pub coherent_host_access: bool,
+    /// SRAM ECC mode reported by the native GPU topology.
+    pub sram_ecc_enabled: bool,
     /// Packet processor firmware revision reported by the backend.
     pub packet_processor_firmware_version: u32,
     /// SDMA firmware revision reported by the backend.
@@ -349,9 +334,6 @@ pub struct Endpoint {
     /// Supported device permission bits. Every allocation requires READ and may
     /// independently request the supported WRITE and EXECUTE bits.
     pub supported_permissions: DeviceAccess,
-    pub(crate) caches: Option<Shared<Vec<CacheInfo>>>,
-    pub(crate) memory_links: Option<Shared<Vec<MemoryLink>>>,
-    pub(crate) topology_key: TopologyKey,
     pub(crate) driver_instance: driver::DriverInstanceId,
     pub(crate) selector: driver::EndpointSelector,
 }
@@ -378,66 +360,5 @@ impl Endpoint {
             EndpointKind::Gpu { info } => Some(info),
             EndpointKind::Cpu | EndpointKind::Npu | EndpointKind::Other => None,
         }
-    }
-
-    /// Returns the native cache records associated with this endpoint.
-    #[must_use]
-    pub fn caches(&self) -> &[CacheInfo] {
-        self.caches.as_ref().map_or(&[], |caches| caches.as_slice())
-    }
-
-    /// Returns the directed native link from this endpoint to another endpoint.
-    #[doc(hidden)]
-    #[must_use]
-    pub fn memory_link_to(&self, owner: &Self) -> Option<MemoryLinkInfo> {
-        if self.driver_instance != owner.driver_instance {
-            return None;
-        }
-        self.memory_links.as_ref().and_then(|links| {
-            links.iter().rev().find_map(|link| {
-                (link.source == self.topology_key
-                    && link.target == owner.topology_key
-                    && !link.source_is_host
-                    && !link.target_is_host)
-                    .then_some(link.info)
-            })
-        })
-    }
-
-    /// Returns the directed native link from this endpoint to host memory.
-    #[doc(hidden)]
-    #[must_use]
-    pub fn memory_link_to_host(&self) -> Option<MemoryLinkInfo> {
-        self.memory_links.as_ref().and_then(|links| {
-            links.iter().rev().find_map(|link| {
-                (link.source == self.topology_key && !link.source_is_host && link.target_is_host)
-                    .then_some(link.info)
-            })
-        })
-    }
-
-    /// Returns the directed native link from the host to this endpoint's memory.
-    #[doc(hidden)]
-    #[must_use]
-    pub fn memory_link_from_host(&self) -> Option<MemoryLinkInfo> {
-        self.memory_links.as_ref().and_then(|links| {
-            links.iter().rev().find_map(|link| {
-                (link.source_is_host && !link.target_is_host && link.target == self.topology_key)
-                    .then_some(link.info)
-            })
-        })
-    }
-
-    /// Returns whether this consumer has a cached direct route to the owner's
-    /// LOCAL memory. The owner itself is always reachable. Peer routes are
-    /// accepted only from the generation-consistent topology snapshot used to
-    /// construct this endpoint record.
-    #[must_use]
-    pub fn can_access_local_memory(&self, owner: &Self) -> bool {
-        self.driver_instance == owner.driver_instance
-            && ((self.topology_key == owner.topology_key)
-                || self
-                    .memory_link_to(owner)
-                    .is_some_and(|link| link.hop_count() != 0))
     }
 }

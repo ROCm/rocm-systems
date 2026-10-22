@@ -32,10 +32,8 @@ use rocddi::device::event::{
 use rocddi::device::gpu::profiling::{PcSamplingConfiguration, PcSamplingConfigurationSet};
 use rocddi::memory::device::Allocation;
 use rocddi::session::{DriverContextLifetime, Session};
-use rocddi::topology::host::{
-    self as host_topology, CpuCacheKind, CpuInfo, HostCaches, HostTopologySnapshot,
-};
-use rocddi::topology::{Endpoint, GpuInfo};
+use rocddi::topology::host::{CpuCacheKind, CpuInfo, HostCaches, HostTopologySnapshot};
+use rocddi::topology::{Endpoint, GpuInfo, TopologySnapshot};
 
 use crate::callback_arg::CallbackArg;
 use crate::ffi::*;
@@ -291,8 +289,12 @@ impl LogWork {
     }
 }
 
+pub(crate) fn gfx_target_name(major: u32, minor: u32, stepping: u32) -> String {
+    format!("gfx{major}{minor}{stepping:x}")
+}
+
 fn gpu_agent_name(gpu: &GpuInfo) -> String {
-    format!("gfx{}{}{}", gpu.gfx_major, gpu.gfx_minor, gpu.gfx_stepping)
+    gfx_target_name(gpu.gfx_major, gpu.gfx_minor, gpu.gfx_stepping)
 }
 
 fn hdp_flush_pointers(address: Option<usize>) -> [usize; 2] {
@@ -547,6 +549,8 @@ pub(crate) struct Gpu {
     pub(crate) endpoint: Endpoint,
     /// Cached hardware facts from passive discovery.
     pub(crate) info: GpuInfo,
+    /// Process-wide recoverable page-fault mode observed at activation.
+    pub(crate) xnack_enabled: bool,
     /// Activated native device and its driver resources.
     pub(crate) device: Device,
     /// HSA-visible short target name.
@@ -791,6 +795,8 @@ pub(crate) struct HsaState {
     pub(crate) inflight: Arc<InFlightTracker>,
     /// CPU and GPU cache records exposed through HSA queries.
     pub(crate) caches: Vec<Cache>,
+    /// Passive node, cache, and reported-route facts for this HSA generation.
+    pub(crate) topology: TopologySnapshot,
     /// Activated GPU agents and their native owners.
     pub(crate) gpus: Vec<Gpu>,
     /// Native session retained until all GPU and memory owners are gone.
@@ -849,12 +855,6 @@ impl HsaState {
         if host_page_size < 4096 || !host_page_size.is_power_of_two() {
             return Err(ERROR.into());
         }
-        let topology = host_topology::snapshot();
-        let host_memory_bytes = topology.memory_bytes.ok_or(ERROR)?;
-        let host = topology.cpu.clone().unwrap_or_else(|| CpuInfo {
-            name: "CPU".to_owned(),
-            compute_units: 0,
-        });
         // The HSA lifecycle gate admits one initialization at a time. A first
         // GPU activation attempt may retain the primary KFD VM even if it
         // fails, so later generations must select a secondary context.
@@ -867,12 +867,36 @@ impl HsaState {
             session: Some(Session::new(lifetime).map_err(map_error)?),
             gpus: Vec::new(),
         };
+        let topology = match pending
+            .session
+            .as_ref()
+            .ok_or(ERROR)
+            .and_then(|session| session.topology_snapshot().map_err(map_error))
+        {
+            Ok(topology) => topology,
+            Err(status) => {
+                return Err(InitFailure {
+                    status,
+                    cleanup_failed: !pending.cleanup(),
+                });
+            }
+        };
+        let Some(host_memory_bytes) = topology.host.memory_bytes else {
+            return Err(InitFailure {
+                status: ERROR,
+                cleanup_failed: !pending.cleanup(),
+            });
+        };
+        let host = topology.host.cpu.clone().unwrap_or_else(|| CpuInfo {
+            name: "CPU".to_owned(),
+            compute_units: 0,
+        });
         match Self::create_with_session(
             &mut pending,
             host_page_size,
             host_memory_bytes,
             host,
-            &topology,
+            topology,
             lifetime,
         ) {
             Ok(runtime) => Ok(runtime),
@@ -888,26 +912,23 @@ impl HsaState {
         host_page_size: usize,
         host_memory_bytes: usize,
         host: CpuInfo,
-        host_topology: &HostTopologySnapshot,
+        topology: TopologySnapshot,
         lifetime: DriverContextLifetime,
     ) -> Result<Self, Status> {
         let session = pending.session.as_ref().ok_or(ERROR)?;
-        let mut endpoints = Vec::new();
-        session
-            .enumerate(&mut |endpoint| {
-                if endpoint.gpu().is_some_and(|gpu| gpu.queues.aql) {
-                    endpoints.push(endpoint);
-                }
-                Ok(())
-            })
-            .map_err(map_error)?;
+        let endpoints = topology
+            .endpoints
+            .iter()
+            .filter(|endpoint| endpoint.gpu().is_some_and(|gpu| gpu.queues.aql))
+            .cloned()
+            .collect::<Vec<_>>();
         if endpoints.is_empty() {
             return Err(OUT_OF_RESOURCES);
         }
         let full_profile =
             full_profile_platform(endpoints.iter().map(|endpoint| endpoint.local_memory_bytes));
         let cpu_agent = HsaAgent { handle: CPU_AGENT };
-        let host_caches = selected_cpu_caches(host_topology);
+        let host_caches = selected_cpu_caches(&topology.host);
         let mut caches = host_caches
             .records
             .iter()
@@ -939,9 +960,8 @@ impl HsaState {
                 handle: GPU_AGENT_BASE + pending.gpus.len() as u64,
             };
             let name = gpu_agent_name(&info);
-            for cache in endpoint
-                .caches()
-                .iter()
+            for cache in topology
+                .caches_for_endpoint(&endpoint)
                 .filter(|cache| rocddi::device::gpu::is_compute_data_cache(cache))
             {
                 caches.push(Cache::new(
@@ -959,6 +979,14 @@ impl HsaState {
                 PRIMARY_CONTEXT_USED.store(true, Ordering::Release);
             }
             let device = session.activate(&endpoint).map_err(map_error)?;
+            let xnack_enabled = if info.gfx_major == 9 {
+                device
+                    .gpu()
+                    .and_then(|gpu| gpu.xnack_enabled())
+                    .map_err(map_error)?
+            } else {
+                false
+            };
             let product_name = endpoint
                 .product_name
                 .clone()
@@ -977,6 +1005,7 @@ impl HsaState {
             pending.gpus.push(Gpu {
                 endpoint,
                 info,
+                xnack_enabled,
                 device,
                 name: name.into_boxed_str(),
                 product_name: product_name.into_boxed_str(),
@@ -1012,6 +1041,7 @@ impl HsaState {
             inflight: Arc::new(InFlightTracker::new()),
             pc_sampling_state: PcSamplingState::new(),
             caches,
+            topology,
             gpus,
             session,
             lifetime,
@@ -1070,14 +1100,7 @@ impl HsaState {
         let index = usize::try_from(offset / ISA_COUNT_PER_GPU).ok()?;
         let variant = offset % ISA_COUNT_PER_GPU;
         let gpu = self.gpus.get(index)?;
-        super::isa_name(
-            gpu.info.gfx_major,
-            gpu.info.gfx_minor,
-            gpu.info.gfx_stepping,
-            gpu.info.asic_revision,
-            variant,
-        )
-        .map(|_| (index, variant))
+        super::isa_name(&gpu.info, gpu.xnack_enabled, variant).map(|_| (index, variant))
     }
 
     pub(crate) fn isa_index(&self, isa: HsaIsa) -> Option<usize> {

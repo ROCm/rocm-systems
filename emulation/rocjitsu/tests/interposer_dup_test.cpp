@@ -737,10 +737,51 @@ TEST(InterposerDupTest, DrmCloseReuseRaceNeverMisclassifiesDuplicate) {
 
 namespace {
 
-// Open the synthetic DRM render node the interposer exposes for the simulated GPU
-// (render minor 128 in the KMD test configs). Requires the KFD driver to be up, so
-// callers open /dev/kfd first.
-int open_drm_render() { return open("/dev/dri/renderD128", O_RDWR | O_CLOEXEC); }
+// Read the configured render minor from the synthetic KFD node.
+uint32_t configured_drm_render_minor() {
+  std::string key;
+  uint32_t minor = 0;
+  {
+    std::ifstream properties("/sys/class/kfd/kfd/topology/nodes/1/properties");
+    while (properties >> key) {
+      if (key == "drm_render_minor") {
+        properties >> minor;
+        break;
+      }
+      std::string value;
+      properties >> value;
+    }
+  }
+  return minor;
+}
+
+// Require the synthetic descriptor so test ioctls cannot reach a physical GPU.
+int open_drm_render() {
+  const uint32_t minor = configured_drm_render_minor();
+  if (minor < 128 || minor >= 192) {
+    errno = ENODEV;
+    return -1;
+  }
+
+  const std::string node = "/dev/dri/renderD" + std::to_string(minor);
+  const int fd = open(node.c_str(), O_RDWR | O_CLOEXEC);
+  if (fd < 0) {
+    errno = ENODEV;
+    return -1;
+  }
+
+  const std::string fd_path = "/proc/self/fd/" + std::to_string(fd);
+  std::array<char, 128> target{};
+  const ssize_t length = readlink(fd_path.c_str(), target.data(), target.size());
+  constexpr char kSyntheticDrmFd[] = "/memfd:rocjitsu_drm (deleted)";
+  if (length != sizeof(kSyntheticDrmFd) - 1 ||
+      std::memcmp(target.data(), kSyntheticDrmFd, sizeof(kSyntheticDrmFd) - 1) != 0) {
+    close(fd);
+    errno = ENODEV;
+    return -1;
+  }
+  return fd;
+}
 
 bool query_drm_device_info(int drm_fd, drm_amdgpu_info_device *device) {
   drm_amdgpu_info query{};
@@ -3798,14 +3839,14 @@ TEST(InterposerDrmTest, RenderNodePathMetadataMatchesDescriptor) {
   ASSERT_EQ(fstat(drm, &descriptor), 0);
   ASSERT_TRUE(S_ISCHR(descriptor.st_mode));
 
-  const char *path = "/dev/dri/renderD128";
+  const std::string path = "/dev/dri/renderD" + std::to_string(configured_drm_render_minor());
   for (const char *symbol : {"stat", "lstat"}) {
     SCOPED_TRACE(symbol);
     auto function =
         reinterpret_cast<int (*)(const char *, struct stat *)>(dlsym(RTLD_DEFAULT, symbol));
     ASSERT_NE(function, nullptr);
     struct stat node {};
-    ASSERT_EQ(function(path, &node), 0);
+    ASSERT_EQ(function(path.c_str(), &node), 0);
     EXPECT_TRUE(S_ISCHR(node.st_mode));
     EXPECT_EQ(node.st_rdev, descriptor.st_rdev);
     ASSERT_EQ(function("/dev/null", &node), 0);
@@ -3821,7 +3862,7 @@ TEST(InterposerDrmTest, RenderNodePathMetadataMatchesDescriptor) {
         reinterpret_cast<int (*)(const char *, struct stat64 *)>(dlsym(RTLD_DEFAULT, symbol));
     ASSERT_NE(function, nullptr);
     struct stat64 node {};
-    ASSERT_EQ(function(path, &node), 0);
+    ASSERT_EQ(function(path.c_str(), &node), 0);
     EXPECT_TRUE(S_ISCHR(node.st_mode));
     EXPECT_EQ(node.st_rdev, descriptor.st_rdev);
   }
@@ -3831,7 +3872,7 @@ TEST(InterposerDrmTest, RenderNodePathMetadataMatchesDescriptor) {
         reinterpret_cast<int (*)(int, const char *, struct stat *)>(dlsym(RTLD_DEFAULT, symbol));
     ASSERT_NE(function, nullptr);
     struct stat node {};
-    ASSERT_EQ(function(1, path, &node), 0);
+    ASSERT_EQ(function(1, path.c_str(), &node), 0);
     EXPECT_TRUE(S_ISCHR(node.st_mode));
     EXPECT_EQ(node.st_rdev, descriptor.st_rdev);
   }
@@ -3841,7 +3882,7 @@ TEST(InterposerDrmTest, RenderNodePathMetadataMatchesDescriptor) {
         reinterpret_cast<int (*)(int, const char *, struct stat64 *)>(dlsym(RTLD_DEFAULT, symbol));
     ASSERT_NE(function, nullptr);
     struct stat64 node {};
-    ASSERT_EQ(function(1, path, &node), 0);
+    ASSERT_EQ(function(1, path.c_str(), &node), 0);
     EXPECT_TRUE(S_ISCHR(node.st_mode));
     EXPECT_EQ(node.st_rdev, descriptor.st_rdev);
   }

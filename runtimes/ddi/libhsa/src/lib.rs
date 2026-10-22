@@ -103,26 +103,30 @@ fn isa_handle(gpu_index: usize, variant: u64) -> HsaIsa {
     }
 }
 
-fn isa_name(
-    gfx_major: u32,
-    gfx_minor: u32,
-    gfx_stepping: u32,
-    asic_revision: u32,
-    variant: u64,
-) -> Option<String> {
-    match variant {
-        0 if (gfx_major, gfx_minor, gfx_stepping) == (12, 5, 0) && asic_revision == 0 => {
-            Some("amdgcn-amd-amdhsa--gfx1250-strict".to_owned())
+fn isa_name(gpu: &rocddi::topology::GpuInfo, xnack_enabled: bool, variant: u64) -> Option<String> {
+    let base = match variant {
+        0 if (gpu.gfx_major, gpu.gfx_minor, gpu.gfx_stepping) == (12, 5, 0)
+            && gpu.asic_revision == 0 =>
+        {
+            "gfx1250-strict".to_owned()
         }
-        0 => Some(format!(
-            "amdgcn-amd-amdhsa--gfx{gfx_major}{gfx_minor}{gfx_stepping}"
-        )),
-        1 if gfx_major == 12 && gfx_minor == 5 => {
-            Some("amdgcn-amd-amdhsa--gfx12-5-generic".to_owned())
-        }
-        1 => Some(format!("amdgcn-amd-amdhsa--gfx{gfx_major}-generic")),
-        _ => None,
-    }
+        0 => runtime::gfx_target_name(gpu.gfx_major, gpu.gfx_minor, gpu.gfx_stepping),
+        1 if gpu.gfx_major == 9 && matches!(gpu.gfx_minor, 4 | 5) => "gfx9-4-generic".to_owned(),
+        1 if gpu.gfx_major == 9 => return None,
+        1 if gpu.gfx_major == 12 && gpu.gfx_minor == 5 => "gfx12-5-generic".to_owned(),
+        1 => format!("gfx{}-generic", gpu.gfx_major),
+        _ => return None,
+    };
+    let features = if gpu.gfx_major == 9 {
+        format!(
+            ":sramecc{}:xnack{}",
+            if gpu.sram_ecc_enabled { '+' } else { '-' },
+            if xnack_enabled { '+' } else { '-' }
+        )
+    } else {
+        String::new()
+    };
+    Some(format!("amdgcn-amd-amdhsa--{base}{features}"))
 }
 
 fn wavefront_handle(isa: HsaIsa) -> HsaWavefront {
@@ -372,7 +376,10 @@ pub unsafe extern "C" fn hsa_system_get_info(attribute: u32, value: *mut c_void)
                 AMD_SYSTEM_INFO_EXT_VERSION_MAJOR => write_value(value, 1_u16),
                 AMD_SYSTEM_INFO_EXT_VERSION_MINOR => write_value(value, 36_u16),
                 AMD_SYSTEM_INFO_VIRTUAL_MEM_API_SUPPORTED => write_value(value, true),
-                AMD_SYSTEM_INFO_XNACK_ENABLED => write_value(value, false),
+                AMD_SYSTEM_INFO_XNACK_ENABLED => write_value(
+                    value,
+                    runtime.gpus.first().is_some_and(|gpu| gpu.xnack_enabled),
+                ),
                 AMD_SYSTEM_INFO_FABRIC_HANDLES_SUPPORTED => write_value(
                     value,
                     !runtime.gpus.is_empty()
@@ -685,6 +692,8 @@ pub unsafe extern "C" fn hsa_agent_get_info(
             persisting_l2_cache_size,
             timestamp_frequency_hz,
             pc_sampling_supported,
+            host_xgmi_atomics,
+            cacheline_size,
         ) = {
             let guard = match lock() {
                 Ok(guard) => guard,
@@ -708,8 +717,27 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                     None,
                     1_000_000_000,
                     false,
+                    false,
+                    64,
                 )
             } else if let Some(index) = runtime.gpu_index(agent) {
+                let endpoint = &runtime.gpus[index].endpoint;
+                let host_xgmi_atomics =
+                    runtime
+                        .topology
+                        .route_from_host(endpoint)
+                        .is_some_and(|link| {
+                            link.kind == rocddi::topology::MemoryLinkType::Xgmi
+                                && link.coherent_support
+                                && link.atomic_support_64bit
+                        });
+                let cacheline_size = runtime
+                    .topology
+                    .caches_for_endpoint(endpoint)
+                    .filter(|cache| cache.level == 2)
+                    .filter_map(|cache| cache.line_size_bytes)
+                    .find(|line| *line != 0)
+                    .unwrap_or(256);
                 let native_device = if matches!(
                     attribute,
                     AMD_AGENT_INFO_CLOCK_COUNTERS
@@ -737,6 +765,8 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                     Some(runtime.gpus[index].persisting_l2_cache_size.clone()),
                     runtime.gpus[index].timestamp_frequency_hz,
                     runtime.gpus[index].pc_sampling_supported,
+                    host_xgmi_atomics,
+                    cacheline_size,
                 )
             } else {
                 return INVALID_AGENT;
@@ -766,14 +796,6 @@ pub unsafe extern "C" fn hsa_agent_get_info(
             None
         };
         let gpu = endpoint.as_ref().and_then(|endpoint| endpoint.gpu());
-        let host_xgmi_atomics = endpoint
-            .as_ref()
-            .and_then(rocddi::topology::Endpoint::memory_link_from_host)
-            .is_some_and(|link| {
-                link.kind == rocddi::topology::MemoryLinkType::Xgmi
-                    && link.coherent_support
-                    && link.atomic_support_64bit
-            });
         let gpu_only = gpu.is_some();
         let image_gpu = gpu.is_some_and(image_gfx12::supported_gpu);
         if !gpu_only && cpu_rejects_amd_agent_info(attribute) {
@@ -861,18 +883,7 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                 ),
                 AGENT_INFO_VERSION_MAJOR | AGENT_INFO_VERSION_MINOR => write_value(value, 1_u16),
                 AMD_AGENT_INFO_CHIP_ID => write_value(value, pci.map_or(0, |info| info.device_id)),
-                AMD_AGENT_INFO_CACHELINE_SIZE => write_value(
-                    value,
-                    endpoint.as_ref().map_or(64, |endpoint| {
-                        endpoint
-                            .caches()
-                            .iter()
-                            .filter(|cache| cache.level == 2)
-                            .filter_map(|cache| cache.line_size_bytes)
-                            .find(|line| *line != 0)
-                            .unwrap_or(256)
-                    }),
-                ),
+                AMD_AGENT_INFO_CACHELINE_SIZE => write_value(value, cacheline_size),
                 AMD_AGENT_INFO_COMPUTE_UNIT_COUNT
                 | AMD_AGENT_INFO_COOPERATIVE_COMPUTE_UNIT_COUNT => write_value(
                     value,
@@ -1306,7 +1317,7 @@ pub unsafe extern "C" fn hsa_agent_iterate_isas(
         let Some(callback) = callback else {
             return INVALID_ARGUMENT;
         };
-        let (index, info) = {
+        let (index, info, xnack_enabled) = {
             let guard = match lock() {
                 Ok(guard) => guard,
                 Err(status) => return status,
@@ -1322,18 +1333,10 @@ pub unsafe extern "C" fn hsa_agent_iterate_isas(
                 };
             };
             let info = runtime.gpus[index].info;
-            (index, info)
+            (index, info, runtime.gpus[index].xnack_enabled)
         };
         for variant in 0..ISA_COUNT_PER_GPU {
-            if isa_name(
-                info.gfx_major,
-                info.gfx_minor,
-                info.gfx_stepping,
-                info.asic_revision,
-                variant,
-            )
-            .is_none()
-            {
+            if isa_name(&info, xnack_enabled, variant).is_none() {
                 continue;
             }
             // SAFETY: The callback and data remain valid for this synchronous call.
@@ -1370,13 +1373,7 @@ pub unsafe extern "C" fn hsa_isa_from_name(name: *const c_char, isa: *mut HsaIsa
         };
         for (index, gpu) in runtime.gpus.iter().enumerate() {
             for variant in 0..ISA_COUNT_PER_GPU {
-                let Some(candidate) = isa_name(
-                    gpu.info.gfx_major,
-                    gpu.info.gfx_minor,
-                    gpu.info.gfx_stepping,
-                    gpu.info.asic_revision,
-                    variant,
-                ) else {
+                let Some(candidate) = isa_name(&gpu.info, gpu.xnack_enabled, variant) else {
                     continue;
                 };
                 if requested == candidate.as_bytes() {
@@ -1407,7 +1404,7 @@ pub unsafe extern "C" fn hsa_isa_get_info_alt(
         if value.is_null() {
             return INVALID_ARGUMENT;
         }
-        let (info, variant) = {
+        let (info, xnack_enabled, variant) = {
             let guard = match lock() {
                 Ok(guard) => guard,
                 Err(status) => return status,
@@ -1418,15 +1415,13 @@ pub unsafe extern "C" fn hsa_isa_get_info_alt(
             let Some((index, variant)) = runtime.isa_parts(isa) else {
                 return INVALID_ISA;
             };
-            (runtime.gpus[index].info, variant)
+            (
+                runtime.gpus[index].info,
+                runtime.gpus[index].xnack_enabled,
+                variant,
+            )
         };
-        let Some(name) = isa_name(
-            info.gfx_major,
-            info.gfx_minor,
-            info.gfx_stepping,
-            info.asic_revision,
-            variant,
-        ) else {
+        let Some(name) = isa_name(&info, xnack_enabled, variant) else {
             return INVALID_ISA;
         };
         // SAFETY: Each arm writes the public value type for the attribute.
@@ -1682,33 +1677,14 @@ pub unsafe extern "C" fn hsa_isa_compatible(
         let Some((agent_index, agent_variant)) = runtime.isa_parts(agent_isa) else {
             return INVALID_ISA;
         };
-        let code = runtime.gpus[code_index].info;
-        let agent = runtime.gpus[agent_index].info;
-        let code_name = isa_name(
-            code.gfx_major,
-            code.gfx_minor,
-            code.gfx_stepping,
-            code.asic_revision,
-            code_variant,
-        );
-        let agent_name = isa_name(
-            agent.gfx_major,
-            agent.gfx_minor,
-            agent.gfx_stepping,
-            agent.asic_revision,
-            agent_variant,
-        );
+        let code = &runtime.gpus[code_index];
+        let agent = &runtime.gpus[agent_index];
+        let code_name = isa_name(&code.info, code.xnack_enabled, code_variant);
+        let agent_name = isa_name(&agent.info, agent.xnack_enabled, agent_variant);
         let compatible = code_name == agent_name
             || (code_variant == 1
                 && agent_variant == 0
-                && code_name
-                    == isa_name(
-                        agent.gfx_major,
-                        agent.gfx_minor,
-                        agent.gfx_stepping,
-                        agent.asic_revision,
-                        1,
-                    ));
+                && code_name == isa_name(&agent.info, agent.xnack_enabled, 1));
         // SAFETY: The caller supplied writable output storage.
         unsafe { result.write(compatible) };
         SUCCESS
@@ -2562,15 +2538,21 @@ mod tests {
 
     #[test]
     fn gfx12_isa_names_match_rocr() {
+        let gpu = rocddi::topology::GpuInfo {
+            gfx_major: 12,
+            gfx_minor: 0,
+            gfx_stepping: 1,
+            ..Default::default()
+        };
         assert_eq!(
-            isa_name(12, 0, 1, 0, 0).as_deref(),
+            isa_name(&gpu, false, 0).as_deref(),
             Some("amdgcn-amd-amdhsa--gfx1201")
         );
         assert_eq!(
-            isa_name(12, 0, 1, 0, 1).as_deref(),
+            isa_name(&gpu, false, 1).as_deref(),
             Some("amdgcn-amd-amdhsa--gfx12-generic")
         );
-        assert_eq!(isa_name(12, 0, 1, 0, ISA_COUNT_PER_GPU), None);
+        assert_eq!(isa_name(&gpu, false, ISA_COUNT_PER_GPU), None);
     }
 
     #[test]

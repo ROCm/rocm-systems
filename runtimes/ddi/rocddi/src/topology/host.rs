@@ -6,6 +6,8 @@
 //! A host domain describes OS topology, not an activated device or a promise
 //! that the calling process may execute on its CPUs. Host observations come
 //! from independent OS files and are not one atomic hardware generation.
+//! The source-qualified topology model projects these observations into host
+//! nodes and caches while retaining this richer CPU and cache-sharing view.
 
 use crate::topology::CacheInfo;
 

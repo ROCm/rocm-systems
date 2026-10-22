@@ -793,7 +793,15 @@ fn pool_access(same_owner: bool, storage: PoolStorage, linked: bool, same_hive: 
     }
 }
 
-fn gpu_pool_host_visible(runtime: &HsaState, index: usize) -> bool {
+/// A partial visible VRAM aperture can back individual KFD PUBLIC allocations.
+/// KFD decides whether each requested allocation fits that host-mappable pool.
+fn gpu_pool_has_host_aperture(runtime: &HsaState, index: usize) -> bool {
+    runtime.gpus[index].endpoint.host_visible_local_memory_bytes != 0
+}
+
+/// Queue and signal mechanisms that can address arbitrary VRAM need full BAR
+/// visibility rather than a host-mappable subset.
+fn gpu_pool_fully_host_visible(runtime: &HsaState, index: usize) -> bool {
     let endpoint = &runtime.gpus[index].endpoint;
     endpoint.local_memory_bytes != 0
         && endpoint.host_visible_local_memory_bytes >= endpoint.local_memory_bytes
@@ -821,10 +829,13 @@ pub(crate) fn signal_batch_pool(
     let uncached =
         kind == GPU_POOL_EXTENDED && gpu.info.gfx_major == 9 && matches!(gpu.info.gfx_minor, 4 | 5);
     let coarse = kind == GPU_POOL_COARSE && gpu.info.gfx_major == 12 && gpu.info.gfx_minor >= 5;
-    let host_atomic_link = gpu.endpoint.memory_link_from_host().is_some_and(|link| {
-        link.kind == MemoryLinkType::Xgmi && link.coherent_support && link.atomic_support_64bit
-    });
-    (gpu_pool_host_visible(runtime, index) && (uncached || coarse)).then_some(
+    let host_atomic_link = runtime
+        .topology
+        .route_from_host(&gpu.endpoint)
+        .is_some_and(|link| {
+            link.kind == MemoryLinkType::Xgmi && link.coherent_support && link.atomic_support_64bit
+        });
+    (gpu_pool_fully_host_visible(runtime, index) && (uncached || coarse)).then_some(
         SignalBatchPool::Device {
             index,
             uncached,
@@ -836,10 +847,10 @@ pub(crate) fn signal_batch_pool(
 fn gpu_pcie_dmabuf_supported(runtime: &HsaState, index: usize) -> bool {
     // Full VRAM visibility supplies a large BAR. A CPU-to-GPU XGMI link is
     // the other route that can satisfy a requested PCIe DMA-BUF mapping.
-    gpu_pool_host_visible(runtime, index)
-        || runtime.gpus[index]
-            .endpoint
-            .memory_link_from_host()
+    gpu_pool_fully_host_visible(runtime, index)
+        || runtime
+            .topology
+            .route_from_host(&runtime.gpus[index].endpoint)
             .is_some_and(|link| link.kind == MemoryLinkType::Xgmi)
 }
 
@@ -866,23 +877,41 @@ fn agent_pool_relationship(
     let link = if same {
         None
     } else if agent.handle == CPU_AGENT {
-        owner_gpu.and_then(|index| runtime.gpus[index].endpoint.memory_link_from_host())
+        owner_gpu.and_then(|index| {
+            runtime
+                .topology
+                .route_from_host(&runtime.gpus[index].endpoint)
+        })
     } else if let Some(requester) = requester_gpu {
         if matches!(storage, PoolStorage::System) {
-            runtime.gpus[requester].endpoint.memory_link_to_host()
+            runtime
+                .topology
+                .route_to_host(&runtime.gpus[requester].endpoint)
         } else {
             owner_gpu.and_then(|owner| {
-                runtime.gpus[requester]
-                    .endpoint
-                    .memory_link_to(&runtime.gpus[owner].endpoint)
+                runtime.topology.route_between(
+                    &runtime.gpus[requester].endpoint,
+                    &runtime.gpus[owner].endpoint,
+                )
             })
         }
     } else {
         None
     };
-    let linked = same || link.is_some_and(|link| link.hop_count() != 0);
+    let linked = same
+        || match (requester_gpu, owner_gpu) {
+            (Some(requester), Some(owner))
+                if matches!(storage, PoolStorage::LocalCoarse | PoolStorage::LocalFine) =>
+            {
+                runtime.session.can_access_local_memory(
+                    &runtime.gpus[requester].endpoint,
+                    &runtime.gpus[owner].endpoint,
+                )
+            }
+            _ => link.is_some_and(|link| link.hop_count() != 0),
+        };
     let cpu_cannot_access_local = agent.handle == CPU_AGENT
-        && owner_gpu.is_some_and(|index| !gpu_pool_host_visible(runtime, index))
+        && owner_gpu.is_some_and(|index| !gpu_pool_has_host_aperture(runtime, index))
         && matches!(storage, PoolStorage::LocalCoarse | PoolStorage::LocalFine);
     let access = if cpu_cannot_access_local {
         POOL_ACCESS_NEVER
@@ -1515,10 +1544,16 @@ unsafe fn memory_pool_allocate(
                     return INVALID_ALLOCATION;
                 }
                 let uncached = flags & ALLOC_UNCACHED != 0 || pool_kind == GPU_POOL_EXTENDED;
+                // A partial BAR can map an individual public allocation, but
+                // the rest of local VRAM must remain available for private
+                // allocations from the same HSA pool.
+                let host_visible = u64::try_from(rounded).is_ok_and(|size| {
+                    size <= runtime.gpus[index].endpoint.host_visible_local_memory_bytes
+                });
                 (
                     index,
                     MemoryKind::DeviceLocal {
-                        host_visible: gpu_pool_host_visible(runtime, index),
+                        host_visible,
                         coherent: gpu_pool_coherent(pool_kind, uncached, flags & ALLOC_PCIE != 0),
                         uncached,
                         contiguous: flags & ALLOC_CONTIGUOUS != 0,
