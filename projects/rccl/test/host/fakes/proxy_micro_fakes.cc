@@ -14,55 +14,16 @@
 
 #include <algorithm>
 #include <cerrno>
-#include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <mutex>
-#include <thread>
-#include <utility>
 
-#include "debug.h"
+#include "debug_fakes.h"
 #include "profiler.h"
 #include "shmutils.h"
+#include "socket_fakes.h"
 
-uint32_t ncclDebugLevelMask = NCCL_DEBUG_LEVEL_MASK_UNINITIALIZED;
-uint64_t ncclDebugMask = ~uint64_t(0);
-thread_local int ncclDebugNoWarn = 0;
-
-namespace {
-std::mutex g_logMutex;  // the proxy threads log too
-std::vector<std::pair<ncclDebugLogLevel, std::string>> g_logged;
-}  // namespace
-
-void ncclDebugLog(ncclDebugLogLevel level, unsigned long, const char*, int, const char* fmt, ...) {
-  char buf[1024];
-  va_list ap;
-  va_start(ap, fmt);
-  std::vsnprintf(buf, sizeof(buf), fmt, ap);
-  va_end(ap);
-  std::lock_guard<std::mutex> lock(g_logMutex);
-  g_logged.emplace_back(level, buf);
-}
-
-bool ProxyLogged(ncclDebugLogLevel level, const char* needle) {
-  std::lock_guard<std::mutex> lock(g_logMutex);
-  for (const auto& m : g_logged)
-    if (m.first == level && m.second.find(needle) != std::string::npos) return true;
-  return false;
-}
-
-int ProxyLogCount(const char* needle) {
-  std::lock_guard<std::mutex> lock(g_logMutex);
-  return std::count_if(g_logged.begin(), g_logged.end(),
-                       [&](const auto& m) { return m.second.find(needle) != std::string::npos; });
-}
-
-void ResetProxyLog() {
-  std::lock_guard<std::mutex> lock(g_logMutex);
-  g_logged.clear();
-}
-
+// nccl_fakes.h declares g_loadParam, but nccl_fakes.cc cannot link here: it defines proxy.cc's client calls.
 static int64_t DefaultLoadParam(const char*, int64_t deftVal) { return deftVal; }
 std::function<int64_t(const char*, int64_t)> g_loadParam = DefaultLoadParam;
 
@@ -75,9 +36,8 @@ bool WaitReadable(int fd) {
   return poll(&p, 1, 2000) > 0;
 }
 
-uint64_t ncclSocketDefaultMagic(void) { return 0; }
-ncclResult_t ncclSocketInit(struct ncclSocket* sock, const union ncclSocketAddress* addr, uint64_t magic,
-                            enum ncclSocketType type, volatile uint32_t* abortFlag, int, int) {
+static ncclResult_t ProxySocketInit(struct ncclSocket* sock, const union ncclSocketAddress* addr, uint64_t magic,
+                                    enum ncclSocketType type, volatile uint32_t* abortFlag, int, int) {
   g_sock.inits++;
   g_sock.lastInitAddr = addr;
   g_sock.lastInitMagic = magic;
@@ -86,14 +46,14 @@ ncclResult_t ncclSocketInit(struct ncclSocket* sock, const union ncclSocketAddre
   sock->abortFlag = abortFlag;
   return g_sock.initResult;
 }
-ncclResult_t ncclSocketConnect(struct ncclSocket* sock) {
+static ncclResult_t ProxySocketConnect(struct ncclSocket* sock) {
   g_sock.connects++;
   if (g_sock.connectResult != ncclSuccess) return g_sock.connectResult;
   sock->socketDescriptor = g_sock.connectFds.empty() ? -1 : g_sock.connectFds.front();
   if (!g_sock.connectFds.empty()) g_sock.connectFds.pop_front();
   return ncclSuccess;
 }
-ncclResult_t ncclSocketAccept(struct ncclSocket* sock, struct ncclSocket* listenSock, bool retry) {
+static ncclResult_t ProxySocketAccept(struct ncclSocket* sock, struct ncclSocket* listenSock, bool retry) {
   char c;
   if (read(listenSock->socketDescriptor, &c, 1) != 1 || retry) return ncclInternalError;
   if (g_sock.acceptResult != ncclSuccess || g_sock.acceptFds.empty()) return ncclSystemError;
@@ -101,20 +61,20 @@ ncclResult_t ncclSocketAccept(struct ncclSocket* sock, struct ncclSocket* listen
   g_sock.acceptFds.pop_front();
   return ncclSuccess;
 }
-ncclResult_t ncclSocketReady(struct ncclSocket* sock, int* running) {
+static ncclResult_t ProxySocketReady(struct ncclSocket* sock, int* running) {
   *running = sock->socketDescriptor != -1;
   return g_sock.readyResult;
 }
-ncclResult_t ncclSocketGetFd(struct ncclSocket* sock, ncclSocketDescriptor* fd) {
+static ncclResult_t ProxySocketGetFd(struct ncclSocket* sock, ncclSocketDescriptor* fd) {
   if (g_sock.getFds++ == g_sock.getFdFailAt) return ncclInternalError;
   *fd = sock->socketDescriptor;
   return ncclSuccess;
 }
-ncclResult_t ncclSocketSetFd(ncclSocketDescriptor fd, struct ncclSocket* sock) {
+static ncclResult_t ProxySocketSetFd(ncclSocketDescriptor fd, struct ncclSocket* sock) {
   sock->socketDescriptor = fd;
   return ncclSuccess;
 }
-ncclResult_t ncclSocketClose(struct ncclSocket* sock, bool) {
+static ncclResult_t ProxySocketClose(struct ncclSocket* sock, bool) {
   g_sock.closes++;
   g_closedFds.push_back(sock->socketDescriptor);
   if (g_sock.onClose) g_sock.onClose(sock->socketDescriptor);
@@ -122,7 +82,7 @@ ncclResult_t ncclSocketClose(struct ncclSocket* sock, bool) {
   sock->socketDescriptor = -1;
   return ncclSuccess;
 }
-ncclResult_t ncclSocketSend(struct ncclSocket* sock, void* ptr, int size) {
+static ncclResult_t ProxySocketSend(struct ncclSocket* sock, void* ptr, int size) {
   if (g_sock.sends++ == g_sock.sendFailAt) return ncclRemoteError;
   for (int off = 0; off < size;) {
     ssize_t n = send(sock->socketDescriptor, (char*)ptr + off, size - off, MSG_NOSIGNAL);
@@ -131,7 +91,7 @@ ncclResult_t ncclSocketSend(struct ncclSocket* sock, void* ptr, int size) {
   }
   return ncclSuccess;
 }
-ncclResult_t ncclSocketRecv(struct ncclSocket* sock, void* ptr, int size) {
+static ncclResult_t ProxySocketRecv(struct ncclSocket* sock, void* ptr, int size) {
   if (g_sock.recvs++ == g_sock.recvFailAt) return ncclRemoteError;
   for (int off = 0; off < size;) {
     if (!WaitReadable(sock->socketDescriptor)) return ncclSystemError;
@@ -141,7 +101,7 @@ ncclResult_t ncclSocketRecv(struct ncclSocket* sock, void* ptr, int size) {
   }
   return ncclSuccess;
 }
-ncclResult_t ncclSocketProgress(int, struct ncclSocket* sock, void* ptr, int size, int* offset, bool*) {
+static ncclResult_t ProxySocketProgress(int, struct ncclSocket* sock, void* ptr, int size, int* offset, bool*) {
   if (g_sock.onProgress) g_sock.onProgress();
   if (g_sock.progresses++ == g_sock.progressFailAt) return ncclRemoteError;
   ssize_t n = recv(sock->socketDescriptor, (char*)ptr + *offset, std::min(size - *offset, g_sock.progressChunk),
@@ -149,18 +109,36 @@ ncclResult_t ncclSocketProgress(int, struct ncclSocket* sock, void* ptr, int siz
   if (n > 0) *offset += n;
   return ncclSuccess;
 }
-ncclResult_t ncclSocketTryRecv(struct ncclSocket* sock, void* ptr, int size, bool* closed, bool) {
+static ncclResult_t ProxySocketTryRecv(struct ncclSocket* sock, void* ptr, int size, bool* closed, bool) {
   *closed = false;
   ncclResult_t res = g_sock.onTryRecv ? g_sock.onTryRecv() : ncclSuccess;
   if (res != ncclSuccess) return res;
   ssize_t n = recv(sock->socketDescriptor, ptr, size, MSG_DONTWAIT);
   if (n == 0) *closed = true;
   if (n <= 0) return n == 0 ? ncclSuccess : ncclInProgress;
-  return n == size ? ncclSuccess : ncclSocketRecv(sock, (char*)ptr + n, size - n);
+  return n == size ? ncclSuccess : ProxySocketRecv(sock, (char*)ptr + n, size - n);
 }
-const char* ncclSocketToString(const union ncclSocketAddress*, char* buf, size_t len, const int) {
+static const char* ProxySocketToString(const union ncclSocketAddress*, char* buf, size_t len, const int) {
   std::snprintf(buf, len, "fake");
   return buf;
+}
+
+// socketDescriptor is one end of a socketpair (or pipe) the test owns, so close() really closes it.
+static void InstallProxySockets() {
+  ResetSocketFakes();
+  ResetExtraSocketFakes();
+  g_ncclSocketInit = ProxySocketInit;
+  g_ncclSocketConnect = ProxySocketConnect;
+  g_ncclSocketAccept = ProxySocketAccept;
+  g_ncclSocketReady = ProxySocketReady;
+  g_ncclSocketGetFd = ProxySocketGetFd;
+  g_ncclSocketSetFd = ProxySocketSetFd;
+  g_ncclSocketClose = ProxySocketClose;
+  g_ncclSocketSend = ProxySocketSend;
+  g_ncclSocketRecv = ProxySocketRecv;
+  g_ncclSocketProgress = ProxySocketProgress;
+  g_ncclSocketTryRecv = ProxySocketTryRecv;
+  g_ncclSocketToString = ProxySocketToString;
 }
 
 // IPC (UDS) sockets.
@@ -227,9 +205,8 @@ ncclResult_t ncclShmUnlink(ncclShmHandle_t) {
   return g_shm.unlinkResult;
 }
 
-// cuMem, thread naming, profiler.
+// cuMem, profiler.
 int g_cuMemEnabled, g_cuMemHostEnabled;
-int g_threadNames;
 bool g_proxyDiagEnabled;
 int g_profOpStarts, g_profCtrlStarts, g_profCtrlStops;
 std::vector<int> g_profCtrlStates;
@@ -237,7 +214,6 @@ std::atomic<int> g_profSleeps;
 
 int ncclCuMemEnable() { return g_cuMemEnabled; }
 int ncclCuMemHostEnable() { return g_cuMemHostEnabled; }
-void ncclSetThreadName(std::thread&, const char*, ...) { g_threadNames++; }
 
 bool ncclProfilerProxyDiagEnabled(void) { return g_proxyDiagEnabled; }
 ncclResult_t ncclProfilerStartProxyOpEvent(int, struct ncclProxyArgs*) {
@@ -309,8 +285,9 @@ struct ncclTransport* ncclTransports[NTRANSPORTS] = {&g_transports[0], &g_transp
                                                      &g_transports[3]};
 
 void ResetProxyMicroFakes() {
-  ResetProxyLog();
+  ResetDebugLog();
   g_loadParam = DefaultLoadParam;
+  InstallProxySockets();
   g_sock = ProxySockFakes{};
   g_sock.sendFailAt = g_sock.recvFailAt = g_sock.getFdFailAt = g_sock.progressFailAt = -1;
   g_sock.progressChunk = 1 << 20;
@@ -319,7 +296,7 @@ void ResetProxyMicroFakes() {
   g_ipc.recvFd = NCCL_INVALID_IPC_FD;
   g_shm = ProxyShmFakes{};
   g_cuMemEnabled = g_cuMemHostEnabled = 0;
-  g_threadNames = 0;
+  g_ncclSetThreadNameCalls = 0;
   g_proxyDiagEnabled = false;
   g_profOpStarts = g_profCtrlStarts = g_profCtrlStops = 0;
   g_profCtrlStates.clear();

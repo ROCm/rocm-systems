@@ -615,9 +615,11 @@ function(rccl_define_micro_source_lists)
   set(TEST_MICRO_PROXY_SOURCE_FILES
     proxy-test.cc
     fakes/proxy_micro_fakes.cc
+    fakes/debug_fakes.cc
     fakes/env_fakes.cc
     fakes/hip_fakes.cc
     fakes/os_fakes.cc
+    fakes/socket_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 

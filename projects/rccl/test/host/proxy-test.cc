@@ -64,11 +64,6 @@ bool WaitFor(Pred pred) {
   return true;
 }
 
-// A g_loadParam hook that sets one proxy.cc param (named as in its NCCL_PARAM) and leaves the rest at their defaults.
-auto Param(const char* name, int64_t value) {
-  return [name, value](const char* env, int64_t deftVal) { return std::strcmp(env, name) == 0 ? value : deftVal; };
-}
-
 // HIP calls the proxy threads make, recorded through hip_fakes.cc's hooks (installed by ProxyFixture).
 std::mutex g_hipMutex;
 hipError_t g_hipSetDeviceResult, g_hipExportResult, g_hipIpcCloseResult;
@@ -273,12 +268,12 @@ TEST_F(ProxyConnPoolMicrotest, ValidateConnection_ChecksBoundsAlignmentAndOwner)
   EXPECT_EQ(ncclProxyValidateConnection(&pool_, &pool_.pools[0][NCCL_PROXY_CONN_POOL_SIZE - 1], 0), ncclSuccess);
   EXPECT_EQ(ncclProxyValidateConnection(&pool_, &pool_.pools[1][1], 9), ncclSuccess);
   EXPECT_EQ(ncclProxyValidateConnection(&pool_, &pool_.pools[0][5], 8), ncclInvalidArgument);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "Invalid proxy connection peer: 7 != 8"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "Invalid proxy connection peer: 7 != 8"));
   EXPECT_EQ(ncclProxyValidateConnection(&pool_, (ncclProxyConnection*)((char*)&pool_.pools[0][5] + 8), 7),
             ncclInvalidArgument);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "wrong alignment"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "wrong alignment"));
   EXPECT_EQ(ncclProxyValidateConnection(&pool_, &pool_.pools[1][2], 0), ncclInvalidArgument);  // past offset
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "not found"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "not found"));
   ncclProxyConnection outside = {};
   EXPECT_EQ(ncclProxyValidateConnection(&pool_, &outside, 0), ncclInvalidArgument);
   free(pool_.pools[0]);
@@ -380,14 +375,14 @@ TEST_F(ProxyResponseQueueMicrotest, Store_RejectsSizeMismatchRepeatsAndUnknownId
   ASSERT_EQ(expectedProxyResponseEnqueue(&state_, &a_, sizeof(int)), ncclSuccess);
   void* buf = Heap(1);
   EXPECT_EQ(expectedProxyResponseStore(&state_, &a_, buf, 2, ncclSuccess), ncclInternalError);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "got 2, expected 4"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "got 2, expected 4"));
   EXPECT_FALSE(state_.expectedResponses->done);
   ASSERT_EQ(expectedProxyResponseStore(&state_, &a_, buf, sizeof(int), ncclSuccess), ncclSuccess);
   buf = Heap(2);
   EXPECT_EQ(expectedProxyResponseStore(&state_, &a_, buf, sizeof(int), ncclSuccess), ncclInternalError);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "already completed"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "already completed"));
   EXPECT_EQ(expectedProxyResponseStore(&state_, &b_, buf, sizeof(int), ncclSuccess), ncclInternalError);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "doesn't match any expected response"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "doesn't match any expected response"));
   free(buf);
 }
 
@@ -416,7 +411,7 @@ TEST_F(ProxyResponseQueueMicrotest, Remove_UnlinksHeadOrMiddleAndWarnsOnUnknown)
   EXPECT_EQ(expectedProxyResponseRemove(&state_, &a_), ncclSuccess);
   EXPECT_EQ(Ids(), (std::vector<void*>{&c_}));
   EXPECT_EQ(expectedProxyResponseRemove(&state_, &a_), ncclInternalError);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "Couldn't find opId"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "Couldn't find opId"));
 }
 
 // Service-side async op queue
@@ -458,12 +453,12 @@ TEST_F(ProxyAsyncOpQueueMicrotest, EnqueueDequeue_KeepsOrderAndFreesBuffers) {
   EXPECT_EQ(Ids(), (std::vector<void*>{&c_}));
   key.opId = &a_;
   EXPECT_EQ(asyncProxyOpDequeue(&peer_, &key), ncclInternalError);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "dequeue nonexistent async opId"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "dequeue nonexistent async opId"));
 }
 
 TEST_F(ProxyAsyncOpQueueMicrotest, Dequeue_NullOpOnAnEmptyQueueWarns) {
   EXPECT_EQ(asyncProxyOpDequeue(&peer_, nullptr), ncclInternalError);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "dequeue null operation"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "dequeue null operation"));
 }
 
 // Proxy state teardown
@@ -478,7 +473,7 @@ TEST_F(ProxyDestroyMicrotest, Destroy_FreesSharedArraysAndPendingResponses) {
   res.proxyState = new ncclProxyState{};
   res.proxyState->refCount = 1;
   EXPECT_EQ(ncclProxyDestroy(&comm), ncclInternalError);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "refCount is 1, expected 0"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "refCount is 1, expected 0"));
   res.proxyState->refCount = 0;
   res.proxyState->peerAddresses = (ncclSocketAddress*)calloc(1, sizeof(ncclSocketAddress));
   res.proxyState->peerAddressesUDS = (uint64_t*)calloc(1, 8);
@@ -665,7 +660,7 @@ TEST_F(ProxyLocalOpAppendMicrotest, LocalOpAppend_FullQueueOfASingleOpCountCanno
   op.opCount = 9;
   for (int i = 0; i < MAX_OPS_PER_PEER - 1; i++) ASSERT_EQ(ncclLocalOpAppend(comm_.get(), Conn(1, 1), &op), ncclSuccess);
   EXPECT_EQ(ncclLocalOpAppend(comm_.get(), Conn(1, 1), &op), ncclInternalError);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "Unable to post incomplete proxy op chain"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "Unable to post incomplete proxy op chain"));
   EXPECT_EQ(pool_->nextOps, -1);
 }
 
@@ -716,10 +711,10 @@ TEST_F(ProxySaveOpMicrotest, SaveProxy_SkipsAbsentPeersAndConnectionsWithoutProg
   peers_[4].send[1].transportComm = nullptr;
   comm_->channels[0].id = 0;
   EXPECT_EQ(SaveProxy(comm_.get(), &comm_->channels[0], proxySend, 4, &op, 1, nullptr), ncclInternalError);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "Rank 0 has no transport for send peer 4 on channel 0/1"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "Rank 0 has no transport for send peer 4 on channel 0/1"));
   peers_[4].recv[0].transportComm = nullptr;
   EXPECT_EQ(SaveProxy(comm_.get(), &comm_->channels[0], proxyRecv, 4, &op, 0, nullptr), ncclInternalError);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "no transport for recv peer 4"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "no transport for recv peer 4"));
 }
 
 TEST_F(ProxySaveOpMicrotest, Ring_SavesRecvFromPrevThenSendToNext) {
@@ -1069,7 +1064,7 @@ TEST_F(ProxyArgsPoolMicrotest, GetOpIndex_LocatesAnOpInAnyPool) {
   EXPECT_EQ(pool, 0);
   EXPECT_EQ(op, PROXYARGS_ALLOCATE_SIZE - 1);
   EXPECT_EQ(getOpIndex(args_, &st(), &pool, &op), ncclInternalError);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "Could not find pool of op"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "Could not find pool of op"));
   st().pool = args_;
   ASSERT_EQ(ncclProxyProgressDestroy(&ps_), ncclSuccess);
 }
@@ -1093,8 +1088,8 @@ TEST_F(ProxyArgsPoolMicrotest, DumpProxyState_WalksActiveAndFreeListsAndClearsMa
   freeFrom(6);
   ncclLastProxyState = &st();
   ncclDumpProxyState(SIGUSR2);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_ATTN, "Inactive op has next set!"));
-  EXPECT_FALSE(ProxyLogged(NCCL_LOG_ATTN, "List loop"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_ATTN, "Inactive op has next set!"));
+  EXPECT_FALSE(DebugLogged(NCCL_LOG_ATTN, "List loop"));
   for (int i = 0; i < PROXYARGS_ALLOCATE_SIZE; i++) ASSERT_EQ(e[i].state & OP_SEEN, 0) << i;
   // Duplicates across lists are reported: e1 is both e0's nextPeer and active, then e3's nextPeer;
   // e3 is both active and free.
@@ -1107,8 +1102,8 @@ TEST_F(ProxyArgsPoolMicrotest, DumpProxyState_WalksActiveAndFreeListsAndClearsMa
   e[2].next = &e[4];
   e[PROXYARGS_ALLOCATE_SIZE - 1].next = &e[3];
   ASSERT_EQ(dumpProxyState(&st()), ncclSuccess);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_ATTN, "List loop at element 0-1"));
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_ATTN, "List loop at element 0-3"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_ATTN, "List loop at element 0-1"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_ATTN, "List loop at element 0-3"));
   // Ops outside every pool abort the dump, whichever list they are on.
   e[PROXYARGS_ALLOCATE_SIZE - 1].next = args_;
   EXPECT_EQ(dumpProxyState(&st()), ncclInternalError);
@@ -1210,12 +1205,12 @@ TEST_F(ProxyAppendMicrotest, OpToArgs_FirstSubCopiesTheOpAndLaterSubsMustMatch) 
     (*f[field])++;
     EXPECT_EQ(ncclProxyOpToArgs(&bad, &a, 2), ncclInternalError) << field;
   }
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "Proxy append mismatch"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "Proxy append mismatch"));
   a.state = ncclProxyOpProgress;
   EXPECT_EQ(ncclProxyOpToArgs(&op, &a, 2), ncclInternalError);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "Proxy append on running operation"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "Proxy append on running operation"));
   EXPECT_EQ(ncclProxyOpToArgs(&op, &a, NCCL_PROXY_MAX_SUBS), ncclInternalError);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "Proxy append out of bounds"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "Proxy append out of bounds"));
 }
 
 TEST_F(ProxyAppendMicrotest, Append_NewPeersJoinTheActiveListInOrder) {
@@ -1261,8 +1256,7 @@ TEST_F(ProxyAppendMicrotest, Append_ErrorsPropagate) {
 }
 
 // ncclProxyOpToArgs bumps nsubs before the mismatch check rejects the sub.
-// Pins AICOMRCCL-2966; a fix flips this pin.
-TEST_F(ProxyAppendMicrotest, Append_KnownBug_CountsAMismatchedSubBeforeRejectingIt) {
+TEST_F(ProxyAppendMicrotest, Append_CountsAMismatchedSubBeforeRejectingIt) {
   conns_[0].shared = 1;
   ncclProxyOp op = Op(0, 3);
   ASSERT_EQ(ProxyAppend(&st(), &op), ncclSuccess);
@@ -1363,7 +1357,7 @@ TEST_F(ProxyGetPostedOpsMicrotest, GetPostedOps_AppendsPostedOpsAndReturnsSlotsT
 
 TEST_F(ProxyGetPostedOpsMicrotest, GetPostedOps_StopsAtTheBatchSizeAndResumesWithoutTheLock) {
   MakeOpsPool();
-  ScopedHook param(g_loadParam, Param("PROXY_APPEND_BATCH_SIZE", 1));
+  ScopedHook param(g_loadParam, ParamOverride({{"PROXY_APPEND_BATCH_SIZE", 1}}));
   auto [first, last] = Chain({{0, 0, 1}, {0, 0, 1}, {0, 1, 2}, {0, 2, 3}, {1, 3, 3}, {1, 3, 4}});
   opsPool_->nextOps = first;
   opsPool_->nextOpsEnd = last;
@@ -1455,7 +1449,7 @@ TEST_F(ProxyProgressThreadMicrotest, ProgressThread_RunsPostedOpsToCompletionThe
   ASSERT_TRUE(WaitFor([&] { return finished == 2; }));
   Stop();
   EXPECT_EQ(g_hipSetDevices, std::vector<int>{3});
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_ATTN, "[Proxy Progress] Failed to set CUDA device 3"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_ATTN, "[Proxy Progress] Failed to set CUDA device 3"));
   EXPECT_EQ(ps_.asyncResult, ncclSuccess);
   EXPECT_EQ(st().active, nullptr);
   EXPECT_EQ(opsPool_->freeOps[0], 101);
@@ -1466,7 +1460,7 @@ TEST_F(ProxyProgressThreadMicrotest, ProgressThread_RunsPostedOpsToCompletionThe
 
 TEST_F(ProxyProgressThreadMicrotest, ProgressThread_StopWaitsForActiveOpsButAbortDoesNot) {
   MakeOpsPool();
-  ScopedHook param(g_loadParam, Param("PROGRESS_APPENDOP_FREQ", 2));
+  ScopedHook param(g_loadParam, ParamOverride({{"PROGRESS_APPENDOP_FREQ", 2}}));
   std::atomic<bool> release{false};
   ScopedHook progress(g_progressFn, [&](ncclProxyArgs* a) {
     if (release) a->state = ncclProxyOpNone;
@@ -1525,7 +1519,7 @@ TEST_F(ProxyProgressThreadMicrotest, ProgressThread_AppendErrorsAreRecordedButTh
 
 TEST_F(ProxyProgressThreadMicrotest, ProgressThread_DumpSignalInstallsTheStateDumper) {
   MakeOpsPool();
-  ScopedHook param(g_loadParam, Param("PROXY_DUMP_SIGNAL", SIGUSR2));
+  ScopedHook param(g_loadParam, ParamOverride({{"PROXY_DUMP_SIGNAL", SIGUSR2}}));
   Start();
   Stop();
   EXPECT_EQ(signal(SIGUSR2, SIG_DFL), ncclDumpProxyState);
@@ -1536,7 +1530,7 @@ TEST_F(ProxyProgressThreadMicrotest, ProgressCreate_StartsOneNamedThread) {
   MakeOpsPool();
   ASSERT_EQ(ncclProxyProgressCreate(&ps_), ncclSuccess);
   ASSERT_EQ(ncclProxyProgressCreate(&ps_), ncclSuccess);
-  EXPECT_EQ(g_threadNames, 1);
+  EXPECT_EQ(g_ncclSetThreadNameCalls.load(), 1);
   Stop();
   EXPECT_FALSE(st().thread.joinable());
 }
@@ -1600,7 +1594,7 @@ TEST_F(ProxyShmPoolMicrotest, OpsFree_UnsharesClosesAndForgetsThePool) {
   proxyOpsFree(&ps_);
   EXPECT_EQ(g_ncclOsMutexCondUnsharedCalls, 1);
   EXPECT_EQ(g_shm.closes, 1);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_ATTN, "shm close failed"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_ATTN, "shm close failed"));
   EXPECT_EQ(st().opsPool, nullptr);
   EXPECT_EQ(st().handle, nullptr);
   proxyOpsFree(&ps_);  // nothing mapped: only the (null) handle close
@@ -1618,7 +1612,7 @@ TEST_F(ProxyShmPoolMicrotest, ShmUnlink_OnlyWhenMappedAndFailureIsNotFatal) {
   g_shm.unlinkResult = ncclSystemError;
   EXPECT_EQ(ncclProxyShmUnlink(&comm), ncclSuccess);
   EXPECT_EQ(g_shm.unlinks, 2);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_ATTN, "proxy ops shm unlink failed"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_ATTN, "proxy ops shm unlink failed"));
 }
 
 TEST_F(ProxyShmPoolMicrotest, ConnInit_RejectsOutOfRangeLocalRanks) {
@@ -1627,7 +1621,7 @@ TEST_F(ProxyShmPoolMicrotest, ConnInit_RejectsOutOfRangeLocalRanks) {
   ncclProxyInitResp resp = {};
   ncclProxyConnection* conn = nullptr;
   EXPECT_EQ(proxyConnInit(&peer, &pool_, &ps_, &req, &resp, &conn), ncclInvalidArgument);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "tpLocalRank 3 out of range [0,3)"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "tpLocalRank 3 out of range [0,3)"));
   req.tpLocalRank = -1;
   EXPECT_EQ(proxyConnInit(&peer, &pool_, &ps_, &req, &resp, &conn), ncclInvalidArgument);
   EXPECT_EQ(pool_.banks, 0);
@@ -1817,7 +1811,7 @@ TEST_F(ProxyCallMicrotest, Poll_AbortAndMissingSocketsFail) {
   EXPECT_EQ(ncclPollProxyResponse(comm_.get(), &conn_, &out, this), ncclInternalError);  // no peer sockets
   abort_ = 1;
   EXPECT_EQ(ncclPollProxyResponse(comm_.get(), &conn_, &out, this), ncclInternalError);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "is in abort state"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "is in abort state"));
 }
 
 TEST_F(ProxyCallMicrotest, Poll_ReturnsInProgressUntilOurResponseArrives) {
@@ -1856,7 +1850,7 @@ TEST_F(ProxyCallMicrotest, Poll_SocketFailuresBeforeOrInsideTheHeader) {
   int out;
   g_sock.progressFailAt = 0;
   EXPECT_EQ(ncclPollProxyResponse(comm_.get(), &conn_, &out, this), ncclInternalError);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "Socket recv failed while polling"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "Socket recv failed while polling"));
   Reply(theirs, this, ncclSuccess, nullptr, 0);
   g_sock.progressFailAt = 2;  // mid-header
   g_sock.progressChunk = 3;
@@ -1868,7 +1862,7 @@ TEST_F(ProxyCallMicrotest, Poll_OurResponseWithoutABufferFails) {
   int value = 1;
   Reply(theirs, this, ncclSuccess, &value, sizeof(value));
   EXPECT_EQ(ncclPollProxyResponse(comm_.get(), &conn_, nullptr, this), ncclInternalError);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "Proxy response buffer is NULL"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "Proxy response buffer is NULL"));
 }
 
 TEST_F(ProxyCallMicrotest, Poll_OtherResponseAllocationOrRecvFailures) {
@@ -1878,7 +1872,7 @@ TEST_F(ProxyCallMicrotest, Poll_OtherResponseAllocationOrRecvFailures) {
   Reply(theirs, &other, ncclSuccess, &value, sizeof(value));
   g_mallocFailAt = 0;
   EXPECT_EQ(ncclPollProxyResponse(comm_.get(), &conn_, &out, this), ncclSystemError);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "Could not allocate proxy response buffer"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "Could not allocate proxy response buffer"));
   theirs = Peer(1);
   Reply(theirs, &other, ncclSuccess, &value, sizeof(value));
   g_sock.recvFailAt = 0;
@@ -1894,7 +1888,7 @@ TEST_F(ProxyCallMicrotest, Poll_UnexpectedOpIdsFail) {
   EXPECT_EQ(ncclPollProxyResponse(comm_.get(), &conn_, &out, this), ncclInternalError);  // nobody expects `other`
   Reply(theirs, this, ncclSuccess, nullptr, 0);
   EXPECT_EQ(ncclPollProxyResponse(comm_.get(), &conn_, &out, this), ncclInternalError);  // nor `this`
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "Couldn't find opId"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "Couldn't find opId"));
 }
 
 TEST_F(ProxyCallMicrotest, CallBlocking_PollsUntilTheResponseForItsOwnOpId) {
@@ -1920,7 +1914,7 @@ TEST_F(ProxyCallMicrotest, CallBlocking_AllocationAndSendFailures) {
   int out;
   g_mallocFailAt = 0;
   EXPECT_EQ(ncclProxyCallBlocking(comm_.get(), &conn_, ncclProxyMsgSetup, nullptr, 0, &out, sizeof(out)), ncclSystemError);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "Failed to allocate proxy operation ID"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "Failed to allocate proxy operation ID"));
   g_sock.sendFailAt = 0;
   EXPECT_EQ(ncclProxyCallBlocking(comm_.get(), &conn_, ncclProxyMsgSetup, nullptr, 0, &out, sizeof(out)), ncclRemoteError);
 }
@@ -1943,12 +1937,12 @@ TEST_F(ProxyConnectMicrotest, Connect_RejectsRanksOutsideTheCommAndTheTopParent)
   ncclProxyConnector pc = {};
   EXPECT_EQ(ncclProxyConnect(comm_.get(), 0, 1, -1, &pc), ncclInternalError);
   EXPECT_EQ(ncclProxyConnect(comm_.get(), 0, 1, kRanks, &pc), ncclInternalError);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "proxyRank 4 out of bounds [0, 4)"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "proxyRank 4 out of bounds [0, 4)"));
   tpRanks_[2] = kRanks;
   EXPECT_EQ(ncclProxyConnect(comm_.get(), 0, 1, 2, &pc), ncclInternalError);
   tpRanks_[2] = -1;
   EXPECT_EQ(ncclProxyConnect(comm_.get(), 0, 1, 2, &pc), ncclInternalError);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "tpRank -1 out of bounds [0, 4) for rank 2"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "tpRank -1 out of bounds [0, 4) for rank 2"));
   tpRanks_[2] = 2;
   ps_.peerSocks = (ncclSocket*)calloc(1, sizeof(ncclSocket));  // sized for fewer ranks by an earlier comm
   ps_.peerArraySize = 1;
@@ -1956,7 +1950,7 @@ TEST_F(ProxyConnectMicrotest, Connect_RejectsRanksOutsideTheCommAndTheTopParent)
   ps_.sharedDevMems = (void**)calloc(1, sizeof(void*));
   ps_.peerSocks[0].socketDescriptor = -1;
   EXPECT_EQ(ncclProxyConnect(comm_.get(), 0, 1, 2, &pc), ncclInternalError);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "peerIndex 2 out of bounds [0, 1)"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "peerIndex 2 out of bounds [0, 1)"));
 }
 
 TEST_F(ProxyConnectMicrotest, Connect_ConnectsInitsAndMapsThePeerOpsPoolOnce) {
@@ -2101,7 +2095,7 @@ TEST_F(ProxyUdsClientMicrotest, CallUDS_FailuresCloseTheSocketAndReport) {
   std::vector<char> big(sizeof(ncclIpcHdr::data) + 1);
   EXPECT_EQ(ncclProxyCallBlockingUDS(comm_.get(), &conn_, 1, big.data(), big.size(), &resp, 4, nullptr, nullptr),
             ncclInternalError);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, ("Invalid UDS proxy request size " + std::to_string(big.size())).c_str()));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, ("Invalid UDS proxy request size " + std::to_string(big.size())).c_str()));
   EXPECT_TRUE(g_ipc.sent.empty());
   for (ncclResult_t* r : {&g_ipc.sendResult, &g_ipc.recvResult}) {
     g_ipc.closes = 0;
@@ -2110,7 +2104,7 @@ TEST_F(ProxyUdsClientMicrotest, CallUDS_FailuresCloseTheSocketAndReport) {
     *r = ncclSuccess;
     EXPECT_EQ(g_ipc.closes, 1);
   }
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "ncclProxyCallBlockingUDS call to tpRank 0(100) failed"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "ncclProxyCallBlockingUDS call to tpRank 0(100) failed"));
 }
 
 // A failed close is retried on the already-closed socket; a fix flips this pin.
@@ -2144,10 +2138,10 @@ TEST_F(ProxyUdsClientMicrotest, GetFd_ConnectsOnFirstUseAndSendsTheHandle) {
   EXPECT_EQ(requests_.size(), 1u);
   g_ipc.sendResult = ncclRemoteError;
   EXPECT_EQ(ncclProxyClientGetFdBlocking(comm_.get(), 2, &handle, &fd), ncclRemoteError);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "ncclProxyClientGetFd call to tpRank 2 handle 0xabcdef failed"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "ncclProxyClientGetFd call to tpRank 2 handle 0xabcdef failed"));
   g_sock.connectResult = ncclRemoteError;
   EXPECT_EQ(ncclProxyClientGetFdBlocking(comm_.get(), 3, &handle, &fd), ncclRemoteError);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "ncclProxyClientGetFd call to tpRank 3"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "ncclProxyClientGetFd call to tpRank 3"));
 }
 
 TEST_F(ProxyUdsClientMicrotest, QueryFd_SendsOneRequestPerSegmentAndStopsAtTheFirstFailure) {
@@ -2168,7 +2162,7 @@ TEST_F(ProxyUdsClientMicrotest, QueryFd_SendsOneRequestPerSegmentAndStopsAtTheFi
   EXPECT_EQ(g_ipc.sent.size(), 1u);
   ncclIpcFd one = -1;
   EXPECT_EQ(ncclProxyClientQueryFdBlocking(comm_.get(), &conn_, 31, &one), ncclRemoteError);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "ncclProxyClientQueryFdBlocking call to tpRank 1 localFd 31 failed"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "ncclProxyClientQueryFdBlocking call to tpRank 1 localFd 31 failed"));
   g_ipc.sendResult = ncclSuccess;
   ASSERT_EQ(ncclProxyClientQueryFdBlocking(comm_.get(), &conn_, 31, &one), ncclSuccess);
   EXPECT_EQ(one, 9);
@@ -2314,7 +2308,7 @@ TEST_F(ProxyServiceOpMicrotest, Init_RejectsMalformedRequests) {
     EXPECT_EQ(InitOp(ncclProxyMsgInit), ncclInvalidArgument);
     Drain();
   }
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "rejecting Init from localRank 0: transport=-1"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "rejecting Init from localRank 0: transport=-1"));
   int req = 0;
   Request(client_, ncclProxyMsgInit, -1, &req, sizeof(req), sizeof(ncclProxyInitResp), &op1_);
   EXPECT_EQ(InitOp(ncclProxyMsgInit), ncclInvalidArgument);
@@ -2322,7 +2316,7 @@ TEST_F(ProxyServiceOpMicrotest, Init_RejectsMalformedRequests) {
   ncclProxyInitReq ok = {};
   Request(client_, ncclProxyMsgInit, -1, &ok, sizeof(ok), 1, &op1_);
   EXPECT_EQ(InitOp(ncclProxyMsgInit), ncclInvalidArgument);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "respSize=1 (expected"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "respSize=1 (expected"));
   EXPECT_EQ(pool_.banks, 0);
   EXPECT_EQ(asyncOps_, 0);
 }
@@ -2335,7 +2329,7 @@ TEST_F(ProxyServiceOpMicrotest, Ops_RejectUnknownOrForeignConnections) {
   peer_.id = 4;  // another peer presenting this peer's connection id
   Request(client_, ncclProxyMsgSetup, id, nullptr, 0, 0, &op2_);
   EXPECT_EQ(InitOp(ncclProxyMsgSetup), ncclInvalidArgument);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "Invalid proxy connection peer: 3 != 4"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "Invalid proxy connection peer: 3 != 4"));
   EXPECT_EQ(g_tp.setups, 0);
 }
 
@@ -2453,11 +2447,13 @@ TEST_F(ProxyServiceLoopMicrotest, Service_ServesAPeerUntilStopThenTearsEverythin
   g_tp.setupDoneAfter = 1;  // completes on the next loop iteration
   Request(c, ncclProxyMsgSetup, 0, nullptr, 0, 0, &op2_);
   Put(c, (int)ncclProxyMsgStop);
+  int listenFd = ps_.listenSock->socketDescriptor;
   ncclProxyService(&ps_);
   EXPECT_EQ(Response<ncclProxyInitResp>(c, &op1_).connId, 0);
   EXPECT_EQ(Get<ncclProxyRpcResponseHeader>(c).opId, &op2_);
   EXPECT_TRUE(Closed(c));
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_ATTN, "[Proxy Service] Failed to set CUDA device 2"));
+  EXPECT_NE(std::find(g_closedFds.begin(), g_closedFds.end(), listenFd), g_closedFds.end());
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_ATTN, "[Proxy Service] Failed to set CUDA device 2"));
   EXPECT_EQ(g_hipSyncs.load(), 1);  // the teardown ran
   EXPECT_EQ(g_tp.frees.size(), 1u);
   EXPECT_EQ(st().opsPool, nullptr);  // progress thread joined and ops pool unmapped
@@ -2494,11 +2490,11 @@ TEST_F(ProxyServiceLoopMicrotest, Service_ClosedOrFailingPeersAreDroppedWhileOth
   ncclProxyService(&ps_);
   EXPECT_EQ(Response<ncclProxyInitResp>(pending, &op1_).connId, 0);
   for (int fd : {quiet, closer, unknown, badConn, pending, stopper}) EXPECT_TRUE(Closed(fd)) << fd;
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_ATTN, "Unknown command 0"));
-  EXPECT_FALSE(ProxyLogged(NCCL_LOG_ATTN, "Unknown command 6"));  // Close is a command, not an unknown one
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_INFO, "Connection closed by localRank"));
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "Failed to execute operation Setup"));
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_INFO, "Force closing peer=0"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_ATTN, "Unknown command 0"));
+  EXPECT_FALSE(DebugLogged(NCCL_LOG_ATTN, "Unknown command 6"));  // Close is a command, not an unknown one
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_INFO, "Connection closed by localRank"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "Failed to execute operation Setup"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_INFO, "Force closing peer=0"));
   FreeUnitLeftovers();  // force-closing a peer at stop does not drain its queued setup
 }
 
@@ -2532,7 +2528,7 @@ TEST_F(ProxyServiceLoopMicrotest, Service_AbortDropsPeersWithPendingOps) {
     EXPECT_EQ(write(listenW_, "c", 1), 1);  // wake the final poll at once
   });
   ncclProxyService(&ps_);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "Error encountered progressing operation=Setup"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "Error encountered progressing operation=Setup"));
   EXPECT_EQ(Response<ncclProxyInitResp>(pending, &op1_).connId, 0);
   EXPECT_TRUE(Closed(pending));
   EXPECT_TRUE(Closed(other));
@@ -2550,7 +2546,7 @@ TEST_F(ProxyServiceLoopMicrotest, Service_RecvErrorsCloseThePeerAndAreQuietOnceA
   });
   ncclProxyService(&ps_);
   EXPECT_EQ(tryRecv.calls, 2);
-  EXPECT_EQ(ProxyLogCount("Could not receive type"), 1);
+  EXPECT_EQ(DebugLogMatching("Could not receive type").size(), 1u);
 }
 
 TEST_F(ProxyServiceLoopMicrotest, Service_AbortWithCuMemHostClosesPeersWhenStopped) {
@@ -2560,7 +2556,7 @@ TEST_F(ProxyServiceLoopMicrotest, Service_AbortWithCuMemHostClosesPeersWhenStopp
   abort_ = 1;
   ncclProxyService(&ps_);
   EXPECT_TRUE(Closed(a));
-  EXPECT_FALSE(ProxyLogged(NCCL_LOG_INFO, "Force closing"));  // closed by the abort check, not the stop sweep
+  EXPECT_FALSE(DebugLogged(NCCL_LOG_INFO, "Force closing"));  // closed by the abort check, not the stop sweep
   for (int variant = 0; variant < 2; variant++) {  // direct mode, or the proxy not stopped yet: swept instead
     ps_.directMode = variant == 0;
     ps_.stop = variant == 0;
@@ -2571,10 +2567,10 @@ TEST_F(ProxyServiceLoopMicrotest, Service_AbortWithCuMemHostClosesPeersWhenStopp
     fds_.push_back(p[1]);
     ps_.listenSock->socketDescriptor = p[0];
     listenW_ = p[1];
-    ResetProxyLog();
+    ResetDebugLog();
     Connect();
     ncclProxyService(&ps_);
-    EXPECT_TRUE(ProxyLogged(NCCL_LOG_INFO, "Force closing")) << variant;
+    EXPECT_TRUE(DebugLogged(NCCL_LOG_INFO, "Force closing")) << variant;
   }
 }
 
@@ -2584,7 +2580,7 @@ TEST_F(ProxyServiceLoopMicrotest, Service_AcceptFailuresAreLoggedAndAffinityIsAp
   ASSERT_EQ(write(listenW_, "c", 1), 1);  // nothing queued to accept
   abort_ = 1;
   ncclProxyService(&ps_);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_ATTN, "Accept failed"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_ATTN, "Accept failed"));
   ASSERT_EQ(g_ncclOsSetAffinityMasks.size(), 1u);
   EXPECT_TRUE(CPU_EQUAL(&g_ncclOsSetAffinityMasks[0], &proxyCpuset));
 }
@@ -2598,7 +2594,7 @@ TEST_F(ProxyServiceLoopMicrotest, Service_KnownBug_TooManyConnectionsSkipsTeardo
   ncclProxyService(&ps_);
   ASSERT_EQ(g_sock.acceptFds.size(), 1u);  // every slot was filled; the extra client was never accepted
   EXPECT_EQ(g_sock.acceptFds.front(), ours.back());
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, ("Too many connections (" + std::to_string(NCCL_MAX_PROXY_CONNECTIONS) +
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, ("Too many connections (" + std::to_string(NCCL_MAX_PROXY_CONNECTIONS) +
                                      " max)").c_str()));
   EXPECT_FALSE(g_watchedFreed);
   EXPECT_EQ(g_hipSyncs.load(), 0);
@@ -2629,7 +2625,7 @@ TEST_F(ProxyServiceLoopMicrotest, Service_KnownBug_PollFailureSkipsTeardown) {
   ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &none), 0);  // poll() rejects nfds above the fd limit
   ncclProxyService(&ps_);
   ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &old), 0);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "[Proxy Service] Poll failed"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "[Proxy Service] Poll failed"));
   EXPECT_EQ(g_sock.acceptFds.size(), 1u);  // the first poll failed, so the pending client was never accepted
   EXPECT_FALSE(g_watchedFreed);
   EXPECT_EQ(g_hipSyncs.load(), 0);
@@ -2652,7 +2648,7 @@ TEST_F(ProxyCpusetMicrotest, CpusetOnce_ParsesNcclProxyCpusetOrClearsIt) {
   EXPECT_EQ(CPU_COUNT(&proxyCpuset), 2);
   EXPECT_TRUE(CPU_ISSET(1, &proxyCpuset));
   EXPECT_TRUE(CPU_ISSET(3, &proxyCpuset));
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_INFO, "NCCL_PROXY_CPUSET = 1,3: 0 changed to 1,3"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_INFO, "NCCL_PROXY_CPUSET = 1,3: 0 changed to 1,3"));
   CPU_ZERO(&proxyCpuset);
 }
 
@@ -2705,7 +2701,7 @@ TEST_F(ProxyUdsFdServiceMicrotest, GetFd_ExportInitSendCloseAndFdCloseFailures) 
   Hdr(ncclProxyMsgGetFd, 1, (void*)0x40);
   g_hipExportResult = hipErrorInvalidValue;
   EXPECT_EQ(proxyUDSRecvReq(&ps_, 0), ncclUnhandledCudaError);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "HIP failure '[hip_fake] stub error'"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "HIP failure '[hip_fake] stub error'"));
   g_hipExportResult = hipSuccess;
   g_ipc.initResult = ncclSystemError;
   EXPECT_EQ(proxyUDSRecvReq(&ps_, 0), ncclSystemError);
@@ -2718,7 +2714,7 @@ TEST_F(ProxyUdsFdServiceMicrotest, GetFd_ExportInitSendCloseAndFdCloseFailures) 
   g_ipc.closeResult = ncclSuccess;
   g_ipc.fdCloseResult = -1;
   EXPECT_EQ(proxyUDSRecvReq(&ps_, 0), ncclSystemError);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "Call to close failed"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "Call to close failed"));
 }
 
 TEST_F(ProxyUdsFdServiceMicrotest, QueryFd_EchoesTheRemoteFd) {
@@ -2756,7 +2752,7 @@ TEST_F(ProxyUdsFdServiceMicrotest, ServiceUDS_HandlesRequestsUntilStopOrAbort) {
   ncclProxyServiceUDS(&ps_);
   EXPECT_EQ(g_ipc.sent.size(), 1u);
   EXPECT_EQ(g_ipc.closes, 2);  // the reply socket, then the service socket
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_ATTN, "[Proxy Service UDS] Failed to set CUDA device 4"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_ATTN, "[Proxy Service UDS] Failed to set CUDA device 4"));
   ASSERT_EQ(g_ncclOsSetAffinityMasks.size(), 1u);
   EXPECT_TRUE(CPU_EQUAL(&g_ncclOsSetAffinityMasks[0], &proxyCpuset));
   ps_.stop = 0;
@@ -2775,7 +2771,7 @@ TEST_F(ProxyUdsServiceMicrotest, RecvReq_UnknownTypeOrRecvFailure) {
 TEST_F(ProxyUdsServiceMicrotest, ServiceUDS_GetFdOrPollFailuresEndIt) {
   g_ipc.getFdResult = ncclInternalError;
   ncclProxyServiceUDS(&ps_);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "Get listenSock fd fails"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "Get listenSock fd fails"));
   EXPECT_TRUE(g_ncclOsSetAffinityMasks.empty());  // no proxy cpuset: the thread keeps its affinity
   g_ipc.getFdResult = ncclSuccess;
   struct rlimit old;
@@ -2784,7 +2780,7 @@ TEST_F(ProxyUdsServiceMicrotest, ServiceUDS_GetFdOrPollFailuresEndIt) {
   ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &none), 0);
   ncclProxyServiceUDS(&ps_);
   ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &old), 0);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "[Proxy Service UDS] Poll failed"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "[Proxy Service UDS] Poll failed"));
   EXPECT_EQ(g_ipc.closes, 0);
 }
 
@@ -2832,7 +2828,7 @@ TEST_F(ProxyLifecycleMicrotest, Init_CreatesTheSharedStateOnceAndOpensTheUdsSock
   EXPECT_EQ(g_ipc.lastInitRank, 1);
   EXPECT_EQ(g_ipc.lastInitHash, 0x11u);
   EXPECT_EQ(ncclProxyInit(comm_.get(), &listen_, addrs_, uds_), ncclInternalError);
-  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "Proxy state is already initialized"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "Proxy state is already initialized"));
   delete res_.proxyState;
   res_.proxyState = nullptr;
   g_ipc.initResult = ncclSystemError;
@@ -2874,7 +2870,7 @@ TEST_F(ProxyLifecycleMicrotest, Create_CopiesCommSettingsAndStartsBothServiceThr
   EXPECT_EQ(ps->buffSizes[1], 777);
   EXPECT_EQ(ps->ll128LineElems, 9);
   EXPECT_EQ(ps->ginState, &res_.ginState);
-  EXPECT_EQ(g_threadNames, 2);
+  EXPECT_EQ(g_ncclSetThreadNameCalls.load(), 2);
   EXPECT_EQ(g_hipSetDevices, (std::vector<int>{5, 5}));
 }
 
