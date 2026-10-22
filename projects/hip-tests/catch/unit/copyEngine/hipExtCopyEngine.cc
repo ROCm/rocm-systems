@@ -155,6 +155,28 @@ __global__ void TwoCopiesOneCompletion(hipExtCopyEngineDeviceHandle handle, void
   *status = result;
 }
 
+// One copy that sets two words, one right after the other, from a single submit: through the
+// one-lane call or the general one. A null second completion is refused.
+__global__ void CopyWithTwoCompletions(hipExtCopyEngineDeviceHandle handle, void* dst,
+                                       const void* src, uint64_t size, uint64_t* signals,
+                                       bool one_lane, hipError_t* statuses) {
+  const hipExtCopyEngineSignal first = SetOnCompletion(&signals[0], 7);
+  const hipExtCopyEngineSignal second = SetOnCompletion(&signals[1], 9);
+  statuses[1] = one_lane ? hipExtCopyEngineSubmitLinearTwoCompletionsOneLane(&handle, dst, src,
+                                                                             size, &first, nullptr)
+                         : hipExtCopyEngineSubmitLinearTwoCompletions(&handle, dst, src, size,
+                                                                      &first, nullptr);
+  hipError_t result = one_lane ? hipExtCopyEngineSubmitLinearTwoCompletionsOneLane(
+                                     &handle, dst, src, size, &first, &second)
+                               : hipExtCopyEngineSubmitLinearTwoCompletions(&handle, dst, src, size,
+                                                                            &first, &second);
+  const hipExtCopyEngineCondition first_done = Reached(&signals[0], 7);
+  const hipExtCopyEngineCondition second_done = Reached(&signals[1], 9);
+  if (result == hipSuccess) result = WaitFor(first_done, kMaxSpins);
+  if (result == hipSuccess) result = WaitFor(second_done, kMaxSpins);
+  statuses[0] = result;
+}
+
 // Inline 1-, 2-, 4- and 8-byte writes into |bytes|; the last one's completion
 // covers all of them. Other sizes are refused.
 __global__ void InlineWrites(hipExtCopyEngineDeviceHandle handle, uint8_t* bytes,
@@ -865,6 +887,38 @@ HIP_TEST_CASE(Unit_hipExtCopyEngine_KernelCopies) {
     HIP_CHECK(hipFree(second_dst));
     HIP_CHECK(hipFree(first_dst));
   }
+
+  const auto check_two_completions = [&](bool one_lane) {
+    std::vector<uint32_t> pattern(kNumWords);
+    for (uint32_t word = 0; word < kNumWords; ++word) pattern[word] = word ^ 0x5a5a5a5au;
+    HIP_CHECK(hipMemcpy(src, pattern.data(), kBytes, hipMemcpyHostToDevice));
+    uint32_t* dst = nullptr;
+    uint64_t* signals = nullptr;
+    hipError_t* statuses = nullptr;
+    HIP_CHECK(hipMalloc(&dst, kBytes));
+    HIP_CHECK(hipMemset(dst, 0, kBytes));
+    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&signals), 2 * sizeof(uint64_t),
+                            hipHostMallocCoherent));
+    signals[0] = signals[1] = 0;
+    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&statuses), 2 * sizeof(hipError_t)));
+    CopyWithTwoCompletions<<<1, 1>>>(handle, dst, src, kBytes, signals, one_lane, statuses);
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipDeviceSynchronize());
+    REQUIRE(statuses[1] == hipErrorInvalidValue);
+    HIP_CHECK(statuses[0]);
+    REQUIRE(signals[0] == 7);
+    REQUIRE(signals[1] == 9);
+    std::vector<uint32_t> copied(kNumWords);
+    HIP_CHECK(hipMemcpy(copied.data(), dst, kBytes, hipMemcpyDeviceToHost));
+    REQUIRE(copied == pattern);
+    HIP_CHECK(hipHostFree(statuses));
+    HIP_CHECK(hipHostFree(signals));
+    HIP_CHECK(hipFree(dst));
+  };
+
+  SECTION("A copy with two completions, one lane") { check_two_completions(true); }
+
+  SECTION("A copy with two completions, general") { check_two_completions(false); }
 
   SECTION("Inline writes") {
     uint64_t* signal = nullptr;

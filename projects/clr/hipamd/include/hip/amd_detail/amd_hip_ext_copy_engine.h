@@ -115,6 +115,23 @@ __device__ __forceinline__ hipError_t CopyEngineSubmitLinear(
                                           options.Completion(), flags));
 }
 
+template <bool OneLane> __device__ __forceinline__ hipError_t CopyEngineSubmitLinearTwoCompletions(
+    const hipExtCopyEngineDeviceHandle* handle, void* dst, const void* src, uint64_t size,
+    const hipExtCopyEngineSignal* completion, const hipExtCopyEngineSignal* secondCompletion,
+    const hipExtCopyEngineCondition* dependency, uint32_t flags) {
+  if (completion == nullptr || secondCompletion == nullptr) return hipErrorInvalidValue;
+  const abce_device_handle_t internal = CopyEngineHandle(handle);
+  if (!abce_device_handle_valid(&internal)) return hipErrorInvalidHandle;
+  const CopyEngineSubmitOptions options(completion, dependency);
+  const abce_device_signal_t second = CopyEngineSignal(*secondCompletion);
+  return CopyEngineStatus(OneLane ? abce_device_submit_linear_two_completions_one_lane(
+                                        &internal, dst, src, size, options.Dependency(),
+                                        options.Completion(), &second, flags)
+                                  : abce_device_submit_linear_two_completions(
+                                        &internal, dst, src, size, options.Dependency(),
+                                        options.Completion(), &second, flags));
+}
+
 template <bool OneLane>
 __device__ __forceinline__ hipError_t CopyEngineSubmitWrite(
     const hipExtCopyEngineDeviceHandle* handle, void* dst, uint64_t value, uint32_t size,
@@ -202,6 +219,30 @@ static __device__ __forceinline__ hipError_t hipExtCopyEngineSubmitLinearOneLane
     const hipExtCopyEngineCondition* dependency = nullptr, uint32_t flags = 0) {
   return hip::detail::CopyEngineSubmitLinear<true>(handle, dst, src, size, completion,
                                                    dependency, flags);
+}
+
+/// hipExtCopyEngineSubmitLinear with two completions, both required, queued
+/// under one reservation and one publish: @p secondCompletion is applied right
+/// after @p completion, and both land once the copy's writes have. One submit
+/// where a copy and then a standalone hipExtCopyEngineSubmitSignal would be two;
+/// the usual use is telling the destination the data arrived and the source side
+/// that it was sent. Otherwise as hipExtCopyEngineSubmitLinear.
+static __device__ __forceinline__ hipError_t hipExtCopyEngineSubmitLinearTwoCompletions(
+    const hipExtCopyEngineDeviceHandle* handle, void* dst, const void* src, uint64_t size,
+    const hipExtCopyEngineSignal* completion, const hipExtCopyEngineSignal* secondCompletion,
+    const hipExtCopyEngineCondition* dependency = nullptr, uint32_t flags = 0) {
+  return hip::detail::CopyEngineSubmitLinearTwoCompletions<false>(
+      handle, dst, src, size, completion, secondCompletion, dependency, flags);
+}
+
+/// hipExtCopyEngineSubmitLinearTwoCompletions for exactly one calling lane per
+/// wave.
+static __device__ __forceinline__ hipError_t hipExtCopyEngineSubmitLinearTwoCompletionsOneLane(
+    const hipExtCopyEngineDeviceHandle* handle, void* dst, const void* src, uint64_t size,
+    const hipExtCopyEngineSignal* completion, const hipExtCopyEngineSignal* secondCompletion,
+    const hipExtCopyEngineCondition* dependency = nullptr, uint32_t flags = 0) {
+  return hip::detail::CopyEngineSubmitLinearTwoCompletions<true>(
+      handle, dst, src, size, completion, secondCompletion, dependency, flags);
 }
 
 /// Write the low @p size (1, 2, 4 or 8) bytes of @p value, carried in the
