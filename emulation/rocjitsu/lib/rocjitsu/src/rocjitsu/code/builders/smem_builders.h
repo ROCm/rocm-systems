@@ -37,7 +37,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand_types.h"
-#include "util/except.h"
+#include "util/diagnostic.h"
 
 namespace rocjitsu {
 
@@ -65,8 +65,10 @@ inline constexpr uint32_t kSmem24BitMaxByteOffset = 0x7FFFFFu;
 
 /// @brief Largest forward byte offset @p arch's SMEM immediate field can name.
 ///
-/// @throws util::UnimplementedInst for a non-AMDGPU architecture.
-[[nodiscard]] inline constexpr uint32_t max_smem_byte_offset(rj_code_arch_t arch) {
+/// @returns Failure for a non-AMDGPU architecture.
+/// @param error Optional caller-owned diagnostic emitter, used only on failure.
+inline constexpr util::FailureOr<uint32_t>
+max_smem_byte_offset(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
   case ROCJITSU_CODE_ARCH_CDNA2:
@@ -81,7 +83,9 @@ inline constexpr uint32_t kSmem24BitMaxByteOffset = 0x7FFFFFu;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return kSmem24BitMaxByteOffset;
   default:
-    throw util::UnimplementedInst("SMEM offset range for target architecture");
+    if (error != nullptr)
+      return error->emit() << "SMEM offset range for target architecture";
+    return util::Result::failure();
   }
 }
 
@@ -104,29 +108,39 @@ inline constexpr uint32_t kSmem24BitMaxByteOffset = 0x7FFFFFu;
 /// OPR_SMEM_OFFSET_NULL from its own generation's table for this field rather
 /// than a shared constant or the generic scalar-source table.
 ///
-/// @throws util::InvalidInst if either pair base is odd or out of field range, or
-///         if @p byte_offset is unaligned or out of range.
-/// @throws util::UnimplementedInst for a non-AMDGPU architecture.
-[[nodiscard]] inline std::array<uint32_t, 2>
-build_s_load_dwordx2(uint16_t sdst, uint16_t sbase, uint32_t byte_offset, rj_code_arch_t arch) {
+/// @returns Failure if either pair base is odd or out of field range, or
+///          if @p byte_offset is unaligned or out of range, or for a non-AMDGPU
+///          architecture.
+/// @param error Optional caller-owned diagnostic emitter, used only on failure.
+inline util::FailureOr<std::array<uint32_t, 2>>
+build_s_load_dwordx2(uint16_t sdst, uint16_t sbase, uint32_t byte_offset, rj_code_arch_t arch,
+                     const util::DiagnosticEmitter *error = nullptr) {
+  const auto fail = [error](const char *message) -> util::Result {
+    if (error != nullptr)
+      return error->emit() << message;
+    return util::Result::failure();
+  };
   // Both operands name a 64-bit pair, so both bases must be even. The encoded
   // fields are narrower than uint16_t and the generated set_field masks rather
   // than rejects, so an out-of-range index would silently become a different
   // register: SBASE is 6 bits holding the index halved, SDATA is 7 bits.
   if ((sbase % 2) != 0)
-    throw util::InvalidInst("SMEM address SGPR pair base must be even");
+    return fail("SMEM address SGPR pair base must be even");
   if ((sdst % 2) != 0)
-    throw util::InvalidInst("SMEM destination SGPR pair base must be even");
+    return fail("SMEM destination SGPR pair base must be even");
   if (sbase > kMaxSmemSbase)
-    throw util::InvalidInst("SMEM address SGPR index exceeds the SBASE field");
+    return fail("SMEM address SGPR index exceeds the SBASE field");
   if (sdst > kMaxSmemSdata)
-    throw util::InvalidInst("SMEM destination SGPR index exceeds the SDATA field");
-  if (byte_offset > max_smem_byte_offset(arch))
-    throw util::InvalidInst("SMEM immediate byte offset out of range for target architecture");
+    return fail("SMEM destination SGPR index exceeds the SDATA field");
+  const auto offset_max = max_smem_byte_offset(arch, error);
+  if (offset_max.failed())
+    return util::Result::failure();
+  if (byte_offset > offset_max.value())
+    return fail("SMEM immediate byte offset out of range for target architecture");
   // Scalar loads ignore the low two address bits, so an unaligned offset would
   // silently load from the aligned-down address.
   if ((byte_offset & 0x3u) != 0)
-    throw util::InvalidInst("SMEM immediate byte offset must be a multiple of 4");
+    return fail("SMEM immediate byte offset must be a multiple of 4");
 
   const auto base = static_cast<uint8_t>(sbase / 2);
   const auto data = static_cast<uint8_t>(sdst);
@@ -187,7 +201,7 @@ build_s_load_dwordx2(uint16_t sdst, uint16_t sbase, uint32_t byte_offset, rj_cod
                               .scale_offset = 0,
                               .soffset = static_cast<uint8_t>(cdna5::OPR_SMEM_OFFSET_NULL)});
   default:
-    throw util::UnimplementedInst("s_load_dwordx2 for target architecture");
+    return fail("s_load_dwordx2 for target architecture");
   }
 }
 
@@ -202,8 +216,11 @@ build_s_load_dwordx2(uint16_t sdst, uint16_t sbase, uint32_t byte_offset, rj_cod
 /// @note Scalar loads are asynchronous. Emit this between the load and the first
 ///   read of its destination.
 ///
-/// @throws util::UnimplementedInst for a non-AMDGPU architecture.
-[[nodiscard]] inline uint32_t build_wait_scalar_loads_complete(rj_code_arch_t arch) {
+/// @returns Failure for a non-AMDGPU architecture.
+/// @param error Optional caller-owned diagnostic emitter, used only on failure.
+inline util::FailureOr<uint32_t>
+build_wait_scalar_loads_complete(rj_code_arch_t arch,
+                                 const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
     return build_sopp_encoding(arch, cdna1::kSWaitcntSopp, 0);
@@ -226,7 +243,9 @@ build_s_load_dwordx2(uint16_t sdst, uint16_t sbase, uint32_t byte_offset, rj_cod
   case ROCJITSU_CODE_ARCH_CDNA5:
     return build_sopp_encoding(arch, cdna5::kSWaitKmcntSopp, 0);
   default:
-    throw util::UnimplementedInst("scalar-load wait for target architecture");
+    if (error != nullptr)
+      return error->emit() << "scalar-load wait for target architecture";
+    return util::Result::failure();
   }
 }
 

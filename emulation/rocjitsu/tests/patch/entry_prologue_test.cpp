@@ -317,16 +317,22 @@ TEST(BuildDbiEntryPrologue, EmitsLoadsThenWaitThenRestore) {
   const auto prologue = build_dbi_entry_prologue(desc, kArch, kStorage, &error);
   ASSERT_TRUE(prologue.has_value()) << error;
 
-  const auto payload =
+  const auto payload_result =
       build_s_load_dwordx2(kStorage.persistent_base, 0, prologue->payload_byte_offset, kArch);
-  const auto original = build_s_load_dwordx2(kStorage.entry_temp_base, 0,
-                                             prologue->original_kernarg_pointer_offset, kArch);
+  ASSERT_TRUE(payload_result.succeeded());
+  const auto payload = payload_result.value();
+  const auto original_result = build_s_load_dwordx2(
+      kStorage.entry_temp_base, 0, prologue->original_kernarg_pointer_offset, kArch);
+  ASSERT_TRUE(original_result.succeeded());
+  const auto original = original_result.value();
+  const auto wait = build_wait_scalar_loads_complete(kArch);
+  ASSERT_TRUE(wait.succeeded());
   const std::vector<uint32_t> expected{
       payload[0],
       payload[1],
       original[0],
       original[1],
-      build_wait_scalar_loads_complete(kArch),
+      wait.value(),
       build_s_mov_b32(0, kStorage.entry_temp_base, kArch),
       build_s_mov_b32(1, static_cast<uint16_t>(kStorage.entry_temp_base + 1), kArch),
   };
@@ -346,16 +352,22 @@ TEST(BuildDbiEntryPrologue, AddressesThroughTheKernargPairWhereverTheAbiPutsIt) 
   const auto prologue = build_dbi_entry_prologue(desc, kArch, kStorage, &error);
   ASSERT_TRUE(prologue.has_value()) << error;
 
-  const auto payload = build_s_load_dwordx2(kStorage.persistent_base, /*sbase=*/2,
-                                            prologue->payload_byte_offset, kArch);
-  const auto original = build_s_load_dwordx2(kStorage.entry_temp_base, /*sbase=*/2,
-                                             prologue->original_kernarg_pointer_offset, kArch);
+  const auto payload_result = build_s_load_dwordx2(kStorage.persistent_base, /*sbase=*/2,
+                                                   prologue->payload_byte_offset, kArch);
+  ASSERT_TRUE(payload_result.succeeded());
+  const auto payload = payload_result.value();
+  const auto original_result = build_s_load_dwordx2(
+      kStorage.entry_temp_base, /*sbase=*/2, prologue->original_kernarg_pointer_offset, kArch);
+  ASSERT_TRUE(original_result.succeeded());
+  const auto original = original_result.value();
+  const auto wait = build_wait_scalar_loads_complete(kArch);
+  ASSERT_TRUE(wait.succeeded());
   const std::vector<uint32_t> expected{
       payload[0],
       payload[1],
       original[0],
       original[1],
-      build_wait_scalar_loads_complete(kArch),
+      wait.value(),
       build_s_mov_b32(2, kStorage.entry_temp_base, kArch),
       build_s_mov_b32(3, static_cast<uint16_t>(kStorage.entry_temp_base + 1), kArch),
   };
@@ -463,6 +475,17 @@ TEST(BuildDbiEntryPrologue, FailsClosedOnAKernargSizeThatOverflowsTheWrapper) {
   EXPECT_FALSE(error.empty());
 }
 
+TEST(BuildDbiEntryPrologue, UnsupportedArchReturnsNoPrologueAndReportsTheError) {
+  for (const auto arch :
+       {ROCJITSU_CODE_ARCH_RV32I, ROCJITSU_CODE_ARCH_RV64I, ROCJITSU_CODE_ARCH_INVALID}) {
+    std::string error;
+    const auto prologue = build_dbi_entry_prologue(
+        kernarg_descriptor(), arch, {.persistent_base = 26, .entry_temp_base = 28}, &error);
+    EXPECT_FALSE(prologue.has_value());
+    EXPECT_EQ(error, "SMEM offset range for target architecture");
+  }
+}
+
 TEST(BuildDbiEntryPrologue, FailsClosedOnAnOddStoragePair) {
   std::string error;
   EXPECT_FALSE(build_dbi_entry_prologue(kernarg_descriptor(), kArch,
@@ -476,8 +499,10 @@ TEST(BuildDbiEntryPrologue, FailsClosedOnAnOddStoragePair) {
 // field width.
 TEST(BuildDbiEntryPrologue, FailsClosedOnAWrapperPastTheSmemImmediateRange) {
   std::string error;
+  const auto offset_max = max_smem_byte_offset(kArch);
+  ASSERT_TRUE(offset_max.succeeded());
   const auto prologue =
-      build_dbi_entry_prologue(kernarg_descriptor(max_smem_byte_offset(kArch)), kArch,
+      build_dbi_entry_prologue(kernarg_descriptor(offset_max.value()), kArch,
                                {.persistent_base = 26, .entry_temp_base = 28}, &error);
   EXPECT_FALSE(prologue.has_value());
   EXPECT_FALSE(error.empty());
