@@ -56,7 +56,7 @@ use crate::runtime::{
     HsaState, InFlightGeneration, boundary, cache_handles_in_level_order, initialized_mut, lock,
     map_error,
 };
-use crate::signal::{AsyncCopyClock, AsyncCopyProfile};
+use crate::signal::{AsyncCopyClock, AsyncCopyProfile, SignalState};
 
 const GPU_POOL_COARSE: u64 = 1;
 pub(crate) const GPU_POOL_FINE: u64 = 2;
@@ -1849,7 +1849,7 @@ pub unsafe extern "C" fn hsa_amd_memory_pool_free(pointer: *mut c_void) -> Statu
                 .allocations
                 .get(&(pointer as usize))
                 .map_or(pointer as usize, |memory| memory.description.agent_base);
-            if copy_borrowed(runtime, base) {
+            if runtime.memory_state.copy_borrowed(base) {
                 return OUT_OF_RESOURCES;
             }
             let removed = if let Some(memory) =
@@ -1868,8 +1868,7 @@ pub unsafe extern "C" fn hsa_amd_memory_pool_free(pointer: *mut c_void) -> Statu
                 else {
                     return INVALID_ALLOCATION;
                 };
-                if copy_borrowed(
-                    runtime,
+                if runtime.memory_state.copy_borrowed(
                     runtime.memory_state.locked_allocations[index]
                         .description
                         .agent_base,
@@ -2342,7 +2341,10 @@ pub unsafe extern "C" fn hsa_amd_agents_allow_access(
             return INVALID_ALLOCATION;
         };
         let memory = &runtime.memory_state.allocations[&key];
-        if copy_borrowed(runtime, memory.description.agent_base) {
+        if runtime
+            .memory_state
+            .copy_borrowed(memory.description.agent_base)
+        {
             return OUT_OF_RESOURCES;
         }
         let owner = memory.description.owner;
