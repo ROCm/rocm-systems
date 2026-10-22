@@ -66,12 +66,12 @@ divergence is ranked by what it costs users:
 | D3 | The DB evaluates untyped system info | With `--specs-correction`, string values make DB arithmetic fail to NULL | Fix |
 | D4 | CLI uses "N/A" and silently drops roofline points whose AI is missing; the DB stores NULL. Only the CLI halts on an idle-GPU counter | Kernels vanish from the roofline without notice; DBs written from idle-GPU counters | Fix |
 | D5 | The CLI computes one filtered aggregate; the DB computes per kernel and per workload | Different granularity | Needed by design |
-| D6 | The DB does not validate `--gpu-id`/`-d` ids; the top-stats tables differ | A typo silently produces an empty DB | Fix |
+| D6 | The DB does not validate `--gpu-id`/`--kernel-iteration-range` ids; the top-stats tables differ | A typo silently produces an empty DB | Fix |
 | D7 | Membw guidance, top-stats percentages, and some tables exist only in the CLI | The report shows data the DB lacks | Needed by design |
 | D8a | The DB stores no ceilings. The limiter exists only in the HTML, which only single-`-p` CLI runs write | Optiq must derive ceilings itself; comparison runs get no HTML; the CSV has no roofline | Needed by design |
 | D8b | The DB's per-kernel roofline table has no view, uses GFLOP/s, and fixes one column per memory level. CLI ceilings use the device-0 row while peaks use the first row. Both drop gfx1250 L2 and L0 points | A `--device N` profile has peaks but no roofline; gfx1250 L2 and L0 points are missing | Deferred |
 | D9 | Rounding, units, and normalization are not recorded | A DB cannot say which normalization produced its values | Fix |
-| D10 | CLI PC sampling ignores `--gpu-id`/`-d` and uses only the first `-k` | Counters and samples are filtered differently | Deferred |
+| D10 | CLI PC sampling ignores `--gpu-id`/`--kernel-iteration-range` and uses only the first `-k` | Counters and samples are filtered differently | Deferred |
 | D12 | Variance warnings differ in granularity | — | Deferred |
 
 Users read results in two places, the terminal and Optiq. When those disagree, users cannot
@@ -100,7 +100,7 @@ and neither writes the roofline HTML.
 |---|---|
 | FR-1 | Every analyze run other than a listing run creates one new run folder. It holds the analysis DB, the full text report, and one folder per workload with the workload CSVs and one folder per kernel. When the data exists, the run also writes the roofline HTML, memory-chart HTML, PC-sampling files, and ML API trace export. |
 | FR-2 | `--output-format` and `-b/--block` stay for one release as deprecated no-ops: `(DEPRECATED)` in help, a warning when used, value ignored. They are removed in the following release. |
-| FR-3 | New analyze option `--output-directory <dir>`, with no short form, names the parent of the run folder. It defaults to the current directory, takes a plain path with no placeholder expansion, and is created with its missing parents. |
+| FR-3 | New analyze option `-d/--output-directory <dir>` names the parent of the run folder. It defaults to the current directory, takes a plain path with no placeholder expansion, and is created with its missing parents. |
 | FR-4 | `-o/--output-name <name>` names the run folder and must match `[A-Za-z0-9_-]+`. If the folder already exists, the run errors before any calculation. |
 | FR-5 | Without `-o`, the run folder is `rocprof_compute_analyze_<YYYYMMDD_HHMMSS>` in local time. If that folder exists, `_1`, `_2`, … is appended until the name is free. |
 | FR-6 | `--list-stats`, `--list-available-metrics`, `--list-torch-operators` and `--list-triton-operators` only print. They create no run folder and write no files. |
@@ -120,14 +120,14 @@ and neither writes the roofline HTML.
 | FR-15 | A value that cannot be calculated is stored as NULL, never as 0. (D4) |
 | FR-16 | If any dispatch reports zero GPU activity (`GRBM_GUI_ACTIVE == 0`), the run halts before the run folder is created. (D4) |
 | FR-17 | Every metric is evaluated for each kernel that survives the filters, and once for the workload, on every run. (D5) |
-| FR-18 | Unknown `--gpu-id`, `-d` or `-k` ids exit with today's messages before the run folder is created. (D6) |
+| FR-18 | The dispatch-ID filter is named `--kernel-iteration-range`; `--dispatch` is removed. Unknown `--gpu-id`, `--kernel-iteration-range` or `-k` ids exit with today's messages before the run folder is created. (D6) |
 | FR-19 | Kernel and dispatch rows cover only what survives all filters. (D6) |
-| FR-20 | The workload's total duration after the `--gpu-id` and `-d` filters is stored. Top-stats Pct is a kernel's total duration divided by the filtered workload's total duration. (D7) |
+| FR-20 | The workload's total duration after the `--gpu-id` and `--kernel-iteration-range` filters is stored. Top-stats Pct is a kernel's total duration divided by the filtered workload's total duration. (D7) |
 | FR-21 | The memory-bandwidth guidance result is stored in the DB. (D7) |
 | FR-22 | Every evaluated metric is stored, whatever the display rules. This includes the roofline plot-points and memory-chart tables. (D7) |
 | FR-23 | Ceilings are stored per workload: one bandwidth ceiling per memory level and one compute ceiling per data type and pipe (VALU or matrix), for every positive benchmark mean in the row FR-13 selects. Roofline points are the per-kernel plot-points metric rows (FR-22). (D8a) |
-| FR-24 | New tables and metric values are stored unrounded, in base units (ns, bytes/s, FLOP/s, FLOP/byte). The options that change values are stored in DB metadata: normalization unit, `-k`, `-d`, `--gpu-id`, and specs correction. (D9) |
-| FR-25 | PC samples are narrowed by `-k`; `--gpu-id` and `-d` do not apply to them yet. The terminal summary, `report.txt` and `pc-sampling-summary.csv` state this. |
+| FR-24 | New tables and metric values are stored unrounded, in base units (ns, bytes/s, FLOP/s, FLOP/byte). The options that change values are stored in DB metadata: normalization unit, `-k`, `--kernel-iteration-range`, `--gpu-id`, and specs correction. (D9) |
+| FR-25 | PC samples are narrowed by `-k`; `--gpu-id` and `--kernel-iteration-range` do not apply to them yet. The terminal summary, `report.txt` and `pc-sampling-summary.csv` state this. |
 
 ### Functional — rendering and export
 
@@ -249,7 +249,7 @@ These divergences stay as they are. Each is taken up only once a customer need i
 flowchart TD
     A[parse arguments] --> L{listing option?}
     L -->|yes| P[print listing and exit; no files]
-    L -->|no| R["resolve run folder<br/>--output-directory or cwd,<br/>-o name or timestamp name"]
+    L -->|no| R["resolve run folder<br/>-d/--output-directory or cwd,<br/>-o name or timestamp name"]
     R --> X{"-o given and<br/>folder exists?"}
     X -->|yes| E1[error]
     X -->|no| V["validate workloads and filter ids"]
@@ -268,7 +268,7 @@ writing leaves a partial run folder, which the error names.
 
 ### Output location
 
-| `--output-directory` | `-o/--output-name` | Run folder |
+| `-d/--output-directory` | `-o/--output-name` | Run folder |
 |---|---|---|
 | — | — | `./rocprof_compute_analyze_<YYYYMMDD_HHMMSS>[_N]` |
 | `<dir>` | — | `<dir>/rocprof_compute_analyze_<YYYYMMDD_HHMMSS>[_N]` |
@@ -276,8 +276,8 @@ writing leaves a partial run folder, which the error names.
 | `<dir>` | `X` | `<dir>/X`, error if it exists |
 | listing option | any | none; the listing is printed |
 
-- `--output-directory` follows the rocprofv3 and profile-mode long name. It has no short form
-  because analyze already uses `-d` for `--dispatch`.
+- `-d/--output-directory` follows the profile-mode option name. The dispatch-ID filter is
+  renamed to `--kernel-iteration-range`, and the old `--dispatch` spelling is removed.
 - `-o` names the output, as rocprofv3's `-o` does.
 - The timestamp sorts run folders chronologically. A user-chosen name is never reused, so a
   rerun cannot overwrite earlier results.
@@ -382,7 +382,7 @@ always written. `-b` warns that `report.txt` holds every section. This follows t
    calculation is deleted, while `--output-format` still selects which files are written.
    *User value:* the terminal and the DB can no longer disagree.
 3. **One run, one folder** (FR-1–FR-10, FR-26, FR-34, NFR-1, NFR-2). This phase adds
-   `--output-directory`, `-o`, timestamped run folders, the workload and kernel layout,
+   `-d/--output-directory`, `-o`, timestamped run folders, the workload and kernel layout,
    `report.txt`, the terminal summary, read-only workloads, the `--output-format` and `-b`
    deprecations, and the end-of-run line. Docs, skills and the CHANGELOG (with the migration
    table) are updated in the same phase.
@@ -400,8 +400,8 @@ always written. `-b` warns that `report.txt` holds every section. This follows t
 | 3 | Percent of Peak | Present in the DB and CSV for every metric flagged in the configs | unit | FR-12 |
 | 4 | Peak coverage | gfx950 and gfx1250 F6F4 and gfx1250 WMMA FP64 peaks equal their `roofline.csv` values; an invalid file gives NULL peaks, no roofline, and a warning | unit | FR-13 |
 | 5 | Typed variables | Same values with and without matching specs correction; a zero value stays 0; a missing value gives NULL and a warning; missing `num_xcd` gives 1 | unit | FR-14 |
-| 6 | Idle-GPU guard and invalid ids | Exit with today's messages, roof-only profiles included; no run folder created | integration | FR-16, FR-18 |
-| 7 | Output resolution matrix | Each row of the location table behaves as specified: timestamp name, `_N` on collision, existing `-o` folder errors, missing `--output-directory` parents created, listing options write nothing | unit + CLI | FR-3–FR-6 |
+| 6 | Idle-GPU guard and invalid ids | Exit with today's messages, roof-only profiles included; unknown ids fail, removed `--dispatch` is rejected, and no run folder is created | integration + CLI | FR-16, FR-18 |
+| 7 | Output resolution matrix | Each row of the location table behaves as specified: timestamp name, `_N` on collision, existing `-o` folder errors, missing parents created with both `-d` and `--output-directory`, listing options write nothing | unit + CLI | FR-3–FR-6 |
 | 8 | Read-only and untouched workload | Analysis of a read-only workload succeeds; a workload directory's existing files are unchanged after a run, including one whose run folder lies inside it | integration | FR-7, FR-8 |
 | 9 | Layout | Expected files and names for single, comparison, PC-sampling and operator runs; kernel folders in top-stats order with demangled names truncated to 64 characters; `kernels.csv` maps every folder | integration | FR-1, FR-9, FR-31, FR-32, FR-34 |
 | 10 | Schema | `schema_version` is 2.4.0; 2.3.1 queries on existing tables and views succeed; schema diagrams regenerated | unit | FR-21, FR-23, FR-24 |
