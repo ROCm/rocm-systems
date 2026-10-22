@@ -16,10 +16,9 @@ ncclResult_t rocmLibraryInit(void) { return ncclSuccess; }
 
 // dmaBufSupported gate: NULL -> unsupported.
 PFN_hsa_amd_portable_export_dmabuf pfn_hsa_amd_portable_export_dmabuf = nullptr;
-
-#ifndef RCCL_ROCMWRAP_FAKES_OMIT_ncclParamDmaBufEnable
+// NCCL_PARAM(DmaBufEnable, "DMABUF_ENABLE", 1) in rocmwrap.cc; tests set it through g_loadParam.
 int64_t ncclParamDmaBufEnable() { return g_loadParam("DMABUF_ENABLE", 1); }
-#endif
+
 int64_t rcclParamForceEnableDMABUF() { return g_loadParam("RCCL_FORCE_ENABLE_DMABUF", 0); }
 
 void ResetRocmWrapFakes() { pfn_hsa_amd_portable_export_dmabuf = nullptr; }

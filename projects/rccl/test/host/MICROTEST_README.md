@@ -638,6 +638,7 @@ symbol.
 | `src/misc/gdr_peermem.cc` | `fakes/gdr_peermem_fakes.{h,cc}` |
 | `src/misc/gdr_probe.cc` (targets that do not compile the real probe) | `fakes/gdr_probe_fakes.{h,cc}` |
 | `src/misc/ibvwrap.cc` | `fakes/ibvwrap_fakes.{h,cc}` |
+| libibverbs provider ops behind the `ibvwrap.h` inline post/poll wrappers | `fakes/ibv_ops_fakes.{h,cc}` |
 | file-static RMA helpers in `src/include/gdrwrap.h` | `fakes/gdrwrap_fakes.{h,cc}` via `fakes/gdrwrap_seam.h` / `fakes/gdrwrap_seam_undef.h` |
 | HSA runtime diagnostics | `fakes/hsa_fakes.cc` |
 | ibverbs provider dv libraries (`libionic.so`, `libmlx5.so`) | `fakes/dv_provider_fake.cc` |

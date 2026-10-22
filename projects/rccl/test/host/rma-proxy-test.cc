@@ -65,21 +65,12 @@
 #include "comm.h"
 #include "rma/rma_proxy.h"
 
-namespace {
-// Settable behind the ncclParamDmaBufEnable() stub below. Default 0 keeps
-// ncclRmaProxyRegMrSym on its plain regMrSym arm: the DMA-BUF arm reaches
-// hsa_amd_portable_export_dmabuf through a function pointer no host-only build
-// can satisfy. The DMA-BUF dispatch is not what this ticket is about.
-int64_t g_paramDmaBufEnable = 0;
-}  // namespace
-
 // --- Link-satisfying stubs for rma_proxy.cc's non-static externals ---------
 //
 // Defined here rather than in a shared fakes/ .cc because none of them has an
 // owning fakes file today and this is the only binary that needs them (same
 // reasoning as p2p-test.cc's allocTracker and ras-test.cc's ncclSetThreadName).
 // They must precede the #include of the unit under test.
-int64_t ncclParamDmaBufEnable() { return g_paramDmaBufEnable; }
 // NCCL_PARAM(IbDataDirect, "IB_DATA_DIRECT", 1), declared by src/transport/net_ib/init.cc.
 int64_t ncclParamIbDataDirect() { return 1; }
 // src/debug.cc. ncclRmaProxyConnectOnce names its progress thread; no behaviour to assert.
@@ -241,7 +232,12 @@ protected:
 
         savedGdrCopy_ = ncclGdrCopy;
         ncclGdrCopy   = NULL;  // production default: GDRCopy off
-        g_paramDmaBufEnable = 0;
+        // DMABUF_ENABLE=0 keeps ncclRmaProxyRegMrSym on its plain regMrSym arm: the
+        // DMA-BUF arm reaches hsa_amd_portable_export_dmabuf through a function
+        // pointer no host-only build can satisfy.
+        g_loadParam = [](const char* env, int64_t deftVal) {
+            return std::strcmp(env, "DMABUF_ENABLE") == 0 ? 0 : deftVal;
+        };
 
         // The GDRCopy-on arm runs ncclGdrCudaCalloc -> ncclCudaCallocDebug,
         // which walks getSideStream() (real getBusId, from src/misc/utils.cc)
@@ -283,7 +279,7 @@ protected:
         // A capable NIC, so no registration below can be steered by a missing
         // capability. The DMA-BUF bit is nonetheless never consulted here:
         // ncclRmaProxyRegMrSym tests ncclParamDmaBufEnable() first, and the
-        // fixture pins that to 0 (see the note on g_paramDmaBufEnable above).
+        // fixture pins that to 0 (see DMABUF_ENABLE above).
         props_.ptrSupport = NCCL_PTR_HOST | NCCL_PTR_CUDA | NCCL_PTR_DMABUF;
         // Drives maxInflightRequests and the circular-buffer queue size; 0
         // would leave production sanitizing down to a zero-length queue.
@@ -300,7 +296,6 @@ protected:
         ncclMemoryStackDestruct(&comm_->memPermanent);
         hostMallocHook_.reset();
         ncclGdrCopy = savedGdrCopy_;
-        g_paramDmaBufEnable = 0;
         ResetRmaFakes();
         ResetHipFakes();
         ResetNcclFakes();
