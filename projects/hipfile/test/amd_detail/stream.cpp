@@ -36,15 +36,32 @@ hipFileFlagsPowerSet()
                               ::testing::Values(0, HIPFILE_STREAM_PAGE_ALIGNED_INPUTS));
 }
 
+// A managed (registered) stream allocates one signal slot under a DeviceGuard and frees it when
+// released. Point the mocked allocation at real storage so the ctor's zero-init write is valid.
+static void
+expectSignalMemory(StrictMock<MHip> &mhip, uint64_t *storage)
+{
+    using ::testing::AnyNumber;
+    using ::testing::Return;
+    EXPECT_CALL(mhip, hipDeviceGetAttribute).Times(AnyNumber()).WillRepeatedly(Return(1));
+    EXPECT_CALL(mhip, hipGetDevice).Times(AnyNumber()).WillRepeatedly(Return(0));
+    EXPECT_CALL(mhip, hipExtMallocWithFlags)
+        .Times(AnyNumber())
+        .WillRepeatedly(Return(static_cast<void *>(storage)));
+    EXPECT_CALL(mhip, hipFree).Times(AnyNumber());
+}
+
 struct HipFileStream : public ::testing::Test {
     HipFileStream()
     {
         nonnull_stream = reinterpret_cast<hipStream_t>(1);
+        expectSignalMemory(mhip, &signal_storage);
     }
     StrictMock<MConfiguration> mconfig;
     StrictMock<MHip>           mhip;
     StrictMock<MSys>           msys;
     hipStream_t                nonnull_stream;
+    uint64_t                   signal_storage{};
     StreamMap                  stream_map;
 };
 
@@ -114,7 +131,9 @@ TEST(HipFileStreamDestructor, destructor_with_streams_in_use_logs)
 {
     StrictMock<MHip>         mhip;
     StrictMock<MSys>         msys;
+    uint64_t                 signal_storage{};
     std::shared_ptr<IStream> stream;
+    expectSignalMemory(mhip, &signal_storage);
     {
         StreamMap stream_map;
         EXPECT_CALL(mhip, hipStreamGetDevice);
@@ -128,11 +147,13 @@ struct HipFileStreamExternal : public HipFileOpened {
     HipFileStreamExternal()
     {
         nonnull_stream = reinterpret_cast<hipStream_t>(1);
+        expectSignalMemory(mhip, &signal_storage);
     }
     StrictMock<MConfiguration> mconfig;
     StrictMock<MHip>           mhip;
     StrictMock<MSys>           msys;
     hipStream_t                nonnull_stream;
+    uint64_t                   signal_storage{};
 };
 
 TEST_F(HipFileStreamExternal, register_and_deregister_with_valid_stream_works)
@@ -145,6 +166,47 @@ TEST_F(HipFileStreamExternal, register_and_deregister_with_valid_stream_works)
 TEST_F(HipFileStreamExternal, deregister_exception_returns_error)
 {
     ASSERT_EQ(hipFileStreamDeregister(nullptr), HipFileOpError(hipFileInvalidValue));
+}
+
+TEST_F(HipFileStream, registered_stream_is_managed_with_signal_slot)
+{
+    EXPECT_CALL(mhip, hipStreamGetDevice);
+    stream_map.registerStream(nonnull_stream, 0);
+    auto stream = stream_map.getStream(nonnull_stream);
+    EXPECT_TRUE(stream->isManaged());
+    EXPECT_TRUE(stream->canUseStreamWaitValue());
+    EXPECT_NE(stream->signalSlot(), nullptr);
+    EXPECT_FALSE(stream->isRetired());
+}
+
+TEST_F(HipFileStream, unregistered_stream_is_unmanaged_without_signal_slot)
+{
+    EXPECT_CALL(mhip, hipStreamGetDevice);
+    auto stream = stream_map.getStream(nonnull_stream);
+    EXPECT_FALSE(stream->isManaged());
+    EXPECT_FALSE(stream->canUseStreamWaitValue());
+    EXPECT_EQ(stream->signalSlot(), nullptr);
+}
+
+TEST_F(HipFileStream, next_and_release_signal_target)
+{
+    EXPECT_CALL(mhip, hipStreamGetDevice);
+    stream_map.registerStream(nonnull_stream, 0);
+    auto stream = stream_map.getStream(nonnull_stream);
+    EXPECT_EQ(stream->nextSignalTarget(), 1u);
+    EXPECT_EQ(stream->nextSignalTarget(), 2u);
+    EXPECT_EQ(stream->releaseSignalTarget(), 1u);
+}
+
+TEST_F(HipFileStream, drain_and_release_retires_syncs_and_frees)
+{
+    EXPECT_CALL(mhip, hipStreamGetDevice);
+    stream_map.registerStream(nonnull_stream, 0);
+    auto stream = stream_map.getStream(nonnull_stream);
+    EXPECT_CALL(mhip, hipStreamSynchronize(nonnull_stream));
+    stream->drainAndRelease();
+    EXPECT_TRUE(stream->isRetired());
+    EXPECT_EQ(stream->signalSlot(), nullptr);
 }
 
 HIPFILE_WARN_NO_GLOBAL_CTOR_ON

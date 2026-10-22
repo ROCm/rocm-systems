@@ -37,6 +37,7 @@ struct MHip : Hip {
     MOCK_METHOD(void, hipHostFree, (void *ptr), (const, override));
     MOCK_METHOD(void *, hipHostGetDevicePointer, (void *hstPtr, unsigned int flags), (const, override));
     MOCK_METHOD(void *, hipExtMallocWithFlags, (size_t size, unsigned int flags), (const, override));
+    MOCK_METHOD(void, hipFree, (void *ptr), (const, override));
     MOCK_METHOD(int, hipRuntimeGetVersion, (), (const, override));
     MOCK_METHOD(void *, hipGetProcAddress,
                 (const char *symbol, int hipVersion, uint64_t flags,

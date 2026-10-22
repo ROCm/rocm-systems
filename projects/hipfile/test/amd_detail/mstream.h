@@ -19,6 +19,13 @@ public:
     MOCK_METHOD(bool, fixedIOSize, (), (const, override));
     MOCK_METHOD(bool, pageAligned, (), (const, override));
     MOCK_METHOD(std::unique_lock<std::mutex>, getLock, (), (override));
+    MOCK_METHOD(bool, isManaged, (), (const, override));
+    MOCK_METHOD(bool, isRetired, (), (const, override));
+    MOCK_METHOD(bool, canUseStreamWaitValue, (), (const, override));
+    MOCK_METHOD(uint64_t *, signalSlot, (), (const, override));
+    MOCK_METHOD(uint64_t, nextSignalTarget, (), (override));
+    MOCK_METHOD(uint64_t, releaseSignalTarget, (), (override));
+    MOCK_METHOD(void, drainAndRelease, (), (override));
 };
 
 }

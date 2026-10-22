@@ -68,6 +68,7 @@ struct Hip {
     virtual void  hipHostFree(void *ptr) const;
     virtual void *hipHostGetDevicePointer(void *hstPtr, unsigned int flags) const;
     virtual void *hipExtMallocWithFlags(size_t size, unsigned int flags) const;
+    virtual void  hipFree(void *ptr) const;
     virtual int   hipRuntimeGetVersion() const;
     virtual void *hipGetProcAddress(const char *symbol, int hipVersion, uint64_t flags,
                                     hipDriverProcAddressQueryResult *symbolStatus) const;
