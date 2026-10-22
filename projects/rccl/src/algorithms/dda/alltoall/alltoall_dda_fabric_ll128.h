@@ -211,8 +211,8 @@ __launch_bounds__(1024)
     for (size_t i = gtid; i < nVec; i += stride) d4[i] = s4[i];
   }
 
-  // Phase 2: poll U slices at once; the atomic 128B line load that sees the flag
-  // also carries the payload, so a matched load is consumed directly.
+  // Phase 2: poll U slices at once; with the cooperative builtins the atomic 128B line
+  // load that sees the flag also carries the payload, so a matched load is consumed directly.
   int spins = 0;
   bool aborted = false;
   for (size_t s0 = gwarp; s0 < slicesTotal; s0 += wstride * U) {
@@ -244,6 +244,16 @@ __launch_bounds__(1024)
           for (int w = 0; w < kDdaLL128WordsPerThread; w += 2) need |= flagLane && (vr[u][w + 1] != flag);
     } while (__any(need));
     if (aborted) break; // the ddaSetLLEpoch below still runs
+#if !RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS
+    // Plain 16B loads do not read the 128B line as one transaction, so a line whose flag
+    // matched may still carry a stale payload word; re-read it as ddaLL128PollWire does.
+#pragma unroll
+    for (int u = 0; u < U; u++)
+      if (u < nv)
+#pragma unroll
+        for (int w = 0; w < kDdaLL128WordsPerThread; w += 2)
+          ddaLL128LoadAtomic16B(wire0 + u * wireStep + w * kDdaLL128Warp, vr[u][w], vr[u][w + 1]);
+#endif
 #pragma unroll
     for (int u = 0; u < U; u++) {
       const size_t s = s0 + (size_t)u * wstride;
