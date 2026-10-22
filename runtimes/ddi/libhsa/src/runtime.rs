@@ -53,9 +53,9 @@ use agent::{
     gpu_agent_name, hdp_flush_pointers, pc_sampling_supported_by_query, selected_cpu_caches,
 };
 pub(crate) use events::CallbackScope;
+use events::notify_system_shutdown;
 #[cfg(test)]
 use events::{hardware_exception_event, memory_fault_event, notify_system_event};
-use events::{notify_system_shutdown, system_event_worker};
 mod lifecycle;
 #[cfg(test)]
 use clock::best_clock_sample;
@@ -145,7 +145,7 @@ pub(crate) struct HsaState {
     /// Process logging sink retained by work outside the registry lock.
     pub(crate) logging: Arc<LogOutput>,
     /// Next opaque HSA handle value.
-    pub(crate) next_handle: u64,
+    next_handle: u64,
     /// HSA queue handles and their frontend teardown dependencies.
     pub(crate) queue_state: QueueState,
     /// HSA code-object and executable handles around rocloader owners.
@@ -171,7 +171,7 @@ pub(crate) struct HsaState {
     /// Latest reported VM fault details for system event queries.
     pub(crate) vm_fault_details: Option<(HsaAgent, u64, u32)>,
     /// Registered process-level system event callbacks.
-    pub(crate) system_event_handlers: Vec<(SystemEventHandler, CallbackArg)>,
+    system_event_handlers: Vec<(SystemEventHandler, CallbackArg)>,
     /// Native system event worker joined during final teardown.
     pub(crate) system_event_worker: Option<JoinHandle<()>>,
     /// Shared stop request observed by those workers.
@@ -437,29 +437,6 @@ impl HsaState {
         let handle = self.next_handle;
         self.next_handle = self.next_handle.checked_add(1).ok_or(OUT_OF_RESOURCES)?;
         Ok(handle)
-    }
-
-    pub(crate) fn ensure_system_event_worker(&mut self) -> Status {
-        if self.system_event_worker.is_some() {
-            return SUCCESS;
-        }
-        let Some(device) = self.gpus.first().map(|gpu| gpu.device.clone()) else {
-            return OUT_OF_RESOURCES;
-        };
-        let subscription = match subscribe(&device) {
-            Ok(subscription) => subscription,
-            Err(_) => return OUT_OF_RESOURCES,
-        };
-        let stop = self.stop_workers.clone();
-        let worker = match thread::Builder::new()
-            .name("rocddi-system-events".into())
-            .spawn(move || system_event_worker(subscription, &stop))
-        {
-            Ok(worker) => worker,
-            Err(_) => return OUT_OF_RESOURCES,
-        };
-        self.system_event_worker = Some(worker);
-        SUCCESS
     }
 
     pub(crate) fn gpu_index(&self, agent: HsaAgent) -> Option<usize> {

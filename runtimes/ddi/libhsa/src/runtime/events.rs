@@ -28,6 +28,48 @@ impl Drop for CallbackScope {
     }
 }
 
+impl HsaState {
+    /// Register a callback and roll it back if native event delivery cannot start.
+    pub(crate) fn register_system_event_handler(
+        &mut self,
+        callback: SystemEventHandler,
+        data: CallbackArg,
+    ) -> Status {
+        if self.system_event_handlers.try_reserve(1).is_err() {
+            return OUT_OF_RESOURCES;
+        }
+        self.system_event_handlers.push((callback, data));
+        let status = self.ensure_system_event_worker();
+        if status != SUCCESS {
+            self.system_event_handlers.pop();
+        }
+        status
+    }
+
+    fn ensure_system_event_worker(&mut self) -> Status {
+        if self.system_event_worker.is_some() {
+            return SUCCESS;
+        }
+        let Some(device) = self.gpus.first().map(|gpu| gpu.device.clone()) else {
+            return OUT_OF_RESOURCES;
+        };
+        let subscription = match subscribe(&device) {
+            Ok(subscription) => subscription,
+            Err(_) => return OUT_OF_RESOURCES,
+        };
+        let stop = self.stop_workers.clone();
+        let worker = match thread::Builder::new()
+            .name("rocddi-system-events".into())
+            .spawn(move || system_event_worker(subscription, &stop))
+        {
+            Ok(worker) => worker,
+            Err(_) => return OUT_OF_RESOURCES,
+        };
+        self.system_event_worker = Some(worker);
+        SUCCESS
+    }
+}
+
 pub(super) fn notify_system_shutdown(handlers: &[(SystemEventHandler, CallbackArg)]) {
     let event = HsaAmdEvent {
         event_type: AMD_SYSTEM_SHUTDOWN_EVENT,

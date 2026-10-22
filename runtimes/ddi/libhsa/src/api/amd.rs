@@ -69,20 +69,9 @@ pub unsafe extern "C" fn hsa_amd_register_system_event_handler(
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
-        if runtime.system_event_handlers.try_reserve(1).is_err() {
-            return OUT_OF_RESOURCES;
-        }
-        runtime
-            .system_event_handlers
-            // SAFETY: The C registration contract keeps callback data live and
-            // synchronizes it until the runtime stops delivering events.
-            .push((callback, unsafe { CallbackArg::new(data) }));
-        let status = runtime.ensure_system_event_worker();
-        if status != SUCCESS {
-            runtime.system_event_handlers.pop();
-            return status;
-        }
-        SUCCESS
+        // SAFETY: The C registration contract keeps callback data live and
+        // synchronized until the runtime stops delivering events.
+        runtime.register_system_event_handler(callback, unsafe { CallbackArg::new(data) })
     })
 }
 
