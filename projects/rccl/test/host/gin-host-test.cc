@@ -8,7 +8,8 @@
 // AICOMRCCL-2017): per-thread endpoint assignment, ginCommCount bump, writer-priority
 // list lock, and progress-thread lifecycle, plus proxy-thread CPU affinity
 // (AICOMRCCL-1859): the comm->cpuAffinity stash in ginDevCommSetupWithBackend and
-// the pin applied by each progress thread.
+// the pin applied by each progress thread. Also covers connecting a DevComm to GIN
+// at a custom rank stride (NCCL 2.31.2, AICOMRCCL-2000).
 //
 // Own binary (rccl-UnitTestsMicroGinHost): gin-plugin-init-test.cc already defines
 // ncclParamGinEnable in rccl-UnitTestsMicro, and gin_fakes.cc supplies
@@ -47,6 +48,7 @@ namespace {
 int g_nLocalGinDevs = 1;
 int g_peerGinCommCount = -1;  // -1: AllGather is a no-op copy; else fill other ranks
 int64_t g_paramGinType = -1;
+int g_railStride = 1;
 
 }  // namespace
 
@@ -81,7 +83,7 @@ ncclTeam_t ncclTeamRail(ncclComm_t) {
   ncclTeam_t t{};
   t.nRanks = 1;
   t.rank = 0;
-  t.stride = 1;
+  t.stride = g_railStride;
   return t;
 }
 
@@ -791,6 +793,166 @@ TEST_F(GinHostProxyAffinitySetupMicrotest, StashesCommAffinityBeforeSpawningProx
   ginState.thread[0].join();
   ASSERT_EQ(1u, g_osSetAffinityMasks.size());
   EXPECT_TRUE(CPU_EQUAL(&comm_->cpuAffinity, &g_osSetAffinityMasks[0]));
+}
+
+// Records the rankStride ginDevCommSetupWithBackend hands to createContext.
+// needsProxyProgress stays off so a successful setup does not spawn workers.
+struct CapturedGinConfig {
+  int calls = 0;
+  int rankStride = -1;
+  ncclNetDeviceHandle_t devHandle{};
+};
+CapturedGinConfig* g_capturedGinConfig = nullptr;
+
+ncclResult_t CaptureStrideCreateContext(void* /*collComm*/, ncclGinConfig_t* config, void** ginCtx,
+                                         ncclNetDeviceHandle_t** devHandle) {
+  g_capturedGinConfig->calls++;
+  g_capturedGinConfig->rankStride = config->rankStride;
+  g_capturedGinConfig->devHandle.handle = reinterpret_cast<void*>(0x21);
+  g_capturedGinConfig->devHandle.needsProxyProgress = 0;
+  *ginCtx = reinterpret_cast<void*>(0x11);
+  *devHandle = &g_capturedGinConfig->devHandle;
+  return ncclSuccess;
+}
+
+ncclResult_t CaptureStrideDestroyContext(void* /*ginCtx*/) { return ncclSuccess; }
+
+// NCCL_GIN_CONNECTION_CUSTOM_STRIDE (AICOMRCCL-2000): the requested world-rank
+// stride must be positive, no larger than the rail team, and a multiple of the
+// stride the communicator actually connected. The plugin sees that stride in
+// units of the connected group.
+class GinHostCustomStrideMicrotest : public ::testing::Test {
+protected:
+  std::unique_ptr<ncclComm> comm_ = std::make_unique<ncclComm>();
+  std::unique_ptr<ncclSharedResources> sr_ = std::make_unique<ncclSharedResources>();
+  CapturedGinConfig captured_;
+  ncclGin_t vtable_{};
+  ncclDevComm devComm_{};
+  int savedRailStride_ = 1;
+
+  void SetUp() override {
+    savedRailStride_ = g_railStride;
+    g_railStride = 4;
+    g_capturedGinConfig = &captured_;
+
+    comm_->sharedRes = sr_.get();
+    comm_->contiguousRanksPerHost = 1;
+
+    struct ncclGinState& ginState = sr_->ginState;
+    ginState.ginConnectionType = NCCL_GIN_CONNECTION_FULL;  // connectedStride == 1
+    ginState.proxyNthreads = 1;
+    ginState.proxyThreadsCreated = true;  // do not spawn progress threads
+    ginState.proxyThreadStopSignal.store(true);
+
+    vtable_.name = "fake-gin-stride";
+    vtable_.createContext = &CaptureStrideCreateContext;
+    vtable_.destroyContext = &CaptureStrideDestroyContext;
+
+    struct ncclGinBackendState& backend = ginState.backends[0];
+    backend.ginType = NCCL_GIN_TYPE_PROXY;
+    backend.ncclGin = &vtable_;
+    backend.ginCommCount = 1;
+    backend.ginComms[0] = reinterpret_cast<void*>(0x10);
+  }
+
+  void TearDown() override {
+    struct ncclGinState& ginState = sr_->ginState;
+    if (ginState.devComms != nullptr) {
+      EXPECT_EQ(ncclSuccess, ncclGinDevCommFree(comm_.get(), &devComm_));
+    }
+    g_capturedGinConfig = nullptr;
+    g_railStride = savedRailStride_;
+  }
+
+  ncclDevCommRequirements MakeReqs(ncclGinConnectionType_t connectionType, int customStride) {
+    ncclDevCommRequirements reqs{};
+    reqs.ginContextCount = 1;
+    reqs.ginConnectionType = connectionType;
+    reqs.ginCustomStride = customStride;
+    reqs.ginTrafficClass = NCCL_CONFIG_UNDEF_INT;
+    reqs.ginSignalCount = 3;
+    return reqs;
+  }
+
+  ncclResult_t Setup(const ncclDevCommRequirements& reqs) {
+    return ginDevCommSetupWithBackend(comm_.get(), &reqs, &devComm_, /*deviceCodeVersion=*/0,
+                                      &sr_->ginState.backends[0]);
+  }
+};
+
+TEST_F(GinHostCustomStrideMicrotest, FullConnectivity_PassesCustomStrideToPlugin) {
+  ncclDevCommRequirements reqs = MakeReqs(NCCL_GIN_CONNECTION_CUSTOM_STRIDE, /*customStride=*/2);
+
+  ASSERT_EQ(ncclSuccess, Setup(reqs));
+
+  EXPECT_EQ(1, captured_.calls);
+  EXPECT_EQ(2, captured_.rankStride);  // requestedStride / connectedStride(1)
+  EXPECT_EQ(1, devComm_.ginConnectionStride);
+  EXPECT_EQ(idivRcp32(1), devComm_.ginConnectionStride_rcp32);
+  EXPECT_EQ(2, devComm_.ginContextStride);
+}
+
+TEST_F(GinHostCustomStrideMicrotest, RailConnectivity_ScalesPluginStrideByConnectedGroup) {
+  sr_->ginState.ginConnectionType = NCCL_GIN_CONNECTION_RAIL;
+  comm_->contiguousRanksPerHost = 2;  // connectedStride
+  ncclDevCommRequirements reqs = MakeReqs(NCCL_GIN_CONNECTION_CUSTOM_STRIDE, /*customStride=*/4);
+
+  ASSERT_EQ(ncclSuccess, Setup(reqs));
+
+  EXPECT_EQ(1, captured_.calls);
+  EXPECT_EQ(2, captured_.rankStride);  // 4 / 2
+  EXPECT_EQ(2, devComm_.ginConnectionStride);
+  EXPECT_EQ(idivRcp32(2), devComm_.ginConnectionStride_rcp32);
+  EXPECT_EQ(4, devComm_.ginContextStride);
+}
+
+TEST_F(GinHostCustomStrideMicrotest, RejectsStrideZero) {
+  ncclDevCommRequirements reqs = MakeReqs(NCCL_GIN_CONNECTION_CUSTOM_STRIDE, /*customStride=*/0);
+
+  EXPECT_EQ(ncclInvalidUsage, Setup(reqs));
+  EXPECT_EQ(0, captured_.calls);
+  EXPECT_EQ(0, devComm_.ginConnectionStride);
+  EXPECT_EQ(0, devComm_.ginContextStride);
+}
+
+TEST_F(GinHostCustomStrideMicrotest, RejectsStrideGreaterThanRail) {
+  ncclDevCommRequirements reqs = MakeReqs(NCCL_GIN_CONNECTION_CUSTOM_STRIDE, /*customStride=*/8);
+
+  EXPECT_EQ(ncclInvalidUsage, Setup(reqs));
+  EXPECT_EQ(0, captured_.calls);
+  EXPECT_EQ(0, devComm_.ginContextStride);
+}
+
+TEST_F(GinHostCustomStrideMicrotest, RejectsStrideNotMultipleOfConnectedStride) {
+  sr_->ginState.ginConnectionType = NCCL_GIN_CONNECTION_RAIL;
+  comm_->contiguousRanksPerHost = 2;
+  ncclDevCommRequirements reqs = MakeReqs(NCCL_GIN_CONNECTION_CUSTOM_STRIDE, /*customStride=*/1);
+
+  EXPECT_EQ(ncclInvalidUsage, Setup(reqs));
+  EXPECT_EQ(0, captured_.calls);
+  EXPECT_EQ(0, devComm_.ginContextStride);
+}
+
+TEST_F(GinHostCustomStrideMicrotest, RailConnectionType_UsesRailStride) {
+  ncclDevCommRequirements reqs = MakeReqs(NCCL_GIN_CONNECTION_RAIL, /*customStride=*/1);
+
+  ASSERT_EQ(ncclSuccess, Setup(reqs));
+
+  EXPECT_EQ(1, captured_.calls);
+  EXPECT_EQ(g_railStride, captured_.rankStride);
+  EXPECT_EQ(1, devComm_.ginConnectionStride);
+  EXPECT_EQ(g_railStride, devComm_.ginContextStride);
+}
+
+TEST_F(GinHostCustomStrideMicrotest, OtherConnectionType_IgnoresCustomStride) {
+  ncclDevCommRequirements reqs = MakeReqs(NCCL_GIN_CONNECTION_FULL, /*customStride=*/2);
+
+  ASSERT_EQ(ncclSuccess, Setup(reqs));
+
+  EXPECT_EQ(1, captured_.calls);
+  EXPECT_EQ(1, captured_.rankStride);
+  EXPECT_EQ(1, devComm_.ginConnectionStride);
+  EXPECT_EQ(1, devComm_.ginContextStride);
 }
 
 }  // namespace
