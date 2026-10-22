@@ -560,13 +560,12 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   }
 }
 
-template <MemcpyKind Kind = MemcpyKind::Put>
+template <MemcpyKind Kind = MemcpyKind::Put, int Unroll = 8>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_wg(void* dst, void* src,
                                                            size_t size) {
   if (size == 0) return;
 
   constexpr int ChunkSize = 16;
-  constexpr int Unroll    = 8;
 
   constexpr CachePolicy LP =
       is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope;
@@ -590,33 +589,32 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   }
 }
 
-// Non-temporal + system scope: correct for both directions of an IPC copy
-// (either side may be remote peer memory). Load/store split like memcpy_wg's
-// LP/SP for independent tuning.
+// Non-temporal + system scope: correct either direction (peer may be remote).
 constexpr int TdmLoadPolicy = tdm::make_cache_policy(
     tdm::LoadTemporalHint::NonTemporal, tdm::Scope::System);
 constexpr int TdmStorePolicy = tdm::make_cache_policy(
     tdm::StoreTemporalHint::NonTemporal, tdm::Scope::System);
 
-// One thread drives the TDM transfer into the registered LDS buffer while
-// the rest of the block covers whatever TDM doesn't (disjoint ranges, no
-// extra sync needed). Falls back to memcpy_wg when TDM isn't available or
-// no LDS buffer was set.
+// Thread 0 drives TDM into the registered LDS buffer; the rest of the block
+// covers what TDM doesn't. Falls back to memcpy_wg if TDM isn't available.
 template <MemcpyKind Kind = MemcpyKind::Put>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_wg_tdm(void* dst, void* src,
                                                                 size_t size) {
 #if ROCSHMEM_TDM_ENABLED
+  // Below threshold, TDM doesn't pay off (like the SDMA threshold); size
+  // is small enough here that Unroll=4 is plenty.
+  if (size < constmem.tdm_threshold) {
+    memcpy_wg<Kind, 4>(dst, src, size);
+    return;
+  }
   const tdm::LdsRegistration reg = tdm::get_lds();
-  // Below 16 bytes there's no room for one double-buffered tile, and below
-  // ROCSHMEM_TDM_THRESHOLD TDM's issue latency isn't amortized -- in both
-  // cases the plain copy path is cheaper (same idea as the SDMA threshold).
-  if (reg.ptr != nullptr && reg.bytes >= 16 && size >= constmem.tdm_threshold) {
+  // Below 16 bytes there's no room for a double-buffered tile.
+  if (reg.ptr != nullptr && reg.bytes >= 16) {
     constexpr uint32_t element_bytes = 1u << tdm::FlatCopyElementLog2;
     uint32_t tile_bytes = static_cast<uint32_t>(
         min(static_cast<size_t>(constmem.tdm_tile_bytes), reg.bytes / 2));
-    // Round down to a whole element: tile_bytes may be an unaligned
-    // ROCSHMEM_TDM_TILE_BYTES override or capped by reg.bytes/2, and an
-    // unaligned stride would leave uncopied gaps between tiles.
+    // Round down to a whole element -- an unaligned stride would leave
+    // gaps between tiles.
     tile_bytes -= tile_bytes % element_bytes;
     if (tile_bytes > 0) {
       if (is_thread_zero_in_block()) {
@@ -625,8 +623,10 @@ template <MemcpyKind Kind = MemcpyKind::Put>
       }
       const size_t covered = tdm::covered_bytes(size, tile_bytes);
       if (covered < size) {
-        memcpy_wg<Kind>(static_cast<char*>(dst) + covered,
-                        static_cast<char*>(src) + covered, size - covered);
+        // Runs concurrently with thread 0's TDM copy; Unroll=4 trims
+        // register pressure here for free (too small to need 8 anyway).
+        memcpy_wg<Kind, 4>(static_cast<char*>(dst) + covered,
+                           static_cast<char*>(src) + covered, size - covered);
       }
       return;
     }
