@@ -1996,8 +1996,9 @@ TEST(ExecutionPluginTest, F32ModeArithmeticObserversSeeCallerRounding) {
           amdgpu::ScopedSimdFastPathTracker tracker;
           succeeded = f.cu->execute_instruction(inst.get(), *wf).succeeded();
           // Without this the observer gate could return and both runs would go
-          // scalar while every other assertion still held.
-          if (force_scalar)
+          // scalar while every other assertion still held. Builds without
+          // <experimental/simd> have no fast path to take.
+          if (force_scalar || !util::has_stdx_simd)
             EXPECT_TRUE(tracker.no_tracked_path_executed());
           else
             EXPECT_TRUE(tracker.only_tracked_path_executed(amdgpu::SimdFastPath::VOP2_BINARY));
