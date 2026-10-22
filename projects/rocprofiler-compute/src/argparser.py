@@ -121,7 +121,7 @@ def add_general_group(
     rocprof_compute_home: Path,
     supported_archs: dict[str, str],
     rocprof_compute_version: dict[str, Optional[str]],
-) -> argparse._ArgumentGroup:
+) -> None:
     general_group = parser.add_argument_group("General Options")
 
     general_group.add_argument(
@@ -140,19 +140,24 @@ def add_general_group(
     general_group.add_argument(
         "-q", "--quiet", action="store_true", help="Reduce output and run quietly."
     )
-    arch_values = ", ".join(supported_archs)
     general_group.add_argument(
         "--list-metrics",
         dest="list_metrics",
-        metavar="arch",
-        nargs="?",
-        const="",
+        metavar="id",
+        nargs="*",
         help=(
-            "List available metrics for specified GPU [arch] "
-            "(Default: current GPU arch).\n"
-            "Use -b to show only some blocks or metrics.\n"
-            f"Values: {arch_values}"
+            "List the blocks of the current GPU.\n"
+            "Add block or metric [id]s or aliases to list their metrics, "
+            'or "all" to list every metric.\n'
+            "With analyze -p <workload>, list the workload's blocks and metrics."
         ),
+    )
+    # Debug option: list the metrics of another arch. Its first value is the arch.
+    general_group.add_argument(
+        "--list-metrics-gfx-id",
+        dest="list_metrics_gfx_id",
+        nargs="+",
+        help=argparse.SUPPRESS,
     )
     general_group.add_argument(
         "--list-blocks",
@@ -160,9 +165,9 @@ def add_general_group(
         metavar="<arch>",
         choices=supported_archs.keys(),
         help=(
-            "DEPRECATED: use --list-metrics [arch] instead.\n"
+            "DEPRECATED: use --list-metrics instead.\n"
             "List available blocks and their aliases for specified GPU <arch>.\n"
-            f"Values: {arch_values}"
+            f"Values: {', '.join(supported_archs)}"
         ),
     )
     general_group.add_argument(
@@ -193,7 +198,6 @@ def add_general_group(
             "--pc-sampling-interval)\n"
         ),
     )
-    return general_group
 
 
 def omniarg_parser(
@@ -209,25 +213,11 @@ def omniarg_parser(
 
     ## General Command Line Options
     ## ----------------------------
-    general_group = add_general_group(
+    add_general_group(
         parser,
         rocprof_compute_home,
         supported_archs,
         rocprof_compute_version,
-    )
-    # profile and analyze define their own -b, so it is only added here
-    general_group.add_argument(
-        "-b",
-        "--block",
-        dest="list_filter",
-        metavar="<id>",
-        nargs="+",
-        type=block_token_or_alias,
-        default=[],
-        help=(
-            "Show only the given metric id(s) or block alias(es) in the "
-            "--list-metrics output\n(e.g. 2, 2.1, 2.1.0, sol)."
-        ),
     )
     parser._positionals.title = "Modes"
     parser._optionals.title = "Help"
@@ -430,7 +420,7 @@ Examples:
             "\t\t\tAlternatively, specify block id(s) for filtering "
             "(e.g. 12, 13, 14).\n"
             "\t\t\tAlternatively, specify block alias(es) for filtering.\n"
-            "\t\t\tAliases are arch-specific; run --list-metrics [arch] to see\n"
+            "\t\t\tAliases are arch-specific; run --list-metrics to see\n"
             "\t\t\tall valid block ids and aliases.\n"
             "\t\t\tCan provide multiple space separated arguments.\n"
             "\t\t\tCannot be used with --set, --roof-only, or --bench-only"
@@ -655,7 +645,7 @@ rocprof-compute analyze --path <workload_path> [analyze options]
 
 -----------------------------------------------------------------------------------
 Examples:
-\trocprof-compute analyze -p workloads/vcopy/mi200/ --list-metrics gfx90a
+\trocprof-compute analyze -p workloads/vcopy/mi200/ --list-metrics
 \trocprof-compute analyze -p workloads/mixbench/mi200/ --dispatch 12 34 --decimal 3
 -----------------------------------------------------------------------------------
         """,

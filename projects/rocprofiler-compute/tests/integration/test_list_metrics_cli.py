@@ -1,25 +1,26 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Integration tests for the modeless --list-metrics and --list-blocks options."""
+"""Integration tests for --list-metrics and the deprecated --list-blocks option."""
 
+import re
 from pathlib import Path
 
 import pytest
 import yaml
-from common import SRC
+from common import ROOT, SRC
 
 import utils.utils_common as utils_common
 from utils.mi_gpu_spec import mi_gpu_specs
 
 ANALYSIS_CONFIGS = Path(SRC) / "rocprof_compute_soc" / "analysis_configs"
+# Profiled with filter_blocks cu_ins and cu_pipe (blocks 10 and 11) on gfx90a
+FILTERED_WORKLOAD = Path(ROOT) / "tests" / "workloads" / "ipblocks_SQ" / "MI200"
 
 
-def listed_metric_ids(output: str) -> set[str]:
-    """Return the ids of the "<id> -> <name>" rows in --list-metrics output."""
-    return {
-        line.strip().split(" -> ")[0] for line in output.splitlines() if " -> " in line
-    }
+def first_column_ids(output: str) -> list[str]:
+    """Return the ids in the first column of the grid rows of output."""
+    return re.findall(r"^│ ([0-9.]+) ", output, flags=re.MULTILINE)
 
 
 # =============================================================================
@@ -28,13 +29,17 @@ def listed_metric_ids(output: str) -> set[str]:
 
 
 def test_list_metrics(binary_handler_analyze_rocprof_compute, capsys):
-    return_code = binary_handler_analyze_rocprof_compute(["--list-metrics", "gfx90a"])
+    return_code = binary_handler_analyze_rocprof_compute([
+        "--list-metrics-gfx-id",
+        "gfx90a",
+    ])
     assert return_code == 0
 
     # Test output
     output = capsys.readouterr().out
-    assert "6 -> Workgroup Manager (SPI)" in output
-    assert "5.2 -> Command processor packet processor (CPC)" in output
+    assert "Platform: gfx90a (MI200)" in output
+    assert re.search(r"│ 6 +│ spi +│ Workgroup Manager \(SPI\) +│", output)
+    assert "5.2" not in first_column_ids(output)
 
 
 def list_blocks_supported_archs() -> list[str]:
@@ -119,18 +124,29 @@ def test_list_blocks_all_archs(binary_handler_analyze_rocprof_compute, capsys, a
             )
 
 
-def test_list_metrics_row_format(binary_handler_analyze_rocprof_compute, capsys):
-    """Blocks show an alias, metrics a unit and description, and no channel rows."""
-    return_code = binary_handler_analyze_rocprof_compute(["--list-metrics", "gfx950"])
+def test_list_metrics_selected_blocks(binary_handler_analyze_rocprof_compute, capsys):
+    """Aliases select blocks, each table is a grid, and per-channel tables
+    collapse to one line."""
+    return_code = binary_handler_analyze_rocprof_compute([
+        "--list-metrics-gfx-id",
+        "gfx950",
+        "sol",
+        "l2_per_channel",
+    ])
     assert return_code == 0
 
     output = capsys.readouterr().out
-    assert "\n2 -> System Speed-of-Light (alias: sol)\n" in output
-    assert "\n\t2.1 -> System Speed-of-Light\n" in output
-    assert "\n\t\t2.1.0 -> VALU FLOPs [GFLOP/s]: The total floating-point" in output
-    assert "\t\t12.2.0 -> LDS Instructions [Instructions per normUnit]: " in output
-    assert "\n\t18.2 -> L2 Cache Hit Rate (Percent)\n" in output
-    assert "18.2.0 ->" not in output
+    assert (
+        "\n2. System Speed-of-Light (alias: sol)\n2.1 System Speed-of-Light\n" in output
+    )
+    assert re.search(
+        r"│ 2\.1\.0 +│ VALU FLOPs +│ GFLOP/s +│ The total floating", output
+    )
+    assert "\nPer-channel metrics are not listed: 18.2 to 18.12\n" in output
+    assert {metric_id.split(".")[0] for metric_id in first_column_ids(output)} == {
+        "2",
+        "18",
+    }
 
 
 def test_list_metrics_defaults_to_current_gpu(
@@ -140,32 +156,20 @@ def test_list_metrics_defaults_to_current_gpu(
     assert return_code == 0
 
     output = capsys.readouterr().out
-    assert "0 -> Top Stats" in output
-    assert "2 -> System Speed-of-Light" in output
+    assert "Platform: gfx" in output
+    assert "│ Block_ID │ Alias" in output
 
 
-def test_list_metrics_with_block_filter(binary_handler_analyze_rocprof_compute, capsys):
+def test_list_metrics_from_workload(binary_handler_analyze_rocprof_compute, capsys):
+    """analyze -p lists the workload's arch and only the blocks it profiled."""
     return_code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "-p",
+        str(FILTERED_WORKLOAD),
         "--list-metrics",
-        "gfx950",
-        "-b",
-        "lds",
-        "2.1.3",
     ])
     assert return_code == 0
 
-    listed_ids = listed_metric_ids(capsys.readouterr().out)
-    assert {"2", "2.1", "2.1.3", "12", "12.1.0"} <= listed_ids
-    assert not {"2.1.0", "3"} & listed_ids
-
-
-def test_block_without_list_metrics_is_rejected(
-    binary_handler_analyze_rocprof_compute,
-):
-    return_code = binary_handler_analyze_rocprof_compute([
-        "--list-blocks",
-        "gfx950",
-        "-b",
-        "2",
-    ])
-    assert return_code == 1
+    output = capsys.readouterr().out
+    assert "Platform: gfx90a (MI200)" in output
+    assert first_column_ids(output) == ["0", "1", "10", "11"]

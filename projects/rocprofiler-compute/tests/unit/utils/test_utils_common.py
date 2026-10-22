@@ -17,8 +17,6 @@ import pytest
 import utils.utils_common as utils_common
 from utils.utils_common import canonical_config_arch
 
-LISTED_METRIC_IDS = ["2", "2.1", "2.1.0", "2.1.1", "3", "3.1", "3.1.0"]
-
 
 def build_listing_panel_configs():
     """Return panel_configs with a plain table and a per-channel table."""
@@ -1132,44 +1130,8 @@ def test_build_metric_details_returns_unit_and_single_line_description():
     assert metric_details["18.1.2"] == ("No Unit", "", "")
 
 
-# =============================================================================
-# FILTER METRIC IDS TESTS
-# =============================================================================
-
-
-def test_filter_metric_ids_keeps_whole_block(monkeypatch):
-    monkeypatch.setattr(utils_common, "get_arch_alias_to_panel_id", lambda arch: {})
-    assert utils_common.filter_metric_ids(LISTED_METRIC_IDS, ["2"], "gfx950") == [
-        "2",
-        "2.1",
-        "2.1.0",
-        "2.1.1",
-    ]
-
-
-def test_filter_metric_ids_keeps_parents_of_selected_metric(monkeypatch):
-    monkeypatch.setattr(utils_common, "get_arch_alias_to_panel_id", lambda arch: {})
-    filtered_ids = utils_common.filter_metric_ids(
-        LISTED_METRIC_IDS, ["3.1.0", "2.1.1"], "gfx950"
-    )
-    assert filtered_ids == ["2", "2.1", "2.1.1", "3", "3.1", "3.1.0"]
-
-
-def test_filter_metric_ids_resolves_block_alias(monkeypatch):
-    monkeypatch.setattr(
-        utils_common, "get_arch_alias_to_panel_id", lambda arch: {"memchart": "3"}
-    )
-    filtered_ids = utils_common.filter_metric_ids(
-        LISTED_METRIC_IDS, ["memchart"], "gfx950"
-    )
-    assert filtered_ids == ["3", "3.1", "3.1.0"]
-
-
-@pytest.mark.parametrize("token", ["bogus", "9", "2.1.5"])
-def test_filter_metric_ids_rejects_unknown_token(monkeypatch, token):
-    monkeypatch.setattr(utils_common, "get_arch_alias_to_panel_id", lambda arch: {})
-    with pytest.raises(SystemExit):
-        utils_common.filter_metric_ids(LISTED_METRIC_IDS, [token], "gfx950")
+def test_placeholder_table_ids_finds_per_channel_table():
+    assert utils_common.placeholder_table_ids(build_listing_panel_configs()) == {"18.2"}
 
 
 # =============================================================================

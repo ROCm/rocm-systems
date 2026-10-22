@@ -44,10 +44,12 @@ NATIVE_KERNEL_SYMBOLS_PREFIX = "kernel_symbols"
 NATIVE_AGENTS_PREFIX = "agents"
 # Panel id of block 30, Memory Bandwidth Analysis
 MEMBW_ANALYSIS_PANEL_ID: int = 3000
+# Panel id of block 4, Roofline
+ROOFLINE_PANEL_ID: int = 400
 
 # Shared suffix for invalid --block errors.
 INVALID_BLOCK_HINT = (
-    "\n\tRun rocprof-compute --list-metrics [arch] to see all block ids/aliases."
+    "\n\tRun rocprof-compute --list-metrics to see all block ids/aliases."
 )
 
 
@@ -791,24 +793,6 @@ def _iter_metric_table_rows(
         yield f"{table_id}.{index}", (name, str(unit or ""), description)
 
 
-def _resolve_block_token(token: str, alias_map: dict[str, str]) -> str:
-    """Return the metric id for a --block id or alias; error out if unknown."""
-    if METRIC_ID_RE.match(token):
-        return token
-    if token not in alias_map:
-        console_error(f"Invalid --block value {token!r}.{INVALID_BLOCK_HINT}")
-    return alias_map[token]
-
-
-def _is_same_id_branch(metric_id: str, selected_id: str) -> bool:
-    """Return True if metric_id is selected_id, or above or below it."""
-    return (
-        metric_id == selected_id
-        or metric_id.startswith(f"{selected_id}.")
-        or selected_id.startswith(f"{metric_id}.")
-    )
-
-
 def format_table_id(config_id: int) -> str:
     """Return the "block.table" id of a metric_table config id, e.g. 1802 -> "18.2"."""
     return f"{config_id // 100}.{config_id % 100}"
@@ -837,20 +821,24 @@ def build_metric_list(
     }
 
 
-def filter_metric_ids(
-    metric_ids: list[str], filter_tokens: list[str], arch: str
-) -> list[str]:
-    """Keep the ids selected by --block tokens, plus their parent ids."""
-    alias_map = get_arch_alias_to_panel_id(arch)
-    selected_ids = [_resolve_block_token(token, alias_map) for token in filter_tokens]
-    for selected_id, token in zip(selected_ids, filter_tokens):
-        if selected_id not in metric_ids:
-            console_error(f"Invalid --block value {token!r}.{INVALID_BLOCK_HINT}")
-    return [
-        metric_id
-        for metric_id in metric_ids
-        if any(_is_same_id_branch(metric_id, selected) for selected in selected_ids)
-    ]
+def resolve_block_token(token: str, alias_map: dict[str, str]) -> Optional[str]:
+    """Return the metric id for a block or metric id or alias, or None if unknown."""
+    if METRIC_ID_RE.match(token):
+        return token
+    return alias_map.get(token)
+
+
+def placeholder_table_ids(panel_configs: OrderedDict[int, dict[str, Any]]) -> set[str]:
+    """Return the ids of the metric tables that expand a placeholder range, such
+    as the per-channel L2 tables. Call before expand_placeholder_ranges."""
+    return {
+        format_table_id(data_config["id"])
+        for panel in panel_configs.values()
+        for data_source in panel["data source"]
+        for type_key, data_config in data_source.items()
+        if type_key == "metric_table"
+        and "placeholder_range" in (data_config.get("metric") or {})
+    }
 
 
 def get_uuid() -> str:
@@ -872,7 +860,9 @@ def convert_filter_blocks_to_panel_ids(
     )
     resolved: set[int] = set()
     for bid in filter_blocks:
-        metric_id = _resolve_block_token(str(bid), alias_map)
+        metric_id = resolve_block_token(str(bid), alias_map)
+        if metric_id is None:
+            console_error(f"Invalid --block value {str(bid)!r}.{INVALID_BLOCK_HINT}")
         resolved.add(int(convert_metric_id_to_panel_info(metric_id)[0]))
     return resolved
 

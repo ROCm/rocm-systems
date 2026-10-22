@@ -58,9 +58,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * `--pc-sampling-rows` now sets the number of kernels shown.
   * Per-instruction counts are in the per-kernel ISA CSV files.
 
-* Merged the metric listing options into `--list-metrics`, which now shows the alias of each block and the unit and description of each metric. Per-channel metrics are no longer listed.
-  * The GPU architecture is optional. Without it, `--list-metrics` lists the metrics of the current GPU.
-  * Use `-b/--block` to list only some blocks or metrics, for example `rocprof-compute --list-metrics gfx950 -b sol 12.1`.
+* `--list-metrics` now does what `--list-blocks` and `--list-available-metrics` did, for the current GPU. It no longer takes a GPU architecture.
+  * On its own, it shows a table of blocks and their aliases.
+  * Add block or metric IDs or aliases, or `all`, to list those metrics with their units and descriptions, for example `rocprof-compute --list-metrics sol 12.1`.
+  * `rocprof-compute analyze -p <workload> --list-metrics` lists only the blocks that the workload profiled.
+  * Per-channel metrics are no longer listed.
 
 ### Removed
 
