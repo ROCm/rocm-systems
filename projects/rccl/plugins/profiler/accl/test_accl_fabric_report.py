@@ -45,7 +45,7 @@ def cum(rate, t):
 def telemetry(host, pid, roce="nic0", t0=900_000, t1=1_600_000, step=10_000, prio=PRIO,
               rx_pause=None, tx_pause=None, rx_frames=None, ecn=None, oos=None, rnr=None,
               other_bpus=0.0, link_gbps=400, prio_bytes=True, time_counters=True,
-              refresh_us=None, pause_prio=None):
+              refresh_us=None, pause_prio=None, no_pfc_prio=None):
     """One telemetry file. Rates are {(a, b): per-us}; pause rates are a fraction
     of time. RCCL sends RCCL_BPUS; `other_bpus` is someone else's traffic on the
     same port. `refresh_us` makes the NIC's ethtool counters step that often."""
@@ -61,6 +61,9 @@ def telemetry(host, pid, roce="nic0", t0=900_000, t1=1_600_000, step=10_000, pri
         rxf[pp] = int(cum(rx_frames, tn))
         nic = (RCCL_BPUS + other_bpus) * tn
         pb[prio] = int(nic)
+        if no_pfc_prio is not None:       # the NIC has no PFC counters for this priority
+            for a in (rxp, txp, rxf):
+                a[no_pfc_prio] = -1
         s = {"ts_us": t, "device_id": 0, "roce_device": roce,
              "tx_bytes": RCCL_BPUS * t, "rx_bytes": RCCL_BPUS * t,
              "nic_tx_bytes": int(nic), "nic_rx_bytes": int(nic),
@@ -69,7 +72,7 @@ def telemetry(host, pid, roce="nic0", t0=900_000, t1=1_600_000, step=10_000, pri
              "oos_drop_count": int(cum(oos, t)), "seq_err_naks_rcvd": 0, "local_ack_timeout_err": -1,
              "out_of_buffer": -1, "rnr_retry_err": int(cum(rnr, t)),
              "pfc_rx_pause_us": rxp if time_counters else z, "pfc_tx_pause_us": txp if time_counters else z,
-             "pfc_rx_frames": rxf, "pfc_tx_frames": z}
+             "pfc_rx_frames": rxf, "pfc_tx_frames": [-1 if no_pfc_prio == i else 0 for i in range(8)]}
         if prio_bytes:
             s["prio_tx_bytes"] = pb
             s["prio_rx_bytes"] = pb
@@ -243,6 +246,13 @@ class VerdictTest(unittest.TestCase):
         r = one()
         self.assertTrue(r.rank(0).verdict.startswith("CLEAN"))
         self.assertIn("PFC counters zero on every priority", next(iter(r.summary.values())))
+
+    def test_no_pfc_on_rccls_priority(self):
+        # mlx5 with PFC enabled only on other priorities: RCCL's has no pause counters.
+        r = one(no_pfc_prio=PRIO)
+        self.assertEqual((r.lane.prio, r.lane.no_pfc), (PRIO, True))
+        self.assertIn(f"no PFC on priority {PRIO}", next(iter(r.summary.values())))
+        self.assertIn("PFC is not enabled on it", r.cli("report"))
 
     # --- the four false reports found in review --------------------------------
 
