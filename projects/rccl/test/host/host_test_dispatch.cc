@@ -487,8 +487,23 @@ std::string mergeReports(const std::vector<SuiteFragment> &fragments)
 
 // ── command line ────────────────────────────────────────────────────
 
+// The help flags gtest itself recognises. Spelled out here because gtest offers no predicate
+// for them: the decision has to be made before gtest ever sees the caller's argv.
+constexpr std::string_view kHelpFlags[] = {"--help", "-h", "-?", "/?"};
+
+// Whether *arg* asks for help rather than for a run.
+//
+// gtest also treats an UNRECOGNISED --gtest_* flag as a help request. That one cannot be
+// mirrored here: knowing which --gtest_* flags exist is exactly the knowledge this dispatcher
+// refuses to carry, so a misspelled flag still reaches the children, each of which prints help.
+bool isHelpFlag(std::string_view arg)
+{
+    return std::find(std::begin(kHelpFlags), std::end(kHelpFlags), arg) != std::end(kHelpFlags);
+}
+
 // The caller's gtest arguments, split into what the dispatcher acts on and what it forwards.
 struct Options {
+    bool help = false;
     bool listTests = false;
     bool alsoRunDisabled = false;
     std::string filter = "*";
@@ -507,7 +522,12 @@ Options parseArgs(const std::vector<std::string> &args)
 
     Options options;
     for (const std::string &arg : args) {
-        if (arg == "--gtest_list_tests") {
+        if (isHelpFlag(arg)) {
+            // Acted on and NOT forwarded: help is a question about this binary, and forwarding
+            // it would fork every child to print its own copy of the same gtest help screen,
+            // none of which writes a report -- which the run would then score as a failure.
+            options.help = true;
+        } else if (arg == "--gtest_list_tests") {
             options.listTests = true;
         } else if (arg == "--gtest_also_run_disabled_tests") {
             // Acted on AND forwarded: the children need it to run their DISABLED_ cases, and
@@ -770,6 +790,29 @@ int main(int argc, char **argv)
     const std::vector<std::string> args(argv + 1, argv + argc);
     const Options options = parseArgs(args);
 
+    const std::string directory = selfDirectory(argv[0]);
+
+    if (options.help) {
+        // Answered before anything is enumerated: listing the cases costs a fork per binary,
+        // and a caller asking what the flags are has not asked for any of that. The binary
+        // names come from the directory scan alone, which is one readdir.
+        fmt::print("{} runs the host-only test binaries beside it, as one gtest suite.\n",
+                   fs::path(argv[0]).filename().string());
+        for (const std::string &binary : discoverBinaries(directory, selfPath())) {
+            fmt::print("  {}\n", binary);
+        }
+        fmt::print("\nCase names are qualified with the owning binary, e.g. MicroInit/Suite.Case,"
+                   "\nso --gtest_filter patterns can name one binary's cases.\n\n");
+        std::fflush(stdout);
+        // gtest prints its own help from InitGoogleTest, so the caller sees the real flag list
+        // for the gtest this was built against rather than a copy of it that can go stale.
+        int help_argc = 2;
+        char help_flag[] = "--help";
+        char *help_argv[] = {argv[0], help_flag, nullptr};
+        ::testing::InitGoogleTest(&help_argc, help_argv);
+        return 0;
+    }
+
     // gtest is initialised from an argv of our own, never the caller's: the flags the caller
     // passed are meant for the children, and letting gtest read --gtest_output here would have
     // the filter resolution in resolveFilter() overwrite the caller's report with an empty one.
@@ -777,7 +820,6 @@ int main(int argc, char **argv)
     char *gtest_argv[] = {argv[0], nullptr};
     ::testing::InitGoogleTest(&gtest_argc, gtest_argv);
 
-    const std::string directory = selfDirectory(argv[0]);
     const std::vector<std::string> binaries = discoverBinaries(directory, selfPath());
     if (binaries.empty()) {
         fmt::print(stderr, "host-test-dispatch: no {}* binaries next to {} -- nothing to run\n",

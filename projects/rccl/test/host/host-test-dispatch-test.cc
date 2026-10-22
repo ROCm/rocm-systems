@@ -384,6 +384,27 @@ TEST(HostDispatchArgsMicrotest, ListTestsIsActedOnNotForwarded)
     EXPECT_TRUE(options.passthrough.empty());
 }
 
+TEST(HostDispatchArgsMicrotest, HelpIsActedOnNotForwarded)
+{
+    // Forwarding help is what the passthrough rule would do by default, and it is wrong: every
+    // child would print the same gtest help screen and exit without writing a report, which the
+    // dispatcher scores as that binary having crashed. Asking for help must not fail the run.
+    for (const std::string flag : {"--help", "-h", "-?", "/?"}) {
+        const Options options = parseArgs({flag});
+        EXPECT_TRUE(options.help) << flag;
+        EXPECT_TRUE(options.passthrough.empty()) << flag;
+    }
+}
+
+TEST(HostDispatchArgsMicrotest, HelpIsNotAssumedOfEveryFlagThatMerelyLooksLikeIt)
+{
+    // The help flags are an exact set, not a prefix match: a child's own flag could begin with
+    // any of them, and swallowing it here would make that flag silently ineffective.
+    const Options options = parseArgs({"--helper-mode", "-household"});
+    EXPECT_FALSE(options.help);
+    EXPECT_EQ(options.passthrough, (std::vector<std::string>{"--helper-mode", "-household"}));
+}
+
 // ── coverageDirectory ───────────────────────────────────────────────
 
 TEST(HostDispatchCoverageMicrotest, ObjectsAreRecordedBesideTheProfiles)
