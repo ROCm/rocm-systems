@@ -11115,7 +11115,9 @@ inline void execute_v_fma_dx9_zero_f32_vop3([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
   if (amdgpu::fp_mode::native_arithmetic_matches(wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32())) {
     ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32_SCOPED(
-        [&wf](auto a, auto b, auto c) { return amdgpu::fma_dx9_zero_f32_simd<false>(a, b, c, wf); },
+        [&wf](auto a, auto b, auto c) {
+          return amdgpu::fma_dx9_zero_f32_simd_unscoped(a, b, c, wf);
+        },
         true /* apply_omod */, true /* force_output_flush */);
   }
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
@@ -11471,7 +11473,7 @@ inline void execute_v_fmac_dx9_zero_f32_vop2([[maybe_unused]] Inst &inst,
     ROCJITSU_TRY_SIMD_VOP2_TERNARY_ACC_SCOPED(
         float32_t, 0u,
         [&wf](auto a, auto b, auto d, auto) {
-          return amdgpu::fma_dx9_zero_f32_simd<false>(a, b, d, wf);
+          return amdgpu::fma_dx9_zero_f32_simd_unscoped(a, b, d, wf);
         },
         wf.fp_round_mode_f32());
   }
@@ -11495,7 +11497,9 @@ inline void execute_v_fmac_dx9_zero_f32_vop3([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
   if (amdgpu::fp_mode::native_arithmetic_matches(wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32())) {
     ROCJITSU_TRY_SIMD_FMAC_VOP3_FP32_SCOPED(
-        [&wf](auto a, auto b, auto c) { return amdgpu::fma_dx9_zero_f32_simd<false>(a, b, c, wf); },
+        [&wf](auto a, auto b, auto c) {
+          return amdgpu::fma_dx9_zero_f32_simd_unscoped(a, b, c, wf);
+        },
         true /* force_output_flush */);
   }
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
@@ -16038,7 +16042,7 @@ template <typename Inst>
 inline void execute_v_pk_fma_f32_vop3p([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_VOP3P_PK_TERNARY_F32(
-      [&wf](auto a, auto b, auto c) { return amdgpu::fma_f32_simd(a, b, c, wf); });
+      [&wf](auto a, auto b, auto c) { return amdgpu::fma_f32_simd_unscoped(a, b, c, wf); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))

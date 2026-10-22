@@ -295,9 +295,11 @@ template <bool Extended, typename Slot>
   };
   if (!matches_mode(x) || !matches_mode(y))
     return false;
-  // Matching controls still permit arithmetic to raise host exception flags. The
-  // MODE-aware F32 helpers scope their own arithmetic; the remaining host multiply
-  // scopes itself. Register access, which can run callbacks, stays outside both.
+  // Matching controls still permit host computation to raise exception flags, so
+  // every slot route that computes on host floats scopes the environment itself:
+  // the MODE-aware F32 helpers, the remaining host multiply, and the RDNA3/3.5
+  // MIN/MAX comparisons. Raw-bit routes need none, and register access, which can
+  // run callbacks, stays outside every scope.
   struct Results {
     alignas(util::native<uint32_t>) uint32_t words[64]{};
     alignas(util::native<uint64_t>) uint64_t pairs[64]{};
@@ -438,6 +440,9 @@ template <bool Extended, typename Slot>
         }
         const auto input_policy = input_denormal::Policy::make(wf.fp_denorm_mode_f32());
         const auto nan_policy = fp_mode::legacy_minmax_policy(arch, wf.ieee_mode());
+        // The legacy comparisons raise invalid on a signaling NaN, so scope the
+        // environment around the whole selection rather than each call.
+        fp_mode::ScopedEnvironment environment(0);
         result =
             slot.op == 10
                 ? minmax::LegacyOperation<fp_format::F32, minmax::LegacyMax>{input_policy,

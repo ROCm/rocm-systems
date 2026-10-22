@@ -3,6 +3,7 @@
 
 """Tests for vector-special execute code generation."""
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import hashlib
@@ -433,6 +434,56 @@ def test_f32_mode_aware_probes_share_one_guest_environment_policy(template):
     # The scoped cores must not also scope per chunk.
     assert 'amdgpu::fma_f32_simd(' not in probe
     assert 'amdgpu::binary_f32_simd<' not in probe
+
+
+_GENERATED = (
+    Path(__file__).resolve().parents[3]
+    / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+)
+_SCOPED_CORES = (
+    'amdgpu::fma_f32_simd(',
+    'amdgpu::binary_f32_simd<',
+    'amdgpu::binary_f16_simd<',
+)
+_UNSCOPED_CORE = re.compile(r'amdgpu::\w+_simd_unscoped\b')
+_PROBE = re.compile(r'ROCJITSU_TRY_SIMD_\w+\(|try_execute_words_simd<[^>]*>\(')
+# Probes that install one guest FP environment for the whole instruction.
+_INSTRUCTION_SCOPED_PROBE = re.compile(
+    r'ROCJITSU_TRY_SIMD_\w+_SCOPED\('
+    r'|ROCJITSU_TRY_SIMD_VOP3P_PK_TERNARY_F32(?:_SELECTORS)?\('
+    r'|try_execute_words_simd<(?:[^,>]+,){4}\s*true>\('
+)
+
+
+def _probe_calls(text: str):
+    """Yield each SIMD probe's opener and its full parenthesized call."""
+    for match in _PROBE.finditer(text):
+        depth, end = 1, match.end()
+        while depth:
+            depth += {'(': 1, ')': -1}.get(text[end], 0)
+            end += 1
+        yield match.group(0), text[match.start() : end]
+
+
+def test_generated_arithmetic_cores_run_under_one_instruction_environment():
+    files = sorted(p for p in _GENERATED.rglob('*') if p.suffix in ('.h', '.cpp'))
+    assert files, f'no generated sources under {_GENERATED}'
+    total = in_scoped_probes = 0
+    for path in files:
+        text = path.read_text()
+        name = path.relative_to(_GENERATED)
+        # Probes own the guest environment, so no route scopes per SIMD chunk.
+        for core in _SCOPED_CORES:
+            assert core not in text, f'{name}: {core} scopes per chunk'
+        total += len(_UNSCOPED_CORE.findall(text))
+        for opener, call in _probe_calls(text):
+            cores = len(_UNSCOPED_CORE.findall(call))
+            if cores:
+                assert _INSTRUCTION_SCOPED_PROBE.fullmatch(
+                    opener
+                ), f'{name}: {opener} runs an unscoped core without an environment'
+                in_scoped_probes += cores
+    assert in_scoped_probes == total > 0
 
 
 def test_true16_vop3_simd_probe_leaves_unsupported_b16_scalar():

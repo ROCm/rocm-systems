@@ -1131,33 +1131,26 @@ inline util::native<uint32_t> binary_f16_simd_unscoped(util::native<uint32_t> a,
   }();
   U rounded = util::f32_to_f16_mode_simd(result, fp16_ovfl);
   // Preserve the scalar helper's NaN selection and invalid-operation results.
+  // The unscoped forms reuse the caller's nearest-even environment rather than
+  // taking one per exceptional lane; rounding and flushing are unchanged.
   const auto exceptional =
       (a & Fmt::kMagnitude) >= Fmt::kInfinity || (b & Fmt::kMagnitude) >= Fmt::kInfinity;
   if (util::stdx::any_of(exceptional))
     for (std::size_t i = 0; i < U::size(); ++i)
       if (exceptional[i])
-        rounded[i] = fp_mode::finish_arithmetic_f16(
-            fp_mode::arithmetic_f16<operation>(lhs[i], rhs[i], 0.0f, 0), 0, denorm_mode, fp16_ovfl);
+        rounded[i] = fp_mode::finish_arithmetic_f16_unscoped(
+            fp_mode::arithmetic_f16_unscoped<operation>(lhs[i], rhs[i], 0.0f), 0, denorm_mode,
+            fp16_ovfl);
   return output_denormal::flush_output<Fmt>(rounded, output_denormal::Policy::make(denorm_mode));
 }
 
-/// @brief binary_f16_simd_unscoped under its own guest FP environment.
-/// @details For callers that evaluate one chunk at a time. Keeping the scope
-/// inside the operation leaves register callbacks in the caller's state. Callers
-/// that own a whole instruction should scope it once and use the unscoped form.
-template <fp_mode::Arithmetic operation>
-inline util::native<uint32_t> binary_f16_simd(util::native<uint32_t> a, util::native<uint32_t> b,
-                                              uint32_t denorm_mode, bool fp16_ovfl) {
-  fp_mode::ScopedEnvironment environment(0);
-  return binary_f16_simd_unscoped<operation>(a, b, denorm_mode, fp16_ovfl);
-}
-
 /// DX9 accumulator and three-source forms share the scalar flushing, zero-product,
-/// NaN and underflow policies. Source preparation is raw-bit, so the guest
-/// environment belongs to the FMA the unscoped and scoped forms select.
-template <bool Scoped = true>
-inline util::native<float> fma_dx9_zero_f32_simd(util::native<float> a, util::native<float> b,
-                                                 util::native<float> c, const Wavefront &wf) {
+/// NaN and underflow policies. Source preparation is raw-bit; the caller owns the
+/// guest environment of the FMA, as for fma_f32_simd_unscoped.
+inline util::native<float> fma_dx9_zero_f32_simd_unscoped(util::native<float> a,
+                                                          util::native<float> b,
+                                                          util::native<float> c,
+                                                          const Wavefront &wf) {
   using U = util::native<uint32_t>;
   a = denormal::flush_value(a);
   b = denormal::flush_value(b);
@@ -1170,10 +1163,7 @@ inline util::native<float> fma_dx9_zero_f32_simd(util::native<float> a, util::na
   util::stdx::where(zero_product, b_bits) = U(0x3f800000u);
   a = std::bit_cast<util::native<float>>(a_bits);
   b = std::bit_cast<util::native<float>>(b_bits);
-  if constexpr (Scoped)
-    return fma_f32_simd(a, b, c, wf, 0, true);
-  else
-    return fma_f32_simd_unscoped(a, b, c, wf, 0, true);
+  return fma_f32_simd_unscoped(a, b, c, wf, 0, true);
 }
 
 /// @brief Execute a MODE-aware native batch of architectural F64 FMAs.
@@ -1287,10 +1277,10 @@ inline util::native<float> pkf32_neg(util::native<float> v, bool do_neg) {
 /// `Scoped` false constructs nothing, leaving host-float functors' code generation
 /// and their host NaN selection untouched.
 ///
-/// Routes still scoping per chunk: VOPD F32 in simd_coverage.h, whose slots are
-/// separate computation regions, and the VOP3P FMA MIX path, whose outer scope
-/// also spans destination-view acquisition. Both need their own correctness
-/// review before moving, so they keep the per-chunk form here.
+/// VOPD F32 in simd_coverage.h still scopes per chunk, since its slots are
+/// separate computation regions. The VOP3P packed-F32 and F32 FMA MIX helpers
+/// keep their existing instruction-wide scopes, which also span view
+/// acquisition, and evaluate the unscoped cores inside them.
 template <bool Scoped, typename View, typename Body>
 [[nodiscard]] inline bool run_instruction_chunks(const View &dst, uint32_t round_mode, Body body) {
   if constexpr (Scoped) {
@@ -4049,8 +4039,9 @@ template <FmaMixDst DstMode, bool Fused = false, typename Inst>
     F c = load_src(src2, base, inst.inst_.src2, op_sel_hi_2, (op_sel >> 2) & 1u, (abs >> 2) & 1u,
                    (neg >> 2) & 1u);
     F r;
+    // Fused results reach here only from the F32 branch, inside its environment.
     if constexpr (Fused)
-      r = fma_f32_simd(a, b, c, wf);
+      r = fma_f32_simd_unscoped(a, b, c, wf);
     else
       r = fma_mix_mul_add(a, b, c);
     if (clamp)
@@ -4478,7 +4469,9 @@ template <typename Inst, typename Op>
 /// same per-register native<float> read/write as the binary form. OP_SEL
 /// chooses each source half independently; op_sel_hi_2 selects src2-hi.
 /// neg/neg_hi bits 0/1/2 sign-flip the respective half. MODE and CLAMP match
-/// the scalar helper, including FMA NaN payload selection.
+/// the scalar helper, including FMA NaN payload selection. The helper installs
+/// one guest FP environment for the instruction, so `op` must not scope itself:
+/// use fma_f32_simd_unscoped.
 template <typename Inst, typename Op>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vop3p_pk_ternary_f32_simd(Inst &inst, Wavefront &wf,
