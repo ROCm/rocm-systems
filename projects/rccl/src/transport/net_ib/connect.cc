@@ -128,16 +128,25 @@ static_assert(NCCL_IB_MAX_QPS < 256, "per-QP GDR flush flag first index and coun
 // the same QP of one NIC, delivered in order: no NIC fusion, no adaptive
 // routing, no out-of-order receive queues (ID-based matching) and no
 // resiliency retransmits.
-bool ncclIbGdrFlushFlagLocalSupport() {
-  if (rcclParamIbGdrFlushFlag() == 0 || ncclNMergedIbDevs == 0) return false;
-  if (ncclParamIbOooRq() != 0 || ncclParamIbResiliencyPortFailover() != 0) return false;
-  const int64_t matching = ncclParamIbReceiverSideMatchingScheme();
-  if (matching != -2 && matching != BY_INDEX) return false;
-  for (int d = 0; d < ncclNMergedIbDevs; d++)
-    if (ncclIbMergedDevs[d].vProps.ndevs != 1) return false;
-  for (int d = 0; d < ncclNIbDevs; d++)
-    if (ncclIbDevs[d].ar) return false;
+bool ncclIbGdrFlushFlagOrdered(int64_t oooRq, int64_t portFailover, int64_t matchingScheme, int nMergedDevs,
+                               const int* mergedNdevs, int nDevs, const int* adaptiveRouting) {
+  if (nMergedDevs == 0 || oooRq != 0 || portFailover != 0) return false;
+  if (matchingScheme != -2 && matchingScheme != BY_INDEX) return false;
+  for (int d = 0; d < nMergedDevs; d++)
+    if (mergedNdevs[d] != 1) return false;
+  for (int d = 0; d < nDevs; d++)
+    if (adaptiveRouting[d]) return false;
   return true;
+}
+
+bool ncclIbGdrFlushFlagLocalSupport() {
+  if (rcclParamIbGdrFlushFlag() == 0) return false;
+  int mergedNdevs[MAX_IB_VDEVS], adaptiveRouting[MAX_IB_DEVS];
+  for (int d = 0; d < ncclNMergedIbDevs; d++) mergedNdevs[d] = ncclIbMergedDevs[d].vProps.ndevs;
+  for (int d = 0; d < ncclNIbDevs; d++) adaptiveRouting[d] = ncclIbDevs[d].ar;
+  return ncclIbGdrFlushFlagOrdered(ncclParamIbOooRq(), ncclParamIbResiliencyPortFailover(),
+                                   ncclParamIbReceiverSideMatchingScheme(), ncclNMergedIbDevs, mergedNdevs,
+                                   ncclNIbDevs, adaptiveRouting);
 }
 
 void ncclIbSetGdrFlushFlag(void* netContext, int enable) {

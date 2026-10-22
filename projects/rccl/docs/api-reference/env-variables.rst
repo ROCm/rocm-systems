@@ -618,10 +618,12 @@ in the following table.
           gfx942 or gfx950, the ``IB`` transport, and no NIC Fusion
           (``NCCL_NET_MERGE_LEVEL``), adaptive routing
           (``NCCL_IB_ADAPTIVE_ROUTING``), out-of-order receive queues
-          (``NCCL_IB_OOO_RQ``) or port-failover resiliency. Otherwise every rank
-          keeps the RDMA read flush. A connection also keeps it when a request
-          spans more than 8 QPs or the flag memory cannot be registered. LL and
-          LL128 receives never use the flag.
+          (``NCCL_IB_OOO_RQ``), ID-based receive matching
+          (``NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=1``) or port-failover
+          resiliency (``NCCL_IB_RESILIENCY_PORT_FAILOVER``). Otherwise every
+          rank keeps the RDMA read flush. A connection also keeps it when a
+          request spans more than 8 QPs or the flag memory cannot be
+          registered. LL and LL128 receives never use the flag.
         | On gfx950 with 2 to 8 nodes of 8 GPUs, a communicator using it also
           adjusts the ``ncclAllReduce`` algorithm and protocol choice from
           16 MB per node upward, and switches ``ncclReduceScatter`` from LL128

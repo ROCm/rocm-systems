@@ -770,7 +770,8 @@ int ncclIbGetTrafficClass(void* ctx);
 void ncclIbSetTrafficClass(void* ctx, int trafficClass);
 
 // ncclNetIb per-communicator context. config stays first: the traffic class
-// accessors cast the context to it.
+// accessors cast the context to it. Any context passed to ncclNetIb.listen,
+// including GIN/RMA's, must be a full ncclIbNetCtx.
 struct ncclIbNetCtx {
   ncclNetCommConfig_t config;
   // Every rank of the communicator can use RCCL_IB_GDR_FLUSH_FLAG (set at init).

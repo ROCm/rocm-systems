@@ -18,7 +18,7 @@
 // gdrFlushSeq slot the GPU reads.
 //
 // The tests drive the plugin directly over a 2-rank connection (rank 0
-// receives, rank 1 sends) and cover setup, per-request gating, CTS hint
+// receives, rank 1 sends) and cover the ordering rules, setup, per-request gating, CTS hint
 // isolation with many outstanding receives, flag-before-data ordering as seen
 // by a GPU observer, connection lifecycle and concurrent connections.
 //
@@ -332,11 +332,33 @@ protected:
     }
 };
 
+// Each setting that breaks RO=0 ordering behind the payload rules the flag out
+// on its own: out-of-order RQ, port-failover resiliency, ID-based matching, a
+// fused (multi-NIC) device, adaptive routing on any device, or no device.
+TEST_F(GdrFlushFlagTest, Ordering_EachDisqualifierRulesTheFlagOut) {
+    constexpr int64_t kAutoMatching = -2, kByIndex = 0, kById = 1;
+    const int single[2] = {1, 1}, fused[2] = {1, 2};
+    const int noAr[2] = {0, 0}, oneAr[2] = {0, 1};
+
+    EXPECT_TRUE(ncclIbGdrFlushFlagOrdered(0, 0, kAutoMatching, 2, single, 2, noAr));
+    EXPECT_TRUE(ncclIbGdrFlushFlagOrdered(0, 0, kByIndex, 2, single, 2, noAr));
+
+    EXPECT_FALSE(ncclIbGdrFlushFlagOrdered(1, 0, kAutoMatching, 2, single, 2, noAr)) << "NCCL_IB_OOO_RQ";
+    EXPECT_FALSE(ncclIbGdrFlushFlagOrdered(0, 1, kAutoMatching, 2, single, 2, noAr))
+        << "NCCL_IB_RESILIENCY_PORT_FAILOVER";
+    EXPECT_FALSE(ncclIbGdrFlushFlagOrdered(0, 0, kById, 2, single, 2, noAr))
+        << "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=1";
+    EXPECT_FALSE(ncclIbGdrFlushFlagOrdered(0, 0, kAutoMatching, 2, fused, 2, noAr)) << "NIC fusion";
+    EXPECT_FALSE(ncclIbGdrFlushFlagOrdered(0, 0, kAutoMatching, 2, single, 2, oneAr)) << "adaptive routing";
+    EXPECT_FALSE(ncclIbGdrFlushFlagOrdered(0, 0, kAutoMatching, 0, single, 0, noAr)) << "no IB device";
+}
+
 // Enabled: the flag page starts zeroed with a clear descriptor, and a
 // receive posted before any hint call is unflagged.
 TEST_F(GdrFlushFlagTest, Enabled_FlagsZeroedAndHintDefaultsOff) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                          false, kMinGpusPerNode, kNoNodeLimit));
+    if (!validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                   false, kMinGpusPerNode, kNoNodeLimit))
+        GTEST_SKIP() << "requires exactly " << kExactTwoProcesses << " ranks";
     AssertInitAndGetDevices(nullptr);
     const std::string why = EnableFlagForComm();
     if (!why.empty()) GTEST_SKIP() << why;
@@ -390,8 +412,9 @@ TEST_F(GdrFlushFlagTest, Enabled_FlagsZeroedAndHintDefaultsOff) {
 // Not enabled for the communicator: no flag page, and a hint set by the caller
 // has no effect.
 TEST_F(GdrFlushFlagTest, Disabled_NoFlagAndHintIgnored) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                          false, kMinGpusPerNode, kNoNodeLimit));
+    if (!validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                   false, kMinGpusPerNode, kNoNodeLimit))
+        GTEST_SKIP() << "requires exactly " << kExactTwoProcesses << " ranks";
     AssertInitAndGetDevices(nullptr);
     const std::string why = DisabledSkipReason();
     if (!why.empty()) GTEST_SKIP() << why;
@@ -440,8 +463,9 @@ TEST_F(GdrFlushFlagTest, Disabled_NoFlagAndHintIgnored) {
 // ones must leave both untouched. Sizes straddle the split-data threshold and
 // include sub-chunk sizes that leave some QPs with zero-length writes.
 TEST_F(GdrFlushFlagTest, PerRequestGating_RandomHintsAndSizes) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                          false, kMinGpusPerNode, kNoNodeLimit));
+    if (!validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                   false, kMinGpusPerNode, kNoNodeLimit))
+        GTEST_SKIP() << "requires exactly " << kExactTwoProcesses << " ranks";
     AssertInitAndGetDevices(nullptr);
     const std::string why = EnableFlagForComm();
     if (!why.empty()) GTEST_SKIP() << why;
@@ -518,8 +542,9 @@ TEST_F(GdrFlushFlagTest, PerRequestGating_RandomHintsAndSizes) {
 // several times, and all-flagged rounds pile every request onto QP 0 when
 // data is not split.
 TEST_F(GdrFlushFlagTest, OutstandingMixedHints_CtsIsolation) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                          false, kMinGpusPerNode, kNoNodeLimit));
+    if (!validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                   false, kMinGpusPerNode, kNoNodeLimit))
+        GTEST_SKIP() << "requires exactly " << kExactTwoProcesses << " ranks";
     AssertInitAndGetDevices(nullptr);
     const std::string why = EnableFlagForComm();
     if (!why.empty()) GTEST_SKIP() << why;
@@ -680,8 +705,9 @@ TEST_F(GdrFlushFlagTest, OutstandingMixedHints_CtsIsolation) {
 // already hold the new pattern: the flag write must not overtake the RO=1
 // payload, on any QP. Coarse and uncached receive buffers alternate.
 TEST_F(GdrFlushFlagTest, GpuObserver_PayloadVisibleOnceFlagSet) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                          false, kMinGpusPerNode, kNoNodeLimit));
+    if (!validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                   false, kMinGpusPerNode, kNoNodeLimit))
+        GTEST_SKIP() << "requires exactly " << kExactTwoProcesses << " ranks";
     AssertInitAndGetDevices(nullptr);
     const std::string why = EnableFlagForComm();
     if (!why.empty()) GTEST_SKIP() << why;
@@ -785,8 +811,9 @@ TEST_F(GdrFlushFlagTest, GpuObserver_PayloadVisibleOnceFlagSet) {
 // must start with a zeroed flag page and clear descriptor, and the cycles must
 // not leak RDMA objects or the flag page's device memory.
 TEST_F(GdrFlushFlagTest, Lifecycle_ReconnectFreshStateNoLeaks) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                          false, kMinGpusPerNode, kNoNodeLimit));
+    if (!validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                   false, kMinGpusPerNode, kNoNodeLimit))
+        GTEST_SKIP() << "requires exactly " << kExactTwoProcesses << " ranks";
     AssertInitAndGetDevices(nullptr);
     const std::string why = EnableFlagForComm();
     if (!why.empty()) GTEST_SKIP() << why;
@@ -876,8 +903,9 @@ TEST_F(GdrFlushFlagTest, Lifecycle_ReconnectFreshStateNoLeaks) {
 // -t. Each recv comm owns its hint, flag page and descriptor, so random
 // per-thread hints must never bleed across connections.
 TEST_F(GdrFlushFlagTest, MultiThread_IndependentCommsKeepOwnState) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                          false, kMinGpusPerNode, kNoNodeLimit));
+    if (!validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                   false, kMinGpusPerNode, kNoNodeLimit))
+        GTEST_SKIP() << "requires exactly " << kExactTwoProcesses << " ranks";
     AssertInitAndGetDevices(nullptr);
     const std::string why = EnableFlagForComm();
     if (!why.empty()) GTEST_SKIP() << why;
