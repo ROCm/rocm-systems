@@ -685,6 +685,8 @@ pub unsafe extern "C" fn hsa_agent_get_info(
             persisting_l2_cache_size,
             timestamp_frequency_hz,
             pc_sampling_supported,
+            host_xgmi_atomics,
+            cacheline_size,
         ) = {
             let guard = match lock() {
                 Ok(guard) => guard,
@@ -708,8 +710,27 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                     None,
                     1_000_000_000,
                     false,
+                    false,
+                    64,
                 )
             } else if let Some(index) = runtime.gpu_index(agent) {
+                let endpoint = &runtime.gpus[index].endpoint;
+                let host_xgmi_atomics =
+                    runtime
+                        .topology
+                        .route_from_host(endpoint)
+                        .is_some_and(|link| {
+                            link.kind == rocddi::topology::MemoryLinkType::Xgmi
+                                && link.coherent_support
+                                && link.atomic_support_64bit
+                        });
+                let cacheline_size = runtime
+                    .topology
+                    .caches_for_endpoint(endpoint)
+                    .filter(|cache| cache.level == 2)
+                    .filter_map(|cache| cache.line_size_bytes)
+                    .find(|line| *line != 0)
+                    .unwrap_or(256);
                 let native_device = if matches!(
                     attribute,
                     AMD_AGENT_INFO_CLOCK_COUNTERS
@@ -737,6 +758,8 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                     Some(runtime.gpus[index].persisting_l2_cache_size.clone()),
                     runtime.gpus[index].timestamp_frequency_hz,
                     runtime.gpus[index].pc_sampling_supported,
+                    host_xgmi_atomics,
+                    cacheline_size,
                 )
             } else {
                 return INVALID_AGENT;
@@ -766,14 +789,6 @@ pub unsafe extern "C" fn hsa_agent_get_info(
             None
         };
         let gpu = endpoint.as_ref().and_then(|endpoint| endpoint.gpu());
-        let host_xgmi_atomics = endpoint
-            .as_ref()
-            .and_then(rocddi::topology::Endpoint::memory_link_from_host)
-            .is_some_and(|link| {
-                link.kind == rocddi::topology::MemoryLinkType::Xgmi
-                    && link.coherent_support
-                    && link.atomic_support_64bit
-            });
         let gpu_only = gpu.is_some();
         let image_gpu = gpu.is_some_and(image_gfx12::supported_gpu);
         if !gpu_only && cpu_rejects_amd_agent_info(attribute) {
@@ -861,18 +876,7 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                 ),
                 AGENT_INFO_VERSION_MAJOR | AGENT_INFO_VERSION_MINOR => write_value(value, 1_u16),
                 AMD_AGENT_INFO_CHIP_ID => write_value(value, pci.map_or(0, |info| info.device_id)),
-                AMD_AGENT_INFO_CACHELINE_SIZE => write_value(
-                    value,
-                    endpoint.as_ref().map_or(64, |endpoint| {
-                        endpoint
-                            .caches()
-                            .iter()
-                            .filter(|cache| cache.level == 2)
-                            .filter_map(|cache| cache.line_size_bytes)
-                            .find(|line| *line != 0)
-                            .unwrap_or(256)
-                    }),
-                ),
+                AMD_AGENT_INFO_CACHELINE_SIZE => write_value(value, cacheline_size),
                 AMD_AGENT_INFO_COMPUTE_UNIT_COUNT
                 | AMD_AGENT_INFO_COOPERATIVE_COMPUTE_UNIT_COUNT => write_value(
                     value,
