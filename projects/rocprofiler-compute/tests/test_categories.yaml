@@ -1,8 +1,8 @@
 test_categories:
+  # Unit tests only.
   quick:
     description: "Fast sanity checks - Run pre-commit (target: < 5 min)"
     test_patterns:
-      - test_profile_misc
       - test_aggregation
       - test_expression
       - test_evaluation_pipeline
@@ -10,11 +10,6 @@ test_categories:
       - test_utils_counter_defs
       - test_parser
       - test_argparser
-      - test_profile_section
-      - test_pc_sampling
-      - test_analyze_workloads
-      - test_profile_iteration_multiplexing_1
-      - test_profile_sets_func
       - test_utils_common
       - test_utils_analysis
       - test_utils_profile
@@ -24,9 +19,7 @@ test_categories:
       - test_benchmark_base
       - test_analysis_cli
       - test_pattern_matching
-      - test_list_metrics_cli
       - test_pc_sampling_analysis
-      - test_pc_sampling_analyze_cli
       - test_analysis_db
       - test_analysis_base
       - test_analysis_orm
@@ -34,16 +27,12 @@ test_categories:
       - test_source_snapshot_analysis
       - test_per_kernel_isa_export
       - test_rocpd_data
-      - test_L1_cache_counters
       - test_roofline_calc
-      - test_roofline_analyze
       - test_roofline_main
       - test_report_shell
-      - test_num_xcds_spec_class
       - test_profiler_base
       - test_pc_sampling_profile
       - test_rocprofv3_avail_interface
-      - test_num_xcds_cli_output
       - test_specs
       - test_mi_gpu_spec
       - test_file_io

@@ -9,12 +9,13 @@
 //! Parsers reject incomplete, duplicate, overflowing, or internally inconsistent
 //! properties rather than filling important device facts with defaults.
 use super::{errno, error, native_error, sys};
+use crate::driver::DriverInstanceId;
 use crate::memory::storage::Shared;
 use crate::memory::storage::TryPush;
 use crate::memory::{DeviceAccess, HostCacheability};
 use crate::topology::{
-    CacheInfo, Endpoint, EndpointKind, GpuInfo, GpuQueueCapabilities, MemoryLink, MemoryLinkInfo,
-    MemoryLinkType, PciInfo, TopologyKey,
+    CacheInfo, CacheKind, Endpoint, EndpointKind, GpuInfo, GpuQueueCapabilities, MemoryLink,
+    MemoryLinkInfo, MemoryLinkType, PciInfo, TopologyKey,
 };
 use crate::{Error, ErrorKind};
 use std::fmt::{self, Write as _};
@@ -25,37 +26,62 @@ use std::path::Path;
 /// Stable KFD and DRM identity and capabilities for one topology node.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct KfdNode {
+    /// Sysfs topology node number.
     pub node: u32,
+    /// Native KFD GPU identifier used by ioctls.
     pub gpu_id: u32,
+    /// DRM render node minor, when this node has one.
     pub render_minor: Option<u32>,
+    /// Stable hardware identifier when reported by KFD.
     pub unique_id: Option<u64>,
+    /// Endpoint identity used to detect topology changes.
     pub identity: [u8; 16],
+    /// Queue and shader geometry qualified for this node.
     pub queues: KfdQueueProperties,
+    /// Total local device memory in bytes.
     pub local_memory_bytes: u64,
+    /// Host-visible local memory in bytes.
     pub public_memory_bytes: u64,
 }
 
 /// Queue and shader properties required to qualify KFD transports.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct KfdQueueProperties {
+    /// Encoded GFX target reported by KFD.
     pub gfx_target: u32,
+    /// Enabled compute-unit count.
     pub compute_units: u32,
+    /// Maximum resident waves per compute unit.
     pub maximum_wave_count_per_compute_unit: u32,
+    /// Maximum scratch waves per compute unit.
     pub maximum_scratch_wave_count_per_compute_unit: u32,
+    /// Hardware lanes per wavefront.
     pub wavefront_size: u32,
+    /// Number of shader XCCs exposed to this process.
     pub xcc_count: u32,
+    /// Shader engines per XCC.
     pub shader_engine_count_per_xcc: u32,
+    /// Native context-save allocation size.
     pub context_size: u32,
+    /// Native control-stack allocation size.
     pub control_stack_size: u32,
+    /// Number of ordinary SDMA engines.
     pub sdma_engines: u32,
+    /// Number of SDMA engines for XGMI links.
     pub sdma_xgmi_engines: u32,
+    /// Available global wave synchronization slots.
     pub gws_count: u32,
+    /// Maximum native compute queues.
     pub compute_queues: u32,
+    /// SDMA queue support validated against native properties.
     pub sdma_qualified: bool,
 }
 
+/// Bounded path builder for sysfs records discovered without allocation.
 struct StackPath {
+    /// UTF-8 path bytes written so far.
     bytes: [u8; 512],
+    /// Length of the initialized byte prefix.
     len: usize,
 }
 impl StackPath {
@@ -120,6 +146,7 @@ fn parse_number(text: &str) -> Result<u64, Error> {
     };
     result.map_err(|_| error(ErrorKind::InvalidData, "invalid numeric sysfs property"))
 }
+/// Validated key-value lines from one native sysfs properties record.
 struct Properties<'a>(&'a str);
 impl<'a> Properties<'a> {
     fn new(text: &'a str) -> Result<Self, Error> {
@@ -177,7 +204,7 @@ impl<'a> Properties<'a> {
     }
 }
 
-fn cache_properties(text: &str) -> Result<CacheInfo, Error> {
+fn cache_properties(text: &str) -> Result<(CacheInfo, u32), Error> {
     let mut sibling_map = false;
     for (index, line) in text.lines().enumerate() {
         let mut parts = line.split_whitespace();
@@ -221,18 +248,42 @@ fn cache_properties(text: &str) -> Result<CacheInfo, Error> {
     let _ = properties.u32("cache_lines_per_tag")?;
     let _ = properties.u32("association")?;
     let _ = properties.u32("latency")?;
+    let native_kind = properties.u32("type")?;
+    let kind = match (native_kind & 1 != 0, native_kind & 2 != 0) {
+        (true, true) => CacheKind::Unified,
+        (true, false) => CacheKind::Data,
+        (false, true) => CacheKind::Instruction,
+        (false, false) => CacheKind::Other,
+    };
     // KFD reports cache capacity in KiB; driver facts use bytes.
-    Ok(CacheInfo {
-        level: properties.u32("level")?,
-        size_bytes: u64::from(properties.u32("size")?) * 1024,
-        line_size_bytes,
-        kind: properties.u32("type")?,
-    })
+    Ok((
+        CacheInfo {
+            level: properties.u32("level")?,
+            size_bytes: u64::from(properties.u32("size")?) * 1024,
+            line_size_bytes: (line_size_bytes != 0).then_some(line_size_bytes),
+            kind,
+            compute_unit_cache: native_kind & (1 << 3) != 0,
+        },
+        properties
+            .optional_u32("persisting_cache_size_max")?
+            .unwrap_or(0),
+    ))
 }
 
-fn caches(root: &str, node: u32, count: u32) -> Result<Option<Shared<Vec<CacheInfo>>>, Error> {
+/// Cache records and the largest reported persisting-L2 reservation.
+struct DiscoveredCaches {
+    /// Cache records ordered by native ordinal when any are present.
+    records: Option<Shared<Vec<CacheInfo>>>,
+    /// Maximum persisting L2 size reported by the device.
+    persisting_l2_cache_size_max: u32,
+}
+
+fn caches(root: &str, node: u32, count: u32) -> Result<DiscoveredCaches, Error> {
     if count == 0 {
-        return Ok(None);
+        return Ok(DiscoveredCaches {
+            records: None,
+            persisting_l2_cache_size_max: 0,
+        });
     }
     let capacity = usize::try_from(count)
         .map_err(|_| error(ErrorKind::ResourceExhausted, "native cache count overflow"))?;
@@ -270,10 +321,19 @@ fn caches(root: &str, node: u32, count: u32) -> Result<Option<Shared<Vec<CacheIn
         ));
     }
     let mut cache_info = crate::memory::storage::try_vec_with_capacity(capacity)?;
-    for (_, cache) in records {
+    let mut persisting_l2_cache_size_max = 0;
+    for (_, (cache, persisting_cache_size_max)) in records {
+        if cache.level == 2 && persisting_l2_cache_size_max == 0 {
+            persisting_l2_cache_size_max = persisting_cache_size_max;
+        }
         cache_info.try_push(cache)?;
     }
-    Shared::new(cache_info).map(Some).map_err(Into::into)
+    Shared::new(cache_info)
+        .map(|records| DiscoveredCaches {
+            records: Some(records),
+            persisting_l2_cache_size_max,
+        })
+        .map_err(Into::into)
 }
 
 fn memory_bank_properties(text: &str) -> Result<Option<(u32, u32)>, Error> {
@@ -343,6 +403,7 @@ fn memory_bus(root: &str, node: u32, count: u32) -> Result<(u32, u32), Error> {
 pub(super) fn enumerate(
     root: &str,
     drm: &str,
+    driver_instance: DriverInstanceId,
     visitor: &mut dyn FnMut(Endpoint) -> Result<(), Error>,
 ) -> Result<(), Error> {
     for _ in 0..3 {
@@ -354,7 +415,7 @@ pub(super) fn enumerate(
         let mut records = Vec::new();
         let nodes = StackPath::new(format_args!("{root}/nodes"))?;
         let result = sys::numeric_directories(nodes.path(), &mut |node| {
-            if let Some(endpoint) = read_node(root, drm, node)? {
+            if let Some(endpoint) = read_node(root, drm, driver_instance, node)? {
                 records.try_push(endpoint)?;
             }
             Ok(())
@@ -376,10 +437,15 @@ pub(super) fn enumerate(
     ))
 }
 
-pub(super) fn open_endpoint(root: &str, drm: &str, id: [u8; 16]) -> Result<Endpoint, Error> {
+pub(super) fn open_endpoint(
+    root: &str,
+    drm: &str,
+    driver_instance: DriverInstanceId,
+    id: [u8; 16],
+) -> Result<Endpoint, Error> {
     let node = u32::from_le_bytes([id[0], id[1], id[2], id[3]]);
     let before = scalar(format_args!("{root}/generation_id"))?;
-    let endpoint = read_node(root, drm, node)?
+    let endpoint = read_node(root, drm, driver_instance, node)?
         .ok_or_else(|| error(ErrorKind::DeviceLost, "native GPU endpoint disappeared"))?;
     let after = scalar(format_args!("{root}/generation_id"))?;
     if before != after {
@@ -578,7 +644,12 @@ fn memory_links(
     clippy::too_many_lines,
     reason = "all immutable native facts share one identity and generation bracket"
 )]
-fn read_node(root: &str, drm: &str, node: u32) -> Result<Option<Endpoint>, Error> {
+fn read_node(
+    root: &str,
+    drm: &str,
+    driver_instance: DriverInstanceId,
+    node: u32,
+) -> Result<Option<Endpoint>, Error> {
     let gpu_id = u32::try_from(scalar(format_args!("{root}/nodes/{node}/gpu_id"))?)
         .map_err(|_| error(ErrorKind::InvalidData, "GPU ID exceeds u32"))?;
     if gpu_id == 0 {
@@ -642,7 +713,10 @@ fn read_node(root: &str, drm: &str, node: u32) -> Result<Option<Endpoint>, Error
     let gws_count = p.optional_u32("num_gws")?.unwrap_or(0);
     let io_link_count = p.optional_u32("io_links_count")?.unwrap_or(0);
     let p2p_link_count = p.optional_u32("p2p_links_count")?.unwrap_or(0);
-    let caches = caches(root, node, p.optional_u32("caches_count")?.unwrap_or(0))?;
+    let DiscoveredCaches {
+        records: caches,
+        persisting_l2_cache_size_max,
+    } = caches(root, node, p.optional_u32("caches_count")?.unwrap_or(0))?;
     let memory_links = memory_links(root, node, gpu_id, io_link_count, p2p_link_count)?;
     let identity_tail = unique_id.unwrap_or((u64::from(domain) << 32) | u64::from(location));
     let mut id = [0; 16];
@@ -673,10 +747,10 @@ fn read_node(root: &str, drm: &str, node: u32) -> Result<Option<Endpoint>, Error
     }
     let sdma_ip = sdma_version(drm, render)?;
     // This transport publishes monotonic 64-bit byte indices and 64-bit
-    // doorbells across the already supported GFX10.1–GFX12.0 native targets.
+    // doorbells across the supported GFX10.1–GFX12 native targets.
     // Commands remain target-specific and caller-owned; a discovered SDMA IP
     // does not change any frontend's advertised transport revision.
-    let sdma_qualified = (100_100..=120_001).contains(&gfx)
+    let sdma_qualified = ((100_100..=120_001).contains(&gfx) || gfx == 120_500)
         && sdma.unwrap_or(0) != 0
         && sdma_queues.unwrap_or(0) != 0;
 
@@ -759,15 +833,19 @@ fn read_node(root: &str, drm: &str, node: u32) -> Result<Option<Endpoint>, Error
     Ok(Some(Endpoint {
         id,
         name,
+        product_name: None,
         pci: Some(pci),
         kind: EndpointKind::Gpu {
             info: GpuInfo {
+                native_gpu_id: gpu_id,
                 gfx_major: gfx / 10000,
                 gfx_minor: (gfx / 100) % 100,
                 gfx_stepping: gfx % 100,
                 unique_id,
                 hive_id,
                 asic_family_id: family_id,
+                drm_asic_family_id: None,
+                counter_frequency_hz: None,
                 asic_revision: (capability & 0x03c0_0000) >> 22,
                 maximum_engine_clock_mhz,
                 memory_bus_width_bits,
@@ -789,36 +867,31 @@ fn read_node(root: &str, drm: &str, node: u32) -> Result<Option<Endpoint>, Error
                 packet_processor_firmware_version: p.optional_u32("fw_version")?.unwrap_or(0)
                     & 0x3ff,
                 sdma_firmware_version: p.optional_u32("sdma_fw_version")?.unwrap_or(0) & 0x3ff,
-                persisting_l2_cache_size_max: p
-                    .optional_u32("persisting_cache_size_max")?
-                    .unwrap_or(0),
+                persisting_l2_cache_size_max,
+                fabric_handles_supported: StackPath::new(format_args!(
+                    "{drm}/renderD{render}/device/ualink"
+                ))
+                .is_ok_and(|path| File::open(path.path()).is_ok()),
                 queues: GpuQueueCapabilities {
                     aql: supports_aql,
-                    // System-scope AQL packet fences and a kernel-issued system
-                    // release are execution-qualified only on the initial
-                    // GFX1201/x86-64 target.
+                    // GFX12 shares the AQL system-scope cache protocol.
                     aql_system_cache_control: cfg!(target_arch = "x86_64")
                         && supports_aql
-                        && gfx == 120_001,
+                        && matches!(gfx, 120_000 | 120_001 | 120_500),
                     pm4: supports_pm4,
                     kernel_pm4: supports_pm4,
-                    // The initial PM4 profile uses the GFX12 ACQUIRE_MEM GCR
-                    // encoding and is execution-qualified on the same exact target
-                    // as construction.
+                    // PM4 uses the GFX12 ACQUIRE_MEM GCR encoding.
                     pm4_system_cache_control: supports_pm4,
                     sdma: sdma_qualified,
                     kernel_sdma: cfg!(target_arch = "x86_64")
                         && sdma_qualified
-                        && gfx == 120_001
-                        && sdma_ip == Some((7, 0, 1)),
-                    // The first execution-qualified path follows ROCr's GFX12
-                    // USER_GCR protocol on SDMA 7.0.1. Keep this narrower than
-                    // queue construction: neither a nearby GFX version nor missing
-                    // IP data proves that protocol.
+                        && ((matches!(gfx, 120_000 | 120_001) && sdma_ip == Some((7, 0, 1)))
+                            || (gfx == 120_500 && sdma_ip == Some((7, 1, 0)))),
+                    // USER_GCR requires the matching target-specific SDMA packet format.
                     sdma_system_cache_control: cfg!(target_arch = "x86_64")
                         && sdma_qualified
-                        && gfx == 120_001
-                        && sdma_ip == Some((7, 0, 1)),
+                        && ((matches!(gfx, 120_000 | 120_001) && sdma_ip == Some((7, 0, 1)))
+                            || (gfx == 120_500 && sdma_ip == Some((7, 1, 0)))),
                     sdma_engine_count: if sdma_qualified { sdma.unwrap_or(0) } else { 0 },
                 },
             },
@@ -827,8 +900,8 @@ fn read_node(root: &str, drm: &str, node: u32) -> Result<Option<Endpoint>, Error
         host_visible_local_memory_bytes: public,
         host_local_cacheability: (cfg!(target_arch = "x86_64")
             && public != 0
-            && (100_100..=120_001).contains(&gfx))
-        .then_some(HostCacheability::WriteCombined),
+            && ((100_100..=120_001).contains(&gfx) || gfx == 120_500))
+            .then_some(HostCacheability::WriteCombined),
         allocation_granularity: 4096,
         address_bit_count: bits,
         minimum_address: 65536,
@@ -840,7 +913,7 @@ fn read_node(root: &str, drm: &str, node: u32) -> Result<Option<Endpoint>, Error
             group: node,
             member: gpu_id,
         },
-        driver_instance: 0,
+        driver_instance,
         selector: crate::driver::EndpointSelector::LinuxKfd(native),
     }))
 }
@@ -919,6 +992,19 @@ pub(super) fn open_render(minor: u32) -> io::Result<File> {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU32, Ordering};
+
+    fn enumerate(
+        root: &str,
+        drm: &str,
+        visitor: &mut dyn FnMut(Endpoint) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        super::enumerate(root, drm, DriverInstanceId::TEST, visitor)
+    }
+
+    fn open_endpoint(root: &str, drm: &str, id: [u8; 16]) -> Result<Endpoint, Error> {
+        super::open_endpoint(root, drm, DriverInstanceId::TEST, id)
+    }
+
     static NEXT: AtomicU32 = AtomicU32::new(0);
     struct Fixture(std::path::PathBuf);
     impl Fixture {
@@ -978,26 +1064,6 @@ mod tests {
     }
 
     #[test]
-    fn persisting_l2_limit_comes_from_the_gpu_node() {
-        let fixture = Fixture::new();
-        let properties = fixture.0.join("topology/nodes/1/properties");
-        let mut contents = std::fs::read_to_string(&properties).unwrap();
-        contents.push_str("persisting_cache_size_max 1048576\n");
-        std::fs::write(&properties, contents).unwrap();
-        let (root, drm) = fixture.roots();
-        let endpoint = open_endpoint(
-            &root,
-            &drm,
-            [1, 0, 0, 0, 42, 0, 0, 0, 123, 0, 0, 0, 0, 0, 0, 0],
-        )
-        .unwrap();
-        assert_eq!(
-            endpoint.gpu().unwrap().persisting_l2_cache_size_max,
-            1_048_576
-        );
-    }
-
-    #[test]
     fn memory_bus_facts_come_from_nonempty_vram_banks() {
         let fixture = Fixture::new();
         let properties = fixture.0.join("topology/nodes/1/properties");
@@ -1045,7 +1111,8 @@ mod tests {
         })
         .unwrap();
         let endpoint = found.unwrap();
-        let linux = endpoint.linux_kfd_drm_info().unwrap();
+        assert_eq!(endpoint.driver_instance, DriverInstanceId::TEST);
+        let linux = crate::topology::platform::linux::kfd_drm_info(&endpoint).unwrap();
         assert_eq!(linux.node_id, 1);
         assert_eq!(linux.gpu_id, 42);
         let gpu = endpoint.gpu().unwrap();
@@ -1143,7 +1210,7 @@ mod tests {
         .unwrap();
         let mut owner = endpoint.clone();
         assert!(endpoint.can_access_local_memory(&owner));
-        owner.driver_instance = 1;
+        owner.driver_instance = crate::driver::new_driver_instance();
         assert!(!endpoint.can_access_local_memory(&owner));
         owner.driver_instance = endpoint.driver_instance;
         owner.topology_key.member += 1;
@@ -1177,7 +1244,7 @@ mod tests {
 
     #[test]
     fn endpoint_from_one_driver_cannot_activate_in_another_session() {
-        use crate::driver::Driver;
+        use crate::driver::{Driver, DriverInstance};
 
         let fixture = Fixture::new();
         let (root, drm) = fixture.roots();
@@ -1191,7 +1258,13 @@ mod tests {
             crate::session::Session::new(crate::session::DriverContextLifetime::Process).unwrap();
         let second =
             crate::session::Session::new(crate::session::DriverContextLifetime::Process).unwrap();
-        endpoint.driver_instance = first.linux_kfd().unwrap().driver_instance();
+        endpoint.driver_instance = first
+            .installed_drivers()
+            .unwrap()
+            .iter()
+            .find_map(DriverInstance::linux_kfd)
+            .unwrap()
+            .driver_instance();
         assert_eq!(
             second.activate(&endpoint).err().unwrap().kind(),
             ErrorKind::InvalidArgument
@@ -1243,27 +1316,27 @@ mod tests {
         )
         .unwrap();
         let to_host = endpoint.memory_link_to_host().unwrap();
-        assert_eq!(to_host.kind(), MemoryLinkType::Pcie);
-        assert_eq!(to_host.minimum_latency(), 1);
-        assert_eq!(to_host.maximum_latency(), 2);
-        assert_eq!(to_host.minimum_bandwidth(), 3);
-        assert_eq!(to_host.maximum_bandwidth(), 64_000);
-        assert!(to_host.supports_32bit_atomics());
-        assert!(to_host.supports_64bit_atomics());
-        assert!(to_host.is_coherent());
-        assert_eq!(to_host.numa_distance(), 20);
+        assert_eq!(to_host.kind, MemoryLinkType::Pcie);
+        assert_eq!(to_host.minimum_latency, 1);
+        assert_eq!(to_host.maximum_latency, 2);
+        assert_eq!(to_host.minimum_bandwidth, 3);
+        assert_eq!(to_host.maximum_bandwidth, 64_000);
+        assert!(to_host.atomic_support_32bit);
+        assert!(to_host.atomic_support_64bit);
+        assert!(to_host.coherent_support);
+        assert_eq!(to_host.numa_distance, 20);
         assert_eq!(to_host.hop_count(), 1);
 
         let from_host = endpoint.memory_link_from_host().unwrap();
-        assert_eq!(from_host.kind(), MemoryLinkType::Pcie);
-        assert_eq!(from_host.minimum_latency(), 4);
-        assert_eq!(from_host.maximum_latency(), 5);
-        assert_eq!(from_host.minimum_bandwidth(), 6);
-        assert_eq!(from_host.maximum_bandwidth(), 63_000);
-        assert!(from_host.supports_32bit_atomics());
-        assert!(from_host.supports_64bit_atomics());
-        assert!(!from_host.is_coherent());
-        assert_eq!(from_host.numa_distance(), 21);
+        assert_eq!(from_host.kind, MemoryLinkType::Pcie);
+        assert_eq!(from_host.minimum_latency, 4);
+        assert_eq!(from_host.maximum_latency, 5);
+        assert_eq!(from_host.minimum_bandwidth, 6);
+        assert_eq!(from_host.maximum_bandwidth, 63_000);
+        assert!(from_host.atomic_support_32bit);
+        assert!(from_host.atomic_support_64bit);
+        assert!(!from_host.coherent_support);
+        assert_eq!(from_host.numa_distance, 21);
         assert_eq!(from_host.hop_count(), 1);
     }
 
@@ -1301,8 +1374,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(endpoint.caches().len(), 4);
-        assert_eq!(endpoint.caches()[0].level(), 1);
-        assert_eq!(endpoint.caches()[0].size_bytes(), 32_768);
+        assert_eq!(endpoint.caches()[0].level, 1);
+        assert_eq!(endpoint.caches()[0].size_bytes, 32_768);
         assert!(crate::device::gpu::is_compute_data_cache(
             &endpoint.caches()[0]
         ));
@@ -1315,9 +1388,10 @@ mod tests {
         assert!(crate::device::gpu::is_compute_data_cache(
             &endpoint.caches()[3]
         ));
-        assert_eq!(endpoint.caches()[3].level(), 2);
-        assert_eq!(endpoint.caches()[3].size_bytes(), 262_144);
-        assert_eq!(endpoint.caches()[3].line_size_bytes(), 64);
+        assert_eq!(endpoint.caches()[3].level, 2);
+        assert_eq!(endpoint.caches()[3].size_bytes, 262_144);
+        assert_eq!(endpoint.caches()[3].line_size_bytes, Some(64));
+        assert_eq!(endpoint.gpu().unwrap().persisting_l2_cache_size_max, 0);
     }
 
     #[test]
@@ -1391,7 +1465,7 @@ mod tests {
 
     #[test]
     fn compute_cache_control_requires_the_qualified_target() {
-        for gfx in [120_001, 120_000] {
+        for gfx in [120_000, 120_001, 120_500, 110_000] {
             let fixture = Fixture::new();
             let path = fixture.0.join("topology/nodes/1/properties");
             let properties = std::fs::read_to_string(&path).unwrap();
@@ -1412,16 +1486,17 @@ mod tests {
             .unwrap();
             let endpoint = found.unwrap();
             let queues = endpoint.gpu().unwrap().queues;
+            let supported = matches!(gfx, 120_000 | 120_001 | 120_500);
             assert!(queues.aql);
             assert_eq!(
                 queues.aql_system_cache_control,
-                cfg!(target_arch = "x86_64") && gfx == 120_001
+                cfg!(target_arch = "x86_64") && supported
             );
             assert_eq!(
                 queues.pm4_system_cache_control,
-                cfg!(target_arch = "x86_64") && gfx == 120_001
+                cfg!(target_arch = "x86_64") && supported
             );
-            assert_eq!(queues.pm4, cfg!(target_arch = "x86_64") && gfx == 120_001);
+            assert_eq!(queues.pm4, cfg!(target_arch = "x86_64") && supported);
         }
     }
 
@@ -1439,13 +1514,24 @@ mod tests {
                 Some(HostCacheability::WriteCombined),
             ),
             (
+                120_000,
+                0x7550,
+                268_435_456,
+                Some(HostCacheability::WriteCombined),
+            ),
+            (
                 120_001,
                 0x7550,
                 268_435_456,
                 Some(HostCacheability::WriteCombined),
             ),
             (120_001, 0x7550, 0, None),
-            (120_500, 0x7550, 268_435_456, None),
+            (
+                120_500,
+                0x7550,
+                268_435_456,
+                Some(HostCacheability::WriteCombined),
+            ),
         ] {
             let fixture = Fixture::new();
             let path = fixture.0.join("topology/nodes/1/properties");
@@ -1586,5 +1672,37 @@ mod tests {
             ErrorKind::InvalidData
         );
         assert!(!visited);
+    }
+
+    #[test]
+    fn persisting_l2_limit_comes_from_the_gpu_node() {
+        let fixture = Fixture::new();
+        let properties = fixture.0.join("topology/nodes/1/properties");
+        let mut contents = std::fs::read_to_string(&properties).unwrap();
+        contents = contents.replace("caches_count 0", "caches_count 3");
+        contents.push_str("persisting_cache_size_max 2097152\n");
+        std::fs::write(&properties, contents).unwrap();
+        for (ordinal, level, max) in [(0, 1, 4_194_304), (1, 2, 0), (2, 2, 1_048_576)] {
+            let directory = fixture.0.join(format!("topology/nodes/1/caches/{ordinal}"));
+            std::fs::create_dir_all(&directory).unwrap();
+            std::fs::write(
+                directory.join("properties"),
+                format!(
+                    "processor_id_low 0\nlevel {level}\nsize 256\ncache_line_size 64\ncache_lines_per_tag 1\nassociation 16\nlatency 1\ntype 8\npersisting_cache_size_max {max}\nsibling_map 1,0,0,0\n"
+                ),
+            )
+            .unwrap();
+        }
+        let (root, drm) = fixture.roots();
+        let endpoint = open_endpoint(
+            &root,
+            &drm,
+            [1, 0, 0, 0, 42, 0, 0, 0, 123, 0, 0, 0, 0, 0, 0, 0],
+        )
+        .unwrap();
+        assert_eq!(
+            endpoint.gpu().unwrap().persisting_l2_cache_size_max,
+            1_048_576
+        );
     }
 }

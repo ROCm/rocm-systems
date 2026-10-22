@@ -11,15 +11,19 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/denormal_value.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/division.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/input_denormal.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/minmax.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/output_denormal.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/output_modifier.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"
 #include "util/data_types.h"
 
 #include <algorithm>
 #include <bit>
+#include <cassert>
 #include <cfenv>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <limits>
 #include <type_traits>
 
@@ -235,6 +239,31 @@ inline uint16_t round_exact_to_bf16(ExactF64Sum sum, uint32_t round_mode) {
 
 } // namespace detail
 
+/// @brief Legacy NaN priority, MODE.IEEE handling and qualified median zero ordering.
+inline minmax::LegacyPolicy legacy_minmax_policy(rj_code_arch_t arch, bool ieee_mode) noexcept {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return {.prefer_first_nan = true, .ieee = ieee_mode, .ordered_zero_median = true};
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA2:
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    // CDNA follows the ISA rules for two-NaN priority and median zero ties.
+    return {.ieee = ieee_mode};
+  case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_CDNA5:
+  case ROCJITSU_CODE_ARCH_RV32I:
+  case ROCJITSU_CODE_ARCH_RV64I:
+  case ROCJITSU_CODE_ARCH_INVALID:
+    break;
+  }
+  assert(false && "legacy min/max policy requires a legacy AMDGPU architecture");
+  std::abort();
+}
+
 /// @brief Whether floating operations with exception support quiet signaling NaNs.
 inline bool quiets_nan(rj_code_arch_t arch, bool ieee_mode) {
   return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5 || ieee_mode;
@@ -380,31 +409,46 @@ enum class PackedF32Op { ADD, MUL, FMA };
 
 enum class PackedBinaryOp { ADD, MUL, MIN, MAX, MINIMUM, MAXIMUM };
 
+/// @brief Packed F16 selection on scalar or SIMD encodings, followed by CLAMP.
+/// @details Selection applies input flushing only. gfx1100 and gfx1201 preserve
+/// selected denormals even when MODE disables output denormals.
+template <bool Minimum, typename V>
+inline V packed_minmax_f16(V a_bits, V b_bits, uint32_t denorm_mode, bool clamp,
+                           bool clamp_nan_to_zero, rj_code_arch_t arch, bool ieee_mode) {
+  const auto input_policy = input_denormal::Policy::make(denorm_mode);
+  V result;
+  if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5) {
+    using Selection = std::conditional_t<Minimum, minmax::MinNum, minmax::MaxNum>;
+    result = minmax::evaluate<fp_format::F16, Selection>(input_policy, a_bits, b_bits);
+  } else {
+    using Selection = std::conditional_t<Minimum, minmax::LegacyMin, minmax::LegacyMax>;
+    result = minmax::LegacyOperation<fp_format::F16, Selection>{
+        input_policy, legacy_minmax_policy(arch, ieee_mode)}(a_bits, b_bits);
+  }
+  return output_modifier::apply<fp_format::F16>(
+      result, {.clamp = clamp, .clamp_nan_to_zero = clamp_nan_to_zero});
+}
+
 /// @brief Packed F16 binary arithmetic uses the FP16/64 MODE controls.
 inline uint16_t packed_binary_f16(PackedBinaryOp operation, uint16_t a_bits, uint16_t b_bits,
                                   uint32_t round_mode, uint32_t denorm_mode, bool clamp,
                                   bool fp16_ovfl, bool clamp_nan_to_zero, rj_code_arch_t arch,
                                   bool ieee_mode) {
+  if (operation == PackedBinaryOp::MIN)
+    return packed_minmax_f16<true>(uint32_t(a_bits), uint32_t(b_bits), denorm_mode, clamp,
+                                   clamp_nan_to_zero, arch, ieee_mode);
+  if (operation == PackedBinaryOp::MAX)
+    return packed_minmax_f16<false>(uint32_t(a_bits), uint32_t(b_bits), denorm_mode, clamp,
+                                    clamp_nan_to_zero, arch, ieee_mode);
   detail::ScopedFenv nearest_environment(0);
   a_bits = detail::flush_input_f16(a_bits, denorm_mode);
   b_bits = detail::flush_input_f16(b_bits, denorm_mode);
   const bool a_nan = (a_bits & 0x7fffu) > 0x7c00u;
   const bool b_nan = (b_bits & 0x7fffu) > 0x7c00u;
-  const bool select = operation == PackedBinaryOp::MIN || operation == PackedBinaryOp::MAX;
   const bool arithmetic = operation == PackedBinaryOp::ADD || operation == PackedBinaryOp::MUL;
-  if ((select || arithmetic) && (a_nan || b_nan)) {
-    const bool a_signaling = a_nan && !(a_bits & 0x0200u);
-    const bool b_signaling = b_nan && !(b_bits & 0x0200u);
-    const bool signaling_select = select && ieee_mode && arch != ROCJITSU_CODE_ARCH_RDNA4 &&
-                                  arch != ROCJITSU_CODE_ARCH_CDNA5 && (a_signaling || b_signaling);
-    if (arithmetic || (a_nan && b_nan) || signaling_select) {
-      // Select before host arithmetic: host NaN payload priority can change
-      // with inlining or sanitizer instrumentation. Legacy IEEE min/max gives
-      // signaling inputs priority; arithmetic and newer min/max prefer src0.
-      const uint16_t selected = (signaling_select ? a_signaling : a_nan) ? a_bits : b_bits;
-      return clamp && clamp_nan_to_zero ? 0
-                                        : selected | (quiets_nan(arch, ieee_mode) ? 0x0200u : 0u);
-    }
+  if (arithmetic && (a_nan || b_nan)) {
+    const uint16_t selected = a_nan ? a_bits : b_bits;
+    return clamp && clamp_nan_to_zero ? 0 : selected | (quiets_nan(arch, ieee_mode) ? 0x0200u : 0u);
   }
   const double first = util::f16_to_f32(a_bits);
   const double second = util::f16_to_f32(b_bits);
@@ -906,21 +950,11 @@ inline double arithmetic_f16(float lhs, float rhs, float addend, uint32_t round_
                                                 static_cast<double>(addend));
 }
 
-/// @brief Evaluate F16 LDEXP in F64 before destination rounding.
-/// @details The caller flushes the raw source half before widening. Migrated
-/// VOP3 callers round to F16 before applying the shared OMOD/CLAMP stage.
-inline double ldexp_f16(float value, int32_t adjustment) {
-  detail::ScopedFenv environment(0);
-  // Every finite nonzero half lies in [2^-24, 2^16). Bounding the adjustment
-  // keeps the intermediate normal in F64 while retaining all F16 rounding
-  // outcomes, including directed underflow and output scaling by up to four.
-  return std::ldexp(static_cast<double>(value), std::clamp(adjustment, -64, 64));
-}
-
 /// @brief Round an F16 arithmetic destination and apply output-denormal policy.
 /// @details Migrated VOP3 callers leave omod=0 and modify the rounded bits
-/// afterward. SDWA supplies omod here to retain legacy pre-round scaling, which
-/// has no SDWA hardware validation. Its migration requires separate captures.
+/// afterward. SDWA supplies omod here to keep the emulator's pre-round scaling,
+/// which gfx1030 SDWA MUL_F16 and ADD_F16 captures contradict; see
+/// output_modifier.h.
 inline uint16_t finish_arithmetic_f16(double value, uint32_t round_mode, uint32_t denorm_mode,
                                       bool fp16_ovfl, uint32_t omod = 0) {
   detail::ScopedFenv environment(0);
@@ -1145,28 +1179,6 @@ inline uint16_t narrow_div_fixup_f16(float value, bool fp16_ovfl) {
   if ((bits & 0x7fffffffu) > 0x7f800000u)
     return static_cast<uint16_t>(((bits >> 16) & 0x8000u) | 0x7c00u | ((bits >> 13) & 0x3ffu));
   return util::f32_to_f16_mode(value, fp16_ovfl);
-}
-
-/// @brief Scale by an integer power of two with explicit guest rounding and flushing.
-template <typename Float>
-inline Float ldexp(Float value, int32_t adjustment, uint32_t rounding, uint32_t denorm) {
-  using Format = DivisionFormat<Float>;
-  using Bits = typename Format::Bits;
-  const Bits bits = std::bit_cast<Bits>(value);
-  const Bits magnitude = bits & ~Format::sign;
-  if (magnitude >= Format::infinity)
-    return std::bit_cast<Float>(Bits(bits | (magnitude > Format::infinity ? Format::quiet : 0)));
-  const int exponent = Format::exponent(bits);
-  if (magnitude == 0 || (exponent == 0 && !(denorm & 1u)))
-    return std::bit_cast<Float>(Bits(bits & Format::sign));
-  const Bits significand =
-      (bits & Format::fraction_mask) | (exponent ? Bits{1} << Format::fraction : 0);
-  // Larger adjustments have the same overflow/underflow result. Bound them
-  // before adding the format's exponent so INT32_MIN/MAX cannot overflow.
-  const int bounded = std::clamp(adjustment, -4096, 4096);
-  return div_round<Float>(significand,
-                          (exponent ? exponent : 1) - Format::bias - Format::fraction + bounded,
-                          (bits & Format::sign) != 0, rounding, denorm);
 }
 
 struct FrexpF32Result {
