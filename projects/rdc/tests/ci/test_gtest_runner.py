@@ -189,6 +189,27 @@ class TestGoogleTestSuite:
             f"rdc_rocr_diag_tests failed (rc={result.returncode}):\n{result.stdout[-2000:]}"
         )
 
+    def test_rdc_rocp(self, rocm_dir, rdctst_path):
+        # rdctst_path skips this test unless the RDC test package is installed, which also
+        # installs rdc_rocp_tests -- except where the build found no rocprofiler-sdk or HSA
+        # headers, which installs a marker in its place and is the one case that skips here.
+        binary = os.path.join(rocm_dir, "share", "rdc", "rdctst_tests", "rdc_rocp_tests")
+        marker = binary + ".absent"
+        if os.path.isfile(marker) and not os.path.isfile(binary):
+            with open(marker, encoding="utf-8") as reason:
+                pytest.skip(reason.read().strip())
+        assert os.path.isfile(binary), f"{binary} is missing from the RDC test package"
+
+        result = subprocess.run([binary], capture_output=True, text=True, timeout=120 * TIME_FACTOR)
+
+        print(result.stdout)
+        if result.stderr:
+            print(result.stderr)
+
+        assert result.returncode == 0, (
+            f"rdc_rocp_tests failed (rc={result.returncode}):\n{result.stdout[-2000:]}"
+        )
+
     def test_rdc_diag_kernels(self, rocm_dir, rdctst_path):
         # rdctst_path skips this test unless the RDC test package is installed, which also
         # installs rdc_diag_kernel_tests. Its gtest libraries are installed beside it, so the

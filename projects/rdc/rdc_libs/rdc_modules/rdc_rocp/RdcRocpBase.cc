@@ -111,13 +111,15 @@ static const std::map<rdc_field_t, const char*> temp_field_map_k = {
 };
 
 rdc_status_t RdcRocpBase::run_profiler(uint32_t agent_index, rdc_field_t field, double* value) {
-  thread_local std::vector<rocprofiler_record_counter_t> records;
+  // A local: a read gets its own sample's records only, never an earlier call's, which can
+  // be another GPU's.
+  std::vector<rocprofiler_record_counter_t> records;
 
-  auto counter_sampler = CounterSampler::get_samplers()[agent_index];
-  if (!counter_sampler) {
+  if (agent_index >= samplers.size() || !samplers[agent_index]) {
     RDC_LOG(RDC_ERROR, "Error: Counter sampler not found for GPU index " << agent_index);
     return RDC_ST_BAD_PARAMETER;
   }
+  auto counter_sampler = samplers[agent_index];
 
   auto field_it = field_to_metric.find(field);
   if (field_it == field_to_metric.end()) {
@@ -215,46 +217,66 @@ rdc_status_t RdcRocpBase::map_entity_to_profiler() {
   return RDC_ST_OK;
 }
 
-void RdcRocpBase::init_rocp_if_not() {
+rdc_status_t RdcRocpBase::init_rocp_if_not() {
   if (m_is_initialized) {
-    return;
+    return m_init_status;
   }
 
-  // ensure initialization is attempted only once, even if it fails
+  // ensure initialization is attempted only once, even if it fails: every later read gets
+  // its status. Nothing between the module and the update thread catches an exception, so
+  // none leaves here.
   m_is_initialized = true;
+  m_init_status = RDC_ST_FAIL_LOAD_MODULE;
 
   hsa_status_t status = hsa_init();
   if (status != HSA_STATUS_SUCCESS) {
     const char* errstr = nullptr;
     hsa_status_string(status, &errstr);
-    throw std::runtime_error("hsa error code: " + std::to_string(status) + " " + errstr);
+    RDC_LOG(RDC_ERROR, "hsa error code: " << status << " " << (errstr != nullptr ? errstr : ""));
+    return m_init_status;
   }
+  // The destructor gives back this reference, and no other.
+  m_hsa_initialized = true;
 
   // check rocprofiler
   if (int rocp_status = 0;
       rocprofiler_is_initialized(&rocp_status) == ROCPROFILER_STATUS_SUCCESS && rocp_status != 1) {
-    throw std::runtime_error("Rocprofiler is not initialized. status: " +
-                             std::to_string(rocp_status));
+    RDC_LOG(RDC_ERROR, "Rocprofiler is not initialized. status: " << rocp_status);
+    return m_init_status;
   }
 
   std::vector<std::string> all_fields;
   std::vector<std::string> checked_fields;
 
-  // populate list of agents
-  agents = CounterSampler::get_available_agents();
-  RDC_LOG(RDC_DEBUG, "Agent count: " << agents.size());
-  samplers = CounterSampler::get_samplers();
+  try {
+    // populate list of agents
+    agents = CounterSampler::get_available_agents();
+    RDC_LOG(RDC_DEBUG, "Agent count: " << agents.size());
+    samplers = CounterSampler::get_samplers();
 
-  map_entity_to_profiler();
+    // tool_init() made one sampler per GPU agent when hsa_init() registered this module,
+    // and the reads index both by the agent's position.
+    if (agents.empty() || samplers.size() != agents.size()) {
+      RDC_LOG(RDC_ERROR, "Profiler has " << agents.size() << " GPU agents and " << samplers.size()
+                                         << " counter samplers");
+      m_init_status = RDC_ST_NOT_SUPPORTED;
+      return m_init_status;
+    }
 
-  // find intersection of supported and requested fields
-  uint32_t agent_index = 0;
-  auto& cs = *samplers[agent_index];
-  RDC_LOG(RDC_DEBUG, "agent_index[" << agent_index << "] location_id["
-                                    << agents[agent_index].location_id << "]");
+    map_entity_to_profiler();
 
-  for (auto& [str, id] : CounterSampler::get_supported_counters(cs.get_agent())) {
-    checked_fields.emplace_back(str);
+    // find intersection of supported and requested fields
+    uint32_t agent_index = 0;
+    auto& cs = *samplers[agent_index];
+    RDC_LOG(RDC_DEBUG, "agent_index[" << agent_index << "] location_id["
+                                      << agents[agent_index].location_id << "]");
+
+    for (auto& [str, id] : CounterSampler::get_supported_counters(cs.get_agent())) {
+      checked_fields.emplace_back(str);
+    }
+  } catch (const std::exception& e) {
+    RDC_LOG(RDC_ERROR, "Profiler failed to start: " << e.what());
+    return m_init_status;
   }
 
   for (const auto& [k, v] : temp_field_map_k) {
@@ -271,6 +293,8 @@ void RdcRocpBase::init_rocp_if_not() {
   }
 
   RDC_LOG(RDC_DEBUG, "Profiler supports " << field_to_metric.size() << " fields");
+  m_init_status = RDC_ST_OK;
+  return m_init_status;
 }
 
 RdcRocpBase::RdcRocpBase() {
@@ -287,12 +311,14 @@ RdcRocpBase::RdcRocpBase() {
 }
 
 RdcRocpBase::~RdcRocpBase() {
-  if (m_is_initialized == false) {
+  // Only the reference that hsa_init() gave: after a failed hsa_init(), the reference
+  // another module took may be ROCr's last.
+  if (!m_hsa_initialized) {
     return;
   }
   const hsa_status_t status = hsa_shut_down();
   if ((status == HSA_STATUS_SUCCESS) || (status == HSA_STATUS_ERROR_NOT_INITIALIZED)) {
-    m_is_initialized = false;
+    m_hsa_initialized = false;
   }
 }
 
@@ -300,6 +326,16 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, rdc_field_value
                                       rdc_field_type_t* type) {
   // default type
   *type = DOUBLE;
+
+  if (data == nullptr) {
+    return RDC_ST_BAD_PARAMETER;
+  }
+
+  // The profiler's start makes the map read below.
+  const rdc_status_t init_status = init_rocp_if_not();
+  if (init_status != RDC_ST_OK) {
+    return init_status;
+  }
 
   // look up the profiler agent index for the given flat GPU index
   auto entity_it = entity_to_prof_map.find(gpu_field.gpu_index);
@@ -309,12 +345,6 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, rdc_field_value
   }
   uint32_t agent_index = entity_it->second;
   const auto& field = gpu_field.field_id;
-
-  if (data == nullptr) {
-    return RDC_ST_BAD_PARAMETER;
-  }
-
-  init_rocp_if_not();
 
   // direct read from rocprofiler
   double read_dbl = 0.0;
@@ -356,12 +386,16 @@ rdc_status_t RdcRocpBase::rocp_lookup_bulk(const std::vector<rdc_gpu_field_t>& f
     return RDC_ST_OK;
   }
 
-  init_rocp_if_not();
-
   // Resize output vectors
   values.resize(fields.size());
   types.resize(fields.size());
   statuses.resize(fields.size());
+
+  const rdc_status_t init_status = init_rocp_if_not();
+  if (init_status != RDC_ST_OK) {
+    statuses.assign(fields.size(), init_status);
+    return init_status;
+  }
 
   // All fields share one GPU; look up its profiler agent index (keyed by flat GPU index)
   auto entity_it = entity_to_prof_map.find(fields[0].gpu_index);
@@ -413,14 +447,14 @@ rdc_status_t RdcRocpBase::rocp_lookup_bulk(const std::vector<rdc_gpu_field_t>& f
 
   // Sample all counters at once using greedy packing
   std::map<std::string, double> sampled_values;
-  auto counter_sampler = CounterSampler::get_samplers()[agent_index];
-  if (!counter_sampler) {
+  if (agent_index >= samplers.size() || !samplers[agent_index]) {
     RDC_LOG(RDC_ERROR, "Error: Counter sampler not found for GPU index " << agent_index);
     for (size_t i = 0; i < fields.size(); i++) {
       statuses[i] = RDC_ST_BAD_PARAMETER;
     }
     return RDC_ST_BAD_PARAMETER;
   }
+  auto counter_sampler = samplers[agent_index];
 
   // Use a longer window for SIMD_UTILIZATION — the 10ms default is too short
   // for workloads with multi-second compute/idle cycles and produces oscillating
@@ -497,6 +531,15 @@ rdc_status_t RdcRocpBase::apply_field_transformation(
       RDC_LOG(RDC_ERROR, "Error: Sample time is zero. Cannot divide by zero.");
       return RDC_ST_BAD_PARAMETER;
     }
+  }
+
+  // The FLOPS percents are per SIMD: a GPU that reports no SIMD per CU has no value for them.
+  if ((field == RDC_FI_PROF_EVAL_FLOPS_16_PERCENT || field == RDC_FI_PROF_EVAL_FLOPS_32_PERCENT ||
+       field == RDC_FI_PROF_EVAL_FLOPS_64_PERCENT) &&
+      agents[agent_index].simd_per_cu == 0) {
+    RDC_LOG(RDC_ERROR,
+            "Field " << field << ": GPU agent " << agent_index << " reports no SIMD per CU");
+    return RDC_ST_NOT_SUPPORTED;
   }
 
   switch (field) {

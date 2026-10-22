@@ -96,6 +96,10 @@ class CounterSampler {
   // Get the size of a counter in number of records
   size_t get_counter_size(rocprofiler_counter_id_t counter);
 
+  // Starts the context, samples it into out after duration microseconds and stops it.
+  // Throws on a failure, after stopping a context that it started.
+  void sample_context(std::vector<rocprofiler_record_counter_t>& out, uint64_t duration);
+
   // Get the dimensions of a counter
   std::vector<rocprofiler_counter_record_dimension_info_t> get_counter_dimensions(
       rocprofiler_counter_id_t counter);

@@ -518,3 +518,81 @@ else()
         COMPONENT ${TESTS_COMPONENT}
     )
 endif()
+
+# rdc_rocp_tests: the ROCp module (RdcRocpBase, its counter sampler and the module API of
+# RdcTelemetryLib.cc) against a link-time fake of the rocprofiler-sdk and HSA functions it calls
+# (fake_rocprofiler.cc), with the fake AMD SMI for the GPU table. It compiles the module's
+# sources, so it needs neither the profiler nor a GPU and links neither rocprofiler-sdk nor
+# hsa-runtime64; librdc_bootstrap provides the logger and the entity codec. It needs the SDK's
+# headers and HSA's, which are looked for under ROCM_DIR whatever BUILD_PROFILER says: without
+# them the target is not built and a marker is installed in its place, which
+# tests/ci/test_gtest_runner.py skips on. The SDK's headers include HIP's, which need HIP's
+# platform definition: the SDK's no-link target carries the include directories and definitions
+# of HIP, HSA and comgr without linking any of them.
+find_package(rocprofiler-sdk 1.1.0 HINTS ${ROCM_DIR}/lib/cmake CONFIG QUIET)
+find_path(RDC_ROCP_TEST_HSA_H hsa/hsa.h PATHS ${ROCM_DIR}/include NO_DEFAULT_PATH)
+message(STATUS "rocprofiler-sdk_FOUND=${rocprofiler-sdk_FOUND}")
+message(STATUS "RDC_ROCP_TEST_HSA_H=${RDC_ROCP_TEST_HSA_H}")
+
+if(
+    rocprofiler-sdk_FOUND
+    AND TARGET rocprofiler-sdk::rocprofiler-sdk-headers
+    AND TARGET rocprofiler-sdk::rocprofiler-sdk-external-nolink
+    AND RDC_ROCP_TEST_HSA_H
+)
+    add_executable(
+        rdc_rocp_tests
+        ${SRC_DIR}/test_rocp.cc
+        ${SRC_DIR}/fake_rocprofiler.cc
+        ${PROJECT_SOURCE_DIR}/rdc_libs/rdc_modules/rdc_rocp/RdcRocpBase.cc
+        ${PROJECT_SOURCE_DIR}/rdc_libs/rdc_modules/rdc_rocp/RdcRocpCounterSampler.cc
+        ${PROJECT_SOURCE_DIR}/rdc_libs/rdc_modules/rdc_rocp/RdcTelemetryLib.cc
+        ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/SmiUtils.cc
+    )
+    target_include_directories(
+        rdc_rocp_tests
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}
+            ${PROJECT_SOURCE_DIR}/include
+            ${COMMON_DIR}
+            ${AMD_SMI_INCLUDE_DIR}
+            ${RDC_ROCP_TEST_HSA_H}
+            ${RDC_ROCP_TEST_HSA_H}/hsa
+    )
+    target_link_libraries(
+        rdc_rocp_tests
+        PRIVATE
+            rocprofiler-sdk::rocprofiler-sdk-headers
+            rocprofiler-sdk::rocprofiler-sdk-external-nolink
+            rdc_bootstrap
+            rdc_fake_amdsmi
+            GTest::gtest_main
+            pthread
+            ${CMAKE_DL_LIBS}
+    )
+    set_target_properties(
+        rdc_rocp_tests
+        PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/fake_gpu:\$ORIGIN/../../../lib"
+    )
+    add_test(NAME rdc_rocp_tests COMMAND rdc_rocp_tests)
+    install(
+        TARGETS rdc_rocp_tests
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
+        COMPONENT ${TESTS_COMPONENT}
+    )
+else()
+    # The exact negation of the guard above: the runner test skips the binary
+    # only when this marker is installed and the binary is not.
+    set(RDC_ROCP_TEST_MARKER ${CMAKE_CURRENT_BINARY_DIR}/rdc_rocp_tests.absent)
+    file(
+        WRITE ${RDC_ROCP_TEST_MARKER}
+        "rdc_rocp_tests was not built: rocprofiler-sdk_FOUND=${rocprofiler-sdk_FOUND} "
+        "(1.1.0 or later, with its headers and no-link targets), "
+        "hsa/hsa.h=${RDC_ROCP_TEST_HSA_H}, searched ${ROCM_DIR}\n"
+    )
+    install(
+        FILES ${RDC_ROCP_TEST_MARKER}
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
+        COMPONENT ${TESTS_COMPONENT}
+    )
+endif()
