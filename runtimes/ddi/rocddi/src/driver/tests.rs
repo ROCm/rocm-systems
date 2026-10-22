@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 const ID: [u8; 16] = [0x42; 16];
 
 struct FakeDriver {
-    instance: u64,
+    instance: DriverInstanceId,
     allocation_drops: Arc<AtomicUsize>,
     fail_activation: bool,
     fail_allocation: bool,
@@ -61,6 +61,7 @@ impl FakeDriver {
         Endpoint {
             id: ID,
             name,
+            product_name: None,
             pci: None,
             kind: EndpointKind::Cpu,
             local_memory_bytes: 0,
@@ -99,7 +100,7 @@ impl CachedInfo for FakeAllocation {
 impl Driver for FakeDriver {
     type DeviceState = FakeDevice;
 
-    fn driver_instance(&self) -> u64 {
+    fn driver_instance(&self) -> DriverInstanceId {
         self.instance
     }
 
@@ -303,7 +304,6 @@ fn non_gpu_driver_contract_covers_discovery_activation_and_failed_cleanup() -> R
     let endpoint = driver.open_endpoint(ID)?;
     assert!(endpoint.pci.is_none());
     assert!(endpoint.gpu().is_none());
-    assert!(endpoint.linux_kfd_drm_info().is_none());
     assert!(!driver.supports_host_registration(&endpoint));
     assert!(driver.activate(&FakeDriver::new().endpoint()).is_err());
 

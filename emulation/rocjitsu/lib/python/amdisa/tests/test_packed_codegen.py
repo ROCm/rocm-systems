@@ -3,6 +3,8 @@
 
 """Tests for packed execute code generation."""
 
+import pytest
+
 from amdisa.isa_profile import FloatDotAccumulation
 
 from amdisa.codegen.execute.packed import (
@@ -24,6 +26,20 @@ from amdisa.codegen.execute.packed import (
     gen_pk_ternary,
 )
 from amdisa.codegen.execute.simd_codegen import vop3p_local_simd_probe_line
+
+
+@pytest.mark.parametrize('format0', ['FP8', 'BF8'])
+@pytest.mark.parametrize('format1', ['FP8', 'BF8'])
+def test_float_dot4_decodes_each_operand_format(format0, format1):
+    cpp = gen_dot4(
+        ['vdst'],
+        ['src0', 'src1', 'src2'],
+        'dot4_f32_fp8',
+        input_formats=(format0, format1),
+    )
+    helpers = {'FP8': 'fp8_e4m3_to_f32', 'BF8': 'bf8_e5m2_to_f32'}
+    assert f'float a = util::{helpers[format0]}' in cpp
+    assert f'float b = util::{helpers[format1]}' in cpp
 
 
 def test_dot4_iu8_uses_operand_signedness_modifiers():

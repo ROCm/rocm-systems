@@ -15,6 +15,7 @@ struct Context {
     live: Mutex<HashMap<usize, Layout>>,
     allocations: AtomicUsize,
     frees: AtomicUsize,
+    resizes: AtomicUsize,
     fail_allocate: AtomicBool,
 }
 
@@ -77,6 +78,34 @@ unsafe extern "C" fn free(data: *mut c_void, pointer: *mut c_void) {
     unsafe { std::alloc::dealloc(pointer.cast(), layout) };
 }
 
+unsafe extern "C" fn resize(
+    data: *mut c_void,
+    pointer: *mut c_void,
+    old_length: u64,
+    new_length: u64,
+    alignment: u64,
+) -> *mut c_void {
+    // SAFETY: The test context owns the original block and both callbacks.
+    let replacement = unsafe { allocate(data, new_length, alignment) };
+    if replacement.is_null() {
+        return ptr::null_mut();
+    }
+    let Ok(copy_length) = usize::try_from(old_length.min(new_length)) else {
+        // SAFETY: This callback just allocated the replacement block.
+        unsafe { free(data, replacement) };
+        return ptr::null_mut();
+    };
+    // SAFETY: The callback contract provides both nonoverlapping live extents.
+    unsafe {
+        ptr::copy_nonoverlapping(pointer.cast::<u8>(), replacement.cast::<u8>(), copy_length);
+        free(data, pointer);
+        (*data.cast::<Context>())
+            .resizes
+            .fetch_add(1, Ordering::Relaxed);
+    }
+    replacement
+}
+
 struct DropValue<'a>(&'a AtomicUsize);
 
 impl Drop for DropValue<'_> {
@@ -88,6 +117,65 @@ impl Drop for DropValue<'_> {
 struct PanicValue<'a> {
     drops: &'a AtomicUsize,
     panic: bool,
+}
+
+#[test]
+fn owner_vector_uses_its_retained_allocator_across_growth_and_scope_exit() {
+    let context = Context::default();
+    let allocator = context.allocator();
+    let mut values = OwnerVec::try_with_allocator(allocator, 1).unwrap();
+    values.try_push(11_u64).unwrap();
+    values.try_push(22).unwrap();
+    values.try_push(33).unwrap();
+    assert_eq!(values.as_slice(), &[11, 22, 33]);
+    assert_eq!(values.pop(), Some(33));
+    drop(values);
+    assert_eq!(context.live_count(), 0);
+    assert_eq!(
+        context.allocations.load(Ordering::Relaxed),
+        context.frees.load(Ordering::Relaxed)
+    );
+}
+
+#[test]
+fn owner_vector_failed_growth_preserves_live_elements() {
+    let context = Context::default();
+    let mut values = OwnerVec::try_with_allocator(context.allocator(), 1).unwrap();
+    values.try_push(7_u64).unwrap();
+    context.fail_allocate.store(true, Ordering::Relaxed);
+    assert_eq!(values.try_push(8), Err(AllocationError));
+    assert_eq!(values.as_slice(), &[7]);
+    context.fail_allocate.store(false, Ordering::Relaxed);
+    drop(values);
+    assert_eq!(context.live_count(), 0);
+}
+
+#[test]
+fn owner_vector_uses_supplied_resize_callback() {
+    let context = Context::default();
+    // SAFETY: The context and callbacks live through vector destruction.
+    let allocator = unsafe {
+        Allocator::from_callbacks_with_resize(
+            ptr::from_ref(&context).cast_mut().cast(),
+            Some(allocate),
+            Some(resize),
+            Some(free),
+        )
+        .unwrap()
+    };
+    let mut values = OwnerVec::try_with_allocator(allocator, 1).unwrap();
+    values.try_push(3_u64).unwrap();
+    values.try_push(5).unwrap();
+    assert_eq!(values.as_slice(), &[3, 5]);
+    assert_eq!(context.resizes.load(Ordering::Relaxed), 1);
+    values.try_push(7).unwrap();
+    values.try_push(9).unwrap();
+    context.fail_allocate.store(true, Ordering::Relaxed);
+    assert_eq!(values.try_push(11), Err(AllocationError));
+    assert_eq!(values.as_slice(), &[3, 5, 7, 9]);
+    context.fail_allocate.store(false, Ordering::Relaxed);
+    drop(values);
+    assert_eq!(context.live_count(), 0);
 }
 
 impl Drop for PanicValue<'_> {
@@ -305,6 +393,19 @@ fn preallocated_shared_owner_publishes_without_another_allocation() {
 }
 
 #[test]
+fn vector_growth_failure_preserves_initialized_elements() {
+    let context = Context::default();
+    let _scope = context.allocator().scope();
+    let mut values = try_vec_with_capacity(1).unwrap();
+    values.try_push(7_u64).unwrap();
+    context.fail_allocate.store(true, Ordering::Relaxed);
+    assert_eq!(values.try_push(9), Err(AllocationError));
+    assert_eq!(values.as_slice(), &[7]);
+    assert_eq!(values.len(), 1);
+    assert_eq!(context.live_count(), 0);
+}
+
+#[test]
 fn system_storage_supports_owners_and_vectors() {
     let mut value = Owned::new(41).unwrap();
     *value += 1;
@@ -319,17 +420,4 @@ fn system_storage_supports_owners_and_vectors() {
     assert_eq!(buffer[99], 99);
     buffer.clear();
     assert!(buffer.is_empty());
-}
-
-#[test]
-fn vector_growth_failure_preserves_initialized_elements() {
-    let context = Context::default();
-    let _scope = context.allocator().scope();
-    let mut values = try_vec_with_capacity(1).unwrap();
-    values.try_push(7_u64).unwrap();
-    context.fail_allocate.store(true, Ordering::Relaxed);
-    assert_eq!(values.try_push(9), Err(AllocationError));
-    assert_eq!(values.as_slice(), &[7]);
-    assert_eq!(values.len(), 1);
-    assert_eq!(context.live_count(), 0);
 }

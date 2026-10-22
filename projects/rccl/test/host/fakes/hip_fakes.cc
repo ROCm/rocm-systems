@@ -52,6 +52,7 @@ ASSERT_HOOK_MATCHES_PROD(g_hipMemMap,                     hipMemMap);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemSetAccess,               hipMemSetAccess);
 ASSERT_HOOK_MATCHES_PROD(g_hipIpcOpenMemHandle,           hipIpcOpenMemHandle);
 ASSERT_HOOK_MATCHES_PROD(g_hipDeviceGetPCIBusId,          hipDeviceGetPCIBusId);
+ASSERT_HOOK_MATCHES_PROD(g_hipDeviceGetByPCIBusId,        hipDeviceGetByPCIBusId);
 ASSERT_HOOK_MATCHES_PROD(g_hipEventRecord,                hipEventRecord);
 ASSERT_HOOK_MATCHES_PROD(g_hipStreamBatchMemOp,           hipStreamBatchMemOp);
 ASSERT_HOOK_MATCHES_PROD(g_hipStreamWriteValue64,         hipStreamWriteValue64);
@@ -59,6 +60,10 @@ ASSERT_HOOK_MATCHES_PROD(g_hipStreamWaitValue64,          hipStreamWaitValue64);
 #ifdef CE_BATCH_ASYNC_SUPPORTED
 ASSERT_HOOK_MATCHES_PROD(g_hipMemcpyBatchAsync,           hipMemcpyBatchAsync);
 #endif
+ASSERT_HOOK_MATCHES_PROD(g_hipMemset,                     hipMemset);
+#define RCCL_ASSERT_INTERCEPTOR_HOOK(name, params) ASSERT_HOOK_MATCHES_PROD(g_##name, name);
+RCCL_HIP_PROFILE_INTERCEPTORS_HOOKED(RCCL_ASSERT_INTERCEPTOR_HOOK)
+#undef RCCL_ASSERT_INTERCEPTOR_HOOK
 
 #undef ASSERT_HOOK_MATCHES_PROD
 
@@ -243,6 +248,7 @@ std::function<hipError_t(int*)> g_hipGetDeviceCount = DefaultHipGetDeviceCount;
 static hipError_t DefaultHipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int device);
 static hipError_t DefaultHipDeviceSetLimit(hipLimit_t limit, size_t value);
 static hipError_t DefaultHipDeviceGetPCIBusId(char* pciBusId, int len, int device);
+static hipError_t DefaultHipDeviceGetByPCIBusId(int* device, const char* pciBusId);
 static hipError_t DefaultHipEventRecord(hipEvent_t event, hipStream_t stream);
 
 static hipError_t DefaultHipDeviceCanAccessPeer(int* canAccessPeer, int, int)
@@ -352,6 +358,17 @@ static hipError_t DefaultHipMemsetAsync(void*, int, size_t, hipStream_t)
     return g_hipAsyncOpsResult;
 }
 
+// Synchronous memset. Unlike the async form (which answers to the shared
+// g_hipAsyncOpsResult gate), this really writes: the allocation seams above
+// hand out std::malloc'd host memory, so production code that memsets a buffer
+// and later reads it back -- ncclRmaProxyCtxAllocGraph zeroing flushBufDev, for
+// one -- sees the zeros it wrote rather than uninitialised bytes.
+static hipError_t DefaultHipMemset(void* dst, int value, size_t bytes)
+{
+    if (dst != nullptr && bytes > 0) std::memset(dst, value, bytes);
+    return hipSuccess;
+}
+
 static hipError_t DefaultHipStreamCreateWithFlags(hipStream_t* stream, unsigned)
 {
     if (stream) *stream = (g_hipStreamCreateResult == hipSuccess)
@@ -391,12 +408,19 @@ std::function<hipError_t(void*, const void*, size_t, hipMemcpyKind)> g_hipMemcpy
 std::function<hipError_t(void*, const void*, size_t, hipMemcpyKind, hipStream_t)>
     g_hipMemcpyAsync = DefaultHipMemcpyAsync;
 std::function<hipError_t(void*, int, size_t, hipStream_t)> g_hipMemsetAsync = DefaultHipMemsetAsync;
+std::function<hipError_t(void*, int, size_t)> g_hipMemset = DefaultHipMemset;
 std::function<hipError_t(hipStream_t*, unsigned)> g_hipStreamCreateWithFlags = DefaultHipStreamCreateWithFlags;
 std::function<hipError_t(hipStream_t)> g_hipStreamSynchronize = DefaultHipStreamSynchronize;
 std::function<hipError_t(hipStream_t)> g_hipStreamDestroy = DefaultHipStreamDestroy;
 std::function<hipError_t(hipStreamCaptureMode*)>
     g_hipThreadExchangeStreamCaptureMode = DefaultHipThreadExchangeStreamCaptureMode;
 std::function<hipError_t(void)> g_hipGetLastError = DefaultHipGetLastError;
+static hipError_t DefaultHipExtLaunchKernel(const void*, dim3, dim3, void**, size_t, hipStream_t, hipEvent_t,
+                                            hipEvent_t, int) {
+    FailLoudUnfaked("hip_fakes", "hipExtLaunchKernel");
+}
+std::function<hipError_t(const void*, dim3, dim3, void**, size_t, hipStream_t, hipEvent_t, hipEvent_t, int)>
+    g_hipExtLaunchKernel = DefaultHipExtLaunchKernel;
 
 // --- the working host-memory VMM stand-in (opt-in) -----------------------
 // A reserved VA range mirrors cuMemAddressReserve with an uncommitted anonymous
@@ -618,6 +642,7 @@ void ResetHipFakes()
     g_hipDeviceGetAttributeResult   = hipErrorInvalidValue;
     g_hipDeviceGetPCIBusIdResult    = hipErrorInvalidValue;
     g_hipDeviceGetPCIBusId          = DefaultHipDeviceGetPCIBusId;
+    g_hipDeviceGetByPCIBusId        = DefaultHipDeviceGetByPCIBusId;
     g_hipEventCreateResult          = hipErrorInvalidValue;
     g_hipMemPoolResult              = hipErrorInvalidValue;
     g_hipStreamCreateResult         = hipErrorInvalidValue;
@@ -642,11 +667,13 @@ void ResetHipFakes()
     g_hipMemcpy                     = DefaultHipMemcpy;
     g_hipMemcpyAsync                = DefaultHipMemcpyAsync;
     g_hipMemsetAsync                = DefaultHipMemsetAsync;
+    g_hipMemset                     = DefaultHipMemset;
     g_hipStreamCreateWithFlags      = DefaultHipStreamCreateWithFlags;
     g_hipStreamSynchronize          = DefaultHipStreamSynchronize;
     g_hipStreamDestroy              = DefaultHipStreamDestroy;
     g_hipThreadExchangeStreamCaptureMode = DefaultHipThreadExchangeStreamCaptureMode;
     g_hipGetLastError               = DefaultHipGetLastError;
+    g_hipExtLaunchKernel            = DefaultHipExtLaunchKernel;
     g_hipEventRecord                = DefaultHipEventRecord;
     g_hipStreamWaitEvent            = DefaultHipStreamWaitEvent;
     g_hipEventQueryRequiresRecord   = false;
@@ -760,6 +787,13 @@ std::function<hipError_t(char*, int, int)> g_hipDeviceGetPCIBusId =
 hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, int device)
 {
     return g_hipDeviceGetPCIBusId(pciBusId, len, device);
+}
+
+static hipError_t DefaultHipDeviceGetByPCIBusId(int*, const char*) { return hipErrorInvalidValue; }
+std::function<hipError_t(int*, const char*)> g_hipDeviceGetByPCIBusId = DefaultHipDeviceGetByPCIBusId;
+hipError_t hipDeviceGetByPCIBusId(int* device, const char* pciBusId)
+{
+    return g_hipDeviceGetByPCIBusId(device, pciBusId);
 }
 
 hipError_t hipEventCreate(hipEvent_t* event)
@@ -974,7 +1008,7 @@ hipError_t hipMallocManaged(void** p, size_t size, unsigned int flags)
     return g_hipMallocManaged(p, size, flags);
 }
 hipError_t hipMemcpy(void* d, const void* s, size_t n, hipMemcpyKind k) { return g_hipMemcpy(d, s, n, k); }
-hipError_t hipMemset(void*, int, size_t) { return hipErrorInvalidValue; }
+hipError_t hipMemset(void* dst, int value, size_t bytes) { return g_hipMemset(dst, value, bytes); }
 hipError_t hipDeviceSynchronize(void) { return hipErrorInvalidValue; }
 // We define hipGetDevicePropertiesR0600, the versioned public HIP ABI symbol,
 // rather than the unversioned hipGetDeviceProperties. Callers write
@@ -1030,6 +1064,32 @@ hipError_t hipMemPoolSetAttribute(hipMemPool_t, hipMemPoolAttr, void*) { return 
 extern "C" {
 #define RCCL_DEFINE_HIP_STUB(name, params) \
   hipError_t name params { FailLoudUnfaked("hip_fakes", #name); }
-RCCL_HIP_PROFILE_INTERCEPTORS(RCCL_DEFINE_HIP_STUB)
+RCCL_HIP_PROFILE_INTERCEPTORS_FAIL_LOUD(RCCL_DEFINE_HIP_STUB)
 #undef RCCL_DEFINE_HIP_STUB
+
+hipError_t hipExtLaunchKernel(const void* function, dim3 grid, dim3 block, void** args, size_t sharedMemBytes,
+                              hipStream_t stream, hipEvent_t startEvent, hipEvent_t stopEvent, int flags) {
+  return g_hipExtLaunchKernel(function, grid, block, args, sharedMemBytes, stream, startEvent, stopEvent, flags);
+}
+}  // extern "C"
+
+// ---- Kernel registration the compiler emits for a TU that defines __global__ functions ----
+// Reached from static init of a test TU that #includes a .cu; the launches themselves go through
+// g_hipExtLaunchKernel. Such a TU must embed a GPU binary (-fcuda-include-gpubinary) or clang
+// also references an external __hip_fatbin_<cuid> that nothing defines.
+extern "C" {
+void** __hipRegisterFatBinary(const void*) {
+  static void* handle = nullptr;
+  return &handle;
+}
+void __hipRegisterFunction(void**, const void*, char*, const char*, unsigned int, void*, void*, void*, void*,
+                           int*) {}
+void __hipUnregisterFatBinary(void**) {}
+hipError_t __hipPopCallConfiguration(dim3*, dim3*, size_t*, hipStream_t*) {
+  FailLoudUnfaked("hip_fakes", "__hipPopCallConfiguration");
+}
+// clang >= 23 registers per-kernel profile shadows under -fprofile-instr-generate; these keep the ROCm profile runtime out.
+void __hipRegisterVar(void**, char*, char*, const char*, int, size_t, int, int) {}
+__attribute__((weak)) void __llvm_profile_offload_register_shadow_variable(void*) {}
+__attribute__((weak)) void __llvm_profile_offload_register_section_shadow_variable(void*) {}
 }  // extern "C"

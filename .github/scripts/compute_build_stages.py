@@ -203,10 +203,13 @@ def compute_windows_families(
     return "none"
 
 
-def set_github_output(build_stages: List[str], windows_families: str) -> None:
+def set_github_output(
+    build_stages: List[str], windows_families: str, changed_projects: str
+) -> None:
     lines = [
         f"build_stages={','.join(build_stages)}",
         f"windows_amdgpu_families={windows_families}",
+        f"changed_projects={changed_projects}",
     ]
     output_file = os.environ.get("GITHUB_OUTPUT", "")
     if not output_file:
@@ -239,18 +242,31 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = parse_args(argv)
+    changed_projects = ",".join(
+        sorted(
+            {
+                (
+                    "projects/amdsmi"
+                    if project.strip() == "shared/cuid"
+                    else project.strip()
+                )
+                for project in args.changed_projects.split(",")
+                if project.strip()
+            }
+        )
+    )
     run_all_tests = str(args.run_all_tests).strip().lower() == "true"
     build_stages = compute_build_stages(
-        changed_projects=args.changed_projects,
+        changed_projects=changed_projects,
         therock_path=args.therock_path,
         run_all_tests=run_all_tests,
     )
     windows_families = compute_windows_families(
-        changed_projects=args.changed_projects,
+        changed_projects=changed_projects,
         therock_path=args.therock_path,
         run_all_tests=run_all_tests,
     )
-    set_github_output(build_stages, windows_families)
+    set_github_output(build_stages, windows_families, changed_projects)
     return 0
 
 
