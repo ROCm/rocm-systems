@@ -255,6 +255,8 @@ bool qualified_store_selectors(const Format &f, uint32_t selectors) {
     return selectors == identity || selectors == reversed || selectors == bgra ||
            selectors == rgb || selectors == (rgb | (1 << 9));
   }
+  if (channels == 1 && f.widths[0] == 32 && f.number == Number::Float && selectors == 0)
+    return true; // Native gfx1201 treats the all-zero view as X for stores.
   if (channels == 1 && (selectors == identity || selectors == reversed || selectors == (4 << 9)))
     return true; // Single-channel identity, WZYX, and A8 views were measured.
   if (!channels)
@@ -275,6 +277,8 @@ void pack_format(const Format &f, uint32_t selectors, std::span<const uint32_t> 
                       : f.number == Number::Uscaled           ? Number::Unorm
                       : f.number == Number::Sscaled           ? Number::Snorm
                                                               : f.number;
+  if (selectors == 0)
+    selectors = 4; // The qualified single-channel zero view stores the first source.
   std::fill(bytes.begin(), bytes.end(), 0);
   uint32_t offset = 0;
   for (uint32_t i = 0; i < 4; ++i) {

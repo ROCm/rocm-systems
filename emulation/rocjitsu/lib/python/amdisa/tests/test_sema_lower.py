@@ -1333,3 +1333,22 @@ class TestSemaXmlLowering:
     def test_s_endpgm_stub(self, blocks):
         result = lower_sema_block(blocks['S_ENDPGM'])
         assert '(void)wf;' in result
+
+
+@pytest.mark.parametrize('ty', [SemaType.I32, SemaType.U32, SemaType.F32])
+@pytest.mark.parametrize('callee', ['minmax', 'maxmin'])
+def test_minmax_uses_integer_comparisons_for_integer_results(ty, callee):
+    call = SemaNode(
+        SemaNodeKind.CALL,
+        ty=ty,
+        call_name=callee,
+        children=(
+            SemaNode(SemaNodeKind.ID, id_name=callee),
+            *(_cast(_src(i), ty) for i in range(3)),
+        ),
+    )
+    body = SemaNode(SemaNodeKind.ASSIGN, children=(_cast(_dst(0), ty), call))
+    output = lower_sema_block(SemaBlock('V_TEST', ExecModel.VECTOR, body))
+    outer, inner = ('max', 'min') if callee == 'minmax' else ('min', 'max')
+    prefix = 'f' if ty == SemaType.F32 else ''
+    assert f'std::{prefix}{outer}(std::{prefix}{inner}(' in output

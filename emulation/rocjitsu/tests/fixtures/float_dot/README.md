@@ -121,3 +121,11 @@ floor, so the two output formats reach it from different directions:
 The broad corpora do not reach either boundary: disabling the unit at 2^-14
 leaves every captured variant matching, and the lanes above were constructed
 for it.
+
+RDNA4 floating DOT2 and all four FP8/BF8 DOT4 combinations were also checked
+with DPP8 reversal and DPP16 row shifts on R9700 (`gfx1201`) using TheRock
+`10.1.0a20260812`. Lane-dependent signs and integer accumulators distinguish
+source permutation from destination masking. The decoded regressions cover
+both wave sizes, inactive destinations, row/bank masks and overlapping sources.
+The four-term FP8/BF8 model uses the same group alignment as the eight-term
+matrix model, with a single group of four products.

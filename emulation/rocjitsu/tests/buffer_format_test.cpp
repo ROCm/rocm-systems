@@ -346,6 +346,8 @@ protected:
         return 13 | (4 << 4); // 32_32_32_UINT.
       case 11:
         return 2 | (4 << 4); // 16_UINT.
+      case 22:
+        return 4 | (7 << 4); // 32_FLOAT.
       case 20:
         return 4 | (4 << 4); // 32_UINT.
       case 42:
@@ -1661,3 +1663,21 @@ TEST_P(RdnaLegacyFormatDecodeTest, SplitOpcodeBitSelectsD16BeforeExecution) {
 INSTANTIATE_TEST_SUITE_P(Rdna, RdnaLegacyFormatDecodeTest,
                          ::testing::Values(ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2));
 } // namespace
+
+TEST_P(BufferFormatExecutionTest, SingleChannelZeroSelectorStoresTheFirstSource) {
+  descriptor(22, 4, 0);
+  const auto vb = wf->vgpr_alloc().base;
+  for (bool d16 : {false, true}) {
+    for (uint32_t lane = 0; lane < 3; ++lane) {
+      cu->write_vgpr(vb, lane, lane);
+      cu->write_vgpr(vb + 8, lane, d16 ? 0xdeadbc00u : 0xbf800001u);
+      memory.write32(0x1000 + lane * 4, 0xa5a5a5a5u);
+    }
+    issue(false, d16);
+    cu->l1_vector().flush_all();
+    l2.flush_all();
+    EXPECT_EQ(memory.read32(0x1000), d16 ? 0xbf800000u : 0xbf800001u);
+    EXPECT_EQ(memory.read32(0x1004), 0xa5a5a5a5u);
+    EXPECT_EQ(memory.read32(0x1008), d16 ? 0xbf800000u : 0xbf800001u);
+  }
+}
