@@ -1002,8 +1002,9 @@ TEST(ProxyTests, ProxyConnectionPoolBoundsCheck)
 //
 // Before 2.30.7, a bad-magic connection was discarded and ncclSocketAccept()
 // immediately retried from inside the proxy service thread. With no subsequent
-// connection ready, that retry blocked in accept() and the thread stopped
-// polling the proxy listen socket and checking abortFlag. The proxy now calls
+// connection ready, the retry loop repeatedly called accept() on the
+// nonblocking listen socket, treated EAGAIN as success, and left the service
+// in the accepting state instead of returning to poll(). The proxy now calls
 // ncclSocketAccept(..., false), which returns after rejecting the peer.
 TEST(ProxyTests, ProxyServiceDoesNotHangOnExternalBadMagic)
 {
@@ -1086,9 +1087,9 @@ TEST(ProxyTests, ProxyServiceDoesNotHangOnExternalBadMagic)
             }
             close(externalFd);
 
-            // The fixed service returns to poll(). The pre-fix service keeps
-            // retrying accept() on the nonblocking listen socket and burns a
-            // CPU while no new peer exists.
+            // The fixed service returns to poll(). The pre-fix retry loop
+            // repeatedly accepts the nonblocking listen socket, treats EAGAIN
+            // as success, and burns a CPU while no new peer exists.
             std::this_thread::sleep_for(std::chrono::milliseconds(250));
             struct timespec cpuAfter = {};
             ASSERT_EQ(clock_gettime(serviceClock, &cpuAfter), 0);
