@@ -221,6 +221,7 @@ echo "==> [4/7] build fixtures, ConnCheck, GinSdmaBroadcastPolicy, GinAnvilSdmaF
   make -j"${build_jobs}" \
     rccl-UnitTestsFixtures \
     rccl-UnitTestsGinAnvilPlugin \
+    rccl-UnitTestsGinRocshmemGdaPlugin \
     rccl-UnitTestsGinAnvilConnCheckDevice \
     rccl-UnitTestsGinSdmaBroadcastPolicy \
     rccl-UnitTestsGinAnvilSdmaFactory \
