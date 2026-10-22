@@ -45,6 +45,7 @@
 
 #include "common/ErrCode.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
+#include "common/SocketTestUtils.hpp"
 #include "os.h"
 #include "profiler.h"
 #include "proxy.h"
@@ -1018,10 +1019,7 @@ TEST(ProxyTests, ProxyServiceDoesNotHangOnExternalBadMagic)
             auto* listenSock = static_cast<ncclSocket*>(calloc(1, sizeof(ncclSocket)));
             ASSERT_NE(listenSock, nullptr);
 
-            union ncclSocketAddress listenAddr = {};
-            listenAddr.sin.sin_family = AF_INET;
-            listenAddr.sin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-            listenAddr.sin.sin_port = 0;
+            union ncclSocketAddress listenAddr = SocketTestUtils::LoopbackAddr();
 
             ASSERT_EQ(ncclSocketInit(listenSock, &listenAddr, NCCL_SOCKET_MAGIC, ncclSocketTypeProxy,
                                      &abortFlag),
@@ -1094,15 +1092,13 @@ TEST(ProxyTests, ProxyServiceDoesNotHangOnExternalBadMagic)
             struct timespec cpuAfter = {};
             ASSERT_EQ(clock_gettime(serviceClock, &cpuAfter), 0);
             const auto wallAfter = std::chrono::steady_clock::now();
-            const double cpuMs =
-                (cpuAfter.tv_sec - cpuBefore.tv_sec) * 1e3 +
-                (cpuAfter.tv_nsec - cpuBefore.tv_nsec) / 1e6;
+            const double cpuMs = SocketTestUtils::timespecDiffMs(cpuBefore, cpuAfter);
             const double wallMs =
                 std::chrono::duration<double, std::milli>(wallAfter - wallBefore).count();
             ASSERT_GT(wallMs, 200.0)
                 << "proxy CPU measurement window was too short (" << wallMs << " ms)";
             const double cpuRatio = cpuMs / wallMs;
-            EXPECT_LT(cpuRatio, 0.5)
+            EXPECT_LT(cpuRatio, SocketTestUtils::kCpuBusyThreshold)
                 << "proxy service busy-spun after bad magic (CPU time " << cpuMs
                 << " ms, wall time " << wallMs << " ms, ratio " << cpuRatio << ")";
 
