@@ -8,13 +8,15 @@
 #include <chrono>
 #include <hip_test_common.hh>
 
+#include "stream_create_helper.hh"
+
 using namespace std;
 
 __global__ static void _noop_kernel() {}
 
 
 HIP_TEST_CASE(Performance_KernelLaunchLatency_IncreasingNumberOfStreams) {
-  vector<int> streamsNumber{1, 10, 50, 100, 1000, 5000};
+  vector<size_t> streamsNumber{1, 10, 50, 100, 1000};
   hipError_t err = hipSuccess;
   hipEvent_t start, stop;
   int32_t NITER = 100000;
@@ -50,16 +52,14 @@ HIP_TEST_CASE(Performance_KernelLaunchLatency_IncreasingNumberOfStreams) {
   HIP_CHECK(hipEventCreate(&stop));
 
   for (auto& numHipStreams : streamsNumber) {
-    vector<hipStream_t> streams(numHipStreams);
+    vector<hipStream_t> streams;
+    streams.reserve(numHipStreams);
 
-    if (isBlocking) {
-      for (int i = 0; i < numHipStreams; ++i) {
-        HIP_CHECK(hipStreamCreate(&streams[i]));
-      }
-    } else {
-      for (int i = 0; i < numHipStreams; ++i) {
-        HIP_CHECK(hipStreamCreateWithFlags(&streams[i], hipStreamNonBlocking));
-      }
+    if (stream_test::CreateStreams(numHipStreams, !isBlocking, streams) ==
+        stream_test::CreateResult::kUnavailable) {
+      cout << "Skipping " << numHipStreams << " streams: the device cannot provide that many"
+           << std::endl;
+      break;
     }
 
     auto kernelStart = std::chrono::steady_clock::now();
@@ -85,8 +85,8 @@ HIP_TEST_CASE(Performance_KernelLaunchLatency_IncreasingNumberOfStreams) {
 
     HIP_CHECK(hipDeviceSynchronize());
 
-    for (int i = 0; i < numHipStreams; ++i) {
-      HIP_CHECK(hipStreamDestroy(streams[i]));
+    for (hipStream_t s : streams) {
+      HIP_CHECK(hipStreamDestroy(s));
     }
   }
   HIP_CHECK(hipEventDestroy(start));

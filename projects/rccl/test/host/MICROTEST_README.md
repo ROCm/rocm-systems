@@ -424,6 +424,15 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   defines the `amd_smi_*` wrappers this file compiles. See
   `test_categories_micro_amdsmi_wrap.yaml`.
 
+- **`rccl-UnitTestsMicroTopo`** — the real `src/graph` files, each `#include`d from its own
+  test TU via `<STEM>_CC_PATH`: `xml.cc` (`Xml*`), `topo.cc` (`Topo*`), `paths.cc` (`Paths*`),
+  `search.cc` (`Search*`), `rome_models.cc` (`graph-rome-models-test.cc`, `GraphRomeModels*`),
+  `connect.cc` (`graph-connect-test.cc`, `GraphConnect*`), `rings.cc` (`Rings*`), `trees.cc`
+  (`Trees*`). Its own binary: `rccl-UnitTestsMicroGraph` links `tuning_fakes.cc`, which
+  defines `connect.cc`'s params, and `os_fakes.cc`, whose CPU and sysfs seams these tests
+  cannot drive. Topologies come from XML built in `TopoScene.h`; HIP and amd-smi come from
+  `fakes/hip_fakes.cc` and `fakes/amdsmi_fakes.cc`, the other externals from
+  `fakes/graph_fakes.cc`. See `test_categories_micro_topo.yaml`.
 - **`rccl-UnitTestsMicroDiagnostics`**: `src/diagnostics/p2p.cc` (via
   `DIAG_P2P_CC_PATH`, suite `DiagP2pMicrotest.*`) and `src/diagnostics/ib_write_bw.cc`
   (via `DIAG_IB_WRITE_BW_CC_PATH`, suite `DiagIbWriteBwMicrotest.*`). Its own binary: it fakes the
@@ -440,7 +449,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
 - **`rccl-UnitTestsMicroGinHostFinalize`**: `src/gin/gin_host.cc` (via
   `GIN_HOST_CC_PATH`, suite `GinHostFinalizeTest.*`): host finalize, connect
   failure / retry, and the register, deregister and DevCommSetup walks over
-  closed backends, against a fake `ncclGin_t` vtable. Separate from
+  closed backends, against `fakes/gin_vtable_fake.h` (also used by
+  `gin-plugin-init-test.cc`). Separate from
   `rccl-UnitTestsMicroGinHost`: both compile `gin_host.cc`, and
   `gin-host-test.cc` defines the same ConnectOnce seams. Also separate from
   `rccl-UnitTestsMicro`, which fakes those entry points in
@@ -587,6 +597,7 @@ symbol.
 | `src/diagnostics/device/p2p.cu` (`ncclDiagP2p*` kernel launchers) | `fakes/diagnostics_p2p_device_fakes.cc` |
 | `src/graph/*.cc` (topo, paths, search, connect, rome consensus) | `fakes/topo_stubs.cc` |
 | `src/graph/tuning.cc`, `src/graph/connect.cc` params | `fakes/tuning_fakes.cc` |
+| everything `src/graph/*.cc` calls outside `src/graph` (`rccl-UnitTestsMicroTopo` only, which compiles the real graph files) | `fakes/graph_fakes.cc` |
 | `src/group.cc` | `fakes/group_fakes.cc` |
 | `src/config/algorithm_*.cc` | compiled real (no fakes file) |
 | `src/config/collconfig.cc` (targets that do not compile the real file) | `fakes/collconfig_fakes.cc` |
@@ -1013,6 +1024,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroConnect            # src/graph/connect.cc Preset/Postset tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics.cc + src/diagnostics/ tests
 ./build/rccl-UnitTestsMicroGraph              # src/graph/{xml,topo,paths,search,rome_models}.cc tests
+./build/rccl-UnitTestsMicroTopo               # src/graph/*.cc tests
 ./build/rccl-UnitTestsMicroGinHost            # src/gin/gin_host.cc GIN_PROXY_NTHREADS
 ./build/rccl-UnitTestsMicroGinHostFinalize    # src/gin/gin_host.cc host finalize
 ./build/rccl-UnitTestsMicroNcclDevice         # nccl_device requirement builders tests
