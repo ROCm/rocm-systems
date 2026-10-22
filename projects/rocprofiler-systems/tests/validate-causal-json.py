@@ -387,9 +387,7 @@ def get_validations(args):
         return data
     elif _len % 5 != 0:
         raise ValueError(
-            "validation requires format: {experiment regex} {progress-point regex} {virtual-speedup} {expected-speedup} {tolerance} (i.e. 5 args per validation. There are {} extra/missing arguments".format(
-                _len % 5
-            )
+            f"validation requires format: {{experiment regex}} {{progress-point regex}} {{virtual-speedup}} {{expected-speedup}} {{tolerance}} (i.e. 5 args per validation. There are {_len % 5} extra/missing arguments"
         )
 
     v = args.validate
