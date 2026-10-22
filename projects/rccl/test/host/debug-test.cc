@@ -276,8 +276,7 @@ TEST_F(DebugMicrotest, WarnEnableDebugInfo_EmptyOrOutOfRangeKeepsThePreviousValu
   EXPECT_FALSE(ncclWarnSetDebugInfo);
 }
 
-// An unset variable keeps the previous value instead of the default. Pins AICOMRCCL-2952; a fix flips this pin.
-TEST_F(DebugMicrotest, WarnEnableDebugInfo_KnownBug_SurvivesAResetWithoutIt) {
+TEST_F(DebugMicrotest, WarnEnableDebugInfo_UnsetKeepsThePreviousValue) {
   g_env["NCCL_WARN_ENABLE_DEBUG_INFO"] = "1";
   Init();
   g_env.erase("NCCL_WARN_ENABLE_DEBUG_INFO");
@@ -285,8 +284,8 @@ TEST_F(DebugMicrotest, WarnEnableDebugInfo_KnownBug_SurvivesAResetWithoutIt) {
   EXPECT_TRUE(ncclWarnSetDebugInfo);
 }
 
-// The documented default is WARN,ATTN, but the runtime default is WARN only. Pins AICOMRCCL-2951; a fix flips this pin.
-TEST_F(DebugMicrotest, TimestampLevels_KnownBug_DefaultIsWarnOnly) {
+// The documented default is WARN,ATTN; the runtime default is WARN only.
+TEST_F(DebugMicrotest, TimestampLevels_DefaultIsWarnOnly) {
   Init();
   EXPECT_EQ(ncclDebugTimestampLevels, kWarn);
 }
@@ -305,8 +304,8 @@ TEST_F(DebugMicrotest, TimestampLevels_CaretExcludesTheListedLevels) {
   EXPECT_EQ(TimestampLevelsFor("^WARN,INFO"), ~(kWarn | kInfo));
 }
 
-// ATTN and ERROR are documented levels the runtime parser silently ignores. Pins AICOMRCCL-2951; a fix flips this pin.
-TEST_F(DebugMicrotest, TimestampLevels_KnownBug_AttnAndErrorAreIgnored) {
+// ATTN and ERROR are documented levels the runtime parser ignores.
+TEST_F(DebugMicrotest, TimestampLevels_AttnAndErrorAreIgnored) {
   EXPECT_EQ(TimestampLevelsFor("ATTN,ERROR"), 0u);
 }
 
@@ -825,9 +824,8 @@ TEST_F(DebugThreadNameMicrotest, Pthread_NamedOnlyWhenEnabled) {
   EXPECT_EQ(NameOf([](std::thread& t) { ncclSetThreadName(t.native_handle(), "IB %s", "async"); }), initialName_);
 }
 
-// The overloads disagree on values other than 0 and 1: only std::thread treats them as enabled. Pins AICOMRCCL-2954; a
-// fix flips this pin.
-TEST_F(DebugThreadNameMicrotest, SetThreadName_KnownBug_NonBinarySettingNamesOnlyStdThreads) {
+// For values other than 0 and 1, only the std::thread overload names the thread.
+TEST_F(DebugThreadNameMicrotest, SetThreadName_NonBinarySettingNamesOnlyStdThreads) {
   g_setThreadName = 2;
   EXPECT_EQ(NameOf([](std::thread& t) { ncclSetThreadName(t, "std"); }), "std");
   EXPECT_EQ(NameOf([](std::thread& t) { ncclSetThreadName(t.native_handle(), "posix"); }), initialName_);
