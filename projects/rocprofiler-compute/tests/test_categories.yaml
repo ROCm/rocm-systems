@@ -40,6 +40,7 @@ test_categories:
       - test_csv_compression
       - test_inject_roctx_package
       - test_inject_roctx_torch
+      - test_inject_roctx_torch_trace_collector
       - test_conftest
       - test_memory_chart_loader
       - test_memory_chart_units
@@ -58,6 +59,8 @@ test_categories:
       - test-pc-sampling-collector
       - test-compression
       - test-csv
+      - test-torch-trace-collector
+      - test-torch-trace-collector-before-install
     therock_ci_exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
@@ -122,6 +125,7 @@ test_categories:
       - test_csv_compression
       - test_inject_roctx_package
       - test_inject_roctx_torch
+      - test_inject_roctx_torch_trace_collector
       - test_inject_roctx_torch_gpu
       - test_profiler_base
       - test_pc_sampling_profile
@@ -143,6 +147,8 @@ test_categories:
       - test-pc-sampling-collector
       - test-compression
       - test-csv
+      - test-torch-trace-collector
+      - test-torch-trace-collector-before-install
       - test_profile_torch_trace
       - test_profile_triton_trace
       - test_profile_ml_api_trace
@@ -222,6 +228,7 @@ test_categories:
       - test_csv_compression
       - test_inject_roctx_package
       - test_inject_roctx_torch
+      - test_inject_roctx_torch_trace_collector
       - test_inject_roctx_torch_gpu
       - test_profiler_base
       - test_pc_sampling_profile
@@ -243,6 +250,8 @@ test_categories:
       - test-pc-sampling-collector
       - test-compression
       - test-csv
+      - test-torch-trace-collector
+      - test-torch-trace-collector-before-install
       - test_profile_torch_trace
       - test_profile_triton_trace
       - test_profile_ml_api_trace
@@ -322,6 +331,7 @@ test_categories:
       - test_csv_compression
       - test_inject_roctx_package
       - test_inject_roctx_torch
+      - test_inject_roctx_torch_trace_collector
       - test_inject_roctx_torch_gpu
       - test_profiler_base
       - test_pc_sampling_profile
@@ -343,6 +353,8 @@ test_categories:
       - test-pc-sampling-collector
       - test-compression
       - test-csv
+      - test-torch-trace-collector
+      - test-torch-trace-collector-before-install
       - test_profile_torch_trace
       - test_profile_triton_trace
       - test_profile_ml_api_trace
