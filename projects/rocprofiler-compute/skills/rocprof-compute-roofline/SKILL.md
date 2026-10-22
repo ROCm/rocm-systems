@@ -17,7 +17,7 @@ carries the same numbers in readable form.
 
 - Linux with `rocprof-compute` on `PATH`. ROCm 6.2 and newer ship it. A source build needs ROCm 5.7.1 or newer; see [source install](../../docs/install/source-install.rst). Use the ROCm install the user already has. There is no default container image to guess.
 - Roofline microbenchmarks run on the Instinct MI200, MI300, and MI350 series and on supported client APUs. MI100 (gfx908) skips them. MI50 and MI60 are not supported. Confirm the architecture in [compatible accelerators](../../docs/reference/compatible-accelerators.rst).
-- `HIP_VISIBLE_DEVICES` chooses the GPU the application runs on. An empty value hides every device, and `CUDA_VISIBLE_DEVICES` is mapped onto it. `--device` selects the GPU for the roofline microbenchmarks only. Do not set `HSA_OVERRIDE_GFX_VERSION` to force an unsupported architecture.
+- `HIP_VISIBLE_DEVICES` chooses the GPU the application runs on. A nonempty `HIP_VISIBLE_DEVICES` overrides `CUDA_VISIBLE_DEVICES`. If `HIP_VISIBLE_DEVICES` is empty, HIP uses `CUDA_VISIBLE_DEVICES`. An empty value of either variable does not hide GPUs. `-1`, or an empty `ROCR_VISIBLE_DEVICES`, hides every GPU. `--device` selects the GPU for the roofline microbenchmarks only. Do not set `HSA_OVERRIDE_GFX_VERSION` to force an unsupported architecture.
 
 ## 1. Collect
 

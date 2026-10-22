@@ -12,7 +12,7 @@ bandwidth, caches, or data movement directly.
 
 - Linux with `rocprof-compute` on `PATH`. ROCm 6.2 and newer ship it. A source build needs ROCm 5.7.1 or newer; see [source install](../../docs/install/source-install.rst). Use the ROCm install the user already has. There is no default container image to guess.
 - Supported accelerators are the Instinct MI100, MI200, MI300, and MI350 series, plus the client APUs in [compatible accelerators](../../docs/reference/compatible-accelerators.rst). MI50 and MI60 are not supported. The experimental memory-bandwidth analysis below is gfx950 only.
-- `HIP_VISIBLE_DEVICES` chooses the GPU the application runs on. An empty value hides every device, and `CUDA_VISIBLE_DEVICES` is mapped onto it. Do not set `HSA_OVERRIDE_GFX_VERSION` to force an unsupported architecture. The profiler then collects the wrong counters.
+- `HIP_VISIBLE_DEVICES` chooses the GPU the application runs on. A nonempty `HIP_VISIBLE_DEVICES` overrides `CUDA_VISIBLE_DEVICES`. If `HIP_VISIBLE_DEVICES` is empty, HIP uses `CUDA_VISIBLE_DEVICES`. An empty value of either variable does not hide GPUs. `-1`, or an empty `ROCR_VISIBLE_DEVICES`, hides every GPU. Do not set `HSA_OVERRIDE_GFX_VERSION` to force an unsupported architecture. The profiler then collects the wrong counters.
 
 Run `rocprof-compute analyze --help` before choosing flags.
 
