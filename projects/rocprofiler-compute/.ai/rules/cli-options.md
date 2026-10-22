@@ -96,7 +96,6 @@ option description, starting with `Values: `. An argument with a default states
 it at the end of the description as `(Default: value)`.
 
 ```text
---output-format <format>   Specify output format (Default: stdout).
-                            Values: stdout, txt, csv, db.
---list-metrics [ids]...    List the blocks of the current GPU, or the metrics of the given block [ids].
+--option <arg>   Description of the option (Default: value).
+                 Values: <value1>, <value2>, ..., <valueN>
 ```
