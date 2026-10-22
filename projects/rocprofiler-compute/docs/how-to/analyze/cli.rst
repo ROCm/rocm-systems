@@ -214,29 +214,13 @@ Open the saved HTML file in a browser for the interactive roofline plot. See :re
 
 .. _cli-list-metrics:
 
-2. Use ``--list-metrics`` with the architecture of the profiled GPU, for example
-   ``gfx90a`` for MI200, to generate a list of available metrics for inspection.
-   Each block shows its alias, and each metric shows its unit and description
-   (shortened with ``...`` below).
+2. Use ``--list-metrics`` to list the blocks the workload profiled, and add
+   block IDs or aliases to list their metrics. See :ref:`list-metrics`.
 
    .. code-block:: shell-session
 
-      $ rocprof-compute --list-metrics gfx90a
-
-      0 -> Top Stats (alias: topstats)
-      1 -> System Info (alias: sysinfo)
-      2 -> System Speed-of-Light (alias: sol)
-              2.1 -> System Speed-of-Light
-                      2.1.0 -> VALU FLOPs [GFLOP/s]: The total floating-point operations executed per second on the VALU. ...
-                      2.1.1 -> MFMA FLOPs (BF16) [GFLOP/s]: The total number of 16-bit brain floating point MFMA operations executed per second. ...
-                      2.1.2 -> MFMA FLOPs (F16) [GFLOP/s]: The total number of 16-bit floating point MFMA operations executed per second. ...
-                      2.1.3 -> MFMA FLOPs (F32) [GFLOP/s]: The total number of 32-bit floating point MFMA operations executed per second. ...
-      ...
-
-   .. note::
-
-      ``--list-available-metrics`` is deprecated and will be removed in a future
-      release. Use ``--list-metrics`` instead.
+      $ rocprof-compute analyze -p workloads/vcopy/MI200/ --list-metrics
+      $ rocprof-compute analyze -p workloads/vcopy/MI200/ --list-metrics sol
 
    On MI300 and MI350 series GPUs, block **1 (System Info)** also reports compute
    and memory partition modes. See :doc:`/conceptual/cdna/compute-memory-partition`
@@ -454,17 +438,11 @@ More analysis options
    Combining it with ``--output-format csv`` or ``--output-format db`` exits with an error.
 
 
-**List metrics**
+**List metrics of selected blocks** (see :ref:`list-metrics`)
 
 .. code-block:: shell
 
-   $ rocprof-compute analyze -p workloads/vcopy/MI200/  --list-metrics gfx90a
-
-**List metrics of selected blocks**
-
-.. code-block:: shell
-
-   $ rocprof-compute analyze -p workloads/vcopy/MI200/  --list-metrics gfx90a -b sol 12
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/  --list-metrics sol 12
 
 **Show Description column which is excluded by default in cli output**
 
