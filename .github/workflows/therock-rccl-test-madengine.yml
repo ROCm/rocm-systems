@@ -228,9 +228,11 @@ jobs:
       - name: Cleanup work directory
         if: always()
         run: |
+          # `ab` holds the per-node logs, the only part that grows with the run;
+          # the upload step above has already kept them as an artifact.
           rm -rf "${WORK_DIR}/madengine" "${WORK_DIR}/MAD" "${WORK_DIR}/conda" \
                  "${WORK_DIR}/env" "${WORK_DIR}/overlay_ctx" \
-                 "${WORK_DIR}/docker_builds"
+                 "${WORK_DIR}/docker_builds" "${WORK_DIR}/ab"
 
           # Nothing on this host builds or pulls an image any more; the nodes
           # build them. Earlier versions did both, under per-run tags nothing
