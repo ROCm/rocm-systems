@@ -2247,9 +2247,9 @@ class CodeGenerator:
                     ('VopdMaxF32',),
                     '''
                     {
-                      float result = std::fmax(std::bit_cast<float>(src0),
-                                               std::bit_cast<float>(src1));
-                      return std::bit_cast<uint32_t>(result);
+                      return amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F32, amdgpu::minmax::LegacyMax>{
+                          amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32()),
+                          amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())}(src0, src1);
                     }
                     ''',
                 ),
@@ -2268,9 +2268,9 @@ class CodeGenerator:
                     ('VopdMinF32',),
                     '''
                     {
-                      float result = std::fmin(std::bit_cast<float>(src0),
-                                               std::bit_cast<float>(src1));
-                      return std::bit_cast<uint32_t>(result);
+                      return amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F32, amdgpu::minmax::LegacyMin>{
+                          amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32()),
+                          amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())}(src0, src1);
                     }
                     ''',
                 ),

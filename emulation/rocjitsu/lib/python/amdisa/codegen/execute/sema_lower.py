@@ -1148,16 +1148,18 @@ def _lower_dst_write(
     """Lower a destination operand write."""
     idx = _get_operand_index(lhs_node)
     # Lower clamp(omod(minmax(...))) directly on destination bits, avoiding a
-    # conversion to host float and back. These forms only exist on targets
-    # without SDWA, so bypassing SDWA's F16 output modifiers is safe here.
+    # conversion to host float and back. Legacy vector F16 selection leaves
+    # SDWA output modifiers to the store; scalar and *_NUM forms have no SDWA.
     selection_node, output_fields = _unwrap_output_modifiers(rhs_node)
     writes_bits = _is_float_minmax(selection_node)
     if writes_bits:
-        _, rhs = _float_minmax_selection(
-            selection_node,
-            ctx,
-            output_fields if selection_node is not rhs_node else None,
-        )
+        fields = output_fields if selection_node is not rhs_node else None
+        if ctx.exec_model == ExecModel.VECTOR and selection_node.call_name in (
+            f'{FLOAT_MINMAX_CALL}legacy_min',
+            f'{FLOAT_MINMAX_CALL}legacy_max',
+        ):
+            _require_sdwa_rounded_store(selection_node, ctx, fields)
+        _, rhs = _float_minmax_selection(selection_node, ctx, fields)
         needs_bitcast = 0
     elif _is_vector_fract(selection_node, ctx):
         writes_bits = True
