@@ -277,8 +277,6 @@ void pack_format(const Format &f, uint32_t selectors, std::span<const uint32_t> 
                       : f.number == Number::Uscaled           ? Number::Unorm
                       : f.number == Number::Sscaled           ? Number::Snorm
                                                               : f.number;
-  if (selectors == 0)
-    selectors = 4; // The qualified single-channel zero view stores the first source.
   std::fill(bytes.begin(), bytes.end(), 0);
   uint32_t offset = 0;
   for (uint32_t i = 0; i < 4; ++i) {
@@ -325,6 +323,8 @@ util::Result pack_buffer_format(uint32_t format, uint32_t selectors,
   if (decoded.failed() || components.empty() ||
       !qualified_store_selectors(decoded.value(), selectors))
     return util::Result::failure();
+  if (selectors == 0)
+    selectors = 4;
   const fp_mode::detail::ScopedFenv environment(0);
   pack_format(decoded.value(), selectors, components, bytes, missing, encoding);
   return util::Result::success();
@@ -395,6 +395,8 @@ util::FailureOr<bool> prepare_buffer_format(Wavefront &wf, VectorMemState &d, ui
   if (!d.is_load && format < 0 &&
       !qualified_store_selectors(d.decoded_buffer_format, d.buffer_selectors))
     return util::Result::failure();
+  if (!d.is_load && format < 0 && d.buffer_selectors == 0)
+    d.buffer_selectors = 4;
   return true;
 }
 

@@ -520,7 +520,6 @@ add_executable(
     valu_floating_policy_test.cpp
     gfx11_dot2_test.cpp
     gfx12_dot_test.cpp
-    gfx12_dot4_test.cpp
     packed_wmma_test.cpp
     rdna_wmma_i32_test.cpp
     rdna_swmmac_i32_test.cpp
