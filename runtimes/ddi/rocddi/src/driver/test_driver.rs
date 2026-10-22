@@ -8,7 +8,7 @@ use crate::memory::host::HostBackingLease;
 use crate::memory::storage::Owned;
 use crate::memory::{AllocationInfo, DeviceAccess, HostRegistration, MemoryKind};
 use crate::session::DriverContextLifetime;
-use crate::topology::{Endpoint, EndpointKind, TopologyKey};
+use crate::topology::{Endpoint, EndpointKind};
 use crate::{Error, ErrorKind};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -22,6 +22,8 @@ pub(crate) struct TestDriver {
     host_registration: bool,
     pub(crate) shutdowns: Arc<AtomicUsize>,
     pub(crate) fail_shutdown: Arc<AtomicBool>,
+    pub(crate) enumerations: Arc<AtomicUsize>,
+    pub(crate) opens: Arc<AtomicUsize>,
 }
 
 /// Activated test endpoint. It intentionally has no GPU resource capabilities.
@@ -64,6 +66,8 @@ impl TestDriver {
             host_registration: false,
             shutdowns: Arc::new(AtomicUsize::new(0)),
             fail_shutdown: Arc::new(AtomicBool::new(false)),
+            enumerations: Arc::new(AtomicUsize::new(0)),
+            opens: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -92,12 +96,6 @@ impl TestDriver {
                 DeviceAccess::READ | DeviceAccess::WRITE
             } else {
                 DeviceAccess::NONE
-            },
-            caches: None,
-            memory_links: None,
-            topology_key: TopologyKey {
-                group: 0,
-                member: 0,
             },
             driver_instance: self.instance,
             selector: EndpointSelector::Opaque(u64::from_le_bytes([
@@ -144,10 +142,12 @@ impl Driver for TestDriver {
         &self,
         visitor: &mut dyn FnMut(Endpoint) -> Result<(), Error>,
     ) -> Result<(), Error> {
+        self.enumerations.fetch_add(1, Ordering::Relaxed);
         visitor(self.endpoint())
     }
 
     fn open_endpoint(&self, id: [u8; 16]) -> Result<Endpoint, Error> {
+        self.opens.fetch_add(1, Ordering::Relaxed);
         if id != self.id {
             return Err(Error::Operation {
                 kind: ErrorKind::InvalidArgument,
@@ -155,6 +155,11 @@ impl Driver for TestDriver {
             });
         }
         Ok(self.endpoint())
+    }
+
+    fn probe_endpoint(&self, id: [u8; 16]) -> Result<Option<Endpoint>, Error> {
+        self.opens.fetch_add(1, Ordering::Relaxed);
+        Ok((id == self.id).then(|| self.endpoint()))
     }
 
     fn populate_endpoint(&self, endpoint: &mut Endpoint) -> Result<(), Error> {
