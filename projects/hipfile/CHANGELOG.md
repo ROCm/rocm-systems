@@ -15,9 +15,12 @@
 * The `HIPFILE_WARN_UNSAFE_BUFFER_OPS` CMake option now defaults to `OFF`.
 * Documented that Linux kernels built with `CONFIG_PCI_P2PDMA=y` are required for fastpath.
 * `hipFileStreamRegister()` and `hipFileStreamDeregister()` now treat the default stream (a null stream handle or `hipStreamPerThread`) as a no-op that returns success, matching cuFile. Previously, deregistering the default stream returned `hipFileInvalidValue`.
+* `hipFileReadAsync()` and `hipFileWriteAsync()` on registered streams now hand each transfer to an internal thread pool and use stream wait values to keep stream order, so on devices that support stream wait values, transfers on different registered streams can run at the same time.
+* `hipFileStreamDeregister()` now synchronizes a registered stream before freeing its resources, so it waits for all work queued on the stream, including asynchronous I/O in flight.
 
 ### Fixed
 
+* `hipFileReadAsync()` and `hipFileWriteAsync()` on the null stream now finish the transfer before returning, as documented. Previously, they queued the transfer and returned before it finished.
 * Asynchronous fastpath operations now fail over to the fallback backend on `ENODEV` or `EREMOTEIO`, matching the synchronous and batch paths.
 * hipFile now returns `hipFileGetNewFDFailed` instead of `hipFileInternalError` when the process or system runs out of file descriptors. API calls that need a new file descriptor, such as `hipFileHandleRegister()`, can return this error.
 * `ais-check` no longer reports an LVM parity RAID logical volume (`raid4`, `raid5`, `raid6`) as fastpath capable.
@@ -32,7 +35,8 @@
 ### Known issues
 
 * The bandwidth reported by `ais-stats` and the Stats API is derived from the sum of the per-operation latencies instead of the elapsed wall-clock time, so when several threads issue I/O concurrently, the reported bandwidth is understated by roughly the number of concurrent threads. See [issue #11919](https://github.com/ROCm/rocm-systems/issues/11919).
-* Asynchronous fastpath I/O, added in hipFile 0.5.0 for ROCm 10.1.0, performs poorly. The ROCm runtime serializes all stream host functions onto a single thread, so asynchronous fastpath operations cannot run concurrently.
+* Asynchronous I/O on unregistered streams runs one transfer at a time, because the ROCm runtime runs stream host functions on a single thread, and a running transfer also delays transfers queued on other streams. Registered streams on devices that don't support stream wait values behave the same way. Register streams with `hipFileStreamRegister()` so their transfers can run at the same time.
+* Asynchronous I/O on a registered stream can hang if it uses the fallback path while the `GPU_MAX_HW_QUEUES` environment variable is set to `1`. Leave `GPU_MAX_HW_QUEUES` unset, or set it to `2` or more.
 
 ## hipFile 0.5.0 for ROCm 10.1.0
 

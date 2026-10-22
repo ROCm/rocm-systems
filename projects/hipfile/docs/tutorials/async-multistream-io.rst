@@ -114,7 +114,8 @@ releasing the buffers and streams.
 
    Teardown reverses setup for each slice:
 
-   1. ``hipFileStreamDeregister()``: remove the stream from hipFile.
+   1. ``hipFileStreamDeregister()``: remove the stream from hipFile. This
+      synchronizes the stream, so it waits for the slice's I/O to finish.
    2. ``hipStreamDestroy()``: destroy the HIP stream.
    3. ``hipFileBufDeregister()``: remove the GPU buffer from hipFile.
    4. ``hipFree()``: free the device memory.
