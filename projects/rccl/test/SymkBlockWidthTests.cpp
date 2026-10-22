@@ -183,6 +183,28 @@ TEST(SymkBlockWidthTest, AllGatherPrefersStoreFrom1M)
 }
 
 // ===========================================================================
+// gfx1250 partition mode: AllGather takes the store kernel over LL from 1.5 MB
+// bus and the hierarchical kernel over the store kernel from 16 MB bus. Both
+// were fitted on 16 ranks, two partitions on each of eight packages.
+// ===========================================================================
+
+TEST(SymkBlockWidthTest, Gfx1250AllGatherTiers)
+{
+    constexpr int kPartitionRanks = 16;
+    auto bytes = [](size_t busBytes) { return busBytes / kPartitionRanks; };
+
+    EXPECT_FALSE(ncclSymkGfx1250AllGatherPrefersStore(kPartitionRanks, bytes(1 * MiB)));
+    EXPECT_FALSE(ncclSymkGfx1250AllGatherPrefersStore(kPartitionRanks, bytes(1536 * KiB) - 1));
+    EXPECT_TRUE(ncclSymkGfx1250AllGatherPrefersStore(kPartitionRanks, bytes(1536 * KiB)));
+    EXPECT_TRUE(ncclSymkGfx1250AllGatherPrefersStore(kPartitionRanks, bytes(4 * GiB)));
+
+    EXPECT_FALSE(ncclSymkGfx1250AllGatherPrefersHier(kPartitionRanks, bytes(8 * MiB)));
+    EXPECT_FALSE(ncclSymkGfx1250AllGatherPrefersHier(kPartitionRanks, bytes(16 * MiB) - 1));
+    EXPECT_TRUE(ncclSymkGfx1250AllGatherPrefersHier(kPartitionRanks, bytes(16 * MiB)));
+    EXPECT_TRUE(ncclSymkGfx1250AllGatherPrefersHier(kPartitionRanks, bytes(4 * GiB)));
+}
+
+// ===========================================================================
 // Blast radius. This matters more than the bands above: it is the only
 // automated guard that the width bands stay confined to the tuned collectives.
 // ===========================================================================

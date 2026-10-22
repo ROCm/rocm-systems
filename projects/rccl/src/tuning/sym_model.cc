@@ -51,6 +51,29 @@ static bool rcclSymkAllGatherLLYieldsToST(struct ncclTuningInput_t* const inputs
          ncclSymkGfx950AllGatherPrefersStore(comm->nRanks, inputs->nBytes);
 }
 
+// In gfx1250 partition mode AllGather runs only LL, the store kernel and the hierarchical kernel, each
+// from where it overtakes the one before, wherever the latter two can run, unless the user forced or
+// narrowed the choice. Below the store kernel's threshold the cost model picks LL, and the store kernel
+// stays in for the launches LL cannot take, such as grouped ones.
+static bool rcclSymkAllGatherYieldsInPartitionMode(struct ncclTuningInput_t* const inputs,
+                                                   enum ncclSymkKernelId kernelId, uint32_t valid_kmask) {
+  constexpr int st = ncclSymkKernelId_AllGather_ST;
+  constexpr int hier = ncclSymkKernelId_AllGather_HierLsaST;
+  struct ncclComm* comm = inputs->comm;
+  if (inputs->func != ncclFuncAllGather || !ncclSymkIsGfx1250(comm) || !comm->hasMloPart ||
+      comm->tuningContext.forced[inputs->func] || !(valid_kmask >> st & 1) || !(valid_kmask >> hier & 1) ||
+      !(inputs->tuningMask >> (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + st) & 1) ||
+      !(inputs->tuningMask >> (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + hier) & 1) ||
+      inputs->winRegType != ncclSymSendRegRecvReg)
+    return false;
+  if (ncclSymkGfx1250AllGatherPrefersHier(comm->nRanks, inputs->nBytes)) return kernelId != hier;
+  if (ncclSymkGfx1250AllGatherPrefersStore(comm->nRanks, inputs->nBytes)) return kernelId != st;
+  return kernelId != st && kernelId != ncclSymkKernelId_AllGather_LL;
+}
+
+// [RCCL] Block width for AllGather_HierLsaST, or 0 for the tuned width. Experimental.
+NCCL_PARAM(SymAgHierThreads, "SYM_AG_HIER_THREADS", 0)
+
 static int rcclSymkCalculateWarps(struct ncclTuningInput_t* const inputs, enum ncclSymkKernelId kernelId) {
   struct ncclComm* comm = inputs->comm;
   bool isLL = ncclSymkLLKernelMask() >> kernelId & 1;
@@ -64,6 +87,11 @@ static int rcclSymkCalculateWarps(struct ncclTuningInput_t* const inputs, enum n
   } else if (ncclSymkIsGfx950(comm) && isLsa) {
     // The width tuning is fitted to the gfx950 LSA kernels.
     nThreads = ncclSymkGfx950BlockThreads(inputs->func, isLL, comm->nRanks, inputs->nBytes);
+  }
+  if (kernelId == ncclSymkKernelId_AllGather_HierLsaST && ncclParamSymAgHierThreads() > 0) {
+    // The push splits each block into a pushing and a forwarding half, and a workgroup holds at most
+    // 1024 threads.
+    nThreads = (int)std::min<int64_t>(std::max<int64_t>(ncclParamSymAgHierThreads(), 2 * comm->WarpSize), 1024);
   }
   return std::max(1, nThreads / comm->WarpSize);
 }
@@ -110,7 +138,8 @@ ncclResult_t ncclTuningSymkModelSim(struct ncclTuningInput_t* const inputs, stru
   }
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  if (rcclSymkAllGatherLLYieldsToST(inputs, (enum ncclSymkKernelId)tuning->symKernelId, valid_kmask)) {
+  if (rcclSymkAllGatherLLYieldsToST(inputs, (enum ncclSymkKernelId)tuning->symKernelId, valid_kmask) ||
+      rcclSymkAllGatherYieldsInPartitionMode(inputs, (enum ncclSymkKernelId)tuning->symKernelId, valid_kmask)) {
     tuning->valid = 0;
     tuning->timeUs = -1.0;
     return ncclSuccess;

@@ -25,7 +25,7 @@
 
 #define NCCL_SYM_KERNEL_CELL_SIZE 1024 // no less than 16 bytes minimal cell size
 
-constexpr int ncclSymkMaxBlocks = 64;
+constexpr int ncclSymkMaxBlocks = 96;
 constexpr int ncclSymkMaxThreads = 256;
 constexpr int ncclSymkLLMaxEltSize = 8;
 
@@ -58,6 +58,7 @@ enum ncclSymkKernelId {
   ncclSymkKernelId_AllGather_STMC,
   ncclSymkKernelId_AllGather_RailRing_LsaST,
   ncclSymkKernelId_AllGather_RailRing_LsaSTMC,
+  ncclSymkKernelId_AllGather_HierLsaST,
 
   ncclSymkKernelId_ReduceScatter_LL,
   ncclSymkKernelId_ReduceScatter_TmaLD,
@@ -84,6 +85,7 @@ constexpr char const* ncclSymKernelStr[] = {
   "AllGather_STMC",
   "AllGather_RailRing_LsaST",
   "AllGather_RailRing_LsaSTMC",
+  "AllGather_HierLsaST",
   "ReduceScatter_LL",
   "ReduceScatter_TmaLD",
   "ReduceScatter_LD",
@@ -100,6 +102,11 @@ struct ncclSymkDevComm {
   struct ncclGinSyncHandle ginSyncHandle;
   ncclDevResourceHandle rsGinAccumBuf;
   uint32_t rsGinAccumBytesPerBlock;
+  // Ranks sharing one physical device, so a hierarchical kernel can tell the on-package half of the
+  // LSA team from the cross-package half. 0 when the comm does not decompose that way.
+  int hierScaleInSize;
+  // Pieces the hierarchical AllGather pushes each slot in, or 0 to pick them by size.
+  int hierPushPieces;
   // Profiler counters (host-pinned), indexed by channel id and per-channel slot.
   // workPhases holds per-phase timestamps published behind a fence.
   struct ncclDevProfiler* workStarted;
@@ -191,6 +198,7 @@ uint32_t ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 bool ncclSymkIsGfx950(struct ncclComm* comm);
+bool ncclSymkIsGfx1250(struct ncclComm* comm);
 #endif
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
@@ -200,6 +208,11 @@ int ncclSymkGfx950BlockThreads(ncclFunc_t coll, bool isLL, int nRanks, size_t nB
 // Whether AllGather should take the store kernel over LL on gfx950, where the shared cost model
 // keeps LL well past the point the store kernel overtakes it.
 bool ncclSymkGfx950AllGatherPrefersStore(int nRanks, size_t nBytes);
+// Whether AllGather should take the store kernel over LL on gfx1250 in partition mode.
+bool ncclSymkGfx1250AllGatherPrefersStore(int nRanks, size_t nBytes);
+// Whether AllGather should take the hierarchical kernel over the store kernel on gfx1250 in partition
+// mode, which the shared cost model never does.
+bool ncclSymkGfx1250AllGatherPrefersHier(int nRanks, size_t nBytes);
 #endif
 
 ncclResult_t ncclSymkMakeDevWork(struct ncclComm* comm, struct ncclTaskColl* task, struct ncclSymkDevWork* outDevWork);

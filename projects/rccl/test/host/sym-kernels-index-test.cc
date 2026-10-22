@@ -124,6 +124,8 @@ const std::vector<ExpectedKernelCase>& ValidCases() {
       {"AllGather_RailRing_LsaST", ncclSymkKernelId_AllGather_RailRing_LsaST, ncclDevSum, ncclFloat32,
        (void*)ncclSymkDevKernel_AllGather_RailRing_LsaST,
        (void*)ncclSymkDevKernel_AllGather_RailRing_LsaST_profile},
+      {"AllGather_HierLsaST", ncclSymkKernelId_AllGather_HierLsaST, ncclDevSum, ncclFloat32,
+       (void*)ncclSymkDevKernel_AllGather_HierLsaST, (void*)ncclSymkDevKernel_AllGather_HierLsaST_profile},
 
       {"AllReduce_AGxLL_R_sum_f32", ncclSymkKernelId_AllReduce_AGxLL_R, ncclDevSum, ncclFloat32,
        (void*)ncclSymkDevKernel_AllReduce_AGxLL_R_sum_f32, (void*)ncclSymkDevKernel_AllReduce_AGxLL_R_sum_f32_profile},
