@@ -89,6 +89,14 @@ union ncclSocketAddress V4Addr(const char* ip, uint16_t port) {
 
 bool SameGid(const union ibv_gid& a, const union ibv_gid& b) { return memcmp(a.raw, b.raw, sizeof(a.raw)) == 0; }
 
+// A zeroed comm; the comm structs are alignas(64), more than calloc promises.
+template <typename T>
+T* NewComm() {
+  auto* p = static_cast<T*>(aligned_alloc(alignof(T), sizeof(T)));
+  memset(p, 0, sizeof(T));
+  return p;
+}
+
 int FakePostRecv(struct ibv_qp*, struct ibv_recv_wr*, struct ibv_recv_wr**);
 
 // Verbs objects handed out by the fakes, with a ledger of what is still live.
@@ -241,7 +249,16 @@ class NetIbCastConnectMicrotest : public ::testing::Test {
   void TearDown() override {
     for (void* c : sendComms_) IbCastCloseSend(c);
     for (void* c : recvComms_) IbCastCloseRecv(c);
-    for (void* l : listens_) IbCastCloseListen(l);
+    for (void* l : listens_) {
+      // IbCastCloseListen leaves an unfinished accept's stage, and the comm in it, behind.
+      ncclIbCommStage* stage = l ? static_cast<ncclIbListenComm*>(l)->stage : nullptr;
+      if (stage) {
+        if (stage->state != ncclIbCommStateStart) free(stage->comm);
+        free(stage->buffer);
+        free(stage);
+      }
+      IbCastCloseListen(l);
+    }
     hooks_.clear();
     for (int i = 0; i < kNDevs; i++) {
       IbCastDevs[i].pdRefs = 0;
@@ -528,7 +545,10 @@ class NetIbCastConnectMicrotest : public ::testing::Test {
     // A side that finished before the other failed still gets closed in TearDown.
     if (sc) sendComms_.push_back(sc);
     if (rc) recvComms_.push_back(rc);
-    if (res != ncclSuccess) return res;
+    if (res != ncclSuccess) {
+      Abandon(handle);
+      return res;
+    }
     *send = static_cast<ncclIbSendComm*>(sc);
     *recv = static_cast<ncclIbRecvComm*>(rc);
     return sc && rc ? ncclSuccess : ncclInProgress;
@@ -539,6 +559,15 @@ class NetIbCastConnectMicrotest : public ::testing::Test {
     void* lc = nullptr;
     ncclIbHandle h = Listen(dev, &lc);
     ASSERT_EQ(Handshake(&h, lc, send, recv, dev), ncclSuccess);
+  }
+
+  // A connect that fails without reaching its fail label keeps the comm in the handle's stage.
+  static void Abandon(ncclIbHandle* handle) {
+    if (handle->stage.state != ncclIbCommStateStart) {
+      free(handle->stage.comm);
+      free(handle->stage.buffer);
+    }
+    handle->stage = {};
   }
 
   void Forget(void* comm) {
@@ -1201,15 +1230,17 @@ TEST_F(NetIbCastConnectQpMicrotest, Create_IonicSetsFeatureBitsAndCtsSlot) {
 }
 
 TEST_F(NetIbCastConnectQpMicrotest, Create_IonicScalesQueueDepthsOnlyForSharedQps) {
+  const int mult = rcclParamIbCastQpDepthMultiplier();
+  ASSERT_GT(mult, 1);
   ncclIbQpCreateAttr a = Attr(/*ionic=*/true);
-  a.cqDepthMultiplier = 8;
+  a.cqDepthMultiplier = mult;
   ncclIbQp qp = {};
   ASSERT_EQ(IbCastQpCreate(&qp, &a), ncclSuccess);
   EXPECT_EQ(verbs_.creates.back().attr.cap.max_recv_wr, 11u);
   a.isQpSharingEnabled = true;
   ASSERT_EQ(IbCastQpCreate(&qp, &a), ncclSuccess);
-  EXPECT_EQ(verbs_.creates.back().attr.cap.max_recv_wr, 88u);
-  EXPECT_EQ(verbs_.creates.back().attr.cap.max_send_wr, 104u);
+  EXPECT_EQ(verbs_.creates.back().attr.cap.max_recv_wr, 11u * mult);
+  EXPECT_EQ(verbs_.creates.back().attr.cap.max_send_wr, 13u * mult);
 }
 
 TEST_F(NetIbCastConnectQpMicrotest, Create_IonicUdQpTakesTheGenericPath) {
@@ -1318,7 +1349,7 @@ TEST_F(NetIbCastConnectUdmaMicrotest, SharedQps_FollowTheGroupOrTheQpIndexWithOn
 }
 
 TEST_F(NetIbCastConnectQpMicrotest, BuildDataQpCreateAttr_SizesSendAndReceiveQueues) {
-  auto* s = static_cast<ncclIbSendComm*>(calloc(1, sizeof(ncclIbSendComm)));
+  auto* s = NewComm<ncclIbSendComm>();
   s->base.isSend = true;
   s->base.isP2p = 1;
   s->devs[1].base = {2, &pd_, &cq_};
@@ -1339,7 +1370,7 @@ TEST_F(NetIbCastConnectQpMicrotest, BuildDataQpCreateAttr_SizesSendAndReceiveQue
   EXPECT_FALSE(a.isQpSharingEnabled);
   free(s);
 
-  auto* r = static_cast<ncclIbRecvComm*>(calloc(1, sizeof(ncclIbRecvComm)));
+  auto* r = NewComm<ncclIbRecvComm>();
   r->devs[0].base = {0, &pd_, &cq_};
   ScopedHook rq(g_ibCastResiliencyDataRqSizeGet, [&](ncclIbResiliency* res, uint dev, uint32_t* size) {
     EXPECT_EQ(res, r->base.resiliency);
@@ -1621,6 +1652,7 @@ TEST_F(NetIbCastConnectHandshakeMicrotest, NonexistentDevice_FailsEitherSide) {
   std::string log =
       CaptureLog([&] { EXPECT_EQ(IbCastConnect(nullptr, IbCastNMergedDevs, &h, &sc, nullptr), ncclInternalError); });
   EXPECT_TRUE(LogHas(log, "non-existent virtual device 4")) << log;
+  Abandon(&h);
 
   ncclIbHandle h2 = Listen(IbCastNMergedDevs, &lc);
   ASSERT_EQ(IbCastConnect(nullptr, 0, &h2, &sc, nullptr), ncclSuccess);
@@ -1631,6 +1663,7 @@ TEST_F(NetIbCastConnectHandshakeMicrotest, NonexistentDevice_FailsEitherSide) {
     EXPECT_EQ(res, ncclInternalError);
   });
   EXPECT_TRUE(LogHas(log, "non-existent virtual device 4")) << log;
+  Abandon(&h2);
 }
 
 TEST_F(NetIbCastConnectHandshakeMicrotest, FusedSenderToSingleNicReceiver_StripesQpsOverBothSenderDevices) {
@@ -2512,6 +2545,7 @@ TEST_F(NetIbCastConnectFlushMicrotest, Accept_KnownBug_DmaBufExportFailureReport
   EXPECT_EQ(res, ncclSuccess);
   EXPECT_EQ(rc, nullptr);
   EXPECT_EQ(static_cast<ncclIbListenComm*>(lc)->stage, nullptr);
+  Abandon(&h);
 }
 
 TEST_F(NetIbCastConnectFlushMicrotest, NoRelaxedOrderingOff_SkipsTheGpuWord) {
@@ -2615,7 +2649,7 @@ TEST_F(NetIbCastConnectCloseMicrotest, NullComms_AreANoop) {
 TEST_F(NetIbCastConnectCloseMicrotest, PartlyBuiltComms_SkipMissingQpsAndMrs) {
   ncclIbNetCommDevBase base = {};
   ASSERT_EQ(IbCastInitCommDevBase(0, &base, nullptr, 8), ncclSuccess);
-  auto* s = static_cast<ncclIbSendComm*>(calloc(1, sizeof(ncclIbSendComm)));
+  auto* s = NewComm<ncclIbSendComm>();
   s->base.vProps.ndevs = 1;
   s->base.nqps = 2;
   s->devs[0].base = base;
@@ -2623,7 +2657,7 @@ TEST_F(NetIbCastConnectCloseMicrotest, PartlyBuiltComms_SkipMissingQpsAndMrs) {
   EXPECT_TRUE(verbs_.live.empty());
 
   ASSERT_EQ(IbCastInitCommDevBase(0, &base, nullptr, 8), ncclSuccess);
-  auto* r = static_cast<ncclIbRecvComm*>(calloc(1, sizeof(ncclIbRecvComm)));
+  auto* r = NewComm<ncclIbRecvComm>();
   r->base.vProps.ndevs = 1;
   r->base.nqps = 2;
   r->flushEnabled = 1;
@@ -2656,6 +2690,9 @@ TEST_F(NetIbCastConnectCloseMicrotest, DestroyFailure_StopsTheClose) {
   ScopedHook qp(g_ibvDestroyQp, [](ibv_qp*) { return ncclSystemError; });
   EXPECT_EQ(IbCastCloseSend(s), ncclSystemError);
   EXPECT_EQ(IbCastCloseRecv(r), ncclSystemError);
+  // A failed close returns before it frees the comm.
+  free(s);
+  free(r);
 }
 
 class NetIbCastConnectSharingMicrotest : public NetIbCastConnectMicrotest {
@@ -2721,8 +2758,9 @@ TEST_F(NetIbCastConnectSharingMicrotest, FirstConnection_MakesEachSideAPrimaryOw
 }
 
 TEST_F(NetIbCastConnectSharingMicrotest, Ainic_ScalesSharedQpDepthByTheMultiplierTheCqAchieved) {
+  ASSERT_GT(rcclParamIbCastQpDepthMultiplier(), 3);
   IbCastAinicRoce = true;
-  cqeCap_ = 3 * NET_IB_MAX_REQUESTS * ncclParamIbCastQpsPerConn() * 3;  // the device grants 3x, not 8x
+  cqeCap_ = 3 * NET_IB_MAX_REQUESTS * ncclParamIbCastQpsPerConn() * 3;  // the device grants 3x, less than asked
   ncclIbSendComm* s = nullptr;
   ncclIbRecvComm* r = nullptr;
   ASSERT_NO_FATAL_FAILURE(Connect(&s, &r));
@@ -3027,7 +3065,7 @@ TEST_F(NetIbCastConnectQpMicrotest, ReceiverOooRq_RequiresPeerSupport) {
   Param("IB_OOO_RQ", 1);
   IbCastDevs[0].ibProvider = IB_PROVIDER_MLX5;
   IbCastDevs[0].ar = 1;
-  auto* r = static_cast<ncclIbRecvComm*>(calloc(1, sizeof(ncclIbRecvComm)));
+  auto* r = NewComm<ncclIbRecvComm>();
   r->base.nqps = 1;
   r->base.vProps.ndevs = 1;
   r->base.localOooRq = true;
@@ -3049,7 +3087,7 @@ TEST_F(NetIbCastConnectSharingMicrotest, SecondaryAloneOnItsNic_DeallocatesThePd
   ASSERT_EQ(IbCastInitCommDevBase(1, &own, nullptr, 8), ncclSuccess);
   ibv_pd* pd = own.pd;
 
-  auto* s = static_cast<ncclIbSendComm*>(calloc(1, sizeof(ncclIbSendComm)));
+  auto* s = NewComm<ncclIbSendComm>();
   InitBase(&s->base, true);
   IbCastCommInitSharingFields(&s->base);
   s->base.vProps.ndevs = 1;
@@ -3076,7 +3114,7 @@ TEST_F(NetIbCastConnectSharingMicrotest, SecondaryAloneOnItsNic_DeallocatesThePd
   free(s);
 
   ASSERT_EQ(IbCastInitCommDevBase(1, &own, nullptr, 8), ncclSuccess);
-  auto* r = static_cast<ncclIbRecvComm*>(calloc(1, sizeof(ncclIbRecvComm)));
+  auto* r = NewComm<ncclIbRecvComm>();
   InitBase(&r->base, false);
   IbCastCommInitSharingFields(&r->base);
   r->base.vProps.ndevs = 1;

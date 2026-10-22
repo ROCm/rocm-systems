@@ -51,6 +51,7 @@
 #include <vector>
 
 #include "ScopedHook.h"
+#include "fakes/fail_loud.h"
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/rma_fakes.h"
@@ -90,6 +91,15 @@ extern "C" hsa_status_t hsa_status_string(hsa_status_t, const char** status_stri
     if (status_string != nullptr) *status_string = "fake HSA status (host microtest)";
     return HSA_STATUS_SUCCESS;
 }
+#if NCCL_CUMEM_DMABUF_EXPORT_GATE
+// libamdhip64, named by getDmaBufFd's cuMem DMA-BUF arm where the export probe and HIP
+// version allow it. The fixture pins DMABUF_ENABLE to 0, so no test reaches it, but the
+// reference survives at any -O level. Weak, so a hook-backed hip_fakes copy would win.
+__attribute__((weak)) hipError_t hipMemGetHandleForAddressRange(void*, hipDeviceptr_t, size_t, hipMemRangeHandleType,
+                                                                unsigned long long) {
+    FailLoudUnfaked("rma-proxy-test", "hipMemGetHandleForAddressRange");
+}
+#endif
 // Defined by src/init.cc. Not a hook: allocMemCPUAccessible() is a header-static
 // template, so this global is the only way to steer it. NULL is production's
 // default (NCCL_GDRCOPY_ENABLE defaults to 0) and selects host-NUMA memory.

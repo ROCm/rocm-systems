@@ -334,8 +334,11 @@ class NetIbCastQpSharingRouteMicrotest : public NetIbCastQpSharingMicrotest {
  protected:
   void SetUp() override {
     NetIbCastQpSharingMicrotest::SetUp();
-    send_ = static_cast<ncclIbSendComm*>(calloc(1, sizeof(ncclIbSendComm)));
-    recv_ = static_cast<ncclIbRecvComm*>(calloc(1, sizeof(ncclIbRecvComm)));
+    // The comm structs are alignas(64), more than calloc promises.
+    send_ = static_cast<ncclIbSendComm*>(aligned_alloc(alignof(ncclIbSendComm), sizeof(ncclIbSendComm)));
+    recv_ = static_cast<ncclIbRecvComm*>(aligned_alloc(alignof(ncclIbRecvComm), sizeof(ncclIbRecvComm)));
+    memset(send_, 0, sizeof(*send_));
+    memset(recv_, 0, sizeof(*recv_));
     sendId_ = IbCastAllocCommId(send_, true);
     recvId_ = IbCastAllocCommId(recv_, false);
     IbCastQpSharingGlobalEnable = true;
