@@ -1068,15 +1068,14 @@ threshold table introduced for gfx1250.
           registration and message size).
 
     * - | ``RCCL_FORCE_CE_ALLREDUCE``
-        | Bypasses the ``NCCL_CTA_POLICY=2`` (``CTA_POLICY_ZERO``) requirement for
-          CE AllReduce, allowing CE to run without symmetric window registration.
-          Does not override the staging buffer size cap (``RCCL_CE_AR_2SHOT_MAX_BYTES``
-          or the arch table ``ceNonRegMax[AR]``); that cap is enforced regardless.
-          When ``-1`` (auto), follows the same gfx1250-default logic as
-          ``RCCL_CE_ALLREDUCE``.
+        | Enables the non-registered (2-shot/staged) CE AllReduce path without
+          requiring ``NCCL_CTA_POLICY=2`` (``CTA_POLICY_ZERO``). Does not affect
+          the registered-window CE AllReduce path, which is controlled independently
+          by ``RCCL_CE_ALLREDUCE``. Does not override the ``ceNonRegMax[AR]`` staging
+          buffer size cap.
       - | ``-1``: Auto — same default as ``RCCL_CE_ALLREDUCE`` (default).
         | ``0``: Disabled.
-        | ``1``: Force-enabled (CTA_POLICY check bypassed).
+        | ``1``: Force-enabled (``CTA_POLICY_ZERO`` requirement bypassed for non-registered path).
 
 
     * - | ``RCCL_CE_AR_2SHOT_MAX_BYTES``
