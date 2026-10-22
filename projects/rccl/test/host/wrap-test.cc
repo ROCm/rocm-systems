@@ -5225,6 +5225,29 @@ TEST(WrapMicrotest, CandSearchRecord_FallbackNotOverwrittenByLaterEligible) {
   EXPECT_FALSE(s.bestPreferredFound) << "SYMMETRIC was never offered so preferred must not be set";
 }
 
+TEST(WrapMicrotest, CandSearchRecord_OutOfWindowWithAllMaskFillsNeither) {
+  // inWindow=false + preferred=ALL: the (preferred != ALL || inWindow) guard
+  // blocks preferred, and the inWindow guard blocks fallback -- neither slot fills.
+  rcclCollDecision out{}, fb{};
+  rcclCollDecision cand{}; cand.algo = NCCL_ALGO_TREE; cand.nMaxChannels = 4;
+  rcclCandSearch s{RCCL_BACKEND_ALL, &out, fb, false, false};
+  rcclCandSearchRecord(s, RCCL_BACKEND_CE, cand, /*inWindow=*/false);
+  EXPECT_FALSE(s.bestFallbackFound)  << "out-of-window candidate must not fill fallback";
+  EXPECT_FALSE(s.bestPreferredFound) << "out-of-window candidate must not fill preferred when preferred=ALL";
+}
+
+TEST(WrapMicrotest, CandSearchRecord_OutOfWindowWithExplicitMaskSetsPreferred) {
+  // inWindow=false + explicit preferred mask: preferred fires (explicit policy
+  // beats the window guard) but fallback does not (inWindow still gates it).
+  rcclCollDecision out{}, fb{};
+  rcclCollDecision cand{}; cand.algo = NCCL_ALGO_RING; cand.nMaxChannels = 6;
+  rcclCandSearch s{RCCL_BACKEND_DDA, &out, fb, false, false};
+  rcclCandSearchRecord(s, RCCL_BACKEND_DDA, cand, /*inWindow=*/false);
+  EXPECT_TRUE(s.bestPreferredFound)  << "explicit preferred mask must set preferred regardless of inWindow";
+  EXPECT_EQ(NCCL_ALGO_RING, out.algo);
+  EXPECT_FALSE(s.bestFallbackFound)  << "out-of-window candidate must not fill fallback";
+}
+
 // ===========================================================================
 // rcclAllReducePreferredBackends -- rccl_wrap.cc.
 //
