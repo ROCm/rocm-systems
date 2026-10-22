@@ -615,6 +615,7 @@ add_executable(
     ds_memory_snapshot_test.cpp
     ds_gws_test.cpp
     buffer_lds_transfer_test.cpp
+    flat_lds_transfer_test.cpp
     scalar_buffer_store_test.cpp
     lds_test.cpp
     lds_counter_test.cpp
@@ -633,6 +634,7 @@ add_executable(
     simulated_kfd_test.cpp
     kfd_events_test.cpp
     decode_smoke_test.cpp
+    rdna4_dot_dpp_test.cpp
     readlane_selector_test.cpp
     decoder_c_api_test.cpp
     buffer_operand_test.cpp
@@ -644,11 +646,13 @@ add_executable(
     shared_infra_test.cpp
     scalar_buffer_test.cpp
     scalar_cache_policy_test.cpp
+    scalar_cache_discard_test.cpp
     transcendental_test.cpp
     comparison_test.cpp
     denormal_test.cpp
     floating_operation_test.cpp
     input_denormal_test.cpp
+    legacy_minmax_test.cpp
     minmax_test.cpp
     output_denormal_test.cpp
     output_modifier_test.cpp
@@ -694,6 +698,7 @@ add_executable(
     sysfs_test.cpp
     kfd_ioctl_test.cpp
     waitcnt_counter_test.cpp
+    wait_hazard_test.cpp
     memory_wait_scoreboard_test.cpp
     register_access_test.cpp
     register_file_test.cpp
@@ -711,6 +716,7 @@ add_executable(
     rdna_wmma_i32_test.cpp
     rdna_swmmac_i32_test.cpp
     rdna_wmma_float_test.cpp
+    rdna_swmmac_float_test.cpp
     atomic_semantics_and_decode_test.cpp
     scalar_atomic_test.cpp
     isa_target_registry_test.cpp
@@ -4061,11 +4067,31 @@ if(RJ_ENABLE_HIP_TESTS)
         )
     endif()
 
+    if(RJ_HIP_RUNTIME_SUPPORTS_GFX942)
+        rj_add_hip_test(hip_hw_id_gfx942_test ARCH gfx942 SOURCE hip_hw_id_test.cpp)
+        rj_add_hip_test_case(
+            hip_hw_id_gfx942_test
+            "HipHwIdTest.MultiXcdDispatchReportsConsistentLocation"
+            NAME "HipHwIdTest.MultiXcdDispatchReportsConsistentLocation.Gfx942"
+            CONFIG ${RJ_CDNA3_KMD_CONFIG}
+            ENVIRONMENT "RJ_HW_ID_XCDS=8" "RJ_HW_ID_SHADER_ENGINES=4" "RJ_HW_ID_CUS_PER_SE=10"
+            TIMEOUT 120
+        )
+    endif()
+
     if(RJ_HIP_RUNTIME_SUPPORTS_GFX950)
         rj_add_hip_test(hip_hw_id_test ARCH gfx950)
         rj_add_hip_test_case(
             hip_hw_id_test
             "HipHwIdTest.FourWaveWorkgroupPreservesSimdIdsAcrossBarrier"
+            TIMEOUT 120
+        )
+
+        rj_add_hip_test_case(
+            hip_hw_id_test
+            "HipHwIdTest.MultiXcdDispatchReportsConsistentLocation"
+            NAME "HipHwIdTest.MultiXcdDispatchReportsConsistentLocation.Gfx950"
+            ENVIRONMENT "RJ_HW_ID_XCDS=8" "RJ_HW_ID_SHADER_ENGINES=4" "RJ_HW_ID_CUS_PER_SE=9"
             TIMEOUT 120
         )
 

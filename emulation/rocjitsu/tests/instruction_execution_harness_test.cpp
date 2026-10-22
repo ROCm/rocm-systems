@@ -14,6 +14,7 @@
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/builders.h"
@@ -51,6 +52,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
@@ -8869,6 +8871,163 @@ TEST(HwregTest, GetregReadsModeAndStatusTargetIds) {
   }
 }
 
+TEST(HwregTest, CdnaLocationReadsUseBackedTopologyFields) {
+  for (const HwregArchCase &arch_case : kHwregArchCases) {
+    if (arch_case.arch != ROCJITSU_CODE_ARCH_CDNA3 && arch_case.arch != ROCJITSU_CODE_ARCH_CDNA4)
+      continue;
+    SCOPED_TRACE(arch_case.name);
+    amdgpu::GpuMemory memory("identity_mem");
+    amdgpu::L2Cache l2("identity_l2");
+    amdgpu::CommandProcessor cp("identity_cp");
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = arch_case.arch;
+    cfg.num_wf_slots = 32;
+    cfg.sgprs_per_wf = 104;
+    cfg.vgprs_per_wf = 256;
+    cfg.lds_size_kb = 64;
+    auto cu = amdgpu::ComputeUnitCore::create("identity_cu", cfg, &memory, &l2);
+    ASSERT_NE(cu, nullptr);
+    auto *wf = cu->dispatch_wf_at(29, 0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    ASSERT_NE(wf, nullptr);
+    uint32_t value = UINT32_MAX;
+    EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(20, 0, 4), value),
+              amdgpu::HwregAccessResult::Unsupported);
+    EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(4, 8, 8), value),
+              amdgpu::HwregAccessResult::Unsupported);
+    cu->set_command_processor(&cp);
+    // A CP without assigned topology must not imply physical XCC zero.
+    EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(20), value),
+              amdgpu::HwregAccessResult::Unsupported);
+    EXPECT_EQ(value, 0u);
+    std::vector<std::unique_ptr<amdgpu::CommandProcessor>> peer_owners;
+    std::vector<amdgpu::CommandProcessor *> peers;
+    for (uint32_t rank = 0; rank < 7; ++rank) {
+      peer_owners.push_back(
+          std::make_unique<amdgpu::CommandProcessor>("peer" + std::to_string(rank)));
+      peers.push_back(peer_owners.back().get());
+    }
+    peers.push_back(&cp);
+    cp.set_xcd_topology(7, peers);
+    // Scratch addressing may differ without changing the physical XCC identity.
+    cp.set_scratch_xcc_layout_for_test(0, 8);
+    cu->set_shader_engine_location(3, 9, 10, 10);
+    auto decoder = Decoder::create(cfg.arch);
+    ASSERT_NE(decoder, nullptr);
+    for (const auto &[field, expected] :
+         std::array<std::pair<uint16_t, uint32_t>, 9>{{{encode_hwreg(4, 0, 4), 7},
+                                                       {encode_hwreg(4, 4, 2), 1},
+                                                       {encode_hwreg(4, 0, 6), 0x17},
+                                                       {encode_hwreg(4, 8, 8), 0x69},
+                                                       {encode_hwreg(4, 12, 1), 0},
+                                                       {encode_hwreg(20, 0, 4), 7},
+                                                       {encode_hwreg(20), 7},
+                                                       {encode_hwreg(20, 4, 28), 0},
+                                                       {encode_hwreg(20, 1, 2), 3}}}) {
+      const auto words = encode_sopk(arch_case.getreg_op, 4, field);
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+      ASSERT_NE(inst, nullptr);
+      ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+      EXPECT_EQ(cu->read_sgpr(wf->sgpr_alloc().base + 4), expected);
+      EXPECT_EQ(amdgpu::write_hwreg_field(*wf, field, 0), amdgpu::HwregAccessResult::ReadOnly);
+    }
+    for (auto field : {encode_hwreg(4), encode_hwreg(4, 6, 1), encode_hwreg(4, 16, 4)})
+      EXPECT_EQ(amdgpu::read_hwreg_field(*wf, field, value),
+                amdgpu::HwregAccessResult::Unsupported);
+    cu->set_shader_engine_location(8, 9, 10, 10);
+    EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(4, 8, 8), value),
+              amdgpu::HwregAccessResult::Unsupported);
+    EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(4, 8, 4), value),
+              amdgpu::HwregAccessResult::Success);
+    EXPECT_EQ(value, 9u);
+    cu->set_shader_engine_location(3, 9, 0);
+    EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(4, 13, 3), value),
+              amdgpu::HwregAccessResult::Success);
+    EXPECT_EQ(value, 3u);
+    EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(4, 12, 1), value),
+              amdgpu::HwregAccessResult::Success);
+    EXPECT_EQ(value, 0u);
+    cu->set_shader_engine_location(3, 9, 8, 16);
+    EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(4, 8, 4), value),
+              amdgpu::HwregAccessResult::Unsupported);
+    EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(4, 13, 3), value),
+              amdgpu::HwregAccessResult::Success);
+    EXPECT_EQ(value, 3u);
+    cu->set_command_processor(nullptr);
+    EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(20, 0, 4), value),
+              amdgpu::HwregAccessResult::Unsupported);
+    wf->halt();
+  }
+}
+
+TEST(HwregTest, CdnaLocationFieldLimitsRejectAliasing) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE(arch);
+    amdgpu::GpuMemory memory("identity_limits_mem");
+    amdgpu::L2Cache l2("identity_limits_l2");
+    amdgpu::CommandProcessor cp("identity_limits_cp");
+    amdgpu::ComputeUnitCore::Config config{};
+    config.arch = arch;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 104;
+    config.vgprs_per_wf = 256;
+    config.lds_size_kb = 64;
+    auto cu = amdgpu::ComputeUnitCore::create("identity_limits_cu", config, &memory, &l2);
+    ASSERT_NE(cu, nullptr);
+    auto *wave = cu->dispatch_wf_at(0, 0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+    ASSERT_NE(wave, nullptr);
+    const auto check = [](amdgpu::Wavefront &resident, uint16_t field,
+                          amdgpu::HwregAccessResult result, uint32_t expected) {
+      SCOPED_TRACE(field);
+      uint32_t value = UINT32_MAX;
+      EXPECT_EQ(amdgpu::read_hwreg_field(resident, field, value), result);
+      EXPECT_EQ(value, expected);
+    };
+    using Result = amdgpu::HwregAccessResult;
+    for (uint32_t width : {16u, 17u}) {
+      SCOPED_TRACE(width);
+      cu->set_shader_engine_location(3, width - 1, width, width);
+      const bool representable = width == 16;
+      const auto result = representable ? Result::Success : Result::Unsupported;
+      check(*wave, encode_hwreg(4, 8, 4), result, representable ? 15 : 0);
+      check(*wave, encode_hwreg(4, 9, 2), result, representable ? 3 : 0);
+      check(*wave, encode_hwreg(4, 13, 3), Result::Success, 3);
+    }
+    for (uint32_t slot : {63u, 64u}) {
+      SCOPED_TRACE(slot);
+      // Construct unregistered slots to test the encoding limit beyond the
+      // configured CDNA residency limit of 32 slots.
+      std::unique_ptr<amdgpu::Wavefront> resident;
+      if (arch == ROCJITSU_CODE_ARCH_CDNA3)
+        resident = std::make_unique<amdgpu::IsaWavefront<cdna3::Isa>>(*cu, slot);
+      else
+        resident = std::make_unique<amdgpu::IsaWavefront<cdna4::Isa>>(*cu, slot);
+      const bool representable = slot == 63;
+      check(*resident, encode_hwreg(4, 0, 4), representable ? Result::Success : Result::Unsupported,
+            representable ? 15 : 0);
+      check(*resident, encode_hwreg(4, 4, 2), Result::Success, slot % 4);
+    }
+    cu->set_command_processor(&cp);
+    for (uint32_t rank : {15u, 16u}) {
+      SCOPED_TRACE(rank);
+      std::vector<std::unique_ptr<amdgpu::CommandProcessor>> owners;
+      std::vector<amdgpu::CommandProcessor *> peers;
+      for (uint32_t peer = 0; peer < rank; ++peer) {
+        owners.push_back(std::make_unique<amdgpu::CommandProcessor>("peer" + std::to_string(peer)));
+        peers.push_back(owners.back().get());
+      }
+      peers.push_back(&cp);
+      cp.set_xcd_topology(rank, peers);
+      for (auto field : {encode_hwreg(20), encode_hwreg(20, 0, 4)})
+        check(*wave, field, rank == 15 ? Result::Success : Result::Unsupported,
+              rank == 15 ? 15 : 0);
+      // Drop peer pointers before destroying their owners.
+      cp.set_xcd_topology(0, {&cp});
+    }
+    cu->set_command_processor(nullptr);
+    wave->halt();
+  }
+}
+
 TEST(HwregTest, CdnaSimdIdsFollowResidentWaveSlots) {
   for (const HwregArchCase &arch_case : kHwregArchCases) {
     if (arch_case.arch != ROCJITSU_CODE_ARCH_CDNA2 && arch_case.arch != ROCJITSU_CODE_ARCH_CDNA3 &&
@@ -8921,9 +9080,16 @@ TEST(HwregTest, CdnaSimdIdsFollowResidentWaveSlots) {
         EXPECT_EQ(cu->read_sgpr(wf->sgpr_alloc().base + 4), expected);
       }
 
-      for (const auto field :
-           {encode_hwreg(4), encode_hwreg(4, 0, 4), encode_hwreg(4, 3, 2), encode_hwreg(4, 5, 2),
-            encode_hwreg(4, 6, 1), encode_hwreg(4, 31, 32), encode_hwreg(63, 4, 1)}) {
+      if (arch_case.arch == ROCJITSU_CODE_ARCH_CDNA2) {
+        for (const auto field : {encode_hwreg(4, 0, 4), encode_hwreg(4, 3, 2)}) {
+          value = UINT32_MAX;
+          EXPECT_EQ(amdgpu::read_hwreg_field(*wf, field, value),
+                    amdgpu::HwregAccessResult::Unsupported);
+          EXPECT_EQ(value, 0u);
+        }
+      }
+      for (const auto field : {encode_hwreg(4), encode_hwreg(4, 5, 2), encode_hwreg(4, 6, 1),
+                               encode_hwreg(4, 31, 32), encode_hwreg(63, 4, 1)}) {
         value = UINT32_MAX;
         EXPECT_EQ(amdgpu::read_hwreg_field(*wf, field, value),
                   amdgpu::HwregAccessResult::Unsupported);
@@ -10310,26 +10476,34 @@ TEST(SdwaOutputScalingTest, HonorsFormatModesAndDestinationPlacement) {
     uint16_t packed_fmac_f16;
     uint16_t mov_b32;
     uint16_t frexp_exp_f32;
+    uint16_t min_f16;
+    uint16_t max_f16;
   };
   constexpr std::array kArchitectures{
       ArchCase{ROCJITSU_CODE_ARCH_CDNA4, cdna4::kVAddF32Vop2, cdna4::kVAddF16Vop2,
                cdna4::kVMulF32Vop2, cdna4::kVMulF16Vop2, cdna4::kVRcpF32Vop1, cdna4::kVRcpF16Vop1,
-               cdna4::kVPkFmacF16Vop2, cdna4::kVMovB32Vop1, cdna4::kVFrexpExpI32F32Vop1},
+               cdna4::kVPkFmacF16Vop2, cdna4::kVMovB32Vop1, cdna4::kVFrexpExpI32F32Vop1,
+               cdna4::kVMinF16Vop2, cdna4::kVMaxF16Vop2},
       ArchCase{ROCJITSU_CODE_ARCH_CDNA3, cdna3::kVAddF32Vop2, cdna3::kVAddF16Vop2,
                cdna3::kVMulF32Vop2, cdna3::kVMulF16Vop2, cdna3::kVRcpF32Vop1, cdna3::kVRcpF16Vop1,
-               cdna3::kVPkFmacF16Vop2, cdna3::kVMovB32Vop1, cdna3::kVFrexpExpI32F32Vop1},
+               cdna3::kVPkFmacF16Vop2, cdna3::kVMovB32Vop1, cdna3::kVFrexpExpI32F32Vop1,
+               cdna3::kVMinF16Vop2, cdna3::kVMaxF16Vop2},
       ArchCase{ROCJITSU_CODE_ARCH_CDNA2, cdna2::kVAddF32Vop2, cdna2::kVAddF16Vop2,
                cdna2::kVMulF32Vop2, cdna2::kVMulF16Vop2, cdna2::kVRcpF32Vop1, cdna2::kVRcpF16Vop1,
-               cdna2::kVPkFmacF16Vop2, cdna2::kVMovB32Vop1, cdna2::kVFrexpExpI32F32Vop1},
+               cdna2::kVPkFmacF16Vop2, cdna2::kVMovB32Vop1, cdna2::kVFrexpExpI32F32Vop1,
+               cdna2::kVMinF16Vop2, cdna2::kVMaxF16Vop2},
       ArchCase{ROCJITSU_CODE_ARCH_CDNA1, cdna1::kVAddF32Vop2, cdna1::kVAddF16Vop2,
                cdna1::kVMulF32Vop2, cdna1::kVMulF16Vop2, cdna1::kVRcpF32Vop1, cdna1::kVRcpF16Vop1,
-               cdna1::kVPkFmacF16Vop2, cdna1::kVMovB32Vop1, cdna1::kVFrexpExpI32F32Vop1},
+               cdna1::kVPkFmacF16Vop2, cdna1::kVMovB32Vop1, cdna1::kVFrexpExpI32F32Vop1,
+               cdna1::kVMinF16Vop2, cdna1::kVMaxF16Vop2},
       ArchCase{ROCJITSU_CODE_ARCH_RDNA2, rdna2::kVAddF32Vop2, rdna2::kVAddF16Vop2,
                rdna2::kVMulF32Vop2, rdna2::kVMulF16Vop2, rdna2::kVRcpF32Vop1, rdna2::kVRcpF16Vop1,
-               rdna2::kVPkFmacF16Vop2, rdna2::kVMovB32Vop1, rdna2::kVFrexpExpI32F32Vop1},
+               rdna2::kVPkFmacF16Vop2, rdna2::kVMovB32Vop1, rdna2::kVFrexpExpI32F32Vop1,
+               rdna2::kVMinF16Vop2, rdna2::kVMaxF16Vop2},
       ArchCase{ROCJITSU_CODE_ARCH_RDNA1, rdna1::kVAddF32Vop2, rdna1::kVAddF16Vop2,
                rdna1::kVMulF32Vop2, rdna1::kVMulF16Vop2, rdna1::kVRcpF32Vop1, rdna1::kVRcpF16Vop1,
-               rdna1::kVPkFmacF16Vop2, rdna1::kVMovB32Vop1, rdna1::kVFrexpExpI32F32Vop1},
+               rdna1::kVPkFmacF16Vop2, rdna1::kVMovB32Vop1, rdna1::kVFrexpExpI32F32Vop1,
+               rdna1::kVMinF16Vop2, rdna1::kVMaxF16Vop2},
   };
   struct ValueCase {
     uint16_t opcode;
@@ -10372,6 +10546,23 @@ TEST(SdwaOutputScalingTest, HonorsFormatModesAndDestinationPlacement) {
         ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x3c00u, 1, 0, 0x4400u},
         ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x3c00u, 2, 0, 0x4800u},
         ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x3c00u, 3, 0, 0x3c00u},
+        ValueCase{architecture.max_f16, false, true, 0x3c00u, 0x4000u, 1, 0, 0x4400u},
+        ValueCase{architecture.min_f16, false, true, 0x3c00u, 0x4000u, 2, 0, 0x4400u},
+        ValueCase{architecture.max_f16, false, true, 0x3c00u, 0x4000u, 3, 0, 0x3c00u},
+        ValueCase{architecture.min_f16, false, true, 0x3c00u, 0x4000u, 1, 0, 0x4000u},
+        ValueCase{architecture.max_f16, false, true, 0x3c00u, 0x4000u, 2, 0, 0x4800u},
+        ValueCase{architecture.min_f16, false, true, 0x3c00u, 0x4000u, 3, 0, 0x3800u},
+        // OMOD uses the F16/F64 denormal field and is suppressed by IEEE.
+        ValueCase{architecture.max_f16, false, true, 0x3c00u, 0x4000u, 1, 2u << 6, 0x4000u},
+        ValueCase{architecture.min_f16, false, true, 0x3c00u, 0x4000u, 2, 2u << 4, 0x4400u},
+        ValueCase{architecture.max_f16, false, true, 0x3c00u, 0x4000u, 1,
+                  amdgpu::Wavefront::IEEE_BIT, 0x4000u},
+        ValueCase{architecture.min_f16, false, true, 0x3c00u, 0x4000u, 2,
+                  amdgpu::Wavefront::IEEE_BIT, 0x3c00u},
+        ValueCase{architecture.max_f16, false, true, 0x3c00u, 0x4000u, 1, 0, 0x4400beefu,
+                  amdgpu::sdwa::WORD_1},
+        ValueCase{architecture.min_f16, false, true, 0x3c00u, 0x4000u, 2, 0, 0x3c00u,
+                  amdgpu::sdwa::DWORD, true},
         // Current emulator SDWA behavior, not capture-backed: scaling and
         // directed guest rounding apply to the same wide result.
         ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x1000u, 1, 1u << 2, 0x4001u},

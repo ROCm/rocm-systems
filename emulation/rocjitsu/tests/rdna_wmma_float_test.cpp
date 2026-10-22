@@ -1,7 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Native FP8/BF8 accumulation and mixed-format regressions.
+// Dense FP8/BF8 arithmetic, mixed formats, and FP16/BF16 packed accumulators.
+#include "fixtures/float_dot/rdna_f16_samples.h"
 #include "fixtures/float_dot/rdna_f8_samples.h"
 #include "rdna_matrix_test_util.h"
 using namespace rocjitsu;
@@ -9,11 +10,11 @@ using namespace rocjitsu::matrix_test;
 
 TEST(RdnaWmmaFloat, NativeF8Arithmetic) {
   // FP8_FP8, wave64: finite nonuniform inputs and D overlapping A.
-  check(ROCJITSU_CODE_ARCH_RDNA4, 64, {0xcc464000u, 0x1c421100u}, 0x000000f0u, f8_input(64, false),
-        kWmmaFp8);
+  check(ROCJITSU_CODE_ARCH_RDNA4, 64, {0xcc464000u, 0x1c421100u}, 0x000000f0u,
+        float_input(64, 8, false, /*gfx12=*/true), kWmmaFp8);
   // BF8_BF8, wave32: finite nonuniform inputs and D overlapping B.
-  check(ROCJITSU_CODE_ARCH_RDNA4, 32, {0xcc494008u, 0x1c421100u}, 0x000000f0u, f8_input(32, true),
-        kWmmaBf8);
+  check(ROCJITSU_CODE_ARCH_RDNA4, 32, {0xcc494008u, 0x1c421100u}, 0x000000f0u,
+        float_input(32, 8, true, /*gfx12=*/true), kWmmaBf8);
   // FP8_BF8: the two operand formats must not be interchanged.
   check(ROCJITSU_CODE_ARCH_RDNA4, 32, {0xcc474018u, 0x1c421100u}, 0x000000f0u,
         uniform_input({0x013840b8u, 0x407b3c01u, 0xbf000000u, 0x13579bdfu, 0xeeddc988u}),
@@ -45,4 +46,33 @@ TEST(RdnaWmmaFloat, NativeF8Arithmetic) {
   check(ROCJITSU_CODE_ARCH_RDNA4, 64, {0xcc464418u, 0x1c421100u}, 0xf0,
         uniform_input({0x38383838u, 0x38383838u, 0xbf800000u, 0, 0}),
         {{0, 0x41700000u}, {255, 0x41700000u}});
+}
+
+TEST(RdnaWmmaFloat, PackedHalvesAndAccumulator) {
+  Registers input = float_input(64, 16, false, /*gfx12=*/false);
+  check(ROCJITSU_CODE_ARCH_RDNA3, 64, {0xcc426018u, 0x1c421100u}, 0xf0, input, kWmmaF16Gfx11High);
+  // RDNA3 FP16: write the low half and preserve the other destination half.
+  check(ROCJITSU_CODE_ARCH_RDNA3, 32, {0xcc424018u, 0x1c421100u}, 0x000000f0u,
+        uniform_input({0xbc003c00u, 0x42004000u, 0xc0003c00u, 0x13579bdfu, 0xeeddc988u}),
+        {{0, 0x1357c700u}, {255, 0x1357c700u}});
+  // RDNA3 FP16: write the high half and preserve the other destination half.
+  check(ROCJITSU_CODE_ARCH_RDNA3, 32, {0xcc426018u, 0x1c421100u}, 0x000000f0u,
+        uniform_input({0xbc003c00u, 0x42004000u, 0xc0003c00u, 0x13579bdfu, 0xeeddc988u}),
+        {{0, 0xc9009bdfu}, {255, 0xc9009bdfu}});
+  // RDNA3 BF16 flushes C on input, before adding one minimum-normal product.
+  Registers tiny_c = uniform_input({0, 0, 0x007f007fu, 0x13579bdfu, 0});
+  for (uint32_t lane = 0; lane < 32; ++lane) {
+    tiny_c[0][lane] = 0x00000080u;
+    tiny_c[8][lane] = 0x00003f80u;
+  }
+  check(ROCJITSU_CODE_ARCH_RDNA3, 32, {0xcc434018u, 0x1c421100u}, 0xf0, tiny_c,
+        {{0, 0x13570080u}, {255, 0x13570080u}});
+  // RDNA4 BF16: zero products preserve the subnormal packed accumulator.
+  check(ROCJITSU_CODE_ARCH_RDNA4, 64, {0xcc434018u, 0x1c421100u}, 0x000000f0u,
+        uniform_input({0x00000000u, 0x00000000u, 0x00010001u, 0x13579bdfu, 0xeeddc988u}),
+        {{0, 0x00010001u}, {127, 0x00010001u}}, 128);
+  // BF16 factors with FP32 accumulation use distinct raw encodings from FP16.
+  check(ROCJITSU_CODE_ARCH_RDNA4, 32, {0xcc414018u, 0x1c421100u}, 0x000000f0u,
+        uniform_input({0xbf803f80u, 0x40404000u, 0xbf000000u, 0x13579bdfu, 0xeeddc988u}),
+        {{0, 0xc1080000u}, {255, 0xc1080000u}});
 }
