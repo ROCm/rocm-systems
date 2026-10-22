@@ -350,17 +350,19 @@ const AMDGpuMetricsUnitTypeTranslationTbl_t amdgpu_metrics_unit_type_translation
 // is_gpu_metrics_version_supported(), so the version a caller is told about and
 // the object built for it always come from the same decision.
 //
-// Resolve a metrics header to its version flag without logging. Minor revisions
-// are byte-prefix supersets of the newest struct we model, so an APU exposing
-// gpu_metrics v2.1-v2.3 is read with the v2.4 layout (its extra trailing fields
-// report as not-applicable). v2.0 is excluded: it stores system_clock_counter
-// right after the header instead of after the temperature/utilization block, so
-// it is not a byte-prefix of v2.1+ and is left unmodeled. Returns kGpuMetricNone
-// when the version cannot be modeled.
+// Resolve a metrics header to its version flag without logging.
+//
 // Format revisions and the content-revision bounds each one covers. The GPU and
-// partition families switch to a kernel-described layout from a given revision
-// on, and the APU family is modeled by one struct whose older revisions are
-// byte-prefixes of it; v2.0 is excluded because it orders its fields differently.
+// partition families switch to a kernel-described layout from a given revision on.
+// The APU family is modeled by the single v2.4 struct, and the older revisions are
+// byte prefixes of it: v2.1-v2.3 stop short of its tail, so an APU exposing one of
+// them is read with the v2.4 layout and the trailing fields its own revision does
+// not carry report as not-applicable. v2.0 is excluded: it stores
+// system_clock_counter right after the header instead of after the
+// temperature/utilization block, so it is not a prefix of v2.1+ and is left
+// unmodeled. v3.0 is a separate layout rather than a prefix of v2.4, so it is
+// matched by the explicit table above and read through its own struct. Returns
+// kGpuMetricNone when the version cannot be modeled.
 constexpr auto kGpuMetricsFormatRevision = std::uint8_t(1);
 constexpr auto kApuMetricsFormatRevision = std::uint8_t(2);
 constexpr auto kGpuMetricsFirstDynamicContentRevision = std::uint8_t(9);
@@ -368,7 +370,7 @@ constexpr auto kPartitionMetricsFirstDynamicContentRevision = std::uint8_t(2);
 constexpr auto kApuMetricsFirstPrefixContentRevision = std::uint8_t(1);
 constexpr auto kApuMetricsLastPrefixContentRevision = std::uint8_t(4);
 
-AMDGpuMetricVersionFlags_t lookup_header_flag_version(
+static AMDGpuMetricVersionFlags_t lookup_header_flag_version(
     const AMDGpuMetricsHeader_v1_t& metrics_header, bool is_partition_metrics) {
   const auto flag_version = join_metrics_version(metrics_header);
   if (!is_partition_metrics) {
@@ -2779,11 +2781,30 @@ AMGpuMetricsPublicLatestTupl_t ApuMetricsBase_v30_t::copy_internal_to_external_m
     }
     return static_cast<PublicPowerT>(std::min<uint32_t>(rounded_watts, max_power));
   };
+  // v2.1/v2.2 firmware reports GFX/MM activity in hundredths of a percent. v2.3/v2.4 come only
+  // from Van Gogh, whose current firmware interface reports whole percent, as v3.0 GFX does.
+  auto convert_apu_activity_centi_to_public_percent = [](auto activity_centi) {
+    using InputT = decltype(activity_centi);
+    // The not-applicable sentinel is not a reading; scaling it would turn it into 655.
+    if (activity_centi == std::numeric_limits<InputT>::max()) {
+      return activity_centi;
+    }
+    return static_cast<InputT>((activity_centi + 50) / 100);
+  };
 
   if (get_gpu_metrics_version_used() == AMDGpuMetricVersionFlags_t::kApuMetricV24) {
     const auto& metrics = m_apu_metrics_v24_tbl;
     auto& apu = m_apu_metrics_tbl;
     set_common_header(metrics.m_common_header);
+    const bool activity_in_centi = metrics.m_common_header.m_content_revision <= 2;
+    const auto gfx_activity =
+        activity_in_centi
+            ? convert_apu_activity_centi_to_public_percent(metrics.m_average_gfx_activity)
+            : metrics.m_average_gfx_activity;
+    const auto mm_activity =
+        activity_in_centi
+            ? convert_apu_activity_centi_to_public_percent(metrics.m_average_mm_activity)
+            : metrics.m_average_mm_activity;
 
     apu.temperature_gfx = metrics.m_temperature_gfx;
     apu.temperature_soc = metrics.m_temperature_soc;
@@ -2795,8 +2816,8 @@ AMGpuMetricsPublicLatestTupl_t ApuMetricsBase_v30_t::copy_internal_to_external_m
                 std::min(static_cast<uint32_t>(RSMI_APU_MAX_L3),
                          static_cast<uint32_t>(std::size(apu.temperature_l3))),
                 apu.temperature_l3);
-    apu.average_gfx_activity = metrics.m_average_gfx_activity;
-    apu.average_mm_activity = metrics.m_average_mm_activity;
+    apu.average_gfx_activity = gfx_activity;
+    apu.average_mm_activity = mm_activity;
     apu.average_socket_power = metrics.m_average_socket_power;
     apu.average_cpu_power = metrics.m_average_cpu_power;
     apu.average_soc_power = metrics.m_average_soc_power;
@@ -2845,8 +2866,8 @@ AMGpuMetricsPublicLatestTupl_t ApuMetricsBase_v30_t::copy_internal_to_external_m
     apu.average_soc_current = metrics.m_average_soc_current;
     apu.average_gfx_current = metrics.m_average_gfx_current;
 
-    metrics_public_init.average_gfx_activity = metrics.m_average_gfx_activity;
-    metrics_public_init.average_mm_activity = metrics.m_average_mm_activity;
+    metrics_public_init.average_gfx_activity = gfx_activity;
+    metrics_public_init.average_mm_activity = mm_activity;
     metrics_public_init.average_socket_power =
         convert_apu_power_mw_to_public_w(metrics.m_average_socket_power);
     metrics_public_init.system_clock_counter = metrics.m_system_clock_counter;
@@ -2883,7 +2904,9 @@ AMGpuMetricsPublicLatestTupl_t ApuMetricsBase_v30_t::copy_internal_to_external_m
       apu.temperature_skin = kTempNotAvailable;
     }
     apu.average_gfx_activity = metrics.m_average_gfx_activity;
-    apu.average_vcn_activity = metrics.m_average_vcn_activity;
+    // v3.0 VCN activity is in hundredths; the kernel divides it by 100 for vcn_busy_percent.
+    apu.average_vcn_activity =
+        convert_apu_activity_centi_to_public_percent(metrics.m_average_vcn_activity);
     std::copy_n(std::begin(metrics.m_average_ipu_activity),
                 std::min(static_cast<uint32_t>(RSMI_APU_MAX_IPU),
                          static_cast<uint32_t>(std::size(apu.average_ipu_activity))),
@@ -5092,7 +5115,7 @@ auto Device::dev_read_gpu_metrics_all_data(DevInfoTypes type) -> rsmi_status_t {
     }
 
   } else {
-    // Metric tables are versioned supersets: a device may report an older,
+    // Metric tables grow by appending, so a device may report an older,
     // shorter revision than the newest struct we model (e.g. an APU exposing
     // gpu_metrics v2.1 into the v2.4 layout). Pre-fill the destination with the
     // not-applicable sentinel and never read past our own buffer, so trailing
@@ -5476,9 +5499,10 @@ auto Device::dev_copy_internal_to_external_metrics(DevInfoTypes type)
   std::string gpu_metrics_path = get_sys_file_path_by_type(type, true);
 
   if (!m_gpu_metrics_ptr) {
-    // Callers stop on the NOT_SUPPORTED reported while reading the header, so a
-    // missing object here means a recognized version produced no table -- a
-    // genuine data inconsistency rather than an unsupported revision.
+    // Setup is what reports an unsupported revision; reaching this point without an
+    // object means a version this library does model produced no table, which is a
+    // data inconsistency. The status is therefore fixed, so log it as an error
+    // rather than routing it through the by-status helper.
     status_code = rsmi_status_t::RSMI_STATUS_UNEXPECTED_DATA;
     ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
        << " | Fail "
@@ -5488,7 +5512,7 @@ auto Device::dev_copy_internal_to_external_metrics(DevInfoTypes type)
                                   gpu_metrics_path)
        << " | Cause: Couldn't get a valid metric object"
        << " | Returning = " << getRSMIStatusString(status_code, false) << " |";
-    log_by_metrics_status(ss, status_code);
+    LOG_ERROR(ss);
     return std::make_tuple(status_code, AMGpuMetricsPublicLatest_t());
   }
 
@@ -5732,6 +5756,20 @@ rsmi_status_t log_metrics_setup_failure(const char* caller, uint32_t dv_ind, Dev
  */
 // log current gpu_metrics file content read
 // any metrics value can be a nullptr
+// The copy stage hands back a pointer into the device's own metrics object, which a
+// concurrent call on the same device can replace while this caller is still reading
+// it -- the device lock is released as soon as this function returns. Re-point the
+// caller at a thread-local copy taken while that lock is still held, which is also
+// the lifetime the public headers promise for this pointer.
+static void rebind_apu_metrics_to_thread_local(rsmi_gpu_metrics_t* metrics) {
+  if (metrics == nullptr || metrics->apu_metrics == nullptr) {
+    return;
+  }
+  thread_local rsmi_apu_metrics_t apu_metrics_copy{};
+  apu_metrics_copy = *metrics->apu_metrics;
+  metrics->apu_metrics = &apu_metrics_copy;
+}
+
 rsmi_status_t rsmi_dev_gpu_metrics_info_get(uint32_t dv_ind, rsmi_gpu_metrics_t* smu) {
   TRY DEVICE_MUTEX CHK_SUPPORT_NAME_ONLY(smu)
 
@@ -5796,6 +5834,7 @@ rsmi_status_t rsmi_dev_gpu_metrics_info_get(uint32_t dv_ind, rsmi_gpu_metrics_t*
   }
 
   *smu = external_metrics;
+  rebind_apu_metrics_to_thread_local(smu);
   ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
      << " | Success "
      << " | Device #: " << dv_ind << " | Type: " << Device::get_type_string(type)
@@ -5875,6 +5914,7 @@ rsmi_status_t rsmi_dev_gpu_partition_metrics_info_get(uint32_t dv_ind, rsmi_gpu_
   }
 
   *smu = external_metrics;
+  rebind_apu_metrics_to_thread_local(smu);
   ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
      << " | Success "
      << " | Device #: " << dv_ind << " | Type: " << Device::get_type_string(type)
