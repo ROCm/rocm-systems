@@ -26,10 +26,18 @@ static ncclResult_t DefaultIonicdvQpSetPuecPlaneRoute(struct ibv_qp*, uint8_t, s
 std::function<ncclResult_t(struct ibv_qp*, uint8_t, struct ionic_dv_puec_route*)> g_ionicdvQpSetPuecPlaneRoute =
     DefaultIonicdvQpSetPuecPlaneRoute;
 
+static uint8_t DefaultIonicdvCtxGetUdmaCount(struct ibv_context*) { return 0; }
+std::function<uint8_t(struct ibv_context*)> g_ionicdvCtxGetUdmaCount = DefaultIonicdvCtxGetUdmaCount;
+
+static uint8_t DefaultIonicdvQpGetUdmaIdx(struct ibv_qp*) { return 0xFF; }
+std::function<uint8_t(struct ibv_qp*)> g_ionicdvQpGetUdmaIdx = DefaultIonicdvQpGetUdmaIdx;
+
 ASSERT_HOOK_MATCHES_PROD(g_ionicdvSymbols, wrap_ionicdv_symbols);
 ASSERT_HOOK_MATCHES_PROD(g_ionicdvQpSetGda, wrap_ionicdv_qp_set_gda);
 ASSERT_HOOK_MATCHES_PROD(g_ionicdvPdSetUdmaMask, wrap_ionicdv_pd_set_udma_mask);
 ASSERT_HOOK_MATCHES_PROD(g_ionicdvQpSetPuecPlaneRoute, wrap_ionicdv_qp_set_puec_plane_route);
+ASSERT_HOOK_MATCHES_PROD(g_ionicdvCtxGetUdmaCount, wrap_ionicdv_ctx_get_udma_count);
+ASSERT_HOOK_MATCHES_PROD(g_ionicdvQpGetUdmaIdx, wrap_ionicdv_qp_get_udma_idx);
 
 ncclResult_t wrap_ionicdv_symbols(void) { return g_ionicdvSymbols(); }
 ncclResult_t wrap_ionicdv_qp_set_gda(struct ibv_qp* ibqp, bool enable_send, bool enable_recv) {
@@ -42,10 +50,14 @@ ncclResult_t wrap_ionicdv_qp_set_puec_plane_route(struct ibv_qp* qp, uint8_t pla
                                                   struct ionic_dv_puec_route* route) {
   return g_ionicdvQpSetPuecPlaneRoute(qp, plane_idx, route);
 }
+uint8_t wrap_ionicdv_ctx_get_udma_count(struct ibv_context* ibctx) { return g_ionicdvCtxGetUdmaCount(ibctx); }
+uint8_t wrap_ionicdv_qp_get_udma_idx(struct ibv_qp* ibqp) { return g_ionicdvQpGetUdmaIdx(ibqp); }
 
 void ResetIonicdvwrapFakes() {
   g_ionicdvSymbols = DefaultIonicdvSymbols;
   g_ionicdvQpSetGda = DefaultIonicdvQpSetGda;
   g_ionicdvPdSetUdmaMask = DefaultIonicdvPdSetUdmaMask;
   g_ionicdvQpSetPuecPlaneRoute = DefaultIonicdvQpSetPuecPlaneRoute;
+  g_ionicdvCtxGetUdmaCount = DefaultIonicdvCtxGetUdmaCount;
+  g_ionicdvQpGetUdmaIdx = DefaultIonicdvQpGetUdmaIdx;
 }

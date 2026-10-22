@@ -977,6 +977,21 @@ TEST_F(NetIbCastInitAinicMicrotest, InitDevices_Ainic_EnablesCtsOffloadAndInline
   EXPECT_FALSE(IbCastMultiplaneEnable);
 }
 
+TEST_F(NetIbCastInitAinicMicrotest, InitDevices_Ainic_StoresEachDevicesNormalizedUdmaCount) {
+  World().AddHca("ionic_1");
+  World().AddHca("ionic_2");
+  // 0 is a driver without the query, which keeps the two legacy engines; an 8-bit mask caps it at 8.
+  const std::map<std::string, uint8_t> raw = {{"ionic_0", 4}, {"ionic_1", 0}, {"ionic_2", 9}};
+  ScopedHook count(g_ionicdvCtxGetUdmaCount, [&](ibv_context* ctx) -> uint8_t {
+    FakeHca* hca = World().Find(ctx);
+    return hca ? raw.at(hca->device.name) : 0;
+  });
+  ASSERT_EQ(Init(), ncclSuccess);
+  std::map<std::string, int> got;
+  for (int d = 0; d < IbCastNDevs; d++) got[IbCastDevs[d].devName] = IbCastDevs[d].capsProvider.ionic.udmaCount;
+  EXPECT_EQ(got, (std::map<std::string, int>{{"ionic_0", 4}, {"ionic_1", 2}, {"ionic_2", 8}}));
+}
+
 TEST_F(NetIbCastInitAinicMicrotest, InitDevices_AinicOffloadOff_KeepsInlineAsConfigured) {
   params_.Set("RCCL_CTS_OFFLOAD_ENABLED", 0);
   params_.Set("GDR_FLUSH_DISABLE", 0);
@@ -1058,7 +1073,9 @@ TEST_F(NetIbCastInitAinicMicrotest, InitDevices_AinicWithResiliency_DropsOffload
 TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_NotAinic_LeavesOffloadOffAndReadsInline) {
   World().AddHca("mlx5_0");
   params_.Set("IB_USE_INLINE", 1);
+  ScopedHook count(g_ionicdvCtxGetUdmaCount, [](ibv_context*) -> uint8_t { return 4; });
   ASSERT_EQ(Init(), ncclSuccess);
+  EXPECT_EQ(count.calls, 0);
   EXPECT_FALSE(IbCastAinicRoce);
   EXPECT_FALSE(IbCastOffloadEnabled);
   EXPECT_TRUE(IbCastUseInline);
@@ -1259,6 +1276,7 @@ TEST_F(NetIbCastInitPropertiesMicrotest, GetProperties_ReportsTheDeviceAndItsLim
 }
 
 TEST_F(NetIbCastInitPropertiesMicrotest, GetProperties_DataDirectAndCtsOffload_ChangeFlushAndRecvs) {
+  IbCastDevs[0].ibProvider = IB_PROVIDER_MLX5;
   IbCastDevs[0].capsProvider.mlx5.dataDirect = 1;
   IbCastOffloadEnabled = true;
   params_.Set("RCCL_IB_P2P_DISABLE_CTS", 0);
@@ -1269,6 +1287,18 @@ TEST_F(NetIbCastInitPropertiesMicrotest, GetProperties_DataDirectAndCtsOffload_C
   params_.Set("RCCL_IB_P2P_DISABLE_CTS", 1);  // offload without CTS: the full count again
   ASSERT_EQ(IbCastGetProperties(0, &props), ncclSuccess);
   EXPECT_EQ(props.maxRecvs, NCCL_NET_IB_MAX_RECVS);
+}
+
+// An ionic device's uDMA count shares capsProvider with mlx5.dataDirect.
+TEST_F(NetIbCastInitPropertiesMicrotest, GetProperties_OnlyAnMlx5DataDirectDeviceForcesFlush) {
+  IbCastDevs[0].capsProvider.ionic.udmaCount = 2;
+  ncclNetProperties_t props;
+  ASSERT_EQ(IbCastGetProperties(0, &props), ncclSuccess);
+  EXPECT_EQ(props.forceFlush, 0);
+  IbCastDevs[0].ibProvider = IB_PROVIDER_MLX5;
+  IbCastDevs[0].capsProvider.mlx5.dataDirect = 0;
+  ASSERT_EQ(IbCastGetProperties(0, &props), ncclSuccess);
+  EXPECT_EQ(props.forceFlush, 0);
 }
 
 TEST_F(NetIbCastInitPropertiesMicrotest, GetProperties_MergedDevice_ReportsTheFusedNameSpeedAndIds) {

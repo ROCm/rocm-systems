@@ -155,6 +155,7 @@ TEST_F(NetIbCastRegMicrotest, RegMrDmaBuf_PassesTheFdOffsetAndIova) {
 }
 
 TEST_F(NetIbCastRegMicrotest, RegMrDmaBuf_DataDirectDevice_GoesThroughMlx5WithTheDataDirectFlag) {
+  IbCastDevs[0].ibProvider = IB_PROVIDER_MLX5;
   IbCastDevs[0].capsProvider.mlx5.dataDirect = 1;
   ScopedHook dmabuf(g_mlx5dvRegDmabufMr, [this](struct ibv_mr** ret, struct ibv_pd*, uint64_t offset, size_t length,
                                                 uint64_t iova, int fd, int access, int mlx5Access) {
@@ -166,6 +167,25 @@ TEST_F(NetIbCastRegMicrotest, RegMrDmaBuf_DataDirectDevice_GoesThroughMlx5WithTh
   ASSERT_EQ(calls_.size(), 1u);
   EXPECT_EQ(calls_[0].mlx5Access, MLX5DV_REG_DMABUF_ACCESS_DATA_DIRECT);
   EXPECT_EQ(calls_[0].fd, 5);
+  EXPECT_EQ(IbCastDeregMr(send_.get(), mhandle), ncclSuccess);
+}
+
+// An ionic device's uDMA count shares capsProvider with mlx5.dataDirect.
+TEST_F(NetIbCastRegMicrotest, RegMrDmaBuf_OnlyAnMlx5DataDirectDeviceGoesThroughMlx5) {
+  IbCastDevs[0].capsProvider.ionic.udmaCount = 2;
+  ScopedHook dmabuf(g_ibvRegDmabufMr, [this](struct ibv_mr** ret, struct ibv_pd*, uint64_t offset, size_t length,
+                                             uint64_t iova, int fd, int access) {
+    *ret = NextMr(nullptr, length, iova, offset, fd, access, 0);
+    return ncclSuccess;
+  });
+  void* mhandle = nullptr;
+  ASSERT_EQ(IbCastRegMrDmaBuf(send_.get(), buf_, 8, NCCL_PTR_CUDA, 0, 5, &mhandle), ncclSuccess);
+  EXPECT_EQ(dmabuf.calls, 1);
+  EXPECT_EQ(IbCastDeregMr(send_.get(), mhandle), ncclSuccess);
+  IbCastDevs[0].ibProvider = IB_PROVIDER_MLX5;
+  IbCastDevs[0].capsProvider.mlx5.dataDirect = 0;
+  ASSERT_EQ(IbCastRegMrDmaBuf(send_.get(), buf_, 8, NCCL_PTR_CUDA, 0, 5, &mhandle), ncclSuccess);
+  EXPECT_EQ(dmabuf.calls, 2);
   EXPECT_EQ(IbCastDeregMr(send_.get(), mhandle), ncclSuccess);
 }
 
