@@ -162,6 +162,8 @@ The ``decode_params`` input parameter is used to specify the decoding parameters
       const RocJpegDecodeParams *decode_params,
       RocJpegImage *destination);
 
+The decode submit functions, ``rocJpegDecode()``, ``rocJpegDecodeBatched()``, ``rocJpegDecodeAsync()``, and ``rocJpegDecodeBatchedAsync()``, must not be called from more than one thread at the same time on the same ``RocJpegHandle``. To decode from several threads, create a handle per thread. ``rocJpegDecodeSync()`` and ``rocJpegDecodeBatchedSync()`` can be called from another thread while an asynchronous submit runs on the same handle.
+
 For more information on decoding streams, see `Decoding a JPEG stream with rocJPEG <./rocjpeg-decoding-a-jpeg-stream.html>`_.
 
 

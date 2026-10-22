@@ -400,6 +400,10 @@ RocJpegStatus ROCJPEGAPI rocJpegGetImageInfo(RocJpegHandle handle, RocJpegStream
  * The stream handle and the data it was parsed from are used until this function returns; do not parse,
  * destroy, or modify them before then.
  *
+ * The decode submit functions (rocJpegDecode(), rocJpegDecodeBatched(), rocJpegDecodeAsync(), and
+ * rocJpegDecodeBatchedAsync()) must not be called from more than one thread at the same time on the same handle.
+ * To decode from several threads, create a handle per thread.
+ *
  * @param handle The rocJpegHandle representing the rocJPEG decoder instance.
  * @param jpeg_stream_handle The rocJpegStreamHandle representing the input JPEG stream.
  * @param decode_params A pointer to RocJpegDecodeParams containing the decoding parameters.
@@ -418,6 +422,10 @@ RocJpegStatus ROCJPEGAPI rocJpegDecode(RocJpegHandle handle, RocJpegStreamHandle
  * The stream handles and the data they were parsed from are used until this function returns; do not parse,
  * destroy, or modify them before then. To parse the next batch while this one is decoding, use a different set
  * of stream handles.
+ *
+ * The decode submit functions (rocJpegDecode(), rocJpegDecodeBatched(), rocJpegDecodeAsync(), and
+ * rocJpegDecodeBatchedAsync()) must not be called from more than one thread at the same time on the same handle.
+ * To decode from several threads, create a handle per thread.
  *
  * @param handle The rocJPEG handle.
  * @param jpeg_stream_handles An array of rocJPEG stream handles representing the input JPEG streams.
@@ -447,9 +455,11 @@ extern const char* ROCJPEGAPI rocJpegGetErrorName(RocJpegStatus rocjpeg_status);
  * This function is one half of the rocJpegDecodeAsync/rocJpegDecodeSync pair. It submits the
  * decode to hardware and returns immediately. The caller must subsequently call rocJpegDecodeSync()
  * on the same handle to wait for completion and retrieve the decoded output.
- * These two calls must not be issued concurrently on the same handle. The intended usage is a
- * producer/consumer model where one thread calls rocJpegDecodeAsync() and a separate thread
- * calls rocJpegDecodeSync().
+ * The intended usage is a producer/consumer model where one thread calls rocJpegDecodeAsync() and a
+ * separate thread calls rocJpegDecodeSync(); the two threads can run these calls at the same time on the
+ * same handle. The decode submit functions (rocJpegDecode(), rocJpegDecodeBatched(), rocJpegDecodeAsync(),
+ * and rocJpegDecodeBatchedAsync()) must not be called from more than one thread at the same time on the
+ * same handle.
  *
  * The stream handle and the data it was parsed from are no longer used once this function returns, so they
  * can be parsed again, destroyed, or freed before rocJpegDecodeSync() is called.
@@ -469,9 +479,9 @@ RocJpegStatus ROCJPEGAPI rocJpegDecodeAsync(RocJpegHandle handle, RocJpegStreamH
  *
  * This function is one half of the rocJpegDecodeAsync/rocJpegDecodeSync pair. It must be called
  * after rocJpegDecodeAsync() on the same handle to wait for the decode to complete and copy the
- * result to the destination buffer. These two calls must not be issued concurrently on the same
- * handle. The intended usage is a producer/consumer model where one thread calls
- * rocJpegDecodeAsync() and a separate thread calls rocJpegDecodeSync().
+ * result to the destination buffer. The intended usage is a producer/consumer model where one thread
+ * calls rocJpegDecodeAsync() and a separate thread calls rocJpegDecodeSync(); the two threads can run
+ * these calls at the same time on the same handle.
  *
  * @param handle The rocJPEG handle.
  * @param destination A pointer to RocJpegImage where the decoded image will be stored.
@@ -488,9 +498,11 @@ RocJpegStatus ROCJPEGAPI rocJpegDecodeSync(RocJpegHandle handle, RocJpegImage *d
  * submits all images in the batch to the hardware decoder and returns immediately without waiting
  * for the decodes to complete or copying the results to the destination buffers. The caller must
  * subsequently call rocJpegDecodeBatchedSync() on the same handle to wait for completion and
- * retrieve the decoded output. These two calls must not be issued concurrently on the same handle.
- * The intended usage is a producer/consumer model where one thread calls
- * rocJpegDecodeBatchedAsync() and a separate thread calls rocJpegDecodeBatchedSync().
+ * retrieve the decoded output. The intended usage is a producer/consumer model where one thread calls
+ * rocJpegDecodeBatchedAsync() and a separate thread calls rocJpegDecodeBatchedSync(); the two threads can
+ * run these calls at the same time on the same handle. The decode submit functions (rocJpegDecode(),
+ * rocJpegDecodeBatched(), rocJpegDecodeAsync(), and rocJpegDecodeBatchedAsync()) must not be called from
+ * more than one thread at the same time on the same handle.
  *
  * The stream handles and the data they were parsed from are no longer used once this function returns, so they
  * can be parsed again, destroyed, or freed before rocJpegDecodeBatchedSync() is called.
@@ -511,10 +523,10 @@ RocJpegStatus ROCJPEGAPI rocJpegDecodeBatchedAsync(RocJpegHandle handle, RocJpeg
  *
  * This function is one half of the rocJpegDecodeBatchedAsync/rocJpegDecodeBatchedSync pair. It
  * must be called after rocJpegDecodeBatchedAsync() on the same handle to wait for all submitted
- * decodes in the batch to complete and copy the results to the destination buffers. These two
- * calls must not be issued concurrently on the same handle. The intended usage is a
- * producer/consumer model where one thread calls rocJpegDecodeBatchedAsync() and a separate
- * thread calls rocJpegDecodeBatchedSync().
+ * decodes in the batch to complete and copy the results to the destination buffers. The intended
+ * usage is a producer/consumer model where one thread calls rocJpegDecodeBatchedAsync() and a separate
+ * thread calls rocJpegDecodeBatchedSync(); the two threads can run these calls at the same time on the
+ * same handle.
  *
  * @param handle The rocJPEG handle.
  * @param destinations An array of RocJpegImage pointers identifying the pending batch, as passed to rocJpegDecodeBatchedAsync.
