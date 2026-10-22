@@ -13,8 +13,13 @@ tests consume the captured bits directly and require no GPU.
 | `gfx1100_cases.h` | GFX11 FP32-output DOT2 cases and a WMMA matrix. |
 | `gfx1201_dot4_cases.h` | 256 native FP8/BF8 DOT4 outputs from 64 raw A/B/C triples. |
 | `gfx1201_cases.h` | GFX12 FP32-output DOT2 cases and WMMA matrices. |
+| `gfx1201_dot4_edge_cases.h` | Native FP8/BF8 DOT4 results for mixed formats, grouped rounding, subnormals and NaN precedence. |
 | `packed_operand_cases.h` | 440 packed WMMA instruction/operand captures for modifiers, selectors and inline constants. |
 | `packed_wmma_cases.h` | Seven F16/BF16 matrix inputs with packed outputs for both architectures and wave sizes. |
+
+The DOT4 edge fixtures were captured separately on R9700 with ROCm SDK
+`10.1.0a20260812`. They include raw results with the first source replaced by
+zero, used to check DPP inactive-source and boundary behavior.
 
 DOT2 records store packed A/B words, FP32 C and the expected FP32 result.
 WMMA inputs use row-major matrices. Packed matrix expectations are indexed by
