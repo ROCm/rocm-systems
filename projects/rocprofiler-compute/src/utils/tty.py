@@ -27,7 +27,7 @@ from memory_chart.loader import Layouts, is_memory_chart_panel
 from memory_chart.render import format_mem_chart_heading, plot_mem_chart
 from memory_chart.units import panel_units
 from utils import parser, schema
-from utils.logger import console_error, console_log, console_warning
+from utils.logger import console_log, console_warning
 from utils.metrics.aggregation import calc_pct_of_peak
 from utils.utils_analysis import (
     ARGS_DISPLAY_MAX_VARIANTS,
@@ -198,12 +198,19 @@ def has_time_data(df: pd.DataFrame) -> bool:
     )
 
 
+def _print_roofline_html_path(runs: dict[str, Any], output: Optional[TextIO]) -> None:
+    """Print where analyze saved the interactive roofline HTML, if it did."""
+    for workload in runs.values():
+        html_path = getattr(workload, "roofline_html_path", None)
+        if html_path:
+            print(f"\nInteractive roofline plot saved to {html_path}", file=output)
+
+
 def is_roofline_shown(
     args: argparse.Namespace,
     runs: dict[str, Any],
     output: Optional[TextIO],
     panel: dict[str, Any],
-    roof_plot: Optional[str],
     hidden_cols: list[str],
 ) -> bool:
     has_roofline_style = any(
@@ -231,6 +238,7 @@ def is_roofline_shown(
 
     print(f"\n{'-' * 80}", file=output)
     print("4. Roofline", file=output)
+    _print_roofline_html_path(runs, output)
 
     # Display roofline metrics for each run
     for run_path, workload in runs.items():
@@ -298,9 +306,6 @@ def is_roofline_shown(
         else:
             print("\nNo per-kernel metrics available", file=output)
 
-    # Show the roofline plot
-    if roof_plot:
-        show_roof_plot(roof_plot)
     return True
 
 
@@ -938,7 +943,6 @@ def show_all(
     arch_configs: schema.ArchConfig,
     output: Optional[TextIO],
     profiling_config: dict[str, Any],
-    roof_plot: Optional[str] = None,
 ) -> None:
     """
     Show all panels with their data in plain text mode.
@@ -976,7 +980,7 @@ def show_all(
         # Handle roofline panel (400) with custom display logic
         # Skip if --view table is set; tables 401/402 will be rendered as normal tables
         if panel_id == 400 and not _tty_view_is_table(args):
-            _ = is_roofline_shown(args, runs, output, panel, roof_plot, hidden_cols)
+            _ = is_roofline_shown(args, runs, output, panel, hidden_cols)
 
         panel_content = ""  # store content of all data_source from one panel
         # Metric -> value from every table in this panel, drawn as one chart
@@ -1125,21 +1129,9 @@ def show_all(
             else:
                 print(f"\n{'-' * 80}", file=output)
                 print(f"{panel_id // 100}. {panel['title']}", file=output)
+                if panel_id == 400:
+                    _print_roofline_html_path(runs, output)
                 print(panel_content, file=output)
-
-
-def show_roof_plot(roof_plot: str) -> None:
-    # TODO: short term solution to display roofline plot
-    print("4.3 Roofline Plot:")
-
-    if roof_plot:
-        print(roof_plot)
-    else:
-        console_error(
-            "Cannot create roofline plot for CLI with incomplete/missing "
-            "roofline profiling data.",
-            exit=False,
-        )
 
 
 def show_kernel_stats(
