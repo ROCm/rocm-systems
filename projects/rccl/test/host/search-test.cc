@@ -1646,21 +1646,23 @@ TEST_F(SearchXmlChannelMicrotest, ExactlyNgpusGpuSubs_AreStillAccepted) {
 }
 
 TEST_F(SearchXmlChannelMicrotest, RankAttributeTooWideForAnInt_IsRejected) {
-  // strtol yields a long; the assignment to int truncates. 4294967296 is the
-  // interesting case: it truncates to 0, a perfectly plausible rank, so the
-  // graph silently gains the wrong one rather than failing a later check.
+  // strtol yields a long; the assignment to int truncates. 2^32 + kRankBase is
+  // the interesting case: it truncates to kRankBase, a rank the topology really
+  // has, so only the range check can reject it, not ncclTopoRankToIndex.
   ncclXmlNode* channel = NewNode("channel");
   ncclXmlNode* gpu = AddChild(channel, "gpu", "0");
-  SetAttr(gpu, "rank", "4294967296");
+  SetAttr(gpu, "rank", std::to_string((1LL << 32) + SearchXmlScene::kRankBase).c_str());
 
   EXPECT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclInvalidUsage);
   EXPECT_EQ(graph()->intra[0], 0);  // nothing was written
 }
 
 TEST_F(SearchXmlChannelMicrotest, NegativeRankAttribute_IsRejected) {
+  // As above, but for the lower bound: -2^32 + kRankBase truncates to kRankBase,
+  // so the negative value only fails if rankValue itself is range-checked.
   ncclXmlNode* channel = NewNode("channel");
   ncclXmlNode* gpu = AddChild(channel, "gpu", "0");
-  SetAttr(gpu, "rank", "-5");
+  SetAttr(gpu, "rank", std::to_string(-(1LL << 32) + SearchXmlScene::kRankBase).c_str());
 
   EXPECT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclInvalidUsage);
 }
