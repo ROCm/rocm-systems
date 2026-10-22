@@ -239,8 +239,13 @@ TEST(BufferFormatTest, LegacyFormatTablesDecodeTheirOwnNumericAndChannelFields) 
 
 TEST(BufferFormatTest, UnsupportedFormatsReturnFailureWithoutModifyingStoreBytes) {
   using E = amdgpu::BufferFormatEncoding;
-  for (const auto &[format, encoding] : std::array<std::pair<uint32_t, E>, 4>{
-           {{64, E::Gfx11}, {78, E::Rdna1}, {34, E::Rdna2}, {0x61, E::Gfx9}}}) {
+  for (const auto &[format, encoding] :
+       std::array<std::pair<uint32_t, E>, 6>{{{64, E::Gfx11},
+                                              {78, E::Rdna1},
+                                              {34, E::Rdna2},
+                                              {0x61, E::Gfx9},
+                                              {1 | (7 << 4), E::Gfx9},
+                                              {8 | (7 << 4), E::Gfx9}}}) {
     std::array<uint8_t, 4> bytes{1, 2, 3, 4};
     const std::array<uint32_t, 1> components{0};
     EXPECT_TRUE(amdgpu::buffer_format_bytes(format, encoding).failed());

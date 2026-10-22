@@ -9611,7 +9611,7 @@ inline void execute_v_cvt_pk_u8_f32_vop3([[maybe_unused]] Inst &inst,
     float fval = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
     uint32_t byte_sel = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane) & 3;
     uint32_t old = amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane);
-    uint32_t byte = static_cast<uint32_t>(std::clamp(fval, 0.0f, 255.0f));
+    uint32_t byte = amdgpu::cvt_u8_f32(fval);
     uint32_t mask = ~(0xFFu << (byte_sel * 8));
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(inst, wf, inst.vdst, lane,
                                                        (old & mask) | (byte << (byte_sel * 8)));
@@ -9628,7 +9628,7 @@ inline void execute_v_cvt_pkaccum_u8_f32_vop3([[maybe_unused]] Inst &inst,
     float fval = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
     uint32_t byte_sel = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane) & 3;
     uint32_t old = amdgpu::RegisterAccess(wf).read_lane(inst.vdst, lane);
-    uint32_t byte = static_cast<uint32_t>(std::clamp(fval, 0.0f, 255.0f));
+    uint32_t byte = amdgpu::cvt_u8_f32(fval);
     uint32_t mask = ~(0xFFu << (byte_sel * 8));
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(inst, wf, inst.vdst, lane,
                                                        (old & mask) | (byte << (byte_sel * 8)));
@@ -14358,15 +14358,17 @@ inline void execute_v_maxmin_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_v_maxmin_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(
+      int32_t, [](auto a, auto b, auto c) { return util::stdx::min(util::stdx::max(a, b), c); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
         inst, wf, inst.vdst, lane,
-        std::fmin(
-            std::fmax(static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)),
-                      static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))),
+        std::min(
+            std::max(static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)),
+                     static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))),
             static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane))));
   }
 }
@@ -14400,15 +14402,17 @@ inline void execute_v_maxmin_num_f32_vop3([[maybe_unused]] Inst &inst,
 
 template <typename Inst>
 inline void execute_v_maxmin_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(
+      uint32_t, [](auto a, auto b, auto c) { return util::stdx::min(util::stdx::max(a, b), c); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
         inst, wf, inst.vdst, lane,
-        std::fmin(std::fmax(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
-                            amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)),
-                  amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
+        std::min(std::max(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+                          amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)),
+                 amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
   }
 }
 
@@ -15357,15 +15361,17 @@ inline void execute_v_minmax_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_v_minmax_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(
+      int32_t, [](auto a, auto b, auto c) { return util::stdx::max(util::stdx::min(a, b), c); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
         inst, wf, inst.vdst, lane,
-        std::fmax(
-            std::fmin(static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)),
-                      static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))),
+        std::max(
+            std::min(static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)),
+                     static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))),
             static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane))));
   }
 }
@@ -15399,15 +15405,17 @@ inline void execute_v_minmax_num_f32_vop3([[maybe_unused]] Inst &inst,
 
 template <typename Inst>
 inline void execute_v_minmax_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(
+      uint32_t, [](auto a, auto b, auto c) { return util::stdx::max(util::stdx::min(a, b), c); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
         inst, wf, inst.vdst, lane,
-        std::fmax(std::fmin(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
-                            amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)),
-                  amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
+        std::max(std::min(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+                          amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)),
+                 amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
   }
 }
 

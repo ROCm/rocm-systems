@@ -741,10 +741,10 @@ TEST(AsyncInstructionQueueTest, IndependentCompletionReleasesOnlyItsOwnDependenc
   a.writes.set(64);
   b.reads.set(0);
   b.writes.set(96);
-  ASSERT_TRUE(queue.submit(first, &state, a));
+  ASSERT_TRUE(queue.submit(first, &state, a, 0));
   EXPECT_FALSE(first);
   state.started.acquire();
-  EXPECT_TRUE(queue.submit(second, &state, b));
+  EXPECT_TRUE(queue.submit(second, &state, b, 0));
   EXPECT_FALSE(second);
   EXPECT_FALSE(pool.available());
   // This dependency must not join the still-blocked earlier instruction.
@@ -785,15 +785,15 @@ TEST(AsyncInstructionQueueTest, RejectsFullPoolWithoutTakingInstructionOwnership
   second->set_data(std::make_unique<QueueRetirementProbe>(state.retired, 1));
   third->set_data(std::make_unique<QueueRetirementProbe>(state.retired, 2));
   Queue queue(pool);
-  ASSERT_TRUE(queue.submit(first, &state, {}));
+  ASSERT_TRUE(queue.submit(first, &state, {}, 0));
   state.started.acquire();
-  EXPECT_TRUE(queue.submit(second, &state, {}));
+  EXPECT_TRUE(queue.submit(second, &state, {}, 0));
   state.second_done.acquire();
   EXPECT_TRUE(state.retired.empty());
   EXPECT_EQ(queue.size(), 2u);
   EXPECT_FALSE(pool.available());
   auto *retained = third.get();
-  EXPECT_FALSE(queue.submit(third, &state, {}));
+  EXPECT_FALSE(queue.submit(third, &state, {}, 0));
   EXPECT_EQ(third.get(), retained);
   // Synchronous fallback is available even though the first job is blocked.
   third->execute(*third, &state);
