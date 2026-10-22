@@ -614,14 +614,13 @@ def pytest_collection_modifyitems(config, items) -> None:
                     )
             except Exception as e:
                 pytest.exit(f"Invalid run_if_gpu_category expression: {e}", returncode=1)
-        if "cap_perfmon" in item.keywords:
-            if not rocprof_config.capabilities.cap_perfmon:
-                item.add_marker(
-                    pytest.mark.skip(
-                        reason="Test requires CAP_PERFMON capability; "
-                        "either enable it or use CAP_SYS_ADMIN as a general override"
-                    )
+        if "cap_perfmon" in item.keywords and not rocprof_config.capabilities.cap_perfmon:
+            item.add_marker(
+                pytest.mark.skip(
+                    reason="Test requires CAP_PERFMON capability; "
+                    "either enable it or use CAP_SYS_ADMIN as a general override"
                 )
+            )
         if "disable_archs" in item.keywords:
             marker = item.get_closest_marker("disable_archs")
             disabled: set = set()
@@ -2442,9 +2441,12 @@ def run_test(
             env["ROCPROFSYS_CI_TIMEOUT"] = str(timeout)
 
         # Verify that MPI is available for "mpi_optional" tests
-        if request.node.get_closest_marker("mpi_optional") and num_procs > 0:
-            if not request.node.get_closest_marker("mpi"):
-                num_procs = 0
+        if (
+            request.node.get_closest_marker("mpi_optional")
+            and num_procs > 0
+            and not request.node.get_closest_marker("mpi")
+        ):
+            num_procs = 0
 
         try:
             runner = runner_class(

@@ -282,15 +282,18 @@ class BaseRunner(ABC):
             except (subprocess.TimeoutExpired, OSError):
                 pass
 
-        if self.launcher is type(self).Launcher.SHMEM and command:
-            # Some PRRTE-based oshrun builds strip the first literal `--` from
-            # the application argv, breaking `rocprof-sys-run -- <binary>`.
-            # A second `--` survives the strip, so insert a decoy to absorb it.
-            # The condition is probed at runtime (see capabilities.oshrun_strips_double_dash)
-            # rather than checked by version number, because distro packages may
-            # bundle a different PRRTE than the upstream Open MPI tarball.
-            if self.config.capabilities.oshrun_strips_double_dash:
-                command = [command[0], "--"] + command[1:]
+        # Some PRRTE-based oshrun builds strip the first literal `--` from
+        # the application argv, breaking `rocprof-sys-run -- <binary>`.
+        # A second `--` survives the strip, so insert a decoy to absorb it.
+        # The condition is probed at runtime (see capabilities.oshrun_strips_double_dash)
+        # rather than checked by version number, because distro packages may
+        # bundle a different PRRTE than the upstream Open MPI tarball.
+        if (
+            self.launcher is type(self).Launcher.SHMEM
+            and command
+            and self.config.capabilities.oshrun_strips_double_dash
+        ):
+            command = [command[0], "--"] + command[1:]
 
         return cmd + command
 
