@@ -44,7 +44,8 @@ Xcd::Xcd(std::string name, const Config &config, rj_code_arch_t arch, GpuMemory 
     // This also sets up on_idle callbacks from CUs to CP::check_all_idle().
     for (uint32_t c = 0; c < se->num_compute_units(); ++c) {
       auto *cu = se->compute_unit(c);
-      cu->set_shader_engine_location(i, c, config.shader_engine.cus_per_shader_array);
+      cu->set_shader_engine_location(i, c, config.shader_engine.cus_per_shader_array,
+                                     se->num_compute_units());
       cp_->add_compute_unit(cu);
     }
     // Register the SE's SPI with the CP so ace_dispatch_all() can use the

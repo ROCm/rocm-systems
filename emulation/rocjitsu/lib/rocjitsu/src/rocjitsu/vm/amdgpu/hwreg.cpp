@@ -29,7 +29,9 @@ enum class HwregState : uint8_t {
   XnackStatePrivGfx1250,
   XnackMaskGfx1250,
   Trapsts,
-  SimdIdCdna2_4,
+  SimdIdCdna2,
+  LocationCdna3_4,
+  XccIdCdna3_4,
   GprAllocGfx9_10,
   GprAllocCdna3_4,
   WaveSchedMode,
@@ -82,7 +84,7 @@ uint32_t blocks_minus_one(uint32_t count, uint32_t block_size) {
   return ((count + block_size - 1u) / block_size) - 1u;
 }
 
-uint32_t cdna2_4_hw_id_raw(const Wavefront &wf) {
+uint32_t cdna2_4_simd_id_raw(const Wavefront &wf) {
   // CDNA2/3/4 define SIMD_ID at HW_ID[5:4]. Assign permanent CU wave slots
   // cyclically to four logical SIMDs. Slot identity survives reuse and
   // checkpoint restoration; no timing model is implied.
@@ -194,13 +196,14 @@ constexpr HwregDescriptor CDNA1_2_HWREGS[] = {
 };
 
 constexpr HwregDescriptor CDNA3_4_HWREGS[] = {
-    // MODE/STATUS, TRAPSTS, GPR_ALLOC and HW_ID.SIMD_ID have backing wave state.
+    // MODE/STATUS, TRAPSTS, GPR_ALLOC, HW_ID location fields, and XCC_ID
+    // have modeled sources in wave state and CU/CP topology.
     // The other XML HWREG IDs stay named but unsupported until their VM state,
     // field layouts and privilege side effects are represented.
     {1, "MODE", HwregState::Mode, HwregWritePolicy::UserWritable},
     {2, "STATUS", HwregState::Status, HwregWritePolicy::Privileged},
     {3, "TRAPSTS", HwregState::Trapsts, HwregWritePolicy::UserWritable},
-    {4, "HW_ID", HwregState::SimdIdCdna2_4, HwregWritePolicy::ReadOnly},
+    {4, "HW_ID", HwregState::LocationCdna3_4, HwregWritePolicy::ReadOnly},
     {5, "GPR_ALLOC", HwregState::GprAllocCdna3_4, HwregWritePolicy::ReadOnly},
     {6, "LDS_ALLOC", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {7, "IB_STS", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
@@ -216,7 +219,7 @@ constexpr HwregDescriptor CDNA3_4_HWREGS[] = {
     {17, "SQ_SHADER_TBA_HI", HwregState::Unsupported, HwregWritePolicy::Privileged},
     {18, "SQ_SHADER_TMA_LO", HwregState::Unsupported, HwregWritePolicy::Privileged},
     {19, "SQ_SHADER_TMA_HI", HwregState::Unsupported, HwregWritePolicy::Privileged},
-    {20, "XCC_ID", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
+    {20, "XCC_ID", HwregState::XccIdCdna3_4, HwregWritePolicy::ReadOnly},
     {21, "SQ_PERF_SNAPSHOT_DATA", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {22, "SQ_PERF_SNAPSHOT_DATA1", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {23, "SQ_PERF_SNAPSHOT_PC_LO", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
@@ -385,7 +388,7 @@ HwregTable table_for_arch(rj_code_arch_t arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
     return make_table(CDNA1_2_HWREGS<HwregState::Unsupported>);
   case ROCJITSU_CODE_ARCH_CDNA2:
-    return make_table(CDNA1_2_HWREGS<HwregState::SimdIdCdna2_4>);
+    return make_table(CDNA1_2_HWREGS<HwregState::SimdIdCdna2>);
   case ROCJITSU_CODE_ARCH_CDNA3:
   case ROCJITSU_CODE_ARCH_CDNA4:
     return make_table(CDNA3_4_HWREGS);
@@ -468,9 +471,21 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
   case HwregState::Trapsts:
     raw_value = wf.trapsts();
     return HwregAccessResult::Success;
-  case HwregState::SimdIdCdna2_4:
-    raw_value = cdna2_4_hw_id_raw(wf);
+  case HwregState::SimdIdCdna2:
+    raw_value = cdna2_4_simd_id_raw(wf);
     return HwregAccessResult::Success;
+  case HwregState::LocationCdna3_4:
+    raw_value = cdna2_4_simd_id_raw(wf) | field_value(wf.wf_id() / 4, 0, 4) |
+                field_value(wf.cu().shader_array_cu_id(), 8, 4) |
+                field_value(wf.cu().shader_engine_id(), 13, 3);
+    return HwregAccessResult::Success;
+  case HwregState::XccIdCdna3_4: {
+    const std::optional<uint32_t> xcc = wf.cu().xcc_id();
+    if (!xcc || *xcc > 15)
+      return HwregAccessResult::Unsupported;
+    raw_value = *xcc;
+    return HwregAccessResult::Success;
+  }
   case HwregState::GprAllocGfx9_10:
     raw_value = gfx9_10_gpr_alloc_raw(wf);
     return HwregAccessResult::Success;
@@ -539,7 +554,9 @@ HwregAccessResult write_raw_hwreg(Wavefront &wf, HwregState state, uint32_t raw_
   case HwregState::XnackMaskGfx1250:
     wf.set_gfx1250_xnack_mask_raw(raw_value);
     return HwregAccessResult::Success;
-  case HwregState::SimdIdCdna2_4:
+  case HwregState::SimdIdCdna2:
+  case HwregState::LocationCdna3_4:
+  case HwregState::XccIdCdna3_4:
   case HwregState::GprAllocGfx9_10:
   case HwregState::GprAllocCdna3_4:
   case HwregState::IbStsGfx1250:
@@ -648,10 +665,27 @@ HwregAccessResult read_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t &valu
   }
 
   // Only SIMD_ID[5:4] has backing state; do not fabricate the other HW_ID fields.
-  if (desc->state == HwregState::SimdIdCdna2_4 &&
+  if (desc->state == HwregState::SimdIdCdna2 &&
       (decoded.offset < 4 || decoded.offset + decoded.size > 6)) {
     value = 0;
     return HwregAccessResult::Unsupported;
+  }
+
+  if (desc->state == HwregState::LocationCdna3_4) {
+    // Only expose fields backed by physical wave slots and CU topology.
+    // PIPE/TG/VM/QUEUE/ME/STATE identities need their own allocation model.
+    // WAVE_ID[3:0], SIMD_ID[5:4], CU_ID[11:8], SH_ID[12], SE_ID[15:13].
+    // CDNA3/4 specify SH_ID as zero, independently of the configured geometry.
+    constexpr uint32_t kSupportedHwIdBits = 0x0000ff3f;
+    if (((decoded.mask << decoded.offset) & ~kSupportedHwIdBits) ||
+        (field_intersects(decoded, 0, 4) && wf.wf_id() >= 64) ||
+        (field_intersects(decoded, 8, 4) &&
+         (!wf.cu().cus_per_shader_array() || wf.cu().cus_per_shader_array() > 16 ||
+          wf.cu().shader_engine_cu_count() != wf.cu().cus_per_shader_array())) ||
+        (field_intersects(decoded, 13, 3) && wf.cu().shader_engine_id() > 7)) {
+      value = 0;
+      return HwregAccessResult::Unsupported;
+    }
   }
 
   if (desc->state == HwregState::GprAllocCdna3_4 && field_intersects(decoded, 12, 6)) {
