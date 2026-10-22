@@ -25,10 +25,12 @@ FLUSH_NEAREST_F32_OPS = frozenset(
     }
 )
 
-# F16 results rounded before SDWA OMOD, which the SDWA store applies, as VOP3
-# does. gfx1030 SDWA matches VOP3 for both bit for bit. sema_lower rejects a
-# rounded F16 FRACT/LDEXP destination whose instruction is missing here.
-SDWA_ROUNDED_F16_OPS = frozenset({'V_FRACT_F16', 'V_LDEXP_F16'})
+# F16 results already represented as half bits before SDWA OMOD. The store
+# applies scaling, as VOP3 does. gfx1030 FRACT/LDEXP match VOP3 bit for bit;
+# MIN/MAX select an input half. sema_lower rejects unlisted F16 producers.
+SDWA_ROUNDED_F16_OPS = frozenset(
+    {'V_FRACT_F16', 'V_LDEXP_F16', 'V_MIN_F16', 'V_MAX_F16'}
+)
 
 
 @dataclass(frozen=True)
