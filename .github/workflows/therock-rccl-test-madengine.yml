@@ -223,6 +223,8 @@ jobs:
           NCCL_DEBUG: WARN
           MAD_SECRETS_HFTOKEN: ${{ secrets.HF_TOKEN || '' }}
           JOB_TIMEOUT_MINUTES: ${{ inputs.job_timeout_minutes }}
+          # Nodes to keep out of the allocation, as a SLURM hostlist.
+          MADENGINE_SLURM_EXCLUDE: ${{ vars.RCCL_MADENGINE_SLURM_EXCLUDE || '' }}
           # Same reason as JOB_TIMEOUT_MINUTES below. The webhook also has a
           # second one: Actions echoes the expanded run block into the log,
           # and this value arrives as an input, not a secret, so nothing
@@ -231,8 +233,6 @@ jobs:
           TEAMS_WEBHOOK: ${{ inputs.teams_webhook }}
           WORKLOAD: ${{ inputs.workload }}
           NODES: ${{ inputs.nodes }}
-          # Nodes to keep out of the allocation, as a SLURM hostlist.
-          MADENGINE_SLURM_EXCLUDE: ${{ vars.RCCL_MADENGINE_SLURM_EXCLUDE || '' }}
         run: |
           export PYTHONPATH="rocm-systems/projects/rccl/ci/scripts:${PYTHONPATH}"
 
