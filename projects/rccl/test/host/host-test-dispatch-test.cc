@@ -254,19 +254,28 @@ TEST(HostDispatchXmlMicrotest, CaseNameIsNotQualified)
 // A minimal but structurally faithful child report.
 std::string childReport(int tests, int failures)
 {
-    return "<?xml version=\"1.0\"?>\n<testsuites tests=\"" + std::to_string(tests) +
-           "\" failures=\"" + std::to_string(failures) +
-           "\" disabled=\"0\" errors=\"0\" time=\"1.5\" name=\"AllTests\">\n"
-           "  <testsuite name=\"Suite\" tests=\"1\">\n"
-           "    <testcase name=\"Case\" classname=\"Suite\"/>\n"
-           "  </testsuite>\n"
-           "</testsuites>\n";
+    return fmt::format(
+        "<?xml version=\"1.0\"?>\n"
+        "<testsuites tests=\"{}\" failures=\"{}\" disabled=\"0\" errors=\"0\" time=\"1.5\""
+        " name=\"AllTests\">\n"
+        "  <testsuite name=\"Suite\" tests=\"1\">\n"
+        "    <testcase name=\"Case\" classname=\"Suite\"/>\n"
+        "  </testsuite>\n"
+        "</testsuites>\n",
+        tests, failures);
+}
+
+// *report* parsed, failing the calling test when it does not parse at all.
+SuiteFragment parsedOrFail(const std::string &report, const std::string &qualifier)
+{
+    const std::optional<SuiteFragment> fragment = parseChildReport(report, qualifier);
+    EXPECT_TRUE(fragment.has_value()) << "report did not parse under qualifier " << qualifier;
+    return fragment.value_or(SuiteFragment{});
 }
 
 TEST(HostDispatchReportMicrotest, RootTotalsAreTakenFromTheChild)
 {
-    SuiteFragment fragment;
-    ASSERT_TRUE(parseChildReport(childReport(7, 2), "Micro", &fragment));
+    const SuiteFragment fragment = parsedOrFail(childReport(7, 2), "Micro");
     EXPECT_EQ(fragment.tests, 7);
     EXPECT_EQ(fragment.failures, 2);
     EXPECT_DOUBLE_EQ(fragment.time, 1.5);
@@ -274,8 +283,7 @@ TEST(HostDispatchReportMicrotest, RootTotalsAreTakenFromTheChild)
 
 TEST(HostDispatchReportMicrotest, FragmentCarriesTheQualifiedSuitesOnly)
 {
-    SuiteFragment fragment;
-    ASSERT_TRUE(parseChildReport(childReport(1, 0), "Micro", &fragment));
+    const SuiteFragment fragment = parsedOrFail(childReport(1, 0), "Micro");
     EXPECT_NE(fragment.xml.find("<testsuite name=\"Micro/Suite\""), std::string::npos);
     EXPECT_EQ(fragment.xml.find("<testsuites"), std::string::npos);
 }
@@ -284,10 +292,9 @@ TEST(HostDispatchReportMicrotest, OutputThatIsNotAGtestReportIsRejected)
 {
     // How a child that died before writing its report is recognised: the file is absent or
     // truncated, and the dispatcher must not read that as a clean run of zero tests.
-    SuiteFragment fragment;
-    EXPECT_FALSE(parseChildReport("", "Micro", &fragment));
-    EXPECT_FALSE(parseChildReport("Segmentation fault\n", "Micro", &fragment));
-    EXPECT_FALSE(parseChildReport("<testsuites tests=\"1\">\n", "Micro", &fragment));
+    EXPECT_FALSE(parseChildReport("", "Micro").has_value());
+    EXPECT_FALSE(parseChildReport("Segmentation fault\n", "Micro").has_value());
+    EXPECT_FALSE(parseChildReport("<testsuites tests=\"1\">\n", "Micro").has_value());
 }
 
 TEST(HostDispatchReportMicrotest, CrashFragmentReportsOneFailure)
@@ -303,10 +310,8 @@ TEST(HostDispatchReportMicrotest, CrashFragmentReportsOneFailure)
 
 TEST(HostDispatchMergeMicrotest, TotalsAreSummedAcrossChildren)
 {
-    SuiteFragment first;
-    SuiteFragment second;
-    ASSERT_TRUE(parseChildReport(childReport(3, 1), "Micro", &first));
-    ASSERT_TRUE(parseChildReport(childReport(4, 2), "MicroInit", &second));
+    const SuiteFragment first = parsedOrFail(childReport(3, 1), "Micro");
+    const SuiteFragment second = parsedOrFail(childReport(4, 2), "MicroInit");
     const std::string merged = mergeReports({first, second});
     EXPECT_NE(merged.find("tests=\"7\""), std::string::npos);
     EXPECT_NE(merged.find("failures=\"3\""), std::string::npos);
@@ -314,10 +319,8 @@ TEST(HostDispatchMergeMicrotest, TotalsAreSummedAcrossChildren)
 
 TEST(HostDispatchMergeMicrotest, EverySuiteSurvivesUnderItsOwnQualifier)
 {
-    SuiteFragment first;
-    SuiteFragment second;
-    ASSERT_TRUE(parseChildReport(childReport(1, 0), "MicroInit", &first));
-    ASSERT_TRUE(parseChildReport(childReport(1, 0), "MicroInitUncached", &second));
+    const SuiteFragment first = parsedOrFail(childReport(1, 0), "MicroInit");
+    const SuiteFragment second = parsedOrFail(childReport(1, 0), "MicroInitUncached");
     const std::string merged = mergeReports({first, second});
     EXPECT_NE(merged.find("<testsuite name=\"MicroInit/Suite\""), std::string::npos);
     EXPECT_NE(merged.find("<testsuite name=\"MicroInitUncached/Suite\""), std::string::npos);
