@@ -289,6 +289,11 @@ TEST_F(PluginOpenMicrotest, GetNetPluginLib_KnownBug_CrashesWhenTheNetLibraryHas
   g_dl.installed["librccl-net.so"] = kNet;
   g_dl.dlinfoFails = true;
   ASSERT_EQ(ncclOpenNetPluginLib(nullptr), kNet);
+  // Opaque, so the optimizer can't treat strdup(NULL) as unreachable and drop the crash.
+  char* noPath = ncclPluginLibPaths[ncclPluginTypeNet];
+  ASSERT_EQ(noPath, nullptr);
+  asm volatile("" : "+r"(noPath));
+  ncclPluginLibPaths[ncclPluginTypeNet] = noPath;
   ScopedDeathTestStyle style("threadsafe");
   EXPECT_EXIT(
       {

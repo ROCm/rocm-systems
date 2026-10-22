@@ -5,9 +5,9 @@
  ************************************************************************/
 
 // Host-only microtests for src/plugin/net.cc: the NCCL_NET_PLUGIN list, the v12-to-v6 version probe, per-comm
-// plugin init/assign/finalize, and the device-count and GDR queries. Library open/close and the version getters
-// are seamed in this TU; logging, env, params and rcclUseAinic come from the shared fakes. The per-version shims
-// and plugin_open.cc have their own test TUs.
+// plugin init/assign/finalize, and the device-count and GDR queries. Library open/close, the version getters and
+// net.cc's logging are seamed in this TU; env, params and rcclUseAinic come from the shared fakes. The per-version
+// shims and plugin_open.cc have their own test TUs.
 
 #include <gtest/gtest.h>
 
@@ -192,7 +192,22 @@ ncclResult_t FakeClosePluginLib(void* handle, ncclPluginType type) {
   return g_closeResult;
 }
 
+// net.cc logs through here, so the level checks below don't depend on how nccl_fakes.cc prints a line.
+static std::vector<std::pair<ncclDebugLogLevel, std::string>> g_netLog;
+static void NetDebugLog(ncclDebugLogLevel level, unsigned long flags, const char* filefunc, int line, const char* fmt,
+                        ...) {
+  char msg[1024];
+  std::va_list ap;
+  va_start(ap, fmt);
+  std::vsnprintf(msg, sizeof(msg), fmt, ap);
+  va_end(ap);
+  if (ncclDebugNoWarn != 0 && level == NCCL_LOG_WARN) level = NCCL_LOG_INFO;  // as debug.cc does
+  g_netLog.emplace_back(level, msg);
+  ncclDebugLog(level, flags, filefunc, line, "%s", msg);
+}
+
 #include "fakes/param_redirect.h"
+#define ncclDebugLog NetDebugLog
 #define ncclOpenNetPluginLib FakeOpenNetPluginLib
 #define ncclClosePluginLib FakeClosePluginLib
 // The GPU-registration probe after the AMD-only break is dead on HIP; keep its allocations off the HIP runtime.
@@ -206,6 +221,7 @@ ncclResult_t FakeClosePluginLib(void* handle, ncclPluginType type) {
 #undef ncclCudaMalloc
 #undef ncclClosePluginLib
 #undef ncclOpenNetPluginLib
+#undef ncclDebugLog
 
 ncclNet_t ncclNetIb = FakeNet<kIb>::Make("IB");
 ncclNet_t ncclNetSocket = FakeNet<kSocket>::Make("Socket");
@@ -254,6 +270,7 @@ class PluginNetMicrotest : public ::testing::Test {
     g_closeResult = ncclSuccess;
     g_netProbes.clear();
     g_collNetProbes.clear();
+    g_netLog.clear();
     comm_ = std::make_unique<ncclComm>();
     comm_->config.netName = nullptr;
     comm_->config.trafficClass = NCCL_CONFIG_UNDEF_INT;
@@ -275,6 +292,13 @@ class PluginNetMicrotest : public ::testing::Test {
   }
 
   netPluginLib_t& Lib(int i) { return netPluginLibs[i]; }
+
+  // How many lines net.cc logged at this level containing needle.
+  static int Logged(ncclDebugLogLevel level, const char* needle) {
+    int n = 0;
+    for (const auto& line : g_netLog) n += line.first == level && line.second.find(needle) != std::string::npos;
+    return n;
+  }
 
   getNcclNet_t* savedNet_[NCCL_NET_VERSION_COUNT];
   getNcclCollNet_t* savedCollNet_[NCCL_NET_VERSION_COUNT];
@@ -436,7 +460,7 @@ TEST_F(PluginNetMicrotest, LoadWithoutCollNetLeavesNetUsable) {
   EXPECT_EQ(Lib(0).ncclCollNet, nullptr);
   EXPECT_EQ(Lib(0).ncclNetPluginState, ncclNetPluginStateInitReady);
   EXPECT_EQ(Lib(0).ncclCollNetPluginState, ncclNetPluginStateLoadFailed);
-  EXPECT_TRUE(LogHas(log, "INFO Successfully loaded external network plugin /opt/lib/ext.so")) << log;
+  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "Successfully loaded external network plugin /opt/lib/ext.so")) << log;
 }
 
 TEST_F(PluginNetMicrotest, LoadWithNoKnownVersionClosesTheLibrary) {
@@ -454,7 +478,7 @@ TEST_F(PluginNetMicrotest, LoadWithNoKnownVersionClosesTheLibrary) {
   EXPECT_EQ(Lib(0).dlHandle, nullptr);
   EXPECT_EQ(Lib(0).ncclNetPluginState, ncclNetPluginStateLoadFailed);
   EXPECT_EQ(Lib(0).ncclCollNetPluginState, ncclNetPluginStateLoadFailed);
-  EXPECT_TRUE(LogHas(log, "INFO External network plugin ext is unsupported")) << log;
+  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "External network plugin ext is unsupported")) << log;
 }
 
 // An explicitly requested plugin that is unusable is an ATTN, naming the resolved path when there is one.
@@ -462,12 +486,12 @@ TEST_F(PluginNetMicrotest, LoadWithNoKnownVersionAttnsWhenNetPluginIsSet) {
   g_libs["ext"] = {5, 0};
   BuildList("ext");
   std::string log = CaptureLog([&] { ASSERT_EQ(ncclNetPluginLoad(&Lib(0)), ncclSuccess); });
-  EXPECT_TRUE(LogHas(log, "ATTN External network plugin ext is unsupported")) << log;
+  EXPECT_TRUE(Logged(NCCL_LOG_ATTN, "External network plugin ext is unsupported")) << log;
 
   Lib(0).ncclNetPluginState = ncclNetPluginStateLoadReady;
   ncclPluginLibPaths[ncclPluginTypeNet] = const_cast<char*>("/opt/lib/ext.so");
   log = CaptureLog([&] { ASSERT_EQ(ncclNetPluginLoad(&Lib(0)), ncclSuccess); });
-  EXPECT_TRUE(LogHas(log, "ATTN External network plugin /opt/lib/ext.so is unsupported")) << log;
+  EXPECT_TRUE(Logged(NCCL_LOG_ATTN, "External network plugin /opt/lib/ext.so is unsupported")) << log;
 }
 
 TEST_F(PluginNetMicrotest, LoadPropagatesACloseFailure) {
@@ -495,11 +519,11 @@ TEST_F(PluginNetMicrotest, CheckDeviceVersionRejectsOtherUnpackVersionsAndUnknow
   g_net[kExtA].deviceVersion = NCCL_NET_DEVICE_UNPACK_VERSION + 1;
   std::string log =
       CaptureLog([&] { EXPECT_EQ(ncclNetCheckDeviceVersion(comm_.get(), &net, 0), ncclInternalError); });
-  EXPECT_TRUE(LogHas(log, "WARN NCCL_DEVICE_UNPACK plugin has incompatible version 8")) << log;
+  EXPECT_TRUE(Logged(NCCL_LOG_WARN, "NCCL_DEVICE_UNPACK plugin has incompatible version 8")) << log;
 
   g_net[kExtA].deviceType = static_cast<ncclNetDeviceType>(0x42);
   log = CaptureLog([&] { EXPECT_EQ(ncclNetCheckDeviceVersion(comm_.get(), &net, 0), ncclInternalError); });
-  EXPECT_TRUE(LogHas(log, "WARN Unknown device code index 66")) << log;
+  EXPECT_TRUE(Logged(NCCL_LOG_WARN, "Unknown device code index 66")) << log;
 
   g_net[kExtA].propsResult = ncclSystemError;
   EXPECT_EQ(ncclNetCheckDeviceVersion(comm_.get(), &net, 0), ncclSystemError);
@@ -551,7 +575,7 @@ TEST_F(PluginNetMicrotest, PluginInitFailureDisablesWithoutFinalize) {
   EXPECT_EQ(g_net[kIb].devicesCalls, 0);
   EXPECT_EQ(Lib(1).ncclNetPluginState, ncclNetPluginStateDisabled);
   EXPECT_EQ(Lib(1).ncclCollNetPluginState, ncclNetPluginStateDisabled);
-  EXPECT_TRUE(LogHas(log, "ATTN Failed to initialize NET plugin IB")) << log;
+  EXPECT_TRUE(Logged(NCCL_LOG_ATTN, "Failed to initialize NET plugin IB")) << log;
 }
 
 TEST_F(PluginNetMicrotest, PluginInitWithoutDevicesFinalizesAndDisables) {
@@ -678,7 +702,7 @@ TEST_F(PluginNetMicrotest, NetInitWithoutAUsablePluginIsInvalidUsage) {
   BuildList("none");
   comm_->config.netName = "nope";
   std::string log = CaptureLog([&] { EXPECT_EQ(ncclNetInit(comm_.get()), ncclInvalidUsage); });
-  EXPECT_TRUE(LogHas(log, "WARN Failed to initialize any NET plugin")) << log;
+  EXPECT_TRUE(Logged(NCCL_LOG_WARN, "Failed to initialize any NET plugin")) << log;
 }
 
 TEST_F(PluginNetMicrotest, NetInitContinuesWhenTelemetryCannotStart) {
@@ -855,12 +879,12 @@ TEST_F(PluginNetMicrotest, InitFromParentRejectsADifferentNetNameButOnlyLogsTraf
   comm_->config.netName = "Socket";
   std::string log =
       CaptureLog([&] { EXPECT_EQ(ncclNetInitFromParent(comm_.get(), parent.get()), ncclInvalidUsage); });
-  EXPECT_TRUE(LogHas(log, "WARN Comm config netName (Socket) does not match the parent (IB)")) << log;
+  EXPECT_TRUE(Logged(NCCL_LOG_WARN, "Comm config netName (Socket) does not match the parent (IB)")) << log;
 
   comm_->config.netName = nullptr;
   comm_->config.trafficClass = 2;
   log = CaptureLog([&] { EXPECT_EQ(ncclNetInitFromParent(comm_.get(), parent.get()), ncclSuccess); });
-  EXPECT_TRUE(LogHas(log, "INFO Comm config trafficClass (2) does not match the parent (1)")) << log;
+  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "Comm config trafficClass (2) does not match the parent (1)")) << log;
 
   comm_->config.trafficClass = 1;
   log = CaptureLog([&] { EXPECT_EQ(ncclNetInitFromParent(comm_.get(), parent.get()), ncclSuccess); });
@@ -871,6 +895,10 @@ TEST_F(PluginNetMicrotest, InitFromParentRejectsADifferentNetNameButOnlyLogsTraf
 // Pins AICOMRCCL-2984; a fix flips this pin.
 TEST_F(PluginNetMicrotest, InitFromParent_KnownBug_CrashesWhenOnlyTheChildHasANetName) {
   auto parent = std::make_unique<ncclComm>();
+  // Opaque, so the optimizer can't treat strcasecmp(..., NULL) as unreachable and drop the crash.
+  const char* noName = nullptr;
+  asm volatile("" : "+r"(noName));
+  parent->config.netName = noName;
   comm_->config.netName = "IB";
   ScopedDeathTestStyle style("threadsafe");
   EXPECT_EXIT(
@@ -891,7 +919,7 @@ TEST_F(PluginNetMicrotest, DevCountsRequireAnEnabledProbedPlugin) {
     EXPECT_EQ(ncclCollNetGetDevCount(0, &phys, &virt), ncclInternalError);
   });
   EXPECT_EQ(phys, -7);
-  EXPECT_TRUE(LogHas(log, "WARN trying to access the number of devices of an uninitialized netPlugin[0]")) << log;
+  EXPECT_EQ(Logged(NCCL_LOG_WARN, "trying to access the number of devices of an uninitialized netPlugin[0]"), 2) << log;
 
   // Enabled but never probed (a later comm whose first init failed) is rejected too.
   Lib(0).ncclNetPluginState = Lib(0).ncclCollNetPluginState = ncclNetPluginStateEnabled;
@@ -938,9 +966,10 @@ TEST_F(PluginNetMicrotest, SetVirtDevCountRequiresEnabledAndNonNegative) {
     EXPECT_EQ(ncclNetSetVirtDevCount(1, 2), ncclInternalError);
     EXPECT_EQ(ncclCollNetSetVirtDevCount(1, 2), ncclInternalError);
   });
-  EXPECT_TRUE(LogHas(log, "WARN ncclNetSetVirtDevCount: failed to set the number of devices for netPlugin[1] to 2"))
+  EXPECT_TRUE(
+      Logged(NCCL_LOG_WARN, "ncclNetSetVirtDevCount: failed to set the number of devices for netPlugin[1] to 2"))
       << log;
-  EXPECT_TRUE(LogHas(log, "WARN ncclCollNetSetVirtDevCount: failed")) << log;
+  EXPECT_TRUE(Logged(NCCL_LOG_WARN, "ncclCollNetSetVirtDevCount: failed")) << log;
 
   Lib(1).ncclNetPluginState = Lib(1).ncclCollNetPluginState = ncclNetPluginStateEnabled;
   EXPECT_EQ(ncclNetSetVirtDevCount(1, -1), ncclInternalError);

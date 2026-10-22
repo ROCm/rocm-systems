@@ -21,8 +21,10 @@
 #include <cstdio>
 #include <string>
 
-// ASan turns a SIGSEGV into a report plus exit(1), so KilledBySignal never matches under it; match the exit instead.
-#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+// ASan and UBSan turn a SIGSEGV into a report plus exit(1), so KilledBySignal never matches under them; match the
+// exit instead.
+#if defined(__SANITIZE_ADDRESS__) || \
+    (defined(__has_feature) && (__has_feature(address_sanitizer) || __has_feature(undefined_behavior_sanitizer)))
 #define DEATH_BY_SEGV ::testing::ExitedWithCode(1)
 #else
 #define DEATH_BY_SEGV ::testing::KilledBySignal(SIGSEGV)
