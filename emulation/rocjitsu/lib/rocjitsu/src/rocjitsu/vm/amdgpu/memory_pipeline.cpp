@@ -112,7 +112,8 @@ VmAccessOutcome MemoryPipeline::issue_impl(Instruction *inst, Wavefront &wf,
     issued_.push({.inst = inst,
                   .wf = &wf,
                   .counters = counters,
-                  .wave_generation = wf.dispatch_generation()});
+                  .wave_generation = wf.dispatch_generation(),
+                  .issue_pc = wf.pc});
     wf.set_state(WfState::VM_RETRY);
     wf.cu().request_functional_yield();
     return VmAccessOutcome::Complete;
@@ -122,8 +123,11 @@ VmAccessOutcome MemoryPipeline::issue_impl(Instruction *inst, Wavefront &wf,
     delete inst;
     return access;
   }
-  complete_entry(
-      {.inst = inst, .wf = &wf, .counters = counters, .wave_generation = wf.dispatch_generation()});
+  complete_entry({.inst = inst,
+                  .wf = &wf,
+                  .counters = counters,
+                  .wave_generation = wf.dispatch_generation(),
+                  .issue_pc = wf.pc});
   return VmAccessOutcome::Complete;
 }
 
@@ -138,10 +142,88 @@ VmAccessOutcome MemoryPipeline::issue_deferred(Instruction *inst, Wavefront &wf)
 void MemoryPipeline::defer_unavailable(Instruction *inst, Wavefront &wf) {
   const WaitCounterTokens counters = issue_counters(*inst);
   acquire_wait_counters(wf, counters);
-  issued_.push(
-      {.inst = inst, .wf = &wf, .counters = counters, .wave_generation = wf.dispatch_generation()});
+  issued_.push({.inst = inst,
+                .wf = &wf,
+                .counters = counters,
+                .wave_generation = wf.dispatch_generation(),
+                .issue_pc = wf.pc});
   wf.set_state(WfState::VM_RETRY);
   wf.cu().request_functional_yield();
+}
+
+bool MemoryPipeline::rewind_unavailable_load(Wavefront &wf) {
+  // VM_RETRY prevents further instruction issue, so the one retained load is
+  // the next architectural instruction. Never replay multiple operations whose
+  // ordering or side effects cannot be recovered from this queue alone.
+  if (wf.state() != WfState::VM_RETRY)
+    return false;
+  Instruction *load = nullptr;
+  PipelineEntry replay{};
+  for (auto entries = issued_; !entries.empty(); entries.pop()) {
+    const auto &entry = entries.front();
+    if (entry.wf != &wf || entry.wave_generation != wf.dispatch_generation())
+      continue;
+    if (load)
+      return false;
+    const auto *state = entry.inst->data();
+    if (state->tag() == SCALAR_MEM) {
+      const auto &scalar = *entry.inst->data_as<ScalarMemState>();
+      if (!scalar.is_load || scalar.atomic_op != AtomicOp::NONE)
+        return false;
+    } else if (state->tag() == GLOBAL_MEM) {
+      const auto &vector = *entry.inst->data_as<VectorMemState>();
+      if (!vector.is_load || vector.atomic_op != AtomicOp::NONE || vector.lds_dst)
+        return false;
+    } else {
+      return false;
+    }
+    load = entry.inst;
+    replay = entry;
+  }
+  if (!load)
+    return false;
+  if (!cancel_wait_check_issue(replay))
+    return false;
+  const size_t pending = issued_.size();
+  for (size_t i = 0; i < pending; ++i) {
+    auto entry = issued_.front();
+    issued_.pop();
+    if (entry.inst != load) {
+      issued_.push(entry);
+      continue;
+    }
+    wf.pc = entry.issue_pc;
+    release_wait_counters(wf, entry.counters);
+    delete entry.inst;
+    wf.set_state(WfState::RUNNING);
+  }
+  return true;
+}
+
+bool MemoryPipeline::cancel_wait_check_issue(const PipelineEntry &entry) {
+  auto &wf = *entry.wf;
+  if (auto *scoreboard = wf.memory_wait_scoreboard();
+      scoreboard && entry.inst->is_memory_wait_producer()) {
+    bool xcnt = false;
+    // An unavailable load with replay-source checking has an outstanding X
+    // position. MODE gates VMEM groups; scalar loads always use their X group.
+    if (scoreboard->outstanding(WaitCounterKind::X)) {
+      const auto events =
+          waitcheck_detail::WaitcheckTarget::classify_events(*entry.inst, wf.cu().arch());
+      if (events.failed())
+        return false;
+      const auto xevent = std::ranges::find(events.value(), WaitCounterKind::X,
+                                            &waitcheck_detail::ClassifiedEvent::counter);
+      xcnt =
+          xevent != events.value().end() &&
+          (xevent->kind == waitcheck_detail::WaitEventKind::Smem || (wf.mode_raw() & (1u << 25)));
+    }
+    if (!scoreboard->cancel_last_issue(entry.issue_pc,
+                                       std::span(entry.counters.types).first(entry.counters.size),
+                                       wf.cu().arch(), xcnt))
+      return false;
+  }
+  return true;
 }
 
 void MemoryPipeline::cancel(Wavefront &wf) {
@@ -158,11 +240,21 @@ void MemoryPipeline::cancel(Wavefront &wf) {
   issued_.swap(retained);
 }
 
-void MemoryPipeline::tick() {
+void MemoryPipeline::tick() { retry_entries(true, 0, 0); }
+
+void MemoryPipeline::retry_for_queue(uint32_t process_id, uint32_t queue_id) {
+  retry_entries(false, process_id, queue_id);
+}
+
+void MemoryPipeline::retry_entries(bool all_queues, uint32_t process_id, uint32_t queue_id) {
   const std::size_t pending = issued_.size();
-  for (std::size_t index = 0; index < pending; ++index) {
+  for (std::size_t index = 0; index < pending && !issued_.empty(); ++index) {
     PipelineEntry entry = issued_.front();
     issued_.pop();
+    if (!all_queues && (entry.wf->process_id() != process_id || entry.wf->queue_id() != queue_id)) {
+      issued_.push(entry);
+      continue;
+    }
     if (entry.wf->dispatch_generation() != entry.wave_generation) {
       delete entry.inst;
       continue;
@@ -170,7 +262,8 @@ void MemoryPipeline::tick() {
     const VmAccessOutcome access = initiate_access(*entry.inst, *entry.wf);
     if (access == VmAccessOutcome::Unavailable) {
       issued_.push(entry);
-      entry.wf->cu().request_functional_yield();
+      if (all_queues)
+        entry.wf->cu().request_functional_yield();
       continue;
     }
     if (access == VmAccessOutcome::Complete) {
@@ -178,11 +271,22 @@ void MemoryPipeline::tick() {
       continue;
     }
 
+    // The retained instruction no longer owns a retry or a diagnostic producer.
+    // An exception owner may keep this wave for replay; settle both before the
+    // callback can suspend it, enter a trap handler, or cancel its dispatch.
+    if (!cancel_wait_check_issue(entry))
+      throw std::logic_error("Deferred memory fault has no matching wait-check issue");
     release_wait_counters(*entry.wf, entry.counters);
+    if (entry.wf->state() == WfState::VM_RETRY)
+      entry.wf->set_state(WfState::RUNNING);
     delete entry.inst;
     if (fault_handler_)
-      fault_handler_(*entry.wf, access);
-    return;
+      fault_handler_(*entry.wf, access, entry.issue_pc);
+    if (all_queues)
+      return;
+    // Snapshot service must settle the other paused waves even when a retained
+    // wave faults. The handler may cancel its dispatch and remove later entries;
+    // the bounded pass rechecks the live queue before accessing the next one.
   }
 }
 

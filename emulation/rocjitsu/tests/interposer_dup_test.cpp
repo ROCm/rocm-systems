@@ -1648,6 +1648,169 @@ TEST(InterposerDrmTest, PrimeImportRejectsADescriptorThatIsNotADmabuf) {
   EXPECT_EQ(close(kfd), 0);
 }
 
+// Device pages are captured by ROCr's GPU core policy, while ordinary host
+// mappings remain eligible for the host core. Check descriptor aliases and both
+// libc entry points because libdrm calls mmap64 even on a 64-bit host.
+TEST(InterposerDrmTest, DeviceMappingsFollowGpuCoreDumpPolicyAcrossDescriptorAliases) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  KfdExport buffer;
+  ASSERT_TRUE(buffer.create(kfd, kPublicVram));
+  int alias = dup(buffer.dmabuf);
+  ASSERT_GE(alias, 0);
+  ASSERT_EQ(close(buffer.dmabuf), 0);
+  buffer.dmabuf = -1;
+
+  auto dump_flags = [](void *address) {
+    std::ifstream smaps("/proc/self/smaps");
+    std::string line;
+    bool selected = false;
+    while (std::getline(smaps, line)) {
+      unsigned long begin = 0, end = 0;
+      if (std::sscanf(line.c_str(), "%lx-%lx", &begin, &end) == 2)
+        selected = reinterpret_cast<uintptr_t>(address) >= begin &&
+                   reinterpret_cast<uintptr_t>(address) < end;
+      if (selected && line.starts_with("VmFlags:"))
+        return line + " ";
+    }
+    return std::string{};
+  };
+  for (bool large_file : {false, true}) {
+    void *mapped = large_file ? mmap64(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, alias, 0)
+                              : mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, alias, 0);
+    ASSERT_NE(mapped, MAP_FAILED);
+    EXPECT_NE(dump_flags(mapped).find(" dd "), std::string::npos);
+    std::ifstream maps("/proc/self/maps");
+    std::string line;
+    bool found = false;
+    while (std::getline(maps, line)) {
+      unsigned long begin = 0, end = 0;
+      if (std::sscanf(line.c_str(), "%lx-%lx", &begin, &end) == 2 &&
+          reinterpret_cast<uintptr_t>(mapped) >= begin &&
+          reinterpret_cast<uintptr_t>(mapped) < end) {
+        EXPECT_NE(line.find("/dev/dri/renderD"), std::string::npos);
+        found = true;
+      }
+    }
+    EXPECT_TRUE(found);
+    ASSERT_EQ(munmap(mapped, 4096), 0);
+  }
+  const int drm = open_drm_render();
+  ASSERT_GE(drm, 0);
+  drm_prime_handle imported{};
+  imported.fd = alias;
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_PRIME_FD_TO_HANDLE, &imported), 0);
+  drm_amdgpu_gem_mmap offset{};
+  offset.in.handle = imported.handle;
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_AMDGPU_GEM_MMAP, &offset), 0);
+  for (bool large_file : {false, true}) {
+    void *mapped = large_file ? mmap64(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, drm,
+                                       static_cast<off64_t>(offset.out.addr_ptr))
+                              : mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, drm,
+                                     static_cast<off_t>(offset.out.addr_ptr));
+    ASSERT_NE(mapped, MAP_FAILED);
+    EXPECT_NE(dump_flags(mapped).find(" dd "), std::string::npos);
+    EXPECT_EQ(munmap(mapped, 4096), 0);
+  }
+  drm_gem_close close_bo{};
+  close_bo.handle = imported.handle;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_GEM_CLOSE, &close_bo), 0);
+  EXPECT_EQ(close(drm), 0);
+  int ordinary = make_sized_memfd(4096);
+  ASSERT_GE(ordinary, 0);
+  void *host = mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, ordinary, 0);
+  ASSERT_NE(host, MAP_FAILED);
+  EXPECT_FALSE(dump_flags(host).empty());
+  EXPECT_EQ(dump_flags(host).find(" dd "), std::string::npos);
+  EXPECT_EQ(munmap(host, 4096), 0);
+  EXPECT_EQ(close(ordinary), 0);
+  EXPECT_EQ(close(alias), 0);
+  buffer.release();
+  EXPECT_EQ(close(kfd), 0);
+}
+
+TEST(InterposerDrmTest, MappingStillSucceedsAtTheDescriptorLimit) {
+  const int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  const int file = make_sized_memfd(4096);
+  ASSERT_GE(file, 0);
+  const uint32_t marker = 0x12345678;
+  ASSERT_EQ(pwrite(file, &marker, sizeof(marker), 0), static_cast<ssize_t>(sizeof(marker)));
+  struct DescriptorLimitGuard {
+    rlimit original{};
+    std::vector<int> descriptors;
+    ~DescriptorLimitGuard() {
+      setrlimit(RLIMIT_NOFILE, &original);
+      for (int fd : descriptors)
+        syscall(SYS_close, fd);
+    }
+  } guard;
+  ASSERT_EQ(getrlimit(RLIMIT_NOFILE, &guard.original), 0);
+  rlimit bounded = guard.original;
+  bounded.rlim_cur = std::min<rlim_t>(bounded.rlim_cur, 64);
+  ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &bounded), 0);
+  for (;;) {
+    const int extra = static_cast<int>(syscall(SYS_dup, file));
+    if (extra < 0)
+      break;
+    guard.descriptors.push_back(extra);
+  }
+  ASSERT_EQ(errno, EMFILE);
+  void *mapped = mmap(nullptr, 4096, PROT_READ, MAP_SHARED, file, 0);
+  ASSERT_NE(mapped, MAP_FAILED);
+  EXPECT_EQ(*static_cast<const uint32_t *>(mapped), marker);
+  EXPECT_EQ(munmap(mapped, 4096), 0);
+  EXPECT_EQ(close(file), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+TEST(InterposerDrmTest, DumpPolicyRetainsTheMappedFileAcrossDescriptorReuse) {
+  auto arm =
+      reinterpret_cast<void (*)(int, int)>(dlsym(RTLD_DEFAULT, "rj_test_swap_fd_after_mmap"));
+  auto swapped = reinterpret_cast<bool (*)()>(dlsym(RTLD_DEFAULT, "rj_test_mmap_swapped_fd"));
+  ASSERT_NE(arm, nullptr);
+  ASSERT_NE(swapped, nullptr);
+  const int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  KfdExport device;
+  ASSERT_TRUE(device.create(kfd, kPublicVram));
+  const int host = make_sized_memfd(4096);
+  ASSERT_GE(host, 0);
+  for (const bool map_device : {false, true}) {
+    for (const bool large_file : {false, true}) {
+      SCOPED_TRACE(map_device);
+      SCOPED_TRACE(large_file);
+      const int original = dup(map_device ? device.dmabuf : host);
+      ASSERT_GE(original, 0);
+      arm(original, map_device ? host : device.dmabuf);
+      void *mapped = large_file ? mmap64(nullptr, 4096, PROT_READ, MAP_SHARED, original, 0)
+                                : mmap(nullptr, 4096, PROT_READ, MAP_SHARED, original, 0);
+      ASSERT_NE(mapped, MAP_FAILED);
+      EXPECT_TRUE(swapped());
+      std::ifstream smaps("/proc/self/smaps");
+      std::string line;
+      bool selected = false, found = false;
+      while (std::getline(smaps, line)) {
+        unsigned long begin = 0, end = 0;
+        if (std::sscanf(line.c_str(), "%lx-%lx", &begin, &end) == 2)
+          selected = reinterpret_cast<uintptr_t>(mapped) >= begin &&
+                     reinterpret_cast<uintptr_t>(mapped) < end;
+        if (selected && line.starts_with("VmFlags:")) {
+          EXPECT_EQ((line + " ").find(" dd ") != std::string::npos, map_device);
+          found = true;
+          break;
+        }
+      }
+      EXPECT_TRUE(found);
+      EXPECT_EQ(munmap(mapped, 4096), 0);
+      EXPECT_EQ(close(original), 0);
+    }
+  }
+  EXPECT_EQ(close(host), 0);
+  device.release();
+  EXPECT_EQ(close(kfd), 0);
+}
+
 TEST(InterposerDrmTest, KfdExportFlagsSurviveDuplicationBeforeThePrimeImport) {
   const struct {
     const char *name;

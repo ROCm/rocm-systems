@@ -28,6 +28,7 @@ constexpr uint32_t kTtmpCount = 16; // ttmps saved at the top of the hwreg block
 // lower bound here would reject an ordinary dispatch and fail the queue's whole
 // CWSR publish. Slots that alias travel in their own fields either way.
 constexpr uint32_t kCwsrHeaderBytes = 10 * sizeof(uint32_t);
+constexpr uint32_t kWaveStateHeaderBytes = 4 * sizeof(uint32_t);
 constexpr uint32_t kControlStackOffset = 0x100u;
 
 // COMPUTE_RELAUNCH classification bits (control_stack_iterate): a word with bit
@@ -42,23 +43,23 @@ constexpr uint32_t round_up(uint32_t v, uint32_t m) { return (v / m + (v % m != 
 //   vgpr_count      = (accum_offset[24:29] + 1) * 4
 //   acc_vgpr_count  = (vgprs[0:5]      + 1) * 8 - vgpr_count   (== 0 here)
 //   sgpr_count      = (sgprs[6:8]      + 1) * 16 - 16
-//   lds_size        = lds[9:16] * 1280 bytes on gfx950
-uint32_t encode_state_word(uint32_t vgpr_count, uint32_t sgpr_count, uint32_t lds_size) {
+//   lds_size        = lds[9:16] * target LDS granule (512B gfx942, 1280B gfx950)
+uint32_t encode_state_word(uint32_t vgpr_count, uint32_t sgpr_count, uint32_t lds_blocks) {
   uint32_t vgprs_field = (vgpr_count / 8) - 1;  // acc == 0  =>  vgpr_count = (vgprs+1)*8
   uint32_t accum_offset = (vgpr_count / 4) - 1; // vgpr_count = (accum_offset+1)*4
   uint32_t sgprs_field = sgpr_count / 16;       // sgpr_count = sgprs_field*16
   uint32_t w = 0;
   w |= (vgprs_field & 0x3Fu);
   w |= (sgprs_field & 0x7u) << 6;
-  w |= ((lds_size / 1280) & 0xFFu) << 9;
+  w |= (lds_blocks & 0xFFu) << 9;
   w |= (accum_offset & 0x3Fu) << 24;
   w |= kRelaunchStateBit;
   return w;
 }
 
-uint32_t encode_gfx1250_state_word(uint32_t vgpr_count, uint32_t lds_size) {
+uint32_t encode_gfx1250_state_word(uint32_t vgpr_count, uint32_t lds_blocks) {
   uint32_t w = ((vgpr_count / 16) - 1) & 0x3Fu;
-  w |= ((lds_size / 1024) & 0x1FFu) << 10;
+  w |= (lds_blocks & 0x1FFu) << 10;
   w |= 1u << 24; // gfx1250 supports wave32 only.
   w |= kRelaunchStateBit;
   return w;
@@ -66,14 +67,13 @@ uint32_t encode_gfx1250_state_word(uint32_t vgpr_count, uint32_t lds_size) {
 
 // Encode the COMPUTE_RELAUNCH "wave" word (bits 30/31 clear so it is neither an
 // event nor a state word).
-uint32_t encode_wave_word(bool first_wave, bool last_wave, uint32_t scratch_scoreboard_id) {
-  uint32_t w = 0;
-  // scratch_scoreboard_id[0:8] locates the wave's private memory; se_id[9:11]=0,
-  // scratch_en[15]=0.
-  w |= (scratch_scoreboard_id & 0x1FFu);
-  if (last_wave)
+uint32_t encode_wave_word(const CwsrWaveState &wave) {
+  // gfx9.4 wave payload: scratch slot [0:8], shader engine [9:10].
+  uint32_t w = wave.scratch_scoreboard_id & 0x1FFu;
+  w |= (wave.shader_engine_id & 0x3u) << 9;
+  if (wave.is_last_in_group)
     w |= 1u << 16;
-  if (first_wave)
+  if (wave.is_first_in_group)
     w |= 1u << 17;
   return w;
 }
@@ -144,13 +144,15 @@ struct CwsrGeometry {
 };
 
 CwsrGeometry compute_geometry(uint32_t area_size, const std::vector<CwsrWaveState> &waves,
-                              rj_code_arch_t arch) {
+                              rj_code_arch_t arch, uint32_t control_stack_capacity,
+                              std::optional<CwsrDebugRegion> runtime_debug_region = {}) {
   CwsrGeometry geometry{};
-  if (!cwsr_layout_modelled(arch) || waves.empty() ||
-      waves.size() > std::numeric_limits<uint32_t>::max())
+  const CwsrAbiProperties abi = cwsr_abi_properties(arch);
+  if (abi.layout_kind == CwsrLayoutKind::Unsupported || abi.lds_granule_bytes == 0 ||
+      waves.empty() || waves.size() > std::numeric_limits<uint32_t>::max())
     return geometry;
 
-  const bool gfx12_5 = cwsr_layout_kind(arch) == CwsrLayoutKind::Gfx12_5;
+  const bool gfx12_5 = abi.layout_kind == CwsrLayoutKind::Gfx12_5;
   const auto properties = isa_properties(arch);
   geometry.sgpr_count = gfx12_5 ? kCwsrGfx1250SavedSgprSlots : kCwsrSavedSgprSlots;
   geometry.hwreg_bytes = (gfx12_5 ? kGfx1250HwregCount : kGfx94HwregCount) * sizeof(uint32_t);
@@ -174,7 +176,7 @@ CwsrGeometry compute_geometry(uint32_t area_size, const std::vector<CwsrWaveStat
     max_lds = std::max(max_lds, static_cast<uint32_t>(wave.lds.size()));
   }
 
-  const uint32_t lds_granule = gfx12_5 ? 1024 : 1280;
+  const uint32_t lds_granule = abi.lds_granule_bytes;
   geometry.lds_bytes = round_up(max_lds, lds_granule);
   if (geometry.lds_bytes / lds_granule > (gfx12_5 ? 0x1FFu : 0xFFu))
     return geometry;
@@ -194,7 +196,14 @@ CwsrGeometry compute_geometry(uint32_t area_size, const std::vector<CwsrWaveStat
       std::ranges::count_if(waves, [](const auto &wave) { return wave.is_first_in_group; });
   const uint64_t wave_state_size = geometry.per_wave * num_waves + geometry.lds_bytes * num_groups;
   const uint64_t control_stack_size = (2u + geometry.state_words + num_waves) * sizeof(uint32_t);
-  const uint64_t wave_area_begin = kControlStackOffset + control_stack_size;
+  if (control_stack_capacity != 0 &&
+      (control_stack_capacity < kCwsrHeaderBytes + control_stack_size ||
+       (control_stack_capacity % sizeof(uint32_t)) != 0))
+    return geometry;
+  const uint64_t wave_area_begin = control_stack_capacity != 0
+                                       ? control_stack_capacity
+                                       : kControlStackOffset + control_stack_size;
+  const uint64_t control_stack_offset = wave_area_begin - control_stack_size;
   const uint64_t wave_state_offset = wave_area_begin + wave_state_size;
   if (control_stack_size > std::numeric_limits<uint32_t>::max() ||
       wave_state_size > std::numeric_limits<uint32_t>::max() ||
@@ -213,12 +222,21 @@ CwsrGeometry compute_geometry(uint32_t area_size, const std::vector<CwsrWaveStat
                           debug_size_64 <= std::numeric_limits<uint32_t>::max() &&
                           debug_offset_64 + debug_size_64 <= area_size;
 
-  geometry.layout.control_stack_offset = kControlStackOffset;
+  geometry.layout.control_stack_offset = static_cast<uint32_t>(control_stack_offset);
   geometry.layout.control_stack_size = static_cast<uint32_t>(control_stack_size);
   geometry.layout.wave_state_offset = static_cast<uint32_t>(wave_state_offset);
   geometry.layout.wave_state_size = static_cast<uint32_t>(wave_state_size);
-  geometry.layout.debug_offset = debug_fits ? static_cast<uint32_t>(debug_offset_64) : 0;
-  geometry.layout.debug_size = debug_fits ? static_cast<uint32_t>(debug_size_64) : 0;
+  if (runtime_debug_region) {
+    // libhsakmt may place this region beyond all per-XCC save areas. When it
+    // lies inside this area, the wave payload must not overwrite it.
+    if (runtime_debug_region->size != 0 && runtime_debug_region->offset < wave_state_offset)
+      return geometry;
+    geometry.layout.debug_offset = runtime_debug_region->offset;
+    geometry.layout.debug_size = runtime_debug_region->size;
+  } else {
+    geometry.layout.debug_offset = debug_fits ? static_cast<uint32_t>(debug_offset_64) : 0;
+    geometry.layout.debug_size = debug_fits ? static_cast<uint32_t>(debug_size_64) : 0;
+  }
   geometry.layout.ok = true;
   return geometry;
 }
@@ -234,15 +252,17 @@ uint32_t image_word(std::span<const uint8_t> image, uint32_t offset) {
 CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
                                 const std::vector<CwsrWaveState> &waves,
                                 const std::function<void(uint64_t, uint32_t)> &write32,
-                                rj_code_arch_t arch) {
+                                rj_code_arch_t arch, uint32_t control_stack_capacity,
+                                std::optional<CwsrDebugRegion> runtime_debug_region) {
   CwsrLayout layout{};
   if (!cwsr_layout_modelled(arch) || waves.empty() || !write32 ||
       (ctx_base & (alignof(uint32_t) - 1)) != 0)
     return layout;
 
-  // Uniform per-dispatch register geometry. ACC-VGPRs are not modeled. gfx950
-  // saves one uniformly-sized LDS block before each workgroup leader.
-  const CwsrGeometry geometry = compute_geometry(area_size, waves, arch);
+  // Uniform per-dispatch register geometry. ACC-VGPRs are not modeled. Each
+  // workgroup leader owns one LDS block rounded to the target save-state unit.
+  const CwsrGeometry geometry =
+      compute_geometry(area_size, waves, arch, control_stack_capacity, runtime_debug_region);
   if (!geometry.layout.ok)
     return layout;
   layout = geometry.layout;
@@ -253,6 +273,7 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
   const uint32_t sgpr_bytes = geometry.sgpr_bytes;
   const uint32_t vgpr_bytes = geometry.vgpr_bytes;
   const uint32_t lds_bytes = geometry.lds_bytes;
+  const uint32_t lds_blocks = lds_bytes / cwsr_abi_properties(arch).lds_granule_bytes;
   const uint32_t lane_count = geometry.lane_count;
   const uint32_t vgpr_lane_bytes = geometry.vgpr_lane_bytes;
   const bool gfx12_5 = cwsr_layout_kind(arch) == CwsrLayoutKind::Gfx12_5;
@@ -266,8 +287,8 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
   const uint64_t cs_base = ctx_base + layout.control_stack_offset;
   write32(cs_base + 0, 0); // PM4 (skipped)
   write32(cs_base + 4, 0); // PM4 (skipped)
-  write32(cs_base + 8, gfx12_5 ? encode_gfx1250_state_word(vgpr_count, lds_bytes)
-                               : encode_state_word(vgpr_count, sgpr_count, lds_bytes));
+  write32(cs_base + 8, gfx12_5 ? encode_gfx1250_state_word(vgpr_count, lds_blocks)
+                               : encode_state_word(vgpr_count, sgpr_count, lds_blocks));
   if (gfx12_5)
     write32(cs_base + 12, 0); // COMPUTE_RELAUNCH2 state
   const uint32_t wave_words_offset = (2 + geometry.state_words) * sizeof(uint32_t);
@@ -277,9 +298,7 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
     // "last" if it closes one. Callers order waves so each workgroup's waves are
     // contiguous and set these flags per workgroup.
     write32(cs_base + wave_words_offset + i * 4,
-            gfx12_5 ? encode_gfx1250_wave_word(waves[i])
-                    : encode_wave_word(waves[i].is_first_in_group, waves[i].is_last_in_group,
-                                       waves[i].scratch_scoreboard_id));
+            gfx12_5 ? encode_gfx1250_wave_word(waves[i]) : encode_wave_word(waves[i]));
   }
 
   // --- Per-wave register blocks, laid out high-to-low from wave_state_offset,
@@ -405,20 +424,22 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
   write32(ctx_base + 4, layout.control_stack_size);
   write32(ctx_base + 8, layout.wave_state_offset);
   write32(ctx_base + 12, layout.wave_state_size);
-  write32(ctx_base + 16, layout.debug_offset);
-  write32(ctx_base + 20, layout.debug_size);
-  write32(ctx_base + 24, 0); // err_payload_addr lo
-  write32(ctx_base + 28, 0); // err_payload_addr hi
-  write32(ctx_base + 32, 0); // err_event_id
-  write32(ctx_base + 36, 0); // reserved1
+  if (!runtime_debug_region) {
+    write32(ctx_base + 16, layout.debug_offset);
+    write32(ctx_base + 20, layout.debug_size);
+    write32(ctx_base + 24, 0); // err_payload_addr lo
+    write32(ctx_base + 28, 0); // err_payload_addr hi
+    write32(ctx_base + 32, 0); // err_event_id
+    write32(ctx_base + 36, 0); // reserved1
+  }
 
   return layout;
 }
 
 CwsrLayout serialize_queue_cwsr_bulk(
     uint64_t ctx_base, uint32_t area_size, const std::vector<CwsrWaveState> &waves,
-    const std::function<void(uint64_t, std::span<const uint8_t>)> &write_block,
-    rj_code_arch_t arch) {
+    const std::function<void(uint64_t, std::span<const uint8_t>)> &write_block, rj_code_arch_t arch,
+    uint32_t control_stack_capacity, std::optional<CwsrDebugRegion> runtime_debug_region) {
   if (!write_block)
     return {};
 
@@ -431,7 +452,7 @@ CwsrLayout serialize_queue_cwsr_bulk(
           image.resize(static_cast<size_t>(offset + sizeof(value)));
         std::memcpy(image.data() + offset, &value, sizeof(value));
       },
-      arch);
+      arch, control_stack_capacity, runtime_debug_region);
   if (!layout.ok)
     return layout;
 
@@ -440,13 +461,15 @@ CwsrLayout serialize_queue_cwsr_bulk(
   write_block(ctx_base + layout.control_stack_offset,
               bytes.subspan(layout.control_stack_offset,
                             layout.wave_state_offset - layout.control_stack_offset));
-  write_block(ctx_base, bytes.first(kCwsrHeaderBytes));
+  write_block(ctx_base,
+              bytes.first(runtime_debug_region ? kWaveStateHeaderBytes : kCwsrHeaderBytes));
   return layout;
 }
 
 bool deserialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
                             std::vector<CwsrWaveState> &waves,
-                            const std::function<uint32_t(uint64_t)> &read32, rj_code_arch_t arch) {
+                            const std::function<uint32_t(uint64_t)> &read32, rj_code_arch_t arch,
+                            uint32_t control_stack_capacity) {
   if (!cwsr_layout_modelled(arch) || waves.empty() || !read32 ||
       (ctx_base & (alignof(uint32_t) - 1)) != 0)
     return false;
@@ -454,7 +477,7 @@ bool deserialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
   // Reproduce the exact geometry serialize_queue_cwsr chose (see that function).
   // The wave count and per-wave sgpr/vgpr counts must match, so the register
   // block addresses computed below land on the same dwords that were written.
-  const CwsrGeometry geometry = compute_geometry(area_size, waves, arch);
+  const CwsrGeometry geometry = compute_geometry(area_size, waves, arch, control_stack_capacity);
   if (!geometry.layout.ok ||
       ctx_base > std::numeric_limits<uint64_t>::max() - geometry.layout.wave_state_offset)
     return false;
@@ -572,10 +595,11 @@ bool deserialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
 
 bool deserialize_queue_cwsr_bulk(
     uint64_t ctx_base, uint32_t area_size, std::vector<CwsrWaveState> &waves,
-    const std::function<void(uint64_t, std::span<uint8_t>)> &read_block, rj_code_arch_t arch) {
+    const std::function<void(uint64_t, std::span<uint8_t>)> &read_block, rj_code_arch_t arch,
+    uint32_t control_stack_capacity) {
   if (!read_block || (ctx_base & (alignof(uint32_t) - 1)) != 0)
     return false;
-  const CwsrGeometry geometry = compute_geometry(area_size, waves, arch);
+  const CwsrGeometry geometry = compute_geometry(area_size, waves, arch, control_stack_capacity);
   if (!geometry.layout.ok ||
       ctx_base > std::numeric_limits<uint64_t>::max() - geometry.layout.wave_state_offset)
     return false;
@@ -586,10 +610,12 @@ bool deserialize_queue_cwsr_bulk(
   if (image_word(header_bytes, 0) != geometry.layout.control_stack_offset ||
       image_word(header_bytes, 4) != geometry.layout.control_stack_size ||
       image_word(header_bytes, 8) != geometry.layout.wave_state_offset ||
-      image_word(header_bytes, 12) != geometry.layout.wave_state_size ||
-      image_word(header_bytes, 16) != geometry.layout.debug_offset ||
-      image_word(header_bytes, 20) != geometry.layout.debug_size)
+      image_word(header_bytes, 12) != geometry.layout.wave_state_size)
     return false;
+
+  // The runtime-owned debugger region need not match the codec's synthetic
+  // allocation and may lie beyond all XCC save areas. It does not determine
+  // the wave payload decoded below.
 
   std::vector<uint8_t> image(geometry.layout.wave_state_offset);
   std::memcpy(image.data(), header.data(), header.size());
@@ -609,7 +635,7 @@ bool deserialize_queue_cwsr_bulk(
         }
         return image_word(image, static_cast<uint32_t>(offset));
       },
-      arch);
+      arch, control_stack_capacity);
   return decoded && in_bounds;
 }
 

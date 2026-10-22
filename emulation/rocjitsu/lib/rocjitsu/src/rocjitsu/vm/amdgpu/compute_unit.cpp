@@ -191,10 +191,10 @@ ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemo
   req_ = add_port(std::make_unique<simdojo::Port>("req", 1, this, simdojo::PortDirection::OUT,
                                                   simdojo::PortProtocol::MEMORY));
 
-  MemoryPipeline::FaultHandler vm_fault_handler = [this](Wavefront &wavefront,
-                                                         VmAccessOutcome outcome) {
-    handle_terminal_vm_fault(wavefront, outcome);
-  };
+  MemoryPipeline::FaultHandler vm_fault_handler =
+      [this](Wavefront &wavefront, VmAccessOutcome outcome, uint64_t issue_pc) {
+        handle_memory_access_failure(wavefront, outcome, issue_pc);
+      };
   scalar_mem_pipeline_.set_fault_handler(vm_fault_handler);
   global_mem_pipeline_.set_fault_handler(vm_fault_handler);
   tensor_dma_pipeline_.set_fault_handler(std::move(vm_fault_handler));
@@ -491,6 +491,21 @@ void ComputeUnitCore::flush_cp_notifications() {
     if (capacity_changed && cp_->dispatch_threads() <= 1 && engine())
       engine()->schedule_event_now(cp_->doorbell_event());
   }
+}
+
+void ComputeUnitCore::handle_memory_access_failure(Wavefront &wf, VmAccessOutcome outcome,
+                                                   uint64_t issue_pc) {
+  assert(outcome != VmAccessOutcome::Complete && outcome != VmAccessOutcome::Unavailable);
+  if (wf.fail_pm4_submission()) {
+    abort_dispatch(wf.dispatch_id());
+    return;
+  }
+  // Only architectural data faults belong to the runtime exception owner.
+  // Fetch faults are offered once at the fetch site, with their real address.
+  if (outcome == VmAccessOutcome::Faulted && memory_violation_handler_ &&
+      memory_violation_handler_(wf, 0, false, issue_pc))
+    return;
+  handle_terminal_vm_fault(wf, outcome);
 }
 
 void ComputeUnitCore::handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome outcome) {
@@ -913,6 +928,32 @@ bool ComputeUnitCore::can_accept_workgroup(uint32_t num_wfs, uint32_t lds_bytes,
   }
 
   return true;
+}
+
+void ComputeUnitCore::retry_paused_queue_memory(uint32_t process_id, uint32_t queue_id,
+                                                bool replay_loads) {
+  WaveStateGuard guard(*this);
+  auto pending = [&](const auto &wave) {
+    return wave && wave->process_id() == process_id && wave->queue_id() == queue_id &&
+           (wave->runtime_suspended() || wave->debug_stopped()) && !wave->wait_counters().empty();
+  };
+  if (std::ranges::any_of(wfs_, pending)) {
+    scalar_mem_pipeline_.retry_for_queue(process_id, queue_id);
+    global_mem_pipeline_.retry_for_queue(process_id, queue_id);
+    local_mem_pipeline_.retry_for_queue(process_id, queue_id);
+    tensor_dma_pipeline_.retry_for_queue(process_id, queue_id);
+  }
+  if (replay_loads) {
+    for (const auto &wave : wfs_) {
+      if (!pending(wave))
+        continue;
+      // Unavailable loads have not committed register writeback or memory
+      // side effects. Save their issuing PC and replay after debugger resume.
+      // Side-effecting operations must finish before a context can be saved.
+      (void)(scalar_mem_pipeline_.rewind_unavailable_load(*wave) ||
+             global_mem_pipeline_.rewind_unavailable_load(*wave));
+    }
+  }
 }
 
 void ComputeUnitCore::tick_pipelines() {
@@ -1866,7 +1907,7 @@ template <bool EnableAsync>
       return;
     }
     if (fetch_outcome == VmAccessOutcome::Faulted && memory_violation_handler_ &&
-        memory_violation_handler_(*active, active->pc, false)) {
+        memory_violation_handler_(*active, active->pc, false, active->pc)) {
       return;
     }
     util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(),
@@ -2069,7 +2110,7 @@ template <bool EnableAsync>
           active->set_ttmp(10, wg[2]);
         }
         if (!uses_split_wave_state) {
-          active->set_ttmp(11, ((active->aql_packet_id() & 0x1FFFFFFu) << 6) |
+          active->set_ttmp(11, ((active->queue_packet_id() & 0x1FFFFFFu) << 6) |
                                    (active->wave_in_group() & 0x3Fu));
           active->set_ttmp(12, saved_status);
           const uint32_t debug_enabled = config->debug_enabled ? (1u << 23) : 0u;
@@ -2180,7 +2221,9 @@ template <bool EnableAsync>
       util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(),
                        " HALT(TensorDmaVmAccess) pc=0x", std::hex, active->pc, std::dec,
                        " vmid=", vmid, " outcome=", static_cast<unsigned>(tensor_outcome));
-      handle_terminal_vm_fault(*active, tensor_outcome);
+      const uint64_t issue_pc = active->pc;
+      active->pc += inst_size;
+      handle_memory_access_failure(*active, tensor_outcome, issue_pc);
       return;
     }
     active->pc += inst_size;
@@ -2238,7 +2281,7 @@ template <bool EnableAsync>
       const VmAccessKind access = dbg_is_atomic  ? VmAccessKind::Atomic
                                   : dbg_is_write ? VmAccessKind::Write
                                                  : VmAccessKind::Read;
-      return vm_access->query_access(addr, dbg_bytes, access) != VmAccessOutcome::Complete;
+      return vm_access->query_access(addr, dbg_bytes, access) == VmAccessOutcome::Faulted;
     }
     return dbg_vmid != 0;
   };
@@ -2258,18 +2301,15 @@ template <bool EnableAsync>
   // s_rfe body clears the flag.
   const bool trap_return = was_in_trap_handler && !active->in_trap_handler();
 
-  // A faulting access is discarded only if the debugger actually claims the
-  // fault. debug_active_ is CU-wide, so the probe also fires for waves of a
-  // process nobody is debugging; on_wave_memory_violation() declines those, and
-  // dropping the instruction anyway silently lost a store, or left a load's
-  // destination registers stale, in an undebugged process.
+  // A frontend may claim an architectural fault for either a debugger or a
+  // runtime exception owner. The probe is CU-wide, so an attached debugger
+  // also enables it for other processes. Only Faulted queries are offered:
+  // transient translation failures, revoked snapshots and invalid requests
+  // remain on the typed memory pipeline's retry/cancellation path.
   //
-  // The report has to be made against the resume PC -- a wave the handler
-  // serializes must come back past the access, not re-execute it -- so the PC
-  // is advanced for the duration of the report and put back if the fault goes
-  // unclaimed. Everything downstream then sees exactly the ordering it saw
-  // before: the instruction is routed at the issue PC and the PC advances
-  // afterwards.
+  // Report against the resume PC. The frontend can restore the issue PC for
+  // XNACK; if it declines, undo only our advance before routing the instruction
+  // normally. A declining handler may itself have changed the PC.
   const uint64_t issue_pc = active->pc;
   bool fault_claimed = false;
   if (debug_memory_fault && !active->debug_halted()) {
@@ -2278,7 +2318,7 @@ template <bool EnableAsync>
     // range walk; only the lanes after it still have to be tested.
     for (auto it = first_fault; it != dbg_addrs.end(); ++it) {
       if ((it == first_fault || access_faults(*it)) &&
-          memory_violation_handler_(*active, *it, dbg_is_write)) {
+          memory_violation_handler_(*active, *it, dbg_is_write, issue_pc)) {
         fault_claimed = true;
         break;
       }
@@ -2317,7 +2357,8 @@ template <bool EnableAsync>
         util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(DataVmAccess) pc=0x",
                          std::hex, active->pc, std::dec, " vmid=", vmid,
                          " outcome=", static_cast<unsigned>(memory_outcome));
-        handle_terminal_vm_fault(*active, memory_outcome);
+        active->pc += inst_size;
+        handle_memory_access_failure(*active, memory_outcome, issue_pc);
         return;
       }
     }
