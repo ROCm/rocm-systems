@@ -1039,9 +1039,6 @@ TEST(ProxyTests, ProxyServiceDoesNotHangOnExternalBadMagic)
 
             const int externalFd = socket(AF_INET, SOCK_STREAM, 0);
             ASSERT_GE(externalFd, 0);
-            ASSERT_EQ(connect(externalFd, reinterpret_cast<const sockaddr*>(&boundAddr.sin),
-                              sizeof(boundAddr.sin)),
-                      0);
 
             std::atomic<bool> serviceExited{false};
             std::thread serviceThread([&]() {
@@ -1057,6 +1054,20 @@ TEST(ProxyTests, ProxyServiceDoesNotHangOnExternalBadMagic)
             ASSERT_EQ(pthread_getcpuclockid(serviceThread.native_handle(), &serviceClock), 0);
             struct timespec cpuBefore = {};
             ASSERT_EQ(clock_gettime(serviceClock, &cpuBefore), 0);
+
+            // Connect only after the service is already polling. Otherwise
+            // the peer sits in the listen backlog and the service spends this
+            // whole setup interval inside the handshake receive loop.
+            const int connectResult =
+                connect(externalFd, reinterpret_cast<const sockaddr*>(&boundAddr.sin), sizeof(boundAddr.sin));
+            if (connectResult != 0) {
+                const int connectError = errno;
+                __atomic_store_n(&abortFlag, 1, __ATOMIC_RELEASE);
+                serviceThread.join();
+                close(externalFd);
+                ADD_FAILURE() << "external client connect failed: " << strerror(connectError);
+                return;
+            }
 
             // Simulate an unrelated external TCP client. It completes the TCP
             // connection and sends a complete hello with a wrong NCCL magic.
