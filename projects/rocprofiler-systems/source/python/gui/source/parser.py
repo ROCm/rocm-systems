@@ -635,12 +635,12 @@ def parse_files(
 
         elif file.endswith(".coz"):
             try:
-                f = open(file, "r")
+                with open(file, "r") as f:
+                    lines = f.readlines()
             except OSError as e:
                 sys.stderr.write(f"{e}\n")
                 continue
 
-            lines = f.readlines()
             # Parse lines
             experiment = None
             samps = {}
