@@ -146,6 +146,29 @@ if(TARGET rdc_client)
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
         COMPONENT ${TESTS_COMPONENT}
     )
+
+    # rdc_policy_client_tests: policy registration through the client against a
+    # fake rdcd that admits, rejects or never answers a stream. Links like
+    # rdc_client_replies_tests.
+    add_executable(rdc_policy_client_tests ${SRC_DIR}/test_policy_client.cc)
+    target_include_directories(
+        rdc_policy_client_tests
+        PRIVATE ${PROJECT_SOURCE_DIR}/include ${PROTOB_OUT_DIR}
+    )
+    target_link_libraries(
+        rdc_policy_client_tests
+        PRIVATE rdc_bootstrap rdc_client gRPC::grpc++ GTest::gtest_main pthread
+    )
+    set_target_properties(
+        rdc_policy_client_tests
+        PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib:\$ORIGIN/../../../lib/rdc/grpc/lib"
+    )
+    add_test(NAME rdc_policy_client_tests COMMAND rdc_policy_client_tests)
+    install(
+        TARGETS rdc_policy_client_tests
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
+        COMPONENT ${TESTS_COMPONENT}
+    )
 endif()
 
 # rdc_link_status_tests: rdc_link_status_get() against fake amdsmi link-status

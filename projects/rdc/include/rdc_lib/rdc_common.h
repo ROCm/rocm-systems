@@ -37,6 +37,9 @@ typedef std::pair<uint32_t, uint32_t> RdcFieldGroupKey;
 //!< The gauge metrics do not require aggregations
 typedef std::map<RdcFieldKey, uint64_t> rdc_gpu_gauges_t;
 
+//!< Initial metadata key with which rdcd admits a RegisterPolicy stream
+inline constexpr char kRdcPolicyAdmissionKey[] = "rdc-policy-admission";
+
 /**
  *  @brief The strncpy but with null terminated
  *

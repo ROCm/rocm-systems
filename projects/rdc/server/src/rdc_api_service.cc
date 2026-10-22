@@ -25,8 +25,9 @@ THE SOFTWARE.
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/impl/call_op_set.h>
 
+#include <algorithm>
+#include <chrono>  // NOLINT
 #include <csignal>
-#include <future>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -42,14 +43,11 @@ THE SOFTWARE.
 namespace amd {
 namespace rdc {
 
-std::map<uint32_t, RdcAPIServiceImpl::policy_thread_context*> RdcAPIServiceImpl::policy_threads_;
-std::mutex RdcAPIServiceImpl::policy_threads_mutex_;
-
-RdcAPIServiceImpl::policy_thread_context* RdcAPIServiceImpl::find_policy_thread(uint32_t group_id) {
-  std::lock_guard<std::mutex> guard(policy_threads_mutex_);
-  auto it = policy_threads_.find(group_id);
-  return (it != policy_threads_.end()) ? it->second : nullptr;
-}
+std::mutex RdcAPIServiceImpl::policy_mutex_;
+std::map<uint32_t, std::vector<std::shared_ptr<RdcAPIServiceImpl::PolicyStream>>>
+    RdcAPIServiceImpl::policy_streams_;
+size_t RdcAPIServiceImpl::policy_stream_count_ = 0;
+bool RdcAPIServiceImpl::policy_shutdown_ = false;
 
 RdcAPIServiceImpl::RdcAPIServiceImpl() : rdc_handle_(nullptr) {}
 
@@ -69,19 +67,25 @@ rdc_status_t RdcAPIServiceImpl::Initialize(uint64_t rdcd_init_flags) {
 }
 
 void RdcAPIServiceImpl::Shutdown() {
-  // exit policy threads
-  std::lock_guard<std::mutex> guard(policy_threads_mutex_);
-  for (auto it : policy_threads_) {
-    stop_policy_stream(it.second);
+  // End every policy stream, and admit no new one.
+  std::lock_guard<std::mutex> guard(policy_mutex_);
+  policy_shutdown_ = true;
+  for (auto& group : policy_streams_) {
+    for (auto& stream : group.second) {
+      {
+        std::lock_guard<std::mutex> lock(stream->mutex);
+        stream->shutdown = true;
+      }
+      stop_policy_stream(stream.get());
+    }
   }
 }
 
 // Ends a RegisterPolicy stream now, not at its next 1 s wakeup.
-void RdcAPIServiceImpl::stop_policy_stream(policy_thread_context* ctx) {
-  pthread_mutex_lock(&ctx->mutex);
-  ctx->start = false;
-  pthread_cond_broadcast(&ctx->cond);
-  pthread_mutex_unlock(&ctx->mutex);
+void RdcAPIServiceImpl::stop_policy_stream(PolicyStream* stream) {
+  std::lock_guard<std::mutex> lock(stream->mutex);
+  stream->stop = true;
+  stream->cv.notify_all();
 }
 
 RdcAPIServiceImpl::~RdcAPIServiceImpl() {
@@ -928,83 +932,135 @@ int RdcAPIServiceImpl::PolicyCallback(rdc_policy_callback_response_t* userData) 
     return 1;
   }
 
-  policy_thread_context* ctx = find_policy_thread(userData->group_id);
-  if (ctx) {
-    pthread_mutex_lock(&ctx->mutex);
-    ctx->response = *userData;
-    ctx->pending = true;
-    pthread_cond_signal(&ctx->cond);
-    pthread_mutex_unlock(&ctx->mutex);
+  // Every stream of the group gets the notification; a stream keeps only the latest one.
+  std::lock_guard<std::mutex> guard(policy_mutex_);
+  auto group = policy_streams_.find(userData->group_id);
+  if (group == policy_streams_.end()) {
+    return 0;
   }
-
+  for (auto& stream : group->second) {
+    std::lock_guard<std::mutex> lock(stream->mutex);
+    stream->response = *userData;
+    stream->pending = true;
+    stream->cv.notify_all();
+  }
   return 0;
+}
+
+void RdcAPIServiceImpl::end_policy_stream(uint32_t group_id,
+                                          const std::shared_ptr<PolicyStream>& stream) {
+  std::lock_guard<std::mutex> guard(policy_mutex_);
+  policy_stream_count_--;
+  // UnRegisterPolicy may have removed the group already, and a new stream may have
+  // registered it again since: only this stream's own entry is removed.
+  auto group = policy_streams_.find(group_id);
+  if (group == policy_streams_.end()) {
+    return;
+  }
+  auto& streams = group->second;
+  auto it = std::find(streams.begin(), streams.end(), stream);
+  if (it == streams.end()) {
+    return;
+  }
+  streams.erase(it);
+  if (streams.empty()) {
+    rdc_policy_unregister(rdc_handle_, group_id);
+    policy_streams_.erase(group);
+  }
 }
 
 ::grpc::Status RdcAPIServiceImpl::RegisterPolicy(
     ::grpc::ServerContext* context, const ::rdc::RegisterPolicyRequest* request,
     ::grpc::ServerWriter<::rdc::RegisterPolicyResponse>* writer) {
-  (void)(context);
-  if (!writer || !request) {
+  if (!context || !writer || !request) {
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
+  const uint32_t group_id = request->group_id();
+
+  // Admission. A rejected stream ends before any message, with a status the client maps to
+  // an RDC status; an admitted one gets the admission key in its initial metadata at once.
+  auto stream = std::make_shared<PolicyStream>();
   {
-    std::lock_guard<std::mutex> guard(policy_threads_mutex_);
-    auto it = policy_threads_.find(request->group_id());
-    if (it == policy_threads_.end()) {
-      policy_thread_context* data = new policy_thread_context;
-      pthread_mutex_init(&data->mutex, nullptr);
-      pthread_cond_init(&data->cond, nullptr);
-      data->start = true;
-      policy_threads_.insert(std::make_pair(request->group_id(), data));
+    std::lock_guard<std::mutex> guard(policy_mutex_);
+    // Rejections a client causes are logged at debug level: any client can repeat them.
+    if (policy_shutdown_) {
+      RDC_LOG(RDC_DEBUG, "Policy stream for group " << group_id << " rejected: rdcd is stopping");
+      return ::grpc::Status(::grpc::StatusCode::UNAVAILABLE, "rdcd is stopping");
+    }
+    if (policy_stream_count_ >= kMaxPolicyStreams) {
+      RDC_LOG(RDC_DEBUG, "Policy stream for group " << group_id << " rejected: rdcd serves "
+                                                    << kMaxPolicyStreams << " already");
+      return ::grpc::Status(::grpc::StatusCode::RESOURCE_EXHAUSTED,
+                            "rdcd serves the most policy registrations it can");
+    }
+    auto group = policy_streams_.find(group_id);
+    if (group == policy_streams_.end()) {
+      rdc_status_t result = rdc_policy_register(rdc_handle_, group_id, PolicyCallback);
+      if (result == RDC_ST_GROUP_NOT_FOUND) {
+        RDC_LOG(RDC_DEBUG, "Policy stream for group " << group_id << " rejected: no such group");
+        return ::grpc::Status(::grpc::StatusCode::NOT_FOUND, "GPU group not found");
+      }
+      if (result != RDC_ST_OK) {
+        RDC_LOG(RDC_ERROR, "Policy stream for group "
+                               << group_id << " rejected: " << rdc_status_string(result));
+        return ::grpc::Status(::grpc::StatusCode::INTERNAL, rdc_status_string(result));
+      }
+      group = policy_streams_.emplace(group_id, std::vector<std::shared_ptr<PolicyStream>>()).first;
+    }
+    group->second.push_back(stream);
+    policy_stream_count_++;
+  }
+  RDC_LOG(RDC_DEBUG, "Policy stream for group " << group_id << " admitted");
+  context->AddInitialMetadata(kRdcPolicyAdmissionKey, "1");
+  writer->SendInitialMetadata();
+
+  // The stream ends when a write fails, the client cancels or goes away (keepalive),
+  // UnRegisterPolicy ends the group's streams, or rdcd stops.
+  bool shutdown = false;
+  while (true) {
+    rdc_policy_callback_response_t response;
+    bool send = false;
+    {
+      std::unique_lock<std::mutex> lock(stream->mutex);
+      stream->cv.wait_for(lock, std::chrono::seconds(1),
+                          [&stream] { return stream->pending || stream->stop; });
+      if (stream->stop) {
+        shutdown = stream->shutdown;
+        break;
+      }
+      if (stream->pending) {
+        response = stream->response;
+        stream->pending = false;
+        send = true;
+      }
+    }
+    if (context->IsCancelled()) {
+      break;
+    }
+    // Written without a lock: a slow client must not block RDC's policy thread.
+    if (send) {
+      ::rdc::RegisterPolicyResponse reply;
+      reply.set_status(RDC_ST_OK);
+      reply.set_version(response.version);
+      reply.set_group_id(response.group_id);
+      reply.set_value(response.value);
+
+      ::rdc::PolicyCondition* cond = reply.mutable_condition();
+      cond->set_type(static_cast<::rdc::PolicyCondition_Type>(response.condition.type));
+      cond->set_value(response.condition.value);
+      reply.set_gpu_index(response.gpu_index);
+      reply.set_reset_triggered(response.reset_triggered != 0);
+      if (!writer->Write(reply)) {
+        break;
+      }
     }
   }
 
-  auto updater = std::async(std::launch::async, [this, request, writer]() {
-    rdc_status_t result = rdc_policy_register(rdc_handle_, request->group_id(), PolicyCallback);
-    if (result == RDC_ST_OK) {
-      policy_thread_context* ctx = find_policy_thread(request->group_id());
-      if (ctx) {
-        // Start without a notification left from an earlier stream.
-        pthread_mutex_lock(&ctx->mutex);
-        ctx->pending = false;
-        ctx->start = true;
-        pthread_mutex_unlock(&ctx->mutex);
-        while (ctx->start) {
-          struct timespec ts;
-          clock_gettime(CLOCK_REALTIME, &ts);
-
-          ts.tv_sec += 1;
-
-          pthread_mutex_lock(&ctx->mutex);
-          int rc = 0;
-          while (!ctx->pending && ctx->start && rc == 0) {
-            rc = pthread_cond_timedwait(&ctx->cond, &ctx->mutex, &ts);  // wait for the callback
-          }
-          bool send = ctx->pending && ctx->start;
-          ctx->pending = false;
-          rdc_policy_callback_response_t response = ctx->response;
-          pthread_mutex_unlock(&ctx->mutex);
-
-          // Write without the lock: a slow client must not block RDC's policy thread.
-          if (send) {
-            ::rdc::RegisterPolicyResponse reply;
-            reply.set_status(RDC_ST_OK);
-            reply.set_version(response.version);
-            reply.set_group_id(response.group_id);
-            reply.set_value(response.value);
-
-            ::rdc::PolicyCondition* cond = reply.mutable_condition();
-            cond->set_type(static_cast<::rdc::PolicyCondition_Type>(response.condition.type));
-            cond->set_value(response.condition.value);
-            reply.set_gpu_index(response.gpu_index);
-            reply.set_reset_triggered(response.reset_triggered != 0);
-            writer->Write(reply);
-          }
-        }
-      }
-    }
-  });
-
+  end_policy_stream(group_id, stream);
+  RDC_LOG(RDC_DEBUG, "Policy stream for group " << group_id << " ended");
+  if (shutdown) {
+    return ::grpc::Status(::grpc::StatusCode::UNAVAILABLE, "rdcd is stopping");
+  }
   return ::grpc::Status::OK;
 }
 
@@ -1016,13 +1072,17 @@ int RdcAPIServiceImpl::PolicyCallback(rdc_policy_callback_response_t* userData) 
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
 
+  // Ends every stream of the group, from any client.
+  std::lock_guard<std::mutex> guard(policy_mutex_);
   rdc_status_t result = rdc_policy_unregister(rdc_handle_, request->group_id());
-  if (result == RDC_ST_OK) {
-    policy_thread_context* ctx = find_policy_thread(request->group_id());
-    if (ctx) {
-      stop_policy_stream(ctx);
+  auto group = policy_streams_.find(request->group_id());
+  if (group != policy_streams_.end()) {
+    for (auto& stream : group->second) {
+      stop_policy_stream(stream.get());
     }
+    policy_streams_.erase(group);
   }
+  reply->set_status(result);
   return ::grpc::Status::OK;
 }
 

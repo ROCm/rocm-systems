@@ -1051,7 +1051,12 @@ rdc_status_t rdc_connect(const char* ipAndPort, rdc_handle_t* p_rdc_handle, cons
  *
  *  @details Disconnect from rdcd daemon, and p_rdc_handle becomes invalid
  *  after this call. It stops the policy callbacks registered on the handle
- *  and waits for a running one to return.
+ *  and waits for a running one to return. It must not run at the same time
+ *  as other calls on the handle, except calls from policy callbacks and an
+ *  rdc_policy_register() that is waiting for rdcd to admit a registration.
+ *  Once rdc_disconnect() has begun, rdc_policy_register() and
+ *  rdc_policy_unregister() from a callback, and a waiting
+ *  rdc_policy_register(), return ::RDC_ST_CLIENT_ERROR.
  *
  *  @param[in] p_rdc_handle The RDC handler that come from rdc_connect().
  *
@@ -1670,6 +1675,16 @@ typedef int (*rdc_policy_register_callback)(rdc_policy_callback_response_t* user
  *  the callback runs on a thread that the library starts for the group. The
  *  callback may call rdc_policy_unregister(), but not rdc_disconnect().
  *
+ *  On a handle from rdc_connect(), the call waits up to 5 seconds for rdcd to
+ *  admit the registration. rdcd serves 64 registrations at once, from all of
+ *  its clients. An rdcd that predates admission does not answer, so after one
+ *  wait without an answer, later calls on the handle do not wait, until the
+ *  handle sees one of its registrations admitted. If rdcd rejects a
+ *  registration after that wait, the registration ends, the rejection is
+ *  logged, and the next rdc_policy_register() of the group runs as if there
+ *  had been none. If rdc_policy_unregister() of the group runs while the call
+ *  waits, the call returns ::RDC_ST_OK and no registration remains.
+ *
  *  @param[in] p_rdc_handle The RDC handler.
  *
  *  @param[in] group_id The GPU group id.
@@ -1677,10 +1692,16 @@ typedef int (*rdc_policy_register_callback)(rdc_policy_callback_response_t* user
  *  @param[in] callback  The callback function to be called when condition meet.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_GROUP_NOT_FOUND The GPU group does not exist.
  *  @retval ::RDC_ST_CONFLICT On a handle from rdc_connect(): a callback is
  *  already registered for the group.
  *  @retval ::RDC_ST_INSUFF_RESOURCES On a handle from rdc_connect(): the
  *  thread for the callback could not start.
+ *  @retval ::RDC_ST_MAX_LIMIT On a handle from rdc_connect(): rdcd already
+ *  serves 64 registrations.
+ *  @retval ::RDC_ST_CLIENT_ERROR On a handle from rdc_connect(): rdcd cannot
+ *  be reached, is stopping or cannot register the group, or the handle is
+ *  being disconnected.
  */
 rdc_status_t rdc_policy_register(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                                  rdc_policy_register_callback callback);
@@ -1693,13 +1714,16 @@ rdc_status_t rdc_policy_register(rdc_handle_t p_rdc_handle, rdc_gpu_group_t grou
  *  callback once after this returns. On a handle from rdc_connect(), it waits
  *  for a running callback of the group to return. Called from a callback, it
  *  does not wait, and the callback of the group may run again until
- *  rdc_disconnect() returns.
+ *  rdc_disconnect() returns. Through rdcd, it ends every registration of the
+ *  group that rdcd serves, from all of its clients.
  *
  *  @param[in] p_rdc_handle The RDC handler.
  *
  *  @param[in] group_id The GPU group id.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_CLIENT_ERROR On a handle from rdc_connect(): rdcd cannot
+ *  be reached, or the handle is being disconnected.
  */
 rdc_status_t rdc_policy_unregister(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id);
 

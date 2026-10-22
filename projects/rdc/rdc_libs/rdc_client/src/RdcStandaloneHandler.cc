@@ -23,12 +23,14 @@ THE SOFTWARE.
 
 #include <grpcpp/grpcpp.h>
 
+#include <chrono>  // NOLINT
 #include <future>
 
 #include "rdc.grpc.pb.h"  // NOLINT
 #include "rdc.pb.h"
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcLogger.h"
+#include "rdc_lib/rdc_common.h"
 
 amd::rdc::RdcHandler* make_handler(const char* ip_and_port, const char* root_ca,
                                    const char* client_cert, const char* client_key) {
@@ -60,34 +62,93 @@ thread_local bool t_in_policy_reader = false;
 
 RdcStandaloneHandler::~RdcStandaloneHandler() {
   // Every reader the handle owns, also one unregistered from a callback,
-  // ends here, before stub_ does.
-  std::vector<std::shared_ptr<policy_stream>> streams;
-  {
-    std::lock_guard<std::mutex> guard(policy_streams_mutex_);
+  // ends here, before stub_ does. rdc_policy_register() calls that wait for
+  // admission give up first and leave without touching the handle again.
+  std::unique_lock<std::mutex> lock(policy_streams_mutex_);
+  destructing_ = true;
+  auto give_up = [](const std::shared_ptr<policy_stream>& stream) {
+    {
+      std::lock_guard<std::mutex> entry_lock(stream->mutex);
+      stream->cancel = true;
+    }
+    stream->cv.notify_all();
+    stop_policy_stream(stream.get());
+  };
+  for (auto& entry : policy_streams_) {
+    give_up(entry.second);
+  }
+  for (auto& stream : draining_) {
+    give_up(stream);
+  }
+  waiters_cv_.wait(lock, [this] { return in_flight_waiters_ == 0; });
+
+  // Join with the mutex released: a callback may call rdc_policy_unregister(),
+  // which returns at once now.
+  while (!policy_streams_.empty() || !draining_.empty()) {
+    std::vector<std::shared_ptr<policy_stream>> streams;
     streams.swap(draining_);
     for (auto& entry : policy_streams_) {
       streams.push_back(entry.second);
     }
     policy_streams_.clear();
-  }
-  for (auto& stream : streams) {
-    stop_policy_stream(stream.get());
-    if (!stream->reader.joinable()) {
-      continue;
+    lock.unlock();
+    for (auto& stream : streams) {
+      if (!stream->reader.joinable()) {
+        continue;
+      }
+      if (stream->reader.get_id() == std::this_thread::get_id()) {
+        // rdc_disconnect() from a callback, which rdc.h does not allow; do not
+        // join this thread from itself.
+        stream->reader.detach();
+      } else {
+        stream->reader.join();
+      }
     }
-    if (stream->reader.get_id() == std::this_thread::get_id()) {
-      // rdc_disconnect() from a callback, which rdc.h does not allow; do not
-      // join this thread from itself.
-      stream->reader.detach();
-    } else {
-      stream->reader.join();
-    }
+    lock.lock();
   }
 }
 
 void RdcStandaloneHandler::stop_policy_stream(policy_stream* stream) {
   stream->stop = true;
   stream->context.TryCancel();
+}
+
+void RdcStandaloneHandler::reap_draining_locked() {
+  for (auto it = draining_.begin(); it != draining_.end();) {
+    const std::shared_ptr<policy_stream>& stream = *it;
+    bool ended = false;
+    {
+      std::lock_guard<std::mutex> entry_lock(stream->mutex);
+      ended = stream->ended;
+    }
+    if (!ended || stream->reader.get_id() == std::this_thread::get_id()) {
+      ++it;
+      continue;
+    }
+    if (stream->reader.joinable()) {
+      stream->reader.join();  // the reader has finished its loop
+    }
+    {
+      std::lock_guard<std::mutex> entry_lock(stream->mutex);
+      if (stream->admitted) {
+        policy_server_old_ = false;  // rdcd admits streams
+      }
+    }
+    it = draining_.erase(it);
+  }
+}
+
+rdc_status_t RdcStandaloneHandler::policy_stream_status(const ::grpc::Status& status) {
+  switch (status.error_code()) {
+    case ::grpc::StatusCode::OK:  // ended normally, for example by an unregister
+      return RDC_ST_OK;
+    case ::grpc::StatusCode::NOT_FOUND:
+      return RDC_ST_GROUP_NOT_FOUND;
+    case ::grpc::StatusCode::RESOURCE_EXHAUSTED:
+      return RDC_ST_MAX_LIMIT;
+    default:  // also rdcd stopping, or rdcd that cannot be reached
+      return RDC_ST_CLIENT_ERROR;
+  }
 }
 
 rdc_status_t RdcStandaloneHandler::error_handle(::grpc::Status status, uint32_t rdc_status) {
@@ -945,9 +1006,31 @@ rdc_status_t RdcStandaloneHandler::rdc_policy_delete(rdc_gpu_group_t group_id,
 
 rdc_status_t RdcStandaloneHandler::rdc_policy_register(rdc_gpu_group_t group_id,
                                                        rdc_policy_register_callback callback) {
-  std::lock_guard<std::mutex> guard(policy_streams_mutex_);
-  if (policy_streams_.count(group_id) != 0) {
-    return RDC_ST_CONFLICT;
+  std::unique_lock<std::mutex> lock(policy_streams_mutex_);
+  if (destructing_) {
+    return RDC_ST_CLIENT_ERROR;
+  }
+  reap_draining_locked();
+  auto existing = policy_streams_.find(group_id);
+  if (existing != policy_streams_.end()) {
+    std::shared_ptr<policy_stream> old = existing->second;
+    bool ended = false;
+    {
+      std::lock_guard<std::mutex> entry_lock(old->mutex);
+      ended = old->ended;
+      if (old->admitted) {
+        policy_server_old_ = false;  // rdcd admits streams
+      }
+    }
+    if (!ended) {
+      return RDC_ST_CONFLICT;
+    }
+    // The stream ended by itself (rdcd stopped, or rejected it late): its
+    // reader has finished, and the group can be registered again.
+    policy_streams_.erase(existing);
+    if (old->reader.joinable() && old->reader.get_id() != std::this_thread::get_id()) {
+      old->reader.join();
+    }
   }
 
   // Read the stream from rdcd on a thread of its own. The thread uses only
@@ -966,10 +1049,29 @@ rdc_status_t RdcStandaloneHandler::rdc_policy_register(rdc_gpu_group_t group_id,
       std::unique_ptr<grpc::ClientReader<::rdc::RegisterPolicyResponse>> reader(
           stub_->RegisterPolicy(&s->context, request));
 
+      // rdcd admits a stream with initial metadata at once. A rejection
+      // carries none, and an older rdcd sends it with the first notification.
+      reader->WaitForInitialMetadata();
+      {
+        std::lock_guard<std::mutex> lock(s->mutex);
+        const auto& metadata = s->context.GetServerInitialMetadata();
+        s->admitted = metadata.find(kRdcPolicyAdmissionKey) != metadata.end();
+      }
+      s->cv.notify_all();
+
       // The loop ends when stop_policy_stream() sets stop, or when Read()
       // fails: rdcd ended the stream, the connection is gone or the call was
       // cancelled.
+      bool notified = false;
       while (!s->stop && reader->Read(&reply)) {
+        if (!notified) {
+          notified = true;
+          {
+            std::lock_guard<std::mutex> lock(s->mutex);
+            s->old_server = !s->admitted;
+          }
+          s->cv.notify_all();
+        }
         ::rdc::PolicyCondition cond = reply.condition();
 
         rdc_policy_callback_response_t response;
@@ -984,14 +1086,86 @@ rdc_status_t RdcStandaloneHandler::rdc_policy_register(rdc_gpu_group_t group_id,
         callback(&response);
       }
 
-      reader->Finish();
+      ::grpc::Status status = reader->Finish();
+      {
+        std::lock_guard<std::mutex> lock(s->mutex);
+        // rdc_policy_register() reports an end it sees; log one that comes later.
+        if (s->returned && !s->stop && !status.ok()) {
+          RDC_LOG(RDC_ERROR, "The policy registration of group "
+                                 << group_id
+                                 << " ended: " << rdc_status_string(policy_stream_status(status))
+                                 << " (gRPC status " << status.error_code() << ")");
+        }
+        s->status = status;
+        s->ended = true;
+      }
+      s->cv.notify_all();
     });
   } catch (...) {  // std::system_error or std::bad_alloc
     policy_streams_.erase(group_id);
     return RDC_ST_INSUFF_RESOURCES;
   }
 
-  return RDC_ST_OK;
+  if (policy_server_old_) {
+    // Wait again once a stream of this handle shows that rdcd admits streams.
+    for (auto& entry : policy_streams_) {
+      std::lock_guard<std::mutex> entry_lock(entry.second->mutex);
+      if (entry.second->admitted) {
+        policy_server_old_ = false;
+        break;
+      }
+    }
+  }
+
+  // Wait up to 5 s for rdcd to admit or reject the stream (not at all for an
+  // rdcd that does not admit), holding only the stream's mutex. The copy of
+  // the stream keeps it alive even if an unregister erases it meanwhile.
+  const auto wait = policy_server_old_ ? std::chrono::seconds(0) : std::chrono::seconds(5);
+  in_flight_waiters_++;
+  lock.unlock();
+  bool admitted = false;
+  bool ended = false;
+  bool cancel = false;
+  ::grpc::Status status;
+  {
+    std::unique_lock<std::mutex> entry_lock(stream->mutex);
+    stream->cv.wait_for(entry_lock, wait, [&stream] {
+      return stream->admitted || stream->old_server || stream->ended || stream->cancel;
+    });
+    admitted = stream->admitted;
+    ended = stream->ended;
+    cancel = stream->cancel;
+    status = stream->status;
+    stream->returned = !ended;
+  }
+  lock.lock();
+
+  rdc_status_t result = RDC_ST_OK;
+  if (admitted) {
+    policy_server_old_ = false;  // rdcd admits streams
+  }
+  if (destructing_) {
+    result = RDC_ST_CLIENT_ERROR;
+  } else if (cancel) {
+    result = RDC_ST_OK;  // a concurrent rdc_policy_unregister() gave the stream up
+  } else if (ended) {
+    // Rejected, or admitted and ended already: the registration is gone.
+    result = policy_stream_status(status);
+    auto it = policy_streams_.find(group_id);
+    if (it != policy_streams_.end() && it->second == stream) {
+      policy_streams_.erase(it);
+      if (stream->reader.joinable() && stream->reader.get_id() != std::this_thread::get_id()) {
+        stream->reader.join();
+      }
+    }
+  } else if (!admitted) {
+    // A notification without admission, or no answer within the wait: an
+    // rdcd that predates admission. Later registrations do not wait.
+    policy_server_old_ = true;
+  }
+  in_flight_waiters_--;
+  waiters_cv_.notify_all();
+  return result;
 }
 
 rdc_status_t RdcStandaloneHandler::rdc_policy_unregister(rdc_gpu_group_t group_id) {
@@ -1001,15 +1175,27 @@ rdc_status_t RdcStandaloneHandler::rdc_policy_unregister(rdc_gpu_group_t group_i
 
   // A callback cannot wait for its own reader, or for another reader that
   // may be waiting for it, so from a callback the stream goes to draining_
-  // for the destructor to join.
+  // to be joined later.
   const bool from_callback = t_in_policy_reader;
   std::shared_ptr<policy_stream> stream;
   {
     std::lock_guard<std::mutex> guard(policy_streams_mutex_);
+    if (destructing_) {
+      return RDC_ST_CLIENT_ERROR;
+    }
+    reap_draining_locked();
     auto it = policy_streams_.find(group_id);
     if (it != policy_streams_.end()) {
       stream = it->second;
       policy_streams_.erase(it);
+      {
+        std::lock_guard<std::mutex> entry_lock(stream->mutex);
+        stream->cancel = true;  // a register waiting for admission returns
+        if (stream->admitted) {
+          policy_server_old_ = false;  // rdcd admits streams
+        }
+      }
+      stream->cv.notify_all();
       if (from_callback) {
         draining_.push_back(stream);
       }
@@ -1024,6 +1210,12 @@ rdc_status_t RdcStandaloneHandler::rdc_policy_unregister(rdc_gpu_group_t group_i
     stop_policy_stream(stream.get());
     if (!from_callback && stream->reader.joinable()) {
       stream->reader.join();
+      // An admission that arrived after the stream was given up still counts.
+      std::lock_guard<std::mutex> guard(policy_streams_mutex_);
+      std::lock_guard<std::mutex> entry_lock(stream->mutex);
+      if (stream->admitted) {
+        policy_server_old_ = false;
+      }
     }
   }
 

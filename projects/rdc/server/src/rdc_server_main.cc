@@ -24,6 +24,7 @@ THE SOFTWARE.
 #include <assert.h>
 #include <fcntl.h>
 #include <getopt.h>
+#include <grpc/grpc.h>
 #include <grpcpp/grpcpp.h>
 #include <pthread.h>
 #include <pwd.h>
@@ -199,6 +200,14 @@ bool RDCServer::Run() {
   } else {
     builder.AddListeningPort(server_address_, grpc::InsecureServerCredentials());
   }
+
+  // Ping idle connections, so that the policy stream of a client that went away ends: a ping
+  // without an answer within 20 s closes the connection and cancels its calls. Pings go on
+  // while a stream sends nothing.
+  builder.AddChannelArgument(GRPC_ARG_KEEPALIVE_TIME_MS, 60000);
+  builder.AddChannelArgument(GRPC_ARG_KEEPALIVE_TIMEOUT_MS, 20000);
+  builder.AddChannelArgument(GRPC_ARG_KEEPALIVE_PERMIT_WITHOUT_CALLS, 1);
+  builder.AddChannelArgument(GRPC_ARG_HTTP2_MAX_PINGS_WITHOUT_DATA, 0);
 
   // Register services as the instances through which we'll communicate with
   // clients. These are synchronous services.

@@ -41,3 +41,13 @@ add_test(NAME rdc_race_tests COMMAND rdc_race_tests)
 
 # Each race test adds its test file and the RDC sources it drives below, in a
 # target_sources() block of its own.
+
+# RdcPolicyImpl calls policy callbacks without its policy lock (rdcd's policy
+# streams rely on it). Compiles RdcPolicyImpl.cc with fakes for what it calls.
+target_sources(
+    rdc_race_tests
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_policy_callback.cc
+        ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcPolicyImpl.cc
+)
+target_include_directories(rdc_race_tests PRIVATE ${PROJECT_SOURCE_DIR} ${AMD_SMI_INCLUDE_DIR})
