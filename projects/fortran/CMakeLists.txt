@@ -2,9 +2,11 @@
 #
 # SPDX-License-Identifier: MIT
 
-# Fortran bindings for the rocm-systems libraries: the `hip` module. hip.F90 is
-# generated from the HIP headers by rocm-fortran-generator; do not edit it by hand.
-# A standalone project, built against an installed HIP (find_package(hip)).
+# Fortran bindings for the rocm-systems libraries: the `hip` and `roctx` modules.
+# hip.F90 and roctx.F90 are generated from the HIP and ROCTx headers by
+# rocm-fortran-generator; do not edit them by hand. A standalone project, built
+# against an installed HIP (find_package(hip)) and ROCTx
+# (find_package(rocprofiler-sdk-roctx)).
 
 cmake_minimum_required(VERSION 3.19)
 
@@ -14,21 +16,26 @@ endif()
 
 # "${UNIX}": ROCm ships no Fortran compiler on Windows, where the probe would
 # pick up a stray gfortran that enable_language(Fortran) then rejects.
-option(BUILD_FORTRAN_BINDINGS "Build the HIP Fortran bindings" "${UNIX}")
-
 option(
-    BUILD_FORTRAN_CLIENTS
-    "Build the HIP Fortran clients and binding tests"
-    ON
+    BUILD_FORTRAN_BINDINGS
+    "Build the HIP and ROCTx Fortran bindings"
+    "${UNIX}"
 )
 
-# Both options are shared by every library in the monorepo; the HIP_ names win.
-if(DEFINED HIP_BUILD_FORTRAN_BINDINGS)
-    set(BUILD_FORTRAN_BINDINGS ${HIP_BUILD_FORTRAN_BINDINGS})
-endif()
-if(DEFINED HIP_BUILD_FORTRAN_CLIENTS)
-    set(BUILD_FORTRAN_CLIENTS ${HIP_BUILD_FORTRAN_CLIENTS})
-endif()
+option(BUILD_FORTRAN_CLIENTS "Build the HIP and ROCTx Fortran binding tests" ON)
+
+# Both options are shared by every library in the monorepo; the HIP_ and ROCTX_
+# names win for their library.
+foreach(_lib IN ITEMS HIP ROCTX)
+    set(_${_lib}_bindings ${BUILD_FORTRAN_BINDINGS})
+    if(DEFINED ${_lib}_BUILD_FORTRAN_BINDINGS)
+        set(_${_lib}_bindings ${${_lib}_BUILD_FORTRAN_BINDINGS})
+    endif()
+    set(_${_lib}_clients ${BUILD_FORTRAN_CLIENTS})
+    if(DEFINED ${_lib}_BUILD_FORTRAN_CLIENTS)
+        set(_${_lib}_clients ${${_lib}_BUILD_FORTRAN_CLIENTS})
+    endif()
+endforeach()
 
 set(FORTRAN_ARRAY_INTERFACES
     "assumed-shape"
@@ -42,9 +49,10 @@ set_property(
 
 if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     set(HIP_HAVE_FORTRAN_BINDINGS FALSE PARENT_SCOPE)
+    set(ROCTX_HAVE_FORTRAN_BINDINGS FALSE PARENT_SCOPE)
 endif()
 
-if(NOT BUILD_FORTRAN_BINDINGS)
+if(NOT _HIP_bindings AND NOT _ROCTX_bindings)
     return()
 endif()
 
@@ -141,7 +149,7 @@ endif()
 if(NOT _have_fortran)
     message(
         STATUS
-        "HIP: no Fortran compiler found, skipping the Fortran bindings"
+        "HIP, ROCTx: no Fortran compiler found, skipping the Fortran bindings"
     )
     return()
 endif()
@@ -158,23 +166,9 @@ if(NOT FORTRAN_ARRAY_INTERFACES MATCHES "^(none|assumed-shape|assumed-rank)$")
     )
 endif()
 
-add_library(hip_fortran STATIC hip.F90)
-add_library(hip::hip_fortran ALIAS hip_fortran)
-
-# Each module compiles to one object, and a linker extracts whole objects from
-# an archive, so a program that calls one wrapper links all of them. One section
-# per procedure lets a program linked with -Wl,--gc-sections keep only the
-# wrappers it calls, and still link when another wrapper names a C function the
-# installed library does not export. Only these compilers split the sections
-# (the Intel ones accept the flags but do not).
-target_compile_options(
-    hip_fortran
-    PRIVATE
-        "$<$<COMPILE_LANG_AND_ID:Fortran,GNU,LLVMFlang,Flang,NVHPC>:-ffunction-sections;-fdata-sections>"
-)
-
 # A .mod is compiler-specific, so artifacts install per compiler, named as the
-# user types it. Must match the mapping in hip-fortran-config.cmake.in.
+# user types it. Must match the mapping in hip-fortran-config.cmake.in and
+# roctx-fortran-config.cmake.in.
 if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
     set(_fc_name "gfortran")
 elseif(CMAKE_Fortran_COMPILER_ID MATCHES "Flang") # Flang, LLVMFlang
@@ -192,154 +186,26 @@ else()
     string(TOLOWER "${_fc_name}" _fc_name)
 endif()
 
-# Not version-specific: a site installing two versions of one compiler sets it.
-set(HIP_FORTRAN_COMPILER_DIR
-    "${_fc_name}"
-    CACHE STRING
-    "Per-compiler subdirectory the .mod and the archive install under"
-)
-
-set(_moddir "${CMAKE_CURRENT_BINARY_DIR}/include")
-set_target_properties(
-    hip_fortran
-    PROPERTIES
-        Fortran_MODULE_DIRECTORY "${_moddir}"
-        Fortran_PREPROCESS ON
-        Fortran_FORMAT FREE
-        POSITION_INDEPENDENT_CODE ON
-)
-
-if(FORTRAN_ARRAY_INTERFACES STREQUAL "assumed-shape")
-    target_compile_definitions(hip_fortran PRIVATE USE_ASSUMED_SHAPE=1)
-elseif(FORTRAN_ARRAY_INTERFACES STREQUAL "assumed-rank")
-    target_compile_definitions(hip_fortran PRIVATE USE_ASSUMED_RANK=1)
-endif()
-
-# No line-length flag: the generated source stays within 131 columns.
-
-target_include_directories(
-    hip_fortran
-    PUBLIC
-        "$<BUILD_INTERFACE:${_moddir}>"
-        "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/fortran/${HIP_FORTRAN_COMPILER_DIR}>"
-)
-
-# hip-config.cmake needs C or CXX enabled for FindThreads.
-if(NOT TARGET hip::host)
-    if(NOT CMAKE_C_COMPILER_LOADED AND NOT CMAKE_CXX_COMPILER_LOADED)
-        enable_language(C)
-    endif()
-    find_package(hip QUIET)
-endif()
-
-# HIP_FORTRAN_NEEDS_C_PACKAGE tells the config package whether to find hip.
-if(TARGET hip::host)
-    target_link_libraries(hip_fortran INTERFACE hip::host)
-    set(HIP_FORTRAN_NEEDS_C_PACKAGE TRUE)
-else()
-    set(HIP_FORTRAN_NEEDS_C_PACKAGE FALSE)
-    message(
-        STATUS
-        "HIP: the runtime was not found, so the Fortran bindings carry no link "
-        "interface; a consumer will have to link it (-lamdhip64) itself."
-    )
-endif()
-
-if(BUILD_FORTRAN_CLIENTS)
-    enable_testing()
-    add_subdirectory(test)
-endif()
-
 include(CMakePackageConfigHelpers)
-
-set(_fortran_pkgdir "${CMAKE_INSTALL_LIBDIR}/cmake/hip-fortran")
 
 # dev: the component HIP's headers and CMake config install under.
 set(HIP_FORTRAN_INSTALL_COMPONENT
     "dev"
     CACHE STRING
-    "Install component of the HIP Fortran bindings"
+    "Install component of the HIP and ROCTx Fortran bindings"
 )
 
-install(
-    TARGETS hip_fortran
-    EXPORT hip-fortran-targets
-    ARCHIVE
-        DESTINATION
-            "${CMAKE_INSTALL_LIBDIR}/fortran/${HIP_FORTRAN_COMPILER_DIR}"
-        COMPONENT ${HIP_FORTRAN_INSTALL_COMPONENT}
-)
-install(
-    DIRECTORY "${_moddir}/"
-    DESTINATION
-        "${CMAKE_INSTALL_INCLUDEDIR}/fortran/${HIP_FORTRAN_COMPILER_DIR}"
-    COMPONENT ${HIP_FORTRAN_INSTALL_COMPONENT}
-    FILES_MATCHING
-    PATTERN "*.mod"
-)
-install(
-    EXPORT hip-fortran-targets
-    FILE hip-fortran-targets.cmake
-    NAMESPACE hip::
-    DESTINATION "${_fortran_pkgdir}"
-    COMPONENT ${HIP_FORTRAN_INSTALL_COMPONENT}
-)
-
-set(HIP_FORTRAN_LIBDIR "${CMAKE_INSTALL_LIBDIR}/fortran")
-set(HIP_FORTRAN_INCLUDEDIR "${CMAKE_INSTALL_INCLUDEDIR}/fortran")
-
-configure_package_config_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/hip-fortran-config.cmake.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/hip-fortran-config.cmake"
-    INSTALL_DESTINATION "${_fortran_pkgdir}"
-    # Not HIP_FORTRAN_COMPILER_DIR: it is a bare name, not a path under the prefix.
-    PATH_VARS HIP_FORTRAN_LIBDIR HIP_FORTRAN_INCLUDEDIR
-)
-install(
-    FILES "${CMAKE_CURRENT_BINARY_DIR}/hip-fortran-config.cmake"
-    DESTINATION "${_fortran_pkgdir}"
-    COMPONENT ${HIP_FORTRAN_INSTALL_COMPONENT}
-)
-
-# From HIP's source VERSION file, as hipamd does; hip_VERSION is the INSTALLED HIP.
-set(_fortran_version "")
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../hip/VERSION")
-    file(
-        STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/../hip/VERSION"
-        _hip_vlist
-        REGEX "^[0-9]+"
-    )
-    list(LENGTH _hip_vlist _hip_vn)
-    if(_hip_vn GREATER_EQUAL 3)
-        list(GET _hip_vlist 0 1 2 _hip_v)
-        list(JOIN _hip_v "." _fortran_version)
-    endif()
-    unset(_hip_vlist)
+if(_HIP_bindings)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/hip.cmake")
+endif()
+if(_ROCTX_bindings)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/roctx.cmake")
 endif()
 
-if(_fortran_version)
-    write_basic_package_version_file(
-        "${CMAKE_CURRENT_BINARY_DIR}/hip-fortran-config-version.cmake"
-        VERSION "${_fortran_version}"
-        COMPATIBILITY SameMajorVersion
-    )
-    install(
-        FILES "${CMAKE_CURRENT_BINARY_DIR}/hip-fortran-config-version.cmake"
-        DESTINATION "${_fortran_pkgdir}"
-        COMPONENT ${HIP_FORTRAN_INSTALL_COMPONENT}
-    )
-else()
-    message(
-        STATUS
-        "HIP: could not determine the version from the VERSION file, so no "
-        "hip-fortran-config-version.cmake is installed and a versioned "
-        "find_package(hip-fortran) will not match."
-    )
-endif()
-
-# Under share/, not include/fortran/, whose entries the config lists as compilers.
-install(
-    FILES "${CMAKE_CURRENT_SOURCE_DIR}/hip.F90"
-    DESTINATION "${CMAKE_INSTALL_DATADIR}/hip/fortran"
-    COMPONENT ${HIP_FORTRAN_INSTALL_COMPONENT}
+if(
+    (TARGET hip_fortran AND _HIP_clients)
+    OR (TARGET roctx_fortran AND _ROCTX_clients)
 )
+    enable_testing()
+    add_subdirectory(test)
+endif()
