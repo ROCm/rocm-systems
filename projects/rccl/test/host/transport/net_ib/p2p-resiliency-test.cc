@@ -16,37 +16,21 @@
 #include <vector>
 
 #include "ScopedHook.h"
+#include "fakes/ibv_ops_fakes.h"
 #include "fakes/ibvwrap_fakes.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/param_redirect.h"
 #include "fakes/transport_net_ib_recovery_fakes.h"
 #include "fakes/transport_net_ib_resiliency_fakes.h"
+#include "transport/net_ib/NetIbQpSeams.h"
 #include "transport/net_ib/connect.h"
 #include "transport/net_ib/p2p.h"
 
 namespace {
 
-uint64_t g_resiliencyNow = 1000;
 int g_resiliencyMultiSendCalls = 0;
 int g_resiliencyPostFifoCalls = 0;
 int g_resiliencyAddEventCalls = 0;
-struct ResiliencyProbePost {
-  uint64_t wrId;
-  uint64_t remoteAddress;
-  uint32_t rkey;
-  uint64_t localAddress;
-  uint32_t length;
-  uint32_t lkey;
-};
-std::vector<ResiliencyProbePost> g_resiliencyProbePosts;
-std::deque<ibv_wc> g_resiliencyProbeCompletions;
-int g_resiliencyProbePostResult = 0;
-std::function<ncclResult_t(ncclIbQp*)> g_resiliencyQpReset = [](ncclIbQp*) { return ncclSystemError; };
-std::function<ncclResult_t(ncclIbQp*, ncclIbQpCreateAttr*)> g_resiliencyQpCreate =
-    [](ncclIbQp*, ncclIbQpCreateAttr*) { return ncclSystemError; };
-std::function<ncclResult_t(ncclIbQp*)> g_resiliencyQpInit = [](ncclIbQp*) { return ncclSystemError; };
-std::function<ncclResult_t(ncclIbQp*)> g_resiliencyQpRtr = [](ncclIbQp*) { return ncclSystemError; };
-std::function<ncclResult_t(ncclIbQp*)> g_resiliencyQpRts = [](ncclIbQp*) { return ncclSystemError; };
 std::vector<size_t> g_resiliencyIbMallocSizes;
 bool g_resiliencyIbMallocPoison = false;
 
@@ -63,7 +47,6 @@ bool AllBytesZero(const T& value) {
   return std::all_of(bytes, bytes + sizeof(T), [](unsigned char byte) { return byte == 0; });
 }
 
-uint64_t TestResiliencyClockNano() { return g_resiliencyNow; }
 ncclResult_t TestResiliencyMultiSend(ncclIbSendComm*, int) {
   ++g_resiliencyMultiSendCalls;
   return ncclSuccess;
@@ -76,41 +59,6 @@ void TestResiliencyAddEvent(ncclIbRequest* request, int devIndex) {
   ++g_resiliencyAddEventCalls;
   request->events[devIndex]++;
 }
-ncclResult_t TestResiliencyQpReset(ncclIbQp* qp) { return g_resiliencyQpReset(qp); }
-ncclResult_t TestResiliencyQpCreate(ncclIbQp* qp, ncclIbQpCreateAttr* attr) {
-  return g_resiliencyQpCreate(qp, attr);
-}
-ncclResult_t TestResiliencyQpInit(ncclIbQp* qp) { return g_resiliencyQpInit(qp); }
-ncclResult_t TestResiliencyQpRtr(ncclIbQp* qp) { return g_resiliencyQpRtr(qp); }
-ncclResult_t TestResiliencyQpRts(ncclIbQp* qp) { return g_resiliencyQpRts(qp); }
-
-int ResiliencyProbePostSend(ibv_qp*, ibv_send_wr* wr, ibv_send_wr** badWr) {
-  if (g_resiliencyProbePostResult != 0) {
-    if (badWr) *badWr = wr;
-    return g_resiliencyProbePostResult;
-  }
-  ResiliencyProbePost post{};
-  post.wrId = wr->wr_id;
-  post.remoteAddress = wr->wr.rdma.remote_addr;
-  post.rkey = wr->wr.rdma.rkey;
-  if (wr->num_sge && wr->sg_list) {
-    post.localAddress = wr->sg_list->addr;
-    post.length = wr->sg_list->length;
-    post.lkey = wr->sg_list->lkey;
-  }
-  g_resiliencyProbePosts.push_back(post);
-  return 0;
-}
-
-int ResiliencyProbePollCq(ibv_cq*, int maxCount, ibv_wc* completions) {
-  int count = std::min<int>(maxCount, g_resiliencyProbeCompletions.size());
-  for (int i = 0; i < count; ++i) {
-    completions[i] = g_resiliencyProbeCompletions.front();
-    g_resiliencyProbeCompletions.pop_front();
-  }
-  return count;
-}
-
 }  // namespace
 
 #define ncclParamIbResiliencyPortFailover NetIbResiliencyParamPortFailover
@@ -133,15 +81,15 @@ int ResiliencyProbePollCq(ibv_cq*, int maxCount, ibv_wc* completions) {
 #define ncclIbResiliencyRequestIsComplete NetIbResiliencyRequestIsComplete
 #define ncclIbResiliencyHandleCompletionError NetIbResiliencyHandleCompletionError
 #define ncclIbResiliencyProgress NetIbResiliencyProgress
-#define clockNano TestResiliencyClockNano
+#define clockNano NetIbTestClockNano
 #define ncclIbMultiSend TestResiliencyMultiSend
 #define ncclIbPostFifo TestResiliencyPostFifo
 #define ncclIbAddEvent TestResiliencyAddEvent
-#define ncclIbQpCreate TestResiliencyQpCreate
-#define ncclIbQpReset TestResiliencyQpReset
-#define ncclIbQpInit TestResiliencyQpInit
-#define ncclIbQpRtr TestResiliencyQpRtr
-#define ncclIbQpRts TestResiliencyQpRts
+#define ncclIbQpCreate NetIbTestQpCreate
+#define ncclIbQpReset NetIbTestQpReset
+#define ncclIbQpInit NetIbTestQpInit
+#define ncclIbQpRtr NetIbTestQpRtr
+#define ncclIbQpRts NetIbTestQpRts
 #pragma push_macro("ncclIbMalloc")
 #undef ncclIbMalloc
 #define ncclIbMalloc TestResiliencyIbMalloc
@@ -234,18 +182,11 @@ class NetIbP2pResiliencyMicrotest : public ::testing::Test {
       ncclIbDevs[i].portAttr.active_mtu = savedMtus_[i];
       ncclIbDevs[i].gidInfo.localGidIndex = savedGidIndices_[i];
     }
-    g_resiliencyNow = 1000;
     g_resiliencyMultiSendCalls = 0;
     g_resiliencyPostFifoCalls = 0;
     g_resiliencyAddEventCalls = 0;
-    g_resiliencyProbePosts.clear();
-    g_resiliencyProbeCompletions.clear();
-    g_resiliencyProbePostResult = 0;
-    g_resiliencyQpReset = [](ncclIbQp*) { return ncclSystemError; };
-    g_resiliencyQpCreate = [](ncclIbQp*, ncclIbQpCreateAttr*) { return ncclSystemError; };
-    g_resiliencyQpInit = [](ncclIbQp*) { return ncclSystemError; };
-    g_resiliencyQpRtr = [](ncclIbQp*) { return ncclSystemError; };
-    g_resiliencyQpRts = [](ncclIbQp*) { return ncclSystemError; };
+    ResetNetIbQpSeams();
+    ResetIbvOpsFakes();
     g_resiliencyIbMallocSizes.clear();
     g_resiliencyIbMallocPoison = false;
     ResetTransportNetIbRecoveryFakes();
@@ -306,7 +247,7 @@ TEST_F(NetIbP2pResiliencyMicrotest, SendRequestTracking_NewGenerationIncrementsA
   request.base = &scene.send.base;
   request.id = 3;
   request.type = NCCL_NET_IB_REQ_SEND;
-  g_resiliencyNow = 9000;
+  g_netIbNowNs = 9000;
 
   ASSERT_EQ(ncclIbResiliencySendRequestInit(&scene.sendRes, &request, 1), ncclSuccess);
   auto& tracked = scene.sendRes.failedRequests[3];
@@ -517,19 +458,19 @@ TEST_F(NetIbP2pResiliencyMicrotest, QpReconfigure_RunsResetInitRtrRtsInOrder) {
   devBase.gidInfo.localGidIndex = 4;
   std::array<char, 4> order{};
   int cursor = 0;
-  g_resiliencyQpReset = [&order, &cursor](ncclIbQp*) {
+  g_netIbQpReset = [&order, &cursor](ncclIbQp*) {
     order[cursor++] = 'R';
     return ncclSuccess;
   };
-  g_resiliencyQpInit = [&order, &cursor](ncclIbQp*) {
+  g_netIbQpInit = [&order, &cursor](ncclIbQp*) {
     order[cursor++] = 'I';
     return ncclSuccess;
   };
-  g_resiliencyQpRtr = [&order, &cursor](ncclIbQp*) {
+  g_netIbQpRtr = [&order, &cursor](ncclIbQp*) {
     order[cursor++] = 'T';
     return ncclSuccess;
   };
-  g_resiliencyQpRts = [&order, &cursor](ncclIbQp*) {
+  g_netIbQpRts = [&order, &cursor](ncclIbQp*) {
     order[cursor++] = 'S';
     return ncclSuccess;
   };
@@ -545,8 +486,8 @@ TEST_F(NetIbP2pResiliencyMicrotest, QpReconfigure_RunsResetInitRtrRtsInOrder) {
 TEST_F(NetIbP2pResiliencyMicrotest, QpReconfigure_StageFailureReportsNotReconfigured) {
   ResiliencyScene scene;
   ncclIbNetCommDevBase devBase{};
-  g_resiliencyQpReset = [](ncclIbQp*) { return ncclSuccess; };
-  g_resiliencyQpInit = [](ncclIbQp*) { return ncclSystemError; };
+  g_netIbQpReset = [](ncclIbQp*) { return ncclSuccess; };
+  g_netIbQpInit = [](ncclIbQp*) { return ncclSystemError; };
   bool success = true;
 
   EXPECT_EQ(NetIbResiliencyQpReconfigure(&scene.sendRes.base, &scene.send.base.qps[0], &devBase, 0, &success),
@@ -630,14 +571,14 @@ TEST_F(NetIbP2pResiliencyMicrotest, SenderProbeQpsCreationStripesDevicesAndPubli
     ncclIbDevs[i].portNum = i + 1;
     scene.verbsQps[i].qp_num = 200 + i;
   }
-  g_resiliencyQpCreate = [&](ncclIbQp* qp, ncclIbQpCreateAttr* attr) {
+  g_netIbQpCreate = [&](ncclIbQp* qp, ncclIbQpCreateAttr* attr) {
     EXPECT_EQ(attr->maxRecvWorkRequest, 0u);
     EXPECT_EQ(attr->maxSendWorkRequest, static_cast<uint32_t>(NET_IB_MAX_REQUESTS));
     qp->qp = &scene.verbsQps[created++];
     return ncclSuccess;
   };
   std::vector<ncclIbQp*> initialized;
-  g_resiliencyQpInit = [&](ncclIbQp* qp) {
+  g_netIbQpInit = [&](ncclIbQp* qp) {
     initialized.push_back(qp);
     return ncclSuccess;
   };
@@ -671,12 +612,12 @@ TEST_F(NetIbP2pResiliencyMicrotest, SenderProbeQpsToRtsUsesRemoteMetadata) {
   remote.devs[0].link_layer = IBV_LINK_LAYER_ETHERNET;
   remote.devs[0].ib_port = 1;
   std::vector<char> transitions;
-  g_resiliencyQpRtr = [&](ncclIbQp* qp) {
+  g_netIbQpRtr = [&](ncclIbQp* qp) {
     EXPECT_EQ(qp, &scene.sendRes.base.probingQps[0]);
     transitions.push_back('T');
     return ncclSuccess;
   };
-  g_resiliencyQpRts = [&](ncclIbQp* qp) {
+  g_netIbQpRts = [&](ncclIbQp* qp) {
     EXPECT_EQ(qp, &scene.sendRes.base.probingQps[0]);
     transitions.push_back('S');
     return ncclSuccess;
@@ -706,8 +647,8 @@ TEST_F(NetIbP2pResiliencyMicrotest, DISABLED_SenderProbeQpsToRtsUsesLocalIbPort)
   remote.devs[0].mtu = IBV_MTU_2048;
   remote.devs[0].link_layer = IBV_LINK_LAYER_ETHERNET;
   remote.devs[0].ib_port = 7;
-  g_resiliencyQpRtr = [](ncclIbQp*) { return ncclSuccess; };
-  g_resiliencyQpRts = [](ncclIbQp*) { return ncclSuccess; };
+  g_netIbQpRtr = [](ncclIbQp*) { return ncclSuccess; };
+  g_netIbQpRts = [](ncclIbQp*) { return ncclSuccess; };
 
   ASSERT_EQ(NetIbResiliencySenderQpsToRts(&scene.sendRes.base, &remote), ncclSuccess);
   EXPECT_EQ(scene.sendRes.base.probingQps[0].rtrAttr.localIbPort, 3);
@@ -725,13 +666,13 @@ TEST_F(NetIbP2pResiliencyMicrotest, DISABLED_ReceiverProbeQpsToRtsUsesLocalIbPor
   scene.recvRes.devs[0].probingCq = &cq;
   ncclIbDevs[0].portNum = 3;
   ncclIbDevs[0].portAttr.active_mtu = IBV_MTU_4096;
-  g_resiliencyQpCreate = [&](ncclIbQp* qp, ncclIbQpCreateAttr*) {
+  g_netIbQpCreate = [&](ncclIbQp* qp, ncclIbQpCreateAttr*) {
     qp->qp = &scene.verbsQps[0];
     return ncclSuccess;
   };
-  g_resiliencyQpInit = [](ncclIbQp*) { return ncclSuccess; };
-  g_resiliencyQpRtr = [](ncclIbQp*) { return ncclSuccess; };
-  g_resiliencyQpRts = [](ncclIbQp*) { return ncclSuccess; };
+  g_netIbQpInit = [](ncclIbQp*) { return ncclSuccess; };
+  g_netIbQpRtr = [](ncclIbQp*) { return ncclSuccess; };
+  g_netIbQpRts = [](ncclIbQp*) { return ncclSuccess; };
   ncclIbConnectionMetadata remote{};
   remote.resiliencyInfo.probingQpsInfo[0].qpn = 300;
   remote.resiliencyInfo.probingQpsInfo[0].devIndex = 0;
@@ -758,23 +699,23 @@ TEST_F(NetIbP2pResiliencyMicrotest, ReceiverProbeQpsCreationStripesAndTransition
     ncclIbDevs[i].portAttr.active_mtu = IBV_MTU_4096;
   }
   int created = 0;
-  g_resiliencyQpCreate = [&](ncclIbQp* qp, ncclIbQpCreateAttr*) {
+  g_netIbQpCreate = [&](ncclIbQp* qp, ncclIbQpCreateAttr*) {
     qp->qp = &scene.verbsQps[created++];
     return ncclSuccess;
   };
   std::vector<char> transitions;
   std::vector<ncclIbQp*> transitionedQps;
-  g_resiliencyQpInit = [&](ncclIbQp* qp) {
+  g_netIbQpInit = [&](ncclIbQp* qp) {
     transitions.push_back('I');
     transitionedQps.push_back(qp);
     return ncclSuccess;
   };
-  g_resiliencyQpRtr = [&](ncclIbQp* qp) {
+  g_netIbQpRtr = [&](ncclIbQp* qp) {
     transitions.push_back('T');
     transitionedQps.push_back(qp);
     return ncclSuccess;
   };
-  g_resiliencyQpRts = [&](ncclIbQp* qp) {
+  g_netIbQpRts = [&](ncclIbQp* qp) {
     transitions.push_back('S');
     transitionedQps.push_back(qp);
     return ncclSuccess;
@@ -815,10 +756,10 @@ TEST_F(NetIbP2pResiliencyMicrotest, QpsReconfigure_DelegatesRecoveryAfterProbeQp
   scene.sendRes.base.probingQps[0].devIndex = 0;
   scene.send.devs[0].base.ibDevN = 0;
   ncclIbDevs[0].gidInfo.localGidIndex = 6;
-  g_resiliencyQpReset = [](ncclIbQp*) { return ncclSuccess; };
-  g_resiliencyQpInit = [](ncclIbQp*) { return ncclSuccess; };
-  g_resiliencyQpRtr = [](ncclIbQp*) { return ncclSuccess; };
-  g_resiliencyQpRts = [](ncclIbQp*) { return ncclSuccess; };
+  g_netIbQpReset = [](ncclIbQp*) { return ncclSuccess; };
+  g_netIbQpInit = [](ncclIbQp*) { return ncclSuccess; };
+  g_netIbQpRtr = [](ncclIbQp*) { return ncclSuccess; };
+  g_netIbQpRts = [](ncclIbQp*) { return ncclSuccess; };
   ScopedHook recovery(g_ncclIbPortRecoveryQpsReconfigure,
                       [](ncclIbResiliency*, int, bool* success) {
                         *success = true;
@@ -869,7 +810,7 @@ TEST_F(NetIbP2pResiliencyMicrotest, HandleCompletionError_SenderMarksDeviceAndTr
   ibv_wc completion{};
   completion.status = IBV_WC_RETRY_EXC_ERR;
   completion.wr_id = 1;
-  g_resiliencyNow = 7000;
+  g_netIbNowNs = 7000;
 
   ASSERT_EQ(NetIbResiliencyHandleCompletionError(&scene.sendRes.base, &completion, 0), ncclSuccess);
   EXPECT_EQ(scene.sendRes.base.devs[0].state.load(), ncclIbResiliencyDevStateError);
@@ -919,7 +860,7 @@ TEST_F(NetIbP2pResiliencyMicrotest, HandleCompletionError_ReceiverFlushClearsFai
 TEST_F(NetIbP2pResiliencyMicrotest, ProbePost_BeforeDelayIsNoOpAndBoundaryPostsExactRecordAddress) {
   ResiliencyScene scene;
   ibv_context context{};
-  context.ops.post_send = ResiliencyProbePostSend;
+  context.ops.post_send = FakeIbvPostSend;
   scene.verbsQps[1].context = &context;
   scene.sendRes.base.devs[0].state.store(ncclIbResiliencyDevStateError, std::memory_order_release);
   scene.sendRes.base.probingQps[1].qp = &scene.verbsQps[1];
@@ -942,19 +883,19 @@ TEST_F(NetIbP2pResiliencyMicrotest, ProbePost_BeforeDelayIsNoOpAndBoundaryPostsE
     return fallback;
   });
 
-  g_resiliencyNow = 1000 + 10 * MSEC_TO_NSEC - 1;
+  g_netIbNowNs = 1000 + 10 * MSEC_TO_NSEC - 1;
   ASSERT_EQ(ncclIbResiliencyProbePost(&scene.sendRes, &failed), ncclSuccess);
-  EXPECT_TRUE(g_resiliencyProbePosts.empty());
+  EXPECT_TRUE(g_ibvPostedSends.empty());
   EXPECT_EQ(failed.state, ncclIbResiliencyRequestStatePending);
 
-  g_resiliencyNow++;
+  g_netIbNowNs++;
   ASSERT_EQ(ncclIbResiliencyProbePost(&scene.sendRes, &failed), ncclSuccess);
-  ASSERT_EQ(g_resiliencyProbePosts.size(), 1u);
-  EXPECT_EQ(g_resiliencyProbePosts[0].wrId, 3u);
-  EXPECT_EQ(g_resiliencyProbePosts[0].remoteAddress,
+  ASSERT_EQ(g_ibvPostedSends.size(), 1u);
+  EXPECT_EQ(g_ibvPostedSends[0].wrId, 3u);
+  EXPECT_EQ(g_ibvPostedSends[0].remoteAddress,
             0x100000u + sizeof(ncclIbRequestCompletionRecord) * 3 + sizeof(int) * NCCL_NET_IB_MAX_RECVS);
-  EXPECT_EQ(g_resiliencyProbePosts[0].rkey, 0x52u);
-  EXPECT_EQ(g_resiliencyProbePosts[0].lkey, 0x51u);
+  EXPECT_EQ(g_ibvPostedSends[0].rkey, 0x52u);
+  EXPECT_EQ(g_ibvPostedSends[0].sge.lkey, 0x51u);
   EXPECT_EQ(failed.state, ncclIbResiliencyRequestStateProbePosted);
   EXPECT_EQ(scene.sendRes.base.devs[1].nOutstandingProbes, 1);
 }
@@ -977,7 +918,7 @@ TEST_F(NetIbP2pResiliencyMicrotest, ProbeCompletion_SuccessMarksRequestCompleted
 TEST_F(NetIbP2pResiliencyMicrotest, ProbeProgress_DrainsCompletionAndDecrementsOutstandingCount) {
   ResiliencyScene scene;
   ibv_context context{};
-  context.ops.poll_cq = ResiliencyProbePollCq;
+  context.ops.poll_cq = FakeIbvPollCq;
   ibv_cq cq{};
   cq.context = &context;
   scene.sendRes.base.devs[1].probingCq = &cq;
@@ -989,7 +930,7 @@ TEST_F(NetIbP2pResiliencyMicrotest, ProbeProgress_DrainsCompletionAndDecrementsO
   ibv_wc completion{};
   completion.status = IBV_WC_SUCCESS;
   completion.wr_id = 5;
-  g_resiliencyProbeCompletions.push_back(completion);
+  g_ibvCompletions.push_back(completion);
 
   ASSERT_EQ(ncclIbResiliencyProbeProgress(&scene.sendRes), ncclSuccess);
   EXPECT_EQ(scene.sendRes.base.devs[1].nOutstandingProbes, 0);

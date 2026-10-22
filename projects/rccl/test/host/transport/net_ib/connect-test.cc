@@ -10,6 +10,7 @@
 
 #include <arpa/inet.h>
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <cstdio>
@@ -22,6 +23,7 @@
 #include "ScopedHook.h"
 #include "fakes/env_fakes.h"
 #include "fakes/hip_fakes.h"
+#include "fakes/ibv_ops_fakes.h"
 #include "fakes/ibvwrap_fakes.h"
 #include "fakes/mlx5dvwrap_fakes.h"
 #include "fakes/nccl_fakes.h"
@@ -102,24 +104,6 @@ union ibv_gid Ipv6Gid(const char* address) {
   EXPECT_EQ(inet_pton(AF_INET6, address, gid.raw), 1);
   return gid;
 }
-
-int g_postRecvCallsForConnect = 0;
-
-int CountConnectPostRecv(ibv_qp*, ibv_recv_wr*, ibv_recv_wr**) {
-  ++g_postRecvCallsForConnect;
-  return 0;
-}
-
-struct ConnectFakeVerbs {
-  ibv_context context{};
-  ibv_qp qp{};
-
-  explicit ConnectFakeVerbs(uint32_t qpNum) {
-    context.ops.post_recv = CountConnectPostRecv;
-    qp.context = &context;
-    qp.qp_num = qpNum;
-  }
-};
 
 class NetIbConnectMicrotest : public ::testing::Test {
  protected:
@@ -240,7 +224,7 @@ class NetIbConnectMicrotest : public ::testing::Test {
     }
     qps_.clear();
     mrs_.clear();
-    g_postRecvCallsForConnect = 0;
+    ResetIbvOpsFakes();
   }
 
   ibv_context context_{};
@@ -1157,7 +1141,7 @@ TEST_F(NetIbConnectMicrotest, CreateFlushQp_FirstUseCreatesLoopbackQpAndHostMr) 
 }
 
 TEST_F(NetIbConnectMicrotest, PostReceiveWorkRequests_ResiliencyDepthControlsPostCount) {
-  ConnectFakeVerbs verbs(71);
+  FakeIbvVerbs verbs(71);
   ncclIbRecvComm comm{};
   ncclIbResiliency resiliency{};
   comm.base.resiliency = &resiliency;
@@ -1169,22 +1153,22 @@ TEST_F(NetIbConnectMicrotest, PostReceiveWorkRequests_ResiliencyDepthControlsPos
     return ncclSuccess;
   };
 
-  g_postRecvCallsForConnect = 0;
   EXPECT_EQ(ncclIbPostReceiveWorkRequestsOnQp(&comm, &qp), ncclSuccess);
-  EXPECT_EQ(g_postRecvCallsForConnect, 3);
+  EXPECT_EQ(g_ibvPostRecvQps, std::vector<ibv_qp*>(3, &verbs.qp));
 }
 
 TEST_F(NetIbConnectMicrotest, ReceiverPrePostReceiveWorkRequests_VisitsEveryQp) {
-  ConnectFakeVerbs first(72);
-  ConnectFakeVerbs second(73);
+  FakeIbvVerbs first(72);
+  FakeIbvVerbs second(73);
   ncclIbRecvComm comm{};
   comm.base.nqps = 2;
   comm.base.qps[0].qp = &first.qp;
   comm.base.qps[1].qp = &second.qp;
-  g_postRecvCallsForConnect = 0;
 
   EXPECT_EQ(ncclIbReceiverPrePostReceiveWorkRequests(&comm), ncclSuccess);
-  EXPECT_EQ(g_postRecvCallsForConnect, 2 * NET_IB_MAX_REQUESTS);
+  EXPECT_EQ(std::count(g_ibvPostRecvQps.begin(), g_ibvPostRecvQps.end(), &first.qp), NET_IB_MAX_REQUESTS);
+  EXPECT_EQ(std::count(g_ibvPostRecvQps.begin(), g_ibvPostRecvQps.end(), &second.qp), NET_IB_MAX_REQUESTS);
+  EXPECT_EQ(g_ibvPostRecvQps.size(), 2u * NET_IB_MAX_REQUESTS);
 }
 
 TEST_F(NetIbConnectMicrotest, FreeGpuFlushMem_HipAllocationIsReleasedAndStateCleared) {
