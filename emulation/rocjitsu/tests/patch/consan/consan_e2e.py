@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Verify physical compiler/application/analyzer handoffs and semantic replay."""
+"""Verify compiler/application/analyzer handoffs and semantic replay in both environments."""
 
 import argparse
 import json

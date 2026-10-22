@@ -218,7 +218,7 @@ if(
 )
     add_executable(
         consan_hsa_runner
-        ${PROJECT_SOURCE_DIR}/tests/dbi/consan_hsa_runner.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/consan_hsa_runner.cpp
     )
     target_include_directories(
         consan_hsa_runner
@@ -234,103 +234,17 @@ if(
         PRIVATE ${ROCM_PATH}/lib/libhsa-runtime64.so ${CMAKE_DL_LIBS}
     )
     rj_configure_target(consan_hsa_runner WARNINGS)
-    foreach(
-        _case
-        race
-        disjoint
-        read_read
-        collision
-        single_lane
-        repeat
-        alias
-        immediate
-        four_ranges
-        exhausted
-        empty
-        branched
-        wrong-artifact
-        bad-geometry
-        profiling
-        reused-signal
+    add_test(
+        NAME ConSanRuntimeIntegration.Guards
+        COMMAND
+            ${Python3_EXECUTABLE} -B
+            ${CMAKE_CURRENT_SOURCE_DIR}/test_runtime_e2e.py
     )
-        add_test(
-            NAME ConSanRuntimeHardware.${_case}
-            COMMAND
-                ${Python3_EXECUTABLE} -B
-                ${PROJECT_SOURCE_DIR}/tests/dbi/consan_runtime_e2e.py --prepare
-                $<TARGET_FILE:rj_consan_prepare> --runner
-                $<TARGET_FILE:consan_hsa_runner> --inspect
-                $<TARGET_FILE:consan_capture_inspect> --plugin
-                $<TARGET_FILE:hsa_consan_testable> --test-statistics --fixtures
-                ${_fixture_dir} --source ${PROJECT_SOURCE_DIR} --root
-                ${RJ_CONSAN_TEST_ARTIFACT_ROOT} --case ${_case}
-        )
-        set_tests_properties(
-            ConSanRuntimeHardware.${_case}
-            PROPERTIES
-                SKIP_RETURN_CODE 77
-                RESOURCE_LOCK consan-gfx1100
-                TIMEOUT 120
-                LABELS "consan;physical-gpu"
-        )
-    endforeach()
-    if(RJ_BUILD_CONSAN_ANALYZER)
-        foreach(
-            _case
-            race
-            disjoint
-            read_read
-            collision
-            single_lane
-            repeat
-            repeat_race
-            alias
-            immediate
-            four_ranges
-            exhausted
-            empty
-            branched
-            wrong-artifact
-            bad-geometry
-            profiling
-            reused-signal
-            utf8_entry
-        )
-            set(_scenario ${_case})
-            set(_entry_options)
-            if(_case STREQUAL "utf8_entry")
-                set(_scenario disjoint)
-                set(_entry_options --utf8-entry)
-            endif()
-            add_test(
-                NAME ConSanE2E.${_case}
-                COMMAND
-                    ${Python3_EXECUTABLE} -B
-                    ${PROJECT_SOURCE_DIR}/tests/dbi/consan_e2e.py --prepare
-                    $<TARGET_FILE:rj_consan_prepare> --runner
-                    $<TARGET_FILE:consan_hsa_runner> --inspect
-                    $<TARGET_FILE:consan_capture_inspect> --plugin
-                    $<TARGET_FILE:hsa_consan_testable> --test-statistics
-                    --analyze $<TARGET_FILE:rj_consan_analyze> --fixtures
-                    ${_fixture_dir} --source ${PROJECT_SOURCE_DIR} --root
-                    ${RJ_CONSAN_TEST_ARTIFACT_ROOT} --case ${_scenario}
-                    ${_entry_options}
-            )
-            set_tests_properties(
-                ConSanE2E.${_case}
-                PROPERTIES
-                    SKIP_RETURN_CODE 77
-                    RESOURCE_LOCK consan-gfx1100
-                    TIMEOUT 120
-                    LABELS "consan;physical-gpu"
-            )
-        endforeach()
-    endif()
 endif()
 
-# Representative three-process paths. Required simulator cases never turn an
-# absent agent into a skip; physical registrations explicitly allow absence.
-if(RJ_BUILD_CONSAN_ANALYZER AND TARGET consan_hsa_runner)
+# Both environments consume the same scenarios. Runtime cases remain available
+# without an analyzer, and simulator cases never treat an absent agent as a skip.
+if(TARGET consan_hsa_runner)
     function(
         consan_add_target_e2e
         environment
@@ -340,24 +254,39 @@ if(RJ_BUILD_CONSAN_ANALYZER AND TARGET consan_hsa_runner)
         scenario
         threads
         variant
+        stage
     )
-        set(_name
-            ConSan${environment}E2E.${gpu}.wave${wave}.${kind}.${scenario}
-        )
         set(_plugin hsa_consan_testable)
         set(_statistics --test-statistics)
+        set(_variant_name)
         if(variant STREQUAL "production")
             set(_plugin hsa_consan)
             set(_statistics)
-            set(_name
-                ConSan${environment}ProductionE2E.${gpu}.wave${wave}.${kind}.${scenario}
-            )
+            set(_variant_name Production)
         elseif(NOT variant STREQUAL "testable")
             message(FATAL_ERROR "Unknown ConSan plugin variant: ${variant}")
         endif()
+        set(_stage_name)
+        set(_analysis_options)
+        if(stage STREQUAL "runtime")
+            set(_stage_name Runtime)
+            set(_driver consan_runtime_e2e.py)
+        elseif(stage STREQUAL "analysis")
+            set(_driver consan_e2e.py)
+            set(_analysis_options --analyze $<TARGET_FILE:rj_consan_analyze>)
+        else()
+            message(FATAL_ERROR "Unknown ConSan test stage: ${stage}")
+        endif()
+        set(_name
+            ConSan${environment}${_stage_name}${_variant_name}E2E.${gpu}.wave${wave}.${kind}.${scenario}
+        )
         set(_case ${scenario})
+        set(_entry_options)
         if(_case STREQUAL "partial")
             set(_case disjoint)
+        elseif(_case STREQUAL "utf8_entry")
+            set(_case disjoint)
+            set(_entry_options --utf8-entry)
         endif()
         set(_execution_options)
         if(environment STREQUAL "Sim")
@@ -384,17 +313,15 @@ if(RJ_BUILD_CONSAN_ANALYZER AND TARGET consan_hsa_runner)
         add_test(
             NAME ${_name}
             COMMAND
-                ${Python3_EXECUTABLE} -B
-                ${PROJECT_SOURCE_DIR}/tests/dbi/consan_e2e.py --prepare
-                $<TARGET_FILE:rj_consan_prepare> --runner
+                ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/${_driver}
+                --prepare $<TARGET_FILE:rj_consan_prepare> --runner
                 $<TARGET_FILE:consan_hsa_runner> --inspect
                 $<TARGET_FILE:consan_capture_inspect> --plugin
-                $<TARGET_FILE:${_plugin}> ${_statistics} --analyze
-                $<TARGET_FILE:rj_consan_analyze> --fixtures ${_fixture_dir}
-                --source ${PROJECT_SOURCE_DIR} --root
+                $<TARGET_FILE:${_plugin}> ${_statistics} ${_analysis_options}
+                --fixtures ${_fixture_dir} --source ${PROJECT_SOURCE_DIR} --root
                 ${RJ_CONSAN_TEST_ARTIFACT_ROOT} --case ${_case} --target ${gpu}
                 --wave-size ${wave} --threads ${threads} --fixture-kind ${kind}
-                ${_execution_options}
+                ${_entry_options} ${_execution_options}
         )
         set_tests_properties(${_name} PROPERTIES TIMEOUT 120)
         if(environment STREQUAL "Sim")
@@ -415,6 +342,25 @@ if(RJ_BUILD_CONSAN_ANALYZER AND TARGET consan_hsa_runner)
             )
         endif()
     endfunction()
+    set(_named_runtime_cases
+        race
+        disjoint
+        read_read
+        collision
+        single_lane
+        repeat
+        alias
+        immediate
+        four_ranges
+        exhausted
+        empty
+        branched
+        wrong-artifact
+        bad-geometry
+        profiling
+        reused-signal
+    )
+    set(_named_analysis_cases ${_named_runtime_cases} repeat_race utf8_entry)
     foreach(
         _mode
         IN
@@ -431,45 +377,51 @@ if(RJ_BUILD_CONSAN_ANALYZER AND TARGET consan_hsa_runner)
         list(GET _parts 0 _gpu)
         list(GET _parts 1 _wave)
         math(EXPR _threads "2 * ${_wave}")
-        consan_add_target_e2e(Sim ${_gpu} ${_wave} assembly high_lane ${_threads} testable)
+        math(EXPR _partial_threads "3 * ${_wave} + 1")
         set(_kind hip)
         if(_gpu STREQUAL "gfx1250")
             set(_kind assembly)
         endif()
-        consan_add_target_e2e(Sim ${_gpu} ${_wave} ${_kind} disjoint ${_threads} production)
-        if(_gpu STREQUAL "gfx1250")
-            consan_add_target_e2e(Sim ${_gpu} ${_wave} assembly missing-statistics ${_threads} production)
-            foreach(
-                _barrier
-                IN
-                ITEMS
-                    batch-barrier-and
-                    batch-barrier-or
-                    late-barrier-and
-                    late-barrier-or
-            )
-                consan_add_target_e2e(Sim ${_gpu} ${_wave} assembly ${_barrier} ${_threads} production)
+        foreach(_environment IN ITEMS Sim Physical)
+            foreach(_scenario IN LISTS _named_runtime_cases)
+                consan_add_target_e2e(${_environment} ${_gpu} ${_wave} named-assembly
+                    ${_scenario} ${_threads} testable runtime
+                )
             endforeach()
-        endif()
-        foreach(
-            _barrier
-            IN
-            ITEMS
-                batch-barrier-and
-                batch-barrier-or
-                late-barrier-and
-                late-barrier-or
-        )
-            consan_add_target_e2e(Physical ${_gpu} ${_wave} ${_kind} ${_barrier} ${_threads} production)
+            if(RJ_BUILD_CONSAN_ANALYZER)
+                foreach(_scenario IN LISTS _named_analysis_cases)
+                    consan_add_target_e2e(${_environment} ${_gpu} ${_wave} named-assembly
+                        ${_scenario} ${_threads} testable analysis
+                    )
+                endforeach()
+                foreach(_scenario IN ITEMS race disjoint read_read)
+                    consan_add_target_e2e(${_environment} ${_gpu} ${_wave} ${_kind}
+                        ${_scenario} ${_threads} testable analysis
+                    )
+                endforeach()
+                consan_add_target_e2e(${_environment} ${_gpu} ${_wave} assembly
+                    high_lane ${_threads} testable analysis
+                )
+                foreach(
+                    _scenario
+                    IN
+                    ITEMS
+                        disjoint
+                        missing-statistics
+                        batch-barrier-and
+                        batch-barrier-or
+                        late-barrier-and
+                        late-barrier-or
+                )
+                    consan_add_target_e2e(${_environment} ${_gpu} ${_wave} ${_kind}
+                        ${_scenario} ${_threads} production analysis
+                    )
+                endforeach()
+                consan_add_target_e2e(${_environment} ${_gpu} ${_wave} ${_kind}
+                    partial ${_partial_threads} testable analysis
+                )
+            endif()
         endforeach()
-        foreach(_scenario IN ITEMS race disjoint read_read)
-            consan_add_target_e2e(Sim ${_gpu} ${_wave} ${_kind} ${_scenario} ${_threads} testable)
-            consan_add_target_e2e(Physical ${_gpu} ${_wave} ${_kind} ${_scenario} ${_threads} testable)
-        endforeach()
-        consan_add_target_e2e(Physical ${_gpu} ${_wave} ${_kind} disjoint ${_threads} production)
-        consan_add_target_e2e(Physical ${_gpu} ${_wave} assembly high_lane ${_threads} testable)
-        math(EXPR _threads "3 * ${_wave} + 1")
-        consan_add_target_e2e(Physical ${_gpu} ${_wave} ${_kind} partial ${_threads} testable)
     endforeach()
 endif()
 

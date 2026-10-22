@@ -15,11 +15,26 @@ from run_required import (
 )
 
 
-def physical_registrations():
+def paired_registrations():
     tests = []
     for name in sorted(physical_names()):
-        _, gpu, wave, kind, scenario = name.split('.')
-        wave_size = int(wave.removeprefix('wave'))
+        # The validator owns agreement, not the CMake scenario's geometry or
+        # fixture mapping. Use arbitrary shared values instead of repeating it.
+        _, gpu, _, _, _ = name.split('.')
+        command = [
+            'python3',
+            'driver.py',
+            '--target',
+            gpu,
+            '--wave-size',
+            '64',
+            '--fixture-kind',
+            'assembly',
+            '--threads',
+            '137',
+            '--case',
+            'shared-fixture',
+        ]
         tests.append(
             {
                 'name': name,
@@ -28,30 +43,41 @@ def physical_registrations():
                     {'name': 'SKIP_RETURN_CODE', 'value': 77},
                     {'name': 'RESOURCE_LOCK', 'value': [f'consan-{gpu}']},
                 ],
-                'command': [
-                    'python3',
-                    'consan_e2e.py',
-                    '--target',
-                    gpu,
-                    '--wave-size',
-                    str(wave_size),
-                    '--fixture-kind',
-                    kind,
-                    '--threads',
-                    str(3 * wave_size + 1 if scenario == 'partial' else 2 * wave_size),
-                    '--case',
-                    'disjoint' if scenario == 'partial' else scenario,
+                'command': list(command),
+            }
+        )
+        tests.append(
+            {
+                'name': name.replace('ConSanPhysical', 'ConSanSim', 1),
+                'properties': [
+                    {
+                        'name': 'LABELS',
+                        'value': ['consan', 'simulator', 'required-consan'],
+                    }
+                ],
+                'command': command
+                + [
+                    '--launcher',
+                    'rocjitsu',
+                    '--config',
+                    'config.json',
+                    '--require-agent',
                 ],
             }
         )
     return tests
 
 
+def set_property(test, name, value):
+    test['properties'] = [item for item in test['properties'] if item['name'] != name]
+    test['properties'].append({'name': name, 'value': value})
+
+
 class RequiredCoverage(unittest.TestCase):
     def test_missing_physical_registration_fails(self):
-        tests = physical_registrations()
+        tests = paired_registrations()
         validate_physical_registrations(tests)
-        for selected in ([], tests[1:]):
+        for selected in ([], tests[1:], tests[2:]):
             with self.assertRaisesRegex(
                 ValueError, 'Physical ConSan registrations missing'
             ):
@@ -67,36 +93,88 @@ class RequiredCoverage(unittest.TestCase):
             ('RESOURCE_LOCK', ['consan-gfx1100']),
         ):
             with self.subTest(property_name=property_name, invalid=invalid):
-                tests = physical_registrations()
+                tests = paired_registrations()
                 test = next(test for test in tests if test['name'] == name)
-                test['properties'] = [
-                    item for item in test['properties'] if item['name'] != property_name
-                ]
-                test['properties'].append({'name': property_name, 'value': invalid})
+                set_property(test, property_name, invalid)
                 with self.assertRaisesRegex(
                     ValueError, 'invalid physical execution properties'
                 ):
                     validate_physical_registrations(tests)
-        for option, invalid in (
-            ('--target', 'gfx1100'),
-            ('--wave-size', '64'),
-            ('--fixture-kind', 'hip'),
-            ('--threads', '64'),
-            ('--case', 'partial'),
-        ):
+        for option in ('--launcher', '--config', '--require-agent'):
             with self.subTest(option=option):
-                tests = physical_registrations()
-                test = next(test for test in tests if test['name'] == name)
-                test['command'][test['command'].index(option) + 1] = invalid
-                with self.assertRaisesRegex(ValueError, f'expected {option}'):
-                    validate_physical_registrations(tests)
-        for option in ('--launcher', '--require-agent'):
-            with self.subTest(option=option):
-                tests = physical_registrations()
+                tests = paired_registrations()
                 test = next(test for test in tests if test['name'] == name)
                 test['command'].append(option)
                 with self.assertRaisesRegex(ValueError, 'requests simulator execution'):
                     validate_physical_registrations(tests)
+
+    def test_simulator_twin_is_required_and_cannot_skip(self):
+        name = 'ConSanSimE2E.gfx1250.wave32.assembly.partial'
+        tests = paired_registrations()
+        with self.assertRaisesRegex(ValueError, 'required simulator twin missing'):
+            validate_physical_registrations(
+                [test for test in tests if test['name'] != name]
+            )
+        for property_name, invalid in (
+            ('LABELS', ['simulator']),
+            ('LABELS', ['simulator', 'required-consan', 'physical-gpu']),
+            ('DISABLED', True),
+            ('SKIP_RETURN_CODE', 77),
+        ):
+            with self.subTest(property_name=property_name):
+                tests = paired_registrations()
+                twin = next(test for test in tests if test['name'] == name)
+                set_property(twin, property_name, invalid)
+                with self.assertRaisesRegex(
+                    ValueError, 'invalid required simulator properties'
+                ):
+                    validate_physical_registrations(tests)
+        for option, width in (
+            ('--launcher', 2),
+            ('--config', 2),
+            ('--require-agent', 1),
+        ):
+            with self.subTest(option=option):
+                tests = paired_registrations()
+                twin = next(test for test in tests if test['name'] == name)
+                offset = twin['command'].index(option)
+                del twin['command'][offset : offset + width]
+                with self.assertRaisesRegex(ValueError, f'expected one {option}'):
+                    validate_physical_registrations(tests)
+
+    def test_twins_must_agree_on_application_arguments(self):
+        for option in (
+            '--target',
+            '--wave-size',
+            '--fixture-kind',
+            '--threads',
+            '--case',
+        ):
+            with self.subTest(option=option):
+                tests = paired_registrations()
+                tests[0]['command'][tests[0]['command'].index(option) + 1] = 'different'
+                with self.assertRaisesRegex(
+                    ValueError, 'command differs from required simulator twin'
+                ):
+                    validate_physical_registrations(tests)
+
+    def test_twins_must_agree_on_nonbackend_flags(self):
+        for flag in ('--utf8-entry', '--test-statistics'):
+            with self.subTest(flag=flag):
+                tests = paired_registrations()
+                tests[0]['command'].append(flag)
+                with self.assertRaisesRegex(
+                    ValueError, 'command differs from required simulator twin'
+                ):
+                    validate_physical_registrations(tests)
+
+    def test_additional_physical_registration_also_needs_a_twin(self):
+        tests = paired_registrations()
+        extra = dict(tests[0])
+        extra['name'] = extra['name'].rsplit('.', 1)[0] + '.additional-case'
+        tests.append(extra)
+        with self.assertRaisesRegex(ValueError, 'required simulator twin missing'):
+            validate_physical_registrations(tests)
 
     def test_missing_or_empty_selection_fails(self):
         for names in (set(), required_names() - {next(iter(required_names()))}):

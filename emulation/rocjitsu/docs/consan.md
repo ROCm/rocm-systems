@@ -107,7 +107,7 @@ notification once the runtime has failed. Healthy barrier-only batches pass
 through. This failure notification releases a waiter for a value less than `1`, but does not mean that the kernel
 ran. Accept only exactly `0` as normal completion, and check it before reading
 kernel output. A timeout or any other completion value is an execution failure.
-The [example runner](../tests/dbi/consan_hsa_runner.cpp) enforces these checks.
+The [example runner](../tests/patch/consan/consan_hsa_runner.cpp) enforces these checks.
 
 Keep resources alive until their ownership handoffs have drained. The runner
 uses a successful `rj_consan_drain()` before releasing each completed dispatch's
@@ -161,7 +161,7 @@ workgroup through the rocJitsu simulator; no physical gfx1250 GPU is required.
 The AMDHSA code-object-v5 image, entry, target, and wave mode must match the
 simulator configuration. A runner option does not change an image's wave mode.
 
-The [controlled HSA runner](../tests/dbi/consan_hsa_runner.cpp) supplies this
+The [controlled HSA runner](../tests/patch/consan/consan_hsa_runner.cpp) supplies this
 fixture's argument bindings, controlled queue, nonoverlapping one-workgroup
 launch, and explicit finish protocol. It is the example application, not a
 general application launcher; other integrations must meet the runtime
@@ -343,6 +343,10 @@ contract, and result types are LDS-specific, so a second analysis must adapt
 those boundaries together.
 
 Use focused producer/transport, runtime, and analyzer checks, plus the
-three-process controls in [consan_e2e.py](../tests/dbi/consan_e2e.py), which cover
-a finding case and a defined-behavior preservation control. Keep simulator and
+three-process controls in [consan_e2e.py](../tests/patch/consan/consan_e2e.py), which cover
+a finding case and a defined-behavior preservation control. Every admitted
+target/wave mode uses the same integration scenarios in the simulator and on
+matching physical hardware. Required simulator cases must execute without skips;
+physical cases skip when the requested HSA agent is unavailable. Runtime-stage
+scenarios remain available without building the analyzer. Keep simulator and
 physical-target evidence distinct.
