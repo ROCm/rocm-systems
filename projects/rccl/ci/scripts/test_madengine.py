@@ -357,7 +357,10 @@ def squash_log_spam(run_dir: Path) -> int:
     if not log_dir.is_dir():
         return 0
     saved = 0
-    for path in sorted(p for p in log_dir.rglob("*") if p.is_file()):
+    for path in sorted(
+        p for p in log_dir.rglob("*")
+        if p.suffix in (".out", ".err", ".log") and p.is_file()
+    ):
         dropped: dict[bytes, int] = {}
         tmp = path.with_name(path.name + ".squash")
         try:
