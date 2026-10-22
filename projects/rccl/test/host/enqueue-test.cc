@@ -1228,11 +1228,18 @@ TEST_F(EnqueueMicrotest, CalcCollChunking_Ll128GrainIsNonZeroForTheFixture) {
          "WarpSize, ll128ShmemElemsPerThread or ll128DataElems makes calcCollChunking:3302 SIGFPE";
 }
 
-TEST_F(EnqueueMicrotest, CalcCollChunking_AmdOneRpnRegisteredRingAllGatherUsesKernelScheduleAtElevenMiB) {
+TEST_F(EnqueueMicrotest, AllGatherNetOffloadCapability_MatchesCompilerPlatform) {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  // ROCM-33020: the AMD kernel forces isNetOffload=false. Registered one-RPN
-  // AllGather must therefore retain the ordinary proxy schedule instead of
-  // switching to NCCL_MAX_NET_SIZE chunks. NCCL_LOCAL_REGISTER=0 and the legacy
+  EXPECT_EQ(0, NCCL_ALLGATHER_NET_OFFLOAD_SUPPORTED);
+#else
+  EXPECT_EQ(1, NCCL_ALLGATHER_NET_OFFLOAD_SUPPORTED);
+#endif
+}
+
+TEST_F(EnqueueMicrotest, CalcCollChunking_NetOffloadUnsupportedOneRpnRegisteredAllGatherUsesKernelSchedule) {
+#if !NCCL_ALLGATHER_NET_OFFLOAD_SUPPORTED
+  // ROCM-33020: without device net offload, registered one-RPN AllGather must
+  // retain the ordinary proxy schedule. NCCL_LOCAL_REGISTER=0 and the legacy
   // torch process group both reach the unregistered baseline below.
   constexpr size_t kPerRankBytes = 11 * 1024 * 1024;
   constexpr size_t kGlobalBytes = 2 * kPerRankBytes;
@@ -1254,23 +1261,17 @@ TEST_F(EnqueueMicrotest, CalcCollChunking_AmdOneRpnRegisteredRingAllGatherUsesKe
   ASSERT_EQ(0, workaround.proxyOp.reg);
   ASSERT_EQ(1, zeroCopy.proxyOp.reg);
 
-  const size_t expectedChunk =
-      size_t(cc.comm.buffSizes[NCCL_PROTO_SIMPLE]) / NCCL_STEPS * ALLGATHER_CHUNKSTEPS;
-  const size_t expectedSlice = expectedChunk / ALLGATHER_CHUNKSTEPS * ALLGATHER_SLICESTEPS;
-  const size_t expectedLoop = size_t(cc.comm.nRanks) * expectedChunk;
-  const int expectedSteps =
-      int((kGlobalBytes + expectedLoop - 1) / expectedLoop) * (cc.comm.nRanks - 1) * ALLGATHER_CHUNKSTEPS;
-
-  EXPECT_EQ(expectedChunk, zeroCopy.proxyOp.chunkSize);
-  EXPECT_EQ(expectedSlice, zeroCopy.proxyOp.sliceSize);
-  EXPECT_EQ(expectedLoop, zeroCopy.proxyOp.loopSize);
-  EXPECT_EQ(expectedSteps, zeroCopy.proxyOp.nsteps);
+  EXPECT_EQ(workaround.chunkSize, zeroCopy.chunkSize);
   EXPECT_EQ(workaround.proxyOp.chunkSize, zeroCopy.proxyOp.chunkSize);
   EXPECT_EQ(workaround.proxyOp.sliceSize, zeroCopy.proxyOp.sliceSize);
+  EXPECT_EQ(workaround.proxyOp.chunkSteps, zeroCopy.proxyOp.chunkSteps);
+  EXPECT_EQ(workaround.proxyOp.sliceSteps, zeroCopy.proxyOp.sliceSteps);
   EXPECT_EQ(workaround.proxyOp.loopSize, zeroCopy.proxyOp.loopSize);
+  EXPECT_EQ(workaround.proxyOp.loopOffset, zeroCopy.proxyOp.loopOffset);
   EXPECT_EQ(workaround.proxyOp.nsteps, zeroCopy.proxyOp.nsteps);
+  EXPECT_NE(size_t(NCCL_MAX_NET_SIZE), size_t(zeroCopy.proxyOp.chunkSize));
 #else
-  GTEST_SKIP() << "RCCL's AMD scheduling divergence is not active in this build";
+  GTEST_SKIP() << "This build supports the matching host/device net-offload schedule";
 #endif
 }
 
