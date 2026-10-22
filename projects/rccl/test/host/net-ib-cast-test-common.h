@@ -56,10 +56,12 @@ class ParamScript {
                                                    }};
 };
 
-// Zeroed heap storage for the large comm structs, as the transport's own calloc gives them.
+// Zeroed heap storage for the large comm structs, aligned as their alignas() asks (calloc only gives 16).
 template <typename T>
 struct ZeroedPtr {
-  ZeroedPtr() : p(static_cast<T*>(calloc(1, sizeof(T)))) {}
+  ZeroedPtr() : p(static_cast<T*>(aligned_alloc(alignof(T), (sizeof(T) + alignof(T) - 1) / alignof(T) * alignof(T)))) {
+    memset(p, 0, sizeof(T));
+  }
   ~ZeroedPtr() { free(p); }
   ZeroedPtr(const ZeroedPtr&) = delete;
   ZeroedPtr& operator=(const ZeroedPtr&) = delete;

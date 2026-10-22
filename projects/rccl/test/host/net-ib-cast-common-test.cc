@@ -384,18 +384,19 @@ TEST_F(NetIbCastCommonEventMicrotest, AsyncThread_QpEventWithCqs_ReportsTheirHan
   EXPECT_EQ(qpStats.fatalErrorCount, 1);
 }
 
+// DEVICE_SPEED_CHANGE is a real event the loop has no case for.
 TEST_F(NetIbCastCommonEventMicrotest, AsyncThread_NonFatalEvents_OnlyWarn) {
   Events({IBV_EVENT_SRQ_ERR, IBV_EVENT_PATH_MIG_ERR, IBV_EVENT_PORT_ERR, IBV_EVENT_PATH_MIG, IBV_EVENT_PORT_ACTIVE,
           IBV_EVENT_SQ_DRAINED, IBV_EVENT_LID_CHANGE, IBV_EVENT_PKEY_CHANGE, IBV_EVENT_SM_CHANGE,
           IBV_EVENT_QP_LAST_WQE_REACHED, IBV_EVENT_CLIENT_REREGISTER, IBV_EVENT_SRQ_LIMIT_REACHED,
-          IBV_EVENT_COMM_EST, (enum ibv_event_type)999});
+          IBV_EVENT_COMM_EST, IBV_EVENT_DEVICE_SPEED_CHANGE});
   std::string log = CaptureLog([&] { IbCastAsyncThreadMain(dev_); });
   EXPECT_EQ(dev_->stats.fatalErrorCount, 0);
   EXPECT_EQ(ack_.calls, 14);
   // These arms only warn.
   EXPECT_TRUE(LogHas(log, "on SRQ")) << log;
   EXPECT_TRUE(LogHas(log, "non-fatal async event")) << log;
-  EXPECT_TRUE(LogHas(log, "unknown event type (999)")) << log;
+  EXPECT_TRUE(LogHas(log, "unknown event type")) << log;
 }
 
 TEST_F(NetIbCastCommonEventMicrotest, AsyncThread_GidChangeHandlerFails_MarksTheDeviceFatal) {

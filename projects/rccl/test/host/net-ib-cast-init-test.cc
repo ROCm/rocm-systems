@@ -487,7 +487,10 @@ TEST_F(NetIbCastInitVDeviceMicrotest, MakeVDevice_BadDeviceCounts_AreRejected) {
 TEST_F(NetIbCastInitVDeviceMicrotest, MakeVDevice_UnknownPhysicalDevice_IsRejected) {
   int d = -1;
   EXPECT_EQ(Make({0, 3}, &d), ncclInvalidUsage);
-  EXPECT_EQ(Make({-1}, &d), ncclInvalidUsage);
+  // Not first: makeVDevice reads IbCastDevs[devs[0]] before it checks the range. The later checks
+  // return the same code, so the warning is what shows this one fired.
+  std::string log = CaptureLog([&] { EXPECT_EQ(Make({0, -1}, &d), ncclInvalidUsage); });
+  EXPECT_TRUE(LogHas(log, "physical device -1")) << log;
   EXPECT_EQ(IbCastNMergedDevs, 0);
 }
 
