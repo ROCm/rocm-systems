@@ -286,8 +286,8 @@ jobs:
   # parallelism and memory headroom were validated at one scale.
   therock-test-madengine-weekly:
     name: "Test MADEngine workloads (weekly)"
-    if: ${{ !cancelled() && (needs.therock-build-linux.result == 'success' || needs.therock-build-linux.result == 'skipped') && inputs.amdgpu_families == 'gfx950-dcgpu' && inputs.test_scope == 'all' && (inputs.event_name == 'schedule' || inputs.event_name == 'workflow_dispatch') }}
-    needs: [therock-build-linux, therock-test-madengine]
+    if: ${{ !cancelled() && contains(fromJSON(needs.test-plan.outputs.suites || '[]'), 'madengine') && (needs.therock-build-linux.result == 'success' || needs.therock-build-linux.result == 'skipped') && inputs.amdgpu_families == 'gfx950-dcgpu' && inputs.test_scope == 'all' && (inputs.event_name == 'schedule' || inputs.event_name == 'workflow_dispatch') }}
+    needs: [test-plan, therock-build-linux, therock-test-madengine]
     permissions:
       contents: read
       id-token: write
