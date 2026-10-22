@@ -16,7 +16,6 @@
 #include "ScopedHook.h"
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
-#include "fakes/os_fakes.h"
 #include "fakes/socket_fakes.h"
 #include "transport/RmaSocketTest.h"
 
@@ -107,7 +106,6 @@ class RmaSocketSetupMicrotest : public ::testing::Test {
 
   void TearDown() override {
     ResetSocketFakes();
-    ResetOsFakes();
     ResetHipFakes();
     ResetNcclFakes();
   }
@@ -399,11 +397,21 @@ TEST_F(RmaSocketSetupMicrotest, DestroyContext_InvalidOwnershipIsRejected) {
 
   auto* orphan = static_cast<ncclRmaSocketProxyCtx*>(std::calloc(1, sizeof(ncclRmaSocketProxyCtx)));
   ASSERT_NE(orphan, nullptr);
+  orphan->nContexts = 1;
   const ncclResult_t orphanResult = ncclRmaSocketProxyDestroyContext(orphan);
   EXPECT_EQ(orphanResult, ncclInvalidUsage);
   if (orphanResult != ncclSuccess) std::free(orphan);
 
   ncclRmaSocketProxyCollComm comm{};
+  comm.nContexts = 1;
+  auto* empty = static_cast<ncclRmaSocketProxyCtx*>(std::calloc(1, sizeof(ncclRmaSocketProxyCtx)));
+  ASSERT_NE(empty, nullptr);
+  empty->collComm = &comm;
+  const ncclResult_t emptyResult = ncclRmaSocketProxyDestroyContext(empty);
+  EXPECT_EQ(emptyResult, ncclInvalidUsage);
+  EXPECT_EQ(comm.nContexts, 1);
+  if (emptyResult != ncclSuccess) std::free(empty);
+
   auto* contexts = static_cast<ncclRmaSocketProxyCtx*>(std::calloc(2, sizeof(ncclRmaSocketProxyCtx)));
   ASSERT_NE(contexts, nullptr);
   for (int c = 0; c < 2; ++c) {
