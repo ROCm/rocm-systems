@@ -4317,11 +4317,14 @@ std::vector<ArithmeticCase> subtraction_mode_cases() {
   for (const Lane &lane : lanes) {
     const bool vop3_form = lane.encoding.vop3;
     for (const auto &[mode, result] : lane.mode_results) {
+      // Both encodings share one MODE-aware helper, so both take SIMD under
+      // guest nearest-even in every denormal mode and fall back for directed
+      // rounding, which the helper cannot honor.
       const bool nearest = ((mode >> 2) & 3u) == 0;
       const SimdPathExpectation simd =
-          !vop3_form ? SimdPathExpectation{}
-          : nearest  ? expect_simd_path(amdgpu::SimdFastPath::VOP3_BINARY_MODE_FP16)
-                     : expect_simd_fallback();
+          !nearest    ? expect_simd_fallback()
+          : vop3_form ? expect_simd_path(amdgpu::SimdFastPath::VOP3_BINARY_MODE_FP16)
+                      : expect_simd_path(amdgpu::SimdFastPath::VOP_WORDS);
       cases.push_back({std::format("{}Mode{:02X}", lane.name, mode),
                        ROCJITSU_CODE_ARCH_RDNA4,
                        {lane.encoding.words[0], lane.encoding.words[1], 0u},
@@ -5157,6 +5160,50 @@ std::vector<ArithmeticCase> mullit_cases() {
   return cases;
 }
 
+// The minimum-normal boundary holds on gfx1100 with IEEE=1 as on gfx1201: a
+// product that rounds up to min_normal keeps it when F32 output denormals are
+// kept, and flushes to a signed zero when they are not. These are the plain and
+// NEG(S0) gfx1100 IEEE=1 captures of the gfx1201 boundary lanes; MODE bit 9
+// (0x200) is IEEE. OMOD forms are excluded: gfx1100 disables OMOD under IEEE=1.
+std::vector<ArithmeticCase> rdna3_mullit_boundary_cases() {
+  struct Lane {
+    const char *name;
+    uint8_t neg;
+    std::array<uint32_t, 3> sources;
+    std::array<std::pair<uint32_t, uint32_t>, 2> mode_results;
+  };
+  constexpr std::array<Lane, 3> lanes = {{
+      {"TinyProductRoundsToMinNormal",
+       0,
+       {0x00800000u, 0x3f7fffffu, 0x3f800000u},
+       {{{0x200u, 0u}, {0x2f0u, 0x00800000u}}}},
+      {"NegativeS0TinyProductRoundsToMinNormal",
+       0,
+       {0x80800000u, 0x3f7fffffu, 0x3f800000u},
+       {{{0x200u, 0x80000000u}, {0x2f0u, 0x80800000u}}}},
+      {"NegTinyProductRoundsToMinNormal",
+       1,
+       {0x00800000u, 0x3f7fffffu, 0x3f800000u},
+       {{{0x200u, 0x80000000u}, {0x2f0u, 0x80800000u}}}},
+  }};
+  std::vector<ArithmeticCase> cases;
+  for (const Lane &lane : lanes) {
+    // llvm-mc gives gfx1100 and gfx1201 the same v_mullit_f32 words.
+    const auto words =
+        rdna4::build_vop3(rdna4::kVMullitF32Vop3,
+                          {.vdst = 6, .src0 = 256, .src1 = 257, .src2 = 258, .neg = lane.neg});
+    for (const auto &[mode, result] : lane.mode_results)
+      cases.push_back({std::format("Gfx1100Ieee1{}Mode{:03X}", lane.name, mode),
+                       ROCJITSU_CODE_ARCH_RDNA3,
+                       {words[0], words[1], 0u},
+                       {{0, lane.sources[0]}, {1, lane.sources[1]}, {2, lane.sources[2]}},
+                       {{6, result}},
+                       mode,
+                       FE_TONEAREST});
+  }
+  return cases;
+}
+
 // RDNA3 VOP3 MAX/MIN OMOD overflow rounds by MODE.FP_ROUND: infinity, or the
 // largest finite value toward zero or away from the result's sign. Lanes are
 // gfx1100 captures with IEEE=0 and flushed output denormals (OMOD active),
@@ -5734,6 +5781,12 @@ INSTANTIATE_TEST_SUITE_P(SignalingNan, ValuMullitModeTest,
                            return info.param.name;
                          });
 
+INSTANTIATE_TEST_SUITE_P(Rdna3Boundary, ValuMullitModeTest,
+                         testing::ValuesIn(rdna3_mullit_boundary_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
 void expect_f16_binary_host_environment(uint32_t host_mxcsr, int host_rounding = FE_TONEAREST) {
   ForceScalarGuard guard;
@@ -5748,25 +5801,43 @@ void expect_f16_binary_host_environment(uint32_t host_mxcsr, int host_rounding =
       // Exact cancellation is +0 under guest RNE, but -0 under host round-down.
       {"ExactCancellationAdd", false, 0x3c00u, 0xbc00u, 0x0000u},
   }};
-  for (const Sample &sample : samples) {
-    const auto words =
-        rdna4::build_vop3(sample.multiply ? rdna4::kVMulF16Vop3 : rdna4::kVAddF16Vop3,
-                          {.vdst = 6, .src0 = 256, .src1 = 257});
-    const ArithmeticCase test{sample.name,
-                              ROCJITSU_CODE_ARCH_RDNA4,
-                              {words[0], words[1], 0},
-                              {{0, sample.a}, {1, sample.b}, {6, 0xa5a5a5a5u}},
-                              {{6, 0xa5a50000u | sample.expected}},
-                              0x40u,
-                              host_rounding,
-                              0xffffu,
-                              host_mxcsr,
-                              expect_simd_path(amdgpu::SimdFastPath::VOP3_BINARY_MODE_FP16)};
-    for (const bool scalar : {true, false}) {
-      SCOPED_TRACE(test.name);
-      SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
-      util::set_force_scalar_for_testing(scalar);
-      expect_arithmetic_case(test, simd_expectation_for_run(test, scalar));
+  // Both encodings share one helper and one guest environment, so both must be
+  // independent of host rounding and flags. MODE 0x40 keeps guest nearest-even
+  // with F16 input denormals flushed, which the VOP2 route reaches only because
+  // its probe installs the environment rather than requiring a matching host.
+  struct Form {
+    const char *name;
+    bool vop3;
+    amdgpu::SimdFastPath path;
+  };
+  constexpr std::array<Form, 2> forms = {{
+      {"E64", true, amdgpu::SimdFastPath::VOP3_BINARY_MODE_FP16},
+      {"E32", false, amdgpu::SimdFastPath::VOP_WORDS},
+  }};
+  for (const Form &form : forms) {
+    for (const Sample &sample : samples) {
+      const uint16_t op = form.vop3 ? (sample.multiply ? rdna4::kVMulF16Vop3 : rdna4::kVAddF16Vop3)
+                                    : (sample.multiply ? rdna4::kVMulF16Vop2 : rdna4::kVAddF16Vop2);
+      const auto words =
+          form.vop3 ? rdna4::build_vop3(op, {.vdst = 6, .src0 = 256, .src1 = 257})
+                    : std::array<uint32_t, 2>{
+                          rdna4::build_vop2(op, {.src0 = 256, .vsrc1 = 1, .vdst = 6})[0], 0u};
+      const ArithmeticCase test{std::format("{}{}", sample.name, form.name),
+                                ROCJITSU_CODE_ARCH_RDNA4,
+                                {words[0], words[1], 0},
+                                {{0, sample.a}, {1, sample.b}, {6, 0xa5a5a5a5u}},
+                                {{6, 0xa5a50000u | sample.expected}},
+                                0x40u,
+                                host_rounding,
+                                0xffffu,
+                                host_mxcsr,
+                                expect_simd_path(form.path)};
+      for (const bool scalar : {true, false}) {
+        SCOPED_TRACE(test.name);
+        SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
+        util::set_force_scalar_for_testing(scalar);
+        expect_arithmetic_case(test, simd_expectation_for_run(test, scalar));
+      }
     }
   }
 }

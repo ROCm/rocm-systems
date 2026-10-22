@@ -420,12 +420,19 @@ def test_vop3_f16_subtraction_uses_mode_aware_add_route(mnemonic, negated, true1
 def test_f32_mode_aware_probes_share_one_guest_environment_policy(template):
     probe = simd_probe_line(template)
 
-    # One ungated probe: the helpers scope the guest environment themselves.
+    # One ungated probe taking a single guest FP environment for the instruction,
+    # with the arithmetic on the unscoped cores instead of scoping each SIMD chunk.
     assert probe.count('ROCJITSU_TRY_SIMD_') == 1
     assert probe.lstrip().startswith('ROCJITSU_TRY_SIMD_')
-    assert 'ScopedEnvironment' not in probe
+    assert '_SCOPED(' in probe
     assert 'native_arithmetic_matches' not in probe
-    assert 'amdgpu::fma_f32_simd(' in probe or 'amdgpu::binary_f32_simd<' in probe
+    assert (
+        'amdgpu::fma_f32_simd_unscoped(' in probe
+        or 'amdgpu::binary_f32_simd_unscoped<' in probe
+    )
+    # The scoped cores must not also scope per chunk.
+    assert 'amdgpu::fma_f32_simd(' not in probe
+    assert 'amdgpu::binary_f32_simd<' not in probe
 
 
 def test_true16_vop3_simd_probe_leaves_unsupported_b16_scalar():

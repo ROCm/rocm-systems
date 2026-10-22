@@ -41,9 +41,13 @@ template <typename Op> inline Op e32_word_operand(const Op &op) {
 /// Common observed word access for local true16 and packed conversion paths.
 /// The callback always sees unsigned words; it owns arithmetic and narrowing.
 /// Partial-byte stores preserve the other half without reporting a false read.
-template <unsigned Arity, bool E32, bool HalfDst, unsigned HalfInputs, typename Inst, typename Op>
+/// `Scoped` takes one guest FP environment for the instruction, for callbacks
+/// built on the unscoped arithmetic cores; see run_instruction_chunks.
+template <unsigned Arity, bool E32, bool HalfDst, unsigned HalfInputs, bool Scoped = false,
+          typename Inst, typename Op>
   requires(util::has_stdx_simd)
-[[nodiscard]] inline bool try_execute_words_simd(Inst &inst, Wavefront &wf, Op op) {
+[[nodiscard]] inline bool try_execute_words_simd(Inst &inst, Wavefront &wf, Op op,
+                                                 uint32_t round_mode = 0) {
   if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst))
     return false;
   auto canonical = [](const auto &operand) {
@@ -100,36 +104,40 @@ template <unsigned Arity, bool E32, bool HalfDst, unsigned HalfInputs, typename 
   const bool zero_high = HalfDst && !E32 && !high_dst && cdna_vop3_low_dst_zeroes_high(wf);
   auto dst =
       regs.write_operand(destination, exec, HalfDst && !zero_high ? (high_dst ? 0xc : 3) : 0xf);
-  for (uint32_t base = 0; base < wf.wf_size(); base += W) {
-    const uint64_t chunk = (exec >> base) & util::mask<uint64_t>(W);
-    if (!chunk)
-      continue;
-    auto load = [&](const auto &view, unsigned i) {
-      U v = view.template load_native<uint32_t>(base);
-      if (HalfInputs & (1u << i))
-        v = (v >> ((selectors & (1u << i)) ? 16 : 0)) & U(0xffffu);
-      return v;
-    };
-    U result;
-    if constexpr (Arity == 1)
-      result = op(load(a, 0));
-    else if constexpr (Arity == 2) {
-      if constexpr (requires { op(load(a, 0), load(*b, 1), base); })
-        result = op(load(a, 0), load(*b, 1), base);
-      else
-        result = op(load(a, 0), load(*b, 1));
-    } else
-      result = op(load(a, 0), load(*b, 1), load(*c, 2));
-    if constexpr (HalfDst)
-      result = (result & U(0xffffu)) << (high_dst ? 16 : 0);
-    dst.template store_native<uint32_t>(base, result, chunk);
-  }
+  if (!run_instruction_chunks<Scoped>(dst, round_mode, [&] {
+        for (uint32_t base = 0; base < wf.wf_size(); base += W) {
+          const uint64_t chunk = (exec >> base) & util::mask<uint64_t>(W);
+          if (!chunk)
+            continue;
+          auto load = [&](const auto &view, unsigned i) {
+            U v = view.template load_native<uint32_t>(base);
+            if (HalfInputs & (1u << i))
+              v = (v >> ((selectors & (1u << i)) ? 16 : 0)) & U(0xffffu);
+            return v;
+          };
+          U result;
+          if constexpr (Arity == 1)
+            result = op(load(a, 0));
+          else if constexpr (Arity == 2) {
+            if constexpr (requires { op(load(a, 0), load(*b, 1), base); })
+              result = op(load(a, 0), load(*b, 1), base);
+            else
+              result = op(load(a, 0), load(*b, 1));
+          } else
+            result = op(load(a, 0), load(*b, 1), load(*c, 2));
+          if constexpr (HalfDst)
+            result = (result & U(0xffffu)) << (high_dst ? 16 : 0);
+          dst.template store_native<uint32_t>(base, result, chunk);
+        }
+      }))
+    return false;
   detail::record_simd_fast_path(SimdFastPath::VOP_WORDS);
   return true;
 }
 
-template <unsigned Arity, bool E32, bool HalfDst, unsigned HalfInputs, typename Inst, typename Op>
-[[nodiscard]] bool try_execute_words_simd(Inst &, Wavefront &, Op) {
+template <unsigned Arity, bool E32, bool HalfDst, unsigned HalfInputs, bool Scoped = false,
+          typename Inst, typename Op>
+[[nodiscard]] bool try_execute_words_simd(Inst &, Wavefront &, Op, uint32_t = 0) {
   return false;
 }
 

@@ -1930,11 +1930,13 @@ public:
   }
 };
 
-// F32 MODE-aware arithmetic scopes the guest environment to its arithmetic
-// (amdgpu::fma_f32_simd), so register-access callbacks see the caller's rounding,
-// exception flags and trap masks on SIMD and scalar paths alike, and inexact
-// results leave the caller's flags unchanged. MODE 0xF1 rounds toward
-// +infinity, unlike the host; 0xF0 matches it. Both run SIMD when enabled.
+// F32 MODE-aware arithmetic takes one guest FP environment for the instruction,
+// after the register views exist, so register-access callbacks see the caller's
+// rounding, exception flags and trap masks on SIMD and scalar paths alike. The
+// arithmetic helper leaves the caller's flags unchanged; V_MUL_F32's
+// instruction-level classifier is an exception, noted on its case below. MODE
+// 0xF1 rounds toward +infinity, unlike the host; 0xF0 matches it. The tracker
+// asserts the SIMD run really took the SIMD route rather than falling back.
 TEST(ExecutionPluginTest, F32ModeArithmeticObserversSeeCallerRounding) {
   struct Case {
     const char *name;
@@ -1989,7 +1991,17 @@ TEST(ExecutionPluginTest, F32ModeArithmeticObserversSeeCallerRounding) {
 #endif
         plugin->read_roundings.clear();
         plugin->read_mxcsrs.clear();
-        const bool succeeded = f.cu->execute_instruction(inst.get(), *wf).succeeded();
+        bool succeeded = false;
+        {
+          amdgpu::ScopedSimdFastPathTracker tracker;
+          succeeded = f.cu->execute_instruction(inst.get(), *wf).succeeded();
+          // Without this the observer gate could return and both runs would go
+          // scalar while every other assertion still held.
+          if (force_scalar)
+            EXPECT_TRUE(tracker.no_tracked_path_executed());
+          else
+            EXPECT_TRUE(tracker.only_tracked_path_executed(amdgpu::SimdFastPath::VOP2_BINARY));
+        }
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
         const uint32_t after_mxcsr = _mm_getcsr();
         _mm_setcsr(saved_mxcsr);
