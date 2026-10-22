@@ -38,7 +38,7 @@ choose which GPU the application runs on; use `HIP_VISIBLE_DEVICES` for that.
 
 See [standalone roofline](../../docs/how-to/profile/mode.rst) for two more options:
 
-- `--roofline` collects only roofline data.
+- `--roofline` selects the roofline block; used alone, it collects only roofline data.
 - `--roofline-bench-only` runs only the microbenchmarks, without an application.
 
 ## 2. Read the table
