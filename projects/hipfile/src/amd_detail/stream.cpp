@@ -138,9 +138,20 @@ Stream::drainAndRelease()
     signal_slot.reset();
 }
 
+static bool
+isDefaultStream(hipStream_t hip_stream)
+{
+    return hip_stream == nullptr || hip_stream == hipStreamPerThread;
+}
+
 void
 StreamMap::registerStream(hipStream_t hip_stream, uint32_t flags)
 {
+    // The default stream is per-device and always available; registering it is a no-op, matching cuFile.
+    if (isDefaultStream(hip_stream)) {
+        return;
+    }
+
     if (StreamMap::from_ptr.end() != StreamMap::from_ptr.find(hip_stream)) {
         throw std::invalid_argument("Stream is already registered");
     }
@@ -152,6 +163,10 @@ StreamMap::registerStream(hipStream_t hip_stream, uint32_t flags)
 void
 StreamMap::deregisterStream(hipStream_t hip_stream)
 {
+    if (isDefaultStream(hip_stream)) {
+        return;
+    }
+
     auto itr = StreamMap::from_ptr.find(hip_stream);
     if (StreamMap::from_ptr.end() == itr) {
         throw std::invalid_argument("Stream is not registered");
