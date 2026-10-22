@@ -915,17 +915,17 @@ TEST_CASE("Unit_HRR_StressApis_Direct", "[.][hrr-direct]") {
 // values, validated via D2H.
 //
 // Each written value gets its OWN D2H readback rather than one combined 16-byte
-// readback, because hrr-playback's D2H validator falls back to candidate float
-// encodings (f32/bf16/f16/f64, atol=rtol=1e-3) when the bytes differ and skips
-// byte-identical elements. A 16-byte readback holding the 32-bit sentinel in the
+// readback, because hrr-playback's D2H validator used to fall back to candidate
+// float encodings (f32/bf16/f16/f64, atol=rtol=1e-3) when the bytes differed and
+// skipped byte-identical elements. A 16-byte readback holding the 32-bit sentinel in the
 // low half of an 8-byte slot decodes, under the f64 candidate, to the subnormal
 // 1.68e-314; a lost 32-bit write reads back as 0.0, which is inside the 1e-3
 // tolerance, so the buffer would be accepted as "f64 within tolerance" while the
 // 64-bit slot stayed byte-identical (skipped). Splitting the readbacks makes the
 // 32-bit blob 4 bytes, and 4 % 8 != 0 excludes the f64 candidate outright; the
 // remaining candidates reject 0.0-vs-0xCAFEBABE by ~1000x (f32 sees -8.35e6
-// against a tolerance of 8.35e3). Unit_HRR_StreamWriteValueRoundtrip also pins
-// HIP_HRR_D2H_EXACT=1 so the replay gate really is byte-for-byte.
+// against a tolerance of 8.35e3). Validation is byte-exact by default now; the
+// split keeps the workload falsifiable under a HIP_HRR_D2H_TOL opt-in too.
 // ===========================================================================
 TEST_CASE("Unit_HRR_StreamWriteValue_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
@@ -1035,8 +1035,8 @@ constexpr size_t kD2DTotal = kD2DPitch * kD2DRows;      // 6144 bytes
 constexpr size_t kD2DPad   = kD2DPitch - kD2DWidth;     // 64 untouched bytes/row
 
 // Sentinel pre-fill of the WHOLE buffer vs the pattern written into the
-// WIDTH sub-region.  The two must be far apart under every dtype the replay
-// D2H validator guesses (f32/bf16/f16/f64 at atol=rtol=1e-3), otherwise a
+// WIDTH sub-region.  The two must be far apart under every dtype a
+// HIP_HRR_D2H_TOL opt-in can name (f32/bf16/f16/f64 at atol=rtol=1e-3), otherwise a
 // replay that never ran the memsets (HRR zero-initialises replay allocations,
 // so the buffer reads back all-zero) would land inside the tolerance and
 // "pass".  0x5A5A5A5A and 0x44444444 decode to (f32) 1.54e16 / 785.07,
@@ -1205,10 +1205,9 @@ TEST_CASE("Unit_HRR_MemsetVariants_Direct", "[.][hrr-direct]") {
   constexpr int    N  = 1024;
   constexpr size_t SZ = N * sizeof(int);  // 4096 bytes
 
-  // Final validation pattern.  Replay zero-initialises its allocations and the
-  // playback D2H validator falls back to a float tolerance (atol=rtol=1e-3 over
-  // f32/bf16/f16/f64, accepting the first encoding that fits), so a small
-  // integer canary cannot detect a no-op replay: 2 decodes to f32 2.8e-45, well
+  // Final validation pattern.  Replay zero-initialises its allocations, and
+  // under a float tolerance (HIP_HRR_D2H_TOL, atol=rtol=1e-3 over any of
+  // f32/bf16/f16/f64) a small integer canary cannot detect a no-op replay: 2 decodes to f32 2.8e-45, well
   // inside atol, and would validate against an all-zero buffer.  0x44444444 is
   // far from zero in every candidate encoding (f32 785.07, bf16 784, f16 4.27,
   // f64 7.5e20).
@@ -2771,12 +2770,10 @@ TEST_CASE("Unit_HRR_MiscAPIs_Direct", "[.][hrr][direct]") {
 // ---------------------------------------------------------------------------
 // Workload V — Driver-style 3D/2D memcpy variants
 //
-// Canary choice matters here.  Replay zero-initialises allocations, and the D2H
-// validator falls back from memcmp to a float tolerance (atol=rtol=1e-3) over
-// candidate f32/bf16/f16/f64 decodings, accepting the first encoding with no
-// out-of-tolerance element.  A canary that decodes near 0.0 in any candidate
-// encoding therefore passes against an all-zero replay buffer, which makes the
-// whole roundtrip vacuous.  Both values below decode far from zero in all four:
+// Canary choice matters under a float tolerance.  Replay zero-initialises
+// allocations, and a HIP_HRR_D2H_TOL opt-in (atol=rtol=1e-3) over f32, bf16, f16
+// or f64 accepts a canary that decodes near 0.0 against an all-zero replay
+// buffer, which makes the whole roundtrip vacuous.  Both values below decode far from zero in all four:
 //   0x5C5C5C5C -> f32 2.48e17, bf16 2.48e17, f16 279, f64 8.25e136
 //   0x4B4B4B4B -> f32 1.33e7,  bf16 1.33e7,  f16 14.6, f64 5.23e54
 // (0x2D2D2D2D, for contrast, is 9.84e-12 as f32, i.e. inside atol.)
@@ -3342,9 +3339,9 @@ TEST_CASE("Unit_HRR_ModuleAPI_Direct", "[.][hrr][direct]") {
       HRR_HIP_CHECK(hipModuleGetFunction(&fn_file, mod_file, "rtc_fill"));
       int* d_file = nullptr;
       HRR_HIP_CHECK(hipMalloc(&d_file, SZ));
-      // Replay compares D2H buffers under a float tolerance, so a small
-      // integer would also pass against a buffer the kernel never wrote.
-      // 0x3F800000 is 1.0f, which is outside the tolerance of an unwritten buffer.
+      // Under a HIP_HRR_D2H_TOL float tolerance a small integer would also pass
+      // against a buffer the kernel never wrote. 0x3F800000 is 1.0f, which is
+      // outside the tolerance of an unwritten buffer.
       int  val   = 0x3F800000;
       int  n     = N;
       void* args[] = { &d_file, &val, &n };
