@@ -4017,12 +4017,30 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_ZeroPolicyNullTableTakesCeRegistered
       });
 }
 
-TEST(WrapMicrotestIsolated, SelectAllReduce_NoForceNoZeroSkipsCeRegistered) {
+TEST(WrapMicrotestIsolated, SelectAllReduce_CeNotEnabledSkipsCeRegistered) {
   RUN_ISOLATED_TEST(
-      "Wrap_SelectAllReduce_NoForceNoZeroSkipsCeRegistered",
+      "Wrap_SelectAllReduce_CeNotEnabledSkipsCeRegistered",
       []() {
-        g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
-        EXPECT_EQ(NCCL_ALGO_RING, SelectCeVsSymk(NCCL_CTA_POLICY_DEFAULT, /*count=*/8, /*symkRequested=*/false));
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0)       return int64_t(0);
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return int64_t(1);
+          return def;
+        };
+        // RCCL_CE_ALLREDUCE=0 is a hard override: CE must not fire regardless of force or CTA policy.
+        // Under DEFAULT policy preferred=ALL so no WARN; under ZERO policy preferred=CE so WARN fires.
+        for (int policy : {NCCL_CTA_POLICY_DEFAULT, NCCL_CTA_POLICY_ZERO}) {
+          int algo;
+          std::string warn = RcclUnitTesting::CaptureLog([&]() {
+            algo = SelectCeVsSymk(policy, /*count=*/8, /*symkRequested=*/false);
+          });
+          EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, algo);
+          EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT,      algo);
+          EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH,    algo);
+          if (policy == NCCL_CTA_POLICY_ZERO) {
+            EXPECT_NE(std::string::npos, warn.find("preferred backend"))
+                << "WARN must fire when CE is preferred (ZERO policy) but disabled by RCCL_CE_ALLREDUCE=0";
+          }
+        }
       });
 }
 
