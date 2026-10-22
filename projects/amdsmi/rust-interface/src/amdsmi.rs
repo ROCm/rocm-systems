@@ -4010,21 +4010,22 @@ pub fn amdsmi_get_gpu_available_counters(
 ///
 /// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_gpu_compute_process_info` call fails.
 pub fn amdsmi_get_gpu_compute_process_info() -> AmdsmiResult<(Vec<AmdsmiProcessInfoT>, u32)> {
-    let mut num_items = MaybeUninit::<u32>::uninit();
+    let mut num_items: u32 = 0;
 
     // First call to get the number of items
     call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_compute_process_info(
         std::ptr::null_mut(),
-        num_items.as_mut_ptr()
+        &mut num_items
     ));
 
-    let num_items = unsafe { num_items.assume_init() };
     let mut procs: Vec<AmdsmiProcessInfoT> = Vec::with_capacity(num_items as usize);
 
-    // Second call to get the actual process information
+    // Second call to get the actual process information. It lowers num_items
+    // when processes exited after the count, and returns INSUFFICIENT_SIZE
+    // instead of raising it, so set_len() stays within the capacity.
     call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_compute_process_info(
         procs.as_mut_ptr(),
-        &mut (num_items as u32)
+        &mut num_items
     ));
 
     unsafe { procs.set_len(num_items as usize) };
@@ -4095,7 +4096,7 @@ pub fn amdsmi_get_gpu_compute_process_info_by_pid(pid: u32) -> AmdsmiResult<Amds
 ///
 /// # Example
 ///
-/// ```rust,should_panic
+/// ```rust
 /// # use amdsmi::*;
 /// #
 /// # fn main() {

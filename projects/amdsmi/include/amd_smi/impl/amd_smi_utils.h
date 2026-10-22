@@ -346,4 +346,34 @@ auto smi_amdgpu_get_active_dkms_version(std::string_view dkms_root, std::string_
                                         std::string_view machine, std::string* active_version)
     -> amdsmi_status_t;
 
+/**
+ *  @brief Parse one "drm-memory-<region>:" line of a DRM fdinfo file.
+ *
+ *  @details Documentation/gpu/drm-usage-stats.rst prints the value as "<n>"
+ *  (bytes), "<n> KiB" or "<n> MiB".
+ *
+ *  @param[in] line One fdinfo line.
+ *  @param[in] key The key with its colon, such as "drm-memory-vram:".
+ *  @param[out] bytes The value in bytes; unchanged unless this returns true.
+ *  @return Whether the line has that key and a value in a known unit.
+ */
+auto smi_amdgpu_parse_drm_memory(std::string_view line, std::string_view key, uint64_t* bytes)
+    -> bool;
+
+/**
+ *  @brief Add a process's DRM memory and engine usage on one GPU to @p info.
+ *
+ *  @details Reads every file of @p fdinfo_dir through the open directory, and
+ *  counts each DRM client on @p bdf once, however many of the files list it.
+ *  A file without a drm-client-id counts on its own.
+ *
+ *  @param[in] fdinfo_dir A /proc/<pid>/fdinfo directory.
+ *  @param[in] bdf The GPU's address as fdinfo prints it, such as "0000:03:00.0".
+ *  @param[in,out] info Gets the sums added to its memory_usage and engine_usage.
+ *  @return ::AMDSMI_STATUS_NO_PERM if the directory cannot be opened, else
+ *  ::AMDSMI_STATUS_SUCCESS.
+ */
+auto smi_amdgpu_sum_drm_fdinfo(const std::string& fdinfo_dir, std::string_view bdf,
+                               amdsmi_proc_info_t* info) -> amdsmi_status_t;
+
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_
