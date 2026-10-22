@@ -18,7 +18,7 @@ import os
 import sys
 import traceback
 
-PY3 = sys.version_info[0] == 3
+PY3 = sys.version_info[0] >= 3
 _ROCPROFSYS_PYTHON_SCRIPT_FILE = None
 
 # Maps a parse_args() destination onto the profiler config attribute it sets.

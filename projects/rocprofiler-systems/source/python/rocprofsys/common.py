@@ -17,7 +17,7 @@ from .libpyrocprofsys.profiler import profiler_finalize as _profiler_fini
 
 __all__ = ["_file", "_finalize", "_get_argv", "_initialize", "exec_"]
 
-PY3 = sys.version_info[0] == 3
+PY3 = sys.version_info[0] >= 3
 
 # exec (from https://bitbucket.org/gutworth/six/):
 if PY3:
