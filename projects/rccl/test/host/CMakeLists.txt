@@ -197,6 +197,7 @@ function(rccl_define_micro_source_lists)
     fakes/bootstrap_micro_fakes.cc
     fakes/env_fakes.cc
     fakes/hip_fakes.cc
+    fakes/nccl_fakes.cc
     fakes/os_fakes.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
     ../common/main_altrsmi.cpp

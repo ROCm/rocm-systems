@@ -13,52 +13,17 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
-#include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <thread>
 
-#include "debug.h"
 #include "env_fakes.h"
+#include "nccl_fakes.h"
 #include "proxy.h"
 
 using namespace bootstrap_micro;
 
-// nccl_fakes.cc's ncclDebugLog only prints, and it cannot be told apart per rank thread; these tests assert
-// on the WARNs the ranks logged, so this binary records them.
-uint32_t ncclDebugLevelMask = NCCL_DEBUG_LEVEL_MASK_UNINITIALIZED;  // log everything
-uint64_t ncclDebugMask = ~uint64_t(0);
-thread_local int ncclDebugNoWarn = 0;
-
-namespace bootstrap_micro {
-std::mutex g_logMu;
-std::vector<std::string> g_warns;
-
-bool Warned(const char* needle) {
-  std::lock_guard<std::mutex> lock(g_logMu);
-  for (const auto& w : g_warns)
-    if (w.find(needle) != std::string::npos) return true;
-  return false;
-}
-}  // namespace bootstrap_micro
-
-void ncclDebugLog(ncclDebugLogLevel level, unsigned long, const char*, int, const char* fmt, ...) {
-  if (level != NCCL_LOG_WARN) return;
-  char buf[512];
-  va_list ap;
-  va_start(ap, fmt);
-  std::vsnprintf(buf, sizeof(buf), fmt, ap);
-  va_end(ap);
-  std::lock_guard<std::mutex> lock(g_logMu);
-  g_warns.push_back(buf);
-}
-
-std::map<std::string, int64_t> g_params;
-std::function<int64_t(const char*, int64_t)> g_loadParam = [](const char* env, int64_t deftVal) {
-  auto it = g_params.find(env);
-  return it == g_params.end() ? deftVal : it->second;
-};
 int64_t ncclParamRasEnable() { return g_loadParam("RAS_ENABLE", 1); }
 
 // src/misc/signals.cc, which has no shared owner: the real one would install process-wide handlers.
@@ -520,11 +485,6 @@ ncclNet_t MakeFakeNet() {
 ncclNet_t g_fakeNet = MakeFakeNet();
 
 void ResetSeams() {
-  {
-    std::lock_guard<std::mutex> lock(g_logMu);
-    g_warns.clear();
-  }
-  g_params.clear();
   g_encrypted = false;
   g_ifCount = 1;
   g_proxyInits.clear();

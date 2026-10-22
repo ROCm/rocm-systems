@@ -6,8 +6,8 @@
 
 // Externals src/bootstrap.cc reaches, for rccl-UnitTestsMicroBootstrap, which compiles it. Distinct from
 // bootstrap_stubs.cc, which fakes bootstrap.cc itself. Ranks run as threads over the in-memory socket layer
-// and net plugin here; misc/utils.cc is the real one, and ncclGetEnv and linux.cc come from env_fakes.cc and
-// os_fakes.cc.
+// and net plugin here; misc/utils.cc is the real one, and logging and g_loadParam, ncclGetEnv and linux.cc
+// come from nccl_fakes.cc, env_fakes.cc and os_fakes.cc.
 
 #ifndef RCCL_TEST_HOST_BOOTSTRAP_MICRO_FAKES_H_
 #define RCCL_TEST_HOST_BOOTSTRAP_MICRO_FAKES_H_
@@ -30,16 +30,9 @@
 #include "ras.h"
 #include "socket.h"
 
-// Params are read on every call (via param_redirect.h) so a test can flip one; unset names keep their default.
-extern std::map<std::string, int64_t> g_params;
-extern std::function<int64_t(const char*, int64_t)> g_loadParam;
 extern bool g_encrypted;  // what ncclGetCryptConnectionMode reports
 
 namespace bootstrap_micro {
-
-extern std::mutex g_logMu;
-extern std::vector<std::string> g_warns;
-bool Warned(const char* needle);
 
 struct ProxyInitCall {
   std::vector<ncclSocketAddress> addrs;
