@@ -6,6 +6,8 @@
 #include "core/trace_cache/cache_type_traits.hpp"
 #include <cstdint>
 
+#include <algorithm>
+#include <array>
 #include <functional>
 #include <map>
 #include <optional>
@@ -14,11 +16,25 @@
 namespace rocprofsys::trace_cache
 {
 
+namespace detail
+{
+template <auto... Identifiers>
+[[nodiscard]] constexpr bool
+are_unique()
+{
+    std::array identifiers{ Identifiers... };
+    std::ranges::sort(identifiers);
+    return std::ranges::adjacent_find(identifiers) == identifiers.end();
+}
+}  // namespace detail
+
 template <typename TypeIdentifierEnum, typename... SupportedTypes>
 class type_registry
 {
     static_assert(type_traits::is_enum_class_v<TypeIdentifierEnum>,
                   "TypeIdentifierEnum must be an enum class");
+    static_assert(detail::are_unique<SupportedTypes::type_identifier...>(),
+                  "two record types share a type_identifier");
 
 public:
     using variant_t = std::variant<SupportedTypes...>;

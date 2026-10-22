@@ -7,6 +7,9 @@
 
 #include <gtest/gtest.h>
 
+static_assert(rocprofsys::trace_cache::detail::are_unique<1, 2, 3>());
+static_assert(!rocprofsys::trace_cache::detail::are_unique<1, 2, 1>());
+
 class type_registry_test : public ::testing::Test
 {
 protected:
