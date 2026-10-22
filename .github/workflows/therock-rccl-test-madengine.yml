@@ -126,11 +126,11 @@ jobs:
       # everything else it runs, and nothing here prunes those caches, so they
       # only ever grow -- across runs, workloads and branches alike. Put them
       # under WORK_DIR instead, which the cleanup step below deletes.
+      # pip reads XDG_CACHE_HOME; conda does not, and keeps its own under
+      # ~/.conda. The literal is repeated because entries in this block cannot
+      # reference each other.
       XDG_CACHE_HOME: "/apps/rccl-ci/madengine/workdir/${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.workload }}/cache"
-      PIP_CACHE_DIR: "/apps/rccl-ci/madengine/workdir/${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.workload }}/cache/pip"
       CONDA_PKGS_DIRS: "/apps/rccl-ci/madengine/workdir/${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.workload }}/cache/conda-pkgs"
-      # ~/.cache/pip is on a small NFS home quota.
-      PIP_NO_CACHE_DIR: '1'
     steps:
       - name: Checkout TheRock repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -225,23 +225,33 @@ jobs:
           JOB_TIMEOUT_MINUTES: ${{ inputs.job_timeout_minutes }}
           # Nodes to keep out of the allocation, as a SLURM hostlist.
           MADENGINE_SLURM_EXCLUDE: ${{ vars.RCCL_MADENGINE_SLURM_EXCLUDE || '' }}
+          # Same reason as JOB_TIMEOUT_MINUTES below. The webhook also has a
+          # second one: Actions echoes the expanded run block into the log,
+          # and this value arrives as an input, not a secret, so nothing
+          # masks it there.
+          NOTIFY_EMAIL: ${{ inputs.notify_email }}
+          TEAMS_WEBHOOK: ${{ inputs.teams_webhook }}
+          WORKLOAD: ${{ inputs.workload }}
+          NODES: ${{ inputs.nodes }}
         run: |
           export PYTHONPATH="rocm-systems/projects/rccl/ci/scripts:${PYTHONPATH}"
 
-          NOTIFY_ARGS=""
-          if [ -n "${{ inputs.notify_email }}" ]; then
-            NOTIFY_ARGS="$NOTIFY_ARGS --notify-email ${{ inputs.notify_email }}"
+          # An array, so a value carrying a space stays one argument instead
+          # of splitting into two the parser then rejects.
+          NOTIFY_ARGS=()
+          if [ -n "${NOTIFY_EMAIL}" ]; then
+            NOTIFY_ARGS+=(--notify-email "${NOTIFY_EMAIL}")
           fi
-          if [ -n "${{ inputs.teams_webhook }}" ]; then
-            NOTIFY_ARGS="$NOTIFY_ARGS --teams-webhook ${{ inputs.teams_webhook }}"
+          if [ -n "${TEAMS_WEBHOOK}" ]; then
+            NOTIFY_ARGS+=(--teams-webhook "${TEAMS_WEBHOOK}")
           fi
 
-          # Read from the environment and validated, NOT interpolated into the
-          # script. A dispatch input pasted straight into a run block is
-          # executed as shell, and this step holds MAD_SECRETS_HFTOKEN. The
-          # job-level fromJSON() is no defence: it parses the leading JSON
-          # value, so "450 $(...)" satisfies the timeout and still reaches bash
-          # here as code.
+          # Every input this step uses is read from the environment and
+          # validated, NOT interpolated into the script. A dispatch input
+          # pasted straight into a run block is executed as shell, and this
+          # step holds MAD_SECRETS_HFTOKEN. The job-level fromJSON() is no
+          # defence: it parses the leading JSON value, so "450 $(...)"
+          # satisfies the timeout and still reaches bash here as code.
           #
           # Arithmetic stays in bash: workflow expressions have no arithmetic
           # operators, and a subtraction there is a parse error that rejects
@@ -253,17 +263,25 @@ jobs:
               echo "::error::job_timeout_minutes must be a plain integer, got '${JOB_TIMEOUT_MINUTES}'"
               exit 1 ;;
           esac
+          # 60 of those minutes are reserved for the setup ahead of the script
+          # and its reporting afterwards. At or below that the script is handed
+          # zero or less and reports "Allocation timed out" the moment salloc
+          # returns -- after the allocation has already been granted.
+          if [ "${JOB_TIMEOUT_MINUTES}" -le 60 ]; then
+            echo "::error::job_timeout_minutes must be greater than the 60 reserved minutes, got '${JOB_TIMEOUT_MINUTES}'"
+            exit 1
+          fi
           SCRIPT_TIMEOUT=$(( JOB_TIMEOUT_MINUTES - 60 ))
 
           python3 rocm-systems/projects/rccl/ci/scripts/test_madengine.py \
             --artifact-dir "${OUTPUT_ARTIFACTS_DIR}" \
-            --workload "${{ inputs.workload }}" \
+            --workload "${WORKLOAD}" \
             --cluster "${CLUSTER}" \
-            --nodes "${{ inputs.nodes }}" \
+            --nodes "${NODES}" \
             --timeout-minutes "${SCRIPT_TIMEOUT}" \
             --results-dir "${RESULTS_DIR}" \
             --work-dir "${WORK_DIR}" \
-            $NOTIFY_ARGS
+            "${NOTIFY_ARGS[@]}"
 
       - name: Upload results
         if: always()
