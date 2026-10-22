@@ -11,7 +11,7 @@
 //! Application callbacks and worker joins occur outside the lock. Final
 //! shutdown removes public reachability before releasing native resources.
 //!
-//! GPU discovery uses rocddi; host CPU information comes from the platform layer.
+//! GPU discovery and passive host CPU information both come from rocddi.
 
 use std::cell::Cell;
 use std::ffi::c_void;
@@ -22,6 +22,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
+use std::time::Instant;
 
 use rocddi::device::Device;
 use rocddi::device::event::{
@@ -31,7 +32,10 @@ use rocddi::device::event::{
 use rocddi::device::gpu::profiling::{PcSamplingConfiguration, PcSamplingConfigurationSet};
 use rocddi::memory::device::Allocation;
 use rocddi::session::{DriverContextLifetime, Session};
-use rocddi::topology::{Endpoint, EndpointDetailsKind, GpuInfo};
+use rocddi::topology::host::{
+    self as host_topology, CpuCacheKind, CpuInfo, HostCaches, HostTopologySnapshot,
+};
+use rocddi::topology::{Endpoint, GpuInfo};
 
 use crate::callback_arg::CallbackArg;
 use crate::ffi::*;
@@ -39,7 +43,6 @@ use crate::image_abi::ImageState;
 use crate::loader::LoaderState;
 use crate::memory::MemoryState;
 use crate::pc_sampling::PcSamplingState;
-use crate::platform::host::{self as platform_host, CpuCacheKind, CpuInfo};
 use crate::queue::QueueState;
 use crate::signal::SignalState;
 
@@ -51,6 +54,59 @@ thread_local! {
 // KFD retains a primary process VM after its last descriptor closes. Later
 // HSA generations therefore need a private context to acquire a fresh VM.
 static PRIMARY_CONTEXT_USED: AtomicBool = AtomicBool::new(false);
+static PRECISE_TIMESTAMPS: AtomicBool = AtomicBool::new(false);
+
+/// Choose the KFD correlation least exposed to preemption between its reads.
+pub(crate) fn clock_counters(
+    device: &Device,
+) -> Result<rocddi::device::gpu::profiling::ClockCounters, rocddi::Error> {
+    let gpu = device.gpu()?;
+    let samples = if PRECISE_TIMESTAMPS.load(Ordering::Acquire) {
+        4
+    } else {
+        1
+    };
+    best_clock_sample(samples, || {
+        let before = Instant::now();
+        let counters = gpu.clock_counters()?;
+        Ok((counters, before.elapsed()))
+    })
+}
+
+fn best_clock_sample<T, E>(
+    count: usize,
+    mut sample: impl FnMut() -> Result<(T, Duration), E>,
+) -> Result<T, E> {
+    let (first, elapsed) = sample()?;
+    let mut best = (first, elapsed);
+    for _ in 1..count {
+        match sample() {
+            Ok((value, elapsed)) if elapsed < best.1 => best = (value, elapsed),
+            Ok(_) => {}
+            Err(_) => return Ok(best.0),
+        }
+    }
+    Ok(best.0)
+}
+
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_enable_high_precision_timestamps")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+pub extern "C" fn hsa_amd_enable_high_precision_timestamps() -> Status {
+    boundary(|| {
+        let guard = match lock() {
+            Ok(guard) => guard,
+            Err(status) => return status,
+        };
+        if guard.as_ref().is_none() {
+            return NOT_INITIALIZED;
+        }
+        PRECISE_TIMESTAMPS.store(true, Ordering::Release);
+        SUCCESS
+    })
+}
 
 /// A transient native query failure leaves support undecided so public calls
 /// can retry after the underlying condition clears.
@@ -433,13 +489,35 @@ fn decode_gpu_pool_handle(pool: HsaMemoryPool, gpu_count: usize) -> Option<(usiz
     let offset = pool.handle.checked_sub(GPU_POOL_BASE)?;
     let index = usize::try_from(offset / 0x10).ok()?;
     let kind = offset % 0x10;
-    (index < gpu_count && matches!(kind, 1..=3)).then_some((index, kind))
+    (index < gpu_count && matches!(kind, 1..=4)).then_some((index, kind))
 }
 
 fn decode_cache_handle(cache: HsaCache, cache_count: usize) -> Option<usize> {
     let index = cache.handle.checked_sub(CACHE_BASE)?;
     let index = usize::try_from(index).ok()?;
     (index < cache_count).then_some(index)
+}
+
+fn selected_cpu_caches(topology: &HostTopologySnapshot) -> &HostCaches {
+    topology
+        .domain(0)
+        .map_or(&topology.caches, |domain| &domain.caches)
+}
+
+pub(crate) fn cache_handles_in_level_order(caches: &[Cache], agent: HsaAgent) -> Vec<HsaCache> {
+    let mut indices = caches
+        .iter()
+        .enumerate()
+        .filter(|(_, cache)| cache.agent == agent)
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    indices.sort_by_key(|&index| caches[index].level);
+    indices
+        .into_iter()
+        .map(|index| HsaCache {
+            handle: CACHE_BASE + index as u64,
+        })
+        .collect()
 }
 
 fn cache_sizes(caches: &[Cache], agent: HsaAgent) -> [u32; 4] {
@@ -771,8 +849,9 @@ impl HsaState {
         if host_page_size < 4096 || !host_page_size.is_power_of_two() {
             return Err(ERROR.into());
         }
-        let host_memory_bytes = platform_host::memory_bytes().ok_or(ERROR)?;
-        let host = platform_host::cpu_info().unwrap_or_else(|| CpuInfo {
+        let topology = host_topology::snapshot();
+        let host_memory_bytes = topology.memory_bytes.ok_or(ERROR)?;
+        let host = topology.cpu.clone().unwrap_or_else(|| CpuInfo {
             name: "CPU".to_owned(),
             compute_units: 0,
         });
@@ -793,6 +872,7 @@ impl HsaState {
             host_page_size,
             host_memory_bytes,
             host,
+            &topology,
             lifetime,
         ) {
             Ok(runtime) => Ok(runtime),
@@ -808,6 +888,7 @@ impl HsaState {
         host_page_size: usize,
         host_memory_bytes: usize,
         host: CpuInfo,
+        host_topology: &HostTopologySnapshot,
         lifetime: DriverContextLifetime,
     ) -> Result<Self, Status> {
         let session = pending.session.as_ref().ok_or(ERROR)?;
@@ -826,18 +907,19 @@ impl HsaState {
         let full_profile =
             full_profile_platform(endpoints.iter().map(|endpoint| endpoint.local_memory_bytes));
         let cpu_agent = HsaAgent { handle: CPU_AGENT };
-        let mut caches = platform_host::caches_for_numa_node(0)
-            .unwrap_or_else(platform_host::caches)
-            .into_iter()
+        let host_caches = selected_cpu_caches(host_topology);
+        let mut caches = host_caches
+            .records
+            .iter()
             .filter(|cache| {
-                cache.kind == CpuCacheKind::Data && cache.first_shared_cpu == Some(cache.cpu)
+                cache.info.kind == CpuCacheKind::Data && cache.first_shared_cpu() == Some(cache.cpu)
             })
             .map(|cache| {
                 Cache::new(
                     cpu_agent,
                     host.name.as_bytes(),
-                    cache.level,
-                    cache.size_bytes,
+                    cache.info.level,
+                    u32::try_from(cache.info.size_bytes).unwrap_or(u32::MAX),
                 )
             })
             .collect::<Vec<_>>();
@@ -845,10 +927,14 @@ impl HsaState {
             .gpus
             .try_reserve(endpoints.len())
             .map_err(|_| OUT_OF_RESOURCES)?;
-        for endpoint in endpoints {
-            let Some(info) = endpoint.gpu().copied() else {
+        for mut endpoint in endpoints {
+            if endpoint.gpu().is_none() {
                 continue;
-            };
+            }
+            session
+                .populate_endpoint(&mut endpoint)
+                .map_err(map_error)?;
+            let info = endpoint.gpu().copied().ok_or(ERROR)?;
             let agent = HsaAgent {
                 handle: GPU_AGENT_BASE + pending.gpus.len() as u64,
             };
@@ -861,32 +947,21 @@ impl HsaState {
                 caches.push(Cache::new(
                     agent,
                     name.as_bytes(),
-                    cache.level(),
-                    u32::try_from(cache.size_bytes()).unwrap_or(u32::MAX),
+                    cache.level,
+                    u32::try_from(cache.size_bytes).unwrap_or(u32::MAX),
                 ));
             }
-            let details = session
-                .query_endpoint_details(&endpoint)
-                .map_err(map_error)?;
-            let (asic_family_id, timestamp_frequency_hz) = match details.kind {
-                EndpointDetailsKind::Gpu {
-                    asic_family_id,
-                    counter_frequency_hz,
-                    ..
-                } => (
-                    asic_family_id.unwrap_or(info.asic_family_id),
-                    counter_frequency_hz.unwrap_or(0),
-                ),
-                _ => return Err(ERROR),
-            };
+            let asic_family_id = info.drm_asic_family_id.unwrap_or(info.asic_family_id);
+            let timestamp_frequency_hz = info.counter_frequency_hz.unwrap_or(0);
             if lifetime == DriverContextLifetime::Process {
                 // Activation may retain a primary VM even when it returns an
                 // error. A later generation must use a private context.
                 PRIMARY_CONTEXT_USED.store(true, Ordering::Release);
             }
             let device = session.activate(&endpoint).map_err(map_error)?;
-            let product_name = details
+            let product_name = endpoint
                 .product_name
+                .clone()
                 .unwrap_or_else(|| "AMD Radeon Graphics".to_owned());
             let mmio_remap = device.gpu().and_then(|gpu| gpu.map_mmio_remap()).ok();
             let hdp_flush = hdp_flush_pointers(
@@ -924,7 +999,7 @@ impl HsaState {
             loader: LoaderState::new(),
             image_state: ImageState::new(),
             memory_state: MemoryState::new(),
-            signal_state: SignalState::new(),
+            signal_state: SignalState::new(lifetime),
             host_memory_bytes,
             host_page_size,
             host_name: host.name.into_boxed_str(),
@@ -1025,7 +1100,15 @@ impl HsaState {
 
     pub(crate) fn decode_gpu_pool(&self, pool: HsaMemoryPool) -> Option<(usize, u64)> {
         let (index, kind) = decode_gpu_pool_handle(pool, self.gpus.len())?;
-        (kind != 2 || self.gpus[index].fine_grain_pool).then_some((index, kind))
+        let gpu = &self.gpus[index];
+        let exposed = match kind {
+            crate::memory::GPU_POOL_FINE => gpu.fine_grain_pool,
+            crate::memory::GPU_POOL_EXTENDED => {
+                gpu.info.gfx_major == 9 && matches!(gpu.info.gfx_minor, 4 | 5)
+            }
+            _ => true,
+        };
+        exposed.then_some((index, kind))
     }
 
     pub(crate) fn prepare_log(&self, flag: u32, arguments: Arguments<'_>) -> Option<LogWork> {
@@ -1113,10 +1196,7 @@ pub(crate) fn translate_gpu_interval(
     if start == 0 || end == 0 {
         return Ok((0, 0));
     }
-    let counters = device
-        .gpu()
-        .and_then(|gpu| gpu.clock_counters())
-        .map_err(map_error)?;
+    let counters = clock_counters(device).map_err(map_error)?;
     Ok((
         translate_gpu_tick(counters, start)?,
         translate_gpu_tick(counters, end)?,
@@ -1393,6 +1473,32 @@ mod tests {
     use rocddi::device::gpu::profiling::ClockCounters;
     use std::ffi::c_void;
     use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering as AtomicOrdering};
+
+    #[test]
+    fn precise_clock_sampling_keeps_the_shortest_complete_sample() {
+        let mut samples = [
+            Ok::<_, &str>((10, Duration::from_micros(40))),
+            Ok((20, Duration::from_micros(3))),
+            Ok((30, Duration::from_micros(12))),
+            Ok((40, Duration::from_micros(1))),
+        ]
+        .into_iter();
+        assert_eq!(best_clock_sample(4, || samples.next().unwrap()), Ok(40));
+
+        let mut calls = 0;
+        assert_eq!(
+            best_clock_sample(4, || {
+                calls += 1;
+                if calls == 2 {
+                    Err("late ioctl failure")
+                } else {
+                    Ok((17, Duration::from_micros(2)))
+                }
+            }),
+            Ok(17)
+        );
+        assert_eq!(calls, 2);
+    }
 
     #[test]
     fn native_busy_reports_resource_contention_across_frontends() {
@@ -1858,6 +1964,71 @@ mod tests {
                 2,
             ),
             None
+        );
+    }
+
+    #[test]
+    fn cpu_cache_source_prefers_numa_zero_and_falls_back_to_system_scan() {
+        use rocddi::topology::host::{CpuCache, HostDomain};
+
+        let cache = |cpu| CpuCache {
+            cpu,
+            shared_cpus: None,
+            info: rocddi::topology::CacheInfo::new(1, 32 * 1024, None, CpuCacheKind::Data),
+        };
+        let mut topology = HostTopologySnapshot {
+            memory_bytes: None,
+            cpu: None,
+            online_cpus: None,
+            caches: HostCaches {
+                records: vec![cache(7)],
+                complete: true,
+            },
+            domains: vec![HostDomain {
+                numa_node: 2,
+                cpus: None,
+                caches: HostCaches {
+                    records: vec![cache(2)],
+                    complete: true,
+                },
+            }],
+            domains_complete: true,
+        };
+        assert_eq!(selected_cpu_caches(&topology).records[0].cpu, 7);
+
+        topology.domains.push(HostDomain {
+            numa_node: 0,
+            cpus: None,
+            caches: HostCaches {
+                records: vec![cache(0)],
+                complete: true,
+            },
+        });
+        assert_eq!(selected_cpu_caches(&topology).records[0].cpu, 0);
+        topology.domains[1].caches.records.clear();
+        assert!(selected_cpu_caches(&topology).records.is_empty());
+    }
+
+    #[test]
+    fn cache_iteration_sorts_levels_without_changing_handles() {
+        let agent = HsaAgent { handle: CPU_AGENT };
+        let other = HsaAgent {
+            handle: GPU_AGENT_BASE,
+        };
+        let caches = [
+            Cache::new(agent, b"CPU", 3, 100),
+            Cache::new(agent, b"CPU", 1, 100),
+            Cache::new(agent, b"CPU", 2, 100),
+            Cache::new(agent, b"CPU", 1, 100),
+            Cache::new(other, b"GPU", 1, 100),
+        ];
+        let handles = cache_handles_in_level_order(&caches, agent)
+            .into_iter()
+            .map(|cache| cache.handle)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            handles,
+            [CACHE_BASE + 1, CACHE_BASE + 3, CACHE_BASE + 2, CACHE_BASE]
         );
     }
 

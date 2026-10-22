@@ -174,6 +174,9 @@ fn cpu_rejects_amd_agent_info(attribute: u32) -> bool {
             | AMD_AGENT_INFO_KERNEL_WG_MAX_DIM
             | AMD_AGENT_INFO_REQUEST_PERSISTING_L2_CACHE_SIZE
             | AMD_AGENT_INFO_MAX_PERSISTING_L2_CACHE_SIZE
+            | AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH
+            | AMD_AGENT_INFO_HOST_ATOMICS_SUPPORTED
+            | AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED
     )
 }
 
@@ -207,8 +210,7 @@ pub extern "C" fn hsa_init() -> Status {
             .as_ref()
             .ok()
             .and_then(|runtime| runtime.gpus.first())
-            .and_then(|gpu| gpu.device.gpu().ok())
-            .and_then(|gpu| gpu.clock_counters().ok())
+            .and_then(|gpu| runtime::clock_counters(&gpu.device).ok())
             .map_or(0, |counters| counters.system_frequency);
         let mut guard = match lock() {
             Ok(guard) => guard,
@@ -335,7 +337,7 @@ pub unsafe extern "C" fn hsa_system_get_info(attribute: u32, value: *mut c_void)
             };
             let device = gpu.device.clone();
             drop(guard);
-            return match device.gpu().and_then(|gpu| gpu.clock_counters()) {
+            return match runtime::clock_counters(&device) {
                 // SAFETY: The caller supplied writable storage for this attribute.
                 Ok(counters) if attribute == SYSTEM_INFO_TIMESTAMP => unsafe {
                     write_value(value, counters.system)
@@ -368,7 +370,7 @@ pub unsafe extern "C" fn hsa_system_get_info(attribute: u32, value: *mut c_void)
                 AMD_SYSTEM_INFO_MWAITX_ENABLED => write_value(value, false),
                 AMD_SYSTEM_INFO_DMABUF_SUPPORTED => write_value(value, true),
                 AMD_SYSTEM_INFO_EXT_VERSION_MAJOR => write_value(value, 1_u16),
-                AMD_SYSTEM_INFO_EXT_VERSION_MINOR => write_value(value, 33_u16),
+                AMD_SYSTEM_INFO_EXT_VERSION_MINOR => write_value(value, 36_u16),
                 AMD_SYSTEM_INFO_VIRTUAL_MEM_API_SUPPORTED => write_value(value, true),
                 AMD_SYSTEM_INFO_XNACK_ENABLED => write_value(value, false),
                 AMD_SYSTEM_INFO_FABRIC_HANDLES_SUPPORTED => write_value(
@@ -743,7 +745,7 @@ pub unsafe extern "C" fn hsa_agent_get_info(
         let clock_counters = if attribute == AMD_AGENT_INFO_CLOCK_COUNTERS {
             native_device
                 .as_ref()
-                .map(|(device, _)| device.gpu().and_then(|gpu| gpu.clock_counters()))
+                .map(|(device, _)| runtime::clock_counters(device))
         } else {
             None
         };
@@ -764,6 +766,14 @@ pub unsafe extern "C" fn hsa_agent_get_info(
             None
         };
         let gpu = endpoint.as_ref().and_then(|endpoint| endpoint.gpu());
+        let host_xgmi_atomics = endpoint
+            .as_ref()
+            .and_then(rocddi::topology::Endpoint::memory_link_from_host)
+            .is_some_and(|link| {
+                link.kind == rocddi::topology::MemoryLinkType::Xgmi
+                    && link.coherent_support
+                    && link.atomic_support_64bit
+            });
         let gpu_only = gpu.is_some();
         let image_gpu = gpu.is_some_and(image_gfx12::supported_gpu);
         if !gpu_only && cpu_rejects_amd_agent_info(attribute) {
@@ -857,8 +867,10 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                         endpoint
                             .caches()
                             .iter()
-                            .find(|cache| cache.level() == 2 && cache.line_size_bytes() != 0)
-                            .map_or(256, rocddi::topology::CacheInfo::line_size_bytes)
+                            .filter(|cache| cache.level == 2)
+                            .filter_map(|cache| cache.line_size_bytes)
+                            .find(|line| *line != 0)
+                            .unwrap_or(256)
                     }),
                 ),
                 AMD_AGENT_INFO_COMPUTE_UNIT_COUNT
@@ -1000,6 +1012,11 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                     value,
                     gpu.map_or(0, |info| info.persisting_l2_cache_size_max as usize),
                 ),
+                AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH => {
+                    write_value(value, gpu_only && !host_xgmi_atomics)
+                }
+                AMD_AGENT_INFO_HOST_ATOMICS_SUPPORTED => write_value(value, host_xgmi_atomics),
+                AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED => write_value(value, false),
                 AMD_AGENT_INFO_HAS_EXPERT_SCHED_MODE => match expert_scheduling {
                     Some(Ok(supported)) => write_value(value, supported),
                     Some(Err(error)) => map_error(error),
@@ -2122,7 +2139,7 @@ pub unsafe extern "C" fn hsa_amd_profiling_convert_tick_to_system_domain(
             };
             (runtime.gpus[index].device.clone(), token)
         };
-        let counters = match device.gpu().and_then(|gpu| gpu.clock_counters()) {
+        let counters = match runtime::clock_counters(&device) {
             Ok(counters) => counters,
             Err(error) => return map_error(error),
         };

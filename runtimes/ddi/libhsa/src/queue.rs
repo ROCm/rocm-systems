@@ -17,7 +17,6 @@
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::c_void;
-use std::mem::ManuallyDrop;
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -27,7 +26,7 @@ use std::time::Duration;
 use rocddi::device::Device;
 use rocddi::device::gpu::queue::{
     MAX_PRIVATE_SEGMENT_BYTES, QueueAccessWidth, QueueErrorEvent, QueueParameters, QueuePriority,
-    QueueProducerMode, QueueRequest, QueueRingMemory, QueueScratch, QueueTransport,
+    QueueProducerMode, QueueRequest, QueueRingMemory, QueueScratch, QueueTransport, RetainedQueue,
     SdmaEngineSelection, plan_scratch,
 };
 use rocddi::memory::device::{Allocation, DeviceAccess, MemoryKind};
@@ -183,24 +182,17 @@ impl QueueEventSignal {
 /// succeeds, a later retry proceeds directly to final queue destruction.
 pub(crate) struct Queue {
     /// Direct native queue and all retained transport backing.
-    pub(crate) native: rocddi::device::gpu::queue::Queue,
+    pub(crate) native: RetainedQueue<QueueBacking>,
     /// Public or intercept-proxy queue pointer returned to callers.
     pub(crate) public_handle: usize,
     /// Controls when profiler callbacks may mention this queue.
     scratch_event_visibility: ScratchEventVisibility,
     /// Retains the doorbell signal published in the HSA queue header.
     _doorbell: Box<AmdSignal>,
-    /// Retains the native event and queue error signals.
-    inactive_signal: Arc<QueueEventSignal>,
     /// Stop flag observed by the queue event worker.
     event_alive: Arc<AtomicBool>,
     /// Worker joined before the native queue is destroyed.
     event_worker: Option<JoinHandle<()>>,
-    /// Current scratch backing retained while the queue can use it.
-    scratch: Option<Allocation>,
-    /// Candidate backing from failed control updates. Native code may have
-    /// accepted its address, so it remains live through destruction.
-    uncertain_scratch: Vec<Allocation>,
     /// HSA agent that owns the queue.
     pub(crate) agent: HsaAgent,
     /// Native queue ID used by KFD event reporting.
@@ -227,6 +219,13 @@ pub(crate) struct Queue {
     pub(crate) vm_fault_reason: u32,
     /// Native destruction has begun and can only be resumed.
     teardown_started: bool,
+}
+
+/// External GPU addresses retained by the native queue through retirement.
+pub(crate) struct QueueBacking {
+    inactive_signal: Arc<QueueEventSignal>,
+    scratch: Option<Allocation>,
+    uncertain_scratch: Vec<Allocation>,
 }
 
 impl Queue {
@@ -292,8 +291,8 @@ pub(crate) fn destroy_runtime_queue(queue: &mut Queue) -> Result<(), rocddi::Err
     stop_queue_event_worker(&queue.event_alive, &mut queue.event_worker)?;
     let public = queue.public_handle as *const HsaQueue;
     let published = queue.scratch_event_visibility == ScratchEventVisibility::Published;
-    let mut release_scratch = || {
-        if let Some(scratch) = queue.scratch.take() {
+    let mut release_scratch = |backing: &mut QueueBacking| {
+        if let Some(scratch) = backing.scratch.take() {
             if published {
                 crate::tool_events::free_start(public);
                 drop(scratch);
@@ -303,11 +302,17 @@ pub(crate) fn destroy_runtime_queue(queue: &mut Queue) -> Result<(), rocddi::Err
             }
         }
     };
-    destroy_native_queue(
-        &mut queue.native,
-        &mut queue.teardown_started,
-        &mut release_scratch,
-    )
+    if !queue.teardown_started {
+        queue.native.inactivate()?;
+        queue.teardown_started = true;
+    }
+    // SAFETY: Inactivation stopped queue consumption, and the HSA caller has
+    // stopped publication. The retained bundle stays live through teardown.
+    unsafe {
+        queue
+            .native
+            .destroy_with_retained_transport(&mut release_scratch)
+    }
 }
 
 pub(crate) fn destroy_runtime_sdma_queue(queue: &mut SdmaQueue) -> Result<(), rocddi::Error> {
@@ -758,19 +763,22 @@ fn handle_queue_event(key: usize, observed: SignalValue) -> Option<QueueEventOut
         return None;
     };
     let result = allocated.and_then(|(allocation, scratch)| {
+        // SAFETY: The backing stays paired with this queue, and the candidate
+        // is staged before its address can be written to native control state.
+        let (native, backing) = unsafe { queue.native.parts_mut() };
         let old = update_scratch_owner(
-            &mut queue.scratch,
-            &mut queue.uncertain_scratch,
+            &mut backing.scratch,
+            &mut backing.uncertain_scratch,
             allocation,
             || {
                 // SAFETY: The inactive signal reports a stopped queue. Both
                 // old and candidate allocations remain owned if the update
                 // fails or unwinds.
-                unsafe { queue.native.set_scratch(scratch) }.map_err(map_error)
+                unsafe { native.set_scratch(scratch) }.map_err(map_error)
             },
         )?;
         let old_visible = queue.scratch_event_visibility == ScratchEventVisibility::Published;
-        queue.inactive_signal.release_queue();
+        backing.inactive_signal.release_queue();
         Ok((scratch, old, old_visible))
     });
     let (size, slots) = result.as_ref().map_or((0, 0), |(scratch, _, _)| {
@@ -1099,117 +1107,88 @@ unsafe fn create_hardware_queue(
     let worker_signal = inactive_signal.clone();
     let saved_cu_mask = cu_mask.unwrap_or_default();
     let mut creation_guard = UnpublishedQueueGuard::new(&prepared.tracker);
-    let (native, (inactive_signal, scratch_allocation)) =
-        match prepared.device.gpu().and_then(|gpu| {
-            // SAFETY: The owner tuple retains all external GPU addresses
-            // through native creation, including an ambiguous CREATE result.
-            unsafe {
-                gpu.create_queue_with_dependencies(
-                    QueueRequest {
-                        ring_size_bytes,
-                        parameters: QueueParameters::Aql {
-                            producer_mode: if queue_type == QUEUE_TYPE_SINGLE {
-                                QueueProducerMode::Single
-                            } else {
-                                QueueProducerMode::Multiple
-                            },
-                            ring_memory,
-                            global_work_sync: cooperative,
-                            inactive_signal: Some(inactive_signal.handle()),
-                            error_event: Some(inactive_signal.error_event()),
-                            scratch,
+    let native = match prepared.device.gpu().and_then(|gpu| {
+        // SAFETY: The owner tuple retains all external GPU addresses
+        // through native creation, including an ambiguous CREATE result.
+        unsafe {
+            gpu.create_queue_with_dependencies(
+                QueueRequest {
+                    ring_size_bytes,
+                    parameters: QueueParameters::Aql {
+                        producer_mode: if queue_type == QUEUE_TYPE_SINGLE {
+                            QueueProducerMode::Single
+                        } else {
+                            QueueProducerMode::Multiple
                         },
-                        priority,
-                        device_producer: false,
+                        ring_memory,
+                        global_work_sync: cooperative,
+                        inactive_signal: Some(inactive_signal.handle()),
+                        error_event: Some(inactive_signal.error_event()),
+                        scratch,
                     },
-                    (inactive_signal, scratch_allocation),
-                )
+                    priority,
+                    device_producer: false,
+                },
+                QueueBacking {
+                    inactive_signal,
+                    scratch: scratch_allocation,
+                    uncertain_scratch: Vec::new(),
+                },
+            )
+        }
+    }) {
+        Ok(created) => created,
+        Err(error) => {
+            if !matches!(error, rocddi::Error::QueueBackingMayBeLive { .. }) {
+                creation_guard.disarm();
             }
-        }) {
-            Ok(created) => created,
-            Err(error) => {
-                if !matches!(error, rocddi::Error::QueueBackingMayBeLive { .. }) {
-                    creation_guard.disarm();
-                }
-                return if cooperative && error.kind() == rocddi::ErrorKind::Busy {
-                    OUT_OF_RESOURCES
-                } else if error.kind() == rocddi::ErrorKind::Unsupported {
-                    INVALID_QUEUE_CREATION
-                } else {
-                    map_error(error)
-                };
-            }
-        };
-    // If setup unwinds, keep the native queue and its external backing live.
-    let mut pending = ManuallyDrop::new((native, inactive_signal, scratch_allocation));
+            return if cooperative && error.kind() == rocddi::ErrorKind::Busy {
+                OUT_OF_RESOURCES
+            } else if error.kind() == rocddi::ErrorKind::Unsupported {
+                INVALID_QUEUE_CREATION
+            } else {
+                map_error(error)
+            };
+        }
+    };
+    // The native owner retains its external backing if setup unwinds.
+    let mut pending = native;
     if !saved_cu_mask.is_empty() {
-        if let Err(error) = pending.0.set_cu_mask(&saved_cu_mask) {
-            let (native, signal, scratch) = ManuallyDrop::into_inner(pending);
-            return abandon_unpublished_tracked(
-                native,
-                (signal, scratch),
-                map_error(error),
-                &mut creation_guard,
-            );
+        if let Err(error) = pending.set_cu_mask(&saved_cu_mask) {
+            return abandon_unpublished_retained(pending, map_error(error), &mut creation_guard);
         }
     }
-    let info = pending.0.info();
+    let info = pending.info();
     if info.write_index_host_address < WRITE_INDEX_OFFSET
         || info.read_index_host_address < READ_INDEX_OFFSET
     {
-        let (native, signal, scratch) = ManuallyDrop::into_inner(pending);
-        return abandon_unpublished_tracked(native, (signal, scratch), ERROR, &mut creation_guard);
+        return abandon_unpublished_retained(pending, ERROR, &mut creation_guard);
     }
     let public = info.write_index_host_address - WRITE_INDEX_OFFSET;
     if info.read_index_host_address - READ_INDEX_OFFSET != public || public % 256 != 0 {
-        let (native, signal, scratch) = ManuallyDrop::into_inner(pending);
-        return abandon_unpublished_tracked(native, (signal, scratch), ERROR, &mut creation_guard);
+        return abandon_unpublished_retained(pending, ERROR, &mut creation_guard);
     }
     *doorbell = AmdSignal::doorbell(info.doorbell_host_address, public);
     let doorbell_handle = (&raw mut *doorbell) as usize as u64;
     let mut guard = match lock() {
         Ok(guard) => guard,
         Err(status) => {
-            let (native, signal, scratch) = ManuallyDrop::into_inner(pending);
-            return abandon_unpublished_tracked(
-                native,
-                (signal, scratch),
-                status,
-                &mut creation_guard,
-            );
+            return abandon_unpublished_retained(pending, status, &mut creation_guard);
         }
     };
     if guard.active_generation() != Some(prepared.generation) {
         drop(guard);
-        let (native, signal, scratch) = ManuallyDrop::into_inner(pending);
-        return abandon_unpublished_tracked(
-            native,
-            (signal, scratch),
-            INVALID_RUNTIME_STATE,
-            &mut creation_guard,
-        );
+        return abandon_unpublished_retained(pending, INVALID_RUNTIME_STATE, &mut creation_guard);
     }
     let Some(runtime) = guard.as_mut() else {
         drop(guard);
-        let (native, signal, scratch) = ManuallyDrop::into_inner(pending);
-        return abandon_unpublished_tracked(
-            native,
-            (signal, scratch),
-            NOT_INITIALIZED,
-            &mut creation_guard,
-        );
+        return abandon_unpublished_retained(pending, NOT_INITIALIZED, &mut creation_guard);
     };
     if runtime.queue_state.queues.try_reserve(1).is_err()
         || runtime.queue_state.queues.contains_key(&public)
     {
         drop(guard);
-        let (native, signal, scratch) = ManuallyDrop::into_inner(pending);
-        return abandon_unpublished_tracked(
-            native,
-            (signal, scratch),
-            OUT_OF_RESOURCES,
-            &mut creation_guard,
-        );
+        return abandon_unpublished_retained(pending, OUT_OF_RESOURCES, &mut creation_guard);
     }
     // SAFETY: The public control pointer is unique in the registry, and
     // rocddi retains this AQL control allocation until native teardown.
@@ -1225,19 +1204,15 @@ unsafe fn create_hardware_queue(
         (*header).reserved = 0;
         (*header).id = prepared.id;
     }
-    let (native, inactive_signal, scratch_allocation) = ManuallyDrop::into_inner(pending);
     runtime.queue_state.queues.insert(
         public,
         Queue {
-            native,
+            native: pending,
             public_handle: public,
             scratch_event_visibility: ScratchEventVisibility::Unpublished,
             _doorbell: doorbell,
-            inactive_signal,
             event_alive,
             event_worker: None,
-            scratch: scratch_allocation,
-            uncertain_scratch: Vec::new(),
             agent,
             hardware_id: u32::try_from(prepared.id).unwrap_or(u32::MAX),
             counted_pool_key: None,
@@ -1321,6 +1296,22 @@ fn abandon_unpublished_tracked<D: 'static>(
     // SAFETY: No public producer has observed the queue. The dependencies
     // retain every external GPU address until native teardown succeeds.
     match unsafe { native.abandon_unpublished_with_dependencies(dependencies) } {
+        Ok(()) => {
+            guard.disarm();
+            status
+        }
+        Err(error) => map_error(error),
+    }
+}
+
+fn abandon_unpublished_retained(
+    native: RetainedQueue<QueueBacking>,
+    status: Status,
+    guard: &mut UnpublishedQueueGuard<'_>,
+) -> Status {
+    // SAFETY: No public producer has observed the queue. The native owner
+    // retains all external GPU addresses through uncertain teardown.
+    match unsafe { native.abandon_unpublished() } {
         Ok(()) => {
             guard.disarm();
             status

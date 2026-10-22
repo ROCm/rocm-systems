@@ -19,6 +19,7 @@ use std::io;
 use std::os::fd::AsRawFd;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use crate::memory::device::VirtualMemoryPlacement;
 use crate::memory::interop::linux::{DmaBuf, DmaBufInfo};
 use crate::memory::storage::{Owned, Shared};
 use crate::memory::{
@@ -429,6 +430,8 @@ impl KfdVirtualMemory {
         };
         vm.check()?;
 
+        let gpu_id = vm.gpu_id;
+
         let owner = Owned::try_new_uninit()?;
         let reservation =
             os_memory::Reservation::new(size_usize, host_page, vm.address_range(), false)
@@ -442,6 +445,11 @@ impl KfdVirtualMemory {
                 size,
                 mapping_granularity: page,
                 physical_backing_id: [0; 2],
+                placement: Some(if native_kind & uapi::VRAM != 0 {
+                    VirtualMemoryPlacement::Device(gpu_id)
+                } else {
+                    VirtualMemoryPlacement::System
+                }),
             },
             freeing: false,
             uncertain: false,
@@ -451,7 +459,7 @@ impl KfdVirtualMemory {
             .vm
             .as_ref()
             .ok_or_else(|| error(ErrorKind::Internal, "virtual memory lost its owner VM"))?
-            .gpu_id();
+            .gpu_id;
         let mut args = uapi::AllocMemory {
             va: memory
                 .reservation
@@ -511,6 +519,17 @@ impl KfdVirtualMemory {
     }
 
     pub(super) fn import(descriptor: i32) -> Result<Owned<Self>, Error> {
+        Self::import_impl(descriptor, None)
+    }
+
+    pub(super) fn import_with_kfd(
+        descriptor: i32,
+        kfd: &super::sys::Kfd,
+    ) -> Result<Owned<Self>, Error> {
+        Self::import_impl(descriptor, Some(kfd))
+    }
+
+    fn import_impl(descriptor: i32, kfd: Option<&super::sys::Kfd>) -> Result<Owned<Self>, Error> {
         let dma_buf = os_file::duplicate_file(descriptor)
             .map_err(|source| native_error("virtual-memory descriptor duplication", source))?;
         let file_info = os_file::dma_buf_file_info(&dma_buf)
@@ -518,6 +537,23 @@ impl KfdVirtualMemory {
         let page = os_memory::page_size()
             .map_err(|source| native_error("virtual-memory page size", source))?
             as u64;
+        // Older KFD versions can import the DMA-BUF but cannot describe its
+        // origin. Preserve that distinction for the HSA handle-info query.
+        let placement = kfd
+            .and_then(|kfd| kfd.dma_buf_info(dma_buf.as_raw_fd()).ok())
+            .and_then(|details| {
+                let info = details.info;
+                if info.size != file_info.size {
+                    return None;
+                }
+                match info.flags & (uapi::VRAM | uapi::GTT) {
+                    uapi::GTT => Some(VirtualMemoryPlacement::System),
+                    uapi::VRAM if info.gpu_id != 0 => {
+                        Some(VirtualMemoryPlacement::Device(info.gpu_id))
+                    }
+                    _ => None,
+                }
+            });
         Owned::new(Self {
             vm: None,
             reservation: None,
@@ -527,6 +563,7 @@ impl KfdVirtualMemory {
                 size: file_info.size,
                 mapping_granularity: page,
                 physical_backing_id: file_info.physical_id,
+                placement,
             },
             freeing: false,
             uncertain: false,
@@ -574,7 +611,7 @@ impl KfdVirtualMemory {
         vm.check()?;
         let path = format!(
             "/sys/class/drm/renderD{}/device/ualink/accel_state",
-            vm.render_minor()
+            vm.render_minor
         );
         Ok(std::fs::read_to_string(path)
             .is_ok_and(|state| matches!(state.trim(), "ready" | "active")))
@@ -602,7 +639,7 @@ impl KfdVirtualMemory {
         }
         // GEM handles are scoped to a DRM file. A dedicated file makes the
         // temporary PRIME import close even if export fails.
-        let render = super::sysfs::open_render(vm.render_minor())
+        let render = super::sysfs::open_render(vm.render_minor)
             .map_err(|source| native_error("fabric render open", source))?;
         let dma_buf = self.dma_buf()?;
         let gem = drm::import_dma_buf(&render, dma_buf.as_raw_fd())

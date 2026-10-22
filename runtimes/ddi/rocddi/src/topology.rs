@@ -4,7 +4,8 @@
 //! Passive hardware discovery records and topology relationships.
 //!
 //! An endpoint describes hardware discovered in one generation-consistent
-//! topology snapshot. It is inert: inspecting or cloning an endpoint does not
+//! topology snapshot. Optional information from other sources may be populated
+//! later on the same record. Inspecting or cloning an endpoint does not
 //! activate hardware, acquire an address space, or grant access to memory. An
 //! activated endpoint is represented separately by `crate::device::Device`.
 //!
@@ -17,6 +18,7 @@ use crate::driver;
 use crate::memory::storage::Shared;
 use crate::memory::{DeviceAccess, HostCacheability};
 
+pub mod host;
 pub mod platform;
 
 /// Exact PCI function and configuration identity reported by the OS.
@@ -42,36 +44,50 @@ pub struct PciInfo {
     pub revision_id: u32,
 }
 
-/// Immutable native cache metadata associated with one endpoint.
+/// Data and instruction classification reported by a topology source.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CacheKind {
+    /// Data cache.
+    Data,
+    /// Instruction cache.
+    Instruction,
+    /// Cache holding both data and instructions.
+    Unified,
+    /// Another or unknown cache type.
+    Other,
+}
+
+/// Passive cache information shared by host and endpoint topology.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CacheInfo {
-    /// Hierarchy level reported by the native topology.
-    pub(crate) level: u32,
+    /// Hierarchy level reported by the topology source.
+    pub level: u32,
     /// Cache capacity in bytes.
-    pub(crate) size_bytes: u64,
-    /// Native cache-line size in bytes.
-    pub(crate) line_size_bytes: u32,
-    /// Native cache type encoding.
-    pub(crate) kind: u32,
+    pub size_bytes: u64,
+    /// Cache-line size in bytes, when the topology source reports one.
+    pub line_size_bytes: Option<u32>,
+    /// Data and instruction classification of this cache.
+    pub kind: CacheKind,
+    /// Whether the source marks this cache as associated with compute units.
+    pub(crate) compute_unit_cache: bool,
 }
 
 impl CacheInfo {
-    /// Returns the native cache level.
+    /// Creates cache information without a compute-unit association.
     #[must_use]
-    pub const fn level(&self) -> u32 {
-        self.level
-    }
-
-    /// Returns the cache capacity in bytes.
-    #[must_use]
-    pub const fn size_bytes(&self) -> u64 {
-        self.size_bytes
-    }
-
-    /// Returns the native cache-line size in bytes.
-    #[must_use]
-    pub const fn line_size_bytes(&self) -> u32 {
-        self.line_size_bytes
+    pub const fn new(
+        level: u32,
+        size_bytes: u64,
+        line_size_bytes: Option<u32>,
+        kind: CacheKind,
+    ) -> Self {
+        Self {
+            level,
+            size_bytes,
+            line_size_bytes,
+            kind,
+            compute_unit_cache: false,
+        }
     }
 }
 
@@ -93,85 +109,31 @@ pub enum MemoryLinkType {
     Unknown,
 }
 
-/// Immutable properties of one directed native topology link.
+/// Passive properties of one directed native topology link.
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct MemoryLinkInfo {
     /// Native minimum latency value for this direction.
-    pub(crate) minimum_latency: u32,
+    pub minimum_latency: u32,
     /// Native maximum latency value for this direction.
-    pub(crate) maximum_latency: u32,
+    pub maximum_latency: u32,
     /// Native minimum bandwidth value for this direction.
-    pub(crate) minimum_bandwidth: u32,
+    pub minimum_bandwidth: u32,
     /// Native maximum bandwidth value for this direction.
-    pub(crate) maximum_bandwidth: u32,
+    pub maximum_bandwidth: u32,
     /// Whether 32-bit atomics may cross this link.
-    pub(crate) atomic_support_32bit: bool,
+    pub atomic_support_32bit: bool,
     /// Whether 64-bit atomics may cross this link.
-    pub(crate) atomic_support_64bit: bool,
+    pub atomic_support_64bit: bool,
     /// Whether the link preserves coherent memory access.
-    pub(crate) coherent_support: bool,
+    pub coherent_support: bool,
     /// Native interconnect classification.
-    pub(crate) kind: MemoryLinkType,
+    pub kind: MemoryLinkType,
     /// Native NUMA weight used for relative distance queries.
-    pub(crate) numa_distance: u32,
+    pub numa_distance: u32,
 }
 
 impl MemoryLinkInfo {
-    #[doc(hidden)]
-    #[must_use]
-    pub const fn minimum_latency(self) -> u32 {
-        self.minimum_latency
-    }
-
-    #[doc(hidden)]
-    #[must_use]
-    pub const fn maximum_latency(self) -> u32 {
-        self.maximum_latency
-    }
-
-    #[doc(hidden)]
-    #[must_use]
-    pub const fn minimum_bandwidth(self) -> u32 {
-        self.minimum_bandwidth
-    }
-
-    #[doc(hidden)]
-    #[must_use]
-    pub const fn maximum_bandwidth(self) -> u32 {
-        self.maximum_bandwidth
-    }
-
-    #[doc(hidden)]
-    #[must_use]
-    pub const fn supports_32bit_atomics(self) -> bool {
-        self.atomic_support_32bit
-    }
-
-    #[doc(hidden)]
-    #[must_use]
-    pub const fn supports_64bit_atomics(self) -> bool {
-        self.atomic_support_64bit
-    }
-
-    #[doc(hidden)]
-    #[must_use]
-    pub const fn is_coherent(self) -> bool {
-        self.coherent_support
-    }
-
-    #[doc(hidden)]
-    #[must_use]
-    pub const fn kind(self) -> MemoryLinkType {
-        self.kind
-    }
-
-    #[doc(hidden)]
-    #[must_use]
-    pub const fn numa_distance(self) -> u32 {
-        self.numa_distance
-    }
-
     #[doc(hidden)]
     #[must_use]
     pub const fn hop_count(self) -> u32 {
@@ -242,8 +204,11 @@ pub struct GpuQueueCapabilities {
 /// GPU target and enabled compute geometry captured without activation.
 /// Required geometry fields must be complete and consistent before this record
 /// is published; opening an endpoint never substitutes guessed dimensions.
+/// Optional DRM facts may be populated later.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct GpuInfo {
+    /// Native KFD GPU identity used to resolve imported allocation placement.
+    pub native_gpu_id: u32,
     /// Exact GFX major version.
     pub gfx_major: u32,
     /// Exact GFX minor version.
@@ -254,8 +219,12 @@ pub struct GpuInfo {
     pub unique_id: Option<u64>,
     /// AMD GPU hive identifier, or zero when the endpoint has no hive.
     pub hive_id: u64,
-    /// ASIC family identifier reported by the backend.
+    /// ASIC family identifier reported by KFD topology.
     pub asic_family_id: u32,
+    /// ASIC family reported by the matching DRM device, when available.
+    pub drm_asic_family_id: Option<u32>,
+    /// GPU timestamp frequency in hertz reported by DRM, when available.
+    pub counter_frequency_hz: Option<u64>,
     /// Target ASIC revision, not PCI configuration revision.
     pub asic_revision: u32,
     /// Maximum compute-engine clock in megahertz.
@@ -322,40 +291,6 @@ impl GpuInfo {
     }
 }
 
-/// Additional endpoint information queried through its owning driver.
-///
-/// The passive [`Endpoint`] keeps identity and discovered capabilities. This
-/// record may include optional information from other native sources without
-/// activating a device.
-#[derive(Clone, Debug, Eq, PartialEq)]
-#[non_exhaustive]
-pub struct EndpointDetails {
-    /// Optional product name for display to applications.
-    pub product_name: Option<String>,
-    /// Kind-specific information beyond the passive endpoint record.
-    pub kind: EndpointDetailsKind,
-}
-
-/// Kind-specific information obtained without activating an endpoint.
-///
-/// The endpoint itself records its engine kind. `Other` means its driver has
-/// no additional kind-specific information to report.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[non_exhaustive]
-pub enum EndpointDetailsKind {
-    /// Additional GPU information supplied by a qualified driver source.
-    #[non_exhaustive]
-    Gpu {
-        /// ASIC family from an additional source, if reported. The passive
-        /// GPU record supplies the fallback.
-        asic_family_id: Option<u32>,
-        /// GPU timestamp frequency in hertz, if reported.
-        counter_frequency_hz: Option<u64>,
-    },
-    /// No additional kind-specific information is available.
-    Other,
-}
-
 /// Kind-specific capabilities attached to one passive endpoint.
 ///
 /// The enum is intentionally open-ended. A backend publishes only a variant
@@ -378,7 +313,8 @@ pub enum EndpointKind {
 }
 
 /// Passive description tied to one native endpoint identity. Its kind and
-/// memory fields describe expected implemented services. Activation separately
+/// memory fields describe expected implemented services. Optional information
+/// may be populated later from other native sources. Activation separately
 /// qualifies the installed native interface and obtains usable address-space
 /// resources. Cloning this record neither activates a device nor grants access
 /// to backing.
@@ -388,6 +324,8 @@ pub struct Endpoint {
     pub id: [u8; 16],
     /// UTF-8 diagnostic name with NUL termination.
     pub name: [u8; 128],
+    /// Optional product name for display, populated from an additional source.
+    pub product_name: Option<String>,
     /// Optional PCI attachment and configuration identity. Endpoints connected
     /// through another bus or fabric report `None`.
     pub pci: Option<PciInfo>,
@@ -419,10 +357,18 @@ pub struct Endpoint {
 }
 
 impl Endpoint {
-    /// Returns this endpoint's kind-specific capability record.
-    #[must_use]
-    pub const fn kind(&self) -> &EndpointKind {
-        &self.kind
+    /// Compares all discovered facts while excluding optional information
+    /// populated later from other native sources.
+    pub(crate) fn matches_discovery(&self, other: &Self) -> bool {
+        let mut expected = self.clone();
+        expected.product_name.clone_from(&other.product_name);
+        if let (EndpointKind::Gpu { info: expected }, EndpointKind::Gpu { info: actual }) =
+            (&mut expected.kind, &other.kind)
+        {
+            expected.drm_asic_family_id = actual.drm_asic_family_id;
+            expected.counter_frequency_hz = actual.counter_frequency_hz;
+        }
+        expected == *other
     }
 
     /// Returns GPU-specific information when this is a GPU endpoint.
@@ -493,20 +439,5 @@ impl Endpoint {
                 || self
                     .memory_link_to(owner)
                     .is_some_and(|link| link.hop_count() != 0))
-    }
-}
-
-impl EndpointDetails {
-    /// Returns a kind-matched result with no additional driver information.
-    pub(crate) fn empty_for(endpoint: &Endpoint) -> Self {
-        Self {
-            product_name: None,
-            kind: endpoint
-                .gpu()
-                .map_or(EndpointDetailsKind::Other, |_| EndpointDetailsKind::Gpu {
-                    asic_family_id: None,
-                    counter_frequency_hz: None,
-                }),
-        }
     }
 }

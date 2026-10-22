@@ -1498,15 +1498,11 @@ impl Drop for GpuCopySequence<'_, '_> {
 }
 
 impl<'device> GpuDevice<'device> {
-    fn copy_resource_pool(&self) -> &'device CopyResourcePool {
-        &self.resources.copy_pool
-    }
-
     fn copy_resources(
         &self,
         format: KernelQueueFormat,
     ) -> Result<CopyResourceLease<'device>, CopyFailure> {
-        self.copy_resource_pool().take(self, format)
+        self.resources.copy_pool.take(self, format)
     }
 
     /// Prepares default and advertised-engine SDMA queues and command allocations
@@ -1523,7 +1519,7 @@ impl<'device> GpuDevice<'device> {
                 detail: "linear SDMA copy is not qualified for this GPU",
             }));
         }
-        let pool = self.copy_resource_pool();
+        let pool = &self.resources.copy_pool;
         pool.preload(self, KernelQueueFormat::Sdma)?;
         let mut engines = self
             .available_sdma_engines()

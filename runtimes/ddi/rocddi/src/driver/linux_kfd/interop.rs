@@ -26,7 +26,7 @@ impl LinuxKfdDriver {
     }
 
     pub(crate) fn supports_system_dma_buf_import(device: &DeviceState) -> bool {
-        device.supports_system_dma_buf_import()
+        device.vm.system_dma_buf_import
     }
 
     /// Imports a borrowed DMA-BUF as a virtual-memory owner.
@@ -38,7 +38,8 @@ impl LinuxKfdDriver {
         descriptor: BorrowedFd<'_>,
     ) -> Result<Owned<KfdVirtualMemory>, Error> {
         self.ensure_open()?;
-        KfdVirtualMemory::import(descriptor.as_raw_fd())
+        let kfd = self.kfd()?;
+        KfdVirtualMemory::import_with_kfd(descriptor.as_raw_fd(), &kfd)
     }
 
     pub(crate) fn export_virtual_memory(memory: &KfdVirtualMemory) -> Result<DmaBuf, Error> {
@@ -153,10 +154,10 @@ impl LinuxKfdDriver {
         size: u64,
     ) -> Result<Owned<LinuxAllocation>, Error> {
         self.ensure_open()?;
-        let words = handle.words();
+        let words = handle.words;
         let owner = devices
             .iter()
-            .find(|device| device.vm.gpu_id() == words[7])
+            .find(|device| device.vm.gpu_id == words[7])
             .ok_or_else(|| {
                 error(
                     ErrorKind::InvalidArgument,
