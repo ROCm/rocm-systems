@@ -49,7 +49,7 @@ void VfioQuiesceWake::notify() const noexcept {
   if (fd_ < 0)
     return;
   const uint64_t one = 1;
-  (void)::write(fd_, &one, sizeof(one));
+  [[maybe_unused]] ssize_t n = ::write(fd_, &one, sizeof(one));
 }
 
 VfioTargetGrants::VfioTargetGrants(std::size_t host_count)

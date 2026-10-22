@@ -32,7 +32,7 @@
         "num_cu_per_sh": 8,
         "simd_per_cu": 4,
         "wave_front_size": 32,
-        "local_mem_size": 463856467968,
+        "local_mem_size": 8589934592,
         "lds_size_kb": 320,
         "mem_width": 24576,
         "mem_clk_max": 1600,
@@ -45,7 +45,7 @@
         "max_engine_clk_fcompute": 2700
       },
       "pci": {
-        "vram_aperture_bytes": 268435456
+        "vram_aperture_bytes": 8589934592
       }
     }
   },

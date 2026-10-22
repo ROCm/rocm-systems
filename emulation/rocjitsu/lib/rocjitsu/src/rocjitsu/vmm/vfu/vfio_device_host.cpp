@@ -865,6 +865,12 @@ bool VfioDeviceHost::build() {
     util::Logger::warn(std::format("vfu: cannot set up DMA: {}", std::strerror(errno)));
     return false;
   }
+
+  vfu_setup_host_doorbell_cb(ctx_, [](vfu_ctx_t *ctx, uint64_t gpa, uint64_t datamatch,
+                                      uint32_t size, int fd) {
+    host_of(ctx).register_host_doorbell(gpa, datamatch, size, fd);
+  });
+
   if (target_grants_ != nullptr)
     vfu_setup_device_quiesce_cb(ctx_, &quiesce_trampoline);
 
@@ -944,7 +950,7 @@ VfioDeviceHost::ServeResult VfioDeviceHost::run(std::stop_token stop_token) {
     }
     if ((waits[1].revents & POLLIN) != 0) {
       uint64_t completed = 0;
-      (void)::read(quiesce_wake_->fd(), &completed, sizeof(completed));
+      [[maybe_unused]] ssize_t n = ::read(quiesce_wake_->fd(), &completed, sizeof(completed));
     }
     if (ready <= 0 && !quiesce_pending_) {
       continue;
@@ -1043,6 +1049,13 @@ VfioDeviceHost::ServeResult VfioDeviceHost::run(std::stop_token stop_token) {
       }
       if (disconnected) {
         guest_regions_.clear();
+        for (auto &db : host_doorbells_) {
+          if (db.fd >= 0) {
+            ::close(db.fd);
+            db.fd = -1;
+          }
+        }
+        host_doorbells_.clear();
         declined_regions = declined_regions_;
         declined_bytes = declined_bytes_;
         stop_after_disconnect = single_client_;
@@ -1153,15 +1166,31 @@ simdojo::DmaAccessOutcome VfioDeviceHost::write_outcome(uint64_t guest_phys,
   const simdojo::DmaAccessOutcome outcome =
       copy_guest_memory(guest_phys, const_cast<std::byte *>(src.data()), src.size(),
                         /*to_guest=*/true);
-  if (outcome != simdojo::DmaAccessOutcome::Complete)
-    return outcome;
-  // DmaEngine::write() promises the bytes are guest-visible on return, and that
-  // writes become visible in the order they return. The copy above lands in
-  // memory the guest has mapped, so completeness is already met; this is what
-  // makes the ORDER hold, and it belongs here because this is the code that owns
-  // the transfer -- a caller cannot order stores on its behalf.
-  std::atomic_thread_fence(std::memory_order_release);
-  return simdojo::DmaAccessOutcome::Complete;
+  if (outcome == simdojo::DmaAccessOutcome::Complete) {
+    // DmaEngine::write() promises the bytes are guest-visible on return, and that
+    // writes become visible in the order they return. The copy above lands in
+    // memory the guest has mapped, so completeness is already met; this is what
+    // makes the ORDER hold, and it belongs here because this is the code that owns
+    // the transfer -- a caller cannot order stores on its behalf.
+    std::atomic_thread_fence(std::memory_order_release);
+    return simdojo::DmaAccessOutcome::Complete;
+  }
+  // GPA not in DMA address space — MMIO region (e.g. NVMe BAR0 doorbell,
+  // another vfio-user device BAR).  Try device_write() which selects the
+  // fastest available path: eventfd doorbell → zero-copy memfd → socket
+  // DMA_WRITE → vfu_mmio_write.  This lets a GPU SDMA engine ring an
+  // emulated NVMe SQ doorbell or write to a peer vfio-user BAR directly
+  // without requiring the MMIO GPA to be registered in DMA space.
+  if (outcome == simdojo::DmaAccessOutcome::Faulted) {
+    const std::lock_guard lock(vfu_mutex_);
+    const std::lock_guard state_lock(state_mutex_);
+    if (ctx_ != nullptr && attached_ && !quiescing_ &&
+        device_write(guest_phys, src.data(), src.size()) == 0) {
+      std::atomic_thread_fence(std::memory_order_release);
+      return simdojo::DmaAccessOutcome::Complete;
+    }
+  }
+  return outcome;
 }
 
 simdojo::DmaAccessOutcome VfioDeviceHost::atomic_destination(uint64_t guest_phys, uint32_t width,
@@ -1390,6 +1419,77 @@ simdojo::DmaAccessOutcome VfioDeviceHost::copy_guest_memory(uint64_t guest_phys,
     gap.mapping->copy(bytes + (gap.iova - guest_phys), to_guest);
   }
   return simdojo::DmaAccessOutcome::Complete;
+}
+
+void VfioDeviceHost::register_host_doorbell(uint64_t gpa, uint64_t datamatch, uint32_t size,
+                                             int fd) {
+  std::lock_guard lock(vfu_mutex_);
+  for (auto &db : host_doorbells_) {
+    if (db.gpa == gpa && db.datamatch == datamatch && db.size == size) {
+      if (db.fd >= 0)
+        ::close(db.fd);
+      db.fd = fd;
+      util::Logger::debug_print([&](std::ostringstream &b) {
+        b << std::format("vfu: HOST_DOORBELL_FD updated: gpa={:#x} datamatch={:#x} size={} fd={}",
+                         gpa, datamatch, size, fd);
+      });
+      return;
+    }
+  }
+  host_doorbells_.push_back({gpa, datamatch, size, fd});
+  util::Logger::debug_print([&](std::ostringstream &b) {
+    b << std::format("vfu: HOST_DOORBELL_FD registered: gpa={:#x} datamatch={:#x} size={} fd={}",
+                     gpa, datamatch, size, fd);
+  });
+}
+
+int VfioDeviceHost::device_write(uint64_t gpa, const void *data, size_t len) {
+  // Caller must hold vfu_mutex_.
+
+  // Path 1: eventfd doorbell — kernel-only, no socket round-trip.
+  for (const auto &db : host_doorbells_) {
+    if (db.gpa == gpa && db.size == static_cast<uint32_t>(len)) {
+      const uint64_t val = 1;
+      if (::write(db.fd, &val, sizeof(val)) == sizeof(val)) {
+        util::Logger::debug_print([&](std::ostringstream &b) {
+          b << std::format("vfu: device_write({:#x}): doorbell eventfd fd={}", gpa, db.fd);
+        });
+        return 0;
+      }
+      return -errno;
+    }
+  }
+
+  // Path 2: memfd-backed DMA region — zero-copy memcpy via vfu_sgl_get.
+  // Path 3 fallback: DMA-registered but non-memfd — vfu_sgl_write socket msg.
+  std::vector<std::byte> sgl_storage(dma_sg_size());
+  auto *sgl = reinterpret_cast<dma_sg_t *>(sgl_storage.data());
+  if (vfu_addr_to_sgl(ctx_, reinterpret_cast<vfu_dma_addr_t>(gpa), len, sgl, 1, PROT_WRITE) == 1) {
+    iovec iov{};
+    if (vfu_sgl_get(ctx_, sgl, &iov, 1, 0) == 0) {
+      std::memcpy(iov.iov_base, data, len);
+      std::atomic_thread_fence(std::memory_order_release);
+      vfu_sgl_put(ctx_, sgl, &iov, 1);
+      util::Logger::debug_print([&](std::ostringstream &b) {
+        b << std::format("vfu: device_write({:#x}): vfu_sgl_get (zero-copy)", gpa);
+      });
+      return 0;
+    }
+    // Non-memfd: fall through to vfu_sgl_write.
+    if (vfu_sgl_write(ctx_, sgl, 1, const_cast<void *>(data), VFU_SGL_DIRECT_ACCESS) == 0) {
+      util::Logger::debug_print([&](std::ostringstream &b) {
+        b << std::format("vfu: device_write({:#x}): vfu_sgl_write", gpa);
+      });
+      return 0;
+    }
+    return -errno;
+  }
+
+  // Path 4: MMIO or unregistered GPA — vfu_mmio_write socket msg.
+  util::Logger::debug_print([&](std::ostringstream &b) {
+    b << std::format("vfu: device_write({:#x}): vfu_mmio_write (MMIO)", gpa);
+  });
+  return vfu_mmio_write(ctx_, gpa, data, len);
 }
 
 } // namespace rocjitsu

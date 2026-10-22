@@ -61,9 +61,10 @@ set(DISABLE_WERROR ON CACHE BOOL "" FORCE)
 
 FetchContent_Declare(
     libvfio-user
-    GIT_REPOSITORY https://github.com/nutanix/libvfio-user.git
-    # Pin the tested v0.8 source revision.
-    GIT_TAG 37491ed9af828fc161238dacd82e83ea35a09f87
+    GIT_REPOSITORY https://github.com/sbates130272/libvfio-user.git
+    # Rebased on upstream master (8039244); adds vfu_setup_host_doorbell_cb()
+    # and vfu_mmio_write(), plus four months of upstream fixes over v0.8.
+    GIT_TAG 3719c3a852820502a7adc9c0c363fd64d48addf0
 )
 
 # json-c reads two variables that belong to the enclosing project:
@@ -77,52 +78,8 @@ set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 # libvfio-user ships no CMakeLists.txt, so MakeAvailable only fetches it; the
 # targets below are ours.
 FetchContent_MakeAvailable(json-c libvfio-user)
-
-# Preserve the upper address of a sub-4GiB 64-bit BAR. The pinned library
-# otherwise masks it to zero, preventing standard DMA maps from resolving the
-# peer's programmed PCI address. Accept a previously applied copy for reused
-# FetchContent source trees.
-set(_rj_vfio_patch
-    "${CMAKE_CURRENT_LIST_DIR}/../patches/libvfio-user/0001-preserve-small-64-bit-bar-upper-address.patch"
-)
-execute_process(
-    COMMAND git apply --check "${_rj_vfio_patch}"
-    WORKING_DIRECTORY "${libvfio-user_SOURCE_DIR}"
-    RESULT_VARIABLE _rj_vfio_patch_forward
-    OUTPUT_QUIET
-    ERROR_QUIET
-)
-if(_rj_vfio_patch_forward EQUAL 0)
-    execute_process(
-        COMMAND git apply "${_rj_vfio_patch}"
-        WORKING_DIRECTORY "${libvfio-user_SOURCE_DIR}"
-        RESULT_VARIABLE _rj_vfio_patch_applied
-    )
-    if(NOT _rj_vfio_patch_applied EQUAL 0)
-        message(
-            FATAL_ERROR
-            "failed to apply the pinned libvfio-user 64-bit BAR fix"
-        )
-    endif()
-else()
-    execute_process(
-        COMMAND git apply --reverse --check "${_rj_vfio_patch}"
-        WORKING_DIRECTORY "${libvfio-user_SOURCE_DIR}"
-        RESULT_VARIABLE _rj_vfio_patch_reverse
-        OUTPUT_QUIET
-        ERROR_QUIET
-    )
-    if(NOT _rj_vfio_patch_reverse EQUAL 0)
-        message(
-            FATAL_ERROR
-            "libvfio-user source does not match the pinned 64-bit BAR fix"
-        )
-    endif()
-endif()
-unset(_rj_vfio_patch)
-unset(_rj_vfio_patch_forward)
-unset(_rj_vfio_patch_applied)
-unset(_rj_vfio_patch_reverse)
+# The 64-bit BAR upper-address fix is included in the pinned fork branch;
+# no local patch is needed.
 set(BUILD_SHARED_LIBS ${_rj_saved_build_shared_libs} CACHE BOOL "" FORCE)
 set(BUILD_TESTING ${_rj_saved_build_testing} CACHE BOOL "" FORCE)
 unset(_rj_saved_build_shared_libs)

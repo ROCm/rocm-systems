@@ -327,6 +327,30 @@ private:
   /// Read and publish only from the serving thread while holding vfu_mutex_.
   void refresh_peer_bar_window();
   std::optional<simdojo::PciBarAddressDecoder::Window> last_published_peer_bar_;
+
+  // QEMU-owned MMIO doorbell eventfds received via VFIO_USER_HOST_DOORBELL_FD.
+  // Writing 1 to db.fd triggers QEMU to write datamatch to db.gpa — one kernel
+  // syscall, no socket round-trip.  Protected by vfu_mutex_.
+  struct HostDoorbell {
+    uint64_t gpa;
+    uint64_t datamatch;
+    uint32_t size; // access width in bytes: 1, 2, 4, or 8
+    int fd;        // eventfd owned by this host; closed on disconnect
+  };
+  std::vector<HostDoorbell> host_doorbells_;
+
+public:
+  // Called by the vfu_host_doorbell_cb_t registered during build().
+  // Takes ownership of fd; replaces an existing entry with the same key.
+  void register_host_doorbell(uint64_t gpa, uint64_t datamatch, uint32_t size, int fd);
+
+  // Unified write-path hierarchy (fastest applicable path wins):
+  //   1. eventfd doorbell (kernel-only, no socket)
+  //   2. memfd-backed DMA region (zero-copy memcpy)
+  //   3. DMA-registered but non-memfd region (vfu_sgl_write socket msg)
+  //   4. MMIO or unregistered GPA (vfu_mmio_write socket msg)
+  // Must be called with vfu_mutex_ held.
+  [[nodiscard]] int device_write(uint64_t gpa, const void *data, size_t len);
 };
 
 } // namespace rocjitsu
