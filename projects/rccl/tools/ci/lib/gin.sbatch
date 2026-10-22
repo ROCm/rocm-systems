@@ -14,14 +14,17 @@
 # On one 8-GPU node:
 #   1. consume ROCm (provisioned on the head node) via .ci-out/rocm.env
 #   2. lib/build-ompi.sh      build OpenMPI (--with-rocm) -> ompi.env
-#   3. lib/build-rocshmem.sh  build rocSHMEM (IPC+SDMA)   -> rocshmem.env
-#   4. projects/rccl  install.sh  build RCCL (GIN/rocSHMEM), then build
+#   3. projects/rccl  install.sh  build RCCL (GIN), then build
 #      rccl-UnitTestsFixtures, the ConnCheck host/device tests, and
 #      rccl-UnitTestsGinSdmaBroadcastPolicy
 #      (GIN_ANVIL_UNIT_TESTS=ON) -> rccl.env
-#   5. projects/rccl-tests        build rccl-tests (DEVICE_API + ROCSHMEM)
-#   6. rccl-UnitTestsGinAnvilSdmaFactory  SDMA factory gtest (single-node)
-#   7. run-gin-ci.sh              run the GIN/rocSHMEM tests (non-gating)
+#   4. projects/rccl-tests        build rccl-tests (DEVICE_API + GIN)
+#   5. rccl-UnitTestsGinAnvilSdmaFactory  SDMA factory gtest (single-node)
+#   6. run-gin-ci.sh              run the GIN tests (non-gating)
+#
+# No rocSHMEM build: a GIN librccl.so is self-contained (compiles the GIN host
+# code it needs from the rocshmem *source* tree, links no rocshmem library), so
+# the CI needs the rocshmem source checkout only, not an install.
 #
 # Required env (from the workflow via `sbatch --export=ALL,...`):
 #   RCCL_DEVICE_API_WORKDIR   GHA workspace (rocm-systems root)
@@ -62,7 +65,7 @@ build_rc=0
 (
 # 1) ROCm: provisioned on the head node from TheRock CI artifacts; consume the
 # workspace tree via rocm.env.
-echo "==> [1/7] use ROCm (provisioned from TheRock artifacts on head node)"
+echo "==> [1/6] use ROCm (provisioned from TheRock artifacts on head node)"
 rocm_env="${workdir}/.ci-out/rocm.env"
 if [[ ! -f "${rocm_env}" ]]; then
   echo "ERROR: ${rocm_env} not found. The workflow must run 'Provision ROCm" >&2
@@ -87,7 +90,7 @@ export CMAKE_PREFIX_PATH="${ROCM_PATH}/lib/cmake:${ROCM_PATH}${CMAKE_PREFIX_PATH
 
 # 2) OpenMPI: built here against ROCM_PATH into the per-job workspace cache
 # (no shared cache), then ompi.env (MPI_HOME) is sourced below.
-echo "==> [2/7] build OpenMPI"
+echo "==> [2/6] build OpenMPI"
 "${ci_dir}/lib/build-ompi.sh"
 set -a
 # shellcheck source=/dev/null
@@ -99,22 +102,14 @@ export PATH="${MPI_HOME}/bin:${PATH}"
 # shellcheck source=/dev/null
 source "${ci_dir}/lib/ensure-python-yaml.sh"
 
-# 3) rocSHMEM (in-tree, IPC+SDMA) -> rocshmem.env (ROCSHMEM_INSTALL_DIR)
-echo "==> [3/7] build rocSHMEM"
-GPU_TARGETS="${gpu_targets}" "${ci_dir}/lib/build-rocshmem.sh"
-set -a
-# shellcheck source=/dev/null
-source "${workdir}/.ci-out/rocshmem.env"
-set +a
-
-# 4) RCCL with GIN / rocSHMEM. Mirrors the Dockerfile: patch the rocSHMEM
-# threshold guard, then install.sh with ENABLE_ROCSHMEM_GIN. Build
-# rccl-UnitTestsFixtures plus the GIN gtest binaries in a second step
-# (reconfigure BUILD_TESTS=ON, GIN_ANVIL_UNIT_TESTS=ON). Do not pass
-# install.sh -t: that builds every test executable and can compile plugin
-# tests before hipify headers exist under parallel -j and abort before
-# librccl.so is installed.
-echo "==> [4/7] build RCCL (GIN, targets=${gpu_targets})"
+# 3) RCCL with GIN. install.sh --rocshmem-gin compiles the GIN host code it needs
+# straight from the in-tree projects/rocshmem *source* (auto-detected) and builds
+# no rocshmem library — librccl.so is self-contained. Build rccl-UnitTestsFixtures
+# plus the GIN gtest binaries in a second step (reconfigure BUILD_TESTS=ON,
+# GIN_ANVIL_UNIT_TESTS=ON). Do not pass install.sh -t: that builds every test
+# executable and can compile plugin tests before hipify headers exist under
+# parallel -j and abort before librccl.so is installed.
+echo "==> [3/6] build RCCL (GIN, targets=${gpu_targets})"
 rccl_src="${workdir}/projects/rccl"
 rccl_prefix="${workdir}/.ci-out/rccl-install"
 rccl_build="${rccl_src}/build/release"
@@ -129,8 +124,7 @@ rm -rf "${rccl_prefix}"
   MPI_PATH="${MPI_HOME}" ./install.sh -j "${build_jobs}" \
     --amdgpu_targets="${gpu_targets}" \
     --prefix="${rccl_prefix}" \
-    --rocshmem-gin --no_clean \
-    --cmake-options "-DROCSHMEM_INSTALL_DIR=${ROCSHMEM_INSTALL_DIR}"
+    --rocshmem-gin --no_clean
 )
 if [[ ! -f "${rccl_prefix}/lib/librccl.so" && ! -f "${rccl_prefix}/lib/librccl.so.1" ]]; then
   echo "ERROR: no librccl.so under ${rccl_prefix}/lib" >&2
@@ -201,7 +195,7 @@ assert_conn_check_kernels_in_fatbin() {
 assert_conn_check_kernels_in_fatbin "${librccl}"
 echo "    conn-check kernels present in ${librccl} .hip_fatbin"
 
-echo "==> [4/7] build fixtures, ConnCheck, GinSdmaBroadcastPolicy, GinAnvilSdmaFactory, and UnitTestsMPI (GIN_ANVIL_UNIT_TESTS=ON)"
+echo "==> [3/6] build fixtures, ConnCheck, GinSdmaBroadcastPolicy, GinAnvilSdmaFactory, and UnitTestsMPI (GIN_ANVIL_UNIT_TESTS=ON)"
 (
   cd "${rccl_build}"
   # ENABLE_MPI_TESTS is what creates the rccl-UnitTestsMPI target (test/
@@ -216,8 +210,7 @@ echo "==> [4/7] build fixtures, ConnCheck, GinSdmaBroadcastPolicy, GinAnvilSdmaF
     -DBUILD_TESTS=ON \
     -DGIN_ANVIL_UNIT_TESTS=ON \
     -DENABLE_MPI_TESTS=ON \
-    -DMPI_PATH="${MPI_HOME}" \
-    -DROCSHMEM_INSTALL_DIR="${ROCSHMEM_INSTALL_DIR}"
+    -DMPI_PATH="${MPI_HOME}"
   make -j"${build_jobs}" \
     rccl-UnitTestsFixtures \
     rccl-UnitTestsGinAnvilPlugin \
@@ -264,21 +257,19 @@ fi
 rccl_cmake_dir="$(dirname "${rccl_cfg}")"
 echo "    in-tree RCCL cmake config: ${rccl_cmake_dir}"
 
-# 5) rccl-tests (DEVICE_API + ROCSHMEM). allreduce fails to build; -k keeps going
+# 4) rccl-tests (DEVICE_API + GIN). allreduce fails to build; -k keeps going
 # so alltoall_perf still lands (matches the Dockerfile's `make -k || true`).
-echo "==> [5/7] build rccl-tests (ENABLE_DEVICE_API + ENABLE_ROCSHMEM_GIN)"
+echo "==> [4/6] build rccl-tests (ENABLE_DEVICE_API + ENABLE_ROCSHMEM_GIN)"
 rccl_tests_src="${workdir}/projects/rccl-tests"
 rccl_tests_build="${workdir}/.ci-out/rccl-tests-build"
 
-# rccl-tests uses find_package(rocshmem) with the roc::rocshmem cmake target,
-# which brings in all transitive dependencies (hip::device, hsakmt, numa, etc.).
-# No manual sed patches or ROCSHMEM_LIBRARY overrides needed.
+# rccl-tests consumes GIN entirely through roc::rccl (self-contained librccl):
+# no rocshmem find_package, no roc::rocshmem link, no ROCSHMEM_INSTALL_DIR.
 rm -rf "${rccl_tests_build}"; mkdir -p "${rccl_tests_build}"
 (
   cd "${rccl_tests_build}"
   cmake -DCMAKE_BUILD_TYPE=Release -DUSE_MPI=ON \
     -DENABLE_DEVICE_API=ON -DENABLE_ROCSHMEM_GIN=ON \
-    -DROCSHMEM_INSTALL_DIR="${ROCSHMEM_INSTALL_DIR}" \
     -DRCCL_DIR="${rccl_cmake_dir}" \
     -DCMAKE_PREFIX_PATH="${rccl_prefix};${MPI_HOME}" \
     -DGPU_TARGETS="${gpu_targets}" \
@@ -296,15 +287,14 @@ if [[ ! -x "${rccl_tests_build}/broadcast_perf" ]]; then
   exit 1
 fi
 
-# Diag: confirm alltoall_perf exports the rocSHMEM host symbol librccl.so resolves
-# at runtime (log_flags); a miss here => runtime 'undefined symbol'.
-sym='rocshmem.*envvar.*log_flags'
-rocshmem_a="${ROCSHMEM_INSTALL_DIR}/lib/librocshmem.a"
+# Diag: a GIN librccl.so must be self-contained — no unresolved rocshmem host
+# symbols (the old -rdynamic/--allow-shlib-undefined model is gone) and no linked
+# rocshmem library. A hit here would mean the de-link regressed.
 librccl="$(ls "${rccl_prefix}"/lib/librccl.so* 2>/dev/null | head -n1)"
-echo "== log_flags symbol diag =="
-nm -C "${rocshmem_a}" 2>/dev/null | grep -E " [TDBRtdbr] .*${sym}" | head || echo "  not defined in librocshmem.a"
-nm -CD "${rccl_tests_build}/alltoall_perf" 2>/dev/null | grep -E "${sym}" || echo "  NOT exported by alltoall_perf"
-nm -CD "${librccl}" 2>/dev/null | grep -E " U .*${sym}" || echo "  not undefined in librccl.so"
+echo "== rocshmem self-containment diag =="
+nm -uC "${librccl}" 2>/dev/null | grep -iE "rocshmem|envvar|IBVWrapper" \
+  && echo "  ERROR: librccl.so has undefined rocshmem symbols (de-link regressed)" >&2 \
+  || echo "  OK: librccl.so leaves no rocshmem host symbol unresolved"
 
 # Hand the install/build locations to the run stage.
 {
@@ -326,9 +316,9 @@ if [[ "${build_rc}" -ne 0 ]]; then
 fi
 
 # Re-source env files written by the build subshell — ROCM_PATH,
-# ROCSHMEM_INSTALL_DIR, RCCL_INSTALL_PREFIX etc. don't survive the subshell.
+# RCCL_INSTALL_PREFIX, RCCL_TESTS_BIN_DIR etc. don't survive the subshell.
 set -a
-for _env in rocm ompi rocshmem rccl; do
+for _env in rocm ompi rccl; do
   _f="${workdir}/.ci-out/${_env}.env"
   # shellcheck source=/dev/null
   [[ -f "${_f}" ]] && source "${_f}"
@@ -337,14 +327,14 @@ set +a
 
 # --- unit test: SDMA factory gtest (single-node, no MPI needed). ---
 # Self-contained: compiles factory + anvil.cpp directly, no librccl.so link.
-echo "==> [6/7] run SDMA factory unit tests"
+echo "==> [5/6] run SDMA factory unit tests"
 sdma_factory_test="${RCCL_FIXTURES_BIN_DIR}/rccl-UnitTestsGinAnvilSdmaFactory"
 if [[ -x "${sdma_factory_test}" ]]; then
   _sysdeps_lib=""
   for _sp in "${ROCM_PATH}/lib/rocm_sysdeps/lib" "${ROCM_PATH}/core/lib/rocm_sysdeps/lib"; do
     [[ -d "${_sp}" ]] && _sysdeps_lib="${_sp}"
   done
-  export LD_LIBRARY_PATH="${RCCL_INSTALL_PREFIX}/lib:${ROCSHMEM_INSTALL_DIR}/lib:${ROCM_PATH}/lib${_sysdeps_lib:+:${_sysdeps_lib}}:${LD_LIBRARY_PATH:-}"
+  export LD_LIBRARY_PATH="${RCCL_INSTALL_PREFIX}/lib:${ROCM_PATH}/lib${_sysdeps_lib:+:${_sysdeps_lib}}:${LD_LIBRARY_PATH:-}"
   "${sdma_factory_test}" --gtest_output="xml:${logs_dir}/sdma-factory-test.xml" \
     || echo "WARNING: SDMA factory unit tests failed (non-gating)" >&2
 else
@@ -356,7 +346,7 @@ fi
 # instead, which the workflow turns into a red (non-gating for gin) result. ---
 test_rc=0
 {
-echo "==> [7/7] run GIN tests"
+echo "==> [6/6] run GIN tests"
 "${ci_dir}/run-gin-ci.sh"
 } > "${test_out}" 2> "${test_err}" || test_rc=$?
 echo "==> test phase logs: ${test_out} / ${test_err}"

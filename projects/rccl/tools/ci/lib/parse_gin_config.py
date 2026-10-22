@@ -10,8 +10,8 @@ Column layout:
   mca<SEP><flags>
   debug_env<SEP><-x flags>   (appended to every test only when RCCL_CI_DEBUG=1)
   test<SEP><name><SEP><kind><SEP><bin><SEP><-x env flags><SEP><args><SEP><np>
-    kind: rocshmem | rccl-tests | fixtures | mpi-fixtures | pytest
-      rocshmem/rccl-tests: mpirun benchmark; bin is the executable name
+    kind: rccl-tests | fixtures | mpi-fixtures | pytest
+      rccl-tests: mpirun benchmark; bin is the executable name
       fixtures: single-process gtest; bin is the executable name
       mpi-fixtures: mpirun gtest from the RCCL build tree (e.g.
         rccl-UnitTestsMPI); bin is the executable name
