@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
+#include <sys/mman.h>
 #include <sys/resource.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -21,6 +22,29 @@ void on_file_size_signal(int) { file_size_signal = 1; }
 __global__ void write_cookie(unsigned char *data) { data[0] = 0x37; }
 
 #define CHECK_HIP(call) ASSERT_EQ((call), hipSuccess)
+
+void check_daemon_host_mapping(size_t bytes) {
+  const long page_size = sysconf(_SC_PAGESIZE);
+  ASSERT_GT(page_size, 0);
+  const size_t page = static_cast<size_t>(page_size);
+  ASSERT_LE(2 * page, bytes);
+  unsigned char *host = nullptr;
+  CHECK_HIP(hipHostMalloc(&host, bytes));
+  std::memset(host, 0x5A, 2 * page);
+  const std::vector<unsigned char> expected(page, 0x5A);
+  // Both requests must retain the daemon's shared backing, including when a
+  // private anonymous request replaces only one page of a fallback allocation.
+  const int types[] = {MAP_PRIVATE, MAP_SHARED};
+  for (size_t index = 0; index < 2; ++index) {
+    auto *addr = host + index * page;
+    ASSERT_EQ(
+        mmap(addr, page, PROT_READ | PROT_WRITE, MAP_FIXED | MAP_ANONYMOUS | types[index], -1, 0),
+        addr)
+        << std::strerror(errno);
+    EXPECT_EQ(std::memcmp(addr, expected.data(), page), 0);
+  }
+  CHECK_HIP(hipHostFree(host));
+}
 
 void check_vmm(size_t bytes, bool allow_rejection) {
   hipMemAllocationProp property{};
@@ -117,6 +141,9 @@ void check_application_limit() {
     EXPECT_EQ(result, source);
   }
   CHECK_HIP(hipFree(device));
+  const char *mode = std::getenv("RJ_TEST_MODE");
+  if (mode && std::strcmp(mode, "daemon") == 0)
+    check_daemon_host_mapping(bytes);
   const char *vmm = std::getenv("RJ_TEST_VMM");
   check_vmm(bytes, vmm && std::strcmp(vmm, "allow-rejection") == 0);
   CHECK_HIP(hipDeviceReset());

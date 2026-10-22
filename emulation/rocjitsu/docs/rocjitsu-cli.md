@@ -22,8 +22,14 @@ and NCCL --- workloads where multiple processes share a single simulated GPU.
 Daemon mode currently rejects dma-buf export with `EOPNOTSUPP`; its RPC protocol
 does not transfer exported descriptors. HIP VMM allocation (`hipMemCreate`)
 depends on that export even with `hipMemHandleTypeNone`, so ROCr may report it
-as out of memory. Use local mode for VMM allocation and shareable-handle APIs.
+as out of memory. Use local mode for VMM allocation and its shareable-handle APIs.
 Ordinary daemon `hipMalloc`, copies, and kernel dispatch remain supported.
+
+For HIP IPC between daemon clients (`hipIpcGetMemHandle` and
+`hipIpcOpenMemHandle`), set `HSA_ENABLE_IPC_MODE_LEGACY=1` before launching the
+clients to select the supported legacy KFD IPC path. The current runtime's
+default dma-buf IPC path fails at handle creation in both local and daemon
+mode; switching to local mode does not resolve that limitation.
 
 ### The fork boundary
 

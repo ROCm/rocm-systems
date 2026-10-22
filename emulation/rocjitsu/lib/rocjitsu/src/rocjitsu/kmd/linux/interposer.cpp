@@ -5662,8 +5662,9 @@ static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, o
           return MAP_FAILED;
         }
         auto *raw = with_host_mapping_held([&] {
-          return rocjitsu::memory_backing::map(
-              addr, length, prot, (flags & ~MAP_ANONYMOUS) | MAP_SHARED, memfd_out, memfd_offset);
+          return rocjitsu::memory_backing::map(addr, length, prot,
+                                               (flags & ~(MAP_ANONYMOUS | MAP_TYPE)) | MAP_SHARED,
+                                               memfd_out, memfd_offset);
         });
         // Preserve the mmap errno across close() (which may set its own).
         int mmap_errno = errno;

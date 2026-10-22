@@ -3875,14 +3875,14 @@ if(RJ_ENABLE_HIP_TESTS)
                         COMMAND ${_launcher_prefix} ${RJ_CLI} ${_daemon_arg}
                             --config ${RJ_HIP_TEST_CONFIG}
                             -- ${CMAKE_CURRENT_BINARY_DIR}/hip_rlimit_fsize_test
-                        ENVIRONMENT "RJ_TEST_LIMIT=${_limit}" "RJ_TEST_PHASE=${_phase}" "RJ_TEST_VMM=${_test_vmm}"
+                        ENVIRONMENT "RJ_TEST_LIMIT=${_limit}" "RJ_TEST_PHASE=${_phase}" "RJ_TEST_VMM=${_test_vmm}" "RJ_TEST_MODE=${_mode}"
                             "ROCJITSU_RUNTIME_DIR=runtime/fsize-${_mode}-${_phase}-${_limit}"
                         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
                         TIMEOUT 120
                         INSTALL_COMMAND ${_launcher_prefix} "\${RJ_INSTALLED_BINDIR}/rocjitsu" ${_daemon_arg}
                             --config "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_HIP_TEST_CONFIG_NAME}"
                             -- bin/hip_rlimit_fsize_test
-                        INSTALL_ENVIRONMENT "RJ_TEST_LIMIT=${_limit}" "RJ_TEST_PHASE=${_phase}" "RJ_TEST_VMM=${_test_vmm}"
+                        INSTALL_ENVIRONMENT "RJ_TEST_LIMIT=${_limit}" "RJ_TEST_PHASE=${_phase}" "RJ_TEST_VMM=${_test_vmm}" "RJ_TEST_MODE=${_mode}"
                     )
                 endforeach()
             endforeach()
