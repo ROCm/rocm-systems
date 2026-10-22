@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "core/trace_cache/archive.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/sample.hpp"
 
 #include <gtest/gtest.h>

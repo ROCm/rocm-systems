@@ -21,38 +21,6 @@ namespace type_traits
 {
 
 template <typename T>
-struct always_false : std::false_type
-{};
-
-}  // namespace type_traits
-
-template <typename T>
-void
-serialize(std::uint8_t*, const T&)
-{
-    static_assert(type_traits::always_false<T>::value, "serialize<T> not specialized");
-}
-
-template <typename T>
-T
-deserialize(std::uint8_t*&)
-{
-    static_assert(type_traits::always_false<T>::value, "deserialize<T> not specialized");
-    return T{};
-}
-
-template <typename T>
-size_t
-get_size(const T&)
-{
-    static_assert(type_traits::always_false<T>::value, "get_size(T) not specialized");
-    return 0;
-}
-
-namespace type_traits
-{
-
-template <typename T>
 struct tuple_to_variant;
 
 template <typename... Types>
@@ -126,27 +94,10 @@ struct is_enum_class
 template <typename T>
 inline constexpr bool is_enum_class_v = is_enum_class<T>::value;
 
-template <typename T>
-concept serializable = requires(std::uint8_t* dst, const T& v) { serialize(dst, v); };
-
-template <typename T>
-concept deserializable = requires(std::uint8_t*& src) {
-    { deserialize<T>(src) } -> std::same_as<T>;
-};
-
-template <typename T>
-concept has_get_size = requires(const T& v) {
-    { get_size(v) } -> std::convertible_to<std::size_t>;
-};
-
 template <typename T, typename TypeIdentifierEnum>
 concept has_type_identifier = is_enum_class_v<TypeIdentifierEnum> && requires {
     { T::type_identifier } -> std::convertible_to<TypeIdentifierEnum>;
 };
-
-template <typename T, typename TypeIdentifierEnum>
-concept cacheable = serializable<T> && deserializable<T> && has_get_size<T> &&
-                    has_type_identifier<T, TypeIdentifierEnum>;
 
 template <typename T, typename TypeIdentifierEnum, typename CacheableType>
 concept sample_processor = requires(T t, TypeIdentifierEnum e, const CacheableType& c) {

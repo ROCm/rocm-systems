@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "core/trace_cache/cache_type_traits.hpp"
 #include "core/trace_cache/cacheable.hpp"
 
 #include <cstddef>
@@ -121,5 +122,35 @@ record_read(std::uint8_t*& buffer)
     buffer = archive.cursor;
     return record;
 }
+
+/** Encoded size of a record. One definition for every record type. */
+template <archive_record T>
+[[nodiscard]] std::size_t
+get_size(const T& record)
+{
+    return record_size(record);
+}
+
+/** Writes a record into a buffer with room for get_size(record) bytes. */
+template <archive_record T>
+void
+serialize(std::uint8_t* buffer, const T& record)
+{
+    record_write(buffer, record);
+}
+
+/** Reads a record and advances the buffer past it. */
+template <archive_record T>
+[[nodiscard]] T
+deserialize(std::uint8_t*& buffer)
+{
+    return record_read<T>(buffer);
+}
+
+namespace type_traits
+{
+template <typename T, typename TypeIdentifierEnum>
+concept cacheable = archive_record<T> && has_type_identifier<T, TypeIdentifierEnum>;
+}  // namespace type_traits
 
 }  // namespace rocprofsys::trace_cache

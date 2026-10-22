@@ -42,64 +42,28 @@ struct sample : trace_cache::cacheable_t
     std::uint32_t   device_id = 0;
     std::uint64_t   timestamp = 0;
     metrics         metric_values{};
+
+    template <typename Archive>
+    void serialize(Archive& archive)
+    {
+        // metrics::query_failed is deliberately not carried: cache_policy::store_sample
+        // drops a failed query before it reaches the buffer, so every stored sample has
+        // it false and the default-constructed value round-trips correctly.
+        archive(enabled_metric.value, device_id, timestamp, metric_values.read_bytes,
+                metric_values.write_bytes, metric_values.read_ops,
+                metric_values.write_ops, metric_values.fastpath_reads,
+                metric_values.fastpath_writes, metric_values.fallback_reads,
+                metric_values.fallback_writes, metric_values.unaligned_reads,
+                metric_values.unaligned_writes, metric_values.read_errors,
+                metric_values.write_errors, metric_values.read_bandwidth,
+                metric_values.write_bandwidth);
+    }
 };
 
 }  // namespace rocprofsys::pmc::collectors::hipfile
 
 namespace rocprofsys::trace_cache
 {
-
-// metrics::query_failed is deliberately not carried: cache_policy::store_sample drops a
-// failed query before it reaches the buffer, so every stored sample has it false and the
-// default-constructed value round-trips correctly.
-// Field order after timestamp is metrics member order, excluding query_failed (dropped
-// before store). serialize, deserialize, and get_size must list the same fields.
-template <>
-inline void
-serialize(std::uint8_t* buffer, const pmc::collectors::hipfile::sample& item)
-{
-    utility::store_value(
-        buffer, static_cast<std::uint32_t>(item.enabled_metric.value), item.device_id,
-        item.timestamp, item.metric_values.read_bytes, item.metric_values.write_bytes,
-        item.metric_values.read_ops, item.metric_values.write_ops,
-        item.metric_values.fastpath_reads, item.metric_values.fastpath_writes,
-        item.metric_values.fallback_reads, item.metric_values.fallback_writes,
-        item.metric_values.unaligned_reads, item.metric_values.unaligned_writes,
-        item.metric_values.read_errors, item.metric_values.write_errors,
-        item.metric_values.read_bandwidth, item.metric_values.write_bandwidth);
-}
-
-template <>
-inline pmc::collectors::hipfile::sample
-deserialize(std::uint8_t*& buffer)
-{
-    pmc::collectors::hipfile::sample item;
-    utility::parse_value(
-        buffer, item.enabled_metric.value, item.device_id, item.timestamp,
-        item.metric_values.read_bytes, item.metric_values.write_bytes,
-        item.metric_values.read_ops, item.metric_values.write_ops,
-        item.metric_values.fastpath_reads, item.metric_values.fastpath_writes,
-        item.metric_values.fallback_reads, item.metric_values.fallback_writes,
-        item.metric_values.unaligned_reads, item.metric_values.unaligned_writes,
-        item.metric_values.read_errors, item.metric_values.write_errors,
-        item.metric_values.read_bandwidth, item.metric_values.write_bandwidth);
-    return item;
-}
-
-template <>
-inline size_t
-get_size(const pmc::collectors::hipfile::sample& item)
-{
-    return utility::get_size(
-        item.enabled_metric.value, item.device_id, item.timestamp,
-        item.metric_values.read_bytes, item.metric_values.write_bytes,
-        item.metric_values.read_ops, item.metric_values.write_ops,
-        item.metric_values.fastpath_reads, item.metric_values.fastpath_writes,
-        item.metric_values.fallback_reads, item.metric_values.fallback_writes,
-        item.metric_values.unaligned_reads, item.metric_values.unaligned_writes,
-        item.metric_values.read_errors, item.metric_values.write_errors,
-        item.metric_values.read_bandwidth, item.metric_values.write_bandwidth);
-}
 
 /// @brief hipFile PMC sample type alias
 using hipfile_pmc_sample = pmc::collectors::hipfile::sample;

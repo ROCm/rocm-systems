@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "backends/amd_smi/gpu_types.hpp"
+#include "core/trace_cache/archive.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/pmc/collectors/cpu/sample.hpp"
 #include "library/pmc/collectors/cpu/types.hpp"
