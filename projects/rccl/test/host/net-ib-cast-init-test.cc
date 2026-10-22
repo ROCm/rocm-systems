@@ -792,7 +792,9 @@ TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_IbHcaRailAndPlane_AreRecordedA
   EXPECT_NE(IbCastDevs[1].planeIdx, IbCastDevs[2].planeIdx);
 }
 
-TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_TooManyPlanes_FailsAfterListing) {
+// The list is freed after enumeration but the pointer is kept, so a plane-index failure frees it
+// again on the fail: path. Pins AICOMRCCL-TBD; a fix flips this pin.
+TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_KnownBug_TooManyPlanesFreesTheDeviceListTwice) {
   std::string hca;
   for (int i = 0; i < NCCL_IB_PLANE_MAX_INDEX; i++) {
     const std::string name = "ionic_" + std::string(1, (char)('a' + i));
@@ -800,7 +802,14 @@ TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_TooManyPlanes_FailsAfterListin
     hca += (i ? "," : "") + name + ":::" + std::to_string(i + 1);
   }
   SetMicroEnv("NCCL_IB_HCA", hca.c_str());
+  std::vector<struct ibv_device**> freed;
+  ScopedHook freeList(g_ibvFreeDeviceList, [&freed](struct ibv_device** list) {
+    freed.push_back(list);
+    return ncclSuccess;
+  });
   EXPECT_EQ(Init(), ncclInvalidUsage);
+  ASSERT_EQ(freed.size(), 2u);
+  EXPECT_EQ(freed[0], freed[1]);
 }
 
 TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_SortsByPciPathUnlessDisabled) {
@@ -1167,8 +1176,13 @@ TEST_F(NetIbCastInitMicrotestIsolated, InitDevices_TelemetryCannotStart_CarriesO
       "NetIbCastInit_TelemetryCannotStart",
       []() {
         FakeIbWorld world;
-        EXPECT_EQ(IbCastInitDevices(nullptr, nullptr), ncclSuccess);
+        world.AddHca("ionic_0");
+        ScopedDebugLogging info(NCCL_LOG_INFO, NCCL_ALL);
+        std::string log = CaptureLog([&] { EXPECT_EQ(IbCastInitDevices(nullptr, nullptr), ncclSuccess); });
         EXPECT_FALSE(rcclTelemetryOn());
+        EXPECT_EQ(IbCastNDevs, 1);
+        EXPECT_TRUE(LogHas(log, "telemetry was requested but could not start")) << log;
+        EXPECT_FALSE(LogHas(log, "telemetry did not register")) << log;
       },
       {{"RCCL_TELEMETRY_ENABLE", "1"}, {"RCCL_TELEMETRY_OUTPUT_DIR", std::string(5000, 'd')}});
 }
@@ -1179,9 +1193,26 @@ TEST_F(NetIbCastInitMicrotestIsolated, InitDevices_TelemetryOn_RegistersEachDevi
       []() {
         FakeIbWorld world;
         world.AddHca("ionic_0");
+        world.AddHca("ionic_1");
+        // ionic_1 sorts first, so a device registered under its listing index lands in the wrong slot.
+        HookOf<decltype(g_initRealpath)> realpath{g_initRealpath, [](const char* path, char*) -> char* {
+                                                    const std::string p(path);
+                                                    if (p == "/sys/class/infiniband/ionic_0/device")
+                                                      return strdup("/sys/devices/pci0000:80/0000:81:00.0");
+                                                    if (p == "/sys/class/infiniband/ionic_1/device")
+                                                      return strdup("/sys/devices/pci0000:00/0000:01:00.0");
+                                                    return nullptr;
+                                                  }};
         EXPECT_EQ(IbCastInitDevices(nullptr, nullptr), ncclSuccess);
         EXPECT_TRUE(rcclTelemetryOn());
-        EXPECT_EQ(rcclTelemetryDevs[0].device_id, 0);
+        ASSERT_EQ(IbCastNDevs, 2);
+        EXPECT_STREQ(IbCastDevs[0].devName, "ionic_1");
+        EXPECT_EQ(rcclTelemetryNumDevs, 2);
+        for (int d = 0; d < 2; d++) {
+          EXPECT_EQ(rcclTelemetryDevs[d].device_id, d);
+          EXPECT_STREQ(rcclTelemetryDevs[d].roce_device, IbCastDevs[d].devName) << d;
+          EXPECT_STREQ(rcclTelemetryDevs[d].transport, "IB-CAST") << d;
+        }
       },
       {{"RCCL_TELEMETRY_ENABLE", "1"}, {"RCCL_TELEMETRY_OUTPUT_DIR", "/tmp"}});
 }

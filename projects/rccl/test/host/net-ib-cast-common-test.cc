@@ -86,6 +86,12 @@ TEST_F(NetIbCastCommonMicrotest, GetNetCommDevBase_FindsThePerDeviceBaseOfSendAn
 TEST_F(NetIbCastCommonMicrotest, SendCommInit_ResetsEveryQpAndTheCommState) {
   ZeroedPtr<ncclIbSendComm> send;
   memset(send->base.qps, 0x5a, sizeof(send->base.qps));
+  memset(send->base.activeQps, 0x5a, sizeof(send->base.activeQps));
+  send->base.nqps = send->base.nDataQps = 7;
+  send->base.optRecvCompletion = true;
+  send->base.ready = 1;
+  ncclIbResiliency res;
+  resiliency_ = &res;
   params_.Set("IB_SPLIT_DATA_ON_QPS", 1);
   ASSERT_EQ(IbCastSendCommInit(send.get()), ncclSuccess);
   EXPECT_TRUE(send->base.isSend);
@@ -94,12 +100,13 @@ TEST_F(NetIbCastCommonMicrotest, SendCommInit_ResetsEveryQpAndTheCommState) {
   EXPECT_EQ(send->base.splitDataOnQps, 1);
   EXPECT_FALSE(send->base.optRecvCompletion);
   EXPECT_EQ(send->base.ready, 0);
-  EXPECT_EQ(send->base.resiliency, nullptr);
+  EXPECT_EQ(send->base.resiliency, &res);
   for (int i = 0; i < NCCL_IB_MAX_QPS; i++) {
     const struct ncclIbQp& qp = send->base.qps[i];
     EXPECT_EQ(qp.devIndex, -1) << i;
     EXPECT_EQ(qp.remDevIdx, -1) << i;
     EXPECT_EQ(qp.eceSupported, 0) << i;
+    EXPECT_EQ(qp.ece.vendor_id | qp.ece.options | qp.ece.comp_mask, 0u) << i;
     EXPECT_EQ(qp.initAttr.portNum, 0) << i;
     EXPECT_EQ(qp.rtrAttr.remoteQpNum, 0u) << i;
     EXPECT_EQ(qp.rtsAttr.timeout, 0) << i;
@@ -118,6 +125,7 @@ TEST_F(NetIbCastCommonMicrotest, BaseCommInit_ResiliencyInitFails_ReturnsTheErro
 
 TEST_F(NetIbCastCommonMicrotest, RecvCommInit_PostsOnDemandByDefault) {
   ZeroedPtr<ncclIbRecvComm> recv;
+  recv->base.isSend = true;
   ASSERT_EQ(IbCastRecvCommInit(recv.get()), ncclSuccess);
   EXPECT_FALSE(recv->base.isSend);
   EXPECT_FALSE(recv->prepostReceiveWorkRequests);
