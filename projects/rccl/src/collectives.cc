@@ -1145,11 +1145,31 @@ static ncclResult_t ncclHierarchicalReduceScatter_Impl(const void* sendbuff, voi
                                  nullptr};
   NCCLCHECK(ncclEnqueueCheck(&infoIntraRS));
 
-  // Step 3: Inter-node ReduceScatter  intraOut -> recvbuff.
+  // Step 3: Inter-node ReduceScatter intraOut -> recvbuff. This is the last GPU work.
+  // The pre-shuffle cannot carry the parent's stop event: the intra and inter
+  // collectives are still queued after it, and a triple-chevron launch cannot
+  // take one anyway. ncclLaunchKernel fuses interComm->doneEvent into that last
+  // kernel. Point the slot at the parent's doneEvent for this launch so the
+  // addon epilogue does not append hipEventRecord (a fixed several-microsecond
+  // packet on the user stream after every hierarchical ReduceScatter).
+  //
+  // The inter comm is only launched from hierarchical AllGather/ReduceScatter,
+  // on this same user stream, and only after rcclAddonLaunchBegin has already
+  // queued the parent doneEvent wait when the stream changed. A later inter
+  // wait on interComm->doneEvent is therefore redundant with that parent wait.
+  // The redirected launch does not record interComm->doneEvent, so the first
+  // time that event is still unrecorded, record it once here. After that the
+  // parent event is the fence, and it is fused into the last kernel.
   size_t interMsgSize = recvcount * typeSize * (size_t)nNodes;
+  const hipEvent_t parentStop = comm->addonStopEvent;
+  const hipEvent_t interDone = interComm->doneEvent;
+  const bool primeInterDone = parentStop != nullptr && interComm->lastStreamTag == 0;
+  if (parentStop != nullptr) interComm->doneEvent = parentStop;
+
+  ncclResult_t interRes;
   if (rcclUseReduceScatterDirect(interComm, interMsgSize)) {
-    NCCLCHECK(rcclDirectReduceScatter(intraOut, recvbuff, recvcount, datatype, op, interComm, stream,
-                                      REDUCESCATTER_CHUNKSTEPS, REDUCESCATTER_SLICESTEPS));
+    interRes = rcclDirectReduceScatter(intraOut, recvbuff, recvcount, datatype, op, interComm, stream,
+                                       REDUCESCATTER_CHUNKSTEPS, REDUCESCATTER_SLICESTEPS);
   } else {
     struct ncclInfo infoInterRS = {ncclFuncReduceScatter,
                                    "HierarchicalReduceScatter-Inter",
@@ -1164,8 +1184,19 @@ static ncclResult_t ncclHierarchicalReduceScatter_Impl(const void* sendbuff, voi
                                    REDUCESCATTER_CHUNKSTEPS,
                                    REDUCESCATTER_SLICESTEPS,
                                    nullptr};
-    NCCLCHECK(ncclEnqueueCheck(&infoInterRS));
+    interRes = ncclEnqueueCheck(&infoInterRS);
   }
+
+  if (parentStop != nullptr) interComm->doneEvent = interDone;
+  if (interRes != ncclSuccess) {
+    // The launch may already have published lastStreamTag. Leave a recorded
+    // inter event behind so a later stream change does not wait on one that
+    // was never recorded. The addon epilogue still records the parent event.
+    if (primeInterDone) (void)hipEventRecord(interDone, stream);
+    return interRes;
+  }
+  if (primeInterDone) CUDACHECK(hipEventRecord(interDone, stream));
+  if (parentStop != nullptr) (void)rcclTakeAddonStopEvent(comm);
 
   return ncclSuccess;
 }
