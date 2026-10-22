@@ -46,7 +46,9 @@ ASSERT_HOOK_MATCHES_PROD(g_hipDriverGetVersion,           hipDriverGetVersion);
 ASSERT_HOOK_MATCHES_PROD(g_hipEventRecord,                hipEventRecord);
 ASSERT_HOOK_MATCHES_PROD(g_hipStreamWaitEvent,            hipStreamWaitEvent);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemGetAllocationGranularity, hipMemGetAllocationGranularity);
+#ifdef RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED
 ASSERT_HOOK_MATCHES_PROD(g_hipMemGetHandleForAddressRange, hipMemGetHandleForAddressRange);
+#endif
 ASSERT_HOOK_MATCHES_PROD(g_hipMemImportFromShareableHandle, hipMemImportFromShareableHandle);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemAddressReserve,          hipMemAddressReserve);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemMap,                     hipMemMap);
@@ -322,11 +324,13 @@ static hipError_t DefaultHipMemGetAllocationPropertiesFromHandle(
 {
     return hipErrorInvalidValue;
 }
+#ifdef RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED
 static hipError_t DefaultHipMemGetHandleForAddressRange(
     void*, hipDeviceptr_t, size_t, hipMemRangeHandleType, unsigned long long)
 {
     return hipErrorInvalidValue;
 }
+#endif
 static hipError_t DefaultHipMemImportFromShareableHandle(
     hipMemGenericAllocationHandle_t* handle, void*, hipMemAllocationHandleType)
 {
@@ -400,8 +404,10 @@ std::function<hipError_t(size_t*, const hipMemAllocationProp*, hipMemAllocationG
     g_hipMemGetAllocationGranularity = DefaultHipMemGetAllocationGranularity;
 std::function<hipError_t(hipMemAllocationProp*, hipMemGenericAllocationHandle_t)>
     g_hipMemGetAllocationPropertiesFromHandle = DefaultHipMemGetAllocationPropertiesFromHandle;
+#ifdef RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED
 std::function<hipError_t(void*, hipDeviceptr_t, size_t, hipMemRangeHandleType, unsigned long long)>
     g_hipMemGetHandleForAddressRange = DefaultHipMemGetHandleForAddressRange;
+#endif
 std::function<hipError_t(hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType)>
     g_hipMemImportFromShareableHandle = DefaultHipMemImportFromShareableHandle;
 std::function<hipError_t(void*, size_t, size_t, hipMemGenericAllocationHandle_t, unsigned long long)>
@@ -666,7 +672,9 @@ void ResetHipFakes()
     g_hipMemCreate                  = DefaultHipMemCreate;
     g_hipMemGetAllocationGranularity = DefaultHipMemGetAllocationGranularity;
     g_hipMemGetAllocationPropertiesFromHandle = DefaultHipMemGetAllocationPropertiesFromHandle;
+#ifdef RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED
     g_hipMemGetHandleForAddressRange = DefaultHipMemGetHandleForAddressRange;
+#endif
     g_hipMemImportFromShareableHandle = DefaultHipMemImportFromShareableHandle;
     g_hipMemMap                     = DefaultHipMemMap;
     g_hipMemSetAccess               = DefaultHipMemSetAccess;
@@ -897,11 +905,13 @@ hipError_t hipMemGetAllocationPropertiesFromHandle(
     return g_hipMemGetAllocationPropertiesFromHandle(prop, handle);
 }
 
+#ifdef RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED
 hipError_t hipMemGetHandleForAddressRange(void* handle, hipDeviceptr_t ptr, size_t size,
                                           hipMemRangeHandleType type, unsigned long long flags)
 {
     return g_hipMemGetHandleForAddressRange(handle, ptr, size, type, flags);
 }
+#endif
 
 hipError_t hipMemExportToShareableHandle(void* shareable,
                                          hipMemGenericAllocationHandle_t handle,

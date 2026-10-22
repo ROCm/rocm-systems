@@ -746,6 +746,7 @@ function(rccl_define_micro_source_lists)
     fakes/gdrwrap_fakes.cc
     fakes/hip_fakes.cc
     fakes/hsa_fakes.cc
+    fakes/ibv_ops_fakes.cc
     fakes/ibvwrap_fakes.cc
     fakes/mlx5dvwrap_fakes.cc
     fakes/nccl_fakes.cc
@@ -1438,7 +1439,6 @@ rccl_add_micro_binary(rccl-UnitTestsMicroRmaProxy
   SOURCES ${TEST_MICRO_RMA_PROXY_SOURCE_FILES}
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
-    RCCL_ROCMWRAP_FAKES_OMIT_ncclParamDmaBufEnable
     RMA_PROXY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_rma_proxy.yaml")
 
