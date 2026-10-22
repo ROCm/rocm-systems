@@ -16,18 +16,6 @@
 #include <cstring>
 #include <sched.h>
 
-#include "fail_loud.h"
-#include "signature-drift.h"
-
-static ncclResult_t DefaultSocketClose(struct ncclSocket*, bool) {
-  FailLoudUnfaked("os_fakes", "ncclSocketClose");
-}
-std::function<ncclResult_t(struct ncclSocket*, bool)> g_ncclSocketClose = DefaultSocketClose;
-ASSERT_HOOK_MATCHES_PROD(g_ncclSocketClose, ncclSocketClose);
-#undef ASSERT_HOOK_MATCHES_PROD
-
-ncclResult_t ncclSocketClose(struct ncclSocket* sock, bool wait) { return g_ncclSocketClose(sock, wait); }
-
 void* ncclOsAlignedAlloc(size_t alignment, size_t size) {
   void* p = nullptr;
   if (posix_memalign(&p, alignment, size) != 0) return nullptr;
@@ -38,9 +26,9 @@ void ncclOsAlignedFree(void* ptr) { free(ptr); }
 
 ncclResult_t ncclOsInitialize() { return ncclSuccess; }
 uint64_t ncclOsGetPid() { return 4321; }
+char* ncclOsStrSep(char** stringp, const char* delim) { return strsep(stringp, delim); }
 size_t ncclOsGetPageSize() { return 4096; }
 size_t ncclOsGetCommMempoolMaxSize() { return 0; }  // src/os/linux.cc: 0 = no cap
-char* ncclOsStrSep(char** stringp, const char* delim) { return strsep(stringp, delim); }
 
 // Controllable (was fail-loud). Records the mask too: :1608 and exit::2403 both call this, and without the
 // recorder either call site could be handed the wrong affinity (affinitySave instead of comm->cpuAffinity)
@@ -148,7 +136,6 @@ ncclResult_t ncclOsGetNumaNodeAffinity(unsigned int, char* affinityStr, size_t m
 }
 
 void ResetOsFakes() {
-  g_ncclSocketClose = DefaultSocketClose;
   g_ncclOsCpuCountValue = 0;
   g_ncclOsCpuCountCalls = 0;
   g_ncclOsCpuCountMasks.clear();
