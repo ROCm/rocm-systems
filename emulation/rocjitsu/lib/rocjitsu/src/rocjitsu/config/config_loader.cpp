@@ -708,7 +708,8 @@ void do_wire_cps(simdojo::CompositeComponent *root, uint32_t cus_per_shader_arra
         auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(se_child.get());
         if (!cu)
           continue;
-        cu->set_shader_engine_location(shader_engine_id, cu_index++, cus_per_shader_array);
+        cu->set_shader_engine_location(shader_engine_id, cu_index++, cus_per_shader_array,
+                                       cus_per_shader_array ? expected_cus : 0);
         cp->add_compute_unit(cu);
       }
       ++shader_engine_id;
@@ -722,7 +723,8 @@ void do_wire_cps(simdojo::CompositeComponent *root, uint32_t cus_per_shader_arra
         auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(child.get());
         if (!cu)
           continue;
-        cu->set_shader_engine_location(0, cu_index++, cus_per_shader_array);
+        cu->set_shader_engine_location(0, cu_index++, cus_per_shader_array,
+                                       cus_per_shader_array ? expected_cus : 0);
         cp->add_compute_unit(cu);
       }
     }

@@ -14,7 +14,7 @@ import time
 
 import pytest
 
-from conftest import run_rdci, terminate_process
+from conftest import gpu_indexes, run_rdci, terminate_process
 
 
 # ---------------------------------------------------------------------------
@@ -88,8 +88,10 @@ class TestUnsupportedFields:
     """Verify graceful handling of unsupported or invalid fields."""
 
     def test_dmon_invalid_field_id(self, rdci_path, rdcd_server):
-        r = run_rdci(rdci_path, "dmon", "-f", "99999", "-c", "1", "-d", "1000")
+        gpu = gpu_indexes(rdci_path)[0]
+        r = run_rdci(rdci_path, "dmon", "-e", "99999", "-i", gpu, "-c", "1", "-d", "1000")
         assert r.returncode != -11, "rdci segfaulted on invalid field"
+        assert r.returncode != 0, f"dmon accepted field 99999:\n{r.stdout}"
 
     def test_fieldgroup_empty_fields(self, rdci_path, rdcd_server):
         r = run_rdci(rdci_path, "fieldgroup", "-c", "ci_empty_fg", "-f", "")
@@ -130,10 +132,7 @@ class TestMissingGroups:
 class TestDaemonResilience:
     """Verify behavior around daemon stop/restart scenarios."""
 
-    def test_rdcd_responds_after_quick_restart(self, rdcd_path, has_gpu):
-        if not has_gpu:
-            pytest.skip("No GPU -- skipping resilience test")
-
+    def test_rdcd_responds_after_quick_restart(self, rdcd_path, rdcd_server):
         import socket
 
         def _port_open(port, timeout=2):
@@ -144,6 +143,8 @@ class TestDaemonResilience:
         port = 50099
         env = os.environ.copy()
 
+        # Only one rdcd can run per host.
+        rdcd_server.stop()
         proc = None
         try:
             proc = subprocess.Popen(
@@ -171,6 +172,8 @@ class TestDaemonResilience:
             assert _port_open(port), "rdcd did not restart successfully"
         finally:
             terminate_process(proc)
+            if not rdcd_server.start():
+                pytest.fail("the session rdcd did not start again")
 
 
 # ---------------------------------------------------------------------------
