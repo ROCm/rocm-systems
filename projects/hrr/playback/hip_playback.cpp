@@ -832,7 +832,7 @@ static void decode_kernel_args(
         auto& storage = arg_storage.back();
         if (value_kind == 1 && arg_size >= 8) {  // whole-arg GPU pointer
             uint64_t rec_ptr; memcpy(&rec_ptr, data, 8);
-            void* live = ctx.translate_ptr(rec_ptr);
+            void* live = ctx.lookup_ptr(rec_ptr);
             // Nothing in the archive covers this address. If a producer said a
             // segment lived there, HIP was bypassed for it — back it now and
             // translate into it. Asked here rather than when the segment was
@@ -905,7 +905,7 @@ static void decode_kernel_args(
                 if (!va_shaped(rec_ptr) &&
                     !(flagged && ctx.in_pinned_host(rec_ptr)))
                     return false;
-                void* live = ctx.translate_ptr(rec_ptr);
+                void* live = ctx.lookup_ptr(rec_ptr);
                 // Same bypassed-segment materialisation as a whole-pointer
                 // argument: a struct field pointing into memory HIP never saw
                 // resolves in no map until the segment is backed. Only an
@@ -987,7 +987,7 @@ static void decode_kernel_args(
                 // to tell apart here.
                 void* live = nullptr;
                 if (va_shaped(rec)) {
-                    live = ctx.translate_ptr(rec);
+                    live = ctx.lookup_ptr(rec);
                     if (!live && ctx.regions_enabled)
                         live = ctx.regions.materialize_for(ctx, rec);
                     if (live)
@@ -2835,7 +2835,7 @@ static void* hrr_block_guard_relocate(PlaybackContext& ctx, RegionLaunchState& r
         return live;
     }
 
-    void* live_base = ctx.translate_ptr(blk_base);
+    void* live_base = ctx.lookup_ptr(blk_base);
     if (!live_base) return live;
 
     HrrBlockGuard g{};
@@ -3219,7 +3219,7 @@ hipError_t playback_hipMallocHost(PlaybackContext& ctx, const uint8_t* pl) {
 
 hipError_t playback_hipFreeHost(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipFreeHost*>(pl);
-    void* live = ctx.translate_ptr(a->ptr);
+    void* live = ctx.lookup_ptr(a->ptr);
     if (!live) return hipSuccess;
     hipError_t r = hipFreeHost(live);
     if (r == hipSuccess) ctx.remove_alloc(a->ptr);
@@ -3296,7 +3296,7 @@ hipError_t playback_hipHostRegister(PlaybackContext& ctx, const uint8_t* pl) {
 hipError_t playback_hipHostUnregister(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipHostUnregister*>(pl);
 
-    // Retrieve the backing buffer regardless of whether translate_ptr succeeds —
+    // Retrieve the backing buffer regardless of whether lookup_ptr succeeds —
     // we must free it even if the alloc_map entry was already removed.
     void* buf = nullptr;
     {
@@ -3308,7 +3308,7 @@ hipError_t playback_hipHostUnregister(PlaybackContext& ctx, const uint8_t* pl) {
         }
     }
 
-    void* live = buf ? buf : ctx.translate_ptr(a->hostPtr);
+    void* live = buf ? buf : ctx.lookup_ptr(a->hostPtr);
     if (!live) return hipSuccess;
 
     hipError_t r = hipHostUnregister(live);
@@ -3376,7 +3376,7 @@ hipError_t playback_hipHostGetDevicePointer(PlaybackContext& ctx, const uint8_t*
 
 hipError_t playback_hipFree(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipFree*>(pl);
-    void* live = ctx.translate_ptr(a->ptr);
+    void* live = ctx.lookup_ptr(a->ptr);
     if (!live) return hipSuccess;
     if (!ctx.in_graph_capture && hrr_free_needs_sync(ctx, live))
         if (hipError_t sr = hipDeviceSynchronize(); sr != hipSuccess) return sr;
@@ -3391,7 +3391,7 @@ hipError_t playback_hipFree(PlaybackContext& ctx, const uint8_t* pl) {
 
 hipError_t playback_hipFreeAsync(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a  = reinterpret_cast<const hrr_args_hipFreeAsync*>(pl);
-    void*       live   = ctx.translate_ptr(a->dev_ptr);
+    void*       live   = ctx.lookup_ptr(a->dev_ptr);
     hipStream_t stream = ctx.translate_stream(a->stream);
     if (!live) return hipSuccess;
     if (hrr_is_placed(ctx, live)) {
@@ -3578,9 +3578,11 @@ static bool hrr_d2h_validate(PlaybackContext& ctx, const char* tag, uint64_t seq
 // allocation HIP never saw, and dispatch_event advances the region timeline
 // before every handler precisely so that memcpys see the same view as a launch.
 static void* translate_or_materialize(PlaybackContext& ctx, uint64_t rec_addr) {
-    void* live = ctx.translate_ptr(rec_addr);
+    void* live = ctx.lookup_ptr(rec_addr);
     if (!live && rec_addr != 0 && ctx.regions_enabled)
         live = ctx.regions.materialize_for(ctx, rec_addr);
+    // Unmapped only once the region has had its chance.
+    if (!live && rec_addr != 0) PlaybackContext::note_unmapped(rec_addr);
     return live;
 }
 
@@ -3621,9 +3623,12 @@ static hipError_t replay_memcpy_impl(PlaybackContext& ctx,
                                      uint64_t size, int32_t kind,
                                      bool is_async, hipStream_t stream,
                                      uint64_t hash_lo, uint64_t hash_hi) {
-    void*      dst = translate_or_materialize(ctx, dst_rec);
+    // Only the kinds that write device memory translate dst. A D2H dst is a
+    // host buffer replay never uses (validation reads back into its own), and
+    // translating it would report every pageable destination as unmapped.
+    const bool dev_dst = kind == hipMemcpyHostToDevice || kind == hipMemcpyDeviceToDevice;
+    void*      dst = dev_dst ? translate_or_materialize(ctx, dst_rec) : nullptr;
     hipError_t r   = hipSuccess;
-
 
     if (kind == hipMemcpyHostToDevice && (hash_lo || hash_hi)) {
         size_t blob_sz = 0;
@@ -5216,7 +5221,13 @@ hipError_t playback_hipMemRelease(PlaybackContext& ctx, const uint8_t* pl) {
 hipError_t playback_hipMemMap(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipMemMap*>(pl);
     void* live_va = ctx.translate_vmm_va(a->ptr);
-    if (!live_va) return hipSuccess;  // VA not tracked, skip
+    if (!live_va) {
+        // Not a reservation base. An address in no reservation or allocation
+        // at all is an unmapped pointer for the policy, so translate_ptr notes
+        // it; one inside a reservation is skipped as before.
+        (void)ctx.translate_ptr(a->ptr);
+        return hipSuccess;
+    }
     hipMemGenericAllocationHandle_t live_handle = ctx.translate_vmm_handle(a->handle);
     if (!live_handle) return hipSuccess;  // handle not tracked, skip
     return hipMemMap(live_va,

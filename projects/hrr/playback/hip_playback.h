@@ -123,6 +123,40 @@ struct HrrHeldRanges {
 // PlaybackContext — central replay state
 // ---------------------------------------------------------------------------
 
+// ---- Unmapped-pointer policy ----
+// A recorded pointer argument that resolves in no allocation, VMM reservation
+// or region is memory replay does not know, most often a buffer a framework
+// carved out of its own pool without HIP seeing it. One such pointer used to
+// cost the whole replay, every later event included, and the handlers did not
+// agree on it: some skipped the call, most aborted.
+//
+// The policy, the same for every handler: PlaybackContext::translate_ptr
+// notes the miss here, and dispatch_event, not the handler, decides. By
+// default the event's result is discarded and the replay goes on: the event is
+// reported with its index, API and recorded pointer, and counted on the
+// summary's "Unmapped" line. The handler still ran, with null in place of the
+// pointer, so it did either nothing (HIP refuses a null destination, and most
+// handlers refuse before calling HIP) or the part of the call that needed no
+// translation. --strict-unmapped aborts the replay at that event instead. A
+// handler never turns an unmapped pointer into success or failure on its own.
+//
+// What this guarantees: a replay whose summary shows no Unmapped line ran
+// every recorded call with each of its pointers translated. One that shows it
+// did not replay that many events as recorded, and the D2H checks still judge
+// whatever output those events would have touched. The count alone does not
+// fail the run; use --strict-unmapped when such an event must not pass.
+//
+// Not covered: kernel-argument words, which are pointers only by shape and
+// have their own count (untranslated_ptr_args); releases (hipFree and its
+// kin), which have nothing to do for memory replay never had and use
+// lookup_ptr; and handles of other kinds (streams, events, modules).
+struct HrrUnmappedNote {
+    uint64_t first = 0;  // first recorded pointer the event could not translate
+    unsigned count = 0;  // how many it met
+};
+// Per thread, because each replay thread dispatches its own events.
+inline thread_local HrrUnmappedNote hrr_unmapped_note;
+
 // How an alloc_map entry's live_ptr was obtained — determines which API must
 // release it at teardown. Mixing them up (e.g. hipFree on a host pointer)
 // returns errors and can corrupt allocator bookkeeping.
@@ -425,6 +459,12 @@ struct PlaybackContext {
     bool warn_untranslated_args = false;
     std::atomic<uint64_t> untranslated_ptr_args{0};
 
+    // Events not replayed as recorded because a pointer argument was unmapped,
+    // and whether such an event aborts the replay instead. See
+    // "Unmapped-pointer policy" above.
+    bool strict_unmapped = false;
+    std::atomic<size_t> unmapped_events{0};
+
     // ---- Guard pages ----
     // Both off by default: they trade the exact memory layout the replay
     // otherwise reproduces for the ability to make an out-of-bounds access
@@ -514,9 +554,23 @@ struct PlaybackContext {
     }
 
     // ---- Pointer translation ----
-    // Translates a recorded GPU address to a live pointer.
-    // Checks alloc_map (exact + range) then vmm_va_map (exact + range).
+    // Translates a recorded GPU address to a live pointer, and notes a miss
+    // for the unmapped-pointer policy (see above PlaybackContext). Every
+    // handler translating an API pointer argument uses this one.
     void* translate_ptr(uint64_t rec) const {
+        void* live = lookup_ptr(rec);
+        if (!live && rec != 0) note_unmapped(rec);
+        return live;
+    }
+    static void note_unmapped(uint64_t rec) {
+        if (hrr_unmapped_note.count++ == 0) hrr_unmapped_note.first = rec;
+    }
+
+    // The same lookup without the note, for callers to whom a miss is an
+    // answer rather than a lost pointer: kernel-argument scans, releases,
+    // diagnostics. Checks alloc_map (exact + range) then vmm_va_map (exact +
+    // range).
+    void* lookup_ptr(uint64_t rec) const {
         if (rec == 0) return nullptr;
         std::shared_lock lk(map_mutex);
         auto it = alloc_map.find(rec);
@@ -664,7 +718,7 @@ struct PlaybackContext {
         std::string out;
         uint64_t rbase = 0; size_t rsize = 0;
         if (is_recorded_va(v, &rbase, &rsize)) {
-            void* live = translate_ptr(rbase);
+            void* live = lookup_ptr(rbase);
             snprintf(buf, sizeof(buf),
                      "recorded allocation 0x%llx+%zu (live base %p)",
                      (unsigned long long)rbase, rsize, live);
