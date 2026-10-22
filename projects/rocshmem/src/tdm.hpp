@@ -51,9 +51,9 @@
 #define HIP_HAVE_TDM_INTRINSICS 0
 #endif
 
-// Single switch for "TDM is actually usable here": the build opted in, the
-// target arch supports it, and the compiler exposes the intrinsics. Nothing
-// below that only makes sense under TDM should exist unless this is true.
+// Single switch for "TDM is actually usable here" (build opted in, arch
+// supports it, compiler exposes the intrinsics). Everything below that's
+// TDM-specific is gated on this.
 #if defined(USE_TDM) && (defined(__gfx1250__) || defined(__gfx1250_strict__)) && \
     HIP_HAVE_TDM_INTRINSICS
 #define ROCSHMEM_TDM_ENABLED 1
@@ -64,12 +64,10 @@
 namespace rocshmem {
 namespace tdm {
 
-// LDS bytes needed for a double-buffered copy_region call with this tile
-// size. Called from host-only code (constmem.cpp, rocshmem.cpp) whenever
-// USE_TDM is set, independent of which device arch is being compiled --
-// gate on that alone, not ROCSHMEM_TDM_ENABLED (its arch macros are never
-// defined during a host-only compilation pass, which would make the
-// function disappear there).
+// LDS bytes for a double-buffered copy_region call with this tile size.
+// Host code (constmem.cpp, rocshmem.cpp) needs this under plain USE_TDM,
+// not ROCSHMEM_TDM_ENABLED -- its arch macros aren't defined when
+// compiling host-only code, which would make this disappear there.
 #if defined(USE_TDM)
 __host__ __device__ constexpr size_t lds_bytes_for_tile(uint32_t tile_bytes) {
   return 2 * static_cast<size_t>(tile_bytes);
@@ -201,10 +199,9 @@ __device__ __forceinline__ Descriptor2D make_descriptor_2d(
 // RAW INTRINSIC WRAPPERS
 // ==============================================================================
 
-// Stalls the wave until fewer than Cnt+1 of its TDM ops are in flight;
-// wait<0>() drains all of them. Cnt (and CachePolicy below) is a template
-// parameter, not a plain argument, because the underlying builtins require
-// an immarg (a literal at the call site).
+// Stalls until fewer than Cnt+1 of this wave's TDM ops remain in flight;
+// wait<0>() drains all of them. Cnt (and CachePolicy below) must be a
+// template parameter: the builtins require an immarg (compile-time literal).
 template <uint16_t Cnt>
 __device__ __forceinline__ void wait() {
   __builtin_amdgcn_s_wait_tensorcnt(Cnt);
@@ -332,13 +329,12 @@ __device__ inline void copy_region(void *dst, const void *src, size_t bytes, voi
   }
 }
 
-// Same contract as copy_region, but always double-buffered and pipelined
-// tighter: waits only for the in-flight count to drop to <=1 (wait<1>())
-// instead of draining every iteration, so a load and a store are almost
-// always both in flight. Tiles issue in pairs (load/store alternating
-// even/odd, buffer chosen by parity); each op is issued exactly two slots
-// after the op it depends on, so wait<1>() before op N guarantees op N-2
-// has completed.
+// Same contract as copy_region, but always double-buffered and more
+// tightly pipelined: waits only until <=1 op is in flight (wait<1>())
+// instead of draining every iteration, so a load and a store are usually
+// both in flight. Tiles issue in load/store pairs (parity picks the
+// buffer); each op is issued exactly two slots after the op it depends on,
+// so wait<1>() before op N guarantees op N-2 already completed.
 template <int LoadCachePolicy, int StoreCachePolicy>
 __device__ inline void copy_region_pipelined(void *dst, const void *src, size_t bytes,
                                              void *lds_scratch, uint32_t tile_bytes_cap) {
