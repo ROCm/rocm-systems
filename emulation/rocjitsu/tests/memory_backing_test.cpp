@@ -403,22 +403,18 @@ TEST(MemoryBackingDeathTest, HelperDoesNotChangeChildWaitsAndRecoversAfterFailur
       ::testing::ExitedWithCode(0), "");
 }
 
-TEST(MemoryBackingDeathTest, SubreaperWarnsAboutChildWaitsAndRecoversAfterFailure) {
+void check_subreaper_warning() {
+  // A re-exec leaves the gtest_main banner buffered on stdout. The logger's
+  // tied stderr stream would otherwise flush it after the file limit is zero.
+  ASSERT_EQ(std::fflush(stdout), 0);
   // GTest captures stderr in a regular file, which cannot accept the warning
   // under hard FSIZE=0. A pipe observes it without relaxing the file limit.
   int diagnostics[2];
   ASSERT_EQ(pipe2(diagnostics, O_CLOEXEC), 0);
-  EXPECT_EXIT(
-      {
-        close(diagnostics[0]);
-        if (dup2(diagnostics[1], STDERR_FILENO) < 0)
-          _exit(2);
-        close(diagnostics[1]);
-        check_helper_lifecycle(true);
-        _exit(::testing::Test::HasFailure() ? 1 : 0);
-      },
-      ::testing::ExitedWithCode(0), "");
+  ASSERT_GE(dup2(diagnostics[1], STDERR_FILENO), 0);
   close(diagnostics[1]);
+  check_helper_lifecycle(true);
+  close(STDERR_FILENO);
   std::string output;
   char buffer[1024];
   ssize_t bytes;
@@ -430,6 +426,15 @@ TEST(MemoryBackingDeathTest, SubreaperWarnsAboutChildWaitsAndRecoversAfterFailur
   const auto first = output.find(warning);
   ASSERT_NE(first, std::string::npos) << output;
   EXPECT_EQ(output.find(warning, first + warning.size()), std::string::npos) << output;
+}
+
+TEST(MemoryBackingDeathTest, SubreaperWarnsAboutChildWaitsAndRecoversAfterFailure) {
+  ASSERT_EXIT(
+      {
+        check_subreaper_warning();
+        _exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
 }
 
 void check_group_signal() {
@@ -687,7 +692,8 @@ TEST(MemoryBackingDeathTest, StartupFailureNamesHelper) {
         const int fd = backing::create(kSize);
         _exit(fd == -1 && errno == EAGAIN ? 0 : 1);
       },
-      ::testing::ExitedWithCode(0), "Cannot start memory keeper.*Resource temporarily unavailable");
+      ::testing::ExitedWithCode(0),
+      "Cannot start memory keeper '[^']*rocjitsu-memory': Resource temporarily unavailable");
 }
 
 void check_seek_contract() {

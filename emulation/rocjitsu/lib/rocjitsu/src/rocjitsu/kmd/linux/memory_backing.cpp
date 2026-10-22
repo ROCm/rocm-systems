@@ -664,7 +664,7 @@ private:
       const int error = errno;
       release_lease();
       if (!warned_) {
-        util::Logger::warn("Cannot start memory keeper '{}': {}", path, std::strerror(error));
+        util::Logger::warn("Cannot start memory keeper '", path, "': ", std::strerror(error));
         warned_ = true;
       }
       errno = error;

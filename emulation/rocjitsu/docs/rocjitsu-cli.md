@@ -19,6 +19,12 @@ the simulated GPU. It operates in four modes:
 Daemon mode supports vLLM's multiprocessing spawn, torchrun, torch.distributed,
 and NCCL --- workloads where multiple processes share a single simulated GPU.
 
+Daemon mode currently rejects dma-buf export with `EOPNOTSUPP`; its RPC protocol
+does not transfer exported descriptors. HIP VMM allocation (`hipMemCreate`)
+depends on that export even with `hipMemHandleTypeNone`, so ROCr may report it
+as out of memory. Use local mode for VMM allocation and shareable-handle APIs.
+Ordinary daemon `hipMalloc`, copies, and kernel dispatch remain supported.
+
 ### The fork boundary
 
 A child created with `fork()` before the parent has started a GPU backend can

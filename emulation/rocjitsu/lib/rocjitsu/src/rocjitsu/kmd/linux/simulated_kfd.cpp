@@ -3263,6 +3263,10 @@ int SimulatedKfd::share_allocation_locked(KfdProcess &proc, KfdProcess::GpuAlloc
 }
 
 int SimulatedKfd::export_dmabuf_ioctl(KfdProcess &proc, void *arg) {
+  // The daemon protocol does not transfer this export yet. Reject it before
+  // retaining a descriptor or publishing the allocation's sharing policy.
+  if (daemon_mode_)
+    return -EOPNOTSUPP;
   auto *args = static_cast<kfd_ioctl_export_dmabuf_args *>(arg);
 
   std::lock_guard<std::mutex> lk(proc.alloc_mutex_);

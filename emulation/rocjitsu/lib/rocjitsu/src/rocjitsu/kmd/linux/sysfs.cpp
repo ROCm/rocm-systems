@@ -157,11 +157,11 @@ void Sysfs::write_file(const std::string &path, const std::string &content) {
   const int fd = libc.openat ? libc.openat(AT_FDCWD, path.c_str(), flags, 0666)
                              : ::open(path.c_str(), flags, 0666);
   if (fd < 0) {
-    util::Logger::warn("Cannot create topology file '{}': {}", path, std::strerror(errno));
+    util::Logger::warn("Cannot create topology file '", path, "': ", std::strerror(errno));
     return;
   }
   if (memory_backing::populate_file(fd, content.data(), content.size()) != 0)
-    util::Logger::warn("Cannot populate topology file '{}': {}", path, std::strerror(errno));
+    util::Logger::warn("Cannot populate topology file '", path, "': ", std::strerror(errno));
   if (libc.close)
     libc.close(fd);
   else

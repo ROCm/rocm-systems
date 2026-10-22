@@ -38,6 +38,7 @@ RJ_DIAGNOSTIC_POP
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
+#include <iterator>
 #include <shared_mutex>
 #include <span>
 #include <thread>
@@ -245,6 +246,74 @@ TEST_F(SimulatedKfdTest, DoorbellExportIsRejected) {
   free_args.handle = doorbell.handle;
   EXPECT_EQ(driver->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_args), 0);
   EXPECT_EQ(driver->close(), 0);
+}
+
+void check_daemon_export_rejection(bool fallback) {
+  if (fallback) {
+    const rlimit limit{2 * 1024 * 1024, 2 * 1024 * 1024};
+    ASSERT_EQ(setrlimit(RLIMIT_FSIZE, &limit), 0);
+  }
+  ASSERT_EQ(setenv("RJ_CONFIG", CONFIG_PATH.c_str(), 1), 0);
+  util::StringDiagnostic diagnostic;
+  auto result = create_test_vm(diagnostic.emitter());
+  ASSERT_TRUE(result.succeeded()) << diagnostic.message();
+  auto vm = std::move(result).value();
+  rocjitsu::SimulatedKfd daemon(*vm.soc(), /*daemon_mode=*/true);
+  const auto process_id = daemon.open_process();
+  ASSERT_NE(process_id, 0u);
+  const auto count_fds = [] {
+    return std::distance(std::filesystem::directory_iterator("/proc/self/fd"),
+                         std::filesystem::directory_iterator{});
+  };
+  const auto before_allocation = count_fds();
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = 4 * 1024 * 1024;
+  allocation.gpu_id = daemon.gpu_id();
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(daemon.ioctl(process_id, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  const auto process = daemon.find_process(process_id);
+  ASSERT_NE(process, nullptr);
+  const auto &stored = process->allocations_.at(allocation.handle);
+  ASSERT_EQ(rocjitsu::memory_backing::contains(stored.memfd), fallback);
+  const auto access = vm.soc()->gpu_vm().snapshot_vmid(process_id);
+  ASSERT_TRUE(access);
+  ASSERT_EQ(access->query_mtype(allocation.va_addr), rocjitsu::amdgpu::Mtype::RW);
+  ASSERT_FALSE(stored.shared);
+  const auto before_export = count_fds();
+  for (unsigned attempt = 0; attempt < 3; ++attempt) {
+    kfd_ioctl_export_dmabuf_args exported{};
+    exported.handle = allocation.handle;
+    exported.dmabuf_fd = static_cast<uint32_t>(-1);
+    EXPECT_EQ(daemon.ioctl(process_id, AMDKFD_IOC_EXPORT_DMABUF, &exported), -EOPNOTSUPP);
+    EXPECT_EQ(static_cast<int>(exported.dmabuf_fd), -1);
+    EXPECT_EQ(count_fds(), before_export);
+    EXPECT_FALSE(stored.shared);
+    EXPECT_EQ(stored.flags, allocation.flags);
+    EXPECT_EQ(access->query_mtype(allocation.va_addr), rocjitsu::amdgpu::Mtype::RW);
+  }
+  kfd_ioctl_free_memory_of_gpu_args release{};
+  release.handle = allocation.handle;
+  EXPECT_EQ(daemon.ioctl(process_id, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &release), 0);
+  EXPECT_EQ(count_fds(), before_allocation);
+  EXPECT_EQ(daemon.close(process_id), 0);
+}
+
+TEST(SimulatedKfdDeathTest, DaemonExportRejectionPreservesNativeBacking) {
+  ASSERT_EXIT(
+      {
+        check_daemon_export_rejection(false);
+        _exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
+TEST(SimulatedKfdDeathTest, DaemonExportRejectionPreservesFallbackBacking) {
+  ASSERT_EXIT(
+      {
+        check_daemon_export_rejection(true);
+        _exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
 }
 
 TEST_F(SimulatedKfdTest, ImportedDmabufReexportKeepsTheOriginalBacking) {
