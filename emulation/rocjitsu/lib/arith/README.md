@@ -2,8 +2,8 @@
 
 ## Current implementation
 
-Both entry points support loose and empirical bit-exact semantics with default controls.
-FMA accepts modes 0–2; WMMA accepts modes 0–3 and has no FP-status output.
+Both entry points accept modes 0–3 with default controls.
+Only FMA mode 3 accumulates FP status; WMMA has no FP-status output.
 CPU implementations are scalar; SIMD backends are planned.
 Compatibility and instruction modifiers are planned; mode 7 is currently rejected.
 
