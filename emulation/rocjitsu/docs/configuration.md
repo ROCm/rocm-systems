@@ -299,6 +299,16 @@ loader warns once per GPU and leaves the shader-array width unknown. Reads
 with unknown or unrepresentable geometry issue an `s_getreg_b32` warning and
 write zero.
 
+CDNA3/4 `HW_ID` exposes resident WAVE_ID/SIMD_ID and backed CU_ID/SE_ID
+fields; SH_ID reads zero as specified by the ISA. CU_ID requires a known,
+single-array geometry with 1–16 CUs per shader engine. SE_ID must fit in
+three bits. `XCC_ID` reads the XCD index within its SoC after topology
+initialization and requires an index in 0–15. Other HW_ID fields remain
+unsupported. Any HW_ID slice touching an unsupported bit rejects the entire
+read; the default 32-bit HW_ID read therefore still warns and writes zero.
+Unknown or unrepresentable identity fields likewise issue an `s_getreg_b32`
+warning and write zero.
+
 Omitted geometry fields inherit defaults selected by `gfx_target_version`.
 For a smaller topology, set both `num_cu_per_sh` and
 `num_shader_arrays_per_engine` to match its CU groups; for example, two arrays
@@ -378,6 +388,10 @@ them issue an `s_getreg_b32` warning and write zero; the simulator cannot infer 
 shader-array-local ID from the shader-engine CU count alone. Saving such a restored
 checkpoint again preserves that unknown geometry.
 
+CDNA3/4 identity reads reuse restored resident slots and CU geometry. XCC_ID
+becomes readable after the restored SoC initializes its topology. Older
+checkpoints without shader-array geometry keep CU_ID unsupported.
+
 ## Multi-GPU
 
 Multi-GPU configs define multiple SoCs with distinct GPU IDs and
@@ -388,3 +402,27 @@ to the correct device based on `gpu_id`.
 `configs/gfx950_mi355x_kmd_2gpu.json` is the default multi-GPU
 configuration for RCCL tests. `configs/gfx1250_mi455x_kmd_4gpu.json`
 provides a four-GPU daemon topology for explicit multi-GPU runs.
+
+## GWS wait budget
+
+The compute-unit option `gws_wait_limit` defaults to 1,000,000 unpaused CU
+steps without instruction progress from the waiting process. Executing an
+instruction on any CU for that process resets its waits' inactivity budgets
+(progress is published once per functional quantum);
+other processes do not. Set it to `0` to allow unbounded waits,
+or increase it for workloads that intentionally wait for later host submissions.
+It measures execution work, not GPU cycles or elapsed wall time. Debugger and
+runtime queue suspension do not consume this budget. CUs containing only GWS
+waiters poll once per normal quantum, including when the execution quantum is
+unlimited; parked waits do not shorten a co-resident producer's quantum.
+
+A wait exceeding the budget emits the process, queue, dispatch, CU, wave,
+resource and PC, faults the dispatch without publishing successful completion,
+reports a wave-abort exception to the queue, cancels its replicas on every XCD,
+and delivers failed native PM4 callbacks before stopping the VM with an error.
+This is an inactivity timeout policy, not a deadlock diagnosis: a process that
+keeps executing instructions can keep its waits alive indefinitely. Quiescence or insufficient
+residency never releases a GWS wait. Barriers require an explicit GWS INIT;
+unsupported residency can exhaust the budget but cannot produce a successful
+rendezvous. Checkpoints containing GWS resource state are rejected because the
+format does not serialize the shared table.

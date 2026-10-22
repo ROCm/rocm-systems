@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 #include "aql_queue.h"
+#include "config_test_util.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/kmd/linux/cwsr.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
@@ -18,6 +20,7 @@
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/virtual_machine.h"
 #include "scoped_temp.h"
+#include "util/diagnostic.h"
 
 #include "embedded_schema.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
@@ -28,11 +31,9 @@
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
 #include "hsa/amd_hsa_queue.h"
 #include "hsa/hsa.h"
 RJ_DIAGNOSTIC_POP
-#include <hsa/amd_hsa_queue.h>
 
 #include <gtest/gtest.h>
 
@@ -61,6 +62,7 @@ RJ_DIAGNOSTIC_POP
 #include <future>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <ostream>
 #include <shared_mutex>
@@ -266,7 +268,14 @@ int daemon_debug_enable(rocjitsu::SimulatedKfd &daemon, uint32_t debugger,
 }
 
 uint32_t query_gb_addr_config(const std::string &config_path, uint32_t gpu_id) {
-  auto loaded = rocjitsu::config::load_config(config_path.c_str(), rocjitsu::kEmbeddedSchema);
+  util::StringDiagnostic loaded_diagnostic;
+  auto loaded_result = rocjitsu::config::load_config(config_path.c_str(), rocjitsu::kEmbeddedSchema,
+                                                     loaded_diagnostic.emitter());
+  if (loaded_result.failed()) {
+    ADD_FAILURE() << loaded_diagnostic.message();
+    return 0;
+  }
+  auto loaded = std::move(loaded_result).value();
   auto root = loaded.take_root();
   auto *soc = dynamic_cast<rocjitsu::SoC *>(root.get());
   if (!soc)
@@ -304,7 +313,14 @@ uint32_t query_gb_addr_config(const std::string &config_path, uint32_t gpu_id) {
 }
 
 std::unique_ptr<rocjitsu::SoC> load_standalone_soc(const std::string &config_path) {
-  auto loaded = rocjitsu::config::load_config(config_path.c_str(), rocjitsu::kEmbeddedSchema);
+  util::StringDiagnostic loaded_diagnostic;
+  auto loaded_result = rocjitsu::config::load_config(config_path.c_str(), rocjitsu::kEmbeddedSchema,
+                                                     loaded_diagnostic.emitter());
+  if (loaded_result.failed()) {
+    ADD_FAILURE() << loaded_diagnostic.message();
+    return nullptr;
+  }
+  auto loaded = std::move(loaded_result).value();
   auto root = loaded.take_root();
   auto *soc = dynamic_cast<rocjitsu::SoC *>(root.get());
   if (!soc)
@@ -321,7 +337,7 @@ protected:
   // has to stay void-returning and be called directly from SetUp().
   void SetUpWithConfig(const std::string &config_path) {
     setenv("RJ_CONFIG", config_path.c_str(), 1);
-    loaded_ = rocjitsu::config::load_config(config_path.c_str(), rocjitsu::kEmbeddedSchema);
+    ASSERT_TRUE(rocjitsu::test::load_valid_config(config_path.c_str(), loaded_));
     auto root = loaded_.take_root();
     auto *soc = dynamic_cast<rocjitsu::SoC *>(root.get());
     ASSERT_NE(soc, nullptr);
@@ -660,6 +676,38 @@ protected:
   int kfd_fd_ = -1;
   std::vector<int> debug_fds_;
 };
+
+TEST_F(KfdIoctlTest, ReportsImplementedKfdUapiVersion) {
+  kfd_ioctl_get_version_args version{};
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_GET_VERSION, &version), 0);
+  EXPECT_EQ(version.major_version, 1u);
+  EXPECT_EQ(version.minor_version, 18u);
+  EXPECT_EQ(KFD_IOCTL_MINOR_VERSION, 19)
+      << "Shared KFD header changed; audit new fields and ioctls before updating the simulator's "
+         "reported UAPI version";
+}
+
+TEST_F(KfdIoctlTest, RejectsUnsupportedMetadataRingQueueCreation) {
+  alignas(4096) std::array<std::byte, 8192> ring{};
+  alignas(64) std::array<uint64_t, 8> ptrs{};
+
+  kfd_ioctl_create_queue_args args{};
+  args.gpu_id = kGpuId;
+  args.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  args.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  args.ring_size = static_cast<uint32_t>(ring.size());
+  args.read_pointer_address = reinterpret_cast<uint64_t>(&ptrs[0]);
+  args.write_pointer_address = reinterpret_cast<uint64_t>(&ptrs[1]);
+  args.queue_percentage = 100;
+  args.metadata_ring_size = 4096;
+
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &args), -EINVAL);
+  args.metadata_ring_size = 0;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &args), 0);
+  kfd_ioctl_destroy_queue_args destroy{};
+  destroy.queue_id = args.queue_id;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+}
 
 TEST_F(KfdIoctlTest, CloseReleasesProcessAfterCompletedOrAbortedInstructionExecution) {
   for (const bool abort : {false, true}) {
@@ -1039,7 +1087,7 @@ protected:
 };
 
 TEST_P(KfdCuMaskPlacementTest, CuMaskSelectsOnlyTheRequestedPhysicalUnits) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   const CuMaskPlacementCase &test = GetParam();
   const bool rdna = soc_->arch() == ROCJITSU_CODE_ARCH_RDNA4;
   const uint32_t wave_size = rdna ? 32u : 64u;
@@ -1049,8 +1097,8 @@ TEST_P(KfdCuMaskPlacementTest, CuMaskSelectsOnlyTheRequestedPhysicalUnits) {
   kernel_descriptor_t kd{};
   kd.kernel_code_entry_byte_offset = sizeof(kd);
   kd.group_segment_fixed_size = 128 * 1024;
-  AMDHSA_BITS_SET(kd.kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, rdna);
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE, rdna);
+  RJ_AMDHSA_BITS_SET(kd.kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, rdna);
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE, rdna);
   std::memcpy(code.data(), &kd, sizeof(kd));
   const uint32_t endpgm = rocjitsu::build_s_endpgm(soc_->arch());
   std::memcpy(code.data() + sizeof(kd), &endpgm, sizeof(endpgm));
@@ -2013,6 +2061,406 @@ TEST_F(KfdIoctlCdna5Test, UpdateQueueValidatesRingAndRejectsMissingQueue) {
   EXPECT_EQ(update.ring_size, 0u)
       << "UPDATE_QUEUE is write-only, so internal normalization must not alter caller storage";
 }
+
+enum class GwsFailureKind { SemaphoreTimeout, UninitializedBarrier };
+
+class KfdGwsFailureTest : public KfdIoctlTest,
+                          public ::testing::WithParamInterface<GwsFailureKind> {
+protected:
+  void SetUp() override { SetUpWithConfig(CDNA2_CONFIG_PATH); }
+};
+
+TEST_P(KfdGwsFailureTest, MultipleCuFailuresPublishWithoutAcknowledgment) {
+  constexpr uint64_t kWaveAbort = KFD_EC_MASK(EC_QUEUE_WAVE_ABORT);
+  constexpr uint64_t kStatusAddress = 0x600002000ULL;
+  constexpr uint32_t kEventId = 37;
+  constexpr uint32_t kCwsrSize = 0x40000;
+  std::vector<uint8_t> cwsr(kCwsrSize * soc_->num_xcds());
+  alignas(4096) std::array<uint8_t, 4096> exception_page{};
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  process->map_pages(reinterpret_cast<uint64_t>(cwsr.data()), cwsr.data(), cwsr.size());
+  process->map_pages(kStatusAddress, exception_page.data(), exception_page.size());
+  std::memcpy(cwsr.data() + 6 * sizeof(uint32_t), &kStatusAddress, sizeof(kStatusAddress));
+  std::memcpy(cwsr.data() + 6 * sizeof(uint32_t) + sizeof(uint64_t), &kEventId, sizeof(kEventId));
+  alignas(rocjitsu::amdgpu::kAqlPacketBytes) std::array<uint8_t, 4096> ring{};
+  alignas(4096) amd_queue_v2_t queue_descriptor{};
+  process->map_pages(reinterpret_cast<uint64_t>(&queue_descriptor), &queue_descriptor,
+                     sizeof(queue_descriptor));
+  kfd_ioctl_create_queue_args create{};
+  create.gpu_id = kCdna2GpuId;
+  create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.queue_percentage = 100;
+  create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  create.ring_size = static_cast<uint32_t>(ring.size());
+  create.read_pointer_address = reinterpret_cast<uint64_t>(&queue_descriptor.read_dispatch_id);
+  create.write_pointer_address = reinterpret_cast<uint64_t>(&queue_descriptor.write_dispatch_id);
+  create.ctx_save_restore_address = reinterpret_cast<uint64_t>(cwsr.data());
+  create.ctx_save_restore_size = kCwsrSize;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+  std::atomic<uint32_t> publications{0}, successful_deliveries{0};
+  struct QueueGuard {
+    rocjitsu::SimulatedKfd *driver;
+    uint32_t queue_id;
+    ~QueueGuard() {
+      driver->set_interrupt_callback_for_testing(nullptr);
+      driver->set_runtime_exception_result_hook_for_testing(nullptr);
+      kfd_ioctl_destroy_queue_args destroy{};
+      destroy.queue_id = queue_id;
+      driver->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy);
+    }
+  } guard{driver_, create.queue_id};
+  driver_->set_interrupt_callback_for_testing([&](uint32_t process_id, uint32_t event_id) {
+    if (event_id != kEventId)
+      return;
+    EXPECT_EQ(vm_read64(kStatusAddress, process_id), kWaveAbort);
+    ++publications;
+    std::lock_guard lock(process->alloc_mutex_);
+    const auto &snapshot = process->queue_snapshot_map_.at(create.queue_id);
+    EXPECT_EQ(snapshot.exception_status & kWaveAbort, kWaveAbort);
+    EXPECT_EQ(snapshot.runtime_exception_pending_status & kWaveAbort, kWaveAbort);
+    // Deliberately never acknowledge. Publication must still transfer ownership.
+  });
+  driver_->set_runtime_exception_result_hook_for_testing([&](bool delivered) {
+    EXPECT_TRUE(delivered);
+    successful_deliveries += delivered;
+  });
+  soc_->for_each_cp([](rocjitsu::amdgpu::CommandProcessor *cp) {
+    cp->set_runtime_exception_ack_timeout_for_testing(std::chrono::milliseconds(0));
+  });
+  const auto &cus = soc_->xcd(0)->command_processor()->compute_units();
+  ASSERT_GE(cus.size(), 2u);
+  std::array<rocjitsu::amdgpu::Wavefront *, 2> waves{};
+  for (unsigned i = 0; i < waves.size(); ++i) {
+    cus[i]->set_gws_wait_limit(1);
+    waves[i] = cus[i]->dispatch_wf(0, 0, 96, 4);
+    ASSERT_NE(waves[i], nullptr);
+    waves[i]->set_process_id(driver_->local_process_id());
+    waves[i]->set_queue_id(create.queue_id);
+    cus[i]->begin_workgroup(0, 0, 1);
+    if (GetParam() == GwsFailureKind::SemaphoreTimeout)
+      cus[i]->gws_sema_p(*waves[i], 0);
+  }
+  const auto fail_wave = [&](unsigned i) {
+    cus[i]->with_wave_state_locked([&] {
+      if (GetParam() == GwsFailureKind::UninitializedBarrier)
+        cus[i]->gws_barrier_arrive(*waves[i], 0, 1);
+      else
+        cus[i]->step();
+    });
+  };
+  // Queue the second failure after the first CU unlocks but before it flushes.
+  // Holding a peer CU's lock during notification delivery would invert the CP's
+  // queue-lock -> wave-lock order, unlike the production pooled execution path.
+  cus[0]->set_notification_flush_hook_for_testing([&] {
+    EXPECT_EQ(publications.load(), 0u);
+    fail_wave(1);
+  });
+  fail_wave(0);
+  EXPECT_EQ(publications.load(), 2u);
+  EXPECT_EQ(successful_deliveries.load(), 2u);
+  for (auto *wave : waves) {
+    EXPECT_TRUE(wave->is_halted());
+    EXPECT_EQ(wave->trap_runtime_exception_status(), 0u);
+  }
+  std::lock_guard lock(process->alloc_mutex_);
+  EXPECT_EQ(process->queue_snapshot_map_.at(create.queue_id).runtime_exception_pending_status &
+                kWaveAbort,
+            0u);
+}
+
+INSTANTIATE_TEST_SUITE_P(GwsFailures, KfdGwsFailureTest,
+                         ::testing::Values(GwsFailureKind::SemaphoreTimeout,
+                                           GwsFailureKind::UninitializedBarrier),
+                         [](const ::testing::TestParamInfo<GwsFailureKind> &info) {
+                           return info.param == GwsFailureKind::SemaphoreTimeout
+                                      ? "SemaphoreTimeout"
+                                      : "UninitializedBarrier";
+                         });
+
+enum class RejectionKind { Decode, Operand, Unimplemented };
+
+struct InstructionRejectionCase {
+  const char *name;
+  RejectionKind kind;
+  bool debugger = false;
+  bool runtime_signal = true;
+  bool registered = true;
+  bool polling = false;
+  bool acknowledge = true;
+  bool status_mapped = true;
+  uint32_t faulting_waves = 1;
+};
+
+class KfdInstructionRejectionTest : public KfdIoctlTest,
+                                    public ::testing::WithParamInterface<InstructionRejectionCase> {
+protected:
+  void SetUp() override {
+    SetUpWithConfig(GetParam().kind == RejectionKind::Unimplemented ? CONFIG_PATH
+                                                                    : CDNA5_CONFIG_PATH);
+  }
+};
+
+TEST_P(KfdInstructionRejectionTest, RoutesFailureToQueueOwner) {
+  constexpr uint64_t kKernelAddress = 0x600000000ULL;
+  const uint32_t exception_event_id = GetParam().polling ? 0 : 37;
+  constexpr uint64_t kWaveIllegalInstruction = KFD_EC_MASK(EC_QUEUE_WAVE_ILLEGAL_INSTRUCTION);
+  constexpr uint64_t kWaveAbort = KFD_EC_MASK(EC_QUEUE_WAVE_ABORT);
+  const uint64_t expected_status = GetParam().kind != RejectionKind::Decode
+                                       ? KFD_EC_MASK(EC_QUEUE_WAVE_ABORT)
+                                       : kWaveIllegalInstruction;
+  int debugger_notifier = -1;
+  if (GetParam().debugger) {
+    kfd_ioctl_runtime_enable_args runtime{};
+    runtime.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &runtime), 0);
+    debugger_notifier = make_debug_fd();
+    kfd_ioctl_dbg_trap_args enable{};
+    enable.pid = static_cast<uint32_t>(getpid());
+    enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+    enable.enable.dbg_fd = debugger_notifier;
+    enable.enable.exception_mask = kWaveIllegalInstruction | kWaveAbort;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+  }
+  std::array<uint8_t, 4096> code_page{};
+  constexpr uint32_t kCwsrSize = 0x40000;
+  std::vector<uint8_t> cwsr(kCwsrSize * soc_->num_xcds());
+  alignas(4096) std::array<uint8_t, 4096> exception_page{};
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  process->map_pages(kKernelAddress, code_page.data(), code_page.size());
+  process->map_pages(reinterpret_cast<uint64_t>(cwsr.data()), cwsr.data(), cwsr.size());
+  // Use a distinct GPU address so unmapping cannot fall back to host identity memory.
+  constexpr uint64_t kExceptionStatusAddress = 0x600002000ULL;
+  process->map_pages(kExceptionStatusAddress, exception_page.data(), exception_page.size());
+  if (GetParam().runtime_signal) {
+    std::memcpy(cwsr.data() + 6 * sizeof(uint32_t), &kExceptionStatusAddress,
+                sizeof(kExceptionStatusAddress));
+    std::memcpy(cwsr.data() + 6 * sizeof(uint32_t) + sizeof(uint64_t), &exception_event_id,
+                sizeof(exception_event_id));
+  }
+
+  alignas(rocjitsu::amdgpu::kAqlPacketBytes) std::array<uint8_t, 4096> ring{};
+  alignas(4096) amd_queue_v2_t queue_descriptor{};
+  process->map_pages(reinterpret_cast<uint64_t>(&queue_descriptor), &queue_descriptor,
+                     sizeof(queue_descriptor));
+  kfd_ioctl_create_queue_args create{};
+  create.gpu_id = GetParam().kind == RejectionKind::Unimplemented ? kGpuId : kCdna5GpuId;
+  create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.queue_percentage = 100;
+  create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  create.ring_size = static_cast<uint32_t>(ring.size());
+  create.read_pointer_address = reinterpret_cast<uint64_t>(&queue_descriptor.read_dispatch_id);
+  create.write_pointer_address = reinterpret_cast<uint64_t>(&queue_descriptor.write_dispatch_id);
+  create.ctx_save_restore_address = reinterpret_cast<uint64_t>(cwsr.data());
+  create.ctx_save_restore_size = kCwsrSize;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+  if (!GetParam().status_mapped)
+    process->unmap_pages(kExceptionStatusAddress, exception_page.size());
+  if (!GetParam().acknowledge || GetParam().faulting_waves > 1) {
+    soc_->for_each_cp([](rocjitsu::amdgpu::CommandProcessor *cp) {
+      cp->set_runtime_exception_ack_timeout_for_testing(std::chrono::milliseconds(0));
+    });
+  }
+  std::mutex interrupt_mutex;
+  std::atomic<uint64_t> delivered_status{0};
+  std::atomic<uint32_t> deliveries{0};
+  struct QueueGuard {
+    rocjitsu::SimulatedKfd *driver;
+    uint32_t queue_id;
+    ~QueueGuard() {
+      driver->set_interrupt_callback_for_testing(nullptr);
+      kfd_ioctl_destroy_queue_args destroy{};
+      destroy.queue_id = queue_id;
+      driver->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy);
+    }
+  } guard{driver_, create.queue_id};
+
+  driver_->set_interrupt_callback_for_testing([&](uint32_t process_id, uint32_t event_id) {
+    // The doorbell monitor also sends generic queue-idle interrupts. Polling
+    // signals share event ID zero, so only a nonzero status identifies an
+    // exception. Serialize observers so a polling interrupt cannot acknowledge
+    // and count the same publication as its synchronous exception notification.
+    if (event_id == 0 && exception_event_id != 0)
+      return;
+    const std::lock_guard lock(interrupt_mutex);
+    EXPECT_EQ(process_id, driver_->local_process_id());
+    EXPECT_EQ(event_id, exception_event_id);
+    const uint64_t status = vm_read64(kExceptionStatusAddress, process_id);
+    if (event_id == 0 && status == 0)
+      return;
+    delivered_status = status;
+    ++deliveries;
+    // Acknowledge the runtime exception without completing the failed kernel.
+    // ROCr removes its async handler after acknowledging the first exception.
+    if (GetParam().acknowledge && deliveries.load() == 1)
+      (void)vm_write64(kExceptionStatusAddress, 0, process_id);
+  });
+
+  // Cover decode errors, unsupported operands, and decoded instructions with no
+  // implementation. Only decode errors represent an illegal GPU instruction.
+  std::array<uint32_t, 3> words{0xffffffffu, 0, 0};
+  auto expected_error = rocjitsu::amdgpu::InstructionExecutionError::None;
+  if (GetParam().kind == RejectionKind::Operand) {
+    words = {0xd0710001u, 0x7c000000u, 0x7c7c0c00u};
+    expected_error = rocjitsu::amdgpu::InstructionExecutionError::UnsupportedOperandValue;
+  } else if (GetParam().kind == RejectionKind::Unimplemented) {
+    words = {0xb8000000u, 0, 0}; // s_cbranch_i_fork on CDNA4.
+    expected_error = rocjitsu::amdgpu::InstructionExecutionError::UnimplementedInstruction;
+  }
+  std::memcpy(code_page.data(), words.data(), sizeof(words));
+  auto *cu = soc_->xcd(0)->command_processor()->compute_units().front();
+  auto *wave = cu->dispatch_wf(0, kKernelAddress, /*sgprs=*/96, /*vgprs=*/4);
+  ASSERT_NE(wave, nullptr);
+  wave->set_process_id(driver_->local_process_id());
+  wave->set_queue_id(GetParam().registered ? create.queue_id : create.queue_id + 1);
+  if (GetParam().kind == RejectionKind::Operand)
+    cu->write_sgpr(wave->sgpr_alloc().base, 2u); // Unsupported TDM active descriptor count.
+  auto *peer_cu = soc_->xcd(1)->command_processor()->compute_units().front();
+  auto *peer = peer_cu->dispatch_wf(1, kKernelAddress, /*sgprs=*/96, /*vgprs=*/4);
+  ASSERT_NE(peer, nullptr);
+  peer->set_process_id(driver_->local_process_id());
+  peer->set_queue_id(create.queue_id);
+
+  std::vector<rocjitsu::amdgpu::Wavefront *> extra_waves;
+  for (uint32_t i = 1; i < GetParam().faulting_waves; ++i) {
+    auto *extra = cu->dispatch_wf(i + 1, kKernelAddress, /*sgprs=*/96, /*vgprs=*/4);
+    ASSERT_NE(extra, nullptr);
+    extra->set_process_id(driver_->local_process_id());
+    extra->set_queue_id(create.queue_id);
+    if (GetParam().kind == RejectionKind::Operand)
+      cu->write_sgpr(extra->sgpr_alloc().base, 2u);
+    extra_waves.push_back(extra);
+  }
+  cu->step();
+  const bool engine_failed = GetParam().kind != RejectionKind::Decode || !GetParam().status_mapped;
+  EXPECT_EQ(engine_->last_exit().code, engine_failed ? 1 : 0);
+  if (!GetParam().runtime_signal || !GetParam().registered) {
+    EXPECT_EQ(deliveries.load(), 0u);
+    EXPECT_TRUE(wave->is_halted());
+    EXPECT_FALSE(peer->debug_suspended());
+    return;
+  }
+  EXPECT_EQ(wave->instruction_execution_error(), expected_error);
+  EXPECT_EQ(wave->trapsts(),
+            GetParam().debugger && GetParam().kind == RejectionKind::Decode ? 1u << 11 : 0u);
+  if (debugger_notifier != -1 && GetParam().kind == RejectionKind::Decode) {
+    EXPECT_EQ(deliveries.load(), 0u);
+    uint64_t notification = 0;
+    EXPECT_EQ(::read(debugger_notifier, &notification, sizeof(notification)), sizeof(notification));
+    EXPECT_NE(notification, 0u);
+    EXPECT_TRUE(wave->fatal_exception_pending());
+    EXPECT_TRUE(wave->debug_stopped());
+    // The debugger owns the illegal-instruction exception until it forwards it.
+    kfd_ioctl_dbg_trap_args forward{};
+    forward.pid = static_cast<uint32_t>(getpid());
+    forward.op = KFD_IOC_DBG_TRAP_SEND_RUNTIME_EVENT;
+    forward.send_runtime_event.gpu_id = create.gpu_id;
+    forward.send_runtime_event.queue_id = create.queue_id;
+    forward.send_runtime_event.exception_mask = expected_status;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &forward), 0);
+  }
+  if (debugger_notifier != -1 && GetParam().kind != RejectionKind::Decode) {
+    // dbgapi needs an architectural stop reason to surface an exception. A
+    // simulator support failure instead reaches ROCr without a debugger event.
+    uint64_t notification = 0;
+    EXPECT_EQ(::read(debugger_notifier, &notification, sizeof(notification)), -1);
+    EXPECT_EQ(errno, EAGAIN);
+    EXPECT_FALSE(wave->debug_halted());
+  }
+  EXPECT_EQ(deliveries.load(), GetParam().status_mapped ? GetParam().faulting_waves : 0u);
+  EXPECT_EQ(delivered_status.load(), GetParam().status_mapped ? expected_status : 0u);
+  EXPECT_EQ(wave->pc, kKernelAddress);
+  EXPECT_FALSE(wave->is_halted());
+  EXPECT_TRUE(wave->fatal_exception_pending());
+  EXPECT_TRUE(wave->debug_suspended());
+  EXPECT_TRUE(peer->fatal_exception_pending());
+  EXPECT_TRUE(peer->debug_suspended());
+  for (auto *extra : extra_waves) {
+    EXPECT_TRUE(extra->fatal_exception_pending());
+    EXPECT_TRUE(extra->debug_suspended());
+    EXPECT_EQ(extra->pc, kKernelAddress);
+  }
+  soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    EXPECT_TRUE(
+        cp->queue_exception_suspended_for_test(create.queue_id, driver_->local_process_id()));
+  });
+  cu->step();
+  peer_cu->step();
+  EXPECT_EQ(deliveries.load(), GetParam().status_mapped ? GetParam().faulting_waves : 0u);
+  EXPECT_EQ(wave->pc, kKernelAddress);
+  EXPECT_EQ(peer->pc, kKernelAddress);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    InstructionFailures, KfdInstructionRejectionTest,
+    ::testing::Values(
+        InstructionRejectionCase{.name = "DecodeWithOneAcknowledgmentForFourWaves",
+                                 .kind = RejectionKind::Decode,
+                                 .faulting_waves = 4},
+        InstructionRejectionCase{.name = "OperandWithOneAcknowledgmentForFourWaves",
+                                 .kind = RejectionKind::Operand,
+                                 .faulting_waves = 4},
+        InstructionRejectionCase{.name = "UnimplementedWithOneAcknowledgmentForFourWaves",
+                                 .kind = RejectionKind::Unimplemented,
+                                 .faulting_waves = 4},
+        InstructionRejectionCase{.name = "DecodeWithoutAcknowledgment",
+                                 .kind = RejectionKind::Decode,
+                                 .acknowledge = false},
+        InstructionRejectionCase{.name = "DecodeWithUnmappedStatus",
+                                 .kind = RejectionKind::Decode,
+                                 .status_mapped = false},
+        InstructionRejectionCase{.name = "OperandWithoutAcknowledgment",
+                                 .kind = RejectionKind::Operand,
+                                 .acknowledge = false},
+        InstructionRejectionCase{.name = "OperandWithoutAcknowledgmentWithDebugger",
+                                 .kind = RejectionKind::Operand,
+                                 .debugger = true,
+                                 .acknowledge = false},
+        InstructionRejectionCase{.name = "OperandWithUnmappedStatus",
+                                 .kind = RejectionKind::Operand,
+                                 .status_mapped = false},
+        InstructionRejectionCase{.name = "OperandWithUnmappedStatusWithDebugger",
+                                 .kind = RejectionKind::Operand,
+                                 .debugger = true,
+                                 .status_mapped = false},
+        InstructionRejectionCase{.name = "UnimplementedWithoutAcknowledgment",
+                                 .kind = RejectionKind::Unimplemented,
+                                 .acknowledge = false},
+        InstructionRejectionCase{.name = "UnimplementedWithoutAcknowledgmentWithDebugger",
+                                 .kind = RejectionKind::Unimplemented,
+                                 .debugger = true,
+                                 .acknowledge = false},
+        InstructionRejectionCase{.name = "UnimplementedWithUnmappedStatus",
+                                 .kind = RejectionKind::Unimplemented,
+                                 .status_mapped = false},
+        InstructionRejectionCase{.name = "UnimplementedWithUnmappedStatusWithDebugger",
+                                 .kind = RejectionKind::Unimplemented,
+                                 .debugger = true,
+                                 .status_mapped = false},
+        InstructionRejectionCase{.name = "Decode", .kind = RejectionKind::Decode},
+        InstructionRejectionCase{.name = "Operand", .kind = RejectionKind::Operand},
+        InstructionRejectionCase{
+            .name = "DecodeWithDebugger", .kind = RejectionKind::Decode, .debugger = true},
+        InstructionRejectionCase{
+            .name = "OperandWithDebugger", .kind = RejectionKind::Operand, .debugger = true},
+        InstructionRejectionCase{.name = "Unimplemented", .kind = RejectionKind::Unimplemented},
+        InstructionRejectionCase{.name = "UnimplementedWithDebugger",
+                                 .kind = RejectionKind::Unimplemented,
+                                 .debugger = true},
+        InstructionRejectionCase{.name = "DecodeWithoutRuntimeSignal",
+                                 .kind = RejectionKind::Decode,
+                                 .runtime_signal = false},
+        InstructionRejectionCase{.name = "OperandWithoutRuntimeSignal",
+                                 .kind = RejectionKind::Operand,
+                                 .runtime_signal = false},
+        InstructionRejectionCase{
+            .name = "OperandWithUnknownQueue", .kind = RejectionKind::Operand, .registered = false},
+        InstructionRejectionCase{
+            .name = "DecodeWithPollingSignal", .kind = RejectionKind::Decode, .polling = true},
+        InstructionRejectionCase{
+            .name = "OperandWithPollingSignal", .kind = RejectionKind::Operand, .polling = true}),
+    [](const ::testing::TestParamInfo<InstructionRejectionCase> &info) { return info.param.name; });
 
 TEST_F(KfdIoctlCdna5Test, RuntimeTrapInterruptSignalsQueueExceptionFromM0) {
   constexpr uint64_t kKernelAddress = 0x600000000ULL;
@@ -4109,7 +4557,26 @@ TEST_F(KfdIoctlTest, DbgTrapCompetingNotifierWriterCannotBlockPublisher) {
   ASSERT_EQ(::poll(&pfd, 1, 1000), 1);
   ASSERT_EQ(::read(notifier, &notifications, sizeof(notifications)),
             static_cast<ssize_t>(sizeof(notifications)));
-  EXPECT_EQ(notifications, 1u);
+  // A retry can write successfully but miss its reap deadline under load,
+  // leaving another wakeup for the same retained event. Check delivery rather
+  // than the eventfd's accumulated retry count.
+  EXPECT_GE(notifications, 1u);
+
+  kfd_ioctl_dbg_trap_args query{};
+  query.pid = static_cast<uint32_t>(getpid());
+  query.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;
+  int query_result = -EAGAIN;
+  for (int attempt = 0; attempt < 200 && query_result == -EAGAIN; ++attempt) {
+    query.query_debug_event.exception_mask = kException;
+    query_result = driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query);
+    if (query_result == -EAGAIN)
+      static_cast<void>(::poll(nullptr, 0, 10));
+  }
+  ASSERT_EQ(query_result, 0);
+  EXPECT_EQ(query.query_debug_event.queue_id, create.queue_id);
+  EXPECT_EQ(query.query_debug_event.exception_mask & kException, kException);
+  query.query_debug_event.exception_mask = kException;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), -EAGAIN);
 
   // Stop fixture threads before fork so their temporary allocations are not
   // orphaned in the child. The process-lifetime notification reaper stays alive.
@@ -7885,7 +8352,7 @@ TEST_F(KfdIoctlCdna5Test, ScratchScoreboardSlotsRestartOnEachShaderEngine) {
 
 TEST_F(KfdIoctlCdna5Test, ScratchGrowthPreservesSpillsFromOverlappingDispatches) {
   using namespace rocjitsu;
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   constexpr uint64_t kCodeAddress = 0x10000;
   constexpr uint64_t kScratchPool = 0x1'0000'0000ULL;
   constexpr uint32_t kSentinel = 0x12345678;
