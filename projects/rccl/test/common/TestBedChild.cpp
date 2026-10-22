@@ -6,6 +6,9 @@
 
 #include "TestBedChild.hpp"
 #include "PipeUtils.hpp"
+#if defined(RCCL_TEST_CODE_COVERAGE)
+#include "ProcessIsolatedTestRunner.hpp"
+#endif
 #include "ResourceGuards.hpp"
 #include "comm.h"
 
@@ -201,7 +204,11 @@ namespace RcclUnitTesting
     close(this->childReadFd);
     close(this->childWriteFd);
 
+#if defined(RCCL_TEST_CODE_COVERAGE)
+    ProcessIsolatedTestRunner::exitChild(0);
+#else
     exit(0);
+#endif
   }
 
   ErrCode TestBedChild::GetUniqueId(std::vector<char>& retValBuf)

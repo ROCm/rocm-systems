@@ -13,7 +13,7 @@ use super::{drm, errno, error, native_error, os_process};
 use crate::device::gpu::kernel_queue::{
     KernelCommand, KernelQueueFormat, KernelQueueStatus, KernelQueueWait,
 };
-use crate::host_storage::{Owned, Shared};
+use crate::memory::storage::{Owned, Shared};
 use crate::{Error, ErrorKind};
 use std::io;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
@@ -73,18 +73,31 @@ fn validate_command(command: KernelCommand) -> Result<u32, Error> {
 
 /// One private DRM submission context, completion fence, and atomic slot.
 pub(crate) struct KfdKernelQueue {
+    /// Exact render VM that owns the command context and completion fence.
     vm: Shared<DeviceVm>,
+    /// Rejects use of inherited handles after fork.
     process: u32,
+    /// Private DRM submission context until destruction succeeds.
     context_id: Option<u32>,
+    /// Timeline object proving command retirement.
     completion_syncobj: Option<u32>,
+    /// Hardware IP and ring selected for this queue.
     engine: drm::CommandEngine,
+    /// Atomic submission slot guarding concurrent producers.
     slot: AtomicU64,
+    /// Highest native submission accepted by the driver.
     accepted: AtomicU64,
+    /// Highest submission whose retirement has been proved.
     retired: AtomicU64,
+    /// A failed submission may have reached native execution.
     ambiguous_submission: AtomicBool,
+    /// Native sequence did not match the expected submission identity.
     sequence_mismatch: AtomicBool,
+    /// Sticky terminal error classification.
     terminal: AtomicU8,
+    /// Context release may have completed despite an error.
     context_free_ambiguous: bool,
+    /// Timeline destruction may have completed despite an error.
     syncobj_destroy_ambiguous: bool,
 }
 
@@ -94,7 +107,7 @@ impl KfdKernelQueue {
         format: KernelQueueFormat,
     ) -> Result<Owned<Self>, Error> {
         vm.check()?;
-        let slot = Owned::<Self>::try_new_uninit(vm.allocator())?;
+        let slot = Owned::<Self>::try_new_uninit()?;
         let (ip_type, ring) = match format {
             KernelQueueFormat::Pm4 => (drm::HW_IP_COMPUTE, 0),
             KernelQueueFormat::Sdma => (drm::HW_IP_DMA, 0),
@@ -470,25 +483,20 @@ impl Drop for KfdKernelQueue {
 mod tests {
     use super::super::{memory, sys, sysfs, uapi};
     use super::*;
-    use crate::host_storage::Allocator;
     use std::fs::File;
     use std::sync::Arc;
 
     #[allow(clippy::unwrap_used)]
     fn scripted_vm() -> Shared<DeviceVm> {
-        let allocator = Allocator::default();
-        let kfd = Shared::new(
-            sys::Kfd::with_hook(
-                File::open("/dev/null").unwrap(),
-                Arc::new(|call| {
-                    if let sys::Call::Wait(args, _) = call {
-                        args.result = uapi::WAIT_TIMEOUT;
-                    }
-                    Ok(())
-                }),
-            ),
-            allocator,
-        )
+        let kfd = Shared::new(sys::Kfd::with_hook(
+            File::open("/dev/null").unwrap(),
+            Arc::new(|call| {
+                if let sys::Call::Wait(args, _) = call {
+                    args.result = uapi::WAIT_TIMEOUT;
+                }
+                Ok(())
+            }),
+        ))
         .unwrap();
         let node = sysfs::KfdNode {
             node: 1,

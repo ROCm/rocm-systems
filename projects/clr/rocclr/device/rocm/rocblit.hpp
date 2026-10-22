@@ -133,6 +133,11 @@ class DmaBlitManager : public device::HostBlitManager {
       const std::vector<amd::BatchCopyOp>& copyOps  //!< Batch of copy operations
   ) const;
 
+  //! Copies multiple pitched boxes between buffer objects in a batch through SDMA
+  bool CopyBufferRectBatch(
+      const std::vector<amd::BatchCopyRectOp>& copy_ops  //!< Batch of box copy operations
+  ) const override;
+
   //! Copies an image object to a buffer object
   virtual bool copyImageToBuffer(
       device::Memory& srcMemory,                            //!< Source memory object
@@ -333,6 +338,11 @@ class KernelBlitManager : public DmaBlitManager {
       bool entire = false,                                  //!< Entire buffer will be updated
       amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
   ) const;
+
+  //! Copies hipMalloc and hipHostMalloc boxes through the SDMA batch path
+  bool CopyBufferRectBatch(
+      const std::vector<amd::BatchCopyRectOp>& copy_ops  //!< Batch of box copy operations
+  ) const override;
 
   //! Copies a buffer object to system memory
   virtual bool readBuffer(

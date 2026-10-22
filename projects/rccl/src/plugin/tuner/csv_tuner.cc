@@ -7,11 +7,11 @@
 /*
  * Built-in CSV-based tuner for RCCL.
  *
- * This tuner reads tuning configurations from a CSV file and overrides
+ * This tuner reads tuning configurations from CSV text and overrides
  * RCCL's default algorithm/protocol selection based on message size,
  * collective type, and topology.
  *
- * The CSV config file is searched in the following order:
+ * The config is searched in the following order:
  * 1. NCCL_TUNER_CONFIG_FILE environment variable
  * 2. <librccl.so dir>/tuner/rccl_tuner_<arch>.csv (for development builds)
  * 3. <librccl.so dir>/tuner/rccl_tuner.csv (for development builds)
@@ -19,14 +19,21 @@
  * 5. <librccl.so dir>/../share/rccl/tuner/rccl_tuner.csv (installed RCCL)
  * 6. ${ROCM_PATH}/share/rccl/tuner/rccl_tuner_<arch>.csv (fallback)
  * 7. ${ROCM_PATH}/share/rccl/tuner/rccl_tuner.csv (fallback)
+ * 8. The configs compiled into librccl.so from the source tree's tuner/
+ *    directory (RCCL_TUNER_EMBEDDED_CONFIG=0 disables these).
  *
- * At each location, if gpuArch is unknown, the directory is scanned for any
- * rccl_tuner*.csv file. If no config file is found, the tuner is not activated.
+ * Steps 1-7 are customer overrides; step 8 is what ships. Embedding the
+ * defaults means a cluster does not have to stage the CSV on every node.
+ *
+ * At each disk location, if gpuArch is unknown, the directory is scanned for
+ * any rccl_tuner*.csv file. If no config is found at all, the tuner is not
+ * activated.
  */
 
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+#include <map>
 #include <mutex>
 #include <string>
 #include <dlfcn.h>
@@ -35,10 +42,15 @@
 
 #include "checks.h"
 #include "debug.h"
+#include "param.h"
 #include "tuner.h"
 #include "nccl_tuner.h"
+#include "rccl_tuner_embedded_configs.h"
 
 #define RCCL_CSV_TUNER_MAX_LINE_LENGTH 256
+
+// A tuner config is a few KB; anything past this is not one.
+#define RCCL_CSV_TUNER_MAX_CONFIG_BYTES (1 << 20)
 
 // CSV field indices for configuration parsing
 // Format: colltype,minbytes,maxbytes,algorithm,protocol,channels,nNodes,nRanks,numPipeOps,regBuff
@@ -59,10 +71,19 @@
 #define CONFIG_FIELDS_WITH_REGBUFF 10 // Fields including both numPipeOps and regBuff
 #define CONFIG_FIELDS_MAX 10  // Maximum number of fields supported
 
-// Global state for CSV config file path discovery
+// Prefix used when logging a config that came from the embedded map
+#define RCCL_CSV_TUNER_EMBEDDED_PREFIX "<embedded>/"
+
+// Set to 0 to ignore the configs compiled into librccl.so. Disk locations and
+// NCCL_TUNER_CONFIG_FILE are unaffected.
+RCCL_PARAM(TunerEmbeddedConfig, "TUNER_EMBEDDED_CONFIG", 1);
+
+// Global state for config source discovery
 static std::mutex csvTunerMutex;
-static char csvTunerConfigPath[512] = {0};
-static bool csvTunerConfigPathSet = false;
+static bool csvTunerSourceResolved = false;
+static char csvTunerConfigPath[512] = {0}; // disk path; empty when embedded
+static std::string csvTunerEmbeddedKey; // embedded map key; empty when disk-backed
+static char csvTunerSourceLabel[600] = {0}; // display name returned for embedded configs
 
 // Forward declaration of tuner symbol (defined at end of file)
 extern ncclTuner_t rcclCsvTuner;
@@ -89,6 +110,18 @@ struct CsvTunerContext {
   ncclDebugLogger_t logFunction;
   ncclNvlDomainInfo_t nvlDomainInfo;
 };
+
+// CSV configs compiled into librccl.so, keyed by source file name.
+const std::map<std::string, std::string>& rcclCsvTunerEmbeddedConfigs() {
+  static const std::map<std::string, std::string> configs = [] {
+    std::map<std::string, std::string> m;
+    for (const RcclEmbeddedTunerConfig* e = kRcclEmbeddedTunerConfigs; e->name != nullptr; ++e) {
+      m.emplace(e->name, e->content);
+    }
+    return m;
+  }();
+  return configs;
+}
 
 // Parse collective type from string; sets *valid=false and returns a placeholder if unknown
 static ncclFunc_t parseCollType(const char* str, bool* valid) {
@@ -180,54 +213,56 @@ static const char* protocolToString(int protocol) {
   }
 }
 
-// Helper function to count valid configuration lines in file
-static int countConfigLines(const char* filename) {
-  FILE* file = fopen(filename, "r");
-  if (!file) {
-    return 0;
+// Copy the next line out of *cursor into line[] and advance *cursor. Returns
+// false at end of buffer. Deliberately matches fgets: a line that does not fit
+// is truncated and the remainder is returned as the next line, so buffer-backed
+// and file-backed configs parse identically.
+static bool nextConfigLine(const char** cursor, char* line, size_t lineSize) {
+  const char* p = *cursor;
+  if (*p == '\0') return false;
+
+  const char* eol = strchr(p, '\n');
+  size_t len = eol ? (size_t)(eol - p) : strlen(p);
+  if (len >= lineSize) {
+    len = lineSize - 1;
+    *cursor = p + len;
+  } else {
+    *cursor = eol ? eol + 1 : p + len;
   }
 
+  memcpy(line, p, len);
+  line[len] = '\0';
+  // Drop a trailing CR so CRLF config text parses like LF.
+  if (len > 0 && line[len - 1] == '\r') line[len - 1] = '\0';
+  return true;
+}
+
+// Upper bound on the configs in a buffer, used to size the allocation.
+static int countConfigLines(const char* buffer) {
   char line[RCCL_CSV_TUNER_MAX_LINE_LENGTH];
+  const char* cursor = buffer;
   int count = 0;
 
-  while (fgets(line, sizeof(line), file)) {
+  while (nextConfigLine(&cursor, line, sizeof(line))) {
     const char* trimmed = line + strspn(line, " \t\r\n\v\f");
 
     // Skip comments and empty/whitespace-only lines
     if (*trimmed == '#' || *trimmed == '\0') continue;
 
-    // Remove trailing newline
-    line[strcspn(line, "\n")] = 0;
-
-    // Check if line has content
-    if (strlen(trimmed) > 0) {
-      count++;
-    }
+    count++;
   }
 
-  fclose(file);
   return count;
 }
 
-// Load configuration from file
-static ncclResult_t loadConfig(CsvTunerContext* ctx, const char* filename) {
-  FILE* file = fopen(filename, "r");
-  if (!file) {
-    if (ctx->logFunction) {
-      ctx->logFunction(NCCL_LOG_INFO, NCCL_TUNING, __FILE__, __LINE__, "TUNER/CsvTuner: Config file %s not found",
-                       filename);
-    }
-    return ncclSuccess; // Not finding config file is not an error
-  }
-
-  // First pass: count valid configuration lines
-  int configCount = countConfigLines(filename);
+// Parse CSV text into ctx->configs. sourceName is for logging only.
+static ncclResult_t loadConfigFromBuffer(CsvTunerContext* ctx, const char* buffer, const char* sourceName) {
+  int configCount = countConfigLines(buffer);
   if (configCount == 0) {
     if (ctx->logFunction) {
       ctx->logFunction(NCCL_LOG_INFO, NCCL_TUNING, __FILE__, __LINE__,
-                       "TUNER/CsvTuner: No valid configurations found in %s", filename);
+                       "TUNER/CsvTuner: No valid configurations found in %s", sourceName);
     }
-    fclose(file);
     return ncclSuccess;
   }
 
@@ -238,7 +273,6 @@ static ncclResult_t loadConfig(CsvTunerContext* ctx, const char* filename) {
       ctx->logFunction(NCCL_LOG_INFO, NCCL_TUNING, __FILE__, __LINE__,
                        "TUNER/CsvTuner: Failed to allocate memory for %d configurations", configCount);
     }
-    fclose(file);
     return ncclSystemError;
   }
 
@@ -250,22 +284,17 @@ static ncclResult_t loadConfig(CsvTunerContext* ctx, const char* filename) {
                      "TUNER/CsvTuner: Allocated memory for %d configurations", configCount);
   }
 
-  // Reset file pointer to beginning
-  fseek(file, 0, SEEK_SET);
-
   char line[RCCL_CSV_TUNER_MAX_LINE_LENGTH];
+  const char* cursor = buffer;
   int lineNum = 0;
 
-  while (fgets(line, sizeof(line), file) && ctx->numConfigs < ctx->maxConfigs) {
+  while (nextConfigLine(&cursor, line, sizeof(line)) && ctx->numConfigs < ctx->maxConfigs) {
     lineNum++;
 
     // Skip comments and empty lines, allowing for leading whitespace
     char* trimmedLine = line;
     while (*trimmedLine == ' ' || *trimmedLine == '\t') trimmedLine++;
-    if (trimmedLine[0] == '#' || trimmedLine[0] == '\n' || trimmedLine[0] == '\0') continue;
-
-    // Remove trailing newline
-    line[strcspn(line, "\n")] = 0;
+    if (trimmedLine[0] == '#' || trimmedLine[0] == '\0') continue;
 
     // Parse CSV format: colltype,minbytes,maxbytes,algorithm,protocol,channels,nNodes,nRanks,numPipeOps,regBuff
     char* token;
@@ -359,12 +388,46 @@ static ncclResult_t loadConfig(CsvTunerContext* ctx, const char* filename) {
     }
   }
 
-  fclose(file);
   if (ctx->logFunction) {
     ctx->logFunction(NCCL_LOG_INFO, NCCL_TUNING, __FILE__, __LINE__,
-                     "TUNER/CsvTuner: Loaded %d tuning configurations from %s", ctx->numConfigs, filename);
+                     "TUNER/CsvTuner: Loaded %d tuning configurations from %s", ctx->numConfigs, sourceName);
   }
   return ncclSuccess;
+}
+
+// Load configuration from file
+static ncclResult_t loadConfig(CsvTunerContext* ctx, const char* filename) {
+  FILE* file = fopen(filename, "r");
+  if (!file) {
+    if (ctx->logFunction) {
+      ctx->logFunction(NCCL_LOG_INFO, NCCL_TUNING, __FILE__, __LINE__, "TUNER/CsvTuner: Config file %s not found",
+                       filename);
+    }
+    return ncclSuccess; // Not finding config file is not an error
+  }
+
+  // Bound the accumulation: the old fgets loop never held more than one line,
+  // so a wrong path (a log, a device node) could not grow the allocation. The
+  // cap is checked per chunk rather than up front because fseek/ftell report
+  // nothing useful for a non-regular file.
+  std::string contents;
+  char chunk[4096];
+  size_t n;
+  while ((n = fread(chunk, 1, sizeof(chunk), file)) > 0) {
+    if (contents.size() + n > RCCL_CSV_TUNER_MAX_CONFIG_BYTES) {
+      if (ctx->logFunction) {
+        ctx->logFunction(NCCL_LOG_WARN, NCCL_TUNING, __FILE__, __LINE__,
+                         "TUNER/CsvTuner: Ignoring config %s, larger than %d bytes", filename,
+                         RCCL_CSV_TUNER_MAX_CONFIG_BYTES);
+      }
+      fclose(file);
+      return ncclSuccess; // A bad config file is not an error, same as a missing one
+    }
+    contents.append(chunk, n);
+  }
+  fclose(file);
+
+  return loadConfigFromBuffer(ctx, contents.c_str(), filename);
 }
 
 // Check if a file exists
@@ -417,15 +480,37 @@ static bool getLibraryDirectory(std::string& libDir) {
   return false;
 }
 
-// Find CSV config file path - called before tuner init to determine if we should use CSV tuner
+// Pick an embedded config for gpuArch. Returns the map key, or empty on no match.
+// Caller holds csvTunerMutex.
+static std::string findEmbeddedConfigKey(const char* gpuArch) {
+  if (!rcclParamTunerEmbeddedConfig()) return std::string();
+
+  const std::map<std::string, std::string>& embedded = rcclCsvTunerEmbeddedConfigs();
+
+  if (gpuArch && gpuArch[0]) {
+    std::string archKey = std::string("rccl_tuner_") + gpuArch + ".csv";
+    if (embedded.count(archKey)) return archKey;
+  }
+  if (embedded.count("rccl_tuner.csv")) return "rccl_tuner.csv";
+
+  // Arch-agnostic pick only when the arch is unknown, mirroring the disk search:
+  // with a known arch, another arch's tuning is worse than no tuning at all.
+  if ((!gpuArch || !gpuArch[0]) && !embedded.empty()) return embedded.begin()->first;
+
+  return std::string();
+}
+
+// Find CSV config source - called before tuner init to determine if we should use CSV tuner.
+// Returns a file path, an "<embedded>/<name>" label, or nullptr.
 const char* rcclCsvTunerFindConfig(const char* gpuArch) {
   std::lock_guard<std::mutex> lock(csvTunerMutex);
 
-  if (csvTunerConfigPathSet) {
+  if (csvTunerSourceResolved) {
+    if (!csvTunerEmbeddedKey.empty()) return csvTunerSourceLabel;
     return csvTunerConfigPath[0] ? csvTunerConfigPath : nullptr;
   }
 
-  csvTunerConfigPathSet = true;
+  csvTunerSourceResolved = true;
 
   // 1. Check NCCL_TUNER_CONFIG_FILE environment variable (highest priority)
   const char* envConfig = getenv("NCCL_TUNER_CONFIG_FILE");
@@ -506,16 +591,29 @@ const char* rcclCsvTunerFindConfig(const char* gpuArch) {
     }
   }
 
-  // No config file found
+  // No file on disk; the probes above left a stale path in the buffer.
   csvTunerConfigPath[0] = '\0';
+
+  // 7. Fall back to the configs compiled into librccl.so.
+  std::string embeddedKey = findEmbeddedConfigKey(gpuArch);
+  if (!embeddedKey.empty()) {
+    csvTunerEmbeddedKey = embeddedKey;
+    snprintf(csvTunerSourceLabel, sizeof(csvTunerSourceLabel), RCCL_CSV_TUNER_EMBEDDED_PREFIX "%s",
+             embeddedKey.c_str());
+    return csvTunerSourceLabel;
+  }
+
+  // No config found
   return nullptr;
 }
 
-// Reset config path discovery (for testing)
+// Reset config source discovery (for testing)
 void rcclCsvTunerResetConfigPath() {
   std::lock_guard<std::mutex> lock(csvTunerMutex);
   csvTunerConfigPath[0] = '\0';
-  csvTunerConfigPathSet = false;
+  csvTunerSourceLabel[0] = '\0';
+  csvTunerEmbeddedKey.clear();
+  csvTunerSourceResolved = false;
 }
 
 // Tuner init function
@@ -542,24 +640,39 @@ static ncclResult_t csvTunerInit(void** context, uint64_t commId, size_t nRanks,
                 "TUNER/CsvTuner: Initializing built-in CSV tuner for %zu nodes, %zu ranks", nNodes, nRanks);
   }
 
-  // Use the config path that was discovered earlier
+  // Use the config source that was discovered earlier
+  std::string embeddedKey;
+  std::string embeddedLabel;
   const char* configFile = nullptr;
   {
     std::lock_guard<std::mutex> lock(csvTunerMutex);
-    if (csvTunerConfigPathSet && csvTunerConfigPath[0]) {
+    embeddedKey = csvTunerEmbeddedKey;
+    embeddedLabel = csvTunerSourceLabel;
+    if (csvTunerSourceResolved && csvTunerConfigPath[0]) {
       configFile = csvTunerConfigPath;
     }
   }
 
-  if (!configFile) {
-    // Fallback: try environment variable or default
-    configFile = getenv("NCCL_TUNER_CONFIG_FILE");
-    if (!configFile) {
-      configFile = "rccl_tuner.csv";
+  ncclResult_t result;
+  if (!embeddedKey.empty()) {
+    const std::map<std::string, std::string>& embedded = rcclCsvTunerEmbeddedConfigs();
+    std::map<std::string, std::string>::const_iterator it = embedded.find(embeddedKey);
+    if (it == embedded.end()) {
+      free(ctx);
+      return ncclInternalError;
     }
+    result = loadConfigFromBuffer(ctx, it->second.c_str(), embeddedLabel.c_str());
+  } else {
+    if (!configFile) {
+      // Fallback: try environment variable or default
+      configFile = getenv("NCCL_TUNER_CONFIG_FILE");
+      if (!configFile) {
+        configFile = "rccl_tuner.csv";
+      }
+    }
+    result = loadConfig(ctx, configFile);
   }
 
-  ncclResult_t result = loadConfig(ctx, configFile);
   if (result != ncclSuccess) {
     if (ctx->configs) {
       free(ctx->configs);
