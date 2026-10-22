@@ -8,13 +8,19 @@ Known issues
 
 This page documents known issues with hipFile.
 
-Asynchronous operations that use the fastpath backend will not retry on the fallback backend
-============================================================================================
+.. _hipfile-gpu-max-hw-queues:
 
-If asynchronous operations satisfy fastpath prerequisites, they now run on the
-fastpath backend. If the fastpath device lookup fails or the p2pdma transfer
-is not supported between the devices, the asynchronous operation will now
-fail.
+Asynchronous I/O on registered streams can hang with one GPU hardware queue
+===========================================================================
+
+If the ``GPU_MAX_HW_QUEUES`` environment variable is set to ``1``, an
+asynchronous transfer on a registered stream that uses the fallback path can
+hang. The registered stream waits on the GPU for the transfer to finish, and
+the fallback path copies the data through the GPU. With a single hardware
+queue, the copy can end up queued behind the stream's wait and never run.
+
+To work around this issue, leave ``GPU_MAX_HW_QUEUES`` unset, or set it to
+``2`` or more when you use registered streams.
 
 Poor performance with GPU Virtual Functions
 ===========================================
