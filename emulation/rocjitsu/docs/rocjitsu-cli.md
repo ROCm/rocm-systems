@@ -47,26 +47,41 @@ receiving real GPU descriptors over a Unix socket.
 ## Command-Line Options
 
 ```
-Usage: rocjitsu --config <config.json> [--daemon|--attach] -- <app> [args...]
+Usage: rocjitsu [--config <config.json>|--profile <name>] [--cpu-thread-budget <n>] [--daemon|--attach] -- <app> [args...]
+       rocjitsu paths [--json]
        rocjitsu --config <config.json> --vfio-socket <path>
 ```
 
 | Option | Description |
 |--------|-------------|
-| `--config <path>` | Path to simulation config JSON (required) |
+| `--config <path>` | Path to simulation config JSON. Cannot be combined with `--profile`. |
+| `--profile <name>` | Bundled profile config to run. Defaults to `mi350x` when neither `--config` nor `--profile` is supplied. |
+| `--cpu-thread-budget <n>`, `--cpu-thread-budget=<n>` | Replace `cpu_thread_budget` for this launch only; the source JSON is left unchanged. Zero selects automatic sizing. Not available with `--attach`. |
+| `--thread-budget-table` | Print engine and dispatch allocations without running a VM. |
+| `--json` | Emit machine-readable JSON for commands that support it, such as `paths`. |
 | `--daemon` | Run in daemon mode: fork a daemon process hosting the simulation engine, then launch the application with the interposer. Without `-- <app>`, runs the daemon server only. |
 | `--attach` | Attach to a running daemon. The socket path is resolved as `$ROCJITSU_RUNTIME_DIR/daemon.sock`, then `$XDG_RUNTIME_DIR/rocjitsu/daemon.sock`, falling back to `/tmp/rocjitsu-<uid>/daemon.sock`. |
 | `--vfio-socket <path>` | Serve the configured GPU as a PCI function over VFIO-user. The VMM must share guest RAM through mmap-able file descriptors. |
 | `--check-vfio-user` | Exit successfully only when this binary was built with VFIO-user support. |
 | `--help`, `-h` | Print usage and exit |
 | `--version`, `-v` | Print version, Git revision, commit date, and commit title, then exit |
+| `paths` | Print config/runtime search paths. Use `--json` for a structured form. |
 | `--` | Separator between rocjitsu options and the target application command line |
 
 ### Usage Examples
 
 ```bash
-# Local mode: in-process simulation
+# Local mode with an explicit config: in-process simulation
 rocjitsu --config configs/gfx950_mi355x_kmd.json -- ./app
+
+# Local mode with a bundled profile
+rocjitsu --profile mi350x -- ./app
+
+# Inspect runtime and config locations
+rocjitsu paths --json
+
+# Show launch-time CPU thread allocation without starting a VM
+rocjitsu --profile mi350x --cpu-thread-budget 8 --thread-budget-table
 
 # Daemon mode: fork daemon + launch app
 rocjitsu --daemon --config configs/gfx950_mi355x_kmd.json -- ./app args...

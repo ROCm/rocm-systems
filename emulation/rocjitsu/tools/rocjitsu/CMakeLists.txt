@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 include(rj_configure_target)
+include(GNUInstallDirs)
 
 add_library(
     rocjitsu_cli_launch_preload
@@ -22,6 +23,13 @@ add_executable(rocjitsu_bin main.cpp)
 target_include_directories(
     rocjitsu_bin
     PRIVATE ${GENERATED_DIR} ${RJ_VERSION_INCLUDE_DIR}
+)
+target_compile_definitions(
+    rocjitsu_bin
+    PRIVATE
+        RJ_SOURCE_CONFIG_DIR="${PROJECT_SOURCE_DIR}/configs"
+        RJ_INSTALL_CONFIG_DIR="${CMAKE_INSTALL_FULL_DATADIR}/rocjitsu/configs"
+        RJ_INSTALL_CONFIG_RELDIR="${CMAKE_INSTALL_DATADIR}/rocjitsu/configs"
 )
 
 target_link_libraries(
@@ -64,7 +72,6 @@ set_target_properties(rocjitsu_bin PROPERTIES OUTPUT_NAME rocjitsu)
 
 rj_configure_target(rocjitsu_bin TOOL)
 
-# Install the rocjitsu CLI so it is usable from a packaged dist (the default
-# entrypoint for driving emulation when mirage is not present).
-include(GNUInstallDirs)
+# Install the rocjitsu CLI so it is usable from a packaged dist and as the
+# default entrypoint for local emulation workflows.
 install(TARGETS rocjitsu_bin RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

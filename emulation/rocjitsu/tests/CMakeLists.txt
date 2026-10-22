@@ -370,12 +370,43 @@ endfunction()
 
 # --- Unit / integration test suite ---
 
+set(_rj_cli_failure_script
+    "${CMAKE_CURRENT_SOURCE_DIR}/check_cli_failure.cmake"
+)
 add_test(NAME RocjitsuVersion COMMAND $<TARGET_FILE:rocjitsu_bin> --version)
 set_tests_properties(
     RocjitsuVersion
     PROPERTIES
         PASS_REGULAR_EXPRESSION
             "rocjitsu ${PROJECT_VERSION}[\r\n]+git revision: .+[\r\n]+git commit: .+"
+)
+set(_rj_paths_runtime "${CMAKE_CURRENT_BINARY_DIR}/paths-runtime")
+add_test(
+    NAME RocjitsuPaths
+    COMMAND
+        ${CMAKE_COMMAND} -E env ROCJITSU_RUNTIME_DIR=${_rj_paths_runtime}
+        $<TARGET_FILE:rocjitsu_bin> paths
+)
+set_tests_properties(
+    RocjitsuPaths
+    PROPERTIES PASS_REGULAR_EXPRESSION "runtime_dir: .*/paths-runtime"
+)
+add_test(
+    NAME RocjitsuPathsJson
+    COMMAND
+        ${CMAKE_COMMAND} -E env ROCJITSU_RUNTIME_DIR=${_rj_paths_runtime}
+        $<TARGET_FILE:rocjitsu_bin> paths --json
+)
+set_tests_properties(
+    RocjitsuPathsJson
+    PROPERTIES PASS_REGULAR_EXPRESSION "\"runtime_dir\": \".*/paths-runtime\""
+)
+add_test(
+    NAME RocjitsuPathsRejectsUnknown
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=paths;--bogus" "-DTEST_REGEX=unknown paths option: --bogus"
+        -P ${_rj_cli_failure_script}
 )
 
 # --cpu-thread-budget has to reach the allocation plan through the config copy the
@@ -395,11 +426,69 @@ add_test(
         $<TARGET_FILE:rocjitsu_bin> --config ${_rj_cdna3_config}
         --cpu-thread-budget=1 --thread-budget-table
 )
+add_test(
+    NAME RocjitsuProfileDefaultThreadBudget
+    COMMAND
+        $<TARGET_FILE:rocjitsu_bin> --cpu-thread-budget 32 --thread-budget-table
+)
+add_test(
+    NAME RocjitsuProfileMi300xThreadBudget
+    COMMAND
+        $<TARGET_FILE:rocjitsu_bin> --profile mi300x --cpu-thread-budget 24
+        --thread-budget-table
+)
+add_test(
+    NAME RocjitsuProfileCaseInsensitiveThreadBudget
+    COMMAND
+        $<TARGET_FILE:rocjitsu_bin> --profile MI450X --cpu-thread-budget 48
+        --thread-budget-table
+)
 set_tests_properties(
     RocjitsuCpuThreadBudget
     RocjitsuCpuThreadBudgetAssigned
     PROPERTIES PASS_REGULAR_EXPRESSION "Configured \\| 1 \\| 1 \\| 0 \\| 1"
 )
+set_tests_properties(
+    RocjitsuProfileMi300xThreadBudget
+    PROPERTIES PASS_REGULAR_EXPRESSION "Configured \\| 8 \\| 17 \\| 0 \\| 24"
+)
+set_tests_properties(
+    RocjitsuProfileDefaultThreadBudget
+    PROPERTIES PASS_REGULAR_EXPRESSION "Configured \\| 8 \\| 17 \\| 8 \\| 32"
+)
+set_tests_properties(
+    RocjitsuProfileCaseInsensitiveThreadBudget
+    PROPERTIES PASS_REGULAR_EXPRESSION "Configured \\| 8 \\| 33 \\| 8 \\| 48"
+)
+
+add_test(
+    NAME RocjitsuProfileRejectsUnknown
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--profile;no-such;--thread-budget-table"
+        "-DTEST_REGEX=unknown profile 'no-such'" -P ${_rj_cli_failure_script}
+)
+
+add_test(
+    NAME RocjitsuProfileRejectsConfigConflict
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--config;${_rj_cdna3_config};--profile;mi350x;--thread-budget-table"
+        "-DTEST_REGEX=--config and --profile cannot be combined" -P
+        ${_rj_cli_failure_script}
+)
+
+if(NOT IS_ABSOLUTE "${CMAKE_INSTALL_DATADIR}")
+    add_test(
+        NAME RocjitsuProfileRelocatedInstall
+        COMMAND
+            ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+            "-DTEST_PREFIX=${CMAKE_CURRENT_BINARY_DIR}/relocated-profile-install"
+            "-DTEST_CONFIG_SOURCE=${CMAKE_SOURCE_DIR}/configs/gfx950_mi355x.json"
+            "-DTEST_CONFIG_RELDIR=${CMAKE_INSTALL_DATADIR}/rocjitsu/configs" -P
+            ${CMAKE_CURRENT_SOURCE_DIR}/profile_relocated_install_test.cmake
+    )
+endif()
 
 add_test(
     NAME RocjitsuCpuThreadBudgetRejectsNonNumeric
