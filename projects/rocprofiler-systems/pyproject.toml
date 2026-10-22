@@ -38,7 +38,7 @@ extend-exclude = [
 ]
 
 [tool.ruff.lint]
-ignore = ["BLE001"]
+ignore = ["BLE001", "S110"]
 
 [tool.ruff.lint.per-file-ignores]
 # `profile` and `noprofile` are injected into builtins by rocprofsys/__main__.py
