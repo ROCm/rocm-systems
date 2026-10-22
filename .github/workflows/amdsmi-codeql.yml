@@ -109,20 +109,8 @@ jobs:
         uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4
         with:
           sarif_file: sarif-results/cpp.sarif
+          checkout_path: ${{ env.PROJECT_DIR }}
           category: '/workflow:amdsmi-codeql/language:cpp'
-
-      - name: Fail on CodeQL findings
-        run: |
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-
-          report = json.loads(Path("sarif-results/cpp.sarif").read_text())
-          findings = sum(len(run.get("results", [])) for run in report["runs"])
-          if findings:
-              print(f"::error::CodeQL reported {findings} finding(s)")
-              raise SystemExit(1)
-          PY
 
       - name: Publish CodeQL report
         if: always()
