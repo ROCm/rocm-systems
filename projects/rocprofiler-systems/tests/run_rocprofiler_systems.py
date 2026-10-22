@@ -20,6 +20,7 @@ import subprocess
 from pathlib import Path
 
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 PROJECT_NAME = "rocprofiler-systems"
 
@@ -123,7 +124,7 @@ def run_tests(tests_dir: Path, env: dict[str, str]) -> None:
         "--tests-regex",
         f"^{PROJECT_NAME}-pytest-config$",
     ]
-    logging.info(f"++ Exec [{tests_dir}]$ {format_command(config_cmd)}")
+    logger.info(f"++ Exec [{tests_dir}]$ {format_command(config_cmd)}")
     subprocess.run(config_cmd, cwd=tests_dir, check=True, env=env)
 
     # The tier label already encodes the always-excluded tests/labels, so we
@@ -136,7 +137,7 @@ def run_tests(tests_dir: Path, env: dict[str, str]) -> None:
         "until-pass:3",
     ]
 
-    logging.info(f"++ Exec [{tests_dir}]$ {format_command(cmd)}")
+    logger.info(f"++ Exec [{tests_dir}]$ {format_command(cmd)}")
     subprocess.run(cmd, cwd=tests_dir, check=True, env=env)
 
 
