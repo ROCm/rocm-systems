@@ -33,6 +33,16 @@ install(
     TARGETS rdc_fake_amdsmi
     LIBRARY DESTINATION ${FAKE_GPU_TEST_DIR} COMPONENT ${TESTS_COMPONENT}
 )
+# A library that calls a function no library of this build defines, for the test of
+# RDC libraries from another build. Linked for lazy binding, with the undefined
+# function allowed, so that only the RDC loader's flags decide when it is noticed.
+add_library(rdc_other_build SHARED other_build.cc)
+target_link_options(rdc_other_build PRIVATE "LINKER:-z,lazy" "LINKER:-z,undefs")
+set_target_properties(rdc_other_build PROPERTIES INSTALL_RPATH "")
+install(
+    TARGETS rdc_other_build
+    LIBRARY DESTINATION ${FAKE_GPU_TEST_DIR} COMPONENT ${TESTS_COMPONENT}
+)
 # Every tests/ci/test_fake_gpu*.py runs from this installed copy; CI's run of
 # tests/ci skips them.
 file(GLOB FAKE_GPU_TESTS CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/tests/ci/test_fake_gpu*.py)

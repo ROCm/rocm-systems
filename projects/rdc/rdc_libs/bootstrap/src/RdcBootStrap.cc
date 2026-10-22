@@ -40,6 +40,7 @@ static amd::rdc::RdcLibraryLoader rdc_embedded_loader;
 
 rdc_status_t rdc_init(uint64_t) { return RDC_ST_OK; }
 
+// Both libraries are loaded with RTLD_NODELETE, so open handles stay usable.
 rdc_status_t rdc_shutdown() {
   rdc_status_t client_status = rdc_client_loader.unload();
   rdc_status_t embedded_status = rdc_embedded_loader.unload();
@@ -56,9 +57,11 @@ rdc_status_t rdc_connect(const char* ipAddress, rdc_handle_t* p_rdc_handle, cons
   }
 
   // gRPC worker threads in librdc_client.so keep running after the channel is
-  // destroyed, so rdc_shutdown() must not unmap the code they execute.
+  // destroyed, so rdc_shutdown() must not unmap the code they execute. With RTLD_NOW
+  // a library from another build that needs a missing function fails to load here,
+  // instead of stopping the process when it first calls that function.
   rdc_status_t status =
-      rdc_client_loader.load("librdc_client.so", &func_make_handler, RTLD_LAZY | RTLD_NODELETE);
+      rdc_client_loader.load("librdc_client.so", &func_make_handler, RTLD_NOW | RTLD_NODELETE);
   if (status != RDC_ST_OK) {
     *p_rdc_handle = nullptr;
     return status;
@@ -84,7 +87,10 @@ rdc_status_t rdc_start_embedded(rdc_operation_mode_t op_mode, rdc_handle_t* p_rd
     return RDC_ST_FAIL_LOAD_MODULE;
   }
 
-  rdc_status_t status = rdc_embedded_loader.load("librdc.so", &func_make_handler);
+  // An open handle's threads run code of librdc.so, and its vtable is there, so
+  // rdc_shutdown() must not unmap it; RTLD_NOW as for librdc_client.so.
+  rdc_status_t status =
+      rdc_embedded_loader.load("librdc.so", &func_make_handler, RTLD_NOW | RTLD_NODELETE);
   if (status != RDC_ST_OK) {
     *p_rdc_handle = nullptr;
     return status;
