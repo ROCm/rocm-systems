@@ -53,6 +53,8 @@ cases:
   Unit_HRR_CaptureCapabilities: {}
   Unit_HRR_CaptureCapabilitiesImport_Direct: {}
   Unit_HRR_CaptureCapabilities_Direct: {}
+  Unit_HRR_CaptureClosesArchiveDirs: {}
+  Unit_HRR_CaptureClosesArchiveDirs_Direct: {}
   Unit_HRR_CaptureCrashDuringFork: {}
   Unit_HRR_CaptureCrashDuringFork_Direct: {}
   Unit_HRR_CaptureCrashOnSmallStack: {}
@@ -66,15 +68,24 @@ cases:
   Unit_HRR_CaptureMarksUnwrittenFilesIncomplete: {}
   Unit_HRR_CaptureMovesEarlierArchiveAside: {}
   Unit_HRR_CaptureRefusesPlantedLinks: {}
+  Unit_HRR_CaptureRenamedArchive_Direct: {}
   Unit_HRR_CaptureReplayRoundtrip: {}
   Unit_HRR_CaptureStartNotice: {}
   Unit_HRR_CaptureSurvivesUnusableOutputPath: {}
+  Unit_HRR_CaptureWritesThroughCheckedDirs: {}
   Unit_HRR_ChevronLaunchRoundtrip: {}
   Unit_HRR_ChevronLaunch_Direct: {}
+  Unit_HRR_CloseDuringCrashManifest: {}
+  Unit_HRR_CloseDuringCrashManifest_Direct: {}
+  Unit_HRR_CodeObjectScrub: {}
+  Unit_HRR_CodeObjectScrubWalker: {}
+  Unit_HRR_CodeObjectScrub_Direct: {}
   Unit_HRR_ConfigureCallRoundtrip: {}
   Unit_HRR_ConfigureCall_Direct: {}
   Unit_HRR_ContextRoundtrip: {}
   Unit_HRR_Context_Direct: {}
+  Unit_HRR_D2HExactByDefaultRoundtrip: {}
+  Unit_HRR_D2HShortBlobRoundtrip: {}
   Unit_HRR_DenseOffsetD2HRoundtrip: {}
   Unit_HRR_DenseOffsetD2H_Direct: {}
   Unit_HRR_DeviceExtraRoundtrip: {}
@@ -105,10 +116,14 @@ cases:
   Unit_HRR_DiskSpace_SmallBlobsCountedInBlocks_Direct: {}
   Unit_HRR_DiskSpace_StopWhileExiting: {}
   Unit_HRR_DiskSpace_StopWhileExiting_Direct: {}
+  Unit_HRR_DiskSpace_StopsAfterRename: {}
+  Unit_HRR_DiskSpace_StopsAfterRename_Direct: {}
   Unit_HRR_DiskSpace_StopsBeforeReserve: {}
   Unit_HRR_DiskSpace_StopsBeforeReserve_Direct: {}
+  Unit_HRR_DispatchSwap_ChildKeepsInheritedPreload: {}
   Unit_HRR_DispatchSwap_Direct: {}
   Unit_HRR_DispatchSwap_NoUnreplayableAfterTrailer: {}
+  Unit_HRR_DispatchSwap_Preload_Direct: {}
   Unit_HRR_DispatchSwap_Unreplayable_Direct: {}
   Unit_HRR_DispatchSwap_WrapperOutlivesCapture: {}
   Unit_HRR_DivergenceAbortRoundtrip: {}
@@ -140,6 +155,8 @@ cases:
   Unit_HRR_ForkAfterCaptureShutdown_Direct: {}
   Unit_HRR_ForkBetweenCaptureFlushAndClose: {}
   Unit_HRR_ForkBetweenCaptureFlushAndClose_Direct: {}
+  Unit_HRR_ForkDuringBlobWrite: {}
+  Unit_HRR_ForkDuringBlobWrite_Direct: {}
   Unit_HRR_ForkWhileNotingUnreplayable: {}
   Unit_HRR_ForkWhileNotingUnreplayable_Direct: {}
   Unit_HRR_ForkWhileRecording: {}
@@ -213,6 +230,22 @@ cases:
   Unit_HRR_Occupancy_Direct: {}
   Unit_HRR_OverflowingMemcpy3DNotRecorded: {}
   Unit_HRR_OverflowingMemcpy3D_Direct: {}
+  Unit_HRR_PinnedHostBlobRefused: {}
+  Unit_HRR_PinnedHostFork: {}
+  Unit_HRR_PinnedHostFork_Direct: {}
+  Unit_HRR_PinnedHostFreedRoundtrip: {}
+  Unit_HRR_PinnedHostFreed_Direct: {}
+  Unit_HRR_PinnedHostLarge_Direct: {}
+  Unit_HRR_PinnedHostMalloc_Direct: {}
+  Unit_HRR_PinnedHostModule_Direct: {}
+  Unit_HRR_PinnedHostRegister_Direct: {}
+  Unit_HRR_PinnedHostRoundtrip: {}
+  Unit_HRR_PinnedHostSnapshotCap: {}
+  Unit_HRR_PinnedHostStreamsRoundtrip: {}
+  Unit_HRR_PinnedHostStreams_Direct: {}
+  Unit_HRR_PinnedHostStructLowBits_Direct: {}
+  Unit_HRR_PinnedHostStruct_Direct: {}
+  Unit_HRR_PinnedMallocHost_Direct: {}
   Unit_HRR_PitchedD2HBlobEdits: {}
   Unit_HRR_PitchedD2HGapRoundtrip: {}
   Unit_HRR_PitchedD2HGap_Direct: {}
@@ -264,6 +297,7 @@ cases:
   Unit_HRR_TextureRoundtrip: {}
   Unit_HRR_Texture_Direct: {}
   Unit_HRR_UncapturedHostWrite_Direct: {}
+  Unit_HRR_UnmappedPointerPolicy: {}
   Unit_HRR_VMMRoundtrip: {}
   Unit_HRR_VMM_Direct: {}
   Unit_HRR_VaPlacement_Direct: {}

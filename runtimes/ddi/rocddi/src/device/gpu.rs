@@ -12,15 +12,19 @@
 use crate::device::Device;
 use crate::driver::GpuDriverRef;
 use crate::memory::Allocation;
-use crate::topology::{CacheInfo, GpuInfo};
+use crate::topology::{CacheInfo, CacheKind, GpuInfo};
 use crate::{Error, ErrorKind};
 
 mod copy;
 pub mod event;
+pub mod image;
 pub(crate) mod kernel_queue;
 pub mod profiling;
 pub mod queue;
-pub use copy::{CopyFailure, CopyRect, GpuCopySequence, GpuCopyTimestamps};
+pub use copy::{
+    CopyFailure, CopyRect, GpuCopyOptions, GpuCopySequence, GpuCopySignal, GpuCopySignalOperation,
+    GpuCopyTimestamps, GpuCopyWait,
+};
 
 /// Services shared by cloned handles for one activated GPU.
 #[derive(Default)]
@@ -38,9 +42,7 @@ pub(crate) struct GpuResources {
 #[doc(hidden)]
 #[must_use]
 pub const fn is_compute_data_cache(cache: &CacheInfo) -> bool {
-    const INSTRUCTION: u32 = 1 << 1;
-    const GPU_COMPUTE_UNIT: u32 = 1 << 3;
-    cache.kind & GPU_COMPUTE_UNIT != 0 && cache.kind & INSTRUCTION == 0
+    cache.compute_unit_cache && matches!(cache.kind, CacheKind::Data | CacheKind::Other)
 }
 
 /// A borrowed GPU capability view of an activated [`Device`].
@@ -60,12 +62,31 @@ pub struct GpuDevice<'a> {
     pub(super) resources: &'a GpuResources,
 }
 
+/// Address configuration reported by the active GPU driver for surface layout.
+///
+/// The register value describes hardware pipe and interleave geometry. A
+/// surface layout implementation must use the value from the same device that
+/// will access the image; topology names alone do not determine its tiling.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct GpuSurfaceConfig {
+    /// Hardware `GB_ADDR_CONFIG` register value.
+    pub gb_addr_config: u32,
+}
+
 impl GpuDevice<'_> {
     /// Returns the GPU target, geometry, and transport capabilities captured at
     /// endpoint activation.
     #[must_use]
     pub const fn info(&self) -> &GpuInfo {
         self.info
+    }
+
+    /// Queries the active device's hardware surface address configuration.
+    ///
+    /// # Errors
+    /// Reports an unavailable native query or device-lifetime failure.
+    pub fn surface_config(&self) -> Result<GpuSurfaceConfig, Error> {
+        self.driver.surface_config()
     }
 
     /// Returns the underlying activated device for operations that are valid
@@ -122,8 +143,7 @@ impl GpuDevice<'_> {
     /// # Errors
     /// Reports invalid extents, unavailable local storage, or driver failures.
     pub fn allocate_queue_scratch(&self, size: u64) -> Result<Allocation, Error> {
-        self.driver
-            .allocate_queue_scratch(self.device.endpoint.driver_instance, size)
+        self.driver.allocate_queue_scratch(size)
     }
 
     /// Maps this GPU's process-level MMIO remap page.
@@ -133,7 +153,6 @@ impl GpuDevice<'_> {
     /// # Errors
     /// Reports unsupported mappings or driver allocation and mapping failures.
     pub fn map_mmio_remap(&self) -> Result<Allocation, Error> {
-        self.driver
-            .map_mmio_remap(self.device.endpoint.driver_instance)
+        self.driver.map_mmio_remap()
     }
 }

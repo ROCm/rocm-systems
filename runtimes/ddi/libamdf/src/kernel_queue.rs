@@ -18,11 +18,17 @@ use rocddi::memory::storage::Owned;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Instant;
 
+/// Public kernel queue with its native submission and retirement state.
 struct KernelQueue {
+    /// Driver-mediated queue that owns accepted native submissions.
     native: NativeQueue,
+    /// Borrowed public device kept live by the queue registration count.
     device: *mut Device,
+    /// Immutable creation facts returned through the AMDF ABI.
     info: amdf_kernel_queue_info_t,
+    /// Highest submission ID published to callers.
     accepted: AtomicU64,
+    /// Prevents new work once public destruction begins.
     destroying: AtomicBool,
 }
 
@@ -88,7 +94,8 @@ pub(crate) unsafe extern "C" fn create(
             AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA => KernelQueueFormat::Sdma,
             _ => return Err(UNSUPPORTED),
         };
-        let slot = Owned::<KernelQueue>::try_new_uninit().map_err(|_| EXHAUSTED)?;
+        let instance = instance::device_instance(device);
+        let slot = instance.owner_slot::<KernelQueue>()?;
         register(&device.queues)?;
         let gpu = match device.native.gpu() {
             Ok(gpu) => gpu,
@@ -271,6 +278,11 @@ pub(crate) unsafe extern "C" fn submit(
             descriptor.byte_offset,
             descriptor.byte_length,
         )?;
+        if queue.info.command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA
+            && command.device_address % 32 != 0
+        {
+            return Err(INVALID);
+        }
         // SAFETY: kernel_command validates current attachment and execute
         // permission. The AMDF submit contract requires the caller to keep
         // command storage and indirect dependencies live and unchanged until
