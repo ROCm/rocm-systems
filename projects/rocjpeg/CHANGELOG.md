@@ -3,7 +3,7 @@
 Documentation for rocJPEG is available at
 [https://rocm.docs.amd.com/projects/rocJPEG/en/latest/](https://rocm.docs.amd.com/projects/rocJPEG/en/latest/)
 
-## rocJPEG 1.13.0 for ROCm 10.2
+## rocJPEG 1.13.0 for ROCm 10.2.0
 
 ### Added
 
@@ -16,7 +16,7 @@ Documentation for rocJPEG is available at
 
 * The decode APIs (`rocJpegDecode`, `rocJpegDecodeAsync`, `rocJpegDecodeBatched`, and `rocJpegDecodeBatchedAsync`) now return `ROCJPEG_STATUS_INVALID_PARAMETER` when the crop rectangle in `RocJpegDecodeParams` does not lie within the image.
 
-## rocJPEG 1.10.0 for ROCm 10.1
+## rocJPEG 1.10.0 for ROCm 10.1.0
 
 ### Added
 
@@ -36,7 +36,7 @@ Documentation for rocJPEG is available at
 
 * Fixed link failures (undefined `pthread_create`) in the `jpegDecodeAsync` and `jpegDecodeBatchedAsync` samples.
 
-## rocJPEG 1.7.0 for ROCm 10.0
+## rocJPEG 1.7.0 for ROCm 10.0.0
 
 ### Added
 

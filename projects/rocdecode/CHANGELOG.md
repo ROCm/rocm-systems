@@ -2,7 +2,7 @@
 
 Full documentation for rocDecode is available at [https://rocm.docs.amd.com/projects/rocDecode/en/latest/](https://rocm.docs.amd.com/projects/rocDecode/en/latest/)
 
-## rocDecode 1.12.0 for ROCm 10.2
+## rocDecode 1.12.0 for ROCm 10.2.0
 
 ### Added
 
@@ -17,7 +17,7 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 * Fixed `rocDecGetDecoderCaps` advertising 16-bit output surface formats for 8-bit content.
 * The `videoDecodeRaw` and `videoDecode` samples now exit with code 77 instead of 1 when the GPU doesn't support the stream's codec, and the `video_decodeRaw-*` and `video_decode-*` CTests report that as skipped instead of failed (e.g. the AV1 tests on gfx90a). A failed decoder capability query is still reported as an error.
 
-## rocDecode 1.10.0 for ROCm 10.1
+## rocDecode 1.10.0 for ROCm 10.1.0
 
 ### Added
 
@@ -34,7 +34,7 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 * Resolved vendored libva link issue in samples without extra env vars.
 * Fixed the performance test script creating the wrong results directory when `sample_mode` is 1.
 
-## rocDecode 1.9.0 for ROCm 10.0
+## rocDecode 1.9.0 for ROCm 10.0.0
 
 ### Added
 
