@@ -30,6 +30,11 @@ NCCL_API(ncclResult_t, ncclGinInboxA2ACreateRequirement, ncclTeam peers, int nBl
 ncclResult_t ncclGinInboxA2ACreateRequirement(ncclTeam peers, int nBlocks, int size_log2,
                                               ncclGinInboxA2AHandle* outHandle, ncclDevResourceRequirements* outReq) {
   int nPeers = peers.nRanks - 1;
+  // Device code reduces modulo nPeers through nPeers_rcp32, so a team needs at least one peer.
+  if (nPeers < 1) {
+    WARN("ncclGinInboxA2ACreateRequirement: team has %d rank(s), at least 2 are required", peers.nRanks);
+    return ncclInvalidArgument;
+  }
   memset(outReq, 0, sizeof(*outReq));
   outHandle->size_log2 = size_log2;
   outHandle->nPeers_rcp32 = idivRcp32(nPeers);

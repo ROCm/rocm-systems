@@ -445,6 +445,7 @@ function(rccl_define_micro_source_lists)
   # fakes/dev_runtime_micro_fakes.cc fakes three of them in rccl-UnitTestsMicro.
   set(TEST_MICRO_NCCL_DEVICE_SOURCE_FILES
     nccl-device-requirements-test.cc
+    fakes/nccl_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 

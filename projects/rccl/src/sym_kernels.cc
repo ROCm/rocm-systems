@@ -267,8 +267,8 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
       rsGinAccumReq.next = reqs.resourceRequirementsList;
       reqs.resourceRequirementsList = &rsGinAccumReq;
 
-      ncclGinInboxA2ACreateRequirement(ncclTeamRail(comm), maxBlocks, log2Up(bufSize), &symk->kcomm.ginInboxRail,
-                                       &ginInboxRailReq);
+      NCCLCHECK(ncclGinInboxA2ACreateRequirement(ncclTeamRail(comm), maxBlocks, log2Up(bufSize),
+                                                 &symk->kcomm.ginInboxRail, &ginInboxRailReq));
       ginInboxRailReq.next = reqs.resourceRequirementsList;
       reqs.resourceRequirementsList = &ginInboxRailReq;
 

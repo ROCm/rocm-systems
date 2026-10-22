@@ -13,11 +13,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <sys/prctl.h>
-#include <sys/resource.h>
 #include <vector>
-
-#include "common/ProcessIsolatedTestRunner.hpp"
 
 // ncclDevResourceRequirements / ncclTeam live behind core_tmp.h, transitively included below.
 #include "nccl_device/impl/ll_a2a__types.h"
@@ -68,23 +64,6 @@ void ExpectNoGinCounterFields(const ncclDevResourceRequirements_t& req) {
   EXPECT_EQ(req.ginCounterCount, 0);
   EXPECT_EQ(req.outGinCounterStart, nullptr);
 }
-
-// The isolated child re-execs, resetting PR_SET_DUMPABLE, so it must be set again here rather than
-// once in the runner. ci-precheckin.json builds Debug with coverage on, so a core dump is sizable.
-void DisableCoreDumpsForExpectedCrash() {
-#if defined(__linux__)
-  if (prctl(PR_SET_DUMPABLE, 0) != 0) {
-    std::perror("prctl(PR_SET_DUMPABLE) failed");
-    _exit(1);
-  }
-#endif
-  const struct rlimit noCore = {0, 0};
-  if (setrlimit(RLIMIT_CORE, &noCore) != 0) {
-    std::perror("setrlimit(RLIMIT_CORE) failed");
-    _exit(1);
-  }
-}
-
 } // namespace
 
 // divUp rounding: maxEltSize of 1, 7, 8 all round up to one 8-byte slot; 9 and 16 need two.
@@ -262,36 +241,21 @@ TEST(DeviceResourceRequirementTests, GinInboxA2ACreateRequirement_BufferSizeAndS
   }
 }
 
-// A 1-rank team makes nPeers = 0, and idivRcp32(0) (bitops.h) divides by zero at runtime: a real
-// defect, unreachable from any in-tree caller (src/sym_kernels.cc guards nRanks >= 2 via
-// computeLsaSize's GCD construction). A crash-containment pin, not an assertion on the exact
-// signal: ProcessIsolatedTestRunner's public API clears per-test results before executeAllTests()
-// returns, so nothing here can read back WTERMSIG. A gtest death test would pin SIGFPE precisely,
-// but this file compiles for both host and the gfx1151 device pass, which never defines __linux__,
-// so GTEST_HAS_DEATH_TEST is false there and EXPECT_EXIT does not exist (confirmed by a scratch
-// build). Verified empirically instead: the isolated child is killed by signal 8 today.
-//
-// x86_64-only: idivRcp32 is a runtime 64-bit divide, and only x86 raises #DE on divide-by-zero.
-// AArch64 UDIV is defined to return 0 without trapping, so the same call would return ncclSuccess
-// there, and this pin would misreport the still-present defect as fixed. Same guard idiom as
-// src/proxy.cc:887. No aarch64 target exists in tools/scripts/test_runner/configs/ today.
-TEST(DeviceResourceRequirementTests, GinInboxA2ACreateRequirement_SingleRankTeam_CrashesOnDivideByZero) {
-#if defined(__x86_64__)
-  // Not RUN_ISOLATED_TEST (it EXPECT_TRUE's the run); no lambda assertion either, so a future fix
-  // that makes the call return normally flips executeAllTests() true and fails the EXPECT_FALSE below.
-  ProcessIsolatedTestRunner::registerTest("GinInboxA2A_SingleRankTeam_DivideByZero", [] {
-    DisableCoreDumpsForExpectedCrash();
-    ncclTeam_t peers{/*nRanks=*/1, /*rank=*/0, /*stride=*/1};
+// A team without peers (nRanks < 2) has no valid nPeers reciprocal, so it is rejected before
+// either out-param is written. ncclTeamRail() on a single-node comm returns such a team.
+TEST(DeviceResourceRequirementTests, GinInboxA2ACreateRequirement_TeamWithoutPeersIsRejected) {
+  for (int nRanks : {1, 0}) {
+    SCOPED_TRACE(::testing::Message() << "nRanks=" << nRanks);
+    ncclTeam_t peers{/*nRanks=*/nRanks, /*rank=*/0, /*stride=*/1};
     ncclGinInboxA2AHandle handle = poisonedHandle<ncclGinInboxA2AHandle>();
     ncclDevResourceRequirements_t req = poisonedRequirement();
-    // Never expected to return: SIGFPE fires inside idivRcp32 before this line completes.
-    ncclGinInboxA2ACreateRequirement(peers, /*nBlocks=*/1, /*size_log2=*/7, &handle, &req);
-  });
-  EXPECT_FALSE(ProcessIsolatedTestRunner::executeAllTests())
-    << "expected the isolated child to be killed by SIGFPE; if it now passes, the defect was fixed";
-#else
-  GTEST_SKIP() << "divide-by-zero trap is x86_64-specific; AArch64 UDIV returns 0 without trapping";
-#endif
+    EXPECT_EQ(ncclGinInboxA2ACreateRequirement(peers, /*nBlocks=*/1, /*size_log2=*/7, &handle, &req),
+              ncclInvalidArgument);
+    const ncclGinInboxA2AHandle poisonHandle = poisonedHandle<ncclGinInboxA2AHandle>();
+    const ncclDevResourceRequirements_t poisonReq = poisonedRequirement();
+    EXPECT_EQ(std::memcmp(&handle, &poisonHandle, sizeof(handle)), 0) << "handle written on error";
+    EXPECT_EQ(std::memcmp(&req, &poisonReq, sizeof(req)), 0) << "requirement written on error";
+  }
 }
 
 // bufferSize == (3*nBarriers + nBarriers*team.nRanks) * sizeof(uint32_t); nBarriers == 0 gives 0.
