@@ -444,6 +444,13 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
+  # rccl-UnitTestsMicroHostDispatch -- host_test_dispatch.cc, the rccl-UnitTestsHostAll front end.
+  # Own binary like every other unit under test; it also makes the dispatcher run its own tests.
+  set(TEST_MICRO_HOST_DISPATCH_SOURCE_FILES
+    host-test-dispatch-test.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
   # rccl-UnitTestsMicroArgcheck -- src/misc/argcheck.cc. Own binary: the test seams the HIP, window
   # and bootstrap calls around argcheck.cc, which other micro binaries link whole as an oracle TU.
   set(TEST_MICRO_ARGCHECK_SOURCE_FILES
@@ -2410,6 +2417,28 @@ rccl_add_micro_binary(rccl-UnitTestsMicroMisc
     MLX5DVSYMBOLS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/mlx5dvsymbols.cc"
     MLX5DVWRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/mlx5dvwrap.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_misc.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroHostDispatch
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroHostDispatch
+  SOURCES ${TEST_MICRO_HOST_DISPATCH_SOURCE_FILES}
+  EXTRA_DEFS ${_MICRO_MODE_DEFS}
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsHostAll
+# ---------------------------------------------------------------------------
+# The single gtest-shaped front door for every rccl-UnitTestsMicro* binary above: it discovers
+# them at run time, so a test harness integrates with this one target and never needs a copy of
+# the binary list. Deliberately NOT named rccl-UnitTestsMicro*, so it cannot front itself.
+#
+# Defined through the same helper as the binaries it runs purely so the two build modes, the
+# install rule and the host-only flags stay in one place; it compiles no production source and
+# links no fakes.
+rccl_add_micro_binary(rccl-UnitTestsHostAll
+  SOURCES host_test_dispatch.cc
+  EXTRA_DEFS ${_MICRO_MODE_DEFS})
 
 # =====================================================================
 # Standalone-only tail: coverage + no CTest registration.

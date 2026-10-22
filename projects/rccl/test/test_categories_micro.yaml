@@ -170,6 +170,16 @@ test_categories:
       - "ProcessIsolatedRunnerMicrotest.*"
       # register/*.cc
       - "Register*"
+      # test/host/host_test_dispatch.cc (rccl-UnitTestsMicroHostDispatch)
+      - "HostDispatchMatchMicrotest.*"
+      - "HostDispatchFilterMicrotest.*"
+      - "HostDispatchListingMicrotest.*"
+      - "HostDispatchQualifierMicrotest.*"
+      - "HostDispatchXmlMicrotest.*"
+      - "HostDispatchReportMicrotest.*"
+      - "HostDispatchMergeMicrotest.*"
+      - "HostDispatchArgsMicrotest.*"
+      - "HostDispatchCoverageMicrotest.*"
     exclude_windows:
       - "*"
     labels:
