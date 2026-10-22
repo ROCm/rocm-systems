@@ -501,7 +501,7 @@ RocJpegStatus ROCJPEGAPI rocJpegDecodeSync(RocJpegHandle handle, RocJpegImage *d
  * retrieve the decoded output. The intended usage is a producer/consumer model where one thread calls
  * rocJpegDecodeBatchedAsync() and a separate thread calls rocJpegDecodeBatchedSync(). The two threads can
  * run these calls at the same time on the same handle. The rocJpegDecode(),
- * rocJpegDecodeBatched(), rocJpegDecodeAsync(), and rocJpegDecodeBatchedAsync()) must not be called from
+ * rocJpegDecodeBatched(), rocJpegDecodeAsync(), and rocJpegDecodeBatchedAsync() must not be called from
  * more than one thread at the same time on the same handle.
  *
  * The stream handles and the data they were parsed from are no longer used once this function returns, so they
