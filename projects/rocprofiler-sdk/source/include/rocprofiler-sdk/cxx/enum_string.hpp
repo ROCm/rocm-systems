@@ -1549,9 +1549,21 @@ ROCPROFILER_ENUM_LABEL(ROCPROFILER_ROCSHMEM_API_ID_getmem_on_stream);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_ROCSHMEM_API_ID_putmem_on_stream);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_ROCSHMEM_API_ID_putmem_signal_on_stream);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_ROCSHMEM_API_ID_signal_wait_until_on_stream);
+#if ROCSHMEM_API_TRACE_VERSION_PATCH >= 8
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_ROCSHMEM_API_ID_signal_add_on_stream);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_ROCSHMEM_API_ID_signal_set_on_stream);
+#endif
+
+#if ROCSHMEM_API_TRACE_VERSION_PATCH < 8
+static_assert(ROCPROFILER_ROCSHMEM_API_ID_LAST == 9);
+#elif ROCSHMEM_API_TRACE_VERSION_PATCH == 8
 static_assert(ROCPROFILER_ROCSHMEM_API_ID_LAST == 11);
+#else
+#    if !defined(ROCPROFILER_UNSAFE_NO_VERSION_CHECK) &&                                           \
+        (defined(ROCPROFILER_CI) && ROCPROFILER_CI > 0)
+static_assert(false, "Support for new ROCSHMEM_API_TRACE_VERSION_PATCH enumerations is required");
+#    endif
+#endif
 
 // rocprofiler_hipfile_api_id_t
 ROCPROFILER_ENUM_INFO(rocprofiler_hipfile_api_id_t,
