@@ -3,6 +3,7 @@
 
 import builtins
 import os
+import random
 import sys
 from pathlib import Path
 
@@ -135,4 +136,21 @@ def pytest_addoption(parser):
             / "lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
         ),
         help="Path to the rocprofiler-sdk tool",
+    )
+
+    parser.addoption(
+        "--coverage-seed",
+        type=int,
+        default=random.randrange(2**32),
+        help="RNG seed for test_torch_trace_coverage sampling.",
+    )
+    parser.addoption(
+        "--coverage-n",
+        type=int,
+        default=20,
+        help=(
+            "Number of operators test_torch_trace_coverage samples, split evenly "
+            "between ATen and structural operators (default 20). "
+            "Use 100 for a nightly run."
+        ),
     )
