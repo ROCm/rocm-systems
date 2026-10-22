@@ -10,6 +10,8 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - `rdcd` pings the connection of each client every 60 seconds and closes a connection whose client does not answer within 20 seconds.
 
+- `rdcd` runs at most two diagnostics at a time, `rdc_diagnostic_run()` and `rdc_test_case_run()` together for all of its clients, and returns `RDC_ST_MAX_LIMIT` for another, so that clients cannot keep the GPUs busy with diagnostics without limit. A run keeps its place until it ends, also after its client has gone away.
+
 - **`rdc_health_get()` returns `RDC_ST_GROUP_NOT_FOUND` for a GPU group that does not exist**.
   - It returned `RDC_ST_OK` with no health watches, so `rdci health -f` showed every watch as Off and exited successfully, and `rdci health -c` failed asking for watches to be enabled. Both commands now fail with a message that the group does not exist.
 
@@ -24,6 +26,10 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - All clients registered for the policies of one GPU group receive every notification. Each notification went to only one of them.
 
 - `rdc_policy_register()` through `rdcd` works again for a group whose registration ended by itself, for example because `rdcd` restarted. It returned `RDC_ST_CONFLICT` for that group until the connection was closed.
+
+- `rdci diag`, and `rdc_diagnostic_run()` and `rdc_test_case_run()` with `rdcd`, report the error of a diagnostic that `rdcd` cannot run, for example for a GPU group that does not exist, and return `RDC_ST_CLIENT_ERROR` when `rdcd` cannot be reached. They reported success with an empty or stale result.
+
+- `rdc_diagnostic_run()` and `rdc_test_case_run()` with `rdcd` no longer crash when `config` is NULL.
 
 - `rdci health -s` on a GPU group that does not exist no longer leaves an unused field group in rdcd. Repeated failures filled the field group table, and commands that need a new field group, such as `rdci dmon`, then failed until rdcd was restarted.
 

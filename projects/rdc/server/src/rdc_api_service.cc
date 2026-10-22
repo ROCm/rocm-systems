@@ -51,6 +51,31 @@ bool RdcAPIServiceImpl::policy_shutdown_ = false;
 
 RdcAPIServiceImpl::RdcAPIServiceImpl() : rdc_handle_(nullptr) {}
 
+RdcAPIServiceImpl::DiagnosticSlot::DiagnosticSlot(std::atomic<uint32_t>* runs) : runs_(runs) {
+  uint32_t held = runs_->load();
+  while (held < kMaxDiagnosticRuns && !runs_->compare_exchange_weak(held, held + 1)) {
+  }
+  held_ = held < kMaxDiagnosticRuns;
+}
+
+RdcAPIServiceImpl::DiagnosticSlot::~DiagnosticSlot() {
+  if (held_) {
+    runs_->fetch_sub(1);
+  }
+}
+
+// Ends a diagnostic run that found no free slot, before any GPU work. Logged at debug level:
+// any client can repeat it.
+template <typename Response>
+::grpc::Status RdcAPIServiceImpl::reject_diagnostic(::grpc::ServerWriter<Response>* writer,
+                                                    const char* rpc) {
+  RDC_LOG(RDC_DEBUG, rpc << " rejected: rdcd runs " << kMaxDiagnosticRuns << " already");
+  Response reply;
+  reply.set_status(RDC_ST_MAX_LIMIT);
+  writer->Write(reply);
+  return ::grpc::Status::OK;
+}
+
 rdc_status_t RdcAPIServiceImpl::Initialize(uint64_t rdcd_init_flags) {
   rdc_status_t result = rdc_init(rdcd_init_flags);
   if (result != RDC_ST_OK) {
@@ -648,6 +673,10 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
   if (!writer || !request) {
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
+  DiagnosticSlot slot(&diagnostic_runs_);  // released when the run returns
+  if (!slot.held()) {
+    return reject_diagnostic(writer, "DiagnosticRun");
+  }
 
   auto cb_lambda = [](void* w, void* m) -> void {
     if (w == nullptr) {
@@ -686,6 +715,7 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
   ::rdc::DiagnosticRunResponse reply;
   reply.set_status(result);
   if (result != RDC_ST_OK) {
+    writer->Write(reply);  // the client returns the status
     return ::grpc::Status::OK;
   }
 
@@ -741,6 +771,10 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
   if (!writer || !request) {
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
+  DiagnosticSlot slot(&diagnostic_runs_);  // released when the run returns
+  if (!slot.held()) {
+    return reject_diagnostic(writer, "DiagnosticTestCaseRun");
+  }
 
   auto cb_lambda = [](void* w, void* m) -> void {
     if (w == nullptr) {
@@ -779,6 +813,7 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
   ::rdc::DiagnosticTestCaseRunResponse reply;
   reply.set_status(result);
   if (result != RDC_ST_OK) {
+    writer->Write(reply);  // the client returns the status
     return ::grpc::Status::OK;
   }
   ::rdc::DiagnosticTestResult* to_diag_info = reply.mutable_result();

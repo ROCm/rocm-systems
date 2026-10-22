@@ -709,7 +709,9 @@ rdc_status_t RdcStandaloneHandler::rdc_diagnostic_run(rdc_gpu_group_t group_id,
 
   request.set_group_id(group_id);
   request.set_level(level);
-  request.set_config(config);
+  if (config != nullptr) {
+    request.set_config(config);
+  }
   request.set_config_size(config_size);
 
   auto reader = stub_->DiagnosticRun(&context, request);
@@ -718,10 +720,17 @@ rdc_status_t RdcStandaloneHandler::rdc_diagnostic_run(rdc_gpu_group_t group_id,
   // there are 2 optional reply fields:
   // * log - reports messages back during the diagnostic run
   // * response - delivered when the diagnostic run completes
+  // A reply with an error status instead ends a run that failed or was rejected. (A stream
+  // cannot use error_handle(): its status comes in a reply, and the gRPC status at the end.)
+  rdc_status_t run_status = RDC_ST_OK;
   while (reader->Read(&reply)) {
     if (reply.has_log()) {
       // TODO: Add different logging levels
       std::cout << "LOG: " << reply.log() << std::endl;
+      continue;
+    }
+    if (reply.status() != RDC_ST_OK) {
+      run_status = static_cast<rdc_status_t>(reply.status());
       continue;
     }
     if (reply.has_response()) {
@@ -763,13 +772,11 @@ rdc_status_t RdcStandaloneHandler::rdc_diagnostic_run(rdc_gpu_group_t group_id,
   }
 
   auto status = reader->Finish();
-  if (status.ok()) {
-    RDC_LOG(RDC_DEBUG, "reader status: success!");
-  } else {
-    RDC_LOG(RDC_ERROR, "reader status: failure!");
+  if (!status.ok()) {
+    RDC_LOG(RDC_ERROR, "DiagnosticRun failed: gRPC status " << status.error_code());
+    return RDC_ST_CLIENT_ERROR;
   }
-
-  return RDC_ST_OK;
+  return run_status;
 }
 
 rdc_status_t RdcStandaloneHandler::rdc_test_case_run(rdc_gpu_group_t group_id,
@@ -785,12 +792,20 @@ rdc_status_t RdcStandaloneHandler::rdc_test_case_run(rdc_gpu_group_t group_id,
   ::grpc::ClientContext context;
 
   request.set_group_id(group_id);
-  request.set_config(config);
+  if (config != nullptr) {
+    request.set_config(config);
+  }
   request.set_config_size(config_size);
   request.set_test_case(static_cast<::rdc::DiagnosticTestCaseRunRequest_TestCaseType>(test_case));
 
   auto reader = stub_->DiagnosticTestCaseRun(&context, request);
+  // A reply with an error status ends a run that failed or was rejected.
+  rdc_status_t run_status = RDC_ST_OK;
   while (reader->Read(&reply)) {
+    if (reply.status() != RDC_ST_OK) {
+      run_status = static_cast<rdc_status_t>(reply.status());
+      continue;
+    }
     if (!reply.has_result()) {
       RDC_LOG(RDC_ERROR, "NO TEST_RUN RESULT!");
       continue;
@@ -823,13 +838,11 @@ rdc_status_t RdcStandaloneHandler::rdc_test_case_run(rdc_gpu_group_t group_id,
   }
 
   auto status = reader->Finish();
-  if (status.ok()) {
-    RDC_LOG(RDC_DEBUG, "reader status: success!");
-  } else {
-    RDC_LOG(RDC_ERROR, "reader status: failure!");
+  if (!status.ok()) {
+    RDC_LOG(RDC_ERROR, "DiagnosticTestCaseRun failed: gRPC status " << status.error_code());
+    return RDC_ST_CLIENT_ERROR;
   }
-
-  return RDC_ST_OK;
+  return run_status;
 }
 
 // Control RdcAPI
