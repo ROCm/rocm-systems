@@ -1788,11 +1788,33 @@ Enable/disable support for multiple outstanding NCCL calls from parallel CUDA gr
 
 The ability to disable support is motivated by observed hangs in the CUDA launches when support is enabled and multiple ranks have work launched via cudaGraphLaunch from the same thread.
 
-When set, this variable overrides the communicator's ``graphUsageMode`` (see :ref:`ncclconfig`): ``1`` sets it to ``2`` and ``0`` sets it to ``0``. Because ``2`` cannot be combined with :ref:`NCCL_GRAPH_STREAM_ORDERING` ``0``, ``1`` also forces ``graphStreamOrdering`` back to ``1`` when stream ordering is disabled.
+To turn mixing off while keeping graph use supported, leave this variable unset,
+set ``graphUsageMode=1`` and use one graph at a time. Setting the variable to
+``0`` forces ``graphUsageMode=0``, under which capturing collectives is not
+supported, so it only suits applications that stop capturing.
+
+Support is in effect only on a communicator whose ``graphUsageMode`` (see
+:ref:`ncclconfig`) is ``2``. Set ``2`` on every communicator involved, including
+each one that shares resources through ``ncclCommSplit``: the interlock only
+holds when both the capturing and the non-captured side use ``2``.
+
+When set to ``0`` or ``1``, this variable overrides ``graphUsageMode``: ``1``
+sets it to ``2`` and ``0`` sets it to ``0``. Any other value is ignored and
+leaves the field in effect.
+
+``graphUsageMode=2`` cannot be combined with :ref:`NCCL_GRAPH_STREAM_ORDERING`
+``0`` (see :c:macro:`graphStreamOrdering <ncclConfig_t.graphStreamOrdering>`).
+NCCL falls back to ``graphStreamOrdering=1`` when it parses a communicator's
+config. A child created with a ``NULL`` config by ``ncclCommSplit``,
+``ncclCommShrink`` or ``ncclCommGrow`` inherits its parent's resolved values
+instead, so with ``NCCL_GRAPH_STREAM_ORDERING=0`` it can end up in that
+combination without a diagnostic.
 
 Value accepted
 ^^^^^^^^^^^^^^
-0 or 1. Unset by default, in which case the communicator's ``graphUsageMode`` applies. In RCCL that defaults to ``0``, so graph mixing support is **disabled** by default (upstream NCCL enables it).
+0 or 1. Unset by default, in which case the communicator's ``graphUsageMode``
+applies. In RCCL that defaults to ``0``, so graph mixing support is
+**disabled** by default (upstream NCCL enables it).
 
 .. _NCCL_GRAPH_STREAM_ORDERING:
 

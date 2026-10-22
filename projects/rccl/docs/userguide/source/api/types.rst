@@ -299,7 +299,23 @@ ncclConfig_t
 
  .. c:macro:: graphUsageMode
 
-  Set the graph usage mode for the communicator. It supports three possible values: 0 (no graphs), 1 (one graph) and 2 (either multiple graphs or mix of graph and non-graph). In RCCL the default value is 0 (upstream NCCL defaults to 2), so graph mixing is off unless the communicator sets 2 or :ref:`NCCL_GRAPH_MIXING_SUPPORT` is ``1``. When that variable is set it overrides this field in both directions: ``0`` turns mixing off even for a communicator configured with 2. Only 2 turns on the support that mixing needs; with 0 or 1 the uses listed under :ref:`NCCL_GRAPH_MIXING_SUPPORT` are not supported. Capturing collectives on a communicator in mode 0 is accepted by the API but not supported: RCCL logs an INFO message (visible with ``NCCL_DEBUG=INFO``) for each captured call that this violates ``graphUsageMode`` and can lead to hangs. Because 0 is the default, a communicator used from CUDA graphs should set 1 (one graph at a time) or 2. If :ref:`NCCL_GRAPH_STREAM_ORDERING` or :c:macro:`graphStreamOrdering` disables capture-time stream ordering (``0``), **graph mixing must be off**—use ``graphUsageMode`` ``0`` or ``1`` only, and leave :ref:`NCCL_GRAPH_MIXING_SUPPORT` unset or ``0``, since ``1`` forces ``graphUsageMode=2``; ``graphUsageMode=2`` must not be combined with ordering ``0`` (see :ref:`NCCL_GRAPH_STREAM_ORDERING`).
+  Set the graph usage mode for the communicator: 0 (no graphs), 1 (one graph)
+  or 2 (either multiple graphs or a mix of graph and non-graph). In RCCL the
+  default is 0; upstream NCCL defaults to 2.
+
+  Only 2 turns on graph mixing support, and only when every communicator
+  involved uses it. :ref:`NCCL_GRAPH_MIXING_SUPPORT` describes what that
+  support covers and how the variable, when set to ``0`` or ``1``, overrides
+  this field.
+
+  Capturing collectives in mode 0 is accepted by the API but not supported:
+  RCCL logs an INFO message (visible with ``NCCL_DEBUG=INFO``) for each
+  captured call, saying that it violates ``graphUsageMode`` and can lead to
+  hangs. A communicator used from CUDA graphs should therefore set 1 (one
+  graph at a time) or 2.
+
+  Mode 2 cannot be combined with capture-time stream ordering disabled; see
+  :c:macro:`graphStreamOrdering`.
 
  .. c:macro:: graphStreamOrdering
 
@@ -319,8 +335,12 @@ ncclConfig_t
   ``graphStreamOrdering=0`` requires ``graphUsageMode`` ``0`` or ``1``
   (mixing **off**). If it is combined with ``graphUsageMode=2``, NCCL logs an
   INFO message (visible with ``NCCL_DEBUG=INFO``) and forces ``graphStreamOrdering`` to ``1``; communicator creation
-  still succeeds. See :ref:`NCCL_GRAPH_STREAM_ORDERING`. NCCL enforces this
-  compatibility fallback within a single communicator only. Communicators
+  still succeeds. See :ref:`NCCL_GRAPH_STREAM_ORDERING`. NCCL applies this
+  fallback when it parses a communicator's config, and within that
+  communicator only. A child created with a ``NULL`` config by
+  ``ncclCommSplit``, ``ncclCommShrink`` or ``ncclCommGrow`` inherits its
+  parent's resolved values instead, so with :ref:`NCCL_GRAPH_STREAM_ORDERING`
+  ``0`` it can end up in the unsupported combination undiagnosed. Communicators
   created by ``ncclCommSplit`` with ``splitShare`` share one internal
   serialization event with their parent, so ordering ``0`` on one and
   ``graphUsageMode=2`` on another that shares those resources is equally
