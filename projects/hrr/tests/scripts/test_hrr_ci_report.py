@@ -5,6 +5,7 @@
 
 import contextlib
 import io
+import json
 import os
 import sys
 import subprocess
@@ -61,6 +62,7 @@ class ClassifyTest(unittest.TestCase):
     def test_queued_job_reports_status(self):
         rows = rpt.classify_jobs([{"name": "gpu / Integration (gfx90a)", "status": "queued"}])
         self.assertEqual(rows[0]["conclusion"], "queued")
+        self.assertFalse(rpt.overall_ok(rows, []))
 
 
 class RocJitsuJobTest(unittest.TestCase):
@@ -168,6 +170,115 @@ class RenderTest(unittest.TestCase):
                                "--results-dir", tmp])
             self.assertEqual(rc, 1, result)
             self.assertIn(f"Configure: {result}, so nothing else ran", out.getvalue())
+
+    def test_run_39793856571_does_not_pass(self):
+        """The jobs API was still queued, needs.gpu had failed, and the gfx950
+        JUnit file already contained Unit_HRR_PinnedHostFork. All three must
+        fail the summary; any one of them is enough."""
+        jobs = [
+            {"name": "Generated sources", "conclusion": "success", "html_url": "u0"},
+            {"name": "HRR script tests", "conclusion": "success"},
+            {"name": "Unit (ubuntu-24.04)", "conclusion": "success"},
+            {"name": "Unit (windows-2022)", "conclusion": "success"},
+            {"name": "GPU / Build capture-enabled HIP and HRR", "conclusion": "success"},
+            {"name": "GPU / Build rocJitsu", "status": "in_progress", "html_url": "u1"},
+            {"name": "GPU / rocJitsu (gfx950)", "status": "queued", "html_url": "u2"},
+        ]
+        needs = {
+            "configure": {"result": "success"},
+            "codegen": {"result": "success"},
+            "scripts": {"result": "success"},
+            "unit": {"result": "success"},
+            "gpu": {"result": "failure"},
+        }
+        failed = (
+            '<?xml version="1.0"?><testsuites><testsuite>'
+            '<testcase name="Unit_HRR_PinnedHostFork"><failure message="42 == 0"/>'
+            "</testcase></testsuite></testsuites>"
+        )
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(rpt, "list_jobs", return_value=jobs), \
+                mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": ""}), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            (Path(tmp) / "integration-gfx950.xml").write_text(failed, encoding="utf-8")
+            rc = rpt.main([
+                "--run-gpu", "true", "--results-dir", tmp,
+                "--families", '[{"family":"gfx950","runner":"ubuntu-24.04"}]',
+                "--needs-json", json.dumps(needs),
+            ])
+        self.assertEqual(rc, 1)
+        text = out.getvalue()
+        self.assertIn("gpu is failure", text)
+        self.assertIn("failed cases in Integration gfx950", text)
+        self.assertIn("| Integration | gfx950 | [queued](u2) |", text)
+
+    def test_junit_failure_fails_when_jobs_and_needs_succeeded(self):
+        jobs = [
+            {"name": "Generated sources", "conclusion": "success"},
+            {"name": "HRR script tests", "conclusion": "success"},
+            {"name": "Unit (ubuntu-24.04)", "conclusion": "success"},
+            {"name": "GPU / rocJitsu (gfx94x)", "conclusion": "success"},
+        ]
+        needs = {name: {"result": "success"} for name in (
+            "configure", "codegen", "scripts", "unit", "gpu")}
+        failed = (
+            '<?xml version="1.0"?><testsuites><testsuite>'
+            '<testcase name="Unit_HRR_PinnedHostFork"><failure message="failed"/>'
+            "</testcase></testsuite></testsuites>"
+        )
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(rpt, "list_jobs", return_value=jobs), \
+                mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": ""}), \
+                contextlib.redirect_stdout(io.StringIO()):
+            (Path(tmp) / "integration-gfx94x.xml").write_text(failed, encoding="utf-8")
+            rc = rpt.main([
+                "--run-gpu", "true", "--results-dir", tmp,
+                "--families", '[{"family":"gfx94x"}]',
+                "--needs-json", json.dumps(needs),
+            ])
+        self.assertEqual(rc, 1)
+
+    def test_a_selected_cpu_job_that_was_skipped_fails(self):
+        needs = {
+            "configure": {"result": "success"},
+            "codegen": {"result": "skipped"},
+            "scripts": {"result": "success"},
+            "unit": {"result": "success"},
+            "gpu": {"result": "skipped"},
+        }
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(rpt, "list_jobs", return_value=JOBS[:3]), \
+                mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": ""}), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            rc = rpt.main(["--results-dir", tmp, "--needs-json", json.dumps(needs)])
+        self.assertEqual(rc, 1)
+        self.assertIn("codegen is skipped", out.getvalue())
+
+    def test_green_needs_jobs_and_junit_pass(self):
+        jobs = [
+            {"name": "Generated sources", "conclusion": "success"},
+            {"name": "HRR script tests", "conclusion": "success"},
+            {"name": "Unit (ubuntu-24.04)", "conclusion": "success"},
+            {"name": "Unit (windows-2022)", "conclusion": "success"},
+            {"name": "GPU / rocJitsu (gfx94x)", "conclusion": "success"},
+        ]
+        needs = {name: {"result": "success"} for name in (
+            "configure", "codegen", "scripts", "unit", "gpu")}
+        passed = (
+            '<?xml version="1.0"?><testsuites><testsuite>'
+            '<testcase name="Unit_HRR_Ok"/></testsuite></testsuites>'
+        )
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(rpt, "list_jobs", return_value=jobs), \
+                mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": ""}), \
+                contextlib.redirect_stdout(io.StringIO()):
+            (Path(tmp) / "integration-gfx94x.xml").write_text(passed, encoding="utf-8")
+            rc = rpt.main([
+                "--run-gpu", "true", "--results-dir", tmp,
+                "--families", '[{"family":"gfx94x"}]',
+                "--needs-json", json.dumps(needs),
+            ])
+        self.assertEqual(rc, 0)
 
 
 class GhApiTest(unittest.TestCase):

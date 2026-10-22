@@ -6,8 +6,8 @@
 
 name: HRR CI
 
-# labeled stays in the types so that adding ci:hrr-capture or ci:gfx* can
-# still start a run; hrr_ci_configure.py decides from the label itself
+# labeled stays in the types so that adding ci:hrr-capture can still start a
+# run; hrr_ci_configure.py decides from the label itself
 # whether anything runs, and the summary job reports the verdict of the run
 # that actually tested the commit (see `pass_through_ok`). A label that
 # changes nothing therefore cannot mask a failing run on the same commit.
@@ -46,7 +46,6 @@ concurrency:
     ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || (github.event_name == 'push' && github.sha) || github.ref }}${{
     github.event.action == 'labeled'
     && github.event.label.name != 'ci:hrr-capture'
-    && !startsWith(github.event.label.name, 'ci:gfx')
     && format('-label-{0}', github.event.label.name) || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
@@ -59,6 +58,7 @@ jobs:
   configure:
     name: Configure
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: read
       pull-requests: read
@@ -88,7 +88,7 @@ jobs:
           persist-credentials: false
           repository: ROCm/TheRock
           # Keep in sync with the TheRock ref in therock-multi-arch-ci.yml.
-          ref: c01e3a3f3f67966dd35612cf363b49964f33cd47 # 2026-10-12
+          ref: 488e66e7c2220df926c2762e9b97a50becfb4239 # 2026-10-21
           path: therock
           sparse-checkout: build_tools/github_actions
 
@@ -144,6 +144,7 @@ jobs:
     needs: configure
     if: ${{ needs.configure.outputs.run_cpu == 'true' }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -175,6 +176,7 @@ jobs:
     needs: configure
     if: ${{ needs.configure.outputs.run_cpu == 'true' }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -214,6 +216,7 @@ jobs:
     needs: configure
     if: ${{ needs.configure.outputs.run_cpu == 'true' }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -350,6 +353,7 @@ jobs:
       || needs.configure.outputs.run_gpu == 'true'
       || (github.event_name == 'pull_request' && github.event.action == 'labeled')) }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       actions: read
       contents: read
@@ -396,10 +400,12 @@ jobs:
             && needs.configure.outputs.run_cpu == 'false'
             && needs.configure.outputs.run_gpu == 'false' }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          NEEDS_JSON: ${{ toJSON(needs) }}
         run: >-
           python3 projects/hrr/tests/scripts/hrr_ci_report.py
           --configure-result "${CONFIGURE_RESULT}"
           --reason "${REASON}" --run-gpu "${RUN_GPU}" --families "${FAMILIES}"
           --skipped-families "${SKIPPED}"
           --results-dir results --base-json base/base.json
+          --needs-json "${NEEDS_JSON}"
           --pass-through "${PASS_THROUGH}" --head-sha "${HEAD_SHA}"

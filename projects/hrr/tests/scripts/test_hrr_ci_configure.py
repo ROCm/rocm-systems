@@ -138,9 +138,9 @@ class RepoConfigTest(unittest.TestCase):
     def test_only_gfx94x_runs_by_default(self):
         """Every family stays listed, but only gfx94x runs unless asked for.
 
-        The others stay in ci.yaml so a ci:gfx... label or the
-        workflow_dispatch families input can still request them; disabling is
-        what keeps them off the default run.
+        The others stay in ci.yaml so the workflow_dispatch families input can
+        still request them; disabling is what keeps them off the default run.
+        ci:gfx labels are TheRock's and do not select an HRR family.
         """
         self.assertEqual(
             sorted(key for key, family in REPO.families.items() if family.enabled),
@@ -149,8 +149,8 @@ class RepoConfigTest(unittest.TestCase):
         for key, family in REPO.families.items():
             self.assertEqual(family.triggers, cfg.EVENTS, key)
 
-    def test_a_label_adds_a_simulator_family(self):
-        """A family outside simulator.default_families joins on its label."""
+    def test_a_gfx_label_does_not_add_a_simulator_family(self):
+        """ci:gfx is a TheRock label. It must not widen the rocJITsu matrix."""
         data = copy.deepcopy(REPO_CONFIG)
         data["simulator"]["default_families"] = ["gfx950", "gfx125x"]
         d = decide(
@@ -159,7 +159,7 @@ class RepoConfigTest(unittest.TestCase):
             ["ci:gfx110x"],
             config=cfg.parse_config(data),
         )
-        self.assertEqual(family_keys(d), ["gfx950", "gfx110x", "gfx125x"])
+        self.assertEqual(family_keys(d), ["gfx950", "gfx125x"])
         self.assertTrue(all(row["backend"] == "simulator" for row in d.families))
 
     def test_multi_gpu_runner_only_nightly(self):
@@ -397,15 +397,13 @@ class DecideTest(unittest.TestCase):
         self.assertTrue(d.run_cpu)
         self.assertTrue(d.run_gpu)
 
-    def test_family_label_adds_family(self):
+    def test_gfx_label_does_not_add_a_family(self):
         d = decide(
             "pull_request",
             ["projects/hrr/playback/x.cpp"],
             labels=["ci:gfx110X-all", "ci:gfx125x"],
         )
-        self.assertEqual(
-            family_keys(d), ["gfx90a", "gfx94x", "gfx950", "gfx110x", "gfx125x"]
-        )
+        self.assertEqual(family_keys(d), ["gfx90a", "gfx94x", "gfx950"])
 
     def test_label_for_family_not_in_config_is_ignored(self):
         d = decide(
@@ -566,13 +564,10 @@ class SimulatorBackendTest(unittest.TestCase):
         self.assertTrue(all(row["backend"] == "gpu" for row in decision.families))
         self.assertNotIn("gfx125x", family_keys(decision))
 
-    def test_simulator_rejects_a_family_without_a_config(self):
+    def test_simulator_rejects_a_requested_family_without_a_config(self):
         with self.assertRaises(cfg.ConfigError) as caught:
             decide(
-                "pull_request",
-                ["projects/hrr/playback/x.cpp"],
-                labels=["ci:gfx103x"],
-                config=REPO,
+                "workflow_dispatch", [], requested=["gfx103x"], config=REPO
             )
         self.assertIn("no config for gfx103x", str(caught.exception))
 
@@ -591,14 +586,9 @@ class LabelEventTest(unittest.TestCase):
     )
 
     def test_which_labels_matter(self):
-        for label in (
-            "ci:hrr-capture",
-            "CI:HRR-Capture",
-            "ci:gfx110x",
-            "ci:gfx110X-all",
-        ):
+        for label in ("ci:hrr-capture", "CI:HRR-Capture"):
             self.assertTrue(cfg.label_matters(label, REPO), label)
-        for label in ("documentation", "ci:skip", "hrr"):
+        for label in ("documentation", "ci:skip", "hrr", "ci:gfx110x", "ci:gfx110X-all"):
             self.assertFalse(cfg.label_matters(label, REPO), label)
 
     def test_other_label_runs_nothing(self):
@@ -617,20 +607,32 @@ class LabelEventTest(unittest.TestCase):
         self.assertFalse(d.run_gpu)
         self.assertIn("documentation", d.reason)
 
-    def test_capture_or_family_label_reruns(self):
-        for label in ("ci:hrr-capture", "ci:gfx110x"):
-            d = cfg.decide(
-                "pull_request",
-                self.CAPTURE,
-                [label],
-                False,
-                [],
-                CONFIG,
-                MATRIX,
-                pick_first,
-                added_label=label,
-            )
-            self.assertTrue(d.run_gpu, label)
+    def test_capture_label_reruns_and_a_gfx_label_does_not(self):
+        d = cfg.decide(
+            "pull_request",
+            self.CAPTURE,
+            ["ci:hrr-capture"],
+            False,
+            [],
+            CONFIG,
+            MATRIX,
+            pick_first,
+            added_label="ci:hrr-capture",
+        )
+        self.assertTrue(d.run_gpu)
+        d = cfg.decide(
+            "pull_request",
+            self.CAPTURE,
+            ["ci:gfx110x"],
+            False,
+            [],
+            CONFIG,
+            MATRIX,
+            pick_first,
+            added_label="ci:gfx110x",
+        )
+        self.assertFalse(d.run_cpu)
+        self.assertFalse(d.run_gpu)
 
     def test_labeled_trigger_and_summary_report_a_verdict(self):
         """Regression for the label that can turn a failing HRR CI green.
@@ -669,7 +671,7 @@ class LabelEventTest(unittest.TestCase):
         text = self.WORKFLOW.read_text(encoding="utf-8")
         group = text[text.index("concurrency:") : text.index("cancel-in-progress:")]
         self.assertIn(f"github.event.label.name != '{REPO.capture_label}'", group)
-        self.assertIn("!startsWith(github.event.label.name, 'ci:gfx')", group)
+        self.assertNotIn("ci:gfx", group)
 
 
 class ForkTest(unittest.TestCase):
@@ -743,6 +745,36 @@ class OutputTest(unittest.TestCase):
         )
         self.assertIn("reason=why\n", text)
         self.assertIn("rocm_sdk_version=1.2.3\n", text)
+
+
+class WorkflowPinTest(unittest.TestCase):
+    ROOT = Path(__file__).resolve().parents[4]
+    SHA = re.compile(r"(?:@|ref:\s*)([0-9a-f]{40})")
+
+    def therock_shas(self, path: Path) -> list[str]:
+        lines = path.read_text(encoding="utf-8").splitlines()
+        found = []
+        for index, line in enumerate(lines):
+            if "ROCm/TheRock" not in line:
+                continue
+            window = "\n".join(lines[index:index + 6])
+            found.extend(self.SHA.findall(window))
+        return found
+
+    def test_hrr_workflows_use_the_multi_arch_therock_pin(self):
+        pinned = self.therock_shas(
+            self.ROOT / ".github/workflows/therock-multi-arch-ci.yml"
+        )
+        self.assertTrue(pinned)
+        self.assertEqual(set(pinned), {pinned[0]})
+        for name in ("hrr-ci.yml", "hrr-gpu.yml"):
+            path = self.ROOT / ".github/workflows" / name
+            text = path.read_text(encoding="utf-8")
+            self.assertNotIn("THEROCK_PIN", text, name)
+            self.assertNotIn("BUILD_IMAGE", text, name)
+            found = self.therock_shas(path)
+            self.assertTrue(found, name)
+            self.assertEqual(set(found), {pinned[0]}, name)
 
 
 if __name__ == "__main__":

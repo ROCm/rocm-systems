@@ -77,7 +77,7 @@ backend:
 # two-GPU gfx950 config and the single-GPU configs of the others.
 #
 # Not listed: gfx103x, gfx1150 and gfx1153, which rocJitsu has no config for.
-# A ci:gfx... label for one of them fails the configure job.
+# A workflow_dispatch families input that names one fails the configure job.
 simulator:
   runner: ubuntu-24.04
   default_families: [gfx90a, gfx94x, gfx950, gfx110x, gfx1151, gfx120x, gfx125x]
@@ -96,8 +96,9 @@ simulator:
 # that covers every GPU target TheRock lists for each family here.
 #
 # Per family, all optional:
-#   enabled    false: run only when requested by a ci:gfx... label or the
-#              workflow_dispatch families input. Default true.
+#   enabled    false: run only when the workflow_dispatch families input names
+#              it. Default true. ci:gfx labels belong to TheRock and are not
+#              read here.
 #   triggers   Events that run this family: pull_request, push, schedule,
 #              workflow_dispatch. Default all four.
 #   runner     Runner label to use instead of TheRock's.
@@ -143,7 +144,7 @@ families:
     enabled: false
   # Off until understood: in two runs the MI455 runner picked the job up, but
   # --arch auto found no GPU, so no case ran. TheRock also reserves this small
-  # pool for designated workflows. A ci:gfx125x label or the workflow_dispatch
-  # families input still runs it.
+  # pool for designated workflows. The workflow_dispatch families input still
+  # runs it.
   gfx125x:
     enabled: false

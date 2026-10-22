@@ -11,8 +11,12 @@ The summary has three parts:
   * the per-suite results table from summarize_junit.py, with a row for every
     ci.yaml family, saying why when one did not run.
 
-Exits 1 when the configure job did not succeed, any HRR job failed or was
-cancelled, or a results file could not be read.
+Exits 1 when the configure job did not succeed, a needed job failed, was
+cancelled, or was skipped after configure selected it, any listed HRR job is
+not in a terminal success state, a JUnit suite has failed cases, or a results
+file could not be read. Job conclusions from the Actions API are links in the
+table. The verdict uses --needs-json (the workflow's toJSON(needs)) and the
+JUnit files, because the jobs API can still say queued after those exist.
 
 With --pass-through true (a label run that ran no HRR job) it reports the
 newest other run on --head-sha that has a verdict instead, and exits 1 unless
@@ -41,7 +45,10 @@ JOB_PATTERNS = (
     # The real-GPU job is "Integration (<family>)", the rocJitsu one "rocJitsu (<family>)".
     ("Integration", re.compile(r"(?:^|/ )(?:Integration|rocJitsu) \((?P<name>[^)]+)\)$")),
 )
-BAD_CONCLUSIONS = {"failure", "cancelled", "timed_out", "startup_failure"}
+# Anything else (queued, in_progress, waiting, unknown) has not finished.
+TERMINAL_OK = {"success", "neutral"}
+BAD_NEEDS = {"failure", "cancelled"}
+CPU_NEEDS = ("codegen", "scripts", "unit")
 
 
 def classify_jobs(jobs: list[dict]) -> list[dict]:
@@ -110,7 +117,39 @@ def render_jobs(rows: list[dict], missing: list[str]) -> str:
 
 
 def overall_ok(rows: list[dict], missing: list[str]) -> bool:
-    return not missing and not any(r["conclusion"] in BAD_CONCLUSIONS for r in rows)
+    """True when every requested family ran and every listed job finished
+    successfully. A skipped, failed, or still-queued job is not a pass: the
+    jobs API has reported queued while the suite had already failed."""
+    if missing:
+        return False
+    return all(r["conclusion"] in TERMINAL_OK for r in rows)
+
+
+def need_result(needs: dict, name: str) -> str:
+    info = needs.get(name)
+    if isinstance(info, dict) and info.get("result"):
+        return str(info["result"])
+    return "missing"
+
+
+def check_needs(needs: dict, *, run_gpu: bool) -> list[str]:
+    """Problems in GitHub's toJSON(needs). A failure or cancellation fails the
+    run. On a run whose configure succeeded, the CPU jobs were selected, and
+    the GPU workflow was selected when run_gpu is true; a skip there is a job
+    that was supposed to run."""
+    problems = []
+    for name in needs:
+        result = need_result(needs, name)
+        if result in BAD_NEEDS:
+            problems.append(f"{name} is {result}")
+    selected = list(CPU_NEEDS)
+    if run_gpu:
+        selected.append("gpu")
+    for name in selected:
+        result = need_result(needs, name)
+        if result != "success" and f"{name} is {result}" not in problems:
+            problems.append(f"{name} is {result}")
+    return problems
 
 
 SUMMARY_JOB = "HRR CI Summary"
@@ -233,6 +272,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     parser.add_argument("--run-id", default=os.environ.get("GITHUB_RUN_ID", ""))
     parser.add_argument("--run-attempt", default=os.environ.get("GITHUB_RUN_ATTEMPT", "1"))
+    parser.add_argument("--needs-json", default="",
+                        help="GitHub toJSON(needs). Empty skips the needs check")
     parser.add_argument("--pass-through", choices=("true", "false"), default="false",
                         help="true: report the earlier run that tested --head-sha instead")
     # Not GITHUB_SHA: on a pull request that is the merge commit, which no
@@ -265,10 +306,13 @@ def main(argv: list[str] | None = None) -> int:
     markdown = render_header(args.reason, run_gpu, families, base, args.configure_result)
     markdown += render_jobs(rows, missing)
     errors: list[str] = []
+    failed_suites: list[str] = []
     args.results_dir.mkdir(parents=True, exist_ok=True)
     table_families = [(f["family"], "") for f in families]
     table_families += [(s["family"], s["reason"]) for s in skipped]
-    markdown += summarize_junit.render(args.results_dir, errors, table_families)
+    markdown += summarize_junit.render(
+        args.results_dir, errors, table_families, failures=failed_suites
+    )
 
     sys.stdout.write(markdown)
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
@@ -277,7 +321,26 @@ def main(argv: list[str] | None = None) -> int:
             out.write(markdown)
     for error in errors:
         print(f"::error::unreadable JUnit XML {error}")
-    return 0 if configured and overall_ok(rows, missing) and not errors else 1
+    for suite in failed_suites:
+        print(f"::error::failed cases in {suite}")
+
+    needs_problems: list[str] = []
+    if args.needs_json and configured:
+        try:
+            needs = json.loads(args.needs_json)
+        except json.JSONDecodeError as error:
+            print(f"::error::could not read --needs-json: {error}")
+            return 1
+        if not isinstance(needs, dict):
+            print("::error::--needs-json must be an object")
+            return 1
+        needs_problems = check_needs(needs, run_gpu=run_gpu)
+        for problem in needs_problems:
+            print(f"::error::{problem}")
+    return 0 if (
+        configured and not needs_problems and overall_ok(rows, missing)
+        and not errors and not failed_suites
+    ) else 1
 
 
 if __name__ == "__main__":

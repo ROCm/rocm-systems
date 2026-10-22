@@ -179,6 +179,18 @@ class MainTest(ScratchDir):
         self.assertTrue(written.startswith("existing\n"))
         self.assertIn("## HRR results by platform", written)
 
+    def test_failed_cases_are_reported_and_exit_1(self):
+        self.write(
+            "integration-gfx950.xml",
+            junit(record("Unit_HRR_PinnedHostFork", "failure", "42 == 0")),
+        )
+        failures: list[str] = []
+        summarize_junit.render(self.dir, [], [("gfx950", "")], failures=failures)
+        self.assertEqual(failures, ["Integration gfx950"])
+        rc, out, _ = self.run_main("--dir", str(self.dir))
+        self.assertEqual(rc, 1)
+        self.assertIn("::error::failed cases in Integration gfx950", out)
+
     def test_unreadable_xml_exits_1_with_an_annotation(self):
         self.write("integration-gfx950.xml", "")
         rc, out, _ = self.run_main("--dir", str(self.dir))

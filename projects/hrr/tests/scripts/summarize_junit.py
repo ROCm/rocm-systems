@@ -106,10 +106,15 @@ def failed_cell(names: list[str]) -> str:
 
 
 def render(
-    directory: Path, errors: list[str], families: list[tuple[str, str]] | None = None
+    directory: Path,
+    errors: list[str],
+    families: list[tuple[str, str]] | None = None,
+    *,
+    failures: list[str] | None = None,
 ) -> str:
     """families: (family, why it did not run, or "") per integration row. By
-    default, one row per integration-<family>.xml present."""
+    default, one row per integration-<family>.xml present. Suites with failed
+    cases are appended to failures as "suite platform"."""
     if families is None:
         families = [
             (path.stem[len("integration-"):], "")
@@ -158,6 +163,8 @@ def render(
             )
             continue
         counts = data["counts"]
+        if failures is not None and counts["FAIL"]:
+            failures.append(f"{suite} {platform}")
         lines.append(
             "| {suite} | {platform} | {passed} | {failed} | {skipped} | {config} | {names} |".format(
                 suite=suite,
@@ -206,14 +213,17 @@ def main(argv: list[str] | None = None) -> int:
         print(f"not a directory: {args.dir}", file=sys.stderr)
         return 1
     errors: list[str] = []
-    markdown = render(args.dir, errors)
+    failures: list[str] = []
+    markdown = render(args.dir, errors, failures=failures)
     sys.stdout.write(markdown)
     if args.summary is not None:
         with args.summary.open("a", encoding="utf-8") as out:
             out.write(markdown)
     for error in errors:
         print(f"::error::unreadable JUnit XML {error}")
-    return 1 if errors else 0
+    for suite in failures:
+        print(f"::error::failed cases in {suite}")
+    return 1 if errors or failures else 0
 
 
 if __name__ == "__main__":

@@ -3,9 +3,11 @@
 
 """Build an amdhip64 with HRR capture compiled in, for the HRR GPU suite.
 
-Interim: TheRock has no capture-enabled build yet. Once rocm-systems CI can
-request TheRock's hrr-capture build variant, hrr-gpu.yml calls TheRock's
-workflows instead and this script and test_hrr_capture_build.py are deleted.
+Interim: this rebuilds CLR with capture enabled on top of TheRock release
+artifacts. It stays until TheRock can build and run the HRR integration
+suite. The hrr-capture variant alone does not: no workflow selects it, and
+it does not install the test binaries. This script and
+test_hrr_capture_build.py go away once that suite runs from TheRock artifacts.
 
 Release builds compile capture out (HIP_HRR_CAPTURE_ENABLED undefined). This
 script installs the ROCm artifacts that rocm-systems' own TheRock CI built for

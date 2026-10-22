@@ -22,9 +22,10 @@ It runs when a change touches a capture or suite path, on any pull request
 with the capture label, nightly and on workflow_dispatch.
 
 The default backend is rocJitsu (simulator). Its jobs are
-simulator.default_families, not the families marked enabled. A ci:gfx... label
-adds a family, and the workflow_dispatch families input replaces the
-selection. A simulator family with no config is an error. The GPU backend
+simulator.default_families, not the families marked enabled. The
+workflow_dispatch families input replaces the selection. A simulator family
+with no config is an error. ci:gfx labels are TheRock's, so this script does
+not read them. The GPU backend
 runs every enabled family whose triggers include the event, on TheRock's
 runner unless ci.yaml overrides it, and takes the multi-GPU runner only on
 its multi_gpu_triggers. workflow_dispatch uses its backend input; any other
@@ -319,26 +320,12 @@ def touches_suite(paths: Iterable[str], config: Config) -> bool:
     return any(_matches(p, config.suite_paths) for p in relevant_paths(paths, config))
 
 
-def labelled_families(labels: Iterable[str], matrix: dict) -> list[str]:
-    """Family keys named by ci:gfx... labels, e.g. ci:gfx110x or ci:gfx110X-all."""
-    wanted = []
-    for label in labels:
-        label = label.strip().lower()
-        if not label.startswith("ci:gfx"):
-            continue
-        name = label[len("ci:") :]
-        for key, config in matrix.items():
-            linux = config.get("linux", {})
-            if name in (key.lower(), str(linux.get("family", "")).lower()):
-                wanted.append(key)
-    return wanted
-
-
 def label_matters(label: str, config: Config) -> bool:
     """Whether adding this label can change what runs. hrr-ci.yml's concurrency
-    group makes the same test, so that other labels do not cancel a run."""
+    group makes the same test, so that other labels do not cancel a run.
+    ci:gfx labels belong to TheRock and must not restart this workflow."""
     label = label.strip().lower()
-    return label == config.capture_label.lower() or label.startswith("ci:gfx")
+    return label == config.capture_label.lower()
 
 
 def runner_for(
@@ -386,7 +373,6 @@ def select_families(
     event: str,
     config: Config,
     requested: list[str],
-    labels: list[str],
     matrix: dict,
     pick_weighted: Callable[[list, str], str],
 ) -> tuple[list[dict], list[dict]]:
@@ -406,7 +392,6 @@ def select_families(
             for key, family in config.families.items()
             if family.enabled and event in family.triggers
         }
-    chosen |= set(labelled_families(labels, matrix)) & set(config.families)
 
     families, skipped = [], []
     for key, family in config.families.items():
@@ -432,11 +417,10 @@ def select_families(
 def select_simulator(
     config: Config,
     requested: list[str],
-    labels: list[str],
     matrix: dict,
 ) -> tuple[list[dict], list[dict]]:
     """rocJitsu families. default_families, unless the dispatch input replaces
-    them. A ci:gfx... label adds a family. A family with no config is an error."""
+    them. A family with no config is an error."""
     if requested:
         unknown = [key for key in requested if key not in config.families]
         if unknown:
@@ -447,7 +431,6 @@ def select_simulator(
         chosen = set(requested)
     else:
         chosen = set(config.simulator.default_families)
-    chosen |= set(labelled_families(labels, matrix)) & set(config.families)
     missing = sorted(key for key in chosen if key not in config.simulator.configs)
     if missing:
         raise ConfigError(f"simulator has no config for {', '.join(missing)}")
@@ -535,10 +518,10 @@ def decide(
         )
 
     if resolved == "simulator":
-        families, skipped = select_simulator(config, requested, labels, matrix)
+        families, skipped = select_simulator(config, requested, matrix)
     else:
         families, skipped = select_families(
-            event, config, requested, labels, matrix, pick_weighted
+            event, config, requested, matrix, pick_weighted
         )
     no_runner = [s["family"] for s in skipped if s["reason"] == NO_RUNNER]
     if no_runner:

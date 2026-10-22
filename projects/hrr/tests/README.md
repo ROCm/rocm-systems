@@ -155,8 +155,8 @@ applies (`scripts/hrr_ci_configure.py`):
   jobs. `paths.capture` also runs the capture-enabled build and the GPU suite.
   `paths.excluded` counts for neither.
 - `capture_label` (`ci:hrr-capture`) runs the GPU suite on a pull request that touches
-  no capture path. Adding it or a `ci:gfx...` label restarts the run; adding any
-  other label leaves the run in progress alone.
+  no capture path. Adding it restarts the run; adding any other label, including
+  TheRock's `ci:gfx...` labels, leaves the run in progress alone.
 - `families`: the GPU families the suite runs on, as TheRock family keys, on the runner
   TheRock's family matrix names. By default each runs on every event (`pull_request`,
   `push`, `schedule`, `workflow_dispatch`). Per family, `enabled: false` leaves it to
@@ -164,10 +164,11 @@ applies (`scripts/hrr_ci_configure.py`):
   and `multi_gpu_triggers` names the events on which it takes TheRock's multi-GPU
   runner instead of the single-GPU one. TheRock's multi-GPU pools are 8-GPU nodes, so
   only gfx950 uses one, nightly; elsewhere the cases that need two devices skip and
-  show in the summary's Skip column. A `ci:gfx...` label adds a
-  family; the `workflow_dispatch` input `families` replaces the selection. Both can
-  name a disabled family. Only gfx94x is enabled today; the others are listed with
-  `enabled: false`, so they run only when a label or the input asks for them.
+  show in the summary's Skip column. The `workflow_dispatch` input `families`
+  replaces the selection and can name a disabled family. Only gfx94x is enabled
+  today; the others are listed with `enabled: false`, so a real-GPU run includes
+  them only when that input names them. `ci:gfx...` labels are TheRock's and do
+  not select an HRR family.
   `targets.arch` in `config/integration.yaml` stays wide on purpose: configure fails
   unless it covers every family listed here, and a requested family needs its
   architecture compiled into the binary.
@@ -177,6 +178,14 @@ An unknown key, trigger or family fails the configure job, and so does a family 
 GPU targets in TheRock's family matrix are not all in `targets.arch` of
 `config/integration.yaml`. To take load off the GPU
 pools, disable families or narrow their triggers here.
+
+Until the TheRock commit pinned by `.github/workflows/therock-multi-arch-ci.yml`
+includes [TheRock #8965](https://github.com/ROCm/TheRock/pull/8965), TheRock
+treats `hrr-ci.yml`, `hrr-gpu.yml`, and `projects/hrr` as unclassified and
+builds every stage. A pull request that changes only those workflow files or
+`config/ci.yaml` should carry the `ci:skip` label. Remove that label when the
+change should build HRR sources, and drop this note once the pin includes
+#8965.
 
 ## Configuring where a case runs
 

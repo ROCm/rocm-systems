@@ -4,8 +4,10 @@
 # Called by hrr-ci.yml, which decides when this runs and on which families.
 #
 # Interim: the build job and projects/hrr/tests/scripts/hrr_capture_build.py
-# exist only until TheRock provides an hrr-capture build variant. After that,
-# this file calls TheRock's multi-arch workflows with that variant instead.
+# rebuild CLR with capture enabled on top of TheRock release artifacts. They
+# stay until TheRock can build and run the HRR integration suite. Defining the
+# hrr-capture variant is not enough: nothing selects it, and it does not
+# install the test binaries.
 
 name: HRR GPU
 
@@ -28,10 +30,6 @@ on:
         description: Run the cases the suite config skips
         type: boolean
         default: false
-
-env:
-  THEROCK_PIN: c01e3a3f3f67966dd35612cf363b49964f33cd47
-  BUILD_IMAGE: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:cf4f6d9909056906e4a1c0bc4c245658a0af4c6a6174082a86adfa2d518b7aeb
 
 permissions:
   contents: read
@@ -59,7 +57,7 @@ jobs:
           persist-credentials: false
           repository: ROCm/TheRock
           # Keep in sync with the TheRock ref in therock-multi-arch-ci.yml.
-          ref: c01e3a3f3f67966dd35612cf363b49964f33cd47 # 2026-10-12
+          ref: 488e66e7c2220df926c2762e9b97a50becfb4239 # 2026-10-21
           path: therock
           sparse-checkout: |
             build_tools
@@ -132,7 +130,7 @@ jobs:
         with:
           persist-credentials: false
           repository: ROCm/TheRock
-          ref: ${{ env.THEROCK_PIN }} # 2026-10-12
+          ref: 488e66e7c2220df926c2762e9b97a50becfb4239 # 2026-10-21
           path: therock
           sparse-checkout: |
             build_tools
@@ -191,11 +189,17 @@ jobs:
     needs: [build, rocjitsu-build]
     if: inputs.simulator_families != '[]'
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(inputs.simulator_families) }}
+    # The same image as the real-GPU job, without devices. The build job's
+    # workspace path is this container's workspace, so the paths compiled into
+    # the test binaries resolve without a symlink on the runner.
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: --user 0:0
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -210,7 +214,7 @@ jobs:
         with:
           persist-credentials: false
           repository: ROCm/TheRock
-          ref: ${{ env.THEROCK_PIN }} # 2026-10-12
+          ref: 488e66e7c2220df926c2762e9b97a50becfb4239 # 2026-10-21
           path: therock
           sparse-checkout: |
             build_tools
@@ -219,13 +223,12 @@ jobs:
           sparse-checkout-cone-mode: false
 
       # The prebuilt rocJitsu and the capture-enabled amdhip64 load libdrm at run
-      # time; the build packages are no longer needed.
+      # time. The container runs as root, so this does not use sudo.
       - name: Install libdrm
-        shell: bash
         run: |
           set -euo pipefail
-          sudo -n apt-get update
-          sudo -n DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             libdrm2 libdrm-amdgpu1
 
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
@@ -266,14 +269,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: python projects/hrr/tests/scripts/hrr_capture_build.py install-base
-
-      # The build job compiled the test binary in a container, where the
-      # workspace is /__w/<repo>/<repo>, and the binary spawns itself and the
-      # playback tool by those absolute paths. Make them resolve on this host.
-      - name: Map the container build path to the workspace
-        run: |
-          sudo mkdir -p /__w/rocm-systems
-          sudo ln -sfn "${GITHUB_WORKSPACE}" /__w/rocm-systems/rocm-systems
 
       - name: Run integration suite
         env:
@@ -347,7 +342,7 @@ jobs:
         with:
           persist-credentials: false
           repository: ROCm/TheRock
-          ref: c01e3a3f3f67966dd35612cf363b49964f33cd47 # 2026-10-12
+          ref: 488e66e7c2220df926c2762e9b97a50becfb4239 # 2026-10-21
           path: therock
           sparse-checkout: |
             build_tools

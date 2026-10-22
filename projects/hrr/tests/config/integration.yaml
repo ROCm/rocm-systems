@@ -272,7 +272,12 @@ cases:
   Unit_HRR_OverflowingMemcpy3DNotRecorded: {}
   Unit_HRR_OverflowingMemcpy3D_Direct: {}
   Unit_HRR_PinnedHostBlobRefused: {}
-  Unit_HRR_PinnedHostFork: {}
+  Unit_HRR_PinnedHostFork:
+    skip:
+      - when: {arch: ["gfx95*"], emulator: true}
+        kind: disabled
+        reason: "The capture subprocess exited 42 under the two-GPU gfx950 rocJITsu configuration; the same case passed on the other rocJITsu families"
+        issue: "https://github.com/ROCm/rocm-systems/issues/14033"
   Unit_HRR_PinnedHostFork_Direct: {}
   Unit_HRR_PinnedHostFreedRoundtrip: {}
   Unit_HRR_PinnedHostFreed_Direct: {}
