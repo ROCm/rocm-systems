@@ -1111,28 +1111,36 @@ if (ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
     add_dependencies(rccl rocshmem_ext)
   endif()
 
-  if (ROCSHMEM_INCLUDE_DIR)
-    target_include_directories(rccl PRIVATE ${ROCSHMEM_INCLUDE_DIR})
-  endif()
-
-  # GIN pulls a few rocshmem headers (and the mlx5 provider .cpp) straight from
-  # the rocshmem source tree; the GDA factory's former host-header dependencies
-  # (ibv_wrapper, topology, envvar, debug_gda) are now shimmed with rccl-native
-  # equivalents, so only the source include paths for the copied GIN headers
-  # remain. No rocshmem *install* (built library) is on the GIN path.
-  if (ROCSHMEM_SOURCE_DIR)
-    target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/src)
-    target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/include)
-    if (ROCSHMEM_BUILD_DIR)
-      target_include_directories(rccl PRIVATE ${ROCSHMEM_BUILD_DIR})
-    else()
-      target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/build/include ${ROCSHMEM_SOURCE_DIR}/build/include/rocshmem)
+  # The rocshmem *source/install* include dirs are ONLY for ENABLE_ROCSHMEM:
+  # its device collectives (AlltoAllGda) compile against rocshmem directly
+  # (<rocshmem/rocshmem.hpp> etc.). A GIN build must NOT put the rocshmem source
+  # tree on its include path — every header the GIN TUs need is a rccl-owned copy
+  # under PROJECT_BINARY_DIR/.../rocshmem_gda (added below), and the factory's
+  # former host-header deps (ibv_wrapper, topology, envvar, debug_gda) are shimmed
+  # with rccl-native equivalents. Exposing ${ROCSHMEM_SOURCE_DIR}/src would let a
+  # stray/transitive include silently resolve an unshimmed rocshmem host header
+  # instead of rccl's copy — a real correctness hazard, not a convenience.
+  if (ENABLE_ROCSHMEM)
+    if (ROCSHMEM_INCLUDE_DIR)
+      target_include_directories(rccl PRIVATE ${ROCSHMEM_INCLUDE_DIR})
+    endif()
+    if (ROCSHMEM_SOURCE_DIR)
+      target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/src)
+      target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/include)
+      if (ROCSHMEM_BUILD_DIR)
+        target_include_directories(rccl PRIVATE ${ROCSHMEM_BUILD_DIR})
+      else()
+        target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/build/include ${ROCSHMEM_SOURCE_DIR}/build/include/rocshmem)
+      endif()
     endif()
   endif()
 endif()
 
 if (ENABLE_ROCSHMEM_GIN)
-  # Ensure we see our copied headers before rocSHMEM's
+  # The rccl-owned copied GIN header tree — the ONLY rocshmem header root on a GIN
+  # build's include path (the rocshmem source tree is intentionally not added; see
+  # above). The GIN TUs and the copied headers' internal (bare) includes resolve
+  # from here.
   target_include_directories(rccl BEFORE PRIVATE ${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda)
 
   # Need to add the GIN GDA directory to the public interface:
@@ -1266,6 +1274,10 @@ if (ENABLE_ROCSHMEM_GIN)
     target_sources(rccl PRIVATE "${_GIN_SDMA_DIR}/anvil.cpp")
     # src/gin/ so host log.hpp wins over the device shim for anvil.cpp.
     target_include_directories(rccl BEFORE PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/gin")
+    # ${PROJECT_BINARY_DIR}/gin so gin_anvil_sdma_factory.cc's #include
+    # "sdma/anvil.hpp" resolves from the rccl-copied anvil tree above, NOT from the
+    # rocshmem source tree (which is deliberately off the GIN include path).
+    target_include_directories(rccl PRIVATE "${PROJECT_BINARY_DIR}/gin")
 
     # Copy SDMA device headers next to gin_anvil_sdma.h so "sdma/anvil_device.hpp"
     # resolves during build (same layout as the install tree).
