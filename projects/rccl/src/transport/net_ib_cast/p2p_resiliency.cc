@@ -1272,3 +1272,14 @@ ncclResult_t IbCastResiliencyProgress(struct ncclIbResiliency* resCtx) {
   }
   return ncclSuccess;
 }
+
+extern "C" ncclResult_t ncclIbCastTestRecvWrIdBound(void) {
+  // One past the last legal receiver slot. The old `<=` bound treated this as
+  // in range and indexed recvReqs[] off the end.
+  struct ncclIbNetCommBase base = {};
+  struct ncclIbResiliency resCtx = {};
+  struct ibv_wc wc = {};
+  resCtx.baseComm = &base;
+  wc.wr_id = NET_IB_MAX_REQUESTS;
+  return IbCastResiliencyHandleCompletionErrorReceiver(&resCtx, &wc, /*devIndex=*/0);
+}

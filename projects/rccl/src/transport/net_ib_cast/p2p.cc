@@ -1493,3 +1493,7 @@ ncclResult_t ncclIbCastFaultOpsClear(void* comm) {
 }
 
 #endif /* ENABLE_FAULT_INJECTION */
+
+extern "C" const char* ncclIbCastTestGinIgetName(void) {
+  return IbCastReqTypeStr[NCCL_NET_IB_REQ_GIN_IGET];
+}

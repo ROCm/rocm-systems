@@ -860,3 +860,153 @@ ncclRma_t IbCastRmaIbProxy = {"RMA_IB_PROXY",
                               NULL,
                               NULL,
                               IbCastGinIbFinalize};
+
+static int castTestPollErrorSecond(struct ibv_cq* cq, int num_entries, struct ibv_wc* wc) {
+  (void)cq;
+  if (num_entries < 2 || wc == NULL) return 0;
+  memset(wc, 0, sizeof(*wc) * 2);
+  wc[0].status = IBV_WC_SUCCESS;
+  wc[0].wr_id = 0;
+  wc[1].status = IBV_WC_REM_ACCESS_ERR;
+  wc[1].wr_id = 0;
+  return 2;
+}
+
+extern "C" ncclResult_t ncclIbCastTestRmaProxyErrorCompletion(void) {
+  struct ncclIbSendComm* comm = NULL;
+  struct ncclSocket* sock = NULL;
+  NCCLCHECK(ncclIbMalloc((void**)&comm, sizeof(*comm)));
+  if (ncclIbMalloc((void**)&sock, sizeof(*sock)) != ncclSuccess) {
+    free(comm);
+    return ncclSystemError;
+  }
+  sock->state = ncclSocketStateReady;
+
+  struct ibv_device device = {};
+  struct ibv_context context = {};
+  struct ibv_pd pd = {};
+  struct ibv_cq cq = {};
+  memcpy(device.name, "fake0", 6);
+  context.device = &device;
+  context.ops.poll_cq = castTestPollErrorSecond;
+  pd.context = &context;
+  cq.context = &context;
+
+  struct ncclIbNetCommDevBase* devBase = &comm->devs[0].base;
+  devBase->cq = &cq;
+  devBase->pd = &pd;
+  devBase->gidInfo.link_layer = IBV_LINK_LAYER_INFINIBAND;
+
+  struct ncclIbRequest* req = NULL;
+  ncclResult_t ret = IbCastGetRequest(&comm->base, &req);
+  if (ret != ncclSuccess || req == NULL) {
+    free(sock);
+    free(comm);
+    return ret == ncclSuccess ? ncclInternalError : ret;
+  }
+  // Slot 0, so the success CQE's wr_id matches this request. events[0] stays
+  // above zero across that CQE, and devBases[1] stays NULL: the pre-fix log
+  // indexed devBases by the completion index and crashed on the error CQE.
+  req->type = NCCL_NET_IB_REQ_GIN_IGET;
+  req->events[0] = 2;
+  req->sock = sock;
+  req->iput.rank = 0;
+  void* sendSlot = comm;
+  struct IbCastRmaIbProxyCtx proxyCtx = {};
+  proxyCtx.fullSendComm = &sendSlot;
+  req->ginProxyCtx = &proxyCtx;
+
+  int done = 0;
+  ret = IbCastRmaIbProxyTest(NULL, req, &done);
+  free(sock);
+  free(comm);
+  return ret;
+}
+
+static int castGinIsendCalls;
+static int castGinRecvPolls;
+static int castGinRecvPolledBeforeSend;
+static int castGinSendPosted;
+static char castGinSendReq;
+static char castGinRecvReq;
+
+static ncclResult_t castGinFakeRegMr(void* comm, void* data, size_t size, int type, void** mhandle) {
+  (void)comm; (void)data; (void)size; (void)type;
+  static int mr;
+  *mhandle = &mr;
+  return ncclSuccess;
+}
+
+static ncclResult_t castGinFakeDeregMr(void* comm, void* mhandle) {
+  (void)comm; (void)mhandle;
+  return ncclSuccess;
+}
+
+static ncclResult_t castGinFakeIsend(void* sendComm, void* data, size_t size, int tag, void* mhandle, void* phandle,
+                                    void** request) {
+  (void)sendComm; (void)data; (void)size; (void)tag; (void)mhandle; (void)phandle;
+  if (castGinRecvPolls == 0) {
+    // CTS not ready. Give up if nothing ever polls the receive, so the old
+    // post-then-wait loop fails the test instead of spinning.
+    if (++castGinIsendCalls > 4) return ncclInternalError;
+    *request = NULL;
+    return ncclSuccess;
+  }
+  castGinSendPosted = 1;
+  *request = &castGinSendReq;
+  return ncclSuccess;
+}
+
+static ncclResult_t castGinFakeIrecv(void* recvComm, int n, void** data, size_t* sizes, int* tags, void** mhandles,
+                                    void** phandles, void** request) {
+  (void)recvComm; (void)n; (void)data; (void)sizes; (void)tags; (void)mhandles; (void)phandles;
+  *request = &castGinRecvReq;
+  return ncclSuccess;
+}
+
+static ncclResult_t castGinFakeTest(void* request, int* done, int* sizes) {
+  (void)sizes;
+  if (request == &castGinRecvReq) {
+    if (!castGinSendPosted) castGinRecvPolledBeforeSend = 1;
+    castGinRecvPolls++;
+  }
+  *done = 1;
+  return ncclSuccess;
+}
+
+extern "C" ncclResult_t ncclIbCastTestGinAllGatherPollsRecv(int* recvPolledBeforeSend) {
+  if (recvPolledBeforeSend == NULL) return ncclInvalidArgument;
+  castGinIsendCalls = 0;
+  castGinRecvPolls = 0;
+  castGinRecvPolledBeforeSend = 0;
+  castGinSendPosted = 0;
+
+  auto savedRegMr = netIbCast.regMr;
+  auto savedDeregMr = netIbCast.deregMr;
+  auto savedIsend = netIbCast.isend;
+  auto savedIrecv = netIbCast.irecv;
+  auto savedTest = netIbCast.test;
+  netIbCast.regMr = castGinFakeRegMr;
+  netIbCast.deregMr = castGinFakeDeregMr;
+  netIbCast.isend = castGinFakeIsend;
+  netIbCast.irecv = castGinFakeIrecv;
+  netIbCast.test = castGinFakeTest;
+
+  struct CastIbGinCollComm cComm = {};
+  cComm.rank = 0;
+  cComm.nranks = 2;
+  cComm.sendComm = &cComm;
+  cComm.recvComm = &cComm;
+  int src = 1;
+  int recvBuf[2] = {};
+  ncclResult_t ret = IbCastGinIbAllGather(&cComm, &src, recvBuf, sizeof(src));
+
+  netIbCast.regMr = savedRegMr;
+  netIbCast.deregMr = savedDeregMr;
+  netIbCast.isend = savedIsend;
+  netIbCast.irecv = savedIrecv;
+  netIbCast.test = savedTest;
+
+  *recvPolledBeforeSend = castGinRecvPolledBeforeSend;
+  return ret;
+}
