@@ -2735,6 +2735,22 @@ TEST_F(ExternalVariableTest, LoadRefusesAScratchpadPastTheEndOfItsAllocation) {
             HSA_STATUS_ERROR_INVALID_ALLOCATION);
 }
 
+TEST_F(ExternalVariableTest, LoadRefusesAScratchpadPastTheEndOfAVmemMapping) {
+  // As above, for a vmem mapping, whose pointer info reports the queried pointer as its base.
+  std::vector<hsa_agent_t> access_agents;
+  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_CPU>, &access_agents),
+            HSA_STATUS_SUCCESS);
+  access_agents.insert(access_agents.end(), aie_agents.begin(), aie_agents.end());
+  vmem_buffer mapping{};
+  ASSERT_TRUE(vmem_allocate(data_pool, 4096, access_agents, &mapping));
+  hsa_executable_t executable{};
+  hsa_code_object_reader_t reader{};
+  EXPECT_EQ(TryLoad(read_hsaco(kParamElfHsacoPath), aie_agents.front(), &executable, &reader,
+                    {{kScratchpad, static_cast<std::uint8_t*>(mapping.va) + mapping.size - 2}}),
+            HSA_STATUS_ERROR_INVALID_ALLOCATION);
+  EXPECT_TRUE(vmem_free(mapping));
+}
+
 TEST_F(ExternalVariableTest, ScratchpadParameterChangesBetweenDispatches) {
   // One loaded kernel, dispatched with a different parameter each time. The test writes each
   // value with a plain store and no flush; the runtime flushes the scratchpad per dispatch.

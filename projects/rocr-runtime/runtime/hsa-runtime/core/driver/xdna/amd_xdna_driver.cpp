@@ -2273,10 +2273,11 @@ static hsa_status_t SubmitFullElfChain(int fd, void* dev_heap_vaddr,
   ctrl_buffers.reserve(num_pkts);
   MAKE_SCOPE_GUARD([&] { FreeDeviceBuffers(fd, dev_heap_vaddr, &ctrl_buffers); });
 
-  // BOs per packet: the control code, each PDI (usually one) and one per kernarg. Four per packet
-  // covers a two-argument kernel; this is a capacity hint, not a bound.
+  // BOs per packet: the control code, each PDI (usually one), one per kernarg and one per external
+  // variable. Five per packet covers a two-argument kernel with a scratchpad; this is a capacity
+  // hint, not a bound.
   std::vector<uint32_t> bo_handles;
-  bo_handles.reserve(num_pkts * 4);
+  bo_handles.reserve(num_pkts * 5);
 
   // Commands to be submitted, and how many argument dwords each occupies in a chain slot.
   std::vector<BOHandle> cmd_bo_handles;

@@ -504,7 +504,7 @@ constexpr const char* kScratchpad = "scratch-pad-ctrl";
  * @return the indices of those relocations in .rela.dyn
  */
 std::vector<std::uint32_t> RelocationsNaming(const std::vector<std::uint8_t>& image,
-                                             const char* name, std::uint32_t* st_size) {
+                                             const std::string& name, std::uint32_t* st_size) {
   std::vector<std::uint32_t> found;
   const std::uint32_t rela = FindSection(image, ".rela.dyn");
   const std::uint32_t dynsym = FindSection(image, ".dynsym");
@@ -521,7 +521,7 @@ std::vector<std::uint32_t> RelocationsNaming(const std::vector<std::uint8_t>& im
                 sizeof(sym));
     const auto* sym_name =
         reinterpret_cast<const char*>(image.data() + str_sh.sh_offset + sym.st_name);
-    if (std::strcmp(sym_name, name) != 0) continue;
+    if (name != sym_name) continue;
     found.push_back(r);
     *st_size = sym.st_size;
   }

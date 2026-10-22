@@ -1912,34 +1912,35 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
         }
         void* va = reinterpret_cast<void*>(var_it->second->address);
 
-        // The NPU reaches the variable at its agent address, so it must lie in one allocation
-        // the driver knows.
+        // The NPU reaches the variable at its agent address, so all of it must lie in one
+        // allocation the driver knows. The extent is measured from the allocation base
+        // FindDriverMemoryHandle returns: for a VMM mapping, PtrInfo reports the queried pointer
+        // as the base but the whole mapping as the size.
+        auto* runtime = core::Runtime::runtime_singleton_;
         hsa_amd_pointer_info_t info = {};
         info.size = sizeof(info);
-        const hsa_status_t s =
-            core::Runtime::runtime_singleton_->PtrInfo(va, &info, nullptr, nullptr, nullptr);
-        const bool known = s == HSA_STATUS_SUCCESS && info.type != HSA_EXT_POINTER_TYPE_UNKNOWN &&
-            info.agentBaseAddress != nullptr;
-        const uint64_t offset = known
-            ? reinterpret_cast<uintptr_t>(va) - reinterpret_cast<uintptr_t>(info.hostBaseAddress)
-            : 0;
-        if (!known || offset + ext.size > info.sizeInBytes) {
+        void* alloc_base = nullptr;
+        core::DriverMemoryHandle handle{};
+        bool known = runtime->PtrInfo(va, &info, nullptr, nullptr, nullptr) == HSA_STATUS_SUCCESS;
+        known = known && info.type != HSA_EXT_POINTER_TYPE_UNKNOWN && info.agentBaseAddress;
+        known = known &&
+            runtime->FindDriverMemoryHandle(va, core_agent, &alloc_base, &handle) ==
+                HSA_STATUS_SUCCESS;
+        const auto offset_in_alloc =
+            reinterpret_cast<uintptr_t>(va) - reinterpret_cast<uintptr_t>(alloc_base);
+        if (!known || offset_in_alloc + ext.size > info.sizeInBytes) {
           log_warning_n(10, "AIE: '%s' is not defined in %u bytes of AIE-accessible memory.\n",
                         name.c_str(), ext.size);
           return HSA_STATUS_ERROR_INVALID_ALLOCATION;
         }
-        uint32_t bo_handle = 0;
-        if (auto st = resolve_handle(va, &bo_handle); st != HSA_STATUS_SUCCESS) {
-          log_warning_n(10, "AIE: '%s' is not in memory the AIE agent can reach.\n", name.c_str());
-          return st;
-        }
 
-        const uint64_t dev_addr = reinterpret_cast<uint64_t>(info.agentBaseAddress) + offset;
+        const uint64_t dev_addr = reinterpret_cast<uint64_t>(info.agentBaseAddress) +
+            (reinterpret_cast<uintptr_t>(va) - reinterpret_cast<uintptr_t>(info.hostBaseAddress));
         for (const AMD::aie_elf::PatchSite& site : ext.sites) {
           const uint64_t value = dev_addr + site.addend;
           std::memcpy(kernel.ctrl_code.data() + site.offset, &value, sizeof(value));
         }
-        desc->external_variables.push_back({va, ext.size, bo_handle});
+        desc->external_variables.push_back({va, ext.size, static_cast<uint32_t>(handle.handle)});
       }
 
       // The control code is only ever a memcpy source for a per-dispatch buffer, so it stays in
