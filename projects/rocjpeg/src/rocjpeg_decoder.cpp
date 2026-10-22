@@ -23,7 +23,7 @@ THE SOFTWARE.
 #include "rocjpeg_decoder.h"
 
 RocJpegDecoder::RocJpegDecoder(RocJpegBackend backend, int device_id) :
-    num_devices_{0}, device_id_ {device_id}, hip_stream_ {0}, backend_{backend} {}
+    num_devices_{0}, device_id_ {device_id}, hip_stream_ {0}, backend_{backend}, initialized_{false} {}
 
 RocJpegDecoder::~RocJpegDecoder() {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -113,8 +113,116 @@ RocJpegStatus RocJpegDecoder::InitializeDecoder() {
         FunctionExitLog(g_rocjpeg_logger);
         return ROCJPEG_STATUS_INVALID_PARAMETER;
     }
+    initialized_ = true;
     FunctionExitLog(g_rocjpeg_logger);
     return rocjpeg_status;
+}
+
+/**
+ * @brief Retrieves the decode capabilities of this decoder.
+ *
+ * All values read here are written only during InitializeDecoder(), which completes before rocJpegCreate()
+ * returns, so no lock is taken and the query never waits behind a decode on the same handle.
+ *
+ * @param decode_caps Pointer to store the decode capabilities.
+ * @return The status of the operation.
+ *         - ROCJPEG_STATUS_SUCCESS if the capabilities are filled.
+ *         - ROCJPEG_STATUS_INVALID_PARAMETER if decode_caps is nullptr.
+ *         - ROCJPEG_STATUS_NOT_INITIALIZED if the decoder failed to initialize; decode_caps is zeroed.
+ */
+RocJpegStatus RocJpegDecoder::GetDecoderCaps(RocJpegDecodeCaps *decode_caps) const {
+    FunctionEntryLogWithArgs(g_rocjpeg_logger, RocJpegFmtPtr(decode_caps));
+    if (decode_caps == nullptr) {
+        CriticalLog(g_rocjpeg_logger, "Null decode capability struct pointer.");
+        FunctionExitLog(g_rocjpeg_logger);
+        return ROCJPEG_STATUS_INVALID_PARAMETER;
+    }
+    memset(decode_caps, 0, sizeof(RocJpegDecodeCaps));
+    if (!initialized_) {
+        ErrorLog(g_rocjpeg_logger, "The rocJPEG decoder is not initialized!");
+        FunctionExitLog(g_rocjpeg_logger);
+        return ROCJPEG_STATUS_NOT_INITIALIZED;
+    }
+    switch (backend_) {
+        case ROCJPEG_BACKEND_HARDWARE: {
+            const VcnJpegSpec &vcn_jpeg_spec = jpeg_vaapi_decoder_.GetCurrentVcnJpegSpec();
+            // Without the VCN ROI support, cropping is done while copying/converting the decoded output.
+            decode_caps->roi_decode = 1;
+            decode_caps->hw_roi_decode = vcn_jpeg_spec.can_roi_decode ? 1 : 0;
+            decode_caps->max_components = NUM_COMPONENTS - 1;
+            decode_caps->num_jpeg_cores = vcn_jpeg_spec.num_jpeg_cores;
+            // These are the limits SubmitDecode/SubmitDecodeBatched enforce on the coded image dimensions.
+            // VASurfaceAttribMinWidth/Height are not used here: they bound the allocated VA surface, which is
+            // always at least default_surface_width_ x default_surface_height_, so they never reject an image.
+            decode_caps->min_width = jpeg_vaapi_decoder_.GetMinPictureWidth();
+            decode_caps->min_height = jpeg_vaapi_decoder_.GetMinPictureHeight();
+            // The parser rejects dimensions above MAX_SAFE_DIMENSION regardless of the VA-API limit.
+            decode_caps->max_width = std::min<uint32_t>(jpeg_vaapi_decoder_.GetMaxPictureWidth(), MAX_SAFE_DIMENSION);
+            decode_caps->max_height = std::min<uint32_t>(jpeg_vaapi_decoder_.GetMaxPictureHeight(), MAX_SAFE_DIMENSION);
+            // A subsampling is supported if the VA-API driver supports the surface the VCN JPEG decoder writes for it.
+            // RocJpegStreamParser rejects ROCJPEG_CSS_411 and ROCJPEG_CSS_UNKNOWN streams, which have no surface format.
+            // The internal ChromaSubsampling values match the public RocJpegChromaSubsampling values.
+            for (int css = 0; css < ROCJPEG_NUM_CHROMA_SUBSAMPLINGS; css++) {
+                RocJpegSurfaceFormat surface_format = jpeg_vaapi_decoder_.GetNativeSurfaceFormat(static_cast<ChromaSubsampling>(css));
+                decode_caps->native_surface_format[css] = surface_format;
+                if (surface_format != ROCJPEG_SURFACE_FORMAT_NONE) {
+                    decode_caps->subsampling_mask |= (1u << css);
+                }
+            }
+            if (decode_caps->subsampling_mask == 0) {
+                break;
+            }
+            decode_caps->is_supported = 1;
+            // VA-API only defines VAProfileJPEGBaseline, which InitializeDecoder requires with the VLD entrypoint;
+            // RocJpegStreamParser rejects every other frame type (SOF1 to SOF15).
+            decode_caps->coding_process_mask = (1u << ROCJPEG_CODING_PROCESS_BASELINE);
+            decode_caps->output_format_mask = (1u << ROCJPEG_OUTPUT_FORMAT_MAX) - 1;
+            // Must match the RGB surface selection in RocJpegVappiDecoder::SubmitDecode/SubmitDecodeBatched,
+            // which uses the VCN color conversion for every subsampling except 4:4:0.
+            if (vcn_jpeg_spec.can_convert_to_rgb) {
+                decode_caps->hw_rgb_subsampling_mask = decode_caps->subsampling_mask & ~(1u << ROCJPEG_CSS_440);
+                // Both masks describe the same capability, so neither is reported on its own: if 4:4:0 is the only
+                // supported subsampling, no subsampling uses the VCN color conversion and both stay zero.
+                if (decode_caps->hw_rgb_subsampling_mask != 0) {
+                    decode_caps->hw_rgb_output_format_mask = (1u << ROCJPEG_OUTPUT_RGB) | (1u << ROCJPEG_OUTPUT_RGB_PLANAR);
+                }
+            }
+            break;
+        }
+        default:
+            FunctionExitLog(g_rocjpeg_logger);
+            return ROCJPEG_STATUS_NOT_IMPLEMENTED;
+    }
+    FunctionExitLog(g_rocjpeg_logger);
+    return ROCJPEG_STATUS_SUCCESS;
+}
+
+/**
+ * @brief Checks that the crop rectangle of the decode parameters lies within the image.
+ *
+ * Without this check, a rectangle extending past the image is accepted, and the part of the output
+ * outside the image is filled with whatever the decoder surface holds there.
+ *
+ * @param decode_params The decode parameters holding the crop rectangle.
+ * @param jpeg_stream_params The parsed JPEG stream parameters holding the image dimensions.
+ * @return ROCJPEG_STATUS_SUCCESS if no cropping is requested or the crop rectangle is within the image,
+ *         ROCJPEG_STATUS_INVALID_PARAMETER otherwise.
+ */
+RocJpegStatus RocJpegDecoder::ValidateCropRectangle(const RocJpegDecodeParams &decode_params, const JpegStreamParameters &jpeg_stream_params) {
+    const auto &crop = decode_params.crop_rectangle;
+    if (crop.left == 0 && crop.top == 0 && crop.right == 0 && crop.bottom == 0) {
+        return ROCJPEG_STATUS_SUCCESS;
+    }
+    const int32_t width = jpeg_stream_params.picture_parameter_buffer.picture_width;
+    const int32_t height = jpeg_stream_params.picture_parameter_buffer.picture_height;
+    if (crop.left < 0 || crop.top < 0 || crop.left >= crop.right || crop.top >= crop.bottom ||
+        crop.right > width || crop.bottom > height) {
+        ErrorLog(g_rocjpeg_logger, "Invalid crop rectangle (left " + ROCJPEG_TOSTR(crop.left) + ", top " + ROCJPEG_TOSTR(crop.top) +
+                 ", right " + ROCJPEG_TOSTR(crop.right) + ", bottom " + ROCJPEG_TOSTR(crop.bottom) + ") for a " +
+                 ROCJPEG_TOSTR(width) + "x" + ROCJPEG_TOSTR(height) + " image");
+        return ROCJPEG_STATUS_INVALID_PARAMETER;
+    }
+    return ROCJPEG_STATUS_SUCCESS;
 }
 
 /**
@@ -143,11 +251,16 @@ RocJpegStatus RocJpegDecoder::Decode(RocJpegStreamHandle jpeg_stream_handle, con
     }
     auto rocjpeg_stream_handle = static_cast<RocJpegStreamParserHandle*>(jpeg_stream_handle);
     const JpegStreamParameters *jpeg_stream_params = rocjpeg_stream_handle->rocjpeg_stream->GetJpegStreamParameters();
+    if (ValidateCropRectangle(*decode_params, *jpeg_stream_params) != ROCJPEG_STATUS_SUCCESS) {
+        FunctionExitLog(g_rocjpeg_logger);
+        return ROCJPEG_STATUS_INVALID_PARAMETER;
+    }
 
     VASurfaceID current_surface_id;
     CHECK_ROCJPEG(jpeg_vaapi_decoder_.SubmitDecode(jpeg_stream_params, current_surface_id, decode_params));
 
-    RocJpegStatus rocjpeg_status = FinalizeDecode(current_surface_id, jpeg_stream_params, decode_params, destination);
+    // A single image is just a batch of one.
+    RocJpegStatus rocjpeg_status = FinalizeDecodeBatched(&current_surface_id, jpeg_stream_params, decode_params, destination, 1);
     if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
         jpeg_vaapi_decoder_.SetSurfaceAsIdle(current_surface_id);
     }
@@ -174,6 +287,10 @@ RocJpegStatus RocJpegDecoder::DecodeAsync(RocJpegStreamHandle jpeg_stream_handle
 
     auto rocjpeg_stream_handle = static_cast<RocJpegStreamParserHandle*>(jpeg_stream_handle);
     const JpegStreamParameters *jpeg_stream_params = rocjpeg_stream_handle->rocjpeg_stream->GetJpegStreamParameters();
+    if (ValidateCropRectangle(*decode_params, *jpeg_stream_params) != ROCJPEG_STATUS_SUCCESS) {
+        FunctionExitLog(g_rocjpeg_logger);
+        return ROCJPEG_STATUS_INVALID_PARAMETER;
+    }
 
     AsyncDecodeState state;
     state.jpeg_stream_params = *jpeg_stream_params;
@@ -214,93 +331,14 @@ RocJpegStatus RocJpegDecoder::DecodeSync(RocJpegImage *destination) {
         pending_decodes_.erase(it);
     }
 
-    // Sync the VA surface and copy the decoded output to the destination without holding the mutex
-    RocJpegStatus rocjpeg_status = FinalizeDecode(state.surface_id, &state.jpeg_stream_params, &state.decode_params, destination);
+    // Sync the VA surface and copy the decoded output to the destination without holding the mutex.
+    // A single image is just a batch of one.
+    RocJpegStatus rocjpeg_status = FinalizeDecodeBatched(&state.surface_id, &state.jpeg_stream_params, &state.decode_params, destination, 1);
     if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
         jpeg_vaapi_decoder_.SetSurfaceAsIdle(state.surface_id);
         FunctionExitLog(g_rocjpeg_logger);
         return rocjpeg_status;
     }
-    FunctionExitLog(g_rocjpeg_logger);
-    return ROCJPEG_STATUS_SUCCESS;
-}
-
-/**
- * @brief Waits for a submitted VA surface, maps it through HIP interop, and writes the requested output.
- */
-RocJpegStatus RocJpegDecoder::FinalizeDecode(VASurfaceID current_surface_id, const JpegStreamParameters *jpeg_stream_params, const RocJpegDecodeParams *decode_params, RocJpegImage *destination) {
-    if (jpeg_stream_params == nullptr || decode_params == nullptr || destination == nullptr) {
-        return ROCJPEG_STATUS_INVALID_PARAMETER;
-    }
-
-    HipInteropDeviceMem hip_interop_dev_mem = {};
-    CHECK_ROCJPEG(jpeg_vaapi_decoder_.SyncSurface(current_surface_id));
-    CHECK_ROCJPEG(jpeg_vaapi_decoder_.GetHipInteropMem(current_surface_id, hip_interop_dev_mem));
-
-    uint16_t chroma_height = 0;
-    uint16_t picture_width = 0;
-    uint16_t picture_height = 0;
-    bool is_roi_valid = false;
-    uint32_t roi_width;
-    uint32_t roi_height;
-    roi_width = decode_params->crop_rectangle.right - decode_params->crop_rectangle.left;
-    roi_height = decode_params->crop_rectangle.bottom - decode_params->crop_rectangle.top;
-
-    if (roi_width > 0 && roi_height > 0 && roi_width <= jpeg_stream_params->picture_parameter_buffer.picture_width && roi_height <= jpeg_stream_params->picture_parameter_buffer.picture_height) {
-        is_roi_valid = true;
-    }
-
-    picture_width = is_roi_valid ? roi_width : jpeg_stream_params->picture_parameter_buffer.picture_width;
-    picture_height = is_roi_valid ? roi_height : jpeg_stream_params->picture_parameter_buffer.picture_height;
-
-    VcnJpegSpec current_vcn_jpeg_spec = jpeg_vaapi_decoder_.GetCurrentVcnJpegSpec();
-    if (is_roi_valid && current_vcn_jpeg_spec.can_roi_decode) {
-        // Set is_roi_valid to false because in this case, the hardware handles the ROI decode and we don't
-        // need to calculate the roi_offset later in the following functions (e.g., CopyChannel, GetPlanarYUVOutputFormat, etc) to copy the crop rectangle
-        is_roi_valid = false;
-    }
-
-    switch (decode_params->output_format) {
-        case ROCJPEG_OUTPUT_NATIVE:
-            // Copy the native decoded output buffers from interop memory directly to the destination buffers
-            CHECK_ROCJPEG(GetChromaHeight(hip_interop_dev_mem.surface_format, picture_height, chroma_height));
-
-            // Copy Luma (first channel) for any surface format
-            CHECK_ROCJPEG(CopyChannel(hip_interop_dev_mem, picture_width, picture_height, 0, destination, decode_params, is_roi_valid));
-
-            if (hip_interop_dev_mem.surface_format == VA_FOURCC_NV12) {
-                // Copy the second channel (UV interleaved) for NV12
-                CHECK_ROCJPEG(CopyChannel(hip_interop_dev_mem, picture_width, chroma_height, 1, destination, decode_params, is_roi_valid));
-            } else if (hip_interop_dev_mem.surface_format == VA_FOURCC_444P ||
-                       hip_interop_dev_mem.surface_format == VA_FOURCC_422V) {
-                // Copy the second and third channels for YUV444 and YUV440 (i.e., YUV422V)
-                CHECK_ROCJPEG(CopyChannel(hip_interop_dev_mem, picture_width, chroma_height, 1, destination, decode_params, is_roi_valid));
-                CHECK_ROCJPEG(CopyChannel(hip_interop_dev_mem, picture_width, chroma_height, 2, destination, decode_params, is_roi_valid));
-            }
-            break;
-        case ROCJPEG_OUTPUT_YUV_PLANAR:
-            CHECK_ROCJPEG(GetChromaHeight(hip_interop_dev_mem.surface_format, picture_height, chroma_height));
-            CHECK_ROCJPEG(GetPlanarYUVOutputFormat(hip_interop_dev_mem, picture_width,
-                                                   picture_height, chroma_height, destination, decode_params, is_roi_valid));
-            break;
-        case ROCJPEG_OUTPUT_Y:
-            CHECK_ROCJPEG(GetYOutputFormat(hip_interop_dev_mem, picture_width,
-                                           picture_height, destination, decode_params, is_roi_valid));
-            break;
-        case ROCJPEG_OUTPUT_RGB:
-            CHECK_ROCJPEG(ColorConvertToRGB(hip_interop_dev_mem, picture_width,
-                                                    picture_height, destination, decode_params, is_roi_valid));
-            break;
-        case ROCJPEG_OUTPUT_RGB_PLANAR:
-            CHECK_ROCJPEG(ColorConvertToRGBPlanar(hip_interop_dev_mem, picture_width,
-                                                    picture_height, destination, decode_params, is_roi_valid));
-            break;
-        default:
-            break;
-    }
-
-    CHECK_HIP(hipStreamSynchronize(hip_stream_));
-    CHECK_ROCJPEG(jpeg_vaapi_decoder_.SetSurfaceAsIdle(current_surface_id));
     FunctionExitLog(g_rocjpeg_logger);
     return ROCJPEG_STATUS_SUCCESS;
 }
@@ -433,6 +471,15 @@ RocJpegStatus RocJpegDecoder::DecodeBatched(RocJpegStreamHandle *jpeg_streams, i
         FunctionExitLog(g_rocjpeg_logger);
         return ROCJPEG_STATUS_EXECUTION_FAILED;
     }
+    // Validate every image before submitting any, so an invalid one does not leave earlier images in flight.
+    for (int i = 0; i < batch_size; i++) {
+        auto rocjpeg_stream_handle = static_cast<RocJpegStreamParserHandle*>(jpeg_streams[i]);
+        if (ValidateCropRectangle(decode_params[i], *rocjpeg_stream_handle->rocjpeg_stream->GetJpegStreamParameters()) != ROCJPEG_STATUS_SUCCESS) {
+            ErrorLog(g_rocjpeg_logger, "Invalid crop rectangle for the image at index " + ROCJPEG_TOSTR(i));
+            FunctionExitLog(g_rocjpeg_logger);
+            return ROCJPEG_STATUS_INVALID_PARAMETER;
+        }
+    }
 
     std::vector<VASurfaceID> current_surface_ids;
     std::vector<JpegStreamParameters> jpeg_streams_params;
@@ -500,6 +547,11 @@ RocJpegStatus RocJpegDecoder::DecodeBatchedAsync(RocJpegStreamHandle *jpeg_strea
     for (int i = 0; i < batch_size; i++) {
         auto rocjpeg_stream_handle = static_cast<RocJpegStreamParserHandle*>(jpeg_streams[i]);
         const JpegStreamParameters *jpeg_stream_params = rocjpeg_stream_handle->rocjpeg_stream->GetJpegStreamParameters();
+        if (ValidateCropRectangle(decode_params[i], *jpeg_stream_params) != ROCJPEG_STATUS_SUCCESS) {
+            ErrorLog(g_rocjpeg_logger, "Invalid crop rectangle for the image at index " + ROCJPEG_TOSTR(i));
+            FunctionExitLog(g_rocjpeg_logger);
+            return ROCJPEG_STATUS_INVALID_PARAMETER;
+        }
         jpeg_streams_params[i] = *jpeg_stream_params;
     }
 
@@ -588,6 +640,9 @@ RocJpegStatus RocJpegDecoder::DecodeBatchedSync(RocJpegImage *destinations, int 
  * This function retrieves the number of components, chroma subsampling, widths, and heights
  * of the image from the given JPEG stream.
  *
+ * Only the parsed parameters of the stream handle are read, never decoder state, so no lock is taken and
+ * the query does not wait behind a decode on the same handle.
+ *
  * @param jpeg_stream_handle The handle to the JPEG stream.
  * @param num_components Pointer to store the number of components in the image.
  * @param subsampling Pointer to store the chroma subsampling of the image.
@@ -598,7 +653,6 @@ RocJpegStatus RocJpegDecoder::DecodeBatchedSync(RocJpegImage *destinations, int 
  */
 RocJpegStatus RocJpegDecoder::GetImageInfo(RocJpegStreamHandle jpeg_stream_handle, uint8_t *num_components, RocJpegChromaSubsampling *subsampling, uint32_t *widths, uint32_t *heights){
     FunctionEntryLogWithArgs(g_rocjpeg_logger, RocJpegFmtPtr(jpeg_stream_handle) + ", " + RocJpegFmtPtr(num_components) + ", " + RocJpegFmtPtr(subsampling) + ", " + RocJpegFmtPtr(widths) + ", " + RocJpegFmtPtr(heights));
-    std::lock_guard<std::mutex> lock(mutex_);
     if (jpeg_stream_handle == nullptr || num_components == nullptr || subsampling == nullptr || widths == nullptr || heights == nullptr) {
         CriticalLog(g_rocjpeg_logger, "Null pointer");
         FunctionExitLog(g_rocjpeg_logger);
@@ -797,235 +851,6 @@ RocJpegStatus RocJpegDecoder::GetChromaHeight(uint32_t surface_format, uint16_t 
 }
 
 /**
- * @brief Converts the color format of the input image to RGB format.
- *
- * This function converts the color format of the input image to RGB format based on the surface format
- * specified in the `hip_interop_dev_mem` parameter. The converted image is stored in the `destination`
- * parameter.
- *
- * @param hip_interop_dev_mem The HipInteropDeviceMem object containing the input image data.
- * @param picture_width The width of the destination image.
- * @param picture_height The height of the destination image.
- * @param destination Pointer to the RocJpegImage object where the converted image will be stored.
- * @return The status of the color conversion operation. Returns ROCJPEG_STATUS_SUCCESS if the conversion
- *         is successful. Returns ROCJPEG_STATUS_JPEG_NOT_SUPPORTED if the surface format is not supported.
- */
-RocJpegStatus RocJpegDecoder::ColorConvertToRGB(HipInteropDeviceMem& hip_interop_dev_mem, uint32_t picture_width, uint32_t picture_height, RocJpegImage *destination, const RocJpegDecodeParams *decode_params, bool is_roi_valid) {
-    // roi_offset is the generic ROI byte offset, computed against the luma pitch. It is applied to the
-    // Y component of every supported YUV surface format, and also to the U/V planes of the formats whose
-    // chroma is neither vertically nor horizontally subsampled (e.g. YUV444 / VA_FOURCC_444P).
-    // roi_uv_offset is the chroma-specific ROI byte offset, computed against the chroma pitch with the
-    // row index halved. It is applied only to the U/V data of the vertically-subsampled formats:
-    // YUV440 (VA_FOURCC_422V surface) and YUV420 (VA_FOURCC_NV12 surface).
-    uint32_t roi_offset = 0;
-    uint32_t roi_uv_offset = 0;
-    int16_t top = decode_params->crop_rectangle.top;
-    int16_t left = decode_params->crop_rectangle.left;
-    if (is_roi_valid) {
-        if (hip_interop_dev_mem.surface_format == VA_FOURCC_422V || hip_interop_dev_mem.surface_format == VA_FOURCC_NV12){
-            roi_uv_offset = (top >> 1) * hip_interop_dev_mem.pitch[1] + left;
-        } else if (hip_interop_dev_mem.surface_format == VA_FOURCC_YUY2) {
-            left *= 2;
-        }
-        roi_offset = top * hip_interop_dev_mem.pitch[0] + left;
-    }
-    switch (hip_interop_dev_mem.surface_format) {
-        case VA_FOURCC_444P:
-            ColorConvertYUV444ToRGB(hip_stream_, picture_width, picture_height, destination->channel[0], destination->pitch[0],
-                                                  hip_interop_dev_mem.hip_mapped_device_mem + roi_offset, hip_interop_dev_mem.pitch[0],
-                                                  hip_interop_dev_mem.hip_mapped_device_mem + hip_interop_dev_mem.offset[1] + roi_offset,
-                                                  hip_interop_dev_mem.hip_mapped_device_mem + hip_interop_dev_mem.offset[2] + roi_offset);
-            break;
-        case VA_FOURCC_422V:
-            ColorConvertYUV440ToRGB(hip_stream_, picture_width, picture_height, destination->channel[0], destination->pitch[0],
-                                                  hip_interop_dev_mem.hip_mapped_device_mem + roi_offset, hip_interop_dev_mem.pitch[0],
-                                                  hip_interop_dev_mem.hip_mapped_device_mem + hip_interop_dev_mem.offset[1] + roi_uv_offset,
-                                                  hip_interop_dev_mem.hip_mapped_device_mem + hip_interop_dev_mem.offset[2] + roi_uv_offset);
-            break;
-        case VA_FOURCC_YUY2:
-            ColorConvertYUYVToRGB(hip_stream_, picture_width, picture_height, destination->channel[0], destination->pitch[0],
-                                                hip_interop_dev_mem.hip_mapped_device_mem + roi_offset, hip_interop_dev_mem.pitch[0]);
-            break;
-        case VA_FOURCC_NV12:
-            ColorConvertNV12ToRGB(hip_stream_, picture_width, picture_height, destination->channel[0], destination->pitch[0],
-                                                hip_interop_dev_mem.hip_mapped_device_mem + roi_offset, hip_interop_dev_mem.pitch[0],
-                                                hip_interop_dev_mem.hip_mapped_device_mem + hip_interop_dev_mem.offset[1] + roi_uv_offset, hip_interop_dev_mem.pitch[1]);
-            break;
-        case VA_FOURCC_Y800:
-            ColorConvertYUV400ToRGB(hip_stream_, picture_width, picture_height, destination->channel[0], destination->pitch[0],
-                                                hip_interop_dev_mem.hip_mapped_device_mem + roi_offset, hip_interop_dev_mem.pitch[0]);
-           break;
-        case VA_FOURCC_RGBA:
-            ColorConvertRGBAToRGB(hip_stream_, picture_width, picture_height, destination->channel[0], destination->pitch[0],
-                                                hip_interop_dev_mem.hip_mapped_device_mem + roi_offset, hip_interop_dev_mem.pitch[0]);
-           break;
-        default:
-            ErrorLog(g_rocjpeg_logger, "Surface format is not supported!");
-            return ROCJPEG_STATUS_JPEG_NOT_SUPPORTED;
-    }
-    return ROCJPEG_STATUS_SUCCESS;
-}
-
-/**
- * @brief Converts the color format of the input image to RGB planar format.
- *
- * This function converts the color format of the input image to RGB planar format.
- * The conversion is performed based on the surface format specified in the `hip_interop_dev_mem`.
- * The converted image is stored in the `destination` RocJpegImage object.
- *
- * @param hip_interop_dev_mem The HipInteropDeviceMem object containing the input image data.
- * @param picture_width The width of the destination image.
- * @param picture_height The height of the destination image.
- * @param destination Pointer to the RocJpegImage object where the converted image will be stored.
- * @return RocJpegStatus The status of the color conversion operation.
- *         Returns ROCJPEG_STATUS_SUCCESS if the conversion is successful.
- *         Returns ROCJPEG_STATUS_JPEG_NOT_SUPPORTED if the surface format is not supported.
- */
-RocJpegStatus RocJpegDecoder::ColorConvertToRGBPlanar(HipInteropDeviceMem& hip_interop_dev_mem, uint32_t picture_width, uint32_t picture_height, RocJpegImage *destination, const RocJpegDecodeParams *decode_params, bool is_roi_valid) {
-    // roi_offset is the generic ROI byte offset, computed against the luma pitch. It is applied to the
-    // Y component of every supported YUV surface format, and also to the U/V planes of the formats whose
-    // chroma is neither vertically nor horizontally subsampled (e.g. YUV444 / VA_FOURCC_444P).
-    // roi_uv_offset is the chroma-specific ROI byte offset, computed against the chroma pitch with the
-    // row index halved. It is applied only to the U/V data of the vertically-subsampled formats:
-    // YUV440 (VA_FOURCC_422V surface) and YUV420 (VA_FOURCC_NV12 surface).
-    uint32_t roi_offset = 0;
-    uint32_t roi_uv_offset = 0;
-    int16_t top = decode_params->crop_rectangle.top;
-    int16_t left = decode_params->crop_rectangle.left;
-    if (is_roi_valid) {
-        if (hip_interop_dev_mem.surface_format == VA_FOURCC_422V || hip_interop_dev_mem.surface_format == VA_FOURCC_NV12){
-            roi_uv_offset = (top >> 1) * hip_interop_dev_mem.pitch[1] + left;
-        } else if (hip_interop_dev_mem.surface_format == VA_FOURCC_YUY2) {
-            left *= 2;
-        }
-        roi_offset = top * hip_interop_dev_mem.pitch[0] + left;
-    }
-    switch (hip_interop_dev_mem.surface_format) {
-        case VA_FOURCC_444P:
-            ColorConvertYUV444ToRGBPlanar(hip_stream_, picture_width, picture_height, destination->channel[0], destination->channel[1], destination->channel[2], destination->pitch[0],
-                                                  hip_interop_dev_mem.hip_mapped_device_mem + roi_offset, hip_interop_dev_mem.pitch[0],
-                                                  hip_interop_dev_mem.hip_mapped_device_mem + hip_interop_dev_mem.offset[1] + roi_offset,
-                                                  hip_interop_dev_mem.hip_mapped_device_mem + hip_interop_dev_mem.offset[2] + roi_offset);
-            break;
-        case VA_FOURCC_422V:
-            ColorConvertYUV440ToRGBPlanar(hip_stream_, picture_width, picture_height, destination->channel[0], destination->channel[1], destination->channel[2], destination->pitch[0],
-                                                  hip_interop_dev_mem.hip_mapped_device_mem + roi_offset, hip_interop_dev_mem.pitch[0],
-                                                  hip_interop_dev_mem.hip_mapped_device_mem + hip_interop_dev_mem.offset[1] + roi_uv_offset,
-                                                  hip_interop_dev_mem.hip_mapped_device_mem + hip_interop_dev_mem.offset[2] + roi_uv_offset);
-            break;
-        case VA_FOURCC_YUY2:
-            ColorConvertYUYVToRGBPlanar(hip_stream_, picture_width, picture_height, destination->channel[0], destination->channel[1], destination->channel[2], destination->pitch[0],
-                                                hip_interop_dev_mem.hip_mapped_device_mem + roi_offset, hip_interop_dev_mem.pitch[0]);
-            break;
-        case VA_FOURCC_NV12:
-            ColorConvertNV12ToRGBPlanar(hip_stream_, picture_width, picture_height, destination->channel[0], destination->channel[1], destination->channel[2], destination->pitch[0],
-                                                hip_interop_dev_mem.hip_mapped_device_mem + roi_offset, hip_interop_dev_mem.pitch[0],
-                                                hip_interop_dev_mem.hip_mapped_device_mem + hip_interop_dev_mem.offset[1] + roi_uv_offset, hip_interop_dev_mem.pitch[1]);
-            break;
-        case VA_FOURCC_Y800:
-            ColorConvertYUV400ToRGBPlanar(hip_stream_, picture_width, picture_height, destination->channel[0], destination->channel[1], destination->channel[2], destination->pitch[0],
-                                                hip_interop_dev_mem.hip_mapped_device_mem + roi_offset, hip_interop_dev_mem.pitch[0]);
-           break;
-        case VA_FOURCC_RGBP:
-            // Copy red, green, and blue channels from the interop memory into the destination
-            for (uint8_t channel_index = 0; channel_index < 3; channel_index++) {
-                CHECK_ROCJPEG(CopyChannel(hip_interop_dev_mem, picture_width, picture_height, channel_index, destination, decode_params, is_roi_valid));
-            }
-           break;
-        default:
-            ErrorLog(g_rocjpeg_logger, "Surface format is not supported!");
-            return ROCJPEG_STATUS_JPEG_NOT_SUPPORTED;
-    }
-    return ROCJPEG_STATUS_SUCCESS;
-}
-
-/**
- * @brief Retrieves the planar YUV output format from the input image.
- *
- * This function converts the input image data to planar YUV format based on the surface format of the input data.
- * If the surface format is VA_FOURCC_YUY2, the function extracts the packed YUYV data and copies them into the
- * first, second, and third channels of the destination image. If the surface format is VA_FOURCC_NV12, the function
- * extracts the interleaved UV channels and copies them into the second and third channels of the destination image.
- * If the surface format is VA_FOURCC_444P, the function copies the luma channel and both chroma channels into the
- * destination image.
- *
- * @param hip_interop_dev_mem The HipInteropDeviceMem object containing the input image data.
- * @param picture_width The width of the input picture.
- * @param picture_height The height of the input picture.
- * @param chroma_height The height of the chroma channels.
- * @param destination Pointer to the RocJpegImage object where the converted image data will be stored.
- * @return The status of the operation. Returns ROCJPEG_STATUS_SUCCESS if successful.
- */
-RocJpegStatus RocJpegDecoder::GetPlanarYUVOutputFormat(HipInteropDeviceMem& hip_interop_dev_mem, uint32_t picture_width, uint32_t picture_height, uint16_t chroma_height, RocJpegImage *destination, const RocJpegDecodeParams *decode_params, bool is_roi_valid) {
-    // Only one ROI offset is needed here, and which plane it addresses depends on the surface format:
-    // for YUV420 (VA_FOURCC_NV12) it is the chroma offset into the interleaved UV plane (row index halved,
-    // chroma pitch) since the luma plane is handled by CopyChannel; for YUY2 it is the offset into the
-    // packed plane (left doubled, because each YUYV pixel occupies 2 bytes).
-    uint32_t roi_offset = 0;
-    if (is_roi_valid) {
-         int16_t top = decode_params->crop_rectangle.top;
-         int16_t left = decode_params->crop_rectangle.left;
-         if (hip_interop_dev_mem.surface_format == VA_FOURCC_NV12){
-            roi_offset = (top >> 1) * hip_interop_dev_mem.pitch[1] + left;
-         } else if (hip_interop_dev_mem.surface_format == VA_FOURCC_YUY2) {
-            roi_offset = top * hip_interop_dev_mem.pitch[0] + (left * 2);
-         }
-    }
-    if (hip_interop_dev_mem.surface_format == VA_FOURCC_YUY2) {
-        // Extract the packed YUYV and copy them into the first, second, and third channels of the destination.
-        ConvertPackedYUYVToPlanarYUV(hip_stream_, picture_width, picture_height, destination->channel[0], destination->channel[1], destination->channel[2],
-                                                  destination->pitch[0], destination->pitch[1], hip_interop_dev_mem.hip_mapped_device_mem + roi_offset, hip_interop_dev_mem.pitch[0]);
-    } else {
-        // Copy Luma
-        CHECK_ROCJPEG(CopyChannel(hip_interop_dev_mem, picture_width, picture_height, 0, destination, decode_params, is_roi_valid));
-        if (hip_interop_dev_mem.surface_format == VA_FOURCC_NV12) {
-            // Extract the interleaved UV channels and copy them into the second and third channels of the destination.
-            ConvertInterleavedUVToPlanarUV(hip_stream_, picture_width >> 1, picture_height >> 1, destination->channel[1], destination->channel[2],
-                destination->pitch[1], hip_interop_dev_mem.hip_mapped_device_mem + hip_interop_dev_mem.offset[1] + roi_offset, hip_interop_dev_mem.pitch[1]);
-        } else if (hip_interop_dev_mem.surface_format == VA_FOURCC_444P ||
-                   hip_interop_dev_mem.surface_format == VA_FOURCC_422V) {
-            CHECK_ROCJPEG(CopyChannel(hip_interop_dev_mem, picture_width, chroma_height, 1, destination, decode_params, is_roi_valid));
-            CHECK_ROCJPEG(CopyChannel(hip_interop_dev_mem, picture_width, chroma_height, 2, destination, decode_params, is_roi_valid));
-        }
-    }
-    return ROCJPEG_STATUS_SUCCESS;
-}
-
-/**
- * @brief Retrieves the Y output format from the input YUV image.
- *
- * This function extracts the Y output format from the RocJpegDecoder based on the provided parameters.
- * If the surface format is VA_FOURCC_YUY2, it calls the ExtractYFromPackedYUYV function to extract the Y component
- * from the packed YUYV format. Otherwise, it calls the CopyChannel function to copy the luma channel.
- *
- * @param hip_interop_dev_mem The HipInteropDeviceMem object containing the surface format and device memory.
- * @param picture_width The width of the picture.
- * @param picture_height The height of the picture.
- * @param destination Pointer to the RocJpegImage object where the extracted Y component will be stored.
- * @return The status of the operation. Returns ROCJPEG_STATUS_SUCCESS if successful.
- */
-RocJpegStatus RocJpegDecoder::GetYOutputFormat(HipInteropDeviceMem& hip_interop_dev_mem, uint32_t picture_width, uint32_t picture_height, RocJpegImage *destination, const RocJpegDecodeParams *decode_params, bool is_roi_valid) {
-    // Only the Y component is produced here, so a single ROI offset into the source luma data suffices.
-    // It is used for YUY2 only (left doubled, because each YUYV pixel occupies 2 bytes); every other
-    // format takes the CopyChannel path, which computes its own offset.
-    uint32_t roi_offset = 0;
-    if (hip_interop_dev_mem.surface_format == VA_FOURCC_YUY2) {
-        // calculate offset and add to hip_mapped_device_mem
-        if (is_roi_valid) {
-                int16_t top = decode_params->crop_rectangle.top;
-                int16_t left = decode_params->crop_rectangle.left * 2;
-                roi_offset = top * hip_interop_dev_mem.pitch[0] + left;
-        }
-        ExtractYFromPackedYUYV(hip_stream_, picture_width, picture_height, destination->channel[0], destination->pitch[0],
-                              hip_interop_dev_mem.hip_mapped_device_mem + roi_offset, hip_interop_dev_mem.pitch[0]);
-    } else {
-        // Copy Luma
-        CHECK_ROCJPEG(CopyChannel(hip_interop_dev_mem, picture_width, picture_height, 0, destination, decode_params, is_roi_valid));
-    }
-    return ROCJPEG_STATUS_SUCCESS;
-}
-
-/**
  * @brief Clears every batched-param scratch buffer at the start of a group.
  */
 void RocJpegDecoder::ResetBatchedParams() {
@@ -1051,9 +876,8 @@ RocJpegStatus RocJpegDecoder::LaunchBatchedParams() {
 }
 
 /**
- * @brief Batched counterpart of ColorConvertToRGB: appends this image's params to
- *        the appropriate packed-RGB kernel buffer instead of launching per image.
- *        Mirrors the pointer/offset arithmetic of ColorConvertToRGB exactly.
+ * @brief Appends this image's packed-RGB conversion params to the appropriate
+ *        kernel buffer; the launch happens once per group in LaunchBatchedParams.
  */
 RocJpegStatus RocJpegDecoder::AccumulateColorConvertToRGB(HipInteropDeviceMem& mem, uint32_t picture_width, uint32_t picture_height, RocJpegImage *destination, const RocJpegDecodeParams *decode_params, bool is_roi_valid) {
     // roi_offset is the generic ROI byte offset, computed against the luma pitch. It is applied to the
@@ -1137,7 +961,7 @@ RocJpegStatus RocJpegDecoder::AccumulateColorConvertToRGB(HipInteropDeviceMem& m
 }
 
 /**
- * @brief Batched counterpart of ColorConvertToRGBPlanar. RGBP (already-planar RGB)
+ * @brief Appends this image's planar-RGB conversion params. RGBP (already-planar RGB)
  *        stays a per-image memcpy; all convertible formats accumulate kernel params.
  */
 RocJpegStatus RocJpegDecoder::AccumulateColorConvertToRGBPlanar(HipInteropDeviceMem& mem, uint32_t picture_width, uint32_t picture_height, RocJpegImage *destination, const RocJpegDecodeParams *decode_params, bool is_roi_valid) {
@@ -1218,9 +1042,9 @@ RocJpegStatus RocJpegDecoder::AccumulateColorConvertToRGBPlanar(HipInteropDevice
 }
 
 /**
- * @brief Batched counterpart of GetPlanarYUVOutputFormat. The luma/chroma plane
- *        copies stay per-image memcpys; the YUY2→planar and NV12 interleaved-UV
- *        conversions accumulate kernel params.
+ * @brief Produces the planar YUV output. The luma/chroma plane copies stay
+ *        per-image memcpys; the YUY2→planar and NV12 interleaved-UV conversions
+ *        accumulate kernel params.
  */
 RocJpegStatus RocJpegDecoder::AccumulatePlanarYUVOutputFormat(HipInteropDeviceMem& mem, uint32_t picture_width, uint32_t picture_height, uint16_t chroma_height, RocJpegImage *destination, const RocJpegDecodeParams *decode_params, bool is_roi_valid) {
     // Only one ROI offset is needed here, and which plane it addresses depends on the surface format:
@@ -1274,8 +1098,8 @@ RocJpegStatus RocJpegDecoder::AccumulatePlanarYUVOutputFormat(HipInteropDeviceMe
 }
 
 /**
- * @brief Batched counterpart of GetYOutputFormat. YUY2 accumulates the Y-extract
- *        kernel; other formats copy the luma plane per image.
+ * @brief Produces the Y-only output. YUY2 accumulates the Y-extract kernel;
+ *        other formats copy the luma plane per image.
  */
 RocJpegStatus RocJpegDecoder::AccumulateYOutputFormat(HipInteropDeviceMem& mem, uint32_t picture_width, uint32_t picture_height, RocJpegImage *destination, const RocJpegDecodeParams *decode_params, bool is_roi_valid) {
     // Only the Y component is produced here, so a single ROI offset into the source luma data suffices.

@@ -175,11 +175,7 @@ Trace mode (default)
 
 Tracing mode generates comprehensive, deterministic traces of every event and measurement during application execution. This mode can be enabled using ``ROCPROFSYS_TRACE=true``, ``ROCPROFSYS_MODE=trace``, or by using the ``--trace`` / ``-T`` CLI flag.
 
-ROCm Systems Profiler provides two tracing implementations:
-
-- **Cached Mode (default)**: By default, when tracing is enabled, ROCm Systems Profiler uses deferred trace generation with minimal runtime overhead. Trace data is buffered during execution and written after the application completes, significantly reducing performance impact during profiling.
-
-- **Legacy Mode**: ``ROCPROFSYS_TRACE_LEGACY=true`` or ``--trace-legacy`` / ``-L`` enables direct mode where trace data is written immediately during execution. This mode provides real-time trace generation but has higher runtime overhead compared to cached mode.
+When tracing is enabled, ROCm Systems Profiler uses deferred trace generation with minimal runtime overhead. Trace data is buffered during execution and written after the application completes, significantly reducing performance impact during profiling.
 
 Additional configuration options to control the tracing behavior include:
 
@@ -187,6 +183,8 @@ Additional configuration options to control the tracing behavior include:
 - ``ROCPROFSYS_TRACE_DURATION`` (``--trace-duration``): Duration of trace collection (in seconds).
 - ``ROCPROFSYS_TRACE_PERIODS`` (``--trace-periods``): Specifies multiple delay/duration periods in the format ``<DELAY>:<DURATION>``, ``<DELAY>:<DURATION>:<REPEAT>``, or ``<DELAY>:<DURATION>:<REPEAT>:<CLOCK_ID>``.
 - ``ROCPROFSYS_TRACE_PERIOD_CLOCK_ID`` (``--trace-clock-id``): Clock type for timing, either ``realtime`` (default) or ``cputime``.
+
+The trace-period clock controls only when collection starts and stops. All CPU and GPU events stored on the trace timeline use ``CLOCK_BOOTTIME``.
 
 Profile mode
 ^^^^^^^^^^^^^^^^^^^^^^^^

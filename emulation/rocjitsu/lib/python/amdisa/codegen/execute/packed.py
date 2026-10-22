@@ -931,13 +931,13 @@ def gen_mad_mix_f32(
     else:
         opsel, opsel_hi = opsel_exprs
         L.append(
-            f'    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane({s0}, lane);'
+            f'    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_operand({s0}, uint64_t{{1}} << lane, {s0}.register_byte_mask()).lane(lane);'
         )
         L.append(
-            f'    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane({s1}, lane);'
+            f'    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_operand({s1}, uint64_t{{1}} << lane, {s1}.register_byte_mask()).lane(lane);'
         )
         L.append(
-            f'    uint32_t raw2 = amdgpu::RegisterAccess(wf).read_lane({s2}, lane);'
+            f'    uint32_t raw2 = amdgpu::RegisterAccess(wf).read_operand({s2}, uint64_t{{1}} << lane, {s2}.register_byte_mask()).lane(lane);'
         )
         L.append(
             '    auto read_mix_src = [](uint32_t raw, uint32_t src_selector, bool src_is_f16,'
@@ -1014,13 +1014,13 @@ def gen_mad_mix_lo_hi(
     else:
         opsel, opsel_hi = opsel_exprs
         L.append(
-            f'    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane({s0}, lane);'
+            f'    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_operand({s0}, uint64_t{{1}} << lane, {s0}.register_byte_mask()).lane(lane);'
         )
         L.append(
-            f'    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane({s1}, lane);'
+            f'    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_operand({s1}, uint64_t{{1}} << lane, {s1}.register_byte_mask()).lane(lane);'
         )
         L.append(
-            f'    uint32_t raw2 = amdgpu::RegisterAccess(wf).read_lane({s2}, lane);'
+            f'    uint32_t raw2 = amdgpu::RegisterAccess(wf).read_operand({s2}, uint64_t{{1}} << lane, {s2}.register_byte_mask()).lane(lane);'
         )
         L.append(
             '    auto read_mix_src = [](uint32_t raw, uint32_t src_selector, bool src_is_f16,'
@@ -1112,13 +1112,13 @@ def gen_mad_mix_bf16(
     else:
         opsel, opsel_hi = opsel_exprs
         L.append(
-            f'    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane({s0}, lane);'
+            f'    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_operand({s0}, uint64_t{{1}} << lane, {s0}.register_byte_mask()).lane(lane);'
         )
         L.append(
-            f'    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane({s1}, lane);'
+            f'    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_operand({s1}, uint64_t{{1}} << lane, {s1}.register_byte_mask()).lane(lane);'
         )
         L.append(
-            f'    uint32_t raw2 = amdgpu::RegisterAccess(wf).read_lane({s2}, lane);'
+            f'    uint32_t raw2 = amdgpu::RegisterAccess(wf).read_operand({s2}, uint64_t{{1}} << lane, {s2}.register_byte_mask()).lane(lane);'
         )
         L.append(
             '    auto read_mix_src = [](uint32_t raw, uint32_t src_selector, bool src_is_bf16,'
@@ -1397,8 +1397,14 @@ def gen_dot2_true16(dst: list[str], src: list[str], cls: str) -> str:
     return '\n'.join(L)
 
 
-def gen_dot4(dst: list[str], src: list[str], cls: str) -> str:
-    """Generate V_DOT4_I32_I8 / V_DOT4_I32_IU8 / V_DOT4_U32_U8."""
+def gen_dot4(
+    dst: list[str],
+    src: list[str],
+    cls: str,
+    *,
+    input_formats: tuple[str, str] = ('FP8', 'FP8'),
+) -> str:
+    """Generate integer and floating DOT4 bodies with each input's format."""
     d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
     L = []
     L.append('  uint64_t exec = wf.exec();')
@@ -1440,16 +1446,16 @@ def gen_dot4(dst: list[str], src: list[str], cls: str) -> str:
             f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, static_cast<uint32_t>(sum));'
         )
     elif cls == 'dot4_f32_fp8':
-        # FP8 dot product: D.f32 += sum(A.fp8[i] * B.fp8[i]) for i in 0..3
+        decode = {'FP8': 'util::fp8_e4m3_to_f32', 'BF8': 'util::bf8_e5m2_to_f32'}
         L.append(
             f'    float acc = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({s2}, lane));'
         )
         L.append('    for (int i = 0; i < 4; ++i) {')
         L.append(
-            '      float a = util::fp8_e4m3_to_f32(static_cast<uint8_t>((raw0 >> (i * 8)) & 0xFF));'
+            f'      float a = {decode[input_formats[0]]}(static_cast<uint8_t>((raw0 >> (i * 8)) & 0xFF));'
         )
         L.append(
-            '      float b = util::fp8_e4m3_to_f32(static_cast<uint8_t>((raw1 >> (i * 8)) & 0xFF));'
+            f'      float b = {decode[input_formats[1]]}(static_cast<uint8_t>((raw1 >> (i * 8)) & 0xFF));'
         )
         L.append('      acc += a * b;')
         L.append('    }')

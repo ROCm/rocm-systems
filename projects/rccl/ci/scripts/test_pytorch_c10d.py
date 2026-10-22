@@ -28,6 +28,7 @@ from rccl_ci_utils import (
     find_pip_sdk_lib_dirs,
     find_rccl_library,
     override_bundled_hip_runtime,
+    override_bundled_hsa_runtime,
     override_bundled_rccl,
     parse_junit_xml,
     quarantine_rocm_sysdeps,
@@ -498,6 +499,10 @@ def main() -> None:
     # so the HIP runtime matches the compiler that built RCCL's device
     # code objects (prevents findSymbol → guarantee → abort)
     override_bundled_hip_runtime(rccl_lib_dir)
+
+    # Step 4b-2: ROCr must be replaced as a pair with HIP above, and both
+    # must complete before the first `import torch` in step 5.
+    override_bundled_hsa_runtime(rccl_lib_dir)
 
     # Step 4c: Configure kpack device code loading — TheRock-built libraries
     # have device code stripped into separate .kpack archives per GPU arch
