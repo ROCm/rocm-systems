@@ -505,7 +505,7 @@ RocJpegStatus ROCJPEGAPI rocJpegDecodeSync(RocJpegHandle handle, RocJpegImage *d
  * more than one thread at the same time on the same handle.
  *
  * The stream handles and the data they were parsed from are no longer used once this function returns. The stream handles 
- * can be parsed again, destroyed, or freed before rocJpegDecodeBatchedSync() is called.
+ * can then be parsed again, destroyed, or freed before rocJpegDecodeBatchedSync() is called.
  *
  * @param handle The rocJPEG handle.
  * @param jpeg_stream_handles An array of rocJPEG stream handles representing the input JPEG streams.
