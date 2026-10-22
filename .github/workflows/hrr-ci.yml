@@ -369,7 +369,6 @@ jobs:
           pattern: results-*
           merge-multiple: true
           path: results
-          if-no-files-found: ignore
 
       - name: Download base build record
         if: ${{ needs.configure.outputs.run_gpu == 'true' }}
