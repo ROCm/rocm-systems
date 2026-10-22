@@ -914,6 +914,22 @@ amdsmi_status_t amdsmi_topo_get_numa_node_number(amdsmi_processor_handle process
   return AMDSMI_STATUS_SUCCESS;
 }
 
+// The partition modes the fake lists, as an MI300X does: SPX, DPX, QPX and CPX (1, 2, 4 and 8
+// partitions), and the configured count as a mode of its own when it is none of those. The
+// active profile has the index of the configured count's mode.
+struct PartitionModes {
+  uint32_t parts[5];
+  uint32_t count;
+  uint32_t active;
+};
+
+PartitionModes partition_modes() {
+  PartitionModes m = {{1, 2, 4, 8}, 4, 0};
+  while (m.active < m.count && m.parts[m.active] != g_cfg.parts) ++m.active;
+  if (m.active == m.count) m.parts[m.count++] = g_cfg.parts;
+  return m;
+}
+
 amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile(
     amdsmi_processor_handle processor_handle, amdsmi_accelerator_partition_profile_t* profile,
     uint32_t* partition_id) {
@@ -927,7 +943,7 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile(
                           : g_cfg.parts == 4 ? AMDSMI_ACCELERATOR_PARTITION_QPX
                                              : AMDSMI_ACCELERATOR_PARTITION_CPX;
   profile->num_partitions = g_cfg.parts;
-  profile->profile_index = g_cfg.parts == 1 ? 0 : (g_cfg.parts == 2 ? 1 : 2);
+  profile->profile_index = partition_modes().active;
   profile->memory_caps.nps_flags.nps1_cap = 1;
   *partition_id = p->part;
   return AMDSMI_STATUS_SUCCESS;
@@ -941,25 +957,25 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile_config(
   if (profile_config == nullptr) return AMDSMI_STATUS_INVAL;
   if (!g_cfg.partitionable) return AMDSMI_STATUS_NOT_SUPPORTED;
   memset(profile_config, 0, sizeof(*profile_config));
-  const uint32_t kParts[] = {1, 2, 8};
-  profile_config->num_profiles = 3;
-  for (uint32_t i = 0; i < 3; ++i) {
-    profile_config->profiles[i].num_partitions = kParts[i];
+  const PartitionModes modes = partition_modes();
+  profile_config->num_profiles = modes.count;
+  for (uint32_t i = 0; i < modes.count; ++i) {
+    profile_config->profiles[i].num_partitions = modes.parts[i];
     profile_config->profiles[i].profile_index = i;
   }
   // One XCC and one decoder resource profile per partition mode (8 XCCs, 4 decoders).
   uint32_t n = 0;
-  for (uint32_t i = 0; i < 3; ++i) {
+  for (uint32_t i = 0; i < modes.count; ++i) {
     auto& xcc = profile_config->resource_profiles[n++];
     xcc.profile_index = i;
     xcc.resource_type = AMDSMI_ACCELERATOR_XCC;
-    xcc.partition_resource = 8 / kParts[i];
+    xcc.partition_resource = 8 / modes.parts[i];
     xcc.num_partitions_share_resource = 1;
     auto& dec = profile_config->resource_profiles[n++];
     dec.profile_index = i;
     dec.resource_type = AMDSMI_ACCELERATOR_DECODER;
-    dec.partition_resource = std::max(1u, 4 / kParts[i]);
-    dec.num_partitions_share_resource = kParts[i] > 4 ? 2 : 1;
+    dec.partition_resource = std::max(1u, 4 / modes.parts[i]);
+    dec.num_partitions_share_resource = modes.parts[i] > 4 ? 2 : 1;
   }
   profile_config->num_resource_profiles = n;
   return AMDSMI_STATUS_SUCCESS;

@@ -368,6 +368,21 @@ def test_discovery_lists_each_partition(tools, tmp_path):
     assert code == 0, f"rdcd exited with {code}\n{d.output()}"
 
 
+@pytest.mark.parametrize("parts,xcc,decoder", [(2, 4, "2"), (3, 2, "1"), (4, 2, "1"), (8, 1, "*1")])
+def test_discovery_shows_each_partitions_resources(tools, tmp_path, parts, xcc, decoder):
+    # The fake GPU's 8 XCCs and 4 decoders, split by the partition mode (3 partitions,
+    # which no MI300X mode has, are a mode of their own). Past four partitions, two
+    # share a decoder, which rdci marks with "*".
+    d = Rdcd(tools, tmp_path, gpus=1, RDC_FAKE_PARTITIONS=parts).start()
+    try:
+        out = d.ok("discovery", "-i")
+        rows = re.findall(r"^\s+g0\.(\d+)\s+(\d+)\s*(\*?\d+)\s*$", out, re.M)
+        assert rows == [(str(p), str(xcc), decoder) for p in range(parts)], out
+    finally:
+        code = d.stop()
+    assert code == 0, f"rdcd exited with {code}\n{d.output()}"
+
+
 def test_dmon_reports_each_gpus_own_values(rdcd):
     names = _field_names(rdcd)
     gpus = ",".join(str(g) for g in range(NUM_GPUS))
