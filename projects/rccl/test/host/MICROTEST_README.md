@@ -457,7 +457,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
 - **`rccl-UnitTestsMicroGinHostFinalize`**: `src/gin/gin_host.cc` (via
   `GIN_HOST_CC_PATH`, suite `GinHostFinalizeTest.*`): host finalize, connect
   failure / retry, and the register, deregister and DevCommSetup walks over
-  closed backends, against a fake `ncclGin_t` vtable. Separate from
+  closed backends, against `fakes/gin_vtable_fake.h` (also used by
+  `gin-plugin-init-test.cc`). Separate from
   `rccl-UnitTestsMicroGinHost`: both compile `gin_host.cc`, and
   `gin-host-test.cc` defines the same ConnectOnce seams. Also separate from
   `rccl-UnitTestsMicro`, which fakes those entry points in
