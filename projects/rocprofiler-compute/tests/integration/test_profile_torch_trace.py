@@ -19,6 +19,7 @@ from tests.integration.common import (
     require_torch,
 )
 from utils import csv_compression
+from utils.utils_analysis import parse_marker_function
 
 MARKER_API_COLUMNS = {
     "Domain",
@@ -45,13 +46,51 @@ COUNTER_COLLECTION_COLUMNS = {
 TORCH_TRACE_WALL_CLOCK_OVERHEAD_PCT = 50.0
 
 
-ADDMM_NATIVE = re.compile(r"aten::addmm(?![A-Za-z0-9_])")
-ADDMM_FALLBACK = re.compile(r"torch\.ops\.aten\.addmm(?![A-Za-z0-9_])")
+ADDMM_MARKER = re.compile(r"aten::addmm(?![A-Za-z0-9_])")
 
 
-def find_addmm_marker(text: str):
-    """Return an addmm marker in either the native or Python-tier spelling."""
-    return ADDMM_NATIVE.search(text) or ADDMM_FALLBACK.search(text)
+def check_torch_trace_markers(marker_rows):
+    """Check the native collector's argument, scope, and launcher metadata."""
+    backward_launchers = set()
+    torch_markers = []
+    for row in marker_rows:
+        marker = parse_marker_function(row["Function"])
+        if marker["Backend"] != "torch":
+            continue
+        if marker["Operator_Name"] == "torch.Tensor.backward":
+            backward_launchers.add((row["Process_Id"], int(row["Thread_Id"])))
+        torch_markers.append((row, marker))
+
+    assert backward_launchers, "Missing torch.Tensor.backward wrapper markers"
+    assert any(
+        marker["Operator_Name"].startswith("aten::") for _, marker in torch_markers
+    ), "No aten:: markers: the torch trace collector did not load"
+
+    relu_markers = [
+        (row, marker)
+        for row, marker in torch_markers
+        if marker["Operator_Name"] == "aten::relu"
+    ]
+    assert relu_markers, "Missing native aten::relu markers"
+    for row, marker in relu_markers:
+        assert "|scope=FUNCTION|" in row["Function"], "Incorrect aten::relu scope"
+        assert marker["args"] == "(self=float32[5x20])", (
+            f"Incorrect aten::relu tensor metadata: {marker['args']}"
+        )
+
+    backward_markers = [
+        (row, marker)
+        for row, marker in torch_markers
+        if "|scope=BACKWARD_FUNCTION|" in row["Function"]
+    ]
+    assert backward_markers, "Missing native BACKWARD_FUNCTION markers"
+    for row, marker in backward_markers:
+        launcher_tid = marker["launcher_thread_id"]
+        assert launcher_tid.isdecimal(), f"Invalid backward launcher ID: {launcher_tid}"
+        assert (row["Process_Id"], int(launcher_tid)) in backward_launchers, (
+            f"Backward launcher ID {launcher_tid} does not match a Python backward "
+            f"thread in process {row['Process_Id']}"
+        )
 
 
 def percent_overhead(with_flag, baseline, label):
@@ -116,6 +155,7 @@ def torch_trace_profiled_workload(
     if not torch_trace_workload_state["profiled"]:
         workload_dir = common.get_output_dir(param_id="torch_trace")
         torch_trace_workload_state["dir"] = workload_dir
+        # Run the workload with the same interpreter as pytest.
         profile_config = dict(config)
         profile_config["torch_test_app"] = [
             sys.executable,
@@ -138,7 +178,7 @@ def torch_trace_profiled_workload(
 
 
 def test_torch_trace_profile_csvs(torch_trace_profiled_workload):
-    """Assert PMC, marker, and counter CSVs from a --torch-trace profile."""
+    """Check profile CSVs and Torch argument, scope, and launcher metadata."""
     workload_dir = torch_trace_profiled_workload
     integration_common.check_csv_files(workload_dir, config.get("num_devices", 1), 1)
 
@@ -161,18 +201,18 @@ def test_torch_trace_profile_csvs(torch_trace_profiled_workload):
                 assert column in fieldnames, (
                     f"Column '{column}' missing in {marker_file}"
                 )
-            found_row = False
+            marker_rows = list(reader)
+            assert marker_rows, f"{marker_file} is empty"
             functions = []
-            for row in reader:
-                found_row = True
+            for row in marker_rows:
                 functions.append(row["Function"])
                 assert row["Function"], f"Empty Function in {marker_file}"
                 assert row["Correlation_Id"], f"Empty Correlation ID in {marker_file}"
                 assert row["Start_Timestamp"], f"Empty Start_Timestamp in {marker_file}"
                 assert row["End_Timestamp"], f"Empty End_Timestamp in {marker_file}"
-            assert found_row, f"{marker_file} is empty"
             assert any("nn.Module.Linear.forward" in fn for fn in functions)
-            assert any(find_addmm_marker(fn) for fn in functions)
+            assert any(ADDMM_MARKER.search(fn) for fn in functions)
+            assert any("scope=FUNCTION" in fn for fn in functions)
             assert any("|seqNr=" in fn for fn in functions)
             assert any("|tid=" in fn for fn in functions)
             assert any("|ftid=" in fn for fn in functions)
@@ -180,6 +220,7 @@ def test_torch_trace_profile_csvs(torch_trace_profiled_workload):
             assert any("|scope=" in fn for fn in functions)
             assert any("|args=" in fn for fn in functions)
             assert any(fn.endswith("|torch") for fn in functions)
+        check_torch_trace_markers(marker_rows)
         with csv_compression.open_gzip_csv_read(corresponding_counter_file) as f:
             reader = csv.DictReader(f)
             fieldnames = reader.fieldnames
@@ -402,7 +443,9 @@ def test_profile_invalid_workloads_no_torch_trace(
 
 
 def test_list_torch_operators_prints_call_tree(
-    torch_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
+    torch_trace_profiled_workload,
+    binary_handler_analyze_rocprof_compute,
+    capsys,
 ):
     code = binary_handler_analyze_rocprof_compute([
         "--experimental",
@@ -416,7 +459,7 @@ def test_list_torch_operators_prints_call_tree(
     out = captured.out + captured.err
     assert "PyTorch Operator Call Tree:" in out
     assert "nn.Module.Linear.forward" in out
-    assert find_addmm_marker(out)
+    assert ADDMM_MARKER.search(out)
     assert "(id " in out
     assert not (
         Path(torch_trace_profiled_workload) / "ml_api_trace" / "consolidated.csv"
@@ -424,7 +467,9 @@ def test_list_torch_operators_prints_call_tree(
 
 
 def test_torch_operator_addmm_selects_kernels(
-    torch_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
+    torch_trace_profiled_workload,
+    binary_handler_analyze_rocprof_compute,
+    capsys,
 ):
     code = binary_handler_analyze_rocprof_compute([
         "--experimental",
@@ -438,7 +483,7 @@ def test_torch_operator_addmm_selects_kernels(
     captured = capsys.readouterr()
     out = captured.out + captured.err
     assert "Matched PyTorch Operators:" in out
-    assert find_addmm_marker(out)
+    assert ADDMM_MARKER.search(out)
     assert "nn.Module.Linear.forward" in out
     assert "operator filter selected" in out
 
@@ -535,6 +580,6 @@ def test_torch_trace_user_range_and_backward_thread_in_marker_csv(
         assert any(fn == "TrainingLoop_UserDefinedMarker" for fn in functions)
         assert any("torch.Tensor.backward" in fn for fn in functions)
         assert len(thread_ids) >= 2
-        assert any("|ltid=" in fn for fn in functions)
+        assert any(re.search(r"\|ltid=\d+\|", fn) for fn in functions)
     finally:
         common.clean_output_dir(config["cleanup"], workload_dir)
