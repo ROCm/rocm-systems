@@ -42,6 +42,8 @@ const char *dbi_load_decision_name(DbiLoadDecision decision) {
     return "probe-target-mismatch";
   case DbiLoadDecision::NotSingleKernel:
     return "not-single-kernel";
+  case DbiLoadDecision::Wave32:
+    return "wave32"; // Liveness bug
   case DbiLoadDecision::UnsupportedControlFlow:
     return "unsupported-control-flow";
   case DbiLoadDecision::NoSites:
@@ -76,6 +78,14 @@ DbiInstrumentation instrument_each_block(std::span<const uint8_t> elf, const Dbi
   const std::vector<KernelDescriptorInfo> kernel_list = scan_object_kernel_descriptors(object);
   if (kernel_list.size() != 1) {
     out.decision = DbiLoadDecision::NotSingleKernel;
+    return out;
+  }
+  // Gate liveness bug:
+  // Liveness reads the SGPR destination of a wave32 compare or carry-out as the
+  // pair its encoding names, so it can report the register after it dead while
+  // the kernel still needs it, and a trampoline would take it.
+  if (kernel_wavefront_size(arch, kernel_list.front().descriptor) == 32) {
+    out.decision = DbiLoadDecision::Wave32;
     return out;
   }
 

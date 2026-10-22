@@ -921,19 +921,21 @@ std::string Instrumentor::undecoded_anchor_error(uint64_t anchor_offset, uint64_
   return message;
 }
 
-std::optional<std::vector<const BasicBlock *>> Instrumentor::kernel_blocks(uint64_t entry,
-                                                                           std::string *error_out) {
+std::optional<std::vector<const BasicBlock *>>
+Instrumentor::kernel_blocks(uint64_t entry_text_offset, std::string *error_out) {
   if (!anchor_text(error_out))
     return std::nullopt;
   const BlockOffsetIndex block_index = build_block_offset_index(blocks_);
-  BasicBlock *entry_block = block_for_offset(block_index, entry);
-  if (entry_block == nullptr || entry_block->start_offset() != entry) {
-    report(error_out, ("no decoded block starts at kernel entry " + std::to_string(entry)).c_str());
+  BasicBlock *entry_block = block_for_offset(block_index, entry_text_offset);
+  if (entry_block == nullptr || entry_block->start_offset() != entry_text_offset) {
+    report(
+        error_out,
+        ("no decoded block starts at kernel entry " + std::to_string(entry_text_offset)).c_str());
     return std::nullopt;
   }
   KernelScopeSpec spec;
   spec.kernel_entries.insert(kernel_entries_.begin(), kernel_entries_.end());
-  spec.own_entries.insert(entry);
+  spec.own_entries.insert(entry_text_offset);
   const std::vector<BasicBlock *> blocks = reachable_kernel_blocks(
       blocks_, block_index, build_block_position_index(blocks_), *entry_block, spec);
   return std::vector<const BasicBlock *>(blocks.begin(), blocks.end());
