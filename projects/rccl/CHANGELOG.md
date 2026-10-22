@@ -54,6 +54,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
   * DDA VMM `ncclAllReduce` and `ncclReduceScatter` launch 2048 / nRanks blocks, clamped to 32 to 128 and never more than before.
 * `fp8_e4m3` and `fp8_e5m2` sum reductions on gfx1250 convert eight elements per instruction using the packed conversion instructions, instead of two. Results are unchanged. Other architectures and reduction operators are unaffected.
 * The rocSHMEM GDA GIN backend (`NCCL_GIN_TYPE=6`) now sets the RoCE traffic class of its queue pairs from `NCCL_GIN_IB_TC`, then `NCCL_IB_TC`, then the communicator traffic class, matching the IB proxy backend. It previously read `ROCSHMEM_GDA_TRAFFIC_CLASS`, which no longer affects these queue pairs. The default remains traffic class 0 when none of these is set.
+* The AMD Pensando 'ionic' RDMA provider for the rocSHMEM GDA GIN backend (`NCCL_GIN_TYPE=6`) now properly enforces the required support for creation of 'collapsed' single-entry completion queues. If network driver and firmware support for this feature is unavailable, an initialization failure will occur rather than a silent fallback to plain completion queues.
 
 ### Removed
 * `NCCL_TOPO_SCATTER_START_NET`, which selected how the first network device was scattered across GPUs. Rail and plane assignment replaces it.

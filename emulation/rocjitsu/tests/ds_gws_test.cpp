@@ -337,8 +337,8 @@ TEST_P(DsGwsTest, StructuralModelExecutesAndAccounts) {
 // generated body would park a wave while the instruction's completion is classified
 // as LDS and omits the GDS wait obligation, so the stateful behavior and the
 // memory-wait accounting would disagree. The inverse GDS guard (ds_gws rejects
-// gds=0, the mirror of the other DS classes rejecting gds=1) raises
-// UnimplementedInst at execution instead.
+// gds=0, the mirror of the other DS classes rejecting gds=1) reports an
+// invalid-instruction-encoding execution failure instead.
 TEST_P(DsGwsTest, RejectsExecutionWithoutGdsBit) {
   auto cfg = cu_config(1);
   auto cu = amdgpu::ComputeUnitCore::create("ds_gws_nogds", cfg, &mem, &l2);
@@ -355,7 +355,10 @@ TEST_P(DsGwsTest, RejectsExecutionWithoutGdsBit) {
     // Decode is unaffected by the GDS bit, so the op still classifies as a memory op.
     EXPECT_TRUE(inst->is_memory_op()) << variant.mnemonic;
     // Execution must be rejected: no wave is parked and no stateful side effect runs.
-    EXPECT_THROW((void)cu->execute_instruction(inst.get(), *wf), util::UnimplementedInst)
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).failed())
+        << variant.mnemonic << " on arch " << unsigned(arch);
+    EXPECT_EQ(wf->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::InvalidInstructionEncoding)
         << variant.mnemonic << " on arch " << unsigned(arch);
     EXPECT_NE(wf->state(), amdgpu::WfState::GWS_WAIT) << variant.mnemonic;
   }
