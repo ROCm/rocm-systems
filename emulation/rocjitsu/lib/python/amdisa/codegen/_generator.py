@@ -13271,6 +13271,10 @@ class CodeGenerator:
                                 sem is not None
                                 and sem.semantic_class in self._READS_ALL_OUTPUT_CLASSES
                             )
+                            assert not (
+                                _reads_all_outputs
+                                and (_supports_dpp_encoding or _supports_dpp8)
+                            ), f'{inst.name}: reads-all-output semantics do not support DPP/DPP8'
                             _semantic_stages_src0 = (
                                 sem is not None
                                 and sem.semantic_class == 'vector_movrel'
