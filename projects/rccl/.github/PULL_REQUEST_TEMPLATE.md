@@ -21,4 +21,3 @@ ___Do not approve until these items are satisfied.___
   - there are any NCCL API version changes,
   - any changes impact library users, and/or
   - any changes impact any other ROCm library.
-- [ ] Transport fixes are made in both `net_ib` and `net_ib_cast`, or the PR says why only one applies.

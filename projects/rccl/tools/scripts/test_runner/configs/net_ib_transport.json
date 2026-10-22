@@ -1651,6 +1651,29 @@
           "test_filter": "RmaMultiSegmentPostMPITest.*:-RmaMultiSegmentPostMPITest.IPutSignalSendQueueOversubscribe"
         },
         {
+          "name": "NetIB_RMA_MultiSeg_SendQueueOversubscribe",
+          "description": "Twice the RMA send queue's worth of 32-WR putSignals without test() on context 0: overflow is fatal for that context, so rejected posts must return no request, every accepted request must end in success or an error rather than hang, and context 1 must still deliver a multi-segment put",
+          "test_filter": "RmaMultiSegmentPostMPITest.IPutSignalSendQueueOversubscribe",
+          "env_variables": {
+            "RCCL_MSEG_SQ_STRESS": "1"
+          }
+        }
+      ]
+    },
+    "net_ib_rma_multisegment_wrbatch": {
+      "extends": "net_ib_base",
+      "timeout": 300,
+      "description": "Classic-only: NCCL_RMA_IB_WR_BATCHSIZE is read by the classic RMA proxy alone, so these runs stay out of the IB-CAST twin.",
+      "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "NCCL_NET": "ib",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_DEBUG_SUBSYS": "ALL",
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "RCCL_TEST_RMA_MSEG_REQUIRE": "1"
+      },
+      "tests": [
+        {
           "name": "NetIB_RMA_MultiSeg_PostPath_WrBatch8",
           "description": "Post path with NCCL_RMA_IB_WR_BATCHSIZE=8, so chains of 9+ WRs drain the batch and post directly",
           "test_filter": "RmaMultiSegmentPostMPITest.*:-RmaMultiSegmentPostMPITest.IPutSignalSendQueueOversubscribe",
@@ -1665,17 +1688,10 @@
           "env_variables": {
             "NCCL_RMA_IB_WR_BATCHSIZE": "2"
           }
-        },
-        {
-          "name": "NetIB_RMA_MultiSeg_SendQueueOversubscribe",
-          "description": "Twice the RMA send queue's worth of 32-WR putSignals without test() on context 0: overflow is fatal for that context, so rejected posts must return no request, every accepted request must end in success or an error rather than hang, and context 1 must still deliver a multi-segment put",
-          "test_filter": "RmaMultiSegmentPostMPITest.IPutSignalSendQueueOversubscribe",
-          "env_variables": {
-            "RCCL_MSEG_SQ_STRESS": "1"
-          }
         }
       ]
     },
+
     "cast_rma_multisegment": {
       "extends": "net_ib_rma_multisegment",
       "description": "IB-CAST twin of net_ib_rma_multisegment: the same tests and filters through the CAST RMA proxy, so a fix made only in net_ib shows up here as a failure.",
@@ -2558,6 +2574,12 @@
       "name": "NET IB - RMA Multi-Segment",
       "description": "AIRUNTIME-2351: per-segment DMA-BUF registration of multi-segment VMM windows, boundary-split iput/iget/iputSignal/iflush, range and segment-cap rejection, and the DeepEP Engram mixed GPU+CPU window",
       "config": "net_ib_rma_multisegment",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - RMA Multi-Segment WR Batch Size",
+      "description": "Classic RMA post path with NCCL_RMA_IB_WR_BATCHSIZE=8 and 2",
+      "config": "net_ib_rma_multisegment_wrbatch",
       "enabled": true
     },
     {

@@ -610,19 +610,21 @@ void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, s
   out->isP2p = base->isP2p;
   if (base->isSend) {
     out->maxRecvWorkRequest = 0;
+    // RCCL: segmented multi-recv chain; switch off keeps 2*MAX.
     out->maxSendWorkRequest = IbCastAdvertiseMultiSeg() ? NCCL_IB_MAX_SEND_WRS : 2 * NET_IB_MAX_REQUESTS;
-    if (base->isRma) out->maxSendWorkRequest = NCCL_IB_RMA_MAX_SEND_WRS;
+    // RCCL: RMA credits need the GIN send depth.
+    if (base->isRma && rcclRmaMultiSegEnabled()) out->maxSendWorkRequest = NCCL_RMA_MAX_SEND_QP_WRS;
   } else {
     if (base->resiliency) {
       IbCastResiliencyDataRqSizeGet(base->resiliency, devIndex, &out->maxRecvWorkRequest);
     } else {
       out->maxRecvWorkRequest = NET_IB_MAX_REQUESTS;
     }
-    // Multi-segment matches IbCastReceiverQpsCreateToRts (side-table WR per CTS WR) for AINIC recovery rebuilds.
-    // RMA recv QPs are flush QPs. IbCastResiliencyDataRqSizeGet dereferences resiliency, so skip it when NULL.
+    // RCCL: multi-segment CTS posts a side-table WR before each CTS WR; multi-segment RMA recv QPs are flush QPs.
+    // IbCastResiliencyDataRqSizeGet dereferences resiliency, so skip it when NULL (AINIC recovery also rebuilds here).
     out->maxSendWorkRequest =
       IbCastAdvertiseMultiSeg() ? NET_IB_MAX_REQUESTS * (base->resiliency ? 1 : 2) * 2 : NET_IB_MAX_REQUESTS;
-    if (base->isRma) out->maxSendWorkRequest = NCCL_IB_RMA_MAX_FLUSH_WRS;
+    if (base->isRma && rcclRmaMultiSegEnabled()) out->maxSendWorkRequest = NCCL_RMA_MAX_FLUSH_QP_WRS;
   }
 }
 
@@ -1620,7 +1622,7 @@ ib_recv_dev_list:
                                   sizeof(comm->putSignalScratchpad), IBV_ACCESS_LOCAL_WRITE),
                   ret, fail);
 
-    // Prepare my CTS FIFO + multi-seg side table (one covering MR).
+    // RCCL: one covering MR for the CTS FIFO and the side table. Switch off keeps the CTS MR.
     NCCLCHECKGOTO(wrap_ibv_reg_mr(&commDev->ctsFifoMr, commDev->base.pd, comm->ctsFifo,
                                   IB_CAST_CTS_FIFO_BYTES + (comm->segLayoutFifo ? IB_CAST_SEG_LAYOUT_FIFO_BYTES : 0),
                                   IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ),
@@ -1682,6 +1684,7 @@ ib_recv_dev_list:
             (trafficClass != NCCL_NET_TRAFFIC_CLASS_UNDEF) ? trafficClass :
                                                              NCCL_IB_TC_DEFAULT;
   strncpy(meta.devName, mergedDev->devName, MAX_MERGED_DEV_NAME);
+  // RCCL: advertise the side-table cap in the reserved devName tail.
   if (comm->segLayoutFifo) ncclIbSetConnectCaps(meta.devName, sizeof(meta.devName), NCCL_IB_CAP_MULTISEG);
 
   stage->state = ncclIbCommStateSend;
@@ -1708,7 +1711,7 @@ ib_connect:
 
   memcpy(&remMeta, stage->buffer, sizeof(ncclIbConnectionMetadata));
   comm->base.optRecvCompletion = comm->base.optRecvCompletion && remMeta.optRecvCompletion;
-  // Without a side table (switch off or RMA), ignore the peer's MULTISEG cap so neither side uses one.
+  // RCCL: without a side table (switch off or RMA), ignore the peer's MULTISEG cap so neither side uses one.
   comm->peerCaps = comm->segLayoutFifo ? ncclIbGetConnectCaps(remMeta.devName, sizeof(remMeta.devName)) : 0;
 
   // ensure that the remote devices have the same link layer than the local devices used in the connection.
@@ -1853,7 +1856,7 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
   // When resiliency is enabled, the number of send work requests is as the
   // number of max requests because every CTS message is signaled.
   qpCreateAttrs.maxSendWorkRequest = NET_IB_MAX_REQUESTS * (rComm->base.resiliency ? 1 : 2);
-  // Multi-segment chains an unsignaled side-table WR before each CTS WR.
+  // RCCL: multi-segment chains an unsignaled side-table WR before each CTS WR.
   if (IbCastAdvertiseMultiSeg()) qpCreateAttrs.maxSendWorkRequest *= 2;
 
   qpCreateAttrs.isQpSharingEnabled = IbCastQpSharingEnabled();
@@ -2418,6 +2421,7 @@ ib_recv:
 
   /* copy back the received info */
   memcpy(&remMeta, stage->buffer, sizeof(struct ncclIbConnectionMetadata));
+  // RCCL: with the switch off or an RMA peer, ignore the peer's MULTISEG cap.
   rComm->peerCaps = IbCastCommAdvertisesMultiSeg(IbCastAdvertiseMultiSeg(), remMeta.isRMA)
                         ? ncclIbGetConnectCaps(remMeta.devName, sizeof(remMeta.devName))
                         : 0;
@@ -2594,7 +2598,7 @@ ib_recv:
 
   // Store the remote CTS FIFO info provided by the remote peer
   rComm->remCtsFifo.addr = remMeta.addr;
-  if (rComm->peerCaps & NCCL_IB_CAP_MULTISEG) {
+  if (rComm->peerCaps & NCCL_IB_CAP_MULTISEG) { // RCCL: side-table shadow only when the peer advertised the cap.
     NCCLCHECKGOTO(ncclIbMalloc((void**)&rComm->remSegLayout, sizeof(*rComm->remSegLayout)), ret, fail);
     rComm->remSegLayout->addr = remMeta.addr + IB_CAST_CTS_FIFO_BYTES;
   }
@@ -2610,7 +2614,7 @@ ib_recv:
                                   IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ),
                   ret, fail);
     rCommDev->sge.lkey = rCommDev->ctsFifoMr->lkey;
-    if (rComm->peerCaps & NCCL_IB_CAP_MULTISEG) {
+    if (rComm->peerCaps & NCCL_IB_CAP_MULTISEG) { // RCCL: MR for the side-table shadow the receiver RDMA-writes.
       NCCLCHECKGOTO(wrap_ibv_reg_mr(&rCommDev->segLayoutFifoMr, rCommDev->base.pd, rComm->remSegLayout->elems,
                                     sizeof(rComm->remSegLayout->elems), IBV_ACCESS_LOCAL_WRITE),
                     ret, fail);
@@ -2727,6 +2731,7 @@ ib_recv:
   meta.optRecvCompletion = rComm->base.optRecvCompletion;
   rComm->base.optRecvCompletion = rComm->base.optRecvCompletion && remMeta.optRecvCompletion;
   strncpy(meta.devName, mergedDev->devName, MAX_MERGED_DEV_NAME);
+  // RCCL: advertise the side-table cap in the reserved devName tail.
   if (IbCastCommAdvertisesMultiSeg(IbCastAdvertiseMultiSeg(), remMeta.isRMA))
     ncclIbSetConnectCaps(meta.devName, sizeof(meta.devName), NCCL_IB_CAP_MULTISEG);
 
@@ -2870,6 +2875,7 @@ static ncclResult_t IbCastCloseRecvFlushMem(struct ncclIbRecvCommDev* commDev) {
 static ncclResult_t IbCastCloseRecvCommDevResources(struct ncclIbRecvComm* comm, int devIndex) {
   struct ncclIbRecvCommDev* commDev = comm->devs + devIndex;
   if (commDev->ctsFifoMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->ctsFifoMr));
+  // RCCL: deregister the side-table MR.
   if (commDev->segLayoutFifoMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->segLayoutFifoMr));
   if (commDev->cmplsRecordsMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->cmplsRecordsMr));
   if (comm->base.resiliency) {
