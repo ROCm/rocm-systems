@@ -23,6 +23,12 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 ### Resolved Issues
 
+- `rdci dmon -e` and `rdci fieldgroup -f` check a numeric field ID before they use it.
+  - An ID that RDC does not know fails with `RDC_ST_BAD_PARAMETER` ("Field <ID> is not supported") before `rdci` contacts `rdcd`; `rdci fieldgroup` ended with "Unhandled exception." for an ID above 2147483647.
+
+- `rdcd`, and the RDC libraries, check a field ID that a caller passes as a number before they use it as an `rdc_field_t`.
+  - An ID that RDC does not know still returns `RDC_ST_NOT_SUPPORTED`, without loading it as an `rdc_field_t`, which is undefined behavior for a value that the enum does not define.
+
 - `rdci config -m` sets the memory clock limit instead of failing, and `rdci config` accepts `--host`.
 
 - rdcd, and processes that embed RDC, no longer crash when a policy with an undefined condition type or action is set.
