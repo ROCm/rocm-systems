@@ -238,6 +238,9 @@ Sysfs::GpuInfo gpu_info_from_rpc(const RpcGpuInfo &src) {
   gpu.num_xcc = src.num_xcc;
   gpu.max_slots_scratch_cu = src.max_slots_scratch_cu;
   gpu.local_mem_size = src.local_mem_size;
+  gpu.visible_vram_size = src.visible_vram_size;
+  gpu.control_stack_size = src.control_stack_size;
+  gpu.context_save_size = src.context_save_size;
   gpu.vram_type = src.vram_type;
   gpu.lds_size_kb = src.lds_size_kb;
   gpu.mem_width = src.mem_width;
@@ -765,6 +768,18 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   size_t arg_size = 0;
   if (!validate_ioctl_arg_size(request, arg, arg_size))
     return -EINVAL;
+
+  // The daemon rewrites mmap_offset to the allocation handle in its reply.
+  // Preserve the caller's USERPTR CPU address for the client-side promotion.
+  uint64_t userptr_cpu_address = 0;
+  if (request == AMDKFD_IOC_ALLOC_MEMORY_OF_GPU) {
+    const auto *alloc = static_cast<const kfd_ioctl_alloc_memory_of_gpu_args *>(arg);
+    if (alloc->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) {
+      userptr_cpu_address = alloc->mmap_offset;
+      if (userptr_cpu_address == 0)
+        return -EINVAL;
+    }
+  }
 
   // Save original embedded pointers before serialization. The daemon rewrites
   // these to point at its own buffer; we must restore the client-side originals
@@ -1365,7 +1380,7 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
                           received_fds[0]);
 
       if (alloc_args->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR)
-        promote_userptr(alloc_args->va_addr, alloc_args->size, received_fds[0]);
+        promote_userptr(userptr_cpu_address, alloc_args->size, received_fds[0]);
     }
   }
 
