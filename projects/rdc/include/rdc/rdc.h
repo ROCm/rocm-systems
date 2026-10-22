@@ -647,10 +647,19 @@ typedef union {
 
 /**
  * @brief The structure to store the field value
+ *
+ * @details status is an rdc_status_t: RDC_ST_OK, or why the value could not be read.
+ * AMD SMI failures become: AMDSMI_STATUS_INVAL RDC_ST_BAD_PARAMETER,
+ * AMDSMI_STATUS_NOT_SUPPORTED RDC_ST_NOT_SUPPORTED, AMDSMI_STATUS_NOT_FOUND
+ * RDC_ST_NOT_FOUND, AMDSMI_STATUS_OUT_OF_RESOURCES RDC_ST_INSUFF_RESOURCES,
+ * AMDSMI_STATUS_FILE_ERROR RDC_ST_FILE_ERROR, AMDSMI_STATUS_NO_DATA RDC_ST_NO_DATA,
+ * AMDSMI_STATUS_NO_PERM RDC_ST_PERM_ERROR, AMDSMI_STATUS_CORRUPTED_EEPROM
+ * RDC_ST_CORRUPTED_EEPROM, and any other RDC_ST_UNKNOWN_ERROR. RDC caches only the values
+ * it read.
  */
 typedef struct {
   rdc_field_t field_id;        //!< The field id of the value
-  int status;                  //!< RDC_ST_OK or error status
+  int status;                  //!< RDC_ST_OK or the rdc_status_t of the failure
   uint64_t ts;                 //!< Timestamp in usec since 1970
   rdc_field_type_t type;       //!< The field type
   rdc_field_value_data value;  //!< Value of the field. Value type
@@ -1947,7 +1956,8 @@ typedef struct {
  *
  *  @param[in] resource_type Which resource type to query
  *
- *  @param[out] profile  The details how the resource is allocated.
+ *  @param[out] profile  The details how the resource is allocated. Its resource_type
+ *  is resource_type.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */

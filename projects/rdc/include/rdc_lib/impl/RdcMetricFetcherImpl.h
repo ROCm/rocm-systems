@@ -102,6 +102,8 @@ class RdcMetricFetcherImpl final : public RdcMetricFetcher {
   bool async_get_pcie_throughput(uint32_t gpu_index, rdc_field_t field_id, rdc_field_value* value);
   void get_pcie_throughput(const RdcFieldKey& key);
 
+  // fetch_smi_field() before its status conversion: value->status is an amdsmi_status_t.
+  rdc_status_t read_smi_field_(uint32_t gpu_index, rdc_field_t field_id, rdc_field_value* value);
   rdc_status_t fetch_gpu_field_(uint32_t gpu_index, rdc_field_t field_id, rdc_field_value* value,
                                 amdsmi_processor_handle& processor_handle);
   rdc_status_t fetch_gpu_partition_field_(uint32_t gpu_index, rdc_field_t field_id,

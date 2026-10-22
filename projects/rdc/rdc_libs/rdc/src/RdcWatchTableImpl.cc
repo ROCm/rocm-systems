@@ -616,8 +616,9 @@ rdc_status_t RdcWatchTableImpl::memory_check(rdc_gpu_group_t group_id, uint32_t 
   rdc_status_t result =
       get_start_end_values(group_id, gpu_index, RDC_FI_ECC_UNCORRECT_TOTAL, 0, nullptr, &end);
   // A GPU without ECC has no count to check, but can still have retired pages. The
-  // fetcher returns RDC_ST_SMI_ERROR for every failure and keeps amd-smi's status in the value.
-  if (result != RDC_ST_OK && end.status != AMDSMI_STATUS_NOT_SUPPORTED) return result;
+  // fetcher returns RDC_ST_SMI_ERROR for every failure and keeps the RDC status of the failure
+  // in the value.
+  if (result != RDC_ST_OK && end.status != RDC_ST_NOT_SUPPORTED) return result;
 
   uint64_t ecc_uncorrectable_count = 0;
   if (result == RDC_ST_OK) ecc_uncorrectable_count = end.value.l_int;

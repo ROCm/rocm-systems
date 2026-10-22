@@ -20,7 +20,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-// The values RdcMetricFetcherImpl reads from the fake AMD SMI (tests/fake_amdsmi).
+// The values RdcMetricFetcherImpl reads from the fake AMD SMI (tests/fake_amdsmi), their
+// statuses, the event counters RdcSmiLib starts, the records RdcTelemetryModule makes
+// and the instance profiles RdcPartitionImpl reads.
 // The fake reads its RDC_FAKE_* knobs once per process, at the first amdsmi_init(),
 // so each case runs in a child process with its own knobs.
 
@@ -30,18 +32,25 @@ THE SOFTWARE.
 #include <unistd.h>
 
 #include <cerrno>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <exception>
+#include <fstream>
 #include <functional>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
+#include "common/rdc_capabilities.h"
 #include "rdc/rdc.h"
 #include "rdc_lib/impl/RdcMetricFetcherImpl.h"
+#include "rdc_lib/impl/RdcPartitionImpl.h"
+#include "rdc_lib/impl/RdcSmiLib.h"
+#include "rdc_lib/impl/RdcTelemetryModule.h"
 #include "rdc_lib/impl/SmiUtils.h"
 
 extern char** environ;
@@ -167,7 +176,7 @@ TEST(FieldValues, AFailedFetchLeavesADefinedValue) {
       rdc_field_value value = dirty_value();
       EXPECT_NE(fetcher.fetch_smi_field(c.index, c.field, &value), RDC_ST_OK);
       EXPECT_EQ(value.field_id, c.field);
-      EXPECT_NE(value.status, AMDSMI_STATUS_SUCCESS);
+      EXPECT_NE(value.status, static_cast<int>(RDC_ST_OK));
       EXPECT_EQ(value.type, INTEGER);
       EXPECT_EQ(value.value.l_int, 0);
       if (c.read) {
@@ -232,7 +241,7 @@ TEST(FieldValues, APartitionPastThePartitionCountHasNoClock) {
         ASSERT_EQ(count, 1);
         rdc_field_value value = dirty_value();
         EXPECT_NE(fetcher.fetch_smi_field(partition(0, 3), RDC_FI_GPU_CLOCK, &value), RDC_ST_OK);
-        EXPECT_NE(value.status, AMDSMI_STATUS_SUCCESS);
+        EXPECT_NE(value.status, static_cast<int>(RDC_ST_OK));
         value = dirty_value();
         ASSERT_EQ(fetcher.fetch_smi_field(partition(0, 0), RDC_FI_GPU_CLOCK, &value), RDC_ST_OK);
         EXPECT_EQ(value.value.l_int, Gpu0::GFX_CLK_MHZ * kHzPerMHz);
@@ -357,6 +366,264 @@ TEST(FieldValues, ABulkFetchOfUnfilledMetricsDoesNotDependOnTheStack) {
                     << "field " << a.field_id << ": " << a.value.l_int << " then " << b.value.l_int;
               }
             });
+}
+
+// ---------------------------------------------------------------------------
+// Statuses, the bulk fetch, partitions, event counters, telemetry records and
+// instance profiles
+// ---------------------------------------------------------------------------
+
+// A path for RDC_FAKE_ARM, unique to this process: the fake applies its rules once
+// the file exists.
+std::string arm_path(const std::string& name) {
+  return ::testing::TempDir() + "rdc_field_status_" + name + "_" + std::to_string(getpid());
+}
+
+void arm(const std::string& path) { std::ofstream(path) << "armed\n"; }
+
+// Whether this process may start an event counter: RDC raises CAP_DAC_OVERRIDE for it,
+// and without it the start fails before AMD SMI is called.
+bool can_start_counters() {
+  amd::rdc::ScopedCapability capability(CAP_DAC_OVERRIDE, CAP_EFFECTIVE);
+  return capability.error() == 0;
+}
+
+// A value that fails to read carries the RDC status of the failure. AMD SMI numbers
+// its statuses differently: its INVAL (1) is RDC's NOT_SUPPORTED, and its
+// NOT_SUPPORTED (2) RDC's SMI_ERROR.
+TEST(FieldStatus, AFailedReadCarriesItsRdcStatus) {
+  const std::string not_supported = "=AMDSMI_STATUS_NOT_SUPPORTED";
+  const std::string inval = "=AMDSMI_STATUS_INVAL";
+  const Knobs two_partitions = {{"RDC_FAKE_GPUS", "1"}, {"RDC_FAKE_PARTITIONS", "2"}};
+  Knobs memory_fails = two_partitions;
+  memory_fails.emplace_back("RDC_FAKE_FAIL", "amdsmi_get_gpu_memory_total" + not_supported);
+  const struct {
+    const char* what;
+    Knobs knobs;
+    uint32_t index;
+    rdc_field_t field;
+    int status;
+  } cases[] = {
+      {"power, not supported",
+       {{"RDC_FAKE_FAIL", "amdsmi_get_power_info" + not_supported}},
+       0,
+       RDC_FI_POWER_USAGE,
+       RDC_ST_NOT_SUPPORTED},
+      {"power, invalid argument",
+       {{"RDC_FAKE_FAIL", "amdsmi_get_power_info" + inval}},
+       0,
+       RDC_FI_POWER_USAGE,
+       RDC_ST_BAD_PARAMETER},
+      {"XGMI read",
+       {{"RDC_FAKE_FAIL", "amdsmi_get_gpu_metrics_info" + not_supported}},
+       0,
+       RDC_FI_XGMI_0_READ_KB,
+       RDC_ST_NOT_SUPPORTED},
+      {"PCIe replay count, a health field",
+       {{"RDC_FAKE_FAIL", "amdsmi_get_pcie_info" + inval}},
+       0,
+       RDC_HEALTH_PCIE_REPLAY_COUNT,
+       RDC_ST_BAD_PARAMETER},
+      {"partition memory total", memory_fails, partition(0, 1), RDC_FI_GPU_MEMORY_TOTAL,
+       RDC_ST_NOT_SUPPORTED},
+      {"partition utilization, which the fake does not report per partition", two_partitions,
+       partition(0, 1), RDC_FI_GPU_UTIL, RDC_ST_NO_DATA},
+      {"no such field", {}, 0, static_cast<rdc_field_t>(9999), RDC_ST_NOT_SUPPORTED},
+  };
+  for (const auto& c : cases) {
+    SCOPED_TRACE(c.what);
+    with_fake(c.knobs, [&c](RdcMetricFetcherImpl& fetcher) {
+      rdc_field_value value = dirty_value();
+      EXPECT_NE(fetcher.fetch_smi_field(c.index, c.field, &value), RDC_ST_OK);
+      EXPECT_EQ(value.status, c.status);
+    });
+  }
+}
+
+// A GPU AMD SMI cannot find: the value and the event counter report the lookup's
+// status, not that of a call made with a null handle.
+TEST(FieldStatus, AMissingGpuReportsTheLookup) {
+  with_fake({}, [](RdcMetricFetcherImpl& fetcher) {
+    amdsmi_processor_handle handle = nullptr;
+    const amdsmi_status_t lookup = amd::rdc::get_processor_handle_from_id(100, &handle);
+    ASSERT_NE(lookup, AMDSMI_STATUS_SUCCESS);
+    const rdc_status_t expected = amd::rdc::Smi2RdcError(lookup);
+    ASSERT_NE(expected, RDC_ST_BAD_PARAMETER) << "the same as a null handle's";
+    rdc_field_value value = dirty_value();
+    EXPECT_NE(fetcher.fetch_smi_field(100, RDC_FI_GPU_CLOCK, &value), RDC_ST_OK);
+    EXPECT_EQ(value.status, static_cast<int>(expected));
+    EXPECT_EQ(fetcher.acquire_smi_handle({100, RDC_EVNT_XGMI_0_THRPUT}), expected);
+  });
+}
+
+// RdcSmiLib reports an event counter that fails to start or to stop; a field without a
+// counter, and a counter already started, are no failure.
+TEST(FieldStatus, AWatchReportsACounterThatFailsToStart) {
+  const rdc_status_t expected = can_start_counters() ? RDC_ST_INSUFF_RESOURCES : RDC_ST_PERM_ERROR;
+  with_fake({{"RDC_FAKE_FAIL", "amdsmi_gpu_create_counter=AMDSMI_STATUS_OUT_OF_RESOURCES"}},
+            [expected](RdcMetricFetcherImpl& fetcher) {
+              amd::rdc::RdcMetricFetcherPtr mf(&fetcher, [](amd::rdc::RdcMetricFetcher*) {});
+              auto lib = std::make_shared<amd::rdc::RdcSmiLib>(mf);
+              rdc_gpu_field_t plain = {0, RDC_FI_GPU_TEMP};
+              EXPECT_EQ(lib->rdc_telemetry_fields_watch(&plain, 1), RDC_ST_OK);
+              rdc_gpu_field_t counter = {0, RDC_EVNT_XGMI_0_THRPUT};
+              EXPECT_EQ(lib->rdc_telemetry_fields_watch(&counter, 1), expected);
+            });
+}
+
+TEST(FieldStatus, AnUnwatchReportsACounterThatFailsToStop) {
+  if (!can_start_counters()) {
+    GTEST_SKIP() << "starting an event counter takes CAP_DAC_OVERRIDE";
+  }
+  const std::string armed = arm_path("stop");
+  unlink(armed.c_str());
+  with_fake({{"RDC_FAKE_ARM", armed},
+             {"RDC_FAKE_FAIL", "amdsmi_gpu_control_counter=AMDSMI_STATUS_UNKNOWN_ERROR"}},
+            [&armed](RdcMetricFetcherImpl& fetcher) {
+              amd::rdc::RdcMetricFetcherPtr mf(&fetcher, [](amd::rdc::RdcMetricFetcher*) {});
+              auto lib = std::make_shared<amd::rdc::RdcSmiLib>(mf);
+              rdc_gpu_field_t counter = {0, RDC_EVNT_XGMI_0_THRPUT};
+              ASSERT_EQ(lib->rdc_telemetry_fields_watch(&counter, 1), RDC_ST_OK);
+              EXPECT_EQ(lib->rdc_telemetry_fields_watch(&counter, 1), RDC_ST_OK);  // started
+              rdc_gpu_field_t plain = {0, RDC_FI_GPU_TEMP};
+              EXPECT_EQ(lib->rdc_telemetry_fields_unwatch(&plain, 1), RDC_ST_OK);
+              arm(armed);
+              EXPECT_EQ(lib->rdc_telemetry_fields_unwatch(&counter, 1), RDC_ST_UNKNOWN_ERROR);
+            });
+  unlink(armed.c_str());
+}
+
+// A failed PCIe throughput read is read again a second later: of the async read, only a
+// value or "not supported" is kept for its 30 seconds.
+TEST(FieldStatus, AFailedPcieReadIsReadAgain) {
+  with_fake({{"RDC_FAKE_FAIL_ONCE", "amdsmi_get_gpu_pci_throughput"}},
+            [](RdcMetricFetcherImpl& fetcher) {
+              bool read = false;
+              for (int i = 0; i < 500 && !read; ++i) {  // at most 10 s
+                rdc_field_value value = dirty_value();
+                read = fetcher.fetch_smi_field(0, RDC_FI_PCIE_TX, &value) == RDC_ST_OK;
+                if (!read) std::this_thread::sleep_for(std::chrono::milliseconds(20));
+              }
+              EXPECT_TRUE(read) << "the failed read was kept";
+            });
+}
+
+std::vector<uint32_t> gpus_of(const std::vector<rdc_gpu_field_value_t>& values) {
+  std::vector<uint32_t> gpus;
+  for (const auto& v : values) gpus.push_back(v.gpu_index);
+  return gpus;
+}
+
+// One GPU's failed metrics read leaves that GPU's fields to the per-field fetch, for
+// that call only; the other GPU's are read in bulk.
+TEST(FieldStatus, TheBulkFetchOutlivesAFailedMetricsRead) {
+  const std::string armed = arm_path("bulk");
+  unlink(armed.c_str());
+  with_fake({{"RDC_FAKE_GPUS", "2"},
+             {"RDC_FAKE_ARM", armed},
+             {"RDC_FAKE_FAIL_ONCE", "amdsmi_get_gpu_metrics_info@0"}},
+            [&armed](RdcMetricFetcherImpl& fetcher) {
+              rdc_gpu_field_t fields[] = {{0, RDC_FI_GPU_TEMP}, {1, RDC_FI_GPU_TEMP}};
+              std::vector<rdc_gpu_field_value_t> results;
+              arm(armed);
+              fetcher.bulk_fetch_smi_fields(fields, 2, results);
+              EXPECT_EQ(gpus_of(results), std::vector<uint32_t>{1});
+              results.clear();
+              EXPECT_EQ(fetcher.bulk_fetch_smi_fields(fields, 2, results), RDC_ST_OK);
+              EXPECT_EQ(gpus_of(results), (std::vector<uint32_t>{0, 1}));
+            });
+  unlink(armed.c_str());
+}
+
+// A partition's fields are not read in bulk, from the whole GPU's metrics: they go to
+// the partition's own read.
+TEST(FieldStatus, TheBulkFetchLeavesPartitionsToTheirOwnRead) {
+  with_fake(
+      {{"RDC_FAKE_GPUS", "1"}, {"RDC_FAKE_PARTITIONS", "2"}}, [](RdcMetricFetcherImpl& fetcher) {
+        rdc_gpu_field_t fields[] = {{partition(0, 1), RDC_FI_GPU_UTIL},
+                                    {partition(0, 1), RDC_FI_GPU_CLOCK},
+                                    {0, RDC_FI_GPU_UTIL}};
+        std::vector<rdc_gpu_field_value_t> results;
+        ASSERT_EQ(fetcher.bulk_fetch_smi_fields(fields, 3, results), RDC_ST_OK);
+        EXPECT_EQ(gpus_of(results), std::vector<uint32_t>{0});
+        // The fake reports no per-partition activity.
+        rdc_field_value value = dirty_value();
+        EXPECT_NE(fetcher.fetch_smi_field(partition(0, 1), RDC_FI_GPU_UTIL, &value), RDC_ST_OK);
+      });
+}
+
+// When the partition count cannot be read, a GPU counts as one partition (as for its
+// clocks): the partitions past it read nothing, whatever the field.
+TEST(FieldStatus, PartitionsPastThePartitionCountReadNothing) {
+  const std::string armed = arm_path("count");
+  unlink(armed.c_str());
+  with_fake({{"RDC_FAKE_GPUS", "1"},
+             {"RDC_FAKE_PARTITIONS", "4"},
+             {"RDC_FAKE_ARM", armed},
+             {"RDC_FAKE_FAIL",
+              "amdsmi_get_gpu_accelerator_partition_profile=AMDSMI_STATUS_NOT_SUPPORTED"}},
+            [&armed](RdcMetricFetcherImpl& fetcher) {
+              rdc_field_value value = dirty_value();
+              ASSERT_EQ(fetcher.fetch_smi_field(partition(0, 1), RDC_FI_GPU_MEMORY_TOTAL, &value),
+                        RDC_ST_OK);
+              arm(armed);
+              uint16_t count = 0;
+              ASSERT_EQ(amd::rdc::get_num_partition(partition(0, 1), &count),
+                        AMDSMI_STATUS_SUCCESS);
+              ASSERT_EQ(count, 1);
+              for (rdc_field_t field : {RDC_FI_GPU_MEMORY_TOTAL, RDC_FI_GPU_MEMORY_USAGE,
+                                        RDC_FI_GPU_UTIL, RDC_FI_GPU_MM_DEC_UTIL}) {
+                SCOPED_TRACE("field " + std::to_string(field));
+                value = dirty_value();
+                EXPECT_NE(fetcher.fetch_smi_field(partition(0, 1), field, &value), RDC_ST_OK);
+                EXPECT_EQ(value.status, static_cast<int>(RDC_ST_NO_DATA));
+              }
+              value = dirty_value();
+              EXPECT_EQ(fetcher.fetch_smi_field(partition(0, 0), RDC_FI_GPU_MEMORY_TOTAL, &value),
+                        RDC_ST_OK);
+            });
+  unlink(armed.c_str());
+}
+
+// The record for a field that no telemetry module reads is defined throughout, whatever
+// the stack held.
+TEST(FieldStatus, AFieldNoModuleReadsGetsADefinedRecord) {
+  amd::rdc::RdcTelemetryModule module({});
+  std::vector<rdc_gpu_field_value_t> records;
+  rdc_field_value_f record = [](rdc_gpu_field_value_t* values, uint32_t count,
+                                void* user_data) -> rdc_status_t {
+    auto* out = static_cast<std::vector<rdc_gpu_field_value_t>*>(user_data);
+    out->insert(out->end(), values, values + count);
+    return RDC_ST_OK;
+  };
+  rdc_gpu_field_t field = {0, RDC_FI_GPU_TEMP};
+  dirty_stack(0xA5);
+  ASSERT_TRUE(shows_dirt(0xA5)) << "this build leaves no dirt in a new frame";
+  dirty_stack(0xA5);
+  ASSERT_EQ(module.rdc_telemetry_fields_value_get(&field, 1, record, &records), RDC_ST_OK);
+  ASSERT_EQ(records.size(), 1u);
+  const rdc_field_value& value = records[0].field_value;
+  EXPECT_EQ(value.field_id, RDC_FI_GPU_TEMP);
+  EXPECT_EQ(value.status, static_cast<int>(RDC_ST_NOT_SUPPORTED));
+  EXPECT_EQ(value.type, INTEGER);
+  EXPECT_EQ(value.ts, 0u);
+  EXPECT_EQ(value.value.l_int, 0);
+}
+
+// An instance profile names the resource it describes, for a GPU and for a partition.
+TEST(FieldStatus, AnInstanceProfileNamesItsResource) {
+  with_fake({{"RDC_FAKE_GPUS", "1"}, {"RDC_FAKE_PARTITIONS", "2"}}, [](RdcMetricFetcherImpl&) {
+    amd::rdc::RdcPartitionImpl partitions;
+    for (rdc_instance_resource_type_t type : {RDC_ACCELERATOR_XCC, RDC_ACCELERATOR_DECODER}) {
+      for (uint32_t entity : {0u, partition(0, 1)}) {
+        SCOPED_TRACE("resource " + std::to_string(type) + " of " + std::to_string(entity));
+        rdc_resource_profile_t profile;
+        memset(&profile, 0xA5, sizeof(profile));
+        ASSERT_EQ(partitions.rdc_instance_profile_get_impl(entity, type, &profile), RDC_ST_OK);
+        EXPECT_EQ(profile.resource_type, type);
+      }
+    }
+  });
 }
 
 }  // namespace
