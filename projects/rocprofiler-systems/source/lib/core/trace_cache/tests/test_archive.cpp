@@ -1,0 +1,359 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+// NOLINTBEGIN(readability-magic-numbers)
+// Test values in this file are arbitrary and chosen for coverage, not domain significance
+
+#include "core/trace_cache/archive.hpp"
+#include "core/trace_cache/cacheable.hpp"
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <gtest/gtest.h>
+#include <optional>
+#include <span>
+#include <string_view>
+#include <vector>
+
+namespace rocprofsys::trace_cache
+{
+
+namespace
+{
+
+enum class test_record_id : std::uint32_t
+{
+    scalar_test          = 1,
+    string_test          = 2,
+    vector_test          = 3,
+    optional_test        = 4,
+    span_test            = 5,
+    derived_test         = 6,
+    counted_entries_test = 7,
+};
+
+struct scalar_record
+{
+    static constexpr auto type_identifier = test_record_id::scalar_test;
+
+    std::uint32_t val_u32 = 0;
+    std::uint64_t val_u64 = 0;
+    double        val_dbl = 0.0;
+
+    template <typename Archive>
+    void serialize(Archive& archive)
+    {
+        archive(val_u32, val_u64, val_dbl);
+    }
+};
+
+struct string_record
+{
+    static constexpr auto type_identifier = test_record_id::string_test;
+
+    std::string_view text;
+
+    template <typename Archive>
+    void serialize(Archive& archive)
+    {
+        archive(text);
+    }
+};
+
+struct vector_record
+{
+    static constexpr auto type_identifier = test_record_id::vector_test;
+
+    std::vector<std::uint8_t> data;
+
+    template <typename Archive>
+    void serialize(Archive& archive)
+    {
+        archive(data);
+    }
+};
+
+struct optional_record
+{
+    static constexpr auto type_identifier = test_record_id::optional_test;
+
+    std::optional<std::int64_t> value;
+
+    template <typename Archive>
+    void serialize(Archive& archive)
+    {
+        archive(value);
+    }
+};
+
+struct span_record
+{
+    static constexpr auto type_identifier = test_record_id::span_test;
+
+    std::span<const std::byte> bytes;
+
+    template <typename Archive>
+    void serialize(Archive& archive)
+    {
+        archive(bytes);
+    }
+};
+
+struct base_record
+{
+    static constexpr auto type_identifier = test_record_id::derived_test;
+
+    std::uint32_t base_field = 0;
+    double        base_value = 0.0;
+
+    template <typename Archive>
+    void serialize(Archive& archive)
+    {
+        archive(base_field, base_value);
+    }
+};
+
+struct derived_record : base_record
+{
+    static constexpr auto type_identifier = test_record_id::derived_test;
+
+    std::uint64_t extra_field = 0;
+
+    template <typename Archive>
+    void serialize(Archive& archive)
+    {
+        base_record::serialize(archive);
+        archive(extra_field);
+    }
+};
+
+struct entry
+{
+    std::uint64_t id    = 0;
+    double        value = 0.0;
+};
+
+struct counted_entries_record
+{
+    static constexpr auto type_identifier = test_record_id::counted_entries_test;
+
+    std::uint32_t      device = 0;
+    std::vector<entry> entries;
+
+    template <typename Archive>
+    void serialize(Archive& archive)
+    {
+        auto count = static_cast<std::uint32_t>(entries.size());
+        archive(device, count);
+        if constexpr(Archive::k_is_loading)
+        {
+            entries.resize(count);
+        }
+        for(std::size_t idx = 0; idx < entries.size(); ++idx)
+        {
+            archive(entries[idx].id, entries[idx].value);
+        }
+    }
+};
+
+}  // namespace
+
+constexpr std::size_t k_buffer_size = 4096;
+
+TEST(archive, scalars_match_utility_encoding)
+{
+    std::array<std::uint8_t, k_buffer_size> buffer{};
+    const std::uint32_t                     val_u32 = 12345U;
+    const std::uint64_t                     val_u64 = 98765432101234ULL;
+    const double                            val_dbl = 2.71828;
+
+    scalar_record orig;
+    orig.val_u32 = val_u32;
+    orig.val_u64 = val_u64;
+    orig.val_dbl = val_dbl;
+
+    const std::size_t size = record_size(orig);
+    record_write(buffer.data(), orig);
+
+    std::uint8_t*       read_buffer = buffer.data();
+    const scalar_record read        = record_read<scalar_record>(read_buffer);
+
+    EXPECT_EQ(read.val_u32, val_u32);
+    EXPECT_EQ(read.val_u64, val_u64);
+    EXPECT_DOUBLE_EQ(read.val_dbl, val_dbl);
+    EXPECT_EQ(read_buffer - buffer.data(), static_cast<std::ptrdiff_t>(size));
+
+    EXPECT_EQ(size, utility::get_size(val_u32, val_u64, val_dbl));
+
+    std::array<std::uint8_t, k_buffer_size> other_buffer{};
+    utility::store_value(other_buffer.data(), val_u32, val_u64, val_dbl);
+
+    EXPECT_EQ(std::memcmp(buffer.data(), other_buffer.data(), size), 0);
+}
+
+TEST(archive, string_view_reads_back_as_view_into_buffer)
+{
+    std::array<std::uint8_t, k_buffer_size> buffer{};
+    const std::string_view                  orig_text = "hello world";
+
+    string_record orig;
+    orig.text = orig_text;
+
+    const std::size_t size = record_size(orig);
+    record_write(buffer.data(), orig);
+
+    std::uint8_t*       read_buffer = buffer.data();
+    const string_record read        = record_read<string_record>(read_buffer);
+
+    EXPECT_EQ(read.text, orig_text);
+    EXPECT_EQ(read.text.data(),
+              reinterpret_cast<const char*>(buffer.data() + sizeof(std::size_t)));
+    EXPECT_EQ(read_buffer - buffer.data(), static_cast<std::ptrdiff_t>(size));
+}
+
+TEST(archive, vector_round_trip)
+{
+    std::array<std::uint8_t, k_buffer_size> buffer{};
+    const std::vector<std::uint8_t>         orig_data = { 10, 20, 30 };
+
+    vector_record orig;
+    orig.data = orig_data;
+
+    const std::size_t size = record_size(orig);
+    record_write(buffer.data(), orig);
+
+    std::uint8_t*       read_buffer = buffer.data();
+    const vector_record read        = record_read<vector_record>(read_buffer);
+
+    EXPECT_EQ(read.data, orig_data);
+    EXPECT_EQ(read_buffer - buffer.data(), static_cast<std::ptrdiff_t>(size));
+}
+
+TEST(archive, optional_engaged_and_empty)
+{
+    std::array<std::uint8_t, k_buffer_size> buffer{};
+    optional_record                         orig_engaged;
+    orig_engaged.value = 9876543210LL;
+
+    const std::size_t size_engaged = record_size(orig_engaged);
+    record_write(buffer.data(), orig_engaged);
+
+    std::uint8_t*         read_buf     = buffer.data();
+    const optional_record read_engaged = record_read<optional_record>(read_buf);
+
+    ASSERT_TRUE(read_engaged.value.has_value());
+    EXPECT_EQ(read_engaged.value.value(), 9876543210LL);
+
+    buffer.fill(0);
+    optional_record orig_empty;
+    orig_empty.value.reset();
+
+    const std::size_t size_empty = record_size(orig_empty);
+    record_write(buffer.data(), orig_empty);
+
+    read_buf                         = buffer.data();
+    const optional_record read_empty = record_read<optional_record>(read_buf);
+
+    EXPECT_FALSE(read_empty.value.has_value());
+
+    EXPECT_EQ(size_engaged, size_empty + sizeof(std::int64_t));
+}
+
+TEST(archive, byte_span_reads_back_as_view)
+{
+    std::array<std::uint8_t, k_buffer_size> buffer{};
+    std::array<double, 3>                   orig_array = { 1.1, 2.2, 3.3 };
+    const auto bytes_span = std::as_bytes(std::span(orig_array));
+
+    span_record orig;
+    orig.bytes = bytes_span;
+
+    const std::size_t size = record_size(orig);
+    record_write(buffer.data(), orig);
+
+    std::uint8_t*     read_buffer = buffer.data();
+    const span_record read        = record_read<span_record>(read_buffer);
+
+    EXPECT_EQ(read.bytes.size(), 3 * sizeof(double));
+    EXPECT_GE(read.bytes.data(), reinterpret_cast<const std::byte*>(buffer.data()));
+    EXPECT_LT(read.bytes.data(),
+              reinterpret_cast<const std::byte*>(buffer.data() + buffer.size()));
+
+    for(std::size_t idx = 0; idx < 3; ++idx)
+    {
+        double value = 0.0;
+        std::memcpy(&value, read.bytes.data() + idx * sizeof(double), sizeof(double));
+        EXPECT_DOUBLE_EQ(value, orig_array[idx]);
+    }
+
+    EXPECT_EQ(read_buffer - buffer.data(), static_cast<std::ptrdiff_t>(size));
+}
+
+TEST(archive, derived_record_serializes_base_first)
+{
+    std::array<std::uint8_t, k_buffer_size> buffer{};
+    derived_record                          orig;
+    orig.base_field  = 555U;
+    orig.base_value  = 3.14;
+    orig.extra_field = 777ULL;
+
+    const std::size_t base_size =
+        record_size(base_record{ .base_field = 555U, .base_value = 3.14 });
+    const std::size_t total_size = record_size(orig);
+
+    record_write(buffer.data(), orig);
+
+    std::uint8_t*        read_buffer = buffer.data();
+    const derived_record read        = record_read<derived_record>(read_buffer);
+
+    EXPECT_EQ(read.base_field, 555U);
+    EXPECT_DOUBLE_EQ(read.base_value, 3.14);
+    EXPECT_EQ(read.extra_field, 777ULL);
+
+    EXPECT_EQ(total_size, base_size + sizeof(std::uint64_t));
+    EXPECT_EQ(read_buffer - buffer.data(), static_cast<std::ptrdiff_t>(total_size));
+}
+
+TEST(archive, is_loading_branch_for_counted_entries)
+{
+    std::array<std::uint8_t, k_buffer_size> buffer{};
+    counted_entries_record                  orig;
+    orig.device = 1U;
+    orig.entries.push_back({ .id = 100, .value = 1.5 });
+    orig.entries.push_back({ .id = 200, .value = 2.5 });
+
+    const std::size_t size = record_size(orig);
+    record_write(buffer.data(), orig);
+
+    std::uint8_t*                read_buffer = buffer.data();
+    const counted_entries_record read = record_read<counted_entries_record>(read_buffer);
+
+    EXPECT_EQ(read.device, 1U);
+    EXPECT_EQ(read.entries.size(), 2U);
+    EXPECT_EQ(read.entries[0].id, 100);
+    EXPECT_DOUBLE_EQ(read.entries[0].value, 1.5);
+    EXPECT_EQ(read.entries[1].id, 200);
+    EXPECT_DOUBLE_EQ(read.entries[1].value, 2.5);
+    EXPECT_EQ(read_buffer - buffer.data(), static_cast<std::ptrdiff_t>(size));
+
+    buffer.fill(0);
+    counted_entries_record orig_empty;
+    orig_empty.device = 2U;
+
+    const std::size_t size_empty = record_size(orig_empty);
+    record_write(buffer.data(), orig_empty);
+
+    read_buffer = buffer.data();
+    const counted_entries_record read_empty =
+        record_read<counted_entries_record>(read_buffer);
+
+    EXPECT_EQ(read_empty.device, 2U);
+    EXPECT_EQ(read_empty.entries.size(), 0U);
+    EXPECT_EQ(read_buffer - buffer.data(), static_cast<std::ptrdiff_t>(size_empty));
+}
+
+}  // namespace rocprofsys::trace_cache
+
+// NOLINTEND(readability-magic-numbers)
