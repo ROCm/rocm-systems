@@ -101,11 +101,17 @@ class TestGpuRas(unittest.TestCase):
         self.common.print_func_name("")
         # A non-handle fails the Python-side isinstance check before any library
         # call happens, so it is not a status expect_status can judge.
+        self.common.print('\t### amdsmi_get_gpu_total_ecc_count(processor_handle="not_a_handle"):')
         with self.assertRaises(amdsmi.AmdSmiParameterException) as cm:
             amdsmi.amdsmi_get_gpu_total_ecc_count("not_a_handle")
         # Confirms it is *this* isinstance check that fired, not some other
         # AmdSmiParameterException raised earlier/elsewhere for a different reason.
         self.assertEqual(cm.exception.expectedType, amdsmi.amdsmi_wrapper.amdsmi_processor_handle)
+        self.common.print(
+            f"\tTEST SUCCESS, raised {type(cm.exception).__name__}, "
+            f"actual type {cm.exception.actualType.__name__}, "
+            f"expected type {cm.exception.expectedType.__name__}"
+        )
         return
 
     def test_gpu_counter_group_supported(self):
