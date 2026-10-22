@@ -208,7 +208,9 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   // ceInitTaskQueue. This ensures ncclCeEnsureAllReduceStaging fires collectively before
   // the first AllReduce dispatch, avoiding the chicken-and-egg where CE 2-shot cannot be
   // selected (ceARTmpBuf==NULL check) before the staging buffer is allocated.
-  if (comm->ceColl.ceArMaxBytes != 0 && comm->ceColl.ceARTmpBuf == nullptr)
+  if (comm->ceColl.ceArMaxBytes != 0 && rcclCeAllReduceEnabled(comm) &&
+      ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || rcclForceCeAllReduceEnabled(comm)) &&
+      comm->ceColl.ceARTmpBuf == nullptr)
     comm->ceColl.stagingPending = true;
   int i = 0;
   int targetStreams = 0;
