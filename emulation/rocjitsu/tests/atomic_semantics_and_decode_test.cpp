@@ -65,6 +65,7 @@ public:
     cu = amdgpu::ComputeUnitCore::create("instruction_policy", config, &memory, &cache);
     decoder = Decoder::create(arch);
     wave = cu->dispatch_wf(0, 0, 106, 256);
+    wave->set_lds_size(static_cast<uint32_t>(wave->lds().size_bytes()));
     wave->set_exec(1);
     base = wave->vgpr_alloc().base;
   }
@@ -367,6 +368,7 @@ protected:
     compute_unit_ = amdgpu::ComputeUnitCore::create("atomic_policy", config, &memory_, &cache_);
     decoder_ = Decoder::create(GetParam());
     wave_ = compute_unit_->dispatch_wf(0, 0, 106, 256);
+    wave_->set_lds_size(static_cast<uint32_t>(wave_->lds().size_bytes()));
     wave_->set_exec(1);
     base_ = wave_->vgpr_alloc().base;
   }

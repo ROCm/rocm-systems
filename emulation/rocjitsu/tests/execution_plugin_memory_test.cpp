@@ -326,6 +326,7 @@ TEST(ExecutionPluginTest, DualOffsetLoadsPreserveSparsePhysicalDestinations) {
     auto *cu = f.cu();
     auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256, wave);
     ASSERT_NE(wf, nullptr);
+    wf->set_lds_size(static_cast<uint32_t>(wf->lds().size_bytes()));
     ASSERT_EQ(wf->vgpr_alloc().count, 256u);
     ASSERT_EQ(cu->vgpr_allocation_block_size(), arch == "cdna4" ? 512u : 256u);
     auto *plugin = f.attach_ordering_plugin();

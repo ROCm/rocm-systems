@@ -1648,6 +1648,7 @@ TEST(RaceDetectorPluginTest, FlatResultsFollowTheirResolvedCounter) {
             cu->set_apertures(kShared, kShared + 0xFFFF, kPrivate, kPrivate + 0xFFFF);
             auto *wf = cu->dispatch_wf(0, 0x100, sgprs, 256, wave_size);
             ASSERT_NE(wf, nullptr);
+            wf->set_lds_size(static_cast<uint32_t>(wf->lds().size_bytes()));
             wf->set_exec(exec);
             wf->set_scratch_base(kScratch);
             wf->set_scratch_lane_size(256);

@@ -8206,7 +8206,8 @@ TEST(AtomicStressTest, DsAddRtnU32_MultiWavefront) {
       S_WAITCNT_0,
       S_ENDPGM,
   };
-  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), /*sgprs=*/104, /*vgprs=*/256,
+                               /*user_sgprs=*/2, /*group_segment_fixed_size=*/256);
 
   // Initialize LDS[0] = 0.
   f.cu()->lds().write32(0, 0);
@@ -8221,9 +8222,8 @@ TEST(AtomicStressTest, DsAddRtnU32_MultiWavefront) {
   EXPECT_EQ(final_val, 192u) << "LDS atomic add result should be 192 (3 waves × 64 lanes)";
 }
 
-// Same test but with 4 workgroups dispatched independently.
-// All share the same CU (and thus same LDS), so atomics must be correct
-// across workgroup boundaries within one CU.
+// Same test but with 4 workgroups resident on one CU. They share its LDS
+// backing, but each addresses only its own 256-byte allocation.
 TEST(AtomicStressTest, DsAddRtnU32_MultiWorkgroup) {
   VmFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize("cdna4", 1, 10));
@@ -8237,17 +8237,21 @@ TEST(AtomicStressTest, DsAddRtnU32_MultiWorkgroup) {
       S_WAITCNT_0,
       S_ENDPGM,
   };
-  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), /*sgprs=*/104, /*vgprs=*/256,
+                               /*user_sgprs=*/2, /*group_segment_fixed_size=*/256);
 
-  f.cu()->lds().write32(0, 0);
+  for (uint32_t workgroup = 0; workgroup < 5; ++workgroup)
+    f.cu()->lds().write32(workgroup * 256, 0);
 
   // 4 workgroups × 64 threads each = 4 wavefronts = 256 atomic adds.
   test::AqlQueue queue(f.mem(), f.cp());
   queue.dispatch(ko, 256, 64);
   f.engine->run();
 
-  uint32_t final_val = f.cu()->lds().read32(0);
-  EXPECT_EQ(final_val, 256u) << "LDS atomic add across 4 workgroups should be 256";
+  for (uint32_t workgroup = 0; workgroup < 4; ++workgroup)
+    EXPECT_EQ(f.cu()->lds().read32(workgroup * 256), 64u)
+        << "workgroup " << workgroup << " counts only its own 64 lanes";
+  EXPECT_EQ(f.cu()->lds().read32(4 * 256), 0u) << "no workgroup reaches past the allocations";
 }
 
 // Non-RTN DS atomic add: verify LDS gets the correct sum even without
@@ -8265,7 +8269,8 @@ TEST(AtomicStressTest, DsAddU32_NoReturn) {
       S_WAITCNT_0,
       S_ENDPGM,
   };
-  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), /*sgprs=*/104, /*vgprs=*/256,
+                               /*user_sgprs=*/2, /*group_segment_fixed_size=*/256);
 
   f.cu()->lds().write32(0, 100); // Start at 100.
 
@@ -8679,7 +8684,8 @@ TEST(DsTransposeTest, ReadB64TrB16_AccBit) {
       S_WAITCNT_0,
       S_ENDPGM,
   };
-  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), /*sgprs=*/104, /*vgprs=*/256,
+                               /*user_sgprs=*/2, /*group_segment_fixed_size=*/1024);
 
   auto *cu = f.cu();
 
@@ -8769,7 +8775,7 @@ void verify_ds_b8_transpose_lane_layout(std::string_view arch, uint32_t wave_siz
             transpose[1], wait[0],        end[0]};
   }
   uint64_t ko = f.write_kernel(0x1000, code.data(), sizeof(code), /*sgprs=*/104, /*vgprs=*/256,
-                               /*user_sgprs=*/2, /*group_segment_fixed_size=*/0,
+                               /*user_sgprs=*/2, /*group_segment_fixed_size=*/1024,
                                /*wgp_mode=*/false, /*enable_vgpr_workitem_id=*/1);
 
   auto *cu = f.cu();
@@ -8864,7 +8870,8 @@ TEST(DsTransposeTest, ReadB64TrB16_LaneLayout) {
       S_WAITCNT_0,
       S_ENDPGM,
   };
-  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), /*sgprs=*/104, /*vgprs=*/256,
+                               /*user_sgprs=*/2, /*group_segment_fixed_size=*/1024);
 
   auto *cu = f.cu();
   for (uint32_t lane = 0; lane < WAVE_SIZE; ++lane) {

@@ -53,6 +53,7 @@ TEST_P(LdsCounterTest, AppendAndConsumeBroadcastOldCounterToSparseActiveLanes) {
     auto decoder = Decoder::create(arch);
     auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
     ASSERT_NE(wf, nullptr);
+    wf->set_lds_size(static_cast<uint32_t>(wf->lds().size_bytes()));
     wf->set_exec(0x25);
     wf->set_m0(0);
     for (uint16_t op : {uint16_t{61}, uint16_t{62}}) {

@@ -1109,33 +1109,98 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
   }
 }
 
+/// @brief The workgroup's LDS allocation within a backing shared by resident workgroups.
+struct LdsAllocation {
+  uint64_t base;
+  uint64_t size;
+};
+
+LdsAllocation lds_allocation(const Wavefront &wf) { return {wf.lds_base(), wf.lds_size()}; }
+
+// Bytes of [address, address + size) inside the allocation, counted from address.
+uint32_t lds_bytes_in_allocation(const LdsAllocation &allocation, uint64_t address, uint32_t size) {
+  if (address < allocation.base || address - allocation.base >= allocation.size)
+    return 0;
+  return static_cast<uint32_t>(
+      std::min<uint64_t>(size, allocation.size - (address - allocation.base)));
+}
+
 // Dispatch ordinary LDS loads, stores and atomics for uniform and mixed routes.
 // Callers prepare buffers and complete retryable global work before entering.
-// FLAT LDS addresses include the workgroup base: reject out-of-backing FLAT
-// lanes before the LDS helpers narrow to 32 bits, preserving zero reads and
-// discarded writes. Ordinary DS lanes retain the existing LDS helper behavior.
-void execute_lds_access(VectorMemState &d, Lds &lds, const std::array<uint64_t, 64> &addresses,
-                        uint64_t lane_mask, const std::vector<uint8_t> &store_data,
+// RDNA4 section 3.3.5.1 and CDNA5 section 3.3.4.1 bound LDS addresses by the workgroup's
+// allocation, not the physical backing other workgroups share. Out-of-range loads return zero,
+// in-range store bytes are written and the rest discarded, and out-of-range atomics are dropped.
+// The allocation boundary is DWORD-aligned, so a partial load's in-range bytes are exactly its
+// in-range DWORDs.
+void execute_lds_access(VectorMemState &d, Lds &lds, const LdsAllocation &allocation,
+                        const std::array<uint64_t, 64> &addresses, uint64_t lane_mask,
+                        const std::vector<uint8_t> &store_data,
                         std::vector<uint8_t> &response_data) {
-  uint64_t out_of_bounds = 0;
-  for (uint64_t lanes = lane_mask & d.flat_local_lane_mask; lanes; lanes &= lanes - 1) {
+  const uint32_t bytes_per_lane = d.elem_size * d.num_elems;
+  uint64_t out_of_range = 0;
+  uint64_t partial = 0;
+  for (uint64_t lanes = lane_mask; lanes; lanes &= lanes - 1) {
     const uint32_t lane = std::countr_zero(lanes);
-    if (addresses[lane] >= lds.size_bytes())
-      out_of_bounds |= uint64_t{1} << lane;
+    const uint32_t in_range = lds_bytes_in_allocation(allocation, addresses[lane], bytes_per_lane);
+    if (in_range == 0)
+      out_of_range |= uint64_t{1} << lane;
+    else if (in_range < bytes_per_lane)
+      partial |= uint64_t{1} << lane;
   }
-  lane_mask &= ~out_of_bounds;
+  if (d.atomic_op != AtomicOp::NONE) {
+    out_of_range |= partial;
+    partial = 0;
+  }
+  lane_mask &= ~(out_of_range | partial);
   if (d.atomic_op != AtomicOp::NONE)
     execute_lds_atomic_rmw(d, &lds, addresses, store_data, response_data, lane_mask);
   else if (d.is_load)
     lds.vector_load(addresses.data(), lane_mask, d.elem_size, d.num_elems, response_data.data());
   else
     lds.vector_store(addresses.data(), lane_mask, d.elem_size, d.num_elems, store_data.data());
+  for (uint64_t lanes = partial; lanes; lanes &= lanes - 1) {
+    const uint32_t lane = std::countr_zero(lanes);
+    const auto address = static_cast<uint32_t>(addresses[lane]);
+    const uint32_t in_range = lds_bytes_in_allocation(allocation, addresses[lane], bytes_per_lane);
+    if (d.is_load) {
+      uint8_t *destination = response_data.data() + lane * bytes_per_lane;
+      std::as_const(lds).read(address, destination, in_range);
+      std::memset(destination + in_range, 0, bytes_per_lane - in_range);
+    } else {
+      lds.write(address, store_data.data() + lane * bytes_per_lane, in_range);
+    }
+  }
   if (d.is_load || d.atomic_op != AtomicOp::NONE) {
-    const uint32_t bytes_per_lane = d.elem_size * d.num_elems;
-    for (uint64_t lanes = out_of_bounds; lanes; lanes &= lanes - 1)
+    for (uint64_t lanes = out_of_range; lanes; lanes &= lanes - 1)
       std::memset(response_data.data() + std::countr_zero(lanes) * bytes_per_lane, 0,
                   bytes_per_lane);
   }
+}
+
+// RDNA3/3.5 section 12.7, RDNA4 section 3.3.5.1 and CDNA5 section 3.3.4.1 require LDS atomics to be
+// aligned to their data size and return MEMVIOL otherwise. Check every LDS lane,
+// including the second DS address, before any lane of the instruction commits.
+bool rejects_misaligned_lds_atomic(const VectorMemState &d, const Wavefront &wf,
+                                   uint64_t lds_lanes) {
+  if (d.atomic_op == AtomicOp::NONE || d.elem_size <= 1)
+    return false;
+  switch (wf.cu().arch()) {
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_CDNA5:
+    break;
+  default:
+    return false;
+  }
+  const auto misaligned = [&](const std::array<uint64_t, 64> &addresses, uint64_t lanes) {
+    for (; lanes; lanes &= lanes - 1)
+      if (addresses[std::countr_zero(lanes)] % d.elem_size != 0)
+        return true;
+    return false;
+  };
+  return misaligned(d.per_lane_addr, lds_lanes) ||
+         (d.ds2_active && misaligned(d.ds2_per_lane_addr, d.lane_mask & lds_lanes));
 }
 
 bool rejects_flat_dds(const Instruction &inst, const Wavefront &wf, uint64_t request_lanes) {
@@ -1159,13 +1224,16 @@ VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront 
   if (rejects_flat_dds(inst, wf, request_lanes))
     return VmAccessOutcome::Faulted;
   const uint64_t shared_lanes = d.flat_local_lane_mask & request_lanes;
+  if (rejects_misaligned_lds_atomic(d, wf, shared_lanes))
+    return VmAccessOutcome::Faulted;
   const VmAccessOutcome outcome = initiate_global_access(d, wf, request_lanes & ~shared_lanes);
   if (outcome != VmAccessOutcome::Complete || shared_lanes == 0)
     return outcome;
 
   // Commit LDS only after all retryable global work completes. In particular,
   // a global retry must not repeat an LDS atomic or discard either result set.
-  execute_lds_access(d, wf.lds(), d.per_lane_addr, shared_lanes, d.store_data, d.response_data);
+  execute_lds_access(d, wf.lds(), lds_allocation(wf), d.per_lane_addr, shared_lanes, d.store_data,
+                     d.response_data);
   return VmAccessOutcome::Complete;
 }
 
@@ -1273,7 +1341,8 @@ VmAccessOutcome LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &
   d.wf_size = wf.wf_size();
   const uint64_t request_lanes = transpose_request_lane_mask(d, wf.wf_size());
   // Uniform shared-aperture FLAT must reject unsupported DDS too.
-  if (rejects_flat_dds(inst, wf, request_lanes))
+  if (rejects_flat_dds(inst, wf, request_lanes) ||
+      rejects_misaligned_lds_atomic(d, wf, request_lanes))
     return VmAccessOutcome::Faulted;
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
@@ -1287,9 +1356,11 @@ VmAccessOutcome LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &
     if (d.ds2_active)
       d.ds2_response_data.resize(d.wf_size * d.num_elems * d.elem_size);
   }
-  execute_lds_access(d, lds, d.per_lane_addr, request_lanes, d.store_data, d.response_data);
+  const LdsAllocation allocation = lds_allocation(wf);
+  execute_lds_access(d, lds, allocation, d.per_lane_addr, request_lanes, d.store_data,
+                     d.response_data);
   if (d.ds2_active)
-    execute_lds_access(d, lds, d.ds2_per_lane_addr, d.lane_mask, d.ds2_store_data,
+    execute_lds_access(d, lds, allocation, d.ds2_per_lane_addr, d.lane_mask, d.ds2_store_data,
                        d.ds2_response_data);
   if (d.atomic_op != AtomicOp::NONE)
     return VmAccessOutcome::Complete;

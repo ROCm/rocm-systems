@@ -4800,6 +4800,7 @@ TEST(MemoryWaitExecutionTest, DualDsExchangeExecutesBothDecodedResultsAcrossArch
     ASSERT_NE(wf, nullptr);
     wf->set_exec(1);
     wf->set_lds_base(cu->allocate_lds(4096));
+    wf->set_lds_size(4096);
     auto decoder = Decoder::create(arch);
     for (unsigned width : {1u, 2u})
       for (bool stride64 : {false, true}) {
