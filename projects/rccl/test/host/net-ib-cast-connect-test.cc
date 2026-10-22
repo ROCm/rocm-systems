@@ -46,9 +46,6 @@
 
 #include "fakes/param_redirect.h"
 
-// src/misc/rocmwrap.cc's param; rocmwrap_fakes.cc leaves it to each binary.
-int64_t ncclParamDmaBufEnable() { return g_loadParam("DMABUF_ENABLE", 1); }
-
 #include NET_IB_CAST_QP_SHARING_CC_PATH
 
 // IbCastRoceGetVersionNum opens a sysfs path; libc_seam has no open().
@@ -221,8 +218,6 @@ class NetIbCastConnectMicrotest : public ::testing::Test {
 
   void SetUp() override {
     g_verbs = &verbs_;
-    savedLevel_ = ncclDebugLevelMask;
-    savedMask_ = ncclDebugMask;
     for (int i = 0; i < kNDevs; i++) {
       ctx_[i] = {};
       ctx_[i].ops.post_recv = FakePostRecv;
@@ -268,8 +263,6 @@ class NetIbCastConnectMicrotest : public ::testing::Test {
     ResetRocmWrapFakes();
     ResetNcclFakes();
     rcclTelemetryEnabled = 0;
-    ncclDebugLevelMask = savedLevel_;
-    ncclDebugMask = savedMask_;
     g_testOpen = nullptr;
     g_verbs = nullptr;
   }
@@ -558,12 +551,8 @@ class NetIbCastConnectMicrotest : public ::testing::Test {
   }
 
   std::string InfoLog(const std::function<void()>& body) {
-    ncclDebugLevelMask = RcclUnitTesting::DebugLevelToMask(NCCL_LOG_INFO);
-    ncclDebugMask = ~0ULL;
-    std::string log = CaptureLog(body);
-    ncclDebugLevelMask = savedLevel_;
-    ncclDebugMask = savedMask_;
-    return log;
+    RcclUnitTesting::ScopedDebugLogging info(NCCL_LOG_INFO, ~0ULL);
+    return CaptureLog(body);
   }
 
   ibv_context ctx_[kNDevs] = {};
@@ -597,8 +586,6 @@ class NetIbCastConnectMicrotest : public ::testing::Test {
   bool mlx5CreateOk_ = true;
   bool prepost_ = false;
   bool optRecv_ = false;
-  uint32_t savedLevel_ = 0;
-  uint64_t savedMask_ = 0;
 };
 
 TEST_F(NetIbCastConnectMicrotest, Handshake_WiresEverySenderQpToItsReceiverPeer) {
@@ -1243,12 +1230,13 @@ TEST_F(NetIbCastConnectQpMicrotest, Create_IonicGdaOrUdmaFailureStillCreatesTheQ
     return ncclSystemError;
   });
   ncclIbQp qp = {};
-  std::string log = CaptureLog([&] { ASSERT_EQ(IbCastQpCreate(&qp, &a), ncclSuccess); });
+  ASSERT_EQ(IbCastQpCreate(&qp, &a), ncclSuccess);
   EXPECT_NE(qp.qp, nullptr);
   EXPECT_EQ(gda.calls, 1);
-  EXPECT_TRUE(LogHas(log, "fake0: ionic_dv_pd_set_udma_mask failed")) << log;
-  log = CaptureLog([&] { ASSERT_EQ(IbCastQpCreate(&qp, &a), ncclSuccess); });
-  EXPECT_FALSE(LogHas(log, "set_udma_mask failed")) << log;  // once per device
+  EXPECT_TRUE(nccl_udma_mask_warned[0]);
+  EXPECT_FALSE(nccl_udma_mask_warned[1]);
+  ASSERT_EQ(IbCastQpCreate(&qp, &a), ncclSuccess);
+  EXPECT_TRUE(nccl_udma_mask_warned[0]);
 }
 
 class NetIbCastConnectUdmaMicrotest : public NetIbCastConnectQpMicrotest {

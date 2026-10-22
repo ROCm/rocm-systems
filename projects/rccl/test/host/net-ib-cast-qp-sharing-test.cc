@@ -461,13 +461,8 @@ TEST_F(NetIbCastQpSharingMicrotest, ValidatePool_CleanPool_ReportsCleanShutdown)
   IbCastQpSharingGlobalEnable = true;
   Register(MakeKey(0, 0));
   IbCastUnregisterSharedQpLocked(&g_IbCastSharedQpPool[0]);
-  uint32_t savedLevel = ncclDebugLevelMask;
-  uint64_t savedMask = ncclDebugMask;
-  ncclDebugLevelMask = RcclUnitTesting::DebugLevelToMask(NCCL_LOG_INFO);
-  ncclDebugMask = ~0ULL;
+  RcclUnitTesting::ScopedDebugLogging info(NCCL_LOG_INFO, ~0ULL);
   const std::string log = CaptureLog([] { IbCastValidateSharedQpPool(); });
-  ncclDebugLevelMask = savedLevel;
-  ncclDebugMask = savedMask;
   EXPECT_TRUE(LogHas(log, "clean shutdown")) << log;
   EXPECT_FALSE(LogHas(log, "LEAK")) << log;
 }
