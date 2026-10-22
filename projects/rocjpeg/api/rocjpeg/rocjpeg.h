@@ -525,7 +525,7 @@ RocJpegStatus ROCJPEGAPI rocJpegDecodeBatchedAsync(RocJpegHandle handle, RocJpeg
  * must be called after rocJpegDecodeBatchedAsync() on the same handle to wait for all submitted
  * decodes in the batch to complete and copy the results to the destination buffers. The intended
  * usage is a producer/consumer model where one thread calls rocJpegDecodeBatchedAsync() and a separate
- * thread calls rocJpegDecodeBatchedSync(); the two threads can run these calls at the same time on the
+ * thread calls rocJpegDecodeBatchedSync(). The two threads can run these calls at the same time on the
  * same handle.
  *
  * @param handle The rocJPEG handle.
