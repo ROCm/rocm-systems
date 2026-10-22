@@ -652,6 +652,7 @@ add_executable(
     denormal_test.cpp
     floating_operation_test.cpp
     input_denormal_test.cpp
+    legacy_minmax_test.cpp
     minmax_test.cpp
     output_denormal_test.cpp
     output_modifier_test.cpp
