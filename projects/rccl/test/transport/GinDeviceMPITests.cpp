@@ -31,6 +31,7 @@
 #include <array>
 #include <cerrno>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <hip/hip_runtime.h>
@@ -155,6 +156,17 @@ std::string ginProxyTestSkipReason() {
   return "";
 }
 
+// For runs that need anvil-sdma and the proxy active together: a set NCCL_GIN_TYPE
+// filters out all but one backend type, and anvil-sdma is single-node only.
+std::string ginMixedBackendSkipReason() {
+  if (std::getenv("NCCL_GIN_TYPE"))
+    return "Requires NCCL_GIN_TYPE unset so anvil-sdma and the proxy are both active";
+  for (auto check : {ginEnvDisabledReason, cuMemReason, singleNodeReason}) {
+    if (auto reason = check(); !reason.empty()) return reason;
+  }
+  return "";
+}
+
 // Host progress threads exist only on the PROXY backend.
 std::string proxyNthreadsSkipReason() {
   if (auto reason = ginProxyTestSkipReason(); !reason.empty()) return reason;
@@ -258,6 +270,30 @@ ncclDevCommRequirements defaultGinReqs() {
   ncclDevCommRequirements r = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
   r.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
   return r;
+}
+
+// Must match the INFO line ncclGinDevCommSetup() emits when a DevComm binds a backend.
+std::string ginBackendLogLine(ncclComm_t comm, const ncclGinBackendState& backend) {
+  char line[256];
+  std::snprintf(line, sizeof(line), "GIN: comm %p rank %d commId 0x%llx using backend %s type %d",
+                static_cast<void*>(comm), comm->rank, static_cast<unsigned long long>(comm->commHash),
+                backend.ncclGin->name, static_cast<int>(backend.ginType));
+  return line;
+}
+
+int countOccurrences(const std::string& text, const std::string& needle) {
+  int n = 0;
+  for (size_t pos = text.find(needle); pos != std::string::npos; pos = text.find(needle, pos + 1)) ++n;
+  return n;
+}
+
+// Active backend of `type` on `comm`, or nullptr if that type is not active.
+const ncclGinBackendState* activeGinBackend(ncclComm_t comm, ncclGinType_t type) {
+  const ncclGinState& ginState = comm->sharedRes->ginState;
+  for (int i = 0; i < ginState.numActiveBackends; i++) {
+    if (ginState.backends[i].ginType == type) return &ginState.backends[i];
+  }
+  return nullptr;
 }
 
 // No-ops on backends other than anvil-sdma. acquire() asserts, so callers wrap
@@ -925,10 +961,9 @@ TEST_F(GinMPIDeviceTests, QpCount_GinStaysBelowConnectionEnv) {
   }
 }
 
-// Each DevComm logs the backend it bound to exactly once. The line is INIT-only, so
-// NCCL_DEBUG_SUBSYS must include INIT. NCCL_GIN_TYPE leaves a single active backend,
-// so backends[0] is the one the line must name. On multi-node comms, comm init already
-// logs it for the internal symmetric-kernel DevComm, so counts are taken after init.
+// Each DevComm logs its comm and the backend it bound to exactly once. The line is
+// INIT-only, so NCCL_DEBUG_SUBSYS must include INIT. On multi-node comms, comm init
+// already logs it for the internal symmetric-kernel DevComm, so counts are taken after init.
 TEST_F(GinMPIDeviceTests, Log_ReportsUsedBackend) {
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
@@ -944,15 +979,10 @@ TEST_F(GinMPIDeviceTests, Log_ReportsUsedBackend) {
   SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t comm = getActiveCommunicator();
 
-  const ncclGinBackendState& backend = comm->sharedRes->ginState.backends[0];
-  const std::string expected = "GIN: using backend " + std::string(backend.ncclGin->name) + " type " +
-                               std::to_string(static_cast<int>(backend.ginType));
-  auto countExpected = [&]() {
-    const std::string log = logCtx.readNcclDebugLog();
-    int n = 0;
-    for (size_t pos = log.find(expected); pos != std::string::npos; pos = log.find(expected, pos + 1)) ++n;
-    return n;
-  };
+  const ncclGinBackendState* backend = activeGinBackend(comm, static_cast<ncclGinType_t>(requestedGinType()));
+  ASSERT_MPI_TRUE(backend != nullptr);
+  const std::string expected = ginBackendLogLine(comm, *backend);
+  auto countExpected = [&]() { return countOccurrences(logCtx.readNcclDebugLog(), expected); };
   const int afterInit = countExpected();
 
   ncclDevCommRequirements reqs = defaultGinReqs();
@@ -970,6 +1000,66 @@ TEST_F(GinMPIDeviceTests, Log_ReportsUsedBackend) {
   auto secondCleanup = makeScopeGuard([&]() { (void)ncclDevCommDestroy(comm, &second); });
   EXPECT_EQ(afterInit + 2, countExpected()) << "after second DevComm, expected: " << expected << "\nactual log:\n"
                                             << logCtx.readNcclDebugLog();
+}
+
+// Comms keep separate GIN state, so two comms can bind different backends. Each DevComm
+// requests its backend through reqs.ginType, which ncclGinDevCommSetup() honors only while
+// NCCL_GIN_TYPE is unset, and its line must name its own comm.
+TEST_F(GinMPIDeviceTests, Log_ReportsBackendPerComm) {
+  if (auto reason = ginMixedBackendSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
+    GTEST_SKIP() << "Requires exactly 2 ranks";
+
+  MPIHelpers::MpiEnvGuard debugGuard("NCCL_DEBUG", "INFO");
+  MPIHelpers::MpiEnvGuard subsysGuard("NCCL_DEBUG_SUBSYS", "INIT");
+  MPIHelpers::TestLogAssertionContext logCtx(
+      MPIHelpers::makeNcclDebugFileAssertionOptions(getTestMpiRank()));
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
+  ncclComm_t parent = getActiveCommunicator();
+
+  ncclConfig_t childConfig = NCCL_CONFIG_INITIALIZER;
+  childConfig.splitShare = 0;
+  ncclComm_t child = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess, ncclCommSplit(parent, 0, getTestMpiRank(), &child, &childConfig));
+  ASSERT_MPI_TRUE(child != nullptr);
+  auto childCleanup = makeScopeGuard([&]() {
+    if (child) (void)ncclCommDestroy(child);
+  });
+  ASSERT_MPI_TRUE(parent->sharedRes != child->sharedRes);
+
+  const ncclGinBackendState* sdma = activeGinBackend(parent, NCCL_GIN_TYPE_ANVIL_SDMA);
+  const ncclGinBackendState* proxy = activeGinBackend(child, NCCL_GIN_TYPE_PROXY);
+  if (sdma == nullptr || proxy == nullptr)
+    GTEST_SKIP() << "Requires anvil-sdma active on the parent comm and the proxy active on the child comm";
+
+  const std::string parentLine = ginBackendLogLine(parent, *sdma);
+  const std::string childLine = ginBackendLogLine(child, *proxy);
+  const std::string before = logCtx.readNcclDebugLog();
+  const int parentBefore = countOccurrences(before, parentLine);
+  const int childBefore = countOccurrences(before, childLine);
+
+  ncclDevCommRequirements reqs = defaultGinReqs();
+  reqs.ginContextCount = 1;
+  reqs.ginSignalCount = 1;
+
+  reqs.ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
+  ncclDevComm parentDev{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(parent, &reqs, &parentDev));
+  auto parentDevCleanup = makeScopeGuard([&]() { (void)ncclDevCommDestroy(parent, &parentDev); });
+
+  reqs.ginType = NCCL_GIN_TYPE_PROXY;
+  ncclDevComm childDev{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(child, &reqs, &childDev));
+  auto childDevCleanup = makeScopeGuard([&]() { (void)ncclDevCommDestroy(child, &childDev); });
+
+  const std::string log = logCtx.readNcclDebugLog();
+  EXPECT_EQ(parentBefore + 1, countOccurrences(log, parentLine)) << "expected: " << parentLine << "\nactual log:\n"
+                                                                 << log;
+  EXPECT_EQ(childBefore + 1, countOccurrences(log, childLine)) << "expected: " << childLine << "\nactual log:\n"
+                                                               << log;
 }
 
 TEST_F(GinMPIDeviceTests, Put_BasicAndOffsets_MultiContext) {

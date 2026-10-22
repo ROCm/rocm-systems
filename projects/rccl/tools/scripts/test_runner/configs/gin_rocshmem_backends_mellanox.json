@@ -231,6 +231,25 @@
         { "name": "ReduceScatter_Symmetric_Avg", "num_gpus": 4 }
       ]
     },
+    "gin_devmpi_mixed": {
+      "extends": "default",
+      "description": "anvil-sdma and the proxy both active on every comm: NCCL_GIN_TYPE must stay unset (an empty value disables anvil-sdma). Single node.",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_ENV_PLUGIN": "none",
+        "NCCL_DMABUF_ENABLE": "1"
+      },
+      "tests": [
+        { "name": "Log_ReportsBackendPerComm", "description": "Two comms bind different GIN backends (anvil-sdma, proxy) and each DevComm line names its own comm", "test_filter": "GinMPIDeviceTests.Log_ReportsBackendPerComm" }
+      ]
+    },
 
     "gin_a2a_eligibility": {
       "extends": "default",
@@ -289,6 +308,12 @@
       "name": "GIN Device MPI Tests - SDMA (single node)",
       "description": "Every GinMPIDeviceTests case, one mpirun per test, on the SDMA backend (single node)",
       "config": "gin_devmpi_sdma",
+      "enabled": true
+    },
+    {
+      "name": "GIN Device MPI Tests - mixed backends (single node)",
+      "description": "Per-comm GIN backend logging with anvil-sdma and the proxy both active, single node",
+      "config": "gin_devmpi_mixed",
       "enabled": true
     },
     {
