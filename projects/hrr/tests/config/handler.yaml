@@ -50,3 +50,5 @@ cases:
   Unit_HRR_Refusals_LinkCreateRefusesPointerCarryingOptions: {}
   Unit_HRR_Refusals_Memcpy2DNoOpCopiesAreNotRefused: {}
   Unit_HRR_Refusals_Memcpy2DWithUnmappedEndIsRefused: {}
+  Unit_HRR_UnmappedNote_IpcCloseOfSkippedImport: {}
+  Unit_HRR_UnmappedNote_MemMap: {}
