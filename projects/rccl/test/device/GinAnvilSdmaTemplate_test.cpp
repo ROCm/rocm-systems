@@ -1561,8 +1561,9 @@ INSTANTIATE_TEST_SUITE_P(
     [](const ::testing::TestParamInfo<SignalFenceParam>& info) { return std::string(info.param.name); });
 
 // H27: strong signals drain every queue to the peer before signalling, whatever
-// this call posted and whatever sdmaDirty says. The only system release is the
-// one signalPeer issues before the atomic.
+// this call posted and whatever sdmaDirty says. Unfused, the only system
+// release is the one signalPeer issues before the atomic; fused, it is the one
+// fenceBeforeStrongFusedSignal issues before the doorbell.
 //
 // The strong launches below pass strong=true to the weak kernels. That forces
 // the intermediate default arguments, which the weak call sites omit.
@@ -1672,62 +1673,148 @@ TEST_F(GinAnvilSdmaTemplateTest, PutValue_StrongSignalQuietsPeerQueue) {
   EXPECT_EQ(downloadU64(f.d_dst), kVal);
 }
 
-// A fused SDMA signal orders only its own queue, so a strong signal must not
-// take it even when the put is fused-eligible. The stub putSignal never bumps
-// the signal cell, so a signal value of 1 shows signalPeer ran instead.
-// useSdmaFusedSignal compiles to false off gfx950, where this would pass
-// without proving the strong guard.
-TEST_F(GinAnvilSdmaTemplateTest, Put_StrongSignalSkipsFusedSdmaSignal) {
-  hipDeviceProp_t prop{};
-  ASSERT_EQ(hipSuccess, hipGetDeviceProperties(&prop, 0));
-  if (std::strstr(prop.gcnArchName, "gfx950") == nullptr) {
-    GTEST_SKIP() << "the fused SDMA signal path exists only on gfx950";
-  }
-  StrongSignalFixture f(0);
-  DeviceBuffer<uintptr_t> d_sigAddrs(2);
-  uintptr_t sigAddrs[2] = {reinterpret_cast<uintptr_t>(f.d_signals.ptr),
-                           reinterpret_cast<uintptr_t>(f.d_signals.ptr)};
-  d_sigAddrs.copyFrom(sigAddrs, 2);
-  f.host.ctx.signal_remote_addrs = d_sigAddrs.ptr;
-  f.host.ctx.fusedSdmaSignal = 1;
-  f.d_h.upload(f.host);
-  kernelPutSignalQuiesce<<<1, 1>>>(f.d_h.ptr, /*hasWins=*/true, StrongSignalFixture::kBytes, /*signalId=*/0,
-                                   /*hasCounter=*/false, ncclGinSignalInc, /*strong=*/true);
-  syncAndCheck();
-  EXPECT_EQ(f.d_signals.download(), 1ULL);
-  EXPECT_EQ(readQuietCount(), 1ULL);
-  EXPECT_EQ(readThreadfenceCount(), 1ULL);
-}
+// H28: VA signals. The cell sits inside the dst window, which the fixture
+// IPC-maps for kBytes, past every payload these cases write. A zeroed VA
+// descriptor aliases indexedSignal.signalId to 0, so an untouched indexed cell
+// 0 also shows the VA descriptor was not read as indexed.
+constexpr size_t kVaSignalOff = 256;
+constexpr uint64_t kVaPutValue = 0x1122334455667788ULL;
 
-// A zeroed VA descriptor aliases indexedSignal.signalId to 0. Treating it as
-// indexed would increment that cell. This backend does not signal VA descriptors.
-__global__ void kernelPutVaDescriptor(TemplateHarness* h, bool putValue) {
+__global__ void kernelPutVaSignal(TemplateHarness* h, bool putValue, size_t bytes, bool strong) {
   if (threadIdx.x != 0) return;
   ncclGinCtx ginCtx{};
   ginCtx.handle = &h->ctx;
   ginCtx.nRanks = 2;
   ncclGinSignalDescriptor sig{};
   sig.type = NCCL_GIN_SIGNAL_TYPE_VA;
+  sig.vaSignal.signalWindow = reinterpret_cast<ncclGinWindow_t>(&h->dstMh);
+  sig.vaSignal.signalOffset = kVaSignalOff;
+  sig.isStrong = strong;
   if (putValue) {
     ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(
-        ginCtx, ncclCoopThread{}, 1, reinterpret_cast<ncclGinWindow_t>(&h->dstMh), 0, 1ULL, sig,
+        ginCtx, ncclCoopThread{}, 1, reinterpret_cast<ncclGinWindow_t>(&h->dstMh), 0, kVaPutValue, sig,
         ncclGinSignalInc, 0, false, nullptr, cuda::thread_scope_system, cuda::thread_scope_system);
   } else {
     ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(
         ginCtx, ncclCoopThread{}, 1, true, reinterpret_cast<ncclGinWindow_t>(&h->dstMh), 0,
-        reinterpret_cast<ncclGinWindow_t>(&h->srcMh), 0, 64, sig, ncclGinSignalInc, 0, false, 0, false,
+        reinterpret_cast<ncclGinWindow_t>(&h->srcMh), 0, bytes, sig, ncclGinSignalInc, 0, false, 0, false,
         nullptr, cuda::thread_scope_system, cuda::thread_scope_system);
   }
 }
 
-TEST_F(GinAnvilSdmaTemplateTest, Put_VaDescriptorDoesNotSignalIndexedId) {
+__global__ void kernelResetVaSignal(TemplateHarness* h) {
+  if (threadIdx.x != 0) return;
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = &h->ctx;
+  ginCtx.nRanks = 2;
+  ncclGinSignalDescriptor sig{};
+  sig.type = NCCL_GIN_SIGNAL_TYPE_VA;
+  sig.vaSignal.signalWindow = reinterpret_cast<ncclGinWindow_t>(&h->dstMh);
+  sig.vaSignal.signalOffset = kVaSignalOff;
+  ncclGinApi_ResetSignal<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, sig);
+}
+
+static uint64_t readVaCell(const DeviceBuffer<uint8_t>& dst) {
+  auto got = dst.copyTo();
+  uint64_t v = 0;
+  std::memcpy(&v, got.data() + kVaSignalOff, sizeof(v));
+  return v;
+}
+
+// IPC path: the VA cell takes the increment through signalPeer, with the same
+// quiet and fence counts as an indexed signal of the same strength.
+TEST_F(GinAnvilSdmaTemplateTest, VaSignal_IpcPathSignalsWindowCell) {
+  for (const bool putValue : {false, true}) {
+    for (const bool strong : {false, true}) {
+      SCOPED_TRACE(::testing::Message() << "putValue=" << putValue << " strong=" << strong);
+      StrongSignalFixture f(128);
+      kernelPutVaSignal<<<1, 1>>>(f.d_h.ptr, putValue, /*bytes=*/64, strong);
+      syncAndCheck();
+      EXPECT_EQ(readVaCell(f.d_dst), 1ULL);
+      EXPECT_EQ(f.d_signals.copyTo(), (std::vector<uint64_t>{0, 0}));
+      EXPECT_EQ(readQuietCount(), strong ? 1ULL : 0ULL);
+      EXPECT_EQ(readThreadfenceCount(), 1ULL);
+      if (putValue) EXPECT_EQ(downloadU64(f.d_dst), kVaPutValue);
+    }
+  }
+}
+
+TEST_F(GinAnvilSdmaTemplateTest, ResetSignal_VaClearsWindowCell) {
   StrongSignalFixture f(128);
-  kernelPutVaDescriptor<<<1, 1>>>(f.d_h.ptr, /*putValue=*/false);
+  std::vector<uint8_t> dst(StrongSignalFixture::kBytes, 0);
+  const uint64_t armed = 5;
+  std::memcpy(dst.data() + kVaSignalOff, &armed, sizeof(armed));
+  f.d_dst.copyFrom(dst);
+  f.d_signals.copyFrom(std::vector<uint64_t>{7, 7});
+  kernelResetVaSignal<<<1, 1>>>(f.d_h.ptr);
   syncAndCheck();
-  kernelPutVaDescriptor<<<1, 1>>>(f.d_h.ptr, /*putValue=*/true);
-  syncAndCheck();
-  EXPECT_EQ(f.d_signals.download(), 0ULL);
-  EXPECT_EQ(readQuietCount(), 0ULL);
+  EXPECT_EQ(readVaCell(f.d_dst), 0ULL);
+  EXPECT_EQ(f.d_signals.copyTo(), (std::vector<uint64_t>{7, 7}));
+}
+
+// Fused SDMA signal, indexed or VA. A weak one is a single putSignal. A strong
+// one quiets the peer's queues and fences first, then still fuses, so the put
+// it carries is never waited on. The stub putSignal does not bump the cell, so
+// cells left at 0 show signalPeer did not run. useSdmaFusedSignal compiles to
+// false off gfx950, where these cases would pass without reaching the fused path.
+static void checkFusedSignal(bool va, bool putValue, bool strong) {
+  SCOPED_TRACE(::testing::Message() << "va=" << va << " putValue=" << putValue << " strong=" << strong);
+  StrongSignalFixture f(0);
+  DeviceBuffer<uintptr_t> d_sigAddrs(2);
+  uintptr_t sigAddrs[2] = {reinterpret_cast<uintptr_t>(f.d_signals.ptr),
+                           reinterpret_cast<uintptr_t>(f.d_signals.ptr)};
+  d_sigAddrs.copyFrom(sigAddrs, 2);
+  f.host.ctx.signal_remote_addrs = d_sigAddrs.ptr;
+  f.d_h.upload(f.host);
+  sdma_anvil::SdmaStubLog log{};
+  {
+    StubRecordOnlyScope recordOnly;
+    ASSERT_TRUE(readStubLog().recordOnly);
+    if (va) {
+      kernelPutVaSignal<<<1, 1>>>(f.d_h.ptr, putValue, StrongSignalFixture::kBytes / 2, strong);
+    } else if (putValue) {
+      kernelPutValueIpcSignalQuiesce<<<1, 1>>>(f.d_h.ptr, kVaPutValue, /*signalId=*/1, strong);
+    } else {
+      kernelPutSignalQuiesce<<<1, 1>>>(f.d_h.ptr, /*hasWins=*/true, StrongSignalFixture::kBytes / 2,
+                                       /*signalId=*/1, /*hasCounter=*/false, ncclGinSignalInc, strong);
+    }
+    ASSERT_EQ(hipGetLastError(), hipSuccess);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+    log = readStubLog();
+  }
+  uint64_t* const cell =
+      va ? reinterpret_cast<uint64_t*>(f.d_dst.ptr + kVaSignalOff) : f.d_signals.ptr + 1;
+  const unsigned nQuiet = strong ? 1U : 0U;
+  ASSERT_EQ(log.count, nQuiet + 1U);
+  if (strong) EXPECT_EQ(log.calls[0].op, sdma_anvil::kSdmaStubQuiet) << "the drain must precede the putSignal";
+  EXPECT_EQ(log.calls[nQuiet].op, sdma_anvil::kSdmaStubPutSignal);
+  EXPECT_EQ(log.calls[nQuiet].signal, cell);
+  EXPECT_EQ(readQuietCount(), static_cast<unsigned long long>(nQuiet));
+  EXPECT_EQ(readThreadfenceCount(), static_cast<unsigned long long>(nQuiet));
+  EXPECT_EQ(f.d_signals.copyTo(), (std::vector<uint64_t>{0, 0}));
+  EXPECT_EQ(readVaCell(f.d_dst), 0ULL);
+}
+
+TEST_F(GinAnvilSdmaTemplateTest, FusedSdmaSignal_StrongQuietsPeerQueuesFirst) {
+  if (!sdmaIsOss7()) {
+    GTEST_SKIP() << "fused SDMA signal needs SDMA_IS_OSS7 (gfx950)";
+  }
+  for (const bool va : {false, true}) {
+    for (const bool putValue : {false, true}) {
+      checkFusedSignal(va, putValue, /*strong=*/true);
+    }
+  }
+}
+
+TEST_F(GinAnvilSdmaTemplateTest, FusedSdmaSignal_WeakIssuesOnlyPutSignal) {
+  if (!sdmaIsOss7()) {
+    GTEST_SKIP() << "fused SDMA signal needs SDMA_IS_OSS7 (gfx950)";
+  }
+  for (const bool va : {false, true}) {
+    for (const bool putValue : {false, true}) {
+      checkFusedSignal(va, putValue, /*strong=*/false);
+    }
+  }
 }
 
 #endif  // NCCL_GIN_ANVIL_SDMA_ENABLE

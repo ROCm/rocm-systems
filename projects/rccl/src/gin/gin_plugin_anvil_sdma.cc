@@ -170,10 +170,9 @@ static ncclResult_t ginAnvilDevices(int* ndev) {
 
 // v14 GIN plugins expose GIN capability flags via getGinProperties.
 // Strong signals are honoured per Put/PutValue by draining every SDMA queue
-// to the peer before the signal (quietPeerQueues in gin_anvil_sdma.h).
-// supportsVASignals stays true because ncclDevCommRequirements defaults
-// ginVaSignalsRequired, and a false flag would reject this backend. The device
-// path implements indexed signals only; a VA descriptor is not signalled.
+// to the peer before the signal (quietPeerQueues in gin_anvil_sdma.h). VA
+// signals resolve through their window like a put destination and take the
+// same strong/weak and fused paths as indexed signals.
 static ncclResult_t ginAnvilGetGinProperties(ncclGinProperties_t* ginProps) {
   ginProps->supportsStrongSignals = true;
   ginProps->supportsVASignals = true;

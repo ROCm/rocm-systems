@@ -165,15 +165,12 @@ std::string proxyNthreadsSkipReason() {
   return "";
 }
 
-// rocSHMEM-GDA and SDMA implement only INDEXED signals; VA signals are
-// unsupported (Put/PutValue address the signal via indexedSignal.signalId).
+// rocSHMEM-GDA implements only INDEXED signals; VA signals are unsupported
+// (Put/PutValue address the signal via indexedSignal.signalId).
 std::string vaSignalTestSkipReason() {
   if (requestedGinType() == NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA)
     return "VA signals not supported by rocSHMEM-GDA (NCCL_GIN_TYPE=" +
            std::to_string(NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA) + ")";
-  if (requestedGinType() == NCCL_NET_DEVICE_GIN_ANVIL_SDMA)
-    return "VA signals not supported by SDMA (NCCL_GIN_TYPE=" +
-           std::to_string(NCCL_NET_DEVICE_GIN_ANVIL_SDMA) + ")";
   return "";
 }
 

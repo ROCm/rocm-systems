@@ -72,10 +72,21 @@ NCCL_DEVICE_INLINE uint64_t* remoteSignalAddr(ncclGinAnvilSdmaGPUContext* rsCtx,
   return nullptr;
 }
 
+// A VA signal cell sits in a registered window at a GIN offset, so it resolves
+// exactly like a put destination.
+NCCL_DEVICE_INLINE uint64_t* remoteSignalAddr(ncclGinAnvilSdmaGPUContext* rsCtx, int peer,
+                                              const ncclGinSignalDescriptor& signal) {
+  if (signal.type == NCCL_GIN_SIGNAL_TYPE_INDEXED) return remoteSignalAddr(rsCtx, peer, signal.indexedSignal.signalId);
+  if (signal.type != NCCL_GIN_SIGNAL_TYPE_VA) return nullptr;
+  auto* mh = (ncclGinAnvilSdmaMemHandle*)signal.vaSignal.signalWindow;
+  if (mh == nullptr) return nullptr;
+  return reinterpret_cast<uint64_t*>(resolveRemotePeerVa(rsCtx, mh, peer, signal.vaSignal.signalOffset));
+}
+
 NCCL_DEVICE_INLINE uint64_t* remoteSdmaFusedSignalAddr(ncclGinAnvilSdmaGPUContext* rsCtx, int peer,
-                                                       ncclGinSignal_t signalId) {
-  // Same peer resolution as remoteSignalAddr: IPC table first, then bound remote bases.
-  return remoteSignalAddr(rsCtx, peer, signalId);
+                                                       const ncclGinSignalDescriptor& signal) {
+  // Same peer resolution as signalPeer, so fused and unfused signals hit the same cell.
+  return remoteSignalAddr(rsCtx, peer, signal);
 }
 
 NCCL_DEVICE_INLINE bool useSdmaFusedSignal(ncclGinAnvilSdmaGPUContext* rsCtx, bool sdmaDataPath, bool hasSignal,
@@ -139,9 +150,9 @@ NCCL_DEVICE_INLINE bool needSdmaQuietBeforeSignal(ncclGinAnvilSdmaGPUContext* rs
   return *handle != nullptr;
 }
 
-NCCL_DEVICE_INLINE void signalPeer(ncclGinAnvilSdmaGPUContext* rsCtx, int peer, ncclGinSignal_t signalId,
+NCCL_DEVICE_INLINE void signalPeer(ncclGinAnvilSdmaGPUContext* rsCtx, int peer, const ncclGinSignalDescriptor& signal,
                                    uint64_t value) {
-  uint64_t* remoteSig = remoteSignalAddr(rsCtx, peer, signalId);
+  uint64_t* remoteSig = remoteSignalAddr(rsCtx, peer, signal);
   if (remoteSig == nullptr) return;
   // The remote add is relaxed, so the system release must run *before* it or
   // ipcPut stores can pass the signal cell. It is the only release on the
@@ -168,10 +179,11 @@ NCCL_DEVICE_INLINE bool skipFenceBeforeSignal(bool needSdmaQuiet, bool hasSignal
 // Per-call path: no coop.sync() runs before this signal, so sdmaDirty cannot
 // answer "every earlier put to this peer" here. A re-mark racing Flush's clear
 // is lost (see quietOwnedSdmaDirtyBits), and another thread's put is not in
-// this thread's bits. Drain every queue to the peer, including the one this
-// call just posted. The barrier does not use this path. It reports no
-// strong-signal support, so fenceFlush (quietOwnedSdmaDirtyBits, then
-// coop.sync()) plus a weak signal is the equivalent the barrier contract
+// this thread's bits. Drain every queue to the peer: after this call's own put
+// for an unfused signal, before it for a fused one (see
+// fenceBeforeStrongFusedSignal). The barrier does not use this path. It
+// reports no strong-signal support, so fenceFlush (quietOwnedSdmaDirtyBits,
+// then coop.sync()) plus a weak signal is the equivalent the barrier contract
 // requires.
 NCCL_DEVICE_INLINE void quietPeerQueues(ncclGinAnvilSdmaGPUContext* rsCtx, int peer) {
   auto** handles = (::sdma_anvil::SdmaQueueDeviceHandle**)loadConst(&rsCtx->queueHandles);
@@ -182,6 +194,16 @@ NCCL_DEVICE_INLINE void quietPeerQueues(ncclGinAnvilSdmaGPUContext* rsCtx, int p
     auto* h = loadConst(handles + peer * numCh + ch);
     if (h != nullptr) ::sdma_anvil::quiet(*h);
   }
+}
+
+// A fused putSignal orders only the payload queued behind it, so a strong one
+// must first retire everything earlier: SDMA puts on any channel to this peer
+// (quietPeerQueues) and this thread's IPC stores, which the engine's signal
+// write does not wait for (system release, as signalPeer does before its
+// atomic). The put itself is not waited on.
+NCCL_DEVICE_INLINE void fenceBeforeStrongFusedSignal(ncclGinAnvilSdmaGPUContext* rsCtx, int peer) {
+  quietPeerQueues(rsCtx, peer);
+  NCCL_GIN_THREADFENCE_SYSTEM();
 }
 
 NCCL_DEVICE_INLINE void maybeFenceBeforeSignal(ncclGinAnvilSdmaGPUContext* rsCtx, int peer, int blockId,
@@ -283,6 +305,7 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
                                       cuda::thread_scope given, uint32_t optFlags = ncclGinOptFlagsDefault) {
     using nccl::gin::anvil::detail::anvilCtxValid;
     using nccl::gin::anvil::detail::effectiveChannel;
+    using nccl::gin::anvil::detail::fenceBeforeStrongFusedSignal;
     using nccl::gin::anvil::detail::remoteSdmaFusedSignalAddr;
     using nccl::gin::anvil::detail::useSdmaFusedSignal;
     using nccl::gin::anvil::detail::markSdmaDirty;
@@ -292,9 +315,7 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
     using nccl::gin::anvil::detail::signalPeer;
     using nccl::gin::anvil::ipcPut;
     using nccl::utility::loadConst;
-    // Indexed only. A VA descriptor shares this union, so reading
-    // indexedSignal.signalId from it aliases a window pointer.
-    bool hasSignal = signal.type == NCCL_GIN_SIGNAL_TYPE_INDEXED;
+    bool hasSignal = signal.type != NCCL_GIN_SIGNAL_TYPE_NONE;
     bool strongSignal = hasSignal && signal.isStrong;
 
     if (coop.thread_rank() != 0) return;
@@ -341,12 +362,11 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
           }
         } else if (srcAddr != nullptr) {
           uint64_t* remoteSig = nullptr;
-          // A fused signal orders only its own queue, so a strong signal takes
-          // the quietPeerQueues path instead.
-          if (!strongSignal && useSdmaFusedSignal(rsCtx, /*sdmaDataPath=*/true, hasSignal, hasCounter, signalOp)) {
-            remoteSig = remoteSdmaFusedSignalAddr(rsCtx, peer, signal.indexedSignal.signalId);
+          if (useSdmaFusedSignal(rsCtx, /*sdmaDataPath=*/true, hasSignal, hasCounter, signalOp)) {
+            remoteSig = remoteSdmaFusedSignalAddr(rsCtx, peer, signal);
             if (remoteSig != nullptr) sdmaFusedSignal = true;
           }
+          if (sdmaFusedSignal && strongSignal) fenceBeforeStrongFusedSignal(rsCtx, peer);
           issuedSdmaThisCall = true;
           __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
           // The SDMA linear-copy count field is 30 bits (max 1 GiB), and a single
@@ -379,7 +399,7 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
 
       if (hasSignal) {
         if (signalOp == ncclGinSignalInc) signalOpArg = 1;
-        signalPeer(rsCtx, peer, signal.indexedSignal.signalId, signalOpArg);
+        signalPeer(rsCtx, peer, signal, signalOpArg);
       }
       if (hasCounter) {
         atomicAdd((unsigned long long*)&loadConst(&rsCtx->counters)[counterId], 1ULL);
@@ -398,6 +418,7 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
                                       uint32_t optFlags = ncclGinOptFlagsDefault) {
     using nccl::gin::anvil::detail::anvilCtxValid;
     using nccl::gin::anvil::detail::effectiveChannel;
+    using nccl::gin::anvil::detail::fenceBeforeStrongFusedSignal;
     using nccl::gin::anvil::detail::remoteSdmaFusedSignalAddr;
     using nccl::gin::anvil::detail::useSdmaFusedSignal;
     using nccl::gin::anvil::detail::markSdmaDirty;
@@ -407,9 +428,7 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
     using nccl::gin::anvil::detail::signalPeer;
     using nccl::gin::anvil::ipcPutScalar;
     using nccl::utility::loadConst;
-    // Indexed only. A VA descriptor shares this union, so reading
-    // indexedSignal.signalId from it aliases a window pointer.
-    bool hasSignal = signal.type == NCCL_GIN_SIGNAL_TYPE_INDEXED;
+    bool hasSignal = signal.type != NCCL_GIN_SIGNAL_TYPE_NONE;
     bool strongSignal = hasSignal && signal.isStrong;
 
     if (coop.thread_rank() != 0) return;
@@ -454,11 +473,11 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
         }
       } else {
         uint64_t* remoteSig = nullptr;
-        if (!strongSignal &&
-            useSdmaFusedSignal(rsCtx, /*sdmaDataPath=*/true, hasSignal, /*hasCounter=*/false, signalOp)) {
-          remoteSig = remoteSdmaFusedSignalAddr(rsCtx, peer, signal.indexedSignal.signalId);
+        if (useSdmaFusedSignal(rsCtx, /*sdmaDataPath=*/true, hasSignal, /*hasCounter=*/false, signalOp)) {
+          remoteSig = remoteSdmaFusedSignalAddr(rsCtx, peer, signal);
           if (remoteSig != nullptr) sdmaFusedSignal = true;
         }
+        if (sdmaFusedSignal && strongSignal) fenceBeforeStrongFusedSignal(rsCtx, peer);
         issuedSdmaThisCall = true;
         __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
         if (sdmaFusedSignal) {
@@ -474,7 +493,7 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
       maybeFenceBeforeSignal(rsCtx, peer, blockId, &handle, issuedSdmaThisCall, /*hasSignal=*/true,
                              /*hasCounter=*/false, strongSignal);
       if (signalOp == ncclGinSignalInc) signalOpArg = 1;
-      signalPeer(rsCtx, peer, signal.indexedSignal.signalId, signalOpArg);
+      signalPeer(rsCtx, peer, signal, signalOpArg);
     }
   }
 };
@@ -519,6 +538,11 @@ struct ncclGinApi_ResetSignal<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
     if (signal.type == NCCL_GIN_SIGNAL_TYPE_INDEXED) {
       uint64_t* signals = nccl::utility::loadConst(&rsCtx->signals);
       if (signals != nullptr) signals[signal.indexedSignal.signalId] = 0;
+    } else if (signal.type == NCCL_GIN_SIGNAL_TYPE_VA) {
+      auto* mh = (ncclGinAnvilSdmaMemHandle*)signal.vaSignal.signalWindow;
+      if (mh == nullptr) return;
+      uintptr_t base = nccl::utility::loadConst(&mh->baseAddr);
+      if (base != 0) *reinterpret_cast<uint64_t*>(base + signal.vaSignal.signalOffset) = 0;
     }
   }
 };
