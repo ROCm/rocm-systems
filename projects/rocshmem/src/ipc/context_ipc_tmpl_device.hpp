@@ -818,17 +818,25 @@ __device__ void IPCContext::internal_broadcast_wave(T *dst, const T *src, int ne
 template <typename T>
 __device__ void IPCContext::broadcast_wg(rocshmem_team_t team, T *dst,
                                       const T *src, int nelems, int pe_root) {
-  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
+#if defined(USE_SDMA)
+  if (sizeof(T) * nelems < 512 || constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED)
+#else
+  if (sizeof(T) * nelems < 512)
+#endif
+    broadcastmem_wg_linear_thread_puts(team, dst, src, nelems * sizeof(T), pe_root);
+  else {
+    IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
 
-  int stride = team_obj->tinfo_wrt_world->stride;
-  int pe_start = team_obj->tinfo_wrt_world->pe_start;
-  int pe_size = team_obj->tinfo_wrt_world->size;
-  long *p_sync = team_obj->bcast_pSync;
+    int stride = team_obj->tinfo_wrt_world->stride;
+    int pe_start = team_obj->tinfo_wrt_world->pe_start;
+    int pe_size = team_obj->tinfo_wrt_world->size;
+    long *p_sync = team_obj->bcast_pSync;
 
-  // Passed pe_root is relative to team, convert to world root
-  int pe_root_world = team_obj->get_pe_in_world(pe_root);
-  internal_broadcastmem_wg(dst, src, nelems * sizeof(T), pe_root_world, pe_start, stride,
-               pe_size, p_sync);
+    // Passed pe_root is relative to team, convert to world root
+    int pe_root_world = team_obj->get_pe_in_world(pe_root);
+    internal_broadcastmem_wg(dst, src, nelems * sizeof(T), pe_root_world, pe_start, stride,
+                 pe_size, p_sync);
+  }
 }
 
 template <typename T>
@@ -936,7 +944,14 @@ __device__ void IPCContext::alltoallv([[maybe_unused]] rocshmem_team_t team,
 template <typename T>
 __device__ void IPCContext::fcollect_wg(rocshmem_team_t team, T *dst,
                                      const T *src, int nelems) {
-  fcollectmem_linear_wg(team, dst, src, nelems * sizeof(T));
+#if defined(USE_SDMA)
+  if (sizeof(T) * nelems < 512 || constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED)
+#else
+  if (sizeof(T) * nelems < 512)
+#endif
+    fcollectmem_wg_linear_thread_puts(team, dst, src, nelems * sizeof(T));
+  else
+    fcollectmem_wg_linear(team, dst, src, nelems * sizeof(T));
 }
 
 template <typename T>
@@ -945,7 +960,7 @@ __device__ int IPCContext::fcollect_wave(rocshmem_team_t team, T *dst,
   if (dst == nullptr || src == nullptr || team == ROCSHMEM_TEAM_INVALID)
     return ROCSHMEM_ERROR;
 
-  fcollectmem_linear_wave(team, dst, src, nelems * sizeof(T));
+  internal_fcollectmem_wave(team, dst, src, nelems * sizeof(T));
 
   return ROCSHMEM_SUCCESS;
 }
