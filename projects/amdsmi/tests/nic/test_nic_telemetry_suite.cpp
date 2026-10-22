@@ -14,6 +14,7 @@
 
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
@@ -29,12 +30,14 @@
 #include <vector>
 
 #include "nic_check.h"
+#include "smi_nic_hwmon.h"
 #include "smi_nic_interface.h"
 #include "smi_nic_telemetry.h"
 
 namespace tp = amd::smi::nic::transport;
 namespace tel = amd::smi::nic::telemetry;
 namespace dl = amd::nic::netlink;
+namespace hw = amd::smi::nic::hwmon;
 
 // Layout tripwire. The public bridge (amd_smi.cc, amdsmi_get_nic_telemetry) copies this
 // snapshot field-by-field into amdsmi_nic_telemetry_t; no static_assert can prove that
@@ -124,6 +127,37 @@ static std::string write_temp_file(const std::string& name, const std::string& c
   f << content;
   f.close();
   return path;
+}
+
+// Writes `content` to g_tmpdir/<rel>, creating the parent directories.
+static void write_sysfs_file(const std::string& rel, const std::string& content) {
+  const auto path = std::filesystem::path(g_tmpdir) / rel;
+  std::filesystem::create_directories(path.parent_path());
+  std::ofstream f(path);
+  f << content;
+}
+
+// An ionic hwmon node as `sensors` reported it for the fourth AINIC. Returns the hwmon root,
+// the directory that holds hwmon3.
+static std::string write_ionic_hwmon(const std::string& root_rel) {
+  const std::string node = root_rel + "/hwmon3/";
+  write_sysfs_file(node + "name", "ionic\n");
+  write_sysfs_file(node + "in0_input", "12060\n");
+  write_sysfs_file(node + "in0_label", "input voltage\n");
+  write_sysfs_file(node + "in1_input", "744\n");
+  write_sysfs_file(node + "in1_label", "core voltage\n");
+  write_sysfs_file(node + "temp1_input", "39000\n");
+  write_sysfs_file(node + "temp1_label", "board temperature\n");
+  write_sysfs_file(node + "temp1_crit", "80000\n");
+  write_sysfs_file(node + "temp2_input", "59000\n");
+  write_sysfs_file(node + "temp2_label", "die temperature\n");
+  write_sysfs_file(node + "temp2_crit", "105000\n");
+  write_sysfs_file(node + "power1_input", "37700000\n");
+  write_sysfs_file(node + "power1_label", "total power\n");
+  write_sysfs_file(node + "power1_max", "40000000\n");
+  write_sysfs_file(node + "power2_input", "11000000\n");
+  write_sysfs_file(node + "power2_label", "core power\n");
+  return g_tmpdir + "/" + root_rel;
 }
 
 // Test cases
@@ -465,11 +499,14 @@ static void test_context_entry_points_reject_bad_input() {
 
   tel::NicTelemetrySnapshot snapshot{};
   dl::DevlinkDeviceInfo info{};
+  std::vector<hw::SensorRecord_t> hwmon_records;
 
   check("telemetry on a null context is rejected",
         smi_get_nic_telemetry(nullptr, 0, &snapshot) == SMI_NIC_STATUS_WRONG_PARAM);
   check("firmware on a null context is rejected",
         smi_get_nic_fw_info(nullptr, 0, &info) == SMI_NIC_STATUS_WRONG_PARAM);
+  check("hwmon sensors on a null context is rejected",
+        smi_get_nic_hwmon_sensors(nullptr, 0, &hwmon_records) == SMI_NIC_STATUS_WRONG_PARAM);
 
   smi_nic_ctx_t ctx = nullptr;
   const auto create_status = smi_nic_create_context(&ctx, true);
@@ -482,10 +519,15 @@ static void test_context_entry_points_reject_bad_input() {
         smi_get_nic_telemetry(ctx, kUnregisteredBdf, nullptr) == SMI_NIC_STATUS_WRONG_PARAM);
   check("firmware with no out parameter is rejected",
         smi_get_nic_fw_info(ctx, kUnregisteredBdf, nullptr) == SMI_NIC_STATUS_WRONG_PARAM);
+  check("hwmon sensors with no out parameter is rejected",
+        smi_get_nic_hwmon_sensors(ctx, kUnregisteredBdf, nullptr) == SMI_NIC_STATUS_WRONG_PARAM);
   check("telemetry for an unregistered BDF reports not found",
         smi_get_nic_telemetry(ctx, kUnregisteredBdf, &snapshot) == SMI_NIC_STATUS_NOT_FOUND);
   check("firmware for an unregistered BDF reports not found",
         smi_get_nic_fw_info(ctx, kUnregisteredBdf, &info) == SMI_NIC_STATUS_NOT_FOUND);
+  check(
+      "hwmon sensors for an unregistered BDF reports not found",
+      smi_get_nic_hwmon_sensors(ctx, kUnregisteredBdf, &hwmon_records) == SMI_NIC_STATUS_NOT_FOUND);
 
   smi_nic_destroy_context(ctx);
 }
@@ -570,6 +612,209 @@ static void test_devlink_addresses_a_portless_nic_itself() {
         "got " + fake->device_info_dev);
 }
 
+struct ExpectedSensor {
+  hw::Category_t category;
+  hw::Attribute_t attribute;
+  uint32_t channel;
+  int64_t value;
+};
+
+static void test_hwmon_scan_ionic_layout() {
+  std::cout << "\nHwmon scan: ionic node as sensors reports it\n";
+  const auto root = write_ionic_hwmon("scan_ionic");
+  const auto records = hw::scan_sensors(root);
+
+  const std::vector<ExpectedSensor> expected = {
+      {hw::Category_t::Temperature, hw::Attribute_t::Input, 1, 39000},
+      {hw::Category_t::Temperature, hw::Attribute_t::Crit, 1, 80000},
+      {hw::Category_t::Temperature, hw::Attribute_t::Input, 2, 59000},
+      {hw::Category_t::Temperature, hw::Attribute_t::Crit, 2, 105000},
+      {hw::Category_t::Power, hw::Attribute_t::Input, 1, 37700000},
+      {hw::Category_t::Power, hw::Attribute_t::Max, 1, 40000000},
+      {hw::Category_t::Power, hw::Attribute_t::Input, 2, 11000000},
+      {hw::Category_t::Voltage, hw::Attribute_t::Input, 0, 12060},
+      {hw::Category_t::Voltage, hw::Attribute_t::Input, 1, 744},
+  };
+  check("one record per recognised attribute", records.size() == expected.size(),
+        "got " + std::to_string(records.size()));
+  if (records.size() != expected.size()) {
+    return;
+  }
+  bool is_order_and_values_match = true;
+  for (size_t i = 0; i < expected.size(); ++i) {
+    is_order_and_values_match =
+        is_order_and_values_match && (records[i].category == expected[i].category) &&
+        (records[i].attribute == expected[i].attribute) &&
+        (records[i].channel == expected[i].channel) && (records[i].value == expected[i].value) &&
+        (records[i].instance == 3);
+  }
+  check("ordered by category then channel then attribute, instance = 3", is_order_and_values_match);
+  check("board label carried to the input record", records[0].label == "board temperature");
+  check("board label carried to its threshold record", records[1].label == "board temperature");
+  check("die label on channel 2", records[2].label == "die temperature");
+  check("temperature unit is milli-degrees", records[0].unit == hw::Unit_t::MilliDegreeCelsius);
+  check("voltage unit is millivolts", records[7].unit == hw::Unit_t::MilliVolt);
+  check("power unit is microwatts", records[4].unit == hw::Unit_t::MicroWatt);
+}
+
+// File set of a bnxt_en hwmon node as listed on b20-31.
+static void test_hwmon_scan_bnxt_layout_reports_shutdown() {
+  std::cout << "\nHwmon scan: bnxt node with shutdown threshold and alarm files\n";
+  write_sysfs_file("scan_bnxt/hwmon0/temp1_input", "37000\n");
+  write_sysfs_file("scan_bnxt/hwmon0/temp1_max", "95000\n");
+  write_sysfs_file("scan_bnxt/hwmon0/temp1_crit", "100000\n");
+  write_sysfs_file("scan_bnxt/hwmon0/temp1_emergency", "105000\n");
+  write_sysfs_file("scan_bnxt/hwmon0/temp1_shutdown", "115000\n");
+  write_sysfs_file("scan_bnxt/hwmon0/temp1_max_alarm", "0\n");
+  write_sysfs_file("scan_bnxt/hwmon0/temp1_crit_alarm", "0\n");
+  write_sysfs_file("scan_bnxt/hwmon0/temp1_emergency_alarm", "0\n");
+  write_sysfs_file("scan_bnxt/hwmon0/temp1_shutdown_alarm", "0\n");
+  const auto records = hw::scan_sensors(g_tmpdir + "/scan_bnxt");
+
+  check("input, max, crit, emergency and shutdown; alarms skipped", records.size() == 5,
+        "got " + std::to_string(records.size()));
+  const auto has_shutdown =
+      std::any_of(records.begin(), records.end(), [](const hw::SensorRecord_t& record) {
+        return ((record.attribute == hw::Attribute_t::Shutdown) && (record.value == 115000));
+      });
+  check("shutdown threshold is reported", has_shutdown);
+}
+
+static void test_hwmon_scan_two_instances_stay_distinct() {
+  std::cout << "\nHwmon scan: same channel on two hwmon nodes\n";
+  write_sysfs_file("scan_two/hwmon1/temp1_input", "30000\n");
+  write_sysfs_file("scan_two/hwmon2/temp1_input", "40000\n");
+  const auto records = hw::scan_sensors(g_tmpdir + "/scan_two");
+
+  check("two records", records.size() == 2, "got " + std::to_string(records.size()));
+  if (records.size() == 2) {
+    check("first is instance 1", (records[0].instance == 1) && (records[0].value == 30000));
+    check("second is instance 2", (records[1].instance == 2) && (records[1].value == 40000));
+  }
+}
+
+static void test_hwmon_scan_missing_label_is_empty() {
+  std::cout << "\nHwmon scan: no label file\n";
+  write_sysfs_file("scan_nolabel/hwmon0/temp1_input", "46000\n");
+  const auto records = hw::scan_sensors(g_tmpdir + "/scan_nolabel");
+
+  check("one record", records.size() == 1);
+  check("label is empty", !records.empty() && records[0].label.empty());
+}
+
+static void test_hwmon_scan_skips_unreadable_and_unknown_files() {
+  std::cout << "\nHwmon scan: unreadable values and files outside the scope\n";
+  write_sysfs_file("scan_skip/hwmon0/temp1_input", "not-a-number\n");
+  write_sysfs_file("scan_skip/hwmon0/temp1_crit", "105000\n");
+  write_sysfs_file("scan_skip/hwmon0/temp1_max_alarm", "0\n");
+  write_sysfs_file("scan_skip/hwmon0/power1_average", "5000000\n");
+  write_sysfs_file("scan_skip/hwmon0/fan1_input", "1200\n");
+  write_sysfs_file("scan_skip/hwmon0/intrusion0_alarm", "0\n");
+  write_sysfs_file("scan_skip/hwmon0/name", "x\n");
+  const auto records = hw::scan_sensors(g_tmpdir + "/scan_skip");
+
+  check("only the readable crit threshold remains", records.size() == 1,
+        "got " + std::to_string(records.size()));
+  check("it is temp1 crit", !records.empty() && (records[0].attribute == hw::Attribute_t::Crit));
+}
+
+static void test_hwmon_scan_negative_and_wide_values() {
+  std::cout << "\nHwmon scan: negative temperature and a power above 32 bits\n";
+  write_sysfs_file("scan_wide/hwmon0/temp1_input", "-5000\n");
+  write_sysfs_file("scan_wide/hwmon0/power1_input", "3000000000\n");
+  const auto records = hw::scan_sensors(g_tmpdir + "/scan_wide");
+
+  check("two records", records.size() == 2);
+  if (records.size() == 2) {
+    check("negative temperature kept", records[0].value == -5000);
+    check("value above INT32_MAX kept", records[1].value == 3000000000LL);
+  }
+}
+
+static void test_hwmon_scan_absent_root_is_empty() {
+  std::cout << "\nHwmon scan: directory missing\n";
+  check("no records", hw::scan_sensors(g_tmpdir + "/does_not_exist").empty());
+}
+
+static void test_temperature_role_ionic() {
+  std::cout << "\nTemperature role: labelled ionic node\n";
+  const auto root = write_ionic_hwmon("role_ionic");
+  const auto asic = hw::find_temperature_input(root, hw::TempRole_t::Asic);
+  const auto board = hw::find_temperature_input(root, hw::TempRole_t::Board);
+
+  check("asic is the die channel",
+        asic.has_value() && (asic.value() == root + "/hwmon3/temp2_input"));
+  check("board is the board channel",
+        board.has_value() && (board.value() == root + "/hwmon3/temp1_input"));
+}
+
+static void test_temperature_role_unlabelled_driver() {
+  std::cout << "\nTemperature role: driver that labels nothing\n";
+  write_sysfs_file("role_plain/hwmon0/temp1_input", "46000\n");
+  const auto root = g_tmpdir + "/role_plain";
+
+  const auto asic = hw::find_temperature_input(root, hw::TempRole_t::Asic);
+  check("asic falls back to temp1",
+        asic.has_value() && (asic.value() == root + "/hwmon0/temp1_input"));
+  check("board is absent", !hw::find_temperature_input(root, hw::TempRole_t::Board).has_value());
+}
+
+static void test_temperature_role_board_only_is_not_asic() {
+  std::cout << "\nTemperature role: only a board channel exists\n";
+  write_sysfs_file("role_boardonly/hwmon0/temp1_input", "39000\n");
+  write_sysfs_file("role_boardonly/hwmon0/temp1_label", "board temperature\n");
+  const auto root = g_tmpdir + "/role_boardonly";
+
+  check("asic must not borrow the board channel",
+        !hw::find_temperature_input(root, hw::TempRole_t::Asic).has_value());
+  check("board still found", hw::find_temperature_input(root, hw::TempRole_t::Board).has_value());
+}
+
+static void test_temperature_role_unlabeled_non_first_channel() {
+  std::cout << "\nTemperature role: unlabelled driver with only temp2\n";
+  write_sysfs_file("role_temp2only/hwmon0/temp2_input", "46000\n");
+  const auto root = g_tmpdir + "/role_temp2only";
+
+  check("asic does not fall back to temp2",
+        !hw::find_temperature_input(root, hw::TempRole_t::Asic).has_value());
+}
+
+static void test_temperature_role_mixed_labels_skip_fallback() {
+  std::cout << "\nTemperature role: unlabelled temp1 beside a labelled die channel\n";
+  write_sysfs_file("role_mixed/hwmon0/temp1_input", "39000\n");
+  write_sysfs_file("role_mixed/hwmon0/temp2_input", "59000\n");
+  write_sysfs_file("role_mixed/hwmon0/temp2_label", "die temperature\n");
+  const auto root = g_tmpdir + "/role_mixed";
+
+  const auto asic = hw::find_temperature_input(root, hw::TempRole_t::Asic);
+  check("asic is the labelled die channel, not temp1",
+        asic.has_value() && (asic.value() == root + "/hwmon0/temp2_input"));
+  check("board is absent", !hw::find_temperature_input(root, hw::TempRole_t::Board).has_value());
+}
+
+static void test_temperature_role_label_case_insensitive() {
+  std::cout << "\nTemperature role: labels in upper and mixed case\n";
+  write_sysfs_file("role_case/hwmon0/temp1_input", "39000\n");
+  write_sysfs_file("role_case/hwmon0/temp1_label", "BOARD Temperature\n");
+  write_sysfs_file("role_case/hwmon0/temp2_input", "59000\n");
+  write_sysfs_file("role_case/hwmon0/temp2_label", "Die Temperature\n");
+  const auto root = g_tmpdir + "/role_case";
+
+  const auto asic = hw::find_temperature_input(root, hw::TempRole_t::Asic);
+  const auto board = hw::find_temperature_input(root, hw::TempRole_t::Board);
+  check("asic matches 'Die Temperature'",
+        asic.has_value() && (asic.value() == root + "/hwmon0/temp2_input"));
+  check("board matches 'BOARD Temperature'",
+        board.has_value() && (board.value() == root + "/hwmon0/temp1_input"));
+}
+
+static void test_temperature_role_absent_root() {
+  std::cout << "\nTemperature role: directory missing\n";
+  const auto root = g_tmpdir + "/does_not_exist";
+  check("asic absent", !hw::find_temperature_input(root, hw::TempRole_t::Asic).has_value());
+  check("board absent", !hw::find_temperature_input(root, hw::TempRole_t::Board).has_value());
+}
+
 int main() {
   char tmpl[] = "/tmp/amdsmi_telemetry_testXXXXXX";
   if (mkdtemp(tmpl) == nullptr) {
@@ -604,6 +849,20 @@ int main() {
   test_snapshot_all_supported();
   test_snapshot_mixed();
   test_snapshot_all_unsupported();
+  test_hwmon_scan_ionic_layout();
+  test_hwmon_scan_bnxt_layout_reports_shutdown();
+  test_hwmon_scan_two_instances_stay_distinct();
+  test_hwmon_scan_missing_label_is_empty();
+  test_hwmon_scan_skips_unreadable_and_unknown_files();
+  test_hwmon_scan_negative_and_wide_values();
+  test_hwmon_scan_absent_root_is_empty();
+  test_temperature_role_ionic();
+  test_temperature_role_unlabelled_driver();
+  test_temperature_role_board_only_is_not_asic();
+  test_temperature_role_unlabeled_non_first_channel();
+  test_temperature_role_mixed_labels_skip_fallback();
+  test_temperature_role_label_case_insensitive();
+  test_temperature_role_absent_root();
 
   auto ec = std::error_code{};
   std::filesystem::remove_all(g_tmpdir, ec);

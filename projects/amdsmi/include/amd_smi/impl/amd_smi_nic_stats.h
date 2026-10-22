@@ -53,6 +53,40 @@ inline auto copy_nic_stats(const smi_nic_stat_info_t& info, uint32_t* num_stats,
 }
 
 /**
+ * Copies the hwmon records that fit into the caller's array and sets *num_sensors to the number
+ * available. With no array only the count is reported. INSUFFICIENT_SIZE tells the caller the
+ * array was too small. Duck-typed on the record fields so this header needs no internal include.
+ */
+template <typename Records>
+inline auto copy_nic_sensors(const Records& records, uint32_t* num_sensors,
+                             amdsmi_nic_sensor_t* sensors) -> amdsmi_status_t {
+  const auto available = static_cast<uint32_t>(records.size());
+  if (sensors == nullptr) {
+    *num_sensors = available;
+    return AMDSMI_STATUS_SUCCESS;
+  }
+
+  const auto num_copied = std::min(available, *num_sensors);
+  for (auto i = uint32_t{0}; i < num_copied; ++i) {
+    const auto& record = records[i];
+    sensors[i] = {};
+    sensors[i].category =
+        static_cast<amdsmi_metric_category_t>(static_cast<uint32_t>(record.category));
+    sensors[i].name =
+        static_cast<amdsmi_nic_sensor_name_t>(static_cast<uint32_t>(record.attribute));
+    sensors[i].unit = static_cast<amdsmi_metric_unit_t>(static_cast<uint32_t>(record.unit));
+    sensors[i].channel = record.channel;
+    sensors[i].instance = record.instance;
+    std::snprintf(sensors[i].label, sizeof(sensors[i].label), "%s", record.label.c_str());
+    sensors[i].value = record.value;
+  }
+
+  const auto is_truncated = (available > *num_sensors);
+  *num_sensors = available;
+  return is_truncated ? AMDSMI_STATUS_INSUFFICIENT_SIZE : AMDSMI_STATUS_SUCCESS;
+}
+
+/**
  * The two-call pattern behind the statistics getters. With no array the count answers; with an
  * array only the list is read, so the device is queried once and not twice. Both callables return
  * the amdsmi status.

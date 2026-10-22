@@ -254,7 +254,7 @@ The other two plugins follow the same interface: UALoE
 (``src/vendors/amd/ualoe_subsystem.{h,cpp}``) matches PCI ids ``1022:1747``, has no
 ports and no netdev, and reports ``FWCTL`` when an ``ifoe.cmd.*`` entry exists;
 Broadcom (``src/vendors/broadcom/broadcom_subsystem.{h,cpp}``) matches netdevs
-whose PCI function is bound to ``bnxt_en``.
+whose PCI function is bound to ``bnxt_en`` or ``bng_en``.
 
 ```mermaid
 flowchart LR
@@ -290,6 +290,7 @@ Examples:
 - `amdsmi_get_nic_bus_info()`
 - `amdsmi_get_nic_port_info()`
 - ``amdsmi_get_nic_telemetry()``
+- `amdsmi_get_nic_hwmon_sensors()`
 - `amdsmi_get_nic_rdma_port_statistics()`
 
 ### Parameter conventions
@@ -711,6 +712,12 @@ amdsmi_status_t amdsmi_get_nic_telemetry(
     amdsmi_processor_handle processor_handle,
     amdsmi_nic_telemetry_t *info);
 
+// NIC hwmon sensors (temperature, voltage, power and their thresholds)
+amdsmi_status_t amdsmi_get_nic_hwmon_sensors(
+    amdsmi_processor_handle processor_handle,
+    uint32_t *num_sensors,
+    amdsmi_nic_sensor_t *sensors);
+
 // NIC Port Information
 amdsmi_status_t amdsmi_get_nic_port_info(
     amdsmi_processor_handle processor_handle,
@@ -991,6 +998,96 @@ Only AI-NIC (ionic) RDMA devices are reported. Broadcom RDMA devices are not par
 the NIC list. ``rdma statistic show mr``, ``rdma statistic mode supported``, and
 setting optional counters are not supported.
 
+### Hardware-monitor sensors with ``metric --nic --sensors``
+
+The ``metric --nic`` command reports the NIC's hwmon sensors (temperature, voltage, and power,
+with their thresholds) with the ``--sensors`` flag:
+
+```
+amd-smi metric --nic <ID | BDF | UUID> --sensors [--json]
+```
+
+**Flags:**
+
+- ``--sensors``: Add a ``SENSORS`` block to the NIC output. Without it the output is unchanged
+  and no sensor is read.
+- ``--json``: Output as JSON. Each reading is ``{"value": <number>, "unit": "<C|V|W>"}``.
+
+**Output structure:**
+
+```
+SENSORS:
+  SENSOR_<N>:
+    LABEL: <driver label, or N/A>
+    CATEGORY: <TEMPERATURE | POWER | VOLTAGE>
+    INSTANCE: <hwmon instance number>
+    CHANNEL: <channel number within the category>
+    VALUE: <reading>
+    <THRESHOLD>: <reading>  # MIN, MAX, LCRIT, CRIT, EMERGENCY, SHUTDOWN, CAP, when the driver exposes them
+```
+
+Each ``SENSOR_<N>`` block is one sensor, numbered from 0 in the order the library returns them
+(by hwmon instance, then category in the order ``TEMPERATURE``, ``POWER``, ``VOLTAGE``, then
+channel number). ``LABEL`` is the driver label, or ``N/A`` when the driver
+gives none. Text output shows units as ``C``, ``V``, and ``W``. CSV flattens the blocks into
+keys such as ``SENSOR_0_LABEL`` and ``SENSOR_0_VALUE``, with plain numbers for the readings.
+A NIC without hwmon sensors prints ``SENSORS: No sensors found for this NIC`` in text and
+``{}`` in JSON.
+
+**Example** (labels and readings as ``sensors`` reports them on an ionic NIC; the instance and
+channel numbers are illustrative):
+
+```
+SENSORS:
+  SENSOR_0:
+    LABEL: board temperature
+    CATEGORY: TEMPERATURE
+    INSTANCE: 3
+    CHANNEL: 1
+    VALUE: 37.0 °C
+    CRIT: 80.0 °C
+  SENSOR_1:
+    LABEL: die temperature
+    CATEGORY: TEMPERATURE
+    INSTANCE: 3
+    CHANNEL: 2
+    VALUE: 53.0 °C
+    CRIT: 105.0 °C
+  SENSOR_2:
+    LABEL: total power
+    CATEGORY: POWER
+    INSTANCE: 3
+    CHANNEL: 1
+    VALUE: 35.34 W
+    MAX: 40.0 W
+  SENSOR_3:
+    LABEL: core power
+    CATEGORY: POWER
+    INSTANCE: 3
+    CHANNEL: 2
+    VALUE: 10.0 W
+  SENSOR_4:
+    LABEL: input voltage
+    CATEGORY: VOLTAGE
+    INSTANCE: 3
+    CHANNEL: 1
+    VALUE: 12.03 V
+  SENSOR_5:
+    LABEL: core voltage
+    CATEGORY: VOLTAGE
+    INSTANCE: 3
+    CHANNEL: 2
+    VALUE: 0.748 V
+```
+
+```bash
+# Sensors of NIC 0
+sudo amd-smi metric --nic 0 --sensors
+
+# The same, as JSON
+sudo amd-smi metric --nic 0 --sensors --json
+```
+
 ---
 
 ## Sysfs data source reference
@@ -1075,6 +1172,7 @@ projects/amdsmi/
 │       │   ├── smi_nic_transport.h           # NicTransport + create_transport() factory
 │       │   ├── smi_nic_stats.h               # StatTier_t and StatTable_t (per-vendor counter tables)
 │       │   ├── smi_nic_telemetry.h           # NicTelemetry: temperature (hwmon), health and port split (devlink)
+│       │   ├── smi_nic_hwmon.h               # hwmon sensor scan: scan_sensors(), find_temperature_input()
 │       │   ├── smi_nic_log.h                 # Debug-log sink used by the library (RSMI_LOGGING)
 │       │   ├── smi_nic_vpd.h                  # PCI VPD (Vital Product Data) TLV parser interface
 │       │   ├── smi_ethtool_ioctl.h           # ethtool ioctl helpers (ioctl transport)
@@ -1093,6 +1191,7 @@ projects/amdsmi/
 │           ├── smi_nic_transport_netlink.cpp # netlink transport backend and AutoBackend (built when HAVE_LIBNL3)
 │           ├── smi_nic_transport_log.cpp     # debug-log decorator applied to every transport backend
 │           ├── smi_nic_telemetry.cpp         # NicTelemetry implementation
+│           ├── smi_nic_hwmon.cpp             # hwmon scan: per-attribute records, label-based ASIC and BOARD lookup
 │           ├── smi_nic_log.cpp               # debug-log sink and value masking
 │           ├── smi_ethtool_ioctl.cpp         # ethtool ioctl backend
 │           ├── smi_nic_vpd.cpp               # PCI VPD TLV parser (product/part/serial)

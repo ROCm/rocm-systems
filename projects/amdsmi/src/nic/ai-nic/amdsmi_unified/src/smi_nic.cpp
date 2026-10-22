@@ -690,36 +690,34 @@ std::optional<std::string> SmiNic::vendor_name() const {
 }
 
 /**
- * Generic hwmon discovery: standard NIC drivers (bnxt_en, ionic) register a
- * hwmon node under the PCI device exposing the ASIC die temperature in
- * tempN_input (millidegrees C). A device without such a node returns nullopt
- * and reports unsupported. Only the ASIC sensor has a generic source;
- * transceiver/board temperatures need a vendor override.
+ * Generic hwmon discovery: standard NIC drivers (bnxt_en, ionic) register a hwmon node under
+ * the PCI device. The ASIC die temperature is the channel labelled "die", or temp1 for a driver
+ * that labels nothing; the board temperature is the channel labelled "board". A device without
+ * a matching channel returns nullopt and reports unsupported. Transceiver temperatures need a
+ * vendor override.
  */
 std::optional<std::string> SmiNic::hwmon_temp_path(NicTempSensor sensor) const {
-  if (sensor != NicTempSensor::Asic) {
+  namespace hw = amd::smi::nic::hwmon;
+
+  hw::TempRole_t role = hw::TempRole_t::Asic;
+  if (sensor == NicTempSensor::Board) {
+    role = hw::TempRole_t::Board;
+  } else if (sensor != NicTempSensor::Asic) {
     return std::nullopt;
   }
 
   const std::string hwmon_root = telemetry_sysfs_bus_path() + "/hwmon";
-  std::error_code ec;
-  if (!std::filesystem::is_directory(hwmon_root, ec)) {
-    NIC_LOG_DEBUG("hwmon scan " + hwmon_root + " -> FAIL not a directory");
-    return std::nullopt;
+  const auto path = hw::find_temperature_input(hwmon_root, role);
+  if (path.has_value()) {
+    NIC_LOG_DEBUG("hwmon scan " + hwmon_root + " -> SUCCESS " + path.value());
+  } else {
+    NIC_LOG_DEBUG("hwmon scan " + hwmon_root + " -> FAIL no matching temperature input");
   }
+  return path;
+}
 
-  // Manual increment(ec): operator++ on directory_iterator throws on a
-  // mid-scan read error; the non-throwing form only guards construction.
-  for (auto it = std::filesystem::directory_iterator(hwmon_root, ec);
-       (!ec && (it != std::filesystem::directory_iterator())); it.increment(ec)) {
-    std::filesystem::path input = it->path() / "temp1_input";
-    if (std::filesystem::exists(input, ec)) {
-      NIC_LOG_DEBUG("hwmon scan " + hwmon_root + " -> SUCCESS " + input.string());
-      return input.string();
-    }
-  }
-  NIC_LOG_DEBUG("hwmon scan " + hwmon_root + " -> FAIL no temp1_input");
-  return std::nullopt;
+std::vector<amd::smi::nic::hwmon::SensorRecord_t> SmiNic::hwmon_sensors() const {
+  return amd::smi::nic::hwmon::scan_sensors(telemetry_sysfs_bus_path() + "/hwmon");
 }
 
 // **** SmiNicPensando ****

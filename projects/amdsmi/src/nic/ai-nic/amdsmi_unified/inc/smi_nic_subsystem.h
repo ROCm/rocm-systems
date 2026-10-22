@@ -17,7 +17,7 @@
 // subsystem. The interface layer names roles, never vendor drivers.
 enum class DriverType {
   Main,  // primary netdev/PCI driver (Pensando ionic, Broadcom bnxt_en)
-  Rdma,  // RDMA auxiliary driver (ionic_rdma, bnxt_en.rdma)
+  Rdma,  // RDMA auxiliary driver (ionic_rdma, bnxt_re.rdma, bng_re.rdma)
 };
 
 /**

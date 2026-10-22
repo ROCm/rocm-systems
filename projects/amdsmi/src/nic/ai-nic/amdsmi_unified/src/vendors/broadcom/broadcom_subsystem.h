@@ -15,7 +15,7 @@
 
 /**
  * Broadcom NIC support: discover() walks /sys/class/net and turns each
- * bnxt_en-bound function of PCI vendor 0x14e4 into one Ethernet SmiNic. Broadcom
+ * bnxt_en- or bng_en-bound function of PCI vendor 0x14e4 into one Ethernet SmiNic. Broadcom
  * exposes no grouping PCI bridge, so each netdev function maps to its own NIC.
  */
 class SmiNicSubsystemBroadcom : public SmiNicSubsystem {
@@ -35,7 +35,7 @@ class SmiNicSubsystemBroadcom : public SmiNicSubsystem {
   static constexpr uint16_t VENDOR_ID = 0x14e4;
 
   bool is_driver_loaded(const std::string& bdf, DriverType driver_type) const override;
-  bool is_bound_to_bnxt_en(const std::string& sysfs_bus_path) const;
+  bool is_bound_to_broadcom_main_driver(const std::string& sysfs_bus_path) const;
 
   std::string driver_sysfs_root_;
   std::vector<std::unique_ptr<SmiNic>> nics_;
