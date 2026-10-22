@@ -49,6 +49,8 @@ hipError_t g_addHostNodeResult = hipSuccess;
 std::vector<hipHostNodeParams> g_hostNodes;
 std::vector<hipGraph_t> g_hostNodeGraphs;
 const auto kGraph = reinterpret_cast<hipGraph_t>(0x6a);
+// Integer math: the base lies outside the test's buffers, so pointer arithmetic would be undefined.
+void* BaseOf(const void* ptr) { return reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(ptr) - 0x10); }
 }  // namespace
 
 hipError_t hipGetDevice(int* dev) {
@@ -59,7 +61,7 @@ const char* hipGetErrorString(hipError_t) { return "fake hip error"; }
 // Every allocation starts 0x10 below the pointer and spans 0x100 bytes.
 hipError_t hipMemGetAddressRange(hipDeviceptr_t* base, size_t* size, hipDeviceptr_t ptr) {
   if (g_addressRangeResult != hipSuccess) return g_addressRangeResult;
-  *base = static_cast<char*>(ptr) - 0x10;
+  *base = BaseOf(ptr);
   *size = 0x100;
   return hipSuccess;
 }
@@ -223,7 +225,7 @@ class RecorderMicrotest : public ::testing::Test {
     std::string bytes = ReadFile(path_);
     EXPECT_EQ(bytes.size() % sizeof(rcclApiCall), 0u);
     std::vector<rcclApiCall> calls(bytes.size() / sizeof(rcclApiCall));
-    std::memcpy(static_cast<void*>(calls.data()), bytes.data(), calls.size() * sizeof(rcclApiCall));
+    if (!calls.empty()) std::memcpy(static_cast<void*>(calls.data()), bytes.data(), calls.size() * sizeof(rcclApiCall));
     return calls;
   }
 
@@ -328,7 +330,7 @@ TEST_F(RecorderMicrotest, Json_CollectiveFromInfoRecordsBuffersCommAndContext) {
             Fmt("  AllReduce : [opCount : 2a, sendbuff : [addr : %p, base : %p, size : 256], recvbuff : [addr : %p, "
                 "base : %p, size : 256], acc : %p, count : 1024, datatype : %d, op : %d, root : 1, comm : %p, "
                 "nranks : 3, stream : %p, task : 34, globalrank : 9, context : [",
-                send_, send_ - 0x10, recv_, recv_ - 0x10, acc_, ncclFloat16, ncclMin, comm_.get(), stream_));
+                send_, BaseOf(send_), recv_, BaseOf(recv_), acc_, ncclFloat16, ncclMin, comm_.get(), stream_));
   Context c = ParseContext(entries[0]);
   EXPECT_EQ(c.thread, (int)syscall(SYS_gettid));
   EXPECT_EQ(c.device, 2);
@@ -369,6 +371,11 @@ TEST_F(RecorderMicrotest, Json_EntriesAreCommaSeparatedAndGroupsNest) {
 TEST_F(RecorderMicrotest, Json_KnownBug_BroadcastsAfterBcastAreDropped) {
   Recorder& r = StartJson();
   rcclApiCall bcast(rccl::rrBcast), broadcast(rccl::rrBroadcast), reduce(rccl::rrReduce);
+  // rcclApiCall(type) leaves datatype and op unset, and the collective format prints both.
+  for (rcclApiCall* c : {&bcast, &broadcast, &reduce}) {
+    c->datatype = ncclInt8;
+    c->op = ncclSum;
+  }
 
   r.record(bcast);
   r.record(broadcast);
@@ -473,7 +480,7 @@ TEST_F(RecorderMicrotest, Json_MemoryAndRegistrationEntries) {
   EXPECT_EQ(Head(e[1]), Fmt("  MemFree : [ptr : %p, context : [", recv_));
   EXPECT_EQ(Head(e[2]), Fmt("  CommRegister : [comm : %p, buff : [addr : %p, base : %p, size : 256], returned handle "
                             ": %p, count : 32, context : [",
-                            comm_.get(), send_, send_ - 0x10, handle));
+                            comm_.get(), send_, BaseOf(send_), handle));
   EXPECT_EQ(Head(e[3]), Fmt("  CommDeregister : [comm : %p, handle : %p, context : [", comm_.get(), handle));
 }
 
@@ -566,7 +573,7 @@ TEST_F(RecorderMicrotest, Binary_WritesOneRawRecordPerCall) {
   ASSERT_EQ(calls.size(), 3u);
   EXPECT_EQ(calls[0].type, rccl::rrReduce);
   EXPECT_EQ(calls[0].sendbuff, static_cast<const void*>(send_));
-  EXPECT_EQ(calls[0].recvPtrBase, static_cast<void*>(recv_ - 0x10));
+  EXPECT_EQ(calls[0].recvPtrBase, BaseOf(recv_));
   EXPECT_EQ(calls[0].nTasks, 34);
   EXPECT_EQ(calls[0].globalRank, 9);
   EXPECT_EQ(calls[0].hipDev, 2);
@@ -769,10 +776,10 @@ TEST_F(RecorderMicrotest, Parse_CollectiveRoundTripsEveryField) {
   EXPECT_EQ(p.type, rccl::rrReduceScatter);
   EXPECT_EQ(p.opCount, 0x2au);
   EXPECT_EQ(p.sendbuff, static_cast<const void*>(send_));
-  EXPECT_EQ(p.sendPtrBase, static_cast<void*>(send_ - 0x10));
+  EXPECT_EQ(p.sendPtrBase, BaseOf(send_));
   EXPECT_EQ(p.sendPtrExtent, 0x100u);
   EXPECT_EQ(p.recvbuff, static_cast<void*>(recv_));
-  EXPECT_EQ(p.recvPtrBase, static_cast<void*>(recv_ - 0x10));
+  EXPECT_EQ(p.recvPtrBase, BaseOf(recv_));
   EXPECT_EQ(p.recvPtrExtent, 0x100u);
   EXPECT_EQ(p.acc, acc_);
   EXPECT_EQ(p.count, 1024u);
@@ -825,7 +832,7 @@ TEST_F(RecorderMicrotest, Parse_OtherCallsRoundTripUpToTheirContext) {
   EXPECT_EQ(p[0].type, rccl::rrCommRegister);
   EXPECT_EQ(p[0].comm, comm_.get());
   EXPECT_EQ(p[0].sendbuff, static_cast<const void*>(send_));
-  EXPECT_EQ(p[0].sendPtrBase, static_cast<void*>(send_ - 0x10));
+  EXPECT_EQ(p[0].sendPtrBase, BaseOf(send_));
   EXPECT_EQ(p[0].sendPtrExtent, 0x100u);
   EXPECT_EQ(p[0].recvbuff, handle);
   EXPECT_EQ(p[0].count, 32u);

@@ -427,6 +427,10 @@ TEST_F(ApiTraceMicrotest, Msccl_RunIsARecordedNoOp) {
   std::vector<std::string> warnings = DebugLogLines(NCCL_LOG_WARN);
   ASSERT_EQ(warnings.size(), 1u);
   EXPECT_NE(warnings[0].find("mscclRunAlgo has no effect"), std::string::npos);
+#ifdef NVTX_NO_IMPL
+  // In-tree builds without ROCTX compile NVTX3_FUNC_WITH_PARAMS out (nvtx_stub.h).
+  EXPECT_TRUE(RoctxRanges().empty());
+#else
   std::vector<RoctxRange> ranges = RoctxRanges();
   ASSERT_EQ(ranges.size(), 1u);
   EXPECT_EQ(ranges[0].name, "RCCL_MSCCL");
@@ -435,6 +439,7 @@ TEST_F(ApiTraceMicrotest, Msccl_RunIsARecordedNoOp) {
   std::memcpy(&payload, ranges[0].payload.data(), sizeof(payload));
   EXPECT_EQ(payload.bytes, 64 * sizeof(float));
   EXPECT_EQ(RoctxRangesOpen(), 0);
+#endif
   EXPECT_TRUE(g_calls.empty());
 }
 
