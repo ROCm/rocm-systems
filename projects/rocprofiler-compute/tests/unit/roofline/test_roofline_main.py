@@ -444,8 +444,8 @@ def drawn_roof_knees(fig: go.Figure) -> Dict[str, Tuple[float, float]]:
     }
 
 
-def stacked_figure(benchmarked_roofline, datatypes: List[str]):
-    """The figure and Roofline for these datatypes stacked onto one axis."""
+def figure_with_precisions(benchmarked_roofline, datatypes: List[str]):
+    """The figure and Roofline object for the given set of precisions."""
     roofline = benchmarked_roofline()
     fig = None
     for dtype in datatypes:
@@ -459,7 +459,7 @@ def test_the_figure_uses_the_machine_frame_while_preserving_roof_knees(
 ) -> None:
     """The viewport comes from all machine ceilings, while drawn knees still
     reflect the tallest compute ceiling in the stacked figure."""
-    _, fig = stacked_figure(benchmarked_roofline, datatypes)
+    _, fig = figure_with_precisions(benchmarked_roofline, datatypes)
 
     x_lo, x_hi = (10**bound for bound in fig.layout.xaxis.range)
     y_lo, y_hi = (10**bound for bound in fig.layout.yaxis.range)
@@ -579,7 +579,7 @@ def test_title_names_the_stable_frame_across_precisions_and_combining(
     benchmarked_roofline,
 ) -> None:
     """Stacking precision roofs and combining figures preserves one frame title."""
-    roofline, figure = stacked_figure(benchmarked_roofline, ["FP64", "BF16"])
+    roofline, figure = figure_with_precisions(benchmarked_roofline, ["FP64", "BF16"])
     expected_title = (
         "Empirical Roofline Analysis<br><sup>Axes fixed to this GPU - "
         "AI 1e-2 to 1e2 - performance 1e0 to 1e5</sup>"
@@ -621,7 +621,7 @@ def test_view_model_carries_the_drawn_knee(benchmarked_roofline) -> None:
     """The client frames on the knees the model ships, so each one has to be the
     knee that figure really draws: capped at its tallest ceiling, including the
     ceilings a stacked datatype brought with it."""
-    roofline, fig = stacked_figure(benchmarked_roofline, ["FP64", "BF16"])
+    roofline, fig = figure_with_precisions(benchmarked_roofline, ["FP64", "BF16"])
     view_model = roofline._Roofline__view_models["FLOP"]
 
     knees = drawn_roof_knees(fig)
@@ -635,7 +635,9 @@ def test_view_model_carries_the_drawn_knee(benchmarked_roofline) -> None:
 def standalone_with_unselected_precision(benchmarked_roofline):
     """The combined document for a run whose opening precision is not its
     tallest, so the default selection is observable in what gets drawn."""
-    roofline, flops_figure = stacked_figure(benchmarked_roofline, ["BF16", "FP64"])
+    roofline, flops_figure = figure_with_precisions(
+        benchmarked_roofline, ["BF16", "FP64"]
+    )
     figure, view_model = roofline._combined_html_figure(None, flops_figure)
     assert figure is not None
     assert view_model.default_precisions == ["BF16"]
@@ -689,7 +691,9 @@ def test_standalone_roofs_open_at_the_selected_cap(benchmarked_roofline) -> None
 def test_dash_figures_keep_every_ceiling(benchmarked_roofline) -> None:
     """The WebUI has no precision selector, so narrowing the standalone document
     must not reach back into the figures Dash renders."""
-    roofline, flops_figure = stacked_figure(benchmarked_roofline, ["BF16", "FP64"])
+    roofline, flops_figure = figure_with_precisions(
+        benchmarked_roofline, ["BF16", "FP64"]
+    )
     source_model = roofline._Roofline__view_models["FLOP"]
     ceiling_indices = [trace["traceIndex"] for trace in source_model.compute_traces]
     roof_extents = drawn_roof_knees(flops_figure)
