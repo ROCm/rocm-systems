@@ -140,6 +140,7 @@ static std::string TargetGenericMap(const std::string& input) {
       {"amdgcn-amd-amdhsa--gfx1200", "amdgcn-amd-amdhsa--gfx12-generic"  },
       {"amdgcn-amd-amdhsa--gfx1201", "amdgcn-amd-amdhsa--gfx12-generic"  },
       {"amdgcn-amd-amdhsa--gfx1250", "amdgcn-amd-amdhsa--gfx12-5-generic"},
+      {"amdgcn-amd-amdhsa--gfx1250-strict", "amdgcn-amd-amdhsa--gfx12-5-generic"},
       // clang-format on
   };
   if (auto i = target_map.find(input); i != target_map.end()) {
