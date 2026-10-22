@@ -1,6 +1,6 @@
 ---
 name: rocprof-compute-memory
-description: Analyzes the AMD GPU memory hierarchy with rocprof-compute, covering the Memory Chart, vL1D and L2 caches, LDS bank conflicts, Infinity Fabric traffic, and the experimental gfx950 memory bandwidth analysis. Use when the user asks about memory bandwidth, cache hit rates, coalescing, LDS conflicts, data locality, HBM traffic, or says a kernel is memory-bound. Not for CUDA tools, Windows, host memory profiling, or system-wide tracing.
+description: Analyzes the AMD GPU memory hierarchy with rocprof-compute, covering the Memory Chart, vL1D and L2 caches, LDS bank conflicts, Infinity Fabric traffic, and the experimental gfx950 memory bandwidth analysis. Use when the user asks about memory bandwidth, cache hit rates, coalescing, LDS conflicts, data locality, HBM traffic, or says a kernel is memory-bound. Not for CUDA tools, Nsight, Windows, host-memory leaks, GPU out-of-memory allocation failures, or system-wide tracing.
 ---
 
 # Analyze the AMD GPU memory hierarchy
