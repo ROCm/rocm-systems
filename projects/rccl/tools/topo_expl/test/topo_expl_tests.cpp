@@ -18,6 +18,7 @@ struct TestResult {
     int model_id;
     int num_nodes;
     bool success;
+    bool skipped;
     std::string error_msg;
     int nranks;
     int nnodes;
@@ -65,6 +66,16 @@ static bool run_single_test(int model_id, int num_nodes) {
     test_result.model_id = model_id;
     test_result.num_nodes = num_nodes;
     test_result.success = (result == TOPO_EXPL_SUCCESS && context != nullptr);
+    test_result.skipped = (result == TOPO_EXPL_UNSUPPORTED);
+
+    if (test_result.skipped) {
+        test_result.error_msg = "Topology does not support this node count";
+        test_result.nranks = 0;
+        test_result.nnodes = 0;
+        test_results.push_back(test_result);
+        topoExplSuppressVerbose = suppress_verbose;
+        return false;
+    }
 
     if (!test_result.success) {
         test_result.error_msg = "Context creation failed";
@@ -128,6 +139,7 @@ static void print_test_summary() {
     int total_tests = 0;
     int passed_tests = 0;
     int failed_tests = 0;
+    int skipped_tests = 0;
     
     printf("\n");
     printf("================================================================================\n");
@@ -145,6 +157,8 @@ static void print_test_summary() {
                 total_tests++;
                 if (result.success) {
                     passed_tests++;
+                } else if (result.skipped) {
+                    skipped_tests++;
                 } else {
                     failed_tests++;
                 }
@@ -152,14 +166,25 @@ static void print_test_summary() {
         }   
     }
     
-    printf("TOTAL: %d tests | PASSED: %d | FAILED: %d\n", 
-           total_tests, passed_tests, failed_tests);
+    printf("TOTAL: %d tests | PASSED: %d | FAILED: %d | SKIPPED: %d\n", 
+           total_tests, passed_tests, failed_tests, skipped_tests);
     
+    if (skipped_tests > 0) {
+        printf("\nSKIPPED TESTS:\n");
+        printf("--------------------\n");
+        for (const auto& result : test_results) {
+            if (result.skipped) {
+                printf("Model %2d, %2d nodes : %s\n",
+                       result.model_id, result.num_nodes, result.error_msg.c_str());
+            }
+        }
+    }
+
     if (failed_tests > 0) {
         printf("\nFAILED TESTS:\n");
         printf("--------------------\n");
         for (const auto& result : test_results) {
-            if (!result.success) {
+            if (!result.success && !result.skipped) {
                 printf("Model %2d, %2d nodes : %s\n",
                        result.model_id, result.num_nodes, result.error_msg.c_str());
             }
@@ -282,6 +307,8 @@ int run_test_suite(const std::set<int>& include_models,
             
             if (success) {
                 printf(" PASSED\n");
+            } else if (test_results.back().skipped) {
+                printf(" SKIPPED\n");
             } else {
                 printf(" FAILED\n");
             }
@@ -294,7 +321,7 @@ int run_test_suite(const std::set<int>& include_models,
     // Return number of failures
     int failed_count = 0;
     for (const auto& result : test_results) {
-        if (!result.success) failed_count++;
+        if (!result.success && !result.skipped) failed_count++;
     }
     
     return failed_count;

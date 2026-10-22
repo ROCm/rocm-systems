@@ -154,6 +154,12 @@ TopoExplResult topoExplCreate(
     
     ctx->nRanks = ctx->network->GetNRanks();
     ctx->nNodes = ctx->network->GetNNodes();
+
+    // Nodes can only be connected through a NIC, so a model without one is single-node only.
+    if (ctx->nNodes > 1 && ctx->network->GetNode(0)->getSystem(0)->nodes[NET].count == 0) {
+      WARN("Topology %s has no NIC; it cannot be simulated with %d nodes", config->xmlTopoFile, ctx->nNodes);
+      return TOPO_EXPL_UNSUPPORTED;
+    }
     
     // Allocate comm structures
     TOPO_NCCLCHECK(ncclCalloc(&ctx->comms, ctx->nRanks));

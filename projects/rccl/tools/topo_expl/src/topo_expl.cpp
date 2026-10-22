@@ -100,6 +100,11 @@ int main(int argc, char* argv[])
   char* numNodesStr = getCmdOption(argv, argv + argc, {"-n", "--nodes"});
   if (numNodesStr)
     numNodes = atol(numNodesStr);
+  if (numNodes < 1) {
+    printf("Warning: invalid number of nodes '%s' for model %d; must be at least 1. Skipping.\n",
+           numNodesStr, model_id);
+    return TOPO_EXPL_INVALID_ARG;
+  }
 
   printf("Generating topology using %d: %s\n", model_id, desc->description);
 
@@ -117,6 +122,10 @@ int main(int argc, char* argv[])
   TopoExplContext* context = nullptr;
   TopoExplResult result = topoExplCreate(&config, &context);
   
+  if (result == TOPO_EXPL_UNSUPPORTED) {
+    printf("Warning: model %d has no NIC and can only be simulated with 1 node. Skipping.\n", model_id);
+    return TOPO_EXPL_ERROR;
+  }
   if (result != TOPO_EXPL_SUCCESS || !context) {
     printf("Error: Failed to create topology explorer context\n");
     topoExplDestroy(context);

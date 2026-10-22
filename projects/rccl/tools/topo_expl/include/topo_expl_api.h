@@ -38,7 +38,8 @@ typedef enum {
   TOPO_EXPL_SUCCESS = 0,
   TOPO_EXPL_ERROR = 1,
   TOPO_EXPL_INVALID_ARG = 2,
-  TOPO_EXPL_INTERNAL_ERROR = 3
+  TOPO_EXPL_INTERNAL_ERROR = 3,
+  TOPO_EXPL_UNSUPPORTED = 4
 } TopoExplResult;
 
 // Collective function types
