@@ -15,17 +15,13 @@
 namespace rocprofsys::trace_cache
 {
 
-// The cache format writes size_t lengths; records pass size_t fields where the old code
-// cast them to std::uint64_t. Both rely on the two being the same type.
 static_assert(std::is_same_v<std::size_t, std::uint64_t>,
               "trace cache format assumes size_t is std::uint64_t");
 
-/** A value (a record or a nested struct) that lists its own fields in serialize(). */
 template <typename Type, typename Archive>
 concept archive_serializable =
     requires(Type& value, Archive& archive) { value.serialize(archive); };
 
-/** Sums the encoded size of the fields a record passes to it. */
 struct binary_size_archive
 {
     static constexpr bool k_is_loading = false;
@@ -43,7 +39,6 @@ private:
     {
         if constexpr(archive_serializable<Type, binary_size_archive>)
         {
-            // Recurse into a nested struct; it is only read through serialize().
             const_cast<Type&>(value).serialize(*this);
         }
         else
@@ -53,7 +48,6 @@ private:
     }
 };
 
-/** Writes the fields into a buffer that already has room for record_size() bytes. */
 struct binary_write_archive
 {
     static constexpr bool k_is_loading = false;
@@ -63,8 +57,7 @@ struct binary_write_archive
     template <typename... Types>
     void operator()(const Types&... values)
     {
-        // Locals, not members: a write through the byte buffer may alias any member, so
-        // members would be reloaded after every field and adjacent copies not merged.
+        // Locals: writes through the byte buffer may alias the members.
         std::uint8_t* const out = buffer;
         std::size_t         pos = position;
         (write_one(values, out, pos), ...);
@@ -77,9 +70,6 @@ private:
     {
         if constexpr(archive_serializable<Type, binary_write_archive>)
         {
-            // Recurse into a nested struct; it is only read through serialize(). The
-            // nested call works on the members, so hand the position over and take it
-            // back.
             position = pos;
             const_cast<Type&>(value).serialize(*this);
             pos = position;
@@ -91,10 +81,7 @@ private:
     }
 };
 
-/**
- * Reads the fields back. string_view and span<const std::byte> fields become views into
- * the buffer, so the buffer must outlive the record (as for the parse buffer today).
- */
+/** string_view and span<const std::byte> fields are read as views into the buffer. */
 struct binary_read_archive
 {
     static constexpr bool k_is_loading = true;
@@ -103,7 +90,6 @@ struct binary_read_archive
     template <typename... Types>
     void operator()(Types&... values)
     {
-        // Local cursor for the same reason as in binary_write_archive.
         std::uint8_t* cur = cursor;
         (read_one(values, cur), ...);
         cursor = cur;
@@ -115,8 +101,6 @@ private:
     {
         if constexpr(archive_serializable<Type, binary_read_archive>)
         {
-            // The nested call works on the member, so hand the cursor over and take it
-            // back.
             cursor = cur;
             value.serialize(*this);
             cur = cursor;
@@ -136,7 +120,6 @@ private:
     }
 };
 
-/** A record that lists its fields once, in byte order, in serialize(Archive&). */
 template <typename T>
 concept archive_record =
     std::is_default_constructible_v<T> &&
@@ -148,14 +131,8 @@ concept archive_record =
         record.serialize(reader);
     };
 
-// serialize() is one non-const member shared by all archives. The size and write archives
-// only read through it, so the const_cast is safe (cereal's output archives do the same).
-//
-// flatten inlines everything these functions call, including the record's own
-// serialize(): without it GCC keeps that member out of line and copies the fields one by
-// one through memory. They are deliberately not inline: flatten is lost once the
-// function is itself inlined, so each record type gets one fully inlined function, as the
-// hand-written specializations had before.
+// const_cast: the size and write archives only read through serialize().
+// flatten, not inline (inlining drops it): one fully inlined function per record type.
 template <archive_record T>
 [[nodiscard, gnu::flatten]] std::size_t
 record_size(const T& record)
@@ -177,10 +154,7 @@ template <archive_record T>
 [[nodiscard, gnu::flatten]] T
 record_read(std::uint8_t*& buffer)
 {
-    // Default-initialized, not value-initialized: zeroing the whole record first keeps it
-    // in memory, and the copy into its final place (a variant) then stalls on the 8-byte
-    // stores. Every stored field is read below; the others keep their member
-    // initializers.
+    // Default-initialized like the old deserializers: zeroing it first was slower.
     T                   record;
     binary_read_archive archive{ .cursor = buffer };
     record.serialize(archive);
@@ -188,7 +162,6 @@ record_read(std::uint8_t*& buffer)
     return record;
 }
 
-/** Encoded size of a record. One definition for every record type. */
 template <archive_record T>
 [[nodiscard]] inline std::size_t
 get_size(const T& record)
@@ -196,7 +169,6 @@ get_size(const T& record)
     return record_size(record);
 }
 
-/** Writes a record into a buffer with room for get_size(record) bytes. */
 template <archive_record T>
 inline void
 serialize(std::uint8_t* buffer, const T& record)
@@ -204,7 +176,6 @@ serialize(std::uint8_t* buffer, const T& record)
     record_write(buffer, record);
 }
 
-/** Reads a record and advances the buffer past it. */
 template <archive_record T>
 [[nodiscard]] inline T
 deserialize(std::uint8_t*& buffer)

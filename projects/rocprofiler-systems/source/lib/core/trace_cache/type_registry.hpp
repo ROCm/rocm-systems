@@ -36,7 +36,7 @@ public:
     }
 
 private:
-    /// Converts to T by reading it, so T is constructed directly in its final storage.
+    // Converts to T by reading it, so the record is built inside the returned optional.
     template <typename T>
     struct reader
     {
@@ -45,8 +45,6 @@ private:
         explicit operator T() const { return deserialize<T>(data); }
     };
 
-    // The deserializer returns the optional itself and builds the record inside it: a
-    // returned record would be copied into the variant and again into the optional.
     std::map<TypeIdentifierEnum, std::function<std::optional<variant_t>(std::uint8_t*&)>>
         m_deserializers;
 
