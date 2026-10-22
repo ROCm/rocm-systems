@@ -681,6 +681,128 @@ TEST(DeviceSignal, NeedsACompletionAndTakesADependency) {
 }
 
 //===----------------------------------------------------------------------===//
+// Second completion
+//===----------------------------------------------------------------------===//
+
+abce_status_t SubmitCopyTwice(const DeviceView& view, const abce_device_signal_t* first,
+                              const abce_device_signal_t* second, size_t size = 4096) {
+  return abce_device_submit_linear_two_completions(view.handle(), FakeAddress(0x20000000),
+                                                   FakeAddress(0x40000000), size, nullptr, first,
+                                                   second, 0);
+}
+
+TEST(DeviceSecondCompletion, FollowsTheFirstInTheSameFrame) {
+  struct Case {
+    const char* isa_name;
+    abce_device_signal_op_t first;
+    abce_device_signal_op_t second;
+    Names packets;
+  };
+  for (const Case& test_case :
+       {Case{"gfx942", ABCE_DEVICE_SIGNAL_ADD, ABCE_DEVICE_SIGNAL_ADD,
+             {"COPY_LINEAR", "ATOMIC", "ATOMIC"}},
+        Case{"gfx942", ABCE_DEVICE_SIGNAL_SET, ABCE_DEVICE_SIGNAL_SET,
+             {"COPY_LINEAR", "FENCE", "FENCE", "FENCE", "FENCE"}},
+        Case{"gfx942", ABCE_DEVICE_SIGNAL_SET, ABCE_DEVICE_SIGNAL_ADD,
+             {"COPY_LINEAR", "FENCE", "FENCE", "ATOMIC"}},
+        Case{"gfx1250", ABCE_DEVICE_SIGNAL_ADD, ABCE_DEVICE_SIGNAL_ADD,
+             {"COPY_LINEAR", "ATOMIC", "ATOMIC"}},
+        Case{"gfx1250", ABCE_DEVICE_SIGNAL_SET, ABCE_DEVICE_SIGNAL_SET,
+             {"COPY_LINEAR", "FENCE_64", "FENCE_64"}}}) {
+    SCOPED_TRACE(std::string(test_case.isa_name) + " " + std::to_string(test_case.first) + " " +
+                 std::to_string(test_case.second));
+    DeviceView view(IsaByName(test_case.isa_name));
+    SignalWord first_word;
+    SignalWord second_word;
+    const abce_device_signal_t first = SignalOn(&first_word, 5, test_case.first);
+    const abce_device_signal_t second = SignalOn(&second_word, 9, test_case.second);
+    ASSERT_EQ(SubmitCopyTwice(view, &first, &second), ABCE_STATUS_OK);
+
+    const WalkResult walk = view.WalkRing(0);
+    EXPECT_TRUE(walk.clean);
+    EXPECT_EQ(walk.Names(), test_case.packets);
+    EXPECT_EQ(view.doorbell(0), view.write_index(0));
+  }
+}
+
+TEST(DeviceSecondCompletion, WritesTheSameBytesAsACopyThenASeparateSignal) {
+  for (const char* isa_name : {"gfx90a", "gfx942", "gfx950", "gfx1250"}) {
+    for (const abce_device_signal_op_t first_op : {ABCE_DEVICE_SIGNAL_SET, ABCE_DEVICE_SIGNAL_ADD}) {
+      for (const abce_device_signal_op_t second_op :
+           {ABCE_DEVICE_SIGNAL_SET, ABCE_DEVICE_SIGNAL_ADD, ABCE_DEVICE_SIGNAL_SUB}) {
+        for (const uint32_t flags : {0u, uint32_t{ABCE_DEVICE_SIGNAL_UNORDERED}}) {
+          // 2 GiB is above every part's per-packet maximum, so that copy chunks.
+          for (const size_t size : {size_t{4096}, size_t{1} << 31}) {
+            SCOPED_TRACE(std::string(isa_name) + " ops " + std::to_string(first_op) + " " +
+                         std::to_string(second_op) + " flags " + std::to_string(flags) + " size " +
+                         std::to_string(size));
+            SignalWord first_word;
+            SignalWord second_word;
+            const abce_device_signal_t first = SignalOn(&first_word, 5, first_op, flags);
+            const abce_device_signal_t second = SignalOn(&second_word, 9, second_op);
+            DeviceView together(IsaByName(isa_name));
+            DeviceView apart(IsaByName(isa_name));
+            ASSERT_EQ(SubmitCopyTwice(together, &first, &second, size), ABCE_STATUS_OK);
+            ASSERT_EQ(SubmitCopy(apart, &first, nullptr, size), ABCE_STATUS_OK);
+            ASSERT_EQ(abce_device_submit_signal(apart.handle(), &second, nullptr, 0),
+                      ABCE_STATUS_OK);
+            EXPECT_EQ(together.Bytes(0), apart.Bytes(0));
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(DeviceSecondCompletion, NeedsAFirstCompletionAndIsValidatedLikeIt) {
+  DeviceView view(IsaByName("gfx942"));
+  SignalWord word;
+  const abce_device_signal_t good = SignalOn(&word, 1, ABCE_DEVICE_SIGNAL_SET);
+  EXPECT_EQ(SubmitCopyTwice(view, nullptr, &good), ABCE_STATUS_INVALID_ARGUMENT);
+
+  alignas(8) uint64_t words[2] = {};
+  abce_device_signal_t second{reinterpret_cast<uint64_t*>(reinterpret_cast<char*>(words) + 4), 1,
+                              ABCE_DEVICE_SIGNAL_SET, 0};
+  EXPECT_EQ(SubmitCopyTwice(view, &good, &second), ABCE_STATUS_INVALID_ARGUMENT)
+      << "misaligned";
+  second.address = &words[0];
+  second.op = 7;
+  EXPECT_EQ(SubmitCopyTwice(view, &good, &second), ABCE_STATUS_INVALID_ARGUMENT)
+      << "unknown operation";
+  EXPECT_EQ(view.write_index(0), 0u) << "a refused submit must not move the ring";
+}
+
+TEST(DeviceSecondCompletion, AnAtomicSecondNeedsDeviceAtomics) {
+  DeviceViewOptions options;
+  options.device_atomic_support = false;
+  DeviceView view(IsaByName("gfx942"), options);
+  SignalWord word;
+  const abce_device_signal_t set = SignalOn(&word, 1, ABCE_DEVICE_SIGNAL_SET);
+  const abce_device_signal_t add = SignalOn(&word, 1, ABCE_DEVICE_SIGNAL_ADD);
+  EXPECT_EQ(SubmitCopyTwice(view, &set, &add), ABCE_STATUS_UNIMPLEMENTED);
+  EXPECT_EQ(view.write_index(0), 0u);
+  EXPECT_EQ(SubmitCopyTwice(view, &set, &set), ABCE_STATUS_OK);
+}
+
+TEST(DeviceSecondCompletion, OneLaneEmitsTheSameFrameAsTheGeneralCall) {
+  for (const char* isa_name : {"gfx942", "gfx1250"}) {
+    SCOPED_TRACE(isa_name);
+    SignalWord first_word;
+    SignalWord second_word;
+    const abce_device_signal_t first = SignalOn(&first_word, 5, ABCE_DEVICE_SIGNAL_SET);
+    const abce_device_signal_t second = SignalOn(&second_word, 1, ABCE_DEVICE_SIGNAL_ADD);
+    DeviceView general(IsaByName(isa_name));
+    DeviceView one_lane(IsaByName(isa_name));
+    ASSERT_EQ(SubmitCopyTwice(general, &first, &second), ABCE_STATUS_OK);
+    ASSERT_EQ(abce_device_submit_linear_two_completions_one_lane(
+                  one_lane.handle(), FakeAddress(0x20000000), FakeAddress(0x40000000), 4096,
+                  nullptr, &first, &second, 0),
+              ABCE_STATUS_OK);
+    EXPECT_EQ(general.Bytes(0), one_lane.Bytes(0));
+  }
+}
+
+//===----------------------------------------------------------------------===//
 // Inline write
 //===----------------------------------------------------------------------===//
 

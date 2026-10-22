@@ -135,6 +135,7 @@ Apply each to a scratch copy of `include/`, rebuild, expect red:
 | a fused builder signals only the last chunk | `Gfx125PlusSignals.*` |
 | an all-fused frame signals only its last body | `Gfx125PlusSignals.*` |
 | a chunked device copy fuses its signal | `DeviceCompletion.AChunkedGfx125PlusCopy*` |
+| a second completion is dropped, written before the first, or accepted without a first | `DeviceSecondCompletion.*` |
 
 In debug builds the builder asserts also fire for the swap-alignment mutation; in release builds
 (asserts compiled out) only the validation test catches it.

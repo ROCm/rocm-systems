@@ -221,6 +221,9 @@ typedef struct abce_device_request_t {
   uint64_t value;   // WRITE only.
   const abce_device_wait_t* dependency;
   const abce_device_signal_t* completion;
+  // Applied right after |completion|, in the same frame; needs |completion|. Both land after the
+  // operation's writes, the second after the first.
+  const abce_device_signal_t* second_completion;
   uint32_t flags;  // ABCE_DEVICE_SUBMIT_*.
 } abce_device_request_t;
 
@@ -296,12 +299,14 @@ typedef struct abce_device_frame_t {
   uint64_t wait_bytes;
   uint64_t body_bytes;
   uint64_t completion_bytes;
+  uint64_t second_completion_bytes;
   uint64_t bytes;
 } abce_device_frame_t;
 
-// Frame: [wait] body [signal]. gfx125+ copies fold the wait, and an UNORDERED
-// signal, into COPY_LINEAR_WAITSIGNAL; otherwise POLL, body, then ATOMIC or
-// FENCE, which land after everything earlier on the ring.
+// Frame: [wait] body [signal] [second signal]. gfx125+ copies fold the wait, and
+// an UNORDERED signal, into COPY_LINEAR_WAITSIGNAL; otherwise POLL, body, then
+// ATOMIC or FENCE, which land after everything earlier on the ring. The second
+// signal is always standalone.
 static inline abce_status_t abce_device_plan_frame(const abce_builder_t* builder,
                                                    const abce_device_request_t* request,
                                                    abce_device_frame_t* out_frame) {
@@ -343,7 +348,12 @@ static inline abce_status_t abce_device_plan_frame(const abce_builder_t* builder
                                                   : sizeof(SDMA_PKT_WRITE_UNTILED) + request->size;
   out_frame->completion_bytes =
       completion && !fused_signal ? abce_device_completion_packet_bytes(builder, completion) : 0;
-  out_frame->bytes = out_frame->wait_bytes + out_frame->body_bytes + out_frame->completion_bytes;
+  out_frame->second_completion_bytes =
+      request->second_completion
+          ? abce_device_completion_packet_bytes(builder, request->second_completion)
+          : 0;
+  out_frame->bytes = out_frame->wait_bytes + out_frame->body_bytes + out_frame->completion_bytes +
+                     out_frame->second_completion_bytes;
   return ABCE_STATUS_OK;
 }
 
@@ -397,7 +407,12 @@ static inline void abce_device_write_frame(const abce_builder_t* builder,
     }
   }
   cursor += frame->body_bytes;
-  if (frame->completion_bytes) abce_device_store_completion(builder, cursor, completion);
+  if (frame->completion_bytes) {
+    abce_device_store_completion(builder, cursor, completion);
+    cursor += frame->completion_bytes;
+  }
+  if (frame->second_completion_bytes)
+    abce_device_store_completion(builder, cursor, request->second_completion);
 }
 
 // Reserves |bytes|, folding in any wrap tail as NOPs, and returns where the
@@ -465,8 +480,11 @@ static inline abce_status_t abce_device_validate_request(const abce_device_submi
        (dependency->compare != ABCE_DEVICE_WAIT_GEQ && dependency->compare != ABCE_DEVICE_WAIT_LEQ) ||
        (!abce_builder_is_gfx125plus(&view->builder) && dependency->value > UINT32_MAX)))
     return ABCE_STATUS_INVALID_ARGUMENT;
-  const abce_device_signal_t* completion = request->completion;
-  if (completion) {
+  if (request->second_completion && !request->completion) return ABCE_STATUS_INVALID_ARGUMENT;
+  const abce_device_signal_t* completions[2] = {request->completion, request->second_completion};
+  for (uint32_t completion_idx = 0; completion_idx < 2; ++completion_idx) {
+    const abce_device_signal_t* completion = completions[completion_idx];
+    if (!completion) continue;
     if (!abce_device_word_well_formed(completion->address) ||
         (completion->op != ABCE_DEVICE_SIGNAL_SET && !abce_device_signal_op_is_atomic(completion->op)) ||
         (completion->flags & ~ABCE_DEVICE_SIGNAL_UNORDERED) != 0)
@@ -606,6 +624,7 @@ static inline abce_device_request_t abce_device_request(abce_device_submit_kind_
   request.value = 0;
   request.dependency = dependency;
   request.completion = completion;
+  request.second_completion = NULL;
   request.flags = flags;
   return request;
 }
@@ -688,6 +707,33 @@ static inline abce_status_t abce_device_submit_linear_one_lane(
     const abce_device_wait_t* dependency, const abce_device_signal_t* completion, uint32_t flags) {
   const abce_device_request_t request =
       abce_device_linear_request(dst, src, size, dependency, completion, flags);
+  return abce_device_submit(handle, &request, true);
+}
+
+// abce_device_submit_linear() with a second completion, applied right after
+// |completion| (required) under the same reservation and publish: one submit
+// where a copy then a standalone signal would be two. For a copy that is
+// announced to its destination and to its source side at once, say. Both land
+// once the copy's writes have, the second after the first.
+static inline abce_status_t abce_device_submit_linear_two_completions(
+    const abce_device_handle_t* handle, void* dst, const void* src, uint64_t size,
+    const abce_device_wait_t* dependency, const abce_device_signal_t* completion,
+    const abce_device_signal_t* second_completion, uint32_t flags) {
+  abce_device_request_t request =
+      abce_device_linear_request(dst, src, size, dependency, completion, flags);
+  request.second_completion = second_completion;
+  return abce_device_submit(handle, &request, false);
+}
+
+// abce_device_submit_linear_two_completions() for exactly one calling lane per
+// wave.
+static inline abce_status_t abce_device_submit_linear_two_completions_one_lane(
+    const abce_device_handle_t* handle, void* dst, const void* src, uint64_t size,
+    const abce_device_wait_t* dependency, const abce_device_signal_t* completion,
+    const abce_device_signal_t* second_completion, uint32_t flags) {
+  abce_device_request_t request =
+      abce_device_linear_request(dst, src, size, dependency, completion, flags);
+  request.second_completion = second_completion;
   return abce_device_submit(handle, &request, true);
 }
 
