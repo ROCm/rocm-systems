@@ -3,7 +3,6 @@
  *
  * SPDX-License-Identifier: MIT
  */
-
 #include "execution_control_common.hh"
 
 #include <hip_test_common.hh>
@@ -30,6 +29,29 @@ HIP_TEST_CASE(Unit_hipLaunchKernel_Positive_Basic) {
     REQUIRE(result == 42);
   }
 }
+
+// Verifies a kernel launch returns before the kernel has run.
+//
+// AMD only because StreamGate uses HIP exclusive APIs
+#if HT_AMD
+HIP_TEST_CASE(Unit_hipLaunchKernel_Positive_Synchronization_Behavior) {
+  HipTest::StreamGate gate{nullptr};
+  hipStream_t kernel_stream{nullptr};
+
+  HIP_CHECK(gate.gate());
+  REQUIRE(gate.is_blocked());
+
+  HIP_CHECK(hipLaunchKernel(reinterpret_cast<void*>(kernel), dim3{1, 1, 1}, dim3{1, 1, 1}, nullptr,
+                            0, kernel_stream));
+  const hipError_t query_while_gated = hipStreamQuery(kernel_stream);
+
+  gate.release();
+  HIP_CHECK(hipDeviceSynchronize());
+
+  REQUIRE(query_while_gated == hipErrorNotReady);
+  REQUIRE(hipStreamQuery(kernel_stream) == hipSuccess);
+}
+#endif  // HT_AMD
 
 HIP_TEST_CASE(Unit_hipLaunchKernel_Positive_Parameters) {
   SECTION("blockDim.x == maxBlockDimX") {
