@@ -22,14 +22,20 @@ THE SOFTWARE.
 
 #include "rdc_lib/impl/SmiUtils.h"
 
+#include <algorithm>
+#include <chrono>  // NOLINT(build/c++11)
 #include <cstdint>
 #include <cstring>
 #include <limits>
-#include <mutex>
+#include <memory>
+#include <mutex>  // NOLINT(build/c++11)
+#include <set>
+#include <utility>
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
 #include "rdc/rdc.h"
+#include "rdc_lib/RdcException.h"
 #include "rdc_lib/RdcLogger.h"
 
 namespace amd {
@@ -80,8 +86,260 @@ rdc_status_t Smi2RdcError(amdsmi_status_t rsmi) {
   }
 }
 
+namespace {
+
+// The flat GPU table and its state, guarded by s_table_mutex.
+std::mutex s_table_mutex;
+std::shared_ptr<const GpuHandleTable> s_table;  // null until first use
+std::vector<bool> s_retry_slot;  // per slot: a placeholder the next listing may still fill
+bool s_table_listed = false;     // the table came from a listing that read every list
+bool s_table_complete = false;   // listed, and no slot left to retry
+std::chrono::steady_clock::time_point s_table_listed_at;
+std::chrono::milliseconds s_retry_period(5000);
+
+// RDC's AMD SMI references (SmiSession objects), guarded by s_session_mutex.
+std::mutex s_session_mutex;
+uint32_t s_session_count = 0;
+
+enum class ProcessorKind { kGpu, kOther, kUnknown };
+
+struct ListedProcessor {
+  amdsmi_processor_handle handle;
+  uint32_t socket_index;
+  uint32_t proc_index;
+  ProcessorKind kind;  // kUnknown: AMD SMI could not report the type
+};
+
+// Lists every processor of every socket, in (socket, processor) order, with its kind. Returns
+// false when a socket or processor list cannot be read, since the slot count is then unknown.
+bool list_processors(std::vector<ListedProcessor>* out) {
+  uint32_t socket_count = 0;
+  if (amdsmi_get_socket_handles(&socket_count, nullptr) != AMDSMI_STATUS_SUCCESS) {
+    return false;
+  }
+  std::vector<amdsmi_socket_handle> sockets(socket_count);
+  if (amdsmi_get_socket_handles(&socket_count, sockets.data()) != AMDSMI_STATUS_SUCCESS) {
+    return false;
+  }
+  std::vector<ListedProcessor> listed;
+  for (uint32_t s = 0; s < socket_count && s < sockets.size(); s++) {
+    uint32_t proc_count = 0;
+    if (amdsmi_get_processor_handles(sockets[s], &proc_count, nullptr) != AMDSMI_STATUS_SUCCESS) {
+      return false;
+    }
+    std::vector<amdsmi_processor_handle> procs(proc_count);
+    if (amdsmi_get_processor_handles(sockets[s], &proc_count, procs.data()) !=
+        AMDSMI_STATUS_SUCCESS) {
+      return false;
+    }
+    for (uint32_t p = 0; p < proc_count && p < procs.size(); p++) {
+      processor_type_t proc_type = AMDSMI_PROCESSOR_TYPE_UNKNOWN;
+      ProcessorKind kind = ProcessorKind::kUnknown;
+      if (amdsmi_get_processor_type(procs[p], &proc_type) == AMDSMI_STATUS_SUCCESS) {
+        kind = proc_type == AMDSMI_PROCESSOR_TYPE_AMD_GPU ? ProcessorKind::kGpu
+                                                          : ProcessorKind::kOther;
+      }
+      listed.push_back({procs[p], s, p, kind});
+    }
+  }
+  *out = std::move(listed);
+  return true;
+}
+
+// The GPU slots of a listing: a slot for each GPU, and a placeholder for each processor of unknown
+// type that can only be a GPU: one on a socket with a GPU, or on any socket when nothing listed is
+// of another kind (AMD SMI was initialized for GPUs only). An unknown processor on a socket with a
+// CPU, or on an unidentified socket next to CPUs, gets no slot. At most RDC_MAX_NUM_DEVICES slots.
+GpuHandleTable gpu_slots(const std::vector<ListedProcessor>& listed) {
+  std::set<uint32_t> gpu_sockets;
+  std::set<uint32_t> other_sockets;
+  for (const auto& proc : listed) {
+    if (proc.kind == ProcessorKind::kGpu) {
+      gpu_sockets.insert(proc.socket_index);
+    } else if (proc.kind == ProcessorKind::kOther) {
+      other_sockets.insert(proc.socket_index);
+    }
+  }
+  GpuHandleTable table;
+  for (const auto& proc : listed) {
+    if (proc.kind == ProcessorKind::kOther) {
+      continue;
+    }
+    if (proc.kind == ProcessorKind::kUnknown && gpu_sockets.count(proc.socket_index) == 0 &&
+        !other_sockets.empty()) {
+      RDC_LOG(RDC_ERROR, "AMD SMI cannot identify processor " << proc.proc_index << " of socket "
+                                                              << proc.socket_index
+                                                              << "; RDC leaves it out");
+      continue;
+    }
+    if (table.size() == RDC_MAX_NUM_DEVICES) {
+      RDC_LOG(RDC_ERROR, "AMD SMI lists more than " << RDC_MAX_NUM_DEVICES
+                                                    << " GPUs; RDC uses the first of them");
+      break;
+    }
+    table.push_back(
+        {proc.handle, proc.socket_index, proc.proc_index, proc.kind == ProcessorKind::kGpu});
+  }
+  return table;
+}
+
+// Caller holds s_table_mutex. Publishes the GPU slots of a complete listing as a new table.
+void publish_listing_locked(const std::vector<ListedProcessor>& listed) {
+  GpuHandleTable table = gpu_slots(listed);
+  if (table.empty()) {
+    RDC_LOG(RDC_ERROR, "build_flat_gpu_table: no AMD GPUs found; GPU table is empty");
+  }
+  s_retry_slot.assign(table.size(), false);
+  for (uint32_t i = 0; i < table.size(); i++) {
+    if (!table[i].available) {
+      RDC_LOG(RDC_ERROR, "AMD SMI cannot identify GPU " << i << "; it is unavailable until it can");
+      s_retry_slot[i] = true;
+    }
+  }
+  s_table_listed = true;
+  s_table_complete =
+      std::none_of(s_retry_slot.begin(), s_retry_slot.end(), [](bool r) { return r; });
+  s_table = std::make_shared<const GpuHandleTable>(std::move(table));
+}
+
+// Caller holds s_table_mutex. Builds the table on first use.
+void build_table_locked() {
+  std::vector<ListedProcessor> listed;
+  s_table_listed_at = std::chrono::steady_clock::now();
+  if (list_processors(&listed)) {
+    publish_listing_locked(listed);
+    return;
+  }
+  RDC_LOG(RDC_ERROR, "AMD SMI could not list its processors; RDC sees no GPU until it can");
+  s_retry_slot.clear();
+  s_table_listed = false;
+  s_table_complete = false;
+  s_table = std::make_shared<const GpuHandleTable>();
+}
+
+// Caller holds s_table_mutex. Lists the processors again. A placeholder whose processor is now a
+// GPU takes its handle; one whose processor is of another kind stays unavailable and is no longer
+// retried; a GPU that is no longer listed becomes unavailable. Slots keep their places and the
+// table keeps its size.
+void retry_table_locked() {
+  std::vector<ListedProcessor> listed;
+  s_table_listed_at = std::chrono::steady_clock::now();
+  if (!list_processors(&listed)) {
+    return;  // keep the table; retry after the next period
+  }
+  if (!s_table_listed) {
+    publish_listing_locked(listed);  // the first complete listing
+    return;
+  }
+  auto table = std::make_shared<GpuHandleTable>(*s_table);
+  for (uint32_t i = 0; i < table->size(); i++) {
+    GpuHandleEntry& slot = (*table)[i];
+    auto found = std::find_if(listed.begin(), listed.end(), [&slot](const ListedProcessor& proc) {
+      return proc.socket_index == slot.socket_index && proc.proc_index == slot.proc_index;
+    });
+    if (found == listed.end()) {
+      if (slot.available) {
+        RDC_LOG(RDC_ERROR, "AMD SMI no longer lists GPU " << i << "; it is unavailable");
+        slot.available = false;
+      }
+      s_retry_slot[i] = true;
+    } else if (!slot.available && found->kind == ProcessorKind::kGpu) {
+      bool taken = std::any_of(table->begin(), table->end(), [&found](const GpuHandleEntry& e) {
+        return e.available && e.handle == found->handle;
+      });
+      if (taken) {
+        continue;  // the listing moved: never give one GPU's handle to two indexes
+      }
+      slot.handle = found->handle;
+      slot.available = true;
+      s_retry_slot[i] = false;
+      RDC_LOG(RDC_INFO, "AMD SMI now identifies GPU " << i);
+    } else if (!slot.available && found->kind == ProcessorKind::kOther) {
+      if (s_retry_slot[i]) {
+        RDC_LOG(RDC_ERROR, "GPU " << i << " is a processor of another kind; it stays unavailable");
+      }
+      s_retry_slot[i] = false;
+    }
+  }
+  s_table_complete =
+      std::none_of(s_retry_slot.begin(), s_retry_slot.end(), [](bool r) { return r; });
+  s_table = std::move(table);
+}
+
+// Caller holds s_table_mutex. The table, built on first use and retried when it is due. A retry
+// lists AMD SMI's processors under the mutex; those calls only read AMD SMI's own lists.
+const GpuHandleTable& current_table_locked() {
+  if (!s_table) {
+    build_table_locked();
+  } else if (!s_table_complete &&
+             std::chrono::steady_clock::now() - s_table_listed_at >= s_retry_period) {
+    retry_table_locked();
+  }
+  return *s_table;
+}
+
+}  // namespace
+
+std::shared_ptr<const GpuHandleTable> get_flat_gpu_table() {
+  std::lock_guard<std::mutex> lock(s_table_mutex);
+  current_table_locked();
+  return s_table;
+}
+
+void reset_flat_gpu_table() {
+  std::lock_guard<std::mutex> lock(s_table_mutex);
+  s_table.reset();
+  s_retry_slot.clear();
+  s_table_listed = false;
+  s_table_complete = false;
+}
+
+void set_flat_gpu_table_retry_period(std::chrono::milliseconds period) {
+  std::lock_guard<std::mutex> lock(s_table_mutex);
+  s_retry_period = period;
+}
+
+SmiSession::SmiSession() {
+  std::lock_guard<std::mutex> lock(s_session_mutex);
+  if (s_session_count == 0) {
+    uint64_t init_flag = AMDSMI_INIT_AMD_GPUS;
+#ifdef ENABLE_ESMI_LIB
+    init_flag |= AMDSMI_INIT_AMD_CPUS;
+#endif
+    amdsmi_status_t ret = amdsmi_init(init_flag);
+#ifdef ENABLE_ESMI_LIB
+    if (ret != AMDSMI_STATUS_SUCCESS) {
+      RDC_LOG(RDC_INFO, "Failed to initialize amdsmi with CPUs enabled.. Disabling CPUs.");
+      init_flag &= ~AMDSMI_INIT_AMD_CPUS;
+      ret = amdsmi_init(init_flag);
+    }
+#endif
+    if (ret != AMDSMI_STATUS_SUCCESS) {
+      RDC_LOG(RDC_ERROR, "amdsmi_init failed: " << ret);
+      throw RdcException(RDC_ST_FAIL_LOAD_MODULE, "AMD SMI failed to initialize");
+    }
+    // Handles from an earlier session are no longer valid: list the GPUs again.
+    try {
+      reset_flat_gpu_table();
+      get_flat_gpu_table();
+    } catch (...) {
+      amdsmi_shut_down();  // no session holds the reference amdsmi_init() took
+      throw;
+    }
+  }
+  s_session_count++;
+}
+
+SmiSession::~SmiSession() {
+  std::lock_guard<std::mutex> lock(s_session_mutex);
+  if (--s_session_count == 0) {
+    reset_flat_gpu_table();
+    amdsmi_shut_down();
+  }
+}
+
 // Dual index semantics for gpu_id:
-//   Physical/instance-0: device_index is a flat index into s_flat_gpu_table.
+//   Physical/instance-0: device_index is a flat index into the flat GPU table.
 //   Partition-instance:  device_index is a socket index, instance_index the per-socket proc.
 // These coincide in SPX but diverge in CPX (multiple procs per socket), so don't pass a
 // flat index where a socket index is expected.
@@ -91,13 +349,17 @@ amdsmi_status_t get_processor_handle_from_id(uint32_t gpu_id,
     return AMDSMI_STATUS_INVAL;
   }
 
-  const auto& table = get_flat_gpu_table();
   rdc_entity_info_t info = rdc_get_info_from_entity_index(gpu_id);
 
   if (info.instance_index == 0 && info.entity_role == RDC_DEVICE_ROLE_PHYSICAL) {
+    std::lock_guard<std::mutex> lock(s_table_mutex);
+    const GpuHandleTable& table = current_table_locked();
     uint32_t flat_idx = info.device_index;
     if (flat_idx >= table.size()) {
       return AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS;
+    }
+    if (!table[flat_idx].available) {
+      return AMDSMI_STATUS_NOT_FOUND;  // logged when the slot became a placeholder
     }
     *processor_handle = table[flat_idx].handle;
     return AMDSMI_STATUS_SUCCESS;
@@ -149,25 +411,12 @@ amdsmi_status_t get_gpu_id_from_processor_handle(amdsmi_processor_handle process
     return AMDSMI_STATUS_INVAL;
   }
 
-  std::vector<amdsmi_socket_handle> sockets;
-  auto ret = get_socket_handles(sockets);
-  if (ret != AMDSMI_STATUS_SUCCESS) {
-    return ret;
-  }
-
-  uint32_t idx = 0;
-  for (auto const& sock : sockets) {
-    std::vector<amdsmi_processor_handle> procs;
-    ret = get_processor_handles(sock, procs);
-    if (ret != AMDSMI_STATUS_SUCCESS) {
-      return ret;
-    }
-    for (auto const& h : procs) {
-      if (h == processor_handle) {
-        *gpu_index = idx;
-        return AMDSMI_STATUS_SUCCESS;
-      }
-      ++idx;
+  // The GPU's slot in the table, so that the index matches the one lookups use.
+  std::shared_ptr<const GpuHandleTable> table = get_flat_gpu_table();
+  for (uint32_t i = 0; i < table->size(); i++) {
+    if ((*table)[i].available && (*table)[i].handle == processor_handle) {
+      *gpu_index = i;
+      return AMDSMI_STATUS_SUCCESS;
     }
   }
 
@@ -242,17 +491,17 @@ amdsmi_status_t get_num_partition(uint32_t index, uint16_t* num_partition) {
   // Decode the entity index so both bare flat indices and partition-instance entity
   // indices resolve to the right socket (they diverge in CPX). See the dual-index note
   // on get_processor_handle_from_id().
-  const auto& table = get_flat_gpu_table();
+  std::shared_ptr<const GpuHandleTable> table = get_flat_gpu_table();
   rdc_entity_info_t info = rdc_get_info_from_entity_index(index);
 
   uint32_t target_socket = 0;
   if (info.entity_role == RDC_DEVICE_ROLE_PHYSICAL && info.instance_index == 0) {
     // Physical/instance-0: device_index is a flat index into the GPU table.
     uint32_t flat_idx = info.device_index;
-    if (flat_idx >= table.size()) {
+    if (flat_idx >= table->size()) {
       return AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS;
     }
-    target_socket = table[flat_idx].socket_index;
+    target_socket = (*table)[flat_idx].socket_index;
   } else {
     // Partition-instance: device_index is the socket index.
     target_socket = info.device_index;
@@ -260,8 +509,8 @@ amdsmi_status_t get_num_partition(uint32_t index, uint16_t* num_partition) {
 
   // Find the first processor in the same socket to query the physical GPU profile.
   amdsmi_processor_handle phys_handle = nullptr;
-  for (const auto& entry : table) {
-    if (entry.socket_index == target_socket) {
+  for (const auto& entry : *table) {
+    if (entry.available && entry.socket_index == target_socket) {
       phys_handle = entry.handle;
       break;
     }
@@ -297,8 +546,8 @@ amdsmi_status_t get_num_partition(uint32_t index, uint16_t* num_partition) {
   // consistent with the rest of RDC's GPU view.
   if (profile.num_partitions == 0 || profile.num_partitions > RDC_MAX_NUM_PARTITIONS) {
     uint16_t socket_entries = 0;
-    for (const auto& entry : table) {
-      if (entry.socket_index == target_socket) {
+    for (const auto& entry : *table) {
+      if (entry.socket_index == target_socket) {  // placeholders keep partition indexes too
         socket_entries++;
       }
     }
@@ -309,73 +558,6 @@ amdsmi_status_t get_num_partition(uint32_t index, uint16_t* num_partition) {
   *num_partition = profile.num_partitions;
 
   return ret;
-}
-
-// Flat (0-based) index -> AMD GPU handle, built lazily and cached for the process lifetime.
-// Goes stale if the partition mode changes at runtime; a daemon restart is the supported fix.
-static std::mutex s_flat_gpu_table_mutex;
-static std::vector<GpuHandleEntry> s_flat_gpu_table;
-static bool s_flat_gpu_table_initialized = false;
-
-// Caller must hold s_flat_gpu_table_mutex.
-static void build_flat_gpu_table_locked() {
-  s_flat_gpu_table.clear();
-
-  uint32_t socket_count = 0;
-  if (amdsmi_get_socket_handles(&socket_count, nullptr) != AMDSMI_STATUS_SUCCESS) {
-    return;
-  }
-  std::vector<amdsmi_socket_handle> sockets(socket_count);
-  if (amdsmi_get_socket_handles(&socket_count, sockets.data()) != AMDSMI_STATUS_SUCCESS) {
-    return;
-  }
-
-  for (uint32_t s = 0; s < socket_count; s++) {
-    uint32_t proc_count = 0;
-    if (amdsmi_get_processor_handles(sockets[s], &proc_count, nullptr) != AMDSMI_STATUS_SUCCESS) {
-      continue;
-    }
-    std::vector<amdsmi_processor_handle> procs(proc_count);
-    if (amdsmi_get_processor_handles(sockets[s], &proc_count, procs.data()) !=
-        AMDSMI_STATUS_SUCCESS) {
-      continue;
-    }
-    for (uint32_t p = 0; p < proc_count; p++) {
-      processor_type_t proc_type = AMDSMI_PROCESSOR_TYPE_UNKNOWN;
-      if (amdsmi_get_processor_type(procs[p], &proc_type) != AMDSMI_STATUS_SUCCESS) {
-        continue;
-      }
-      if (proc_type == AMDSMI_PROCESSOR_TYPE_AMD_GPU) {
-        GpuHandleEntry entry;
-        entry.handle = procs[p];
-        entry.socket_index = s;
-        entry.proc_index = p;
-        s_flat_gpu_table.push_back(entry);
-      }
-    }
-  }
-
-  // A query failure above leaves the table empty or short; warn once so a
-  // misbehaving driver/topology is diagnosable rather than silently swallowed.
-  if (s_flat_gpu_table.empty()) {
-    RDC_LOG(RDC_ERROR, "build_flat_gpu_table: no AMD GPUs found; GPU table is empty");
-  }
-  s_flat_gpu_table_initialized = true;
-}
-
-const std::vector<GpuHandleEntry>& get_flat_gpu_table() {
-  std::lock_guard<std::mutex> lock(s_flat_gpu_table_mutex);
-  if (!s_flat_gpu_table_initialized) {
-    build_flat_gpu_table_locked();
-  }
-  return s_flat_gpu_table;
-}
-
-// Invalidates the cache; previously returned references are dangling afterward.
-void reset_flat_gpu_table() {
-  std::lock_guard<std::mutex> lock(s_flat_gpu_table_mutex);
-  s_flat_gpu_table.clear();
-  s_flat_gpu_table_initialized = false;
 }
 
 uint64_t count_pending_bad_pages(const amdsmi_retired_page_record_t* records, uint32_t count) {

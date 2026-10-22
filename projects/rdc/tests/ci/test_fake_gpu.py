@@ -67,8 +67,8 @@ UNREACHED_APIS = {
     "amdsmi_stop_gpu_event_notification": "rdci offers no notification event field",
 }
 
-# A failing amdsmi_init() makes rdcd hang, then crash on SIGTERM; the rdcd
-# start/stop fix adds that case. amdsmi_shut_down() has no failure to inject.
+# test_fake_gpu_session.py fails amdsmi_init(); amdsmi_shut_down() has no failure
+# to inject.
 LIFECYCLE_APIS = {"amdsmi_init", "amdsmi_shut_down"}
 
 

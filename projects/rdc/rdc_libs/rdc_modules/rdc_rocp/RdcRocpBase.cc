@@ -173,9 +173,13 @@ rdc_status_t RdcRocpBase::map_entity_to_profiler() {
     prof_kfd_map.insert({prof_gpu_index, agents[prof_gpu_index].gpu_id});
   }
 
-  const auto& flat_table = get_flat_gpu_table();
+  std::shared_ptr<const GpuHandleTable> table = get_flat_gpu_table();
+  const GpuHandleTable& flat_table = *table;
 
   for (uint32_t flat_idx = 0; flat_idx < flat_table.size(); flat_idx++) {
+    if (!flat_table[flat_idx].available) {
+      continue;  // a GPU AMD SMI cannot identify has no profiler agent
+    }
     auto* processor = flat_table[flat_idx].handle;
 
     amdsmi_kfd_info_t kfd_info;

@@ -42,45 +42,18 @@ THE SOFTWARE.
 #include "rdc_lib/impl/RdcWatchTableImpl.h"
 #include "rdc_lib/rdc_common.h"
 
-namespace {
-// call the smi_init when load library
-// and smi_shutdown when unload the library.
-class smi_initializer {
-  smi_initializer() {
-    // Make sure smi will not be initialized multiple times
-    amdsmi_shut_down();
-    amdsmi_status_t ret = AMDSMI_STATUS_UNKNOWN_ERROR;
-    uint64_t init_flag = AMDSMI_INIT_AMD_GPUS;
-#ifdef ENABLE_ESMI_LIB
-    init_flag |= AMDSMI_INIT_AMD_CPUS;
-#endif
-    ret = amdsmi_init(init_flag);
-#ifdef ENABLE_ESMI_LIB
-    if (ret != AMDSMI_STATUS_SUCCESS) {
-      RDC_LOG(RDC_INFO, "Failed to initialize amdsmi with CPUs enabled.. Disabling CPUs.");
-      init_flag &= ~AMDSMI_INIT_AMD_CPUS;
-      ret = amdsmi_init(init_flag);
-    }
-#endif
-    if (ret != AMDSMI_STATUS_SUCCESS) {
-      RDC_LOG(RDC_ERROR, "SMI FAILED with" << ret);
-      throw amd::rdc::RdcException(RDC_ST_FAIL_LOAD_MODULE, "SMI initialize fail");
-    }
-  }
-  ~smi_initializer() { amdsmi_shut_down(); }
-
- public:
-  static smi_initializer& getInstance() {
-    static smi_initializer instance;
-    return instance;
-  }
-};
-
-static smi_initializer& in = smi_initializer::getInstance();
-}  // namespace
-
+// Called through dlsym by rdc_start_embedded(): no exception may leave it.
 amd::rdc::RdcHandler* make_handler(rdc_operation_mode_t op_mode) {
-  return new amd::rdc::RdcEmbeddedHandler(op_mode);
+  try {
+    return new amd::rdc::RdcEmbeddedHandler(op_mode);
+  } catch (const amd::rdc::RdcException& e) {
+    RDC_LOG(RDC_ERROR, "Cannot start embedded RDC: " << e.what());
+  } catch (const std::exception& e) {
+    RDC_LOG(RDC_ERROR, "Cannot start embedded RDC: " << e.what());
+  } catch (...) {
+    RDC_LOG(RDC_ERROR, "Cannot start embedded RDC: unknown exception");
+  }
+  return nullptr;
 }
 
 namespace amd {
@@ -90,7 +63,8 @@ namespace rdc {
 const uint32_t METIC_UPDATE_FREQUENCY = 1000;  // 1000 microseconds by default
 
 RdcEmbeddedHandler::RdcEmbeddedHandler(rdc_operation_mode_t mode)
-    : partition_(new RdcPartitionImpl()),
+    : smi_session_(),
+      partition_(new RdcPartitionImpl()),
       group_settings_(new RdcGroupSettingsImpl(partition_)),
       cache_mgr_(new RdcCacheManagerImpl()),
       metric_fetcher_(new RdcMetricFetcherImpl()),
@@ -136,6 +110,9 @@ rdc_status_t RdcEmbeddedHandler::get_gpu_gauges(rdc_gpu_gauges_t* gpu_gauges) {
   for (uint32_t i = 0; i < count; i++) {
     rdc_field_value value;
     status = metric_fetcher_->fetch_smi_field(gpu_index_list[i], RDC_FI_GPU_MEMORY_TOTAL, &value);
+    if (status == RDC_ST_NOT_FOUND) {
+      continue;  // a GPU AMD SMI cannot identify has no gauges
+    }
     if (status != RDC_ST_OK) {
       RDC_LOG(RDC_ERROR, "Fail to get total memory of GPU " << gpu_index_list[i]);
       return status;

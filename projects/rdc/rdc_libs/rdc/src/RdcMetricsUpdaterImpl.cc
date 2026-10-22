@@ -36,12 +36,21 @@ RdcMetricsUpdaterImpl::RdcMetricsUpdaterImpl(const RdcWatchTablePtr& watch_table
                                              const uint32_t check_frequency)
     : watch_table_(watch_table), started_(false), _check_frequency(check_frequency) {}
 
-// Make the listen time for notifications a relatively long time.
-// There's no point in starting/stopping it constantly.
-static const uint32_t kRdcFieldListenNotifTime_mS = 10000;
+// The longest one notification listen blocks, and so the longest stop() waits for the
+// notification thread. Events that arrive between listens wait in AMD SMI's queue.
+static const uint32_t kRdcFieldListenNotifTime_mS = 1000;
 static const uint32_t kRdcEventCheck_ms = 1000;
 
+RdcMetricsUpdaterImpl::~RdcMetricsUpdaterImpl() { stop(); }
+
+template <typename Duration>
+void RdcMetricsUpdaterImpl::pause(Duration period) {
+  std::unique_lock<std::mutex> lock(mutex_);
+  cv_.wait_for(lock, period, [this] { return !started_; });
+}
+
 void RdcMetricsUpdaterImpl::start() {
+  std::lock_guard<std::mutex> lock(mutex_);
   if (started_) {
     return;
   }
@@ -49,18 +58,32 @@ void RdcMetricsUpdaterImpl::start() {
   notif_updater_ = std::async(std::launch::async, [this]() {
     while (started_) {
       watch_table_->rdc_field_listen_notif(kRdcFieldListenNotifTime_mS);
-      std::this_thread::sleep_for(std::chrono::milliseconds(kRdcEventCheck_ms));
+      pause(std::chrono::milliseconds(kRdcEventCheck_ms));
     }
   });
   updater_ = std::async(std::launch::async, [this]() {
     while (started_) {
       watch_table_->rdc_field_update_all();
-      std::this_thread::sleep_for(std::chrono::microseconds(_check_frequency));
+      pause(std::chrono::microseconds(_check_frequency));
     }
   });
 }
 
-void RdcMetricsUpdaterImpl::stop() { started_ = false; }
+void RdcMetricsUpdaterImpl::stop() {
+  {
+    // Under the mutex, so a thread between its check and its wait cannot miss the wake-up.
+    std::lock_guard<std::mutex> lock(mutex_);
+    started_ = false;
+  }
+  cv_.notify_all();
+  // A notification listen in progress ends after its timeout (kRdcFieldListenNotifTime_mS).
+  if (updater_.valid()) {
+    updater_.wait();
+  }
+  if (notif_updater_.valid()) {
+    notif_updater_.wait();
+  }
+}
 
 }  // namespace rdc
 }  // namespace amd

@@ -49,16 +49,16 @@ using amd::rdc::get_flat_gpu_table;
 using amd::rdc::get_num_partition;
 using amd::rdc::get_processor_handle_from_id;
 using amd::rdc::GpuHandleEntry;
+using amd::rdc::GpuHandleTable;
 using amd::rdc::reset_flat_gpu_table;
 
 namespace {
 
-// One-time amdsmi init/shutdown for the whole binary. Mirrors RdcEmbeddedHandler's
-// smi_initializer (defensive shut_down first, then init with GPUs).
+// One-time amdsmi init/shutdown for the whole binary: loading librdc does not initialize
+// AMD SMI (an RDC handler takes its own reference), so the test does.
 class SmiEnvironment : public ::testing::Environment {
  public:
   void SetUp() override {
-    amdsmi_shut_down();
     amdsmi_status_t ret = amdsmi_init(AMDSMI_INIT_AMD_GPUS);
     initialized_ = (ret == AMDSMI_STATUS_SUCCESS);
     if (!initialized_) {
@@ -92,7 +92,7 @@ class SmiUtilsHwTest : public ::testing::Test {
     if (!SmiEnvironment::initialized_) {
       GTEST_SKIP() << "amdsmi not initialized";
     }
-    if (get_flat_gpu_table().empty()) {
+    if (get_flat_gpu_table()->empty()) {
       GTEST_SKIP() << "no AMD GPUs present";
     }
   }
@@ -101,11 +101,13 @@ class SmiUtilsHwTest : public ::testing::Test {
 // The flat table must contain every enumerated AMD GPU processor once, with
 // unique handles and consistent socket/proc bookkeeping.
 TEST_F(SmiUtilsHwTest, FlatTableEnumeratesUniqueGpus) {
-  const auto& table = get_flat_gpu_table();
+  const auto snapshot = get_flat_gpu_table();
+  const GpuHandleTable& table = *snapshot;
   ASSERT_FALSE(table.empty());
 
   std::set<amdsmi_processor_handle> handles;
   for (const auto& e : table) {
+    EXPECT_TRUE(e.available) << "AMD SMI could not identify a processor";
     EXPECT_NE(e.handle, nullptr);
     EXPECT_TRUE(handles.insert(e.handle).second) << "duplicate handle in flat table";
 
@@ -119,7 +121,8 @@ TEST_F(SmiUtilsHwTest, FlatTableEnumeratesUniqueGpus) {
 
 // A flat index in range must resolve; out of range must be rejected cleanly.
 TEST_F(SmiUtilsHwTest, ProcessorHandleFromFlatIndex) {
-  const auto& table = get_flat_gpu_table();
+  const auto snapshot = get_flat_gpu_table();
+  const GpuHandleTable& table = *snapshot;
 
   for (uint32_t i = 0; i < table.size(); i++) {
     amdsmi_processor_handle h = nullptr;
@@ -137,7 +140,8 @@ TEST_F(SmiUtilsHwTest, ProcessorHandleFromFlatIndex) {
 // table records for that socket/proc. This is the invariant CPX relies on: both
 // index encodings name the same physical processor.
 TEST_F(SmiUtilsHwTest, EntityEncodedPathMatchesFlatTable) {
-  const auto& table = get_flat_gpu_table();
+  const auto snapshot = get_flat_gpu_table();
+  const GpuHandleTable& table = *snapshot;
 
   for (const auto& e : table) {
     uint32_t entity = PartitionEntityIndex(e.socket_index, e.proc_index);
@@ -158,7 +162,8 @@ TEST_F(SmiUtilsHwTest, EntityEncodedOutOfRangeSocketRejected) {
 // get_num_partition() must succeed and report >= 1 for every flat index, and it
 // must reject an out-of-range index and a null out-pointer.
 TEST_F(SmiUtilsHwTest, NumPartitionSaneForEveryGpu) {
-  const auto& table = get_flat_gpu_table();
+  const auto snapshot = get_flat_gpu_table();
+  const GpuHandleTable& table = *snapshot;
 
   for (uint32_t i = 0; i < table.size(); i++) {
     uint16_t n = 0;
@@ -178,7 +183,8 @@ TEST_F(SmiUtilsHwTest, NumPartitionSaneForEveryGpu) {
 // so get_num_partition() must return an identical count for all of them. This is
 // the core CPX guarantee: querying any partition resolves the physical profile.
 TEST_F(SmiUtilsHwTest, NumPartitionConsistentWithinSocket) {
-  const auto& table = get_flat_gpu_table();
+  const auto snapshot = get_flat_gpu_table();
+  const GpuHandleTable& table = *snapshot;
 
   // socket_index -> (count of table entries, first partition count seen)
   std::vector<int> per_socket_entries(RDC_ENTITY_DEVICE_MASK + 1, 0);
@@ -216,15 +222,17 @@ TEST_F(SmiUtilsHwTest, NumPartitionConsistentWithinSocket) {
 
 // reset_flat_gpu_table() must invalidate and rebuild an equivalent table.
 TEST_F(SmiUtilsHwTest, ResetRebuildsEquivalentTable) {
-  std::vector<GpuHandleEntry> before = get_flat_gpu_table();
+  const auto before = get_flat_gpu_table();
   reset_flat_gpu_table();
-  const auto& after = get_flat_gpu_table();
+  const auto after = get_flat_gpu_table();
 
-  ASSERT_EQ(before.size(), after.size());
-  for (size_t i = 0; i < before.size(); i++) {
-    EXPECT_EQ(before[i].handle, after[i].handle) << "entry " << i;
-    EXPECT_EQ(before[i].socket_index, after[i].socket_index) << "entry " << i;
-    EXPECT_EQ(before[i].proc_index, after[i].proc_index) << "entry " << i;
+  ASSERT_NE(before, after) << "reset_flat_gpu_table() kept the old table";
+  ASSERT_EQ(before->size(), after->size());
+  for (size_t i = 0; i < before->size(); i++) {
+    EXPECT_EQ((*before)[i].handle, (*after)[i].handle) << "entry " << i;
+    EXPECT_EQ((*before)[i].socket_index, (*after)[i].socket_index) << "entry " << i;
+    EXPECT_EQ((*before)[i].proc_index, (*after)[i].proc_index) << "entry " << i;
+    EXPECT_EQ((*before)[i].available, (*after)[i].available) << "entry " << i;
   }
 }
 

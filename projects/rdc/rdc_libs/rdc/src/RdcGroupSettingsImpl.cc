@@ -90,6 +90,11 @@ rdc_status_t RdcGroupSettingsImpl::rdc_group_gpu_add(rdc_gpu_group_t groupId, ui
   // Pass the full entity index so the partition helper resolves the correct socket for
   // CPX partition instances (entity_info.device_index alone is only the socket index).
   rdc_status_t status = partition_->rdc_get_num_partition_impl(gpu_index, &num_partitions);
+  if (status == RDC_ST_NOT_FOUND && entity_info.entity_role == RDC_DEVICE_ROLE_PHYSICAL) {
+    // A GPU AMD SMI cannot identify keeps its index in groups; its fields read as not found.
+    num_partitions = 1;
+    status = RDC_ST_OK;
+  }
   if (status != RDC_ST_OK) {
     RDC_LOG(RDC_ERROR, "rdc_group_gpu_add: get_num_partition failed for gpu_index="
                            << gpu_index << " device_index=" << entity_info.device_index
