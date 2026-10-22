@@ -28,10 +28,10 @@ from utils.utils_analysis import (
     validate_workload,
 )
 from utils.utils_common import (
-    PC_SAMPLING_BLOCK_IDS,
     canonical_config_arch,
     get_uuid,
     is_only_pc_sampling,
+    is_pc_sampling_collected,
     load_panel_configs,
     validate_roofline_csv,
 )
@@ -81,9 +81,7 @@ class OmniAnalyze_Base:
     def pc_sampling_collected(self) -> bool:
         """True when PC sampling is among the collected blocks."""
         config = getattr(self, "_profiling_config", {})
-        return any(
-            block in PC_SAMPLING_BLOCK_IDS for block in config.get("filter_blocks", [])
-        )
+        return is_pc_sampling_collected(config.get("filter_blocks", []))
 
     def pc_sampling_only(self) -> bool:
         """True when every collected block is PC sampling."""
