@@ -9,6 +9,7 @@
 #include <functional>
 #include <map>
 #include <optional>
+#include <utility>
 
 namespace rocprofsys::trace_cache
 {
@@ -26,23 +27,36 @@ public:
 
     std::optional<variant_t> get_type(TypeIdentifierEnum id, std::uint8_t*& data)
     {
-        auto const it = deserializers.find(id);
-        if(it != deserializers.end())
+        auto const found = m_deserializers.find(id);
+        if(found != m_deserializers.end())
         {
-            return it->second(data);
+            return found->second(data);
         }
         return std::nullopt;
     }
 
 private:
-    std::map<TypeIdentifierEnum, std::function<variant_t(std::uint8_t*&)>> deserializers;
+    /// Converts to T by reading it, so T is constructed directly in its final storage.
+    template <typename T>
+    struct reader
+    {
+        std::uint8_t*& data;
+
+        explicit operator T() const { return deserialize<T>(data); }
+    };
+
+    // The deserializer returns the optional itself and builds the record inside it: a
+    // returned record would be copied into the variant and again into the optional.
+    std::map<TypeIdentifierEnum, std::function<std::optional<variant_t>(std::uint8_t*&)>>
+        m_deserializers;
 
     template <typename T>
         requires type_traits::cacheable<T, TypeIdentifierEnum>
     void register_type()
     {
-        deserializers[T::type_identifier] = [](std::uint8_t*& data) -> variant_t {
-            return deserialize<T>(data);
+        m_deserializers[T::type_identifier] = [](std::uint8_t*& data) {
+            return std::optional<variant_t>{ std::in_place, std::in_place_type<T>,
+                                             reader<T>{ data } };
         };
     }
 };
