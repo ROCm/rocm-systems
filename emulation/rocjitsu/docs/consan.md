@@ -99,14 +99,28 @@ The runtime neither compiles nor diagnoses races. Its transport completion does
 not synchronize guest LDS accesses.
 
 Applications integrating the plugin must check completion values and finish
-status. When the plugin rejects a tracked dispatch before submission, it records
-failure and stores `-1` to its non-null application completion signal. Rejected
-batches also notify tracked AND/OR barrier completions with `-1`, preserving
-signals owned by pending dispatches. Later barriers receive the same failure
-notification once the runtime has failed. Healthy barrier-only batches pass
-through. This failure notification releases a waiter for a value less than `1`, but does not mean that the kernel
-ran. Accept only exactly `0` as normal completion, and check it before reading
-kernel output. A timeout or any other completion value is an execution failure.
+status. The plugin tracks signals successfully created through the hooked
+`hsa_signal_create` or, when provided by the runtime, `hsa_amd_signal_create`
+after plugin installation. Dispatch completions must be fresh, dedicated signals
+initialized to `1`. Signals created before installation, imported from another
+process, or obtained through other APIs or by bypassing the hooks are untracked.
+They cannot be used as dispatch completions and receive no failure notification.
+
+When the plugin rejects a dispatch before submission, it records failure and
+stores `-1` to its tracked application completion signal, unless pending work
+already owns that signal. Rejected batches also notify tracked AND/OR barrier
+completions with `-1`, preserving signals owned by pending dispatches. Once the
+runtime has failed, it discards later AND/OR barriers with the same notification
+rules. Healthy individual barriers and barrier-only batches pass through. Other
+packet types are discarded without completion notification, even if their
+signals are tracked. Clients must use bounded waits: a discarded barrier with an
+untracked signal can retain its initial value, and a dependency requiring `0`
+is not satisfied by the failure value `-1`.
+
+The failure notification releases a waiter for a value less than `1`, but does
+not mean that the kernel ran. Accept only exactly `0` as normal completion, and
+check it before reading kernel output. A timeout or any other completion value
+is an execution failure.
 The [example runner](../tests/patch/consan/consan_hsa_runner.cpp) enforces these checks.
 
 Keep resources alive until their ownership handoffs have drained. The runner

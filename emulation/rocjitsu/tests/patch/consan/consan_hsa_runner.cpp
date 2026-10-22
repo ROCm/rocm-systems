@@ -96,7 +96,7 @@ int run(int argc, char **argv) {
     std::cerr << "Usage: consan_hsa_runner ORIGINAL ENTRY LAUNCHES defined|observe [--baseline] "
                  "[--bad-geometry] [--profiling] [--reuse-signal] [--target GPU] [--wave-size N] "
                  "[--threads N] [--test-statistics] [--batch-barrier-and|--batch-barrier-or] "
-                 "[--separate-barrier]\n";
+                 "[--separate-barrier] [--amd-signals]\n";
     return 3;
   }
   uint32_t launches = 0;
@@ -110,7 +110,7 @@ int run(int argc, char **argv) {
   std::string_view target = "gfx1100";
   uint32_t threads = 64, wave_size = 32;
   bool baseline = false, bad_geometry = false, profiling = false, reuse_signal = false;
-  bool test_statistics = false, separate_barrier = false;
+  bool test_statistics = false, separate_barrier = false, amd_signals = false;
   uint16_t barrier_type = 0;
   for (int index = 5; index < argc; ++index) {
     const std::string_view option(argv[index]);
@@ -124,6 +124,8 @@ int run(int argc, char **argv) {
       reuse_signal = true;
     else if (option == "--test-statistics")
       test_statistics = true;
+    else if (option == "--amd-signals")
+      amd_signals = true;
     else if (option == "--batch-barrier-and" || option == "--batch-barrier-or")
       barrier_type = option == "--batch-barrier-and" ? HSA_PACKET_TYPE_BARRIER_AND
                                                      : HSA_PACKET_TYPE_BARRIER_OR;
@@ -261,9 +263,13 @@ int run(int argc, char **argv) {
     if (destination.fail() && result == 0)
       result = 22;
   }
+  const auto create_completion = [amd_signals](hsa_signal_t *completion) {
+    return amd_signals ? hsa_amd_signal_create(1, 0, nullptr, 0, completion)
+                       : hsa_signal_create(1, 0, nullptr, completion);
+  };
   for (uint32_t index = 0; result == 0 && index < launches; ++index) {
     if (signal.handle == 0) {
-      if (!require(hsa_signal_create(1, 0, nullptr, &signal), "dedicated signal")) {
+      if (!require(create_completion(&signal), "dedicated signal")) {
         result = 21;
         break;
       }
@@ -274,8 +280,7 @@ int run(int argc, char **argv) {
     std::memcpy(arguments, &input, 4);
     std::memcpy(static_cast<uint8_t *>(arguments) + 8, &output, 8);
     std::memset(output, 0, output_bytes);
-    if (barrier_type &&
-        !require(hsa_signal_create(1, 0, nullptr, &barrier_signal), "barrier completion")) {
+    if (barrier_type && !require(create_completion(&barrier_signal), "barrier completion")) {
       result = 21;
       break;
     }

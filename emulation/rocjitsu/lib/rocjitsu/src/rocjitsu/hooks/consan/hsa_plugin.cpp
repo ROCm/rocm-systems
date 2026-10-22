@@ -327,12 +327,15 @@ public:
 
   hsa_status_t signal_create(hsa_signal_value_t value, uint32_t consumers,
                              const hsa_agent_t *agents, hsa_signal_t *signal) {
-    const hsa_status_t status = core_.hsa_signal_create_fn(value, consumers, agents, signal);
-    if (status == HSA_STATUS_SUCCESS) {
-      std::lock_guard lock(mutex_);
-      signals_[signal->handle] = {.dedicated = value == 1};
-    }
-    return status;
+    return record_signal(core_.hsa_signal_create_fn(value, consumers, agents, signal), value,
+                         signal);
+  }
+
+  hsa_status_t amd_signal_create(hsa_signal_value_t value, uint32_t consumers,
+                                 const hsa_agent_t *agents, uint64_t attributes,
+                                 hsa_signal_t *signal) {
+    return record_signal(
+        amd_.hsa_amd_signal_create_fn(value, consumers, agents, attributes, signal), value, signal);
   }
 
   hsa_status_t signal_destroy(hsa_signal_t signal) {
@@ -443,6 +446,15 @@ public:
   }
 
 private:
+  hsa_status_t record_signal(hsa_status_t status, hsa_signal_value_t value,
+                             const hsa_signal_t *signal) {
+    if (status == HSA_STATUS_SUCCESS) {
+      std::lock_guard lock(mutex_);
+      signals_[signal->handle] = {.dedicated = value == 1};
+    }
+    return status;
+  }
+
   std::string agent_target(hsa_agent_t agent) {
     hsa_device_type_t type{};
     hsa_isa_t isa{};
@@ -1057,6 +1069,12 @@ hsa_status_t HSA_API signal_create(hsa_signal_value_t value, uint32_t consumers,
                                    const hsa_agent_t *agents, hsa_signal_t *signal) {
   return boundary([&] { return runtime->signal_create(value, consumers, agents, signal); });
 }
+hsa_status_t HSA_API amd_signal_create(hsa_signal_value_t value, uint32_t consumers,
+                                       const hsa_agent_t *agents, uint64_t attributes,
+                                       hsa_signal_t *signal) {
+  return boundary(
+      [&] { return runtime->amd_signal_create(value, consumers, agents, attributes, signal); });
+}
 hsa_status_t HSA_API signal_destroy(hsa_signal_t signal) {
   return boundary([&] { return runtime->signal_destroy(signal); });
 }
@@ -1136,6 +1154,8 @@ bool install(HsaApiTable *table) {
   patched.hsa_signal_create_fn = signal_create;
   patched.hsa_signal_destroy_fn = signal_destroy;
   patched.hsa_shut_down_fn = shutdown;
+  if (amd.hsa_amd_signal_create_fn)
+    table->amd_ext_->hsa_amd_signal_create_fn = amd_signal_create;
   table->amd_ext_->hsa_amd_profiling_set_profiler_enabled_fn = profiling;
   table->amd_ext_->hsa_amd_queue_intercept_create_fn = intercept_create;
   table->amd_ext_->hsa_amd_queue_intercept_register_fn = intercept_register;
@@ -1200,6 +1220,7 @@ extern "C" RJ_API_EXPORT void OnUnload() noexcept {
     RJ_CONSAN_RESTORE_HOOK(core, saved, hsa_shut_down_fn, shutdown);
     AmdExtTable &amd = *installed_amd;
     const AmdExtTable &original = runtime->amd();
+    RJ_CONSAN_RESTORE_HOOK(amd, original, hsa_amd_signal_create_fn, amd_signal_create);
     RJ_CONSAN_RESTORE_HOOK(amd, original, hsa_amd_profiling_set_profiler_enabled_fn, profiling);
     RJ_CONSAN_RESTORE_HOOK(amd, original, hsa_amd_queue_intercept_create_fn, intercept_create);
     RJ_CONSAN_RESTORE_HOOK(amd, original, hsa_amd_queue_intercept_register_fn, intercept_register);
