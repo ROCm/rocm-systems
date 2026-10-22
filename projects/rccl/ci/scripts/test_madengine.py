@@ -64,23 +64,19 @@ _METRIC_ALIASES: dict[str, set[str]] = {
 }
 _TFLOPS_METRICS = {"TFLOPS_per_gpu_avg"}
 
-# Applied to the candidate/baseline ratio of one same-node A/B pair, which
-# repeats to within 0.25% (AICOMNET-420).
+# Applied to the candidate/baseline ratio of one same-node A/B pair.
 REGRESSION_THRESHOLD_TRAINING = 0.02  # 2%
 REGRESSION_THRESHOLD_INFERENCE = 0.05  # 5%
 
 BASELINE = "baseline"
 CANDIDATE = "candidate"
 
-# Kept in its own directory: it doubles as the build context the compute
-# nodes use, and WORK_DIR holds the Python environment, the clones and the
-# live sbatch logs -- tarring a file that is still growing fails the build.
+# Its own directory because it is also the nodes' build context: WORK_DIR has
+# live sbatch logs, and tarring a file that is still growing fails the build.
 OVERLAY_CTX = "overlay_ctx"
 OVERLAY_DOCKERFILE = "Dockerfile.rccl-overlay"
 
-# The A/B below needs both runs in one allocation, which requires madengine to
-# execute a multi-node workload in place instead of submitting its own sbatch
-# (ROCm/madengine#213), so the pin must not predate it.
+# Must not predate ROCm/madengine#213: the A/B runs madengine inside salloc.
 MADENGINE_REPO = "https://github.com/ROCm/madengine.git"
 MADENGINE_REF = "00ee3e80c0a308599633caf74e5d91a72164a2fe"  # develop, has #190 and #213
 MAD_REPO = "https://github.com/ROCm/MAD.git"
@@ -359,10 +355,8 @@ def verify_rccl_replacement(
 ) -> tuple[bool, str]:
     """Verify that every node used the CI-built RCCL, not its bundled copy.
 
-    Requires a ``*_node_<i>.out`` log from each of the *nodes* nodes, checks
-    *all* of them for ``RCCL version :`` and compares against the expected
-    fingerprint.  A library that reached only one node still fails — this is
-    the multi-node failure this job exists to catch.
+    Requires a ``*_node_<i>.out`` log from each of the *nodes* nodes; a library
+    that reached only some of them fails.
 
     Returns (ok, message).  Generic across frameworks — any RCCL-based
     application prints the version string during init.
@@ -472,11 +466,9 @@ def stage_rccl_overlay(
     gpu_target: str,
     work_dir: Path,
 ) -> str:
-    """Stage the candidate image: the base with the CI-built RCCL swapped in.
+    """Stage the candidate image (base + CI-built RCCL) under ``overlay_ctx``.
 
-    Writes the Dockerfile and its build context under ``overlay_ctx`` and
-    returns the tag. Nothing is built here: node 0 of the allocation builds it
-    from the manifest's Dockerfile and the other nodes load it.
+    Returns the tag. Nothing is built here; the allocation's nodes build it.
     """
     rccl_commit = get_rccl_commit(rccl_lib)
     tag = f"{base_image}-rccl-{gpu_target}-{rccl_commit}"
@@ -591,14 +583,8 @@ def generate_manifest(
     ``context.docker_env_vars`` and ``deployment_config.env_vars``, mounts
     in ``context.docker_mounts``.
 
-    *run_dir* is where madengine will be invoked from, and therefore where the
-    manifest and all of the run's relative outputs (``perf.csv``,
-    ``perf_entry_super.json``, ``slurm_output/``) land.  The A/B gives each
-    phase its own, so the two runs do not overwrite each other.
-
-    *pull_only* describes the baseline image: a stock registry tag with no
-    Dockerfile behind it.  madengine then pulls it per node instead of taking
-    the local-image path, which would try to build it and stage a tar.
+    *run_dir*: madengine's working directory for this phase; gets the manifest.
+    *pull_only*: a stock registry image, pulled per node rather than built.
     """
     gpus_per_node = workload_config["gpus_per_node"]
 
@@ -782,13 +768,9 @@ def generate_manifest(
 
 
 def prepare_phase_dir(work_dir: Path, phase: str) -> Path:
-    """Create the directory madengine will be invoked from for one phase.
+    """Create one phase's madengine working directory, with its own scripts copy.
 
-    madengine writes ``perf.csv``, ``perf_entry_super.json`` and
-    ``slurm_output/`` relative to its working directory under fixed names, and
-    resolves the model's ``scripts/...`` path the same way.  Giving each phase
-    its own directory with its own copy of the scripts is what keeps the two
-    runs from overwriting each other's results.
+    madengine writes its outputs under fixed names relative to its cwd.
     """
     run_dir = work_dir / "ab" / phase
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -801,14 +783,8 @@ def prepare_phase_dir(work_dir: Path, phase: str) -> Path:
     return run_dir
 
 
-# Run on every node once the phases are done. The images are per-run tags that
-# no later run can reuse, and each is tens of GB on a node's local disk.
-#
-# The containers run as root, so the task's own `rm -rf` of its workspace leaves
-# whatever they wrote, and madengine's stale-workspace sweep only looks at this
-# user's directories. Only this job's workspaces are touched. Without sudo, rm
-# runs as root in whichever of this run's images the node has; never pulled, as
-# each is tens of GB. $1 is kept, the rest are removed.
+# Run on every node after both phases. Container output is root-owned, so the
+# workspace is removed from inside a local image (never pulled); $1 is kept.
 CLEANUP_IMAGES = """\
 #!/bin/bash
 helper="$1"; shift
@@ -852,26 +828,9 @@ def run_ab_in_one_allocation(
     timeout_minutes: int,
     built_images: list[str] | None = None,
 ) -> dict:
-    """Run every phase back to back inside a single SLURM allocation.
+    """Run every phase back to back inside one SLURM allocation, on the same nodes.
 
-    The phases are only comparable if they land on the same nodes.  Which node
-    pair the scheduler picks moves the absolute throughput by more than the
-    regression threshold, so two independently scheduled jobs would be
-    measuring the cluster as much as RCCL (AICOMNET-420).
-
-    Submitting a second job pinned to the first one's nodes does not solve it:
-    such a job is not schedulable until those exact nodes free up again, and
-    while it waits it reserves nothing and accrues no priority.  On a busy
-    shared partition that wait is unbounded, so the comparison would sometimes
-    not happen at all — worse than a noisy gate.  The allocation is therefore
-    taken once and held across both runs.
-
-    madengine picks up SLURM_JOB_ID from salloc and runs the workload in place
-    through srun instead of submitting its own sbatch (ROCm/madengine#213).
-
-    *built_images* are the tags the nodes build for this run; they are removed
-    from every node once both phases are done, together with this job's node
-    workspaces. A run killed by the timeout leaves them behind.
+    *built_images* are removed from every node afterwards (not on a timeout).
 
     Returns ``{"exit_codes": {phase: int}, "job_id": str, "nodelist": str}``.
     """
@@ -880,9 +839,8 @@ def run_ab_in_one_allocation(
 
     script_lines = [
         "#!/bin/bash",
-        "# Generated by test_madengine.py. Deliberately no `set -e`: a failed",
-        "# baseline must still let the candidate run, so the report can say",
-        "# which side broke.",
+        "# Generated by test_madengine.py. No `set -e`: a failed baseline must",
+        "# still let the candidate run.",
         'echo "Allocation: job=${SLURM_JOB_ID} nodes=${SLURM_JOB_NODELIST}"',
         'printf "%s\\n%s\\n" "${SLURM_JOB_ID}" "${SLURM_JOB_NODELIST}" > '
         + shlex.quote(str(alloc_info)),
@@ -932,10 +890,8 @@ def run_ab_in_one_allocation(
     log.info("Phases: %s", ", ".join(p for p, _ in phases))
     log.info("Timeout: %d minutes (includes time spent queueing)", timeout_minutes)
 
-    # Pre-warm: madengine validates CLI availability by running
-    # `madengine --version` itself.  A cold import of its heavy dependencies
-    # (kubernetes, aiohttp, paramiko) off NFS is slow, so run it once here to
-    # populate the bytecode cache.
+    # Pre-warm the bytecode cache: madengine runs `madengine --version` itself,
+    # and a cold import of its dependencies off NFS is slow.
     try:
         subprocess.run(["madengine", "--version"], capture_output=True, timeout=120)
     except subprocess.TimeoutExpired:
@@ -1100,22 +1056,12 @@ def parse_live_log_metrics(work_dir: Path) -> list[dict]:
 
 
 def _usable_metric(val: float) -> bool:
-    """Whether a throughput can be scored.
-
-    NaN compares false against any threshold, so it would read as "no
-    regression", and a dropped row is what makes the A/B report the phase as
-    missing instead.
-    """
+    """Whether a throughput can be scored; NaN would pass any threshold."""
     return math.isfinite(val) and val > 0
 
 
 def collect_phase_results(run_dir: Path, metric_key: str) -> list[dict]:
-    """Per-precision metrics for one phase.
-
-    Prefers madengine's structured output and falls back to scraping the live
-    log.  Each entry carries precision, metric value and a pass/fail status, so
-    the A/B comparison and the datastore writes are driven from one list.
-    """
+    """Per-precision metrics for one phase: structured output, else the live log."""
     perf_results = parse_perf_results(run_dir)
     results: list[dict] = []
 
@@ -1270,11 +1216,8 @@ def pair_by_precision(
 ) -> list[dict]:
     """Join the two phases into one comparison row per precision.
 
-    A precision present in only one phase still gets a row, with the other
-    side left as None, so the report can say which side is missing instead of
-    silently dropping it. So does an expected precision neither phase
-    returned: a leg disabled upstream must fail the gate, not pass it on the
-    precisions that are left.
+    A precision missing from a phase, or *expected* but absent from both, keeps
+    a row with None so the gate fails instead of skipping it.
     """
     comparisons: dict[str, dict] = {
         precision: {"precision": precision, BASELINE: None, CANDIDATE: None}
@@ -1443,9 +1386,8 @@ def main() -> None:
     )
 
     args = parser.parse_args()
-    # madengine runs a workload inside this allocation only when it spans more
-    # than one node; with one, each phase is its own sbatch and the two can land
-    # on different nodes.
+    # madengine runs inside our allocation only for multi-node workloads; a
+    # single-node phase gets its own sbatch, possibly on other nodes.
     if args.nodes < 2:
         parser.error("--nodes must be at least 2 for a same-node A/B")
 
@@ -1472,9 +1414,8 @@ def main() -> None:
     # Step 2: Install madengine
     install_madengine(work_dir)
 
-    # Step 3: Stage the candidate image (or use pre-built). Images are built
-    # on the allocation's nodes, never here: this host is shared by every
-    # runner and has neither the disk for them nor any use for them.
+    # Step 3: Stage the candidate image (or use pre-built). Images are built on
+    # the allocation's nodes, never here: this host's disk is shared by runners.
     if args.skip_overlay_build:
         if not args.overlay_image:
             log.error("--skip-overlay-build requires --overlay-image")
@@ -1590,8 +1531,7 @@ def main() -> None:
         prec = c["precision"] or "?"
         base, cand = c[BASELINE], c[CANDIDATE]
         if c["ratio"] is None:
-            # One side is missing or produced no number. That is a failure of
-            # the job, not evidence about RCCL, so say so rather than guess.
+            # A missing side is a job failure, not evidence about RCCL.
             regression_msgs.append(
                 f"[{prec}] no comparison — baseline={_format_phase(base)}, "
                 f"candidate={_format_phase(cand)}"
