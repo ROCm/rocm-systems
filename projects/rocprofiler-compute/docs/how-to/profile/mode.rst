@@ -504,41 +504,8 @@ The following example only collects the counters required to calculate ``Total V
    ...
 
 
-To see a list of available hardware report blocks and metrics, use the
-``--list-metrics`` option. It lists the current GPU unless you pass an
-architecture such as ``gfx942``. Each block shows its alias, and each metric
-shows its unit and description (shortened with ``...`` below). Add ``-b`` to
-list only some blocks or metrics.
-
-.. code-block:: shell-session
-
-   $ rocprof-compute --list-metrics
-
-   0 -> Top Stats (alias: topstats)
-   1 -> System Info (alias: sysinfo)
-   2 -> System Speed-of-Light (alias: sol)
-         2.1 -> System Speed-of-Light
-                  2.1.0 -> VALU FLOPs [GFLOP/s]: The total floating-point operations executed per second on the VALU. ...
-                  2.1.1 -> MFMA FLOPs (F8) [GFLOP/s]: The total number of 8-bit floating point MFMA operations executed per second. ...
-   ...
-   5 -> Command Processor (CPC/CPF) (alias: cpc)
-         5.1 -> Command processor fetcher (CPF)
-                  5.1.0 -> CPF Utilization [Percent]: Percent of total cycles where the CPF was busy actively doing any work. ...
-                  5.1.1 -> CPF Stall [Percent]: Percent of CPF busy cycles where the CPF was stalled for any reason.
-   ...
-
-   $ rocprof-compute --list-metrics gfx942 -b spi
-
-   6 -> Workgroup Manager (SPI) (alias: spi)
-         6.1 -> Workgroup manager utilizations
-                  6.1.0 -> Accelerator Utilization [Percent]: The percent of cycles in the kernel where the accelerator was actively doing any work.
-                  6.1.1 -> Scheduler-Pipe Utilization [Percent]: The percent of total scheduler-pipe cycles in the kernel where ...
-   ...
-
-.. note::
-
-   ``--list-available-metrics`` and ``--list-blocks`` are deprecated and will be
-   removed in a future release. Use ``--list-metrics`` instead.
+To see the available report blocks and their metrics, use ``--list-metrics``.
+See :ref:`list-metrics`.
 
 .. _profiling-kernel-filtering:
 

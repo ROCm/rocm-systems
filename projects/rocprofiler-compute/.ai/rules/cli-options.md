@@ -27,7 +27,7 @@ that option as a prefix.
 
 If an option already exists with the same meaning in another mode, keep its
 name. Don't add a prefix. For example, `-b/--block` filters by block or metric
-id in `profile`, `analyze`, and `--list-metrics`.
+id in both `profile` and `analyze`.
 
 Frequently used options get a short alias: a single lowercase letter with a
 single dash, such as `-v`.
@@ -62,6 +62,5 @@ it at the end of the description as `(Default: value)`.
 ```text
 --output-format <format>   Specify output format (Default: stdout).
                             Values: stdout, txt, csv, db.
---list-metrics [arch]      List available metrics for specified GPU [arch] (Default: current GPU arch).
-                            Values: gfx908, gfx90a, gfx940, gfx941, gfx942, gfx950, gfx1150, gfx1151, gfx1152, gfx1153, gfx1250
+--list-metrics [ids]...    List the blocks of the current GPU, or the metrics of the given block [ids].
 ```
