@@ -84,6 +84,8 @@ cases:
   Unit_HRR_ConfigureCall_Direct: {}
   Unit_HRR_ContextRoundtrip: {}
   Unit_HRR_Context_Direct: {}
+  Unit_HRR_D2HExactByDefaultRoundtrip: {}
+  Unit_HRR_D2HShortBlobRoundtrip: {}
   Unit_HRR_DenseOffsetD2HRoundtrip: {}
   Unit_HRR_DenseOffsetD2H_Direct: {}
   Unit_HRR_DeviceExtraRoundtrip: {}
@@ -295,6 +297,7 @@ cases:
   Unit_HRR_TextureRoundtrip: {}
   Unit_HRR_Texture_Direct: {}
   Unit_HRR_UncapturedHostWrite_Direct: {}
+  Unit_HRR_UnmappedPointerPolicy: {}
   Unit_HRR_VMMRoundtrip: {}
   Unit_HRR_VMM_Direct: {}
   Unit_HRR_VaPlacement_Direct: {}
