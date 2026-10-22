@@ -112,40 +112,25 @@ def fatal_error(msg, *args, exit_code=1):
 def validate_output_directory(output_directory):
     """Reject structurally invalid output paths that can be checked before launch.
 
-    For runtime-expanded paths, only the literal prefix is checked. The C++ output
-    layer remains responsible for the expanded path, directory creation, and races.
+    The C++ output layer remains responsible for runtime-expanded paths, directory
+    creation, and filesystem races.
+
+    Args:
+        output_directory: Path-like output destination to validate.
     """
     if output_directory is None:
         return
 
     output_directory = os.fspath(output_directory)
-    if not output_directory or output_directory in (
-        "stdout",
-        "STDOUT",
-        "stderr",
-        "STDERR",
+    if (
+        not output_directory
+        or output_directory in ("stdout", "STDOUT", "stderr", "STDERR")
+        or any(marker in output_directory for marker in ("%", "{", "$"))
     ):
         return
 
-    # Validate only the path components before the first runtime-expanded component.
-    marker_positions = [
-        output_directory.find(marker)
-        for marker in ("%", "{", "$")
-        if marker in output_directory
-    ]
-    path_to_check = output_directory
-    if marker_positions:
-        first_marker = min(marker_positions)
-        separator = output_directory.rfind(os.sep, 0, first_marker)
-        if separator < 0:
-            path_to_check = os.curdir
-        elif separator == 0:
-            path_to_check = os.sep
-        else:
-            path_to_check = output_directory[:separator]
-
     # Find the nearest existing component without creating the requested directory.
-    existing_path = path_to_check
+    existing_path = output_directory
     while True:
         try:
             existing_lstat = os.lstat(existing_path)
@@ -191,6 +176,57 @@ def validate_output_directory(output_directory):
         f"Output path '{output_directory}' has a non-directory path component: "
         f"'{existing_path}'"
     )
+
+
+def get_effective_output_paths(args, pass_id=None):
+    """Resolve the base and optional per-pass output paths.
+
+    Args:
+        args: Launcher arguments containing output_directory and sub_directory.
+        pass_id: Optional multipass identifier appended to sub_directory.
+
+    Returns:
+        A tuple containing the base output path and the per-pass output path.
+        The per-pass path is None for a single-pass run.
+    """
+    output_path = (
+        args.output_directory if args.output_directory is not None else os.getcwd()
+    )
+    pass_output_path = None
+    if pass_id is not None and args.sub_directory is not None:
+        pass_output_path = os.path.join(
+            f"{output_path}", f"{args.sub_directory}{pass_id}"
+        )
+    return output_path, pass_output_path
+
+
+def prevalidate_output_paths(args, pass_id=None, should_produce_output=None):
+    """Validate output paths that can be resolved safely before launch.
+
+    Args:
+        args: Launcher arguments for the planned run.
+        pass_id: Optional multipass identifier.
+        should_produce_output: Whether this MPI rank produces profiler output.
+            When None, the value is resolved from args and the environment.
+
+    Returns:
+        A tuple containing the base output path and the per-pass output path.
+    """
+    output_path, pass_output_path = get_effective_output_paths(args, pass_id)
+
+    # Attach-mode paths are resolved inside the target process, whose cwd and mount
+    # namespace can differ from the attaching process.
+    if args.pid:
+        return output_path, pass_output_path
+
+    if should_produce_output is None:
+        should_produce_output = get_mpi_output_context(args).should_produce_output
+
+    if should_produce_output:
+        validate_output_directory(output_path)
+        if pass_output_path is not None:
+            validate_output_directory(pass_output_path)
+    return output_path, pass_output_path
 
 
 def warning(msg, *args):
@@ -348,26 +384,25 @@ def parse_rank_specification(rank_spec):
     return ranks
 
 
-def should_rank_provide_output(
-    mpi_ranks_spec=None, custom_rank_env=None, custom_size_env=None
-):
+def is_mpi_rank_selected(mpi_ranks_spec, current_rank, world_size):
     """Check if the current MPI rank should provide profile/trace output.
+
+    If no rank specification is provided or the current rank cannot be detected,
+    output remains enabled. Selected ranks are validated against the world size
+    when it is known.
+
     Args:
-        mpi_ranks_spec: String specification of ranks (e.g., "0-3,8,10-15")
-                       If None, all ranks provide output (default behavior).
-        custom_rank_env: Optional custom environment variable name for rank detection.
-        custom_size_env: Optional custom environment variable name for world size detection.
+        mpi_ranks_spec: String specification of ranks (e.g., "0-3,8,10-15").
+            If None, all ranks provide output (default behavior).
+        current_rank: Resolved MPI rank, or None when unavailable.
+        world_size: Resolved MPI world size, or None when unavailable.
+
     Returns:
         True if this rank should provide output, False otherwise.
     """
     # If no specification provided, all ranks provide output (default)
     if not mpi_ranks_spec:
         return True
-
-    # Get both rank and size from the same source
-    current_rank, world_size, _, _ = get_mpi_rank_and_size(
-        custom_rank_env, custom_size_env
-    )
 
     # If we can't detect the rank, assume we should provide output
     if current_rank is None:
@@ -387,6 +422,48 @@ def should_rank_provide_output(
 
     # Check if current rank is in the selected set
     return current_rank in selected_ranks
+
+
+def get_mpi_output_context(args):
+    """Resolve MPI identity and output selection from launcher arguments.
+
+    Rank and size are resolved as a pair from the same MPI implementation,
+    including OpenMPI, MVAPICH2, SLURM, or configured custom variables.
+
+    Args:
+        args: Launcher arguments. mpi_world_rank_variable is an optional
+            environment-variable name for rank detection, and
+            mpi_world_size_variable is an optional environment-variable name
+            for world-size detection. profile_mpi_ranks optionally specifies
+            which ranks should provide output.
+
+    Returns:
+        A dotdict containing rank, size, rank_var, size_var, and
+        should_produce_output.
+    """
+    custom_rank_env = getattr(args, "mpi_world_rank_variable", None)
+    custom_size_env = getattr(args, "mpi_world_size_variable", None)
+    if (custom_rank_env is None) != (custom_size_env is None):
+        fatal_error(
+            "When using custom MPI environment variables, "
+            "both --mpi-world-rank-variable and --mpi-world-size-variable must be specified"
+        )
+
+    mpi_rank, mpi_size, rank_var, size_var = get_mpi_rank_and_size(
+        custom_rank_env, custom_size_env
+    )
+    should_produce_output = is_mpi_rank_selected(
+        getattr(args, "profile_mpi_ranks", None), mpi_rank, mpi_size
+    )
+    return dotdict(
+        {
+            "rank": mpi_rank,
+            "size": mpi_size,
+            "rank_var": rank_var,
+            "size_var": size_var,
+            "should_produce_output": should_produce_output,
+        }
+    )
 
 
 def resolve_library_path(val, args, is_sdk_lib=True):
@@ -1711,74 +1788,40 @@ def run(app_args, args, **kwargs):
     use_execv = kwargs.get("use_execv", True)
     app_pass = kwargs.get("pass_id", None)
 
-    # Validate custom MPI environment variables
-    # If one custom variable is specified, both must be provided
-    custom_rank_env = (
-        args.mpi_world_rank_variable
-        if has_set_attr(args, "mpi_world_rank_variable")
-        else None
-    )
-    custom_size_env = (
-        args.mpi_world_size_variable
-        if has_set_attr(args, "mpi_world_size_variable")
-        else None
-    )
-
-    if (custom_rank_env is not None and custom_size_env is None) or (
-        custom_rank_env is None and custom_size_env is not None
-    ):
-        fatal_error(
-            "When using custom MPI environment variables, "
-            "both --mpi-world-rank-variable and --mpi-world-size-variable must be specified"
-        )
-
     # Set ROCPROF_MPI_RANK_VAR and ROCPROF_MPI_SIZE_VAR to tell C++ which env variables to read
     # This allows subprocesses to correctly read their own rank/size from MPI environment
     # instead of inheriting stale values from parent process
-    # Use get_mpi_rank_and_size to ensure rank and size come from the same source
-    # This normalizes all MPI implementations (OpenMPI, MVAPICH2, SLURM, custom, etc.)
-    mpi_rank, mpi_size, rank_var, size_var = get_mpi_rank_and_size(
-        custom_rank_env, custom_size_env
-    )
-    if rank_var is not None:
-        app_env["ROCPROF_MPI_RANK_VAR"] = rank_var
-    if size_var is not None:
-        app_env["ROCPROF_MPI_SIZE_VAR"] = size_var
+    # get_mpi_output_context ensures rank and size come from the same MPI implementation.
+    mpi = get_mpi_output_context(args)
+    if mpi.rank_var is not None:
+        app_env["ROCPROF_MPI_RANK_VAR"] = mpi.rank_var
+    if mpi.size_var is not None:
+        app_env["ROCPROF_MPI_SIZE_VAR"] = mpi.size_var
 
     # Check if this MPI rank should provide profile/trace output
     # If not, run the application without profiling instrumentation
-    if has_set_attr(args, "profile_mpi_ranks"):
-        if not should_rank_provide_output(
-            args.profile_mpi_ranks, custom_rank_env, custom_size_env
-        ):
-            # We already have mpi_rank from above, just use it for logging
-            if mpi_rank is not None and args.log_level in ("info", "trace"):
-                sys.stderr.write(
-                    f"[rocprofv3] MPI rank {mpi_rank} not in selected ranks "
-                    f"({args.profile_mpi_ranks}), running application without profiling\n"
-                )
-                sys.stderr.flush()
-            # Execute application without profiling
-            if use_execv:
-                os.execvpe(app_args[0], app_args, env=app_env)
-            else:
-                try:
-                    exit_code = subprocess.check_call(app_args, env=app_env)
-                    return exit_code
-                except Exception as e:
-                    fatal_error(f"{e}\n")
+    if not mpi.should_produce_output:
+        if mpi.rank is not None and args.log_level in ("info", "trace"):
+            sys.stderr.write(
+                f"[rocprofv3] MPI rank {mpi.rank} not in selected ranks "
+                f"({args.profile_mpi_ranks}), running application without profiling\n"
+            )
+            sys.stderr.flush()
+        # Execute application without profiling
+        if use_execv:
+            os.execvpe(app_args[0], app_args, env=app_env)
+        else:
+            try:
+                exit_code = subprocess.check_call(app_args, env=app_env)
+                return exit_code
+            except Exception as e:
+                fatal_error(f"{e}\n")
 
-    _output_path = (
-        args.output_directory if args.output_directory is not None else os.getcwd()
+    # Multipass runs prevalidate every pass before execution. Revalidate here to
+    # catch filesystem changes between planning and the individual launch.
+    _output_path, _pass_output_path = prevalidate_output_paths(
+        args, app_pass, mpi.should_produce_output
     )
-    validate_output_directory(_output_path)
-
-    _pass_output_path = None
-    if app_pass is not None and args.sub_directory is not None:
-        _pass_output_path = os.path.join(
-            f"{_output_path}", f"{args.sub_directory}{app_pass}"
-        )
-        validate_output_directory(_pass_output_path)
 
     def setattrifnone(obj, attr, value):
         if getattr(obj, f"{attr}") is None:
@@ -2959,7 +3002,10 @@ def main(argv=None):
         # Get base args from first input arg (for CLI-only passes)
         base_args = get_args(cmd_args, inp_args[0])
 
-        # Run each pass with its specific config
+        # Materialize and validate every pass before launching the first one. This
+        # avoids completing earlier, potentially expensive passes before discovering
+        # that a later pass has an invalid output destination or conflicting options.
+        planned_passes = []
         for idx, pass_config in enumerate(all_pass_configs):
             if pass_config["from_cli"]:
                 # CLI pass: use base_args and override PMC
@@ -2971,11 +3017,18 @@ def main(argv=None):
                 pass_args = get_args(cmd_args, pass_config["config"])
 
             validate_selected_regions_conflicts(pass_args)
+            planned_passes.append((pass_args, idx + 1))
 
+        for pass_args, pass_id in planned_passes:
+            prevalidate_output_paths(pass_args, pass_id)
+
+        # Run each pass with its specific config. run() revalidates the paths to
+        # protect against filesystem changes after the all-pass preflight.
+        for pass_args, pass_id in planned_passes:
             _ec = run(
                 app_args,
                 pass_args,
-                pass_id=(idx + 1),
+                pass_id=pass_id,
                 use_execv=False,
             )
             if _ec is not None and _ec != 0:
