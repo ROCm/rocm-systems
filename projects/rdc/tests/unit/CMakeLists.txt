@@ -47,15 +47,17 @@ endif()
 include(GoogleTest)
 
 # rdc_codec_tests: pure-logic tests (entity codec, AFID field registration,
-# library loader; the loader tests dlopen only libm and libc). Links only
-# librdc_bootstrap (which holds the codec, the field descriptor table and the
-# loader) and NOT librdc, so it pulls in no amdsmi and runs on GPU-less CI.
-# Uses gtest_main since it needs no custom setup.
+# library loader, field names, the ROCm path and the logger; the loader tests
+# dlopen only libm and libc). Links only librdc_bootstrap (which holds the codec,
+# the field descriptor table, the loader and the logger) and NOT librdc, so it
+# pulls in no amdsmi and runs on GPU-less CI. Uses gtest_main since it needs no
+# custom setup.
 add_executable(
     ${RDC_CODEC_TESTS}
     ${SRC_DIR}/test_entity_codec.cc
     ${SRC_DIR}/test_afid_field.cc
     ${SRC_DIR}/test_library_loader.cc
+    ${SRC_DIR}/test_bootstrap_checks.cc
 )
 target_include_directories(
     ${RDC_CODEC_TESTS}
