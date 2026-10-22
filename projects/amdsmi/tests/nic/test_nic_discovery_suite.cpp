@@ -287,6 +287,32 @@ int main() {
     check("broadcom port iface correct", false);
   }
 
+  // ---- Broadcom bng_en: the newer driver of the same PCI vendor (BCM57708, 0x1780) ----
+  const std::string bng_bdf = "0000:01:00.0";
+  fs::path bng_dir = root / "sys/bus/pci/drivers/bng_en";
+  fs::create_directories(bng_dir);
+  fs::create_symlink("../../../devices/pci/" + bng_bdf, bng_dir / bng_bdf);
+  check("broadcom Main driver detected for a bng_en function",
+        bsub.is_driver_loaded(bng_bdf, DriverType::Main));
+
+  fs::path bng_disc_root = make_tmp_root();
+  TmpRootGuard_t bng_disc_root_guard(bng_disc_root);
+  make_fake_netdev(bng_disc_root, "bng_test0", bng_bdf, "0x14e4", "0x1780", "bng_en");
+  make_fake_netdev(bng_disc_root, "bnxt_legacy", "0000:01:00.1", "0x14e4", "0x16d7", "tg3");
+
+  SmiNicSubsystemBroadcom bng_disc;
+  bng_disc.discover((bng_disc_root / "sys/bus/pci/devices").string(),
+                    (bng_disc_root / "sys/class/net").string(), nullptr);
+  const auto& bng_nics = bng_disc.get_nics();
+  check("broadcom discover finds exactly one bng_en NIC", bng_nics.size() == 1);
+  if (bng_nics.size() == 1) {
+    check("bng_en NIC bdf correct", bng_nics[0]->bdf() == bng_bdf);
+    check("bng_en NIC vendor is Broadcom", bng_nics[0]->vendor() == NicVendor::Broadcom);
+  } else {
+    check("bng_en NIC bdf correct", false);
+    check("bng_en NIC vendor is Broadcom", false);
+  }
+
   // ---- Broadcom Rdma positive: an aux-driver symlink whose resolved target
   //      passes through /<bdf>/ exercises the is_canonical_match=true branch of
   //      the shared is_driver_bound_to_bdf helper (its most intricate path). ----
@@ -305,6 +331,22 @@ int main() {
         rdma_sub.is_driver_loaded(rdma_bdf, DriverType::Rdma));
   check("broadcom Rdma driver absent for other bdf",
         !rdma_sub.is_driver_loaded("0000:e1:00.1", DriverType::Rdma));
+
+  // ---- Broadcom bng_en Rdma: aux driver bng_re.rdma binds bng_en.rdma.<n> ----
+  fs::path bng_rdma_root = make_tmp_root();
+  TmpRootGuard_t bng_rdma_root_guard(bng_rdma_root);
+  const std::string bng_rdma_bdf = "0000:01:00.0";
+  fs::create_directories(bng_rdma_root / "sys/bus/pci/devices" / bng_rdma_bdf / "bng_en.rdma.0");
+  fs::path bng_aux_drv = bng_rdma_root / "sys/bus/auxiliary/drivers/bng_re.rdma";
+  fs::create_directories(bng_aux_drv);
+  fs::create_symlink("../../../../bus/pci/devices/" + bng_rdma_bdf + "/bng_en.rdma.0",
+                     bng_aux_drv / "bng_en.rdma.0");
+  SmiNicSubsystemBroadcom broadcom_bng_rdma(bng_rdma_root.string());
+  SmiNicSubsystem& bng_rdma_sub = broadcom_bng_rdma;
+  check("broadcom Rdma driver detected for bng_re.rdma",
+        bng_rdma_sub.is_driver_loaded(bng_rdma_bdf, DriverType::Rdma));
+  check("bng_re.rdma absent for other bdf",
+        !bng_rdma_sub.is_driver_loaded("0000:01:00.1", DriverType::Rdma));
 
   // ---- Pensando discover(): a bridge with no port beneath it (0x1dd8:0008) ----
   // The bridge is the NIC handle. With no ionic port under it the card carries
@@ -632,6 +674,48 @@ int main() {
     }
     check("asic hwmon path resolves through the port",
           asic_path.has_value() && (asic_path.value() == expected.string()));
+  }
+
+  // ---- a labelled ionic hwmon splits the die from the board ----
+  // The ionic driver labels its channels; the die channel is the ASIC temperature and the board
+  // channel is BOARD. Taking temp1 blindly reports the board temperature as ASIC.
+  {
+    fs::path lbl_root = make_tmp_root();
+    TmpRootGuard_t lbl_root_guard(lbl_root);
+    make_fake_pci_tree(lbl_root, "0000:00", "0000:01:00.0", "0x0008", "0000:02:01.0",
+                       "0000:04:00.0", "enP0p4s0");
+    const fs::path lbl_hwmon =
+        lbl_root / "sys/devices/pci0000:00/0000:01:00.0/0000:02:01.0/0000:04:00.0/hwmon/hwmon3";
+    fs::create_directories(lbl_hwmon);
+    std::ofstream(lbl_hwmon / "temp1_input") << "39000\n";
+    std::ofstream(lbl_hwmon / "temp1_label") << "board temperature\n";
+    std::ofstream(lbl_hwmon / "temp1_crit") << "80000\n";
+    std::ofstream(lbl_hwmon / "temp2_input") << "59000\n";
+    std::ofstream(lbl_hwmon / "temp2_label") << "die temperature\n";
+    std::ofstream(lbl_hwmon / "temp2_crit") << "105000\n";
+    const fs::path lbl_node = lbl_root / "sys/bus/pci/devices/0000:04:00.0/hwmon/hwmon3";
+
+    SmiNicSubsystemPensando lbl_disc;
+    lbl_disc.discover((lbl_root / "sys/bus/pci/devices").string(),
+                      (lbl_root / "sys/class/net").string(), nullptr);
+    const auto& lnics = lbl_disc.get_nics();
+    check("labelled fixture discovers one NIC", lnics.size() == 1);
+    if (lnics.size() == 1) {
+      const auto lbl_asic = lnics[0]->hwmon_temp_path(NicTempSensor::Asic);
+      const auto lbl_board = lnics[0]->hwmon_temp_path(NicTempSensor::Board);
+      check("asic path is the die channel",
+            lbl_asic.has_value() && (lbl_asic.value() == (lbl_node / "temp2_input").string()));
+      check("board path is the board channel",
+            lbl_board.has_value() && (lbl_board.value() == (lbl_node / "temp1_input").string()));
+      check("transceiver stays unsupported",
+            !lnics[0]->hwmon_temp_path(NicTempSensor::Transceiver).has_value());
+
+      const auto records = lnics[0]->hwmon_sensors();
+      check("hwmon_sensors reports four attributes", records.size() == 4,
+            "got " + std::to_string(records.size()));
+      check("hwmon_sensors carries the hwmon instance",
+            !records.empty() && (records.front().instance == 3));
+    }
   }
 
   // ---- the management function is found on the far side of the switch ----

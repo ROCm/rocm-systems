@@ -3,6 +3,8 @@
 
 #include "broadcom/broadcom_subsystem.h"
 
+#include <algorithm>
+#include <array>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -15,7 +17,10 @@
 namespace fs = std::filesystem;
 
 namespace {
-constexpr const char* kBnxtDriverName = "bnxt_en";
+// bng_en is the newer driver of the same Broadcom Ethernet family; both expose the same netdev
+// and hwmon layout.
+constexpr std::array<const char*, 2> kBroadcomMainDrivers = {"bnxt_en", "bng_en"};
+constexpr std::array<const char*, 2> kBroadcomRdmaAuxDrivers = {"bnxt_re.rdma", "bng_re.rdma"};
 }  // namespace
 
 NicVendor SmiNicSubsystemBroadcom::vendor() const { return NicVendor::Broadcom; }
@@ -24,12 +29,19 @@ bool SmiNicSubsystemBroadcom::is_driver_loaded(const std::string& bdf,
                                                DriverType driver_type) const {
   switch (driver_type) {
     case DriverType::Main:
-      return is_driver_bound_to_bdf(driver_sysfs_root_ + "/sys/bus/pci/drivers/bnxt_en", bdf,
-                                    /*is_canonical_match=*/false);
+      return std::any_of(
+          kBroadcomMainDrivers.begin(), kBroadcomMainDrivers.end(), [&](const char* driver) {
+            return is_driver_bound_to_bdf(driver_sysfs_root_ + "/sys/bus/pci/drivers/" + driver,
+                                          bdf,
+                                          /*is_canonical_match=*/false);
+          });
     case DriverType::Rdma:
-      return is_driver_bound_to_bdf(driver_sysfs_root_ + "/sys/bus/auxiliary/drivers/bnxt_re.rdma",
-                                    bdf,
-                                    /*is_canonical_match=*/true);
+      return std::any_of(kBroadcomRdmaAuxDrivers.begin(), kBroadcomRdmaAuxDrivers.end(),
+                         [&](const char* driver) {
+                           return is_driver_bound_to_bdf(
+                               driver_sysfs_root_ + "/sys/bus/auxiliary/drivers/" + driver, bdf,
+                               /*is_canonical_match=*/true);
+                         });
     default:
       return false;
   }
@@ -57,9 +69,9 @@ void SmiNicSubsystemBroadcom::discover(
     }
 
     const std::string sysfs_bus_path = pci_path + "/" + bdf;
-    // bnxt spans many device ids; vendor + driver bind identify it.
+    // Broadcom spans many device ids; vendor + driver bind identify it.
     [[maybe_unused]] auto [vendor_id, device_id] = read_pci_ids(sysfs_bus_path);
-    if ((vendor_id != VENDOR_ID) || !is_bound_to_bnxt_en(sysfs_bus_path)) {
+    if ((vendor_id != VENDOR_ID) || !is_bound_to_broadcom_main_driver(sysfs_bus_path)) {
       continue;
     }
 
@@ -73,13 +85,16 @@ void SmiNicSubsystemBroadcom::discover(
   }
 }
 
-bool SmiNicSubsystemBroadcom::is_bound_to_bnxt_en(const std::string& sysfs_bus_path) const {
+bool SmiNicSubsystemBroadcom::is_bound_to_broadcom_main_driver(
+    const std::string& sysfs_bus_path) const {
   std::error_code ec;
   fs::path driver_link = fs::path(sysfs_bus_path) / "driver";
   if (!fs::is_symlink(driver_link, ec)) {
     return false;
   }
-  return ((fs::read_symlink(driver_link, ec).filename().string() == kBnxtDriverName) && !ec);
+  const std::string bound_driver = fs::read_symlink(driver_link, ec).filename().string();
+  return (!ec && std::any_of(kBroadcomMainDrivers.begin(), kBroadcomMainDrivers.end(),
+                             [&](const char* driver) { return (bound_driver == driver); }));
 }
 
 const std::vector<std::unique_ptr<SmiNic>>& SmiNicSubsystemBroadcom::get_nics() const {

@@ -450,6 +450,8 @@ smi_nic_status_t smi_get_nic_rdma_port_statistics_list(smi_nic_ctx_t ctx, uint64
 #ifdef __cplusplus
 }  // extern "C"
 
+#include <vector>
+
 // Declared, not included: this header is installed and smi_nic_telemetry.h is
 // not, so including it would ship a header that cannot be compiled. Both types
 // are only ever read through an out pointer, and every in-tree caller that
@@ -460,6 +462,9 @@ struct NicTelemetrySnapshot;
 namespace amd::nic::netlink {
 struct DevlinkDeviceInfo;
 }  // namespace amd::nic::netlink
+namespace amd::smi::nic::hwmon {
+struct SensorRecord_t;
+}  // namespace amd::smi::nic::hwmon
 
 /**
  * @brief C++-only: live telemetry for the NIC registered under @p device.
@@ -490,6 +495,20 @@ smi_nic_status_t smi_get_nic_telemetry(smi_nic_ctx_t ctx, uint64_t device,
  */
 smi_nic_status_t smi_get_nic_fw_info(smi_nic_ctx_t ctx, uint64_t device,
                                      amd::nic::netlink::DevlinkDeviceInfo* info);
+
+/**
+ * @brief C++-only: every hwmon sensor attribute of the NIC registered under @p device.
+ *
+ * Same resolution and locking as ::smi_get_nic_telemetry. A NIC with no hwmon node yields an
+ * empty list, not an error.
+ *
+ * @param ctx Context returned by ::smi_nic_create_context.
+ * @param device Packed BDF, in the ::amdsmi_bdf_t as_uint encoding.
+ * @param records Replaced on success; unmodified otherwise.
+ * @return ::smi_nic_status_t | ::SMI_NIC_STATUS_SUCCESS on success, non-zero on failure.
+ */
+smi_nic_status_t smi_get_nic_hwmon_sensors(
+    smi_nic_ctx_t ctx, uint64_t device, std::vector<amd::smi::nic::hwmon::SensorRecord_t>* records);
 #endif
 
 #endif  // __SMI_NIC_INTERFACE_H__

@@ -947,3 +947,32 @@ smi_nic_status_t smi_get_nic_fw_info(smi_nic_ctx_t ctx, uint64_t device,
   }
   return SMI_NIC_STATUS_SUCCESS;
 }
+
+smi_nic_status_t smi_get_nic_hwmon_sensors(
+    smi_nic_ctx_t ctx, uint64_t device,
+    std::vector<amd::smi::nic::hwmon::SensorRecord_t>* records) {
+  if (!ctx || !records) {
+    return SMI_NIC_STATUS_WRONG_PARAM;
+  }
+
+  auto* nic_system = get_nic_system_from_context(ctx);
+  if (!nic_system) {
+    return SMI_NIC_STATUS_NOT_INIT;
+  }
+
+  std::lock_guard<std::mutex> lock(ctx->ctx_mutex);
+  const SmiNic* nic = nic_system->get_nic_by_bdf(device);
+  if (!nic) {
+    return SMI_NIC_STATUS_NOT_FOUND;
+  }
+
+  // The scan allocates strings and vectors; keep a throw off the C ABI boundary.
+  try {
+    *records = nic->hwmon_sensors();
+  } catch (const std::bad_alloc&) {
+    return SMI_NIC_STATUS_NO_RESOURCE;
+  } catch (...) {
+    return SMI_NIC_STATUS_ERROR;
+  }
+  return SMI_NIC_STATUS_SUCCESS;
+}
