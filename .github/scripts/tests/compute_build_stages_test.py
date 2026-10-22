@@ -217,6 +217,86 @@ class ComputeBuildStagesTest(unittest.TestCase):
             "",
         )
 
+    def _install_alias_topology(self):
+        """Fake topology that resolves aliases and maps stages per artifact.
+
+        Mirrors the pinned TheRock topology for the projects used below: clr and
+        hip are source paths of core-hip, which needs compiler-runtime and
+        runtime-tests and builds on Windows; hrr has no alias of its own.
+        """
+        aliases = {"clr": "core-hip", "hip": "core-hip", "rdc": "rdc"}
+        stages = {
+            "core-hip": {"compiler-runtime", "runtime-tests"},
+            "rdc": {"compiler-runtime", "dctools-core"},
+        }
+        mod = types.ModuleType("_therock_utils.build_topology")
+
+        class _Topo:
+            artifacts = {
+                "core-hip": types.SimpleNamespace(disable_platforms=[]),
+                "rdc": types.SimpleNamespace(disable_platforms=["windows"]),
+            }
+
+            def get_all_stage_names(self):
+                return {
+                    "compiler-runtime",
+                    "runtime-tests",
+                    "dctools-core",
+                    "math-libs",
+                    "comm-libs",
+                }
+
+            def get_stages_for_artifacts(self, artifacts):
+                return set().union(*(stages.get(a, set()) for a in artifacts))
+
+            def resolve_alias_to_artifact(self, project):
+                return aliases.get(project)
+
+        mod.get_topology = lambda: _Topo()
+        pkg = types.ModuleType("_therock_utils")
+        pkg.__path__ = []
+        patcher = patch.dict(
+            sys.modules,
+            {"_therock_utils": pkg, "_therock_utils.build_topology": mod},
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_hrr_only_builds_core_hip_stages_and_keeps_windows(self):
+        # hrr is compiled into amdhip64, so it resolves through clr to core-hip:
+        # HIP's stages only, and Windows stays on.
+        self._install_alias_topology()
+        self.assertEqual(
+            cbs.compute_build_stages("projects/hrr", "_therock"),
+            ["compiler-runtime", "runtime-tests"],
+        )
+        with self.assertLogs(cbs.logger, level="INFO") as logs:
+            self.assertEqual(
+                cbs.compute_windows_families("projects/hrr", "_therock"), ""
+            )
+        self.assertIn(
+            "INFO:compute_build_stages:hrr builds on Windows -> keep Windows",
+            logs.output,
+        )
+
+    def test_hrr_with_clr_builds_everything(self):
+        # clr is a full-build project; adding hrr must not narrow it.
+        self._install_alias_topology()
+        self.assertEqual(
+            cbs.compute_build_stages("projects/hrr,projects/clr", "_therock"), []
+        )
+        self.assertEqual(
+            cbs.compute_windows_families("projects/hrr,projects/clr", "_therock"), ""
+        )
+
+    def test_hrr_with_unknown_project_builds_everything(self):
+        # The hrr alias must not weaken the unknown-project fail-safe.
+        self._install_alias_topology()
+        for projects in ("projects/unknown", "projects/hrr,projects/unknown"):
+            with self.subTest(projects=projects):
+                self.assertEqual(cbs.compute_build_stages(projects, "_therock"), [])
+                self.assertEqual(cbs.compute_windows_families(projects, "_therock"), "")
+
     def test_windows_empty_changed_projects_keeps_windows(self):
         self.assertEqual(cbs.compute_windows_families("", "_therock"), "")
 

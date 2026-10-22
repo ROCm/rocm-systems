@@ -74,6 +74,25 @@ FULL_BUILD_PROJECTS = {
     "roctracer",
 }
 
+# Projects that have no artifact of their own in TheRock's topology but are
+# compiled into another project's artifact. Each maps to the topology alias of
+# that project, so TheRock still derives the stages and platforms. These are
+# applied only when resolving against the topology, after the full-build check,
+# so the alias target's FULL_BUILD_PROJECTS entry does not apply to them.
+#
+# hrr: projects/clr/hipamd/src/hrr/CMakeLists.txt compiles the capture sources
+# into amdhip64 on every platform and includes projects/hrr/include, so an
+# hrr-only change needs exactly what HIP's artifact (core-hip) needs, Windows
+# included.
+TOPOLOGY_ALIASES = {
+    "hrr": "clr",
+}
+
+
+def _resolve_artifact(topology, project: str) -> Optional[str]:
+    """Resolve a project to its TheRock artifact, honouring TOPOLOGY_ALIASES."""
+    return topology.resolve_alias_to_artifact(TOPOLOGY_ALIASES.get(project, project))
+
 
 def _parse_projects(changed_projects: str) -> List[str]:
     """Normalize 'projects/clr,projects/hip' -> ['clr', 'hip']."""
@@ -137,7 +156,7 @@ def compute_build_stages(
     # resolve_alias_to_artifact() (which understands artifact names, subproject
     # aliases from artifact_subprojects.json, split_databases, and BUILD_TOPOLOGY
     # source_paths) and then map artifacts -> stages with get_stages_for_artifacts().
-    resolved = {p: topology.resolve_alias_to_artifact(p) for p in projects}
+    resolved = {p: _resolve_artifact(topology, p) for p in projects}
     unknown = [p for p, art in resolved.items() if art is None]
     if unknown:
         logger.info(f"Unrecognized project(s) {sorted(unknown)} -> build all stages")
@@ -189,7 +208,7 @@ def compute_windows_families(
         return ""
 
     for project in projects:
-        artifact = topology.resolve_alias_to_artifact(project)
+        artifact = _resolve_artifact(topology, project)
         if artifact is None:
             logger.info(f"Unrecognized project {project} -> keep Windows")
             return ""
