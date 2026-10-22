@@ -770,7 +770,10 @@ def main(argv: list[str] | None = None) -> int:
             # Revalidate all editable snapshots before starting the next analysis.
             for path, state in states.items():
                 ensure_unchanged(path, state.data)
-            with tempfile.TemporaryDirectory(prefix="clang-tidy-fixes-") as temporary:
+            # Not merged: parenthesized `with` needs Python 3.9+ and this targets py38
+            with tempfile.TemporaryDirectory(  # noqa: SIM117
+                prefix="clang-tidy-fixes-"
+            ) as temporary:
                 with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
                     futures = [
                         pool.submit(
