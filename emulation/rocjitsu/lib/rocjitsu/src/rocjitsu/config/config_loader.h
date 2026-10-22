@@ -368,6 +368,21 @@ util::FailureOr<LoadedConfig> load_config_from_string(const std::string &json,
                                                       util::DiagnosticEmitter emit_error,
                                                       uint32_t host_threads);
 
+/// @brief Load simulation config text with caller-owned asynchronous execution resources.
+/// @details This overload takes its helper allocation from the caller. A null resource explicitly
+/// disables asynchronous helpers. The loaded CUs share the supplied resource, which is useful
+/// when several independently loaded topologies must use one bounded helper pool.
+/// @param json JSON configuration string.
+/// @param schema_text FlatBuffers schema text (the .fbs content).
+/// @param emit_error Destination for failure diagnostics.
+/// @param host_threads Affinity width for automatic selection; zero gives a budget of one.
+/// @param async_resources Shared asynchronous execution resources, or null to disable helpers.
+/// @returns LoadedConfig with engine parameters and built topology, or failure.
+util::FailureOr<LoadedConfig> load_config_from_string(
+    const std::string &json, const std::string &schema_text, util::DiagnosticEmitter emit_error,
+    uint32_t host_threads,
+    std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources> async_resources);
+
 /// Build only the selected local node. A nonempty node_id must agree with a
 /// local_node field in the JSON, if one exists. An empty node_id uses local_node;
 /// if neither selects a node, the graph must contain exactly one node. This
