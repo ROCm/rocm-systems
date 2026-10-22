@@ -145,16 +145,13 @@ endif()
 add_rccl_test(all_gather)
 add_rccl_test(all_reduce)
 add_rccl_test(alltoall)
-if (ENABLE_ROCSHMEM_GIN AND TARGET roc::rocshmem)
+if (ENABLE_ROCSHMEM_GIN)
     target_compile_definitions(alltoall_perf PRIVATE ENABLE_ROCSHMEM_GIN)
     target_compile_options(alltoall_perf PRIVATE -fgpu-rdc $<$<CONFIG:Debug>:-ggdb -O0>)
-    # --whole-archive: librccl.so (ENABLE_ROCSHMEM_GIN) leaves rocshmem host
-    # symbols unresolved (--allow-shlib-undefined).  The executable must pull
-    # in ALL rocshmem symbols (not just those it references directly) so that
-    # -rdynamic exports them for librccl.so to resolve at runtime.
-    target_link_libraries(alltoall_perf PRIVATE
-        -Wl,--whole-archive roc::rocshmem -Wl,--no-whole-archive)
-    target_link_options(alltoall_perf PRIVATE -fgpu-rdc --hip-link -rdynamic)
+    # librccl.so is self-contained for GIN (no unresolved rocshmem host symbols),
+    # so the test needs neither --whole-archive roc::rocshmem nor -rdynamic. Keep
+    # -fgpu-rdc --hip-link for the GIN device kernels.
+    target_link_options(alltoall_perf PRIVATE -fgpu-rdc --hip-link)
 
     # GIN-SDMA hybrid AllGather (all_gather_perf -D 3): same device-RDC link as
     # alltoall_perf so the GinHybridAllGatherKernel resolves the GIN device backend.
@@ -162,38 +159,38 @@ if (ENABLE_ROCSHMEM_GIN AND TARGET roc::rocshmem)
       target_compile_definitions(all_gather_perf PRIVATE ENABLE_DEVICE_API)
     endif()
     target_compile_options(all_gather_perf PRIVATE -fgpu-rdc $<$<CONFIG:Debug>:-ggdb -O0>)
-    target_link_libraries(all_gather_perf PRIVATE
-        -Wl,--whole-archive roc::rocshmem -Wl,--no-whole-archive)
-    target_link_options(all_gather_perf PRIVATE -fgpu-rdc --hip-link -rdynamic)
+    target_link_options(all_gather_perf PRIVATE -fgpu-rdc --hip-link)
 endif()
-if (ENABLE_ROCSHMEM_GIN AND TARGET roc::rocshmem AND RCCL_SOURCE_DIR)
+if (ENABLE_ROCSHMEM_GIN AND RCCL_SOURCE_DIR)
     add_executable(gin_rocshmem_gda_factory_test ${CMAKE_CURRENT_SOURCE_DIR}/gin_rocshmem_gda_factory_test.cu)
     set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/gin_rocshmem_gda_factory_test.cu PROPERTIES LANGUAGE CXX)
     target_include_directories(gin_rocshmem_gda_factory_test PRIVATE
         ${ROCM_PATH}/include
         ${RCCL_SOURCE_DIR}/src/include
-        ${ROCSHMEM_SOURCE_DIR}/src
-        ${ROCSHMEM_SOURCE_DIR}/include
-        ${ROCSHMEM_INSTALL_DIR}/include
     )
     target_compile_options(gin_rocshmem_gda_factory_test PRIVATE -fgpu-rdc -xhip)
+    # The GIN QP C-API (rocshmem_gin_*) and all QP device headers resolve from
+    # roc::rccl (its installed nccl_device/gin/rocshmem_gda/ tree). Do NOT add the
+    # rocSHMEM source/install include dirs: they ship rocshmem_config.h with
+    # USE_CONSTMEM=ON, which would compile the __constant__ constmem device path
+    # and leave rocshmem::constmem undefined at link. rccl's installed config
+    # (USE_CONSTMEM=OFF) selects the constmem-free per-instance provider path.
+    # No --whole-archive roc::rocshmem / -rdynamic needed.
     target_link_libraries(gin_rocshmem_gda_factory_test PRIVATE
-        roc::rccl -Wl,--whole-archive roc::rocshmem -Wl,--no-whole-archive
+        roc::rccl
         $<TARGET_NAME_IF_EXISTS:MPI::MPI_CXX>)
-    target_link_options(gin_rocshmem_gda_factory_test PRIVATE -fgpu-rdc --hip-link -rdynamic)
+    target_link_options(gin_rocshmem_gda_factory_test PRIVATE -fgpu-rdc --hip-link)
     set_target_properties(gin_rocshmem_gda_factory_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 endif()
 add_rccl_test(alltoallv)
 add_rccl_test(broadcast)
-if (ENABLE_ROCSHMEM_GIN AND TARGET roc::rocshmem)
+if (ENABLE_ROCSHMEM_GIN)
     # GIN-SDMA hybrid Broadcast (broadcast_perf -D 3): same device-RDC link as
     # alltoall_perf/all_gather_perf so the Gin*BroadcastKernel variants resolve
     # the GIN device backend (SDMA puts + LSA/LL peer stores).
     target_compile_definitions(broadcast_perf PRIVATE ENABLE_ROCSHMEM_GIN)
     target_compile_options(broadcast_perf PRIVATE -fgpu-rdc $<$<CONFIG:Debug>:-ggdb -O0>)
-    target_link_libraries(broadcast_perf PRIVATE
-        -Wl,--whole-archive roc::rocshmem -Wl,--no-whole-archive)
-    target_link_options(broadcast_perf PRIVATE -fgpu-rdc --hip-link -rdynamic)
+    target_link_options(broadcast_perf PRIVATE -fgpu-rdc --hip-link)
 endif()
 add_rccl_test(gather)
 add_rccl_test(hypercube)
