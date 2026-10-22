@@ -9,6 +9,12 @@ Speed-of-Light is the first panel to read after profiling. It puts every
 headline metric next to the hardware peak for the current GPU, so one table
 says whether a kernel is near any limit at all.
 
+## Prerequisites
+
+- Linux with `rocprof-compute` on `PATH`, and an existing workload directory. ROCm 6.2 and newer ship the tool. A source build needs ROCm 5.7.1 or newer; see [source install](../../docs/install/source-install.rst). Use the ROCm install the user already has. There is no default container image to guess.
+- Supported accelerators are the Instinct MI100, MI200, MI300, and MI350 series, plus the client APUs in [compatible accelerators](../../docs/reference/compatible-accelerators.rst). MI50 and MI60 are not supported. CDNA and RDNA use different Speed-of-Light references, linked below.
+- `HIP_VISIBLE_DEVICES` chooses the GPU a new collection runs on. An empty value hides every device, and `CUDA_VISIBLE_DEVICES` is mapped onto it. Do not set `HSA_OVERRIDE_GFX_VERSION` to force an unsupported architecture. The printed peaks would then describe the wrong GPU.
+
 Run `rocprof-compute analyze --help` before choosing flags.
 
 ## 1. Get the panel

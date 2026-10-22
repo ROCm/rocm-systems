@@ -4,9 +4,9 @@
 
 """Run the skill evaluation datasets through Claude Code.
 
-There is no CI for skills, so this is the manual gate: run it before a release
-to check that each skill still routes on the prompts it should and stays quiet
-on the ones it should not.
+Structural checks run in CI. This script is the manual gate for routing and
+behavior: run it before a release to check that each skill still routes on the
+prompts it should and stays quiet on the ones it should not.
 
 Usage:
     ./skills/run_evals.py                      # routing only, no tools

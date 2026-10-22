@@ -77,6 +77,12 @@
       "id": "pcs-cuda-sampling",
       "skill_should_trigger": false,
       "prompt": "do instruction level sampling on my CUDA kernel"
+    },
+    {
+      "id": "pcs-rocprofv3-direct",
+      "skill_should_trigger": false,
+      "note": "Direct rocprofv3 PC sampling belongs to the rocprofiler-sdk skill, not rocprof-compute.",
+      "prompt": "run rocprofv3 with --pc-sampling-beta-enabled on my HIP binary and analyze the json"
     }
   ]
 }

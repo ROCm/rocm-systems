@@ -64,8 +64,14 @@ skills, so they keep working offline.
 
 ## Tests
 
-There is no CI for skills. `run_evals.py` is the gate, and it is meant to be
-run by hand before a release:
+Pull requests that touch these skills, or the docs they link, run structural
+checks through `.github/workflows/rocprofiler-compute-skills.yml`. That workflow
+calls the AMD skillscope reusable workflow. It does not grade routing or
+behavior on every pull request: routing needs a product-owned model API key,
+and behavior needs a supported GPU. Dispatch the workflow with routing enabled
+for a manual routing run. Grade behavior on hardware with `run_evals.py`.
+
+`run_evals.py` remains the release gate:
 
 ```bash
 ./skills/run_evals.py --list                         # validate the datasets

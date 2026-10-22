@@ -9,6 +9,12 @@ Start here for any "profile this" or "why is this kernel slow" request. This
 skill collects counters, narrows a workload down to one kernel, and identifies
 what limits it. Hand off to a focused skill once the limit is clear.
 
+## Prerequisites
+
+- Linux with `rocprof-compute` on `PATH`. ROCm 6.2 and newer ship it. A source build needs ROCm 5.7.1 or newer; see [source install](../../docs/install/source-install.rst). Use the ROCm install the user already has. There is no default container image to guess.
+- Supported accelerators are the Instinct MI100, MI200, MI300, and MI350 series, plus the client APUs in [compatible accelerators](../../docs/reference/compatible-accelerators.rst). MI50 and MI60 are not supported. Read `GPU Arch` from `rocprof-compute --specs` before promising a feature the table does not list.
+- `HIP_VISIBLE_DEVICES` chooses the GPU the application runs on. An empty value hides every device, and `CUDA_VISIBLE_DEVICES` is mapped onto it. Do not set `HSA_OVERRIDE_GFX_VERSION` to force an unsupported architecture. The profiler then collects the wrong counters.
+
 Run `rocprof-compute profile --help` and `rocprof-compute analyze --help`
 before choosing flags. Options change between releases; do not guess one.
 
@@ -25,7 +31,8 @@ different questions. Choose by what the user is asking, not by difficulty.
 Counters are the default starting point because they cover the whole kernel
 cheaply. Go straight to `rocprof-compute-pc-sampling` when the user asks about instructions,
 source lines, or stall reasons, and use both when an architectural limit needs
-to be traced back to the code that causes it.
+to be traced back to the code that causes it. A request to run `rocprofv3`
+itself is neither this skill nor `rocprof-compute-pc-sampling`.
 
 ## 1. Check the environment
 
