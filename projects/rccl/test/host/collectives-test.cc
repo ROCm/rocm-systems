@@ -4,8 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host-only microtests for src/collectives.cc and the alltoallv_meta.h helpers it includes. Its externals
-// are in fakes/collectives_micro_fakes.cc; ncclEnqueueCheck records the ncclInfo each entry point builds.
+// Host-only microtests for src/collectives.cc and the alltoallv_meta.h helpers it includes. Its externals come
+// from their owners' fakes files; SharedHooks routes them into `fake` for the life of a test.
 
 #include <gtest/gtest.h>
 
@@ -14,17 +14,27 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <functional>
+#include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
 #include "ScopedHook.h"
 #include "fakes/bootstrap_stubs.h"
-#include "fakes/collectives_micro_fakes.h"
+#include "fakes/ce_fakes.h"
+#include "fakes/collconfig_fakes.h"
+#include "fakes/comm_fakes.h"
+#include "fakes/dda_fakes.h"
 #include "fakes/dev_runtime_fakes.h"
+#include "fakes/enqueue_fakes.h"
+#include "fakes/group_fakes.h"
 #include "fakes/hip_fakes.h"
+#include "fakes/nccl_fakes.h"
 #include "fakes/nccl_stubs.h"
+#include "fakes/rccl_wrap_fakes.h"
 #include "fakes/recorder_fakes.h"
 #include "fakes/strongstream_stubs.h"
 #include "fakes/sym_kernels_fakes.h"
@@ -36,19 +46,247 @@
 
 namespace {
 
-using namespace collectives_micro;
-
 constexpr int kRank = 1;
 constexpr int kNRanks = 4;
 constexpr int kCudaDev = 3;
 constexpr size_t kCount = 32;
 
-bool Logged(ncclDebugLogLevel level, const std::string& needle) {
-  for (const LogLine& line : fake.log) {
-    if (line.level == level && line.text.find(needle) != std::string::npos) return true;
-  }
-  return false;
+struct Enqueued {
+  ncclInfo info;
+  bool directReduceScatter;
+  std::vector<size_t> sizes;  // info.sizes points at the caller's stack, so snapshot it
+};
+
+struct Recorded {
+  rccl::rcclCall_t type;
+  const void* sendbuff;
+  void* recvbuff;
+  size_t count;
+  int root;
+  const size_t* sendcounts;
+  const size_t* rdispls;
+};
+
+struct Select {
+  std::string coll;
+  const void* sendbuff;
+  void* recvbuff;
+  size_t count;
+  ncclRedOp_t op;
+  hipStream_t stream;
+  bool query;
+  bool hint;
+};
+
+struct Addon {
+  std::string fn;
+  const void* sendbuff;
+  void* recvbuff;
+  size_t count;
+  ncclDataType_t datatype;
+  ncclRedOp_t op;
+  ncclComm* comm;
+  hipStream_t stream;
+};
+
+struct DdaEnabledCall {
+  size_t totalBytes;
+  size_t threshold;
+  bool query;
+};
+
+struct SymkQuery {
+  ncclFunc_t coll;
+  int red;
+  ncclDataType_t type;
+  size_t nElts;
+};
+
+struct CeEligibility {
+  ncclDataType_t datatype;
+  ncclSymRegType_t regType;
+  ncclDevrWindow* sendWin;
+  ncclDevrWindow* recvWin;
+  bool sysmem;
+  bool capturing;
+};
+
+struct P2p {
+  bool send;
+  const void* buff;
+  size_t count;
+  ncclDataType_t datatype;
+  int peer;
+};
+
+struct Bcast {
+  const void* sendbuff;
+  void* recvbuff;
+  size_t count;
+  int root;
+};
+
+struct CeAr {
+  const void* sendbuff;
+  void* recvbuff;
+  size_t count;
+  ncclDataType_t datatype;
+  ncclRedOp_t op;
+  ncclDevrWindow* win;
+  ncclCeCollArgs* args;
+};
+
+struct KernelLaunch {
+  const void* fn;
+  dim3 grid;
+  dim3 block;
+  size_t shmem;
+  hipStream_t stream;
+  hipEvent_t stopEvent;
+  const char* src;
+  char* dst;
+  size_t rankOffset;
+  int cols;
+  int rows;
+};
+
+// Every seam's knobs and observations; SetUp resets them.
+struct Fakes {
+  std::vector<std::string> trace;  // dependency calls in issue order
+  std::vector<Enqueued> enqueued;
+  std::deque<ncclResult_t> enqueueResults;  // consumed per call; empty means success
+  const ncclCollConfig_t* parsedConfig = nullptr;
+  ncclResult_t parseResult = ncclSuccess;
+  std::vector<Recorded> recorded;
+  ncclResult_t recordResult = ncclSuccess;
+  std::vector<Select> selects;
+  rcclCollDecision decision{NCCL_ALGO_RING};
+  ncclResult_t selectResult = ncclSuccess;
+  ncclResult_t addonBeginResult = ncclSuccess;
+  ncclResult_t addonEndSeen = ncclInternalError;
+  std::vector<Addon> addons;
+  ncclResult_t addonResult = ncclSuccess;
+  std::vector<int> algoNamesAsked;
+  std::vector<DdaEnabledCall> ddaEnabledCalls;
+  bool ddaEnabled = false;
+  size_t ddaThreshold = 0;
+  std::vector<ncclFunc_t> thresholdFuncs;
+  std::function<bool(ncclComm*, size_t)> useAgDirect;
+  std::function<bool(ncclComm*, size_t)> useRsDirect;
+  ncclResult_t symkInitResult = ncclSuccess;
+  bool symkAvailable = true;
+  std::vector<SymkQuery> symkQueries;
+  std::map<const void*, ncclDevrWindow*> windows;
+  const void* findWindowFailPtr = nullptr;
+  std::set<ncclDevrWindow*> sysmemWindows;
+  ncclSymRegType_t regType = ncclSymSendNonregRecvNonreg;
+  ncclResult_t regTypeResult = ncclSuccess;
+  std::vector<std::pair<ncclDevrWindow*, ncclDevrWindow*>> regTypeArgs;
+  std::vector<CeEligibility> ceEligCalls;
+  std::vector<CeEligibility> hierEligCalls;
+  bool ceElig = false;
+  bool hierElig = false;
+  bool capturing = false;
+  ncclResult_t captureResult = ncclSuccess;
+  std::vector<int> captureModes;
+  std::vector<size_t> memAllocSizes;
+  std::vector<void*> memAllocs;
+  int memAllocFailAt = 0;
+  int currentDevice = 9;
+  hipError_t getDeviceResult = hipSuccess;
+  int setDeviceCalls = 0;
+  int setDeviceFailAt = 0;
+  std::deque<hipError_t> memcpyResults;
+  hipError_t syncResult = hipSuccess;
+  hipError_t lastError = hipSuccess;
+  ncclResult_t groupStartResult = ncclSuccess;
+  ncclResult_t groupEndResult = ncclSuccess;
+  std::vector<P2p> p2ps;
+  int p2pFailAt = 0;
+  std::map<int, std::vector<size_t>> peerMeta;  // copied into an ncclRecv buffer from that peer
+  std::vector<Bcast> broadcasts;
+  ncclResult_t commCountResult = ncclSuccess;
+  ncclResult_t userRankResult = ncclSuccess;
+  ncclResult_t profStartResult = ncclSuccess;
+  ncclCeCollArgs profArgs{};
+  std::vector<CeAr> ceArs;
+  ncclResult_t ceArResult = ncclSuccess;
+  std::vector<uint8_t> peerFlags;
+  std::vector<uint8_t> gatheredOwnFlag;
+  ncclResult_t bootstrapResult = ncclSuccess;
+  std::vector<KernelLaunch> launches;
+};
+Fakes fake;
+
+ncclResult_t RecordAddon(const char* fn, const void* s, void* r, size_t n, ncclDataType_t t, ncclRedOp_t o,
+                         ncclComm* c, hipStream_t st) {
+  fake.trace.push_back(fn);
+  fake.addons.push_back({fn, s, r, n, t, o, c, st});
+  return fake.addonResult;
 }
+
+void RecordLaunch(const void* fn, dim3 grid, dim3 block, void** args, size_t shmem, hipStream_t stream,
+                  hipEvent_t stop) {
+  fake.trace.push_back("launch");
+  fake.launches.push_back({fn, grid, block, shmem, stream, stop, *static_cast<const char**>(args[0]),
+                           *static_cast<char**>(args[1]), *static_cast<size_t*>(args[2]),
+                           *static_cast<int*>(args[3]), *static_cast<int*>(args[4])});
+}
+
+ncclResult_t RecordP2p(bool send, const void* buff, size_t count, ncclDataType_t datatype, int peer) {
+  fake.p2ps.push_back({send, buff, count, datatype, peer});
+  return static_cast<int>(fake.p2ps.size()) == fake.p2pFailAt ? ncclInternalError : ncclSuccess;
+}
+
+ncclResult_t RecordSelect(const char* coll, const void* sendbuff, void* recvbuff, size_t count, ncclRedOp_t op,
+                          hipStream_t stream, bool query, bool hint, rcclCollDecision* d) {
+  fake.trace.push_back("select");
+  fake.selects.push_back({coll, sendbuff, recvbuff, count, op, stream, query, hint});
+  *d = fake.decision;
+  return fake.selectResult;
+}
+
+}  // namespace
+
+// api_trace.cc's NCCL_API dispatch symbols. Their owner, fakes/api_trace_fakes.cc, forwards to init.cc's _impl
+// functions, which this binary does not compile, so the AlltoAllv tests define the three they observe here.
+ncclResult_t ncclSend(const void* buff, size_t count, ncclDataType_t datatype, int peer, ncclComm_t, hipStream_t) {
+  return RecordP2p(true, buff, count, datatype, peer);
+}
+ncclResult_t ncclRecv(void* buff, size_t count, ncclDataType_t datatype, int peer, ncclComm_t, hipStream_t) {
+  auto it = fake.peerMeta.find(peer);
+  if (it != fake.peerMeta.end()) std::memcpy(buff, it->second.data(), it->second.size() * sizeof(size_t));
+  return RecordP2p(false, buff, count, datatype, peer);
+}
+ncclResult_t ncclBroadcast(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t, int root, ncclComm_t,
+                           hipStream_t) {
+  fake.broadcasts.push_back({sendbuff, recvbuff, count, root});
+  return ncclSuccess;
+}
+
+#if defined(ENABLE_ROCSHMEM_GIN)
+// The GIN-SDMA launchers (src/algorithms/gin/sdma/*.cu) have no fakes file yet.
+ncclResult_t ncclAllToAllGinSdma(const void* s, void* r, size_t n, ncclDataType_t t, ncclComm* c, hipStream_t st) {
+  return RecordAddon("ncclAllToAllGinSdma", s, r, n, t, ncclNumOps, c, st);
+}
+ncclResult_t ncclAllReduceGinSdma(const void* s, void* r, size_t n, ncclDataType_t t, ncclRedOp_t o, ncclComm* c,
+                                  hipStream_t st) {
+  return RecordAddon("ncclAllReduceGinSdma", s, r, n, t, o, c, st);
+}
+#endif
+
+namespace {
+
+using DdaSig = ncclResult_t(const void*, void*, size_t, ncclDataType_t, ncclComm*, hipStream_t);
+using DdaOpSig = ncclResult_t(const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, ncclComm*, hipStream_t);
+#define ADDON_HOOK(hook, fn)                                                                           \
+  ScopedHook<DdaSig> hook##_{g_##hook,                                                                 \
+                             [](const void* s, void* r, size_t n, ncclDataType_t t, ncclComm* c,      \
+                                hipStream_t st) { return RecordAddon(fn, s, r, n, t, ncclNumOps, c, st); }};
+#define ADDON_OP_HOOK(hook, fn)                                                                        \
+  ScopedHook<DdaOpSig> hook##_{g_##hook,                                                               \
+                               [](const void* s, void* r, size_t n, ncclDataType_t t, ncclRedOp_t o,   \
+                                  ncclComm* c, hipStream_t st) { return RecordAddon(fn, s, r, n, t, o, c, st); }};
 
 // The shared fakes' hooks, routed into `fake` for the life of a test.
 struct SharedHooks {
@@ -62,10 +300,10 @@ struct SharedHooks {
     fake.currentDevice = dev;
     return hipSuccess;
   }};
+  // hip_fakes.cc records each copy in g_hipMemcpyAsyncArgs; this adds the order, the scripted result and the copy.
   ScopedHook<hipError_t(void*, const void*, size_t, hipMemcpyKind, hipStream_t)> memcpyAsync{
-      g_hipMemcpyAsync, [](void* dst, const void* src, size_t bytes, hipMemcpyKind kind, hipStream_t stream) {
+      g_hipMemcpyAsync, [](void* dst, const void* src, size_t bytes, hipMemcpyKind, hipStream_t) {
         fake.trace.push_back("memcpy");
-        fake.memcpys.push_back({dst, src, bytes, kind, stream});
         if (dst == nullptr || src == nullptr) {
           ADD_FAILURE() << "hipMemcpyAsync with a null pointer";
           return hipErrorInvalidValue;
@@ -148,12 +386,167 @@ struct SharedHooks {
     }
     return ncclSuccess;
   }};
+
+  // enqueue.cc
+  ScopedHook<ncclResult_t(ncclInfo*)> enqueueCheck{g_enqueueCheck, [](ncclInfo* info) {
+    fake.trace.push_back(std::string("enqueue ") + info->opName);
+    std::vector<size_t> sizes;
+    if (info->sizes != nullptr) {
+      const size_t n = info->comm->nRanks;
+      sizes.assign(info->sizes, info->sizes + 4 * n * n);
+    }
+    fake.enqueued.push_back({*info, info->comm != nullptr && info->comm->enableDirectReduceScatter, sizes});
+    if (fake.enqueueResults.empty()) return ncclSuccess;
+    ncclResult_t res = fake.enqueueResults.front();
+    fake.enqueueResults.pop_front();
+    return res;
+  }};
+  ScopedHook<void(const ncclInfo&)> logCollInfo{
+      g_rcclLogCollInfo, [](const ncclInfo& info) { fake.trace.push_back(std::string("log ") + info.opName); }};
+  ScopedHook<ncclResult_t(ncclComm*, hipStream_t, rcclAddonLaunchState*)> addonBegin{
+      g_rcclAddonLaunchBegin, [](ncclComm*, hipStream_t, rcclAddonLaunchState*) {
+        fake.trace.push_back("begin");
+        return fake.addonBeginResult;
+      }};
+  ScopedHook<ncclResult_t(ncclComm*, hipStream_t, const rcclAddonLaunchState&, ncclResult_t)> addonEnd{
+      g_rcclAddonLaunchEnd, [](ncclComm*, hipStream_t, const rcclAddonLaunchState&, ncclResult_t res) {
+        fake.trace.push_back("end");
+        fake.addonEndSeen = res;
+        return res;
+      }};
+
+  // config/collconfig.cc
+  ScopedHook<ncclResult_t(const ncclCollConfig_t*, ncclCollConfig_t*)> parseConfig{
+      g_parseCollConfig, [](const ncclCollConfig_t* config, ncclCollConfig_t* internal) {
+        fake.parsedConfig = config;
+        if (fake.parseResult != ncclSuccess) return fake.parseResult;
+        *internal = *config;
+        return ncclSuccess;
+      }};
+
+  // rccl_wrap.cc
+  ScopedHook<ncclResult_t(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, hipStream_t, bool, bool,
+                          rcclCollDecision*)>
+      selectAllReduce{g_rcclSelectAllReduce, [](ncclComm*, const void* s, void* r, size_t n, ncclDataType_t,
+                                                ncclRedOp_t op, hipStream_t st, bool q, bool h, rcclCollDecision* d) {
+        return RecordSelect("AllReduce", s, r, n, op, st, q, h, d);
+      }};
+  ScopedHook<ncclResult_t(ncclComm*, const void*, void*, size_t, ncclDataType_t, hipStream_t, bool, bool,
+                          rcclCollDecision*)>
+      selectAllGather{g_rcclSelectAllGather, [](ncclComm*, const void* s, void* r, size_t n, ncclDataType_t,
+                                                hipStream_t st, bool q, bool h, rcclCollDecision* d) {
+        return RecordSelect("AllGather", s, r, n, ncclNumOps, st, q, h, d);
+      }};
+  ScopedHook<ncclResult_t(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, bool, rcclCollDecision*)>
+      selectReduceScatter{g_rcclSelectReduceScatter, [](ncclComm*, const void* s, void* r, size_t n, ncclDataType_t,
+                                                        ncclRedOp_t op, bool q, rcclCollDecision* d) {
+        return RecordSelect("ReduceScatter", s, r, n, op, nullptr, q, false, d);
+      }};
+  ScopedHook<ncclResult_t(ncclComm*, const void*, void*, size_t, ncclDataType_t, hipStream_t, bool, bool,
+                          rcclCollDecision*)>
+      selectAlltoAll{g_rcclSelectAlltoAll, [](ncclComm*, const void* s, void* r, size_t n, ncclDataType_t,
+                                              hipStream_t st, bool q, bool h, rcclCollDecision* d) {
+        return RecordSelect("AlltoAll", s, r, n, ncclNumOps, st, q, h, d);
+      }};
+  ScopedHook<bool(const ncclComm*, size_t, size_t, bool, const char*)> ddaEnabled{
+      g_rcclDdaEnabled, [](const ncclComm*, size_t totalBytes, size_t threshold, bool query, const char*) {
+        fake.ddaEnabledCalls.push_back({totalBytes, threshold, query});
+        return fake.ddaEnabled;
+      }};
+  ScopedHook<size_t(const ncclComm*, ncclFunc_t)> ddaThreshold{g_rcclDdaEntryThreshold,
+                                                               [](const ncclComm*, ncclFunc_t func) {
+                                                                 fake.thresholdFuncs.push_back(func);
+                                                                 return fake.ddaThreshold;
+                                                               }};
+  ScopedHook<ncclResult_t(int, const char**)> algoName{g_rcclGetAlgoName, [](int algo, const char** name) {
+    fake.algoNamesAsked.push_back(algo);
+    *name = "ADDON";
+    return ncclSuccess;
+  }};
+  ScopedHook<bool(ncclComm*, size_t&)> useAgDirect{g_rcclUseAllGatherDirect, [](ncclComm* comm, size_t& msgSize) {
+    return fake.useAgDirect && fake.useAgDirect(comm, msgSize);
+  }};
+  ScopedHook<bool(ncclComm*, size_t&)> useRsDirect{g_rcclUseReduceScatterDirect, [](ncclComm* comm, size_t& msgSize) {
+    return fake.useRsDirect && fake.useRsDirect(comm, msgSize);
+  }};
+
+  // ce_coll.cc
+  ScopedHook<bool(ncclComm*, ncclDataType_t, ncclSymRegType_t, bool, bool)> ceElig{
+      g_ceAlltoAllvEligible, [](ncclComm*, ncclDataType_t datatype, ncclSymRegType_t regType, bool sysmem,
+                                bool capturing) {
+        fake.ceEligCalls.push_back({datatype, regType, nullptr, nullptr, sysmem, capturing});
+        return fake.ceElig;
+      }};
+  ScopedHook<bool(ncclComm*, ncclDataType_t, ncclSymRegType_t, ncclDevrWindow*, ncclDevrWindow*, bool, bool)> hierElig{
+      g_hierCeAlltoAllvEligible, [](ncclComm*, ncclDataType_t datatype, ncclSymRegType_t regType,
+                                    ncclDevrWindow* sendWin, ncclDevrWindow* recvWin, bool sysmem, bool capturing) {
+        fake.hierEligCalls.push_back({datatype, regType, sendWin, recvWin, sysmem, capturing});
+        return fake.hierElig;
+      }};
+  ScopedHook<ncclResult_t(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, hipStream_t,
+                          ncclDevrWindow*, ncclCeCollArgs*)>
+      ceAllReduce{g_ceAllReduce, [](ncclComm*, const void* sendbuff, void* recvbuff, size_t count,
+                                    ncclDataType_t datatype, ncclRedOp_t op, hipStream_t, ncclDevrWindow* win,
+                                    ncclCeCollArgs* args) {
+        fake.trace.push_back("ceAllReduce");
+        fake.ceArs.push_back({sendbuff, recvbuff, count, datatype, op, win, args});
+        return fake.ceArResult;
+      }};
+
+  // group.cc and init.cc
+  ScopedHook<ncclResult_t()> groupStart{g_ncclGroupStart, [] {
+    fake.trace.push_back("groupStart");
+    return fake.groupStartResult;
+  }};
+  ScopedHook<ncclResult_t()> groupEnd{g_ncclGroupEnd, [] {
+    fake.trace.push_back("groupEnd");
+    return fake.groupEndResult;
+  }};
+  ScopedHook<ncclResult_t(const ncclComm_t, int*)> commCount{g_commCount, [](const ncclComm_t comm, int* count) {
+    *count = comm->nRanks;
+    return fake.commCountResult;
+  }};
+  ScopedHook<ncclResult_t(const ncclComm_t, int*)> userRank{g_commUserRank, [](const ncclComm_t comm, int* rank) {
+    *rank = comm->rank;
+    return fake.userRankResult;
+  }};
+  ScopedHook<ncclResult_t(ncclComm*, ncclCeCollArgs*, hipStream_t)> profStart{
+      g_profilerStartCeCollEvent, [](ncclComm*, ncclCeCollArgs* args, hipStream_t) {
+        fake.trace.push_back("profStart");
+        fake.profArgs = *args;
+        return fake.profStartResult;
+      }};
+  ScopedHook<ncclResult_t(ncclComm*, ncclCeCollArgs*, hipStream_t)> profStop{
+      g_profilerStopCeCollEvent, [](ncclComm*, ncclCeCollArgs*, hipStream_t) {
+        fake.trace.push_back("profStop");
+        return ncclSuccess;
+      }};
+
+  // src/algorithms/dda launchers
+  ADDON_HOOK(allGatherDdaFabricLL, "ncclAllGatherDdaFabricLL")
+  ADDON_HOOK(allGatherDdaFabricLL128, "ncclAllGatherDdaFabricLL128")
+  ADDON_HOOK(allGatherDdaFabric, "ncclAllGatherDdaFabric")
+  ADDON_HOOK(allGatherDdaIpc, "ncclAllGatherDdaIpc")
+  ADDON_HOOK(allToAllDdaFabricLL, "ncclAllToAllDdaFabricLL")
+  ADDON_HOOK(allToAllDdaFabricLL128, "ncclAllToAllDdaFabricLL128")
+  ADDON_HOOK(allToAllDdaFabric, "ncclAllToAllDdaFabric")
+  ADDON_HOOK(allToAllDdaIpc, "ncclAllToAllDdaIpc")
+  ADDON_OP_HOOK(allReduceDdaFabricLL, "ncclAllReduceDdaFabricLL")
+  ADDON_OP_HOOK(allReduceDdaFabricLL128, "ncclAllReduceDdaFabricLL128")
+  ADDON_OP_HOOK(allReduceDdaFabric, "ncclAllReduceDdaFabric")
+  ADDON_OP_HOOK(allReduceDdaIpc, "ncclAllReduceDdaIpc")
+  ADDON_OP_HOOK(reduceScatterDdaFabricLL, "ncclReduceScatterDdaFabricLL")
+  ADDON_OP_HOOK(reduceScatterDdaFabricLL128, "ncclReduceScatterDdaFabricLL128")
+  ADDON_OP_HOOK(reduceScatterDdaFabric, "ncclReduceScatterDdaFabric")
+  ADDON_OP_HOOK(reduceScatterDdaIpc, "ncclReduceScatterDdaIpc")
 };
+#undef ADDON_HOOK
+#undef ADDON_OP_HOOK
 
 class CollectivesMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
-    ResetCollectivesMicroFakes();
+    fake = Fakes{};
     g_recorderSkips.clear();
 
     comm_ = MakeComm(kRank, kNRanks);
@@ -165,6 +558,8 @@ class CollectivesMicrotest : public ::testing::Test {
   void TearDown() override {
     for (void* p : fake.memAllocs) std::free(p);
     fake.memAllocs.clear();
+    ResetHipFakes();       // g_hipMemcpyAsyncArgs
+    ResetRcclWrapFakes();  // g_rcclParamDdaEnable and its call count
   }
 
   std::unique_ptr<ncclComm> MakeComm(int rank, int nRanks) {
@@ -301,18 +696,21 @@ TEST_F(CollectivesMicrotest, AlltoAllPivotEnable_ReadsItsEnvWithDefaultOff) {
 
 // Dispatch helpers
 
+// When DDA is not taken the helper explains why (INFO only); the explanation reads RCCL_DDA_ENABLE unless symk won.
 TEST_F(CollectivesMicrotest, AllReduceDda_SymmetricEligibleNeverTakesDda) {
   fake.ddaEnabled = true;
   EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, true, false, false));
   EXPECT_TRUE(fake.ddaEnabledCalls.empty());
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "AR DDA disqualified: symk eligible"));
+  EXPECT_TRUE(fake.thresholdFuncs.empty());
+  EXPECT_EQ(0, g_rcclParamDdaEnableCalls);
 }
 
 TEST_F(CollectivesMicrotest, AllReduceDda_CeAllowedYieldsOffGfx1250) {
   fake.ddaEnabled = true;
   EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, false, true, false));
   EXPECT_TRUE(fake.ddaEnabledCalls.empty());
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "ceAllReduceAllowed=1 on non-gfx1250"));
+  EXPECT_TRUE(fake.thresholdFuncs.empty());
+  EXPECT_EQ(1, g_rcclParamDdaEnableCalls);
 }
 
 TEST_F(CollectivesMicrotest, AllReduceDda_Gfx1250FabricRunsEvenWhenCeIsAllowed) {
@@ -325,36 +723,45 @@ TEST_F(CollectivesMicrotest, AllReduceDda_Gfx1250FabricRunsEvenWhenCeIsAllowed) 
   EXPECT_EQ(4096u, fake.ddaEnabledCalls[0].threshold);
   EXPECT_FALSE(fake.ddaEnabledCalls[0].query);
   EXPECT_EQ(std::vector<ncclFunc_t>{ncclFuncAllReduce}, fake.thresholdFuncs);
-  EXPECT_TRUE(fake.log.empty());
+  EXPECT_EQ(0, g_rcclParamDdaEnableCalls);
 }
 
-TEST_F(CollectivesMicrotest, AllReduceDda_ExplainsADisabledDda) {
-  fake.ddaEnableParam = 0;
+TEST_F(CollectivesMicrotest, AllReduceDda_RejectionReadsTheDdaEnableParam) {
+  g_rcclParamDdaEnable = 0;
   EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, false, false, false));
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "AR DDA disqualified: RCCL_DDA_ENABLE=0"));
+  EXPECT_EQ(1, g_rcclParamDdaEnableCalls);
+  EXPECT_EQ(1u, fake.ddaEnabledCalls.size());
 }
 
-TEST_F(CollectivesMicrotest, AllReduceDda_ExplainsAMessageOverTheThreshold) {
+TEST_F(CollectivesMicrotest, AllReduceDda_MessageOverTheThresholdIsRejected) {
   fake.ddaThreshold = 64;
   EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat64, false, false, false));
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "AR DDA disqualified: msgBytes=256 > entryThreshold=64"));
+  ASSERT_EQ(1u, fake.ddaEnabledCalls.size());
+  EXPECT_EQ(kCount * 8, fake.ddaEnabledCalls[0].totalBytes);
+  EXPECT_EQ(64u, fake.ddaEnabledCalls[0].threshold);
+  EXPECT_EQ(std::vector<ncclFunc_t>{ncclFuncAllReduce}, fake.thresholdFuncs);
+  EXPECT_EQ(1, g_rcclParamDdaEnableCalls);
 }
 
-TEST_F(CollectivesMicrotest, AllReduceDda_Gfx1250WithCeAllowedFallsToTheThresholdReason) {
+TEST_F(CollectivesMicrotest, AllReduceDda_Gfx1250WithCeAllowedStillAsksDda) {
   SetArch("gfx1250");
   EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, false, true, false));
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "msgBytes=128 > entryThreshold=0"));
+  EXPECT_EQ(1u, fake.ddaEnabledCalls.size());
+  EXPECT_EQ(1, g_rcclParamDdaEnableCalls);
 }
 
-TEST_F(CollectivesMicrotest, AllReduceDda_QueryIsSilent) {
-  EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, true, false, true));
-  EXPECT_TRUE(fake.log.empty());
+TEST_F(CollectivesMicrotest, AllReduceDda_QueryExplainsNothing) {
+  EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, false, false, true));
+  EXPECT_EQ(1u, fake.ddaEnabledCalls.size());
+  EXPECT_EQ(1u, fake.thresholdFuncs.size());
+  EXPECT_EQ(0, g_rcclParamDdaEnableCalls);
 }
 
 TEST_F(CollectivesMicrotest, AllReduceDda_TakesDdaWhenNothingElseServesTheCall) {
   fake.ddaEnabled = true;
   EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, false, false, false));
-  EXPECT_TRUE(fake.log.empty());
+  EXPECT_EQ(1u, fake.thresholdFuncs.size());
+  EXPECT_EQ(0, g_rcclParamDdaEnableCalls);
 }
 
 TEST_F(CollectivesMicrotest, AlltoAllDda_YieldsToCe) {
@@ -742,7 +1149,6 @@ TEST_F(CollectivesMicrotest, AllReduceWithBias_RejectsANullAccumulator) {
   EXPECT_EQ(ncclInvalidArgument,
             ncclAllReduceWithBias_impl(send_.data(), recv_.data(), kCount, ncclFloat32, ncclSum, comm_.get(), stream_,
                                        nullptr));
-  EXPECT_TRUE(Logged(NCCL_LOG_WARN, "acc cannot be nullptr"));
   EXPECT_TRUE(fake.recorded.empty());
   EXPECT_TRUE(fake.enqueued.empty());
 }
@@ -842,7 +1248,7 @@ TEST_F(CollectivesMicrotest, AllGather_SelectsOnceAndEnqueuesTheDecision) {
   EXPECT_TRUE(info.decision.ceCapturing);
   EXPECT_TRUE(info.decision.ceArGraphAllowed);
   EXPECT_FALSE(info.useDirect);
-  EXPECT_TRUE(fake.log.empty());
+  EXPECT_TRUE(fake.algoNamesAsked.empty());
 }
 
 TEST_F(CollectivesMicrotest, AllGather_FailuresBeforeDispatchStopIt) {
@@ -868,11 +1274,6 @@ TEST_F(CollectivesMicrotest, AllGather_DdaArmsLaunchAsAddons) {
                    {RCCL_DDA_FABRIC_VMM, "ncclAllGatherDdaFabric"},
                    {RCCL_DDA_IPC, "ncclAllGatherDdaIpc"}},
                   [&] { return AllGather(); }, ncclNumOps, "AllGather");
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "AllGather: taking DDA fabric LL path: nRanks=4 nNodes=1 sendcount=32"));
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "datatype=7 totalBytes=512"));
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "AllGather: taking DDA fabric LL128 path"));
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "AllGather: taking DDA fabric (VMM) path: nRanks=4 nNodes=1 sendcount=32 "
-                                    "datatype=7 bytes=128"));
 }
 
 TEST_F(CollectivesMicrotest, AllGather_FailedPrologueSkipsTheAddon) {
@@ -902,8 +1303,6 @@ TEST_F(CollectivesMicrotest, AllGather_DirectMarksTheInfo) {
   ASSERT_EQ(1u, fake.enqueued.size());
   EXPECT_TRUE(Info().useDirect);
   EXPECT_EQ(RCCL_DIRECT_ALLGATHER, Info().decision.algo);
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "RCCL DIRECT ALLGATHER count = 32, msgSize = 512"));
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "rank = 1"));
 }
 
 TEST_F(CollectivesMicrotest, AllGather_EmptyDirectCallIsANoOp) {
@@ -920,7 +1319,7 @@ TEST_F(CollectivesMicrotest, AllGather_CheckModeDivertsAddonsButKeepsDirect) {
   ASSERT_EQ(1u, fake.enqueued.size());
   EXPECT_EQ(RCCL_DDA_IPC, Info().decision.algo);
   EXPECT_TRUE(fake.addons.empty());
-  EXPECT_FALSE(Logged(NCCL_LOG_INFO, "impl selected"));
+  EXPECT_TRUE(fake.algoNamesAsked.empty());
 
   Decide(RCCL_DIRECT_ALLGATHER);
   EXPECT_EQ(ncclSuccess, AllGather());
@@ -931,17 +1330,13 @@ TEST_F(CollectivesMicrotest, AllGather_CheckModeDivertsAddonsButKeepsDirect) {
 TEST_F(CollectivesMicrotest, AllGather_NamesTheAddonOnRankZeroOnly) {
   Decide(RCCL_CE_SCRATCH);
   EXPECT_EQ(ncclSuccess, AllGather());
-  EXPECT_FALSE(Logged(NCCL_LOG_INFO, "impl selected"));
   comm_->rank = 0;
   Decide(NCCL_ALGO_TREE);
   EXPECT_EQ(ncclSuccess, AllGather());
-  EXPECT_FALSE(Logged(NCCL_LOG_INFO, "impl selected"));
+  EXPECT_TRUE(fake.algoNamesAsked.empty());
   Decide(RCCL_DIRECT_ALLGATHER);
   EXPECT_EQ(ncclSuccess, AllGather());
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "AllGather impl selected: algo ADDON"));
-  fake.algoName = nullptr;
-  EXPECT_EQ(ncclSuccess, AllGather());
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "AllGather impl selected: algo ?"));
+  EXPECT_EQ(std::vector<int>{RCCL_DIRECT_ALLGATHER}, fake.algoNamesAsked);
 }
 
 // Hierarchical AllGather / ReduceScatter: 2 nodes x 4 local ranks, this rank is node 1, local rank 1.
@@ -1046,12 +1441,12 @@ TEST_F(CollectivesHierarchicalMicrotest, AllGather_InPlaceStagesTheOwnSliceFirst
   Decide(RCCL_HIERARCHICAL_ALLGATHER);
   const float* own = recv_.data() + comm_->rank * kCount;
   EXPECT_EQ(ncclSuccess, ncclAllGather_impl(own, recv_.data(), kCount, ncclFloat32, comm_.get(), stream_));
-  ASSERT_EQ(1u, fake.memcpys.size());
-  EXPECT_EQ(temp_.data(), fake.memcpys[0].dst);
-  EXPECT_EQ(own, fake.memcpys[0].src);
-  EXPECT_EQ(kCount * sizeof(float), fake.memcpys[0].bytes);
-  EXPECT_EQ(hipMemcpyDeviceToDevice, fake.memcpys[0].kind);
-  EXPECT_EQ(stream_, fake.memcpys[0].stream);
+  ASSERT_EQ(1u, g_hipMemcpyAsyncArgs.size());
+  EXPECT_EQ(temp_.data(), g_hipMemcpyAsyncArgs[0].dst);
+  EXPECT_EQ(own, g_hipMemcpyAsyncArgs[0].src);
+  EXPECT_EQ(kCount * sizeof(float), g_hipMemcpyAsyncArgs[0].bytes);
+  EXPECT_EQ(hipMemcpyDeviceToDevice, g_hipMemcpyAsyncArgs[0].kind);
+  EXPECT_EQ(stream_, g_hipMemcpyAsyncArgs[0].stream);
   EXPECT_EQ(temp_.data(), Info(0).sendbuff);
 }
 
@@ -1303,7 +1698,8 @@ TEST_F(CollectivesMicrotest, AlltoAll_DdaArmsLaunchAsAddons) {
                    {RCCL_DDA_FABRIC_VMM, "ncclAllToAllDdaFabric"},
                    {RCCL_DDA_IPC, "ncclAllToAllDdaIpc"}},
                   [&] { return AlltoAll(); }, ncclNumOps, "AlltoAll");
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "AlltoAll impl selected: algo ADDON"));
+  EXPECT_EQ((std::vector<int>{RCCL_DDA_FABRIC_LL, RCCL_DDA_FABRIC_LL128, RCCL_DDA_FABRIC_VMM, RCCL_DDA_IPC}),
+            fake.algoNamesAsked);
 }
 
 TEST_F(CollectivesMicrotest, AlltoAll_CheckModeDivertsDda) {
@@ -1315,7 +1711,7 @@ TEST_F(CollectivesMicrotest, AlltoAll_CheckModeDivertsDda) {
   EXPECT_EQ(ncclFuncAlltoAll, Info().coll);
   EXPECT_EQ(RCCL_DDA_FABRIC_LL, Info().decision.algo);
   EXPECT_TRUE(fake.addons.empty());
-  EXPECT_TRUE(fake.log.empty());
+  EXPECT_TRUE(fake.algoNamesAsked.empty());
 }
 
 TEST_F(CollectivesMicrotest, AlltoAll_NamesTheAddonOnRankZeroOnly) {
@@ -1324,11 +1720,10 @@ TEST_F(CollectivesMicrotest, AlltoAll_NamesTheAddonOnRankZeroOnly) {
   comm_->rank = 0;
   Decide(NCCL_ALGO_RING);
   EXPECT_EQ(ncclSuccess, AlltoAll());
-  EXPECT_TRUE(fake.log.empty());
-  fake.algoName = nullptr;
+  EXPECT_TRUE(fake.algoNamesAsked.empty());
   Decide(RCCL_DIRECT_ALLTOALL);
   EXPECT_EQ(ncclSuccess, AlltoAll());
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "AlltoAll impl selected: algo ?"));
+  EXPECT_EQ(std::vector<int>{RCCL_DIRECT_ALLTOALL}, fake.algoNamesAsked);
 }
 
 // AllReduce dispatch
@@ -1379,10 +1774,7 @@ TEST_F(CollectivesMicrotest, AllReduce_DdaArmsLaunchAsAddons) {
                    {RCCL_DDA_FABRIC_VMM, "ncclAllReduceDdaFabric"},
                    {RCCL_DDA_IPC, "ncclAllReduceDdaIpc"}},
                   [&] { return AllReduce(); }, ncclProd, "AllReduce");
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "AllReduce: taking DDA fabric LL path: nRanks=4 nNodes=1 count=32 datatype=7 "
-                                    "bytes=128"));
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "AllReduce: taking DDA fabric LL128 path"));
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "AllReduce: taking DDA fabric (VMM) path"));
+  EXPECT_TRUE(fake.algoNamesAsked.empty());  // rank 1
 }
 
 TEST_F(CollectivesMicrotest, AllReduce_CheckModeDivertsAddons) {
@@ -1404,13 +1796,10 @@ TEST_F(CollectivesMicrotest, AllReduce_NamesTheAddonOnRankZeroOnly) {
   comm_->rank = 0;
   Decide(NCCL_ALGO_PAT);
   EXPECT_EQ(ncclSuccess, AllReduce());
-  EXPECT_TRUE(fake.log.empty());
+  EXPECT_TRUE(fake.algoNamesAsked.empty());
   Decide(RCCL_SYMMETRIC);
   EXPECT_EQ(ncclSuccess, AllReduce());
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "AllReduce impl selected: algo ADDON"));
-  fake.algoName = nullptr;
-  EXPECT_EQ(ncclSuccess, AllReduce());
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "AllReduce impl selected: algo ?"));
+  EXPECT_EQ(std::vector<int>{RCCL_SYMMETRIC}, fake.algoNamesAsked);
 }
 
 TEST_F(CollectivesMicrotest, AllReduce_CeTwoShotRunsInsideAProfilerEvent) {
@@ -1437,7 +1826,6 @@ TEST_F(CollectivesMicrotest, AllReduce_CeTwoShotRunsInsideAProfilerEvent) {
   EXPECT_EQ(nullptr, fake.ceArs[0].win);
   EXPECT_NE(nullptr, fake.ceArs[0].args);
   EXPECT_TRUE(fake.enqueued.empty());
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "CE 2-shot AllReduce: count=32 datatype=7 op=1 rank=1/4"));
 }
 
 TEST_F(CollectivesMicrotest, AllReduce_CeTwoShotSkipsEmptyCallsAndAFailedProfilerStart) {
@@ -1507,11 +1895,8 @@ TEST_F(CollectivesMicrotest, ReduceScatter_DdaArmsLaunchAsAddons) {
                    {RCCL_DDA_FABRIC_VMM, "ncclReduceScatterDdaFabric"},
                    {RCCL_DDA_IPC, "ncclReduceScatterDdaIpc"}},
                   [&] { return ReduceScatter(); }, ncclMin, "ReduceScatter");
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "ReduceScatter impl selected: algo ADDON"));
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "ReduceScatter: taking DDA fabric LL path: nRanks=4 nNodes=1 recvcount=32 "
-                                    "datatype=7 bytes=128"));
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "ReduceScatter: taking DDA fabric LL128 path"));
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "ReduceScatter: taking DDA fabric (VMM) path"));
+  EXPECT_EQ((std::vector<int>{RCCL_DDA_FABRIC_LL, RCCL_DDA_FABRIC_LL128, RCCL_DDA_FABRIC_VMM, RCCL_DDA_IPC}),
+            fake.algoNamesAsked);
 }
 
 TEST_F(CollectivesMicrotest, ReduceScatter_CheckModeDivertsAddons) {
@@ -1522,7 +1907,7 @@ TEST_F(CollectivesMicrotest, ReduceScatter_CheckModeDivertsAddons) {
   ASSERT_EQ(1u, fake.enqueued.size());
   EXPECT_FALSE(Info().useDirect);
   EXPECT_FALSE(fake.enqueued[0].directReduceScatter);
-  EXPECT_TRUE(fake.log.empty());
+  EXPECT_TRUE(fake.algoNamesAsked.empty());
 }
 
 TEST_F(CollectivesMicrotest, ReduceScatter_NamesTheAddonOnRankZeroOnly) {
@@ -1531,11 +1916,10 @@ TEST_F(CollectivesMicrotest, ReduceScatter_NamesTheAddonOnRankZeroOnly) {
   comm_->rank = 0;
   Decide(NCCL_ALGO_RING);
   EXPECT_EQ(ncclSuccess, ReduceScatter());
-  EXPECT_TRUE(fake.log.empty());
-  fake.algoName = nullptr;
+  EXPECT_TRUE(fake.algoNamesAsked.empty());
   Decide(RCCL_SYMMETRIC);
   EXPECT_EQ(ncclSuccess, ReduceScatter());
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "ReduceScatter impl selected: algo ?"));
+  EXPECT_EQ(std::vector<int>{RCCL_SYMMETRIC}, fake.algoNamesAsked);
 }
 
 // Direct ReduceScatter stages every peer slice into tempBuff, then reduces it, both under the force flag.
@@ -1564,7 +1948,6 @@ TEST_F(CollectivesMicrotest, ReduceScatter_DirectStagesThenReduces) {
   EXPECT_TRUE(fake.enqueued[0].directReduceScatter);
   EXPECT_TRUE(fake.enqueued[1].directReduceScatter);
   EXPECT_FALSE(comm_->enableDirectReduceScatter);
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "RCCL DIRECT REDUCE-SCATTER recvcount=32 msgSize=512 rank=1 nRanks=4 nNodes=1"));
 }
 
 TEST_F(CollectivesMicrotest, ReduceScatter_DirectClearsTheForceFlagOnFailure) {
@@ -1746,16 +2129,16 @@ TEST_F(CollectivesAlltoAllvMicrotest, Ce_ExchangesTheSizeMatrixThenEnqueuesIt) {
             fake.trace);
   EXPECT_EQ(9, fake.currentDevice);
 
-  ASSERT_EQ(2u, fake.memcpys.size());
-  EXPECT_EQ(comm_->localSizes, fake.memcpys[0].dst);
-  EXPECT_EQ(nLocal * sizeof(size_t), fake.memcpys[0].bytes);
-  EXPECT_EQ(hipMemcpyHostToDevice, fake.memcpys[0].kind);
-  EXPECT_EQ(stream_, fake.memcpys[0].stream);
+  ASSERT_EQ(2u, g_hipMemcpyAsyncArgs.size());
+  EXPECT_EQ(comm_->localSizes, g_hipMemcpyAsyncArgs[0].dst);
+  EXPECT_EQ(nLocal * sizeof(size_t), g_hipMemcpyAsyncArgs[0].bytes);
+  EXPECT_EQ(hipMemcpyHostToDevice, g_hipMemcpyAsyncArgs[0].kind);
+  EXPECT_EQ(stream_, g_hipMemcpyAsyncArgs[0].stream);
   const size_t* local = static_cast<const size_t*>(comm_->localSizes);
   EXPECT_EQ(LocalBlock(), std::vector<size_t>(local, local + nLocal));
-  EXPECT_EQ(comm_->gatheredSizes, fake.memcpys[1].src);
-  EXPECT_EQ(nLocal * kNRanks * sizeof(size_t), fake.memcpys[1].bytes);
-  EXPECT_EQ(hipMemcpyDeviceToHost, fake.memcpys[1].kind);
+  EXPECT_EQ(comm_->gatheredSizes, g_hipMemcpyAsyncArgs[1].src);
+  EXPECT_EQ(nLocal * kNRanks * sizeof(size_t), g_hipMemcpyAsyncArgs[1].bytes);
+  EXPECT_EQ(hipMemcpyDeviceToHost, g_hipMemcpyAsyncArgs[1].kind);
 
   ASSERT_EQ(2u * kNRanks, fake.p2ps.size());
   for (int r = 0; r < kNRanks; r++) {
@@ -1867,10 +2250,10 @@ TEST_F(CollectivesAlltoAllvMicrotest, Ce_ExchangeFailuresReturnTheFirstError) {
   fake.groupEndResult = ncclRemoteError;
   EXPECT_EQ(ncclRemoteError, AlltoAllv());
   fake.groupEndResult = ncclSuccess;
-  fake.memcpys.clear();
+  g_hipMemcpyAsyncArgs.clear();
   fake.memcpyResults = {hipSuccess, hipErrorInvalidValue};
   EXPECT_EQ(ncclUnhandledCudaError, AlltoAllv());
-  EXPECT_EQ(2u, fake.memcpys.size());
+  EXPECT_EQ(2u, g_hipMemcpyAsyncArgs.size());
   fake.syncResult = hipErrorLaunchFailure;
   EXPECT_EQ(ncclUnhandledCudaError, AlltoAllv());
   EXPECT_TRUE(fake.enqueued.empty());

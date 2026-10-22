@@ -122,9 +122,11 @@ extern int g_hipMemoryPoolsSupported;     // hipDeviceAttributeMemoryPoolsSuppor
 // A call count alone cannot tell one device copy's operands from another's, so record them per call.
 extern int g_hipMemcpyAsyncCalls;
 struct HipMemcpyAsyncRecord {
-    void*       dst;
-    const void* src;
-    size_t      bytes;
+    void*         dst;
+    const void*   src;
+    size_t        bytes;
+    hipMemcpyKind kind;
+    hipStream_t   stream;
 };
 extern std::vector<HipMemcpyAsyncRecord> g_hipMemcpyAsyncArgs;
 

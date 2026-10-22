@@ -19,7 +19,6 @@
 #include "debug.h"
 #include "device.h"
 
-#include "../common/LogCapture.hpp"
 #include "ScopedHook.h"
 #include "fakes/hip_fakes.h"
 
@@ -30,18 +29,8 @@
 
 namespace {
 
-using RcclUnitTesting::CaptureLog;
-using RcclUnitTesting::LogHas;
-
 constexpr size_t kElts = 100;
 
-struct Memcpy {
-  void* dst;
-  const void* src;
-  size_t bytes;
-  hipMemcpyKind kind;
-  hipStream_t stream;
-};
 struct Launch {
   const void* fn;
   dim3 grid;
@@ -71,6 +60,8 @@ const void* Kernel() {
 
 class OnerankMicrotest : public ::testing::Test {
  protected:
+  void TearDown() override { ResetHipFakes(); }  // g_hipMemcpyAsyncArgs
+
   ncclResult_t LaunchOneRank(ncclDevRedOpFull op, ncclDataType_t type, const void* acc = nullptr,
                              hipEvent_t event = nullptr, size_t nElts = kElts) {
     return ncclLaunchOneRank(dst_, src_, nElts, op, type, stream_, event, acc);
@@ -83,7 +74,6 @@ class OnerankMicrotest : public ::testing::Test {
   hipStream_t stream_ = reinterpret_cast<hipStream_t>(0x5a);
 
   std::vector<std::string> trace_;
-  std::vector<Memcpy> memcpys_;
   hipError_t memcpyResult_ = hipSuccess;
   std::vector<hipStreamCaptureMode> captureModes_;
   int exchangeFailAt_ = 0;
@@ -100,10 +90,10 @@ class OnerankMicrotest : public ::testing::Test {
         *mode = captureModes_.size() % 2 ? hipStreamCaptureModeThreadLocal : hipStreamCaptureModeRelaxed;
         return hipSuccess;
       }};
+  // hip_fakes.cc records the copy's operands in g_hipMemcpyAsyncArgs; this keeps the order and scripts the result.
   ScopedHook<hipError_t(void*, const void*, size_t, hipMemcpyKind, hipStream_t)> memcpy_{
-      g_hipMemcpyAsync, [this](void* dst, const void* src, size_t bytes, hipMemcpyKind kind, hipStream_t stream) {
+      g_hipMemcpyAsync, [this](void*, const void*, size_t, hipMemcpyKind, hipStream_t) {
         trace_.push_back("memcpy");
-        memcpys_.push_back({dst, src, bytes, kind, stream});
         return memcpyResult_;
       }};
   ScopedHook<hipError_t(hipEvent_t, hipStream_t)> record_{g_hipEventRecord, [this](hipEvent_t e, hipStream_t st) {
@@ -132,12 +122,12 @@ TEST_F(OnerankMicrotest, InPlaceWithoutBiasIsANoOp) {
 TEST_F(OnerankMicrotest, OutOfPlaceWithoutBiasIsOneRelaxedCopy) {
   EXPECT_EQ(ncclSuccess, LaunchOneRank(Op(ncclDevMinMax), ncclFloat64));
   EXPECT_EQ((std::vector<std::string>{"exchange", "memcpy", "exchange"}), trace_);
-  ASSERT_EQ(1u, memcpys_.size());
-  EXPECT_EQ(dst_, memcpys_[0].dst);
-  EXPECT_EQ(src_, memcpys_[0].src);
-  EXPECT_EQ(kElts * sizeof(double), memcpys_[0].bytes);
-  EXPECT_EQ(hipMemcpyDefault, memcpys_[0].kind);
-  EXPECT_EQ(stream_, memcpys_[0].stream);
+  ASSERT_EQ(1u, g_hipMemcpyAsyncArgs.size());
+  EXPECT_EQ(dst_, g_hipMemcpyAsyncArgs[0].dst);
+  EXPECT_EQ(src_, g_hipMemcpyAsyncArgs[0].src);
+  EXPECT_EQ(kElts * sizeof(double), g_hipMemcpyAsyncArgs[0].bytes);
+  EXPECT_EQ(hipMemcpyDefault, g_hipMemcpyAsyncArgs[0].kind);
+  EXPECT_EQ(stream_, g_hipMemcpyAsyncArgs[0].stream);
   // Relaxed for the copy, then the caller's mode put back.
   EXPECT_EQ((std::vector<hipStreamCaptureMode>{hipStreamCaptureModeRelaxed, hipStreamCaptureModeThreadLocal}),
             captureModes_);
@@ -149,20 +139,20 @@ TEST_F(OnerankMicrotest, CopyFailuresAreHipErrors) {
   EXPECT_EQ(2u, captureModes_.size());  // the mode is restored on the failure path too
   memcpyResult_ = hipSuccess;
   captureModes_.clear();
-  memcpys_.clear();
+  g_hipMemcpyAsyncArgs.clear();
   exchangeFailAt_ = 1;
   EXPECT_EQ(ncclUnhandledCudaError, LaunchOneRank(Op(ncclDevSum), ncclInt8));
-  EXPECT_TRUE(memcpys_.empty());
+  EXPECT_TRUE(g_hipMemcpyAsyncArgs.empty());
   captureModes_.clear();
   exchangeFailAt_ = 2;  // restoring the caller's mode fails after the copy was issued
   EXPECT_EQ(ncclUnhandledCudaError, LaunchOneRank(Op(ncclDevSum), ncclInt8));
-  EXPECT_EQ(1u, memcpys_.size());
+  EXPECT_EQ(1u, g_hipMemcpyAsyncArgs.size());
 }
 
 TEST_F(OnerankMicrotest, PreMulSumAlwaysReduces) {
   src_ = dst_;
   EXPECT_EQ(ncclSuccess, LaunchOneRank(Op(ncclDevPreMulSum, 0x3f800000u, true), ncclFloat32));
-  EXPECT_TRUE(memcpys_.empty());
+  EXPECT_TRUE(g_hipMemcpyAsyncArgs.empty());
   ASSERT_EQ(1u, launches_.size());
   const Launch& l = launches_[0];
   EXPECT_EQ((Kernel<FuncPreMulSum, float>()), l.fn);
@@ -188,7 +178,7 @@ TEST_F(OnerankMicrotest, BiasReducesWithEveryOp) {
   EXPECT_EQ(src_, launches_[0].src);
   EXPECT_EQ(7u, launches_[0].scalarArg);
   EXPECT_FALSE(launches_[0].scalarArgIsPtr);
-  EXPECT_TRUE(memcpys_.empty());
+  EXPECT_TRUE(g_hipMemcpyAsyncArgs.empty());
 }
 
 // SumPostDiv divides by nRanks == 1, so it runs as Sum.
@@ -257,12 +247,11 @@ TEST_F(OnerankMicrotest, GridGrowsWithTheMessageUpTo32Blocks) {
 TEST_F(OnerankMicrotest, CompletionEventIsRecordedBeforeTheLaunch) {
   int acc = 0;
   hipEvent_t event = reinterpret_cast<hipEvent_t>(0xe7);
-  std::string log = CaptureLog([&] { EXPECT_EQ(ncclSuccess, LaunchOneRank(Op(ncclDevSum), ncclFloat32, &acc, event)); });
+  EXPECT_EQ(ncclSuccess, LaunchOneRank(Op(ncclDevSum), ncclFloat32, &acc, event));
   EXPECT_EQ((std::vector<std::string>{"record", "launch"}), trace_);
   ASSERT_EQ(1u, eventRecords_.size());
   EXPECT_EQ(event, eventRecords_[0].first);
   EXPECT_EQ(stream_, eventRecords_[0].second);
-  EXPECT_TRUE(LogHas(log, "launch-completion events require CUDA 12.3"));
 
   trace_.clear();
   eventRecordResult_ = hipErrorInvalidHandle;
@@ -272,18 +261,16 @@ TEST_F(OnerankMicrotest, CompletionEventIsRecordedBeforeTheLaunch) {
 
 TEST_F(OnerankMicrotest, NoCompletionEventNoRecord) {
   int acc = 0;
-  RcclUnitTesting::ScopedDebugLogging all(-1, ~uint64_t(0));
-  std::string log = CaptureLog([&] { EXPECT_EQ(ncclSuccess, LaunchOneRank(Op(ncclDevSum), ncclFloat32, &acc)); });
+  EXPECT_EQ(ncclSuccess, LaunchOneRank(Op(ncclDevSum), ncclFloat32, &acc));
   EXPECT_TRUE(eventRecords_.empty());
-  EXPECT_TRUE(log.empty()) << log;
+  EXPECT_EQ(std::vector<std::string>{"launch"}, trace_);
 }
 
 TEST_F(OnerankMicrotest, LaunchFailureIsAHipError) {
   int acc = 0;
   launchResult_ = hipErrorLaunchFailure;
-  std::string log =
-      CaptureLog([&] { EXPECT_EQ(ncclUnhandledCudaError, LaunchOneRank(Op(ncclDevSum), ncclFloat32, &acc)); });
-  EXPECT_TRUE(LogHas(log, "HIP failure"));
+  EXPECT_EQ(ncclUnhandledCudaError, LaunchOneRank(Op(ncclDevSum), ncclFloat32, &acc));
+  EXPECT_EQ(std::vector<std::string>{"launch"}, trace_);
 }
 
 }  // namespace

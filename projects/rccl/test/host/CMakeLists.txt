@@ -25,6 +25,10 @@ rccl_assert_source_line("${_rccl_src_root}/init.cc"
 rccl_assert_source_line("${_rccl_src_root}/init.cc"
   "NCCL_PARAM(CGAClusterSize, \"CGA_CLUSTER_SIZE\", NCCL_CONFIG_UNDEF_INT)"
   "fakes/comm_fakes.cc: ncclParamCGAClusterSize()")
+rccl_assert_source_line("${_rccl_src_root}/rccl_wrap.cc"
+  "RCCL_PARAM(DdaEnable, \"DDA_ENABLE\", 1)" "fakes/rccl_wrap_fakes.cc: rcclParamDdaEnable()")
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/rccl_wrap_fakes.cc"
+  "int64_t g_rcclParamDdaEnable = 1" "the DdaEnable fake default")
 # Both arms of the ROCM_VERSION split at enqueue.cc:437-441; enqueue_fakes.cc mirrors both, so pin both.
 rccl_assert_source_line("${_rccl_src_root}/enqueue/enqueue.cc"
   "NCCL_PARAM(GraphRegister, \"GRAPH_REGISTER\", 1)"
@@ -225,11 +229,18 @@ function(rccl_define_micro_source_lists)
   # most targets link, defines this file's string helpers.
   set(TEST_MICRO_COLLECTIVES_SOURCE_FILES
     collectives-test.cc
-    fakes/collectives_micro_fakes.cc
     fakes/bootstrap_stubs.cc
+    fakes/ce_fakes.cc
+    fakes/collconfig_fakes.cc
+    fakes/comm_fakes.cc
+    fakes/dda_fakes.cc
     fakes/dev_runtime_fakes.cc
+    fakes/enqueue_fakes.cc
+    fakes/group_fakes.cc
     fakes/hip_fakes.cc
+    fakes/nccl_fakes.cc
     fakes/nccl_stubs.cc
+    fakes/rccl_wrap_fakes.cc
     fakes/recorder_fakes.cc
     fakes/strongstream_stubs.cc
     fakes/sym_kernels_fakes.cc
@@ -246,12 +257,13 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroMgmtTaskEnq -- src/enqueue/mgmt_task_enq.cc. Own binary: fakes/nccl_stubs.cc
-  # fakes ncclMgmtTaskEnqueue, so this test defines the group thread-locals that file owns.
+  # rccl-UnitTestsMicroMgmtTaskEnq -- src/enqueue/mgmt_task_enq.cc. Own binary: it defines
+  # ncclMgmtTaskEnqueue, which fakes/nccl_stubs.cc drops here via RCCL_STUBS_OMIT_ncclMgmtTaskEnqueue.
   set(TEST_MICRO_MGMT_TASK_ENQ_SOURCE_FILES
     mgmt-task-enq-test.cc
     fakes/group_fakes.cc
     fakes/nccl_fakes.cc
+    fakes/nccl_stubs.cc
     fakes/utils_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
@@ -1337,6 +1349,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroMgmtTaskEnq
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     MGMT_TASK_ENQ_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/enqueue/mgmt_task_enq.cc"
+    RCCL_STUBS_OMIT_ncclMgmtTaskEnqueue  # mgmt_task_enq.cc defines it
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_mgmt_task_enq.yaml")
 
 # ---------------------------------------------------------------------------

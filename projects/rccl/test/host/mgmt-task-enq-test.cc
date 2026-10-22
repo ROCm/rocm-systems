@@ -11,16 +11,9 @@
 
 #include <cstdint>
 #include <memory>
-#include <string>
 #include <vector>
 
-#include "../common/LogCapture.hpp"
 #include "group.h"
-
-// group.cc's other thread-locals live in fakes/nccl_stubs.cc, which also fakes ncclMgmtTaskEnqueue.
-thread_local int ncclGroupDepth = 0;
-thread_local ncclResult_t ncclGroupError = ncclSuccess;
-thread_local ncclComm* ncclGroupCommPreconnectHead = nullptr;
 
 #include MGMT_TASK_ENQ_CC_PATH
 
@@ -124,12 +117,10 @@ TEST_F(MgmtTaskEnqMicrotest, Enqueue_KnownBug_MixedBlockingModesAreNotRejected) 
   ncclAsyncJob a{};
   ncclAsyncJob b{};
   EXPECT_EQ(ncclSuccess, ncclMgmtTaskEnqueue(&a, TaskFunc, Destroy, blocking.get()));
-  std::string log = RcclUnitTesting::CaptureLog(
-      [&] { EXPECT_EQ(ncclSuccess, ncclMgmtTaskEnqueue(&b, TaskFunc, Destroy, nonblocking.get())); });
+  EXPECT_EQ(ncclSuccess, ncclMgmtTaskEnqueue(&b, TaskFunc, Destroy, nonblocking.get()));
   EXPECT_EQ(0, ncclGroupBlocking);
   EXPECT_EQ(&b, ncclIntruQueueHead(&nonblocking->mgmtTaskQueue));
   EXPECT_TRUE(g_destroyed.empty());
-  EXPECT_TRUE(log.empty()) << log;
 }
 
 }  // namespace

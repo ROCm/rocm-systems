@@ -927,7 +927,7 @@ hipError_t hipMemcpyAsync(void* dst, const void* src, size_t bytes, hipMemcpyKin
                           hipStream_t stream)
 {
     g_hipMemcpyAsyncCalls++;
-    g_hipMemcpyAsyncArgs.push_back({dst, src, bytes});
+    g_hipMemcpyAsyncArgs.push_back({dst, src, bytes, kind, stream});
     return g_hipMemcpyAsync(dst, src, bytes, kind, stream);
 }
 
