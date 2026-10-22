@@ -127,6 +127,7 @@ typedef union rocprofiler_rocshmem_api_args_t
         uint64_t    cmp_value;
         hipStream_t stream;
     } signal_wait_until_on_stream;
+#if ROCSHMEM_API_TRACE_VERSION_PATCH >= 8
     struct
     {
         uint64_t*   sig_addr;
@@ -141,6 +142,7 @@ typedef union rocprofiler_rocshmem_api_args_t
         int         pe;
         hipStream_t stream;
     } signal_set_on_stream;
+#endif
 } rocprofiler_rocshmem_api_args_t;
 
 ROCPROFILER_EXTERN_C_FINI
