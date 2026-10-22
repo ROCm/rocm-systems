@@ -477,6 +477,10 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipLaunchKernel_SyncBehavior) {
 }
 #endif  // HT_AMD
 
+static __global__ void ReadManagedInitialized(int* value) {
+  *value = g_managed_initialized[0];
+}
+
 // hipMemcpyAsync must initialize managed symbols for the stream's device, not
 // the current device. A zero-byte copy isolates initialization from copy effects.
 HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpyAsync_CrossCurrentDeviceStream) {
@@ -558,10 +562,6 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_InitIndependentOfNullStream) {
   }
 }
 #endif  // HT_AMD
-
-static __global__ void ReadManagedInitialized(int* value) {
-  *value = g_managed_initialized[0];
-}
 
 // Sanity check test for the windows implementation.
 // 

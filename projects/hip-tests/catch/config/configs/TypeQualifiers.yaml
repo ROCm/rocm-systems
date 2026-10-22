@@ -6,8 +6,6 @@ TypeQualifiers:
     disabled:
       targets: [amd_windows, amd_wsl]
       reason: "AIRUNTIME-2744 - SWDEV-396615: multi-GPU case not considered correctly. gfx1201 (amd_windows) self-skips: GPU does not support managed memory. gfx1201 (amd_wsl) self-skips: GPU does not support managed memory. Needs re-triage."
-  # Intentionally enabled on Windows: it is the only coverage of the managed
-  # device-slot write on PAL, where every capability-gated test skips.
   Unit_hipManagedKeyword_KernelReadsManagedSymbol: *level_default
   Unit_hipManagedKeyword_hipMemcpy: *level_default
   Unit_hipManagedKeyword_hipMemcpyHtoD: *level_default
@@ -24,9 +22,9 @@ TypeQualifiers:
   Unit_hipManagedKeyword_hipMemcpyBatchAsync: *level_default
   Unit_hipManagedKeyword_hipMemcpyPeer:
     <<: *level_default
-    disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "SWDEV-396615: multi-GPU case not considered correctly."
-  Unit_hipManagedKeyword_hipMemcpyAsync_CrossCurrentDeviceStream: *level_default
+    tags: [multigpu]
+  Unit_hipManagedKeyword_hipMemcpyAsync_CrossCurrentDeviceStream:
+    <<: *level_default
+    tags: [multigpu]
   Unit_hipManagedKeyword_hipPointerGetAttributes_BeforeKernel: *level_default
   Unit_hipManagedKeyword_hipPointerGetAttributes_AfterKernel: *level_default
