@@ -762,7 +762,7 @@ TEST_F(GinHostProxyContextMicrotest, Create_QueueLimitScalesWithMaxRecvs) {
 }
 
 // The fallback size is never checked itself, so a plugin with a non-power-of-two maxRecvs gets a queue the
-// index mask (queueSize - 1) cannot wrap. Pins AICOMRCCL-2994; a fix flips this pin.
+// index mask (queueSize - 1) cannot wrap.
 TEST_F(GinHostProxyContextMicrotest, Create_NonPowerOfTwoMaxRecvs_KeepsANonPowerOfTwoQueue) {
   rma_.maxRecvs = 3;
   ASSERT_EQ(ncclSuccess, Reconnect());
