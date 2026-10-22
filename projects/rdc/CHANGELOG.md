@@ -6,6 +6,12 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 ### Changed
 
+- **RDC rejects GPU group and field group names that contain control characters or are not valid UTF-8**.
+  - rdci also shows control characters in any text it gets from rdcd as escapes, so that text can no longer send terminal escape sequences to another user's terminal.
+
+- **`rdci policy` sets exactly one condition per command**.
+  - A set fails when it gives none or more than one of `-M`, `-T` and `-P`. It kept only one of them, or with `-A` alone sent an undefined condition.
+
 - **`rdc_health_get()` returns `RDC_ST_GROUP_NOT_FOUND` for a GPU group that does not exist**.
   - It returned `RDC_ST_OK` with no health watches, so `rdci health -f` showed every watch as Off and exited successfully, and `rdci health -c` failed asking for watches to be enabled. Both commands now fail with a message that the group does not exist.
 
@@ -16,6 +22,27 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - Removed the unused `GetBlockNameStr()` test helper and its GPU block name map. Nothing called it, and its `static_assert` on `AMDSMI_GPU_BLOCK_LAST` broke the RDC build whenever AMD SMI added an IP block (#10949).
 
 ### Resolved Issues
+
+- `rdci config -m` sets the memory clock limit instead of failing, and `rdci config` accepts `--host`.
+
+- rdcd, and processes that embed RDC, no longer crash when a policy with an undefined condition type or action is set.
+
+- `rdci --json` output stays valid when text from rdcd contains quotes or backslashes.
+
+- `rdci policy`, `rdci config`, `rdci dmon` and `rdci discovery -v` exit with an error code when the request fails, instead of printing nothing or a success message and exiting with 0.
+
+- `rdci dmon` separates its columns, reports the events of every GPU, and no longer prints GPU indexes without values when it watches only event fields.
+
+- `rdci discovery -i` shows each partition once, with an ID that RDC accepts.
+  - It listed each socket's partitions under every GPU index, with IDs that pointed at other GPUs or at none; in `--json` output, each GPU index's `partitions` list now holds only its own partition.
+
+- `rdci discovery -i` shows N/A instead of 0 for an XCC or decoder count that it cannot get.
+
+- `rdci diag -c` no longer prints two debug lines.
+
+- rdcd logs a diagnostic client that goes away once, at debug level, instead of an error for each progress line.
+
+- `rdci policy --help` and `rdci topo --help` print their help and exit successfully, and the topo help lists the options `rdci topo` accepts.
 
 - `rdci health -s` on a GPU group that does not exist no longer leaves an unused field group in rdcd. Repeated failures filled the field group table, and commands that need a new field group, such as `rdci dmon`, then failed until rdcd was restarted.
 

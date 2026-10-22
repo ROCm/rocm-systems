@@ -59,11 +59,8 @@ UNREACHED_APIS = {
     "amdsmi_get_afids_from_cper": "needs CPER records; the fake reports none by default",
     "amdsmi_get_gpu_accelerator_partition_profile_config": "partition profile query",
     "amdsmi_get_gpu_compute_process_gpus": "needs processes; the fake reports none by default",
-    "amdsmi_get_lib_version": "component version query, not exposed by rdci",
-    "amdsmi_get_power_cap_info": "rdci config has no --host option",
-    "amdsmi_set_power_cap": "rdci config has no --host option",
-    "amdsmi_set_gpu_clk_limit": "rdci config has no --host option",
-    "amdsmi_set_gpu_perf_level": "rdci config has no --host option",
+    "amdsmi_set_gpu_perf_level": "rdci config --clear resets the performance level only when "
+    "the reported maximum clock differs from the top supported frequency; the fake's are equal",
     "amdsmi_reset_gpu": "policy reset action needs a breached threshold",
 }
 
@@ -605,6 +602,9 @@ def _workload_commands(field_ids):
         ("policy", "-g", "{gid}", "-T", "95", "-A", "0"),
         ("policy", "-g", "{gid}", "--get"),
         ("policy", "-g", "{gid}", "--clear"),
+        ("config", "-g", "{gid}", "-s", "-p", "400", "-x", "1500", "-m", "1200"),
+        ("config", "-g", "{gid}", "-c"),
+        ("discovery", "-v"),
         ("diag", "-g", "{gid}", "-r", "1"),
     ]
 
@@ -726,3 +726,20 @@ def test_runtime_files_do_not_contain_the_fake():
     for path in binaries:
         with open(path, "rb") as f:
             assert b"RDC_FAKE_" not in f.read(), f"{path} references the fake"
+
+
+# ---------------------------------------------------------------------------
+# Stress: long loops, run only with RDC_TEST_STRESS=1
+# ---------------------------------------------------------------------------
+@pytest.mark.stress
+def test_rdcd_start_watch_stop_loop(tools, tmp_path):
+    """rdcd starts, serves a watch and stops cleanly 50 times in a row."""
+    for i in range(50):
+        run = tmp_path / f"run{i}"
+        run.mkdir()
+        d = Rdcd(tools, run).start()
+        try:
+            d.ok("dmon", "-e", ",".join(str(f) for f in DMON_FIELDS), "-i", "0", "-c", "1")
+        finally:
+            code = d.stop()
+        assert code == 0, f"run {i}: rdcd exited with {code}\n{d.output()}"

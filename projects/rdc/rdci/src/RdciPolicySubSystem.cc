@@ -132,6 +132,20 @@ void RdciPolicySubSystem::parse_cmd_opts(int argc, char** argv) {
     throw RdcException(RDC_ST_BAD_PARAMETER, "Need to specify the group id to notify");
   }
 
+  // A set takes one condition: rdc_policy_t holds one
+  if (policy_ops_ == POLICY_SET) {
+    const size_t conditions = options_.size() - options_.count(POLICY_OPT_ACTION);
+    if (conditions == 0) {
+      show_help();
+      throw RdcException(RDC_ST_BAD_PARAMETER, "Need a condition to set: --max, --temp or --power");
+    }
+    if (conditions > 1) {
+      show_help();
+      throw RdcException(RDC_ST_BAD_PARAMETER,
+                         "Set one condition per command: --max, --temp or --power");
+    }
+  }
+
   // Set default action to 0
   if (policy_ops_ == POLICY_SET && options_.find(POLICY_OPT_ACTION) == options_.end()) {
     options_.insert({POLICY_OPT_ACTION, RDC_POLICY_ACTION_NONE});
@@ -218,10 +232,12 @@ void RdciPolicySubSystem::set_terminating(int sig) {
 
 void RdciPolicySubSystem::process() {
   rdc_status_t result = RDC_ST_OK;
-  rdc_policy_t policy;
+  rdc_policy_t policy = {};
   rdc_policy_t policies[RDC_MAX_POLICY_SETTINGS];
 
   switch (policy_ops_) {
+    case POLICY_HELP:
+      return;  // parse_cmd_opts() printed it
     case POLICY_SET: {
       if (!is_group_id_set) {
         show_help();
@@ -265,6 +281,9 @@ void RdciPolicySubSystem::process() {
       }
       uint32_t count = 0;
       result = rdc_policy_get(rdc_handle_, group_id_, &count, policies);
+      if (result == RDC_ST_NOT_FOUND) {
+        std::cout << "No policy is set on GPU group " << group_id_ << std::endl;
+      }
       if (result == RDC_ST_OK) {
         std::cout << "Policy information \n";
         std::cout << "+------------------------+"
@@ -330,16 +349,34 @@ void RdciPolicySubSystem::process() {
       break;
     }
     case POLICY_CLEAR: {
+      // RDC_ST_NOT_FOUND: the group has no policy of that condition type
+      bool cleared = false;
       for (uint32_t cond = RDC_POLICY_COND_FIRST; cond <= RDC_POLICY_COND_LAST; cond++) {
         rdc_policy_condition_type_t condition_type = static_cast<rdc_policy_condition_type_t>(cond);
         result = rdc_policy_delete(rdc_handle_, group_id_, condition_type);
+        if (result == RDC_ST_OK) {
+          cleared = true;
+        } else if (result != RDC_ST_NOT_FOUND) {
+          break;
+        }
       }
-      std::cout << "Policy is cleared on GPU group " << group_id_ << std::endl;
+      if (result != RDC_ST_OK && result != RDC_ST_NOT_FOUND) {
+        break;
+      }
+      if (cleared) {
+        std::cout << "Policy is cleared on GPU group " << group_id_ << std::endl;
+      } else {
+        std::cout << "No policy is set on GPU group " << group_id_ << std::endl;
+      }
+      result = RDC_ST_OK;
       break;
     }
     default:
       throw RdcException(RDC_ST_BAD_PARAMETER, "Unknown command");
       break;
+  }
+  if (result != RDC_ST_OK) {
+    throw RdcException(result, rdc_status_string(result));
   }
 }
 }  // namespace rdc

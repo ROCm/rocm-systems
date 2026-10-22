@@ -23,12 +23,14 @@ THE SOFTWARE.
 
 #include <grpcpp/grpcpp.h>
 
+#include <cstring>
 #include <future>
 
 #include "rdc.grpc.pb.h"  // NOLINT
 #include "rdc.pb.h"
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcLogger.h"
+#include "rdc_lib/rdc_common.h"
 
 amd::rdc::RdcHandler* make_handler(const char* ip_and_port, const char* root_ca,
                                    const char* client_cert, const char* client_key) {
@@ -55,7 +57,8 @@ RdcStandaloneHandler::RdcStandaloneHandler(const char* ip_and_port, const char* 
 
 rdc_status_t RdcStandaloneHandler::error_handle(::grpc::Status status, uint32_t rdc_status) {
   if (!status.ok()) {
-    std::cout << status.error_message() << ". Error code:" << status.error_code() << std::endl;
+    std::cout << rdc_escape_text(status.error_message(), false)
+              << ". Error code:" << status.error_code() << std::endl;
     return RDC_ST_CLIENT_ERROR;
   }
 
@@ -618,7 +621,7 @@ rdc_status_t RdcStandaloneHandler::rdc_diagnostic_run(rdc_gpu_group_t group_id,
   while (reader->Read(&reply)) {
     if (reply.has_log()) {
       // TODO: Add different logging levels
-      std::cout << "LOG: " << reply.log() << std::endl;
+      std::cout << "LOG: " << rdc_escape_text(reply.log(), false) << std::endl;
       continue;
     }
     if (reply.has_response()) {
@@ -825,6 +828,16 @@ rdc_status_t RdcStandaloneHandler::get_mixed_component_version(
   return RDC_ST_OK;
 }
 
+// The integer a caller put in an enum: a value the enum does not define, such as a negative
+// one, is undefined behavior once loaded as the enum, so this copies its bytes.
+template <typename Enum>
+static int32_t enum_value(const Enum& value) {
+  static_assert(sizeof(Enum) == sizeof(int32_t), "a 32-bit enum");
+  int32_t v;
+  std::memcpy(&v, &value, sizeof(v));
+  return v;
+}
+
 // Policy RdcAPI
 rdc_status_t RdcStandaloneHandler::rdc_policy_set(rdc_gpu_group_t group_id, rdc_policy_t policy) {
   ::rdc::SetPolicyRequest request;
@@ -833,11 +846,12 @@ rdc_status_t RdcStandaloneHandler::rdc_policy_set(rdc_gpu_group_t group_id, rdc_
 
   request.set_group_id(group_id);
   auto to_policy = request.mutable_policy();
-  to_policy->set_action(static_cast<::rdc::Policy_Action>(policy.action));
+  to_policy->set_action(static_cast<::rdc::Policy_Action>(enum_value(policy.action)));
 
   auto to_condition = to_policy->mutable_condition();
 
-  to_condition->set_type(static_cast<::rdc::PolicyCondition_Type>(policy.condition.type));
+  to_condition->set_type(
+      static_cast<::rdc::PolicyCondition_Type>(enum_value(policy.condition.type)));
   to_condition->set_value(policy.condition.value);
 
   // call gRPC
@@ -892,7 +906,7 @@ rdc_status_t RdcStandaloneHandler::rdc_policy_delete(rdc_gpu_group_t group_id,
   request.set_group_id(group_id);
 
   request.set_condition_type(
-      static_cast<::rdc::DeletePolicyRequest_PolicyConditionType>(condition_type));
+      static_cast<::rdc::DeletePolicyRequest_PolicyConditionType>(enum_value(condition_type)));
 
   // call gRPC
   ::grpc::Status status = stub_->DeletePolicy(&context, request, &reply);

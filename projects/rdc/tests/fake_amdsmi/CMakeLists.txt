@@ -33,11 +33,38 @@ install(
     TARGETS rdc_fake_amdsmi
     LIBRARY DESTINATION ${FAKE_GPU_TEST_DIR} COMPONENT ${TESTS_COMPONENT}
 )
+
+# Stand-in for replies rdci cannot get from a well-behaved rdcd (RDC_FAKE_CLIENT_*), for
+# tests/ci/test_fake_gpu_rdci.py. Test-only like the fake and preloaded into rdci, it finds the
+# real RDC client calls with dlsym(RTLD_NEXT), so it links no RDC library. Only standalone builds
+# have rdci.
+if(BUILD_STANDALONE)
+    add_library(rdc_fake_client SHARED fake_rdc_client.cc)
+    target_include_directories(rdc_fake_client PRIVATE ${PROJECT_SOURCE_DIR}/include)
+    target_link_libraries(rdc_fake_client PRIVATE ${CMAKE_DL_LIBS})
+    set_target_properties(rdc_fake_client PROPERTIES CXX_VISIBILITY_PRESET default INSTALL_RPATH "")
+    install(
+        TARGETS rdc_fake_client
+        LIBRARY DESTINATION ${FAKE_GPU_TEST_DIR} COMPONENT ${TESTS_COMPONENT}
+    )
+endif()
 # Every tests/ci/test_fake_gpu*.py runs from this installed copy; CI's run of
 # tests/ci skips them.
 file(GLOB FAKE_GPU_TESTS CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/tests/ci/test_fake_gpu*.py)
 install(
-    FILES fake_values.inc ${FAKE_GPU_TESTS} ${PROJECT_SOURCE_DIR}/tests/ci/fake_gpu_golden.py
+    FILES
+        fake_values.inc
+        ${FAKE_GPU_TESTS}
+        ${PROJECT_SOURCE_DIR}/tests/ci/fake_gpu_golden.py
+        ${PROJECT_SOURCE_DIR}/tests/ci/fake_gpu_stress.py
     DESTINATION ${FAKE_GPU_TEST_DIR}
     COMPONENT ${TESTS_COMPONENT}
+)
+# The installed suite's conftest.py carries only the stress plumbing; helpers and fixtures come
+# from test_fake_gpu.py.
+install(
+    FILES ${PROJECT_SOURCE_DIR}/tests/ci/fake_gpu_conftest.py
+    DESTINATION ${FAKE_GPU_TEST_DIR}
+    COMPONENT ${TESTS_COMPONENT}
+    RENAME conftest.py
 )

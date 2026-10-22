@@ -96,4 +96,6 @@ RDC_TEST_PREFIX=<install prefix> LD_LIBRARY_PATH=<prefix>/lib:<prefix>/lib/rdc \
 ```
 
 `rdcd` allows one instance per host, so stop any other `rdcd` first. Set
-`RDC_TEST_TIME_FACTOR` to stretch the timeouts for sanitizer builds.
+`RDC_TEST_TIME_FACTOR` to stretch the timeouts for sanitizer builds, and
+`RDC_TEST_STRESS=1` to run the stress tests (long loops, marked `stress`).
+With `RDC_CI_REQUIRE_STRESS=1` a run in which no stress test ran fails.

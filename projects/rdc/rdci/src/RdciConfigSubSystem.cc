@@ -51,8 +51,10 @@ RdciConfigSubSystem::RdciConfigSubSystem()
 RdciConfigSubSystem::~RdciConfigSubSystem() {}
 
 void RdciConfigSubSystem::parse_cmd_opts(int argc, char** argv) {
+  const int HOST_OPTIONS = 1000;
   const int JSON_OPTIONS = 1001;
-  const struct option long_options[] = {{"set", no_argument, nullptr, 's'},
+  const struct option long_options[] = {{"host", required_argument, nullptr, HOST_OPTIONS},
+                                        {"set", no_argument, nullptr, 's'},
                                         {"get", no_argument, nullptr, 't'},
                                         {"clear", no_argument, nullptr, 'c'},
                                         {"unauth", optional_argument, nullptr, 'u'},
@@ -69,8 +71,11 @@ void RdciConfigSubSystem::parse_cmd_opts(int argc, char** argv) {
   config_cmd_ = CONFIG_COMMAND_NONE;
   bool group_id_set = false;  // ensure set, get, and clear have a group associated with them
 
-  while ((opt = getopt_long(argc, argv, "stcuhg:p:x:m", long_options, &option_index)) != -1) {
+  while ((opt = getopt_long(argc, argv, "stcuhg:p:x:m:", long_options, &option_index)) != -1) {
     switch (opt) {
+      case HOST_OPTIONS:
+        ip_port_ = optarg;
+        break;
       case 's':
         config_cmd_ = CONFIG_COMMAND_SET;
         break;
@@ -152,19 +157,21 @@ void RdciConfigSubSystem::process() {
 
       rdc_config_setting_t setting;
 
+      // Stop at the first setting that fails
+      result = RDC_ST_OK;
       if (gfx_max_clock_ != 0) {
         setting.type = RDC_CFG_GFX_CLOCK_LIMIT;
         setting.target_value = gfx_max_clock_;
         result = rdc_config_set(rdc_handle_, group_id_, setting);
       }
 
-      if (power_limit_ != 0) {
+      if (result == RDC_ST_OK && power_limit_ != 0) {
         setting.type = RDC_CFG_POWER_LIMIT;
         setting.target_value = power_limit_;
         result = rdc_config_set(rdc_handle_, group_id_, setting);
       }
 
-      if (memory_max_clock_ != 0) {
+      if (result == RDC_ST_OK && memory_max_clock_ != 0) {
         setting.type = RDC_CFG_MEMORY_CLOCK_LIMIT;
         setting.target_value = memory_max_clock_;
         result = rdc_config_set(rdc_handle_, group_id_, setting);
@@ -189,11 +196,12 @@ void RdciConfigSubSystem::process() {
           job_fields.push_back(info.field_ids[i]);
         }
         result = rdc_field_unwatch(rdc_handle_, group_id_, old_fgid);
-        if (result != RDC_ST_OK) {
+        // A --set whose watch failed left its field group unwatched
+        if (result != RDC_ST_OK && result != RDC_ST_NOT_FOUND) {
           std::cout << "Error unable to unwatch field group: " << old_fgid << std::endl;
           break;
         }
-        rdc_group_field_destroy(rdc_handle_, old_fgid);
+        result = rdc_group_field_destroy(rdc_handle_, old_fgid);
         if (result != RDC_ST_OK) {
           std::cout << "Error unable to destroy field group: " << old_fgid << std::endl;
           break;
@@ -214,7 +222,7 @@ void RdciConfigSubSystem::process() {
       result = rdc_group_field_create(rdc_handle_, job_fields.size(), job_fields.data(),
                                       fg_name.c_str(), &fgid);
       if (result != RDC_ST_OK) {
-        std::cout << "Error creating field group: " << fgid << std::endl;
+        std::cout << "Error creating field group: " << fg_name << std::endl;
         break;
       }
       std::cout << "Successfully created the field group " << fgid << std::endl;
@@ -226,7 +234,7 @@ void RdciConfigSubSystem::process() {
       result = rdc_field_watch(rdc_handle_, group_id_, fgid, update_frequency, max_keep_age,
                                max_keep_samples);
       if (result != RDC_ST_OK) {
-        std::cout << "Error creating field watch for group id: " + group_id_ << std::endl;
+        std::cout << "Error creating field watch for group id: " << group_id_ << std::endl;
         break;
       }
 
@@ -255,20 +263,28 @@ void RdciConfigSubSystem::process() {
     }
     case CONFIG_COMMAND_CLEAR: {
       result = rdc_config_clear(rdc_handle_, group_id_);
+      if (result != RDC_ST_OK) {
+        std::cout << "Error unable to clear the configuration of group: " << group_id_ << std::endl;
+        break;
+      }
 
-      // Delete the field group and GPU group
-      std::vector<rdc_field_t> job_fields;
+      // Delete the field group --set created, if there is one
       rdc_field_grp_t old_fgid;
       std::string fg_name = make_fg_name(group_id_);
       if (rdc_group_field_find(rdc_handle_, fg_name.c_str(), &old_fgid) == RDC_ST_OK) {
-        rdc_field_unwatch(rdc_handle_, group_id_, old_fgid);
-        rdc_group_field_destroy(rdc_handle_, old_fgid);
+        result = rdc_field_unwatch(rdc_handle_, group_id_, old_fgid);
+        // A --set whose watch failed left its field group unwatched
+        if (result != RDC_ST_OK && result != RDC_ST_NOT_FOUND) {
+          std::cout << "Error unable to unwatch field group: " << old_fgid << std::endl;
+          break;
+        }
+        result = rdc_group_field_destroy(rdc_handle_, old_fgid);
+        if (result != RDC_ST_OK) {
+          std::cout << "Error unable to destroy field group: " << old_fgid << std::endl;
+          break;
+        }
+        std::cout << "Successfully deleted the field group " << old_fgid << std::endl;
       }
-      if (result != RDC_ST_OK) {
-        std::cout << "Error delete field group. Return: " << rdc_status_string(result);
-        break;
-      }
-      std::cout << "Successfully deleted the field group " << old_fgid << std::endl;
 
       if (result == RDC_ST_OK) {
         if (is_json_output()) {
@@ -347,7 +363,7 @@ void RdciConfigSubSystem::display_config_settings(rdc_config_setting_list_t& rdc
     std::vector<uint32_t> group_index_array(rdc_group_info.entity_ids,
                                             rdc_group_info.entity_ids + rdc_group_info.count);
     sort(begin(group_index_array), end(group_index_array));
-    for (uint32_t i = 0; i < rdc_configs_list.total_settings && i < RDC_GROUP_MAX_ENTITIES; ++i) {
+    for (uint32_t i = 0; i < rdc_configs_list.total_settings && i < RDC_MAX_CONFIG_SETTINGS; ++i) {
       auto type = rdc_configs_list.settings[i].type;
       auto config_value = rdc_configs_list.settings[i].target_value;
 
@@ -380,8 +396,8 @@ void RdciConfigSubSystem::display_config_settings(rdc_config_setting_list_t& rdc
                 ss << std::fixed << std::setprecision(0) << mhz;
                 json_ss << mhz;
               } else {
-                ss << value.value.str;
-                json_ss << value.value.str;
+                ss << rdc_escape_text(value.value.str, false);
+                json_ss << "\"" << rdc_escape_text(value.value.str, true) << "\"";
               }
             }
             ss << std::endl;
@@ -410,8 +426,8 @@ void RdciConfigSubSystem::display_config_settings(rdc_config_setting_list_t& rdc
                 ss << std::fixed << std::setprecision(0) << mhz;
                 json_ss << mhz;
               } else {
-                ss << value.value.str;
-                json_ss << value.value.str;
+                ss << rdc_escape_text(value.value.str, false);
+                json_ss << "\"" << rdc_escape_text(value.value.str, true) << "\"";
               }
             }
             ss << std::endl;
@@ -439,8 +455,8 @@ void RdciConfigSubSystem::display_config_settings(rdc_config_setting_list_t& rdc
                 ss << std::fixed << std::setprecision(3) << watts;
                 json_ss << watts;
               } else {
-                ss << value.value.str;
-                json_ss << value.value.str;
+                ss << rdc_escape_text(value.value.str, false);
+                json_ss << "\"" << rdc_escape_text(value.value.str, true) << "\"";
               }
             }
             ss << std::endl;

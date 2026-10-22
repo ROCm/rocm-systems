@@ -26,6 +26,7 @@ THE SOFTWARE.
 #include <unistd.h>
 
 #include <algorithm>
+#include <cstring>
 #include <ctime>
 #include <map>
 #include <sstream>
@@ -56,17 +57,27 @@ RdcPolicyImpl::~RdcPolicyImpl() {
   thread_.join();
 }
 
+// The integer a caller put in an enum: a value the enum does not define, such as a negative
+// one, is undefined behavior once loaded as the enum, so this copies its bytes.
+template <typename Enum>
+static int32_t enum_value(const Enum& value) {
+  static_assert(sizeof(Enum) == sizeof(int32_t), "a 32-bit enum");
+  int32_t v;
+  std::memcpy(&v, &value, sizeof(v));
+  return v;
+}
+
 rdc_status_t RdcPolicyImpl::rdc_policy_set(rdc_gpu_group_t group_id, rdc_policy_t policy) {
   rdc_status_t status = RDC_ST_NOT_SUPPORTED;
   std::lock_guard<std::mutex> guard(policy_mutex_);
 
-  // parameters check
-  if (policy.condition.type >= RDC_POLICY_COND_MAX) {
+  // parameters check: unsigned, so that a negative value fails too
+  if (static_cast<uint32_t>(enum_value(policy.condition.type)) > RDC_POLICY_COND_LAST) {
     status = RDC_ST_BAD_PARAMETER;
     return status;
   }
 
-  if (policy.action > RDC_POLICY_ACTION_GPU_RESET) {
+  if (static_cast<uint32_t>(enum_value(policy.action)) > RDC_POLICY_ACTION_GPU_RESET) {
     status = RDC_ST_BAD_PARAMETER;
     return status;
   }
@@ -144,6 +155,9 @@ rdc_status_t RdcPolicyImpl::rdc_policy_get(rdc_gpu_group_t group_id, uint32_t* c
 
 rdc_status_t RdcPolicyImpl::rdc_policy_delete(rdc_gpu_group_t group_id,
                                               rdc_policy_condition_type_t condition_type) {
+  if (static_cast<uint32_t>(enum_value(condition_type)) > RDC_POLICY_COND_LAST) {
+    return RDC_ST_BAD_PARAMETER;
+  }
   rdc_status_t status = RDC_ST_NOT_FOUND;
 
   std::lock_guard<std::mutex> guard(policy_mutex_);

@@ -377,8 +377,8 @@ void RdciStatsSubSystem::process() {
         std::ostringstream oss;
         oss << "PID: " << pr.pid << ", Start: " << pr.start_time / 1000
             << ", End: " << pr.stop_time / 1000;
-        std::cout << "| " << std::setw(33) << std::left << pr.process_name << "| " << oss.str()
-                  << "\n";
+        std::cout << "| " << std::setw(33) << std::left << rdc_escape_text(pr.process_name, false)
+                  << "| " << oss.str() << "\n";
       }
       std::cout << "+----------------------------------+------------------------------------\n";
     } else {
@@ -388,7 +388,7 @@ void RdciStatsSubSystem::process() {
         auto& pr = job_info.processes[p];
         std::cout << (p ? "," : "") << "{"
                   << "\"pid\":" << pr.pid << ","
-                  << "\"process_name\":\"" << pr.process_name << "\","
+                  << "\"process_name\":\"" << rdc_escape_text(pr.process_name, true) << "\","
                   << "\"start_time\":" << pr.start_time / 1000 << ","
                   << "\"stop_time\":" << pr.stop_time / 1000 << "}";
       }

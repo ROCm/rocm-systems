@@ -630,6 +630,13 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
 
+  // The log callback runs on this RPC's thread while the run below goes on (that path
+  // starts no thread), so its cookie can live here and `failed` needs no atomic.
+  struct LogCookie {
+    ::grpc::ServerWriter<::rdc::DiagnosticRunResponse>* writer;
+    bool failed;
+  } cookie = {writer, false};
+
   auto cb_lambda = [](void* w, void* m) -> void {
     if (w == nullptr) {
       RDC_LOG(RDC_ERROR, "BAD WRITER");
@@ -641,21 +648,26 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
       return;
     }
 
-    auto writer = static_cast<::grpc::ServerWriter<::rdc::DiagnosticRunResponse>*>(w);
+    auto* cookie = static_cast<LogCookie*>(w);
+    if (cookie->failed) {
+      return;
+    }
     char* message = static_cast<char*>(m);
 
     ::rdc::DiagnosticRunResponse reply;
 
     reply.set_log(std::string(message));
-    if (!writer->Write(reply)) {
-      RDC_LOG(RDC_ERROR, "Failed to write log message");
+    if (!cookie->writer->Write(reply)) {
+      // The run goes on without the client
+      cookie->failed = true;
+      RDC_LOG(RDC_DEBUG, "Diagnostic client is gone; dropping the remaining log lines");
     }
   };
 
   rdc_callback_t cb = cb_lambda;
   rdc_diag_callback_t callback = {
       cb,
-      writer,
+      &cookie,
   };
 
   rdc_diag_response_t diag_response;
@@ -723,6 +735,13 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
 
+  // The log callback runs on this RPC's thread while the run below goes on (that path
+  // starts no thread), so its cookie can live here and `failed` needs no atomic.
+  struct LogCookie {
+    ::grpc::ServerWriter<::rdc::DiagnosticTestCaseRunResponse>* writer;
+    bool failed;
+  } cookie = {writer, false};
+
   auto cb_lambda = [](void* w, void* m) -> void {
     if (w == nullptr) {
       RDC_LOG(RDC_ERROR, "BAD WRITER");
@@ -734,21 +753,26 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
       return;
     }
 
-    auto writer = static_cast<::grpc::ServerWriter<::rdc::DiagnosticTestCaseRunResponse>*>(w);
+    auto* cookie = static_cast<LogCookie*>(w);
+    if (cookie->failed) {
+      return;
+    }
     char* message = static_cast<char*>(m);
 
     ::rdc::DiagnosticTestCaseRunResponse reply;
 
     reply.set_log(std::string(message));
-    if (!writer->Write(reply)) {
-      RDC_LOG(RDC_ERROR, "Failed to write log message");
+    if (!cookie->writer->Write(reply)) {
+      // The run goes on without the client
+      cookie->failed = true;
+      RDC_LOG(RDC_DEBUG, "Diagnostic client is gone; dropping the remaining log lines");
     }
   };
 
   rdc_callback_t cb = cb_lambda;
   rdc_diag_callback_t callback = {
       cb,
-      writer,
+      &cookie,
   };
 
   rdc_diag_test_result_t test_result;
@@ -839,6 +863,12 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
   ::rdc::Policy p = request->policy();
 
   ::rdc::PolicyCondition cond = p.condition();
+  // Any client can send any value: check it before casting it to rdc.h's enums
+  if (static_cast<uint32_t>(cond.type()) > RDC_POLICY_COND_LAST ||
+      static_cast<uint32_t>(p.action()) > RDC_POLICY_ACTION_GPU_RESET) {
+    reply->set_status(RDC_ST_BAD_PARAMETER);
+    return ::grpc::Status::OK;
+  }
   policy.condition.type = static_cast<rdc_policy_condition_type_t>(cond.type());
   policy.condition.value = cond.value();
   policy.action = static_cast<rdc_policy_action_t>(p.action());
@@ -894,6 +924,12 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
   (void)(context);
   if (!reply || !request) {
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
+  }
+
+  // Any client can send any value: check it before casting it to rdc.h's enum
+  if (static_cast<uint32_t>(request->condition_type()) > RDC_POLICY_COND_LAST) {
+    reply->set_status(RDC_ST_BAD_PARAMETER);
+    return ::grpc::Status::OK;
   }
 
   // call RDC Policy API
