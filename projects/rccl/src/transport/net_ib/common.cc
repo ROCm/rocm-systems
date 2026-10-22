@@ -255,7 +255,7 @@ ncclNet_t ncclNetIb = {
   ncclIbInit,
   ncclIbDevices,
   ncclIbGetProperties,
-  ncclIbListen,
+  ncclIbNetListen,
   ncclIbConnect,
   ncclIbAccept,
   ncclIbRegMr,

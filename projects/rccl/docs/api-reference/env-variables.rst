@@ -614,16 +614,19 @@ in the following table.
           sender writes a per-QP flag into GPU memory after the payload, on the
           same QP and without relaxed ordering, and the GPU waits for the flag
           instead.
-        | Both sides of a connection must enable it. A connection falls back to
-          the RDMA read flush when the peer does not enable it, when it uses
-          more than one NIC (NIC Fusion), when a request spans more than 8 QPs,
-          or when the flag memory cannot be registered. LL and LL128 receives
-          never use the flag.
-        | On gfx950 with 2 to 8 nodes of 8 GPUs, enabling it also adjusts the
-          ``ncclAllReduce`` algorithm and protocol choice from 16 MB per node
-          upward, and switches ``ncclReduceScatter`` from LL128 to Simple above
-          6 MB per rank instead of 8 MB, unless ``NCCL_ALGO`` or ``NCCL_PROTO``
-          is set.
+        | A communicator uses it only when every rank sets it and can use it:
+          gfx942 or gfx950, the ``IB`` transport, and no NIC Fusion
+          (``NCCL_NET_MERGE_LEVEL``), adaptive routing
+          (``NCCL_IB_ADAPTIVE_ROUTING``), out-of-order receive queues
+          (``NCCL_IB_OOO_RQ``) or port-failover resiliency. Otherwise every rank
+          keeps the RDMA read flush. A connection also keeps it when a request
+          spans more than 8 QPs or the flag memory cannot be registered. LL and
+          LL128 receives never use the flag.
+        | On gfx950 with 2 to 8 nodes of 8 GPUs, a communicator using it also
+          adjusts the ``ncclAllReduce`` algorithm and protocol choice from
+          16 MB per node upward, and switches ``ncclReduceScatter`` from LL128
+          to Simple above 6 MB per rank instead of 8 MB, unless ``NCCL_ALGO``
+          or ``NCCL_PROTO`` is set.
         | Read once per process.
       - | ``0``: Disabled (default).
         | ``1``: Enabled.

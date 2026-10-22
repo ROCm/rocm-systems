@@ -691,6 +691,8 @@ struct ncclIbListenComm {
   int dev;
   struct ncclSocket sock;
   struct ncclIbCommStage* stage;
+  // Accepted receivers set up the GDR flush flag (ncclNetIb only, see ncclIbNetCtx).
+  int gdrFlushFlag;
 };
 
 static inline void ncclIbCheckSpeedChanges(struct ncclIbSendComm* sendComm, struct ncclIbNetCommBase* base) {
@@ -766,6 +768,16 @@ ncclResult_t ncclIbRegMrDmaBufInternal(void* comm, void* data, size_t size, int 
 
 int ncclIbGetTrafficClass(void* ctx);
 void ncclIbSetTrafficClass(void* ctx, int trafficClass);
+
+// ncclNetIb per-communicator context. config stays first: the traffic class
+// accessors cast the context to it.
+struct ncclIbNetCtx {
+  ncclNetCommConfig_t config;
+  // Every rank of the communicator can use RCCL_IB_GDR_FLUSH_FLAG (set at init).
+  int gdrFlushFlag;
+};
+// ncclNetIb listen: ncclIbListen plus the context's GDR flush flag decision.
+ncclResult_t ncclIbNetListen(void* ctx, int dev, void* opaqueHandle, void** listenComm);
 
 // Net IB plugin entry functions.
 ncclResult_t ncclIbInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction);

@@ -106,10 +106,6 @@ NCCL_PARAM(Ll128Nthreads, "LL128_NTHREADS", -2);
 NCCL_PARAM(PatEnable, "PAT_ENABLE", 0);
 NCCL_PARAM(NetOverhead, "NET_OVERHEAD", -2);
 
-// Defined in src/transport/net_ib/connect.cc, which topo_expl does not link;
-// rccl_wrap.cc reads it in rcclUpdateRemoteFlushAlgoProto.
-RCCL_PARAM(IbGdrFlushFlag, "IB_GDR_FLUSH_FLAG", 0);
-
 // Stubs for symbols newly referenced by src/misc/param.cc and debug.h
 // after the NCCL 2.28.9 sync. topo_expl does not use the env-plugin
 // machinery and does not link debug.cc, so provide minimal definitions.

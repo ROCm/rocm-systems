@@ -321,8 +321,6 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
   }
 }
 
-RCCL_PARAM_DECLARE(IbGdrFlushFlag);
-
 // gfx950 multi-node choices with the remote GDR flush flag, measured on 2/4/8 nodes of 8 GPUs.
 //
 // reduce_scatter: from 6 MB per rank, Simple beats LL128 (by 15-30% at 8 MB per rank), so LL128 stops
@@ -334,7 +332,7 @@ void rcclUpdateRemoteFlushAlgoProto(struct ncclComm* comm, size_t nBytes, struct
                                     float (*table)[NCCL_NUM_PROTOCOLS]) {
   static int userInput = -1;
   if (userInput == -1) userInput = (ncclGetEnv("NCCL_ALGO") || ncclGetEnv("NCCL_PROTO")) ? 1 : 0;
-  if (userInput || rcclParamIbGdrFlushFlag() == 0 || comm->nNodes < 2 || comm->nNodes > 8 ||
+  if (userInput || !comm->ibGdrFlushFlag || comm->nNodes < 2 || comm->nNodes > 8 ||
       comm->nRanks != comm->nNodes * 8 || !IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950"))
     return;
   if (info->func == ncclFuncReduceScatter) {

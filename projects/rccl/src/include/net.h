@@ -44,9 +44,14 @@ extern NCCL_NET_DATA_IMPORT ncclNet_t ncclNetNd;
 
 #undef NCCL_NET_DATA_IMPORT
 
-// RCCL_IB_GDR_FLUSH_FLAG=1: GPU-visible per-QP flags of an ncclNetIb recv comm
-// (NULL if not negotiated), and the packed gdrFlushSeq entry (see device.h) the
-// GPU waits on for the last completed receive.
+// RCCL_IB_GDR_FLUSH_FLAG=1: whether this process can use the flag (the comm
+// enables it only when every rank can), and the comm-wide decision for an
+// ncclNetIb context.
+bool ncclIbGdrFlushFlagLocalSupport();
+void ncclIbSetGdrFlushFlag(void* netContext, int enable);
+// GPU-visible per-QP flags of an ncclNetIb recv comm (NULL if this connection
+// keeps the RDMA read flush), and the packed gdrFlushSeq entry (see device.h)
+// the GPU waits on for the last completed receive.
 uint64_t* ncclIbGetGpuFlushFlag(void* recvComm);
 uint64_t ncclIbGetGpuFlushFlagSeq(void* recvComm);
 // Whether the following irecv needs the flag write (SIMPLE GDR receives only).

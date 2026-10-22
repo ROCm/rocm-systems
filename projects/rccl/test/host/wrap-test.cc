@@ -1277,18 +1277,20 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_MultiNodeUsesTunedLLRange) 
 }
 
 // ===========================================================================
-// rcclUpdateRemoteFlushAlgoProto: with RCCL_IB_GDR_FLUSH_FLAG on, gfx950 on
-// 2-8 nodes of 8 GPUs. all_reduce goes Ring/LL128 from 16 MB per node,
-// Tree/Simple from 32 MB per node and Ring/Simple from 64 MB per node;
+// rcclUpdateRemoteFlushAlgoProto: with every rank on RCCL_IB_GDR_FLUSH_FLAG
+// (comm->ibGdrFlushFlag), gfx950 on 2-8 nodes of 8 GPUs. all_reduce goes
+// Ring/LL128 from 16 MB per node, Tree/Simple from 32 MB per node and
+// Ring/Simple from 64 MB per node;
 // reduce_scatter LL128 switches to Simple above 6 MB per rank. Its
 // NCCL_ALGO/NCCL_PROTO check is cached in a static, so every test runs isolated.
 // ===========================================================================
 
 namespace {
-ncclComm* MakeRemoteFlushComm(const char* arch, int nNodes, int nRanks) {
+ncclComm* MakeRemoteFlushComm(const char* arch, int nNodes, int nRanks, bool gdrFlushFlag = true) {
   ncclComm* comm = MakeCommWithArch(arch);
   comm->nNodes = nNodes;
   comm->nRanks = nRanks;
+  comm->ibGdrFlushFlag = gdrFlushFlag;
   return comm;
 }
 
@@ -1321,7 +1323,6 @@ TEST(WrapMicrotestIsolated, UpdateRemoteFlushAlgoProto_AllReduceSizeBandsScaleWi
       []() {
         SetMicroEnvAbsent("NCCL_ALGO");
         SetMicroEnvAbsent("NCCL_PROTO");
-        ScopedHook flag(g_paramIbGdrFlushFlag, []() { return int64_t(1); });
         for (int nNodes : {2, 4, 8}) {
           ncclComm* comm = MakeRemoteFlushComm("gfx950", nNodes, nNodes * 8);
           const size_t perNode = (size_t)nNodes << 20;  // 1 MB per node
@@ -1347,13 +1348,11 @@ TEST(WrapMicrotestIsolated, UpdateRemoteFlushAlgoProto_ReduceScatterLL128StopsAt
         SetMicroEnvAbsent("NCCL_PROTO");
         const size_t kLimit = (size_t)6 << 20;
         {
-          ScopedHook flag(g_paramIbGdrFlushFlag, []() { return int64_t(0); });
-          ncclComm* comm = MakeRemoteFlushComm("gfx950", 2, 16);
+          ncclComm* comm = MakeRemoteFlushComm("gfx950", 2, 16, /*gdrFlushFlag=*/false);
           EXPECT_EQ(kRingLL128, ApplyRemoteFlushRule(comm, 16 * (kLimit + 1), ncclFuncReduceScatter, kRingLL128))
               << "flag off";
           DeleteCommWithArch(comm);
         }
-        ScopedHook flag(g_paramIbGdrFlushFlag, []() { return int64_t(1); });
         for (int nNodes : {2, 4, 8}) {
           const int nRanks = nNodes * 8;
           ncclComm* comm = MakeRemoteFlushComm("gfx950", nNodes, nRanks);
@@ -1386,12 +1385,10 @@ TEST(WrapMicrotestIsolated, UpdateRemoteFlushAlgoProto_GatesLeaveChoiceUntouched
         SetMicroEnvAbsent("NCCL_PROTO");
         const size_t kBytes = (size_t)64 << 20;  // Tree/Simple on 2 nodes when every gate passes
         {
-          ScopedHook flag(g_paramIbGdrFlushFlag, []() { return int64_t(0); });
-          ncclComm* comm = MakeRemoteFlushComm("gfx950", 2, 16);
+          ncclComm* comm = MakeRemoteFlushComm("gfx950", 2, 16, /*gdrFlushFlag=*/false);
           EXPECT_EQ(kRingLL, ApplyRemoteFlushRule(comm, kBytes)) << "flag off";
           DeleteCommWithArch(comm);
         }
-        ScopedHook flag(g_paramIbGdrFlushFlag, []() { return int64_t(1); });
         struct Case {
           const char* what;
           const char* arch;
@@ -1426,7 +1423,6 @@ void ExpectUserSettingLeavesChoiceUntouched(const char* var) {
   SetMicroEnvAbsent("NCCL_ALGO");
   SetMicroEnvAbsent("NCCL_PROTO");
   SetMicroEnv(var, "Ring");
-  ScopedHook flag(g_paramIbGdrFlushFlag, []() { return int64_t(1); });
   ncclComm* comm = MakeRemoteFlushComm("gfx950", 2, 16);
   EXPECT_EQ(kRingLL, ApplyRemoteFlushRule(comm, (size_t)64 << 20)) << var << " set";
   EXPECT_EQ(kRingLL128, ApplyRemoteFlushRule(comm, (size_t)16 * (8 << 20), ncclFuncReduceScatter, kRingLL128))

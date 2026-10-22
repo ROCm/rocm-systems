@@ -67,10 +67,8 @@ struct ncclIbConnectionMetadata {
   int tc;
   int sl;
   int isP2p;
-  // GDR flush flag negotiation. The sender sets flagFlushCapable; the receiver
-  // answers with a non-zero flagFlushAddr/flagFlushRkey only if it enabled the
-  // flag flush, so both sides always agree on whether the flag is written.
-  int flagFlushCapable;
+  // Receiver to sender: the GDR flush flags to write after each flagged
+  // payload, or 0 when this connection keeps the RDMA read flush.
   uint32_t flagFlushRkey;
   uint64_t flagFlushAddr;
 };

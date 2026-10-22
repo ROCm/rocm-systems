@@ -6,7 +6,10 @@
 
 // Whitebox tests for the NET/IB remote GDR flush flag (RCCL_IB_GDR_FLUSH_FLAG=1).
 //
-// With the flag negotiated, the sender of a flagged request appends an RO=0
+// Communicator init enables the flag on the net context only when every rank
+// can use it; the tests make that decision over MPI the same way. With it on,
+// each receiver hands its sender a flag page, and the sender of a flagged
+// request appends an RO=0
 // RDMA write of (id + 1) to the receiver's per-QP flag after the RO=1 payload,
 // so the GPU can wait on the flag instead of an iflush. Whether a request is
 // flagged is chosen per irecv by ncclIbSetGpuFlushFlagHint and travels to the
@@ -15,7 +18,7 @@
 // gdrFlushSeq slot the GPU reads.
 //
 // The tests drive the plugin directly over a 2-rank connection (rank 0
-// receives, rank 1 sends) and cover negotiation, per-request gating, CTS hint
+// receives, rank 1 sends) and cover setup, per-request gating, CTS hint
 // isolation with many outstanding receives, flag-before-data ordering as seen
 // by a GPU observer, connection lifecycle and concurrent connections.
 //
@@ -149,22 +152,31 @@ protected:
         return res;
     }
 
-    // Collective skip decision so both ranks skip or run together. Returns the
+    // Collective, like communicator init: both ranks must be able to use the
+    // flag, and then it is enabled on this test's net contexts. Returns the
     // reason to skip, or an empty string to run.
-    std::string FlagSkipReason() {
+    std::string EnableFlagForComm() {
         std::string why;
         if (!flagEnvEnabled()) why = "requires RCCL_IB_GDR_FLUSH_FLAG=1";
+        else if (net_ != &ncclNetIb) why = "the flag is ncclNetIb only";
+        else if (!ncclIbGdrFlushFlagLocalSupport())
+            why = "NIC fusion, adaptive routing, out-of-order RQ or resiliency rules the flag out";
         else if (!gdrPtrSupport()) why = "no GDR backend (neither peermem nor dma-buf) on this device";
         else if (expectedFlagCount() > kMaxWaitQps) why = "the flag needs at most 8 QPs per request";
         int skip = why.empty() ? 0 : 1;
         MPI_Allreduce(MPI_IN_PLACE, &skip, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
         if (skip && why.empty()) why = "peer rank cannot run the flag path";
-        return skip ? why : std::string();
+        if (skip) return why;
+        ncclIbSetGdrFlushFlag(initCtx_, 1);
+        threadCtxInit_ = [](void* ctx) { ncclIbSetGdrFlushFlag(ctx, 1); };
+        return std::string();
     }
 
+    // The flag stays off on a net context the communicator did not enable it
+    // on, whatever RCCL_IB_GDR_FLUSH_FLAG says.
     std::string DisabledSkipReason() {
         std::string why;
-        if (flagEnvEnabled()) why = "requires RCCL_IB_GDR_FLUSH_FLAG unset or 0";
+        if (net_ != &ncclNetIb) why = "the flag is ncclNetIb only";
         else if (!gdrPtrSupport()) why = "no GDR backend (neither peermem nor dma-buf) on this device";
         int skip = why.empty() ? 0 : 1;
         MPI_Allreduce(MPI_IN_PLACE, &skip, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
@@ -186,9 +198,9 @@ protected:
         return bad == 0;
     }
 
-    // Rank 0 reports whether the recv comm negotiated the flag; both ranks
+    // Rank 0 reports whether the recv comm set up the flag; both ranks
     // receive the answer so they leave the test together.
-    bool FlagNegotiated(const ConnectionPair& pair, uint64_t** flags) {
+    bool FlagSetUp(const ConnectionPair& pair, uint64_t** flags) {
         uint64_t* f = (MPIEnvironment::world_rank == 0) ? ncclIbGetGpuFlushFlag(pair.recvComm) : nullptr;
         int ok = (MPIEnvironment::world_rank == 0) ? (f != nullptr) : 0;
         MPI_Bcast(&ok, 1, MPI_INT, 0, MPI_COMM_WORLD);
@@ -320,13 +332,13 @@ protected:
     }
 };
 
-// Negotiation: the flag page starts zeroed with a clear descriptor, and a
+// Enabled: the flag page starts zeroed with a clear descriptor, and a
 // receive posted before any hint call is unflagged.
-TEST_F(GdrFlushFlagTest, Negotiated_FlagsZeroedAndHintDefaultsOff) {
+TEST_F(GdrFlushFlagTest, Enabled_FlagsZeroedAndHintDefaultsOff) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                           false, kMinGpusPerNode, kNoNodeLimit));
     AssertInitAndGetDevices(nullptr);
-    const std::string why = FlagSkipReason();
+    const std::string why = EnableFlagForComm();
     if (!why.empty()) GTEST_SKIP() << why;
 
     const int rank = MPIEnvironment::world_rank;
@@ -334,7 +346,7 @@ TEST_F(GdrFlushFlagTest, Negotiated_FlagsZeroedAndHintDefaultsOff) {
     NetConnectionGuard connGuard(net_);
     SetupConnectionWithGuard(0, pair, connGuard);
     uint64_t* flags = nullptr;
-    ASSERT_TRUE(FlagNegotiated(pair, &flags)) << "RCCL_IB_GDR_FLUSH_FLAG=1 but the recv comm has no flag";
+    ASSERT_TRUE(FlagSetUp(pair, &flags)) << "the flag is enabled but the recv comm has none";
 
     std::vector<uint64_t> snap;
     if (rank == 0) {
@@ -375,7 +387,8 @@ TEST_F(GdrFlushFlagTest, Negotiated_FlagsZeroedAndHintDefaultsOff) {
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
-// Feature off: no flag page, and a hint set by the caller has no effect.
+// Not enabled for the communicator: no flag page, and a hint set by the caller
+// has no effect.
 TEST_F(GdrFlushFlagTest, Disabled_NoFlagAndHintIgnored) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                           false, kMinGpusPerNode, kNoNodeLimit));
@@ -387,7 +400,7 @@ TEST_F(GdrFlushFlagTest, Disabled_NoFlagAndHintIgnored) {
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
     SetupConnectionWithGuard(0, pair, connGuard);
-    EXPECT_FALSE(FlagNegotiated(pair, nullptr));
+    EXPECT_FALSE(FlagSetUp(pair, nullptr));
 
     const size_t size = 4097;
     void* buffer = nullptr;
@@ -430,7 +443,7 @@ TEST_F(GdrFlushFlagTest, PerRequestGating_RandomHintsAndSizes) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                           false, kMinGpusPerNode, kNoNodeLimit));
     AssertInitAndGetDevices(nullptr);
-    const std::string why = FlagSkipReason();
+    const std::string why = EnableFlagForComm();
     if (!why.empty()) GTEST_SKIP() << why;
 
     const int rank = MPIEnvironment::world_rank;
@@ -438,7 +451,7 @@ TEST_F(GdrFlushFlagTest, PerRequestGating_RandomHintsAndSizes) {
     NetConnectionGuard connGuard(net_);
     SetupConnectionWithGuard(0, pair, connGuard);
     uint64_t* flags = nullptr;
-    ASSERT_TRUE(FlagNegotiated(pair, &flags));
+    ASSERT_TRUE(FlagSetUp(pair, &flags));
     const std::vector<uint64_t> snap = (rank == 0) ? SnapshotFlags(flags) : std::vector<uint64_t>();
 
     const size_t kSizes[] = {1, 7, 4097, 65536 + 3, 1 << 20, (4 << 20) + 129};
@@ -508,7 +521,7 @@ TEST_F(GdrFlushFlagTest, OutstandingMixedHints_CtsIsolation) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                           false, kMinGpusPerNode, kNoNodeLimit));
     AssertInitAndGetDevices(nullptr);
-    const std::string why = FlagSkipReason();
+    const std::string why = EnableFlagForComm();
     if (!why.empty()) GTEST_SKIP() << why;
 
     const int rank = MPIEnvironment::world_rank;
@@ -516,7 +529,7 @@ TEST_F(GdrFlushFlagTest, OutstandingMixedHints_CtsIsolation) {
     NetConnectionGuard connGuard(net_);
     SetupConnectionWithGuard(0, pair, connGuard);
     uint64_t* flags = nullptr;
-    ASSERT_TRUE(FlagNegotiated(pair, &flags));
+    ASSERT_TRUE(FlagSetUp(pair, &flags));
     const std::vector<uint64_t> snap = (rank == 0) ? SnapshotFlags(flags) : std::vector<uint64_t>();
 
     constexpr int kWindow = 16;
@@ -670,7 +683,7 @@ TEST_F(GdrFlushFlagTest, GpuObserver_PayloadVisibleOnceFlagSet) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                           false, kMinGpusPerNode, kNoNodeLimit));
     AssertInitAndGetDevices(nullptr);
-    const std::string why = FlagSkipReason();
+    const std::string why = EnableFlagForComm();
     if (!why.empty()) GTEST_SKIP() << why;
 
     const int rank = MPIEnvironment::world_rank;
@@ -678,7 +691,7 @@ TEST_F(GdrFlushFlagTest, GpuObserver_PayloadVisibleOnceFlagSet) {
     NetConnectionGuard connGuard(net_);
     SetupConnectionWithGuard(0, pair, connGuard);
     uint64_t* flags = nullptr;
-    ASSERT_TRUE(FlagNegotiated(pair, &flags));
+    ASSERT_TRUE(FlagSetUp(pair, &flags));
 
     const size_t kSizes[] = {1, 4097, (1 << 20) + 3, 16 << 20, (16 << 20) + 4099};
     const size_t maxSize = *std::max_element(std::begin(kSizes), std::end(kSizes));
@@ -775,7 +788,7 @@ TEST_F(GdrFlushFlagTest, Lifecycle_ReconnectFreshStateNoLeaks) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                           false, kMinGpusPerNode, kNoNodeLimit));
     AssertInitAndGetDevices(nullptr);
-    const std::string why = FlagSkipReason();
+    const std::string why = EnableFlagForComm();
     if (!why.empty()) GTEST_SKIP() << why;
 
     const int rank = MPIEnvironment::world_rank;
@@ -801,7 +814,7 @@ TEST_F(GdrFlushFlagTest, Lifecycle_ReconnectFreshStateNoLeaks) {
         NetConnectionGuard connGuard(net_);
         SetupConnectionWithGuard(0, pair, connGuard);
         uint64_t* flags = nullptr;
-        ASSERT_TRUE(FlagNegotiated(pair, &flags)) << "cycle " << cycle;
+        ASSERT_TRUE(FlagSetUp(pair, &flags)) << "cycle " << cycle;
         std::vector<uint64_t> snap;
         if (rank == 0) {
             EXPECT_EQ(ncclIbGetGpuFlushFlagSeq(pair.recvComm), 0u) << "cycle " << cycle;
@@ -866,7 +879,7 @@ TEST_F(GdrFlushFlagTest, MultiThread_IndependentCommsKeepOwnState) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                           false, kMinGpusPerNode, kNoNodeLimit));
     AssertInitAndGetDevices(nullptr);
-    const std::string why = FlagSkipReason();
+    const std::string why = EnableFlagForComm();
     if (!why.empty()) GTEST_SKIP() << why;
 
     const int rank = MPIEnvironment::world_rank;
@@ -887,7 +900,7 @@ TEST_F(GdrFlushFlagTest, MultiThread_IndependentCommsKeepOwnState) {
         };
         if (hipSetDevice(hipDev) != hipSuccess) return fail("hipSetDevice failed");
         uint64_t* flags = (rank == 0) ? ncclIbGetGpuFlushFlag(pair.recvComm) : nullptr;
-        if (rank == 0 && !flags) return fail("flag not negotiated");
+        if (rank == 0 && !flags) return fail("flag not set up");
         if (rank == 0 && firstNonZeroQpFlag(flags) != -1) return fail("QP flags not zeroed");
         const std::vector<uint64_t> snap = (rank == 0) ? SnapshotFlags(flags) : std::vector<uint64_t>();
 
