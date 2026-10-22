@@ -679,11 +679,6 @@ Roofline visualization options (available only in analyze mode):
 * ``-m``, ``--roofline-mem-level``: Filter by memory level -- ALL, HBM, L2, vL1D, L0, LDS (default: ALL)
 * ``-R``, ``--roofline-data-types``: Choose datatypes for roofline visualization (default: FP32)
 
-.. note::
-
-   The old names ``--sort``, ``--mem-level``, and ``--roofline-data-type`` still work,
-   but show a warning. They will be removed in a future release.
-
 Example that uses several memory levels and data types:
 
 .. code-block:: shell-session
