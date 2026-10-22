@@ -65,6 +65,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Removed the roofline plot from CLI analyze output. The HTML roofline plot is unaffected and continues to be written to disk.
   * The `plotext` dependency is no longer installed.
 
+* Removed the `analyze --sort`, `--mem-level`, and `--roofline-data-type` options. The roofline HTML shows every memory level and precision, and you can filter them in the browser.
+
 ### Optimized
 
 ### Resolved issues
