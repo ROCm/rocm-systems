@@ -743,6 +743,7 @@ function(rccl_define_micro_source_lists)
     p2p-resiliency-recovery-test.cc
     p2p-resiliency-recovery-ainic-test.cc
     fakes/ibvwrap_fakes.cc
+    fakes/libc_fakes.cc                  # g_malloc / g_free for the recovery context
     fakes/nccl_fakes.cc
     fakes/net_ib_cast_capability_fakes.cc
     fakes/net_ib_cast_common_fakes.cc

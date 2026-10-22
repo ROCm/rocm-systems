@@ -20,19 +20,20 @@
 
 #include "../common/LogCapture.hpp"
 #include "P2pResiliencyScene.h"
+#include "fakes/libc_fakes.h"
 #include "fakes/param_redirect.h"
 
-// The recovery context is the unit's only plain malloc; the seam lets a test fail it.
-static bool g_recoveryMallocFails = false;
-static void* P2pResiliencyRecoveryTestMalloc(size_t size) { return g_recoveryMallocFails ? nullptr : malloc(size); }
+// Only malloc and free from fakes/libc_seam.h: its send/recv renames would hit the context's members.
+extern "C" void* micro_malloc(size_t);
+extern "C" void micro_free(void*);
 
 #define clockNano P2pResiliencyTestClockNano
-#define malloc P2pResiliencyRecoveryTestMalloc
+#define malloc micro_malloc
+#define free micro_free
 #include P2P_RESILIENCY_RECOVERY_CC_PATH
+#undef free
 #undef malloc
 #undef clockNano
-
-void ncclSetThreadName(pthread_t, const char*, ...) {}
 
 // ThreadStop clears the flag without the mutex, so its wakeup can be lost (AICOMRCCL-3103).
 // Clearing it under the mutex first makes the stop deterministic.
@@ -77,6 +78,8 @@ class P2pResiliencyRecoveryMicrotest : public ::testing::Test {
   std::function<int(ibv_cq*, int, ibv_wc*)> defaultPoll_;
   std::function<int(ibv_qp*, ibv_send_wr*)> defaultSend_;
   std::function<int(ibv_qp*, ibv_recv_wr*)> defaultRecv_;
+  // The recovery thread frees contexts too, and the default's g_freedPointers is not thread-safe.
+  ScopedHook<void(void*)> free_{g_free, [](void* p) { std::free(p); }};
 
   void SetUp() override {
     defaultPoll_ = scene_.pollCq;
@@ -565,6 +568,13 @@ TEST_F(P2pResiliencyRecoveryMicrotest, ContextInit_Receiver_PostsAFullBatchOfBuf
 }
 
 TEST_F(P2pResiliencyRecoveryMicrotest, ContextInit_Failure_ReturnsTheErrorAndNoContext) {
+  void* taken = nullptr;
+  std::vector<void*> freed;
+  ScopedHook alloc(g_malloc, [&](size_t size) { return taken = std::malloc(size); });
+  ScopedHook release(g_free, [&](void* p) {
+    freed.push_back(p);
+    std::free(p);
+  });
   for (bool isSend : {true, false}) {
     Make(isSend, 1, 1);
     {
@@ -572,15 +582,21 @@ TEST_F(P2pResiliencyRecoveryMicrotest, ContextInit_Failure_ReturnsTheErrorAndNoC
       ctx_ = (ncclIbPortRecoveryContext*)0x1;
       EXPECT_EQ(IbCastPortRecoveryContextInit(res_, 0, &ctx_), ncclSystemError);
       EXPECT_EQ(ctx_, nullptr);
+      EXPECT_EQ(freed, std::vector<void*>{taken});
     }
     int posts = 0;
     scene_.postRecv = [&](ibv_qp*, ibv_recv_wr*) { return ++posts == 2 ? EIO : 0; };
     EXPECT_EQ(IbCastPortRecoveryContextInit(res_, 0, &ctx_), isSend ? ncclSuccess : ncclSystemError);
     if (ctx_) IbCastPortRecoveryContextDestroy(ctx_);
     ctx_ = nullptr;
+    EXPECT_EQ(freed.size(), 2u);
+    EXPECT_EQ(freed.back(), taken);
     scene_.postRecv = [](ibv_qp*, ibv_recv_wr*) { return EIO; };
     EXPECT_EQ(IbCastPortRecoveryContextInit(res_, 0, &ctx_), ncclSystemError);
     EXPECT_EQ(ctx_, nullptr);
+    EXPECT_EQ(freed.size(), 3u);
+    EXPECT_EQ(freed.back(), taken);
+    freed.clear();
     Reset();
   }
   EXPECT_EQ(IbCastPortRecoveryContextInit(nullptr, 0, nullptr), ncclInternalError);
@@ -588,12 +604,11 @@ TEST_F(P2pResiliencyRecoveryMicrotest, ContextInit_Failure_ReturnsTheErrorAndNoC
 
 TEST_F(P2pResiliencyRecoveryMicrotest, ContextInit_AllocationFails_ReturnsInternalError) {
   Make(true, 1, 1);
-  g_recoveryMallocFails = true;
-  ncclResult_t ret = IbCastPortRecoveryContextInit(res_, 0, &ctx_);
-  g_recoveryMallocFails = false;
-  EXPECT_EQ(ret, ncclInternalError);
+  ScopedHook alloc(g_malloc, [](size_t) -> void* { return nullptr; });
+  EXPECT_EQ(IbCastPortRecoveryContextInit(res_, 0, &ctx_), ncclInternalError);
   EXPECT_EQ(ctx_, nullptr);
   EXPECT_TRUE(scene_.transitions.empty());
+  EXPECT_EQ(alloc.calls, 1);
 }
 
 TEST_F(P2pResiliencyRecoveryMicrotest, HandleFailure_QueuesTheDeviceForTheThread) {

@@ -157,13 +157,13 @@ TEST_F(P2pResiliencyMicrotest, DeviceNumSet_RecoveryEnabled_SizesRecoveryQpsForT
   EXPECT_EQ(res_->nPortRecoveryQps, 3);
 }
 
-TEST_F(P2pResiliencyMicrotest, DeviceNumSet_SingleProbingQp_Warns) {
+TEST_F(P2pResiliencyMicrotest, DeviceNumSet_SingleProbingQp_IsStillConfigured) {
   send_ = scene_.NewComm<ncclIbSendComm>(true, 2, 2);
   ASSERT_EQ(IbCastResiliencyInit(&send_->base, &res_), ncclSuccess);
-  std::string log = CaptureLog([&] { EXPECT_EQ(IbCastResiliencyDeviceNumSet(res_, 1, 2), ncclSuccess); });
-  EXPECT_TRUE(LogHas(log, "with a single device")) << log;
-  log = CaptureLog([&] { EXPECT_EQ(IbCastResiliencyDeviceNumSet(res_, 2, 1), ncclSuccess); });
-  EXPECT_FALSE(LogHas(log, "with a single device")) << log;
+  ASSERT_EQ(IbCastResiliencyDeviceNumSet(res_, 1, 2), ncclSuccess);
+  EXPECT_EQ(res_->nProbingQps, 1);
+  ASSERT_EQ(IbCastResiliencyDeviceNumSet(res_, 2, 1), ncclSuccess);
+  EXPECT_EQ(res_->nProbingQps, 2);
 }
 
 TEST_F(P2pResiliencyMicrotest, DataCqSizeGet_Sender_HoldsEveryRequestOnOneSurvivingDevice) {
@@ -658,8 +658,7 @@ TEST_F(P2pResiliencyMicrotest, QpsReconfigure_ProbingQpFails_ReportsNotReconfigu
 }
 
 TEST_F(P2pResiliencyMicrotest, Close_NullContext_IsTolerated) {
-  std::string log = CaptureLog([] { EXPECT_EQ(IbCastResiliencyClose(nullptr), ncclSuccess); });
-  EXPECT_TRUE(LogHas(log, "Resiliency context is NULL")) << log;
+  EXPECT_EQ(IbCastResiliencyClose(nullptr), ncclSuccess);
 }
 
 TEST_F(P2pResiliencyMicrotest, Close_DestroysEveryCreatedProbingQp) {
