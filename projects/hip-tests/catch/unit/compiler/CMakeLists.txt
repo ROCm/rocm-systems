@@ -109,9 +109,7 @@ if(HIP_PLATFORM MATCHES "amd")
     add_dependencies(hipSquareGenericTargetDefault hipSquareGenericTargetOnlyCompressed)
   endif()
 
-  # Build hipSpirvTest for amdgcnspirv only: drop the global --offload-arch flags
-  # (CMAKE_HIP_FLAGS) for this target and compile the test main into it rather
-  # than using Main_Object, which is built for the real GPU archs.
+  # Build hipSpirvTest for amdgcnspirv only
   set(SPIRV_TEST_SRC
     hipSpirvTest.cc
     ../../hipTestMain/hip_test_context.cc
