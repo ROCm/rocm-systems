@@ -307,8 +307,8 @@ TEST(GinAllReducePolicy, GinScatterScratchLayout) {
   const auto base = reinterpret_cast<const char*>(static_cast<uintptr_t>(0x10000));
   EXPECT_EQ(ginScatterIncomingBase(base, nRanks, slotBytes, slot, false), base);
   const char* staged = ginScatterIncomingBase(base, nRanks, slotBytes, slot, true);
-  EXPECT_EQ(static_cast<uintptr_t>(staged),
-            static_cast<uintptr_t>(base) + static_cast<size_t>(slot) * nRanks * slotBytes);
+  EXPECT_EQ(reinterpret_cast<uintptr_t>(staged),
+            reinterpret_cast<uintptr_t>(base) + static_cast<size_t>(slot) * nRanks * slotBytes);
 }
 
 TEST(GinAllReducePolicy, GinScatterScratchIsIncomingSlots) {
