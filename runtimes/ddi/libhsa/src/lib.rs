@@ -13,6 +13,8 @@
 //! encodings into runtime-owned objects; the individual modules document the
 //! lifetime and synchronization rules for those objects.
 
+// HSA attribute tables and generated dispatch have long functions; modules also
+// import the shared FFI catalog. Keep those two structural exceptions explicit.
 #![allow(
     clippy::cast_possible_truncation,
     clippy::cast_ptr_alignment,

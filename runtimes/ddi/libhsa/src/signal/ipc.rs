@@ -11,7 +11,7 @@ const IPC_SIGNAL_ID: u64 = 0x71fc_ca6a_3d5d_5276;
 
 /// The mapped record exchanged with another HSA process.
 ///
-/// ROCr peers read the signal prefix, `core_signal`, and `id` at fixed offsets.
+/// `ROCr` peers read the signal prefix, `core_signal`, and `id` at fixed offsets.
 /// The other bytes are reserved wire storage, not per-process Rust state.
 #[repr(C, align(64))]
 pub(super) struct IpcSignalBlock {
