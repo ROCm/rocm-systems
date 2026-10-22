@@ -215,53 +215,66 @@ template <typename T, ROCSHMEM_OP Op>
 __device__ void IPCContext::internal_direct_allreduce_wave(
     T *dst, const T *src, int nelems, IPCTeam *team_obj) {  // NOLINT(runtime/int)
 
-  int stride = team_obj->tinfo_wrt_world->stride;
-  int PE_start = team_obj->tinfo_wrt_world->pe_start;
   int PE_size = team_obj->tinfo_wrt_world->size;
   long *pSync = team_obj->reduce_pSync;
   T *pWrk = reinterpret_cast<T *>(team_obj->pWrk);
+  int my_pe_in_team = team_obj->my_pe;
 
-  int finish = PE_start + stride * PE_size;
-  int pe = my_pe;
-  int wf_tid = get_flat_block_id() % WF_SIZE;
-  int64_t flag_val = 1;
+  int tid = get_flat_block_id();
+  int step_size = get_flat_block_size() < WF_SIZE ? get_flat_block_size() : WF_SIZE;
+  int wf_tid = tid % WF_SIZE;
 
   // Initialize local dst from src
   for (int i = wf_tid; i < nelems; i += WF_SIZE) {
     dst[i] = src[i];
   }
 
-  // Put src to pWrk on all other PEs and signal via pSync
-  for (int i = PE_start; i < finish; i += stride) {
-    if (i != pe) {
-      internal_putmem_wave(&pWrk[pe * nelems],
-        reinterpret_cast<const void *>(src), nelems * sizeof(T), i);
-      if (is_thread_zero_in_wave()) {
-        fence(i);
-        internal_putmem(&pSync[pe], &flag_val, sizeof(*pSync), i);
-      }
+  // Compute byte offset of pWrk dest slot from sync pool base.
+  // pWrk is in the wrk_sync_pool (not the symmetric heap), so we
+  // must use wrk_sync_pool_bases_ for remote access.
+  ptrdiff_t pWrk_offset = reinterpret_cast<char*>(&pWrk[my_pe_in_team * nelems])
+                          - wrk_sync_pool_bases_[my_pe];
+  ptrdiff_t pSync_offset = reinterpret_cast<char*>(&pSync[my_pe_in_team])
+                           - wrk_sync_pool_bases_[my_pe];
+
+  // Lane-distributed: each lane copies src to pWrk on its assigned subset
+  // of remote PEs via wrk_sync_pool_bases_, then signals via ipcAMOAdd.
+  for (int j = tid; j < PE_size; j += step_size) {
+    int dest_pe = team_obj->get_pe_in_world(j);
+    if (dest_pe != my_pe) {
+      T *remote_pWrk = reinterpret_cast<T*>(
+          wrk_sync_pool_bases_[dest_pe] + pWrk_offset);
+      memcpy(remote_pWrk, src, nelems * sizeof(T));
+    }
+  }
+  for (int j = tid; j < PE_size; j += step_size) {
+    int dest_pe = team_obj->get_pe_in_world(j);
+    if (dest_pe != my_pe) {
+      __threadfence_system();
+      ipcImpl_.ipcAMOAdd(reinterpret_cast<long*>(
+          wrk_sync_pool_bases_[dest_pe] + pSync_offset), 1L);
     }
   }
 
-  // Reduce contributions from all other PEs into dst
-  for (int i = PE_start; i < finish; i += stride) {
-    if (i != pe) {
-      if (is_thread_zero_in_wave()) {
-        wait_until(&pSync[i], ROCSHMEM_CMP_EQ, flag_val);
-      }
+  // Each lane polls its assigned subset of sync flags, then reduces.
+  for (int j = tid; j < PE_size; j += step_size) {
+    int dest_pe = team_obj->get_pe_in_world(j);
+    if (dest_pe != my_pe) {
+      long *sync_flag = &pSync[j];
+      while (uncached_load(sync_flag) != 1) { }
+      pSync[j] = ROCSHMEM_SYNC_VALUE;
+    }
+  }
+
+  // All lanes cooperate on the reduction (must see all data first).
+  for (int i = 0; i < PE_size; i++) {
+    int dest_pe = team_obj->get_pe_in_world(i);
+    if (dest_pe != my_pe) {
       T *ptr = &pWrk[i * nelems];
       for (int j = wf_tid; j < nelems; j += WF_SIZE) {
         OpWrap<Op>::Calc(ptr, dst, j);
       }
     }
-  }
-
-  // Reset pSync entries
-  if (is_thread_zero_in_wave()) {
-    for (int i = 0; i < num_pes; i++) {
-      pSync[i] = ROCSHMEM_SYNC_VALUE;
-    }
-    __threadfence_system();
   }
 }
 
