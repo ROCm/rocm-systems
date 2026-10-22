@@ -112,11 +112,12 @@ TEST_F(SdkPmcSampleTest, GetSizeMatchesSerializedBytes)
     const size_t computed_size = get_size(original);
     serialize(buffer.data(), original);
 
-    std::uint8_t* ptr = buffer.data();
-    deserialize<sample>(ptr);
-    const size_t bytes_consumed = static_cast<size_t>(ptr - buffer.data());
+    std::uint8_t* ptr            = buffer.data();
+    const sample  deserialized   = deserialize<sample>(ptr);
+    const size_t  bytes_consumed = static_cast<size_t>(ptr - buffer.data());
 
     EXPECT_EQ(bytes_consumed, computed_size);
+    EXPECT_EQ(deserialized.entries.size(), original.entries.size());
 }
 
 TEST_F(SdkPmcSampleTest, DeserializePreservesBufferPointerAdvancement)

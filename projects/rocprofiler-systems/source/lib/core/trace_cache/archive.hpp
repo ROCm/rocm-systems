@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "common/defines.h"
 #include "core/trace_cache/cache_type_traits.hpp"
 #include "core/trace_cache/cacheable.hpp"
 
@@ -32,14 +33,14 @@ struct binary_size_archive
     std::size_t           size         = 0;
 
     template <typename... Types>
-    void operator()(const Types&... values)
+    ROCPROFSYS_INLINE void operator()(const Types&... values)
     {
         (size_one(values), ...);
     }
 
 private:
     template <typename Type>
-    void size_one(const Type& value)
+    ROCPROFSYS_INLINE void size_one(const Type& value)
     {
         if constexpr(archive_serializable<Type, binary_size_archive>)
         {
@@ -61,23 +62,33 @@ struct binary_write_archive
     std::size_t           position     = 0;
 
     template <typename... Types>
-    void operator()(const Types&... values)
+    ROCPROFSYS_INLINE void operator()(const Types&... values)
     {
-        (write_one(values), ...);
+        // Locals, not members: a write through the byte buffer may alias any member, so
+        // members would be reloaded after every field and adjacent copies not merged.
+        std::uint8_t* const out = buffer;
+        std::size_t         pos = position;
+        (write_one(values, out, pos), ...);
+        position = pos;
     }
 
 private:
     template <typename Type>
-    void write_one(const Type& value)
+    ROCPROFSYS_INLINE void write_one(const Type& value, std::uint8_t* out,
+                                     std::size_t& pos)
     {
         if constexpr(archive_serializable<Type, binary_write_archive>)
         {
-            // Recurse into a nested struct; it is only read through serialize().
+            // Recurse into a nested struct; it is only read through serialize(). The
+            // nested call works on the members, so hand the position over and take it
+            // back.
+            position = pos;
             const_cast<Type&>(value).serialize(*this);
+            pos = position;
         }
         else
         {
-            utility::store_value(value, buffer, position);
+            utility::store_value(value, out, pos);
         }
     }
 };
@@ -92,30 +103,37 @@ struct binary_read_archive
     std::uint8_t*         cursor       = nullptr;
 
     template <typename... Types>
-    void operator()(Types&... values)
+    ROCPROFSYS_INLINE void operator()(Types&... values)
     {
-        (read_one(values), ...);
+        // Local cursor for the same reason as in binary_write_archive.
+        std::uint8_t* cur = cursor;
+        (read_one(values, cur), ...);
+        cursor = cur;
     }
 
 private:
     template <typename Type>
-    void read_one(Type& value)
+    ROCPROFSYS_INLINE void read_one(Type& value, std::uint8_t*& cur)
     {
         if constexpr(archive_serializable<Type, binary_read_archive>)
         {
+            // The nested call works on the member, so hand the cursor over and take it
+            // back.
+            cursor = cur;
             value.serialize(*this);
+            cur = cursor;
         }
         else if constexpr(std::is_same_v<Type, std::span<const std::byte>>)
         {
             std::size_t byte_count = 0;
-            std::memcpy(&byte_count, cursor, sizeof(std::size_t));
-            cursor += sizeof(std::size_t);
-            value = { reinterpret_cast<const std::byte*>(cursor), byte_count };
-            cursor += byte_count;
+            std::memcpy(&byte_count, cur, sizeof(std::size_t));
+            cur += sizeof(std::size_t);
+            value = { reinterpret_cast<const std::byte*>(cur), byte_count };
+            cur += byte_count;
         }
         else
         {
-            utility::parse_value(cursor, value);
+            utility::parse_value(cur, value);
         }
     }
 };
@@ -134,9 +152,15 @@ concept archive_record =
 
 // serialize() is one non-const member shared by all archives. The size and write archives
 // only read through it, so the const_cast is safe (cereal's output archives do the same).
+//
+// flatten inlines everything these functions call, including the record's own
+// serialize(): without it GCC keeps that member out of line and copies the fields one by
+// one through memory. They are not ROCPROFSYS_INLINE on purpose: flatten is lost once the
+// function is itself inlined, so each record type gets one fully inlined function, as the
+// hand-written specializations had before.
 template <archive_record T>
-[[nodiscard]] std::size_t
-record_size(const T& record)
+[[nodiscard]] __attribute__((flatten)) std::size_t
+                                       record_size(const T& record)
 {
     binary_size_archive archive;
     const_cast<T&>(record).serialize(archive);
@@ -144,7 +168,7 @@ record_size(const T& record)
 }
 
 template <archive_record T>
-void
+__attribute__((flatten)) void
 record_write(std::uint8_t* buffer, const T& record)
 {
     binary_write_archive archive{ .buffer = buffer, .position = 0 };
@@ -152,7 +176,7 @@ record_write(std::uint8_t* buffer, const T& record)
 }
 
 template <archive_record T>
-[[nodiscard]] T
+[[nodiscard]] __attribute__((flatten)) T
 record_read(std::uint8_t*& buffer)
 {
     T                   record{};
@@ -164,15 +188,15 @@ record_read(std::uint8_t*& buffer)
 
 /** Encoded size of a record. One definition for every record type. */
 template <archive_record T>
-[[nodiscard]] std::size_t
-get_size(const T& record)
+[[nodiscard]] ROCPROFSYS_INLINE std::size_t
+                                get_size(const T& record)
 {
     return record_size(record);
 }
 
 /** Writes a record into a buffer with room for get_size(record) bytes. */
 template <archive_record T>
-void
+ROCPROFSYS_INLINE void
 serialize(std::uint8_t* buffer, const T& record)
 {
     record_write(buffer, record);
@@ -180,7 +204,7 @@ serialize(std::uint8_t* buffer, const T& record)
 
 /** Reads a record and advances the buffer past it. */
 template <archive_record T>
-[[nodiscard]] T
+[[nodiscard]] ROCPROFSYS_INLINE T
 deserialize(std::uint8_t*& buffer)
 {
     return record_read<T>(buffer);
