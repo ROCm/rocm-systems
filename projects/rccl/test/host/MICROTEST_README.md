@@ -1107,9 +1107,3 @@ override is active, `SetMicroEnv` and `SetMicroEnvAbsent` also update `environ`.
 `ClearMicroEnv`/`ResetEnvFakes` restore the original process environment and
 clear the lookup map. Map-only tests retain the existing fallback behavior
 unless they opt into the enumeration override.
-
-`DISABLED_Summarize_HashCollisionsReportFullCommIdentity` tracks AICOMRCCL-2743.
-The environment reporters currently omit host and process hashes, so distinct
-communicators can appear identical. The disabled regression specifies the full
-identity for consistent, mismatch, and mismatch-summary reports. Enable it
-with the separate production fix; enabled tests still pin correct grouping.
