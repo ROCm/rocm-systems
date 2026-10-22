@@ -120,13 +120,7 @@ fn enqueue_copy_job(
         Err(_) => return OUT_OF_RESOURCES,
     };
     for completion in pending.handles.iter().skip(dependency_len) {
-        if let Some(record) = pending
-            .signals
-            .async_signal_refs
-            .get_mut(&(completion.handle as usize))
-        {
-            record.copy_profile = None;
-        }
+        pending.signals.set_copy_profile(*completion, None);
     }
     pending.transfer_to_worker();
     pending.memory.workers.push(worker);
