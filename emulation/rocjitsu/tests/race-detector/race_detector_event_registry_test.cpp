@@ -4,7 +4,6 @@
 #include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
 #include <gtest/gtest.h>
-#include <vector>
 
 using namespace rocjitsu::plugins::race_detector;
 
@@ -27,18 +26,17 @@ TEST(RaceDetector, EventRegistry_TrimmedWaveLocalEventsAreNotBarrierQueued) {
   // already-trimmed id, causing heap corruption and potentially corrupting LDS
   // race bookkeeping.
   int N = EventRegistry::kTrimAttemptInterval;
-  RaceDetector detector(/*nWaves=*/
-                        1, /*vgprCount=*/2, /*sgprCount=*/2, Dim3d(0), [](RaceViolation) {},
-                        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4),
-                        /*ldsSizeBytes=*/64 * 1024);
+  RaceDetector detector(
+      /*nWaves=*/
+      1, Dim3d(0), [](RaceViolation) {}, counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4),
+      /*ldsSizeBytes=*/64 * 1024);
   auto &wave = detector.getWaveRaceState(0);
 
   // Allocate enough wave-local loads to trigger EventRegistry trimming. Each
   // load is immediately completed with vmcnt(0), so none should be waiting for
   // a workgroup barrier.
   for (int i = 0; i < N; ++i) {
-    wave.registerEvent(/*pc=*/static_cast<uint64_t>(i), MemoryEventType::GLOBAL_TO_VGPR,
-                       std::vector<uint32_t>{0}, /*execMask=*/1);
+    wave.registerEvent(/*pc=*/static_cast<uint64_t>(i), MemoryEventType::GLOBAL_TO_VGPR);
     PendingWaitCount wait;
     wait.add(rocjitsu::amdgpu::WaitCounterType::VMCNT, 0);
     wave.dispatch(wait);

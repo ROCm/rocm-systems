@@ -22,9 +22,9 @@ namespace rocjitsu::plugins::race_detector {
 ///
 /// An event is trimmable when it can never be accessed again:
 ///   - RETIRED events (explicitly retired at s_barrier via retireEvent).
-///   - WAVE_COMPLETE non-LDS events. These have left all per-wave and
-///     per-register lists; retireEvent is a no-op for them, so they don't
-///     need to wait for s_barrier.
+///   - WAVE_COMPLETE non-LDS events. These have left all per-wave lists;
+///     retireEvent is a no-op for them, so they don't need to wait for
+///     s_barrier.
 ///   - WAVE_COMPLETE LDS events are NOT trimmable until retired, because
 ///     retireEvent must still remove them from ldsWriteEvents/ldsReadEvents
 ///     and adjust byte counts.
@@ -43,19 +43,14 @@ class EventRegistry {
     uint8_t satisfiedCounterMask;
     MemoryOrderClass memoryOrder;
     EventStatus status;
-    uint8_t byteMask;
-    uint8_t lastRegisterByteMask;
-    uint64_t execMask;
-    std::vector<uint32_t> registers;
     IntervalSet ldsIntervals;
   };
 
 public:
   /// Allocate a new event with every simultaneous counter obligation.
-  EventId add(WaveId waveId, uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers,
-              uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals,
+  EventId add(WaveId waveId, uint64_t pc, MemoryEventType type, IntervalSet ldsIntervals,
               std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-              MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0) {
+              MemoryOrderClass memoryOrder) {
     int id = base_offset_ + static_cast<int>(entries_.size());
     assert(!counterObligations.empty());
     assert(counterObligations.size() <= amdgpu::MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS);
@@ -67,10 +62,6 @@ public:
                     0,
                     memoryOrder,
                     EventStatus::ACTIVE,
-                    byteMask,
-                    lastRegisterByteMask ? lastRegisterByteMask : byteMask,
-                    execMask,
-                    std::move(registers),
                     std::move(ldsIntervals)};
     std::ranges::copy(counterObligations, event.counterObligations.begin());
     entries_.push_back(std::move(event));
@@ -145,24 +136,9 @@ public:
   EventStatus status(EventId id) const { return entries_[index(id)].status; }
   bool isTrimmable(EventId id) const { return isEntryTrimmable(entries_[index(id)]); }
   uint64_t pc(EventId id) const { return entries_[index(id)].pc; }
-  uint8_t byteMask(EventId id) const { return entries_[index(id)].byteMask; }
-  /// Packed loads can write fewer bytes in the last destination without
-  /// creating a second event or consuming another wait-counter increment.
-  uint8_t registerByteMask(EventId id, uint32_t reg) const {
-    const auto &event = entries_[index(id)];
-    return !event.registers.empty() && reg == event.registers.back() ? event.lastRegisterByteMask
-                                                                     : event.byteMask;
-  }
-  uint64_t execMask(EventId id) const { return entries_[index(id)].execMask; }
   WaveId waveId(EventId id) const { return entries_[index(id)].waveId; }
 
-  std::span<const uint32_t> registers(EventId id) const { return entries_[index(id)].registers; }
-
   const IntervalSet &ldsIntervals(EventId id) const { return entries_[index(id)].ldsIntervals; }
-
-  bool isActiveForLane(EventId id, int lane) const {
-    return (entries_[index(id)].execMask >> lane) & 1;
-  }
 
   // -- Test helpers --
 

@@ -42,27 +42,23 @@ class RaceDetector {
 public:
   /// ldsSizeBytes is the CU backing capacity, independent of workgroup
   /// allocation metadata and the lazily materialized byte count.
-  RaceDetector(int nWaves, int vgprCount, int sgprCount, Dim3d workgroupId,
-               std::function<void(RaceViolation)> raceHandler, CounterCapacities,
-               size_t ldsSizeBytes);
+  RaceDetector(int nWaves, Dim3d workgroupId, std::function<void(RaceViolation)> raceHandler,
+               CounterCapacities, size_t ldsSizeBytes);
 
   /// Allocate an event using the counter and ordering implied by its type.
-  EventId allocateEventId(WaveId wave, uint64_t pc, MemoryEventType type,
-                          std::vector<uint32_t> registers, uint64_t execMask) {
-    return allocateEventId(wave, pc, type, std::move(registers), execMask, 0xF, {},
-                           defaultWaitCounterType(type), defaultMemoryOrder(type));
+  EventId allocateEventId(WaveId wave, uint64_t pc, MemoryEventType type) {
+    return allocateEventId(wave, pc, type, {}, defaultWaitCounterType(type),
+                           defaultMemoryOrder(type));
   }
 
   /// Allocate a workgroup-global event ID and record its metadata.
   EventId
-  allocateEventId(WaveId, uint64_t pc, MemoryEventType, std::vector<uint32_t> registers,
-                  uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals,
+  allocateEventId(WaveId, uint64_t pc, MemoryEventType, IntervalSet ldsIntervals,
                   amdgpu::WaitCounterType waitCounterType, MemoryOrderClass memoryOrder,
                   std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt);
-  EventId allocateEventId(WaveId, uint64_t pc, MemoryEventType, std::vector<uint32_t> registers,
-                          uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals,
+  EventId allocateEventId(WaveId, uint64_t pc, MemoryEventType, IntervalSet ldsIntervals,
                           std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                          MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0);
+                          MemoryOrderClass memoryOrder);
 
   /// Transition an event from ACTIVE to WAVE_COMPLETE.
   void markEventWaveComplete(EventId);

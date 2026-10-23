@@ -3,19 +3,20 @@
 
 #include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <limits>
 #include <sstream>
 
 namespace rocjitsu::plugins::race_detector {
 
-RaceDetector::RaceDetector(int nWaves, int vgprCount, int sgprCount, Dim3d workgroupId,
+RaceDetector::RaceDetector(int nWaves, Dim3d workgroupId,
                            std::function<void(RaceViolation)> raceHandler,
                            CounterCapacities counterCapacities, size_t ldsSizeBytes)
     : ldsSizeBytes_(ldsSizeBytes), workgroupId(workgroupId), raceHandler(std::move(raceHandler)) {
   waveRaceStates.reserve(nWaves);
   for (int i = 0; i < nWaves; ++i) {
-    waveRaceStates.emplace_back(vgprCount, sgprCount, WaveId{i}, this, counterCapacities);
+    waveRaceStates.emplace_back(WaveId{i}, this, counterCapacities);
   }
 }
 
@@ -32,7 +33,6 @@ void RaceDetector::setProfiler(ProfilerInterface &p) {
 
 EventId
 RaceDetector::allocateEventId(WaveId waveId, uint64_t pc, MemoryEventType type,
-                              std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
                               IntervalSet ldsIntervals, amdgpu::WaitCounterType waitCounterType,
                               MemoryOrderClass memoryOrder,
                               std::optional<amdgpu::WaitCounterType> additionalWaitCounterType) {
@@ -41,21 +41,18 @@ RaceDetector::allocateEventId(WaveId waveId, uint64_t pc, MemoryEventType type,
   size_t count = 1;
   if (additionalWaitCounterType)
     obligations[count++] = {*additionalWaitCounterType, memoryOrder};
-  return allocateEventId(waveId, pc, type, std::move(registers), execMask, byteMask,
-                         std::move(ldsIntervals), std::span(obligations.data(), count),
-                         memoryOrder);
+  return allocateEventId(waveId, pc, type, std::move(ldsIntervals),
+                         std::span(obligations.data(), count), memoryOrder);
 }
 
 EventId
 RaceDetector::allocateEventId(WaveId waveId, uint64_t pc, MemoryEventType type,
-                              std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
                               IntervalSet ldsIntervals,
                               std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                              MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask) {
+                              MemoryOrderClass memoryOrder) {
   bool hasLds = !ldsIntervals.empty();
   EventId eid =
-      events_.add(waveId, pc, type, std::move(registers), execMask, byteMask,
-                  std::move(ldsIntervals), counterObligations, memoryOrder, lastRegisterByteMask);
+      events_.add(waveId, pc, type, std::move(ldsIntervals), counterObligations, memoryOrder);
   if (hasLds) {
     const auto &ivs = events_.ldsIntervals(eid);
     const WaveId orderedWave = memoryOrder == MemoryOrderClass::LDS ? waveId : WaveId{-1};
@@ -126,9 +123,9 @@ void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
     if (wave == events_.waveId(eventId)) {
       // The LDS bytes are safe only when the two operations share a proven
       // FIFO completion class, or an explicit wait completed the older event.
-      // The read's destination VGPR remains independently protected by its
-      // wait-counter obligations. This WAR check does not cover LDS
-      // write/write ordering, which is not currently checked.
+      // The read's destination VGPR is checked by the core memory-wait
+      // scoreboard. This WAR check does not cover LDS write/write ordering,
+      // which is not currently checked.
       const MemoryOrderClass pendingMemoryOrder = events_.memoryOrder(eventId);
       const bool orderedWithCurrent = currentMemoryOrder != MemoryOrderClass::UNORDERED &&
                                       pendingMemoryOrder == currentMemoryOrder;
@@ -206,97 +203,34 @@ RaceDetector::decorateException(const RaceViolation &e, uint64_t wavePc, int num
   constexpr int nBefore = 1;
   constexpr int nAfter = 1;
 
-  auto printCodeBlocks = [&](std::ostringstream &oss, std::vector<uint64_t> eventPcs) {
-    std::ranges::sort(eventPcs);
-    if (eventPcs.empty()) {
-      return;
-    }
-    int64_t blockStart = static_cast<int64_t>(eventPcs[0]) - nBefore;
-    int64_t blockEnd = static_cast<int64_t>(eventPcs[0]) + nAfter;
-    std::vector<uint64_t> arrows = {eventPcs[0]};
+  std::ostringstream oss;
+  oss << "\nLDS race in byte " << e.index << " detected in workgroup (" << workgroupId.x << ","
+      << workgroupId.y << "," << workgroupId.z << "). Race between a pair in:\n\n";
 
-    for (size_t i = 1; i < eventPcs.size(); ++i) {
-      int64_t pc = static_cast<int64_t>(eventPcs[i]);
-      if (pc - nBefore <= blockEnd + 1) {
-        blockEnd = std::max(blockEnd, pc + nAfter);
-        arrows.push_back(eventPcs[i]);
-      } else {
-        printCodeBlock(oss, blockStart, blockEnd, arrows);
-        oss << "\n";
-        blockStart = pc - nBefore;
-        blockEnd = pc + nAfter;
-        arrows = {eventPcs[i]};
-      }
-    }
-    printCodeBlock(oss, blockStart, blockEnd, arrows);
-    oss << "\n";
+  struct PcWaveLane {
+    uint64_t pc;
+    int wave;
+    int lane;
   };
+  std::vector<PcWaveLane> entries{
+      {wavePc, e.wave, e.lane},
+      {events_.pc(e.conflictingEvent), events_.waveId(e.conflictingEvent).value, -1},
+  };
+  std::ranges::sort(entries, [](const PcWaveLane &a, const PcWaveLane &b) {
+    return std::tie(a.pc, a.wave) < std::tie(b.pc, b.wave);
+  });
 
-  if (e.space == RaceViolation::Space::VGPR) {
-    std::ostringstream oss;
-    oss << "\nVGPR race detected on line " << wavePc << " (wave " << e.wave << ", lane " << e.lane
-        << ") in workgroup (" << workgroupId.x << "," << workgroupId.y << "," << workgroupId.z
-        << "). Conflicting events:\n\n";
-
-    std::vector<uint64_t> eventPcs{wavePc, events_.pc(e.conflictingEvent)};
-    printCodeBlocks(oss, std::move(eventPcs));
-    return oss.str();
-  }
-
-  if (e.space == RaceViolation::Space::SGPR) {
-    std::ostringstream oss;
-    oss << "\nSGPR race detected on line " << wavePc << " (wave " << e.wave << ") in workgroup ("
-        << workgroupId.x << "," << workgroupId.y << "," << workgroupId.z
-        << "). Conflicting events:\n\n";
-
-    std::vector<uint64_t> eventPcs{wavePc, events_.pc(e.conflictingEvent)};
-    printCodeBlocks(oss, std::move(eventPcs));
-    return oss.str();
-  }
-
-  if (e.space == RaceViolation::Space::TTMP) {
-    std::ostringstream oss;
-    oss << "\nTTMP race detected on line " << wavePc << " (wave " << e.wave << ") in workgroup ("
-        << workgroupId.x << "," << workgroupId.y << "," << workgroupId.z
-        << "). Conflicting events:\n\n";
-
-    std::vector<uint64_t> eventPcs{wavePc, events_.pc(e.conflictingEvent)};
-    printCodeBlocks(oss, std::move(eventPcs));
-    return oss.str();
-  }
-
-  if (e.space == RaceViolation::Space::LDS) {
-    std::ostringstream oss;
-    oss << "\nLDS race in byte " << e.index << " detected in workgroup (" << workgroupId.x << ","
-        << workgroupId.y << "," << workgroupId.z << "). Race between a pair in:\n\n";
-
-    struct PcWaveLane {
-      uint64_t pc;
-      int wave;
-      int lane;
-    };
-    std::vector<PcWaveLane> entries{
-        {wavePc, e.wave, e.lane},
-        {events_.pc(e.conflictingEvent), events_.waveId(e.conflictingEvent).value, -1},
-    };
-    std::ranges::sort(entries, [](const PcWaveLane &a, const PcWaveLane &b) {
-      return std::tie(a.pc, a.wave) < std::tie(b.pc, b.wave);
-    });
-
-    for (const auto &entry : entries) {
-      oss << "Wave " << entry.wave;
-      if (entry.lane >= 0) {
-        oss << " Lane " << entry.lane;
-      }
-      oss << ":\n";
-      std::array<uint64_t, 1> arrowLine = {entry.pc};
-      printCodeBlock(oss, entry.pc - nBefore, entry.pc + nAfter, arrowLine);
-      oss << "\n";
+  for (const auto &entry : entries) {
+    oss << "Wave " << entry.wave;
+    if (entry.lane >= 0) {
+      oss << " Lane " << entry.lane;
     }
-    return oss.str();
+    oss << ":\n";
+    std::array<uint64_t, 1> arrowLine = {entry.pc};
+    printCodeBlock(oss, entry.pc - nBefore, entry.pc + nAfter, arrowLine);
+    oss << "\n";
   }
-
-  return "\nUnknown race space\n";
+  return oss.str();
 }
 
 } // namespace rocjitsu::plugins::race_detector

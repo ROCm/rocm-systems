@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 /// @file wait_hazard_test.cpp
-/// @brief Shared wait-retirement and register-readiness tests for the core
-/// scoreboard and race plugin.
+/// @brief Wait-retirement tests shared by the core scoreboard and race plugin,
+/// plus core-only register-readiness tests.
 
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 #include "rocjitsu/isa/decoder.h"
@@ -108,7 +108,7 @@ public:
     if (!cu_)
       return;
     PluginSinkConfig sinks;
-    sink_ = &sinks.emplace<StringSink>();
+    sinks.emplace<StringSink>();
     plugins_ = std::make_shared<ExecutionPluginGroup>(std::move(sinks));
     auto plugin = std::make_unique<RaceDetectorPlugin>();
     auto *observer = plugin.get();
@@ -126,14 +126,13 @@ public:
   }
   bool ready() const { return state_ != nullptr; }
   static bool supports(CounterDomain domain) { return domain.race.has_value(); }
-  void load(CounterDomain domain, unsigned reg, bool unordered = false, uint64_t lanes = 1,
-            uint8_t bytes = 0xf) {
-    state_->registerEvent(0x100 + reg * 4, MemoryEventType::GLOBAL_TO_VGPR, {reg}, lanes, bytes,
-                          *domain.race,
+  void load(CounterDomain domain, unsigned reg, bool unordered = false) {
+    state_->registerEvent(0x100 + reg * 4, MemoryEventType::GLOBAL_TO_VGPR, *domain.race,
                           unordered ? MemoryOrderClass::UNORDERED : MemoryOrderClass::VMEM);
+    events_.at(reg) = EventId{events().totalAllocated() - 1};
   }
   void counter_only(CounterDomain domain) {
-    state_->registerEvent(0x800, MemoryEventType::VGPR_TO_GLOBAL, {}, 1, 0xf, *domain.race,
+    state_->registerEvent(0x800, MemoryEventType::VGPR_TO_GLOBAL, *domain.race,
                           MemoryOrderClass::VMEM);
   }
   void wait(uint32_t word) { wait(std::span<const uint32_t>(&word, 1)); }
@@ -145,24 +144,23 @@ public:
     });
   }
   void expect_drained() const { EXPECT_TRUE(state_->getWaveMemoryEvents().empty()); }
-  bool reports(unsigned reg, uint64_t lanes = 1, uint8_t bytes = 0xf, bool write = false) {
-    const auto before = sink_->str().size();
-    wave_->pc = 0x1000 + reg * 4;
-    if (write)
-      plugins_->onAmdgpuWriteVgprLanes(wave_, wave_->vgpr_alloc().base + reg, lanes, bytes);
-    else
-      plugins_->onAmdgpuReadVgprLanes(wave_, wave_->vgpr_alloc().base + reg, lanes, bytes);
-    return sink_->str().size() != before;
+  // The plugin does not check registers, so a pending result stands in for the
+  // hazard the core reports.
+  bool reports(unsigned reg, uint64_t = 1, uint8_t = 0xf, bool = false) const {
+    const EventId event = events_.at(reg);
+    return events().contains(event) && events().status(event) == EventStatus::ACTIVE;
   }
 
 private:
+  const EventRegistry &events() const { return state_->getDetector()->events(); }
+
   GpuMemory memory_{"shared_wait_memory"};
   L2Cache l2_{"shared_wait_l2"};
   std::shared_ptr<ExecutionPluginGroup> plugins_;
   std::unique_ptr<ComputeUnitCore> cu_;
   Wavefront *wave_ = nullptr;
   WaveRaceState *state_ = nullptr;
-  StringSink *sink_ = nullptr;
+  std::array<EventId, 16> events_{};
 };
 
 // Seed pending events directly to test wait retirement independently of
@@ -486,8 +484,9 @@ TYPED_TEST(WaitHazardTest, UnorderedResultRequiresAZeroWait) {
   }
 }
 
-TYPED_TEST(WaitHazardTest, RegisterLanesAndBytesKeepIndependentReadiness) {
-  TypeParam backend(ROCJITSU_CODE_ARCH_CDNA5);
+// Only the core tracks register lanes and bytes.
+TEST(CoreWaitHazardTest, RegisterLanesAndBytesKeepIndependentReadiness) {
+  CoreWaitBackend backend(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(backend.ready());
   backend.load(kLoad, 5, false, 1, 0x3);
   EXPECT_FALSE(backend.reports(5, 2, 0xf));

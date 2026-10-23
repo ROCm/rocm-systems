@@ -738,6 +738,76 @@ TEST(MemoryWaitExecutionTest, FormattedLoadsTrackRegisterLayoutInsteadOfMemoryFo
   }
 }
 
+TEST(MemoryWaitExecutionTest, D16ResultsOccupyTheWholeDwordWithSramEcc) {
+  const auto words = [](auto encoded) {
+    return std::vector<uint32_t>(encoded.begin(), encoded.end());
+  };
+  struct Case {
+    rj_code_arch_t arch;
+    bool high;
+    std::vector<uint32_t> words;
+  };
+  const Case cases[] = {
+      {ROCJITSU_CODE_ARCH_CDNA4, false,
+       words(cdna4::build_mubuf(cdna4::kBufferLoadShortD16Mubuf,
+                                {.vdata = 8, .srsrc = 0, .soffset = 128}))},
+      {ROCJITSU_CODE_ARCH_CDNA4, true,
+       words(cdna4::build_mubuf(cdna4::kBufferLoadShortD16HiMubuf,
+                                {.vdata = 8, .srsrc = 0, .soffset = 128}))},
+      {ROCJITSU_CODE_ARCH_CDNA5, false,
+       words(cdna5::build_vglobal(cdna5::kGlobalLoadD16B16Vglobal, {.saddr = 124, .vdst = 8}))},
+      {ROCJITSU_CODE_ARCH_CDNA5, true,
+       words(cdna5::build_vglobal(cdna5::kGlobalLoadD16HiB16Vglobal, {.saddr = 124, .vdst = 8}))},
+      {ROCJITSU_CODE_ARCH_RDNA4, false,
+       words(rdna4::build_vglobal(rdna4::kGlobalLoadD16B16Vglobal, {.saddr = 124, .vdst = 8}))},
+      {ROCJITSU_CODE_ARCH_RDNA4, true,
+       words(rdna4::build_vglobal(rdna4::kGlobalLoadD16HiB16Vglobal, {.saddr = 124, .vdst = 8}))},
+  };
+  for (const auto &test : cases) {
+    SCOPED_TRACE(static_cast<unsigned>(test.arch));
+    SCOPED_TRACE(test.high);
+    GpuMemory memory("d16_ecc_memory");
+    L2Cache l2("d16_ecc_l2");
+    ComputeUnitCore::Config config{};
+    config.arch = test.arch;
+    config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 106;
+    config.vgprs_per_wf = 32;
+    auto cu = ComputeUnitCore::create("d16_ecc_cu", config, &memory, &l2);
+    const bool sram_ecc = test.arch != ROCJITSU_CODE_ARCH_RDNA4;
+    ASSERT_EQ(cu->sram_ecc(), sram_ecc);
+    auto *wf = cu->dispatch_wf(0, 0x100, 106, 32, test.arch == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(1);
+    auto decoder = Decoder::create(test.arch);
+    util::StringDiagnostic error;
+    auto decoded = decoder->decode_window(test.words, 0, error.emitter());
+    ASSERT_TRUE(decoded.succeeded()) << error.message();
+    auto &inst = *decoded.value();
+    const uint8_t written = test.high ? 0xc : 0x3;
+    const RegisterRef destination{RegClass::VGPR, 8, 1};
+    auto &state = wf->ensure_memory_wait_scoreboard();
+    for (const uint8_t bytes : {written, static_cast<uint8_t>(0xf & ~written)}) {
+      SCOPED_TRACE(unsigned(bytes));
+      const bool overlaps = bytes == written || sram_ecc;
+      state.clear();
+      unsigned reports = 0;
+      state.bind(0x200, &reports, [](void *p, const auto &) { ++*static_cast<unsigned *>(p); });
+      state.add(
+          {state.issue(WaitCounterKind::Ds), 0x80, 1, destination, WaitCounterKind::Ds, bytes});
+      state.check_instruction(inst, *wf);
+      EXPECT_EQ(reports != 0, overlaps) << "overwrite of an older result";
+      state.clear();
+      cu->track_memory_wait(inst, *wf);
+      reports = 0;
+      state.bind(0x200, &reports, [](void *p, const auto &) { ++*static_cast<unsigned *>(p); });
+      state.access(destination, 1, bytes, /*write=*/false);
+      EXPECT_EQ(reports != 0, overlaps) << "read before the D16 result";
+    }
+  }
+}
+
 TEST(MemoryWaitExecutionTest, LdsStackTracksOnePointerWordAlongsideTwoPoppedNodes) {
   GpuMemory memory("stack_wait_memory");
   L2Cache l2("stack_wait_l2");
@@ -4255,6 +4325,44 @@ TEST(MemoryWaitExecutionTest, ScalarStoresReadTheirDataAndHaveNoRegisterResult) 
   cu->track_memory_wait(inst, *wf);
   EXPECT_TRUE(state.events().empty());
   EXPECT_EQ(state.outstanding(WaitCounterKind::Ds), 1u);
+}
+
+TEST(MemoryWaitExecutionTest, ScalarLoadIntoTrapTemporaryLeavesItsResultPending) {
+  GpuMemory memory("ttmp_load_plan_memory");
+  L2Cache l2("ttmp_load_plan_l2");
+  ComputeUnitCore::Config config{};
+  config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+  config.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 128;
+  config.vgprs_per_wf = 32;
+  auto cu = ComputeUnitCore::create("ttmp_load_plan_cu", config, &memory, &l2);
+  auto *wf = cu->dispatch_wf(0, 0x100, 128, 32);
+  ASSERT_NE(wf, nullptr);
+  auto decoder = Decoder::create(config.arch);
+  const auto words = cdna4::build_smem(cdna4::kSLoadDwordSmem,
+                                       {.sbase = 0, .sdata = kTtmpSelectorFirst, .imm = 1});
+  util::StringDiagnostic error;
+  auto decoded = decoder->decode_window(words, 0, error.emitter());
+  ASSERT_TRUE(decoded.succeeded()) << error.message();
+  auto &state = wf->ensure_memory_wait_scoreboard();
+  const RegisterRef ttmp0{RegClass::TTMP, 0, 1};
+  for (bool waited : {false, true})
+    for (bool write : {false, true}) {
+      SCOPED_TRACE(waited);
+      SCOPED_TRACE(write);
+      state.clear();
+      cu->track_memory_wait(*decoded.value(), *wf);
+      ASSERT_EQ(state.events().size(), 1u);
+      EXPECT_EQ(state.events().front().reg, ttmp0);
+      const auto counter = state.events().front().counter;
+      unsigned reports = 0;
+      state.bind(0x200, &reports, [](void *p, const auto &) { ++*static_cast<unsigned *>(p); });
+      if (waited)
+        state.wait(counter, 0);
+      state.access(ttmp0, ~uint64_t{0}, 0xf, write);
+      EXPECT_EQ(reports, waited ? 0u : 1u);
+    }
 }
 
 TEST(MemoryWaitExecutionTest, ScalarMemoryRegisterOffsetIsCheckedBeforeAddressCalculation) {

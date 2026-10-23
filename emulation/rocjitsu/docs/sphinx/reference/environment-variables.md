@@ -25,7 +25,7 @@ Enables the race detection plugin.
 |---|---|
 | **Default** | Disabled (unset) |
 | **Allowed values** | `1` to enable |
-| **Effect** | When set to `1`, the race detection plugin hooks memory instructions, register reads, barriers, and `s_waitcnt` to detect data races within a workgroup. Reports violations with disassembly traces. |
+| **Effect** | When set to `1`, the race detection plugin hooks memory instructions, barriers, and `s_waitcnt` to detect LDS data races within a workgroup. Reports violations with disassembly traces. Register hazards are reported by the emulator core instead; see the [memory wait diagnostics guide](../../memory-wait-diagnostics.md). |
 
 ### `RJ_LOG`
 

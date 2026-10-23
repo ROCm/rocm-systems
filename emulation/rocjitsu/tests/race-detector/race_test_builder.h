@@ -11,7 +11,7 @@
 #include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
 
-#include <cassert>
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -22,10 +22,10 @@ namespace rocjitsu::plugins::race_detector {
 
 class RaceTestBuilder {
 public:
-  RaceTestBuilder(int numWaves, int vgprs, int sgprs, int waveSize = 64, Dim3d wgId = Dim3d(0))
+  RaceTestBuilder(int numWaves, int waveSize = 64, Dim3d wgId = Dim3d(0))
       : waveSize_(waveSize), defaultExec_(waveSize == 64 ? ~0ULL : (1ULL << waveSize) - 1) {
     detector_ = std::make_unique<RaceDetector>(
-        numWaves, vgprs, sgprs, wgId, [this](RaceViolation v) { violations_.push_back(v); },
+        numWaves, wgId, [this](RaceViolation v) { violations_.push_back(v); },
         counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4), /*ldsSizeBytes=*/64 * 1024);
     for (int w = 0; w < numWaves; ++w) {
       waves_.push_back(&detector_->getWaveRaceState(w));
@@ -33,105 +33,74 @@ public:
   }
 
   // -- Memory events --
+  //
+  // Each helper returns the event it registered, so tests can observe which
+  // events a wait or counter-capacity constraint completes.
 
   /// Register a global load into VGPRs (tracked by vmcnt).
-  void
-  globalLoad(int wave, int vgprBase, int numRegs, uint64_t exec = 0, uint8_t byteMask = 0xF,
-             MemoryOrderClass memoryOrder = defaultMemoryOrder(MemoryEventType::GLOBAL_TO_VGPR),
-             std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt) {
-    if (!exec) {
-      exec = defaultExec_;
-    }
+  EventId
+  globalLoad(int wave,
+             MemoryOrderClass memoryOrder = defaultMemoryOrder(MemoryEventType::GLOBAL_TO_VGPR)) {
     waves_[wave]->prepareForCounterIncrement(amdgpu::WaitCounterType::VMCNT);
-    if (additionalWaitCounterType)
-      waves_[wave]->prepareForCounterIncrement(*additionalWaitCounterType);
-    std::vector<uint32_t> regs(numRegs);
-    for (int i = 0; i < numRegs; ++i) {
-      regs[i] = vgprBase + i;
-      waves_[wave]->checkVgprWrite(vgprBase + i, exec, byteMask, memoryOrder);
-    }
-    waves_[wave]->registerEvent(pc_++, MemoryEventType::GLOBAL_TO_VGPR, std::move(regs), exec,
-                                byteMask, amdgpu::WaitCounterType::VMCNT, memoryOrder,
-                                additionalWaitCounterType);
+    waves_[wave]->registerEvent(pc_++, MemoryEventType::GLOBAL_TO_VGPR,
+                                amdgpu::WaitCounterType::VMCNT, memoryOrder);
+    return lastEvent();
   }
 
   /// Register a generic FLAT load whose active lanes resolve uniformly to
   /// global memory. The caller supplies architecture-specific counter
   /// obligations because their domains and ordering vary by target.
-  void flatGlobalLoad(int wave, int vgprBase, int numRegs,
-                      std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                      uint64_t exec = 0) {
-    if (!exec)
-      exec = defaultExec_;
-    const MemoryOrderClass memoryOrder = memoryOrderForObligations(counterObligations);
-    std::vector<uint32_t> registers(numRegs);
-    for (int i = 0; i < numRegs; ++i) {
-      registers[i] = vgprBase + i;
-      waves_[wave]->checkVgprWrite(vgprBase + i, exec, /*byteMask=*/0xF, memoryOrder);
-    }
-    waves_[wave]->registerEvent(pc_++, MemoryEventType::GLOBAL_TO_VGPR, std::move(registers), exec,
-                                /*byteMask=*/0xF, counterObligations, memoryOrder);
+  EventId flatGlobalLoad(int wave,
+                         std::span<const amdgpu::MemoryCounterObligation> counterObligations) {
+    waves_[wave]->registerEvent(pc_++, MemoryEventType::GLOBAL_TO_VGPR, counterObligations,
+                                memoryOrderForObligations(counterObligations));
+    return lastEvent();
   }
 
   /// Register a Direct-to-LDS global load (tracked by vmcnt).
   /// ldsAddrs is per-active-lane; padded to waveSize internally.
-  void globalToLds(int wave, std::vector<uint32_t> ldsAddrs, int bytesPerLane, uint64_t exec = 0) {
+  EventId globalToLds(int wave, std::vector<uint32_t> ldsAddrs, int bytesPerLane,
+                      uint64_t exec = 0) {
     if (!exec) {
       exec = defaultExec_;
     }
     constexpr MemoryOrderClass memoryOrder = MemoryOrderClass::VMEM;
     waves_[wave]->prepareForCounterIncrement(amdgpu::WaitCounterType::VMCNT);
     ldsAddrs.resize(waveSize_, 0);
-    waves_[wave]->registerLdsEvent(pc_++, MemoryEventType::GLOBAL_TO_LDS,
-                                   /*registers=*/{}, exec, waveSize_, ldsAddrs, bytesPerLane,
-                                   /*byteMask=*/0xF, amdgpu::WaitCounterType::VMCNT, memoryOrder);
+    waves_[wave]->registerLdsEvent(pc_++, MemoryEventType::GLOBAL_TO_LDS, exec, waveSize_, ldsAddrs,
+                                   bytesPerLane, amdgpu::WaitCounterType::VMCNT, memoryOrder);
+    return lastEvent();
   }
 
   /// Register a global store from VGPRs (tracked by vmcnt).
-  /// Stores read VGPRs at issue time — no destination registers.
-  void globalStore(int wave, uint64_t exec = 0) {
-    if (!exec) {
-      exec = defaultExec_;
-    }
+  EventId globalStore(int wave) {
     constexpr MemoryOrderClass memoryOrder = MemoryOrderClass::VMEM;
     waves_[wave]->prepareForCounterIncrement(amdgpu::WaitCounterType::VMCNT);
     waves_[wave]->registerEvent(pc_++, MemoryEventType::VGPR_TO_GLOBAL,
-                                /*registers=*/{}, exec, /*byteMask=*/0xF,
                                 amdgpu::WaitCounterType::VMCNT, memoryOrder);
+    return lastEvent();
   }
 
-  /// Register a scalar load into SGPRs with its architecture-specific counter.
-  void scalarLoad(int wave, int sgprBase, int numRegs,
-                  amdgpu::WaitCounterType waitCounterType = amdgpu::WaitCounterType::LGKMCNT) {
-    const uint8_t increment = numRegs > 1 ? 2 : 1;
+  /// Register a scalar load with its architecture-specific counter. A load of
+  /// more than one dword contributes two counter tokens.
+  EventId scalarLoad(int wave, int dwords = 1,
+                     amdgpu::WaitCounterType waitCounterType = amdgpu::WaitCounterType::LGKMCNT) {
+    const uint8_t increment = dwords > 1 ? 2 : 1;
     waves_[wave]->prepareForCounterIncrement(waitCounterType, increment);
     const std::array obligations{
         amdgpu::MemoryCounterObligation{waitCounterType, MemoryOrderClass::UNORDERED, increment}};
-    waves_[wave]->registerScalarLoad(
-        pc_++,
-        RegisterRef{RegClass::SGPR, static_cast<uint16_t>(sgprBase), static_cast<uint8_t>(numRegs)},
-        defaultExec_, obligations, MemoryOrderClass::UNORDERED);
-  }
-
-  /// Register a scalar load into TTMPs with its architecture-specific counter.
-  void ttmpLoad(int wave, int ttmpBase, int numRegs,
-                amdgpu::WaitCounterType waitCounterType = amdgpu::WaitCounterType::LGKMCNT) {
-    const uint8_t increment = numRegs > 1 ? 2 : 1;
-    waves_[wave]->prepareForCounterIncrement(waitCounterType, increment);
-    const std::array obligations{
-        amdgpu::MemoryCounterObligation{waitCounterType, MemoryOrderClass::UNORDERED, increment}};
-    waves_[wave]->registerScalarLoad(
-        pc_++,
-        RegisterRef{RegClass::TTMP, static_cast<uint16_t>(ttmpBase), static_cast<uint8_t>(numRegs)},
-        defaultExec_, obligations, MemoryOrderClass::UNORDERED);
+    waves_[wave]->registerEvent(pc_++, MemoryEventType::GLOBAL_TO_SGPR, obligations,
+                                MemoryOrderClass::UNORDERED);
+    return lastEvent();
   }
 
   /// Register a scalar store so partial waits retain counter ordering.
-  void scalarStore(int wave,
-                   amdgpu::WaitCounterType waitCounterType = amdgpu::WaitCounterType::LGKMCNT) {
+  EventId scalarStore(int wave,
+                      amdgpu::WaitCounterType waitCounterType = amdgpu::WaitCounterType::LGKMCNT) {
     waves_[wave]->prepareForCounterIncrement(waitCounterType);
-    waves_[wave]->registerEvent(pc_++, MemoryEventType::SCALAR_TO_GLOBAL, {}, defaultExec_, 0xF,
-                                waitCounterType, MemoryOrderClass::UNORDERED);
+    waves_[wave]->registerEvent(pc_++, MemoryEventType::SCALAR_TO_GLOBAL, waitCounterType,
+                                MemoryOrderClass::UNORDERED);
+    return lastEvent();
   }
 
   /// Apply issue-time backpressure before checking an operation's accesses.
@@ -144,10 +113,11 @@ public:
   }
 
   /// Register an LDS write and validate against outstanding reads.
-  void ldsWrite(int wave, int lane, int addr, int bytes,
-                MemoryOrderClass memoryOrder = MemoryOrderClass::LDS,
-                amdgpu::WaitCounterType waitCounterType = amdgpu::WaitCounterType::LGKMCNT,
-                std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt) {
+  EventId
+  ldsWrite(int wave, int lane, int addr, int bytes,
+           MemoryOrderClass memoryOrder = MemoryOrderClass::LDS,
+           amdgpu::WaitCounterType waitCounterType = amdgpu::WaitCounterType::LGKMCNT,
+           std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt) {
     waves_[wave]->prepareForCounterIncrement(waitCounterType);
     if (additionalWaitCounterType)
       waves_[wave]->prepareForCounterIncrement(*additionalWaitCounterType);
@@ -155,19 +125,17 @@ public:
     std::vector<uint32_t> ldsAddrs(waveSize_, 0);
     ldsAddrs[lane] = addr;
     uint64_t laneMask = 1ULL << lane;
-    waves_[wave]->registerLdsEvent(pc_++, MemoryEventType::VGPR_TO_LDS,
-                                   /*registers=*/{}, laneMask, waveSize_, ldsAddrs, bytes,
-                                   /*byteMask=*/0xF, waitCounterType, memoryOrder,
+    waves_[wave]->registerLdsEvent(pc_++, MemoryEventType::VGPR_TO_LDS, laneMask, waveSize_,
+                                   ldsAddrs, bytes, waitCounterType, memoryOrder,
                                    additionalWaitCounterType);
+    return lastEvent();
   }
 
   /// Register an LDS read and validate against outstanding writes.
-  /// byteMask: which bytes of the destination VGPR are written by this load
-  /// (0xF=full, 0x3=lo D16, 0xC=hi D16). Used for byte-level race tracking.
-  void ldsRead(int wave, int lane, int addr, int bytes, int vgprDst, uint8_t byteMask = 0xF,
-               amdgpu::WaitCounterType waitCounterType = amdgpu::WaitCounterType::LGKMCNT,
-               MemoryOrderClass memoryOrder = MemoryOrderClass::LDS,
-               std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt) {
+  EventId ldsRead(int wave, int lane, int addr, int bytes,
+                  amdgpu::WaitCounterType waitCounterType = amdgpu::WaitCounterType::LGKMCNT,
+                  MemoryOrderClass memoryOrder = MemoryOrderClass::LDS,
+                  std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt) {
     waves_[wave]->prepareForCounterIncrement(waitCounterType);
     if (additionalWaitCounterType)
       waves_[wave]->prepareForCounterIncrement(*additionalWaitCounterType);
@@ -175,24 +143,24 @@ public:
     std::vector<uint32_t> ldsAddrs(waveSize_, 0);
     ldsAddrs[lane] = addr;
     uint64_t laneMask = 1ULL << lane;
-    std::vector<uint32_t> regs = {static_cast<uint32_t>(vgprDst)};
-    waves_[wave]->registerLdsEvent(pc_++, MemoryEventType::LDS_TO_VGPR, std::move(regs), laneMask,
-                                   waveSize_, ldsAddrs, bytes, byteMask, waitCounterType,
-                                   memoryOrder, additionalWaitCounterType);
+    waves_[wave]->registerLdsEvent(pc_++, MemoryEventType::LDS_TO_VGPR, laneMask, waveSize_,
+                                   ldsAddrs, bytes, waitCounterType, memoryOrder,
+                                   additionalWaitCounterType);
+    return lastEvent();
   }
 
   /// Register a CDNA1-4 generic FLAT load whose active lanes resolve uniformly
   /// to LDS. Its unordered VMCNT and LGKMCNT obligations are independent of
   /// that resolved memory route.
-  void flatLdsLoad(int wave, int lane, int addr, int bytes, int vgprDst) {
-    ldsRead(wave, lane, addr, bytes, vgprDst, /*byteMask=*/0xF, amdgpu::WaitCounterType::VMCNT,
-            MemoryOrderClass::UNORDERED, amdgpu::WaitCounterType::LGKMCNT);
+  EventId flatLdsLoad(int wave, int lane, int addr, int bytes) {
+    return ldsRead(wave, lane, addr, bytes, amdgpu::WaitCounterType::VMCNT,
+                   MemoryOrderClass::UNORDERED, amdgpu::WaitCounterType::LGKMCNT);
   }
 
   /// Register a CDNA1-4 generic FLAT store whose active lane resolves to LDS.
-  void flatLdsStore(int wave, int lane, int addr, int bytes) {
-    ldsWrite(wave, lane, addr, bytes, MemoryOrderClass::UNORDERED, amdgpu::WaitCounterType::VMCNT,
-             amdgpu::WaitCounterType::LGKMCNT);
+  EventId flatLdsStore(int wave, int lane, int addr, int bytes) {
+    return ldsWrite(wave, lane, addr, bytes, MemoryOrderClass::UNORDERED,
+                    amdgpu::WaitCounterType::VMCNT, amdgpu::WaitCounterType::LGKMCNT);
   }
 
   // -- Sync --
@@ -220,47 +188,6 @@ public:
 
   // -- Trigger race checks --
 
-  /// Check a VGPR read for races against pending loads.
-  /// byteMask selects which bytes of the 4-byte register are read:
-  ///   0xF = all 4 bytes (default, full 32-bit read)
-  ///   0x3 = lo 2 bytes (D16 lo half)
-  ///   0xC = hi 2 bytes (D16 hi half)
-  /// A race fires only when the pending load's bytes overlap the read's bytes.
-  void checkVgprRead(int wave, int reg, int lane, uint8_t byteMask = 0xF) {
-    waves_[wave]->checkVgprRead(reg, lane, byteMask);
-  }
-
-  void checkVgprReadLanes(int wave, int reg, uint64_t laneMask, uint8_t byteMask = 0xF) {
-    waves_[wave]->checkVgprReadLanes(reg, laneMask, byteMask);
-  }
-
-  void checkVgprWrite(int wave, int reg, int lane, uint8_t byteMask = 0xF) {
-    waves_[wave]->checkVgprWrite(reg, lane, byteMask);
-  }
-
-  void checkVgprWriteLanes(int wave, int reg, uint64_t laneMask, uint8_t byteMask = 0xF) {
-    waves_[wave]->checkVgprWriteLanes(reg, laneMask, byteMask);
-  }
-
-  void checkSgprRead(int wave, int reg, int width = 1) {
-    waves_[wave]->checkScalarRead(
-        RegisterRef{RegClass::SGPR, static_cast<uint16_t>(reg), static_cast<uint8_t>(width)});
-  }
-
-  void checkSgprWrite(int wave, int reg, int width = 1) {
-    waves_[wave]->checkScalarWrite(
-        RegisterRef{RegClass::SGPR, static_cast<uint16_t>(reg), static_cast<uint8_t>(width)});
-  }
-
-  void checkTtmpRead(int wave, int reg) {
-    waves_[wave]->checkScalarRead(RegisterRef{RegClass::TTMP, static_cast<uint16_t>(reg), 1});
-  }
-
-  void checkTtmpWrite(int wave, int reg, int width = 1) {
-    waves_[wave]->checkScalarWrite(
-        RegisterRef{RegClass::TTMP, static_cast<uint16_t>(reg), static_cast<uint8_t>(width)});
-  }
-
   void checkLdsRead(int wave, int lane, int addr, int bytes,
                     MemoryOrderClass memoryOrder = MemoryOrderClass::LDS) {
     detector_->validateRead(addr, WaveId{wave}, lane, bytes, memoryOrder);
@@ -277,32 +204,6 @@ public:
   int raceCount() const { return static_cast<int>(violations_.size()); }
   const std::vector<RaceViolation> &violations() const { return violations_; }
 
-  bool hasVgprRace(int reg) const {
-    for (const auto &v : violations_) {
-      if (v.space == RaceViolation::Space::VGPR && v.index == reg) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  bool hasSgprRace(int reg) const {
-    for (const auto &v : violations_) {
-      if (v.space == RaceViolation::Space::SGPR && v.index == reg) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  bool hasTtmpRace(int reg) const {
-    for (const auto &v : violations_) {
-      if (v.space == RaceViolation::Space::TTMP && v.index == reg)
-        return true;
-    }
-    return false;
-  }
-
   bool hasLdsRace(int addr) const {
     for (const auto &v : violations_) {
       if (v.space == RaceViolation::Space::LDS && v.index == addr) {
@@ -316,7 +217,15 @@ public:
 
   const EventRegistry &events() const { return detector_->events(); }
 
+  /// True until every wait-counter obligation of the event is satisfied.
+  /// Trimmed events completed before the registry dropped them.
+  bool isPending(EventId event) const {
+    return events().contains(event) && events().status(event) == EventStatus::ACTIVE;
+  }
+
 private:
+  EventId lastEvent() const { return EventId{events().totalAllocated() - 1}; }
+
   std::unique_ptr<RaceDetector> detector_;
   std::vector<WaveRaceState *> waves_;
   std::vector<RaceViolation> violations_;

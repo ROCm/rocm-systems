@@ -95,7 +95,10 @@ public:
   explicit RaceDetectorPlugin(const char *config_json = nullptr);
   ~RaceDetectorPlugin() override;
 
-  bool observes_sgpr_reads() const override { return true; }
+  bool observes_vgpr_reads() const override { return false; }
+  bool observes_vgpr_writes() const override { return false; }
+  bool observes_scalar_register_writes() const override { return false; }
+  bool observes_sgpr_reads() const override { return false; }
   bool observes_memory_routing() const override { return true; }
 
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override;
@@ -106,17 +109,6 @@ public:
 
   void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
                                   const Instruction &inst, amdgpu::Wavefront &wf) override;
-
-  void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg, uint64_t lane_mask,
-                             uint8_t byte_mask = ExecutionPlugin::kFullByteMask) override;
-
-  void onAmdgpuWriteVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg,
-                              uint64_t lane_mask,
-                              uint8_t byte_mask = ExecutionPlugin::kFullByteMask) override;
-
-  void onAmdgpuReadScalarRegister(const amdgpu::Wavefront *wf, RegisterRef reg) override;
-
-  void onAmdgpuWriteScalarRegister(const amdgpu::Wavefront *wf, RegisterRef reg) override;
 
   void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
                                         amdgpu::Wavefront &wf) override;

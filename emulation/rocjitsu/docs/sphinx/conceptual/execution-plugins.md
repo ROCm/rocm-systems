@@ -35,9 +35,10 @@ information to track data flow and detect hazards.
 ### Register
 
 Called when a wavefront reads a register (SGPR or VGPR). Plugins that
-track register-level hazards use this callback to check whether a
-pending memory operation has been properly waited on before the
-destination register is consumed.
+follow register-level data flow use this callback. Plugins do not need it
+to check whether a pending memory operation has been waited on before its
+destination register is consumed: the emulator core reports those hazards
+itself (see the [memory wait diagnostics guide](../../memory-wait-diagnostics.md)).
 
 ### Barrier
 
@@ -94,25 +95,22 @@ For a full reference of all rocJITsu environment variables, see
 
 ### Race detector
 
-The race detector plugin hooks memory instructions, register reads,
-barriers, and `s_waitcnt` events to detect data races within a
-workgroup. It tracks in-flight memory events through a lifecycle ---
-active, wave-complete, and retired --- and reports when a register or
-LDS byte is accessed before the operation that produced it has been
-properly synchronized.
+The race detector plugin hooks memory instructions, barriers, and
+`s_waitcnt` events to detect LDS data races within a workgroup. It
+tracks in-flight memory events through a lifecycle --- active,
+wave-complete, and retired --- and reports when an LDS byte is accessed
+before the operation that produced it has been properly synchronized:
 
-The detector identifies three categories of hazard:
-
--   **VGPR races**: a vector register is read before a pending global or
-    LDS load has completed.
--   **SGPR races**: a scalar register is read before a pending scalar
-    load has completed.
 -   **LDS races**: an LDS byte is read or written by one wave while
     another wave has an outstanding write to the same byte, without an
     intervening `s_barrier`.
+-   **Direct-to-LDS reads**: a wave reads LDS bytes targeted by its own
+    outstanding direct-to-LDS load before the required `s_waitcnt`.
 
-Detection operates at byte granularity: D16 (half-register) loads flag
-races only on the affected bytes, and LDS races are tracked per byte.
+LDS races are tracked per byte. Register hazards, such as reading a VGPR
+or SGPR before the load that writes it has completed, are reported by the
+emulator core rather than by this plugin; see the
+[memory wait diagnostics guide](../../memory-wait-diagnostics.md).
 
 Enable the race detector and direct output to files:
 

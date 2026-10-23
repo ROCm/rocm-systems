@@ -143,8 +143,9 @@ hardware occupancy or select a latency at which memory becomes visible.
 
 These are known limits, not an exhaustive list. Investigate warnings against the
 target's ordering rules; use `--wait-checking=off` to suppress both warning classes
-when needed. Plugins may overlap with these checks and additionally validate
-hazards such as memory visibility and communication between waves.
+when needed. The [race-detector plugin](race-detector.md) does not repeat these
+register checks; it validates LDS communication between waves and same-wave reads
+of direct-to-LDS results.
 
 ## Access planning and cost
 

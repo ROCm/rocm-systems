@@ -63,12 +63,13 @@ enum class EventStatus {
 
 /// Describes a detected race condition. Used by the race detection layer
 /// to report violations without depending on any exception type.
+/// Register hazards are diagnosed by the core memory-wait scoreboard.
 struct RaceViolation {
-  enum class Space { VGPR, SGPR, TTMP, LDS };
+  enum class Space { LDS };
   Space space;
-  int index;    ///< Register index (VGPR/SGPR) or byte address (LDS).
+  int index;    ///< LDS byte address.
   int wave;     ///< Wave that triggered the violation.
-  int lane;     ///< Lane within the wave, or -1 for scalar.
+  int lane;     ///< Lane within the wave.
   bool isWrite; ///< True if the violating access was a write.
   Dim3d workgroupId;
   EventId conflictingEvent; ///< Exact pending memory event that caused the violation.

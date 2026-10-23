@@ -8,7 +8,7 @@ wavefront dispatches, memory instructions, register reads, barriers, etc.
 
 | Plugin | Location | Description |
 |---|---|---|
-| `RaceDetectorPlugin` | `race_detector/` | Hooks memory instructions, register reads, barriers, and `s_waitcnt` to detect data races. Reports violations with disassembly traces. See [race-detector.md](race-detector.md). |
+| `RaceDetectorPlugin` | `race_detector/` | Hooks memory instructions, barriers, and `s_waitcnt` to detect LDS data races. Reports violations with disassembly traces. See [race-detector.md](race-detector.md). |
 | `KernelLoggingPlugin` | `logging/` | Logs kernel dispatches and detects MMA instruction usage. |
 | `ThroughputPlugin` | `throughput/` | Reports per-dispatch and aggregate wave-instruction MIPS with an exclusive instruction-family breakdown. |
 | `InstructionMixPlugin` | `instruction_mix/` | Records which ISA mnemonics a run executed and how often, per dispatch and in aggregate, for instruction-mix and instruction-coverage reporting. |
@@ -388,8 +388,9 @@ and byte masks for masked, sub-dword, and multi-register operands. Internal
 storage operations used to preserve unaffected register state do not produce
 additional architectural callbacks.
 
-Asynchronous memory operations are modeled separately. The race detector
-records their register dependencies when they are issued. A later completion
+Asynchronous memory operations are modeled separately. The core memory-wait
+checker records their register dependencies when they are issued (see
+[memory-wait-diagnostics.md](memory-wait-diagnostics.md)). A later completion
 updates storage without emitting the same instruction-level write again.
 Synchronization retires the corresponding outstanding operations using the
 counter family captured at issue. This distinguishes legacy combined

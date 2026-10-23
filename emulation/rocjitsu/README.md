@@ -131,9 +131,11 @@ effect, including masked and sub-dword operations. Internal storage operations
 used to preserve unaffected register state are not reported as additional
 instruction effects.
 
-Asynchronous memory operations use a separate lifecycle. The race detector
-records register dependencies when the operation is issued. Later completion
-updates register storage without reporting the same instruction effect again.
+Asynchronous memory operations use a separate lifecycle. The core memory-wait
+checker records register dependencies when the operation is issued (see
+[docs/memory-wait-diagnostics.md](docs/memory-wait-diagnostics.md)). Later
+completion updates register storage without reporting the same instruction
+effect again.
 See
 [docs/plugins.md](docs/plugins.md) for the plugin contract.
 
