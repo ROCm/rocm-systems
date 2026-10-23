@@ -23,6 +23,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -362,6 +363,10 @@ public:
   /// exposing the owning compute unit or reclassifying the address through the
   /// legacy memory path.
   [[nodiscard]] std::optional<GpuVmAccess> snapshot_vm_access() const;
+
+  /// Resolve a diagnostic PC on the owning CU's execution thread.
+  /// Virtual dispatch lets standalone plugins use the runtime's decoder and memory services.
+  virtual std::string disassemble_instruction(uint64_t pc) const;
 
   /// @brief Read GPU memory in this wave's process address space.
   [[nodiscard]] VmAccessOutcome read_gpu_memory(uint64_t addr, std::span<uint8_t> dst) const;

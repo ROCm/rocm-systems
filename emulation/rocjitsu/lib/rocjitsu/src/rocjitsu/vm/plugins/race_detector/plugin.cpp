@@ -132,22 +132,16 @@ MarkedPc findConflict(const RaceViolation &v, RaceDetector &detector) {
 // Format a race trace showing the instruction stream between the memory
 // operation that wrote a register (conflict) and the instruction that read
 // it before the write completed (read). The trace is a rolling window of
-// recent PCs; disasm maps every PC seen in the kernel to its disassembly.
+// recent PCs; only instructions included in the output are disassembled.
 //
 // Output uses ==> markers for the two involved instructions and annotates
 // each with wave/lane. Instructions before the first marker are trimmed.
 // When the conflict fell outside the trace window, its disassembly is still
-// shown (from the disasm map) with a "(before trace window)" note.
+// shown with a "(before trace window)" note.
 std::string formatTrace(const RingBuffer<uint64_t, 256> &trace,
-                        const std::unordered_map<uint64_t, std::string> &disasm,
+                        const std::function<std::string(uint64_t)> &disassemble,
                         std::optional<MarkedPc> conflict, MarkedPc read) {
   auto isMarked = [&](uint64_t pc) { return pc == read.pc || (conflict && pc == conflict->pc); };
-
-  auto lookup = [&](uint64_t pc) -> const std::string & {
-    static const std::string empty;
-    auto it = disasm.find(pc);
-    return it != disasm.end() ? it->second : empty;
-  };
 
   size_t n = trace.size();
   size_t first = n;
@@ -170,7 +164,7 @@ std::string formatTrace(const RingBuffer<uint64_t, 256> &trace,
 
   if (conflict && !conflict_found) {
     oss << "  ==>  0x" << std::hex << conflict->pc << std::dec << "  ";
-    auto &d = lookup(conflict->pc);
+    auto d = disassemble(conflict->pc);
     if (!d.empty())
       oss << d << "  ";
     oss << "(before trace window)";
@@ -196,7 +190,7 @@ std::string formatTrace(const RingBuffer<uint64_t, 256> &trace,
     bool is_conflict = conflict && pc == conflict->pc;
     bool is_read = pc == read.pc;
     oss << ((is_conflict || is_read) ? "  ==>  " : "       ");
-    oss << "0x" << std::hex << pc << std::dec << "  " << lookup(pc);
+    oss << "0x" << std::hex << pc << std::dec << "  " << disassemble(pc);
     if (is_conflict) {
       oss << "  ; <-- wave " << conflict->wave;
       if (conflict->lane >= 0)
@@ -290,7 +284,9 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
     oss << "]\n";
 
     MarkedPc access_mark{pc, v.wave, v.lane};
-    oss << formatTrace(ws->trace, ws->disasm->to_map(), conflict, access_mark);
+    oss << formatTrace(
+        ws->trace, [wf](uint64_t trace_pc) { return wf->disassemble_instruction(trace_pc); },
+        conflict, access_mark);
 
     {
       std::lock_guard<std::mutex> lock(report_mutex_);
@@ -321,7 +317,7 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
   };
 
   // Multi-XCD: workgroups from the same dispatch can arrive on different
-  // partition threads, so detectors_ and dispatch_disasm_ need protection.
+  // partition threads, so the detector map needs protection.
   std::lock_guard<std::mutex> lock(dispatch_mutex_);
   detectors_[key] = std::make_unique<RaceDetector>(
       static_cast<int>(num_waves), static_cast<int>(physical_vgpr_count),
@@ -330,13 +326,9 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
       wavefronts.front()->lds().size_bytes());
 
   auto &det = *detectors_[key];
-  auto &dc = dispatch_disasm_[dispatch_id];
-  if (!dc)
-    dc = std::make_shared<DisasmCache>();
   for (uint32_t w = 0; w < num_waves; ++w) {
     auto state = std::make_unique<RaceWavefrontState>();
     state->race_state = &det.getWaveRaceState(static_cast<int>(w));
-    state->disasm = dc;
     wavefronts[w]->set_plugin_state(slot_index(), std::move(state));
   }
 }
@@ -538,7 +530,6 @@ void RaceDetectorPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Ins
       s->race_state->prepareForCounterIncrement(amdgpu::WaitCounterType::LGKMCNT);
   }
   s->trace.push(pc);
-  s->disasm->record(pc, inst);
 }
 
 void RaceDetectorPlugin::onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/, const Instruction &inst,

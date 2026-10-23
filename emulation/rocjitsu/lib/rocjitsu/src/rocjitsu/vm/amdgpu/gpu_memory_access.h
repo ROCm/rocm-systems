@@ -24,6 +24,10 @@ public:
 
   [[nodiscard]] VmAccessOutcome read(VmMemoryDomain domain, uint64_t address,
                                      std::span<std::byte> bytes) override;
+  [[nodiscard]] bool try_read_instruction(VmMemoryDomain domain, uint64_t address,
+                                          std::span<std::byte> bytes) override {
+    return read(domain, address, bytes) == VmAccessOutcome::Complete;
+  }
   [[nodiscard]] VmAccessOutcome write(VmMemoryDomain domain, uint64_t address,
                                       std::span<const std::byte> bytes) override;
   [[nodiscard]] AtomicLoadResult atomic_load(VmMemoryDomain domain, uint64_t address,
