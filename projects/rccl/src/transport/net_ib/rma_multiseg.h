@@ -26,7 +26,7 @@
 #define NCCL_RMA_MAX_SIGNAL_WRS (NCCL_RMA_MAX_DATA_WRS + 1)
 #define NCCL_RMA_MAX_FLUSH_WRS NCCL_RMA_MAX_SEGMENTS
 // RCCL: multi-segment sender QP depth, NCCL_IB_MAX_SEND_WRS, spelled without common.h; connect.cc asserts they match.
-#define NCCL_RMA_SEND_QP_WRS (2 * 256 + 8 * 2 * NCCL_RMA_MAX_SEGMENTS + 1)
+#define NCCL_RMA_SEND_QP_WRS (2 * 256 + 8 * (8 * 2 * NCCL_RMA_MAX_SEGMENTS + 1))
 
 static inline size_t ncclRmaSegmentSliceBytes(size_t remaining, size_t localRemaining, size_t remoteRemaining) {
   size_t chunk = remaining;

@@ -349,10 +349,9 @@ TEST(NetIbSplit, IndependentLocalAndRemoteStartOffsets) {
     EXPECT_EQ(out[1].remoteSeg, 1);
 }
 
-// DeepEP Engram uses one unequal [GPU][CPU] window and reads remote CPU storage
-// into a different offset in the local GPU segment. Preserve that consumer
-// geometry as a host-only regression for independent offset/key selection.
-TEST(NetIbSplit, DeepEP_EngramCpuToGpuOffsets) {
+// One window is a GPU segment followed by a smaller CPU segment. A transfer
+// from the remote CPU segment into the local GPU segment keeps both offsets.
+TEST(NetIbSplit, GpuCpuWindowIndependentOffsets) {
     constexpr uint64_t gpuBytes = 6u * 1024 * 1024;
     constexpr uint64_t cpuBytes = 2u * 1024 * 1024;
     constexpr uint64_t remoteBase = 0x900000000ULL;
@@ -525,4 +524,38 @@ TEST(NetIbMultiSeg, HostVmmBaseZeroDoesNotWrapRemaining)
     const size_t segSize = kSeg;
     EXPECT_EQ(ncclIbBytesRemainingInSegment(kBase, 0, segSize), segSize);
     EXPECT_EQ(ncclIbBytesRemainingInSegment(kBase + 4096, kBase, segSize), segSize - 4096);
+}
+
+TEST(NetIbSideTable, MissingIdxIsNotReady) {
+    const uint64_t slotIdx[] = {7, 7, 0};
+    EXPECT_FALSE(ncclIbSideTableReady(true, true, true, slotIdx, 3, 7));
+}
+
+TEST(NetIbSideTable, MatchingIdxIsReady) {
+    const uint64_t slotIdx[] = {7, 7};
+    EXPECT_TRUE(ncclIbSideTableReady(true, true, true, slotIdx, 2, 7));
+}
+
+TEST(NetIbSideTable, NoTableOrNoCapDoesNotWait) {
+    const uint64_t slotIdx[] = {0};
+    EXPECT_TRUE(ncclIbSideTableReady(false, true, true, slotIdx, 1, 9));
+    EXPECT_TRUE(ncclIbSideTableReady(true, false, true, slotIdx, 1, 9));
+    EXPECT_TRUE(ncclIbSideTableReady(true, true, false, slotIdx, 1, 9));
+}
+
+TEST(NetIbSideTable, NullIdxWithTableIsNotReady) {
+    EXPECT_FALSE(ncclIbSideTableReady(true, true, true, nullptr, 1, 1));
+}
+
+// NCCL_STEPS and NCCL_NET_IB_MAX_RECVS are both 8. NET_IB_MAX_REQUESTS is 256.
+// The old depth added one chain (128) on top of 256 and held three full flushes.
+TEST(NetIbMultiSeg, FlushQpDepthCoversEveryOutstandingStep) {
+    constexpr int kSteps = 8;
+    constexpr int kRecvs = 8;
+    constexpr int kLegacy = 256;
+    EXPECT_EQ(ncclIbFlushQpSendDepth(kSteps, kRecvs, NCCL_IB_MAX_SEGMENTS, kLegacy, 0), kLegacy);
+    EXPECT_EQ(ncclIbFlushQpSendDepth(kSteps, kRecvs, NCCL_IB_MAX_SEGMENTS, kLegacy, 1),
+              kSteps * kRecvs * NCCL_IB_MAX_SEGMENTS);
+    EXPECT_LT(kLegacy + kRecvs * NCCL_IB_MAX_SEGMENTS,
+              ncclIbFlushQpSendDepth(kSteps, kRecvs, NCCL_IB_MAX_SEGMENTS, kLegacy, 1));
 }
