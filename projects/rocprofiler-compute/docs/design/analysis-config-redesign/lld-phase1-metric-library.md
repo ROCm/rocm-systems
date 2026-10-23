@@ -749,7 +749,7 @@ unchanged -- it receives the same `dict[str, str]` regardless of source.
 | Tool | What changes |
 |---|---|
 | `validate_sets_metric_ids.py` | Accept string metric IDs. Validate against `MetricLibrary` when Layer 2 active, positional index when not. |
-| `format_yaml.py` | Recognize Layer 2 YAML structure (metric list with `id`, `name`, aggregation fields). Core equation formatting logic (factoring constants out of aggregation) is unchanged -- same equation keys (`value`, `avg`, `min`, `max`, `peak`). |
+| `lint_analysis_config.py` | Recognize Layer 2 YAML structure (metric list with `id`, `name`, aggregation fields). Core equation formatting logic (factoring constants out of aggregation) is unchanged -- same equation keys (`value`, `avg`, `min`, `max`, `peak`). |
 | `hash_manager.py` | Include base arch directories in hash database. Path discovery expands to cover `gfx908/*.yaml` and `gfx115x/*.yaml` as base arch files. |
 | `verify_against_config_template.py` | Validate Layer 2 files against `layer2_schema.py` instead of the Panel Config template. During transition, both templates checked depending on file location. |
 | `metric_description_manager.py` | Read descriptions from Layer 2 definitions (co-located with `id`). Output format for docs YAMLs is unchanged. |
