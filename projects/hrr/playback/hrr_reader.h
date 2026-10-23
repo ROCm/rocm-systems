@@ -5,6 +5,7 @@
  */
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -204,8 +205,27 @@ struct Archive {
 // API
 // ---------------------------------------------------------------------------
 
-// Load an archive from disk. Returns false on error.
-bool load_archive(const std::string& path, Archive& archive);
+// What loading may spend. The archive chooses how many records it holds and how
+// big each is (up to kMaxRecordBytes), so the loader charges what it retains
+// against one byte budget and stops at a deadline, instead of trusting the
+// archive to fit.
+struct LoadLimits {
+  // Charged for each record's raw bytes and for what is parsed out of a kernel
+  // launch (name, arguments, snapshots) and for each Event itself. Null: a
+  // private budget of kDefaultMaxHostBytes. A budget the caller passes keeps
+  // the bytes of a successful load charged, since the archive still holds them;
+  // a failed load gives back what it charged.
+  ByteBudget* bytes = nullptr;
+  // Loading stops, and fails, once this time has passed. Default: never.
+  std::chrono::steady_clock::time_point deadline =
+      std::chrono::steady_clock::time_point::max();
+};
+
+// Load an archive from disk. Returns false on error, including a record that
+// would take the load past limits.bytes or a load still running at
+// limits.deadline; the diagnostic names the limit and its option.
+bool load_archive(const std::string& path, Archive& archive,
+                  const LoadLimits& limits = LoadLimits{});
 
 // The pid in the name of a per-process archive directory, "pid-<decimal pid>",
 // or 0 for any other name. An archive moved aside to pid-<pid>.prev-<n>, when a
@@ -235,13 +255,18 @@ constexpr uint32_t kMaxRecordBytes = 64u * 1024u * 1024u;
 enum class RecordStatus {
   Ok,           // a complete record was read into the output buffer
   EndOfStream,  // clean EOF exactly at a record boundary
-  Torn          // partial record at the tail; everything before it is intact
+  Torn,         // partial record at the tail; everything before it is intact
+  OverBudget    // the record would not fit the budget; nothing was allocated
 };
 
 // Read one framed record into `out` (resized to the record's full length,
 // header included). Only the final record of a stream can ever be Torn, because
-// the writer appends whole records.
-RecordStatus read_raw_record(FILE* f, std::vector<uint8_t>& out);
+// the writer appends whole records. With `budget`, the record's length is
+// charged before `out` grows to it: a record that does not fit returns
+// OverBudget without allocating it, and one that is read keeps its charge
+// (a torn one gives it back).
+RecordStatus read_raw_record(FILE* f, std::vector<uint8_t>& out,
+                             ByteBudget* budget = nullptr);
 
 // Open a record stream and validate its 8-byte header. `expected_magic` selects
 // the stream kind (HRR_MAGIC for events.bin, HRR_REGION_MAGIC for a region

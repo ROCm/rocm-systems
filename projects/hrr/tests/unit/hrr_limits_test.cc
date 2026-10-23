@@ -46,6 +46,34 @@ hrr_event_header make_record(uint64_t seq, uint64_t thread_id = 42) {
   return h;
 }
 
+// Append one record of `len` bytes (header included) whose payload is zeros.
+// A device-synchronize record parses without reading its payload, so the
+// padding is retained raw and nothing else.
+void write_padded_record(std::ofstream& f, uint64_t seq, uint32_t len) {
+  hrr_event_header h = make_record(seq);
+  h.payload_length = len;
+  f.write(reinterpret_cast<const char*>(&h), sizeof(h));
+  std::vector<char> pad(len - sizeof(h), 0);
+  f.write(pad.data(), static_cast<std::streamsize>(pad.size()));
+}
+
+// An archive directory holding `n` padded records of `len` bytes each.
+struct PaddedArchive {
+  fs::path root;
+  PaddedArchive(const std::string& name, int n, uint32_t len) {
+    root = fs::temp_directory_path() / ("hrr_lim_" + name);
+    fs::remove_all(root);
+    fs::create_directories(root / "blobs");
+    fs::create_directories(root / "code_objects");
+    std::ofstream f(root / "events.bin", std::ios::binary);
+    hrr_file_header fh{HRR_MAGIC, HRR_VERSION, 0};
+    f.write(reinterpret_cast<const char*>(&fh), sizeof(fh));
+    for (int i = 0; i < n; ++i) write_padded_record(f, static_cast<uint64_t>(i), len);
+  }
+  ~PaddedArchive() { fs::remove_all(root); }
+  std::string path() const { return root.string(); }
+};
+
 // RAII synthetic archive directory with a caller-chosen sequence list.
 struct TmpArchive {
   fs::path root;
@@ -592,6 +620,183 @@ HRR_TEST_CASE(Unit_HRR_Limits_FindSeqGap) {
   CHECK(missing == 3);
   CHECK(hrr::find_seq_gap({13, 11, 10}, &missing));
   CHECK(missing == 12);
+}
+
+// ---------------------------------------------------------------------------
+// The archive load is bounded in bytes and in time
+// ---------------------------------------------------------------------------
+
+/**
+ * Test Description
+ * ----------------
+ *   - load_archive charges each record's raw bytes to the budget it is given
+ *     and refuses an archive that does not fit, naming --max-host-bytes. It
+ *     stops at the record that crosses the cap, so it holds far fewer events
+ *     than the file has, and gives its charge back. The same archive loads
+ *     under a larger budget, which stays charged for what the archive holds.
+ */
+HRR_TEST_CASE(Unit_HRR_Limits_LoadByteBudget) {
+  constexpr uint32_t kLen = 100 * 1024;
+  constexpr int kRecords = 40;  // 4 MB of records
+  PaddedArchive arc("loadbytes", kRecords, kLen);
+
+  hrr::ByteBudget small(1u << 20);  // 1 MiB
+  hrr::LoadLimits tight;
+  tight.bytes = &small;
+  hrr::Archive refused;
+  CHECK_FALSE(hrr::load_archive(arc.path(), refused, tight));
+  CHECK(refused.events.size() < 11);  // 1 MiB holds ten such records
+  CHECK(small.used() == 0);
+
+  hrr::ByteBudget large(64u << 20);
+  hrr::LoadLimits roomy;
+  roomy.bytes = &large;
+  hrr::Archive loaded;
+  CHECK(hrr::load_archive(arc.path(), loaded, roomy));
+  CHECK(loaded.events.size() == kRecords);
+  CHECK(large.used() >= uint64_t(kRecords) * kLen);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - read_raw_record charges a record before it allocates it: a header that
+ *     claims a 60 MiB record under a 1 MiB budget is OverBudget, the buffer
+ *     never grows past the header, and nothing is left charged. Without a
+ *     budget the same header is read as before (here, a torn tail).
+ */
+HRR_TEST_CASE(Unit_HRR_Limits_RecordChargedBeforeAllocation) {
+  const fs::path path = fs::temp_directory_path() / "hrr_lim_bigclaim.bin";
+  {
+    std::ofstream f(path, std::ios::binary);
+    hrr_event_header h = make_record(0);
+    h.payload_length = 60u << 20;  // the record claims 60 MiB; the file has none
+    f.write(reinterpret_cast<const char*>(&h), sizeof(h));
+  }
+  hrr::ByteBudget budget(1u << 20);
+  std::vector<uint8_t> out;
+  FILE* f = fopen(path.string().c_str(), "rb");
+  REQUIRE(f != nullptr);
+  CHECK(hrr::read_raw_record(f, out, &budget) == hrr::RecordStatus::OverBudget);
+  CHECK(out.size() == sizeof(hrr_event_header));
+  CHECK(out.capacity() < (1u << 20));
+  CHECK(budget.used() == 0);
+  fclose(f);
+
+  f = fopen(path.string().c_str(), "rb");
+  REQUIRE(f != nullptr);
+  CHECK(hrr::read_raw_record(f, out) == hrr::RecordStatus::Torn);
+  fclose(f);
+  fs::remove(path);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - A kernel launch whose arguments expand when parsed is charged for the
+ *     expansion, not just its raw bytes: 20000 zero-length arguments are 60 kB
+ *     on disk but 20000 KernelArg structs in memory. A budget that holds the
+ *     raw record and not the expansion refuses it; a larger one loads it.
+ */
+HRR_TEST_CASE(Unit_HRR_Limits_LoadChargesParsedKernelExpansion) {
+  constexpr uint16_t kArgs = 20000;
+  std::vector<uint8_t> body;
+  auto put = [&](const void* p, size_t n) {
+    body.insert(body.end(), static_cast<const uint8_t*>(p),
+                static_cast<const uint8_t*>(p) + n);
+  };
+  const uint64_t stream = 0;
+  const uint16_t name_len = 1;
+  put(&stream, 8);
+  put(&name_len, 2);
+  put("k", 1);
+  const uint64_t co_hash[2] = {0, 0};
+  put(co_hash, 16);
+  const uint32_t dims[7] = {1, 1, 1, 1, 1, 1, 0};  // grid, block, shared_mem
+  put(dims, 28);
+  const uint16_t counts[2] = {kArgs, 0};
+  put(counts, 4);
+  for (uint16_t i = 0; i < kArgs; ++i) {
+    const uint8_t kind = 0;
+    const uint16_t size = 0;
+    put(&kind, 1);
+    put(&size, 2);
+  }
+
+  const fs::path root = fs::temp_directory_path() / "hrr_lim_kernelexp";
+  fs::remove_all(root);
+  fs::create_directories(root / "blobs");
+  fs::create_directories(root / "code_objects");
+  {
+    std::ofstream f(root / "events.bin", std::ios::binary);
+    hrr_file_header fh{HRR_MAGIC, HRR_VERSION, 0};
+    f.write(reinterpret_cast<const char*>(&fh), sizeof(fh));
+    hrr_event_header h = make_record(0);
+    h.event_type = static_cast<uint16_t>(HRR_API_HIPLAUNCHKERNEL);
+    h.payload_length = static_cast<uint32_t>(sizeof(h) + body.size());
+    f.write(reinterpret_cast<const char*>(&h), sizeof(h));
+    f.write(reinterpret_cast<const char*>(body.data()),
+            static_cast<std::streamsize>(body.size()));
+  }
+  const uint64_t raw = sizeof(hrr_event_header) + body.size();
+  const uint64_t expanded = uint64_t(kArgs) * sizeof(hrr::KernelArg);
+  REQUIRE(expanded > 4 * raw);  // otherwise the raw-bytes cap below proves nothing
+
+  hrr::ByteBudget raw_only(raw + sizeof(hrr::Event) + 1024);
+  hrr::LoadLimits tight;
+  tight.bytes = &raw_only;
+  hrr::Archive refused;
+  CHECK_FALSE(hrr::load_archive(root.string(), refused, tight));
+  CHECK(raw_only.used() == 0);
+
+  hrr::ByteBudget roomy_budget(raw + expanded + (1u << 20));
+  hrr::LoadLimits roomy;
+  roomy.bytes = &roomy_budget;
+  hrr::Archive loaded;
+  CHECK(hrr::load_archive(root.string(), loaded, roomy));
+  REQUIRE(loaded.events.size() == 1);
+  REQUIRE(loaded.events[0].kernel_launch != nullptr);
+  CHECK(loaded.events[0].kernel_launch->args.size() == kArgs);
+  CHECK(roomy_budget.used() >= raw + expanded);
+  fs::remove_all(root);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - load_archive fails once its deadline has passed, and loads the same
+ *     archive when the deadline is later.
+ */
+HRR_TEST_CASE(Unit_HRR_Limits_LoadDeadline) {
+  TmpArchive arc("loaddeadline", {0, 1, 2});
+  hrr::LoadLimits late;
+  late.deadline = std::chrono::steady_clock::now() + std::chrono::hours(1);
+  hrr::Archive ok;
+  CHECK(hrr::load_archive(arc.path(), ok, late));
+  CHECK(ok.events.size() == 3);
+
+  hrr::LoadLimits past;
+  past.deadline = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+  hrr::Archive expired;
+  CHECK_FALSE(hrr::load_archive(arc.path(), expired, past));
+  CHECK(expired.events.empty());
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - hrr-playback --info on an archive larger than --max-host-bytes refuses
+ *     it, naming the option, without a GPU; the same command with the cap
+ *     raised prints the summary.
+ */
+HRR_TEST_CASE(Unit_HRR_Limits_PlaybackInfoRefusesOverByteBudget) {
+  PaddedArchive arc("info_bytes", 40, 100 * 1024);
+  auto [ret, out] = hrr_playback_merged(arc.root, "--info --max-host-bytes 1048576");
+  CHECK(ret != 0);
+  CHECK(out.find("--max-host-bytes") != std::string::npos);
+
+  auto [ok_ret, ok_out] = hrr_playback_merged(arc.root, "--info --max-host-bytes 1073741824");
+  CHECK(ok_ret == 0);
 }
 
 /** @} */
