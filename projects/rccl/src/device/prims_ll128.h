@@ -8,6 +8,15 @@
 
 #define NCCL_LL128_FLAGTHREAD (NCCL_LL128_LINEELEMS - 1)
 
+// 1: data is only trusted from a load issued after its flags were seen valid,
+//    so every row is reloaded once after it validates (upstream NCCL behavior).
+// 0: trust the data that came back in the same load as the valid flag. This
+//    relies on a line's data never becoming visible later than its flag to the
+//    single warp-wide load that reads both.
+#ifndef RCCL_LL128_CONFIRM_RELOAD
+#define RCCL_LL128_CONFIRM_RELOAD 0
+#endif
+
 #ifndef RCCL_USE_WBINVL1_VOL
 #if defined(__GFX8__) || defined(__gfx906__) || defined(__gfx908__) || defined(__gfx90a__)
 #define RCCL_USE_WBINVL1_VOL 1
@@ -82,8 +91,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
   const int warp;
   const int warpInBlock; // warp index in thread block
   const int group;
-  // Primitives groups start on a warp boundary, so tid % WARP_SIZE is the hardware lane. Reading it from the
-  // hardware keeps it out of the object, which lives in scratch (its member arrays are indexed at run time).
+  // Primitives groups start on a warp boundary, so tid % WARP_SIZE is the hardware lane.
   static __device__ __forceinline__ int laneId() { return (int)__lane_id(); }
   static __device__ __forceinline__ bool isFlagLane() {
     return (laneId() % (NCCL_LL128_LINEELEMS / 2)) == (NCCL_LL128_LINEELEMS / 2 - 1);
@@ -104,6 +112,8 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
   volatile struct ncclConnFifo* sendConnFifo = NULL;
   uint64_t sendConnHeadCache; // Cache last seen value
   volatile uint64_t* sendConnTailPtr = NULL;
+  // Index the per-peer arrays only with compile-time indices. A run-time index moves the whole object to scratch,
+  // and every scratch load in the slice loop costs a vmcnt(0) that also waits for the previous slice's FIFO stores.
   uint64_t recvStep[MaxRecv];
   volatile uint64_t* sendConnHeadPtr = NULL;
 
@@ -170,7 +180,12 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
         if (checkAbort(abort, 1, spins)) break;
       }
       if (sendConnFifo) {
-        sendConnFifo[sendStep[laneId()] % NCCL_STEPS].size = nbytes;
+        uint64_t step = sendStep[0];
+#pragma unroll
+        for (int i = 1; i < MaxSend; i++) {
+          if (laneId() == i) step = sendStep[i];
+        }
+        sendConnFifo[step % NCCL_STEPS].size = nbytes;
       }
       sendConnHead += 1;
     }
@@ -264,12 +279,15 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
        * defer that shuffle, which incurs a dependency stall, until after other
        * memops are launched by the caller.
        */
+      // Load unconditionally from an index clamped to the last chunk holding data. A guarded load leaves a phi that
+      // needs the loaded value at the join, which forces a vmcnt wait right after the load, and on gfx9 that wait
+      // also covers this warp's earlier FIFO stores. Words loaded only to satisfy the clamp are never stored:
+      // flag lanes drop odd groups in loadRegsFinish, and storeRegs and the receiver stop at eltN.
+      const int lastIx = (eltN - 1) / EltPer16B;
 #pragma unroll
       for (int g = 0; g < WordPerThread / 2; g++) {
-        if (!isFlagLane() || g % 2 == 0) {
-          if (ix[g] * EltPer16B < eltN)
-            loadUser128((uint64_t*)(src + ix[g] * EltPer16B), regs[2 * g + 0], regs[2 * g + 1]);
-        }
+        const int ixc = min(ix[g], lastIx);
+        loadUser128((uint64_t*)(src + ixc * EltPer16B), regs[2 * g + 0], regs[2 * g + 1]);
       }
     } else {
       // Not aligned. Stage the smallest 16 byte aligned region subsuming the
@@ -345,6 +363,76 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
 
 #define WARP_MASK 0xffffffff
 
+  // Spin until every flag of one peer's slice is valid, leaving the slice in vr.
+  // Each spin reloads only the window of rows, lowest to highest, whose flags
+  // were not all valid at the previous vote; see RCCL_LL128_CONFIRM_RELOAD.
+  template <int ELEMS_PER_THREAD>
+  __device__ __forceinline__ void recvWaitLoad(uint64_t* ptr, uint64_t flag, uint64_t (&vr)[ELEMS_PER_THREAD]) {
+    constexpr int Rows = ELEMS_PER_THREAD / 2;
+    constexpr bool Confirm = RCCL_LL128_CONFIRM_RELOAD;
+    static_assert(Rows <= 32, "reload tracking holds one bit per row");
+    constexpr uint32_t AllRows = Rows == 32 ? ~0u : (1u << Rows) - 1;
+    constexpr uint64_t WarpMask = WARP_SIZE == 64 ? ~0ull : (1ull << WARP_SIZE) - 1;
+    constexpr int LineLanes = NCCL_LL128_LINEELEMS / 2;
+    constexpr uint64_t FlagLanes = (WarpMask / ((1ull << LineLanes) - 1)) << (LineLanes - 1);
+
+    // Per-row flag votes; lanes not holding a flag always vote yes.
+    uint64_t ok[Rows];
+    // Returns true (warp-uniform) once every flag in the slice is valid.
+    auto vote = [&]() -> bool {
+      uint64_t allOk = WarpMask;
+#pragma unroll
+      for (int r = 0; r < Rows; r++) {
+        ok[r] = __ballot(vr[2 * r + 1] == flag) | (WarpMask & ~FlagLanes);
+        allOk &= ok[r];
+      }
+      return allOk == WarpMask;
+    };
+    auto loadAll = [&]() {
+#pragma unroll
+      for (int u = 0; u < ELEMS_PER_THREAD; u += 2) load128NT(ptr + u * WARP_SIZE, vr[u], vr[u + 1]);
+    };
+    // Rows (warp-uniform) with every flag valid at the last vote.
+    auto validRows = [&]() -> uint32_t {
+      uint32_t rows = 0;
+#pragma unroll
+      for (int r = 0; r < Rows; r++) {
+        if (ok[r] == WarpMask) rows |= 1u << r;
+      }
+      return rows;
+    };
+    // Reload the window spanning the lowest to the highest row not yet done.
+    auto loadRows = [&](uint32_t skip) {
+      uint32_t pending = AllRows & ~skip;
+      if (pending == 0) return;
+      int lo = __builtin_ctz(pending);
+      int hi = 32 - __builtin_clz(pending);
+#pragma unroll
+      for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
+        if (u / 2 >= lo && u / 2 < hi) load128NT(ptr + u * WARP_SIZE, vr[u], vr[u + 1]);
+      }
+    };
+
+    loadAll();
+    if (vote()) {
+      if (Confirm) loadAll();
+      return;
+    }
+    uint32_t valid = validRows();
+    uint32_t done = Confirm ? 0 : valid;
+    bool needReload;
+    int spins = 0;
+    do {
+      loadRows(done);
+      if (Confirm) done |= valid;
+      needReload = !vote();
+      valid = needReload ? validRows() : AllRows;
+      if (!Confirm) done = valid;
+      needReload &= (0 == checkAbort(abort, 1, spins));
+    } while (__any(needReload));
+    if (Confirm) loadRows(done);
+  }
+
   // recvPtr0/recvFlag0/sendPtr0/sendFlag0 are peer 0's FIFO and flag for this step, computed once per op so the
   // slice loop does not reload them from scratch. A scratch load there costs a vmcnt(0), which on gfx9 also waits
   // for the previous slice's remote stores to complete.
@@ -357,23 +445,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
 
     __syncwarp();
     /************************ Wait first recv ********************/
-    if (RECV) {
-      uint64_t* ptr = recvPtr0 + ll128Offset;
-      uint64_t flag = recvFlag0;
-      bool needReload;
-      int spins = 0;
-      do {
-        needReload = false;
-#pragma unroll
-        for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
-          load128NT(ptr + u * WARP_SIZE, vr[u], vr[u + 1]);
-          needReload |= isFlagLane() && (vr[u + 1] != flag);
-        }
-        needReload &= (0 == checkAbort(abort, 1, spins));
-      } while (__any(needReload));
-#pragma unroll
-      for (int u = 0; u < ELEMS_PER_THREAD; u += 2) load128NT(ptr + u * WARP_SIZE, vr[u], vr[u + 1]);
-    }
+    if (RECV) recvWaitLoad(recvPtr0 + ll128Offset, recvFlag0, vr);
 
     /************* Finish register load **************/
     if (SRC) {
@@ -402,22 +474,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
       // Yes, for some template arguments this code will be unreachable.  That's fine.
       // coverity[dead_error_line]
       for (int i = 1; i < MaxRecv && i < fan.nrecv(); i++) {
-        uint64_t flag = recvFlag(i);
-        uint64_t* ptr = recvPtr(i) + ll128Offset;
-        bool needReload;
-        int spins = 0;
-        do {
-          needReload = false;
-#pragma unroll
-          for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
-            load128NT(ptr + u * WARP_SIZE, vr[u], vr[u + 1]);
-            needReload |= isFlagLane() && (vr[u + 1] != flag);
-          }
-          needReload &= (0 == checkAbort(abort, 1, spins));
-        } while (__any(needReload));
-
-#pragma unroll
-        for (int u = 0; u < ELEMS_PER_THREAD; u += 2) load128NT(ptr + u * WARP_SIZE, vr[u], vr[u + 1]);
+        recvWaitLoad(recvPtr(i) + ll128Offset, recvFlag(i), vr);
 
 #pragma unroll
         for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
@@ -574,13 +631,19 @@ public:
 #endif
     barriers = &ncclShmem.groups[group].barrier;
     int nrecv = 0, nsend = 0;
-    while (nrecv < MaxRecv && recvPeers[nrecv] >= 0) {
-      loadRecvConn(&channel->peers[recvPeers[nrecv]]->recv[connIndexRecv], nrecv);
-      nrecv++;
+#pragma unroll
+    for (int i = 0; i < MaxRecv; i++) {
+      if (nrecv == i && recvPeers[i] >= 0) {
+        loadRecvConn(&channel->peers[recvPeers[i]]->recv[connIndexRecv], i);
+        nrecv++;
+      }
     }
-    while (nsend < MaxSend && sendPeers[nsend] >= 0) {
-      loadSendConn(&channel->peers[sendPeers[nsend]]->send[connIndexSend], nsend);
-      nsend++;
+#pragma unroll
+    for (int i = 0; i < MaxSend; i++) {
+      if (nsend == i && sendPeers[i] >= 0) {
+        loadSendConn(&channel->peers[sendPeers[i]]->send[connIndexSend], i);
+        nsend++;
+      }
     }
     this->fan = Fan(nrecv, nsend);
     // Coverity reports recvConn and sendConn being possibly NULL at this point but that won't actually
