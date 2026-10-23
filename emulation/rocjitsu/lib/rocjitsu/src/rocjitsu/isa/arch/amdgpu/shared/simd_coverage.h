@@ -296,10 +296,16 @@ template <bool Extended, typename Slot>
   if (!matches_mode(x) || !matches_mode(y))
     return false;
   // Matching controls still permit host computation to raise exception flags, so
-  // every slot route that computes on host floats scopes the environment itself:
-  // the MODE-aware F32 helpers and the remaining host multiply. Raw-bit routes,
-  // including the F32 MIN/MAX selections, need none, and register access, which
-  // can run callbacks, stays outside every scope.
+  // each slot that computes on host floats takes one environment for the whole
+  // wavefront, after its own operand reads and around its chunk loop, and uses
+  // the unscoped arithmetic cores inside it. Raw-bit routes, including the F32
+  // MIN/MAX selections, need none, and register access, which can run callbacks,
+  // stays outside every scope.
+  // Wider than is_arithmetic, which only gates MODE precision: F64 MIN/MAX
+  // select with host fmax/fmin and signal on NaN inputs under no MODE gate.
+  auto computes_on_host = [](const Slot &slot) {
+    return slot.op <= 7 || (Extended && (slot.op == 19 || (slot.op >= 32 && slot.op <= 36)));
+  };
   struct Results {
     alignas(util::native<uint32_t>) uint32_t words[64]{};
     alignas(util::native<uint64_t>) uint64_t pairs[64]{};
@@ -317,10 +323,10 @@ template <bool Extended, typename Slot>
         std::optional<RegisterAccess::OperandRead64View> c;
         if (slot.op == 32)
           c.emplace(regs.read_operand64(*slot.src2, exec));
+        fp_mode::ScopedEnvironment environment(0);
         for (uint32_t base = 0; base < wf.wf_size(); base += W) {
           if (!((exec >> base) & util::mask<uint64_t>(W)))
             continue;
-          fp_mode::ScopedEnvironment environment(0);
           auto load = [&](const auto &view, unsigned i) {
             U bits = view.template load_native<uint64_t>(base);
             if (slot.neg & (1u << i))
@@ -368,6 +374,11 @@ template <bool Extended, typename Slot>
       acc.emplace(regs.read_operand(*slot.dst, exec));
     const uint64_t condition =
         slot.op == 9 ? (slot.uses_vcc ? wf.vcc_mask() : read_wave_mask_scalar(*slot.src2, wf)) : 0;
+    // The eligibility gate above leaves MODE.FP_ROUND nearest-even here, so this
+    // installs the same environment the scoped F32 helpers would.
+    std::optional<fp_mode::ScopedEnvironment> environment;
+    if (computes_on_host(slot))
+      environment.emplace(wf.fp_round_mode_f32());
     for (uint32_t base = 0; base < wf.wf_size(); base += W) {
       if (!((exec >> base) & util::mask<uint64_t>(W)))
         continue;
@@ -386,39 +397,36 @@ template <bool Extended, typename Slot>
       U result;
       switch (slot.op) {
       case 0:
-        result = std::bit_cast<U>(fma_f32_simd(af, bf, acc->template load_native<float>(base), wf));
+        result = std::bit_cast<U>(
+            fma_f32_simd_unscoped(af, bf, acc->template load_native<float>(base), wf));
         break;
       case 1:
       case 19:
-        result = std::bit_cast<U>(fma_f32_simd(af, bf, cf, wf));
+        result = std::bit_cast<U>(fma_f32_simd_unscoped(af, bf, cf, wf));
         break;
       case 2:
-        result = std::bit_cast<U>(fma_f32_simd(af, cf, bf, wf));
+        result = std::bit_cast<U>(fma_f32_simd_unscoped(af, cf, bf, wf));
         break;
       case 3:
-        result = std::bit_cast<U>(binary_f32_simd<fp_mode::Arithmetic::MUL>(af, bf, wf));
+        result = std::bit_cast<U>(binary_f32_simd_unscoped<fp_mode::Arithmetic::MUL>(af, bf, wf));
         break;
       case 4:
-        result = std::bit_cast<U>(binary_f32_simd<fp_mode::Arithmetic::ADD>(af, bf, wf));
+        result = std::bit_cast<U>(binary_f32_simd_unscoped<fp_mode::Arithmetic::ADD>(af, bf, wf));
         break;
       case 5:
         // SUB/SUBREV add the negated subtrahend in operand order, as VOP2 does.
-        result = std::bit_cast<U>(binary_f32_simd<fp_mode::Arithmetic::ADD>(
+        result = std::bit_cast<U>(binary_f32_simd_unscoped<fp_mode::Arithmetic::ADD>(
             af, std::bit_cast<F>(bv ^ U(0x80000000u)), wf));
         break;
       case 6:
-        result = std::bit_cast<U>(binary_f32_simd<fp_mode::Arithmetic::ADD>(
+        result = std::bit_cast<U>(binary_f32_simd_unscoped<fp_mode::Arithmetic::ADD>(
             std::bit_cast<F>(av ^ U(0x80000000u)), bf, wf));
         break;
-      case 7: {
-        // The only slot operation still multiplying on the host; scope the
-        // environment so its exception flags stay out of the caller's.
-        fp_mode::ScopedEnvironment environment(0);
+      case 7:
         result = std::bit_cast<U>(af * bf);
         util::stdx::where(((av & U(0x7fffffffu)) == U(0)) || ((bv & U(0x7fffffffu)) == U(0)),
                           result) = U(0);
         break;
-      }
       case 8:
         result = av;
         break;

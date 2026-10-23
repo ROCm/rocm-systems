@@ -1277,10 +1277,10 @@ inline util::native<float> pkf32_neg(util::native<float> v, bool do_neg) {
 /// `Scoped` false constructs nothing, leaving host-float functors' code generation
 /// and their host NaN selection untouched.
 ///
-/// VOPD F32 in simd_coverage.h still scopes per chunk, since its slots are
-/// separate computation regions. The VOP3P packed-F32 and F32 FMA MIX helpers
-/// keep their existing instruction-wide scopes, which also span view
-/// acquisition, and evaluate the unscoped cores inside them.
+/// VOPD in simd_coverage.h reaches the same policy without this helper: its two
+/// slots are separate computation regions, so each scopes its own chunk loop.
+/// The VOP3P packed-float and FMA MIX helpers keep their existing instruction-wide
+/// scopes, which predate this helper and still span view acquisition.
 template <bool Scoped, typename View, typename Body>
 [[nodiscard]] inline bool run_instruction_chunks(const View &dst, uint32_t round_mode, Body body) {
   if constexpr (Scoped) {
