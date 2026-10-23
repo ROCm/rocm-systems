@@ -334,9 +334,7 @@ util::FailureOr<LoadedConfig> load_config(const std::string &json_path,
 /// @details Like the three-argument overload, but uses @p host_threads as the
 /// affinity input to the shared execution budget. Zero means indeterminate and
 /// gives an automatic budget of one. An explicit cpu_thread_budget overrides it.
-/// File-reading, parsing, KFD/DBT device conversion, component-range, and
-/// link-expression failures emit a diagnostic and return failure. Other validation
-/// and allocation exceptions propagate.
+/// Failure diagnostics and exceptions follow the three-argument @ref load_config overload.
 /// @param json_path Path to the JSON config file.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
 /// @param emit_error Destination for failure diagnostics.
@@ -361,9 +359,8 @@ util::FailureOr<LoadedConfig> load_config_from_string(const std::string &json,
 
 /// @brief Load simulation config from a JSON string against a stated host width.
 /// @details See the four-argument @ref load_config overload.
-/// Parsing, KFD/DBT device conversion, component-range, and link-expression failures
-/// emit a diagnostic and return failure. Other validation and allocation exceptions
-/// propagate.
+/// Failure diagnostics and exceptions follow the three-argument @ref load_config_from_string
+/// overload.
 /// @param json JSON configuration string.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
 /// @param emit_error Destination for failure diagnostics.

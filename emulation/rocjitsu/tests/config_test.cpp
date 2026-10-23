@@ -238,6 +238,10 @@ TEST(ConfigExpressionTest, MalformedLinksReturnDiagnostics) {
       {R"json({"pattern":"src -> dst","where_expr":"(1"})json", "Missing ')' in: (1"},
       {R"json({"pattern":"src -> dst","where_expr":"1 +"})json", "Unexpected token in: 1 +"},
       {R"json({"pattern":"src -> dst","where_expr":"1 2"})json", "Extra tokens in: 1 2"},
+      {R"json({"pattern":"src -> dst","where_expr":"1 || missing"})json",
+       "Unknown var 'missing' in: 1 || missing"},
+      {R"json({"pattern":"src -> dst","where_expr":"0 && missing"})json",
+       "Unknown var 'missing' in: 0 && missing"},
       {R"json({"pattern":"src[i -> dst"})json", "Unmatched '[' in: src[i"},
       {R"json({"pattern":"src[missing] -> dst"})json", "Unknown var 'missing'"},
       {R"json({"pattern":"src -> dst[1 +]"})json", "Unexpected token in: 1 +"},
@@ -276,6 +280,23 @@ TEST(ConfigExpressionTest, ValidExpressionsExpandLinks) {
   EXPECT_EQ(links[1].dst, "dst2");
   EXPECT_EQ(links[0].latency, 7u);
   EXPECT_EQ(links[0].weight, 3u);
+
+  const struct {
+    const char *expression;
+    size_t link_count;
+  } cases[] = {{"1 || 0", 4u}, {"0 && 1", 0u}, {"i == 0 || i == 3", 2u}};
+  for (const auto &test : cases) {
+    SCOPED_TRACE(test.expression);
+    const auto filtered_json =
+        link_expression_config(std::string(R"json({"pattern":"src[i] -> dst[i]",
+          "for_ranges":[{"var_name":"i","start":0,"end":4}],"where_expr":")json") +
+                               test.expression + R"json("})json");
+    util::StringDiagnostic filtered_diagnostic;
+    auto filtered = config::load_config_from_string(filtered_json, kEmbeddedSchema,
+                                                    filtered_diagnostic.emitter(), 1);
+    ASSERT_TRUE(filtered.succeeded()) << filtered_diagnostic.message();
+    EXPECT_EQ(filtered.value().build_result.link_specs.size(), test.link_count);
+  }
 }
 
 TEST(ConfigExpressionTest, ComponentRangeOverflowReturnsThroughBothLoaders) {
@@ -310,6 +331,7 @@ TEST(ConfigExpressionTest, ComponentRangesPreserveHalfOpenAndEmptySemantics) {
   const auto &children = loaded.value().build_result.root->children();
   ASSERT_EQ(children.size(), 3u);
   EXPECT_EQ(children[1]->name(), "part4294967294");
+  // Preserve the old stoul-to-uint32_t narrowing: 4294967296 becomes component 0.
   EXPECT_EQ(children.back()->name(), "wrapped0");
 }
 

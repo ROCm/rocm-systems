@@ -289,14 +289,10 @@ private:
     while (is2("||")) {
       if (adv().failed())
         return util::Result::failure();
-      if (l.value()) {
-        l = 1;
-      } else {
-        auto r = p_and();
-        if (r.failed())
-          return util::Result::failure();
-        l = r.value() ? 1 : 0;
-      }
+      auto r = p_and();
+      if (r.failed())
+        return util::Result::failure();
+      l = (l.value() || r.value()) ? 1 : 0;
     }
     return l;
   }
@@ -307,14 +303,10 @@ private:
     while (is2("&&")) {
       if (adv().failed())
         return util::Result::failure();
-      if (!l.value()) {
-        l = 0;
-      } else {
-        auto r = p_cmp();
-        if (r.failed())
-          return util::Result::failure();
-        l = r.value() ? 1 : 0;
-      }
+      auto r = p_cmp();
+      if (r.failed())
+        return util::Result::failure();
+      l = (l.value() && r.value()) ? 1 : 0;
     }
     return l;
   }
@@ -323,54 +315,26 @@ private:
     if (maybe_l.failed())
       return util::Result::failure();
     auto l = maybe_l.value();
-    if (is2("==")) {
+    auto compare = [&](auto op) -> util::FailureOr<int32_t> {
       if (adv().failed())
         return util::Result::failure();
       auto r = p_add();
       if (r.failed())
         return util::Result::failure();
-      return (l == r.value()) ? 1 : 0;
-    }
-    if (is2("!=")) {
-      if (adv().failed())
-        return util::Result::failure();
-      auto r = p_add();
-      if (r.failed())
-        return util::Result::failure();
-      return (l != r.value()) ? 1 : 0;
-    }
-    if (is2("<=")) {
-      if (adv().failed())
-        return util::Result::failure();
-      auto r = p_add();
-      if (r.failed())
-        return util::Result::failure();
-      return (l <= r.value()) ? 1 : 0;
-    }
-    if (is2(">=")) {
-      if (adv().failed())
-        return util::Result::failure();
-      auto r = p_add();
-      if (r.failed())
-        return util::Result::failure();
-      return (l >= r.value()) ? 1 : 0;
-    }
-    if (is1('<')) {
-      if (adv().failed())
-        return util::Result::failure();
-      auto r = p_add();
-      if (r.failed())
-        return util::Result::failure();
-      return (l < r.value()) ? 1 : 0;
-    }
-    if (is1('>')) {
-      if (adv().failed())
-        return util::Result::failure();
-      auto r = p_add();
-      if (r.failed())
-        return util::Result::failure();
-      return (l > r.value()) ? 1 : 0;
-    }
+      return op(l, r.value()) ? 1 : 0;
+    };
+    if (is2("=="))
+      return compare([](int32_t lhs, int32_t rhs) { return lhs == rhs; });
+    if (is2("!="))
+      return compare([](int32_t lhs, int32_t rhs) { return lhs != rhs; });
+    if (is2("<="))
+      return compare([](int32_t lhs, int32_t rhs) { return lhs <= rhs; });
+    if (is2(">="))
+      return compare([](int32_t lhs, int32_t rhs) { return lhs >= rhs; });
+    if (is1('<'))
+      return compare([](int32_t lhs, int32_t rhs) { return lhs < rhs; });
+    if (is1('>'))
+      return compare([](int32_t lhs, int32_t rhs) { return lhs > rhs; });
     return l;
   }
   util::FailureOr<int32_t> p_add() {
@@ -512,16 +476,18 @@ util::FailureOr<std::vector<std::string>> expand_range(const std::string &pat,
   if (!std::regex_match(pat, m, re))
     return std::vector<std::string>{pat};
   auto pfx = m[1].str();
-  unsigned long start = 0, end = 0;
+  unsigned long parsed_start = 0, parsed_end = 0;
   auto s_text = m[2].str(), e_text = m[3].str();
-  if (std::from_chars(s_text.data(), s_text.data() + s_text.size(), start).ec != std::errc{} ||
-      std::from_chars(e_text.data(), e_text.data() + e_text.size(), end).ec != std::errc{})
+  if (std::from_chars(s_text.data(), s_text.data() + s_text.size(), parsed_start).ec !=
+          std::errc{} ||
+      std::from_chars(e_text.data(), e_text.data() + e_text.size(), parsed_end).ec != std::errc{})
     return emit_error.emit() << "Range bound out of unsigned long range in: " << pat;
-  auto s = static_cast<uint32_t>(start);
-  auto e = static_cast<uint32_t>(end);
+  // Preserve the old stoul-to-uint32_t narrowing behavior for component ranges.
+  auto range_start = static_cast<uint32_t>(parsed_start);
+  auto range_end = static_cast<uint32_t>(parsed_end);
   auto sfx = m[4].str();
   std::vector<std::string> out;
-  for (uint32_t i = s; i < e; ++i)
+  for (uint32_t i = range_start; i < range_end; ++i)
     out.push_back(pfx + std::to_string(i) + sfx);
   return out;
 }
