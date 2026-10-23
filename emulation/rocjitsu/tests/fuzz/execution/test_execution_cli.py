@@ -164,7 +164,7 @@ class ExecutionFuzzCliTest(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertIn("seed range exceeds uint64", result.stderr)
 
-    def test_unsupported_guest_input_is_a_normal_halt(self) -> None:
+    def test_unsupported_guest_input_stops_without_a_normal_halt(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             input_path = Path(temporary) / "input.bin"
             input_path.write_bytes(bytes([6, 0, 0, 0, 0x68, 0xD8]))
@@ -172,7 +172,9 @@ class ExecutionFuzzCliTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("could not execute ds_gws_sema_v", result.stderr)
             stats = json.loads(result.stdout)
-            self.assertEqual(stats["inputs_halted"], 1)
+            self.assertEqual(stats["waves_halted"], 0)
+            self.assertEqual(stats["inputs_halted"], 0)
+            self.assertEqual(stats["inputs_stopped"], 1)
             self.assertEqual(stats["budget_exhausted"], 0)
 
     def test_invalid_async_mode_is_rejected(self) -> None:
