@@ -15,6 +15,11 @@ Full documentation for AMD Debugger API is available at
   - Precise ALU exception reporting
   - Local memory out-of-range access reporting
 
+### Changed
+- Host memory transfers on Windows no longer fail when the requested size
+  extends past the end of the containing memory region. This fixes intermittent
+  fatal errors when attaching to processes with a large number of code objects.
+
 ## rocm-dbgapi-0.82.1 for ROCm-10.2
 ### Added
 - A CMake based GoogleTest and GMock unit test suite under `test/`, controlled
