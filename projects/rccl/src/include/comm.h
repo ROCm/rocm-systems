@@ -842,6 +842,8 @@ struct ncclComm {
 
   // Buffer sizes
   int buffSizes[NCCL_NUM_PROTOCOLS];
+  // LL128 buffer for send/recv; smaller than buffSizes[NCCL_PROTO_LL128] when collectives use a scaled-up one.
+  int p2pLl128BuffSize;
   int p2pChunkSize;
   int nvlsChunkSize;
 

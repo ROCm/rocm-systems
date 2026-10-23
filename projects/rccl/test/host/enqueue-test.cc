@@ -835,6 +835,7 @@ struct ChunkComm {
   ncclComm& comm{*storage};
   explicit ChunkComm(int protoSimpleBuf = 1 << 22) {
     for (int p = 0; p < NCCL_NUM_PROTOCOLS; ++p) comm.buffSizes[p] = protoSimpleBuf;
+    comm.p2pLl128BuffSize = protoSimpleBuf;
     // LOAD-BEARING: rcclProtoGrainSize(LL128) (scheduler.h:22) is
     //   WarpSize * ll128ShmemElemsPerThread * ll128DataElems * 8 / ll128LineElems
     // so a zero WarpSize makes grainSize 0, and :3028's
@@ -4006,6 +4007,7 @@ struct Gfx1250AddP2pScene {
     c->buffSizes[NCCL_PROTO_LL] = 1 << 20;
     c->buffSizes[NCCL_PROTO_LL128] = 1 << 20;
     c->buffSizes[NCCL_PROTO_SIMPLE] = 1 << 20;
+    c->p2pLl128BuffSize = c->buffSizes[NCCL_PROTO_LL128];
     SetSingleGpuArch(topo.get(), "gfx1250");
     topo->ll128Enabled = true;
     c->topo = topo.get();

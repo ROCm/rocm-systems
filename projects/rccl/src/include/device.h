@@ -720,6 +720,7 @@ struct ncclKernelComm {
   int node;
   int nNodes;
   int buffSizes[NCCL_NUM_PROTOCOLS];
+  int p2pLl128BuffSize;
   int p2pChunkSize;
   bool p2pCrossClique;
   int isAllNvlink;

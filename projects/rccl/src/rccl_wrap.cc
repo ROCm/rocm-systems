@@ -226,6 +226,8 @@ void rcclUpdateCollectiveAlgorithm(struct ncclComm* comm, size_t nBytes, struct 
   info->algorithm = NCCL_ALGO_TREE;
 }
 
+RCCL_PARAM_DECLARE(RsLl128Tune);
+
 void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, struct ncclTaskColl* info) {
   // Honor user input for protocol choice
   const bool userProtocolInput = rcclNcclProtoEnvIsSet();
@@ -302,6 +304,12 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
             }
           }
         }
+        // With RCCL_RS_LL128_TUNE=1 and the scaled collective LL128 buffer (rcclScaleCollLl128BuffSize),
+        // ReduceScatter Ring/LL128 beats Ring/Simple up to 7 MiB per rank on 2-16 nodes (+10% at 7 MiB); Ring/Simple
+        // wins from 8 MiB. With the default buffer Ring/LL128 needs a second loop there and loses.
+        if (info->func == ncclFuncReduceScatter && rcclParamRsLl128Tune() != 0 &&
+            comm->buffSizes[NCCL_PROTO_LL128] > comm->p2pLl128BuffSize)
+          ll128Max = std::max<uint64_t>(ll128Max, 7 << 20);
         if (sizePerRank <= ll128Max && sizePerRank > ll128Min) {
           info->protocol = NCCL_PROTO_LL128;
         }
@@ -321,46 +329,104 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
   }
 }
 
-// gfx950 multi-node choices with the remote GDR flush flag, measured on 2/4/8 nodes of 8 GPUs.
+// The gfx950 multi-node tuning below applies only when the communicator uses the remote GDR flush flag and
+// has 8 GPUs per node, and each part is off by default:
+// RCCL_AR_ALGO_TUNE=1: all_reduce switch points (Ring/LL128 from 12 MB per node), 16-node Tree/Simple from 8 to
+// 64 MB per node, and RCCL_AR_RING_SIMPLE_NCHANNELS channels for Ring/Simple from 64 to 128 MB per node.
+RCCL_PARAM(ArAlgoTune, "AR_ALGO_TUNE", 0);
+// Channels for Ring/Simple from 64 to 128 MB per node with RCCL_AR_ALGO_TUNE=1; 0 keeps RCCL's own count.
+RCCL_PARAM(ArRingSimpleNchannels, "AR_RING_SIMPLE_NCHANNELS", 48);
+// RCCL_LL128_COLL_BUFF_SCALE=N (>1): collective LL128 buffer multiple on 2-8 and 16 nodes (4 measured); all_reduce
+// then keeps Ring/LL128 up to its one-loop limit. 1 keeps the default. NCCL_LL128_BUFFSIZE overrides it.
+RCCL_PARAM(Ll128CollBuffScale, "LL128_COLL_BUFF_SCALE", 1);
+// RCCL_RS_LL128_TUNE=1: with the scaled buffer, reduce_scatter uses Ring/LL128 up to 7 MiB per rank.
+RCCL_PARAM(RsLl128Tune, "RS_LL128_TUNE", 0);
+
+// comm->ibGdrFlushFlag is the same on every rank, so every rank sizes the LL128 buffer the same way.
+static bool rcclRemoteFlushTuned(struct ncclComm* comm) {
+  return comm->ibGdrFlushFlag && comm->nRanks == comm->nNodes * 8 &&
+         IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
+}
+
+// Ring all_reduce moves one LL128 chunk per channel per rank per loop, so data past chunk * nChannels * nRanks
+// needs a second loop at full ring latency and loses about a third of its bandwidth. A larger buffer lifts that
+// limit; send/recv keeps the default size (comm->p2pLl128BuffSize), since it allocates one buffer per network
+// peer and channel and would grow with the node count.
+void rcclScaleCollLl128BuffSize(struct ncclComm* comm) {
+  const int64_t scale = rcclParamLl128CollBuffScale();
+  if (scale <= 1 || comm->nNodes < 2 || (comm->nNodes > 8 && comm->nNodes != 16) || !comm->topo->ll128Enabled ||
+      !rcclRemoteFlushTuned(comm))
+    return;
+  comm->buffSizes[NCCL_PROTO_LL128] = (int)(comm->p2pLl128BuffSize * scale);
+  INFO(NCCL_INIT, "LL128 buffer for collectives %d (x%ld), for send/recv %d", comm->buffSizes[NCCL_PROTO_LL128],
+       (long)scale, comm->p2pLl128BuffSize);
+}
+
+// Bytes per node that Ring/LL128 all_reduce moves in one loop.
+static size_t rcclRingLl128OneLoopPerNode(struct ncclComm* comm, int nChannels) {
+  const size_t chunk =
+    (size_t)(comm->buffSizes[NCCL_PROTO_LL128] / NCCL_STEPS) / comm->ll128LineElems * comm->ll128DataElems;
+  return chunk * nChannels * (comm->nRanks / comm->nNodes);
+}
+
+// gfx950 multi-node choices with the remote GDR flush flag, 8 GPUs per node, all choices measured.
 //
-// reduce_scatter: from 6 MB per rank, Simple beats LL128 (by 15-30% at 8 MB per rank), so LL128 stops
-// there instead of at the 8 MB per rank of tuning_model_6.
+// reduce_scatter (2-8 nodes): from 6 MB per rank, Simple beats LL128 (by 15-30% at 8 MB per rank), so LL128
+// stops there instead of at the 8 MB per rank of tuning_model_6; 7 MiB with RCCL_RS_LL128_TUNE=1 and the scaled
+// LL128 buffer.
 //
-// all_reduce: around 32 MB per node the fastest choice goes Ring/LL128 -> Tree/Simple -> Ring/Simple, one
-// power of two each, while the cost model goes straight from Ring/LL128 to Ring/Simple a size late.
-void rcclUpdateRemoteFlushAlgoProto(struct ncclComm* comm, size_t nBytes, struct ncclTaskColl* info,
-                                    float (*table)[NCCL_NUM_PROTOCOLS]) {
+// all_reduce, 2-8 nodes: Ring/LL128 from 16 MB per node (12 with RCCL_AR_ALGO_TUNE) to 32 MB per node,
+// Tree/Simple to 64 MB per node, then Ring/Simple, where the cost model goes from Ring/LL128 straight to
+// Ring/Simple a size late. With RCCL_AR_ALGO_TUNE or a scaled LL128 buffer, Ring/LL128 runs until it would need a
+// second loop (24.5 MiB per node with the default buffer, 98 MiB with x4), and with RCCL_AR_ALGO_TUNE Ring/Simple
+// uses 48 channels up to 128 MB per node.
+// all_reduce, 16 nodes (RCCL_AR_ALGO_TUNE): Tree/Simple beats Tree/LL128 from 8 MB per node; above 64 MB per node
+// the cost model already picks the fastest choice.
+//
+// Returns the channel count for the choice made, or 0 to keep RCCL's own.
+int rcclUpdateRemoteFlushAlgoProto(struct ncclComm* comm, size_t nBytes, struct ncclTaskColl* info,
+                                   float (*table)[NCCL_NUM_PROTOCOLS]) {
   static int userInput = -1;
   if (userInput == -1) userInput = (ncclGetEnv("NCCL_ALGO") || ncclGetEnv("NCCL_PROTO")) ? 1 : 0;
-  if (userInput || !comm->ibGdrFlushFlag || comm->nNodes < 2 || comm->nNodes > 8 ||
-      comm->nRanks != comm->nNodes * 8 || !IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950"))
-    return;
+  if (userInput || comm->nNodes < 2 || !rcclRemoteFlushTuned(comm)) return 0;
+  const bool ll128Scaled = comm->buffSizes[NCCL_PROTO_LL128] > comm->p2pLl128BuffSize;
   if (info->func == ncclFuncReduceScatter) {
-    if (info->protocol == NCCL_PROTO_LL128 && info->algorithm < NCCL_NUM_ALGORITHMS &&
-        rcclGetSizePerRank(info->func, nBytes, comm->nRanks) > ((size_t)6 << 20) &&
+    const size_t ll128MaxPerRank = (size_t)(rcclParamRsLl128Tune() != 0 && ll128Scaled ? 7 : 6) << 20;
+    if (comm->nNodes <= 8 && info->protocol == NCCL_PROTO_LL128 && info->algorithm < NCCL_NUM_ALGORITHMS &&
+        rcclGetSizePerRank(info->func, nBytes, comm->nRanks) > ll128MaxPerRank &&
         table[info->algorithm][NCCL_PROTO_SIMPLE] >= 0.0)
       info->protocol = NCCL_PROTO_SIMPLE;
-    return;
+    return 0;
   }
-  if (info->func != ncclFuncAllReduce) return;
-  if (info->algorithm != NCCL_ALGO_RING && info->algorithm != NCCL_ALGO_TREE) return;
-  const size_t treeSimpleMin = (size_t)comm->nNodes << 25;
+  if (info->func != ncclFuncAllReduce) return 0;
+  const bool arTune = rcclParamArAlgoTune() != 0;
+  if (comm->nNodes > 8 && !(arTune && comm->nNodes == 16)) return 0;
+  if (info->algorithm != NCCL_ALGO_RING && info->algorithm != NCCL_ALGO_TREE) return 0;
+  const size_t perNode = nBytes / comm->nNodes;
   int algorithm, protocol;
-  if (nBytes >= 2 * treeSimpleMin) {
-    algorithm = NCCL_ALGO_RING;
-    protocol = NCCL_PROTO_SIMPLE;
-  } else if (nBytes >= treeSimpleMin) {
+  int nChannels = 0;
+  if (comm->nNodes == 16) {
+    if (perNode < (8 << 20) || perNode > (64 << 20)) return 0;
     algorithm = NCCL_ALGO_TREE;
     protocol = NCCL_PROTO_SIMPLE;
-  } else if (nBytes >= treeSimpleMin / 2) {
+  } else if (perNode >= (64 << 20)) {
+    algorithm = NCCL_ALGO_RING;
+    protocol = NCCL_PROTO_SIMPLE;
+    if (arTune && perNode < (128 << 20)) nChannels = (int)rcclParamArRingSimpleNchannels();
+  } else if (perNode < (arTune ? (12 << 20) : (16 << 20))) {
+    return 0;
+  } else if ((arTune || ll128Scaled) ? perNode <= rcclRingLl128OneLoopPerNode(comm, comm->nChannels)
+                                     : perNode < (32 << 20)) {
     algorithm = NCCL_ALGO_RING;
     protocol = NCCL_PROTO_LL128;
   } else {
-    return;
+    algorithm = NCCL_ALGO_TREE;
+    protocol = NCCL_PROTO_SIMPLE;
   }
-  if (table[algorithm][protocol] < 0.0) return; // unavailable, including NCCL_ALGO_PROTO_IGNORE
+  if (table[algorithm][protocol] < 0.0) return 0; // unavailable, including NCCL_ALGO_PROTO_IGNORE
   info->algorithm = algorithm;
   info->protocol = protocol;
+  return nChannels > 0 ? nChannels : 0;
 }
 
 ncclResult_t rcclGetAlgoProtoIndex(const char* envStr, const char* algoProtoString[], int nEntries, int& result) {
