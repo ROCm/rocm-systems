@@ -2194,11 +2194,33 @@ kmd_driver_t::xfer_host_memory_partial (host_address_t address, void *read,
   if ((read == nullptr) == (write == nullptr))
     return AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT;
 
+  if (*size == 0)
+    return AMD_DBGAPI_STATUS_SUCCESS;
+
+  /* Compute the exact query size.  ReadProcessMemory and WriteProcessMemory
+     require that all the region must be accessible, clamp the request if
+     necessary.  */
+  MEMORY_BASIC_INFORMATION mbi{};
+  if (::VirtualQueryEx (m_inferior_handle, (LPCVOID)(uintptr_t)address, &mbi,
+                        sizeof (mbi))
+      == 0)
+    return AMD_DBGAPI_STATUS_ERROR_MEMORY_ACCESS;
+
+  if (mbi.State != MEM_COMMIT
+      || (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) != 0)
+    return AMD_DBGAPI_STATUS_ERROR_MEMORY_ACCESS;
+
+  auto region_end = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
+  size_t max_size
+    = std::min (*size, (size_t)(region_end - (uintptr_t)address));
+
+  dbgapi_assert (max_size > 0);
+
   if (((read != nullptr)
          ? ::ReadProcessMemory (m_inferior_handle, (LPCVOID)(uintptr_t)address,
-                                read, *size, &processed_size)
+                                read, max_size, &processed_size)
          : ::WriteProcessMemory (m_inferior_handle, (LPVOID)(uintptr_t)address,
-                                 write, *size, &processed_size))
+                                 write, max_size, &processed_size))
       != 0)
     {
       *size = processed_size;
