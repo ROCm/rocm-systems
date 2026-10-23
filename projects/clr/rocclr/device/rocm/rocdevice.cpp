@@ -4170,8 +4170,13 @@ bool Device::CreateSignals(uint32_t count, hsa_signal_value_t initial_value, uin
   // Device memory is only reachable through a batch
   if (batched || device_memory) {
     std::vector<hsa_signal_value_t> initial_values(count, initial_value);
-    const hsa_amd_memory_pool_t pool =
-        device_memory ? device_signal_pool_ : getHostMemoryPool(kAtomics);
+    // Host signals go to the kernarg pool, which ROCr allocates uncached, as it does for
+    // hsa_signal_create. The plain fine-grained pool is mapped MTYPE_NC on gfx950, where a CP
+    // polling the signal may not see another queue's update.
+    const hsa_amd_memory_pool_t host_pool = (cpu_agent_info_->kern_arg_pool.handle != 0)
+                                                ? cpu_agent_info_->kern_arg_pool
+                                                : getHostMemoryPool(kAtomics);
+    const hsa_amd_memory_pool_t pool = device_memory ? device_signal_pool_ : host_pool;
     hsa_amd_signal_batch_t batch;
     if (HSA_STATUS_SUCCESS == Hsa::signal_batch_create(count, initial_values.data(), 0, nullptr,
                                                        attributes, pool, &batch, signals)) {
