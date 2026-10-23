@@ -265,7 +265,9 @@ pub(crate) fn host_page_size() -> Result<u64, Error> {
 
 impl Drop for HostAllocation {
     fn drop(&mut self) {
-        if self.free().is_err() {
+        if let Err(error) = self.free() {
+            let (_, size) = self.extent();
+            crate::memory::device::record_rollback(error, size);
             // The mapping may still be live. Keep its owner from running a
             // second, unchecked unmap during this destructor.
             if let Some(mapping) = self.mapping.take() {
@@ -279,10 +281,8 @@ impl Drop for HostAllocation {
 #[allow(unsafe_code, clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use crate::memory::host::{
-        HostAllocation as PublicHostAllocation, host_cache_control, host_cache_line_size,
-        host_page_size,
-    };
+    use crate::host::cache::{CacheMaintenance, CachePolicy};
+    use crate::memory::host::{HostAllocation as PublicHostAllocation, host_page_size};
     use crate::os::linux::errno;
     use crate::session::{DriverContextLifetime, Session};
     #[test]
@@ -295,10 +295,10 @@ mod tests {
         let mut allocation = PublicHostAllocation::allocate(size, alignment).unwrap();
         assert_eq!(allocation.info().host_address as u64 % alignment, 0);
         assert_eq!(allocation.info().size, size);
-        if let Ok(line) = host_cache_line_size() {
+        if let Ok(recipe) = CacheMaintenance::qualify(CachePolicy::WriteBack) {
             // SAFETY: The newly allocated extent remains mapped.
             unsafe {
-                host_cache_control(allocation.info().host_address, size, line).unwrap();
+                recipe.apply(allocation.info().host_address, size).unwrap();
             }
         }
         allocation.free().unwrap();

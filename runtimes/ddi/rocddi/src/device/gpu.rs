@@ -12,7 +12,7 @@
 use crate::device::Device;
 use crate::driver::GpuDriverRef;
 use crate::memory::Allocation;
-use crate::topology::{CacheInfo, GpuInfo};
+use crate::topology::{CacheInfo, CacheKind, GpuInfo};
 use crate::{Error, ErrorKind};
 
 mod copy;
@@ -42,9 +42,7 @@ pub(crate) struct GpuResources {
 #[doc(hidden)]
 #[must_use]
 pub const fn is_compute_data_cache(cache: &CacheInfo) -> bool {
-    const INSTRUCTION: u32 = 1 << 1;
-    const GPU_COMPUTE_UNIT: u32 = 1 << 3;
-    cache.kind & GPU_COMPUTE_UNIT != 0 && cache.kind & INSTRUCTION == 0
+    cache.compute_unit_cache && matches!(cache.kind, CacheKind::Data | CacheKind::Other)
 }
 
 /// A borrowed GPU capability view of an activated [`Device`].
@@ -76,6 +74,14 @@ pub struct GpuSurfaceConfig {
 }
 
 impl GpuDevice<'_> {
+    /// Queries the active KFD process's recoverable page-fault mode.
+    ///
+    /// # Errors
+    /// Returns a native or device-lifetime failure when the mode is unavailable.
+    pub fn xnack_enabled(&self) -> Result<bool, Error> {
+        self.driver.xnack_enabled()
+    }
+
     /// Returns the GPU target, geometry, and transport capabilities captured at
     /// endpoint activation.
     #[must_use]

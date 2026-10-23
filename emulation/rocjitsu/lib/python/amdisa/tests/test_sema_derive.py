@@ -1819,7 +1819,7 @@ class TestDeriveVectorBinop:
             call_names = [
                 n.call_name for n in block.body.walk() if n.kind == SemaNodeKind.CALL
             ]
-            assert f'std::f{op}' in call_names
+            assert f'float_minmax_legacy_{op}' in call_names
         for op in ['min', 'max']:
             sem = _FakeSem(f'V_{op.upper()}_I32', 'vector_binop', op, 'i32')
             block = derive_sema_block(sem)
@@ -2272,10 +2272,14 @@ _SCALAR_ATOMIC_OPS = (
 )
 
 
+# Compare-swap carries its compare value after the source, doubling its data.
 _IMPLEMENTED_SCALAR_ATOMICS = {
-    f'S_ATOMIC_{op}{width}': (op.lower(), elem_size, num_elems)
+    f'S_ATOMIC_{op}{width}': (
+        op.lower(),
+        elem_size,
+        2 * num_elems if op == 'CMPSWAP' else num_elems,
+    )
     for op in _SCALAR_ATOMIC_OPS
-    if op != 'CMPSWAP'
     for width, elem_size, num_elems in (('', 4, 1), ('_X2', 8, 2))
 }
 
