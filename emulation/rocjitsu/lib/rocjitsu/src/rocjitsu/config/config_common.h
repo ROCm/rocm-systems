@@ -9,6 +9,7 @@
 
 #include "rocjitsu/config/kfd_device_config.h"
 #include "rocjitsu/config/pci_device_config.h"
+#include "rocjitsu/vm/amdgpu/arithmetic_policy.h"
 
 #include "flatbuffers/idl.h"
 #include "simulation_config_generated.h"
@@ -27,6 +28,19 @@
 
 namespace rocjitsu {
 namespace config {
+
+// Missing policy fields use the same default as a fresh configuration.
+inline amdgpu::ArithmeticPolicy arithmetic_from_fb(const fb::ArithmeticPolicyConfig *policy) {
+  if (!policy || !policy->semantics())
+    return {};
+  return amdgpu::parse_arithmetic_policy(policy->semantics()->string_view());
+}
+
+inline flatbuffers::Offset<fb::ArithmeticPolicyConfig>
+arithmetic_to_fb(flatbuffers::FlatBufferBuilder &builder, amdgpu::ArithmeticPolicy policy) {
+  return fb::CreateArithmeticPolicyConfig(
+      builder, builder.CreateString(amdgpu::arithmetic_semantics_name(policy.semantics)));
+}
 
 /// @brief Launch override: disable checks, enable ordinary checks, or also enable XCNT.
 enum class WaitChecking { Off, On, All };
