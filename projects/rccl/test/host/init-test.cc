@@ -4465,8 +4465,7 @@ TEST_F(InitMicrotestIsolated, GetUniqueId_NcclInitEnvFails_PropagatesBeforeNcclI
       });
 }
 
-// LATENT BUG (init.cc:369): this is the only record(rcclCall_t,int,int,ncclUniqueId*,...) site that drops the
-// result; :3467/:3483/:3709 all NCCLCHECK it. A recorder failure here is swallowed and the API reports success.
+// Deliberately unlike the comm-init sites, which NCCLCHECK the recorder: a trace-write failure must not fail the mint.
 TEST_F(InitMicrotest, GetUniqueId_RecorderFails_StillReturnsSuccess) {
   g_bootstrapHandleTemplate = DistinctiveHandle();
   g_recorderResult = ncclInternalError;
