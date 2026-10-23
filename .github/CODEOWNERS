@@ -7,8 +7,10 @@
 /.github/workflows/hip-*.yml                                          @ROCm/hip-reviewers
 /.github/workflows/hrr-*.yml                                          @ROCm/hrr-reviewers
 /.github/workflows/amdsmi-*.yml                                       @ROCm/smi-reviewers
+/.github/workflows/cuid-*.yml                                         @gabrpham @dmitrii-galantsev
 /.github/workflows/hipfile-*.yml                                      @ROCm/hipfile-reviewers
 /.github/workflows/lstt-*.yml                                         @ROCm/lstt
+/.github/workflows/media-libs-ci.yml                                  @ROCm/cv-ml-team
 /.github/workflows/profiler-hub-*.yml                                 @ROCm/rocm-profiler-hub
 /.github/workflows/rdc-*.yml                                          @ROCm/rdc-reviewers
 /.github/workflows/rocjitsu-*.yml                                     @ROCm/rocjitsu-core-team
@@ -17,15 +19,13 @@
 /.github/workflows/rocprofiler-sdk-*.yml                              @ROCm/rocm-devtools-team @ROCm/rocprofiler-owners
 /.github/workflows/rocprofiler-register-*.yml                         @ROCm/rocm-devtools-team @ROCm/rocprofiler-owners
 /.github/workflows/aqlprofile-*.yml                                   @ROCm/rocm-devtools-team @ROCm/rocprofiler-owners
+/.github/workflows/rocr-runtime-*.yml                                 @ROCm/rocr-maintainers
 /.github/workflows/rocprofiler-systems-*.yml                          @ROCm/rocprof-sys
 /.github/workflows/*therock*.yml                                      @ROCm/therock-infra-write @ROCm/rocm-systems-reviewers
 /.github/workflows/*rccl*                                             @ROCm/rccl-ci
 /.github/workflows/therock-rccl-*.yml                                 @ROCm/therock-infra-write @ROCm/rccl-ci
 
 # Individual contributors
-/.github/workflows/cuid-*.yml                                         @gabrpham @dmitrii-galantsev
-/.github/workflows/media-libs-ci.yml                                  @kiritigowda @AryanSalmanpour @rrawther
-/.github/workflows/rocr-runtime-*.yml                                 @kentrussell @dayatsin-amd @cfreeamd @atgutier @shwetagkhatri
 /.github/workflows/systems-pr-bot.yml                                 @samathew121 @amd-shiraz
 /.github/workflows/issue-import.yml                                   @jayhawk-commits @ammallya
 /.github/workflows/import_pr_list.yml                                 @jayhawk-commits @ammallya
