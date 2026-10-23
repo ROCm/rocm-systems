@@ -628,7 +628,8 @@ void applyOutputSpec(std::string_view value, Options *options)
     options->outputPath = path;
 }
 
-// *args* (argv[1:]) parsed into :class:`Options`, with *outputEnv* standing for GTEST_OUTPUT.
+// *args* (argv[1:]) parsed into :class:`Options`, with *outputEnv* standing for GTEST_OUTPUT and
+// *filterEnv* for GTEST_FILTER.
 //
 // Everything the dispatcher does not act on is forwarded verbatim, so flags it has never heard of
 // (--gtest_repeat, --gtest_shuffle, a binary's own env-driven switches) keep working.
@@ -637,7 +638,14 @@ void applyOutputSpec(std::string_view value, Options *options)
 // process: it seeds the output flag at static init, so the no-op run that resolves the filter
 // would write its own all-pass report over the caller's file and the real results would never
 // reach it. Taking the variable ourselves turns it into the destination of the merged report.
-Options parseArgs(const std::vector<std::string> &args, std::string_view outputEnv = "")
+//
+// GTEST_FILTER is taken for the same reason in reverse: left in the environment it would reach
+// the children, which hold UNQUALIFIED names, so a pattern written against the published
+// qualified names would select nothing in any of them while this process still asked for every
+// case. Taken here it is a default for the dispatcher's own filter, resolved over the published
+// names like a --gtest_filter flag, and clearConsumedEnvironment() keeps it from the children.
+Options parseArgs(const std::vector<std::string> &args, std::string_view outputEnv = "",
+                  std::string_view filterEnv = "")
 {
     constexpr std::string_view kFilterFlag = "--gtest_filter=";
     constexpr std::string_view kOutputFlag = "--gtest_output=";
@@ -645,6 +653,9 @@ Options parseArgs(const std::vector<std::string> &args, std::string_view outputE
     Options options;
     if (!outputEnv.empty()) {
         applyOutputSpec(outputEnv, &options);   // an explicit flag below overrides this
+    }
+    if (!filterEnv.empty()) {
+        options.filter = std::string(filterEnv);   // an explicit flag below overrides this
     }
     for (const std::string &arg : args) {
         if (isHelpFlag(arg)) {
@@ -826,6 +837,23 @@ void clearShardingEnvironment()
     }
 }
 
+// The variables parseArgs() has already acted on, and which must not reach a child.
+constexpr std::string_view kConsumedVariables[] = {"GTEST_FILTER"};
+
+// Drop the variables this process has consumed, so no child acts on them a second time.
+//
+// GTEST_FILTER was resolved over the published, qualified names; each child is then handed its
+// cases by name. A child that still saw the variable would apply it again to its own unqualified
+// listing and run a subset of what it was told to run -- or nothing at all, silently and green.
+//
+// Called before enumerate(), since the --gtest_list_tests children see this environment too.
+void clearConsumedEnvironment()
+{
+    for (const std::string_view variable : kConsumedVariables) {
+        unsetenv(std::string(variable).c_str());
+    }
+}
+
 // Run *path* with *args*, inheriting stdio, and return its exit status (128+signal if killed).
 int runChild(const std::string &path, const std::vector<std::string> &args)
 {
@@ -963,7 +991,9 @@ int main(int argc, char **argv)
 {
     const std::vector<std::string> args(argv + 1, argv + argc);
     const char *outputEnv = std::getenv("GTEST_OUTPUT");
-    const Options options = parseArgs(args, outputEnv == nullptr ? "" : outputEnv);
+    const char *filterEnv = std::getenv("GTEST_FILTER");
+    const Options options = parseArgs(args, outputEnv == nullptr ? "" : outputEnv,
+                                      filterEnv == nullptr ? "" : filterEnv);
 
     const std::string directory = selfDirectory(argv[0]);
 
@@ -1008,6 +1038,9 @@ int main(int argc, char **argv)
                    kBinaryPrefix, directory);
         return 1;
     }
+
+    // Before the first fork: the --gtest_list_tests children inherit this environment too.
+    clearConsumedEnvironment();
 
     const Enumeration enumeration = enumerate(directory, binaries, listTestsOutput);
     for (const std::string &binary : enumeration.unlistable) {
