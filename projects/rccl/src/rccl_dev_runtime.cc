@@ -105,12 +105,14 @@ ncclResult_t rcclDevrProbeNonSymWindow(struct ncclComm* comm, void* userPtr, siz
   return ncclSuccess;
 }
 
-ncclResult_t rcclDevrGinSegmentRegType(bool isHost, int maxGlobalNumSegments, int* ptrType, bool* needDmabuf) {
+ncclResult_t rcclDevrGinSegmentRegType(bool isHost, bool globalHasSysmemSegment, int maxGlobalNumSegments,
+                                       int* ptrType, bool* needDmabuf) {
   // Host VMM is CPU memory, but NCCL_PTR_HOST would pin it with ibv_reg_mr and EFAULT; use the DMA-BUF MR path.
   *ptrType = NCCL_PTR_CUDA;
   *needDmabuf = maxGlobalNumSegments > 1 || isHost;
-  if (isHost && !ncclParamDmaBufEnable()) {
-    WARN("Host VMM GIN segment requires NCCL_DMABUF_ENABLE=1");
+  // Imported host segments read as device on peers, so reject on the team-wide flag before the collective register.
+  if (globalHasSysmemSegment && !ncclParamDmaBufEnable()) {
+    WARN("GIN window with host VMM requires NCCL_DMABUF_ENABLE=1");
     return ncclInvalidUsage;
   }
   return ncclSuccess;

@@ -811,10 +811,10 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
     return ncclSuccess;
   }
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  // RCCL: one HIP DMA-BUF covers only the first segment; with =0 fail closed instead of a partial MR.
-  if (mem->maxGlobalNumSegments > 1 && !mem->globalHasSysmemSegment && !ncclParamMultiSegmentRegister()) {
-    WARN("Window %p spans %d physical segments; GIN needs NCCL_MULTI_SEGMENT_REGISTER=1 to register it",
-         mem->primaryAddr, mem->maxGlobalNumSegments);
+  // RCCL: one HIP DMA-BUF covers only the first segment; fail closed instead of registering a partial MR.
+  if (mem->maxGlobalNumSegments > 1 && !mem->globalHasSysmemSegment) {
+    WARN("Window %p spans %d device-memory segments; GIN cannot register it on HIP", mem->primaryAddr,
+         mem->maxGlobalNumSegments);
     ret = ncclInvalidUsage;
     goto fail;
   }
@@ -828,8 +828,8 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
     int ptrType;
     bool needDmabuf;
-    NCCLCHECKGOTO(rcclDevrGinSegmentRegType(ncclSymIsHostSegment(cuMemLocType), mem->maxGlobalNumSegments, &ptrType,
-                                            &needDmabuf),
+    NCCLCHECKGOTO(rcclDevrGinSegmentRegType(ncclSymIsHostSegment(cuMemLocType), mem->globalHasSysmemSegment,
+                                            mem->maxGlobalNumSegments, &ptrType, &needDmabuf),
                   ret, fail);
 #else
     // CUDA HOST_NUMA is pin-able CPU pages (NCCL_PTR_HOST); device VMM is NCCL_PTR_CUDA.

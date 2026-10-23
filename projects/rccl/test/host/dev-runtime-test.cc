@@ -1902,25 +1902,9 @@ TEST_F(SymMemoryRegisterGinTest, NoSysmemSegment_RegistersOneDeviceWindow) {
   EXPECT_EQ(mem.ginSegmentInfos[0].memType, hipMemLocationTypeDevice);
 }
 
-// The multiSegment flag passed to GIN comes from the communicator-wide segment
-// count, not this rank's.
-TEST_F(SymMemoryRegisterGinTest, MultipleGlobalSegments_FlagsRegistrationMultiSegment) {
-  mem.maxGlobalNumSegments = 2;
-  ScopedHook loadParam(g_loadParam, MultiSegRegisterOn());
-  bool registeredMultiSegment = false;
-  ScopedHook reg(g_devrGinRegister,
-                 [&](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool multi, int) {
-                   registeredMultiSegment = multi;
-                   return ncclSuccess;
-                 });
-
-  ASSERT_EQ(symMemoryRegisterGin(comm, &mem), ncclSuccess);
-  EXPECT_TRUE(registeredMultiSegment);
-}
-
-// NCCL_MULTI_SEGMENT_REGISTER=0: a device-only multi-segment window is rejected
-// before any GIN registration; a single-segment window still registers.
-TEST_F(SymMemoryRegisterGinTest, MultiSegmentRegisterOff_RejectsMultiSegmentWindow) {
+// A device-only multi-segment window is rejected before any GIN registration
+// whatever NCCL_MULTI_SEGMENT_REGISTER says; a single-segment window still registers.
+TEST_F(SymMemoryRegisterGinTest, MultiSegmentDeviceWindow_RejectedBeforeRegistering) {
   // RCCL: the register seam includes the generation array.
   ScopedHook reg(g_devrGinRegister,
                  [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int) {
@@ -1929,6 +1913,10 @@ TEST_F(SymMemoryRegisterGinTest, MultiSegmentRegisterOff_RejectsMultiSegmentWind
 
   mem.maxGlobalNumSegments = 2;
   EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclInvalidUsage);
+  {
+    ScopedHook loadParam(g_loadParam, MultiSegRegisterOn());
+    EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclInvalidUsage);
+  }
   EXPECT_EQ(reg.calls, 0);
   EXPECT_EQ(mem.ginSegmentInfos, nullptr);
 
@@ -2074,26 +2062,6 @@ TEST_F(SymMemoryRegisterGinElasticTest, DeviceSegment_RegistersAsCudaPointer) {
   EXPECT_EQ(types[0], NCCL_PTR_CUDA);
 }
 
-// NCCL_MULTI_SEGMENT_REGISTER=0 keeps develop behaviour here: one window per segment.
-TEST_F(SymMemoryRegisterGinElasticTest, MultiSegmentRegisterOff_RegistersOneWindowPerSegment) {
-  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
-    return std::string(env) == "MULTI_SEGMENT_REGISTER" ? 0 : deftVal;
-  });
-  ScopedHook gather(g_devrBootstrapAllGather, AgreeingAllGather());
-  std::vector<size_t> sizes;
-  // RCCL: the register seam includes the generation array.
-  ScopedHook reg(g_devrGinRegister, [&](ncclComm*, void*, size_t size, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int) {
-    sizes.push_back(size);
-    return ncclSuccess;
-  });
-
-  ASSERT_EQ(symMemoryRegisterGin(comm, &mem), ncclSuccess);
-  ASSERT_EQ(reg.calls, 2);
-  EXPECT_EQ(sizes[0], 4096u);
-  EXPECT_EQ(sizes[1], 8192u);
-  EXPECT_EQ(mem.numGinSegments, 2);
-}
-
 #if defined(__HIP_PLATFORM_AMD__) && NCCL_CUMEM_HOST_GATE
 // One host segment is not maxGlobalNumSegments > 1. needDmabuf still has to
 // be true or ncclGinRegister falls through to ibv_reg_mr on the host VMM pointer.
@@ -2151,6 +2119,24 @@ TEST_F(SymMemoryRegisterGinElasticTest, HostSegment_DmabufDisabled_FailsClosed) 
                      }
                      return hipSuccess;
                    });
+  // RCCL: the register seam includes the generation array.
+  ScopedHook reg(g_devrGinRegister,
+                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int) {
+                   return ncclSuccess;
+                 });
+
+  EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclInvalidUsage);
+  EXPECT_EQ(reg.calls, 0);
+  EXPECT_EQ(mem.ginSegmentInfos, nullptr);
+}
+
+// A peer's imported host segment reads as device here, but the window holds host VMM,
+// so this rank must reject too rather than enter the collective register alone.
+TEST_F(SymMemoryRegisterGinElasticTest, ImportedHostSegment_DmabufDisabled_FailsClosed) {
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "DMABUF_ENABLE" ? 0 : deftVal;
+  });
+  ScopedHook gather(g_devrBootstrapAllGather, AgreeingAllGather());
   // RCCL: the register seam includes the generation array.
   ScopedHook reg(g_devrGinRegister,
                  [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int) {
