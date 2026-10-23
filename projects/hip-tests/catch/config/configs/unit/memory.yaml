@@ -2214,6 +2214,24 @@ memory:
       targets: [amd_linux]
       reason: "AIRUNTIME-2744 - needs to be re-triaged."
     tags: [query, P0]
+  Unit_hipMemGetInfo_Apu_TotalWithinOsShare:
+    <<: *level_default
+    disabled:
+      targets: [amd_linux, amd_wsl, nvidia_windows, nvidia_linux]
+      reason: "Tests the Windows APU runtime"
+    tags: [query]
+  Unit_hipMalloc_Apu_ReportedFreeIsAllocatable:
+    <<: *level_default
+    disabled:
+      targets: [amd_linux, amd_wsl, nvidia_windows, nvidia_linux]
+      reason: "Tests the Windows APU runtime"
+    tags: [alloc, query]
+  Unit_hipMalloc_Apu_ConcurrentAllocationsStayWithinTotal:
+    <<: *level_default
+    disabled:
+      targets: [amd_linux, amd_wsl, nvidia_windows, nvidia_linux]
+      reason: "Tests the Windows APU runtime"
+    tags: [alloc]
   Unit_hipFreeImplicitSyncDev:
     <<: *level_default
     tags: [alloc, P0]

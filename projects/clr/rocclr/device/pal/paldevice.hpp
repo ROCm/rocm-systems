@@ -173,6 +173,7 @@ class NullDevice : public amd::Device {
 
   Pal::AsicRevision asicRevision_;  //!< ASIC revision
   const char* palName_;             //!< Device name
+  uint64_t apuBorrowLimit_ = 0;     //!< Host RAM an APU may use as device memory
 
   //! Fills OpenCL device info structure
   void fillDeviceInfo(const Pal::DeviceProperties& palProp,  //!< PAL device properties
@@ -691,6 +692,10 @@ class Device : public NullDevice {
   void HiddenHeapAlloc(const VirtualGPU& gpu);
 
   Pal::gpusize GetMaxFrameBuffer() const { return maxFrameBufferAllocation_; }
+
+  //! Moves device memory of an APU to host memory past the carve-out, within the borrow limit.
+  //! False if it fits in neither.
+  bool ApuPlaceDeviceMemory(Pal::gpusize size, Resource::MemoryType* memType) const;
 
   Pal::gpusize TotalAlloc() const {
     Pal::gpusize local = allocedMem[Pal::GpuHeapLocal] - resourceCache().persistentCacheSize();

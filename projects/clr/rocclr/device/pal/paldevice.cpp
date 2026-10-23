@@ -361,7 +361,18 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
   const uint64_t gartCredit = gartSize - std::min<uint64_t>(gartSize / 4, 4 * Gi);
 
   if (settings().apuSystem_) {
-    info_.globalMemSize_ += gartCredit;
+    // The carve-out is host DRAM too, so don't add the aperture on top of it. The OS lets a GPU
+    // share the part of host RAM the aperture is; that share of all DRAM, carve-out included, is
+    // what the GPU may hold, so borrow only what the carve-out doesn't cover.
+    const uint64_t hostRam = amd::Os::hostTotalPhysicalMemory();
+    apuBorrowLimit_ = gartCredit;
+    if (!PAL_APU_STACK_APERTURE && (hostRam > gartSize)) {
+      const uint64_t carveOutExcess =
+          static_cast<uint64_t>(static_cast<double>(localRAM) * (hostRam - gartSize) / hostRam);
+      apuBorrowLimit_ =
+          (gartSize > carveOutExcess) ? std::min(gartSize - carveOutExcess, gartCredit) : 0;
+    }
+    info_.globalMemSize_ += apuBorrowLimit_;
   }
 
   // Find the largest heap form FB memory
@@ -1978,6 +1989,33 @@ bool Device::unbindExternalDevice(uint flags, void* const pDevice[], void* pCont
     }
   }
   return true;
+}
+
+// Device memory past an APU's carve-out goes to host RAM, which the GPU shares with the OS:
+// running it out hangs the OS instead of failing allocations. So past the carve-out, borrow only up
+// to the borrow limit and fail the allocation otherwise.
+bool Device::ApuPlaceDeviceMemory(Pal::gpusize size, Resource::MemoryType* memType) const {
+  auto place = [&]() {
+    // Cached allocations hold their memory, so they count
+    const Pal::gpusize deviceUsed =
+        allocedMem[Pal::GpuHeapLocal] + allocedMem[Pal::GpuHeapInvisible];
+    if ((*memType != Resource::RemoteUSWC) && (deviceUsed + size <= GetMaxFrameBuffer())) {
+      return true;
+    }
+    const Pal::gpusize hostUsed =
+        allocedMem[Pal::GpuHeapGartUswc] + allocedMem[Pal::GpuHeapGartCacheable];
+    if (hostUsed + size <= apuBorrowLimit_) {
+      *memType = Resource::RemoteUSWC;
+      return true;
+    }
+    return false;
+  };
+  // Release the cache, as GpuMemoryReference::Create does when PAL fails, and try again
+  if (place() || (resourceCache().free() && place())) {
+    return true;
+  }
+  ClPrint(amd::LOG_WARNING, amd::LOG_MEM, "APU can't place %llu MB of device memory", size / Mi);
+  return false;
 }
 
 bool Device::globalFreeMemory(size_t* freeMemory) const {

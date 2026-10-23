@@ -165,6 +165,9 @@ release(uint, HIP_LAUNCH_BLOCKING, 0,                                         \
         "same as AMD_SERIALIZE_KERNEL=2")                                     \
 release(bool, PAL_ALWAYS_RESIDENT, false,                                     \
         "Force memory resources to become resident at allocation time")       \
+release(bool, PAL_APU_STACK_APERTURE, false,                                  \
+        "Report an APU's aperture credit as device memory on top of the "     \
+        "carve-out")                                                          \
 release(uint, HIP_HOST_COHERENT, 0,                                           \
         "Coherent memory in hipHostMalloc, 0x1 = memory is coherent with host"\
         "0x0 = memory is not coherent between host and GPU")                  \

@@ -92,6 +92,7 @@ bool Memory::create(Resource::MemoryType memType, Resource::CreateParams* params
   if (!ValidateMemory(memType)) {
     return false;
   }
+  const bool deviceMemory = (memType == Local) || (memType == Persistent);
 
   do {
     // Assume that allocations will be placed into visible heap when ReBar is enabled
@@ -102,11 +103,10 @@ bool Memory::create(Resource::MemoryType memType, Resource::CreateParams* params
       memType = Persistent;
     }
 
-    if (amd::IS_HIP && dev().settings().apuSystem_) {
-      Pal::gpusize totalAlloc = dev().TotalAlloc();
-      if (memType == Local && totalAlloc > dev().GetMaxFrameBuffer()) {
-        memType = RemoteUSWC;
-      }
+    if (amd::IS_HIP && dev().settings().apuSystem_ && deviceMemory &&
+        !dev().ApuPlaceDeviceMemory(size(), &memType)) {
+      result = false;
+      break;
     }
     // Create a resource in PAL
     result = Resource::create(memType, params, forceLinear);
