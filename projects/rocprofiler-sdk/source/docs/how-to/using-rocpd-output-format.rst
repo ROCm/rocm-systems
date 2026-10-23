@@ -2122,9 +2122,9 @@ only those that resolved to an instruction.
    - Only program counters that a query actually decodes are cached: the query
      must project the ``instruction`` or ``instruction_comment`` columns, the
      program counter must not already be stored, it must decode successfully,
-     and its code object must match its recorded content hash. Memory-resident
-     code objects that cannot be decoded (see the note below) are therefore not
-     cached.
+     and its code object must match its recorded content hash. Memory-only
+     code objects that cannot be decoded (see :ref:`Memory-only code objects
+     <memory-only-code-objects>`) are therefore not cached.
    - It is skipped silently when the database cannot be written (a read-only
      file or filesystem, lock contention, a database deleted or replaced after
      it was opened, or a pre-3.0.6 database without the
@@ -2184,12 +2184,58 @@ controls whether *new* decodes are persisted:
   Lazy decoding requires accessible code-object bytes through a local
   ``file://`` URI. Both ``storage_type = FILE`` and ``storage_type = MEMORY``
   objects can be decoded when such a URI resolves to matching bytes; MEMORY
-  objects must also match the recorded ``memory_size``. PC sampling does not
-  snapshot purely memory-resident objects to disk. Objects available only
-  through a ``memory://`` URI therefore cannot be decoded after the profiled
-  process exits, and the view reports ``Decode unavailable``. To retain their
-  disassembly, pass ``--complete-isa-decode`` at collection time; it decodes
-  the live bytes in-process and persists the text into the database.
+  objects must also match the recorded ``memory_size``.
+
+.. _memory-only-code-objects:
+
+Memory-only code objects
+########################
+
+Some code objects exist only in process memory, for example modules loaded
+with ``hipModuleLoadData`` from runtime-compiled (``hiprtc``) code. They are
+recorded with ``storage_type = MEMORY`` and a ``memory://`` URI, and their
+bytes are gone once the profiled process exits. When PC sampling writes ROCpd
+output, ``rocprofv3`` therefore copies each such code object to a snapshot file
+as soon as it is loaded, and records the snapshot's location as
+``snapshot_uri`` in ``rocpd_info_code_object.extdata``. The original ``uri``
+and ``storage_type`` are kept unchanged. Lazy decoding reads the snapshot
+instead of the unreachable ``memory://`` URI, so ``--complete-isa-decode`` is
+no longer needed to disassemble these objects. Memory-backed code objects whose
+``uri`` already refers to a file (such as code objects embedded in an
+executable or shared library) are read back from that file and are not
+snapshotted.
+
+- **Location:** snapshots are written next to the database, in a
+  ``code_objects`` directory named with the same output prefix, for example
+  ``<output-directory>/<hostname>/<pid>_code_objects/<pid>_code_object_<id>.hsaco``
+  for ``<output-directory>/<hostname>/<pid>_results.db``. An existing file is
+  never overwritten; a numbered name is used instead.
+- **Retention:** keep the snapshot files for as long as the database is
+  post-processed lazily. Deleting them does not affect the rest of the data,
+  but the affected program counters are then reported as
+  ``Decode unavailable``. Instruction text that was already persisted to
+  ``rocpd_disassembly_data`` (by ``--complete-isa-decode`` or the disassembly
+  write-back cache) does not need the snapshots.
+- **Relocation:** ``snapshot_uri`` records an absolute path. When the
+  database and its snapshot directory are moved or copied to another location
+  or machine, map the recorded directory to the new one with
+  ``--codeobj-path-prefix-map`` (or ``codeobj_path_prefix_map`` via the API).
+  Merging or packaging databases does not copy snapshot files.
+- **Disk usage:** each memory-only code object loaded during profiling is
+  written once per process, whether or not it is sampled, so disk usage grows
+  with the size and number of runtime-loaded code objects and with the number
+  of profiled processes. Snapshots are named by process ID, so rerunning with
+  the same output file name replaces the database but leaves the previous
+  run's snapshots in place; remove them when they are no longer needed.
+
+Program counters in a memory-only code object are still reported as
+``Decode unavailable`` when its snapshot could not be written (a warning is
+logged at collection time), when the snapshot is missing or its bytes do not
+match the recorded ``memory_size`` and ``content_hash``, when a single code
+object exceeds the 512 MiB lazy-decoding limit, or for databases recorded
+before snapshots were introduced. To retain the disassembly in those cases,
+pass ``--complete-isa-decode`` at collection time; it decodes the live bytes
+in-process and persists the text into the database.
 
 Moving a recording to another machine
 ++++++++++++++++++++++++++++++++++++++

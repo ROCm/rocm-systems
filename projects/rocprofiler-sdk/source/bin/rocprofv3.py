@@ -873,8 +873,9 @@ For attachment profiling of running processes:
             "ISA decode directly in ROCPD output. "
             "Default: off (ROCPD post-processing lazily disassembles local code objects "
             "whose bytes still match their recorded content hash when no text is "
-            "stored). For PC sampling this adds one row per distinct sampled program "
-            "counter to the database."
+            "stored; memory-only code objects are snapshotted to files under the "
+            "output directory for this). For PC sampling this adds one row per "
+            "distinct sampled program counter to the database."
         ),
     )
 

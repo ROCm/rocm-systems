@@ -419,7 +419,8 @@ def _setup_isa_decode_views(conn, codeobj_path_prefix_map, cache_disassembly):
                         END
                     ) AS storage_type,
                     JSON_EXTRACT(extdata, '$.memory_size') AS memory_size,
-                    JSON_EXTRACT(extdata, '$.content_hash') AS content_hash
+                    JSON_EXTRACT(extdata, '$.content_hash') AS content_hash,
+                    JSON_EXTRACT(extdata, '$.snapshot_uri') AS snapshot_uri
                 FROM rocpd_info_code_object
                 """).fetchall()
         except sqlite3.OperationalError as error:
@@ -441,6 +442,7 @@ def _setup_isa_decode_views(conn, codeobj_path_prefix_map, cache_disassembly):
             storage_type,
             memory_size,
             content_hash,
+            snapshot_uri,
         ) = row
         key = (str(guid), int(code_object_id))
         metadata = {
@@ -452,6 +454,7 @@ def _setup_isa_decode_views(conn, codeobj_path_prefix_map, cache_disassembly):
             "storage_type": storage_type,
             "memory_size": int(memory_size or 0),
             "content_hash": content_hash if isinstance(content_hash, str) else None,
+            "snapshot_uri": snapshot_uri if isinstance(snapshot_uri, str) else None,
         }
         previous = code_object_metadata.setdefault(key, metadata)
         if previous != metadata:
@@ -611,45 +614,45 @@ def _setup_isa_decode_views(conn, codeobj_path_prefix_map, cache_disassembly):
 
     def _build_decoder(key):
         metadata = code_object_metadata.get(key)
-        if not metadata or not metadata["uri"]:
+        if not metadata:
             return decoder_unavailable
         if metadata["storage_type"] == "FILE":
+            uris = [metadata["uri"]]
             expected_size = 0
         elif metadata["storage_type"] == "MEMORY":
-            # Limitation: lazy post-processing decode can only read a
-            # memory-backed code object when its URI resolves to a real
-            # on-disk file. A code object loaded purely from process
-            # memory has a non-file URI (e.g. ``memory://...``) and is
-            # not snapshotted to disk during PC sampling (unlike ATT),
-            # so its bytes are gone once the profiled process exits and
-            # _read_code_object_file raises below -> the decoded view then
-            # reports "Decode unavailable" for those program counters.
-            # Pass --complete-isa-decode at collection time to bake in
-            # the disassembly for such code objects (it disassembles
-            # them in-process from live memory).
+            # A code object loaded purely from process memory has a non-file
+            # URI (e.g. ``memory://...``) whose bytes are gone once the
+            # profiled process exits, so rocprofv3 snapshots it to a sidecar
+            # file recorded as snapshot_uri.  Databases without a snapshot
+            # (older captures, or a failed snapshot write) can still decode
+            # objects whose original URI resolves to an on-disk file.
+            uris = [metadata["snapshot_uri"], metadata["uri"]]
             expected_size = metadata["memory_size"]
         else:
             return decoder_unavailable
-        try:
-            data = _read_code_object_file(metadata["uri"], expected_size=expected_size)
-            # A rebuilt or remapped file can decode to plausible but wrong
-            # instructions: reject bytes that differ from the profiled object.
-            recorded_hash = metadata["content_hash"]
-            if (
-                recorded_hash
-                and libpyrocpd.code_object_content_hash(data) != recorded_hash
-            ):
-                return decoder_unavailable
-            decoder = libpyrocpd.isa_decoder()
-            decoder.add_code_object_memory(
-                data,
-                key[1],
-                metadata["load_delta"],
-                metadata["load_size"],
-            )
-        except (OSError, ValueError, TypeError, RuntimeError):
-            return decoder_unavailable
-        return (decoder, bool(recorded_hash), len(data))
+        recorded_hash = metadata["content_hash"]
+        for uri in filter(None, uris):
+            try:
+                data = _read_code_object_file(uri, expected_size=expected_size)
+                # A rebuilt or remapped file (or a modified snapshot) can decode
+                # to plausible but wrong instructions: reject bytes that differ
+                # from the profiled object.
+                if (
+                    recorded_hash
+                    and libpyrocpd.code_object_content_hash(data) != recorded_hash
+                ):
+                    continue
+                decoder = libpyrocpd.isa_decoder()
+                decoder.add_code_object_memory(
+                    data,
+                    key[1],
+                    metadata["load_delta"],
+                    metadata["load_size"],
+                )
+            except (OSError, ValueError, TypeError, RuntimeError):
+                continue
+            return (decoder, bool(recorded_hash), len(data))
+        return decoder_unavailable
 
     def _get_decoder(key):
         """Return ``(decoder, verified)``; decoder is None when unavailable."""

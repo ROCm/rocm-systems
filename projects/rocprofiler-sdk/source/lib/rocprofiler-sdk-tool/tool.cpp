@@ -1089,6 +1089,30 @@ callback_tracing_callback(rocprofiler_callback_tracing_record_t record,
     (void) data;
 }
 
+// A code object loaded from memory without a backing file (e.g. hipModuleLoadData) is gone once
+// the process exits, so ROCpd post-processing could not decode its PC samples. Snapshot its bytes
+// while they are still valid. Memory objects with a file:// URI are read back from that file
+// (verified against their content hash) instead, so they are not duplicated on disk.
+void
+snapshot_code_object(const tool::rocprofiler_code_object_info_t& obj_data)
+{
+    if(obj_data.storage_type != ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY) return;
+    if(obj_data.uri && std::string_view{obj_data.uri}.substr(0, 7) == "file://") return;
+
+    try
+    {
+        auto filename = get_output_filename(
+            tool::get_config(),
+            fmt::format("code_objects/{}_code_object_{}", getpid(), obj_data.code_object_id),
+            ".hsaco");
+        CHECK_NOTNULL(tool_metadata)->add_code_object_snapshot(obj_data, filename);
+    } catch(const std::exception& e)
+    {
+        ROCP_WARNING << fmt::format(
+            "Failed to snapshot code object {}: {}", obj_data.code_object_id, e.what());
+    }
+}
+
 void
 code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
                              rocprofiler_user_data_t*              user_data,
@@ -1109,6 +1133,7 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
             {
                 CHECK_NOTNULL(tool_metadata)
                     ->add_decoder(obj_data, tool::get_config().rocpd_output);
+                if(tool::get_config().rocpd_output) snapshot_code_object(*obj_data);
             }
 
             if(obj_data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY &&

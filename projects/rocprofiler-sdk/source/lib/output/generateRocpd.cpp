@@ -2078,14 +2078,20 @@ write_rocpd(
 
             const auto* _agent = tool_metadata.get_agent(itr.rocp_agent);
             // content_hash identifies the bytes PC sampling decoded, so rocpd can reject a
-            // rebuilt or remapped file before decoding it lazily.
+            // rebuilt or remapped file before decoding it lazily. snapshot_uri locates the copy
+            // of a memory-only code object; uri keeps its original memory:// location.
             auto json_data = get_json_string(
-                [](auto& ar, const auto& oitr, const std::optional<std::string>& content_hash) {
+                [](auto&                             ar,
+                   const auto&                       oitr,
+                   const std::optional<std::string>& content_hash,
+                   const std::optional<std::string>& snapshot_uri) {
                     cereal::save(ar, oitr);
                     if(content_hash) ar(cereal::make_nvp("content_hash", *content_hash));
+                    if(snapshot_uri) ar(cereal::make_nvp("snapshot_uri", *snapshot_uri));
                 },
                 itr,
-                tool_metadata.get_code_object_content_hash(itr.code_object_id));
+                tool_metadata.get_code_object_content_hash(itr.code_object_id),
+                tool_metadata.get_code_object_snapshot_uri(itr.code_object_id));
 
             get_insert_statement(
                 db,
