@@ -868,6 +868,10 @@ void CommandProcessor::shutdown() {
   // An instruction failure stops the engine before peer doorbell events may
   // run. Engine workers have joined, so finish cancelling those shards here.
   drain_dispatch_fault_inbox();
+  {
+    std::lock_guard lock(hw_queue_mutex_);
+    drain_pending_queue_failures();
+  }
   retry_event_pending_.store(false, std::memory_order_release);
   stall_recheck_pending_ = false;
   stall_recheck_tick_ = simdojo::TICK_MAX;
@@ -1481,7 +1485,9 @@ QueuePrepareCloseStatus CommandProcessor::close_queue_registration(uint64_t regi
       for (const DispatchEntry &entry : queue->entries)
         dispatch_launch_metadata_.erase(entry.dispatch_id);
       // Cancel every child stream before releasing the queue's VM lease.
-      if (!queue->commands.submissions.empty() || !queue->dispatches.entries.empty())
+      if (!queue->commands.submissions.empty() || !queue->dispatches.entries.empty() ||
+          std::ranges::find(pending_queue_failures_, registration_id) !=
+              pending_queue_failures_.end())
         fail_pm4_queue(*queue, queue->dispatches);
       // Any shares still unpublished here are simply dropped. They cannot be
       // credited to the grid from this thread: publish_share is the release edge
@@ -3322,16 +3328,42 @@ void CommandProcessor::fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchStat
   for (auto &entry : queue.entries)
     if (entry.grid_completion)
       entry.grid_completion->mark_faulted();
-  // The CP owns the queue lock and CU workers have rejoined. Stop all resident
-  // waves before releasing the submission's BO references or publishing failure.
+  // A CU can report a fault before its sibling workers finish. Stop the queue's
+  // waves now, but retain submission backing until cache maintenance is safe.
   cancel_queue_dispatches(queue);
-  flush_gpu_caches();
   qs.entries.clear();
+  if (dispatch_workers_active_) {
+    if (std::ranges::find(pending_queue_failures_, queue.registration_id) ==
+        pending_queue_failures_.end())
+      pending_queue_failures_.push_back(queue.registration_id);
+    return;
+  }
+  flush_gpu_caches();
+  std::erase(pending_queue_failures_, queue.registration_id);
+  complete_failed_queue(queue);
+}
+
+void CommandProcessor::complete_failed_queue(ComputeQueueRecord &queue) {
   for (auto &submission : queue.commands.submissions)
     if (submission.complete)
       submission.complete(false);
   queue.commands.submissions.clear();
   queue.command_access.reset();
+}
+
+void CommandProcessor::drain_pending_queue_failures() {
+  assert(!dispatch_workers_active_);
+  if (pending_queue_failures_.empty())
+    return;
+  std::vector<uint64_t> registrations;
+  registrations.swap(pending_queue_failures_);
+  flush_gpu_caches();
+  for (uint64_t registration_id : registrations) {
+    const std::vector<ComputeQueueRecord>::iterator queue =
+        std::ranges::find(compute_queues_, registration_id, &ComputeQueueRecord::registration_id);
+    if (queue != compute_queues_.end())
+      complete_failed_queue(*queue);
+  }
 }
 
 void CommandProcessor::fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs,
@@ -4708,10 +4740,31 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
         pooled_due_ticks_.empty())
       return FunctionalQuantumResult{};
 
-    lock.unlock();
-    FunctionalQuantumResult result = run_active_cus_once(now);
-    lock.lock();
+    class DispatchWorkerBatch {
+    public:
+      DispatchWorkerBatch(std::unique_lock<std::recursive_mutex> &queue_lock, bool &active)
+          : queue_lock_(queue_lock), active_(active) {
+        active_ = true;
+        queue_lock_.unlock();
+      }
+      DispatchWorkerBatch(const DispatchWorkerBatch &) = delete;
+      DispatchWorkerBatch &operator=(const DispatchWorkerBatch &) = delete;
+      ~DispatchWorkerBatch() {
+        queue_lock_.lock();
+        active_ = false;
+      }
 
+    private:
+      std::unique_lock<std::recursive_mutex> &queue_lock_;
+      bool &active_;
+    };
+    FunctionalQuantumResult result;
+    {
+      DispatchWorkerBatch batch(lock, dispatch_workers_active_);
+      result = run_active_cus_once(now);
+    }
+
+    drain_pending_queue_failures();
     drain_pending_cluster_barrier_completions();
     drain_pending_wg_completions();
     if (!drain_completions())
@@ -4927,6 +4980,7 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
 }
 
 void CommandProcessor::flush_gpu_caches() {
+  assert(!dispatch_workers_active_ && "cache maintenance must follow the CU worker join");
   // Both L1 caches are write-through, so discard their clean snapshots around
   // direct backing writes. Flush dirty L2 data before the direct write so a
   // later L2 flush cannot overwrite it.
