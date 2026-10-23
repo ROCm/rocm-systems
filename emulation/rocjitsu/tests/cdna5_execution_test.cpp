@@ -3,6 +3,7 @@
 
 #include "cdna5_sim_test_common.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/decoder.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/isa_features.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vbuffer.h"
@@ -215,6 +216,36 @@ TEST(Gfx1250ExecutionTest, GlobalTransposePreservesZeroExecAndDestination) {
   for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
     EXPECT_EQ(compute_unit->read_vgpr(wave->vgpr_alloc().base + kDestination, lane), kSentinel);
     EXPECT_EQ(compute_unit->read_vgpr(wave->vgpr_alloc().base + kDestination + 1, lane), kSentinel);
+  }
+}
+
+TEST(Gfx1250ExecutionTest, ArchitectureDecoderScalarOffsetFailureDoesNotThrowOrCreateMemoryState) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *cu = sim.cu();
+  auto *wave = sim.dispatch_scratch_wf(32);
+  ASSERT_NE(wave, nullptr);
+  constexpr uint32_t kSentinel = 0xa5a55a5au;
+  write_wave_sgpr(*cu, *wave, 0, 0x4000);
+  write_wave_sgpr(*cu, *wave, 1, 0);
+  write_wave_sgpr(*cu, *wave, 4, kSentinel);
+  for (uint8_t selector : {uint8_t{126}, uint8_t{127}}) {
+    SCOPED_TRACE(selector);
+    const auto words =
+        cdna5::build_smem(cdna5::kSLoadB32Smem, {.sbase = 0, .sdata = 4, .soffset = selector});
+    // The architecture decoder precedes the factory decoder's operand validation.
+    auto decoded = cdna5::Decoder::decode(words.data(), {});
+    ASSERT_TRUE(decoded.succeeded());
+    auto &load = decoded.value();
+    ASSERT_NE(load->execute, nullptr);
+    wave->clear_instruction_execution_error();
+    // Bypass the CU's legacy catch so restoring the throw fails this test.
+    ASSERT_NO_THROW(load->execute(*load, wave));
+    EXPECT_EQ(wave->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    EXPECT_EQ(load->data(), nullptr);
+    EXPECT_EQ(read_wave_sgpr(*cu, *wave, 4), kSentinel);
+    EXPECT_TRUE(cu->execute_instruction(load.get(), *wave).failed());
   }
 }
 
