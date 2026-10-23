@@ -569,11 +569,10 @@ struct ncclIbSendComm {
   // RCCL: page-aligned block. The side table is appended only when this rank advertises.
   struct ncclIbSendFifo (*ctsFifo)[NCCL_NET_IB_MAX_RECVS];
   struct ncclIbSegLayout (*segLayoutFifo)[NCCL_NET_IB_MAX_RECVS];
-  char ctsRegionPad[16]; // two pointers are 16 bytes; keeps sges 32-byte aligned
   // RCCL: a multi-segment send may split one request's per-QP chunk into up to one WR
   // per local+remote segment boundary crossing. Size the WR/SGE pools
   // for the worst case; single-segment sends use exactly one WR per request.
-  struct ibv_sge sges[NCCL_IB_MAX_WRS_PER_SEND];
+  alignas(32) struct ibv_sge sges[NCCL_IB_MAX_WRS_PER_SEND];
   struct ibv_send_wr wrs[NCCL_IB_MAX_WRS_PER_SEND + 1];
   // Each dev correlates to a mergedIbDev
   struct ncclIbSendCommDev devs[NCCL_IB_MAX_DEVS_PER_NIC];
