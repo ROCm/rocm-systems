@@ -29,6 +29,7 @@
 #include "lib/rocprofiler-sdk/aql/packet_construct.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/counters/dispatch_handlers.hpp"
+#include "lib/rocprofiler-sdk/counters/ioctl.hpp"
 #include "lib/rocprofiler-sdk/counters/queue_hooks.hpp"
 #include "lib/rocprofiler-sdk/counters/sample_processing.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
@@ -185,6 +186,21 @@ start_context(const context::context* ctx)
         return;
     }
 
+    // By default the device lock is acquired here, at context start, rather than at
+    // configuration time; see controller.cpp's use_device_lock_at_start handling for the
+    // legacy opt-in. Mirrors device_counting.cpp's start_agent_ctx().
+    if(!counters::use_device_lock_at_start())
+    {
+        for(const auto& agent : agent::get_agents())
+        {
+            if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
+            if(counters::counter_collection_has_device_lock())
+            {
+                counters::counter_collection_device_lock(agent, true);
+            }
+        }
+    }
+
     // Counter collection no longer registers a per-queue callback with the queue
     // controller; the HSA write interceptor calls counters::kernel_dispatch_phase_enter_hook /
     // kernel_dispatch_phase_exit_hook directly (see hsa/queue.cpp). Keep the callback thread.
@@ -241,6 +257,22 @@ stop_context(const context::context* ctx)
         controller->disable_serialization(ctx->dispatch_counter_collection->agents);
         // No per-queue callback to remove; counters::kernel_dispatch_phase_enter_hook no-ops once
         // dispatch_counter_collection is disabled above.
+    }
+
+    // By default the device lock acquired in start_context() above is released here, at
+    // context stop, rather than being held for the life of the process (the legacy
+    // behavior under use_device_lock_at_start()). Mirrors device_counting.cpp's
+    // stop_agent_ctx().
+    if(!counters::use_device_lock_at_start())
+    {
+        for(const auto& agent : agent::get_agents())
+        {
+            if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
+            if(counters::counter_collection_has_device_lock())
+            {
+                counters::counter_collection_device_unlock(agent);
+            }
+        }
     }
 
     // Only once serialization is released; see start_context().

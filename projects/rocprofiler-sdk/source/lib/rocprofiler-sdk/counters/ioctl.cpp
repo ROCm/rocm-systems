@@ -84,6 +84,18 @@ profiler_ioctl(kfd_ioctl_profiler_args& args)
         return ROCPROFILER_STATUS_SUCCESS;
     return ROCPROFILER_STATUS_ERROR;
 }
+
+// Dispatch mode (KFD_IOC_PROFILER_PMC with lock=0, perfcount_enable=1) trades the old
+// exclusive profiler_process lock for a per-process perfmon clock override, and relies on
+// process teardown (not an explicit unlock ioctl) to release it. The kernel only honors this
+// behavior starting at KFD_IOC_PROFILER_VERSION_NUM 2; on older kernels it falls through to
+// the exclusive-lock path and would spuriously fail, so only use it when the running kernel
+// reports exactly that version.
+bool
+dispatch_mode_supported()
+{
+    return kfd_profiler_version() == KFD_IOC_PROFILER_VERSION_NUM;
+}
 }  // namespace
 
 unsigned long
@@ -97,22 +109,34 @@ get_profiler_ioctl_request_for_version(uint32_t major_version, uint32_t minor_ve
     return AMDKFD_IOC_PROFILER;
 }
 
+uint32_t
+kfd_profiler_version()
+{
+    static uint32_t version = []() -> uint32_t {
+        kfd_ioctl_profiler_args args = {};
+        args.op                      = KFD_IOC_PROFILER_VERSION;
+        if(profiler_ioctl(args) != ROCPROFILER_STATUS_SUCCESS) return 0;
+        return args.version;
+    }();
+    return version;
+}
+
 bool
 counter_collection_has_device_lock()
 {
-    kfd_ioctl_profiler_args args = {};
-    args.op                      = KFD_IOC_PROFILER_VERSION;
-    return profiler_ioctl(args) == ROCPROFILER_STATUS_SUCCESS;
+    return kfd_profiler_version() != 0;
 }
 
 rocprofiler_status_t
 counter_collection_device_lock(const rocprofiler_agent_t* agent, bool all_queues)
 {
     CHECK(agent);
+    const bool use_dispatch_mode = dispatch_mode_supported();
+
     kfd_ioctl_profiler_args args = {};
     args.op                      = KFD_IOC_PROFILER_PMC;
     args.pmc.gpu_id              = agent->gpu_id;
-    args.pmc.lock                = 1;
+    args.pmc.lock                = use_dispatch_mode ? 0 : 1;
     args.pmc.perfcount_enable    = all_queues ? 1 : 0;
 
     auto status = profiler_ioctl(args);
@@ -157,6 +181,16 @@ rocprofiler_status_t
 counter_collection_device_unlock(const rocprofiler_agent_t* agent)
 {
     CHECK(agent);
+
+    if(dispatch_mode_supported())
+    {
+        // Dispatch mode (lock=0, perfcount_enable=1 at lock time) has no unprivileged "off"
+        // ioctl: the kernel only clears perfmon_clk_req when this process's KFD device context
+        // is torn down. Sending lock=0, perfcount_enable=0 here would just hit the
+        // perfmon_capable() check and fail EPERM, so there is nothing to do.
+        return ROCPROFILER_STATUS_SUCCESS;
+    }
+
     kfd_ioctl_profiler_args args = {};
     args.op                      = KFD_IOC_PROFILER_PMC;
     args.pmc.gpu_id              = agent->gpu_id;
