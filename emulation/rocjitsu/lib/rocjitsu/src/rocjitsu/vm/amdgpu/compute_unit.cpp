@@ -528,8 +528,7 @@ void ComputeUnitCore::fail_gws_wait(Wavefront &wf, std::string_view reason) {
                      " gws_wait_limit=", config_.gws_wait_limit);
   const uint32_t dispatch_id = wf.dispatch_id();
   const bool pm4_failed = wf.fail_pm4_submission();
-  if (!pm4_failed &&
-      !(execution_failure_handler_ && execution_failure_handler_(wf, /*retain_wave=*/false))) {
+  if (!pm4_failed && !(execution_failure_handler_ && execution_failure_handler_(wf))) {
     defer_queue_exception(nullptr, wf.queue_id(), wf.process_id(), kAqlQueueWaveAbort,
                           /*clear_debug_stop_on_success=*/false,
                           /*retain_failure_for_debugger=*/false,
@@ -858,7 +857,7 @@ void ComputeUnitCore::handle_instruction_failure(Wavefront &wf, const std::strin
     // frontend may own the notification, but must not retain this incarnation.
     // A claimed illegal-instruction notification must not also publish queue abort.
     if (!exception_claimed && execution_failure_handler_)
-      (void)execution_failure_handler_(wf, /*retain_wave=*/false);
+      (void)execution_failure_handler_(wf);
     pending_dispatch_failures_.push_back({.queue_id = wf.queue_id(),
                                           .process_id = wf.process_id(),
                                           .dispatch_id = wf.dispatch_id(),

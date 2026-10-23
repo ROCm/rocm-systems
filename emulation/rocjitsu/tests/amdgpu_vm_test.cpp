@@ -9231,7 +9231,7 @@ TEST(AqlDispatchTest, RuntimeDecodeClaimStillFailsDispatchAndPreservesBarrier) {
   uint32_t handled = 0;
   uint32_t queue_aborts = 0;
   for (uint32_t cu = 0; cu < 2; ++cu) {
-    f.cu(cu)->set_execution_failure_handler([&](amdgpu::Wavefront &, bool) {
+    f.cu(cu)->set_execution_failure_handler([&](amdgpu::Wavefront &) {
       ++queue_aborts;
       return true;
     });
@@ -9274,17 +9274,13 @@ TEST(AqlDispatchTest, RuntimeDecodeClaimStillFailsDispatchAndPreservesBarrier) {
 TEST(AqlDispatchTest, FatalFailureUsesNonRetainingExceptionDelivery) {
   VmFixture fixture;
   ASSERT_NO_FATAL_FAILURE(fixture.initialize("cdna4"));
-  bool retention_requested = true;
   bool delivered = false;
   amdgpu::Wavefront *failed_wave = nullptr;
-  fixture.cu()->set_execution_failure_handler([&](amdgpu::Wavefront &wave, bool retain_wave) {
+  fixture.cu()->set_execution_failure_handler([&](amdgpu::Wavefront &wave) {
     failed_wave = &wave;
-    retention_requested = retain_wave;
-    return wave.cu().signal_queue_exception(
-        wave.queue_id(), wave.process_id(), 1, false, false,
-        retain_wave ? amdgpu::QueueExceptionDeliveryPolicy::PublishOrFail
-                    : amdgpu::QueueExceptionDeliveryPolicy::PublishAndCancel,
-        retain_wave);
+    return wave.cu().signal_queue_exception(wave.queue_id(), wave.process_id(), 1, false, false,
+                                            amdgpu::QueueExceptionDeliveryPolicy::PublishAndCancel,
+                                            /*retain_wave=*/false);
   });
   fixture.cu()->set_queue_exception_handler(
       [&](uint32_t, uint32_t, uint64_t, bool, amdgpu::QueueExceptionDeliveryPolicy policy) {
@@ -9301,7 +9297,6 @@ TEST(AqlDispatchTest, FatalFailureUsesNonRetainingExceptionDelivery) {
   queue.submit(make_dispatch_packet(kernel, 0x3000, 32, 32));
   fixture.engine->run();
   ASSERT_TRUE(delivered);
-  EXPECT_FALSE(retention_requested);
   EXPECT_EQ(failed_wave->trap_runtime_exception_status(), 0u);
   EXPECT_EQ(fixture.engine->last_exit().code, 1);
   EXPECT_EQ(completion_signal_value(fixture.mem(), 0x3000), 1);
