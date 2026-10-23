@@ -177,7 +177,7 @@ jobs:
           # under a tree this job provisions itself; the packages below are pinned enough.
           update: false
           additional-packages: build-essential cmake ninja-build git python3 python3-pip
-            python3-venv pkg-config libdw-dev libelf-dev libdrm-dev libsqlite3-dev
+ /////            python3-venv python3-dev pkg-config libdw-dev libelf-dev libdrm-dev libsqlite3-dev
             libzstd-dev curl ca-certificates
 
       - name: Copy repository into WSL
@@ -433,11 +433,16 @@ jobs:
           # shellcheck disable=SC1091
           source "${HOME}/rocprof-wsl-env.sh"
 
+          PYTHON_EXECUTABLE="$(command -v python3)"
+          PYTHON_VERSION="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+
           cd "${SDK_SOURCE_DIR}"
           cmake -B "${SDK_BUILD_DIR}" -S . -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_PREFIX_PATH="${ROCM_PATH};${ROCM_PATH}/llvm" \
-            -DPython3_EXECUTABLE="$(which python3)" \
+            -DPython3_EXECUTABLE="${PYTHON_EXECUTABLE}" \
+            -DROCPROFILER_PYTHON_EXECUTABLES="${PYTHON_EXECUTABLE}" \
+            -DROCPROFILER_PYTHON_VERSIONS="${PYTHON_VERSION}" \
             -DGPU_TARGETS="${GPU_TARGET}" \
             -DROCPROFILER_BUILD_TESTS=ON \
             -DROCPROFILER_BUILD_SAMPLES=ON \
