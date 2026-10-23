@@ -25,7 +25,7 @@ ENV PATH=${HOME}/.local/bin:${PATH}
 
 RUN apt-get update && \
     apt-get dist-upgrade -y && \
-    apt-get install -y apt-utils autoconf autotools-dev bash-completion \
+    apt-get install -y --no-install-recommends apt-utils autoconf autotools-dev bash-completion \
         build-essential chrpath cmake curl flex gettext git-core gnupg2 iproute2 \
         libgmock-dev libgtest-dev libnuma1 libopenmpi-dev libpapi-dev libpfm4-dev \
         librpm-dev libsqlite3-dev libtool libudev1 lsb-release m4 ninja-build \
@@ -44,9 +44,9 @@ RUN if [ "${ROCM_MAJOR}" != "0" ] || [ "${ROCM_MINOR}" != "0" ]; then \
         OS_CODENAME=$(grep '^VERSION_CODENAME=' /etc/os-release | cut -d'=' -f2) && \
         AMDGPU_DEB="amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb" && \
         wget https://repo.radeon.com/amdgpu-install/${ROCM_VERSION_URL}/ubuntu/${OS_CODENAME}/${AMDGPU_DEB} && \
-        apt-get install -y ./${AMDGPU_DEB} && \
+        apt-get install -y --no-install-recommends ./${AMDGPU_DEB} && \
         apt-get update && \
-        apt-get install -y rocm-dev rccl-dev libpciaccess0 ${EXTRA_PACKAGES} && \
+        apt-get install -y --no-install-recommends rocm-dev rccl-dev libpciaccess0 ${EXTRA_PACKAGES} && \
         apt-get autoclean; \
     fi
 
@@ -83,3 +83,7 @@ RUN if python3 -c "import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)"
 ENV LC_ALL=C.UTF-8
 WORKDIR /home
 SHELL [ "/bin/bash", "--login", "-c" ]
+
+# Build/development image that runs as root by design.
+# trivy:ignore:DS-0002
+USER root
