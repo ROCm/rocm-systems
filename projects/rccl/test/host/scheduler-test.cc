@@ -2272,7 +2272,7 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_KernelDynSmem_FalseWhenBitNotS
 // ---- Tma kernels: launch geometry and the tile-staging LDS bound ----
 //
 // These read ncclSymkWarpsPerBlock rather than restating 16, but they do not prove the tuner picks
-// it: nWarps arrives already decided and no test target compiles sym_model.cc. They cover what is
+// it: nWarps arrives already decided and this target does not compile sym_model.cc. They cover what is
 // downstream of that choice. That the width fits the budget is a static_assert in sym_kernels.h.
 constexpr int kSymTmaWaveSize = 32;
 constexpr ncclSymkKernelId kSymTmaKernelId = ncclSymkKernelId_AllGather_TmaST;
