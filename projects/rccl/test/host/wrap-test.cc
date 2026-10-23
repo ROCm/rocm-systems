@@ -920,6 +920,46 @@ TEST(WrapMicrotestIsolated, SetDefaultBuffSizes_Gfx1250UsesWiderLL128Line) {
       });
 }
 
+// gfx950 keeps the 64B line of other gfx9xx archs (28 elems/thread), but when
+// the comm can select LL128 its buffer is 4x deeper: 112 elems, 1,835,008
+// bytes at 256 threads. Literals for the same reason as 28 and 120 above.
+// Isolated for the same reason too.
+TEST(WrapMicrotestIsolated, SetDefaultBuffSizes_Gfx950LL128BufferGrowsOnlyWhenLL128Enabled) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SetDefaultBuffSizes_Gfx950LL128BufferGrowsOnlyWhenLL128Enabled",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        int disabledSizes[NCCL_NUM_PROTOCOLS] = {0};
+        rcclSetDefaultBuffSizes(comm, disabledSizes);
+        EXPECT_EQ(28 * RCCL_GFX950_MAX_NTHREADS * NCCL_STEPS * (int)sizeof(uint64_t),
+                  disabledSizes[NCCL_PROTO_LL128]);
+
+        comm->topo->ll128Enabled = true;
+        int enabledSizes[NCCL_NUM_PROTOCOLS] = {0};
+        rcclSetDefaultBuffSizes(comm, enabledSizes);
+        EXPECT_EQ(112 * RCCL_GFX950_MAX_NTHREADS * NCCL_STEPS * (int)sizeof(uint64_t),
+                  enabledSizes[NCCL_PROTO_LL128]);
+        EXPECT_EQ(disabledSizes[NCCL_PROTO_LL], enabledSizes[NCCL_PROTO_LL]);
+        EXPECT_EQ(disabledSizes[NCCL_PROTO_SIMPLE], enabledSizes[NCCL_PROTO_SIMPLE]);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The 4x LL128 buffer is gfx950-only: gfx942 with LL128 enabled keeps 28.
+TEST(WrapMicrotestIsolated, SetDefaultBuffSizes_Gfx942LL128EnabledKeepsDefaultBuffer) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SetDefaultBuffSizes_Gfx942LL128EnabledKeepsDefaultBuffer",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->topo->ll128Enabled = true;
+        int defaultBuffSizes[NCCL_NUM_PROTOCOLS] = {0};
+        rcclSetDefaultBuffSizes(comm, defaultBuffSizes);
+        EXPECT_EQ(28 * RCCL_DEFAULT_MAX_NTHREADS * NCCL_STEPS * (int)sizeof(uint64_t),
+                  defaultBuffSizes[NCCL_PROTO_LL128]);
+        DeleteCommWithArch(comm);
+      });
+}
+
 // ===========================================================================
 // rcclFuncMaxSendRecvCount -- rccl_wrap.cc:1656-1660. Thin wrapper delegating
 // to the header-inline ncclFuncMaxSendRecvCount (enqueue.h); RCCL_EXPOSE_STATIC
