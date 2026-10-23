@@ -62,6 +62,12 @@ inline uint16_t random_f16_bits(std::minstd_rand &random) {
   return uint16_t((raw & 0x8000) | ((12 + ((raw >> 10) & 3)) << 10) | (raw & 0x3ff));
 }
 
+// Draw a finite BF16 encoding with a modest exponent from the engine's high bits.
+inline uint16_t random_bf16_bits(std::minstd_rand &random) {
+  uint32_t raw = uint32_t(random()) >> 15;
+  return uint16_t((raw & 0x8000) | ((124 + ((raw >> 7) & 3)) << 7) | (raw & 0x7f));
+}
+
 // Match NaNs by classification. Loose semantics compare signed infinities
 // exactly and finite values with atol/rtol; other semantics compare bits.
 // The caller must expect exact execution for fallback/compatibility modes.

@@ -43,4 +43,12 @@ void set_wmma_gfx12_half(uint32_t *const *v, int coordinate, int k, uint32_t bit
   word = (word & ~(0xffffU << shift)) | (bits << shift);
 }
 
+// Access a gfx12 FP32 accumulator element in the wave's ISA register layout.
+template <int Lanes> uint32_t &wmma_gfx12_acc(uint32_t *const *v, int row, int col) {
+  static_assert(Lanes == 32 || Lanes == 64);
+  constexpr int regs = 256 / Lanes;
+  int lane = col + 16 * (row / 8) + (Lanes == 64 ? 32 * ((row / 4) % 2) : 0);
+  return v[row % regs][lane];
+}
+
 } // namespace rocjitsu::arith::test
