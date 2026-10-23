@@ -114,6 +114,75 @@ TEST(HostDispatchQualifierMicrotest, QualifiedSuiteIsGtestPrefixShaped)
     EXPECT_EQ(qualifiedSuite("MicroInit", "InitMicrotest"), "MicroInit/InitMicrotest");
 }
 
+// ── enumerate ───────────────────────────────────────────────────────
+
+// A listing a healthy binary would print for one suite of one case.
+std::string listingOf(const std::string &suite, const std::string &test)
+{
+    return fmt::format("{}.\n  {}\n", suite, test);
+}
+
+TEST(HostDispatchEnumerateMicrotest, ABinaryThatWillNotListIsReportedNotDropped)
+{
+    // The failure this must never have: a binary that cannot start fails --gtest_list_tests
+    // first, and if that merely yielded no cases it would vanish from the run -- unrun,
+    // unreported, and the run still green. It has to come back named so the caller can fail.
+    const Enumeration enumeration =
+        enumerate("/build", {"rccl-UnitTestsMicroGood", "rccl-UnitTestsMicroBroken"},
+                  [](const std::string &path) -> std::optional<std::string> {
+                      if (path.find("Broken") != std::string::npos) {
+                          return std::nullopt;
+                      }
+                      return listingOf("Suite", "Case");
+                  });
+
+    EXPECT_EQ(enumeration.unlistable, (std::vector<std::string>{"rccl-UnitTestsMicroBroken"}));
+    ASSERT_EQ(enumeration.candidates.size(), 1u);
+    EXPECT_EQ(enumeration.candidates[0].suite, "MicroGood/Suite");
+}
+
+TEST(HostDispatchEnumerateMicrotest, ABinaryHoldingNoCasesIsNotTreatedAsBroken)
+{
+    // The distinction the optional carries: listing nothing is a healthy answer, and scoring it
+    // as a failure would fail the run for a binary that is merely empty.
+    const Enumeration enumeration =
+        enumerate("/build", {"rccl-UnitTestsMicroEmpty"},
+                  [](const std::string &) -> std::optional<std::string> { return std::string(); });
+
+    EXPECT_TRUE(enumeration.unlistable.empty());
+    EXPECT_TRUE(enumeration.candidates.empty());
+}
+
+TEST(HostDispatchEnumerateMicrotest, EachBinaryIsAskedForItsOwnPath)
+{
+    std::vector<std::string> asked;
+    enumerate("/build/test/host", {"rccl-UnitTestsMicro", "rccl-UnitTestsMicroInit"},
+              [&asked](const std::string &path) -> std::optional<std::string> {
+                  asked.push_back(path);
+                  return std::string();
+              });
+
+    EXPECT_EQ(asked, (std::vector<std::string>{"/build/test/host/rccl-UnitTestsMicro",
+                                               "/build/test/host/rccl-UnitTestsMicroInit"}));
+}
+
+TEST(HostDispatchEnumerateMicrotest, CasesCarryTheIndexOfTheBinaryThatOwnsThem)
+{
+    // group() resolves a candidate back to its binary through this index alone, so a skipped
+    // binary must not shift the ones after it.
+    const Enumeration enumeration =
+        enumerate("/build", {"rccl-UnitTestsMicroBroken", "rccl-UnitTestsMicroInit"},
+                  [](const std::string &path) -> std::optional<std::string> {
+                      if (path.find("Broken") != std::string::npos) {
+                          return std::nullopt;
+                      }
+                      return listingOf("InitMicrotest", "Case");
+                  });
+
+    ASSERT_EQ(enumeration.candidates.size(), 1u);
+    EXPECT_EQ(enumeration.candidates[0].binary, 1u);
+}
+
 // ── childFilters ────────────────────────────────────────────────────
 
 // A selection of *selected* cases out of a binary holding *runnable* of them.

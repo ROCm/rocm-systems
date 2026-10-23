@@ -47,6 +47,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <sstream>
@@ -620,13 +621,18 @@ std::string shellQuote(const std::string &argument)
     return quoted + "'";
 }
 
-// *path*'s --gtest_list_tests output, or an empty string when it could not be listed.
-std::string listTestsOutput(const std::string &path)
+// *path*'s --gtest_list_tests output, or nullopt when the binary failed to produce one.
+//
+// The two are deliberately distinguishable: a healthy binary that holds no cases lists nothing
+// and is not a problem, whereas one that cannot start (missing .so, an abort in static init)
+// fails here FIRST, before anything else the dispatcher does to it, and must not be mistaken
+// for the former. See enumerate().
+std::optional<std::string> listTestsOutput(const std::string &path)
 {
     const std::string command = fmt::format("{} --gtest_list_tests 2>/dev/null", shellQuote(path));
     std::unique_ptr<FILE, int (*)(FILE *)> pipe(popen(command.c_str(), "r"), pclose);
     if (pipe == nullptr) {
-        return "";
+        return std::nullopt;
     }
     std::string output;
     char buffer[4096];
@@ -634,8 +640,49 @@ std::string listTestsOutput(const std::string &path)
         output += buffer;
     }
     // pclose() is the child's exit status, so it has to be read before the handle is released;
-    // a non-zero status means the listing is partial and the binary owns no cases here.
-    return pclose(pipe.release()) == 0 ? output : std::string();
+    // a non-zero status means the listing is partial, whatever arrived on stdout.
+    if (pclose(pipe.release()) != 0) {
+        return std::nullopt;
+    }
+    return output;
+}
+
+// ── enumeration ───────────────────────────────────────────────────
+
+// What the discovered binaries hold, and which of them would not say.
+struct Enumeration {
+    std::vector<CandidateCase> candidates;
+    std::vector<std::string> unlistable;   // binaries whose --gtest_list_tests failed
+};
+
+// How a binary is asked for its cases. A seam so the enumeration can be tested without one.
+using ListingFn = std::function<std::optional<std::string>(const std::string &)>;
+
+// Every case every discovered binary holds, published name and all, in discovery order.
+//
+// A binary that will not list its cases is RECORDED, never skipped. Dropping it would be the
+// one failure this dispatcher must not have: discovery is what replaced the hand-kept binary
+// lists, so a binary that cannot start would otherwise disappear from the run entirely -- unrun,
+// unreported, absent from the coverage manifest -- and the run would still exit 0. The
+// hand-kept list it replaced caught exactly this, by checking each binary wrote a report.
+Enumeration enumerate(const std::string &directory, const std::vector<std::string> &binaries,
+                      const ListingFn &listing)
+{
+    Enumeration enumeration;
+    for (size_t i = 0; i < binaries.size(); ++i) {
+        const std::optional<std::string> output =
+            listing((fs::path(directory) / binaries[i]).string());
+        if (!output) {
+            enumeration.unlistable.push_back(binaries[i]);
+            continue;
+        }
+        const std::string qualifier = qualifierFor(binaries[i]);
+        for (const TestCaseName &name : parseListTests(*output)) {
+            enumeration.candidates.push_back(
+                CandidateCase{i, qualifiedSuite(qualifier, name.suite), name});
+        }
+    }
+    return enumeration;
 }
 
 // Run *path* with *args*, inheriting stdio, and return its exit status (128+signal if killed).
@@ -730,22 +777,6 @@ namespace {
 
 using namespace rccl_host_dispatch;
 
-// Every case every discovered binary holds, published name and all, in discovery order.
-std::vector<CandidateCase> enumerate(const std::string &directory,
-                                     const std::vector<std::string> &binaries)
-{
-    std::vector<CandidateCase> candidates;
-    for (size_t i = 0; i < binaries.size(); ++i) {
-        const std::string qualifier = qualifierFor(binaries[i]);
-        for (const TestCaseName &name :
-             parseListTests(listTestsOutput(directory + "/" + binaries[i]))) {
-            candidates.push_back(
-                CandidateCase{i, qualifiedSuite(qualifier, name.suite), name});
-        }
-    }
-    return candidates;
-}
-
 // A temporary directory for the children's reports, removed when the guard goes out of scope.
 //
 // mkdtemp and not std::filesystem: the standard has no atomic create-unique-directory, and
@@ -827,7 +858,11 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    const std::vector<CandidateCase> candidates = enumerate(directory, binaries);
+    const Enumeration enumeration = enumerate(directory, binaries, listTestsOutput);
+    for (const std::string &binary : enumeration.unlistable) {
+        fmt::print(stderr, "host-test-dispatch: {} could not list its tests\n", binary);
+    }
+    const std::vector<CandidateCase> &candidates = enumeration.candidates;
     const std::vector<size_t> chosen =
         resolveFilter(candidates, options.filter, options.alsoRunDisabled);
 
@@ -835,7 +870,11 @@ int main(int argc, char **argv)
         // gtest resolved the filter over the published names, so it can print the listing too,
         // in exactly the format a caller parsing it expects.
         ::testing::GTEST_FLAG(list_tests) = true;
-        return RUN_ALL_TESTS();
+        const int status = RUN_ALL_TESTS();
+        // A listing missing a binary's cases is wrong, not merely short, and a caller building
+        // a work list from it cannot tell. The warnings above name the binaries; this makes the
+        // incompleteness something a script notices too.
+        return enumeration.unlistable.empty() ? status : 1;
     }
 
     const std::vector<Selection> selections = group(directory, binaries, candidates, chosen, options.alsoRunDisabled);
@@ -850,6 +889,15 @@ int main(int argc, char **argv)
     std::vector<SuiteFragment> fragments;
     std::vector<std::string> ran;
     int failures = 0;
+
+    // A binary that would not list its cases is reported before any are run: it holds an
+    // unknown number of them, so the run cannot be green whatever the rest of the tree does.
+    for (const std::string &binary : enumeration.unlistable) {
+        fragments.push_back(crashFragment(qualifierFor(binary),
+                                          "binary could not list its tests -- it likely failed "
+                                          "to start"));
+        ++failures;
+    }
     for (const Selection &selection : selections) {
         const std::vector<std::string> filters = childFilters(selection);
         ran.push_back(selection.path);
