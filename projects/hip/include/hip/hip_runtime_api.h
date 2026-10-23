@@ -1777,6 +1777,29 @@ typedef struct hipExtDynDataPrefetchConfig {
 } hipExtDynDataPrefetchConfig;
 
 /**
+ * @brief Per-dispatch CU mask configuration.
+ *
+ * Pointed to by a launch attribute via @ref hipLaunchAttributeExtCUMask.
+ * Restricts which compute units execute a kernel dispatch via the launch
+ * descriptor's CU enable field (gfx1250+, Format 4 packets).
+ *
+ * Specifies a contiguous range of CUs [cuStart, cuStart + cuCount) within
+ * each enabled Shader Engine. The same range is applied symmetrically to all
+ * enabled SEs and replicated across all XCCs. Fields map directly to the
+ * launch descriptor's cu_enable DWORD.
+ *
+ * When combined with a stream-level CU mask (from @ref hipExtStreamCreateWithCUMask
+ * or a green context), the hardware intersects both masks automatically.
+ * On devices that do not support per-dispatch CU masking, this attribute is
+ * silently ignored and the stream-level mask remains the sole mechanism.
+ */
+typedef struct hipExtCUMaskConfig {
+  uint32_t cuStart;   ///< First CU index within each enabled SE (0-15)
+  uint32_t cuCount;   ///< Number of contiguous CUs from cuStart (0 = all CUs in each SE)
+  uint32_t seEn;      ///< Shader Engine enable mask (0 = all SEs, bit 0 = SE0, bit 1 = SE1)
+} hipExtCUMaskConfig;
+
+/**
  *  Launch Attribute ID
  */
 typedef enum hipLaunchAttributeID {
@@ -1790,6 +1813,7 @@ typedef enum hipLaunchAttributeID {
   hipLaunchAttributeMemSyncDomainMap = 9,       ///< Valid for streams, graph nodes, launches
   hipLaunchAttributeMemSyncDomain = 10,         ///< Valid for streams, graph nodes, launches
   hipLaunchAttributeExtDynDataPrefetch = 1024,  ///< Valid for launches. Prefetch data into L2 before kernel execution.
+  hipLaunchAttributeExtCUMask = 1025,           ///< Valid for launches. Per-dispatch CU mask via launch descriptor.
   hipLaunchAttributeMax
 } hipLaunchAttributeID;
 
@@ -1833,6 +1857,7 @@ typedef union hipLaunchAttributeValue {
   hipClusterSchedulingPolicy clusterSchedulingPolicyPreference;  ///< Value of launch attribute :: hipLaunchAttributeClusterSchedulingPolicyPreference
                                                                  ///< determines the preferred strategy for distributing blocks within a compute cluster
   const hipExtDynDataPrefetchConfig* dynDataPrefetch;  ///< Value of launch attribute ::hipLaunchAttributeExtDynDataPrefetch
+  hipExtCUMaskConfig cuMask;  ///< Value of launch attribute ::hipLaunchAttributeExtCUMask
 } hipLaunchAttributeValue;
 
 /**

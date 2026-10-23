@@ -5307,6 +5307,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
  * It also parses the kernel arguments buffer to inject into Hsa Runtime
  * the list of kernel parameters.
  */
+
 // ================================================================================================
 void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
   if (vcmd.cooperativeGroups()) {
@@ -5375,6 +5376,15 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
       metadata_preloader_.SetDynDataPrefetchRegions(vcmd.dynDataPrefetchConfig());
     }
 
+    if (vcmd.cuEnableConfig().isEnabled()) {
+      const auto& cfg = vcmd.cuEnableConfig();
+      // Pack cu_enable DWORD: START [3:0], CNT [7:4], SE_EN [9:8]
+      uint32_t packed = (cfg.cu_start & 0xF) | ((cfg.cu_count & 0xF) << 4) | ((cfg.se_en & 0x3) << 8);
+      if (packed != 0) {
+        metadata_preloader_.SetCUEnableOverride(packed);
+      }
+    }
+
     // Submit kernel to HW
     if (!submitKernelInternal(vcmd.sizes(), vcmd.kernel(), vcmd.parameters(),
                               static_cast<void*>(as_cl(&vcmd.event())), vcmd.sharedMemBytes(),
@@ -5384,6 +5394,7 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
     }
 
     metadata_preloader_.ClearDynDataPrefetchConfig();
+    metadata_preloader_.ClearCUEnableOverride();
 
     profilingEnd();
   }
@@ -5839,6 +5850,13 @@ uint32_t VirtualGPU::MetaDataPreloader::FillKernelDispatchMetadata(
           dyn_data_prefetch_hints_,
           m->launch_descriptor.prefetch,
           dyn_data_prefetch_num_regions_);
+    }
+
+    if (cu_enable_override_active_) {
+      if (m->launch_descriptor.version == AMD_LAUNCH_DESCRIPTOR_VERSION_NONE) {
+        m->launch_descriptor.version = launch_descriptor_version_;
+      }
+      m->launch_descriptor.cu_enable = cu_enable_override_;
     }
 
     // Write event_id from amd_signal_t directly (non-interrupt signals have event_id == 0).
