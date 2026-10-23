@@ -709,7 +709,7 @@ TEST_F(InitMicrotest, GetParentRanks_ExcludeAll_ReturnsZeroRanks) {
       << "nothing should have been written";
 }
 
-// LATENT BUG (init.cc:2540): *nRanksRet is parentRanks - excludeRanksCount and nothing dedupes, so myRank can == nRanks
+// Not a reachable defect: the sole caller rejects duplicate exclusions first (ncclCommInitChildComm).
 TEST_F(InitMicrotest, GetParentRanks_DuplicateExclusion_EvictsAnExtraRank) {
   int exclude[2] = {1, 1};  // sorted, but the same rank twice
   int out[4] = {-1, -1, -1, -1};
@@ -1251,6 +1251,7 @@ TEST_F(InitMicrotest, CommShrink_NotReadyComm_ReturnsInvalidArgument) {
   // rank 1 so the self-exclusion bsearch at init.cc:4039 does not reject first.
   ReadyComm rc;
   rc.get()->rank = 1;
+  rc.get()->nRanks = 2;
   rc.get()->asyncResult = ncclInProgress;
   ncclComm_t out = nullptr;
   int exclude[1] = {0};
@@ -8790,6 +8791,38 @@ TEST_F(InitMicrotest, CommShrink_NoAbortFlag_NeverSynchronisesTheDeviceStream) {
   EXPECT_EQ(0u, c.abortFlag()) << "without NCCL_SHRINK_ABORT nothing raises the flags";
 }
 
+namespace {
+ncclResult_t Shrink_RejectedWithoutLaunching(std::vector<int> exclude, const char* expectWarn) {
+  ReadyComm rc;
+  rc.get()->nRanks = 4;
+  rc.get()->rank = 3;
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+  ncclComm_t out = reinterpret_cast<ncclComm_t>(0x1);
+  ncclResult_t res = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    res = ncclCommShrink_impl(rc.get(), exclude.data(), static_cast<int>(exclude.size()), &out, /*config=*/nullptr,
+                              /*shrinkFlags=*/0);
+  });
+  EXPECT_EQ(0, rec.calls) << "a rejected exclusion list must not launch the child init";
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, expectWarn)) << log;
+  rec.Release();
+  return res;
+}
+}  // namespace
+
+TEST_F(InitMicrotest, CommShrink_NegativeExcludedRank_ReturnsInvalidArgument) {
+  EXPECT_EQ(ncclInvalidArgument, Shrink_RejectedWithoutLaunching({1, -1}, "must be in [0, 4)"));
+}
+
+TEST_F(InitMicrotest, CommShrink_ExcludedRankEqualToNRanks_ReturnsInvalidArgument) {
+  EXPECT_EQ(ncclInvalidArgument, Shrink_RejectedWithoutLaunching({4, 0}, "must be in [0, 4)"));
+}
+
+TEST_F(InitMicrotest, CommShrink_DuplicateExcludedRank_ReturnsInvalidArgument) {
+  EXPECT_EQ(ncclInvalidArgument, Shrink_RejectedWithoutLaunching({1, 2, 1}, "contains rank 1 more than once"));
+}
+
 
 namespace {
 
@@ -9669,18 +9702,18 @@ TEST_F(InitMicrotest, InitChildComm_Shrink_SortsCallerListAndCopiesItIntoTheJob)
   Grow_AllowHostAlloc();
   Grow_ParentComm parent;
   parent->childCount = kGrow_ParentChildCount;
-  int exclude[3] = {5, 1, 3};
+  int exclude[3] = {kGrow_ParentRanks - 1, 1, 0};
   Grow_LaunchSpy spy;
   ncclComm_t out = kGrow_NewcommPoison;
 
   ASSERT_EQ(ncclSuccess, Grow_RunShrink(parent.get(), NCCL_SHRINK_DEFAULT, exclude, 3, &out));
 
-  EXPECT_EQ(1, exclude[0]);
-  EXPECT_EQ(3, exclude[1]);
-  EXPECT_EQ(5, exclude[2]);
+  EXPECT_EQ(0, exclude[0]);
+  EXPECT_EQ(1, exclude[1]);
+  EXPECT_EQ(kGrow_ParentRanks - 1, exclude[2]);
   const Grow_LaunchRecord& r = spy.rec();
   EXPECT_EQ(3, r.excludeRanksCount);
-  EXPECT_EQ(std::vector<int>({1, 3, 5}), r.excludeRanks);
+  EXPECT_EQ(std::vector<int>({0, 1, kGrow_ParentRanks - 1}), r.excludeRanks);
   EXPECT_EQ(0, r.childCount) << "a shrink does not consume a childCount slot";
   EXPECT_EQ(kGrow_ParentChildCount, parent->childCount);
   Rank_ReleaseComm(r.jobComm, /*ownsAbortResources=*/true);
