@@ -17,6 +17,7 @@
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/comparison.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/conversion.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/denormal_value.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/division.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
@@ -99,9 +100,18 @@ enum class SimdFastPath : uint8_t {
   VOP3_UNARY_FP16,
   VOP3_LDEXP_RAW,
   VOP3_TERNARY_FP16,
+  VOP3_TERNARY_RAW_FP,
   VOP3_TERNARY_TRUE16_RAW_FP16,
   VOP3_FMA_FP16,
+  VOP3P_DOT_INT,
   VOP_WORDS,
+  VOP1_UNARY,
+  VOP2_BINARY,
+  VOP3_BINARY,
+  VOP3_BINARY_TRUE16_SRC,
+  VOP3_TERNARY,
+  CVT_F64_TO_B32,
+  CVT_B32_TO_F64,
 };
 
 namespace detail {
@@ -509,26 +519,47 @@ inline util::native<uint32_t> simd_cvt_u32_f32(util::native<float32_t> s) {
   });
 }
 
+/// @brief Convert f32 to a zero-extended packed i16 lane.
+/// @details NaN converts to zero and out-of-range values saturate before the
+/// signed 16-bit result is returned in the low half of a uint32_t.
+inline uint32_t cvt_i16_f32(float32_t value) {
+  if (std::isnan(value))
+    return uint32_t{0};
+  if (value >= 32768.0f)
+    return static_cast<uint32_t>(static_cast<uint16_t>(std::numeric_limits<int16_t>::max()));
+  if (value < -32768.0f)
+    return static_cast<uint32_t>(static_cast<uint16_t>(std::numeric_limits<int16_t>::min()));
+  return static_cast<uint16_t>(static_cast<int16_t>(value));
+}
+
+/// @brief Convert f32 to a zero-extended packed u16 lane.
+/// @details NaN and negative inputs convert to zero; values above the u16 range
+/// saturate to UINT16_MAX.
+inline uint32_t cvt_u16_f32(float32_t value) {
+  if (std::isnan(value) || value < 0.0f)
+    return uint32_t{0};
+  if (value >= 65536.0f)
+    return static_cast<uint32_t>(std::numeric_limits<uint16_t>::max());
+  return static_cast<uint16_t>(value);
+}
+
+/// @brief Convert f32 to a zero-extended packed u8 lane.
+/// @details NaN and negative inputs convert to zero; values above the u8 range
+/// saturate to UINT8_MAX.
+inline uint32_t cvt_u8_f32(float32_t value) {
+  if (std::isnan(value) || value < 0.0f)
+    return uint32_t{0};
+  if (value >= 256.0f)
+    return static_cast<uint32_t>(std::numeric_limits<uint8_t>::max());
+  return static_cast<uint32_t>(static_cast<uint8_t>(value));
+}
+
 inline util::native<uint32_t> simd_cvt_i16_f32_to_u32(util::native<float32_t> s) {
-  return util::map_native_convert_scalar<uint32_t>(s, [](float32_t value) {
-    if (std::isnan(value))
-      return uint32_t{0};
-    if (value >= 32768.0f)
-      return static_cast<uint32_t>(static_cast<uint16_t>(std::numeric_limits<int16_t>::max()));
-    if (value < -32768.0f)
-      return static_cast<uint32_t>(static_cast<uint16_t>(std::numeric_limits<int16_t>::min()));
-    return static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(value)));
-  });
+  return util::map_native_convert_scalar<uint32_t>(s, cvt_i16_f32);
 }
 
 inline util::native<uint32_t> simd_cvt_u16_f32_to_u32(util::native<float32_t> s) {
-  return util::map_native_convert_scalar<uint32_t>(s, [](float32_t value) {
-    if (std::isnan(value) || value < 0.0f)
-      return uint32_t{0};
-    if (value >= 65536.0f)
-      return static_cast<uint32_t>(std::numeric_limits<uint16_t>::max());
-    return static_cast<uint32_t>(static_cast<uint16_t>(value));
-  });
+  return util::map_native_convert_scalar<uint32_t>(s, cvt_u16_f32);
 }
 
 template <typename Op>
@@ -796,6 +827,105 @@ inline auto flush_input_then(input_denormal::Policy policy, Op operation) {
       return operation(input_denormal::flush_input<Fmt>(value, policy));
     }
   };
+}
+
+/// @brief The MODE.FP_DENORM field that governs format Fmt.
+template <typename Fmt> inline uint32_t fp_denorm_mode(const Wavefront &wf) {
+  static_assert(std::is_same_v<Fmt, fp_format::F32> || std::is_same_v<Fmt, fp_format::F16> ||
+                    std::is_same_v<Fmt, fp_format::F64>,
+                "Unsupported format for fp_denorm_mode");
+  return std::is_same_v<Fmt, fp_format::F32> ? wf.fp_denorm_mode_f32()
+                                             : wf.fp_denorm_mode_f16_f64();
+}
+
+/// @brief The input flush that MODE selects for a format Fmt source.
+template <typename Fmt> inline input_denormal::Policy input_denormal_policy(const Wavefront &wf) {
+  return input_denormal::Policy::make(fp_denorm_mode<Fmt>(wf));
+}
+
+/// @brief Resolve a conversion to a floating format from MODE and the instruction fields.
+/// @details Each format reads its own MODE fields: the source's input-denormal
+/// control and the destination's rounding, output-denormal and FP16_OVFL
+/// controls. The result is ready for scalar lanes and SIMD batches alike.
+/// @param abs VOP3 ABS field, or zero.
+/// @param neg VOP3 NEG field, or zero.
+/// @param omod VOP3 OMOD field, or zero.
+/// @param clamp VOP3 CLAMP field, or zero.
+template <typename From, typename To>
+inline conversion::ToFloat<From, To> conversion_to_float(const Wavefront &wf, uint32_t abs = 0,
+                                                         uint32_t neg = 0, uint32_t omod = 0,
+                                                         uint32_t clamp = 0) {
+  conversion::ToFloat<From, To> stages;
+  stages.abs = abs;
+  stages.neg = neg;
+  if constexpr (!conversion::is_integer_v<From>)
+    stages.input = input_denormal_policy<From>(wf);
+  stages.output = output_modifier_policy<To>(wf, omod, clamp);
+  // OMOD treats a result that is tiny after rounding as zero, as disabled
+  // output denormals do; output_modifier then makes it +0.
+  const bool flush_tiny = output_denormal::Policy::make(fp_denorm_mode<To>(wf)).flush_outputs ||
+                          stages.output.omod != 0;
+  stages.rounding = {conversion::mode_rounding(stages.output.round_mode), flush_tiny,
+                     std::is_same_v<To, fp_format::F16> && wf.fp16_ovfl()};
+  // gfx1100 keeps a widened signaling NaN unquieted with MODE.IEEE clear, and
+  // quiets every narrowed one.
+  stages.quiet_nan = fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode());
+  return stages;
+}
+
+/// @brief Resolve a VOP1 conversion to F16, which scales by SDWA OMOD before rounding.
+/// @details Keeps the emulator's SDWA F16 order of sdwa::round_f16_result: the
+/// producer scales before narrowing, and sdwa::write_lane then applies OMOD's zero
+/// rules and CLAMP. gfx1030 captures disagree: SDWA F16 conversions match VOP3,
+/// rounding first (65535 div:2 gives 0x7c00, not 0x7800). Without SDWA there is no OMOD.
+template <typename From, typename Inst>
+inline conversion::ToFloat<From, fp_format::F16> sdwa_conversion_to_f16(const Inst &inst,
+                                                                        const Wavefront &wf) {
+  auto stages = conversion_to_float<From, fp_format::F16>(wf);
+  constexpr int32_t kScale[] = {0, 1, 2, -1};
+  stages.rounding.prescale = kScale[sdwa::output_modifier<sdwa::ResultFormat::F16>(inst, wf) & 3u];
+  return stages;
+}
+
+/// @brief Resolve V_CVT_FLOOR_I32_F32 or V_CVT_NEAREST_I32_F32 (conversion::FloorI32,
+/// conversion::NearestI32) from the F32 input-denormal control and ABS/NEG.
+template <typename Op>
+inline Op conversion_f32_to_integer(const Wavefront &wf, uint32_t abs = 0, uint32_t neg = 0) {
+  return {abs, neg, input_denormal_policy<fp_format::F32>(wf)};
+}
+
+/// @brief Resolve V_CVT_PK_U8_F32, which rounds in the F32 MODE.FP_ROUND field.
+inline conversion::PackU8 conversion_pk_u8(const Wavefront &wf, uint32_t abs = 0,
+                                           uint32_t neg = 0) {
+  return {abs, neg, input_denormal_policy<fp_format::F32>(wf),
+          conversion::mode_rounding(wf.fp_round_mode_f32())};
+}
+
+/// @brief Resolve V_PACK_B32_F16 from MODE and the target's NaN quieting.
+inline conversion::PackB32F16 conversion_pack_b32_f16(const Wavefront &wf, uint32_t abs = 0,
+                                                      uint32_t neg = 0) {
+  return {abs, neg, input_denormal_policy<fp_format::F16>(wf),
+          fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode())};
+}
+
+/// @brief Resolve an F32-to-FP8/BF8 conversion; FP16_OVFL saturates finite overflow.
+template <typename Fmt>
+inline conversion::ToFp8<Fmt> conversion_to_fp8(const Wavefront &wf, uint32_t abs = 0,
+                                                uint32_t neg = 0) {
+  return {abs, neg, input_denormal_policy<fp_format::F32>(wf), wf.fp16_ovfl()};
+}
+
+/// @brief Resolve V_CVT_PK_RTZ_F16_F32: each F32 source rounds toward zero into one half.
+/// @details MODE.FP_ROUND is ignored. ABS/NEG bit i applies to source i; OMOD and
+/// CLAMP are not applied to the packed result.
+inline conversion::PackedF16<fp_format::F32>
+conversion_pk_rtz_f16(const Wavefront &wf, uint32_t abs = 0, uint32_t neg = 0) {
+  conversion::PackedF16<fp_format::F32> packed{
+      conversion_to_float<fp_format::F32, fp_format::F16>(wf, abs, neg),
+      conversion_to_float<fp_format::F32, fp_format::F16>(wf, abs >> 1, neg >> 1)};
+  packed.low.rounding.direction = conversion::Rounding::TOWARD_ZERO;
+  packed.high.rounding.direction = conversion::Rounding::TOWARD_ZERO;
+  return packed;
 }
 
 /// @brief Wrap a raw-bit operation with the instruction's source and output modifiers.
@@ -1724,6 +1854,44 @@ template <typename Tin, typename Inst, typename CvtOp>
 /// Unconstrained fallback for the b32->f64 cvt path; see the binary-path note.
 template <typename Tin, typename Inst, typename CvtOp>
 [[nodiscard]] bool try_execute_cvt_b32_to_f64_simd(Inst &, Wavefront &, CvtOp) {
+  return false;
+}
+
+/// @brief Run a raw-bit F64-source conversion on the f64->b32 cvt path.
+/// @details `stages` maps F64 encodings in 64-bit lanes to 32-bit destination
+/// encodings in the same lanes, such as a conversion::ToFloat; the store keeps
+/// their low 32 bits.
+template <typename Inst, typename Stages>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_conversion_from_f64_simd(Inst &inst, Wavefront &wf,
+                                                               const Stages &stages) {
+  return try_execute_cvt_f64_to_b32_simd<uint32_t>(inst, wf, [&stages](util::native<double> s) {
+    return util::stdx::static_simd_cast<util::narrow32<uint32_t>>(
+        stages(std::bit_cast<util::native<uint64_t>>(s)));
+  });
+}
+
+template <typename Inst, typename Stages>
+[[nodiscard]] bool try_execute_conversion_from_f64_simd(Inst &, Wavefront &, const Stages &) {
+  return false;
+}
+
+/// @brief Run a raw-bit conversion to F64 on the b32->f64 cvt path.
+/// @details The 32-bit source encodings are zero-extended into 64-bit lanes for
+/// `stages`, which returns F64 encodings.
+template <typename Inst, typename Stages>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_conversion_to_f64_simd(Inst &inst, Wavefront &wf,
+                                                             const Stages &stages) {
+  return try_execute_cvt_b32_to_f64_simd<uint32_t>(
+      inst, wf, [&stages](util::narrow32<uint32_t> source) {
+        return std::bit_cast<util::native<double>>(
+            stages(util::stdx::static_simd_cast<util::native<uint64_t>>(source)));
+      });
+}
+
+template <typename Inst, typename Stages>
+[[nodiscard]] bool try_execute_conversion_to_f64_simd(Inst &, Wavefront &, const Stages &) {
   return false;
 }
 
@@ -3865,6 +4033,11 @@ enum class PackedFloatOp { ADD, MUL, FMA, MIN, MAX, MINIMUM, MAXIMUM };
 /// F16 and BF16 sums retain a residual when their terms exceed F64 precision.
 template <PackedFloatOp Op, bool Bf16, typename U>
 inline U packed_float_half_simd(U a_bits, U b_bits, U c_bits, Wavefront &wf, bool clamp) {
+  if constexpr (!Bf16 && (Op == PackedFloatOp::MIN || Op == PackedFloatOp::MAX)) {
+    return fp_mode::packed_minmax_f16<Op == PackedFloatOp::MIN>(
+        a_bits, b_bits, wf.fp_denorm_mode_f16_f64(), clamp, floating_clamp_nan_to_zero(wf),
+        wf.cu().arch(), wf.ieee_mode());
+  }
   using D = util::native<double>;
   constexpr bool Select = Op == PackedFloatOp::MIN || Op == PackedFloatOp::MAX ||
                           Op == PackedFloatOp::MINIMUM || Op == PackedFloatOp::MAXIMUM;
@@ -4356,11 +4529,10 @@ template <typename Inst> [[nodiscard]] bool try_execute_vop3p_mov_b32_simd(Inst 
 /// signed forms when inst.clamp is set, saturation to [INT_MIN, INT_MAX]. Unsigned
 /// clamp saturates to UINT_MAX. Clamped accumulation is widened so overflow is
 /// detected before narrowing; unclamped accumulation remains in uint32_t bits
-/// and wraps. For the 16-bit forms op_sel /
-/// op_sel_hi pick the source halves,
-/// so the fast path gates on the default packing (op_sel == 0, op_sel_hi == 3)
-/// and bails otherwise; the 8/4-bit scalar bodies ignore op_sel so no gate is
-/// needed there.
+/// and wraps. op_sel / op_sel_hi pick the source halves. The 16-bit forms gate
+/// on the default packing (op_sel == 0, op_sel_hi == 3) and bail otherwise; the
+/// 8/4-bit forms apply the selection to the packed sources, as gfx1201 and
+/// gfx1100 do.
 template <int ElemBits, bool Signed, typename Inst>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vop3p_dot_int_simd(Inst &inst, Wavefront &wf) {
@@ -4394,8 +4566,12 @@ template <int ElemBits, bool Signed, typename Inst>
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    const U raw0 = src0.template load_native<uint32_t>(base);
-    const U raw1 = src1.template load_native<uint32_t>(base);
+    U raw0 = src0.template load_native<uint32_t>(base);
+    U raw1 = src1.template load_native<uint32_t>(base);
+    if constexpr (ElemBits != 16) {
+      raw0 = select_packed_halves(raw0, packed_opsel(inst.inst_), packed_opsel_hi(inst.inst_), 0);
+      raw1 = select_packed_halves(raw1, packed_opsel(inst.inst_), packed_opsel_hi(inst.inst_), 1);
+    }
     const U acc = src2.template load_native<uint32_t>(base);
     if constexpr (Signed) {
 #if !UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
@@ -4403,11 +4579,11 @@ template <int ElemBits, bool Signed, typename Inst>
         using I64 = util::stdx::fixed_size_simd<int64_t, W>;
         I64 sum = util::stdx::static_simd_cast<I64>(std::bit_cast<I>(acc));
         for (int i = 0; i < N; ++i) {
-          const U ea = (raw0 >> (i * ElemBits)) & kElemMask;
-          const U eb = (raw1 >> (i * ElemBits)) & kElemMask;
-          const I a = std::bit_cast<I>(simd_sign_extend_u32(ea, ElemBits));
-          const I b = std::bit_cast<I>(simd_sign_extend_u32(eb, ElemBits));
-          sum += util::stdx::static_simd_cast<I64>(a * b);
+          const U src0_bits = (raw0 >> (i * ElemBits)) & kElemMask;
+          const U src1_bits = (raw1 >> (i * ElemBits)) & kElemMask;
+          const I src0_elem = std::bit_cast<I>(simd_sign_extend_u32(src0_bits, ElemBits));
+          const I src1_elem = std::bit_cast<I>(simd_sign_extend_u32(src1_bits, ElemBits));
+          sum += util::stdx::static_simd_cast<I64>(src0_elem * src1_elem);
         }
         util::stdx::where(sum < I64(std::numeric_limits<int32_t>::min()), sum) =
             I64(std::numeric_limits<int32_t>::min());
@@ -4419,11 +4595,11 @@ template <int ElemBits, bool Signed, typename Inst>
 #endif
       U sum = acc;
       for (int i = 0; i < N; ++i) {
-        const U ea = (raw0 >> (i * ElemBits)) & kElemMask;
-        const U eb = (raw1 >> (i * ElemBits)) & kElemMask;
-        const I a = std::bit_cast<I>(simd_sign_extend_u32(ea, ElemBits));
-        const I b = std::bit_cast<I>(simd_sign_extend_u32(eb, ElemBits));
-        sum += std::bit_cast<U>(a * b);
+        const U src0_bits = (raw0 >> (i * ElemBits)) & kElemMask;
+        const U src1_bits = (raw1 >> (i * ElemBits)) & kElemMask;
+        const I src0_elem = std::bit_cast<I>(simd_sign_extend_u32(src0_bits, ElemBits));
+        const I src1_elem = std::bit_cast<I>(simd_sign_extend_u32(src1_bits, ElemBits));
+        sum += std::bit_cast<U>(src0_elem * src1_elem);
       }
       dst.template store_native<uint32_t>(base, sum, chunk);
     } else {
@@ -4432,9 +4608,9 @@ template <int ElemBits, bool Signed, typename Inst>
         using U64 = util::stdx::fixed_size_simd<uint64_t, W>;
         U64 sum = util::stdx::static_simd_cast<U64>(acc);
         for (int i = 0; i < N; ++i) {
-          const U ea = (raw0 >> (i * ElemBits)) & kElemMask;
-          const U eb = (raw1 >> (i * ElemBits)) & kElemMask;
-          sum += util::stdx::static_simd_cast<U64>(ea * eb);
+          const U src0_bits = (raw0 >> (i * ElemBits)) & kElemMask;
+          const U src1_bits = (raw1 >> (i * ElemBits)) & kElemMask;
+          sum += util::stdx::static_simd_cast<U64>(src0_bits * src1_bits);
         }
         util::stdx::where(sum > U64(std::numeric_limits<uint32_t>::max()), sum) =
             U64(std::numeric_limits<uint32_t>::max());
@@ -4444,13 +4620,14 @@ template <int ElemBits, bool Signed, typename Inst>
 #endif
       U sum = acc;
       for (int i = 0; i < N; ++i) {
-        const U ea = (raw0 >> (i * ElemBits)) & kElemMask;
-        const U eb = (raw1 >> (i * ElemBits)) & kElemMask;
-        sum += ea * eb;
+        const U src0_bits = (raw0 >> (i * ElemBits)) & kElemMask;
+        const U src1_bits = (raw1 >> (i * ElemBits)) & kElemMask;
+        sum += src0_bits * src1_bits;
       }
       dst.template store_native<uint32_t>(base, sum, chunk);
     }
   }
+  detail::record_simd_fast_path(SimdFastPath::VOP3P_DOT_INT);
   return true;
 }
 
@@ -4465,14 +4642,16 @@ template <int ElemBits, bool Signed, typename Inst>
 enum class Vop3pDotHalfFormat { F16, BF16 };
 
 /// VOP3P v_dot2_f32_{f16,bf16} SIMD fast path. Two half-precision products plus
-/// an f32 accumulator collapse into a single f32 lane: result = a0*b0 + a1*b1 +
-/// acc (plain `*` / `+`, left-to-right — matching the scalar, NOT a contracted
-/// fma). op_sel / op_sel_hi pick the halves of src0/src1 (gated to the default
-/// packing op_sel == 0 && op_sel_hi == 3); neg / neg_hi flip the src0/src1
-/// product-operand signs and neg bit 2 flips the accumulator. The encoded CLAMP
-/// field is ignored for floating DOT instructions. NaN-input payload divergence accepted (same
-/// carve-out as the pk_fma
-/// slices). @tparam Fmt selects the f16 vs bf16 widening.
+/// an f32 accumulator collapse into a single f32 lane: result =
+/// src0_lo*src1_lo + src0_hi*src1_hi + acc (plain `*` / `+`, left-to-right —
+/// matching the scalar, NOT a contracted fma). op_sel / op_sel_hi pick the
+/// halves of src0/src1 (gated to the default packing op_sel == 0 &&
+/// op_sel_hi == 3); neg / neg_hi flip the src0/src1 product-operand signs; on
+/// the accumulator neg_hi bit 2 is ABS, applied before neg bit 2, as in the
+/// scalar body. The encoded CLAMP field is ignored for
+/// floating DOT instructions. NaN-input payload divergence is accepted, as for
+/// the pk_fma slices.
+/// @tparam Fmt Selects F16 or BF16 widening of the half-precision sources.
 template <Vop3pDotHalfFormat Fmt, typename Inst>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vop3p_dot_f16_simd(Inst &inst, Wavefront &wf) {
@@ -4496,17 +4675,19 @@ template <Vop3pDotHalfFormat Fmt, typename Inst>
   const uint64_t exec = dpp::execution_lane_mask(inst, wf);
   using F = util::native<float>;
   using U = util::native<uint32_t>;
-  const U kSignBit(0x80000000u);
-  const bool neg_a0 = inst.inst_.neg & 1u;
-  const bool neg_b0 = inst.inst_.neg & 2u;
-  const bool neg_acc = inst.inst_.neg & 4u;
-  const bool neg_a1 = inst.inst_.neg_hi & 1u;
-  const bool neg_b1 = inst.inst_.neg_hi & 2u;
-  const auto widen = [](U raw) {
+  const bool neg_src0_lo = inst.inst_.neg & 1u;
+  const bool neg_src1_lo = inst.inst_.neg & 2u;
+  const bool neg_src0_hi = inst.inst_.neg_hi & 1u;
+  const bool neg_src1_hi = inst.inst_.neg_hi & 2u;
+  // Widen one half, then flip its sign (NEG only; the product sources have no ABS).
+  const auto half = [](U raw, bool negate) {
+    F value;
     if constexpr (Fmt == Vop3pDotHalfFormat::BF16)
-      return util::bf16_to_f32_simd(raw);
+      value = util::bf16_to_f32_simd(raw);
     else
-      return util::f16_to_f32_simd(raw);
+      value = util::f16_to_f32_simd(raw);
+    return std::bit_cast<F>(
+        source_modifier::apply<fp_format::F32>(std::bit_cast<U>(value), false, negate));
   };
   RegisterAccess regs(wf);
   auto src0 = regs.read_operand(inst.src0, exec);
@@ -4519,23 +4700,14 @@ template <Vop3pDotHalfFormat Fmt, typename Inst>
       continue;
     const U raw0 = src0.template load_native<uint32_t>(base);
     const U raw1 = src1.template load_native<uint32_t>(base);
-    F acc = src2.template load_native<float>(base);
-    F a0 = widen(raw0 & 0xFFFFu);
-    F a1 = widen(raw0 >> 16);
-    F b0 = widen(raw1 & 0xFFFFu);
-    F b1 = widen(raw1 >> 16);
-    if (neg_a0)
-      a0 = std::bit_cast<F>(std::bit_cast<U>(a0) ^ kSignBit);
-    if (neg_b0)
-      b0 = std::bit_cast<F>(std::bit_cast<U>(b0) ^ kSignBit);
-    if (neg_a1)
-      a1 = std::bit_cast<F>(std::bit_cast<U>(a1) ^ kSignBit);
-    if (neg_b1)
-      b1 = std::bit_cast<F>(std::bit_cast<U>(b1) ^ kSignBit);
-    if (neg_acc)
-      acc = std::bit_cast<F>(std::bit_cast<U>(acc) ^ kSignBit);
-    F r = a0 * b0 + a1 * b1 + acc;
-    dst.template store_native<float>(base, r, chunk);
+    const F acc = std::bit_cast<F>(source_modifier::apply<fp_format::F32>(
+        src2.template load_native<uint32_t>(base), 2, inst.inst_.neg_hi, inst.inst_.neg));
+    const F src0_lo = half(raw0 & 0xFFFFu, neg_src0_lo);
+    const F src0_hi = half(raw0 >> 16, neg_src0_hi);
+    const F src1_lo = half(raw1 & 0xFFFFu, neg_src1_lo);
+    const F src1_hi = half(raw1 >> 16, neg_src1_hi);
+    F result = src0_lo * src1_lo + src0_hi * src1_hi + acc;
+    dst.template store_native<float>(base, result, chunk);
   }
   return true;
 }
@@ -4550,8 +4722,8 @@ template <Vop3pDotHalfFormat Fmt, typename Inst>
 /// signedness is chosen at RUNTIME from inst.neg (bit 0 -> src0 signed, bit 1
 /// -> src1 signed) — hoisted out of the chunk loop. src2 is the int32
 /// accumulator seed; clamp (when set) saturates to [INT_MIN, INT_MAX] before
-/// narrowing. Unclamped accumulation wraps in uint32_t bits. The 8/4-bit scalar
-/// bodies read no op_sel/neg_hi, so no gate.
+/// narrowing. Unclamped accumulation wraps in uint32_t bits. op_sel / op_sel_hi
+/// pick the source halves, as in the scalar bodies.
 template <int ElemBits, typename Inst>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vop3p_dot_int_mixed_simd(Inst &inst, Wavefront &wf) {
@@ -4572,6 +4744,8 @@ template <int ElemBits, typename Inst>
 #endif
   const bool src0_signed = (inst.inst_.neg & 0x1u) != 0;
   const bool src1_signed = (inst.inst_.neg & 0x2u) != 0;
+  const uint32_t opsel = packed_opsel(inst.inst_);
+  const uint32_t opsel_hi = packed_opsel_hi(inst.inst_);
   using U = util::native<uint32_t>;
   using I = util::native<int32_t>;
   RegisterAccess regs(wf);
@@ -4583,21 +4757,25 @@ template <int ElemBits, typename Inst>
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    const U raw0 = src0.template load_native<uint32_t>(base);
-    const U raw1 = src1.template load_native<uint32_t>(base);
+    const U raw0 =
+        select_packed_halves(src0.template load_native<uint32_t>(base), opsel, opsel_hi, 0);
+    const U raw1 =
+        select_packed_halves(src1.template load_native<uint32_t>(base), opsel, opsel_hi, 1);
     const U acc = src2.template load_native<uint32_t>(base);
 #if !UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
     if (clamp) {
       using I64 = util::stdx::fixed_size_simd<int64_t, W>;
       I64 sum = util::stdx::static_simd_cast<I64>(std::bit_cast<I>(acc));
       for (int i = 0; i < N; ++i) {
-        const U ea = (raw0 >> (i * ElemBits)) & kElemMask;
-        const U eb = (raw1 >> (i * ElemBits)) & kElemMask;
-        const I a = src0_signed ? std::bit_cast<I>(simd_sign_extend_u32(ea, ElemBits))
-                                : util::stdx::static_simd_cast<I>(ea);
-        const I b = src1_signed ? std::bit_cast<I>(simd_sign_extend_u32(eb, ElemBits))
-                                : util::stdx::static_simd_cast<I>(eb);
-        sum += util::stdx::static_simd_cast<I64>(a * b);
+        const U src0_bits = (raw0 >> (i * ElemBits)) & kElemMask;
+        const U src1_bits = (raw1 >> (i * ElemBits)) & kElemMask;
+        const I src0_elem = src0_signed
+                                ? std::bit_cast<I>(simd_sign_extend_u32(src0_bits, ElemBits))
+                                : util::stdx::static_simd_cast<I>(src0_bits);
+        const I src1_elem = src1_signed
+                                ? std::bit_cast<I>(simd_sign_extend_u32(src1_bits, ElemBits))
+                                : util::stdx::static_simd_cast<I>(src1_bits);
+        sum += util::stdx::static_simd_cast<I64>(src0_elem * src1_elem);
       }
       util::stdx::where(sum < I64(std::numeric_limits<int32_t>::min()), sum) =
           I64(std::numeric_limits<int32_t>::min());
@@ -4609,16 +4787,17 @@ template <int ElemBits, typename Inst>
 #endif
     U sum = acc;
     for (int i = 0; i < N; ++i) {
-      const U ea = (raw0 >> (i * ElemBits)) & kElemMask;
-      const U eb = (raw1 >> (i * ElemBits)) & kElemMask;
-      const I a = src0_signed ? std::bit_cast<I>(simd_sign_extend_u32(ea, ElemBits))
-                              : util::stdx::static_simd_cast<I>(ea);
-      const I b = src1_signed ? std::bit_cast<I>(simd_sign_extend_u32(eb, ElemBits))
-                              : util::stdx::static_simd_cast<I>(eb);
-      sum += std::bit_cast<U>(a * b);
+      const U src0_bits = (raw0 >> (i * ElemBits)) & kElemMask;
+      const U src1_bits = (raw1 >> (i * ElemBits)) & kElemMask;
+      const I src0_elem = src0_signed ? std::bit_cast<I>(simd_sign_extend_u32(src0_bits, ElemBits))
+                                      : util::stdx::static_simd_cast<I>(src0_bits);
+      const I src1_elem = src1_signed ? std::bit_cast<I>(simd_sign_extend_u32(src1_bits, ElemBits))
+                                      : util::stdx::static_simd_cast<I>(src1_bits);
+      sum += std::bit_cast<U>(src0_elem * src1_elem);
     }
     dst.template store_native<uint32_t>(base, sum, chunk);
   }
+  detail::record_simd_fast_path(SimdFastPath::VOP3P_DOT_INT);
   return true;
 }
 
@@ -4758,14 +4937,20 @@ template <bool Vop3, typename Inst>
 /// commas) pass through as one token sequence. Relies on the kernel's `inst`
 /// and `wf` parameters being in scope.
 #define ROCJITSU_TRY_SIMD_VOP2_BINARY(T, ...)                                                      \
-  if (::rocjitsu::amdgpu::try_execute_binary_vop2_simd<T>(inst, wf, __VA_ARGS__))                  \
-  return
+  if (::rocjitsu::amdgpu::try_execute_binary_vop2_simd<T>(inst, wf, __VA_ARGS__)) {                \
+    ::rocjitsu::amdgpu::detail::record_simd_fast_path(                                             \
+        ::rocjitsu::amdgpu::SimdFastPath::VOP2_BINARY);                                            \
+    return;                                                                                        \
+  }
 
 /// VOP1 unary counterpart of ROCJITSU_TRY_SIMD_VOP2_BINARY. Variadic in the
 /// operator argument so functor lambdas pass through as one token sequence.
 #define ROCJITSU_TRY_SIMD_VOP1_UNARY(Tin, Tout, ...)                                               \
-  if (::rocjitsu::amdgpu::try_execute_unary_vop1_simd<Tin, Tout>(inst, wf, __VA_ARGS__))           \
-  return
+  if (::rocjitsu::amdgpu::try_execute_unary_vop1_simd<Tin, Tout>(inst, wf, __VA_ARGS__)) {         \
+    ::rocjitsu::amdgpu::detail::record_simd_fast_path(                                             \
+        ::rocjitsu::amdgpu::SimdFastPath::VOP1_UNARY);                                             \
+    return;                                                                                        \
+  }
 
 /// Carry-VOP2 counterpart. The wrapper-owned writer merges DPP-suppressed
 /// lanes and applies the target wave-width policy before the VCC commit.
@@ -4869,8 +5054,11 @@ template <bool Vop3, typename Inst>
 #define ROCJITSU_TRY_SIMD_CVT_F64_TO_B32(Tout, ...) static_cast<void>(inst)
 #else
 #define ROCJITSU_TRY_SIMD_CVT_F64_TO_B32(Tout, ...)                                                \
-  if (::rocjitsu::amdgpu::try_execute_cvt_f64_to_b32_simd<Tout>(inst, wf, __VA_ARGS__))            \
-  return
+  if (::rocjitsu::amdgpu::try_execute_cvt_f64_to_b32_simd<Tout>(inst, wf, __VA_ARGS__)) {          \
+    ::rocjitsu::amdgpu::detail::record_simd_fast_path(                                             \
+        ::rocjitsu::amdgpu::SimdFastPath::CVT_F64_TO_B32);                                         \
+    return;                                                                                        \
+  }
 #endif
 
 /// Mixed-width cvt counterpart, 32-bit source -> f64 dst. `Tin` is the 32-bit
@@ -4879,8 +5067,30 @@ template <bool Vop3, typename Inst>
 #define ROCJITSU_TRY_SIMD_CVT_B32_TO_F64(Tin, ...) static_cast<void>(inst)
 #else
 #define ROCJITSU_TRY_SIMD_CVT_B32_TO_F64(Tin, ...)                                                 \
-  if (::rocjitsu::amdgpu::try_execute_cvt_b32_to_f64_simd<Tin>(inst, wf, __VA_ARGS__))             \
-  return
+  if (::rocjitsu::amdgpu::try_execute_cvt_b32_to_f64_simd<Tin>(inst, wf, __VA_ARGS__)) {           \
+    ::rocjitsu::amdgpu::detail::record_simd_fast_path(                                             \
+        ::rocjitsu::amdgpu::SimdFastPath::CVT_B32_TO_F64);                                         \
+    return;                                                                                        \
+  }
+#endif
+
+/// Raw-bit conversions from or to F64 (shared/conversion.h stage objects).
+#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#define ROCJITSU_TRY_SIMD_CONVERSION_FROM_F64(...) static_cast<void>(inst)
+#define ROCJITSU_TRY_SIMD_CONVERSION_TO_F64(...) static_cast<void>(inst)
+#else
+#define ROCJITSU_TRY_SIMD_CONVERSION_FROM_F64(...)                                                 \
+  if (::rocjitsu::amdgpu::try_execute_conversion_from_f64_simd(inst, wf, __VA_ARGS__)) {           \
+    ::rocjitsu::amdgpu::detail::record_simd_fast_path(                                             \
+        ::rocjitsu::amdgpu::SimdFastPath::CVT_F64_TO_B32);                                         \
+    return;                                                                                        \
+  }
+#define ROCJITSU_TRY_SIMD_CONVERSION_TO_F64(...)                                                   \
+  if (::rocjitsu::amdgpu::try_execute_conversion_to_f64_simd(inst, wf, __VA_ARGS__)) {             \
+    ::rocjitsu::amdgpu::detail::record_simd_fast_path(                                             \
+        ::rocjitsu::amdgpu::SimdFastPath::CVT_B32_TO_F64);                                         \
+    return;                                                                                        \
+  }
 #endif
 
 /// VOP3 v_cvt_f32_f16 counterpart. Generic form reads src0.l; TRUE16 form
@@ -4970,14 +5180,20 @@ template <bool Vop3, typename Inst>
 /// VOP3 integer/bitwise binary counterpart (reads src0/src1, no modifiers).
 /// `T` is the 32-bit integer lane type; variadic in the functor.
 #define ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(T, ...)                                                  \
-  if (::rocjitsu::amdgpu::try_execute_binary_vop3_simd<T>(inst, wf, __VA_ARGS__))                  \
-  return
+  if (::rocjitsu::amdgpu::try_execute_binary_vop3_simd<T>(inst, wf, __VA_ARGS__)) {                \
+    ::rocjitsu::amdgpu::detail::record_simd_fast_path(                                             \
+        ::rocjitsu::amdgpu::SimdFastPath::VOP3_BINARY);                                            \
+    return;                                                                                        \
+  }
 
 /// VOP3 binary counterpart for true16 source selectors with a full b32 result,
 /// such as v_pack_b32_f16.
 #define ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC(T, ...)                                           \
-  if (::rocjitsu::amdgpu::try_execute_binary_vop3_true16_src_simd<T>(inst, wf, __VA_ARGS__))       \
-  return
+  if (::rocjitsu::amdgpu::try_execute_binary_vop3_true16_src_simd<T>(inst, wf, __VA_ARGS__)) {     \
+    ::rocjitsu::amdgpu::detail::record_simd_fast_path(                                             \
+        ::rocjitsu::amdgpu::SimdFastPath::VOP3_BINARY_TRUE16_SRC);                                 \
+    return;                                                                                        \
+  }
 
 /// VOP3 f16 binary counterpart: same packed path as the integer form, but bails
 /// to the (modifier-applying) scalar body when any abs/neg/omod/clamp field is
@@ -5137,8 +5353,11 @@ template <bool Vop3, typename Inst>
 /// VOP3 integer/bitwise ternary counterpart (reads src0/src1/src2, no
 /// modifiers). `T` is the 32-bit integer lane type; variadic in the functor.
 #define ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(T, ...)                                                 \
-  if (::rocjitsu::amdgpu::try_execute_ternary_vop3_simd<T>(inst, wf, __VA_ARGS__))                 \
-  return
+  if (::rocjitsu::amdgpu::try_execute_ternary_vop3_simd<T>(inst, wf, __VA_ARGS__)) {               \
+    ::rocjitsu::amdgpu::detail::record_simd_fast_path(                                             \
+        ::rocjitsu::amdgpu::SimdFastPath::VOP3_TERNARY);                                           \
+    return;                                                                                        \
+  }
 
 /// VOP3 ternary counterpart for true16 SRC0/SRC1 plus full-width SRC2/result.
 #define ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_SRC01(T, ...)                                        \
@@ -5154,8 +5373,11 @@ template <bool Vop3, typename Inst>
 /// the same functor contract as ROCJITSU_TRY_SIMD_VOP3_BINARY_RAW_FP.
 #define ROCJITSU_TRY_SIMD_VOP3_TERNARY_RAW_FP(Fmt, ...)                                            \
   if (::rocjitsu::amdgpu::try_execute_ternary_vop3_simd<uint32_t>(                                 \
-          inst, wf, ::rocjitsu::amdgpu::vop3_float_operation<Fmt>(inst, wf, __VA_ARGS__)))         \
-  return
+          inst, wf, ::rocjitsu::amdgpu::vop3_float_operation<Fmt>(inst, wf, __VA_ARGS__))) {       \
+    ::rocjitsu::amdgpu::detail::record_simd_fast_path(                                             \
+        ::rocjitsu::amdgpu::SimdFastPath::VOP3_TERNARY_RAW_FP);                                    \
+    return;                                                                                        \
+  }
 #define ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_RAW_FP16(Fmt, ...)                                   \
   if (::rocjitsu::amdgpu::try_execute_ternary_vop3_true16_simd<uint32_t>(                          \
           inst, wf, ::rocjitsu::amdgpu::vop3_float_operation<Fmt>(inst, wf, __VA_ARGS__))) {       \

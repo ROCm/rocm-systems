@@ -15,6 +15,7 @@ use std::mem::size_of;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicPtr, Ordering};
 
+/// Generated support for this frontend.
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/api_trace_generated.rs"));
 }
@@ -34,6 +35,7 @@ struct ApiTableVersion {
 }
 
 impl ApiTableVersion {
+    /// Builds a table version with its exact ABI byte size.
     fn new(major_id: u32, minor_id: usize, step_id: u32) -> Self {
         Self {
             major_id,
@@ -54,6 +56,7 @@ struct ApiTable<const N: usize> {
 }
 
 impl<const N: usize> ApiTable<N> {
+    /// Builds a stable function table with version metadata.
     fn new(major: u32, step: u32, functions: [*mut c_void; N]) -> Self {
         Self {
             version: ApiTableVersion::new(major, size_of::<Self>(), step),
@@ -86,11 +89,17 @@ struct RootTable {
 struct ApiTables {
     /// Points into the table fields of this same pinned allocation.
     root: RootTable,
+    /// Pinned table of core HSA function pointers.
     core: ApiTable<{ generated::CORE_COUNT }>,
+    /// Pinned table of AMD extension function pointers.
     amd_ext: ApiTable<{ generated::AMD_EXT_COUNT }>,
+    /// Pinned table of finalizer extension pointers.
     finalizer_ext: ApiTable<{ generated::FINALIZER_EXT_COUNT }>,
+    /// Pinned table of image extension pointers.
     image_ext: ApiTable<{ generated::IMAGE_EXT_COUNT }>,
+    /// Pinned table of tool support function pointers.
     tools: ApiTable<{ generated::TOOLS_COUNT }>,
+    /// Pinned table of PC sampling extension pointers.
     pc_sampling_ext: ApiTable<{ generated::PC_SAMPLING_EXT_COUNT }>,
 }
 
@@ -101,6 +110,7 @@ struct ApiTables {
 unsafe impl Send for ApiTables {}
 
 impl ApiTables {
+    /// Allocates the root table and all child tables at stable addresses.
     fn new() -> Box<Self> {
         let original = generated::initial_functions();
         let mut tables = Box::new(Self {
@@ -129,6 +139,7 @@ impl ApiTables {
         tables
     }
 
+    /// Snapshots the original functions in every published API table.
     fn functions(&self) -> generated::InitialFunctions {
         generated::InitialFunctions {
             core: self.core.functions,
@@ -140,6 +151,7 @@ impl ApiTables {
         }
     }
 
+    /// Restores the original function slots after tool unloading.
     fn restore(&mut self, saved: &generated::InitialFunctions) {
         self.core.functions = saved.core;
         self.amd_ext.functions = saved.amd_ext;
@@ -154,6 +166,7 @@ impl ApiTables {
 struct ToolLibrary(usize);
 
 impl ToolLibrary {
+    /// Opens a named tool library and takes ownership of its handle.
     fn open(name: &CStr) -> Option<Self> {
         // RTLD_NODELETE retains code until process exit: a shutdown wrapper
         // may still be returning through this library after OnUnload.
@@ -167,6 +180,7 @@ impl ToolLibrary {
         (!handle.is_null()).then_some(Self(handle as usize))
     }
 
+    /// Finds an already-loaded tool library without loading it again.
     fn open_loaded(name: &CStr) -> Option<Self> {
         // SAFETY: RTLD_NOLOAD resolves only an existing process mapping and
         // takes one reference when it succeeds.
@@ -179,6 +193,7 @@ impl ToolLibrary {
         (!handle.is_null()).then_some(Self(handle as usize))
     }
 
+    /// Looks up a symbol in an opened tool library.
     fn symbol(&self, name: &CStr) -> *mut c_void {
         // SAFETY: The handle remains owned by this ToolLibrary.
         unsafe { libc::dlsym(self.0 as *mut c_void, name.as_ptr()) }
@@ -186,6 +201,7 @@ impl ToolLibrary {
 }
 
 impl Drop for ToolLibrary {
+    /// Releases the library reference while `RTLD_NODELETE` keeps code mapped.
     fn drop(&mut self) {
         // SAFETY: This closes one owned dlopen reference. RTLD_NODELETE keeps
         // code mapped while a tool wrapper can still be on the call stack.
@@ -215,9 +231,12 @@ struct ToolCandidate {
     order: u64,
 }
 
+/// Loaded tools and stable API tables for the current process.
 static STATE: Mutex<Option<ToolState>> = Mutex::new(None);
+/// Published tool scratch callback table read by queue operations.
 static SCRATCH_TABLE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 
+/// Returns a registered scratch callback at the given table index.
 pub(crate) fn scratch_callback(index: usize) -> Option<unsafe extern "C" fn(*const c_void) -> u32> {
     if index >= generated::TOOLS_COUNT {
         return None;
@@ -240,6 +259,7 @@ pub(crate) fn scratch_callback(index: usize) -> Option<unsafe extern "C" fn(*con
     })
 }
 
+/// Atomically publishes the current API tables to export trampolines.
 fn publish(tables: &ApiTables) {
     generated::publish(tables);
     SCRATCH_TABLE.store(
@@ -248,9 +268,13 @@ fn publish(tables: &ApiTables) {
     );
 }
 
+/// Tool entry point called with mutable HSA API tables on attach.
 type OnLoad = unsafe extern "C" fn(*mut RootTable, u64, u64, *const *const c_char) -> bool;
+/// Tool entry point called when HSA unloads the tool.
 type OnUnload = unsafe extern "C" fn();
+/// rocprofiler import-registration entry point.
 type RegisterImport = extern "C" fn() -> u32;
+/// rocprofiler registration entry point receiving API tables.
 type Register = unsafe extern "C" fn(
     *const c_char,
     RegisterImport,
@@ -260,13 +284,16 @@ type Register = unsafe extern "C" fn(
     *mut u64,
 ) -> u32;
 
+/// ABI version value for HSA register.
 const HSA_REGISTER_VERSION: u32 = 12_100;
 
 #[unsafe(no_mangle)]
+/// Reports the HSA import registration version to rocprofiler.
 pub extern "C" fn rocprofiler_register_import_hsa() -> u32 {
     HSA_REGISTER_VERSION
 }
 
+/// Checks whether the process is running in a secure execution mode.
 fn secure_execution() -> bool {
     // SAFETY: These libc queries have no pointer arguments or retained state.
     unsafe {
@@ -276,6 +303,7 @@ fn secure_execution() -> bool {
     }
 }
 
+/// Splits and validates the configured list of tool library names.
 fn parse_tool_names(names: &str) -> Vec<String> {
     let mut parsed = Vec::new();
     let mut current = String::new();
@@ -306,6 +334,7 @@ fn parse_tool_names(names: &str) -> Vec<String> {
     parsed
 }
 
+/// Registers rocprofiler against the mutable tool tables.
 fn register_profiler(state: &mut ToolState) -> bool {
     let Some(library) = ToolLibrary::open(c"librocprofiler-register.so.0") else {
         return false;
@@ -344,6 +373,7 @@ fn register_profiler(state: &mut ToolState) -> bool {
     status == 0
 }
 
+/// Collects the name of a loaded library during linker iteration.
 unsafe extern "C" fn collect_loaded_library(
     info: *mut libc::dl_phdr_info,
     _size: usize,
@@ -365,6 +395,7 @@ unsafe extern "C" fn collect_loaded_library(
     0
 }
 
+/// Combines environment and already-loaded libraries into tool candidates.
 fn loaded_tool_candidates(env_count: usize) -> Vec<ToolCandidate> {
     let mut loaded = Vec::<CString>::new();
     // SAFETY: The callback borrows loaded only during this synchronous call.
@@ -392,6 +423,7 @@ fn loaded_tool_candidates(env_count: usize) -> Vec<ToolCandidate> {
     candidates
 }
 
+/// Attaches configured legacy tools and lets each modify the API tables.
 fn load_legacy_tools(state: &mut ToolState) {
     let names = if secure_execution() {
         Vec::new()
@@ -460,6 +492,7 @@ fn load_legacy_tools(state: &mut ToolState) {
     }
 }
 
+/// Loads and attaches legacy HSA tools in configured order.
 pub(crate) fn load() {
     let mut guard = STATE
         .lock()
@@ -482,6 +515,7 @@ pub(crate) fn load() {
     state.active = true;
 }
 
+/// Detaches loaded tools and restores original API function pointers.
 pub(crate) fn unload() {
     let mut guard = STATE
         .lock()
@@ -530,6 +564,7 @@ pub(crate) fn image_extension_table() -> [usize; 14] {
     .map(|name| generated::public_address(name).unwrap_or(0))
 }
 
+/// Returns the AMD loader extension function table.
 pub(crate) fn loader_extension_table() -> [usize; 7] {
     [
         "hsa_ven_amd_loader_query_host_address",
@@ -543,6 +578,7 @@ pub(crate) fn loader_extension_table() -> [usize; 7] {
     .map(|name| generated::public_address(name).unwrap_or(0))
 }
 
+/// Returns the PC sampling extension function table.
 pub(crate) fn pc_sampling_extension_table() -> [usize; 7] {
     [
         "hsa_ven_amd_pcs_iterate_configuration",
