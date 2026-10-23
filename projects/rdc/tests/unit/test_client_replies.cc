@@ -41,6 +41,7 @@ THE SOFTWARE.
 #include <memory>
 #include <mutex>  // NOLINT
 #include <string>
+#include <vector>
 
 #include "rdc.grpc.pb.h"  // NOLINT
 #include "rdc/rdc.h"
@@ -81,6 +82,8 @@ struct Replies {
   RunStream run = RunStream::kResults;  // what each diagnostic and test case run carries
   uint32_t value_type = 0;              // type of each field value (INTEGER)
   uint32_t num_partition = 8;           // partitions of every GPU
+  uint32_t value_field = kValueField;   // field of each field value
+  std::vector<uint32_t> group_fields = {kValueField};  // fields of the field group
 };
 
 // Whether every byte of an output is the 0xA5 the caller filled it with.
@@ -241,6 +244,14 @@ class OverstatingService final : public ::rdc::RdcAPI::Service {
     return ::grpc::Status::OK;
   }
 
+  ::grpc::Status GetFieldGroupInfo(::grpc::ServerContext*, const ::rdc::GetFieldGroupInfoRequest*,
+                                   ::rdc::GetFieldGroupInfoResponse* reply) override {
+    reply->set_status(RDC_ST_OK);
+    reply->set_filed_group_name("fields");
+    for (uint32_t field : replies_.group_fields) reply->add_field_ids(field);
+    return ::grpc::Status::OK;
+  }
+
   ::grpc::Status GetLatestFieldValue(::grpc::ServerContext*,
                                      const ::rdc::GetLatestFieldValueRequest*,
                                      ::rdc::GetLatestFieldValueResponse* reply) override {
@@ -271,7 +282,7 @@ class OverstatingService final : public ::rdc::RdcAPI::Service {
   // state.
   template <typename Reply>
   void set_value(Reply* reply) const {
-    reply->set_field_id(kValueField);
+    reply->set_field_id(replies_.value_field);
     reply->set_rdc_status(kValueStatus);
     reply->set_ts(kValueTs);
     if (replies_.value_type == DOUBLE) {
@@ -740,6 +751,51 @@ TEST_F(RdcClientRepliesTest, FieldValuesOfAnUnknownTypeAreAClientError) {
                                                    next_since.get(), value.get());
     ok = ok && since == RDC_ST_CLIENT_ERROR && untouched(*value) && untouched(*next_since);
     if (!ok) fprintf(stderr, "status %d and %d\n", latest, since);
+    return ok;
+  });
+}
+
+// A value of another field than the one asked for is a client error: rdcd mixed up its
+// replies, and the field ID could be one that rdc_field_t does not define.
+TEST_F(RdcClientRepliesTest, FieldValuesOfAnotherFieldAreAClientError) {
+  for (uint32_t field : {static_cast<uint32_t>(RDC_FI_MEM_CLOCK), 99999u, 0xffffffffu}) {
+    SCOPED_TRACE(field);
+    Replies replies;
+    replies.value_field = field;
+    expect_in_child(replies, [](const Session& session) {
+      auto value = dirty<rdc_field_value>();
+      auto next_since = dirty<uint64_t>();
+      rdc_status_t latest =
+          rdc_field_get_latest_value(session.handle(), 0, RDC_FI_GPU_CLOCK, value.get());
+      bool ok = latest == RDC_ST_CLIENT_ERROR && untouched(*value);
+      rdc_status_t since = rdc_field_get_value_since(session.handle(), 0, RDC_FI_GPU_CLOCK, 0,
+                                                     next_since.get(), value.get());
+      ok = ok && since == RDC_ST_CLIENT_ERROR && untouched(*value) && untouched(*next_since);
+      if (!ok) fprintf(stderr, "status %d and %d\n", latest, since);
+      return ok;
+    });
+  }
+}
+
+// A field group can hold fields that this client does not know, such as fields that a
+// newer rdcd added: they read as RDC_FI_INVALID, and the other fields as they are.
+TEST_F(RdcClientRepliesTest, FieldsTheClientDoesNotKnowReadAsInvalid) {
+  Replies replies;
+  replies.group_fields = {RDC_FI_GPU_CLOCK, 99999u, RDC_FI_MEM_CLOCK, 0xffffffffu};
+  expect_in_child(replies, [](const Session& session) {
+    auto info = dirty<rdc_field_group_info_t>();
+    rdc_status_t status = rdc_group_field_get_info(session.handle(), 1, info.get());
+    // Read as numbers: an rdc_field_t must not be read with a value that it does not define.
+    static_assert(sizeof(rdc_field_t) == sizeof(uint32_t), "rdc_field_t is 32 bits");
+    uint32_t fields[4] = {};
+    bool ok = status == RDC_ST_OK && info->count == 4;
+    if (ok) memcpy(fields, info->field_ids, sizeof(fields));
+    ok = ok && fields[0] == RDC_FI_GPU_CLOCK && fields[1] == RDC_FI_INVALID &&
+         fields[2] == RDC_FI_MEM_CLOCK && fields[3] == RDC_FI_INVALID;
+    if (!ok) {
+      fprintf(stderr, "status %d, count %u, fields %u %u %u %u\n", status, info->count, fields[0],
+              fields[1], fields[2], fields[3]);
+    }
     return ok;
   });
 }
