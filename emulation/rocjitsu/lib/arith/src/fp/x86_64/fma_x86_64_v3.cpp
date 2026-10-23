@@ -1,11 +1,12 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Loose AVX2 FP32 fused multiply-add with modifiers and guest flushing.
+// AVX2 operand-placement choices shared by register and literal FMA implementations.
 // CPU-specific arithmetic stays here; public entry points select this backend.
 
 #include "common/simd.h"
 #include "common/x86_64/alu_x86_64_v3.h"
+#include "fp/fma.h"
 #include "rj_arith/rj_arith.h"
 
 #include <immintrin.h>
@@ -13,10 +14,13 @@
 
 namespace rocjitsu::arith {
 
+namespace {
+
 // Evaluate FP32 fused multiply-add for the selected lanes. Requires validated controls;
 // preserve inactive destination lanes.
-void fma_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t modifiers, uint32_t *d,
-                   const uint32_t *a, const uint32_t *b, const uint32_t *c) {
+template <bool Dx9Zero, FmaOperands Operands = FmaOperands::Registers>
+void run(uint32_t exec_mask, uint32_t modifiers, uint32_t *d, const uint32_t *a, const uint32_t *b,
+         const uint32_t *c, uint32_t literal = 0, uint64_t flags = 0) {
   const __m256i keep_a = _mm256_set1_epi32((modifiers & RJ_ARITH_ALU_ABS_A) ? 0x7fffffff : -1);
   const __m256i flip_a = _mm256_set1_epi32((modifiers & RJ_ARITH_ALU_NEG_A) ? INT32_MIN : 0);
   const __m256i keep_b = _mm256_set1_epi32((modifiers & RJ_ARITH_ALU_ABS_B) ? 0x7fffffff : -1);
@@ -34,19 +38,30 @@ void fma_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t modifiers, uint3
         _mm256_and_si256(_mm256_loadu_si256(reinterpret_cast<const __m256i *>(b + i)), keep_b),
         flip_b));
     __m256 vc;
-
-    vc = _mm256_castsi256_ps(_mm256_xor_si256(
-        _mm256_and_si256(_mm256_loadu_si256(reinterpret_cast<const __m256i *>(c + i)), keep_c),
-        flip_c));
-
-    if ((flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS)) {
+    if constexpr (Operands == FmaOperands::MultiplyLiteral) {
+      vc = vb;
+      vb = _mm256_castsi256_ps(_mm256_set1_epi32(int(literal)));
+    } else if constexpr (Operands == FmaOperands::AddLiteral) {
+      vc = _mm256_castsi256_ps(_mm256_set1_epi32(int(literal)));
+    } else {
+      vc = _mm256_castsi256_ps(_mm256_xor_si256(
+          _mm256_and_si256(_mm256_loadu_si256(reinterpret_cast<const __m256i *>(c + i)), keep_c),
+          flip_c));
+    }
+    if (Dx9Zero || (flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS)) {
       va = flush_denorm_f32(va);
       vb = flush_denorm_f32(vb);
       vc = flush_denorm_f32(vc);
     }
-
+    if constexpr (Dx9Zero) {
+      auto zero = _mm256_setzero_ps();
+      auto has_zero =
+          _mm256_or_ps(_mm256_cmp_ps(va, zero, _CMP_EQ_OQ), _mm256_cmp_ps(vb, zero, _CMP_EQ_OQ));
+      va = _mm256_blendv_ps(va, zero, has_zero);
+      vb = _mm256_blendv_ps(vb, _mm256_set1_ps(1), has_zero);
+    }
     auto result = _mm256_fmadd_ps(va, vb, vc);
-    if ((flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
+    if (Dx9Zero || (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
       result = flush_denorm_f32(result);
     }
     if (omod) {
@@ -62,5 +77,35 @@ void fma_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t modifiers, uint3
                            _mm256_castps_si256(result));
   }
 }
+
+} // namespace
+
+// Evaluate FP32 fused multiply-add. Preserve destination lanes outside exec_mask.
+// Requires the named CPU features and validated instruction controls.
+void fma_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t modifiers, uint32_t *d,
+                   const uint32_t *a, const uint32_t *b, const uint32_t *c) {
+  run<false>(exec_mask, modifiers, d, a, b, c, 0, flags);
+}
+
+// Evaluate FP32 fused multiply-add. Preserve destination lanes outside exec_mask.
+// Requires the named CPU features and validated instruction controls.
+void fma_dx9_zero_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t modifiers, uint32_t *d,
+                            const uint32_t *a, const uint32_t *b, const uint32_t *c) {
+  run<true>(exec_mask, modifiers, d, a, b, c, 0, flags);
+}
+
+// Evaluate FP32 fused multiply-add. Preserve destination lanes outside exec_mask.
+// Requires the named CPU features and validated instruction controls.
+template <bool Multiply>
+void literal_fma_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t literal, uint32_t *d,
+                           const uint32_t *a, const uint32_t *b) {
+  run<false, Multiply ? FmaOperands::MultiplyLiteral : FmaOperands::AddLiteral>(
+      exec_mask, 0, d, a, b, nullptr, literal, flags);
+}
+
+template void literal_fma_x86_64_v3<false>(uint64_t, uint32_t, uint32_t, uint32_t *,
+                                           const uint32_t *, const uint32_t *);
+template void literal_fma_x86_64_v3<true>(uint64_t, uint32_t, uint32_t, uint32_t *,
+                                          const uint32_t *, const uint32_t *);
 
 } // namespace rocjitsu::arith

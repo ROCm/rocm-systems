@@ -18,6 +18,26 @@
 
 namespace rocjitsu::arith::test {
 
+// Pin the FP16 FMA boundary where directed rounding precedes output flushing.
+template <int Lanes, typename Call> void check_half_fma_directed_flush(Call call) {
+  using Mask = std::conditional_t<Lanes == 32, uint32_t, uint64_t>;
+  const auto cpus = supported_cpu_levels();
+  // Directed rounding can promote a tiny half result before output flushing.
+  for (uint64_t cpu : cpus) {
+    for (bool negative : {false, true}) {
+      Registers<10, Lanes> r{};
+      r.v[0][0] = 0x0800;
+      r.v[2][0] = negative ? 0x0ab1 : 0x8ab1;
+      r.v[4][0] = negative ? 0x8400 : 0x0400;
+      uint64_t flags = cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS |
+                       RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS |
+                       (negative ? RJ_ARITH_FP_ROUND_DOWN : RJ_ARITH_FP_ROUND_UP);
+      ASSERT_EQ(call(flags, Mask(1), 0, r.v + 6, r.v, r.v + 2, r.v + 4, nullptr), RJ_ARITH_SUCCESS);
+      EXPECT_EQ(r.v[6][0] & 0xffffU, negative ? 0x8400U : 0x0400U);
+    }
+  }
+}
+
 // Differential SIMD regression coverage, supplementing the independent arithmetic
 // references and status fixtures. This checks optimization against the inherited
 // scalar model, not the model's agreement with hardware.
@@ -25,23 +45,6 @@ template <int Width, int Lanes, typename Call>
 void check_fma_simd(Call call, const std::vector<uint64_t> &modes) {
   using Mask = std::conditional_t<Lanes == 32, uint32_t, uint64_t>;
   const auto cpus = supported_cpu_levels();
-  if constexpr (Width == 16) {
-    // Directed rounding can promote a tiny half result before output flushing.
-    for (uint64_t cpu : cpus) {
-      for (bool negative : {false, true}) {
-        Registers<10, Lanes> r{};
-        r.v[0][0] = 0x0800;
-        r.v[2][0] = negative ? 0x0ab1 : 0x8ab1;
-        r.v[4][0] = negative ? 0x8400 : 0x0400;
-        uint64_t flags = cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS |
-                         RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS |
-                         (negative ? RJ_ARITH_FP_ROUND_DOWN : RJ_ARITH_FP_ROUND_UP);
-        ASSERT_EQ(call(flags, Mask(1), 0, r.v + 6, r.v, r.v + 2, r.v + 4, nullptr),
-                  RJ_ARITH_SUCCESS);
-        EXPECT_EQ(r.v[6][0] & 0xffffU, negative ? 0x8400U : 0x0400U);
-      }
-    }
-  }
   std::minstd_rand rng;
   for (int sample = 0; sample < (Width == 16 ? 16 : 12); ++sample) {
     Registers<10, Lanes> input;

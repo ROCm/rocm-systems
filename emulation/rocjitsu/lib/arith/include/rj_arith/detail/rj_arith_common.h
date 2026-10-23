@@ -164,6 +164,28 @@ constexpr uint32_t RJ_ARITH_EXCEPTION_UNDERFLOW = 1U << 4;
 constexpr uint32_t RJ_ARITH_EXCEPTION_INEXACT = 1U << 5;
 constexpr uint32_t RJ_ARITH_EXCEPTION_INT_DIV0 = 1U << 6;
 
+// Packed source negation: independent for the low and high result calculations.
+constexpr uint32_t RJ_ARITH_PK_NEG_LO_A = 1U << 0;
+constexpr uint32_t RJ_ARITH_PK_NEG_LO_B = 1U << 1;
+constexpr uint32_t RJ_ARITH_PK_NEG_LO_C = 1U << 2;
+constexpr uint32_t RJ_ARITH_PK_NEG_HI_A = 1U << 3;
+constexpr uint32_t RJ_ARITH_PK_NEG_HI_B = 1U << 4;
+constexpr uint32_t RJ_ARITH_PK_NEG_HI_C = 1U << 5;
+
+// Packed output clamp: floats to [0, 1], with NaNs and -0 to +0;
+// integer ADD/SUB/MAD saturate to their result range.
+constexpr uint32_t RJ_ARITH_PK_CLAMP = 1U << 6;
+
+// Packed half selectors flip the default choice for each result calculation.
+// Zero flags use low inputs for the low result and high inputs for the high one.
+// These flags can swap or replicate halves independently for each source.
+constexpr uint32_t RJ_ARITH_PK_LO_A_HIGH = 1U << 7;
+constexpr uint32_t RJ_ARITH_PK_LO_B_HIGH = 1U << 8;
+constexpr uint32_t RJ_ARITH_PK_LO_C_HIGH = 1U << 9;
+constexpr uint32_t RJ_ARITH_PK_HI_A_LOW = 1U << 10;
+constexpr uint32_t RJ_ARITH_PK_HI_B_LOW = 1U << 11;
+constexpr uint32_t RJ_ARITH_PK_HI_C_LOW = 1U << 12;
+
 // Floating ALU source modifiers: ABS precedes NEG.
 constexpr uint32_t RJ_ARITH_ALU_NEG_A = 1U << 0;
 constexpr uint32_t RJ_ARITH_ALU_NEG_B = 1U << 1;
