@@ -135,9 +135,9 @@ the run stopped, as a bounded run via `rj_vm_request_exit` leaves them). An
 unfinished dispatch still contributes its mnemonics to the summary's union, but
 gets no `"record":"dispatch"` line, because its per-dispatch totals are not
 final. When `incomplete_dispatches` is non-zero the summary is a subset:
-wavefronts that never halted keep their counts in wavefront-local state that
-the plugin cannot reach at shutdown, so absence no longer proves
-non-execution.
+wavefronts that reached neither halt nor cancellation keep their counts in
+wavefront-local state that the plugin cannot reach at shutdown, so absence no
+longer proves non-execution.
 
 Turning coverage into a *percentage* needs a denominator the plugin
 deliberately does not supply: it observes decoded instructions, not the target
@@ -454,12 +454,14 @@ when no contained plugin consumes a hook.
 For finer-grained selection, `observes_hot_hooks_for_wavefront(wf)` controls
 all high-frequency callbacks for one wavefront. After every plugin's
 `onAmdgpuWavefrontDispatched()` callback completes, the group samples and caches
-that predicate on the wavefront until halt. Reentrant hooks during dispatch or
-halt, hooks without a wavefront, and hooks on a resident wave after live plugin-
-group replacement use the current group's live predicate instead. The predicate
+that predicate on the wavefront until halt or cancellation, including rollback
+before a retry in the same slot. Reentrant hooks during dispatch, halt or
+cancellation, hooks without a wavefront, and hooks on a resident wave after live
+plugin-group replacement use the current group's live predicate instead. The predicate
 must therefore be lock-free, thread-safe, and stable for the subscribed portion
-of a wavefront's lifetime. Lifecycle, dispatch, workgroup, wavefront, and barrier
-callbacks are not filtered by this predicate.
+of a wavefront incarnation, ending at its matching halt or cancellation.
+Lifecycle, dispatch, workgroup, wavefront, and barrier callbacks are not filtered
+by this predicate.
 
 Live replacement refreshes subscriptions for resident waves, but does not
 replay their dispatch callbacks or migrate or clear their wave-local plugin
