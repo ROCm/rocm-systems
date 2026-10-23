@@ -5395,6 +5395,39 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_ForceDdaChoosesDdaWhenEligible) {
       });
 }
 
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_ForceDdaWithLLDisabledChoosesVmm) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_ForceDdaWithLLDisabledChoosesVmm",
+      []() {
+        // RCCL_DDA_LL=0 makes arDdaLLMax=0 so the LL candidate block is skipped
+        // even though LL is structurally eligible.  RCCL_FORCE_DDA=1 sets
+        // preferred=RCCL_BACKEND_DDA, so VMM must win as the next DDA tier.
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_FORCE_DDA") == 0) return 1;
+          if (std::strcmp(env, "RCCL_DDA_LL")  == 0)  return 0;
+          return def;
+        };
+        ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
+                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
+        // LL is eligible — proves arDdaLLMax > 0 guard, not eligibility, skips it.
+        ScopedHook llEligible(g_allReduceDdaFabricLLEligible,
+                              [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
+        ScopedHook vmmEligible(g_allReduceDdaFabricEligible,
+                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->nRanks = 1;
+        comm->nNodes = 1;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess,
+                  rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
+                                      /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_VMM, decision.algo)
+            << "LL disabled via RCCL_DDA_LL=0 must not block VMM under FORCE_DDA";
+        DeleteCommWithArch(comm);
+      });
+}
+
 TEST(WrapMicrotestIsolated, SelectAllReduce_ForceDdaFallsBackWhenDdaIneligible) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllReduce_ForceDdaFallsBackWhenDdaIneligible",
