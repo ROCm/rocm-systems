@@ -268,8 +268,6 @@ fn amd_agent_helpers_match_the_public_abi() {
         assert!(cpu_rejects_amd_agent_info(attribute));
     }
     assert!(!cpu_rejects_amd_agent_info(AMD_AGENT_INFO_NEAREST_CPU));
-    assert_eq!(nearest_cpu_agent(false).handle, 0);
-    assert_eq!(nearest_cpu_agent(true).handle, CPU_AGENT);
     let _: unsafe extern "C" fn(*mut u8, *mut c_void) -> Status = hsa_amd_enable_logging;
     let _: unsafe extern "C" fn(HsaAgent, *mut u32) -> Status = hsa_amd_coherency_get_type;
     let _: unsafe extern "C" fn(HsaAgent, u32, *mut c_void) -> Status = hsa_amd_agent_set_attribute;

@@ -68,10 +68,10 @@ fn vmem_pointer_description(runtime: &HsaState, address: usize) -> Option<Pointe
             .filter(|(_, access)| access.permissions != ACCESS_PERMISSION_NONE)
             .map(|(&agent, _)| HsaAgent { handle: agent })
             .collect();
-        let host_access = mapping
-            .access
-            .get(&CPU_AGENT)
-            .is_some_and(|access| access.permissions != ACCESS_PERMISSION_NONE);
+        let host_access = mapping.access.iter().any(|(handle, access)| {
+            runtime.is_cpu_agent(HsaAgent { handle: *handle })
+                && access.permissions != ACCESS_PERMISSION_NONE
+        });
         let owner = pool_owner(runtime, handle.pool).unwrap_or(HsaAgent { handle: 0 });
         let global_flags = pool_global_flags(runtime, handle.pool).unwrap_or(0);
         return Some(PointerDescription {
@@ -116,12 +116,18 @@ pub(super) fn host_copy_address(
         if description.pointer_type == POINTER_TYPE_RESERVED_ADDR {
             return Err(INVALID_ALLOCATION);
         }
-        vmem_copy_access(
-            runtime,
-            &description,
-            HsaAgent { handle: CPU_AGENT },
-            required_access,
-        )?;
+        if description.pointer_type == POINTER_TYPE_HSA_VMEM
+            && !description
+                .accessible
+                .iter()
+                .copied()
+                .filter(|agent| runtime.is_cpu_agent(*agent))
+                .any(|agent| {
+                    vmem_copy_access(runtime, &description, agent, required_access).is_ok()
+                })
+        {
+            return Err(INVALID_ALLOCATION);
+        }
         return description
             .host_range(address, size)
             .ok_or(INVALID_ALLOCATION);
@@ -403,7 +409,7 @@ pub unsafe extern "C" fn hsa_amd_agents_allow_access(
             return OUT_OF_RESOURCES;
         }
         let owner = memory.description.owner;
-        let storage = if owner.handle == CPU_AGENT {
+        let storage = if runtime.is_cpu_agent(owner) {
             PoolStorage::System
         } else if memory.pool_global_flags & POOL_FLAG_FINE != 0 {
             PoolStorage::LocalFine
@@ -412,7 +418,7 @@ pub unsafe extern "C" fn hsa_amd_agents_allow_access(
         };
         if agents.iter().any(|agent| {
             agent_pool_relationship(runtime, *agent, owner, storage).0 == POOL_ACCESS_NEVER
-                || (agent.handle == CPU_AGENT && memory.description.host_base.is_none())
+                || (runtime.is_cpu_agent(*agent) && memory.description.host_base.is_none())
         }) {
             return INVALID_ARGUMENT;
         }
@@ -442,6 +448,7 @@ pub unsafe extern "C" fn hsa_amd_agents_allow_access(
         else {
             return ERROR;
         };
+        let cpu_count = runtime.cpus.len() as u64;
         let Some(memory) = runtime.memory_state.allocations.get_mut(&key) else {
             return ERROR;
         };
@@ -453,18 +460,22 @@ pub unsafe extern "C" fn hsa_amd_agents_allow_access(
             Err(error) => {
                 // Native calls can complete a prefix before reporting failure.
                 // Report only mappings still known to be available.
-                let cpu = HsaAgent { handle: CPU_AGENT };
-                let cpu_accessible = owner == cpu || memory.description.accessible.contains(&cpu);
-                memory.description.accessible.clear();
+                let is_cpu = |agent: HsaAgent| {
+                    agent
+                        .handle
+                        .checked_sub(CPU_AGENT)
+                        .is_some_and(|index| index < cpu_count)
+                };
+                memory.description.accessible.retain(|agent| is_cpu(*agent));
+                if is_cpu(owner) && !memory.description.accessible.contains(&owner) {
+                    memory.description.accessible.push(owner);
+                }
                 if memory
                     .description
                     .accessible
-                    .try_reserve(runtime.gpus.len() + usize::from(cpu_accessible))
+                    .try_reserve(runtime.gpus.len())
                     .is_ok()
                 {
-                    if cpu_accessible {
-                        memory.description.accessible.push(cpu);
-                    }
                     for (index, gpu) in runtime.gpus.iter().enumerate() {
                         if memory.allocation.device_address(&gpu.device).is_ok() {
                             memory.description.accessible.push(HsaAgent {

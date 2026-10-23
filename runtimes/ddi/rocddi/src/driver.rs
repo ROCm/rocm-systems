@@ -296,6 +296,12 @@ pub(crate) trait VirtualMemoryOperations: Driver {
         size: u64,
         permissions: DeviceAccess,
     ) -> Result<Owned<Self::VirtualHostMapping>, Error>;
+    /// Changes the protection of a live host map without replacing its owner.
+    /// An error leaves the previous permissions in force.
+    fn set_virtual_host_mapping_permissions(
+        mapping: &mut Self::VirtualHostMapping,
+        permissions: DeviceAccess,
+    ) -> Result<(), Error>;
     /// Unmaps one host range, retaining its owner if cleanup fails.
     fn free_virtual_host_mapping(mapping: &mut Self::VirtualHostMapping) -> Result<(), Error>;
 }

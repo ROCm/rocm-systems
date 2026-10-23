@@ -1091,6 +1091,7 @@ pub(super) enum BufferKind {
     Vram {
         public: bool,
         coherent: bool,
+        extended_coherent: bool,
         uncached: bool,
         contiguous: bool,
     },
@@ -1355,6 +1356,7 @@ impl KfdAllocation {
                     BufferKind::Vram {
                         public,
                         coherent,
+                        extended_coherent,
                         uncached,
                         contiguous,
                     } => {
@@ -1362,6 +1364,11 @@ impl KfdAllocation {
                             | uapi::NO_SUBSTITUTE
                             | if public { uapi::PUBLIC } else { 0 }
                             | if coherent { uapi::COHERENT } else { 0 }
+                            | if extended_coherent {
+                                uapi::EXT_COHERENT
+                            } else {
+                                0
+                            }
                             | if uncached { uapi::UNCACHED } else { 0 }
                             | if contiguous { uapi::CONTIGUOUS } else { 0 }
                     }

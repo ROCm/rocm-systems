@@ -30,7 +30,7 @@ pub unsafe extern "C" fn hsa_amd_ipc_memory_create(
         let Some(memory) = runtime.memory_state.allocations.values().find(|memory| {
             memory.description.agent_base == pointer as usize
                 && memory.description.size == size
-                && memory.description.owner.handle != CPU_AGENT
+                && !runtime.is_cpu_agent(memory.description.owner)
         }) else {
             return INVALID_ARGUMENT;
         };
@@ -347,7 +347,7 @@ unsafe fn ais_file_io(
     let Some(description) = pointer_description(runtime, device_pointer as usize) else {
         return ERROR;
     };
-    if description.owner.handle == CPU_AGENT {
+    if runtime.is_cpu_agent(description.owner) {
         return ERROR;
     }
     let address = device_pointer as usize;
@@ -509,7 +509,7 @@ unsafe fn portable_export_dmabuf(
     else {
         return INVALID_ALLOCATION;
     };
-    if memory.description.owner.handle == CPU_AGENT {
+    if runtime.is_cpu_agent(memory.description.owner) {
         return INVALID_AGENT;
     }
     let Some(index) = runtime.gpu_index(memory.description.owner) else {
@@ -620,7 +620,7 @@ unsafe fn memory_lock_to_pool(
     size: usize,
     agents: *const HsaAgent,
     num_agents: i32,
-    pool: HsaMemoryPool,
+    pool: Option<HsaMemoryPool>,
     flags: u32,
     agent_ptr: *mut *mut c_void,
 ) -> Status {
@@ -632,6 +632,12 @@ unsafe fn memory_lock_to_pool(
         Ok(runtime) => runtime,
         Err(status) => return status,
     };
+    let pool = pool.unwrap_or_else(|| {
+        runtime.cpus.iter().position(|cpu| !cpu.apu).map_or_else(
+            || HsaState::cpu_pool(0, CpuPoolKind::Fine),
+            |index| HsaState::cpu_pool(index, CpuPoolKind::Coarse),
+        )
+    });
     if host_ptr.is_null() || size == 0 || agent_ptr.is_null() {
         return INVALID_ARGUMENT;
     }
@@ -641,12 +647,17 @@ unsafe fn memory_lock_to_pool(
     {
         return INVALID_ARGUMENT;
     }
-    if !cpu_pool(pool) {
+    if runtime.decode_cpu_pool(pool).is_none() {
         return INVALID_MEMORY_POOL;
     }
     let global_flags = match pool_global_flags(runtime, pool) {
         Some(flags) => flags,
         None => return INVALID_MEMORY_POOL,
+    };
+    let owner = pool_owner(runtime, pool).ok_or(INVALID_MEMORY_POOL);
+    let owner = match owner {
+        Ok(owner) => owner,
+        Err(status) => return status,
     };
     if runtime.full_profile {
         // SAFETY: The caller supplied writable pointer storage.
@@ -667,7 +678,7 @@ unsafe fn memory_lock_to_pool(
         // SAFETY: The ABI requires num_agents readable handles when agents is non-null.
         let requested = unsafe { std::slice::from_raw_parts(agents, count) };
         for agent in requested {
-            if agent.handle == CPU_AGENT {
+            if runtime.is_cpu_agent(*agent) {
                 continue;
             }
             let Some(index) = runtime.gpu_index(*agent) else {
@@ -741,6 +752,7 @@ unsafe fn memory_lock_to_pool(
             host_base,
             device_base,
             size,
+            owner,
             effective_global_flags(global_flags, flags & ALLOC_UNCACHED != 0, false),
             accessible,
         ));
@@ -765,19 +777,7 @@ pub unsafe extern "C" fn hsa_amd_memory_lock(
     boundary(|| {
         // SAFETY: The HSA C caller provides live input and output storage and
         // retains the host page cover through unlock or uncertain teardown.
-        unsafe {
-            memory_lock_to_pool(
-                host_ptr,
-                size,
-                agents,
-                num_agents,
-                HsaMemoryPool {
-                    handle: CPU_POOL_COARSE,
-                },
-                0,
-                agent_ptr,
-            )
-        }
+        unsafe { memory_lock_to_pool(host_ptr, size, agents, num_agents, None, 0, agent_ptr) }
     })
 }
 
@@ -799,7 +799,17 @@ pub unsafe extern "C" fn hsa_amd_memory_lock_to_pool(
     boundary(|| {
         // SAFETY: The HSA C caller provides live input and output storage and
         // retains the host page cover through unlock or uncertain teardown.
-        unsafe { memory_lock_to_pool(host_ptr, size, agents, num_agents, pool, flags, agent_ptr) }
+        unsafe {
+            memory_lock_to_pool(
+                host_ptr,
+                size,
+                agents,
+                num_agents,
+                Some(pool),
+                flags,
+                agent_ptr,
+            )
+        }
     })
 }
 

@@ -1674,6 +1674,7 @@ impl KfdQueue {
             BufferKind::Vram {
                 public: true,
                 coherent: false,
+                extended_coherent: false,
                 uncached: true,
                 contiguous: false,
             }
@@ -1722,6 +1723,7 @@ impl KfdQueue {
                 BufferKind::Vram {
                     public: false,
                     coherent: false,
+                    extended_coherent: false,
                     uncached: false,
                     contiguous: false,
                 },

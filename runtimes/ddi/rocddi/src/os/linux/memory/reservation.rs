@@ -13,7 +13,7 @@ use crate::os::linux::{invalid_data, process_identity::check_process};
 use crate::os::native_error;
 use libc::{
     MADV_DONTFORK, MAP_ANONYMOUS, MAP_FIXED, MAP_NORESERVE, MAP_PRIVATE, MAP_SHARED, PROT_NONE,
-    PROT_READ, PROT_WRITE, mmap, munmap,
+    PROT_READ, PROT_WRITE, mmap, mprotect, munmap,
 };
 use std::ffi::{c_int, c_void};
 use std::fs::File;
@@ -374,6 +374,28 @@ impl Reservation {
         self.map_file(dma_buf, offset, protection)
     }
 
+    /// Changes permissions on the complete live host view in place.
+    pub(crate) fn set_permissions(&mut self, permission_bits: u32) -> io::Result<()> {
+        check_process(self.process)?;
+        if self.length == 0 {
+            return Err(invalid_data("host mapping is not live"));
+        }
+        let protection = match permission_bits {
+            0 => PROT_NONE,
+            1 => PROT_READ,
+            2 => PROT_WRITE,
+            3 => PROT_READ_WRITE,
+            _ => return Err(io::Error::from(io::ErrorKind::InvalidInput)),
+        };
+        // SAFETY: This view owns the complete page-aligned live mapping.
+        // mprotect preserves its backing and address on success.
+        if unsafe { mprotect(self.address as *mut c_void, self.size, protection) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        self.writable = protection == PROT_READ_WRITE;
+        Ok(())
+    }
+
     /// Replaces the owned range with a shared writable file mapping.
     /// The signed offset preserves native tokens whose high bits are set.
     pub(crate) fn map_file_read_write(&mut self, file: &File, offset: i64) -> io::Result<()> {
@@ -674,5 +696,28 @@ mod tests {
                 .kind(),
             io::ErrorKind::InvalidInput
         );
+    }
+
+    #[test]
+    fn virtual_host_mapping_changes_permissions_without_replacing_its_view() {
+        let page = page_size().unwrap();
+        let parent = Reservation::new(page, page, (0, u64::MAX), false).unwrap();
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/zero")
+            .unwrap();
+        let mut view = Reservation::view(parent.address(), page);
+        view.map_dma_buf_with_permissions(&file, 0, 1).unwrap();
+        let address = view.address();
+        view.set_permissions(3).unwrap();
+        assert_eq!(view.address(), address);
+        view.set_permissions(1).unwrap();
+        assert_eq!(
+            view.set_permissions(4).unwrap_err().kind(),
+            io::ErrorKind::InvalidInput
+        );
+        assert_eq!(view.address(), address);
+        view.release().unwrap();
     }
 }
