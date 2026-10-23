@@ -1170,6 +1170,36 @@ several invocations of that binary, because the kernel caps one argv entry at
 `MAX_ARG_STRLEN` (128 KiB) and rejects a longer `exec` outright with `E2BIG`,
 which the biggest binary's 2,199 case names would exceed.
 
+### What the children inherit
+
+gtest configures itself from `GTEST_*` variables as well as from flags, and that
+is dangerous in a dispatcher, because this process reads them too. Every such
+variable is one of two things:
+
+- **Consumed** — the dispatcher acts on it and re-expresses the decision as an
+  explicit per-child flag, so the children never see the variable. A child that
+  saw it would decide the same question a *second* time, over a case list that
+  has already been narrowed, and exit 0 having run a fraction of it.
+  `GTEST_FILTER` (resolved over the qualified names), `GTEST_OUTPUT` (becomes
+  the merged report), `GTEST_ALSO_RUN_DISABLED_TESTS` (decides the selection)
+  and the three `GTEST_*SHARD*` variables (sharding happens once) are consumed.
+- **Forwarded** — it means the same thing in a child and changes nothing about
+  which cases run: `GTEST_COLOR`, `GTEST_BRIEF`, `GTEST_REPEAT`,
+  `GTEST_DEATH_TEST_STYLE` and the like.
+
+An **unknown** `GTEST_*` variable is consumed and named on stderr. That is the
+safe default of the two: a variable a future gtest adds costs a redundant strip
+and a line of output, where inheriting it could silently cost coverage. Nothing
+here has to be updated for gtest to stay *correct* — the table in
+`host_test_dispatch.cc` only buys back the forwarding of variables we have
+decided are harmless. Non-`GTEST_` variables are never touched.
+
+The strip happens **in each child, between `fork()` and `exec()`**, not in the
+dispatcher. Two reasons: the dispatcher goes on using the originals after the
+first fork (it shards over them), and putting it at the fork sites means there
+is no ordering in `main()` to get right and a fork site added later inherits the
+guarantee by construction.
+
 For coverage, each child inherits `LLVM_PROFILE_FILE` and drops its own
 `.profraw` as usual. What a harness cannot know is which binaries those
 profiles came from — `llvm-cov` needs an `--object` per binary and silently

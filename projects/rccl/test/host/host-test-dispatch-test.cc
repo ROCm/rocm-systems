@@ -604,6 +604,32 @@ TEST(HostDispatchArgsMicrotest, AnExplicitFilterFlagBeatsTheEnvironment)
     EXPECT_EQ(parseArgs({"--gtest_filter=*Flag.*"}, "", "*Env.*").filter, "*Flag.*");
 }
 
+TEST(HostDispatchArgsMicrotest, GtestAlsoRunDisabledEnvironmentSelectsAndForwards)
+{
+    // Left to the children alone, the DISABLED_ cases would run in a binary sent "*" and be
+    // skipped in one sent a name list, because this process would not have selected them.
+    const Options options = parseArgs({}, "", "", "1");
+    EXPECT_TRUE(options.alsoRunDisabled);
+    EXPECT_EQ(options.passthrough,
+              (std::vector<std::string>{"--gtest_also_run_disabled_tests"}));
+}
+
+TEST(HostDispatchArgsMicrotest, GtestAlsoRunDisabledFollowsGtestsFalsehood)
+{
+    // gtest's rule for its boolean variables: "0" is the only false value, unset aside.
+    EXPECT_FALSE(parseArgs({}, "", "", "0").alsoRunDisabled);
+    EXPECT_TRUE(parseArgs({}, "", "", "anything else").alsoRunDisabled);
+}
+
+TEST(HostDispatchArgsMicrotest, TheDisabledFlagIsForwardedOnceWhenTheEnvironmentAgrees)
+{
+    // The flag and the variable say the same thing; a child must not be sent it twice.
+    const Options options = parseArgs({"--gtest_also_run_disabled_tests"}, "", "", "1");
+    EXPECT_TRUE(options.alsoRunDisabled);
+    EXPECT_EQ(options.passthrough,
+              (std::vector<std::string>{"--gtest_also_run_disabled_tests"}));
+}
+
 TEST(HostDispatchArgsMicrotest, OutputDirectoryGetsGtestsDefaultFilename)
 {
     EXPECT_EQ(parseArgs({"--gtest_output=xml:/tmp/reports/"}).outputPath,
@@ -657,49 +683,117 @@ TEST(HostDispatchArgsMicrotest, HelpIsNotAssumedOfEveryFlagThatMerelyLooksLikeIt
     EXPECT_EQ(options.passthrough, (std::vector<std::string>{"--helper-mode", "-household"}));
 }
 
-// ── clearShardingEnvironment ────────────────────────────────────────
+// ── the gtest environment the children are given ────────────────────
 
-TEST(HostDispatchShardingMicrotest, EveryShardingVariableIsClearedForTheChildren)
+namespace {
+
+// *name* removed from the environment, whatever the test before this one left behind.
+struct ScopedUnset {
+    explicit ScopedUnset(const char *name) : name_(name) { unsetenv(name_); }
+    ~ScopedUnset() { unsetenv(name_); }
+    const char *name_;
+};
+
+// Whether gtestVariablesToStrip() currently names *name*.
+bool stripped(const char *name)
 {
-    // A child that still saw these would shard the exact case list it was handed, running a
-    // fraction of it and exiting 0 -- so the whole run covers 1/N of the tree and says nothing.
-    // Spelled out here rather than looped over kShardingVariables, so a typo in that array
-    // cannot make the test agree with the bug.
+    const std::vector<std::string> names = gtestVariablesToStrip();
+    return std::find(names.begin(), names.end(), name) != names.end();
+}
+
+}  // namespace
+
+TEST(HostDispatchEnvironmentMicrotest, EveryVariableTheDispatcherActsOnIsKeptFromTheChildren)
+{
+    // Each of these has already been resolved into an explicit per-child flag or into the
+    // dispatcher's own behaviour. A child that saw one would decide it a second time, over a
+    // case list that has already been narrowed -- and exit 0 having run a fraction of it.
+    // Spelled out rather than looped over kGtestVariables, so a wrong Disposition in that table
+    // cannot make this test agree with the bug.
+    const ScopedUnset guards[] = {ScopedUnset("GTEST_FILTER"), ScopedUnset("GTEST_OUTPUT"),
+                                  ScopedUnset("GTEST_ALSO_RUN_DISABLED_TESTS"),
+                                  ScopedUnset("GTEST_TOTAL_SHARDS"),
+                                  ScopedUnset("GTEST_SHARD_INDEX"),
+                                  ScopedUnset("GTEST_SHARD_STATUS_FILE")};
+    (void)guards;
+    setenv("GTEST_FILTER", "*Suite.Case", 1);
+    setenv("GTEST_OUTPUT", "xml:/tmp/callers_report.xml", 1);
+    setenv("GTEST_ALSO_RUN_DISABLED_TESTS", "1", 1);
     setenv("GTEST_TOTAL_SHARDS", "4", 1);
     setenv("GTEST_SHARD_INDEX", "2", 1);
     setenv("GTEST_SHARD_STATUS_FILE", "/tmp/shard_status", 1);
 
-    clearShardingEnvironment();
-
-    EXPECT_EQ(getenv("GTEST_TOTAL_SHARDS"), nullptr);
-    EXPECT_EQ(getenv("GTEST_SHARD_INDEX"), nullptr);
-    EXPECT_EQ(getenv("GTEST_SHARD_STATUS_FILE"), nullptr);
+    EXPECT_TRUE(stripped("GTEST_FILTER"));
+    EXPECT_TRUE(stripped("GTEST_OUTPUT"));
+    EXPECT_TRUE(stripped("GTEST_ALSO_RUN_DISABLED_TESTS"));
+    EXPECT_TRUE(stripped("GTEST_TOTAL_SHARDS"));
+    EXPECT_TRUE(stripped("GTEST_SHARD_INDEX"));
+    EXPECT_TRUE(stripped("GTEST_SHARD_STATUS_FILE"));
 }
 
-// ── clearConsumedEnvironment ────────────────────────────────────────
-
-TEST(HostDispatchShardingMicrotest, GtestFilterIsClearedBeforeAnyChildIsForked)
+TEST(HostDispatchEnvironmentMicrotest, AVariableThisBuildHasNeverHeardOfIsKeptFromTheChildren)
 {
-    // parseArgs() has already resolved this over the published, qualified names. A child that
-    // still saw it would apply it again to its own unqualified names and run a subset -- or
-    // nothing, exiting 0 either way.
-    setenv("GTEST_FILTER", "*Suite.Case", 1);
+    // The point of the fail-closed default: a variable a future gtest adds is stripped without
+    // this file being touched. Inheriting it instead could silently narrow every child's run.
+    const ScopedUnset guard("GTEST_SOME_FUTURE_SELECTION_KNOB");
+    setenv(guard.name_, "1", 1);
 
-    clearConsumedEnvironment();
+    EXPECT_TRUE(stripped(guard.name_));
+}
+
+TEST(HostDispatchEnvironmentMicrotest, PresentationVariablesStillReachTheChildren)
+{
+    // These mean the same thing in a child and change nothing about which cases run, so
+    // stripping them would be a gratuitous behaviour change for the caller.
+    const ScopedUnset color("GTEST_COLOR");
+    const ScopedUnset brief("GTEST_BRIEF");
+    const ScopedUnset style("GTEST_DEATH_TEST_STYLE");
+    setenv(color.name_, "yes", 1);
+    setenv(brief.name_, "1", 1);
+    setenv(style.name_, "threadsafe", 1);
+
+    EXPECT_FALSE(stripped(color.name_));
+    EXPECT_FALSE(stripped(brief.name_));
+    EXPECT_FALSE(stripped(style.name_));
+}
+
+TEST(HostDispatchEnvironmentMicrotest, OnlyGtestVariablesAreTouched)
+{
+    // The strip is scoped to gtest's own namespace: a binary's own env-driven switches, and the
+    // coverage variables this dispatcher relies on, have to survive into the children.
+    const ScopedUnset profile("LLVM_PROFILE_FILE");
+    setenv(profile.name_, "/tmp/profiles/rccl_%p.profraw", 1);
+
+    EXPECT_FALSE(stripped(profile.name_));
+    EXPECT_FALSE(stripped("PATH"));
+}
+
+TEST(HostDispatchEnvironmentMicrotest, StrippingHappensOnTheChildsCopyOfTheEnvironment)
+{
+    // stripGtestVariablesInChild() runs between fork() and exec(). Here that is this process,
+    // so the test can only state the mechanics: the named variables, and nothing else, go.
+    const ScopedUnset filter("GTEST_FILTER");
+    const ScopedUnset color("GTEST_COLOR");
+    setenv(filter.name_, "*Suite.Case", 1);
+    setenv(color.name_, "yes", 1);
+
+    stripGtestVariablesInChild({"GTEST_FILTER"});
 
     EXPECT_EQ(getenv("GTEST_FILTER"), nullptr);
+    EXPECT_STREQ(getenv("GTEST_COLOR"), "yes");
 }
 
-TEST(HostDispatchShardingMicrotest, GtestOutputIsClearedBeforeAnyChildIsForked)
+TEST(HostDispatchEnvironmentMicrotest, ShardingVariablesSurviveInTheDispatcherItself)
 {
-    // Every child is given an explicit --gtest_output into the report directory. One that still
-    // saw the variable would write the caller's file too -- and in the enumeration pass it would
-    // write a LISTING there, because gtest reports in list mode when an output is set.
-    setenv("GTEST_OUTPUT", "xml:/tmp/callers_report.xml", 1);
+    // The dispatcher shards ONCE, over the published names, and that happens after the listing
+    // children have been forked. Were the strip done to this process rather than to each child,
+    // sharding would be silently disabled for the whole run.
+    const ScopedUnset total("GTEST_TOTAL_SHARDS");
+    setenv(total.name_, "4", 1);
 
-    clearConsumedEnvironment();
+    (void)gtestVariablesToStrip();
 
-    EXPECT_EQ(getenv("GTEST_OUTPUT"), nullptr);
+    EXPECT_STREQ(getenv("GTEST_TOTAL_SHARDS"), "4");
 }
 
 // ── coverageDirectory ───────────────────────────────────────────────
