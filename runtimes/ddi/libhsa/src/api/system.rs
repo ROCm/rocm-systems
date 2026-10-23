@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-//! HSA C ABI entry points for this domain.
+//! System information, status strings, and extension discovery queries.
 
 use std::ffi::{c_char, c_void};
 
@@ -15,6 +15,7 @@ use crate::runtime::{boundary, lock, map_error};
 use crate::{image_abi, loader, pc_sampling};
 use crate::{image_gfx12, runtime};
 
+/// Minor version of the HSA runtime ABI reported to clients.
 pub(crate) const HSA_RUNTIME_VERSION_MINOR: u16 = 21;
 /// # Safety
 /// Any non-null `value` must address aligned, writable storage for the type
@@ -104,6 +105,7 @@ pub unsafe extern "C" fn hsa_system_get_info(attribute: u32, value: *mut c_void)
     })
 }
 
+/// Returns the NUL-terminated name of a supported HSA extension.
 pub(crate) fn extension_name(extension: u16) -> Option<&'static [u8]> {
     match extension {
         EXTENSION_FINALIZER => Some(b"HSA_EXTENSION_FINALIZER\0"),
@@ -118,6 +120,7 @@ pub(crate) fn extension_name(extension: u16) -> Option<&'static [u8]> {
     }
 }
 
+/// Builds the 128-byte extension support bitmap for the current runtime.
 pub(crate) fn extension_mask(images: bool, pc_sampling: bool) -> [u8; 128] {
     let mut extensions = [0_u8; 128];
     extensions[usize::from(EXTENSION_AMD_LOADER / 8)] |= 1 << (EXTENSION_AMD_LOADER % 8);
@@ -131,6 +134,7 @@ pub(crate) fn extension_mask(images: bool, pc_sampling: bool) -> [u8; 128] {
     extensions
 }
 
+/// Returns the highest supported minor version for an extension major version.
 pub(crate) fn supported_extension_minor(extension: u16, version_major: u16) -> Option<u16> {
     (version_major == 1
         && matches!(
@@ -140,6 +144,7 @@ pub(crate) fn supported_extension_minor(extension: u16, version_major: u16) -> O
     .then_some(0)
 }
 
+/// Checks whether a legacy extension is exposed by this runtime.
 pub(crate) fn legacy_extension_supported(
     extension: u16,
     version_major: u16,
@@ -154,6 +159,7 @@ pub(crate) fn legacy_extension_supported(
         }
 }
 
+/// Checks whether an agent exposes a legacy extension.
 pub(crate) fn legacy_agent_extension_supported(
     extension: u16,
     gpu: bool,
@@ -163,6 +169,7 @@ pub(crate) fn legacy_agent_extension_supported(
     gpu && legacy_extension_supported(extension, version_major, version_minor)
 }
 
+/// Checks whether an agent exposes the requested major extension version.
 pub(crate) fn major_agent_extension_supported(
     extension: u16,
     gpu: bool,
@@ -171,6 +178,7 @@ pub(crate) fn major_agent_extension_supported(
     gpu && supported_extension_minor(extension, version_major).is_some()
 }
 
+/// Checks whether an extension ID is defined by the core or AMD ABI range.
 pub(crate) fn valid_extension(extension: u16) -> bool {
     extension <= EXTENSION_PROFILING_EVENTS
         || (EXTENSION_AMD_PROFILER..=EXTENSION_AMD_PC_SAMPLING).contains(&extension)

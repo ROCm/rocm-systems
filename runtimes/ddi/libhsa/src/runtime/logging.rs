@@ -6,6 +6,7 @@
 use super::*;
 
 thread_local! {
+    /// Whether this thread is inside a borrowed C stream write.
     static IN_LOG_WRITE: Cell<bool> = const { Cell::new(false) };
 }
 
@@ -14,6 +15,7 @@ thread_local! {
 pub(crate) struct LogWriteScope;
 
 impl LogWriteScope {
+    /// Marks entry into a process logging callback scope.
     fn enter() -> Option<Self> {
         if IN_LOG_WRITE.with(|active| active.replace(true)) {
             return None;
@@ -21,12 +23,14 @@ impl LogWriteScope {
         Some(Self)
     }
 
+    /// Checks whether the current thread is writing through the log callback.
     pub(crate) fn active() -> bool {
         IN_LOG_WRITE.with(Cell::get)
     }
 }
 
 impl Drop for LogWriteScope {
+    /// Clears the thread-local logging reentrancy marker.
     fn drop(&mut self) {
         IN_LOG_WRITE.with(|active| active.set(false));
     }
@@ -52,7 +56,9 @@ struct BorrowedCStream(NonNull<c_void>);
 unsafe impl Send for BorrowedCStream {}
 
 unsafe extern "C" {
+    /// Writes byte records to a borrowed C stdio stream.
     fn fwrite(buffer: *const c_void, size: usize, count: usize, stream: *mut c_void) -> usize;
+    /// Flushes pending output from a borrowed C stdio stream.
     fn fflush(stream: *mut c_void) -> i32;
 }
 
@@ -65,6 +71,7 @@ pub(crate) struct LogOutput {
 }
 
 impl LogOutput {
+    /// Initializes logging state with no custom output stream.
     pub(super) fn new() -> Self {
         Self {
             enabled: AtomicU64::new(0),
@@ -76,6 +83,7 @@ impl LogOutput {
         }
     }
 
+    /// Configures logging flags and the output stream.
     pub(crate) fn set(&self, flags: [u8; 8], stream: *mut c_void) -> Status {
         let Ok(mut config) = self.config.lock() else {
             return ERROR;
@@ -90,6 +98,7 @@ impl LogOutput {
         SUCCESS
     }
 
+    /// Stops this session.
     pub(super) fn stop(&self) {
         let mut config = self
             .config
@@ -101,6 +110,7 @@ impl LogOutput {
         self.enabled.store(0, Ordering::Release);
     }
 
+    /// Writes a selected log line to the configured stream.
     fn write(&self, flag: u32, line: &[u8]) {
         let Some(_scope) = LogWriteScope::enter() else {
             return;
@@ -126,6 +136,7 @@ impl LogOutput {
         }
     }
 
+    /// Formats a log record while the runtime state is borrowed.
     pub(super) fn prepare(
         self: &Arc<Self>,
         tracker: &Arc<InFlightTracker>,
@@ -161,11 +172,13 @@ pub(crate) struct LogWork {
 }
 
 impl LogWork {
+    /// Writes a prepared log record after releasing the runtime lock.
     pub(crate) fn write(self) {
         self.output.write(self.flag, self.line.as_bytes());
     }
 }
 
+/// Checks whether a logging category is enabled in the flag array.
 pub(super) fn logging_flag_enabled(flags: [u8; 8], flag: u32) -> bool {
     usize::try_from(flag / 8)
         .ok()

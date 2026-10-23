@@ -10,6 +10,7 @@ use super::*;
     unsafe(export_name = "__hsa_impl_hsa_memory_allocate")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Allocates memory memory and returns its address.
 pub unsafe extern "C" fn hsa_memory_allocate(
     region: HsaRegion,
     size: usize,
@@ -34,6 +35,7 @@ pub unsafe extern "C" fn hsa_memory_allocate(
     unsafe(export_name = "__hsa_impl_hsa_memory_free")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Releases the memory resource.
 pub unsafe extern "C" fn hsa_memory_free(pointer: *mut c_void) -> Status {
     if pointer.is_null() {
         return boundary(|| {
@@ -57,6 +59,7 @@ pub unsafe extern "C" fn hsa_memory_free(pointer: *mut c_void) -> Status {
     unsafe(export_name = "__hsa_impl_hsa_memory_register")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Updates registration for the memory register HSA operation.
 pub extern "C" fn hsa_memory_register(pointer: *mut c_void, size: usize) -> Status {
     boundary(|| {
         let guard = match lock() {
@@ -78,6 +81,7 @@ pub extern "C" fn hsa_memory_register(pointer: *mut c_void, size: usize) -> Stat
     unsafe(export_name = "__hsa_impl_hsa_memory_deregister")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Updates registration for the memory deregister HSA operation.
 pub extern "C" fn hsa_memory_deregister(_pointer: *mut c_void, _size: usize) -> Status {
     boundary(|| {
         let guard = match lock() {
@@ -97,6 +101,7 @@ pub extern "C" fn hsa_memory_deregister(_pointer: *mut c_void, _size: usize) -> 
     unsafe(export_name = "__hsa_impl_hsa_memory_assign_agent")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Assigns an agent access to an HSA memory allocation.
 pub extern "C" fn hsa_memory_assign_agent(
     pointer: *mut c_void,
     agent: HsaAgent,
@@ -128,6 +133,7 @@ pub extern "C" fn hsa_memory_assign_agent(
     unsafe(export_name = "__hsa_impl_hsa_amd_agent_memory_pool_get_info")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Writes the requested agent-to-pool relationship attribute.
 pub unsafe extern "C" fn hsa_amd_agent_memory_pool_get_info(
     agent: HsaAgent,
     pool: HsaMemoryPool,
@@ -181,6 +187,7 @@ pub unsafe extern "C" fn hsa_amd_agent_memory_pool_get_info(
     })
 }
 
+/// Allocates native pool memory and publishes its HSA pointer metadata.
 unsafe fn memory_pool_allocate(
     pool: HsaMemoryPool,
     size: usize,
@@ -341,6 +348,7 @@ unsafe fn memory_pool_allocate(
     })
 }
 
+/// Retires an allocation that failed before frontend publication.
 fn retire_unpublished_memory(
     mut memory: Memory,
     in_flight: &InFlightGeneration,
@@ -361,6 +369,7 @@ fn retire_unpublished_memory(
     unsafe(export_name = "__hsa_impl_hsa_amd_memory_pool_allocate")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Allocates memory pool memory and returns its address.
 pub unsafe extern "C" fn hsa_amd_memory_pool_allocate(
     pool: HsaMemoryPool,
     size: usize,
@@ -376,6 +385,7 @@ pub unsafe extern "C" fn hsa_amd_memory_pool_allocate(
     unsafe(export_name = "__hsa_impl_hsa_amd_register_deallocation_callback")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Registers a callback for allocation deallocation.
 pub unsafe extern "C" fn hsa_amd_register_deallocation_callback(
     pointer: *mut c_void,
     callback: DeallocationCallbackFn,
@@ -442,6 +452,7 @@ pub unsafe extern "C" fn hsa_amd_register_deallocation_callback(
     unsafe(export_name = "__hsa_impl_hsa_amd_deregister_deallocation_callback")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Removes a registered deallocation callback.
 pub unsafe extern "C" fn hsa_amd_deregister_deallocation_callback(
     pointer: *mut c_void,
     callback: DeallocationCallbackFn,
@@ -505,6 +516,7 @@ pub unsafe extern "C" fn hsa_amd_deregister_deallocation_callback(
     unsafe(export_name = "__hsa_impl_hsa_amd_memory_pool_free")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Releases the memory pool resource.
 pub unsafe extern "C" fn hsa_amd_memory_pool_free(pointer: *mut c_void) -> Status {
     boundary(|| {
         enum Removed {

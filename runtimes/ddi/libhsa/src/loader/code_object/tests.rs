@@ -1,31 +1,45 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+//! Code-object parser and relocation regression tests.
+
 use super::*;
 
+/// Writes a little-endian 16-bit value into the ELF fixture.
 fn write_u16(bytes: &mut [u8], offset: usize, value: u16) {
     bytes[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
 }
 
+/// Writes a little-endian 32-bit value into the ELF fixture.
 fn write_u32(bytes: &mut [u8], offset: usize, value: u32) {
     bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
 }
 
+/// Writes a little-endian 64-bit value into the ELF fixture.
 fn write_u64(bytes: &mut [u8], offset: usize, value: u64) {
     bytes[offset..offset + 8].copy_from_slice(&value.to_le_bytes());
 }
 
+/// Writes a little-endian signed 64-bit ELF relocation value.
 fn write_i64(bytes: &mut [u8], offset: usize, value: i64) {
     bytes[offset..offset + 8].copy_from_slice(&value.to_le_bytes());
 }
 
+/// Builds a minimal GFX1201 code-object fixture.
 fn gfx1201_code_object() -> Vec<u8> {
+    /// Byte offset of the ELF section-header table.
     const SECTION_OFFSET: usize = 64;
+    /// Number of ELF section headers in the fixture.
     const SECTION_COUNT: usize = 5;
+    /// Byte offset of the ELF string table.
     const STRING_OFFSET: usize = SECTION_OFFSET + SECTION_COUNT * 64;
+    /// Byte offset of the ELF symbol table.
     const SYMBOL_OFFSET: usize = 448;
+    /// Byte offset of the executable text section.
     const TEXT_OFFSET: usize = 544;
+    /// Byte offset of the fixture data section.
     const DATA_OFFSET: usize = 608;
+    /// NUL-separated symbol names referenced by the fixture.
     const STRINGS: &[u8] = b"\0module::kernel.kd\0global\0";
     let mut bytes = vec![0_u8; DATA_OFFSET + 8];
     bytes[..4].copy_from_slice(b"\x7fELF");
@@ -97,6 +111,7 @@ fn gfx1201_code_object() -> Vec<u8> {
 }
 
 #[test]
+/// Checks parsing of GFX1201 code object metadata and symbols.
 fn parses_gfx1201_code_object_metadata_and_symbols() {
     let bytes = gfx1201_code_object();
     let layout = parse_elf_layout(&bytes);
@@ -137,6 +152,7 @@ fn parses_gfx1201_code_object_metadata_and_symbols() {
 }
 
 #[test]
+/// Checks rejection of non HSA ELF images.
 fn rejects_non_hsa_elf_images() {
     let mut bytes = gfx1201_code_object();
     bytes[7] = 0;
@@ -144,6 +160,7 @@ fn rejects_non_hsa_elf_images() {
 }
 
 #[test]
+/// Checks rejection of truncated and corrupt ELF tables.
 fn rejects_truncated_and_corrupt_elf_tables() {
     let original = gfx1201_code_object();
     // The last section header ends at byte 384. Every shorter prefix is
@@ -209,6 +226,7 @@ fn rejects_truncated_and_corrupt_elf_tables() {
 }
 
 #[test]
+/// Verifies that generated ELF mutations keep parser and relocator bounded.
 fn generated_elf_mutations_keep_parser_and_relocator_bounded() {
     let original = gfx1201_code_object();
     let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
@@ -240,11 +258,17 @@ fn generated_elf_mutations_keep_parser_and_relocator_bounded() {
 }
 
 #[test]
+/// Checks application of relative and defined absolute relocations.
 fn applies_relative_and_defined_absolute_relocations() {
+    /// Byte extent of one ELF section-header entry.
     const SECTION_ENTRY_SIZE: usize = 64;
+    /// Number of sections in the relocation fixture.
     const SECTION_COUNT: usize = 4;
+    /// Byte offset of the symbol table in the fixture.
     const SYMBOL_OFFSET: usize = SECTION_ENTRY_SIZE * SECTION_COUNT;
+    /// Byte offset of the relocation table in the fixture.
     const RELOCATION_OFFSET: usize = SYMBOL_OFFSET + 48;
+    /// Byte offset of the string table in the fixture.
     const STRING_OFFSET: usize = RELOCATION_OFFSET + 48;
     let mut bytes = vec![0_u8; STRING_OFFSET + 1];
 

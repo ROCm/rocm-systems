@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-//! HSA C ABI entry points for this domain.
+//! Process initialization and shutdown entry points for the HSA C ABI.
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
 use crate::api_trace;
@@ -9,6 +9,7 @@ use crate::ffi::*;
 use crate::runtime::{HsaState, LifecycleTransition, boundary, lock};
 use crate::{runtime, signal};
 
+/// Finishes shutdown after deferred native work has released its owners.
 fn complete_deferred_shutdown(runtime: HsaState, generation: u64) {
     let mut transition = LifecycleTransition::stopping(generation);
     let status = runtime.stop();
@@ -27,6 +28,7 @@ fn complete_deferred_shutdown(runtime: HsaState, generation: u64) {
     unsafe(export_name = "__hsa_impl_hsa_init")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Initializes the process HSA runtime and increments its reference count.
 pub extern "C" fn hsa_init() -> Status {
     boundary(|| {
         let generation = {
@@ -89,6 +91,7 @@ pub extern "C" fn hsa_init() -> Status {
     unsafe(export_name = "__hsa_impl_hsa_shut_down")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Releases one HSA initialization reference and tears down the final state.
 pub extern "C" fn hsa_shut_down() -> Status {
     boundary(|| {
         if runtime::LogWriteScope::active() {

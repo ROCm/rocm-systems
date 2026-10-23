@@ -22,6 +22,7 @@ unsafe fn write_uri(value: *mut c_void, uri: &[u8]) {
     unsafe(export_name = "__hsa_impl_hsa_ven_amd_loader_query_host_address")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Translates a loaded device address to its host mapping.
 pub unsafe extern "C" fn hsa_ven_amd_loader_query_host_address(
     device_address: *const c_void,
     host_address: *mut *const c_void,
@@ -53,6 +54,7 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_query_host_address(
     unsafe(export_name = "__hsa_impl_hsa_ven_amd_loader_query_segment_descriptors")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Copies descriptors for loaded executable segments.
 pub unsafe extern "C" fn hsa_ven_amd_loader_query_segment_descriptors(
     segment_descriptors: *mut HsaLoaderSegmentDescriptor,
     num_segment_descriptors: *mut usize,
@@ -133,6 +135,7 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_query_segment_descriptors(
     unsafe(export_name = "__hsa_impl_hsa_ven_amd_loader_query_executable")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Finds the executable containing a loaded device address.
 pub unsafe extern "C" fn hsa_ven_amd_loader_query_executable(
     device_address: *const c_void,
     executable: *mut HsaExecutable,
@@ -175,6 +178,7 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_query_executable(
     unsafe(export_name = "__hsa_impl_hsa_ven_amd_loader_executable_iterate_loaded_code_objects")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Visits code objects loaded into an executable.
 pub unsafe extern "C" fn hsa_ven_amd_loader_executable_iterate_loaded_code_objects(
     executable: HsaExecutable,
     callback: LoadedCodeObjectCallback,
@@ -220,6 +224,7 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_executable_iterate_loaded_code_objec
     unsafe(export_name = "__hsa_impl_hsa_ven_amd_loader_loaded_code_object_get_info")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Writes a requested loaded-code-object attribute.
 pub unsafe extern "C" fn hsa_ven_amd_loader_loaded_code_object_get_info(
     loaded_code_object: HsaLoadedCodeObject,
     attribute: u32,
@@ -294,6 +299,7 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_loaded_code_object_get_info(
     )
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Snapshots a bounded file range into a code-object reader.
 pub unsafe extern "C" fn hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size(
     file: i32,
     offset: usize,
@@ -348,6 +354,7 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_code_object_reader_create_from_file_
     unsafe(export_name = "__hsa_impl_hsa_ven_amd_loader_iterate_executables")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Visits all live executable handles.
 pub unsafe extern "C" fn hsa_ven_amd_loader_iterate_executables(
     callback: ExecutableCallback,
     data: *mut c_void,

@@ -50,6 +50,7 @@ enum ReaderStorage {
 }
 
 impl ReaderStorage {
+    /// Builds this value from file.
     fn from_file(descriptor: i32, offset: usize, size: usize) -> Self {
         crate::platform::code_object_file_uri(descriptor, offset, size)
             .map_or(Self::Memory, |uri| Self::File { uri })
@@ -128,6 +129,7 @@ pub(crate) struct LoadedMetadata {
     uri: Vec<u8>,
 }
 
+/// Loader owner for an executable or code object.
 type LoadedObject = rocloader::LoadedObject<LoadedMetadata>;
 
 /// HSA profile and rounding policy around the reusable executable owner.
@@ -158,6 +160,7 @@ pub(crate) fn loaded_host_range(
 }
 
 #[cfg(test)]
+/// Converts test load segments through the production loader mapping.
 fn loaded_segments(
     loads: &[LoadSegment],
     device_base: u64,
@@ -189,6 +192,7 @@ pub(crate) struct LoaderState {
 }
 
 impl LoaderState {
+    /// Initializes the code-object and executable handle registries.
     pub(crate) fn new() -> Self {
         Self {
             code_objects: HashMap::new(),
@@ -217,6 +221,7 @@ mod reader;
 use code_object::map_loader_error;
 
 #[cfg(any(test, not(target_arch = "x86_64")))]
+/// Returns the loader extension functions in public ABI table order.
 pub(crate) fn loader_extension_table() -> [usize; 7] {
     [
         query::hsa_ven_amd_loader_query_host_address as *const () as usize,

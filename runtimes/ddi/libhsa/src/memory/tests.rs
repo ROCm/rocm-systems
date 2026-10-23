@@ -1,12 +1,15 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+//! Memory, SVM, interop, and virtual-memory regression tests.
+
 use super::allocation::*;
 use super::interop::*;
 use super::virtual_memory::*;
 use super::*;
 
 #[test]
+/// Verifies that execute access permission matches the native bitmask.
 fn execute_access_permission_matches_the_native_bitmask() {
     assert_eq!(ACCESS_PERMISSION_EX, DeviceAccess::EXECUTE.bits());
     assert_eq!(
@@ -22,6 +25,8 @@ fn execute_access_permission_matches_the_native_bitmask() {
 }
 
 #[test]
+/// Verifies that completed memory workers are reaped without joining active
+/// work.
 fn completed_memory_workers_are_reaped_without_joining_active_work() {
     let mut state = MemoryState::new();
     let stop = Arc::new(AtomicBool::new(false));
@@ -48,6 +53,7 @@ fn completed_memory_workers_are_reaped_without_joining_active_work() {
 }
 
 #[test]
+/// Verifies that pointer info matches the public x86 64 ABI.
 fn pointer_info_matches_the_public_x86_64_abi() {
     assert_eq!(size_of::<HsaAmdPointerInfo>(), 64);
     assert_eq!(std::mem::align_of::<HsaAmdPointerInfo>(), 8);
@@ -70,9 +76,14 @@ fn pointer_info_matches_the_public_x86_64_abi() {
 }
 
 #[test]
+/// Verifies that IPC attach does not clobber an aliased input on failure.
 fn ipc_attach_does_not_clobber_an_aliased_input_on_failure() {
     #[repr(align(8))]
-    struct AlignedHandle(HsaAmdIpcMemory);
+    /// Aligns a shared IPC handle for an aliasing test.
+    struct AlignedHandle(
+        /// IPC handle whose input and output pointers alias in this test.
+        HsaAmdIpcMemory,
+    );
 
     let original = [0xfeed_beef_u32; 8];
     let mut handle = AlignedHandle(HsaAmdIpcMemory { handle: original });
@@ -92,6 +103,7 @@ fn ipc_attach_does_not_clobber_an_aliased_input_on_failure() {
 }
 
 #[test]
+/// Verifies that allow access rejects reserved flags before runtime lookup.
 fn allow_access_rejects_reserved_flags_before_runtime_lookup() {
     let agent = HsaAgent {
         handle: GPU_AGENT_BASE,
@@ -112,6 +124,7 @@ fn allow_access_rejects_reserved_flags_before_runtime_lookup() {
 }
 
 #[test]
+/// Verifies that registered range aligns native pages and preserves host offset.
 fn registered_range_aligns_native_pages_and_preserves_host_offset() {
     assert_eq!(
         registered_range(0x10_000, 1, 4096),
@@ -137,6 +150,7 @@ fn registered_range_aligns_native_pages_and_preserves_host_offset() {
 }
 
 #[test]
+/// Verifies that registered GPU alias translates to host backing.
 fn registered_gpu_alias_translates_to_host_backing() {
     let description = PointerDescription {
         pointer_type: POINTER_TYPE_LOCKED,
@@ -173,6 +187,7 @@ fn registered_gpu_alias_translates_to_host_backing() {
 }
 
 #[test]
+/// Verifies that private graphics addresses do not claim a CPU mapping.
 fn private_graphics_addresses_do_not_claim_a_cpu_mapping() {
     let description = PointerDescription {
         pointer_type: POINTER_TYPE_GRAPHICS,
@@ -194,6 +209,7 @@ fn private_graphics_addresses_do_not_claim_a_cpu_mapping() {
 }
 
 #[test]
+/// Verifies that external memory entry points match the linux public ABI.
 fn external_memory_entry_points_match_the_linux_public_abi() {
     assert_eq!(size_of::<HsaAmdIpcMemory>(), 32);
     assert_eq!(align_of::<HsaAmdIpcMemory>(), 4);
@@ -264,6 +280,7 @@ fn external_memory_entry_points_match_the_linux_public_abi() {
 }
 
 #[test]
+/// Verifies that virtual memory entry points match the public ABI.
 fn virtual_memory_entry_points_match_the_public_abi() {
     assert_eq!(size_of::<HsaAmdVmemAllocHandle>(), 8);
     assert_eq!(align_of::<HsaAmdVmemAllocHandle>(), 8);
@@ -309,6 +326,7 @@ fn virtual_memory_entry_points_match_the_public_abi() {
 }
 
 #[test]
+/// Verifies that virtual mapping contains only its half open range.
 fn virtual_mapping_contains_only_its_half_open_range() {
     let mapping = VmemMapping {
         handle: 1,
@@ -324,6 +342,7 @@ fn virtual_mapping_contains_only_its_half_open_range() {
 }
 
 #[test]
+/// Verifies that virtual map rejects unaligned addresses before runtime lookup.
 fn virtual_map_rejects_unaligned_addresses_before_runtime_lookup() {
     let page = current_host_page().unwrap();
     assert_eq!(
@@ -339,6 +358,7 @@ fn virtual_map_rejects_unaligned_addresses_before_runtime_lookup() {
 }
 
 #[test]
+/// Verifies that AIS transfer preserves offsets partial reads and status.
 fn ais_transfer_preserves_offsets_partial_reads_and_status()
 -> Result<(), Box<dyn std::error::Error>> {
     use std::fs::OpenOptions;
@@ -450,6 +470,7 @@ fn ais_transfer_preserves_offsets_partial_reads_and_status()
 }
 
 #[test]
+/// Verifies that deallocation callback entry points match the public ABI.
 fn deallocation_callback_entry_points_match_the_public_abi() {
     let _: unsafe extern "C" fn(*mut c_void, DeallocationCallbackFn, *mut c_void) -> Status =
         hsa_amd_register_deallocation_callback;
@@ -458,6 +479,7 @@ fn deallocation_callback_entry_points_match_the_public_abi() {
 }
 
 #[test]
+/// Verifies that migration entry points match the public ABI.
 fn migration_entry_points_match_the_public_abi() {
     let _: unsafe extern "C" fn(HsaMemoryPool, HsaMemoryPool, *mut bool) -> Status =
         hsa_amd_memory_pool_can_migrate;
@@ -466,6 +488,7 @@ fn migration_entry_points_match_the_public_abi() {
 }
 
 #[test]
+/// Verifies that base memory entry points match the public ABI.
 fn base_memory_entry_points_match_the_public_abi() {
     let _: unsafe extern "C" fn(HsaRegion, usize, *mut *mut c_void) -> Status = hsa_memory_allocate;
     let _: unsafe extern "C" fn(*mut c_void) -> Status = hsa_memory_free;
@@ -476,6 +499,7 @@ fn base_memory_entry_points_match_the_public_abi() {
 }
 
 #[test]
+/// Verifies that zero length memory operations skip address resolution.
 fn zero_length_memory_operations_skip_address_resolution() {
     let aligned = align_of::<u32>() as *mut c_void;
     assert_eq!(memory_copy_has_work(aligned, aligned, 0), Ok(false));
@@ -504,6 +528,7 @@ fn zero_length_memory_operations_skip_address_resolution() {
 }
 
 #[test]
+/// Verifies that rectangular copy entry point matches the public ABI.
 fn rectangular_copy_entry_point_matches_the_public_abi() {
     let _: unsafe extern "C" fn(
         *const HsaPitchedPtr,
@@ -525,6 +550,7 @@ fn rectangular_copy_entry_point_matches_the_public_abi() {
 }
 
 #[test]
+/// Verifies that batch copy entry point and descriptor match the public ABI.
 fn batch_copy_entry_point_and_descriptor_match_the_public_abi() {
     let _: unsafe extern "C" fn(*const HsaAmdMemoryCopyOp, u32, u32, *const HsaSignal) -> Status =
         hsa_amd_memory_async_batch_copy;
@@ -542,6 +568,7 @@ fn batch_copy_entry_point_and_descriptor_match_the_public_abi() {
 }
 
 #[test]
+/// Verifies that async copy entry points preserve no init validation.
 fn async_copy_entry_points_preserve_no_init_validation() {
     let agent = HsaAgent { handle: 0 };
     let completion = HsaSignal { handle: 1 };
@@ -605,6 +632,7 @@ fn async_copy_entry_points_preserve_no_init_validation() {
 }
 
 #[test]
+/// Verifies that SVM entry points match the public ABI.
 fn svm_entry_points_match_the_public_abi() {
     assert_eq!(size_of::<HsaAmdSvmAttributePair>(), 16);
     assert_eq!(align_of::<HsaAmdSvmAttributePair>(), 8);
@@ -641,6 +669,7 @@ fn svm_entry_points_match_the_public_abi() {
 }
 
 #[test]
+/// Verifies that SVM ranges cover each touched page.
 fn svm_ranges_cover_each_touched_page() {
     let page = current_host_page().unwrap();
     let page_address = page as u64;
@@ -655,6 +684,7 @@ fn svm_ranges_cover_each_touched_page() {
 }
 
 #[test]
+/// Verifies that portable close works without an initialized runtime.
 fn portable_close_works_without_an_initialized_runtime() {
     use std::os::fd::IntoRawFd;
 
@@ -664,6 +694,7 @@ fn portable_close_works_without_an_initialized_runtime() {
 }
 
 #[test]
+/// Verifies that portable export checks initialization before arguments.
 fn portable_export_checks_initialization_before_arguments() {
     assert!(lock().is_ok_and(|runtime| runtime.as_ref().is_none()));
 
@@ -700,6 +731,7 @@ fn portable_export_checks_initialization_before_arguments() {
 }
 
 #[test]
+/// Verifies that memory lock checks initialization before arguments.
 fn memory_lock_checks_initialization_before_arguments() {
     assert!(lock().is_ok_and(|runtime| runtime.as_ref().is_none()));
 
@@ -741,6 +773,7 @@ fn memory_lock_checks_initialization_before_arguments() {
 }
 
 #[test]
+/// Verifies that CPU pool allocations preserve their cache policy.
 fn cpu_pool_allocations_preserve_their_cache_policy() {
     for (pool, cache) in [
         (CPU_POOL_FINE, HostMappingPolicy::Fine),
@@ -779,6 +812,7 @@ fn cpu_pool_allocations_preserve_their_cache_policy() {
 }
 
 #[test]
+/// Verifies that GFX12 GPU pool and region enumeration matches `ROCr`.
 fn gfx12_gpu_pool_and_region_enumeration_matches_rocr() {
     let index = 2;
     let pools = gpu_agent_pools(index, false, false)
@@ -838,6 +872,7 @@ fn gfx12_gpu_pool_and_region_enumeration_matches_rocr() {
 }
 
 #[test]
+/// Verifies that agent pool access matches `ROCr` relationships.
 fn agent_pool_access_matches_rocr_relationships() {
     assert_eq!(
         pool_access(true, PoolStorage::System, false, false),
@@ -878,6 +913,7 @@ fn agent_pool_access_matches_rocr_relationships() {
 }
 
 #[test]
+/// Verifies that topology link types use the HSA AMD encoding.
 fn topology_link_types_use_the_hsa_amd_encoding() {
     assert_eq!(hsa_link_type(MemoryLinkType::HyperTransport), 0);
     assert_eq!(hsa_link_type(MemoryLinkType::Qpi), 1);
