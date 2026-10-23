@@ -454,6 +454,7 @@ void Sysfs::write_drm_tree(const std::vector<GpuInfo> &gpus) {
     uint32_t render_minor = gpu.drm_render_minor;
     std::string render_name = "renderD" + std::to_string(render_minor);
     std::string card_name = "card" + std::to_string(i);
+    const std::string vram_capacity = std::to_string(gpu.local_mem_size) + "\n";
 
     std::ostringstream vendor_hex, device_hex, revision_hex;
     vendor_hex << "0x" << std::hex << gpu.vendor_id << "\n";
@@ -493,6 +494,9 @@ void Sysfs::write_drm_tree(const std::vector<GpuInfo> &gpus) {
         write_file(instance_dir + "/minor", std::to_string(block.minor) + "\n");
         write_file(instance_dir + "/revision", std::to_string(block.revision) + "\n");
       }
+      // All advertised VRAM is CPU-visible, matching AMDGPU_INFO_MEMORY and VRAM_GTT.
+      write_file(device_dir + "/mem_info_vram_total", vram_capacity);
+      write_file(device_dir + "/mem_info_vis_vram_total", vram_capacity);
     }
   }
 

@@ -123,6 +123,14 @@ rocjitsu --daemon --config configs/gfx950_mi355x_kmd.json -- ./my_hip_app
 
 See [docs/rocjitsu-cli.md](docs/rocjitsu-cli.md) for all CLI modes.
 
+Local Linux simulation exposes KFD 1.19 secondary contexts through
+`AMDKFD_IOC_CREATE_PROCESS`. Each independent KFD open starts in the primary
+context; duplicated descriptors share context selection and secondary cleanup.
+KFD allocations, DRM VM bindings and GPU virtual addresses follow that context.
+Secondary contexts reject USERPTR allocation, KFD SVM and debug-trap operations,
+matching the native interface. The daemon and guest interfaces continue to
+expose KFD 1.18 because they do not carry per-open context selection.
+
 ## VGPR observation contract
 
 Execution plugins observe architectural instruction-level VGPR reads and

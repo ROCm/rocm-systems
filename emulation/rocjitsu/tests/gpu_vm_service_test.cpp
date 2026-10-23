@@ -2185,7 +2185,13 @@ TEST(CommandProcessorQueueRegistration, RejectsInvalidAqlRingLayoutsAtDirectBoun
   EXPECT_FALSE(command_processor.update_queue_registration(registration_id, 0x200, 0, 100));
   EXPECT_FALSE(command_processor.update_queue_registration(registration_id, 0x200, 63, 100));
   EXPECT_FALSE(command_processor.update_queue_registration(registration_id, 0x200, 65, 100));
+  EXPECT_TRUE(command_processor.update_queue_registration(registration_id, 0, 0, 0));
+  EXPECT_TRUE(command_processor.update_queue_registration(registration_id, 0, 1024, 0));
+  EXPECT_TRUE(command_processor.queue_runtime_suspended_for_test(1, 7));
+  EXPECT_FALSE(command_processor.update_queue_registration(registration_id, 0, 64, 100));
+  EXPECT_TRUE(command_processor.queue_runtime_suspended_for_test(1, 7));
   EXPECT_TRUE(command_processor.update_queue_registration(registration_id, 0x200, 64, 100));
+  EXPECT_FALSE(command_processor.queue_runtime_suspended_for_test(1, 7));
   EXPECT_TRUE(command_processor.unregister_queue_registration(registration_id));
 }
 
@@ -2320,6 +2326,8 @@ TEST(GpuVmService, AqlReconfigureRejectsInvalidRingGeometry) {
           .ring_base_address = 0x200, .ring_size_bytes = 63, .scheduling_percentage = 100},
       QueueReconfigureRequest{
           .ring_base_address = 0x200, .ring_size_bytes = 65, .scheduling_percentage = 100},
+      QueueReconfigureRequest{
+          .ring_base_address = 0x200, .ring_size_bytes = 64, .scheduling_percentage = 101},
   };
   for (const QueueReconfigureRequest request : invalid) {
     const QueueReconfigureResult result = queues.reconfigure_queue(queue, request);
@@ -2331,6 +2339,26 @@ TEST(GpuVmService, AqlReconfigureRejectsInvalidRingGeometry) {
       queue, {.ring_base_address = 0x200, .ring_size_bytes = 64, .scheduling_percentage = 0});
   EXPECT_TRUE(disabled.found);
   EXPECT_EQ(disabled.status, QueueReconfigureStatus::Disabled);
+
+  for (const uint32_t ring_size : {0u, 1024u}) {
+    const QueueReconfigureResult ringless = queues.reconfigure_queue(
+        queue, {.ring_base_address = 0, .ring_size_bytes = ring_size, .scheduling_percentage = 0});
+    EXPECT_TRUE(ringless.found);
+    EXPECT_EQ(ringless.status, QueueReconfigureStatus::Disabled);
+    EXPECT_TRUE(command_processor.queue_runtime_suspended_for_test(1, 7));
+  }
+  EXPECT_EQ(queues
+                .reconfigure_queue(
+                    queue,
+                    {.ring_base_address = 0, .ring_size_bytes = 1024, .scheduling_percentage = 100})
+                .status,
+            QueueReconfigureStatus::Invalid);
+  EXPECT_TRUE(command_processor.queue_runtime_suspended_for_test(1, 7));
+  const QueueReconfigureResult resumed = queues.reconfigure_queue(
+      queue, {.ring_base_address = 0x200, .ring_size_bytes = 64, .scheduling_percentage = 100});
+  EXPECT_TRUE(resumed.found);
+  EXPECT_EQ(resumed.status, QueueReconfigureStatus::Applied);
+  EXPECT_FALSE(command_processor.queue_runtime_suspended_for_test(1, 7));
 
   EXPECT_TRUE(queues.unregister_queue(queue));
   EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
@@ -2431,6 +2459,12 @@ TEST(GpuVmService, StaleAqlBindingCannotChangeOrRemoveReusedQueueIdentity) {
 
   EXPECT_EQ(stale.binding->reconfigure(
                 {.ring_base_address = 0x2000, .ring_size_bytes = 4096, .scheduling_percentage = 0}),
+            QueueReconfigureStatus::Stale);
+  EXPECT_FALSE(command_processor.queue_runtime_suspended_for_test(request.identity.queue_id,
+                                                                  request.identity.process_id));
+
+  EXPECT_EQ(stale.binding->reconfigure(
+                {.ring_base_address = 0, .ring_size_bytes = 0, .scheduling_percentage = 0}),
             QueueReconfigureStatus::Stale);
   EXPECT_FALSE(command_processor.queue_runtime_suspended_for_test(request.identity.queue_id,
                                                                   request.identity.process_id));

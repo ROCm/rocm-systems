@@ -174,6 +174,17 @@ public:
   /// @{
   int open() override;
   int close() override;
+  int open_file() override;
+  std::shared_ptr<OpenFile> local_file(int descriptor) override;
+  void track_local_file(int descriptor, std::shared_ptr<OpenFile> file) override;
+  void untrack_local_file(int descriptor) override;
+  int ioctl_file(int descriptor, unsigned long request, void *arg) override;
+  void *mmap_file(int descriptor, void *addr, size_t length, int prot, int flags,
+                  off_t offset) override;
+  /// Context selected by this KFD open file; internal calls use the primary.
+  uint32_t process_id_for_file(int descriptor);
+  /// Create an independent local context with its own GPU address spaces.
+  uint32_t open_secondary_process();
 
   /// @brief Add one open reference to the local process without re-opening.
   /// @details Used by the interposer when an existing KFD fd is duplicated
@@ -447,7 +458,8 @@ public:
   /// COHERENT for the interposer's GEM_VA path.
   static amdgpu::Mtype pte_mtype_for_flags(uint32_t alloc_flags, bool shared = false);
   /// @brief Submit compute IBs to the CP assigned to a DRM file/context/ring key.
-  int submit_pm4(uint32_t render_minor, uint64_t queue_key, amdgpu::Pm4Submission submission);
+  int submit_pm4(uint32_t render_minor, uint64_t queue_key, amdgpu::Pm4Submission submission,
+                 uint32_t process_id = 0);
   /// Cancel accepted work and release the queue owned by one DRM context/ring.
   void retire_pm4_queue(uint64_t queue_key);
 
@@ -462,12 +474,12 @@ public:
   /// @retval false the local process is gone, so nothing was mapped (the caller
   ///         must surface an error rather than report a phantom success).
   [[nodiscard]] bool gem_va_map(uint64_t gpu_va, void *host_ptr, size_t size, uint32_t alloc_flags,
-                                bool sealed_ram = false);
+                                bool sealed_ram = false, uint32_t process_id = 0);
 
   /// @brief Remove a GPU page-table range installed by gem_va_map (GEM_VA UNMAP).
   /// @retval true the range was unmapped.
   /// @retval false the local process is gone, so nothing was unmapped.
-  [[nodiscard]] bool gem_va_unmap(uint64_t gpu_va, size_t size);
+  [[nodiscard]] bool gem_va_unmap(uint64_t gpu_va, size_t size, uint32_t process_id = 0);
 
   /// @brief Keep DRM BO state with the local allocations backed by the file @p st describes.
   /// @details A KFD allocation's BO, with its UMD metadata, outlives every GEM handle
@@ -491,7 +503,7 @@ public:
   /// capture the GPU PTE MTYPE flags at EXPORT_DMABUF time (before the allocation
   /// may be freed). Includes sharing policy without changing the requested flags
   /// returned by the KFD ABI.
-  uint32_t mapping_flags_for_handle(uint64_t handle) const;
+  uint32_t mapping_flags_for_handle(uint64_t handle, uint32_t process_id = 0) const;
 
   /// @brief Per-GPU device state (mirrors kfd_dev in the kernel).
   struct GpuDevice {
@@ -523,6 +535,8 @@ private:
 
   /// @brief Look up the local-mode process.
   std::shared_ptr<KfdProcess> find_local_process() const;
+  /// Context owning a doorbell mapping, including independent secondary contexts.
+  std::shared_ptr<KfdProcess> find_doorbell_process(const void *addr, size_t length) const;
 
   /// @brief Look up a KfdProcess by its client (Linux) pid. Used by
   /// AMDKFD_IOC_DBG_TRAP to resolve the debug target, mirroring the kernel's
@@ -767,6 +781,10 @@ private:
   void init_command_processors_locked();
 
   std::vector<GpuDevice> gpus_;
+  /// Serializes descriptor aliases without nesting process teardown under this lock.
+  std::mutex local_files_mutex_;
+  /// Application file descriptions; duplicated descriptors share one selector.
+  std::unordered_map<int, std::shared_ptr<OpenFile>> local_files_;
   /// @brief Serializes each per-GPU unsupported-CWSR warning latch and log.
   std::mutex cwsr_layout_warning_mutex_;
   bool daemon_mode_ = false;
@@ -812,7 +830,16 @@ private:
   /// @brief PM4 queue registry; nests outside CP queue locks, never inside process_mutex_.
   /// The engine does not acquire this mutex when completing a submission.
   std::mutex pm4_mutex_;
-  std::unordered_map<uint64_t, std::pair<amdgpu::CommandProcessor *, uint32_t>> pm4_queues_;
+  struct Pm4Queue {
+    /// Command processor owning the registered queue.
+    amdgpu::CommandProcessor *command_processor;
+    /// Hardware queue identifier within the command processor.
+    uint32_t queue_id;
+    /// KFD context owning the queue and its GPU address space.
+    uint32_t process_id;
+  };
+  /// Registered PM4 queues indexed by the interposer's globally unique queue key.
+  std::unordered_map<uint64_t, Pm4Queue> pm4_queues_;
   static constexpr uint32_t kPm4QueueIdBase = 0x80000000; ///< Separate from KFD queue IDs.
   uint32_t next_pm4_queue_id_ = kPm4QueueIdBase;
   std::unordered_map<uint32_t, std::shared_ptr<KfdProcess>> processes_;

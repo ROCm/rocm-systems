@@ -220,14 +220,15 @@ class WorkflowScopeTests(unittest.TestCase):
     def test_project_scopes_and_documentation_exclusions(self) -> None:
         for name in ("cuid", "rocprofiler-compute"):
             with self.subTest(name=name):
-                self.assertTrue(self.affected(name, f"projects/{name}/src/runtime.cpp"))
+                directory = f"shared/{name}" if name == "cuid" else f"projects/{name}"
+                self.assertTrue(self.affected(name, f"{directory}/src/runtime.cpp"))
                 self.assertTrue(
                     self.affected(name, f".github/workflows/{name}-formatting.yml")
                 )
                 for path in ("README.md", "docs/conf.py", ".readthedocs.yaml"):
-                    self.assertFalse(self.affected(name, f"projects/{name}/{path}"))
+                    self.assertFalse(self.affected(name, f"{directory}/{path}"))
                 self.assertFalse(self.affected(name, "runtimes/src/lib.rs"))
-                self.assertTrue(self.affected(name, f"projects/{name}/README.md\n"))
+                self.assertTrue(self.affected(name, f"{directory}/README.md\n"))
 
     def test_shared_action_changes_activate_every_scope(self) -> None:
         for name in ("runtimes", "rocjitsu", "cuid", "rocprofiler-compute"):

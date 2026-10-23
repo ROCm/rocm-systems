@@ -656,12 +656,12 @@ public:
       return {};
     }
     LocalOpen result;
-    result.fd = drv->open();
+    result.fd = drv->open_file();
     if (result.fd < 0)
       return result;
     if (result.fd != drv->fd())
       track_open_fd(result.fd);
-    result.clear_dups_needed = !drv->owns_fd(drv->fd());
+    result.clear_dups_needed = result.fd == drv->fd() && !drv->owns_fd(drv->fd());
     return result;
   }
 
@@ -984,7 +984,16 @@ public:
   /// fd or its backend is no longer active. On a non-nullopt return the caller
   /// MUST consume the reservation exactly once: commit_dup() on syscall success,
   /// or release_backend() on syscall failure.
-  [[nodiscard]] std::optional<DupBackend> reserve_dup_backend(int src_fd) {
+  struct DupReservation {
+    /// Backend reference balanced independently from file-description ownership.
+    DupBackend backend;
+    /// Pins the driver until the retained file description is released.
+    std::shared_ptr<LinuxKfd> local_driver;
+    /// Context selection shared by all aliases of the source open file.
+    std::shared_ptr<LinuxKfd::OpenFile> file;
+  };
+
+  [[nodiscard]] std::optional<DupReservation> reserve_dup_backend(int src_fd) {
     // Classify once WITHOUT init_mutex_ first, purely to get out of the way. Every
     // dup/dup2/dup3/fcntl(F_DUPFD*) in the process reaches here, on any descriptor,
     // and init_mutex_ is held for the whole of VM bring-up and teardown -- so taking
@@ -1008,12 +1017,15 @@ public:
       return std::nullopt;
     if (!retain_backend(*backend))
       return std::nullopt; // backend went away before we could reserve.
-    return backend;
+    auto local_driver = *backend == DupBackend::Local ? driver() : nullptr;
+    auto file = local_driver ? local_driver->local_file(src_fd) : nullptr;
+    return DupReservation{*backend, std::move(local_driver), std::move(file)};
   }
 
   /// @brief Record a dup fd whose backend reference was already reserved via
   /// reserve_dup_backend(). Consumes exactly that one reserved reference.
-  void commit_dup(int fd, DupBackend backend) {
+  void commit_dup(int fd, const DupReservation &reservation) {
+    const auto backend = reservation.backend;
     // Classify first, then release_backend(): the classification only reads the
     // driver, while release_backend() may drop the last reference and free it.
     bool aliases_primary = false;
@@ -1032,6 +1044,8 @@ public:
     {
       std::lock_guard lock(fd_mutex_);
       inserted = kfd_dup_fds_.emplace(fd, backend).second;
+      if (inserted && reservation.local_driver && reservation.file)
+        reservation.local_driver->track_local_file(fd, reservation.file);
     }
     if (!inserted)
       // fd already tracked (dup returned a recycled number we still hold): undo
@@ -1053,8 +1067,13 @@ public:
         was_tracked = true;
       }
     }
-    if (was_tracked)
+    if (was_tracked) {
+      if (backend == DupBackend::Local) {
+        if (auto local = driver())
+          local->untrack_local_file(fd);
+      }
       release_backend(backend);
+    }
   }
 
   /// @brief Drop all KFD identity/references for an fd number that dup2/dup3 is
@@ -1142,20 +1161,25 @@ public:
   }
 
   void clear_dups() {
-    std::vector<DupBackend> released;
+    std::vector<std::pair<int, DupBackend>> released;
     {
       std::lock_guard lock(fd_mutex_);
       released.reserve(kfd_dup_fds_.size());
       for (auto &[fd, backend] : kfd_dup_fds_)
-        released.push_back(backend);
+        released.emplace_back(fd, backend);
       kfd_dup_fds_.clear();
     }
     // Drop the references the cleared dups were holding, each on the backend it
     // was tracked against. Used when a fresh open() rebinds the local process;
     // the just-opened reference is preserved because clear_dups runs before any
     // new dups are tracked.
-    for (DupBackend backend : released)
+    for (const auto &[descriptor, backend] : released) {
+      if (backend == DupBackend::Local) {
+        if (auto local = driver())
+          local->untrack_local_file(descriptor);
+      }
       release_backend(backend);
+    }
   }
 
   /// @brief Tear down the remote connection state. Caller MUST hold remote_mutex_.
@@ -1459,6 +1483,8 @@ public:
   struct DrmFileState {
     uint64_t id = 0;
     uint32_t render_minor = 128;
+    /// GPU context acquired through KFD; zero uses the primary before acquisition.
+    std::atomic<uint32_t> kfd_process_id{0};
     /// @brief Operational reference to the backend this DRM file belongs to.
     /// @details A synthetic render fd owns GEM mappings whose teardown
     /// (reap_gem_for_drm_file -> gem_va_unmap) must reach the driver that installed
@@ -2456,6 +2482,8 @@ public:
     void *cpu_ptr = nullptr;
     bool sealed_ram = false;
     SimulatedKfd *owner = nullptr;
+    /// Context in which this entry installed GPU translations.
+    uint32_t process_id = 0;
     std::vector<GemMapping> installed_vas;
   };
 
@@ -2740,7 +2768,8 @@ public:
           finished->failed.store(true, std::memory_order_release);
         notify_syncobj_waiters(file);
       };
-      int result = driver->submit_pm4(file->render_minor, queue_key, std::move(submission));
+      int result = driver->submit_pm4(file->render_minor, queue_key, std::move(submission),
+                                      file->kfd_process_id.load(std::memory_order_acquire));
       {
         std::lock_guard lock(fd_mutex_);
         // A concurrent final close may already have retired this file's queues.
@@ -3170,6 +3199,12 @@ public:
     return exported;
   }
 
+  uint32_t drm_process_id(const DrmFileToken &file) {
+    const uint32_t selected = file->kfd_process_id.load(std::memory_order_acquire);
+    auto *simulated = drm_file_simulated(file);
+    return selected ? selected : (simulated ? simulated->local_process_id() : 0);
+  }
+
   /// @brief Install or replace a resident mapping or sparse VA reservation.
   /// @details Serializes range bookkeeping, PTE updates and output timeline signals
   /// under fd_mutex_, so GEM_CLOSE cannot remove backing during an update. Resident
@@ -3205,25 +3240,23 @@ public:
     if ((va_address | offset_in_bo | map_size) & 4095)
       return -EINVAL;
     GemEntry &gem = prt ? prt_entries_[file->id] : it->second;
+    const uint32_t process_id = drm_process_id(file);
+    if (prt)
+      gem.process_id = process_id;
     if (!prt && (gem.size == 0 || offset_in_bo > gem.size || map_size > gem.size - offset_in_bo))
       return -EINVAL;
     const GemMapping range{va_address, map_size};
-    // Handle the target VA range's current occupant. Independent DRM files have
-    // private handle namespaces but currently share one simulated GPU page table,
-    // so a foreign mapping must never be overwritten. REPLACE may evict only a
-    // current holder from this DRM file; plain MAP rejects any current holder.
-    const bool foreign_overlap = range_is_mapped_by_other_drm_file_locked(file->id, range);
+    // DRM files acquired by the same KFD context share its GPU page table.
+    // REPLACE may evict only this file's mappings within that context; plain
+    // MAP rejects any current holder. Other contexts have independent GPU VAs.
+    const bool foreign_overlap =
+        range_is_mapped_by_other_drm_file_locked(file->id, range, process_id);
     if (foreign_overlap) {
-      // TODO: Give each independent DRM file its own simulated GPUVM. Until then,
-      // permitting this overlap would overwrite the single shared page table and
-      // let either file tear down the other's PTEs. Make the model limitation
-      // visible instead of silently accepting or rejecting the update.
-      util::Logger::warn("DRM files currently share one simulated GPUVM; rejecting overlapping "
-                         "GEM_VA range at address ",
+      util::Logger::warn("DRM files in the same KFD context have overlapping GEM_VA ranges at ",
                          va_address);
       return -EINVAL;
     }
-    if (!replace && range_is_mapped_locked(range)) {
+    if (!replace && range_is_mapped_locked(range, process_id)) {
       return -EINVAL;
     }
     if (!prt && !gem.cpu_ptr) {
@@ -3234,7 +3267,7 @@ public:
         return -EINVAL;
       gem.cpu_ptr = p;
     }
-    if (replace && !evict_range_locked(drv, file->id, range, /*allow_missing=*/true))
+    if (replace && !evict_range_locked(drv, file->id, range, /*allow_missing=*/true, process_id))
       return -EINVAL;
     // Record which SimulatedKfd's page table receives these PTEs so GEM_CLOSE (or a
     // DRM-file-close reap) unmaps through the driver that installed them, never a
@@ -3253,8 +3286,10 @@ public:
     // only returns false if the local process vanished mid-call; treat that as a
     // failed map (do not record the range) so GEM_VA reports the error rather than a
     // phantom success.
-    if (!prt && !drv->gem_va_map(va_address, host, map_size, gem.alloc_flags, gem.sealed_ram))
+    if (!prt && !drv->gem_va_map(va_address, host, map_size, gem.alloc_flags, gem.sealed_ram,
+                                 file->kfd_process_id.load(std::memory_order_acquire)))
       return -EINVAL;
+    gem.process_id = process_id;
     gem.installed_vas.push_back(range);
     if (publish_timeline)
       signal_syncobj_locked(timeline, timeline_point);
@@ -3293,7 +3328,7 @@ public:
     const GemMapping range{va_address, map_size};
     if (std::ranges::find(gem.installed_vas, range) == gem.installed_vas.end())
       return -EINVAL; // This handle does not own the exact range — do not touch PTEs.
-    if (!prt && !drv->gem_va_unmap(va_address, map_size))
+    if (!prt && !drv->gem_va_unmap(va_address, map_size, gem.process_id))
       return -EINVAL;
     std::erase(gem.installed_vas, range);
     if (publish_timeline)
@@ -3328,7 +3363,7 @@ public:
     if (!drv)
       return -ENODEV;
     if (!evict_range_locked(drv, file->id, GemMapping{va_address, map_size},
-                            /*allow_missing=*/false))
+                            /*allow_missing=*/false, drm_process_id(file)))
       return -EINVAL;
     if (publish_timeline)
       signal_syncobj_locked(timeline, timeline_point);
@@ -3772,7 +3807,7 @@ private:
       // and there is nothing to remove — either way the range must not remain
       // recorded, so the return value is intentionally not actionable here.
       for (const auto &r : gem.installed_vas)
-        (void)gem.owner->gem_va_unmap(r.va_address, r.map_size);
+        (void)gem.owner->gem_va_unmap(r.va_address, r.map_size, gem.process_id);
     }
     if (gem.cpu_ptr && gem.size)
       InterposerContext::real().munmap(gem.cpu_ptr, gem.size);
@@ -3790,7 +3825,8 @@ private:
   /// Caller holds fd_mutex_. Return false if no range overlaps unless allow_missing,
   /// or if a resident unmap fails. Completed removals are not rolled back on failure.
   [[nodiscard]] bool evict_range_locked(SimulatedKfd *drv, uint64_t drm_file_id,
-                                        const GemMapping &range, bool allow_missing) {
+                                        const GemMapping &range, bool allow_missing,
+                                        uint32_t process_id) {
     bool evicted_any = false;
     auto evict = [&](std::vector<GemMapping> &ranges, bool resident) {
       for (size_t i = 0; i < ranges.size();) {
@@ -3802,7 +3838,7 @@ private:
         const uint64_t begin = std::max(old.va_address, range.va_address);
         const uint64_t end =
             std::min(old.va_address + old.map_size, range.va_address + range.map_size);
-        if (resident && !drv->gem_va_unmap(begin, end - begin))
+        if (resident && !drv->gem_va_unmap(begin, end - begin, process_id))
           return false;
         ranges.erase(ranges.begin() + i);
         if (old.va_address < begin)
@@ -3822,30 +3858,36 @@ private:
     return evicted_any || allow_missing;
   }
 
-  /// @brief Whether any GEM mapping or sparse reservation overlaps @p range in the shared
-  /// simulated GPU page table. Caller holds fd_mutex_. Used by plain MAP to reject
+  /// @brief Whether any GEM mapping or sparse reservation overlaps @p range in the
+  /// selected context's GPU page table. Caller holds fd_mutex_. Used by plain MAP to reject
   /// a map that would collide with an existing range's PTEs, regardless of which
   /// DRM file owns it.
-  [[nodiscard]] bool range_is_mapped_locked(const GemMapping &range) const {
+  [[nodiscard]] bool range_is_mapped_locked(const GemMapping &range, uint32_t process_id) const {
     for (const auto &[handle, gem] : gem_entries_) {
+      if (gem.process_id != process_id)
+        continue;
       for (const auto &existing : gem.installed_vas)
         if (existing.overlaps(range))
           return true;
     }
     for (const auto &[file_id, gem] : prt_entries_)
-      for (const auto &existing : gem.installed_vas)
-        if (existing.overlaps(range))
-          return true;
+      if (gem.process_id == process_id)
+        for (const auto &existing : gem.installed_vas)
+          if (existing.overlaps(range))
+            return true;
     return false;
   }
 
   /// @brief Whether a GEM mapping or sparse reservation owned by a file other than @p drm_file_id
-  /// overlaps @p range in the shared simulated GPU page table. Caller holds
+  /// overlaps @p range in the selected context's GPU page table. Caller holds
   /// fd_mutex_. Used by REPLACE to reject a foreign collision before evicting any
   /// mapping owned by the caller.
   [[nodiscard]] bool range_is_mapped_by_other_drm_file_locked(uint64_t drm_file_id,
-                                                              const GemMapping &range) const {
+                                                              const GemMapping &range,
+                                                              uint32_t process_id) const {
     for (const auto &[handle, gem] : gem_entries_) {
+      if (gem.process_id != process_id)
+        continue;
       if (gem.drm_file_id == drm_file_id)
         continue;
       for (const auto &existing : gem.installed_vas)
@@ -3853,7 +3895,7 @@ private:
           return true;
     }
     for (const auto &[file_id, gem] : prt_entries_)
-      if (file_id != drm_file_id)
+      if (file_id != drm_file_id && gem.process_id == process_id)
         for (const auto &existing : gem.installed_vas)
           if (existing.overlaps(range))
             return true;
@@ -5075,7 +5117,28 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
           // shared_ptr snapshot is still live, and this dup still belongs to it.
           remote_dispatch = InterposerContext::ctx.remote();
         } else if (auto drv = InterposerContext::ctx.driver()) {
-          int rc = drv->ioctl(request, arg);
+          if (request == AMDKFD_IOC_ACQUIRE_VM && arg) {
+            if (auto *sim = dynamic_cast<SimulatedKfd *>(drv.get())) {
+              const auto &arguments = *static_cast<kfd_ioctl_acquire_vm_args *>(arg);
+              auto render = InterposerContext::ctx.reserve_drm_file_for_ioctl(arguments.drm_fd);
+              if (!render.file())
+                return kfd_ioctl_ret(-EINVAL);
+              auto file = render.file();
+              if (InterposerContext::ctx.drm_file_simulated(file) != sim)
+                return kfd_ioctl_ret(-EINVAL);
+              const auto *gpu = sim->gpu_info_for_render_minor(file->render_minor);
+              if (!gpu || gpu->gpu_id != arguments.gpu_id)
+                return kfd_ioctl_ret(-EINVAL);
+              const uint32_t process_id = sim->process_id_for_file(fd);
+              if (process_id == 0)
+                return kfd_ioctl_ret(-EBADF);
+              uint32_t expected = 0;
+              if (!file->kfd_process_id.compare_exchange_strong(expected, process_id) &&
+                  expected != process_id)
+                return kfd_ioctl_ret(-EBUSY);
+            }
+          }
+          int rc = drv->ioctl_file(fd, request, arg);
           // Capture the KFD allocation flags for a freshly exported dmabuf fd. The
           // flags determine the GPU PTE MTYPE when the fd is later mapped via GEM_VA,
           // and must be recorded now because the allocation may be freed first. Only
@@ -5093,7 +5156,7 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
               // interposer does not reach into driver-private per-process state.
               InterposerContext::ctx.track_gem_flags(
                   static_cast<int>(export_args->dmabuf_fd),
-                  sim->mapping_flags_for_handle(export_args->handle));
+                  sim->mapping_flags_for_handle(export_args->handle, sim->process_id_for_file(fd)));
             }
           }
           return kfd_ioctl_ret(rc);
@@ -5159,7 +5222,7 @@ RJ_INTERPOSER_EXPORT int dup(int oldfd) {
       return -1;
     return InterposerContext::real().dup(oldfd);
   }
-  std::optional<InterposerContext::DupBackend> reserved;
+  std::optional<InterposerContext::DupReservation> reserved;
   InterposerContext::DrmFileToken drm_file;
   InterposerContext::DrmFinalRelease drm_release;
   int rc;
@@ -5185,7 +5248,7 @@ RJ_INTERPOSER_EXPORT int dup(int oldfd) {
   if (rc < 0) {
     const int saved_errno = errno;
     if (reserved)
-      InterposerContext::ctx.release_backend(*reserved);
+      InterposerContext::ctx.release_backend(reserved->backend);
     InterposerContext::ctx.release_drm_file_reservation(drm_file);
     errno = saved_errno;
     return rc;
@@ -5212,7 +5275,7 @@ namespace {
 //     invalidated and its reference released, so the reused fd number no longer
 //     routes to the old backend.
 // Then the replacement is recorded on the reserved source backend.
-void reconcile_dup_target(int newfd, std::optional<InterposerContext::DupBackend> reserved,
+void reconcile_dup_target(int newfd, std::optional<InterposerContext::DupReservation> reserved,
                           InterposerContext::DrmFinalRelease overwritten_release,
                           InterposerContext::DrmFinalRelease displaced_release) {
   InterposerContext::ctx.untrack_sysfs(newfd);
@@ -5241,7 +5304,7 @@ RJ_INTERPOSER_EXPORT int dup2(int oldfd, int newfd) {
   // tracking would drop a still-open ref. Forward without touching tracking.
   if (oldfd == newfd)
     return InterposerContext::real().dup2(oldfd, newfd);
-  std::optional<InterposerContext::DupBackend> reserved;
+  std::optional<InterposerContext::DupReservation> reserved;
   InterposerContext::DrmFileToken drm_file;
   InterposerContext::DrmFinalRelease overwritten_release;
   InterposerContext::DrmFinalRelease displaced_release;
@@ -5271,7 +5334,7 @@ RJ_INTERPOSER_EXPORT int dup2(int oldfd, int newfd) {
   if (rc < 0) {
     const int saved_errno = errno;
     if (reserved)
-      InterposerContext::ctx.release_backend(*reserved);
+      InterposerContext::ctx.release_backend(reserved->backend);
     InterposerContext::ctx.release_drm_file_reservation(drm_file);
     errno = saved_errno;
     return rc;
@@ -5290,7 +5353,7 @@ RJ_INTERPOSER_EXPORT int dup3(int oldfd, int newfd, int flags) {
   }
   // dup3(fd, fd, ...) is required to fail with EINVAL without altering the
   // descriptor; do not mutate tracking before the syscall confirms that.
-  std::optional<InterposerContext::DupBackend> reserved;
+  std::optional<InterposerContext::DupReservation> reserved;
   InterposerContext::DrmFileToken drm_file;
   InterposerContext::DrmFinalRelease overwritten_release;
   InterposerContext::DrmFinalRelease displaced_release;
@@ -5320,7 +5383,7 @@ RJ_INTERPOSER_EXPORT int dup3(int oldfd, int newfd, int flags) {
   if (rc < 0) {
     const int saved_errno = errno;
     if (reserved)
-      InterposerContext::ctx.release_backend(*reserved);
+      InterposerContext::ctx.release_backend(reserved->backend);
     InterposerContext::ctx.release_drm_file_reservation(drm_file);
     errno = saved_errno;
     return rc;
@@ -5417,7 +5480,7 @@ int fcntl_impl(int fd, int cmd, void *ptr_arg, int int_arg) {
   // between the dup and tracking the new fd. F_DUPFD does not overwrite an
   // existing fd, so no primary/dup reconciliation of a target is needed.
   const bool is_dupfd = (cmd == F_DUPFD || cmd == F_DUPFD_CLOEXEC);
-  std::optional<InterposerContext::DupBackend> reserved;
+  std::optional<InterposerContext::DupReservation> reserved;
   InterposerContext::DrmFileToken drm_file;
   const auto invoke = [&]() -> long {
     switch (kind) {
@@ -5458,7 +5521,7 @@ int fcntl_impl(int fd, int cmd, void *ptr_arg, int int_arg) {
     if (rc < 0) {
       const int saved_errno = errno;
       if (reserved)
-        InterposerContext::ctx.release_backend(*reserved);
+        InterposerContext::ctx.release_backend(reserved->backend);
       InterposerContext::ctx.release_drm_file_reservation(drm_file);
       errno = saved_errno;
     } else {
@@ -5550,7 +5613,7 @@ static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, o
   {
 
     if (auto drv = InterposerContext::ctx.lookup(fd))
-      return drv->mmap(addr, length, prot, flags, offset);
+      return drv->mmap_file(fd, addr, length, prot, flags, offset);
 
     // Dispatch a tracked KFD dup by its RECORDED backend (as ioctl() does), not by
     // "remote if any remote is live", so routing follows the reference the dup
@@ -5560,7 +5623,7 @@ static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, o
       if (*backend == InterposerContext::DupBackend::Remote) {
         remote_mmap = InterposerContext::ctx.remote();
       } else if (auto drv = InterposerContext::ctx.driver()) {
-        return drv->mmap(addr, length, prot, flags, offset);
+        return drv->mmap_file(fd, addr, length, prot, flags, offset);
       }
     }
 
@@ -5581,8 +5644,12 @@ static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, o
         // run release_remote_open(), RemoteDriver::close() would drop the RPC
         // socket, and this mmap would then execute against a closed connection.
         // Keeping the lease alive across the call is the whole point of it.
-        if (const auto &local = lease.local())
+        if (const auto &local = lease.local()) {
+          if (auto *simulated = dynamic_cast<SimulatedKfd *>(local.get()))
+            return simulated->mmap(InterposerContext::ctx.drm_process_id(drm_file), addr, length,
+                                   prot, flags, offset);
           return local->mmap(addr, length, prot, flags, offset);
+        }
         if (const auto &remote = lease.remote())
           return remote->mmap(addr, length, prot, flags, offset);
       }

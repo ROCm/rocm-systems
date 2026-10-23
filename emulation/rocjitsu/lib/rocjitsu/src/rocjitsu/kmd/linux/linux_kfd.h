@@ -11,6 +11,7 @@
 #include "rocjitsu/vm/driver.h"
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <string_view>
 
@@ -55,6 +56,26 @@ public:
 
   /// @brief Return the /dev/kfd fd represented by this driver.
   [[nodiscard]] virtual int fd() const = 0;
+
+  /// One open file description, shared by duplicated descriptors.
+  struct OpenFile {
+    virtual ~OpenFile() = default;
+  };
+
+  /// Open an application file; internal bootstrap opens remain driver-scoped.
+  virtual int open_file() { return open(); }
+  /// Snapshot the open file before duplication or a potentially blocking call.
+  virtual std::shared_ptr<OpenFile> local_file(int) { return {}; }
+  /// Publish an alias of an already retained file description.
+  virtual void track_local_file(int, std::shared_ptr<OpenFile>) {}
+  /// Release a descriptor's file description before releasing its backend lease.
+  virtual void untrack_local_file(int) {}
+  /// Dispatch through the context selected on this open file description.
+  virtual int ioctl_file(int, unsigned long request, void *arg) { return ioctl(request, arg); }
+  /// Map resources belonging to this open file's context.
+  virtual void *mmap_file(int, void *addr, size_t length, int prot, int flags, off_t offset) {
+    return mmap(addr, length, prot, flags, offset);
+  }
 
   /// @brief Retain one duplicate open reference, if this driver tracks them.
   /// @retval true A reference was added.

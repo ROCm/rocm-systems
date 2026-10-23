@@ -4,10 +4,9 @@
 /// @file kfd_process.h
 /// @brief Per-process KFD state, analogous to the kernel's kfd_process.
 ///
-/// @details Each process that opens /dev/kfd gets a KfdProcess instance holding
-/// its allocations, queues, events, doorbells, and memory policies. The
-/// SimulatedKfd owns a process table mapping fds to KfdProcess instances,
-/// and delegates per-process ioctl operations through here.
+/// @details Each KFD context holds allocations, queues, events, doorbells, and
+/// memory policies. SimulatedKfd indexes contexts by process ID; local open file
+/// descriptions select the shared primary or an independently owned secondary.
 
 #pragma once
 
@@ -44,10 +43,9 @@ struct GemObject;
 
 /// @brief Per-process KFD state.
 ///
-/// @details Mirrors the kernel's kfd_process + kfd_process_device for a
-/// single-GPU simulator. Each daemon client connection or local-mode session
-/// gets one KfdProcess. The SimulatedKfd maintains a process table and
-/// routes ioctls to the correct KfdProcess.
+/// @details Mirrors the kernel's kfd_process and per-GPU kfd_process_device.
+/// Daemon connections and local primary/secondary contexts own separate instances.
+/// SimulatedKfd routes each ioctl to its selected KfdProcess.
 class KfdProcess {
 public:
   /// @brief Per-GPU state within a process.
@@ -76,11 +74,15 @@ public:
   /// @brief Construct a new KFD process with a unique process ID.
   /// @param process_id Unique identifier (analogous to PASID) for CP routing.
   /// @param num_gpus Number of GPU devices (sizes per-GPU state vector).
-  explicit KfdProcess(uint32_t process_id, uint32_t num_gpus = 1)
-      : process_id_(process_id), next_gpu_va_(0x1000000000ULL), gpu_state_(num_gpus) {}
+  /// @param secondary_context Exclude this file-owned context from primary PID lookup.
+  explicit KfdProcess(uint32_t process_id, uint32_t num_gpus = 1, bool secondary_context = false)
+      : process_id_(process_id), secondary_context_(secondary_context),
+        next_gpu_va_(0x1000000000ULL), gpu_state_(num_gpus) {}
 
   /// @brief Get the process ID (PASID analog).
   uint32_t process_id() const { return process_id_; }
+  /// PID-based debugger lookup names only the process's primary context.
+  bool is_secondary_context() const { return secondary_context_; }
 
   pid_t client_pid() const { return client_pid_; }
   void set_client_pid(pid_t pid) { client_pid_ = pid; }
@@ -520,6 +522,8 @@ public:
 
   uint32_t process_id_;
   pid_t client_pid_ = 0;
+  /// Set before publication for a file-owned context outside the primary PID namespace.
+  const bool secondary_context_;
   std::atomic<uint32_t> open_ref_count_{1};
 
   /// @brief Serializes this process's ioctls, analogous to the real KFD's

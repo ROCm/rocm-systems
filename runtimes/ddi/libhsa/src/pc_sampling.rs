@@ -191,7 +191,7 @@ fn create_session(args: &CreateArgs) -> Status {
             return INVALID_AGENT;
         };
         let info = runtime.gpus[index].info;
-        if !session::supported_gpu(info) {
+        if !runtime.gpus[index].pc_sampling_supported {
             return NOT_SUPPORTED;
         }
         if runtime.pc_sampling_state.agent_busy(args.agent) {

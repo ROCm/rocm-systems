@@ -1931,7 +1931,11 @@ rj_add_test(
 # The launcher preloads the interposer and supplies its config_path file.
 # Exercise fd tracking, device discovery, GEM/PRIME mappings, synchronization
 # and PM4 dispatch through the public driver interface.
-add_executable(interposer_dup_test interposer_dup_test.cpp)
+add_executable(
+    interposer_dup_test
+    interposer_dup_test.cpp
+    kfd_open_file_test.cpp
+)
 rj_configure_target(interposer_dup_test TEST)
 target_link_libraries(
     interposer_dup_test
@@ -2013,6 +2017,19 @@ function(rj_add_interposer_test_suite _suite)
         )
     endforeach()
 endfunction()
+
+rj_add_interposer_test_suite(KfdOpenFileTest
+    IndependentOpensSharePrimaryUntilExplicitSelection
+    DupSharesSelectionAndRetainsSecondaryAfterOriginalClose
+    SecondaryFinalCloseReleasesEventBacking
+    ConcurrentSelectionHasOneWinner
+    SecondaryAllocationHandlesBelongToTheirFile
+    DrmBindingsAndVirtualAddressesAreContextLocal
+    Dup2ReleasesOverwrittenSecondary
+    DrmMmapUsesAcquiredSecondary
+    DoorbellClientViewCanUnmapBeforeContextClose
+    SecondaryRejectsPrimaryOnlyOperations
+)
 
 set(_rj_interposer_dup_tests
     ConstructorPreservesDescriptorLimit
@@ -2140,6 +2157,12 @@ foreach(_config IN ITEMS gfx1100_w7900 gfx1201_r9700)
         InterposerPm4Test
         CONFIG "${CMAKE_SOURCE_DIR}/configs/${_config}.json"
         ${_rj_interposer_pm4_tests}
+    )
+    rj_add_interposer_test_suite(
+        InterposerSecondaryPm4Test
+        CONFIG "${CMAKE_SOURCE_DIR}/configs/${_config}.json"
+        SubmissionUsesSecondaryAddressSpace
+        KfdFinalCloseCancelsPendingSubmission
     )
 endforeach()
 

@@ -61,7 +61,7 @@ int main(int argc, char **argv) {
 
   CHECK(query(AMDF_ABI_VERSION_1, AMDF_ABI_VERSION_LATEST, &api) ==
         AMDF_STATUS_OK);
-  CHECK(api != NULL && api->abi_version == AMDF_ABI_VERSION_3);
+  CHECK(api != NULL && api->abi_version == AMDF_ABI_VERSION_12);
   CHECK(api->structure_size >= sizeof(*api));
   CHECK(api->instance_create && api->instance_destroy &&
         api->instance_enumerate_memory_scopes && api->memory_scope_query_info);

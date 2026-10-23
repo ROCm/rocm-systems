@@ -75,10 +75,13 @@ fn native_node() -> sysfs::KfdNode {
             maximum_wave_count_per_compute_unit: 32,
             maximum_scratch_wave_count_per_compute_unit: 32,
             wavefront_size: 32,
+            local_data_share_bytes_per_compute_unit: 64 * 1024,
             xcc_count: 1,
             shader_engine_count_per_xcc: 2,
-            context_size: 65536,
-            control_stack_size: 4096,
+            context_sizes: Some(super::super::queue_context::QueueContextSizes {
+                context_size: 65536,
+                control_stack_size: 4096,
+            }),
             sdma_engines: 2,
             sdma_xgmi_engines: 1,
             gws_count: 64,
@@ -396,6 +399,16 @@ impl Fixture {
                         assert_eq!(ring.flags, expected_ring_flags);
                         let pointers = at(args.read_pointer);
                         assert_eq!(pointers.size, page);
+                        // Control and indices are data. Packet fetches use
+                        // the executable ring allocation checked above.
+                        assert_eq!(
+                            pointers.flags,
+                            uapi::GTT
+                                | uapi::WRITABLE
+                                | uapi::COHERENT
+                                | uapi::UNCACHED
+                                | uapi::NO_SUBSTITUTE
+                        );
                         let read_context = |address: u64, bytes: &mut [u8]| {
                             if state.svm_context.is_some_and(|(base, size)| {
                                 address >= base
@@ -1430,7 +1443,7 @@ fn invalid_scratch_geometry_fails_before_native_acquisition() {
 }
 
 #[test]
-fn unsupported_options_and_missing_context_sizes_fail_before_acquisition() {
+fn unsupported_options_and_invalid_context_sizes_fail_before_acquisition() {
     let fixture = Fixture::new(true);
     let base = descriptor(aql(QueueProducerMode::Single));
     for desc in [
@@ -1469,7 +1482,7 @@ fn unsupported_options_and_missing_context_sizes_fail_before_acquisition() {
         assert!(fixture.create(desc).is_err());
     }
     let mut native = native_node();
-    native.queues.context_size = 0;
+    native.queues.context_sizes.as_mut().unwrap().context_size = 0;
     assert!(Request::validate(&native, base).is_err());
     let sdma = descriptor(QueueParameters::Sdma);
     let mut native = native_node();

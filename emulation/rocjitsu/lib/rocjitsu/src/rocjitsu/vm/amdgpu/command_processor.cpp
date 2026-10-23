@@ -1604,9 +1604,11 @@ bool CommandProcessor::update_queue(uint32_t queue_id, uint32_t process_id, uint
 
 bool CommandProcessor::update_queue_registration(uint64_t registration_id, uint64_t ring_base_va,
                                                  uint32_t ring_size, uint32_t queue_percentage) {
-  if (registration_id == 0)
+  if (registration_id == 0 || queue_percentage > 100)
     return false;
-  if (ring_base_va == 0 || ring_base_va % 4 || ring_size < 4 || ring_size % 4)
+  const bool ringless_disable = ring_base_va == 0 && queue_percentage == 0;
+  if (!ringless_disable &&
+      (ring_base_va == 0 || ring_base_va % 4 || ring_size < 4 || ring_size % 4))
     return false;
 
   const bool suspended = queue_percentage == 0;
@@ -1620,11 +1622,15 @@ bool CommandProcessor::update_queue_registration(uint64_t registration_id, uint6
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
     for (auto &q : compute_queues_) {
       if (q.registration_id == registration_id) {
+        // KFD can stop a queue with a null ring. Retain its backing geometry
+        // while suspended so admitted work and teardown still own valid storage.
+        const uint64_t next_ring_base = ringless_disable ? q.ring_base_va : ring_base_va;
+        const uint32_t next_ring_size = ringless_disable ? q.ring_size : ring_size;
         if (q.packet_format == QueuePacketFormat::Aql &&
-            !valid_aql_packet_ring(ring_base_va, ring_size))
+            !valid_aql_packet_ring(next_ring_base, next_ring_size))
           return false;
         if (q.packet_format == QueuePacketFormat::Pm4 &&
-            (q.ring_base_va != ring_base_va || q.ring_size != ring_size)) {
+            (q.ring_base_va != next_ring_base || q.ring_size != next_ring_size)) {
           if (q.has_pending_commands())
             return false;
           q.read_pointer_journal.reset();
@@ -1634,8 +1640,8 @@ bool CommandProcessor::update_queue_registration(uint64_t registration_id, uint6
         found = true;
         queue_id = q.queue_id;
         process_id = q.process_id;
-        q.ring_base_va = ring_base_va;
-        q.ring_size = ring_size;
+        q.ring_base_va = next_ring_base;
+        q.ring_size = next_ring_size;
         update_replicas = q.xcd_fanout;
         changed = q.runtime_suspended != suspended;
         q.runtime_suspended = suspended;

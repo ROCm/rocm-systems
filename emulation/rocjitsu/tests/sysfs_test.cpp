@@ -38,6 +38,7 @@ RJ_DIAGNOSTIC_POP
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace {
 
@@ -796,6 +797,42 @@ TEST(SysfsTopologyDebugCapabilityTest, ConfigTopologyMatchesRealHardware) {
             kmd::gc_ip_version_for_gfx_target_version(loaded.device.gfx_target_version)));
     EXPECT_EQ(static_cast<uint32_t>(props["capability2"]), e->capability2);
     EXPECT_EQ(props["debug_prop"], e->debug_prop);
+  }
+}
+
+TEST(SysfsMemoryTest, DrmCapacitiesMatchEachGpuMemoryBank) {
+  std::vector<Sysfs::GpuInfo> gpus = {
+      make_gpu_info(120001u /* gfx1201 */),
+      make_gpu_info(110501u /* gfx1151 */),
+      make_gpu_info(90500u /* gfx950 */),
+  };
+  gpus[0].local_mem_size = (1ull << 34) + 4096;
+  gpus[1].local_mem_size = 0;
+  gpus[2].local_mem_size = (1ull << 38) + 8192;
+  for (size_t index = 0; index < gpus.size(); ++index) {
+    gpus[index].gpu_id = static_cast<uint32_t>(index + 1);
+    gpus[index].drm_render_minor = static_cast<uint32_t>(133 + 2 * index);
+  }
+
+  Sysfs sysfs;
+  const std::string topology_dir = sysfs.generate(gpus);
+  ASSERT_FALSE(topology_dir.empty());
+  ASSERT_FALSE(sysfs.drm_path().empty());
+
+  for (size_t index = 0; index < gpus.size(); ++index) {
+    SCOPED_TRACE(index);
+    const auto memory = read_properties(topology_dir + "/nodes/" + std::to_string(index + 1) +
+                                        "/mem_banks/0/properties");
+    ASSERT_TRUE(memory.contains("size_in_bytes"));
+    ASSERT_EQ(memory.at("size_in_bytes"), gpus[index].local_mem_size);
+    const std::string capacity = std::to_string(memory.at("size_in_bytes")) + "\n";
+    for (const std::string &entry : {"card" + std::to_string(index),
+                                     "renderD" + std::to_string(gpus[index].drm_render_minor)}) {
+      SCOPED_TRACE(entry);
+      const std::string device_dir = sysfs.drm_path() + "/" + entry + "/device";
+      EXPECT_EQ(read_sysfs_file(device_dir + "/mem_info_vram_total"), capacity);
+      EXPECT_EQ(read_sysfs_file(device_dir + "/mem_info_vis_vram_total"), capacity);
+    }
   }
 }
 

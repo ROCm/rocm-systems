@@ -29,8 +29,8 @@ constexpr std::string_view kKfdTopologyAltPrefix = "/sys/class/kfd/kfd/topology"
 constexpr std::string_view kDrmSysfsPrefix = "/sys/class/drm";
 constexpr std::string_view kDrmRenderPrefix = "/sys/class/drm/renderD";
 constexpr std::string_view kSysDevCharPrefix = "/sys/dev/char/";
-// The shared UAPI describes 1.19, but the simulator does not implement
-// metadata-ring queue creation. Advertise the last supported minor version.
+// Process-scoped and remote interfaces lack per-file secondary selection.
+// Local application files advertise 1.19 through their context-owning interface.
 constexpr uint32_t kImplementedKfdIoctlMinorVersion = 18;
 
 } // namespace
@@ -110,6 +110,8 @@ const char *LinuxKfd::ioctl_name(unsigned long request) {
     return "GET_APERTURES";
   case AMDKFD_IOC_ACQUIRE_VM:
     return "ACQUIRE_VM";
+  case AMDKFD_IOC_CREATE_PROCESS:
+    return "CREATE_PROCESS";
   case AMDKFD_IOC_ALLOC_MEMORY_OF_GPU:
     return "ALLOC_MEMORY";
   case AMDKFD_IOC_FREE_MEMORY_OF_GPU:

@@ -512,7 +512,7 @@ TEST(DaemonApi, AcceptsValidGetVersionIoctlPayload) {
   ASSERT_EQ(response.payload_bytes, sizeof(arguments));
   ASSERT_TRUE(rpc_recv_exact(client, &arguments, sizeof(arguments)));
   EXPECT_EQ(arguments.major_version, KFD_IOCTL_MAJOR_VERSION);
-  // Metadata-ring queues from KFD 1.19 are not implemented by the simulator.
+  // RPC sessions still expose the shared process-ID interface, not file contexts.
   EXPECT_EQ(arguments.minor_version, 18u);
   EXPECT_EQ(daemon.status(), RJ_DAEMON_STATUS_RUNNING);
   close_session(client, 3);

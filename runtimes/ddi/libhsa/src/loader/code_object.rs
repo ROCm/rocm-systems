@@ -207,11 +207,15 @@ pub(super) fn parse_and_load(
         };
         (
             gpu_index,
-            MemoryKind::DeviceLocal {
-                host_visible: true,
-                coherent: false,
-                uncached: false,
-                contiguous: false,
+            if runtime.gpus[gpu_index].endpoint.local_memory_bytes == 0 {
+                MemoryKind::System
+            } else {
+                MemoryKind::DeviceLocal {
+                    host_visible: true,
+                    coherent: false,
+                    uncached: false,
+                    contiguous: false,
+                }
             },
             LOADER_OBJECT_KIND_AGENT,
         )

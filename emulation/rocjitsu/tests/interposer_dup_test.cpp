@@ -2166,11 +2166,22 @@ protected:
   uint32_t *memory_ = nullptr;
   int private_gem_slot_ = -1;
 
-  void SetUp() override {
+  void SetUp() override { set_up_context(false); }
+
+  void set_up_context(bool secondary_context) {
     kfd_ = open_kfd();
     ASSERT_GE(kfd_, 0);
     drm_ = open_drm_render();
     ASSERT_GE(drm_, 0);
+    if (secondary_context) {
+      kfd_ioctl_create_process_args select{};
+      ASSERT_EQ(ioctl(kfd_, AMDKFD_IOC_CREATE_PROCESS, &select), 0);
+      kfd_ioctl_acquire_vm_args acquire{};
+      std::ifstream gpu_id_file("/sys/class/kfd/kfd/topology/nodes/1/gpu_id");
+      ASSERT_TRUE(gpu_id_file >> acquire.gpu_id);
+      acquire.drm_fd = static_cast<uint32_t>(drm_);
+      ASSERT_EQ(ioctl(kfd_, AMDKFD_IOC_ACQUIRE_VM, &acquire), 0);
+    }
     int probe = open("/dev/null", O_RDONLY | O_CLOEXEC);
     ASSERT_GE(probe, 0);
     private_gem_slot_ = fcntl(probe, F_DUPFD_CLOEXEC, 4096);
@@ -2397,6 +2408,38 @@ protected:
     return rc;
   }
 };
+
+class InterposerSecondaryPm4Test : public InterposerPm4Test {
+protected:
+  void SetUp() override { set_up_context(true); }
+};
+
+TEST_F(InterposerSecondaryPm4Test, SubmissionUsesSecondaryAddressSpace) {
+  const uint32_t packet[] = {0xc0033700,
+                             5u << 8,
+                             static_cast<uint32_t>(kAddress + 4096),
+                             static_cast<uint32_t>(kAddress >> 32),
+                             0x12345678,
+                             0xffff1000};
+  std::memcpy(memory_, packet, sizeof(packet));
+  uint64_t sequence = 0;
+  ASSERT_EQ(submit(std::size(packet), false, &sequence), 0);
+  ASSERT_EQ(wait_output(INT64_MAX), 0);
+  EXPECT_EQ(memory_[1024], 0x12345678u);
+  uint64_t user_fence = 0;
+  std::memcpy(&user_fence, memory_ + 1026, sizeof(user_fence));
+  EXPECT_EQ(user_fence, sequence);
+}
+
+TEST_F(InterposerSecondaryPm4Test, KfdFinalCloseCancelsPendingSubmission) {
+  memory_[0] = 0xffff1000;
+  uint64_t sequence = 0;
+  ASSERT_EQ(submit(1, true, &sequence), 0);
+  ASSERT_EQ(close(kfd_), 0);
+  kfd_ = -1;
+  EXPECT_EQ(wait_output(INT64_MAX), -1);
+  EXPECT_EQ(errno, EIO);
+}
 
 TEST_F(InterposerPm4Test, SubmissionFenceQueryPollsAndWaitsForCompletion) {
   uint64_t busy = 99;

@@ -30,3 +30,10 @@ submits 16 kernel dispatch packets. Every completion must increment the
 host-visible output exactly once. The script compares the results and prints
 library, code-object, and probe hashes. This checks one dispatch and memory
 path on the current GPU; it does not cover other kernels or hardware.
+
+The compiled kernel probe accepts `LIBRARY HSACO [GPU_INDEX]`; the optional
+zero-based index selects an agent from that library's GPU enumeration. Its
+default remains the first GPU. `LIBRARY --list-gpus` prints each index and HSA
+agent name, then shuts down without dispatching. A code object must match the
+selected GPU. This permits testing each physical GPU, including repeated
+instances of the same architecture, without relying on visibility filters.

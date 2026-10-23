@@ -8,6 +8,7 @@ rj_add_object_library(rocjitsu_kmd
     legacy_gpu_vm.cpp
     libc_passthrough.cpp
     linux_kfd.cpp
+    kfd_open_file.cpp
     remote_driver.cpp
     rj_daemon.cpp
     simulated_kfd.cpp

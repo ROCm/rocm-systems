@@ -8,6 +8,7 @@
 //! current native identity before publication and again before activation.
 //! Parsers reject incomplete, duplicate, overflowing, or internally inconsistent
 //! properties rather than filling important device facts with defaults.
+use super::queue_context::QueueContextSizes;
 use super::{errno, error, native_error, sys};
 use crate::driver::{DriverInstanceId, KfdAccessTarget};
 use crate::memory::storage::Shared;
@@ -62,10 +63,10 @@ pub(crate) struct KfdQueueProperties {
     pub xcc_count: u32,
     /// Shader engines per XCC.
     pub shader_engine_count_per_xcc: u32,
-    /// Native context-save allocation size.
-    pub context_size: u32,
-    /// Native control-stack allocation size.
-    pub control_stack_size: u32,
+    /// LDS capacity per compute unit in bytes.
+    pub local_data_share_bytes_per_compute_unit: u32,
+    /// Kernel-provided per-XCC context sizes; absent on older KFD interfaces.
+    pub context_sizes: Option<QueueContextSizes>,
     /// Number of ordinary SDMA engines.
     pub sdma_engines: u32,
     /// Number of SDMA engines for XGMI links.
@@ -995,10 +996,17 @@ fn read_node(
         maximum_wave_count_per_compute_unit: waves,
         maximum_scratch_wave_count_per_compute_unit: scratch,
         wavefront_size: wave_size,
+        local_data_share_bytes_per_compute_unit: lds
+            .checked_mul(1024)
+            .ok_or_else(|| error(ErrorKind::InvalidData, "native LDS capacity exceeds u32"))?,
         xcc_count: xcc,
         shader_engine_count_per_xcc: arrays / arrays_per_xcc,
-        context_size: context.unwrap_or(0),
-        control_stack_size: stack.unwrap_or(0),
+        context_sizes: context
+            .zip(stack)
+            .map(|(context_size, control_stack_size)| QueueContextSizes {
+                context_size,
+                control_stack_size,
+            }),
         sdma_engines: sdma.unwrap_or(0),
         sdma_xgmi_engines,
         gws_count,
@@ -1871,6 +1879,62 @@ mod tests {
             )
             .unwrap_err();
             assert_eq!(error.kind(), ErrorKind::InvalidData);
+        }
+    }
+
+    #[test]
+    fn absent_context_metadata_keeps_native_compute_queues_available() {
+        let fixture = Fixture::new();
+        let path = fixture.0.join("topology/nodes/1/properties");
+        let contents = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(
+            path,
+            contents.replace("cwsr_size 65536\nctl_stack_size 4096\n", ""),
+        )
+        .unwrap();
+        let (root, drm) = fixture.roots();
+        let mut found = None;
+        enumerate(&root, &drm, &mut |endpoint| {
+            found = Some(endpoint);
+            Ok(())
+        })
+        .unwrap();
+        let queues = found.unwrap().gpu().unwrap().queues;
+        assert!(queues.aql);
+        assert_eq!(queues.pm4, cfg!(target_arch = "x86_64"));
+    }
+
+    #[test]
+    fn incomplete_context_metadata_is_rejected_and_invalid_sizes_disable_compute() {
+        for (metadata, invalid_record) in [
+            ("cwsr_size 65536\n", true),
+            ("ctl_stack_size 4096\n", true),
+            ("cwsr_size 0\nctl_stack_size 0\n", false),
+            ("cwsr_size 65536\nctl_stack_size 40\n", false),
+        ] {
+            let fixture = Fixture::new();
+            let path = fixture.0.join("topology/nodes/1/properties");
+            let contents = std::fs::read_to_string(&path).unwrap();
+            std::fs::write(
+                path,
+                contents.replace("cwsr_size 65536\nctl_stack_size 4096\n", metadata),
+            )
+            .unwrap();
+            let (root, drm) = fixture.roots();
+            let mut found = None;
+            let result = enumerate(&root, &drm, &mut |endpoint| {
+                found = Some(endpoint);
+                Ok(())
+            });
+            if invalid_record {
+                assert_eq!(result.unwrap_err().kind(), ErrorKind::InvalidData);
+                assert!(found.is_none());
+            } else {
+                result.unwrap();
+                let queues = found.unwrap().gpu().unwrap().queues;
+                assert!(!queues.aql);
+                assert!(!queues.pm4);
+            }
         }
     }
 

@@ -164,8 +164,8 @@ amdgpu::Mtype SimulatedKfd::pte_mtype_for_flags(uint32_t flags, bool shared) {
 }
 
 bool SimulatedKfd::gem_va_map(uint64_t gpu_va, void *host_ptr, size_t size, uint32_t alloc_flags,
-                              bool sealed_ram) {
-  auto proc = find_process(local_process_id_);
+                              bool sealed_ram, uint32_t process_id) {
+  auto proc = find_process(process_id ? process_id : local_process_id_);
   if (!proc)
     return false;
   // GEM_VA uses the interposer's private read-write dmabuf mapping, whose
@@ -176,8 +176,8 @@ bool SimulatedKfd::gem_va_map(uint64_t gpu_va, void *host_ptr, size_t size, uint
   return true;
 }
 
-bool SimulatedKfd::gem_va_unmap(uint64_t gpu_va, size_t size) {
-  auto proc = find_process(local_process_id_);
+bool SimulatedKfd::gem_va_unmap(uint64_t gpu_va, size_t size, uint32_t process_id) {
+  auto proc = find_process(process_id ? process_id : local_process_id_);
   if (!proc)
     return false;
   unmap_from_gpu(*proc, gpu_va, size);
@@ -185,8 +185,8 @@ bool SimulatedKfd::gem_va_unmap(uint64_t gpu_va, size_t size) {
 }
 
 int SimulatedKfd::submit_pm4(uint32_t render_minor, uint64_t queue_key,
-                             amdgpu::Pm4Submission submission) {
-  const auto process = find_process(local_process_id_);
+                             amdgpu::Pm4Submission submission, uint32_t process_id) {
+  const auto process = find_process(process_id ? process_id : local_process_id_);
   if (!process)
     return -ENODEV;
   std::lock_guard op_lock(process->op_mutex_);
@@ -203,14 +203,18 @@ int SimulatedKfd::submit_pm4(uint32_t render_minor, uint64_t queue_key,
       return -ENODEV;
     amdgpu::ComputeQueueConfig queue;
     queue.address_space = process->gpu(*ordinal).address_space;
-    queue.process_id = local_process_id_;
+    queue.process_id = process->process_id();
     queue.queue_id = next_pm4_queue_id_++;
     const uint32_t queue_id = queue.queue_id;
     if (!cp->register_drm_queue(std::move(queue)))
       return -EIO;
-    it = pm4_queues_.emplace(queue_key, std::pair{cp, queue_id}).first;
+    it = pm4_queues_.emplace(queue_key, Pm4Queue{cp, queue_id, process->process_id()}).first;
   }
-  return it->second.first->submit_pm4(it->second.second, local_process_id_, std::move(submission))
+  const auto &queue = it->second;
+  if (queue.process_id != process->process_id())
+    return -EINVAL;
+  return queue.command_processor->submit_pm4(queue.queue_id, queue.process_id,
+                                             std::move(submission))
              ? 0
              : -EIO;
 }
@@ -220,7 +224,8 @@ void SimulatedKfd::retire_pm4_queue(uint64_t queue_key) {
   const auto it = pm4_queues_.find(queue_key);
   if (it == pm4_queues_.end())
     return;
-  it->second.first->unregister_drm_queue(it->second.second, local_process_id_);
+  const auto &queue = it->second;
+  queue.command_processor->unregister_drm_queue(queue.queue_id, queue.process_id);
   pm4_queues_.erase(it);
 }
 
@@ -762,8 +767,8 @@ std::shared_ptr<KfdProcess> SimulatedKfd::find_local_process() const {
   return find_process(local_process_id_);
 }
 
-uint32_t SimulatedKfd::mapping_flags_for_handle(uint64_t handle) const {
-  auto proc = find_process(local_process_id_);
+uint32_t SimulatedKfd::mapping_flags_for_handle(uint64_t handle, uint32_t process_id) const {
+  auto proc = find_process(process_id ? process_id : local_process_id_);
   if (!proc)
     return 0;
   std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
@@ -894,6 +899,8 @@ const SimulatedKfd::GpuDevice *SimulatedKfd::find_gpu(uint32_t gpu_id) const {
 }
 
 SimulatedKfd::~SimulatedKfd() {
+  // Drop file-owned secondary contexts while every backend service is still live.
+  local_files_.clear();
   // CPs may outlive this frontend. Revoke callback admission and drain any
   // callback already executing before touching the state captured by them.
   for (GpuDevice &gpu : gpus_)
@@ -1016,30 +1023,36 @@ void SimulatedKfd::setup_topology(const std::vector<config::KfdDeviceConfig> &de
   topology_.setup_environment();
 }
 
-bool SimulatedKfd::is_doorbell_range(const void *addr, size_t length) const {
-  auto p = find_process(local_process_id_);
-  if (!p || !addr || length == 0)
-    return false;
-  // Check every GPU ordinal's doorbell page: dispatch_mmap/dispatch_munmap install
-  // and tear down a doorbell page per ordinal, so a multi-GPU process has more than
-  // one to guard (checking only ordinal 0 would leave a higher ordinal's page
-  // unprotected against a client mprotect). Snapshot each page/size under
-  // alloc_mutex_ so a concurrent dispatch_mmap/dispatch_munmap (which mutate these
-  // under the same lock) cannot tear the pointer/size read.
-  std::lock_guard<std::mutex> lock(p->alloc_mutex_);
-  for (const auto &gs : p->gpu_state_) {
-    if (ranges_overlap(addr, length, gs.doorbell_monitor_page, gs.doorbell_page_size))
-      return true;
-    for (const auto &view : gs.doorbell_views)
-      if (ranges_overlap(addr, length, view.page, gs.doorbell_page_size))
-        return true;
+std::shared_ptr<KfdProcess> SimulatedKfd::find_doorbell_process(const void *addr,
+                                                                size_t length) const {
+  if (!addr || length == 0)
+    return {};
+  std::vector<std::shared_ptr<KfdProcess>> processes;
+  {
+    std::lock_guard lock(process_mutex_);
+    for (const auto &[id, process] : processes_)
+      processes.push_back(process);
   }
-  return false;
+  for (const auto &process : processes) {
+    std::lock_guard lock(process->alloc_mutex_);
+    for (const auto &gpu : process->gpu_state_) {
+      if (ranges_overlap(addr, length, gpu.doorbell_monitor_page, gpu.doorbell_page_size))
+        return process;
+      for (const auto &view : gpu.doorbell_views)
+        if (ranges_overlap(addr, length, view.page, gpu.doorbell_page_size))
+          return process;
+    }
+  }
+  return {};
+}
+
+bool SimulatedKfd::is_doorbell_range(const void *addr, size_t length) const {
+  return find_doorbell_process(addr, length) != nullptr;
 }
 
 void *SimulatedKfd::mmap_replacing_client_doorbell_views(void *addr, size_t length, int prot,
                                                          int flags, int fd, off_t offset) {
-  auto proc = find_process(local_process_id_);
+  auto proc = find_doorbell_process(addr, length);
   if (!proc)
     return safe_mmap(addr, length, prot, flags, fd, offset);
 
@@ -1467,15 +1480,16 @@ void SimulatedKfd::begin_local_shutdown() {
   // The wake is one-way for this driver's life: the interposer calls it only after
   // it has committed to teardown, so nothing clears the flags and every subsequent
   // wait reports the same benign timeout.
-  if (auto proc = find_local_process()) {
-    proc->event_state_.begin_wait_cancel();
-    // WAIT_EVENTS is not the only call that parks. RUNTIME_ENABLE waits on the
-    // debugger's acknowledgement, and is dispatched outside op_mutex_ precisely
-    // because it blocks -- so that thread holds a driver snapshot for the whole
-    // wait and teardown would sit behind it until the handshake deadline expired.
-    // Cancelling is equally pure: the waiter reports the handshake as cancelled
-    // and no event, page or process state is mutated.
-    cancel_runtime_handshake(proc->client_pid());
+  std::vector<std::shared_ptr<KfdProcess>> processes;
+  {
+    std::lock_guard lock(process_mutex_);
+    for (const auto &[id, process] : processes_)
+      processes.push_back(process);
+  }
+  for (const auto &process : processes) {
+    process->event_state_.begin_wait_cancel();
+    if (!process->is_secondary_context())
+      cancel_runtime_handshake(process->client_pid());
   }
 }
 
@@ -1603,13 +1617,17 @@ int SimulatedKfd::close(uint32_t process_id) {
 
   // Release queue binding leases and submission BO references before revoking
   // this process's address spaces or unmapping its allocations.
-  if (process_id == local_process_id_) {
+  {
     std::lock_guard lock(pm4_mutex_);
-    for (const auto &[key, queue] : pm4_queues_) {
-      (void)key;
-      queue.first->unregister_drm_queues(process_id);
+    for (auto it = pm4_queues_.begin(); it != pm4_queues_.end();) {
+      const auto &queue = it->second;
+      if (queue.process_id != process_id) {
+        ++it;
+        continue;
+      }
+      queue.command_processor->unregister_drm_queue(queue.queue_id, queue.process_id);
+      it = pm4_queues_.erase(it);
     }
-    pm4_queues_.clear();
   }
 
   const bool trace_enabled = vm_trace_enabled();
@@ -2296,7 +2314,18 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
 }
 
 int SimulatedKfd::munmap(void *addr, size_t length) {
-  return munmap(local_process_id_, addr, length);
+  std::vector<std::shared_ptr<KfdProcess>> processes;
+  {
+    std::lock_guard lock(process_mutex_);
+    for (const auto &[id, process] : processes_)
+      processes.push_back(process);
+  }
+  for (const auto &process : processes) {
+    const int result = dispatch_munmap(*process, addr, length);
+    if (result != -ENOENT)
+      return result;
+  }
+  return -ENOENT;
 }
 
 int SimulatedKfd::munmap(uint32_t process_id, void *addr, size_t length) {
@@ -2526,6 +2555,8 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
   // The kernel creates a PAGE_ALIGN(size) BO. LLVM can legally widen a scalar
   // load within its mapped tail page even when the logical tensor is smaller.
   const uint64_t allocation_size = (args->size + 0xFFF) & ~uint64_t(0xFFF);
+  if (proc.is_secondary_context() && (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR))
+    return -EOPNOTSUPP;
 
   std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
 
@@ -2730,41 +2761,41 @@ int SimulatedKfd::free_memory_ioctl(KfdProcess &proc, void *arg) {
 
   std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
   auto it = proc.allocations_.find(args->handle);
-  if (it != proc.allocations_.end()) {
-    auto &alloc = it->second;
-    if (alloc.imported && alloc.dmabuf_fd >= 0) {
-      libc_passthrough().close(alloc.dmabuf_fd);
-      if (auto dmabuf_it = proc.imported_dmabufs_.find(args->handle);
-          dmabuf_it != proc.imported_dmabufs_.end()) {
-        proc.fd_to_import_handle_.erase(dmabuf_it->second.fd);
-        proc.imported_dmabufs_.erase(dmabuf_it);
-      }
+  if (it == proc.allocations_.end())
+    return -EINVAL;
+  auto &alloc = it->second;
+  if (alloc.imported && alloc.dmabuf_fd >= 0) {
+    libc_passthrough().close(alloc.dmabuf_fd);
+    if (auto dmabuf_it = proc.imported_dmabufs_.find(args->handle);
+        dmabuf_it != proc.imported_dmabufs_.end()) {
+      proc.fd_to_import_handle_.erase(dmabuf_it->second.fd);
+      proc.imported_dmabufs_.erase(dmabuf_it);
     }
-    if (alloc.host_ptr && !alloc.user_va)
-      unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
-    if (alloc.memfd >= 0) {
-      {
-        std::lock_guard<std::mutex> lk(owned_fds_mutex_);
-        owned_fds_.erase(alloc.memfd);
-      }
-      libc_passthrough().close(alloc.memfd);
-    }
-
-    uint32_t freed_process_id = proc.process_id();
-    uint64_t freed_handle = args->handle;
-    proc.allocations_.erase(it);
-
+  }
+  if (alloc.host_ptr && !alloc.user_va)
+    unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
+  if (alloc.memfd >= 0) {
     {
-      std::lock_guard<std::mutex> ilk(ipc_mutex_);
-      for (auto ipc_it = ipc_store_.begin(); ipc_it != ipc_store_.end();) {
-        if (ipc_it->second.source_process_id == freed_process_id &&
-            ipc_it->second.source_alloc_handle == freed_handle) {
-          if (ipc_it->second.backing_memfd >= 0)
-            libc_passthrough().close(ipc_it->second.backing_memfd);
-          ipc_it = ipc_store_.erase(ipc_it);
-        } else {
-          ++ipc_it;
-        }
+      std::lock_guard<std::mutex> lk(owned_fds_mutex_);
+      owned_fds_.erase(alloc.memfd);
+    }
+    libc_passthrough().close(alloc.memfd);
+  }
+
+  uint32_t freed_process_id = proc.process_id();
+  uint64_t freed_handle = args->handle;
+  proc.allocations_.erase(it);
+
+  {
+    std::lock_guard<std::mutex> ilk(ipc_mutex_);
+    for (auto ipc_it = ipc_store_.begin(); ipc_it != ipc_store_.end();) {
+      if (ipc_it->second.source_process_id == freed_process_id &&
+          ipc_it->second.source_alloc_handle == freed_handle) {
+        if (ipc_it->second.backing_memfd >= 0)
+          libc_passthrough().close(ipc_it->second.backing_memfd);
+        ipc_it = ipc_store_.erase(ipc_it);
+      } else {
+        ++ipc_it;
       }
     }
   }
@@ -2798,15 +2829,15 @@ int SimulatedKfd::unmap_memory_ioctl(KfdProcess &proc, void *arg) {
   auto *args = static_cast<kfd_ioctl_unmap_memory_from_gpu_args *>(arg);
   std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
   auto it = proc.allocations_.find(args->handle);
-  if (it != proc.allocations_.end()) {
-    // UNMAP only tears down GPU page-table mappings; the allocation record
-    // (and its backing memfd/dmabuf_fd) stays tracked until FREE_MEMORY_OF_GPU
-    // releases it. Erasing here would leak those fds and make a later FREE a
-    // no-op for this handle.
-    auto &alloc = it->second;
-    if (alloc.host_ptr)
-      unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
-  }
+  if (it == proc.allocations_.end())
+    return -EINVAL;
+  // UNMAP only tears down GPU page-table mappings; the allocation record
+  // (and its backing memfd/dmabuf_fd) stays tracked until FREE_MEMORY_OF_GPU
+  // releases it. Erasing here would leak those fds and make a later FREE a
+  // no-op for this handle.
+  auto &alloc = it->second;
+  if (alloc.host_ptr)
+    unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
   args->n_success = args->n_devices;
   return 0;
 }
@@ -3548,6 +3579,8 @@ int SimulatedKfd::get_dmabuf_info_ioctl(KfdProcess &proc, void *arg) {
 }
 
 int SimulatedKfd::svm_ioctl(KfdProcess &proc, void *arg) {
+  if (proc.is_secondary_context())
+    return -EOPNOTSUPP;
   auto *args = static_cast<kfd_ioctl_svm_args *>(arg);
   auto *attrs = reinterpret_cast<kfd_ioctl_svm_attribute *>(args + 1);
 
@@ -3631,7 +3664,8 @@ int SimulatedKfd::runtime_enable_ioctl(KfdProcess &proc, void *arg) {
       proc.runtime_state_.capabilities_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
       proc.runtime_state_.r_debug = args->r_debug;
       args->capabilities_mask = proc.runtime_state_.capabilities_mask;
-      auto session = debug_sessions_.find(proc.client_pid());
+      auto session = proc.is_secondary_context() ? debug_sessions_.end()
+                                                 : debug_sessions_.find(proc.client_pid());
       notify_debugger = session != debug_sessions_.end() && session->second.enabled;
     } else {
       // Report the !disabled -> disabled transition. rocdbgapi needs it to stop
@@ -3644,7 +3678,8 @@ int SimulatedKfd::runtime_enable_ioctl(KfdProcess &proc, void *arg) {
       // the session table under the same lock the enable branch uses, so an
       // undebugged process exit does not re-take debug_sessions_mutex_ in the
       // callee just to discover there is nobody to tell.
-      auto session = debug_sessions_.find(proc.client_pid());
+      auto session = proc.is_secondary_context() ? debug_sessions_.end()
+                                                 : debug_sessions_.find(proc.client_pid());
       notify_disable = proc.runtime_state_.enabled && session != debug_sessions_.end() &&
                        session->second.enabled;
       proc.runtime_state_ = KfdProcess::RuntimeState{};
@@ -3665,7 +3700,7 @@ std::shared_ptr<KfdProcess> SimulatedKfd::find_process_by_client_pid(pid_t pid) 
     return nullptr;
   std::lock_guard<std::mutex> lk(process_mutex_);
   for (auto &[id, proc] : processes_)
-    if (proc->client_pid() == pid)
+    if (proc->client_pid() == pid && !proc->is_secondary_context())
       return proc;
   return nullptr;
 }
@@ -5881,6 +5916,8 @@ bool queues_all_dead(KfdProcess *proc, const kfd_ioctl_dbg_trap_args &args) {
 // in real kernel, amd/amdkfd/kfd_chardev.c kfd_ioctl_set_debug_trap
 int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_mem_fd,
                                    int target_proc_fd) {
+  if (caller.is_secondary_context())
+    return -EOPNOTSUPP;
   auto *args = static_cast<kfd_ioctl_dbg_trap_args *>(arg);
   util::Logger::driver("DBG_TRAP pid=", args->pid, " op=", args->op);
   // rocjitsu always models hardware scheduling, so the driver's

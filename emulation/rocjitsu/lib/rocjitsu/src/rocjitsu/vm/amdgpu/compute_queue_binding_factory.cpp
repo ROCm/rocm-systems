@@ -33,7 +33,11 @@ public:
   QueueReconfigureStatus reconfigure(const QueueReconfigureRequest &request) override {
     if (format_ == QueuePacketFormat::Pm4)
       return command_processor_.update_pm4_queue_registration(registration_id_, request);
-    if (!valid_aql_packet_ring(request.ring_base_address, request.ring_size_bytes))
+    const bool ringless_disable =
+        request.ring_base_address == 0 && request.scheduling_percentage == 0;
+    if (request.scheduling_percentage > 100 ||
+        (!ringless_disable &&
+         !valid_aql_packet_ring(request.ring_base_address, request.ring_size_bytes)))
       return QueueReconfigureStatus::Invalid;
     if (!registration_id_ || !command_processor_.update_queue_registration(
                                  registration_id_, request.ring_base_address,

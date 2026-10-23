@@ -20,6 +20,8 @@ const AMDGPU_MACHINE_GFX90A: u32 = 0x3f;
 const AMDGPU_MACHINE_GFX942: u32 = 0x4c;
 const AMDGPU_MACHINE_GFX950: u32 = 0x4f;
 const AMDGPU_MACHINE_GFX9_4_GENERIC: u32 = 0x5f;
+const AMDGPU_MACHINE_GFX1100: u32 = 0x41;
+const AMDGPU_MACHINE_GFX1151: u32 = 0x4a;
 const AMDGPU_MACHINE_GFX1200: u32 = 0x48;
 const AMDGPU_MACHINE_GFX1250: u32 = 0x49;
 const AMDGPU_MACHINE_GFX1201: u32 = 0x4e;
@@ -181,6 +183,8 @@ fn code_object_target(machine: u32) -> Option<(&'static str, u64)> {
         AMDGPU_MACHINE_GFX942 => Some(("gfx942", 0)),
         AMDGPU_MACHINE_GFX950 => Some(("gfx950", 0)),
         AMDGPU_MACHINE_GFX9_4_GENERIC => Some(("gfx9-4-generic", 1)),
+        AMDGPU_MACHINE_GFX1100 => Some(("gfx1100", 0)),
+        AMDGPU_MACHINE_GFX1151 => Some(("gfx1151", 0)),
         AMDGPU_MACHINE_GFX1200 => Some(("gfx1200", 0)),
         AMDGPU_MACHINE_GFX1250 => Some(("gfx1250", 0)),
         AMDGPU_MACHINE_GFX1201 => Some(("gfx1201", 0)),
@@ -218,6 +222,8 @@ fn validate_target(layout: Layout, target: Target) -> Result<(), Error> {
         AMDGPU_MACHINE_GFX942 => gfx == (9, 4, 2),
         AMDGPU_MACHINE_GFX950 => gfx == (9, 5, 0),
         AMDGPU_MACHINE_GFX9_4_GENERIC => matches!(gfx, (9, 4, 2) | (9, 5, 0)),
+        AMDGPU_MACHINE_GFX1100 => gfx == (11, 0, 0),
+        AMDGPU_MACHINE_GFX1151 => gfx == (11, 5, 1),
         AMDGPU_MACHINE_GFX1200 => gfx == (12, 0, 0),
         AMDGPU_MACHINE_GFX1201 => gfx == (12, 0, 1),
         AMDGPU_MACHINE_GFX12_GENERIC => (gfx.0, gfx.1) == (12, 0) && matches!(gfx.2, 0 | 1),
@@ -409,7 +415,9 @@ fn parse_symbols(
     let entries = rocelf::amdgpu_symbols(bytes, layout, &order.section_types())?;
     let wavefront_size = if matches!(
         layout.flags & AMDGPU_MACHINE_MASK,
-        AMDGPU_MACHINE_GFX1200
+        AMDGPU_MACHINE_GFX1100
+            | AMDGPU_MACHINE_GFX1151
+            | AMDGPU_MACHINE_GFX1200
             | AMDGPU_MACHINE_GFX1201
             | AMDGPU_MACHINE_GFX1250
             | AMDGPU_MACHINE_GFX12_GENERIC
@@ -483,6 +491,45 @@ fn parse_symbols(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rdna3_code_objects_require_the_matching_agent() -> Result<(), Error> {
+        for (machine, minor, stepping, name) in [
+            (AMDGPU_MACHINE_GFX1100, 0, 0, "gfx1100"),
+            (AMDGPU_MACHINE_GFX1151, 5, 1, "gfx1151"),
+        ] {
+            let mut bytes = [0u8; 64];
+            bytes[..4].copy_from_slice(b"\x7fELF");
+            bytes[4] = 2;
+            bytes[5] = 1;
+            bytes[7] = ELF_OS_ABI_AMDGPU_HSA;
+            bytes[8] = 3;
+            bytes[16..18].copy_from_slice(&ELF_TYPE_DYN.to_le_bytes());
+            bytes[18..20].copy_from_slice(&ELF_MACHINE_AMDGPU.to_le_bytes());
+            bytes[20..24].copy_from_slice(&1u32.to_le_bytes());
+            bytes[48..52].copy_from_slice(&machine.to_le_bytes());
+            bytes[52..54].copy_from_slice(&64u16.to_le_bytes());
+            let object = CodeObject::parse(&bytes)?;
+            assert_eq!(object.target()?, (name, 0));
+            let target = Target {
+                gfx_major: 11,
+                gfx_minor: minor,
+                gfx_stepping: stepping,
+                asic_revision: 0,
+                xnack_enabled: None,
+                sram_ecc_enabled: None,
+            };
+            object.validate_target(target)?;
+            assert!(matches!(
+                object.validate_target(Target {
+                    gfx_stepping: stepping + 1,
+                    ..target
+                }),
+                Err(Error::IncompatibleTarget)
+            ));
+        }
+        Ok(())
+    }
 
     #[test]
     fn variable_metadata_matches_rocr_section_flag_interpretation() {

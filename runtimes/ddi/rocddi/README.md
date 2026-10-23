@@ -67,3 +67,24 @@ See the [workspace instructions](../../README.md) for CMake and Cargo commands.
 The Rust unit and integration tests cover host contracts. The ignored GPU CTS
 cases require a qualified host and do not run in the default suite. The runtime
 is early-access and is not part of the repository's default build or installation.
+
+### Compute-queue context sizing
+
+KFD's `cwsr_size` and `ctl_stack_size` topology properties are optional. A
+complete kernel-provided pair is authoritative and passes native alignment and
+extent validation. When both properties are absent, the backend derives the
+context layout for its supported RDNA targets from active CUs per XCC,
+resident-wave capacity, register storage and LDS capacity. This follows
+libhsakmt's `update_ctx_save_restore_size` and register-size helpers. Incomplete
+pairs, invalid supplied sizes and targets without a sizing model remain
+unsupported rather than being replaced with guessed storage.
+
+[`queue_context.rs`](src/driver/linux_kfd/queue_context.rs) owns this
+calculation and its layout contract. Control-stack storage includes the native
+header and respects GFX10's hardware limit. Debugger storage is sized per
+resident wave, aligned to 64 bytes, and placed after all per-XCC contexts.
+The complete allocation is host-page aligned and checked against the native
+headers' 32-bit offset and size fields before backing is acquired. KFD queue
+creation receives the per-XCC context and control-stack sizes, excluding the
+separate debugger extent.
+

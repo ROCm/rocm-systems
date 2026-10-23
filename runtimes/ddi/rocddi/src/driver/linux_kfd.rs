@@ -13,6 +13,7 @@ pub(super) mod memory;
 mod operations;
 mod pc_sampling;
 mod queue;
+mod queue_context;
 mod registered_host;
 pub(super) mod sys;
 mod sysfs;
