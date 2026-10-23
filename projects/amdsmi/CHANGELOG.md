@@ -3692,7 +3692,7 @@ GPU: 1
 $ amd-smi static --asic
 GPU: 0
     ASIC:
-        MARKET_NAME: MI308X
+        MARKET_NAME: MI300X
         VENDOR_ID: 0x1002
         VENDOR_NAME: Advanced Micro Devices Inc. [AMD/ATI]
         SUBVENDOR_ID: 0x1002
@@ -3727,7 +3727,7 @@ typedef struct {
 $ amd-smi static --asic
 GPU: 0
     ASIC:
-        MARKET_NAME: MI308X
+        MARKET_NAME: MI300X
         VENDOR_ID: 0x1002
         VENDOR_NAME: Advanced Micro Devices Inc. [AMD/ATI]
         SUBVENDOR_ID: 0x1002

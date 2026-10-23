@@ -135,8 +135,7 @@ returns an error.
 - **MI300 (Aqua Vanjaram)** -- Only `AUTO` and `MANUAL` are accepted; `LOW`,
   `HIGH`, and the `STABLE_*` profiling levels are rejected by PMFW
   (`AMDSMI_STATUS_NOT_SUPPORTED`). Performance determinism is ASIC/PMFW-dependent
-  -- observed working on MI300A but returning `AMDSMI_STATUS_NOT_SUPPORTED` on
-  MI308X. Verify with `amd-smi metric --perf-level` after setting.
+  -- observed working on MI300A. Verify with `amd-smi metric --perf-level` after setting.
 - **MI350** -- Only `AUTO` and `MANUAL` are accepted; `LOW`, `HIGH`, and
   `STABLE_*` are rejected by PMFW. Performance determinism is **defeatured**; CSC
   (Clock Stretching Compensation) is intended to address the variability use case
