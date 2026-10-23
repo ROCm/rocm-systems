@@ -134,8 +134,8 @@ LibcPassthrough &libc_passthrough();
 
 /// @brief Compatibility entry points for operations absent from older libc releases.
 /// @details Prefer the resolved libc wrapper. If unavailable, use the syscall
-/// entry point; callers retain typed arguments and errno. The standalone helper
-/// also uses this fallback before the pass-through table is resolved.
+/// entry point; callers retain typed arguments and errno. Standalone callers
+/// also use this fallback before the pass-through table is resolved.
 int host_pidfd_open(pid_t pid, unsigned int flags);
 int host_close_range(unsigned int first, unsigned int last, int flags);
 ssize_t host_getdents64(int fd, void *buffer, size_t size);

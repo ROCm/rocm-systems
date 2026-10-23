@@ -6853,7 +6853,7 @@ TEST(RemoteDriverMmapDeathTest, ReleasesFallbackRepliesAndPreservesStoredBacking
 
 TEST(RemoteDriverExportTest, ExportRequiresTransferredDescriptor) {
   constexpr size_t bytes = 4 * 1024 * 1024;
-  const CloseOnScopeExit backing{static_cast<int>(syscall(SYS_memfd_create, "export", 0))};
+  const CloseOnScopeExit backing{memfd_create("export", 0)};
   ASSERT_TRUE(backing);
   ASSERT_EQ(ftruncate(backing.get(), bytes), 0);
   const CloseOnScopeExit unrelated{::open("/dev/null", O_RDONLY)};
