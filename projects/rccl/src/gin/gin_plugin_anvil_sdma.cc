@@ -22,6 +22,7 @@
 #include "gin/gin_anvil_sdma_factory.h"
 #include <hip/hip_runtime.h>
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -40,6 +41,10 @@ static std::set<struct ncclComm*> ginAnvilConnCheckedComms;
 struct ginAnvilInitCtx {
   struct ncclComm* comm;
 };
+
+// Live ginAnvilInitCtx allocations. Only observable surface a test has for the
+// finalize path, which is otherwise reached through ncclCommDestroy.
+static std::atomic<int> ginAnvilLiveInitCtxs{0};
 
 struct ginAnvilCollCtx {
   int nranks;
@@ -142,11 +147,16 @@ void ncclGinAnvilPluginTestResetHostState(void) {
   ginAnvilConnCheckedComms.clear();
 }
 
+int ncclGinAnvilPluginTestLiveInitCtxCount(void) {
+  return ginAnvilLiveInitCtxs.load(std::memory_order_relaxed);
+}
+
 static ncclResult_t ginAnvilInit(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction) {
   const char* gin_type = getenv("NCCL_GIN_TYPE");
   if (gin_type && atoi(gin_type) != NCCL_NET_DEVICE_GIN_ANVIL_SDMA) return ncclInternalError;
   if (gin_anvil_sdma_probe() <= 0) return ncclInternalError;
   auto* ictx = new ginAnvilInitCtx{};
+  ginAnvilLiveInitCtxs.fetch_add(1, std::memory_order_relaxed);
   *ctx = ictx;
   return ncclSuccess;
 }
@@ -225,13 +235,6 @@ static uint32_t ginAnvilFusedSignalFromEnv() {
   return atoi(e) != 0 ? 1u : 0u;
 }
 
-static uint32_t ginAnvilIpcAgentFenceFromEnv() {
-  const char* e = getenv("NCCL_GIN_ANVIL_SDMA_IPC_AGENT_FENCE");
-  if (!e || !e[0]) return 0;
-  if (e[0] == '0' && e[1] == '\0') return 0;
-  return atoi(e) != 0 ? 1u : 0u;
-}
-
 static uint32_t ginAnvilIpcSignalPeerFromEnv() {
   const char* e = getenv("NCCL_GIN_ANVIL_SDMA_SIGNAL_IPC");
   if (!e || !e[0]) return 0;
@@ -291,9 +294,11 @@ static ncclResult_t ginAnvilCloseListen(void* listenComm) {
 static ncclResult_t ginAnvilCloseColl(void* collComm) {
   ginAnvilCollCtx* cctx = (ginAnvilCollCtx*)collComm;
   if (cctx) {
-    // Erase here, not in finalize: ncclGinHostFinalize closeColls then memsets
-    // ginState before ncclGinFinalize, so plugin finalize never runs for a live
-    // GIN backend and a recycled ncclComm* would otherwise skip the gate.
+    // Erase here, not in finalize: closeColl also runs on backend-drop paths
+    // (plugin/gin.cc) that never reach plugin finalize, and a recycled
+    // ncclComm* would otherwise skip the gate. Host finalize keeps the backend
+    // records for ncclGinFinalize (AICOMRCCL-2739), so finalize still runs for
+    // a live connected backend and is not the only erase site.
     if (cctx->comm) {
       std::lock_guard<std::mutex> lock(pluginMutex);
       ginAnvilConnCheckedComms.erase(cctx->comm);
@@ -305,6 +310,7 @@ static ncclResult_t ginAnvilCloseColl(void* collComm) {
 }
 
 static ncclResult_t ginAnvilFinalize(void* ctx) {
+  if (ctx) ginAnvilLiveInitCtxs.fetch_sub(1, std::memory_order_relaxed);
   delete (ginAnvilInitCtx*)ctx;
   return ncclSuccess;
 }
@@ -900,7 +906,6 @@ static ncclResult_t ginAnvilCreateContext(void* collComm, ncclGinConfig_t* confi
                                                              : (uint32_t)thr;
   }
   ctx->gpuCtxHost.fusedSdmaSignal = ginAnvilFusedSignalFromEnv();
-  ctx->gpuCtxHost.ipcAgentFence = ginAnvilIpcAgentFenceFromEnv();
   ctx->gpuCtxHost.ipcSignalPeer = ginAnvilIpcSignalPeerFromEnv();
   ctx->gpuCtxHost.signals = nullptr;
   ctx->gpuCtxHost.signal_remote_addrs = nullptr;
@@ -939,10 +944,10 @@ static ncclResult_t ginAnvilCreateContext(void* collComm, ncclGinConfig_t* confi
   *outGinCtx = ctx;
   *outDevHandle = ctx->devHandle;
   INFO(NCCL_INIT,
-       "GIN anvil-sdma: context created (v%d, %d signals, %d counters, signalSlot=%d, sdmaThreshold=%u, "
+       "GIN anvil-sdma: context created (v%d, %d signals, %d counters, sdmaThreshold=%u, %d channels, "
        "spread=%d, fusedSignal=%u)",
-       NCCL_GIN_ANVIL_SDMA_NET_VERSION, config->nSignals, config->nCounters, ctx->signalSlot,
-       ctx->gpuCtxHost.sdmaThreshold, ctx->gpuCtxHost.sdmaChannelStride, ctx->gpuCtxHost.fusedSdmaSignal);
+       NCCL_GIN_ANVIL_SDMA_NET_VERSION, config->nSignals, config->nCounters, ctx->gpuCtxHost.sdmaThreshold,
+       ctx->numChannels, ctx->gpuCtxHost.sdmaChannelStride, ctx->gpuCtxHost.fusedSdmaSignal);
   return ncclSuccess;
 
 fail:

@@ -62,6 +62,18 @@ constexpr uint32_t make_gc_ip_version(uint32_t major, uint32_t minor, uint32_t r
 /// drivers/gpu/drm/amd/amdkfd/kfd_device.c).
 constexpr uint32_t gc_ip_version_for_gfx_target_version(uint32_t gfx_target_version) {
   switch (gfx_target_version) {
+  case 90000: // Vega10 / gfx900
+    return make_gc_ip_version(9, 0, 1);
+  case 90002: // Raven: GC 9.1.0 or 9.2.2, equivalent for these capability checks.
+    return make_gc_ip_version(9, 1, 0);
+  case 90004: // Vega12 / gfx904
+    return make_gc_ip_version(9, 2, 1);
+  case 90006: // Vega20 / gfx906
+    return make_gc_ip_version(9, 4, 0);
+  case 90008: // Arcturus / gfx908
+    return make_gc_ip_version(9, 4, 1);
+  case 90012: // Renoir / gfx90c
+    return make_gc_ip_version(9, 3, 0);
   case 90010: // Aldebaran / gfx90a  -> GC 9.4.2
     return make_gc_ip_version(9, 4, 2);
   case 90402: // MI300 / gfx942      -> GC 9.4.3

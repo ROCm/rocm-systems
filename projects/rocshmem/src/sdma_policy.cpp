@@ -64,12 +64,18 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int num_pes, int rank) {
   int deviceId;
   CHECK_HIP(hipGetDevice(&deviceId));
 
-  // Create SDMA connections to all local PEs including self
+  // Create SDMA connections to all local PEs including self. A failed connect aborts rather than
+  // clearing sdmaEnabled on this rank alone: sdmaEnabled also selects the alltoall algorithm, and
+  // ranks that disagree on it run incompatible synchronization and hang.
   for (int i = 0; i < shm_size; i++) {
     if (i != deviceId) {
       sdma_anvil::EnablePeerAccess(deviceId, i);
     }
-    sdma_anvil::anvil.connect(deviceId, i, numChannels);
+    if (!sdma_anvil::anvil.connect(deviceId, i, numChannels)) {
+      LOG_ERROR_ABORT("SDMA: connect failed from device %d to %d with %d channel(s); set "
+                      "ROCSHMEM_SDMA_ENABLED=0 or lower ROCSHMEM_SDMA_NUM_CHANNELS",
+                      deviceId, i, numChannels);
+    }
   }
 
   // Total number of handles: shm_size * numChannels
@@ -103,7 +109,11 @@ __host__ void SdmaImpl::sdmaHostStop() {
     CHECK_HIP(hipFree(deviceHandles_d));
     deviceHandles_d = nullptr;
   }
-  sdma_anvil::anvil.disconnect();
+  // Release only the peers sdmaHostInit wired: the channel map is process-global, so disconnect()
+  // would also destroy queues another user still holds. A disabled init wired none.
+  if (sdmaEnabled) {
+    for (int i = 0; i < shm_size; i++) sdma_anvil::anvil.disconnectDevice(i);
+  }
 }
 
 #endif  // USE_SDMA
