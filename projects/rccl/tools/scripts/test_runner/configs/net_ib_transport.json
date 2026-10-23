@@ -750,7 +750,7 @@
         {
           "name": "Cast_MultiSegment_OptRecv_All",
           "description": "Every CAST multi-segment test, including the hinted segmented-write and invalid-range checks, with optRecvCompletion on",
-          "test_filter": "NetIbMultiSegmentMPITest.*"
+          "test_filter": "NetIbMultiSegmentMPITest.*-*OldPeer*"
         }
       ]
     },
@@ -782,7 +782,12 @@
         {
           "name": "Cast_MultiSegment_All",
           "description": "CAST registration, asymmetric/cross-boundary transfer, multi-receive, flush, limits, and single-segment regressions",
-          "test_filter": "NetIbMultiSegmentMPITest.*"
+          "test_filter": "NetIbMultiSegmentMPITest.*-*OldPeer*"
+        },
+        {
+          "name": "Cast_MultiSeg_OldPeer_SingleRkeyCrossBoundaryTransfer",
+          "description": "Sender cap off, receiver cap on: the receiver declines multi-segment registration and the cross-boundary write completes on one rkey. Own process so the per-rank switch is the first read of the cached param.",
+          "test_filter": "NetIbMultiSegmentMPITest.OldPeer_SingleRkeyCrossBoundaryTransfer"
         },
         {
           "name": "UBR_MultiSegment_Generic",
