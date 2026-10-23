@@ -412,3 +412,40 @@ TEST(RmaSegmentMathTest, WrCreditsReleaseJumpsSeveralIds)
     // The one live id is tracked, so the untracked cost does not apply.
     EXPECT_EQ(ncclRmaWrCreditsInUse(&c, posted, 1), 9);
 }
+
+struct SegCountPrefix {
+    uint32_t tag;
+    int nSegments;
+};
+
+TEST(RmaSegmentMathTest, SegmentCountNullAndUntaggedAreZero)
+{
+    EXPECT_EQ(rcclRmaMrSegmentCount(nullptr), 0);
+    SegCountPrefix wrong{0x11111111u, 4};
+    EXPECT_EQ(rcclRmaMrSegmentCount(&wrong), 0);
+    uintptr_t pointerShaped = static_cast<uintptr_t>(0x7f0000001000ull);
+    EXPECT_EQ(rcclRmaMrSegmentCount(&pointerShaped), 0);
+}
+
+TEST(RmaSegmentMathTest, SegmentCountReadsTaggedHandle)
+{
+    SegCountPrefix one{rcclRmaSegMrTag(), 1};
+    SegCountPrefix four{rcclRmaSegMrTag(), 4};
+    SegCountPrefix cap{rcclRmaSegMrTag(), NCCL_RMA_MAX_SEGMENTS};
+    EXPECT_EQ(rcclRmaMrSegmentCount(&one), 1);
+    EXPECT_EQ(rcclRmaMrSegmentCount(&four), 4);
+    EXPECT_EQ(rcclRmaMrSegmentCount(&cap), NCCL_RMA_MAX_SEGMENTS);
+    EXPECT_FALSE(rcclRmaMrSegmentCount(&one) > 1);
+    EXPECT_TRUE(rcclRmaMrSegmentCount(&four) > 1);
+    EXPECT_TRUE(rcclRmaMrSegmentCount(&cap) > 1);
+}
+
+TEST(RmaSegmentMathTest, SegmentCountKeepsZeroAndNegative)
+{
+    SegCountPrefix zero{rcclRmaSegMrTag(), 0};
+    SegCountPrefix negative{rcclRmaSegMrTag(), -1};
+    EXPECT_EQ(rcclRmaMrSegmentCount(&zero), 0);
+    EXPECT_EQ(rcclRmaMrSegmentCount(&negative), -1);
+    EXPECT_FALSE(rcclRmaMrSegmentCount(&zero) > 1);
+    EXPECT_FALSE(rcclRmaMrSegmentCount(&negative) > 1);
+}

@@ -11,6 +11,7 @@
 #include <limits.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 #include "nccl.h"
 
 // RCCL: cap on physical segments per GIN/RMA symmetric buffer. HIP dma-buf export
@@ -227,5 +228,21 @@ ncclResult_t rcclRmaIbProxyIPutSignal(void* rmaCtx, int context, uint64_t srcOff
                                uint32_t optFlags, void** request);
 ncclResult_t rcclRmaIbProxyIFlush(void* rmaCtx, int context, void* mhandle, uint32_t rank, void** request);
 ncclResult_t rcclRmaIbProxyTestFailed(struct ncclIbRequest* req, int* done);
+
+// First field of the multi-segment MR. The single-MR handle does not carry it.
+static inline uint32_t rcclRmaSegMrTag(void) { return 0xC3C3A5A5u; }
+
+// Segment count, or 0 when the handle is empty or is the single-MR layout.
+static inline int rcclRmaMrSegmentCount(const void* mhandle) {
+  if (mhandle == NULL) return 0;
+  uint32_t tag = 0;
+  int nSegments = 0;
+  memcpy(&tag, mhandle, sizeof(tag));
+  memcpy(&nSegments, (const char*)mhandle + sizeof(tag), sizeof(nSegments));
+  if (tag != rcclRmaSegMrTag()) return 0;
+  return nSegments;
+}
+
+int rcclRmaIbProxyMrSegmentCount(void* mhandle);
 
 #endif
