@@ -108,11 +108,10 @@ ncclResult_t ncclTopoGetCpuAffinity(struct ncclTopoSystem* system, int rank, ncc
 #define NCCL_TOPO_CPU_MODEL_AMD_ZEN12 1
 #define NCCL_TOPO_CPU_MODEL_AMD_ZEN34 2
 #define NCCL_TOPO_CPU_MODEL_AMD_ZEN5 3
-// RCCL-specific AMD CPU models (values chosen to not collide with the upstream ZEN* ids above)
-#define NCCL_TOPO_CPU_MODEL_AMD_ZEN 5
-#define NCCL_TOPO_CPU_MODEL_AMD_ROME 6
 #define NCCL_TOPO_CPU_MODEL_YONGFENG 1
 ncclResult_t ncclTopoCpuType(struct ncclTopoSystem* system, int* arch, int* vendor, int* model);
+// RCCL: true when the first CPU is an AMD Rome-class host, which enables the Rome presets and GDR relaxation.
+bool rcclTopoCpuIsRome(struct ncclTopoSystem* system);
 ncclResult_t ncclTopoGetGpuCount(struct ncclTopoSystem* system, int* count);
 ncclResult_t ncclTopoGetNetCount(struct ncclTopoSystem* system, int* count);
 ncclResult_t ncclTopoGetNvsCount(struct ncclTopoSystem* system, int* count);
