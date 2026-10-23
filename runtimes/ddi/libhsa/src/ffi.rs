@@ -134,11 +134,16 @@ pub(crate) const ISA_COUNT_PER_GPU: u64 = 2;
 pub(crate) const WAVEFRONT_BASE: u64 = 0x4853_4100_0028_0000;
 /// Synthetic handle for the fine-grained host memory pool.
 pub(crate) const CPU_POOL_FINE: u64 = 0x4853_4100_0030_0001;
+/// Base value of CPU memory-pool handles, with sixteen slots per CPU agent.
+pub(crate) const CPU_POOL_BASE: u64 = CPU_POOL_FINE - 1;
 /// Synthetic handle for the extended fine-grained host pool.
+#[cfg(test)]
 pub(crate) const CPU_POOL_EXTENDED: u64 = 0x4853_4100_0030_0002;
 /// Synthetic handle for the host kernel-argument pool.
+#[cfg(test)]
 pub(crate) const CPU_POOL_KERNARG: u64 = 0x4853_4100_0030_0003;
 /// Synthetic handle for the coarse-grained host pool.
+#[cfg(test)]
 pub(crate) const CPU_POOL_COARSE: u64 = 0x4853_4100_0030_0004;
 /// Base value of the synthetic GPU pool handle range.
 pub(crate) const GPU_POOL_BASE: u64 = 0x4853_4100_0040_0000;

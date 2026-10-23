@@ -58,14 +58,66 @@ use crate::runtime::{
 };
 use crate::signal::{AsyncCopyClock, AsyncCopyProfile, SignalState};
 
-/// Synthetic GPU pool kind for coarse-grained memory.
-const GPU_POOL_COARSE: u64 = 1;
-/// Synthetic GPU pool kind for fine-grained memory.
-pub(crate) const GPU_POOL_FINE: u64 = 2;
-/// Synthetic GPU pool kind for workgroup memory.
-const GPU_POOL_GROUP: u64 = 3;
-/// Synthetic GPU pool kind for extended fine-grained memory.
-pub(crate) const GPU_POOL_EXTENDED: u64 = 4;
+/// Handle slots reserved for each agent's memory pools.
+pub(crate) const POOL_HANDLE_STRIDE: u64 = 0x10;
+
+/// CPU memory-pool class encoded in an HSA pool handle.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u64)]
+pub(crate) enum CpuPoolKind {
+    /// Fine-grained host memory.
+    Fine = 1,
+    /// Extended fine-grained host memory.
+    ExtendedFine = 2,
+    /// Uncached kernel-argument memory.
+    Kernarg = 3,
+    /// Coarse-grained host memory.
+    Coarse = 4,
+}
+
+impl CpuPoolKind {
+    /// CPU pools in the order exposed to HSA clients.
+    pub(crate) const ALL: [Self; 4] = [Self::Fine, Self::ExtendedFine, Self::Kernarg, Self::Coarse];
+
+    /// Decodes the kind slot within one CPU agent's handle range.
+    pub(crate) fn from_slot(slot: u64) -> Option<Self> {
+        match slot {
+            1 => Some(Self::Fine),
+            2 => Some(Self::ExtendedFine),
+            3 => Some(Self::Kernarg),
+            4 => Some(Self::Coarse),
+            _ => None,
+        }
+    }
+}
+
+/// GPU memory-pool class encoded in an HSA pool handle.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u64)]
+pub(crate) enum GpuPoolKind {
+    /// Coarse-grained local memory.
+    Coarse = 1,
+    /// Fine-grained local memory.
+    Fine = 2,
+    /// Per-workgroup memory.
+    Group = 3,
+    /// Extended fine-grained local memory.
+    ExtendedFine = 4,
+}
+
+impl GpuPoolKind {
+    /// Decodes the kind slot within one GPU agent's handle range.
+    pub(crate) fn from_slot(slot: u64) -> Option<Self> {
+        match slot {
+            1 => Some(Self::Coarse),
+            2 => Some(Self::Fine),
+            3 => Some(Self::Group),
+            4 => Some(Self::ExtendedFine),
+            _ => None,
+        }
+    }
+}
+
 /// Native allocation flag requesting PCIe-visible memory.
 const ALLOC_PCIE: u32 = 1;
 /// Native allocation flag requesting contiguous memory.
@@ -594,12 +646,12 @@ impl VmemHandle {
     }
 }
 
-/// Native mapping owner selected by whether access belongs to a CPU or GPU.
+/// Native device mapping owner; CPU accesses share the host map on `VmemMapping`.
 enum VmemAccessOwner {
     /// Native mapping in an activated device VM.
     Device(VirtualDeviceMapping),
-    /// Native mapping in the host process address space.
-    Host(VirtualHostMapping),
+    /// Permission record for the process-wide host mapping.
+    Host,
 }
 
 /// Per-agent permissions and the native object that enforces them.
@@ -615,7 +667,7 @@ impl VmemAccess {
     fn free(&mut self) -> Result<(), rocddi::Error> {
         match &mut self.owner {
             VmemAccessOwner::Device(mapping) => mapping.free(),
-            VmemAccessOwner::Host(mapping) => mapping.free(),
+            VmemAccessOwner::Host => Ok(()),
         }
     }
 }
@@ -634,9 +686,31 @@ pub(crate) struct VmemMapping {
     size: usize,
     /// Per-agent permissions and native map owners.
     access: HashMap<u64, VmemAccess>,
+    /// One process-wide host map shared by all CPU-agent access records.
+    host_mapping: Option<VirtualHostMapping>,
 }
 
 impl VmemMapping {
+    /// Returns the process-wide CPU permission union after one agent changes.
+    fn host_permissions_after(&self, agent: u64, permissions: u32) -> u32 {
+        self.access
+            .iter()
+            .filter(|(other, access)| {
+                **other != agent && matches!(access.owner, VmemAccessOwner::Host)
+            })
+            .fold(permissions, |bits, (_, access)| bits | access.permissions)
+    }
+
+    /// Returns the currently granted process-wide CPU permission union.
+    fn host_permissions(&self) -> u32 {
+        self.access
+            .values()
+            .filter(|access| matches!(access.owner, VmemAccessOwner::Host))
+            .fold(ACCESS_PERMISSION_NONE, |bits, access| {
+                bits | access.permissions
+            })
+    }
+
     /// Checks whether the requested address belongs to this object.
     fn contains(&self, address: usize) -> bool {
         contains(self.address, self.size, address)
@@ -644,7 +718,12 @@ impl VmemMapping {
 
     /// Releases access.
     fn free_access(&mut self) -> Result<(), rocddi::Error> {
-        let agents = self.access.keys().copied().collect::<Vec<_>>();
+        let agents = self
+            .access
+            .iter()
+            .filter(|(_, access)| matches!(access.owner, VmemAccessOwner::Device(_)))
+            .map(|(agent, _)| *agent)
+            .collect::<Vec<_>>();
         for agent in agents {
             let Some(mut access) = self.access.remove(&agent) else {
                 continue;
@@ -654,6 +733,12 @@ impl VmemMapping {
                 return Err(error);
             }
         }
+        if let Some(mapping) = &mut self.host_mapping {
+            mapping.free()?;
+            self.host_mapping = None;
+        }
+        self.access
+            .retain(|_, access| !matches!(access.owner, VmemAccessOwner::Host));
         Ok(())
     }
 }
@@ -665,6 +750,7 @@ impl LockedMemory {
         host_base: usize,
         device_base: usize,
         size: usize,
+        owner: HsaAgent,
         global_flags: u32,
         accessible: Vec<HsaAgent>,
     ) -> Self {
@@ -675,7 +761,7 @@ impl LockedMemory {
                 agent_base: device_base,
                 host_base: Some(host_base),
                 size,
-                owner: HsaAgent { handle: CPU_AGENT },
+                owner,
                 global_flags,
                 registered: true,
                 alloc_flags: POINTER_ALLOC_NONPAGED | POINTER_ALLOC_HOST_ACCESS,
