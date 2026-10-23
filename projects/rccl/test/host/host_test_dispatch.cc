@@ -37,6 +37,7 @@
 #include <gtest/gtest.h>
 
 #include <fmt/format.h>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -111,6 +112,15 @@ double toDouble(std::string_view text, double fallback)
     char *end = nullptr;
     const double value = std::strtod(copy.c_str(), &end);
     return end == copy.c_str() ? fallback : value;
+}
+
+// gtest's JSON time fields, e.g. "0.015s", as seconds. 0 when the string is not one.
+double jsonSeconds(std::string_view text)
+{
+    if (!text.empty() && text.back() == 's') {
+        text.remove_suffix(1);
+    }
+    return toDouble(text, 0.0);
 }
 
 // ── --gtest_list_tests parsing ──────────────────────────────────────
@@ -352,11 +362,27 @@ std::vector<std::string> childFilters(const Selection &selection)
     return filters;
 }
 
-// ── JUnit XML merging ───────────────────────────────────────────────
+// ── report merging ──────────────────────────────────────────────────
+
+// The report formats gtest can write, and this dispatcher therefore has to merge.
+//
+// Both are real consumers: run_host_tests.sh asks for xml, and the coco test runner asks for
+// json through GTEST_OUTPUT (tools/scripts/test_runner/lib/test_executor.py).
+enum class ReportFormat { Xml, Json };
+
+// *format* as gtest spells it in --gtest_output=<format>:<path>.
+std::string_view formatName(ReportFormat format)
+{
+    return format == ReportFormat::Json ? "json" : "xml";
+}
 
 // One child's report, as merged into the dispatcher's own.
+//
+// Only the member matching the run's format is populated, except in crashFragment(), which
+// fills both so the crash path never has to know which format is in play.
 struct SuiteFragment {
     std::string xml;   // the child's <testsuite> elements, qualifier applied
+    nlohmann::json suites = nlohmann::json::array();   // the same suites, as JSON objects
     long tests = 0;
     long failures = 0;
     long disabled = 0;
@@ -413,11 +439,55 @@ std::string applyQualifier(std::string_view xml, std::string_view qualifier)
     return out;
 }
 
+// *text* (one child's whole JSON report) reduced to the fragment the dispatcher splices in.
+//
+// Parsed rather than pattern-matched: gtest's JSON escapes strings (its own report writes
+// \/ for every path separator) and nests failure messages that contain braces and quotes, none
+// of which survives being cut out of the text by hand. nlohmann also gives the only honest
+// answer to "is this a gtest report at all?" -- a parse error, or a missing testsuites array.
+std::optional<SuiteFragment> parseChildJsonReport(const std::string &text,
+                                                  std::string_view qualifier)
+{
+    const nlohmann::json root = nlohmann::json::parse(text, nullptr, /*allow_exceptions=*/false);
+    if (root.is_discarded() || !root.is_object() || !root.contains("testsuites") ||
+        !root["testsuites"].is_array()) {
+        return std::nullopt;
+    }
+
+    SuiteFragment fragment;
+    fragment.tests = root.value("tests", 0);
+    fragment.failures = root.value("failures", 0);
+    fragment.disabled = root.value("disabled", 0);
+    fragment.errors = root.value("errors", 0);
+    fragment.skipped = root.value("skipped", 0);
+    fragment.time = jsonSeconds(root.value("time", std::string("0s")));
+
+    // Suite and case keep their own identity; only the names that carry the suite's identity
+    // move, exactly as in the XML path: the suite's name and each case's classname.
+    for (nlohmann::json suite : root["testsuites"]) {
+        if (!suite.is_object()) {
+            continue;
+        }
+        suite["name"] = fmt::format("{}/{}", qualifier, suite.value("name", std::string()));
+        if (suite.contains("testsuite") && suite["testsuite"].is_array()) {
+            for (nlohmann::json &testcase : suite["testsuite"]) {
+                if (testcase.is_object() && testcase.contains("classname")) {
+                    testcase["classname"] =
+                        fmt::format("{}/{}", qualifier,
+                                    testcase.value("classname", std::string()));
+                }
+            }
+        }
+        fragment.suites.push_back(std::move(suite));
+    }
+    return fragment;
+}
+
 // *xml* (one child's whole report) reduced to the fragment the dispatcher splices in.
 //
 // Returns nullopt when the document has no <testsuites> root, which is how a child that died
 // before writing its report, or wrote something that is not a gtest report, is recognised.
-std::optional<SuiteFragment> parseChildReport(std::string_view xml, std::string_view qualifier)
+std::optional<SuiteFragment> parseChildXmlReport(std::string_view xml, std::string_view qualifier)
 {
     const size_t root = xml.find("<testsuites");
     if (root == std::string_view::npos) {
@@ -440,6 +510,14 @@ std::optional<SuiteFragment> parseChildReport(std::string_view xml, std::string_
     return fragment;
 }
 
+// *text* (one child's whole report, in *format*) reduced to the fragment to splice in.
+std::optional<SuiteFragment> parseChildReport(const std::string &text, std::string_view qualifier,
+                                              ReportFormat format)
+{
+    return format == ReportFormat::Json ? parseChildJsonReport(text, qualifier)
+                                        : parseChildXmlReport(text, qualifier);
+}
+
 // A one-case <testsuite> standing in for a child that produced no usable report.
 //
 // Synthesised rather than ignored: a binary that crashes, or that rejects an argument and exits
@@ -458,11 +536,63 @@ SuiteFragment crashFragment(std::string_view qualifier, std::string_view detail)
         "    </testcase>\n"
         "  </testsuite>\n",
         fmt::arg("qualifier", qualifier), fmt::arg("detail", detail));
+
+    // The same case as JSON. Spelled with the keys the results consumer actually reads -- a
+    // non-empty failures array, status RUN and result COMPLETED -- because a case missing them
+    // is classified as not-run and would drop the failure rather than report it (see
+    // _leaf_case_status in tools/scripts/test_runner/lib/test_executor.py).
+    const std::string suiteName = fmt::format("{}/HostTestDispatch", qualifier);
+    fragment.suites.push_back(nlohmann::json{
+        {"name", suiteName},
+        {"tests", 1},
+        {"failures", 1},
+        {"disabled", 0},
+        {"errors", 0},
+        {"time", "0s"},
+        {"testsuite",
+         nlohmann::json::array(
+             {nlohmann::json{{"name", "BinaryProducedAReport"},
+                             {"status", "RUN"},
+                             {"result", "COMPLETED"},
+                             {"time", "0s"},
+                             {"classname", suiteName},
+                             {"failures", nlohmann::json::array({nlohmann::json{
+                                              {"failure", detail}, {"type", ""}}})}}})}});
     return fragment;
 }
 
+// The merged report for *fragments*, as a complete gtest JSON document.
+std::string mergeJsonReports(const std::vector<SuiteFragment> &fragments)
+{
+    long tests = 0, failures = 0, disabled = 0, errors = 0, skipped = 0;
+    double time = 0.0;
+    nlohmann::json suites = nlohmann::json::array();
+    for (const SuiteFragment &fragment : fragments) {
+        tests += fragment.tests;
+        failures += fragment.failures;
+        disabled += fragment.disabled;
+        errors += fragment.errors;
+        skipped += fragment.skipped;
+        time += fragment.time;
+        for (const nlohmann::json &suite : fragment.suites) {
+            suites.push_back(suite);
+        }
+    }
+    const nlohmann::json root{{"tests", tests},
+                              {"failures", failures},
+                              {"disabled", disabled},
+                              {"errors", errors},
+                              {"skipped", skipped},
+                              {"time", fmt::format("{:g}s", time)},
+                              {"name", "AllTests"},
+                              {"testsuites", suites}};
+    // Two-space indent and a trailing newline, as gtest's own JSON writer produces, so a
+    // report from one binary and a merged one still diff cleanly against each other.
+    return root.dump(2) + "\n";
+}
+
 // The merged report for *fragments*, as a complete JUnit XML document.
-std::string mergeReports(const std::vector<SuiteFragment> &fragments)
+std::string mergeXmlReports(const std::vector<SuiteFragment> &fragments)
 {
     long tests = 0, failures = 0, disabled = 0, errors = 0, skipped = 0;
     double time = 0.0;
@@ -484,6 +614,12 @@ std::string mergeReports(const std::vector<SuiteFragment> &fragments)
         "<testsuites tests=\"{}\" failures=\"{}\" disabled=\"{}\" errors=\"{}\" skipped=\"{}\""
         " time=\"{:g}\" name=\"AllTests\">{}</testsuites>\n",
         tests, failures, disabled, errors, skipped, time, body);
+}
+
+// The merged report for *fragments*, in *format*.
+std::string mergeReports(const std::vector<SuiteFragment> &fragments, ReportFormat format)
+{
+    return format == ReportFormat::Json ? mergeJsonReports(fragments) : mergeXmlReports(fragments);
 }
 
 // ── command line ────────────────────────────────────────────────────
@@ -509,19 +645,44 @@ struct Options {
     bool alsoRunDisabled = false;
     std::string filter = "*";
     std::string outputPath;       // empty: the caller asked for no report
+    ReportFormat outputFormat = ReportFormat::Xml;
     std::vector<std::string> passthrough;
 };
 
-// *args* (argv[1:]) parsed into :class:`Options`.
+// A --gtest_output= value ("<format>:<path>", or a bare path) applied to *options*.
+//
+// gtest's own rules, mirrored: no prefix means xml, and a path ending in '/' is a directory to
+// write the default filename into.
+void applyOutputSpec(std::string_view value, Options *options)
+{
+    const size_t colon = value.find(':');
+    std::string_view format = colon == std::string_view::npos ? "xml" : value.substr(0, colon);
+    std::string path(colon == std::string_view::npos ? value : value.substr(colon + 1));
+    options->outputFormat = format == "json" ? ReportFormat::Json : ReportFormat::Xml;
+    if (!path.empty() && path.back() == '/') {
+        path += fmt::format("test_detail.{}", formatName(options->outputFormat));
+    }
+    options->outputPath = path;
+}
+
+// *args* (argv[1:]) parsed into :class:`Options`, with *outputEnv* standing for GTEST_OUTPUT.
 //
 // Everything the dispatcher does not act on is forwarded verbatim, so flags it has never heard of
 // (--gtest_repeat, --gtest_shuffle, a binary's own env-driven switches) keep working.
-Options parseArgs(const std::vector<std::string> &args)
+//
+// GTEST_OUTPUT is read here rather than left to gtest because gtest would act on it in THIS
+// process: it seeds the output flag at static init, so the no-op run that resolves the filter
+// would write its own all-pass report over the caller's file and the real results would never
+// reach it. Taking the variable ourselves turns it into the destination of the merged report.
+Options parseArgs(const std::vector<std::string> &args, std::string_view outputEnv = "")
 {
     constexpr std::string_view kFilterFlag = "--gtest_filter=";
     constexpr std::string_view kOutputFlag = "--gtest_output=";
 
     Options options;
+    if (!outputEnv.empty()) {
+        applyOutputSpec(outputEnv, &options);   // an explicit flag below overrides this
+    }
     for (const std::string &arg : args) {
         if (isHelpFlag(arg)) {
             // Acted on and NOT forwarded: help is a question about this binary, and forwarding
@@ -538,12 +699,7 @@ Options parseArgs(const std::vector<std::string> &args)
         } else if (startsWith(arg, kFilterFlag)) {
             options.filter = arg.substr(kFilterFlag.size());
         } else if (startsWith(arg, kOutputFlag)) {
-            const std::string value = arg.substr(kOutputFlag.size());
-            const size_t colon = value.find(':');
-            const std::string path = colon == std::string::npos ? "" : value.substr(colon + 1);
-            // gtest reads a directory (trailing '/') as "write test_detail.xml in here".
-            options.outputPath =
-                !path.empty() && path.back() == '/' ? path + "test_detail.xml" : path;
+            applyOutputSpec(std::string_view(arg).substr(kOutputFlag.size()), &options);
         } else {
             options.passthrough.push_back(arg);
         }
@@ -804,10 +960,12 @@ public:
 
     bool valid() const { return !path_.empty(); }
 
-    // Where part *part* of *qualifier*'s report should be written.
-    std::string reportPath(const std::string &qualifier, size_t part) const
+    // Where part *part* of *qualifier*'s report should be written, in *format*.
+    std::string reportPath(const std::string &qualifier, size_t part, ReportFormat format) const
     {
-        return (fs::path(path_) / fmt::format("{}{}.xml", qualifier, part)).string();
+        return (fs::path(path_) /
+                fmt::format("{}{}.{}", qualifier, part, formatName(format)))
+            .string();
     }
 
 private:
@@ -819,7 +977,8 @@ private:
 int main(int argc, char **argv)
 {
     const std::vector<std::string> args(argv + 1, argv + argc);
-    const Options options = parseArgs(args);
+    const char *outputEnv = std::getenv("GTEST_OUTPUT");
+    const Options options = parseArgs(args, outputEnv == nullptr ? "" : outputEnv);
 
     const std::string directory = selfDirectory(argv[0]);
 
@@ -850,6 +1009,13 @@ int main(int argc, char **argv)
     int gtest_argc = 1;
     char *gtest_argv[] = {argv[0], nullptr};
     ::testing::InitGoogleTest(&gtest_argc, gtest_argv);
+
+    // The private argv is not enough on its own: gtest seeds this flag from GTEST_OUTPUT at
+    // static init, so without clearing it the no-op run in resolveFilter() would write an
+    // all-pass report to the caller's file -- a green report for a run that had not happened
+    // yet, and that the merged report would never replace. parseArgs() has already taken the
+    // variable as the destination for the real one.
+    ::testing::GTEST_FLAG(output) = "";
 
     const std::vector<std::string> binaries = discoverBinaries(directory, selfPath());
     if (binaries.empty()) {
@@ -902,10 +1068,13 @@ int main(int argc, char **argv)
         const std::vector<std::string> filters = childFilters(selection);
         ran.push_back(selection.path);
         for (size_t part = 0; part < filters.size(); ++part) {
-            const std::string reportPath = reportDir.reportPath(selection.qualifier, part);
+            const std::string reportPath =
+                reportDir.reportPath(selection.qualifier, part, options.outputFormat);
+            // The child is asked for the format the caller wants, so the merge is always of
+            // like with like and no report is ever transcoded between the two.
             std::vector<std::string> childArgs = {
                 fmt::format("--gtest_filter={}", filters[part]),
-                fmt::format("--gtest_output=xml:{}", reportPath),
+                fmt::format("--gtest_output={}:{}", formatName(options.outputFormat), reportPath),
             };
             childArgs.insert(childArgs.end(), options.passthrough.begin(),
                              options.passthrough.end());
@@ -919,7 +1088,8 @@ int main(int argc, char **argv)
             const int status = runChild(selection.path, childArgs);
 
             if (std::optional<SuiteFragment> fragment =
-                    parseChildReport(readFile(reportPath), selection.qualifier)) {
+                    parseChildReport(readFile(reportPath), selection.qualifier,
+                                     options.outputFormat)) {
                 fragments.push_back(std::move(*fragment));
             } else {
                 // No report: the binary died or never started. Its cases are unaccounted for, so
@@ -946,7 +1116,7 @@ int main(int argc, char **argv)
                        std::strerror(errno));
             return 1;
         }
-        report << mergeReports(fragments);
+        report << mergeReports(fragments, options.outputFormat);
     }
 
     return failures == 0 ? 0 : 1;

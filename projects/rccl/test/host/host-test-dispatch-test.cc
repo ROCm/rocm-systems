@@ -337,7 +337,8 @@ std::string childReport(int tests, int failures)
 // *report* parsed, failing the calling test when it does not parse at all.
 SuiteFragment parsedOrFail(const std::string &report, const std::string &qualifier)
 {
-    const std::optional<SuiteFragment> fragment = parseChildReport(report, qualifier);
+    const std::optional<SuiteFragment> fragment =
+        parseChildReport(report, qualifier, ReportFormat::Xml);
     EXPECT_TRUE(fragment.has_value()) << "report did not parse under qualifier " << qualifier;
     return fragment.value_or(SuiteFragment{});
 }
@@ -361,9 +362,10 @@ TEST(HostDispatchReportMicrotest, OutputThatIsNotAGtestReportIsRejected)
 {
     // How a child that died before writing its report is recognised: the file is absent or
     // truncated, and the dispatcher must not read that as a clean run of zero tests.
-    EXPECT_FALSE(parseChildReport("", "Micro").has_value());
-    EXPECT_FALSE(parseChildReport("Segmentation fault\n", "Micro").has_value());
-    EXPECT_FALSE(parseChildReport("<testsuites tests=\"1\">\n", "Micro").has_value());
+    EXPECT_FALSE(parseChildReport("", "Micro", ReportFormat::Xml).has_value());
+    EXPECT_FALSE(parseChildReport("Segmentation fault\n", "Micro", ReportFormat::Xml).has_value());
+    EXPECT_FALSE(
+        parseChildReport("<testsuites tests=\"1\">\n", "Micro", ReportFormat::Xml).has_value());
 }
 
 TEST(HostDispatchReportMicrotest, CrashFragmentReportsOneFailure)
@@ -381,7 +383,7 @@ TEST(HostDispatchMergeMicrotest, TotalsAreSummedAcrossChildren)
 {
     const SuiteFragment first = parsedOrFail(childReport(3, 1), "Micro");
     const SuiteFragment second = parsedOrFail(childReport(4, 2), "MicroInit");
-    const std::string merged = mergeReports({first, second});
+    const std::string merged = mergeReports({first, second}, ReportFormat::Xml);
     EXPECT_NE(merged.find("tests=\"7\""), std::string::npos);
     EXPECT_NE(merged.find("failures=\"3\""), std::string::npos);
 }
@@ -390,7 +392,7 @@ TEST(HostDispatchMergeMicrotest, EverySuiteSurvivesUnderItsOwnQualifier)
 {
     const SuiteFragment first = parsedOrFail(childReport(1, 0), "MicroInit");
     const SuiteFragment second = parsedOrFail(childReport(1, 0), "MicroInitUncached");
-    const std::string merged = mergeReports({first, second});
+    const std::string merged = mergeReports({first, second}, ReportFormat::Xml);
     EXPECT_NE(merged.find("<testsuite name=\"MicroInit/Suite\""), std::string::npos);
     EXPECT_NE(merged.find("<testsuite name=\"MicroInitUncached/Suite\""), std::string::npos);
 }
@@ -400,9 +402,131 @@ TEST(HostDispatchMergeMicrotest, NoChildrenStillProducesAValidEmptyReport)
     // The report is the caller's second signal that the run happened at all (coco fails a test
     // whose XML is missing or has no <testsuites>), so a filter that selects nothing must still
     // produce a well-formed document rather than no file.
-    const std::string merged = mergeReports({});
+    const std::string merged = mergeReports({}, ReportFormat::Xml);
     EXPECT_NE(merged.find("<testsuites tests=\"0\""), std::string::npos);
     EXPECT_NE(merged.find("</testsuites>"), std::string::npos);
+}
+
+// ── JSON reports ────────────────────────────────────────────────────
+
+// A child's JSON report in gtest's own shape, with *tests* cases of which *failures* failed.
+std::string childJsonReport(int tests, int failures)
+{
+    nlohmann::json cases = nlohmann::json::array();
+    for (int i = 0; i < tests; ++i) {
+        nlohmann::json testcase{{"name", fmt::format("Case{}", i)},
+                                {"file", "/src/suite-test.cc"},
+                                {"line", 10 + i},
+                                {"status", "RUN"},
+                                {"result", "COMPLETED"},
+                                {"time", "0.001s"},
+                                {"classname", "Suite"}};
+        if (i < failures) {
+            testcase["failures"] =
+                nlohmann::json::array({nlohmann::json{{"failure", "expected 1 == 2"},
+                                                      {"type", ""}}});
+        }
+        cases.push_back(testcase);
+    }
+    const nlohmann::json root{{"tests", tests},   {"failures", failures}, {"disabled", 0},
+                              {"errors", 0},      {"time", "1.5s"},       {"name", "AllTests"},
+                              {"testsuites", nlohmann::json::array({nlohmann::json{
+                                                 {"name", "Suite"},
+                                                 {"tests", tests},
+                                                 {"failures", failures},
+                                                 {"time", "1.5s"},
+                                                 {"testsuite", cases}}})}};
+    return root.dump(2) + "\n";
+}
+
+TEST(HostDispatchJsonMicrotest, RootTotalsAreTakenFromTheChild)
+{
+    const std::optional<SuiteFragment> fragment =
+        parseChildReport(childJsonReport(7, 2), "Micro", ReportFormat::Json);
+    ASSERT_TRUE(fragment.has_value());
+    EXPECT_EQ(fragment->tests, 7);
+    EXPECT_EQ(fragment->failures, 2);
+    EXPECT_DOUBLE_EQ(fragment->time, 1.5);   // "1.5s", not 1.5
+}
+
+TEST(HostDispatchJsonMicrotest, QualifierMovesSuiteNameAndClassnameTogether)
+{
+    // The same contract the XML path has: both spellings of the suite's identity move, because
+    // a consumer reconstructs the case from suite name plus classname.
+    const std::optional<SuiteFragment> fragment =
+        parseChildReport(childJsonReport(1, 0), "MicroInit", ReportFormat::Json);
+    ASSERT_TRUE(fragment.has_value());
+    ASSERT_EQ(fragment->suites.size(), 1u);
+    EXPECT_EQ(fragment->suites[0]["name"], "MicroInit/Suite");
+    EXPECT_EQ(fragment->suites[0]["testsuite"][0]["classname"], "MicroInit/Suite");
+    EXPECT_EQ(fragment->suites[0]["testsuite"][0]["name"], "Case0");   // the case, untouched
+}
+
+TEST(HostDispatchJsonMicrotest, CaseDetailSurvivesTheMerge)
+{
+    // The keys the coco runner reads off each leaf (test_executor.py: _leaf_case_status), which
+    // a reserialised report has to carry through untouched or every case reads as not-run.
+    const std::optional<SuiteFragment> fragment =
+        parseChildReport(childJsonReport(2, 1), "Micro", ReportFormat::Json);
+    ASSERT_TRUE(fragment.has_value());
+    const nlohmann::json merged =
+        nlohmann::json::parse(mergeReports({*fragment}, ReportFormat::Json));
+    const nlohmann::json &failed = merged["testsuites"][0]["testsuite"][0];
+    EXPECT_EQ(failed["status"], "RUN");
+    EXPECT_EQ(failed["result"], "COMPLETED");
+    EXPECT_EQ(failed["file"], "/src/suite-test.cc");
+    EXPECT_EQ(failed["line"], 10);
+    ASSERT_TRUE(failed["failures"].is_array());
+    EXPECT_EQ(failed["failures"][0]["failure"], "expected 1 == 2");
+    EXPECT_FALSE(merged["testsuites"][0]["testsuite"][1].contains("failures"));
+}
+
+TEST(HostDispatchJsonMicrotest, TotalsAreSummedAcrossChildren)
+{
+    const std::optional<SuiteFragment> first =
+        parseChildReport(childJsonReport(3, 1), "Micro", ReportFormat::Json);
+    const std::optional<SuiteFragment> second =
+        parseChildReport(childJsonReport(4, 2), "MicroInit", ReportFormat::Json);
+    ASSERT_TRUE(first.has_value() && second.has_value());
+    const nlohmann::json merged =
+        nlohmann::json::parse(mergeReports({*first, *second}, ReportFormat::Json));
+    EXPECT_EQ(merged["tests"], 7);
+    EXPECT_EQ(merged["failures"], 3);
+    EXPECT_EQ(merged["time"], "3s");   // seconds summed, and spelled the way gtest spells them
+    ASSERT_EQ(merged["testsuites"].size(), 2u);
+    EXPECT_EQ(merged["testsuites"][0]["name"], "Micro/Suite");
+    EXPECT_EQ(merged["testsuites"][1]["name"], "MicroInit/Suite");
+}
+
+TEST(HostDispatchJsonMicrotest, OutputThatIsNotAGtestReportIsRejected)
+{
+    EXPECT_FALSE(parseChildReport("", "Micro", ReportFormat::Json).has_value());
+    EXPECT_FALSE(parseChildReport("Segmentation fault\n", "Micro", ReportFormat::Json).has_value());
+    // Valid JSON, but not a report: the distinction string matching could not make.
+    EXPECT_FALSE(parseChildReport("{\"tests\": 1}", "Micro", ReportFormat::Json).has_value());
+}
+
+TEST(HostDispatchJsonMicrotest, CrashFragmentIsAFailingCaseInBothFormats)
+{
+    // crashFragment() carries both representations so the crash path never has to know which
+    // format is in play; a JSON run must still see the failure.
+    const SuiteFragment fragment = crashFragment("MicroInit", "exit status 139");
+    const nlohmann::json merged =
+        nlohmann::json::parse(mergeReports({fragment}, ReportFormat::Json));
+    EXPECT_EQ(merged["failures"], 1);
+    const nlohmann::json &testcase = merged["testsuites"][0]["testsuite"][0];
+    EXPECT_EQ(testcase["classname"], "MicroInit/HostTestDispatch");
+    EXPECT_EQ(testcase["result"], "COMPLETED");
+    EXPECT_EQ(testcase["failures"][0]["failure"], "exit status 139");
+}
+
+TEST(HostDispatchJsonMicrotest, NoChildrenStillProducesAValidEmptyReport)
+{
+    const nlohmann::json merged = nlohmann::json::parse(mergeReports({}, ReportFormat::Json));
+    EXPECT_EQ(merged["tests"], 0);
+    EXPECT_EQ(merged["name"], "AllTests");
+    EXPECT_TRUE(merged["testsuites"].is_array());
+    EXPECT_TRUE(merged["testsuites"].empty());
 }
 
 // ── parseArgs ───────────────────────────────────────────────────────
@@ -414,6 +538,39 @@ TEST(HostDispatchArgsMicrotest, FilterAndOutputAreTakenFromTheCaller)
     EXPECT_EQ(options.filter, "Suite.*");
     EXPECT_EQ(options.outputPath, "/tmp/report.xml");
     EXPECT_FALSE(options.listTests);
+}
+
+TEST(HostDispatchArgsMicrotest, OutputFormatComesFromTheSpecNotTheFilename)
+{
+    EXPECT_EQ(parseArgs({"--gtest_output=json:/tmp/r.json"}).outputFormat, ReportFormat::Json);
+    EXPECT_EQ(parseArgs({"--gtest_output=xml:/tmp/r.xml"}).outputFormat, ReportFormat::Xml);
+    // gtest's rule for a bare path: xml.
+    EXPECT_EQ(parseArgs({"--gtest_output=/tmp/r.out"}).outputFormat, ReportFormat::Xml);
+    EXPECT_EQ(parseArgs({"--gtest_output=/tmp/r.out"}).outputPath, "/tmp/r.out");
+}
+
+TEST(HostDispatchArgsMicrotest, OutputDirectoryGetsTheDefaultNameForItsFormat)
+{
+    EXPECT_EQ(parseArgs({"--gtest_output=json:/tmp/reports/"}).outputPath,
+              "/tmp/reports/test_detail.json");
+}
+
+TEST(HostDispatchArgsMicrotest, GtestOutputEnvironmentIsTakenAsTheReportDestination)
+{
+    // Left to gtest, this variable would make the no-op filter-resolution run write an all-pass
+    // report over the caller's file, and the merged one would never be written at all: the run
+    // could fail and the report still read green. Taken here, it names the merged report.
+    const Options options = parseArgs({}, "json:/tmp/from_env.json");
+    EXPECT_EQ(options.outputPath, "/tmp/from_env.json");
+    EXPECT_EQ(options.outputFormat, ReportFormat::Json);
+}
+
+TEST(HostDispatchArgsMicrotest, AnExplicitOutputFlagBeatsTheEnvironment)
+{
+    // gtest's own precedence: the flag wins over GTEST_OUTPUT.
+    const Options options = parseArgs({"--gtest_output=xml:/tmp/flag.xml"}, "json:/tmp/env.json");
+    EXPECT_EQ(options.outputPath, "/tmp/flag.xml");
+    EXPECT_EQ(options.outputFormat, ReportFormat::Xml);
 }
 
 TEST(HostDispatchArgsMicrotest, FilterDefaultsToEverything)

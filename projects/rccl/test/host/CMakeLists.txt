@@ -775,7 +775,8 @@ function(rccl_add_micro_binary _name)
     endif()
     target_link_options(${_name} PRIVATE ${_ramb_link_opts})
     target_link_libraries(${_name} PRIVATE
-      GTest::GTest Threads::Threads fmt::fmt-header-only)
+      GTest::GTest Threads::Threads fmt::fmt-header-only
+      nlohmann_json::nlohmann_json)
   endif()
 endfunction()
 
@@ -1101,6 +1102,15 @@ function(rccl_standalone_coverage)
     target_compile_options(rccl-source-wrappers PRIVATE -fprofile-instr-generate -fcoverage-mapping)
   endif()
 endfunction()
+
+# --- nlohmann/json: the RCCL-vendored single header ------------------
+# Unlike fmt, the library build has no use for it, so cmake/Dependencies.cmake does not
+# pull it in and the target does not exist in either mode until this runs. Outside the
+# `if`/`else` below so the two modes resolve it identically.
+if(NOT TARGET nlohmann_json::nlohmann_json)
+  add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../external/nlohmann_json"
+                   "${CMAKE_BINARY_DIR}/external/nlohmann_json")
+endif()
 
 # =====================================================================
 # Driver: pick the mode, then define the micro-test binaries ONCE.
