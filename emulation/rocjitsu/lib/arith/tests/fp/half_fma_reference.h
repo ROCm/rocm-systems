@@ -62,13 +62,13 @@ inline uint16_t pack(Number value, bool saturate) {
 }
 
 // Compute FP16 FMA under default guest controls with optional finite saturation.
-inline uint16_t evaluate(uint16_t a, uint16_t b, uint16_t c, bool saturate) {
+inline uint16_t evaluate(uint16_t a, uint16_t b, uint16_t c, bool saturate, bool rdna3 = false) {
   uint16_t ma = a & 0x7fff, mb = b & 0x7fff, mc = c & 0x7fff;
   uint16_t result;
   if ((!ma && mb == 0x7c00) || (!mb && ma == 0x7c00)) {
     result = 0xfe00;
   } else if (nan(a) || nan(b) || nan(c)) {
-    result = (nan(a) ? a : nan(b) ? b : c) | 0x200;
+    result = (nan(a) ? a : nan(b) ? b : c) | (!rdna3 ? 0x200 : 0);
   } else if (ma == 0x7c00 || mb == 0x7c00) {
     result = ((a ^ b) & 0x8000) | 0x7c00;
     if (mc == 0x7c00 && ((result ^ c) & 0x8000)) {

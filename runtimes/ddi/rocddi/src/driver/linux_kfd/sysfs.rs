@@ -14,9 +14,9 @@ use crate::memory::storage::Shared;
 use crate::memory::storage::TryPush;
 use crate::memory::{DeviceAccess, HostCacheability};
 use crate::topology::{
-    CacheInfo, CacheKind, Endpoint, EndpointKind, GpuInfo, GpuQueueCapabilities, MemoryLinkInfo,
-    MemoryLinkType, MemoryLocation, MemoryLocationKind, NativeNodeId, NodeKind, PciInfo,
-    SourceKind, TopologyCache, TopologySnapshot,
+    CacheInfo, CacheKind, CpuNodeInfo, Endpoint, EndpointKind, GpuInfo, GpuQueueCapabilities,
+    MemoryBank, MemoryBankKind, MemoryLinkInfo, MemoryLinkType, MemoryLocation, MemoryLocationKind,
+    NativeNodeId, NodeKind, PciInfo, SourceKind, TopologyCache, TopologySnapshot,
 };
 use crate::{Error, ErrorKind};
 use std::fmt::{self, Write as _};
@@ -205,6 +205,16 @@ impl<'a> Properties<'a> {
     }
 }
 
+fn cpu_node_info(properties: &Properties<'_>) -> Result<Option<CpuNodeInfo>, Error> {
+    let count = properties.optional_u32("cpu_cores_count")?.unwrap_or(0);
+    let base = properties.optional_u32("cpu_core_id_base")?;
+    Ok((count != 0).then_some(CpuNodeInfo {
+        core_count: count,
+        core_id_base: base,
+        maximum_clock_mhz: properties.optional_u32("max_engine_clk_ccompute")?,
+    }))
+}
+
 fn cache_properties(text: &str) -> Result<(CacheInfo, u32), Error> {
     let mut sibling_map = false;
     for (index, line) in text.lines().enumerate() {
@@ -263,6 +273,7 @@ fn cache_properties(text: &str) -> Result<(CacheInfo, u32), Error> {
             size_bytes: u64::from(properties.u32("size")?) * 1024,
             line_size_bytes: (line_size_bytes != 0).then_some(line_size_bytes),
             kind,
+            cpu_cache: native_kind & (1 << 2) != 0,
             compute_unit_cache: native_kind & (1 << 3) != 0,
         },
         properties
@@ -337,22 +348,45 @@ fn caches(root: &str, node: u32, count: u32) -> Result<DiscoveredCaches, Error> 
         .map_err(Into::into)
 }
 
-fn memory_bank_properties(text: &str) -> Result<Option<(u32, u32)>, Error> {
+/// One KFD bank report before it is associated with a source-qualified node.
+#[derive(Clone, Copy)]
+struct DiscoveredBank {
+    ordinal: u32,
+    kind: MemoryBankKind,
+    size: u64,
+    flags: u32,
+    width: u32,
+    clock: u32,
+}
+
+fn memory_bank_properties(text: &str, ordinal: u32) -> Result<DiscoveredBank, Error> {
     let properties = Properties::new(text)?;
     let heap = properties.u32("heap_type")?;
     let size = properties.required("size_in_bytes")?;
-    if size == 0 || !matches!(heap, 1 | 2) {
-        return Ok(None);
-    }
-    Ok(Some((
-        properties.optional_u32("width")?.unwrap_or(0),
-        properties.optional_u32("mem_clk_max")?.unwrap_or(0),
-    )))
+    let kind = match heap {
+        0 => MemoryBankKind::System,
+        1 => MemoryBankKind::FrameBufferPublic,
+        2 => MemoryBankKind::FrameBufferPrivate,
+        3 => MemoryBankKind::Gds,
+        4 => MemoryBankKind::Lds,
+        5 => MemoryBankKind::Scratch,
+        6 => MemoryBankKind::DeviceSvm,
+        7 => MemoryBankKind::Mmio,
+        other => MemoryBankKind::Other(other),
+    };
+    Ok(DiscoveredBank {
+        ordinal,
+        kind,
+        size,
+        flags: properties.optional_u32("flags")?.unwrap_or(0),
+        width: properties.optional_u32("width")?.unwrap_or(0),
+        clock: properties.optional_u32("mem_clk_max")?.unwrap_or(0),
+    })
 }
 
-fn memory_bus(root: &str, node: u32, count: u32) -> Result<(u32, u32), Error> {
+fn memory_banks(root: &str, node: u32, count: u32) -> Result<Vec<DiscoveredBank>, Error> {
     if count == 0 {
-        return Ok((0, 0));
+        return Ok(Vec::new());
     }
     let capacity = usize::try_from(count).map_err(|_| {
         error(
@@ -375,7 +409,7 @@ fn memory_bus(root: &str, node: u32, count: u32) -> Result<(u32, u32), Error> {
         let mut bytes = [0; 4096];
         records.try_push((
             ordinal,
-            memory_bank_properties(read(path.path(), &mut bytes)?)?,
+            memory_bank_properties(read(path.path(), &mut bytes)?, ordinal)?,
         ))?;
         Ok(())
     })?;
@@ -386,7 +420,6 @@ fn memory_bus(root: &str, node: u32, count: u32) -> Result<(u32, u32), Error> {
         ));
     }
     records.sort_unstable_by_key(|(ordinal, _)| *ordinal);
-    let mut selected = (0, 0);
     for (expected, (ordinal, bank)) in records.iter().enumerate() {
         if usize::try_from(*ordinal) != Ok(expected) {
             return Err(error(
@@ -394,17 +427,30 @@ fn memory_bus(root: &str, node: u32, count: u32) -> Result<(u32, u32), Error> {
                 "native memory-bank ordinals are not contiguous",
             ));
         }
-        if let Some(bank) = bank {
-            selected = *bank;
-        }
+        debug_assert_eq!(*ordinal, bank.ordinal);
     }
-    Ok(selected)
+    Ok(records.into_iter().map(|(_, bank)| bank).collect())
+}
+
+fn memory_bus(banks: &[DiscoveredBank]) -> (u32, u32) {
+    banks
+        .iter()
+        .rfind(|bank| {
+            bank.size != 0
+                && matches!(
+                    bank.kind,
+                    MemoryBankKind::FrameBufferPublic | MemoryBankKind::FrameBufferPrivate
+                )
+        })
+        .map_or((0, 0), |bank| (bank.width, bank.clock))
 }
 
 struct DiscoveredEndpoint {
     endpoint: Endpoint,
     caches: Option<Shared<Vec<CacheInfo>>>,
     links: Option<Shared<Vec<KfdReportedLink>>>,
+    cpu: Option<CpuNodeInfo>,
+    banks: Vec<DiscoveredBank>,
 }
 
 /// One directed KFD node report, before resolution into snapshot node IDs.
@@ -424,6 +470,8 @@ struct DiscoveredNode {
     endpoint: Option<Endpoint>,
     caches: Option<Shared<Vec<CacheInfo>>>,
     links: Option<Shared<Vec<KfdReportedLink>>>,
+    cpu: Option<CpuNodeInfo>,
+    banks: Vec<DiscoveredBank>,
 }
 
 struct DiscoveredTopology {
@@ -462,6 +510,8 @@ fn read_all(
                     endpoint: None,
                     caches: None,
                     links: None,
+                    cpu: None,
+                    banks: Vec::new(),
                 }
             } else {
                 let endpoint = read_node(root, drm, driver_instance, node)?.ok_or_else(|| {
@@ -473,6 +523,8 @@ fn read_all(
                     endpoint: Some(endpoint.endpoint),
                     caches: endpoint.caches,
                     links: endpoint.links,
+                    cpu: endpoint.cpu,
+                    banks: endpoint.banks,
                 }
             };
             records.try_push(record)?;
@@ -542,6 +594,20 @@ pub(super) fn contribute_topology(
             .find(|(native, _, _)| *native == record.node)
             .map(|(_, _, id)| *id)
             .ok_or_else(|| error(ErrorKind::InvalidData, "KFD endpoint has no topology node"))?;
+        if let Some(cpu) = record.cpu {
+            snapshot.set_cpu_node(node, cpu)?;
+        }
+        for bank in &record.banks {
+            snapshot.add_memory_bank(MemoryBank {
+                node,
+                native_ordinal: bank.ordinal,
+                kind: bank.kind,
+                capacity_bytes: bank.size,
+                native_flags: bank.flags,
+                width_bits: (bank.width != 0).then_some(bank.width),
+                maximum_clock_mhz: (bank.clock != 0).then_some(bank.clock),
+            })?;
+        }
         if let Some(caches) = &record.caches {
             for cache in caches.iter() {
                 snapshot
@@ -703,6 +769,12 @@ fn read_host_node(root: &str, node: u32) -> Result<DiscoveredNode, Error> {
     let path = StackPath::new(format_args!("{root}/nodes/{node}/properties"))?;
     let mut bytes = [0; 16384];
     let properties = Properties::new(read(path.path(), &mut bytes)?)?;
+    let cpu = cpu_node_info(&properties)?;
+    let banks = memory_banks(
+        root,
+        node,
+        properties.optional_u32("mem_banks_count")?.unwrap_or(0),
+    )?;
     let caches = caches(
         root,
         node,
@@ -722,6 +794,8 @@ fn read_host_node(root: &str, node: u32) -> Result<DiscoveredNode, Error> {
         endpoint: None,
         caches,
         links,
+        cpu,
+        banks,
     })
 }
 
@@ -905,8 +979,9 @@ fn read_node(
     let hive_id = p.optional("hive_id")?.unwrap_or(0);
     let family_id = p.optional_u32("family_id")?.unwrap_or(0);
     let maximum_engine_clock_mhz = p.optional_u32("max_engine_clk_fcompute")?.unwrap_or(0);
-    let (memory_bus_width_bits, maximum_memory_clock_mhz) =
-        memory_bus(root, node, p.optional_u32("mem_banks_count")?.unwrap_or(0))?;
+    let banks = memory_banks(root, node, p.optional_u32("mem_banks_count")?.unwrap_or(0))?;
+    let (memory_bus_width_bits, maximum_memory_clock_mhz) = memory_bus(&banks);
+    let cpu = cpu_node_info(&p)?;
     let sdma_xgmi_engines = p.optional_u32("num_sdma_xgmi_engines")?.unwrap_or(0);
     let gws_count = p.optional_u32("num_gws")?.unwrap_or(0);
     let io_link_count = p.optional_u32("io_links_count")?.unwrap_or(0);
@@ -965,10 +1040,13 @@ fn read_node(
     }
     let sdma_ip = sdma_version(drm, render)?;
     // This transport publishes monotonic 64-bit byte indices and 64-bit
-    // doorbells across the supported GFX10.1–GFX12 native targets.
+    // doorbells across the supported GFX9–GFX12 native targets. GFX9 uses
+    // ROCr's SDMA v4 packet path, so its IP version must match that dialect.
     // Commands remain target-specific and caller-owned; a discovered SDMA IP
     // does not change any frontend's advertised transport revision.
-    let sdma_qualified = ((100_100..=120_001).contains(&gfx) || gfx == 120_500)
+    let gfx9_sdma = matches!(gfx, 90008 | 90010 | 90402 | 90500)
+        && sdma_ip.is_some_and(|(major, _, _)| major == 4);
+    let sdma_qualified = (gfx9_sdma || (100_100..=120_001).contains(&gfx) || gfx == 120_500)
         && sdma.unwrap_or(0) != 0
         && sdma_queues.unwrap_or(0) != 0;
 
@@ -1082,6 +1160,7 @@ fn read_node(
                 gws_count,
                 iommu_v2_supported: capability & (1 << 1) != 0,
                 coherent_host_access: capability & (1 << 28) != 0,
+                sram_ecc_enabled: capability & 0x0400_0000 != 0,
                 packet_processor_firmware_version: p.optional_u32("fw_version")?.unwrap_or(0)
                     & 0x3ff,
                 sdma_firmware_version: p.optional_u32("sdma_fw_version")?.unwrap_or(0) & 0x3ff,
@@ -1135,6 +1214,8 @@ fn read_node(
         endpoint,
         caches,
         links: memory_links,
+        cpu,
+        banks,
     }))
 }
 
@@ -1350,6 +1431,19 @@ mod tests {
         let gpu = endpoint.gpu().unwrap();
         assert_eq!(gpu.memory_bus_width_bits, 384);
         assert_eq!(gpu.maximum_memory_clock_mhz, 1400);
+        let snapshot = topology(&root, &drm);
+        let gpu_node = snapshot
+            .nodes
+            .iter()
+            .find(|node| node.native_id == NativeNodeId::LinuxKfd(1))
+            .unwrap();
+        let banks = snapshot.banks_for_node(gpu_node.id).collect::<Vec<_>>();
+        assert_eq!(banks.len(), 3);
+        assert_eq!(banks[1].native_ordinal, 1);
+        assert_eq!(banks[1].kind, MemoryBankKind::FrameBufferPrivate);
+        assert_eq!(banks[1].capacity_bytes, 1_048_576);
+        assert_eq!(banks[1].width_bits, Some(384));
+        assert_eq!(banks[1].maximum_clock_mhz, Some(1400));
     }
 
     #[test]
@@ -1585,7 +1679,16 @@ mod tests {
         std::fs::write(fixture.0.join("topology/nodes/0/gpu_id"), "0\n").unwrap();
         std::fs::write(
             fixture.0.join("topology/nodes/0/properties"),
-            "io_links_count 1\np2p_links_count 0\n",
+            "cpu_cores_count 8\ncpu_core_id_base 16\nmax_engine_clk_ccompute 4200\n\
+             mem_banks_count 1\n\
+             io_links_count 1\np2p_links_count 0\n",
+        )
+        .unwrap();
+        let bank = fixture.0.join("topology/nodes/0/mem_banks/0");
+        std::fs::create_dir_all(&bank).unwrap();
+        std::fs::write(
+            bank.join("properties"),
+            "heap_type 0\nsize_in_bytes 1073741824\nflags 3\n",
         )
         .unwrap();
         std::fs::create_dir_all(fixture.0.join("topology/nodes/1/io_links/0")).unwrap();
@@ -1613,8 +1716,24 @@ mod tests {
         let endpoint = &snapshot.endpoints[0];
         assert_eq!(snapshot.sources.last().unwrap().generation, Some(1));
         assert!(snapshot.nodes.iter().any(|node| {
-            node.native_id == NativeNodeId::LinuxKfd(0) && node.kind == NodeKind::KfdHost
+            node.native_id == NativeNodeId::LinuxKfd(0)
+                && node.kind == NodeKind::KfdHost
+                && node.cpu
+                    == Some(CpuNodeInfo {
+                        core_count: 8,
+                        core_id_base: Some(16),
+                        maximum_clock_mhz: Some(4200),
+                    })
         }));
+        let cpu_node = snapshot
+            .nodes
+            .iter()
+            .find(|node| node.native_id == NativeNodeId::LinuxKfd(0))
+            .unwrap();
+        let bank = snapshot.banks_for_node(cpu_node.id).next().unwrap();
+        assert_eq!(bank.kind, MemoryBankKind::System);
+        assert_eq!(bank.capacity_bytes, 1_073_741_824);
+        assert_eq!(bank.native_flags, 3);
         let to_host = snapshot.route_to_host(endpoint).unwrap();
         assert_eq!(to_host.kind, MemoryLinkType::Pcie);
         assert_eq!(to_host.minimum_latency, 1);
@@ -1664,7 +1783,7 @@ mod tests {
             concat!(
                 "processor_id_low 0\nlevel 3\nsize 512\ncache_line_size 64\n",
                 "cache_lines_per_tag 1\nassociation 16\nlatency 1\n",
-                "type 3\nsibling_map 1,0,0,0\n"
+                "type 5\nsibling_map 1,0,0,0\n"
             ),
         )
         .unwrap();
@@ -1692,7 +1811,10 @@ mod tests {
             .find(|node| node.native_id == NativeNodeId::LinuxKfd(2))
             .unwrap();
         assert!(snapshot.caches.iter().any(|cache| {
-            cache.node == host.id && cache.info.level == 3 && cache.info.size_bytes == 512 * 1024
+            cache.node == host.id
+                && cache.info.cpu_cache
+                && cache.info.level == 3
+                && cache.info.size_bytes == 512 * 1024
         }));
         assert!(
             snapshot

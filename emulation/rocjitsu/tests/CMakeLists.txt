@@ -27,6 +27,7 @@ set(RJ_OBJECT_LIBS
     rocjitsu_analysis
     rocjitsu_code
     rocjitsu_code_object
+    rocjitsu_executable
     rocjitsu_isa
     rocjitsu_isa_registry
     simdojo
@@ -110,11 +111,68 @@ set_tests_properties(
 add_executable(rj_decode_fuzz_test fuzz/decode/decode_fuzz_test.cpp)
 target_link_libraries(
     rj_decode_fuzz_test
-    PRIVATE rj_decode_fuzz_core GTest::gtest_main
+    PRIVATE
+        rj_decode_fuzz_core
+        rocjitsu_amdgpu_isa_model_registry
+        GTest::gtest_main
 )
 rj_configure_target(rj_decode_fuzz_test PRIVATE_INCLUDES WARNINGS)
 add_dependencies(rj_decode_fuzz_test rj_decode_fuzz)
 rj_add_gtest_tests(rj_decode_fuzz_test)
+
+add_executable(
+    rj_code_object_fuzz_test
+    fuzz/code_object/code_object_fuzz_test.cpp
+)
+target_link_libraries(
+    rj_code_object_fuzz_test
+    PRIVATE
+        rj_code_object_fuzz_core
+        rocjitsu_amdgpu_isa_model_registry
+        GTest::gtest_main
+)
+target_include_directories(
+    rj_code_object_fuzz_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+)
+rj_configure_target(rj_code_object_fuzz_test PRIVATE_INCLUDES WARNINGS)
+add_dependencies(rj_code_object_fuzz_test rj_code_object_fuzz)
+rj_add_gtest_tests(rj_code_object_fuzz_test)
+add_test(
+    NAME CodeObjectFuzzCliTest
+    COMMAND
+        ${CMAKE_COMMAND} -DFUZZ_EXECUTABLE=$<TARGET_FILE:rj_code_object_fuzz>
+        -DWORK_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/code-object-fuzz-cli -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/code_object/test_code_object_fuzz_cli.cmake
+)
+
+add_executable(rj_execution_fuzz_test fuzz/execution/execution_fuzz_test.cpp)
+target_link_libraries(
+    rj_execution_fuzz_test
+    PRIVATE rj_execution_fuzz_core rocjitsu_isa_registry GTest::gtest_main
+)
+rj_configure_target(rj_execution_fuzz_test PRIVATE_INCLUDES WARNINGS)
+add_dependencies(rj_execution_fuzz_test rj_execution_fuzz)
+rj_add_gtest_tests(rj_execution_fuzz_test)
+
+add_executable(
+    rj_multiplexer_fuzz_test
+    fuzz/multiplexer/multiplexer_fuzz_test.cpp
+)
+target_link_libraries(
+    rj_multiplexer_fuzz_test
+    PRIVATE rj_multiplexer_fuzz_core rocjitsu_isa_registry GTest::gtest_main
+)
+rj_configure_target(rj_multiplexer_fuzz_test PRIVATE_INCLUDES WARNINGS)
+add_dependencies(rj_multiplexer_fuzz_test rj_fuzz)
+rj_add_gtest_tests(rj_multiplexer_fuzz_test)
+add_test(
+    NAME MultiplexerFuzzCliTest
+    COMMAND
+        ${CMAKE_COMMAND} -DFUZZ_EXECUTABLE=$<TARGET_FILE:rj_fuzz>
+        -DWORK_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/multiplexer-fuzz-cli -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/multiplexer/test_multiplexer_fuzz_cli.cmake
+)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(
@@ -147,12 +205,32 @@ add_test(
         ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/decode/test_decode_cli.py -v
 )
 add_test(
+    NAME ExecutionCampaignUnitTest
+    COMMAND
+        ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/execution/test_execution_campaign.py -v
+)
+add_test(
+    NAME ExecutionFuzzCliTest
+    COMMAND
+        ${CMAKE_COMMAND} -E env
+        RJ_EXECUTION_FUZZ=$<TARGET_FILE:rj_execution_fuzz> ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/execution/test_execution_cli.py -v
+)
+set_tests_properties(ExecutionFuzzCliTest PROPERTIES TIMEOUT 120)
+add_test(
     NAME PretranslateScriptUnitTest
     COMMAND
         ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_pretranslate.py -v
 )
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_test(
+        NAME BenchmarkRunnerCpuPolicyUnitTest
+        COMMAND
+            ${Python3_EXECUTABLE} -B
+            ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_cpu_policy.py -v
+    )
     add_test(
         NAME CorpusRunnerUnitTest
         COMMAND
@@ -352,6 +430,7 @@ add_executable(
     scalar_cache_discard_test.cpp
     transcendental_test.cpp
     comparison_test.cpp
+    conversion_test.cpp
     denormal_test.cpp
     floating_operation_test.cpp
     input_denormal_test.cpp
@@ -388,6 +467,7 @@ add_executable(
     dbi/kernarg_sgpr_slot_test.cpp
     code/code_object_target_id_test.cpp
     code/executable_test.cpp
+    code/file_loading_test.cpp
     code/relocation_function_table_test.cpp
     dbt/semantic_scratch_test.cpp
     dbt/waitcnt_translator_test.cpp
@@ -895,6 +975,26 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
     rj_configure_target(cache_allocation_failure_test WARNINGS)
     rj_add_gtest_tests(cache_allocation_failure_test)
+
+    # Isolate the process-wide replacement operator new from rocjitsu_tests.
+    add_executable(
+        file_loading_allocation_failure_test
+        code/file_loading_allocation_failure_test.cpp
+    )
+    target_include_directories(
+        file_loading_allocation_failure_test
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_link_libraries(
+        file_loading_allocation_failure_test
+        PRIVATE
+            rocjitsu_dbt_internal
+            rocjitsu_cdna5_model_registry
+            simdojo_headers
+            GTest::gtest_main
+    )
+    rj_configure_target(file_loading_allocation_failure_test PRIVATE_INCLUDES WARNINGS)
+    rj_add_gtest_tests(file_loading_allocation_failure_test)
 
     # Exercise the model ISA contract in a decoder-only final link.
     add_executable(rocjitsu_model_only_test model_only_isa_test.cpp)

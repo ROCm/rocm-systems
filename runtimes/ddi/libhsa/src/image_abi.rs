@@ -15,11 +15,17 @@ use crate::ffi::*;
 use crate::image_gfx12::{self, Format, Layout};
 use crate::runtime::{HsaState, InFlightToken, boundary, initialized_mut, lock, map_error};
 
+/// Image layout selector for native tiled storage.
 const IMAGE_LAYOUT_OPAQUE: u32 = 0;
+/// Image layout selector for linear storage.
 const IMAGE_LAYOUT_LINEAR: u32 = 1;
+/// Capability bit for read-only image access.
 const IMAGE_CAPABILITY_READ_ONLY: u32 = 1;
+/// Capability bit for write-only image access.
 const IMAGE_CAPABILITY_WRITE_ONLY: u32 = 2;
+/// Capability bit for read/write image access.
 const IMAGE_CAPABILITY_READ_WRITE: u32 = 4;
+/// Capability bit for a stable image data layout.
 const IMAGE_CAPABILITY_INVARIANT_LAYOUT: u32 = 16;
 
 /// One GPU-visible image descriptor. HSA owns the descriptor and the caller
@@ -73,6 +79,7 @@ struct NativeMipLayout {
 }
 
 impl From<HsaExtImageDescriptorV2> for HsaExtImageDescriptor {
+    /// Copies the common descriptor fields while omitting the mip count.
     fn from(value: HsaExtImageDescriptorV2) -> Self {
         Self {
             geometry: value.geometry,
@@ -85,6 +92,7 @@ impl From<HsaExtImageDescriptorV2> for HsaExtImageDescriptor {
     }
 }
 
+/// Validates a GPU agent and returns its GFX12 runtime index.
 fn gfx12_index(runtime: &HsaState, agent: HsaAgent) -> Result<usize, Status> {
     let index = runtime.gpu_index(agent).ok_or(INVALID_AGENT)?;
     let info = runtime.gpus[index].info;
@@ -94,6 +102,7 @@ fn gfx12_index(runtime: &HsaState, agent: HsaAgent) -> Result<usize, Status> {
     Ok(index)
 }
 
+/// Computes the image capability flags for a format and geometry.
 fn image_capability(
     runtime: &HsaState,
     agent: HsaAgent,
@@ -113,6 +122,7 @@ fn image_capability(
         | IMAGE_CAPABILITY_INVARIANT_LAYOUT)
 }
 
+/// Computes the native image layout requested by an HSA descriptor.
 fn image_layout(
     runtime: &HsaState,
     agent: HsaAgent,
@@ -135,6 +145,7 @@ fn image_layout(
     Ok((index, format, surface))
 }
 
+/// Limits the mip count to the surface dimensions and descriptor.
 fn maximum_mip_levels(descriptor: HsaExtImageDescriptor, surface: Layout) -> usize {
     let maximum_dimension = match descriptor.geometry {
         0 | 3 => surface.width,
@@ -145,6 +156,7 @@ fn maximum_mip_levels(descriptor: HsaExtImageDescriptor, surface: Layout) -> usi
     (usize::BITS - maximum_dimension.leading_zeros()) as usize
 }
 
+/// Builds a native layout for the requested mip level chain.
 fn native_mip_layout(
     agent: HsaAgent,
     descriptor: HsaExtImageDescriptorV2,
@@ -222,6 +234,7 @@ fn native_mip_layout(
 }
 
 #[allow(unsafe_code)]
+/// Creates native mip image and records its ownership.
 unsafe fn create_native_mip_image(
     agent: HsaAgent,
     descriptor: HsaExtImageDescriptorV2,
@@ -300,6 +313,7 @@ unsafe fn create_native_mip_image(
 }
 
 #[allow(unsafe_code)]
+/// Calculates image storage requirements and writes the result to the caller.
 unsafe fn get_info(
     agent: HsaAgent,
     descriptor: HsaExtImageDescriptor,
@@ -376,6 +390,7 @@ struct PreparedImage {
 }
 
 #[allow(unsafe_code)]
+/// Publishes a created native image under a new HSA handle.
 unsafe fn publish_image(
     runtime: &mut HsaState,
     agent: HsaAgent,
@@ -446,6 +461,7 @@ unsafe fn publish_image(
 }
 
 #[allow(unsafe_code)]
+/// Creates image and records its ownership.
 unsafe fn create_image(agent: HsaAgent, request: ImageRequest) -> Status {
     let ImageRequest {
         descriptor,
@@ -631,6 +647,7 @@ pub(crate) struct ImageState {
 }
 
 impl ImageState {
+    /// Initializes empty image and sampler handle registries.
     pub(crate) fn new() -> Self {
         Self {
             samplers: HashMap::new(),
@@ -638,12 +655,14 @@ impl ImageState {
         }
     }
 
+    /// Releases all frontend image and sampler records.
     pub(crate) fn clear(&mut self) {
         self.samplers.clear();
         self.images.clear();
     }
 }
 
+/// Encodes an HSA sampler descriptor into hardware descriptor words.
 fn sampler_words(descriptor: HsaExtSamplerDescriptorV2) -> Result<[u32; 8], Status> {
     if descriptor.coordinate_mode > 1 || descriptor.filter_mode > 1 {
         return Err(SAMPLER_DESCRIPTOR_UNSUPPORTED);
@@ -673,6 +692,7 @@ fn sampler_words(descriptor: HsaExtSamplerDescriptorV2) -> Result<[u32; 8], Stat
 }
 
 #[allow(unsafe_code)]
+/// Creates sampler and records its ownership.
 unsafe fn create_sampler(
     agent: HsaAgent,
     descriptor: HsaExtSamplerDescriptorV2,
@@ -749,6 +769,7 @@ unsafe fn create_sampler(
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 #[allow(unsafe_code)]
+/// Reports image capabilities for a format and geometry.
 pub unsafe extern "C" fn hsa_ext_image_get_capability(
     agent: HsaAgent,
     geometry: u32,
@@ -783,6 +804,7 @@ pub unsafe extern "C" fn hsa_ext_image_get_capability(
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 #[allow(unsafe_code)]
+/// Reports image capabilities for a specified layout.
 pub unsafe extern "C" fn hsa_ext_image_get_capability_with_layout(
     agent: HsaAgent,
     geometry: u32,
@@ -802,6 +824,7 @@ pub unsafe extern "C" fn hsa_ext_image_get_capability_with_layout(
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 #[allow(unsafe_code)]
+/// Reports allocation size and alignment for an image.
 pub unsafe extern "C" fn hsa_ext_image_data_get_info(
     agent: HsaAgent,
     image_descriptor: *const HsaExtImageDescriptor,
@@ -833,6 +856,7 @@ pub unsafe extern "C" fn hsa_ext_image_data_get_info(
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 #[allow(unsafe_code)]
+/// Reports allocation requirements for a chosen image layout.
 pub unsafe extern "C" fn hsa_ext_image_data_get_info_with_layout(
     agent: HsaAgent,
     image_descriptor: *const HsaExtImageDescriptor,
@@ -867,6 +891,7 @@ pub unsafe extern "C" fn hsa_ext_image_data_get_info_with_layout(
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 #[allow(unsafe_code)]
+/// Reports allocation requirements for a mipmapped image.
 pub unsafe extern "C" fn hsa_ext_image_data_get_info_v2(
     agent: HsaAgent,
     image_descriptor: *const HsaExtImageDescriptorV2,
@@ -916,6 +941,7 @@ pub unsafe extern "C" fn hsa_ext_image_data_get_info_v2(
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 #[allow(unsafe_code)]
+/// Creates an image using runtime-selected native layout.
 pub unsafe extern "C" fn hsa_ext_image_create(
     agent: HsaAgent,
     image_descriptor: *const HsaExtImageDescriptor,
@@ -951,6 +977,7 @@ pub unsafe extern "C" fn hsa_ext_image_create(
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 #[allow(unsafe_code)]
+/// Creates an image using the requested native layout.
 pub unsafe extern "C" fn hsa_ext_image_create_with_layout(
     agent: HsaAgent,
     image_descriptor: *const HsaExtImageDescriptor,
@@ -989,6 +1016,7 @@ pub unsafe extern "C" fn hsa_ext_image_create_with_layout(
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 #[allow(unsafe_code)]
+/// Creates a mipmapped image from a version-two descriptor.
 pub unsafe extern "C" fn hsa_ext_image_create_v2(
     agent: HsaAgent,
     image_descriptor: *const HsaExtImageDescriptorV2,
@@ -1031,6 +1059,7 @@ pub unsafe extern "C" fn hsa_ext_image_create_v2(
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 #[allow(unsafe_code)]
+/// Creates an AMD image using native descriptor data.
 pub unsafe extern "C" fn hsa_amd_image_create(
     agent: HsaAgent,
     image_descriptor: *const HsaExtImageDescriptor,
@@ -1082,6 +1111,7 @@ pub unsafe extern "C" fn hsa_amd_image_create(
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 #[allow(unsafe_code)]
+/// Creates a version-two AMD image using native descriptor data.
 pub unsafe extern "C" fn hsa_amd_image_create_v2(
     agent: HsaAgent,
     image_descriptor: *const HsaExtImageDescriptorV2,
@@ -1134,6 +1164,7 @@ pub unsafe extern "C" fn hsa_amd_image_create_v2(
     })
 }
 
+/// Destroys image and releases its owned resources.
 fn destroy_image(agent: HsaAgent, image: HsaExtImage) -> Status {
     let mut guard = match lock() {
         Ok(guard) => guard,
@@ -1162,6 +1193,7 @@ fn destroy_image(agent: HsaAgent, image: HsaExtImage) -> Status {
     unsafe(export_name = "__hsa_impl_hsa_ext_image_destroy")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Releases an image handle and its native backing.
 pub extern "C" fn hsa_ext_image_destroy(agent: HsaAgent, image: HsaExtImage) -> Status {
     boundary(|| destroy_image(agent, image))
 }
@@ -1171,6 +1203,7 @@ pub extern "C" fn hsa_ext_image_destroy(agent: HsaAgent, image: HsaExtImage) -> 
     unsafe(export_name = "__hsa_impl_hsa_ext_image_destroy_v2")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Destroys a version-two image handle and its native backing.
 pub extern "C" fn hsa_ext_image_destroy_v2(agent: HsaAgent, image: HsaExtImage) -> Status {
     boundary(|| destroy_image(agent, image))
 }
@@ -1302,6 +1335,7 @@ struct ImageSnapshot {
     native: Option<NativeImage>,
 }
 
+/// Copies image ownership and layout data for work outside the lock.
 fn image_snapshot(
     agent: HsaAgent,
     image: HsaExtImage,
@@ -1333,6 +1367,7 @@ fn image_snapshot(
 }
 
 impl ImageSnapshot {
+    /// Computes a row address in the image backing, checking overflow.
     fn row_address(&self, x: usize, y: usize, z: usize) -> Option<usize> {
         usize::try_from(self.data)
             .ok()?
@@ -1341,6 +1376,7 @@ impl ImageSnapshot {
             .checked_add(x.checked_mul(self.format.bytes)?)
     }
 
+    /// Validates an image region against the image dimensions.
     fn region(&self, region: HsaExtImageRegion) -> Result<Region, Status> {
         let offset = [
             region.offset.x as usize,
@@ -1369,6 +1405,7 @@ impl ImageSnapshot {
         Ok(Region { offset, range })
     }
 
+    /// Computes a row address within a validated image region.
     fn region_row_address(&self, x: usize, y: usize, z: usize) -> Option<usize> {
         if self.descriptor.geometry == 3 {
             self.row_address(x, 0, y)
@@ -1387,6 +1424,7 @@ struct Region {
     range: [usize; 3],
 }
 
+/// Normalizes caller row and slice pitches for an external image buffer.
 fn external_pitches(
     row_bytes: usize,
     rows: usize,
@@ -1406,13 +1444,16 @@ fn external_pitches(
     Ok((row_pitch, slice_pitch))
 }
 
+/// Computes a linear image row offset, checking overflow.
 fn row_offset(z: usize, y: usize, row_pitch: usize, slice_pitch: usize) -> Option<usize> {
     z.checked_mul(slice_pitch)?
         .checked_add(y.checked_mul(row_pitch)?)
 }
 
+/// Tiled transfer chunk size in bytes.
 const TILED_TRANSFER_CHUNK_BYTES: usize = 1024 * 1024;
 
+/// Allocates and initializes a staging buffer of the requested size.
 fn zeroed_bytes(size: usize) -> Result<Vec<u8>, Status> {
     let mut bytes = Vec::new();
     bytes
@@ -1422,6 +1463,7 @@ fn zeroed_bytes(size: usize) -> Result<Vec<u8>, Status> {
     Ok(bytes)
 }
 
+/// Constructs an address mapper for a tiled image surface.
 fn tiled_mapper(snapshot: &ImageSnapshot) -> Result<rocaddr3::SurfaceMapper, Status> {
     let native = snapshot.native.as_ref().ok_or(NOT_SUPPORTED)?;
     rocaddr3::SurfaceMapper::new(native.request, &native.layout).map_err(|_| IMAGE_SIZE_UNSUPPORTED)
@@ -1481,6 +1523,7 @@ fn tiled_chunk_addresses(
     Ok(entries)
 }
 
+/// Finds the next contiguous run of tiled element addresses.
 fn next_tiled_run(entries: &[(u64, usize)], first: usize, element_bytes: usize) -> usize {
     let mut end = first + 1;
     while end < entries.len()
@@ -1496,8 +1539,11 @@ fn next_tiled_run(entries: &[(u64, usize)], first: usize, element_bytes: usize) 
 enum TiledSource<'a> {
     /// Strided caller-owned host rows and slices.
     Rows {
+        /// Base address of caller-owned source pixels.
         address: usize,
+        /// Byte stride between adjacent rows of the tiled source.
         row_pitch: usize,
+        /// Byte stride between adjacent slices of the tiled source.
         slice_pitch: usize,
     },
     /// One pixel repeated across the region.
@@ -1505,6 +1551,7 @@ enum TiledSource<'a> {
 }
 
 #[allow(unsafe_code)]
+/// Writes tiled rows to the validated destination.
 unsafe fn write_tiled_rows(
     snapshot: &ImageSnapshot,
     region: Region,
@@ -1614,6 +1661,7 @@ unsafe fn write_tiled_rows(
 }
 
 #[allow(unsafe_code)]
+/// Reads tiled rows from the supplied source.
 unsafe fn read_tiled_rows(
     snapshot: &ImageSnapshot,
     region: Region,
@@ -1708,6 +1756,7 @@ unsafe fn read_tiled_rows(
 }
 
 #[allow(unsafe_code)]
+/// Copies image rows after validating its source and destination.
 unsafe fn copy_image_rows(
     snapshot: &ImageSnapshot,
     external: usize,
@@ -1781,6 +1830,7 @@ unsafe fn copy_image_rows(
 }
 
 #[allow(unsafe_code)]
+/// Transfers a validated image region between image and host storage.
 unsafe fn transfer_image(
     agent: HsaAgent,
     image: HsaExtImage,
@@ -1831,6 +1881,7 @@ unsafe fn transfer_image(
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 #[allow(unsafe_code)]
+/// Copies a region between two images.
 pub unsafe extern "C" fn hsa_ext_image_copy(
     agent: HsaAgent,
     src_image: HsaExtImage,
@@ -1926,6 +1977,7 @@ pub unsafe extern "C" fn hsa_ext_image_copy(
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 #[allow(unsafe_code)]
+/// Copies host image data into an image region.
 pub unsafe extern "C" fn hsa_ext_image_import(
     agent: HsaAgent,
     src_memory: *const c_void,
@@ -1953,6 +2005,7 @@ pub unsafe extern "C" fn hsa_ext_image_import(
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 #[allow(unsafe_code)]
+/// Copies an image region into host storage.
 pub unsafe extern "C" fn hsa_ext_image_export(
     agent: HsaAgent,
     src_image: HsaExtImage,
@@ -1974,6 +2027,7 @@ pub unsafe extern "C" fn hsa_ext_image_export(
     })
 }
 
+/// Converts a 32-bit float to its 16-bit image channel encoding.
 fn f32_to_f16(value: f32) -> u16 {
     let bits = value.to_bits();
     let sign = ((bits >> 16) & 0x8000) as u16;
@@ -2018,6 +2072,7 @@ fn f32_to_f16(value: f32) -> u16 {
 }
 
 #[allow(unsafe_code)]
+/// Encodes a clear color in the image channel format.
 unsafe fn clear_pixel(snapshot: &ImageSnapshot, data: *const c_void) -> Result<[u8; 16], Status> {
     let channels = match snapshot.descriptor.format.channel_order {
         0 | 1 => 1,
@@ -2076,6 +2131,7 @@ unsafe fn clear_pixel(snapshot: &ImageSnapshot, data: *const c_void) -> Result<[
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 #[allow(unsafe_code)]
+/// Fills an image region with an encoded clear color.
 pub unsafe extern "C" fn hsa_ext_image_clear(
     agent: HsaAgent,
     image: HsaExtImage,
@@ -2152,6 +2208,7 @@ pub unsafe extern "C" fn hsa_ext_image_clear(
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 #[allow(unsafe_code)]
+/// Reports maximum dimensions supported for an image geometry.
 pub unsafe extern "C" fn hsa_amd_image_get_info_max_dim(
     agent: HsaAgent,
     attribute: u32,
@@ -2171,14 +2228,17 @@ pub unsafe extern "C" fn hsa_amd_image_get_info_max_dim(
 #[cfg(any(test, not(target_arch = "x86_64")))]
 #[repr(C)]
 pub(crate) struct ImageExtensionTable {
+    /// Queries format and geometry capabilities.
     get_capability:
         unsafe extern "C" fn(HsaAgent, u32, *const HsaExtImageFormat, *mut u32) -> Status,
+    /// Reports required image allocation size and alignment.
     data_get_info: unsafe extern "C" fn(
         HsaAgent,
         *const HsaExtImageDescriptor,
         u32,
         *mut HsaExtImageDataInfo,
     ) -> Status,
+    /// Creates an image using the runtime-selected layout.
     create: unsafe extern "C" fn(
         HsaAgent,
         *const HsaExtImageDescriptor,
@@ -2186,7 +2246,9 @@ pub(crate) struct ImageExtensionTable {
         u32,
         *mut HsaExtImage,
     ) -> Status,
+    /// Releases a published image handle.
     destroy: extern "C" fn(HsaAgent, HsaExtImage) -> Status,
+    /// Copies a region between two images.
     copy: unsafe extern "C" fn(
         HsaAgent,
         HsaExtImage,
@@ -2195,6 +2257,7 @@ pub(crate) struct ImageExtensionTable {
         *const HsaDim3,
         *const HsaDim3,
     ) -> Status,
+    /// Copies host data into an image region.
     import: unsafe extern "C" fn(
         HsaAgent,
         *const c_void,
@@ -2203,6 +2266,7 @@ pub(crate) struct ImageExtensionTable {
         HsaExtImage,
         *const HsaExtImageRegion,
     ) -> Status,
+    /// Copies an image region into host storage.
     export: unsafe extern "C" fn(
         HsaAgent,
         HsaExtImage,
@@ -2211,20 +2275,25 @@ pub(crate) struct ImageExtensionTable {
         usize,
         *const HsaExtImageRegion,
     ) -> Status,
+    /// Fills an image region with a clear color.
     clear: unsafe extern "C" fn(
         HsaAgent,
         HsaExtImage,
         *const c_void,
         *const HsaExtImageRegion,
     ) -> Status,
+    /// Creates a sampler from the original descriptor layout.
     sampler_create: unsafe extern "C" fn(
         HsaAgent,
         *const HsaExtSamplerDescriptor,
         *mut HsaExtSampler,
     ) -> Status,
+    /// Releases a sampler handle.
     sampler_destroy: extern "C" fn(HsaAgent, HsaExtSampler) -> Status,
+    /// Queries format capabilities for an explicit layout.
     get_capability_with_layout:
         unsafe extern "C" fn(HsaAgent, u32, *const HsaExtImageFormat, u32, *mut u32) -> Status,
+    /// Reports allocation requirements for an explicit layout.
     data_get_info_with_layout: unsafe extern "C" fn(
         HsaAgent,
         *const HsaExtImageDescriptor,
@@ -2234,6 +2303,7 @@ pub(crate) struct ImageExtensionTable {
         usize,
         *mut HsaExtImageDataInfo,
     ) -> Status,
+    /// Creates an image using an explicit layout and pitches.
     create_with_layout: unsafe extern "C" fn(
         HsaAgent,
         *const HsaExtImageDescriptor,
@@ -2244,6 +2314,7 @@ pub(crate) struct ImageExtensionTable {
         usize,
         *mut HsaExtImage,
     ) -> Status,
+    /// Creates a sampler from the extended descriptor layout.
     sampler_create_v2: unsafe extern "C" fn(
         HsaAgent,
         *const HsaExtSamplerDescriptorV2,
@@ -2256,6 +2327,7 @@ const _: () =
     assert!(std::mem::size_of::<ImageExtensionTable>() == 14 * std::mem::size_of::<usize>());
 
 #[cfg(any(test, not(target_arch = "x86_64")))]
+/// Builds the image extension table from this frontend’s entry points.
 pub(crate) fn image_extension_table() -> ImageExtensionTable {
     ImageExtensionTable {
         get_capability: hsa_ext_image_get_capability,
@@ -2281,6 +2353,7 @@ pub(crate) fn image_extension_table() -> ImageExtensionTable {
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 #[allow(unsafe_code)]
+/// Creates a sampler from an HSA descriptor.
 pub unsafe extern "C" fn hsa_ext_sampler_create(
     agent: HsaAgent,
     sampler_descriptor: *const HsaExtSamplerDescriptor,
@@ -2317,6 +2390,7 @@ pub unsafe extern "C" fn hsa_ext_sampler_create(
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 #[allow(unsafe_code)]
+/// Creates a sampler from a version-two descriptor.
 pub unsafe extern "C" fn hsa_ext_sampler_create_v2(
     agent: HsaAgent,
     sampler_descriptor: *const HsaExtSamplerDescriptorV2,
@@ -2341,6 +2415,7 @@ pub unsafe extern "C" fn hsa_ext_sampler_create_v2(
     unsafe(export_name = "__hsa_impl_hsa_ext_sampler_destroy")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Releases a sampler descriptor handle.
 pub extern "C" fn hsa_ext_sampler_destroy(agent: HsaAgent, sampler: HsaExtSampler) -> Status {
     boundary(|| {
         if agent.handle == 0 {
@@ -2370,10 +2445,12 @@ pub extern "C" fn hsa_ext_sampler_destroy(agent: HsaAgent, sampler: HsaExtSample
 }
 
 #[cfg(test)]
+/// Image entry-point validation and output-preservation checks.
 mod tests {
     use super::*;
 
     #[test]
+    /// Checks rejected image requests leave caller output storage untouched.
     fn unsupported_image_entry_points_leave_outputs_untouched() {
         let agent = HsaAgent { handle: 0 };
         let mut capability = 0xfeed_u32;
