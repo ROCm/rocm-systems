@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// gfx12 Wave32/Wave64 FP16 fused multiply-add, with explicit EXEC and whole-VGPR aliases.
+// gfx11/gfx12 Wave32/Wave64 FP16 fused multiply-add, with explicit EXEC and whole-VGPR aliases.
 
 #include "common/float_formats.h"
 #include "common/internal.h"
@@ -36,8 +36,9 @@ static uint16_t loose_half_fma(float x, float y, float z, bool saturate) {
 } // namespace rocjitsu::arith
 
 // Evaluate the low halfword and preserve the high half and inactive lanes.
-// Modes 0..2 do not access FP status; mode 3 accumulates active-lane causes.
-template <int Lanes>
+// Modes 0..2 do not access FP status; mode 3 accumulates gfx12 active-lane
+// causes and rejects unsupported gfx11 TRAPSTS reporting before any write.
+template <int Lanes, bool Rdna3 = false>
 static int fma(uint64_t flags, rocjitsu::arith::ExecMask<Lanes> exec_mask,
                uint64_t instruction_flags, uint32_t *const *d, const uint32_t *const *a,
                const uint32_t *const *b, const uint32_t *const *c, uint32_t *excp_flag_user) {
@@ -47,6 +48,9 @@ static int fma(uint64_t flags, rocjitsu::arith::ExecMask<Lanes> exec_mask,
   if (int error = rocjitsu::arith::validate(flags)) {
     return error;
   }
+  if (Rdna3 && rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
   }
@@ -55,7 +59,7 @@ static int fma(uint64_t flags, rocjitsu::arith::ExecMask<Lanes> exec_mask,
   uint16_t result[Lanes];
   for (int lane = 0; lane < Lanes; ++lane) {
     if (rocjitsu::arith::is_exact(flags)) {
-      result[lane] = rocjitsu::arith::half_fma_value(
+      result[lane] = rocjitsu::arith::half_fma_value<!Rdna3>(
           uint16_t(a[0][lane]), uint16_t(b[0][lane]), uint16_t(c[0][lane]),
           bool(flags & RJ_ARITH_FP16_OVFL),
           report && ((exec_mask >> lane) & 1) ? &exceptions : nullptr);
@@ -91,4 +95,18 @@ int rj_arith_v_fma_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
                                  const uint32_t *const *b, const uint32_t *const *c,
                                  uint32_t *excp_flag_user) {
   return fma<64>(flags, exec_mask, instruction_flags, d, a, b, c, excp_flag_user);
+}
+
+// Evaluate gfx11 FP16 FMA for Wave32; required TRAPSTS reporting is unsupported.
+int rj_arith_v_fma_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                           const uint32_t *const *c, uint32_t *trapsts) {
+  return fma<32, true>(flags, exec_mask, instruction_flags, d, a, b, c, trapsts);
+}
+
+// Evaluate gfx11 FP16 FMA for Wave64; required TRAPSTS reporting is unsupported.
+int rj_arith_v_fma_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                           const uint32_t *const *c, uint32_t *trapsts) {
+  return fma<64, true>(flags, exec_mask, instruction_flags, d, a, b, c, trapsts);
 }

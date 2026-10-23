@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Scalar gfx12 FP16 FMA with default guest controls, optional finite saturation,
-// and FP-status reporting.
+// Scalar RDNA3/gfx12 FP16 FMA with default guest controls, optional finite saturation,
+// and gfx12 FP-status reporting.
 // Internal helpers shared by instruction implementations; not part of the public C API.
 
 #pragma once
@@ -49,6 +49,7 @@ inline uint16_t half_fma_narrow(uint64_t bits) {
 // Default guest rounding and denormal policy; preserve architecture-specific NaN results.
 // A null status pointer skips reporting; otherwise OR causes into existing bits.
 // Reporting is supported for gfx12 only.
+template <bool QuietNaNs>
 inline uint16_t half_fma_value(uint16_t a, uint16_t b, uint16_t c, bool saturate,
                                uint32_t *exceptions = nullptr) {
   uint16_t ma = a & 0x7fff, mb = b & 0x7fff, mc = c & 0x7fff;
@@ -76,7 +77,7 @@ inline uint16_t half_fma_value(uint16_t a, uint16_t b, uint16_t c, bool saturate
   if (invalid_product) {
     exceptional = 0xfe00;
   } else if (nan) {
-    exceptional = (a_nan ? a : b_nan ? b : c) | 0x0200;
+    exceptional = (a_nan ? a : b_nan ? b : c) | (QuietNaNs ? 0x0200 : 0);
   } else if (ma == 0x7c00 || mb == 0x7c00) {
     exceptional = ((a ^ b) & 0x8000) | 0x7c00;
     if (opposite_infinities) {
