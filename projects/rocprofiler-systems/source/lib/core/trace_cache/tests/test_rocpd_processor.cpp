@@ -2022,7 +2022,7 @@ TEST_F(rocpd_write_read_test_interface, handle_cpu_pmc_sample_pathway)
                 { .cpu_id = 0, .frequency = k_core0_freq_mhz, .load = 0.0 },
                 { .cpu_id = 1, .frequency = k_core1_freq_mhz, .load = 0.0 },
             };
-            auto freqs = rocprofsys::pmc::collectors::cpu::serialize_frequencies(cores);
+            auto freqs = rocprofsys::pmc::collectors::cpu::core_frequencies(cores);
             const cpu_pmc_sample sample{ enabled,          0, k_timestamp, proc,
                                          std::move(freqs), {} };
             processor.handle(sample);

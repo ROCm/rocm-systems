@@ -6,18 +6,50 @@
 #include "core/trace_cache/sample_type.hpp"
 #include "library/pmc/collectors/cpu/types.hpp"
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
-#include <cstring>
+#include <utility>
 #include <vector>
 
 namespace rocprofsys::pmc::collectors::cpu
 {
 
+/** @brief Frequency of one CPU core in MHz. */
+struct core_frequency
+{
+    std::size_t cpu_id = 0;
+    float       value  = 0.0f;
+
+    bool operator==(const core_frequency&) const = default;
+
+    template <typename Archive>
+    void serialize(Archive& archive)
+    {
+        archive(cpu_id, value);
+    }
+};
+
+/** @brief Load of one CPU core in percent. */
+struct core_load
+{
+    std::size_t cpu_id = 0;
+    double      value  = 0.0;
+
+    bool operator==(const core_load&) const = default;
+
+    template <typename Archive>
+    void serialize(Archive& archive)
+    {
+        archive(cpu_id, value);
+    }
+};
+
 /**
  * @brief CPU PMC sample type for trace cache.
  *
- * Stores enabled metrics, timestamp, process-level data, and serialized
- * per-CPU frequency/load data as byte vectors.
+ * Stores enabled metrics, timestamp, process-level data, and per-core frequency
+ * and load entries.
  */
 struct sample : trace_cache::cacheable_t
 {
@@ -26,23 +58,24 @@ struct sample : trace_cache::cacheable_t
     };
 
     sample() = default;
-    sample(enabled_metrics _settings, std::uint32_t _device_id, std::uint64_t _timestamp,
-           const process_metrics& _process_data, std::vector<std::uint8_t> _freqs,
-           std::vector<std::uint8_t> _loads)
-    : enabled_metric(_settings)
-    , device_id(_device_id)
-    , timestamp(_timestamp)
-    , process_data(_process_data)
-    , freqs(std::move(_freqs))
-    , loads(std::move(_loads))
+    sample(enabled_metrics settings, std::uint32_t socket_id, std::uint64_t timestamp_ns,
+           const process_metrics&      process,
+           std::vector<core_frequency> per_core_frequencies,
+           std::vector<core_load>      per_core_loads)
+    : enabled_metric(settings)
+    , device_id(socket_id)
+    , timestamp(timestamp_ns)
+    , process_data(process)
+    , freqs(std::move(per_core_frequencies))
+    , loads(std::move(per_core_loads))
     {}
 
-    enabled_metrics           enabled_metric{};
-    std::uint32_t             device_id = 0;
-    std::uint64_t             timestamp = 0;
-    process_metrics           process_data{};
-    std::vector<std::uint8_t> freqs;  // serialized cpu_id+freq pairs
-    std::vector<std::uint8_t> loads;  // serialized cpu_id+load pairs
+    enabled_metrics             enabled_metric{};
+    std::uint32_t               device_id = 0;
+    std::uint64_t               timestamp = 0;
+    process_metrics             process_data{};
+    std::vector<core_frequency> freqs;
+    std::vector<core_load>      loads;
 
     template <typename Archive>
     void serialize(Archive& archive)
@@ -51,43 +84,23 @@ struct sample : trace_cache::cacheable_t
     }
 };
 
-inline std::vector<std::uint8_t>
-serialize_frequencies(const std::vector<per_cpu_metrics>& cpu_data)
+inline std::vector<core_frequency>
+core_frequencies(const std::vector<per_cpu_metrics>& cpu_data)
 {
-    constexpr size_t idx_size   = sizeof(size_t);
-    constexpr size_t value_size = sizeof(float);
-
-    std::vector<std::uint8_t> result;
-    result.resize(cpu_data.size() * (idx_size + value_size));
-
-    size_t offset = 0;
-    for(const auto& cpu : cpu_data)
-    {
-        std::memcpy(result.data() + offset, &cpu.cpu_id, idx_size);
-        offset += idx_size;
-        std::memcpy(result.data() + offset, &cpu.frequency, value_size);
-        offset += value_size;
-    }
+    std::vector<core_frequency> result(cpu_data.size());
+    std::ranges::transform(cpu_data, result.begin(), [](const per_cpu_metrics& cpu) {
+        return core_frequency{ .cpu_id = cpu.cpu_id, .value = cpu.frequency };
+    });
     return result;
 }
 
-inline std::vector<std::uint8_t>
-serialize_loads(const std::vector<per_cpu_metrics>& cpu_data)
+inline std::vector<core_load>
+core_loads(const std::vector<per_cpu_metrics>& cpu_data)
 {
-    constexpr size_t idx_size   = sizeof(size_t);
-    constexpr size_t value_size = sizeof(double);
-
-    std::vector<std::uint8_t> result;
-    result.resize(cpu_data.size() * (idx_size + value_size));
-
-    size_t offset = 0;
-    for(const auto& cpu : cpu_data)
-    {
-        std::memcpy(result.data() + offset, &cpu.cpu_id, idx_size);
-        offset += idx_size;
-        std::memcpy(result.data() + offset, &cpu.load, value_size);
-        offset += value_size;
-    }
+    std::vector<core_load> result(cpu_data.size());
+    std::ranges::transform(cpu_data, result.begin(), [](const per_cpu_metrics& cpu) {
+        return core_load{ .cpu_id = cpu.cpu_id, .value = cpu.load };
+    });
     return result;
 }
 

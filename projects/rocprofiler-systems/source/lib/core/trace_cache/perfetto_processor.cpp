@@ -982,50 +982,6 @@ perfetto_processor_t::handle(const cpu_pmc_sample& _cpu_sample)
     using cpu_freq_track = core::perfetto::counter_track<category::cpu_freq>;
     using cpu_load_track = core::perfetto::counter_track<category::cpu_load>;
 
-    struct core_freq_sample
-    {
-        size_t id;
-        float  value;
-    };
-
-    struct core_load_sample
-    {
-        size_t id;
-        double value;
-    };
-
-    auto const deserialize_freqs = [](const std::vector<std::uint8_t>& buffer) {
-        std::vector<core_freq_sample> result;
-        size_t                        offset = 0;
-
-        while(offset + sizeof(float) + sizeof(size_t) <= buffer.size())
-        {
-            core_freq_sample core_sample;
-            std::memcpy(&core_sample.id, buffer.data() + offset, sizeof(size_t));
-            offset += sizeof(size_t);
-            std::memcpy(&core_sample.value, buffer.data() + offset, sizeof(float));
-            offset += sizeof(float);
-            result.push_back(core_sample);
-        }
-        return result;
-    };
-
-    auto const deserialize_loads = [](const std::vector<std::uint8_t>& buffer) {
-        std::vector<core_load_sample> result;
-        size_t                        offset = 0;
-
-        while(offset + sizeof(double) + sizeof(size_t) <= buffer.size())
-        {
-            core_load_sample core_sample;
-            std::memcpy(&core_sample.id, buffer.data() + offset, sizeof(size_t));
-            offset += sizeof(size_t);
-            std::memcpy(&core_sample.value, buffer.data() + offset, sizeof(double));
-            offset += sizeof(double);
-            result.push_back(core_sample);
-        }
-        return result;
-    };
-
     if(!m_cpu_pmc_initialized)
     {
         process_page_track::emplace(0, "CPU Memory Usage (S)", "MB");
@@ -1117,10 +1073,9 @@ perfetto_processor_t::handle(const cpu_pmc_sample& _cpu_sample)
 
     if(_em.bits.frequency)
     {
-        const auto cpu_freqs = deserialize_freqs(_cpu_sample.freqs);
-        for(const auto& cpu_data : cpu_freqs)
+        for(const auto& cpu_data : _cpu_sample.freqs)
         {
-            const size_t cpu_id = cpu_data.id;
+            const size_t cpu_id = cpu_data.cpu_id;
             if(!cpu_freq_track::exists(cpu_id))
             {
                 const auto track_name = "CPU [" + std::to_string(_device_id) +
@@ -1136,10 +1091,9 @@ perfetto_processor_t::handle(const cpu_pmc_sample& _cpu_sample)
 
     if(_em.bits.load)
     {
-        const auto cpu_loads = deserialize_loads(_cpu_sample.loads);
-        for(const auto& cpu_data : cpu_loads)
+        for(const auto& cpu_data : _cpu_sample.loads)
         {
-            const size_t cpu_id = cpu_data.id;
+            const size_t cpu_id = cpu_data.cpu_id;
             if(!cpu_load_track::exists(cpu_id))
             {
                 const auto track_name = "CPU [" + std::to_string(_device_id) +

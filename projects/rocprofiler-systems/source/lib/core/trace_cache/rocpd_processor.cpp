@@ -798,50 +798,6 @@ rocpd_processor_t::handle(
 void
 rocpd_processor_t::handle([[maybe_unused]] const cpu_pmc_sample& cpu_pmc_smpl)
 {
-    struct core_freq_sample
-    {
-        size_t id;
-        float  value;
-    };
-
-    struct core_load_sample
-    {
-        size_t id;
-        double value;
-    };
-
-    auto const deserialize_freqs = [](const std::vector<std::uint8_t>& buffer) {
-        std::vector<core_freq_sample> result;
-        size_t                        offset = 0;
-
-        while(offset + sizeof(float) + sizeof(size_t) <= buffer.size())
-        {
-            core_freq_sample core_sample{};
-            std::memcpy(&core_sample.id, buffer.data() + offset, sizeof(size_t));
-            offset += sizeof(size_t);
-            std::memcpy(&core_sample.value, buffer.data() + offset, sizeof(float));
-            offset += sizeof(float);
-            result.push_back(core_sample);
-        }
-        return result;
-    };
-
-    auto const deserialize_loads = [](const std::vector<std::uint8_t>& buffer) {
-        std::vector<core_load_sample> result;
-        size_t                        offset = 0;
-
-        while(offset + sizeof(double) + sizeof(size_t) <= buffer.size())
-        {
-            core_load_sample core_sample{};
-            std::memcpy(&core_sample.id, buffer.data() + offset, sizeof(size_t));
-            offset += sizeof(size_t);
-            std::memcpy(&core_sample.value, buffer.data() + offset, sizeof(double));
-            offset += sizeof(double);
-            result.push_back(core_sample);
-        }
-        return result;
-    };
-
     const auto* name         = trait::name<category::cpu_freq>::value;
     const auto& process_info = m_metadata->get_process_info();
 
@@ -971,10 +927,9 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_pmc_sample& cpu_pmc_smpl)
                    std::to_string(device_id) + "] Core [" + std::to_string(cpu_id) + "]";
         };
 
-        const auto core_freq_samples = deserialize_freqs(cpu_pmc_smpl.freqs);
-        for(const auto& core : core_freq_samples)
+        for(const auto& core : cpu_pmc_smpl.freqs)
         {
-            auto const track_name = get_freq_track_name(core.id);
+            auto const track_name = get_freq_track_name(core.cpu_id);
             insert_event_and_sample(trait::name<category::cpu_freq>::value,
                                     track_name.c_str(), static_cast<double>(core.value));
         }
@@ -987,10 +942,9 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_pmc_sample& cpu_pmc_smpl)
                    std::to_string(device_id) + "] Core [" + std::to_string(cpu_id) + "]";
         };
 
-        const auto core_load_samples = deserialize_loads(cpu_pmc_smpl.loads);
-        for(const auto& core : core_load_samples)
+        for(const auto& core : cpu_pmc_smpl.loads)
         {
-            auto const track_name = get_load_track_name(core.id);
+            auto const track_name = get_load_track_name(core.cpu_id);
             insert_event_and_sample(trait::name<category::cpu_load>::value,
                                     track_name.c_str(), static_cast<double>(core.value));
         }

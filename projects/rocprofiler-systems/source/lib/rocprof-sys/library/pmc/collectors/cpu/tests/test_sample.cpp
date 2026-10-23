@@ -3,6 +3,7 @@
 
 #include "core/trace_cache/archive.hpp"
 #include "library/pmc/collectors/cpu/sample.hpp"
+#include "library/pmc/collectors/cpu/types.hpp"
 
 #include <array>
 #include <cstdint>
@@ -10,6 +11,19 @@
 #include <vector>
 
 using namespace rocprofsys::trace_cache;
+
+namespace
+{
+constexpr auto          k_all_metrics      = 0x1FFU;  // all 9 bits
+constexpr std::int64_t  k_page_rss         = 1024;
+constexpr std::int64_t  k_virt_mem         = 2048;
+constexpr std::int64_t  k_peak_rss         = 4096;
+constexpr std::int64_t  k_context_switches = 500;
+constexpr std::int64_t  k_page_faults      = 100;
+constexpr std::int64_t  k_user_mode_time   = 1000000;
+constexpr std::int64_t  k_kernel_mode_time = 500000;
+constexpr std::uint64_t k_timestamp        = 80000;
+}  // namespace
 
 class cpu_pmc_sample_test : public ::testing::Test
 {
@@ -23,23 +37,24 @@ TEST_F(cpu_pmc_sample_test, serialize_deserialize)
 {
     using namespace rocprofsys::pmc::collectors::cpu;
 
-    enabled_metrics em{};
-    em.value = 0x1FF;  // all 9 bits
+    enabled_metrics enabled{};
+    enabled.value = k_all_metrics;
 
-    process_metrics pm{};
-    pm.page_rss         = 1024;
-    pm.virt_mem         = 2048;
-    pm.peak_rss         = 4096;
-    pm.context_switches = 500;
-    pm.page_faults      = 100;
-    pm.user_mode_time   = 1000000;
-    pm.kernel_mode_time = 500000;
+    process_metrics process{};
+    process.page_rss         = k_page_rss;
+    process.virt_mem         = k_virt_mem;
+    process.peak_rss         = k_peak_rss;
+    process.context_switches = k_context_switches;
+    process.page_faults      = k_page_faults;
+    process.user_mode_time   = k_user_mode_time;
+    process.kernel_mode_time = k_kernel_mode_time;
 
-    const std::vector<std::uint8_t> freqs_data = {
-        100, 150, 200, 180, 190, 195, 185, 170
-    };
-    const std::vector<std::uint8_t> loads_data = { 10, 20, 30, 40 };
-    const cpu_pmc_sample            original(em, 1u, 80000, pm, freqs_data, loads_data);
+    const std::vector<core_frequency> freqs_data = { { .cpu_id = 0, .value = 3200.0f },
+                                                     { .cpu_id = 1, .value = 2800.5f } };
+    const std::vector<core_load>      loads_data = { { .cpu_id = 0, .value = 12.5 },
+                                                     { .cpu_id = 1, .value = 87.25 } };
+    const cpu_pmc_sample original(enabled, 1u, k_timestamp, process, freqs_data,
+                                  loads_data);
 
     serialize(buffer.data(), original);
 
@@ -66,16 +81,17 @@ TEST_F(cpu_pmc_sample_test, get_size)
 {
     using namespace rocprofsys::pmc::collectors::cpu;
 
-    const enabled_metrics em{};
-    const process_metrics pm{};
+    const enabled_metrics enabled{};
+    const process_metrics process{};
 
-    const std::vector<std::uint8_t> freqs_data = {
-        100, 150, 200, 180, 190, 195, 185, 170
-    };
-    const std::vector<std::uint8_t> loads_data = { 10, 20, 30, 40 };
-    const cpu_pmc_sample            s(em, 0u, 80000, pm, freqs_data, loads_data);
+    const std::vector<core_frequency> freqs_data = { { .cpu_id = 0, .value = 3200.0f },
+                                                     { .cpu_id = 1, .value = 2800.5f } };
+    const std::vector<core_load>      loads_data = { { .cpu_id = 0, .value = 12.5 },
+                                                     { .cpu_id = 1, .value = 87.25 } };
+    const cpu_pmc_sample record(enabled, 0u, k_timestamp, process, freqs_data,
+                                loads_data);
 
-    EXPECT_GT(get_size(s), 0u);
+    EXPECT_GT(get_size(record), 0u);
 }
 
 TEST_F(cpu_pmc_sample_test, type_identifier)
@@ -87,10 +103,11 @@ TEST_F(cpu_pmc_sample_test, empty_data)
 {
     using namespace rocprofsys::pmc::collectors::cpu;
 
-    const enabled_metrics           em{};
-    const process_metrics           pm{};
-    const std::vector<std::uint8_t> empty;
-    const cpu_pmc_sample            original(em, 0u, 0, pm, empty, empty);
+    const enabled_metrics             enabled{};
+    const process_metrics             process{};
+    const std::vector<core_frequency> empty_freqs;
+    const std::vector<core_load>      empty_loads;
+    const cpu_pmc_sample original(enabled, 0u, 0, process, empty_freqs, empty_loads);
 
     serialize(buffer.data(), original);
 

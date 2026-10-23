@@ -204,8 +204,8 @@ struct cache_policy
                "socket id exceeds cpu_pmc_sample::device_id width");
         trace_cache::get_buffer_storage().store(trace_cache::cpu_pmc_sample{
             effective, static_cast<std::uint32_t>(device_id), timestamp,
-            metric_values.process_data, serialize_frequencies(cpu_data),
-            serialize_loads(cpu_data) });
+            metric_values.process_data, core_frequencies(cpu_data),
+            core_loads(cpu_data) });
     }
 
 private:

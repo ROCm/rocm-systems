@@ -401,8 +401,8 @@ TEST(record_format, cpu_pmc_sample)
           .frequency = std::bit_cast<float>(0x4D4D4D4DU),
           .load      = std::bit_cast<double>(0x6E6E6E6E6E6E6E6EUL) },
     };
-    const auto freqs = rocprofsys::pmc::collectors::cpu::serialize_frequencies(cores);
-    const auto loads = rocprofsys::pmc::collectors::cpu::serialize_loads(cores);
+    const auto freqs = rocprofsys::pmc::collectors::cpu::core_frequencies(cores);
+    const auto loads = rocprofsys::pmc::collectors::cpu::core_loads(cores);
 
     auto process_data             = rocprofsys::pmc::collectors::cpu::process_metrics{};
     process_data.page_rss         = 0x3333333333333333UL;

@@ -33,6 +33,7 @@ enum class test_record_id : std::uint32_t
     derived_test         = 6,
     counted_entries_test = 7,
     nested_test          = 8,
+    entry_vector_test    = 9,
 };
 
 struct scalar_record
@@ -183,6 +184,33 @@ struct nested_record
     void serialize(Archive& archive)
     {
         archive(head, inner, tail);
+    }
+};
+
+struct labeled_entry
+{
+    std::uint32_t    id = 0;
+    std::string_view label;
+
+    template <typename Archive>
+    void serialize(Archive& archive)
+    {
+        archive(id, label);
+    }
+};
+
+struct entry_vector_record
+{
+    static constexpr auto type_identifier = test_record_id::entry_vector_test;
+
+    std::uint32_t              device = 0;
+    std::vector<labeled_entry> entries;
+    std::uint32_t              tail = 0;
+
+    template <typename Archive>
+    void serialize(Archive& archive)
+    {
+        archive(device, entries, tail);
     }
 };
 
@@ -419,6 +447,54 @@ TEST(archive, nested_struct_serializes_itself)
     utility::store_value(orig.tail, other_buffer.data(), nested_position);
 
     EXPECT_EQ(std::memcmp(buffer.data(), other_buffer.data(), size), 0);
+}
+
+TEST(archive, vector_of_serializable_values_round_trip)
+{
+    std::array<std::uint8_t, k_buffer_size> buffer{};
+    entry_vector_record                     orig;
+    orig.device  = 7U;
+    orig.entries = { { .id = 1U, .label = "a" }, { .id = 2U, .label = "longer label" } };
+    orig.tail    = 99U;
+
+    const std::size_t size = get_size(orig);
+    serialize(buffer.data(), orig);
+
+    std::size_t byte_count = 0;
+    std::memcpy(&byte_count, buffer.data() + sizeof(std::uint32_t), sizeof(std::size_t));
+    EXPECT_EQ(byte_count, 39U);
+
+    std::uint8_t*             read_buffer = buffer.data();
+    const entry_vector_record read        = deserialize<entry_vector_record>(read_buffer);
+
+    EXPECT_EQ(read.device, 7U);
+    ASSERT_EQ(read.entries.size(), 2U);
+    EXPECT_EQ(read.entries[0].id, 1U);
+    EXPECT_EQ(read.entries[0].label, "a");
+    EXPECT_EQ(read.entries[1].id, 2U);
+    EXPECT_EQ(read.entries[1].label, "longer label");
+    EXPECT_EQ(read.tail, 99U);
+    EXPECT_EQ(read_buffer - buffer.data(), static_cast<std::ptrdiff_t>(size));
+}
+
+TEST(archive, empty_vector_of_serializable_values)
+{
+    std::array<std::uint8_t, k_buffer_size> buffer{};
+    entry_vector_record                     orig;
+    orig.device = 3U;
+    orig.tail   = 4U;
+
+    const std::size_t size = get_size(orig);
+    EXPECT_EQ(size, sizeof(std::uint32_t) + sizeof(std::size_t) + sizeof(std::uint32_t));
+    serialize(buffer.data(), orig);
+
+    std::uint8_t*             read_buffer = buffer.data();
+    const entry_vector_record read        = deserialize<entry_vector_record>(read_buffer);
+
+    EXPECT_EQ(read.device, 3U);
+    EXPECT_TRUE(read.entries.empty());
+    EXPECT_EQ(read.tail, 4U);
+    EXPECT_EQ(read_buffer - buffer.data(), static_cast<std::ptrdiff_t>(size));
 }
 
 }  // namespace rocprofsys::trace_cache

@@ -22,6 +22,11 @@ template <typename Type, typename Archive>
 concept archive_serializable =
     requires(Type& value, Archive& archive) { value.serialize(archive); };
 
+template <typename Type, typename Archive>
+concept archive_serializable_vector =
+    type_traits::is_vector_v<Type> &&
+    archive_serializable<typename Type::value_type, Archive>;
+
 struct binary_size_archive
 {
     static constexpr bool k_is_loading = false;
@@ -37,13 +42,22 @@ private:
     template <typename Type>
     void size_one(const Type& value)
     {
-        if constexpr(archive_serializable<Type, binary_size_archive>)
+        size += utility::get_size(value);
+    }
+
+    template <archive_serializable<binary_size_archive> Type>
+    void size_one(const Type& value)
+    {
+        const_cast<Type&>(value).serialize(*this);
+    }
+
+    template <archive_serializable_vector<binary_size_archive> Type>
+    void size_one(const Type& value)
+    {
+        size += sizeof(std::size_t);
+        for(const auto& element : value)
         {
-            const_cast<Type&>(value).serialize(*this);
-        }
-        else
-        {
-            size += utility::get_size(value);
+            size_one(element);
         }
     }
 };
@@ -68,16 +82,31 @@ private:
     template <typename Type>
     void write_one(const Type& value, std::uint8_t* out, std::size_t& pos)
     {
-        if constexpr(archive_serializable<Type, binary_write_archive>)
+        utility::store_value(value, out, pos);
+    }
+
+    template <archive_serializable<binary_write_archive> Type>
+    void write_one(const Type& value, [[maybe_unused]] std::uint8_t* out,
+                   std::size_t& pos)
+    {
+        position = pos;
+        const_cast<Type&>(value).serialize(*this);
+        pos = position;
+    }
+
+    template <archive_serializable_vector<binary_write_archive> Type>
+    void write_one(const Type& value, std::uint8_t* out, std::size_t& pos)
+    {
+        // Byte count first, as for vectors of arithmetic values; known once the elements
+        // are written.
+        const std::size_t count_position = pos;
+        pos += sizeof(std::size_t);
+        for(const auto& element : value)
         {
-            position = pos;
-            const_cast<Type&>(value).serialize(*this);
-            pos = position;
+            write_one(element, out, pos);
         }
-        else
-        {
-            utility::store_value(value, out, pos);
-        }
+        const std::size_t byte_count = pos - count_position - sizeof(std::size_t);
+        std::memcpy(out + count_position, &byte_count, sizeof(std::size_t));
     }
 };
 
@@ -99,24 +128,38 @@ private:
     template <typename Type>
     void read_one(Type& value, std::uint8_t*& cur)
     {
-        if constexpr(archive_serializable<Type, binary_read_archive>)
+        utility::parse_value(cur, value);
+    }
+
+    template <archive_serializable<binary_read_archive> Type>
+    void read_one(Type& value, std::uint8_t*& cur)
+    {
+        cursor = cur;
+        value.serialize(*this);
+        cur = cursor;
+    }
+
+    template <archive_serializable_vector<binary_read_archive> Type>
+    void read_one(Type& value, std::uint8_t*& cur)
+    {
+        std::size_t byte_count = 0;
+        std::memcpy(&byte_count, cur, sizeof(std::size_t));
+        cur += sizeof(std::size_t);
+        const std::uint8_t* const end = cur + byte_count;
+        value.clear();
+        while(cur < end)
         {
-            cursor = cur;
-            value.serialize(*this);
-            cur = cursor;
+            read_one(value.emplace_back(), cur);
         }
-        else if constexpr(std::is_same_v<Type, std::span<const std::byte>>)
-        {
-            std::size_t byte_count = 0;
-            std::memcpy(&byte_count, cur, sizeof(std::size_t));
-            cur += sizeof(std::size_t);
-            value = { reinterpret_cast<const std::byte*>(cur), byte_count };
-            cur += byte_count;
-        }
-        else
-        {
-            utility::parse_value(cur, value);
-        }
+    }
+
+    static void read_one(std::span<const std::byte>& value, std::uint8_t*& cur)
+    {
+        std::size_t byte_count = 0;
+        std::memcpy(&byte_count, cur, sizeof(std::size_t));
+        cur += sizeof(std::size_t);
+        value = { reinterpret_cast<const std::byte*>(cur), byte_count };
+        cur += byte_count;
     }
 };
 
