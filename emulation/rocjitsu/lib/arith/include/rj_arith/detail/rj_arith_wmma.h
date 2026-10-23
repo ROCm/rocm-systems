@@ -31,6 +31,19 @@ int rj_arith_v_wmma_f32_16x16x16_bf16_w32_gfx12(uint64_t flags, uint64_t instruc
                                                 uint32_t *const *d, const uint32_t *const *a,
                                                 const uint32_t *const *b, const uint32_t *const *c);
 
+// Wave64 uses two A/B VGPRs and four C/D VGPRs, each with 64 lane words.
+// C/D[row][col] maps to [row % 4][col + 16 * (row / 8) + 32 * ((row / 4) % 2)].
+// A/B element (coordinate, k) maps to [(k % 4) / 2][coordinate + 16 * (k / 4)], half k % 2.
+// Controls and FP-status behavior match Wave32 above.
+int rj_arith_v_wmma_f32_16x16x16_f16_w64_gfx12(uint64_t flags, uint64_t instruction_flags,
+                                               uint32_t *const *d, const uint32_t *const *a,
+                                               const uint32_t *const *b, const uint32_t *const *c);
+
+// BF16 uses the same Wave64 layout and control/status contract as FP16.
+int rj_arith_v_wmma_f32_16x16x16_bf16_w64_gfx12(uint64_t flags, uint64_t instruction_flags,
+                                                uint32_t *const *d, const uint32_t *const *a,
+                                                const uint32_t *const *b, const uint32_t *const *c);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif

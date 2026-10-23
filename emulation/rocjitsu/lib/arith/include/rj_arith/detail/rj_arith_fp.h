@@ -36,6 +36,18 @@ int rj_arith_v_fma_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t in
                                  const uint32_t *const *b, const uint32_t *const *c,
                                  uint32_t *excp_flag_user);
 
+// FP32 Wave32 contract with 64-lane operands and 64-bit EXEC; mode 3 is rejected.
+int rj_arith_v_fma_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                 uint32_t *const *d, const uint32_t *const *a,
+                                 const uint32_t *const *b, const uint32_t *const *c,
+                                 uint32_t *excp_flag_user);
+
+// Wave64 FP16 FMA has the same control and accumulating-status contract as Wave32.
+int rj_arith_v_fma_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                 uint32_t *const *d, const uint32_t *const *a,
+                                 const uint32_t *const *b, const uint32_t *const *c,
+                                 uint32_t *excp_flag_user);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif
