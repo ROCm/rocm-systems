@@ -1781,6 +1781,10 @@ __global__ ATTR_NO_INLINE void rocshmem_alltoallmem_kernel(rocshmem_team_t team,
                                                            void *dest,
                                                            const void *source,
                                                            size_t size) {
+  // rocSHMEM owns this launch (see alltoallmem_on_stream in host.cpp), so it
+  // can safely claim the kernel's whole dynamic LDS for the TDM fast path
+  extern __shared__ uint8_t lds[];
+  rocshmem_set_tdm_lds(lds, rocshmem_query_tdm_lds_bytes());
   rocshmem_ctx_alltoall_wg<char>(ROCSHMEM_CTX_DEFAULT, team, (char *) dest,
                                  (const char *) source, (int) size);
 }
@@ -1822,6 +1826,10 @@ __global__ ATTR_NO_INLINE void rocshmem_reduce_on_stream_kernel(rocshmem_team_t 
 __global__ ATTR_NO_INLINE void rocshmem_broadcastmem_kernel(
     rocshmem_team_t team, void *dest, const void *source, size_t nelems,
     int pe_root) {
+  // rocSHMEM owns this launch (see broadcastmem_on_stream in host.cpp), so it
+  // can safely claim the kernel's whole dynamic LDS for the TDM fast path --
+  extern __shared__ uint8_t lds[];
+  rocshmem_set_tdm_lds(lds, rocshmem_query_tdm_lds_bytes());
   rocshmem_broadcast_wg<char>(ROCSHMEM_CTX_DEFAULT, team, (char *) dest, (const char *) source,
                               (int) nelems, pe_root);
 }
