@@ -14,7 +14,6 @@ from sqlalchemy.orm import Session
 
 from pc_sampling.source_snapshot_analysis import parse_source_frames
 from utils.analysis_orm import (
-    PER_KERNEL_ISA_FILE_KEY_COLUMN_COUNT,
     CodeObjectStore,
     Database,
     Dispatch,
@@ -29,6 +28,7 @@ from utils.analysis_orm import (
     SourceFile,
     SourceLine,
     Workload,
+    per_kernel_isa_file_key_columns,
 )
 
 PC_SAMPLING_SUMMARY_VIEW_COLUMNS = [
@@ -221,6 +221,25 @@ def fetch_pc_sampling_summary_rows(session: Session) -> list[dict[str, object]]:
             decoded_row["stall_reason"] = json.loads(stall_reason)
         decoded_rows.append(decoded_row)
     return decoded_rows
+
+
+def add_captured_source_file(
+    session: Session,
+    workload: Workload,
+    file_path: str,
+    line_count: int,
+) -> SourceFile:
+    """Store a file read from the source snapshot, with every one of its lines."""
+    source_file = SourceFile(workload=workload, file_path=file_path, md5_checksum="aa")
+    session.add_all([
+        SourceLine(
+            source_file=source_file,
+            line_number=line_number,
+            content=f"line {line_number}",
+        )
+        for line_number in range(1, line_count + 1)
+    ])
+    return source_file
 
 
 # =============================================================================
@@ -1060,7 +1079,7 @@ def test_per_kernel_isa_select_leads_with_the_file_key_columns():
     """The exporter slices the key off by count, so order and count must hold."""
     statement = Database._per_kernel_isa_statement(workload_id=1, stall_reasons=[])
     leading_columns = list(statement.selected_columns)[
-        :PER_KERNEL_ISA_FILE_KEY_COLUMN_COUNT
+        : len(per_kernel_isa_file_key_columns())
     ]
 
     assert [column.name for column in leading_columns] == [
@@ -1070,4 +1089,63 @@ def test_per_kernel_isa_select_leads_with_the_file_key_columns():
         "kernel_short_name",
         "code_object_id",
         "pid",
+    ]
+
+
+def test_per_source_line_rows_add_up_the_instructions_of_each_line(db_session):
+    """Each line of a captured file adds up the instructions that came from it."""
+    workload = Workload(name="w", sub_name="s")
+    kernel = Kernel(kernel_name="vecCopy", workload=workload)
+    add_captured_source_file(db_session, workload, "/s/a.cpp", line_count=3)
+    add_captured_source_file(db_session, workload, "/s/hip.h", line_count=2)
+    for instruction in (
+        {
+            "code_object_id": 5,
+            "source": "/s/hip.h:2 -> /s/a.cpp:2",
+            "total_count": 3,
+            "issue_count": 1,
+            "stall_count": 2,
+            "wave_occupancy_percent": 50.0,
+            "stall_reasons": {"WAITCNT": 2},
+        },
+        # A line that appears twice in one stack counts once.
+        {
+            "code_object_id": 6,
+            "source": "/s/a.cpp:2 -> /s/a.cpp:2",
+            "total_count": 5,
+            "issue_count": 4,
+            "stall_count": 1,
+            "wave_occupancy_percent": 10.0,
+            "active_thread_percent": 80.0,
+            "stall_reasons": {"NONE": 1},
+        },
+        {"code_object_id": 7, "source": "/s/a.cpp:?"},
+        {"code_object_id": 8, "source": "/s/absent.cpp:1"},
+    ):
+        add_pc_sampling_state(
+            db_session, workload=workload, kernel=kernel, pid=42, **instruction
+        )
+    db_session.commit()
+
+    rows = [
+        (
+            *row[:-1],
+            [
+                isa_reference["code_object_id"]
+                for isa_reference in json.loads(row[-1])
+                if isa_reference["kernel_uuid"] is not None
+            ],
+        )
+        for row in Database.stream_per_source_line_rows(
+            workload.workload_id, ["NONE", "WAITCNT"]
+        )
+    ]
+
+    empty_counts = (None,) * 7
+    assert rows == [
+        ("w", "s", "/s/a.cpp", 1, "line 1", *empty_counts, []),
+        ("w", "s", "/s/a.cpp", 2, "line 2", 8, 5, 3, 25.0, 80.0, 1, 2, [5, 6]),
+        ("w", "s", "/s/a.cpp", 3, "line 3", *empty_counts, []),
+        ("w", "s", "/s/hip.h", 1, "line 1", *empty_counts, []),
+        ("w", "s", "/s/hip.h", 2, "line 2", 3, 1, 2, 50.0, None, None, 2, [5]),
     ]

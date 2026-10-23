@@ -20,7 +20,11 @@ import pytest
 from sqlalchemy import text
 
 from memory_chart.loader import Layouts
-from pc_sampling import per_kernel_isa_export, source_snapshot_analysis
+from pc_sampling import (
+    per_kernel_isa_export,
+    per_source_line_export,
+    source_snapshot_analysis,
+)
 from pc_sampling.code_object_analysis import CodeObjectInstruction, CodeObjectSymbol
 from pc_sampling.pc_sampling_analysis import SOURCE_LINE_MISSING, InstructionLineRecord
 from rocprof_compute_analyze.analysis_db import (
@@ -2216,6 +2220,10 @@ def read_exported_source_files(result_path):
         exported_path: contents
         for exported_path, contents in exported_files.items()
         if source_snapshot_analysis.SOURCE_EXPORT_DIRECTORY_NAME in exported_path.parts
+        # The per-source-line files beside each copy have their own test.
+        and not exported_path.name.endswith(
+            per_source_line_export.SOURCE_LINE_FILE_SUFFIX
+        )
     }
 
 
@@ -3297,6 +3305,85 @@ def test_run_analysis_isa_carries_no_stall_columns_for_host_trap(tmp_path):
     assert stall_reason_columns(header) == []
     # host_trap knows the sample landed, but not whether the wave issued.
     assert rows[0][4:7] == ["1", "", ""]
+
+
+def test_run_analysis_writes_source_line_counts_beside_the_source_copy(tmp_path):
+    """A source file's per-source-line file sits beside its copy and cites ISA rows."""
+    workload_path = tmp_path / "workloads" / ISA_WORKLOAD_NAME / ISA_WORKLOAD_SUB_NAME
+    tool_data_records = make_source_workload_tool_data_records(
+        workload_path,
+        {"/s/a.cpp": "int first;\nint second;\nint third;\n"},
+        ["/s/a.cpp:1", "/s/a.cpp:2"],
+    )
+    # Both offsets belong to one kernel, so the references number its ISA rows.
+    tool_data = tool_data_records[0]
+    tool_data["kernel_symbols"][1]["kernel_id"] = 100
+    tool_data["buffer_records"]["kernel_dispatch"][1]["dispatch_info"]["kernel_id"] = (
+        100
+    )
+    analyzer, result_path = make_csv_run_analyzer(
+        tmp_path, {str(workload_path): tool_data_records}
+    )
+    run_source_export_analysis(analyzer)
+
+    source_directory = (
+        result_path
+        / per_kernel_isa_export.PER_KERNEL_DIRECTORY_NAME
+        / ISA_WORKLOAD_NAME
+        / ISA_WORKLOAD_SUB_NAME
+        / source_snapshot_analysis.SOURCE_EXPORT_DIRECTORY_NAME
+        / "s"
+    )
+    assert sorted(path.name for path in source_directory.iterdir()) == [
+        "a.cpp",
+        "a.cpp_pc_sampling.csv",
+    ]
+    kernel_row = pd.read_csv(result_path / "kernel.csv").iloc[0]
+    isa_file = (
+        f"{kernel_row.short_name}_uuid_{kernel_row.kernel_uuid}"
+        "/isa_code_object_id_5_pid_42.csv"
+    )
+    with (source_directory / "a.cpp_pc_sampling.csv").open(
+        newline="", encoding="utf-8"
+    ) as source_line_file:
+        header, *rows = list(csv.reader(source_line_file))
+
+    assert header == [
+        "Source line number",
+        "Source line",
+        "Total count",
+        "Active count",
+        "Stall count",
+        "Wave occupancy percent",
+        "Active thread percent",
+        "Stall WAITCNT",
+        "ISA references",
+    ]
+    assert rows == [
+        [
+            "1",
+            "int first;",
+            "1",
+            "0",
+            "1",
+            "",
+            "",
+            "1",
+            f"{isa_file}:1",
+        ],
+        [
+            "2",
+            "int second;",
+            "1",
+            "1",
+            "0",
+            "",
+            "",
+            "",
+            f"{isa_file}:2",
+        ],
+        ["3", "int third;", "", "", "", "", "", "", ""],
+    ]
 
 
 def test_run_analysis_kernel_filter_reaches_a_sampling_only_workload(tmp_path):

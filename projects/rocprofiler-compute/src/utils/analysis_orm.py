@@ -14,11 +14,12 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import closing
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, List, Optional, Tuple
 
 from sqlalchemy import (
     JSON,
     Column,
+    ColumnElement,
     Float,
     ForeignKey,
     Integer,
@@ -533,7 +534,17 @@ def per_kernel_isa_file_key_columns() -> list[Any]:
     ]
 
 
-PER_KERNEL_ISA_FILE_KEY_COLUMN_COUNT = len(per_kernel_isa_file_key_columns())
+def per_source_line_file_key_columns() -> List[Any]:
+    """Return the columns that name the file a per-source-line row is written to.
+
+    The per-source-line query selects these columns first, and the exporter
+    uses their count to split them off each row.
+    """
+    return [
+        Workload.name.label("workload_name"),
+        Workload.sub_name.label("workload_sub_name"),
+        SourceFile.file_path.label("file_path"),
+    ]
 
 
 class Database:
@@ -665,7 +676,28 @@ class Database:
         Rows arrive in the order the exporter writes them, through the raw
         sqlite3 cursor so the full result set is never held in memory.
         """
-        statement = cls._per_kernel_isa_statement(workload_id, stall_reasons)
+        yield from cls._stream_rows(
+            cls._per_kernel_isa_statement(workload_id, stall_reasons)
+        )
+
+    @classmethod
+    def stream_per_source_line_rows(
+        cls,
+        workload_id: int,
+        stall_reasons: List[str],
+    ) -> Iterator[Tuple[Any, ...]]:
+        """Yield every line of one workload's captured source files, file by file.
+
+        The rows arrive in the order the exporter writes them, through the raw
+        sqlite3 cursor, so the full result set is never held in memory.
+        """
+        yield from cls._stream_rows(
+            cls._per_source_line_statement(workload_id, stall_reasons)
+        )
+
+    @classmethod
+    def _stream_rows(cls, statement: Select[Any]) -> Iterator[Tuple[Any, ...]]:
+        """Yield the rows of a statement through the raw sqlite3 cursor."""
         raw_conn = cls._session.connection().connection
         yield from raw_conn.execute(
             str(
@@ -884,6 +916,117 @@ class Database:
                 CodeObjectStore.pid,
                 InstructionLine.code_object_offset,
             )
+        )
+
+    @staticmethod
+    def _per_source_line_statement(
+        workload_id: int,
+        stall_reasons: List[str],
+    ) -> Select[Any]:
+        """Select every line of one workload's captured source files.
+
+        Each line sums the per-kernel ISA rows of the instructions whose inline
+        stack names that line, and references those rows.
+        """
+        isa_lines = (
+            Database
+            ._per_kernel_isa_statement(workload_id, stall_reasons)
+            .add_columns(
+                InstructionLine.instruction_uuid.label("instruction_uuid"),
+                # Number the rows of each ISA file as the ISA exporter does.
+                func
+                .row_number()
+                .over(
+                    partition_by=(
+                        Kernel.kernel_uuid,
+                        CodeObjectStore.code_object_id,
+                        CodeObjectStore.pid,
+                    ),
+                    order_by=InstructionLine.code_object_offset,
+                )
+                .label("instruction_line_number"),
+            )
+            .subquery("isa_lines")
+        )
+        # Count an instruction once per line, even if its stack names the line twice.
+        line_instructions = (
+            select(
+                InstructionSourceLine.instruction_uuid,
+                InstructionSourceLine.source_line_uuid,
+            )
+            .distinct()
+            .subquery("line_instructions")
+        )
+        sample_count = isa_lines.c["count"]
+
+        return (
+            select(
+                *per_source_line_file_key_columns(),
+                SourceLine.line_number,
+                SourceLine.content,
+                func.sum(sample_count).label("count"),
+                func.sum(isa_lines.c.issue_count).label("issue_count"),
+                func.sum(isa_lines.c.stall_count).label("stall_count"),
+                Database._sample_weighted_average(
+                    isa_lines.c.wave_occupancy_percent, sample_count
+                ).label("wave_occupancy_percent"),
+                Database._sample_weighted_average(
+                    isa_lines.c.active_thread_percent, sample_count
+                ).label("active_thread_percent"),
+                *(
+                    func.sum(isa_lines.c[stall_reason]).label(stall_reason)
+                    for stall_reason in stall_reasons
+                ),
+                func.json_group_array(
+                    func.json_object(
+                        "kernel_uuid",
+                        isa_lines.c.kernel_uuid,
+                        "short_name",
+                        isa_lines.c.kernel_short_name,
+                        "code_object_id",
+                        isa_lines.c.code_object_id,
+                        "pid",
+                        isa_lines.c.pid,
+                        "instruction_line_number",
+                        isa_lines.c.instruction_line_number,
+                    )
+                ).label("isa_references"),
+            )
+            .select_from(SourceLine)
+            .join(
+                SourceFile,
+                SourceLine.source_file_uuid == SourceFile.source_file_uuid,
+            )
+            .join(Workload, SourceFile.workload_id == Workload.workload_id)
+            # Keep the lines that no instruction came from.
+            .outerjoin(
+                line_instructions,
+                SourceLine.source_line_uuid == line_instructions.c.source_line_uuid,
+            )
+            .outerjoin(
+                isa_lines,
+                line_instructions.c.instruction_uuid == isa_lines.c.instruction_uuid,
+            )
+            .where(SourceFile.workload_id == workload_id)
+            # Only captured files are exported.
+            .where(SourceFile.md5_checksum.is_not(None))
+            # Skip "?" frames, which are stored without a line number.
+            .where(SourceLine.line_number.is_not(None))
+            .group_by(SourceLine.source_line_uuid)
+            .order_by(SourceFile.file_path, SourceLine.line_number)
+        )
+
+    @staticmethod
+    def _sample_weighted_average(
+        percent: ColumnElement[Any],
+        sample_count: ColumnElement[Any],
+    ) -> ColumnElement[Any]:
+        """Average per-instruction percentages, weighted by their sample counts.
+
+        An instruction without a percentage adds no weight.
+        """
+        return func.sum(percent * sample_count) / func.sum(
+            case((percent.is_not(None), sample_count))
         )
 
     @staticmethod

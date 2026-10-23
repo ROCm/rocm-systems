@@ -20,6 +20,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Scalar data cache utilization, latency, stall rate, and bandwidth.
   * GL1 request latency.
 
+* Added PC sampling counts per source line to `rocprof-compute analyze --output-format csv`. Beside each captured source file, `<file>_pc_sampling.csv` lists every line of the file with the samples of the instructions compiled from it, and where those instructions sit in the per-kernel ISA files.
+
 ### Changed
 
 * `--triton-trace` no longer captures the Triton kernels that `torch.compile` generates. Use `--torch-trace` for those kernels.
