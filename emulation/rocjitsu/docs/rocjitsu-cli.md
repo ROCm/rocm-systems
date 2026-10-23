@@ -10,7 +10,12 @@ the simulated GPU. It operates in four modes:
 - **Daemon mode**: Spawns a daemon child process that hosts the simulation
   engine, then `LD_PRELOAD` + `execve`s the target. Client processes
   communicate with the daemon via RPC over a Unix domain socket. GPU memory
-  is shared using backing descriptors passed via SCM_RIGHTS.
+  is shared using backing descriptors passed via SCM_RIGHTS. After a
+  successful KFD open, losing this connection terminates the client process,
+  even if its GPU work has finished. An orderly daemon stop or restart also
+  terminates attached clients that are idle or doing only host work. The
+  interposer calls `_Exit(EXIT_FAILURE)`, which skips `atexit` handlers and
+  stdio flushing.
 - **Attach mode**: Launches an application against an already-running daemon.
 - **VFIO-user mode**: Serves each configured local GPU as a PCI function to an
   external VMM through its own AF_UNIX socket. This mode is available only in
