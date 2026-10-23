@@ -7,6 +7,7 @@ set(RJ_TOOL_OBJECT_LIBS
     rocjitsu_analysis
     rocjitsu_code
     rocjitsu_code_object
+    rocjitsu_executable
     rocjitsu_isa
     rocjitsu_amdgpu_isa_registry
     simdojo
