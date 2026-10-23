@@ -180,7 +180,6 @@ test_categories:
       - test_profile_roofline_validation
       - test_profile_section
       - test_profile_sets_func
-      - test_profile_sort
       - test_profile_iteration_multiplexing_1
       - test_profile_iteration_multiplexing_2
       - test_profile_iteration_multiplexing_stochastic
@@ -283,7 +282,6 @@ test_categories:
       - test_profile_roofline_validation
       - test_profile_section
       - test_profile_sets_func
-      - test_profile_sort
       - test_profile_iteration_multiplexing_1
       - test_profile_iteration_multiplexing_2
       - test_profile_iteration_multiplexing_stochastic

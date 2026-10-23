@@ -245,37 +245,10 @@ def sanitize_ai_value(value: Union[SupportsFloat, str, None]) -> float:
     return numeric if np.isfinite(numeric) else 0
 
 
-def sanitize_mem_level(mem_level: Union[list[str], str], gpu_model: str) -> list[str]:
-    """
-    Ensure cache level requests through --mem-level roofline analysis option
-    are supported on the architecture, and have been normalized.
-    """
-    # Make mem_level a list if not already one
-    levels_raw = mem_level if isinstance(mem_level, list) else [mem_level]
-
-    # Normalize user-facing "vL1D" to CSV column name "L1" before filtering
-    levels_raw = [("L1" if m == "vL1D" else m) for m in levels_raw]
-
-    model_memory_levels = mi_gpu_specs.get_memory_levels(gpu_model)
-
-    # Remove any requested mem levels not supported in the profiled arch
-    levels = [m for m in levels_raw if m in model_memory_levels]
-
-    if levels_raw != ["ALL"] and levels != levels_raw:
-        console_warning(
-            f"Cache levels requested with --mem-level for {gpu_model} are not valid- "
-            "unsupported cache levels will not be displayed."
-        )
-
-    # An empty list means the mem_level was originally ALL, or the user requested
-    # unsupported levels and we should default back to complete list of all
-    # memory levels for the arch (ALL).
-    levels = model_memory_levels if levels == [] else levels
-
-    # Skip MALL since we do not benchmark for this at this time
-    levels = [m for m in levels if m != "MALL"]
-
-    return levels
+def roofline_mem_levels(gpu_model: str) -> list[str]:
+    """Memory levels of the GPU model that the roofline benchmark measures.
+    MALL is not benchmarked."""
+    return [m for m in mi_gpu_specs.get_memory_levels(gpu_model) if m != "MALL"]
 
 
 # -------------------------------------------------------------------------------------
@@ -291,7 +264,6 @@ def calc_ceilings(
     """Given benchmarking data, calculate ceilings (or peak performance) for
     empirical roofline"""
 
-    # TODO: This is where filtering by memory level will need to occur for standalone
     graph_points: dict[str, list[Union[list[float], float, None]]] = {
         "hbm": [],
         "l2": [],
@@ -302,9 +274,7 @@ def calc_ceilings(
         "matrix_ops": [],
     }
 
-    cache_hierarchy = sanitize_mem_level(
-        roofline_parameters["mem_level"], mspec.gpu_model
-    )
+    cache_hierarchy = roofline_mem_levels(mspec.gpu_model)
 
     x1 = y1 = x2 = y2 = -1
     x1_matrix = y1_matrix = x2_matrix = y2_matrix = -1
@@ -846,9 +816,7 @@ def _expected_benchmark_columns(
     if OpsSupport.VALU in SUPPORTED_DATATYPES[mspec.gpu_arch][dtype]:
         columns.append(f"{dtype}{ops_flops}")
 
-    cache_hierarchy = sanitize_mem_level(
-        roofline_parameters["mem_level"], mspec.gpu_model
-    )
+    cache_hierarchy = roofline_mem_levels(mspec.gpu_model)
     columns.extend(f"{cache_level}Bw" for cache_level in cache_hierarchy)
 
     if OpsSupport.MATRIX in SUPPORTED_DATATYPES[mspec.gpu_arch][dtype]:
