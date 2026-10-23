@@ -135,7 +135,7 @@ concept archive_record =
 // flatten, not inline (inlining drops it): one fully inlined function per record type.
 template <archive_record T>
 [[nodiscard, gnu::flatten]] std::size_t
-record_size(const T& record)
+get_size(const T& record)
 {
     binary_size_archive archive;
     const_cast<T&>(record).serialize(archive);
@@ -144,7 +144,7 @@ record_size(const T& record)
 
 template <archive_record T>
 [[gnu::flatten]] void
-record_write(std::uint8_t* buffer, const T& record)
+serialize(std::uint8_t* buffer, const T& record)
 {
     binary_write_archive archive{ .buffer = buffer, .position = 0 };
     const_cast<T&>(record).serialize(archive);
@@ -152,7 +152,7 @@ record_write(std::uint8_t* buffer, const T& record)
 
 template <archive_record T>
 [[nodiscard, gnu::flatten]] T
-record_read(std::uint8_t*& buffer)
+deserialize(std::uint8_t*& buffer)
 {
     // Default-initialized like the old deserializers: zeroing it first was slower.
     T                   record;
@@ -160,27 +160,6 @@ record_read(std::uint8_t*& buffer)
     record.serialize(archive);
     buffer = archive.cursor;
     return record;
-}
-
-template <archive_record T>
-[[nodiscard]] inline std::size_t
-get_size(const T& record)
-{
-    return record_size(record);
-}
-
-template <archive_record T>
-inline void
-serialize(std::uint8_t* buffer, const T& record)
-{
-    record_write(buffer, record);
-}
-
-template <archive_record T>
-[[nodiscard]] inline T
-deserialize(std::uint8_t*& buffer)
-{
-    return record_read<T>(buffer);
 }
 
 namespace type_traits

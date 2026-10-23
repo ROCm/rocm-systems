@@ -202,21 +202,25 @@ TEST(archive, scalars_match_utility_encoding)
     orig.val_u64 = val_u64;
     orig.val_dbl = val_dbl;
 
-    const std::size_t size = record_size(orig);
-    record_write(buffer.data(), orig);
+    const std::size_t size = get_size(orig);
+    serialize(buffer.data(), orig);
 
     std::uint8_t*       read_buffer = buffer.data();
-    const scalar_record read        = record_read<scalar_record>(read_buffer);
+    const scalar_record read        = deserialize<scalar_record>(read_buffer);
 
     EXPECT_EQ(read.val_u32, val_u32);
     EXPECT_EQ(read.val_u64, val_u64);
     EXPECT_DOUBLE_EQ(read.val_dbl, val_dbl);
     EXPECT_EQ(read_buffer - buffer.data(), static_cast<std::ptrdiff_t>(size));
 
-    EXPECT_EQ(size, utility::get_size(val_u32, val_u64, val_dbl));
+    EXPECT_EQ(size, utility::get_size(val_u32) + utility::get_size(val_u64) +
+                        utility::get_size(val_dbl));
 
     std::array<std::uint8_t, k_buffer_size> other_buffer{};
-    utility::store_value(other_buffer.data(), val_u32, val_u64, val_dbl);
+    std::size_t                             utility_position = 0;
+    utility::store_value(val_u32, other_buffer.data(), utility_position);
+    utility::store_value(val_u64, other_buffer.data(), utility_position);
+    utility::store_value(val_dbl, other_buffer.data(), utility_position);
 
     EXPECT_EQ(std::memcmp(buffer.data(), other_buffer.data(), size), 0);
 }
@@ -229,11 +233,11 @@ TEST(archive, string_view_reads_back_as_view_into_buffer)
     string_record orig;
     orig.text = orig_text;
 
-    const std::size_t size = record_size(orig);
-    record_write(buffer.data(), orig);
+    const std::size_t size = get_size(orig);
+    serialize(buffer.data(), orig);
 
     std::uint8_t*       read_buffer = buffer.data();
-    const string_record read        = record_read<string_record>(read_buffer);
+    const string_record read        = deserialize<string_record>(read_buffer);
 
     EXPECT_EQ(read.text, orig_text);
     EXPECT_EQ(read.text.data(),
@@ -249,11 +253,11 @@ TEST(archive, vector_round_trip)
     vector_record orig;
     orig.data = orig_data;
 
-    const std::size_t size = record_size(orig);
-    record_write(buffer.data(), orig);
+    const std::size_t size = get_size(orig);
+    serialize(buffer.data(), orig);
 
     std::uint8_t*       read_buffer = buffer.data();
-    const vector_record read        = record_read<vector_record>(read_buffer);
+    const vector_record read        = deserialize<vector_record>(read_buffer);
 
     EXPECT_EQ(read.data, orig_data);
     EXPECT_EQ(read_buffer - buffer.data(), static_cast<std::ptrdiff_t>(size));
@@ -265,11 +269,11 @@ TEST(archive, optional_engaged_and_empty)
     optional_record                         orig_engaged;
     orig_engaged.value = 9876543210LL;
 
-    const std::size_t size_engaged = record_size(orig_engaged);
-    record_write(buffer.data(), orig_engaged);
+    const std::size_t size_engaged = get_size(orig_engaged);
+    serialize(buffer.data(), orig_engaged);
 
     std::uint8_t*         read_buf     = buffer.data();
-    const optional_record read_engaged = record_read<optional_record>(read_buf);
+    const optional_record read_engaged = deserialize<optional_record>(read_buf);
 
     ASSERT_TRUE(read_engaged.value.has_value());
     EXPECT_EQ(read_engaged.value.value(), 9876543210LL);
@@ -278,11 +282,11 @@ TEST(archive, optional_engaged_and_empty)
     optional_record orig_empty;
     orig_empty.value.reset();
 
-    const std::size_t size_empty = record_size(orig_empty);
-    record_write(buffer.data(), orig_empty);
+    const std::size_t size_empty = get_size(orig_empty);
+    serialize(buffer.data(), orig_empty);
 
     read_buf                         = buffer.data();
-    const optional_record read_empty = record_read<optional_record>(read_buf);
+    const optional_record read_empty = deserialize<optional_record>(read_buf);
 
     EXPECT_FALSE(read_empty.value.has_value());
 
@@ -298,11 +302,11 @@ TEST(archive, byte_span_reads_back_as_view)
     span_record orig;
     orig.bytes = bytes_span;
 
-    const std::size_t size = record_size(orig);
-    record_write(buffer.data(), orig);
+    const std::size_t size = get_size(orig);
+    serialize(buffer.data(), orig);
 
     std::uint8_t*     read_buffer = buffer.data();
-    const span_record read        = record_read<span_record>(read_buffer);
+    const span_record read        = deserialize<span_record>(read_buffer);
 
     EXPECT_EQ(read.bytes.size(), 3 * sizeof(double));
     EXPECT_GE(read.bytes.data(), reinterpret_cast<const std::byte*>(buffer.data()));
@@ -328,13 +332,13 @@ TEST(archive, derived_record_serializes_base_first)
     orig.extra_field = 777ULL;
 
     const std::size_t base_size =
-        record_size(base_record{ .base_field = 555U, .base_value = 3.14 });
-    const std::size_t total_size = record_size(orig);
+        get_size(base_record{ .base_field = 555U, .base_value = 3.14 });
+    const std::size_t total_size = get_size(orig);
 
-    record_write(buffer.data(), orig);
+    serialize(buffer.data(), orig);
 
     std::uint8_t*        read_buffer = buffer.data();
-    const derived_record read        = record_read<derived_record>(read_buffer);
+    const derived_record read        = deserialize<derived_record>(read_buffer);
 
     EXPECT_EQ(read.base_field, 555U);
     EXPECT_DOUBLE_EQ(read.base_value, 3.14);
@@ -352,11 +356,11 @@ TEST(archive, is_loading_branch_for_counted_entries)
     orig.entries.push_back({ .id = 100, .value = 1.5 });
     orig.entries.push_back({ .id = 200, .value = 2.5 });
 
-    const std::size_t size = record_size(orig);
-    record_write(buffer.data(), orig);
+    const std::size_t size = get_size(orig);
+    serialize(buffer.data(), orig);
 
     std::uint8_t*                read_buffer = buffer.data();
-    const counted_entries_record read = record_read<counted_entries_record>(read_buffer);
+    const counted_entries_record read = deserialize<counted_entries_record>(read_buffer);
 
     EXPECT_EQ(read.device, 1U);
     EXPECT_EQ(read.entries.size(), 2U);
@@ -370,12 +374,12 @@ TEST(archive, is_loading_branch_for_counted_entries)
     counted_entries_record orig_empty;
     orig_empty.device = 2U;
 
-    const std::size_t size_empty = record_size(orig_empty);
-    record_write(buffer.data(), orig_empty);
+    const std::size_t size_empty = get_size(orig_empty);
+    serialize(buffer.data(), orig_empty);
 
     read_buffer = buffer.data();
     const counted_entries_record read_empty =
-        record_read<counted_entries_record>(read_buffer);
+        deserialize<counted_entries_record>(read_buffer);
 
     EXPECT_EQ(read_empty.device, 2U);
     EXPECT_EQ(read_empty.entries.size(), 0U);
@@ -391,11 +395,11 @@ TEST(archive, nested_struct_serializes_itself)
     orig.inner.beta  = 3.33;
     orig.tail        = 4444U;
 
-    const std::size_t size = record_size(orig);
-    record_write(buffer.data(), orig);
+    const std::size_t size = get_size(orig);
+    serialize(buffer.data(), orig);
 
     std::uint8_t*       read_buffer = buffer.data();
-    const nested_record read        = record_read<nested_record>(read_buffer);
+    const nested_record read        = deserialize<nested_record>(read_buffer);
 
     EXPECT_EQ(read.head, 1111ULL);
     EXPECT_EQ(read.inner.alpha, 2222U);
@@ -403,12 +407,16 @@ TEST(archive, nested_struct_serializes_itself)
     EXPECT_EQ(read.tail, 4444U);
     EXPECT_EQ(read_buffer - buffer.data(), static_cast<std::ptrdiff_t>(size));
 
-    EXPECT_EQ(size,
-              utility::get_size(orig.head, orig.inner.alpha, orig.inner.beta, orig.tail));
+    EXPECT_EQ(size, utility::get_size(orig.head) + utility::get_size(orig.inner.alpha) +
+                        utility::get_size(orig.inner.beta) +
+                        utility::get_size(orig.tail));
 
     std::array<std::uint8_t, k_buffer_size> other_buffer{};
-    utility::store_value(other_buffer.data(), orig.head, orig.inner.alpha,
-                         orig.inner.beta, orig.tail);
+    std::size_t                             nested_position = 0;
+    utility::store_value(orig.head, other_buffer.data(), nested_position);
+    utility::store_value(orig.inner.alpha, other_buffer.data(), nested_position);
+    utility::store_value(orig.inner.beta, other_buffer.data(), nested_position);
+    utility::store_value(orig.tail, other_buffer.data(), nested_position);
 
     EXPECT_EQ(std::memcmp(buffer.data(), other_buffer.data(), size), 0);
 }

@@ -343,8 +343,10 @@ TEST_F(cacheable_test, parse_multiple_values_with_optional)
     std::string_view             parsed_str;
     std::optional<double>        parsed_opt_empty;
 
-    rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_int, parsed_opt,
-                                                  parsed_str, parsed_opt_empty);
+    rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_int);
+    rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_opt);
+    rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_str);
+    rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_opt_empty);
 
     EXPECT_EQ(parsed_int, 100);
     ASSERT_TRUE(parsed_opt.has_value());
@@ -495,8 +497,11 @@ TEST_F(cacheable_test, parse_multiple_values_with_optional_vector_and_string_vie
     std::optional<std::vector<std::uint8_t>> parsed_nullvec;
     std::optional<std::string_view>          parsed_nullstr;
 
-    rocprofsys::trace_cache::utility::parse_value(
-        data_pos, parsed_int, parsed_vec, parsed_str, parsed_nullvec, parsed_nullstr);
+    rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_int);
+    rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_vec);
+    rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_str);
+    rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_nullvec);
+    rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_nullstr);
 
     EXPECT_EQ(parsed_int, 42);
     ASSERT_TRUE(parsed_vec.has_value());
@@ -555,8 +560,10 @@ TEST_F(cacheable_test, parse_multiple_values)
     std::string_view parsed_string;
     unsigned char    parsed_uchar;
 
-    rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_int, parsed_double,
-                                                  parsed_string, parsed_uchar);
+    rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_int);
+    rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_double);
+    rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_string);
+    rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_uchar);
 
     EXPECT_EQ(parsed_int, 42);
     EXPECT_DOUBLE_EQ(parsed_double, 3.14);

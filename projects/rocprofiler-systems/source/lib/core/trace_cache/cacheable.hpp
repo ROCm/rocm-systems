@@ -84,13 +84,6 @@ get_size(Type&& val)
     }
 }
 
-template <typename Type, typename... Types>
-__attribute__((always_inline)) constexpr size_t
-get_size(Type&& val, Types&&... vals)
-{
-    return get_size(std::forward<Type>(val)) + get_size(std::forward<Types>(vals)...);
-}
-
 template <typename Type>
     requires type_traits::supported_cache_type<Type>
 __attribute__((always_inline)) inline void
@@ -135,14 +128,6 @@ store_value(const Type& value, std::uint8_t* buffer, size_t& position)
         std::memcpy(dest, &value, sizeof(DecayedType));
         position += sizeof(DecayedType);
     }
-}
-
-template <typename... Types>
-__attribute__((always_inline)) inline void
-store_value(std::uint8_t* buffer, const Types&... values)
-{
-    size_t position = 0;
-    (store_value(values, buffer, position), ...);
 }
 
 template <typename Type>
@@ -199,14 +184,6 @@ parse_value(std::uint8_t*& data_pos, Type& arg)
         std::memcpy(&arg, data_pos, sizeof(DecayedType));
         data_pos += sizeof(DecayedType);
     }
-}
-
-template <typename Type, typename... Types>
-__attribute__((always_inline)) inline static void
-parse_value(std::uint8_t*& data_pos, Type& arg, Types&... args)
-{
-    parse_value(data_pos, arg);
-    parse_value(data_pos, args...);
 }
 
 }  // namespace utility
