@@ -414,7 +414,6 @@ std::string RunShowVersion(int debugLevel) {
 }
 }  // namespace
 
-// LATENT BUG (init.cc:1011-1012): hostBuf is uninitialised and gethostname need not NUL-terminate on truncation.
 TEST_F(InitMicrotest, ShowVersion_HappyPath_LogsVersionHostAndLibPath) {
   char host[HOST_NAME_MAX] = {};
   ASSERT_EQ(0, gethostname(host, sizeof(host) - 1));
@@ -437,7 +436,7 @@ TEST_F(InitMicrotest, ShowVersion_HappyPath_LogsVersionHostAndLibPath) {
 TEST_F(InitMicrotest, ShowVersion_DebugLevelVersion_UsesVersionLog) {
   const std::string log = RunShowVersion(NCCL_LOG_VERSION);
   // showVersion passes sizeof(hostBuf)-1, reserving the byte gethostname need not NUL-terminate.
-  EXPECT_EQ(static_cast<size_t>(HOST_NAME_MAX - 1), LastGethostnameLen());
+  EXPECT_EQ(static_cast<size_t>(HOST_NAME_MAX), LastGethostnameLen());
   EXPECT_TRUE(LogHas(log, "RCCL version")) << "actual log:\n" << log;
   EXPECT_TRUE(LogHas(log, "init.cc:")) << "VERSION arm not taken:\n" << log;
   EXPECT_FALSE(LogHas(log, "showVersion:")) << "took the INFO arm:\n" << log;
@@ -511,6 +510,13 @@ TEST_F(InitMicrotest, ShowVersion_GethostnameFails_ReportsUnknownHost) {
   const std::string log = RunShowVersion(NCCL_LOG_INFO);
   // The trailing \n matters: LogHas is a substring check, so without it "UnknownHostX" would also match.
   EXPECT_TRUE(LogHas(log, "Hostname     : Unknown\n")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, ShowVersion_GethostnameFillsBufferUnterminated_LogsAMaxLengthTerminatedName) {
+  SetGethostnameFillUnterminated(true);
+  const std::string log = RunShowVersion(NCCL_LOG_INFO);
+  const std::string expect = "Hostname     : " + std::string(HOST_NAME_MAX, 'x') + "\n";
+  EXPECT_TRUE(LogHas(log, expect.c_str())) << "actual log:\n" << log;
 }
 
 TEST_F(InitMicrotest, ShowVersion_DladdrFails_ReportsUnknownLibPath) {

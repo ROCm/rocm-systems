@@ -14,6 +14,8 @@
 #include <cstddef>
 
 void SetGethostnameFail(bool fail);
+// Makes gethostname fill every byte it is given with 'x' and succeed without NUL-terminating.
+void SetGethostnameFillUnterminated(bool fill);
 void SetDladdrFail(bool fail);
 size_t LastGethostnameLen();
 
