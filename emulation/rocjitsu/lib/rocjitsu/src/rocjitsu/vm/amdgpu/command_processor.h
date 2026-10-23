@@ -49,6 +49,7 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <shared_mutex>
 #include <string>
 #include <thread>
@@ -672,6 +673,8 @@ private:
                                      simdojo::Tick now);
   void cancel_queue_dispatches(const ComputeQueueRecord &queue);
   void fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchState &qs);
+  void complete_failed_queue(ComputeQueueRecord &queue);
+  void drain_pending_queue_failures();
   void fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs, simdojo::Tick now);
   util::Result dispatch_pm4(const ComputeQueueRecord &queue, Pm4DispatchState &qs,
                             const std::array<uint32_t, 4> &dimensions,
@@ -916,6 +919,10 @@ private:
   std::atomic<uint64_t> dispatched_workgroups_{0};
   simdojo::ExecMode exec_mode_ = simdojo::ExecMode::FUNCTIONAL;
   uint32_t dispatch_threads_ = 1;
+  /// Protected by hw_queue_mutex_. Faults cancel waves immediately, but cache
+  /// maintenance and submission callbacks wait until the pool rejoins.
+  bool dispatch_workers_active_ = false;
+  std::vector<uint64_t> pending_queue_failures_;
   CpuDispatchPool *shared_dispatch_pool_ = nullptr;
   std::unique_ptr<CpuDispatchPool> local_dispatch_pool_;
   std::vector<ComputeUnitCore *> active_cu_scratch_;

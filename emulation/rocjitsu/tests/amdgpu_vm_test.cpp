@@ -9930,6 +9930,106 @@ TEST(AqlDispatchTest, LaterVmFaultCancelsEarlierAdmittedDispatchAndPreservesBarr
   }
 }
 
+class AqlQueueFailureConcurrencyTest : public testing::TestWithParam<bool> {
+protected:
+  void check_failure(bool inspect_worker_cache) {
+    using namespace std::chrono_literals;
+    const bool vm_fault = GetParam();
+    VmFixture fixture;
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize("cdna4", 2));
+    fixture.cp()->set_dispatch_threads(2);
+    for (uint32_t index = 0; index < 2; ++index)
+      fixture.cu(index)->set_functional_quantum(64);
+    auto lifecycle = std::make_unique<CancellationLifecyclePlugin>();
+    auto *observed = lifecycle.get();
+    auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    ASSERT_TRUE(group->add(std::move(lifecycle)));
+    fixture.soc_ptr->set_plugin_group(group);
+
+    std::array<uint32_t, 34> failing_code;
+    failing_code.fill(SOPP_S_NOP);
+    constexpr uint32_t kSCbranchIFork = 0xB8000000u;
+    failing_code[32] = vm_fault ? SOPP_S_NOP : kSCbranchIFork;
+    failing_code.back() = SOPP_S_ENDPGM;
+    const uint64_t failing_kernel =
+        fixture.write_kernel(0x1000, failing_code.data(), sizeof(failing_code));
+    std::array<uint32_t, 4001> busy_code;
+    busy_code.fill(SOPP_S_NOP);
+    busy_code.back() = SOPP_S_ENDPGM;
+    const uint64_t busy_kernel = fixture.write_kernel(0x10000, busy_code.data(), sizeof(busy_code));
+    constexpr uint64_t kFailureSignal = 0x3000;
+    constexpr uint64_t kBarrierSignal = 0x4000;
+    constexpr uint64_t kBusySignal = 0x5000;
+    for (uint64_t signal : {kFailureSignal, kBarrierSignal, kBusySignal})
+      init_completion_signal(fixture.mem(), signal);
+
+    test::AqlQueue failing_queue(fixture.mem(), fixture.cp());
+    test::AqlQueue busy_queue(fixture.mem(), fixture.cp(), 0xf1000000, 4096, 0xf1010000, 0xf1010008,
+                              0xf1010010, false, 2);
+    fixture.cp()->set_queue_cu_selection(1, 0, std::vector{fixture.cu(0)});
+    fixture.cp()->set_queue_cu_selection(2, 0, std::vector{fixture.cu(1)});
+    failing_queue.submit(make_dispatch_packet(failing_kernel, kFailureSignal, 32, 32));
+    hsa_kernel_dispatch_packet_t barrier{};
+    barrier.header = HSA_PACKET_TYPE_BARRIER_AND | (1u << HSA_PACKET_HEADER_BARRIER);
+    barrier.completion_signal.handle = kBarrierSignal;
+    failing_queue.submit(barrier);
+    busy_queue.submit(make_dispatch_packet(busy_kernel, kBusySignal, 128, 32));
+    ASSERT_TRUE(fixture.engine->step());
+    ASSERT_EQ(observed->launches, 5u);
+    const uint32_t failed_dispatch = fixture.cu(0)->wf(0)->dispatch_id();
+
+    std::promise<void> busy_entered;
+    std::future<void> busy_ready = busy_entered.get_future();
+    uint64_t busy_cache_epoch = 0;
+    if (inspect_worker_cache) {
+      fixture.cu(1)->set_notification_flush_hook_for_testing([&] {
+        // Pause outside the wave lock so queue cancellation can visit this CU.
+        // The pool still owns this quantum until the callback returns.
+        busy_cache_epoch = fixture.cu(1)->instruction_cache().epoch();
+        busy_entered.set_value();
+        const auto deadline = std::chrono::steady_clock::now() + 5s;
+        while (!fixture.cp()->queue_faulted_for_test(1, 0) &&
+               std::chrono::steady_clock::now() < deadline)
+          std::this_thread::yield();
+        ASSERT_TRUE(fixture.cp()->queue_faulted_for_test(1, 0));
+        EXPECT_EQ(fixture.cu(1)->instruction_cache().epoch(), busy_cache_epoch)
+            << "Queue failure invalidated a cache before its worker joined";
+      });
+    }
+    if (inspect_worker_cache || vm_fault) {
+      fixture.cu(0)->set_notification_flush_hook_for_testing([&] {
+        if (inspect_worker_cache)
+          ASSERT_EQ(busy_ready.wait_for(5s), std::future_status::ready);
+        if (vm_fault)
+          fixture.cp()->notify_dispatch_vm_fault(1, 0, failed_dispatch,
+                                                 amdgpu::VmAccessOutcome::Faulted);
+      });
+    }
+
+    fixture.engine->run();
+    EXPECT_EQ(fixture.engine->last_exit().code, vm_fault ? 0 : 1);
+    EXPECT_TRUE(fixture.cp()->queue_faulted_for_test(1, 0));
+    EXPECT_FALSE(fixture.cp()->queue_faulted_for_test(2, 0));
+    EXPECT_EQ(observed->cancellations, 1u);
+    EXPECT_EQ(observed->halts, vm_fault ? 4u : 0u);
+    EXPECT_EQ(observed->completed_dispatches, vm_fault ? 1u : 0u);
+    EXPECT_EQ(completion_signal_value(fixture.mem(), kFailureSignal), 1);
+    EXPECT_EQ(completion_signal_value(fixture.mem(), kBarrierSignal), 1);
+    EXPECT_EQ(completion_signal_value(fixture.mem(), kBusySignal), vm_fault ? 0 : 1);
+    if (inspect_worker_cache)
+      EXPECT_GT(fixture.cu(1)->instruction_cache().epoch(), busy_cache_epoch);
+  }
+};
+
+TEST_P(AqlQueueFailureConcurrencyTest, DefersCacheFlushUntilWorkersJoin) { check_failure(true); }
+
+TEST_P(AqlQueueFailureConcurrencyTest, FailsAlongsideBusyIndependentQueue) { check_failure(false); }
+
+INSTANTIATE_TEST_SUITE_P(FailureKinds, AqlQueueFailureConcurrencyTest, testing::Bool(),
+                         [](const testing::TestParamInfo<bool> &info) {
+                           return info.param ? "VmFault" : "InstructionFailure";
+                         });
+
 class ThrowingIssuePlugin final : public ExecutionPlugin {
 public:
   enum Hook { Before, After, Halt };
