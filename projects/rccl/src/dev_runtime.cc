@@ -360,12 +360,23 @@ ncclResult_t ncclDevrFinalize(struct ncclComm* comm) {
       symMemoryDestroy(comm, devr->memHead);
     }
     if (devr->lsaFlatBase != nullptr) {
-      // The drain above unmapped every per-rank slice via symMemoryDestroy,
-      // so this is now expected to succeed. Surface failures instead of
-      // masking with CUCHECKIGNORE — a regression in the drain path should
-      // not be silently swallowed (AICOMRCCL-835).
+      // The drain above unmapped every slice it is allowed to. Surface a real
+      // AddressFree failure instead of masking it (AICOMRCCL-835).
+      // gfx1250, and multi-rank gfx950, leave imported peer LSA slices mapped:
+      // hipMemUnmap of those slices faults on ROCm 10.2, and AddressFree of a
+      // reservation that still contains them hangs or double-frees (ROCM-30633).
+      // One-rank gfx950 has no peer slice, so it still frees.
       CUdeviceptr flatAddr = reinterpret_cast<CUdeviceptr>(devr->lsaFlatBase);
-      CUCHECKGOTO(cuMemAddressFree(flatAddr, devr->lsaSize * devr->bigSize), fatalRet, cleanup);
+      size_t flatBytes = devr->lsaSize * devr->bigSize;
+      bool skipFlatFree = rcclSkipLsaFlatAddressFree() || (rcclSkipCuMemFree() && devr->lsaSize > 1);
+      devr->lsaFlatBase = nullptr;
+      if (!skipFlatFree) {
+        CUCHECKGOTO(cuMemAddressFree(flatAddr, flatBytes), fatalRet, cleanup);
+      } else {
+        INFO(NCCL_INIT,
+             "ncclDevrFinalize: skipping lsaFlatBase cuMemAddressFree "
+             "(peer LSA maps left in place; VA unreclaimed until exit)");
+      }
     }
     ncclSpaceDestruct(&devr->bigSpace);
   }
@@ -833,21 +844,31 @@ static void symMemoryUnregister(struct ncclComm* comm, struct ncclDevrMemory* me
 }
 
 static void symMemoryUnmapLsaRank(struct ncclDevrState* devr, struct ncclDevrMemory* mem, int rank) {
+  // Imported peer slices: hipMemUnmap SIGSEGVs on gfx950/gfx1250 (ROCM-30633).
+  // The local slice is the owner's own mapping and is still released.
+  if (rank != devr->lsaSelf && rcclSkipCuMemFree()) return;
+
   uintptr_t base = reinterpret_cast<uintptr_t>(devr->lsaFlatBase);
   uintptr_t addr = base + rank * devr->bigSize + mem->bigOffset;
   for (int idx = 0; idx < mem->lsaNumSegments[rank]; idx++) {
     CUdeviceptr tmpBase = nullptr;
     size_t tmpBaseSize = 0;
     CUCHECKIGNORE(cuMemGetAddressRange(&tmpBase, &tmpBaseSize, reinterpret_cast<CUdeviceptr>(addr)));
-    CUCHECKIGNORE(cuMemUnmap(reinterpret_cast<CUdeviceptr>(addr), tmpBaseSize));
-    addr = addr + tmpBaseSize;
+    // A failed query leaves size 0. Unmap the range HIP reported, which may
+    // start before addr when the address sits inside a larger mapping.
+    if (tmpBaseSize == 0) break;
+    CUdeviceptr unmapAddr = tmpBase != nullptr ? tmpBase : reinterpret_cast<CUdeviceptr>(addr);
+    CUCHECKIGNORE(cuMemUnmap(unmapAddr, tmpBaseSize));
+    addr = reinterpret_cast<uintptr_t>(unmapAddr) + tmpBaseSize;
   }
 }
 
 // Unmap LSA-flat slices created by symMemoryMapLsaTeam. Must run before
 // ncclSpaceFree so a later obtain can remap the same bigOffset, and so
 // ncclDevrFinalize's cuMemAddressFree does not see leftover mappings.
-// Without LSA registration only our own rank's slice was mapped.
+// Peer slices stay mapped when rcclSkipCuMemFree() is set; finalize then
+// skips AddressFree. Without LSA registration only our own rank's slice
+// was mapped.
 static void symMemoryUnmapLsaTeam(struct ncclComm* comm, struct ncclDevrMemory* mem) {
   if (comm == nullptr || mem == nullptr || mem->lsaNumSegments == nullptr) return;
   struct ncclDevrState* devr = &comm->devrState;

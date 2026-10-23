@@ -57,22 +57,24 @@ inline void rcclRegisterShutdownHandler() {
 }
 
 // RCCL workaround (gfx950 / gfx1250): hipMemUnmap on cuMem VMM *peer* allocations
-// can deadlock or double-free in the HSA busy-wait during ncclCommDestroy teardown.
-// To avoid that we skip ONLY the peer-aperture teardown in ncclCuMemFreeAddr (the
-// cuMemUnmap + cuMemAddressFree of the peer-mapped VA range), leaking just that
-// VA aperture (the OS reclaims it at process exit). The owner's physical handle
-// (ncclCuMemFree -> cuMemRelease) and ordinary buffers (ncclCudaFree -> cudaFree)
-// still free normally, so long-lived processes do not grow memory on every
-// ncclCommDestroy. Auto-enabled on gfx950 and gfx1250 (ROCM-30633); override with
+// can deadlock, double-free, or SIGSEGV inside the ROCm runtime during
+// ncclCommDestroy. Two sites skip that peer unmap (the OS reclaims the VA at
+// process exit):
+//   * ncclCuMemFreeAddr — IPC peer apertures
+//   * symMemoryUnmapLsaTeam — imported LSA-flat slices of other ranks
+//     (MI350 + ROCm 10.2, symmetric reduce_perf, exit 139)
+// The owner's physical handle (ncclCuMemFree -> cuMemRelease), the local LSA
+// slice, and ordinary buffers (ncclCudaFree -> cudaFree) still free normally.
+// Auto-enabled on gfx950 and gfx1250 (ROCM-30633); override with
 // NCCL_CUMEM_SKIP_FREE=0 (force off) or =1 (force on).
 //
-// Separate site: ncclDevrFinalize may skip owner-local cuMemAddressFree of the
-// LSA flat VA reservation (lsaFlatBase). Temporary gfx1250-only workaround
-// (ROCM-30633): leftover peer maps can hang or double-free AddressFree, and this
-// is the only reclaim site, so a process that creates/destroys device-API comms
-// in a loop will not recover that VA until exit. MI355 (gfx950) still
-// AddressFrees this reservation with skip-free auto-on. NCCL_CUMEM_SKIP_FREE
-// =0/1 still overrides both helpers below.
+// ncclDevrFinalize skips cuMemAddressFree of the LSA flat reservation when
+// rcclSkipLsaFlatAddressFree() is set (gfx1250, or NCCL_CUMEM_SKIP_FREE=1),
+// and also when peer LSA slices were left mapped (rcclSkipCuMemFree() and
+// lsaSize > 1). AddressFree of a reservation that still has those maps hangs
+// or faults, and this is the only reclaim site, so that VA is not recovered
+// until process exit. A one-rank gfx950 team has no peer slice and still
+// frees. NCCL_CUMEM_SKIP_FREE=0/1 still overrides both helpers below.
 inline bool rcclSkipCuMemFreeFromArch(const hipDeviceProp_t& prop) {
   return strstr(prop.gcnArchName, "gfx950") != nullptr ||
          strstr(prop.gcnArchName, "gfx1250") != nullptr;
