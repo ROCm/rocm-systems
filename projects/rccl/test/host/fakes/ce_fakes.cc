@@ -25,6 +25,7 @@ ASSERT_HOOK_MATCHES_PROD(g_ceLocalReduceBlocks, ncclCeLocalReduceBlocks);
 ASSERT_HOOK_MATCHES_PROD(g_ceInitBatchOpsParams, ncclCeInitBatchOpsParams);
 ASSERT_HOOK_MATCHES_PROD(g_ceLaunchBatchOps, ncclCeLaunchBatchOps);
 ASSERT_HOOK_MATCHES_PROD(g_ncclCeInit, ncclCeInit);
+ASSERT_HOOK_MATCHES_PROD(g_ncclCeEnsureAllReduceStaging, ncclCeEnsureAllReduceStaging);
 #undef ASSERT_HOOK_MATCHES_PROD
 
 static ncclResult_t DefaultCeInit(struct ncclComm*) {
@@ -33,6 +34,13 @@ static ncclResult_t DefaultCeInit(struct ncclComm*) {
 std::function<ncclResult_t(struct ncclComm*)> g_ncclCeInit = DefaultCeInit;
 
 ncclResult_t ncclCeInit(struct ncclComm* comm) { return g_ncclCeInit(comm); }
+
+static ncclResult_t DefaultCeEnsureAllReduceStaging(struct ncclComm*) {
+  FailLoudUnfaked("ce_fakes", "ncclCeEnsureAllReduceStaging");
+}
+std::function<ncclResult_t(struct ncclComm*)> g_ncclCeEnsureAllReduceStaging = DefaultCeEnsureAllReduceStaging;
+
+ncclResult_t ncclCeEnsureAllReduceStaging(struct ncclComm* comm) { return g_ncclCeEnsureAllReduceStaging(comm); }
 
 bool g_ceImplemented = false;
 bool g_ceAvailableValue = false;
@@ -75,6 +83,13 @@ bool ncclCeScratchAvailable(struct ncclComm* comm, ncclFunc_t func, int op, nccl
   return g_ceScratchAvailable(comm, func, op, type, regType);
 }
 int ncclCeLocalReduceBlocks(ncclDataType_t type, size_t count) { return g_ceLocalReduceBlocks(type, count); }
+int ncclCeRecvRangeContainedInWindow(struct ncclDevrWindow const* win, void const* recvbuff, size_t totalBytes) {
+  if (win == nullptr || recvbuff == nullptr) return 0;
+  const uintptr_t winStart = reinterpret_cast<uintptr_t>(win->userPtr);
+  const uintptr_t recvStart = reinterpret_cast<uintptr_t>(recvbuff);
+  return recvStart >= winStart && totalBytes <= win->size &&
+         recvStart - winStart <= win->size - totalBytes;
+}
 bool ncclHierCeAvailable(struct ncclComm* comm, ncclFunc_t func, int op, ncclDataType_t type,
                          ncclSymRegType_t regType, struct ncclDevrWindow* sendWin,
                          struct ncclDevrWindow* recvWin) {
@@ -137,6 +152,7 @@ void ResetCeFakes() {
   g_ceInitBatchOpsParams = DefaultCeInitBatchOpsParams;
   g_ceLaunchBatchOps     = DefaultCeLaunchBatchOps;
   g_ncclCeInit = DefaultCeInit;
+  g_ncclCeEnsureAllReduceStaging = DefaultCeEnsureAllReduceStaging;
   g_ceImplemented = false;
   g_ceAvailableValue = false;
   g_ceScratchAvailableValue = false;

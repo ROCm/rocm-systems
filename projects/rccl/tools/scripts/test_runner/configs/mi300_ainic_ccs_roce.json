@@ -406,6 +406,11 @@
           "name": "A18_SubnetMatchesAny",
           "description": "subnetMatchesAny skips invalid/zero GIDs and matches against the remaining set.",
           "test_filter": "NetIbCastSubnet.SubnetMatchesAny"
+        },
+        {
+          "name": "A18_SignalingRateTable",
+          "description": "ibvSpeeds[] maps every IB signaling rate, including FDR10, to its Mb/s value.",
+          "test_filter": "NetIbCastSpeed.SignalingRateTable"
         }
       ]
     },
@@ -725,6 +730,98 @@
       ]
     },
 
+    "net_ib_cast_udma_unit": {
+      "extends": "gtest_base",
+      "binary": "rccl-UnitTestsFixturesDebug",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 120,
+      "description": "Pure host-side unit tests for dynamic UDMA count discovery and round-robin QP-to-UDMA pinning. No MPI/verbs/NIC required.",
+      "tests": [
+        {
+          "name": "A22_Udma_RoundRobin2Engines",
+          "description": "2-engine round-robin produces alternating LOW/HIGH masks (legacy behavior).",
+          "test_filter": "NetIbCastUdma.RoundRobin2Engines"
+        },
+        {
+          "name": "A22_Udma_RoundRobin4Engines",
+          "description": "4-engine round-robin cycles through all four single-bit masks.",
+          "test_filter": "NetIbCastUdma.RoundRobin4Engines"
+        },
+        {
+          "name": "A22_Udma_RoundRobin1Engine",
+          "description": "Single-engine: all QPs get mask=0x01.",
+          "test_filter": "NetIbCastUdma.RoundRobin1Engine"
+        },
+        {
+          "name": "A22_Udma_RoundRobin8Engines",
+          "description": "8-engine round-robin cycles through all eight single-bit masks.",
+          "test_filter": "NetIbCastUdma.RoundRobin8Engines"
+        },
+        {
+          "name": "A22_Udma_AllEnginesUsed",
+          "description": "Every engine appears exactly N times when nChannels = udmaCount * N.",
+          "test_filter": "NetIbCastUdma.AllEnginesUsed"
+        },
+        {
+          "name": "A22_Udma_InvalidArgs",
+          "description": "Null pointer, zero udmaCount, zero/negative channels return ncclInvalidArgument.",
+          "test_filter": "NetIbCastUdma.InvalidArgs"
+        },
+        {
+          "name": "A22_Udma_BackwardCompatWith2Engines",
+          "description": "2-engine distribution matches legacy IONIC_UDMA_MASK_LOW/HIGH alternation.",
+          "test_filter": "NetIbCastUdma.BackwardCompatWith2Engines"
+        },
+        {
+          "name": "A22_Udma_NormalizeUdmaCountZeroFallback",
+          "description": "Zero from driver falls back to 2; values >8 clamped to 8.",
+          "test_filter": "NetIbCastUdma.NormalizeUdmaCountZeroFallback"
+        },
+        {
+          "name": "A22_Udma_SharedHelperMatchesProductionFormula",
+          "description": "Shared helper produces identical masks to inline 1u << (cursor % udmaCount).",
+          "test_filter": "NetIbCastUdma.SharedHelperMatchesProductionFormula"
+        },
+        {
+          "name": "A22_Udma_CrossChannelDistribution",
+          "description": "Consecutive channels get distinct engines, cycling through all udmaCount.",
+          "test_filter": "NetIbCastUdma.CrossChannelDistribution"
+        }
+      ]
+    },
+
+    "cast_udma_pinning": {
+      "extends": "cast_base",
+      "timeout": 600,
+      "description": "UDMA pinning end-to-end verification via ionic_dv_qp_get_udma_idx. Requires AINIC.",
+      "tests": [
+        {
+          "name": "A23_Cast_UdmaPinningVerify",
+          "description": "Single-channel UDMA pinning: all QPs report same in-range UDMA index + data integrity.",
+          "test_filter": "NetIbMPITest.CastUdmaPinningVerify"
+        }
+      ]
+    },
+
+    "cast_udma_pinning_sharing": {
+      "extends": "cast_base",
+      "timeout": 600,
+      "description": "UDMA pinning with QP sharing enabled (NGROUPS=1 forces per-QP qpIdx selector).",
+      "env_variables": {
+        "RCCL_IB_QP_SHARING_ENABLE": "1",
+        "RCCL_IB_COMM_NGROUPS": "1"
+      },
+      "tests": [
+        {
+          "name": "A23_Cast_UdmaPinningSharingVerify",
+          "description": "Sharing-path UDMA: per-QP indices in range, distinct engines when nqps >= udmaCount.",
+          "test_filter": "NetIbMPITest.CastUdmaPinningSharingVerify"
+        }
+      ]
+    },
+
     "cast_multiplane_perf": {
       "extends": "rccl_tests_base",
       "timeout": 600,
@@ -776,6 +873,9 @@
     { "config": "net_ib_cast_multiplane_unit", "enabled": true, "smoke": true },
     { "config": "cast_multiplane_mpi",      "enabled": true },
     { "config": "cast_multiplane_disabled", "enabled": true },
+    { "config": "net_ib_cast_udma_unit",   "enabled": true, "smoke": true },
+    { "config": "cast_udma_pinning",       "enabled": true },
+    { "config": "cast_udma_pinning_sharing", "enabled": true },
 
     { "config": "ib_baseline",           "enabled": true, "smoke": true },
     { "config": "cast_alltoall_full",    "enabled": true, "smoke": true },
