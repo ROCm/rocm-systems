@@ -36,7 +36,7 @@ pub unsafe extern "C" fn hsa_agent_iterate_isas(
                 return NOT_INITIALIZED;
             };
             let Some(index) = runtime.gpu_index(agent) else {
-                return if agent.handle == CPU_AGENT {
+                return if runtime.is_cpu_agent(agent) {
                     SUCCESS
                 } else {
                     INVALID_AGENT

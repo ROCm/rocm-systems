@@ -78,6 +78,72 @@ missing (for example, ``cuMemEnable`` or ``globalGinSupport``). If you expect
 the symmetric path but it is disabled, check those prerequisites rather than
 ``NCCL_P2P_LEVEL``.
 
+.. _symmetric-tdm-kernels:
+
+Tensor Data Mover symmetric kernels on gfx1250
+----------------------------------------------
+
+On gfx1250 (MI450), the symmetric allgather, allreduce, and reduce-scatter
+kernels have a variant that stages data through the Tensor Data Mover (TDM)
+rather than per-lane vector loads and stores. TDM is a DMA engine that moves
+tiles between global memory and the LDS (shared memory). As in NCCL 2.31.2,
+these kernels are enabled by default (``NCCL_SYM_TMA_ENABLE=1``).
+
+You don't need to change anything in your application to use them. A collective
+can use a TDM kernel when all of the following are true:
+
+- RCCL was built with ``gfx1250`` in ``GPU_TARGETS`` against a ROCm SDK that
+  ships the TDM descriptor header (``hip/amd_detail/amd_gfx1250_TDM.h``). The
+  TDM kernels are not generated otherwise.
+- The communicator can use symmetric memory (see the prerequisites above), and
+  the send and receive buffers are registered as symmetric windows, as for any
+  symmetric kernel.
+- The operation is an allgather of any datatype, or an allreduce with
+  ``ncclSum`` or a reduce-scatter with ``ncclSum`` or ``ncclAvg`` on a
+  floating-point type (``float``, ``half``, ``bfloat16``, ``fp8_e4m3``, or
+  ``fp8_e5m2``).
+- The send and receive buffers sit at the same offset, modulo 16 bytes, within
+  their windows. For an in-place allgather or reduce-scatter, the per-rank slice
+  must also be a multiple of 16 bytes.
+- The message is large enough for the TDM deep loop to engage.
+
+The symmetric cost model then chooses between the TDM kernel and the vector-load
+kernels. The TDM kernels cost more setup latency but reach a higher bandwidth
+ceiling, so the model picks them for large messages. When it does, the
+kernel launches at 512 threads (16 waves) per block and the widest block count
+allowed, because TDM throughput keeps scaling with resident blocks.
+
+To check which kernel ran, enable tuning logs and look for the ``[Symmetric]``
+line. TDM kernels have ``Tma`` in their name:
+
+.. code-block:: shell
+
+   NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=TUNING ./your_app
+   # ... ReduceScatter [Symmetric]: 67108864 Bytes -> Kernel ReduceScatter_TmaLD nchannels 64 nthreads 512 nWorks 1
+
+In rccl-tests, ``-A 1`` prints the selected algorithm for each size. With
+symmetric registration (``-R 2``), the ``algo`` column shows ``SymTDM`` for sizes
+that use a TDM kernel and ``SYM`` for sizes that use a vector-load symmetric
+kernel:
+
+.. code-block:: shell
+
+   ./reduce_scatter_perf -g 4 -b 64M -e 256M -f 4 -R 2 -A 1
+   #       size  ...   algo     proto   nchannels
+   #   67108864  ...    SYM    SIMPLE          62
+   #  268435456  ...  SymTDM    SIMPLE          64
+
+``NCCL_SYM_TMA_ENABLE`` controls these kernels:
+
+- ``0`` disables them.
+- ``1`` (the default) offers them to the cost model.
+- ``2`` forces them wherever the collective has one, ignoring the cost model and
+  the minimum size. Use ``2`` for A/B measurements only.
+
+Set ``NCCL_SYM_TMA_ENABLE`` to the same value on every rank. Each rank reads it
+on its own, and ranks that disagree can pick different kernels for the same
+collective and hang.
+
 .. _device-symmetric-memory:
 
 Device-side symmetric memory access (``ncclFindWindow``)

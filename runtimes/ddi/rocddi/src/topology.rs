@@ -22,9 +22,9 @@ pub mod host;
 mod model;
 pub mod platform;
 pub use model::{
-    AttachmentKind, EndpointAttachment, MemoryLocation, MemoryLocationKind, NativeNodeId, NodeId,
-    NodeKind, ReportedRoute, SourceId, SourceKind, TopologyCache, TopologyNode, TopologySnapshot,
-    TopologySource,
+    AttachmentKind, CpuNodeInfo, EndpointAttachment, MemoryBank, MemoryBankKind, MemoryLocation,
+    MemoryLocationKind, NativeNodeId, NodeId, NodeKind, ReportedRoute, SourceId, SourceKind,
+    TopologyCache, TopologyNode, TopologySnapshot, TopologySource,
 };
 
 /// Exact PCI function and configuration identity reported by the OS.
@@ -74,6 +74,8 @@ pub struct CacheInfo {
     pub line_size_bytes: Option<u32>,
     /// Data and instruction classification of this cache.
     pub kind: CacheKind,
+    /// Whether the source classifies this as a CPU cache.
+    pub cpu_cache: bool,
     /// Whether the source marks this cache as associated with compute units.
     pub(crate) compute_unit_cache: bool,
 }
@@ -92,6 +94,7 @@ impl CacheInfo {
             size_bytes,
             line_size_bytes,
             kind,
+            cpu_cache: false,
             compute_unit_cache: false,
         }
     }

@@ -161,8 +161,8 @@ pub unsafe extern "C" fn hsa_amd_agent_memory_pool_get_info(
         let storage = runtime
             .decode_gpu_pool(pool)
             .map_or(PoolStorage::System, |(_, kind)| match kind {
-                GPU_POOL_GROUP => PoolStorage::Group,
-                GPU_POOL_FINE => PoolStorage::LocalFine,
+                GpuPoolKind::Group => PoolStorage::Group,
+                GpuPoolKind::Fine => PoolStorage::LocalFine,
                 _ => PoolStorage::LocalCoarse,
             });
         let (access, link) = agent_pool_relationship(runtime, agent, owner, storage);
@@ -227,13 +227,17 @@ unsafe fn memory_pool_allocate(
                 Some(size) => size,
                 None => return INVALID_ALLOCATION,
             };
-            let (device_index, kind) = if cpu_pool(pool) {
-                (0, cpu_pool_memory_kind(pool, runtime.lifetime, flags))
+            let cpu_pool_index = runtime.decode_cpu_pool(pool).map(|(index, _)| index);
+            let (device_index, kind) = if let Some(cpu_index) = cpu_pool_index {
+                (
+                    runtime.gpu_for_cpu(cpu_index),
+                    cpu_pool_memory_kind(pool, runtime.lifetime, flags),
+                )
             } else if let Some((index, pool_kind)) = runtime.decode_gpu_pool(pool) {
-                if pool_kind == GPU_POOL_GROUP {
+                if pool_kind == GpuPoolKind::Group {
                     return INVALID_ALLOCATION;
                 }
-                let uncached = flags & ALLOC_UNCACHED != 0 || pool_kind == GPU_POOL_EXTENDED;
+                let uncached = flags & ALLOC_UNCACHED != 0;
                 // A partial BAR can map an individual public allocation, but
                 // the rest of local VRAM must remain available for private
                 // allocations from the same HSA pool.
@@ -245,6 +249,7 @@ unsafe fn memory_pool_allocate(
                     MemoryKind::DeviceLocal {
                         host_visible,
                         coherent: gpu_pool_coherent(pool_kind, uncached, flags & ALLOC_PCIE != 0),
+                        extended_coherent: pool_kind == GpuPoolKind::ExtendedFine && !uncached,
                         uncached,
                         contiguous: flags & ALLOC_CONTIGUOUS != 0,
                     },
@@ -252,18 +257,17 @@ unsafe fn memory_pool_allocate(
             } else {
                 return invalid_pool;
             };
-            let maximum = runtime.decode_gpu_pool(pool).map_or(
-                runtime.host_memory_bytes & !(page - 1),
-                |(index, pool_kind)| {
-                    if pool_kind == GPU_POOL_GROUP {
-                        0
-                    } else {
-                        usize::try_from(runtime.gpus[index].endpoint.local_memory_bytes)
-                            .unwrap_or(usize::MAX)
-                            & !(page - 1)
-                    }
-                },
-            );
+            let maximum = if let Some((index, pool_kind)) = runtime.decode_gpu_pool(pool) {
+                if pool_kind == GpuPoolKind::Group {
+                    0
+                } else {
+                    runtime.gpu_pool_size(index, pool_kind) & !(page - 1)
+                }
+            } else if cpu_pool_index.is_some() {
+                runtime.system_alloc_max_bytes
+            } else {
+                return invalid_pool;
+            };
             if rounded > maximum {
                 return INVALID_ALLOCATION;
             }
@@ -304,9 +308,12 @@ unsafe fn memory_pool_allocate(
         };
         let info = allocation.info();
         let pointer_value = info.host_address.unwrap_or(info.device_address as usize);
-        let accessible = vec![HsaAgent {
+        let mut accessible = vec![HsaAgent {
             handle: GPU_AGENT_BASE + device_index as u64,
         }];
+        if owner.handle != GPU_AGENT_BASE + device_index as u64 {
+            accessible.push(owner);
+        }
         let memory = Memory::new(
             allocation,
             size,

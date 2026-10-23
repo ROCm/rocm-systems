@@ -7,10 +7,16 @@ use super::*;
 
 /// Checks whether a memory pool handle names a host CPU pool.
 pub(super) fn cpu_pool(pool: HsaMemoryPool) -> bool {
-    matches!(
-        pool.handle,
-        CPU_POOL_FINE | CPU_POOL_EXTENDED | CPU_POOL_KERNARG | CPU_POOL_COARSE
-    )
+    cpu_pool_kind(pool).is_some()
+}
+
+/// Decodes the pool class while leaving generation ownership to `HsaState`.
+pub(super) fn cpu_pool_kind(pool: HsaMemoryPool) -> Option<CpuPoolKind> {
+    let offset = pool.handle.checked_sub(CPU_POOL_BASE)?;
+    if pool.handle >= GPU_POOL_BASE {
+        return None;
+    }
+    CpuPoolKind::from_slot(offset % POOL_HANDLE_STRIDE)
 }
 
 /// Maps a CPU pool handle to its native memory kind.
@@ -19,7 +25,9 @@ pub(super) fn cpu_pool_memory_kind(
     lifetime: DriverContextLifetime,
     flags: u32,
 ) -> MemoryKind {
-    if pool.handle == CPU_POOL_KERNARG || lifetime == DriverContextLifetime::Session {
+    if cpu_pool_kind(pool) == Some(CpuPoolKind::Kernarg)
+        || lifetime == DriverContextLifetime::Session
+    {
         MemoryKind::System
     } else {
         MemoryKind::OwnedHost {
@@ -30,11 +38,11 @@ pub(super) fn cpu_pool_memory_kind(
 
 /// Chooses the host mapping policy for a CPU pool and flags.
 pub(super) fn cpu_pool_mapping_policy(pool: HsaMemoryPool, flags: u32) -> HostMappingPolicy {
-    if pool.handle == CPU_POOL_KERNARG || flags & ALLOC_UNCACHED != 0 {
+    if cpu_pool_kind(pool) == Some(CpuPoolKind::Kernarg) || flags & ALLOC_UNCACHED != 0 {
         HostMappingPolicy::Uncached
-    } else if pool.handle == CPU_POOL_EXTENDED {
+    } else if cpu_pool_kind(pool) == Some(CpuPoolKind::ExtendedFine) {
         HostMappingPolicy::Extended
-    } else if pool.handle == CPU_POOL_FINE || flags & ALLOC_PCIE != 0 {
+    } else if cpu_pool_kind(pool) == Some(CpuPoolKind::Fine) || flags & ALLOC_PCIE != 0 {
         HostMappingPolicy::Fine
     } else {
         HostMappingPolicy::Coarse
@@ -56,8 +64,10 @@ pub(super) fn effective_global_flags(pool_flags: u32, uncached: bool, pcie: bool
 
 /// Returns the agent that owns a memory pool handle.
 pub(super) fn pool_owner(runtime: &HsaState, pool: HsaMemoryPool) -> Option<HsaAgent> {
-    if cpu_pool(pool) {
-        Some(HsaAgent { handle: CPU_AGENT })
+    if let Some((index, _)) = runtime.decode_cpu_pool(pool) {
+        Some(HsaAgent {
+            handle: CPU_AGENT + index as u64,
+        })
     } else {
         runtime.decode_gpu_pool(pool).map(|(index, _)| HsaAgent {
             handle: GPU_AGENT_BASE + index as u64,
@@ -67,16 +77,16 @@ pub(super) fn pool_owner(runtime: &HsaState, pool: HsaMemoryPool) -> Option<HsaA
 
 /// Returns the global flags advertised by a memory pool.
 pub(super) fn pool_global_flags(runtime: &HsaState, pool: HsaMemoryPool) -> Option<u32> {
-    let flags = match pool.handle {
-        CPU_POOL_FINE => POOL_FLAG_FINE,
-        CPU_POOL_EXTENDED => POOL_FLAG_EXTENDED_FINE,
-        CPU_POOL_KERNARG => POOL_FLAG_KERNARG | POOL_FLAG_FINE,
-        CPU_POOL_COARSE => POOL_FLAG_COARSE,
+    let flags = match runtime.decode_cpu_pool(pool).map(|(_, kind)| kind) {
+        Some(CpuPoolKind::Fine) => POOL_FLAG_FINE,
+        Some(CpuPoolKind::ExtendedFine) => POOL_FLAG_EXTENDED_FINE,
+        Some(CpuPoolKind::Kernarg) => POOL_FLAG_KERNARG | POOL_FLAG_FINE,
+        Some(CpuPoolKind::Coarse) => POOL_FLAG_COARSE,
         _ => match runtime.decode_gpu_pool(pool) {
-            Some((_, GPU_POOL_COARSE)) => POOL_FLAG_COARSE,
-            Some((_, GPU_POOL_FINE)) => POOL_FLAG_FINE,
-            Some((_, GPU_POOL_EXTENDED)) => POOL_FLAG_EXTENDED_FINE,
-            Some((_, GPU_POOL_GROUP)) => 0,
+            Some((_, GpuPoolKind::Coarse)) => POOL_FLAG_COARSE,
+            Some((_, GpuPoolKind::Fine)) => POOL_FLAG_FINE,
+            Some((_, GpuPoolKind::ExtendedFine)) => POOL_FLAG_EXTENDED_FINE,
+            Some((_, GpuPoolKind::Group)) => 0,
             _ => return None,
         },
     };
@@ -90,39 +100,15 @@ pub(super) fn gpu_agent_pools(
     extended: bool,
 ) -> Vec<HsaMemoryPool> {
     let mut pools = Vec::with_capacity(usize::from(fine_grain) + usize::from(extended) + 2);
-    pools.push(HsaState::gpu_pool(index, GPU_POOL_COARSE));
+    pools.push(HsaState::gpu_pool(index, GpuPoolKind::Coarse));
     if extended {
-        pools.push(HsaState::gpu_pool(index, GPU_POOL_EXTENDED));
+        pools.push(HsaState::gpu_pool(index, GpuPoolKind::ExtendedFine));
     }
     if fine_grain {
-        pools.push(HsaState::gpu_pool(index, GPU_POOL_FINE));
+        pools.push(HsaState::gpu_pool(index, GpuPoolKind::Fine));
     }
-    pools.push(HsaState::gpu_pool(index, GPU_POOL_GROUP));
+    pools.push(HsaState::gpu_pool(index, GpuPoolKind::Group));
     pools
-}
-
-/// Enumerates the HSA memory regions exposed by a GPU agent.
-pub(super) fn gpu_agent_regions(
-    index: usize,
-    fine_grain: bool,
-    extended: bool,
-) -> Vec<HsaMemoryPool> {
-    let mut regions = gpu_agent_pools(index, fine_grain, extended);
-    regions.extend([
-        HsaMemoryPool {
-            handle: CPU_POOL_FINE,
-        },
-        HsaMemoryPool {
-            handle: CPU_POOL_KERNARG,
-        },
-        HsaMemoryPool {
-            handle: CPU_POOL_EXTENDED,
-        },
-        HsaMemoryPool {
-            handle: CPU_POOL_COARSE,
-        },
-    ]);
-    regions
 }
 
 /// Backing and coherence class represented by one HSA memory pool.
@@ -181,8 +167,8 @@ pub(crate) enum SignalBatchPool {
     Device {
         /// Index of the GPU that owns the selected device pool.
         index: usize,
-        /// Whether the selected pool requests uncached memory.
-        uncached: bool,
+        /// Whether the selected pool requests extended coherent memory.
+        extended: bool,
         /// Whether signal writes require an HDP flush.
         flush: bool,
     },
@@ -193,24 +179,25 @@ pub(crate) fn signal_batch_pool(
     runtime: &HsaState,
     pool: HsaMemoryPool,
 ) -> Option<SignalBatchPool> {
-    if matches!(pool.handle, CPU_POOL_FINE | CPU_POOL_KERNARG) {
+    if matches!(
+        runtime.decode_cpu_pool(pool),
+        Some((_, CpuPoolKind::Fine | CpuPoolKind::Kernarg))
+    ) {
         return Some(SignalBatchPool::System);
     }
     let (index, kind) = runtime.decode_gpu_pool(pool)?;
     let gpu = &runtime.gpus[index];
-    let uncached =
-        kind == GPU_POOL_EXTENDED && gpu.info.gfx_major == 9 && matches!(gpu.info.gfx_minor, 4 | 5);
-    let coarse = kind == GPU_POOL_COARSE && gpu.info.gfx_major == 12 && gpu.info.gfx_minor >= 5;
-    let host_atomic_link = runtime
-        .topology
-        .route_from_host(&gpu.endpoint)
-        .is_some_and(|link| {
-            link.kind == MemoryLinkType::Xgmi && link.coherent_support && link.atomic_support_64bit
-        });
-    (gpu_pool_fully_host_visible(runtime, index) && (uncached || coarse)).then_some(
+    let extended = kind == GpuPoolKind::ExtendedFine
+        && gpu.info.gfx_major == 9
+        && matches!(gpu.info.gfx_minor, 4 | 5);
+    let coarse = kind == GpuPoolKind::Coarse && gpu.info.gfx_major == 12 && gpu.info.gfx_minor >= 5;
+    let host_atomic_link = runtime.route_from_nearest_cpu(index).is_some_and(|link| {
+        link.kind == MemoryLinkType::Xgmi && link.coherent_support && link.atomic_support_64bit
+    });
+    (gpu_pool_fully_host_visible(runtime, index) && (extended || coarse)).then_some(
         SignalBatchPool::Device {
             index,
-            uncached,
+            extended,
             flush: !host_atomic_link,
         },
     )
@@ -222,14 +209,13 @@ pub(super) fn gpu_pcie_dmabuf_supported(runtime: &HsaState, index: usize) -> boo
     // the other route that can satisfy a requested PCIe DMA-BUF mapping.
     gpu_pool_fully_host_visible(runtime, index)
         || runtime
-            .topology
-            .route_from_host(&runtime.gpus[index].endpoint)
+            .route_from_nearest_cpu(index)
             .is_some_and(|link| link.kind == MemoryLinkType::Xgmi)
 }
 
 /// Checks whether a GPU pool provides coherent access.
-pub(super) fn gpu_pool_coherent(pool_kind: u64, uncached: bool, pcie: bool) -> bool {
-    matches!(pool_kind, GPU_POOL_FINE | GPU_POOL_EXTENDED) || uncached || pcie
+pub(super) fn gpu_pool_coherent(pool_kind: GpuPoolKind, uncached: bool, pcie: bool) -> bool {
+    matches!(pool_kind, GpuPoolKind::Fine | GpuPoolKind::ExtendedFine) || uncached || pcie
 }
 
 /// Builds an agent-to-pool access and link description.
@@ -242,6 +228,25 @@ pub(super) fn agent_pool_relationship(
     let same = owner == agent;
     let requester_gpu = runtime.gpu_index(agent);
     let owner_gpu = runtime.gpu_index(owner);
+    let native_node = |agent: HsaAgent| {
+        runtime
+            .cpu_index(agent)
+            .and_then(|index| runtime.cpus[index].node)
+            .or_else(|| {
+                runtime.gpu_index(agent).and_then(|index| {
+                    runtime
+                        .topology
+                        .nodes_for_endpoint(&runtime.gpus[index].endpoint)
+                        .find(|node| {
+                            runtime.topology.sources[node.source.0].kind
+                                == rocddi::topology::SourceKind::LinuxKfd
+                        })
+                        .map(|node| node.id)
+                })
+            })
+    };
+    let requester_node = native_node(agent);
+    let owner_node = native_node(owner);
     let same_hive = match (requester_gpu, owner_gpu) {
         (Some(requester), Some(owner)) => {
             runtime.gpus[requester].info.hive_id == runtime.gpus[owner].info.hive_id
@@ -249,31 +254,12 @@ pub(super) fn agent_pool_relationship(
         (None, Some(owner)) => runtime.gpus[owner].info.hive_id == 0,
         _ => false,
     };
-    let link = if same {
-        None
-    } else if agent.handle == CPU_AGENT {
-        owner_gpu.and_then(|index| {
-            runtime
-                .topology
-                .route_from_host(&runtime.gpus[index].endpoint)
-        })
-    } else if let Some(requester) = requester_gpu {
-        if matches!(storage, PoolStorage::System) {
-            runtime
-                .topology
-                .route_to_host(&runtime.gpus[requester].endpoint)
-        } else {
-            owner_gpu.and_then(|owner| {
-                runtime.topology.route_between(
-                    &runtime.gpus[requester].endpoint,
-                    &runtime.gpus[owner].endpoint,
-                )
-            })
-        }
-    } else {
-        None
-    };
+    let link = requester_node
+        .zip(owner_node)
+        .and_then(|(from, to)| runtime.topology.route_between_nodes(from, to));
+    let same_node = requester_node.is_some() && requester_node == owner_node;
     let linked = same
+        || same_node
         || match (requester_gpu, owner_gpu) {
             (Some(requester), Some(owner))
                 if matches!(storage, PoolStorage::LocalCoarse | PoolStorage::LocalFine) =>
@@ -285,11 +271,13 @@ pub(super) fn agent_pool_relationship(
             }
             _ => link.is_some_and(|link| link.hop_count() != 0),
         };
-    let cpu_cannot_access_local = agent.handle == CPU_AGENT
+    let cpu_cannot_access_local = runtime.is_cpu_agent(agent)
         && owner_gpu.is_some_and(|index| !gpu_pool_has_host_aperture(runtime, index))
         && matches!(storage, PoolStorage::LocalCoarse | PoolStorage::LocalFine);
     let access = if cpu_cannot_access_local {
         POOL_ACCESS_NEVER
+    } else if runtime.is_cpu_agent(agent) && storage == PoolStorage::System && linked {
+        POOL_ACCESS_DEFAULT
     } else {
         pool_access(same, storage, linked, same_hive)
     };
@@ -337,28 +325,21 @@ pub(super) const fn hsa_link_type(kind: MemoryLinkType) -> u32 {
 
 /// Enumerates the memory pools visible to an HSA agent.
 fn agent_pools(runtime: &HsaState, agent: HsaAgent) -> Result<Vec<HsaMemoryPool>, Status> {
-    if agent.handle == CPU_AGENT {
-        Ok(vec![
-            HsaMemoryPool {
-                handle: CPU_POOL_FINE,
-            },
-            HsaMemoryPool {
-                handle: CPU_POOL_EXTENDED,
-            },
-            HsaMemoryPool {
-                handle: CPU_POOL_KERNARG,
-            },
-            HsaMemoryPool {
-                handle: CPU_POOL_COARSE,
-            },
-        ])
+    if let Some(index) = runtime.cpu_index(agent) {
+        Ok(CpuPoolKind::ALL
+            .into_iter()
+            .filter(|kind| *kind != CpuPoolKind::Coarse || !runtime.cpus[index].apu)
+            .map(|kind| HsaState::cpu_pool(index, kind))
+            .collect())
     } else if let Some(index) = runtime.gpu_index(agent) {
         let gpu = &runtime.gpus[index];
-        Ok(gpu_agent_pools(
+        let mut pools = gpu_agent_pools(
             index,
             gpu.fine_grain_pool,
-            gpu.info.gfx_major == 9 && matches!(gpu.info.gfx_minor, 4 | 5),
-        ))
+            !(gpu.info.gfx_major == 12 && gpu.info.gfx_minor == 0),
+        );
+        pools.retain(|pool| runtime.decode_gpu_pool(*pool).is_some());
+        Ok(pools)
     } else {
         Err(INVALID_AGENT)
     }
@@ -366,18 +347,23 @@ fn agent_pools(runtime: &HsaState, agent: HsaAgent) -> Result<Vec<HsaMemoryPool>
 
 /// Enumerates the memory regions visible to an HSA agent.
 fn agent_regions(runtime: &HsaState, agent: HsaAgent) -> Result<Vec<HsaMemoryPool>, Status> {
-    if agent.handle == CPU_AGENT {
-        return agent_pools(runtime, agent);
-    }
-    let Some(index) = runtime.gpu_index(agent) else {
+    if !runtime.is_cpu_agent(agent) && runtime.gpu_index(agent).is_none() {
         return Err(INVALID_AGENT);
+    }
+    let mut regions = if runtime.is_cpu_agent(agent) {
+        Vec::new()
+    } else {
+        agent_pools(runtime, agent)?
     };
-    Ok(gpu_agent_regions(
-        index,
-        runtime.gpus[index].fine_grain_pool,
-        runtime.gpus[index].info.gfx_major == 9
-            && matches!(runtime.gpus[index].info.gfx_minor, 4 | 5),
-    ))
+    for cpu_index in 0..runtime.cpus.len() {
+        regions.extend(agent_pools(
+            runtime,
+            HsaAgent {
+                handle: CPU_AGENT + cpu_index as u64,
+            },
+        )?);
+    }
+    Ok(regions)
 }
 
 #[cfg_attr(
@@ -563,22 +549,21 @@ unsafe fn memory_pool_get_info(
     value: *mut c_void,
     invalid_pool: Status,
 ) -> Status {
+    let cpu_pool = runtime.decode_cpu_pool(pool);
     let gpu_pool = runtime.decode_gpu_pool(pool);
-    if !cpu_pool(pool) && gpu_pool.is_none() {
+    if cpu_pool.is_none() && gpu_pool.is_none() {
         return invalid_pool;
     }
-    let kind = gpu_pool.map_or(0, |(_, kind)| kind);
-    let group = kind == GPU_POOL_GROUP;
+    let group = matches!(gpu_pool, Some((_, GpuPoolKind::Group)));
     let flags = pool_global_flags(runtime, pool).unwrap_or(0);
     let page = runtime.host_page_size;
-    let size = gpu_pool.map_or(runtime.host_memory_bytes, |(index, _)| {
-        if group {
-            usize::try_from(runtime.gpus[index].info.local_data_share_byte_length)
-                .unwrap_or(usize::MAX)
-        } else {
-            usize::try_from(runtime.gpus[index].endpoint.local_memory_bytes).unwrap_or(usize::MAX)
-        }
-    });
+    let size = if let Some((index, kind)) = gpu_pool {
+        runtime.gpu_pool_size(index, kind)
+    } else if let Some((index, _)) = cpu_pool {
+        runtime.cpus[index].memory_bytes
+    } else {
+        return invalid_pool;
+    };
     // SAFETY: Each arm writes the public value type for the attribute.
     unsafe {
         match attribute {
@@ -589,23 +574,25 @@ unsafe fn memory_pool_get_info(
             }
             POOL_INFO_GLOBAL_FLAGS => value.cast::<u32>().write(flags),
             POOL_INFO_SIZE => value.cast::<usize>().write(size),
-            POOL_INFO_ALLOC_MAX_SIZE => {
-                value
-                    .cast::<usize>()
-                    .write(if group { 0 } else { size & !(page - 1) })
-            }
+            POOL_INFO_ALLOC_MAX_SIZE => value.cast::<usize>().write(if group {
+                0
+            } else if cpu_pool.is_some() {
+                runtime.system_alloc_max_bytes
+            } else {
+                size & !(page - 1)
+            }),
             POOL_INFO_RUNTIME_ALLOC_ALLOWED => value.cast::<bool>().write(!group),
             POOL_INFO_RUNTIME_ALLOC_GRANULE | POOL_INFO_RUNTIME_ALLOC_ALIGNMENT => {
                 value.cast::<usize>().write(if group { 0 } else { page })
             }
             POOL_INFO_RUNTIME_ALLOC_REC_GRANULE => value.cast::<usize>().write(if group {
                 0
-            } else if gpu_pool.is_some() {
+            } else if gpu_pool.is_some() && !runtime.disable_fragment_allocator {
                 2 * 1024 * 1024
             } else {
                 page
             }),
-            POOL_INFO_ACCESSIBLE_BY_ALL => value.cast::<bool>().write(cpu_pool(pool)),
+            POOL_INFO_ACCESSIBLE_BY_ALL => value.cast::<bool>().write(cpu_pool.is_some()),
             POOL_INFO_SIGNAL_CAPABLE => value
                 .cast::<bool>()
                 .write(signal_batch_pool(runtime, pool).is_some()),
@@ -613,7 +600,7 @@ unsafe fn memory_pool_get_info(
                 if group {
                     return INVALID_ARGUMENT;
                 }
-                value.cast::<u32>().write(u32::from(!cpu_pool(pool)));
+                value.cast::<u32>().write(u32::from(cpu_pool.is_none()));
             }
             _ => return INVALID_ARGUMENT,
         }
@@ -690,17 +677,29 @@ pub unsafe extern "C" fn hsa_region_get_info(
                 memory_pool_get_info(runtime, pool, pool_attribute, value, INVALID_REGION)
             };
         }
-        if !cpu_pool(pool) && runtime.decode_gpu_pool(pool).is_none() {
+        if runtime.decode_cpu_pool(pool).is_none() && runtime.decode_gpu_pool(pool).is_none() {
             return INVALID_REGION;
         }
         // SAFETY: Each arm writes the public value type for the attribute.
         unsafe {
             match attribute {
                 REGION_INFO_ALLOC_MAX_PRIVATE_WORKGROUP_SIZE => return INVALID_ARGUMENT,
-                AMD_REGION_INFO_HOST_ACCESSIBLE => value.cast::<bool>().write(cpu_pool(pool)),
+                AMD_REGION_INFO_HOST_ACCESSIBLE => value
+                    .cast::<bool>()
+                    .write(runtime.decode_cpu_pool(pool).is_some()),
                 AMD_REGION_INFO_BASE => value.cast::<*mut c_void>().write(std::ptr::null_mut()),
-                AMD_REGION_INFO_BUS_WIDTH => value.cast::<u32>().write(0),
-                AMD_REGION_INFO_MAX_CLOCK_FREQUENCY => value.cast::<u32>().write(0),
+                AMD_REGION_INFO_BUS_WIDTH => value.cast::<u32>().write(
+                    runtime
+                        .pool_bank(pool)
+                        .and_then(|bank| bank.width_bits)
+                        .unwrap_or(0),
+                ),
+                AMD_REGION_INFO_MAX_CLOCK_FREQUENCY => value.cast::<u32>().write(
+                    runtime
+                        .pool_bank(pool)
+                        .and_then(|bank| bank.maximum_clock_mhz)
+                        .unwrap_or(0),
+                ),
                 _ => return INVALID_ARGUMENT,
             }
         }
