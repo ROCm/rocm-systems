@@ -220,11 +220,7 @@ void ComputeQueue::FaultMonitorThread(ComputeQueue* queue) {
   auto last_progress = std::chrono::steady_clock::now();
 
   while (!queue->thread_stop_) {
-    // Stall detection: neither rptr nor the GPU fence has advanced while work
-    // is pending.  On the !platform_atomic_support_ path the AqlToPm4Thread
-    // blocks in a fence wait before advancing rptr, so rptr alone is not a
-    // reliable progress indicator — the GPU fence (*sync_addr) still advances
-    // as submissions retire.
+    // Stall detection: check both rptr and GPU fence since rptr stalls during CpuWait.
     if (!dxg_runtime->disable_wait_timeout_) {
       uint64_t current_rptr = queue->ring_rptr->load(std::memory_order_relaxed);
       uint64_t current_wptr = queue->ring_wptr->load(std::memory_order_relaxed);
@@ -1172,22 +1168,22 @@ hsa_status_t ComputeQueue::Process(void) {
     if (!ready_to_submit) continue;
 
     ret = Submit();
-    if (ret != HSA_STATUS_SUCCESS) return ret;
+    if (ret != HSA_STATUS_SUCCESS) {
+      pending_signals_.clear();
+      return ret;
+    }
 
     // CPU wait for GPU fence, then decrement all pending completion signals.
     // Without platform atomics the GPU cannot decrement signals itself, so the
     // AqlToPm4Thread does it on the CPU once the submission has retired.
     if (!platform_atomic_support_ && !pending_signals_.empty()) {
-      constexpr int kFaultTimeoutMs = 30000;
-      auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(kFaultTimeoutMs);
-      while (LoadSyncValue(sync_addr) < sync_point) {
-        if (!dxg_runtime->disable_wait_timeout_ &&
-            std::chrono::steady_clock::now() >= deadline) {
-          pr_err("GPU fence timeout after %dms — possible device fault (sync_addr=%" PRIu64
-                 " expected=%" PRIu64 ")\n", kFaultTimeoutMs, LoadSyncValue(sync_addr), sync_point);
-          return static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION);
+      if (LoadSyncValue(sync_addr) < sync_point) {
+        if (!device->CpuWait(&syncobj, &sync_point, 1, false)) {
+          pr_err("GPU fence wait failed (sync_addr=%" PRIu64 " expected=%" PRIu64 ")\n",
+                 LoadSyncValue(sync_addr), sync_point);
+          pending_signals_.clear();
+          return HSA_STATUS_ERROR;
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
       }
       for (uint64_t* addr : pending_signals_)
         rocr::atomic::Decrement(addr);
