@@ -16,7 +16,7 @@
         <link rel="prev" href="../rocgdb-debugging/">
       
       
-        <link rel="next" href="../qemu-vfio/">
+        <link rel="next" href="../benchmark-runner-setup/">
       
       
         
@@ -714,6 +714,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../benchmark-runner-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Benchmark runner setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1814,6 +1842,9 @@ workload revision, command line, environment, and raw output with every result.
 Run from each revision's build tree; do not install either build into a shared
 SDK during the comparison.</p>
 <h2 id="prepare-the-host">Prepare the host<a class="headerlink" href="#prepare-the-host" title="Permanent link">&para;</a></h2>
+<p>For dedicated Actions benchmark runners, see the
+<a href="../benchmark-runner-setup/">benchmark runner setup guide</a> for CPU reservation,
+fixed frequency and idle settings, and Bpfland.</p>
 <p>Prefer a quiet host. If background work cannot be stopped, reserve complete
 physical cores with disjoint systemd cgroup cpusets. <code>taskset</code> constrains only
 the benchmark and does not stop an unrestricted build from using the same CPUs.</p>
