@@ -7749,6 +7749,78 @@ def test_memory_issue_metadata_covers_every_memory_semantic(arch_name, profile):
         codegen._wait_counter_type('buffer_load')
 
 
+@pytest.mark.parametrize('has_gds', [True, False], ids=['gds-field', 'fieldless'])
+@pytest.mark.parametrize(
+    ('name', 'semantic_class', 'arch_name', 'profile'),
+    [
+        ('DS_READ_B32', 'ds_read', 'cdna4', Cdna4Profile()),
+        ('DS_WRITE_B32', 'ds_write', 'cdna4', Cdna4Profile()),
+        ('DS_BVH_STACK_RTN_B32', 'ds_stack', 'rdna3', Rdna3Profile()),
+        ('DS_BVH_STACK_PUSH4_POP1_RTN_B32', 'ds_stack', 'rdna4', Rdna4Profile()),
+        ('DS_ADD_U32', 'ds_atomic', 'cdna4', Cdna4Profile()),
+        ('DS_WRXCHG2_RTN_B32', 'ds_atomic2', 'cdna4', Cdna4Profile()),
+        ('DS_MSKOR_B32', 'ds_mskor', 'cdna4', Cdna4Profile()),
+        ('DS_APPEND', 'ds_append_consume', 'cdna4', Cdna4Profile()),
+        (
+            'DS_ATOMIC_BARRIER_ARRIVE_RTN_B64',
+            'ds_barrier_arrive',
+            'cdna5',
+            Cdna5Profile(),
+        ),
+        ('DS_GWS_INIT', 'ds_gws', 'rdna3', Rdna3Profile()),
+    ],
+)
+def test_ds_mode_rejection_precedes_execution(
+    name, semantic_class, arch_name, profile, has_gds
+):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name=arch_name, profile=profile, inst_encodings=[], encoding_map={}
+    )
+    # VDS has no GDS mode bit. Vary field presence independently of the stack
+    # layout so guard generation cannot accidentally depend on the architecture.
+    enc_name = 'ENC_DS' if has_gds else 'ENC_VDS'
+    codegen._current_enc = SimpleNamespace(enc_name=enc_name)
+    codegen._current_inst_fields = {'gds'} if has_gds else set()
+    inst = Instruction(
+        name,
+        enc_name,
+        0,
+        [
+            Operand('vdst', 32, 'OPR_VGPR', False, True, False, False, 0),
+            Operand('addr', 32, 'OPR_VGPR', True, False, False, False, 1),
+            Operand('data0', 32, 'OPR_VGPR', True, False, False, False, 2),
+            Operand('data1', 32, 'OPR_VGPR', True, False, False, False, 3),
+        ],
+    )
+    sem = derive_semantics(name, enc_name)
+    assert sem.semantic_class == semantic_class
+
+    body = codegen._gen_execute_body(inst, sem, enc_name)
+
+    assert 'throw ' not in body
+    assert 'std::make_unique<amdgpu::VectorMemState>' in body
+    if not has_gds:
+        assert 'inst_.gds' not in body
+        assert 'report_instruction_execution_error' not in body
+        return
+
+    requires_gds = semantic_class == 'ds_gws'
+    condition = '!inst_.gds' if requires_gds else 'inst_.gds'
+    error = 'InvalidInstructionEncoding' if requires_gds else 'UnimplementedInstruction'
+    # A complete guard at the start ensures no allocation, register read, stack
+    # preparation or GWS state change can happen before rejection returns.
+    guard = (
+        f'  if ({condition}) {{\n'
+        '    wf.report_instruction_execution_error(\n'
+        f'        amdgpu::InstructionExecutionError::{error});\n'
+        '    return;\n'
+        '  }\n'
+    )
+    assert body.startswith(guard)
+    assert body.count('report_instruction_execution_error') == 1
+
+
 def test_memory_execution_sets_resolved_counter_before_operand_reads():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(arch_name='cdna4', profile=Cdna4Profile())

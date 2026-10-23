@@ -202,6 +202,35 @@ constexpr std::array kStoreTargets = {
                 rdna4::kDsStoreAddtidB32Vds},
 };
 
+TEST(DsMemorySnapshot, RejectsUnimplementedGdsWithoutPreparingPayload) {
+  SnapshotFixture fx(64, ROCJITSU_CODE_ARCH_CDNA4, 16);
+  ASSERT_NE(fx.wf, nullptr);
+  fx.wf->set_exec(1);
+  fx.cu->write_vgpr(fx.wf->vgpr_alloc().base, 0, 0);
+  fx.cu->write_vgpr(fx.wf->vgpr_alloc().base + 1, 0, 42);
+  fx.cu->set_plugin_group(fx.group);
+
+  cdna4::DsBuilderFields fields{.gds = 1, .addr = 0, .data0 = 1};
+  const auto words = cdna4::build_ds(cdna4::kDsWriteB32Ds, fields);
+  auto decoder = Decoder::create(fx.arch);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+  // The CU translates legacy throws into failures, so also check the callback directly.
+  ASSERT_NO_THROW(inst->execute(*inst, fx.wf));
+  EXPECT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).failed());
+  EXPECT_EQ(fx.wf->instruction_execution_error(),
+            InstructionExecutionError::UnimplementedInstruction);
+  EXPECT_EQ(inst->data(), nullptr);
+  EXPECT_TRUE(fx.observer->reads.empty());
+
+  fields.gds = 0;
+  auto supported = fx.issue_encoded(cdna4::build_ds(cdna4::kDsWriteB32Ds, fields));
+  ASSERT_NE(supported, nullptr);
+  EXPECT_EQ(fx.wf->instruction_execution_error(), InstructionExecutionError::None);
+  EXPECT_NE(supported->data(), nullptr);
+  fx.wf->halt();
+}
+
 TEST(DsMemorySnapshot, DwordStoresPreservePayloadAndObservedValues) {
   constexpr std::array opcodes = {cdna4::kDsWriteB32Ds, cdna4::kDsWriteB64Ds, cdna4::kDsWriteB96Ds,
                                   cdna4::kDsWriteB128Ds};
