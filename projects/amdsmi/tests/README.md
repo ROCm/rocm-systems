@@ -93,17 +93,25 @@ Suite names are the only selection mechanism — `<Component><Type>[<Operation>]
 
 ### Memory-partition coverage
 
-`GpuFunctionalReadWrite.TestMemoryPartitionReadWrite` checks getters, capabilities,
-invalid inputs, and setting only the current NPS mode. It never intentionally
-stages alternate NPS modes or sets compute profiles. Saved per-device memory and
-compute state is verified without repair; drift or unreadable saved state fails
-the test.
+A staged NPS mode takes effect on the next driver reload, and requesting the active
+mode does not cancel it. Default runs therefore never request an NPS mode other than
+the active one:
+
+- `GpuFunctionalReadWrite.TestMemoryPartitionReadWrite` checks getters, capabilities,
+  invalid inputs, and setting only the current mode. It never sets compute profiles.
+  Saved per-device memory and compute state is verified without repair; drift or
+  unreadable saved state fails the test.
+- `test_partition.py` and `test_benchmark.py` request only the active mode or values
+  the setter rejects.
+- `test_memory_partition_cycle.py` skips unless `AMDSMI_ALLOW_DESTRUCTIVE_TESTS=1`.
+  With it, each staged mode is applied by a driver reload and the starting mode is
+  restored.
+
+`unit/gpu/test_memory_partition_staging.py` checks these Python tests against a fake
+driver that follows the staging rules.
 
 Run with exclusive partition-management access: reads and same-mode requests are
-not atomic against another process changing the topology. Alternate NPS transitions
-require an isolated lifecycle harness; active-mode readback cannot prove a pending
-alternate request was canceled. This test does not certify state preservation by
-other tests in the full read/write suite.
+not atomic against another process changing the topology.
 
 ## Python — three runners over one shared engine
 

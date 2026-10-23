@@ -224,6 +224,15 @@ class TestGpuBenchmark(unittest.TestCase):
 
         return stats
 
+    def _active_memory_partition_types(self, processor):
+        # Any other mode stays staged until the next driver reload, and requesting the
+        # active mode does not cancel it, so the set benchmarks time only the active mode.
+        try:
+            active = amdsmi.amdsmi_get_gpu_memory_partition(processor)
+        except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException):
+            return []
+        return [t for t in common.MEMORY_PARTITION_TYPES if t[0] == active]
+
     def test_performance_clean_gpu_local_data(self):
         self.common.print_func_name("")
 
@@ -3508,7 +3517,7 @@ class TestGpuBenchmark(unittest.TestCase):
                 memory_partition_type_name,
                 memory_partition_type,
                 memory_partition_type_cond,
-            ) in common.MEMORY_PARTITION_TYPES:
+            ) in self._active_memory_partition_types(processor):
                 self._log_test_start(
                     "amdsmi_set_gpu_memory_partition",
                     "Processor",
@@ -3555,7 +3564,7 @@ class TestGpuBenchmark(unittest.TestCase):
                 memory_partition_type_name,
                 memory_partition_type,
                 memory_partition_type_cond,
-            ) in common.MEMORY_PARTITION_TYPES:
+            ) in self._active_memory_partition_types(processor):
                 self._log_test_start(
                     "amdsmi_set_gpu_memory_partition_mode",
                     "Processor",

@@ -309,12 +309,15 @@ class TestGpuPartition(unittest.TestCase):
     # Uses clk_limit_type_name instead of clk_limit_type
 
     def test_set_gpu_memory_partition_return_codes(self):
-        """Verify that set accepts supported modes and rejects unsupported ones."""
+        """Verify that set rejects values that are not a memory partition mode."""
         self.common.print_func_name("")
 
+        # A valid mode stays staged until the next driver reload, and requesting the
+        # active mode does not cancel it, so only values that cannot be staged are sent.
+        rejected = [t for t in common.MEMORY_PARTITION_TYPES if t[2] == common.FAIL]
         self.common.Test_Per_GPU_With_One_Enum(
             amdsmi_set_gpu_memory_partition_mode=amdsmi.amdsmi_set_gpu_memory_partition_mode,
-            memory_partition_type=common.MEMORY_PARTITION_TYPES,
+            memory_partition_type=rejected,
         )
         return
 
