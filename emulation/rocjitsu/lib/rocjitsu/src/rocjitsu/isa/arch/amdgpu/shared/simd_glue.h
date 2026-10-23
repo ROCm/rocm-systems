@@ -1043,12 +1043,14 @@ fma_f16_mode_simd(util::native<uint32_t> src0, util::native<uint32_t> src1,
 /// @details The caller owns that environment: MODE.FP_ROUND rounding, and containing the
 /// flags this arithmetic raises. Exceptional lanes use scalar NaN selection and
 /// minimum-normal boundary handling.
-/// Nonzero effective OMOD forces output flushing here, before destination scaling.
+/// force_denorm_flush overrides MODE to flush subnormal a, b, c and results.
+/// Nonzero effective OMOD independently forces output flushing before destination scaling.
 inline util::native<float> fma_f32_simd_unscoped(util::native<float> a, util::native<float> b,
                                                  util::native<float> c, const Wavefront &wf,
-                                                 uint32_t omod = 0, bool force_flush = false) {
+                                                 uint32_t omod = 0,
+                                                 bool force_denorm_flush = false) {
   using U = util::native<uint32_t>;
-  const uint32_t denorm_mode = force_flush ? 0 : wf.fp_denorm_mode_f32();
+  const uint32_t denorm_mode = force_denorm_flush ? 0 : wf.fp_denorm_mode_f32();
   if (!(denorm_mode & 1u)) {
     a = denormal::flush_value(a);
     b = denormal::flush_value(b);
@@ -1146,7 +1148,7 @@ inline util::native<float> fma_dx9_zero_f32_simd_unscoped(util::native<float> a,
   util::stdx::where(zero_product, b_bits) = U(0x3f800000u);
   a = std::bit_cast<util::native<float>>(a_bits);
   b = std::bit_cast<util::native<float>>(b_bits);
-  return fma_f32_simd_unscoped(a, b, c, wf, 0, true);
+  return fma_f32_simd_unscoped(a, b, c, wf, 0, true /* force_denorm_flush */);
 }
 
 /// @brief Execute a MODE-aware native batch of architectural F64 FMAs.
