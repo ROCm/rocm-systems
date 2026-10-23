@@ -3781,7 +3781,10 @@
         {
           "name": "UBR_MultiSegment_Symmetric_LsaGin",
           "description": "Cross-node ReduceScatter over multi-segment windows (LSA + GIN)",
-          "test_filter": "UBR_MultiSegment.Symmetric_LsaGin"
+          "test_filter": "UBR_MultiSegment.Symmetric_LsaGin",
+          "env_variables": {
+            "NCCL_MULTI_SEGMENT_REGISTER": "1"
+          }
         },
         {
           "name": "UBR_MultiSegment_MultiSegmentRegisterOff_SliceSkipsNet",
