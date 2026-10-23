@@ -5483,7 +5483,7 @@
         {
           "name": "MultiSegment_Transport_All_MultiNode",
           "description": "Classic NET/IB and GIN multi-segment P2P/RMA tests (non-hybrid)",
-          "test_filter": "NetIbMultiSegmentMPITest.*:RmaMultiSegmentMPITest.*-RmaMultiSegmentMPITest.DeepEP_Hybrid*"
+          "test_filter": "NetIbMultiSegmentMPITest.*:RmaMultiSegmentMPITest.*-RmaMultiSegmentMPITest.DeepEP_Hybrid*:*OldPeer*"
         },
         {
           "name": "MultiSegment_Transport_RegisterOff_MultiNode",

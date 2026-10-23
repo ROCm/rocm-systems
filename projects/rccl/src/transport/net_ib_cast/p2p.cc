@@ -374,10 +374,12 @@ static inline ncclResult_t IbCastMultiSendSegmented(struct ncclIbSendComm* comm,
       for (int r = 0; r < nreqs; r++) reqs[r]->tel_post_ts = _tel_ns;
     }
 
-    struct ibv_send_wr* bad_wr;
+    struct ibv_send_wr* bad_wr = NULL;
     ncclResult_t postRet = wrap_ibv_post_send(qp->qp, comm->wrs, &bad_wr);
     if (postRet != ncclSuccess) {
       if (remapWrId) IbCastQpSchedFreeRemap(remapWrId);
+      // RCCL: only the tail is signaled and it never posted, so leave sentData clear.
+      // isendFail then drops this QP's event and frees the request, as iflush does.
       return postRet;
     }
 
@@ -703,10 +705,9 @@ static inline ncclResult_t rcclIbCastIflushMultiSeg(void* recvComm, int n, void*
            comm->devs[i].gpuFlush.qp.qp->qp_num, wrId);
       iflushRet = wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &flushWrs[0], &bad_wr);
       TIME_STOP(4);
-      if (iflushRet != ncclSuccess) {
-        // Only the chain tail is signaled, so a partial post never completes on this device.
-        goto iflushFail;
-      }
+      // RCCL: only the tail read is signaled, so a prefix has no completion.
+      // iflushFail frees the request unless an earlier device already armed one.
+      if (iflushRet != ncclSuccess) goto iflushFail;
     }
 
     IbCastAddEvent(req, i);
