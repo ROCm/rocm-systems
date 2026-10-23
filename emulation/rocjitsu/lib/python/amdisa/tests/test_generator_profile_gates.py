@@ -3927,11 +3927,15 @@ def test_generated_vector_f16_arithmetic_consumes_fp16_ovfl(
     vop2 = _shared_execute_body(execute_shared, 'v_add_f16_vop2', 'v_add_f16_vop3')
     vop3 = _shared_execute_body(execute_shared, 'v_add_f16_vop3', 'v_add_f32_vop2')
 
-    assert 'if (wf.fp16_ovfl())' in vop2
-    assert 'f32_to_f16_ovfl_simd' in vop2
+    # Both encodings delegate FP16_OVFL narrowing to the shared arithmetic helper,
+    # so neither selects a narrowing helper by branching on the bit. VOP2 takes the
+    # unscoped core under one per-instruction environment rather than one per chunk.
+    assert 'binary_f16_simd_unscoped<amdgpu::fp_mode::Arithmetic::ADD>' in vop2
+    assert 'ROCJITSU_TRY_SIMD_VOP2_BINARY_SCOPED(' in vop2
+    assert 'if (wf.fp16_ovfl())' not in vop2
+    assert 'f32_to_f16_ovfl_simd' not in vop2
     assert 'sdwa::finish_arithmetic_f16' in vop2
     assert 'wf.fp16_ovfl()' in vop2
-    # VOP3 delegates FP16_OVFL narrowing to its MODE-aware SIMD helper.
     assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(false,' in vop3
     assert 'sdwa::finish_arithmetic_f16' in vop3
     assert 'wf.fp16_ovfl()' in vop3
@@ -7565,6 +7569,40 @@ def test_vopd_integer_simd_probe_requires_available_opcodes(tmp_path, missing_op
     execute_slot = exec_cpp[exec_cpp.index('uint32_t Vopd::execute_slot') :]
     assert execute_slot.index('src0 = apply_neg(') < execute_slot.index('return src0;')
     assert execute_slot.index('return src0;') < execute_slot.index('uint32_t src1 =')
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+def test_vopd_subtraction_adds_negated_subtrahend(tmp_path, arch):
+    profile = Rdna3Profile() if arch == 'rdna3' else Rdna4Profile()
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name=arch,
+        generated_dir_name=arch,
+        cpp_namespace=arch,
+        profile=profile,
+        operand_types={'OPR_SRC'},
+    )
+    codegen.out_path = str(tmp_path)
+    codegen.config = CodegenConfig()
+    codegen.gen_vopd()
+    exec_cpp = (tmp_path / arch / 'vopd_exec.cpp').read_text()
+
+    def body(case):
+        # The last label is the execute_slot body; earlier ones list modifier support.
+        start = exec_cpp.rindex(f'case {case}:')
+        return exec_cpp[start : exec_cpp.index('case ', start + 1)]
+
+    # As VOP2: ADD of the negated subtrahend, in operand order, with the
+    # architectural NaN policy. Host subtraction would keep a NaN subtrahend's sign.
+    sub, subrev = body('kVopdSubF32'), body('kVopdSubrevF32')
+    for text in (sub, subrev):
+        assert 'Arithmetic::ADD>' in text
+        assert 'Arithmetic::SUB>' not in text
+        assert 'wf.cu().arch(), wf.ieee_mode()' in text
+    assert 'std::bit_cast<float>(src0), std::bit_cast<float>(src1 ^ 0x80000000u)' in sub
+    assert (
+        'std::bit_cast<float>(src0 ^ 0x80000000u), std::bit_cast<float>(src1)' in subrev
+    )
 
 
 def test_rdna4_profile_enables_generated_vopd():
