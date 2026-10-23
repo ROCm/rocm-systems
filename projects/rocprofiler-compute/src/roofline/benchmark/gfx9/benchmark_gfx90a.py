@@ -9,6 +9,7 @@
 #
 # -----------------------------------------------------------------------------
 
+from .. import ceilings
 from . import benchmark_gfx9_base
 
 
@@ -19,14 +20,7 @@ class Bench_gfx90a(benchmark_gfx9_base.Bench_gfx9):
     def __init__(self, device_id: int, cache_sizes: dict) -> None:
         super().__init__(device_id, cache_sizes)
 
-        self.unsupported_data_types = [
-            "MALL",
-            "MFMA-F4",
-            "MFMA-F6",
-            "MFMA-F6F4",
-            "MFMA-MXF8",
-            "MFMA-F8",
-        ]
+        self.unsupported_data_types = ceilings.UNSUPPORTED_DATA_TYPES["gfx90a"]
 
         self.matrix_ops = {
             "F4": 0,

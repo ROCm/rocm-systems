@@ -8,6 +8,7 @@
 #
 # -----------------------------------------------------------------------------
 
+from .. import ceilings
 from . import benchmark_gfx11_base
 
 
@@ -17,3 +18,5 @@ from . import benchmark_gfx11_base
 class Bench_gfx1151(benchmark_gfx11_base.Bench_gfx11):
     def __init__(self, device_id: int, cache_sizes: dict) -> None:
         super().__init__(device_id, cache_sizes)
+
+        self.unsupported_data_types = ceilings.UNSUPPORTED_DATA_TYPES["gfx1151"]

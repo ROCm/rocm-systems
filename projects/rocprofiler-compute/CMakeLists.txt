@@ -587,6 +587,13 @@ add_test(
 )
 
 add_test(
+    NAME test_ceilings
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_ceilings.xml ${COV_OPTION}
+        tests/unit/roofline/benchmark/test_ceilings.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
     NAME test_analysis_cli
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_analysis_cli.xml
@@ -651,6 +658,13 @@ add_test(
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_roofline_analyze.xml
         ${COV_OPTION} tests/integration/test_roofline_analyze.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_run_benchmark
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_run_benchmark.xml
+        ${COV_OPTION} tests/unit/roofline/test_run_benchmark.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -1124,6 +1138,7 @@ if(${ENABLE_COVERAGE})
         test_amdsmi_interface
         test_noise_clamper
         test_benchmark_base
+        test_ceilings
         test_analysis_cli
         test_pattern_matching
         test_list_metrics_cli
@@ -1139,6 +1154,7 @@ if(${ENABLE_COVERAGE})
         test_roofline_calc
         test_roofline_analyze
         test_roofline_main
+        test_run_benchmark
         test_report_shell
         test_rocpd_data
         test_profile_torch_trace
