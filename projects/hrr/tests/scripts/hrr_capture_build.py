@@ -24,6 +24,8 @@ LD_LIBRARY_PATH.
                  which amdhip64 and ROCr the suite loads.
   install-base   On a GPU machine: install the run-time artifacts of the
                  recorded base run and the capture-enabled amdhip64.
+  fetch-rocjitsu Install rocJitsu from the newest develop run that has the
+                 rocJitsu artifacts, and report whether they hold the launcher.
 """
 
 from __future__ import annotations
@@ -77,6 +79,10 @@ RUNTIME_ARTIFACTS = (
     "core-runtime_lib",
     "core-hip_lib",
 )
+
+# The rocJitsu launcher, its interposer and its KMD configs, for the simulator
+# jobs. Only TheRock refs that package bin/rocjitsu ship the launcher.
+ROCJITSU_ARTIFACTS = ("rocjitsu_run", "rocjitsu_lib")
 
 # What CLR's install writes into lib/: amdhip64 plus hiprtc and its builtins.
 # All of it comes from this checkout, so all of it is carried to the test job.
@@ -134,7 +140,7 @@ def pick_base_run(finder_json: dict) -> dict:
     }
 
 
-def find_base_run(therock: Path) -> dict:
+def find_base_run(therock: Path, artifacts: Sequence[str] = BUILD_ARTIFACTS) -> dict:
     cmd = [
         sys.executable,
         therock / "build_tools" / "find_latest_artifacts.py",
@@ -148,7 +154,7 @@ def find_base_run(therock: Path) -> dict:
         BASE_ARTIFACT_GROUP,
         "--json",
     ]
-    for artifact in BUILD_ARTIFACTS:
+    for artifact in artifacts:
         cmd += ["--require-artifact", f"{artifact}_generic"]
     print("+ " + " ".join(str(c) for c in cmd), flush=True)
     # Only stdout is captured: it carries the JSON, stderr the finder's log.
@@ -470,15 +476,55 @@ def cache_key_digest(
     return digest.hexdigest()
 
 
-def cmd_cache_key(args: argparse.Namespace) -> int:
-    base = json.loads(args.base_json.read_text())
-    digest = cache_key_digest(args.src, base, args.therock_pin, args.image, args.archs)
-    line = f"digest={digest}\n"
+def write_output(line: str) -> None:
     output = os.environ.get("GITHUB_OUTPUT", "")
     if output:
         with open(output, "a", encoding="utf-8") as handle:
             handle.write(line)
     sys.stdout.write(line)
+
+
+def cmd_cache_key(args: argparse.Namespace) -> int:
+    base = json.loads(args.base_json.read_text())
+    digest = cache_key_digest(args.src, base, args.therock_pin, args.image, args.archs)
+    write_output(f"digest={digest}\n")
+    return 0
+
+
+def missing_rocjitsu(prefix: Path) -> list[str]:
+    """What hrr-gpu.yml packages from a prebuilt rocJitsu and prefix lacks."""
+    missing = []
+    if not (prefix / "bin" / "rocjitsu").is_file():
+        missing.append("bin/rocjitsu")
+    if not any((prefix / "lib").glob("librocjitsu.so*")):
+        missing.append("lib/librocjitsu.so")
+    if not (prefix / "share" / "rocjitsu" / "configs").is_dir():
+        missing.append("share/rocjitsu/configs")
+    return missing
+
+
+def cmd_fetch_rocjitsu(
+    args: argparse.Namespace,
+    runner: Runner = run,
+    finder: Callable[[Path, Sequence[str]], dict] = find_base_run,
+) -> int:
+    """Writes prebuilt=true when --rocjitsu-dir now holds the whole launcher
+    layout. Any other outcome writes prebuilt=false, and the caller builds
+    rocJitsu."""
+    found = False
+    try:
+        base = finder(args.therock, ROCJITSU_ARTIFACTS)
+        print(f"rocJitsu: {base['repo']} run {base['run_id']} at {base['commit']}")
+        runner(fetch_command(args.therock, base, args.rocjitsu_dir, ROCJITSU_ARTIFACTS))
+        missing = missing_rocjitsu(args.rocjitsu_dir)
+        if missing:
+            print(
+                f"{args.rocjitsu_dir} lacks {', '.join(missing)}; rocJitsu will be built"
+            )
+        found = not missing
+    except (SystemExit, subprocess.CalledProcessError) as e:
+        print(f"::warning::no prebuilt rocJitsu, so it will be built: {e}")
+    write_output(f"prebuilt={'true' if found else 'false'}\n")
     return 0
 
 
@@ -506,7 +552,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
         "command",
-        choices=("fetch-base", "build", "stage", "verify", "install-base", "cache-key"),
+        choices=(
+            "fetch-base",
+            "build",
+            "stage",
+            "verify",
+            "install-base",
+            "cache-key",
+            "fetch-rocjitsu",
+        ),
     )
     parser.add_argument("--therock", type=Path, default=Path("therock"))
     parser.add_argument("--src", type=Path, default=Path.cwd())
@@ -514,6 +568,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--build", type=Path, default=Path("build"))
     parser.add_argument("--capture-lib", type=Path, default=Path("build/capture-lib"))
     parser.add_argument("--base-json", type=Path, default=Path("build/base.json"))
+    parser.add_argument(
+        "--rocjitsu-dir", type=Path, default=Path("build/rocjitsu-prebuilt")
+    )
     parser.add_argument(
         "--archs",
         default="",
@@ -524,7 +581,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--image", default="", help="Build container image digest")
     args = parser.parse_args(argv)
-    for name in ("therock", "src", "dist", "build", "capture_lib", "base_json"):
+    for name in (
+        "therock",
+        "src",
+        "dist",
+        "build",
+        "capture_lib",
+        "base_json",
+        "rocjitsu_dir",
+    ):
         setattr(args, name, getattr(args, name).resolve())
     if args.command in ("build", "verify", "cache-key") and not args.archs:
         config = hrr_test_config.load(args.src / INTEGRATION_CONFIG)
@@ -541,6 +606,7 @@ def main(argv: list[str] | None = None) -> int:
         "verify": cmd_verify,
         "install-base": cmd_install_base,
         "cache-key": cmd_cache_key,
+        "fetch-rocjitsu": cmd_fetch_rocjitsu,
     }[args.command](args)
 
 

@@ -26,6 +26,10 @@ on:
         description: Real-GPU rows from that list. [] skips the GPU jobs.
         type: string
         default: "[]"
+      build_rocjitsu:
+        description: Build rocJitsu from this tree instead of taking TheRock's
+        type: boolean
+        default: true
       ignore_test_config:
         description: Run the cases the suite config skips
         type: boolean
@@ -105,11 +109,12 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # rocJitsu has no family or architecture argument: every simulator job would
-  # build the same binary, so build it once here. The simulator jobs download
-  # it from the artifact. The launcher is tools/rocjitsu/rocjitsu and finds
-  # librocjitsu.so at ../../ from its own path, so the tarball keeps the build/rocjitsu layout, and tar keeps the
-  # exec bit that upload-artifact would drop.
+  # rocJitsu has no family or architecture argument, so every simulator job
+  # uses the same launcher, prepared once here: TheRock's from a develop run
+  # unless build_rocjitsu is set or no run ships it, else built from this tree.
+  # The tarball has bin/rocjitsu and lib/librocjitsu.so*, which the launcher
+  # finds at ../lib from its own path, plus share/rocjitsu/configs when it is
+  # TheRock's. tar keeps the exec bit that upload-artifact would drop.
   rocjitsu-build:
     name: Build rocJitsu
     if: inputs.simulator_families != '[]'
@@ -122,6 +127,7 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             emulation/rocjitsu
+            projects/hrr/tests/scripts
             runtimes/api-headers
             shared/machine-readable-isa
 
@@ -138,14 +144,6 @@ jobs:
             requirements.txt
           sparse-checkout-cone-mode: false
 
-      - name: Install rocJitsu build packages
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo -n apt-get update
-          sudo -n DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            build-essential ca-certificates clang libdrm-dev ninja-build
-
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.12"
@@ -159,7 +157,24 @@ jobs:
             -r therock/requirements.txt 'cmake==3.31.10' 'PyYAML==6.0.2'
           echo "${RUNNER_TEMP}/hrr-venv/bin" >> "${GITHUB_PATH}"
 
+      - name: Fetch TheRock's rocJitsu
+        id: prebuilt
+        if: ${{ !inputs.build_rocjitsu }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python projects/hrr/tests/scripts/hrr_capture_build.py fetch-rocjitsu
+
+      - name: Install rocJitsu build packages
+        if: ${{ steps.prebuilt.outputs.prebuilt != 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo -n apt-get update
+          sudo -n DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential ca-certificates clang libdrm-dev ninja-build
+
       - name: Build rocJitsu
+        if: ${{ steps.prebuilt.outputs.prebuilt != 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -168,12 +183,23 @@ jobs:
 
       - name: Package rocJitsu
         shell: bash
+        env:
+          PREBUILT: ${{ steps.prebuilt.outputs.prebuilt }}
         run: |
           set -euo pipefail
-          # The glob must expand inside build/rocjitsu, so cd there. tar keeps
-          # symlinks, so a versioned librocjitsu.so chain survives.
-          ls -l build/rocjitsu/tools/rocjitsu/rocjitsu build/rocjitsu/librocjitsu.so*
-          (cd build/rocjitsu && tar -cf "${GITHUB_WORKSPACE}/rocjitsu.tar" tools/rocjitsu/rocjitsu librocjitsu.so*)
+          mkdir -p pkg/bin pkg/lib
+          # cp -a keeps the symlinks of a versioned librocjitsu.so chain.
+          if [[ "${PREBUILT}" == "true" ]]; then
+            src=build/rocjitsu-prebuilt
+            cp -a "${src}/bin/rocjitsu" pkg/bin/
+            cp -a "${src}"/lib/librocjitsu.so* pkg/lib/
+            mkdir -p pkg/share/rocjitsu
+            cp -a "${src}/share/rocjitsu/configs" pkg/share/rocjitsu/
+          else
+            cp -a build/rocjitsu/tools/rocjitsu/rocjitsu pkg/bin/
+            cp -a build/rocjitsu/librocjitsu.so* pkg/lib/
+          fi
+          tar -C pkg -cf rocjitsu.tar .
           tar -tvf rocjitsu.tar
 
       - name: Upload rocJitsu
@@ -257,8 +283,13 @@ jobs:
           set -euo pipefail
           mkdir -p build/rocjitsu
           tar -C build/rocjitsu -xf rocjitsu-artifact/rocjitsu.tar
-          ls -l build/rocjitsu/tools/rocjitsu build/rocjitsu/librocjitsu.so*
-          echo "${GITHUB_WORKSPACE}/build/rocjitsu/tools/rocjitsu" >> "${GITHUB_PATH}"
+          ls -l build/rocjitsu/bin build/rocjitsu/lib
+          # TheRock's launcher runs with the configs of the same build.
+          configs=build/rocjitsu/share/rocjitsu/configs
+          if [[ -d "${configs}" ]]; then
+            cp -a "${configs}/." emulation/rocjitsu/configs/
+          fi
+          echo "${GITHUB_WORKSPACE}/build/rocjitsu/bin" >> "${GITHUB_PATH}"
 
       - name: Download build
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1

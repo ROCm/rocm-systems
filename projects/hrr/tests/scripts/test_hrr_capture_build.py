@@ -4,12 +4,16 @@
 """Tests for hrr_capture_build.py."""
 
 import argparse
+import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -362,6 +366,95 @@ class FetchBaseTest(unittest.TestCase):
             cmd = [str(c) for c in calls[0]]
             self.assertEqual(cmd[cmd.index("--run-id") + 1], "123")
             self.assertIn("core-runtime_dev", cmd)
+
+
+class FetchRocjitsuTest(unittest.TestCase):
+    # What fetch_artifacts.py --flatten writes for rocjitsu_run and rocjitsu_lib
+    # from a TheRock ref that does not package the launcher.
+    TODAY = (
+        "bin/rj_pretranslate",
+        "lib/librocjitsu.so",
+        "share/rocjitsu/configs/a.json",
+    )
+    LAUNCHER = "bin/rocjitsu"
+
+    def fetch(self, finder, files=(), fail_after_writing=False):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "github_output"
+            rocjitsu_dir = Path(tmp) / "rocjitsu"
+            calls = []
+
+            def runner(cmd):
+                calls.append([str(c) for c in cmd])
+                for rel in files:
+                    (rocjitsu_dir / rel).parent.mkdir(parents=True, exist_ok=True)
+                    (rocjitsu_dir / rel).write_text("")
+                if fail_after_writing:
+                    raise subprocess.CalledProcessError(1, cmd)
+
+            args = argparse.Namespace(therock=Path("/t"), rocjitsu_dir=rocjitsu_dir)
+            env = dict(os.environ, GITHUB_OUTPUT=str(out))
+            with mock.patch.dict(os.environ, env), redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    cb.cmd_fetch_rocjitsu(args, runner=runner, finder=finder), 0
+                )
+            return calls, out.read_text()
+
+    @staticmethod
+    def found(*_):
+        return cb.pick_base_run(FINDER_FOUND)
+
+    def test_launcher_in_the_artifacts(self):
+        requested = []
+
+        def finder(_therock, artifacts):
+            requested.append(artifacts)
+            return cb.pick_base_run(FINDER_FOUND)
+
+        calls, output = self.fetch(finder, self.TODAY + (self.LAUNCHER,))
+        self.assertEqual(output, "prebuilt=true\n")
+        self.assertEqual(requested, [cb.ROCJITSU_ARTIFACTS])
+        self.assertEqual(calls[0][calls[0].index("--run-id") + 1], "123")
+        self.assertIn("rocjitsu_run", calls[0])
+
+    def test_todays_artifacts_lack_the_launcher(self):
+        _, output = self.fetch(self.found, self.TODAY)
+        self.assertEqual(output, "prebuilt=false\n")
+
+    def test_launcher_without_its_interposer(self):
+        files = (self.LAUNCHER, "share/rocjitsu/configs/a.json")
+        _, output = self.fetch(self.found, files)
+        self.assertEqual(output, "prebuilt=false\n")
+
+    def test_fetch_that_fails_after_writing_the_launcher(self):
+        _, output = self.fetch(
+            self.found, self.TODAY + (self.LAUNCHER,), fail_after_writing=True
+        )
+        self.assertEqual(output, "prebuilt=false\n")
+
+    def test_finder_finds_no_run(self):
+        # find_latest_artifacts.py exits 1 when no run matches.
+        def finder(*_):
+            raise subprocess.CalledProcessError(1, ["find_latest_artifacts.py"])
+
+        calls, output = self.fetch(finder, self.TODAY + (self.LAUNCHER,))
+        self.assertEqual(calls, [])
+        self.assertEqual(output, "prebuilt=false\n")
+
+    def test_finder_requires_the_rocjitsu_artifacts(self):
+        result = mock.Mock(stdout=json.dumps(FINDER_FOUND))
+        with mock.patch.object(cb.subprocess, "run", return_value=result) as run:
+            with redirect_stdout(io.StringIO()):
+                cb.find_base_run(Path("/t"), cb.ROCJITSU_ARTIFACTS)
+        cmd = [str(c) for c in run.call_args.args[0]]
+        required = [cmd[i + 1] for i, c in enumerate(cmd) if c == "--require-artifact"]
+        self.assertEqual(required, ["rocjitsu_run_generic", "rocjitsu_lib_generic"])
+
+    def test_fetch_rocjitsu_command_and_its_directory(self):
+        # hrr-gpu.yml packages from build/rocjitsu-prebuilt.
+        args = cb.parse_args(["fetch-rocjitsu"])
+        self.assertEqual(args.command, "fetch-rocjitsu")
+        self.assertEqual(args.rocjitsu_dir, Path("build/rocjitsu-prebuilt").resolve())
 
 
 if __name__ == "__main__":
