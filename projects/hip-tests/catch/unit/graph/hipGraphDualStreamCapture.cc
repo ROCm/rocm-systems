@@ -10,15 +10,17 @@
  * @ingroup GraphTest
  * A deep graph captured from two streams, shaped like a dual-stream MoE layer: each layer forks
  * from the main stream to a side stream, runs a three-kernel branch and a one-kernel branch in
- * parallel, and joins them with an add whose output feeds the next layer. The graph is long
- * enough for the executor to spread it over several hardware queues, and replayed many times so
- * per-queue signal pools wrap around. Kernels spin so the branches really overlap. Every
+ * parallel, and joins them with an add whose output feeds the next layer. The executor spreads
+ * the parallel branches of each level over its hardware queues, so every fork and join becomes a
+ * cross-queue wait. Every kernel reads its inputs first, then spins, then writes: a consumer that
+ * starts before its producer has finished reads poison, whichever branch is the long one. Every
  * intermediate buffer is poisoned before each replay and the result is compared exactly with a
- * host reference, so a dropped fork or join wait reads poisoned or stale data and fails.
+ * host reference, so a dropped fork or join wait fails the test.
  */
 
 #include <hip_test_common.hh>
 
+#include <algorithm>
 #include <cstdint>
 #include <vector>
 
@@ -29,25 +31,51 @@ constexpr size_t kElems = 64 * 1024;
 constexpr int kReplays = 20;
 constexpr uint32_t kPoison = 0xDEADBEEFu;
 
-// Spin lengths in wall_clock64 ticks. The three-kernel branch is the long one.
-constexpr unsigned long long kHeavySpin = 20000;
-constexpr unsigned long long kLightSpin = 2000;
+// Spin lengths in microseconds. The three-kernel branch is the long one.
+constexpr unsigned long long kHeavySpinUs = 200;
+constexpr unsigned long long kLightSpinUs = 20;
+constexpr unsigned long long kAddSpinUs = 20;
 
-__global__ void MulAddSpin(uint32_t* out, const uint32_t* in, uint32_t mul, uint32_t add,
-                           unsigned long long spin_ticks, size_t n) {
+unsigned long long WallClockTicksPerUs() {
+  int device = 0;
+  int wall_clock_khz = 0;
+  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipDeviceGetAttribute(&wall_clock_khz, hipDeviceAttributeWallClockRate, device));
+  return std::max(1ULL, static_cast<unsigned long long>(wall_clock_khz) / 1000);
+}
+
+// Reads before the spin, so the read happens as early as the kernel starts; the volatile load and
+// the compiler barrier keep it from being moved after the loop.
+__device__ uint32_t LoadEarly(const uint32_t* p) {
+  const uint32_t v = *static_cast<const volatile uint32_t*>(p);
+  asm volatile("" ::: "memory");
+  return v;
+}
+
+__device__ void Spin(unsigned long long ticks) {
   const unsigned long long start = wall_clock64();
-  while (wall_clock64() - start < spin_ticks) {
-  }
-  const size_t i = blockIdx.x * static_cast<size_t>(blockDim.x) + threadIdx.x;
-  if (i < n) {
-    out[i] = in[i] * mul + add;
+  while (wall_clock64() - start < ticks) {
   }
 }
 
-__global__ void Add(uint32_t* out, const uint32_t* a, const uint32_t* b, size_t n) {
+__global__ void MulAddSpin(uint32_t* out, const uint32_t* in, uint32_t mul, uint32_t add,
+                           unsigned long long spin_ticks, size_t n) {
   const size_t i = blockIdx.x * static_cast<size_t>(blockDim.x) + threadIdx.x;
+  const uint32_t x = i < n ? LoadEarly(&in[i]) : 0;
+  Spin(spin_ticks);
   if (i < n) {
-    out[i] = a[i] + b[i];
+    out[i] = x * mul + add;
+  }
+}
+
+__global__ void AddSpin(uint32_t* out, const uint32_t* a, const uint32_t* b,
+                        unsigned long long spin_ticks, size_t n) {
+  const size_t i = blockIdx.x * static_cast<size_t>(blockDim.x) + threadIdx.x;
+  const uint32_t x = i < n ? LoadEarly(&a[i]) : 0;
+  const uint32_t y = i < n ? LoadEarly(&b[i]) : 0;
+  Spin(spin_ticks);
+  if (i < n) {
+    out[i] = x + y;
   }
 }
 
@@ -73,27 +101,33 @@ uint32_t Reference(uint32_t x) {
   return x;
 }
 
-void RoutedBranch(const LayerBuffers& b, const uint32_t* in, int layer, hipStream_t s) {
+void RoutedBranch(const LayerBuffers& b, const uint32_t* in, int layer, unsigned long long ticks,
+                  hipStream_t s) {
   const dim3 block(256);
   const dim3 grid((kElems + block.x - 1) / block.x);
-  MulAddSpin<<<grid, block, 0, s>>>(b.h1, in, 3u, static_cast<uint32_t>(layer), kHeavySpin,
-                                    kElems);
-  MulAddSpin<<<grid, block, 0, s>>>(b.h2, b.h1, 5u, 7u, kHeavySpin, kElems);
-  MulAddSpin<<<grid, block, 0, s>>>(b.routed, b.h2, 9u, 1u, kHeavySpin, kElems);
+  MulAddSpin<<<grid, block, 0, s>>>(b.h1, in, 3u, static_cast<uint32_t>(layer), ticks, kElems);
+  MulAddSpin<<<grid, block, 0, s>>>(b.h2, b.h1, 5u, 7u, ticks, kElems);
+  MulAddSpin<<<grid, block, 0, s>>>(b.routed, b.h2, 9u, 1u, ticks, kElems);
 }
 
-void SharedBranch(const LayerBuffers& b, const uint32_t* in, int layer, hipStream_t s) {
+void SharedBranch(const LayerBuffers& b, const uint32_t* in, int layer, unsigned long long ticks,
+                  hipStream_t s) {
   const dim3 block(256);
   const dim3 grid((kElems + block.x - 1) / block.x);
-  MulAddSpin<<<grid, block, 0, s>>>(b.shared, in, 10u, static_cast<uint32_t>(layer), kLightSpin,
+  MulAddSpin<<<grid, block, 0, s>>>(b.shared, in, 10u, static_cast<uint32_t>(layer), ticks,
                                     kElems);
 }
 
-// Captures the layers from |main| and |side|. With |heavy_on_side| the three-kernel branch runs
-// on the side stream ("reversed"), otherwise the one-kernel branch does ("original").
+// Captures the layers from |main| and |side|. With |heavy_on_side| the three-kernel branch is
+// captured on the side stream ("reversed"), otherwise the one-kernel branch is ("original").
+// The executor assigns queues per dependency level, not per capture stream, so the two cases
+// differ in the order the branches are captured, not in which stream runs them.
 hipGraph_t CaptureLayers(const std::vector<LayerBuffers>& layers, const uint32_t* input,
                          bool heavy_on_side, hipStream_t main, hipStream_t side,
                          std::vector<hipEvent_t>& events) {
+  const unsigned long long ticks_per_us = WallClockTicksPerUs();
+  const unsigned long long heavy = kHeavySpinUs * ticks_per_us;
+  const unsigned long long light = kLightSpinUs * ticks_per_us;
   hipGraph_t graph = nullptr;
   HIP_CHECK(hipStreamBeginCapture(main, hipStreamCaptureModeGlobal));
   const uint32_t* in = input;
@@ -105,18 +139,19 @@ hipGraph_t CaptureLayers(const std::vector<LayerBuffers>& layers, const uint32_t
     HIP_CHECK(hipEventRecord(fork, main));
     HIP_CHECK(hipStreamWaitEvent(side, fork, 0));
     if (heavy_on_side) {
-      RoutedBranch(b, in, l, side);
-      SharedBranch(b, in, l, main);
+      RoutedBranch(b, in, l, heavy, side);
+      SharedBranch(b, in, l, light, main);
     } else {
-      SharedBranch(b, in, l, side);
-      RoutedBranch(b, in, l, main);
+      SharedBranch(b, in, l, light, side);
+      RoutedBranch(b, in, l, heavy, main);
     }
     // Join: the add waits for the side-stream branch.
     HIP_CHECK(hipEventRecord(join, side));
     HIP_CHECK(hipStreamWaitEvent(main, join, 0));
     const dim3 block(256);
     const dim3 grid((kElems + block.x - 1) / block.x);
-    Add<<<grid, block, 0, main>>>(b.out, b.routed, b.shared, kElems);
+    AddSpin<<<grid, block, 0, main>>>(b.out, b.routed, b.shared, kAddSpinUs * ticks_per_us,
+                                      kElems);
     in = b.out;
   }
   HIP_CHECK(hipStreamEndCapture(main, &graph));
@@ -159,6 +194,8 @@ void RunDualStreamGraph(bool heavy_on_side) {
   for (size_t i = 0; i < kElems; ++i) {
     expected[i] = Reference(host_input[i]);
   }
+  // A layer map that isn't one-to-one would collapse the elements to one value and hide errors.
+  REQUIRE(expected[0] != expected[1]);
 
   std::vector<uint32_t> result(kElems);
   for (int replay = 0; replay < kReplays; ++replay) {
@@ -201,8 +238,8 @@ void RunDualStreamGraph(bool heavy_on_side) {
  * Test Description
  * ------------------------
  *  - Captures a 32-layer dual-stream graph (event fork/join per layer) with the one-kernel
- *    branch on the side stream, replays it 20 times with poisoned intermediates and compares the
- *    result with a host reference.
+ *    branch captured on the side stream, as in the PyTorch dual-stream MoE pattern, replays it 20
+ *    times with poisoned intermediates and compares the result with a host reference.
  * Test source
  * ------------------------
  *  - unit/graph/hipGraphDualStreamCapture.cc
@@ -217,8 +254,8 @@ HIP_TEST_CASE(Unit_hipGraphDualStreamCapture_LightBranchOnSideStream) {
 /**
  * Test Description
  * ------------------------
- *  - Same as above with the three-kernel branch on the side stream, so the join waits for the
- *    longer branch.
+ *  - Same as above with the three-kernel branch captured on the side stream, which changes the
+ *    order the executor sees the two branches of each layer in.
  * Test source
  * ------------------------
  *  - unit/graph/hipGraphDualStreamCapture.cc
