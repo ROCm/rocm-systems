@@ -24,6 +24,7 @@ Execution semantics are provided by ``SemanticsSpec`` from
 import cgen
 
 from amdisa.codegen.execute import input_policy
+from amdisa.codegen.execute.conversion import share_stages
 from amdisa.codegen.execute.floating_policy import (
     F16_TRANSCENDENTAL_OPS,
     FLUSH_NEAREST_F32_OPS,
@@ -53,11 +54,14 @@ from amdisa.fieldless_policy import (
 )
 from amdisa.semantics import (
     F16_INPUT_CONVERSION_DTYPES,
-    F32_INPUT_CONVERSION_DTYPES,
-    F32_TO_INTEGER_DTYPES,
+    INTEGER_RESULT_CONVERSIONS,
     INTEGER_RESULT_OPERATIONS,
+    INTEGER_SOURCE_CONVERSIONS,
+    TO_FLOAT_CONVERSIONS,
     InstructionSemantics,
     SemanticsSpec,
+    takes_output_modifiers,
+    takes_source_modifiers,
 )
 from amdisa.isa_profile import DppOpcodeRule, FloatDotAccumulation
 
@@ -70,48 +74,15 @@ from amdisa.codegen.shared_baselines import (
     CDNA_BASELINE as _CDNA_BASELINE,
     CDNA_ARCHES as _CDNA_ARCHES,
 )
-from amdisa.codegen.execute.vop3_modifiers import (
-    vop3_src_mod,
-    vop3_dst_mod,
-)
+from amdisa.codegen.execute.vop3_modifiers import vop3_src_mod
 from amdisa.codegen.execute.vector_special import (
-    gen_vector_mbcnt,
-    gen_vector_mad_64_32,
-    gen_vector_mad_32_16,
-    gen_vector_div_fixup,
-    gen_vector_div_scale,
-    gen_vector_div_fmas,
-    gen_vector_dot,
-    gen_vector_dot2c_bf16,
-    gen_vector_bitop3,
-    gen_vector_permlane_swap,
-    gen_vector_permlane,
-    gen_vector_permlane64,
     gen_vector_cvt_pk,
     gen_vector_cvt_scale,
 )
-from amdisa.codegen.execute.vector_cmp import (
-    gen_vector_cmp_class,
-    gen_vector_cmp,
-    gen_vector_cmpx,
-    gen_vector_add_co,
-)
 from amdisa.codegen.execute.packed import (
-    gen_pk_binop,
-    gen_pk_ternary,
-    gen_pk_binop_f32,
-    gen_pk_ternary_f32,
-    gen_pk_mov_b32,
-    gen_mad_mix_f32,
-    gen_mad_mix_lo_hi,
     gen_dot2,
     gen_dot4,
     gen_dot8,
-)
-from amdisa.codegen.execute.matrix import (
-    gen_accvgpr_read,
-    gen_accvgpr_write,
-    gen_mfma,
 )
 
 
@@ -6668,49 +6639,31 @@ class CodeGenerator:
                     and dtype in ('b16', 'u16')
                 )
                 is_float_op = dtype in ('f16', 'f32', 'f64', 'bf16')
-                # Integer sources take no ABS/NEG, but the float result takes
-                # CLAMP and OMOD like any other VOP3 float result.
-                is_integer_to_float = cls == 'vector_unary' and dtype in (
-                    'f32_i32',
-                    'f32_u32',
-                    'f32_ubyte0',
-                    'f32_ubyte1',
-                    'f32_ubyte2',
-                    'f32_ubyte3',
-                    'f64_i32',
-                    'f64_u32',
-                )
-                is_f32_input_conversion = (
-                    cls == 'vector_unary' and dtype in F32_INPUT_CONVERSION_DTYPES
-                )
-                is_f16_input_conversion = (
-                    cls == 'vector_unary' and dtype in F16_INPUT_CONVERSION_DTYPES
+                is_conversion = cls == 'vector_unary' and dtype in (
+                    INTEGER_SOURCE_CONVERSIONS
+                    | INTEGER_RESULT_CONVERSIONS
+                    | TO_FLOAT_CONVERSIONS.keys()
+                    | F16_INPUT_CONVERSION_DTYPES
                 )
                 if (
                     is_vop3
-                    and (
-                        is_float_op
-                        or is_integer_to_float
-                        or is_f32_input_conversion
-                        or is_f16_input_conversion
-                    )
+                    and (is_float_op or is_conversion)
                     and not is_true16_mov
                     and cls != 'pseudo_scalar_unary'
                 ):
                     from amdisa.sema_enrich import enrich_block
 
-                    ef = set() if is_integer_to_float else {'neg'}
-                    if has_abs and not is_integer_to_float:
+                    allows_source_modifiers = (
+                        not is_conversion or takes_source_modifiers(dtype)
+                    )
+                    ef = {'neg'} if allows_source_modifiers else set()
+                    if has_abs and allows_source_modifiers:
                         ef.add('abs')
                     inst_fields = getattr(self, '_current_inst_fields', set())
-                    integer_result = (
-                        dtype in F32_TO_INTEGER_DTYPES
-                        or op in INTEGER_RESULT_OPERATIONS
-                    )
-                    if 'clamp' in inst_fields and not integer_result:
-                        ef.add('clamp')
-                    if 'omod' in inst_fields and not integer_result:
-                        ef.add('omod')
+                    if takes_output_modifiers(
+                        inst.name, dtype if is_conversion else '', op
+                    ):
+                        ef |= {'clamp', 'omod'} & inst_fields
                     sema_block = enrich_block(sema_block, enc_field_names=frozenset(ef))
                 # Preserve 6470's scalar_saveexec -> b64 dtype fix. Per-operand
                 # bit widths (op_widths) subsume the old src_width/dst_width name
@@ -13789,6 +13742,7 @@ class CodeGenerator:
                                 ),
                                 cmpx_writes_vcc=self.isa_spec.profile.cmpx_writes_vcc,
                                 result_writer=_mask_result_writer,
+                                arch_name=self.generated_dir_name,
                             )
                             if self.generated_dir_name in ('cdna5', 'cdna4', 'rdna4')
                             else None
@@ -13802,7 +13756,9 @@ class CodeGenerator:
                             or _renamed_vop3p_probe
                         )
                         _local_simd_probe_body = ''
-                        _local_scalar_body = _local_body
+                        _local_simd_probe, _local_scalar_body = share_stages(
+                            _local_simd_probe, _local_body
+                        )
                         _local_execute_body = _local_scalar_body
                         if _local_simd_probe:
                             _local_simd_body = (
@@ -15173,6 +15129,11 @@ class CodeGenerator:
                 'amdgpu::vop3_fp8_decode_e5m3(inst)',
             )
             prefixed_body = _re.sub(
+                r'(amdgpu::sdwa_conversion_to_f16<[\w:]+>)\(\*this, wf\)',
+                r'\1(inst, wf)',
+                prefixed_body,
+            )
+            prefixed_body = _re.sub(
                 r'\s*\(void\)wf;\s*(?://[^\n]*)?\n?', '\n', prefixed_body
             )
             result_format = self._sdwa_result_format(sem)
@@ -15327,10 +15288,13 @@ class CodeGenerator:
                 f'[[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf'
                 f'{result_parameter}) {{'
             )
-            probe = simd_probe_line(
-                mnemonic,
-                true16_vop3=is_true16_vop3,
-                result_writer='commit_result' if uses_result_writer else None,
+            probe, prefixed_body = share_stages(
+                simd_probe_line(
+                    mnemonic,
+                    true16_vop3=is_true16_vop3,
+                    result_writer='commit_result' if uses_result_writer else None,
+                ),
+                prefixed_body,
             )
             if mnemonic.rsplit('_', 1)[0].upper() in FLUSH_NEAREST_F32_OPS:
                 # These mappings ignore guest rounding. Keep output scaling and clamp
