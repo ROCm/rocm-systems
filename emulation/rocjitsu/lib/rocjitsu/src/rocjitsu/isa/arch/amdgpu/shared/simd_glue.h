@@ -4706,8 +4706,8 @@ template <Vop3pDotHalfFormat Fmt, typename Inst>
     const F src0_hi = half(raw0 >> 16, neg_src0_hi);
     const F src1_lo = half(raw1 & 0xFFFFu, neg_src1_lo);
     const F src1_hi = half(raw1 >> 16, neg_src1_hi);
-    F r = src0_lo * src1_lo + src0_hi * src1_hi + acc;
-    dst.template store_native<float>(base, r, chunk);
+    F result = src0_lo * src1_lo + src0_hi * src1_hi + acc;
+    dst.template store_native<float>(base, result, chunk);
   }
   return true;
 }
