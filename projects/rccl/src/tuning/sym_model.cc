@@ -20,10 +20,11 @@ NCCL_PARAM(SymCTAs, "SYM_CTAS", 0)
 
 static constexpr float disableTime = 1.e30f;
 
-int ncclSymkModelCtasEnvOverride() {
+int ncclSymkModelCtasEnvOverride(enum ncclSymkKernelId kernelId) {
+  int maxBlocks = kernelId == ncclSymkKernelId_AllGather_HierLsaST ? ncclSymkAgHierMaxBlocks : ncclSymkMaxBlocks;
   int64_t nUserCTAs = ncclParamSymCTAs();
   if (nUserCTAs < 1) return 0;
-  if (nUserCTAs > ncclSymkMaxBlocks) return ncclSymkMaxBlocks;
+  if (nUserCTAs > maxBlocks) return maxBlocks;
   return static_cast<int>(nUserCTAs);
 }
 
@@ -49,6 +50,26 @@ static bool rcclSymkAllGatherLLYieldsToST(struct ncclTuningInput_t* const inputs
          (inputs->tuningMask >> (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_ST) & 1) &&
          (inputs->winRegType == ncclSymSendRegRecvReg || inputs->winRegType == ncclSymSendNonregRecvReg) &&
          ncclSymkGfx950AllGatherPrefersStore(comm->nRanks, inputs->nBytes);
+}
+
+// In gfx1250 partition mode AllGather runs only LL, the store kernel and the hierarchical kernel, each
+// from where it overtakes the one before, wherever the latter two can run, unless the user forced or
+// narrowed the choice. Below the store kernel's threshold the cost model picks LL, and the store kernel
+// stays in for the launches LL cannot take, such as grouped ones.
+static bool rcclSymkAllGatherYieldsInPartitionMode(struct ncclTuningInput_t* const inputs,
+                                                   enum ncclSymkKernelId kernelId, uint32_t valid_kmask) {
+  constexpr int st = ncclSymkKernelId_AllGather_ST;
+  constexpr int hier = ncclSymkKernelId_AllGather_HierLsaST;
+  struct ncclComm* comm = inputs->comm;
+  if (inputs->func != ncclFuncAllGather || !ncclSymkIsGfx1250(comm) || !comm->hasMloPart ||
+      comm->tuningContext.forced[inputs->func] || !(valid_kmask >> st & 1) || !(valid_kmask >> hier & 1) ||
+      !(inputs->tuningMask >> (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + st) & 1) ||
+      !(inputs->tuningMask >> (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + hier) & 1) ||
+      inputs->winRegType != ncclSymSendRegRecvReg)
+    return false;
+  if (ncclSymkGfx1250AllGatherPrefersHier(comm->nRanks, inputs->nBytes)) return kernelId != hier;
+  if (ncclSymkGfx1250AllGatherPrefersStore(comm->nRanks, inputs->nBytes)) return kernelId != st;
+  return kernelId != st && kernelId != ncclSymkKernelId_AllGather_LL;
 }
 
 static int rcclSymkCalculateWarps(struct ncclTuningInput_t* const inputs, enum ncclSymkKernelId kernelId) {
@@ -110,7 +131,8 @@ ncclResult_t ncclTuningSymkModelSim(struct ncclTuningInput_t* const inputs, stru
   }
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  if (rcclSymkAllGatherLLYieldsToST(inputs, (enum ncclSymkKernelId)tuning->symKernelId, valid_kmask)) {
+  if (rcclSymkAllGatherLLYieldsToST(inputs, (enum ncclSymkKernelId)tuning->symKernelId, valid_kmask) ||
+      rcclSymkAllGatherYieldsInPartitionMode(inputs, (enum ncclSymkKernelId)tuning->symKernelId, valid_kmask)) {
     tuning->valid = 0;
     tuning->timeUs = -1.0;
     return ncclSuccess;
