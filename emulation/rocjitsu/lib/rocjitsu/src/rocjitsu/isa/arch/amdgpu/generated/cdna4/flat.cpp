@@ -8,7 +8,6 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx940_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx9_cache_flags.h"
-#include "util/except.h"
 #include <memory>
 
 namespace rocjitsu {
@@ -27,13 +26,24 @@ FlatLoadUbyteFlat::FlatLoadUbyteFlat(const MachineInst *inst)
       m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  src_operands_[1] = &flat_scratch;
-  src_operands_[2] = &gpumem;
-  src_operands_[3] = &m0;
-  num_src_ = 4;
+  src_operands_[1] = &gpumem;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -46,11 +56,23 @@ FlatLoadUbyteFlat::FlatLoadUbyteFlat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatLoadUbyteFlat(const MachineInst *opcode) {
+DecodeResult decodeFlatLoadUbyteFlat(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_load_ubyte", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatLoadUbyteFlat>(opcode);
 }
 } // namespace detail
@@ -68,13 +90,24 @@ FlatLoadSbyteFlat::FlatLoadSbyteFlat(const MachineInst *inst)
       m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  src_operands_[1] = &flat_scratch;
-  src_operands_[2] = &gpumem;
-  src_operands_[3] = &m0;
-  num_src_ = 4;
+  src_operands_[1] = &gpumem;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -87,11 +120,23 @@ FlatLoadSbyteFlat::FlatLoadSbyteFlat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatLoadSbyteFlat(const MachineInst *opcode) {
+DecodeResult decodeFlatLoadSbyteFlat(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_load_sbyte", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatLoadSbyteFlat>(opcode);
 }
 } // namespace detail
@@ -109,13 +154,24 @@ FlatLoadUshortFlat::FlatLoadUshortFlat(const MachineInst *inst)
       m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  src_operands_[1] = &flat_scratch;
-  src_operands_[2] = &gpumem;
-  src_operands_[3] = &m0;
-  num_src_ = 4;
+  src_operands_[1] = &gpumem;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -128,11 +184,23 @@ FlatLoadUshortFlat::FlatLoadUshortFlat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatLoadUshortFlat(const MachineInst *opcode) {
+DecodeResult decodeFlatLoadUshortFlat(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_load_ushort", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatLoadUshortFlat>(opcode);
 }
 } // namespace detail
@@ -150,13 +218,24 @@ FlatLoadSshortFlat::FlatLoadSshortFlat(const MachineInst *inst)
       m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  src_operands_[1] = &flat_scratch;
-  src_operands_[2] = &gpumem;
-  src_operands_[3] = &m0;
-  num_src_ = 4;
+  src_operands_[1] = &gpumem;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -169,11 +248,23 @@ FlatLoadSshortFlat::FlatLoadSshortFlat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatLoadSshortFlat(const MachineInst *opcode) {
+DecodeResult decodeFlatLoadSshortFlat(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_load_sshort", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatLoadSshortFlat>(opcode);
 }
 } // namespace detail
@@ -191,13 +282,24 @@ FlatLoadDwordFlat::FlatLoadDwordFlat(const MachineInst *inst)
       m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  src_operands_[1] = &flat_scratch;
-  src_operands_[2] = &gpumem;
-  src_operands_[3] = &m0;
-  num_src_ = 4;
+  src_operands_[1] = &gpumem;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -210,11 +312,23 @@ FlatLoadDwordFlat::FlatLoadDwordFlat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatLoadDwordFlat(const MachineInst *opcode) {
+DecodeResult decodeFlatLoadDwordFlat(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_load_dword", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatLoadDwordFlat>(opcode);
 }
 } // namespace detail
@@ -232,13 +346,24 @@ FlatLoadDwordx2Flat::FlatLoadDwordx2Flat(const MachineInst *inst)
       m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  src_operands_[1] = &flat_scratch;
-  src_operands_[2] = &gpumem;
-  src_operands_[3] = &m0;
-  num_src_ = 4;
+  src_operands_[1] = &gpumem;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -251,11 +376,23 @@ FlatLoadDwordx2Flat::FlatLoadDwordx2Flat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatLoadDwordx2Flat(const MachineInst *opcode) {
+DecodeResult decodeFlatLoadDwordx2Flat(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_load_dwordx2", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatLoadDwordx2Flat>(opcode);
 }
 } // namespace detail
@@ -273,13 +410,24 @@ FlatLoadDwordx3Flat::FlatLoadDwordx3Flat(const MachineInst *inst)
       m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  src_operands_[1] = &flat_scratch;
-  src_operands_[2] = &gpumem;
-  src_operands_[3] = &m0;
-  num_src_ = 4;
+  src_operands_[1] = &gpumem;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -292,11 +440,23 @@ FlatLoadDwordx3Flat::FlatLoadDwordx3Flat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatLoadDwordx3Flat(const MachineInst *opcode) {
+DecodeResult decodeFlatLoadDwordx3Flat(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_load_dwordx3", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatLoadDwordx3Flat>(opcode);
 }
 } // namespace detail
@@ -314,13 +474,24 @@ FlatLoadDwordx4Flat::FlatLoadDwordx4Flat(const MachineInst *inst)
       m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  src_operands_[1] = &flat_scratch;
-  src_operands_[2] = &gpumem;
-  src_operands_[3] = &m0;
-  num_src_ = 4;
+  src_operands_[1] = &gpumem;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -333,11 +504,23 @@ FlatLoadDwordx4Flat::FlatLoadDwordx4Flat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatLoadDwordx4Flat(const MachineInst *opcode) {
+DecodeResult decodeFlatLoadDwordx4Flat(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_load_dwordx4", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatLoadDwordx4Flat>(opcode);
 }
 } // namespace detail
@@ -356,12 +539,23 @@ FlatStoreByteFlat::FlatStoreByteFlat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &m0;
-  num_src_ = 4;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -374,11 +568,26 @@ FlatStoreByteFlat::FlatStoreByteFlat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  data.set_register_byte_mask(0x1);
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatStoreByteFlat(const MachineInst *opcode) {
+DecodeResult decodeFlatStoreByteFlat(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_store_byte", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatStoreByteFlat>(opcode);
 }
 } // namespace detail
@@ -397,12 +606,23 @@ FlatStoreByteD16HiFlat::FlatStoreByteD16HiFlat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &m0;
-  num_src_ = 4;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -415,11 +635,26 @@ FlatStoreByteD16HiFlat::FlatStoreByteD16HiFlat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  data.set_register_byte_mask(0x4);
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatStoreByteD16HiFlat(const MachineInst *opcode) {
+DecodeResult decodeFlatStoreByteD16HiFlat(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_store_byte_d16_hi", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatStoreByteD16HiFlat>(opcode);
 }
 } // namespace detail
@@ -438,12 +673,23 @@ FlatStoreShortFlat::FlatStoreShortFlat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &m0;
-  num_src_ = 4;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -456,11 +702,26 @@ FlatStoreShortFlat::FlatStoreShortFlat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  data.set_register_byte_mask(0x3);
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatStoreShortFlat(const MachineInst *opcode) {
+DecodeResult decodeFlatStoreShortFlat(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_store_short", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatStoreShortFlat>(opcode);
 }
 } // namespace detail
@@ -479,12 +740,23 @@ FlatStoreShortD16HiFlat::FlatStoreShortD16HiFlat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &m0;
-  num_src_ = 4;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -497,11 +769,26 @@ FlatStoreShortD16HiFlat::FlatStoreShortD16HiFlat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  data.set_register_byte_mask(0xc);
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatStoreShortD16HiFlat(const MachineInst *opcode) {
+DecodeResult decodeFlatStoreShortD16HiFlat(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_store_short_d16_hi", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatStoreShortD16HiFlat>(opcode);
 }
 } // namespace detail
@@ -520,12 +807,23 @@ FlatStoreDwordFlat::FlatStoreDwordFlat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &m0;
-  num_src_ = 4;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -538,11 +836,25 @@ FlatStoreDwordFlat::FlatStoreDwordFlat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatStoreDwordFlat(const MachineInst *opcode) {
+DecodeResult decodeFlatStoreDwordFlat(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_store_dword", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatStoreDwordFlat>(opcode);
 }
 } // namespace detail
@@ -561,12 +873,23 @@ FlatStoreDwordx2Flat::FlatStoreDwordx2Flat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &m0;
-  num_src_ = 4;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -579,11 +902,25 @@ FlatStoreDwordx2Flat::FlatStoreDwordx2Flat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatStoreDwordx2Flat(const MachineInst *opcode) {
+DecodeResult decodeFlatStoreDwordx2Flat(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_store_dwordx2", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatStoreDwordx2Flat>(opcode);
 }
 } // namespace detail
@@ -602,12 +939,23 @@ FlatStoreDwordx3Flat::FlatStoreDwordx3Flat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &m0;
-  num_src_ = 4;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -620,11 +968,25 @@ FlatStoreDwordx3Flat::FlatStoreDwordx3Flat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatStoreDwordx3Flat(const MachineInst *opcode) {
+DecodeResult decodeFlatStoreDwordx3Flat(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_store_dwordx3", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatStoreDwordx3Flat>(opcode);
 }
 } // namespace detail
@@ -643,12 +1005,23 @@ FlatStoreDwordx4Flat::FlatStoreDwordx4Flat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &m0;
-  num_src_ = 4;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -661,11 +1034,25 @@ FlatStoreDwordx4Flat::FlatStoreDwordx4Flat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatStoreDwordx4Flat(const MachineInst *opcode) {
+DecodeResult decodeFlatStoreDwordx4Flat(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_store_dwordx4", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatStoreDwordx4Flat>(opcode);
 }
 } // namespace detail
@@ -683,13 +1070,24 @@ FlatLoadUbyteD16Flat::FlatLoadUbyteD16Flat(const MachineInst *inst)
       m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  src_operands_[1] = &flat_scratch;
-  src_operands_[2] = &gpumem;
-  src_operands_[3] = &m0;
-  num_src_ = 4;
+  src_operands_[1] = &gpumem;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -702,21 +1100,26 @@ FlatLoadUbyteD16Flat::FlatLoadUbyteD16Flat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatLoadUbyteD16Flat(const MachineInst *opcode) {
+DecodeResult decodeFlatLoadUbyteD16Flat(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_load_ubyte_d16", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatLoadUbyteD16Flat>(opcode);
 }
 } // namespace detail
-
-void FlatLoadUbyteD16Flat::implicit_uses(RegisterSet &uses) const {
-  Flat::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdst.to_register_ref())
-      uses.expand(*r);
-}
 
 FlatLoadUbyteD16HiFlat::FlatLoadUbyteD16HiFlat(const MachineInst *inst)
     : Flat("flat_load_ubyte_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
@@ -731,13 +1134,24 @@ FlatLoadUbyteD16HiFlat::FlatLoadUbyteD16HiFlat(const MachineInst *inst)
       m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  src_operands_[1] = &flat_scratch;
-  src_operands_[2] = &gpumem;
-  src_operands_[3] = &m0;
-  num_src_ = 4;
+  src_operands_[1] = &gpumem;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -750,21 +1164,26 @@ FlatLoadUbyteD16HiFlat::FlatLoadUbyteD16HiFlat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatLoadUbyteD16HiFlat(const MachineInst *opcode) {
+DecodeResult decodeFlatLoadUbyteD16HiFlat(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_load_ubyte_d16_hi", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatLoadUbyteD16HiFlat>(opcode);
 }
 } // namespace detail
-
-void FlatLoadUbyteD16HiFlat::implicit_uses(RegisterSet &uses) const {
-  Flat::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdst.to_register_ref())
-      uses.expand(*r);
-}
 
 FlatLoadSbyteD16Flat::FlatLoadSbyteD16Flat(const MachineInst *inst)
     : Flat("flat_load_sbyte_d16", reinterpret_cast<const OpEncoding *>(inst),
@@ -779,13 +1198,24 @@ FlatLoadSbyteD16Flat::FlatLoadSbyteD16Flat(const MachineInst *inst)
       m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  src_operands_[1] = &flat_scratch;
-  src_operands_[2] = &gpumem;
-  src_operands_[3] = &m0;
-  num_src_ = 4;
+  src_operands_[1] = &gpumem;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -798,21 +1228,26 @@ FlatLoadSbyteD16Flat::FlatLoadSbyteD16Flat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatLoadSbyteD16Flat(const MachineInst *opcode) {
+DecodeResult decodeFlatLoadSbyteD16Flat(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_load_sbyte_d16", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatLoadSbyteD16Flat>(opcode);
 }
 } // namespace detail
-
-void FlatLoadSbyteD16Flat::implicit_uses(RegisterSet &uses) const {
-  Flat::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdst.to_register_ref())
-      uses.expand(*r);
-}
 
 FlatLoadSbyteD16HiFlat::FlatLoadSbyteD16HiFlat(const MachineInst *inst)
     : Flat("flat_load_sbyte_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
@@ -827,13 +1262,24 @@ FlatLoadSbyteD16HiFlat::FlatLoadSbyteD16HiFlat(const MachineInst *inst)
       m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  src_operands_[1] = &flat_scratch;
-  src_operands_[2] = &gpumem;
-  src_operands_[3] = &m0;
-  num_src_ = 4;
+  src_operands_[1] = &gpumem;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -846,21 +1292,26 @@ FlatLoadSbyteD16HiFlat::FlatLoadSbyteD16HiFlat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatLoadSbyteD16HiFlat(const MachineInst *opcode) {
+DecodeResult decodeFlatLoadSbyteD16HiFlat(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_load_sbyte_d16_hi", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatLoadSbyteD16HiFlat>(opcode);
 }
 } // namespace detail
-
-void FlatLoadSbyteD16HiFlat::implicit_uses(RegisterSet &uses) const {
-  Flat::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdst.to_register_ref())
-      uses.expand(*r);
-}
 
 FlatLoadShortD16Flat::FlatLoadShortD16Flat(const MachineInst *inst)
     : Flat("flat_load_short_d16", reinterpret_cast<const OpEncoding *>(inst),
@@ -875,13 +1326,24 @@ FlatLoadShortD16Flat::FlatLoadShortD16Flat(const MachineInst *inst)
       m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  src_operands_[1] = &flat_scratch;
-  src_operands_[2] = &gpumem;
-  src_operands_[3] = &m0;
-  num_src_ = 4;
+  src_operands_[1] = &gpumem;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -894,21 +1356,26 @@ FlatLoadShortD16Flat::FlatLoadShortD16Flat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatLoadShortD16Flat(const MachineInst *opcode) {
+DecodeResult decodeFlatLoadShortD16Flat(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_load_short_d16", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatLoadShortD16Flat>(opcode);
 }
 } // namespace detail
-
-void FlatLoadShortD16Flat::implicit_uses(RegisterSet &uses) const {
-  Flat::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdst.to_register_ref())
-      uses.expand(*r);
-}
 
 FlatLoadShortD16HiFlat::FlatLoadShortD16HiFlat(const MachineInst *inst)
     : Flat("flat_load_short_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
@@ -923,13 +1390,24 @@ FlatLoadShortD16HiFlat::FlatLoadShortD16HiFlat(const MachineInst *inst)
       m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  src_operands_[1] = &flat_scratch;
-  src_operands_[2] = &gpumem;
-  src_operands_[3] = &m0;
-  num_src_ = 4;
+  src_operands_[1] = &gpumem;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -942,21 +1420,26 @@ FlatLoadShortD16HiFlat::FlatLoadShortD16HiFlat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatLoadShortD16HiFlat(const MachineInst *opcode) {
+DecodeResult decodeFlatLoadShortD16HiFlat(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_load_short_d16_hi", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatLoadShortD16HiFlat>(opcode);
 }
 } // namespace detail
-
-void FlatLoadShortD16HiFlat::implicit_uses(RegisterSet &uses) const {
-  Flat::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdst.to_register_ref())
-      uses.expand(*r);
-}
 
 FlatAtomicSwapFlat::FlatAtomicSwapFlat(const MachineInst *inst)
     : Flat("flat_atomic_swap", reinterpret_cast<const OpEncoding *>(inst),
@@ -978,15 +1461,26 @@ FlatAtomicSwapFlat::FlatAtomicSwapFlat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &gpumem_in;
-  src_operands_[4] = &m0;
-  num_src_ = 5;
+  src_operands_[2] = &gpumem_in;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -1000,11 +1494,25 @@ FlatAtomicSwapFlat::FlatAtomicSwapFlat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatAtomicSwapFlat(const MachineInst *opcode) {
+DecodeResult decodeFlatAtomicSwapFlat(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_atomic_swap", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatAtomicSwapFlat>(opcode);
 }
 } // namespace detail
@@ -1029,15 +1537,26 @@ FlatAtomicCmpswapFlat::FlatAtomicCmpswapFlat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &gpumem_in;
-  src_operands_[4] = &m0;
-  num_src_ = 5;
+  src_operands_[2] = &gpumem_in;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -1051,11 +1570,25 @@ FlatAtomicCmpswapFlat::FlatAtomicCmpswapFlat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatAtomicCmpswapFlat(const MachineInst *opcode) {
+DecodeResult decodeFlatAtomicCmpswapFlat(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_atomic_cmpswap", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatAtomicCmpswapFlat>(opcode);
 }
 } // namespace detail
@@ -1080,15 +1613,26 @@ FlatAtomicAddFlat::FlatAtomicAddFlat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &gpumem_in;
-  src_operands_[4] = &m0;
-  num_src_ = 5;
+  src_operands_[2] = &gpumem_in;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -1102,11 +1646,25 @@ FlatAtomicAddFlat::FlatAtomicAddFlat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatAtomicAddFlat(const MachineInst *opcode) {
+DecodeResult decodeFlatAtomicAddFlat(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_atomic_add", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatAtomicAddFlat>(opcode);
 }
 } // namespace detail
@@ -1131,15 +1689,26 @@ FlatAtomicSubFlat::FlatAtomicSubFlat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &gpumem_in;
-  src_operands_[4] = &m0;
-  num_src_ = 5;
+  src_operands_[2] = &gpumem_in;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -1153,11 +1722,25 @@ FlatAtomicSubFlat::FlatAtomicSubFlat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatAtomicSubFlat(const MachineInst *opcode) {
+DecodeResult decodeFlatAtomicSubFlat(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_atomic_sub", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatAtomicSubFlat>(opcode);
 }
 } // namespace detail
@@ -1182,15 +1765,26 @@ FlatAtomicSminFlat::FlatAtomicSminFlat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &gpumem_in;
-  src_operands_[4] = &m0;
-  num_src_ = 5;
+  src_operands_[2] = &gpumem_in;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -1204,11 +1798,25 @@ FlatAtomicSminFlat::FlatAtomicSminFlat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatAtomicSminFlat(const MachineInst *opcode) {
+DecodeResult decodeFlatAtomicSminFlat(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_atomic_smin", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatAtomicSminFlat>(opcode);
 }
 } // namespace detail
@@ -1233,15 +1841,26 @@ FlatAtomicUminFlat::FlatAtomicUminFlat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &gpumem_in;
-  src_operands_[4] = &m0;
-  num_src_ = 5;
+  src_operands_[2] = &gpumem_in;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -1255,11 +1874,25 @@ FlatAtomicUminFlat::FlatAtomicUminFlat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatAtomicUminFlat(const MachineInst *opcode) {
+DecodeResult decodeFlatAtomicUminFlat(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_atomic_umin", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatAtomicUminFlat>(opcode);
 }
 } // namespace detail
@@ -1284,15 +1917,26 @@ FlatAtomicSmaxFlat::FlatAtomicSmaxFlat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &gpumem_in;
-  src_operands_[4] = &m0;
-  num_src_ = 5;
+  src_operands_[2] = &gpumem_in;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -1306,11 +1950,25 @@ FlatAtomicSmaxFlat::FlatAtomicSmaxFlat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatAtomicSmaxFlat(const MachineInst *opcode) {
+DecodeResult decodeFlatAtomicSmaxFlat(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_atomic_smax", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatAtomicSmaxFlat>(opcode);
 }
 } // namespace detail
@@ -1335,15 +1993,26 @@ FlatAtomicUmaxFlat::FlatAtomicUmaxFlat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &gpumem_in;
-  src_operands_[4] = &m0;
-  num_src_ = 5;
+  src_operands_[2] = &gpumem_in;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -1357,11 +2026,25 @@ FlatAtomicUmaxFlat::FlatAtomicUmaxFlat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatAtomicUmaxFlat(const MachineInst *opcode) {
+DecodeResult decodeFlatAtomicUmaxFlat(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_atomic_umax", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatAtomicUmaxFlat>(opcode);
 }
 } // namespace detail
@@ -1386,15 +2069,26 @@ FlatAtomicAndFlat::FlatAtomicAndFlat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &gpumem_in;
-  src_operands_[4] = &m0;
-  num_src_ = 5;
+  src_operands_[2] = &gpumem_in;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -1408,11 +2102,25 @@ FlatAtomicAndFlat::FlatAtomicAndFlat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatAtomicAndFlat(const MachineInst *opcode) {
+DecodeResult decodeFlatAtomicAndFlat(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_atomic_and", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatAtomicAndFlat>(opcode);
 }
 } // namespace detail
@@ -1437,15 +2145,26 @@ FlatAtomicOrFlat::FlatAtomicOrFlat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &gpumem_in;
-  src_operands_[4] = &m0;
-  num_src_ = 5;
+  src_operands_[2] = &gpumem_in;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -1459,11 +2178,25 @@ FlatAtomicOrFlat::FlatAtomicOrFlat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatAtomicOrFlat(const MachineInst *opcode) {
+DecodeResult decodeFlatAtomicOrFlat(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_atomic_or", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatAtomicOrFlat>(opcode);
 }
 } // namespace detail
@@ -1488,15 +2221,26 @@ FlatAtomicXorFlat::FlatAtomicXorFlat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &gpumem_in;
-  src_operands_[4] = &m0;
-  num_src_ = 5;
+  src_operands_[2] = &gpumem_in;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -1510,11 +2254,25 @@ FlatAtomicXorFlat::FlatAtomicXorFlat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatAtomicXorFlat(const MachineInst *opcode) {
+DecodeResult decodeFlatAtomicXorFlat(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_atomic_xor", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatAtomicXorFlat>(opcode);
 }
 } // namespace detail
@@ -1539,15 +2297,26 @@ FlatAtomicIncFlat::FlatAtomicIncFlat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &gpumem_in;
-  src_operands_[4] = &m0;
-  num_src_ = 5;
+  src_operands_[2] = &gpumem_in;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -1561,11 +2330,25 @@ FlatAtomicIncFlat::FlatAtomicIncFlat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatAtomicIncFlat(const MachineInst *opcode) {
+DecodeResult decodeFlatAtomicIncFlat(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_atomic_inc", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatAtomicIncFlat>(opcode);
 }
 } // namespace detail
@@ -1590,15 +2373,26 @@ FlatAtomicDecFlat::FlatAtomicDecFlat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &gpumem_in;
-  src_operands_[4] = &m0;
-  num_src_ = 5;
+  src_operands_[2] = &gpumem_in;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -1612,11 +2406,25 @@ FlatAtomicDecFlat::FlatAtomicDecFlat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatAtomicDecFlat(const MachineInst *opcode) {
+DecodeResult decodeFlatAtomicDecFlat(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_atomic_dec", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatAtomicDecFlat>(opcode);
 }
 } // namespace detail
@@ -1641,15 +2449,26 @@ FlatAtomicAddF32Flat::FlatAtomicAddF32Flat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &gpumem_in;
-  src_operands_[4] = &m0;
-  num_src_ = 5;
+  src_operands_[2] = &gpumem_in;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -1663,11 +2482,25 @@ FlatAtomicAddF32Flat::FlatAtomicAddF32Flat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatAtomicAddF32Flat(const MachineInst *opcode) {
+DecodeResult decodeFlatAtomicAddF32Flat(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_atomic_add_f32", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatAtomicAddF32Flat>(opcode);
 }
 } // namespace detail
@@ -1692,15 +2525,26 @@ FlatAtomicPkAddF16Flat::FlatAtomicPkAddF16Flat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &gpumem_in;
-  src_operands_[4] = &m0;
-  num_src_ = 5;
+  src_operands_[2] = &gpumem_in;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -1714,11 +2558,25 @@ FlatAtomicPkAddF16Flat::FlatAtomicPkAddF16Flat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatAtomicPkAddF16Flat(const MachineInst *opcode) {
+DecodeResult decodeFlatAtomicPkAddF16Flat(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_atomic_pk_add_f16", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatAtomicPkAddF16Flat>(opcode);
 }
 } // namespace detail
@@ -1743,15 +2601,26 @@ FlatAtomicAddF64Flat::FlatAtomicAddF64Flat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &gpumem_in;
-  src_operands_[4] = &m0;
-  num_src_ = 5;
+  src_operands_[2] = &gpumem_in;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -1765,11 +2634,25 @@ FlatAtomicAddF64Flat::FlatAtomicAddF64Flat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatAtomicAddF64Flat(const MachineInst *opcode) {
+DecodeResult decodeFlatAtomicAddF64Flat(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_atomic_add_f64", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatAtomicAddF64Flat>(opcode);
 }
 } // namespace detail
@@ -1794,15 +2677,26 @@ FlatAtomicMinF64Flat::FlatAtomicMinF64Flat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &gpumem_in;
-  src_operands_[4] = &m0;
-  num_src_ = 5;
+  src_operands_[2] = &gpumem_in;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -1816,11 +2710,25 @@ FlatAtomicMinF64Flat::FlatAtomicMinF64Flat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatAtomicMinF64Flat(const MachineInst *opcode) {
+DecodeResult decodeFlatAtomicMinF64Flat(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_atomic_min_f64", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatAtomicMinF64Flat>(opcode);
 }
 } // namespace detail
@@ -1845,15 +2753,26 @@ FlatAtomicMaxF64Flat::FlatAtomicMaxF64Flat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &gpumem_in;
-  src_operands_[4] = &m0;
-  num_src_ = 5;
+  src_operands_[2] = &gpumem_in;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -1867,11 +2786,25 @@ FlatAtomicMaxF64Flat::FlatAtomicMaxF64Flat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatAtomicMaxF64Flat(const MachineInst *opcode) {
+DecodeResult decodeFlatAtomicMaxF64Flat(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_atomic_max_f64", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatAtomicMaxF64Flat>(opcode);
 }
 } // namespace detail
@@ -1896,15 +2829,26 @@ FlatAtomicPkAddBf16Flat::FlatAtomicPkAddBf16Flat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &gpumem_in;
-  src_operands_[4] = &m0;
-  num_src_ = 5;
+  src_operands_[2] = &gpumem_in;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -1918,11 +2862,25 @@ FlatAtomicPkAddBf16Flat::FlatAtomicPkAddBf16Flat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatAtomicPkAddBf16Flat(const MachineInst *opcode) {
+DecodeResult decodeFlatAtomicPkAddBf16Flat(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_atomic_pk_add_bf16", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatAtomicPkAddBf16Flat>(opcode);
 }
 } // namespace detail
@@ -1947,15 +2905,26 @@ FlatAtomicSwapX2Flat::FlatAtomicSwapX2Flat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &gpumem_in;
-  src_operands_[4] = &m0;
-  num_src_ = 5;
+  src_operands_[2] = &gpumem_in;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -1969,11 +2938,25 @@ FlatAtomicSwapX2Flat::FlatAtomicSwapX2Flat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatAtomicSwapX2Flat(const MachineInst *opcode) {
+DecodeResult decodeFlatAtomicSwapX2Flat(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_atomic_swap_x2", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatAtomicSwapX2Flat>(opcode);
 }
 } // namespace detail
@@ -1998,15 +2981,26 @@ FlatAtomicCmpswapX2Flat::FlatAtomicCmpswapX2Flat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &gpumem_in;
-  src_operands_[4] = &m0;
-  num_src_ = 5;
+  src_operands_[2] = &gpumem_in;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -2020,11 +3014,25 @@ FlatAtomicCmpswapX2Flat::FlatAtomicCmpswapX2Flat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatAtomicCmpswapX2Flat(const MachineInst *opcode) {
+DecodeResult decodeFlatAtomicCmpswapX2Flat(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_atomic_cmpswap_x2", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatAtomicCmpswapX2Flat>(opcode);
 }
 } // namespace detail
@@ -2049,15 +3057,26 @@ FlatAtomicAddX2Flat::FlatAtomicAddX2Flat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &gpumem_in;
-  src_operands_[4] = &m0;
-  num_src_ = 5;
+  src_operands_[2] = &gpumem_in;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -2071,11 +3090,25 @@ FlatAtomicAddX2Flat::FlatAtomicAddX2Flat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatAtomicAddX2Flat(const MachineInst *opcode) {
+DecodeResult decodeFlatAtomicAddX2Flat(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_atomic_add_x2", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatAtomicAddX2Flat>(opcode);
 }
 } // namespace detail
@@ -2100,15 +3133,26 @@ FlatAtomicSubX2Flat::FlatAtomicSubX2Flat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &gpumem_in;
-  src_operands_[4] = &m0;
-  num_src_ = 5;
+  src_operands_[2] = &gpumem_in;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -2122,11 +3166,25 @@ FlatAtomicSubX2Flat::FlatAtomicSubX2Flat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatAtomicSubX2Flat(const MachineInst *opcode) {
+DecodeResult decodeFlatAtomicSubX2Flat(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_atomic_sub_x2", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatAtomicSubX2Flat>(opcode);
 }
 } // namespace detail
@@ -2151,15 +3209,26 @@ FlatAtomicSminX2Flat::FlatAtomicSminX2Flat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &gpumem_in;
-  src_operands_[4] = &m0;
-  num_src_ = 5;
+  src_operands_[2] = &gpumem_in;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -2173,11 +3242,25 @@ FlatAtomicSminX2Flat::FlatAtomicSminX2Flat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatAtomicSminX2Flat(const MachineInst *opcode) {
+DecodeResult decodeFlatAtomicSminX2Flat(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_atomic_smin_x2", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatAtomicSminX2Flat>(opcode);
 }
 } // namespace detail
@@ -2202,15 +3285,26 @@ FlatAtomicUminX2Flat::FlatAtomicUminX2Flat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &gpumem_in;
-  src_operands_[4] = &m0;
-  num_src_ = 5;
+  src_operands_[2] = &gpumem_in;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -2224,11 +3318,25 @@ FlatAtomicUminX2Flat::FlatAtomicUminX2Flat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatAtomicUminX2Flat(const MachineInst *opcode) {
+DecodeResult decodeFlatAtomicUminX2Flat(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_atomic_umin_x2", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatAtomicUminX2Flat>(opcode);
 }
 } // namespace detail
@@ -2253,15 +3361,26 @@ FlatAtomicSmaxX2Flat::FlatAtomicSmaxX2Flat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &gpumem_in;
-  src_operands_[4] = &m0;
-  num_src_ = 5;
+  src_operands_[2] = &gpumem_in;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -2275,11 +3394,25 @@ FlatAtomicSmaxX2Flat::FlatAtomicSmaxX2Flat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatAtomicSmaxX2Flat(const MachineInst *opcode) {
+DecodeResult decodeFlatAtomicSmaxX2Flat(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_atomic_smax_x2", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatAtomicSmaxX2Flat>(opcode);
 }
 } // namespace detail
@@ -2304,15 +3437,26 @@ FlatAtomicUmaxX2Flat::FlatAtomicUmaxX2Flat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &gpumem_in;
-  src_operands_[4] = &m0;
-  num_src_ = 5;
+  src_operands_[2] = &gpumem_in;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -2326,11 +3470,25 @@ FlatAtomicUmaxX2Flat::FlatAtomicUmaxX2Flat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatAtomicUmaxX2Flat(const MachineInst *opcode) {
+DecodeResult decodeFlatAtomicUmaxX2Flat(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_atomic_umax_x2", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatAtomicUmaxX2Flat>(opcode);
 }
 } // namespace detail
@@ -2355,15 +3513,26 @@ FlatAtomicAndX2Flat::FlatAtomicAndX2Flat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &gpumem_in;
-  src_operands_[4] = &m0;
-  num_src_ = 5;
+  src_operands_[2] = &gpumem_in;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -2377,11 +3546,25 @@ FlatAtomicAndX2Flat::FlatAtomicAndX2Flat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatAtomicAndX2Flat(const MachineInst *opcode) {
+DecodeResult decodeFlatAtomicAndX2Flat(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_atomic_and_x2", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatAtomicAndX2Flat>(opcode);
 }
 } // namespace detail
@@ -2406,15 +3589,26 @@ FlatAtomicOrX2Flat::FlatAtomicOrX2Flat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &gpumem_in;
-  src_operands_[4] = &m0;
-  num_src_ = 5;
+  src_operands_[2] = &gpumem_in;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -2428,11 +3622,25 @@ FlatAtomicOrX2Flat::FlatAtomicOrX2Flat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatAtomicOrX2Flat(const MachineInst *opcode) {
+DecodeResult decodeFlatAtomicOrX2Flat(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_atomic_or_x2", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatAtomicOrX2Flat>(opcode);
 }
 } // namespace detail
@@ -2457,15 +3665,26 @@ FlatAtomicXorX2Flat::FlatAtomicXorX2Flat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &gpumem_in;
-  src_operands_[4] = &m0;
-  num_src_ = 5;
+  src_operands_[2] = &gpumem_in;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -2479,11 +3698,25 @@ FlatAtomicXorX2Flat::FlatAtomicXorX2Flat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatAtomicXorX2Flat(const MachineInst *opcode) {
+DecodeResult decodeFlatAtomicXorX2Flat(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_atomic_xor_x2", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatAtomicXorX2Flat>(opcode);
 }
 } // namespace detail
@@ -2508,15 +3741,26 @@ FlatAtomicIncX2Flat::FlatAtomicIncX2Flat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &gpumem_in;
-  src_operands_[4] = &m0;
-  num_src_ = 5;
+  src_operands_[2] = &gpumem_in;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -2530,11 +3774,25 @@ FlatAtomicIncX2Flat::FlatAtomicIncX2Flat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatAtomicIncX2Flat(const MachineInst *opcode) {
+DecodeResult decodeFlatAtomicIncX2Flat(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_atomic_inc_x2", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatAtomicIncX2Flat>(opcode);
 }
 } // namespace detail
@@ -2559,15 +3817,26 @@ FlatAtomicDecX2Flat::FlatAtomicDecX2Flat(const MachineInst *inst)
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   dst_operands_[0] = &gpumem;
-  src_operands_[2] = &flat_scratch;
-  src_operands_[3] = &gpumem_in;
-  src_operands_[4] = &m0;
-  num_src_ = 5;
+  src_operands_[2] = &gpumem_in;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -2581,12 +3850,699 @@ FlatAtomicDecX2Flat::FlatAtomicDecX2Flat(const MachineInst *inst)
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeFlatAtomicDecX2Flat(const MachineInst *opcode) {
+DecodeResult decodeFlatAtomicDecX2Flat(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Flat::validate_encoding(
+      "flat_atomic_dec_x2", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<FlatAtomicDecX2Flat>(opcode);
+}
+} // namespace detail
+
+GlobalLoadLdsUbyteFlat::GlobalLoadLdsUbyteFlat(const MachineInst *inst)
+    : Flat("global_load_lds_ubyte", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::GlobalLoadLdsUbyteFlat)),
+      vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR,
+           (reinterpret_cast<const OpEncoding *>(inst)->vdst +
+            (reinterpret_cast<const OpEncoding *>(inst)->acc
+                 ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
+                 : 0))),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &m0;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  m0.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+namespace detail {
+DecodeResult decodeGlobalLoadLdsUbyteFlat(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Flat::validate_encoding(
+      "global_load_lds_ubyte", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
+    return emit_error.emit() << "GLOBAL_LOAD_LDS_UBYTE requires segment 2";
+  return std::make_unique<GlobalLoadLdsUbyteFlat>(opcode);
+}
+} // namespace detail
+
+GlobalLoadLdsSbyteFlat::GlobalLoadLdsSbyteFlat(const MachineInst *inst)
+    : Flat("global_load_lds_sbyte", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::GlobalLoadLdsSbyteFlat)),
+      vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR,
+           (reinterpret_cast<const OpEncoding *>(inst)->vdst +
+            (reinterpret_cast<const OpEncoding *>(inst)->acc
+                 ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
+                 : 0))),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &m0;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  m0.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+namespace detail {
+DecodeResult decodeGlobalLoadLdsSbyteFlat(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Flat::validate_encoding(
+      "global_load_lds_sbyte", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
+    return emit_error.emit() << "GLOBAL_LOAD_LDS_SBYTE requires segment 2";
+  return std::make_unique<GlobalLoadLdsSbyteFlat>(opcode);
+}
+} // namespace detail
+
+GlobalLoadLdsUshortFlat::GlobalLoadLdsUshortFlat(const MachineInst *inst)
+    : Flat("global_load_lds_ushort", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::GlobalLoadLdsUshortFlat)),
+      vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR,
+           (reinterpret_cast<const OpEncoding *>(inst)->vdst +
+            (reinterpret_cast<const OpEncoding *>(inst)->acc
+                 ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
+                 : 0))),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &m0;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  m0.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+namespace detail {
+DecodeResult decodeGlobalLoadLdsUshortFlat(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Flat::validate_encoding(
+      "global_load_lds_ushort", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
+    return emit_error.emit() << "GLOBAL_LOAD_LDS_USHORT requires segment 2";
+  return std::make_unique<GlobalLoadLdsUshortFlat>(opcode);
+}
+} // namespace detail
+
+GlobalLoadLdsSshortFlat::GlobalLoadLdsSshortFlat(const MachineInst *inst)
+    : Flat("global_load_lds_sshort", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::GlobalLoadLdsSshortFlat)),
+      vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR,
+           (reinterpret_cast<const OpEncoding *>(inst)->vdst +
+            (reinterpret_cast<const OpEncoding *>(inst)->acc
+                 ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
+                 : 0))),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &m0;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  m0.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+namespace detail {
+DecodeResult decodeGlobalLoadLdsSshortFlat(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Flat::validate_encoding(
+      "global_load_lds_sshort", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
+    return emit_error.emit() << "GLOBAL_LOAD_LDS_SSHORT requires segment 2";
+  return std::make_unique<GlobalLoadLdsSshortFlat>(opcode);
+}
+} // namespace detail
+
+GlobalLoadLdsDwordFlat::GlobalLoadLdsDwordFlat(const MachineInst *inst)
+    : Flat("global_load_lds_dword", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::GlobalLoadLdsDwordFlat)),
+      vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR,
+           (reinterpret_cast<const OpEncoding *>(inst)->vdst +
+            (reinterpret_cast<const OpEncoding *>(inst)->acc
+                 ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
+                 : 0))),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &m0;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  m0.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+namespace detail {
+DecodeResult decodeGlobalLoadLdsDwordFlat(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Flat::validate_encoding(
+      "global_load_lds_dword", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
+    return emit_error.emit() << "GLOBAL_LOAD_LDS_DWORD requires segment 2";
+  return std::make_unique<GlobalLoadLdsDwordFlat>(opcode);
+}
+} // namespace detail
+
+GlobalLoadLdsDwordx4Flat::GlobalLoadLdsDwordx4Flat(const MachineInst *inst)
+    : Flat("global_load_lds_dwordx4", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::GlobalLoadLdsDwordx4Flat)),
+      vdst(128, OperandType::OPR_VGPR_OR_ACCVGPR,
+           (reinterpret_cast<const OpEncoding *>(inst)->vdst +
+            (reinterpret_cast<const OpEncoding *>(inst)->acc
+                 ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
+                 : 0))),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &m0;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  m0.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+namespace detail {
+DecodeResult decodeGlobalLoadLdsDwordx4Flat(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Flat::validate_encoding(
+      "global_load_lds_dwordx4", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
+    return emit_error.emit() << "GLOBAL_LOAD_LDS_DWORDX4 requires segment 2";
+  return std::make_unique<GlobalLoadLdsDwordx4Flat>(opcode);
+}
+} // namespace detail
+
+GlobalLoadLdsDwordx3Flat::GlobalLoadLdsDwordx3Flat(const MachineInst *inst)
+    : Flat("global_load_lds_dwordx3", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::GlobalLoadLdsDwordx3Flat)),
+      vdst(96, OperandType::OPR_VGPR_OR_ACCVGPR,
+           (reinterpret_cast<const OpEncoding *>(inst)->vdst +
+            (reinterpret_cast<const OpEncoding *>(inst)->acc
+                 ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
+                 : 0))),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &m0;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  m0.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+namespace detail {
+DecodeResult decodeGlobalLoadLdsDwordx3Flat(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Flat::validate_encoding(
+      "global_load_lds_dwordx3", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
+    return emit_error.emit() << "GLOBAL_LOAD_LDS_DWORDX3 requires segment 2";
+  return std::make_unique<GlobalLoadLdsDwordx3Flat>(opcode);
+}
+} // namespace detail
+
+ScratchLoadLdsUbyteFlat::ScratchLoadLdsUbyteFlat(const MachineInst *inst)
+    : Flat("scratch_load_lds_ubyte", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::ScratchLoadLdsUbyteFlat)),
+      vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR,
+           (reinterpret_cast<const OpEncoding *>(inst)->vdst +
+            (reinterpret_cast<const OpEncoding *>(inst)->acc
+                 ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
+                 : 0))),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
+      saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &m0;
+  num_src_ = 2;
+  num_dst_ = 0;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+namespace detail {
+DecodeResult decodeScratchLoadLdsUbyteFlat(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Flat::validate_encoding(
+      "scratch_load_lds_ubyte", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 1u) [[unlikely]]
+    return emit_error.emit() << "SCRATCH_LOAD_LDS_UBYTE requires segment 1";
+  return std::make_unique<ScratchLoadLdsUbyteFlat>(opcode);
+}
+} // namespace detail
+
+ScratchLoadLdsSbyteFlat::ScratchLoadLdsSbyteFlat(const MachineInst *inst)
+    : Flat("scratch_load_lds_sbyte", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::ScratchLoadLdsSbyteFlat)),
+      vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR,
+           (reinterpret_cast<const OpEncoding *>(inst)->vdst +
+            (reinterpret_cast<const OpEncoding *>(inst)->acc
+                 ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
+                 : 0))),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
+      saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &m0;
+  num_src_ = 2;
+  num_dst_ = 0;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+namespace detail {
+DecodeResult decodeScratchLoadLdsSbyteFlat(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Flat::validate_encoding(
+      "scratch_load_lds_sbyte", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 1u) [[unlikely]]
+    return emit_error.emit() << "SCRATCH_LOAD_LDS_SBYTE requires segment 1";
+  return std::make_unique<ScratchLoadLdsSbyteFlat>(opcode);
+}
+} // namespace detail
+
+ScratchLoadLdsUshortFlat::ScratchLoadLdsUshortFlat(const MachineInst *inst)
+    : Flat("scratch_load_lds_ushort", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::ScratchLoadLdsUshortFlat)),
+      vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR,
+           (reinterpret_cast<const OpEncoding *>(inst)->vdst +
+            (reinterpret_cast<const OpEncoding *>(inst)->acc
+                 ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
+                 : 0))),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
+      saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &m0;
+  num_src_ = 2;
+  num_dst_ = 0;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+namespace detail {
+DecodeResult decodeScratchLoadLdsUshortFlat(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Flat::validate_encoding(
+      "scratch_load_lds_ushort", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 1u) [[unlikely]]
+    return emit_error.emit() << "SCRATCH_LOAD_LDS_USHORT requires segment 1";
+  return std::make_unique<ScratchLoadLdsUshortFlat>(opcode);
+}
+} // namespace detail
+
+ScratchLoadLdsSshortFlat::ScratchLoadLdsSshortFlat(const MachineInst *inst)
+    : Flat("scratch_load_lds_sshort", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::ScratchLoadLdsSshortFlat)),
+      vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR,
+           (reinterpret_cast<const OpEncoding *>(inst)->vdst +
+            (reinterpret_cast<const OpEncoding *>(inst)->acc
+                 ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
+                 : 0))),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
+      saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &m0;
+  num_src_ = 2;
+  num_dst_ = 0;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+namespace detail {
+DecodeResult decodeScratchLoadLdsSshortFlat(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Flat::validate_encoding(
+      "scratch_load_lds_sshort", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 1u) [[unlikely]]
+    return emit_error.emit() << "SCRATCH_LOAD_LDS_SSHORT requires segment 1";
+  return std::make_unique<ScratchLoadLdsSshortFlat>(opcode);
+}
+} // namespace detail
+
+ScratchLoadLdsDwordFlat::ScratchLoadLdsDwordFlat(const MachineInst *inst)
+    : Flat("scratch_load_lds_dword", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::ScratchLoadLdsDwordFlat)),
+      vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR,
+           (reinterpret_cast<const OpEncoding *>(inst)->vdst +
+            (reinterpret_cast<const OpEncoding *>(inst)->acc
+                 ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
+                 : 0))),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
+      saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &m0;
+  num_src_ = 2;
+  num_dst_ = 0;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+namespace detail {
+DecodeResult decodeScratchLoadLdsDwordFlat(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Flat::validate_encoding(
+      "scratch_load_lds_dword", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 1u) [[unlikely]]
+    return emit_error.emit() << "SCRATCH_LOAD_LDS_DWORD requires segment 1";
+  return std::make_unique<ScratchLoadLdsDwordFlat>(opcode);
 }
 } // namespace detail
 

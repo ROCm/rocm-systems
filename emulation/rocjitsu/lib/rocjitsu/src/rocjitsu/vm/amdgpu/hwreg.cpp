@@ -22,11 +22,22 @@ enum class HwregState : uint8_t {
   Unsupported,
   Mode,
   Status,
+  StatePrivGfx12,
+  ExcpFlagPrivGfx12,
+  ExcpFlagUserGfx12,
+  TrapCtrlGfx12,
+  XnackStatePrivGfx1250,
+  XnackMaskGfx1250,
+  Trapsts,
+  SimdIdCdna2,
+  LocationCdna3_4,
+  XccIdCdna3_4,
   GprAllocGfx9_10,
   GprAllocCdna3_4,
   WaveSchedMode,
   IbStsGfx1250,
   IbSts2Gfx1250,
+  WgpIdGfx1250,
 };
 
 enum class HwregWritePolicy : uint8_t {
@@ -73,6 +84,13 @@ uint32_t blocks_minus_one(uint32_t count, uint32_t block_size) {
   return ((count + block_size - 1u) / block_size) - 1u;
 }
 
+uint32_t cdna2_4_simd_id_raw(const Wavefront &wf) {
+  // CDNA2/3/4 define SIMD_ID at HW_ID[5:4]. Assign permanent CU wave slots
+  // cyclically to four logical SIMDs. Slot identity survives reuse and
+  // checkpoint restoration; no timing model is implied.
+  return field_value(wf.wf_id() % 4u, 4, 2);
+}
+
 uint32_t gfx9_10_gpr_alloc_raw(const Wavefront &wf) {
   const RegAllocation &vgpr = wf.vgpr_alloc();
   const RegAllocation &sgpr = wf.sgpr_alloc();
@@ -104,17 +122,62 @@ uint32_t gfx1250_ib_sts_raw(const Wavefront &wf) {
          field_value(counters.vscnt, 24, 6);
 }
 
+// RocJITsu keeps the scalar condition, priorities, and halt state in its
+// common internal STATUS word. GFX12 exposes those fields through
+// STATE_PRIV instead, so shader HWREG accesses need an explicit translation.
+// SCRATCH_EN is derived from the live scratch allocation just as the hardware
+// initializes it at wave creation.
+uint32_t gfx12_state_priv_raw(const Wavefront &wf) {
+  return gfx12_state_priv_from_status(wf.status_raw(), wf.scratch_base() != 0);
+}
+
+void set_gfx12_state_priv_raw(Wavefront &wf, uint32_t value) {
+  wf.set_status_raw(update_status_from_gfx12_state_priv(wf.status_raw(), value));
+  // A privileged STATE_PRIV write, rather than S_SENDMSGHALT, owns HALT.
+  wf.set_self_halted(false);
+}
+
+// GFX12 split the legacy TRAPSTS/MODE state into EXCP_FLAG_PRIV,
+// EXCP_FLAG_USER and TRAP_CTRL. RocJITsu keeps the execution-facing causes in
+// its common representation, so shader HWREG accesses translate the complete
+// architected field inventory in both directions. EXCP_FLAG_USER's two texture
+// flags have no legacy slot and are held separately on the wave.
+uint32_t gfx12_excp_flag_priv_raw(const Wavefront &wf) {
+  return gfx12_excp_flag_priv_from_trapsts(wf.trapsts());
+}
+
+void set_gfx12_excp_flag_priv_raw(Wavefront &wf, uint32_t value) {
+  wf.set_trapsts(update_trapsts_from_gfx12_excp_flag_priv(wf.trapsts(), value));
+}
+
+uint32_t gfx12_excp_flag_user_raw(const Wavefront &wf) {
+  return (wf.trapsts() & 0x7Fu) | wf.gfx12_excp_flag_user_extra_raw();
+}
+
+void set_gfx12_excp_flag_user_raw(Wavefront &wf, uint32_t value) {
+  wf.set_trapsts(update_trapsts_from_gfx12_excp_flag_user(wf.trapsts(), value));
+  wf.set_gfx12_excp_flag_user_extra_raw(value & (0x3u << 30));
+}
+
+uint32_t gfx12_trap_ctrl_raw(const Wavefront &wf) { return wf.gfx12_trap_ctrl_raw(); }
+
+void set_gfx12_trap_ctrl_raw(Wavefront &wf, uint32_t value) { wf.set_gfx12_trap_ctrl_raw(value); }
+
 // UserWritable records ISA privilege, not simulator completeness. If a
 // user-writable register has no HwregState backing yet, writes return
 // Unsupported rather than fabricating hidden state or side effects.
+
+// CDNA2 backs HW_ID.SIMD_ID. CDNA1's public ISA omits the field layout, so
+// instantiate its otherwise shared register table with HW_ID unsupported.
+template <HwregState HwIdState>
 constexpr HwregDescriptor CDNA1_2_HWREGS[] = {
     // CDNA-family ISA XML uses MODE=1 and STATUS=2. Keep XML-only and
     // unmodeled state explicit but unsupported until the corresponding VM
     // state, field layouts, and privilege side effects are represented.
     {1, "MODE", HwregState::Mode, HwregWritePolicy::UserWritable},
-    {2, "STATUS", HwregState::Status, HwregWritePolicy::ReadOnly},
-    {3, "TRAPSTS", HwregState::Unsupported, HwregWritePolicy::UserWritable},
-    {4, "HW_ID", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
+    {2, "STATUS", HwregState::Status, HwregWritePolicy::Privileged},
+    {3, "TRAPSTS", HwregState::Trapsts, HwregWritePolicy::UserWritable},
+    {4, "HW_ID", HwIdState, HwregWritePolicy::ReadOnly},
     {5, "GPR_ALLOC", HwregState::GprAllocGfx9_10, HwregWritePolicy::ReadOnly},
     {6, "LDS_ALLOC", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {7, "IB_STS", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
@@ -133,14 +196,14 @@ constexpr HwregDescriptor CDNA1_2_HWREGS[] = {
 };
 
 constexpr HwregDescriptor CDNA3_4_HWREGS[] = {
-    // CDNA3/CDNA4 ISA manuals define the GPR_ALLOC field layout; MODE/STATUS
-    // and GPR_ALLOC have backing wave state, while the other XML HWREG IDs stay
-    // named but unsupported until their VM state and privilege side effects are
-    // represented.
+    // MODE/STATUS, TRAPSTS, GPR_ALLOC, HW_ID location fields, and XCC_ID
+    // have modeled sources in wave state and CU/CP topology.
+    // The other XML HWREG IDs stay named but unsupported until their VM state,
+    // field layouts and privilege side effects are represented.
     {1, "MODE", HwregState::Mode, HwregWritePolicy::UserWritable},
-    {2, "STATUS", HwregState::Status, HwregWritePolicy::ReadOnly},
-    {3, "TRAPSTS", HwregState::Unsupported, HwregWritePolicy::UserWritable},
-    {4, "HW_ID", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
+    {2, "STATUS", HwregState::Status, HwregWritePolicy::Privileged},
+    {3, "TRAPSTS", HwregState::Trapsts, HwregWritePolicy::UserWritable},
+    {4, "HW_ID", HwregState::LocationCdna3_4, HwregWritePolicy::ReadOnly},
     {5, "GPR_ALLOC", HwregState::GprAllocCdna3_4, HwregWritePolicy::ReadOnly},
     {6, "LDS_ALLOC", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {7, "IB_STS", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
@@ -156,7 +219,7 @@ constexpr HwregDescriptor CDNA3_4_HWREGS[] = {
     {17, "SQ_SHADER_TBA_HI", HwregState::Unsupported, HwregWritePolicy::Privileged},
     {18, "SQ_SHADER_TMA_LO", HwregState::Unsupported, HwregWritePolicy::Privileged},
     {19, "SQ_SHADER_TMA_HI", HwregState::Unsupported, HwregWritePolicy::Privileged},
-    {20, "XCC_ID", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
+    {20, "XCC_ID", HwregState::XccIdCdna3_4, HwregWritePolicy::ReadOnly},
     {21, "SQ_PERF_SNAPSHOT_DATA", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {22, "SQ_PERF_SNAPSHOT_DATA1", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {23, "SQ_PERF_SNAPSHOT_PC_LO", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
@@ -168,7 +231,7 @@ constexpr HwregDescriptor RDNA1_HWREGS[] = {
     // are named for diagnostics but stay unsupported without modeled VM state.
     {1, "MODE", HwregState::Mode, HwregWritePolicy::UserWritable},
     {2, "STATUS", HwregState::Status, HwregWritePolicy::ReadOnly},
-    {3, "TRAPSTS", HwregState::Unsupported, HwregWritePolicy::UserWritable},
+    {3, "TRAPSTS", HwregState::Trapsts, HwregWritePolicy::UserWritable},
     {4, "HW_ID_LEGACY", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {5, "GPR_ALLOC", HwregState::GprAllocGfx9_10, HwregWritePolicy::ReadOnly},
     {6, "LDS_ALLOC", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
@@ -201,7 +264,7 @@ constexpr HwregDescriptor RDNA2_HWREGS[] = {
     // are named for diagnostics but stay unsupported without modeled VM state.
     {1, "MODE", HwregState::Mode, HwregWritePolicy::UserWritable},
     {2, "STATUS", HwregState::Status, HwregWritePolicy::ReadOnly},
-    {3, "TRAPSTS", HwregState::Unsupported, HwregWritePolicy::UserWritable},
+    {3, "TRAPSTS", HwregState::Trapsts, HwregWritePolicy::UserWritable},
     {5, "GPR_ALLOC", HwregState::GprAllocGfx9_10, HwregWritePolicy::ReadOnly},
     {6, "LDS_ALLOC", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {7, "IB_STS", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
@@ -232,7 +295,7 @@ constexpr HwregDescriptor RDNA3_HWREGS[] = {
     // but left unsupported until VM state and privilege side effects are added.
     {1, "MODE", HwregState::Mode, HwregWritePolicy::UserWritable},
     {2, "STATUS", HwregState::Status, HwregWritePolicy::ReadOnly},
-    {3, "TRAPSTS", HwregState::Unsupported, HwregWritePolicy::UserWritable},
+    {3, "TRAPSTS", HwregState::Trapsts, HwregWritePolicy::UserWritable},
     {5, "GPR_ALLOC", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {6, "LDS_ALLOC", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {7, "IB_STS", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
@@ -261,7 +324,7 @@ constexpr HwregDescriptor RDNA4_HWREGS[] = {
     // appears in prose only, so keep it as a named unsupported read-only entry.
     {1, "WAVE_MODE", HwregState::Mode, HwregWritePolicy::UserWritable},
     {2, "WAVE_STATUS", HwregState::Status, HwregWritePolicy::ReadOnly},
-    {4, "WAVE_STATE_PRIV", HwregState::Unsupported, HwregWritePolicy::Privileged},
+    {4, "WAVE_STATE_PRIV", HwregState::StatePrivGfx12, HwregWritePolicy::Privileged},
     {5, "WAVE_GPR_ALLOC", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {6, "WAVE_LDS_ALLOC", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {10, "PERF_SNAPSHOT_DATA", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
@@ -269,9 +332,9 @@ constexpr HwregDescriptor RDNA4_HWREGS[] = {
     {12, "PERF_SNAPSHOT_PC_HI", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {15, "PERF_SNAPSHOT_DATA1", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {16, "PERF_SNAPSHOT_DATA2", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
-    {17, "WAVE_EXCP_FLAG_PRIV", HwregState::Unsupported, HwregWritePolicy::Privileged},
-    {18, "WAVE_EXCP_FLAG_USER", HwregState::Unsupported, HwregWritePolicy::UserWritable},
-    {19, "WAVE_TRAP_CTRL", HwregState::Unsupported, HwregWritePolicy::Privileged},
+    {17, "WAVE_EXCP_FLAG_PRIV", HwregState::ExcpFlagPrivGfx12, HwregWritePolicy::Privileged},
+    {18, "WAVE_EXCP_FLAG_USER", HwregState::ExcpFlagUserGfx12, HwregWritePolicy::UserWritable},
+    {19, "WAVE_TRAP_CTRL", HwregState::TrapCtrlGfx12, HwregWritePolicy::Privileged},
     {20, "WAVE_SCRATCH_BASE_LO", HwregState::Unsupported, HwregWritePolicy::Privileged},
     {21, "WAVE_SCRATCH_BASE_HI", HwregState::Unsupported, HwregWritePolicy::Privileged},
     {23, "WAVE_HW_ID1", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
@@ -288,7 +351,7 @@ constexpr HwregDescriptor GFX1250_HWREGS[] = {
     // departure recorded in cdna5::Isa.
     {1, "WAVE_MODE", HwregState::Mode, HwregWritePolicy::UserWritable},
     {2, "WAVE_STATUS", HwregState::Status, HwregWritePolicy::ReadOnly},
-    {4, "WAVE_STATE_PRIV", HwregState::Unsupported, HwregWritePolicy::Privileged},
+    {4, "WAVE_STATE_PRIV", HwregState::StatePrivGfx12, HwregWritePolicy::Privileged},
     {5, "WAVE_GPR_ALLOC", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {6, "WAVE_LDS_ALLOC", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {7, "IB_STS", HwregState::IbStsGfx1250, HwregWritePolicy::ReadOnly},
@@ -298,17 +361,17 @@ constexpr HwregDescriptor GFX1250_HWREGS[] = {
     {14, "FLUSH_IB", HwregState::Unsupported, HwregWritePolicy::UserWritable},
     {15, "PERF_SNAPSHOT_DATA1", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {16, "PERF_SNAPSHOT_DATA2", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
-    {17, "WAVE_EXCP_FLAG_PRIV", HwregState::Unsupported, HwregWritePolicy::Privileged},
-    {18, "WAVE_EXCP_FLAG_USER", HwregState::Unsupported, HwregWritePolicy::UserWritable},
-    {19, "WAVE_TRAP_CTRL", HwregState::Unsupported, HwregWritePolicy::Privileged},
+    {17, "WAVE_EXCP_FLAG_PRIV", HwregState::ExcpFlagPrivGfx12, HwregWritePolicy::Privileged},
+    {18, "WAVE_EXCP_FLAG_USER", HwregState::ExcpFlagUserGfx12, HwregWritePolicy::UserWritable},
+    {19, "WAVE_TRAP_CTRL", HwregState::TrapCtrlGfx12, HwregWritePolicy::Privileged},
     {20, "WAVE_SCRATCH_BASE_LO", HwregState::Unsupported, HwregWritePolicy::Privileged},
     {21, "WAVE_SCRATCH_BASE_HI", HwregState::Unsupported, HwregWritePolicy::Privileged},
-    {23, "WAVE_HW_ID1", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
+    {23, "WAVE_HW_ID1", HwregState::WgpIdGfx1250, HwregWritePolicy::ReadOnly},
     {24, "WAVE_HW_ID2", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {26, "WAVE_SCHED_MODE", HwregState::WaveSchedMode, HwregWritePolicy::UserWritable},
     {28, "IB_STS2", HwregState::IbSts2Gfx1250, HwregWritePolicy::ReadOnly},
-    {33, "WAVE_XNACK_STATE_PRIV", HwregState::Unsupported, HwregWritePolicy::Privileged},
-    {34, "WAVE_XNACK_MASK", HwregState::Unsupported, HwregWritePolicy::Privileged},
+    {33, "WAVE_XNACK_STATE_PRIV", HwregState::XnackStatePrivGfx1250, HwregWritePolicy::Privileged},
+    {34, "WAVE_XNACK_MASK", HwregState::XnackMaskGfx1250, HwregWritePolicy::Privileged},
 };
 
 template <size_t N> constexpr HwregTable make_table(const HwregDescriptor (&entries)[N]) {
@@ -323,8 +386,9 @@ HwregTable table_for_arch(rj_code_arch_t arch) {
    */
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
+    return make_table(CDNA1_2_HWREGS<HwregState::Unsupported>);
   case ROCJITSU_CODE_ARCH_CDNA2:
-    return make_table(CDNA1_2_HWREGS);
+    return make_table(CDNA1_2_HWREGS<HwregState::SimdIdCdna2>);
   case ROCJITSU_CODE_ARCH_CDNA3:
   case ROCJITSU_CODE_ARCH_CDNA4:
     return make_table(CDNA3_4_HWREGS);
@@ -337,7 +401,7 @@ HwregTable table_for_arch(rj_code_arch_t arch) {
     return make_table(RDNA3_HWREGS);
   case ROCJITSU_CODE_ARCH_RDNA4:
     return make_table(RDNA4_HWREGS);
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return make_table(GFX1250_HWREGS);
   default:
     return {nullptr, 0};
@@ -368,6 +432,16 @@ bool field_intersects(const DecodedHwreg &decoded, uint32_t offset, uint32_t siz
   return decoded.offset < offset + size && offset < decoded.offset + decoded.size;
 }
 
+// Observe only the requested field, never the other bits read to preserve a
+// partial HWREG write. GFX12 moved SCC from STATUS[0] to STATE_PRIV[9].
+bool field_aliases_scc(const Wavefront &wf, HwregState state, const DecodedHwreg &decoded) {
+  if (state == HwregState::StatePrivGfx12)
+    return field_intersects(decoded, 9, 1);
+  const auto arch = wf.cu().arch();
+  return state == HwregState::Status && arch != ROCJITSU_CODE_ARCH_RDNA4 &&
+         arch != ROCJITSU_CODE_ARCH_CDNA5 && field_intersects(decoded, 0, 1);
+}
+
 HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_value) {
   switch (state) {
   case HwregState::Mode:
@@ -376,6 +450,42 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
   case HwregState::Status:
     raw_value = wf.status_raw();
     return HwregAccessResult::Success;
+  case HwregState::StatePrivGfx12:
+    raw_value = gfx12_state_priv_raw(wf);
+    return HwregAccessResult::Success;
+  case HwregState::ExcpFlagPrivGfx12:
+    raw_value = gfx12_excp_flag_priv_raw(wf);
+    return HwregAccessResult::Success;
+  case HwregState::ExcpFlagUserGfx12:
+    raw_value = gfx12_excp_flag_user_raw(wf);
+    return HwregAccessResult::Success;
+  case HwregState::TrapCtrlGfx12:
+    raw_value = gfx12_trap_ctrl_raw(wf);
+    return HwregAccessResult::Success;
+  case HwregState::XnackStatePrivGfx1250:
+    raw_value = wf.gfx1250_xnack_state_priv_raw();
+    return HwregAccessResult::Success;
+  case HwregState::XnackMaskGfx1250:
+    raw_value = wf.gfx1250_xnack_mask_raw();
+    return HwregAccessResult::Success;
+  case HwregState::Trapsts:
+    raw_value = wf.trapsts();
+    return HwregAccessResult::Success;
+  case HwregState::SimdIdCdna2:
+    raw_value = cdna2_4_simd_id_raw(wf);
+    return HwregAccessResult::Success;
+  case HwregState::LocationCdna3_4:
+    raw_value = cdna2_4_simd_id_raw(wf) | field_value(wf.wf_id() / 4, 0, 4) |
+                field_value(wf.cu().shader_array_cu_id(), 8, 4) |
+                field_value(wf.cu().shader_engine_id(), 13, 3);
+    return HwregAccessResult::Success;
+  case HwregState::XccIdCdna3_4: {
+    const std::optional<uint32_t> xcc = wf.cu().xcc_id();
+    if (!xcc || *xcc > 15)
+      return HwregAccessResult::Unsupported;
+    raw_value = *xcc;
+    return HwregAccessResult::Success;
+  }
   case HwregState::GprAllocGfx9_10:
     raw_value = gfx9_10_gpr_alloc_raw(wf);
     return HwregAccessResult::Success;
@@ -391,6 +501,12 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
   case HwregState::IbSts2Gfx1250:
     raw_value = gfx1250_ib_sts2_raw(wf);
     return HwregAccessResult::Success;
+  case HwregState::WgpIdGfx1250:
+    if (!wf.cu().cus_per_shader_array() || wf.cu().cus_per_shader_array() > 16)
+      return HwregAccessResult::Unsupported;
+    // Each gfx1250 ComputeUnit models one WGP, including its shared LDS.
+    raw_value = field_value(wf.cu().shader_array_cu_id(), 10, 4);
+    return HwregAccessResult::Success;
   case HwregState::Unsupported:
     return HwregAccessResult::Unsupported;
   }
@@ -405,11 +521,47 @@ HwregAccessResult write_raw_hwreg(Wavefront &wf, HwregState state, uint32_t raw_
   case HwregState::WaveSchedMode:
     wf.set_wave_sched_mode_raw(raw_value);
     return HwregAccessResult::Success;
+  case HwregState::Trapsts:
+    // The trap handler clears the excp bit it just serviced before s_rfe, so
+    // this has to write through to wave state rather than report Unsupported.
+    wf.set_trapsts(raw_value);
+    return HwregAccessResult::Success;
   case HwregState::Status:
+    // Only reachable from a privileged (trap-handler) write; the policy check
+    // in write_hwreg_field() refuses user-mode writes before we get here. The
+    // gfx9 trap handler sets STATUS.HALT this way before returning.
+    //
+    // That makes this the other origin of STATUS.HALT, so it owns the bit now:
+    // drop any s_sendmsghalt provenance, whichever way the handler wrote it.
+    wf.set_status_raw(raw_value);
+    wf.set_self_halted(false);
+    return HwregAccessResult::Success;
+  case HwregState::StatePrivGfx12:
+    set_gfx12_state_priv_raw(wf, raw_value);
+    return HwregAccessResult::Success;
+  case HwregState::ExcpFlagPrivGfx12:
+    set_gfx12_excp_flag_priv_raw(wf, raw_value);
+    return HwregAccessResult::Success;
+  case HwregState::ExcpFlagUserGfx12:
+    set_gfx12_excp_flag_user_raw(wf, raw_value);
+    return HwregAccessResult::Success;
+  case HwregState::TrapCtrlGfx12:
+    set_gfx12_trap_ctrl_raw(wf, raw_value);
+    return HwregAccessResult::Success;
+  case HwregState::XnackStatePrivGfx1250:
+    wf.set_gfx1250_xnack_state_priv_raw(raw_value);
+    return HwregAccessResult::Success;
+  case HwregState::XnackMaskGfx1250:
+    wf.set_gfx1250_xnack_mask_raw(raw_value);
+    return HwregAccessResult::Success;
+  case HwregState::SimdIdCdna2:
+  case HwregState::LocationCdna3_4:
+  case HwregState::XccIdCdna3_4:
   case HwregState::GprAllocGfx9_10:
   case HwregState::GprAllocCdna3_4:
   case HwregState::IbStsGfx1250:
   case HwregState::IbSts2Gfx1250:
+  case HwregState::WgpIdGfx1250:
   case HwregState::Unsupported:
     return HwregAccessResult::Unsupported;
   }
@@ -422,6 +574,66 @@ uint32_t insert_hwreg_field(uint32_t raw_value, uint32_t src, const DecodedHwreg
 }
 
 } // namespace
+
+uint32_t gfx12_state_priv_from_status(uint32_t status, bool scratch_enabled) {
+  uint32_t value = ((status & 1u) << 9) | (((status >> 1) & 0xFu) << 10);
+  value |= ((status >> 13) & 1u) << 14;
+  value |= (scratch_enabled ? 1u : 0u) << 18;
+  value |= ((status >> 19) & 1u) << 19;
+  value |= ((status >> 7) & 1u) << 20;
+  return value;
+}
+
+uint32_t update_status_from_gfx12_state_priv(uint32_t status, uint32_t state_priv) {
+  constexpr uint32_t kMappedStatus =
+      (1u << 0) | (0xFu << 1) | (1u << 7) | Wavefront::kStatusHaltMask | (1u << 19);
+  status &= ~kMappedStatus;
+  status |= (state_priv >> 9) & 1u;
+  status |= ((state_priv >> 10) & 0xFu) << 1;
+  status |= ((state_priv >> 14) & 1u) << 13;
+  status |= ((state_priv >> 19) & 1u) << 19;
+  status |= ((state_priv >> 20) & 1u) << 7;
+  return status;
+}
+
+uint32_t gfx12_excp_flag_priv_from_trapsts(uint32_t trapsts) {
+  uint32_t value = ((trapsts >> 7) & 1u) << 0;
+  value |= ((trapsts >> 12) & 0x7u) << 1;
+  value |= ((trapsts >> 8) & 1u) << 4;
+  value |= ((trapsts >> 10) & 1u) << 5;
+  value |= ((trapsts >> 11) & 1u) << 6;
+  value |= ((trapsts >> 22) & 1u) << 7;
+  value |= ((trapsts >> 23) & 1u) << 8;
+  value |= ((trapsts >> 24) & 1u) << 9;
+  value |= ((trapsts >> 26) & 1u) << 10;
+  value |= ((trapsts >> 25) & 1u) << 11;
+  value |= ((trapsts >> 28) & 1u) << 12;
+  value |= trapsts & (0x3u << 30);
+  return value;
+}
+
+uint32_t update_trapsts_from_gfx12_excp_flag_priv(uint32_t trapsts, uint32_t excp_flag_priv) {
+  constexpr uint32_t kMappedTrapsts = (1u << 7) | (1u << 8) | (1u << 10) | (1u << 11) |
+                                      (0x7u << 12) | (0x1Fu << 22) | (1u << 28) | (0x3u << 30);
+  trapsts &= ~kMappedTrapsts;
+  trapsts |= ((excp_flag_priv >> 0) & 1u) << 7;
+  trapsts |= ((excp_flag_priv >> 1) & 0x7u) << 12;
+  trapsts |= ((excp_flag_priv >> 4) & 1u) << 8;
+  trapsts |= ((excp_flag_priv >> 5) & 1u) << 10;
+  trapsts |= ((excp_flag_priv >> 6) & 1u) << 11;
+  trapsts |= ((excp_flag_priv >> 7) & 1u) << 22;
+  trapsts |= ((excp_flag_priv >> 8) & 1u) << 23;
+  trapsts |= ((excp_flag_priv >> 9) & 1u) << 24;
+  trapsts |= ((excp_flag_priv >> 10) & 1u) << 26;
+  trapsts |= ((excp_flag_priv >> 11) & 1u) << 25;
+  trapsts |= ((excp_flag_priv >> 12) & 1u) << 28;
+  trapsts |= excp_flag_priv & (0x3u << 30);
+  return trapsts;
+}
+
+uint32_t update_trapsts_from_gfx12_excp_flag_user(uint32_t trapsts, uint32_t excp_flag_user) {
+  return (trapsts & ~0x7Fu) | (excp_flag_user & 0x7Fu);
+}
 
 uint32_t hwreg_id(uint16_t hwreg) { return hwreg & 0x3Fu; }
 
@@ -452,7 +664,38 @@ HwregAccessResult read_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t &valu
     return HwregAccessResult::Unsupported;
   }
 
+  // Only SIMD_ID[5:4] has backing state; do not fabricate the other HW_ID fields.
+  if (desc->state == HwregState::SimdIdCdna2 &&
+      (decoded.offset < 4 || decoded.offset + decoded.size > 6)) {
+    value = 0;
+    return HwregAccessResult::Unsupported;
+  }
+
+  if (desc->state == HwregState::LocationCdna3_4) {
+    // Only expose fields backed by physical wave slots and CU topology.
+    // PIPE/TG/VM/QUEUE/ME/STATE identities need their own allocation model.
+    // WAVE_ID[3:0], SIMD_ID[5:4], CU_ID[11:8], SH_ID[12], SE_ID[15:13].
+    // CDNA3/4 specify SH_ID as zero, independently of the configured geometry.
+    constexpr uint32_t kSupportedHwIdBits = 0x0000ff3f;
+    if (((decoded.mask << decoded.offset) & ~kSupportedHwIdBits) ||
+        (field_intersects(decoded, 0, 4) && wf.wf_id() >= 64) ||
+        (field_intersects(decoded, 8, 4) &&
+         (!wf.cu().cus_per_shader_array() || wf.cu().cus_per_shader_array() > 16 ||
+          wf.cu().shader_engine_cu_count() != wf.cu().cus_per_shader_array())) ||
+        (field_intersects(decoded, 13, 3) && wf.cu().shader_engine_id() > 7)) {
+      value = 0;
+      return HwregAccessResult::Unsupported;
+    }
+  }
+
   if (desc->state == HwregState::GprAllocCdna3_4 && field_intersects(decoded, 12, 6)) {
+    value = 0;
+    return HwregAccessResult::Unsupported;
+  }
+
+  // Only WGP_ID[13:10] has backing state; do not fabricate the other HW_ID1 fields.
+  if (desc->state == HwregState::WgpIdGfx1250 &&
+      (decoded.offset < 10 || decoded.offset + decoded.size > 14)) {
     value = 0;
     return HwregAccessResult::Unsupported;
   }
@@ -468,7 +711,17 @@ HwregAccessResult read_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t &valu
   return HwregAccessResult::Success;
 }
 
-HwregAccessResult write_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t src) {
+bool hwreg_accesses_scc(const Wavefront &wf, uint16_t hwreg, bool write) {
+  const auto decoded = decode_hwreg(hwreg);
+  const auto *desc = find_descriptor(wf.cu().arch(), decoded.id);
+  if (!desc || !field_aliases_scc(wf, desc->state, decoded))
+    return false;
+  return !write || (desc->write_policy != HwregWritePolicy::ReadOnly &&
+                    (desc->write_policy != HwregWritePolicy::Privileged || wf.in_trap_handler()));
+}
+
+HwregAccessResult write_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t src,
+                                    HwregWriteKind kind) {
   DecodedHwreg decoded = decode_hwreg(hwreg);
   const HwregDescriptor *desc = find_descriptor(wf.cu().arch(), decoded.id);
   if (!desc)
@@ -478,7 +731,12 @@ HwregAccessResult write_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t src)
   case HwregWritePolicy::ReadOnly:
     return HwregAccessResult::ReadOnly;
   case HwregWritePolicy::Privileged:
-    return HwregAccessResult::Privileged;
+    // A wave running the trap handler is in privileged mode (hardware sets
+    // STATUS.PRIV on trap entry), which is exactly the context these registers
+    // are writable from. Everything else is user mode and is refused.
+    if (!wf.in_trap_handler())
+      return HwregAccessResult::Privileged;
+    break;
   case HwregWritePolicy::UserWritable:
     break;
   }
@@ -488,7 +746,19 @@ HwregAccessResult write_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t src)
   if (result != HwregAccessResult::Success)
     return result;
 
-  return write_raw_hwreg(wf, desc->state, insert_hwreg_field(raw_value, src, decoded));
+  uint32_t updated = insert_hwreg_field(raw_value, src, decoded);
+  if (desc->state == HwregState::Mode && kind != HwregWriteKind::Generic &&
+      wf.cu().setreg_vgpr_msb_fixup()) {
+    // Public LLVM's SetregVGPRMSBFixup contract records that gfx1250 MODE
+    // writes take VGPR-MSB from the unshifted source bits[12:19], regardless of
+    // the requested HWREG slice. gfx1251 lacks this target capability and uses
+    // the ordinary field insertion above.
+    updated = (updated & ~VGPR_MSB_MODE_MASK) | (src & VGPR_MSB_MODE_MASK);
+    if (kind == HwregWriteKind::SetregImm32)
+      wf.arm_setreg_vgpr_msb_hazard();
+  }
+
+  return write_raw_hwreg(wf, desc->state, updated);
 }
 
 } // namespace amdgpu

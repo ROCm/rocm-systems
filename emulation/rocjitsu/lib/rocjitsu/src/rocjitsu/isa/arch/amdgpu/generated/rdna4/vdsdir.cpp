@@ -6,7 +6,6 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vdsdir.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
-#include "util/except.h"
 #include <memory>
 
 namespace rocjitsu {
@@ -26,10 +25,16 @@ DsParamLoadVdsdir::DsParamLoadVdsdir(const MachineInst *inst)
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeDsParamLoadVdsdir(const MachineInst *opcode) {
+DecodeResult decodeDsParamLoadVdsdir(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vdsdir::validate_encoding(
+      "ds_param_load", reinterpret_cast<const Vdsdir::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<DsParamLoadVdsdir>(opcode);
 }
 } // namespace detail
@@ -46,10 +51,19 @@ DsDirectLoadVdsdir::DsDirectLoadVdsdir(const MachineInst *inst)
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
+  flags_ |= CONDITIONAL_MEMORY_LANES;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeDsDirectLoadVdsdir(const MachineInst *opcode) {
+DecodeResult decodeDsDirectLoadVdsdir(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vdsdir::validate_encoding(
+      "ds_direct_load", reinterpret_cast<const Vdsdir::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<DsDirectLoadVdsdir>(opcode);
 }
 } // namespace detail

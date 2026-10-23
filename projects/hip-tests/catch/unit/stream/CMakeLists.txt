@@ -15,6 +15,7 @@ set(TEST_SRC
     hipStreamDestroy.cc
     hipStreamValue.cc
     hipStreamSynchronize.cc
+    hipStreamSyncMultiThread.cc
     hipStreamQuery.cc
     hipDeviceGetStreamPriorityRange.cc
     hipStreamACb_StrmSyncTiming.cc
@@ -24,6 +25,7 @@ set(TEST_SRC
     hipStreamLegacy_compiler_options.cc
     hipStreamGetId.cc
     hipStreamSetGetAttributes.cc
+    hipSharedQueueAnyOrderOverlap.cc
     hipStreamAttachMemAsync.cc
     # TODO renable it TheRock is not finding it
     hipStreamCopyAttributes.cc

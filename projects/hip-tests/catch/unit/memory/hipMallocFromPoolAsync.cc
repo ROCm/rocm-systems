@@ -455,38 +455,6 @@ static void threadQAsyncCommands(streamMemAllocTest* testObj, hipStream_t strm, 
   testObj->freeDevBuf(strm);
 }
 
-static void thread_Test1(hipStream_t stream, int N, enum eTestValue testtype, int threadNum) {
-  thread_results[threadNum] = checkMaximumAndDefaultThreshold(stream, N, testtype, 0, true);
-}
-
-static bool test_hipMallocFromPoolAsync_MThread(enum eTestValue testtype) {
-  // create a stream
-  constexpr int N = 1 << 20;
-  std::vector<std::thread> tests;
-  hipStream_t stream[NUMBER_OF_THREADS];
-  // Initialize and create streams
-  for (int idx = 0; idx < NUMBER_OF_THREADS; idx++) {
-    thread_results[idx] = false;
-    HIP_CHECK(hipStreamCreate(&stream[idx]));
-  }
-  // Spawn the test threads
-  for (int idx = 0; idx < NUMBER_OF_THREADS; idx++) {
-    tests.push_back(std::thread(thread_Test1, stream[idx], N, testtype, idx));
-  }
-  // Wait for all threads to complete
-  for (std::thread& t : tests) {
-    t.join();
-  }
-  HIP_CHECK_THREAD_FINALIZE();
-  // Wait for thread and destroy stream
-  bool status = true;
-  for (int idx = 0; idx < NUMBER_OF_THREADS; idx++) {
-    status = status & thread_results[idx];
-    HIP_CHECK(hipStreamDestroy(stream[idx]));
-  }
-  return status;
-}
-
 static void thread_Test2(hipMemPool_t mempool, hipStream_t stream, int N, int threadNum) {
   MThreadOutcome& out = thread_outcome[threadNum];
   // The common mempool belongs to kCommonMpoolDevice. A worker thread starts on

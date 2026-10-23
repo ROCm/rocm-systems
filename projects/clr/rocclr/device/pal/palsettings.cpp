@@ -152,6 +152,8 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
     // Fall through for Navi2x ...
     case Pal::AsicRevision::StrixHalo:
     case Pal::AsicRevision::Strix1:
+    case Pal::AsicRevision::Gfx1170:
+    case Pal::AsicRevision::Gfx1171:
     case Pal::AsicRevision::Krackan1:
     case Pal::AsicRevision::Krackan2:
     case Pal::AsicRevision::Phoenix1:
@@ -164,14 +166,6 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
     case Pal::AsicRevision::Navi23:
     case Pal::AsicRevision::Navi22:
     case Pal::AsicRevision::Navi21:
-      // set wavefront 64 for Geekbench 5
-      {
-        if (appName == "Geekbench 5.exe" || appName == "geekbench_x86_64.exe" ||
-            appName == "geekbench5.exe") {
-          useWavefront64 = true;
-        }
-      }
-    // Fall through for Navi1x ...
     case Pal::AsicRevision::Navi14:
     case Pal::AsicRevision::Navi12:
     case Pal::AsicRevision::Navi10:
@@ -217,7 +211,9 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
         supportDepthsRGB_ = true;
       }
       if (use64BitPtr_) {
-        maxAllocSize_ = 64ULL * Gi;
+        // Unified memory APUs address the carve-out and the aperture as one pool, which
+        // already exceeds 64 GiB on shipping parts.
+        maxAllocSize_ = 256ULL * Gi;
       } else {
         maxAllocSize_ = 3ULL * Gi;
       }

@@ -43,7 +43,7 @@ struct TargetInfo {
 
 // \NPI new GPU: add a {"gfxNNNN", ARCH, EF_MACH, TARGET} row here
 // (and bump the  std::array size) so the DBT tool can translate to/from it.
-constexpr std::array<TargetInfo, 5> kTargetInfos = {{
+constexpr std::array<TargetInfo, 6> kTargetInfos = {{
     {"gfx942", ROCJITSU_CODE_ARCH_CDNA3, EF_AMDGPU_MACH_AMDGCN_GFX942, ROCJITSU_CODE_TARGET_GFX942},
     {"gfx950", ROCJITSU_CODE_ARCH_CDNA4, EF_AMDGPU_MACH_AMDGCN_GFX950, ROCJITSU_CODE_TARGET_GFX950},
     {"gfx1200", ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MACH_AMDGCN_GFX1200,
@@ -52,8 +52,10 @@ constexpr std::array<TargetInfo, 5> kTargetInfos = {{
      ROCJITSU_CODE_TARGET_GFX1201},
     // gfx1250 A0 and B0 share the same ELF machine and structural ISA. Separate
     // revision options select the translation direction.
-    {"gfx1250", ROCJITSU_CODE_ARCH_GFX1250, EF_AMDGPU_MACH_AMDGCN_GFX1250,
+    {"gfx1250", ROCJITSU_CODE_ARCH_CDNA5, EF_AMDGPU_MACH_AMDGCN_GFX1250,
      ROCJITSU_CODE_TARGET_GFX1250},
+    {"gfx1251", ROCJITSU_CODE_ARCH_CDNA5, EF_AMDGPU_MACH_AMDGCN_GFX1251,
+     ROCJITSU_CODE_TARGET_GFX1251},
 }};
 
 struct CliOptions {
@@ -95,6 +97,7 @@ void print_help() {
       << "  --skip-failed-kernels          Preserve failed kernels and continue other kernels\n"
       << "  --verify-idempotence           Require a same-architecture second pass to be "
          "unchanged\n"
+      << "  --verify-rewrite-discharge     Require no registered rewrite trigger in final output\n"
       << "  --show-all-translations         Include unchanged identity mappings in diff output\n"
       << "  --list-code-objects             List extractable code objects and exit\n"
       << "  --help                          Show this help\n\n"
@@ -199,6 +202,10 @@ void print_help() {
     }
     if (arg == "--verify-idempotence") {
       options.translate.verify_idempotence = true;
+      continue;
+    }
+    if (arg == "--verify-rewrite-discharge") {
+      options.translate.verify_rewrite_discharge = true;
       continue;
     }
 
@@ -344,6 +351,8 @@ struct ReportTotals {
     return "resource-limit";
   case DiagnosticKind::KernelSkipped:
     return "kernel-skipped";
+  case DiagnosticKind::ResidualRewrite:
+    return "residual-rewrite";
   }
   return "unknown";
 }
@@ -356,6 +365,8 @@ void print_diagnostic(std::ostream &os, const TranslationDiagnostic &diagnostic,
      << diagnostic_kind_name(diagnostic.kind);
   if (diagnostic.guest_offset)
     os << " .text+" << hex_offset(*diagnostic.guest_offset);
+  if (diagnostic.output_offset)
+    os << " output:.text+" << hex_offset(*diagnostic.output_offset);
   if (!diagnostic.mnemonic.empty())
     os << " " << diagnostic.mnemonic;
   os << ": " << diagnostic.message << "\n";
@@ -537,6 +548,12 @@ void print_text_report(std::ostream &os, const CliOptions &options,
                                                                   : "not-verified";
     os << "idempotence: " << status << "\n";
   }
+  if (options.translate.verify_rewrite_discharge) {
+    const std::string_view status = !output.rewrite_discharge_checked   ? "not-checked"
+                                    : output.rewrite_discharge_verified ? "verified"
+                                                                        : "not-verified";
+    os << "rewrite_discharge: " << status << "\n";
+  }
 
   print_code_object_report(os, "source", output.source_report);
   print_code_object_report(os, "translated", output.translated_report);
@@ -601,6 +618,10 @@ int rocjitsu::tools::detail::run_dbt_translate_cli(int argc, char **argv,
 
   if (options.list_code_objects && options.translate.verify_idempotence) {
     std::cerr << "--verify-idempotence cannot be combined with --list-code-objects\n";
+    return kUsageError;
+  }
+  if (options.list_code_objects && options.translate.verify_rewrite_discharge) {
+    std::cerr << "--verify-rewrite-discharge cannot be combined with --list-code-objects\n";
     return kUsageError;
   }
 

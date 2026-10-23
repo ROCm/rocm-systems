@@ -73,7 +73,7 @@ In our first experiment, we consider the simplest possible case, a
      mdata:Unsigned
      remoteId:-1
    <...>
-   $ rocprof-compute analyze -p workloads/coarse_grained_local/mi200 -b 17.2.0 17.2.1 17.2.2 17.4.0 17.4.1 17.4.2 17.5.0 17.5.1 17.5.2 17.5.3 17.5.4 -n per_kernel --dispatch 2
+   $ rocprof-compute analyze -p workloads/coarse_grained_local/mi200 -b 17.2.0 17.2.1 17.2.2 17.4.0 17.4.1 17.4.2 17.5.0 17.5.1 17.5.2 17.5.3 17.5.4 -n per_kernel --dispatch 3
    <...>
    17. L2 Cache
    17.2 L2 - Fabric Transactions
@@ -172,7 +172,7 @@ accelerator. Our code uses the ``hipExtMallocWithFlag`` API with the
      mdata:Unsigned
      remoteId:-1
    <...>
-   $ rocprof-compute analyze -p workloads/fine_grained_local/mi200 -b 17.2.0 17.2.1 17.2.2 17.2.3 17.4.0 17.4.1 17.4.2 17.5.0 17.5.1 17.5.2 17.5.3 17.5.4  -n per_kernel --dispatch 2
+   $ rocprof-compute analyze -p workloads/fine_grained_local/mi200 -b 17.2.0 17.2.1 17.2.2 17.2.3 17.4.0 17.4.1 17.4.2 17.5.0 17.5.1 17.5.2 17.5.3 17.5.4  -n per_kernel --dispatch 3
    <...>
    17. L2 Cache
    17.2 L2 - Fabric Transactions
@@ -254,7 +254,7 @@ substantial change in the L2-Fabric metrics:
      mdata:Unsigned
      remoteId:-1
    <...>
-   $ rocprof-compute analyze -p workloads/fine_grained_remote/mi200 -b 17.2.0 17.2.1 17.2.2 17.2.3 17.4.0 17.4.1 17.4.2 17.5.0 17.5.1 17.5.2 17.5.3 17.5.4  -n per_kernel --dispatch 2
+   $ rocprof-compute analyze -p workloads/fine_grained_remote/mi200 -b 17.2.0 17.2.1 17.2.2 17.2.3 17.4.0 17.4.1 17.4.2 17.5.0 17.5.1 17.5.2 17.5.3 17.5.4  -n per_kernel --dispatch 3
    <...>
    17. L2 Cache
    17.2 L2 - Fabric Transactions
@@ -348,7 +348,7 @@ fine-grained memory using the ``hipHostMalloc`` API:
      mdata:Unsigned
      remoteId:-1
    <...>
-   $ rocprof-compute analyze -p workloads/fine_grained_host/mi200 -b 17.2.0 17.2.1 17.2.2 17.2.3 17.4.0 17.4.1 17.4.2 17.5.0 17.5.1 17.5.2 17.5.3 17.5.4  -n per_kernel --dispatch 2
+   $ rocprof-compute analyze -p workloads/fine_grained_host/mi200 -b 17.2.0 17.2.1 17.2.2 17.2.3 17.4.0 17.4.1 17.4.2 17.5.0 17.5.1 17.5.2 17.5.3 17.5.4  -n per_kernel --dispatch 3
    <...>
    17. L2 Cache
    17.2 L2 - Fabric Transactions
@@ -425,7 +425,7 @@ allocation as coarse-grained:
      mdata:Unsigned
      remoteId:-1
    <...>
-   $ rocprof-compute analyze -p workloads/coarse_grained_host/mi200 -b 17.2.0 17.2.1 17.2.2 17.2.3 17.4.0 17.4.1 17.4.2 17.5.0 17.5.1 17.5.2 17.5.3 17.5.4  -n per_kernel --dispatch 2
+   $ rocprof-compute analyze -p workloads/coarse_grained_host/mi200 -b 17.2.0 17.2.1 17.2.2 17.2.3 17.4.0 17.4.1 17.4.2 17.5.0 17.5.1 17.5.2 17.5.3 17.5.4  -n per_kernel --dispatch 3
    <...>
    17. L2 Cache
    17.2 L2 - Fabric Transactions
@@ -493,7 +493,7 @@ operations to fine-grained memory allocated on the host:
      mdata:Unsigned
      remoteId:-1
    <...>
-   $ rocprof-compute analyze -p workloads/fine_grained_host_writes/mi200 -b 17.2.4 17.2.5 17.2.6 17.2.7 17.2.8 17.4.3 17.4.4 17.4.5 17.4.6 17.5.5 17.5.6 17.5.7 17.5.8 17.5.9 17.5.10 -n per_kernel --dispatch 2
+   $ rocprof-compute analyze -p workloads/fine_grained_host_writes/mi200 -b 17.2.4 17.2.5 17.2.6 17.2.7 17.2.8 17.4.3 17.4.4 17.4.5 17.4.6 17.5.5 17.5.6 17.5.7 17.5.8 17.5.9 17.5.10 -n per_kernel --dispatch 3
    <...>
    17. L2 Cache
    17.2 L2 - Fabric Transactions
@@ -585,7 +585,7 @@ operations to the CPU’s DRAM.
      mdata:Unsigned
      remoteId:-1
    <...>
-   $ rocprof-compute analyze -p workloads/fine_grained_host_add/mi200 -b 17.2.4 17.2.5 17.2.6 17.2.7 17.2.8 17.4.3 17.4.4 17.4.5 17.4.6 17.5.5 17.5.6 17.5.7 17.5.8 17.5.9 17.5.10 -n per_kernel --dispatch 2
+   $ rocprof-compute analyze -p workloads/fine_grained_host_add/mi200 -b 17.2.4 17.2.5 17.2.6 17.2.7 17.2.8 17.4.3 17.4.4 17.4.5 17.4.6 17.5.5 17.5.6 17.5.7 17.5.8 17.5.9 17.5.10 -n per_kernel --dispatch 3
    <...>
    17. L2 Cache
    17.2 L2 - Fabric Transactions

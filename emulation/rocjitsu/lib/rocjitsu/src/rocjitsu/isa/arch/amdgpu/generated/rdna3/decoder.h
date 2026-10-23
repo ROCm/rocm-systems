@@ -8,6 +8,9 @@
 #define ROCJITSU_ISA_ARCH_AMDGPU_RDNA3_DECODER_H_
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/machine_insts.h"
+#include "rocjitsu/isa/decode_result.h"
+#include <array>
+#include <cstddef>
 #include <memory>
 
 namespace rocjitsu {
@@ -18,7 +21,8 @@ namespace rdna3 {
 
 class Decoder {
 public:
-  static std::unique_ptr<Instruction> decode(const MachineInst *opcode);
+  static constexpr std::size_t kMaxInstructionWords = 3;
+  static DecodeResult decode(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 };
 
 } // namespace rdna3

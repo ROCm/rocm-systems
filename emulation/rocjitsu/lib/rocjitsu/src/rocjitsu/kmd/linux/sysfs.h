@@ -41,6 +41,7 @@ public:
     uint32_t revision_id = 0;
     uint32_t pci_revision_id = 0;
     std::string marketing_name;
+    std::vector<config::DeviceIpVersion> ip_versions;
 
     // Compute unit organization
     uint32_t simd_count = 0;
@@ -71,8 +72,9 @@ public:
     uint32_t l2_assoc = 16;
 
     // Engines and queues
-    uint32_t num_sdma_engines = 2;
+    uint32_t num_sdma_engines = 0;
     uint32_t num_sdma_xgmi_engines = 0;
+    uint32_t num_sdma_queues_per_engine = 0;
     uint32_t num_cp_queues = 128;
     uint32_t max_engine_clk_fcompute = 2100; // MHz
 
@@ -109,9 +111,8 @@ public:
     /// recovers NumShaderBanks as array_count / simd_arrays_per_engine and
     /// rocdbgapi recovers the engine count as
     /// array_count * num_xcc / simd_arrays_per_engine, so both invert this
-    /// product to get num_shader_engines back. Deriving it here keeps the
-    /// configs stating the geometry they model -- an MI350X XCD has four
-    /// shader engines of two arrays, so num_shader_engines is 4, not 8.
+    /// product to get num_shader_engines back. Deriving the array count from
+    /// the configured geometry keeps these representations consistent.
     uint32_t array_count_per_xcc() const {
       return num_shader_engines * effective_arrays_per_engine();
     }
@@ -132,7 +133,9 @@ public:
 
   /// @brief Generate the sysfs topology directory for multiple GPUs.
   /// @param gpus Per-GPU configurations. Each gets its own topology node.
-  std::string generate(const std::vector<GpuInfo> &gpus);
+  /// @param publish_peer_links Whether the GPU peers have qualified executable routes.
+  /// An explicit false writes zero P2P counts so libhsakmt cannot infer peers.
+  std::string generate(const std::vector<GpuInfo> &gpus, bool publish_peer_links = true);
 
   /// @brief Get the generated KFD topology path (empty if not yet generated).
   const std::string &path() const { return topology_dir_; }
@@ -149,9 +152,6 @@ public:
   /// @brief Remove the generated directories.
   void cleanup();
 
-  /// @brief Drop ownership of inherited paths without removing them.
-  void release_after_fork();
-
 private:
   std::string topology_dir_;
   std::string drm_dir_;
@@ -163,7 +163,7 @@ private:
   void write_system_properties(uint32_t num_devices);
   void write_cpu_node(const std::string &nodes_dir, uint32_t num_gpu_links);
   void write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, const GpuInfo &gpu,
-                      uint32_t total_gpus);
+                      uint32_t total_gpus, bool publish_peer_links);
   void write_drm_tree(const std::vector<GpuInfo> &gpus);
 };
 

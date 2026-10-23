@@ -165,9 +165,11 @@ message(STATUS "  ROCSHMEM_INCLUDE_DIRS: ${ROCSHMEM_INCLUDE_DIRS}")
 # any other GPU with hipErrorInvalidKernelFile (218). We therefore emit code
 # objects for every architecture the linked rocSHMEM was built for.
 #
-# Default: discover the arches from the installed rocSHMEM device bitcode
-# (<prefix>/lib/librocshmem_device_<arch>.bc) so the wheel matches that rocSHMEM
-# build. Override explicitly with -DROCSHMEM_GPU_TARGETS=gfx942,gfx950,...
+# Default: use ROCSHMEM_OFFLOAD_TARGETS from the selected package's installed
+# rocshmem_config.h. This records the architectures compiled into librocshmem.a
+# and remains authoritative regardless of whether standalone JIT bitcode is
+# installed. Override with a supported subset by passing
+# -DROCSHMEM_GPU_TARGETS=gfx942,gfx950,...
 #
 # NOTE: we deliberately use our own ROCSHMEM_GPU_TARGETS cache variable rather
 # than the ambient GPU_TARGETS: find_package(hip) above sets GPU_TARGETS to the
@@ -176,32 +178,50 @@ message(STATUS "  ROCSHMEM_INCLUDE_DIRS: ${ROCSHMEM_INCLUDE_DIRS}")
 set(ROCSHMEM_GPU_TARGETS "" CACHE STRING
     "GPU architectures to emit device code objects for (default: auto-detect from the rocSHMEM install)")
 
-set(_ROCSHMEM_ARCHES "${ROCSHMEM_GPU_TARGETS}")
-if(NOT _ROCSHMEM_ARCHES)
-  get_filename_component(_ROCSHMEM_LIBDIR "${rocshmem_DIR}/../.." ABSOLUTE)
-  file(GLOB _ROCSHMEM_DEVICE_BC "${_ROCSHMEM_LIBDIR}/librocshmem_device_*.bc")
-  foreach(_bc ${_ROCSHMEM_DEVICE_BC})
-    get_filename_component(_bc_name "${_bc}" NAME)
-    string(REGEX REPLACE "^librocshmem_device_(.+)\\.bc$" "\\1" _arch "${_bc_name}")
-    list(APPEND _ROCSHMEM_ARCHES "${_arch}")
-  endforeach()
+set(_ROCSHMEM_CONFIG_HEADER
+    "${ROCSHMEM_INCLUDE_DIRS}/rocshmem/rocshmem_config.h")
+if(NOT EXISTS "${_ROCSHMEM_CONFIG_HEADER}")
+  message(FATAL_ERROR
+    "rocshmem4py: selected rocSHMEM package does not provide "
+    "${_ROCSHMEM_CONFIG_HEADER}")
 endif()
 
-set(_ROCSHMEM_OFFLOAD_FLAGS "")
+file(READ "${_ROCSHMEM_CONFIG_HEADER}" _ROCSHMEM_CONFIG_CONTENTS)
+string(REGEX MATCH
+  "#[ \t]*define[ \t]+ROCSHMEM_OFFLOAD_TARGETS[ \t]+\"([^\"]+)\""
+  _ROCSHMEM_TARGETS_DEFINITION
+  "${_ROCSHMEM_CONFIG_CONTENTS}")
+set(_ROCSHMEM_AVAILABLE_ARCHES "${CMAKE_MATCH_1}")
+string(REGEX REPLACE "[ \t]+" ";"
+  _ROCSHMEM_AVAILABLE_ARCHES "${_ROCSHMEM_AVAILABLE_ARCHES}")
+if(NOT _ROCSHMEM_TARGETS_DEFINITION OR NOT _ROCSHMEM_AVAILABLE_ARCHES)
+  message(FATAL_ERROR
+    "rocshmem4py: ${_ROCSHMEM_CONFIG_HEADER} does not record any "
+    "static-library GPU targets in ROCSHMEM_OFFLOAD_TARGETS")
+endif()
+
+set(_ROCSHMEM_ARCHES "${ROCSHMEM_GPU_TARGETS}")
+string(REPLACE "," ";" _ROCSHMEM_ARCHES "${_ROCSHMEM_ARCHES}")
 if(_ROCSHMEM_ARCHES)
-  string(REPLACE "," ";" _ROCSHMEM_ARCHES "${_ROCSHMEM_ARCHES}")
-  list(REMOVE_DUPLICATES _ROCSHMEM_ARCHES)
-  message(STATUS "rocshmem4py: building device code objects for: ${_ROCSHMEM_ARCHES}")
-  foreach(_arch ${_ROCSHMEM_ARCHES})
-    list(APPEND _ROCSHMEM_OFFLOAD_FLAGS "--offload-arch=${_arch}")
+  foreach(_arch IN LISTS _ROCSHMEM_ARCHES)
+    list(FIND _ROCSHMEM_AVAILABLE_ARCHES "${_arch}" _arch_index)
+    if(_arch_index EQUAL -1)
+      message(FATAL_ERROR
+        "rocshmem4py: ROCSHMEM_GPU_TARGETS requests ${_arch}, but the "
+        "selected rocSHMEM package was built for: "
+        "${_ROCSHMEM_AVAILABLE_ARCHES}")
+    endif()
   endforeach()
 else()
-  message(WARNING
-    "rocshmem4py: could not determine GPU architectures from the rocSHMEM "
-    "install and -DROCSHMEM_GPU_TARGETS was not set; device code will target "
-    "the compiler default only (likely a single arch). Pass "
-    "-DROCSHMEM_GPU_TARGETS=gfx942,gfx950,... to build a portable multi-arch wheel.")
+  set(_ROCSHMEM_ARCHES "${_ROCSHMEM_AVAILABLE_ARCHES}")
 endif()
+list(REMOVE_DUPLICATES _ROCSHMEM_ARCHES)
+
+set(_ROCSHMEM_OFFLOAD_FLAGS "")
+message(STATUS "rocshmem4py: building device code objects for: ${_ROCSHMEM_ARCHES}")
+foreach(_arch IN LISTS _ROCSHMEM_ARCHES)
+  list(APPEND _ROCSHMEM_OFFLOAD_FLAGS "--offload-arch=${_arch}")
+endforeach()
 
 ###############################################################################
 # Build Extension Module
@@ -238,6 +258,10 @@ if(THEROCK_TOOLCHAIN_ROOT)
   )
 endif()
 
+# rocSHMEM's exported target conditionally references MPI::MPI_CXX when the
+# selected package was built with external MPI. Its package config does not yet
+# create that target, so retain discovery here. Do not link MPI directly:
+# roc::rocshmem must be the authority on whether the extension requires MPI.
 find_package(MPI QUIET)
 
 if(hip_FOUND)
@@ -252,11 +276,6 @@ else()
     amdhip64
     hsa-runtime64
   )
-endif()
-
-if(MPI_FOUND)
-  target_link_libraries(_rocshmem4py PRIVATE ${MPI_CXX_LIBRARIES})
-  target_include_directories(_rocshmem4py PRIVATE ${MPI_CXX_INCLUDE_DIRS})
 endif()
 
 target_link_libraries(_rocshmem4py PRIVATE

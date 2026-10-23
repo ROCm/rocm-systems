@@ -6,7 +6,6 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/vintrp.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/execution_backend.h"
-#include "util/except.h"
 #include <memory>
 
 namespace rocjitsu {
@@ -26,10 +25,16 @@ VInterpP1F32Vintrp::VInterpP1F32Vintrp(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   m0.apply_fieldless_caps(false, false, false);
+  flags_ |= EMBEDDED_MEMORY_WAIT;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVInterpP1F32Vintrp(const MachineInst *opcode) {
+DecodeResult decodeVInterpP1F32Vintrp(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vintrp::validate_encoding(
+      "v_interp_p1_f32", reinterpret_cast<const Vintrp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VInterpP1F32Vintrp>(opcode);
 }
 } // namespace detail
@@ -41,18 +46,23 @@ VInterpP2F32Vintrp::VInterpP2F32Vintrp(const MachineInst *inst)
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       attr(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->attr),
       m0(32, OperandType::OPR_SDST_M0, 124) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &vsrc;
-  src_operands_[2] = &attr;
-  src_operands_[3] = &m0;
-  num_src_ = 4;
+  src_operands_[0] = &vsrc;
+  src_operands_[1] = &attr;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
   m0.apply_fieldless_caps(false, false, false);
+  flags_ |= EMBEDDED_MEMORY_WAIT;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVInterpP2F32Vintrp(const MachineInst *opcode) {
+DecodeResult decodeVInterpP2F32Vintrp(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vintrp::validate_encoding(
+      "v_interp_p2_f32", reinterpret_cast<const Vintrp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VInterpP2F32Vintrp>(opcode);
 }
 } // namespace detail
@@ -71,10 +81,16 @@ VInterpMovF32Vintrp::VInterpMovF32Vintrp(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   m0.apply_fieldless_caps(false, false, false);
+  flags_ |= EMBEDDED_MEMORY_WAIT;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVInterpMovF32Vintrp(const MachineInst *opcode) {
+DecodeResult decodeVInterpMovF32Vintrp(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vintrp::validate_encoding(
+      "v_interp_mov_f32", reinterpret_cast<const Vintrp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VInterpMovF32Vintrp>(opcode);
 }
 } // namespace detail

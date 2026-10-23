@@ -4,9 +4,8 @@
 #pragma once
 
 #include "common/defines.h"
-#include "rocprofiler-systems/categories.h"  // in rocprof-sys-user
-
-#include <timemory/compat/macros.h>
+#include "rocprofiler-systems/annotation.h"  // in rocprof-sys-common-api
+#include "rocprofiler-systems/categories.h"  // in rocprof-sys-common-api
 
 #include <cstddef>
 
@@ -51,17 +50,23 @@ extern "C"
     /// stops an instrumentation region (user-defined)
     int rocprofsys_pop_region(const char*) ROCPROFSYS_PUBLIC_API;
 
-    /// starts an instrumentation region in a user-defined category and (optionally)
-    /// adds annotations to the perfetto trace.
+    /// starts an instrumentation region in a user-defined category
     int rocprofsys_push_category_region(rocprofsys_category_t, const char*,
                                         rocprofsys_annotation_t*,
                                         size_t) ROCPROFSYS_PUBLIC_API;
 
-    /// stops an instrumentation region in a user-defined category and (optionally)
-    /// adds annotations to the perfetto trace.
+    /// stops an instrumentation region in a user-defined category
     int rocprofsys_pop_category_region(rocprofsys_category_t, const char*,
                                        rocprofsys_annotation_t*,
                                        size_t) ROCPROFSYS_PUBLIC_API;
+
+    /// starts a Python instrumentation region
+    int rocprofsys_push_category_region_python(const char*, rocprofsys_annotation_t*,
+                                               size_t) ROCPROFSYS_PUBLIC_API;
+
+    /// stops a Python instrumentation region
+    int rocprofsys_pop_category_region_python(const char*, rocprofsys_annotation_t*,
+                                              size_t) ROCPROFSYS_PUBLIC_API;
 
     /// stores source code information
     void rocprofsys_register_source(const char* file, const char* func, size_t line,
@@ -102,6 +107,12 @@ extern "C"
     void rocprofsys_pop_category_region_hidden(rocprofsys_category_t, const char*,
                                                rocprofsys_annotation_t*,
                                                size_t) ROCPROFSYS_HIDDEN_API;
+    void rocprofsys_push_category_region_python_hidden(const char*,
+                                                       rocprofsys_annotation_t*,
+                                                       size_t) ROCPROFSYS_HIDDEN_API;
+    void rocprofsys_pop_category_region_python_hidden(const char*,
+                                                      rocprofsys_annotation_t*,
+                                                      size_t) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_register_source_hidden(const char*, const char*, size_t, size_t,
                                            const char*) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_register_coverage_hidden(const char*, const char*,

@@ -1,23 +1,6 @@
 #!/usr/bin/env python3
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 import logging
 
@@ -85,7 +68,7 @@ def _fabric_local_active_accelerators_rows(vpod_active_accelerators):
 
 
 class FabricCommands:
-    def fabric(self, args, multiple_devices=False, gpu=None, topology=None, info=None):
+    def fabric(self, args, multiple_devices=False, gpu=None, topology=None, telemetry=None):
         """Get fabric (UALoE) information for target GPUs.
 
         params:
@@ -93,7 +76,7 @@ class FabricCommands:
             multiple_devices - True if checking for multiple devices
             gpu              - device_handle override for args.gpu
             topology         - Value override for args.topology
-            info             - Value override for args.info
+            telemetry        - Value override for args.telemetry
         return:
             Nothing
         """
@@ -102,8 +85,8 @@ class FabricCommands:
             args.gpu = gpu
         if topology is not None:
             args.topology = topology
-        if info is not None:
-            args.info = info
+        if telemetry is not None:
+            args.telemetry = telemetry
 
         # Default to all GPUs if none specified
         if args.gpu is None:
@@ -118,17 +101,16 @@ class FabricCommands:
         args.gpu = device_handle
 
         # Default: show everything if no specific arg given
-        if not any([args.topology, args.info]):
+        if not any([args.topology, args.telemetry]):
             args.topology = True
-            args.info = True
+            args.telemetry = True
 
         gpu_handle = args.gpu
         gpu_id = self.helpers.get_gpu_id_from_device_handle(gpu_handle)
         gpu_bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(gpu_handle)
         values = {"gpu": gpu_id, "bdf": gpu_bdf}
 
-        # --info ──────────────────────────────────────────────────────────────
-        if args.info:
+        if args.topology:
             fabric_info = "N/A"
             try:
                 raw = amdsmi_interface.amdsmi_get_gpu_fabric_info(gpu_handle)
@@ -202,8 +184,7 @@ class FabricCommands:
                 )
             values["fabric_info"] = fabric_info
 
-        # --topology ─────────────────────────────────────────────────────────
-        if args.topology:
+        if args.telemetry:
             fabric_telemetry = "N/A"
             try:
                 category_mask = (

@@ -1,23 +1,6 @@
 #!/usr/bin/env python3
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 import argparse
 import logging
@@ -26,6 +9,7 @@ import sys
 from amdsmi_helpers import AMDSMIHelpers
 from amdsmi_logger import AMDSMILogger
 from amdsmi import amdsmi_exception, amdsmi_interface
+from amdsmi_cli_exceptions import AmdSmiDeviceKind, AmdSmiExitCode, AmdSmiLibraryErrorException
 
 from subcommands import (
     BadPagesCommands,
@@ -47,6 +31,19 @@ from subcommands import (
     VersionCommands,
     XgmiCommands,
 )
+
+
+def _exit_on_init_error(output_format, error, device_kind: AmdSmiDeviceKind):
+    """Report a device-init library failure and exit with its status code.
+
+    Device init runs before argv is parsed, so this cannot reach the top-level
+    handler; ``output_format`` comes from the raw argv scan in amdsmi_cli.main.
+    The traceback stays at debug level -- the user gets the formatted error.
+    """
+    exc = AmdSmiLibraryErrorException(output_format, error.err_code)
+    logging.debug(f"Unexpected library error during {device_kind.value} device init", exc_info=True)
+    print(exc)
+    sys.exit(exc.value)
 
 
 class AMDSMICommands(
@@ -114,7 +111,7 @@ class AMDSMICommands(
                         "Unable to get devices, driver not initialized (amdgpu not found in modules)"
                     )
                 else:
-                    raise e
+                    _exit_on_init_error(self.logger.format, e, AmdSmiDeviceKind.GPU)
 
             if len(self.device_handles) == 0:
                 # No GPU's found post amdgpu driver initialization
@@ -143,7 +140,7 @@ class AMDSMICommands(
                         "Unable to get devices, driver not initialized (BRCMNIC not found in modules)"
                     )
                 else:
-                    raise e
+                    _exit_on_init_error(self.logger.format, e, AmdSmiDeviceKind.NIC)
 
         # Resolve the node handle (independent of AINIC init; needed for amd-smi node).
         for dev in self.device_handles:
@@ -170,7 +167,7 @@ class AMDSMICommands(
                         "Unable to detect any CPU devices, check amd_hsmp (or) hsmp_acpi version and module status (sudo modprobe amd_hsmp (or) sudo modprobe hsmp_acpi)"
                     )
                 else:
-                    raise e
+                    _exit_on_init_error(self.logger.format, e, AmdSmiDeviceKind.CPU)
 
             # core handles
             try:
@@ -184,7 +181,7 @@ class AMDSMICommands(
                         "Unable to get CORE devices, amd_hsmp driver not loaded (sudo modprobe amd_hsmp)"
                     )
                 else:
-                    raise e
+                    _exit_on_init_error(self.logger.format, e, AmdSmiDeviceKind.CPU_CORE)
 
             if len(self.cpu_handles) == 0 and len(self.core_handles) == 0:
                 # No CPU's found post amd_hsmp driver initialization
@@ -199,7 +196,7 @@ class AMDSMICommands(
             version_args.cpu_version = False
             version_args.nic_version = False
             self.version(version_args)
-            sys.exit(-1)
+            sys.exit(int(AmdSmiExitCode.DEVICE_NOT_FOUND))
 
     def profile(self, args):
         """Not applicable to linux baremetal"""

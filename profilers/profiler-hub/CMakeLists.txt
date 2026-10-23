@@ -1,11 +1,43 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
-project(profiler-hub VERSION 0.1.0)
+cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
+
+# Version lives in VERSION file.
+file(
+    STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION"
+    FULL_VERSION_STRING
+    LIMIT_COUNT 1
+)
+
+# file(STRINGS) does not register its input as a configure dependency, so editing
+# VERSION alone would leave the old version baked into an existing build tree.
+set_property(
+    DIRECTORY
+    APPEND
+    PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION"
+)
+# Only MAJOR.MINOR.PATCH is passed to project(); any trailing pre-release suffix
+# stays in FULL_VERSION_STRING for reporting.
+if(NOT FULL_VERSION_STRING MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)")
+    message(
+        FATAL_ERROR
+        "VERSION must begin with MAJOR.MINOR.PATCH (found '${FULL_VERSION_STRING}')"
+    )
+endif()
+
+set(PROFILER_HUB_VERSION "${CMAKE_MATCH_1}.${CMAKE_MATCH_2}.${CMAKE_MATCH_3}")
+
+project(profiler-hub VERSION ${PROFILER_HUB_VERSION})
+
+message(
+    STATUS
+    "[${PROJECT_NAME}] version ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH} (${FULL_VERSION_STRING})"
+)
+
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -18,9 +50,14 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 # ------------------------------------------------------------ #
 
 option(PROFILER_HUB_BUILD_TESTS "Build unit tests" ON)
-option(PROFILER_HUB_BUILD_BENCHMARKS "Build performance benchmarks" ON)
+option(PROFILER_HUB_BUILD_BENCHMARKS "Build performance benchmarks" OFF)
 option(PROFILER_HUB_ENABLE_LOGGING "Enable logging" OFF)
 option(PROFILER_HUB_ENABLE_COVERAGE "Enable code coverage" OFF)
+option(
+    PROFILER_HUB_FETCH_DEPENDENCIES
+    "Download missing or unsuitable dependencies at configure time"
+    OFF
+)
 
 if(PROFILER_HUB_BUILD_TESTS)
     enable_testing()
@@ -32,9 +69,9 @@ include(GNUInstallDirs)
 # Version
 # ------------------------------------------------------------ #
 
-# Version is the single source of truth in `project(profiler-hub VERSION ...)`
-# above. CMake automatically populates profiler-hub_VERSION_{MAJOR,MINOR,PATCH}
-# and profiler-hub_VERSION from it.
+# The VERSION file is the single source of truth for the library version.
+# project() above is populated from that file, and CMake then sets
+# profiler-hub_VERSION_{MAJOR,MINOR,PATCH} and profiler-hub_VERSION.
 
 # ------------------------------------------------------------ #
 # Object Library (compiled once, used by both shared and static)
@@ -131,6 +168,20 @@ if(PROFILER_HUB_ENABLE_COVERAGE)
 endif()
 
 # ------------------------------------------------------------ #
+# Schema from rocprofiler-sdk-rocpd
+# ------------------------------------------------------------ #
+
+set(SQL_SCHEMA_DIR ${CMAKE_CURRENT_LIST_DIR}/source/data_storage/schema)
+set(SQL_SCHEMA_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/source/data_storage/)
+
+include(rocprofiler-sdk-rocpd)
+
+target_include_directories(
+    profiler-hub-objects
+    PRIVATE ${SQL_SCHEMA_BINARY_DIR}
+)
+
+# ------------------------------------------------------------ #
 # SQLite3
 # ------------------------------------------------------------ #
 
@@ -159,40 +210,6 @@ include(nlohmann_json)
 target_link_libraries(profiler-hub-objects PRIVATE nlohmann_json::nlohmann_json)
 
 # ------------------------------------------------------------ #
-# Schema from rocprofiler-sdk-rocpd
-# ------------------------------------------------------------ #
-
-set(SQL_SCHEMA_DIR ${CMAKE_CURRENT_LIST_DIR}/source/data_storage/schema)
-set(SQL_SCHEMA_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/source/data_storage/)
-
-include(rocm)
-include(rocprofiler-sdk-rocpd)
-
-if(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD)
-    target_link_libraries(
-        profiler-hub-objects
-        PRIVATE rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd
-    )
-
-    target_compile_definitions(
-        profiler-hub-objects
-        PRIVATE
-            $<$<COMPILE_LANGUAGE:CXX>:USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=1>
-    )
-else()
-    target_include_directories(
-        profiler-hub-objects
-        PRIVATE ${SQL_SCHEMA_BINARY_DIR}
-    )
-
-    target_compile_definitions(
-        profiler-hub-objects
-        PRIVATE
-            $<$<COMPILE_LANGUAGE:CXX>:USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=0>
-    )
-endif()
-
-# ------------------------------------------------------------ #
 # Logging
 # ------------------------------------------------------------ #
 
@@ -216,10 +233,9 @@ add_library(profiler-hub SHARED $<TARGET_OBJECTS:profiler-hub-objects>)
 add_library(profiler-hub-static STATIC $<TARGET_OBJECTS:profiler-hub-objects>)
 set_target_properties(profiler-hub-static PROPERTIES OUTPUT_NAME profiler-hub)
 
-target_link_options(
-    profiler-hub
-    PRIVATE -Wl,--exclude-libs,$<TARGET_FILE_NAME:profiler-hub-sqlite3-static>
-)
+if(TARGET profiler-hub-sqlite3-shared)
+    set_target_properties(profiler-hub PROPERTIES INSTALL_RPATH "$ORIGIN")
+endif()
 
 # Embed semantic version + ABI version on the shared library so that
 # libprofiler-hub.so.<MAJOR> is the SONAME and libprofiler-hub.so.<MAJOR>.<MINOR>.<PATCH>
@@ -267,9 +283,10 @@ endforeach()
 # target_link_libraries() above (that only supplies the $<BUILD_INTERFACE:>
 # object library), so consumers of the *installed* static package would
 # otherwise get no transitive link requirements at all. Explicitly restore
-# the ones that are genuinely resolvable by real consumers; queries,
-# sqlite3, and profiler-hub-objects itself are always in-tree-only and
-# never belong here. nlohmann_json is deliberately excluded too: it is a
+# the ones that are genuinely resolvable by real consumers; queries and
+# profiler-hub-objects itself are always in-tree-only and never belong here.
+# sqlite3 is omitted, as it has always been: listing it would change the
+# installed static contract. nlohmann_json is deliberately excluded too: it is a
 # PRIVATE, header-only dependency of profiler-hub-objects that never appears
 # in the installed public headers, so it carries no link symbols a static
 # consumer needs. profiler-hub (SHARED) needs no such list: its dependencies
@@ -334,23 +351,6 @@ endforeach()
 unset(_profiler_hub_dep_target)
 unset(_profiler_hub_dep_aliased)
 unset(_profiler_hub_dep_is_imported)
-if(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD)
-    # rocprofiler-sdk-rocpd is only ever discovered via find_package() (see
-    # cmake/rocprofiler-sdk-rocpd.cmake); unlike fmt/spdlog it has no in-tree
-    # FetchContent fallback, so the target is always IMPORTED here and needs
-    # no IMPORTED-ness check.
-    list(
-        APPEND profiler_hub_static_iface_libs
-        "$<INSTALL_INTERFACE:rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd>"
-    )
-    string(
-        APPEND profiler_hub_static_find_dependencies
-        "find_package(rocprofiler-sdk-rocpd QUIET)\n"
-        "if(NOT TARGET rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd)\n"
-        "    list(APPEND profiler-hub_static_MISSING_DEPENDENCIES \"rocprofiler-sdk-rocpd\")\n"
-        "endif()\n"
-    )
-endif()
 set_target_properties(
     profiler-hub-static
     PROPERTIES INTERFACE_LINK_LIBRARIES "${profiler_hub_static_iface_libs}"

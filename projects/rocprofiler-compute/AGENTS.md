@@ -19,6 +19,12 @@ nesting, code organization, and testing conventions.
 All code in `src/` must pass Ruff checks. Read **[`.ai/rules/ruff.md`](.ai/rules/ruff.md)**
 for enforced rules including type annotations, f-strings, and `pathlib` usage.
 
+## CLI Options
+
+Read **[`.ai/rules/cli-options.md`](.ai/rules/cli-options.md)** before working on
+any command-line option, whether adding one, changing one, reviewing one, or
+answering questions about one.
+
 ## Tooling
 
 Scripts under `tools/` generate committed artifacts that must never be
@@ -39,8 +45,19 @@ for staging, commit message conventions, pre-commit hook handling, and branch sa
 When asked to create a pull request, follow **[`.ai/rules/pr-workflow.md`](.ai/rules/pr-workflow.md)**
 for PR template inference, JIRA handling, formatting, and repo identification.
 
-## Skills
+## Contributor Skills
 
 Reusable agent workflows live under **[`.ai/skills/`](.ai/skills/)** with
 tool-specific shims in `.claude/commands/`, `.github/prompts/`, and
 `.cursor/commands/`.
+
+## User-Facing Skills
+
+Agent Skills that drive `rocprof-compute` for end users live under
+**[`skills/`](skills/)**. Read **[`skills/README.md`](skills/README.md)** for
+the layout and how to run their evaluations.
+
+These skills have no CI coverage, so keeping them correct is each change's own
+responsibility. When a change alters CLI options, output layout, supported
+architectures, or whether a feature is experimental, update the matching skill
+in the same pull request, the same way you update docs and tests.

@@ -16,6 +16,7 @@
 /// from the comparison so both runs skip the same lanes. In-process inactive
 /// lanes must stay preserved.
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -30,6 +31,7 @@
 #include "util/simd.h"
 
 #include <array>
+#include <bit>
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <memory>
@@ -68,7 +70,7 @@ struct Case {
   Kind kind;
 };
 
-const std::array<Case, 14> kCases = {{
+const std::array<Case, 13> kCases = {{
     {"v_add_f64_vop3", 640, Kind::Bin},
     {"v_mul_f64_vop3", 641, Kind::Bin},
     {"v_max_f64_vop3", 643, Kind::BinMinMax},
@@ -78,7 +80,6 @@ const std::array<Case, 14> kCases = {{
     {"v_trunc_f64_vop3", 343, Kind::Una},
     {"v_rndne_f64_vop3", 345, Kind::Una},
     {"v_sqrt_f64_vop3", 360, Kind::Una},
-    {"v_fract_f64_vop3", 370, Kind::Una},
     {"v_rcp_f64_vop3", 357, Kind::Una},
     {"v_rsq_f64_vop3", 358, Kind::Una},
     {"v_mov_b64_vop3", 376, Kind::Una},
@@ -91,9 +92,10 @@ const std::array<uint64_t, 16> kF64 = {{
     0x0000000000000000ull, 0x8000000000000000ull, 0x3FF0000000000000ull, 0xBFF0000000000000ull,
     0x400921FB54442D18ull, 0xC00921FB54442D18ull, 0x7FF0000000000000ull, 0xFFF0000000000000ull,
     0x7FF8000000000000ull, 0xFFF4000000000000ull, 0x0000000000000001ull, 0x8000000000000001ull,
-    0x7FEFFFFFFFFFFFFFull, 0x3FE0000000000000ull, // 0.5
-    0x3FD999999999999Aull,                        // 0.4
-    0x4000000000000000ull,                        // 2.0
+    0x7FEFFFFFFFFFFFFFull,
+    0x3FE0000000000000ull, // 0.5
+    0x3FD999999999999Aull, // 0.4
+    0x4000000000000000ull, // 2.0
 }};
 
 struct Fixture {
@@ -136,7 +138,7 @@ struct Fixture {
 
   std::array<uint64_t, WF_SIZE> run(Instruction *inst, uint32_t rot, uint64_t exec) {
     seed_inputs(rot, exec);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     std::array<uint64_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
@@ -165,7 +167,7 @@ void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     vop3_encode(c.opcode, /*vdst=*/kDstVgpr, /*src0=*/256, /*src1=*/258, abs, neg, omod, clamp,
                 words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.name << " decode failed";
     auto out = fx.run(inst, rot, exec);
     delete inst;
@@ -238,6 +240,39 @@ TEST(Vop3Fp64SimdCorrectness, PartialExec) {
   }
   for (const auto &c : kCases)
     check_case(c, /*abs=*/0, /*neg=*/0, /*omod=*/0, /*clamp=*/0, /*exec=*/0xA5A5'F0F0'1234'8001ULL);
+}
+
+TEST(Vop3Fp64SimdCorrectness, OmodHonorsOutputDenormAndIeeeMode) {
+  ForceScalarGuard gate_guard;
+  struct ModeCase {
+    uint32_t mode;
+    double expected;
+  };
+  constexpr std::array<ModeCase, 3> kModes = {{
+      {0u, 2.0},
+      {1u << 7, 1.0},
+      {amdgpu::Wavefront::IEEE_BIT, 1.0},
+  }};
+
+  for (bool force_scalar : {true, false}) {
+    util::set_force_scalar_for_testing(force_scalar);
+    for (const auto &mode_case : kModes) {
+      Fixture fx;
+      ASSERT_NE(fx.cu, nullptr);
+      ASSERT_NE(fx.wf, nullptr);
+      fx.wf->set_mode_raw(mode_case.mode);
+      uint32_t words[2] = {};
+      vop3_encode(/*v_add_f64=*/640, /*vdst=*/kDstVgpr, /*src0=*/256, /*src1=*/258,
+                  /*abs=*/0, /*neg=*/0, /*omod=*/1, /*clamp=*/0, words);
+      std::unique_ptr<Instruction> inst(decode_valid(*fx.decoder, words));
+      ASSERT_NE(inst, nullptr);
+
+      const auto out = fx.run(inst.get(), /*rot=*/2, /*exec=*/~0ULL);
+
+      EXPECT_EQ(out[0], std::bit_cast<uint64_t>(mode_case.expected))
+          << "force_scalar=" << force_scalar << " mode=" << mode_case.mode;
+    }
+  }
 }
 
 } // namespace

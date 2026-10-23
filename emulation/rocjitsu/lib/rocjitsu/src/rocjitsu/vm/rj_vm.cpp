@@ -10,14 +10,17 @@
 #include "rocjitsu/vm/plugins/plugin_loader.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
 #include "rocjitsu/vm/soc.h"
+#include "rocjitsu/vm/topology_assembly.h"
 
 #include "rocjitsu/base/rj_compiler.h"
+#include "util/diagnostic.h"
 #include "util/log.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "linux/uapi/kfd_ioctl.h"
+#include "uapi/linux/kfd_ioctl.h"
 RJ_DIAGNOSTIC_POP
 
+#include <algorithm>
 #include <cerrno>
 #include <cstring>
 #include <memory>
@@ -54,6 +57,7 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
         partition_socs.push_back(extra_soc);
     }
   }
+  loaded.apply_cpu_dispatch_threads();
   // XCD partitions (config num_threads): run each XCD on its own engine
   // partition/thread so the XCDs execute concurrently across their separate L2s.
   const uint32_t num_threads_requested = loaded.engine_config.num_threads;
@@ -63,7 +67,6 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
     util::Logger::warn("num_threads clamped: requested=", num_threads_requested,
                        ", effective=", num_threads_used);
   loaded.engine_config.num_threads = num_threads_used;
-
   bool serve = (mode == RJ_VM_MODE_LOCAL || mode == RJ_VM_MODE_DAEMON);
   bool daemon = (mode == RJ_VM_MODE_DAEMON);
   if (serve) {
@@ -74,55 +77,7 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
   s->engine_config = loaded.engine_config;
   s->engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
 
-  if (loaded.num_gpus > 1 && !loaded.extra_gpu_builds.empty()) {
-    std::vector<std::unique_ptr<SoC>> socs;
-    std::vector<uint32_t> gpu_ids;
-
-    auto root0 = loaded.take_root();
-    root0.release();
-    socs.push_back(std::unique_ptr<SoC>(s->soc));
-    gpu_ids.push_back(loaded.devices.empty() ? 0 : loaded.devices[0].gpu_id);
-
-    for (size_t i = 0; i < loaded.extra_gpu_builds.size(); ++i) {
-      auto &eb = loaded.extra_gpu_builds[i];
-      auto *extra_soc = dynamic_cast<SoC *>(eb.root.get());
-      if (!extra_soc)
-        continue;
-      eb.root.release();
-      socs.push_back(std::unique_ptr<SoC>(extra_soc));
-      gpu_ids.push_back(i + 1 < loaded.devices.size() ? loaded.devices[i + 1].gpu_id : 0);
-    }
-
-    auto vm_ptr = std::make_unique<VirtualMachine>(std::move(socs), std::move(gpu_ids), daemon);
-    s->vm = vm_ptr.get();
-    s->engine->topology().set_root(std::move(vm_ptr));
-
-    auto prefix_specs = [](std::vector<simdojo::LinkSpec> &specs, const std::string &pfx) {
-      for (auto &ls : specs) {
-        ls.src = pfx + ls.src;
-        ls.dst = pfx + ls.dst;
-      }
-    };
-    prefix_specs(loaded.build_result.link_specs, "gpu0.");
-    loaded.wire_links(s->engine->topology());
-    s->soc->wire_backing(s->engine->topology());
-    for (size_t i = 0; i < loaded.extra_gpu_builds.size(); ++i) {
-      auto &eb = loaded.extra_gpu_builds[i];
-      prefix_specs(eb.link_specs, "gpu" + std::to_string(i + 1) + ".");
-      s->engine->topology().wire_links(eb.link_specs, loaded.exec_mode);
-      auto *extra_soc = s->vm->soc(static_cast<uint32_t>(i + 1));
-      if (extra_soc)
-        extra_soc->wire_backing(s->engine->topology());
-    }
-  } else {
-    auto root = loaded.take_root();
-    root.release();
-    auto vm_ptr = std::make_unique<VirtualMachine>(std::unique_ptr<SoC>(s->soc), daemon);
-    s->vm = vm_ptr.get();
-    s->engine->topology().set_root(std::move(vm_ptr));
-    loaded.wire_links(s->engine->topology());
-    s->soc->wire_backing(s->engine->topology());
-  }
+  s->vm = assemble_virtual_machine_topology(loaded, s->engine->topology(), daemon);
   if (num_threads_used > 1 && !amdgpu::partition_topology_by_xcds(
                                   s->engine->topology(), partition_socs, num_threads_used)) {
     throw std::invalid_argument("multi-threaded VM requires at least one XCD");
@@ -142,8 +97,14 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
 
   if (serve) {
     s->engine->register_as_primary();
-    if (loaded.num_gpus > 1 && !loaded.devices.empty())
-      s->vm->driver()->setup_topology(loaded.devices, num_xcds);
+    // Legacy replicated-GPU configs keep their existing XGMI discovery
+    // metadata for compatibility. Manifest routes describe topology only;
+    // until peer execution is granted, they must not advertise KFD XGMI
+    // links, hive IDs, or XGMI SDMA engines to ROCr.
+    if (!loaded.devices.empty())
+      s->vm->driver()->setup_topology(loaded.devices, num_xcds,
+                                      !loaded.system_graph.explicit_manifest,
+                                      loaded.system_graph.explicit_manifest);
     else
       s->vm->driver()->setup_topology(loaded.device, num_xcds);
     s->vm->driver()->open();
@@ -154,35 +115,89 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
   return ROCJITSU_STATUS_SUCCESS;
 }
 
-void reconstruct_embedded_pointers(uint32_t cmd, void *arg, size_t arg_size, size_t total_size) {
-  if (total_size <= arg_size)
-    return;
+bool reconstruct_embedded_pointers(uint32_t cmd, void *arg, size_t arg_size, size_t total_size) {
+  if (total_size < arg_size)
+    return false;
   auto *extra = static_cast<uint8_t *>(arg) + arg_size;
+  const size_t inline_size = total_size - arg_size;
+  auto has_entries = [inline_size](size_t count, size_t entry_size) {
+    return entry_size == 0 || count <= inline_size / entry_size;
+  };
   switch (cmd) {
+  case AMDKFD_IOC_SET_CU_MASK: {
+    auto *args = static_cast<kfd_ioctl_set_cu_mask_args *>(arg);
+    if (args->num_cu_mask == 0 || args->num_cu_mask % 32 != 0 ||
+        !has_entries(std::min(args->num_cu_mask, 1024u) / 32, sizeof(uint32_t)))
+      return false;
+    args->cu_mask_ptr = reinterpret_cast<uint64_t>(extra);
+    break;
+  }
   case AMDKFD_IOC_WAIT_EVENTS: {
     auto *args = static_cast<kfd_ioctl_wait_events_args *>(arg);
-    args->events_ptr = reinterpret_cast<uint64_t>(extra);
+    if (!has_entries(args->num_events, sizeof(kfd_event_data)))
+      return false;
+    if (args->num_events > 0)
+      args->events_ptr = reinterpret_cast<uint64_t>(extra);
     break;
   }
   case AMDKFD_IOC_MAP_MEMORY_TO_GPU:
   case AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU: {
     auto *args = static_cast<kfd_ioctl_map_memory_to_gpu_args *>(arg);
-    args->device_ids_array_ptr = reinterpret_cast<uint64_t>(extra);
+    if (!has_entries(args->n_devices, sizeof(uint32_t)))
+      return false;
+    if (args->n_devices > 0)
+      args->device_ids_array_ptr = reinterpret_cast<uint64_t>(extra);
     break;
   }
   case AMDKFD_IOC_GET_PROCESS_APERTURES_NEW: {
     auto *args = static_cast<kfd_ioctl_get_process_apertures_new_args *>(arg);
-    args->kfd_process_device_apertures_ptr = reinterpret_cast<uint64_t>(extra);
+    if (!has_entries(args->num_of_nodes, sizeof(kfd_process_device_apertures)))
+      return false;
+    if (args->num_of_nodes > 0)
+      args->kfd_process_device_apertures_ptr = reinterpret_cast<uint64_t>(extra);
     break;
   }
   case AMDKFD_IOC_DBG_TRAP: {
     auto *args = static_cast<kfd_ioctl_dbg_trap_args *>(arg);
     switch (args->op) {
-    case KFD_IOC_DBG_TRAP_ENABLE:
-      args->enable.rinfo_ptr = reinterpret_cast<uint64_t>(extra);
+    case KFD_IOC_DBG_TRAP_ENABLE: {
+      const size_t required =
+          std::min(static_cast<size_t>(args->enable.rinfo_size), sizeof(kfd_runtime_info));
+      if (required > inline_size)
+        return false;
+      if (required > 0)
+        args->enable.rinfo_ptr = reinterpret_cast<uint64_t>(extra);
       break;
+    }
     case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
-      args->device_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(extra);
+      if (!has_entries(args->device_snapshot.num_devices, args->device_snapshot.entry_size))
+        return false;
+      if (args->device_snapshot.num_devices > 0 && args->device_snapshot.snapshot_buf_ptr != 0)
+        args->device_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(extra);
+      break;
+    case KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT:
+      if (!has_entries(args->queue_snapshot.num_queues, args->queue_snapshot.entry_size))
+        return false;
+      if (args->queue_snapshot.num_queues > 0 && args->queue_snapshot.snapshot_buf_ptr != 0)
+        args->queue_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(extra);
+      break;
+    case KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO:
+      if (args->query_exception_info.info_size > inline_size)
+        return false;
+      if (args->query_exception_info.info_size > 0 && args->query_exception_info.info_ptr != 0)
+        args->query_exception_info.info_ptr = reinterpret_cast<uint64_t>(extra);
+      break;
+    case KFD_IOC_DBG_TRAP_SUSPEND_QUEUES:
+      if (!has_entries(args->suspend_queues.num_queues, sizeof(uint32_t)))
+        return false;
+      if (args->suspend_queues.num_queues > 0 && args->suspend_queues.queue_array_ptr != 0)
+        args->suspend_queues.queue_array_ptr = reinterpret_cast<uint64_t>(extra);
+      break;
+    case KFD_IOC_DBG_TRAP_RESUME_QUEUES:
+      if (!has_entries(args->resume_queues.num_queues, sizeof(uint32_t)))
+        return false;
+      if (args->resume_queues.num_queues > 0 && args->resume_queues.queue_array_ptr != 0)
+        args->resume_queues.queue_array_ptr = reinterpret_cast<uint64_t>(extra);
       break;
     default:
       break;
@@ -192,30 +207,53 @@ void reconstruct_embedded_pointers(uint32_t cmd, void *arg, size_t arg_size, siz
   default:
     break;
   }
+  return true;
 }
 
 } // namespace
 
 rj_status_t rj_vm_create(const char *json_path, rj_vm_mode_t mode, rj_vm_t **vm) {
+  return rj_vm_create_for_node(json_path, nullptr, mode, vm);
+}
+
+rj_status_t rj_vm_create_for_node(const char *json_path, const char *node_id, rj_vm_mode_t mode,
+                                  rj_vm_t **vm) {
   if (!json_path || !vm)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   try {
-    auto loaded = config::load_config(json_path, rocjitsu::kEmbeddedSchema);
-    return create_from_loaded(loaded, mode, vm);
+    util::StringDiagnostic diagnostic;
+    auto loaded = config::load_config_for_node(json_path, rocjitsu::kEmbeddedSchema,
+                                               node_id ? node_id : "", diagnostic.emitter());
+    if (loaded.failed()) {
+      util::Logger::warn("rj_vm_create_for_node failed: ", diagnostic.message());
+      return ROCJITSU_STATUS_INVALID_FILE;
+    }
+    return create_from_loaded(loaded.value(), mode, vm);
   } catch (const std::exception &e) {
-    util::Logger::warn("rj_vm_create failed: ", e.what());
+    util::Logger::warn("rj_vm_create_for_node failed: ", e.what());
     return ROCJITSU_STATUS_INVALID_FILE;
   }
 }
 
 rj_status_t rj_vm_create_from_string(const char *json, rj_vm_mode_t mode, rj_vm_t **vm) {
+  return rj_vm_create_from_string_for_node(json, nullptr, mode, vm);
+}
+
+rj_status_t rj_vm_create_from_string_for_node(const char *json, const char *node_id,
+                                              rj_vm_mode_t mode, rj_vm_t **vm) {
   if (!json || !vm)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   try {
-    auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
-    return create_from_loaded(loaded, mode, vm);
+    util::StringDiagnostic diagnostic;
+    auto loaded = config::load_config_from_string_for_node(
+        json, rocjitsu::kEmbeddedSchema, node_id ? node_id : "", diagnostic.emitter());
+    if (loaded.failed()) {
+      util::Logger::warn("rj_vm_create_from_string_for_node failed: ", diagnostic.message());
+      return ROCJITSU_STATUS_INVALID_ARGUMENT;
+    }
+    return create_from_loaded(loaded.value(), mode, vm);
   } catch (const std::exception &e) {
-    util::Logger::warn("rj_vm_create_from_string failed: ", e.what());
+    util::Logger::warn("rj_vm_create_from_string_for_node failed: ", e.what());
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   }
 }
@@ -269,6 +307,8 @@ rj_status_t rj_vm_step(rj_vm_t *vm, int *active) {
     return ROCJITSU_STATUS_UNSUPPORTED;
 
   bool any_active = vm->engine->step();
+  if (vm->engine->exit_code() != 0)
+    return ROCJITSU_STATUS_ERROR;
   if (active)
     *active = any_active ? 1 : 0;
   return ROCJITSU_STATUS_SUCCESS;
@@ -302,8 +342,17 @@ rj_status_t rj_vm_save_checkpoint(const rj_vm_t *vm, const char *path, uint64_t 
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   if (!vm->soc)
     return ROCJITSU_STATUS_ERROR;
+  // The checkpoint format and restore path contain one SoC. Reject before
+  // opening the output file rather than silently dropping other GPU state.
+  if (vm->vm && vm->vm->num_socs() > 1)
+    return ROCJITSU_STATUS_UNSUPPORTED;
   try {
-    config::save_checkpoint(path, *vm->soc, tick, vm->engine_config);
+    auto engine_config = vm->engine_config;
+    if (engine_config.num_threads == vm->loaded.execution_threads.engines)
+      engine_config.num_threads = vm->loaded.requested_engine_threads;
+    config::save_checkpoint(path, *vm->soc, tick, engine_config, vm->loaded.cpu_dispatch_threads,
+                            vm->loaded.cpu_thread_budget, vm->loaded.thread_allocations,
+                            vm->loaded.legacy_auto_dispatch, vm->loaded.async_helper_threads);
     return ROCJITSU_STATUS_SUCCESS;
   } catch (const std::exception &) {
     return ROCJITSU_STATUS_ERROR;
@@ -325,7 +374,11 @@ namespace {
 
 rj_status_t execute_impl(SimulatedKfd *driver, uint32_t process_id, rj_vm_cmd_t *cmd) {
   auto arg_size = _IOC_SIZE(cmd->cmd);
-  reconstruct_embedded_pointers(cmd->cmd, cmd->buf, arg_size, cmd->buf_size);
+  if (!reconstruct_embedded_pointers(cmd->cmd, cmd->buf, arg_size, cmd->buf_size)) {
+    cmd->result = -EINVAL;
+    cmd->shared_handle = -1;
+    return ROCJITSU_STATUS_SUCCESS;
+  }
 
   // For DBG_TRAP ENABLE the debugger's notifier pipe arrives as an SCM_RIGHTS
   // fd in cmd->in_handle (already in the daemon's fd space). Substitute it for
@@ -356,7 +409,8 @@ rj_status_t execute_impl(SimulatedKfd *driver, uint32_t process_id, rj_vm_cmd_t 
     }
   }
 
-  cmd->result = driver->ioctl(process_id, cmd->cmd, cmd->buf);
+  cmd->result =
+      driver->ioctl(process_id, cmd->cmd, cmd->buf, &cmd->in_mem_handle, cmd->in_proc_handle);
   cmd->shared_handle = -1;
   if (adopting_notifier && cmd->result == 0)
     cmd->in_handle = -1;
@@ -377,14 +431,14 @@ rj_status_t execute_impl(SimulatedKfd *driver, uint32_t process_id, rj_vm_cmd_t 
 } // namespace
 
 rj_status_t rj_vm_execute(rj_vm_t *vm, rj_vm_cmd_t *cmd) {
-  if (!vm || !cmd || !vm->vm || !vm->vm->driver())
+  if (!vm || !cmd || !cmd->buf || !vm->vm || !vm->vm->driver())
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   auto *driver = vm->vm->driver();
   return execute_impl(driver, driver->local_process_id(), cmd);
 }
 
 rj_status_t rj_vm_execute_as(rj_vm_t *vm, uint32_t process_id, rj_vm_cmd_t *cmd) {
-  if (!vm || !cmd || !vm->vm || !vm->vm->driver())
+  if (!vm || !cmd || !cmd->buf || !vm->vm || !vm->vm->driver())
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   return execute_impl(vm->vm->driver(), process_id, cmd);
 }
@@ -491,10 +545,26 @@ rj_status_t rj_vm_drm_path(rj_vm_t *vm, const char **path) {
 }
 
 rj_status_t rj_vm_gpu_info(rj_vm_t *vm, rj_vm_gpu_info_t *info) {
+  return rj_vm_gpu_info_at(vm, 0, info);
+}
+
+rj_status_t rj_vm_gpu_count(rj_vm_t *vm, uint32_t *count) {
+  if (!vm || !count || !vm->vm || !vm->vm->driver())
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  *count = vm->vm->driver()->num_gpus();
+  return ROCJITSU_STATUS_SUCCESS;
+}
+
+rj_status_t rj_vm_gpu_info_at(rj_vm_t *vm, uint32_t ordinal, rj_vm_gpu_info_t *info) {
   if (!vm || !info || !vm->vm || !vm->vm->driver())
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  const auto &gpu = vm->vm->driver()->topology().gpu_info();
+  const auto *gpu_ptr = vm->vm->driver()->gpu_info_at(ordinal);
+  if (!gpu_ptr && ordinal == 0)
+    gpu_ptr = &vm->vm->driver()->topology().gpu_info();
+  if (!gpu_ptr)
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  const auto &gpu = *gpu_ptr;
   *info = {};
   info->present = 1;
   info->gpu_id = gpu.gpu_id;

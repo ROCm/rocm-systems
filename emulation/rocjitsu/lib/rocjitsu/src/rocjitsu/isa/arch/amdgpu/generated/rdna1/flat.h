@@ -18,59 +18,106 @@ class FlatLoadUbyteFlat : public Flat {
 public:
   FlatLoadUbyteFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
+  Operand gpumem;
   Operand saddr;
+  Operand lds_m0;
 };
 
 class FlatLoadSbyteFlat : public Flat {
 public:
   FlatLoadSbyteFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
+  Operand gpumem;
   Operand saddr;
+  Operand lds_m0;
 };
 
 class FlatLoadUshortFlat : public Flat {
 public:
   FlatLoadUshortFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
+  Operand gpumem;
   Operand saddr;
+  Operand lds_m0;
 };
 
 class FlatLoadSshortFlat : public Flat {
 public:
   FlatLoadSshortFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
+  Operand gpumem;
   Operand saddr;
+  Operand lds_m0;
 };
 
 class FlatLoadDwordFlat : public Flat {
 public:
   FlatLoadDwordFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
+  Operand gpumem;
   Operand saddr;
+  Operand lds_m0;
 };
 
 class FlatLoadDwordx2Flat : public Flat {
 public:
   FlatLoadDwordx2Flat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
+  Operand gpumem;
   Operand saddr;
 };
 
@@ -78,9 +125,16 @@ class FlatLoadDwordx4Flat : public Flat {
 public:
   FlatLoadDwordx4Flat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
+  Operand gpumem;
   Operand saddr;
 };
 
@@ -88,9 +142,16 @@ class FlatLoadDwordx3Flat : public Flat {
 public:
   FlatLoadDwordx3Flat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
+  Operand gpumem;
   Operand saddr;
 };
 
@@ -98,8 +159,15 @@ class FlatStoreByteFlat : public Flat {
 public:
   FlatStoreByteFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
   Operand saddr;
 };
@@ -108,8 +176,15 @@ class FlatStoreByteD16HiFlat : public Flat {
 public:
   FlatStoreByteD16HiFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
   Operand saddr;
 };
@@ -118,8 +193,15 @@ class FlatStoreShortFlat : public Flat {
 public:
   FlatStoreShortFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
   Operand saddr;
 };
@@ -128,8 +210,15 @@ class FlatStoreShortD16HiFlat : public Flat {
 public:
   FlatStoreShortD16HiFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
   Operand saddr;
 };
@@ -138,8 +227,15 @@ class FlatStoreDwordFlat : public Flat {
 public:
   FlatStoreDwordFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
   Operand saddr;
 };
@@ -148,8 +244,15 @@ class FlatStoreDwordx2Flat : public Flat {
 public:
   FlatStoreDwordx2Flat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
   Operand saddr;
 };
@@ -158,8 +261,15 @@ class FlatStoreDwordx4Flat : public Flat {
 public:
   FlatStoreDwordx4Flat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
   Operand saddr;
 };
@@ -168,8 +278,15 @@ class FlatStoreDwordx3Flat : public Flat {
 public:
   FlatStoreDwordx3Flat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
   Operand saddr;
 };
@@ -178,76 +295,138 @@ class FlatLoadUbyteD16Flat : public Flat {
 public:
   FlatLoadUbyteD16Flat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+    modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0x3;
+  }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
+  Operand gpumem;
   Operand saddr;
+  Operand lds_m0;
 };
 
 class FlatLoadUbyteD16HiFlat : public Flat {
 public:
   FlatLoadUbyteD16HiFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+    modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0xc;
+  }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
+  Operand gpumem;
   Operand saddr;
+  Operand lds_m0;
 };
 
 class FlatLoadSbyteD16Flat : public Flat {
 public:
   FlatLoadSbyteD16Flat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+    modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0x3;
+  }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
+  Operand gpumem;
   Operand saddr;
+  Operand lds_m0;
 };
 
 class FlatLoadSbyteD16HiFlat : public Flat {
 public:
   FlatLoadSbyteD16HiFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+    modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0xc;
+  }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
+  Operand gpumem;
   Operand saddr;
+  Operand lds_m0;
 };
 
 class FlatLoadShortD16Flat : public Flat {
 public:
   FlatLoadShortD16Flat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+    modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0x3;
+  }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
+  Operand gpumem;
   Operand saddr;
+  Operand lds_m0;
 };
 
 class FlatLoadShortD16HiFlat : public Flat {
 public:
   FlatLoadShortD16HiFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+    modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0xc;
+  }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
+  Operand gpumem;
   Operand saddr;
+  Operand lds_m0;
 };
 
 class FlatAtomicSwapFlat : public Flat {
 public:
   FlatAtomicSwapFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand saddr;
 };
 
@@ -255,10 +434,18 @@ class FlatAtomicCmpswapFlat : public Flat {
 public:
   FlatAtomicCmpswapFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand saddr;
 };
 
@@ -266,10 +453,18 @@ class FlatAtomicAddFlat : public Flat {
 public:
   FlatAtomicAddFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand saddr;
 };
 
@@ -277,10 +472,18 @@ class FlatAtomicSubFlat : public Flat {
 public:
   FlatAtomicSubFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand saddr;
 };
 
@@ -288,10 +491,18 @@ class FlatAtomicSminFlat : public Flat {
 public:
   FlatAtomicSminFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand saddr;
 };
 
@@ -299,10 +510,18 @@ class FlatAtomicUminFlat : public Flat {
 public:
   FlatAtomicUminFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand saddr;
 };
 
@@ -310,10 +529,18 @@ class FlatAtomicSmaxFlat : public Flat {
 public:
   FlatAtomicSmaxFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand saddr;
 };
 
@@ -321,10 +548,18 @@ class FlatAtomicUmaxFlat : public Flat {
 public:
   FlatAtomicUmaxFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand saddr;
 };
 
@@ -332,10 +567,18 @@ class FlatAtomicAndFlat : public Flat {
 public:
   FlatAtomicAndFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand saddr;
 };
 
@@ -343,10 +586,18 @@ class FlatAtomicOrFlat : public Flat {
 public:
   FlatAtomicOrFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand saddr;
 };
 
@@ -354,10 +605,18 @@ class FlatAtomicXorFlat : public Flat {
 public:
   FlatAtomicXorFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand saddr;
 };
 
@@ -365,10 +624,18 @@ class FlatAtomicIncFlat : public Flat {
 public:
   FlatAtomicIncFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand saddr;
 };
 
@@ -376,10 +643,18 @@ class FlatAtomicDecFlat : public Flat {
 public:
   FlatAtomicDecFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand saddr;
 };
 
@@ -387,10 +662,18 @@ class FlatAtomicFcmpswapFlat : public Flat {
 public:
   FlatAtomicFcmpswapFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand saddr;
 };
 
@@ -398,10 +681,18 @@ class FlatAtomicFminFlat : public Flat {
 public:
   FlatAtomicFminFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand saddr;
 };
 
@@ -409,10 +700,18 @@ class FlatAtomicFmaxFlat : public Flat {
 public:
   FlatAtomicFmaxFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand saddr;
 };
 
@@ -420,10 +719,18 @@ class FlatAtomicSwapX2Flat : public Flat {
 public:
   FlatAtomicSwapX2Flat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand saddr;
 };
 
@@ -431,10 +738,18 @@ class FlatAtomicCmpswapX2Flat : public Flat {
 public:
   FlatAtomicCmpswapX2Flat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand saddr;
 };
 
@@ -442,10 +757,18 @@ class FlatAtomicAddX2Flat : public Flat {
 public:
   FlatAtomicAddX2Flat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand saddr;
 };
 
@@ -453,10 +776,18 @@ class FlatAtomicSubX2Flat : public Flat {
 public:
   FlatAtomicSubX2Flat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand saddr;
 };
 
@@ -464,10 +795,18 @@ class FlatAtomicSminX2Flat : public Flat {
 public:
   FlatAtomicSminX2Flat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand saddr;
 };
 
@@ -475,10 +814,18 @@ class FlatAtomicUminX2Flat : public Flat {
 public:
   FlatAtomicUminX2Flat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand saddr;
 };
 
@@ -486,10 +833,18 @@ class FlatAtomicSmaxX2Flat : public Flat {
 public:
   FlatAtomicSmaxX2Flat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand saddr;
 };
 
@@ -497,10 +852,18 @@ class FlatAtomicUmaxX2Flat : public Flat {
 public:
   FlatAtomicUmaxX2Flat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand saddr;
 };
 
@@ -508,10 +871,18 @@ class FlatAtomicAndX2Flat : public Flat {
 public:
   FlatAtomicAndX2Flat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand saddr;
 };
 
@@ -519,10 +890,18 @@ class FlatAtomicOrX2Flat : public Flat {
 public:
   FlatAtomicOrX2Flat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand saddr;
 };
 
@@ -530,10 +909,18 @@ class FlatAtomicXorX2Flat : public Flat {
 public:
   FlatAtomicXorX2Flat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand saddr;
 };
 
@@ -541,10 +928,18 @@ class FlatAtomicIncX2Flat : public Flat {
 public:
   FlatAtomicIncX2Flat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand saddr;
 };
 
@@ -552,10 +947,18 @@ class FlatAtomicDecX2Flat : public Flat {
 public:
   FlatAtomicDecX2Flat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand saddr;
 };
 
@@ -563,10 +966,18 @@ class FlatAtomicFcmpswapX2Flat : public Flat {
 public:
   FlatAtomicFcmpswapX2Flat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand saddr;
 };
 
@@ -574,10 +985,18 @@ class FlatAtomicFminX2Flat : public Flat {
 public:
   FlatAtomicFminX2Flat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand saddr;
 };
 
@@ -585,10 +1004,18 @@ class FlatAtomicFmaxX2Flat : public Flat {
 public:
   FlatAtomicFmaxX2Flat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.flat_address = &addr;
+    if (inst_.saddr != 0x7D && inst_.saddr != 127)
+      modifiers.flat_scalar_address = &saddr;
+    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+  }
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand saddr;
 };
 

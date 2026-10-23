@@ -118,8 +118,11 @@ public:
   ImageAtomicSwapMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand srsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class ImageAtomicCmpswapMimg : public Mimg {
@@ -127,8 +130,11 @@ public:
   ImageAtomicCmpswapMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand srsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class ImageAtomicAddMimg : public Mimg {
@@ -136,8 +142,11 @@ public:
   ImageAtomicAddMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand srsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class ImageAtomicSubMimg : public Mimg {
@@ -145,8 +154,11 @@ public:
   ImageAtomicSubMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand srsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class ImageAtomicSminMimg : public Mimg {
@@ -154,8 +166,11 @@ public:
   ImageAtomicSminMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand srsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class ImageAtomicUminMimg : public Mimg {
@@ -163,8 +178,11 @@ public:
   ImageAtomicUminMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand srsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class ImageAtomicSmaxMimg : public Mimg {
@@ -172,8 +190,11 @@ public:
   ImageAtomicSmaxMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand srsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class ImageAtomicUmaxMimg : public Mimg {
@@ -181,8 +202,11 @@ public:
   ImageAtomicUmaxMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand srsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class ImageAtomicAndMimg : public Mimg {
@@ -190,8 +214,11 @@ public:
   ImageAtomicAndMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand srsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class ImageAtomicOrMimg : public Mimg {
@@ -199,8 +226,11 @@ public:
   ImageAtomicOrMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand srsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class ImageAtomicXorMimg : public Mimg {
@@ -208,8 +238,11 @@ public:
   ImageAtomicXorMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand srsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class ImageAtomicIncMimg : public Mimg {
@@ -217,8 +250,11 @@ public:
   ImageAtomicIncMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand srsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class ImageAtomicDecMimg : public Mimg {
@@ -226,8 +262,11 @@ public:
   ImageAtomicDecMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand srsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class ImageSampleMimg : public Mimg {

@@ -1,0 +1,84 @@
+# MIT License
+#
+# Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+#
+# Early (preloaded, HIP-only) tool + late tool that calls force_configure TWICE.
+#
+# This is the API-contract test for rocprofiler_force_configure() itself (the rest of the
+# suite tests the tracing produced by a single successful late registration). It exercises
+# the documented idempotency of the late path: a tool that calls force_configure() a
+# second time with the SAME configure function must not be registered twice. The SDK
+# de-duplicates the configure function (registration.cpp::invoke_client_configure "more
+# than once" guard), so the second call must NOT double tool_init or duplicate the
+# captured records.
+#
+# The driver asserts the RETURN CODE of both calls; validate.py asserts the second call
+# did not double-register (exactly the phase-2 dispatch count, not twice that).
+#
+cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+
+project(
+    rocprofiler-sdk-tests-anytime-early-hip-late-double-configure
+    LANGUAGES CXX
+    VERSION 0.0.0)
+
+find_package(rocprofiler-sdk REQUIRED)
+find_package(Python3 REQUIRED)
+
+set(early-hip-late-double-configure-env
+    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$<TARGET_FILE_DIR:rocprofiler-sdk-json-tool-late>:$ENV{LD_LIBRARY_PATH}"
+    "ROCPROFILER_SDK_TEST_LIB_DIR=$<TARGET_FILE_DIR:rocprofiler-sdk-json-tool-late>"
+    "ROCPROFILER_TOOL_CONTEXTS=HIP_API_BUFFERED"
+    "ROCPROFILER_TOOL_OUTPUT_FILE=${CMAKE_CURRENT_BINARY_DIR}/early-hip-late-double-configure-tool-a.json"
+    "ROCPROFILER_TOOL_LATE_OUTPUT_FILE=${CMAKE_CURRENT_BINARY_DIR}/early-hip-late-double-configure-tool-b.json"
+    "ROCPROFILER_TOOL_DISABLE_PERFETTO=1")
+
+rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY conftest.py)
+
+rocprofiler_add_integration_execute_test(
+    anytime-early-hip-late-double-configure
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/test_early_hip_late_double_configure.py
+    DEPENDS rocprofiler-sdk-json-tool rocprofiler-sdk-json-tool-late python-hip-kernels
+    TIMEOUT 120
+    LABELS "integration-tests;anytime-tool-config"
+    PRELOAD "$<TARGET_FILE:rocprofiler-sdk-json-tool>"
+    ENVIRONMENT "${early-hip-late-double-configure-env}"
+    SKIP_REGULAR_EXPRESSION "test skipped"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    FIXTURES_SETUP anytime-early-hip-late-double-configure)
+
+rocprofiler_add_integration_validate_test(
+    anytime-early-hip-late-double-configure
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    TIMEOUT 45
+    LABELS "integration-tests;anytime-tool-config"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    FIXTURES_REQUIRED anytime-early-hip-late-double-configure
+    ARGS --tool-a-input
+         ${CMAKE_CURRENT_BINARY_DIR}/early-hip-late-double-configure-tool-a.json
+         --tool-b-input
+         ${CMAKE_CURRENT_BINARY_DIR}/early-hip-late-double-configure-tool-b.json
+         --phase2-count
+         40)

@@ -1,24 +1,7 @@
 #!/usr/bin/env python3
 # PYTHON_ARGCOMPLETE_OK
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 import functools
 import logging
@@ -71,7 +54,9 @@ except ImportError:
     except ImportError as e:
         print(f"Unhandled import error: {e}")
         print(f"Unable to import amdsmi_cli files. Check {cli_files_path} if they are present.")
-        sys.exit(1)
+        from amdsmi_cli_exceptions import AmdSmiExitCode
+
+        sys.exit(int(AmdSmiExitCode.IMPORT_ERROR))
 
 
 def _print_error(e, destination):
@@ -147,7 +132,15 @@ if __name__ == "__main__":
         sys.tracebacklimit = -1
 
     amd_smi_helpers = AMDSMIHelpers()
-    amd_smi_commands = AMDSMICommands(helpers=amd_smi_helpers)
+    # Device init below can fail before argv is parsed, and it still has to
+    # report in the format the user asked for. Neither flag has a short form.
+    if "--json" in sys.argv:
+        init_format = "json"
+    elif "--csv" in sys.argv:
+        init_format = "csv"
+    else:
+        init_format = "human_readable"
+    amd_smi_commands = AMDSMICommands(format=init_format, helpers=amd_smi_helpers)
     amd_smi_parser = AMDSMIParser(
         amd_smi_commands.version,
         amd_smi_commands.list_devices,
@@ -192,6 +185,7 @@ if __name__ == "__main__":
         "--core",
         "--profile",
         "--cper-file",
+        "--ampp-activate",
     ]
     case_sensitive_prefixes = [
         "--folder=",
@@ -201,14 +195,35 @@ if __name__ == "__main__":
         "--core=",
         "--profile=",
         "--cper-file=",
+        "--ampp-activate=",
     ]
+    # Arguments whose *entire* remaining value list (nargs="+") must keep case
+    # -- e.g. --ampp-configure PROFILE_NAME KEY=VALUE [KEY=VALUE ...], where
+    # the sysfs field names (KEY) are case-sensitive per the driver spec (e.g.
+    # "PPT0_Limit", "MaxGfxclkFreq"). Unlike case_sensitive_args above, this
+    # must preserve case for *all* following tokens, not just the next one,
+    # until the next flag (a token starting with "-") or end of argv.
+    multi_value_case_sensitive_args = ["--ampp-configure"]
 
     preserve_case_for_next = False
+    preserve_case_until_flag = False
     for i, arg in enumerate(sys.argv):
+        if preserve_case_until_flag and not arg.startswith("-"):
+            # Still within the case-sensitive value list of a preceding
+            # multi-value flag (e.g. --ampp-configure).
+            processed_argv.append(arg)
+            continue
+        preserve_case_until_flag = False
+
         if preserve_case_for_next:
             # Preserve case for the next argument value
             processed_argv.append(arg)
             preserve_case_for_next = False
+        elif arg in multi_value_case_sensitive_args:
+            # Convert flag to lowercase but preserve case for every value
+            # that follows, until the next flag.
+            processed_argv.append(arg.lower())
+            preserve_case_until_flag = True
         elif arg in case_sensitive_args:
             # Convert flag to lowercase but preserve next value
             processed_argv.append(arg.lower())
@@ -237,8 +252,9 @@ if __name__ == "__main__":
         elif sys.argv[1] in valid_commands:
             args = amd_smi_parser.parse_args(args=None)
         else:
+            # Raised before args are parsed, so the format comes from sys.argv.
             raise amdsmi_cli_exceptions.AmdSmiInvalidSubcommandException(
-                sys.argv[1], amd_smi_commands.logger.destination
+                sys.argv[1], amd_smi_helpers.get_output_format()
             )
 
         # Handle command modifiers before subcommand execution
@@ -250,27 +266,24 @@ if __name__ == "__main__":
         if hasattr(args, "file") and args.file:
             amd_smi_commands.logger.destination = args.file
         configure_logging_and_execute(args, amd_smi_commands)
+
+        sys.exit(amd_smi_helpers.error_collector.resolve_exit_code())
     except amdsmi_cli_exceptions.AmdSmiException as e:
-        _print_error(
-            f"{type(e).__module__}.{type(e).__name__}: {str(e)}",
-            amd_smi_commands.logger.destination,
-        )
+        _print_error(str(e), amd_smi_commands.logger.destination)
         sys.exit(abs(e.value))
     except amdsmi_exception.AmdSmiLibraryException as e:
+        # A library error that escaped the single-device path. Print it, record
+        # it as a device failure, and finalize so the exit code matches the
+        # multi-device path (the underlying AMDSMI_STATUS_* code).
         exc = amdsmi_cli_exceptions.AmdSmiLibraryErrorException(
             amd_smi_commands.logger.format, e.get_error_code()
         )
-        _print_error(
-            f"{type(exc).__module__}.{type(exc).__name__}: {str(exc)}",
-            amd_smi_commands.logger.destination,
-        )
-        sys.exit(abs(exc.value))
+        _print_error(str(exc), amd_smi_commands.logger.destination)
+        amd_smi_helpers.error_collector.record_library_error(e.get_error_code())
+        sys.exit(amd_smi_helpers.error_collector.resolve_exit_code())
     except PermissionError as e:
         command = sys.argv[1] if len(sys.argv) > 1 else ""
         outputformat = amd_smi_commands.logger.format
         exc = amdsmi_cli_exceptions.AmdSmiPermissionDeniedException(command, outputformat)
-        _print_error(
-            f"{type(exc).__module__}.{type(exc).__name__}: {str(exc)}",
-            amd_smi_commands.logger.destination,
-        )
+        _print_error(str(exc), amd_smi_commands.logger.destination)
         sys.exit(abs(exc.value))

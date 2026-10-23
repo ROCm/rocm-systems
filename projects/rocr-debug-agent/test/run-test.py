@@ -1,6 +1,7 @@
 import os
 import re
 import select
+import socket
 import sys
 import tempfile
 import unittest.mock
@@ -10,6 +11,7 @@ import hashlib
 import logging
 import shutil
 import signal
+import threading
 
 DEFAULT_TIMEOUT = 60
 
@@ -299,6 +301,55 @@ def test_save_code_objects(*, name, args, **_):
         return True
 
 
+def test_save_code_objects_dir_tokens(*, name, args, **_):
+    """--save-code-objects honors %-format tokens in the directory path.
+
+    Only tokens whose expansion the test process shares with the debugged
+    child (%u, %g, %h) plus the literal %% are used here: the agent validates
+    the directory with stat(), so it must already exist, which means the test
+    has to be able to predict the expanded path.
+    """
+    if not shutil.which("readelf"):
+        logger().info("Tool readelf not found, skipping %s", name)
+        unsupported_tests.add(test_save_code_objects_dir_tokens)
+        return True
+
+    _log = logger()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        template = "co-u%u-g%g-h%h-%%"
+        expanded = f"co-u{os.getuid()}-g{os.getgid()}-h{socket.gethostname()}-%"
+
+        save_dir = os.path.join(tmpdir, expanded)
+        os.mkdir(save_dir)
+
+        run_and_communicate(
+            test_name=name,
+            args=args,
+            debug_agent_options=(
+                f"--save-code-objects={tmpdir}/{template} --load-all-code-objects"
+            ),
+        )
+
+        produced = [
+            p
+            for p in (os.path.join(save_dir, f) for f in os.listdir(save_dir))
+            if os.path.isfile(p)
+        ]
+        with_symbol = [
+            p for p in produced if _has_symbol_with_readelf(p, "saved_test_kernel")
+        ]
+        if len(with_symbol) != 2:
+            _log.info(
+                "Expected 2 code objects with symbol in expanded dir %s, found %d",
+                save_dir,
+                len(with_symbol),
+            )
+            _log.info("Directory contents:\n\t%s", "\n\t".join(produced))
+            return False
+
+        return True
+
+
 def test_output_redirection(*, name, args, patterns=(), **_):
     check_list = [re.compile(s) for s in patterns]
 
@@ -330,6 +381,57 @@ def test_output_redirection(*, name, args, patterns=(), **_):
                 _log.info("Full output log contents:\n%s", log_contents)
 
             return all_output_string_found
+
+
+def test_output_filename_tokens(*, name, args, patterns=(), **_):
+    """Verify that %-format tokens in the -o filename are expanded.
+
+    Exercises every supported token at once.  The numeric tokens (%p, %t, %u,
+    %g) must expand to digits, %e to the (possibly truncated) executable comm
+    name, and %% to a single literal '%'.  No raw token may survive, and the
+    expanded file must contain the wave dump.
+    """
+    check_list = [re.compile(s) for s in patterns]
+    _log = logger()
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        name_template = "dump-%e-pid%p-t%t-u%u-g%g-%%.txt"
+        options = f"-o {tmpdir}/{name_template}"
+
+        run_and_communicate(
+            test_name=name,
+            args=args,
+            debug_agent_options=options,
+        )
+
+        produced = os.listdir(tmpdir)
+        if len(produced) != 1:
+            _log.info("expected exactly one output file, found: %s", produced)
+            return False
+
+        produced_name = produced[0]
+
+        # The numeric tokens become digits and %% becomes a literal '%'.
+        name_re = re.compile(r"^dump-.+-pid\d+-t\d+-u\d+-g\d+-%\.txt$")
+        if not name_re.match(produced_name):
+            _log.info("filename not expanded as expected: %s", produced_name)
+            return False
+
+        for raw in ("%e", "%p", "%t", "%u", "%g"):
+            if raw in produced_name:
+                _log.info("unexpanded token %s left in name: %s", raw, produced_name)
+                return False
+
+        with open(os.path.join(tmpdir, produced_name), "r") as f:
+            log_contents = f.read()
+
+        for check_str in check_list:
+            if not check_str.search(log_contents):
+                _log.info('"%s" not found in %s', check_str.pattern, produced_name)
+                _log.info("Full output log contents:\n%s", log_contents)
+                return False
+
+        return True
 
 
 def test_sigquit(*, args, patterns=(), **_):
@@ -534,6 +636,76 @@ def test_lazy_loading_and_eager_incompatible(*, name, args, patterns=(), **_):
     return True
 
 
+def test_sigquit_resumes(*, name, args, patterns=(), **_):
+    """SIGQUIT a running kernel, release it once the waves are printed, and
+    expect the program to finish: the agent resumes the waves it stopped."""
+    check_list = [re.compile(s) for s in patterns]
+    _log = logger()
+    p = Popen(["./rocm-debug-agent-test", args], stdin=PIPE, stdout=PIPE, stderr=PIPE)
+
+    lock = threading.Lock()
+    collected = {"out": b"", "err": b""}
+
+    def drain(stream, key):
+        for chunk in iter(lambda: stream.read1(4096), b""):
+            with lock:
+                collected[key] += chunk
+
+    readers = [
+        threading.Thread(target=drain, args=(p.stdout, "out"), daemon=True),
+        threading.Thread(target=drain, args=(p.stderr, "err"), daemon=True),
+    ]
+    for t in readers:
+        t.start()
+
+    def wait_for(key, text):
+        end = time.monotonic() + DEFAULT_TIMEOUT
+        while time.monotonic() < end:
+            with lock:
+                if text in collected[key]:
+                    return True
+            if p.poll() is not None:
+                break
+            time.sleep(0.1)
+        return False
+
+    def fail(reason):
+        _log.info("Test %s FAIL: %s", name, reason)
+        p.kill()
+        p.wait()
+        for t in readers:
+            t.join(timeout=5)
+        log_program_output(
+            collected["out"].decode("utf-8", "replace"),
+            collected["err"].decode("utf-8", "replace"),
+        )
+        return False
+
+    if not wait_for("out", b"Kernel started"):
+        return fail("the kernel did not start")
+    p.send_signal(signal.SIGQUIT)
+    if not wait_for("err", b"End of disassembly"):
+        return fail("no wave dump with disassembly after SIGQUIT")
+    try:
+        p.stdin.write(b"go\n")
+        p.stdin.flush()
+    except BrokenPipeError:
+        return fail("the program exited before it was released")
+    try:
+        rc = p.wait(timeout=DEFAULT_TIMEOUT)
+    except TimeoutExpired:
+        return fail("the program did not finish: waves left stopped after the dump")
+    for t in readers:
+        t.join(timeout=5)
+    out_str = collected["out"].decode("utf-8", "replace")
+    err_str = collected["err"].decode("utf-8", "replace")
+    log_program_output(out_str, err_str)
+    if rc != 0 or "Kernel finished" not in out_str:
+        _log.info("Test %s: exit code %d", name, rc)
+        return False
+    return check_errors(check_list, out_str, err_str)
+
+
 # ==============================================================================
 # Test Definitions
 #
@@ -604,10 +776,28 @@ TEST_DEFINITIONS = [
         'function': test_save_code_objects,
     },
     {
+        'name': 'test_save_code_objects_dir_tokens',
+        'description': '--save-code-objects expands %-format tokens in the directory path',
+        'args': '4',
+        'function': test_save_code_objects_dir_tokens,
+    },
+    {
         'name': 'test_output_redirection',
         'description': '-o redirects the wave dump to a file instead of stderr',
         'args': '1',
         'function': test_output_redirection,
+        'patterns': [
+            r"s0:",
+            r"v0:",
+            r"0x0000: 22222222 11111111",
+            r"Disassembly for function vector_add_assert_trap\(int\*, int\*, int\*\)",
+        ],
+    },
+    {
+        'name': 'test_output_filename_tokens',
+        'description': '-o expands %-format tokens (%e %p %t %u %g %%) in the filename',
+        'args': '1',
+        'function': test_output_filename_tokens,
         'patterns': [
             r"s0:",
             r"v0:",
@@ -659,6 +849,16 @@ TEST_DEFINITIONS = [
             r"s0:",
             r"v0:",
             r"Disassembly for function sigquit_kern\(int\*\)",
+        ],
+    },
+    {
+        'name': 'test_sigquit_resumes',
+        'description': 'SIGQUIT dump names the kernel and the program then finishes',
+        'args': '8',
+        'function': test_sigquit_resumes,
+        'patterns': [
+            r"<sigquit_resume_kern\(int\*, int const\*\)>",
+            r"Disassembly for function sigquit_resume_kern\(int\*, int const\*\)",
         ],
     },
     {

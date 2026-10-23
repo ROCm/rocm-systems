@@ -43,24 +43,25 @@ THE SOFTWARE.
 using CachePolicy = uint32_t;
 
 enum struct MemScope : uint32_t {
-    WGP = 0,    // Workgroup processor scope - warps running on the same WGP should be able to see the effect of the operation
-    SE,         // Shader engine a.k.a cluster scope
-    DEV,        // Device scope
-    SYS,        // System scope
+  WGP =
+    0, // Workgroup processor scope - warps running on the same WGP should be able to see the effect of the operation
+  SE, // Shader engine a.k.a cluster scope
+  DEV, // Device scope
+  SYS, // System scope
 };
 
 enum struct TemporalHint : uint32_t {
-    RT = 0, // Regular temporal (nothing special)
-    NT,     // Not temporal
-    HT,     // High temporal
-    LU,     // Last use
-    NT_RT,
-    RT_NT,
-    NT_HT,
+  RT = 0, // Regular temporal (nothing special)
+  NT, // Not temporal
+  HT, // High temporal
+  LU, // Last use
+  NT_RT,
+  RT_NT,
+  NT_HT,
 };
 
 __host__ __device__ constexpr CachePolicy createCachePolicy(TemporalHint temporal, MemScope scope) noexcept {
-    return static_cast<CachePolicy>(scope) << 3 | static_cast<CachePolicy>(temporal);
+  return static_cast<CachePolicy>(scope) << 3 | static_cast<CachePolicy>(temporal);
 }
 
 static_assert(createCachePolicy(TemporalHint::RT, MemScope::WGP) == 0);

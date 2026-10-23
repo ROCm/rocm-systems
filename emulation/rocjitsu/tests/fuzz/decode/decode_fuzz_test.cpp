@@ -38,8 +38,8 @@ protected:
 };
 
 TEST(DecodeFuzzTargetsTest, CreatesEachSupportedDecoder) {
-  constexpr std::string_view targets[] = {"cdna1", "cdna2", "cdna3",   "cdna4", "rdna1",
-                                          "rdna2", "rdna3", "rdna3_5", "rdna4", "gfx1250"};
+  constexpr std::string_view targets[] = {"cdna1", "cdna2",   "cdna3", "cdna4",   "rdna1",  "rdna2",
+                                          "rdna3", "rdna3_5", "rdna4", "gfx1250", "gfx1251"};
   for (const std::string_view target : targets) {
     SCOPED_TRACE(target);
     EXPECT_NE(create_decoder(target), nullptr);
@@ -99,7 +99,7 @@ TEST_F(DecodeFuzzCoreTest, DecodesSopTwoWithLiteralWithoutAborting) {
 
 TEST_F(DecodeFuzzCoreTest, PreservesSixteenByteInstruction) {
   const auto input =
-      make_window(std::array<uint32_t, 4>{0xCC350000u, 0x02020900u, 0xCC330006u, 0x02026912u});
+      make_window(std::array<uint32_t, 4>{0xCC350000u, 0x04020900u, 0xCC330006u, 0x02026912u});
   const DecodeRecord record = decode_window(*decoder, input);
   ASSERT_TRUE(record.valid);
   EXPECT_EQ(record.size, 16);

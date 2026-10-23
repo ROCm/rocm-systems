@@ -18,6 +18,7 @@
 
 #include "rccl/rccl.h"
 #include "util.h"
+#include "gin_sdma_devtime_host.h"
 #include "git_version.h"
 #include "os.h"
 #include <assert.h>
@@ -479,9 +480,10 @@ void writeBenchmarkLineTerminator(int actualIters, const char *name) {
 
 // Handle a cases where we don't write out of place results
 void writeBenchMarkLineNullBody() {
-  PRINT("                                ");  // only do in-place for trace replay
+  rccl_tests_devtime::emitSkippedOutOfPlaceColumnToStdout();
   if(write_json) {
-    jsonKey("out_of_place"); jsonNull();
+    jsonKey(rccl_tests_devtime::kSkippedOutOfPlaceJsonKey);
+    jsonNull();
   }
 }
 

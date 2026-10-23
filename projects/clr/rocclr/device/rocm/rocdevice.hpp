@@ -60,24 +60,22 @@ class PrintfDbg;
 
 class ProfilingSignal : public amd::ReferenceCountedObject {
  public:
-  //! Sentinel for queue_index_ when the owning stream is unknown.
-  static constexpr uint32_t kInvalidQueueIndex = std::numeric_limits<uint32_t>::max();
+  //! Sentinel for dispatch_slot_ when this signal doesn't time a reported graph dispatch.
+  static constexpr uint32_t kNoDispatchSlot = std::numeric_limits<uint32_t>::max();
 
   hsa_signal_t signal_;   //!< HSA signal to track profiling information
   Timestamp* ts_;         //!< Timestamp object associated with the signal
   HwQueueEngine engine_;  //!< Engine used with this signal
-  //! vGPU (queue) index of the stream this signal was dispatched on. Graphs span
-  //! multiple streams under one command, so profiling reads this per-signal to
-  //! attribute each kernel to the queue it actually ran on.
-  uint32_t queue_index_ = kInvalidQueueIndex;
+  //! AccumulateCommand dispatch record this signal supplies timing for.
+  uint32_t dispatch_slot_ = kNoDispatchSlot;
   std::recursive_mutex lock_;  //!< Signal lock for update
+  bool in_device_memory_ = false;  //!< Host stores to the value need FlushSignalStores
 
   typedef union {
     struct {
-      uint32_t done_ : 1;              //!< True if signal is done
-      uint32_t isPacketDispatch_ : 1;  //!< True if the packet, used with the signal, is dispatch
-      uint32_t interrupt_ : 1;         //!< True if the signal will trigger an interrupt
-      uint32_t reserved_ : 29;
+      uint32_t done_ : 1;       //!< True if signal is done
+      uint32_t interrupt_ : 1;  //!< True if the signal will trigger an interrupt
+      uint32_t reserved_ : 30;
     };
     uint32_t data_;
   } Flags;
@@ -96,7 +94,7 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
     signal_.handle = 0;
     flags_.data_ = 0;
     flags_.done_ = true;
-    queue_index_ = kInvalidQueueIndex;
+    dispatch_slot_ = kNoDispatchSlot;
   }
 
   virtual ~ProfilingSignal();
@@ -111,7 +109,7 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
     cached_timing_.start_ = 0;
     cached_timing_.end_ = 0;
     cached_timing_.valid_ = false;
-    queue_index_ = kInvalidQueueIndex;
+    dispatch_slot_ = kNoDispatchSlot;
   }
 
   //! Check if timing is already cached
@@ -190,7 +188,8 @@ class NullDevice : public amd::Device {
   virtual void deregisterSvmMemory(void* ptr) const { ShouldNotReachHere(); }
 
   //! Just returns nullptr for the dummy device
-  device::Memory* createMemory(amd::Memory& owner) const override {
+  device::Memory* createMemory(
+      amd::Memory& owner, amd::Memory::ErrorCode* errorCode) const override {
     ShouldNotReachHere();
     return nullptr;
   }
@@ -339,13 +338,11 @@ class NullDevice : public amd::Device {
   void getHwEventTime(const amd::Event& event, uint64_t* start, uint64_t* end) const override {};
   void ReleaseGlobalSignal(void* signal) const override {}
 
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
   virtual device::UriLocator* createUriLocator() const {
     ShouldNotReachHere();
     return nullptr;
   }
-#endif
 #endif
 
  private:
@@ -399,6 +396,9 @@ class Device : public NullDevice {
   }
 
   void setupCpuAgent();  // Setup the CPU agent which has the least NUMA distance to this GPU
+  //! Whether the agent shares physical memory with the CPU. Distinct from a FULL profile:
+  //! MI300A reports BASE while still being an APU.
+  static bool agentIsAPU(hsa_agent_t agent);
 
   void checkAtomicSupport();  //!< Check the support for pcie atomics
 
@@ -420,7 +420,8 @@ class Device : public NullDevice {
   virtual device::Program* createProgram(amd::Program& owner,
                                          amd::option::Options* options = nullptr) override;
 
-  virtual device::Memory* createMemory(amd::Memory& owner) const override;
+  virtual device::Memory* createMemory(
+      amd::Memory& owner, amd::Memory::ErrorCode* errorCode) const override;
   virtual device::Memory* createMemory(size_t size, size_t alignment = 0) const override;
   //! Sampler object allocation
   virtual bool createSampler(const amd::Sampler& owner,  //!< abstraction layer sampler object
@@ -476,9 +477,19 @@ class Device : public NullDevice {
   void deviceVmemRelease(uint64_t mem_handle) const;
   uint64_t deviceVmemAlloc(size_t size, uint64_t flags) const;
 
-  //! Allocate a host-resident VMM handle on a CPU NUMA pool. numaNode < 0 resolves
-  //! to the calling thread's current node (HostNumaCurrent). Returns 0 on failure.
+  //! Allocate a host-resident VMM handle on a CPU NUMA pool. The node selector is resolved to a
+  //! CPU agent. numaNode = -1 resolves to calling thread's current node (HostNumaCurrent).
+  //! numaNode = -2 resolves to default ROCr CPU agent (Host). numaNode >= 0 resolves to that
+  //! particular NUMA node. Returns 0 on failure.
   uint64_t hostVmemAlloc(size_t size, uint64_t flags, int numaNode) const;
+
+  //! Recovers the location, owning device and size of a VMM allocation from its
+  //! ROCr handle. Returns false when ROCr cannot report them - an imported handle
+  //! whose placement the kernel could not describe, or (under ROCR_DLL_LOAD) a
+  //! ROCr too old to export hsa_amd_vmem_get_vmem_info - leaving the caller on
+  //! its default.
+  bool getVmmAllocInfo(amd::Memory& amd_mem_obj, amd::Device::VmmLocationType* location_type,
+                       int* device_id, size_t* size) const override;
 
   void* deviceLocalAlloc(size_t size,
                         const AllocationFlags& flags = AllocationFlags{}, bool allowAllAgentsAccess = true) const override;
@@ -527,11 +538,30 @@ class Device : public NullDevice {
   virtual void getHwEventTime(const amd::Event& event, uint64_t* start, uint64_t* end) const override;
   virtual void ReleaseGlobalSignal(void* signal) const override;
   virtual void RetainGlobalSignal(void* signal) const override;
-  virtual bool CreateHwEvents(int count, std::vector<void*>& hw_events) const override;
+  virtual bool CreateHwEvents(int count, bool batched,
+                              std::vector<void*>& hw_events) const override;
+  //! Creates signals, from one allocation when batched, else from the ROCr signal pool.
+  //! A batch costs an allocation, so batched is for pooled signals. device_memory places the
+  //! batch in device memory, which requires a batch. Each signal is destroyed individually
+  //! either way. in_device_memory reports where the signals were placed.
+  bool CreateSignals(uint32_t count, hsa_signal_value_t initial_value, uint64_t attributes,
+                     bool batched, bool device_memory, hsa_signal_t* signals,
+                     bool& in_device_memory) const;
+  //! Makes earlier host stores to device-memory signal values visible to the GPU. When ROCr
+  //! reports that stores to device memory come over PCIe, re-store the last one and read it back.
+  //! last_stored must be in device memory, or the readback does not drain HDP.
+  void FlushSignalStores(hsa_signal_t last_stored, hsa_signal_value_t value) const;
+  //! AQL queue ring buffers are placed in device memory. A profiler tool scans and rewrites the
+  //! packets from the host, so its queues keep system-memory rings.
+  bool AqlRingsInDeviceMemory() const {
+    return settings().aql_device_ring_buf_ && info_.largeBar_ &&
+           Hsa::amd_queue_create_available() &&
+           !amd::activity_prof::tool_attached.load(std::memory_order_relaxed);
+  }
   virtual void DestroyHwEvent(void* hw_event) const override;
   virtual void ResetHwEvents(const std::vector<void*>& hw_events) const override;
   virtual void QuiesceHwEvents(const std::vector<void*>& hw_events) const override;
-  virtual uint8_t* CreateBarrierPacket() const override;
+  virtual uint8_t* CreateBarrierPacket(int num_deps) const override;
   virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
                                    const std::vector<void*>& hw_events) const override;
   virtual bool CreateUserEvent(amd::UserEvent* event) const override;
@@ -746,6 +776,9 @@ class Device : public NullDevice {
   hsa_amd_memory_pool_t gpuvm_segment_;
   hsa_amd_memory_pool_t gpu_fine_grained_segment_;
   hsa_amd_memory_pool_t gpu_ext_fine_grained_segment_;
+  hsa_amd_memory_pool_t device_signal_pool_{0};  //!< Pool for signals in device memory, if any
+  bool graph_device_signals_ = false;  //!< Graph signals live in device_signal_pool_
+  bool pcie_stores_need_flush_ = true;  //!< Stores to device memory come over PCIe through HDP
   hsa_signal_t prefetch_signal_;  //!< Prefetch signal, used to explicitly prefetch SVM on device
   std::atomic<int> cache_state_;  //!< State of cache, kUnknown/kFlushedToDevice/kFlushedToSystem
 
@@ -827,6 +860,7 @@ class Device : public NullDevice {
   uint32_t maxSdmaReadMask_;
   uint32_t maxSdmaWriteMask_;
   bool isXgmi_;  //!< Flag to indicate if there is XGMI between CPU<->GPU
+  bool isAPU_ = false;  //!< Flag to indicate the agent shares physical memory with the CPU
   bool pm4_emulation_ = false;  //!< Flag to indicate if PM4 emulation is enabled
   uint32_t numHwPipes_;  //!< Number of hardware pipes
 
@@ -834,6 +868,8 @@ class Device : public NullDevice {
   struct SdmaEngineAllocator {
     amd::Monitor lock_;  //!< Protects the allocation state
     std::unordered_map<VirtualGPU*, uint32_t> vgpu_to_engine_;  //!< VirtualGPU -> engine mask
+    //! Peer agent handle -> engines ROCr has reported as usable for P2P with that peer
+    std::unordered_map<uint64_t, uint32_t> peer_engine_mask_;
     std::atomic<uint32_t> next_rr_engine_{0};  //!< RR counter for sdma engine selection
     const Device& device_;  //!< Reference to parent device for accessing masks
 
@@ -864,10 +900,8 @@ class Device : public NullDevice {
     return (engine_type == HwQueueEngine::SdmaD2H) ? maxSdmaReadMask_ : maxSdmaWriteMask_;
   }
 
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
   virtual device::UriLocator* createUriLocator() const;
-#endif
 #endif
 };  // class roc::Device
 

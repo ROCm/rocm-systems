@@ -10,6 +10,7 @@
 #include "os/os.hpp"
 #include "utils/debug.hpp"
 #include "utils/flags.hpp"
+#include "utils/nontemporal.hpp"
 #include "utils/options.hpp"
 #include "utils/versions.hpp"
 #include "thread/monitor.hpp"
@@ -35,10 +36,8 @@
 #include "platform/interop_d3d11.hpp"
 #endif
 
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
 #include "device/rocm/rocurilocator.hpp"
-#endif
 #endif
 
 #if defined(__linux__)
@@ -125,7 +124,7 @@ bool NullDevice::create(const amd::Isa& isa) {
   std::stringstream ss;
   ss << AMD_BUILD_STRING " (HSA,LC) [Offline]";
   ::strncpy(info_.driverVersion_, ss.str().c_str(), sizeof(info_.driverVersion_) - 1);
-  info_.version_ = "OpenCL " OPENCL_VERSION_STR " ";
+  info_.version_ = "OpenCL " OPENCL_VERSION_STR " " AMD_PLATFORM_INFO;
   return true;
 }
 
@@ -173,6 +172,18 @@ int Device::agentGlobalIndex(hsa_agent_t agent) {
   return -1;
 }
 
+// Query HSA_AMD_MEMORY_PROPERTY_AGENT_IS_APU (MI300A reports true despite BASE profile).
+bool Device::agentIsAPU(hsa_agent_t agent) {
+  uint8_t memory_properties[8] = {0};
+  if (HSA_STATUS_SUCCESS !=
+      Hsa::agent_get_info(agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MEMORY_PROPERTIES,
+                          memory_properties)) {
+    LogError("HSA_AGENT_INFO_AMD_MEMORY_PROPERTIES query failed");
+    return false;
+  }
+  return hsa_flag_isset64(memory_properties, HSA_AMD_MEMORY_PROPERTY_AGENT_IS_APU);
+}
+
 void Device::setupCpuAgent() {
   int32_t numaDistance = std::numeric_limits<int32_t>::max();
   uint32_t index = 0;  // 0 as default
@@ -191,6 +202,12 @@ void Device::setupCpuAgent() {
   link_attrs.push_back(std::make_pair(LinkAttribute::kLinkLinkType, 0));
   if (findLinkInfo(cpu_agents_[0].fine_grain_pool, &link_attrs)) {
     isXgmi_ = (link_attrs[0].second == HSA_AMD_LINK_INFO_TYPE_XGMI);
+    // findLinkInfo stores -1 when there are zero hops. kLinkHopCount is a
+    // NUMA-distance estimate and is 0 when that distance is below one hop.
+    const bool cpu_link = link_attrs[0].second >= 0;
+    info_.largeBar_ = ROC_ENABLE_LARGE_BAR && cpu_link && !isAPU_;
+  } else {
+    info_.largeBar_ = false;
   }
 
   preferred_numa_node_ = index;
@@ -644,6 +661,10 @@ bool Device::create() {
     return false;
   }
 
+  // Query before Settings::create() since the threshold selection depends on it,
+  // and before setupCpuAgent() so large BAR can exclude APUs.
+  isAPU_ = agentIsAPU(bkendDevice_);
+
   setupCpuAgent();
 
   // Get Agent HDP Flush Register Memory
@@ -664,7 +685,7 @@ bool Device::create() {
   settings_ = hsaSettings;
   if (!hsaSettings || !hsaSettings->create((agent_profile_ == HSA_PROFILE_FULL), *isa,
                                            isa->xnack() == amd::Isa::Feature::Enabled, coop_groups,
-                                           isXgmi_)) {
+                                           isXgmi_, isAPU_)) {
     LogPrintfError("Unable to create settings for HSA device %s (PCI ID %x)", agent_name,
                    pciDeviceId_);
     return false;
@@ -845,14 +866,15 @@ hsa_status_t Device::iterateGpuMemoryPoolCallback(hsa_amd_memory_pool_t pool, vo
         } else if ((global_flag & HSA_REGION_GLOBAL_FLAG_COARSE_GRAINED) != 0) {
           dev->gpuvm_segment_ = pool;
 
-          // If cpu agent cannot access this pool, the device does not support large bar.
+          // WSL/Windows does not report CPU link hops the way KFD does. CPU
+          // access to this pool is the large-BAR signal there. An APU can
+          // access the pool because the memory is shared, so that stays false.
           hsa_amd_memory_pool_access_t tmp{};
           Hsa::agent_memory_pool_get_info(dev->cpu_agent_info_->agent, pool,
                                           HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS, &tmp);
-
           if (tmp == HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED) {
             dev->info_.largeBar_ = false;
-          } else {
+          } else if (!dev->isAPU_) {
             dev->info_.largeBar_ = ROC_ENABLE_LARGE_BAR;
           }
 
@@ -1228,6 +1250,41 @@ bool Device::populateOCLDeviceConstants() {
 
   assert(group_segment_.handle != 0);
 
+  struct NamedPool {
+    hsa_amd_memory_pool_t pool;
+    const char* name;
+  };
+  const char* signal_pool_name = "none (host)";
+  // ROCr reports the device pools it accepts for signals; a ROCr without the query reports none
+  for (const NamedPool& candidate :
+       {NamedPool{gpu_ext_fine_grained_segment_, "device extended fine-grained"},
+        NamedPool{gpuvm_segment_, "device coarse-grained"},
+        NamedPool{gpu_fine_grained_segment_, "device fine-grained"}}) {
+    bool signal_capable = false;
+    if ((candidate.pool.handle != 0) &&
+        (Hsa::memory_pool_get_info(candidate.pool, static_cast<hsa_amd_memory_pool_info_t>(
+                                                       HSA_AMD_MEMORY_POOL_INFO_SIGNAL_CAPABLE),
+                                   &signal_capable) == HSA_STATUS_SUCCESS) &&
+        signal_capable) {
+      device_signal_pool_ = candidate.pool;
+      signal_pool_name = candidate.name;
+      break;
+    }
+  }
+  // The host writes these signals through the BAR. A profiler tool's host atomics on them are not
+  // atomic over PCIe, and its reads after destroy hit an unmapped batch arena.
+  const bool tool_attached = amd::activity_prof::tool_attached.load(std::memory_order_relaxed);
+  graph_device_signals_ = DEBUG_CLR_GRAPH_DEV_SIGNALS && info_.largeBar_ &&
+                          (device_signal_pool_.handle != 0) && !tool_attached;
+  ClPrint(amd::LOG_INFO, amd::LOG_INIT,
+          "Signal pool: %s. Device memory: graph signals %d, AQL rings %d "
+          "(profiler tool: %d)",
+          signal_pool_name, graph_device_signals_, AqlRingsInDeviceMemory(), tool_attached);
+  // Left true by a runtime without the query, since flushing is always correct
+  Hsa::agent_get_info(bkendDevice_,
+                      static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH),
+                      &pcie_stores_need_flush_);
+
   for (auto agent : gpu_agents_) {
     if (agent.handle != bkendDevice_.handle) {
       hsa_status_t err;
@@ -1282,16 +1339,7 @@ bool Device::populateOCLDeviceConstants() {
 
   info_.maxWorkItemDimensions_ = 3;
 
-  uint8_t memory_properties[8];
-  // Get the memory property from ROCr.
-  if (HSA_STATUS_SUCCESS !=
-      Hsa::agent_get_info(bkendDevice_, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MEMORY_PROPERTIES,
-                         memory_properties)) {
-    LogError("HSA_AGENT_INFO_AMD_MEMORY_PROPERTIES query failed");
-  }
-
-  // Check if the device is APU
-  if (hsa_flag_isset64(memory_properties, HSA_AMD_MEMORY_PROPERTY_AGENT_IS_APU)) {
+  if (isAPU_) {
     info_.hostUnifiedMemory_ = 1;
   }
 
@@ -1443,12 +1491,12 @@ bool Device::populateOCLDeviceConstants() {
     info_.version_ =
         "OpenCL " /*OPENCL_VERSION_STR*/
         "2.0"
-        " ";
+        " " AMD_PLATFORM_INFO;
   } else {
     info_.version_ =
         "OpenCL " /*OPENCL_VERSION_STR*/
         "1.2"
-        " ";
+        " " AMD_PLATFORM_INFO;
   }
 
   info_.builtInKernels_ = "";
@@ -1732,6 +1780,22 @@ bool Device::populateOCLDeviceConstants() {
       (amd::device::getValueFromIsaMeta(isaName, "AddressableNumSGPRs", sgprValue))
       ? (atoi(sgprValue.c_str()))
       : 0;
+
+  std::string sgprAllocGranule, trapHandlerEnabled;
+  info_.sgprAllocGranularity_ =
+      amd::device::getValueFromIsaMeta(isaName, "SGPRAllocGranule", sgprAllocGranule)
+      ? atoi(sgprAllocGranule.c_str())
+      : 0;
+  // Comgr reports whether a trap handler is present, but not the size of the
+  // SGPR block it reserves per wave, which is arch-independent.
+  constexpr uint32_t kTrapNumSgprs = 16;  // LLVM IsaInfo::TRAP_NUM_SGPRS
+  info_.sgprTrapHandlerReserve_ =
+      (amd::device::getValueFromIsaMeta(isaName, "TrapHandlerEnabled", trapHandlerEnabled) &&
+       atoi(trapHandlerEnabled.c_str()) != 0)
+      ? kTrapNumSgprs
+      : 0;
+  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "sgprAllocGranule=%u, sgprTrapHandlerReserve=%u",
+          info_.sgprAllocGranularity_, info_.sgprTrapHandlerReserve_);
   std::string imageSupport;
   if (amd::device::getValueFromIsaMeta(isaName, "ImageSupport", imageSupport)) {
     info_.imageSupport_ =
@@ -2104,7 +2168,12 @@ Memory* Device::getRocMemory(amd::Memory* mem) const {
 }
 
 // ================================================================================================
-device::Memory* Device::createMemory(amd::Memory& owner) const {
+device::Memory* Device::createMemory(
+    amd::Memory& owner, amd::Memory::ErrorCode* errorCode) const {
+  if (errorCode != nullptr) {
+    *errorCode = amd::Memory::kErrorUnknown;
+  }
+
   roc::Memory* memory = nullptr;
   if (owner.asBuffer()) {
     memory = new roc::Buffer(*this, owner);
@@ -2118,7 +2187,7 @@ device::Memory* Device::createMemory(amd::Memory& owner) const {
     return nullptr;
   }
 
-  bool result = memory->create();
+  bool result = memory->create(false, errorCode);
 
   if (!result) {
     LogError("Failed creating memory");
@@ -2158,7 +2227,8 @@ device::Memory* Device::createMemory(amd::Memory& owner) const {
       return nullptr;
     }
 
-    if (devImageView != nullptr && !devImageView->createView(static_cast<roc::Image&>(*memory))) {
+    if (devImageView != nullptr &&
+        !devImageView->createView(static_cast<roc::Image&>(*memory), errorCode)) {
       LogError("[OCL] Fail to create device mem object for the view");
       delete devImageView;
       imageView->release();
@@ -2201,7 +2271,7 @@ device::Memory* Device::createMemory(amd::Memory& owner) const {
 device::Memory* Device::createMemory(size_t size, size_t alignment) const {
   auto buffer = new roc::Buffer(*this, size);
   static constexpr bool LocalAlloc = true;
-  if ((buffer == nullptr) || !buffer->create(LocalAlloc)) {
+  if ((buffer == nullptr) || !buffer->create(LocalAlloc, nullptr)) {
     LogError("Couldn't allocate memory on device!");
     return nullptr;
   }
@@ -2383,10 +2453,16 @@ uint64_t Device::deviceVmemAlloc(size_t size, uint64_t flags) const {
     return 0;
   }
 
+  uint64_t hsa_mem_flags = 0;
+  // gfx120x does not support extended-scope fine-grained memory. So explicitly force the uncached flag.
+  if (uncached && isa().versionMajor() == 12 && isa().versionMinor() == 0) {
+    hsa_mem_flags |= HSA_AMD_MEMORY_POOL_UNCACHED_FLAG;
+  }
+
   hsa_amd_vmem_alloc_handle_t hsa_vmem_handle{};
 
   // We only allow pinned memory at this time.
-  hsa_status_t hsa_status = Hsa::vmem_handle_create(pool, size, MEMORY_TYPE_PINNED, 0,
+  hsa_status_t hsa_status = Hsa::vmem_handle_create(pool, size, MEMORY_TYPE_PINNED, hsa_mem_flags,
                                                     &hsa_vmem_handle);
 
   if (hsa_status != HSA_STATUS_SUCCESS) {
@@ -2413,21 +2489,28 @@ uint64_t Device::hostVmemAlloc(size_t size, uint64_t flags, int numaNode) const 
     return 0;
   }
 
-  // numaNode < 0 (HostNumaCurrent) resolves to the calling thread's current node.
+  // Resolve the backing CPU agent.
+  //   -2 (Host)            -> default CPU agent.
+  //   -1 (HostNumaCurrent) -> current node
+  //   >= 0 (HostNuma)      -> that node
+  const AgentInfo* agentInfo = cpu_agent_info_;
   int node = numaNode;
-  if (node < 0) {
+  if (numaNode == -1) {
     node = static_cast<int>(numa::getCurrentNumaNode());
   }
-  if (node < 0 || static_cast<size_t>(node) >= cpu_agents_.size()) {
-    LogPrintfError("hostVmemAlloc: invalid NUMA node %d (cpu agents: %zu)", numaNode,
+  if (node >= static_cast<int>(cpu_agents_.size())) {
+    LogPrintfError("hostVmemAlloc: invalid NUMA node %d (cpu agents: %zu)", node,
                    cpu_agents_.size());
     return 0;
+  }
+  if (node >= 0) {
+    agentInfo = &cpu_agents_[node];
   }
 
   // PHYMEM: ROCCLR_MEM_HSA_UNCACHED is passed as HSA_AMD_MEMORY_POOL_UNCACHED_FLAG in |flags|.
   const bool uncached = (flags & HSA_AMD_MEMORY_POOL_UNCACHED_FLAG) != 0;
   const MemorySegment mem_seg = uncached ? kUncachedAtomics : kAtomics;
-  hsa_amd_memory_pool_t pool = getHostMemoryPool(mem_seg, &cpu_agents_[node]);
+  hsa_amd_memory_pool_t pool = getHostMemoryPool(mem_seg, agentInfo);
   if (pool.handle == 0) {
     LogPrintfError("hostVmemAlloc: no host memory pool for NUMA node %d", node);
     return 0;
@@ -2442,6 +2525,54 @@ uint64_t Device::hostVmemAlloc(size_t size, uint64_t flags, int numaNode) const 
   }
 
   return hsa_vmem_handle.handle;
+}
+
+bool Device::getVmmAllocInfo(amd::Memory& amd_mem_obj, amd::Device::VmmLocationType* location_type,
+                             int* device_id, size_t* size) const {
+  if (location_type == nullptr || device_id == nullptr || size == nullptr) return false;
+
+  const uint64_t hsa_handle = amd_mem_obj.getUserData().hsa_handle;
+  if (hsa_handle == 0) return false;
+
+  // Enhancement entry point: an older ROCr does not export it. Report failure so
+  // the caller keeps its legacy device/size-zero behaviour.
+  if (!Hsa::vmem_get_vmem_info_available()) return false;
+
+  hsa_amd_vmem_alloc_handle_t handle{hsa_handle};
+  hsa_amd_vmem_handle_info_t info{};
+  info.size = sizeof(info);
+
+  // Fails for an import whose placement ROCr could not recover, which is the
+  // case the caller's fallback exists for.
+  if (Hsa::vmem_get_vmem_info(handle, &info) != HSA_STATUS_SUCCESS || info.agent.handle == 0) {
+    return false;
+  }
+
+  // Ask the owning agent what it is. The allocation's pool is deliberately not
+  // consulted: for an imported handle it names a placement class, not the pool
+  // the exporter allocated from.
+  hsa_device_type_t dev_type{};
+  if (Hsa::agent_get_info(info.agent, HSA_AGENT_INFO_DEVICE, &dev_type) != HSA_STATUS_SUCCESS) {
+    return false;
+  }
+
+  *size = info.alloc_size;
+  *location_type = (dev_type == HSA_DEVICE_TYPE_CPU) ? amd::Device::VmmLocationType::kHost
+                                                     : amd::Device::VmmLocationType::kDevice;
+
+  // Host memory is not device-indexed. For device memory report the owning GPU
+  // rather than whichever device the importing thread happens to have current.
+  *device_id = static_cast<int>(amd::InvalidDeviceId);
+  if (*location_type == amd::Device::VmmLocationType::kDevice) {
+    for (auto& device : devices()) {
+      if (static_cast<Device*>(device)->getBackendDevice().handle == info.agent.handle) {
+        *device_id = static_cast<int>(device->index());
+        break;
+      }
+    }
+    if (*device_id == static_cast<int>(amd::InvalidDeviceId)) return false;
+  }
+  return true;
 }
 
 void* Device::reserveMemory(size_t size, size_t alignment) const {
@@ -2486,7 +2617,9 @@ void* Device::deviceLocalAlloc(size_t size, const AllocationFlags& flags, bool a
   if (flags.executable_) {
     hsa_mem_flags |= HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG;
   }
-  if (flags.uncached_ && isa().versionMajor() == 12) {
+
+  // gfx120x does not support extended-scope fine-grained memory. So explicitly force the uncached flag.
+  if (flags.uncached_ && isa().versionMajor() == 12 && isa().versionMinor() == 0) {
     hsa_mem_flags |= HSA_AMD_MEMORY_POOL_UNCACHED_FLAG;
   }
 
@@ -3492,8 +3625,7 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
   // by default on gfx94x/gfx125x, overridable via DEBUG_CLR_AQL_DEV_QUEUE):
   //   false - system memory
   //   true  - ring buffer in device memory if Large BAR is available.
-  const bool device_mem_ring_buf =
-      settings().aql_device_ring_buf_ && info_.largeBar_ && Hsa::amd_queue_create_available();
+  const bool device_mem_ring_buf = AqlRingsInDeviceMemory();
   hsa_amd_queue_create_desc_t desc = {};
   desc.version = HSA_AMD_QUEUE_CREATE_DESC_VERSION;
   desc.engine_type = HSA_AMD_QUEUE_ENGINE_COMPUTE;
@@ -3573,8 +3705,12 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
     QueueExtras extras;
     extras.deviceMemRingBuf = (desc.flags & HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF) != 0;
     extras.largestAqlBarrierBitSlot = std::make_shared<std::atomic<uint64_t>>(kInvalidAqlSlot);
-    hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_RING_BUFFER,
-                           &extras.metadataRingBuffer);
+    // Leaving the ring base null makes MetaDataPreloader::HasMetadataQueue() false,
+    // which is the single gate every metadata path already checks.
+    if (DEBUG_CLR_ENABLE_KDQ) {
+      hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_RING_BUFFER,
+                             &extras.metadataRingBuffer);
+    }
     if (DEBUG_CLR_DIRECT_DOORBELL) {
       uint64_t db_id = 0;
       if (hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_DOORBELL_ID, &db_id) ==
@@ -3917,8 +4053,7 @@ hsa_status_t Device::BackendErrorCallBackHandler(const hsa_amd_event_t* event, v
             std::string kernelName = vgpu->AnalyzeAqlQueue();
             const char* kname = kernelName.c_str();
             ClPrint(amd::LOG_NONE, amd::LOG_ALWAYS,
-                    "Memory Fault Error [%sGPU index: %u, "
-                    "faulting addr: 0x%" PRIx64 ", kernel: %s]",
+                    "[%sGPU index: %u, faulting addr: 0x%" PRIx64 ", kernel: %s]",
                     host_tag.c_str(), roc_dev->index(),
                     event->memory_fault.virtual_address, kname);
           }
@@ -4008,20 +4143,51 @@ void Device::RetainGlobalSignal(void* signal) const {
 }
 
 // ================================================================================================
-bool Device::CreateHwEvents(int count, std::vector<void*>& hw_events) const {
-  hw_events.resize(count, nullptr);
-  for (int i = 0; i < count; ++i) {
-    ProfilingSignal* ps = new ProfilingSignal();
+bool Device::CreateHwEvents(int count, bool batched, std::vector<void*>& hw_events) const {
+  std::vector<hsa_signal_t> signals(count);
+  bool in_device_memory = false;
+  // An unpooled set is created per launch, where a device batch would cost 86-158 us
+  if (!CreateSignals(count, 1, HSA_AMD_SIGNAL_AMD_GPU_ONLY, batched,
+                     batched && graph_device_signals_, signals.data(), in_device_memory)) {
+    hw_events.assign(count, nullptr);
+    return false;
+  }
+  hw_events.resize(count);
+  for (int event_idx = 0; event_idx < count; ++event_idx) {
+    ProfilingSignal* profiling_signal = new ProfilingSignal();
+    profiling_signal->signal_ = signals[event_idx];
+    profiling_signal->in_device_memory_ = in_device_memory;
+    hw_events[event_idx] = profiling_signal;
+  }
+  return true;
+}
+
+// ================================================================================================
+bool Device::CreateSignals(uint32_t count, hsa_signal_value_t initial_value, uint64_t attributes,
+                           bool batched, bool device_memory, hsa_signal_t* signals,
+                           bool& in_device_memory) const {
+  in_device_memory = false;
+  // Device memory is only reachable through a batch
+  if (batched || device_memory) {
+    std::vector<hsa_signal_value_t> initial_values(count, initial_value);
+    const hsa_amd_memory_pool_t pool =
+        device_memory ? device_signal_pool_ : getHostMemoryPool(kAtomics);
+    hsa_amd_signal_batch_t batch;
+    if (HSA_STATUS_SUCCESS == Hsa::signal_batch_create(count, initial_values.data(), 0, nullptr,
+                                                       attributes, pool, &batch, signals)) {
+      Hsa::signal_batch_destroy(batch);
+      in_device_memory = device_memory;
+      return true;
+    }
+  }
+  for (uint32_t signal_idx = 0; signal_idx < count; ++signal_idx) {
     if (HSA_STATUS_SUCCESS !=
-        Hsa::signal_create(1, 0, nullptr, HSA_AMD_SIGNAL_AMD_GPU_ONLY, &ps->signal_)) {
-      delete ps;
-      for (int j = 0; j < i; ++j) {
-        reinterpret_cast<ProfilingSignal*>(hw_events[j])->release();
-        hw_events[j] = nullptr;
+        Hsa::signal_create(initial_value, 0, nullptr, attributes, &signals[signal_idx])) {
+      for (uint32_t created_idx = 0; created_idx < signal_idx; ++created_idx) {
+        Hsa::signal_destroy(signals[created_idx]);
       }
       return false;
     }
-    hw_events[i] = ps;
   }
   return true;
 }
@@ -4032,18 +4198,48 @@ void Device::DestroyHwEvent(void* hw_event) const {
 }
 
 // ================================================================================================
+void Device::FlushSignalStores(hsa_signal_t last_stored, hsa_signal_value_t value) const {
+  if (!pcie_stores_need_flush_) {
+    return;
+  }
+  volatile hsa_signal_value_t* last_value =
+      &reinterpret_cast<amd_signal_t*>(last_stored.handle)->value;
+  amd::nontemporalStoreFence();
+  *last_value = value;
+#if defined(ATI_ARCH_X86)
+  _mm_mfence();
+#else
+  std::atomic_thread_fence(std::memory_order_seq_cst);
+#endif
+  (void)*last_value;
+}
+
+// ================================================================================================
 void Device::ResetHwEvents(const std::vector<void*>& hw_events) const {
   // Re-arm pooled signals for reuse by a new graph launch. The caller
   // guarantees these signals belong to a completed (drained) launch, so this
   // cannot corrupt an in-flight launch. Avoids signal_create/destroy on the
   // hot launch path.
+  hsa_signal_t last_stored{0};
   for (void* hw_event : hw_events) {
     if (hw_event != nullptr) {
       auto* ps = reinterpret_cast<ProfilingSignal*>(hw_event);
-      Hsa::signal_silent_store_relaxed(ps->signal_, 1);
+      if (ps->in_device_memory_) {
+        reinterpret_cast<amd_signal_t*>(ps->signal_.handle)->value = kInitSignalValueOne;
+        last_stored = ps->signal_;
+      } else {
+        Hsa::signal_silent_store_relaxed(ps->signal_, 1);
+      }
       ps->flags_.done_ = true;
       ps->ResetCachedTiming();
     }
+  }
+  // Bulk flush of HDP. The packets that wait on these signals go to rings of this device, and a
+  // device-memory ring receives them through the same BAR after these stores, in order. Every
+  // ring here comes from acquireQueue, which requests the placement AqlRingsInDeviceMemory()
+  // reports; ROCr fails that request rather than fall back to a system-memory ring.
+  if (last_stored.handle != 0 && !AqlRingsInDeviceMemory()) {
+    FlushSignalStores(last_stored, kInitSignalValueOne);
   }
 }
 
@@ -4061,17 +4257,37 @@ void Device::QuiesceHwEvents(const std::vector<void*>& hw_events) const {
 }
 
 // ================================================================================================
-uint8_t* Device::CreateBarrierPacket() const {
+uint8_t* Device::CreateBarrierPacket(int num_deps) const {
   static constexpr uint16_t kBarrierNopHeader =
       (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE) |
       (1 << HSA_PACKET_HEADER_BARRIER) |
       (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
       (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE);
 
+  static constexpr uint16_t kBarrierValueNopHeader =
+      (HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE) |
+      (1 << HSA_PACKET_HEADER_BARRIER) |
+      (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
+      (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE);
+
   static_assert(sizeof(hsa_barrier_and_packet_t) == 64, "AQL packet size must be 64 bytes");
+  static_assert(sizeof(hsa_amd_barrier_value_packet_t) == 64, "AQL packet size must be 64 bytes");
+
   auto* raw = new uint8_t[64]();
-  auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);
-  pkt->header = kBarrierNopHeader;
+  if (num_deps == 1 && settings().barrier_value_packet_) {
+    auto* pkt = reinterpret_cast<hsa_amd_barrier_value_packet_t*>(raw);
+    pkt->header.header = kBarrierValueNopHeader;
+    pkt->header.AmdFormat = HSA_AMD_PACKET_TYPE_BARRIER_VALUE;
+    // The awaited signal is a completion signal: it rests armed at 1 and the GPU
+    // decrements it to 0 when the producer finishes. So "producer done" is
+    // (signal & mask) < 1. ApplyHwEventPatches fills in the signal handle.
+    pkt->value = kInitSignalValueOne;
+    pkt->mask = std::numeric_limits<int64_t>::max();
+    pkt->cond = HSA_SIGNAL_CONDITION_LT;
+  } else {
+    auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);
+    pkt->header = kBarrierNopHeader;
+  }
   return raw;
 }
 
@@ -4095,28 +4311,13 @@ void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
       auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);
       pkt->completion_signal = sig;
 
-      // Prepare this signal for profiling: mark it as active and classify
-      // the packet type so checkGpuTime → addTimestamps only fires for
-      // kernel dispatches (not synthetic barriers).
+      // Prepare this signal for profiling. The dispatch path assigns this
+      // launch's slot only when the actual carrier is a kernel dispatch.
       ps->flags_.done_ = false;
-      // Record the queue this patched dispatch signal runs on (resolved from the
-      // owning segment's stream at launch) so profiling attributes it to the
-      // right stream rather than the graph launch stream.
-      ps->queue_index_ = patch.queue_index;
-      uint16_t hdr;
-      memcpy(&hdr, patch.packet, sizeof(hdr));
-      uint8_t pktType = hdr & ((1 << HSA_PACKET_HEADER_WIDTH_TYPE) - 1);
-      // A kernel dispatch could be a vendor-specific ext-kernel-dispatch
-      // packet, identified by amd_format (byte 2).  Classify it as a dispatch so
-      // the patched last-node completion signal contributes its GPU timing like
-      // every other graph kernel node.
-      const uint8_t amdFormat = patch.packet[2];
-      ps->flags_.isPacketDispatch_ =
-          (pktType == HSA_PACKET_TYPE_KERNEL_DISPATCH) ||
-          (pktType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
-           amdFormat == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH);
+      ps->dispatch_slot_ = ProfilingSignal::kNoDispatchSlot;
     } else {
-      // dep_slot >= 0: patch a barrier's dependency signal slot (cross-segment wait)
+      // dep_slot >= 0: patch a barrier's dependency signal slot (cross-segment wait).
+      // Slot 0 also covers a barrier-value packet: its signal aliases dep_signal[0].
       auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);
       pkt->dep_signal[patch.dep_slot] = sig;
     }
@@ -4214,43 +4415,7 @@ uint32_t Device::SdmaEngineAllocator::AllocateEngine(VirtualGPU* vgpu, HwQueueEn
                               ? device_.maxSdmaReadMask_
                               : device_.maxSdmaWriteMask_;
 
-  // Simple round-robin path if all engines have equal bandwidth
-  // Disabled by default - use preferred engine logic for current GPUs
-  constexpr bool kUseSimpleRR = false;
-
-  if (kUseSimpleRR) {
-    // Simple round-robin: just cycle through valid engines
-    // This will be enabled for future GPUs where engine selection doesn't matter
-    if (validEngineMask == 0) {
-      ClPrint(amd::LOG_WARNING, amd::LOG_COPY,
-              "No valid SDMA engines for VirtualGPU %p", vgpu);
-      return 0;
-    }
-
-    // Cycle through bit positions, find next valid engine
-    uint32_t start_bit = next_rr_engine_.fetch_add(1, std::memory_order_relaxed);
-    uint32_t selected_mask = 0;
-
-    // Try up to 32 positions to find a valid engine
-    for (uint32_t i = 0; i < 32; ++i) {
-      uint32_t bit = (start_bit + i) % 32;
-      uint32_t mask = 1u << bit;
-      if (validEngineMask & mask) {
-        selected_mask = mask;
-        break;
-      }
-    }
-
-    vgpu_to_engine_[vgpu] = selected_mask;
-
-    ClPrint(amd::LOG_INFO, amd::LOG_COPY,
-            "Assigned SDMA engine (simple RR) to VirtualGPU %p: mask=0x%x, engine_type=%d",
-            vgpu, selected_mask, engine_type);
-
-    return selected_mask;
-  }
-
-  // Current path: Query HSA for engine status and preferences
+  // Query HSA for engine status and preferences
   uint32_t freeEngineMask = 0;
   uint32_t preferredMask = 0;
   hsa_status_t status = HSA_STATUS_SUCCESS;
@@ -4260,6 +4425,22 @@ uint32_t Device::SdmaEngineAllocator::AllocateEngine(VirtualGPU* vgpu, HwQueueEn
   if (status == HSA_STATUS_SUCCESS) {
     // Query preferred (high-bandwidth) engines
     status = Hsa::memory_get_preferred_copy_engine(peerAgent, copyAgent, &preferredMask);
+  }
+
+  const bool is_inter_gpu = (engine_type == HwQueueEngine::SdmaP2P);
+
+  // maxSdmaWriteMask_ describes CPU<->GPU traffic and includes the H2D/D2H blit
+  // slots, which ROCr refuses to drive a P2P copy on. The engines it does accept
+  // for an inter-GPU copy are the ones reported for the peer direction, so use
+  // those as the valid set instead. That query only lists engines which are idle
+  // at the time of the call, so keep the union per peer to stay correct once all
+  // of them are busy.
+  if (is_inter_gpu) {
+    uint32_t& peer_engine_mask = peer_engine_mask_[peerAgent.handle];
+    peer_engine_mask |= freeEngineMask;
+    if (peer_engine_mask != 0) {
+      validEngineMask = peer_engine_mask;
+    }
   }
 
   // Constrain to valid engines
@@ -4275,8 +4456,6 @@ uint32_t Device::SdmaEngineAllocator::AllocateEngine(VirtualGPU* vgpu, HwQueueEn
   uint32_t allocated_mask = 0;
 
   // For inter-GPU copies, strongly prefer the recommended engines
-  bool is_inter_gpu = (engine_type == HwQueueEngine::SdmaP2P);
-
   if (is_inter_gpu && (preferredMask != 0)) {
     // Inter-GPU: prioritize preferredMask, even if engines are already allocated
     candidate_mask = validEngineMask & preferredMask;
@@ -4515,10 +4694,8 @@ void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data) {
 }
 
 // ================================================================================================
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
 device::UriLocator* Device::createUriLocator() const { return new roc::UriLocator(); }
-#endif
 #endif
 
 // ================================================================================================

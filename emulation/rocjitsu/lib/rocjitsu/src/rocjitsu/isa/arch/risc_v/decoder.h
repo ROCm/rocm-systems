@@ -4,8 +4,10 @@
 #ifndef ROCJITSU_ISA_RISC_V_DECODER_H_
 #define ROCJITSU_ISA_RISC_V_DECODER_H_
 
+#include "rocjitsu/isa/decode_result.h"
 #include "rocjitsu/isa/instruction.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 
@@ -16,9 +18,15 @@ using DecodeFn = std::unique_ptr<Instruction> (*)(uint32_t);
 
 class Decoder {
 public:
+  static constexpr std::size_t kMaxInstructionWords = 1;
   static std::unique_ptr<Instruction> decode(uint32_t instr);
-  static std::unique_ptr<Instruction> decode(const uint32_t *instr) {
-    return instr == nullptr ? nullptr : decode(*instr);
+  static DecodeResult decode(const uint32_t *instr, const DecodeErrorEmitter &emit_error) {
+    if (instr == nullptr)
+      return emit_error.emit() << "Null instruction encoding";
+    auto decoded = decode(*instr);
+    if (!decoded)
+      return emit_error.emit() << "Invalid instruction opcode";
+    return decoded;
   }
 
 private:

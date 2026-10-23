@@ -158,8 +158,9 @@ class GlobalLoadD16U8Vglobal : public Vglobal {
 public:
   GlobalLoadD16U8Vglobal(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
-  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0x3;
+  }
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -170,8 +171,9 @@ class GlobalLoadD16I8Vglobal : public Vglobal {
 public:
   GlobalLoadD16I8Vglobal(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
-  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0x3;
+  }
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -182,8 +184,9 @@ class GlobalLoadD16B16Vglobal : public Vglobal {
 public:
   GlobalLoadD16B16Vglobal(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
-  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0x3;
+  }
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -194,8 +197,9 @@ class GlobalLoadD16HiU8Vglobal : public Vglobal {
 public:
   GlobalLoadD16HiU8Vglobal(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
-  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0xc;
+  }
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -206,8 +210,9 @@ class GlobalLoadD16HiI8Vglobal : public Vglobal {
 public:
   GlobalLoadD16HiI8Vglobal(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
-  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0xc;
+  }
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -218,8 +223,9 @@ class GlobalLoadD16HiB16Vglobal : public Vglobal {
 public:
   GlobalLoadD16HiB16Vglobal(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
-  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0xc;
+  }
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -646,6 +652,9 @@ class GlobalLoadBlockVglobal : public Vglobal {
 public:
   GlobalLoadBlockVglobal(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.block_data = &vdst;
+  }
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -657,6 +666,9 @@ class GlobalStoreBlockVglobal : public Vglobal {
 public:
   GlobalStoreBlockVglobal(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.block_data = &vsrc;
+  }
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
@@ -692,6 +704,9 @@ class GlobalLoadTr16B128Vglobal : public Vglobal {
 public:
   GlobalLoadTr16B128Vglobal(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.exec_all_if_nonzero = true;
+  }
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -702,6 +717,9 @@ class GlobalLoadTr8B64Vglobal : public Vglobal {
 public:
   GlobalLoadTr8B64Vglobal(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.exec_all_if_nonzero = true;
+  }
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -968,6 +986,9 @@ class GlobalLoadTr4B64Vglobal : public Vglobal {
 public:
   GlobalLoadTr4B64Vglobal(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.exec_all_if_nonzero = true;
+  }
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -978,6 +999,9 @@ class GlobalLoadTr6B96Vglobal : public Vglobal {
 public:
   GlobalLoadTr6B96Vglobal(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.exec_all_if_nonzero = true;
+  }
   Operand vdst;
   Operand vaddr;
   Operand saddr;

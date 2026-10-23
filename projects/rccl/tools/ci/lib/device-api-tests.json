@@ -1,14 +1,28 @@
 {
   "_comment": [
-    "Device-API benchmark matrix for run-device-api-ci.sh.",
+    "GIN device-API benchmark matrix for run-device-api-ci.sh.",
     "Add a mode by appending a suites entry. Each suite runs every bin as:",
-    "  mpirun -np $NP <base_env + suite env> -x LD_LIBRARY_PATH ./build/<bin> $bench_args <args>",
+    "  mpirun -np $NP <base_env + suite env> -x LD_LIBRARY_PATH ${RCCL_TESTS_BIN_DIR}/<bin> $bench_args <args>",
+    "RCCL_TESTS_BIN_DIR is the absolute cmake build dir (.ci-out/rccl-tests-build",
+    "for this job). gin-d3 and gin-d4 are the host-proxy device API (NCCL_GIN_TYPE=2).",
+    "Anvil SDMA (NCCL_GIN_TYPE=7), including all_gather_perf -D 3, lives in",
+    "gin-tests.json. Symmetric AllReduce/AllGather/ReduceScatter (-R 2) and LSA",
+    "all_reduce_perf (-D 1/-D 2) stay in device-api-nongin-tests.json:",
+    "all_reduce_perf does not build under ENABLE_ROCSHMEM_GIN.",
+    "After the matrix, run-device-api-ci.sh runs pytest test/test_AllToAllDevtime.py",
+    "(GIN -D 3 device-timing smoke: -B 1/2 and -B 2 -H 1; ENABLE_DEVICE_API build).",
     "bench_args: common bench flags | base_env: -x on every run",
     "debug_env:  -x added only when RCCL_CI_DEBUG=1",
     "  {LOGDIR} in debug_env is replaced by the runner with the per-job debug dir,",
     "  so NCCL_DEBUG_FILE writes per-rank logs there instead of flooding stdout.",
     "suites:     [ { name, bins:[...], args, env:[...] (optional) } ]",
-    "Switched from YAML to JSON because PyYAML is not installed on the CI hosts."
+    "Switched from YAML to JSON because PyYAML is not installed on the CI hosts.",
+    "gin-d3-nicfusion names the NICs it merges instead of using",
+    "  NCCL_NET_MERGE_LEVEL: the runner only collects exit codes, and a level",
+    "  that happens not to fuse would leave the suite passing while testing",
+    "  nothing. NCCL_NET_FORCE_MERGE fails communicator setup when its names do",
+    "  not resolve, so the suite either fuses or goes red. The names below are",
+    "  this cluster's; update them if the lane moves."
   ],
 
   "bench_args": "-b 8 -e 1G -f 2 -g 1",
@@ -18,21 +32,6 @@
   "debug_env": ["NCCL_DEBUG=INFO", "NCCL_DEBUG_SUBSYS=INIT,NET", "NCCL_DEBUG_FILE={LOGDIR}/nccl-debug.%h.%p.log"],
 
   "suites": [
-    {
-      "name": "symmetric",
-      "bins": ["broadcast_perf", "reduce_perf", "sendrecv_perf", "scatter_perf", "gather_perf"],
-      "args": "-R 2"
-    },
-    {
-      "name": "lsa-d1",
-      "bins": ["all_reduce_perf"],
-      "args": "-R 2 -D 1"
-    },
-    {
-      "name": "lsa-d2",
-      "bins": ["all_reduce_perf"],
-      "args": "-R 2 -D 2"
-    },
     {
       "name": "gin-d3",
       "bins": ["alltoall_perf"],
@@ -44,6 +43,12 @@
       "bins": ["alltoall_perf"],
       "args": "-R 2 -D 4",
       "env": ["NCCL_DMABUF_ENABLE=1", "NCCL_GIN_TYPE=2", "HSA_NO_SCRATCH_RECLAIM=1", "NCCL_ENV_PLUGIN=none", "RCCL_ENABLE_INTRANET=1"]
+    },
+    {
+      "name": "gin-d3-nicfusion",
+      "bins": ["alltoall_perf"],
+      "args": "-R 2 -D 3",
+      "env": ["NCCL_DMABUF_ENABLE=1", "NCCL_GIN_TYPE=2", "HSA_NO_SCRATCH_RECLAIM=1", "NCCL_ENV_PLUGIN=none", "RCCL_ENABLE_INTRANET=1", "NCCL_IB_MERGE_NICS=1", "NCCL_NET_FORCE_MERGE=bnxt_re0,bnxt_re1;bnxt_re2,bnxt_re3;bnxt_re4,bnxt_re5;bnxt_re6,bnxt_re7"]
     }
   ]
 }

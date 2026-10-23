@@ -25,6 +25,7 @@
 #include <rocprofiler-sdk/hipfile/api_args.h>
 
 #include "fmt/core.h"
+#include "fmt/ranges.h"
 
 #include <type_traits>
 
@@ -393,6 +394,144 @@ ROCP_SDK_HIPFILE_FORMATTER(hipFileIOEvents_t,
                            v.status,
                            v.ret,
                            '}')
+
+ROCP_SDK_HIPFILE_FORMATTER(timespec, "{}tv_sec={}, tv_nsec={}{}", '{', v.tv_sec, v.tv_nsec, '}')
+
+#if HIPFILE_RUNTIME_API_TABLE_STEP_VERSION >= 1
+ROCP_SDK_HIPFILE_FORMATTER(hipFileOpCounter_t, "{}ok={}, err={}{}", '{', v.ok, v.err, '}')
+
+ROCP_SDK_HIPFILE_FORMATTER(
+    hipFileStatsLevel1_t,
+    "{}read_ops={}, write_ops={}, hdl_register_ops={}, hdl_deregister_ops={}, "
+    "buf_register_ops={}, buf_deregister_ops={}, read_bytes={}, write_bytes={}, "
+    "read_bw_bytes_per_sec={}, write_bw_bytes_per_sec={}, read_lat_avg_us={}, "
+    "write_lat_avg_us={}, read_ops_per_sec={}, write_ops_per_sec={}, read_lat_sum_us={}, "
+    "write_lat_sum_us={}, batch_submit_ops={}, batch_complete_ops={}, batch_setup_ops={}, "
+    "batch_cancel_ops={}, batch_destroy_ops={}, batch_enqueued_ops={}, "
+    "batch_posix_enqueued_ops={}, batch_processed_ops={}, batch_posix_processed_ops={}, "
+    "batch_nvfs_submit_ops={}, batch_p2p_submit_ops={}, batch_aio_submit_ops={}, "
+    "batch_iouring_submit_ops={}, batch_mixed_io_submit_ops={}, batch_total_submit_ops={}, "
+    "batch_read_bytes={}, batch_write_bytes={}, batch_read_bw_bytes={}, "
+    "batch_write_bw_bytes={}, batch_submit_lat_avg_us={}, batch_completion_lat_avg_us={}, "
+    "batch_submit_ops_per_sec={}, batch_complete_ops_per_sec={}, batch_submit_lat_sum_us={}, "
+    "batch_completion_lat_sum_us={}, last_batch_read_bytes={}, last_batch_write_bytes={}{}",
+    '{',
+    v.read_ops,
+    v.write_ops,
+    v.hdl_register_ops,
+    v.hdl_deregister_ops,
+    v.buf_register_ops,
+    v.buf_deregister_ops,
+    v.read_bytes,
+    v.write_bytes,
+    v.read_bw_bytes_per_sec,
+    v.write_bw_bytes_per_sec,
+    v.read_lat_avg_us,
+    v.write_lat_avg_us,
+    v.read_ops_per_sec,
+    v.write_ops_per_sec,
+    v.read_lat_sum_us,
+    v.write_lat_sum_us,
+    v.batch_submit_ops,
+    v.batch_complete_ops,
+    v.batch_setup_ops,
+    v.batch_cancel_ops,
+    v.batch_destroy_ops,
+    v.batch_enqueued_ops,
+    v.batch_posix_enqueued_ops,
+    v.batch_processed_ops,
+    v.batch_posix_processed_ops,
+    v.batch_nvfs_submit_ops,
+    v.batch_p2p_submit_ops,
+    v.batch_aio_submit_ops,
+    v.batch_iouring_submit_ops,
+    v.batch_mixed_io_submit_ops,
+    v.batch_total_submit_ops,
+    v.batch_read_bytes,
+    v.batch_write_bytes,
+    v.batch_read_bw_bytes,
+    v.batch_write_bw_bytes,
+    v.batch_submit_lat_avg_us,
+    v.batch_completion_lat_avg_us,
+    v.batch_submit_ops_per_sec,
+    v.batch_complete_ops_per_sec,
+    v.batch_submit_lat_sum_us,
+    v.batch_completion_lat_sum_us,
+    v.last_batch_read_bytes,
+    v.last_batch_write_bytes,
+    '}')
+
+ROCP_SDK_HIPFILE_FORMATTER(hipFileStatsLevel2_t,
+                           "{}basic={}, read_size_kb_hist=[{}], write_size_kb_hist=[{}]{}",
+                           '{',
+                           v.basic,
+                           fmt::join(v.read_size_kb_hist, v.read_size_kb_hist + 32, ", "),
+                           fmt::join(v.write_size_kb_hist, v.write_size_kb_hist + 32, ", "),
+                           '}')
+
+template <>
+struct formatter<hipFilePerGpuStats_t> : rocprofiler::hipfile::details::base_formatter
+{
+    template <typename Ctx>
+    auto format(const hipFilePerGpuStats_t& v, Ctx& ctx) const
+    {
+        auto out = fmt::format_to(ctx.out(), "{}uuid=[", '{');
+        for(size_t i = 0; i < HIPFILE_GPU_UUID_LEN; ++i)
+        {
+            out = fmt::format_to(
+                out, "{}{:02x}", (i > 0) ? ", " : "", static_cast<unsigned char>(v.uuid[i]));
+        }
+        return fmt::format_to(
+            out,
+            "], read_bytes={}, read_bw_bytes_per_sec={}, read_utilization={}, "
+            "read_duration_us={}, n_total_reads={}, n_p2p_reads={}, n_nvfs_reads={}, "
+            "n_posix_reads={}, n_unaligned_reads={}, n_dr_reads={}, n_sparse_regions={}, "
+            "n_inline_regions={}, n_reads_err={}, write_bytes={}, write_bw_bytes_per_sec={}, "
+            "write_utilization={}, write_duration_us={}, n_total_writes={}, n_p2p_writes={}, "
+            "n_nvfs_writes={}, n_posix_writes={}, n_unaligned_writes={}, n_dr_writes={}, "
+            "n_writes_err={}, n_mmap={}, n_mmap_ok={}, n_mmap_err={}, n_mmap_free={}, "
+            "reg_bytes={}{}",
+            v.read_bytes,
+            v.read_bw_bytes_per_sec,
+            v.read_utilization,
+            v.read_duration_us,
+            v.n_total_reads,
+            v.n_p2p_reads,
+            v.n_nvfs_reads,
+            v.n_posix_reads,
+            v.n_unaligned_reads,
+            v.n_dr_reads,
+            v.n_sparse_regions,
+            v.n_inline_regions,
+            v.n_reads_err,
+            v.write_bytes,
+            v.write_bw_bytes_per_sec,
+            v.write_utilization,
+            v.write_duration_us,
+            v.n_total_writes,
+            v.n_p2p_writes,
+            v.n_nvfs_writes,
+            v.n_posix_writes,
+            v.n_unaligned_writes,
+            v.n_dr_writes,
+            v.n_writes_err,
+            v.n_mmap,
+            v.n_mmap_ok,
+            v.n_mmap_err,
+            v.n_mmap_free,
+            v.reg_bytes,
+            '}');
+    }
+};
+
+ROCP_SDK_HIPFILE_FORMATTER(hipFileStatsLevel3_t,
+                           "{}detailed={}, num_gpus={}, per_gpu_stats=[{}]{}",
+                           '{',
+                           v.detailed,
+                           v.num_gpus,
+                           fmt::join(v.per_gpu_stats, v.per_gpu_stats + HIPFILE_MAX_GPUS, ", "),
+                           '}')
+#endif
 }  // namespace fmt
 
 #undef ROCP_SDK_HIPFILE_FORMAT_UNKNOWN

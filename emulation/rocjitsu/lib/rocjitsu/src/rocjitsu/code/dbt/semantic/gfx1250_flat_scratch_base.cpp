@@ -6,7 +6,7 @@
 
 #include "rocjitsu/code/dbt/semantic/gfx1250_flat_scratch_base.h"
 
-#include "rocjitsu/analysis/liveness.h"
+#include "rocjitsu/code/analysis/liveness.h"
 #include "rocjitsu/code/dbt/hazard_tracker.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
@@ -369,6 +369,30 @@ bool gfx1250_reads_flat_scratch_base_64bit(const Instruction &inst) {
   return false;
 }
 
+bool gfx1250_flat_scratch_base_residual(const Instruction &inst) {
+  const uint32_t *raw = inst.raw_encoding();
+  if (raw == nullptr)
+    return false;
+  const std::optional<EncodingSourceFields> layout = source_fields(raw[0]);
+  if (!layout)
+    return instruction_names_selector_in_any_64bit_source(inst);
+
+  const size_t available =
+      inst.size() > 0 ? static_cast<size_t>(inst.size()) / sizeof(uint32_t) : 0;
+  const std::span<const uint32_t> words(raw, std::min(modelled_word_count(*layout), available));
+  const int sources = std::min(inst.num_src_operands(), static_cast<int>(layout->count));
+  for (int source_index = 0; source_index < sources; ++source_index) {
+    if (!is_flat_scratch_base_64bit_source(inst, source_index, *layout, words))
+      continue;
+    if (layout->vector)
+      return true;
+    const Operand *operand = inst.src_operand(source_index);
+    if (operand != nullptr && operand->encoding_value() == kFlatScratchBaseHi)
+      return true;
+  }
+  return false;
+}
+
 ExpandResult gfx1250_lower_flat_scratch_base_source(const Instruction &inst, uint64_t offset,
                                                     std::span<const uint8_t> source_text,
                                                     const LivenessAnalysis &liveness,
@@ -398,9 +422,10 @@ ExpandResult gfx1250_lower_flat_scratch_base_source(const Instruction &inst, uin
   std::optional<uint16_t> borrowed_pair;
   std::optional<uint16_t> staged_vgpr_pair;
   if (layout->vector) {
-    borrowed_pair = liveness.find_free_sgpr_pair(&inst);
-    if (!borrowed_pair || *borrowed_pair + 1 > kMaxOrdinarySgpr) {
-      borrowed_pair.reset();
+    const std::optional<uint16_t> free_pair = liveness.find_free_sgpr_pair(&inst);
+    borrowed_pair =
+        (free_pair.has_value() && *free_pair + 1 <= kMaxOrdinarySgpr) ? free_pair : std::nullopt;
+    if (!borrowed_pair) {
       staged_vgpr_pair = reusable_destination_pair(inst, *layout, *words, liveness);
       if (!staged_vgpr_pair) {
         return ExpandResult::failed(
@@ -448,7 +473,11 @@ ExpandResult gfx1250_lower_flat_scratch_base_source(const Instruction &inst, uin
       set_word_field((*words)[field.word], 256u + *staged_vgpr_pair, field.shift, field.width);
       continue;
     }
-    set_word_field((*words)[field.word], *borrowed_pair, field.shift, field.width);
+    // The pair is engaged on this path: scalar and staged rewrites continued
+    // to the next source field, and failing to reserve either temporary
+    // returned outright.
+    const uint32_t replacement_selector = borrowed_pair.value_or(0);
+    set_word_field((*words)[field.word], replacement_selector, field.shift, field.width);
   }
 
   if (staged_vgpr_pair) {

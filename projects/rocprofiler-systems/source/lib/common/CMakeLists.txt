@@ -60,6 +60,7 @@ target_sources(
     rocprofiler-systems-common-library
     INTERFACE
         ${CMAKE_CURRENT_BINARY_DIR}/defines.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/clocks.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/delimit.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/environment.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/invoke.hpp
@@ -68,9 +69,10 @@ target_sources(
         ${CMAKE_CURRENT_SOURCE_DIR}/path.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/setup.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/static_object.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/string_utility.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/synchronized.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/traits.hpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/units.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/version.hpp
 )
 
 get_filename_component(COMMON_SOURCE_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}" DIRECTORY)
@@ -92,8 +94,12 @@ target_compile_definitions(
 
 target_link_libraries(
     rocprofiler-systems-common-library
-    INTERFACE $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-logger>
+    INTERFACE
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-logger>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-policies-library>
 )
+
+add_subdirectory(units)
 
 if(ROCPROFSYS_BUILD_TESTING)
     add_subdirectory(tests)

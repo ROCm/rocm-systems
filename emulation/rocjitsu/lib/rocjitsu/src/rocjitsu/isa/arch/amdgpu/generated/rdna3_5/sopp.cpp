@@ -6,7 +6,6 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/sopp.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/execution_backend.h"
-#include "util/except.h"
 #include <memory>
 
 namespace rocjitsu {
@@ -22,7 +21,11 @@ SNopSopp::SNopSopp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSNopSopp(const MachineInst *opcode) {
+DecodeResult decodeSNopSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopp::validate_encoding(
+      "s_nop", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SNopSopp>(opcode);
 }
 } // namespace detail
@@ -34,10 +37,16 @@ SSetkillSopp::SSetkillSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  if (inst_.simm16 & 1u)
+    flags_ |= PROGRAM_TERMINATOR;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSSetkillSopp(const MachineInst *opcode) {
+DecodeResult decodeSSetkillSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopp::validate_encoding(
+      "s_setkill", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SSetkillSopp>(opcode);
 }
 } // namespace detail
@@ -52,7 +61,11 @@ SSethaltSopp::SSethaltSopp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSSethaltSopp(const MachineInst *opcode) {
+DecodeResult decodeSSethaltSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopp::validate_encoding(
+      "s_sethalt", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SSethaltSopp>(opcode);
 }
 } // namespace detail
@@ -67,7 +80,11 @@ SSleepSopp::SSleepSopp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSSleepSopp(const MachineInst *opcode) {
+DecodeResult decodeSSleepSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopp::validate_encoding(
+      "s_sleep", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SSleepSopp>(opcode);
 }
 } // namespace detail
@@ -82,7 +99,13 @@ SSetInstPrefetchDistanceSopp::SSetInstPrefetchDistanceSopp(const MachineInst *in
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSSetInstPrefetchDistanceSopp(const MachineInst *opcode) {
+DecodeResult decodeSSetInstPrefetchDistanceSopp(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Sopp::validate_encoding("s_set_inst_prefetch_distance",
+                              reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SSetInstPrefetchDistanceSopp>(opcode);
 }
 } // namespace detail
@@ -97,7 +120,11 @@ SClauseSopp::SClauseSopp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSClauseSopp(const MachineInst *opcode) {
+DecodeResult decodeSClauseSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopp::validate_encoding(
+      "s_clause", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SClauseSopp>(opcode);
 }
 } // namespace detail
@@ -112,7 +139,11 @@ SDelayAluSopp::SDelayAluSopp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSDelayAluSopp(const MachineInst *opcode) {
+DecodeResult decodeSDelayAluSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopp::validate_encoding(
+      "s_delay_alu", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SDelayAluSopp>(opcode);
 }
 } // namespace detail
@@ -129,7 +160,12 @@ SWaitcntDepctrSopp::SWaitcntDepctrSopp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSWaitcntDepctrSopp(const MachineInst *opcode) {
+DecodeResult decodeSWaitcntDepctrSopp(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopp::validate_encoding(
+      "s_waitcnt_depctr", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SWaitcntDepctrSopp>(opcode);
 }
 } // namespace detail
@@ -145,7 +181,11 @@ SWaitcntSopp::SWaitcntSopp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSWaitcntSopp(const MachineInst *opcode) {
+DecodeResult decodeSWaitcntSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopp::validate_encoding(
+      "s_waitcnt", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SWaitcntSopp>(opcode);
 }
 } // namespace detail
@@ -159,7 +199,11 @@ SWaitIdleSopp::SWaitIdleSopp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSWaitIdleSopp(const MachineInst *opcode) {
+DecodeResult decodeSWaitIdleSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopp::validate_encoding(
+      "s_wait_idle", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SWaitIdleSopp>(opcode);
 }
 } // namespace detail
@@ -175,7 +219,11 @@ SWaitEventSopp::SWaitEventSopp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSWaitEventSopp(const MachineInst *opcode) {
+DecodeResult decodeSWaitEventSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopp::validate_encoding(
+      "s_wait_event", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SWaitEventSopp>(opcode);
 }
 } // namespace detail
@@ -190,7 +238,11 @@ STrapSopp::STrapSopp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSTrapSopp(const MachineInst *opcode) {
+DecodeResult decodeSTrapSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopp::validate_encoding(
+      "s_trap", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<STrapSopp>(opcode);
 }
 } // namespace detail
@@ -205,7 +257,11 @@ SRoundModeSopp::SRoundModeSopp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSRoundModeSopp(const MachineInst *opcode) {
+DecodeResult decodeSRoundModeSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopp::validate_encoding(
+      "s_round_mode", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SRoundModeSopp>(opcode);
 }
 } // namespace detail
@@ -220,7 +276,12 @@ SDenormModeSopp::SDenormModeSopp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSDenormModeSopp(const MachineInst *opcode) {
+DecodeResult decodeSDenormModeSopp(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopp::validate_encoding(
+      "s_denorm_mode", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SDenormModeSopp>(opcode);
 }
 } // namespace detail
@@ -233,7 +294,11 @@ SCodeEndSopp::SCodeEndSopp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCodeEndSopp(const MachineInst *opcode) {
+DecodeResult decodeSCodeEndSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopp::validate_encoding(
+      "s_code_end", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCodeEndSopp>(opcode);
 }
 } // namespace detail
@@ -250,7 +315,11 @@ SBranchSopp::SBranchSopp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSBranchSopp(const MachineInst *opcode) {
+DecodeResult decodeSBranchSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopp::validate_encoding(
+      "s_branch", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SBranchSopp>(opcode);
 }
 } // namespace detail
@@ -275,7 +344,12 @@ SCbranchScc0Sopp::SCbranchScc0Sopp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCbranchScc0Sopp(const MachineInst *opcode) {
+DecodeResult decodeSCbranchScc0Sopp(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopp::validate_encoding(
+      "s_cbranch_scc0", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCbranchScc0Sopp>(opcode);
 }
 } // namespace detail
@@ -300,7 +374,12 @@ SCbranchScc1Sopp::SCbranchScc1Sopp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCbranchScc1Sopp(const MachineInst *opcode) {
+DecodeResult decodeSCbranchScc1Sopp(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopp::validate_encoding(
+      "s_cbranch_scc1", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCbranchScc1Sopp>(opcode);
 }
 } // namespace detail
@@ -325,7 +404,12 @@ SCbranchVcczSopp::SCbranchVcczSopp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCbranchVcczSopp(const MachineInst *opcode) {
+DecodeResult decodeSCbranchVcczSopp(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopp::validate_encoding(
+      "s_cbranch_vccz", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCbranchVcczSopp>(opcode);
 }
 } // namespace detail
@@ -350,7 +434,12 @@ SCbranchVccnzSopp::SCbranchVccnzSopp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCbranchVccnzSopp(const MachineInst *opcode) {
+DecodeResult decodeSCbranchVccnzSopp(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopp::validate_encoding(
+      "s_cbranch_vccnz", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCbranchVccnzSopp>(opcode);
 }
 } // namespace detail
@@ -375,7 +464,12 @@ SCbranchExeczSopp::SCbranchExeczSopp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCbranchExeczSopp(const MachineInst *opcode) {
+DecodeResult decodeSCbranchExeczSopp(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopp::validate_encoding(
+      "s_cbranch_execz", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCbranchExeczSopp>(opcode);
 }
 } // namespace detail
@@ -400,7 +494,12 @@ SCbranchExecnzSopp::SCbranchExecnzSopp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCbranchExecnzSopp(const MachineInst *opcode) {
+DecodeResult decodeSCbranchExecnzSopp(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopp::validate_encoding(
+      "s_cbranch_execnz", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCbranchExecnzSopp>(opcode);
 }
 } // namespace detail
@@ -420,7 +519,12 @@ SCbranchCdbgsysSopp::SCbranchCdbgsysSopp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCbranchCdbgsysSopp(const MachineInst *opcode) {
+DecodeResult decodeSCbranchCdbgsysSopp(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopp::validate_encoding(
+      "s_cbranch_cdbgsys", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCbranchCdbgsysSopp>(opcode);
 }
 } // namespace detail
@@ -435,7 +539,12 @@ SCbranchCdbguserSopp::SCbranchCdbguserSopp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCbranchCdbguserSopp(const MachineInst *opcode) {
+DecodeResult decodeSCbranchCdbguserSopp(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopp::validate_encoding(
+      "s_cbranch_cdbguser", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCbranchCdbguserSopp>(opcode);
 }
 } // namespace detail
@@ -450,7 +559,12 @@ SCbranchCdbgsysOrUserSopp::SCbranchCdbgsysOrUserSopp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCbranchCdbgsysOrUserSopp(const MachineInst *opcode) {
+DecodeResult decodeSCbranchCdbgsysOrUserSopp(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopp::validate_encoding(
+      "s_cbranch_cdbgsys_or_user", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCbranchCdbgsysOrUserSopp>(opcode);
 }
 } // namespace detail
@@ -465,7 +579,12 @@ SCbranchCdbgsysAndUserSopp::SCbranchCdbgsysAndUserSopp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCbranchCdbgsysAndUserSopp(const MachineInst *opcode) {
+DecodeResult decodeSCbranchCdbgsysAndUserSopp(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopp::validate_encoding(
+      "s_cbranch_cdbgsys_and_user", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCbranchCdbgsysAndUserSopp>(opcode);
 }
 } // namespace detail
@@ -479,7 +598,11 @@ SEndpgmSopp::SEndpgmSopp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSEndpgmSopp(const MachineInst *opcode) {
+DecodeResult decodeSEndpgmSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopp::validate_encoding(
+      "s_endpgm", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SEndpgmSopp>(opcode);
 }
 } // namespace detail
@@ -493,7 +616,12 @@ SEndpgmSavedSopp::SEndpgmSavedSopp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSEndpgmSavedSopp(const MachineInst *opcode) {
+DecodeResult decodeSEndpgmSavedSopp(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopp::validate_encoding(
+      "s_endpgm_saved", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SEndpgmSavedSopp>(opcode);
 }
 } // namespace detail
@@ -507,7 +635,12 @@ SEndpgmOrderedPsDoneSopp::SEndpgmOrderedPsDoneSopp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSEndpgmOrderedPsDoneSopp(const MachineInst *opcode) {
+DecodeResult decodeSEndpgmOrderedPsDoneSopp(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopp::validate_encoding(
+      "s_endpgm_ordered_ps_done", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SEndpgmOrderedPsDoneSopp>(opcode);
 }
 } // namespace detail
@@ -520,7 +653,11 @@ SWakeupSopp::SWakeupSopp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSWakeupSopp(const MachineInst *opcode) {
+DecodeResult decodeSWakeupSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopp::validate_encoding(
+      "s_wakeup", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SWakeupSopp>(opcode);
 }
 } // namespace detail
@@ -535,7 +672,11 @@ SSetprioSopp::SSetprioSopp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSSetprioSopp(const MachineInst *opcode) {
+DecodeResult decodeSSetprioSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopp::validate_encoding(
+      "s_setprio", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SSetprioSopp>(opcode);
 }
 } // namespace detail
@@ -550,10 +691,15 @@ SSendmsgSopp::SSendmsgSopp(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   m0.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSSendmsgSopp(const MachineInst *opcode) {
+DecodeResult decodeSSendmsgSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopp::validate_encoding(
+      "s_sendmsg", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SSendmsgSopp>(opcode);
 }
 } // namespace detail
@@ -568,10 +714,16 @@ SSendmsghaltSopp::SSendmsghaltSopp(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   m0.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSSendmsghaltSopp(const MachineInst *opcode) {
+DecodeResult decodeSSendmsghaltSopp(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopp::validate_encoding(
+      "s_sendmsghalt", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SSendmsghaltSopp>(opcode);
 }
 } // namespace detail
@@ -586,7 +738,12 @@ SIncperflevelSopp::SIncperflevelSopp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSIncperflevelSopp(const MachineInst *opcode) {
+DecodeResult decodeSIncperflevelSopp(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopp::validate_encoding(
+      "s_incperflevel", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SIncperflevelSopp>(opcode);
 }
 } // namespace detail
@@ -601,7 +758,12 @@ SDecperflevelSopp::SDecperflevelSopp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSDecperflevelSopp(const MachineInst *opcode) {
+DecodeResult decodeSDecperflevelSopp(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopp::validate_encoding(
+      "s_decperflevel", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SDecperflevelSopp>(opcode);
 }
 } // namespace detail
@@ -617,7 +779,12 @@ STtracedataSopp::STtracedataSopp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSTtracedataSopp(const MachineInst *opcode) {
+DecodeResult decodeSTtracedataSopp(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopp::validate_encoding(
+      "s_ttracedata", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<STtracedataSopp>(opcode);
 }
 } // namespace detail
@@ -625,17 +792,19 @@ std::unique_ptr<Instruction> decodeSTtracedataSopp(const MachineInst *opcode) {
 STtracedataImmSopp::STtracedataImmSopp(const MachineInst *inst)
     : Sopp("s_ttracedata_imm", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::STtracedataImmSopp)),
-      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
-      m0(32, OperandType::OPR_SDST_M0, 125) {
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
   src_operands_[0] = &simm16;
-  src_operands_[1] = &m0;
-  num_src_ = 2;
+  num_src_ = 1;
   num_dst_ = 0;
-  m0.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSTtracedataImmSopp(const MachineInst *opcode) {
+DecodeResult decodeSTtracedataImmSopp(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopp::validate_encoding(
+      "s_ttracedata_imm", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<STtracedataImmSopp>(opcode);
 }
 } // namespace detail
@@ -648,7 +817,11 @@ SIcacheInvSopp::SIcacheInvSopp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSIcacheInvSopp(const MachineInst *opcode) {
+DecodeResult decodeSIcacheInvSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopp::validate_encoding(
+      "s_icache_inv", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SIcacheInvSopp>(opcode);
 }
 } // namespace detail
@@ -662,7 +835,11 @@ SBarrierSopp::SBarrierSopp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSBarrierSopp(const MachineInst *opcode) {
+DecodeResult decodeSBarrierSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopp::validate_encoding(
+      "s_barrier", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SBarrierSopp>(opcode);
 }
 } // namespace detail

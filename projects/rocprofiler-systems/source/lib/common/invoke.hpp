@@ -26,9 +26,7 @@
 #    define ROCPROFSYS_COMMON_LIBRARY_LOG_END
 #endif
 
-namespace rocprofsys
-{
-inline namespace common
+namespace rocprofsys::inline common
 {
 namespace
 {
@@ -47,7 +45,7 @@ inline std::int64_t
 get_thread_index()
 {
     static std::atomic<std::int64_t> _c{ 0 };
-    static thread_local auto         _v = _c++;
+    static thread_local auto const   _v = _c++;
     return _v;
 }
 
@@ -100,7 +98,7 @@ invoke(const char* _name, int _verbose, bool& _toggle, FuncT&& _func, Args... _a
             }
             return std::invoke(std::forward<FuncT>(_func), _args...);
         }
-        else if(_verbose >= 2)
+        if(_verbose >= 2)
         {
             fflush(stderr);
             ROCPROFSYS_COMMON_LIBRARY_LOG_START
@@ -125,8 +123,10 @@ invoke(const char* _name, int _verbose, bool& _toggle, FuncT&& _func, Args... _a
     }
 
     using return_type = decltype(std::invoke(std::forward<FuncT>(_func), _args...));
-    if constexpr(!std::is_void<return_type>::value) return return_type();
+    if constexpr(!std::is_void<return_type>::value)
+    {
+        return return_type();
+    }
 }
 }  // namespace
-}  // namespace common
-}  // namespace rocprofsys
+}  // namespace rocprofsys::inline common

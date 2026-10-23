@@ -2,7 +2,39 @@
 
 Full documentation for rocDecode is available at [https://rocm.docs.amd.com/projects/rocDecode/en/latest/](https://rocm.docs.amd.com/projects/rocDecode/en/latest/)
 
-## (Unreleased) rocDecode 1.9.0
+## rocDecode 1.12.0 for ROCm 10.2.0
+
+### Added
+
+* Initial Windows support: hardware-accelerated video decoding on Windows via the vaon12 backend (Mesa's VA-API on D3D12 translation layer). Requires HIP and the vaon12 VA-API driver from TheRock for Windows.
+* On Windows, the TheRock VA-API DLLs (`rocm_sysdeps_va_win32.dll`, `rocm_sysdeps_va.dll`) are loaded at run time, matching the Linux dlopen behavior. `%ROCM_PATH%\lib\rocm_sysdeps\bin` no longer needs to be on `PATH`.
+* HEVC: generation of unavailable reference pictures for a BLA picture or a CRA picture with NoRaslOutputFlag equal to 1 (H.265 clause 8.3.3).
+
+### Resolved issues
+
+* Fixed a stray RASL picture being output from the first CRA picture after an application signals end of sequence with the `ROCDEC_PKT_ENDOFSTREAM` packet flag. The flag now ends the coded video sequence the same way an in-band EOS NAL unit does, so the next IRAP picture gets `NoRaslOutputFlag` equal to 1.
+* Fixed out-of-bounds memory access issues in the HEVC, AVC, AV1, VP9 and base parsers.
+* Fixed `rocDecGetDecoderCaps` advertising 16-bit output surface formats for 8-bit content.
+* The `videoDecodeRaw` and `videoDecode` samples now exit with code 77 instead of 1 when the GPU doesn't support the stream's codec, and the `video_decodeRaw-*` and `video_decode-*` CTests report that as skipped instead of failed (e.g. the AV1 tests on gfx90a). A failed decoder capability query is still reported as an error.
+
+## rocDecode 1.10.0 for ROCm 10.1.0
+
+### Added
+
+* Added support for explicitly loading librocm_sysdeps_va via dlopen, ensuring complete isolation from the system libva library.
+* `BUILD_TESTS` CMake option (default OFF) to build and install the sample and negative API test binaries, including under TheRock.
+
+### Changed
+
+* The VA-API and DRM CMake find modules now search only the TheRock sysdeps location (`${ROCM_PATH}/lib/rocm_sysdeps`) instead of falling back to system paths.
+* Replaced GCC- and POSIX-specific constructs in the parsers and logging code with portable equivalents, in preparation for Windows support.
+
+### Resolved issues
+
+* Resolved vendored libva link issue in samples without extra env vars.
+* Fixed the performance test script creating the wrong results directory when `sample_mode` is 1.
+
+## rocDecode 1.9.0 for ROCm 10.0.0
 
 ### Added
 
@@ -12,9 +44,12 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 
 * Fixed decode errors of some AVC interlaced container streams by adding support for the picture data packet from the demuxer which contains multiple pictures.
 * Corrected fake CTest passes.
-* Resolved vendored libva link issue in samples without extra env vars.
+* Fixed decoding always running on the first GPU (`renderD128`) on GPUs whose HIP device UUID doesn't match the amdgpu sysfs `unique_id` (for example, MI355X). The decoder now binds to the requested `device_id` by PCI bus/device/function.
+* Fixed the `RocVideoDecoder` utility and the `rocdecDecode` sample not setting `device_id` before querying decoder capabilities and creating the decoder.
+* Fixed GPU memory leaks in the `videoDecodeRGB` sample.
+* Fixed sample and unit test failures in AddressSanitizer (ASAN) builds.
 
-## rocDecode 1.8.0 for ROCm 7.13
+## rocDecode 1.8.0 for ROCm 7.14.1
 
 ### Added
 
@@ -23,8 +58,16 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 * Logging improvement: Merged all logger instances into one global instance.
 * Logging improvement: Unified logging format in utility classes with core library logging format.
 * Logging improvement: Moved debug logging from a compile-time switch to the runtime logger level controlled by ROCDEC_LOG_LEVEL (debug = 4).
+* Logging improvement: Log messages show both the kernel thread ID and a hash ID, in the same thread ID format as `AMD_LOG_LEVEL`.
+* Logging improvement: Function entry and exit logs include the API argument addresses.
+* Logging improvement: Info level logs include the VA-API version and driver, the DRM render node, and the GPU UUID mapping.
 * Feature: support for user set output surface format.
 * Graceful handling of VUI syntax errors for AVC and HEVC.
+* `-f` option in the `videoDecodeRGB` sample to decode a given number of frames.
+* `-cs` option in the `videoDecodeRGB` sample to select the color standard used for YUV to RGB conversion.
+* `ENABLE_EXTENDED_TESTS` CMake option to enable the FFmpeg-dependent extended CTests.
+* A Python test runner is installed with the rocDecode tests.
+* Support for gfx1150, gfx1152, gfx1153, and gfx1250.
 
 ### Changed
 
@@ -35,9 +78,21 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 * Removed package install documentation; updated all documentation to reference TheRock for installation.
 * Simplified libva version check (single `>= 1.22` requirement).
 * Cleaned up CMake error messages.
+* Removed the unsupported three-plane YUV output path from VA-API/HIP interop.
+* Added DRM render node offset handling for MI308 compute partitions.
 
+### Resolved issues
 
-## rocDecode 1.7.0 for ROCm 7.2.1
+* Fixed chroma scaling and the P016 maximum value in the color space conversion utility.
+* Fixed an integer underflow when demuxing an MPEG-4 first frame shorter than 3 bytes.
+* Fixed the FFmpeg-based decoder handling SEI messages as AVC/HEVC for every codec.
+* Added validation of the number of layers returned by VA-API before it's used.
+* Fixed segmentation faults in the `videoDecodeBatch` sample with `mem_type` 2.
+* Fixed the `rocdecDecode` sample failing on SLES.
+* Fixed the `rocdecDecode` sample parsing a frame number from the directory path or file extension instead of the file name.
+* Fixed samples linking against the wrong `rocdecode-host` library.
+
+## rocDecode 1.7.0 for ROCm 7.2.4
 
 ### Changed
 

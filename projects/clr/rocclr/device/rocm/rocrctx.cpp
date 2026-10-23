@@ -37,6 +37,7 @@ bool Hsa::LoadLib() {
   GET_ROCR_SYMBOL(hsa_queue_load_write_index_scacquire)
   GET_ROCR_SYMBOL(hsa_queue_load_write_index_relaxed)
   GET_ROCR_SYMBOL(hsa_queue_add_write_index_screlease)
+  GET_ROCR_SYMBOL(hsa_queue_cas_write_index_screlease)
   GET_ROCR_SYMBOL(hsa_memory_register)
   GET_ROCR_SYMBOL(hsa_memory_deregister)
   GET_ROCR_SYMBOL(hsa_memory_copy)
@@ -97,6 +98,10 @@ bool Hsa::LoadLib() {
   GET_ROCR_SYMBOL(hsa_amd_register_system_event_handler)
   GET_ROCR_SYMBOL(hsa_amd_queue_set_priority)
   GET_ROCR_OPTIONAL_SYMBOL(hsa_amd_queue_create)
+  // Absent before interface 1.36; signals are then created individually. Only a dynamically
+  // loaded ROCr can lack them: a linked build requires them, as it does hsa_amd_queue_create.
+  GET_ROCR_OPTIONAL_SYMBOL(hsa_amd_signal_batch_create)
+  GET_ROCR_OPTIONAL_SYMBOL(hsa_amd_signal_batch_destroy)
   GET_ROCR_SYMBOL(hsa_amd_memory_async_copy_rect)
   GET_ROCR_SYMBOL(hsa_amd_memory_lock_to_pool)
   GET_ROCR_SYMBOL(hsa_amd_signal_value_pointer)
@@ -104,11 +109,13 @@ bool Hsa::LoadLib() {
   GET_ROCR_SYMBOL(hsa_amd_svm_attributes_get)
   GET_ROCR_SYMBOL(hsa_amd_svm_prefetch_async)
   GET_ROCR_SYMBOL(hsa_amd_svm_discard_batch_async)
-  GET_ROCR_SYMBOL(hsa_amd_portable_export_dmabuf)
+  GET_ROCR_SYMBOL(hsa_amd_portable_export_dmabuf_v2)
   GET_ROCR_SYMBOL(hsa_amd_portable_close_dmabuf)
   GET_ROCR_SYMBOL(hsa_amd_vmem_address_reserve)
   GET_ROCR_SYMBOL(hsa_amd_vmem_address_free)
   GET_ROCR_SYMBOL(hsa_amd_vmem_handle_create)
+  // Optional: absent on an older ROCr, in which case getVmmAllocInfo falls back.
+  GET_ROCR_OPTIONAL_SYMBOL(hsa_amd_vmem_get_vmem_info)
   GET_ROCR_SYMBOL(hsa_amd_vmem_handle_release)
   GET_ROCR_SYMBOL(hsa_amd_vmem_map)
   GET_ROCR_SYMBOL(hsa_amd_vmem_unmap)

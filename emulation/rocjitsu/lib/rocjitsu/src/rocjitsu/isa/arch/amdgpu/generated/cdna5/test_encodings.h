@@ -393,6 +393,7 @@ inline constexpr TestEncoding ENCODINGS[] = {
     {"v_cvt_norm_u16_f16", {0x7E00C800U, 0x00000000U}},
     {"v_swap_b32", {0x7E00CA00U, 0x00000000U}},
     {"v_swap_b16", {0x7E00CC00U, 0x00000000U}},
+    {"v_permlane64_b32", {0x7E00CE00U, 0x00000000U}},
     {"v_swaprel_b32", {0x7E00D000U, 0x00000000U}},
     {"v_not_b16", {0x7E00D200U, 0x00000000U}},
     {"v_cvt_i32_i16", {0x7E00D400U, 0x00000000U}},
@@ -1249,6 +1250,15 @@ inline constexpr TestEncoding ENCODINGS[] = {
     {"v_wmma_f16_16x16x128_bf8_fp8", {0xCC860000U, 0x00000000U}},
     {"v_wmma_f16_16x16x128_bf8_bf8", {0xCC870000U, 0x00000000U}},
     {"v_wmma_f32_32x16x128_f4", {0xCC880000U, 0x00000000U}},
+    {"v_pk_fma_f64", {0xCC3B0000U, 0x00000000U}},
+    {"v_pk_mul_f64", {0xCC3C0000U, 0x00000000U}},
+    {"v_pk_add_f64", {0xCC4B0000U, 0x00000000U}},
+    {"v_pk_add_nc_u64", {0xCC4C0000U, 0x00000000U}},
+    {"v_pk_sub_nc_u64", {0xCC4D0000U, 0x00000000U}},
+    {"v_pk_max_num_f64", {0xCC4E0000U, 0x00000000U}},
+    {"v_pk_min_num_f64", {0xCC4F0000U, 0x00000000U}},
+    {"v_pk_lshl_add_u64", {0xCC7E0000U, 0x00000000U}},
+    {"v_wmma_f64_16x16x4_f64", {0xCC5B0000U, 0x00000000U}},
     {"ds_add_u32", {0xD8000000U, 0x00000000U}},
     {"ds_sub_u32", {0xD8040000U, 0x00000000U}},
     {"ds_rsub_u32", {0xD8080000U, 0x00000000U}},
@@ -1613,7 +1623,7 @@ inline constexpr TestEncoding ENCODINGS[] = {
     {"global_load_tr6_b96", {0xEE1D0000U, 0x00000000U}},
 };
 
-inline constexpr size_t NUM_ENCODINGS = 1592;
+inline constexpr size_t NUM_ENCODINGS = 1602;
 
 } // namespace rocjitsu::cdna5::test_data
 

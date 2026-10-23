@@ -66,8 +66,8 @@ function(rj_configure_target target)
             PRIVATE
                 ${PROJECT_SOURCE_DIR}/lib/rocjitsu/include
                 ${PROJECT_SOURCE_DIR}/lib/rocjitsu/src
-                ${HSA_INCLUDE_DIR}
         )
+        target_link_libraries(${target} PRIVATE rocm_runtime::runtime_headers)
     endif()
     if(ARG_GENERATED)
         target_include_directories(${target} PRIVATE ${GENERATED_DIR})
@@ -82,6 +82,15 @@ function(rj_configure_target target)
                 ${target}
                 PRIVATE -Wall -Wextra -Wpedantic -Werror
             )
+            if(
+                CMAKE_CXX_COMPILER_ID MATCHES "GNU"
+                AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 15
+            )
+                target_compile_options(
+                    ${target}
+                    PRIVATE -Wno-error=maybe-uninitialized
+                )
+            endif()
         endif()
     endif()
     if(ARG_HIDDEN)

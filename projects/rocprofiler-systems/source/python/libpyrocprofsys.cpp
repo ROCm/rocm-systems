@@ -7,11 +7,11 @@
 #include "dl/dl.hpp"
 #include "library/coverage.hpp"
 #include "library/coverage/impl.hpp"
-#include "rocprofiler-systems/categories.h"
-#include "rocprofiler-systems/user.h"
+#include "rocprofiler-systems/annotation.h"
 
 #include "common/environment.hpp"
-#include <spdlog/fmt/fmt.h>
+#include <algorithm>
+#include <fmt/format.h>
 #include <timemory/backends/process.hpp>
 #include <timemory/backends/threading.hpp>
 // Provides inline tim::get_env<bool>/<std::string> specialization definitions before
@@ -23,14 +23,13 @@
 #include <timemory/mpl/policy.hpp>
 #include <timemory/operations/types/file_output_message.hpp>
 #include <timemory/tpls/cereal/cereal.hpp>
-#include <timemory/utility/filepath.hpp>
-#include <timemory/utility/macros.hpp>
 #include <timemory/utility/types.hpp>
 #include <timemory/variadic/macros.hpp>
 
 #include <pybind11/detail/common.h>
 #include <pybind11/operators.h>
 #include <pybind11/pybind11.h>
+#include <pybind11/pytypes.h>
 #include <pyerrors.h>
 
 #include <atomic>
@@ -75,11 +74,6 @@ namespace pycoverage
 py::module
 generate(py::module& _pymod);
 }
-namespace pyuser
-{
-py::module
-generate(py::module& _pymod);
-}
 }  // namespace pyrocprofsys
 
 template <typename... Tp>
@@ -92,9 +86,9 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
     py::doc("ROCm Systems Profiler Python bindings for profiling, user API, and "
             "code coverage post-processing");
 
-    static bool _is_initialized = false;
-    static bool _is_finalized   = false;
-    static auto _get_use_mpi    = []() {
+    static bool       _is_initialized = false;
+    static bool       _is_finalized   = false;
+    static auto const _get_use_mpi    = []() {
         bool _use_mpi = false;
         try
         {
@@ -102,14 +96,17 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
             _use_mpi = true;
         } catch(py::error_already_set& _exc)
         {
-            if(!_exc.matches(PyExc_ImportError)) throw;
+            if(!_exc.matches(PyExc_ImportError))
+            {
+                throw;
+            }
         }
         return _use_mpi;
     };
     // Deferred out of module init: this is the first call into the dl layer and it
     // dlopens librocprof-sys.so, so registering here would load the whole runtime on
     // `import rocprofsys`.
-    static auto _register_pause_callbacks = []() {
+    static auto const _register_pause_callbacks = []() {
         rocprofsys_external_register_pause_callbacks(&pyrocprofsys_pause_callback,
                                                      &pyrocprofsys_resume_callback);
     };
@@ -122,7 +119,9 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
         "initialize",
         [](const std::string& _v) {
             if(_is_initialized)
+            {
                 throw std::runtime_error("Error! rocprofsys is already initialized");
+            }
             _is_initialized = true;
             _register_pause_callbacks();
             rocprofsys_set_mpi(_get_use_mpi());
@@ -134,17 +133,22 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
         "initialize",
         [](const py::list& _v) {
             if(_is_initialized)
+            {
                 throw std::runtime_error("Error! rocprofsys is already initialized");
+            }
             _is_initialized = true;
             _register_pause_callbacks();
             rocprofsys_set_instrumented(
-                static_cast<int>(rocprofsys::dl::InstrumentMode::PythonProfile));
+                static_cast<int>(rocprofsys::dl::instrument_mode::python_profile));
             rocprofsys_set_mpi(_get_use_mpi());
             std::string _cmd      = {};
             std::string _cmd_line = {};
             for(auto&& itr : _v)
             {
-                if(_cmd.empty()) _cmd = itr.cast<std::string>();
+                if(_cmd.empty())
+                {
+                    _cmd = itr.cast<std::string>();
+                }
                 _cmd_line += " " + itr.cast<std::string>();
             }
             if(!_cmd_line.empty())
@@ -160,7 +164,9 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
         "finalize",
         []() {
             if(_is_finalized)
+            {
                 throw std::runtime_error("Error! rocprofsys is already finalized");
+            }
             _is_finalized = true;
             rocprofsys_finalize();
         },
@@ -168,18 +174,21 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
 
     pyprofile::generate(omni);
     pycoverage::generate(omni);
-    pyuser::generate(omni);
 
     auto _python_path = rocprofsys::get_env(rocprofsys::env_vars::PATH, std::string{});
     auto _libpath     = std::string{ "librocprof-sys-dl.so" };
-    if(!_python_path.empty()) _libpath = fmt::format("{}/{}", _python_path, _libpath);
+    if(!_python_path.empty())
+    {
+        _libpath = fmt::format("{}/{}", _python_path, _libpath);
+    }
     // permit env override if default path fails/is wrong
     _libpath = rocprofsys::get_env(rocprofsys::env_vars::DL_LIBRARY, _libpath);
     // this is necessary when building with -static-libstdc++
     // without it, loading librocprof-sys.so within librocprof-sys-dl.so segfaults
     if(!dlopen(_libpath.c_str(), RTLD_NOW | RTLD_GLOBAL))
     {
-        auto _msg = fmt::format(R"(dlopen("{}", RTLD_NOW | RTLD_GLOBAL))", _libpath);
+        auto const _msg =
+            fmt::format(R"(dlopen("{}", RTLD_NOW | RTLD_GLOBAL))", _libpath);
         perror(_msg.c_str());
         fprintf(stderr, "[rocprofsys][dl][pid=%i] %s :: %s\n", getpid(), _msg.c_str(),
                 dlerror());
@@ -228,20 +237,22 @@ struct config
     std::int32_t            base_stack_depth   = -1;
     std::int32_t            verbose            = 0;
     std::int64_t            depth_tracker      = 0;
-    std::string             base_module_path   = {};
-    strset_t                restrict_functions = {};
-    strset_t                restrict_filenames = {};
-    strset_t                include_functions  = {};
-    strset_t                include_filenames  = {};
-    strset_t                exclude_functions  = default_exclude_functions;
-    strset_t                exclude_filenames  = default_exclude_filenames;
-    std::vector<profiler_t> records            = {};
-    annotations_t           annotations = { note_t{ "file", ROCPROFSYS_STRING, nullptr },
-                                            note_t{ "line", ROCPROFSYS_INT32, nullptr },
-                                            note_t{ "lasti", ROCPROFSYS_INT32, nullptr },
-                                            note_t{ "argcount", ROCPROFSYS_INT32, nullptr },
-                                            note_t{ "nlocals", ROCPROFSYS_INT32, nullptr },
-                                            note_t{ "stacksize", ROCPROFSYS_INT32, nullptr } };
+    std::string             base_module_path;
+    strset_t                restrict_functions;
+    strset_t                restrict_filenames;
+    strset_t                include_functions;
+    strset_t                include_filenames;
+    strset_t                exclude_functions = default_exclude_functions;
+    strset_t                exclude_filenames = default_exclude_filenames;
+    std::vector<profiler_t> records;
+    annotations_t           annotations = {
+        note_t{ .name = "file", .type = ROCPROFSYS_STRING, .value = nullptr },
+        note_t{ .name = "line", .type = ROCPROFSYS_INT32, .value = nullptr },
+        note_t{ .name = "lasti", .type = ROCPROFSYS_INT32, .value = nullptr },
+        note_t{ .name = "argcount", .type = ROCPROFSYS_INT32, .value = nullptr },
+        note_t{ .name = "nlocals", .type = ROCPROFSYS_INT32, .value = nullptr },
+        note_t{ .name = "stacksize", .type = ROCPROFSYS_INT32, .value = nullptr }
+    };
 };
 //
 inline config&
@@ -250,8 +261,11 @@ get_config()
     static auto*              _instance    = new config{};
     static thread_local auto* _tl_instance = []() {
         static std::atomic<std::uint32_t> _count{ 0 };
-        auto                              _cnt = _count++;
-        if(_cnt == 0) return _instance;
+        auto const                        _cnt = _count++;
+        if(_cnt == 0)
+        {
+            return _instance;
+        }
 
         auto* _tmp               = new config{};
         _tmp->is_running         = _instance->is_running;
@@ -272,7 +286,10 @@ get_config()
         _tmp->verbose            = _instance->verbose;
         _tmp->annotations        = _instance->annotations;
         // if full filepath is specified, include filename is implied
-        if(_tmp->full_filepath && !_tmp->include_filename) _tmp->include_filename = true;
+        if(_tmp->full_filepath && !_tmp->include_filename)
+        {
+            _tmp->include_filename = true;
+        }
         return _tmp;
     }();
     return *_tl_instance;
@@ -309,22 +326,31 @@ get_frame_code(PyFrameObject* frame)
 }
 //
 void
-profiler_function(py::object pframe, const char* swhat, py::object arg)
+profiler_function(py::object pframe, const char* swhat, [[maybe_unused]] py::object arg)
 {
-    if(get_paused() > 0 || g_library_paused.load(std::memory_order_relaxed)) return;
+    if(get_paused() > 0 || g_library_paused.load(std::memory_order_relaxed))
+    {
+        return;
+    }
 
     static thread_local auto& _config  = get_config();
     static thread_local auto  _disable = false;
 
-    if(_disable) return;
+    if(_disable)
+    {
+        return;
+    }
 
     _disable = true;
     const tim::scope::destructor _dtor{ []() { _disable = false; } };
     (void) _dtor;
 
-    if(pframe.is_none() || pframe.ptr() == nullptr) return;
+    if(pframe.is_none() || pframe.ptr() == nullptr)
+    {
+        return;
+    }
 
-    static auto _rocprofsys_path = _config.base_module_path;
+    static auto const _rocprofsys_path = _config.base_module_path;
 
     auto* frame = reinterpret_cast<PyFrameObject*>(pframe.ptr());
 
@@ -337,12 +363,14 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
     if(what < 0)
     {
         if(_config.verbose > 2)
+        {
             TIMEMORY_PRINT_HERE("%s :: %s",
                                 "Ignoring what != {CALL,C_CALL,RETURN,C_RETURN}", swhat);
+        }
         return;
     }
 
-    auto _update_ignore_stack_depth = [what]() {
+    auto const _update_ignore_stack_depth = [what]() {
         switch(what)
         {
             case PyTrace_CALL: ++_config.ignore_stack_depth; break;
@@ -354,12 +382,14 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
     if(_config.ignore_stack_depth > 0)
     {
         if(_config.verbose > 2)
+        {
             TIMEMORY_PRINT_HERE("%s :: %s :: %u", "Ignoring call/return", swhat,
                                 _config.ignore_stack_depth);
+        }
         _update_ignore_stack_depth();
         return;
     }
-    else if(_config.ignore_stack_depth < 0)
+    if(_config.ignore_stack_depth < 0)
     {
         TIMEMORY_PRINT_HERE("WARNING! ignore_stack_depth is < 0 :: ",
                             _config.ignore_stack_depth);
@@ -369,13 +399,15 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
     if(!_config.trace_c && (what == PyTrace_C_CALL || what == PyTrace_C_RETURN))
     {
         if(_config.verbose > 2)
+        {
             TIMEMORY_PRINT_HERE("%s :: %s", "Ignoring C call/return", swhat);
+        }
         return;
     }
 
     // get the arguments
     auto _get_args = [&]() {
-        auto inspect = py::module::import("inspect");
+        auto const inspect = py::module::import("inspect");
         try
         {
             return py::cast<std::string>(
@@ -384,51 +416,76 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
         {
             TIMEMORY_CONDITIONAL_PRINT_HERE(_config.verbose > 1, "Error! %s",
                                             _exc.what());
-            if(!_exc.matches(PyExc_AttributeError)) throw;
+            if(!_exc.matches(PyExc_AttributeError))
+            {
+                throw;
+            }
         }
         return std::string{};
     };
 
     // get the final label
-    auto _get_label = [&](auto& _funcname, auto& _filename, auto& _fullpath) {
-        auto _bracket = _config.include_filename;
-        if(_bracket) _funcname.insert(0, "[");
+    auto const _get_label = [&](auto& _funcname, auto& _filename, auto& _fullpath) {
+        auto const _bracket = _config.include_filename;
+        if(_bracket)
+        {
+            _funcname.insert(0, "[");
+        }
         // append the arguments
-        if(_config.include_args) _funcname.append(_get_args());
-        if(_bracket) _funcname.append("]");
+        if(_config.include_args)
+        {
+            _funcname.append(_get_args());
+        }
+        if(_bracket)
+        {
+            _funcname.append("]");
+        }
         // append the filename
         if(_config.include_filename)
         {
             if(_config.full_filepath)
+            {
                 _funcname.append(fmt::format("[{}", _fullpath));
+            }
             else
+            {
                 _funcname.append(fmt::format("[{}", _filename));
+            }
         }
         // append the line number
         if(_config.include_line && _config.include_filename)
+        {
             _funcname.append(fmt::format(":{}]", get_frame_lineno(frame)));
+        }
         else if(_config.include_line)
+        {
             _funcname.append(fmt::format(":{}", get_frame_lineno(frame)));
+        }
         else if(_config.include_filename)
+        {
             _funcname += "]";
+        }
         return _funcname;
     };
 
-    auto _find_matching = [](const strset_t& _expr, const std::string& _name) {
+    auto const _find_matching = [](const strset_t& _expr, const std::string& _name) {
         const auto _rconstants =
             std::regex_constants::egrep | std::regex_constants::optimize;
         for(const auto& itr : _expr)  // NOLINT
         {
-            if(std::regex_search(_name, std::regex(itr, _rconstants))) return true;
+            if(std::regex_search(_name, std::regex(itr, _rconstants)))
+            {
+                return true;
+            }
         }
         return false;
     };
 
-    bool  _force      = false;
-    auto& _only_funcs = _config.restrict_functions;
-    auto& _incl_funcs = _config.include_functions;
-    auto& _skip_funcs = _config.exclude_functions;
-    auto  _func       = py::cast<std::string>(get_frame_code(frame)->co_name);
+    bool        _force      = false;
+    auto const& _only_funcs = _config.restrict_functions;
+    auto const& _incl_funcs = _config.include_functions;
+    auto const& _skip_funcs = _config.exclude_functions;
+    auto        _func       = py::cast<std::string>(get_frame_code(frame)->co_name);
 
     if(!_only_funcs.empty())
     {
@@ -436,8 +493,10 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
         if(!_force)
         {
             if(_config.verbose > 2)
+            {
                 TIMEMORY_PRINT_HERE("Skipping non-restricted function: %s",
                                     _func.c_str());
+            }
             return;
         }
     }
@@ -451,24 +510,30 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
         else if(_find_matching(_skip_funcs, _func))
         {
             if(_config.verbose > 1)
+            {
                 TIMEMORY_PRINT_HERE("Skipping designated function: '%s'", _func.c_str());
+            }
             if(!_find_matching(default_exclude_functions, _func))
+            {
                 _update_ignore_stack_depth();
+            }
             return;
         }
     }
 
-    auto& _only_files = _config.restrict_filenames;
-    auto& _incl_files = _config.include_filenames;
-    auto& _skip_files = _config.exclude_filenames;
-    auto  _full       = py::cast<std::string>(get_frame_code(frame)->co_filename);
-    auto  _file       = rocprofsys::path::filename(_full);
+    auto const& _only_files = _config.restrict_filenames;
+    auto const& _incl_files = _config.include_filenames;
+    auto const& _skip_files = _config.exclude_filenames;
+    auto        _full       = py::cast<std::string>(get_frame_code(frame)->co_filename);
+    auto        _file       = rocprofsys::path::filename(_full);
 
     if(!_config.include_internal &&
        strncmp(_full.c_str(), _rocprofsys_path.c_str(), _rocprofsys_path.length()) == 0)
     {
         if(_config.verbose > 2)
+        {
             TIMEMORY_PRINT_HERE("Skipping internal function: %s", _func.c_str());
+        }
         return;
     }
 
@@ -478,7 +543,9 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
         if(!_force)
         {
             if(_config.verbose > 2)
+            {
                 TIMEMORY_PRINT_HERE("Skipping non-restricted file: %s", _full.c_str());
+            }
             return;
         }
     }
@@ -492,7 +559,9 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
         else if(_find_matching(_skip_files, _full))
         {
             if(_config.verbose > 2)
+            {
                 TIMEMORY_PRINT_HERE("Skipping non-included file: %s", _full.c_str());
+            }
             return;
         }
     }
@@ -501,15 +570,18 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
                                     _func.c_str(), _get_args().c_str(), _file.c_str(),
                                     _full.c_str());
 
-    auto _label = _get_label(_func, _file, _full);
-    if(_label.empty()) return;
+    auto const _label = _get_label(_func, _file, _full);
+    if(_label.empty())
+    {
+        return;
+    }
 
     static thread_local strset_t _labels{};
     const auto&                  _label_ref = *_labels.emplace(_label).first;
     auto                         _annotate  = _config.annotate_trace;
 
     // start function
-    auto _profiler_call = [&]() {
+    auto const _profiler_call = [&]() {
         int _lineno = 0;
         int _lasti  = 0;
         if(_annotate)
@@ -525,19 +597,17 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
         }
 
         _config.records.emplace_back([&_label_ref, _annotate]() {
-            rocprofsys_pop_category_region(ROCPROFSYS_CATEGORY_PYTHON, _label_ref.c_str(),
-                                           (_annotate) ? _config.annotations.data()
-                                                       : nullptr,
-                                           _config.annotations.size());
+            rocprofsys_pop_category_region_python(
+                _label_ref.c_str(), _annotate ? _config.annotations.data() : nullptr,
+                _config.annotations.size());
         });
-        rocprofsys_push_category_region(ROCPROFSYS_CATEGORY_PYTHON, _label_ref.c_str(),
-                                        (_annotate) ? _config.annotations.data()
-                                                    : nullptr,
-                                        _config.annotations.size());
+        rocprofsys_push_category_region_python(
+            _label_ref.c_str(), _annotate ? _config.annotations.data() : nullptr,
+            _config.annotations.size());
     };
 
     // stop function
-    auto _profiler_return = [&]() {
+    auto const _profiler_return = [&]() {
         if(!_config.records.empty())
         {
             _config.records.back()();
@@ -554,9 +624,6 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
         case PyTrace_C_RETURN: _profiler_return(); break;
         default: break;
     }
-
-    // don't do anything with arg
-    tim::consume_parameters(arg);
 }
 //
 py::module
@@ -564,34 +631,42 @@ generate(py::module& _pymod)
 {
     py::module _prof = _pymod.def_submodule("profiler", "Profiling functions");
 
-    auto _init = []() {
+    auto const _init = []() {
         try
         {
             auto _file =
                 py::module::import("rocprofsys").attr("__file__").cast<std::string>();
             if(_file.find('/') != std::string::npos)
+            {
                 _file = _file.substr(0, _file.find_last_of('/'));
+            }
             get_config().base_module_path = _file;
         } catch(py::cast_error& e)
         {
             std::cerr << "[profiler_init]> " << e.what() << std::endl;
         }
-        if(get_config().is_running) return;
+        if(get_config().is_running)
+        {
+            return;
+        }
         rocprofsys_init_tooling();
         get_config().records.clear();
         get_config().base_stack_depth = -1;
         get_config().is_running       = true;
     };
 
-    auto _fini = []() {
-        if(!get_config().is_running) return;
+    auto const _fini = []() {
+        if(!get_config().is_running)
+        {
+            return;
+        }
         get_config().is_running       = false;
         get_config().base_stack_depth = -1;
         get_config().records.clear();
     };
 
-    auto _sys        = py::module::import("sys");
-    auto _setprofile = _sys.attr("setprofile");
+    auto const _sys        = py::module::import("sys");
+    auto const _setprofile = _sys.attr("setprofile");
 
     _prof.def("profiler_function", &profiler_function, "Profiling function");
     _prof.def("profiler_init", _init, "Initialize the profiler");
@@ -599,14 +674,19 @@ generate(py::module& _pymod)
     _prof.def(
         "profiler_pause",
         [_setprofile]() {
-            if(++get_paused() == 1) _setprofile(nullptr);
+            if(++get_paused() == 1)
+            {
+                _setprofile(nullptr);
+            }
         },
         "Pause the profiler");
     _prof.def(
         "profiler_resume",
         [_setprofile]() {
             if(--get_paused() == 0 && !g_library_paused.load(std::memory_order_relaxed))
+            {
                 _setprofile(py::cpp_function{ profiler_function });
+            }
         },
         "Resume the profiler");
 
@@ -640,16 +720,20 @@ generate(py::module& _pymod)
     CONFIGURATION_PROPERTY("verbosity", std::int32_t, "Verbosity of the logging",
                            get_config().verbose)
 
-    static auto _get_strset = [](const strset_t& _targ) {
+    static auto const _get_strset = [](const strset_t& _targ) {
         auto _out = py::list{};
-        for(auto itr : _targ)
+        for(const auto& itr : _targ)
+        {
             _out.append(itr);
+        }
         return _out;
     };
 
-    static auto _set_strset = [](const py::list& _inp, strset_t& _targ) {
+    static auto const _set_strset = [](const py::list& _inp, strset_t& _targ) {
         for(const auto& itr : _inp)
+        {
             _targ.insert(itr.cast<std::string>());
+        }
     };
 
 #define CONFIGURATION_PROPERTY_LAMBDA(NAME, DOC, GET, SET)                               \
@@ -777,14 +861,15 @@ generate(py::module& _pymod)
     _pycov_details.def(py::self <= py::self);
     _pycov_details.def(py::self >= py::self);
 
-    auto _load_coverage = [](const std::string& _inp) {
+    auto const _load_coverage = [](const std::string& _inp) {
         coverage::code_coverage* _summary = nullptr;
         coverage_data_vector_t*  _details = nullptr;
         std::ifstream            ifs{ _inp };
         if(ifs)
         {
             namespace cereal = tim::cereal;
-            auto ar = tim::policy::input_archive<cereal::JSONInputArchive>::get(ifs);
+            auto const ar =
+                tim::policy::input_archive<cereal::JSONInputArchive>::get(ifs);
 
             try
             {
@@ -804,12 +889,12 @@ generate(py::module& _pymod)
         return std::make_tuple(_summary, _details);
     };
 
-    auto _save_coverage = [](coverage::code_coverage* _summary,
-                             coverage_data_vector_t* _details, std::string _name) {
+    auto const _save_coverage = [](coverage::code_coverage* _summary,
+                                   coverage_data_vector_t* _details, std::string _name) {
         std::stringstream oss{};
         {
             namespace cereal = tim::cereal;
-            auto ar =
+            auto const ar =
                 tim::policy::output_archive<cereal::PrettyJSONOutputArchive>::get(oss);
 
             ar->setNextName("rocprofsys");
@@ -824,7 +909,7 @@ generate(py::module& _pymod)
         _name = fmt::format(
             "{}.json", std::regex_replace(_name, std::regex{ "(.*)(\\.json$)" }, "$1"));
         std::ofstream ofs{};
-        if(tim::filepath::open(ofs, _name))
+        if(rocprofsys::path::create_parent_dirs_and_open_ofstream(ofs, _name))
         {
             tim::operation::file_output_message<rocprofsys::coverage::code_coverage>{}(
                 _name, std::string{ "coverage" });
@@ -840,14 +925,17 @@ generate(py::module& _pymod)
     _pycov.def("save", _save_coverage, "Save code coverage data", py::arg("summary"),
                py::arg("details"), py::arg("filename") = "coverage.json");
 
-    auto _concat_coverage = [](coverage_data_vector_t* _lhs,
-                               coverage_data_vector_t* _rhs) {
-        std::sort(_rhs->begin(), _rhs->end(), std::greater<coverage::coverage_data>{});
+    auto const _concat_coverage = [](coverage_data_vector_t* _lhs,
+                                     coverage_data_vector_t* _rhs) {
+        std::ranges::sort(*_rhs, std::greater<coverage::coverage_data>{});
 
-        auto _find = [_lhs](const auto& _v) {
+        auto const _find = [_lhs](const auto& _v) {
             for(auto iitr = _lhs->begin(); iitr != _lhs->end(); ++iitr)
             {
-                if(*iitr == _v) return std::make_pair(iitr, true);
+                if(*iitr == _v)
+                {
+                    return std::make_pair(iitr, true);
+                }
             }
             return std::make_pair(_lhs->end(), false);
         };
@@ -856,19 +944,25 @@ generate(py::module& _pymod)
         _new_entries.reserve(_rhs->size());
         for(auto& itr : *_rhs)
         {
-            auto litr = _find(itr);
+            auto const litr = _find(itr);
             if(!litr.second)
+            {
                 _new_entries.emplace_back(&itr);
+            }
             else
+            {
                 *litr.first += itr;
+            }
         }
 
         _lhs->reserve(_lhs->size() + _new_entries.size());
         for(auto& itr : _new_entries)
+        {
             _lhs->emplace_back(std::move(*itr));
+        }
         _rhs->clear();
 
-        std::sort(_lhs->begin(), _lhs->end(), std::greater<coverage::coverage_data>{});
+        std::ranges::sort(*_lhs, std::greater<coverage::coverage_data>{});
         return _lhs;
     };
 
@@ -877,12 +971,14 @@ generate(py::module& _pymod)
     using coverage_data_map =
         uomap_t<std::string_view, uomap_t<std::string_view, std::map<size_t, size_t>>>;
 
-    auto _coverage_summary = [](coverage_data_vector_t* _data) {
+    auto const _coverage_summary = [](coverage_data_vector_t* _data) {
         coverage::code_coverage _summary{};
         coverage_data_map       _mdata{};
 
-        for(auto& itr : *_data)
+        for(auto const& itr : *_data)
+        {
             _mdata[itr.module][itr.function][itr.address] += itr.count;
+        }
 
         for(const auto& file : _mdata)
         {
@@ -910,9 +1006,9 @@ generate(py::module& _pymod)
 
     _pycov.def("get_summary", _coverage_summary, "Generate a code coverage summary");
 
-    auto _get_top = [](coverage_data_vector_t* _data, size_t _n) {
+    auto const _get_top = [](coverage_data_vector_t* _data, size_t _n) {
         auto _ret = *_data;
-        std::sort(_ret.begin(), _ret.end(), std::greater<coverage::coverage_data>{});
+        std::ranges::sort(_ret, std::greater<coverage::coverage_data>{});
         _ret.resize(std::min<size_t>(_n, _ret.size()));
         _ret.shrink_to_fit();
         return _ret;
@@ -921,9 +1017,9 @@ generate(py::module& _pymod)
     _pycov.def("get_top", _get_top, "Get the top covered functions", py::arg("details"),
                py::arg("n") = 10);
 
-    auto _get_bottom = [](coverage_data_vector_t* _data, size_t _n) {
+    auto const _get_bottom = [](coverage_data_vector_t* _data, size_t _n) {
         auto _ret = *_data;
-        std::sort(_ret.begin(), _ret.end(), std::less<coverage::coverage_data>{});
+        std::ranges::sort(_ret, std::less<coverage::coverage_data>{});
         _ret.resize(std::min<size_t>(_n, _ret.size()));
         _ret.shrink_to_fit();
         return _ret;
@@ -936,32 +1032,6 @@ generate(py::module& _pymod)
 }
 }  // namespace pycoverage
 
-namespace pyuser
-{
-py::module
-generate(py::module& _pymod)
-{
-    py::module _pyuser = _pymod.def_submodule("user", "User instrumentation");
-
-    _pyuser.def("start_trace", &rocprofsys_user_start_trace,
-                "Enable tracing on this thread and all subsequently created threads");
-    _pyuser.def("stop_trace", &rocprofsys_user_stop_trace,
-                "Disable tracing on this thread and all subsequently created threads");
-    _pyuser.def(
-        "start_thread_trace", &rocprofsys_user_start_thread_trace,
-        "Enable tracing on this thread. Does not apply to subsequently created threads");
-    _pyuser.def(
-        "stop_thread_trace", &rocprofsys_user_stop_thread_trace,
-        "Enable tracing on this thread. Does not apply to subsequently created threads");
-    _pyuser.def("push_region", &rocprofsys_user_push_region,
-                "Start a user-defined region");
-    _pyuser.def("pop_region", &rocprofsys_user_pop_region, "Start a user-defined region");
-    _pyuser.def("error_string", &rocprofsys_user_error_string,
-                "Return a descriptor for the provided error code");
-
-    return _pyuser;
-}
-}  // namespace pyuser
 }  // namespace pyrocprofsys
 //
 //======================================================================================//

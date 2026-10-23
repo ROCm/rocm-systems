@@ -243,6 +243,7 @@ DriverState::decrRefCount()
 
     // Clear the maps if the reference count just hit zero
     if (ref_count == 0) {
+        batch_map->clear();
         buffer_map->clear();
         file_map->clear();
     }

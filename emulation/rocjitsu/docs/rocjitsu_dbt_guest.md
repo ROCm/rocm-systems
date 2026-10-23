@@ -64,53 +64,53 @@ Underneath:
 1. ROCR must internally discover both the real host GPU and the synthetic guest
    GPU.
 
-   The selected host must stay available for queues, allocations, and code
-   loading. The synthetic guest must also exist so ROCR can build the guest HSA
-   agent. Public HSA iteration is then shadowed: rocjitsu emits the guest agent
-   in the selected host's ordinal slot and suppresses the guest's own slot. This
-   keeps applications that choose the first GPU on the guest path while leaving
-   the host agent alive for execution.
+    The selected host must stay available for queues, allocations, and code
+    loading. The synthetic guest must also exist so ROCR can build the guest HSA
+    agent. Public HSA iteration is then shadowed: rocjitsu emits the guest agent
+    in the selected host's ordinal slot and suppresses the guest's own slot. This
+    keeps applications that choose the first GPU on the guest path while leaving
+    the host agent alive for execution.
 
-   If `ROCR_VISIBLE_DEVICES` is set, the launcher preserves its selected order
-   and expands it with the appended guest ordinal so both sides remain visible
-   internally before the HSA hook applies public shadowing. Because CLR applies
-   `HIP_VISIBLE_DEVICES` or `CUDA_VISIBLE_DEVICES` after HSA agent iteration,
-   the launcher normalizes an existing client selector to equivalent numeric
-   ordinals after ROCR filtering. This keeps host UUID selection meaningful
-   after the host's public identity is replaced by the guest. OpenCL's
-   `GPU_DEVICE_ORDINAL` remains owned by the client runtime and is not used to
-   choose the DBT host.
+    If `ROCR_VISIBLE_DEVICES` is set, the launcher preserves its selected order
+    and expands it with the appended guest ordinal so both sides remain visible
+    internally before the HSA hook applies public shadowing. Because CLR applies
+    `HIP_VISIBLE_DEVICES` or `CUDA_VISIBLE_DEVICES` after HSA agent iteration,
+    the launcher normalizes an existing client selector to equivalent numeric
+    ordinals after ROCR filtering. This keeps host UUID selection meaningful
+    after the host's public identity is replaced by the guest. OpenCL's
+    `GPU_DEVICE_ORDINAL` remains owned by the client runtime and is not used to
+    choose the DBT host.
 
 2. Guest-facing discovery stays guest-shaped.
 
-   Calls that applications use to decide which kernel image to load, such as
-   agent name and ISA iteration, should report the synthetic guest agent. If we
-   mapped those calls to the host, the application would choose host kernels
-   and skip DBT.
+    Calls that applications use to decide which kernel image to load, such as
+    agent name and ISA iteration, should report the synthetic guest agent. If we
+    mapped those calls to the host, the application would choose host kernels
+    and skip DBT.
 
 3. Execution-facing calls map guest handles to host handles.
 
-   Queue creation, code-object load, symbol lookup, memory access, and AMD
-   extension operations that take an agent are redirected from the guest agent
-   to the selected host agent.
+    Queue creation, code-object load, symbol lookup, memory access, and AMD
+    extension operations that take an agent are redirected from the guest agent
+    to the selected host agent.
 
 4. KFD emulation stops at guest discovery.
 
-   `GuestKfd` should not run queues, allocate real guest VRAM, or process AQL
-   packets. It does handle enough startup plumbing for ROCR discovery: process
-   apertures, clock counters, VM acquisition, available-memory queries, memory
-   policy setup, synthetic guest memory handles, and guest-to-host gpu_id
-   rewrites for map/unmap requests. If a guest execution ioctl is reached after
-   the HSA hooks are in place, that is a missed HSA interception and should be
-   visible in logs.
+    `GuestKfd` should not run queues, allocate real guest VRAM, or process AQL
+    packets. It does handle enough startup plumbing for ROCR discovery: process
+    apertures, clock counters, VM acquisition, available-memory queries, memory
+    policy setup, synthetic guest memory handles, and guest-to-host gpu_id
+    rewrites for map/unmap requests. If a guest execution ioctl is reached after
+    the HSA hooks are in place, that is a missed HSA interception and should be
+    visible in logs.
 
 5. Code objects are loaded against the host ROCR agent.
 
-   ROCR validates code-object ISA against the load agent using ELF header
-   fields. The hook translates the ELF to host ISA and calls the original
-   `hsa_executable_load_agent_code_object()` with the host agent, not the guest
-   agent. Symbol queries using the guest agent are later remapped to the host
-   agent so application code still works.
+    ROCR validates code-object ISA against the load agent using ELF header
+    fields. The hook translates the ELF to host ISA and calls the original
+    `hsa_executable_load_agent_code_object()` with the host agent, not the guest
+    agent. Symbol queries using the guest agent are later remapped to the host
+    agent so application code still works.
 
 ## Architecture
 
@@ -200,16 +200,26 @@ rocjitsu goes through the patched table and is covered.
   without registered memory bytes fail rather than retrying an incompatible
   original ELF.
 - `librocjitsu_hooks.so` and the gfx1250 B0/A0 hotswap hook
-  (`libhsa_hotswap_rocjitsu.so`) are mutually exclusive in `HSA_TOOLS_LIB`.
-  Both patch the same four code-object entries of the HSA core API table
+  (`libhsa_hotswap_rocjitsu.so`) should not both be active. They overlap on five
+  code-object entries of the HSA core API table
   (`hsa_code_object_reader_create_from_file`,
-  `hsa_code_object_reader_create_from_memory`, `hsa_executable_destroy`,
-  `hsa_executable_load_agent_code_object`), so whichever tool ROCR loads
-  second wraps the first one's wrappers. Nothing enforces or detects that
-  order: it follows only the order of names in `HSA_TOOLS_LIB`, and neither
-  library exports `HSA_AMD_TOOL_PRIORITY` to pin its slot. Load exactly one
-  of them. The supported launch path does this for you — `rocjitsu` *sets*
-  `HSA_TOOLS_LIB` to the DBT hook rather than appending to it.
+  `hsa_code_object_reader_create_from_memory`,
+  `hsa_code_object_reader_destroy`, `hsa_executable_destroy`,
+  `hsa_executable_load_agent_code_object`), so whichever ROCR loads second wraps
+  the first one's wrappers.
+
+    Note that `HSA_TOOLS_LIB` does not decide automatic loading. ROCR calls
+    `Runtime::LoadHotswapTool()` before it reads `HSA_TOOLS_LIB`. Current releases
+    load the hotswap hook when `HSA_HOTSWAP_ENABLE` is true and a gfx1250 A0 agent
+    is present; older releases load it unless `HSA_HOTSWAP_DISABLE` is true.
+
+    The supported DBT launch path enforces one hook across both runtime
+    generations: `rocjitsu` sets `HSA_HOTSWAP_ENABLE=0` and
+    `HSA_HOTSWAP_DISABLE=1`, then replaces `HSA_TOOLS_LIB` with the DBT hook rather
+    than appending to it. An inherited parent setting therefore cannot enable the
+    automatic hotswap hook. Neither library exports `HSA_AMD_TOOL_PRIORITY`, so
+    nothing pins a slot among tools that do come from `HSA_TOOLS_LIB`.
+
 - `HSA_TOOLS_DISABLE_REGISTER=1` is a workaround. The better design is a
   rocprofiler-register API-table interposer that applies the same shadowing
   before rocprofiler validates HSA agents.

@@ -38,7 +38,9 @@ public:
   ~AmdGpuCodeObject();
 
   /// @brief Load a standalone device ELF from @p elf_path.
+  /// @details Expected loading and parsing failures leave is_valid() false.
   /// @param[in] elf_path Path to a standalone device ELF file.
+  /// @throws std::bad_alloc if memory allocation fails.
   explicit AmdGpuCodeObject(const std::string &elf_path);
 
   /// @brief Construct from raw ELF bytes in memory.
@@ -90,6 +92,9 @@ public:
 private:
   void load_sections();
 
+  /// Section-header metadata for executable SHT_NOBITS ranges. These are not
+  /// materialized in all_sections(), whose entries always own readable bytes.
+  std::vector<std::unique_ptr<Section>> executable_nobits_sections_;
   rj_code_target_id_t target_id_ = ROCJITSU_CODE_TARGET_INVALID;
   std::string offload_kind_;
   std::string target_triple_;

@@ -3,20 +3,21 @@
 
 #include "rocjitsu/code/patch/probe_clobber.h"
 
-#include "rocjitsu/analysis/def_use_chain.h"
+#include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/patch/error_report.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
+#include "rocjitsu/isa/target_registry.h"
 
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
-#include <vector>
 
 namespace rocjitsu {
 
@@ -67,8 +68,8 @@ void note_special_state(ProbeClobberSummary &summary, RegClass cls) {
 // TODO: drop this name fallback once the operand-type modeling work lands.
 std::optional<RegClass> special_class_from_name(std::string_view name) {
   std::string lower(name);
-  std::transform(lower.begin(), lower.end(), lower.begin(),
-                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  std::ranges::transform(lower, lower.begin(),
+                         [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
   const std::string_view n = lower;
   auto starts_with = [&](std::string_view prefix) { return n.substr(0, prefix.size()) == prefix; };
   if (starts_with("exec"))
@@ -117,19 +118,23 @@ void scan_special_state(const Instruction &inst, ProbeClobberSummary &summary) {
 
 std::optional<ProbeClobberSummary> build_probe_clobber_summary(const ProbeCallable &callable,
                                                                std::string *error_out) {
-  auto decoder = Decoder::create(callable.arch);
+  const auto &registry = default_isa_target_registry();
+  if (callable.target != ROCJITSU_CODE_TARGET_INVALID) {
+    const IsaTargetDescriptor *descriptor = registry.find(callable.target);
+    if (descriptor == nullptr || descriptor->architecture_id != callable.arch) {
+      report(error_out, "probe target does not match the probe architecture");
+      return std::nullopt;
+    }
+  }
+  auto decoder = callable.target == ROCJITSU_CODE_TARGET_INVALID
+                     ? Decoder::create(callable.arch)
+                     : Decoder::create(registry, callable.target);
   if (!decoder) {
     report(error_out, "no decoder available for the probe architecture");
     return std::nullopt;
   }
 
-  // One extra zero word of slack so the decoder can always read a trailing
-  // second word for an 8-byte instruction whose first word is the last body
-  // word. build_probe_callable already verified the body decodes cleanly and is
-  // not truncated; this guards the independent decode here. See probe_callable.
-  const size_t num_words = callable.body_words.size();
-  std::vector<uint32_t> words(num_words + 1, 0);
-  std::copy(callable.body_words.begin(), callable.body_words.end(), words.begin());
+  const std::span<const uint32_t> body(callable.body_words);
 
   ProbeClobberSummary summary;
   // probe_callable rejects private/scratch access, so this stays false. Kept as
@@ -137,26 +142,27 @@ std::optional<ProbeClobberSummary> build_probe_clobber_summary(const ProbeCallab
   summary.uses_private_segment = false;
 
   size_t w = 0;
-  while (w < num_words) {
-    std::unique_ptr<Instruction> inst(decoder->decode(&words[w]));
-    if (!inst) {
-      report(error_out, "failed to decode probe body while summarizing clobbers");
+  while (w < body.size()) {
+    util::StringDiagnostic decode_error;
+    // Bounded by the words left in the body, so a truncated trailing
+    // instruction fails to decode rather than reading past the copy. See
+    // build_probe_callable, which applies the same bound.
+    DecodeResult decoded =
+        decoder->decode_window(body.subspan(w), w * sizeof(uint32_t), decode_error.emitter());
+    if (decoded.failed()) {
+      const std::string message = "failed to decode probe body at word " + std::to_string(w) +
+                                  " while summarizing clobbers: " + decode_error.message();
+      report(error_out, message.c_str());
       return std::nullopt;
     }
-    const int size = inst->size();
-    if (size != 4 && size != 8) {
-      report(error_out, "probe body instruction has an unexpected size");
-      return std::nullopt;
-    }
-    const size_t inst_words = static_cast<size_t>(size) / sizeof(uint32_t);
-    if (w + inst_words > num_words) {
-      report(error_out, "probe body instruction extends past the copied body");
-      return std::nullopt;
-    }
+    std::unique_ptr<Instruction> inst = std::move(decoded).value();
+    const size_t inst_words = static_cast<size_t>(inst->size()) / sizeof(uint32_t);
 
-    // Ordinary clobbers (SGPR/VGPR/AccVGPR), including implicit defs.
+    // Ordinary clobbers (SGPR/VGPR/AccVGPR), including implicit defs. Special
+    // singletons in du.defs are projected out — they are summarized separately
+    // via scan_special_state below and must not enter ordinary_clobbers.
     const InstDefUse du(*inst);
-    summary.ordinary_clobbers |= du.defs;
+    summary.ordinary_clobbers |= du.defs.ordinary_only();
 
     scan_special_state(*inst, summary);
 

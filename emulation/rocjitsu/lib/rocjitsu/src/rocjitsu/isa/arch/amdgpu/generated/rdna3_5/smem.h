@@ -21,6 +21,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
 };
 
 class SLoadB64Smem : public Smem {
@@ -30,6 +31,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
 };
 
 class SLoadB128Smem : public Smem {
@@ -39,6 +41,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
 };
 
 class SLoadB256Smem : public Smem {
@@ -48,6 +51,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
 };
 
 class SLoadB512Smem : public Smem {
@@ -57,51 +61,77 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
 };
 
 class SBufferLoadB32Smem : public Smem {
 public:
   SBufferLoadB32Smem(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.buffer_resource = &sbase;
+    modifiers.scalar_buffer_words = 3;
+  }
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
 };
 
 class SBufferLoadB64Smem : public Smem {
 public:
   SBufferLoadB64Smem(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.buffer_resource = &sbase;
+    modifiers.scalar_buffer_words = 3;
+  }
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
 };
 
 class SBufferLoadB128Smem : public Smem {
 public:
   SBufferLoadB128Smem(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.buffer_resource = &sbase;
+    modifiers.scalar_buffer_words = 3;
+  }
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
 };
 
 class SBufferLoadB256Smem : public Smem {
 public:
   SBufferLoadB256Smem(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.buffer_resource = &sbase;
+    modifiers.scalar_buffer_words = 3;
+  }
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
 };
 
 class SBufferLoadB512Smem : public Smem {
 public:
   SBufferLoadB512Smem(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.buffer_resource = &sbase;
+    modifiers.scalar_buffer_words = 3;
+  }
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
 };
 
 class SGl1InvSmem : public Smem {

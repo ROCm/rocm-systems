@@ -10,6 +10,8 @@
 #include "rocsettings.hpp"
 #include "device/rocm/rocglinterop.hpp"
 
+#include <limits>
+
 namespace amd::roc {
 
 // ================================================================================================
@@ -89,12 +91,26 @@ Settings::Settings() {
 
 // ================================================================================================
 bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, bool coop_groups,
-                      bool isXgmi) {
+                      bool isXgmi, bool isAPU) {
   uint32_t gfxipMajor = isa.versionMajor();
   uint32_t gfxipMinor = isa.versionMinor();
   uint32_t gfxStepping = isa.versionStepping();
 
   customHostAllocator_ = false;
+
+  // gfx942 pins only above 1 MiB; pinning below that causes performance drops (ROCM-27725).
+  // gfx1151 does not pin at any size, using the memcpy path is faster (ROCM-28901).
+  // Other APUs keep the default threshold.
+  if (isAPU && flagIsDefault(GPU_PINNED_MIN_XFER_SIZE)) {
+    constexpr size_t kNeverPinXferSize = std::numeric_limits<size_t>::max();
+    const bool isGfx1151 = (gfxipMajor == 11 && gfxipMinor == 5 && gfxStepping == 1);
+    const bool isGfx942 = (gfxipMajor == 9 && gfxipMinor == 4 && gfxStepping == 2);
+    if (isGfx1151) {
+      pinnedMinXferSize_ = kNeverPinXferSize;
+    } else if (isGfx942) {
+      pinnedMinXferSize_ = 1 * Mi;
+    }
+  }
 
   if (fullProfile) {
     pinnedXferSize_ = 0;
@@ -150,6 +166,7 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
   if ((gfxipMajor == 9 && gfxipMinor >= 4) ||
       (gfxipMajor == 12 && gfxipMinor >= 5)) {
     sdma_swap_supported_ = true;
+    sdma_swap_alignment_ = (gfxipMajor == 12) ? 32 : 64;
   }
 
   setKernelArgImpl(isa, isXgmi);
@@ -189,11 +206,10 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
     groupMemCarveout_ = true;
   }
 
-  // SDMA indirect copy uses the gfx1250 wait/signal-indirect SDMA
-  // packet that dereferences a pointer-to-pointer slot before issuing the
-  // copy.
-  if (gfxipMajor == 12 && gfxipMinor == 5) {
+  // SDMA indirect copies dereference pointer slots before copying.
+  if (gfxipMajor == 12 && gfxipMinor >= 5) {
     sdma_indirect_supported_ = true;
+    sdma_indirect_max_size_ = 0x3fffffff;  // ROCr MaxSingleLinearCopySize
   }
 
 #if defined(_WIN32)
@@ -278,12 +294,11 @@ void Settings::setKernelArgImpl(const amd::Isa& isa, bool isXgmi) {
   if (isGfx94x || isGfx125x) {
     kernel_arg_impl_ = kernelArgImpl;
     kernel_arg_opt_ = true;
+    aql_device_ring_buf_ = DEBUG_CLR_AQL_DEV_QUEUE > 0;
   }
 
   if (!flagIsDefault(HIP_FORCE_DEV_KERNARG)) {
     kernel_arg_impl_ = kernelArgImpl & (HIP_FORCE_DEV_KERNARG ? 0xF : 0x0);
   }
-
-  aql_device_ring_buf_ = (DEBUG_CLR_AQL_DEV_QUEUE > 0);
 }
 }  // namespace amd::roc

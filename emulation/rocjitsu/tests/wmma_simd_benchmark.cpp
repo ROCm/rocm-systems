@@ -4,21 +4,27 @@
 /// @file wmma_simd_benchmark.cpp
 /// @brief A/B microbenchmark: SIMD vs forced-scalar execution of the shared
 /// WMMA/SWMMAC execute kernels (exec_wmma_f32 / exec_wmma_i32 / exec_wmma_f16 /
-/// exec_swmmac_*), covering the gfx1250 (RDNA4, wave32) matrix shapes that route
+/// exec_swmmac_*), covering the gfx1250 (CDNA5, wave32) matrix shapes that route
 /// through them.
 ///
 /// Both modes run in the same process; util::set_force_scalar_for_testing flips
 /// the kernel between its dense native-width matmul (SIMD) and the per-output
-/// scalar triple-loop. The benchmark drives the execute kernels directly (no
-/// decode) so it isolates the matmul body, then reports ns/op and speedup and
-/// checks SIMD-vs-scalar agreement:
+/// scalar triple-loop. Most cases drive the execute kernels directly to isolate
+/// the matmul body; the mixed BF16/F32 target also measures dispatch through a
+/// pre-decoded instruction. The benchmark reports ns/op and speedup and checks
+/// SIMD-vs-scalar agreement:
 ///   - i32 output: integer MAC is exact, bit-identical.
-///   - f32/f16/bf16 output: SIMD uses fused FMA (matching the hardware) while the
-///     scalar reference is non-fused, so results agree to a small tolerance.
+///   - most f32/f16/bf16 output paths retain a fused-vs-nonfused tolerance;
+///   - mixed BF16/F32 uses fused scalar and SIMD paths and compares raw output.
 
+#include "decode_test_util.h"
 #include "mma_test_util.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
+#include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -29,6 +35,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <bit>
 #include <chrono>
 #include <cmath>
@@ -36,6 +43,8 @@
 #include <cstdio>
 #include <functional>
 #include <random>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -56,7 +65,7 @@ constexpr uint32_t S0_OFF = 0;
 constexpr uint32_t S1_OFF = 32;
 constexpr uint32_t S2_OFF = 64;
 constexpr uint32_t INDEX_OFF = 96;
-constexpr uint32_t OUT_REGS = 8; // dst window read back for the correctness check.
+constexpr uint32_t OUT_REGS = 8; // Default dst window read back for the correctness check.
 
 constexpr uint32_t INDEX_ENTRIES = 16;
 constexpr uint32_t INDEX_KEY = 0;
@@ -72,7 +81,7 @@ struct BenchFixture {
 
   BenchFixture() : gpu_mem("wmma_simd_bench_mem"), l2("wmma_simd_bench_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+    cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
@@ -139,9 +148,9 @@ struct BenchFixture {
         cu->write_vgpr(vbase + off + reg, lane, value);
   }
 
-  std::vector<uint32_t> snapshot_out() const {
-    std::vector<uint32_t> out(OUT_REGS * WF_SIZE);
-    for (uint32_t reg = 0; reg < OUT_REGS; ++reg)
+  std::vector<uint32_t> snapshot_out(uint32_t out_regs = OUT_REGS) const {
+    std::vector<uint32_t> out(out_regs * WF_SIZE);
+    for (uint32_t reg = 0; reg < out_regs; ++reg)
       for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
         out[reg * WF_SIZE + lane] = cu->read_vgpr(vbase + S2_OFF + reg, lane);
     return out;
@@ -188,34 +197,39 @@ void compare(const char *label, Cmp cmp, const std::vector<uint32_t> &sc,
   }
 }
 
-// Drive one WMMA kernel A/B: run scalar then SIMD, compare dst, then time both.
+// Drive one WMMA kernel A/B: compare dst, then time balanced scalar/SIMD blocks.
 void bench(const char *label, BenchFixture &fx, const std::function<void()> &run, double macs,
-           Cmp cmp) {
+           Cmp cmp, uint32_t out_regs = OUT_REGS) {
   ASSERT_NE(fx.cu, nullptr);
   ASSERT_NE(fx.wf, nullptr);
 
   util::set_force_scalar_for_testing(true);
   run();
-  auto result_scalar = fx.snapshot_out();
+  auto result_scalar = fx.snapshot_out(out_regs);
   util::set_force_scalar_for_testing(false);
   run();
-  auto result_simd = fx.snapshot_out();
+  auto result_simd = fx.snapshot_out(out_regs);
   compare(label, cmp, result_scalar, result_simd);
 
-  auto time_mode = [&](bool force_scalar) -> double {
+  auto time_block = [&](bool force_scalar, int iterations) -> Clock::duration::rep {
     util::set_force_scalar_for_testing(force_scalar);
-    for (int i = 0; i < 50; ++i)
+    for (int i = 0; i < 25; ++i)
       run();
     auto t0 = Clock::now();
-    for (int i = 0; i < ITERATIONS; ++i)
+    for (int i = 0; i < iterations; ++i)
       run();
     auto t1 = Clock::now();
     util::set_force_scalar_for_testing(false);
-    return std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count() /
-           static_cast<double>(ITERATIONS);
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
   };
-  double sc = time_mode(true);
-  double sd = time_mode(false);
+  const int first_iterations = ITERATIONS / 2;
+  const int second_iterations = ITERATIONS - first_iterations;
+  const auto sc_first = time_block(true, first_iterations);
+  const auto sd_first = time_block(false, first_iterations);
+  const auto sd_second = time_block(false, second_iterations);
+  const auto sc_second = time_block(true, second_iterations);
+  const double sc = static_cast<double>(sc_first + sc_second) / ITERATIONS;
+  const double sd = static_cast<double>(sd_first + sd_second) / ITERATIONS;
   std::printf("\n  === %s (gfx1250, wave32) ===\n"
               "  MACs/op: %.0f   scalar: %9.1f ns   simd: %9.1f ns   speedup: %5.2fx\n",
               label, macs, sc, sd, (sd > 0) ? sc / sd : 0.0);
@@ -404,6 +418,57 @@ TEST(WmmaSimdBenchmark, Bf16_16x16x32_bf16_Specialized) {
   bench("v_wmma_bf16_16x16x32_bf16 [specialized]", fx, run, double(M) * N * K, Cmp::Bf16Tol);
 }
 
+// Dense WMMA, f32 accumulator and packed bf16 output.  Keep the eight-register
+// f32 accumulator separate from the four-register destination so repeated
+// iterations do not reinterpret a prior packed result as the next accumulator.
+TEST(WmmaSimdBenchmark, Bf16F32_16x16x32_bf16) {
+  SKIP_IF_NO_SIMD();
+  if (util::native<float>::size() != 16)
+    GTEST_SKIP() << "the BF16F32 fast path requires 16-lane native SIMD";
+  BenchFixture fx;
+  constexpr uint32_t M = 16, N = 16, K = 32;
+  fx.seed_bf16(S0_OFF, 8, mma_test::SmallGen(65));
+  fx.seed_bf16(S1_OFF, 8, mma_test::SmallGen(66));
+  fx.seed(INDEX_OFF, 8, /*bit_width=*/32, mma_test::SmallGen(67));
+  auto run = [&] {
+    amdgpu::exec_wmma_bf16f32_16x16x32_bf16(*fx.cu, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
+                                            fx.vbase + S1_OFF, fx.vbase + INDEX_OFF,
+                                            amdgpu::ACC_FROM_VGPR, /*c_modifier=*/0);
+  };
+  bench("v_wmma_bf16f32_16x16x32_bf16", fx, run, double(M) * N * K, Cmp::IntExact, /*out_regs=*/4);
+}
+
+// Full decoded/executed path for the same mixed-width instruction.  Decode is
+// intentionally outside the timed loop; dispatch and architectural register
+// routing remain inside it.
+TEST(WmmaSimdBenchmark, DecodedBf16F32_16x16x32_bf16) {
+  SKIP_IF_NO_SIMD();
+  if (util::native<float>::size() != 16)
+    GTEST_SKIP() << "the BF16F32 fast path requires 16-lane native SIMD";
+  BenchFixture fx;
+  constexpr uint32_t M = 16, N = 16, K = 32;
+  fx.seed_bf16(S0_OFF, 8, mma_test::SmallGen(68));
+  fx.seed_bf16(S1_OFF, 8, mma_test::SmallGen(69));
+  fx.seed(INDEX_OFF, 8, /*bit_width=*/32, mma_test::SmallGen(70));
+
+  const auto words = cdna5::build_vop3p(
+      cdna5::kVWmmaBf16f3216x16x32Bf16Vop3p,
+      {.vdst = S2_OFF, .src0 = 256 + S0_OFF, .src1 = 256 + S1_OFF, .src2 = 256 + INDEX_OFF});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "v_wmma_bf16f32_16x16x32_bf16");
+  ASSERT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
+  bool execution_failed = false;
+  auto run = [&] {
+    execution_failed |= !fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded();
+  };
+  bench("decoded v_wmma_bf16f32_16x16x32_bf16", fx, run, double(M) * N * K, Cmp::IntExact,
+        /*out_regs=*/4);
+  ASSERT_FALSE(execution_failed);
+}
+
 // Dense WMMA, i32 output, iu8 input, K=64 — the real gfx1250 integer shape,
 // generic baseline vs specialized (constexpr + i8 bulk sign-extend convert).
 TEST(WmmaSimdBenchmark, I32_16x16x64_iu8) {
@@ -462,6 +527,62 @@ TEST(WmmaSimdBenchmark, F32_16x16x64_fp8_Specialized) {
                                                           fx.vbase + S2_OFF, /*const_acc=*/0);
   };
   bench("v_wmma_f32_16x16x64_fp8_fp8 [specialized]", fx, run, double(M) * N * K, Cmp::F32Tol);
+}
+
+TEST(WmmaSimdBenchmark, DecodedScaleF32_16x16x128_fp4) {
+  SKIP_IF_NO_SIMD();
+  BenchFixture fx;
+  constexpr uint32_t M = 16, N = 16, K = 128;
+  const uint32_t fp4_one = util::f32_to_fp4_e2m1_rne(1.0f);
+  const uint32_t packed_fp4_one = fp4_one * 0x11111111u;
+  fx.seed_words(S0_OFF, 8, packed_fp4_one);
+  fx.seed_words(S1_OFF, 8, packed_fp4_one);
+  fx.seed_words(S2_OFF, OUT_REGS, 0);
+
+  constexpr auto prefix = cdna5::build_vop3p(0x35, {.src0 = 128, .src1 = 128, .src2 = 256});
+  auto matrix = cdna5::build_vop3p(cdna5::kVWmmaF3216x16x128F8f6f4Vop3p, {.vdst = S2_OFF,
+                                                                          .opsel = 4,
+                                                                          .src0 = 256 + S0_OFF,
+                                                                          .src1 = 256 + S1_OFF,
+                                                                          .src2 = 128,
+                                                                          .opsel_hi = 0});
+  matrix[0] |= 1u << 14;
+  const std::array<uint32_t, 4> words = {prefix[0], prefix[1], matrix[0], matrix[1]};
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+  auto run = [&] { (void)fx.cu->execute_instruction(inst.get(), *fx.wf); };
+  bench("decoded v_wmma_scale_f32_16x16x128_fp4_fp4", fx, run, double(M) * N * K, Cmp::F32Tol);
+}
+
+TEST(WmmaSimdBenchmark, DecodedScaleF32_32x16x128_fp4) {
+  SKIP_IF_NO_SIMD();
+  BenchFixture fx;
+  constexpr uint32_t M = 32, N = 16, K = 128;
+  constexpr uint32_t kM32OutRegs = 16;
+  const uint32_t fp4_one = util::f32_to_fp4_e2m1_rne(1.0f);
+  const uint32_t packed_fp4_one = fp4_one * 0x11111111u;
+  fx.seed_words(S0_OFF, 16, packed_fp4_one);
+  fx.seed_words(S1_OFF, 8, packed_fp4_one);
+  fx.seed_words(S2_OFF, kM32OutRegs, 0);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  for (const auto &[prefix_op, label] : std::array<std::pair<uint16_t, const char *>, 2>{
+           {{0x35, "decoded v_wmma_scale_f32_32x16x128_fp4"},
+            {0x3a, "decoded v_wmma_scale16_f32_32x16x128_fp4"}}}) {
+    const auto prefix = cdna5::build_vop3p(prefix_op, {.src0 = 128, .src1 = 128, .src2 = 256});
+    auto matrix = cdna5::build_vop3p(
+        cdna5::kVWmmaF3232x16x128F4Vop3p,
+        {.vdst = S2_OFF, .src0 = 256 + S0_OFF, .src1 = 256 + S1_OFF, .src2 = 128, .opsel_hi = 3});
+    matrix[0] |= 1u << 14;
+    const std::array<uint32_t, 4> words = {prefix[0], prefix[1], matrix[0], matrix[1]};
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    auto run = [&] { (void)fx.cu->execute_instruction(inst.get(), *fx.wf); };
+    bench(label, fx, run, double(M) * N * K, Cmp::F32Tol, kM32OutRegs);
+  }
 }
 
 // Dense WMMA, f32 output, bf8 input, K=128 — specialized.

@@ -100,6 +100,9 @@ class InterruptSignal : private LocalSignal, public Signal {
   explicit InterruptSignal(hsa_signal_value_t initial_value,
                            HsaEvent* use_event = NULL);
 
+  /// @brief Builds a batch member in @p slot. See LocalSignal.
+  InterruptSignal(hsa_signal_value_t initial_value, SignalBatch* batch, SharedSignal* slot);
+
   ~InterruptSignal();
 
   // Below are various methods corresponding to the APIs, which load/store the
@@ -113,6 +116,8 @@ class InterruptSignal : private LocalSignal, public Signal {
   void StoreRelaxed(hsa_signal_value_t value);
 
   void StoreRelease(hsa_signal_value_t value);
+
+  void StoreReleaseAndNotify(hsa_signal_value_t value);
 
   hsa_signal_value_t WaitRelaxed(hsa_signal_condition_t condition,
                                  hsa_signal_value_t compare_value,
@@ -208,6 +213,8 @@ class InterruptSignal : private LocalSignal, public Signal {
   }
 
   void SetEvent();
+
+  void AttachEvent(HsaEvent* use_event);
 
   DISALLOW_COPY_AND_ASSIGN(InterruptSignal);
 };

@@ -44,7 +44,7 @@ std::string make_single_se_gfx1250_config(uint32_t num_cus) {
              std::to_string(i) + R"(","latency":1,"weight":10})";
   }
 
-  return R"({"max_ticks":10000,"num_threads":1,"vm":{"arch":"gfx1250"},)"
+  return R"({"max_ticks":10000,"num_threads":1,"vm":{"arch":"cdna5"},)"
          R"("topology":{"root":{"name":"soc","type":"soc","children":[)"
          R"({"name":"vram","type":"gpu_memory"},)"
          R"({"name":"xcd0","type":"xcd","children":[)"
@@ -54,7 +54,9 @@ std::string make_single_se_gfx1250_config(uint32_t num_cus) {
          R"({"name":")" +
          cu_range +
          R"(","type":"compute_unit","config":[)"
-         R"({"key":"num_wf_slots","value":"80"},)"
+         R"({"key":"num_wf_slots","value":")" +
+         std::to_string(kGfx1250WaveSlotsPerCu) +
+         R"("},)"
          R"({"key":"sgprs_per_wf","value":"128"},)"
          R"({"key":"vgprs_per_wf","value":"1024"},)"
          R"({"key":"lds_size_kb","value":"160"})"
@@ -64,6 +66,7 @@ std::string make_single_se_gfx1250_config(uint32_t num_cus) {
 
 TEST(Gfx1250ExecutionTest, ClusterLoadsDecodeAndPopulateVectorMemState) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -245,6 +248,7 @@ TEST(Gfx1250ExecutionTest, ClusterLoadsDecodeAndPopulateVectorMemState) {
 
 TEST(Gfx1250ExecutionTest, GlobalStoreAsyncFromLdsAppliesIoffsetToGlobalAndLdsSource) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -294,6 +298,7 @@ TEST(Gfx1250ExecutionTest, GlobalStoreAsyncFromLdsAppliesIoffsetToGlobalAndLdsSo
 
 TEST(Gfx1250ExecutionTest, GlobalStoreAsyncFromOutOfRangeLdsSourceProducesZeroPayload) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -321,6 +326,7 @@ TEST(Gfx1250ExecutionTest, GlobalStoreAsyncFromOutOfRangeLdsSourceProducesZeroPa
 
 TEST(Gfx1250ExecutionTest, AsyncLdsAddressRejectsAccessOutsideAllocation) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -335,6 +341,169 @@ TEST(Gfx1250ExecutionTest, AsyncLdsAddressRejectsAccessOutsideAllocation) {
   EXPECT_EQ(cdna5::async_lds_lane_address(inst, *wf, 256, 4), wf->lds_base() + 252);
   EXPECT_EQ(cdna5::async_lds_lane_address(inst, *wf, 256, 16), amdgpu::kInvalidLdsAddress);
   EXPECT_EQ(cdna5::async_lds_lane_address(inst, *wf, 260, 4), amdgpu::kInvalidLdsAddress);
+
+  inst.ioffset = 64;
+  EXPECT_EQ(cdna5::async_lds_lane_address(inst, *wf, UINT32_MAX - 63, 4), wf->lds_base());
+}
+
+TEST(Gfx1250ExecutionTest, DecodedAsyncLdsLoadsHonorEveryAccessWidthAtAllocationEnd) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0x1u);
+  wf->set_lds_base(cu->allocate_lds(256));
+  wf->set_lds_size(256);
+
+  constexpr uint64_t kGlobalBase = 0x1a0000u;
+  write_wave_sgpr(*cu, *wf, 0, static_cast<uint32_t>(kGlobalBase));
+  write_wave_sgpr(*cu, *wf, 1, static_cast<uint32_t>(kGlobalBase >> 32));
+  const uint32_t vgpr_base = wf->vgpr_alloc().base;
+  cu->write_vgpr(vgpr_base, 0, 0);
+
+  struct TestCase {
+    uint16_t opcode;
+    std::string_view mnemonic;
+    uint32_t access_size;
+  };
+  constexpr TestCase cases[] = {
+      {cdna5::kGlobalLoadAsyncToLdsB8Vglobal, "global_load_async_to_lds_b8", 1},
+      {cdna5::kGlobalLoadAsyncToLdsB32Vglobal, "global_load_async_to_lds_b32", 4},
+      {cdna5::kGlobalLoadAsyncToLdsB64Vglobal, "global_load_async_to_lds_b64", 8},
+      {cdna5::kGlobalLoadAsyncToLdsB128Vglobal, "global_load_async_to_lds_b128", 16},
+  };
+
+  for (const auto &tc : cases) {
+    SCOPED_TRACE(tc.mnemonic);
+    const auto words =
+        cdna5::build_vglobal(tc.opcode, {.saddr = 0, .vdst = 1, .vaddr = 0, .ioffset = 0});
+    auto execute_at = [&](uint32_t relative_addr) {
+      cu->write_vgpr(vgpr_base + 1, 0, relative_addr);
+      auto inst = decode_gfx1250(words, tc.mnemonic);
+      EXPECT_NE(inst, nullptr);
+      if (!inst)
+        return amdgpu::kInvalidLdsAddress;
+      inst->execute(*inst, wf);
+      auto *state = inst->data_as<amdgpu::VectorMemState>();
+      EXPECT_NE(state, nullptr);
+      if (!state)
+        return amdgpu::kInvalidLdsAddress;
+      EXPECT_EQ(state->elem_size * state->num_elems, tc.access_size);
+      return state->per_lane_lds_addr[0];
+    };
+
+    const uint32_t last_valid = wf->lds_size() - tc.access_size;
+    EXPECT_EQ(execute_at(last_valid), wf->lds_base() + last_valid);
+    EXPECT_EQ(execute_at(last_valid + 1), amdgpu::kInvalidLdsAddress);
+  }
+}
+
+TEST(Gfx1250SimulationTest, GlobalLoadAsyncToLdsWrapsBeforeAddingAllocationBase) {
+  constexpr uint64_t kernel_addr = 0x10000;
+  constexpr uint64_t input_addr = 0x2a00;
+  constexpr uint32_t lds_bytes_per_wg = 256;
+  constexpr uint32_t expected = 0x12345678u;
+  constexpr auto move_wrapping_lds =
+      cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 255, .vdst = 1});
+  constexpr auto async_load = cdna5::build_vglobal(
+      cdna5::kGlobalLoadAsyncToLdsB32Vglobal, {.saddr = 0, .vdst = 1, .vaddr = 0, .ioffset = 64});
+  const uint32_t code[] = {
+      0xBE8000FFu,
+      static_cast<uint32_t>(input_addr - 64), // s_mov_b32 s0, input_addr - 64
+      0xBE810080u,                            // s_mov_b32 s1, 0
+      0x7E000280u,                            // v_mov_b32_e32 v0, 0
+      move_wrapping_lds[0],
+      UINT32_MAX - 63, // v_mov_b32_e32 v1, 0xffffffc0
+      async_load[0],
+      async_load[1],
+      async_load[2],
+      0xBFCA0000u, // s_wait_asynccnt 0
+      S_ENDPGM_GFX12,
+  };
+
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  uint64_t kernel_object = sim.write_kernel(kernel_addr, code, std::size(code), 128);
+  sim.memory->write32(input_addr, expected);
+
+  hsa_kernel_dispatch_packet_t pkt{};
+  pkt.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+  pkt.setup = 1;
+  pkt.workgroup_size_x = 32;
+  pkt.workgroup_size_y = 1;
+  pkt.workgroup_size_z = 1;
+  pkt.grid_size_x = 32;
+  pkt.grid_size_y = 1;
+  pkt.grid_size_z = 1;
+  pkt.group_segment_size = lds_bytes_per_wg;
+  pkt.kernel_object = kernel_object;
+  test::AqlQueue queue(sim.memory, sim.cp());
+  queue.submit(pkt);
+  ASSERT_TRUE(sim.engine->step());
+
+  auto *wf = sim.cu()->wf(0);
+  ASSERT_NE(wf, nullptr);
+  wf->set_lds_base(sim.cu()->allocate_lds(lds_bytes_per_wg));
+  ASSERT_NE(wf->lds_base(), 0u);
+  const uint32_t lds_base = wf->lds_base();
+  sim.cu()->lds().write32(lds_base, 0xa5a5a5a5u);
+  EXPECT_NO_THROW(sim.engine->run());
+  EXPECT_EQ(sim.cu()->lds().read32(lds_base), expected);
+}
+
+TEST(Gfx1250SimulationTest, GlobalStoreAsyncFromLdsWrapsBeforeAddingAllocationBase) {
+  constexpr uint64_t kernel_addr = 0x10000;
+  constexpr uint64_t output_addr = 0x2c00;
+  constexpr uint32_t lds_bytes_per_wg = 256;
+  constexpr uint32_t expected = 0x89abcdefu;
+  constexpr auto move_wrapping_lds =
+      cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 255, .vdst = 1});
+  constexpr auto async_store =
+      cdna5::build_vglobal(cdna5::kGlobalStoreAsyncFromLdsB32Vglobal,
+                           {.saddr = 0, .vsrc = 1, .vaddr = 0, .ioffset = 64});
+  const uint32_t code[] = {
+      0xBE8000FFu,
+      static_cast<uint32_t>(output_addr - 64), // s_mov_b32 s0, output_addr - 64
+      0xBE810080u,                             // s_mov_b32 s1, 0
+      0x7E000280u,                             // v_mov_b32_e32 v0, 0
+      move_wrapping_lds[0],
+      UINT32_MAX - 63, // v_mov_b32_e32 v1, 0xffffffc0
+      async_store[0],
+      async_store[1],
+      async_store[2],
+      0xBFCA0000u, // s_wait_asynccnt 0
+      S_ENDPGM_GFX12,
+  };
+
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  uint64_t kernel_object = sim.write_kernel(kernel_addr, code, std::size(code), 128);
+  sim.memory->write32(output_addr, 0u);
+
+  hsa_kernel_dispatch_packet_t pkt{};
+  pkt.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+  pkt.setup = 1;
+  pkt.workgroup_size_x = 32;
+  pkt.workgroup_size_y = 1;
+  pkt.workgroup_size_z = 1;
+  pkt.grid_size_x = 32;
+  pkt.grid_size_y = 1;
+  pkt.grid_size_z = 1;
+  pkt.group_segment_size = lds_bytes_per_wg;
+  pkt.kernel_object = kernel_object;
+  test::AqlQueue queue(sim.memory, sim.cp());
+  queue.submit(pkt);
+  ASSERT_TRUE(sim.engine->step());
+
+  auto *wf = sim.cu()->wf(0);
+  ASSERT_NE(wf, nullptr);
+  wf->set_lds_base(sim.cu()->allocate_lds(lds_bytes_per_wg));
+  ASSERT_NE(wf->lds_base(), 0u);
+  const uint32_t lds_base = wf->lds_base();
+  sim.cu()->lds().write32(lds_base, expected);
+  EXPECT_NO_THROW(sim.engine->run());
+  EXPECT_EQ(sim.memory->read32(output_addr), expected);
 }
 
 TEST(Gfx1250ExecutionTest, DispatchEntryClusterMathCoversMultiDimensionalShapes) {
@@ -418,6 +587,7 @@ TEST(Gfx1250ExecutionTest, DispatchEntryClusterMathCoversMultiDimensionalShapes)
 
 TEST(Gfx1250ExecutionTest, ClusterLdsMulticastTransactionCapturesRemapState) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(9, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -478,6 +648,7 @@ TEST(Gfx1250ExecutionTest, ClusterLdsSourceRankSelectionCoversDefaultAndMasks) {
 
 TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineWritesOnlyIssuingParticipant) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   cu->clear_lds();
 
@@ -514,6 +685,7 @@ TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineWritesOnlyIssuingPa
 
 TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineSkipsUnissuedSelectedPeer) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   cu->clear_lds();
 
@@ -540,6 +712,7 @@ TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineSkipsUnissuedSelect
 
 TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineUsesRecipientOwnedDestinations) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   cu->clear_lds();
 
@@ -583,6 +756,7 @@ TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineUsesRecipientOwnedD
 
 TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineRejectsUndersizedPayload) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
 
   amdgpu::ClusterLdsMulticastTransaction txn{};
@@ -598,6 +772,7 @@ TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineRejectsUndersizedPa
 
 TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineDropsOutOfRangeTarget) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
 
   amdgpu::ClusterLdsMulticastTransaction txn{};
@@ -617,6 +792,7 @@ TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineDropsOutOfRangeTarg
 
 TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineRejectsStridedOutOfRangeTarget) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
 
   amdgpu::ClusterLdsMulticastTransaction txn{};
@@ -634,6 +810,7 @@ TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineRejectsStridedOutOf
 
 TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineDropsWidenedRemapOverflow) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   constexpr uint32_t kSentinel = 0xa5a5a5a5u;
   cu->lds().write32(0, kSentinel);
@@ -656,6 +833,7 @@ TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineDropsWidenedRemapOv
 
 TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineDropsInvalidSignedOffsetAddress) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   cu->clear_lds();
 
@@ -679,6 +857,7 @@ TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineDropsInvalidSignedO
 
 TEST(Gfx1250ExecutionTest, ClusterLdsPinPreventsAllocatorReuseUntilClusterCompletes) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
 
   EXPECT_EQ(cu->allocate_lds(257), 0u);
@@ -695,6 +874,7 @@ TEST(Gfx1250ExecutionTest, ClusterLdsPinPreventsAllocatorReuseUntilClusterComple
 
 TEST(Gfx1250ExecutionTest, OrdinaryLdsDstLoadWritesDirectlyAndCompletesAsyncCounter) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -735,6 +915,7 @@ TEST(Gfx1250ExecutionTest, OrdinaryLdsDstLoadWritesDirectlyAndCompletesAsyncCoun
 
 TEST(Gfx1250ExecutionTest, NonClusterClusterLdsLoadDowngradesToOrdinaryAsyncToLds) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -777,6 +958,7 @@ TEST(Gfx1250ExecutionTest, NonClusterClusterLdsLoadDowngradesToOrdinaryAsyncToLd
 
 TEST(Gfx1250ExecutionTest, ClusterLoadRequestBypassesStaleL1VectorLine) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -841,6 +1023,7 @@ TEST(Gfx1250ExecutionTest, ClusterLoadRequestBypassesStaleL1VectorLine) {
 
 TEST(Gfx1250ExecutionTest, ClusterLdsFallbackSkipsSelfWhenMaskExcludesSource) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(/*wg_id=*/3, /*pc=*/0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -891,6 +1074,7 @@ TEST(Gfx1250SimulationTest, ClusterLdsTargetsCoversMasksAndLifetime) {
   const uint32_t code[] = {S_ENDPGM_GFX12};
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   uint64_t kernel_object = sim.write_kernel(kernel_addr, code, std::size(code), 128);
   test::AqlQueue queue(sim.memory, sim.cp());
   queue.dispatch_clustered(kernel_object, /*cluster_count_x=*/1, /*cluster_size_x=*/2,
@@ -947,6 +1131,7 @@ TEST(Gfx1250SimulationTest, ClusterLdsTargetsUseMultiDimensionalClusterPlacement
   const uint32_t code[] = {S_ENDPGM_GFX12};
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   uint64_t kernel_object = sim.write_kernel(kernel_addr, code, std::size(code), 128);
 
   amdgpu::AmdExtKernelDispatchPacket pkt{};
@@ -1018,7 +1203,8 @@ TEST(Gfx1250SimulationTest, ClusterLdsDoesNotRemapIntoNonParticipatingPeerLdsBas
   constexpr uint32_t cluster_size = 8;
   const uint32_t code[] = {S_ENDPGM_GFX12};
 
-  Gfx1250Sim sim(make_single_se_gfx1250_config(/*num_cus=*/4));
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize(make_single_se_gfx1250_config(/*num_cus=*/4)));
   uint64_t kernel_object = sim.write_kernel(kernel_addr, code, std::size(code), 128);
   test::AqlQueue queue(sim.memory, sim.cp());
   queue.dispatch_clustered(kernel_object, /*cluster_count_x=*/1, cluster_size,
@@ -1081,13 +1267,17 @@ TEST(Gfx1250SimulationTest, RejectsUnsupportedClusterSize) {
   const uint32_t code[] = {S_ENDPGM_GFX12};
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   uint64_t kernel_object = sim.write_kernel(kernel_addr, code, std::size(code), 128);
   test::AqlQueue queue(sim.memory, sim.cp());
   queue.dispatch_clustered(kernel_object, /*cluster_count_x=*/1,
                            /*cluster_size_x=*/amdgpu::kClusterMulticastMaskBits + 1,
                            /*workgroup_size_x=*/32);
 
-  EXPECT_THROW((void)sim.engine->step(), std::runtime_error);
+  EXPECT_NO_THROW((void)sim.engine->step());
+  EXPECT_TRUE(sim.cp()->queue_faulted_for_test(1, 0));
+  EXPECT_EQ(sim.memory->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 0u);
+  EXPECT_EQ(sim.cp()->dispatched_count(), 0u);
 }
 
 TEST(Gfx1250SimulationTest, RejectsMisalignedClusteredWorkgroupIdOffset) {
@@ -1095,13 +1285,17 @@ TEST(Gfx1250SimulationTest, RejectsMisalignedClusteredWorkgroupIdOffset) {
   const uint32_t code[] = {S_ENDPGM_GFX12};
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   uint64_t kernel_object = sim.write_kernel(kernel_addr, code, std::size(code), 128);
   sim.cp()->set_workgroup_id_offset(1);
   test::AqlQueue queue(sim.memory, sim.cp());
   queue.dispatch_clustered(kernel_object, /*cluster_count_x=*/1, /*cluster_size_x=*/2,
                            /*workgroup_size_x=*/32);
 
-  EXPECT_THROW((void)sim.engine->step(), std::runtime_error);
+  EXPECT_NO_THROW((void)sim.engine->step());
+  EXPECT_TRUE(sim.cp()->queue_faulted_for_test(1, 0));
+  EXPECT_EQ(sim.memory->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 0u);
+  EXPECT_EQ(sim.cp()->dispatched_count(), 0u);
 }
 
 TEST(Gfx1250SimulationTest, RejectsIncompleteClusterGrid) {
@@ -1109,12 +1303,16 @@ TEST(Gfx1250SimulationTest, RejectsIncompleteClusterGrid) {
   const uint32_t code[] = {S_ENDPGM_GFX12};
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   uint64_t kernel_object = sim.write_kernel(kernel_addr, code, std::size(code), 128);
   test::AqlQueue queue(sim.memory, sim.cp());
   queue.dispatch_clustered(kernel_object, /*cluster_count_x=*/1, /*cluster_size_x=*/2,
                            /*workgroup_size_x=*/0);
 
-  EXPECT_THROW((void)sim.engine->step(), std::runtime_error);
+  EXPECT_NO_THROW((void)sim.engine->step());
+  EXPECT_TRUE(sim.cp()->queue_faulted_for_test(1, 0));
+  EXPECT_EQ(sim.memory->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 0u);
+  EXPECT_EQ(sim.cp()->dispatched_count(), 0u);
 }
 
 TEST(Gfx1250SimulationTest, ClusterLoadAsyncToLdsDoesNotWriteMaskExcludedParticipant) {
@@ -1134,6 +1332,7 @@ TEST(Gfx1250SimulationTest, ClusterLoadAsyncToLdsDoesNotWriteMaskExcludedPartici
   };
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   uint64_t kernel_object = sim.write_kernel(kernel_addr, code, std::size(code), 128);
   for (uint32_t byte = 0; byte < 256; ++byte)
     sim.memory->write8(input_addr + byte, static_cast<uint8_t>(0x40u + byte));
@@ -1188,6 +1387,7 @@ TEST(Gfx1250SimulationTest, ClusterLoadAsyncToLdsWritesEachIssuingParticipant) {
   };
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   uint64_t kernel_object = sim.write_kernel(kernel_addr, code, std::size(code), 128);
   for (uint32_t byte = 0; byte < 256; ++byte)
     sim.memory->write8(input_addr + byte, static_cast<uint8_t>(0x80u + byte));
@@ -1238,6 +1438,7 @@ TEST(Gfx1250SimulationTest, GlobalLoadAsyncToLdsDropsNetNegativeDestination) {
   };
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   uint64_t kernel_object = sim.write_kernel(kernel_addr, code, std::size(code), 128);
   sim.memory->write32(input_addr, 0x12345678u);
 
@@ -1281,6 +1482,7 @@ TEST(Gfx1250SimulationTest, GlobalLoadAsyncToLdsDropsDestinationPastWorkgroupAll
   };
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   uint64_t kernel_object = sim.write_kernel(kernel_addr, code, std::size(code), 128);
   sim.memory->write32(input_addr, 0x12345678u);
 
@@ -1326,6 +1528,7 @@ TEST(Gfx1250SimulationTest, ClusterLoadAsyncToLdsDropsNetNegativeDestination) {
   };
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   uint64_t kernel_object = sim.write_kernel(kernel_addr, code, std::size(code), 128);
   sim.memory->write32(input_addr, 0x12345678u);
 
@@ -1362,6 +1565,7 @@ TEST(Gfx1250SimulationTest, ClusterLoadAsyncToLdsAppliesIoffsetToGlobalAndLds) {
   };
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   uint64_t kernel_object = sim.write_kernel(kernel_addr, code, std::size(code), 128);
   for (uint32_t byte = 0; byte < 256; ++byte)
     sim.memory->write8(input_addr + byte, static_cast<uint8_t>(0xc0u + byte));
@@ -1401,6 +1605,7 @@ TEST(Gfx1250SimulationTest, Ttmp7ClusterGridYDoesNotBleedIntoZAt16BitBoundary) {
   const uint32_t code[] = {S_ENDPGM_GFX12};
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code), 128);
   constexpr uint32_t kWorkgroupIdOffset = 0x10000;
   sim.cp()->set_workgroup_id_offset(kWorkgroupIdOffset);
@@ -1454,16 +1659,16 @@ TEST(Gfx1250SimulationTest, IbSts2ClusterFieldsAreZeroForOrdinaryDispatch) {
   };
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code), 128);
   test::AqlQueue queue(sim.memory, sim.cp());
   queue.dispatch(kernel_object, /*grid_size_x=*/32, /*workgroup_size_x=*/32);
   step_until_halted(*sim.engine, *sim.cu());
 
-  auto *wf = sim.cu()->wf(0);
-  ASSERT_NE(wf, nullptr);
-  const uint32_t sbase = wf->sgpr_alloc().base;
-  EXPECT_EQ(sim.cu()->read_sgpr(sbase + 2), 0u);
-  EXPECT_EQ(sim.cu()->read_sgpr(sbase + 3), 0u);
+  ASSERT_EQ(sim.snapshot->snapshots().size(), 1u);
+  const auto &wf = sim.snapshot->snapshots().front();
+  EXPECT_EQ(wf.sgpr(2), 0u);
+  EXPECT_EQ(wf.sgpr(3), 0u);
 }
 
 TEST(Gfx1250SimulationTest, DynamicClusterLaunchStateMatchesCompilerAbiWithAlignedOffset) {
@@ -1497,6 +1702,7 @@ TEST(Gfx1250SimulationTest, DynamicClusterLaunchStateMatchesCompilerAbiWithAlign
   };
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code), 128);
   constexpr uint32_t kWorkgroupIdOffset = 16;
   sim.cp()->set_workgroup_id_offset(kWorkgroupIdOffset);
@@ -1533,9 +1739,9 @@ TEST(Gfx1250SimulationTest, DynamicClusterLaunchStateMatchesCompilerAbiWithAlign
   };
   std::vector<LaunchState> states;
   for (const auto &wf : sim.snapshot->snapshots())
-    states.push_back({wf.wg_id, wf.sgpr(114), wf.sgpr(115), wf.sgpr(117), wf.sgpr(2), wf.sgpr(3),
+    states.push_back({wf.wg_id, wf.ttmp(6), wf.ttmp(7), wf.ttmp(9), wf.sgpr(2), wf.sgpr(3),
                       wf.sgpr(6), wf.sgpr(10), wf.sgpr(13)});
-  std::sort(states.begin(), states.end(), [](const LaunchState &lhs, const LaunchState &rhs) {
+  std::ranges::sort(states, [](const LaunchState &lhs, const LaunchState &rhs) {
     return lhs.workgroup_id < rhs.workgroup_id;
   });
 

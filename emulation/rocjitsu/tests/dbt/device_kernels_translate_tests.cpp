@@ -9,21 +9,17 @@
 #endif
 
 #include "../test_paths.h"
+#include "decode_test_util.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/dbt/binary_translator.h"
 #include "rocjitsu/code/dbt/kernel_descriptor_translator.h"
 #include "rocjitsu/code/executable.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
-
-#include "rocjitsu/base/rj_compiler.h"
-RJ_DIAGNOSTIC_PUSH
-RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
-RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
@@ -84,14 +80,14 @@ MutableKernelDescriptorImage mutable_vector_add_descriptor(rj_code_arch_t guest_
 
   fixture.kd_file_off = translations[0].descriptor_file_offset;
   fixture.valid =
-      fixture.kd_file_off + sizeof(rocr::llvm::amdhsa::kernel_descriptor_t) <= fixture.image.size();
+      fixture.kd_file_off + sizeof(rocjitsu::amdhsa::kernel_descriptor_t) <= fixture.image.size();
   return fixture;
 }
 
-rocr::llvm::amdhsa::kernel_descriptor_t *
+rocjitsu::amdhsa::kernel_descriptor_t *
 mutable_kernel_descriptor(MutableKernelDescriptorImage &fixture) {
-  return reinterpret_cast<rocr::llvm::amdhsa::kernel_descriptor_t *>(fixture.image.data() +
-                                                                     fixture.kd_file_off);
+  return reinterpret_cast<rocjitsu::amdhsa::kernel_descriptor_t *>(fixture.image.data() +
+                                                                   fixture.kd_file_off);
 }
 
 std::vector<rocjitsu::KdTranslation>
@@ -161,19 +157,19 @@ TEST(BinaryTranslatorE2E, TranslateVectorAddCdna4ToCdna3) {
   const auto *original_text_bytes = reinterpret_cast<const uint8_t *>(original_text->data());
   const auto *translated_text_bytes = reinterpret_cast<const uint8_t *>(translated_text->data());
   const auto original_text_end = original_text_bytes + original_text->size();
-  const auto first_text_diff =
-      std::mismatch(original_text_bytes, original_text_end, translated_text_bytes);
-  EXPECT_EQ(first_text_diff.first, original_text_end)
+  const auto translated_text_end = translated_text_bytes + translated_text->size();
+  const auto first_text_diff = std::ranges::mismatch(original_text_bytes, original_text_end,
+                                                     translated_text_bytes, translated_text_end);
+  EXPECT_EQ(first_text_diff.in1, original_text_end)
       << "The vector-add gfx950 and gfx942 codegen is byte-identical; CDNA4→CDNA3 DBT should "
          "leave the instruction stream unchanged for this kernel. First differing byte offset is "
-      << std::distance(original_text_bytes, first_text_diff.first) << ", original word 0x"
-      << std::hex
+      << std::distance(original_text_bytes, first_text_diff.in1) << ", original word 0x" << std::hex
       << reinterpret_cast<const uint32_t *>(
-             original_text_bytes)[std::distance(original_text_bytes, first_text_diff.first) /
+             original_text_bytes)[std::distance(original_text_bytes, first_text_diff.in1) /
                                   sizeof(uint32_t)]
       << ", translated word 0x"
       << reinterpret_cast<const uint32_t *>(
-             translated_text_bytes)[std::distance(original_text_bytes, first_text_diff.first) /
+             translated_text_bytes)[std::distance(original_text_bytes, first_text_diff.in1) /
                                     sizeof(uint32_t)]
       << std::dec;
 
@@ -188,24 +184,17 @@ TEST(BinaryTranslatorE2E, TranslateVectorAddCdna4ToCdna3) {
     const size_t words = sec->size() / sizeof(uint32_t);
     size_t pc = 0;
     while (pc < words) {
-      try {
-        std::unique_ptr<rocjitsu::Instruction> inst(decoder->decode(&data[pc]));
-        if (!inst) {
-          ++decode_failures;
-          ++pc;
-          continue;
-        }
-        const std::string_view mnemonic(inst->mnemonic());
-        if (mnemonic.starts_with("v_add_"))
-          has_vector_add = true;
-        pc += inst->size() / 4;
-        ++inst_count;
-      } catch (const std::exception &e) {
-        std::cerr << "  decode fail at 0x" << std::hex << pc * 4 << " word=0x" << data[pc] << ": "
-                  << e.what() << "\n";
+      std::unique_ptr<rocjitsu::Instruction> inst(decode_valid(*decoder, &data[pc]));
+      if (!inst) {
         ++decode_failures;
         ++pc;
+        continue;
       }
+      const std::string_view mnemonic(inst->mnemonic());
+      if (mnemonic.starts_with("v_add_"))
+        has_vector_add = true;
+      pc += inst->size() / 4;
+      ++inst_count;
     }
   }
   EXPECT_GT(inst_count, 0) << "Translated text section should contain instructions";
@@ -214,7 +203,7 @@ TEST(BinaryTranslatorE2E, TranslateVectorAddCdna4ToCdna3) {
 }
 
 TEST(KernelDescriptorTranslator, Cdna4ToRdna4MaterializesWorkgroupIdsFromTtmpGridPayload) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   Executable exec(kernel_path("vector_add"));
   ASSERT_TRUE(exec.is_valid());
@@ -239,10 +228,10 @@ TEST(KernelDescriptorTranslator, Cdna4ToRdna4MaterializesWorkgroupIdsFromTtmpGri
 
   auto *kd = reinterpret_cast<kernel_descriptor_t *>(image.data() + kd_file_off);
   kd->compute_pgm_rsrc2 = 0;
-  AMDHSA_BITS_SET(kd->compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 12);
-  AMDHSA_BITS_SET(kd->compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1);
-  AMDHSA_BITS_SET(kd->compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y, 1);
-  AMDHSA_BITS_SET(kd->compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z, 1);
+  RJ_AMDHSA_BITS_SET(kd->compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 12);
+  RJ_AMDHSA_BITS_SET(kd->compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1);
+  RJ_AMDHSA_BITS_SET(kd->compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y, 1);
+  RJ_AMDHSA_BITS_SET(kd->compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z, 1);
 
   rocjitsu::AmdGpuCodeObject mutated(image.data(), image.size());
   ASSERT_TRUE(mutated.is_valid());
@@ -251,74 +240,72 @@ TEST(KernelDescriptorTranslator, Cdna4ToRdna4MaterializesWorkgroupIdsFromTtmpGri
 
   const auto translations = translator.translate_image(
       image, text->sectionOffset(), text->size(), rocjitsu::KernelDescriptorTranslationOptions{});
-  const auto translated = std::find_if(translations.begin(), translations.end(),
-                                       [kd_file_off](const auto &translation) {
-                                         return translation.descriptor_file_offset == kd_file_off;
-                                       });
+  const auto translated =
+      std::ranges::find_if(translations, [kd_file_off](const auto &translation) {
+        return translation.descriptor_file_offset == kd_file_off;
+      });
   ASSERT_NE(translated, translations.end());
 
   constexpr uint16_t ttmp_base = 108;
   const uint16_t shift16 = rocjitsu::scalar_positive_inline_u32(16);
   const std::vector<uint32_t> expected = {
       rocjitsu::build_s_mov_b32(12, ttmp_base + 9, ROCJITSU_CODE_ARCH_RDNA4),
-      rocjitsu::build_s_delay_alu(rocjitsu::kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4),
+      rocjitsu::build_s_delay_alu(rocjitsu::kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4).value(),
       rocjitsu::build_s_mov_b32(13, ttmp_base + 7, ROCJITSU_CODE_ARCH_RDNA4),
-      rocjitsu::build_s_delay_alu(rocjitsu::kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4),
+      rocjitsu::build_s_delay_alu(rocjitsu::kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4).value(),
       rocjitsu::build_s_lshl_b32(13, 13, shift16, ROCJITSU_CODE_ARCH_RDNA4),
-      rocjitsu::build_s_delay_alu(rocjitsu::kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4),
+      rocjitsu::build_s_delay_alu(rocjitsu::kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4).value(),
       rocjitsu::build_s_lshr_b32(13, 13, shift16, ROCJITSU_CODE_ARCH_RDNA4),
-      rocjitsu::build_s_delay_alu(rocjitsu::kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4),
+      rocjitsu::build_s_delay_alu(rocjitsu::kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4).value(),
       rocjitsu::build_s_lshr_b32(14, ttmp_base + 7, shift16, ROCJITSU_CODE_ARCH_RDNA4),
-      rocjitsu::build_s_delay_alu(rocjitsu::kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4),
+      rocjitsu::build_s_delay_alu(rocjitsu::kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4).value(),
   };
   EXPECT_EQ(translated->prologue_words, expected)
       << "CDNA workgroup_id SGPRs must be rebuilt from RDNA4 TTMP9 and packed TTMP7";
 }
 
 TEST(KernelDescriptorTranslator, Cdna4ToRdna4MaterializesXOnlyWorkgroupId) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   auto fixture = mutable_vector_add_descriptor(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(fixture.valid);
 
   auto *kd = mutable_kernel_descriptor(fixture);
   kd->compute_pgm_rsrc2 = 0;
-  AMDHSA_BITS_SET(kd->compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 12);
-  AMDHSA_BITS_SET(kd->compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1);
+  RJ_AMDHSA_BITS_SET(kd->compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 12);
+  RJ_AMDHSA_BITS_SET(kd->compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1);
 
   const auto translations =
       translate_mutable_descriptor(fixture, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto translated =
-      std::find_if(translations.begin(), translations.end(), [&fixture](const auto &translation) {
-        return translation.descriptor_file_offset == fixture.kd_file_off;
-      });
+  const auto translated = std::ranges::find_if(translations, [&fixture](const auto &translation) {
+    return translation.descriptor_file_offset == fixture.kd_file_off;
+  });
   ASSERT_NE(translated, translations.end());
 
   constexpr uint16_t ttmp_base = 108;
   const std::vector<uint32_t> expected = {
       rocjitsu::build_s_mov_b32(12, ttmp_base + 9, ROCJITSU_CODE_ARCH_RDNA4),
-      rocjitsu::build_s_delay_alu(rocjitsu::kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4),
+      rocjitsu::build_s_delay_alu(rocjitsu::kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4).value(),
   };
   EXPECT_EQ(translated->prologue_words, expected);
 }
 
 TEST(KernelDescriptorTranslator, Cdna4ToRdna4SkipsPrologueWhenNoWorkgroupIdsAreEnabled) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   auto fixture = mutable_vector_add_descriptor(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(fixture.valid);
 
   auto *kd = mutable_kernel_descriptor(fixture);
   kd->compute_pgm_rsrc2 = 0;
-  AMDHSA_BITS_SET(kd->compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 12);
+  RJ_AMDHSA_BITS_SET(kd->compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 12);
   const int64_t original_entry = kd->kernel_code_entry_byte_offset;
 
   const auto translations =
       translate_mutable_descriptor(fixture, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto translated =
-      std::find_if(translations.begin(), translations.end(), [&fixture](const auto &translation) {
-        return translation.descriptor_file_offset == fixture.kd_file_off;
-      });
+  const auto translated = std::ranges::find_if(translations, [&fixture](const auto &translation) {
+    return translation.descriptor_file_offset == fixture.kd_file_off;
+  });
   ASSERT_NE(translated, translations.end());
   EXPECT_TRUE(translated->prologue_words.empty());
 
@@ -337,7 +324,7 @@ TEST(KernelDescriptorTranslator, Cdna4ToRdna4SkipsPrologueWhenNoWorkgroupIdsAreE
 }
 
 TEST(KernelDescriptorTranslator, CdnaAccVgprExpansionGrowsUnifiedVgprAllocationForRdna4) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   for (rj_code_arch_t guest_arch :
        {ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
@@ -347,15 +334,14 @@ TEST(KernelDescriptorTranslator, CdnaAccVgprExpansionGrowsUnifiedVgprAllocationF
     auto *kd = mutable_kernel_descriptor(fixture);
     kd->compute_pgm_rsrc1 = 0;
     kd->compute_pgm_rsrc3 = 0;
-    AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 15);
-    AMDHSA_BITS_SET(kd->compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 15);
+    RJ_AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 15);
+    RJ_AMDHSA_BITS_SET(kd->compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 15);
 
     const auto translations =
         translate_mutable_descriptor(fixture, guest_arch, ROCJITSU_CODE_ARCH_RDNA4);
-    const auto translated =
-        std::find_if(translations.begin(), translations.end(), [&fixture](const auto &translation) {
-          return translation.descriptor_file_offset == fixture.kd_file_off;
-        });
+    const auto translated = std::ranges::find_if(translations, [&fixture](const auto &translation) {
+      return translation.descriptor_file_offset == fixture.kd_file_off;
+    });
     ASSERT_NE(translated, translations.end());
     EXPECT_EQ(translated->accvgpr_base, 64u);
     // CDNA descriptors encode one unified VGPR allocation. ACCUM_OFFSET splits
@@ -369,7 +355,7 @@ TEST(KernelDescriptorTranslator, CdnaAccVgprExpansionGrowsUnifiedVgprAllocationF
 }
 
 TEST(KernelDescriptorTranslator, CdnaToCdnaMovesAccVgprBaseAboveSemanticScratch) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   auto fixture = mutable_vector_add_descriptor(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
   ASSERT_TRUE(fixture.valid);
@@ -377,17 +363,16 @@ TEST(KernelDescriptorTranslator, CdnaToCdnaMovesAccVgprBaseAboveSemanticScratch)
   auto *kd = mutable_kernel_descriptor(fixture);
   kd->compute_pgm_rsrc1 = 0;
   kd->compute_pgm_rsrc3 = 0;
-  AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 13);
-  AMDHSA_BITS_SET(kd->compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 23);
+  RJ_AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 13);
+  RJ_AMDHSA_BITS_SET(kd->compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 23);
 
   rocjitsu::KernelDescriptorTranslationOptions options;
   options.minimum_vgprs = 128;
   const auto translations = translate_mutable_descriptor(fixture, ROCJITSU_CODE_ARCH_CDNA4,
                                                          ROCJITSU_CODE_ARCH_CDNA3, options);
-  const auto translated =
-      std::find_if(translations.begin(), translations.end(), [&fixture](const auto &translation) {
-        return translation.descriptor_file_offset == fixture.kd_file_off;
-      });
+  const auto translated = std::ranges::find_if(translations, [&fixture](const auto &translation) {
+    return translation.descriptor_file_offset == fixture.kd_file_off;
+  });
   ASSERT_NE(translated, translations.end());
   EXPECT_EQ(translated->accvgpr_base, 96u);
   EXPECT_EQ(translated->target_accvgpr_base, 128u);
@@ -407,12 +392,13 @@ TEST(KernelDescriptorTranslator, CdnaToCdnaMovesAccVgprBaseAboveSemanticScratch)
   const auto patched_image = patcher.emit();
   const auto *patched_kd =
       reinterpret_cast<const kernel_descriptor_t *>(patched_image.data() + fixture.kd_file_off);
-  EXPECT_EQ(AMDHSA_BITS_GET(patched_kd->compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET),
-            31u);
+  EXPECT_EQ(
+      RJ_AMDHSA_BITS_GET(patched_kd->compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET),
+      31u);
 }
 
 TEST(KernelDescriptorTranslator, CdnaToCdnaMovesAccVgprBaseWithoutReportedAccVgprs) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   auto fixture = mutable_vector_add_descriptor(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
   ASSERT_TRUE(fixture.valid);
@@ -420,17 +406,16 @@ TEST(KernelDescriptorTranslator, CdnaToCdnaMovesAccVgprBaseWithoutReportedAccVgp
   auto *kd = mutable_kernel_descriptor(fixture);
   kd->compute_pgm_rsrc1 = 0;
   kd->compute_pgm_rsrc3 = 0;
-  AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 11);
-  AMDHSA_BITS_SET(kd->compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 23);
+  RJ_AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 11);
+  RJ_AMDHSA_BITS_SET(kd->compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 23);
 
   rocjitsu::KernelDescriptorTranslationOptions options;
   options.minimum_vgprs = 104;
   const auto translations = translate_mutable_descriptor(fixture, ROCJITSU_CODE_ARCH_CDNA4,
                                                          ROCJITSU_CODE_ARCH_CDNA3, options);
-  const auto translated =
-      std::find_if(translations.begin(), translations.end(), [&fixture](const auto &translation) {
-        return translation.descriptor_file_offset == fixture.kd_file_off;
-      });
+  const auto translated = std::ranges::find_if(translations, [&fixture](const auto &translation) {
+    return translation.descriptor_file_offset == fixture.kd_file_off;
+  });
   ASSERT_NE(translated, translations.end());
   EXPECT_EQ(translated->accvgpr_base, 96u);
   EXPECT_EQ(translated->target_accvgpr_base, 104u);
@@ -445,12 +430,13 @@ TEST(KernelDescriptorTranslator, CdnaToCdnaMovesAccVgprBaseWithoutReportedAccVgp
   const auto patched_image = patcher.emit();
   const auto *patched_kd =
       reinterpret_cast<const kernel_descriptor_t *>(patched_image.data() + fixture.kd_file_off);
-  EXPECT_EQ(AMDHSA_BITS_GET(patched_kd->compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET),
-            25u);
+  EXPECT_EQ(
+      RJ_AMDHSA_BITS_GET(patched_kd->compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET),
+      25u);
 }
 
 TEST(KernelDescriptorTranslator, CdnaToCdnaAllowsFullVgprAndAccVgprDescriptorAllocation) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   auto fixture = mutable_vector_add_descriptor(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
   ASSERT_TRUE(fixture.valid);
@@ -458,15 +444,14 @@ TEST(KernelDescriptorTranslator, CdnaToCdnaAllowsFullVgprAndAccVgprDescriptorAll
   auto *kd = mutable_kernel_descriptor(fixture);
   kd->compute_pgm_rsrc1 = 0;
   kd->compute_pgm_rsrc3 = 0;
-  AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 63);
-  AMDHSA_BITS_SET(kd->compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 63);
+  RJ_AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 63);
+  RJ_AMDHSA_BITS_SET(kd->compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 63);
 
   const auto translations =
       translate_mutable_descriptor(fixture, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
-  const auto translated =
-      std::find_if(translations.begin(), translations.end(), [&fixture](const auto &translation) {
-        return translation.descriptor_file_offset == fixture.kd_file_off;
-      });
+  const auto translated = std::ranges::find_if(translations, [&fixture](const auto &translation) {
+    return translation.descriptor_file_offset == fixture.kd_file_off;
+  });
   ASSERT_NE(translated, translations.end());
   EXPECT_TRUE(translated->supported);
   EXPECT_EQ(translated->target_vgpr_count, 256u);
@@ -475,22 +460,59 @@ TEST(KernelDescriptorTranslator, CdnaToCdnaAllowsFullVgprAndAccVgprDescriptorAll
   EXPECT_EQ(translated->target_vgpr_granulated, 63u);
 }
 
+TEST(KernelDescriptorTranslator, Cdna1KeepsVgprAndAccumulatorAllocationsSeparate) {
+  using namespace rocjitsu::amdhsa;
+  for (bool full : {false, true}) {
+    auto fixture =
+        mutable_vector_add_descriptor(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA1);
+    ASSERT_TRUE(fixture.valid);
+    auto *kd = mutable_kernel_descriptor(fixture);
+    kd->compute_pgm_rsrc1 = 0;
+    kd->compute_pgm_rsrc3 = 1u << 16; // Guest TG_SPLIT must not leak into reserved host bits.
+    RJ_AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                       full ? 63 : 13);
+    RJ_AMDHSA_BITS_SET(kd->compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
+                       full ? 63 : 23);
+    rocjitsu::KernelDescriptorTranslationOptions options;
+    options.minimum_vgprs = full ? 256 : 128;
+    const auto translations = translate_mutable_descriptor(fixture, ROCJITSU_CODE_ARCH_CDNA4,
+                                                           ROCJITSU_CODE_ARCH_CDNA1, options);
+    const auto translated = std::ranges::find_if(translations, [&fixture](const auto &translation) {
+      return translation.descriptor_file_offset == fixture.kd_file_off;
+    });
+    ASSERT_NE(translated, translations.end());
+    EXPECT_TRUE(translated->supported);
+    EXPECT_EQ(translated->target_accvgpr_base, 0u);
+    EXPECT_EQ(translated->target_vgpr_count, full ? 256u : 128u);
+    EXPECT_EQ(translated->target_agpr_count, full ? 256u : 16u);
+    EXPECT_EQ(translated->target_vgpr_allocation_count, full ? 256u : 128u);
+    EXPECT_EQ(translated->target_vgpr_granulated, full ? 63u : 31u);
+    rocjitsu::AmdGpuCodeObject mutated(fixture.image.data(), fixture.image.size());
+    ASSERT_TRUE(mutated.is_valid());
+    rocjitsu::CodeObjectPatcher patcher(mutated);
+    ASSERT_TRUE(patcher.apply_kernel_descriptor_translation(*translated, ROCJITSU_CODE_ARCH_CDNA1));
+    const auto patched_image = patcher.emit();
+    const auto *patched_kd =
+        reinterpret_cast<const kernel_descriptor_t *>(patched_image.data() + fixture.kd_file_off);
+    EXPECT_EQ(patched_kd->compute_pgm_rsrc3, 0u);
+  }
+}
+
 TEST(KernelDescriptorTranslator, CdnaDescriptorAllowsReservedSgprAllocationRounding) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   auto fixture = mutable_vector_add_descriptor(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
   ASSERT_TRUE(fixture.valid);
 
   auto *kd = mutable_kernel_descriptor(fixture);
   kd->compute_pgm_rsrc1 = 0;
-  AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13);
+  RJ_AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13);
 
   const auto translations =
       translate_mutable_descriptor(fixture, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
-  const auto translated =
-      std::find_if(translations.begin(), translations.end(), [&fixture](const auto &translation) {
-        return translation.descriptor_file_offset == fixture.kd_file_off;
-      });
+  const auto translated = std::ranges::find_if(translations, [&fixture](const auto &translation) {
+    return translation.descriptor_file_offset == fixture.kd_file_off;
+  });
   ASSERT_NE(translated, translations.end());
   EXPECT_TRUE(translated->supported);
   EXPECT_EQ(translated->guest_sgpr_count, 112u);
@@ -499,7 +521,7 @@ TEST(KernelDescriptorTranslator, CdnaDescriptorAllowsReservedSgprAllocationRound
 }
 
 TEST(KernelDescriptorTranslator, RdnaWave64UsesAmdhsaDescriptorVgprEncoding) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   Executable exec(kernel_path("vector_add"));
   ASSERT_TRUE(exec.is_valid());
@@ -523,7 +545,7 @@ TEST(KernelDescriptorTranslator, RdnaWave64UsesAmdhsaDescriptorVgprEncoding) {
   auto *kd = reinterpret_cast<kernel_descriptor_t *>(image.data() + kd_file_off);
   kd->compute_pgm_rsrc1 = 0;
   kd->kernel_code_properties = 0;
-  AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 31);
+  RJ_AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 31);
 
   // Use CDNA1 as the guest so the source descriptor field means exactly
   // 128 VGPRs without AccVGPR remapping. The target assertions below check the
@@ -537,10 +559,10 @@ TEST(KernelDescriptorTranslator, RdnaWave64UsesAmdhsaDescriptorVgprEncoding) {
     rocjitsu::KernelDescriptorTranslator translator(ROCJITSU_CODE_ARCH_CDNA1, host_arch);
     const auto translations = translator.translate_image(
         image, text->sectionOffset(), text->size(), rocjitsu::KernelDescriptorTranslationOptions{});
-    const auto translated = std::find_if(translations.begin(), translations.end(),
-                                         [kd_file_off](const auto &translation) {
-                                           return translation.descriptor_file_offset == kd_file_off;
-                                         });
+    const auto translated =
+        std::ranges::find_if(translations, [kd_file_off](const auto &translation) {
+          return translation.descriptor_file_offset == kd_file_off;
+        });
     ASSERT_NE(translated, translations.end());
     EXPECT_EQ(translated->target_wave_size, 64);
     EXPECT_EQ(translated->target_vgpr_count, 128u);
@@ -589,7 +611,7 @@ TEST(BinaryTranslatorE2E,
   const auto translated_infos = translated_parser.translate_image(
       {translated_image, translated_co.image_size()}, translated_text->sectionOffset(),
       translated_text->size(), rocjitsu::KernelDescriptorTranslationOptions{});
-  const auto translated_info = std::find_if(
+  const auto translated_info = std::ranges::find_if(
       translated_infos.begin(), translated_infos.end(),
       [kd_file_off](const auto &info) { return info.descriptor_file_offset == kd_file_off; });
   ASSERT_NE(translated_info, translated_infos.end());
@@ -614,7 +636,7 @@ TEST(BinaryTranslatorE2E,
   ASSERT_LT(original_info->entry_text_offset, text->size());
 
   std::unique_ptr<rocjitsu::Instruction> original_entry(
-      decoder->decode(&words[original_info->entry_text_offset / sizeof(uint32_t)]));
+      decode_valid(*decoder, &words[original_info->entry_text_offset / sizeof(uint32_t)]));
   ASSERT_NE(original_entry, nullptr);
   EXPECT_NE(std::string_view(original_entry->mnemonic()), "s_branch")
       << "Original kernel entry should not be replaced by a prologue branch stub";
@@ -626,7 +648,7 @@ TEST(BinaryTranslatorE2E,
 
   const auto *redirected_words = reinterpret_cast<const uint32_t *>(text->data());
   std::unique_ptr<rocjitsu::Instruction> redirected_entry(
-      decoder->decode(&redirected_words[redirected_section_offset / sizeof(uint32_t)]));
+      decode_valid(*decoder, &redirected_words[redirected_section_offset / sizeof(uint32_t)]));
   ASSERT_NE(redirected_entry, nullptr);
   EXPECT_EQ(std::string_view(redirected_entry->mnemonic()), "s_mov_b32")
       << "Redirected kernel entry should begin with the descriptor ABI prologue";
@@ -641,7 +663,7 @@ TEST(CodeObjectPatcher, RejectsOutOfRangeKernelDescriptorUpdates) {
   ASSERT_NE(co, nullptr);
 
   rocjitsu::CodeObjectPatcher patcher(*co);
-  std::array<uint8_t, sizeof(rocr::llvm::amdhsa::kernel_descriptor_t)> descriptor{};
+  std::array<uint8_t, sizeof(rocjitsu::amdhsa::kernel_descriptor_t)> descriptor{};
   const uint64_t image_size = static_cast<uint64_t>(co->image_size());
 
   EXPECT_FALSE(patcher.patch_kernel_descriptor(image_size, descriptor));
@@ -726,7 +748,7 @@ TEST(BinaryTranslatorE2E, OutputDecodesAsValidRdna4) {
     size_t pc = 0;
     while (pc < words) {
       try {
-        std::unique_ptr<rocjitsu::Instruction> inst(decoder->decode(&data[pc]));
+        std::unique_ptr<rocjitsu::Instruction> inst(decode_valid(*decoder, &data[pc]));
         if (!inst) {
           ++decode_failures;
           ++pc;
@@ -768,7 +790,7 @@ TEST(BinaryTranslatorE2E, NoGfx9WaitcntInOutput) {
     size_t pc = 0;
     while (pc < words) {
       try {
-        std::unique_ptr<rocjitsu::Instruction> inst(decoder->decode(&data[pc]));
+        std::unique_ptr<rocjitsu::Instruction> inst(decode_valid(*decoder, &data[pc]));
         if (!inst) {
           ++pc;
           continue;
@@ -852,7 +874,7 @@ TEST(BinaryTranslatorE2E, DumpTranslation) {
     printf("\n--- %s (%zu bytes, %zu words) ---\n", label, size, words);
     while (pc < words) {
       try {
-        std::unique_ptr<rocjitsu::Instruction> inst(dec->decode(&data[pc]));
+        std::unique_ptr<rocjitsu::Instruction> inst(decode_valid(*dec, &data[pc]));
         if (!inst) {
           printf("  0x%04zx: ???\n", pc * 4);
           ++pc;

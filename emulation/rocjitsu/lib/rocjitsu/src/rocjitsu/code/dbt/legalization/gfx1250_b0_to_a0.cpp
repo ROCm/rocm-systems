@@ -6,8 +6,8 @@
 
 #include "rocjitsu/code/dbt/legalization/gfx1250_b0_to_a0.h"
 
-#include "rocjitsu/analysis/def_use_chain.h"
-#include "rocjitsu/analysis/gfx1250_vgpr_msb.h"
+#include "rocjitsu/code/analysis/def_use_chain.h"
+#include "rocjitsu/code/analysis/gfx1250_vgpr_msb.h"
 #include "rocjitsu/code/dbt/generated/legalization_types.h"
 #include "rocjitsu/code/dbt/semantic/gfx1250_flat_scratch_base.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
@@ -43,10 +43,10 @@ namespace {
 /// unimplemented siblings then fail closed instead of passing through silently.
 /// That is why the integer WMMA prefixes below keep their entry.
 ///
-/// Separately, a 64-bit source reading FLAT_SCRATCH_BASE is classified via
-/// operand inspection (see gfx1250_reads_flat_scratch_base_64bit), and the
-/// barrier-state query and s_monitor_sleep are DEFERRED with a pass-through
-/// report rather than fail-closed (see gfx1250_b0_to_a0_is_deferred_family).
+/// Separately, non-opcode-keyed rewrites are classified by SemanticTranslator's
+/// profile registry, and the barrier-state and sleep/monitor families are
+/// DEFERRED with a pass-through report rather than fail-closed (see
+/// gfx1250_b0_to_a0_is_deferred_family).
 inline constexpr std::array<std::string_view, 17> kExactB0ToA0TranslationMnemonics = {
     "ds_load_2addr_b32",
     "ds_load_2addr_b64",
@@ -172,7 +172,8 @@ inline constexpr std::array<std::string_view, 17> kExactB0ToA0TranslationMnemoni
     const Instruction &inst,
     const std::unordered_map<uint64_t, const Instruction *> &source_instruction_by_offset,
     const Gfx1250VgprMsbAnalysis &vgpr_msb) {
-  RegisterSet pending_defs = InstDefUse(inst, &vgpr_msb, UnknownVgprDefPolicy::ExpandAll).defs;
+  RegisterSet pending_defs =
+      InstDefUse(inst, &vgpr_msb, UnknownVgprDefPolicy::ExpandAll).defs.ordinary_only();
   uint64_t next_offset = inst.src_loc() + inst.size();
   while (true) {
     const auto next_it = source_instruction_by_offset.find(next_offset);
@@ -200,7 +201,7 @@ inline constexpr std::array<std::string_view, 17> kExactB0ToA0TranslationMnemoni
     const InstDefUse access(next, &vgpr_msb, UnknownVgprDefPolicy::ExpandAll);
     if (access.uses.intersects(pending_defs))
       return false;
-    pending_defs |= access.defs;
+    pending_defs |= access.defs.ordinary_only();
 
     if (next.size() <= 0)
       return false;
@@ -260,13 +261,7 @@ const InstructionLegalization *gfx1250_b0_to_a0_legalization(const Instruction &
   if (fp8_clamp_family && !requires_fp8_clamp_emulation(inst))
     return nullptr;
 
-  // Reading FLAT_SCRATCH_BASE through a 64-bit source position is a property of
-  // the operand rather than the mnemonic, so it is classified separately.
-  // Deferred families reach here and stay on the copy path. Reporting that
-  // omission is the translation loop's job: see
-  // gfx1250_b0_to_a0_is_deferred_family.
-  if (!requires_b0_to_a0_expansion(inst.mnemonic()) &&
-      !gfx1250_reads_flat_scratch_base_64bit(inst)) {
+  if (!requires_b0_to_a0_expansion(inst.mnemonic())) {
     return nullptr;
   }
 

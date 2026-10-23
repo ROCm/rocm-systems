@@ -90,11 +90,11 @@ rj_status_t rj_code_decoder_decode(rj_code_decoder_t *decoder,
 
   try {
     Instruction::ScopedHeapAllocation heap_allocation;
-    std::unique_ptr<Instruction> decoded(decoder->decoder->decode(binary_inst));
-    if (!decoded)
+    DecodeResult decoded = decoder->decoder->decode(binary_inst);
+    if (decoded.failed())
       return ROCJITSU_STATUS_ERROR;
 
-    *inst = reinterpret_cast<rj_code_inst_t *>(decoded.release());
+    *inst = reinterpret_cast<rj_code_inst_t *>(decoded.value().release());
     return ROCJITSU_STATUS_SUCCESS;
   } catch (const std::bad_alloc &) {
     return ROCJITSU_STATUS_OUT_OF_RESOURCES;

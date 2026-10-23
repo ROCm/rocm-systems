@@ -6,15 +6,18 @@
  ************************************************************************/
 
 #include "comm.h"
+#include "alloc.h"
 #include "info.h"
 #include "bootstrap.h"
 #define ENABLE_TIMER 0
 #include "timer.h"
 #include "transport.h"
 
-struct ncclTransport* ncclTransports[NTRANSPORTS + 1] = {
-  &p2pTransport, &shmTransport, &netTransport, &collNetTransport,
-  &profilerTransport // Not really used for transport, only to create proxy ops polling on profiler counters.
+struct ncclTransport* ncclTransports[NTRANSPORTS] = {
+  &p2pTransport,
+  &shmTransport,
+  &netTransport,
+  &collNetTransport,
 };
 
 template <int type>
@@ -31,7 +34,7 @@ static ncclResult_t selectTransport(struct ncclComm* comm, struct ncclTopoGraph*
     NCCLCHECK(ncclTopoGetIntraNetDev(comm->topo, peer, graph, channelId, (type == 1) ? 0 : 1, nullptr, &n2));
   }
   bool xgmi;
-  NCCLCHECK(ncclTopoGetLinkType(comm->topo, myInfo->cudaDev, peerInfo->cudaDev, &xgmi));
+  NCCLCHECK(ncclTopoGetLinkType(comm->topo, myInfo->nvmlDev, peerInfo->nvmlDev, &xgmi));
 
   for (int t = 0; t < NTRANSPORTS; t++) {
     if (graph == NULL && connIndex == NCCL_CONN_IDX_P2P_NET && (t == TRANSPORT_SHM || (!xgmi && t == TRANSPORT_P2P)))
@@ -154,6 +157,12 @@ ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* 
 
   int count = 0;
   int num = MAXCHANNELS / CHANNELS_PER_MASK_WORD;
+
+  // Pool a single side stream for all buffer allocations during this pre-connect
+  // phase (including proxy-thread ncclCudaCalloc for this device), avoiding
+  // transient per-connection stream create/destroy. Released when this returns
+  // so it does not persist into the steady-state collective phase.
+  ncclSideStreamScope sideScope(comm->cudaDev, comm->sideStreamPriority);
 
   NCCLCHECK(ncclCalloc(&data, maxPeers));
   NCCLCHECKGOTO(ncclCalloc(&recvData, maxPeers), ret, fail);

@@ -121,7 +121,7 @@ void Operand::read_lane_chunk_exec(const amdgpu::Wavefront &wf, uint32_t lane_ba
     return;
   }
   if (!reads_value()) {
-    std::fill_n(out, count, 0u);
+    std::ranges::fill_n(out, count, 0u);
     return;
   }
   assert(lane_base <= wf.wf_size());
@@ -131,16 +131,16 @@ void Operand::read_lane_chunk_exec(const amdgpu::Wavefront &wf, uint32_t lane_ba
       out[i] = read_lane_exec(wf, lane_base + i);
     return;
   }
-  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
-    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;
+  if (auto off = resolved_vgpr_offset_exec(wf)) {
+    uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, vgpr_msb_role());
     uint64_t lane_mask =
         count == 0 ? 0 : util::mask<uint64_t>(static_cast<int>(count)) << lane_base;
     auto region =
-        amdgpu::RegisterAccess(wf.cu()).read_vgpr_region(wf.vgpr_alloc().base + voff, 1, lane_mask);
-    std::copy_n(region.lanes().begin() + lane_base, count, out);
+        amdgpu::RegisterAccess(wf).read_vgpr_region(wf.vgpr_alloc().base + voff, 1, lane_mask);
+    std::ranges::copy_n(region.lanes().begin() + lane_base, count, out);
     return;
   }
-  std::fill_n(out, count, Isa::simd_broadcast_value(wf, opr_type_, encoding_value_));
+  std::ranges::fill_n(out, count, Isa::simd_broadcast_value(wf, opr_type_, encoding_value_));
 }
 
 void Operand::write_lane_chunk_exec(amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
@@ -155,25 +155,28 @@ void Operand::write_lane_chunk_exec(amdgpu::Wavefront &wf, uint32_t lane_base, u
         write_lane_exec(wf, lane_base + i, vals[i]);
     return;
   }
-  auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this);
+  auto off = resolved_vgpr_offset_exec(wf);
   if (!off) {
     for (uint32_t i = 0; i < count; ++i)
       if (mask & (1ULL << i))
         write_lane_exec(wf, lane_base + i, vals[i]);
     return;
   }
-  uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
+  amdgpu::VgprMsbRole role =
+      vgpr_msb_role() == amdgpu::VgprMsbRole::None ? amdgpu::VgprMsbRole::Dst : vgpr_msb_role();
+  uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, role);
   uint32_t reg = wf.vgpr_alloc().base + voff;
+  if (!amdgpu::OperandExecutionAccess::raw_compute_unit(wf.cu()).owns_vgpr_range(wf, reg, 1))
+    return;
   uint64_t full_mask = util::mask<uint64_t>(static_cast<int>(count));
+  uint8_t *dst = amdgpu::OperandExecutionAccess::raw_compute_unit(wf.cu()).raw_vgpr_data(reg);
   if ((mask & full_mask) == full_mask) {
-    uint8_t *dst = amdgpu::OperandExecutionAccess::raw_compute_unit(wf.cu()).raw_vgpr_data(reg);
     std::memcpy(dst + lane_base * sizeof(uint32_t), vals, count * sizeof(uint32_t));
     return;
   }
   for (uint32_t i = 0; i < count; ++i)
     if (mask & (1ULL << i))
-      amdgpu::OperandExecutionAccess::raw_compute_unit(wf.cu()).write_vgpr(reg, lane_base + i,
-                                                                           vals[i]);
+      std::memcpy(dst + (lane_base + i) * sizeof(uint32_t), &vals[i], sizeof(uint32_t));
 }
 
 uint32_t Operand::read_scalar_exec(const amdgpu::Wavefront &wf) const {
@@ -204,16 +207,16 @@ uint32_t Operand::read_lane_exec(const amdgpu::Wavefront &wf, uint32_t lane) con
   int ev = encoding_value_;
   if (auto packed = packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, ev)) {
     uint32_t off = packed->reg + (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);
-    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, off, false) : off;
+    uint32_t voff = amdgpu::apply_gpr_idx(wf, off, vgpr_msb_role());
     uint8_t byte_mask = packed->shift ? rocjitsu::ExecutionPlugin::kHighHalfByteMask
                                       : rocjitsu::ExecutionPlugin::kLowHalfByteMask;
     uint32_t raw =
-        amdgpu::RegisterAccess(wf.cu()).read_vgpr(wf.vgpr_alloc().base + voff, lane, byte_mask);
+        amdgpu::RegisterAccess(wf).read_vgpr(wf.vgpr_alloc().base + voff, lane, byte_mask);
     return (raw >> packed->shift) & 0xffffu;
   }
   if (auto off = Isa::resolved_vgpr_offset(opr_type_, ev)) {
-    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;
-    return amdgpu::RegisterAccess(wf.cu()).read_vgpr(wf.vgpr_alloc().base + voff, lane);
+    uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, vgpr_msb_role());
+    return amdgpu::RegisterAccess(wf).read_vgpr(wf.vgpr_alloc().base + voff, lane);
   }
   if (is_immediate_type(opr_type_))
     return static_cast<uint32_t>(ev);
@@ -242,17 +245,21 @@ void Operand::write_lane_exec(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val
   if (auto packed =
           packed_16bit_vgpr_dst(packed_16bit_dst_, size_bits_, opr_type_, encoding_value_)) {
     uint32_t off = packed->reg + (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);
-    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, off, true) : off;
+    amdgpu::VgprMsbRole role =
+        vgpr_msb_role() == amdgpu::VgprMsbRole::None ? amdgpu::VgprMsbRole::Dst : vgpr_msb_role();
+    uint32_t voff = amdgpu::apply_gpr_idx(wf, off, role);
     uint32_t idx = wf.vgpr_alloc().base + voff;
     uint8_t write_byte_mask = packed->shift ? rocjitsu::ExecutionPlugin::kHighHalfByteMask
                                             : rocjitsu::ExecutionPlugin::kLowHalfByteMask;
     uint32_t placed = (val & 0xffffu) << packed->shift;
-    amdgpu::RegisterAccess(wf.cu()).write_vgpr(idx, lane, placed, write_byte_mask);
+    amdgpu::RegisterAccess(wf).write_vgpr(idx, lane, placed, write_byte_mask);
     return;
   }
   if (auto off = Isa::resolved_vgpr_offset(opr_type_, encoding_value_)) {
-    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
-    amdgpu::RegisterAccess(wf.cu()).write_vgpr(wf.vgpr_alloc().base + voff, lane, val);
+    amdgpu::VgprMsbRole role =
+        vgpr_msb_role() == amdgpu::VgprMsbRole::None ? amdgpu::VgprMsbRole::Dst : vgpr_msb_role();
+    uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, role);
+    amdgpu::RegisterAccess(wf).write_vgpr(wf.vgpr_alloc().base + voff, lane, val);
     return;
   }
   throw std::logic_error("write_lane called on non-VGPR operand type");
@@ -269,9 +276,9 @@ uint64_t Operand::read_lane64_exec(const amdgpu::Wavefront &wf, uint32_t lane) c
     return 0;
   int ev = encoding_value_;
   if (auto off = Isa::resolved_vgpr_offset(opr_type_, ev)) {
-    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;
+    uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, vgpr_msb_role());
     uint32_t idx = wf.vgpr_alloc().base + voff;
-    return amdgpu::RegisterAccess(wf.cu()).read_vgpr64(idx, lane);
+    return amdgpu::RegisterAccess(wf).read_vgpr64(idx, lane);
   }
   if (literal32_widening_)
     return widened_literal32_value();
@@ -290,9 +297,11 @@ void Operand::write_lane64_exec(amdgpu::Wavefront &wf, uint32_t lane, uint64_t v
   if (!is_writable())
     return;
   if (auto off = Isa::resolved_vgpr_offset(opr_type_, encoding_value_)) {
-    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
+    amdgpu::VgprMsbRole role =
+        vgpr_msb_role() == amdgpu::VgprMsbRole::None ? amdgpu::VgprMsbRole::Dst : vgpr_msb_role();
+    uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, role);
     uint32_t idx = wf.vgpr_alloc().base + voff;
-    amdgpu::RegisterAccess(wf.cu()).write_vgpr64(idx, lane, val);
+    amdgpu::RegisterAccess(wf).write_vgpr64(idx, lane, val);
     return;
   }
   throw std::logic_error("write_lane64 called on non-VGPR operand type");
@@ -325,64 +334,74 @@ void Operand::write_scalar64_exec(amdgpu::Wavefront &wf, uint64_t val) const {
 }
 
 std::optional<uint32_t> Operand::simd_vgpr_base_exec(const amdgpu::Wavefront &wf) const {
-  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this))
-    return wf.vgpr_alloc().base + (wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off);
+  if (auto off = resolved_vgpr_offset_exec(wf))
+    return wf.vgpr_alloc().base + amdgpu::apply_gpr_idx(wf, *off, vgpr_msb_role());
   return std::nullopt;
 }
 
 std::optional<uint32_t> Operand::simd_vgpr_base_mut_exec(amdgpu::Wavefront &wf) const {
-  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this))
-    return wf.vgpr_alloc().base + (wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off);
+  if (auto off = resolved_vgpr_offset_exec(wf)) {
+    amdgpu::VgprMsbRole role =
+        vgpr_msb_role() == amdgpu::VgprMsbRole::None ? amdgpu::VgprMsbRole::Dst : vgpr_msb_role();
+    return wf.vgpr_alloc().base + amdgpu::apply_gpr_idx(wf, *off, role);
+  }
   return std::nullopt;
 }
 
-const amdgpu::VgprStorage *Operand::simd_vgpr_storage_exec(const amdgpu::Wavefront &wf) const {
-  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
-    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;
-    return &amdgpu::OperandExecutionAccess::raw_compute_unit(wf.cu()).template raw_vgpr_reg<64>(
-        wf.vgpr_alloc().base + voff);
+amdgpu::ConstVgprStorage Operand::simd_vgpr_storage_exec(const amdgpu::Wavefront &wf) const {
+  if (auto off = resolved_vgpr_offset_exec(wf)) {
+    uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, vgpr_msb_role());
+    const auto &cu = amdgpu::OperandExecutionAccess::raw_compute_unit(wf.cu());
+    return {reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(wf.vgpr_alloc().base + voff)),
+            cu.vgpr_storage_lane_count()};
   }
-  return nullptr;
+  return {};
 }
 
-amdgpu::VgprStorage *Operand::simd_vgpr_storage_mut_exec(amdgpu::Wavefront &wf) const {
-  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
-    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
-    return &amdgpu::OperandExecutionAccess::raw_compute_unit(wf.cu()).template raw_vgpr_reg<64>(
-        wf.vgpr_alloc().base + voff);
+amdgpu::VgprStorage Operand::simd_vgpr_storage_mut_exec(amdgpu::Wavefront &wf) const {
+  if (auto off = resolved_vgpr_offset_exec(wf)) {
+    amdgpu::VgprMsbRole role =
+        vgpr_msb_role() == amdgpu::VgprMsbRole::None ? amdgpu::VgprMsbRole::Dst : vgpr_msb_role();
+    uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, role);
+    auto &cu = amdgpu::OperandExecutionAccess::raw_compute_unit(wf.cu());
+    return {reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(wf.vgpr_alloc().base + voff)),
+            cu.vgpr_storage_lane_count()};
   }
-  return nullptr;
+  return {};
 }
 
 amdgpu::ConstVgprStoragePair64
 Operand::simd_vgpr_storage64_exec(const amdgpu::Wavefront &wf) const {
-  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
-    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;
+  if (auto off = resolved_vgpr_offset_exec(wf)) {
+    uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, vgpr_msb_role());
     uint32_t reg = wf.vgpr_alloc().base + voff;
+    const auto &cu = amdgpu::OperandExecutionAccess::raw_compute_unit(wf.cu());
     return {
-        &amdgpu::OperandExecutionAccess::raw_compute_unit(wf.cu()).template raw_vgpr_reg<64>(reg),
-        &amdgpu::OperandExecutionAccess::raw_compute_unit(wf.cu()).template raw_vgpr_reg<64>(reg +
-                                                                                             1)};
+        {reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(reg)), cu.vgpr_storage_lane_count()},
+        {reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(reg + 1)),
+         cu.vgpr_storage_lane_count()}};
   }
-  return {nullptr, nullptr};
+  return {};
 }
 
 amdgpu::VgprStoragePair64 Operand::simd_vgpr_storage64_mut_exec(amdgpu::Wavefront &wf) const {
-  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
-    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
+  if (auto off = resolved_vgpr_offset_exec(wf)) {
+    amdgpu::VgprMsbRole role =
+        vgpr_msb_role() == amdgpu::VgprMsbRole::None ? amdgpu::VgprMsbRole::Dst : vgpr_msb_role();
+    uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, role);
     uint32_t reg = wf.vgpr_alloc().base + voff;
+    auto &cu = amdgpu::OperandExecutionAccess::raw_compute_unit(wf.cu());
     return {
-        &amdgpu::OperandExecutionAccess::raw_compute_unit(wf.cu()).template raw_vgpr_reg<64>(reg),
-        &amdgpu::OperandExecutionAccess::raw_compute_unit(wf.cu()).template raw_vgpr_reg<64>(reg +
-                                                                                             1)};
+        {reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(reg)), cu.vgpr_storage_lane_count()},
+        {reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(reg + 1)), cu.vgpr_storage_lane_count()}};
   }
-  return {nullptr, nullptr};
+  return {};
 }
 
 void Operand::simd_notify_read_exec(const amdgpu::Wavefront &wf, uint64_t lane_mask,
                                     uint8_t byte_mask) const {
-  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
-    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;
+  if (auto off = resolved_vgpr_offset_exec(wf)) {
+    uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, vgpr_msb_role());
     amdgpu::OperandExecutionAccess::raw_compute_unit(wf.cu()).notify_vgpr_read(
         &wf, wf.vgpr_alloc().base + voff, lane_mask, byte_mask);
   }
@@ -390,8 +409,8 @@ void Operand::simd_notify_read_exec(const amdgpu::Wavefront &wf, uint64_t lane_m
 
 void Operand::simd_notify_read_mut_exec(amdgpu::Wavefront &wf, uint64_t lane_mask,
                                         uint8_t byte_mask) const {
-  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
-    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
+  if (auto off = resolved_vgpr_offset_exec(wf)) {
+    uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, vgpr_msb_role());
     amdgpu::OperandExecutionAccess::raw_compute_unit(wf.cu()).notify_vgpr_read(
         &wf, wf.vgpr_alloc().base + voff, lane_mask, byte_mask);
   }
@@ -399,8 +418,8 @@ void Operand::simd_notify_read_mut_exec(amdgpu::Wavefront &wf, uint64_t lane_mas
 
 void Operand::simd_notify_read64_exec(const amdgpu::Wavefront &wf, uint64_t lane_mask,
                                       uint8_t byte_mask) const {
-  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
-    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;
+  if (auto off = resolved_vgpr_offset_exec(wf)) {
+    uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, vgpr_msb_role());
     uint32_t reg = wf.vgpr_alloc().base + voff;
     amdgpu::OperandExecutionAccess::raw_compute_unit(wf.cu()).notify_vgpr_read(&wf, reg, lane_mask,
                                                                                byte_mask);
@@ -411,8 +430,8 @@ void Operand::simd_notify_read64_exec(const amdgpu::Wavefront &wf, uint64_t lane
 
 void Operand::simd_notify_read64_mut_exec(amdgpu::Wavefront &wf, uint64_t lane_mask,
                                           uint8_t byte_mask) const {
-  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
-    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
+  if (auto off = resolved_vgpr_offset_exec(wf)) {
+    uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, vgpr_msb_role());
     uint32_t reg = wf.vgpr_alloc().base + voff;
     amdgpu::OperandExecutionAccess::raw_compute_unit(wf.cu()).notify_vgpr_read(&wf, reg, lane_mask,
                                                                                byte_mask);
@@ -423,8 +442,10 @@ void Operand::simd_notify_read64_mut_exec(amdgpu::Wavefront &wf, uint64_t lane_m
 
 void Operand::simd_notify_write_mut_exec(amdgpu::Wavefront &wf, uint64_t lane_mask,
                                          uint8_t byte_mask) const {
-  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
-    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
+  if (auto off = resolved_vgpr_offset_exec(wf)) {
+    amdgpu::VgprMsbRole role =
+        vgpr_msb_role() == amdgpu::VgprMsbRole::None ? amdgpu::VgprMsbRole::Dst : vgpr_msb_role();
+    uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, role);
     amdgpu::OperandExecutionAccess::raw_compute_unit(wf.cu()).notify_vgpr_write(
         &wf, wf.vgpr_alloc().base + voff, lane_mask, byte_mask);
   }
@@ -432,8 +453,10 @@ void Operand::simd_notify_write_mut_exec(amdgpu::Wavefront &wf, uint64_t lane_ma
 
 void Operand::simd_notify_write64_mut_exec(amdgpu::Wavefront &wf, uint64_t lane_mask,
                                            uint8_t byte_mask) const {
-  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
-    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
+  if (auto off = resolved_vgpr_offset_exec(wf)) {
+    amdgpu::VgprMsbRole role =
+        vgpr_msb_role() == amdgpu::VgprMsbRole::None ? amdgpu::VgprMsbRole::Dst : vgpr_msb_role();
+    uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, role);
     uint32_t reg = wf.vgpr_alloc().base + voff;
     amdgpu::OperandExecutionAccess::raw_compute_unit(wf.cu()).notify_vgpr_write(&wf, reg, lane_mask,
                                                                                 byte_mask);
@@ -487,6 +510,18 @@ bool Operand::full_execution_backend_complete() {
            backend.simd_notify_write64_mut != nullptr;
   };
   return is_complete(*static_cast<const ExecutionBackend *>(full_execution_backend()));
+}
+
+std::optional<uint32_t> Operand::resolved_vgpr_offset_exec(const amdgpu::Wavefront &wf) const {
+  if (!reads_value())
+    return std::nullopt;
+  auto packed =
+      packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, encoding_value_);
+  if (!packed)
+    packed = packed_16bit_vgpr_dst(packed_16bit_dst_, size_bits_, opr_type_, encoding_value_);
+  if (packed)
+    return packed->reg + (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);
+  return detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this);
 }
 
 } // namespace rdna3_5

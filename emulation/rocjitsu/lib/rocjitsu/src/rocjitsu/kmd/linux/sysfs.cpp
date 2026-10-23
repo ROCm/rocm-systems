@@ -9,7 +9,7 @@
 #include "rocjitsu/kmd/linux/rpc.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "linux/uapi/kfd_sysfs.h"
+#include "uapi/linux/kfd_sysfs.h"
 RJ_DIAGNOSTIC_POP
 
 #include <cerrno>
@@ -164,11 +164,6 @@ void Sysfs::cleanup() {
   }
 }
 
-void Sysfs::release_after_fork() {
-  topology_dir_.clear();
-  drm_dir_.clear();
-}
-
 void Sysfs::setup_environment() {}
 
 void Sysfs::write_generation_id() { write_file(topology_dir_ + "/generation_id", "1\n"); }
@@ -191,6 +186,8 @@ void Sysfs::write_cpu_node(const std::string &nodes_dir, uint32_t num_gpu_links)
     make_dir(node_dir + "/io_links/" + std::to_string(i));
 
   write_file(node_dir + "/gpu_id", "0\n");
+  // KFD publishes a name file for every topology node.
+  write_file(node_dir + "/name", "\n");
 
   long nproc = sysconf(_SC_NPROCESSORS_ONLN);
   if (nproc < 1)
@@ -267,15 +264,15 @@ void Sysfs::write_cpu_node(const std::string &nodes_dir, uint32_t num_gpu_links)
 }
 
 void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, const GpuInfo &gpu,
-                           uint32_t total_gpus) {
+                           uint32_t total_gpus, bool publish_peer_links) {
   std::string node_dir = nodes_dir + "/" + std::to_string(node_idx);
   make_dir(node_dir);
   make_dir(node_dir + "/mem_banks/0");
   make_dir(node_dir + "/caches/0");
   make_dir(node_dir + "/caches/1");
 
-  // IO links: link 0 = to CPU, links 1..N-1 = XGMI to peer GPUs
-  uint32_t num_io_links = 1 + (total_gpus > 1 ? total_gpus - 1 : 0);
+  // IO link 0 reaches the CPU. Peer links require an executable route.
+  uint32_t num_io_links = publish_peer_links ? total_gpus : 1;
   for (uint32_t i = 0; i < num_io_links; ++i)
     make_dir(node_dir + "/io_links/" + std::to_string(i));
 
@@ -287,7 +284,7 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
   const DebugTopology topology = kmd::effective_topology_for(
       gpu.gfx_target_version, gpu.capability, gpu.capability2, gpu.debug_prop, gpu.revision_id);
 
-  uint32_t p2p_links = total_gpus > 1 ? total_gpus - 1 : 0;
+  uint32_t p2p_links = publish_peer_links ? total_gpus - 1 : 0;
 
   // array_count is the one geometry property KFD reports per node rather than
   // per XCC: node_show() emits node_props.array_count * NUM_XCC, while
@@ -327,7 +324,7 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
         << "hive_id " << gpu.hive_id << "\n"
         << "num_sdma_engines " << gpu.num_sdma_engines << "\n"
         << "num_sdma_xgmi_engines " << gpu.num_sdma_xgmi_engines << "\n"
-        << "num_sdma_queues_per_engine 2\n"
+        << "num_sdma_queues_per_engine " << gpu.num_sdma_queues_per_engine << "\n"
         << "num_cp_queues " << gpu.num_cp_queues << "\n"
         << "max_engine_clk_fcompute " << gpu.max_engine_clk_fcompute << "\n"
         << "max_engine_clk_ccompute 0\n"
@@ -400,7 +397,7 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
   }
 
   // IO links 1..N-1: XGMI to peer GPUs (type 11)
-  if (total_gpus > 1) {
+  if (publish_peer_links && total_gpus > 1) {
     uint32_t link_idx = 1;
     for (uint32_t peer = 1; peer <= total_gpus; ++peer) {
       if (peer == node_idx)
@@ -488,6 +485,14 @@ void Sysfs::write_drm_tree(const std::vector<GpuInfo> &gpus) {
       write_file(device_dir + "/revision", revision_hex.str());
       write_file(device_dir + "/subsystem_vendor", vendor_hex.str());
       write_file(device_dir + "/subsystem_device", device_hex.str());
+      for (const auto &block : gpu.ip_versions) {
+        std::string instance_dir =
+            device_dir + "/ip_discovery/die/0/" + std::to_string(block.hardware_id) + "/0";
+        make_dir(instance_dir);
+        write_file(instance_dir + "/major", std::to_string(block.major) + "\n");
+        write_file(instance_dir + "/minor", std::to_string(block.minor) + "\n");
+        write_file(instance_dir + "/revision", std::to_string(block.revision) + "\n");
+      }
     }
   }
 
@@ -503,7 +508,7 @@ void Sysfs::write_drm_tree(const std::vector<GpuInfo> &gpus) {
 
 std::string Sysfs::generate(const GpuInfo &gpu) { return generate(std::vector<GpuInfo>{gpu}); }
 
-std::string Sysfs::generate(const std::vector<GpuInfo> &gpus) {
+std::string Sysfs::generate(const std::vector<GpuInfo> &gpus, bool publish_peer_links) {
   cleanup();
 
   static std::once_flag reap_once;
@@ -526,7 +531,7 @@ std::string Sysfs::generate(const std::vector<GpuInfo> &gpus) {
 
   write_cpu_node(nodes_dir, num_gpus);
   for (uint32_t i = 0; i < num_gpus; ++i)
-    write_gpu_node(nodes_dir, i + 1, gpus[i], num_gpus);
+    write_gpu_node(nodes_dir, i + 1, gpus[i], num_gpus, publish_peer_links);
 
   write_drm_tree(gpus);
 
@@ -549,6 +554,7 @@ Sysfs::GpuInfo gpu_info_from_config(const config::KfdDeviceConfig &dev, uint32_t
   gpu.debug_prop = dev.debug_prop;
   gpu.drm_render_minor = dev.drm_render_minor;
   gpu.marketing_name = dev.marketing_name;
+  gpu.ip_versions = dev.ip_versions;
   gpu.revision_id = dev.revision_id;
   gpu.pci_revision_id = dev.pci_revision_id;
   gpu.simd_count = dev.simd_count;
@@ -572,6 +578,7 @@ Sysfs::GpuInfo gpu_info_from_config(const config::KfdDeviceConfig &dev, uint32_t
   gpu.l2_assoc = dev.l2_assoc;
   gpu.num_sdma_engines = dev.num_sdma_engines;
   gpu.num_sdma_xgmi_engines = dev.num_sdma_xgmi_engines;
+  gpu.num_sdma_queues_per_engine = dev.num_sdma_queues_per_engine;
   gpu.num_cp_queues = dev.num_cp_queues;
   gpu.max_engine_clk_fcompute = dev.max_engine_clk_fcompute;
   gpu.num_xcc = num_xcc;

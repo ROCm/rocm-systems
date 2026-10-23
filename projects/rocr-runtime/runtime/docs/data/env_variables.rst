@@ -75,6 +75,13 @@
       - | 0: Disable
         | 1: Enable
 
+    * - | ``HSA_ENABLE_SDMA_GPU_POLL``
+        | Windows only, and only meaningful on a native SDMA user queue, which the device capability decides. Selects who executes the dependency ``POLL_REGMEM`` packets the copy writes into the ring: the SDMA engine, or a host thread in the thunk that waits the signals out, strips the packets, and only then submits the span.
+        | Defaults to host-thread emulation. Set to 1 once the driver supports GPU-side polling.
+      - ``0``
+      - | 0: Emulate the polls on a host thread.
+        | 1: Let the SDMA engine execute the polls.
+
     * - | ``HSA_ENABLE_MWAITX``
         | When mwaitx is enabled, on AMD CPUs, runtime will hint to the CPU to go into lower power-states when doing busy loops by using the mwaitx instruction.
       - ``1``
@@ -93,29 +100,35 @@
       - | 0: Disable debug mode.
         | 1: Enable debug mode with additional validation and logging.
 
-    * - | ``HSA_HOTSWAP_DISABLE``
-        | Disables HotSwap code object rewriting. HotSwap is enabled by default on supported GPU and ASIC revisions.
+    * - | ``HSA_HOTSWAP_ENABLE``
+        | Enables automatic loading of the HotSwap tool, which retargets code objects for ``gfx1250`` A0 agents. Automatic loading is disabled by default and only occurs when explicitly enabled and a supported agent is present. This variable does not prevent explicit loading through ``HSA_TOOLS_LIB``.
       - ``0``
-      - | 0, ``false``, ``off``, ``no``, ``n``, or ``f``: Allow HotSwap on supported GPU and ASIC revisions.
-        | Any other non-empty value: Disable HotSwap and use the original code object load path.
+      - | Unset, empty, 0, ``false``, ``off``, ``no``, ``n``, or ``f``: Skip automatic loading of the HotSwap tool.
+        | Any other value: Automatically load the HotSwap tool when a supported agent is present.
+
+    * - | ``HSA_DISABLE_GFX12_STRICT``
+        | Controls reporting of the "strict" ISA variant on A0 silicon. Disabled by default, so the agent keeps the base target. Set to 0 to opt in and have the agent report the strict variant instead.
+      - ``1``
+      - | 0: Report the strict ISA variant on A0 agents.
+        | 1, unset, empty, or any other value: Keep the base target on A0 agents.
 
     * - | ``HSA_HOTSWAP_VERBOSE``
-        | Enables HotSwap diagnostic logging to stderr.
+        | Enables HotSwap diagnostic logging to stderr. Read by the HotSwap tool itself, not by the runtime, so it has no effect unless the tool is loaded. Errors are always reported regardless of this setting.
       - ``0``
-      - | 0, ``false``, ``off``, ``no``, ``n``, or ``f``: Disable HotSwap diagnostic logging.
-        | Any other non-empty value: Enable HotSwap diagnostic logging.
+      - | Unset, empty, or 0: Disable HotSwap diagnostic logging.
+        | Any other value: Enable HotSwap diagnostic logging.
 
-    * - | ``HSA_HOTSWAP_STRICT_MODE``
-        | Enables the opt-in HotSwap strict mask workaround request for non-A0 ``gfx1250`` targets.
+    * - | ``HSA_HOTSWAP_DUMP_SOURCE``
+        | Writes the source code object to disk when the HotSwap tool refuses to translate it. Off by default because these objects are large and a failed translation is not memoized, so the same bytes fail again on every load. At most one artifact is written per source, for at most 32 distinct sources per process; an out-of-resources failure is never captured.
       - ``0``
-      - | 0, ``false``, ``off``, ``no``, ``n``, or ``f``: Disable strict mask workaround requests.
-        | Any other non-empty value: Request COMGR strict mask workarounds for non-A0 ``gfx1250`` HotSwap rewrites.
+      - | Unset, empty, or 0: Do not write refused code objects.
+        | Any other value: Write each refused code object once.
 
-    * - | ``AMD_COMGR_HOTSWAP_ENTRY_TRAMPOLINES``
-        | Controls whether ROCr requests COMGR entry-trampoline HotSwap rewriting for gfx12.5 targets. Disabled by default.
-      - ``0``
-      - | ``1``, ``true``, ``on``, ``yes``, or any other truthy value: Enable entry-trampoline rewrites for gfx125* and ``gfx12-5-generic`` targets.
-        | Unset, empty, 0, ``false``, ``off``, ``no``, ``n``, or ``f``: Disable entry-trampoline rewrites.
+    * - | ``HSA_HOTSWAP_DUMP_DIR``
+        | Directory that receives the artifacts written by ``HSA_HOTSWAP_DUMP_SOURCE``. Naming a destination does not by itself enable capture.
+      - ``TMPDIR``, else ``/tmp``
+      - | Any non-empty path: Write artifacts there.
+        | Unset or empty: Fall back to ``TMPDIR``, then ``/tmp``.
 
     * - | ``HSA_ENABLE_DXG_DETECTION``
         | Controls detection of the DXG driver (/dev/dxg) on WSL2.

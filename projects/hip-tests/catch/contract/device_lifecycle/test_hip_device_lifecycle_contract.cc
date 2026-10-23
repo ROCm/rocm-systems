@@ -111,3 +111,27 @@ HIP_TEST_CASE(Contract_DeviceLifecycle_HipDevicePrimaryCtxReset_Default_LeavesDe
   cleanup.Add([ptr] { (void)hipFree(ptr); });
   REQUIRE(ptr != nullptr);
 }
+
+// @asserts: hipInitDevice - initializing a visible device with no flags is accepted or reported unsupported
+HIP_TEST_CASE(Contract_DeviceLifecycle_HipInitDevice_Default_AcceptsVisibleDevice) {
+  int count = 0;
+  HIP_CHECK(hipGetDeviceCount(&count));
+  REQUIRE(count > 0);
+
+  // Initializing a visible device with no flags (flags == 0) must be accepted (or
+  // reported unsupported).
+  RequireAcceptedOrBenign(hipInitDevice(0, 0, 0));
+}
+
+// @asserts: hipInitDevice - an out-of-range device ordinal is rejected with a defined error
+HIP_TEST_CASE(Contract_DeviceLifecycle_HipInitDevice_InvalidDevice_IsRejected) {
+  int count = 0;
+  HIP_CHECK(hipGetDeviceCount(&count));
+  REQUIRE(count > 0);
+
+  // An ordinal past the last visible device is not addressable; the call must
+  // report a defined error rather than succeed or crash.
+  const hipError_t status = hipInitDevice(count, 0, 0);
+  REQUIRE(status != hipSuccess);
+  (void)hipGetLastError();
+}

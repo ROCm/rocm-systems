@@ -32,6 +32,17 @@ VaMgr::~VaMgr() {
   frag_map_.clear();
 }
 
+void VaMgr::FreeStats(uint64_t* total_free, uint64_t* largest_free) {
+  lock_guard<mutex> gard(lock_);
+
+  uint64_t total = 0;
+  for (const auto& entry : free_list_) total += entry.first;
+
+  *total_free = total;
+  // free_list_ is keyed by fragment size, so the last entry is the largest one.
+  *largest_free = free_list_.empty() ? 0 : free_list_.rbegin()->first;
+}
+
 uint64_t VaMgr::Alloc(uint64_t bytes, uint64_t align, uint64_t addr) {
 
   if (addr > 0 &&

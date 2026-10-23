@@ -1,0 +1,26 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+set(control_sources
+    ${CMAKE_CURRENT_LIST_DIR}/session.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/triggers/roctx.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/waitable_clocks/steady.cpp
+)
+
+set(control_headers
+    ${CMAKE_CURRENT_LIST_DIR}/session.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/triggers/roctx.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/triggers/time_window.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/waitable_clocks/contract.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/waitable_clocks/posix.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/waitable_clocks/steady.hpp
+)
+
+target_sources(
+    rocprofiler-systems-core-library
+    PRIVATE ${control_sources} ${control_headers}
+)
+
+if(ROCPROFSYS_BUILD_TESTING)
+    add_subdirectory(tests)
+endif()

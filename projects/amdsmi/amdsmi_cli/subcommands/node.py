@@ -1,30 +1,45 @@
 #!/usr/bin/env python3
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 import logging
+import os
 
 from amdsmi import amdsmi_exception, amdsmi_interface
 
 
 class NodeCommands:
+    def _node_cuid_components(self, include_primary):
+        """Every component's CUID, named by type and position within its type."""
+        try:
+            components = amdsmi_interface.amdsmi_get_cuid_components()
+        except (amdsmi_exception.AmdSmiLibraryException, AttributeError) as e:
+            logging.debug("Failed to list CUID components | %s", e)
+            return "N/A"
+
+        counts = {}
+        result = {}
+        for component in components:
+            kind = component["component_type"]
+            index = counts.get(kind, 0)
+            counts[kind] = index + 1
+            name = kind if kind == "PLATFORM" else f"{kind} {index}"
+            if include_primary:
+                primary = component["primary"] or (
+                    "N/A (requires root)" if os.geteuid() != 0 else "N/A"
+                )
+            else:
+                primary = "N/A (not requested)"
+            result[name] = {
+                "derived_cuid": component["derived"],
+                "primary_cuid": primary,
+                "source": component["source"],
+                "auxiliary": component["auxiliary"],
+                "bdf": component["bdf"] or "N/A",
+                "device_path": component["device_path"] or "N/A",
+            }
+        return result
+
     def node(
         self,
         args,
@@ -33,6 +48,9 @@ class NodeCommands:
         power_management=None,
         base_board_temps=None,
         gtt=None,
+        tray=None,
+        cuid=None,
+        cuid_primary=None,
     ):
         """List node information
 
@@ -44,6 +62,10 @@ class NodeCommands:
             power_management (bool, optional): Value override for args.power_management. Defaults to None.
             base_board_temps (bool, optional): Value override for args.base_board_temps. Defaults to None.
             gtt (bool, optional): Value override for args.gtt. Defaults to None.
+            tray (bool, optional): Value override for args.tray. Defaults to None.
+            cuid (bool, optional): Value override for args.cuid. Defaults to None.
+            cuid_primary (bool, optional): Value override for args.cuid_primary.
+                Defaults to None.
 
         Returns:
             None: Print output via AMDSMILogger to destination
@@ -53,8 +75,16 @@ class NodeCommands:
             args.nodes = nodes
         if gtt:
             args.gtt = gtt
+        if tray:
+            args.tray = tray
+        if cuid:
+            args.cuid = cuid
+        if cuid_primary:
+            args.cuid_primary = cuid_primary
+        args.cuid_primary = getattr(args, "cuid_primary", False)
+        args.cuid = getattr(args, "cuid", False) or args.cuid_primary
         # Store args that are applicable to the current platform
-        current_platform_args = ["power_management", "base_board_temps", "gtt"]
+        current_platform_args = ["power_management", "base_board_temps", "gtt", "tray"]
 
         # Check if any node-specific options were passed via command line
         current_platform_values = []
@@ -64,6 +94,12 @@ class NodeCommands:
             current_platform_values += [args.base_board_temps]
         if args.gtt:
             current_platform_values += [args.gtt]
+        if args.tray:
+            current_platform_values += [args.tray]
+        # CUID is opt-in: it enumerates every component, and without root most
+        # of what it reports is temporary.
+        if args.cuid:
+            current_platform_values += [args.cuid]
 
         # If no node options are passed, enable all by default
         if not any(current_platform_values):
@@ -77,11 +113,19 @@ class NodeCommands:
             self.group_check_printed = True
 
         # Initialize variables for both power management and base board temps
-        npm_dict = {"limit": "N/A", "status": "N/A", "threshold": "N/A"}
+        npm_dict = {
+            "limit": "N/A",
+            "status": "N/A",
+            "threshold": "N/A",
+            "balancing_mode": "N/A",
+            "current_node_power": "N/A",
+            "supported_balancing_modes": "N/A",
+        }
         power_unit = "W"
         limit = "N/A"
         base_board_temp_dict = {}
         gtt_dict = {}
+        tray_dict = {}
 
         # Get NPM info
         if args.power_management:
@@ -99,6 +143,7 @@ class NodeCommands:
                 limit = npm_info.get("limit", "N/A")
                 status = npm_info.get("status", npm_info.get("current", "N/A"))
                 ubb_power_threshold = npm_info.get("ubb_power_threshold", "N/A")
+                current_node_power = npm_info.get("current_node_power", "N/A")
 
                 if limit != "N/A":
                     npm_dict["limit"] = limit
@@ -111,6 +156,33 @@ class NodeCommands:
                 # Add UBB power threshold if available
                 if ubb_power_threshold != "N/A":
                     npm_dict["threshold"] = ubb_power_threshold
+                # Add current node power if available
+                if current_node_power != "N/A":
+                    npm_dict["current_node_power"] = current_node_power
+
+            # Balancing mode queries are not gated on NPM being enabled, so
+            # they run regardless of whether npm_info came back as a dict.
+            if args.nodes is not None:
+                try:
+                    mode = amdsmi_interface.amdsmi_get_npm_balancing_mode(args.nodes)
+                    npm_dict["balancing_mode"] = self.helpers.NPM_BALANCING_MODE_TO_CLI.get(
+                        mode, mode
+                    )
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    logging.debug("amdsmi_get_npm_balancing_mode failed: %s", e.get_error_info())
+
+                try:
+                    supported_modes = amdsmi_interface.amdsmi_get_npm_supported_balancing_modes(
+                        args.nodes
+                    )
+                    npm_dict["supported_balancing_modes"] = [
+                        self.helpers.NPM_BALANCING_MODE_TO_CLI.get(mode, mode)
+                        for mode in supported_modes
+                    ]
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    logging.debug(
+                        "amdsmi_get_npm_supported_balancing_modes failed: %s", e.get_error_info()
+                    )
 
         # Get base board temperatures using node_handle
         if args.base_board_temps:
@@ -149,6 +221,18 @@ class NodeCommands:
                 logging.debug("Failed to get GTT info | %s", e.get_error_info())
                 gtt_dict = {}
 
+        # Get compute tray type and accelerator count
+        if args.tray:
+            try:
+                tray_dict = amdsmi_interface.amdsmi_get_tray_info()
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                logging.debug("Failed to get tray info | %s", e.get_error_info())
+                tray_dict = {}
+
+        cuid_dict = {}
+        if args.cuid:
+            cuid_dict["components"] = self._node_cuid_components(args.cuid_primary)
+
         # Print output
         if self.logger.is_human_readable_format() and self.logger.destination == "stdout":
             node_output = ["NODE:"]
@@ -158,6 +242,16 @@ class NodeCommands:
                 node_output.append(f"        STATUS: {npm_dict.get('status', 'N/A')}")
                 threshold = npm_dict.get("threshold", "N/A")
                 node_output.append(f"        THRESHOLD: {threshold} {power_unit}")
+                balancing_mode = npm_dict.get("balancing_mode", "N/A")
+                node_output.append(f"        BALANCING_MODE: {balancing_mode}")
+                current_node_power = npm_dict.get("current_node_power", "N/A")
+                node_output.append(f"        CURRENT_NODE_POWER: {current_node_power} {power_unit}")
+                supported_balancing_modes = npm_dict.get("supported_balancing_modes", "N/A")
+                if isinstance(supported_balancing_modes, list):
+                    supported_balancing_modes = ", ".join(supported_balancing_modes)
+                node_output.append(
+                    f"        SUPPORTED_BALANCING_MODES: {supported_balancing_modes}"
+                )
             if args.base_board_temps and base_board_temp_dict:
                 node_output.append("    BASEBOARD:")
                 node_output.append("        TEMPERATURE:")
@@ -174,14 +268,38 @@ class NodeCommands:
                     node_output.append(
                         f"        PENDING (after reboot): {p_gb:.2f} GB ({p_pages} pages)"
                     )
+            if args.tray:
+                node_output.append("    TRAY:")
+                node_output.append(
+                    f"        MAX_ACC_PER_TRAY: {tray_dict.get('max_acc_per_tray', 'N/A')}"
+                )
+                node_output.append(f"        TRAY_TYPE: {tray_dict.get('tray_type', 'N/A')}")
+            if args.cuid:
+                node_output.append("    CUID:")
+                components = cuid_dict["components"]
+                if not isinstance(components, dict):
+                    node_output.append(f"        COMPONENTS: {components}")
+                else:
+                    for name, fields in components.items():
+                        node_output.append(f"        {name}:")
+                        for key, value in fields.items():
+                            node_output.append(f"            {key.upper()}: {value}")
             print("\n".join(node_output))
         else:
             if self.logger.is_csv_format():
-                csv_dict = {}
+                # Only node 0 is currently supported; mirror the gpu/cpu/nic
+                # CSV surfaces, which always lead with a device identifier.
+                csv_dict = {"node": 0}
                 if args.power_management:
                     csv_dict["limit"] = npm_dict.get("limit", "N/A")
                     csv_dict["status"] = npm_dict.get("status", "N/A")
                     csv_dict["threshold"] = npm_dict.get("threshold", "N/A")
+                    csv_dict["balancing_mode"] = npm_dict.get("balancing_mode", "N/A")
+                    csv_dict["current_node_power"] = npm_dict.get("current_node_power", "N/A")
+                    supported_balancing_modes = npm_dict.get("supported_balancing_modes", "N/A")
+                    if isinstance(supported_balancing_modes, list):
+                        supported_balancing_modes = ";".join(supported_balancing_modes)
+                    csv_dict["supported_balancing_modes"] = supported_balancing_modes
                 if args.base_board_temps and base_board_temp_dict:
                     csv_dict.update(base_board_temp_dict)
                 if args.gtt and gtt_dict:
@@ -190,6 +308,19 @@ class NodeCommands:
                     if "pending_size_gb" in gtt_dict:
                         csv_dict["gtt_pending_gb"] = gtt_dict["pending_size_gb"]
                         csv_dict["gtt_pending_pages"] = gtt_dict["pending_size_pages"]
+                if args.tray:
+                    csv_dict["max_acc_per_tray"] = tray_dict.get("max_acc_per_tray", "N/A")
+                    csv_dict["tray_type"] = tray_dict.get("tray_type", "N/A")
+                components = cuid_dict.get("components")
+                if isinstance(components, str):
+                    csv_dict["components"] = components
+                if isinstance(components, dict) and components:
+                    # One row per component, each carrying the node's fields.
+                    for name, fields in components.items():
+                        self.logger.output = {**csv_dict, "component": name, **fields}
+                        self.logger.store_multiple_device_output()
+                    self.logger.print_output(multiple_device_enabled=True)
+                    return
                 self.logger.output = csv_dict
             else:
                 # For JSON and human readable format with file output
@@ -201,11 +332,23 @@ class NodeCommands:
                         npm_dict["threshold"] = self.helpers.unit_format(
                             self.logger, threshold, power_unit
                         )
+                    current_node_power_value = npm_dict.get("current_node_power", "N/A")
+                    if current_node_power_value != "N/A":
+                        npm_dict["current_node_power"] = self.helpers.unit_format(
+                            self.logger, current_node_power_value, power_unit
+                        )
                     node_output["power_management"] = npm_dict
                 if args.base_board_temps and base_board_temp_dict:
                     node_output["base_board"] = {"temperature": base_board_temp_dict}
                 if args.gtt and gtt_dict:
                     node_output["gtt"] = gtt_dict
+                if args.tray:
+                    node_output["tray"] = {
+                        "max_acc_per_tray": tray_dict.get("max_acc_per_tray", "N/A"),
+                        "tray_type": tray_dict.get("tray_type", "N/A"),
+                    }
+                if args.cuid:
+                    node_output["cuid"] = cuid_dict
                 self.logger.output = {"node": node_output}
                 if multiple_devices:
                     self.logger.store_multiple_device_output()

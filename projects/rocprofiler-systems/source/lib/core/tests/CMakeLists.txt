@@ -5,10 +5,18 @@ add_library(demangler-tests OBJECT demangler_test.cpp)
 
 target_link_libraries(
     demangler-tests
-    PRIVATE rocprofiler-systems-googletest-library rocprofiler-systems-core-library
+    PRIVATE
+        rocprofiler-systems-googletest-library
+        rocprofiler-systems-core-library
+        rocprofiler-systems-logger
+        rocprofiler-systems-headers
+        rocprofiler-systems-timemory
 )
 
-target_include_directories(demangler-tests PRIVATE ${PROJECT_SOURCE_DIR}/source/lib)
+target_include_directories(
+    demangler-tests
+    PRIVATE ${PROJECT_SOURCE_DIR}/source/lib ${CMAKE_BINARY_DIR}/source/lib/
+)
 
 add_library(track-registry-tests OBJECT test_track_registry.cpp)
 
@@ -50,6 +58,18 @@ target_link_libraries(
 
 target_include_directories(
     parse-numeric-range-tests
+    PRIVATE ${PROJECT_SOURCE_DIR}/source/lib ${CMAKE_BINARY_DIR}/source/lib/
+)
+
+add_library(process-environment-tests OBJECT test_process_environment_info.cpp)
+
+target_link_libraries(
+    process-environment-tests
+    PRIVATE rocprofiler-systems-googletest-library rocprofiler-systems-json
+)
+
+target_include_directories(
+    process-environment-tests
     PRIVATE ${PROJECT_SOURCE_DIR}/source/lib ${CMAKE_BINARY_DIR}/source/lib/
 )
 

@@ -3,7 +3,7 @@
 ## The University of Illinois/NCSA
 ## Open Source License (NCSA)
 ##
-## Copyright (c) 2014-2021, Advanced Micro Devices, Inc. All rights reserved.
+## Copyright (c) 2014-2026, Advanced Micro Devices, Inc. All rights reserved.
 ##
 ## Developed by:
 ##
@@ -105,7 +105,7 @@ find_path(AMDCUID_INCLUDE_DIR
   PATHS ${AMDCUID_ROOT}/include
   NO_DEFAULT_PATH
 )
-if (AMDCUID_LIB AND AMDCUID_INCLUDE_DIR) 
+if (AMDCUID_LIB AND AMDCUID_INCLUDE_DIR)
   message(STATUS "Found AMDCUID lib: ${AMDCUID_LIB}")
   message(STATUS "Found AMDCUID header: ${AMDCUID_INCLUDE_DIR}")
   set(AMDCUID_FOUND TRUE)
@@ -238,8 +238,6 @@ set ( SRCS core/driver/driver.cpp
            core/runtime/amd_topology.cpp
            core/runtime/default_signal.cpp
            core/runtime/host_queue.cpp
-           core/runtime/hotswap.cpp
-           core/runtime/hotswap_gfx_query.cpp
            core/runtime/hsa.cpp
            core/runtime/hsa_api_trace.cpp
            core/runtime/hsa_ext_amd.cpp
@@ -261,17 +259,21 @@ set ( SRCS core/driver/driver.cpp
            libamdhsacode/amd_hsa_code_util.cpp
            libamdhsacode/amd_hsa_locks.cpp
            libamdhsacode/amd_options.cpp
-           libamdhsacode/amd_hsa_code.cpp)
+           libamdhsacode/amd_hsa_code.cpp
+           core/runtime/amd_aie_code.cpp)
 
 if(UNIX)
   set(SRC_OS core/util/lnx/os_linux.cpp
+	     core/runtime/thunk_loader_linux.cpp
 	     libamdhsacode/lnx/amd_core_dump.cpp)
   set(SRC_XDNA core/driver/xdna/amd_xdna_driver.cpp
                core/runtime/amd_aie_agent.cpp
-               core/runtime/amd_aie_aql_queue.cpp)
+               core/runtime/amd_aie_aql_queue.cpp
+               core/runtime/amd_aie_elf.cpp)
 else()
   target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE NOMINMAX)
   set(SRC_OS core/util/win/os_win.cpp
+	     core/runtime/thunk_loader_win.cpp
 	     libamdhsacode/win32/amd_core_dump.cpp)
 endif()
 
@@ -301,9 +303,8 @@ if (${PC_SAMPLING_SUPPORT})
 endif()
 
 if (${AMDCUID_FOUND})
-  find_package(OpenSSL REQUIRED) # Required by CUID library
   target_include_directories(${CORE_RUNTIME_TARGET} PRIVATE ${AMDCUID_INCLUDE_DIR})
-  target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE ${AMDCUID_LIB} OpenSSL::Crypto)
+  target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE ${AMDCUID_LIB})
   set_target_properties(${CORE_RUNTIME_TARGET} PROPERTIES
               BUILD_RPATH "${AMDCUID_ROOT}/lib"
               INSTALL_RPATH "${AMDCUID_ROOT}/lib")

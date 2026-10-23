@@ -23,16 +23,17 @@ template <typename T>
 void
 verify_buffer_contains(const T& sample, const std::uint8_t* buffer, size_t& buffer_pos)
 {
-    auto type_id = *reinterpret_cast<const test_type_identifier_t*>(buffer + buffer_pos);
+    auto const type_id =
+        *reinterpret_cast<const test_type_identifier_t*>(buffer + buffer_pos);
     EXPECT_EQ(type_id, T::type_identifier);
     buffer_pos += sizeof(test_type_identifier_t);
 
-    auto size = *reinterpret_cast<const size_t*>(buffer + buffer_pos);
+    auto const size = *reinterpret_cast<const size_t*>(buffer + buffer_pos);
     EXPECT_EQ(size, rocprofsys::trace_cache::get_size(sample));
     buffer_pos += sizeof(size_t);
 
     std::uint8_t* deserialize_ptr = const_cast<std::uint8_t*>(buffer + buffer_pos);
-    auto          deserialized = rocprofsys::trace_cache::deserialize<T>(deserialize_ptr);
+    auto const    deserialized = rocprofsys::trace_cache::deserialize<T>(deserialize_ptr);
     EXPECT_EQ(deserialized, sample);
     buffer_pos += size;
 }
@@ -100,6 +101,8 @@ std::unique_ptr<::testing::StrictMock<gmock_thread_state_policy_t>>
 
 struct mock_thread_state_policy_t
 {
+    using State = rocprofsys::state::thread::State;
+
     static constexpr rocprofsys::state::thread::State Internal =
         rocprofsys::state::thread::Internal;
 
@@ -409,6 +412,7 @@ TEST_F(buffer_storage_test, concurrent_mixed_type_store)
     const int                items_per_thread = 10;
     std::vector<std::thread> threads;
 
+    threads.reserve(num_threads);
     for(int t = 0; t < num_threads; ++t)
     {
         threads.emplace_back([&, t]() {
@@ -448,11 +452,12 @@ TEST_F(buffer_storage_test, concurrent_mixed_type_store)
 
     while(buffer_pos < buffer_data.size())
     {
-        auto type_id = *reinterpret_cast<const test_type_identifier_t*>(
+        auto const type_id = *reinterpret_cast<const test_type_identifier_t*>(
             buffer_data.data() + buffer_pos);
         buffer_pos += sizeof(test_type_identifier_t);
 
-        auto size = *reinterpret_cast<const size_t*>(buffer_data.data() + buffer_pos);
+        auto const size =
+            *reinterpret_cast<const size_t*>(buffer_data.data() + buffer_pos);
         buffer_pos += sizeof(size_t) + size;
 
         if(type_id != test_type_identifier_t::fragmented_space)
@@ -505,11 +510,11 @@ TEST_F(buffer_storage_test, repeated_fragmentation)
 
     while(buffer_pos < buffer_data.size())
     {
-        auto type_id =
+        auto const type_id =
             *reinterpret_cast<const test_type_identifier_t*>(buffer + buffer_pos);
         buffer_pos += sizeof(test_type_identifier_t);
 
-        auto size = *reinterpret_cast<const size_t*>(buffer + buffer_pos);
+        auto const size = *reinterpret_cast<const size_t*>(buffer + buffer_pos);
         buffer_pos += sizeof(size_t) + size;
 
         switch(type_id)

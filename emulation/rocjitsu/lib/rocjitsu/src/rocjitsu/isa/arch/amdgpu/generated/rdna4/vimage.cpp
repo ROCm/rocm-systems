@@ -6,16 +6,39 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vimage.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
-#include "util/except.h"
+#include <algorithm>
+#include <bit>
 #include <memory>
 
 namespace rocjitsu {
 namespace rdna4 {
 
+namespace {
+template <typename MimgMachineInst>
+uint32_t mimg_vdata_bits(const MimgMachineInst *inst, bool gather4, bool d16_allowed,
+                         bool status_allowed, bool sampler) {
+  uint32_t words = gather4 ? 4u : std::max(1, std::popcount(uint32_t{inst->dmask}));
+  if (d16_allowed && inst->d16)
+    words = (words + 1) / 2;
+  // A dropped fetch with DMASK=0 cannot produce TFE status. LWE
+  // can still return status for sampler operations. Both flags
+  // share one status word; stores do not consume that word.
+  bool status = false;
+  if constexpr (requires { inst->tfe; })
+    status = status_allowed && inst->tfe && inst->dmask;
+  if constexpr (requires { inst->lwe; })
+    status = status || (status_allowed && sampler && inst->lwe);
+  if (status)
+    ++words;
+  return words * 32;
+}
+} // namespace
+
 ImageLoadVimage::ImageLoadVimage(const MachineInst *inst)
     : Vimage("image_load", reinterpret_cast<const OpEncoding *>(inst),
              selected_exec_fn(InstructionExecutionId::ImageLoadVimage)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, false),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   dst_operands_[0] = &vdata;
@@ -24,10 +47,16 @@ ImageLoadVimage::ImageLoadVimage(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageLoadVimage(const MachineInst *opcode) {
+DecodeResult decodeImageLoadVimage(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vimage::validate_encoding(
+      "image_load", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageLoadVimage>(opcode);
 }
 } // namespace detail
@@ -35,7 +64,8 @@ std::unique_ptr<Instruction> decodeImageLoadVimage(const MachineInst *opcode) {
 ImageLoadMipVimage::ImageLoadMipVimage(const MachineInst *inst)
     : Vimage("image_load_mip", reinterpret_cast<const OpEncoding *>(inst),
              selected_exec_fn(InstructionExecutionId::ImageLoadMipVimage)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, false),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   dst_operands_[0] = &vdata;
@@ -44,10 +74,16 @@ ImageLoadMipVimage::ImageLoadMipVimage(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageLoadMipVimage(const MachineInst *opcode) {
+DecodeResult decodeImageLoadMipVimage(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vimage::validate_encoding(
+      "image_load_mip", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageLoadMipVimage>(opcode);
 }
 } // namespace detail
@@ -55,7 +91,8 @@ std::unique_ptr<Instruction> decodeImageLoadMipVimage(const MachineInst *opcode)
 ImageLoadPckVimage::ImageLoadPckVimage(const MachineInst *inst)
     : Vimage("image_load_pck", reinterpret_cast<const OpEncoding *>(inst),
              selected_exec_fn(InstructionExecutionId::ImageLoadPckVimage)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, false, true, false),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   dst_operands_[0] = &vdata;
@@ -64,10 +101,16 @@ ImageLoadPckVimage::ImageLoadPckVimage(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageLoadPckVimage(const MachineInst *opcode) {
+DecodeResult decodeImageLoadPckVimage(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vimage::validate_encoding(
+      "image_load_pck", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageLoadPckVimage>(opcode);
 }
 } // namespace detail
@@ -75,7 +118,8 @@ std::unique_ptr<Instruction> decodeImageLoadPckVimage(const MachineInst *opcode)
 ImageLoadPckSgnVimage::ImageLoadPckSgnVimage(const MachineInst *inst)
     : Vimage("image_load_pck_sgn", reinterpret_cast<const OpEncoding *>(inst),
              selected_exec_fn(InstructionExecutionId::ImageLoadPckSgnVimage)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, false, true, false),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   dst_operands_[0] = &vdata;
@@ -84,10 +128,16 @@ ImageLoadPckSgnVimage::ImageLoadPckSgnVimage(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageLoadPckSgnVimage(const MachineInst *opcode) {
+DecodeResult decodeImageLoadPckSgnVimage(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vimage::validate_encoding(
+      "image_load_pck_sgn", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageLoadPckSgnVimage>(opcode);
 }
 } // namespace detail
@@ -95,7 +145,8 @@ std::unique_ptr<Instruction> decodeImageLoadPckSgnVimage(const MachineInst *opco
 ImageLoadMipPckVimage::ImageLoadMipPckVimage(const MachineInst *inst)
     : Vimage("image_load_mip_pck", reinterpret_cast<const OpEncoding *>(inst),
              selected_exec_fn(InstructionExecutionId::ImageLoadMipPckVimage)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, false, true, false),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   dst_operands_[0] = &vdata;
@@ -104,10 +155,16 @@ ImageLoadMipPckVimage::ImageLoadMipPckVimage(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageLoadMipPckVimage(const MachineInst *opcode) {
+DecodeResult decodeImageLoadMipPckVimage(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vimage::validate_encoding(
+      "image_load_mip_pck", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageLoadMipPckVimage>(opcode);
 }
 } // namespace detail
@@ -115,7 +172,8 @@ std::unique_ptr<Instruction> decodeImageLoadMipPckVimage(const MachineInst *opco
 ImageLoadMipPckSgnVimage::ImageLoadMipPckSgnVimage(const MachineInst *inst)
     : Vimage("image_load_mip_pck_sgn", reinterpret_cast<const OpEncoding *>(inst),
              selected_exec_fn(InstructionExecutionId::ImageLoadMipPckSgnVimage)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, false, true, false),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   dst_operands_[0] = &vdata;
@@ -124,10 +182,16 @@ ImageLoadMipPckSgnVimage::ImageLoadMipPckSgnVimage(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageLoadMipPckSgnVimage(const MachineInst *opcode) {
+DecodeResult decodeImageLoadMipPckSgnVimage(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Vimage::validate_encoding(
+      "image_load_mip_pck_sgn", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageLoadMipPckSgnVimage>(opcode);
 }
 } // namespace detail
@@ -135,7 +199,8 @@ std::unique_ptr<Instruction> decodeImageLoadMipPckSgnVimage(const MachineInst *o
 ImageStoreVimage::ImageStoreVimage(const MachineInst *inst)
     : Vimage("image_store", reinterpret_cast<const OpEncoding *>(inst),
              selected_exec_fn(InstructionExecutionId::ImageStoreVimage)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, false, false),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   src_operands_[0] = &vdata;
@@ -144,10 +209,16 @@ ImageStoreVimage::ImageStoreVimage(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageStoreVimage(const MachineInst *opcode) {
+DecodeResult decodeImageStoreVimage(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vimage::validate_encoding(
+      "image_store", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageStoreVimage>(opcode);
 }
 } // namespace detail
@@ -155,7 +226,8 @@ std::unique_ptr<Instruction> decodeImageStoreVimage(const MachineInst *opcode) {
 ImageStoreMipVimage::ImageStoreMipVimage(const MachineInst *inst)
     : Vimage("image_store_mip", reinterpret_cast<const OpEncoding *>(inst),
              selected_exec_fn(InstructionExecutionId::ImageStoreMipVimage)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, false, false),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   src_operands_[0] = &vdata;
@@ -164,10 +236,16 @@ ImageStoreMipVimage::ImageStoreMipVimage(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageStoreMipVimage(const MachineInst *opcode) {
+DecodeResult decodeImageStoreMipVimage(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vimage::validate_encoding(
+      "image_store_mip", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageStoreMipVimage>(opcode);
 }
 } // namespace detail
@@ -175,7 +253,8 @@ std::unique_ptr<Instruction> decodeImageStoreMipVimage(const MachineInst *opcode
 ImageStorePckVimage::ImageStorePckVimage(const MachineInst *inst)
     : Vimage("image_store_pck", reinterpret_cast<const OpEncoding *>(inst),
              selected_exec_fn(InstructionExecutionId::ImageStorePckVimage)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, false, false, false),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   src_operands_[0] = &vdata;
@@ -184,10 +263,16 @@ ImageStorePckVimage::ImageStorePckVimage(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageStorePckVimage(const MachineInst *opcode) {
+DecodeResult decodeImageStorePckVimage(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vimage::validate_encoding(
+      "image_store_pck", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageStorePckVimage>(opcode);
 }
 } // namespace detail
@@ -195,7 +280,8 @@ std::unique_ptr<Instruction> decodeImageStorePckVimage(const MachineInst *opcode
 ImageStoreMipPckVimage::ImageStoreMipPckVimage(const MachineInst *inst)
     : Vimage("image_store_mip_pck", reinterpret_cast<const OpEncoding *>(inst),
              selected_exec_fn(InstructionExecutionId::ImageStoreMipPckVimage)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, false, false, false),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   src_operands_[0] = &vdata;
@@ -204,10 +290,16 @@ ImageStoreMipPckVimage::ImageStoreMipPckVimage(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageStoreMipPckVimage(const MachineInst *opcode) {
+DecodeResult decodeImageStoreMipPckVimage(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vimage::validate_encoding(
+      "image_store_mip_pck", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageStoreMipPckVimage>(opcode);
 }
 } // namespace detail
@@ -215,25 +307,37 @@ std::unique_ptr<Instruction> decodeImageStoreMipPckVimage(const MachineInst *opc
 ImageAtomicSwapVimage::ImageAtomicSwapVimage(const MachineInst *inst)
     : Vimage("image_atomic_swap", reinterpret_cast<const OpEncoding *>(inst),
              selected_exec_fn(InstructionExecutionId::ImageAtomicSwapVimage)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask}),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata_return(
+          (32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask})) +
+              32u * inst_.tfe,
+          OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
-  dst_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &rsrc;
-  dst_operands_[1] = &gpumem;
+  dst_operands_[0] = &gpumem;
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
-  num_dst_ = 2;
+  num_dst_ = 1;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata_return;
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageAtomicSwapVimage(const MachineInst *opcode) {
+DecodeResult decodeImageAtomicSwapVimage(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vimage::validate_encoding(
+      "image_atomic_swap", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageAtomicSwapVimage>(opcode);
 }
 } // namespace detail
@@ -241,25 +345,37 @@ std::unique_ptr<Instruction> decodeImageAtomicSwapVimage(const MachineInst *opco
 ImageAtomicCmpswapVimage::ImageAtomicCmpswapVimage(const MachineInst *inst)
     : Vimage("image_atomic_cmpswap", reinterpret_cast<const OpEncoding *>(inst),
              selected_exec_fn(InstructionExecutionId::ImageAtomicCmpswapVimage)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask}),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata_return(
+          (32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask})) / 2 +
+              32u * inst_.tfe,
+          OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
-  dst_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &rsrc;
-  dst_operands_[1] = &gpumem;
+  dst_operands_[0] = &gpumem;
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
-  num_dst_ = 2;
+  num_dst_ = 1;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata_return;
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageAtomicCmpswapVimage(const MachineInst *opcode) {
+DecodeResult decodeImageAtomicCmpswapVimage(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Vimage::validate_encoding(
+      "image_atomic_cmpswap", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageAtomicCmpswapVimage>(opcode);
 }
 } // namespace detail
@@ -267,25 +383,37 @@ std::unique_ptr<Instruction> decodeImageAtomicCmpswapVimage(const MachineInst *o
 ImageAtomicAddUintVimage::ImageAtomicAddUintVimage(const MachineInst *inst)
     : Vimage("image_atomic_add_uint", reinterpret_cast<const OpEncoding *>(inst),
              selected_exec_fn(InstructionExecutionId::ImageAtomicAddUintVimage)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask}),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata_return(
+          (32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask})) +
+              32u * inst_.tfe,
+          OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
-  dst_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &rsrc;
-  dst_operands_[1] = &gpumem;
+  dst_operands_[0] = &gpumem;
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
-  num_dst_ = 2;
+  num_dst_ = 1;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata_return;
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageAtomicAddUintVimage(const MachineInst *opcode) {
+DecodeResult decodeImageAtomicAddUintVimage(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Vimage::validate_encoding(
+      "image_atomic_add_uint", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageAtomicAddUintVimage>(opcode);
 }
 } // namespace detail
@@ -293,25 +421,37 @@ std::unique_ptr<Instruction> decodeImageAtomicAddUintVimage(const MachineInst *o
 ImageAtomicSubUintVimage::ImageAtomicSubUintVimage(const MachineInst *inst)
     : Vimage("image_atomic_sub_uint", reinterpret_cast<const OpEncoding *>(inst),
              selected_exec_fn(InstructionExecutionId::ImageAtomicSubUintVimage)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask}),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata_return(
+          (32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask})) +
+              32u * inst_.tfe,
+          OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
-  dst_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &rsrc;
-  dst_operands_[1] = &gpumem;
+  dst_operands_[0] = &gpumem;
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
-  num_dst_ = 2;
+  num_dst_ = 1;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata_return;
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageAtomicSubUintVimage(const MachineInst *opcode) {
+DecodeResult decodeImageAtomicSubUintVimage(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Vimage::validate_encoding(
+      "image_atomic_sub_uint", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageAtomicSubUintVimage>(opcode);
 }
 } // namespace detail
@@ -319,25 +459,37 @@ std::unique_ptr<Instruction> decodeImageAtomicSubUintVimage(const MachineInst *o
 ImageAtomicMinIntVimage::ImageAtomicMinIntVimage(const MachineInst *inst)
     : Vimage("image_atomic_min_int", reinterpret_cast<const OpEncoding *>(inst),
              selected_exec_fn(InstructionExecutionId::ImageAtomicMinIntVimage)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask}),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata_return(
+          (32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask})) +
+              32u * inst_.tfe,
+          OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
-  dst_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &rsrc;
-  dst_operands_[1] = &gpumem;
+  dst_operands_[0] = &gpumem;
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
-  num_dst_ = 2;
+  num_dst_ = 1;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata_return;
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageAtomicMinIntVimage(const MachineInst *opcode) {
+DecodeResult decodeImageAtomicMinIntVimage(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vimage::validate_encoding(
+      "image_atomic_min_int", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageAtomicMinIntVimage>(opcode);
 }
 } // namespace detail
@@ -345,25 +497,37 @@ std::unique_ptr<Instruction> decodeImageAtomicMinIntVimage(const MachineInst *op
 ImageAtomicMinUintVimage::ImageAtomicMinUintVimage(const MachineInst *inst)
     : Vimage("image_atomic_min_uint", reinterpret_cast<const OpEncoding *>(inst),
              selected_exec_fn(InstructionExecutionId::ImageAtomicMinUintVimage)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask}),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata_return(
+          (32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask})) +
+              32u * inst_.tfe,
+          OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
-  dst_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &rsrc;
-  dst_operands_[1] = &gpumem;
+  dst_operands_[0] = &gpumem;
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
-  num_dst_ = 2;
+  num_dst_ = 1;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata_return;
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageAtomicMinUintVimage(const MachineInst *opcode) {
+DecodeResult decodeImageAtomicMinUintVimage(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Vimage::validate_encoding(
+      "image_atomic_min_uint", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageAtomicMinUintVimage>(opcode);
 }
 } // namespace detail
@@ -371,25 +535,37 @@ std::unique_ptr<Instruction> decodeImageAtomicMinUintVimage(const MachineInst *o
 ImageAtomicMaxIntVimage::ImageAtomicMaxIntVimage(const MachineInst *inst)
     : Vimage("image_atomic_max_int", reinterpret_cast<const OpEncoding *>(inst),
              selected_exec_fn(InstructionExecutionId::ImageAtomicMaxIntVimage)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask}),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata_return(
+          (32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask})) +
+              32u * inst_.tfe,
+          OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
-  dst_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &rsrc;
-  dst_operands_[1] = &gpumem;
+  dst_operands_[0] = &gpumem;
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
-  num_dst_ = 2;
+  num_dst_ = 1;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata_return;
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageAtomicMaxIntVimage(const MachineInst *opcode) {
+DecodeResult decodeImageAtomicMaxIntVimage(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vimage::validate_encoding(
+      "image_atomic_max_int", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageAtomicMaxIntVimage>(opcode);
 }
 } // namespace detail
@@ -397,25 +573,37 @@ std::unique_ptr<Instruction> decodeImageAtomicMaxIntVimage(const MachineInst *op
 ImageAtomicMaxUintVimage::ImageAtomicMaxUintVimage(const MachineInst *inst)
     : Vimage("image_atomic_max_uint", reinterpret_cast<const OpEncoding *>(inst),
              selected_exec_fn(InstructionExecutionId::ImageAtomicMaxUintVimage)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask}),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata_return(
+          (32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask})) +
+              32u * inst_.tfe,
+          OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
-  dst_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &rsrc;
-  dst_operands_[1] = &gpumem;
+  dst_operands_[0] = &gpumem;
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
-  num_dst_ = 2;
+  num_dst_ = 1;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata_return;
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageAtomicMaxUintVimage(const MachineInst *opcode) {
+DecodeResult decodeImageAtomicMaxUintVimage(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Vimage::validate_encoding(
+      "image_atomic_max_uint", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageAtomicMaxUintVimage>(opcode);
 }
 } // namespace detail
@@ -423,25 +611,37 @@ std::unique_ptr<Instruction> decodeImageAtomicMaxUintVimage(const MachineInst *o
 ImageAtomicAndVimage::ImageAtomicAndVimage(const MachineInst *inst)
     : Vimage("image_atomic_and", reinterpret_cast<const OpEncoding *>(inst),
              selected_exec_fn(InstructionExecutionId::ImageAtomicAndVimage)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask}),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata_return(
+          (32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask})) +
+              32u * inst_.tfe,
+          OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
-  dst_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &rsrc;
-  dst_operands_[1] = &gpumem;
+  dst_operands_[0] = &gpumem;
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
-  num_dst_ = 2;
+  num_dst_ = 1;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata_return;
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageAtomicAndVimage(const MachineInst *opcode) {
+DecodeResult decodeImageAtomicAndVimage(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vimage::validate_encoding(
+      "image_atomic_and", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageAtomicAndVimage>(opcode);
 }
 } // namespace detail
@@ -449,25 +649,37 @@ std::unique_ptr<Instruction> decodeImageAtomicAndVimage(const MachineInst *opcod
 ImageAtomicOrVimage::ImageAtomicOrVimage(const MachineInst *inst)
     : Vimage("image_atomic_or", reinterpret_cast<const OpEncoding *>(inst),
              selected_exec_fn(InstructionExecutionId::ImageAtomicOrVimage)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask}),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata_return(
+          (32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask})) +
+              32u * inst_.tfe,
+          OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
-  dst_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &rsrc;
-  dst_operands_[1] = &gpumem;
+  dst_operands_[0] = &gpumem;
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
-  num_dst_ = 2;
+  num_dst_ = 1;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata_return;
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageAtomicOrVimage(const MachineInst *opcode) {
+DecodeResult decodeImageAtomicOrVimage(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vimage::validate_encoding(
+      "image_atomic_or", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageAtomicOrVimage>(opcode);
 }
 } // namespace detail
@@ -475,25 +687,37 @@ std::unique_ptr<Instruction> decodeImageAtomicOrVimage(const MachineInst *opcode
 ImageAtomicXorVimage::ImageAtomicXorVimage(const MachineInst *inst)
     : Vimage("image_atomic_xor", reinterpret_cast<const OpEncoding *>(inst),
              selected_exec_fn(InstructionExecutionId::ImageAtomicXorVimage)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask}),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata_return(
+          (32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask})) +
+              32u * inst_.tfe,
+          OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
-  dst_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &rsrc;
-  dst_operands_[1] = &gpumem;
+  dst_operands_[0] = &gpumem;
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
-  num_dst_ = 2;
+  num_dst_ = 1;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata_return;
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageAtomicXorVimage(const MachineInst *opcode) {
+DecodeResult decodeImageAtomicXorVimage(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vimage::validate_encoding(
+      "image_atomic_xor", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageAtomicXorVimage>(opcode);
 }
 } // namespace detail
@@ -501,25 +725,37 @@ std::unique_ptr<Instruction> decodeImageAtomicXorVimage(const MachineInst *opcod
 ImageAtomicIncUintVimage::ImageAtomicIncUintVimage(const MachineInst *inst)
     : Vimage("image_atomic_inc_uint", reinterpret_cast<const OpEncoding *>(inst),
              selected_exec_fn(InstructionExecutionId::ImageAtomicIncUintVimage)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask}),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata_return(
+          (32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask})) +
+              32u * inst_.tfe,
+          OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
-  dst_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &rsrc;
-  dst_operands_[1] = &gpumem;
+  dst_operands_[0] = &gpumem;
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
-  num_dst_ = 2;
+  num_dst_ = 1;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata_return;
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageAtomicIncUintVimage(const MachineInst *opcode) {
+DecodeResult decodeImageAtomicIncUintVimage(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Vimage::validate_encoding(
+      "image_atomic_inc_uint", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageAtomicIncUintVimage>(opcode);
 }
 } // namespace detail
@@ -527,25 +763,37 @@ std::unique_ptr<Instruction> decodeImageAtomicIncUintVimage(const MachineInst *o
 ImageAtomicDecUintVimage::ImageAtomicDecUintVimage(const MachineInst *inst)
     : Vimage("image_atomic_dec_uint", reinterpret_cast<const OpEncoding *>(inst),
              selected_exec_fn(InstructionExecutionId::ImageAtomicDecUintVimage)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask}),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata_return(
+          (32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask})) +
+              32u * inst_.tfe,
+          OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
-  dst_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &rsrc;
-  dst_operands_[1] = &gpumem;
+  dst_operands_[0] = &gpumem;
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
-  num_dst_ = 2;
+  num_dst_ = 1;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata_return;
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageAtomicDecUintVimage(const MachineInst *opcode) {
+DecodeResult decodeImageAtomicDecUintVimage(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Vimage::validate_encoding(
+      "image_atomic_dec_uint", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageAtomicDecUintVimage>(opcode);
 }
 } // namespace detail
@@ -553,7 +801,8 @@ std::unique_ptr<Instruction> decodeImageAtomicDecUintVimage(const MachineInst *o
 ImageGetResinfoVimage::ImageGetResinfoVimage(const MachineInst *inst)
     : Vimage("image_get_resinfo", reinterpret_cast<const OpEncoding *>(inst),
              selected_exec_fn(InstructionExecutionId::ImageGetResinfoVimage)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, false, false, false),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(32, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   dst_operands_[0] = &vdata;
@@ -562,10 +811,16 @@ ImageGetResinfoVimage::ImageGetResinfoVimage(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageGetResinfoVimage(const MachineInst *opcode) {
+DecodeResult decodeImageGetResinfoVimage(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vimage::validate_encoding(
+      "image_get_resinfo", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageGetResinfoVimage>(opcode);
 }
 } // namespace detail
@@ -582,10 +837,16 @@ ImageBvhIntersectRayVimage::ImageBvhIntersectRayVimage(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageBvhIntersectRayVimage(const MachineInst *opcode) {
+DecodeResult decodeImageBvhIntersectRayVimage(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Vimage::validate_encoding(
+      "image_bvh_intersect_ray", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageBvhIntersectRayVimage>(opcode);
 }
 } // namespace detail
@@ -602,10 +863,17 @@ ImageBvh64IntersectRayVimage::ImageBvh64IntersectRayVimage(const MachineInst *in
   num_src_ = 2;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageBvh64IntersectRayVimage(const MachineInst *opcode) {
+DecodeResult decodeImageBvh64IntersectRayVimage(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Vimage::validate_encoding("image_bvh64_intersect_ray",
+                                reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageBvh64IntersectRayVimage>(opcode);
 }
 } // namespace detail
@@ -617,16 +885,22 @@ ImageBvhDualIntersectRayVimage::ImageBvhDualIntersectRayVimage(const MachineInst
       vaddr(384, OperandType::OPR_VGPR, 0),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
   dst_operands_[1] = &vaddr;
-  src_operands_[1] = &rsrc;
-  num_src_ = 2;
+  src_operands_[0] = &rsrc;
+  num_src_ = 1;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageBvhDualIntersectRayVimage(const MachineInst *opcode) {
+DecodeResult decodeImageBvhDualIntersectRayVimage(const MachineInst *opcode,
+                                                  const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Vimage::validate_encoding("image_bvh_dual_intersect_ray",
+                                reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageBvhDualIntersectRayVimage>(opcode);
 }
 } // namespace detail
@@ -638,16 +912,21 @@ ImageBvh8IntersectRayVimage::ImageBvh8IntersectRayVimage(const MachineInst *inst
       vaddr(352, OperandType::OPR_VGPR, 0),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
   dst_operands_[1] = &vaddr;
-  src_operands_[1] = &rsrc;
-  num_src_ = 2;
+  src_operands_[0] = &rsrc;
+  num_src_ = 1;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageBvh8IntersectRayVimage(const MachineInst *opcode) {
+DecodeResult decodeImageBvh8IntersectRayVimage(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  Result validation = Vimage::validate_encoding(
+      "image_bvh8_intersect_ray", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageBvh8IntersectRayVimage>(opcode);
 }
 } // namespace detail
@@ -655,25 +934,37 @@ std::unique_ptr<Instruction> decodeImageBvh8IntersectRayVimage(const MachineInst
 ImageAtomicAddFltVimage::ImageAtomicAddFltVimage(const MachineInst *inst)
     : Vimage("image_atomic_add_flt", reinterpret_cast<const OpEncoding *>(inst),
              selected_exec_fn(InstructionExecutionId::ImageAtomicAddFltVimage)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask}),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata_return(
+          (32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask})) +
+              32u * inst_.tfe,
+          OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
-  dst_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &rsrc;
-  dst_operands_[1] = &gpumem;
+  dst_operands_[0] = &gpumem;
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
-  num_dst_ = 2;
+  num_dst_ = 1;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata_return;
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageAtomicAddFltVimage(const MachineInst *opcode) {
+DecodeResult decodeImageAtomicAddFltVimage(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vimage::validate_encoding(
+      "image_atomic_add_flt", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageAtomicAddFltVimage>(opcode);
 }
 } // namespace detail
@@ -681,25 +972,37 @@ std::unique_ptr<Instruction> decodeImageAtomicAddFltVimage(const MachineInst *op
 ImageAtomicMinFltVimage::ImageAtomicMinFltVimage(const MachineInst *inst)
     : Vimage("image_atomic_min_flt", reinterpret_cast<const OpEncoding *>(inst),
              selected_exec_fn(InstructionExecutionId::ImageAtomicMinFltVimage)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask}),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata_return(
+          (32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask})) +
+              32u * inst_.tfe,
+          OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
-  dst_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &rsrc;
-  dst_operands_[1] = &gpumem;
+  dst_operands_[0] = &gpumem;
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
-  num_dst_ = 2;
+  num_dst_ = 1;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata_return;
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageAtomicMinFltVimage(const MachineInst *opcode) {
+DecodeResult decodeImageAtomicMinFltVimage(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vimage::validate_encoding(
+      "image_atomic_min_flt", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageAtomicMinFltVimage>(opcode);
 }
 } // namespace detail
@@ -707,25 +1010,37 @@ std::unique_ptr<Instruction> decodeImageAtomicMinFltVimage(const MachineInst *op
 ImageAtomicMaxFltVimage::ImageAtomicMaxFltVimage(const MachineInst *inst)
     : Vimage("image_atomic_max_flt", reinterpret_cast<const OpEncoding *>(inst),
              selected_exec_fn(InstructionExecutionId::ImageAtomicMaxFltVimage)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask}),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata_return(
+          (32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask})) +
+              32u * inst_.tfe,
+          OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
-  dst_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &rsrc;
-  dst_operands_[1] = &gpumem;
+  dst_operands_[0] = &gpumem;
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
-  num_dst_ = 2;
+  num_dst_ = 1;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata_return;
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageAtomicMaxFltVimage(const MachineInst *opcode) {
+DecodeResult decodeImageAtomicMaxFltVimage(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vimage::validate_encoding(
+      "image_atomic_max_flt", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageAtomicMaxFltVimage>(opcode);
 }
 } // namespace detail
@@ -733,25 +1048,37 @@ std::unique_ptr<Instruction> decodeImageAtomicMaxFltVimage(const MachineInst *op
 ImageAtomicPkAddF16Vimage::ImageAtomicPkAddF16Vimage(const MachineInst *inst)
     : Vimage("image_atomic_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst),
              selected_exec_fn(InstructionExecutionId::ImageAtomicPkAddF16Vimage)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask}),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata_return(
+          (32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask})) +
+              32u * inst_.tfe,
+          OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
-  dst_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &rsrc;
-  dst_operands_[1] = &gpumem;
+  dst_operands_[0] = &gpumem;
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
-  num_dst_ = 2;
+  num_dst_ = 1;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata_return;
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageAtomicPkAddF16Vimage(const MachineInst *opcode) {
+DecodeResult decodeImageAtomicPkAddF16Vimage(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vimage::validate_encoding(
+      "image_atomic_pk_add_f16", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageAtomicPkAddF16Vimage>(opcode);
 }
 } // namespace detail
@@ -759,25 +1086,37 @@ std::unique_ptr<Instruction> decodeImageAtomicPkAddF16Vimage(const MachineInst *
 ImageAtomicPkAddBf16Vimage::ImageAtomicPkAddBf16Vimage(const MachineInst *inst)
     : Vimage("image_atomic_pk_add_bf16", reinterpret_cast<const OpEncoding *>(inst),
              selected_exec_fn(InstructionExecutionId::ImageAtomicPkAddBf16Vimage)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask}),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata_return(
+          (32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask})) +
+              32u * inst_.tfe,
+          OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
-  dst_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &rsrc;
-  dst_operands_[1] = &gpumem;
+  dst_operands_[0] = &gpumem;
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
-  num_dst_ = 2;
+  num_dst_ = 1;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata_return;
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageAtomicPkAddBf16Vimage(const MachineInst *opcode) {
+DecodeResult decodeImageAtomicPkAddBf16Vimage(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Vimage::validate_encoding(
+      "image_atomic_pk_add_bf16", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageAtomicPkAddBf16Vimage>(opcode);
 }
 } // namespace detail

@@ -1,33 +1,30 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 #include <amd_smi_test/test_base.h>
 #include <gtest/gtest.h>
+#include <unistd.h>
 
+#include <algorithm>
+#include <atomic>
+#include <cerrno>
+#include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <limits>
+#include <memory>
+#include <string>
+#include <tuple>
+#include <utility>
 #include <vector>
 
+#include "amd_smi/impl/amd_smi_utils.h"
+#include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi_gpu_metrics.h"
+#include "rocm_smi/rocm_smi_main.h"
 #include "test_common.h"
 
 namespace amd::smi {
@@ -113,6 +110,68 @@ auto WriteBlobToTempFile(const std::vector<uint8_t>& blob,
 
   return file_path;
 }
+
+using AttrId = amd::smi::details::AMDGpuMetricAttributeId_t;
+
+using AttrType = amd::smi::details::AMDGpuMetricAttributeType_t;
+
+// Serializes a dynamic (v1.9) gpu_metrics table, laid out as the driver emits
+// it: header, attribute count, then encoded id + values, all of one type.
+auto BuildDynamicBlob(const std::vector<std::pair<AttrId, std::vector<uint64_t>>>& attrs,
+                      AttrType type = AttrType::TYPE_UINT64) -> std::vector<std::byte> {
+  std::vector<std::byte> blob;
+  auto put = [&blob](const auto& v) {
+    const auto* p = reinterpret_cast<const std::byte*>(&v);
+    blob.insert(blob.end(), p, p + sizeof(v));
+  };
+  put(amd::smi::details::AMDGpuDynamicMetricsHeader_v1_t{0, 1, 9});
+  put(static_cast<uint32_t>(attrs.size()));
+  for (const auto& [id, values] : attrs) {
+    put(amd::smi::details::amdgpu_metrics_encode_attr(0, static_cast<uint64_t>(type),
+                                                      static_cast<uint64_t>(id), values.size()));
+    for (const auto v : values) {
+      if (type == AttrType::TYPE_UINT32) {
+        put(static_cast<uint32_t>(v));
+      } else {
+        put(v);
+      }
+    }
+  }
+  const auto size = static_cast<uint16_t>(blob.size());
+  std::memcpy(blob.data(), &size, sizeof(size));
+  return blob;
+}
+
+auto ToPublicMetrics(const std::vector<std::byte>& blob) -> amd::smi::AMGpuMetricsPublicLatest_t {
+  amd::smi::AMDGpuDynamicMetrics_t dyn;
+  EXPECT_EQ(dyn.parse_from_buffer(blob.data(), blob.size()), RSMI_STATUS_SUCCESS);
+  amd::smi::GpuMetricsBaseDynamic_t metrics;
+  metrics.set_parsed_dynamic(std::move(dyn));
+  const auto [status, out] = metrics.copy_internal_to_external_metrics();
+  EXPECT_EQ(status, RSMI_STATUS_SUCCESS);
+  return out;
+}
+
+// Appends a device to the library's list for the duration of a test and puts
+// the list back afterwards, so one test cannot leave the singleton altered for
+// the rest of the binary.
+class ScopedLibraryDevice {
+ public:
+  explicit ScopedLibraryDevice(const std::string& device_path)
+      : devices_(amd::smi::RocmSMI::getInstance().devices()), original_count_(devices_.size()) {
+    devices_.push_back(std::make_shared<amd::smi::Device>(device_path, nullptr));
+  }
+  ~ScopedLibraryDevice() { devices_.resize(original_count_); }
+
+  ScopedLibraryDevice(const ScopedLibraryDevice&) = delete;
+  ScopedLibraryDevice& operator=(const ScopedLibraryDevice&) = delete;
+
+  uint32_t index() const { return static_cast<uint32_t>(original_count_); }
+
+ private:
+  std::vector<std::shared_ptr<amd::smi::Device>>& devices_;
+  std::size_t original_count_;
+};
 
 }  // namespace
 
@@ -206,4 +265,714 @@ TEST(GpuUnit, XCPMetricDynamicVersionSupported) {
 
     std::filesystem::remove(fake_path);
   }
+}
+
+// MI450 publishes one xGMI read/write data counter (its GPU-CPU link). It must
+// land in link 0 rather than be dropped, leaving every link "not reported".
+TEST(GpuUnit, DynamicMetricsXgmiSingleInstanceFillsFirstLink) {
+  const auto out = ToPublicMetrics(BuildDynamicBlob({
+      {AttrId::XGMI_READ_DATA_ACC, {449353}},
+      {AttrId::XGMI_WRITE_DATA_ACC, {0}},
+  }));
+  EXPECT_EQ(out.xgmi_read_data_acc[0], 449353u);
+  EXPECT_EQ(out.xgmi_write_data_acc[0], 0u);
+  EXPECT_EQ(out.xgmi_read_data_acc[1], UINT64_MAX);
+  EXPECT_EQ(out.xgmi_write_data_acc[1], UINT64_MAX);
+}
+
+// Per-link arrays keep mapping element by element.
+TEST(GpuUnit, DynamicMetricsXgmiPerLinkArrayCopiesEachLink) {
+  const auto out = ToPublicMetrics(BuildDynamicBlob({
+      {AttrId::XGMI_READ_DATA_ACC, {10, 20, 30}},
+  }));
+  EXPECT_EQ(out.xgmi_read_data_acc[0], 10u);
+  EXPECT_EQ(out.xgmi_read_data_acc[1], 20u);
+  EXPECT_EQ(out.xgmi_read_data_acc[2], 30u);
+  EXPECT_EQ(out.xgmi_read_data_acc[3], UINT64_MAX);
+}
+
+// A driver may declare the counter narrower than the public field; the value
+// still lands in link 0 rather than being dropped.
+TEST(GpuUnit, DynamicMetricsXgmiSingleInstanceNarrowerTypeFillsFirstLink) {
+  const auto out = ToPublicMetrics(
+      BuildDynamicBlob({{AttrId::XGMI_READ_DATA_ACC, {1234}}}, AttrType::TYPE_UINT32));
+  EXPECT_EQ(out.xgmi_read_data_acc[0], 1234u);
+  EXPECT_EQ(out.xgmi_read_data_acc[1], UINT64_MAX);
+}
+
+// A narrower all-ones "not reported" value must stay unavailable instead of
+// widening into a real-looking 4294967295.
+TEST(GpuUnit, DynamicMetricsXgmiSingleInstanceNarrowerUnsetStaysUnset) {
+  const auto out = ToPublicMetrics(
+      BuildDynamicBlob({{AttrId::XGMI_READ_DATA_ACC, {UINT32_MAX}}}, AttrType::TYPE_UINT32));
+  EXPECT_EQ(out.xgmi_read_data_acc[0], UINT64_MAX);
+}
+
+// A value wider than the public field must not be truncated into a
+// plausible-looking reading; a value that fits maps through.
+TEST(GpuUnit, DynamicMetricsSingleInstanceOutOfRangeStaysUnset) {
+  const auto wide = ToPublicMetrics(BuildDynamicBlob({{AttrId::XGMI_LINK_STATUS, {70000}}}));
+  EXPECT_EQ(wide.xgmi_link_status[0], UINT16_MAX);
+  const auto fits = ToPublicMetrics(BuildDynamicBlob({{AttrId::XGMI_LINK_STATUS, {1}}}));
+  EXPECT_EQ(fits.xgmi_link_status[0], 1u);
+}
+
+// gpu_metrics versions we can model must build an object; versions we cannot
+// must classify as kGpuMetricNone (no object) so callers get NOT_SUPPORTED
+// rather than corrupt data. APUs expose the v2.x family: v2.1-v2.3 are
+// byte-prefix subsets read with the v2.4 layout, while v2.4 and v3.0 are exact
+// matches. v2.0 orders its fields differently (system_clock_counter before the
+// temperature block), so it is not modeled. Guard that contract here.
+TEST(GpuUnit, GPUMetricVersionSupportClassification) {
+  PRINT_VERBOSITY();
+  const bool is_partition_metrics = false;
+
+  struct VersionCase {
+    uint8_t format;
+    uint8_t content;
+    bool recognized;
+  };
+  const VersionCase cases[] = {
+      {1, 4, true},                                 // GPU metrics positive control
+      {2, 1, true},  {2, 2, true},  {2, 3, true},   // APU v2.x prefix subsets
+      {2, 4, true},  {3, 0, true},                  // APU exact matches
+      {2, 0, false},                                // v2.0: different field order
+      {2, 5, false}, {4, 0, false}, {5, 0, false},  // beyond what we model
+  };
+
+  for (const auto& c : cases) {
+    SCOPED_TRACE(testing::Message() << "metrics version " << static_cast<int>(c.format) << "."
+                                    << static_cast<int>(c.content));
+    const auto blob = BuildFakeMetricsBlob(amd::smi::AMDGpuMetricsHeader_v1_t{
+        .m_structure_size = sizeof(amd::smi::AMDGpuMetricsHeader_v1_t),
+        .m_format_revision = c.format,
+        .m_content_revision = c.content,
+    });
+    const auto fake_path =
+        WriteBlobToTempFile(blob, "amdsmi_fake_metrics_v" + std::to_string(c.format) + "_" +
+                                      std::to_string(c.content) + ".bin");
+    ASSERT_TRUE(std::filesystem::exists(fake_path));
+
+    const auto* header = reinterpret_cast<const amd::smi::AMDGpuMetricsHeader_v1_t*>(blob.data());
+    const auto flag = amd::smi::translate_header_to_flag_version(*header, is_partition_metrics,
+                                                                 fake_path.string());
+    auto metrics_ptr =
+        amd::smi::amdgpu_metrics_factory(flag, is_partition_metrics, fake_path.string());
+
+    if (c.recognized) {
+      EXPECT_NE(flag, amd::smi::AMDGpuMetricVersionFlags_t::kGpuMetricNone);
+      EXPECT_NE(metrics_ptr, nullptr) << "recognized version must build a metrics object";
+    } else {
+      EXPECT_EQ(flag, amd::smi::AMDGpuMetricVersionFlags_t::kGpuMetricNone)
+          << "unrecognized version must not map to a supported flag";
+      EXPECT_EQ(metrics_ptr, nullptr) << "unrecognized version must not build a metrics object";
+    }
+
+    std::filesystem::remove(fake_path);
+  }
+}
+
+namespace {
+
+using ApuMetrics = amd::smi::AMDApuMetrics_v24_t;
+using ApuMetricsV30 = amd::smi::AMDApuMetrics_v30_t;
+
+// Declared table sizes of the APU revisions the v2.4 layout covers: each
+// revision stops at a different field, so its declared size is the offset of
+// the first field it does not define.
+constexpr std::size_t kApuV21Size = offsetof(ApuMetrics, m_indep_throttle_status);
+constexpr std::size_t kApuV22Size = offsetof(ApuMetrics, m_average_temperature_gfx);
+constexpr std::size_t kApuV23Size = offsetof(ApuMetrics, m_average_cpu_voltage);
+constexpr std::size_t kApuV24Size = offsetof(ApuMetrics, m_average_gfx_current) + sizeof(uint16_t);
+
+// Filler that differs per byte offset, so every field reads back a value only
+// its own bytes could have produced: a copy that lands in the wrong member is
+// then visible, which a uniform fill would hide. The range stays inside
+// [0x10, 0xEF], clear of both 0x00 and the 0xFF not-applicable sentinel, so a
+// populated field can never be mistaken for one the revision omits.
+constexpr uint8_t FillByte(std::size_t offset) {
+  return static_cast<uint8_t>(0x10 + (offset % 0xE0));
+}
+
+// The little-endian value a field of type T at `offset` receives from the fill.
+template <typename T>
+constexpr T FilledValue(std::size_t offset) {
+  T value = 0;
+  for (std::size_t index = 0; index < sizeof(T); ++index) {
+    value = static_cast<T>(value | (static_cast<T>(FillByte(offset + index)) << (8 * index)));
+  }
+  return value;
+}
+
+// Fake sysfs tree at <tmp>/<name>/device/gpu_metrics. Binary reads are cached
+// per (device path, read size), so each case needs its own directory. The
+// process id and a counter keep that true for concurrent runs and for repeats
+// of the same case, which would otherwise share a path and its cache entry.
+class FakeMetricsDevice {
+ public:
+  explicit FakeMetricsDevice(const std::string& name)
+      : root_(std::filesystem::temp_directory_path() /
+              ("amdsmi_apu_metrics_" + name + "_" + std::to_string(::getpid()) + "_" +
+               std::to_string(NextInstanceId()))) {
+    std::filesystem::remove_all(root_);
+    std::filesystem::create_directories(root_ / "device");
+  }
+  ~FakeMetricsDevice() { std::filesystem::remove_all(root_); }
+
+  FakeMetricsDevice(const FakeMetricsDevice&) = delete;
+  FakeMetricsDevice& operator=(const FakeMetricsDevice&) = delete;
+
+  void WriteMetrics(const std::vector<uint8_t>& blob) const {
+    Write(root_ / "device" / "gpu_metrics", blob);
+  }
+
+  // A directory is the only way to get fopen() to succeed and the following
+  // fread() to fail with the stream's error flag set while returning zero bytes:
+  // the same shape as an empty node apart from that flag, which is what tells the
+  // two apart. Permissions are not a substitute -- they fail the open instead and
+  // would move the test onto a different branch.
+  void ReplaceMetricsFileWithDirectory() const {
+    const auto node = root_ / "device" / "gpu_metrics";
+    std::error_code ignored;
+    std::filesystem::remove(node, ignored);
+    std::filesystem::create_directories(node);
+  }
+
+  void WritePartitionMetrics(const std::vector<uint8_t>& blob) const {
+    std::filesystem::create_directories(root_ / "device" / "xcp");
+    Write(root_ / "device" / "xcp" / "xcp_metrics", blob);
+  }
+
+  std::string path() const { return root_.string(); }
+
+ private:
+  static unsigned NextInstanceId() {
+    static std::atomic<unsigned> counter{0};
+    return counter.fetch_add(1);
+  }
+
+  static void Write(const std::filesystem::path& file, const std::vector<uint8_t>& blob) {
+    std::ofstream stream(file, std::ios::binary | std::ios::trunc);
+    stream.write(reinterpret_cast<const char*>(blob.data()),
+                 static_cast<std::streamsize>(blob.size()));
+  }
+
+  std::filesystem::path root_;
+};
+
+// A full table-sized blob whose every metric byte carries the filler, with a
+// header declaring only `declared_size` bytes. The reader is expected to honor
+// the declared size, so bytes past it must never reach the metrics table.
+auto BuildMetricsBlob(std::size_t table_size, uint8_t format_revision, uint8_t content_revision,
+                      uint16_t declared_size) -> std::vector<uint8_t> {
+  std::vector<uint8_t> blob(table_size);
+  for (std::size_t offset = 0; offset < blob.size(); ++offset) {
+    blob[offset] = FillByte(offset);
+  }
+  amd::smi::AMDGpuMetricsHeader_v1_t header{};
+  header.m_structure_size = declared_size;
+  header.m_format_revision = format_revision;
+  header.m_content_revision = content_revision;
+  std::memcpy(blob.data(), &header, sizeof(header));
+  return blob;
+}
+
+// Always give the file at least as many bytes as its header declares. A blob that
+// stopped at the struct size would turn a read that ignored the declared size into
+// a harmless short read instead of the overrun such a read really is.
+auto BuildApuMetricsBlob(uint8_t content_revision, uint16_t declared_size) -> std::vector<uint8_t> {
+  return BuildMetricsBlob(std::max(sizeof(ApuMetrics), std::size_t{declared_size}), 2,
+                          content_revision, declared_size);
+}
+
+// Overwrite one little-endian uint16_t field that the filler already populated.
+void WriteLe16(std::vector<uint8_t>& blob, std::size_t offset, uint16_t value) {
+  blob[offset] = static_cast<uint8_t>(value & 0xFFU);
+  blob[offset + 1] = static_cast<uint8_t>(value >> 8);
+}
+
+}  // namespace
+
+// A device may report an older, shorter APU revision than the newest layout we
+// model, or declare a table longer than it. Reading must pre-fill with the
+// not-applicable sentinel, take only the bytes the header declares, and stay
+// inside our own buffer. Exercise that end to end against a fake sysfs node.
+TEST(GpuUnit, APUMetricsShortRevisionReadsTrailingFieldsAsNotApplicable) {
+  PRINT_VERBOSITY();
+
+  struct ReadCase {
+    const char* name;
+    uint8_t content_revision;
+    uint16_t declared_size;
+    bool has_indep_throttle_status;  // added in v2.2
+    bool has_average_temperature;    // added in v2.3
+    bool has_average_voltage;        // added in v2.4
+    bool activity_in_hundredths;     // v2.1 and v2.2 only
+  };
+  static_assert(sizeof(ApuMetrics) + 4096 <= UINT16_MAX,
+                "the oversized case must still fit the uint16_t the header declares");
+  const ReadCase cases[] = {
+      {"v2_1", 1, kApuV21Size, false, false, false, true},
+      {"v2_2", 2, kApuV22Size, true, false, false, true},
+      {"v2_3", 3, kApuV23Size, true, true, false, false},
+      {"v2_4", 4, kApuV24Size, true, true, true, false},
+      // Header claims more than the layout we model, and the file really is that
+      // long (see the blob size below), so a read that trusted the header would
+      // write past our buffer instead of simply coming up short.
+      {"v2_4_header_exceeds_struct", 4, sizeof(ApuMetrics) + 4096, true, true, true, false},
+  };
+
+  for (const auto& test_case : cases) {
+    SCOPED_TRACE(testing::Message() << "APU metrics revision " << test_case.name);
+    FakeMetricsDevice fake_device(test_case.name);
+    fake_device.WriteMetrics(
+        BuildApuMetricsBlob(test_case.content_revision, test_case.declared_size));
+
+    amd::smi::Device device(fake_device.path(), nullptr);
+    ASSERT_EQ(device.setup_gpu_metrics_reading(), rsmi_status_t::RSMI_STATUS_SUCCESS);
+
+    const auto [status_code, metrics] = device.dev_copy_internal_to_external_metrics();
+    ASSERT_EQ(status_code, rsmi_status_t::RSMI_STATUS_SUCCESS);
+    ASSERT_NE(metrics.apu_metrics, nullptr);
+    const auto& apu = *metrics.apu_metrics;
+
+    EXPECT_EQ(metrics.common_header.format_revision, 2);
+    EXPECT_EQ(metrics.common_header.content_revision, test_case.content_revision);
+
+    // Present in every v2.x revision.
+    EXPECT_EQ(apu.temperature_gfx, FilledValue<uint16_t>(offsetof(ApuMetrics, m_temperature_gfx)));
+    // Scaled to whole percent only on v2.1/v2.2; the fill never holds the N/A value.
+    const auto filled_activity =
+        FilledValue<uint16_t>(offsetof(ApuMetrics, m_average_gfx_activity));
+    EXPECT_EQ(apu.average_gfx_activity,
+              test_case.activity_in_hundredths ? (filled_activity + 50) / 100 : filled_activity);
+    EXPECT_EQ(apu.average_socket_power,
+              FilledValue<uint16_t>(offsetof(ApuMetrics, m_average_socket_power)));
+    EXPECT_EQ(apu.average_gfxclk_frequency,
+              FilledValue<uint16_t>(offsetof(ApuMetrics, m_average_gfxclk_frequency)));
+    EXPECT_EQ(apu.throttle_status, FilledValue<uint32_t>(offsetof(ApuMetrics, m_throttle_status)));
+    EXPECT_EQ(apu.fan_pwm, FilledValue<uint16_t>(offsetof(ApuMetrics, m_fan_pwm)));
+
+    // Added by later revisions: read back only when the header declares them.
+    EXPECT_EQ(apu.indep_throttle_status,
+              test_case.has_indep_throttle_status
+                  ? FilledValue<uint64_t>(offsetof(ApuMetrics, m_indep_throttle_status))
+                  : UINT64_MAX);
+    EXPECT_EQ(apu.average_temperature_gfx,
+              test_case.has_average_temperature
+                  ? FilledValue<uint16_t>(offsetof(ApuMetrics, m_average_temperature_gfx))
+                  : UINT16_MAX);
+    EXPECT_EQ(apu.average_cpu_voltage,
+              test_case.has_average_voltage
+                  ? FilledValue<uint16_t>(offsetof(ApuMetrics, m_average_cpu_voltage))
+                  : UINT16_MAX);
+  }
+}
+
+// Reading a metrics table pre-fills and clamps using sizeof_metric_table(), so
+// that size must describe the very buffer get_metrics_table() hands back. v1.8
+// backs both the GPU table and the smaller partition table, so pin the pairing
+// for both modes: sizing the partition table as the GPU table would write past
+// the end of it.
+// v2.1 and v2.2 tables report GFX and MM activity in hundredths of a percent, so the
+// public fields have to be scaled to whole percent, in the APU sub-struct as well as
+// at the top level. The expected values are worked out by hand instead of
+// being recomputed from the production expression, so changing that expression
+// cannot quietly carry the expectation along with it.
+TEST(GpuUnit, ApuActivityReachesThePublicFieldsAsWholePercent) {
+  PRINT_VERBOSITY();
+
+  // Both fields must fall inside the revision the blob declares. If one did not,
+  // the read would leave it at the sentinel and the checks below would pass
+  // without the conversion ever running.
+  static_assert(offsetof(ApuMetrics, m_average_gfx_activity) + sizeof(uint16_t) <= kApuV21Size,
+                "v2.1 must carry average_gfx_activity for this test to mean anything");
+  static_assert(offsetof(ApuMetrics, m_average_mm_activity) + sizeof(uint16_t) <= kApuV21Size,
+                "v2.1 must carry average_mm_activity for this test to mean anything");
+
+  struct ActivityCase {
+    const char* name;
+    uint16_t hundredths;
+    uint16_t whole_percent;
+  };
+  // 45.67 rules out plain truncation, which would answer 45; 12.34 rules out
+  // rounding away from zero, which would answer 13; 12.50 is the exact half that
+  // separates rounding half up from rounding half to even.
+  const ActivityCase cases[] = {
+      {"45.67 %", 4567, 46},
+      {"12.34 %", 1234, 12},
+      {"12.50 %", 1250, 13},
+  };
+  // Both revisions that report hundredths, so the last one scaled is pinned too.
+  const std::pair<uint8_t, std::size_t> revisions[] = {{1, kApuV21Size}, {2, kApuV22Size}};
+
+  for (const auto& [content_revision, declared_size] : revisions) {
+    for (const auto& test_case : cases) {
+      SCOPED_TRACE(testing::Message() << "v2." << static_cast<int>(content_revision)
+                                      << " GFX activity " << test_case.name);
+
+      // Give MM a different reading, so a conversion that crossed the two fields
+      // over would not go unnoticed.
+      constexpr uint16_t kMmHundredths = 999;  // 9.99 %
+      auto blob = BuildApuMetricsBlob(content_revision, static_cast<uint16_t>(declared_size));
+      WriteLe16(blob, offsetof(ApuMetrics, m_average_gfx_activity), test_case.hundredths);
+      WriteLe16(blob, offsetof(ApuMetrics, m_average_mm_activity), kMmHundredths);
+
+      FakeMetricsDevice fake_device("apu_activity_scaled");
+      fake_device.WriteMetrics(blob);
+
+      amd::smi::Device device(fake_device.path(), nullptr);
+      ASSERT_EQ(device.setup_gpu_metrics_reading(), rsmi_status_t::RSMI_STATUS_SUCCESS);
+      const auto [status_code, metrics] = device.dev_copy_internal_to_external_metrics();
+      ASSERT_EQ(status_code, rsmi_status_t::RSMI_STATUS_SUCCESS);
+      ASSERT_NE(metrics.apu_metrics, nullptr);
+
+      EXPECT_EQ(metrics.average_gfx_activity, test_case.whole_percent);
+      EXPECT_EQ(metrics.average_mm_activity, uint16_t{10});
+
+      // Python and the CLI print the APU sub-struct with a % sign too.
+      EXPECT_EQ(metrics.apu_metrics->average_gfx_activity, test_case.whole_percent);
+      EXPECT_EQ(metrics.apu_metrics->average_mm_activity, uint16_t{10});
+    }
+  }
+}
+
+// Van Gogh's current firmware interface publishes v2.3/v2.4 with activity already in
+// whole percent, so scaling it would turn 48 % GFX busy into 0.
+TEST(GpuUnit, ApuV23AndV24ActivityPassesThroughAsWholePercent) {
+  PRINT_VERBOSITY();
+
+  const std::pair<uint8_t, std::size_t> revisions[] = {{3, kApuV23Size}, {4, kApuV24Size}};
+  for (const auto& [content_revision, declared_size] : revisions) {
+    SCOPED_TRACE(testing::Message() << "v2." << static_cast<int>(content_revision));
+    auto blob = BuildApuMetricsBlob(content_revision, static_cast<uint16_t>(declared_size));
+    WriteLe16(blob, offsetof(ApuMetrics, m_average_gfx_activity), 45);
+    WriteLe16(blob, offsetof(ApuMetrics, m_average_mm_activity), 100);
+
+    FakeMetricsDevice fake_device("apu_activity_whole");
+    fake_device.WriteMetrics(blob);
+
+    amd::smi::Device device(fake_device.path(), nullptr);
+    ASSERT_EQ(device.setup_gpu_metrics_reading(), rsmi_status_t::RSMI_STATUS_SUCCESS);
+    const auto [status_code, metrics] = device.dev_copy_internal_to_external_metrics();
+    ASSERT_EQ(status_code, rsmi_status_t::RSMI_STATUS_SUCCESS);
+    ASSERT_NE(metrics.apu_metrics, nullptr);
+
+    EXPECT_EQ(metrics.average_gfx_activity, uint16_t{45});
+    EXPECT_EQ(metrics.average_mm_activity, uint16_t{100});
+    EXPECT_EQ(metrics.apu_metrics->average_gfx_activity, uint16_t{45});
+    EXPECT_EQ(metrics.apu_metrics->average_mm_activity, uint16_t{100});
+  }
+}
+
+// The not-applicable sentinel is not a reading, so scaling it would turn a field
+// the device never answered for into a plausible-looking 655 %. The other field
+// carries a real reading in the same table: without it this test would also pass
+// if the read had populated nothing at all, since the destination is pre-filled
+// with the very sentinel being checked for.
+TEST(GpuUnit, NotApplicableApuActivityIsStillReportedAsNotApplicable) {
+  PRINT_VERBOSITY();
+
+  constexpr uint16_t kMmHundredths = 4567;  // 45.67 %
+  auto blob = BuildApuMetricsBlob(1, static_cast<uint16_t>(kApuV21Size));
+  WriteLe16(blob, offsetof(ApuMetrics, m_average_gfx_activity), UINT16_MAX);
+  WriteLe16(blob, offsetof(ApuMetrics, m_average_mm_activity), kMmHundredths);
+
+  FakeMetricsDevice fake_device("apu_activity_sentinel");
+  fake_device.WriteMetrics(blob);
+
+  amd::smi::Device device(fake_device.path(), nullptr);
+  ASSERT_EQ(device.setup_gpu_metrics_reading(), rsmi_status_t::RSMI_STATUS_SUCCESS);
+  const auto [status_code, metrics] = device.dev_copy_internal_to_external_metrics();
+  ASSERT_EQ(status_code, rsmi_status_t::RSMI_STATUS_SUCCESS);
+  ASSERT_NE(metrics.apu_metrics, nullptr);
+
+  EXPECT_EQ(metrics.average_gfx_activity, uint16_t{UINT16_MAX});
+  EXPECT_EQ(metrics.average_mm_activity, uint16_t{46})
+      << "a live reading beside the sentinel proves the read populated these fields";
+  EXPECT_EQ(metrics.apu_metrics->average_gfx_activity, uint16_t{UINT16_MAX});
+  EXPECT_EQ(metrics.apu_metrics->average_mm_activity, uint16_t{46});
+}
+
+TEST(GpuUnit, GPUMetricsV18TableSizeMatchesSelectedTable) {
+  PRINT_VERBOSITY();
+
+  amd::smi::GpuMetricsBase_v18_t metrics;
+
+  metrics.set_is_partition_metrics(false);
+  EXPECT_EQ(metrics.sizeof_metric_table(), sizeof(amd::smi::AMDGpuMetrics_v18_t));
+
+  metrics.set_is_partition_metrics(true);
+  EXPECT_EQ(metrics.sizeof_metric_table(), sizeof(amd::smi::AMDGpuMetrics_v18_Partition_v1_0_t));
+
+  EXPECT_LT(sizeof(amd::smi::AMDGpuMetrics_v18_Partition_v1_0_t),
+            sizeof(amd::smi::AMDGpuMetrics_v18_t))
+      << "the partition table is the smaller of the two, so a size mismatch overruns it";
+}
+
+// A revision we cannot model has no table to build, and the public entry points
+// rely on that being reported as NOT_SUPPORTED rather than as unexpected data.
+// Pin both halves of that contract: the setup stage classifies the revision,
+// and the copy stage -- which callers must not reach -- reports the generic
+// failure that would otherwise mask it.
+TEST(GpuUnit, UnsupportedMetricRevisionReportsNotSupported) {
+  PRINT_VERBOSITY();
+
+  FakeMetricsDevice fake_device("unsupported_v2_5");
+  // v2.5 is past the newest APU layout we model, so it cannot be read.
+  fake_device.WriteMetrics(BuildApuMetricsBlob(5, sizeof(ApuMetrics)));
+
+  amd::smi::Device device(fake_device.path(), nullptr);
+  std::ostringstream metrics_log;
+
+  EXPECT_EQ(device.dev_log_gpu_metrics(metrics_log), rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED);
+
+  const auto [copy_status, metrics] = device.dev_copy_internal_to_external_metrics();
+  EXPECT_NE(copy_status, rsmi_status_t::RSMI_STATUS_SUCCESS)
+      << "the copy stage cannot tell an unsupported revision apart, which is why callers "
+         "stop on the setup status instead; it only has to refuse to succeed";
+  EXPECT_EQ(metrics.apu_metrics, nullptr);
+}
+
+// v3.0 is a different layout, not a v2.x prefix, and it reaches the caller
+// through the same unified object. Read a real v3.0 blob end to end so the
+// classification is backed by an actual read: v3.0 fields must carry the
+// device data and the v2.4-only fields must stay not-applicable.
+TEST(GpuUnit, APUMetricsV30ReadsThroughTheSameUnifiedObject) {
+  PRINT_VERBOSITY();
+
+  FakeMetricsDevice fake_device("v3_0");
+  fake_device.WriteMetrics(
+      BuildMetricsBlob(sizeof(ApuMetricsV30), 3, 0, static_cast<uint16_t>(sizeof(ApuMetricsV30))));
+
+  amd::smi::Device device(fake_device.path(), nullptr);
+  ASSERT_EQ(device.setup_gpu_metrics_reading(), rsmi_status_t::RSMI_STATUS_SUCCESS);
+
+  const auto [status_code, metrics] = device.dev_copy_internal_to_external_metrics();
+  ASSERT_EQ(status_code, rsmi_status_t::RSMI_STATUS_SUCCESS);
+  ASSERT_NE(metrics.apu_metrics, nullptr);
+  const auto& apu = *metrics.apu_metrics;
+
+  EXPECT_EQ(metrics.common_header.format_revision, 3);
+  EXPECT_EQ(metrics.common_header.content_revision, 0);
+
+  // Shared with v2.x, plus fields only v3.0 defines.
+  EXPECT_EQ(apu.temperature_gfx, FilledValue<uint16_t>(offsetof(ApuMetricsV30, m_temperature_gfx)));
+  EXPECT_EQ(apu.average_gfx_activity,
+            FilledValue<uint16_t>(offsetof(ApuMetricsV30, m_average_gfx_activity)));
+  EXPECT_EQ(apu.temperature_skin,
+            FilledValue<uint16_t>(offsetof(ApuMetricsV30, m_temperature_skin)));
+  EXPECT_EQ(apu.average_vcn_activity,
+            (FilledValue<uint16_t>(offsetof(ApuMetricsV30, m_average_vcn_activity)) + 50) / 100);
+  EXPECT_EQ(apu.average_ipu_power,
+            FilledValue<uint16_t>(offsetof(ApuMetricsV30, m_average_ipu_power)));
+  EXPECT_EQ(apu.average_apu_power,
+            FilledValue<uint32_t>(offsetof(ApuMetricsV30, m_average_apu_power)));
+  EXPECT_EQ(apu.average_dgpu_power,
+            FilledValue<uint32_t>(offsetof(ApuMetricsV30, m_average_dgpu_power)));
+  EXPECT_EQ(apu.throttle_residency_prochot,
+            FilledValue<uint32_t>(offsetof(ApuMetricsV30, m_throttle_residency_prochot)));
+  EXPECT_EQ(apu.time_filter_alphavalue,
+            FilledValue<uint32_t>(offsetof(ApuMetricsV30, m_time_filter_alphavalue)));
+
+  // v2.4-only fields have no v3.0 source, so they stay not-applicable.
+  EXPECT_EQ(apu.average_mm_activity, UINT16_MAX);
+  EXPECT_EQ(apu.temperature_l3[0], UINT16_MAX);
+  EXPECT_EQ(apu.fan_pwm, UINT16_MAX);
+  EXPECT_EQ(apu.average_cpu_voltage, UINT16_MAX);
+  EXPECT_EQ(apu.indep_throttle_status, UINT64_MAX);
+
+  // PLX temperature is read out of gpu_metrics, and an APU has no such sensor,
+  // so the reading stays at the sentinel that makes the query unsupported.
+  EXPECT_EQ(metrics.temperature_vrsoc, UINT16_MAX);
+}
+
+// PLX temperature is sourced from gpu_metrics, so a device without that sensor
+// reports the not-applicable sentinel rather than an error. Reading it back as
+// a temperature would hand the caller a bogus 65535 C, so the query has to come
+// back unsupported instead.
+TEST(GpuUnit, PlxTemperatureSentinelReportsNotSupported) {
+  PRINT_VERBOSITY();
+
+  amdsmi_gpu_metrics_t metric_info{};
+  int64_t temperature = -1;
+
+  metric_info.temperature_vrsoc = std::numeric_limits<uint16_t>::max();
+  EXPECT_EQ(smi_amdgpu_plx_temp_from_metrics(metric_info, &temperature),
+            AMDSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_EQ(temperature, -1) << "an unsupported reading must leave the output untouched";
+
+  // A device that does report the sensor still gets its reading through.
+  metric_info.temperature_vrsoc = 42;
+  EXPECT_EQ(smi_amdgpu_plx_temp_from_metrics(metric_info, &temperature), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(temperature, 42);
+}
+
+// The header read must keep working for a revision we cannot model: the header
+// is the only way for a caller to discover which revision a device reports, so
+// refusing to read it hides exactly the information needed to diagnose the gap.
+TEST(GpuUnit, MetricsHeaderReadsForAnUnsupportedRevision) {
+  PRINT_VERBOSITY();
+
+  FakeMetricsDevice fake_device("header_unsupported_v2_5");
+  fake_device.WriteMetrics(BuildApuMetricsBlob(5, sizeof(ApuMetrics)));
+
+  amd::smi::Device device(fake_device.path(), nullptr);
+  ASSERT_EQ(device.dev_read_gpu_metrics_header_data(), rsmi_status_t::RSMI_STATUS_SUCCESS);
+
+  const auto& header = device.dev_get_metrics_header();
+  EXPECT_EQ(header.m_format_revision, 2);
+  EXPECT_EQ(header.m_content_revision, 5);
+}
+
+// A table shorter than its own header declares is a data error, not a verdict on
+// the device. Reporting it as unsupported would send a caller looking for a
+// missing feature instead of a truncated read.
+TEST(GpuUnit, TruncatedMetricsTableReportsUnexpectedSize) {
+  PRINT_VERBOSITY();
+
+  FakeMetricsDevice fake_device("truncated_v2_1");
+  auto blob = BuildApuMetricsBlob(1, static_cast<uint16_t>(kApuV21Size));
+  blob.resize(kApuV21Size / 2);  // the header still claims the whole table
+  fake_device.WriteMetrics(blob);
+
+  amd::smi::Device device(fake_device.path(), nullptr);
+  EXPECT_EQ(device.setup_gpu_metrics_reading(), rsmi_status_t::RSMI_STATUS_UNEXPECTED_SIZE);
+}
+
+// A driver with no metrics callback still publishes the node, and reading it
+// returns nothing: the device has no metrics, rather than a bad table.
+TEST(GpuUnit, EmptyMetricsNodeReportsNotSupported) {
+  PRINT_VERBOSITY();
+
+  FakeMetricsDevice fake_device("empty_node");
+  fake_device.WriteMetrics({});
+
+  amd::smi::Device device(fake_device.path(), nullptr);
+  EXPECT_EQ(device.setup_gpu_metrics_reading(), rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED);
+}
+
+// The early return that keeps an unsupported revision from reaching the copy
+// stage lives in the public entry point, so exercise that entry point: the
+// Device stage alone stays green with the guard deleted.
+// A node the driver refuses to read is not a node that is absent. Reporting the
+// refusal as NOT_SUPPORTED would hide a transient device state -- a reset, a
+// suspend -- behind an answer that sounds permanent, and the refusal returns zero
+// bytes just as an empty node does, so only the stream's error flag separates them.
+TEST(GpuUnit, DriverRefusedMetricsReadIsNotReportedAsUnsupported) {
+  PRINT_VERBOSITY();
+
+  FakeMetricsDevice fake_device("refused_metrics_read");
+  fake_device.ReplaceMetricsFileWithDirectory();
+
+  // The branch under test is only reached when the open succeeds and the read
+  // then fails. Check that the directory still behaves that way before drawing
+  // any conclusion from the status below, so a platform where it stopped doing
+  // so reports that rather than passing for the wrong reason.
+  {
+    const std::string node = fake_device.path() + "/device/gpu_metrics";
+    FILE* stream = std::fopen(node.c_str(), "rb");
+    ASSERT_NE(stream, nullptr) << "opening a directory must still succeed here";
+    char byte = 0;
+    errno = 0;
+    const std::size_t read_count = std::fread(&byte, 1, sizeof(byte), stream);
+    const bool failed = std::ferror(stream) != 0;
+    std::fclose(stream);
+    ASSERT_EQ(read_count, 0u);
+    ASSERT_TRUE(failed) << "reading a directory must still set the stream's error flag";
+  }
+
+  amd::smi::Device device(fake_device.path(), nullptr);
+  const auto status_code = device.setup_gpu_metrics_reading();
+
+  // Pinned rather than merely "not NOT_SUPPORTED": the errno this path reports is
+  // public behaviour that callers switch on, so changing it should have to be
+  // deliberate.
+  EXPECT_EQ(status_code, rsmi_status_t::RSMI_STATUS_UNEXPECTED_SIZE)
+      << "a read the driver refused must not read back as a device without metrics";
+}
+
+TEST(GpuUnit, PublicMetricsEntryReportsUnsupportedRevision) {
+  PRINT_VERBOSITY();
+
+  FakeMetricsDevice fake_device("public_unsupported_v2_5");
+  fake_device.WriteMetrics(BuildApuMetricsBlob(5, sizeof(ApuMetrics)));
+
+  const ScopedLibraryDevice library_device(fake_device.path());
+  rsmi_gpu_metrics_t metrics{};
+
+  EXPECT_EQ(rsmi_dev_gpu_metrics_info_get(library_device.index(), &metrics),
+            rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED);
+}
+
+// A table that cannot even hold the header it was selected by has nothing to
+// read. Without a lower bound the read is a no-op that reports success, and the
+// copy stage then reports the not-applicable fill back as the metrics version,
+// contradicting the header the device published.
+TEST(GpuUnit, MetricsTableSmallerThanItsHeaderIsRejected) {
+  PRINT_VERBOSITY();
+
+  FakeMetricsDevice fake_device("declared_size_zero");
+  fake_device.WriteMetrics(BuildApuMetricsBlob(1, 0));
+
+  amd::smi::Device device(fake_device.path(), nullptr);
+  EXPECT_EQ(device.setup_gpu_metrics_reading(), rsmi_status_t::RSMI_STATUS_UNEXPECTED_SIZE);
+}
+
+// A malformed table must reach the caller as the reason setup gave. Only the
+// unreadable-revision case used to be forwarded, so every other setup failure
+// arrived as the copy stage's generic unexpected-data result.
+TEST(GpuUnit, PublicMetricsEntryReportsAMalformedTable) {
+  PRINT_VERBOSITY();
+
+  FakeMetricsDevice fake_device("public_declared_size_zero");
+  fake_device.WriteMetrics(BuildApuMetricsBlob(1, 0));
+
+  const ScopedLibraryDevice library_device(fake_device.path());
+  rsmi_gpu_metrics_t metrics{};
+
+  EXPECT_EQ(rsmi_dev_gpu_metrics_info_get(library_device.index(), &metrics),
+            rsmi_status_t::RSMI_STATUS_UNEXPECTED_SIZE);
+}
+
+// The partition entry point carries the same guard as the GPU one, so pin it
+// too: the two have drifted apart before.
+TEST(GpuUnit, PublicPartitionMetricsEntryReportsUnsupportedRevision) {
+  PRINT_VERBOSITY();
+
+  FakeMetricsDevice fake_device("partition_unsupported_v9_9");
+  // Partition metrics are read from device/xcp/xcp_metrics.
+  fake_device.WritePartitionMetrics(BuildMetricsBlob(sizeof(ApuMetrics), 9, 9, sizeof(ApuMetrics)));
+
+  const ScopedLibraryDevice library_device(fake_device.path());
+  rsmi_gpu_metrics_t metrics{};
+
+  EXPECT_EQ(rsmi_dev_gpu_partition_metrics_info_get(library_device.index(), &metrics),
+            rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED);
+}
+
+// The PLX reading comes out of gpu_metrics, so drive it from a device whose
+// table really was read rather than from a hand-built struct: an APU leaves the
+// sensor at the sentinel, which is what makes the query unsupported.
+TEST(GpuUnit, PlxTemperatureFromAFakeApuDeviceIsNotSupported) {
+  PRINT_VERBOSITY();
+
+  FakeMetricsDevice fake_device("plx_apu_v2_1");
+  fake_device.WriteMetrics(BuildApuMetricsBlob(1, static_cast<uint16_t>(kApuV21Size)));
+
+  amd::smi::Device device(fake_device.path(), nullptr);
+  ASSERT_EQ(device.setup_gpu_metrics_reading(), rsmi_status_t::RSMI_STATUS_SUCCESS);
+
+  const auto [status_code, metrics] = device.dev_copy_internal_to_external_metrics();
+  ASSERT_EQ(status_code, rsmi_status_t::RSMI_STATUS_SUCCESS);
+
+  amdsmi_gpu_metrics_t public_metrics{};
+  static_assert(sizeof(public_metrics) == sizeof(metrics),
+                "the rsmi and amdsmi metrics structs must stay layout-compatible");
+  std::memcpy(&public_metrics, &metrics, sizeof(public_metrics));
+
+  int64_t temperature = -1;
+  EXPECT_EQ(smi_amdgpu_plx_temp_from_metrics(public_metrics, &temperature),
+            AMDSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_EQ(temperature, -1);
 }
