@@ -1300,18 +1300,27 @@ TEST_F(InitMicrotest, CommShrink_ZeroExcludeCount_ReturnsInvalidArgumentViaExitP
   EXPECT_EQ(nullptr, out) << "a failed shrink must not hand back a comm";
 }
 
-// LATENT BUG (init.cc:4113): PtrCheck rejects a null newcomm by jumping to exit:, which derefs *newcomm and SEGFAULTs.
-TEST_F(InitMicrotest, CommShrink_NullNewcomm_DiesOnNullDeref) {
+TEST_F(InitMicrotest, CommShrink_NullNewcomm_ReturnsInvalidArgument) {
   ReadyComm rc;
+  rc.get()->rank = 1;
+  rc.get()->nRanks = 2;
   int exclude[1] = {0};
-  // Match the message too: the signal alone would also accept a crash arriving BEFORE the newcomm validation.
-  EXPECT_EXIT(
-      {
-        DisableCoreDumpsForExpectedCrash();
-        (void)ncclCommShrink_impl(rc.get(), exclude, /*excludeRanksCount=*/1, nullptr,
-                                  /*config=*/nullptr, /*shrinkFlags=*/0);
-      },
-      DEATH_BY_SEGV, "newcomm argument is NULL");
+  ncclResult_t res = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    res = ncclCommShrink_impl(rc.get(), exclude, /*excludeRanksCount=*/1, nullptr, /*config=*/nullptr,
+                              /*shrinkFlags=*/0);
+  });
+  EXPECT_EQ(ncclInvalidArgument, res);
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "newcomm argument is NULL")) << log;
+}
+
+TEST_F(InitMicrotest, CommSplit_NullNewcomm_ReturnsInvalidArgument) {
+  ReadyComm rc;
+  ncclResult_t res = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog(
+      [&] { res = ncclCommSplit_impl(rc.get(), /*color=*/1, /*key=*/0, nullptr, /*config=*/nullptr); });
+  EXPECT_EQ(ncclInvalidArgument, res);
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "newcomm argument is NULL")) << log;
 }
 
 // Full strings, not substrings: a prefix check cannot see a changed NCCL_DEBUG level or a dropped "(run with)" hint.

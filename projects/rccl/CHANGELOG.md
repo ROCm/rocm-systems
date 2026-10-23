@@ -78,6 +78,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Fixed intermittent data corruption in multi-node collectives, seen as out-of-bounds values in 8-node AllToAll, on hosts that use GPU Direct RDMA through peermem. Since RCCL 2.30.4 the GDR flush scratchpad was registered only through dma-buf, so on peermem hosts the flush degraded to a single RDMA read of the receive buffer, which does not order earlier relaxed-ordering writes. The scratchpad is now also registered through peermem, restoring the strictly ordered RDMA write that precedes the flush read.
 * Fixed `ncclCommAbort` and `ncclCommRevoke` hanging when a DDA collective (IPC on gfx942/gfx950, fabric LL/LL128/VMM on gfx1250) was waiting on a peer that never joined. DDA kernels now observe the communicator abort flag while waiting. A parent communicator shrunk with `NCCL_SHRINK_ABORT` no longer uses DDA for later collectives.
 * Fixed `ncclCommShrink` accepting an exclusion list with negative, out-of-range or duplicate ranks and building a child communicator with an inconsistent rank count, which could hang or access memory out of bounds. Such a list now returns `ncclInvalidArgument`.
+* Fixed `ncclCommSplit` and `ncclCommShrink` crashing when `newcomm` is `NULL`. They now return `ncclInvalidArgument`.
 
 ### Known issues
 * The FP8 ReduceSum and ReduceCopy device APIs are not exported in the LLVM bitcode library.
