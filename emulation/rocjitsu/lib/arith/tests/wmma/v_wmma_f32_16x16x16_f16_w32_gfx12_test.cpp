@@ -8,6 +8,7 @@
 #include "common/cpu.h"
 #include "common/floating_point.h"
 #include "common/registers.h"
+#include "common/semantics.h"
 #include "rj_arith/rj_arith.h"
 #include "wmma/helpers.h"
 
@@ -96,10 +97,7 @@ TEST(WmmaF32F16W32Gfx12, Arithmetic) {
   // A/B overlap, partial A/B/C overlap, B/C overlap, C alias, and disjoint D.
   const std::vector<uint64_t> cpu_levels = rocjitsu::arith::test::supported_cpu_levels();
   for (uint64_t cpu : cpu_levels) {
-    for (uint64_t semantics :
-         {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE,
-          RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS,
-          RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL}) {
+    for (uint64_t semantics : rocjitsu::arith::test::semantics_modes()) {
       for (uint64_t fp_flags : {uint64_t{0}, RJ_ARITH_FP16_OVFL}) {
         for (int aliasing_offset : {0, 2, 4, 8, 16}) {
           SCOPED_TRACE(::testing::Message() << cpu << '/' << semantics << '/' << aliasing_offset);

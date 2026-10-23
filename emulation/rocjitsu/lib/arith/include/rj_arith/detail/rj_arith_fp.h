@@ -15,11 +15,12 @@ extern "C" {
 #endif
 
 // Fused multiply-add reads the low 16 bits of A/B/C and writes the low 16 bits of D,
-// preserving D's high half and inactive lanes. Modes 0..2 are supported; modes 1..2 use empirical
-// exact arithmetic. Mode 3 returns RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS. FP status pointers are
-// unused in modes 0..2. Instruction flags must be zero. Only CPU-level and semantics fields (with
-// supported values) and RJ_ARITH_FP16_OVFL are accepted; all other flag bits are rejected.
-// RJ_ARITH_FP16_OVFL saturates finite FP16 overflow; infinities remain infinite.
+// preserving D's high half and inactive lanes. Modes 0..3 are supported; modes 1..3 use empirical
+// exact arithmetic. FP status pointers are unused in modes 0..2. Instruction flags must be zero.
+// Only CPU-level and semantics fields (with supported values) and RJ_ARITH_FP16_OVFL are accepted;
+// all other flag bits are rejected. RJ_ARITH_FP16_OVFL saturates finite FP16 overflow; infinities
+// remain infinite. Mode 3 ORs active-lane FP exception causes into excp_flag_user, preserving
+// existing bits.
 int rj_arith_v_fma_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                  uint32_t *const *d, const uint32_t *const *a,
                                  const uint32_t *const *b, const uint32_t *const *c,
