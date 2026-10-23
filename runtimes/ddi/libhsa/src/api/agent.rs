@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-//! HSA C ABI entry points for this domain.
+//! Agent iteration and CPU/GPU attributes exposed through the HSA C ABI.
 
 use super::host_alloc_dmabuf_supported;
 use super::output::{write_bytes, write_value};
@@ -16,15 +16,19 @@ use crate::isa::isa_handle;
 use crate::runtime::{boundary, lock, map_error};
 use crate::{image_gfx12, platform, runtime};
 
+/// Maximum dimensions of a kernel cluster.
 pub(crate) const KERNEL_CLUSTER_MAX_DIM: HsaAmdDim3 = HsaAmdDim3 {
     x: i32::MAX as u64,
     y: 65_535,
     z: 65_535,
 };
+/// Maximum dimensions of a single cluster.
 pub(crate) const CLUSTER_MAX_DIM: HsaAmdDim3 = HsaAmdDim3 { x: 1, y: 1, z: 1 };
+/// Maximum number of workgroups in a kernel cluster.
 pub(crate) const KERNEL_CLUSTER_MAX_SIZE: u64 =
     KERNEL_CLUSTER_MAX_DIM.x * KERNEL_CLUSTER_MAX_DIM.y * KERNEL_CLUSTER_MAX_DIM.z;
 
+/// Formats the UUID advertised for a GPU or host agent.
 pub(crate) fn agent_uuid(gpu: Option<&rocddi::topology::GpuInfo>) -> String {
     match gpu {
         None => "CPU-XX".to_owned(),
@@ -35,6 +39,7 @@ pub(crate) fn agent_uuid(gpu: Option<&rocddi::topology::GpuInfo>) -> String {
     }
 }
 
+/// Checks whether a CPU agent must reject an AMD-specific attribute.
 pub(crate) fn cpu_rejects_amd_agent_info(attribute: u32) -> bool {
     matches!(
         attribute,
@@ -61,6 +66,7 @@ pub(crate) fn cpu_rejects_amd_agent_info(attribute: u32) -> bool {
     )
 }
 
+/// Returns the closest CPU agent available for the requested policy.
 pub(crate) fn nearest_cpu_agent(gpu_only: bool) -> HsaAgent {
     HsaAgent {
         handle: if gpu_only { CPU_AGENT } else { 0 },

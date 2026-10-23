@@ -1,18 +1,26 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+//! Queue ownership, atomic index, and ABI regression tests.
+
 use super::*;
 use std::sync::atomic::AtomicUsize;
 
-struct DropCount(Arc<AtomicUsize>);
+/// Counts owner drops during queue scratch rollback tests.
+struct DropCount(
+    /// Number of observed owner drops.
+    Arc<AtomicUsize>,
+);
 
 impl Drop for DropCount {
+    /// Records destruction of the test owner.
     fn drop(&mut self) {
         self.0.fetch_add(1, Ordering::Release);
     }
 }
 
 #[test]
+/// Verifies that failed scratch update retains both old and candidate owners.
 fn failed_scratch_update_retains_both_old_and_candidate_owners() {
     let old_drops = Arc::new(AtomicUsize::new(0));
     let new_drops = Arc::new(AtomicUsize::new(0));
@@ -38,6 +46,7 @@ fn failed_scratch_update_retains_both_old_and_candidate_owners() {
 
 #[test]
 #[allow(clippy::panic)]
+/// Verifies that scratch update unwind keeps candidate owned.
 fn scratch_update_unwind_keeps_candidate_owned() {
     let drops = Arc::new(AtomicUsize::new(0));
     let mut current = None;
@@ -58,6 +67,7 @@ fn scratch_update_unwind_keeps_candidate_owned() {
 }
 
 #[test]
+/// Verifies that stopping a queue joins its event worker.
 fn stopping_a_queue_joins_its_event_worker() {
     let alive = Arc::new(AtomicBool::new(true));
     let entered = Arc::new(AtomicBool::new(false));
@@ -86,6 +96,7 @@ fn stopping_a_queue_joins_its_event_worker() {
 
 #[test]
 #[allow(clippy::unwrap_used)]
+/// Verifies that queue event worker keeps its join handle for later cleanup.
 fn queue_event_worker_keeps_its_join_handle_for_later_cleanup() {
     let alive = Arc::new(AtomicBool::new(true));
     let worker_slot = Arc::new(std::sync::Mutex::new(None));
@@ -114,12 +125,14 @@ fn queue_event_worker_keeps_its_join_handle_for_later_cleanup() {
 }
 
 #[test]
+/// Verifies that async copy profiling entry point matches the public ABI.
 fn async_copy_profiling_entry_point_matches_the_public_abi() {
     let _: unsafe extern "C" fn(HsaSignal, *mut ProfilingTime) -> Status =
         hsa_amd_profiling_get_async_copy_time;
 }
 
 #[test]
+/// Verifies that external semaphore queue entry points match the public ABI.
 fn external_semaphore_queue_entry_points_match_the_public_abi() {
     let _: unsafe extern "C" fn(*mut HsaQueue, HsaAmdExternalSemaphore, u64) -> Status =
         hsa_amd_queue_signal_external_semaphore;
@@ -128,6 +141,7 @@ fn external_semaphore_queue_entry_points_match_the_public_abi() {
 }
 
 #[test]
+/// Verifies that counted queue entry points match the public ABI.
 fn counted_queue_entry_points_match_the_public_abi() {
     let _: unsafe extern "C" fn(
         HsaAgent,
@@ -142,6 +156,7 @@ fn counted_queue_entry_points_match_the_public_abi() {
 }
 
 #[test]
+/// Verifies that counted queue pool selects the first least used hardware queue.
 fn counted_queue_pool_selects_the_first_least_used_hardware_queue() {
     let pool = [
         CountedHardwareQueue {
@@ -162,6 +177,7 @@ fn counted_queue_pool_selects_the_first_least_used_hardware_queue() {
 }
 
 #[test]
+/// Verifies that counted queue handles are unique copies of the hardware header.
 fn counted_queue_handles_are_unique_copies_of_the_hardware_header() {
     let hardware = Box::new(HsaQueue {
         queue_type: QUEUE_TYPE_MULTI,
@@ -202,9 +218,14 @@ fn counted_queue_handles_are_unique_copies_of_the_hardware_header() {
 }
 
 #[repr(C, align(256))]
-struct PublicQueueStorage([u8; 256]);
+/// Provides aligned bytes for a public queue fixture.
+struct PublicQueueStorage(
+    /// Storage large enough for the public queue header.
+    [u8; 256],
+);
 
 #[test]
+/// Verifies that soft queue control uses the direct index path.
 fn soft_queue_control_uses_the_direct_index_path() {
     let mut control = Box::new(SoftQueueControl([0; 32]));
     let public = control.0.as_mut_ptr().cast::<HsaQueue>();
@@ -221,6 +242,7 @@ fn soft_queue_control_uses_the_direct_index_path() {
 }
 
 #[test]
+/// Verifies that counted queue index operations reach the hardware control.
 fn counted_queue_index_operations_reach_the_hardware_control() {
     let mut hardware = PublicQueueStorage([0; 256]);
     let hardware_queue = hardware.0.as_mut_ptr().cast::<HsaQueue>();
@@ -263,6 +285,7 @@ fn counted_queue_index_operations_reach_the_hardware_control() {
 }
 
 #[test]
+/// Verifies that AMD queue create descriptor matches the public x86 64 ABI.
 fn amd_queue_create_descriptor_matches_the_public_x86_64_abi() {
     assert_eq!(std::mem::size_of::<HsaAmdComputeQueueParams>(), 32);
     assert_eq!(std::mem::size_of::<HsaAmdSdmaQueueParams>(), 32);
@@ -292,6 +315,7 @@ fn amd_queue_create_descriptor_matches_the_public_x86_64_abi() {
 }
 
 #[test]
+/// Verifies that queue create input does not read the uninitialized output.
 fn queue_create_input_does_not_read_the_uninitialized_output() {
     let mut descriptor = std::mem::MaybeUninit::<HsaAmdQueueCreateDesc>::uninit();
     let pointer = descriptor.as_mut_ptr();
@@ -324,6 +348,7 @@ fn queue_create_input_does_not_read_the_uninitialized_output() {
 }
 
 #[test]
+/// Verifies that queue create copies a mask inside the descriptor.
 fn queue_create_copies_a_mask_inside_the_descriptor() -> Result<(), Status> {
     let mut descriptor = HsaAmdQueueCreateDesc {
         version: AMD_QUEUE_CREATE_DESC_VERSION,
@@ -358,6 +383,7 @@ fn queue_create_copies_a_mask_inside_the_descriptor() -> Result<(), Status> {
 }
 
 #[test]
+/// Verifies that firmware queue errors map to public status codes.
 fn firmware_queue_errors_map_to_public_status_codes() {
     assert_eq!(queue_error_status(2), INCOMPATIBLE_ARGUMENTS);
     assert_eq!(queue_error_status(4), INVALID_ALLOCATION);
@@ -372,6 +398,7 @@ fn firmware_queue_errors_map_to_public_status_codes() {
 }
 
 #[test]
+/// Verifies that base atomic entry points preserve queue indices.
 fn base_atomic_entry_points_preserve_queue_indices() {
     let mut storage = PublicQueueStorage([0; 256]);
     let queue = storage.0.as_mut_ptr().cast::<HsaQueue>();
@@ -411,6 +438,8 @@ fn base_atomic_entry_points_preserve_queue_indices() {
 
 #[test]
 #[allow(clippy::unwrap_used)]
+/// Verifies that repeated queue index access does not wait for the registry
+/// mutex.
 fn repeated_queue_index_access_does_not_wait_for_the_registry_mutex() {
     use std::sync::mpsc;
 

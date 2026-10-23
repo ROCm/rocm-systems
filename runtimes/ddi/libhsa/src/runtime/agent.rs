@@ -17,14 +17,17 @@ pub(super) fn pc_sampling_supported_by_query(
     }
 }
 
+/// Chooses the public HSA name for a discovered GPU.
 pub(super) fn gpu_agent_name(gpu: &GpuInfo) -> String {
     gfx_target_name(gpu.gfx_major, gpu.gfx_minor, gpu.gfx_stepping)
 }
 
+/// Builds the two HDP flush addresses required by the HSA ABI.
 pub(super) fn hdp_flush_pointers(address: Option<usize>) -> [usize; 2] {
     address.map_or([0; 2], |address| [address, address + 4])
 }
 
+/// Checks whether all local-memory sizes permit the full HSA profile.
 pub(super) fn full_profile_platform(local_memory_bytes: impl IntoIterator<Item = u64>) -> bool {
     let mut local_memory_bytes = local_memory_bytes.into_iter();
     local_memory_bytes
@@ -32,6 +35,7 @@ pub(super) fn full_profile_platform(local_memory_bytes: impl IntoIterator<Item =
         .is_some_and(|bytes| bytes == 0 && local_memory_bytes.all(|bytes| bytes == 0))
 }
 
+/// Decodes GPU pool handle into its runtime components.
 pub(super) fn decode_gpu_pool_handle(
     pool: HsaMemoryPool,
     gpu_count: usize,
@@ -42,18 +46,21 @@ pub(super) fn decode_gpu_pool_handle(
     (index < gpu_count && matches!(kind, 1..=4)).then_some((index, kind))
 }
 
+/// Decodes cache handle into its runtime components.
 pub(super) fn decode_cache_handle(cache: HsaCache, cache_count: usize) -> Option<usize> {
     let index = cache.handle.checked_sub(CACHE_BASE)?;
     let index = usize::try_from(index).ok()?;
     (index < cache_count).then_some(index)
 }
 
+/// Selects CPU caches from the available runtime resources.
 pub(super) fn selected_cpu_caches(topology: &HostTopologySnapshot) -> &HostCaches {
     topology
         .domain(0)
         .map_or(&topology.caches, |domain| &domain.caches)
 }
 
+/// Returns cache handles ordered by level for an agent.
 pub(crate) fn cache_handles_in_level_order(caches: &[Cache], agent: HsaAgent) -> Vec<HsaCache> {
     let mut indices = caches
         .iter()
@@ -70,6 +77,7 @@ pub(crate) fn cache_handles_in_level_order(caches: &[Cache], agent: HsaAgent) ->
         .collect()
 }
 
+/// Collects per-level cache sizes for an agent.
 pub(super) fn cache_sizes(caches: &[Cache], agent: HsaAgent) -> [u32; 4] {
     let mut sizes = [0_u32; 4];
     for cache in caches.iter().filter(|cache| cache.agent == agent) {
@@ -137,6 +145,7 @@ pub(crate) struct Cache {
 }
 
 impl Cache {
+    /// Builds a cache record with stable name bytes and level metadata.
     pub(super) fn new(agent: HsaAgent, agent_name: &[u8], level: u32, size: u32) -> Self {
         let name_length = agent_name
             .iter()

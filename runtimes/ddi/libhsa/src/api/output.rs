@@ -7,6 +7,7 @@ use std::ffi::c_void;
 
 use crate::ffi::{INVALID_ARGUMENT, SUCCESS, Status};
 
+/// Writes value to the validated destination.
 pub(super) unsafe fn write_value<T: Copy>(output: *mut c_void, value: T) -> Status {
     if output.is_null() {
         return INVALID_ARGUMENT;
@@ -16,6 +17,7 @@ pub(super) unsafe fn write_value<T: Copy>(output: *mut c_void, value: T) -> Stat
     SUCCESS
 }
 
+/// Writes bytes to the validated destination.
 pub(super) unsafe fn write_bytes(output: *mut c_void, bytes: &[u8], extent: usize) -> Status {
     if output.is_null() || bytes.len() > extent {
         return INVALID_ARGUMENT;

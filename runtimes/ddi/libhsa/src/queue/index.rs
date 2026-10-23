@@ -59,6 +59,7 @@ unsafe fn with_queue_index<R>(
     unsafe(export_name = "__hsa_impl_hsa_queue_load_read_index_relaxed")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Loads the queue read index with relaxed ordering.
 pub unsafe extern "C" fn hsa_queue_load_read_index_relaxed(queue: *const HsaQueue) -> u64 {
     // SAFETY: The caller owns a live queue while accessing its index.
     unsafe {
@@ -74,6 +75,7 @@ pub unsafe extern "C" fn hsa_queue_load_read_index_relaxed(queue: *const HsaQueu
     unsafe(export_name = "__hsa_impl_hsa_queue_load_read_index_scacquire")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Loads the queue read index with the HSA SC-acquire contract.
 pub unsafe extern "C" fn hsa_queue_load_read_index_scacquire(queue: *const HsaQueue) -> u64 {
     // SAFETY: The caller owns a live queue while accessing its index.
     unsafe {
@@ -89,6 +91,7 @@ pub unsafe extern "C" fn hsa_queue_load_read_index_scacquire(queue: *const HsaQu
     unsafe(export_name = "__hsa_impl_hsa_queue_load_read_index_acquire")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Uses the deprecated acquire spelling for the queue read index.
 pub unsafe extern "C" fn hsa_queue_load_read_index_acquire(queue: *const HsaQueue) -> u64 {
     // SAFETY: This deprecated entry point has the same contract as the
     // sequentially-consistent acquire spelling.
@@ -100,6 +103,7 @@ pub unsafe extern "C" fn hsa_queue_load_read_index_acquire(queue: *const HsaQueu
     unsafe(export_name = "__hsa_impl_hsa_queue_load_write_index_relaxed")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Loads the queue write index with relaxed ordering.
 pub unsafe extern "C" fn hsa_queue_load_write_index_relaxed(queue: *const HsaQueue) -> u64 {
     // SAFETY: The caller owns a live queue while accessing its index.
     unsafe {
@@ -115,6 +119,7 @@ pub unsafe extern "C" fn hsa_queue_load_write_index_relaxed(queue: *const HsaQue
     unsafe(export_name = "__hsa_impl_hsa_queue_load_write_index_scacquire")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Loads the queue write index with the HSA SC-acquire contract.
 pub unsafe extern "C" fn hsa_queue_load_write_index_scacquire(queue: *const HsaQueue) -> u64 {
     // SAFETY: The caller owns a live queue while accessing its index.
     unsafe {
@@ -130,17 +135,20 @@ pub unsafe extern "C" fn hsa_queue_load_write_index_scacquire(queue: *const HsaQ
     unsafe(export_name = "__hsa_impl_hsa_queue_load_write_index_acquire")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Uses the deprecated acquire spelling for the queue write index.
 pub unsafe extern "C" fn hsa_queue_load_write_index_acquire(queue: *const HsaQueue) -> u64 {
     // SAFETY: This deprecated entry point has the same contract as the
     // sequentially-consistent acquire spelling.
     unsafe { hsa_queue_load_write_index_scacquire(queue) }
 }
 
+/// Stores a queue index with the selected atomic ordering.
 unsafe fn queue_store(queue: *const HsaQueue, offset: usize, value: u64, order: Ordering) {
     // SAFETY: The caller owns a live queue while accessing its index.
     let _ = unsafe { with_queue_index(queue, offset, |index| index.store(value, order)) };
 }
 
+/// Compares and exchanges a queue index with the selected ordering.
 unsafe fn queue_compare_exchange(
     queue: *const HsaQueue,
     expected: u64,
@@ -159,6 +167,7 @@ unsafe fn queue_compare_exchange(
     .unwrap_or(0)
 }
 
+/// Atomically adds to the queue write index with the selected ordering.
 unsafe fn queue_add(queue: *const HsaQueue, value: u64, order: Ordering) -> u64 {
     // SAFETY: The caller owns a live queue while reserving packet slots.
     unsafe {
@@ -169,8 +178,10 @@ unsafe fn queue_add(queue: *const HsaQueue, value: u64, order: Ordering) -> u64 
     .unwrap_or(0)
 }
 
+/// Generates the queue store entry ABI entry points.
 macro_rules! queue_store_entry {
     ($name:ident, $offset:expr, $order:expr) => {
+        #[doc = concat!("Stores a queue index through `", stringify!($name), "`.")]
         #[cfg_attr(all(target_arch = "x86_64", not(test)), unsafe(export_name = concat!("__hsa_impl_", stringify!($name))))]
         #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
         pub unsafe extern "C" fn $name(queue: *const HsaQueue, value: u64) {
@@ -180,8 +191,10 @@ macro_rules! queue_store_entry {
     };
 }
 
+/// Generates the queue compare exchange entry ABI entry points.
 macro_rules! queue_compare_exchange_entry {
     ($name:ident, $success:expr, $failure:expr) => {
+        #[doc = concat!("Conditionally exchanges a queue index through `", stringify!($name), "`.")]
         #[cfg_attr(all(target_arch = "x86_64", not(test)), unsafe(export_name = concat!("__hsa_impl_", stringify!($name))))]
         #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
         pub unsafe extern "C" fn $name(queue: *const HsaQueue, expected: u64, value: u64) -> u64 {
@@ -191,8 +204,10 @@ macro_rules! queue_compare_exchange_entry {
     };
 }
 
+/// Generates the queue add entry ABI entry points.
 macro_rules! queue_add_entry {
     ($name:ident, $order:expr) => {
+        #[doc = concat!("Atomically increments a queue index through `", stringify!($name), "`.")]
         #[cfg_attr(all(target_arch = "x86_64", not(test)), unsafe(export_name = concat!("__hsa_impl_", stringify!($name))))]
         #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
         pub unsafe extern "C" fn $name(queue: *const HsaQueue, value: u64) -> u64 {

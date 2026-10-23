@@ -10,6 +10,7 @@ use super::*;
     unsafe(export_name = "__hsa_impl_hsa_memory_copy")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Copies bytes between validated host and GPU memory ranges.
 pub unsafe extern "C" fn hsa_memory_copy(
     dst: *mut c_void,
     src: *const c_void,
@@ -90,6 +91,7 @@ pub unsafe extern "C" fn hsa_memory_copy(
     unsafe(export_name = "__hsa_impl_hsa_amd_memory_fill")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Fills an allocation with repeated 32-bit values.
 pub unsafe extern "C" fn hsa_amd_memory_fill(
     pointer: *mut c_void,
     value: u32,
@@ -195,6 +197,7 @@ pub unsafe extern "C" fn hsa_amd_memory_fill(
     })
 }
 
+/// Converts a pointer and size into a checked SVM address range.
 pub(super) fn svm_range(pointer: *mut c_void, size: usize) -> Result<(u64, u64), Status> {
     if pointer.is_null() || size == 0 {
         return Err(INVALID_ARGUMENT);
@@ -215,6 +218,7 @@ pub(super) fn svm_range(pointer: *mut c_void, size: usize) -> Result<(u64, u64),
     Ok((base as u64, length as u64))
 }
 
+/// Maps an HSA agent to its SVM location identifier.
 fn svm_location_from_agent(
     runtime: &HsaState,
     agent: HsaAgent,
@@ -230,6 +234,7 @@ fn svm_location_from_agent(
     Ok(SvmLocation::Device(runtime.gpus[index].endpoint.id))
 }
 
+/// Maps a native SVM location identifier back to an HSA agent.
 fn svm_agent_from_location(runtime: &HsaState, location: SvmLocation) -> Result<HsaAgent, Status> {
     match location {
         SvmLocation::System => Ok(HsaAgent { handle: CPU_AGENT }),
@@ -245,6 +250,7 @@ fn svm_agent_from_location(runtime: &HsaState, location: SvmLocation) -> Result<
     }
 }
 
+/// Reserves attribute and agent-index storage for an SVM query.
 fn reserve_svm_attributes(count: usize) -> Result<(Vec<SvmAttribute>, Vec<Option<usize>>), Status> {
     if count > SVM_MAX_ATTRIBUTES {
         return Err(INVALID_ARGUMENT);
@@ -265,6 +271,7 @@ fn reserve_svm_attributes(count: usize) -> Result<(Vec<SvmAttribute>, Vec<Option
     unsafe(export_name = "__hsa_impl_hsa_amd_svm_attributes_set")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Sets SVM policy attributes for a virtual address range.
 pub unsafe extern "C" fn hsa_amd_svm_attributes_set(
     pointer: *mut c_void,
     size: usize,
@@ -436,6 +443,7 @@ pub unsafe extern "C" fn hsa_amd_svm_attributes_set(
     unsafe(export_name = "__hsa_impl_hsa_amd_svm_attributes_get")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Reads SVM policy attributes for a virtual address range.
 pub unsafe extern "C" fn hsa_amd_svm_attributes_get(
     pointer: *mut c_void,
     size: usize,
@@ -650,7 +658,9 @@ pub unsafe extern "C" fn hsa_amd_svm_attributes_get(
 
 /// Rolls back signal and allocation retention until the worker accepts them.
 struct PendingAsyncRetention<'a> {
+    /// Signal registry borrowed until copy ownership transfers.
     signals: &'a mut SignalState,
+    /// Allocation registry borrowed until copy ownership transfers.
     memory: &'a mut MemoryState,
     /// Signals retained for the pending worker.
     handles: Arc<Vec<HsaSignal>>,
@@ -661,6 +671,7 @@ struct PendingAsyncRetention<'a> {
 }
 
 impl<'a> PendingAsyncRetention<'a> {
+    /// Starts a guard that rolls back retained copy operands unless transferred.
     fn new(
         signals: &'a mut SignalState,
         memory: &'a mut MemoryState,
@@ -680,6 +691,7 @@ impl<'a> PendingAsyncRetention<'a> {
         Ok(pending)
     }
 
+    /// Retains memory while dependent work may use it.
     fn retain_memory(&mut self, base: usize) -> Result<(), Status> {
         self.borrowed_memory
             .try_reserve(1)
@@ -689,6 +701,7 @@ impl<'a> PendingAsyncRetention<'a> {
         Ok(())
     }
 
+    /// Transfers retained copy borrows to the asynchronous worker.
     fn transfer_to_worker(&mut self) {
         self.retained = 0;
         self.borrowed_memory.clear();
@@ -696,6 +709,7 @@ impl<'a> PendingAsyncRetention<'a> {
 }
 
 impl MemoryState {
+    /// Retains copy borrow while dependent work may use it.
     pub(super) fn retain_copy_borrow(&mut self, base: usize) -> Result<(), Status> {
         if !self.async_copy_borrows.contains_key(&base) {
             self.async_copy_borrows
@@ -707,6 +721,7 @@ impl MemoryState {
         Ok(())
     }
 
+    /// Releases the retained copy borrow reference.
     pub(super) fn release_copy_borrow(&mut self, base: usize) {
         if let Some(count) = self.async_copy_borrows.get_mut(&base) {
             *count -= 1;
@@ -716,6 +731,7 @@ impl MemoryState {
         }
     }
 
+    /// Copies borrowed after validating its source and destination.
     pub(super) fn copy_borrowed(&self, base: usize) -> bool {
         self.async_copy_borrows
             .get(&base)
@@ -724,6 +740,7 @@ impl MemoryState {
 }
 
 impl Drop for PendingAsyncRetention<'_> {
+    /// Releases copy operands that were not transferred to a worker.
     fn drop(&mut self) {
         for signal in self.handles.iter().take(self.retained) {
             self.signals.release_async_signal(*signal);
@@ -734,6 +751,7 @@ impl Drop for PendingAsyncRetention<'_> {
     }
 }
 
+/// Releases the retained async resources reference.
 fn release_async_resources(
     handles: &[HsaSignal],
     borrowed_memory: &[Option<usize>],
@@ -755,6 +773,7 @@ fn release_async_resources(
     // it retains all signal storage until after this worker exits.
 }
 
+/// Publishes success or failure through the completion signal value.
 fn complete_async_signal_value(signal: &crate::signal::AmdSignal, success: bool) {
     if success {
         signal.value.fetch_sub(1, Ordering::Release);
@@ -763,6 +782,7 @@ fn complete_async_signal_value(signal: &crate::signal::AmdSignal, success: bool)
     }
 }
 
+/// Completes async signal after its pending work has retired.
 fn finish_async_signal(completion: HsaSignal, success: bool) {
     if completion.handle == 0 {
         return;
@@ -776,6 +796,7 @@ fn finish_async_signal(completion: HsaSignal, success: bool) {
     };
 }
 
+/// Completes async copy signal after its pending work has retired.
 fn finish_async_copy_signal(
     completion: HsaSignal,
     success: bool,
@@ -808,6 +829,7 @@ fn finish_async_copy_signal(
     clippy::needless_pass_by_value,
     reason = "the worker owns the session and stop token for its full asynchronous lifetime"
 )]
+/// Runs SVM prefetch work after its dependency signals are satisfied.
 fn svm_prefetch_worker(
     session: Session,
     stop: Arc<AtomicBool>,
@@ -830,6 +852,7 @@ fn svm_prefetch_worker(
     finish_async_signal(completion, result.is_ok());
 }
 
+/// Waits for async dependencies to complete.
 fn wait_async_dependencies(dependencies: &[HsaSignal], stop: &AtomicBool) -> bool {
     for &dependency in dependencies {
         loop {
@@ -859,6 +882,7 @@ fn wait_async_dependencies(dependencies: &[HsaSignal], stop: &AtomicBool) -> boo
     unsafe(export_name = "__hsa_impl_hsa_amd_svm_prefetch_async")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Prefetches an SVM range after its dependency signals complete.
 pub unsafe extern "C" fn hsa_amd_svm_prefetch_async(
     pointer: *mut c_void,
     size: usize,
@@ -964,6 +988,7 @@ pub unsafe extern "C" fn hsa_amd_svm_prefetch_async(
     unsafe(export_name = "__hsa_impl_hsa_amd_svm_discard_batch_async")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Discards the requested SVM ranges asynchronously.
 pub unsafe extern "C" fn hsa_amd_svm_discard_batch_async(
     pointers: *mut *mut c_void,
     sizes: *mut usize,
@@ -994,6 +1019,7 @@ pub unsafe extern "C" fn hsa_amd_svm_discard_batch_async(
     unsafe(export_name = "__hsa_impl_hsa_amd_svm_discard_and_prefetch_batch_async")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Discards and then prefetches SVM ranges asynchronously.
 pub unsafe extern "C" fn hsa_amd_svm_discard_and_prefetch_batch_async(
     pointers: *mut *mut c_void,
     sizes: *mut usize,
@@ -1032,21 +1058,31 @@ enum AsyncCopyRoute {
     Noop,
     /// CPU copy performed after dependency signals complete.
     Host {
+        /// Destination operand for this copy route.
         destination: HostCopyDestination,
+        /// Source operand for this copy route.
         source: HostCopySource,
+        /// Number of bytes in the host copy.
         size: usize,
     },
     /// One native SDMA operation on an activated GPU.
     Gpu {
+        /// Activated device retained until the asynchronous route completes.
         device: Box<Device>,
+        /// Index of the activated GPU used by this route.
         index: usize,
+        /// Native GPU copy operation for this route.
         entry: GpuCopyEntry,
     },
     /// Several ordered SDMA operations sharing one native sequence.
     GpuBatch {
+        /// Activated device retained until the asynchronous route completes.
         device: Box<Device>,
+        /// Index of the activated GPU used by this route.
         index: usize,
+        /// Ordered native copy operations sharing one batch.
         entries: Vec<GpuCopyEntry>,
+        /// Wait and signal controls surrounding the copy.
         controls: BatchCopyControls,
     },
 }
@@ -1057,33 +1093,49 @@ enum GpuCopyEntry {
     Rect(CopyRect),
     /// Direct linear copy.
     Linear {
+        /// Destination operand for this copy route.
         destination: u64,
+        /// Source operand for this copy route.
         source: u64,
+        /// Number of bytes copied or exchanged.
         size: u64,
     },
     /// Exchange between two GPU address ranges.
     Swap {
+        /// First GPU address in the swap.
         address_a: u64,
+        /// Second GPU address in the swap.
         address_b: u64,
+        /// Number of bytes copied or exchanged.
         size: u64,
     },
     /// Copy whose addresses may come from GPU-visible pointer slots.
     Indirect {
+        /// Destination operand for this copy route.
         destination: u64,
+        /// Source operand for this copy route.
         source: u64,
+        /// Number of bytes copied or exchanged.
         size: u64,
+        /// Whether the source names a GPU-visible pointer slot.
         indirect_source: bool,
+        /// Whether the destination names a GPU-visible pointer slot.
         indirect_destination: bool,
     },
     /// Copy from host storage staged for SDMA access.
     FromHost {
+        /// Destination operand for this copy route.
         destination: u64,
+        /// Source operand for this copy route.
         source: HostCopySource,
     },
     /// Copy to a host destination staged for SDMA access.
     ToHost {
+        /// Destination operand for this copy route.
         destination: HostCopyDestination,
+        /// Source operand for this copy route.
         source: u64,
+        /// Number of bytes copied or exchanged.
         size: usize,
     },
 }
@@ -1101,22 +1153,33 @@ struct BatchCopyControls {
 enum SyncGpuCopyRoute {
     /// Direct copy between GPU-addressable ranges.
     Direct {
+        /// Activated device retained through this synchronous copy.
         device: Box<Device>,
+        /// Destination operand for this copy route.
         destination: u64,
+        /// Source operand for this copy route.
         source: u64,
+        /// Number of bytes in this synchronous copy.
         size: u64,
     },
     /// Copy from a CPU-only source through staging.
     FromHost {
+        /// Activated device retained through this synchronous copy.
         device: Box<Device>,
+        /// Destination operand for this copy route.
         destination: u64,
+        /// Source operand for this copy route.
         source: HostCopySource,
     },
     /// Copy into a CPU-only destination through staging.
     ToHost {
+        /// Activated device retained through this synchronous copy.
         device: Box<Device>,
+        /// Destination operand for this copy route.
         destination: HostCopyDestination,
+        /// Source operand for this copy route.
         source: u64,
+        /// Number of bytes in this synchronous copy.
         size: usize,
     },
 }
@@ -1153,7 +1216,12 @@ enum SyncGpuCopyOutcome {
     /// Native and host copies completed without deferred publication.
     Done,
     /// Staged bytes to write to a loader-owned mapping.
-    LoadedDestination { address: usize, bytes: Vec<u8> },
+    LoadedDestination {
+        /// Address of the loader-owned destination mapping.
+        address: usize,
+        /// Bytes staged until the native copy completes.
+        bytes: Vec<u8>,
+    },
 }
 
 /// Frontend status and whether native work may still read its operands.
@@ -1165,6 +1233,7 @@ struct CopyRouteFailure {
 }
 
 impl CopyRouteFailure {
+    /// Constructs a failure whose native operands are already retired.
     fn retired(status: Status) -> Self {
         Self {
             status,
@@ -1174,6 +1243,7 @@ impl CopyRouteFailure {
 }
 
 impl From<rocddi::device::gpu::CopyFailure> for CopyRouteFailure {
+    /// Preserves native liveness uncertainty while translating the status.
     fn from(failure: rocddi::device::gpu::CopyFailure) -> Self {
         Self {
             status: map_error(failure.error),
@@ -1198,6 +1268,7 @@ struct ResolvedAsyncCopy {
     borrowed_memory: [Option<usize>; 2],
 }
 
+/// Copies agent after validating its source and destination.
 fn copy_agent(
     runtime: &HsaState,
     requested: HsaAgent,
@@ -1216,6 +1287,7 @@ fn copy_agent(
         .ok_or(INVALID_AGENT)
 }
 
+/// Selects copy GPU from the available runtime resources.
 fn selected_copy_gpu(
     runtime: &HsaState,
     description: &PointerDescription,
@@ -1226,6 +1298,7 @@ fn selected_copy_gpu(
         .find_map(|agent| runtime.gpu_index(agent).map(|index| (index, agent)))
 }
 
+/// Copies pointer description after validating its source and destination.
 fn copy_pointer_description(
     runtime: &HsaState,
     pointer: usize,
@@ -1246,6 +1319,7 @@ fn copy_pointer_description(
     Ok(description)
 }
 
+/// Resolves a GPU address to its allocation and accessible agent.
 fn gpu_copy_address(
     runtime: &HsaState,
     description: Option<&PointerDescription>,
@@ -1293,6 +1367,7 @@ pub(crate) fn image_device_address(
     .map(|(address, _)| address)
 }
 
+/// Prepares host copy source before publication or execution.
 fn prepare_host_copy_source(
     runtime: &HsaState,
     description: Option<&PointerDescription>,
@@ -1321,6 +1396,7 @@ fn prepare_host_copy_source(
     }
 }
 
+/// Prepares host copy destination before publication or execution.
 fn prepare_host_copy_destination(
     runtime: &HsaState,
     description: Option<&PointerDescription>,
@@ -1337,6 +1413,7 @@ fn prepare_host_copy_destination(
     }
 }
 
+/// Checks virtual memory permissions for a copy by the given agent.
 pub(super) fn vmem_copy_access(
     runtime: &HsaState,
     description: &PointerDescription,
@@ -1361,6 +1438,7 @@ pub(super) fn vmem_copy_access(
     Ok(())
 }
 
+/// Resolves async copy to a validated runtime resource.
 fn resolve_async_copy(
     runtime: &HsaState,
     destination: usize,
@@ -1511,6 +1589,7 @@ fn resolve_async_copy(
     })
 }
 
+/// Resolves sync GPU copy to a validated runtime resource.
 fn resolve_sync_gpu_copy(
     runtime: &HsaState,
     destination: usize,
@@ -1623,12 +1702,14 @@ fn resolve_sync_gpu_copy(
     }
 }
 
+/// Copies GPU after validating its source and destination.
 fn copy_gpu(device: &Device) -> Result<rocddi::device::gpu::GpuDevice<'_>, CopyRouteFailure> {
     device
         .gpu()
         .map_err(|error| CopyRouteFailure::retired(map_error(error)))
 }
 
+/// Copies bytes from a loader-owned source into stable staging memory.
 fn loaded_source_snapshot(address: usize, size: usize) -> Result<Vec<u8>, Status> {
     let mut bytes = Vec::new();
     bytes
@@ -1645,6 +1726,7 @@ fn loaded_source_snapshot(address: usize, size: usize) -> Result<Vec<u8>, Status
     Ok(bytes)
 }
 
+/// Runs a closure with a validated host source address.
 fn with_host_copy_source<T>(
     source: &HostCopySource,
     copy: impl FnOnce(&[u8]) -> Result<T, CopyRouteFailure>,
@@ -1666,6 +1748,7 @@ fn with_host_copy_source<T>(
     copy(host)
 }
 
+/// Copies from host route after validating its source and destination.
 fn copy_from_host_route(
     device: &Device,
     destination: u64,
@@ -1680,6 +1763,7 @@ fn copy_from_host_route(
     })
 }
 
+/// Copies to host destination after validating its source and destination.
 fn copy_to_host_destination(
     destination: &HostCopyDestination,
     size: usize,
@@ -1709,6 +1793,7 @@ fn copy_to_host_destination(
     }
 }
 
+/// Copies to host route after validating its source and destination.
 fn copy_to_host_route(
     device: &Device,
     destination: &HostCopyDestination,
@@ -1724,6 +1809,7 @@ fn copy_to_host_route(
     })
 }
 
+/// Executes a synchronous copy on the selected native route.
 fn execute_sync_gpu_copy(
     route: SyncGpuCopyRoute,
     stop: &AtomicBool,
@@ -1759,6 +1845,7 @@ fn execute_sync_gpu_copy(
     }
 }
 
+/// Writes loaded copy destination to the validated destination.
 fn write_loaded_copy_destination(address: usize, bytes: &[u8]) -> Status {
     let guard = match lock() {
         Ok(guard) => guard,
@@ -1778,6 +1865,7 @@ fn write_loaded_copy_destination(address: usize, bytes: &[u8]) -> Status {
     SUCCESS
 }
 
+/// Submits a sequence of native copy entries to the GPU.
 fn execute_gpu_entries(
     device: &Device,
     entries: impl ExactSizeIterator<Item = GpuCopyEntry>,
@@ -1898,6 +1986,7 @@ fn execute_gpu_entries(
     }
 }
 
+/// Reads a system clock tick from the native device or host.
 fn system_copy_tick(device: Option<&Device>) -> Result<u64, CopyRouteFailure> {
     let device = device.ok_or_else(|| CopyRouteFailure::retired(ERROR))?;
     let counters = crate::runtime::clock_counters(device)
@@ -1908,6 +1997,7 @@ fn system_copy_tick(device: Option<&Device>) -> Result<u64, CopyRouteFailure> {
     Ok(counters.system)
 }
 
+/// Builds an asynchronous copy profile from GPU copy timestamps.
 fn gpu_copy_profile(index: usize, ticks: Option<GpuCopyTimestamps>) -> Option<AsyncCopyProfile> {
     ticks.map(|ticks| AsyncCopyProfile {
         clock: AsyncCopyClock::Gpu(index),
@@ -1916,6 +2006,7 @@ fn gpu_copy_profile(index: usize, ticks: Option<GpuCopyTimestamps>) -> Option<As
     })
 }
 
+/// Executes a validated host, GPU, or staging copy route.
 fn execute_copy_route(
     route: AsyncCopyRoute,
     sdma_engine: Option<u32>,

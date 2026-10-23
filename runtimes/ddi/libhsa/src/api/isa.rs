@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-//! HSA C ABI entry points for this domain.
+//! ISA and wavefront handle queries exposed through the HSA C ABI.
 
 use std::ffi::{CStr, c_char, c_void};
 

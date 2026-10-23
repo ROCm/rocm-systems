@@ -1,8 +1,11 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+//! Signal lifetime, callback, wait, IPC, and ABI regression tests.
+
 use super::*;
 
+/// Creates a signal batch and returns its live members.
 fn batch_fixture(count: usize) -> (SignalState, HsaAmdSignalBatch, Vec<HsaSignal>) {
     let slots: Box<[AmdSignal]> = (0..count)
         .map(|index| AmdSignal::user(SignalValue::try_from(index).unwrap()))
@@ -34,6 +37,7 @@ fn batch_fixture(count: usize) -> (SignalState, HsaAmdSignalBatch, Vec<HsaSignal
 }
 
 #[test]
+/// Verifies that batch storage survives both destruction orders.
 fn batch_storage_survives_both_destruction_orders() {
     for handle_first in [false, true] {
         let (mut state, batch, signals) = batch_fixture(3);
@@ -56,6 +60,7 @@ fn batch_storage_survives_both_destruction_orders() {
 }
 
 #[test]
+/// Verifies that batch storage waits for retired async member.
 fn batch_storage_waits_for_retired_async_member() {
     let (mut state, batch, signals) = batch_fixture(1);
     state.retain_async_signal(signals[0]).unwrap();
@@ -69,6 +74,7 @@ fn batch_storage_waits_for_retired_async_member() {
 }
 
 #[test]
+/// Verifies that device write readback does not restore an intervening update.
 fn device_write_readback_does_not_restore_an_intervening_update() {
     let value = AtomicI64::new(1);
     // Model a GPU decrement after the host's store but before its flush.
@@ -78,6 +84,7 @@ fn device_write_readback_does_not_restore_an_intervening_update() {
 }
 
 #[test]
+/// Verifies that posted store batch range tracks member lifetime.
 fn posted_store_batch_range_tracks_member_lifetime() {
     let (mut state, batch, signals) = batch_fixture(1);
     let signal = signals[0];
@@ -107,18 +114,24 @@ fn posted_store_batch_range_tracks_member_lifetime() {
     assert!(!batch_needs_flush(range.0));
 }
 
+/// Counts repeated callback invocations while rearming.
 unsafe extern "C" fn count_rearmed_handler(_value: SignalValue, arg: *mut c_void) -> bool {
     // SAFETY: The test passes a live AtomicU64 for the worker lifetime.
     let calls = unsafe { &*(arg.cast::<AtomicU64>()) };
     calls.fetch_add(1, Ordering::Relaxed) < 2
 }
 
+/// Tracks simultaneous asynchronous callback execution.
 struct AsyncSerializationProbe {
+    /// Callbacks currently running.
     active: AtomicU64,
+    /// Highest observed concurrent callback count.
     maximum_active: AtomicU64,
+    /// Callbacks that finished execution.
     completed: AtomicU64,
 }
 
+/// Records concurrent callback count during dispatcher execution.
 unsafe extern "C" fn serialized_async_function(arg: *mut c_void) {
     // SAFETY: The test passes a live probe for the dispatcher lifetime.
     let probe = unsafe { &*(arg.cast::<AsyncSerializationProbe>()) };
@@ -129,17 +142,22 @@ unsafe extern "C" fn serialized_async_function(arg: *mut c_void) {
     probe.completed.fetch_add(1, Ordering::Release);
 }
 
+/// Tracks callback delivery after dispatcher stop.
 struct StopDispatcherProbe {
+    /// Stop request set by the first callback.
     stop: std::sync::atomic::AtomicBool,
+    /// Calls delivered after the stop request.
     later_calls: AtomicU64,
 }
 
+/// Requests dispatcher stop from its first callback.
 unsafe extern "C" fn stop_dispatcher_from_callback(arg: *mut c_void) {
     // SAFETY: The probe remains live until the dispatcher returns.
     let probe = unsafe { &*(arg.cast::<StopDispatcherProbe>()) };
     probe.stop.store(true, Ordering::Release);
 }
 
+/// Records whether a queued callback ran after stop.
 unsafe extern "C" fn count_later_callback(arg: *mut c_void) {
     // SAFETY: The probe remains live until the dispatcher returns.
     let probe = unsafe { &*(arg.cast::<StopDispatcherProbe>()) };
@@ -147,6 +165,8 @@ unsafe extern "C" fn count_later_callback(arg: *mut c_void) {
 }
 
 #[test]
+/// Verifies that dispatcher does not invoke queued callbacks after callback
+/// requests stop.
 fn dispatcher_does_not_invoke_queued_callbacks_after_callback_requests_stop() {
     let probe = StopDispatcherProbe {
         stop: std::sync::atomic::AtomicBool::new(false),
@@ -175,6 +195,7 @@ fn dispatcher_does_not_invoke_queued_callbacks_after_callback_requests_stop() {
     assert_eq!(probe.later_calls.load(Ordering::Relaxed), 0);
 }
 
+/// Calls HSA shutdown from an asynchronous callback.
 unsafe extern "C" fn shutdown_from_async_callback(arg: *mut c_void) {
     // SAFETY: The test retains this atomic until the dispatcher exits.
     let status = unsafe { &*(arg.cast::<AtomicU64>()) };
@@ -182,6 +203,7 @@ unsafe extern "C" fn shutdown_from_async_callback(arg: *mut c_void) {
 }
 
 #[test]
+/// Verifies that async callback without runtime reports not initialized.
 fn async_callback_without_runtime_reports_not_initialized() {
     let status = AtomicU64::new(0);
     let (sender, receiver) = std::sync::mpsc::channel();
@@ -198,11 +220,15 @@ fn async_callback_without_runtime_reports_not_initialized() {
     assert_eq!(status.load(Ordering::Acquire), u64::from(NOT_INITIALIZED));
 }
 
+/// Records shutdown status from a signal callback.
 struct ShutdownSignalProbe {
+    /// HSA status returned by shutdown in the callback.
     status: AtomicU64,
+    /// Stop request used to finish dispatcher work.
     stop: std::sync::atomic::AtomicBool,
 }
 
+/// Calls HSA shutdown from a signal handler.
 unsafe extern "C" fn shutdown_from_signal_handler(_value: SignalValue, arg: *mut c_void) -> bool {
     // SAFETY: The test retains the probe until the dispatcher joins.
     let probe = unsafe { &*(arg.cast::<ShutdownSignalProbe>()) };
@@ -214,6 +240,7 @@ unsafe extern "C" fn shutdown_from_signal_handler(_value: SignalValue, arg: *mut
 }
 
 #[test]
+/// Verifies that async signal handler without runtime reports not initialized.
 fn async_signal_handler_without_runtime_reports_not_initialized() {
     let storage = AmdSignal::user(1);
     let signal = HsaSignal {
@@ -245,6 +272,7 @@ fn async_signal_handler_without_runtime_reports_not_initialized() {
 }
 
 #[test]
+/// Verifies that async handler rearms while condition remains satisfied.
 fn async_handler_rearms_while_condition_remains_satisfied() {
     let storage = AmdSignal::user(1);
     let signal = HsaSignal {
@@ -282,6 +310,7 @@ fn async_handler_rearms_while_condition_remains_satisfied() {
 }
 
 #[test]
+/// Verifies that async callbacks execute serially.
 fn async_callbacks_execute_serially() {
     let probe = AsyncSerializationProbe {
         active: AtomicU64::new(0),
@@ -320,6 +349,7 @@ fn async_callbacks_execute_serially() {
 }
 
 #[test]
+/// Verifies that lock free signal lookup observes atomic invalidation.
 fn lock_free_signal_lookup_observes_atomic_invalidation() {
     let storage = std::sync::Arc::new(AmdSignal::user(7));
     let handle = HsaSignal {
@@ -351,6 +381,7 @@ fn lock_free_signal_lookup_observes_atomic_invalidation() {
 }
 
 #[test]
+/// Verifies that AMD signal helpers match the public ABI.
 fn amd_signal_helpers_match_the_public_abi() {
     let _: unsafe extern "C" fn(HsaSignal, *mut u32) -> Status = hsa_amd_signal_get_event_id;
     let _: unsafe extern "C" fn(AsyncFunction, *mut c_void) -> Status = hsa_amd_async_function;
@@ -361,6 +392,7 @@ fn amd_signal_helpers_match_the_public_abi() {
 }
 
 #[test]
+/// Verifies that signal consumers reject duplicates.
 fn signal_consumers_reject_duplicates() {
     let consumers = [HsaAgent { handle: 1 }, HsaAgent { handle: 1 }];
     // SAFETY: The array contains the declared number of readable handles.
@@ -376,6 +408,7 @@ fn signal_consumers_reject_duplicates() {
 }
 
 #[test]
+/// Verifies that signal consumers select `ROCr` signal types.
 fn signal_consumers_select_rocr_signal_types() {
     let cpu = [HsaAgent { handle: CPU_AGENT }];
     let gpu = [HsaAgent {
@@ -398,6 +431,7 @@ fn signal_consumers_select_rocr_signal_types() {
 }
 
 #[test]
+/// Verifies that interrupt signal exposes the KFD mailbox layout.
 fn interrupt_signal_exposes_the_kfd_mailbox_layout() {
     let signal = AmdSignal::interrupt(7, 0x1234_5000, 19);
     assert_eq!(signal.kind.load(Ordering::Relaxed), AMD_SIGNAL_KIND_USER);
@@ -407,6 +441,7 @@ fn interrupt_signal_exposes_the_kfd_mailbox_layout() {
 }
 
 #[test]
+/// Verifies that value pointer requires a busy wait signal.
 fn value_pointer_requires_a_busy_wait_signal() {
     let user = AmdSignal::user(7);
     let doorbell = AmdSignal::doorbell(0x1000, 0x2000);
@@ -422,6 +457,7 @@ fn value_pointer_requires_a_busy_wait_signal() {
 }
 
 #[test]
+/// Verifies that signal group entry points match the public ABI.
 fn signal_group_entry_points_match_the_public_abi() {
     let _: unsafe extern "C" fn(
         u32,
@@ -450,6 +486,7 @@ fn signal_group_entry_points_match_the_public_abi() {
 }
 
 #[test]
+/// Verifies that base atomic entry points preserve signal values.
 fn base_atomic_entry_points_preserve_signal_values() {
     let storage = AmdSignal::user(7);
     let signal = HsaSignal {
@@ -487,6 +524,7 @@ fn base_atomic_entry_points_preserve_signal_values() {
 }
 
 #[test]
+/// Verifies that wait timeout uses system timestamp ticks.
 fn wait_timeout_uses_system_timestamp_ticks() {
     let frequency = 100_000_000;
     assert!(!timeout_elapsed(Duration::from_nanos(9), 1, frequency));
@@ -509,6 +547,7 @@ fn wait_timeout_uses_system_timestamp_ticks() {
 }
 
 #[test]
+/// Verifies that wait many reports original indices and satisfying values.
 fn wait_many_reports_original_indices_and_satisfying_values() {
     let first = AmdSignal::user(3);
     let second = AmdSignal::user(8);
@@ -570,6 +609,7 @@ fn wait_many_reports_original_indices_and_satisfying_values() {
 }
 
 #[test]
+/// Verifies that wait all zeroes unsatisfied values on timeout.
 fn wait_all_zeroes_unsatisfied_values_on_timeout() {
     let storage = AmdSignal::user(3);
     let signals = [HsaSignal {
@@ -600,6 +640,7 @@ fn wait_all_zeroes_unsatisfied_values_on_timeout() {
 }
 
 #[test]
+/// Verifies that wait all accepts comparison values as output storage.
 fn wait_all_accepts_comparison_values_as_output_storage() -> Result<(), &'static str> {
     let storage = AmdSignal::user(7);
     let signals = [HsaSignal {
@@ -633,6 +674,7 @@ fn wait_all_accepts_comparison_values_as_output_storage() -> Result<(), &'static
 }
 
 #[test]
+/// Verifies that shutdown cancels unbounded multi signal waits.
 fn shutdown_cancels_unbounded_multi_signal_waits() {
     let storage = AmdSignal::user(3);
     let handles = [HsaSignal {
@@ -674,6 +716,7 @@ fn shutdown_cancels_unbounded_multi_signal_waits() {
 
 #[test]
 #[allow(clippy::unwrap_used)]
+/// Verifies that retired signal ends multi signal waits.
 fn retired_signal_ends_multi_signal_waits() {
     let retired = Arc::new(AtomicBool::new(false));
     let stop = Arc::new(AtomicBool::new(false));
@@ -743,6 +786,7 @@ fn retired_signal_ends_multi_signal_waits() {
 }
 
 #[test]
+/// Verifies that IPC reattach does not clear a prior waiters retirement.
 fn ipc_reattach_does_not_clear_a_prior_waiters_retirement() {
     let mut record = AsyncSignalRecord {
         references: 1,
@@ -762,6 +806,7 @@ fn ipc_reattach_does_not_clear_a_prior_waiters_retirement() {
 }
 
 #[test]
+/// Verifies that AMD multi waits require runtime initialization.
 fn amd_multi_waits_require_runtime_initialization() {
     let signal = AmdSignal::user(3);
     let signals = [HsaSignal {
@@ -805,6 +850,7 @@ fn amd_multi_waits_require_runtime_initialization() {
 
 #[test]
 #[ignore = "requires a qualified GPU and KFD runtime"]
+/// Verifies that destroyed signal storage is reused.
 fn destroyed_signal_storage_is_reused() {
     assert_eq!(crate::hsa_init(), SUCCESS);
     let mut signal = HsaSignal { handle: 0 };
