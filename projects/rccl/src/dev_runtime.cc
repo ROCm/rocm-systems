@@ -604,15 +604,8 @@ static ncclResult_t symMemoryMapLsaTeam(struct ncclComm* comm, struct ncclDevrMe
           messages[r * maxSegments + segment].type = hostType;
         }
       }
-      int exporter = -1; // RCCL: the rank that exported the host fd keeps it; other ranks import that fd.
-      for (int r = 0; r < devr->lsaSize; r++) {
-        if (segment >= segmentCounts[r]) continue;
-        if (messages[r * maxSegments + segment].hostExportable) {
-          exporter = r;
-          break;
-        }
-      }
-      if (exporter == devr->lsaSelf && segment < numSegments && localHostFds[segment] >= 0) {
+      // RCCL: a rank that exported its own fd registers that fd. Other ranks import the first exporter.
+      if (segment < numSegments && localHostFds[segment] >= 0) {
         if (mem->hostOwnerFds == nullptr) {
           NCCLCHECKGOTO(ncclCalloc(&mem->hostOwnerFds, mem->numSegments), ret, fail);
           for (int s = 0; s < mem->numSegments; s++) mem->hostOwnerFds[s] = -1;
@@ -620,18 +613,21 @@ static ncclResult_t symMemoryMapLsaTeam(struct ncclComm* comm, struct ncclDevrMe
         mem->hostOwnerFds[segment] = localHostFds[segment];
         localHostFds[segment] = -1;
         INFO(NCCL_REG, "Symmetric window segment %d: NIC registration uses the local host allocation fd", segment);
-      } else if (exporter >= 0) {
-        NCCLCHECKGOTO(symMemoryGetHostOwnerFd(comm, mem, segment, exporter,
-                                              messages + exporter * maxSegments + segment),
-                      ret, fail);
-      } else if (nHost == 1) {
-        int owner = -1; // RCCL: no rank exported a shareable handle, so ask the single host owner for its fd.
+      } else {
+        int exporter = -1;
         for (int r = 0; r < devr->lsaSize; r++) {
           if (segment >= segmentCounts[r]) continue;
-          if (ncclSymIsHostSegment(messages[r * maxSegments + segment].type)) owner = r;
+          if (messages[r * maxSegments + segment].hostExportable) {
+            exporter = r;
+            break;
+          }
         }
-        NCCLCHECKGOTO(symMemoryGetHostOwnerFd(comm, mem, segment, owner, messages + owner * maxSegments + segment),
-                      ret, fail);
+        // RCCL: no fallback to a non-exporter. Its proxy would repeat the failed export and never reply.
+        if (exporter >= 0) {
+          NCCLCHECKGOTO(symMemoryGetHostOwnerFd(comm, mem, segment, exporter,
+                                                messages + exporter * maxSegments + segment),
+                        ret, fail);
+        }
       }
     }
   }

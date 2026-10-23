@@ -773,6 +773,7 @@ static ncclResult_t ncclRmaIbProxyGetRecvComm(struct ncclRmaIbProxyCtx* rmaProxy
 // helpers above; the upstream ops hook them through rcclRmaMultiSegEnabled().
 
 struct rcclRmaIbProxySegMrHandle {
+  uint32_t tag; // rcclRmaSegMrTag. The single-MR handle does not carry this tag.
   int nSegments;
   // segOff[0]==0, segOff[nSegments]==size; per-segment local MRs.
   // base_vas indexed [rank*nSegments + seg].
@@ -786,6 +787,15 @@ struct rcclRmaIbProxySegMrHandle {
   // nSegments == 1: the develop layout over mrHandle[0] and base_vas, with device-0 rkeys, for develop's op bodies.
   struct ncclRmaIbProxyMrHandle single;
 };
+
+static_assert(offsetof(struct rcclRmaIbProxySegMrHandle, tag) == 0, "segment-count tag is the first field");
+static_assert(offsetof(struct rcclRmaIbProxySegMrHandle, nSegments) == sizeof(uint32_t),
+              "nSegments follows the tag");
+
+// RCCL: tests read nSegments from the handle. A single-MR handle has no tag, so the count is 0.
+int rcclRmaIbProxyMrSegmentCount(void* mhandle) {
+  return rcclRmaMrSegmentCount(mhandle);
+}
 
 struct ncclRmaIbProxyRegistration {
   ncclResult_t status;
@@ -1014,6 +1024,7 @@ ncclResult_t rcclRmaIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t siz
     ret = ncclInvalidUsage;
     goto reconcile;
   }
+  rmaMrHandle->tag = rcclRmaSegMrTag();
   rmaMrHandle->nSegments = nSeg;
   rmaMrHandle->segOff[0] = 0;
 

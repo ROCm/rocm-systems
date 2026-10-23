@@ -13,6 +13,12 @@
  * dev_runtime.cc.
  *************************************************************************/
 
+// The library defines this when hipMemLocationTypeHost exists. This TU includes
+// dev_runtime.cc, so the host-fd tests need the same gate.
+#ifndef RCCL_HIP_MEM_LOCATION_HOST_SUPPORTED
+#define RCCL_HIP_MEM_LOCATION_HOST_SUPPORTED
+#endif
+
 #include "fakes/dev_runtime_micro_fakes.h"
 #include "fakes/hip_fakes.h"      // the shared g_hip* seams this suite drives
 #include "fakes/nccl_fakes.h"     // g_ncclProxyClientGetFdBlocking
@@ -1275,6 +1281,15 @@ protected:
     comm->devrState.lsaRankList = nullptr;  // borrowed, not malloc'd
     ResetDevRuntimeMicroFakes();
   }
+
+  void SetTeam(const int* ranks, int n, int self) {
+    lsaRankList.assign(ranks, ranks + n);
+    comm->devrState.lsaRankList = lsaRankList.data();
+    comm->devrState.lsaSize = n;
+    comm->devrState.lsaSelf = self;
+    lsaNumSegments.assign(n, 1);
+    mem.lsaNumSegments = lsaNumSegments.data();
+  }
 };
 
 // Branch: lsaFlatBase is null, so the flat VA range is reserved for the whole
@@ -1645,6 +1660,7 @@ TEST_F(SymMemoryMapLsaTeamTest, ImportedHostSegment_PublishesOwnerFd) {
                     [](void*, int*, int, int, void* buf, int) {
                       auto* msgs = static_cast<symLsaMessage*>(buf);
                       msgs[1].type = kLocHost;
+                      msgs[1].hostExportable = 1;
                       msgs[1].segmentSize = 4096;
                       return ncclSuccess;
                     });
@@ -1692,6 +1708,7 @@ TEST_F(SymMemoryMapLsaTeamTest, OwnerFdFetchFails_FailsMapWithoutKeepingFd) {
                     [](void*, int*, int, int, void* buf, int) {
                       auto* msgs = static_cast<symLsaMessage*>(buf);
                       msgs[1].type = kLocHost;
+                      msgs[1].hostExportable = 1;
                       msgs[1].segmentSize = 4096;
                       return ncclSuccess;
                     });
@@ -1704,6 +1721,240 @@ TEST_F(SymMemoryMapLsaTeamTest, OwnerFdFetchFails_FailsMapWithoutKeepingFd) {
   EXPECT_EQ(barrier.calls, 0);
   ASSERT_NE(mem.hostOwnerFds, nullptr);
   EXPECT_EQ(mem.hostOwnerFds[0], -1);
+}
+
+// This rank created the host segment, so the map keeps that fd and does not
+// import anyone else's.
+TEST_F(SymMemoryMapLsaTeamTest, LocalExport_KeepsOwnFd) {
+  int pipefd[2] = {-1, -1};
+  ASSERT_EQ(pipe(pipefd), 0);
+  struct CloseFd {
+    int fd;
+    ~CloseFd() { if (fd >= 0) close(fd); }
+  } readEnd{pipefd[0]}, writeEnd{pipefd[1]};
+  int exported = -1;
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "SYM_REUSE_SYSMEM_HANDLES" ? 1 : deftVal;
+  });
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
+                   [](hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t) {
+                     if (prop) {
+                       *prop = hipMemAllocationProp{};
+                       prop->location.type = kLocHost;
+                     }
+                     return hipSuccess;
+                   });
+  ScopedHook exportFd(g_hipMemExportToShareableHandle,
+                      [&](void* shareable, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType,
+                          unsigned long long) {
+                        int fd = dup(pipefd[1]);
+                        if (shareable) *static_cast<int*>(shareable) = fd;
+                        exported = fd;
+                        return hipSuccess;
+                      });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
+                    [](void*, int*, int, int, void* buf, int) {
+                      auto* msgs = static_cast<symLsaMessage*>(buf);
+                      msgs[1].type = hipMemLocationTypeDevice;
+                      msgs[1].segmentSize = 4096;
+                      return ncclSuccess;
+                    });
+  ScopedHook proxy(g_ncclProxyClientGetFdBlocking,
+                   [](ncclComm*, int, void*, int*) { return ncclSystemError; });
+
+  EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_EQ(proxy.calls, 0);
+  ASSERT_NE(mem.hostOwnerFds, nullptr);
+  EXPECT_EQ(mem.hostOwnerFds[0], exported);
+  EXPECT_GE(exported, 0);
+  EXPECT_NE(fcntl(exported, F_GETFD), -1);
+}
+
+// Two ranks each exported. This rank is not the first, so keeping the first
+// exporter's fd would register the wrong buffer and close this rank's fd.
+TEST_F(SymMemoryMapLsaTeamTest, SecondExporter_KeepsOwnFd) {
+  const int ranks[] = {4, 7};
+  SetTeam(ranks, 2, /*self=*/1);
+  int pipefd[2] = {-1, -1};
+  ASSERT_EQ(pipe(pipefd), 0);
+  struct CloseFd {
+    int fd;
+    ~CloseFd() { if (fd >= 0) close(fd); }
+  } readEnd{pipefd[0]}, writeEnd{pipefd[1]};
+  int exported = -1;
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "SYM_REUSE_SYSMEM_HANDLES" ? 1 : deftVal;
+  });
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
+                   [](hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t) {
+                     if (prop) {
+                       *prop = hipMemAllocationProp{};
+                       prop->location.type = kLocHost;
+                     }
+                     return hipSuccess;
+                   });
+  ScopedHook exportFd(g_hipMemExportToShareableHandle,
+                      [&](void* shareable, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType,
+                          unsigned long long) {
+                        int fd = dup(pipefd[1]);
+                        if (shareable) *static_cast<int*>(shareable) = fd;
+                        exported = fd;
+                        return hipSuccess;
+                      });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
+                    [](void*, int*, int, int, void* buf, int) {
+                      auto* msgs = static_cast<symLsaMessage*>(buf);
+                      msgs[0].type = kLocHost;
+                      msgs[0].hostExportable = 1;
+                      msgs[0].segmentSize = 4096;
+                      return ncclSuccess;
+                    });
+  ScopedHook proxy(g_ncclProxyClientGetFdBlocking,
+                   [](ncclComm*, int, void*, int*) { return ncclSystemError; });
+
+  EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_EQ(proxy.calls, 0);
+  ASSERT_NE(mem.hostOwnerFds, nullptr);
+  EXPECT_EQ(mem.hostOwnerFds[0], exported);
+  EXPECT_NE(fcntl(exported, F_GETFD), -1);
+}
+
+// The host owner could not export, so no rank can supply an fd. Its proxy would
+// repeat the failed export and never reply, so the importer must not ask it.
+TEST_F(SymMemoryMapLsaTeamTest, Importer_NoExporterSkipsProxy) {
+  const int ranks[] = {11, 22, 33};
+  SetTeam(ranks, 3, /*self=*/0);
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "SYM_REUSE_SYSMEM_HANDLES" ? 1 : deftVal;
+  });
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
+                   [](hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t) {
+                     if (prop) {
+                       *prop = hipMemAllocationProp{};
+                       prop->location.type = hipMemLocationTypeDevice;
+                     }
+                     return hipSuccess;
+                   });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
+                    [](void*, int*, int, int, void* buf, int) {
+                      auto* msgs = static_cast<symLsaMessage*>(buf);
+                      msgs[1].type = kLocHost;
+                      msgs[1].hostExportable = 0;
+                      msgs[1].segmentSize = 4096;
+                      msgs[2].type = hipMemLocationTypeDevice;
+                      msgs[2].segmentSize = 4096;
+                      return ncclSuccess;
+                    });
+  ScopedHook proxy(g_ncclProxyClientGetFdBlocking,
+                   [](ncclComm*, int, void*, int*) { return ncclSystemError; });
+
+  EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_EQ(proxy.calls, 0);
+  EXPECT_EQ(mem.hostOwnerFds, nullptr);
+}
+
+// Export reported success but handed back -1. That is not a usable fd, so this
+// rank imports the peer that did export.
+TEST_F(SymMemoryMapLsaTeamTest, NegativeExportFd_ImportsPeer) {
+  const int ranks[] = {8, 9};
+  SetTeam(ranks, 2, /*self=*/0);
+  int pipefd[2] = {-1, -1};
+  ASSERT_EQ(pipe(pipefd), 0);
+  struct CloseFd {
+    int fd;
+    ~CloseFd() { if (fd >= 0) close(fd); }
+  } readEnd{pipefd[0]}, writeEnd{pipefd[1]};
+  int asked = -1;
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "SYM_REUSE_SYSMEM_HANDLES" ? 1 : deftVal;
+  });
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
+                   [](hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t) {
+                     if (prop) {
+                       *prop = hipMemAllocationProp{};
+                       prop->location.type = kLocHost;
+                     }
+                     return hipSuccess;
+                   });
+  ScopedHook exportFd(g_hipMemExportToShareableHandle,
+                      [](void* shareable, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType,
+                         unsigned long long) {
+                        if (shareable) *static_cast<int*>(shareable) = -1;
+                        return hipSuccess;
+                      });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
+                    [](void*, int*, int, int, void* buf, int) {
+                      auto* msgs = static_cast<symLsaMessage*>(buf);
+                      msgs[1].type = kLocHost;
+                      msgs[1].hostExportable = 1;
+                      msgs[1].segmentSize = 4096;
+                      return ncclSuccess;
+                    });
+  ScopedHook proxy(g_ncclProxyClientGetFdBlocking, [&](ncclComm*, int rank, void*, int* fd) {
+    asked = rank;
+    if (fd) *fd = dup(pipefd[1]);
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_EQ(exportFd.calls, 1);
+  EXPECT_EQ(proxy.calls, 1);
+  EXPECT_EQ(asked, 9);
+  ASSERT_NE(mem.hostOwnerFds, nullptr);
+  EXPECT_GE(mem.hostOwnerFds[0], 0);
+  EXPECT_NE(mem.hostOwnerFds[0], -1);
+}
+
+// This rank failed to export. The other two did, so the import uses the first
+// exporter, not the later one.
+TEST_F(SymMemoryMapLsaTeamTest, ExportFails_ImportsFirstExporter) {
+  const int ranks[] = {5, 6, 7};
+  SetTeam(ranks, 3, /*self=*/2);
+  int pipefd[2] = {-1, -1};
+  ASSERT_EQ(pipe(pipefd), 0);
+  struct CloseFd {
+    int fd;
+    ~CloseFd() { if (fd >= 0) close(fd); }
+  } readEnd{pipefd[0]}, writeEnd{pipefd[1]};
+  int asked = -1;
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "SYM_REUSE_SYSMEM_HANDLES" ? 1 : deftVal;
+  });
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
+                   [](hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t) {
+                     if (prop) {
+                       *prop = hipMemAllocationProp{};
+                       prop->location.type = kLocHost;
+                     }
+                     return hipSuccess;
+                   });
+  ScopedHook exportFd(g_hipMemExportToShareableHandle,
+                      [](void*, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType, unsigned long long) {
+                        return hipErrorInvalidValue;
+                      });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
+                    [](void*, int*, int, int, void* buf, int) {
+                      auto* msgs = static_cast<symLsaMessage*>(buf);
+                      msgs[0].type = kLocHost;
+                      msgs[0].hostExportable = 1;
+                      msgs[0].segmentSize = 4096;
+                      msgs[1].type = kLocHost;
+                      msgs[1].hostExportable = 1;
+                      msgs[1].segmentSize = 4096;
+                      return ncclSuccess;
+                    });
+  ScopedHook proxy(g_ncclProxyClientGetFdBlocking, [&](ncclComm*, int rank, void*, int* fd) {
+    asked = rank;
+    if (fd) *fd = dup(pipefd[1]);
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_EQ(exportFd.calls, 1);
+  EXPECT_EQ(proxy.calls, 1);
+  EXPECT_EQ(asked, 5);
+  ASSERT_NE(mem.hostOwnerFds, nullptr);
+  EXPECT_GE(mem.hostOwnerFds[0], 0);
 }
 #endif
 

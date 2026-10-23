@@ -36,9 +36,6 @@ constexpr int    kNumSegments     = 4;
 constexpr size_t kSignalSize      = 64;
 constexpr size_t kMiB             = 1024u * 1024;
 
-// INFO marker emitted by the backend when the per-segment path fires.
-constexpr const char* kMultiSegMarker = "multi-segment buffer";
-
 // Edge-case payload sizes from 0 up to `maxBytes`, anchored around byte/word,
 // page (4K), 64K, and the per-segment boundary `seg`. Deduplicated + sorted.
 inline std::vector<size_t> EdgeCaseSizes(size_t seg, size_t maxBytes)
@@ -63,30 +60,19 @@ inline std::vector<size_t> EdgeCaseSizes(size_t seg, size_t maxBytes)
 
 } // namespace
 
-// RMA proxy fixture + NCCL INFO log capture to confirm the per-segment path
-// fired (vs single-MR fallback when cuMem enumeration is unavailable).
+// RMA proxy fixture. The per-segment path is the MR handle's segment count.
 class RmaMultiSegmentMPITest : public RmaMPITestBase
 {
 protected:
-    std::unique_ptr<MPIHelpers::MpiEnvGuard>             cuMemGuard_;
-    std::unique_ptr<MPIHelpers::MpiEnvGuard>             debugGuard_;
-    std::unique_ptr<MPIHelpers::MpiEnvGuard>             debugSubsysGuard_;
-    std::unique_ptr<MPIHelpers::TestLogAssertionContext> logCtx_;
+    std::unique_ptr<MPIHelpers::MpiEnvGuard> cuMemGuard_;
 
     int GetNumContexts() const override { return 1; }
 
     void SetUp() override
     {
-        // Per-segment enumeration needs the cuMem path; the marker gate below
-        // covers cases where the param was already cached process-wide.
-        cuMemGuard_       = std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_CUMEM_ENABLE",  "1");
-        debugGuard_       = std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_DEBUG",         "INFO");
-        debugSubsysGuard_ = std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_DEBUG_SUBSYS",  "ALL");
-
+        // Per-segment enumeration needs cuMem. NCCL_PARAM caches it for the process.
+        cuMemGuard_ = std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_CUMEM_ENABLE", "1");
         RmaMPITestBase::SetUp();
-
-        logCtx_ = std::make_unique<MPIHelpers::TestLogAssertionContext>(
-            MPIHelpers::makeCombinedAssertionLogOptions(getTestMpiRank()));
     }
 
     void TearDown() override
@@ -104,16 +90,7 @@ protected:
             RCCLHybridVmmTests::FreeHybridVmm(*b);
         }
         hybridBuffers_.clear();
-        logCtx_.reset();
-        debugSubsysGuard_.reset();
-        debugGuard_.reset();
         cuMemGuard_.reset();
-    }
-
-    std::string readAllLogs() const
-    {
-        if (!logCtx_) return {};
-        return logCtx_->readNcclDebugLog() + logCtx_->readPerRankStderrLog();
     }
 
     // Collective skip: if ANY rank wants to skip, all ranks return true so they
@@ -123,11 +100,19 @@ protected:
         return MPIHelpers::anyRankTrue(wantSkip);
     }
 
-    // True only if EVERY rank observed the per-segment registration marker.
+    // True when a registration on this rank returned more than one segment.
+    bool RegisteredMultiSegment() const
+    {
+        for (void* mh : registeredMhandles_) {
+            if (rcclRmaIbProxyMrSegmentCount(mh) > 1) return true;
+        }
+        return false;
+    }
+
+    // True only if EVERY rank registered more than one segment.
     bool AllTookMultiSegPath()
     {
-        return MPIHelpers::allRanksTrue(
-            readAllLogs().find(kMultiSegMarker) != std::string::npos);
+        return MPIHelpers::allRanksTrue(RegisteredMultiSegment());
     }
 
     // Allocate a fixture-owned N-segment VMM window (freed in TearDown after MR
@@ -214,8 +199,7 @@ protected:
     // RCCL_TEST_RMA_MSEG_REQUIRE=1 (CI) turns the skip into a failure.
     bool MultiSegmentPathAvailable()
     {
-        const bool local =
-            readAllLogs().find(kMultiSegMarker) != std::string::npos;
+        const bool local = RegisteredMultiSegment();
         if (!MPIHelpers::anyRankTrue(local)) {
             if (MPIHelpers::getEnvParam<int>("RCCL_TEST_RMA_MSEG_REQUIRE", 0) != 0)
                 ADD_FAILURE() << "RCCL_TEST_RMA_MSEG_REQUIRE=1 but no rank took the multi-segment path";
@@ -1255,7 +1239,7 @@ TEST_F(RmaMultiSegmentMPITest, MultiSegmentRegisterOff_KeepsUpstreamPath)
 
     void* mh = nullptr;
     (void)RegMr(buf->ptr, buf->totalSize, &mh);
-    const bool local = readAllLogs().find(kMultiSegMarker) != std::string::npos;
+    const bool local = rcclRmaIbProxyMrSegmentCount(mh) > 1;
     EXPECT_FALSE(MPIHelpers::anyRankTrue(local))
         << "NCCL_MULTI_SEGMENT_REGISTER=0 still took the per-segment RMA path";
 }
@@ -1310,15 +1294,14 @@ TEST_F(RmaMultiSegmentMPITest, RegisterAsymmetricSegmentCountRejected)
     void *mh = nullptr, *gh = nullptr;
     ncclResult_t r = RegMr(bb->ptr, bb->totalSize, &mh, &gh);
 
-    // Both ranks must have taken the per-segment path, else there is nothing to test.
-    if (!MultiSegmentPathAvailable())
-        GTEST_SKIP() << "multi-segment path not exercised on this host";
-
-    // If enumeration happened to return identical counts there is no asymmetry
-    // to reject (registration succeeds on both ranks); skip rather than misfire.
-    // Skip only if every rank succeeded (identical enumeration). any-rank skip hid unilateral success.
-    if (MPIHelpers::allRanksTrue(r == ncclSuccess))
-        GTEST_SKIP() << "ranks enumerated identical segment counts; no asymmetry";
+    // Only the per-segment count consensus rejects collectively, and a rejection leaves no handle to read.
+    if (!MPIHelpers::allRanksTrue(r == ncclInvalidUsage)) {
+        if (!MultiSegmentPathAvailable())
+            GTEST_SKIP() << "multi-segment path not exercised on this host";
+        // Skip only if every rank succeeded (identical enumeration). any-rank skip hid unilateral success.
+        if (MPIHelpers::allRanksTrue(r == ncclSuccess))
+            GTEST_SKIP() << "ranks enumerated identical segment counts; no asymmetry";
+    }
 
     EXPECT_EQ(r, ncclInvalidUsage)
         << "asymmetric per-rank segment count must be rejected (rank " << worldRank_
