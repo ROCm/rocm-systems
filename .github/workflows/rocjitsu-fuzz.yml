@@ -1,0 +1,362 @@
+# Run the broad rocjitsu fuzz target after relevant canonical develop updates,
+# or as an opt-in presubmit for same-repository pull requests. The fuzz job has
+# a read-only token; only the reporting job can comment on the associated PR.
+name: "rocjitsu-fuzz"
+
+on:
+  push:
+    branches:
+      - develop
+    paths:
+      - "emulation/rocjitsu/**"
+      - "runtimes/api-headers/**"
+      - ".github/scripts/collect_rocjitsu_afl_results.py"
+      - ".github/scripts/rocjitsu_fuzz_report.js"
+      - ".github/scripts/run_rocjitsu_afl_campaign.py"
+      - ".github/scripts/tests/test_collect_rocjitsu_afl_results.py"
+      - ".github/scripts/tests/test_rocjitsu_fuzz_report.js"
+      - ".github/scripts/tests/test_run_rocjitsu_afl_campaign.py"
+      - ".github/workflows/rocjitsu-fuzz.yml"
+  pull_request:
+    branches:
+      - develop
+    types:
+      - labeled
+      - synchronize
+    paths:
+      - "emulation/rocjitsu/**"
+      - "runtimes/api-headers/**"
+      - ".github/scripts/collect_rocjitsu_afl_results.py"
+      - ".github/scripts/rocjitsu_fuzz_report.js"
+      - ".github/scripts/run_rocjitsu_afl_campaign.py"
+      - ".github/scripts/tests/test_collect_rocjitsu_afl_results.py"
+      - ".github/scripts/tests/test_rocjitsu_fuzz_report.js"
+      - ".github/scripts/tests/test_run_rocjitsu_afl_campaign.py"
+      - ".github/workflows/rocjitsu-fuzz.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
+  ROCJITSU_ASAN_UBSAN_BUILD_DIR: ${{ github.workspace }}/build-fuzz-asan-ubsan
+  ROCJITSU_TSAN_BUILD_DIR: ${{ github.workspace }}/build-fuzz-tsan
+  ROCJITSU_SEED_DIR: ${{ github.workspace }}/multiplexer-seeds
+  ROCJITSU_ASAN_UBSAN_FINDINGS_DIR: ${{ github.workspace }}/multiplexer-findings-asan-ubsan
+  ROCJITSU_TSAN_FINDINGS_DIR: ${{ github.workspace }}/multiplexer-findings-tsan
+  ROCJITSU_ARTIFACT_DIR: ${{ github.workspace }}/fuzz-artifact
+  ROCJITSU_FUZZ_CAMPAIGN_SECONDS: 360
+  ROCJITSU_FUZZ_WORKERS: 32
+
+jobs:
+  fuzz:
+    if: >-
+      github.repository == 'ROCm/rocm-systems' && (
+        github.event_name == 'workflow_dispatch' ||
+        (github.event_name == 'push' && github.ref == 'refs/heads/develop') ||
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name == github.repository &&
+         (github.event.action != 'labeled' ||
+          github.event.label.name == 'rocjitsu-presubmit-fuzz') &&
+         contains(github.event.pull_request.labels.*.name, 'rocjitsu-presubmit-fuzz'))
+      )
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: true
+    env:
+      AFL_CRASH_EXITCODE: "1"
+      AFL_CRASHING_SEEDS_AS_NEW_CRASH: "1"
+      AFL_FAST_CAL: "1"
+      AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES: "1"
+      AFL_NO_AFFINITY: "1"
+      AFL_NO_UI: "1"
+      AFL_SKIP_CPUFREQ: "1"
+      AFL_SYNC_TIME: "1"
+    runs-on: aws-linux-scale-rocm-medium
+    timeout-minutes: 60
+    outputs:
+      artifact-url: ${{ steps.upload.outputs.artifact-url }}
+      asan-ubsan-campaign-outcome: ${{ steps.findings.outputs.asan-ubsan-campaign-outcome }}
+      asan-ubsan-crash-count: ${{ steps.findings.outputs.asan-ubsan-crash-count }}
+      asan-ubsan-execution-count: ${{ steps.findings.outputs.asan-ubsan-execution-count }}
+      asan-ubsan-executions-per-second: ${{ steps.findings.outputs.asan-ubsan-executions-per-second }}
+      asan-ubsan-hang-count: ${{ steps.findings.outputs.asan-ubsan-hang-count }}
+      tsan-campaign-outcome: ${{ steps.findings.outputs.tsan-campaign-outcome }}
+      tsan-crash-count: ${{ steps.findings.outputs.tsan-crash-count }}
+      tsan-execution-count: ${{ steps.findings.outputs.tsan-execution-count }}
+      tsan-executions-per-second: ${{ steps.findings.outputs.tsan-executions-per-second }}
+      tsan-hang-count: ${{ steps.findings.outputs.tsan-hang-count }}
+      crash-count: ${{ steps.findings.outputs.crash-count }}
+      finding-count: ${{ steps.findings.outputs.finding-count }}
+      hang-count: ${{ steps.findings.outputs.hang-count }}
+      campaign-failed: ${{ steps.findings.outputs.campaign-failed }}
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      env:
+        DEBIAN_FRONTEND: noninteractive
+    steps:
+      - name: Install build and fuzzing dependencies
+        run: |
+          sudo -n apt-get update
+          # Ubuntu Noble's AFL++ compiler wrapper uses Clang 17, so install its
+          # matching sanitizer runtime alongside the default Clang package.
+          sudo -n DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            afl++ \
+            build-essential \
+            ca-certificates \
+            clang \
+            cmake \
+            git \
+            libclang-rt-17-dev \
+            libdrm-dev \
+            ninja-build \
+            nodejs \
+            python3-pytest
+
+      - name: Checkout rocm-systems
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          path: rocm-systems
+          persist-credentials: false
+          sparse-checkout: |
+            emulation/rocjitsu
+            runtimes/api-headers
+            .github/scripts
+
+      - name: Test campaign helpers
+        run: |
+          python3 -m pytest -q \
+            rocm-systems/.github/scripts/tests/test_collect_rocjitsu_afl_results.py \
+            rocm-systems/.github/scripts/tests/test_run_rocjitsu_afl_campaign.py
+          node --test rocm-systems/.github/scripts/tests/test_rocjitsu_fuzz_report.js
+
+      - name: Build the instrumented multiplexers
+        shell: bash
+        run: |
+          export AFL_LLVM_THREADSAFE_INST=1
+          cmake -S "${ROCJITSU_SOURCE_DIR}" -B "${ROCJITSU_ASAN_UBSAN_BUILD_DIR}" -GNinja \
+            -DBUILD_TESTING=OFF \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_C_COMPILER=afl-clang-fast \
+            -DCMAKE_CXX_COMPILER=afl-clang-fast++ \
+            -DROCJITSU_HOST_CPU_BASELINE=x86-64-v3 \
+            -DRJ_ENABLE_ASAN=ON \
+            -DRJ_ENABLE_TSAN=OFF \
+            -DRJ_ENABLE_UBSAN=ON \
+            -DRJ_SANITIZER_RUNTIME=STATIC
+          cmake --build "${ROCJITSU_ASAN_UBSAN_BUILD_DIR}" --target rj_fuzz
+
+          cmake -S "${ROCJITSU_SOURCE_DIR}" -B "${ROCJITSU_TSAN_BUILD_DIR}" -GNinja \
+            -DBUILD_TESTING=OFF \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_C_COMPILER=afl-clang-fast \
+            -DCMAKE_CXX_COMPILER=afl-clang-fast++ \
+            -DROCJITSU_HOST_CPU_BASELINE=x86-64-v3 \
+            -DRJ_ENABLE_ASAN=OFF \
+            -DRJ_ENABLE_TSAN=ON \
+            -DRJ_ENABLE_UBSAN=OFF \
+            -DRJ_SANITIZER_RUNTIME=STATIC
+          cmake --build "${ROCJITSU_TSAN_BUILD_DIR}" --target rj_fuzz
+
+      - name: Emit the seed corpus
+        run: |
+          "${ROCJITSU_ASAN_UBSAN_BUILD_DIR}/fuzz/multiplexer/rj_fuzz" \
+            --emit-seeds "${ROCJITSU_SEED_DIR}"
+
+      - name: Run the ASan and UBSan campaign
+        id: asan_ubsan_campaign
+        continue-on-error: true
+        timeout-minutes: 15
+        shell: bash
+        env:
+          ASAN_OPTIONS: abort_on_error=1:detect_leaks=0:symbolize=0
+          UBSAN_OPTIONS: abort_on_error=1:halt_on_error=1:print_stacktrace=1
+        run: |
+          python3 rocm-systems/.github/scripts/run_rocjitsu_afl_campaign.py \
+            "${ROCJITSU_ASAN_UBSAN_BUILD_DIR}/fuzz/multiplexer/rj_fuzz" \
+            "${ROCJITSU_SEED_DIR}" \
+            "${ROCJITSU_ASAN_UBSAN_FINDINGS_DIR}" \
+            "${ROCJITSU_FUZZ_CAMPAIGN_SECONDS}" \
+            "${ROCJITSU_FUZZ_WORKERS}"
+
+      - name: Run the TSan campaign
+        id: tsan_campaign
+        continue-on-error: true
+        timeout-minutes: 15
+        shell: bash
+        env:
+          TSAN_OPTIONS: exitcode=1:halt_on_error=1
+        run: |
+          python3 rocm-systems/.github/scripts/run_rocjitsu_afl_campaign.py \
+            "${ROCJITSU_TSAN_BUILD_DIR}/fuzz/multiplexer/rj_fuzz" \
+            "${ROCJITSU_SEED_DIR}" \
+            "${ROCJITSU_TSAN_FINDINGS_DIR}" \
+            "${ROCJITSU_FUZZ_CAMPAIGN_SECONDS}" \
+            "${ROCJITSU_FUZZ_WORKERS}"
+
+      - name: Collect crashes and hangs
+        id: findings
+        if: ${{ !cancelled() }}
+        shell: bash
+        env:
+          ASAN_UBSAN_CAMPAIGN_OUTCOME: ${{ steps.asan_ubsan_campaign.outcome }}
+          TSAN_CAMPAIGN_OUTCOME: ${{ steps.tsan_campaign.outcome }}
+        run: |
+          python3 rocm-systems/.github/scripts/collect_rocjitsu_afl_results.py
+
+      - name: Upload fuzz findings
+        id: upload
+        if: >-
+          !cancelled() &&
+          (steps.findings.outputs.finding-count != '0' ||
+           steps.findings.outputs.campaign-failed == 'true')
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rocjitsu-fuzz-findings-${{ github.sha }}
+          path: ${{ env.ROCJITSU_ARTIFACT_DIR }}
+          if-no-files-found: error
+          retention-days: 14
+
+  report:
+    needs: fuzz
+    if: >-
+      always() &&
+      needs.fuzz.result != 'cancelled' &&
+      needs.fuzz.result != 'skipped'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout reporting helper
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          path: rocm-systems
+          persist-credentials: false
+          sparse-checkout: |
+            .github/scripts
+
+      - name: Comment on the associated pull request
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          ARTIFACT_URL: ${{ needs.fuzz.outputs.artifact-url }}
+          ASAN_UBSAN_CAMPAIGN_OUTCOME: ${{ needs.fuzz.outputs.asan-ubsan-campaign-outcome }}
+          ASAN_UBSAN_CRASH_COUNT: ${{ needs.fuzz.outputs.asan-ubsan-crash-count }}
+          ASAN_UBSAN_EXECUTION_COUNT: ${{ needs.fuzz.outputs.asan-ubsan-execution-count }}
+          ASAN_UBSAN_EXECUTIONS_PER_SECOND: ${{ needs.fuzz.outputs.asan-ubsan-executions-per-second }}
+          ASAN_UBSAN_HANG_COUNT: ${{ needs.fuzz.outputs.asan-ubsan-hang-count }}
+          TSAN_CAMPAIGN_OUTCOME: ${{ needs.fuzz.outputs.tsan-campaign-outcome }}
+          TSAN_CRASH_COUNT: ${{ needs.fuzz.outputs.tsan-crash-count }}
+          TSAN_EXECUTION_COUNT: ${{ needs.fuzz.outputs.tsan-execution-count }}
+          TSAN_EXECUTIONS_PER_SECOND: ${{ needs.fuzz.outputs.tsan-executions-per-second }}
+          TSAN_HANG_COUNT: ${{ needs.fuzz.outputs.tsan-hang-count }}
+          CRASH_COUNT: ${{ needs.fuzz.outputs.crash-count }}
+          FINDING_COUNT: ${{ needs.fuzz.outputs.finding-count }}
+          HANG_COUNT: ${{ needs.fuzz.outputs.hang-count }}
+          CAMPAIGN_FAILED: ${{ needs.fuzz.outputs.campaign-failed }}
+          CAMPAIGN_SECONDS: ${{ env.ROCJITSU_FUZZ_CAMPAIGN_SECONDS }}
+          FUZZ_JOB_RESULT: ${{ needs.fuzz.result }}
+          WORKERS: ${{ env.ROCJITSU_FUZZ_WORKERS }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const repository = `${owner}/${repo}`;
+            const {
+              buildReport,
+              findExistingReportComment,
+            } = require(`${process.env.GITHUB_WORKSPACE}/rocm-systems/.github/scripts/rocjitsu_fuzz_report.js`);
+            let pull;
+            let marker;
+            let phase;
+            let subject;
+            if (context.eventName === 'pull_request') {
+              pull = context.payload.pull_request;
+              marker = `<!-- rocjitsu-presubmit-fuzz:${pull.number} -->`;
+              phase = 'presubmit';
+              const headSha = pull.head.sha;
+              const headUrl = `${context.serverUrl}/${repository}/commit/${headSha}`;
+              subject = `the merge result for PR head [\`${headSha.slice(0, 12)}\`](${headUrl})`;
+            } else {
+              const associated = await github.paginate(
+                github.rest.repos.listPullRequestsAssociatedWithCommit,
+                { owner, repo, commit_sha: context.sha, per_page: 100 },
+              );
+              const isDispatch = context.eventName === 'workflow_dispatch';
+              const matches = associated.filter(
+                (candidate) =>
+                  candidate.base?.ref === 'develop' &&
+                  candidate.base?.repo?.full_name === repository &&
+                  (isDispatch
+                    ? (candidate.state === 'open' && candidate.head?.sha === context.sha) ||
+                      (candidate.merged_at && candidate.merge_commit_sha === context.sha)
+                    : candidate.merged_at && candidate.merge_commit_sha === context.sha),
+              );
+              if (matches.length !== 1) {
+                core.warning(
+                  `Expected one associated develop PR for ${context.sha}, found ${matches.length}.`,
+                );
+                return;
+              }
+              [pull] = matches;
+              const commitUrl = `${context.serverUrl}/${repository}/commit/${context.sha}`;
+              if (pull.merged_at) {
+                marker = `<!-- rocjitsu-post-commit-fuzz:${context.sha} -->`;
+                phase = 'post-commit';
+                subject = `commit [\`${context.sha.slice(0, 12)}\`](${commitUrl})`;
+              } else {
+                marker = `<!-- rocjitsu-presubmit-fuzz:${pull.number} -->`;
+                phase = 'presubmit';
+                subject = `PR head [\`${context.sha.slice(0, 12)}\`](${commitUrl})`;
+              }
+            }
+
+            const runUrl = `${context.serverUrl}/${repository}/actions/runs/${context.runId}`;
+            const { body } = buildReport(process.env, {
+              marker,
+              phase,
+              subject,
+              runUrl,
+            });
+
+            const comments = await github.paginate(
+              github.rest.issues.listComments,
+              { owner, repo, issue_number: pull.number, per_page: 100 },
+            );
+            const existing = findExistingReportComment(comments, marker);
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: pull.number,
+                body,
+              });
+            }
+
+      - name: Warn about fuzz findings
+        if: >-
+          always() &&
+          needs.fuzz.outputs.finding-count != '0'
+        env:
+          CRASH_COUNT: ${{ needs.fuzz.outputs.crash-count }}
+          HANG_COUNT: ${{ needs.fuzz.outputs.hang-count }}
+        run: |
+          echo "::warning::rocjitsu fuzzing found ${CRASH_COUNT} crash(es) and ${HANG_COUNT} hang(s)"
+
+      - name: Fail an incomplete fuzz campaign
+        if: >-
+          always() &&
+          needs.fuzz.outputs.campaign-failed == 'true'
+        env:
+          CRASH_COUNT: ${{ needs.fuzz.outputs.crash-count }}
+          HANG_COUNT: ${{ needs.fuzz.outputs.hang-count }}
+        run: |
+          echo "::error::rocjitsu fuzzing did not complete; partial results contain ${CRASH_COUNT} crash(es) and ${HANG_COUNT} hang(s)"
+          exit 1
