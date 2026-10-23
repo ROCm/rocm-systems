@@ -87,6 +87,11 @@ void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char* file
   (void)fmt;
 }
 
+// Real definitions live in transport/net_ib/, which this target does not link.
+// -1 is the NCCL_PARAM default and leaves the plugin on its comm->config rung.
+int64_t ncclParamGinIbTc() { return -1; }
+int64_t ncclParamIbTc() { return -1; }
+
 extern "C" hipError_t hipMalloc(void** ptr, size_t size) {
   using Fn = hipError_t (*)(void**, size_t);
   static Fn real = reinterpret_cast<Fn>(dlsym(RTLD_NEXT, "hipMalloc"));
@@ -126,8 +131,10 @@ ncclResult_t bootstrapAllGather(void* commState, void* allData, int size) {
 extern "C" int rocshmem_gin_probe_devices(void) { return Stubs::g.probeResult; }
 
 extern "C" int rocshmem_gin_create_qps(int nRanks, int myRank, int (*allgather)(void*, void*, size_t),
-                                       void* allgather_ctx, rocshmem_gin_qp_set_t* out_qp_set, void*** out_gpu_qps) {
+                                       void* allgather_ctx, int traffic_class,
+                                       rocshmem_gin_qp_set_t* out_qp_set, void*** out_gpu_qps) {
   (void)allgather_ctx;
+  (void)traffic_class;
   if (Stubs::g.createQpsFail || !allgather || nRanks < 1 || myRank < 0 || myRank >= nRanks) return -1;
   *out_qp_set = reinterpret_cast<rocshmem_gin_qp_set_t>(&Stubs::g_qpSetToken);
   *out_gpu_qps = Stubs::FakeGpuQps();
