@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/components/backtrace_metrics.hpp"
+#include "common/clocks.hpp"
 #include "common/units/data_size.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
@@ -25,7 +26,6 @@
 #include <timemory/components/papi/papi_vector.hpp>
 #include <timemory/components/rusage/components.hpp>
 #include <timemory/components/rusage/types.hpp>
-#include <timemory/components/timing/backends.hpp>
 #include <timemory/components/trip_count/extern.hpp>
 #include <timemory/macros.hpp>
 #include <timemory/math.hpp>
@@ -44,7 +44,6 @@
 #include <array>
 #include <chrono>
 #include <cstring>
-#include <ctime>
 #include <initializer_list>
 #include <mutex>
 #include <regex>
@@ -313,7 +312,7 @@ backtrace_metrics::sample(int)
     }
 
     auto const _cache = tim::rusage_cache{ RUSAGE_THREAD };
-    m_cpu             = tim::get_clock_thread_now<std::int64_t, std::nano>();
+    m_cpu_time        = clocks::thread_cpu::now();
     m_mem_peak        = _cache.get_peak_rss();
     m_ctx_swch        = _cache.get_num_priority_context_switch() +
                  _cache.get_num_voluntary_context_switch();
@@ -422,7 +421,7 @@ backtrace_metrics::operator-=(const backtrace_metrics& _rhs)
 
     if(_lhs(category::thread_cpu_time{}))
     {
-        _lhs.m_cpu -= _rhs.m_cpu;
+        _lhs.m_cpu_time -= _rhs.m_cpu_time;
     }
 
     if(_lhs(category::thread_peak_memory{}))
@@ -461,9 +460,7 @@ backtrace_metrics::cache_backtrace_data(std::int64_t _tid, std::uint64_t _ts) co
     if(is_category_enabled(category::thread_cpu_time{}))
     {
         cache_backtrace_metrics_events<category::thread_cpu_time, double>(
-            0, _ts,
-            std::chrono::duration<double>{ std::chrono::nanoseconds{ m_cpu } }.count(),
-            _tid);
+            0, _ts, std::chrono::duration<double>{ m_cpu_time }.count(), _tid);
     }
 
     if(is_category_enabled(category::thread_peak_memory{}))
