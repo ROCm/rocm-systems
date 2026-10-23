@@ -605,6 +605,9 @@ def _make_rpc_args(
         remaining=["--", "./myapp"],
         list_stats=list_stats,
         output_format=output_format,
+        debug_options=[],
+        verify_deps=False,
+        view=None,
         torch_operator=None,
         triton_operator=None,
         list_torch_operators=False,
@@ -752,15 +755,32 @@ def test_sanitize_membw_analysis_injects_block_30(
     "output_format, expect_error",
     [("stdout", False), ("txt", False), ("csv", True), ("db", True)],
 )
-def test_handle_analyze_args_list_stats_output_format(output_format, expect_error):
+@pytest.mark.parametrize(
+    "selectors",
+    [
+        [],
+        ["single-metric"],
+        ["verify-deps"],
+        ["table-view", "ignore-amd-smi", "single-metric", "verify-deps"],
+    ],
+)
+def test_handle_analyze_args_list_stats_output_format(
+    output_format, expect_error, selectors
+):
     """--list-stats is rejected with csv and db output."""
     args = _make_rpc_args(mode="analyze", list_stats=True, output_format=output_format)
+    args.debug_options = selectors
     instance = _make_rpc_with_args(args)
     if expect_error:
         with pytest.raises(SystemExit):
             instance.handle_analyze_args()
     else:
         instance.handle_analyze_args()
+
+    assert args.debug == ("single-metric" in selectors)
+    assert args.verify_deps == ("verify-deps" in selectors)
+    assert args.ignore_amd_smi == ("ignore-amd-smi" in selectors)
+    assert args.view == ("table" if "table-view" in selectors else None)
 
 
 # ---------------------------------------------------------------------------

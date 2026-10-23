@@ -4,6 +4,7 @@
 """Unit tests for utils/specs.py."""
 
 from subprocess import CompletedProcess
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -153,6 +154,42 @@ def test_kw_only_rejects_positional_arguments():
 
     spec = MachineSpecs(gpu_arch="gfx942")
     assert spec.gpu_arch == "gfx942"
+
+
+@pytest.mark.misc
+def test_live_machine_specs_skips_amd_smi_when_requested():
+    """The debug AMD-SMI bypass must not initialize or query AMD-SMI."""
+    machine_specs = MachineSpecs(rocminfo_lines=None)
+    args = SimpleNamespace(ignore_amd_smi=True)
+    soc_info = {
+        "rocminfo_lines": None,
+        "gpu_arch": "gfx942",
+        "gpu_chip_id": "0x7408",
+    }
+
+    with patch.object(
+        specs,
+        "_extract_machine_info",
+        return_value={
+            "cpu_model": None,
+            "sbios": None,
+            "linux_kernel_version": None,
+            "cpu_memory": None,
+            "linux_distro": None,
+        },
+    ), patch.object(specs, "_extract_soc_info", return_value=soc_info), patch.object(
+        specs, "_extract_gpu_info"
+    ) as extract_gpu_info, patch.object(
+        specs.amdsmi_interface, "amdsmi_ctx"
+    ) as amdsmi_ctx, patch.object(
+        specs, "spec_family_for_arch", return_value=lambda **_kwargs: machine_specs
+    ), patch.object(specs, "_load_soc_module"), patch.object(
+        specs, "get_rocm_ver", return_value="7.0.0"
+    ), patch.object(machine_specs, "finalize_soc_fields"):
+        assert specs._probe_live_machine_specs(args) is machine_specs
+
+    extract_gpu_info.assert_not_called()
+    amdsmi_ctx.assert_not_called()
 
 
 @pytest.mark.misc
