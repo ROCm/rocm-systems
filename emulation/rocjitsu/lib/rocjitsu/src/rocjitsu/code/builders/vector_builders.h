@@ -41,7 +41,8 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
-#include "util/except.h"
+#include "util/diagnostic.h"
+#include "util/result.h"
 
 namespace rocjitsu {
 
@@ -56,57 +57,64 @@ inline constexpr uint16_t kVectorSrcLiteral = cdna1::OPR_SRC_SRC_LITERAL;
 /// value, so the immediate travels in a second word. Emitting the pair as one
 /// unit keeps the caller from having to know that.
 ///
+/// @returns Failure when the target ISA has no VOP1 encoding.
+/// @param error Optional caller-owned diagnostic emitter, used only on failure.
+///
 /// @note On gfx1250 an encoded @p vdst names a register within the bank
 ///   MODE.VGPR_MSB selects, not a fixed physical VGPR. That constrains callers
 ///   that must name a specific register, not this encoder
-[[nodiscard]] inline std::array<uint32_t, 2> build_v_mov_b32_imm(uint16_t vdst, uint32_t imm,
-                                                                 rj_code_arch_t arch) {
+inline util::FailureOr<std::array<uint32_t, 2>>
+build_v_mov_b32_imm(uint16_t vdst, uint32_t imm, rj_code_arch_t arch,
+                    const util::DiagnosticEmitter *error = nullptr) {
   const uint8_t dst = static_cast<uint8_t>(vdst);
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
-    return {
+    return std::array<uint32_t, 2>{
         cdna1::build_vop1(cdna1::kVMovB32Vop1, {.src0 = kVectorSrcLiteral, .vdst = dst}).front(),
         imm};
   case ROCJITSU_CODE_ARCH_CDNA2:
-    return {
+    return std::array<uint32_t, 2>{
         cdna2::build_vop1(cdna2::kVMovB32Vop1, {.src0 = kVectorSrcLiteral, .vdst = dst}).front(),
         imm};
   case ROCJITSU_CODE_ARCH_CDNA3:
-    return {
+    return std::array<uint32_t, 2>{
         cdna3::build_vop1(cdna3::kVMovB32Vop1, {.src0 = kVectorSrcLiteral, .vdst = dst}).front(),
         imm};
   case ROCJITSU_CODE_ARCH_CDNA4:
-    return {
+    return std::array<uint32_t, 2>{
         cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = kVectorSrcLiteral, .vdst = dst}).front(),
         imm};
   case ROCJITSU_CODE_ARCH_CDNA5:
-    return {
+    return std::array<uint32_t, 2>{
         cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = kVectorSrcLiteral, .vdst = dst}).front(),
         imm};
   case ROCJITSU_CODE_ARCH_RDNA1:
-    return {
+    return std::array<uint32_t, 2>{
         rdna1::build_vop1(rdna1::kVMovB32Vop1, {.src0 = kVectorSrcLiteral, .vdst = dst}).front(),
         imm};
   case ROCJITSU_CODE_ARCH_RDNA2:
-    return {
+    return std::array<uint32_t, 2>{
         rdna2::build_vop1(rdna2::kVMovB32Vop1, {.src0 = kVectorSrcLiteral, .vdst = dst}).front(),
         imm};
   case ROCJITSU_CODE_ARCH_RDNA3:
-    return {
+    return std::array<uint32_t, 2>{
         rdna3::build_vop1(rdna3::kVMovB32Vop1, {.src0 = kVectorSrcLiteral, .vdst = dst}).front(),
         imm};
   case ROCJITSU_CODE_ARCH_RDNA3_5:
-    return {rdna3_5::build_vop1(rdna3_5::kVMovB32Vop1, {.src0 = kVectorSrcLiteral, .vdst = dst})
-                .front(),
-            imm};
+    return std::array<uint32_t, 2>{
+        rdna3_5::build_vop1(rdna3_5::kVMovB32Vop1, {.src0 = kVectorSrcLiteral, .vdst = dst})
+            .front(),
+        imm};
   case ROCJITSU_CODE_ARCH_RDNA4:
-    return {
+    return std::array<uint32_t, 2>{
         rdna4::build_vop1(rdna4::kVMovB32Vop1, {.src0 = kVectorSrcLiteral, .vdst = dst}).front(),
         imm};
   default:
     // RV32I/RV64I and ROCJITSU_CODE_ARCH_INVALID reach here: not AMDGPU, so
     // there is no VOP1 encoding to pick.
-    throw util::UnimplementedInst("v_mov_b32 with a literal for target architecture");
+    if (error != nullptr)
+      return error->emit() << "unsupported target architecture for v_mov_b32 with a literal";
+    return util::Result::failure();
   }
 }
 
@@ -119,17 +127,24 @@ inline constexpr uint16_t kVectorSrcLiteral = cdna1::OPR_SRC_SRC_LITERAL;
 /// Broadcasting a scalar this way is how the trampoline hands a probe a value it
 /// holds in an SGPR rather than as a build-time constant.
 ///
-/// @throws util::InvalidInst if @p src0 names the literal constant. That form
+/// @returns Failure when the target ISA has no VOP1 encoding or @p src0 names
+///   the literal constant. That form
 ///   needs a trailing word this encoder has no way to return, so accepting it
 ///   would emit an instruction that reads whatever follows it.
+///
+/// @param error Optional caller-owned diagnostic emitter, used only on failure.
 ///
 /// @note On gfx1250 an encoded @p vdst names a register within the bank
 ///   MODE.VGPR_MSB selects, not a fixed physical VGPR. That constrains callers
 ///   that must name a specific register, not this encoder
-[[nodiscard]] inline uint32_t build_v_mov_b32_src(uint16_t vdst, uint16_t src0,
-                                                  rj_code_arch_t arch) {
-  if (src0 == kVectorSrcLiteral)
-    throw util::InvalidInst("v_mov_b32 from a literal needs build_v_mov_b32_imm");
+inline util::FailureOr<uint32_t>
+build_v_mov_b32_src(uint16_t vdst, uint16_t src0, rj_code_arch_t arch,
+                    const util::DiagnosticEmitter *error = nullptr) {
+  if (src0 == kVectorSrcLiteral) {
+    if (error != nullptr)
+      return error->emit() << "v_mov_b32 from a literal needs build_v_mov_b32_imm";
+    return util::Result::failure();
+  }
   const uint8_t dst = static_cast<uint8_t>(vdst);
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
@@ -155,7 +170,9 @@ inline constexpr uint16_t kVectorSrcLiteral = cdna1::OPR_SRC_SRC_LITERAL;
   default:
     // RV32I/RV64I and ROCJITSU_CODE_ARCH_INVALID reach here: not AMDGPU, so
     // there is no VOP1 encoding to pick.
-    throw util::UnimplementedInst("v_mov_b32 from a register for target architecture");
+    if (error != nullptr)
+      return error->emit() << "unsupported target architecture for v_mov_b32 from a register";
+    return util::Result::failure();
   }
 }
 

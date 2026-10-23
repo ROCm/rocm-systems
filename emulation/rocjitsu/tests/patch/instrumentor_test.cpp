@@ -2480,8 +2480,10 @@ bool contains_words(const std::vector<uint32_t> &haystack, std::span<const uint3
 std::optional<uint16_t> storage_base_from_argument(const std::vector<uint32_t> &trampoline,
                                                    rj_code_arch_t arch) {
   for (uint16_t sgpr = 0; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr) {
-    const uint32_t mov = build_v_mov_b32_src(/*vdst=*/0, sgpr, arch);
-    if (std::find(trampoline.begin(), trampoline.end(), mov) != trampoline.end())
+    const auto mov = build_v_mov_b32_src(/*vdst=*/0, sgpr, arch);
+    if (mov.failed())
+      return std::nullopt;
+    if (std::find(trampoline.begin(), trampoline.end(), mov.value()) != trampoline.end())
       return sgpr;
   }
   return std::nullopt;
