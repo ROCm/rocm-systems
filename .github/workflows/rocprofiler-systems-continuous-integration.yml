@@ -250,6 +250,11 @@ jobs:
           apt install -y libopenmpi-dev
           echo "✅ MPI Installed!"
 
+      - name: Install libstdc++-16-dev (temp debug)
+        run: |
+          apt-get install -y libstdc++-16-dev
+          echo "✅ MPI Installed!"
+
       - name: Install Latest Nightly ROCm
         run: |
           set -euo pipefail
@@ -308,8 +313,8 @@ jobs:
             -DROCPROFSYS_BUILD_ELFUTILS=ON \
             -DROCPROFSYS_BUILD_LIBIBERTY=ON \
             -DROCPROFSYS_BUILD_CI=ON \
-            -DROCPROFSYS_BUILD_EXAMPLES=OFF \
-            -DROCPROFSYS_BUILD_TESTING=OFF \
+            -DROCPROFSYS_BUILD_EXAMPLES=ON \
+            -DROCPROFSYS_BUILD_TESTING=ON \
             -DROCPROFSYS_USE_PYTHON=ON \
             -DROCPROFSYS_MAX_THREADS=64 \
             -- \
