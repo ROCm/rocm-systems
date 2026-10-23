@@ -144,15 +144,7 @@ test_categories:
       # test/common/ProcessIsolatedTestRunner.cpp
       - "ProcessIsolatedRunnerMicrotest.*"
       # test/host/host_test_dispatch.cc (rccl-UnitTestsMicroHostDispatch)
-      - "HostDispatchMatchMicrotest.*"
-      - "HostDispatchFilterMicrotest.*"
-      - "HostDispatchListingMicrotest.*"
-      - "HostDispatchQualifierMicrotest.*"
-      - "HostDispatchXmlMicrotest.*"
-      - "HostDispatchReportMicrotest.*"
-      - "HostDispatchMergeMicrotest.*"
-      - "HostDispatchArgsMicrotest.*"
-      - "HostDispatchCoverageMicrotest.*"
+      - "HostDispatch*"
     exclude_windows:
       - "*"
     labels:
