@@ -12,6 +12,7 @@ target_link_libraries(
         rocjitsu_analysis
         rocjitsu_code
         rocjitsu_code_object
+        rocjitsu_executable
         rocjitsu_isa
         rocjitsu_isa_registry
         simdojo
