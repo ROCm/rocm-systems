@@ -576,7 +576,8 @@ hipError_t hipStreamWaitEvent_common(hipStream_t stream, hipEvent_t event, unsig
   hip::Stream* eventStream = reinterpret_cast<hip::Stream*>(eventStreamHandle);
 
   // The legacy stream can never record into a graph. This is decided before
-  // hip::getStream resolves the handle, because resolving the null streamsynchronises it against every active blocking stream on the device.
+  // hip::getStream resolves the handle, because resolving the null stream synchronises it
+  // against every active blocking stream on the device.
   if ((stream == nullptr || stream == hipStreamLegacy) && eventStream != nullptr &&
       eventStream->IsEventCaptured(event)) {
     eventStream->InvalidateCapture();
