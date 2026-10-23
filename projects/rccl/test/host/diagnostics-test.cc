@@ -489,13 +489,15 @@ TEST_F(DiagnosticsMicrotest, DetectTransportMask_AllGatherFailureLeavesMaskZero)
 }
 
 // Peers enter the allgather this rank skips, so later diagnostics collectives pair up wrongly; a fix flips this pin.
-TEST_F(DiagnosticsMicrotest, DetectTransportMask_KnownBug_CallocFailureSkipsAllGather) {
+TEST_F(DiagnosticsMicrotest, DetectTransportMask_CallocFailureStillJoinsAllGather) {
   BuildComm(2, 0, 2);
   g_diagnosticsCallocFailAt = 1;
   ncclResult_t ret;
   EXPECT_EQ(Detect(&ret), 0u);
+  // The allocation failure is still surfaced...
   EXPECT_EQ(ret, ncclSystemError);
-  EXPECT_EQ(gathers_, 0);
+  // ...but the rank joins the all-gather via the fallback buffer, so peers do not hang.
+  EXPECT_EQ(gathers_, 1);
 }
 
 TEST_F(DiagnosticsMicrotest, Run_SingleHostSkipsNetBwAndRunsP2p) {
