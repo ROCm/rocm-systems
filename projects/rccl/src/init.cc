@@ -1175,7 +1175,13 @@ static ncclResult_t devCommSetup(ncclComm_t comm) {
 
   // Allocate device counters and their pinned host mirror when enabled.
   comm->gpuTimerOffsetNs = 0;
+#ifdef RCCL_DISABLE_PROGRESS_COUNTERS
+  if (ncclParamProgressCountersEnable() != 0)
+    ATTN("NCCL_PROGRESS_COUNTERS ignored: RCCL was built with RCCL_DISABLE_PROGRESS_COUNTERS");
+  if (false) {
+#else
   if (ncclParamRasEnable() == 1 && ncclParamProgressCountersEnable() != 0) {
+#endif
     // Allocate this communicator's pinned host counter mirror.
     NCCLCHECKGOTO(ncclCudaHostCalloc(&comm->hostCountersBlock, 1), ret, fail);
     ncclCommPushCudaHostFree(comm, comm->hostCountersBlock);

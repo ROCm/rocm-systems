@@ -485,7 +485,21 @@ __device__ __forceinline__ void progressCounterPublishCompletedSlot(int slot, ui
 #endif
 }
 
-__device__ __forceinline__ void profiler(int action) {
+// Build with -DRCCL_DISABLE_PROGRESS_COUNTERS to compile the progress-counter hooks out of the
+// generic kernel; the host then never allocates the counter block (see devCommSetup).
+#ifdef RCCL_DISABLE_PROGRESS_COUNTERS
+#define RCCL_PROGRESS_COUNTERS_COMPILED 0
+#else
+#define RCCL_PROGRESS_COUNTERS_COMPILED 1
+#endif
+
+// progressCounters is fixed for the lifetime of the comm, so ncclKernelMain reads it once
+// after the shmem publish and passes the block-uniform result down.
+__device__ __forceinline__ bool progressCountersOn() {
+  return RCCL_PROGRESS_COUNTERS_COMPILED && __builtin_expect(ncclShmem.comm.progressCounters != nullptr, 0);
+}
+
+__device__ __forceinline__ void profiler(int action, bool progressCounters) {
   if (threadIdx.x == 0) {
     int idx = 0;
     uint64_t wc = ncclShmem.channel.workCounter + 1;
@@ -493,7 +507,7 @@ __device__ __forceinline__ void profiler(int action) {
       // timestamp+counter share one 16B slot (single cache line), so publishing
       // them together needs no fence.
       // Resolve this batch's progress-counter slot and mark the channel active.
-      if (ncclShmem.comm.progressCounters != nullptr) {
+      if (progressCounters) {
         int slot = progressCounterBatchSlot();
         if (slot >= 0) ncclShmem.comm.progressCounters->collOpActive[ncclShmem.channelId] = 1ull << slot;
       }
@@ -514,7 +528,7 @@ __device__ __forceinline__ void profiler(int action) {
       }
       ncclShmem.channel.workCounter += ncclShmem.nWorks;
       // Do not report aborted work as completed; leave its active mask set.
-      if (ncclShmem.aborted == 0 && ncclShmem.comm.progressCounters != nullptr) {
+      if (progressCounters && ncclShmem.aborted == 0) {
         int slot = progressCounterBatchSlot();
         if (slot >= 0) ncclShmem.comm.progressCounters->collOpActive[ncclShmem.channelId] = 0;
         progressCounterPublishCompletedSlot(slot, progressCounterScanBatch());
@@ -668,8 +682,9 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
   __syncthreads();
 #endif
 
+  const bool progressCounters = progressCountersOn();
   while (ncclShmem.aborted == 0) {
-    profiler(START);
+    profiler(START, progressCounters);
     if (0 <= SpecializedFnId && ncclShmem.funcId == (unsigned)SpecializedFnId) {
       SpecializedRunWorkBatch().run();
     } else {
@@ -703,15 +718,15 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
     default:
       break;
     }
-    profiler(STOP);
+    profiler(STOP, progressCounters);
     // Keep workStorage stable until thread 0 finishes counting.
-    if (ncclShmem.comm.progressCounters != nullptr) __syncthreads();
+    if (progressCounters) __syncthreads();
     loadWorkBatchToShmem(tid % WARP_SIZE, tn, args, batchIx);
     __syncthreads();
   }
   // Publish progress-counter completion for the last batch only after every thread has left the work body.
-  if (ncclShmem.comm.progressCounters != nullptr) __syncthreads();
-  profiler(FINI);
+  if (progressCounters) __syncthreads();
+  profiler(FINI, progressCounters);
 }
 
 __global__ void ncclDevKernel_Generic_1(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
