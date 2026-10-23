@@ -47,7 +47,7 @@ from __future__ import annotations
 import unittest
 from unittest import mock
 
-from common.common import amdsmi
+from common.common import amdsmi, log_api_call
 
 
 def _make_node_handle() -> "amdsmi.amdsmi_wrapper.amdsmi_node_handle":
@@ -59,12 +59,22 @@ def _make_node_handle() -> "amdsmi.amdsmi_wrapper.amdsmi_node_handle":
 
 class TestAmdSmiGetNpmBalancingModeParameterValidation(unittest.TestCase):
     def test_rejects_non_node_handle(self):
-        with self.assertRaises(amdsmi.AmdSmiParameterException):
+        with self.assertRaises(amdsmi.AmdSmiParameterException) as raised:
             amdsmi.amdsmi_get_npm_balancing_mode("not-a-node-handle")
+        log_api_call(
+            "\t### amdsmi_get_npm_balancing_mode():",
+            raised.exception,
+            raises=amdsmi.AmdSmiParameterException,
+        )
 
     def test_rejects_none_node_handle(self):
-        with self.assertRaises(amdsmi.AmdSmiParameterException):
+        with self.assertRaises(amdsmi.AmdSmiParameterException) as raised:
             amdsmi.amdsmi_get_npm_balancing_mode(None)
+        log_api_call(
+            "\t### amdsmi_get_npm_balancing_mode():",
+            raised.exception,
+            raises=amdsmi.AmdSmiParameterException,
+        )
 
 
 class TestAmdSmiGetNpmBalancingModeStringMapping(unittest.TestCase):
@@ -81,6 +91,7 @@ class TestAmdSmiGetNpmBalancingModeStringMapping(unittest.TestCase):
             side_effect=_fake_amdsmi_get_npm_balancing_mode,
         ) as mocked_call:
             result = amdsmi.amdsmi_get_npm_balancing_mode(node_handle)
+            log_api_call("\t### amdsmi_get_npm_balancing_mode():")
         return result, mocked_call
 
     def test_power_balancing_maps_to_pb(self):
@@ -106,28 +117,53 @@ class TestAmdSmiGetNpmBalancingModeStringMapping(unittest.TestCase):
 
 class TestAmdSmiSetNpmBalancingModeParameterValidation(unittest.TestCase):
     def test_rejects_non_node_handle(self):
-        with self.assertRaises(amdsmi.AmdSmiParameterException):
+        with self.assertRaises(amdsmi.AmdSmiParameterException) as raised:
             amdsmi.amdsmi_set_npm_balancing_mode("not-a-node-handle", "PB")
+        log_api_call(
+            "\t### amdsmi_set_npm_balancing_mode():",
+            raised.exception,
+            raises=amdsmi.AmdSmiParameterException,
+        )
 
     def test_rejects_none_node_handle(self):
-        with self.assertRaises(amdsmi.AmdSmiParameterException):
+        with self.assertRaises(amdsmi.AmdSmiParameterException) as raised:
             amdsmi.amdsmi_set_npm_balancing_mode(None, "PB")
+        log_api_call(
+            "\t### amdsmi_set_npm_balancing_mode():",
+            raised.exception,
+            raises=amdsmi.AmdSmiParameterException,
+        )
 
     def test_rejects_unknown_mode_string(self):
         node_handle = _make_node_handle()
-        with self.assertRaises(amdsmi.AmdSmiParameterException):
+        with self.assertRaises(amdsmi.AmdSmiParameterException) as raised:
             amdsmi.amdsmi_set_npm_balancing_mode(node_handle, "BOGUS")
+        log_api_call(
+            "\t### amdsmi_set_npm_balancing_mode():",
+            raised.exception,
+            raises=amdsmi.AmdSmiParameterException,
+        )
 
     def test_rejects_lowercase_mode_string(self):
         # Case matters -- "pb"/"fb" are not accepted, only the exact "PB"/"FB".
         node_handle = _make_node_handle()
-        with self.assertRaises(amdsmi.AmdSmiParameterException):
+        with self.assertRaises(amdsmi.AmdSmiParameterException) as raised:
             amdsmi.amdsmi_set_npm_balancing_mode(node_handle, "pb")
+        log_api_call(
+            "\t### amdsmi_set_npm_balancing_mode():",
+            raised.exception,
+            raises=amdsmi.AmdSmiParameterException,
+        )
 
     def test_rejects_none_mode(self):
         node_handle = _make_node_handle()
-        with self.assertRaises(amdsmi.AmdSmiParameterException):
+        with self.assertRaises(amdsmi.AmdSmiParameterException) as raised:
             amdsmi.amdsmi_set_npm_balancing_mode(node_handle, None)
+        log_api_call(
+            "\t### amdsmi_set_npm_balancing_mode():",
+            raised.exception,
+            raises=amdsmi.AmdSmiParameterException,
+        )
 
 
 class TestAmdSmiSetNpmBalancingModeStatusMapping(unittest.TestCase):
@@ -139,6 +175,7 @@ class TestAmdSmiSetNpmBalancingModeStatusMapping(unittest.TestCase):
             return_value=amdsmi.amdsmi_wrapper.AMDSMI_STATUS_SUCCESS,
         ) as mocked_call:
             result = amdsmi.amdsmi_set_npm_balancing_mode(node_handle, "FB")
+            log_api_call("\t### amdsmi_set_npm_balancing_mode():")
 
         self.assertIsNone(result)
         mocked_call.assert_called_once()
@@ -155,6 +192,11 @@ class TestAmdSmiSetNpmBalancingModeStatusMapping(unittest.TestCase):
         ):
             with self.assertRaises(amdsmi.AmdSmiLibraryException) as ctx:
                 amdsmi.amdsmi_set_npm_balancing_mode(node_handle, "PB")
+        log_api_call(
+            "\t### amdsmi_set_npm_balancing_mode():",
+            ctx.exception,
+            amdsmi.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM,
+        )
         self.assertEqual(
             ctx.exception.get_error_code(), amdsmi.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM
         )
@@ -171,6 +213,11 @@ class TestAmdSmiSetNpmBalancingModeStatusMapping(unittest.TestCase):
         ):
             with self.assertRaises(amdsmi.AmdSmiLibraryException) as ctx:
                 amdsmi.amdsmi_set_npm_balancing_mode(node_handle, "PB")
+        log_api_call(
+            "\t### amdsmi_set_npm_balancing_mode():",
+            ctx.exception,
+            amdsmi.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED,
+        )
         self.assertEqual(
             ctx.exception.get_error_code(), amdsmi.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
         )
@@ -178,12 +225,22 @@ class TestAmdSmiSetNpmBalancingModeStatusMapping(unittest.TestCase):
 
 class TestAmdSmiGetNpmSupportedBalancingModesParameterValidation(unittest.TestCase):
     def test_rejects_non_node_handle(self):
-        with self.assertRaises(amdsmi.AmdSmiParameterException):
+        with self.assertRaises(amdsmi.AmdSmiParameterException) as raised:
             amdsmi.amdsmi_get_npm_supported_balancing_modes("not-a-node-handle")
+        log_api_call(
+            "\t### amdsmi_get_npm_supported_balancing_modes():",
+            raised.exception,
+            raises=amdsmi.AmdSmiParameterException,
+        )
 
     def test_rejects_none_node_handle(self):
-        with self.assertRaises(amdsmi.AmdSmiParameterException):
+        with self.assertRaises(amdsmi.AmdSmiParameterException) as raised:
             amdsmi.amdsmi_get_npm_supported_balancing_modes(None)
+        log_api_call(
+            "\t### amdsmi_get_npm_supported_balancing_modes():",
+            raised.exception,
+            raises=amdsmi.AmdSmiParameterException,
+        )
 
 
 class TestAmdSmiGetNpmSupportedBalancingModesDecode(unittest.TestCase):
@@ -200,6 +257,7 @@ class TestAmdSmiGetNpmSupportedBalancingModesDecode(unittest.TestCase):
             side_effect=_fake_amdsmi_get_npm_supported_balancing_modes,
         ) as mocked_call:
             result = amdsmi.amdsmi_get_npm_supported_balancing_modes(node_handle)
+            log_api_call("\t### amdsmi_get_npm_supported_balancing_modes():")
         return result, mocked_call
 
     def test_both_modes_supported(self):

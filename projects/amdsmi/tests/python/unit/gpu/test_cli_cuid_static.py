@@ -20,7 +20,14 @@ import unittest
 from contextlib import redirect_stdout
 from unittest import mock
 
-from common.common import cli_search_order, fake_module, find_cli_dir, load_cli_module, stub_modules
+from common.common import (
+    cli_search_order,
+    fake_module,
+    find_cli_dir,
+    load_cli_module,
+    log_api_call,
+    stub_modules,
+)
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _CLI_DIR = find_cli_dir(*cli_search_order(_THIS_DIR))
@@ -143,6 +150,7 @@ class TestCuidComponentsBinding(_BindingTestBase):
     def test_entries_are_decoded(self):
         self._fake([2])
         components = self.interface.amdsmi_get_cuid_components()
+        log_api_call("\t### amdsmi_get_cuid_components():")
         self.assertEqual([c["bdf"] for c in components], ["0000:00:00.0", "0000:01:00.0"])
         self.assertEqual(components[1]["derived"], "00000001-0000-8000-8000-000000000000")
         self.assertEqual(components[0]["component_type"], "GPU")
@@ -154,6 +162,7 @@ class TestCuidComponentsBinding(_BindingTestBase):
     def test_a_component_appearing_between_calls_is_listed(self):
         self._fake([1, 2])
         components = self.interface.amdsmi_get_cuid_components()
+        log_api_call("\t### amdsmi_get_cuid_components():")
         self.assertEqual(self.calls, [False, True, False, True])
         self.assertEqual(len(components), 2)
 
