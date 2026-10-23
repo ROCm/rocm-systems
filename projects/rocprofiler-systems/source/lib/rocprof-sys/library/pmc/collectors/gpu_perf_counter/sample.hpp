@@ -42,16 +42,7 @@ struct sample : trace_cache::cacheable_t
     template <typename Archive>
     void serialize(Archive& archive)
     {
-        auto count = static_cast<std::uint32_t>(entries.size());
-        archive(device_id, timestamp, count);
-        if constexpr(Archive::k_is_loading)
-        {
-            entries.resize(count);
-        }
-        for(auto& entry : entries)
-        {
-            archive(entry.counter_id, entry.value);
-        }
+        archive(device_id, timestamp, entries);
     }
 };
 
