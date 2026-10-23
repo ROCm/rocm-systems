@@ -44,7 +44,6 @@ class TestMemoryPartitionReadWrite : public TestBase {
         amdsmi_set_gpu_memory_partition_mode;
     std::function<decltype(amdsmi_get_gpu_xcd_counter)> get_xcd_counter =
         amdsmi_get_gpu_xcd_counter;
-    std::function<void(amdsmi_processor_handle)> print_device_header;
   } api_;
 };
 
