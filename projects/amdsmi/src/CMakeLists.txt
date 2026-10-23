@@ -22,7 +22,7 @@ set(SRC_DIR "amd_smi")
 set(INC_DIR "${PROJECT_SOURCE_DIR}/include/amd_smi")
 
 set(NIC_SOURCES "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amd_smi_ainic_device.cc")
-set(NIC_INCLUDES ${INC_DIR}/impl/nic/amd_smi_ainic_device.h)
+set(NIC_INCLUDES ${INC_DIR}/impl/nic/amd_smi_ainic_device.h ${INC_DIR}/impl/nic/amd_smi_nic_interface.h)
 set(NIC_INCLUDE_DIRS "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/")
 
 set(SRC_LIST
@@ -499,6 +499,7 @@ set(UNIFIED_NIC_INCLUDES
     "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_nic_system.h"
     "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_nic_transport.h"
     "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_nic_vpd.h"
+    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_pci_topology.h"
     "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_sysfs.h"
 )
 install(

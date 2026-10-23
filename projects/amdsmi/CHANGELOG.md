@@ -111,8 +111,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Added ``amdsmi_get_nic_port_ifindex()``**.  
   - It returns the full Linux interface index of a NIC port. ``amdsmi_nic_port_t::ifindex`` is one byte and reads 0 for an index above 255.
 
-- **Added ``amdsmi_set_nic_stat_scope()``**.  
-  - It chooses whether ``amdsmi_get_nic_vendor_statistics()`` returns the default or the extended counter set for a NIC handle. The default set is returned until a scope is set.
+- **Added ``amdsmi_get_nic_vendor_statistics_with_scope()``**.  
+  - It returns the default or the extended counter set of a NIC port, as chosen in the call. ``amdsmi_get_nic_vendor_statistics()`` returns the default set.
+
+- **``amdsmi_topo_get_link_type()`` now accepts NIC handles**.  
+  - For a NIC and a GPU, or two NICs, it reports whether they share a PCIe switch, share a NUMA node or sit on different NUMA nodes. ``hops`` may be ``NULL`` and reads ``UINT64_MAX`` for NIC pairs.
 
 - **Added ``TYPE`` to ``amd-smi list --nic`` and ``amd-smi metric --nic``**.  
   - It shows ``AINIC``, ``UALoE`` or the vendor name, and ``N/A`` when the type is unknown.
@@ -142,6 +145,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **``amdsmi_get_nic_fw_info()`` is now implemented**.  
   - It reports a NIC's firmware versions, and ``amd-smi firmware --nic`` shows them.
+  - Each entry has a ``type`` (fixed, running or stored) and a ``fw`` member holding the name and version, and a NIC can report up to 64 entries. Read ``entry.fw.name`` where ``entry.name`` was used.
+
+- **RDMA ``MAX_MTU`` and ``ACTIVE_MTU`` now come from libibverbs**.  
+  - They read ``N/A`` when the RDMA provider cannot answer, and a provider that crashes no longer affects ``amd-smi`` or the library.
 
 - **``amdsmi_get_nic_port_info()`` now keeps ports whose driver is not loaded**.  
   - ``ports[i]`` is the port that the NIC statistics calls take as index ``i``. A port with no driver keeps its BDF and netdev and reads ``N/A`` elsewhere. It was left out before, which shifted every later index.

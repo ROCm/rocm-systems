@@ -29,10 +29,12 @@
 #include <system_error>
 #include <vector>
 
+#include "amd_smi/impl/nic/amd_smi_nic_interface.h"
 #include "nic_check.h"
 #include "smi_nic_hwmon.h"
 #include "smi_nic_interface.h"
 #include "smi_nic_telemetry.h"
+#include "smi_nic_testing.h"
 
 namespace tp = amd::smi::nic::transport;
 namespace tel = amd::smi::nic::telemetry;
@@ -488,6 +490,135 @@ static void test_device_info_unsupported() {
   check("errno = ENOTSUP", r.error_code == ENOTSUP, "got " + std::to_string(r.error_code));
 }
 
+static void set_devlink_version(dl::DevlinkDeviceInfo& info, uint8_t index,
+                                dl::DevlinkVersionType type, const char* name, const char* value) {
+  info.versions[index].type = static_cast<uint8_t>(type);
+  std::snprintf(info.versions[index].name, sizeof(info.versions[index].name), "%s", name);
+  std::snprintf(info.versions[index].value, sizeof(info.versions[index].value), "%s", value);
+}
+
+static void test_fw_info_keeps_each_devlink_version_with_its_type() {
+  std::cout << "\nFirmware: devlink versions map to the shim struct\n";
+  auto dev = dl::DevlinkDeviceInfo{};
+  set_devlink_version(dev, 0, dl::DevlinkVersionType::Fixed, "asic.id", "0x1780");
+  set_devlink_version(dev, 1, dl::DevlinkVersionType::Running, "fw", "1.0.2.8");
+  set_devlink_version(dev, 2, dl::DevlinkVersionType::Stored, "fw", "1.0.2.9");
+  dev.version_count = 3;
+
+  auto fw = smi_nic_fw_info_t{};
+  smi_nic_fw_info_from_devlink_for_testing(dev, &fw);
+
+  check("three versions are copied", fw.count == 3, "got " + std::to_string(fw.count));
+  check("a fixed version keeps its type", fw.versions[0].type == SMI_NIC_FW_VERSION_TYPE_FIXED);
+  check("a running version keeps its type", fw.versions[1].type == SMI_NIC_FW_VERSION_TYPE_RUNNING);
+  check("a stored version keeps its type", fw.versions[2].type == SMI_NIC_FW_VERSION_TYPE_STORED);
+  check("the name is copied", std::string(fw.versions[0].name) == "asic.id");
+  check("the value lands in version", std::string(fw.versions[1].version) == "1.0.2.8");
+  check("two entries named fw stay separate",
+        (std::string(fw.versions[1].name) == "fw") && (std::string(fw.versions[2].name) == "fw") &&
+            (std::string(fw.versions[2].version) == "1.0.2.9"));
+}
+
+static void test_fw_info_of_a_device_without_versions_is_empty() {
+  auto dev = dl::DevlinkDeviceInfo{};
+  auto fw = smi_nic_fw_info_t{};
+  fw.count = 7;  // stale value must not survive
+  smi_nic_fw_info_from_devlink_for_testing(dev, &fw);
+  check("no versions give a zero count", fw.count == 0);
+}
+
+static void test_telemetry_shim_struct_copies_every_snapshot_field() {
+  std::cout << "\nTelemetry: snapshot maps to the shim struct\n";
+  auto snapshot = tel::NicTelemetrySnapshot{};
+  snapshot.temperature = {52, tel::kTempUnsupported, 40};
+  snapshot.health.state = static_cast<uint8_t>(tel::HealthState::Healthy);
+  snapshot.health.error_count = 7;
+  std::snprintf(snapshot.health.reporter, sizeof(snapshot.health.reporter), "%s", "fw");
+  snapshot.port_split = {1, 4};
+
+  auto telemetry = smi_nic_telemetry_t{};
+  smi_nic_telemetry_from_snapshot_for_testing(snapshot, &telemetry);
+
+  check("asic temperature", telemetry.temperature.asic_temp_c == 52);
+  check("an unexposed transceiver temperature keeps the reserved value",
+        telemetry.temperature.transceiver_temp_c == tel::kTempUnsupported);
+  check("board temperature", telemetry.temperature.board_temp_c == 40);
+  check("health state", telemetry.health.state == static_cast<uint8_t>(tel::HealthState::Healthy));
+  check("error count", telemetry.health.error_count == 7);
+  check("reporter name", std::string(telemetry.health.reporter) == "fw");
+  check("splittable", telemetry.port_split.splittable == 1);
+  check("split count", telemetry.port_split.split_count == 4);
+}
+
+static hw::SensorRecord_t make_sensor_record(uint32_t channel, int64_t value, const char* label) {
+  return {hw::Category_t::Temperature,
+          hw::Attribute_t::Input,
+          hw::Unit_t::MilliDegreeCelsius,
+          channel,
+          3,
+          label,
+          value};
+}
+
+static void test_sensor_shim_struct_copies_every_record_field() {
+  std::cout << "\nSensors: records map to the shim struct\n";
+  auto records = std::vector<hw::SensorRecord_t>{};
+  records.push_back(make_sensor_record(1, 39000, "board temperature"));
+  records.push_back(
+      {hw::Category_t::Voltage, hw::Attribute_t::Crit, hw::Unit_t::MilliVolt, 0, 4, "", -5});
+
+  auto info = std::make_unique<smi_nic_sensor_info_t>();
+  const auto status = smi_nic_sensor_info_from_records_for_testing(records, info.get());
+
+  check("the conversion succeeds", status == SMI_NIC_STATUS_SUCCESS);
+  check("count", info->count == 2, std::to_string(info->count));
+  check("category",
+        info->sensors[0].category == static_cast<uint32_t>(hw::Category_t::Temperature));
+  check("attribute", info->sensors[1].attribute == static_cast<uint32_t>(hw::Attribute_t::Crit));
+  check("unit", info->sensors[1].unit == static_cast<uint32_t>(hw::Unit_t::MilliVolt));
+  check("channel", info->sensors[0].channel == 1);
+  check("instance", info->sensors[1].instance == 4);
+  check("label", std::string(info->sensors[0].label) == "board temperature");
+  check("a missing label is empty", std::string(info->sensors[1].label).empty());
+  check("a negative value survives", info->sensors[1].value == -5);
+}
+
+static void test_sensor_shim_struct_reports_overflow_and_keeps_what_fits() {
+  auto records = std::vector<hw::SensorRecord_t>{};
+  for (uint32_t i = 0; i < (SMI_NIC_MAX_SENSORS + 1); ++i) {
+    records.push_back(make_sensor_record(i, i, "t"));
+  }
+
+  auto info = std::make_unique<smi_nic_sensor_info_t>();
+  const auto status = smi_nic_sensor_info_from_records_for_testing(records, info.get());
+
+  check("more records than the struct holds report no resource",
+        status == SMI_NIC_STATUS_NO_RESOURCE);
+  check("the records that fit are kept", info->count == SMI_NIC_MAX_SENSORS);
+  check("the last kept record is intact",
+        info->sensors[SMI_NIC_MAX_SENSORS - 1].value == (SMI_NIC_MAX_SENSORS - 1));
+}
+
+static void test_sensor_shim_struct_truncates_a_long_label_with_a_terminator() {
+  auto records = std::vector<hw::SensorRecord_t>{};
+  records.push_back(
+      make_sensor_record(1, 1, std::string(SMI_NIC_MAX_STRING_LENGTH + 20, 'x').c_str()));
+
+  auto info = std::make_unique<smi_nic_sensor_info_t>();
+  smi_nic_sensor_info_from_records_for_testing(records, info.get());
+
+  check("a long label is cut to fit with its terminator",
+        std::string(info->sensors[0].label).size() == (SMI_NIC_MAX_STRING_LENGTH - 1));
+}
+
+static void test_sensor_shim_struct_of_a_nic_without_hwmon_is_empty() {
+  auto info = std::make_unique<smi_nic_sensor_info_t>();
+  info->count = 9;  // stale value must not survive
+  const auto status = smi_nic_sensor_info_from_records_for_testing({}, info.get());
+  check("no records succeed", status == SMI_NIC_STATUS_SUCCESS);
+  check("no records give a zero count", info->count == 0);
+}
+
 // The context entry points are how libamd_smi reaches telemetry. They resolve
 // the NIC under the context lock, so every rejection has to happen there rather
 // than in a caller holding a pointer discovery handed out.
@@ -497,16 +628,16 @@ static void test_context_entry_points_reject_bad_input() {
   // sysfs-discovered device can ever occupy it on any host.
   constexpr uint64_t kUnregisteredBdf = 0xffffffffffffffffULL;
 
-  tel::NicTelemetrySnapshot snapshot{};
-  dl::DevlinkDeviceInfo info{};
-  std::vector<hw::SensorRecord_t> hwmon_records;
+  auto telemetry = smi_nic_telemetry_t{};
+  smi_nic_fw_info_t info{};
+  auto sensors = std::make_unique<smi_nic_sensor_info_t>();
 
   check("telemetry on a null context is rejected",
-        smi_get_nic_telemetry(nullptr, 0, &snapshot) == SMI_NIC_STATUS_WRONG_PARAM);
+        smi_get_nic_telemetry(nullptr, 0, &telemetry) == SMI_NIC_STATUS_WRONG_PARAM);
   check("firmware on a null context is rejected",
         smi_get_nic_fw_info(nullptr, 0, &info) == SMI_NIC_STATUS_WRONG_PARAM);
   check("hwmon sensors on a null context is rejected",
-        smi_get_nic_hwmon_sensors(nullptr, 0, &hwmon_records) == SMI_NIC_STATUS_WRONG_PARAM);
+        smi_get_nic_hwmon_sensors(nullptr, 0, sensors.get()) == SMI_NIC_STATUS_WRONG_PARAM);
 
   smi_nic_ctx_t ctx = nullptr;
   const auto create_status = smi_nic_create_context(&ctx, true);
@@ -522,12 +653,12 @@ static void test_context_entry_points_reject_bad_input() {
   check("hwmon sensors with no out parameter is rejected",
         smi_get_nic_hwmon_sensors(ctx, kUnregisteredBdf, nullptr) == SMI_NIC_STATUS_WRONG_PARAM);
   check("telemetry for an unregistered BDF reports not found",
-        smi_get_nic_telemetry(ctx, kUnregisteredBdf, &snapshot) == SMI_NIC_STATUS_NOT_FOUND);
+        smi_get_nic_telemetry(ctx, kUnregisteredBdf, &telemetry) == SMI_NIC_STATUS_NOT_FOUND);
   check("firmware for an unregistered BDF reports not found",
         smi_get_nic_fw_info(ctx, kUnregisteredBdf, &info) == SMI_NIC_STATUS_NOT_FOUND);
   check(
       "hwmon sensors for an unregistered BDF reports not found",
-      smi_get_nic_hwmon_sensors(ctx, kUnregisteredBdf, &hwmon_records) == SMI_NIC_STATUS_NOT_FOUND);
+      smi_get_nic_hwmon_sensors(ctx, kUnregisteredBdf, sensors.get()) == SMI_NIC_STATUS_NOT_FOUND);
 
   smi_nic_destroy_context(ctx);
 }
@@ -842,6 +973,13 @@ int main() {
   test_port_split_unsupported();
   test_device_info_supported();
   test_device_info_unsupported();
+  test_fw_info_keeps_each_devlink_version_with_its_type();
+  test_fw_info_of_a_device_without_versions_is_empty();
+  test_telemetry_shim_struct_copies_every_snapshot_field();
+  test_sensor_shim_struct_copies_every_record_field();
+  test_sensor_shim_struct_reports_overflow_and_keeps_what_fits();
+  test_sensor_shim_struct_truncates_a_long_label_with_a_terminator();
+  test_sensor_shim_struct_of_a_nic_without_hwmon_is_empty();
   test_context_entry_points_reject_bad_input();
   test_devlink_addresses_the_port_function();
   test_devlink_health_addresses_the_management_function();

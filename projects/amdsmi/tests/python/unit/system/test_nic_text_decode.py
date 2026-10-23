@@ -33,8 +33,12 @@ class _FakeHandle:
     """Stands in for the ctypes amdsmi_processor_handle type."""
 
 
-class _FwEntry(ctypes.Structure):
+class _Fw(ctypes.Structure):
     _fields_ = [("name", ctypes.c_char * _NAME_BYTES), ("version", ctypes.c_char * _NAME_BYTES)]
+
+
+class _FwEntry(ctypes.Structure):
+    _fields_ = [("type", ctypes.c_int), ("fw", _Fw)]
 
 
 class _FwInfo(ctypes.Structure):
@@ -93,7 +97,7 @@ def _stats_getter(function_name: str) -> Any:
         amdsmi_processor_handle=_FakeHandle,
         amdsmi_nic_stat_t=_Stat,
         AMDSMI_NIC_STAT_SCOPE_DEFAULT=0,
-        amdsmi_set_nic_stat_scope=lambda handle, scope: _STATUS_SUCCESS,
+        amdsmi_get_nic_vendor_statistics_with_scope=fake_get_stats,
         **{function_name: fake_get_stats},
     )
     return _load([function_name], wrapper)[function_name]
@@ -104,8 +108,8 @@ class TestNicTextDecode(unittest.TestCase):
         def fake_get_fw_info(handle: object, out: Any) -> int:
             fw_info = out._obj
             fw_info.num_fw = 1
-            fw_info.fw[0].name = _INVALID_UTF8
-            fw_info.fw[0].version = _INVALID_UTF8
+            fw_info.fw[0].fw.name = _INVALID_UTF8
+            fw_info.fw[0].fw.version = _INVALID_UTF8
             return _STATUS_SUCCESS
 
         wrapper = types.SimpleNamespace(

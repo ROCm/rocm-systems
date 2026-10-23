@@ -3052,7 +3052,7 @@ typedef struct {
  */
 #define AMDSMI_MAX_NIC_PORTS 32     //!< Maximum number of NIC ports
 #define AMDSMI_MAX_NIC_RDMA_DEV 32  //!< Maximum number of NIC RDMA devices
-#define AMDSMI_MAX_NIC_FW 16        //!< Maximum number of NIC firmwares
+#define AMDSMI_MAX_NIC_FW 64        //!< Maximum number of NIC firmwares
 
 /**
  * @brief Structure for NIC statistic name-value pairs
@@ -3073,7 +3073,7 @@ typedef struct {
  * (e.g. an AMD POLLARA exposes both a firmware-control management function and
  * host network ports).
  *
- * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef enum {
   AMDSMI_NIC_CAP_FWCTL = (1u << 0),   //!< exposes a firmware-control management function
@@ -3086,7 +3086,7 @@ typedef enum {
  * Which kind of NIC a handle refers to. Use the vendor name to tell apart devices reported as
  * ::AMDSMI_NIC_TYPE_OTHER.
  *
- * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef enum {
   AMDSMI_NIC_TYPE_UNKNOWN = 0,  //!< the type could not be determined
@@ -3145,6 +3145,17 @@ typedef struct {
 } amdsmi_nic_numa_info_t;
 
 /**
+ * @brief NIC firmware version type
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef enum {
+  AMDSMI_NIC_FW_VERSION_TYPE_FIXED,    //!< Fixed (hardware) firmware version
+  AMDSMI_NIC_FW_VERSION_TYPE_RUNNING,  //!< Currently running firmware version
+  AMDSMI_NIC_FW_VERSION_TYPE_STORED    //!< Stored (pending) firmware version
+} amdsmi_nic_fw_version_type_t;
+
+/**
  * @brief NIC firmware information
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
@@ -3152,6 +3163,16 @@ typedef struct {
 typedef struct {
   char name[AMDSMI_MAX_STRING_LENGTH];
   char version[AMDSMI_MAX_STRING_LENGTH];
+} amdsmi_nic_fw_t;
+
+/**
+ * @brief NIC firmware entry
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+  amdsmi_nic_fw_version_type_t type;
+  amdsmi_nic_fw_t fw;
 } amdsmi_nic_fw_entry_t;
 
 /**
@@ -3167,7 +3188,7 @@ typedef struct {
 /**
  * @brief NIC health state.
  *
- * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef enum {
   AMDSMI_NIC_HEALTH_UNKNOWN = 0,  //!< reserved: reporter present, state indeterminate
@@ -3178,19 +3199,9 @@ typedef enum {
 } amdsmi_nic_health_state_t;
 
 /**
- * @brief NIC discovery filter mode. Selects which NICs @ref amdsmi_init enumerates.
- *
- * @cond @tag{gpu_bm_linux} @tag{host} @endcond
- */
-typedef enum {
-  AMDSMI_NIC_FILTER_ALL = 0,     //!< Discover every supported NIC (default)
-  AMDSMI_NIC_FILTER_AINIC_ONLY,  //!< Discover only AMD NICs (AINIC cards and UALoE endpoints)
-} amdsmi_nic_filter_t;
-
-/**
  * @brief NIC temperatures in whole degrees Celsius; UINT16_MAX when unavailable.
  *
- * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef struct {
   uint16_t asic_temp_c;
@@ -3201,7 +3212,7 @@ typedef struct {
 /**
  * @brief NIC health summary.
  *
- * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef struct {
   uint8_t state;  //!< an amdsmi_nic_health_state_t value
@@ -3213,7 +3224,7 @@ typedef struct {
 /**
  * @brief NIC port-split configuration; UINT8_MAX when unknown.
  *
- * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef struct {
   uint8_t splittable;
@@ -3223,7 +3234,7 @@ typedef struct {
 /**
  * @brief Aggregate live NIC telemetry.
  *
- * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef struct {
   amdsmi_nic_temperature_t temperature;
@@ -3236,7 +3247,7 @@ typedef struct {
  *
  * Numeric values match the host library; only the units the NIC sensors report are defined.
  *
- * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef enum {
   AMDSMI_METRIC_UNIT_MILLIVOLT = 5,
@@ -3249,7 +3260,7 @@ typedef enum {
  *
  * Numeric values match the host library; only the categories the NIC sensors report are defined.
  *
- * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef enum {
   AMDSMI_METRIC_CATEGORY_TEMPERATURE = 3,
@@ -3263,7 +3274,7 @@ typedef enum {
  * The category of the record disambiguates, for example, a temperature @c max from a power
  * @c max. The alarm attributes are not reported.
  *
- * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef enum {
   AMDSMI_NIC_SENSOR_NAME_UNKNOWN = 0,
@@ -3284,7 +3295,7 @@ typedef enum {
  * @c temp1 of two hwmon nodes of one NIC stays distinguishable. Group records that share
  * @c instance, @c category and @c channel to rebuild a sensor with its thresholds.
  *
- * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef struct {
   amdsmi_metric_category_t category;
@@ -7670,21 +7681,33 @@ amdsmi_status_t amdsmi_get_minmax_bandwidth_between_processors(
 
 // clang-format off
 /**
- *  @brief Retrieve the hops and the connection type between 2 GPUs
+ *  @brief Retrieve the hops and the connection type between 2 processors
  *
  *  @ingroup tagHWTopology
  *
- *  @platform{gpu_bm_linux}
+ *  @platform{gpu_bm_linux} @platform{host}
  *
  *  @details Given a source processor handle @p processor_handle_src and
- *  a destination processor handle @p processor_handle_dst, and a pointer to an
- *  uint64_t @p hops and a pointer to an ::amdsmi_link_type_t @p type,
- *  this function will write the number of hops and the connection type
- *  between the device @p processor_handle_src and @p processor_handle_dst to the memory
- *  pointed to by @p hops and @p type.
+ *  a destination processor handle @p processor_handle_dst, this function
+ *  writes the connection type to @p type.  If @p hops is non-NULL, the
+ *  number of hops for the connection is also written.
  *
- *  @note The value written to @p hops is an <b>abstracted topology step count</b>,
- *  not the number of physical xGMI links traversed. The possible values are:
+ *  For GPU-to-GPU queries, @p type returns one of INTERNAL, PCIE, XGMI,
+ *  NOT_APPLICABLE, or UNKNOWN, and @p hops returns the hop count.
+ *
+ *  For queries involving a NIC processor (NIC-to-GPU or NIC-to-NIC),
+ *  @p type returns one of PCIE (same PCIe switch), NUMA (same NUMA node,
+ *  different PCIe switch), XNUMA (different NUMA nodes), or UNKNOWN.  The
+ *  @p hops parameter is not meaningful for NIC queries; callers should pass
+ *  NULL.  If non-NULL, @p hops is set to UINT64_MAX.
+ *
+ *  @note This is a lightweight query that returns only the link type and
+ *  hop count, and is available on both @platform{gpu_bm_linux} and
+ *  @platform{host} for GPU-to-GPU, NIC-to-GPU and NIC-to-NIC pairs.
+ *
+ *  @note For GPU-to-GPU queries the value written to @p hops is an <b>abstracted
+ *  topology step count</b>, not the number of physical xGMI links traversed.
+ *  The possible values are:
  *
  *  | Value | Meaning |
  *  |-------|---------|
@@ -7702,11 +7725,11 @@ amdsmi_status_t amdsmi_get_minmax_bandwidth_between_processors(
  *
  *  @param[in] processor_handle_dst the destination processor handle
  *
- *  @param[in,out] hops A pointer to an uint64_t to which the
- *  abstracted hop count for the connection should be written.
+ *  @param[in,out] hops A pointer to uint64_t to receive the hop count,
+ *  or NULL if hop count is not needed.
  *
- *  @param[in,out] type A pointer to an ::amdsmi_link_type_t to which the
- *  type for the connection should be written.
+ *  @param[in,out] type A pointer to an ::amdsmi_link_type_t to receive
+ *  the link type.  Must not be NULL.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
@@ -10529,7 +10552,7 @@ amdsmi_status_t amdsmi_get_nic_asic_info(amdsmi_processor_handle processor_handl
  *
  *  @ingroup tagNicInfo
  *
- *  @platform{host} @platform{gpu_bm_linux}
+ *  @platform{gpu_bm_linux}
  *
  *  @param[in] processor_handle NIC for which to query
  *
@@ -10545,7 +10568,7 @@ amdsmi_status_t amdsmi_get_nic_type(amdsmi_processor_handle processor_handle,
  *
  *  @ingroup tagNicInfo
  *
- *  @platform{host} @platform{gpu_bm_linux}
+ *  @platform{gpu_bm_linux}
  *
  *  @param[in] processor_handle NIC for which to query
  *
@@ -10556,27 +10579,6 @@ amdsmi_status_t amdsmi_get_nic_type(amdsmi_processor_handle processor_handle,
  */
 amdsmi_status_t amdsmi_get_nic_capability(amdsmi_processor_handle processor_handle,
                                           uint32_t* capability);
-
-/**
- *  @brief Restrict which NICs @ref amdsmi_init discovers.
- *
- *  @ingroup tagNicInfo
- *
- *  @platform{host} @platform{gpu_bm_linux}
- *
- *  The filter is process-global and is read during @ref amdsmi_init, so it must
- *  be set BEFORE calling @ref amdsmi_init to affect that init.
- *
- *  The default is ::AMDSMI_NIC_FILTER_ALL (every supported NIC is discovered).
- *  Skip third-party NICs with ::AMDSMI_NIC_FILTER_AINIC_ONLY, which keeps AINIC cards and
- *  UALoE endpoints; restore the default with ::AMDSMI_NIC_FILTER_ALL.
- *
- *  @param[in] mode an ::amdsmi_nic_filter_t value
- *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
- *  ::AMDSMI_STATUS_INVAL if mode is not a valid ::amdsmi_nic_filter_t
- */
-amdsmi_status_t amdsmi_set_nic_filter(amdsmi_nic_filter_t mode);
 
 /**
  *  @brief Retrieves BUS information for the NIC
@@ -10636,7 +10638,7 @@ amdsmi_status_t amdsmi_get_nic_port_info(amdsmi_processor_handle processor_handl
  *
  *  @ingroup tagNicInfo
  *
- *  @platform{host} @platform{gpu_bm_linux}
+ *  @platform{gpu_bm_linux}
  *
  *  amdsmi_nic_port_t::ifindex holds one byte; this returns the whole value.
  *
@@ -10739,7 +10741,7 @@ amdsmi_status_t amdsmi_get_nic_fw_info(amdsmi_processor_handle processor_handle,
  *
  *  @ingroup tagNicInfo
  *
- *  @platform{host} @platform{gpu_bm_linux}
+ *  @platform{gpu_bm_linux}
  *
  *  @note Health and port-split are read over devlink (libnl3); temperature via
  *  sysfs/hwmon. A metric the NIC does not expose is reported through reserved values
@@ -10762,11 +10764,11 @@ amdsmi_status_t amdsmi_get_nic_telemetry(amdsmi_processor_handle processor_handl
  *
  *  @ingroup tagNicInfo
  *
- *  @platform{host} @platform{gpu_bm_linux}
+ *  @platform{gpu_bm_linux}
  *
  *  @details One record is returned per readable hwmon attribute (input, min, max, lcrit, crit,
- *  emergency, cap). Values are the raw hwmon integers in the record's unit. A NIC with no hwmon
- *  node reports zero records and ::AMDSMI_STATUS_SUCCESS.
+ *  emergency, shutdown, cap). Values are the raw hwmon integers in the record's unit. A NIC with no
+ * hwmon node reports zero records and ::AMDSMI_STATUS_SUCCESS.
  *
  *  @param[in] processor_handle NIC for which to query
  *
@@ -10819,7 +10821,7 @@ amdsmi_status_t amdsmi_get_nic_port_statistics(amdsmi_processor_handle processor
  *
  *  AMDSMI_NIC_STAT_SCOPE_EXTENDED is a superset of AMDSMI_NIC_STAT_SCOPE_DEFAULT.
  *
- *  @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ *  @cond @tag{gpu_bm_linux} @endcond
  */
 typedef enum {
   AMDSMI_NIC_STAT_SCOPE_DEFAULT = 0,
@@ -10841,8 +10843,8 @@ typedef enum {
  *  between different NIC vendors and driver/fw versions. The statistic names are
  *  preserved as provided by the underlying driver implementation.
  *
- *  The counter set is the tier chosen for @p processor_handle with
- *  amdsmi_set_nic_stat_scope(), AMDSMI_NIC_STAT_SCOPE_DEFAULT until set.
+ *  Reads the AMDSMI_NIC_STAT_SCOPE_DEFAULT counter set. Use
+ *  amdsmi_get_nic_vendor_statistics_with_scope() to choose the tier.
  *
  *  @param[in] processor_handle NIC for which to query
  *  @param[in] port_index index of the NIC port to query
@@ -10865,24 +10867,37 @@ amdsmi_status_t amdsmi_get_nic_vendor_statistics(amdsmi_processor_handle process
                                                  amdsmi_nic_stat_t* stats);
 
 /**
- *  @brief Select the vendor statistics tier returned for a NIC handle
+ *  @brief Retrieve vendor specific statistics for the NIC port in the given tier
  *
  *  @ingroup tagNicInfo
  *
- *  @platform{host} @platform{gpu_bm_linux}
+ *  @platform{gpu_bm_linux}
  *
- *  Applies to later amdsmi_get_nic_vendor_statistics() calls on @p processor_handle. The
- *  setting is per handle; callers that share a handle across threads must agree on the tier.
+ *  Same as amdsmi_get_nic_vendor_statistics(), with the tier passed in the call instead of
+ *  fixed to the default.
  *
- *  @param[in] processor_handle NIC to configure
+ *  @param[in] processor_handle NIC for which to query
+ *  @param[in] port_index index of the NIC port to query
  *  @param[in] scope AMDSMI_NIC_STAT_SCOPE_DEFAULT for the driver's default counter set,
  *  AMDSMI_NIC_STAT_SCOPE_EXTENDED for the full set (a superset). Any other value returns
  *  ::AMDSMI_STATUS_INVAL
+ *  @param[in,out] num_stats pointer to the number of statistics
+ *    - Input: maximum number of statistics that stats array can hold; ignored if stats is NULL
+ *    - Output: number of statistics available
+ *  @param[out] stats pointer to array of amdsmi_nic_stat_t structures to be filled
+ *    - If NULL, only num_stats is filled with the count of available statistics
+ *    - If not NULL, must be allocated by user with at least num_stats elements. When there are
+ *      more statistics, the first num_stats are filled and ::AMDSMI_STATUS_INSUFFICIENT_SIZE
+ *      is returned
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on failure
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, including a driver with no
+ *    statistics (num_stats is 0). ::AMDSMI_STATUS_NOT_FOUND if @p port_index is past the last
+ *    port, ::AMDSMI_STATUS_API_FAILED if the driver's statistics could not be read, non-zero on
+ *    other failure
  */
-amdsmi_status_t amdsmi_set_nic_stat_scope(amdsmi_processor_handle processor_handle,
-                                          amdsmi_nic_stat_scope_t scope);
+amdsmi_status_t amdsmi_get_nic_vendor_statistics_with_scope(
+    amdsmi_processor_handle processor_handle, uint32_t port_index, amdsmi_nic_stat_scope_t scope,
+    uint32_t* num_stats, amdsmi_nic_stat_t* stats);
 
 /** @} End tagNicInfo */
 

@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -19,12 +20,14 @@
 #include <variant>
 #include <vector>
 
+#include "amd_smi/impl/nic/amd_smi_nic_interface.h"
 #include "smi_devlink_netlink.h"
 #include "smi_ethtool_ioctl.h"
 #include "smi_nic_system.h"
 #include "smi_nic_telemetry.h"
 #include "smi_nic_testing.h"
 #include "smi_sysfs.h"
+#include "vendors/vendor_registry.h"
 
 struct smi_nic_ctx {
   std::unique_ptr<SmiNicSystem> nic_system;
@@ -101,6 +104,97 @@ smi_nic_status_t smi_nic_destroy_context(smi_nic_ctx_t ctx) {
   }
 }
 
+namespace {
+
+auto to_shim_vendor(NicVendor vendor) -> smi_nic_vendor_t {
+  switch (vendor) {
+    case NicVendor::AMD:
+      return SMI_NIC_VENDOR_AMD;
+    case NicVendor::Broadcom:
+      return SMI_NIC_VENDOR_BROADCOM;
+    case NicVendor::Unknown:
+      break;
+  }
+  return SMI_NIC_VENDOR_UNKNOWN;
+}
+
+}  // namespace
+
+namespace {
+
+// Resolves the NIC under the context lock and hands it to read; the shim getters that only
+// copy one value out of a NIC share this.
+auto read_nic_value(smi_nic_ctx_t ctx, uint64_t device,
+                    const std::function<void(const SmiNic&)>& read) -> smi_nic_status_t {
+  if (!ctx) {
+    return SMI_NIC_STATUS_WRONG_PARAM;
+  }
+  auto* nic_system = get_nic_system_from_context(ctx);
+  if (!nic_system) {
+    return SMI_NIC_STATUS_NOT_INIT;
+  }
+  const auto lock = std::lock_guard<std::mutex>{ctx->ctx_mutex};
+  const auto* nic = nic_system->get_nic_by_bdf(device);
+  if (!nic) {
+    return SMI_NIC_STATUS_NOT_FOUND;
+  }
+  read(*nic);
+  return SMI_NIC_STATUS_SUCCESS;
+}
+
+}  // namespace
+
+smi_nic_status_t smi_get_nic_kind(smi_nic_ctx_t ctx, uint64_t device, uint8_t* kind) {
+  if (!kind) {
+    return SMI_NIC_STATUS_WRONG_PARAM;
+  }
+  return read_nic_value(ctx, device,
+                        [&](const SmiNic& nic) { *kind = static_cast<uint8_t>(nic.kind()); });
+}
+
+smi_nic_status_t smi_get_nic_capability(smi_nic_ctx_t ctx, uint64_t device, uint32_t* capability) {
+  if (!capability) {
+    return SMI_NIC_STATUS_WRONG_PARAM;
+  }
+  return read_nic_value(ctx, device, [&](const SmiNic& nic) { *capability = nic.capabilities(); });
+}
+
+static_assert(static_cast<int>(amd::smi::nic::pci::LinkType_t::Unknown) ==
+              SMI_NIC_LINK_TYPE_UNKNOWN);
+static_assert(static_cast<int>(amd::smi::nic::pci::LinkType_t::Pcie) == SMI_NIC_LINK_TYPE_PCIE);
+static_assert(static_cast<int>(amd::smi::nic::pci::LinkType_t::Numa) == SMI_NIC_LINK_TYPE_NUMA);
+static_assert(static_cast<int>(amd::smi::nic::pci::LinkType_t::Xnuma) == SMI_NIC_LINK_TYPE_XNUMA);
+
+smi_nic_status_t smi_topo_get_nic_link_type(smi_nic_ctx_t ctx, uint64_t device_src,
+                                            uint64_t device_dst, smi_nic_link_type_t* type) {
+  if (!type) {
+    return SMI_NIC_STATUS_WRONG_PARAM;
+  }
+  return read_nic_value(ctx, device_src, [&](const SmiNic& nic) {
+    // LinkType_t carries the shim enumerators' values.
+    *type = static_cast<smi_nic_link_type_t>(nic.link_type(device_dst));
+  });
+}
+
+smi_nic_status_t smi_nic_driver_loaded(smi_nic_vendor_t vendor) {
+  if ((vendor != SMI_NIC_VENDOR_AMD) && (vendor != SMI_NIC_VENDOR_BROADCOM)) {
+    return SMI_NIC_STATUS_WRONG_PARAM;
+  }
+
+  // A vendor can have several plugins (Pensando and UALoE are both AMD); any one loaded counts.
+  try {
+    for (const auto& plugin : make_default_vendor_plugins()) {
+      if ((to_shim_vendor(plugin->vendor()) == vendor) &&
+          plugin->is_driver_present(DriverType::Main)) {
+        return SMI_NIC_STATUS_SUCCESS;
+      }
+    }
+  } catch (const std::exception&) {
+    return SMI_NIC_STATUS_ERROR;
+  }
+  return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+}
+
 smi_nic_status_t smi_discover_nics(smi_nic_ctx_t ctx, smi_nic_discovery_t* discovery) {
   if (!ctx || !discovery) {
     return SMI_NIC_STATUS_WRONG_PARAM;
@@ -128,6 +222,7 @@ smi_nic_status_t smi_discover_nics(smi_nic_ctx_t ctx, smi_nic_discovery_t* disco
     for (const auto* nic : nics) {
       std::snprintf(discovery->devices[index].bdf, SMI_NIC_MAX_STRING_LENGTH, "%s",
                     nic->bdf().c_str());
+      discovery->devices[index].vendor = to_shim_vendor(nic->vendor());
       index++;
     }
 
@@ -249,9 +344,6 @@ smi_nic_status_t smi_get_nic_asic_info(smi_nic_ctx_t ctx, uint64_t device,
   }
   std::snprintf(info->serial_number, SMI_NIC_MAX_STRING_LENGTH, "%s",
                 serial.empty() ? kNotAvailable : serial.c_str());
-
-  info->type = static_cast<uint8_t>(nic->kind());
-  info->capability = nic->capabilities();
 
   return SMI_NIC_STATUS_SUCCESS;
 }
@@ -657,8 +749,15 @@ smi_nic_status_t smi_get_nic_port_statistics_list(smi_nic_ctx_t ctx, uint64_t de
 }
 
 smi_nic_status_t smi_get_nic_vendor_statistics_count(smi_nic_ctx_t ctx, uint64_t device,
-                                                     uint32_t port_index,
-                                                     smi_nic_stat_scope_t scope, uint32_t* count) {
+                                                     uint32_t port_index, uint32_t* count) {
+  return smi_get_nic_vendor_statistics_count_with_scope(ctx, device, port_index,
+                                                        SMI_NIC_STAT_SCOPE_DEFAULT, count);
+}
+
+smi_nic_status_t smi_get_nic_vendor_statistics_count_with_scope(smi_nic_ctx_t ctx, uint64_t device,
+                                                                uint32_t port_index,
+                                                                smi_nic_stat_scope_t scope,
+                                                                uint32_t* count) {
   if (!ctx || !count) {
     return SMI_NIC_STATUS_WRONG_PARAM;
   }
@@ -699,8 +798,16 @@ smi_nic_status_t smi_get_nic_vendor_statistics_count(smi_nic_ctx_t ctx, uint64_t
 }
 
 smi_nic_status_t smi_get_nic_vendor_statistics_list(smi_nic_ctx_t ctx, uint64_t device,
-                                                    uint32_t port_index, smi_nic_stat_scope_t scope,
+                                                    uint32_t port_index,
                                                     smi_nic_stat_info_t* stats) {
+  return smi_get_nic_vendor_statistics_list_with_scope(ctx, device, port_index,
+                                                       SMI_NIC_STAT_SCOPE_DEFAULT, stats);
+}
+
+smi_nic_status_t smi_get_nic_vendor_statistics_list_with_scope(smi_nic_ctx_t ctx, uint64_t device,
+                                                               uint32_t port_index,
+                                                               smi_nic_stat_scope_t scope,
+                                                               smi_nic_stat_info_t* stats) {
   if (!ctx || !stats) {
     return SMI_NIC_STATUS_WRONG_PARAM;
   }
@@ -876,9 +983,24 @@ smi_nic_status_t smi_nic_create_context_for_testing(smi_nic_ctx_t* ctx,
   return SMI_NIC_STATUS_SUCCESS;
 }
 
+void smi_nic_telemetry_from_snapshot_for_testing(
+    const amd::smi::nic::telemetry::NicTelemetrySnapshot& snapshot,
+    smi_nic_telemetry_t* telemetry) {
+  *telemetry = {};
+  telemetry->temperature.asic_temp_c = snapshot.temperature.asic_temp_c;
+  telemetry->temperature.transceiver_temp_c = snapshot.temperature.transceiver_temp_c;
+  telemetry->temperature.board_temp_c = snapshot.temperature.board_temp_c;
+  telemetry->health.state = snapshot.health.state;
+  telemetry->health.error_count = snapshot.health.error_count;
+  std::snprintf(telemetry->health.reporter, sizeof(telemetry->health.reporter), "%s",
+                snapshot.health.reporter);
+  telemetry->port_split.splittable = snapshot.port_split.splittable;
+  telemetry->port_split.split_count = snapshot.port_split.split_count;
+}
+
 smi_nic_status_t smi_get_nic_telemetry(smi_nic_ctx_t ctx, uint64_t device,
-                                       amd::smi::nic::telemetry::NicTelemetrySnapshot* snapshot) {
-  if (!ctx || !snapshot) {
+                                       smi_nic_telemetry_t* telemetry) {
+  if (!ctx || !telemetry) {
     return SMI_NIC_STATUS_WRONG_PARAM;
   }
 
@@ -897,8 +1019,10 @@ smi_nic_status_t smi_get_nic_telemetry(smi_nic_ctx_t ctx, uint64_t device,
   // as a failure, so there is no unsuccessful result to branch on here.
   // The devlink client allocates netlink messages that throw; keep that off the C ABI boundary.
   try {
-    amd::smi::nic::telemetry::NicTelemetry telemetry(amd::nic::netlink::create_devlink_client());
-    *snapshot = telemetry.get_snapshot(*nic).value;
+    amd::smi::nic::telemetry::NicTelemetry telemetry_reader(
+        amd::nic::netlink::create_devlink_client());
+    const auto snapshot = telemetry_reader.get_snapshot(*nic).value;
+    smi_nic_telemetry_from_snapshot_for_testing(snapshot, telemetry);
   } catch (const std::bad_alloc&) {
     return SMI_NIC_STATUS_NO_RESOURCE;
   } catch (...) {
@@ -907,8 +1031,37 @@ smi_nic_status_t smi_get_nic_telemetry(smi_nic_ctx_t ctx, uint64_t device,
   return SMI_NIC_STATUS_SUCCESS;
 }
 
-smi_nic_status_t smi_get_nic_fw_info(smi_nic_ctx_t ctx, uint64_t device,
-                                     amd::nic::netlink::DevlinkDeviceInfo* info) {
+namespace {
+
+auto to_shim_fw_version_type(uint8_t devlink_type) -> smi_nic_fw_version_type_t {
+  switch (static_cast<amd::nic::netlink::DevlinkVersionType>(devlink_type)) {
+    case amd::nic::netlink::DevlinkVersionType::Running:
+      return SMI_NIC_FW_VERSION_TYPE_RUNNING;
+    case amd::nic::netlink::DevlinkVersionType::Stored:
+      return SMI_NIC_FW_VERSION_TYPE_STORED;
+    case amd::nic::netlink::DevlinkVersionType::Fixed:
+      break;
+  }
+  return SMI_NIC_FW_VERSION_TYPE_FIXED;
+}
+
+}  // namespace
+
+void smi_nic_fw_info_from_devlink_for_testing(const amd::nic::netlink::DevlinkDeviceInfo& device,
+                                              smi_nic_fw_info_t* info) {
+  *info = {};
+  const auto count = std::min<size_t>(device.version_count, SMI_NIC_MAX_FW_VERSIONS);
+  for (size_t i = 0; i < count; ++i) {
+    info->versions[i].type = to_shim_fw_version_type(device.versions[i].type);
+    std::snprintf(info->versions[i].name, sizeof(info->versions[i].name), "%s",
+                  device.versions[i].name);
+    std::snprintf(info->versions[i].version, sizeof(info->versions[i].version), "%s",
+                  device.versions[i].value);
+  }
+  info->count = static_cast<uint32_t>(count);
+}
+
+smi_nic_status_t smi_get_nic_fw_info(smi_nic_ctx_t ctx, uint64_t device, smi_nic_fw_info_t* info) {
   if (!ctx || !info) {
     return SMI_NIC_STATUS_WRONG_PARAM;
   }
@@ -939,7 +1092,7 @@ smi_nic_status_t smi_get_nic_fw_info(smi_nic_ctx_t ctx, uint64_t device,
       return SMI_NIC_STATUS_NOT_SUPPORTED;
     }
 
-    *info = dev.value;
+    smi_nic_fw_info_from_devlink_for_testing(dev.value, info);
   } catch (const std::bad_alloc&) {
     return SMI_NIC_STATUS_NO_RESOURCE;
   } catch (...) {
@@ -948,10 +1101,29 @@ smi_nic_status_t smi_get_nic_fw_info(smi_nic_ctx_t ctx, uint64_t device,
   return SMI_NIC_STATUS_SUCCESS;
 }
 
-smi_nic_status_t smi_get_nic_hwmon_sensors(
-    smi_nic_ctx_t ctx, uint64_t device,
-    std::vector<amd::smi::nic::hwmon::SensorRecord_t>* records) {
-  if (!ctx || !records) {
+smi_nic_status_t smi_nic_sensor_info_from_records_for_testing(
+    const std::vector<amd::smi::nic::hwmon::SensorRecord_t>& records, smi_nic_sensor_info_t* info) {
+  *info = {};
+  const auto count = std::min<size_t>(records.size(), SMI_NIC_MAX_SENSORS);
+  for (size_t i = 0; i < count; ++i) {
+    const auto& record = records[i];
+    auto& sensor = info->sensors[i];
+    sensor.category = static_cast<uint32_t>(record.category);
+    sensor.attribute = static_cast<uint32_t>(record.attribute);
+    sensor.unit = static_cast<uint32_t>(record.unit);
+    sensor.channel = record.channel;
+    sensor.instance = record.instance;
+    std::snprintf(sensor.label, sizeof(sensor.label), "%s", record.label.c_str());
+    sensor.value = record.value;
+  }
+  info->count = static_cast<uint32_t>(count);
+  return (records.size() > SMI_NIC_MAX_SENSORS) ? SMI_NIC_STATUS_NO_RESOURCE
+                                                : SMI_NIC_STATUS_SUCCESS;
+}
+
+smi_nic_status_t smi_get_nic_hwmon_sensors(smi_nic_ctx_t ctx, uint64_t device,
+                                           smi_nic_sensor_info_t* info) {
+  if (!ctx || !info) {
     return SMI_NIC_STATUS_WRONG_PARAM;
   }
 
@@ -968,7 +1140,7 @@ smi_nic_status_t smi_get_nic_hwmon_sensors(
 
   // The scan allocates strings and vectors; keep a throw off the C ABI boundary.
   try {
-    *records = nic->hwmon_sensors();
+    return smi_nic_sensor_info_from_records_for_testing(nic->hwmon_sensors(), info);
   } catch (const std::bad_alloc&) {
     return SMI_NIC_STATUS_NO_RESOURCE;
   } catch (...) {

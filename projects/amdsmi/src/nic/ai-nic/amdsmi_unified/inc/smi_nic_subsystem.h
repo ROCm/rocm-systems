@@ -24,6 +24,10 @@ enum class DriverType {
  * Base interface for a per-vendor NIC discovery plugin. Concrete plugins live
  * under src/vendors/<name>/ and are wired in via make_default_vendor_plugins().
  */
+// Where the kernel lists bound drivers; a plugin appends the driver name.
+constexpr auto kPciDriversDir = "/sys/bus/pci/drivers/";
+constexpr auto kAuxDriversDir = "/sys/bus/auxiliary/drivers/";
+
 class SmiNicSubsystem {
  public:
   virtual ~SmiNicSubsystem() = default;
@@ -35,11 +39,15 @@ class SmiNicSubsystem {
   // resolves by which plugin owns the NIC.
   virtual NicVendor vendor() const = 0;
   virtual bool is_driver_loaded(const std::string& bdf, DriverType driver_type) const = 0;
+  // True when the vendor's driver directory for driver_type exists. No device is checked, so a
+  // loaded driver with nothing bound still counts. A plugin without a driver of that kind says no.
+  virtual auto is_driver_present(DriverType /*driver_type*/) const -> bool { return false; }
   virtual const std::vector<std::unique_ptr<SmiNic>>& get_nics() const = 0;
 
  protected:
   std::pair<uint16_t, uint16_t> read_pci_ids(const std::string& sysfs_bus_path) const;
   bool was_bdf_resolved(const std::string& symlink, std::string& bdf) const;
+  auto is_directory_present(const std::string& path) const -> bool;
 
   // True if the driver bound at driver_dir claims bdf. is_canonical_match=false:
   // a direct child entry named <bdf> counts (PCI driver dir). is_canonical_match=true:

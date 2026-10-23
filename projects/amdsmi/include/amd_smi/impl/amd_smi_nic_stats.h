@@ -12,6 +12,7 @@
 #include "amd_smi/amdsmi.h"
 
 // Included bare: the header opens its own extern "C".
+#include "amd_smi/impl/nic/amd_smi_nic_interface.h"
 #include "amd_smi/impl/nic/amdsmi_unified/interface/smi_nic_interface.h"
 
 namespace amd::smi {
@@ -36,6 +37,21 @@ inline auto was_nic_stat_scope_resolved(int scope, smi_nic_stat_scope_t* nic_sco
   return false;
 }
 
+/** The public link type for how the NIC library says a NIC connects to a device. */
+inline auto to_amdsmi_link_type(smi_nic_link_type_t link) -> amdsmi_link_type_t {
+  switch (link) {
+    case SMI_NIC_LINK_TYPE_PCIE:
+      return AMDSMI_LINK_TYPE_PCIE;
+    case SMI_NIC_LINK_TYPE_NUMA:
+      return AMDSMI_LINK_TYPE_NUMA;
+    case SMI_NIC_LINK_TYPE_XNUMA:
+      return AMDSMI_LINK_TYPE_XNUMA;
+    case SMI_NIC_LINK_TYPE_UNKNOWN:
+      break;
+  }
+  return AMDSMI_LINK_TYPE_UNKNOWN;
+}
+
 /**
  * Copies the entries that fit into the caller's array and sets *num_stats to the number available.
  * INSUFFICIENT_SIZE tells the caller the array was too small, so it can resize and call again.
@@ -55,12 +71,11 @@ inline auto copy_nic_stats(const smi_nic_stat_info_t& info, uint32_t* num_stats,
 /**
  * Copies the hwmon records that fit into the caller's array and sets *num_sensors to the number
  * available. With no array only the count is reported. INSUFFICIENT_SIZE tells the caller the
- * array was too small. Duck-typed on the record fields so this header needs no internal include.
+ * array was too small.
  */
-template <typename Records>
-inline auto copy_nic_sensors(const Records& records, uint32_t* num_sensors,
+inline auto copy_nic_sensors(const smi_nic_sensor_info_t& info, uint32_t* num_sensors,
                              amdsmi_nic_sensor_t* sensors) -> amdsmi_status_t {
-  const auto available = static_cast<uint32_t>(records.size());
+  const auto available = info.count;
   if (sensors == nullptr) {
     *num_sensors = available;
     return AMDSMI_STATUS_SUCCESS;
@@ -68,16 +83,14 @@ inline auto copy_nic_sensors(const Records& records, uint32_t* num_sensors,
 
   const auto num_copied = std::min(available, *num_sensors);
   for (auto i = uint32_t{0}; i < num_copied; ++i) {
-    const auto& record = records[i];
+    const auto& record = info.sensors[i];
     sensors[i] = {};
-    sensors[i].category =
-        static_cast<amdsmi_metric_category_t>(static_cast<uint32_t>(record.category));
-    sensors[i].name =
-        static_cast<amdsmi_nic_sensor_name_t>(static_cast<uint32_t>(record.attribute));
-    sensors[i].unit = static_cast<amdsmi_metric_unit_t>(static_cast<uint32_t>(record.unit));
+    sensors[i].category = static_cast<amdsmi_metric_category_t>(record.category);
+    sensors[i].name = static_cast<amdsmi_nic_sensor_name_t>(record.attribute);
+    sensors[i].unit = static_cast<amdsmi_metric_unit_t>(record.unit);
     sensors[i].channel = record.channel;
     sensors[i].instance = record.instance;
-    std::snprintf(sensors[i].label, sizeof(sensors[i].label), "%s", record.label.c_str());
+    std::snprintf(sensors[i].label, sizeof(sensors[i].label), "%s", record.label);
     sensors[i].value = record.value;
   }
 
