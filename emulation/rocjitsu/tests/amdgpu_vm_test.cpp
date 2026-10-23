@@ -9981,8 +9981,9 @@ TEST(Pm4DispatchTest, InstructionFailureReclaimsWgpReservationsForOtherQueues) {
   constexpr uint32_t kFirstQueue = 71;
   for (uint32_t dispatch_threads : {1u, 2u}) {
     for (uint32_t failed_workgroups : {1u, 2u, 3u}) {
-      for (uint32_t kWgpLdsBytes : {64u * 1024, 128u * 1024}) {
-        SCOPED_TRACE(std::format("threads={} workgroups={}", dispatch_threads, failed_workgroups));
+      for (uint32_t wgp_lds_bytes : {64u * 1024, 128u * 1024}) {
+        SCOPED_TRACE(std::format("threads={} workgroups={} wgp_lds_bytes={}", dispatch_threads,
+                                 failed_workgroups, wgp_lds_bytes));
         VmFixture f;
         ASSERT_NO_FATAL_FAILURE(
             f.initialize("rdna1", 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128));
@@ -10009,7 +10010,7 @@ TEST(Pm4DispatchTest, InstructionFailureReclaimsWgpReservationsForOtherQueues) {
           };
           uint32_t rsrc1 = 0, rsrc2 = 0;
           RJ_AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE, 1);
-          RJ_AMDHSA_BITS_SET(rsrc2, COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE, kWgpLdsBytes / 512);
+          RJ_AMDHSA_BITS_SET(rsrc2, COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE, wgp_lds_bytes / 512);
           packet(amdgpu::Pm4Opcode::SetShReg, {amdgpu::kPm4ComputeNumThreadX, 64, 1, 1});
           packet(amdgpu::Pm4Opcode::SetShReg, {amdgpu::kPm4ComputePgmLo, uint32_t(code >> 8), 0});
           packet(amdgpu::Pm4Opcode::SetShReg, {amdgpu::kPm4ComputePgmRsrc1, rsrc1, rsrc2});
@@ -10045,13 +10046,13 @@ TEST(Pm4DispatchTest, InstructionFailureReclaimsWgpReservationsForOtherQueues) {
         EXPECT_EQ(observed->completed_dispatches, 1u);
         EXPECT_GT(observed->cancellations, 0u);
         EXPECT_EQ(observed->launches, observed->cancellations + observed->halts);
-        if (kWgpLdsBytes == 64 * 1024 && failed_workgroups == 2) {
+        if (wgp_lds_bytes == 64 * 1024 && failed_workgroups == 2) {
           EXPECT_EQ(observed->launches, 6u);
           EXPECT_EQ(observed->cancellations, 4u);
         }
         ASSERT_EQ(snapshots->snapshots().size(), 2u);
         for (const auto &wave : snapshots->snapshots())
-          EXPECT_GE(wave.lds_size_bytes, kWgpLdsBytes);
+          EXPECT_GE(wave.lds_size_bytes, wgp_lds_bytes);
       }
     }
   }

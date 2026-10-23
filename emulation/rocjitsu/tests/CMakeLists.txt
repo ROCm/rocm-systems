@@ -3772,8 +3772,8 @@ if(RJ_ENABLE_HIP_TESTS)
                 RJ_HIP_VECTOR_ADD_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_vector_add_test"
                 RJ_HIP_MEMCPY_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_memcpy_test"
                 RJ_HIP_RCCL_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_rccl_test"
-                RJ_INTERPOSER_DUP_BIN="$<TARGET_FILE:interposer_dup_test>"
                 RJ_HIP_INSTRUCTION_FAILURE_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_instruction_failure_test"
+                RJ_INTERPOSER_DUP_BIN="$<TARGET_FILE:interposer_dup_test>"
                 RJ_DAEMON_LOGGING_CONFIG="${CMAKE_CURRENT_BINARY_DIR}/daemon_logging_config.json"
                 RJ_DAEMON_LOGGING_SINK_TOKEN="__RJ_DAEMON_SINK_DIR__"
                 RJ_INSTALLED_DAEMON_BIN="${_rj_installed_rocjitsu_bin}"
@@ -3783,8 +3783,8 @@ if(RJ_ENABLE_HIP_TESTS)
                 RJ_INSTALLED_HIP_VECTOR_ADD_BIN="hip_vector_add_test"
                 RJ_INSTALLED_HIP_MEMCPY_BIN="hip_memcpy_test"
                 RJ_INSTALLED_HIP_RCCL_BIN="hip_rccl_test"
-                RJ_INSTALLED_INTERPOSER_DUP_BIN="interposer_dup_test"
                 RJ_INSTALLED_HIP_INSTRUCTION_FAILURE_BIN="hip_instruction_failure_test"
+                RJ_INSTALLED_INTERPOSER_DUP_BIN="interposer_dup_test"
                 RJ_INSTALLED_DAEMON_LOGGING_CONFIG="${_rj_installed_daemon_logging_config}"
         )
         target_link_libraries(daemon_test PRIVATE GTest::gtest_main)
