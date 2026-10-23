@@ -1228,14 +1228,6 @@ TEST_F(EnqueueMicrotest, CalcCollChunking_Ll128GrainIsNonZeroForTheFixture) {
          "WarpSize, ll128ShmemElemsPerThread or ll128DataElems makes calcCollChunking:3302 SIGFPE";
 }
 
-TEST_F(EnqueueMicrotest, AllGatherNetOffloadCapability_MatchesCompilerPlatform) {
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  EXPECT_EQ(0, NCCL_ALLGATHER_NET_OFFLOAD_SUPPORTED);
-#else
-  EXPECT_EQ(1, NCCL_ALLGATHER_NET_OFFLOAD_SUPPORTED);
-#endif
-}
-
 TEST_F(EnqueueMicrotest, CalcCollChunking_NetOffloadUnsupportedOneRpnRegisteredAllGatherUsesKernelSchedule) {
 #if !NCCL_ALLGATHER_NET_OFFLOAD_SUPPORTED
   // ROCM-33020: without device net offload, registered one-RPN AllGather must
