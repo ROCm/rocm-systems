@@ -103,7 +103,8 @@ Useful `report` options:
 | `--warmup N` | `5` | Skip collectives with sequence number below N |
 | `--threshold-pct` | `5` | Pause share of wall time that counts |
 | `--threshold-fps` | `100` | Pause frames per second that count, on NICs that count frames only |
-| `--threshold-marks-pct` | `1` | Share of packets ECN-marked or answered with a CNP that counts |
+| `--threshold-ecn-pct` | `1` | Share of received packets ECN-marked that counts |
+| `--threshold-cnps` | `100` | CNPs sent plus received per second that count |
 | `--link-busy-pct` | `80` | Link use that counts as busy |
 | `--link-other-pct` | `20` | Non-RCCL share of a busy link that counts as shared |
 | `--per-nic` | off | One row per NIC instead of only the worst |
@@ -121,7 +122,8 @@ Then there is one row per rank and (collective, message size):
 | `txPause` | Our NIC paused the switch, as % of wall time (host side) |
 | `loss` | Out-of-sequence drops, sequence-error NAKs, ACK timeouts |
 | `rnr` | Receiver-not-ready / out-of-receive-buffer events |
-| `mark%` | ECN-marked packets or CNPs as % of packets |
+| `ecn%` | ECN-marked packets as % of packets received |
+| `cnp/s` | CNPs sent plus received per second of wall time |
 | `link%`, `rccl%` | How busy the link was, and how much of that was this job's RCCL traffic |
 | `B/coll` | RCCL bytes sent per collective on that NIC |
 | `cmpl p50/p99` | Work-request completion latency percentiles |
@@ -139,7 +141,7 @@ Findings:
 | `FABRIC-LOSS` | Drops, NAKs or timeouts on the wire |
 | `HOST-RNR` | The receiver was not ready |
 | `LINK-SHARED` | The link was busy, mostly with traffic that is not this job's RCCL |
-| `CONGESTION-MARKS` | ECN marks or CNPs above the threshold |
+| `CONGESTION-MARKS` | ECN marks or CNPs above their thresholds |
 | `CLEAN` | Every counter below threshold. The time went elsewhere; accl's own classification is shown |
 | `INCONCLUSIVE` | Samples are missing, or only an upper bound crosses a threshold |
 
@@ -153,6 +155,15 @@ host part is possible but not proven.
 
 **Notes** at the bottom explain anything that weakens the numbers, such as
 overlapping collectives or counters that did not refresh.
+
+### Why CNPs are a rate, not a percent
+
+A switch marks a share of the packets it queues, so ECN is shown as a percent
+of packets. CNPs are different: a NIC sends at most one per flow every few
+tens of microseconds, however many marked packets arrive. Even a flow that is
+slowed the whole time sees CNPs for well under 1% of its packets, so CNPs are
+shown per second instead. On a congested mlx5 fabric they ran at several
+hundred per second per NIC, and at 0 when the fabric was quiet.
 
 ### NICs that count only pause frames
 
