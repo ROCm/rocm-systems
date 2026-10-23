@@ -289,6 +289,9 @@ class VirtualGPU : public device::VirtualDevice {
     //! Wait for the curent active signal. Can idle the queue
     bool WaitCurrent();
 
+    //! Process the timing of the completed signal before its reuse. Requires the execution() lock
+    void ProcessSignalTiming(ProfilingSignal* signal);
+
     //! Update current active engine
     void SetActiveEngine(HwQueueEngine engine = HwQueueEngine::Compute) { engine_ = engine; }
     HwQueueEngine GetActiveEngine() const { return engine_; }
@@ -586,6 +589,7 @@ class VirtualGPU : public device::VirtualDevice {
       bool attach_signal = false);
   void submitNativeFn(amd::NativeFnCommand& cmd);
   void submitMarker(amd::Marker& cmd);
+  void CompleteCpuWait(amd::Command& cmd) override;
   void submitAccumulate(amd::AccumulateCommand& cmd);
   void submitAcquireExtObjects(amd::AcquireExtObjectsCommand& cmd);
   void submitReleaseExtObjects(amd::ReleaseExtObjectsCommand& cmd);

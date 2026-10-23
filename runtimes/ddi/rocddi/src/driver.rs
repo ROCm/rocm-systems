@@ -398,6 +398,8 @@ pub(crate) trait PcSamplingResource {
 /// Allocation, virtual memory, queue, and instrumentation capabilities are
 /// independent. A GPU backend need not implement them to expose these queries.
 pub(crate) trait GpuDriver: Driver {
+    /// Queries the process-wide XNACK mode without changing it.
+    fn xnack_enabled(&self, device: &Self::DeviceState) -> Result<bool, Error>;
     /// Sets the native VM's persisting L2 reservation in bytes.
     fn set_persisting_l2_cache_size(
         &self,
