@@ -108,10 +108,12 @@ bool Memory::create(Resource::MemoryType memType, Resource::CreateParams* params
       result = false;
       break;
     }
+    apuReserved_ = apuPlaced ? size() : 0;
     // Create a resource in PAL
     result = Resource::create(memType, params, forceLinear);
     if (apuPlaced) {
       dev().ApuReleaseReservation(size());
+      apuReserved_ = 0;
     }
     if (!result) {
       size_t freeMemory[2];

@@ -484,6 +484,7 @@ class Resource {
                  Pal::gpusize svmPtr);
 
   uint elementSize_;  //!< Size of a single element in bytes
+  Pal::gpusize apuReserved_ = 0;  //!< APU device memory reserved for this resource while created
 
   //! Returns PAL image object
   Pal::IImage* image() const { return image_; }

@@ -2001,18 +2001,18 @@ bool Device::ApuPlaceDeviceMemory(Pal::gpusize size, Resource::MemoryType* memTy
   // REMOTE_ALLOC, set for tiny carve-outs too, makes Resource::create place it in host RAM
   const bool hostOnly = settings().remoteAlloc_ || (*memType == Resource::RemoteUSWC);
   // Reserves the size until the allocation is accounted, so concurrent ones can't overcommit.
-  // The counters include cached allocations, which hold their memory too.
+  // An allocation is accounted before its reservation ends under this lock, so the counters read
+  // here never miss one. They include cached allocations, which hold their memory too.
   auto reserve = [&](bool host) {
     const Pal::gpusize limit = host ? apuBorrowLimit_ : apuCarveOutLimit_;
-    Pal::gpusize reserved = apuReserved_.load();
-    do {
-      const Pal::gpusize used =
-          host ? allocedMem[Pal::GpuHeapGartUswc] + allocedMem[Pal::GpuHeapGartCacheable]
-               : allocedMem[Pal::GpuHeapLocal] + allocedMem[Pal::GpuHeapInvisible];
-      if (used + reserved + size > limit) {
-        return false;
-      }
-    } while (!apuReserved_.compare_exchange_weak(reserved, reserved + size));
+    std::lock_guard<std::mutex> lock(apuReserveLock_);
+    const Pal::gpusize used =
+        host ? allocedMem[Pal::GpuHeapGartUswc] + allocedMem[Pal::GpuHeapGartCacheable]
+             : allocedMem[Pal::GpuHeapLocal] + allocedMem[Pal::GpuHeapInvisible];
+    if (used + apuReserved_ + size > limit) {
+      return false;
+    }
+    apuReserved_ += size;
     return true;
   };
   if (!hostOnly && reserve(false)) {

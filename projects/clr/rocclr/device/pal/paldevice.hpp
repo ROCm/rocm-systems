@@ -699,7 +699,10 @@ class Device : public NullDevice {
                             bool releaseCache = true) const;
 
   //! Ends a reservation of ApuPlaceDeviceMemory, once the allocation is accounted or failed
-  void ApuReleaseReservation(Pal::gpusize size) const { apuReserved_ -= size; }
+  void ApuReleaseReservation(Pal::gpusize size) const {
+    std::lock_guard<std::mutex> lock(apuReserveLock_);
+    apuReserved_ -= size;
+  }
 
   Pal::gpusize TotalAlloc() const {
     Pal::gpusize local = allocedMem[Pal::GpuHeapLocal] - resourceCache().persistentCacheSize();
@@ -784,7 +787,9 @@ class Device : public NullDevice {
       heaps_[Pal::GpuHeapCount];           //!< Information about heaps, returned from PAL
   Pal::gpusize maxFrameBufferAllocation_;  //!< To reserve some memory in frame buffer
   Pal::gpusize apuCarveOutLimit_ = 0;      //!< Device memory an APU's carve-out holds
-  mutable std::atomic<Pal::gpusize> apuReserved_{0};      //!< APU device memory being allocated
+  //! Guards admission against the counters together with the end of a reservation
+  mutable std::mutex apuReserveLock_;
+  mutable Pal::gpusize apuReserved_ = 0;                  //!< APU device memory being allocated
   std::map<Pal::IQueue*, QueueRecycleInfo*> queue_pool_;  //!< Pool of PAL queues for recycling
   amd::Program* trap_handler_ = nullptr;  //!< Trap handler program for debugger setup
 };
