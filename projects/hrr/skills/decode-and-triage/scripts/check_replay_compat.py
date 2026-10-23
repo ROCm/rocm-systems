@@ -276,7 +276,9 @@ def _parse_rocm_smi(text: str) -> tuple[int, list[str], list[str]]:
 def _parse_amd_smi_static(text: str) -> tuple[int, list[str], list[str]]:
     """Parse `amd-smi static --asic`: a `GPU: N` heading per device."""
     count = len(re.findall(r"^GPU: \d+\s*$", text, re.M))
-    archs = [a.lower() for a in re.findall(r"^\s*TARGET_GRAPHICS_VERSION: (\S+)", text, re.M)]
+    # amd-smi prints N/A when the ASIC query fails; "" keeps the index and skips the arch check.
+    archs = ["" if a == "N/A" else a.lower()
+             for a in re.findall(r"^\s*TARGET_GRAPHICS_VERSION: (\S+)", text, re.M)]
     names = [n.strip() for n in re.findall(r"^\s*MARKET_NAME: (.+)$", text, re.M)]
     return count, archs, names
 
@@ -769,7 +771,7 @@ def render_report(report: CompatReport) -> str:
             f"- comgr_version: {r.comgr_version or 'n/a'}",
         ]
         if r.gpu_archs:
-            lines.append(f"- gpu_archs: {', '.join(r.gpu_archs)}")
+            lines.append(f"- gpu_archs: {', '.join(a or 'n/a' for a in r.gpu_archs)}")
     if report.blocks:
         lines += ["", "## Blocking issues"]
         lines += [f"- {b}" for b in report.blocks]

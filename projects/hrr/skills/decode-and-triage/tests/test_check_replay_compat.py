@@ -191,6 +191,38 @@ class CheckReplayCompatTests(unittest.TestCase):
         self.assertEqual(env.gpu_names, ["AMD Instinct MI300A"])
 
     @mock.patch("check_replay_compat.probe_comgr_version", return_value=None)
+    @mock.patch("check_replay_compat._run")
+    @mock.patch(
+        "check_replay_compat.shutil.which",
+        side_effect=lambda name: "/opt/rocm/bin/amd-smi" if name == "amd-smi" else None,
+    )
+    def test_amd_smi_unknown_arch_skips_arch_check(
+        self, _which_mock: mock.Mock, run_mock: mock.Mock, _comgr_mock: mock.Mock
+    ) -> None:
+        # amd-smi prints N/A when the ASIC query fails (amdsmi_cli/subcommands/static.py).
+        run_mock.return_value = mock.Mock(
+            stdout=(
+                "GPU: 0\n"
+                "    ASIC:\n"
+                "        TARGET_GRAPHICS_VERSION: N/A\n"
+                "GPU: 1\n"
+                "    ASIC:\n"
+                "        TARGET_GRAPHICS_VERSION: gfx942\n"
+            ),
+            stderr="",
+        )
+        with mock.patch.object(crc, "_IS_WIN", False):
+            env = crc.probe_host_replay_env()
+        self.assertEqual(env.gpu_archs, ["", "gfx942"])
+        capture = crc.CaptureMetadata(
+            device_count=2, devices=SAMPLE_METADATA["devices"]
+        )
+        report = crc.evaluate_compat(capture, env, gpu=0, strict_arch=True)
+        self.assertTrue(report.ok)
+        self.assertFalse(report.warnings)
+        self.assertIn("- gpu_archs: n/a, gfx942", crc.render_report(report))
+
+    @mock.patch("check_replay_compat.probe_comgr_version", return_value=None)
     @mock.patch("check_replay_compat._find_hip_exe", return_value=None)
     def test_probe_windows_reads_arch_and_version_like_capture(
         self, _exe_mock: mock.Mock, _comgr_mock: mock.Mock
