@@ -1025,6 +1025,17 @@ in `src/gtest-internal-inl.h`, which is not installed), and a reimplementation
 drifts — the first one here selected `DISABLED_` cases that gtest would not have
 run.
 
+Each child is then handed an **exact `:`-joined list of its own case names**,
+never the caller's pattern: the pattern is written against qualified names, and
+in a multi-arm binary (`rccl-UnitTestsMicroInit*`) it would also match the
+identically named cases of the arm it was meant to exclude. Two exceptions keep
+that list manageable — when every case a binary could run is selected it is sent
+`*` instead, which is shorter in the logs and is why its `DISABLED_` cases do
+not force a list; and a list longer than ~60,000 characters is split across
+several invocations of that binary, because the kernel caps one argv entry at
+`MAX_ARG_STRLEN` (128 KiB) and rejects a longer `exec` outright with `E2BIG`,
+which the biggest binary's 2,199 case names would exceed.
+
 For coverage, each child inherits `LLVM_PROFILE_FILE` and drops its own
 `.profraw` as usual. What a harness cannot know is which binaries those
 profiles came from — `llvm-cov` needs an `--object` per binary and silently

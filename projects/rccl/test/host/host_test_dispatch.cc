@@ -6,33 +6,10 @@
 
 // rccl-UnitTestsHostAll -- one gtest-shaped front door for every host-only test binary.
 //
-// The host tree deliberately builds many small binaries rather than one: a binary exists
-// wherever a production TU gates code at the preprocessor (the three init.cc arms) or needs a
-// macro set binary-wide (WarpSpeed), and every new unit under test tends to bring another. That
-// is good for the tests and bad for everything downstream, because each consumer then has to
-// keep its own copy of the binary list and they all drift (test/host/run_host_tests.sh, the coco
-// lane config, the coco llvm-cov --object list).
-//
-// This binary removes those lists. It discovers its sibling binaries at RUN time, speaks the
-// subset of the gtest CLI its callers use (--gtest_list_tests, --gtest_filter, --gtest_output),
-// forks each binary that owns a selected case, and merges their JUnit XML into the single report
-// the caller asked for. Adding a host test binary therefore needs no change anywhere else.
-//
-// Case names are qualified with the owning binary's distinguishing suffix, e.g.
-//
-//     rccl-UnitTestsMicroInit-uncached   ->  MicroInitUncached/InitMicrotest.CommAllocHonoursUncached
-//
-// in gtest's own Prefix/Suite.Case shape, so `*InitMicrotest.*` still selects it. The
-// qualification is not cosmetic: the three init arms and the two enqueue arms publish identical
-// Suite.Case names, and without it their results would collide into one identity when every
-// binary reports through one front door.
-//
-// Coverage: each child inherits LLVM_PROFILE_FILE, whose %p expands per process, so the children
-// drop their own .profraw with no help from here. What the harness cannot know is which binaries
-// those profiles came from -- llvm-cov needs an --object for each, and a profile whose object is
-// missing is silently discarded. So every binary this dispatcher runs is appended to
-// coverage-objects.txt next to the profiles, making the test tree, not the harness, the source of
-// truth for the object set.
+// Discovers its rccl-UnitTestsMicro* siblings at run time, forks the ones owning a selected
+// case, and merges their reports into the one the caller asked for. What it is for, how the
+// case names are qualified, and how the coverage manifest is used: see MICROTEST_README.md,
+// "rccl-UnitTestsHostAll".
 
 #include <gtest/gtest.h>
 
@@ -233,17 +210,9 @@ class NoopTest : public ::testing::Test {
 
 // The indices of *candidates* that *filter* selects, decided by gtest itself.
 //
-// The dispatcher has to know which binary owns a selected case BEFORE it forks anything, which
-// means answering "does this filter select this name?" in this process. Rather than reimplement
-// gtest's filter grammar -- which is not just ':'-joined globs with one '-' half, but also the
-// DISABLED_ rule, sharding and whatever the next release adds -- this registers the published
-// names as empty tests and lets gtest resolve the filter against them, then reads back
-// should_run(). gtest does not expose a matcher any other way: UnitTestOptions::FilterMatchesTest
-// is declared only in src/gtest-internal-inl.h, which is not installed.
-//
-// The empty tests are "run" (the default printer is released first, so nothing is printed): the
-// filter is applied inside UnitTest::Run(), and should_run() is meaningless before it. For the
-// ~7000 cases of the whole host tree that costs about 15ms.
+// The empty tests have to be "run" to be selected: should_run() is meaningless until the filter
+// is applied inside UnitTest::Run(). Why gtest resolves this rather than a matcher of our own:
+// MICROTEST_README.md, "rccl-UnitTestsHostAll".
 std::vector<size_t> resolveFilter(const std::vector<CandidateCase> &candidates,
                                   const std::string &filter, bool also_run_disabled)
 {
@@ -329,15 +298,9 @@ std::vector<Selection> group(const std::string &directory,
 
 // The --gtest_filter(s) to hand *selection*'s binary, one per invocation of it.
 //
-// Normally an exact ':'-joined list of case names, never the caller's own pattern: that pattern
-// is written against the qualified names and would, in a multi-arm binary, also match the cases
-// of the arm it was meant to exclude. Two exceptions:
-//
-//   * every case the binary could run selected -> "*", much shorter in the logs. The DISABLED_
-//     cases it holds are no reason to fall back to a list: naming them explicitly would not run
-//     them either, but it would push the biggest binary's filter past the exec limit and split
-//     its run into several invocations for nothing;
-//   * a list past kMaxFilterChars -> split, because exec rejects an over-long argument.
+// An exact list of case names, never the caller's pattern, which would also select the
+// identically named cases of a multi-arm binary's other arm. Why "*" and why the split:
+// MICROTEST_README.md, "rccl-UnitTestsHostAll".
 std::vector<std::string> childFilters(const Selection &selection)
 {
     if (selection.cases.size() == selection.runnable) {
@@ -957,8 +920,8 @@ using namespace rccl_host_dispatch;
 
 // A temporary directory for the children's reports, removed when the guard goes out of scope.
 //
-// mkdtemp and not std::filesystem: the standard has no atomic create-unique-directory, and
-// inventing a name to hand fs::create_directory races every other dispatcher running beside us.
+// mkdtemp and not std::filesystem: the standard has no atomic create-unique-directory, and an
+// invented name races the other dispatchers running beside us.
 class ReportDirectory {
 public:
     ReportDirectory()
