@@ -207,6 +207,18 @@ public:
                           hsa_amd_svm_attribute_pair_t* attribs, size_t count) override;
   hsa_status_t SvmPrefetch(const core::Agent& dstAgent, void* base, size_t size) override;
 
+  /// @brief Compute CWSR (Context Save/Restore) size when DRM ioctl fails.
+  ///
+  /// @param [in] gpu_agent The GPU agent for which to compute CWSR size.
+  /// @param [out] cwsr_info Computed CWSR size information.
+  /// @return HSA_STATUS_SUCCESS on success, error code on failure.
+  ///
+  /// @details Fallback calculation when amdgpu_query_cwsr_info fails.
+  /// Uses GPU properties (CU count, SIMD count, etc.) to compute required
+  /// context save area size. Matches thunk's update_ctx_save_restore_size logic.
+  hsa_status_t ComputeCwsrSizeFallback(const GpuAgent& gpu_agent,
+                                       struct drm_amdgpu_info_cwsr* cwsr_info) const;
+
   private:
   /// @brief Allocate (if needed) doorbell memory
   ///
