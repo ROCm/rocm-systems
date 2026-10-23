@@ -54,11 +54,7 @@ jobs:
           config: |
             paths-ignore:
               - projects/aqlprofile/**
-            # Unpinned action and reusable workflow references are reported by
-            # zizmor's `unpinned-uses` audit instead, which can allow branch
-            # refs for `ROCm/TheRock/*` only (.github/scan_tools_configs/zizmor.yml).
-            # CodeQL's equivalent query can only trust a whole owner, not one
-            # repository.
+            # Unpinned action and reusable workflow references are reported by zizmor's `unpinned-uses` audit instead.
             query-filters:
               - exclude:
                   id: actions/unpinned-tag
