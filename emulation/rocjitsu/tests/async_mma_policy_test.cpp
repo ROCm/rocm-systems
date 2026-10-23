@@ -28,6 +28,7 @@
 
 #include <array>
 #include <atomic>
+#include <bit>
 #include <chrono>
 #include <memory>
 #include <semaphore>
@@ -351,6 +352,150 @@ public:
 private:
   BlockedMmaState &state_;
 };
+
+TEST(AsyncMmaPolicyTest, Dpp16InstructionsDrainAndStopAnAsyncWindow) {
+  auto mma_decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  const auto mma_words =
+      cdna5::build_vop3p(cdna5::kVWmmaF3216x16x64Fp8Fp8Vop3p,
+                         {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3});
+  std::unique_ptr<Instruction> mma(decode_valid(*mma_decoder, mma_words.data()));
+
+  auto cdna4_decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  const auto vop1_base =
+      cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = amdgpu::SRC_DPP, .vdst = 202});
+  auto vop1_raw =
+      std::bit_cast<cdna4::Vop1VopDppMachineInst>(std::array<uint32_t, 2>{vop1_base[0], 0});
+  vop1_raw.vsrc0 = 200;
+  vop1_raw.dpp_ctrl = amdgpu::dpp::ROW_SHR1;
+  vop1_raw.bank_mask = vop1_raw.row_mask = 0xf;
+
+  const auto vop2_base =
+      cdna4::build_vop2(cdna4::kVAddF32Vop2, {.src0 = amdgpu::SRC_DPP, .vsrc1 = 201, .vdst = 202});
+  auto vop2_raw =
+      std::bit_cast<cdna4::Vop2VopDppMachineInst>(std::array<uint32_t, 2>{vop2_base[0], 0});
+  vop2_raw.vsrc0 = 200;
+  vop2_raw.dpp_ctrl = amdgpu::dpp::ROW_SHR1;
+  vop2_raw.bank_mask = vop2_raw.row_mask = 0xf;
+
+  auto cdna5_decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  const auto vop3_base = cdna5::build_vop3(
+      cdna5::kVAddF32Vop3,
+      {.vdst = 202, .src0 = amdgpu::SRC_DPP, .src1 = 256 + 201, .src2 = 256 + 202});
+  auto vop3_raw = std::bit_cast<cdna5::Vop3VopDpp16MachineInst>(
+      std::array<uint32_t, 3>{vop3_base[0], vop3_base[1], 0});
+  vop3_raw.vsrc0 = 200;
+  vop3_raw.dpp_ctrl = amdgpu::dpp::ROW_SHR1;
+  vop3_raw.bank_mask = vop3_raw.row_mask = 0xf;
+
+  std::vector<std::unique_ptr<Instruction>> boundaries;
+  boundaries.emplace_back(
+      decode_valid(*cdna4_decoder, reinterpret_cast<const uint32_t *>(&vop1_raw)));
+  boundaries.emplace_back(
+      decode_valid(*cdna4_decoder, reinterpret_cast<const uint32_t *>(&vop2_raw)));
+  boundaries.emplace_back(
+      decode_valid(*cdna5_decoder, reinterpret_cast<const uint32_t *>(&vop3_raw)));
+
+  amdgpu::GpuMemory memory("dpp_boundary_memory");
+  amdgpu::L2Cache l2("dpp_boundary_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 256;
+  config.async_resources = std::make_shared<mc::ExecutionResources>(1);
+  auto cu = amdgpu::ComputeUnitCore::create("dpp_boundary_cu", config, &memory, &l2);
+  auto *wave = cu->dispatch_wf(0, 0, 106, 256);
+  ASSERT_NE(wave, nullptr);
+  wave->set_exec(0xffffffff);
+
+  for (const auto &boundary : boundaries) {
+    SCOPED_TRACE(boundary->disassemble());
+    amdgpu::RegisterModifiers modifiers;
+    boundary->amdgpu_register_modifiers(modifiers);
+    ASSERT_TRUE(modifiers.dpp);
+    ASSERT_FALSE(modifiers.dpp8);
+
+    BlockedMmaState state;
+    amdgpu::AsyncInstructionWindow window(*cu, *wave);
+    std::unique_ptr<Instruction> blocked = std::make_unique<BlockedMma>(*mma, state);
+    ASSERT_TRUE(window.submit_mma(blocked));
+    state.started.acquire();
+
+    std::binary_semaphore returned{0};
+    bool returned_before_completion = false;
+    std::thread releaser([&] {
+      returned_before_completion = returned.try_acquire_for(std::chrono::milliseconds(50));
+      state.unblock.release();
+    });
+    window.before(*boundary);
+    returned.release();
+    releaser.join();
+
+    EXPECT_FALSE(returned_before_completion);
+    EXPECT_FALSE(window.pending());
+    EXPECT_TRUE(window.stopped());
+    window.drain();
+  }
+}
+
+TEST(AsyncMmaPolicyTest, IndependentPlainAndDpp8InstructionsKeepTheAsyncWindowOpen) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  const auto mma_words =
+      cdna5::build_vop3p(cdna5::kVWmmaF3216x16x64Fp8Fp8Vop3p,
+                         {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3});
+  std::unique_ptr<Instruction> mma(decode_valid(*decoder, mma_words.data()));
+
+  const auto plain_words = cdna5::build_vop3(
+      cdna5::kVAddF32Vop3, {.vdst = 202, .src0 = 256 + 200, .src1 = 256 + 201, .src2 = 256 + 202});
+  std::unique_ptr<Instruction> plain(decode_valid(*decoder, plain_words.data()));
+  const auto dpp8_base =
+      cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = amdgpu::SRC_DPP8_FI_0, .vdst = 202});
+  auto dpp8_raw =
+      std::bit_cast<cdna5::Vop1VopDpp8MachineInst>(std::array<uint32_t, 2>{dpp8_base[0], 0});
+  dpp8_raw.vsrc0 = 200;
+  dpp8_raw.lane_sel_0 = 0;
+  dpp8_raw.lane_sel_1 = 1;
+  dpp8_raw.lane_sel_2 = 2;
+  dpp8_raw.lane_sel_3 = 3;
+  dpp8_raw.lane_sel_4 = 4;
+  dpp8_raw.lane_sel_5 = 5;
+  dpp8_raw.lane_sel_6 = 6;
+  dpp8_raw.lane_sel_7 = 7;
+  std::unique_ptr<Instruction> dpp8(
+      decode_valid(*decoder, reinterpret_cast<const uint32_t *>(&dpp8_raw)));
+  amdgpu::RegisterModifiers dpp8_modifiers;
+  dpp8->amdgpu_register_modifiers(dpp8_modifiers);
+  ASSERT_FALSE(dpp8_modifiers.dpp);
+  ASSERT_TRUE(dpp8_modifiers.dpp8);
+
+  amdgpu::GpuMemory memory("dpp_control_memory");
+  amdgpu::L2Cache l2("dpp_control_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 256;
+  config.async_resources = std::make_shared<mc::ExecutionResources>(1);
+  auto cu = amdgpu::ComputeUnitCore::create("dpp_control_cu", config, &memory, &l2);
+  auto *wave = cu->dispatch_wf(0, 0, 106, 256);
+  ASSERT_NE(wave, nullptr);
+  wave->set_exec(0xffffffff);
+
+  for (const auto *control : {plain.get(), dpp8.get()}) {
+    SCOPED_TRACE(control->disassemble());
+    BlockedMmaState state;
+    amdgpu::AsyncInstructionWindow window(*cu, *wave);
+    std::unique_ptr<Instruction> blocked = std::make_unique<BlockedMma>(*mma, state);
+    ASSERT_TRUE(window.submit_mma(blocked));
+    state.started.acquire();
+
+    window.before(*control);
+    EXPECT_TRUE(window.pending());
+    EXPECT_FALSE(window.stopped());
+    state.unblock.release();
+    window.drain();
+  }
+}
 
 TEST(AsyncMmaPolicyTest, WaitIdleDrainsBlockedMmaBeforeReturningToIssue) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
