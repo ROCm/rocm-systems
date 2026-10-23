@@ -9138,7 +9138,11 @@ class CodeGenerator:
         return '\n'.join(L)
 
     def _gen_ds_gds_guard(self, *, require_gds: bool = False) -> str:
-        """Reject unsupported DS modes before any execution side effects."""
+        """Generate a DS/GDS rejection prefix before execution side effects.
+
+        By default, reject unsupported GDS mode (gds=1). With require_gds=True,
+        generate the GWS guard that rejects gds=0 instead.
+        """
         if not self._enc_has_field('gds'):
             return ''
         condition = '!inst_.gds' if require_gds else 'inst_.gds'
