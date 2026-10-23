@@ -441,6 +441,9 @@ ncclResult_t ncclGinSetDefaultBackend(struct ncclComm* comm, uint64_t globalBitM
   struct ncclGinState* ginState = &comm->sharedRes->ginState;
   int initialNumActiveBackends = ginState->numActiveBackends;
   int currentNumActiveBackends = 0;
+  // Finalized backends are kept for ncclGinFinalize alone: leave them in place
+  // and do not re-arm supported, which would let a new shared split reconnect.
+  if (ginState->finalized) return ncclSuccess;
   std::lock_guard<std::mutex> lock(pluginMutex);
 
   // Close ALL non-global backends and compact the array

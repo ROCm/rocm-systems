@@ -19,6 +19,7 @@
 #include "channel.h"
 #include "rocmwrap.h"
 #include "rccl_vars.h"
+#include "rccl_arch_thresholds.h"
 #include "profiler.h"
 #include "transport.h"
 #include "register_inline.h"
@@ -650,6 +651,7 @@ ncclResult_t ncclPrepareTasks(struct ncclComm* comm, bool* algoNeedConnect, bool
   int fnOpTyIndices[ncclNumFuncs * ncclNumDevRedOps * ncclNumTypes];
   int fnOpTyCount = 0;
 
+  rcclSetCeAllReduceFastPath(comm);
   // Skip symmetric kernels for cross-clique
   if (comm->symmetricSupport && !comm->p2pCrossClique) {
     NCCLCHECK(ncclMakeSymmetricTaskList(comm, task, &planner->collSymTaskQueue, &task));
@@ -1326,19 +1328,36 @@ static bool rcclP2pBatchEligible(struct ncclComm* comm, ssize_t sendBytes, ssize
                               rcclParamP2pBatchThreshold());
 }
 
+// Number of the p2pnChannelsPerPeer parts a task of collAPI uses and connects. Multi-node AINIC scatter
+// uses and connects only the most parts whose flows from the root still fit the pool; connecting more
+// slows it down. A user-set nChannelsPerNetPeer is kept, as in ncclTopoComputeP2pChannels. Depend only
+// on values both ends of a pair share, or they disagree on the parts.
+int rcclP2pTaskParts(struct ncclComm* comm, ncclFunc_t collAPI) {
+  if (collAPI == ncclFuncScatter && comm->nNodes > 1 && comm->config.nChannelsPerNetPeer == NCCL_CONFIG_UNDEF_INT &&
+      rcclUseAinic()) {
+    int partsThatFit = comm->p2pnChannels / (comm->nRanks - 1);
+    return std::min(comm->p2pnChannelsPerPeer, partsThatFit >= 1 ? pow2Down(partsThatFit) : 1);
+  }
+  return comm->p2pnChannelsPerPeer;
+}
+
 static int rcclP2pPolicyChannels(struct ncclComm* comm, struct ncclTaskP2p* task) {
   struct Policy {
     const char* arch;
     ncclFunc_t collAPI;
     int nChannels;
   };
-  // This workaround targets direct P2P/IPC traffic only. When P2P is disabled,
+  if (task == nullptr) return -1;
+  // The Scatter part limit is about network flows, so it applies with P2P disabled too.
+  int taskParts = rcclP2pTaskParts(comm, task->collAPI);
+  if (taskParts < comm->p2pnChannelsPerPeer) return taskParts;
+  // The policies below target direct P2P/IPC traffic only. When P2P is disabled,
   // preserve the normal channel selection for the fallback transport.
-  if (task == nullptr || ncclParamP2pDisable()) return -1;
+  if (ncclParamP2pDisable()) return -1;
   constexpr Policy policies[] = {
     // Two-channel full-mesh traffic has high variance on gfx110x. Keep the
-    // workaround specific to AllToAll so Gather, Scatter, and SendRecv retain
-    // their higher-throughput multi-channel paths.
+    // workaround specific to AllToAll so Gather, SendRecv and Scatter (outside the
+    // AINIC part limit above) retain their higher-throughput multi-channel paths.
     {"gfx110", ncclFuncAlltoAll, 1},
   };
   for (const auto& policy : policies) {
@@ -1371,6 +1390,10 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   // Keep policy direction-local so a different task paired in the same planner
   // round cannot change the channel count selected by this task's peer.
   int kChannels[2] = {rcclP2pPolicyChannels(comm, p2pTasks[0]), rcclP2pPolicyChannels(comm, p2pTasks[1])};
+  int taskParts[2];
+  for (int dir = 0; dir < 2; dir++)
+    taskParts[dir] =
+      p2pTasks[dir] ? std::min(nChannelsMax, rcclP2pTaskParts(comm, p2pTasks[dir]->collAPI)) : nChannelsMax;
   bool batchP2P = rcclP2pBatchEligible(comm, sendBytes, recvBytes);
   // Keep work-fusion size-gated (batchP2P) but select the channel map from the
   // communicator flag. Keying the map to eligibility collapsed large AllToAll
@@ -1431,6 +1454,7 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
         ncclP2pChannelForPart(comm->p2pnChannels, base, part, nChannelsMax, comm->nNodes, comm->p2pChannelShiftSize);
       struct ncclChannelPeer** channelPeers = comm->channels[channelId].peers;
       for (int dir = 0; dir <= 1; dir++) {
+        if (part >= taskParts[dir]) continue;
         int peerRank = dir ? sendRank : recvRank;
         struct ncclConnector* conn =
           dir ? &channelPeers[peerRank]->send[connIndex[dir]] : &channelPeers[peerRank]->recv[connIndex[dir]];
@@ -1545,7 +1569,7 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
         if (bytes[dir] > 0 && proxySameProcess[dir] && protocol[dir] == NCCL_PROTO_SIMPLE && (!pxnUsed)) {
           int regFlag = 0;
           NCCLCHECKGOTO(ncclCalloc(&handles[dir], nChannelsMax), ret, cleanup);
-          for (int part = 0; part < nChannelsMax; part++) {
+          for (int part = 0; part < taskParts[dir]; part++) {
             int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, part, nChannelsMax, comm->nNodes,
                                                   comm->p2pChannelShiftSize);
             struct ncclChannelPeer** channelPeers = comm->channels[channelId].peers;
@@ -2437,6 +2461,7 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
         plan->ceCollArgs->sendWin = task->sendWin;
         plan->ceCollArgs->recvWin = task->recvWin;
         plan->ceCollArgs->useDda = task->useDda;
+        plan->ceCollArgs->allReduceFastPath = task->ceAllReduceFastPath;
         plan->ceCollArgs->ddaPeerBases = task->ddaPeerBases;
         plan->ceCollArgs->ddaUserRecvBuff = task->ddaUserRecvBuff;
         plan->ceCollArgs->ddaCopyBackBytes = task->ddaCopyBackBytes;
@@ -3854,14 +3879,18 @@ static ncclResult_t p2pTaskAppend(struct ncclComm* comm, struct ncclInfo* info, 
   // Mark channels that need pre-connect
   if (comm->rank != peer) {
     if (!(isSendNotRecv ? planner->peers[peer].sendSeen : planner->peers[peer].recvSeen)) {
+      int nParts = rcclP2pTaskParts(comm, collAPI);
       // planner->peers[peer].send/recvSeen is private to each comm, so we need to set it anyway.
-      (isSendNotRecv ? planner->peers[peer].sendSeen : planner->peers[peer].recvSeen) = true;
+      // Leave it clear when only some parts are connected, so a later task to this peer that uses
+      // all of them still connects the rest.
+      if (nParts == comm->p2pnChannelsPerPeer)
+        (isSendNotRecv ? planner->peers[peer].sendSeen : planner->peers[peer].recvSeen) = true;
       int round = 0;
       while (peer != (isSendNotRecv ? comm->p2pSchedule[round].sendRank : comm->p2pSchedule[round].recvRank)) {
         round += 1;
       }
       uint8_t base = ncclP2pChannelBaseForRound(comm, round, rcclEffectiveP2pBatchEnable(comm));
-      for (int c = 0; c < comm->p2pnChannelsPerPeer; c++) {
+      for (int c = 0; c < nParts; c++) {
           int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, c, comm->p2pnChannelsPerPeer, comm->nNodes,
                                                 comm->p2pChannelShiftSize);
           if (isSendNotRecv) {
@@ -4119,6 +4148,7 @@ static ncclResult_t ceCollTaskAppend(struct ncclComm* comm, struct ncclInfo* inf
   t->sendbuff = info->sendbuff;
   t->recvbuff = ddaRecvBase != nullptr ? ddaRecvBase : info->recvbuff;
   t->useDda = ddaRecvBase != nullptr;
+  t->ceAllReduceFastPath = false;
   t->ddaPeerBases = ddaPeerBasesHost;
   // DDA path stages results in scratch (t->recvbuff); remember the real user
   // recvbuff. The copy-back size is collective-specific and computed at the copy
@@ -4699,8 +4729,10 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           // message must fit the 2-shot window and the allocated buffer.
           size_t totalBytes = info->count * ncclTypeSize(info->datatype);
           const size_t twoShotMax = rcclCeAr2ShotMax(comm);
-          if (twoShotMax == 0 || totalBytes > twoShotMax || totalBytes > comm->ceColl.ceArMaxBytes ||
-              !rcclForceCeAllReduceEnabled(comm) || !comm->symmetricSupport || comm->nNodes > 1) {
+          const size_t twoShotMin = rcclCeAr2ShotMin(comm);
+          if (!rcclWindowFits(totalBytes, twoShotMin, twoShotMax) || totalBytes > comm->ceColl.ceArMaxBytes ||
+              !rcclForceCeAllReduceEnabled(comm) || !comm->symmetricSupport || comm->nNodes > 1 ||
+              !ncclCeImplemented(info->coll, info->op, info->datatype) || !ncclDevrIsOneLsaTeam(comm)) {
             ceAllReduceFits = false;
           } else {
             ceAllReduceFits = true;
@@ -4715,20 +4747,24 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       bool ceArSymRegistered =
         info->coll == ncclFuncAllReduce && rcclForceCeAllReduceEnabled(comm) && ceAvailable && !hasSysmemSegment;
       size_t recvBytes = (size_t)comm->nRanks * info->count * ncclTypeSize(info->datatype);
-      // Sym-window CE AllGather (-R 2) above the symk/CE crossover, without requiring
-      // CTAPolicy=ZERO to flip the whole comm to CE mode. Same predicate the
-      // rcclSelectAllGather Branch #3 reports, so selection and dispatch agree.
+      // Sym-window CE AllGather (-R 2) above the symk/CE crossover. Mirrors
+      // rcclSelectAllGather Branch #3 (ZERO || window) so ncclAllGatherConfig
+      // and the selector agree. The selector's !symEligible guard prevents CE
+      // from overriding symk; enqueue.cc never computes symEligible and has no
+      // competing symk path here, so window alone suffices.
       bool ceAgSymRegistered =
         !rcclNcclAlgoEnvIsSet() &&
         info->coll == ncclFuncAllGather && ceAvailable && !hasSysmemSegment &&
-        rcclAllGatherCeRegisteredWindow(comm, recvBytes, winRegType, ceCapturing);
+        ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) ||
+         rcclAllGatherCeRegisteredWindow(comm, recvBytes, winRegType, ceCapturing));
       const bool allGatherDecided = (info->coll == ncclFuncAllGather && info->decisionValid);
       const bool alltoAllDecided = (info->coll == ncclFuncAlltoAll && info->decisionValid);
       if (info->coll == ncclFuncAllReduce && info->decisionValid) {
         // AllReduce's backend was already chosen once by rcclSelectAllReduce();
         // honor it here instead of recomputing CE eligibility. rcclSelectAllReduce
-        // step 5 reproduces develop's CE-registered condition exactly
-        // (!hasSysmemSegment && ceAvailable && ((CTAPolicy & ZERO) || force)), so
+        // step 5 reproduces both of develop's CE-append conditions exactly -- registered
+        // windows (ceAvailable && ((CTAPolicy & ZERO) || force)) and forced CE on
+        // unregistered buffers (ceAllReduceFits), each with !hasSysmemSegment -- so
         // decision.algo == RCCL_CE_REGISTERED <=> the CE branches below would fire.
         if (info->decision.algo == RCCL_CE_REGISTERED) {
           INFO(NCCL_INIT, "Taking CE collective path for AllReduce");
@@ -4881,6 +4917,16 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
   return ncclSuccess;
 }
 
+void rcclLogCollInfo(const struct ncclInfo& info) {
+  INFO(NCCL_COLL,
+       "%s: opCount %lx sendbuff %p recvbuff %p acc %p count %zu datatype %d op %d root %d comm %p [nranks=%d] stream "
+       "%p task %d globalrank %d",
+       info.opName, info.comm->opCount, info.sendbuff, info.recvbuff, info.acc, info.count, info.datatype, info.op,
+       info.root, info.comm, info.comm->nRanks, info.stream,
+       info.comm->planner.nTasksP2p + info.comm->planner.nTasksColl,
+       info.comm->localRankToRank[info.comm->localRank]);
+}
+
 ncclResult_t ncclEnqueueCheck(struct ncclInfo* info) {
   // Early-out on invalid or revoked communicator
   ncclResult_t ret = CommCheck(info->comm, info->opName, "comm");
@@ -4925,13 +4971,7 @@ ncclResult_t ncclEnqueueCheck(struct ncclInfo* info) {
   }
   NCCLCHECKGOTO(ArgsCheck(info), ret, fail);
 
-  INFO(NCCL_COLL,
-       "%s: opCount %lx sendbuff %p recvbuff %p acc %p count %zu datatype %d op %d root %d comm %p [nranks=%d] stream "
-       "%p task %d globalrank %d",
-       info->opName, info->comm->opCount, info->sendbuff, info->recvbuff, info->acc, info->count, info->datatype,
-       info->op, info->root, info->comm, info->comm->nRanks, info->stream,
-       info->comm->planner.nTasksP2p + info->comm->planner.nTasksColl,
-       info->comm->localRankToRank[info->comm->localRank]);
+  rcclLogCollInfo(*info);
   TRACE_CALL("nccl%s(%" PRIx64 ",%" PRIx64 ",%zu,%d,%d,%d,%p,%p)", info->opName,
              reinterpret_cast<int64_t>(info->sendbuff), reinterpret_cast<int64_t>(info->recvbuff), info->count,
              info->datatype, info->op, info->root, info->comm, info->stream);

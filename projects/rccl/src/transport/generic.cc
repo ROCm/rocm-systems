@@ -9,7 +9,12 @@
 #include "transport.h"
 #include "bootstrap.h"
 
+// RCCL: HIP leaves multi-segment registration off until a job opts in.
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+NCCL_PARAM(MultiSegmentRegister, "MULTI_SEGMENT_REGISTER", 0);
+#else
 NCCL_PARAM(MultiSegmentRegister, "MULTI_SEGMENT_REGISTER", 1);
+#endif
 
 ncclResult_t ncclTransportRingConnect(struct ncclComm* comm) {
   struct ringConnInfo {

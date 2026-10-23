@@ -10,13 +10,13 @@ import re
 
 import pytest
 
-from amdisa.codegen.execute.sema_lower import _INLINE_UNARY_OPS
+from amdisa.codegen.execute import float_fract, float_ldexp
+from amdisa.codegen.execute.sema_lower import _INLINE_UNARY_OPS, lower_sema_block
 from amdisa.codegen.execute.simd_codegen import (
     SIMD_VOP1_UNARY,
     local_coverage_probe,
     simd_probe_line,
 )
-from amdisa.codegen.execute.vector_alu import gen_vector_unary
 from amdisa.codegen.execute.vector_special import (
     _TRIG_PREOP_CHUNK_BITS,
     _TRIG_PREOP_TWO_OVER_PI_CHUNKS,
@@ -38,15 +38,17 @@ from amdisa.codegen.config import CodegenConfig
 from amdisa.codegen._generator import CodeGenerator
 from amdisa.gpuisa import Instruction, Operand
 from amdisa.isa_profile import Cdna5Profile, Rdna3Profile, Rdna4Profile
+from amdisa.sema_derive import derive_sema_block
+from amdisa.sema_enrich import enrich_block
+from amdisa.semantics import derive_semantics
 from amdisa.semantics import derive_semantics
 
 
 def test_cls_i32_codegen():
-    scalar = gen_vector_unary(['vdst'], ['src0'], 'cls_i32', None)
     semantic = _INLINE_UNARY_OPS['cls_i32']
     simd = SIMD_VOP1_UNARY['v_cls_i32_vop1'][2]
 
-    for emitted in (scalar, semantic, simd):
+    for emitted in (semantic, simd):
         assert '0xFFFFFFFFu' in emitted or 'static_cast<uint32_t>(-1)' in emitted
         assert 'countl_zero' in emitted or 'clz_u32_simd' in emitted
         assert 'countl_zero(abs_val)) - 1' not in emitted
@@ -113,6 +115,20 @@ def test_saturating_pack_codegen_covers_all_narrowing_modes():
 
     with pytest.raises(ValueError, match='unsupported saturating-pack operation'):
         gen_vector_sat_pack(['vdst'], ['src0'], 'unknown')
+
+
+def test_saturating_pack_vop3_writes_the_opsel_destination_half():
+    vop3 = gen_vector_sat_pack(['vdst'], ['src0'], 'u8_i16', true16_dst=True)
+    vop1 = gen_vector_sat_pack(['vdst'], ['src0'], 'u8_i16')
+    write = (
+        'write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_), result, true)'
+    )
+    assert write in vop3
+    assert 'write_lane(vdst, lane, result)' not in vop3
+    assert write not in vop1
+    # The 32-bit results of the 4-bit packs are unaffected.
+    i4 = gen_vector_sat_pack(['vdst'], ['src0'], 'i4_i8', true16_dst=True)
+    assert 'write_lane(vdst, lane, result)' in i4
 
 
 def test_perm_and_qsad_codegen_cover_multiword_results():
@@ -235,18 +251,72 @@ def test_arch_local_execute_bodies_are_not_shared():
     assert 'vector_qsad' in CodeGenerator._NON_SHAREABLE_CLASSES
 
 
+@pytest.mark.parametrize('dtype', ['f16', 'f32', 'f64'])
+def test_fract_simd_probes_use_the_shared_raw_operation(dtype):
+    fmt = f'amdgpu::fp_format::{dtype.upper()}'
+    operation = f'amdgpu::fract::Operation<{fmt}>{{amdgpu::fract::Policy::make('
+    vop1 = simd_probe_line(f'v_fract_{dtype}_vop1')
+    assert operation in vop1 and 'floor' not in vop1
+    # VOP3 FRACT deliberately has no SIMD path in any format.
+    assert simd_probe_line(f'v_fract_{dtype}_vop3') is None
+    if dtype == 'f16':
+        assert simd_probe_line('v_fract_f16_vop3', true16_vop3=True) is None
+
+
+def test_ldexp_simd_probes_use_the_shared_raw_operation():
+    operation = (
+        'amdgpu::ldexp::Operation<amdgpu::fp_format::F16>{amdgpu::ldexp::Policy::make('
+    )
+    vop2 = simd_probe_line('v_ldexp_f16_vop2')
+    # Every MODE takes the SIMD path; the helper rounds and saturates itself.
+    # Only SDWA sets OMOD on VOP2, and SDWA OMOD keeps the scalar body.
+    assert vop2 == f'  ROCJITSU_TRY_SIMD_VOP2_BINARY(uint32_t, {operation}' + (
+        'wf.fp_denorm_mode_f16_f64(), wf.fp_round_mode_f16_f64(), wf.fp16_ovfl(), '
+        'false)});'
+    )
+    vop3 = {
+        'f16': simd_probe_line('v_ldexp_f16_vop3'),
+        'f32': simd_probe_line('v_ldexp_f32_vop3'),
+        'f64': simd_probe_line('v_ldexp_f64_vop3'),
+    }
+    assert vop3['f16'].startswith(
+        f'  ROCJITSU_TRY_SIMD_VOP3_LDEXP_RAW_FP16({operation}'
+    )
+    assert simd_probe_line('v_ldexp_f16_vop3', true16_vop3=True).startswith(
+        f'  ROCJITSU_TRY_SIMD_VOP3_LDEXP_TRUE16_RAW_FP16({operation}'
+    )
+    assert vop3['f32'].startswith(
+        '  ROCJITSU_TRY_SIMD_VOP3_LDEXP_RAW_FP('
+        'amdgpu::ldexp::Operation<amdgpu::fp_format::F32>{'
+    )
+    assert vop3['f64'].startswith(
+        '  ROCJITSU_TRY_SIMD_VOP3_LDEXP_RAW_FP64('
+        'amdgpu::ldexp::Operation<amdgpu::fp_format::F64, 32>{'
+    )
+    # Effective OMOD makes a tiny result flush before scaling.
+    for dtype, line in vop3.items():
+        assert line.endswith(
+            f'amdgpu::output_modifier_policy<amdgpu::fp_format::{dtype.upper()}>'
+            '(wf, inst.inst_.omod, inst.inst_.clamp).omod != 0)});'
+        )
+
+
+@pytest.mark.parametrize('module', [float_fract, float_ldexp])
+def test_raw_operation_policies_reject_unknown_formats(module):
+    with pytest.raises(ValueError, match='bf16'):
+        module.policy_expr('bf16', *(['false'] if module is float_ldexp else []))
+
+
 def test_vop3_f16_simd_probes_split_true16_from_generic():
     add_generic = simd_probe_line('v_add_f16_vop3')
     add_true16 = simd_probe_line('v_add_f16_vop3', true16_vop3=True)
     rcp_generic = simd_probe_line('v_rcp_f16_vop3')
     rcp_true16 = simd_probe_line('v_rcp_f16_vop3', true16_vop3=True)
 
-    assert 'if (wf.fp16_ovfl())' in add_generic
-    assert 'util::f32_to_f16_ovfl_simd' in add_generic
-    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_F16' in add_generic
-    assert 'if (wf.fp16_ovfl())' in add_true16
-    assert 'util::f32_to_f16_ovfl_simd' in add_true16
-    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16' in add_true16
+    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(false,' in add_generic
+    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(true,' in add_true16
+    assert 'amdgpu::fp_mode::Arithmetic::ADD' in add_generic
+    assert 'amdgpu::fp_mode::Arithmetic::ADD' in add_true16
     assert 'if (!wf.fp16_ovfl())' not in rcp_generic
     assert 'ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16' in rcp_generic
     assert 'if (!wf.fp16_ovfl())' not in rcp_true16
@@ -261,6 +331,8 @@ def test_vop3_f16_simd_probes_split_true16_from_generic():
     div_fixup_true16 = simd_probe_line('v_div_fixup_f16_vop3', true16_vop3=True)
     assert 'if (!wf.fp16_ovfl())' not in div_fixup_true16
     assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16' in div_fixup_true16
+    assert 'F16TernaryOutputOrder::MODIFY_THEN_ROUND' in div_fixup
+    assert 'F16TernaryOutputOrder::MODIFY_THEN_ROUND' in div_fixup_true16
     fmac_generic = simd_probe_line('v_fmac_f16_vop3')
     fmac_true16 = simd_probe_line('v_fmac_f16_vop3', true16_vop3=True)
     assert fmac_generic == '  ROCJITSU_TRY_SIMD_FMAC_VOP3_MODE_FP16();'
@@ -601,7 +673,8 @@ def test_true16_special_vop3_simd_routes_use_true16_glue():
     'name', ['v_cvt_pkrtz_f16_f32_vop3', 'v_cvt_pk_rtz_f16_f32_vop3']
 )
 def test_packed_rtz_simd_applies_source_modifiers(name):
-    probes = [simd_probe_line(name)]
+    # Every probe passes the scalar body's stage object, ABS/NEG included.
+    probes = [simd_probe_line(name), simd_probe_line(name.replace('_vop3', '_vop2'))]
     local = local_coverage_probe(name)
     if name == 'v_cvt_pkrtz_f16_f32_vop3':
         assert local is not None
@@ -609,18 +682,13 @@ def test_packed_rtz_simd_applies_source_modifiers(name):
     else:
         assert local is None
     for probe in probes:
-        assert not probe.startswith('  if (!(inst.inst_.abs | inst.inst_.neg))')
-        assert 'f32_to_f16_rtz_simd' in probe
-        for index, source in enumerate(('a', 'b')):
-            absolute = f'if (inst.inst_.abs & {1 << index}u) {source} &= ~0x80000000u;'
-            negative = f'if (inst.inst_.neg & {1 << index}u) {source} ^= 0x80000000u;'
-            assert probe.index(absolute) < probe.index(negative)
-            assert probe.index(negative) < probe.index('f32_to_f16_rtz_simd')
-    assert 'inst_.abs' not in simd_probe_line(name.replace('_vop3', '_vop2'))
+        assert 'conversion)' in probe
+        assert 'conversion_pk_rtz_f16' not in probe
+        assert 'f32_to_f16_rtz_simd' not in probe
 
 
 @pytest.mark.parametrize('has_abs', [False, True])
-def test_packed_rtz_vop3_modifiers_precede_conversion(has_abs):
+def test_packed_rtz_vop3_modifiers_reach_the_shared_conversion(has_abs):
     cpp = gen_vector_cvt_pk(
         ['vdst'],
         ['src0', 'src1'],
@@ -630,13 +698,58 @@ def test_packed_rtz_vop3_modifiers_precede_conversion(has_abs):
         has_abs=has_abs,
     )
     abs_field = 'inst_.abs' if has_abs else '0u'
+    stages = f'const auto conversion = amdgpu::conversion_pk_rtz_f16(wf, {abs_field}, inst_.neg);'
+    assert cpp.startswith(f'  {stages}')
+    assert 'conversion(s0, s1)' in cpp
+    assert 'util::f32_to_f16_rtz' not in cpp
+
+
+@pytest.mark.parametrize('op', ['u16_f32', 'i16_f32'])
+@pytest.mark.parametrize('has_abs', [False, True])
+def test_packed_integer_vop3_modifiers_precede_conversion(op, has_abs):
+    cpp = gen_vector_cvt_pk(
+        ['vdst'],
+        ['src0', 'src1'],
+        'vector_cvt_pk',
+        op,
+        is_vop3=True,
+        has_abs=has_abs,
+    )
+    abs_field = 'inst_.abs' if has_abs else '0u'
     for source in (0, 1):
         modifiers = (
-            f's{source} = amdgpu::source_modifier::apply_to_float('
-            f's{source}, {source}, {abs_field}, inst_.neg);'
+            f'f{source} = amdgpu::source_modifier::apply_to_float('
+            f'f{source}, {source}, {abs_field}, inst_.neg);'
         )
         assert modifiers in cpp
-        assert cpp.index(modifiers) < cpp.index('util::f32_to_f16_rtz')
+        assert cpp.index(modifiers) < cpp.index(f'amdgpu::cvt_{op}(f0)')
+
+
+@pytest.mark.parametrize('name', ['v_cvt_i32_f64', 'v_cvt_u32_f64'])
+def test_f64_to_integer_simd_defers_source_modifiers_to_scalar(name):
+    vop3 = simd_probe_line(f'{name}_vop3')
+    # The glue carries no modifiers, so a modified encoding runs the scalar body.
+    assert vop3.startswith('  if (!inst.inst_.abs && !inst.inst_.neg) {\n')
+    assert '  ROCJITSU_TRY_SIMD_CVT_F64_TO_B32(' in vop3
+    assert 'apply_vop3_src_mod_f64' not in vop3
+    assert 'inst_.abs' not in simd_probe_line(f'{name}_vop1')
+
+
+@pytest.mark.parametrize(
+    ('name', 'operation'),
+    [
+        ('v_cvt_floor_i32_f32', 'FloorI32'),
+        ('v_cvt_flr_i32_f32', 'FloorI32'),
+        ('v_cvt_nearest_i32_f32', 'NearestI32'),
+        ('v_cvt_rpi_i32_f32', 'NearestI32'),
+    ],
+)
+def test_floor_nearest_simd_uses_shared_raw_bit_conversion(name, operation):
+    # Both forms pass the scalar body's FloorI32/NearestI32 stage object; for
+    # VOP3 it holds ABS/NEG, so a modified encoding stays on the SIMD path.
+    probe = '  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, conversion);'
+    assert simd_probe_line(f'{name}_vop1') == probe
+    assert simd_probe_line(f'{name}_vop3') == probe
 
 
 @pytest.mark.parametrize('dtype', ['f32', 'f16'])
@@ -702,3 +815,50 @@ def test_normalized_conversion_modifiers_and_single_rounding(dtype, op, has_abs)
                 assert probe.index(negative) < probe.index(conversion)
         if dtype == 'f16':
             assert 'input_policy = amdgpu::input_denormal::Policy::make(' in probe
+
+
+@pytest.mark.parametrize('has_abs', [False, True])
+def test_packed_u8_uses_the_shared_conversion(has_abs):
+    cpp = gen_vector_cvt_pk(
+        ['vdst'],
+        ['src0', 'src1', 'src2'],
+        'vector_cvt_pk_u8_f32',
+        None,
+        is_vop3=True,
+        has_abs=has_abs,
+    )
+    abs_field = 'inst_.abs' if has_abs else '0u'
+    assert cpp.startswith(
+        f'  const auto conversion = amdgpu::conversion_pk_u8(wf, {abs_field}, inst_.neg);'
+    )
+    assert 'conversion(s0, s1, s2)' in cpp
+    assert 'std::clamp' not in cpp
+    assert simd_probe_line('v_cvt_pk_u8_f32_vop3') == (
+        '  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(uint32_t, conversion);'
+    )
+    # V_CVT_PKACCUM_U8_F32 keeps its own body.
+    accumulate = gen_vector_cvt_pk(
+        ['vdst'], ['src0', 'src1'], 'vector_cvt_pk_u8_f32', None, is_vop3=True
+    )
+    assert 'conversion_pk_u8' not in accumulate
+
+
+@pytest.mark.parametrize('has_abs', [False, True])
+def test_pack_b32_f16_uses_the_shared_conversion(has_abs):
+    cpp = gen_vector_cvt_pk(
+        ['vdst'],
+        ['src0', 'src1'],
+        'vector_pack_b32_f16',
+        None,
+        opsel='inst_.opsel',
+        dtype='f16',
+        is_vop3=True,
+        has_abs=has_abs,
+    )
+    abs_field = 'inst_.abs' if has_abs else '0u'
+    assert cpp.startswith(
+        f'  const auto conversion = amdgpu::conversion_pack_b32_f16(wf, {abs_field}, inst_.neg);'
+    )
+    assert 'conversion(s0, s1)' in cpp
+    probe = simd_probe_line('v_pack_b32_f16_vop3')
+    assert probe == '  ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC(uint32_t, conversion);'

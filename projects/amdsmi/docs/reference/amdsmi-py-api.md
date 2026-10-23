@@ -500,6 +500,112 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
+### amdsmi_get_gpu_cuid_info
+
+Description: Returns the Component Unified ID (CUID) of the device together with
+its provenance. Prefer this over `amdsmi_get_gpu_device_uuid`, which returns a
+legacy device UUID rather than a CUID.
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: Dictionary with fields
+
+Field | Content
+---|---
+`primary` | Canonical CUID as a UUIDv8 string. Empty when the caller lacks the privilege to read it, since the primary payload embeds the raw serial number. An empty value is not an error
+`derived` | Derived CUID as a UUIDv8 string. Names the component without disclosing its serial, and is the value to record
+`component_type` | On-wire Component Type by name: `PLATFORM`, `CPU`, `GPU`, `NIC`, `NPU`, `STORAGE`, `MEMORY`, `GENPCIE`, `GENC`, `RACKTRAY`, `RACK`, `OTHER`, or `UNKNOWN`
+`source` | Which stage of the staged lookup answered: `DRIVER`, `LIBRARY` or `UNKNOWN`
+`auxiliary` | `True` for a temporary CUID, built from the machine ID and world-readable device information. Such a value changes when the machine ID changes and is not unique across nodes
+
+Every CUID is temporary: built from the machine ID and world-readable device
+information. A handle of a GPU in SPX reports the whole GPU's CUID, and one for
+a partition in DPX and above reports that partition's.
+The result is built from several queries, so it is not atomic under a
+topology change. If the auxiliary flag cannot be read, the call raises
+rather than reporting `False`.
+
+Exceptions that can be thrown by `amdsmi_get_gpu_cuid_info` function:
+
+* `AmdSmiParameterException`
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_NO_PERM` - The auxiliary flag cannot be read by this caller
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            info = amdsmi.amdsmi_get_gpu_cuid_info(device)
+            print("Derived CUID:", info['derived'])
+            print("Component type:", info['component_type'])
+            print("Source:", info['source'])
+            print("Auxiliary:", info['auxiliary'])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cuid_components
+
+Description: Lists every component on the node that has a CUID: the platform,
+each CPU package, each AMD GPU and GPU partition, each NPU, and each NIC
+function, ordered by component type, then BDF, then device path. Needs no
+processor handle. Every CUID is temporary, so `primary` is empty.
+
+Input parameters: `None`
+
+Output: List of dictionaries, one per component, with fields; empty list if the node has none
+
+Field | Content
+---|---
+`primary` | Primary CUID, or `""` without root
+`derived` | Derived CUID
+`component_type` | `PLATFORM`, `CPU`, `GPU`, `NIC`, ...
+`source` | `DRIVER`, `LIBRARY` or `UNKNOWN`
+`auxiliary` | `True` for a temporary CUID
+`bdf` | PCI address; for a GPU partition, the address amd-smi uses for it, as `amd-smi list` shows it; `""` for the platform and CPUs
+`device_path` | Sysfs path, or `""` for the platform
+`vendor_id` | PCI or CPUID vendor ID, `0` for the platform
+
+Exceptions that can be thrown by `amdsmi_get_cuid_components` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_PERM` - A component's auxiliary flag cannot be read by this caller
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Built without CUID support
+- `AMDSMI_STATUS_API_FAILED` - API call failed
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    for component in amdsmi.amdsmi_get_cuid_components():
+        print(component['component_type'], component['bdf'], component['derived'])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
 ### amdsmi_get_gpu_enumeration_info
 
 Description: Returns enumeration information for the given GPU
@@ -568,12 +674,8 @@ Output: Dictionary with fields
 
 Field | Content
 ---|---
-``driver_name`` |  driver name
-``driver_kernel_version`` | amdgpu kernel source version, such as ``6.19.14``
-``amdgpu_driver_version`` | amdgpu module version, such as ``31400000``
-``driver_version`` | driver version, such as ``6.19.14.31400000``
-``driver_build_version`` | active DKMS build version, such as ``2370381``
-``driver_full_version`` | composed version, such as ``6.19.14.31400000-2370381``
+`driver_name` |  driver name
+`driver_version` |  driver_version
 ``driver_date`` | driver date, such as ``2015/01/01 00:00``, or ``N/A`` when the kernel does not report one
 
 Exceptions that can be thrown by `amdsmi_get_gpu_driver_info` function:

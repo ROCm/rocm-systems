@@ -22,7 +22,6 @@
 #include <algorithm>
 #include <cstdint>
 
-#include <timemory/components/timing/backends.hpp>
 #include <timemory/hash/types.hpp>
 #include <timemory/mpl/policy.hpp>
 #include <timemory/tpls/cereal/archives.hpp>
