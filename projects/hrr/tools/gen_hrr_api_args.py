@@ -250,6 +250,9 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     # Pushes an archive-chosen offset into the runtime's argument vector; the
     # handler refuses a range that wraps or exceeds the legacy argument buffer.
     "hipSetupArgument",
+    # Records on this replay thread that the runtime holds an execution frame,
+    # which hipSetupArgument writes into and requires.
+    "hipConfigureCall",
     # Cooperative launches by host stub — the cooperative entry point, for the
     # same reason hipModuleLaunchCooperativeKernel needs it.
     "hipLaunchCooperativeKernel",

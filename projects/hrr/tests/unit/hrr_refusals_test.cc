@@ -25,6 +25,7 @@
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <thread>
 
 // Defined in hip_playback.cpp; not declared in the public header.
 hipError_t playback_hipStreamSetAttribute(PlaybackContext& ctx, const uint8_t* pl);
@@ -181,9 +182,7 @@ TEST_CASE("Unit_HRR_Refusals_Memcpy2DNoOpCopiesAreNotRefused", "[hrr]") {
  *     the 64-bit range (where offset + size wraps in size_t, the runtime's own
  *     arithmetic), one just past the buffer, and one that asks for terabytes.
  *     The handler returns hipErrorInvalidValue and its message names the call
- *     and the event's sequence number. No hipConfigureCall precedes the record,
- *     so a call that did reach the runtime would have no execution frame to
- *     write into.
+ *     and the event's sequence number.
  */
 TEST_CASE("Unit_HRR_Refusals_SetupArgumentRefusesAWrappingOrOversizedOffset", "[hrr]") {
   struct Case { uint64_t offset; uint32_t n; };
@@ -206,6 +205,34 @@ TEST_CASE("Unit_HRR_Refusals_SetupArgumentRefusesAWrappingOrOversizedOffset", "[
     CHECK(err.find("sequence number") != std::string::npos);
     CHECK(err.find("refusing the call") != std::string::npos);
   }
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - A hipSetupArgument record whose range fits the legacy argument buffer is
+ *     still refused when no hipConfigureCall has been replayed on its thread:
+ *     the runtime would write into the top of an empty execution-frame stack.
+ *     The record runs on a fresh thread, so no earlier test's configure counts.
+ */
+TEST_CASE("Unit_HRR_Refusals_SetupArgumentRefusesWithoutAConfigureCall", "[hrr]") {
+  PlaybackContext ctx;
+  hrr_test::ExactRecord<hrr_args_hipSetupArgument> rec;
+  auto* a = rec.get();
+  a->arg_present = 1;
+  a->arg_n = 8;
+  a->size = 8;
+  a->offset = 0;
+  std::memset(a->arg_bytes, 0xAB, sizeof(a->arg_bytes));
+  hipError_t r = hipSuccess;
+  const std::string err = hrr_test::capture_stderr([&] {
+    std::thread t([&] { r = hrr_playback_dispatch[HRR_API_HIPSETUPARGUMENT](ctx, rec.bytes()); });
+    t.join();
+  });
+  INFO(err);
+  CHECK(r == hipErrorInvalidValue);
+  CHECK(err.find("no hipConfigureCall") != std::string::npos);
+  CHECK(err.find("refusing the call") != std::string::npos);
 }
 
 /** @} */

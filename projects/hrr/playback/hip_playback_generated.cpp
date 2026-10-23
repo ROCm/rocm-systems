@@ -138,17 +138,7 @@ static hipError_t playback_hipChooseDeviceR0000(PlaybackContext& ctx, const uint
   return _r;
 }
 
-static hipError_t playback_hipConfigureCall(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipConfigureCall*>(payload);
-  dim3 _dim_gridDim(a->gridDim_x, a->gridDim_y, a->gridDim_z);
-  dim3 _dim_blockDim(a->blockDim_x, a->blockDim_y, a->blockDim_z);
-  hipError_t _r = (hipError_t)hipConfigureCall(_dim_gridDim, _dim_blockDim, (size_t)a->sharedMem, (hipStream_t)ctx.translate_stream(a->stream));
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipConfigureCall", a->ret);
-    return hipSuccess;
-  }
-  return _r;
-}
+extern hipError_t playback_hipConfigureCall(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipCreateSurfaceObject(PlaybackContext& ctx, const uint8_t* payload) {
   (void)payload;

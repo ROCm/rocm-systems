@@ -118,8 +118,6 @@ TEST_CASE("Unit_HRR_Slots_SetupArgumentRange", "[hrr]") {
   CHECK_FALSE(hrr::setup_argument_range_ok(UINT64_MAX, 8));
   CHECK_FALSE(hrr::setup_argument_range_ok(UINT64_MAX - 3, 8));
   CHECK_FALSE(hrr::setup_argument_range_ok(UINT64_MAX - 255, 256));
-  // offset + size wraps to a value the buffer would hold.
-  CHECK(static_cast<uint64_t>(UINT64_MAX - 3 + 8) < cap);
 }
 
 /** @} */
