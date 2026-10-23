@@ -105,10 +105,18 @@ jobs:
             --sarif-category '/workflow:amdsmi-codeql/language:cpp' \
             --output=sarif-results/cpp.sarif
 
+      - name: Filter E-SMI findings
+        uses: advanced-security/filter-sarif@2da736ff05ef065cb2894ac6892e47b5eac2c3c0 # v1.1
+        with:
+          patterns: |
+            -**/esmi_ib_library/**
+          input: sarif-results/cpp.sarif
+          output: sarif-results/cpp-filtered.sarif
+
       - name: Upload SARIF
         uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4
         with:
-          sarif_file: sarif-results/cpp.sarif
+          sarif_file: sarif-results/cpp-filtered.sarif
           checkout_path: ${{ env.PROJECT_DIR }}
           category: '/workflow:amdsmi-codeql/language:cpp'
 
