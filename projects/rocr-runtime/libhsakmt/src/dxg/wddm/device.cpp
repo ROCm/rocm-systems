@@ -73,24 +73,6 @@ WDDMDevice::WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_i
 
   NTSTATUS ret = ParseDeviceInfo();
   pr_rocr_info("kmd_version:%" PRIu32 "\n", device_info_.kmd_version);
-  device_info_.hwsInfo.hwsMask.aql_queue &= !dxg_runtime->use_pm4_;
-  // The KMD only accepts PM4 packets on COMPUTE0, but wkmi defaults compute_schedid
-  // to COMPUTE1 whenever AQL-on-compute1 is supported. Override to COMPUTE0 for the
-  // PM4 path.
-  if (dxg_runtime->use_pm4_) {
-     if (EngineOrdinal(kSchedulerIdCompute0, &device_info_) >= 0) {
-       device_info_.compute_schedid = kSchedulerIdCompute0;
-     } else {
-       pr_err("PM4 path requires COMPUTE0 schedId=%" PRIu32 " but it is not present; keeping compute_schedid=%" PRIu32 "\n",
-              kSchedulerIdCompute0, device_info_.compute_schedid);
-     }
-  }
-  pr_rocr_info("hwsInfo: aql_queue=%d computeHwsEnabled=%d sdma_queue=%d use_pm4_override=%" PRIu64
-           " compute_schedid=%" PRIu32 "\n",
-           device_info_.hwsInfo.hwsMask.aql_queue,
-           device_info_.hwsInfo.hwsMask.computeHwsEnabled,
-           device_info_.hwsInfo.hwsMask.sdma_queue,
-           (uint64_t)dxg_runtime->use_pm4_, device_info_.compute_schedid);
 
   if (ret == STATUS_OBJECT_NAME_NOT_FOUND || ret == STATUS_REVISION_MISMATCH) {
     // Skip adapter
@@ -103,6 +85,28 @@ WDDMDevice::WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_i
     init_status_ = kDeviceFailed;
     return;
   }
+
+  // Per-device decision: gfx9 must not flip the global setting for other adapters.
+  bool use_pm4 = dxg_runtime->use_pm4_;
+#ifdef __linux__
+  if (Major() == 9)
+    use_pm4 = false;
+#endif
+  if (use_pm4) {
+    device_info_.hwsInfo.hwsMask.aql_queue = 0;
+    // KMD only accepts PM4 on COMPUTE0, but wkmi defaults to COMPUTE1 when AQL-on-compute1 is supported.
+    if (EngineOrdinal(kSchedulerIdCompute0, &device_info_) >= 0) {
+      device_info_.compute_schedid = kSchedulerIdCompute0;
+    } else {
+      pr_err("PM4 path requires COMPUTE0 schedId=%" PRIu32 " but it is not present; keeping compute_schedid=%" PRIu32 "\n",
+             kSchedulerIdCompute0, device_info_.compute_schedid);
+    }
+  }
+  pr_rocr_info("hwsInfo: aql_queue=%d computeHwsEnabled=%d sdma_queue=%d use_pm4=%d compute_schedid=%" PRIu32 "\n",
+               device_info_.hwsInfo.hwsMask.aql_queue,
+               device_info_.hwsInfo.hwsMask.computeHwsEnabled,
+               device_info_.hwsInfo.hwsMask.sdma_queue,
+               use_pm4, device_info_.compute_schedid);
 
   if (device_info_.max_scratch_slots_per_cu == 0)
     device_info_.max_scratch_slots_per_cu = 32;
