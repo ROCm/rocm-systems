@@ -578,6 +578,19 @@ TEST(HostDispatchArgsMicrotest, FilterDefaultsToEverything)
     EXPECT_EQ(parseArgs({}).filter, "*");
 }
 
+TEST(HostDispatchArgsMicrotest, GtestFilterEnvironmentIsTakenAsTheFilter)
+{
+    // Left in the environment, this would filter the children's unqualified listings while the
+    // dispatcher still asked for every case. Taken here, it is resolved over the published names.
+    EXPECT_EQ(parseArgs({}, "", "*Suite.Case").filter, "*Suite.Case");
+}
+
+TEST(HostDispatchArgsMicrotest, AnExplicitFilterFlagBeatsTheEnvironment)
+{
+    // gtest's own precedence: the flag wins over GTEST_FILTER.
+    EXPECT_EQ(parseArgs({"--gtest_filter=*Flag.*"}, "", "*Env.*").filter, "*Flag.*");
+}
+
 TEST(HostDispatchArgsMicrotest, OutputDirectoryGetsGtestsDefaultFilename)
 {
     EXPECT_EQ(parseArgs({"--gtest_output=xml:/tmp/reports/"}).outputPath,
@@ -648,6 +661,20 @@ TEST(HostDispatchShardingMicrotest, EveryShardingVariableIsClearedForTheChildren
     EXPECT_EQ(getenv("GTEST_TOTAL_SHARDS"), nullptr);
     EXPECT_EQ(getenv("GTEST_SHARD_INDEX"), nullptr);
     EXPECT_EQ(getenv("GTEST_SHARD_STATUS_FILE"), nullptr);
+}
+
+// ── clearConsumedEnvironment ────────────────────────────────────────
+
+TEST(HostDispatchShardingMicrotest, GtestFilterIsClearedBeforeAnyChildIsForked)
+{
+    // parseArgs() has already resolved this over the published, qualified names. A child that
+    // still saw it would apply it again to its own unqualified names and run a subset -- or
+    // nothing, exiting 0 either way.
+    setenv("GTEST_FILTER", "*Suite.Case", 1);
+
+    clearConsumedEnvironment();
+
+    EXPECT_EQ(getenv("GTEST_FILTER"), nullptr);
 }
 
 // ── coverageDirectory ───────────────────────────────────────────────
