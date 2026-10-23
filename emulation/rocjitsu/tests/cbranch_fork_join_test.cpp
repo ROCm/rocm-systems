@@ -368,6 +368,7 @@ TEST_P(CbranchForkJoinTest, ForkAtFullDepthWritesEntrySevenAndWrapsCsp) {
   EXPECT_EQ(wf->cond_stack_ptr(), 0u);
   EXPECT_EQ(sgpr64(28), ~uint64_t{0x15});
   EXPECT_EQ(sgpr64(30), kNextPc);
+  EXPECT_EQ(cu->isa_diagnostic_count(), 1u);
 }
 
 TEST_P(CbranchForkJoinTest, IForkRunsTheSmallerPassSideThenTheSavedFailSide) {
@@ -471,6 +472,45 @@ TEST_P(CbranchForkJoinTest, ForkAndJoinCarryControlFlowMetadata) {
   check(kIForkVccThen, COND_BRANCH, int64_t{8}, /*is_fork=*/true);
   check(kGForkVccS36, INDIRECT_BRANCH, std::nullopt, /*is_fork=*/true);
   check(0xBE802E22u, INDIRECT_BRANCH, std::nullopt, /*is_fork=*/false); // s_cbranch_join s34
+}
+
+TEST_P(CbranchForkJoinTest, ValidStackUseReportsNoDiagnostics) {
+  // The sixth and deepest documented entry, s[20:23], then its join.
+  wf->set_cond_stack_ptr(5);
+  EXPECT_EQ(cbranch_fork(*wf, 0x15, kTarget, kNextPc), kTarget);
+  EXPECT_EQ(cbranch_join(*wf, /*saved_csp=*/5, kNextPc), kNextPc);
+  EXPECT_EQ(wf->cond_stack_ptr(), 5u);
+  EXPECT_EQ(cu->isa_diagnostic_count(), 0u);
+}
+
+TEST_P(CbranchForkJoinTest, ForkPastSixEntriesReportsUndefinedBehavior) {
+  wf->set_cond_stack_ptr(6);
+  EXPECT_EQ(cbranch_fork(*wf, 0x15, kTarget, kNextPc), kTarget);
+  EXPECT_EQ(wf->cond_stack_ptr(), 7u);
+  EXPECT_EQ(cu->isa_diagnostic_count(), 1u);
+}
+
+TEST_P(CbranchForkJoinTest, JoinBelowSavedCspReportsUndefinedBehavior) {
+  // CSP 0 against a saved 2: no entry of the matching fork is left. The pop
+  // still happens and wraps CSP to 7, as the 3-bit field does.
+  EXPECT_EQ(wf->cond_stack_ptr(), 0u);
+  (void)cbranch_join(*wf, /*saved_csp=*/2, kNextPc);
+  EXPECT_EQ(wf->cond_stack_ptr(), 7u);
+  EXPECT_EQ(cu->isa_diagnostic_count(), 1u);
+}
+
+TEST_P(CbranchForkJoinTest, StackEntryOutsideSgprAllocationReportsUndefinedBehavior) {
+  // A 16-SGPR wave owns s[0:15]; entry 4 would be s[16:19].
+  wf->halt();
+  wf = cu->dispatch_wf(1, kCodeBase, 16, 256);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(~uint64_t{0});
+  wf->set_cond_stack_ptr(4);
+
+  (void)cbranch_fork(*wf, 0x15, kTarget, kNextPc);
+  EXPECT_EQ(cu->isa_diagnostic_count(), 1u);
+  (void)cbranch_join(*wf, /*saved_csp=*/4, kNextPc);
+  EXPECT_EQ(cu->isa_diagnostic_count(), 2u);
 }
 
 // MODE.CSP and the fork/join instructions exist only on CDNA1-4.

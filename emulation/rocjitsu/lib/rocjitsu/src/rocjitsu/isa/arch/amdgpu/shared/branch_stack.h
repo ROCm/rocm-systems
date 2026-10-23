@@ -28,13 +28,29 @@ inline uint32_t branch_stack_entry_sgpr(const Wavefront &wf, uint32_t csp) {
   return wf.sgpr_alloc().base + csp * 4;
 }
 
+/// The manual documents a six-entry stack. Running the smaller side first keeps
+/// any valid program within it, so a deeper push means a malformed program.
+inline constexpr uint32_t kBranchStackDepth = 6;
+
+/// @brief Warn when the entry at @p sgpr does not fit in the wave's SGPRs.
+/// @details Out-of-allocation SGPR writes are dropped and reads return zero, so
+/// the matching join would resume at address 0 with EXEC cleared.
+inline void check_branch_stack_entry_allocated(const Wavefront &wf, uint32_t sgpr) {
+  if (!wf.sgpr_alloc().contains(sgpr, 4))
+    wf.report_undefined_behavior("branch stack entry lies outside the wave's SGPR allocation");
+}
+
 /// @brief Push @p entry at MODE.CSP, then increment CSP.
 inline void push_branch_stack(Wavefront &wf, BranchStackEntry entry) {
-  const uint32_t sgpr = branch_stack_entry_sgpr(wf, wf.cond_stack_ptr());
+  const uint32_t csp = wf.cond_stack_ptr();
+  if (csp >= kBranchStackDepth)
+    wf.report_undefined_behavior("fork pushes past the six-entry branch stack");
+  const uint32_t sgpr = branch_stack_entry_sgpr(wf, csp);
+  check_branch_stack_entry_allocated(wf, sgpr);
   RegisterAccess regs(wf);
   regs.write_sgpr64(sgpr, entry.lanes);
   regs.write_sgpr64(sgpr + 2, entry.resume_pc);
-  wf.set_cond_stack_ptr(wf.cond_stack_ptr() + 1);
+  wf.set_cond_stack_ptr(csp + 1);
 }
 
 /// @brief Decrement MODE.CSP, then pop the entry it points to.
@@ -42,6 +58,7 @@ inline BranchStackEntry pop_branch_stack(Wavefront &wf) {
   // Read CSP back after the decrement so it wraps as a 3-bit field.
   wf.set_cond_stack_ptr(wf.cond_stack_ptr() - 1);
   const uint32_t sgpr = branch_stack_entry_sgpr(wf, wf.cond_stack_ptr());
+  check_branch_stack_entry_allocated(wf, sgpr);
   RegisterAccess regs(wf);
   return {regs.read_sgpr64(sgpr), regs.read_sgpr64(sgpr + 2)};
 }
@@ -78,6 +95,9 @@ inline uint64_t cbranch_fork(Wavefront &wf, uint64_t compare, uint64_t target, u
 inline uint64_t cbranch_join(Wavefront &wf, uint32_t saved_csp, uint64_t next_pc) {
   if (wf.cond_stack_ptr() == saved_csp) // second arrival
     return next_pc;
+  // Below the saved value, no entry of the matching fork is left to pop.
+  if (wf.cond_stack_ptr() < saved_csp)
+    wf.report_undefined_behavior("join finds MODE.CSP below its saved value");
 
   // first arrival
   const BranchStackEntry waiting = pop_branch_stack(wf);
