@@ -38,9 +38,7 @@
 #include "atomic.hpp"
 #include "bit.hpp"
 #include "constants.hpp"
-#include "constmem.hpp"
 #include "log.hpp"
-#include "tdm.hpp"
 
 namespace rocshmem {
 
@@ -587,52 +585,6 @@ template <MemcpyKind Kind = MemcpyKind::Put, int Unroll = 8>
                            static_cast<uint8_t*>(src) + n_chunks * ChunkSize,
                            remainder);
   }
-}
-
-// Thread 0 drives TDM into the registered LDS buffer; the rest of the block
-// covers what TDM doesn't. Falls back to memcpy_wg if TDM isn't available.
-template <MemcpyKind Kind = MemcpyKind::Put>
-[[maybe_unused]] __device__ __forceinline__ void memcpy_wg_tdm(void* dst, void* src,
-                                                                size_t size) {
-#if ROCSHMEM_TDM_ENABLED
-  // Non-temporal + system scope: correct either direction (peer may be remote).
-  constexpr int TdmLoadPolicy = tdm::make_cache_policy(
-    tdm::LoadTemporalHint::NonTemporal, tdm::Scope::System);
-  constexpr int TdmStorePolicy = tdm::make_cache_policy(
-    tdm::StoreTemporalHint::NonTemporal, tdm::Scope::System);
-
-  // Below threshold, TDM doesn't pay off (like the SDMA threshold); size
-  // is small enough here that Unroll=4 is plenty.
-  if (size < constmem.tdm_threshold) {
-    memcpy_wg<Kind, 4>(dst, src, size);
-    return;
-  }
-  const tdm::LdsRegistration reg = tdm::get_lds();
-  // Below 16 bytes there's no room for a double-buffered tile.
-  if (reg.ptr != nullptr && reg.bytes >= 16) {
-    constexpr uint32_t element_bytes = 1u << tdm::FlatCopyElementLog2;
-    uint32_t tile_bytes = static_cast<uint32_t>(
-        min(static_cast<size_t>(constmem.tdm_tile_bytes), reg.bytes / 2));
-    // Round down to a whole element -- an unaligned stride would leave
-    // gaps between tiles.
-    tile_bytes -= tile_bytes % element_bytes;
-    if (tile_bytes > 0) {
-      if (is_thread_zero_in_block()) {
-        tdm::copy_region<TdmLoadPolicy, TdmStorePolicy>(dst, src, size, reg.ptr, tile_bytes,
-                                            /*double_buffered=*/true);
-      }
-      const size_t covered = tdm::covered_bytes(size, tile_bytes);
-      if (covered < size) {
-        // Runs concurrently with thread 0's TDM copy; Unroll=4 trims
-        // register pressure here for free (too small to need 8 anyway).
-        memcpy_wg<Kind, 4>(static_cast<char*>(dst) + covered,
-                           static_cast<char*>(src) + covered, size - covered);
-      }
-      return;
-    }
-  }
-#endif
-  memcpy_wg<Kind>(dst, src, size);
 }
 
 /* Is ptr_b in range [ptr_a, ptr_a + len_a) */

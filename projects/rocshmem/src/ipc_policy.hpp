@@ -39,6 +39,7 @@
 #include "bootstrap/bootstrap.hpp"
 #include "atomic.hpp"
 #include "sdma_policy.hpp"
+#include "tdm_policy.hpp"
 
 namespace rocshmem {
 
