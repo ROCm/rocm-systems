@@ -62,6 +62,11 @@ bool SmiNicSubsystem::was_bdf_resolved(const std::string& symlink, std::string& 
   }
 }
 
+auto SmiNicSubsystem::is_directory_present(const std::string& path) const -> bool {
+  auto ec = std::error_code{};
+  return (fs::exists(path, ec) && fs::is_directory(path, ec));
+}
+
 bool SmiNicSubsystem::is_driver_bound_to_bdf(const std::string& driver_dir, const std::string& bdf,
                                              bool is_canonical_match) const {
   std::error_code ec;

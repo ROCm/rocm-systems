@@ -25,7 +25,9 @@ constexpr size_t kAsic = 2;
 constexpr size_t kNuma = 3;
 constexpr size_t kPort = 4;
 constexpr size_t kRdma = 5;
-constexpr size_t kGetterCount = 6;
+constexpr size_t kKind = 6;
+constexpr size_t kCapability = 7;
+constexpr size_t kGetterCount = 8;
 
 // inline (not anonymous-namespace): NicUnit's SetUp/Populate are defined in
 // this header and included by multiple .cc files, so the linker folds their
@@ -50,9 +52,14 @@ smi_nic_status_t Stub(smi_nic_ctx_t, uint64_t, Info* info) {
 // return without its own `*info = {}`, so the zeroing the tolerated path is
 // asserted to perform still has to come from production.
 inline const amd::smi::nic_info_getters_t kStubGetters = {
-    Stub<kBus, smi_nic_bus_info_t>,   Stub<kDriver, smi_nic_driver_info_t>,
-    Stub<kAsic, smi_nic_asic_info_t>, Stub<kNuma, smi_nic_numa_info_t>,
-    Stub<kPort, smi_nic_port_info_t>, Stub<kRdma, smi_nic_rdma_devices_info_t>,
+    Stub<kBus, smi_nic_bus_info_t>,
+    Stub<kDriver, smi_nic_driver_info_t>,
+    Stub<kAsic, smi_nic_asic_info_t>,
+    Stub<kNuma, smi_nic_numa_info_t>,
+    Stub<kPort, smi_nic_port_info_t>,
+    Stub<kRdma, smi_nic_rdma_devices_info_t>,
+    Stub<kKind, uint8_t>,
+    Stub<kCapability, uint32_t>,
 };
 
 class NicUnit : public ::testing::Test {

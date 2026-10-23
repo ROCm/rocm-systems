@@ -24,6 +24,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <queue>
 #include <set>
 #include <sstream>
@@ -49,6 +50,7 @@
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/amd_smi_uuid.h"
 #include "amd_smi/impl/nic/amd_smi_ainic_device.h"
+#include "amd_smi/impl/nic/amd_smi_nic_interface.h"
 #include "amd_smi/impl/nic/amdsmi_unified/interface/smi_nic_interface.h"
 #include "amd_smi/impl/scoped_fd.h"
 #include "amd_smi/impl/xf86drm.h"
@@ -971,6 +973,18 @@ amdsmi_status_t amdsmi_get_nic_rdma_dev_info(amdsmi_processor_handle processor_h
   return AMDSMI_STATUS_SUCCESS;
 }
 
+static amdsmi_nic_fw_version_type_t to_amdsmi_fw_version_type(smi_nic_fw_version_type_t type) {
+  switch (type) {
+    case SMI_NIC_FW_VERSION_TYPE_RUNNING:
+      return AMDSMI_NIC_FW_VERSION_TYPE_RUNNING;
+    case SMI_NIC_FW_VERSION_TYPE_STORED:
+      return AMDSMI_NIC_FW_VERSION_TYPE_STORED;
+    case SMI_NIC_FW_VERSION_TYPE_FIXED:
+      break;
+  }
+  return AMDSMI_NIC_FW_VERSION_TYPE_FIXED;
+}
+
 amdsmi_status_t amdsmi_get_nic_fw_info(amdsmi_processor_handle processor_handle,
                                        amdsmi_nic_fw_info_t* info) {
   AMDSMI_CHECK_INIT();
@@ -984,18 +998,20 @@ amdsmi_status_t amdsmi_get_nic_fw_info(amdsmi_processor_handle processor_handle,
     return status;
   }
 
-  amd::nic::netlink::DevlinkDeviceInfo dev = {};
+  smi_nic_fw_info_t shim_fw = {};
   const smi_nic_status_t nic_status = smi_get_nic_fw_info(
-      amd::smi::AMDSmiSystem::getInstance().get_ainic_ctx(), ainic_info.bus.bdf.as_uint, &dev);
+      amd::smi::AMDSmiSystem::getInstance().get_ainic_ctx(), ainic_info.bus.bdf.as_uint, &shim_fw);
   if (nic_status != SMI_NIC_STATUS_SUCCESS) {
     return amd::smi::ainic_to_amdsmi_status(nic_status);
   }
 
   *info = {};
-  const uint32_t n = std::min<uint32_t>(dev.version_count, AMDSMI_MAX_NIC_FW);
+  const uint32_t n = std::min<uint32_t>(shim_fw.count, AMDSMI_MAX_NIC_FW);
   for (uint32_t i = 0; i < n; ++i) {
-    std::snprintf(info->fw[i].name, sizeof(info->fw[i].name), "%s", dev.versions[i].name);
-    std::snprintf(info->fw[i].version, sizeof(info->fw[i].version), "%s", dev.versions[i].value);
+    info->fw[i].type = to_amdsmi_fw_version_type(shim_fw.versions[i].type);
+    std::snprintf(info->fw[i].fw.name, sizeof(info->fw[i].fw.name), "%s", shim_fw.versions[i].name);
+    std::snprintf(info->fw[i].fw.version, sizeof(info->fw[i].fw.version), "%s",
+                  shim_fw.versions[i].version);
   }
   info->num_fw = n;
   return AMDSMI_STATUS_SUCCESS;
@@ -1014,30 +1030,26 @@ amdsmi_status_t amdsmi_get_nic_telemetry(amdsmi_processor_handle processor_handl
     return status;
   }
 
-  namespace tel = amd::smi::nic::telemetry;
-  tel::NicTelemetrySnapshot snap = {};
-  const smi_nic_status_t nic_status = smi_get_nic_telemetry(
-      amd::smi::AMDSmiSystem::getInstance().get_ainic_ctx(), ainic_info.bus.bdf.as_uint, &snap);
+  smi_nic_telemetry_t telemetry = {};
+  const smi_nic_status_t nic_status =
+      smi_get_nic_telemetry(amd::smi::AMDSmiSystem::getInstance().get_ainic_ctx(),
+                            ainic_info.bus.bdf.as_uint, &telemetry);
   if (nic_status != SMI_NIC_STATUS_SUCCESS) {
     return amd::smi::ainic_to_amdsmi_status(nic_status);
   }
 
-  // C2 field-copy bridge. The snapshot already carries the public-matching
-  // reserved values (per-width max) for unexposed metrics, so a straight copy is
-  // correct; *info = {} zero-fills reserved[]. The static guard breaks the
-  // build if the internal layout grows, forcing this copy to be revisited.
-  static_assert(sizeof(tel::NicTelemetrySnapshot) == 84,
-                "NicTelemetrySnapshot layout changed; revisit amdsmi_get_nic_telemetry copy");
-
+  // The shim struct already carries the public-matching reserved values (per-width max) for
+  // unexposed metrics, so a straight copy is correct; *info = {} zero-fills reserved[].
   *info = {};
-  info->temperature.asic_temp_c = snap.temperature.asic_temp_c;
-  info->temperature.transceiver_temp_c = snap.temperature.transceiver_temp_c;
-  info->temperature.board_temp_c = snap.temperature.board_temp_c;
-  info->health.state = snap.health.state;
-  info->health.error_count = snap.health.error_count;
-  std::snprintf(info->health.reporter, sizeof(info->health.reporter), "%s", snap.health.reporter);
-  info->port_split.splittable = snap.port_split.splittable;
-  info->port_split.split_count = snap.port_split.split_count;
+  info->temperature.asic_temp_c = telemetry.temperature.asic_temp_c;
+  info->temperature.transceiver_temp_c = telemetry.temperature.transceiver_temp_c;
+  info->temperature.board_temp_c = telemetry.temperature.board_temp_c;
+  info->health.state = telemetry.health.state;
+  info->health.error_count = telemetry.health.error_count;
+  std::snprintf(info->health.reporter, sizeof(info->health.reporter), "%s",
+                telemetry.health.reporter);
+  info->port_split.splittable = telemetry.port_split.splittable;
+  info->port_split.split_count = telemetry.port_split.split_count;
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -1088,14 +1100,15 @@ amdsmi_status_t amdsmi_get_nic_hwmon_sensors(amdsmi_processor_handle processor_h
     return status;
   }
 
-  std::vector<hw::SensorRecord_t> records;
-  const smi_nic_status_t nic_status = smi_get_nic_hwmon_sensors(
-      amd::smi::AMDSmiSystem::getInstance().get_ainic_ctx(), ainic_info.bus.bdf.as_uint, &records);
+  const auto records = std::make_unique<smi_nic_sensor_info_t>();
+  const smi_nic_status_t nic_status =
+      smi_get_nic_hwmon_sensors(amd::smi::AMDSmiSystem::getInstance().get_ainic_ctx(),
+                                ainic_info.bus.bdf.as_uint, records.get());
   if (nic_status != SMI_NIC_STATUS_SUCCESS) {
     return amd::smi::ainic_to_amdsmi_status(nic_status);
   }
 
-  return amd::smi::copy_nic_sensors(records, num_sensors, sensors);
+  return amd::smi::copy_nic_sensors(*records, num_sensors, sensors);
 }
 
 amdsmi_status_t amdsmi_get_nic_device_bdf(amdsmi_processor_handle processor_handle,
@@ -1134,26 +1147,10 @@ amdsmi_status_t amdsmi_get_nic_port_statistics(amdsmi_processor_handle processor
       num_stats, stats);
 }
 
-amdsmi_status_t amdsmi_set_nic_stat_scope(amdsmi_processor_handle processor_handle,
-                                          amdsmi_nic_stat_scope_t scope) {
-  AMDSMI_CHECK_INIT();
-  smi_nic_stat_scope_t nic_scope = SMI_NIC_STAT_SCOPE_DEFAULT;
-  if (!amd::smi::was_nic_stat_scope_resolved(scope, &nic_scope)) {
-    return AMDSMI_STATUS_INVAL;
-  }
-
-  amd::smi::AMDSmiAINICDevice* nic_device = nullptr;
-  amdsmi_status_t status = get_ainic_device_from_handle(processor_handle, &nic_device);
-  if (status != AMDSMI_STATUS_SUCCESS) {
-    return status;
-  }
-  nic_device->set_stat_scope(scope);
-  return AMDSMI_STATUS_SUCCESS;
-}
-
-amdsmi_status_t amdsmi_get_nic_vendor_statistics(amdsmi_processor_handle processor_handle,
-                                                 uint32_t port_index, uint32_t* num_stats,
-                                                 amdsmi_nic_stat_t* stats) {
+static amdsmi_status_t get_nic_vendor_statistics(amdsmi_processor_handle processor_handle,
+                                                 uint32_t port_index,
+                                                 smi_nic_stat_scope_t nic_scope,
+                                                 uint32_t* num_stats, amdsmi_nic_stat_t* stats) {
   AMDSMI_CHECK_INIT();
   if (num_stats == nullptr) {
     return AMDSMI_STATUS_INVAL;
@@ -1164,24 +1161,38 @@ amdsmi_status_t amdsmi_get_nic_vendor_statistics(amdsmi_processor_handle process
   if (status != AMDSMI_STATUS_SUCCESS) {
     return status;
   }
-  // The setter only stores a validated tier.
-  const smi_nic_stat_scope_t nic_scope =
-      (nic_device->stat_scope() == AMDSMI_NIC_STAT_SCOPE_EXTENDED) ? SMI_NIC_STAT_SCOPE_EXTENDED
-                                                                   : SMI_NIC_STAT_SCOPE_DEFAULT;
 
   smi_nic_ctx_t ctx = amd::smi::AMDSmiSystem::getInstance().get_ainic_ctx();
   const uint64_t device = nic_device->bdf();
 
   return amd::smi::get_nic_stats(
       [&](uint32_t* available) {
-        return amd::smi::ainic_to_amdsmi_status(
-            smi_get_nic_vendor_statistics_count(ctx, device, port_index, nic_scope, available));
+        return amd::smi::ainic_to_amdsmi_status(smi_get_nic_vendor_statistics_count_with_scope(
+            ctx, device, port_index, nic_scope, available));
       },
       [&](smi_nic_stat_info_t* info) {
-        return amd::smi::ainic_to_amdsmi_status(
-            smi_get_nic_vendor_statistics_list(ctx, device, port_index, nic_scope, info));
+        return amd::smi::ainic_to_amdsmi_status(smi_get_nic_vendor_statistics_list_with_scope(
+            ctx, device, port_index, nic_scope, info));
       },
       num_stats, stats);
+}
+
+amdsmi_status_t amdsmi_get_nic_vendor_statistics(amdsmi_processor_handle processor_handle,
+                                                 uint32_t port_index, uint32_t* num_stats,
+                                                 amdsmi_nic_stat_t* stats) {
+  return get_nic_vendor_statistics(processor_handle, port_index, SMI_NIC_STAT_SCOPE_DEFAULT,
+                                   num_stats, stats);
+}
+
+amdsmi_status_t amdsmi_get_nic_vendor_statistics_with_scope(
+    amdsmi_processor_handle processor_handle, uint32_t port_index, amdsmi_nic_stat_scope_t scope,
+    uint32_t* num_stats, amdsmi_nic_stat_t* stats) {
+  AMDSMI_CHECK_INIT();
+  smi_nic_stat_scope_t nic_scope = SMI_NIC_STAT_SCOPE_DEFAULT;
+  if (!amd::smi::was_nic_stat_scope_resolved(scope, &nic_scope)) {
+    return AMDSMI_STATUS_INVAL;
+  }
+  return get_nic_vendor_statistics(processor_handle, port_index, nic_scope, num_stats, stats);
 }
 
 amdsmi_status_t amdsmi_get_nic_rdma_port_statistics(amdsmi_processor_handle processor_handle,
@@ -3789,13 +3800,70 @@ amdsmi_status_t amdsmi_get_link_metrics(amdsmi_processor_handle processor_handle
   return AMDSMI_STATUS_SUCCESS;
 }
 
+// The link between a NIC and a GPU or another NIC. It is a property of the PCI topology, so the hop
+// count has no meaning here and is set to UINT64_MAX when the caller asks for it. Returns nullopt
+// when neither handle is a NIC, so the caller falls back to the GPU pair.
+static std::optional<amdsmi_status_t> get_nic_link_type(
+    amdsmi_processor_handle processor_handle_src, amdsmi_processor_handle processor_handle_dst,
+    uint64_t* hops, amdsmi_link_type_t* type) {
+  amd::smi::AMDSmiAINICDevice* src_nic = nullptr;
+  amd::smi::AMDSmiAINICDevice* dst_nic = nullptr;
+  const bool is_src_nic =
+      (get_ainic_device_from_handle(processor_handle_src, &src_nic) == AMDSMI_STATUS_SUCCESS);
+  const bool is_dst_nic =
+      (get_ainic_device_from_handle(processor_handle_dst, &dst_nic) == AMDSMI_STATUS_SUCCESS);
+  if (!is_src_nic && !is_dst_nic) {
+    return std::nullopt;
+  }
+
+  // The relation is symmetric: ask from the NIC, whichever side it is.
+  const auto nic = is_src_nic ? src_nic : dst_nic;
+  const auto other_handle = is_src_nic ? processor_handle_dst : processor_handle_src;
+  const auto other_nic = is_src_nic ? dst_nic : src_nic;
+
+  uint64_t other_bdf = 0;
+  if (other_nic != nullptr) {
+    other_bdf = other_nic->bdf();
+  } else {
+    amdsmi_bdf_t gpu_bdf = {};
+    const amdsmi_status_t status = amdsmi_get_gpu_device_bdf(other_handle, &gpu_bdf);
+    if (status != AMDSMI_STATUS_SUCCESS) {
+      return status;
+    }
+    other_bdf = gpu_bdf.as_uint;
+  }
+
+  smi_nic_link_type_t link = SMI_NIC_LINK_TYPE_UNKNOWN;
+  const smi_nic_status_t nic_status = smi_topo_get_nic_link_type(
+      amd::smi::AMDSmiSystem::getInstance().get_ainic_ctx(), nic->bdf(), other_bdf, &link);
+  if (nic_status != SMI_NIC_STATUS_SUCCESS) {
+    return amd::smi::ainic_to_amdsmi_status(nic_status);
+  }
+
+  *type = amd::smi::to_amdsmi_link_type(link);
+  if (hops != nullptr) {
+    *hops = std::numeric_limits<uint64_t>::max();
+  }
+  return AMDSMI_STATUS_SUCCESS;
+}
+
 amdsmi_status_t amdsmi_topo_get_link_type(amdsmi_processor_handle processor_handle_src,
                                           amdsmi_processor_handle processor_handle_dst,
                                           uint64_t* hops, amdsmi_link_type_t* type) {
   AMDSMI_CHECK_INIT();
-  if (hops == nullptr || type == nullptr) {
+  if (type == nullptr) {
     return AMDSMI_STATUS_INVAL;
   }
+
+  const auto nic_pair_status =
+      get_nic_link_type(processor_handle_src, processor_handle_dst, hops, type);
+  if (nic_pair_status.has_value()) {
+    return nic_pair_status.value();
+  }
+
+  // Neither side is a NIC: a GPU pair. The hop count is optional for the caller.
+  uint64_t gpu_hops = 0;
+  uint64_t* hops_out = (hops != nullptr) ? hops : &gpu_hops;
 
   amd::smi::AMDSmiGPUDevice* src_device = nullptr;
   amd::smi::AMDSmiGPUDevice* dst_device = nullptr;
@@ -3805,19 +3873,18 @@ amdsmi_status_t amdsmi_topo_get_link_type(amdsmi_processor_handle processor_hand
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 #ifdef ENABLE_WSL_BACKEND
   if (src_device->backend() || dst_device->backend()) {
-    if (hops == nullptr || type == nullptr) return AMDSMI_STATUS_INVAL;
     if (src_device == dst_device) {
-      *hops = 0;
+      *hops_out = 0;
       *type = AMDSMI_LINK_TYPE_INTERNAL;
     } else {
-      *hops = 1;
+      *hops_out = 1;
       *type = AMDSMI_LINK_TYPE_PCIE;
     }
     return AMDSMI_STATUS_SUCCESS;
   }
 #endif
-  auto rstatus = rsmi_topo_get_link_type(src_device->get_gpu_id(), dst_device->get_gpu_id(), hops,
-                                         reinterpret_cast<RSMI_IO_LINK_TYPE*>(type));
+  auto rstatus = rsmi_topo_get_link_type(src_device->get_gpu_id(), dst_device->get_gpu_id(),
+                                         hops_out, reinterpret_cast<RSMI_IO_LINK_TYPE*>(type));
   return amd::smi::rsmi_to_amdsmi_status(rstatus);
 }
 
@@ -9424,17 +9491,6 @@ static amdsmi_status_t run_dracut_f() {
   }
 
   return AMDSMI_STATUS_API_FAILED;
-}
-
-amdsmi_status_t amdsmi_set_nic_filter(amdsmi_nic_filter_t mode) {
-  // No AMDSMI_CHECK_INIT(): the filter is read during amdsmi_init, so callers
-  // set it before init.
-  if ((mode != AMDSMI_NIC_FILTER_ALL) && (mode != AMDSMI_NIC_FILTER_AINIC_ONLY)) {
-    return AMDSMI_STATUS_INVAL;
-  }
-
-  amd::smi::AMDSmiSystem::getInstance().set_nic_filter(mode);
-  return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t amdsmi_set_ttm_pages_limit(uint64_t pages) {

@@ -15,6 +15,7 @@
 #include "smi_nic_stats.h"
 #include "smi_nic_transport.h"
 #include "smi_nic_vpd.h"
+#include "smi_pci_topology.h"
 
 /**
  * @brief Convert BDF string format to uint64_t
@@ -72,6 +73,7 @@ class SmiInfiniBandPort {
   const std::string& name() const;
   std::optional<uint8_t> port_num() const;
   std::optional<std::string> state() const;
+  // libibverbs answers first; the sysfs files are the fallback for a driver that exposes them.
   std::optional<uint16_t> max_mtu() const;
   std::optional<uint16_t> active_mtu() const;
   // const: counters are re-read on every query, so the map is a mutable cache.
@@ -83,6 +85,8 @@ class SmiInfiniBandPort {
   std::string name_;
   std::string sysfs_path_;
   mutable std::map<std::string, uint64_t> hw_counters_map_;
+  std::optional<uint16_t> m_ibverbs_max_mtu;
+  std::optional<uint16_t> m_ibverbs_active_mtu;
 };
 
 class SmiInfiniBand {
@@ -219,6 +223,11 @@ class SmiNic {
   virtual uint32_t capabilities() const;
 
   std::optional<uint16_t> vendor_id() const;
+  // How this NIC connects to the device at other_bdf (a packed BDF): the same PCIe switch, the same
+  // NUMA node or another one. Read from sysfs; pci_root is a seam for tests.
+  auto link_type(uint64_t other_bdf,
+                 const std::string& pci_root = amd::smi::nic::pci::kDefaultPciRoot) const
+      -> amd::smi::nic::pci::LinkType_t;
   std::optional<uint16_t> subvendor_id() const;
   std::optional<uint16_t> device_id() const;
   std::optional<uint16_t> subsystem_id() const;

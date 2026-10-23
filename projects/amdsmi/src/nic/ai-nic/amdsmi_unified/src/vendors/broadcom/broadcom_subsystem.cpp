@@ -47,6 +47,22 @@ bool SmiNicSubsystemBroadcom::is_driver_loaded(const std::string& bdf,
   }
 }
 
+auto SmiNicSubsystemBroadcom::is_driver_present(DriverType driver_type) const -> bool {
+  const auto is_any_present = [&](const auto& drivers, const std::string& drivers_dir) {
+    return std::any_of(drivers.begin(), drivers.end(), [&](const char* driver) {
+      return is_directory_present(driver_sysfs_root_ + drivers_dir + driver);
+    });
+  };
+  switch (driver_type) {
+    case DriverType::Main:
+      return is_any_present(kBroadcomMainDrivers, kPciDriversDir);
+    case DriverType::Rdma:
+      return is_any_present(kBroadcomRdmaAuxDrivers, kAuxDriversDir);
+    default:
+      return false;
+  }
+}
+
 void SmiNicSubsystemBroadcom::discover(
     const std::string& pci_path, const std::string& net_path,
     std::shared_ptr<amd::smi::nic::transport::NicTransport> transport) {

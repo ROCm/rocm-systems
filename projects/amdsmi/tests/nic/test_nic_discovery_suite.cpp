@@ -17,6 +17,7 @@
 #include <optional>
 #include <string>
 #include <system_error>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -26,9 +27,15 @@
 #include "smi_nic_log.h"
 #include "smi_nic_subsystem.h"
 #include "smi_nic_system.h"
+#include "smi_pci_topology.h"
 #include "vendors/amd/ualoe_subsystem.h"
 #include "vendors/broadcom/broadcom_subsystem.h"
 #include "vendors/pensando/pensando_subsystem.h"
+
+// amdsmi_unified declares smi_nic_create_context(ctx); the shared shim must stay call-compatible.
+static_assert(
+    std::is_same_v<decltype(&smi_nic_create_context), smi_nic_status_t (*)(smi_nic_ctx_t*)>,
+    "smi_nic_create_context must take only the context pointer, as in amdsmi_unified");
 
 namespace fs = std::filesystem;
 
@@ -198,7 +205,94 @@ class StubAmdSubsystem : public SmiNicSubsystem {
   std::vector<std::unique_ptr<SmiNic>> nics_;
 };
 
+namespace pci = amd::smi::nic::pci;
+
+// One device in a fake PCI tree: its directory nests under the parents named by `chain`, and the
+// bus/pci/devices symlink points at it the way sysfs does.
+static void make_pci_device(const fs::path& root, const std::vector<std::string>& chain,
+                            const std::string& bdf, std::optional<int> numa_node) {
+  auto device_dir = root / "devices" / "pci0000:00";
+  for (const auto& parent : chain) {
+    device_dir /= parent;
+  }
+  device_dir /= bdf;
+  fs::create_directories(device_dir);
+  fs::create_directories(root / "bus/pci/devices");
+  fs::create_directory_symlink(device_dir, root / "bus/pci/devices" / bdf);
+  if (numa_node.has_value()) {
+    std::ofstream(device_dir / "numa_node") << numa_node.value() << "\n";
+  }
+}
+
+static void test_pci_bdf_round_trip() {
+  check("a packed BDF formats as dddd:bb:dd.f",
+        pci::format_bdf(0x10000 | (0x03 << 8) | 3) == "0001:03:00.3");
+  check("a valid BDF is accepted", pci::is_valid_bdf("0000:e1:00.0"));
+  check("a short BDF is rejected", !pci::is_valid_bdf("e1:00.0"));
+  check("a BDF with a bad separator is rejected", !pci::is_valid_bdf("0000:e1:00:0"));
+}
+
+static void test_pci_topology_follows_the_sysfs_tree() {
+  std::cout << "\nPCI topology: parent, switch and NUMA lookups on a fake tree\n";
+  const auto root_dir = make_tmp_root();
+  TmpRootGuard_t root_guard(root_dir);
+  const auto pci_root = (root_dir / "bus/pci/devices").string();
+
+  // Root port 00:01.0 holds a switch (01:00.0) with two downstream ports; a second root port
+  // 00:02.0 holds one endpoint; domain 0001 is a different NUMA node.
+  make_pci_device(root_dir, {}, "0000:00:01.0", 0);
+  make_pci_device(root_dir, {"0000:00:01.0"}, "0000:01:00.0", 0);
+  make_pci_device(root_dir, {"0000:00:01.0", "0000:01:00.0"}, "0000:02:00.0", 0);
+  make_pci_device(root_dir, {"0000:00:01.0", "0000:01:00.0"}, "0000:02:01.0", 0);
+  make_pci_device(root_dir, {"0000:00:01.0", "0000:01:00.0", "0000:02:00.0"}, "0000:03:00.0", 0);
+  make_pci_device(root_dir, {"0000:00:01.0", "0000:01:00.0", "0000:02:01.0"}, "0000:04:00.0", 0);
+  make_pci_device(root_dir, {}, "0000:00:02.0", 0);
+  make_pci_device(root_dir, {"0000:00:02.0"}, "0000:05:00.0", 0);
+  make_pci_device(root_dir, {}, "0001:00:01.0", 1);
+  make_pci_device(root_dir, {"0001:00:01.0"}, "0001:01:00.0", 1);
+  make_pci_device(root_dir, {"0000:00:02.0"}, "0000:06:00.0", std::nullopt);
+  make_pci_device(root_dir, {"0000:00:02.0"}, "0000:07:00.0", -1);
+
+  check(
+      "the parent of an endpoint is its downstream port",
+      pci::get_pcie_parent("0000:03:00.0", pci_root) == std::optional<std::string>("0000:02:00.0"));
+  check("a root port has no parent", !pci::get_pcie_parent("0000:00:01.0", pci_root).has_value());
+  check("a device missing from sysfs has no parent",
+        !pci::get_pcie_parent("0000:aa:00.0", pci_root).has_value());
+  check("ancestors run from the nearest up to the root port",
+        pci::get_pcie_ancestors("0000:03:00.0", pci_root) ==
+            (std::vector<std::string>{"0000:02:00.0", "0000:01:00.0", "0000:00:01.0"}));
+
+  check("two endpoints behind one switch share it",
+        pci::is_same_pcie_switch("0000:03:00.0", "0000:04:00.0", pci_root));
+  check("endpoints under different root ports do not share a switch",
+        !pci::is_same_pcie_switch("0000:03:00.0", "0000:05:00.0", pci_root));
+  check("a root port alone is the root complex, not a switch",
+        !pci::is_same_pcie_switch("0000:05:00.0", "0000:06:00.0", pci_root));
+
+  check("NUMA node is read from the device", pci::get_numa_node("0001:01:00.0", pci_root) == 1);
+  check("a device without a numa_node file has none",
+        !pci::get_numa_node("0000:06:00.0", pci_root).has_value());
+  check("a NUMA node of -1 means unknown",
+        !pci::get_numa_node("0000:07:00.0", pci_root).has_value());
+  check("a NIC object reports its link type to another device",
+        SmiNic("", "0000:03:00.0").link_type(0x400, pci_root) == pci::LinkType_t::Pcie);
+
+  check("the same switch is a PCIe link",
+        pci::get_link_type("0000:03:00.0", "0000:04:00.0", pci_root) == pci::LinkType_t::Pcie);
+  check("different switches on one NUMA node are a NUMA link",
+        pci::get_link_type("0000:03:00.0", "0000:05:00.0", pci_root) == pci::LinkType_t::Numa);
+  check("different NUMA nodes are a cross-NUMA link",
+        pci::get_link_type("0000:03:00.0", "0001:01:00.0", pci_root) == pci::LinkType_t::Xnuma);
+  check("an unreadable NUMA node leaves the link unknown",
+        pci::get_link_type("0000:03:00.0", "0000:06:00.0", pci_root) == pci::LinkType_t::Unknown);
+  check("an invalid BDF leaves the link unknown",
+        pci::get_link_type("0000:03:00.0", "garbage", pci_root) == pci::LinkType_t::Unknown);
+}
+
 int main() {
+  test_pci_bdf_round_trip();
+  test_pci_topology_follows_the_sysfs_tree();
   const std::string bdf = "0000:c1:00.0";
   fs::path root = make_tmp_root();
   TmpRootGuard_t root_guard(root);
@@ -219,6 +313,16 @@ int main() {
   // Rdma role hits a different (unpopulated) path -> proves the roles diverge.
   check("pensando Rdma driver absent (dir not present)",
         !sub.is_driver_loaded(bdf, DriverType::Rdma));
+
+  // The BDF-less overload only asks whether the vendor's driver directory exists.
+  check("pensando Main driver present without a bdf", sub.is_driver_present(DriverType::Main));
+  check("pensando Rdma driver absent without a bdf", !sub.is_driver_present(DriverType::Rdma));
+  const auto empty_root = make_tmp_root();
+  TmpRootGuard_t empty_root_guard(empty_root);
+  SmiNicSubsystemPensando pensando_without_driver(empty_root.string());
+  check(
+      "pensando Main driver absent when no driver dir exists",
+      !static_cast<SmiNicSubsystem&>(pensando_without_driver).is_driver_present(DriverType::Main));
 
   // A dangling entry must not hide a valid one listed after it. Directory order is
   // filesystem-defined, so pick a name for the valid link that this filesystem lists second.
@@ -294,6 +398,9 @@ int main() {
   fs::create_symlink("../../../devices/pci/" + bng_bdf, bng_dir / bng_bdf);
   check("broadcom Main driver detected for a bng_en function",
         bsub.is_driver_loaded(bng_bdf, DriverType::Main));
+  check("broadcom Main driver present without a bdf", bsub.is_driver_present(DriverType::Main));
+  check("broadcom Rdma driver absent without a bdf (no aux dir)",
+        !bsub.is_driver_present(DriverType::Rdma));
 
   fs::path bng_disc_root = make_tmp_root();
   TmpRootGuard_t bng_disc_root_guard(bng_disc_root);
@@ -347,6 +454,24 @@ int main() {
         bng_rdma_sub.is_driver_loaded(bng_rdma_bdf, DriverType::Rdma));
   check("bng_re.rdma absent for other bdf",
         !bng_rdma_sub.is_driver_loaded("0000:01:00.1", DriverType::Rdma));
+  check("broadcom Rdma driver present without a bdf for bng_re.rdma",
+        bng_rdma_sub.is_driver_present(DriverType::Rdma));
+  check("broadcom Main driver absent without a bdf when only the aux driver exists",
+        !bng_rdma_sub.is_driver_present(DriverType::Main));
+
+  // ---- smi_nic_driver_loaded(): the vendor-level answer, read from the real /sys ----
+  check("an unknown vendor is a bad parameter",
+        smi_nic_driver_loaded(SMI_NIC_VENDOR_UNKNOWN) == SMI_NIC_STATUS_WRONG_PARAM);
+  const auto expected_status = [](const SmiNicSubsystem& plugin) {
+    return (plugin.is_driver_present(DriverType::Main) ? SMI_NIC_STATUS_SUCCESS
+                                                       : SMI_NIC_STATUS_DRIVER_NOT_LOADED);
+  };
+  const auto real_pensando = SmiNicSubsystemPensando{};
+  const auto real_broadcom = SmiNicSubsystemBroadcom{};
+  check("the AMD answer follows the ionic driver directory",
+        smi_nic_driver_loaded(SMI_NIC_VENDOR_AMD) == expected_status(real_pensando));
+  check("the Broadcom answer follows the bnxt_en and bng_en driver directories",
+        smi_nic_driver_loaded(SMI_NIC_VENDOR_BROADCOM) == expected_status(real_broadcom));
 
   // ---- Pensando discover(): a bridge with no port beneath it (0x1dd8:0008) ----
   // The bridge is the NIC handle. With no ionic port under it the card carries

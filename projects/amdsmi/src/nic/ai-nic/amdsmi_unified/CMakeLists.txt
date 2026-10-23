@@ -43,7 +43,9 @@ set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${NIC_LINKER_FLAGS}")
 set(CPP_SRCS
     "${NIC_SOURCE_DIR}/smi_ethtool_ioctl.cpp"
     "${NIC_SOURCE_DIR}/smi_nic.cpp"
+    "${NIC_SOURCE_DIR}/smi_ibverbs.cpp"
     "${NIC_SOURCE_DIR}/smi_nic_hwmon.cpp"
+    "${NIC_SOURCE_DIR}/smi_pci_topology.cpp"
     "${NIC_SOURCE_DIR}/smi_nic_interface.cpp"
     "${NIC_SOURCE_DIR}/smi_nic_log.cpp"
     "${NIC_SOURCE_DIR}/smi_nic_subsystem.cpp"
@@ -85,6 +87,17 @@ set_target_properties(amdsminic PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${NIC_BUILD_
 # Vendor plugins live under src/vendors/<name>/; expose the vendors root so the
 # registry and plugin translation units resolve their headers.
 target_include_directories(amdsminic PRIVATE "${NIC_SOURCE_DIR}/vendors")
+
+# libibverbs fills the RDMA port MTU. It is loaded with dlopen at run time, so the headers are only
+# needed to build; without them the MTU falls back to the sysfs files, which most drivers lack.
+find_path(LIBIBVERBS_INCLUDE_DIR infiniband/verbs.h)
+if(LIBIBVERBS_INCLUDE_DIR)
+    target_include_directories(amdsminic PRIVATE ${LIBIBVERBS_INCLUDE_DIR})
+    target_compile_definitions(amdsminic PRIVATE LIBIBVERBS_INSTALLED)
+else()
+    message(WARNING "libibverbs headers not found: the RDMA port MTU will read N/A on most drivers")
+endif()
+target_link_libraries(amdsminic PRIVATE ${CMAKE_DL_LIBS})
 
 # Add compile definition if libnl-3 is available
 if(NIC_HAS_LIBNL)

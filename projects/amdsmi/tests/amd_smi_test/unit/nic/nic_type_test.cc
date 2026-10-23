@@ -16,6 +16,7 @@
 #include <type_traits>
 
 #include "amd_smi/amdsmi.h"
+#include "amd_smi/impl/amd_smi_nic_stats.h"
 #include "amd_smi/impl/nic/amd_smi_ainic_device.h"
 #include "nic_unit_fixture.h"
 
@@ -31,8 +32,8 @@ constexpr auto kPortIfindexOffsetBytes = size_t{780};
 constexpr auto kPortMacAddressOffsetBytes = size_t{781};
 constexpr auto kPortLinkSpeedOffsetBytes = size_t{1296};
 
-// FillByte(kAsic) repeated across the 32-bit capability member.
-constexpr auto kAsicFillCapability = uint32_t{0xA2A2A2A2};
+// FillByte(kCapability) repeated across the 32-bit capability.
+constexpr auto kKindCapabilityFill = uint32_t{0xA7A7A7A7};
 
 // Distinct from each other and from the fill byte, so a swapped source cannot match.
 constexpr auto kDistinctType = uint8_t{2};
@@ -70,6 +71,26 @@ TEST_F(NicUnit, NicPublicLayoutVendorStatisticsSignatureMatchPreviousRelease) {
   EXPECT_TRUE((std::is_same_v<decltype(&amdsmi_get_nic_vendor_statistics), DevelopSignature_t>));
 }
 
+// The firmware layout follows amdsmi_unified: an entry is a version type plus the name and version.
+TEST_F(NicUnit, NicPublicLayoutFirmwareMatchesTheSharedInterface) {
+  EXPECT_EQ(AMDSMI_MAX_NIC_FW, 64);
+  EXPECT_EQ(sizeof(amdsmi_nic_fw_t), 2 * kMaxStringLength);
+  EXPECT_EQ(offsetof(amdsmi_nic_fw_entry_t, fw), sizeof(amdsmi_nic_fw_version_type_t));
+  EXPECT_EQ(static_cast<int>(AMDSMI_NIC_FW_VERSION_TYPE_FIXED), 0);
+  EXPECT_EQ(static_cast<int>(AMDSMI_NIC_FW_VERSION_TYPE_RUNNING), 1);
+  EXPECT_EQ(static_cast<int>(AMDSMI_NIC_FW_VERSION_TYPE_STORED), 2);
+}
+
+// The library reports how a NIC connects to a device; the public call speaks amdsmi_link_type_t.
+TEST_F(NicUnit, NicLinkTypeMapsEachLibraryLinkToThePublicOne) {
+  using amd::smi::to_amdsmi_link_type;
+
+  EXPECT_EQ(to_amdsmi_link_type(SMI_NIC_LINK_TYPE_PCIE), AMDSMI_LINK_TYPE_PCIE);
+  EXPECT_EQ(to_amdsmi_link_type(SMI_NIC_LINK_TYPE_NUMA), AMDSMI_LINK_TYPE_NUMA);
+  EXPECT_EQ(to_amdsmi_link_type(SMI_NIC_LINK_TYPE_XNUMA), AMDSMI_LINK_TYPE_XNUMA);
+  EXPECT_EQ(to_amdsmi_link_type(SMI_NIC_LINK_TYPE_UNKNOWN), AMDSMI_LINK_TYPE_UNKNOWN);
+}
+
 TEST_F(NicUnit, NicTypeEnumValuesAreStable) {
   EXPECT_EQ(static_cast<int>(AMDSMI_NIC_TYPE_UNKNOWN), 0);
   EXPECT_EQ(static_cast<int>(AMDSMI_NIC_TYPE_AINIC), 1);
@@ -85,32 +106,51 @@ TEST_F(NicUnit, NicPublicLayoutBrcmProcessorTypesKeepTheirValues) {
   EXPECT_EQ(static_cast<int>(AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH), 9);
 }
 
-// The stub getter fills the shim asic struct with FillByte(kAsic); type and capability are its
-// last two members.
-TEST_F(NicUnit, PopulateKeepsAsicTypeAndCapabilityOnTheDevice) {
+// The stub getters fill their outputs with their own FillByte, so each device member shows which
+// getter it came from.
+TEST_F(NicUnit, PopulateTakesTypeAndCapabilityFromTheirOwnGetters) {
   ASSERT_EQ(Populate(), AMDSMI_STATUS_SUCCESS);
 
-  EXPECT_EQ(info_.type, FillByte(kAsic));
-  EXPECT_EQ(info_.capability, kAsicFillCapability);
+  EXPECT_EQ(info_.type, FillByte(kKind));
+  EXPECT_EQ(info_.capability, kKindCapabilityFill);
 }
 
-smi_nic_status_t DistinctAsicStub(smi_nic_ctx_t, uint64_t, smi_nic_asic_info_t* info) {
-  std::memset(info, 0, sizeof(*info));
-  info->type = kDistinctType;
-  info->capability = kDistinctCapability;
+smi_nic_status_t DistinctKindStub(smi_nic_ctx_t, uint64_t, uint8_t* kind) {
+  *kind = kDistinctType;
   return SMI_NIC_STATUS_SUCCESS;
 }
 
-// The uniform fill above cannot tell type from capability or from a neighbouring member.
-TEST_F(NicUnit, PopulateTakesTypeAndCapabilityFromTheirOwnShimMembers) {
+smi_nic_status_t DistinctCapabilityStub(smi_nic_ctx_t, uint64_t, uint32_t* capability) {
+  *capability = kDistinctCapability;
+  return SMI_NIC_STATUS_SUCCESS;
+}
+
+// The uniform fill above cannot tell type from capability.
+TEST_F(NicUnit, PopulateKeepsDistinctTypeAndCapabilityValues) {
   auto getters = kStubGetters;
-  getters.asic = DistinctAsicStub;
+  getters.kind = DistinctKindStub;
+  getters.capability = DistinctCapabilityStub;
   amd::smi::nic_set_info_getters_for_testing(&getters);
 
   ASSERT_EQ(Populate(), AMDSMI_STATUS_SUCCESS);
 
   EXPECT_EQ(info_.type, kDistinctType);
   EXPECT_EQ(info_.capability, kDistinctCapability);
+}
+
+smi_nic_status_t FailingKindStub(smi_nic_ctx_t, uint64_t, uint8_t*) {
+  return SMI_NIC_STATUS_NOT_FOUND;
+}
+
+// A cosmetic field must not drop a NIC that every other getter could read.
+TEST_F(NicUnit, PopulateKeepsTheNicWhenTheKindGetterFails) {
+  auto getters = kStubGetters;
+  getters.kind = FailingKindStub;
+  amd::smi::nic_set_info_getters_for_testing(&getters);
+
+  ASSERT_EQ(Populate(), AMDSMI_STATUS_SUCCESS);
+
+  EXPECT_EQ(info_.type, uint8_t{0});
 }
 
 // The public getters read these without copying the whole info struct, which is over 600 KB.
