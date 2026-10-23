@@ -52,13 +52,13 @@ static inline std::pair<dim3, dim3> ddaAllToAllFabricGeom(ncclComm* comm, size_t
   return dda::common::getGridAndBlockDims(bytes, 1, comm->ddaFabricMaxBlocks);
 }
 
-// Pieces of a peer-major push: one per 2^pieceShift bytes of the chunk per peer, 1..16 (1 if the pipeline is off), or
-// RCCL_DDA_A2A_PUSH_PEER_PIECES (<= 64) if set. Vector: 1 MiB (cheap epoch flags); TDM: 4 MiB (toggle flags).
-static inline unsigned ddaAllToAllFabricPeerPieces(size_t chunkBytes, int pieceShift) {
+// Pieces of a peer-major push: one per MiB of the chunk per peer, 1..maxPieces (1 if the pipeline is off), or
+// RCCL_DDA_A2A_PUSH_PEER_PIECES (<= 64) if set. The vector push stops at 16 pieces, the TDM push at 32.
+static inline unsigned ddaAllToAllFabricPeerPieces(size_t chunkBytes, unsigned maxPieces) {
   if (!rcclParamDdaA2APushPeerPipe()) return 1;
   const int64_t forced = rcclParamDdaA2APushPeerPieces();
   if (forced > 0) return static_cast<unsigned>(std::min<int64_t>(forced, 64));
-  return static_cast<unsigned>(std::clamp<size_t>(chunkBytes >> pieceShift, 1, 16));
+  return static_cast<unsigned>(std::clamp<size_t>(chunkBytes >> 20, 1, maxPieces));
 }
 
 struct DdaA2APeerGeom {
@@ -71,14 +71,20 @@ struct DdaA2APeerGeom {
 // 256 threads: that keeps small messages fast and 512 is slower below ~64 MB). `waves` is the number of waves of work
 // for ONE peer's chunk. blocksPerPeer is capped so the grid stays inside the barrier's flag allocation. The result
 // depends only on that, nRanks and the init-time cap, so every rank gets the same grid. Returns blocksPerPeer == 0
-// when there are more peers than blocks.
-static inline DdaA2APeerGeom ddaAllToAllFabricPeerGeom(ncclComm* comm, size_t waves, size_t kMaxWaves) {
+// when there are more peers than blocks. balanceRounds (TDM): a wave does `rounds` rounds of work, so take the fewest
+// blocks that still need only as many rounds as the cap would, instead of a last round that few blocks share.
+static inline DdaA2APeerGeom ddaAllToAllFabricPeerGeom(ncclComm* comm, size_t waves, size_t kMaxWaves,
+                                                       bool balanceRounds = false) {
   constexpr size_t kWave = 32;
   const size_t cap = static_cast<size_t>(comm->ddaFabricMaxBlocks) / static_cast<size_t>(comm->nRanks);
   if (cap == 0) return {dim3(1), dim3(1), 0};
   waves = std::max<size_t>(1, waves);
   size_t bpp = (waves + kMaxWaves - 1) / kMaxWaves;
   bpp = std::max<size_t>(1, std::min(bpp, cap));
+  if (balanceRounds) {
+    const size_t rounds = (waves + cap * kMaxWaves - 1) / (cap * kMaxWaves);
+    bpp = std::max<size_t>(1, std::min(cap, (waves + rounds * kMaxWaves - 1) / (rounds * kMaxWaves)));
+  }
   const size_t wavesPerBlock = std::min(kMaxWaves, (waves + bpp - 1) / bpp);
   return {dim3(static_cast<unsigned>(bpp * comm->nRanks)), dim3(static_cast<unsigned>(wavesPerBlock * kWave)),
           static_cast<int>(bpp)};
@@ -168,7 +174,8 @@ static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvb
     const size_t tilesPerWave = dda::common::kDdaA2ATdmWindowBytes / tileBytes;
     const size_t tiles = (count + tileBytes - 1) / tileBytes;
     const DdaA2APeerGeom pg = ddaAllToAllFabricPeerGeom(comm, (tiles + tilesPerWave - 1) / tilesPerWave,
-                                                        dda::common::kDdaA2ATdmMaxWarpsPerBlock);
+                                                        dda::common::kDdaA2ATdmMaxWarpsPerBlock,
+                                                        /*balanceRounds=*/true);
     if (pg.blocksPerPeer > 0) {
       const int smemBytes = (pg.block.x / dda::common::kDdaA2ATdmWave) * dda::common::kDdaA2ATdmWindowBytes;
       const uint8_t* sendBytes = static_cast<const uint8_t*>(sendbuff);
@@ -187,7 +194,7 @@ static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvb
         break;
       }
       if (prep == ncclSuccess) {
-        const unsigned pieces = ddaAllToAllFabricPeerPieces(count, 22);
+        const unsigned pieces = ddaAllToAllFabricPeerPieces(count, 32);
         INFO(NCCL_COLL,
              "DDA fabric AllToAll: launching peer-major TDM push kernel: nRanks=%d count=%zu tile=%d grid=%u "
              "block=%u blocksPerPeer=%d smem=%d pieces=%u",
@@ -273,7 +280,7 @@ static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvb
     const size_t vecWaves = (count * sizeof(T) / sizeof(uint4) + 31) / 32;
     const DdaA2APeerGeom pg = ddaAllToAllFabricPeerGeom(comm, vecWaves, 8);
     if (pg.blocksPerPeer > 0) {
-      const unsigned pieces = ddaAllToAllFabricPeerPieces(count * sizeof(T), 20);
+      const unsigned pieces = ddaAllToAllFabricPeerPieces(count * sizeof(T), 16);
       INFO(NCCL_COLL,
            "DDA fabric AllToAll: launching peer-major push kernel: nRanks=%d count=%zu grid=%u block=%u "
            "blocksPerPeer=%d pieces=%u",
