@@ -2345,7 +2345,7 @@ memory:
     <<: *level_default
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "disabled on Windows, where gfx1201 (amd_windows) and gfx1201 (amd_wsl) self-skip because the GPU does not support managed memory"
+      reason: "AIRUNTIME-2291 - disabled on Windows, where gfx1201 (amd_windows) and gfx1201 (amd_wsl) self-skip because the GPU does not support managed memory"
     tags: [query, P1, managed_memory]
   Unit_hipMemAdvise_TstAlignedAllocMem:
     <<: *level_default
