@@ -193,15 +193,29 @@ private:
 class MockPcSamplingCollector : public rocprofiler_compute_tool::pc_sampling_collector_t
 {
 public:
+    struct SymbolRegistration
+    {
+        uint64_t    kernel_id;
+        uint64_t    code_object_id;
+        std::string symbol_name;
+    };
+
     void on_code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& info) override;
-    void finalize(rocprofiler_compute_tool::code_object_writer_t& writer) override;
+    void on_kernel_symbol_register(uint64_t         kernel_id,
+                                   uint64_t         code_object_id,
+                                   std::string_view symbol_name) override;
+    void finalize(rocprofiler_compute_tool::code_object_writer_t& writer,
+                  const std::set<uint64_t>&                       dispatched_kernel_ids) override;
+    bool has_code_objects() const override;
     const std::set<std::filesystem::path>& get_source_paths() const override;
 
     void set_has_code_objects(bool has_code_objects);
     void set_source_paths(const std::set<std::filesystem::path>& source_paths);
 
-    int load_count     = 0;
-    int finalize_count = 0;
+    std::vector<SymbolRegistration> symbol_registrations;
+    std::set<uint64_t>              last_dispatched_kernel_ids;
+    int                             load_count     = 0;
+    int                             finalize_count = 0;
 
 private:
     bool                            m_has_code_objects = false;

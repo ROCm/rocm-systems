@@ -8,7 +8,7 @@ TEST_F(test_code_object_writer_t, ProvidedNoData_ReturnsMinimalJson)
 {
     const auto& result = m_writer.get_result();
     EXPECT_FALSE(result.empty());
-    EXPECT_TRUE(nlohmann::json::accept(result));
+    EXPECT_EQ(nlohmann::json::parse(result), nlohmann::json::parse(R"({"code_objects":[]})"));
 }
 
 TEST_F(test_code_object_writer_t, ProvidedNoCodeObjects_IsEmpty)
