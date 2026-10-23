@@ -25,6 +25,10 @@ that option as a prefix.
 --roofline --roofline-bench-only
 ```
 
+If an option already exists with the same meaning in another mode, keep its
+name. Don't add a prefix. For example, `-b/--block` filters by block or metric
+id in both `profile` and `analyze`.
+
 Frequently used options get a short alias: a single lowercase letter with a
 single dash, such as `-v`.
 
@@ -56,8 +60,7 @@ option description, starting with `Values: `. An argument with a default states
 it at the end of the description as `(Default: value)`.
 
 ```text
---output-format <format>   Specify output format (Default: stdout).
-                            Values: stdout, txt, csv, db.
---list-blocks [arch]       List all available blocks for analysis on specified GPU <arch> (Default: current GPU arch).
-                            Values: gfx908, gfx90a, gfx940, gfx941, gfx942, gfx950, gfx1151
+--roofline-data-types <types>...   Selects data <type>s to present in roofline (Default: FP32).
+                                    Values: FP4, FP6, FP8, FP16, BF16, FP32, FP64, I8, I32, I64.
+--list-metrics [ids]...            List the blocks of the current GPU, or the metrics of the given block [ids].
 ```

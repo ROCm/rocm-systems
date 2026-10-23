@@ -116,13 +116,6 @@ def non_negative_int(value: str) -> int:
     return parsed
 
 
-def print_avail_arch(avail_arch: list[str], args: str) -> str:
-    ret_str = f"List all available {args} for analysis on specified arch:"
-    for arch in avail_arch:
-        ret_str += f"\n   {arch}"
-    return ret_str
-
-
 def add_general_group(
     parser: argparse.ArgumentParser,
     rocprof_compute_home: Path,
@@ -150,16 +143,32 @@ def add_general_group(
     general_group.add_argument(
         "--list-metrics",
         dest="list_metrics",
-        metavar="",
-        choices=supported_archs.keys(),
-        help=print_avail_arch(list(supported_archs.keys()), "metrics"),
+        metavar="id",
+        nargs="*",
+        help=(
+            "List the blocks of the current GPU.\n"
+            "Add block or metric [id]s or aliases to list their metrics, "
+            'or "all" to list every metric.\n'
+            "With analyze -p <workload>, list the workload's blocks and metrics."
+        ),
+    )
+    # Debug option: list the metrics of another arch. Its first value is the arch.
+    general_group.add_argument(
+        "--list-metrics-gfx-id",
+        dest="list_metrics_gfx_id",
+        nargs="+",
+        help=argparse.SUPPRESS,
     )
     general_group.add_argument(
         "--list-blocks",
         dest="list_blocks",
-        metavar="",
+        metavar="<arch>",
         choices=supported_archs.keys(),
-        help=print_avail_arch(list(supported_archs.keys()), "blocks"),
+        help=(
+            "DEPRECATED: use --list-metrics instead.\n"
+            "List available blocks and their aliases for specified GPU <arch>.\n"
+            f"Values: {', '.join(supported_archs)}"
+        ),
     )
     general_group.add_argument(
         "--config-dir",
@@ -390,7 +399,10 @@ Examples:
     profile_group.add_argument(
         "--list-available-metrics",
         dest="list_available_metrics",
-        help="\t\t\tList all available metrics for analysis on current arch",
+        help=(
+            "\t\t\tDEPRECATED: use --list-metrics instead.\n"
+            "\t\t\tList all available metrics for analysis on current arch"
+        ),
         action="store_true",
     )
     profile_group.add_argument(
@@ -408,7 +420,7 @@ Examples:
             "\t\t\tAlternatively, specify block id(s) for filtering "
             "(e.g. 12, 13, 14).\n"
             "\t\t\tAlternatively, specify block alias(es) for filtering.\n"
-            "\t\t\tAliases are arch-specific; run --list-blocks <arch> to see\n"
+            "\t\t\tAliases are arch-specific; run --list-metrics to see\n"
             "\t\t\tall valid block ids and aliases.\n"
             "\t\t\tCan provide multiple space separated arguments.\n"
             "\t\t\tCannot be used with --set, --roof-only, or --bench-only"
@@ -633,7 +645,7 @@ rocprof-compute analyze --path <workload_path> [analyze options]
 
 -----------------------------------------------------------------------------------
 Examples:
-\trocprof-compute analyze -p workloads/vcopy/mi200/ --list-metrics gfx90a
+\trocprof-compute analyze -p workloads/vcopy/mi200/ --list-metrics
 \trocprof-compute analyze -p workloads/mixbench/mi200/ --dispatch 12 34 --decimal 3
 -----------------------------------------------------------------------------------
         """,
@@ -683,7 +695,10 @@ Examples:
     analyze_group.add_argument(
         "--list-available-metrics",
         dest="list_available_metrics",
-        help="\t\tList all available metrics for analysis on current arch",
+        help=(
+            "\t\tDEPRECATED: use --list-metrics instead.\n"
+            "\t\tList all available metrics for analysis on the workload arch"
+        ),
         action="store_true",
     )
     analyze_group.add_argument(

@@ -49,6 +49,12 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Renamed the PC sampling analyze table columns `count_issued` and `count_stalled` to `issue_count` and `stall_count`, so the terminal table uses the same column names as `pc_sampling_summary.csv` and `compute_pc_sampling_summary_view`.
 
+* `--list-metrics` now does what `--list-blocks` and `--list-available-metrics` did, for the current GPU. It no longer takes a GPU architecture.
+  * On its own, it shows a table of blocks and their aliases.
+  * Add block or metric IDs or aliases, or `all`, to list those metrics with their units and descriptions, for example `rocprof-compute --list-metrics sol 12.1`.
+  * `rocprof-compute analyze -p <workload> --list-metrics` lists only the blocks that the workload profiled.
+  * Per-channel metrics are no longer listed.
+
 ### Removed
 
 * Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or `--output-format db` to explore results in ROCm Optiq.
@@ -88,6 +94,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Fixed PC sampling stall reasons counting samples where the wave issued an instruction.
 
 ### Upcoming changes
+
+* `--list-blocks` and `--list-available-metrics` are deprecated and will be removed in a future release. Use `--list-metrics` instead.
 
 ### Known issues
 

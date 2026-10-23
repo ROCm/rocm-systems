@@ -69,21 +69,72 @@ Common filters to customize data collection include:
 
 See :ref:`Filtering <filtering>` for an in-depth walkthrough.
 
+.. _list-metrics:
+
+List blocks and metrics
+^^^^^^^^^^^^^^^^^^^^^^^
+
 To view available metrics by hardware block, use the ``--list-metrics``
-option with a system architecture argument or ``--list-available-metrics``
-to view the metrics for current system architecture:
+option. It lists the blocks of the current GPU and their aliases. Add block or
+metric IDs or aliases to list their metrics with units and descriptions, or
+``all`` to list every metric:
 
 .. code-block:: shell
 
-   $ rocprof-compute --list-metrics <sys_arch>
-   $ rocprof-compute profile --list-available-metrics
+   $ rocprof-compute --list-metrics
+   $ rocprof-compute --list-metrics sol 12 11.1.0
+   $ rocprof-compute --list-metrics all
 
-To view available aliases by hardware block, use the ``--list-blocks``
-option with a system architecture argument
+To list the blocks and metrics of a profiled workload, use analyze mode:
 
 .. code-block:: shell
 
-   $ rocprof-compute --list-blocks <sys_arch>
+   $ rocprof-compute analyze -p <workload_path> --list-metrics
+
+The block table shows each block's ID and alias. Each metric table shows the
+metric's ID, unit, and description. For example, on an MI300 system:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute --list-metrics
+
+   Platform: gfx942 (MI300)
+
+   ╒══════════╤════════════════╤══════════════════════════════════════════════════════╕
+   │ Block_ID │ Alias          │ Block                                                │
+   ╞══════════╪════════════════╪══════════════════════════════════════════════════════╡
+   │ 0        │ topstats       │ Top Stats                                            │
+   │ 1        │ sysinfo        │ System Info                                          │
+   │ 2        │ sol            │ System Speed-of-Light                                │
+   │ 3        │ memchart       │ Memory Chart                                         │
+   │ 4        │ roof           │ Roofline                                             │
+   │ 5        │ cpc            │ Command Processor (CPC/CPF)                          │
+   │ 6        │ spi            │ Workgroup Manager (SPI)                              │
+   ...
+
+   $ rocprof-compute --list-metrics spi
+
+   Platform: gfx942 (MI300)
+
+   6. Workgroup Manager (SPI) (alias: spi)
+   6.1 Workgroup manager utilizations
+   ╒═══════════╤════════════════════════════════╤═════════════╤══════════════════════════════════════════╕
+   │ Metric_ID │ Metric                         │ Unit        │ Description                              │
+   ╞═══════════╪════════════════════════════════╪═════════════╪══════════════════════════════════════════╡
+   │ 6.1.0     │ Accelerator Utilization        │ Percent     │ The percent of cycles in the kernel      │
+   │           │                                │             │ where the accelerator was actively doing │
+   │           │                                │             │ any work.                                │
+   ├───────────┼────────────────────────────────┼─────────────┼──────────────────────────────────────────┤
+   │ 6.1.1     │ Scheduler-Pipe Utilization     │ Percent     │ The percent of total scheduler-pipe      │
+   │           │                                │             │ cycles in the kernel where the           │
+   │           │                                │             │ scheduler-pipes were actively doing any  │
+   │           │                                │             │ work.                                    │
+   ...
+
+.. note::
+
+   ``--list-blocks`` and ``--list-available-metrics`` are deprecated and will be
+   removed in a future release. Use ``--list-metrics`` instead.
 
 .. _basic-analyze-cli:
 
