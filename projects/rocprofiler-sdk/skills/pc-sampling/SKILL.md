@@ -16,7 +16,7 @@ description: Profiles a target application using rocprofv3 with program counter 
 To run rocprofv3 with PC sampling:
 
 - explicitly enable pc sampling with the flag `--pc-sampling-beta-enabled`.
-- specify the type of pc sampling method with `--pc-sampling-method`: `host_trap` or `stochastic`
+- specify the pc sampling method with `--pc-sampling-method`: `host_trap` or `stochastic`
 - specify the interval unit for the sampling with `--pc-sampling-unit`: `time` for host_trap and `cycles` for stochastic
 - specify the sampling interval with `--pc-sampling-interval`: an integer representing microseconds if you specified `time` or cycles if you specified `cycles`.
 - add the `--kernel-trace` flag to track kernel launches for attribution
@@ -90,4 +90,4 @@ A brief overview of stall types and their causes is available in this skill's re
 
 The rocm-systems repository has several PC sampling documentation files in this folder: projects/rocprofiler-sdk/source/docs/how-to/. You may also access them here: https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/develop/how-to/cdna3-cdna4-pc-sampling.html
 
-Only one PC sampling configuration can be used at a time, so if exactly one valid configuration is reported then PC sampling is probably being actively used by another process.
+Only one PC sampling configuration can be used at a time, so if exactly one valid configuration is reported then PC sampling is probably being actively used by another process. If this happens, report it to the user and inform them that results may be affected.
