@@ -2450,6 +2450,26 @@ void run_cdna4_dot2_f32_bf16(bool force_scalar) {
   // widening or incorrect clamp implementation would not produce this.
   EXPECT_EQ(cu->read_vgpr(vb + 3, 0), std::bit_cast<uint32_t>(11.5f));
 
+  // NEG_HI on the F32 accumulator is ABS, applied before NEG. This follows the
+  // gfx1201/gfx1100 captures; CDNA4 itself was not captured.
+  cu->write_vgpr(vb + 2, 0, std::bit_cast<uint32_t>(-0.5f));
+  for (const auto &[neg, expected] : {std::pair{0, 11.5f}, std::pair{4, 10.5f}}) {
+    SCOPED_TRACE(neg);
+    const auto abs_words =
+        cdna4::build_vop3p(cdna4::kVDot2F32Bf16Vop3p, {.vdst = static_cast<uint8_t>(3),
+                                                       .neg_hi = 4,
+                                                       .op_sel_hi_2 = 1,
+                                                       .src0 = static_cast<uint16_t>(256),
+                                                       .src1 = static_cast<uint16_t>(257),
+                                                       .src2 = static_cast<uint16_t>(258),
+                                                       .op_sel_hi = 3,
+                                                       .neg = static_cast<uint8_t>(neg)});
+    std::unique_ptr<Instruction> abs_inst(decode_valid(*decoder, abs_words.data()));
+    ASSERT_NE(abs_inst, nullptr);
+    EXPECT_TRUE(cu->execute_instruction(abs_inst.get(), *wf).succeeded());
+    EXPECT_EQ(cu->read_vgpr(vb + 3, 0), std::bit_cast<uint32_t>(expected));
+  }
+
   if (!wf->is_halted())
     wf->halt();
 }
@@ -10354,25 +10374,30 @@ TEST(Cdna5VopdCndmaskTest, Wave32LaneMaskIgnoresTheNeighbouringScalar) {
 }
 
 namespace {
-TEST(RdnaDot2Bf16ExecutionTest, RoundingAndDenormalsAcrossTargets) {
+// gfx1201 and gfx1100 round the sum to FP32 and truncate that to BF16, so a
+// halfway or above-halfway BF16 tail is dropped. gfx1201 keeps BF16 subnormal
+// inputs and results; gfx1100 reads and returns them as +0. Captured lanes for
+// both cards are in valu_fp_mode_test.cpp; RDNA3.5 follows the RDNA3 rule.
+TEST(RdnaDot2Bf16ExecutionTest, TruncationAndSubnormalsMatchEachTarget) {
   struct Case {
     const char *name;
     uint32_t left;
     uint32_t right;
     uint16_t accumulator;
-    uint16_t expected;
+    uint16_t gfx1201;
+    uint16_t gfx1100;
   };
   const std::array cases{
-      Case{"round_product", 0xbfed, 0x4007, 0, 0xc07a},
-      Case{"tie_even_lower", 0x3f80, 0x3f80, 0x3b80, 0x3f80},
-      Case{"tie_even_upper", 0x3f81, 0x3f80, 0x3b80, 0x3f82},
-      Case{"flush_low_input", 0x0040, 0x4000, 0, 0},
-      Case{"flush_high_input", 0x00400000, 0x40000000, 0, 0},
-      Case{"flush_accumulator", 0, 0, 0x0040, 0},
-      Case{"flush_output", 0x0080, 0x3f00, 0, 0},
-      Case{"flush_negative_output", 0x8080, 0x3f00, 0, 0x8000},
-      Case{"finite_control", 0x3f80, 0x4000, 0x4040, 0x40a0},
-      Case{"infinity", 0x7f80, 0x3f80, 0, 0x7f80},
+      Case{"truncate_product", 0xbfed, 0x4007, 0, 0xc079, 0xc079},
+      Case{"truncate_halfway_even", 0x3f80, 0x3f80, 0x3b80, 0x3f80, 0x3f80},
+      Case{"truncate_halfway_odd", 0x3f81, 0x3f80, 0x3b80, 0x3f81, 0x3f81},
+      Case{"subnormal_low_input", 0x0040, 0x4000, 0, 0x0080, 0},
+      Case{"subnormal_high_input", 0x00400000, 0x40000000, 0, 0x0080, 0},
+      Case{"subnormal_accumulator", 0, 0, 0x0040, 0x0040, 0},
+      Case{"subnormal_output", 0x0080, 0x3f00, 0, 0x0040, 0},
+      Case{"subnormal_negative_output", 0x8080, 0x3f00, 0, 0x8040, 0},
+      Case{"finite_control", 0x3f80, 0x4000, 0x4040, 0x40a0, 0x40a0},
+      Case{"infinity", 0x7f80, 0x3f80, 0, 0x7f80, 0x7f80},
   };
   for (rj_code_arch_t arch :
        {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
@@ -10413,7 +10438,8 @@ TEST(RdnaDot2Bf16ExecutionTest, RoundingAndDenormalsAcrossTargets) {
           const int restored_round = std::fegetround();
           std::fesetround(saved_round);
           EXPECT_EQ(restored_round, host_round);
-          EXPECT_EQ(compute_unit->read_vgpr(base + 3, 0), 0xcafe0000u | test.expected);
+          const uint16_t expected = arch == ROCJITSU_CODE_ARCH_RDNA4 ? test.gfx1201 : test.gfx1100;
+          EXPECT_EQ(compute_unit->read_vgpr(base + 3, 0), 0xcafe0000u | expected);
         }
       }
     }
