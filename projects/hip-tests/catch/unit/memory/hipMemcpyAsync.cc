@@ -148,23 +148,17 @@ HIP_TEST_CASE(Unit_hipMemcpyAsync_Capture) {
  * Regression test for a silently lost host-to-device copy.
  *
  * A small async H2D copy from pageable memory is staged: the runtime memcpy's the source into a
- * pinned staging slot, then a blit shader reads that slot and writes the destination. On gfx11
- * slots are packed at the 64-byte cache line size the agent reports, so two consecutive copies
- * land in one 128-byte L2 line.
+ * pinned staging slot, then a blit shader reads that slot and writes the destination. Slots are
+ * bump-allocated and aligned to the cache line size the agent reports through
+ * HSA_AMD_AGENT_INFO_CACHELINE_SIZE.
  *
- * The first copy of a pair is what loses the second one's data. Its shader pulls in the whole line
- * before the CPU fills the neighboring slot, and because staging is coarse-grained the CPU's store
- * never invalidates it. The second shader needed a system-scope acquire to drop that stale line
- * but got agent scope, which reaches L1 and not L2, so it read zeros and wrote them to the
- * destination.
+ * KFD reported that size as zero on gfx11 and CLR substituted its 64-byte fallback, while L2
+ * tracks 128-byte lines. Two consecutive copies therefore landed in one line.
  *
- * All four of these are needed; drop any one and the failure disappears:
+ * All four of these were needed to reproduce; drop any one and the failure disappears:
  *   - the source is pageable host memory; a pinned source is read directly, with no staging
  *   - the copy is asynchronous
- *   - the copy is smaller than the 128-byte granule, so that two of them share a line; larger
- *     transfers get a line each, and past 16 KiB they leave the blit path for SDMA entirely
- *   - the stream is freshly created on every iteration, which is what keeps handing out pools whose
- *     untouched pages read back as the zeros that make a lost copy recognizable
+ *   - the copy is smaller than the 128-byte granule, so that two of them share a line;
  *
  * Due to the nature of the regression, the test needs to be probabilistic.
  */
