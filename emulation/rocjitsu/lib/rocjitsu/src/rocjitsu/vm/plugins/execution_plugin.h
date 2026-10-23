@@ -224,6 +224,8 @@ public:
   virtual void onAmdgpuDispatchExecutionBegin(uint32_t /*dispatch_id*/) {}
 
   /// Called when all workgroups of a dispatch have completed execution.
+  /// Cancelled dispatches do not receive this callback, even if
+  /// onAmdgpuDispatchExecutionBegin was called.
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuDispatchExecutionEnd(uint32_t /*dispatch_id*/) {}
 
