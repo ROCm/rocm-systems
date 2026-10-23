@@ -90,7 +90,7 @@ jobs:
             zlib1g-dev
 
       - name: Checkout rocm-systems
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: rocm-systems
           ref: ${{ env.ROCJITSU_SHA }}
@@ -107,7 +107,7 @@ jobs:
 
       # Use the workflow's converter even when benchmarking an older Rocjitsu commit.
       - name: Checkout workflow tools
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: workflow-source
           ref: ${{ github.sha }}
@@ -126,7 +126,7 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
 
       - name: Checkout benchmark corpus
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ROCm/rocjitsu-test-corpus
           ref: ${{ env.CORPUS_SHA }}
@@ -134,7 +134,7 @@ jobs:
           persist-credentials: false
 
       - name: Checkout pinned Tensile source
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ROCm/rocm-libraries
           ref: ${{ env.TENSILE_SHA }}
@@ -142,7 +142,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
 
@@ -265,7 +265,7 @@ jobs:
 
       - name: Upload workload failure diagnostics
         if: ${{ !cancelled() && (steps.benchmark.outcome == 'failure' || steps.benchmark.outputs.case_failures == 'true') }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ env.RESULTS_ARTIFACT }}-diagnostics
           path: |
@@ -277,7 +277,7 @@ jobs:
       - name: Upload original raw benchmark JSON
         id: upload_raw
         if: ${{ !cancelled() && (steps.benchmark.outcome == 'success' || steps.benchmark.outcome == 'failure') }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ env.RESULTS_ARTIFACT }}-raw
           path: ${{ env.ROCJITSU_RESULT_DIR }}/run.json
@@ -307,7 +307,7 @@ jobs:
       - name: Upload dashboard benchmark JSON
         id: upload_dashboard
         if: ${{ !cancelled() && steps.dashboard.outcome == 'success' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ env.RESULTS_ARTIFACT }}-dashboard
           path: ${{ env.BENCHMARK_DIR }}/dashboard/*.json
@@ -331,21 +331,21 @@ jobs:
       contents: write
     steps:
       - name: Download original raw JSON
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: ${{ env.RESULTS_ARTIFACT }}-raw
           path: ${{ env.RESULTS_DOWNLOAD_DIR }}/raw
 
       - name: Download dashboard JSON
         if: ${{ needs.benchmark.outputs.dashboard_ready == 'true' }}
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: ${{ env.RESULTS_ARTIFACT }}-dashboard
           path: ${{ env.RESULTS_DOWNLOAD_DIR }}/dashboard
 
       - name: Checkout publication validator
         if: ${{ needs.benchmark.outputs.dashboard_ready == 'true' }}
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: workflow-source
           ref: ${{ github.sha }}
@@ -356,12 +356,12 @@ jobs:
 
       - name: Set up Node.js
         if: ${{ needs.benchmark.outputs.dashboard_ready == 'true' }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "22.13.0"
 
       - name: Checkout publication branch
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: publication
           ref: ${{ env.RESULTS_BRANCH }}
