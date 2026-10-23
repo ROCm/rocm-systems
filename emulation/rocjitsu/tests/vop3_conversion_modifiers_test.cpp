@@ -274,8 +274,9 @@ TEST_P(Vop3ConversionModifierTest, NearestRoundsTiesUpWithoutRoundingAdjacentInp
     uint32_t bits;
     int32_t expected;
   };
-  // Ties and adjacent representable values match physical gfx1100/gfx1201.
-  // The same rounding rule is specified for RPI on earlier RDNA and CDNA.
+  // Ties, adjacent representable values and NaNs match physical gfx1100/gfx1201.
+  // A NaN saturates by its sign bit. The same rules are applied to RPI on
+  // earlier RDNA and CDNA without hardware verification.
   constexpr Case cases[] = {
       {0xc0200001, -3},          {0xc0200000, -2},        {0xc01fffff, -2},
       {0xbfc00001, -2},          {0xbfc00000, -1},        {0xbfbfffff, -1},
@@ -288,8 +289,8 @@ TEST_P(Vop3ConversionModifierTest, NearestRoundsTiesUpWithoutRoundingAdjacentInp
       {0x4b800000, 16777216},    {0xcb800000, -16777216}, {0x4effffff, 2147483520},
       {0xceffffff, -2147483520}, {0x4f000000, INT32_MAX}, {0xcf000000, INT32_MIN},
       {0x4f000001, INT32_MAX},   {0xcf000001, INT32_MIN}, {0x7f800000, INT32_MAX},
-      {0xff800000, INT32_MIN},   {0x7fc00000, 0},         {0xffc00000, 0},
-      {0x7f800001, 0},
+      {0xff800000, INT32_MIN},   {0x7fc00000, INT32_MAX}, {0xffc00000, INT32_MIN},
+      {0x7f800001, INT32_MAX},
   };
   for (bool force_scalar : {false, true}) {
     ForceScalarGuard guard(force_scalar);
@@ -339,7 +340,8 @@ TEST_P(Vop3ConversionModifierTest, PackedRtzPreservesIndependentSourceModifiers)
     uint16_t packed;
   };
   // Explicit RTZ results include discarded mantissa bits, signed zero,
-  // a half subnormal, and finite overflow. The conversion ignores MODE rounding.
+  // a half subnormal, and finite overflow. The conversion ignores MODE rounding;
+  // as on gfx1201, the subnormal flushes when MODE disables F16 output denormals.
   constexpr Case cases[] = {{0xbf803fff, 0xbc01}, {0x40490fdb, 0x4248}, {0x80000000, 0x8000},
                             {0x477fffff, 0x7bff}, {0xb3ffffff, 0x8001}, {0x3fffffff, 0x3fff},
                             {0xc0200000, 0xc100}, {0x3f000000, 0x3800}};
@@ -366,8 +368,9 @@ TEST_P(Vop3ConversionModifierTest, PackedRtzPreservesIndependentSourceModifiers)
                                             256u | (257u << 9) | (neg_mask << 29)};
         std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
         ASSERT_NE(inst, nullptr);
-        for (uint32_t mode : {0u, 0xfu}) {
+        for (uint32_t mode : {0u, 0xfu, 0xf0u}) {
           wf->set_mode_raw(mode);
+          const bool flush_f16 = (mode & 0x80u) == 0;
           for (uint64_t exec : {wf->wf_size() == 64 ? ~0ull : 0xffffffffull, 0x55ull}) {
             SCOPED_TRACE(testing::Message()
                          << "scalar=" << force_scalar << " abs_mask=" << abs_mask
@@ -387,6 +390,8 @@ TEST_P(Vop3ConversionModifierTest, PackedRtzPreservesIndependentSourceModifiers)
                   half &= 0x7fff;
                 if (neg_mask & (1u << src))
                   half ^= 0x8000;
+                if (flush_f16 && (half & 0x7c00) == 0)
+                  half &= 0x8000;
                 expected |= half << (16 * src);
               }
               EXPECT_EQ(cu->read_vgpr(vb + 2, lane), exec & (1ull << lane) ? expected : 0xdeadbeefu)

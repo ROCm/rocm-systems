@@ -202,7 +202,10 @@ def _register_handlers() -> None:
         c.dst_ops, c.src_ops, c.profile.uses_vgpr_msb_indexing
     )
     DISPATCH['vector_sat_pack'] = lambda c: gen_vector_sat_pack(
-        c.dst_ops, c.src_ops, c.op
+        c.dst_ops,
+        c.src_ops,
+        c.op,
+        true16_dst=c.is_vop3 and c.profile.uses_true16_vop3_opsel,
     )
     DISPATCH['vector_mullit'] = lambda c: gen_vector_mullit(
         c.dst_ops, c.src_ops, c.is_vop3, c.has_abs
