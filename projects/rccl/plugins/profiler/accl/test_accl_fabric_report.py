@@ -45,7 +45,7 @@ def cum(rate, t):
 def telemetry(host, pid, roce="nic0", t0=900_000, t1=1_600_000, step=10_000, prio=PRIO,
               rx_pause=None, tx_pause=None, rx_frames=None, ecn=None, oos=None, rnr=None,
               other_bpus=0.0, link_gbps=400, prio_bytes=True, time_counters=True,
-              refresh_us=None, pause_prio=None, no_pfc_prio=None):
+              refresh_us=None, pause_prio=None, no_pfc_prio=None, cnp=None):
     """One telemetry file. Rates are {(a, b): per-us}; pause rates are a fraction
     of time. RCCL sends RCCL_BPUS; `other_bpus` is someone else's traffic on the
     same port. `refresh_us` makes the NIC's ethtool counters step that often."""
@@ -68,7 +68,7 @@ def telemetry(host, pid, roce="nic0", t0=900_000, t1=1_600_000, step=10_000, pri
              "tx_bytes": RCCL_BPUS * t, "rx_bytes": RCCL_BPUS * t,
              "nic_tx_bytes": int(nic), "nic_rx_bytes": int(nic),
              "nic_tx_packets": int(nic / 4096), "nic_rx_packets": int(nic / 4096),
-             "ecn_marked_pkts": int(cum(ecn, t)), "cnp_sent": 0, "cnp_rcvd": 0,
+             "ecn_marked_pkts": int(cum(ecn, t)), "cnp_sent": int(cum(cnp, t)), "cnp_rcvd": 0,
              "oos_drop_count": int(cum(oos, t)), "seq_err_naks_rcvd": 0, "local_ack_timeout_err": -1,
              "out_of_buffer": -1, "rnr_retry_err": int(cum(rnr, t)),
              "pfc_rx_pause_us": rxp if time_counters else z, "pfc_tx_pause_us": txp if time_counters else z,
@@ -349,6 +349,13 @@ class VerdictTest(unittest.TestCase):
         # RCCL alone is ~2.4 packets/us; 0.1 marks/us is ~4%, 1 mark is ~0%.
         self.assertEqual(one(ecn={BUSY: 0.1}).rank(0).verdict, "CONGESTION-MARKS")
         self.assertTrue(one(ecn={(BUSY[0], BUSY[0] + 1): 1.0}).rank(0).verdict.startswith("CLEAN"))
+
+    def test_cnps_are_a_rate_not_a_share(self):
+        # 300 CNPs/s is about 0.01% of packets here, yet a flow slowed all the time.
+        g = one(cnp={BUSY: 300e-6}).rank(0)
+        self.assertEqual(g.verdict, "CONGESTION-MARKS")
+        self.assertAlmostEqual(g.nics[0].cnp_ps[0], 300, delta=30)
+        self.assertTrue(one(cnp={BUSY: 20e-6}).rank(0).verdict.startswith("CLEAN"))
 
     def test_frames_only_nic_uses_frames(self):
         r = one(rx_frames={BUSY: 500e-6}, time_counters=False, roce="bnxt_re0")

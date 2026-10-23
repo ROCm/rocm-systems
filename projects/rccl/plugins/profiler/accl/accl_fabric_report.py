@@ -24,7 +24,7 @@ Findings, per NIC:
   FABRIC-LOSS        out-of-sequence drops, sequence-error NAKs, ACK timeouts
   HOST-RNR           receiver not ready / out of receive buffers
   LINK-SHARED        the link was busy and mostly with traffic that is not RCCL
-  CONGESTION-MARKS   ECN-marked packets or CNPs above a share of all packets
+  CONGESTION-MARKS   ECN-marked share of received packets, or CNPs per second, above a threshold
 Rx pause is not proof of a fabric fault: a receiver that pushes back makes
 the switch pause the senders. The per-collective summary therefore blames a
 host first when any of its NICs paused the switch.
@@ -463,7 +463,8 @@ def pause_unit(dev: Device, prio: int) -> Optional[str]:
 class Thresholds:
     pause_pct: float = 5.0      # % of wall time paused
     pause_fps: float = 100.0    # pause frames per second, when only frames are counted
-    marks_pct: float = 1.0      # % of packets ECN-marked or answered with a CNP
+    ecn_pct: float = 1.0        # % of received packets ECN-marked
+    cnp_ps: float = 100.0       # CNPs sent + received per second
     link_busy_pct: float = 80.0  # link use that counts as busy
     link_other_pct: float = 20.0  # non-RCCL share of the link that counts as shared
 
@@ -483,7 +484,8 @@ class NicStats:
     tx_pause: Optional[Tuple[float, float]] = None
     loss: Optional[Tuple[float, float]] = None       # fabric-loss events (lb, ub)
     rnr: Optional[Tuple[float, float]] = None        # host-not-ready events (lb, ub)
-    marks_pct: Optional[float] = None
+    ecn_pct: Optional[Tuple[float, float]] = None    # ECN-marked % of received packets (lb, ub)
+    cnp_ps: Optional[Tuple[float, float]] = None     # CNPs sent + received per second (lb, ub)
     link_pct: Optional[float] = None                 # busier direction, % of link speed
     rccl_pct: Optional[float] = None                 # RCCL's share of that traffic
     nic_stale: bool = False
@@ -617,17 +619,26 @@ def _nic_stats(dev, g, spans, busy, interval, lane, thr, tels, host, gr) -> NicS
         if lvl:
             ns.findings.append(Finding(name, lvl, f"{_fmt_range((lb, ub), '')} {what}"))
 
-    # ECN marks and CNPs as a share of packets, from the same counter windows.
-    shares = []
-    for mark, pkts in (("ecn_marked_pkts", "nic_rx_packets"), ("cnp_rcvd", "nic_tx_packets")):
-        bm, bp = bound(s.get(mark), spans, pad, False), bound(s.get(pkts), spans, pad, False)
-        if bm is not None and bp is not None and bp.ub not in (0, INF):
-            shares.append(100.0 * bm.ub / bp.ub)
-    if shares:
-        ns.marks_pct = max(shares)
-        if ns.marks_pct >= thr.marks_pct:
-            ns.findings.append(Finding("CONGESTION-MARKS", "yes",
-                                       f"{ns.marks_pct:.1f}% of packets ECN-marked or CNP'd"))
+    # ECN marks as a share of received packets: a switch marks a share of the
+    # packets it queues. CNPs as a rate instead: a NIC sends at most one per flow
+    # every few tens of us, however many marks arrive, so their share of packets
+    # stays far below 1% even when a flow is slowed the whole time.
+    lvls = []
+    bm, bp = bound(s.get("ecn_marked_pkts"), spans, pad, False), bound(s.get("nic_rx_packets"), spans, pad, False)
+    if bm is not None and bp is not None and bp.ub not in (0, INF):
+        ns.ecn_pct = (100.0 * bm.lb / bp.ub,
+                      INF if bm.ub == INF or bp.lb == 0 else 100.0 * bm.ub / bp.lb)
+        lvls.append((_level(*ns.ecn_pct, thr.ecn_pct), f"{_fmt_range(ns.ecn_pct, '%')} of packets ECN-marked"))
+    bs = [b for b in (bound(s.get(k), spans, pad, False) for k in ("cnp_sent", "cnp_rcvd")) if b is not None]
+    if bs and busy > 0:
+        tot = Bound(sum(b.lb for b in bs), INF if any(b.ub == INF for b in bs) else sum(b.ub for b in bs),
+                    min(b.fill for b in bs))
+        ns.cnp_ps = _rate(tot, busy, "/s")
+        lvls.append((_level(*ns.cnp_ps, thr.cnp_ps), f"{_fmt_range(ns.cnp_ps, '/s')} CNPs sent or received"))
+    hit = [(l, d) for l, d in lvls if l]
+    if hit:
+        level = "yes" if any(l == "yes" for l, _ in hit) else "maybe"
+        ns.findings.append(Finding("CONGESTION-MARKS", level, "; ".join(d for _, d in hit)))
 
     # Link use, and how much of it was RCCL. Port counters include all traffic.
     if busy > 0:
@@ -898,14 +909,14 @@ def print_report(results: List[GroupResult], lane: Lane, thr: Thresholds, per_ni
         print("  Every PFC counter stayed zero: either nothing paused or PFC is disabled, so a")
         print("  CLEAN result cannot rule out a lossy fabric on its own; check the loss columns.")
     print(f"Thresholds: pause {thr.pause_pct:g}% of wall time (or {thr.pause_fps:g} frames/s where the NIC "
-          f"counts frames only), marks {thr.marks_pct:g}% of packets, link busy {thr.link_busy_pct:g}% "
+          f"counts frames only), ECN {thr.ecn_pct:g}% of packets or {thr.cnp_ps:g} CNPs/s, link busy {thr.link_busy_pct:g}% "
           f"with >= {thr.link_other_pct:g}% non-RCCL traffic")
     print("  rxPause = switch paused our transmit   txPause = our NIC paused the switch")
     print("  a-b = at least a, at most b (counters are sampled, not continuous)\n")
 
     hdr = (f"{'Coll':<12} {'Size':>5} {'Rank':>4} {'Host':<14} {'N':>4} {'wall ms':>8} "
            f"{'busBW':>6} {'NIC':<10} {'rxPause':>10} {'txPause':>10} {'loss':>6} {'rnr':>5} "
-           f"{'mark%':>5} {'link%':>5} {'rccl%':>5} {'B/coll':>8} {'cmpl p50/p99':>13}  Verdict")
+           f"{'ecn%':>9} {'cnp/s':>11} {'link%':>5} {'rccl%':>5} {'B/coll':>8} {'cmpl p50/p99':>13}  Verdict")
     print(hdr)
     print("-" * len(hdr))
     for g in sorted(results, key=lambda r: (r.coll, r.msg_size, r.host, r.rank)):
@@ -923,7 +934,7 @@ def print_report(results: List[GroupResult], lane: Lane, thr: Thresholds, per_ni
             bpc = accl_report.fmt_size(int(n.sw_tx_per_coll)) + ("*" if g.overlap_pct > 10 else "")
             print(f"{lead} {n.roce[:10]:<10} {_fmt_range(n.rx_pause, n.unit or ''):>10} "
                   f"{_fmt_range(n.tx_pause, n.unit or ''):>10} {_fmt_range(n.loss, ''):>6} "
-                  f"{_fmt_range(n.rnr, ''):>5} {'-' if n.marks_pct is None else f'{n.marks_pct:.1f}':>5} "
+                  f"{_fmt_range(n.rnr, ''):>5} {_fmt_range(n.ecn_pct, '%'):>9} {_fmt_range(n.cnp_ps, '/s'):>11} "
                   f"{link:>5} {'-' if n.rccl_pct is None else f'{n.rccl_pct:.0f}':>5} {bpc:>8} "
                   f"{p50 + '/' + p99:>13}  {g.verdict if i == 0 else ''}")
 
@@ -938,7 +949,7 @@ def print_report(results: List[GroupResult], lane: Lane, thr: Thresholds, per_ni
     print("  FABRIC-LOSS        out-of-sequence drops, sequence-error NAKs, ACK timeouts")
     print("  HOST-RNR           receiver not ready / out of receive buffers")
     print("  LINK-SHARED        link busy, mostly with traffic that is not this job's RCCL")
-    print("  CONGESTION-MARKS   ECN-marked packets or CNPs above the threshold share")
+    print("  CONGESTION-MARKS   ECN-marked share of packets, or CNPs per second, above the threshold")
     print("  CLEAN              every counter below threshold; time went elsewhere")
     print("  INCONCLUSIVE       missing samples, or only an upper bound crosses a threshold")
     print("  Echo split (FABRIC+HOST): pause x on senders, pushback y on a receiver; y can hold")
@@ -1232,8 +1243,10 @@ def main():
             p.add_argument("--threshold-fps", type=float, default=d.pause_fps,
                            help="pause frames per second that count, on NICs that count frames "
                                 "only (default %(default)s)")
-            p.add_argument("--threshold-marks-pct", type=float, default=d.marks_pct,
-                           help="ECN-marked or CNP share of packets that counts (default %(default)s)")
+            p.add_argument("--threshold-ecn-pct", type=float, default=d.ecn_pct,
+                           help="ECN-marked share of received packets that counts (default %(default)s)")
+            p.add_argument("--threshold-cnps", type=float, default=d.cnp_ps,
+                           help="CNPs sent + received per second that count (default %(default)s)")
             p.add_argument("--link-busy-pct", type=float, default=d.link_busy_pct,
                            help="link use that counts as busy (default %(default)s)")
             p.add_argument("--link-other-pct", type=float, default=d.link_other_pct,
@@ -1245,7 +1258,7 @@ def main():
 
     recs, tels, used, lane, warnings = load(args)
     if args.cmd == "report":
-        thr = Thresholds(args.threshold_pct, args.threshold_fps, args.threshold_marks_pct,
+        thr = Thresholds(args.threshold_pct, args.threshold_fps, args.threshold_ecn_pct, args.threshold_cnps,
                          args.link_busy_pct, args.link_other_pct)
         results = analyze(recs, tels, lane, thr)
         resets = sum(s.resets for t in tels.values() for d in t.devices.values() for s in d.series.built())

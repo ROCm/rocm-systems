@@ -221,7 +221,7 @@ interval is longer than a single collective.
 |---|---|
 | `rxP%` | PFC pause time **received** (the switch paused our transmit) as a share of wall time. Evidence against the **fabric**. |
 | `txP%` | PFC pause time **sent** (our NIC paused the switch because this host could not take data in fast enough). Evidence against the **host**. |
-| `ECN`, `CNPrx` | ECN-marked packets and CNPs received during the spans. |
+| `ecn%`, `cnp/s` | ECN-marked share of received packets, and CNPs sent plus received per second. |
 | `NICtx GB/s` | NIC-level RoCE transmit rate during the spans. |
 | `B/coll` | RCCL bytes sent per collective on that NIC (exact, from `net`). |
 | `cmpl p50/p99` | WQE completion latency percentiles, upper bucket edges. |
@@ -233,7 +233,7 @@ Verdicts, checked in this order:
 | `FABRIC+HOST` | both `rxP%` and `txP%` at or above `--threshold-pct` (default 5) |
 | `FABRIC` | `rxP%` at or above the threshold |
 | `HOST-RX` | `txP%` at or above the threshold |
-| `CONGESTION-MARKS` | no pause above the threshold, but ECN marks or CNPs were seen |
+| `CONGESTION-MARKS` | ECN marks at or above `--threshold-ecn-pct` (default 1%) of packets, or CNPs at or above `--threshold-cnps` (default 100/s) |
 | `NOT-FABRIC (...)` | fabric counters clean; accl's own classification in brackets |
 | `NO-PFC-DATA (...)` | the NIC exposed no PFC pause time |
 | `NO-DATA` | no telemetry for that process |
