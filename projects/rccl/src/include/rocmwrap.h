@@ -70,6 +70,12 @@
 
 #define NCCL_CUMEM_DMABUF_EXPORT_GATE NCCL_CUMEM_DMABUF_EXPORT_GATE_FOR(NCCL_CUMEM_DMABUF_EXPORT_PROBE, HIP_VERSION)
 
+// Kernel version packing used by ncclGetKernelVersionCode(). cuMem works below 6.8; 6.8 is a performance recommendation.
+#define NCCL_KERNEL_VERSION_CODE(major, minor) (((major) << 16) | ((minor) << 8))
+#define NCCL_CUMEM_PERF_KERNEL_VERSION NCCL_KERNEL_VERSION_CODE(6, 8)
+#define NCCL_CUMEM_KERNEL_PERF_RECOMMENDED(kernelVersionCode) \
+  ((kernelVersionCode) >= NCCL_CUMEM_PERF_KERNEL_VERSION)
+
 // HIP: implemented in rma_proxy_launch.cc (hipStreamBatchMemOp + old-HIP fallback).
 // CUDA: implemented in cudawrap.cc (cuStreamBatchMemOp).
 ncclResult_t ncclCuStreamBatchMemOp(cudaStream_t stream, unsigned int numOps, CUstreamBatchMemOpParams* batchParams);

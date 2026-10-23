@@ -19,6 +19,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <fcntl.h>     // InstallHipVmmEmulator's DMA-BUF export fd
 #include <sys/mman.h>  // InstallHipVmmEmulator's mmap-backed VA
 
 #include <hip/hip_ext.h>  // hipExtModuleLaunchKernel, for the profile-interceptor stubs
@@ -50,6 +51,9 @@ ASSERT_HOOK_MATCHES_PROD(g_hipMemImportFromShareableHandle, hipMemImportFromShar
 ASSERT_HOOK_MATCHES_PROD(g_hipMemAddressReserve,          hipMemAddressReserve);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemMap,                     hipMemMap);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemSetAccess,               hipMemSetAccess);
+#ifdef RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED
+ASSERT_HOOK_MATCHES_PROD(g_hipMemGetHandleForAddressRange, hipMemGetHandleForAddressRange);
+#endif
 ASSERT_HOOK_MATCHES_PROD(g_hipIpcOpenMemHandle,           hipIpcOpenMemHandle);
 ASSERT_HOOK_MATCHES_PROD(g_hipDeviceGetPCIBusId,          hipDeviceGetPCIBusId);
 ASSERT_HOOK_MATCHES_PROD(g_hipDeviceGetByPCIBusId,        hipDeviceGetByPCIBusId);
@@ -337,6 +341,13 @@ static hipError_t DefaultHipMemSetAccess(void*, size_t, const hipMemAccessDesc*,
     return hipErrorInvalidValue;
 }
 static hipError_t DefaultHipMemUnmap(void*, size_t) { return hipErrorInvalidValue; }
+#ifdef RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED
+static hipError_t DefaultHipMemGetHandleForAddressRange(void*, hipDeviceptr_t, size_t, hipMemRangeHandleType,
+                                                        unsigned long long)
+{
+    return hipErrorInvalidValue;
+}
+#endif
 
 static hipError_t DefaultHipIpcOpenMemHandle(void** devPtr, hipIpcMemHandle_t, unsigned)
 {
@@ -401,6 +412,10 @@ std::function<hipError_t(void*, size_t, size_t, hipMemGenericAllocationHandle_t,
 std::function<hipError_t(void*, size_t, const hipMemAccessDesc*, size_t)>
     g_hipMemSetAccess = DefaultHipMemSetAccess;
 std::function<hipError_t(void*, size_t)> g_hipMemUnmap = DefaultHipMemUnmap;
+#ifdef RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED
+std::function<hipError_t(void*, hipDeviceptr_t, size_t, hipMemRangeHandleType, unsigned long long)>
+    g_hipMemGetHandleForAddressRange = DefaultHipMemGetHandleForAddressRange;
+#endif
 std::function<hipError_t(void**, hipIpcMemHandle_t, unsigned)>
     g_hipIpcOpenMemHandle = DefaultHipIpcOpenMemHandle;
 std::function<hipError_t(void*)> g_hipIpcCloseMemHandle = DefaultHipIpcCloseMemHandle;
@@ -502,6 +517,13 @@ void InstallHipVmmEmulator()
     g_hipMemSetAccess = [](void*, size_t, const hipMemAccessDesc*, size_t) { return hipSuccess; };
     g_hipMemUnmap     = [](void*, size_t) { return hipSuccess; };
     g_hipMemRelease   = [](hipMemGenericAllocationHandle_t) { return hipSuccess; };
+#ifdef RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED
+    g_hipMemGetHandleForAddressRange = [](void* handle, hipDeviceptr_t, size_t, hipMemRangeHandleType,
+                                          unsigned long long) {
+        *static_cast<int*>(handle) = open("/dev/null", O_RDONLY);
+        return hipSuccess;
+    };
+#endif
     g_hipMemRetainAllocationHandle = [](hipMemGenericAllocationHandle_t* handle, void*) {
         if (handle) *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
         return hipSuccess;
@@ -662,6 +684,9 @@ void ResetHipFakes()
     g_hipMemMap                     = DefaultHipMemMap;
     g_hipMemSetAccess               = DefaultHipMemSetAccess;
     g_hipMemUnmap                   = DefaultHipMemUnmap;
+#ifdef RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED
+    g_hipMemGetHandleForAddressRange = DefaultHipMemGetHandleForAddressRange;
+#endif
     g_hipIpcOpenMemHandle           = DefaultHipIpcOpenMemHandle;
     g_hipIpcCloseMemHandle          = DefaultHipIpcCloseMemHandle;
     g_hipMemcpy                     = DefaultHipMemcpy;
@@ -914,6 +939,14 @@ hipError_t hipMemSetAccess(void* ptr, size_t size, const hipMemAccessDesc* desc,
 }
 
 hipError_t hipMemUnmap(void* ptr, size_t size) { return g_hipMemUnmap(ptr, size); }
+
+#ifdef RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED
+hipError_t hipMemGetHandleForAddressRange(void* handle, hipDeviceptr_t dptr, size_t size,
+                                          hipMemRangeHandleType handleType, unsigned long long flags)
+{
+    return g_hipMemGetHandleForAddressRange(handle, dptr, size, handleType, flags);
+}
+#endif
 
 // The recording stays in the wrapper rather than the default hook, so a test
 // that installs its own copy behaviour still gets the call log p2p-test asserts on.

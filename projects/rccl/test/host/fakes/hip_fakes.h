@@ -157,6 +157,11 @@ extern std::function<hipError_t(void* /*ptr*/, size_t /*size*/, const hipMemAcce
                                 size_t /*count*/)>
     g_hipMemSetAccess;
 extern std::function<hipError_t(void* /*ptr*/, size_t /*size*/)> g_hipMemUnmap;
+#ifdef RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED
+extern std::function<hipError_t(void* /*handle*/, hipDeviceptr_t /*dptr*/, size_t /*size*/,
+                                hipMemRangeHandleType /*type*/, unsigned long long /*flags*/)>
+    g_hipMemGetHandleForAddressRange;
+#endif
 
 extern std::function<hipError_t(void** /*ptr*/, hipIpcMemHandle_t /*handle*/, unsigned /*flags*/)>
     g_hipIpcOpenMemHandle;
