@@ -3706,8 +3706,8 @@ TEST_F(KfdIoctlTest, DaemonQueueControlUsesSharedUserptrBacking) {
 
   const int backing_fd = daemon_driver.get_mmap_backing(process_id, allocation.mmap_offset);
   ASSERT_GE(backing_fd, 0);
-  void *client_mapping = rocjitsu::memory_backing::map(nullptr, kPageSize, PROT_READ | PROT_WRITE,
-                                                       MAP_SHARED, backing_fd, 0);
+  void *client_mapping = rocjitsu::map_memory_backing(nullptr, kPageSize, PROT_READ | PROT_WRITE,
+                                                      MAP_SHARED, backing_fd, 0);
   ASSERT_NE(client_mapping, MAP_FAILED) << ::strerror(errno);
   auto *queue = static_cast<amd_queue_t *>(client_mapping);
   queue->read_dispatch_id = 3;
@@ -6734,9 +6734,9 @@ void check_mmap_reply_ownership(bool fallback) {
   const long page_size = sysconf(_SC_PAGESIZE);
   ASSERT_GT(page_size, 0);
   const size_t page = static_cast<size_t>(page_size);
-  CloseOnScopeExit backing{rocjitsu::memory_backing::create(page)};
+  CloseOnScopeExit backing{rocjitsu::create_memory_backing(page)};
   ASSERT_TRUE(backing);
-  ASSERT_EQ(rocjitsu::memory_backing::contains(backing.get()), fallback);
+  ASSERT_EQ(rocjitsu::is_memory_backing_token(backing.get()), fallback);
   struct stat identity {};
   ASSERT_EQ(fstat(backing.get(), &identity), 0);
   int server_fd = -1;

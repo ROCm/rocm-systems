@@ -14,6 +14,6 @@ int main(int argc, char **argv) {
   auto parsed = std::from_chars(argv[1], end, owner);
   if (parsed.ec != std::errc{} || parsed.ptr != end || owner <= 0)
     return 1;
-  using namespace rocjitsu::memory_backing;
-  run_keeper(kListenerFd, kLeaseFd, kStartupFd, owner);
+  using namespace rocjitsu;
+  run_memory_keeper(kMemoryKeeperListenerFd, kMemoryKeeperLeaseFd, kMemoryKeeperStartupFd, owner);
 }

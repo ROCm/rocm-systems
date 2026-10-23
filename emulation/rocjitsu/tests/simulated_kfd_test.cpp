@@ -274,7 +274,7 @@ void check_daemon_export_rejection(bool fallback) {
   const auto process = daemon.find_process(process_id);
   ASSERT_NE(process, nullptr);
   const auto &stored = process->allocations_.at(allocation.handle);
-  ASSERT_EQ(rocjitsu::memory_backing::contains(stored.backing_fd), fallback);
+  ASSERT_EQ(rocjitsu::is_memory_backing_token(stored.backing_fd), fallback);
   const auto access = vm.soc()->gpu_vm().snapshot_vmid(process_id);
   ASSERT_TRUE(access);
   ASSERT_EQ(access->query_mtype(allocation.va_addr), rocjitsu::amdgpu::Mtype::RW);
@@ -342,14 +342,14 @@ TEST_F(SimulatedKfdTest, ImportedDmabufReexportKeepsTheOriginalBacking) {
   ASSERT_EQ(driver->ioctl(AMDKFD_IOC_EXPORT_DMABUF, &reexported), 0);
   struct stat original {
   }, again{};
-  ASSERT_EQ(rocjitsu::memory_backing::stat(exported.dmabuf_fd, &original), 0);
-  ASSERT_EQ(rocjitsu::memory_backing::stat(reexported.dmabuf_fd, &again), 0);
+  ASSERT_EQ(rocjitsu::stat_memory_backing(exported.dmabuf_fd, &original), 0);
+  ASSERT_EQ(rocjitsu::stat_memory_backing(reexported.dmabuf_fd, &again), 0);
   EXPECT_EQ(again.st_dev, original.st_dev);
   EXPECT_EQ(again.st_ino, original.st_ino);
-  void *source = rocjitsu::memory_backing::map(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED,
-                                               exported.dmabuf_fd, 0);
-  void *view = rocjitsu::memory_backing::map(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED,
-                                             reexported.dmabuf_fd, 0);
+  void *source = rocjitsu::map_memory_backing(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                              exported.dmabuf_fd, 0);
+  void *view = rocjitsu::map_memory_backing(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                            reexported.dmabuf_fd, 0);
   ASSERT_NE(source, MAP_FAILED);
   ASSERT_NE(view, MAP_FAILED);
   *static_cast<uint32_t *>(source) = 0xaaaa;

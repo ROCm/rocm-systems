@@ -1,6 +1,7 @@
 # KFD and GEM memory backing
 
-GPU allocations, doorbells, event pages, and GEM objects use `memory_backing`.
+GPU allocations, doorbells, event pages, and GEM objects use the backing adapters
+in `memory_backing.h`.
 The private `rocjitsu-memory` helper creates fixed-size memfds within its own
 inherited hard file limit, raising only its own soft limit. If that limit
 cannot accommodate an allocation, it uses
@@ -10,10 +11,15 @@ Internal scratch that has no exportable handle uses shared anonymous memory
 with `MAP_NORESERVE`, preserving sharing across fork without file sizing.
 
 Shared RAM is retained by opaque Unix socket descriptors. Kernel descriptor
-references preserve it across duplication, fork, and `SCM_RIGHTS` transfer.
+references preserve it across duplication, fork, and `SCM_RIGHTS` transfer while
+its creating keeper remains alive.
 The helper holds an attachment to each segment, marks it for removal, and drops
 that attachment when the final token closes. Mapped views can outlive all
-handles. Mapping adapters use `shmat` and zero-old-size `mremap` aliases, retain
+handles. Keeper failure invalidates its tokens: subsequent mapping and reopen
+requests fail with `ESTALE`, even if a pre-existing view still retains a segment.
+Existing views remain usable, but a token with no remaining view loses its data
+when the keeper dies. A replacement keeper serves new allocations; it cannot
+recover data from invalidated tokens. Mapping adapters use `shmat` and zero-old-size `mremap` aliases, retain
 read-only permissions, and support partial and fixed mappings without copying
 live buffer contents. These fallback descriptors require rocjitsu's mapping and
 metadata adapters; importing them into a different IPC namespace fails with
@@ -52,7 +58,11 @@ a warning identifying the file. Application writes, including runtime compiler
 temporary files, continue to obey the application's current limit.
 
 Changing effective user or group credentials retires the previous helper's
-lease before using a new helper; previously exported tokens remain valid.
+lease before using a new helper; previously exported tokens retain their keeper
+and storage. New token mappings still check the caller's current System V IPC
+permissions. Segments use mode 0600; a different effective UID without
+`CAP_IPC_OWNER` receives `EACCES`, even when it retained a token. Already mapped
+views remain usable. Group-only changes do not remove the owning UID's access.
 Detached helpers must be reaped by PID 1 or an adopting child subreaper,
 including after application children exit. Run containers with a reaping init
 such as tini. An application acting as PID 1 or enabling
@@ -71,3 +81,12 @@ sizing and application limits unchanged.
 Installed objects locate the helper in their installation. Only objects inside
 the configured build tree may fall back to its helper executable; an incomplete
 installation fails rather than using another build's private protocol.
+
+File-limit handling does not require `HSA_ENABLE_IPC_MODE_LEGACY=1`. Ordinary HIP
+allocation, copies, dispatch, and local VMM work with the runtime's default IPC
+selection. The System V RAM fallback is independent of HSA's legacy IPC API and requires
+Linux System V IPC support; native memfd backing does not.
+HIP IPC sharing between processes is a separate compatibility boundary: the
+current dma-buf IPC path is unsupported, so daemon clients using
+`hipIpcGetMemHandle`/`hipIpcOpenMemHandle` need the legacy mode described in the
+[CLI guide](rocjitsu-cli.md#overview). This change does not add dma-buf IPC support.

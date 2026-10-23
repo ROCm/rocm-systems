@@ -32,7 +32,6 @@
 #include <vector>
 
 namespace {
-namespace backing = rocjitsu::memory_backing;
 constexpr size_t kSize = 64 * 1024;
 
 class MemoryBackingDeathTest : public ::testing::Test {
@@ -47,21 +46,21 @@ protected:
 TEST_F(MemoryBackingDeathTest, NativePreallocationAndForcedTokensPreserveMetadata) {
   ASSERT_EXIT(
       {
-        const int sparse = backing::create(kSize);
-        const int committed = backing::create(kSize, true);
+        const int sparse = rocjitsu::create_memory_backing(kSize);
+        const int committed = rocjitsu::create_memory_backing(kSize, true);
         struct stat sparse_info {};
         struct stat committed_info {};
         bool okay = sparse >= 0 && committed >= 0 && fstat(sparse, &sparse_info) == 0 &&
                     fstat(committed, &committed_info) == 0 && sparse_info.st_blocks == 0 &&
                     committed_info.st_blocks >= static_cast<blkcnt_t>(kSize / 512);
         setenv("RJ_TEST_FORCE_TOKEN_BACKING", "1", 1);
-        const int token = backing::create(kSize, true);
+        const int token = rocjitsu::create_memory_backing(kSize, true);
         char path[] = "/tmp/rocjitsu-metadata-XXXXXX";
         const int metadata = mkstemp(path);
         unlink(path);
         const char contents[] = "metadata";
-        okay = okay && token >= 0 && backing::contains(token) && metadata >= 0 &&
-               backing::populate_file(metadata, contents, sizeof(contents)) == 0;
+        okay = okay && token >= 0 && rocjitsu::is_memory_backing_token(token) && metadata >= 0 &&
+               rocjitsu::populate_backing_file(metadata, contents, sizeof(contents)) == 0;
         char observed[sizeof(contents)]{};
         okay = okay && pread(metadata, observed, sizeof(observed), 0) == sizeof(observed) &&
                std::memcmp(contents, observed, sizeof(contents)) == 0;
@@ -91,7 +90,7 @@ void check_inherited_descriptors() {
   sock_fprog program{static_cast<unsigned short>(std::size(filter)), filter};
   ASSERT_EQ(prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0), 0);
   ASSERT_EQ(prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &program), 0);
-  const int memory = backing::create(kSize);
+  const int memory = rocjitsu::create_memory_backing(kSize);
   ASSERT_GE(memory, 0);
   ASSERT_EQ(close(high), 0);
   pollfd pipe_state{pipes[0], POLLIN | POLLHUP, 0};
@@ -111,7 +110,7 @@ TEST_F(MemoryBackingDeathTest, ClosesInheritedDescriptorsAboveLoweredHardLimit) 
 }
 
 void check_metadata_population() {
-  const int warmup = backing::create(1);
+  const int warmup = rocjitsu::create_memory_backing(1);
   ASSERT_GE(warmup, 0);
   close(warmup);
   const rlimit zero{};
@@ -130,7 +129,7 @@ void check_metadata_population() {
       }
       for (const size_t size : {size_t{2}, size_t{8193}}) {
         const std::string expected(size, 'x');
-        ASSERT_EQ(backing::populate_file(fd, expected.data(), expected.size()), 0);
+        ASSERT_EQ(rocjitsu::populate_backing_file(fd, expected.data(), expected.size()), 0);
         struct stat info {};
         ASSERT_EQ(fstat(fd, &info), 0);
         EXPECT_EQ(info.st_size, size);
@@ -160,28 +159,29 @@ TEST_F(MemoryBackingDeathTest, MetadataPopulationPreservesContentsAfterLimitDrop
 void check_aliases() {
   const rlimit limit{};
   ASSERT_EQ(setrlimit(RLIMIT_FSIZE, &limit), 0);
-  const int fd = backing::create(kSize);
+  const int fd = rocjitsu::create_memory_backing(kSize);
   ASSERT_GE(fd, 0) << strerror(errno);
   auto *original = static_cast<unsigned char *>(
-      backing::map(nullptr, kSize, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0));
+      rocjitsu::map_memory_backing(nullptr, kSize, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0));
   ASSERT_NE(original, MAP_FAILED);
   original[4096] = 0x42;
-  const int readonly = backing::reopen(fd, O_RDONLY | O_CLOEXEC);
+  const int readonly = rocjitsu::reopen_memory_backing(fd, O_RDONLY | O_CLOEXEC);
   ASSERT_GE(readonly, 0);
-  EXPECT_EQ(backing::fcntl(readonly, F_GETFL) & O_ACCMODE, O_RDONLY);
+  EXPECT_EQ(rocjitsu::fcntl_memory_backing(readonly, F_GETFL) & O_ACCMODE, O_RDONLY);
   EXPECT_NE(fcntl(readonly, F_GETFD) & FD_CLOEXEC, 0);
   auto *alias = static_cast<unsigned char *>(
-      backing::map(nullptr, 4096, PROT_READ, MAP_SHARED, readonly, 4096));
+      rocjitsu::map_memory_backing(nullptr, 4096, PROT_READ, MAP_SHARED, readonly, 4096));
   ASSERT_NE(alias, MAP_FAILED);
   EXPECT_EQ(alias[0], 0x42);
   EXPECT_EQ(mprotect(alias, 4096, PROT_READ | PROT_WRITE), -1);
   EXPECT_EQ(errno, EACCES);
-  EXPECT_EQ(backing::map(nullptr, 4096, PROT_WRITE, MAP_SHARED, readonly, 0), MAP_FAILED);
+  EXPECT_EQ(rocjitsu::map_memory_backing(nullptr, 4096, PROT_WRITE, MAP_SHARED, readonly, 0),
+            MAP_FAILED);
   EXPECT_EQ(errno, EACCES);
   struct stat before {
   }, after{};
-  ASSERT_EQ(backing::stat(fd, &before), 0);
-  ASSERT_EQ(backing::stat(readonly, &after), 0);
+  ASSERT_EQ(rocjitsu::stat_memory_backing(fd, &before), 0);
+  ASSERT_EQ(rocjitsu::stat_memory_backing(readonly, &after), 0);
   EXPECT_EQ(before.st_size, kSize);
   EXPECT_EQ(before.st_ino, after.st_ino);
   const int retained = dup(fd);
@@ -190,8 +190,8 @@ void check_aliases() {
   close(readonly);
   ASSERT_EQ(munmap(original, kSize), 0);
   ASSERT_EQ(munmap(alias, 4096), 0);
-  original = static_cast<unsigned char *>(
-      backing::map(nullptr, kSize, PROT_READ | PROT_WRITE, MAP_SHARED, retained, 0));
+  original = static_cast<unsigned char *>(rocjitsu::map_memory_backing(
+      nullptr, kSize, PROT_READ | PROT_WRITE, MAP_SHARED, retained, 0));
   ASSERT_NE(original, MAP_FAILED);
   close(retained);
   EXPECT_EQ(original[4096], 0x42);
@@ -212,31 +212,35 @@ TEST_F(MemoryBackingDeathTest, HardZeroLimitPreservesAliasesAndAccessModes) {
 }
 
 void check_FixedPartialMappingsPreserveDataAndRejectOverlap() {
-  const int fd = backing::create(kSize);
+  const int fd = rocjitsu::create_memory_backing(kSize);
   ASSERT_GE(fd, 0);
   auto *original = static_cast<unsigned char *>(
-      backing::map(nullptr, kSize, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0));
+      rocjitsu::map_memory_backing(nullptr, kSize, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0));
   ASSERT_NE(original, MAP_FAILED);
   original[4096] = 0x57;
   auto *target = static_cast<unsigned char *>(
       mmap(nullptr, kSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
   ASSERT_NE(target, MAP_FAILED);
   target[0] = 0x11;
-  EXPECT_EQ(backing::map(target, 4096, PROT_READ, MAP_SHARED | MAP_FIXED_NOREPLACE, fd, 4096),
+  EXPECT_EQ(rocjitsu::map_memory_backing(target, 4096, PROT_READ, MAP_SHARED | MAP_FIXED_NOREPLACE,
+                                         fd, 4096),
             MAP_FAILED);
   EXPECT_EQ(errno, EEXIST);
   EXPECT_EQ(target[0], 0x11);
-  ASSERT_EQ(backing::map(target, 4096, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, fd, 4096),
+  ASSERT_EQ(rocjitsu::map_memory_backing(target, 4096, PROT_READ | PROT_WRITE,
+                                         MAP_SHARED | MAP_FIXED, fd, 4096),
             target);
   EXPECT_EQ(target[0], 0x57);
   target[0] = 0x68;
   EXPECT_EQ(original[4096], 0x68);
   ASSERT_EQ(munmap(target, kSize), 0);
   // The freed hole is also a candidate for the helper's temporary shmat.
-  ASSERT_EQ(backing::map(target, kSize, PROT_READ, MAP_SHARED | MAP_FIXED, fd, 0), target);
+  ASSERT_EQ(rocjitsu::map_memory_backing(target, kSize, PROT_READ, MAP_SHARED | MAP_FIXED, fd, 0),
+            target);
   EXPECT_EQ(target[4096], 0x68);
   ASSERT_EQ(munmap(target, kSize), 0);
-  ASSERT_EQ(backing::map(target, kSize, PROT_READ, MAP_SHARED | MAP_FIXED_NOREPLACE, fd, 0),
+  ASSERT_EQ(rocjitsu::map_memory_backing(target, kSize, PROT_READ, MAP_SHARED | MAP_FIXED_NOREPLACE,
+                                         fd, 0),
             target);
   EXPECT_EQ(target[4096], 0x68);
   EXPECT_EQ(munmap(target, kSize), 0);
@@ -245,19 +249,19 @@ void check_FixedPartialMappingsPreserveDataAndRejectOverlap() {
 }
 
 void check_ConcurrentReopensUseIndependentReplies() {
-  const int fd = backing::create(kSize);
+  const int fd = rocjitsu::create_memory_backing(kSize);
   ASSERT_GE(fd, 0);
   std::atomic<unsigned> failures = 0;
   std::vector<std::thread> workers;
   for (unsigned thread = 0; thread < 8; ++thread) {
     workers.emplace_back([&] {
       for (unsigned iteration = 0; iteration < 32; ++iteration) {
-        const int alias = backing::reopen(fd, O_RDWR);
+        const int alias = rocjitsu::reopen_memory_backing(fd, O_RDWR);
         if (alias < 0) {
           ++failures;
           continue;
         }
-        void *view = backing::map(nullptr, 4096, PROT_READ, MAP_SHARED, alias, 0);
+        void *view = rocjitsu::map_memory_backing(nullptr, 4096, PROT_READ, MAP_SHARED, alias, 0);
         if (view == MAP_FAILED || (fcntl(alias, F_GETFD) & FD_CLOEXEC))
           ++failures;
         if (view != MAP_FAILED)
@@ -282,11 +286,11 @@ void check_DescriptorSurvivesCreatingProcessExit() {
     const rlimit limit{};
     if (setrlimit(RLIMIT_FSIZE, &limit) != 0)
       _exit(1);
-    const int fd = backing::create(kSize);
+    const int fd = rocjitsu::create_memory_backing(kSize);
     if (fd < 0)
       _exit(2);
     auto *view = static_cast<unsigned char *>(
-        backing::map(nullptr, kSize, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0));
+        rocjitsu::map_memory_backing(nullptr, kSize, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0));
     if (view == MAP_FAILED)
       _exit(3);
     view[0] = 0x9A;
@@ -328,7 +332,7 @@ void check_DescriptorSurvivesCreatingProcessExit() {
   int fd = -1;
   memcpy(&fd, CMSG_DATA(header), sizeof(fd));
   ASSERT_GE(fd, 0);
-  const int pidfd = syscall(SYS_pidfd_open, helper, 0);
+  const int pidfd = rocjitsu::host_pidfd_open(helper, 0);
   ASSERT_GE(pidfd, 0);
   FILE *segments = std::fopen("/proc/sysvipc/shm", "r");
   ASSERT_NE(segments, nullptr);
@@ -343,8 +347,8 @@ void check_DescriptorSurvivesCreatingProcessExit() {
   }
   std::fclose(segments);
   ASSERT_GE(segment, 0);
-  auto *view =
-      static_cast<unsigned char *>(backing::map(nullptr, kSize, PROT_READ, MAP_SHARED, fd, 0));
+  auto *view = static_cast<unsigned char *>(
+      rocjitsu::map_memory_backing(nullptr, kSize, PROT_READ, MAP_SHARED, fd, 0));
   ASSERT_NE(view, MAP_FAILED);
   close(fd);
   close(sockets[0]);
@@ -413,13 +417,13 @@ void check_concurrent_limits() {
   for (unsigned thread = 0; thread < 8; ++thread) {
     workers.emplace_back([&] {
       for (unsigned iteration = 0; iteration < 16; ++iteration) {
-        const int fd = backing::create(kSize);
+        const int fd = rocjitsu::create_memory_backing(kSize);
         if (fd < 0) {
           ++failures;
           continue;
         }
-        auto *view = static_cast<unsigned char *>(
-            backing::map(nullptr, kSize, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0));
+        auto *view = static_cast<unsigned char *>(rocjitsu::map_memory_backing(
+            nullptr, kSize, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0));
         close(fd);
         if (view == MAP_FAILED) {
           ++failures;
@@ -456,6 +460,94 @@ pid_t token_keeper(int fd) {
   return getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &peer, &size) == 0 ? peer.pid : -1;
 }
 
+TEST_F(MemoryBackingDeathTest, KeeperLossRejectsRetainedTokens) {
+  ASSERT_EXIT(
+      {
+        const rlimit zero{};
+        ASSERT_EQ(setrlimit(RLIMIT_FSIZE, &zero), 0);
+        const int fd = rocjitsu::create_memory_backing(kSize);
+        ASSERT_GE(fd, 0);
+        auto *view = static_cast<uint32_t *>(rocjitsu::map_memory_backing(
+            nullptr, kSize, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0));
+        ASSERT_NE(view, MAP_FAILED);
+        view[0] = 0x12345678;
+        ASSERT_EQ(munmap(view, kSize), 0);
+        const int retained_fd = rocjitsu::create_memory_backing(kSize);
+        ASSERT_GE(retained_fd, 0);
+        auto *retained = static_cast<uint32_t *>(rocjitsu::map_memory_backing(
+            nullptr, kSize, PROT_READ | PROT_WRITE, MAP_SHARED, retained_fd, 0));
+        ASSERT_NE(retained, MAP_FAILED);
+        retained[0] = 0x87654321;
+        const pid_t helper = token_keeper(fd);
+        ASSERT_EQ(token_keeper(retained_fd), helper);
+        const int pidfd = rocjitsu::host_pidfd_open(helper, 0);
+        ASSERT_GE(pidfd, 0);
+        ASSERT_EQ(kill(helper, SIGKILL), 0);
+        pollfd exited{};
+        exited.fd = pidfd;
+        exited.events = POLLIN;
+        ASSERT_EQ(poll(&exited, 1, 2000), 1);
+        EXPECT_EQ(rocjitsu::map_memory_backing(nullptr, kSize, PROT_READ, MAP_SHARED, fd, 0),
+                  MAP_FAILED);
+        EXPECT_EQ(errno, ESTALE);
+        EXPECT_EQ(rocjitsu::reopen_memory_backing(fd, O_RDONLY), -1);
+        EXPECT_EQ(errno, ESTALE);
+        EXPECT_EQ(retained[0], 0x87654321u);
+        EXPECT_EQ(
+            rocjitsu::map_memory_backing(nullptr, kSize, PROT_READ, MAP_SHARED, retained_fd, 0),
+            MAP_FAILED);
+        EXPECT_EQ(errno, ESTALE);
+        munmap(retained, kSize);
+        close(retained_fd);
+        close(pidfd);
+        close(fd);
+        const int replacement = rocjitsu::create_memory_backing(kSize);
+        ASSERT_GE(replacement, 0);
+        EXPECT_NE(token_keeper(replacement), helper);
+        close(replacement);
+        _exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
+TEST_F(MemoryBackingDeathTest, ChangedEffectiveUidRechecksTokenMappingPermissions) {
+  uid_t real, effective, saved;
+  ASSERT_EQ(getresuid(&real, &effective, &saved), 0);
+  uid_t alternate = real != effective ? real : saved;
+  if (alternate == effective) {
+    if (effective != 0)
+      GTEST_SKIP() << "requires root or a distinct real/saved UID";
+    alternate = 65534;
+  }
+  ASSERT_EXIT(
+      {
+        const rlimit zero{};
+        ASSERT_EQ(setrlimit(RLIMIT_FSIZE, &zero), 0);
+        const int fd = rocjitsu::create_memory_backing(kSize);
+        ASSERT_GE(fd, 0);
+        auto *existing = static_cast<uint32_t *>(rocjitsu::map_memory_backing(
+            nullptr, kSize, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0));
+        ASSERT_NE(existing, MAP_FAILED);
+        existing[0] = 0x12345678;
+        ASSERT_EQ(seteuid(alternate), 0);
+        void *denied = rocjitsu::map_memory_backing(nullptr, kSize, PROT_READ, MAP_SHARED, fd, 0);
+        const int error = errno;
+        const uint32_t retained = existing[0];
+        ASSERT_EQ(seteuid(effective), 0);
+        EXPECT_EQ(denied, MAP_FAILED);
+        EXPECT_EQ(error, EACCES);
+        EXPECT_EQ(retained, 0x12345678u);
+        void *restored = rocjitsu::map_memory_backing(nullptr, kSize, PROT_READ, MAP_SHARED, fd, 0);
+        ASSERT_NE(restored, MAP_FAILED);
+        EXPECT_EQ(*static_cast<uint32_t *>(restored), 0x12345678u);
+        munmap(restored, kSize);
+        munmap(existing, kSize);
+        close(fd);
+        _exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
 volatile sig_atomic_t child_signal = 0;
 void observe_child_signal(int) { child_signal = 1; }
 
@@ -469,7 +561,7 @@ void check_helper_lifecycle(bool subreaper = false) {
   action.sa_handler = observe_child_signal;
   sigemptyset(&action.sa_mask);
   ASSERT_EQ(sigaction(SIGCHLD, &action, nullptr), 0);
-  const int fd = backing::create(kSize);
+  const int fd = rocjitsu::create_memory_backing(kSize);
   ASSERT_GE(fd, 0);
   const pid_t helper = token_keeper(fd);
   ASSERT_GT(helper, 0);
@@ -487,15 +579,15 @@ void check_helper_lifecycle(bool subreaper = false) {
   limited = original;
   limited.rlim_cur = 5;
   ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &limited), 0);
-  EXPECT_EQ(backing::create(kSize), -1);
+  EXPECT_EQ(rocjitsu::create_memory_backing(kSize), -1);
   EXPECT_EQ(errno, EMFILE);
   ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &original), 0);
-  int next = backing::create(kSize);
+  int next = rocjitsu::create_memory_backing(kSize);
   ASSERT_GE(next, 0);
   EXPECT_EQ(token_keeper(next), helper);
   close(next);
 
-  const int pidfd = syscall(SYS_pidfd_open, helper, 0);
+  const int pidfd = rocjitsu::host_pidfd_open(helper, 0);
   ASSERT_GE(pidfd, 0);
   ASSERT_EQ(kill(helper, SIGKILL), 0);
   pollfd exited{pidfd, POLLIN, 0};
@@ -508,7 +600,7 @@ void check_helper_lifecycle(bool subreaper = false) {
   EXPECT_EQ(waitpid(-1, &status, WNOHANG), -1);
   EXPECT_EQ(errno, ECHILD);
   EXPECT_EQ(child_signal, subreaper ? 1 : 0);
-  next = backing::create(kSize);
+  next = rocjitsu::create_memory_backing(kSize);
   ASSERT_GE(next, 0) << strerror(errno);
   EXPECT_NE(token_keeper(next), helper);
   close(next);
@@ -582,14 +674,15 @@ void check_group_signal() {
   ASSERT_NE(signal(SIGINT, SIG_IGN), SIG_ERR);
   const rlimit zero{};
   ASSERT_EQ(setrlimit(RLIMIT_FSIZE, &zero), 0);
-  const int fd = backing::create(kSize);
+  const int fd = rocjitsu::create_memory_backing(kSize);
   ASSERT_GE(fd, 0);
   ASSERT_EQ(kill(0, SIGINT), 0);
-  void *view = backing::map(nullptr, kSize, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+  void *view =
+      rocjitsu::map_memory_backing(nullptr, kSize, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
   ASSERT_NE(view, MAP_FAILED);
-  const int reopened = backing::reopen(fd, O_RDONLY);
+  const int reopened = rocjitsu::reopen_memory_backing(fd, O_RDONLY);
   ASSERT_GE(reopened, 0);
-  const int next = backing::create(kSize);
+  const int next = rocjitsu::create_memory_backing(kSize);
   ASSERT_GE(next, 0);
   EXPECT_EQ(token_keeper(next), token_keeper(fd));
   close(next);
@@ -610,7 +703,7 @@ TEST_F(MemoryBackingDeathTest, GroupSignalsPreserveUnmappedTokens) {
 void check_lease_replacement() {
   const rlimit zero{};
   ASSERT_EQ(setrlimit(RLIMIT_FSIZE, &zero), 0);
-  int fd = backing::create(kSize);
+  int fd = rocjitsu::create_memory_backing(kSize);
   ASSERT_GE(fd, 0);
   const pid_t first_helper = token_keeper(fd);
   int lease = -1;
@@ -624,22 +717,22 @@ void check_lease_replacement() {
     }
   }
   ASSERT_GE(lease, 0);
-  const int replacement = syscall(SYS_memfd_create, "lease-replacement", MFD_CLOEXEC);
+  const int replacement = memfd_create("lease-replacement", MFD_CLOEXEC);
   ASSERT_GE(replacement, 0);
   struct stat before {
   }, after{};
   ASSERT_EQ(fstat(replacement, &before), 0);
   ASSERT_EQ(dup2(replacement, lease), lease);
   close(replacement);
-  const int next = backing::create(kSize);
+  const int next = rocjitsu::create_memory_backing(kSize);
   ASSERT_GE(next, 0);
   EXPECT_NE(token_keeper(next), first_helper);
   ASSERT_EQ(fstat(lease, &after), 0);
   EXPECT_EQ(before.st_ino, after.st_ino);
   // Closing the owner's lease must not invalidate separately held tokens.
-  const int alias = backing::reopen(fd, O_RDONLY);
+  const int alias = rocjitsu::reopen_memory_backing(fd, O_RDONLY);
   ASSERT_GE(alias, 0);
-  void *view = backing::map(nullptr, kSize, PROT_READ, MAP_SHARED, alias, 0);
+  void *view = rocjitsu::map_memory_backing(nullptr, kSize, PROT_READ, MAP_SHARED, alias, 0);
   ASSERT_NE(view, MAP_FAILED);
   munmap(view, kSize);
   close(alias);
@@ -661,21 +754,21 @@ void check_credential_retirement(gid_t alternate) {
   const gid_t original = getegid();
   const rlimit zero{};
   ASSERT_EQ(setrlimit(RLIMIT_FSIZE, &zero), 0);
-  const int retained = backing::create(kSize);
+  const int retained = rocjitsu::create_memory_backing(kSize);
   ASSERT_GE(retained, 0);
-  const int retained_pidfd = syscall(SYS_pidfd_open, token_keeper(retained), 0);
+  const int retained_pidfd = rocjitsu::host_pidfd_open(token_keeper(retained), 0);
   ASSERT_GE(retained_pidfd, 0);
   int previous_pidfd = -1;
   for (unsigned iteration = 0; iteration < 4; ++iteration) {
     ASSERT_EQ(setegid(iteration % 2 ? original : alternate), 0);
-    const int next = backing::create(kSize);
+    const int next = rocjitsu::create_memory_backing(kSize);
     ASSERT_GE(next, 0) << strerror(errno);
     if (previous_pidfd >= 0) {
       pollfd exited{previous_pidfd, POLLIN, 0};
       EXPECT_EQ(poll(&exited, 1, 2000), 1) << "retired credential helper survived";
       close(previous_pidfd);
     }
-    previous_pidfd = syscall(SYS_pidfd_open, token_keeper(next), 0);
+    previous_pidfd = rocjitsu::host_pidfd_open(token_keeper(next), 0);
     ASSERT_GE(previous_pidfd, 0);
     close(next);
     unsigned leases = 0;
@@ -692,9 +785,9 @@ void check_credential_retirement(gid_t alternate) {
   // Retiring the owner's lease must preserve independently exported tokens.
   pollfd retained_exited{retained_pidfd, POLLIN, 0};
   EXPECT_EQ(poll(&retained_exited, 1, 0), 0);
-  const int alias = backing::reopen(retained, O_RDONLY);
+  const int alias = rocjitsu::reopen_memory_backing(retained, O_RDONLY);
   ASSERT_GE(alias, 0);
-  void *view = backing::map(nullptr, kSize, PROT_READ, MAP_SHARED, alias, 0);
+  void *view = rocjitsu::map_memory_backing(nullptr, kSize, PROT_READ, MAP_SHARED, alias, 0);
   ASSERT_NE(view, MAP_FAILED);
   EXPECT_EQ(munmap(view, kSize), 0);
   close(alias);
@@ -732,7 +825,7 @@ void check_exec_retirement() {
     const rlimit zero{};
     if (setrlimit(RLIMIT_FSIZE, &zero) != 0)
       _exit(1);
-    const int fd = backing::create(kSize);
+    const int fd = rocjitsu::create_memory_backing(kSize);
     const pid_t helper = token_keeper(fd);
     if (fd < 0 || helper <= 0)
       _exit(2);
@@ -761,8 +854,8 @@ void check_exec_retirement() {
   close(idle_lifetime[0]);
   pid_t children[2]{};
   ASSERT_EQ(read(control[0], children, sizeof(children)), sizeof(children));
-  const int pidfd = syscall(SYS_pidfd_open, children[0], 0);
-  const int idle_pidfd = syscall(SYS_pidfd_open, children[1], 0);
+  const int pidfd = rocjitsu::host_pidfd_open(children[0], 0);
+  const int idle_pidfd = rocjitsu::host_pidfd_open(children[1], 0);
   ASSERT_GE(pidfd, 0);
   ASSERT_GE(idle_pidfd, 0);
   ASSERT_EQ(write(control[0], "x", 1), 1);
@@ -799,11 +892,11 @@ void check_nofile_headroom() {
   ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &limited), 0);
   const rlimit zero{};
   ASSERT_EQ(setrlimit(RLIMIT_FSIZE, &zero), 0);
-  std::vector<int> descriptors{backing::create(kSize)};
+  std::vector<int> descriptors{rocjitsu::create_memory_backing(kSize)};
   ASSERT_GE(descriptors.front(), 0);
   ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &original), 0);
   for (unsigned count = 1; count < 96; ++count) {
-    const int fd = backing::create(kSize);
+    const int fd = rocjitsu::create_memory_backing(kSize);
     ASSERT_GE(fd, 0) << count << ": " << strerror(errno);
     EXPECT_EQ(token_keeper(fd), token_keeper(descriptors.front()));
     descriptors.push_back(fd);
@@ -829,7 +922,7 @@ TEST_F(MemoryBackingDeathTest, StartupFailureNamesHelper) {
         const rlimit zero{};
         if (setrlimit(RLIMIT_NPROC, &zero) != 0)
           _exit(2);
-        const int fd = backing::create(kSize);
+        const int fd = rocjitsu::create_memory_backing(kSize);
         _exit(fd == -1 && errno == EAGAIN ? 0 : 1);
       },
       ::testing::ExitedWithCode(0),
@@ -839,17 +932,17 @@ TEST_F(MemoryBackingDeathTest, StartupFailureNamesHelper) {
 void check_seek_contract() {
   const rlimit zero{};
   ASSERT_EQ(setrlimit(RLIMIT_FSIZE, &zero), 0);
-  const int fd = backing::create(kSize);
+  const int fd = rocjitsu::create_memory_backing(kSize);
   ASSERT_GE(fd, 0);
   off_t result = -1;
-  EXPECT_TRUE(backing::seek_token(fd, 0, SEEK_END, result));
+  EXPECT_TRUE(rocjitsu::seek_memory_backing_token(fd, 0, SEEK_END, result));
   EXPECT_EQ(result, kSize);
-  EXPECT_TRUE(backing::seek_token(fd, 0, SEEK_SET, result));
+  EXPECT_TRUE(rocjitsu::seek_memory_backing_token(fd, 0, SEEK_SET, result));
   EXPECT_EQ(result, 0);
-  EXPECT_TRUE(backing::seek_token(fd, 1, SEEK_SET, result));
+  EXPECT_TRUE(rocjitsu::seek_memory_backing_token(fd, 1, SEEK_SET, result));
   EXPECT_EQ(result, -1);
   EXPECT_EQ(errno, EINVAL);
-  EXPECT_TRUE(backing::seek_token(fd, 0, SEEK_CUR, result));
+  EXPECT_TRUE(rocjitsu::seek_memory_backing_token(fd, 0, SEEK_CUR, result));
   EXPECT_EQ(result, -1);
   EXPECT_EQ(errno, EINVAL);
   close(fd);

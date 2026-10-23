@@ -231,7 +231,7 @@ namespace {
 /// it reaches this lock, so widening the region would invert the two orders.
 void *safe_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
   auto mapping_lock = rocjitsu::host_mapping_lock().lock_exclusive();
-  return memory_backing::map(addr, length, prot, flags, fd, offset);
+  return map_memory_backing(addr, length, prot, flags, fd, offset);
 }
 
 /// @brief munmap via the real libc, with the mapping layout held still.
@@ -323,7 +323,7 @@ private:
 /// is_drm()). Routing through the passthrough table keeps "the driver never
 /// re-enters the interposer" total and avoids acquiring fd_mutex_ under a held
 /// per-process lock (alloc_mutex_/etc.).
-int safe_fstat(int fd, struct stat *st) { return memory_backing::stat(fd, st); }
+int safe_fstat(int fd, struct stat *st) { return stat_memory_backing(fd, st); }
 
 /// @brief fcntl via the real libc, bypassing the interposer.
 /// @details The interposer's fcntl hook takes fd_mutex_ on F_DUPFD paths; calling
@@ -331,7 +331,7 @@ int safe_fstat(int fd, struct stat *st) { return memory_backing::stat(fd, st); }
 /// inversion. The passthrough table's fcntl is variadic; the int-arg forms
 /// (F_DUPFD_CLOEXEC, F_ADD_SEALS, F_GETFL/no-arg) used here forward cleanly.
 template <typename... Args> int safe_fcntl(int fd, int cmd, Args... args) {
-  return memory_backing::fcntl(fd, cmd, args...);
+  return fcntl_memory_backing(fd, cmd, args...);
 }
 
 constexpr auto kDebugNotificationWriteTimeout = std::chrono::milliseconds(250);
@@ -1944,7 +1944,7 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
       if (source_doorbell_fd < 0) {
         // Local-mode ROCr can request a doorbell mmap without first allocating a
         // KFD doorbell object. Give that path the same persistent shared backing.
-        created_source.reset(memory_backing::create(length));
+        created_source.reset(create_memory_backing(length));
         if (!created_source)
           return MAP_FAILED;
         source_doorbell_fd = created_source.get();
@@ -1974,7 +1974,7 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
       return MAP_FAILED;
     }
 
-    if (memory_backing::ensure_size(doorbell_fd, length) != 0) {
+    if (ensure_memory_backing_size(doorbell_fd, length) != 0) {
       int saved_errno = errno;
       new_doorbell_fd.reset();
       errno = saved_errno;
@@ -2098,7 +2098,7 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
     // different fds to different callers -- leaving one polling an object that
     // never receives event updates -- besides racing the field itself.
     const int events_fd = proc.event_state_.ensure_backing(length, [&](size_t size) -> int {
-      auto raw_events_fd = memory_backing::create(size);
+      auto raw_events_fd = create_memory_backing(size);
       if (raw_events_fd < 0)
         return -1;
       int backing = safe_fcntl(raw_events_fd, F_DUPFD_CLOEXEC, kBackingFdMin);
@@ -2151,7 +2151,7 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
 
   if (alloc.backing_fd >= 0) {
     if (length > alloc.size) {
-      if (memory_backing::ensure_size(alloc.backing_fd, length) != 0) {
+      if (ensure_memory_backing_size(alloc.backing_fd, length) != 0) {
         errno = ENOMEM;
         return MAP_FAILED;
       }
@@ -2492,7 +2492,7 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
     // Every allocation on this path retains one backing descriptor, even if
     // it is never exported. Fail allocation if that backing cannot be created
     // with its full size. Caller-VA backing stays sparse until first touch.
-    auto raw_fd = memory_backing::create(alloc.size, daemon_mode_ || !user_provided_va);
+    auto raw_fd = create_memory_backing(alloc.size, daemon_mode_ || !user_provided_va);
     if (raw_fd < 0)
       return -errno;
     alloc.backing_fd = safe_fcntl(raw_fd, F_DUPFD_CLOEXEC, kBackingFdMin);
@@ -3240,7 +3240,7 @@ int SimulatedKfd::share_allocation_locked(KfdProcess &proc, KfdProcess::GpuAlloc
     return -EINVAL;
   // IPC may retain a writable private alias for a read-only public dma-buf.
   const int exported = alloc.export_access_mode >= 0
-                           ? memory_backing::reopen(backing, alloc.export_access_mode | O_CLOEXEC)
+                           ? reopen_memory_backing(backing, alloc.export_access_mode | O_CLOEXEC)
                            : safe_fcntl(backing, F_DUPFD_CLOEXEC, 0);
   if (exported < 0)
     return -errno;
@@ -3344,7 +3344,7 @@ int SimulatedKfd::ipc_import_handle_ioctl(KfdProcess &proc, void *arg) {
     return -errno;
   const int public_mode = original_flags & O_ACCMODE;
   if (public_mode != O_RDWR) {
-    const int writable = memory_backing::reopen(backing.get(), O_RDWR | O_CLOEXEC);
+    const int writable = reopen_memory_backing(backing.get(), O_RDWR | O_CLOEXEC);
     if (writable < 0)
       return -errno;
     backing = UniqueDriverFd(writable);

@@ -4,16 +4,26 @@
 /// @file libc_passthrough.h
 /// @brief Resolved libc entry points used to bypass rocjitsu interposer wrappers.
 
-#ifndef ROCJITSU_KMD_LINUX_LIBC_PASSTHROUGH_H_
-#define ROCJITSU_KMD_LINUX_LIBC_PASSTHROUGH_H_
+#pragma once
 
 #include "util/unique_handle.h"
 
 #include <cstddef>
 #include <cstdio>
 #include <dirent.h>
+#include <fcntl.h>
+#include <poll.h>
+#include <sched.h>
+#include <sys/epoll.h>
+#include <sys/eventfd.h>
+#include <sys/prctl.h>
+#include <sys/random.h>
+#include <sys/resource.h>
+#include <sys/shm.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 // Forward declaration keeps legacy aliases independent of feature-macro order.
@@ -76,6 +86,38 @@ public:
   int (*lxstat_fn)(int, const char *, struct stat *) = nullptr;
   int (*lxstat64_fn)(int, const char *, struct stat64 *) = nullptr;
   pid_t (*fork)() = nullptr;
+  decltype(&::getsockname) getsockname = nullptr;
+  decltype(&::sendmsg) sendmsg = nullptr;
+  decltype(&::recvmsg) recvmsg = nullptr;
+  decltype(&::shmget) shmget = nullptr;
+  decltype(&::shmat) shmat = nullptr;
+  decltype(&::shmdt) shmdt = nullptr;
+  decltype(&::shmctl) shmctl = nullptr;
+  decltype(&::getrandom) getrandom = nullptr;
+  decltype(&::prlimit) prlimit = nullptr;
+  decltype(&::ftruncate) ftruncate = nullptr;
+  decltype(&::fallocate) fallocate = nullptr;
+  decltype(&::socketpair) socketpair = nullptr;
+  decltype(&::bind) bind = nullptr;
+  decltype(&::epoll_ctl) epoll_ctl = nullptr;
+  decltype(&::prctl) prctl = nullptr;
+  decltype(&::epoll_create1) epoll_create1 = nullptr;
+  decltype(&::eventfd) eventfd = nullptr;
+  decltype(&::epoll_wait) epoll_wait = nullptr;
+  decltype(&::accept4) accept4 = nullptr;
+  decltype(&::getsockopt) getsockopt = nullptr;
+  decltype(&::socket) socket = nullptr;
+  decltype(&::connect) connect = nullptr;
+  decltype(&::listen) listen = nullptr;
+  decltype(&::execve) execve = nullptr;
+  decltype(&::setsid) setsid = nullptr;
+  decltype(&::waitpid) waitpid = nullptr;
+  decltype(&::poll) poll = nullptr;
+  decltype(&::clone) clone = nullptr;
+  decltype(&::_exit) exit_immediately = nullptr;
+  int (*pidfd_open)(pid_t, unsigned int) = nullptr;
+  int (*close_range)(unsigned int, unsigned int, int) = nullptr;
+  ssize_t (*getdents64)(int, void *, size_t) = nullptr;
 
   /// @brief Return true after all required symbols have been resolved.
   [[nodiscard]] bool ready() const { return initialized_; }
@@ -89,6 +131,14 @@ private:
 
 /// @brief Return the process-wide libc pass-through table.
 LibcPassthrough &libc_passthrough();
+
+/// @brief Compatibility entry points for operations absent from older libc releases.
+/// @details Prefer the resolved libc wrapper. If unavailable, use the syscall
+/// entry point; callers retain typed arguments and errno. The standalone helper
+/// also uses this fallback before the pass-through table is resolved.
+int host_pidfd_open(pid_t pid, unsigned int flags);
+int host_close_range(unsigned int first, unsigned int last, int flags);
+ssize_t host_getdents64(int fd, void *buffer, size_t size);
 
 /// @brief UniqueHandle traits that close through the libc pass-through table.
 /// @details The interposer and the drivers link into ONE DSO, and the interposer
@@ -118,5 +168,3 @@ struct PassthroughFdTraits {
 using UniqueDriverFd = util::BasicUniqueHandle<PassthroughFdTraits>;
 
 } // namespace rocjitsu
-
-#endif // ROCJITSU_KMD_LINUX_LIBC_PASSTHROUGH_H_

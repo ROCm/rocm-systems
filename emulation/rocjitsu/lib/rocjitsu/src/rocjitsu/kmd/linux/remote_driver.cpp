@@ -219,7 +219,7 @@ PtracerGrantVerdict authorize_daemon_address_space_access(int socket) {
 
 /// @brief Map driver backing without re-entering the interposer.
 void *safe_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
-  return memory_backing::map(addr, length, prot, flags, fd, offset);
+  return map_memory_backing(addr, length, prot, flags, fd, offset);
 }
 
 Sysfs::GpuInfo gpu_info_from_rpc(const RpcGpuInfo &src) {
@@ -1354,7 +1354,7 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
     if (num_fds > 0 && received_fds[0] >= 0) {
       uint64_t size = 0;
       struct stat st {};
-      if (memory_backing::stat(received_fds[0], &st) == 0)
+      if (stat_memory_backing(received_fds[0], &st) == 0)
         size = static_cast<uint64_t>(st.st_size);
       register_allocation(import_args->handle, import_args->va_addr, size, received_fds[0]);
     }
@@ -1428,7 +1428,7 @@ void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t o
       mapping_backing = it->second;
   }
   if (mapping_backing >= 0) {
-    if (memory_backing::ensure_size(mapping_backing, length) != 0)
+    if (ensure_memory_backing_size(mapping_backing, length) != 0)
       return MAP_FAILED;
 
     // Pre-copy committed pages (code objects) from the existing anonymous
