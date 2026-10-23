@@ -35,16 +35,13 @@ class MockMspec:
     gpu_arch = "gfx90a"
 
 
-def make_roofline(datatypes: List[str], **run_parameters: object) -> Roofline:
+def make_roofline(**run_parameters: object) -> Roofline:
     """A Roofline for the unit tests. It never reads its ``args`` on the
-    cli_generate_plot / generate_plot paths, so a bare Namespace suffices."""
+    generate_plot path, so a bare Namespace suffices."""
     parameters: Dict[str, object] = {
         "workload_dir": "",
         "device_id": 0,
-        "sort_type": "kernels",
-        "mem_level": "ALL",
         "is_standalone": True,
-        "roofline_data_type": datatypes,
     }
     parameters.update(run_parameters)
     return Roofline(argparse.Namespace(), MockMspec(), parameters)
@@ -53,8 +50,7 @@ def make_roofline(datatypes: List[str], **run_parameters: object) -> Roofline:
 @pytest.fixture
 def benchmarked_roofline(tmp_path: Path):
     """Build a Roofline over MI210 benchmark data: bandwidth for every memory
-    level, a scalar FP64 peak, and MFMA peaks. Takes the datatypes to stack,
-    which is what the figure the tests read back off differs by.
+    level, a scalar FP64 peak, and MFMA peaks.
     """
     header = (
         "device,LDSBw,HBMBw,L1Bw,L2Bw,FP64Flops,MFMAF16Flops,MFMABF16Flops,MFMAF64Flops"
@@ -62,13 +58,13 @@ def benchmarked_roofline(tmp_path: Path):
     row = "0,500,500,500,500,3000,10000,11000,12000"
     (tmp_path / "roofline.csv").write_text(f"{header}\n{row}\n", encoding="utf-8")
 
-    def build(datatypes: List[str], **run_parameters: object):
+    def build(**run_parameters: object):
         parameters = {
             "workload_dir": str(tmp_path),
             "matrix_ops_type": "MFMA",
         }
         parameters.update(run_parameters)
-        return make_roofline(datatypes, **parameters)
+        return make_roofline(**parameters)
 
     return build
 
@@ -110,13 +106,6 @@ def is_whole_decade(value: float) -> bool:
     return math.isclose(exponent, round(exponent))
 
 
-@pytest.mark.parametrize("dtype", ["FP32", "INVALID_DATATYPE"])
-def test_cli_generate_plot_returns_nothing_without_usable_input(dtype: str) -> None:
-    """A datatype this arch cannot be profiled for, and a datatype with no AI
-    data, are both declined rather than half-plotted."""
-    assert make_roofline(["FP32"]).cli_generate_plot(dtype, ai_data={}) is None
-
-
 @pytest.mark.parametrize(
     "dtype, drawn, not_drawn",
     [
@@ -130,28 +119,11 @@ def test_generate_plot_draws_the_roofs_the_datatype_reaches(
     """Each datatype gets one compute roof per op class it reaches on this arch:
     BF16 is matrix-only where FP64 is dual-path. On CDNA the matrix roofs are
     labeled MFMA, never WMMA."""
-    fig = benchmarked_roofline(["FP64", "BF16"]).generate_plot(dtype, fig=go.Figure())
+    fig = benchmarked_roofline().generate_plot(dtype, fig=go.Figure())
 
     names = {trace.name for trace in fig.data}
     assert names.issuperset(drawn)
     assert names.isdisjoint(not_drawn)
-
-
-def test_generate_plot_filters_bandwidth_roofs_by_mem_level(
-    benchmarked_roofline,
-) -> None:
-    """The selected memory level reaches both the figure and client model."""
-    roofline = benchmarked_roofline(["FP64"], mem_level=["HBM"])
-    fig = roofline.generate_plot("FP64", fig=go.Figure())
-
-    bandwidth_levels = {"LDS", "L1", "L2", "HBM"}
-    drawn_bandwidth_levels = {
-        trace.name for trace in fig.data if trace.name in bandwidth_levels
-    }
-    assert drawn_bandwidth_levels == {"HBM"}
-
-    view_model = roofline._Roofline__view_models["FLOP"]
-    assert {roof["level"] for roof in view_model.roofline_traces} == {"HBM"}
 
 
 CEILING = {"hbm": [[0.01, 1.0], [1.0, 1500.0], 1500.0]}
@@ -182,7 +154,7 @@ def test_kernel_traces_stacked_compute_peaks__limiter_names_binding_one() -> Non
     ai_data = {"ai_hbm": [[100.0], [50000.0]], "kernelNames": ["kA"]}
 
     traces, _ = kernel_traces(
-        make_roofline(["FP32"]),
+        make_roofline(),
         ai_data,
         compute_peaks=[("FP32 MFMA", 90000.0), ("FP16 MFMA", 180000.0)],
     )
@@ -192,7 +164,7 @@ def test_kernel_traces_stacked_compute_peaks__limiter_names_binding_one() -> Non
 
 def test_kernel_traces_exceeded_memory_roof__falls_back_to_compute_peak() -> None:
     traces, _ = kernel_traces(
-        make_roofline(["FP32"]),
+        make_roofline(),
         {"ai_hbm": [[1.0], [5000.0]], "kernelNames": ["kA"]},
     )
 
@@ -204,7 +176,7 @@ def test_kernel_traces_name_the_roof_that_binds() -> None:
     memory level, and falls back to Unknown when the ceiling data holds no roof
     for that level at all. Levels with no positive AI are not plotted."""
     traces, model = kernel_traces(
-        make_roofline(["FP32"]),
+        make_roofline(),
         {
             "ai_hbm": [[1.0], [900.0]],
             "ai_l2": [[0.0], [0.0]],
@@ -217,7 +189,7 @@ def test_kernel_traces_name_the_roof_that_binds() -> None:
     assert "Limited by Memory: HBM" in traces[0].hovertemplate
 
     unroofed_traces, unroofed = kernel_traces(
-        make_roofline(["FP32"]),
+        make_roofline(),
         {"ai_hbm": [[1.0], [900.0]], "kernelNames": ["kA"]},
         ceiling_data={},
         compute_peaks=[],
@@ -232,7 +204,7 @@ def test_kernel_traces_name_the_roof_that_binds() -> None:
 
 def test_kernel_traces_expose_the_limiting_peak_for_a_memory_bound_kernel() -> None:
     traces, model = kernel_traces(
-        make_roofline(["FP32"]),
+        make_roofline(),
         {"ai_hbm": [[1.0], [900.0]], "kernelNames": ["kA"]},
         sanitized_cache_hierarchy=["HBM", "L2"],
     )
@@ -248,7 +220,7 @@ def test_kernel_traces_expose_the_leftmost_peak_for_a_compute_bound_kernel() -> 
     (L2's AI of 0.5 sits left of HBM's AI of 2.0) so the client still has a
     single point to show without guessing which one."""
     _, model = kernel_traces(
-        make_roofline(["FP32"]),
+        make_roofline(),
         {
             "ai_hbm": [[2.0], [1000.0]],
             "ai_l2": [[0.5], [1000.0]],
@@ -267,7 +239,7 @@ def test_kernel_traces_expose_the_leftmost_peak_when_the_limiter_is_unknown() ->
     limitingPeak falls back to the kernel's own lowest-AI point (L2 at 0.5,
     left of HBM's 2.0)."""
     traces, model = kernel_traces(
-        make_roofline(["FP32"]),
+        make_roofline(),
         {
             "ai_hbm": [[2.0], [1000.0]],
             "ai_l2": [[0.5], [1000.0]],
@@ -289,7 +261,7 @@ def test_kernel_traces_differing_bandwidths__points_share_binding_roof_pct() -> 
     }
 
     _, model = kernel_traces(
-        make_roofline(["FP32"]),
+        make_roofline(),
         {
             "ai_hbm": [[2.0], [1000.0]],
             "ai_l2": [[0.5], [1000.0]],
@@ -308,7 +280,7 @@ def test_kernel_traces_differing_bandwidths__points_share_binding_roof_pct() -> 
 def test_bandwidth_hover_no_traffic_level__still_lists_at_zero() -> None:
     ceiling = dict(CEILING, lds=[[0.01, 1.0], [1.0, 800.0], 800.0])
     _, model = kernel_traces(
-        make_roofline(["FP32"]),
+        make_roofline(),
         {
             "ai_hbm": [[1.0], [900.0]],
             "ai_l2": [[0.0], [0.0]],
@@ -335,7 +307,7 @@ def test_kernel_hover_given_a_name_under_the_length_cap__wraps_it_whole() -> Non
     name = "Cijk_Alik_Bljk_" + "SB_MT256x256x16_MI32x32x2x1_" * 6
 
     traces, _ = kernel_traces(
-        make_roofline(["FP32"]),
+        make_roofline(),
         {"ai_hbm": [[1.0], [900.0]], "kernelNames": [name]},
     )
 
@@ -367,7 +339,7 @@ def test_kernel_hover_truncates_names_beyond_two_hundred_characters() -> None:
     name = "Cijk_Alik_Bljk_" + "SB_MT256x256x16_MI32x32x2x1_" * 40
 
     traces, _ = kernel_traces(
-        make_roofline(["FP32"]),
+        make_roofline(),
         {"ai_hbm": [[1.0], [900.0]], "kernelNames": [name]},
     )
 
@@ -472,9 +444,9 @@ def drawn_roof_knees(fig: go.Figure) -> Dict[str, Tuple[float, float]]:
     }
 
 
-def stacked_figure(benchmarked_roofline, datatypes: List[str]):
-    """The figure and Roofline for these datatypes stacked onto one axis."""
-    roofline = benchmarked_roofline(datatypes)
+def figure_with_precisions(benchmarked_roofline, datatypes: List[str]):
+    """The figure and Roofline object for the given set of precisions."""
+    roofline = benchmarked_roofline()
     fig = None
     for dtype in datatypes:
         fig = roofline.generate_plot(dtype, fig=fig)
@@ -487,7 +459,7 @@ def test_the_figure_uses_the_machine_frame_while_preserving_roof_knees(
 ) -> None:
     """The viewport comes from all machine ceilings, while drawn knees still
     reflect the tallest compute ceiling in the stacked figure."""
-    _, fig = stacked_figure(benchmarked_roofline, datatypes)
+    _, fig = figure_with_precisions(benchmarked_roofline, datatypes)
 
     x_lo, x_hi = (10**bound for bound in fig.layout.xaxis.range)
     y_lo, y_hi = (10**bound for bound in fig.layout.yaxis.range)
@@ -511,10 +483,10 @@ def test_kernel_under_the_frame_is_not_clamped(benchmarked_roofline) -> None:
     }
     inside_only = {"ai_hbm": [[1.0], [500.0]], "kernelNames": ["framed"]}
 
-    _, figure, _, _ = benchmarked_roofline(["FP64"]).construct_plotly_figures(
+    _, figure, _, _ = benchmarked_roofline().construct_plotly_figures(
         ai_data, datatypes=["FP64"]
     )
-    _, reference, _, _ = benchmarked_roofline(["FP64"]).construct_plotly_figures(
+    _, reference, _, _ = benchmarked_roofline().construct_plotly_figures(
         inside_only, datatypes=["FP64"]
     )
 
@@ -529,10 +501,10 @@ def test_kernel_data_does_not_change_machine_axis_ranges(benchmarked_roofline) -
     slow = {"ai_hbm": [[0.5], [2000.0]], "kernelNames": ["slow"]}
     fast = {"ai_hbm": [[40.0], [20000.0]], "kernelNames": ["fast"]}
 
-    _, slow_figure, _, _ = benchmarked_roofline(["FP64"]).construct_plotly_figures(
+    _, slow_figure, _, _ = benchmarked_roofline().construct_plotly_figures(
         slow, datatypes=["FP64"]
     )
-    _, fast_figure, _, _ = benchmarked_roofline(["FP64"]).construct_plotly_figures(
+    _, fast_figure, _, _ = benchmarked_roofline().construct_plotly_figures(
         fast, datatypes=["FP64"]
     )
 
@@ -542,7 +514,7 @@ def test_kernel_data_does_not_change_machine_axis_ranges(benchmarked_roofline) -
 def test_combined_document_embeds_the_plotly_frame(benchmarked_roofline) -> None:
     """The standalone model ships the same data-coordinate frame Plotly uses."""
     figure, document = interactive_document(
-        benchmarked_roofline(["FP64"]),
+        benchmarked_roofline(),
         {"ai_hbm": [[0.5], [2000.0]], "kernelNames": ["slow"]},
     )
 
@@ -552,10 +524,25 @@ def test_combined_document_embeds_the_plotly_frame(benchmarked_roofline) -> None
     assert embedded_frame["y"] == pytest.approx(layout_frame[1])
 
 
+def test_save_html_files_returns_the_written_path(
+    benchmarked_roofline, tmp_path: Path
+) -> None:
+    """The returned path is the HTML document written into the workload dir."""
+    roofline = benchmarked_roofline()
+    figures = roofline.construct_plotly_figures(
+        {"ai_hbm": [[0.5], [2000.0]], "kernelNames": ["slow"]}, datatypes=["FP64"]
+    )
+
+    path = roofline.save_html_files(*figures)
+
+    assert path == f"{tmp_path}/empirRoof_gpu-0.html"
+    assert Path(path).is_file()
+
+
 @pytest.mark.parametrize("source_key", ["FLOP", "OP"])
 def test_combined_model_copies_either_source_frame(source_key: str) -> None:
     """The combined model retains the frame from either available figure class."""
-    roofline = make_roofline(["FP64"])
+    roofline = make_roofline()
     source_frame = {"x": [1e-2, 1e2], "y": [1e1, 1e6]}
     # No public API exists for pre-seeding the per-figure view models.
     roofline._Roofline__view_models = {
@@ -575,11 +562,11 @@ def test_combined_model_copies_either_source_frame(source_key: str) -> None:
 def test_kernel_sets_ship_identical_embedded_frames(benchmarked_roofline) -> None:
     """Changing only kernel coordinates cannot alter the browser's reset frame."""
     _, slow_document = interactive_document(
-        benchmarked_roofline(["FP64"]),
+        benchmarked_roofline(),
         {"ai_hbm": [[0.5], [2000.0]], "kernelNames": ["slow"]},
     )
     _, fast_document = interactive_document(
-        benchmarked_roofline(["FP64"]),
+        benchmarked_roofline(),
         {"ai_hbm": [[40.0], [20000.0]], "kernelNames": ["fast"]},
     )
 
@@ -592,7 +579,7 @@ def test_title_names_the_stable_frame_across_precisions_and_combining(
     benchmarked_roofline,
 ) -> None:
     """Stacking precision roofs and combining figures preserves one frame title."""
-    roofline, figure = stacked_figure(benchmarked_roofline, ["FP64", "BF16"])
+    roofline, figure = figure_with_precisions(benchmarked_roofline, ["FP64", "BF16"])
     expected_title = (
         "Empirical Roofline Analysis<br><sup>Axes fixed to this GPU - "
         "AI 1e-2 to 1e2 - performance 1e0 to 1e5</sup>"
@@ -607,7 +594,7 @@ def test_fallback_frame_has_truthful_subtitle(
     benchmarked_roofline, monkeypatch
 ) -> None:
     """Fallback ranges identify their source in the subtitle."""
-    roofline = benchmarked_roofline(["FP64"])
+    roofline = benchmarked_roofline()
     machine_figure = roofline.generate_plot("FP64")
     assert "Axes fixed to this GPU" in machine_figure.layout.title.text
 
@@ -634,7 +621,7 @@ def test_view_model_carries_the_drawn_knee(benchmarked_roofline) -> None:
     """The client frames on the knees the model ships, so each one has to be the
     knee that figure really draws: capped at its tallest ceiling, including the
     ceilings a stacked datatype brought with it."""
-    roofline, fig = stacked_figure(benchmarked_roofline, ["FP64", "BF16"])
+    roofline, fig = figure_with_precisions(benchmarked_roofline, ["FP64", "BF16"])
     view_model = roofline._Roofline__view_models["FLOP"]
 
     knees = drawn_roof_knees(fig)
@@ -648,7 +635,9 @@ def test_view_model_carries_the_drawn_knee(benchmarked_roofline) -> None:
 def standalone_with_unselected_precision(benchmarked_roofline):
     """The combined document for a run whose opening precision is not its
     tallest, so the default selection is observable in what gets drawn."""
-    roofline, flops_figure = stacked_figure(benchmarked_roofline, ["BF16", "FP64"])
+    roofline, flops_figure = figure_with_precisions(
+        benchmarked_roofline, ["BF16", "FP64"]
+    )
     figure, view_model = roofline._combined_html_figure(None, flops_figure)
     assert figure is not None
     assert view_model.default_precisions == ["BF16"]
@@ -702,7 +691,9 @@ def test_standalone_roofs_open_at_the_selected_cap(benchmarked_roofline) -> None
 def test_dash_figures_keep_every_ceiling(benchmarked_roofline) -> None:
     """The WebUI has no precision selector, so narrowing the standalone document
     must not reach back into the figures Dash renders."""
-    roofline, flops_figure = stacked_figure(benchmarked_roofline, ["BF16", "FP64"])
+    roofline, flops_figure = figure_with_precisions(
+        benchmarked_roofline, ["BF16", "FP64"]
+    )
     source_model = roofline._Roofline__view_models["FLOP"]
     ceiling_indices = [trace["traceIndex"] for trace in source_model.compute_traces]
     roof_extents = drawn_roof_knees(flops_figure)
@@ -726,12 +717,12 @@ def test_default_precisions_no_preferred__falls_back_to_first_datatype() -> None
     assert _default_precisions(["FP64", "BF16"]) == ["FP64"]
 
 
-def test_construct_plotly_figures_all_datatypes_ignores_cli_selection(
+def test_construct_plotly_figures_defaults_to_every_supported_datatype(
     benchmarked_roofline,
 ) -> None:
-    """construct_plotly_figures attempts all supported architecture datatypes
-    even when the analyze arguments selected only one terminal datatype."""
-    roofline = benchmarked_roofline(["FP64"])
+    """With no datatypes given, construct_plotly_figures draws every datatype
+    the architecture supports."""
+    roofline = benchmarked_roofline()
 
     ops_figure, flops_figure, _, _ = roofline.construct_plotly_figures(
         {"kernelNames": []}, datatypes=None

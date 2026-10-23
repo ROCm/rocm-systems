@@ -22,6 +22,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+* `--triton-trace` no longer captures the Triton kernels that `torch.compile` generates. Use `--torch-trace` for those kernels.
+
+* The PyTorch and Triton operator call trees now show each operator's arguments. `--torch-operator` and `--triton-operator` can now be used together.
+
 * Improved the standalone roofline HTML kernel hover tooltip: it now shows the limiting roof, percent of roofline, achieved and peak bandwidth per memory level, dispatch count and share of total application dispatches, and kernel duration and share of total application time. Kernel names longer than 200 characters are truncated in the sidebar, with the full name shown on hover.
 
 * The roofline benchmark now reports the peak measured sample across runs instead of the mean.
@@ -49,6 +53,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or `--output-format db` to explore results in ROCm Optiq.
   * The `dash`, `dash-bootstrap-components`, `dash-svg`, `textual`, and `textual_plotext` dependencies are no longer installed.
+
 * Removed the unused `compute_workload_roofline_data` table from the analysis database.
 
 * Removed the HBM and remote traffic percentage metrics from the gfx908–gfx942 Memory Chart. On gfx940–gfx942 the new Data Fabric to MALL arrows report estimated HBM bandwidth instead.
@@ -57,11 +62,19 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Removed the `analyze --dependency` and `profile --target` options, which had no effect, and the undocumented `analyze --report-diff` and `profile --kokkos-trace` options.
 
+* Removed the roofline plot from CLI analyze output. The HTML roofline plot is unaffected and continues to be written to disk.
+  * The `plotext` dependency is no longer installed.
+
+* Removed the `analyze --sort`, `analyze --mem-level`, and `analyze --roofline-data-type` options.
+  * These options were utilized solely by roofline plot in CLI analyze output block 4.3, which has been removed. The roofline HTML output shows every memory level and precision, and you can filter them in the browser.
+
 ### Optimized
 
 ### Resolved issues
 
 * Fixed a `KeyError: 'title'` when combining `analyze --list-stats` with `--output-format csv` or `--output-format db`. These unsupported combinations now report a clear error during option validation.
+
+* Fixed `--torch-trace` errors in models that use lazy layers such as `nn.LazyLinear`.
 
 * Fixed measured zero HBM bandwidth rendering as `N/A` on the CDNA (gfx9) Memory Chart Data Fabric to MALL arrows. It now reports `0.000 GB/s`.
 * Fixed dispatch IDs not always following kernel launch order.

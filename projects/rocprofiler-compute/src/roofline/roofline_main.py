@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
-import plotext as plt
 import plotly.colors as pcolors
 import plotly.graph_objects as go
 
@@ -38,7 +37,6 @@ from roofline.run_benchmark import (
 from utils.logger import (
     console_debug,
     console_error,
-    console_log,
     console_warning,
     demarcate,
 )
@@ -50,7 +48,7 @@ from utils.roofline_calc import (
     OpsSupport,
     construct_roof,
     machine_ceilings,
-    sanitize_mem_level,
+    roofline_mem_levels,
 )
 from utils.specs import MachineSpecs
 from utils.utils_analysis import get_matrix_ops_type
@@ -58,14 +56,14 @@ from utils.utils_analysis import get_matrix_ops_type
 _KERNEL_PALETTE: list[str] = pcolors.qualitative.Dark24 + pcolors.qualitative.Light24
 DEFAULT_AXIS_BOUNDS = (XMIN, XMAX_DEFAULT, 1.0, 1000000.0)
 ROOF_DENSE_PAD_FACTOR = 1e3
-TRACE_COLORS: dict[str, dict[str, str]] = {
-    "l0": {"html": "#F0E442", "cli": "brown+"},
-    "l1": {"html": "#0072B2", "cli": "red+"},
-    "l2": {"html": "#009E73", "cli": "green+"},
-    "hbm": {"html": "#D55E00", "cli": "blue+"},
-    "lds": {"html": "#E69F00", "cli": "orange+"},
-    "valu": {"html": "#CC79A7", "cli": "white"},
-    "matrix_ops": {"html": "#56B4E9", "cli": "magenta+"},
+TRACE_COLORS: dict[str, str] = {
+    "l0": "#F0E442",
+    "l1": "#0072B2",
+    "l2": "#009E73",
+    "hbm": "#D55E00",
+    "lds": "#E69F00",
+    "valu": "#CC79A7",
+    "matrix_ops": "#56B4E9",
 }
 
 # Dense roof sampling so hover hits a vertex anywhere on the line.
@@ -116,15 +114,13 @@ def _roof_clipped_to_peak(
     return xs, ys
 
 
-def get_color(category: str, backend: str = "html") -> str:
+def get_color(category: str) -> str:
     key = category.removeprefix("ai_").lower()
 
     if key not in TRACE_COLORS:
         raise RuntimeError(f"Invalid category passed to get_color(): {category}")
-    if backend not in TRACE_COLORS[key]:
-        raise RuntimeError(f"Invalid backend passed to get_color(): {backend}")
 
-    return TRACE_COLORS[key][backend]
+    return TRACE_COLORS[key]
 
 
 def _roof_sample_count(low_ai: float, high_ai: float) -> int:
@@ -638,8 +634,9 @@ class Roofline:
         flops_figure: Optional[go.Figure],
         ops_dt_list: str,
         flops_dt_list: str,
-    ) -> None:
-        """Write one precision-selectable Plotly HTML document to disk."""
+    ) -> Optional[str]:
+        """Write one precision-selectable Plotly HTML document to disk and
+        return its path, or None when there is nothing to plot."""
         dev_id = str(self.__run_parameters["device_id"])
         kernel_list = ""
         if self.__run_parameters.get("kernel_filter", False):
@@ -663,7 +660,8 @@ class Roofline:
             )
             path = f"{workload_dir}/empirRoof_gpu-{dev_id}{kernel_list}.html"
             Path(path).write_text(document, encoding="utf-8")
-            console_log("roofline", "Roofline HTML files saved.")
+            return path
+        return None
 
     def _combined_html_figure(
         self,
@@ -783,9 +781,7 @@ class Roofline:
         """
         is_new_figure = fig is None
 
-        sanitized_cache_hierarchy = sanitize_mem_level(
-            self.__run_parameters["mem_level"], self.__mspec.gpu_model
-        )
+        sanitized_cache_hierarchy = roofline_mem_levels(self.__mspec.gpu_model)
 
         self.__ceiling_data = self._ceiling_for_dtype(dtype)
         console_debug("roofline", f"Ceiling data:\n{self.__ceiling_data}")
@@ -1084,185 +1080,3 @@ class Roofline:
                 font=dict(size=13, color="#1b1f24"),
             ),
         )
-
-    def cli_generate_plot(
-        self,
-        dtype: str,
-        ai_data: dict[str, Any],
-    ) -> Optional[str]:
-        """
-        Plot CLI mode roofline analysis in terminal using plotext
-
-        :param dtype: The datatype to be profiled
-        :param ai_data: Pre-computed arithmetic intensity data from calc_ai_analyze
-        :return: Build the current figure using plot.build(),
-        or None if datatype is not valid for the architecture
-        :rtype: str or None
-        """
-        console_debug("roofline", "Generating roofline plot for CLI")
-
-        if not self._datatype_supported(dtype):
-            console_error(
-                f"{dtype} is not a supported datatype for roofline profiling on "
-                f"{getattr(self.__mspec, 'gpu_model', 'N/A')} (arch: "
-                f"{self.__mspec.gpu_arch})- cannot construct CLI plot",
-                exit=False,
-            )
-            return
-
-        if not ai_data:
-            console_warning(
-                "roofline",
-                "Skipping roofline charting due to invalid arithmetic intensity data",
-            )
-            return
-
-        self.__ai_data = ai_data
-
-        workload_dir = self.__run_parameters.get("workload_dir", "")
-        if not (Path(workload_dir) / "roofline.csv").is_file():
-            console_log(
-                "roofline",
-                f"{workload_dir}/roofline.csv does not exist",
-            )
-            return None
-
-        self.__ceiling_data = construct_roof(
-            roofline_parameters=self.__run_parameters,
-            dtype=dtype,
-            mspec=self.__mspec,
-        )
-
-        self.roof_setup()
-
-        sanitized_cache_hierarchy = sanitize_mem_level(
-            self.__run_parameters["mem_level"], self.__mspec.gpu_model
-        )
-
-        kernel_markers = {
-            0: "star",
-            1: "cross",
-            2: "sd",
-            3: "shamrock",
-            4: "at",
-            5: "atom",
-        }
-
-        plt.clf()
-        plt.plotsize(plt.tw(), plt.th())
-
-        ops_flops = _figure_class(dtype)
-
-        for cache_level in sanitized_cache_hierarchy:
-            cache_key = cache_level.lower()
-
-            # cache_data layout:
-            #   [0] list[float] — x-axis coords for AI: [start_AI, ridge_point_AI]
-            #   [1] list[float] — y-axis coords for performance: [start_perf, peak_perf]
-            #   [2] float       — scalar peak bandwidth (GB/s)
-            cache_data = self.__ceiling_data.get(cache_key)
-
-            if not cache_data or cache_data[0] is None:
-                continue
-            plt.plot(
-                cache_data[0],
-                cache_data[1],
-                label=f"{cache_level}-{dtype}",
-                marker="braille",
-                color=get_color(cache_level, backend="cli"),
-            )
-            plt.text(
-                f"{round(cache_data[2])} GB/s",
-                x=cache_data[0][0],
-                y=cache_data[1][0],
-                background="black",
-                color="white",
-                alignment="left",
-            )
-            console_debug(
-                "roofline",
-                f"{cache_level}: [{cache_data[0][0]},"
-                f"{cache_data[0][1]}], "
-                f"[{cache_data[1][0]},"
-                f"{cache_data[1][1]}], "
-                f"{cache_data[2]}",
-            )
-
-        # Plot the compute peaks this datatype reaches, each drawn a shade below
-        # its measured value so the line reads as a ceiling rather than a bound.
-        for key, label in self._compute_paths(dtype):
-            ceiling = self.__ceiling_data.get(key)
-            if not ceiling or ceiling[0] is None:
-                console_warning(f"No {label} measurement available for {dtype}")
-                continue
-            plt.plot(
-                ceiling[0],
-                [max(perf - 0.1, 1e-9) for perf in ceiling[1]],
-                label=f"Peak {label}-{dtype}",
-                marker="braille",
-                color=get_color(key, backend="cli"),
-            )
-            plt.text(
-                f"{round(ceiling[2])} G{ops_flops}/s",
-                x=ceiling[0][1] - 800,
-                y=ceiling[1][1],
-                background="black",
-                color="white",
-                alignment="right",
-            )
-            console_debug(
-                "roofline",
-                f"{label}: [{ceiling[0][0]},{ceiling[0][1]}], "
-                f"[{ceiling[1][0]},{ceiling[1][1]}], {ceiling[2]}",
-            )
-
-        # Plot Application AI
-        for cache_level in sanitized_cache_hierarchy:
-            key = f"ai_{cache_level.lower()}"
-            if key not in self.__ai_data:
-                continue
-
-            kernel_names = self.__ai_data.get("kernelNames", [])
-            for i in range(len(self.__ai_data.get("kernelNames", []))):
-                # Zero intensity level means no data reported for this cache level
-                if i >= len(self.__ai_data[key][0]) or i >= len(self.__ai_data[key][1]):
-                    console_debug(
-                        "roofline",
-                        f"AI_{kernel_names[i]}: array too short, skipped",
-                    )
-                    continue
-
-                if self.__ai_data[key][0][i] > 0 and self.__ai_data[key][1][i] > 0:
-                    plt.plot(
-                        [self.__ai_data[key][0][i]],
-                        [self.__ai_data[key][1][i]],
-                        label=f"AI_{cache_level}_{kernel_names[i][:40]}",
-                        color=get_color(cache_level, backend="cli"),
-                        marker=kernel_markers[i % len(kernel_markers)],
-                    )
-
-                console_debug(
-                    "roofline",
-                    f"AI_{kernel_names[i]}: {self.__ai_data[key][0][i]}, "
-                    f"{self.__ai_data[key][1][i]}",
-                )
-        plt.xlabel(f"Arithmetic Intensity ({ops_flops}s/Byte)")
-        plt.ylabel("Performance (GFLOP/sec)")
-        wdir = self.__run_parameters.get("workload_dir", "")
-        plt.title(f"Roofline ({dtype}) - {wdir}")
-
-        # Canvas config
-        plt.theme("pro")
-        plt.xscale("log")
-        plt.yscale("log")
-
-        # Build figure
-        # Print plot using `plt._utility.write(self.cli_generate_plot(dtype))`
-        return plt.build()
-
-    def get_dtype(self) -> list[str]:
-        """
-        Return the data types requested by the user (else the default data type)
-        for the roofline plot.
-        """
-        return self.__run_parameters["roofline_data_type"]

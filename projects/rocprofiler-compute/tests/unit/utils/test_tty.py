@@ -7,6 +7,7 @@ import argparse
 import sys
 from io import StringIO
 from types import SimpleNamespace
+from typing import Optional
 
 import pandas as pd
 import pytest
@@ -15,8 +16,11 @@ import config
 from membw_analysis.models import BottleneckNode, MemBwAnalysisResult
 from utils.tty import (
     _render_membw_guidance,
+    build_continuation_indent,
     convert_time_columns,
+    format_args_variant_lines,
     format_duration,
+    format_node_args,
     format_node_stats,
     format_table_output,
     has_time_data,
@@ -29,8 +33,7 @@ from utils.tty import (
 from utils.utils_analysis import (
     CallTreeNode,
     KernelStats,
-    build_call_trees,
-    build_operator_summary,
+    rollup_node_stats,
 )
 from utils.utils_common import strip_ansi
 
@@ -49,11 +52,6 @@ _OPERATOR_SUMMARY_COLUMNS = [
     "Min_Dispatch",
     "Max_Dispatch",
 ]
-
-
-def build_summary_from_dataframe(rows):
-    call_trees = build_call_trees(pd.DataFrame(rows))
-    return build_operator_summary(call_trees)
 
 
 def make_args(**overrides) -> argparse.Namespace:
@@ -95,6 +93,57 @@ def make_membw_panel(*, include_panel: bool = True) -> SimpleNamespace:
     return SimpleNamespace(
         metric_dataframe=metric_dataframe, arch_configs=arch_configs, runs=runs
     )
+
+
+def make_roofline_panel(*, html_path: Optional[str] = None) -> SimpleNamespace:
+    """Arch configs and runs holding the single rates table of roofline panel 400."""
+    metric_dataframe = pd.DataFrame({"Metric": ["Metric A"], "Value": [1]})
+    table_config = {
+        "id": 401,
+        "title": "Roofline Performance Rates",
+        "cli_style": "Roofline",
+        "header": {"metric": "Metric", "value": "Value"},
+    }
+    arch_configs = SimpleNamespace(
+        panel_configs={
+            400: {
+                "id": 400,
+                "title": "Roofline",
+                "data source": [{"metric_table": table_config}],
+            }
+        }
+    )
+    runs = {
+        "fixture": SimpleNamespace(
+            dfs={401: metric_dataframe},
+            sys_info=pd.DataFrame([{"gpu_arch": "gfx950"}]),
+            roofline_peaks=pd.DataFrame([{"peak": 1.0}]),
+            roofline_html_path=html_path,
+        )
+    }
+    return SimpleNamespace(
+        metric_dataframe=metric_dataframe, arch_configs=arch_configs, runs=runs
+    )
+
+
+def render_roofline_panel(panel: SimpleNamespace, view: Optional[str]) -> str:
+    """Run show_all over a make_roofline_panel fixture and return its output."""
+    rendered_output = StringIO()
+    show_all(
+        make_args(
+            filter_metrics=None,
+            include_cols=None,
+            membw_analysis=False,
+            path=[["fixture"]],
+            time_unit="ns",
+            view=view,
+        ),
+        panel.runs,
+        panel.arch_configs,
+        rendered_output,
+        profiling_config={"filter_blocks": []},
+    )
+    return rendered_output.getvalue()
 
 
 def sample_time_data() -> pd.DataFrame:
@@ -658,50 +707,6 @@ def test_format_node_stats_renders_na_when_dispatch_stats_missing():
     assert "dispatch_max: N/A" in rendered
 
 
-def test_show_call_tree_prints_location_and_stats(capsys):
-    root = CallTreeNode(name="main.py:10")
-    root.kernel_launches = 1
-    root.total_duration_ms = 0.5
-    child = CallTreeNode(name="op_a")
-    child.kernel_launches = 1
-    child.total_duration_ms = 0.5
-    child.kernels["kern"] = KernelStats(launches=1, total_duration_ns=500_000.0)
-    root.children["op_a"] = child
-    show_call_tree({"main.py:10": root})
-    output = capsys.readouterr().out
-    assert "main.py:10" in output
-    assert "dispatches: 1" in output
-    assert "kern" in output
-
-
-def test_show_call_tree_sorted_by_duration(capsys):
-    root_a = CallTreeNode(name="a.py:1")
-    root_a.total_duration_ms = 10.0
-    root_a.kernel_launches = 1
-    root_b = CallTreeNode(name="b.py:1")
-    root_b.total_duration_ms = 20.0
-    root_b.kernel_launches = 2
-    show_call_tree({"a.py:1": root_a, "b.py:1": root_b})
-    output = capsys.readouterr().out
-    assert output.index("b.py:1") < output.index("a.py:1")
-
-
-def test_show_call_tree_kernel_id_printed(capsys):
-    root = CallTreeNode(name="f.py:1")
-    root.kernel_launches = 1
-    root.total_duration_ms = 1.0
-    child = CallTreeNode(name="op")
-    child.kernel_launches = 1
-    child.total_duration_ms = 1.0
-    child.kernels["kern_x"] = KernelStats(
-        launches=1, total_duration_ns=1_000_000.0, kernel_id=42
-    )
-    root.children["op"] = child
-    show_call_tree({"f.py:1": root})
-    output = capsys.readouterr().out
-    assert "(id 42)" in output
-
-
 def test_print_operator_node_branching_shows_stats(capsys):
     node = CallTreeNode(name="branch")
     node.kernel_launches = 2
@@ -753,6 +758,189 @@ def test_print_operator_node_long_kernel_wraps(capsys):
     assert not any(line.strip().startswith("(id 7)") for line in output_lines)
 
 
+def test_print_operator_node_folds_identical_children(capsys):
+    first = CallTreeNode(name="aten::addmm", file_name="net.py", line_number=10)
+    first.invocation_ids.add("1")
+    first.kernels["addmm"] = KernelStats(
+        launches=1,
+        total_duration_ns=2_000_000.0,
+        min_duration_ns=2_000_000.0,
+        max_duration_ns=2_000_000.0,
+    )
+    second = CallTreeNode(name="aten::addmm", file_name="net.py", line_number=10)
+    second.invocation_ids.add("2")
+    second.kernels["addmm"] = KernelStats(
+        launches=1,
+        total_duration_ns=3_000_000.0,
+        min_duration_ns=3_000_000.0,
+        max_duration_ns=3_000_000.0,
+    )
+    parent = CallTreeNode(name="forward")
+    parent.invocation_ids.add("0")
+    parent.children = [first, second]
+    rollup_node_stats(first)
+    rollup_node_stats(second)
+    rollup_node_stats(parent)
+    print_operator_node(parent)
+    output = capsys.readouterr().out
+    assert output.count("aten::addmm") == 1
+    assert "calls: 2" in output
+    assert parent.children == [first, second]
+
+
+def test_show_call_tree_folds_identical_sibling_leaves(capsys):
+    first = CallTreeNode(name="aten::addmm", file_name="net.py", line_number=10)
+    first.invocation_ids.add("1")
+    first.kernels["addmm"] = KernelStats(
+        launches=1,
+        total_duration_ns=2_000_000.0,
+        min_duration_ns=2_000_000.0,
+        max_duration_ns=2_000_000.0,
+    )
+    second = CallTreeNode(name="aten::addmm", file_name="net.py", line_number=10)
+    second.invocation_ids.add("2")
+    second.kernels["addmm"] = KernelStats(
+        launches=1,
+        total_duration_ns=3_000_000.0,
+        min_duration_ns=3_000_000.0,
+        max_duration_ns=3_000_000.0,
+    )
+    parent = CallTreeNode(name="forward")
+    parent.invocation_ids.add("0")
+    parent.children = [first, second]
+    rollup_node_stats(first)
+    rollup_node_stats(second)
+    rollup_node_stats(parent)
+    show_call_tree({"1": [parent]})
+    output = capsys.readouterr().out
+    assert output.count("aten::addmm") == 1
+    assert "calls: 2" in output
+    assert parent.children == [first, second]
+
+
+def test_format_node_args_present() -> None:
+    node = CallTreeNode(
+        name="aten::mm",
+        args_invocations={"(self=float32[2x2])": {"1@m.py:1", "2@m.py:1"}},
+    )
+    assert format_node_args(node) == " args=(self=float32[2x2])"
+
+
+def test_format_node_args_absent() -> None:
+    assert format_node_args(CallTreeNode(name="aten::mm")) == ""
+    empty_parens = CallTreeNode(name="aten::mm", args_invocations={"()": set()})
+    assert format_node_args(empty_parens) == ""
+
+
+def test_format_args_variant_lines_orders_by_call_count() -> None:
+    node = CallTreeNode(
+        name="aten::mm",
+        args_invocations={
+            "(self=float32[2x2])": {"1@m.py:1"},
+            "(self=float32[4x4])": {"2@m.py:1", "3@m.py:1"},
+        },
+    )
+    assert format_args_variant_lines(node) == [
+        "args variants:",
+        "  2 calls  (self=float32[4x4])",
+        "  1 call   (self=float32[2x2])",
+    ]
+
+
+def test_format_args_variant_lines_empty_below_two_variants() -> None:
+    assert format_args_variant_lines(CallTreeNode(name="aten::mm")) == []
+    single = CallTreeNode(
+        name="aten::mm", args_invocations={"(self=float32[2x2])": {"1@m.py:1"}}
+    )
+    assert format_args_variant_lines(single) == []
+
+
+def test_format_args_variant_lines_caps_variant_count() -> None:
+    node = CallTreeNode(
+        name="aten::mm",
+        args_invocations={
+            f"(self=float32[{index}x{index}])": {str(index)} for index in range(7)
+        },
+    )
+    lines = format_args_variant_lines(node)
+    assert lines[0] == "args variants:"
+    assert len(lines) == 7
+    assert lines[-1] == "  ... 2 more variants"
+
+
+def test_format_args_variant_lines_omits_counts_without_invocation_ids() -> None:
+    node = CallTreeNode(
+        name="aten::mm",
+        args_invocations={
+            "(self=float32[2x2])": set(),
+            "(self=float32[4x4])": set(),
+        },
+    )
+    assert format_args_variant_lines(node) == [
+        "args variants:",
+        "    (self=float32[2x2])",
+        "    (self=float32[4x4])",
+    ]
+
+
+def test_print_operator_node_shows_args(capsys) -> None:
+    node = CallTreeNode(
+        name="aten::mm", args_invocations={"(self=float32[2x2])": {"1@m.py:1"}}
+    )
+    node.kernels["kernel_gemm"] = KernelStats(launches=1, total_duration_ns=1000.0)
+    print_operator_node(node)
+    output = capsys.readouterr().out
+    assert "aten::mm" in output
+    assert "args=(self=float32[2x2])" in output
+
+
+def test_print_operator_node_shows_args_variants_block(capsys) -> None:
+    node = CallTreeNode(
+        name="aten::mm",
+        args_invocations={
+            "(self=float32[2x2])": {"1@m.py:1"},
+            "(self=float32[4x4])": {"2@m.py:1", "3@m.py:1"},
+        },
+    )
+    node.kernels["kernel_gemm"] = KernelStats(launches=1, total_duration_ns=1000.0)
+    print_operator_node(node)
+    output = capsys.readouterr().out
+    assert "args=" not in output
+    assert "args variants:" in output
+    assert "2 calls  (self=float32[4x4])" in output
+    assert "1 call   (self=float32[2x2])" in output
+
+
+def test_build_continuation_indent_keeps_pipes() -> None:
+    assert build_continuation_indent("   |  └─ ", "   |  ") == "   |     "
+    assert build_continuation_indent("   |  ", "   |  ") == "   |  "
+    assert build_continuation_indent("└─ ", "") == "   "
+
+
+def test_show_call_tree_does_not_fold_roots_across_threads(capsys):
+    first = CallTreeNode(name="aten::addmm", file_name="net.py", line_number=10)
+    first.invocation_ids.add("1")
+    first.kernels["addmm"] = KernelStats(
+        launches=1,
+        total_duration_ns=2_000_000.0,
+        min_duration_ns=2_000_000.0,
+        max_duration_ns=2_000_000.0,
+    )
+    second = CallTreeNode(name="aten::addmm", file_name="net.py", line_number=10)
+    second.invocation_ids.add("2")
+    second.kernels["addmm"] = KernelStats(
+        launches=1,
+        total_duration_ns=3_000_000.0,
+        min_duration_ns=3_000_000.0,
+        max_duration_ns=3_000_000.0,
+    )
+    rollup_node_stats(first)
+    rollup_node_stats(second)
+    show_call_tree({"1": [first], "2": [second]})
+    output = capsys.readouterr().out
+    assert output.count("aten::addmm") == 2
+
+
 # ---------------------------------------------------------------------------
 # show_operator_summary
 # ---------------------------------------------------------------------------
@@ -762,36 +950,6 @@ def test_show_operator_summary_empty_prints_no_dispatches_message(capsys):
     show_operator_summary(pd.DataFrame(columns=_OPERATOR_SUMMARY_COLUMNS))
     output = capsys.readouterr().out
     assert "no operators with recorded dispatches" in output
-
-
-def test_show_operator_summary_renders_per_cell_unit_suffix(capsys):
-    summary = build_summary_from_dataframe([
-        {
-            "Operator_Name": "op_a",
-            "Kernel_Name": "kern",
-            "Context_Id": "10@f.py:1",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 2_000_000,
-        }
-    ])
-    show_operator_summary(summary)
-    output = capsys.readouterr().out
-    assert "ms" in output or "us" in output
-    assert "Operator" in output
-    assert "Total" in output
-
-
-def test_show_operator_summary_renders_na_for_nan_cells(capsys):
-    root = CallTreeNode(name="f.py:1")
-    op = CallTreeNode(name="op")
-    op.kernel_launches = 1
-    op.total_duration_ms = 0.0
-    op.invocation_ids.add("ctx")
-    root.children["op"] = op
-    summary = build_operator_summary({"f.py:1": root})
-    show_operator_summary(summary)
-    output = capsys.readouterr().out
-    assert "N/A" in output
 
 
 # ---------------------------------------------------------------------------
@@ -876,12 +1034,13 @@ def test_show_all_view_table_replaces_memory_chart_panel(
         pytest.param("table", False, id="view_table"),
     ],
 )
-def test_show_all_view_table_skips_roofline_plot(
+def test_show_all_view_table_skips_per_kernel_roofline_layout(
     monkeypatch: pytest.MonkeyPatch,
     view,
     expect_roofline_called: bool,
 ) -> None:
-    """--view table do not render roofline plot."""
+    """--view table prints the roofline tables as plain tables instead of the
+    per-kernel layout."""
     roofline_called = False
 
     def _spy(*_a, **_k) -> bool:
@@ -890,58 +1049,40 @@ def test_show_all_view_table_skips_roofline_plot(
         return False
 
     monkeypatch.setattr("utils.tty.is_roofline_shown", _spy)
-    df = pd.DataFrame({"Metric": ["Metric A"], "Value": [1]})
-    monkeypatch.setattr("utils.tty.process_table_data", lambda *_a, **_k: df)
-    rendered_output = StringIO()
-
-    arch_configs = SimpleNamespace(
-        panel_configs={
-            400: {
-                "id": 400,
-                "title": "Roofline",
-                "data source": [
-                    {
-                        "metric_table": {
-                            "id": 401,
-                            "title": "Roofline Performance Rates",
-                            "cli_style": "Roofline",
-                            "header": {"metric": "Metric", "value": "Value"},
-                        }
-                    }
-                ],
-            }
-        }
+    panel = make_roofline_panel()
+    monkeypatch.setattr(
+        "utils.tty.process_table_data", lambda *_a, **_k: panel.metric_dataframe
     )
-    runs = {
-        "fixture": SimpleNamespace(
-            dfs={401: df},
-            sys_info=pd.DataFrame([{"gpu_arch": "gfx950"}]),
-            roofline_peaks=pd.DataFrame([{"peak": 1.0}]),
-        )
-    }
 
-    show_all(
-        make_args(
-            filter_metrics=None,
-            include_cols=None,
-            membw_analysis=False,
-            path=[["fixture"]],
-            time_unit="ns",
-            view=view,
-        ),
-        runs,
-        arch_configs,
-        rendered_output,
-        profiling_config={"filter_blocks": []},
-    )
+    output = render_roofline_panel(panel, view)
 
     assert roofline_called is expect_roofline_called
-
-    output = rendered_output.getvalue()
     if view == "table":
-        assert "4.3 Roofline Plot" not in output
         assert "4.1 Roofline Performance Rates" in output
         assert "Metric A" in output
+
+
+@pytest.mark.parametrize("view", [None, "table"], ids=["default", "view_table"])
+@pytest.mark.parametrize("html_path", [None, "wl/empirRoof_gpu-0.html"])
+def test_show_all_prints_roofline_html_path_under_heading(
+    monkeypatch: pytest.MonkeyPatch,
+    view: Optional[str],
+    html_path: Optional[str],
+) -> None:
+    """Both views name the saved roofline HTML right under the block heading."""
+    panel = make_roofline_panel(html_path=html_path)
+    monkeypatch.setattr(
+        "utils.tty.process_table_data", lambda *_a, **_k: panel.metric_dataframe
+    )
+
+    output = render_roofline_panel(panel, view)
+
+    if html_path:
+        assert (
+            f"4. Roofline\n\nInteractive roofline plot saved to {html_path}\n" in output
+        )
+    else:
+        assert "Interactive roofline plot" not in output
 
 
 # ---------------------------------------------------------------------------
@@ -1043,3 +1184,33 @@ class TestRenderMembwGuidance:
         output = _render_membw_guidance(result)
         assert "No bottlenecks detected" not in output
         assert "Bottlenecks detected" in output
+
+
+def test_show_call_tree_prints_file_line_sort_and_kernel_id(capsys):
+    """Constructed nodes: file:line, duration order, and kernel_id print."""
+    longer = CallTreeNode(name="nn.Module.SimpleModel.forward")
+    longer.total_duration_ms = 8.0
+    longer.invocation_ids.add("0")
+    child = CallTreeNode(
+        name="nn.Module.Linear.forward",
+        file_name="simple_torch_code.py",
+        line_number=19,
+    )
+    child.total_duration_ms = 5.0
+    child.invocation_ids.add("10")
+    child.kernels["addmm_kernel"] = KernelStats(
+        launches=1,
+        total_duration_ns=5_000_000.0,
+        kernel_id=4,
+    )
+    longer.children = [child]
+    shorter = CallTreeNode(name="aten::relu")
+    shorter.total_duration_ms = 1.0
+    shorter.invocation_ids.add("90")
+    show_call_tree({"1": [longer], "2": [shorter]})
+    output = capsys.readouterr().out
+    assert "Thread_Id" not in output
+    assert output.index("nn.Module.SimpleModel.forward") < output.index("aten::relu")
+    assert "nn.Module.Linear.forward simple_torch_code.py:19" in output
+    assert "aten::relu simple_torch_code.py" not in output
+    assert "(id 4)" in output

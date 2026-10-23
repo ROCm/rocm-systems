@@ -1386,9 +1386,7 @@ def gen_vector_cvt_pk(
         L.append(
             f'    uint32_t old = amdgpu::RegisterAccess(wf).read_lane({old_src}, lane);'
         )
-        L.append(
-            '    uint32_t byte = static_cast<uint32_t>(std::clamp(fval, 0.0f, 255.0f));'
-        )
+        L.append('    uint32_t byte = amdgpu::cvt_u8_f32(fval);')
         L.append('    uint32_t mask = ~(0xFFu << (byte_sel * 8));')
         L.append(
             f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, (old & mask) | (byte << (byte_sel * 8)));'
@@ -1569,21 +1567,13 @@ def gen_vector_cvt_pk(
                 f'    float f1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane));'
             )
             if op == 'u16_f32':
-                L.append(
-                    '    uint16_t lo = static_cast<uint16_t>(std::clamp(f0, 0.0f, 65535.0f));'
-                )
-                L.append(
-                    '    uint16_t hi = static_cast<uint16_t>(std::clamp(f1, 0.0f, 65535.0f));'
-                )
+                L.append('    uint32_t lo = amdgpu::cvt_u16_f32(f0);')
+                L.append('    uint32_t hi = amdgpu::cvt_u16_f32(f1);')
             else:
-                L.append(
-                    '    int16_t lo = static_cast<int16_t>(std::clamp(f0, -32768.0f, 32767.0f));'
-                )
-                L.append(
-                    '    int16_t hi = static_cast<int16_t>(std::clamp(f1, -32768.0f, 32767.0f));'
-                )
+                L.append('    uint32_t lo = amdgpu::cvt_i16_f32(f0);')
+                L.append('    uint32_t hi = amdgpu::cvt_i16_f32(f1);')
             L.append(
-                f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, (static_cast<uint32_t>(static_cast<uint16_t>(hi)) << 16) | static_cast<uint32_t>(static_cast<uint16_t>(lo)));'
+                f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, (hi << 16) | (lo & 0xFFFFu));'
             )
         else:
             L.append(

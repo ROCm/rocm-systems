@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 /// Test driver instance with only the common driver contract.
 pub(crate) struct TestDriver {
-    instance: u64,
+    instance: super::DriverInstanceId,
     id: [u8; 16],
     kind: EndpointKind,
     lifetime: DriverContextLifetime,
@@ -78,6 +78,7 @@ impl TestDriver {
         Endpoint {
             id: self.id,
             name,
+            product_name: None,
             pci: None,
             kind: self.kind,
             local_memory_bytes: 0,
@@ -120,7 +121,7 @@ impl AddressSpaceInfo for TestDevice {
 impl Driver for TestDriver {
     type DeviceState = TestDevice;
 
-    fn driver_instance(&self) -> u64 {
+    fn driver_instance(&self) -> super::DriverInstanceId {
         self.instance
     }
 
@@ -156,8 +157,17 @@ impl Driver for TestDriver {
         Ok(self.endpoint())
     }
 
+    fn populate_endpoint(&self, endpoint: &mut Endpoint) -> Result<(), Error> {
+        endpoint.product_name = Some("Test endpoint".to_owned());
+        if let EndpointKind::Gpu { info } = &mut endpoint.kind {
+            info.drm_asic_family_id = Some(42);
+            info.counter_frequency_hz = Some(1_000_000);
+        }
+        Ok(())
+    }
+
     fn activate(&self, endpoint: &Endpoint) -> Result<TestDevice, Error> {
-        if endpoint != &self.endpoint() {
+        if !endpoint.matches_discovery(&self.endpoint()) {
             return Err(Error::Operation {
                 kind: ErrorKind::InvalidArgument,
                 detail: "foreign test endpoint",
