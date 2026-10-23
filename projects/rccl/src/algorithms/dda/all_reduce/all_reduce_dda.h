@@ -38,15 +38,13 @@ __launch_bounds__(512)
   barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();
 }
 
-template <typename T, int NRANKS, bool hasAcc>
+template <typename T, int NRANKS, bool hasAcc, bool kCopyInKernel = false>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
   __global__ void ddaAllReduceTreeIpc(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
                                       const T* __restrict__ sendbuff, int selfRank, IpcGpuBarrier barrier,
                                       const T* __restrict__ acc) {
-  barrier.syncOnSameBlockIdx<false /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
-
   const size_t countPerRank = count / NRANKS;
   constexpr auto countPerThread = sizeof(uint4) / sizeof(T);
   const auto gtIdx = blockDim.x * blockIdx.x + threadIdx.x;
@@ -54,6 +52,22 @@ __launch_bounds__(512)
   const auto idxStart = gtIdx * countPerThread;
   const auto idxEnd = countPerRank;
   const size_t idxStride = gridDim.x * blockDim.x * countPerThread;
+
+  // kCopyInKernel is the host's only staging decision (ddaAllReduceTreeIpcStaging).
+  // The barrier below only orders blocks with the same index across ranks, so each
+  // block stages exactly the elements its peers' same-index blocks reduce: the same
+  // [idxStart, idxEnd) range in every per-rank shard.
+  if constexpr (kCopyInKernel) {
+#pragma unroll NRANKS
+    for (int s = 0; s < NRANKS; ++s) {
+      const size_t off = static_cast<size_t>(s) * countPerRank;
+      copyFromSrcToDest<T>(sendbuff + off, ipcbuffs[selfRank] + off, idxStart, idxEnd, idxStride);
+    }
+    barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
+  } else {
+    // Host enqueued cudaMemcpyAsync into ddaScratch before launch.
+    barrier.syncOnSameBlockIdx<false /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
+  }
 
   reduceScatter<T, NRANKS, hasAcc>(ipcbuffs, ipcbuffs[selfRank], acc, selfRank, NRANKS, idxStart, idxEnd, idxStride, 1);
 

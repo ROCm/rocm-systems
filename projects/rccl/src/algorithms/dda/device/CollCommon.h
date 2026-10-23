@@ -253,6 +253,24 @@ inline DdaRsIpcStaging ddaReduceScatterIpcStaging(size_t recvcount, int typeSize
   return DdaRsIpcStaging::HostPreCopy;
 }
 
+// All-reduce IPC tree copies sendbuff into scratch inside the kernel at or below
+// this total payload. Above it the host pre-copies the whole input into scratch.
+// A stream operation ahead of the kernel that carries the addon stop event costs
+// ~3-4.5 us per call on MI350X, which dominates in this range.
+constexpr size_t kDdaArIpcTreeKernelCopyMaxBytes = 4ULL * 1024 * 1024;
+
+enum class DdaArIpcTreeStaging {
+  InKernel,    // kernel copies each per-rank shard from sendbuff
+  HostPreCopy, // host cudaMemcpyAsync before launch
+};
+
+inline DdaArIpcTreeStaging ddaAllReduceTreeIpcStaging(size_t count, int typeSize) {
+  if (count * static_cast<size_t>(typeSize) <= kDdaArIpcTreeKernelCopyMaxBytes) {
+    return DdaArIpcTreeStaging::InKernel;
+  }
+  return DdaArIpcTreeStaging::HostPreCopy;
+}
+
 constexpr uint32_t calcBlockCount(size_t numThreads, size_t threadsPerBlock, size_t maxBlocks) {
   const auto uNumThreads = static_cast<uint64_t>(numThreads);
   const auto uThreadsPerBlock = static_cast<uint64_t>(threadsPerBlock);

@@ -31,6 +31,9 @@ constexpr size_t kFp32CountAtThreshold = kFlatTreeThresholdBytes / sizeof(float)
 constexpr size_t kFp16CountAtThreshold = kFlatTreeThresholdBytes / sizeof(uint16_t);
 // 8 MiB fp32 tree payload, which the tree path copies into scratch before it launches.
 constexpr size_t kFp32CountCopiedBeforeTree = (8u << 20) / sizeof(float);
+// Spelled out rather than read from kDdaArIpcTreeKernelCopyMaxBytes: at or below 4 MiB the tree kernel stages
+// sendbuff itself, so no stream operation sits between the kernel carrying the stop event and the previous call.
+constexpr size_t kFp32CountAtTreeKernelCopyMax = (4u << 20) / sizeof(float);
 
 void* const kSendbuff = reinterpret_cast<void*>(0x10);
 void* const kRecvbuff = reinterpret_cast<void*>(0x20);
@@ -211,6 +214,11 @@ class DdaAllReduceIpcDispatchTest : public ::testing::Test {
     return reinterpret_cast<const void*>(&dda::common::ddaAllReduceTreeIpc<T, kDdaNranks, false>);
   }
 
+  template <typename T>
+  static const void* TreeCopyInKernel() {
+    return reinterpret_cast<const void*>(&dda::common::ddaAllReduceTreeIpc<T, kDdaNranks, false, true>);
+  }
+
   const hipEvent_t kStopEvent = reinterpret_cast<hipEvent_t>(0x77);
   const hipStream_t kStream = reinterpret_cast<hipStream_t>(0x88);
   DdaIpcMockComm mock_;
@@ -287,8 +295,24 @@ TEST_F(DdaAllReduceIpcDispatchTest, PayloadAboveThresholdRunsTree) {
   const size_t count = kFp32CountAtThreshold + 4 * kDdaNranks;
   ASSERT_EQ(ncclSuccess, Run(count, ncclFloat32));
   ASSERT_EQ(1u, launches_.size());
-  EXPECT_EQ(Tree<float>(), launches_[0].kernel);
+  EXPECT_EQ(TreeCopyInKernel<float>(), launches_[0].kernel);
   EXPECT_EQ(count, launches_[0].count);
+  EXPECT_EQ(0, g_hipMemcpyAsyncCalls);
+}
+
+TEST_F(DdaAllReduceIpcDispatchTest, TreePayloadAtKernelCopyMaxIsStagedInKernel) {
+  ASSERT_EQ(ncclSuccess, Run(kFp32CountAtTreeKernelCopyMax, ncclFloat32));
+  ASSERT_EQ(1u, launches_.size());
+  EXPECT_EQ(TreeCopyInKernel<float>(), launches_[0].kernel);
+  EXPECT_EQ(kStopEvent, launches_[0].stopEvent);
+  EXPECT_EQ(0, g_hipMemcpyAsyncCalls);
+}
+
+TEST_F(DdaAllReduceIpcDispatchTest, TreePayloadAboveKernelCopyMaxIsCopiedByHost) {
+  ASSERT_EQ(ncclSuccess, Run(kFp32CountAtTreeKernelCopyMax + 4 * kDdaNranks, ncclFloat32));
+  ASSERT_EQ(1u, launches_.size());
+  EXPECT_EQ(Tree<float>(), launches_[0].kernel);
+  EXPECT_EQ(1, g_hipMemcpyAsyncCalls);
 }
 
 TEST_F(DdaAllReduceIpcDispatchTest, LargeTreePayloadIsCopiedToScratchBeforeLaunch) {
@@ -325,7 +349,7 @@ TEST_F(DdaAllReduceIpcDispatchTest, ThresholdIsInBytesNotElements) {
   ASSERT_EQ(ncclSuccess, Run(kFp16CountAtThreshold + 8 * kDdaNranks, ncclBfloat16));
   ASSERT_EQ(2u, launches_.size());
   EXPECT_EQ(Flat<bf16>(), launches_[0].kernel);
-  EXPECT_EQ(Tree<bf16>(), launches_[1].kernel);
+  EXPECT_EQ(TreeCopyInKernel<bf16>(), launches_[1].kernel);
 }
 
 TEST_F(DdaAllReduceIpcDispatchTest, LaunchGeometryFollowsTheDispatchedElementSize) {
