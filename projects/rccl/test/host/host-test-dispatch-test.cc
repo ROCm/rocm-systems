@@ -802,16 +802,16 @@ TEST(HostDispatchEnvironmentMicrotest, ShardingVariablesSurviveInTheDispatcherIt
 
 // ── coverageDirectory ───────────────────────────────────────────────
 
-TEST(HostDispatchCoverageMicrotest, ObjectsAreRecordedBesideTheProfiles)
+TEST(HostDispatchCoverageMicrotest, ProfileDirectoryIsTakenFromThePattern)
 {
     // The harness points LLVM_PROFILE_FILE at a pattern, not a file; only its directory is a real
-    // path, and that is where the object manifest has to land for the harness to find it.
+    // path, and that is where the merged tracefile has to land for the harness to find it.
     setenv("LLVM_PROFILE_FILE", "/tmp/coverage_raw/rccl_%h_%p_%m.profraw", 1);
     EXPECT_EQ(coverageDirectory(), "/tmp/coverage_raw");
     unsetenv("LLVM_PROFILE_FILE");
 }
 
-TEST(HostDispatchCoverageMicrotest, NoProfileVariableMeansNoManifest)
+TEST(HostDispatchCoverageMicrotest, NoProfileVariableMeansNoTracefile)
 {
     unsetenv("LLVM_PROFILE_FILE");
     EXPECT_EQ(coverageDirectory(), "");
@@ -851,6 +851,242 @@ TEST(HostDispatchCoverageMicrotest, NoProfileVariableLeavesTheChildEnvironmentAl
     // Nothing to redirect when coverage is not being collected, and an empty result is what the
     // call sites test to decide whether to set the variable at all.
     EXPECT_EQ(childProfileFile("", "/b/rccl-UnitTestsMicroTopo"), "");
+}
+
+
+// ── lcov merge ──────────────────────────────────────────────────────
+
+namespace {
+
+// The lcov records for one source file, with the counting lines left to the code under test.
+std::string tracefile(const std::string &path, const std::string &body)
+{
+    return "SF:" + path + "\n" + body + "end_of_record\n";
+}
+
+// Whether *text* contains *line* as a whole line.
+bool hasLine(const std::string &text, const std::string &line)
+{
+    return ("\n" + text).find("\n" + line + "\n") != std::string::npos;
+}
+
+}  // namespace
+
+TEST(HostDispatchLcovMicrotest, ALineCoveredByOneBinaryIsCoveredInTheMerge)
+{
+    // The point of the union: several binaries compile the same source under different #defines,
+    // so each reaches lines the others cannot, and the merged view has to credit all of them.
+    const std::string merged = mergeLcovTracefiles({
+        tracefile("/src/init.cc", "DA:10,1\nDA:20,0\n"),
+        tracefile("/src/init.cc", "DA:10,0\nDA:20,5\n"),
+    });
+
+    EXPECT_TRUE(hasLine(merged, "DA:10,1")) << merged;
+    EXPECT_TRUE(hasLine(merged, "DA:20,5")) << merged;
+    EXPECT_TRUE(hasLine(merged, "LF:2")) << merged;
+    EXPECT_TRUE(hasLine(merged, "LH:2")) << merged;
+}
+
+TEST(HostDispatchLcovMicrotest, ALineNoBinaryReachedStaysUncovered)
+{
+    const std::string merged = mergeLcovTracefiles({
+        tracefile("/src/init.cc", "DA:10,0\n"),
+        tracefile("/src/init.cc", "DA:10,0\n"),
+    });
+
+    EXPECT_TRUE(hasLine(merged, "DA:10,0")) << merged;
+    EXPECT_TRUE(hasLine(merged, "LH:0")) << merged;
+}
+
+TEST(HostDispatchLcovMicrotest, EachSourceFileKeepsItsOwnRecord)
+{
+    const std::string merged = mergeLcovTracefiles({
+        tracefile("/src/init.cc", "DA:10,1\n"),
+        tracefile("/src/enqueue.cc", "DA:7,1\n"),
+    });
+
+    EXPECT_TRUE(hasLine(merged, "SF:/src/init.cc")) << merged;
+    EXPECT_TRUE(hasLine(merged, "SF:/src/enqueue.cc")) << merged;
+    EXPECT_EQ(merged.find("end_of_record"), merged.find("end_of_record"));
+    EXPECT_EQ(std::count(merged.begin(), merged.end(), '\n') > 0, true);
+}
+
+TEST(HostDispatchLcovMicrotest, CountingLinesAreRecomputedNotCarriedOver)
+{
+    // llvm-cov's own FNF/LF/BRF count its internal regions, not the records beside them -- a
+    // record with 648 FN lines can be headed FNF:258 -- so summing the inputs' numbers would
+    // give totals that match neither the records nor anything lcov computes from them.
+    const std::string merged = mergeLcovTracefiles({
+        tracefile("/src/init.cc", "DA:10,1\nDA:11,1\nLF:999\nLH:999\n"),
+    });
+
+    EXPECT_TRUE(hasLine(merged, "LF:2")) << merged;
+    EXPECT_TRUE(hasLine(merged, "LH:2")) << merged;
+    EXPECT_FALSE(hasLine(merged, "LF:999")) << merged;
+}
+
+TEST(HostDispatchLcovMicrotest, ARepeatedLineInOneRecordIsCountedOnce)
+{
+    // llvm-cov emits a line once per region covering it, so a record can carry the same DA line
+    // twice. Counting both would inflate LF and make the merged percentage a fiction.
+    const std::string merged = mergeLcovTracefiles({
+        tracefile("/src/init.cc", "DA:10,1\nDA:10,2\n"),
+    });
+
+    EXPECT_TRUE(hasLine(merged, "LF:1")) << merged;
+    EXPECT_TRUE(hasLine(merged, "DA:10,3")) << merged;
+}
+
+TEST(HostDispatchLcovMicrotest, ABranchOneBinaryNeverEvaluatedIsTakenIfAnotherTookIt)
+{
+    // '-' is the absence of information, not a zero: a binary whose #defines compile the branch
+    // out reports it unevaluated, and must not veto the binary that took it.
+    const std::string merged = mergeLcovTracefiles({
+        tracefile("/src/init.cc", "BRDA:10,0,0,-\n"),
+        tracefile("/src/init.cc", "BRDA:10,0,0,4\n"),
+    });
+
+    EXPECT_TRUE(hasLine(merged, "BRDA:10,0,0,4")) << merged;
+    EXPECT_TRUE(hasLine(merged, "BRH:1")) << merged;
+}
+
+TEST(HostDispatchLcovMicrotest, ABranchNoBinaryEvaluatedStaysUnevaluated)
+{
+    const std::string merged = mergeLcovTracefiles({
+        tracefile("/src/init.cc", "BRDA:10,0,0,-\n"),
+        tracefile("/src/init.cc", "BRDA:10,0,0,-\n"),
+    });
+
+    EXPECT_TRUE(hasLine(merged, "BRDA:10,0,0,-")) << merged;
+    EXPECT_TRUE(hasLine(merged, "BRF:1")) << merged;
+    EXPECT_TRUE(hasLine(merged, "BRH:0")) << merged;
+}
+
+TEST(HostDispatchLcovMicrotest, FunctionExecutionsAreSummedAcrossBinaries)
+{
+    const std::string merged = mergeLcovTracefiles({
+        tracefile("/src/init.cc", "FN:44,_Z4initv\nFNDA:3,_Z4initv\n"),
+        tracefile("/src/init.cc", "FN:44,_Z4initv\nFNDA:2,_Z4initv\n"),
+    });
+
+    EXPECT_TRUE(hasLine(merged, "FNDA:5,_Z4initv")) << merged;
+    EXPECT_TRUE(hasLine(merged, "FNF:1")) << merged;
+    EXPECT_TRUE(hasLine(merged, "FNH:1")) << merged;
+}
+
+TEST(HostDispatchLcovMicrotest, AFunctionNameCarryingACommaSurvives)
+{
+    // Mangled names of templates contain commas, so a split on every comma would truncate the
+    // name and make the same function look like two.
+    const std::string merged = mergeLcovTracefiles({
+        tracefile("/src/init.cc", "FN:7,file.cc:_ZL3fooIiEvT_,S0_\nFNDA:1,file.cc:_ZL3fooIiEvT_,S0_\n"),
+    });
+
+    EXPECT_TRUE(hasLine(merged, "FN:7,file.cc:_ZL3fooIiEvT_,S0_")) << merged;
+    EXPECT_TRUE(hasLine(merged, "FNF:1")) << merged;
+}
+
+TEST(HostDispatchLcovMicrotest, AFunctionSeenAtTwoLinesTakesTheEarlierOne)
+{
+    const std::string merged = mergeLcovTracefiles({
+        tracefile("/src/init.cc", "FN:90,_Z4initv\n"),
+        tracefile("/src/init.cc", "FN:44,_Z4initv\n"),
+    });
+
+    EXPECT_TRUE(hasLine(merged, "FN:44,_Z4initv")) << merged;
+    EXPECT_FALSE(hasLine(merged, "FN:90,_Z4initv")) << merged;
+}
+
+TEST(HostDispatchLcovMicrotest, AWrappedCounterStillReadsAsCovered)
+{
+    // llvm-cov prints counters as unsigned 64-bit and sometimes prints one that has wrapped --
+    // 18446744073709551591 is a counter expression that evaluated below zero. It does not fit a
+    // signed long, and rejecting it as unparseable would turn a covered line into an uncovered
+    // one, which is the one way this merge could understate coverage.
+    const std::string merged =
+        mergeLcovTracefiles({tracefile("/src/init.cc", "DA:18,18446744073709551591\n")});
+
+    EXPECT_TRUE(hasLine(merged, "LH:1")) << merged;
+}
+
+TEST(HostDispatchLcovMicrotest, SummingHugeCountersSaturatesRatherThanWraps)
+{
+    // Two near-maximal counters summed must not come out negative, which would read as
+    // uncovered -- the opposite of what two covering binaries mean.
+    const std::string merged = mergeLcovTracefiles({
+        tracefile("/src/init.cc", "DA:18,9223372036854775807\n"),
+        tracefile("/src/init.cc", "DA:18,9223372036854775807\n"),
+    });
+
+    EXPECT_TRUE(hasLine(merged, "DA:18,9223372036854775807")) << merged;
+    EXPECT_TRUE(hasLine(merged, "LH:1")) << merged;
+}
+
+TEST(HostDispatchLcovMicrotest, MergingTheSameInputTwiceIsByteIdentical)
+{
+    // The tracefile is an artifact a dashboard diffs between runs, so the merge has to be a
+    // function of its inputs alone and not of the order a directory happened to be read in.
+    const std::string one = mergeLcovTracefiles({
+        tracefile("/src/b.cc", "DA:2,1\n"), tracefile("/src/a.cc", "DA:1,1\n")});
+    const std::string two = mergeLcovTracefiles({
+        tracefile("/src/a.cc", "DA:1,1\n"), tracefile("/src/b.cc", "DA:2,1\n")});
+
+    EXPECT_EQ(one, two);
+}
+
+TEST(HostDispatchLcovMicrotest, NothingToMergeIsAnEmptyTracefileNotAMalformedOne)
+{
+    EXPECT_EQ(mergeLcovTracefiles({}), "");
+}
+
+TEST(HostDispatchLcovMicrotest, RecordLinesWithNoSourceFileAreIgnored)
+{
+    // A truncated tracefile (a killed llvm-cov) must not have its orphaned lines attributed to
+    // whichever file happened to be merged before it.
+    const std::string merged = mergeLcovTracefiles({"DA:10,1\n", tracefile("/src/a.cc", "DA:1,1\n")});
+
+    EXPECT_FALSE(hasLine(merged, "DA:10,1")) << merged;
+    EXPECT_TRUE(hasLine(merged, "LF:1")) << merged;
+}
+
+// ── coverage export commands ────────────────────────────────────────
+
+TEST(HostDispatchCoverageMicrotest, ExportNamesOnlyTheBinaryTheProfilesCameFrom)
+{
+    // The pairing is the reason this runs in the dispatcher at all: llvm-cov rejects a profile
+    // read against an object it was not built from, and only the dispatcher knows which binary
+    // produced which profiles.
+    const std::string command = lcovExportCommand("llvm-cov", "/b/rccl-UnitTestsMicroInit",
+                                                  "/c/merged.profdata", "(/test/|nvtx)",
+                                                  "/c/coverage.lcov");
+
+    EXPECT_NE(command.find("'/b/rccl-UnitTestsMicroInit'"), std::string::npos) << command;
+    EXPECT_EQ(command.find("rccl-UnitTestsMicroUtils"), std::string::npos) << command;
+    EXPECT_NE(command.find("-format=lcov"), std::string::npos) << command;
+}
+
+TEST(HostDispatchCoverageMicrotest, EveryProfileInTheBinarysDirectoryIsMerged)
+{
+    // The process-isolated tests fork, so one binary leaves many .profraw behind; merging only
+    // some of them would silently under-report its coverage.
+    const std::string command = profdataMergeCommand(
+        "llvm-profdata", {"/c/a-1.profraw", "/c/a-2.profraw"}, "/c/merged.profdata");
+
+    EXPECT_NE(command.find("'/c/a-1.profraw'"), std::string::npos) << command;
+    EXPECT_NE(command.find("'/c/a-2.profraw'"), std::string::npos) << command;
+    EXPECT_NE(command.find("-o '/c/merged.profdata'"), std::string::npos) << command;
+}
+
+TEST(HostDispatchCoverageMicrotest, APathWithAQuoteInItCannotBreakOutOfTheCommand)
+{
+    // The command is handed to /bin/sh, and the paths in it come from the filesystem rather than
+    // from this process, so a quote in a directory name must stay data. Pinned as the exact
+    // single-quoted form: the dangerous text is still present, but only ever inside quotes.
+    const std::string command =
+        profdataMergeCommand("llvm-profdata", {"/c/a'; rm -rf /; echo '.profraw"}, "/c/m.profdata");
+
+    EXPECT_NE(command.find(R"('/c/a'\''; rm -rf /; echo '\''.profraw')"), std::string::npos)
+        << command;
 }
 
 }  // namespace

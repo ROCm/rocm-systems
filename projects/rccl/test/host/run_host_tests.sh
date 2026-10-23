@@ -361,12 +361,24 @@ do_coverage() {
       continue
     fi
 
-    # Per-binary: merge its own profraw and report against its own object only.
+    # rccl-UnitTestsHostAll already merged and exported every binary it ran, as
+    # part of the run: it is the only thing that knows which profiles came from
+    # which binary, and llvm-cov rejects a profile read against an object it was
+    # not built from. Those binaries are already in host-coverage.lcov, so they
+    # are not added to the union again below. Everything else (rccl-HostUnitTests,
+    # which the front door does not run) is merged and exported here.
+    local from_front_door=0
+    if [ -f "$dir/merged.profdata" ] && [ -f "$dir/coverage.lcov" ]; then
+      from_front_door=1
+    fi
+
     # Guard each llvm invocation: under `set -e` one bad binary would otherwise
     # abort the whole phase mid-loop and discard the rc already accumulated.
     # Degrade instead -- mark the phase failed and move on to the next binary.
-    llvm-profdata merge -sparse "$dir"/*.profraw -o "$dir/merged.profdata" \
-      || { echo "    error: llvm-profdata failed for $name" >&2; rc=1; continue; }
+    if [ "$from_front_door" -eq 0 ]; then
+      llvm-profdata merge -sparse "$dir"/*.profraw -o "$dir/merged.profdata" \
+        || { echo "    error: llvm-profdata failed for $name" >&2; rc=1; continue; }
+    fi
 
     llvm-cov report "$exe" \
       -instr-profile="$dir/merged.profdata" \
@@ -381,18 +393,26 @@ do_coverage() {
       || { echo "    error: llvm-cov show failed for $name" >&2; rc=1; continue; }
 
     # Per-binary lcov tracefile -- the hash-agnostic, line/branch-keyed form that
-    # can be unioned across binaries. Tag it with the binary name so genhtml and
-    # lcov diagnostics are legible.
-    llvm-cov export "$exe" \
-      -instr-profile="$dir/merged.profdata" \
-      --ignore-filename-regex='(/test/|nvtx)' \
-      -format=lcov > "$dir/coverage.lcov" \
-      || { echo "    error: llvm-cov export failed for $name" >&2; rc=1; continue; }
+    # can be unioned across binaries.
+    if [ "$from_front_door" -eq 0 ]; then
+      llvm-cov export "$exe" \
+        -instr-profile="$dir/merged.profdata" \
+        --ignore-filename-regex='(/test/|nvtx)' \
+        -format=lcov > "$dir/coverage.lcov" \
+        || { echo "    error: llvm-cov export failed for $name" >&2; rc=1; continue; }
+      tracefiles+=("$dir/coverage.lcov")
+    fi
 
     echo "    $name text report: $dir/coverage.txt"
     echo "    $name html report: $dir/html/index.html"
-    tracefiles+=("$dir/coverage.lcov")
   done
+
+  # The front door's merge of everything it ran, as one tracefile. Added whole
+  # rather than per binary, so the ~37 binaries behind it are unioned once, by
+  # the thing that ran them, instead of again here.
+  if [ -f "$COVERAGE_DIR/host-coverage.lcov" ]; then
+    tracefiles+=("$COVERAGE_DIR/host-coverage.lcov")
+  fi
 
   if [ "${#tracefiles[@]}" -eq 0 ]; then
     echo "error: no .profraw files found under $COVERAGE_DIR --" >&2

@@ -268,6 +268,39 @@ class CoverageReportingTest(unittest.TestCase):
                 show_cmd[show_cmd.index(str(device_elf)) - 1], "--object"
             )
 
+    def test_host_test_binaries_are_discovered_not_listed(self):
+        # The host binaries compile their unit-under-test into themselves rather
+        # than loading librccl.so, so a profile of theirs is discarded in silence
+        # unless the binary is named as an --object. A hand-kept list drifts and
+        # that silence hides it, so the naming convention is the registry here --
+        # a binary added to test/host needs no change in this file.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            executor, build_dir = self._coverage_executor(root)
+            host_dir = build_dir / "test" / "host"
+            host_dir.mkdir(parents=True)
+            for name in ("rccl-UnitTestsMicroInit", "rccl-UnitTestsMicroBrandNew"):
+                binary = host_dir / name
+                binary.write_bytes(b"object")
+                binary.chmod(0o755)
+            (host_dir / "host_tests.xml").write_text("<testsuites/>")
+
+            recorded = []
+
+            def _record(cmd, *args, **kwargs):
+                recorded.append(list(cmd))
+                return mock.Mock(returncode=0)
+
+            self.assertTrue(self._run_report(executor, _record))
+
+            show_cmd = next(c for c in recorded if "show" in c)
+            for name in ("rccl-UnitTestsMicroInit", "rccl-UnitTestsMicroBrandNew"):
+                path = str(host_dir / name)
+                self.assertIn(path, show_cmd)
+                self.assertEqual(show_cmd[show_cmd.index(path) - 1], "--object")
+            # Only binaries: a report or a log sitting beside them is not an object.
+            self.assertNotIn(str(host_dir / "host_tests.xml"), show_cmd)
+
     def test_host_only_fallback_skips_uninstrumented_device_elf(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

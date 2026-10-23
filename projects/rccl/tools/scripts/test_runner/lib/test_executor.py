@@ -3295,57 +3295,16 @@ class TestExecutor:
         # (p2p.cc/init.cc + oracle TUs from the hipify tree) directly, so their
         # counters live in the binary itself and must be listed as --object for
         # llvm-cov to attribute that coverage.
+        #
+        # Discovered rather than listed. The list this replaces named 43 binaries,
+        # 15 of which no longer existed and 12 of which were missing -- their
+        # coverage was being discarded silently, because a profile whose object is
+        # absent is dropped without a word. The naming convention is the registry,
+        # the same one rccl-UnitTestsHostAll discovers its siblings by, so a new
+        # host binary is picked up here with no change at all.
         host_test_dir = os.path.join(test_dir, "host")
-        for binary in ["rccl-UnitTestsMicro", "rccl-UnitTestsMicroInit",
-                       "rccl-UnitTestsMicroAlloc",
-                       "rccl-UnitTestsMicroAllocator",
-                       "rccl-UnitTestsMicroAmdsmiWrap",
-                       "rccl-UnitTestsMicroApiTrace",
-                       "rccl-UnitTestsMicroArgcheck",
-                       "rccl-UnitTestsMicroBootstrap",
-                       "rccl-UnitTestsMicroCftDevRuntime",
-                       "rccl-UnitTestsMicroCollTrace",
-                       "rccl-UnitTestsMicroCollectives",
-                       "rccl-UnitTestsMicroCore",
-                       "rccl-UnitTestsMicroCpuset",
-                       "rccl-UnitTestsMicroCrypt",
-                       "rccl-UnitTestsMicroDdaColl",
-                       "rccl-UnitTestsMicroDebug",
-                       "rccl-UnitTestsMicroGinHostProxy",
-                       "rccl-UnitTestsMicroLinux",
-                       "rccl-UnitTestsMicroMemManager",
-                       "rccl-UnitTestsMicroMgmtTaskEnq",
-                       "rccl-UnitTestsMicroMnnvl",
-                       "rccl-UnitTestsMicroNcclDevice",
-                       "rccl-UnitTestsMicroOnerank",
-                       "rccl-UnitTestsMicroParam",
-                       "rccl-UnitTestsMicroPlugin",
-                       "rccl-UnitTestsMicroProfiler",
-                       "rccl-UnitTestsMicroProxy",
-                       "rccl-UnitTestsMicroRecorder",
-                       "rccl-UnitTestsMicroRocmwrap",
-                       "rccl-UnitTestsMicroRoctxNvml",
-                       "rccl-UnitTestsMicroRomeModels",
-                       "rccl-UnitTestsMicroStrongstream",
-                       "rccl-UnitTestsMicroTopo",
-                       "rccl-UnitTestsMicroUtils",
-                       "rccl-UnitTestsMicroInit-uncached",
-                       "rccl-UnitTestsMicroInit-faultinj",
-                       "rccl-UnitTestsMicroEnqueue",
-                       "rccl-UnitTestsMicroSymKernels",
-                       "rccl-UnitTestsMicroNvls",
-                       "rccl-UnitTestsMicroGinHost",
-                       "rccl-UnitTestsMicroRomeModels",
-                       "rccl-UnitTestsMicroDda",
-                       "rccl-UnitTestsMicroHostDispatch",
-                       "rccl-UnitTestsMicroTopo",
-                       "rccl-UnitTestsMicroNetIbCastInit",
-                       "rccl-UnitTestsMicroNetIbCastDataPath",
-                       "rccl-UnitTestsMicroNet",
-                       "rccl-UnitTestsMicroMisc",
-                       "rccl-UnitTestsMicroP2pResiliency"]:
-            binary_path = os.path.join(host_test_dir, binary)
-            if os.path.isfile(binary_path):
+        for binary_path in sorted(glob.glob(os.path.join(host_test_dir, "rccl-UnitTests*"))):
+            if os.path.isfile(binary_path) and os.access(binary_path, os.X_OK):
                 object_files.extend(["--object", binary_path])
                 if self.args.verbose:
                     print(f"Found microtest binary: {binary_path}")

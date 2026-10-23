@@ -51,9 +51,8 @@ A new binary is named in **one** place: `rccl_add_micro_binary()` in
 `test/host/CMakeLists.txt`. Everything that runs it finds it from the name alone
 — `run_host_tests.sh` and `configs/ci-precheckin.json` both go through
 [`rccl-UnitTestsHostAll`](#rccl-unittestshostall--one-front-door-for-every-host-binary),
-which discovers its `rccl-UnitTestsMicro*` siblings at run time. (The microtest
-list in `lib/test_executor.py` that llvm-cov reads as `--object` is the one copy
-left; see AICOMRCCL-2097.)
+which discovers its `rccl-UnitTestsMicro*` siblings at run time. (`lib/test_executor.py` discovers the
+same binaries by the same naming convention for its `llvm-cov --object` set.)
 
 ## Units under test
 
@@ -1221,18 +1220,31 @@ first fork (it shards over them), and putting it at the fork sites means there
 is no ordering in `main()` to get right and a fork site added later inherits the
 guarantee by construction.
 
-For coverage, each child inherits `LLVM_PROFILE_FILE` and drops its own
-`.profraw` as usual. What a harness cannot know is which binaries those
-profiles came from — `llvm-cov` needs an `--object` per binary and silently
-discards a profile whose object is missing — so the dispatcher appends every
-binary it ran to `coverage-objects.txt` in the profile directory. That file,
-not a list maintained in the harness, is the object set.
+For coverage, each child profiles into its own directory and the dispatcher
+then **merges the results itself**, writing `host-coverage.lcov` beside the
+profiles. It does the merge because only it knows which profiles came from
+which binary, and that pairing is not optional: `llvm-cov` needs the owning
+binary as `--object`, rejects a profile read against any other as mismatched
+data, and discards in silence a profile whose object is missing. So each child
+is exported on its own (`llvm-profdata merge` then `llvm-cov export
+-format=lcov`, with that child as the only `--object`) and the tracefiles are
+unioned per line and per branch — covered if ANY binary covered it, which is
+the only correct union when the binaries compile the same source under
+different `#define`s and so cannot share a profile at all.
+
+The result is object-free and hash-agnostic, so no consumer has to reconstruct
+the object set to read it. The export is best effort: a run whose tests passed
+does not fail because `llvm-cov` is absent, but every binary left out says so
+by name, since a silently missing tracefile reads downstream as "this code is
+not covered". `RCCL_HOST_COVERAGE_IGNORE_REGEX` overrides what is filtered out
+(by default the tests' own code and vendored nvtx).
 
 Adding a host test binary therefore needs no change outside this directory.
 
 Each child's `LLVM_PROFILE_FILE` is the inherited one with the child's own name
 inserted as a directory component, so the profiles land in
-`<profile dir>/<binary>/` rather than pooling. That is not tidiness: the
+`<profile dir>/<binary>/` rather than pooling — which is also what makes the
+pairing above possible. That is not tidiness: the
 binaries compile some of the same source under different `#define`s, so a shared
 function has a different coverage-mapping hash in each, and a report built from
 one object over a pool of mixed profiles is rejected as mismatched data. The
@@ -1244,7 +1256,9 @@ Both consumers in this tree now go through it: `run_host_tests.sh` runs
 `rccl-UnitTestsHostAll` (plus `rccl-HostUnitTests`, which is not fronted — its
 name carries no `rccl-UnitTestsMicro` prefix to be discovered on), and
 `configs/ci-precheckin.json` has one `unit_tests_host_all` configuration where
-it used to carry 27 per-binary ones.
+it used to carry 27 per-binary ones. `run_host_tests.sh coverage` builds its
+overall report from `host-coverage.lcov` plus the one binary the front door
+does not run, rather than unioning ~38 tracefiles of its own.
 
 ## Standalone host-only build (no full librccl build)
 
