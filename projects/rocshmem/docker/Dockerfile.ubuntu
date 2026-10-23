@@ -20,7 +20,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends software-properties-common \
  && apt-get update \
  && apt-get install -y --no-install-recommends \
-      build-essential autoconf libtool flex bison pkg-config cmake git wget curl ca-certificates \
+      build-essential autoconf automake libtool flex bison pkg-config cmake git wget curl ca-certificates \
       libibverbs-dev ibverbs-utils libibumad-dev libpci-dev librdmacm-dev rdma-core infiniband-diags \
       python3-venv \
 # OPTIONAL: required to use mpirun launcher

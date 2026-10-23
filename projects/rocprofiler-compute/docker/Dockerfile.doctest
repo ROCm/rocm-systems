@@ -6,7 +6,7 @@ WORKDIR /app
 
 # Update package list and install prerequisites
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    software-properties-common cmake locales git \
+    software-properties-common gpg-agent cmake locales git \
     && add-apt-repository ppa:deadsnakes/ppa \
     && apt-get update
 

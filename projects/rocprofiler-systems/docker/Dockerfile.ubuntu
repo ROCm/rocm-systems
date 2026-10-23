@@ -25,7 +25,7 @@ ENV PATH=${HOME}/.local/bin:${PATH}
 
 RUN apt-get update && \
     apt-get dist-upgrade -y && \
-    apt-get install -y --no-install-recommends apt-utils autoconf autotools-dev bash-completion \
+    apt-get install -y --no-install-recommends apt-utils autoconf automake autotools-dev bash-completion \
         build-essential chrpath cmake curl flex gettext git-core gnupg2 iproute2 \
         libgmock-dev libgtest-dev libnuma1 libopenmpi-dev libpapi-dev libpfm4-dev \
         librpm-dev libsqlite3-dev libtool libudev1 lsb-release m4 ninja-build \
