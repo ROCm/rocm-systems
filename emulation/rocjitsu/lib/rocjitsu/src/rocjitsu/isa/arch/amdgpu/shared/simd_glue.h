@@ -1070,20 +1070,9 @@ inline util::native<float> fma_f32_simd_unscoped(util::native<float> a, util::na
   return flush_output ? denormal::flush_value(result) : result;
 }
 
-/// @brief fma_f32_simd_unscoped under its own guest FP environment.
-/// @details For callers that evaluate one chunk at a time. Keeping the scope
-/// inside the operation leaves register callbacks in the caller's state. Callers
-/// that own a whole instruction should scope it once and use the unscoped form.
-inline util::native<float> fma_f32_simd(util::native<float> a, util::native<float> b,
-                                        util::native<float> c, const Wavefront &wf,
-                                        uint32_t omod = 0, bool force_flush = false) {
-  fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
-  return fma_f32_simd_unscoped(a, b, c, wf, omod, force_flush);
-}
-
 /// ADD and MUL share FMA's NaN and pre-packing tininess policy. Callers pass
-/// SUB as ADD of the negated subtrahend. The unscoped form leaves the guest
-/// rounding environment to the caller, as fma_f32_simd_unscoped does.
+/// SUB as ADD of the negated subtrahend. The guest rounding environment is the
+/// caller's, as for fma_f32_simd_unscoped.
 template <fp_mode::Arithmetic operation>
 inline util::native<float> binary_f32_simd_unscoped(util::native<float> a, util::native<float> b,
                                                     const Wavefront &wf, uint32_t omod = 0) {
@@ -1096,13 +1085,6 @@ inline util::native<float> binary_f32_simd_unscoped(util::native<float> a, util:
                                                    U(0x80000000u));
     return fma_f32_simd_unscoped(a, b, zero, wf, omod);
   }
-}
-
-template <fp_mode::Arithmetic operation>
-inline util::native<float> binary_f32_simd(util::native<float> a, util::native<float> b,
-                                           const Wavefront &wf, uint32_t omod = 0) {
-  fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
-  return binary_f32_simd_unscoped<operation>(a, b, wf, omod);
 }
 
 /// @brief Evaluate F16 ADD/MUL with nearest-even destination rounding.
