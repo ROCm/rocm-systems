@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <vector>
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
@@ -107,14 +108,33 @@ static ncclResult_t ncclDiagDetectTransportMask(struct ncclComm* comm, unsigned 
     localPathMask |= 1u << t;
   }
 
-  NCCLCHECK(ncclCalloc(&allPathMasks, comm->nRanks));
-  allPathMasks[comm->rank] = localPathMask;
-  NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, allPathMasks, sizeof(unsigned int)), ret, fail);
+  {
+    // The all-gather below is collective: every peer blocks in it. If the per-rank buffer
+    // allocation fails on one rank only, that rank must NOT return early, or its peers hang in the
+    // all-gather and every later diagnostics collective desyncs. On failure, still join the
+    // collective using a local fallback buffer and surface the allocation error afterwards.
+    ncclResult_t allocRes = ncclCalloc(&allPathMasks, comm->nRanks);
+    std::vector<unsigned int> fallbackMasks;
+    unsigned int* masks = allPathMasks;
+    if (allocRes != ncclSuccess) {
+      fallbackMasks.assign(comm->nRanks, 0u);
+      masks = fallbackMasks.data();
+    }
 
-  if (outUnionMask != nullptr) {
-    unsigned int unionMask = 0;
-    for (int r = 0; r < comm->nRanks; r++) unionMask |= allPathMasks[r];
-    *outUnionMask = unionMask;
+    masks[comm->rank] = localPathMask;
+    NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, masks, sizeof(unsigned int)), ret, fail);
+
+    if (allocRes != ncclSuccess) {
+      // We joined the collective so peers progressed; now report the allocation failure.
+      ret = allocRes;
+      goto fail;
+    }
+
+    if (outUnionMask != nullptr) {
+      unsigned int unionMask = 0;
+      for (int r = 0; r < comm->nRanks; r++) unionMask |= masks[r];
+      *outUnionMask = unionMask;
+    }
   }
 
 fail:
