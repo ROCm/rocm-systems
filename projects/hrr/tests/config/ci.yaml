@@ -79,18 +79,8 @@ backend:
 #
 # Not listed: gfx103x, gfx1150 and gfx1153, which rocJitsu has no config for.
 # A workflow_dispatch families input that names one fails the configure job.
-#
-# The simulator jobs take rocJitsu, with that build's configs, from the newest
-# develop TheRock run that has the rocJitsu artifacts, if those include the
-# launcher (hrr_capture_build.py fetch-rocjitsu). They build it from this tree
-# instead on schedule and workflow_dispatch, when a change touches
-# source_paths or cannot be listed, and when that run lacks the launcher.
 simulator:
   runner: ubuntu-24.04
-  source_paths:
-    - emulation/rocjitsu/
-    - shared/machine-readable-isa/
-    - runtimes/api-headers/
   default_families: [gfx90a, gfx94x, gfx950, gfx110x, gfx1151, gfx120x, gfx125x]
   configs:
     gfx94x: emulation/rocjitsu/configs/gfx942_cdna3_kmd.json

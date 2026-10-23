@@ -100,7 +100,6 @@ jobs:
       simulator_families: ${{ steps.decide.outputs.simulator_families }}
       gpu_families: ${{ steps.decide.outputs.gpu_families }}
       skipped_families: ${{ steps.decide.outputs.skipped_families }}
-      build_rocjitsu: ${{ steps.decide.outputs.build_rocjitsu }}
       reason: ${{ steps.decide.outputs.reason }}
       rocm_sdk_version: ${{ steps.decide.outputs.rocm_sdk_version }}
     steps:
@@ -373,7 +372,6 @@ jobs:
       families: ${{ needs.configure.outputs.families }}
       simulator_families: ${{ needs.configure.outputs.simulator_families }}
       gpu_families: ${{ needs.configure.outputs.gpu_families }}
-      build_rocjitsu: ${{ needs.configure.outputs.build_rocjitsu == 'true' }}
       ignore_test_config: ${{ inputs.ignore_test_config || false }}
 
   summary:

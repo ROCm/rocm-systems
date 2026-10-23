@@ -159,11 +159,6 @@ applies (`scripts/hrr_ci_configure.py`):
 - `capture_label` (`ci:hrr-capture`) runs the GPU suite on a pull request that touches
   an HRR path but no capture path. Adding it restarts the run; adding any other label,
   including TheRock's `ci:gfx...` labels, leaves the run in progress alone.
-- `simulator.source_paths`: the simulator jobs take rocJitsu, with that build's
-  configs, from the newest develop TheRock run that has the rocJitsu artifacts, if
-  those include the launcher. They build it from this tree instead on `schedule` and
-  `workflow_dispatch`, when a change touches one of these paths or cannot be listed,
-  and when that run's artifacts lack the launcher.
 - `families`: the GPU families the suite runs on, as TheRock family keys, on the runner
   TheRock's family matrix names. By default each runs on every event (`pull_request`,
   `push`, `schedule`, `workflow_dispatch`). Per family, `enabled: false` leaves it to

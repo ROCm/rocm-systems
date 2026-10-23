@@ -13,8 +13,6 @@ Writes these GitHub Actions outputs:
   gpu_families      The subset whose backend is gpu.
   skipped_families  JSON list of {"family", "reason"}: the other ci.yaml
                     families, when the suite runs.
-  build_rocjitsu    "true" when the simulator jobs use rocJitsu built from this
-                    tree rather than TheRock's (see builds_rocjitsu).
   reason            One line explaining the decision, shown in the summary.
   rocm_sdk_version  The ROCm SDK the unit job installs.
 
@@ -85,7 +83,6 @@ class Simulator:
     runner: str
     default_families: tuple[str, ...]
     configs: dict[str, str]
-    source_paths: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -108,7 +105,6 @@ class Decision:
     reason: str
     families: list[dict] = field(default_factory=list)
     skipped: list[dict] = field(default_factory=list)
-    build_rocjitsu: bool = False
 
 
 def _mapping(
@@ -169,9 +165,7 @@ def _backend(value) -> Backend:
 
 
 def _simulator(value, families: dict) -> Simulator:
-    value = _mapping(
-        "simulator", value, ("runner", "default_families", "configs"), ("source_paths",)
-    )
+    value = _mapping("simulator", value, ("runner", "default_families", "configs"))
     default_families = _strings("simulator.default_families", value["default_families"])
     unknown = [key for key in default_families if key not in families]
     if unknown:
@@ -195,11 +189,6 @@ def _simulator(value, families: dict) -> Simulator:
         runner=_string("simulator.runner", value["runner"]),
         default_families=default_families,
         configs=parsed,
-        source_paths=(
-            _strings("simulator.source_paths", value["source_paths"])
-            if "source_paths" in value
-            else ()
-        ),
     )
 
 
@@ -330,15 +319,6 @@ def touches_capture(paths: Iterable[str], config: Config) -> bool:
 
 def touches_suite(paths: Iterable[str], config: Config) -> bool:
     return any(_matches(p, config.suite_paths) for p in relevant_paths(paths, config))
-
-
-def builds_rocjitsu(event: str, paths: list[str] | None, config: Config) -> bool:
-    """Whether the simulator jobs use rocJitsu built from this tree rather than
-    TheRock's. schedule and workflow_dispatch test this tree's rocJitsu, as
-    does a change set that touches simulator.source_paths or cannot be listed."""
-    if event in ("schedule", "workflow_dispatch") or paths is None:
-        return True
-    return any(_matches(p, config.simulator.source_paths) for p in paths)
 
 
 def label_matters(label: str, config: Config) -> bool:
@@ -551,15 +531,7 @@ def decide(
         return Decision(
             run_cpu, False, why + "; no GPU family with a runner was selected"
         )
-    simulated = resolved == "simulator"
-    return Decision(
-        run_cpu,
-        True,
-        why,
-        families,
-        skipped,
-        build_rocjitsu=simulated and builds_rocjitsu(event, paths, config),
-    )
+    return Decision(run_cpu, True, why, families, skipped)
 
 
 def is_fork(event: str, head_repo: str, repo: str) -> bool:
@@ -629,7 +601,6 @@ def write_outputs(
         f"simulator_families={_dump(simulator)}",
         f"gpu_families={_dump(gpu)}",
         f"skipped_families={_dump(decision.skipped)}",
-        f"build_rocjitsu={'true' if decision.build_rocjitsu else 'false'}",
         f"reason={decision.reason}",
         f"rocm_sdk_version={rocm_sdk_version}",
     ]
