@@ -49,7 +49,7 @@ RUN if [ "${ROCM_MAJOR}" != "0" ] || [ "${ROCM_MINOR}" != "0" ]; then \
         apt-get install -y --no-install-recommends ./${AMDGPU_DEB} && \
         apt-get update && \
         apt-get install -y --no-install-recommends rocm-dev rccl-dev libpciaccess0 ${EXTRA_PACKAGES} && \
-        apt-get autoclean; \
+        apt-get clean; \
     fi && \
     rm -rf /var/lib/apt/lists/*
 
