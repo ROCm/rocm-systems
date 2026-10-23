@@ -31,6 +31,7 @@ from utils.utils_common import (
     expand_placeholder_ranges,
     normalize_filter_to_str_list,
 )
+from utils.utils_counter_defs import metric_expressions, metric_value_keys
 
 # ------------------------------------------------------------------------------
 # Internal global definitions
@@ -201,7 +202,7 @@ def _build_metric_table_df(
     is_simple_box = data_config.get("cli_style") == "simple_box"
 
     headers: list[str] = ["Metric_ID", data_config["header"]["metric"]]
-    header_keys: set[str] = set(data_config["header"]) - {"metric", "expr"}
+    value_keys = metric_value_keys(data_config)
     if is_simple_box:
         headers.extend(simple_box)
         for key, tile in data_config["header"].items():
@@ -230,26 +231,15 @@ def _build_metric_table_df(
             continue
 
         values: list[Any] = [metric_idx, key]
-        eqn_content: list[Any] = []
-        if is_simple_box:
-            for k, v in entries.items():
-                if k == "expr":
-                    for bv in simple_box.values():
-                        values.append(bv[0] + v + bv[1])
-                    eqn_content.append(v)
-                elif k not in {"coll_level", "alias"} and k in header_keys:
-                    values.append(v)
-        else:
-            for k, v in entries.items():
-                if k not in {"coll_level", "alias"} and k in header_keys:
-                    values.append(v)
-                    eqn_content.append(v)
-        expressions.extend(
-            v for v in eqn_content if isinstance(v, str) and v and v != "None"
-        )
+        for k, v in entries.items():
+            if is_simple_box and k == "expr":
+                values.extend(
+                    prefix + v + suffix for prefix, suffix in simple_box.values()
+                )
+            elif k in value_keys:
+                values.append(v)
+        expressions.extend(metric_expressions(data_config, entries))
 
-        if "alias" in entries:
-            values.append(entries["alias"])
         if "metrics_description" in panel:
             values.append(panel["metrics_description"].get(key, ""))
 
