@@ -1042,6 +1042,17 @@ TEST(ProxyTests, ProxyServiceDoesNotHangOnExternalBadMagic)
             std::thread serviceThread([&]() {
                 ncclProxyService(&proxyState);
             });
+            struct ServiceThreadGuard {
+                volatile uint32_t* abortFlag;
+                std::thread& thread;
+
+                ~ServiceThreadGuard() {
+                    if (thread.joinable()) {
+                        __atomic_store_n(abortFlag, 1, __ATOMIC_RELEASE);
+                        thread.join();
+                    }
+                }
+            } serviceGuard{&abortFlag, serviceThread};
 
             // Let ncclProxyService enter its poll loop before delivering the
             // malformed connection.
