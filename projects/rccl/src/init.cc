@@ -4348,10 +4348,14 @@ static ncclResult_t commDestroySync(struct ncclAsyncJob* job_) {
 
     NCCLCHECKGOTO(ncclCommPollEventCallbacks(comm, true), ret, fail);
     NCCLCHECKGOTO(ncclCommPollCallbacks(comm, false), ret, fail);
+    if (COMPILER_ATOMIC_LOAD(comm->abortFlag, std::memory_order_acquire) != 0) {
+      NCCLCHECKGOTO(ncclCommOrphanPersistentPlans(comm), ret, fail);
+    }
     // And keep polling until all graphs referencing us die.
     while (comm->localPersistentRefs != 0) {
       NCCLCHECKGOTO(ncclCommPollCallbacks(comm, /*waitSome=*/true), ret, fail);
     }
+    ncclCommDropPersistentPlanRefs(comm);
     while (!ncclIntruQueueEmpty(&comm->legacyRegCleanupQueue)) {
       struct ncclCommCallback* cb = ncclIntruQueueDequeue(&comm->legacyRegCleanupQueue);
       if (cb->fn(comm, cb) != ncclSuccess) {
@@ -4545,9 +4549,14 @@ static ncclResult_t commReclaim(struct ncclAsyncJob* job_) {
           /* commRevokeAsync already synced streams and stopped proxy;
            * drain any remaining persistent graph refs and legacy IPC cleanup
            * callbacks before commCleanup runs (mirrors commDestroySync). */
+          if ((ret = ncclCommOrphanPersistentPlans(curIntraComm)) != ncclSuccess) {
+            WARN("commReclaim: reclaiming graph plans failed comm %p (rank = %d) error %d", curIntraComm, curRank,
+                 ret);
+          }
           while (curIntraComm->localPersistentRefs != 0) {
             if ((ret = ncclCommPollCallbacks(curIntraComm, /*waitSome=*/true)) != ncclSuccess) break;
           }
+          if (curIntraComm->localPersistentRefs == 0) ncclCommDropPersistentPlanRefs(curIntraComm);
           while (!ncclIntruQueueEmpty(&curIntraComm->legacyRegCleanupQueue)) {
             struct ncclCommCallback* cb = ncclIntruQueueDequeue(&curIntraComm->legacyRegCleanupQueue);
             if (cb->fn(curIntraComm, cb) != ncclSuccess) {
