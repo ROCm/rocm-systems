@@ -6170,7 +6170,7 @@ TEST_F(DevCommCreateTest, RequirementsFilterFails_ReturnsErrorWithoutQueueing) {
 
 // ---------------------------------------------------------------------------
 // devrGinContextsTotal sizes the per-context resource regions for the largest
-// ginContextCount any active backend could round nGinContexts up to.
+// ginContextCount any active backend could round nGinContextsRequested up to.
 
 TEST(DevrGinContextsTotal, NoActiveBackends_ReturnsRequested) {
   struct ncclGinState ginState{};
