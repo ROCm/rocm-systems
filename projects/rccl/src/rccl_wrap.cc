@@ -1721,11 +1721,16 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
         const size_t arDdaLLMax    = rcclDdaLLThresholdTab(archTable, ncclFuncAllReduce, comm->nRanks);
         const size_t arDdaLL128Max = rcclDdaLL128ThresholdTab(archTable, ncclFuncAllReduce, comm->nRanks);
         // Large comms: VMM ahead of LL two-shot for mid sizes (ddaArVmmFirst*).
+        // Record via the candidate search rather than returning early so that
+        // rcclCandSearch arbitration runs to completion: under CTA_POLICY_ZERO the
+        // preferred mask is RCCL_BACKEND_CE, so an early return would silently
+        // bypass the preferred/fallback warning when CE 2-shot is not yet ready.
         if (rcclDdaArVmmFirstTab(archTable, comm->nRanks, msgBytes, winRegType) &&
             ncclAllReduceDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
-          decision->algo = RCCL_DDA_FABRIC_VMM;
-          decision->nMaxChannels = ncclAllReduceDdaFabricBlocks(comm, count, datatype);
-          return rcclSelectDone("AR", query, decision);
+          rcclCollDecision cand = *decision;
+          cand.algo = RCCL_DDA_FABRIC_VMM;
+          cand.nMaxChannels = ncclAllReduceDdaFabricBlocks(comm, count, datatype);
+          rcclCandSearchRecord(cs, RCCL_BACKEND_DDA, cand);
         }
         // Small-message fast lane: LL protocol (no GPU barrier).
         if (arDdaLLMax > 0 && ncclAllReduceDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype, op)) {

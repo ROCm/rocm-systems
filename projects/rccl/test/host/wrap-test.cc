@@ -6612,6 +6612,31 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstNeedsVmmEligible) {
       });
 }
 
+// Under CTA_POLICY_ZERO the preferred backend is RCCL_BACKEND_CE. The vmmFirst
+// block used to return early, silently bypassing the preferred/fallback warning
+// when CE 2-shot is unavailable (ceARTmpBuf==NULL). After the fix it records via
+// rcclCandSearchRecord so the search arbitrates: VMM becomes the bestFallback, the
+// preferred mask is not satisfied, and the "preferred backend" warning fires.
+TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstFallsBackUnderZeroPolicy) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_Gfx1250VmmFirstFallsBackUnderZeroPolicy",
+      []() {
+        RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_WARN, NCCL_ALL);
+        ArDdaHooks hooks;
+        ArVmmEligible vmmHook;
+        ncclComm* comm = MakeArDdaComm(32);
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        // ceARTmpBuf stays null → CE 2-shot not available → vmmFirst VMM is the
+        // only candidate, but CE is preferred → fallback is used with a warning.
+        std::string warn = RcclUnitTesting::CaptureLog([&]() {
+          EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_VMM, SelectAllReduceDdaAlgo(comm, 8 * kMiB));
+        });
+        EXPECT_NE(std::string::npos, warn.find("preferred backend"))
+            << "warn must fire when CE is preferred but CE 2-shot is unavailable";
+        DeleteCommWithArch(comm);
+      });
+}
+
 // The ReduceScatter selector passes nRanks to the VMM cap: VMM, newly on for gfx1250,
 // runs to nRanks x 2 MiB on a 16-rank comm and not past it; 4 ranks keep it off.
 TEST(WrapMicrotestIsolated, SelectReduceScatter_Gfx1250RankScaledVmm) {
