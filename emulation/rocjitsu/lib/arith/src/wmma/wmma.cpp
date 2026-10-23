@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Dense gfx12 Wave32 FP16 WMMA with FP32 accumulation.
+// Dense gfx12 Wave32 FP16/BF16 WMMA with FP32 accumulation.
 // Stage the complete result before writing to permit input/output aliases.
 
 #include "common/float_formats.h"
@@ -14,9 +14,9 @@
 #include <stdint.h>
 
 // Evaluate one complete matrix tile. Reject unsupported controls before accessing operands.
-int rj_arith_v_wmma_f32_16x16x16_f16_w32_gfx12(uint64_t flags, uint64_t instruction_flags,
-                                               uint32_t *const *d, const uint32_t *const *a,
-                                               const uint32_t *const *b, const uint32_t *const *c) {
+template <bool Bf16>
+static int wmma(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d,
+                const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c) {
   if (instruction_flags) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
@@ -27,6 +27,9 @@ int rj_arith_v_wmma_f32_16x16x16_f16_w32_gfx12(uint64_t flags, uint64_t instruct
   // Eight K elements per source lane; two adjacent elements share a word.
   const auto read = [](const uint32_t *const *v, int index, int k) {
     return uint16_t(v[(k % 8) / 2][index + 16 * (k / 8)] >> (16 * (k % 2)));
+  };
+  const auto convert = [](uint16_t bits) {
+    return Bf16 ? rocjitsu::arith::bf16_to_float(bits) : rocjitsu::arith::f16_to_float(bits);
   };
   for (int row = 0; row < 16; ++row) {
     for (int col = 0; col < 16; ++col) {
@@ -42,13 +45,12 @@ int rj_arith_v_wmma_f32_16x16x16_f16_w32_gfx12(uint64_t flags, uint64_t instruct
             left[j] = read(a, row, physical);
             right[j] = read(b, col, physical);
           }
-          acc_bits = rocjitsu::arith::gfx12_dot_bits<false, 4, false>(left, right, acc_bits);
+          acc_bits = rocjitsu::arith::gfx12_dot_bits<Bf16, 4, false>(left, right, acc_bits);
         }
       } else {
         float acc = rocjitsu::arith::as_float(c[row % 8][lane]);
         for (int k = 0; k < 16; ++k) {
-          acc = std::fma(rocjitsu::arith::f16_to_float(read(a, row, k)),
-                         rocjitsu::arith::f16_to_float(read(b, col, k)), acc);
+          acc = std::fma(convert(read(a, row, k)), convert(read(b, col, k)), acc);
         }
         acc_bits = rocjitsu::arith::as_bits(acc);
       }
@@ -61,4 +63,19 @@ int rj_arith_v_wmma_f32_16x16x16_f16_w32_gfx12(uint64_t flags, uint64_t instruct
     }
   }
   return RJ_ARITH_SUCCESS;
+}
+
+// Evaluate one gfx12 Wave32 F16 tile into FP32 destination registers.
+int rj_arith_v_wmma_f32_16x16x16_f16_w32_gfx12(uint64_t flags, uint64_t instruction_flags,
+                                               uint32_t *const *d, const uint32_t *const *a,
+                                               const uint32_t *const *b, const uint32_t *const *c) {
+  return wmma<false>(flags, instruction_flags, d, a, b, c);
+}
+
+// Evaluate one gfx12 Wave32 BF16 tile into FP32 destination registers.
+int rj_arith_v_wmma_f32_16x16x16_bf16_w32_gfx12(uint64_t flags, uint64_t instruction_flags,
+                                                uint32_t *const *d, const uint32_t *const *a,
+                                                const uint32_t *const *b,
+                                                const uint32_t *const *c) {
+  return wmma<true>(flags, instruction_flags, d, a, b, c);
 }

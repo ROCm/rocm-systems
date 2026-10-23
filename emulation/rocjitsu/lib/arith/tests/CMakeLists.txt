@@ -23,6 +23,24 @@ rj_add_gtest_tests(
     TEST_PREFIX "rj_arith."
 )
 
+add_executable(
+    rj_arith_v_wmma_f32_16x16x16_bf16_w32_gfx12_test
+    wmma/v_wmma_f32_16x16x16_bf16_w32_gfx12_test.cpp
+)
+target_link_libraries(
+    rj_arith_v_wmma_f32_16x16x16_bf16_w32_gfx12_test
+    PRIVATE rj_arith GTest::gtest_main
+)
+target_include_directories(
+    rj_arith_v_wmma_f32_16x16x16_bf16_w32_gfx12_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${rj_arith_source_dir}/src
+)
+rj_configure_target(rj_arith_v_wmma_f32_16x16x16_bf16_w32_gfx12_test WARNINGS)
+rj_add_gtest_tests(
+    rj_arith_v_wmma_f32_16x16x16_bf16_w32_gfx12_test
+    TEST_PREFIX "rj_arith."
+)
+
 add_executable(rj_arith_v_fma_test fp/v_fma_test.cpp)
 target_link_libraries(rj_arith_v_fma_test PRIVATE rj_arith GTest::gtest_main)
 target_include_directories(
@@ -50,6 +68,7 @@ if(RJ_INSTALL_TESTS)
         IN
         ITEMS
             rj_arith_v_wmma_f32_16x16x16_f16_w32_gfx12_test
+            rj_arith_v_wmma_f32_16x16x16_bf16_w32_gfx12_test
             rj_arith_v_fma_test
             rj_arith_cpu_test
     )
