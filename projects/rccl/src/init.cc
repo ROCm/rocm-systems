@@ -4824,6 +4824,18 @@ static ncclResult_t ncclCommInitChildComm(ncclComm_t comm, ncclComm_t* newcomm, 
     NCCLCHECKGOTO(excludeRanksCount > 0 ? ncclSuccess : ncclInvalidArgument, res, exit);
     // excludeRanksList may not be sorted, need to sort it
     qsort(excludeRanksList, excludeRanksCount, sizeof(int), compareInts);
+    if (excludeRanksList[0] < 0 || excludeRanksList[excludeRanksCount - 1] >= comm->nRanks) {
+      WARN("%s: excludeRanksList entries must be in [0, %d)", caller, comm->nRanks);
+      res = ncclInvalidArgument;
+      goto exit;
+    }
+    for (int i = 1; i < excludeRanksCount; i++) {
+      if (excludeRanksList[i] == excludeRanksList[i - 1]) {
+        WARN("%s: excludeRanksList contains rank %d more than once", caller, excludeRanksList[i]);
+        res = ncclInvalidArgument;
+        goto exit;
+      }
+    }
     // ranks in excludeRanksList should not call into this function
     NCCLCHECKGOTO(bsearch(&comm->rank, excludeRanksList, excludeRanksCount, sizeof(int), compareInts) ?
                     ncclInvalidArgument :
