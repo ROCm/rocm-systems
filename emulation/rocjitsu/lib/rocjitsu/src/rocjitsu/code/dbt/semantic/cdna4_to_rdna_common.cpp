@@ -115,8 +115,11 @@ ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_a
   uint16_t shift_dst = vdst;
   if (vdst_aliases_src2) {
     // Need a dead, even-aligned VGPR pair that overlaps neither S0/S2 nor vdst.
-    const auto scratch = liveness.find_free_run(&inst, /*count=*/2, /*search_start=*/0,
+    auto maybe_scratch = liveness.find_free_run(&inst, /*count=*/2, /*search_start=*/0,
                                                 /*base_alignment=*/2);
+    if (maybe_scratch.failed())
+      return ExpandResult::internal_failure("liveness query from a rule marked liveness-free");
+    const auto scratch = maybe_scratch.value();
     if (!scratch)
       return ExpandResult::failed(
           std::string(inst.mnemonic()) +
@@ -134,7 +137,10 @@ ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_a
   // silently clobber a live VCC that the surrounding code still depends on.
   // Allocate a dead ordinary SGPR pair instead and grow the target descriptor to
   // cover it, matching the EXEC-save precedent in the MFMA lowering.
-  const auto carry_sgpr_opt = liveness.find_free_sgpr_pair(&inst);
+  auto maybe_carry_sgpr_opt = liveness.find_free_sgpr_pair(&inst);
+  if (maybe_carry_sgpr_opt.failed())
+    return ExpandResult::internal_failure("liveness query from a rule marked liveness-free");
+  const auto carry_sgpr_opt = maybe_carry_sgpr_opt.value();
   if (!carry_sgpr_opt)
     return ExpandResult::failed(
         std::string(inst.mnemonic()) +

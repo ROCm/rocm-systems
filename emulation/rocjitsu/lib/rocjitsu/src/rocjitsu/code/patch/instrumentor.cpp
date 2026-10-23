@@ -1305,7 +1305,12 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
         result.errors.emplace_back("internal: anchor instruction vanished after validation");
         continue;
       }
-      const RegisterSet &live = liveness.live_before(*anchor);
+      auto maybe_live = liveness.live_before(*anchor);
+      if (maybe_live.failed()) {
+        result.errors.emplace_back("internal: anchor liveness is unavailable");
+        continue;
+      }
+      const RegisterSet &live = *maybe_live.value();
 
       // Set the probe's offset
       TrampolinePlan plan = make_base_plan(site, arch_, trampoline_offset);

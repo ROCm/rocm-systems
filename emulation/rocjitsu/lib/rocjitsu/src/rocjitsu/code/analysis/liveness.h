@@ -16,6 +16,7 @@
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/register_set.h"
+#include "rocjitsu/result.h"
 #include "rocjitsu/vm/amdgpu/vgpr_msb.h"
 
 #include <cstdint>
@@ -192,7 +193,10 @@ struct LivenessAnalysisOptions {
 /// register usage. The backward CFG fixed point and live-before snapshots are
 /// materialized on the first query that needs them. Queries on one analysis
 /// object are not thread-safe because const query methods may populate that
-/// deferred cache.
+/// deferred cache. All FailureOr query methods return failure when analysis was
+/// intentionally omitted. A successful false or nullopt is an ordinary query
+/// answer, not an unavailable-analysis error. Borrowed query results remain valid
+/// for the lifetime of the analysis.
 class LivenessAnalysis {
 public:
   /// @brief Prepare register analysis for one kernel's block set.
@@ -221,9 +225,9 @@ public:
   /// @brief Create a fail-closed sentinel for a scope that does not need liveness.
   ///
   /// @details BinaryTranslator uses this when every matching semantic expansion
-  /// rule is marked liveness-free. Any query on the returned object throws
-  /// std::logic_error so an incorrectly classified rule cannot silently use
-  /// missing liveness data.
+  /// rule is marked liveness-free. Guarded queries return failure so an incorrectly
+  /// classified rule cannot silently use missing liveness data. Successful
+  /// false or nullopt results retain their ordinary query-specific meaning.
   [[nodiscard]] static LivenessAnalysis unavailable();
 
   /// @brief Whether a query has materialized the deferred backward CFG state.
@@ -233,28 +237,31 @@ public:
   [[nodiscard]] bool has_materialized_cfg_liveness() const { return analyzed_; }
 
   /// @brief Block liveness by block object.
-  [[nodiscard]] const BlockLiveness &block_liveness(const BasicBlock &block) const;
+  /// @pre @p block must be one of the BasicBlock objects passed to the constructor.
+  /// @details Passing a block outside that scope violates an internal contract
+  /// and is asserted in assertion-enabled builds. Returns failure when
+  /// the analysis is unavailable, matching live_before().
+  FailureOr<const BlockLiveness *> block_liveness(const BasicBlock &block) const;
 
   /// @brief Whether a live-before snapshot was materialized for @p inst.
   /// @details Returns false when @p inst was not part of the analyzed scope.
-  ///          Throws std::logic_error when the analysis is unavailable,
+  ///          Returns failure when the analysis is unavailable,
   ///          matching live_before().
-  [[nodiscard]] bool has_live_before(const Instruction &inst) const;
+  FailureOr<bool> has_live_before(const Instruction &inst) const;
 
   /// @brief Registers live immediately before @p inst executes.
   ///
   /// @details Ordinary registers only. Special singletons (EXEC/M0/PC/...) are
   /// deliberately excluded: implicit special uses are not yet fully modeled, so
-  /// this analysis does not answer special-register liveness.
-  [[nodiscard]] const RegisterSet &live_before(const Instruction &inst) const;
+  /// this analysis does not answer special-register liveness. Returns failure
+  /// when the analysis is unavailable.
+  FailureOr<const RegisterSet *> live_before(const Instruction &inst) const;
 
   /// @brief Convenience predicate for one register reference. Only meaningful
   /// for ordinary classes; special-register liveness is not tracked (see
   /// live_before()).
-  [[nodiscard]] bool is_live_before(const Instruction &inst, RegisterRef ref) const;
+  FailureOr<bool> is_live_before(const Instruction &inst, RegisterRef ref) const;
 
-  /// @brief gfx1250 VGPR bank selected for @p role before @p inst.
-  /// @returns nullopt when this is not a gfx1250 analysis or the state is ambiguous.
   /// @brief The VGPR_MSB analysis this liveness owns, or nullptr when it has none.
   ///
   /// @details Exposed so a caller that needs the same dataflow does not build a second one over
@@ -264,15 +271,18 @@ public:
     return gfx1250_vgpr_msb_.get();
   }
 
-  [[nodiscard]] std::optional<uint8_t> vgpr_msb_bank_before(const Instruction &inst,
-                                                            amdgpu::VgprMsbRole role) const;
+  /// @brief gfx1250 VGPR bank selected for @p role before @p inst.
+  /// @returns Failure when unavailable; successful nullopt when this is not a
+  /// gfx1250 analysis or the state is ambiguous.
+  FailureOr<std::optional<uint8_t>> vgpr_msb_bank_before(const Instruction &inst,
+                                                         amdgpu::VgprMsbRole role) const;
 
   /// @brief Whether statically decoded operands cover every VGPR access in the scope.
   ///
   /// @details False when relative addressing or runtime GPR indexing can redirect
   /// an encoded VGPR operand. Transformations that compare or reuse physical
   /// VGPR ranges must fail closed when this query returns false.
-  [[nodiscard]] bool global_vgpr_usage_is_complete() const;
+  FailureOr<bool> global_vgpr_usage_is_complete() const;
 
   /// @brief Find a VGPR tuple that no instruction in the kernel reads or writes.
   ///
@@ -293,7 +303,7 @@ public:
   /// @param base_alignment Required tuple-base alignment.
   /// @param available_count Exclusive upper bound imposed by the current
   ///        descriptor allocation.
-  [[nodiscard]] std::optional<uint16_t> find_globally_unused_vgpr_run(
+  FailureOr<std::optional<uint16_t>> find_globally_unused_vgpr_run(
       const Instruction *inst, uint16_t count, uint16_t search_start = 0,
       uint16_t base_alignment = 1,
       uint16_t available_count = static_cast<uint16_t>(REGISTER_SET_MAX_VGPRS)) const;
@@ -308,20 +318,20 @@ public:
   /// liveness for a power-of-two-aligned dead run that is also encodable for
   /// the target instruction. Runs wider than a RegisterRef can name (255) fail
   /// closed, since the search tests a candidate run as one RegisterRef.
-  [[nodiscard]] std::optional<uint16_t> find_free_run(const Instruction *inst, uint16_t count,
-                                                      uint16_t search_start = 0,
-                                                      uint16_t base_alignment = 1) const;
+  FailureOr<std::optional<uint16_t>> find_free_run(const Instruction *inst, uint16_t count,
+                                                   uint16_t search_start = 0,
+                                                   uint16_t base_alignment = 1) const;
 
   /// @brief Find an even-aligned dead SGPR pair immediately before an instruction.
   ///
   /// @details Even alignment is required for pair operations such as saving EXEC
   /// with an s_mov_b64-style scalar move.
-  [[nodiscard]] std::optional<uint16_t> find_free_sgpr_pair(const Instruction *inst,
-                                                            uint16_t search_start = 0) const;
+  FailureOr<std::optional<uint16_t>> find_free_sgpr_pair(const Instruction *inst,
+                                                         uint16_t search_start = 0) const;
 
   /// @brief Find one dead SGPR immediately before an instruction.
-  [[nodiscard]] std::optional<uint16_t> find_free_sgpr(const Instruction *inst,
-                                                       uint16_t search_start = 0) const;
+  FailureOr<std::optional<uint16_t>> find_free_sgpr(const Instruction *inst,
+                                                    uint16_t search_start = 0) const;
 
 private:
   /// @brief Tag selecting the unavailable sentinel constructor.
@@ -331,11 +341,11 @@ private:
   explicit LivenessAnalysis(UnavailableTag);
 
   /// @brief Reject a query when this object is the unavailable sentinel.
-  /// @throws std::logic_error if liveness data was intentionally not built.
-  void require_available() const;
+  /// @returns Failure if liveness data was intentionally not built.
+  Result require_available() const;
 
   /// @brief Materialize CFG live-before state on the first query that needs it.
-  void ensure_analyzed() const;
+  Result ensure_analyzed() const;
 
   /// @brief Collect whole-kernel register use without running backward dataflow.
   void collect_global_register_usage(KernelBlockScope blocks, std::span<const uint8_t> text,

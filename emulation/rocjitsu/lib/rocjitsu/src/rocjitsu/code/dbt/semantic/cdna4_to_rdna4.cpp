@@ -149,8 +149,10 @@ ExpandResult lower_mfma_f32_16x16x16_f16(const Instruction &inst, const Liveness
                                     std::to_string(src0) + " src1=" + std::to_string(src1),
                                 {"Add an MFMA lowering path for scalar or inline-constant "
                                  "matrix operands."});
-
-  auto exec_save_opt = liveness.find_free_sgpr_pair(&inst);
+  auto maybe_exec_save_opt = liveness.find_free_sgpr_pair(&inst);
+  if (maybe_exec_save_opt.failed())
+    return ExpandResult::internal_failure("liveness query from a rule marked liveness-free");
+  const auto exec_save_opt = maybe_exec_save_opt.value();
   if (!exec_save_opt)
     return ExpandResult::failed(
         std::string(inst.mnemonic()) +
@@ -158,8 +160,10 @@ ExpandResult lower_mfma_f32_16x16x16_f16(const Instruction &inst, const Liveness
         {"Reduce SGPR pressure, improve liveness, or add scalar spill support for semantic "
          "lowerings."});
   const uint8_t kExecSave = static_cast<uint8_t>(*exec_save_opt);
-
-  auto tmp_sgpr_opt = liveness.find_free_sgpr(&inst, kExecSave + 2);
+  auto maybe_tmp_sgpr_opt = liveness.find_free_sgpr(&inst, kExecSave + 2);
+  if (maybe_tmp_sgpr_opt.failed())
+    return ExpandResult::internal_failure("liveness query from a rule marked liveness-free");
+  const auto tmp_sgpr_opt = maybe_tmp_sgpr_opt.value();
   if (!tmp_sgpr_opt)
     return ExpandResult::failed(
         std::string(inst.mnemonic()) +
@@ -167,8 +171,10 @@ ExpandResult lower_mfma_f32_16x16x16_f16(const Instruction &inst, const Liveness
         {"Reduce SGPR pressure, improve liveness, or add scalar spill support for semantic "
          "lowerings."});
   const uint8_t kTmpSgpr = static_cast<uint8_t>(*tmp_sgpr_opt);
-
-  auto free_reg = liveness.find_free_run(&inst, 1, vdst + 4);
+  auto maybe_free_reg = liveness.find_free_run(&inst, 1, vdst + 4);
+  if (maybe_free_reg.failed())
+    return ExpandResult::internal_failure("liveness query from a rule marked liveness-free");
+  const auto free_reg = maybe_free_reg.value();
   if (!free_reg)
     return ExpandResult::failed(
         std::string(inst.mnemonic()) +

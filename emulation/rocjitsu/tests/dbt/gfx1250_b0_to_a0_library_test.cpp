@@ -196,6 +196,26 @@ TEST(Gfx1250B0ToA0Library, ReportsTranslatorExpandFailedAndRequiredWork) {
   EXPECT_NE(required->message.find("different barrier id"), std::string::npos);
 }
 
+TEST(Gfx1250B0ToA0Library, PreservesLivenessContractDiagnostic) {
+  const std::vector<rocjitsu::TranslationDiagnostic> source = {{
+      .severity = rocjitsu::DiagnosticSeverity::Error,
+      .kind = rocjitsu::DiagnosticKind::InternalError,
+      .guest_offset = std::nullopt,
+      .output_offset = std::nullopt,
+      .mnemonic = "",
+      .message = "liveness query from a rule marked liveness-free",
+      .required_work = {},
+  }};
+  std::vector<CapturedDiagnostic> captured;
+
+  rocjitsu::emit_gfx1250_b0_to_a0_diagnostics(capture_diagnostic, &captured, source);
+
+  ASSERT_EQ(captured.size(), 1u);
+  EXPECT_EQ(captured[0].severity, "error");
+  EXPECT_EQ(captured[0].kind, "translation-exception");
+  EXPECT_EQ(captured[0].message, source[0].message);
+}
+
 TEST(Gfx1250B0ToA0Library, FansOutRequiredWorkAsCallbackViews) {
   const std::vector<rocjitsu::TranslationDiagnostic> source = {{
       .severity = rocjitsu::DiagnosticSeverity::Error,

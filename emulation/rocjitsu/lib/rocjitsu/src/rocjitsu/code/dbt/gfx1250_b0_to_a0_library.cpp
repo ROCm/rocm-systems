@@ -68,6 +68,8 @@ const char *diagnostic_kind_name(rocjitsu::DiagnosticKind kind) noexcept {
     return kKindTranslatorKernelSkipped;
   case rocjitsu::DiagnosticKind::ResidualRewrite:
     return kKindTranslatorResidualRewrite;
+  case rocjitsu::DiagnosticKind::InternalError:
+    return kKindTranslationException;
   }
   return "unknown";
 }
@@ -175,12 +177,15 @@ rj_gfx1250_b0_to_a0_translate(const void *source_elf, size_t source_size, uint8_
     // see, and it never reaches the caller if reporting is conditional on the
     // object being undispatchable.
     rocjitsu::emit_gfx1250_b0_to_a0_diagnostics(diagnostic_callback, user_data, result.diagnostics);
+    // Preserve the status used when a liveness contract failure was thrown.
+    if (rocjitsu::has_diagnostic_kind(result.diagnostics, rocjitsu::DiagnosticKind::InternalError))
+      return ROCJITSU_STATUS_ERROR;
     // A translation that ran to completion and produced nothing dispatchable is a
     // statement about the input, not about this run: repeating it reaches the same
     // conclusion. Reporting it as such is what lets a caller distinguish it from
     // the environmental failures below and cache the verdict rather than
-    // rediscovering it. ROCJITSU_STATUS_ERROR is left to mean the translator threw,
-    // which carries no such promise.
+    // rediscovering it. Internal translator errors and exceptions carry no such
+    // promise and retain ROCJITSU_STATUS_ERROR.
     if (result.elf_bytes.empty() || !result.dispatchable()) {
       if (result.diagnostics.empty())
         emit_diagnostic(diagnostic_callback, user_data, kSeverityError, kKindResultNotDispatchable,
