@@ -99,8 +99,9 @@ constexpr int RJ_ARITH_ERROR_UNSUPPORTED_REGISTER_STATE = 4;
 
 // EXEC-dependent Wave32 entry points use a 32-bit exec_mask (Wave64 uses 64 bits).
 // Scalar, pseudo-scalar, WMMA and SWMMAC instructions ignore EXEC and omit exec_mask.
-// Matrix instructions read and write all lanes. Each Wave32 VGPR pointer names 32
-// contiguous uint32_t lane words. Pointer arrays and backing storage must be valid.
+// Matrix instructions read and write all lanes. Each _w32 VGPR pointer names 32
+// contiguous uint32_t lane words; each _w64 pointer names 64. Pointer arrays and
+// backing storage must be valid.
 // Whole VGPRs may alias; distinct VGPR addresses must not overlap. Sources are
 // conceptually read before writes. Inactive destination lanes and all destinations
 // on error are unchanged. Arithmetic assumes the default host FP environment:
