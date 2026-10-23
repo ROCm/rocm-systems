@@ -388,6 +388,9 @@ stream:
   Unit_hipStreamAddCallback_MultipleThreads:
     <<: *level_default
     tags: [callback, P1]
+  Unit_hipStreamSynchronize_ConcurrentSubmitFromOtherThread:
+    <<: *level_default
+    tags: [synchronization, P1]
   Unit_hipStreamWaitEvent_Negative:
     <<: *level_default
     tags: [synchronization, P1]
