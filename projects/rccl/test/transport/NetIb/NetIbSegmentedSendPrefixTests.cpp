@@ -123,7 +123,7 @@ TEST_F(NetIbSegmentedSendPrefix, FirstQpRejectsWholeChainFreesRequest) {
   g_post.failQpNum = qps[0].qp_num;
   g_post.mode = PostFail::Head;
   void* request = nullptr;
-  Isend(&request);
+  EXPECT_EQ(Isend(&request), ncclSuccess);
 
   EXPECT_EQ(g_post.calls, 1);
   EXPECT_EQ(g_post.failedCallWrs, 2);
@@ -139,7 +139,7 @@ TEST_F(NetIbSegmentedSendPrefix, FirstQpLosesSignaledTailKeepsOnlyThatEvent) {
   g_post.failQpNum = qps[0].qp_num;
   g_post.mode = PostFail::Tail;
   void* request = nullptr;
-  Isend(&request);
+  EXPECT_EQ(Isend(&request), ncclSuccess);
 
   EXPECT_EQ(g_post.calls, 1);
   EXPECT_EQ(request, &comm->base.reqs[0]);
@@ -153,7 +153,7 @@ TEST_F(NetIbSegmentedSendPrefix, SecondQpRejectsWholeChainKeepsFirstQpEvent) {
   g_post.failQpNum = qps[1].qp_num;
   g_post.mode = PostFail::Head;
   void* request = nullptr;
-  Isend(&request);
+  EXPECT_EQ(Isend(&request), ncclSuccess);
 
   EXPECT_EQ(g_post.calls, 2);
   EXPECT_EQ(g_post.failedCallWrs, 2);
