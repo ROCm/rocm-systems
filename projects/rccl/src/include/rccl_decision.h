@@ -64,7 +64,7 @@ enum : rcclBackendMask_t {
 // CTAPolicy and any force-CE env vars.  RCCL_BACKEND_ALL means "no preference"
 // (zero overhead on the default path).  Defined in rccl_wrap.cc.
 struct ncclComm;
-rcclBackendMask_t rcclPreferredBackends(const struct ncclComm* comm);
+rcclBackendMask_t rcclAllReducePreferredBackends(const struct ncclComm* comm);
 
 // Working state for the single-pass preferred/fallback backend search used by
 // rcclSelectXxx().  Each selector initialises its own instance; the preferred
