@@ -824,6 +824,12 @@ static ncclResult_t ncclIbSenderQpsToRts(ncclIbSendComm* comm, struct ncclIbConn
     ncclIbSendCommDev* commDev = &comm->devs[localQp->devIndex];
     ncclIbDev* ibDev = &ncclIbDevs[commDev->base.ibDevN];
     ncclIbQpInfo* remQpInfo = &remMeta->qpInfo[qpIndex];
+    // RCCL: the peer sends devIndex, and it indexes remDevs and the RMA rkey tables.
+    if (remQpInfo->devIndex < 0 || remQpInfo->devIndex >= NCCL_IB_MAX_DEVS_PER_NIC) {
+      WARN("NET/IB: peer QP %d reports device index %d, expected [0, %d)", qpIndex, remQpInfo->devIndex,
+           NCCL_IB_MAX_DEVS_PER_NIC);
+      return ncclInternalError;
+    }
     ncclIbDevInfo* remDevInfo = &remMeta->devs[remQpInfo->devIndex];
 
     localQp->remDevIdx = remQpInfo->devIndex;
@@ -1267,6 +1273,12 @@ static ncclResult_t ncclIbReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
     ncclIbQpInfo* remQpInfo = &remMeta->qpInfo[qpIndex];
     ncclIbQpInfo* localQpInfo = &meta->qpInfo[qpIndex];
     int remDevIndex = remQpInfo->devIndex;
+    // RCCL: the peer sends devIndex, and it indexes remDevs and the RMA rkey tables.
+    if (remDevIndex < 0 || remDevIndex >= NCCL_IB_MAX_DEVS_PER_NIC) {
+      WARN("NET/IB: peer QP %d reports device index %d, expected [0, %d)", qpIndex, remDevIndex,
+           NCCL_IB_MAX_DEVS_PER_NIC);
+      return ncclInternalError;
+    }
     ncclIbDevInfo* remDevInfo = &remMeta->devs[remDevIndex];
     ncclIbQp* localQp = &rComm->base.qps[qpIndex];
 

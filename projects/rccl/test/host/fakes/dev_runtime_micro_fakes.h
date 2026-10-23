@@ -61,6 +61,8 @@ extern std::function<ncclResult_t(struct ncclComm*, void*, size_t, void*[NCCL_GI
                                   ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS],
                                   uint32_t[NCCL_GIN_MAX_ACTIVE_BACKENDS], int, bool, int)>
     g_devrGinRegister;
+// dmabufFd of each ncclGinRegister call, in order; cleared by ResetDevRuntimeMicroFakes.
+extern std::vector<int> g_devrGinRegisterDmabufFds;
 extern std::function<ncclResult_t(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS],
                                   uint32_t const[NCCL_GIN_MAX_ACTIVE_BACKENDS])>
     g_devrGinDeregister;

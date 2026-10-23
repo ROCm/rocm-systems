@@ -542,9 +542,14 @@ static ncclResult_t symMemoryMapLsaTeam(struct ncclComm* comm, struct ncclDevrMe
     maxSegments = std::max(maxSegments, segmentCounts[rank]);
   }
 
+  // RCCL: rank-local owner-fd failures are returned after the intra-node barrier so peers do not wait on this rank.
+  ncclResult_t ownerFdRet = ncclSuccess;
+
   NCCLCHECKGOTO(ncclCalloc(&messages, (size_t)devr->lsaSize * maxSegments), ret, fail);
-  NCCLCHECKGOTO(ncclCalloc(&localHostFds, numSegments), ret, fail);
-  for (int segment = 0; segment < numSegments; segment++) localHostFds[segment] = -1;
+  // RCCL: without this table the rank only skips offering its own fd, so the allgather still runs.
+  if (ncclCalloc(&localHostFds, numSegments) == ncclSuccess) {
+    for (int segment = 0; segment < numSegments; segment++) localHostFds[segment] = -1;
+  }
 
   for (int segment = 0; segment < numSegments; segment++) {
     symLsaMessage* msg = messages + devr->lsaSelf * maxSegments + segment;
@@ -558,7 +563,7 @@ static ncclResult_t symMemoryMapLsaTeam(struct ncclComm* comm, struct ncclDevrMe
            devr->lsaSelf, segment, msg->type, numSegments, msg->segmentSize, msg->memHandle);
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
       // RCCL: imported host handles fail this export. The creating rank's fd is what GIN can register.
-      if (ncclSymIsHostSegment(msg->type) &&
+      if (localHostFds != nullptr && ncclSymIsHostSegment(msg->type) &&
           ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR &&
           mem->memHandles[segment] != 0 && CUPFN(cuMemExportToShareableHandle) != nullptr) {
         int fd = -1;
@@ -605,14 +610,18 @@ static ncclResult_t symMemoryMapLsaTeam(struct ncclComm* comm, struct ncclDevrMe
         }
       }
       // RCCL: a rank that exported its own fd registers that fd. Other ranks import the first exporter.
-      if (segment < numSegments && localHostFds[segment] >= 0) {
-        if (mem->hostOwnerFds == nullptr) {
-          NCCLCHECKGOTO(ncclCalloc(&mem->hostOwnerFds, mem->numSegments), ret, fail);
-          for (int s = 0; s < mem->numSegments; s++) mem->hostOwnerFds[s] = -1;
+      if (segment < numSegments && localHostFds != nullptr && localHostFds[segment] >= 0) {
+        if (mem->hostOwnerFds == nullptr && ownerFdRet == ncclSuccess) {
+          ownerFdRet = ncclCalloc(&mem->hostOwnerFds, mem->numSegments);
+          if (ownerFdRet == ncclSuccess) {
+            for (int s = 0; s < mem->numSegments; s++) mem->hostOwnerFds[s] = -1;
+          }
         }
-        mem->hostOwnerFds[segment] = localHostFds[segment];
-        localHostFds[segment] = -1;
-        INFO(NCCL_REG, "Symmetric window segment %d: NIC registration uses the local host allocation fd", segment);
+        if (mem->hostOwnerFds != nullptr) {
+          mem->hostOwnerFds[segment] = localHostFds[segment];
+          localHostFds[segment] = -1;
+          INFO(NCCL_REG, "Symmetric window segment %d: NIC registration uses the local host allocation fd", segment);
+        }
       } else {
         int exporter = -1;
         for (int r = 0; r < devr->lsaSize; r++) {
@@ -623,10 +632,8 @@ static ncclResult_t symMemoryMapLsaTeam(struct ncclComm* comm, struct ncclDevrMe
           }
         }
         // RCCL: no fallback to a non-exporter. Its proxy would repeat the failed export and never reply.
-        if (exporter >= 0) {
-          NCCLCHECKGOTO(symMemoryGetHostOwnerFd(comm, mem, segment, exporter,
-                                                messages + exporter * maxSegments + segment),
-                        ret, fail);
+        if (exporter >= 0 && ownerFdRet == ncclSuccess) {
+          ownerFdRet = symMemoryGetHostOwnerFd(comm, mem, segment, exporter, messages + exporter * maxSegments + segment);
         }
       }
     }
@@ -654,6 +661,7 @@ static ncclResult_t symMemoryMapLsaTeam(struct ncclComm* comm, struct ncclDevrMe
     NCCLCHECKGOTO(bootstrapIntraNodeBarrier(comm->bootstrap, devr->lsaRankList, devr->lsaSelf, devr->lsaSize, 0xbeef),
                   ret, fail);
   }
+  NCCLCHECKGOTO(ownerFdRet, ret, fail);
 leave:
   if (localHostFds != nullptr) { // RCCL: close host fds this rank exported but did not keep.
     for (int s = 0; s < numSegments; s++) {
@@ -900,9 +908,11 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
     return ncclSuccess;
   }
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  // RCCL: one HIP DMA-BUF covers only the first segment; with =0 fail closed instead of a partial MR.
-  if (mem->maxGlobalNumSegments > 1 && !mem->globalHasSysmemSegment && !ncclParamMultiSegmentRegister()) {
-    WARN("Window %p spans %d physical segments; GIN needs NCCL_MULTI_SEGMENT_REGISTER=1 to register it",
+  // RCCL: one HIP DMA-BUF covers only the first segment; fail closed unless the backend registers per segment.
+  if (mem->maxGlobalNumSegments > 1 && !mem->globalHasSysmemSegment &&
+      !rcclDevrGinRegistersMultiSegment(comm, mem->minGlobalNumSegments, mem->maxGlobalNumSegments)) {
+    WARN("Window %p spans %d physical segments; GIN registers it only with NCCL_MULTI_SEGMENT_REGISTER=1 on the "
+         "proxy backend over IB",
          mem->primaryAddr, mem->maxGlobalNumSegments);
     ret = ncclInvalidUsage;
     goto fail;
@@ -918,7 +928,10 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
     int ptrType;
     bool needDmabuf;
-    if (hostOwnerFd >= 0) cuMemLocType = static_cast<CUmemLocationType>(CU_MEM_LOCATION_TYPE_HOST_NUMA);
+#if NCCL_CUMEM_HOST_GATE
+    // RCCL: an owner fd marks an imported host segment, which reads as device here; record it as host.
+    if (hostOwnerFd >= 0) cuMemLocType = hipMemLocationTypeHost;
+#endif
     NCCLCHECKGOTO(
         rcclDevrGinSegmentRegType(mem->globalHasSysmemSegment, mem->maxGlobalNumSegments, &ptrType, &needDmabuf),
         ret, fail);
