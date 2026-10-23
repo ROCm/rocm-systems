@@ -55,6 +55,7 @@ enum sqtt_token_reg_t
     COMPUTE_PGM_RSRC1 = 0x12,
     COMPUTE_PGM_RSRC2,
     COMPUTE_PGM_RSRC3 = 0x2D,
+    COMPUTE_DISPATCH_END = 0x7D,
     COMPUTE_NOWHERE = 0x7F
 };
 
@@ -83,7 +84,8 @@ struct occupancy_info_t : public rocprofiler_thread_trace_decoder_occupancy_t
         uint64_t pipe,
         uint64_t is_ext,
         uint64_t wg,
-        uint64_t cluster = 0
+        uint64_t cluster = 0,
+        uint64_t dispatch_id = 0
     )
     {
         this->pc = pc;
@@ -98,6 +100,7 @@ struct occupancy_info_t : public rocprofiler_thread_trace_decoder_occupancy_t
         this->is_ext = is_ext;
         this->workgroup_id = wg & 0x7F;
         this->cluster_id = cluster & 0x1F;
+        this->dispatch_id = dispatch_id & 0x3FF;
         this->_rsvd = 0;
     }
     occupancy_info_t(
@@ -111,7 +114,8 @@ struct occupancy_info_t : public rocprofiler_thread_trace_decoder_occupancy_t
         uint64_t pipe,
         uint64_t is_ext,
         uint64_t wg,
-        uint64_t cluster = 0
+        uint64_t cluster = 0,
+        uint64_t dispatch_id = 0
     )
     {
         this->pc = pc;
@@ -126,6 +130,7 @@ struct occupancy_info_t : public rocprofiler_thread_trace_decoder_occupancy_t
         this->is_ext = is_ext;
         this->workgroup_id = wg & 0x7F;
         this->cluster_id = cluster & 0x1F;
+        this->dispatch_id = dispatch_id & 0x3FF;
         this->_rsvd = 0;
     }
 };
@@ -344,7 +349,7 @@ public:
     uint64_t counter_frequency{0};
 
     bool bIsROCMFormat = false;
-    int userdata_state{};
+    PipeArray<int> userdata_states{};
     int tt_version{0};
 
     CowPtr<std::vector<address_range_t>> active_codeobjs{};
@@ -417,6 +422,11 @@ public:
     bool IsUserdata2(size_t addr) { return addr == USERDATA_ADDR_2; }
     bool IsUserdata3(size_t addr) { return addr == USERDATA_ADDR_3; }
 
+    CSRegisterHandler()
+    {
+        for (auto& me : userdata_states) me.fill(ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_LAST);
+    }
+
     ~CSRegisterHandler() = default;
 
     template <typename TokenType> void UpdateRegCS(const TokenType& token)
@@ -446,13 +456,13 @@ public:
 
         if (!bIsROCMFormat && isUserdataHeader(token))
         {
-            userdata_state = ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_LAST;
             bIsROCMFormat = true;
             return {};
         }
 
         if (!bIsROCMFormat) return {};
 
+        auto& userdata_state = userdata_states.at_reg(token);
         if (userdata_state == WAIT_FOR_HEADER)
         {
             auto statechange = isUserdataState(token);
@@ -571,6 +581,11 @@ public:
     template <typename TokenType> pcinfo_t get_wave_start(const TokenType& token)
     {
         return ToPcV2(table, (wave_start_addr.at_reg(token) << 8) & BITMASK);
+    }
+
+    template <typename TokenType> uint64_t get_current_pkt_addr(const TokenType& token)
+    {
+        return dispatch_pkt_addr.at_reg(token);
     }
 
     pcinfo_t get_wave_start_delayed(uint64_t addr) { return ToPcV2(table_from_start, addr); }
