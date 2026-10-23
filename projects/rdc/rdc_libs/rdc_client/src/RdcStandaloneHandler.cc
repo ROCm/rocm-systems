@@ -164,21 +164,24 @@ rdc_status_t RdcStandaloneHandler::rdc_job_get_stats(const char job_id[64],
   rdc_status_t err_status = error_handle(status, reply.status());
   if (err_status != RDC_ST_OK) return err_status;
 
+  // Count the entries the reply carries, not the counts it states.
   if (reply.gpus_size() > RDC_MAX_NUM_GPUS_PER_JOB) {
     return RDC_ST_BAD_PARAMETER;
   }
-  if (reply.num_processes() > RDC_MAX_NUM_PROCESSES_STATUS) {
+  if (reply.processes_size() > RDC_MAX_NUM_PROCESSES_STATUS) {
     return RDC_ST_BAD_PARAMETER;
   }
 
-  p_job_info->num_gpus = reply.num_gpus();
+  // Leave no entries of an earlier call past the ones this reply fills.
+  *p_job_info = {};
+  p_job_info->num_gpus = reply.gpus_size();
   copy_gpu_usage_info(reply.summary(), &(p_job_info->summary));
   for (int i = 0; i < reply.gpus_size(); i++) {
     copy_gpu_usage_info(reply.gpus(i), &(p_job_info->gpus[i]));
   }
 
-  p_job_info->num_processes = reply.num_processes();
-  for (uint32_t i = 0; i < reply.num_processes(); i++) {
+  p_job_info->num_processes = reply.processes_size();
+  for (int i = 0; i < reply.processes_size(); i++) {
     const auto& proc_msg = reply.processes(i);
     p_job_info->processes[i].pid = proc_msg.pid();
 
@@ -437,10 +440,11 @@ rdc_status_t RdcStandaloneHandler::rdc_group_get_all_ids(rdc_gpu_group_t group_i
   rdc_status_t err_status = error_handle(status, reply.status());
   if (err_status != RDC_ST_OK) return err_status;
 
-  *count = reply.group_ids_size();
-  if (*count >= RDC_MAX_NUM_GROUPS) {
+  // RDC holds up to RDC_MAX_NUM_GROUPS groups.
+  if (reply.group_ids_size() > RDC_MAX_NUM_GROUPS) {
     return RDC_ST_MAX_LIMIT;
   }
+  *count = reply.group_ids_size();
   for (uint32_t i = 0; i < *count; i++) {
     group_id_list[i] = reply.group_ids(i);
   }
@@ -462,10 +466,11 @@ rdc_status_t RdcStandaloneHandler::rdc_group_field_get_all_ids(
   rdc_status_t err_status = error_handle(status, reply.status());
   if (err_status != RDC_ST_OK) return err_status;
 
-  *count = reply.field_group_ids_size();
-  if (*count >= RDC_MAX_NUM_FIELD_GROUPS) {
+  // RDC holds up to RDC_MAX_NUM_FIELD_GROUPS field groups.
+  if (reply.field_group_ids_size() > RDC_MAX_NUM_FIELD_GROUPS) {
     return RDC_ST_MAX_LIMIT;
   }
+  *count = reply.field_group_ids_size();
   for (uint32_t i = 0; i < *count; i++) {
     field_group_id_list[i] = reply.field_group_ids(i);
   }
@@ -863,11 +868,12 @@ rdc_status_t RdcStandaloneHandler::rdc_policy_get(rdc_gpu_group_t group_id, uint
   rdc_status_t err_status = error_handle(status, reply.status());
   if (err_status != RDC_ST_OK) return err_status;
 
-  auto response = reply.response();
-  uint32_t policy_count = response.count();
-  if (policy_count > RDC_MAX_POLICY_SETTINGS) {
+  const auto& response = reply.response();
+  // Count the policies the reply carries, not the count it states.
+  if (response.policies_size() > RDC_MAX_POLICY_SETTINGS) {
     return RDC_ST_BAD_PARAMETER;
   }
+  const uint32_t policy_count = response.policies_size();
 
   for (uint32_t i = 0; i < policy_count; ++i) {
     const ::rdc::Policy& policy = response.policies(i);

@@ -1279,11 +1279,13 @@ rdc_status_t rdc_group_gpu_get_info(rdc_handle_t p_rdc_handle, rdc_gpu_group_t p
  *  @param[in] p_rdc_handle The RDC handler.
  *
  *  @param[out] group_id_list Array reference to fill GPU group
- *  ids in the system.
+ *  ids in the system, of ::RDC_MAX_NUM_GROUPS entries.
  *
  *  @param[out] count Number of GPU group returned in group_id_list.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_MAX_LIMIT there are more than ::RDC_MAX_NUM_GROUPS
+ *  groups; count is not set.
  */
 rdc_status_t rdc_group_get_all_ids(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id_list[],
                                    uint32_t* count);
@@ -1372,11 +1374,13 @@ rdc_status_t rdc_group_field_get_info(rdc_handle_t p_rdc_handle, rdc_field_grp_t
  *  @param[in] p_rdc_handle The RDC handler.
  *
  *  @param[out] field_group_id_list Array reference to fill field group
- *  ids in the system.
+ *  ids in the system, of ::RDC_MAX_NUM_FIELD_GROUPS entries.
  *
  *  @param[out] count Number of field group returned in field_group_id_list.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_MAX_LIMIT there are more than
+ *  ::RDC_MAX_NUM_FIELD_GROUPS field groups; count is not set.
  */
 rdc_status_t rdc_group_field_get_all_ids(rdc_handle_t p_rdc_handle,
                                          rdc_field_grp_t field_group_id_list[], uint32_t* count);
