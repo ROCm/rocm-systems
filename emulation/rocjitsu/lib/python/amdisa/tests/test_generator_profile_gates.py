@@ -3978,12 +3978,18 @@ def test_generated_f16_sdwa_keeps_unmigrated_ordering(
 
 
 @pytest.mark.parametrize(
-    'instruction,encoding', [('V_FRACT_F16', 'vop1'), ('V_LDEXP_F16', 'vop2')]
+    'instruction,encoding',
+    [
+        ('V_FRACT_F16', 'vop1'),
+        ('V_LDEXP_F16', 'vop2'),
+        ('V_MIN_F16', 'vop2'),
+        ('V_MAX_F16', 'vop2'),
+    ],
 )
 def test_generated_f16_sdwa_rounds_before_omod(
     generated_f16_sdwa_consumers, instruction, encoding
 ):
-    """gfx1030 SDWA captures: the body rounds; the SDWA store applies OMOD."""
+    """FRACT/LDEXP round and MIN/MAX select; the SDWA store applies OMOD."""
     route, output = generated_f16_sdwa_consumers
     if route == 'shared':
         source = (output / 'shared' / 'execute_shared.h').read_text()
@@ -6153,23 +6159,23 @@ def test_generated_dpp_commit_separates_modern_source_and_destination_masks(
         assert 'amdgpu::dpp::dpp_compare_result(' in body
 
 
-def test_rdna1_2_generated_vopc_dpp_is_explicitly_unsupported(
-    amdgpu_generated_root: Path,
+@pytest.mark.parametrize('arch', ('cdna1', 'cdna2', 'cdna3', 'cdna4', 'rdna1', 'rdna2'))
+def test_generated_vopc_dpp_is_explicitly_unsupported(
+    amdgpu_generated_root: Path, arch
 ):
-    for arch in ('rdna1', 'rdna2'):
-        vopc_model = (amdgpu_generated_root / arch / 'vopc.cpp').read_text()
-        vopc_exec = (amdgpu_generated_root / arch / 'vopc_exec.cpp').read_text()
-        assert 'amdgpu::dpp::apply_dpp' not in vopc_exec, arch
-        assert 'dpp_write_mask' not in vopc_exec, arch
-
-        ctor = _generated_decode_body(vopc_model, 'VCmpEqU32Vopc')
-        assert 'emit_error.emit() << "V_CMP_EQ_U32 does not support DPP"' in ctor, arch
-        assert 'amdgpu::dpp::is_src_dpp8(' in ctor, arch
-        assert 'reinterpret_cast<const Vop1VopDpp16MachineInst *>' not in ctor, arch
-
-        body = _generated_method_body(vopc_exec, 'VCmpEqU32Vopc', 'VCmpLeU32Vopc')
-        assert 'throw util::UnimplementedInst(mnemonic());' in body, arch
-        assert 'amdgpu::dpp::is_src_dpp8(inst_.src0)' in body, arch
+    vopc_model = (amdgpu_generated_root / arch / 'vopc.cpp').read_text()
+    vopc_exec = (amdgpu_generated_root / arch / 'vopc_exec.cpp').read_text()
+    assert 'SRC_SDWA' in vopc_exec
+    assert 'SRC_DPP' not in vopc_exec
+    assert 'is_src_dpp8' not in vopc_exec
+    assert 'amdgpu::dpp::apply_dpp' not in vopc_exec
+    assert 'dpp_write_mask' not in vopc_exec
+    assert 'throw util::UnimplementedInst' not in vopc_exec
+    ctor = _generated_decode_body(vopc_model, 'VCmpEqU32Vopc')
+    assert 'emit_error.emit() << "V_CMP_EQ_U32 does not support DPP"' in ctor
+    if arch in ('rdna1', 'rdna2'):
+        assert 'amdgpu::dpp::is_src_dpp8(' in ctor
+        assert 'reinterpret_cast<const Vop1VopDpp16MachineInst *>' not in ctor
 
 
 def test_generated_cmpx_dpp_cleanup_applies_arch_compare_rules(

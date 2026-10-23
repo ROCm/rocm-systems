@@ -1695,14 +1695,24 @@ class CodeGenerator:
         return (
             self._supports_dpp_for_encoding(enc_name)
             and self._dpp_opcode_rule(inst, enc_name) is not DppOpcodeRule.FORBID
-            and self._instruction_supports_modifier_encoding(inst, enc_name, 'dpp')
+            and self.isa_spec.profile.supports_dpp_opcode(
+                enc_name,
+                inst.name,
+                has_modifier_encoding=self._instruction_supports_modifier_encoding(
+                    inst, enc_name, 'dpp'
+                ),
+            )
         )
 
     def _instruction_supports_dpp8(self, inst: Instruction, enc_name: str) -> bool:
         return self._dpp_opcode_rule(
             inst, enc_name
-        ) is DppOpcodeRule.ALLOW and self._instruction_supports_modifier_encoding(
-            inst, enc_name, 'dpp8'
+        ) is DppOpcodeRule.ALLOW and self.isa_spec.profile.supports_dpp_opcode(
+            enc_name,
+            inst.name,
+            has_modifier_encoding=self._instruction_supports_modifier_encoding(
+                inst, enc_name, 'dpp8'
+            ),
         )
 
     def _instruction_supports_sdwa(self, inst: Instruction, enc_name: str) -> bool:
@@ -2237,9 +2247,9 @@ class CodeGenerator:
                     ('VopdMaxF32',),
                     '''
                     {
-                      float result = std::fmax(std::bit_cast<float>(src0),
-                                               std::bit_cast<float>(src1));
-                      return std::bit_cast<uint32_t>(result);
+                      return amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F32, amdgpu::minmax::LegacyMax>{
+                          amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32()),
+                          amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())}(src0, src1);
                     }
                     ''',
                 ),
@@ -2258,9 +2268,9 @@ class CodeGenerator:
                     ('VopdMinF32',),
                     '''
                     {
-                      float result = std::fmin(std::bit_cast<float>(src0),
-                                               std::bit_cast<float>(src1));
-                      return std::bit_cast<uint32_t>(result);
+                      return amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F32, amdgpu::minmax::LegacyMin>{
+                          amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32()),
+                          amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())}(src0, src1);
                     }
                     ''',
                 ),
@@ -2879,17 +2889,26 @@ class CodeGenerator:
                       kVopdMovB32, kVopdAddNcU32, kVopdLshlrevB32>(wf, x_, y_))
                 return;
             ''')
+        wave64_guard = (
+            'return;'
+            if logical_arch in ('rdna3', 'rdna3_5')
+            else 'wf.report_instruction_execution_error(\n'
+            '    amdgpu::InstructionExecutionError::InvalidInstructionEncoding);\n'
+            'return;'
+        )
         execution_method = (
             textwrap.dedent('''\
             void Vopd::execute_impl(amdgpu::Wavefront &wf) {
-              if (wf.wf_size() != 32)
-                throw util::UnimplementedInst("VOPD requires Wave32");
+              if (wf.wf_size() != 32) {
+            @WAVE64_GUARD@
+              }
             @VOPD_INTEGER_SIMD_PROBE@
             @EXECUTE_IMPL_BODY@
             }
             ''')
             .replace('@EXECUTE_IMPL_BODY@', execute_impl_body)
             .replace('@VOPD_INTEGER_SIMD_PROBE@', vopd_integer_simd_probe)
+            .replace('@WAVE64_GUARD@', textwrap.indent(wave64_guard, '    '))
         )
 
         vopd_isa_diagnostics = cpp_block('''
@@ -7790,6 +7809,9 @@ class CodeGenerator:
             )
 
         if cls.startswith('dot4_'):
+            if cls == 'dot4_f32_fp8':
+                formats = sem.name.rsplit('_', 2)[1:]
+                return gen_dot4(dst_ops, src_ops, cls, input_formats=tuple(formats))
             return gen_dot4(dst_ops, src_ops, cls)
 
         if cls.startswith('dot8_'):
@@ -7988,8 +8010,11 @@ class CodeGenerator:
             gds_guard = ''
             if self._enc_has_field('gds'):
                 gds_guard = (
-                    '  if (!inst_.gds)\n'
-                    '    throw util::UnimplementedInst(mnemonic());\n'
+                    '  if (!inst_.gds) {\n'
+                    '    wf.report_instruction_execution_error(\n'
+                    '        amdgpu::InstructionExecutionError::InvalidInstructionEncoding);\n'
+                    '    return;\n'
+                    '  }\n'
                 )
             return gds_guard + self._gen_ds_gws(dst_ops, src_ops, sem)
 
@@ -12776,9 +12801,12 @@ class CodeGenerator:
                             )
                     if inst_sem and inst_sem.semantic_class == 'mfma':
                         ctor_body_parts.append('flags_ |= MATRIX_REGISTER_ACCESSES;')
-                        # CBSZ is a broadcast for F32/I32 MFMA, but a format
-                        # selector for F8/F6/F4; F64 ignores it. Qualify the
-                        # static restriction once and report on the CU issuer.
+                        # CBSZ selects broadcasting for F32/I32 MFMA, but is a
+                        # format selector for F8/F6/F4; F64 ignores it. For the
+                        # qualified broadcast forms, reject a group larger than
+                        # the instruction block count and an ABID outside the
+                        # selected group. CBSZ zero disables broadcasting, so
+                        # ABID is deliberately ignored in that case.
                         broadcast_shape = re.match(
                             r'V_MFMA_(?:F32|I32)_(\d+)X(\d+)X', inst.name
                         )
@@ -12790,7 +12818,8 @@ class CodeGenerator:
                             rows, cols = map(int, broadcast_shape.groups())
                             blocks = 64 * (inst.operands[0].size // 32) // (rows * cols)
                             ctor_body_parts.append(
-                                f'if ((1u << inst_.cbsz) > {blocks}u) '
+                                f'if ((1u << inst_.cbsz) > {blocks}u || '
+                                '(inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz))) '
                                 'flags_ |= INVALID_MFMA_BROADCAST;'
                             )
                     # These qualified execution emitters only access their
@@ -13344,11 +13373,6 @@ class CodeGenerator:
                                             f'{_legacy_dpp_write_mask_lines("dpp_write_mask_")}'
                                             '  }\n'
                                         )
-                                elif _dpp_struct:
-                                    _dpp_preamble += (
-                                        '  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))\n'
-                                        '    throw util::UnimplementedInst(mnemonic());\n'
-                                    )
                             elif _modern_dpp_compare:
                                 _dpp_preamble += (
                                     '  uint64_t dpp_old_exec_ = wf.exec();\n'
@@ -13386,27 +13410,24 @@ class CodeGenerator:
                             # DPP/SDWA stage the named architectural source into
                             # an execution-local proxy. Swap-style ops
                             # (vector_swap / permlane*_swap) read every output;
-                            # DPP on those lane-crossing operations is not a
-                            # modeled/legal combination, so fail loudly.
+                            # they do not support DPP extensions, so keep their
+                            # architectural sources unstaged.
                             _reads_all_outputs = (
                                 sem is not None
                                 and sem.semantic_class in self._READS_ALL_OUTPUT_CLASSES
                             )
+                            assert not (
+                                _reads_all_outputs
+                                and (_supports_dpp_encoding or _supports_dpp8)
+                            ), f'{inst.name}: reads-all-output semantics do not support DPP/DPP8'
                             _semantic_stages_src0 = (
                                 sem is not None
                                 and sem.semantic_class == 'vector_movrel'
                                 and sem.operation in ('src', 'srcdst', 'srcdst2')
                             )
-                            if _reads_all_outputs and (
-                                _supports_dpp_encoding or _supports_dpp8
-                            ):
-                                _dpp_preamble += (
-                                    '  if (inst_.src0 == amdgpu::SRC_DPP ||\n'
-                                    '      amdgpu::dpp::is_src_dpp8(inst_.src0))\n'
-                                    '    throw util::UnimplementedInst(mnemonic());\n'
-                                )
-                            elif (
-                                not _semantic_stages_src0
+                            if (
+                                not _reads_all_outputs
+                                and not _semantic_stages_src0
                                 and _dpp_struct
                                 and _supports_dpp_encoding
                                 and _src0_name
