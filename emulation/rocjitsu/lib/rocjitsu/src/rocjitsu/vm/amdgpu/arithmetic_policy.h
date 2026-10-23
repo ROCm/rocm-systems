@@ -36,6 +36,7 @@ public:
 
   /// @brief Return cached CPU capability and semantics flags.
   uint64_t flags() const { return flags_; }
+  bool reports_fp_status() const;
 
 private:
   uint64_t flags_;
