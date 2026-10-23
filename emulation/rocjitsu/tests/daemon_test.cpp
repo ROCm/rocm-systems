@@ -59,9 +59,9 @@ struct TestPaths {
   std::string hip_vector_add_bin = RJ_HIP_VECTOR_ADD_BIN;
   std::string hip_memcpy_bin = RJ_HIP_MEMCPY_BIN;
   std::string hip_rccl_bin = RJ_HIP_RCCL_BIN;
+  std::string hip_instruction_failure_bin = RJ_HIP_INSTRUCTION_FAILURE_BIN;
   std::string daemon_logging_config = RJ_DAEMON_LOGGING_CONFIG;
   std::string interposer_dup_bin = RJ_INTERPOSER_DUP_BIN;
-  std::string hip_instruction_failure_bin = RJ_HIP_INSTRUCTION_FAILURE_BIN;
 };
 
 std::filesystem::path resolve_relative_to_exe(const std::filesystem::path &exe_dir,
@@ -106,9 +106,9 @@ TestPaths installed_paths(const std::filesystem::path &exe_dir) {
       resolve_relative_to_exe(exe_dir, RJ_INSTALLED_HIP_VECTOR_ADD_BIN).string(),
       resolve_relative_to_exe(exe_dir, RJ_INSTALLED_HIP_MEMCPY_BIN).string(),
       resolve_relative_to_exe(exe_dir, RJ_INSTALLED_HIP_RCCL_BIN).string(),
+      resolve_relative_to_exe(exe_dir, RJ_INSTALLED_HIP_INSTRUCTION_FAILURE_BIN).string(),
       resolve_relative_to_exe(exe_dir, RJ_INSTALLED_DAEMON_LOGGING_CONFIG).string(),
       resolve_relative_to_exe(exe_dir, RJ_INSTALLED_INTERPOSER_DUP_BIN).string(),
-      resolve_relative_to_exe(exe_dir, RJ_INSTALLED_HIP_INSTRUCTION_FAILURE_BIN).string(),
   };
 }
 
@@ -141,13 +141,14 @@ const char *hip_memcpy_bin() { return test_paths().hip_memcpy_bin.c_str(); }
 
 const char *hip_rccl_bin() { return test_paths().hip_rccl_bin.c_str(); }
 
-const char *daemon_logging_config() { return test_paths().daemon_logging_config.c_str(); }
-const char *interposer_dup_bin() { return test_paths().interposer_dup_bin.c_str(); }
 #ifdef RJ_HAS_INSTRUCTION_FAILURE_TEST
 const char *hip_instruction_failure_bin() {
   return test_paths().hip_instruction_failure_bin.c_str();
 }
 #endif
+
+const char *daemon_logging_config() { return test_paths().daemon_logging_config.c_str(); }
+const char *interposer_dup_bin() { return test_paths().interposer_dup_bin.c_str(); }
 
 TEST(RocjitsuCliDaemon, LaunchesApplicationAfterDaemonIsReady) {
   const char *xdg = std::getenv("XDG_RUNTIME_DIR");
