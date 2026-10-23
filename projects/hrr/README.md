@@ -114,6 +114,7 @@ On Linux the archive is readable only by the user who captured it (directories 0
 | `--sync-after-launch` | `hipDeviceSynchronize` after every kernel launch |
 | `--sync-after-event` | Sync after every event (slow; pinpoints faults/hangs) |
 | `--continue-on-error` | Report each HIP API error and keep replaying instead of aborting; for surveying which APIs fail, not for reproducing a fault |
+| `--strict-unmapped` | Abort at the first event with a pointer argument in no allocation replay knows; by default such an event's result is discarded, it is reported with its index, API and pointer, and the summary counts it on its `Unmapped` line |
 | `--sync-watchdog-ms N` | Abort if any device sync exceeds `N` ms (`0` = disabled) |
 | `--max-seq-waits N` | End the replay when an event's sequence number is still not reached after `N` waits with no progress and no HIP call in flight; a backstop, since a gap or duplicate in the recorded sequence is refused before the replay starts (default `5000000`, a few minutes) |
 | `--max-query-attempts N` | Stop retrying `hipEventQuery`/`hipStreamQuery` after `N` attempts that return `hipErrorNotReady` (default: no limit; the query waits for replayed work as a synchronize does) |
@@ -211,9 +212,15 @@ the next event, so the divergence is confined to the launch under examination.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `HIP_HRR_D2H_ATOL` | tuned for bf16/fp16 | Absolute tolerance for float D2H compare |
-| `HIP_HRR_D2H_RTOL` | tuned for bf16/fp16 | Relative tolerance for float D2H compare |
-| `HIP_HRR_D2H_EXACT` | off | Require byte-exact D2H match (disable tolerance) |
+| `HIP_HRR_D2H_TOL` | unset (byte-exact) | `<type>:<atol>:<rtol>`, type one of `f32`, `bf16`, `f16`, `f64`: a read-back that differs from its blob passes if every element, read as `<type>`, is within `atol + rtol·|expected|` |
+
+D2H checks are byte-exact by default: a blob has no element type, and reading
+integers as floats lets small values match zero, so a replay that wrote nothing
+would pass. Opt into `HIP_HRR_D2H_TOL` only for an archive whose read-backs are
+floats of that type produced by nondeterministic kernels (atomic or split-K
+reductions); the summary counts those passes as `within tol`, apart from exact
+ones. A blob shorter than its linear copy is a skipped check, and a replay whose
+every check is skipped fails.
 
 **Exit codes:** `0` pass; `1` D2H failure; `2` early divergence abort.
 

@@ -917,6 +917,12 @@ bool VirtualGPU::HwQueueTracker::CpuWaitForSignal(ProfilingSignal* signal) {
     }
   }
 
+  ProcessSignalTiming(signal);
+  return true;
+}
+
+// ================================================================================================
+void VirtualGPU::HwQueueTracker::ProcessSignalTiming(ProfilingSignal* signal) {
   // Process this signal's timing before signal reuse
   // This copies timing to the Timestamp
   if (signal->ts_ != nullptr) {
@@ -928,8 +934,6 @@ bool VirtualGPU::HwQueueTracker::CpuWaitForSignal(ProfilingSignal* signal) {
     std::scoped_lock lock(signal->LockSignalOps());
     signal->flags_.done_ = true;
   }
-
-  return true;
 }
 
 // ================================================================================================
@@ -3852,6 +3856,49 @@ void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
 }
 
 // ================================================================================================
+void VirtualGPU::SubmitBatchCopyMemoryRect(amd::BatchCopyMemoryRectCommand& cmd) {
+  std::scoped_lock lock(execution());
+
+  profilingBegin(cmd, true);
+
+  const std::vector<amd::BatchCopyRectOp>& copy_ops = cmd.CopyOps();
+
+  device::Memory::SyncFlags sync_flags;
+  sync_flags.skipEntire_ = false;
+  for (const amd::BatchCopyRectOp& op : copy_ops) {
+    Memory* src_dev_mem = dev().getRocMemory(op.src_memory);
+    Memory* dst_dev_mem = dev().getRocMemory(op.dst_memory);
+    if (src_dev_mem == nullptr || dst_dev_mem == nullptr) {
+      LogError("SubmitBatchCopyMemoryRect: Invalid memory objects!");
+      cmd.setStatus(CL_INVALID_MEM_OBJECT);
+      profilingEnd();
+      return;
+    }
+    dst_dev_mem->syncCacheFromHost(*this, sync_flags);
+    src_dev_mem->syncCacheFromHost(*this);
+  }
+
+  if (!blitMgr().CopyBufferRectBatch(copy_ops)) {
+    LogError("SubmitBatchCopyMemoryRect: Batch rect copy failed!");
+    cmd.setStatus(CL_OUT_OF_RESOURCES);
+    profilingEnd();
+    return;
+  }
+
+  // Several SDMA engines each complete their own signal. The barrier joins those signals
+  // into the one completion signal attached to this command.
+  if (!Barriers().IsExternalSignalListEmpty()) {
+    dispatchBarrierPacket(kNopPacketHeader);
+  }
+
+  for (const amd::BatchCopyRectOp& op : copy_ops) {
+    op.dst_memory->signalWrite(&dev());
+  }
+
+  profilingEnd();
+}
+
+// ================================================================================================
 void VirtualGPU::SchedulePinnedMemoryRelease(amd::HostQueue& queue,
                                              std::vector<amd::Memory*> pinned_memory) {
   if (pinned_memory.empty()) {
@@ -5351,10 +5398,12 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
   std::scoped_lock lock(execution());
   if (vcmd.CpuWaitRequested()) {
     if (IS_WINDOWS) SetStateFlag(kForceIrq);
-    // It should be safe to call flush directly if there are not pending dispatches without
-    // HSA signal callback
     AcquireHwQueueIfNeeded();
-    flush(vcmd.GetBatchHead());
+    // Make sure the last signal covers all submitted work, but don't wait for it here. The wait
+    // would hold the execution() lock and block all other threads, which submit to this queue.
+    // The caller waits for the attached signal and completes the batch in CompleteCpuWait().
+    releaseGpuMemoryFence(kSkipCpuWait);
+    AttachHwEvent(&vcmd, Barriers().GetLastSignal());
     SetCoalesceWindow(0, nullptr);
   } else {
     profilingBegin(vcmd);
@@ -5420,6 +5469,35 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
     profilingEnd();
   }
   ClearStateFlag(kForceIrq);
+}
+
+// ================================================================================================
+void VirtualGPU::CompleteCpuWait(amd::Command& cmd) {
+  auto* signal = reinterpret_cast<ProfilingSignal*>(cmd.HwEvent());
+  assert((signal != nullptr) && "Marker with CPU wait must have a HW event!");
+
+  // Wait without the execution() lock. The marker holds a reference to the signal,
+  // so the tracker can't reuse it in the meantime
+  WaitForSignal(signal->signal_, ActiveWait());
+
+  // The wait returns early, with the signal not completed normally, if the device is in an error
+  // state (HIP_SKIP_ABORT_ON_GPU_ERROR). The signal timing and the queue states can't be used then,
+  // since the GPU may still run. The batch is completed anyway, as before, because otherwise the
+  // threads waiting for its commands would hang
+  if (Hsa::signal_load_relaxed(signal->signal_) == 0) {
+    std::scoped_lock lock(execution());
+    Barriers().ProcessSignalTiming(signal);
+    // Kernel arguments and memory dependencies can be released only if the wait covered all
+    // submitted work, otherwise newer submissions may still use them
+    if ((Barriers().GetLastSignal() == signal) && !IsPendingDispatch()) {
+      ResetQueueStates();
+    }
+  }
+  // Complete the batch without the lock: it belongs to the marker only, and the user callbacks
+  // it runs must not block the other threads submitting to this queue. It uses no VirtualGPU or
+  // tracker state, and the commands' Timestamps serialize with the tracker the same way as in
+  // HsaAmdSignalHandler
+  updateCommandsState(cmd.GetBatchHead());
 }
 
 // ================================================================================================

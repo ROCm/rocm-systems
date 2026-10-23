@@ -52,6 +52,7 @@ class FillMemoryCommand;
 class CopyMemoryCommand;
 class CopyMemoryP2PCommand;
 class BatchCopyMemoryCommand;
+class BatchCopyMemoryRectCommand;
 class BatchWriteMemoryCommand;
 class BatchReadMemoryCommand;
 class MapMemoryCommand;
@@ -1333,6 +1334,7 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   virtual void submitCopyMemory(amd::CopyMemoryCommand& cmd) = 0;
   virtual void submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) = 0;
   virtual void submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) = 0;
+  virtual void SubmitBatchCopyMemoryRect(amd::BatchCopyMemoryRectCommand& cmd) = 0;
   virtual void SubmitBatchWriteMemory(amd::BatchWriteMemoryCommand& cmd) = 0;
   virtual void SubmitBatchReadMemory(amd::BatchReadMemoryCommand& cmd) = 0;
   virtual void submitMapMemory(amd::MapMemoryCommand& cmd) = 0;
@@ -1340,6 +1342,8 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   virtual void submitKernel(amd::NDRangeKernelCommand& command) = 0;
   virtual void submitNativeFn(amd::NativeFnCommand& cmd) = 0;
   virtual void submitMarker(amd::Marker& cmd) = 0;
+  //! Waits for a marker with CPU wait, after Command::enqueue() released the lock (ROCm specific)
+  virtual void CompleteCpuWait(amd::Command& cmd) {}
   virtual void submitAccumulate(amd::AccumulateCommand& cmd) = 0;
   virtual void submitExternalSemaphoreCmd(amd::ExternalSemaphoreCmd& cmd) = 0;
   virtual void submitFillMemory(amd::FillMemoryCommand& cmd) = 0;
