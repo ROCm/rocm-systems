@@ -549,6 +549,19 @@ TEST(HostDispatchArgsMicrotest, OutputFormatComesFromTheSpecNotTheFilename)
     EXPECT_EQ(parseArgs({"--gtest_output=/tmp/r.out"}).outputPath, "/tmp/r.out");
 }
 
+TEST(HostDispatchArgsMicrotest, ABareFormatNamesTheFormatNotTheFile)
+{
+    // gtest reads a colon-less "xml"/"json" as the format and writes its own default filename.
+    // Read as a path instead, "--gtest_output=json" would write XML to a file called "json".
+    const Options json = parseArgs({"--gtest_output=json"});
+    EXPECT_EQ(json.outputFormat, ReportFormat::Json);
+    EXPECT_EQ(json.outputPath, "./test_detail.json");
+
+    const Options xml = parseArgs({"--gtest_output=xml"});
+    EXPECT_EQ(xml.outputFormat, ReportFormat::Xml);
+    EXPECT_EQ(xml.outputPath, "./test_detail.xml");
+}
+
 TEST(HostDispatchArgsMicrotest, OutputDirectoryGetsTheDefaultNameForItsFormat)
 {
     EXPECT_EQ(parseArgs({"--gtest_output=json:/tmp/reports/"}).outputPath,
