@@ -1,1 +1,0 @@
-../../../../../../sample/vsequential_access.cpp

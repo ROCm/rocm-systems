@@ -1,1 +1,0 @@
-../../../../../../sample/simple_net.py

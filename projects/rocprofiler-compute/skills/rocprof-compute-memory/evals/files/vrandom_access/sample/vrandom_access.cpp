@@ -1,1 +1,0 @@
-../../../../../../sample/vrandom_access.cpp

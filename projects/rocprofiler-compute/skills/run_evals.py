@@ -95,7 +95,7 @@ def load_cases(skill: Path) -> list[dict[str, Any]]:
         if case["id"] in seen:
             sys.exit(f"{skill.name}: duplicate case id {case['id']!r}")
         seen.add(case["id"])
-        if "workspace" in case and not (skill / case["workspace"]).is_dir():
+        if "workspace" in case and not workspace_dir(skill, case["workspace"]).is_dir():
             sys.exit(f"{skill.name}: {case['id']} names a missing workspace")
 
         if case["skill_should_trigger"]:
@@ -117,11 +117,23 @@ def load_cases(skill: Path) -> list[dict[str, Any]]:
     return cases
 
 
+def workspace_dir(skill: Path, workspace: str) -> Path:
+    """Join ``workspace`` onto the skill directory the way skillscope does.
+
+    skillscope checks ``(skill_path / workspace).is_dir()`` and then
+    ``copytree``s that directory. Parent-directory references stay in the
+    relative path and are followed by both calls, so a case can name
+    ``../../sample/<application>`` without copying those sources into the skill.
+    """
+    return skill / workspace
+
+
 def build_workspace(root: Path, skill: Path, case: dict[str, Any]) -> Path:
     """Install every skill and seed a scratch workspace with the case's files.
 
     Like skillscope, the contents of the case's workspace directory, relative
-    to the skill, land at the workspace root.
+    to the skill, land at the workspace root. Parent-directory references in
+    ``workspace`` are kept and followed.
     """
     workspace = root / "workspace"
     workspace.mkdir(parents=True)
@@ -132,7 +144,9 @@ def build_workspace(root: Path, skill: Path, case: dict[str, Any]) -> Path:
         check=True,
     )
     if "workspace" in case:
-        shutil.copytree(skill / case["workspace"], workspace, dirs_exist_ok=True)
+        shutil.copytree(
+            workspace_dir(skill, case["workspace"]), workspace, dirs_exist_ok=True
+        )
     return workspace
 
 

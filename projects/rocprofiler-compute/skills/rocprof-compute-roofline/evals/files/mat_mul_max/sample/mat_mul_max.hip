@@ -1,1 +1,0 @@
-../../../../../../sample/mat_mul_max.hip

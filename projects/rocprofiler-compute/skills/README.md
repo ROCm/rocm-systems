@@ -95,10 +95,12 @@ Each dataset needs at least three cases that should trigger the skill, two that
 should not, and one triggering case with judged behavior. Negative cases carry
 only an id, a prompt, and an optional note.
 
-A triggering case that needs an application sets `workspace` to a directory
-under that skill's `evals/files/`, and the prompt names the application. The
-contents of that directory are copied to the workspace root, as skillscope
-does.
+A triggering case that needs an application sets `workspace` to the existing
+sample directory that contains it, relative to the skill directory, and does
+not add those sources to the skill. For example, `../../sample` or
+`../../sample/membw_analysis_test_suite`. The prompt names the application
+relative to that directory. The contents of the workspace directory are copied
+to the workspace root when the case runs, as skillscope does.
 
 ## Keeping skills correct
 
