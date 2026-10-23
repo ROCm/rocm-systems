@@ -5,6 +5,8 @@
 
 use super::*;
 use crate::isa::gfx_target_name;
+use rocddi::topology::host::{HostCaches, HostTopologySnapshot};
+use rocddi::topology::{MemoryBankKind, NativeNodeId, NodeKind, TopologySnapshot};
 
 /// A transient native query failure leaves support undecided so public calls
 /// can retry after the underlying condition clears.
@@ -39,11 +41,11 @@ pub(super) fn full_profile_platform(local_memory_bytes: impl IntoIterator<Item =
 pub(super) fn decode_gpu_pool_handle(
     pool: HsaMemoryPool,
     gpu_count: usize,
-) -> Option<(usize, u64)> {
+) -> Option<(usize, GpuPoolKind)> {
     let offset = pool.handle.checked_sub(GPU_POOL_BASE)?;
-    let index = usize::try_from(offset / 0x10).ok()?;
-    let kind = offset % 0x10;
-    (index < gpu_count && matches!(kind, 1..=4)).then_some((index, kind))
+    let index = usize::try_from(offset / POOL_HANDLE_STRIDE).ok()?;
+    let kind = GpuPoolKind::from_slot(offset % POOL_HANDLE_STRIDE)?;
+    (index < gpu_count).then_some((index, kind))
 }
 
 /// Decodes cache handle into its runtime components.
@@ -53,11 +55,79 @@ pub(super) fn decode_cache_handle(cache: HsaCache, cache_count: usize) -> Option
     (index < cache_count).then_some(index)
 }
 
-/// Selects CPU caches from the available runtime resources.
-pub(super) fn selected_cpu_caches(topology: &HostTopologySnapshot) -> &HostCaches {
-    topology
-        .domain(0)
-        .map_or(&topology.caches, |domain| &domain.caches)
+/// Selects OS cache records only when a CPU node can identify their domain.
+pub(super) fn host_caches_for_cpu(
+    topology: &HostTopologySnapshot,
+    core_id_base: Option<u32>,
+    cpu_count: usize,
+) -> Option<&HostCaches> {
+    if let Some(domain) = core_id_base.and_then(|base| topology.domain_for_apic_id(base)) {
+        return Some(&domain.caches);
+    }
+    (cpu_count == 1).then_some(&topology.caches)
+}
+
+/// CPU agent built from one KFD CPU-bearing node or an OS fallback.
+pub(crate) struct Cpu {
+    /// Source-qualified native node, absent only when KFD reports no CPU node.
+    pub(crate) node: Option<rocddi::topology::NodeId>,
+    /// KFD node ordinal used by HSA node queries.
+    pub(crate) native_node: u32,
+    /// Stable public CPU name.
+    pub(crate) name: Box<str>,
+    /// CPU cores reported for this native node.
+    pub(crate) compute_units: u32,
+    /// Maximum native CPU clock in MHz, when reported.
+    pub(crate) maximum_clock_mhz: u32,
+    /// Capacity of its reported system memory bank.
+    pub(crate) memory_bytes: usize,
+    /// Whether the same native node also reports a GPU.
+    pub(crate) apu: bool,
+}
+
+/// Builds one CPU agent per KFD node that actually reports CPU cores.
+pub(super) fn cpu_agents(
+    topology: &TopologySnapshot,
+    host: &rocddi::topology::host::CpuInfo,
+    host_memory_bytes: usize,
+) -> Vec<Cpu> {
+    let mut cpus = topology
+        .nodes
+        .iter()
+        .filter_map(|node| {
+            let cpu = node.cpu?;
+            let NativeNodeId::LinuxKfd(native_node) = node.native_id else {
+                return None;
+            };
+            let memory_bytes = topology
+                .banks_for_node(node.id)
+                .find(|bank| bank.kind == MemoryBankKind::System && bank.capacity_bytes != 0)
+                .map_or(0, |bank| {
+                    usize::try_from(bank.capacity_bytes).unwrap_or(usize::MAX)
+                });
+            Some(Cpu {
+                node: Some(node.id),
+                native_node,
+                name: host.name.clone().into_boxed_str(),
+                compute_units: cpu.core_count,
+                maximum_clock_mhz: cpu.maximum_clock_mhz.unwrap_or(0),
+                memory_bytes,
+                apu: node.kind == NodeKind::KfdGpu,
+            })
+        })
+        .collect::<Vec<_>>();
+    if cpus.is_empty() {
+        cpus.push(Cpu {
+            node: None,
+            native_node: 0,
+            name: host.name.clone().into_boxed_str(),
+            compute_units: host.compute_units,
+            maximum_clock_mhz: 0,
+            memory_bytes: host_memory_bytes,
+            apu: false,
+        });
+    }
+    cpus
 }
 
 /// Returns cache handles ordered by level for an agent.
@@ -94,6 +164,20 @@ pub(super) fn cache_sizes(caches: &[Cache], agent: HsaAgent) -> [u32; 4] {
             }
         } else {
             sizes[index] = sizes[index].saturating_add(bytes);
+        }
+    }
+    sizes
+}
+
+/// Projects CPU cache-size attributes using `ROCr`'s last-record-per-level rule.
+pub(super) fn cpu_cache_sizes(caches: &[Cache], agent: HsaAgent) -> [u32; 4] {
+    let mut sizes = [0_u32; 4];
+    for cache in caches.iter().filter(|cache| cache.agent == agent) {
+        if let Some(index) = usize::from(cache.level)
+            .checked_sub(1)
+            .filter(|index| *index < sizes.len())
+        {
+            sizes[index] = cache.size;
         }
     }
     sizes

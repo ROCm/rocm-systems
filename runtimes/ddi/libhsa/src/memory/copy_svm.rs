@@ -227,7 +227,7 @@ fn svm_location_from_agent(
     if agent.handle == 0 && allow_null {
         return Ok(SvmLocation::Undefined);
     }
-    if agent.handle == CPU_AGENT {
+    if runtime.is_cpu_agent(agent) {
         return Ok(SvmLocation::System);
     }
     let index = runtime.gpu_index(agent).ok_or(INVALID_AGENT)?;
@@ -393,7 +393,7 @@ pub unsafe extern "C" fn hsa_amd_svm_attributes_set(
                         return INCOMPATIBLE_ARGUMENTS;
                     }
                     agents.push(agent.handle);
-                    if agent.handle == CPU_AGENT {
+                    if runtime.is_cpu_agent(agent) {
                         if pair.attribute == AMD_SVM_ATTRIB_AGENT_NO_ACCESS {
                             clear_flags |= SVM_FLAG_HOST_ACCESS;
                         } else {
@@ -510,7 +510,7 @@ pub unsafe extern "C" fn hsa_amd_svm_attributes_get(
                     if !runtime.is_agent(agent) {
                         return INVALID_AGENT;
                     }
-                    if agent.handle == CPU_AGENT {
+                    if runtime.is_cpu_agent(agent) {
                         get_flags = true;
                         indices.push(None);
                     } else {
@@ -615,7 +615,7 @@ pub unsafe extern "C" fn hsa_amd_svm_attributes_get(
                     let agent = HsaAgent {
                         handle: unsafe { (&raw const (*pair).value).read() },
                     };
-                    let result = if agent.handle == CPU_AGENT {
+                    let result = if runtime.is_cpu_agent(agent) {
                         if set_flags & SVM_FLAG_HOST_ACCESS != 0 {
                             AMD_SVM_ATTRIB_AGENT_ACCESSIBLE
                         } else {
