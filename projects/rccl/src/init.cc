@@ -3293,10 +3293,10 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   }
 
   // Check if using host uncached mem correctly
-  NCCLCHECK(checkHostUncacheMemSetting(comm));
+  NCCLCHECKGOTO(checkHostUncacheMemSetting(comm), res, fail);
 
   // RCCL: determine and set unroll factor for comm
-  NCCLCHECK(commSetUnrollFactor(comm));
+  NCCLCHECKGOTO(commSetUnrollFactor(comm), res, fail);
 
 #ifdef ENABLE_ROCSHMEM
   if (!job->parent && rcclParamRocshmemEnabled()) {
@@ -3309,7 +3309,8 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
       ret = rocshmem::rocshmem_get_uniqueid(&rocshmemUniqueId);
       if (ret != rocshmem::ROCSHMEM_SUCCESS) {
         ERROR("Error in rocshmem_get_uniqueid, Rocshmem cannot be initialized.");
-        return ncclSystemError;
+        res = ncclSystemError;
+        goto fail;
       }
     }
 
@@ -3319,13 +3320,15 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
     ret = rocshmem::rocshmem_set_attr_uniqueid_args(job->myrank, job->nranks, &rocshmemUniqueId, &rocshmemAttr);
     if (ret != rocshmem::ROCSHMEM_SUCCESS) {
       ERROR("Error in rocshmem_set_attr_uniqueid_args, Rocshmem cannot be initialized.");
-      return ncclSystemError;
+      res = ncclSystemError;
+      goto fail;
     }
 
     ret = rocshmem::rocshmem_init_attr(rocshmem::ROCSHMEM_INIT_WITH_UNIQUEID, &rocshmemAttr);
     if (ret != rocshmem::ROCSHMEM_SUCCESS) {
       ERROR("Error in rocshmem_init_attr, Rocshmem cannot be initialized.");
-      return ncclSystemError;
+      res = ncclSystemError;
+      goto fail;
     }
 
     const char* inputStr = std::getenv("ROCSHMEM_HEAP_SIZE");
@@ -3360,13 +3363,13 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
                                           &(comm->team_reduce_world_dup));
 
     ncclCommToRshmemTeam[comm] = comm->team_reduce_world_dup;
-    CUDACHECK(hipDeviceSynchronize());
+    CUDACHECKGOTO(hipDeviceSynchronize(), res, fail);
   }
 #endif
 
   // Allocate Temp Buffer for Direct Reduce Scatter
   if (IsArchMatch(archName, "gfx950")) {
-    NCCLCHECK(ncclCudaMalloc(&(comm->tempBuff), TEMP_BUFF_SIZE, comm->memManager));
+    NCCLCHECKGOTO(ncclCudaMalloc(&(comm->tempBuff), TEMP_BUFF_SIZE, comm->memManager), res, fail);
   }
 
   NCCLCHECKGOTO(latency_profiler::collTraceInit(comm), res, fail);
