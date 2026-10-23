@@ -14,6 +14,7 @@ from amdisa.codegen.execute.floating_policy import (
     F16_TRANSCENDENTAL_CALLS,
     FLUSH_NEAREST_F32_OPS,
     SDWA_ROUNDED_F16_OPS,
+    TRANS_F32_OPS,
 )
 
 from dataclasses import dataclass, field, replace
@@ -142,6 +143,9 @@ class LoweringContext:
     true16_dst_select: str | None = None
     true16_src_selects: dict[int, str] = field(default_factory=dict)
     true16_vop3_opsel: str | None = None
+    # amdgpu::fp_format tag (F16 or F32) whose sign bit ABS/NEG modify in
+    # integer-typed source reads. None ignores them, as integer operations do.
+    source_modifier_format: str | None = None
     fp8_byte_select: str | None = None
     fp8_decode_e5m3_select: str | None = None
     arch_name: str = ''
@@ -153,6 +157,8 @@ class LoweringContext:
     flush_nearest_f32: bool = False
     # Instruction name, for errors raised while lowering its body.
     instruction_name: str = ''
+    # F32 TRANS: OMOD overflow ignores MODE rounding (TRANS_F32_OPS).
+    trans_f32: bool = False
     arithmetic_flush_output: str | None = None
     integer_saturation_dtype: str | None = None
 
@@ -234,6 +240,7 @@ def lower_sema_block(block: SemaBlock, ctx: LoweringContext | None = None) -> st
     )
     ctx.flush_nearest_f32 = block.instruction_name in FLUSH_NEAREST_F32_OPS
     ctx.instruction_name = block.instruction_name
+    ctx.trans_f32 = block.instruction_name in TRANS_F32_OPS
     body_lines = _lower_stmt(block.body, ctx)
 
     if ctx.exec_model == ExecModel.VECTOR:
@@ -2206,6 +2213,10 @@ def _input_flushed_source(node: SemaNode, ctx: LoweringContext) -> str | None:
     widened. Flushing keeps the sign, so it commutes with ABS/NEG. Return None
     when ``node`` is not a direct floating register read.
     """
+    if node.kind == SemaNodeKind.UMINUS:
+        # A negated source (SUB's subtrahend) is flushed like a NEG modifier.
+        source = _input_flushed_source(node.children[0], ctx)
+        return None if source is None else f'(-{source})'
     modifiers = None
     if node.kind == SemaNodeKind.CALL and node.call_name == 'apply_src_mod':
         if len(node.children) < 5:
@@ -2587,8 +2598,15 @@ def _lower_apply_src_mod(node: SemaNode, ctx: LoweringContext) -> str:
 
     src_child = node.children[1]
     src_ty = src_child.ty
+    abs_field = 'inst_.abs' if has_abs else '0u'
+    neg_field = 'inst_.neg' if has_neg else '0u'
     if src_ty and src_ty.base in ('I', 'U'):
-        return src_expr
+        if ctx.source_modifier_format is None:
+            return src_expr
+        return (
+            f'amdgpu::source_modifier::apply<amdgpu::fp_format::{ctx.source_modifier_format}>('
+            f'static_cast<uint32_t>({src_expr}), {src_idx}, {abs_field}, {neg_field})'
+        )
 
     is_64 = node.ty and node.ty.size == 64
     fp_type = 'double' if is_64 else 'float'
@@ -2604,8 +2622,6 @@ def _lower_apply_src_mod(node: SemaNode, ctx: LoweringContext) -> str:
         init = f'std::bit_cast<{fp_type}>({src_expr})'
     else:
         init = src_expr
-    abs_field = 'inst_.abs' if has_abs else '0u'
-    neg_field = 'inst_.neg' if has_neg else '0u'
     return (
         f'[&]() {{ {fp_type} sv = {init};'
         f' return amdgpu::source_modifier::apply_to_float(sv, {src_idx}, '
@@ -2666,20 +2682,18 @@ def _lower_apply_omod(node: SemaNode, ctx: LoweringContext) -> str:
             else ctx
         ),
     )
+    # Raw-bit scaling: overflow rounds by MODE, except for TRANS results.
+    omod_round = '0' if ctx.trans_f32 else 'wf.fp_round_mode_f32()'
     if arithmetic_f32:
         # The arithmetic helper establishes MODE and restores the host state.
-        # Only active scaling needs a second environment, after the operation.
         return (
             f'[&]() {{ float v = {rhs};'
-            f' const uint32_t effective_omod = {omod_expr};'
-            ' if (effective_omod == 0) return v;'
-            f' {environment}'
-            ' return amdgpu::fp_mode::apply_omod_f32(v, effective_omod); }()'
+            f' return amdgpu::fp_mode::apply_omod_f32(v, {omod_expr}, {omod_round}); }}()'
         )
     if node.ty == SemaType.F32:
         return (
             f'[&]() {{ {environment}float v = {rhs};'
-            f' return amdgpu::fp_mode::apply_omod_f32(v, {omod_expr}); }}()'
+            f' return amdgpu::fp_mode::apply_omod_f32(v, {omod_expr}, {omod_round}); }}()'
         )
     return (
         f'[&]() {{ {environment}{fp_type} v = {rhs};'
@@ -2709,8 +2723,11 @@ def _lower_apply_clamp(node: SemaNode, ctx: LoweringContext) -> str:
         else ''
     )
     if node.ty == SemaType.F32 and any(
-        child.kind == SemaNodeKind.FMA for child in node.children[1].walk()
+        child.kind in (SemaNodeKind.ADD, SemaNodeKind.MUL, SemaNodeKind.FMA)
+        for child in node.children[1].walk()
     ):
+        # The arithmetic helper scopes MODE itself; scope only CLAMP here, after
+        # the operand reads, so register-access callbacks keep the caller's FP state.
         return (
             f'[&]() {{ float v = {rhs};'
             f' if (inst_.clamp) {{ {environment}'

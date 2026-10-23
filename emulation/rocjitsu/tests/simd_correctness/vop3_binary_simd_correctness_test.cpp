@@ -34,6 +34,7 @@
 #include <cfenv>
 #include <cstdint>
 #include <gtest/gtest.h>
+#include <map>
 #include <memory>
 #include <string>
 #include <utility>
@@ -303,6 +304,16 @@ public:
   std::vector<std::array<uint64_t, 7>> events;
 };
 
+// Lanes reported per (write, register, bytes, rounding, flags, control), merging
+// the per-lane events of scalar execution with SIMD's per-view events.
+std::map<std::array<uint64_t, 6>, uint64_t>
+observed_coverage(const std::vector<std::array<uint64_t, 7>> &events) {
+  std::map<std::array<uint64_t, 6>, uint64_t> coverage;
+  for (const auto &event : events)
+    coverage[{event[0], event[1], event[3], event[4], event[5], event[6]}] |= event[2];
+  return coverage;
+}
+
 TEST(Vop3BinarySimdCorrectness, SubtractionModesAndHostStateAcrossTargets) {
   ForceScalarGuard gate_guard;
   // Cancellation, signed zeros, rounding boundaries, overflow, and distinct
@@ -393,7 +404,11 @@ TEST(Vop3BinarySimdCorrectness, SubtractionModesAndHostStateAcrossTargets) {
           return std::pair{out, events};
         };
         const auto reference = run(true), actual = run(false);
-        EXPECT_EQ(actual, reference);
+        EXPECT_EQ(actual.first, reference.first);
+        // Scalar execution reports each lane, SIMD each register view. Both must
+        // cover the same registers and lanes, and every callback must see the
+        // caller's FP environment.
+        EXPECT_EQ(observed_coverage(actual.second), observed_coverage(reference.second));
         if (!e64 && (exec & 1u)) {
           // 1 - 2^-25 is exactly halfway below 1. This independent rounding
           // witness also catches GCC moving the SIMD subtraction across MODE.
