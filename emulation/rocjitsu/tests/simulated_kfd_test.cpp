@@ -274,7 +274,7 @@ void check_daemon_export_rejection(bool fallback) {
   const auto process = daemon.find_process(process_id);
   ASSERT_NE(process, nullptr);
   const auto &stored = process->allocations_.at(allocation.handle);
-  ASSERT_EQ(rocjitsu::memory_backing::contains(stored.memfd), fallback);
+  ASSERT_EQ(rocjitsu::memory_backing::contains(stored.backing_fd), fallback);
   const auto access = vm.soc()->gpu_vm().snapshot_vmid(process_id);
   ASSERT_TRUE(access);
   ASSERT_EQ(access->query_mtype(allocation.va_addr), rocjitsu::amdgpu::Mtype::RW);
@@ -914,7 +914,7 @@ TEST_F(SimulatedKfdTest, FailedMonitorMmapPreservesFixedTarget) {
   auto process = driver->find_process(driver->local_process_id());
   ASSERT_NE(process, nullptr);
   EXPECT_EQ(process->gpu(0).doorbell_monitor_page, nullptr);
-  EXPECT_EQ(process->gpu(0).doorbell_memfd, -1);
+  EXPECT_EQ(process->gpu(0).doorbell_backing_fd, -1);
   EXPECT_TRUE(process->gpu(0).doorbell_views.empty());
 
   EXPECT_EQ(driver->close(), 0);
@@ -1322,7 +1322,7 @@ TEST_F(SimulatedKfdTest, ProcessAddressedDoorbellMmapPublishesCanonicalMemfd) {
   ASSERT_NE(driver->mmap(process_id, nullptr, doorbell_page_size, PROT_READ | PROT_WRITE,
                          MAP_SHARED, doorbell_mmap_offset),
             MAP_FAILED);
-  EXPECT_GE(driver->get_mmap_memfd(process_id, doorbell_mmap_offset), 0)
+  EXPECT_GE(driver->get_mmap_backing(process_id, doorbell_mmap_offset), 0)
       << "daemon fd passing must use the canonical backing created by mmap";
   EXPECT_EQ(driver->close(process_id), 0);
 }
@@ -1398,12 +1398,12 @@ TEST_F(SimulatedKfdTest, UnknownDoorbellGpuDoesNotUseCanonicalBacking) {
   ASSERT_NE(
       driver->mmap(nullptr, doorbell_page_size, PROT_READ | PROT_WRITE, MAP_SHARED, valid_offset),
       MAP_FAILED);
-  ASSERT_GE(driver->get_mmap_memfd(valid_offset), 0);
+  ASSERT_GE(driver->get_mmap_backing(valid_offset), 0);
 
   const uint32_t unknown_gpu_id = driver->gpu_id() + 1;
   const off_t unknown_offset = static_cast<off_t>(rocjitsu::KFD_MMAP_TYPE_DOORBELL |
                                                   rocjitsu::kfd_mmap_gpu_id(unknown_gpu_id));
-  EXPECT_EQ(driver->get_mmap_memfd(unknown_offset), -1);
+  EXPECT_EQ(driver->get_mmap_backing(unknown_offset), -1);
   errno = 0;
   EXPECT_EQ(
       driver->mmap(nullptr, doorbell_page_size, PROT_READ | PROT_WRITE, MAP_SHARED, unknown_offset),

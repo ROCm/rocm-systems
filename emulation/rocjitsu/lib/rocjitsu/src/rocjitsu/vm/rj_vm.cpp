@@ -444,11 +444,11 @@ rj_status_t execute_impl(SimulatedKfd *driver, uint32_t process_id, rj_vm_cmd_t 
   if (cmd->cmd == AMDKFD_IOC_ALLOC_MEMORY_OF_GPU && cmd->result == 0) {
     auto *alloc_args = static_cast<kfd_ioctl_alloc_memory_of_gpu_args *>(cmd->buf);
     cmd->shared_handle =
-        driver->get_mmap_memfd(process_id, static_cast<off_t>(alloc_args->mmap_offset));
+        driver->get_mmap_backing(process_id, static_cast<off_t>(alloc_args->mmap_offset));
   } else if (cmd->cmd == AMDKFD_IOC_IPC_IMPORT_HANDLE && cmd->result == 0) {
     auto *import_args = static_cast<kfd_ioctl_ipc_import_handle_args *>(cmd->buf);
     cmd->shared_handle =
-        driver->get_mmap_memfd(process_id, static_cast<off_t>(import_args->mmap_offset));
+        driver->get_mmap_backing(process_id, static_cast<off_t>(import_args->mmap_offset));
   }
 
   return ROCJITSU_STATUS_SUCCESS;
@@ -630,7 +630,7 @@ rj_status_t rj_vm_gpu_info(rj_vm_t *vm, rj_vm_gpu_info_t *info) {
 rj_status_t rj_vm_get_shared_mem(rj_vm_t *vm, int64_t offset, rj_handle_t *handle) {
   if (!vm || !handle || !vm->vm || !vm->vm->driver())
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
-  *handle = vm->vm->driver()->get_mmap_memfd(static_cast<off_t>(offset));
+  *handle = vm->vm->driver()->get_mmap_backing(static_cast<off_t>(offset));
   return ROCJITSU_STATUS_SUCCESS;
 }
 
@@ -638,6 +638,6 @@ rj_status_t rj_vm_get_shared_mem_as(rj_vm_t *vm, uint32_t process_id, int64_t of
                                     rj_handle_t *handle) {
   if (!vm || !handle || !vm->vm || !vm->vm->driver())
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
-  *handle = vm->vm->driver()->get_mmap_memfd(process_id, static_cast<off_t>(offset));
+  *handle = vm->vm->driver()->get_mmap_backing(process_id, static_cast<off_t>(offset));
   return ROCJITSU_STATUS_SUCCESS;
 }

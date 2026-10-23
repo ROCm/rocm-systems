@@ -4,6 +4,13 @@
 #ifndef ROCJITSU_KMD_LINUX_MEMORY_BACKING_H_
 #define ROCJITSU_KMD_LINUX_MEMORY_BACKING_H_
 
+/// @file
+/// @brief Shared backing descriptors, either native memfds or opaque socket tokens.
+/// @details Descriptors retain their storage across dup, fork, and SCM_RIGHTS.
+/// Callers own returned descriptors and must use these adapters for mapping and
+/// metadata; tokens do not support file I/O. Failures use errno. Ordinary file
+/// descriptors retain host behavior where an operation supports both forms.
+
 #include <cstddef>
 #include <cstdint>
 #include <sys/stat.h>
@@ -11,12 +18,16 @@
 
 namespace rocjitsu::memory_backing {
 
+inline constexpr int kListenerFd = 3;
+inline constexpr int kLeaseFd = 4;
+inline constexpr int kStartupFd = 5;
+inline constexpr int kFirstUnreservedFd = kStartupFd + 1;
+
 /// @brief Create fixed-size shared RAM, independent of RLIMIT_FSIZE.
-/// @details The descriptor retains the RAM across dup, fork, and SCM_RIGHTS.
-/// Use this interface to map or inspect it: when a memfd cannot fit the
-/// inherited hard limit, the result is an opaque shared-RAM handle instead.
-/// All functions use errno on failure.
-int create(size_t size);
+/// @details Preallocation is best effort for native memfds; token storage stays
+/// sparse. RJ_TEST_FORCE_TOKEN_BACKING=1 selects tokens for integration testing
+/// without affecting ordinary metadata files or changing application limits.
+int create(size_t size, bool preallocate = false);
 
 /// @brief Populate a newly created metadata file using the keeper's inherited hard limit.
 /// @details The caller owns this unpublished regular file; its offset stays at zero.
@@ -44,6 +55,9 @@ bool stat_token(int fd, struct stat *result);
 /// @details The result is -1 with errno set for unsupported token seek operations.
 bool seek_token(int fd, off_t offset, int whence, off_t &result);
 
+/// @brief Query backing metadata or forward a descriptor command to the host.
+/// @details Tokens synthesize F_GETFL and F_GET_SEALS, reject F_ADD_SEALS with
+/// EPERM, and forward other commands to their underlying socket descriptor.
 int fcntl(int fd, int command, uintptr_t argument = 0);
 
 /// @brief Reopen a backing with an independently retained access mode.

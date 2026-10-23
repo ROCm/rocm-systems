@@ -264,62 +264,11 @@ Emulates the AMDKFD kernel driver via LD_PRELOAD interposition:
 - **EventState** — KFD event lifecycle (create, set, reset, wait,
   destroy). Signal page uses the same shared backing as GPU allocations.
 
-GPU allocations, doorbells, event pages, and GEM objects use `memory_backing`.
-The private `rocjitsu-memory` helper creates fixed-size memfds within its own
-inherited hard file limit, raising only its own soft limit. If that limit
-cannot accommodate an allocation, it uses
-System V shared RAM instead. This also supports a finite inherited hard
-`RLIMIT_FSIZE` without changing the application's limits or signal disposition.
-Internal scratch that has no exportable handle uses shared anonymous memory
-with `MAP_NORESERVE`, preserving sharing across fork without file sizing.
-
-Shared RAM is retained by opaque Unix socket descriptors. Kernel descriptor
-references preserve it across duplication, fork, and `SCM_RIGHTS` transfer.
-The helper holds an attachment to each segment, marks it for removal, and drops
-that attachment when the final token closes. Mapped views can outlive all
-handles. Mapping adapters use `shmat` and zero-old-size `mremap` aliases, retain
-read-only permissions, and support partial and fixed mappings without copying
-live buffer contents. These fallback descriptors require rocjitsu's mapping and
-metadata adapters; importing them into a different IPC namespace fails with
-`EXDEV`. Size queries through `lseek`/`lseek64` follow dma-buf semantics:
-zero-offset `SEEK_END` reports the size, zero-offset `SEEK_SET` reports zero,
-and other seeks fail with `EINVAL`. Ordinary memfds retain native Linux behavior.
-
-This fallback assumes trusted same-UID processes in the IPC namespace. A live
-segment remains discoverable in `/proc/sysvipc/shm` and can be attached directly
-by another process with the same UID, without receiving a token. Socket names
-carry descriptive, unauthenticated metadata; they do not establish authority.
-Read-only adapter mappings enforce mapping permissions, not isolation against
-such processes. Each fallback region also consumes a namespace-wide segment
-ID and shared-memory budget (`kernel.shmmni` and `kernel.shmall`) until its last
-attachment disappears, even after `IPC_RMID`.
-
-Socket tokens support these mapping/metadata adapters, not file-offset I/O.
-The PCI model's `VramStore` still uses its own memfd with `pread`/`pwrite` and
-is outside this KFD backing support for file limits.
-
-The helper execs with an independent address space, detaches from application
-job control, and watches its owner's pidfd and a close-on-exec file lease.
-The lease is a process-owned record lock on an empty memfd, so an idle forked
-child cannot keep its parent's lease alive after exec. A helper thread waits
-for release of that lock and notifies the event loop. The helper retires
-on owner exit or exec, preserving any exported tokens until they close, without
-retaining application mappings. Closing or overwriting the lease causes the
-next request to start a new helper. The interposer starts it before application
-code can lower file limits. A forked child starts its own helper under the
-child's then-current hard limits. Generated topology files and proc-maps
-snapshots are sized there and populated through mappings; these small metadata
-files must fit that helper's hard file limit. Topology population failures emit
-a warning identifying the file. Application writes, including runtime compiler
-temporary files, continue to obey the application's current limit.
-
-Changing effective user or group credentials retires the previous helper's
-lease before using a new helper; previously exported tokens remain valid.
-Child-wait isolation is unsupported when the owner enables
-`PR_SET_CHILD_SUBREAPER`: Linux reparents the detached helper to that owner.
-rocjitsu warns once per process when it detects this setting. Such owners
-must wait for known application child PIDs, handle the helper's `SIGCHLD`, and
-avoid waiting for all children while the helper still serves their process.
+GPU allocations, doorbells, event pages, and GEM objects use the private
+`rocjitsu-memory` helper to keep backing creation independent of application
+file-size limits. It provides native memfds or shared-memory tokens consumed
+through the `memory_backing` adapters. See [KFD and GEM memory backing](memory-backing.md)
+for allocation policy, mapping semantics, resource limits, and helper lifecycle.
 
 ### Code — Executable Loading & Analysis (`code/`)
 

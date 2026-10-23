@@ -3684,7 +3684,7 @@ TEST_F(KfdIoctlTest, GetTileConfigReturnsUnsupportedInDaemonMode) {
 }
 
 // ROCr places its queue object in a USERPTR allocation that KFD must update
-// directly. In daemon mode both sides map the memfd returned by allocation, so
+// directly. In daemon mode both sides map the backing descriptor returned by allocation, so
 // queue-pointer publication must use the daemon's retained alias of that same
 // backing rather than approximating an atomic through process_vm_writev().
 TEST_F(KfdIoctlTest, DaemonQueueControlUsesSharedUserptrBacking) {
@@ -3704,10 +3704,10 @@ TEST_F(KfdIoctlTest, DaemonQueueControlUsesSharedUserptrBacking) {
                      KFD_IOC_ALLOC_MEM_FLAGS_COHERENT;
   ASSERT_EQ(daemon_driver.ioctl(process_id, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
 
-  const int memfd = daemon_driver.get_mmap_memfd(process_id, allocation.mmap_offset);
-  ASSERT_GE(memfd, 0);
+  const int backing_fd = daemon_driver.get_mmap_backing(process_id, allocation.mmap_offset);
+  ASSERT_GE(backing_fd, 0);
   void *client_mapping = rocjitsu::memory_backing::map(nullptr, kPageSize, PROT_READ | PROT_WRITE,
-                                                       MAP_SHARED, memfd, 0);
+                                                       MAP_SHARED, backing_fd, 0);
   ASSERT_NE(client_mapping, MAP_FAILED) << ::strerror(errno);
   auto *queue = static_cast<amd_queue_t *>(client_mapping);
   queue->read_dispatch_id = 3;
@@ -3760,16 +3760,16 @@ TEST(KfdIoctlStandaloneTest, GetTileConfigReportsRdnaGbAddrConfig) {
 
 TEST_F(KfdIoctlTest, ImportDmabufAndQueryInfo) {
   constexpr size_t kSize = 4096;
-  int memfd = static_cast<int>(syscall(SYS_memfd_create, "kfd_dmabuf_test", MFD_CLOEXEC));
-  ASSERT_GE(memfd, 0);
-  ASSERT_EQ(ftruncate(memfd, kSize), 0);
+  int backing_fd = static_cast<int>(syscall(SYS_memfd_create, "kfd_dmabuf_test", MFD_CLOEXEC));
+  ASSERT_GE(backing_fd, 0);
+  ASSERT_EQ(ftruncate(backing_fd, kSize), 0);
 
-  void *addr = mmap(nullptr, kSize, PROT_READ | PROT_WRITE, MAP_SHARED, memfd, 0);
+  void *addr = mmap(nullptr, kSize, PROT_READ | PROT_WRITE, MAP_SHARED, backing_fd, 0);
   ASSERT_NE(addr, MAP_FAILED);
   std::memset(addr, 0xAB, kSize);
 
   kfd_ioctl_import_dmabuf_args import_args{};
-  import_args.dmabuf_fd = memfd;
+  import_args.dmabuf_fd = backing_fd;
   import_args.gpu_id = kGpuId;
   import_args.va_addr = reinterpret_cast<uint64_t>(addr);
 
@@ -3778,7 +3778,7 @@ TEST_F(KfdIoctlTest, ImportDmabufAndQueryInfo) {
   EXPECT_NE(import_args.handle, 0u);
 
   kfd_ioctl_get_dmabuf_info_args info_args{};
-  info_args.dmabuf_fd = memfd;
+  info_args.dmabuf_fd = backing_fd;
   info_args.metadata_ptr = 0;
   info_args.metadata_size = 0;
 
@@ -3793,7 +3793,7 @@ TEST_F(KfdIoctlTest, ImportDmabufAndQueryInfo) {
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_args), 0);
 
   munmap(addr, kSize);
-  close(memfd);
+  close(backing_fd);
 }
 
 TEST_F(KfdIoctlTest, SvmSetAndGetAttributes) {
@@ -8012,7 +8012,7 @@ TEST_F(KfdIoctlTest, DestructorDrainsMultiplyOpenedProcess) {
 
     // daemon_driver goes out of scope here -> ~SimulatedKfd must drain the
     // still-open (refcount 1) process fully. Under ASan/leak checking this fails
-    // if the destructor leaks the process's allocation/memfd.
+    // if the destructor leaks the process's allocation/backing descriptor.
   }
   // No crash / no leak reported == pass. (pid intentionally unused past scope.)
   (void)pid;

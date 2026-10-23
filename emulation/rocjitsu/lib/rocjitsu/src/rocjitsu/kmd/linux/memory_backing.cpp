@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/kmd/linux/memory_backing.h"
+#include "rocjitsu/kmd/linux/syscall_compat.h"
 
 #include "rocjitsu/kmd/linux/libc_passthrough.h"
 #include "util/log.h"
@@ -11,6 +12,7 @@
 #include <climits>
 #include <csignal>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
 #include <fcntl.h>
@@ -34,23 +36,6 @@
 #include <sys/wait.h>
 #include <type_traits>
 #include <unistd.h>
-
-// The CI base image has older libc/kernel headers than its running kernel.
-// These recent syscall numbers are shared by all architectures ROCm targets.
-#ifndef SYS_pidfd_open
-#ifdef __NR_pidfd_open
-#define SYS_pidfd_open __NR_pidfd_open
-#else
-#define SYS_pidfd_open 434
-#endif
-#endif
-#ifndef SYS_close_range
-#ifdef __NR_close_range
-#define SYS_close_range __NR_close_range
-#else
-#define SYS_close_range 436
-#endif
-#endif
 
 namespace rocjitsu::memory_backing {
 namespace {
@@ -108,7 +93,7 @@ bool identify(int fd, Identity &identity) {
   return found;
 }
 
-enum class Operation : uint32_t { Backing, SizeFile };
+enum class Operation : uint32_t { Backing, SizeFile, PreallocatedBacking, TokenBacking };
 
 struct Request {
   uint64_t size;
@@ -253,7 +238,7 @@ Region *create_region(size_t size) {
 // that limit permits; unlike the application, it never runs application code
 // that can lower the limit concurrently with sizing a file. An inherited hard
 // limit is handled by shared RAM below, without changing application limits.
-int create_file(size_t size) {
+int create_file(size_t size, bool preallocate) {
   rlimit limit{};
   if (host_call(SYS_prlimit64, 0, RLIMIT_FSIZE, nullptr, &limit) != 0)
     return -1;
@@ -271,6 +256,8 @@ int create_file(size_t size) {
     errno = error;
     return -1;
   }
+  if (preallocate)
+    host_call(SYS_fallocate, fd, 0, 0, size);
   return fd;
 }
 
@@ -468,12 +455,19 @@ void *watch_lease(void *argument) {
         char byte = 0;
         if (receive_descriptor(reply, &byte, 1, descriptor, MSG_DONTWAIT) == 1 && descriptor >= 0)
           result = host_call(SYS_ftruncate, descriptor, request.size) == 0 ? 0 : errno;
-      } else if (request.operation == Operation::Backing &&
+      } else if ((request.operation == Operation::Backing ||
+                  request.operation == Operation::PreallocatedBacking ||
+                  request.operation == Operation::TokenBacking) &&
                  (request.mode == O_RDONLY || request.mode == O_RDWR) &&
                  (token->region || (request.size && request.size <= SIZE_MAX))) {
         if (!token->region) {
-          descriptor = create_file(request.size);
-          result = descriptor >= 0 ? 0 : errno;
+          if (request.operation == Operation::TokenBacking) {
+            result = EFBIG;
+          } else {
+            descriptor =
+                create_file(request.size, request.operation == Operation::PreallocatedBacking);
+            result = descriptor >= 0 ? 0 : errno;
+          }
         }
         if (token->region || result == EFBIG) {
           Region *region = token->region ? token->region : create_region(request.size);
@@ -501,11 +495,11 @@ void *watch_lease(void *argument) {
 }
 
 int request_backing(int socket, size_t size, int mode, int sized_file = -1,
-                    bool *disconnected = nullptr) {
+                    bool *disconnected = nullptr, Operation operation = Operation::Backing) {
   int reply[2];
   if (host_call(SYS_socketpair, AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, reply) != 0)
     return -1;
-  const Request request{size, mode, sized_file >= 0 ? Operation::SizeFile : Operation::Backing};
+  const Request request{size, mode, sized_file >= 0 ? Operation::SizeFile : operation};
   int result = 0;
   if (sized_file >= 0) {
     const char byte = 0;
@@ -550,9 +544,20 @@ std::string keeper_path() {
         if (host_call(SYS_faccessat, AT_FDCWD, installed.c_str(), X_OK) == 0)
           return installed.string();
       }
+      // Match actual build output directories, not arbitrary descendants: an
+      // install staging prefix may itself live beneath the build directory.
+      for (const char *directory : {RJ_MEMORY_KEEPER_BUILD_LIBDIR, RJ_MEMORY_KEEPER_BUILD_BINDIR,
+                                    RJ_MEMORY_KEEPER_BUILD_TESTDIR}) {
+        if (!*directory)
+          continue;
+        const auto build = std::filesystem::canonical(directory, error);
+        if (!error && library.parent_path() == build)
+          return RJ_MEMORY_KEEPER_BUILD_PATH;
+      }
     }
   }
-  return RJ_MEMORY_KEEPER_BUILD_PATH;
+  // An installed object must not silently use a helper from another build.
+  return {};
 }
 
 // The bootstrap and its child execute only async-signal-safe syscalls. They
@@ -567,7 +572,7 @@ std::string keeper_path() {
 // NOFILE may have been lowered below descriptors inherited from the application.
 // Enumerate the actual table without libc directory streams after the raw clone.
 bool close_inherited_fds() {
-  if (host_call(SYS_close_range, 6u, UINT_MAX, 0u) == 0)
+  if (host_call(SYS_close_range, static_cast<unsigned>(kFirstUnreservedFd), UINT_MAX, 0u) == 0)
     return true;
   const int directory =
       host_call(SYS_openat, AT_FDCWD, "/proc/self/fd", O_RDONLY | O_DIRECTORY | O_CLOEXEC, 0);
@@ -611,8 +616,8 @@ bool close_inherited_fds() {
           break;
         number = number * 10 + digit;
       }
-      if (index && index < entry->record_size - name_offset && name[index] == '\0' && number >= 6 &&
-          number != static_cast<unsigned>(directory))
+      if (index && index < entry->record_size - name_offset && name[index] == '\0' &&
+          number >= kFirstUnreservedFd && number != static_cast<unsigned>(directory))
         close_fd(static_cast<int>(number));
       position += entry->record_size;
     }
@@ -625,22 +630,23 @@ bool close_inherited_fds() {
 [[noreturn]] void exec_keeper(int control, int lease, int startup, const char *path,
                               const char *owner) {
   // Preserve the incoming descriptors before moving them into fixed slots.
-  const int saved_lease = host_call(SYS_fcntl, lease, F_DUPFD_CLOEXEC, 6);
-  const int saved_startup = host_call(SYS_fcntl, startup, F_DUPFD_CLOEXEC, 6);
+  const int saved_lease = host_call(SYS_fcntl, lease, F_DUPFD_CLOEXEC, kFirstUnreservedFd);
+  const int saved_startup = host_call(SYS_fcntl, startup, F_DUPFD_CLOEXEC, kFirstUnreservedFd);
   if (saved_lease < 0 || saved_startup < 0)
     startup_failed(startup, errno);
-  if (control != 3) {
-    if (host_call(SYS_dup3, control, 3, 0) < 0)
+  if (control != kListenerFd) {
+    if (host_call(SYS_dup3, control, kListenerFd, 0) < 0)
       startup_failed(saved_startup, errno);
   } else {
-    host_call(SYS_fcntl, 3, F_SETFD, 0);
+    host_call(SYS_fcntl, kListenerFd, F_SETFD, 0);
   }
-  if (host_call(SYS_dup3, saved_lease, 4, 0) < 0 || host_call(SYS_dup3, saved_startup, 5, 0) < 0)
+  if (host_call(SYS_dup3, saved_lease, kLeaseFd, 0) < 0 ||
+      host_call(SYS_dup3, saved_startup, kStartupFd, 0) < 0)
     startup_failed(saved_startup, errno);
-  for (int fd = 0; fd < 3; ++fd)
+  for (int fd = 0; fd < kListenerFd; ++fd)
     close_fd(fd);
   if (!close_inherited_fds())
-    startup_failed(5, errno);
+    startup_failed(kStartupFd, errno);
   char *arguments[] = {const_cast<char *>(path), const_cast<char *>(owner), nullptr};
   // The helper links its C++ runtime statically. Application preload and loader
   // configuration must not initialize a simulator inside the helper.
@@ -650,7 +656,7 @@ bool close_inherited_fds() {
   char no_temporary_files[] = "TMPDIR=/dev/null";
   char *environment[] = {no_temporary_files, nullptr};
   host_call(SYS_execve, path, arguments, environment);
-  startup_failed(5, errno);
+  startup_failed(kStartupFd, errno);
 }
 
 std::atomic<pid_t> warned_subreaper{};
@@ -665,7 +671,7 @@ public:
     return owner == getpid() && user == geteuid() && group == getegid();
   }
 
-  int allocate(size_t size, int sized_file, bool &retry) {
+  int allocate(size_t size, int sized_file, bool &retry, Operation operation) {
     std::lock_guard lock(mutex_);
     // A caller may have obtained this pointer just before a credential change
     // replaced it. Never restart an unreachable helper after retirement.
@@ -684,7 +690,7 @@ public:
       int descriptor = -1;
       bool disconnected = false;
       if (host_call(SYS_connect, socket, &address_, length_) == 0)
-        descriptor = request_backing(socket, size, O_RDWR, sized_file, &disconnected);
+        descriptor = request_backing(socket, size, O_RDWR, sized_file, &disconnected, operation);
       else
         disconnected = errno == ECONNREFUSED;
       const int error = errno;
@@ -746,11 +752,14 @@ private:
     if (host_call(SYS_faccessat, AT_FDCWD, path, X_OK) != 0)
       return -1;
     int subreaper = 0;
-    if (host_call(SYS_prctl, PR_GET_CHILD_SUBREAPER, &subreaper, 0, 0, 0) == 0 && subreaper &&
+    host_call(SYS_prctl, PR_GET_CHILD_SUBREAPER, &subreaper, 0, 0, 0);
+    if ((subreaper || owner == 1 || getppid() == 1) &&
         warned_subreaper.exchange(owner, std::memory_order_relaxed) != owner)
       util::Logger::warn("Memory keeper child-wait isolation is unsupported for child "
-                         "subreapers; wait for known application child PIDs instead of all "
-                         "children, and expect keeper SIGCHLD notifications");
+                         "subreapers and PID-1 owners. PID 1 or the adopting subreaper must "
+                         "reap exited keepers with waitpid(..., WNOHANG), including after "
+                         "application children exit; use a reaping init such as tini in "
+                         "containers. Do not block waiting for live keepers");
     uint64_t nonce = 0;
     long random_bytes;
     do {
@@ -881,13 +890,13 @@ Keeper *get_keeper() {
   return current;
 }
 
-int allocate_backing(size_t size, int sized_file = -1) {
+int allocate_backing(size_t size, int sized_file = -1, Operation operation = Operation::Backing) {
   for (;;) {
     auto *current = get_keeper();
     if (!current)
       return -1;
     bool retry = false;
-    const int result = current->allocate(size, sized_file, retry);
+    const int result = current->allocate(size, sized_file, retry, operation);
     if (!retry)
       return result;
   }
@@ -899,12 +908,16 @@ int allocate_backing(size_t size, int sized_file = -1) {
   keep_regions(listener, lease, startup, owner);
 }
 
-int create(size_t size) {
+int create(size_t size, bool preallocate) {
   if (!size || size > static_cast<size_t>(std::numeric_limits<off_t>::max())) {
     errno = EINVAL;
     return -1;
   }
-  return allocate_backing(size);
+  const char *force_token = std::getenv("RJ_TEST_FORCE_TOKEN_BACKING");
+  const auto operation = force_token && std::strcmp(force_token, "1") == 0 ? Operation::TokenBacking
+                         : preallocate ? Operation::PreallocatedBacking
+                                       : Operation::Backing;
+  return allocate_backing(size, -1, operation);
 }
 
 int populate_file(int fd, const void *data, size_t size) {
@@ -1041,11 +1054,18 @@ void *map(void *addr, size_t length, int prot, int flags, int fd, off_t offset) 
     errno = EINVAL;
     return MAP_FAILED;
   }
-  if (flags & MAP_FIXED_NOREPLACE) {
+  int placement_flags = flags & MAP_FIXED_NOREPLACE;
+#ifdef MAP_32BIT
+  if (!(flags & MAP_FIXED))
+    placement_flags |= flags & MAP_32BIT;
+#endif
+  const bool reserve_target = placement_flags != 0;
+  if (reserve_target) {
     const long reservation = host_call(SYS_mmap, addr, mapped_size, PROT_NONE,
-                                       MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+                                       MAP_PRIVATE | MAP_ANONYMOUS | placement_flags, -1, 0);
     if (reservation == -1)
       return MAP_FAILED;
+    addr = reinterpret_cast<void *>(reservation);
     flags |= MAP_FIXED;
   }
   // An unmapped MAP_FIXED target may itself be selected by shmat. Keep
@@ -1061,7 +1081,7 @@ void *map(void *addr, size_t length, int prot, int flags, int fd, off_t offset) 
       const int error = errno;
       for (unsigned index = 0; index < count; ++index)
         host_call(SYS_shmdt, attachments[index]);
-      if (flags & MAP_FIXED_NOREPLACE)
+      if (reserve_target)
         host_call(SYS_munmap, addr, mapped_size);
       errno = error;
       return MAP_FAILED;
@@ -1083,7 +1103,7 @@ void *map(void *addr, size_t length, int prot, int flags, int fd, off_t offset) 
                        MREMAP_MAYMOVE | ((flags & MAP_FIXED) ? MREMAP_FIXED : 0), addr);
   const int error = errno;
   host_call(SYS_shmdt, source);
-  if (mapped == -1 && (flags & MAP_FIXED_NOREPLACE))
+  if (mapped == -1 && reserve_target)
     host_call(SYS_munmap, addr, mapped_size);
   errno = error;
   return reinterpret_cast<void *>(mapped);

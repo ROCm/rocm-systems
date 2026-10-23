@@ -121,6 +121,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         target_compile_definitions(
             ${_target}
             PRIVATE
+                RJ_MEMORY_KEEPER_BUILD_LIBDIR="$<TARGET_FILE_DIR:rocjitsu_shared>"
+                RJ_MEMORY_KEEPER_BUILD_BINDIR="$<TARGET_FILE_DIR:rocjitsu_bin>"
+                RJ_MEMORY_KEEPER_BUILD_TESTDIR="$<$<BOOL:${BUILD_TESTING}>:$<TARGET_FILE_DIR:rocjitsu_tests>>"
                 RJ_MEMORY_KEEPER_BUILD_PATH="$<TARGET_FILE:rocjitsu_memory>"
                 RJ_MEMORY_KEEPER_INSTALL_PATH="${_rj_keeper_relative}"
                 RJ_MEMORY_KEEPER_BIN_INSTALL_PATH="${_rj_keeper_bin_relative}"

@@ -8,9 +8,9 @@
 /// @brief Client-side RPC stub that forwards KFD ioctls to the rocjitsu daemon.
 ///
 /// @details Implements the Driver interface by serializing ioctl requests over
-/// a Unix domain socket to the daemon process. GPU memory is shared via memfds
-/// passed through SCM_RIGHTS. The client mmaps these memfds locally at the
-/// addresses ROCR's FMM expects.
+/// a Unix domain socket to the daemon process. GPU memory is shared via backings
+/// passed through SCM_RIGHTS. The client maps them locally through the backing
+/// adapter at the addresses ROCR's FMM expects.
 
 #include "rocjitsu/kmd/linux/sysfs.h"
 #include "rocjitsu/vm/driver.h"
@@ -112,30 +112,30 @@ public:
     return ptracer_verdict_;
   }
 
-  /// @brief Outcome of find_memfd_for_addr(): distinguishes "no matching range"
-  /// from "range matched but the memfd dup failed".
+  /// @brief Outcome of find_backing_for_addr(): distinguishes "no matching range"
+  /// from "range matched but the backing descriptor dup failed".
   /// @details The caller must treat these differently: kNotFound means fall back
   /// to the normal (anonymous) mapping; kDupFailed means a daemon-shared range
   /// DID cover the address but we could not hand out a descriptor for it (e.g.
   /// EMFILE/ENFILE), so falling back to an anonymous mapping would silently break
   /// the shared-memory invariant — the caller should fail the mmap instead.
-  enum class MemfdLookup { kNotFound, kFound, kDupFailed };
+  enum class BackingLookup { kNotFound, kFound, kDupFailed };
 
-  /// @brief Find a stored memfd that covers the given GPUVM address.
+  /// @brief Find a stored backing descriptor that covers the given GPUVM address.
   /// @details Used by the interposer to intercept anonymous MAP_FIXED at
-  /// addresses that have daemon-shared memfd mappings.
+  /// addresses that already map daemon-shared memory.
   /// @param addr The target address to look up.
   /// @param length The mapping length.
-  /// @param[out] memfd_out On kFound, a NEWLY DUP'd memfd covering this address.
+  /// @param[out] backing_out On kFound, a NEWLY DUP'd backing descriptor covering this address.
   ///             The caller OWNS this descriptor and MUST close() it after use;
   ///             it is a dup (taken under the RPC lock) so its lifetime is
   ///             independent of this RemoteDriver and a concurrent close() cannot
   ///             invalidate it mid-use.
-  /// @param[out] memfd_offset On kFound, the offset within the memfd.
+  /// @param[out] backing_offset On kFound, the offset within the backing.
   /// @returns kFound if a range matched and the dup succeeded; kDupFailed if a
   ///          range matched but the dup failed; kNotFound if no range matched.
-  [[nodiscard]] MemfdLookup find_memfd_for_addr(void *addr, size_t length, int *memfd_out,
-                                                off_t *memfd_offset);
+  [[nodiscard]] BackingLookup find_backing_for_addr(void *addr, size_t length, int *backing_out,
+                                                    off_t *backing_offset);
 
   /// @brief Perform the RPC handshake with the daemon.
   /// @details Sends RPC_HANDSHAKE, receives the topology path and gpu_id,
@@ -191,7 +191,7 @@ public:
 
 private:
   int send_ioctl(unsigned long request, void *arg);
-  int send_mmap(void *addr, size_t length, int prot, int flags, off_t offset, int *memfd_out);
+  int send_mmap(void *addr, size_t length, int prot, int flags, off_t offset, int *backing_out);
 
   /// @brief Mark the RPC stream unusable and make the connection terminal.
   /// @details Called from every framing failure — a half-written request, a
@@ -231,17 +231,17 @@ private:
   /// socket writes without this lock, corrupting the RPC stream.
   std::mutex rpc_mutex_;
 
-  /// @brief Memfds received from the daemon during ALLOC_MEMORY, keyed by handle.
-  std::unordered_map<uint64_t, int> handle_memfds_;
+  /// @brief Backing descriptors received during ALLOC_MEMORY, keyed by handle.
+  std::unordered_map<uint64_t, int> handle_backings_;
 
-  /// @brief Maps GPUVM addresses to allocation memfds for anonymous MAP_FIXED
+  /// @brief Maps GPUVM addresses to allocation backings for anonymous MAP_FIXED
   /// interception. When ROCR's FMM does anonymous MAP_FIXED at a GPUVM address
-  /// that already has a daemon-shared memfd, we use the memfd instead to
-  /// preserve cross-process sharing. Keyed by alloc va_addr, value is memfd.
+  /// that already has daemon-shared memory, we map its backing to preserve
+  /// cross-process sharing. Keyed by allocation VA.
   struct AllocRange {
     uint64_t va;
     uint64_t size;
-    int memfd;
+    int backing_fd;
   };
   std::vector<AllocRange> alloc_ranges_;
 };

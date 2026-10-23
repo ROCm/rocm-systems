@@ -2475,12 +2475,21 @@ public:
   struct GemSubmissionLease {
     InterposerContext *context;
     std::vector<uint32_t> handles;
+    void *fence_view = nullptr;
+    size_t fence_view_size = 0;
     bool active = false;
     ~GemSubmissionLease() { release(); }
     void release(SimulatedKfd *executing_driver = nullptr) {
-      if (!active)
+      if (!active && !fence_view)
         return;
       std::lock_guard lock(context->fd_mutex_);
+      if (fence_view) {
+        auto mapping_lock = rocjitsu::host_mapping_lock().lock_exclusive();
+        InterposerContext::real().munmap(fence_view, fence_view_size);
+        fence_view = nullptr;
+      }
+      if (!active)
+        return;
       for (auto handle : handles) {
         auto it = context->gem_entries_.find(handle);
         assert(it != context->gem_entries_.end() && it->second.submission_refs);
@@ -2690,19 +2699,24 @@ public:
               user_fence->offset > it->second.size - 8)
             return -EINVAL;
           auto &gem = it->second;
-          // The submission lease retains this mapping even if GEM_CLOSE arrives
-          // before completion. File writes cannot address fallback socket tokens.
-          if (!gem.cpu_ptr) {
+          if (gem.cpu_ptr) {
+            fence_address = static_cast<uint8_t *>(gem.cpu_ptr) + user_fence->offset;
+          } else {
+            // A fence-only BO needs one page, not a full CPU view of the BO.
+            // The lease retains the view through GEM_CLOSE and rejected enqueue.
+            const size_t page = sysconf(_SC_PAGESIZE);
+            const uint64_t offset = user_fence->offset / page * page;
             auto mapping_lock = rocjitsu::host_mapping_lock().lock_exclusive();
             void *mapping = gem.dmabuf_fd->use([&](int fd) {
-              return rocjitsu::memory_backing::map(nullptr, gem.size, PROT_READ | PROT_WRITE,
-                                                   MAP_SHARED, fd, 0);
+              return rocjitsu::memory_backing::map(nullptr, page, PROT_READ | PROT_WRITE,
+                                                   MAP_SHARED, fd, offset);
             });
             if (mapping == MAP_FAILED)
               return -errno;
-            gem.cpu_ptr = mapping;
+            retained->fence_view = mapping;
+            retained->fence_view_size = page;
+            fence_address = static_cast<uint8_t *>(mapping) + (user_fence->offset - offset);
           }
-          fence_address = static_cast<uint8_t *>(gem.cpu_ptr) + user_fence->offset;
         }
         for (auto handle : retained->handles)
           ++gem_entries_.at(handle).submission_refs;
@@ -5653,12 +5667,13 @@ static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, o
     return remote_mmap->mmap(addr, length, prot, flags, offset);
 
   if (fd < 0 && (flags & MAP_FIXED) && prot != PROT_NONE && addr) {
-    int memfd_out = -1;
-    off_t memfd_offset = 0;
-    auto remote_memfd = InterposerContext::ctx.remote();
-    if (remote_memfd) {
-      auto lookup = remote_memfd->find_memfd_for_addr(addr, length, &memfd_out, &memfd_offset);
-      if (lookup == RemoteDriver::MemfdLookup::kDupFailed) {
+    int backing_out = -1;
+    off_t backing_offset = 0;
+    auto remote_backing = InterposerContext::ctx.remote();
+    if (remote_backing) {
+      auto lookup =
+          remote_backing->find_backing_for_addr(addr, length, &backing_out, &backing_offset);
+      if (lookup == RemoteDriver::BackingLookup::kDupFailed) {
         // A daemon-shared range covered this address but we could not obtain a
         // descriptor for it. Falling back to an anonymous mapping would silently
         // detach it from the shared memory, so fail the mmap instead. Preserve
@@ -5666,24 +5681,24 @@ static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, o
         // clobbering it, so the caller sees the real failure cause.
         return MAP_FAILED;
       }
-      if (lookup == RemoteDriver::MemfdLookup::kFound) {
-        // memfd_out is a caller-owned dup; close it once we are done. Its
+      if (lookup == RemoteDriver::BackingLookup::kFound) {
+        // backing_out is a caller-owned dup; close it once we are done. Its
         // validity is independent of a concurrent RemoteDriver teardown/close.
-        auto total = static_cast<off_t>(length) + memfd_offset;
-        if (rocjitsu::memory_backing::ensure_size(memfd_out, total) != 0) {
+        auto total = static_cast<off_t>(length) + backing_offset;
+        if (rocjitsu::memory_backing::ensure_size(backing_out, total) != 0) {
           const int error = errno;
-          InterposerContext::real().close(memfd_out);
+          InterposerContext::real().close(backing_out);
           errno = error;
           return MAP_FAILED;
         }
         auto *raw = with_host_mapping_held([&] {
           return rocjitsu::memory_backing::map(addr, length, prot,
                                                (flags & ~(MAP_ANONYMOUS | MAP_TYPE)) | MAP_SHARED,
-                                               memfd_out, memfd_offset);
+                                               backing_out, backing_offset);
         });
         // Preserve the mmap errno across close() (which may set its own).
         int mmap_errno = errno;
-        InterposerContext::real().close(memfd_out);
+        InterposerContext::real().close(backing_out);
         if (raw != MAP_FAILED) {
 #ifdef MADV_POPULATE_WRITE
           InterposerContext::real().madvise(raw, length, MADV_POPULATE_WRITE);

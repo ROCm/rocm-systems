@@ -4,17 +4,21 @@
 #include "rocjitsu/kmd/linux/libc_passthrough.h"
 #include "rocjitsu/kmd/linux/memory_backing.h"
 
+#include "rocjitsu/kmd/linux/syscall_compat.h"
+
 #include <gtest/gtest.h>
 
 #include <atomic>
 #include <cerrno>
 #include <csignal>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
 #include <linux/filter.h>
 #include <linux/seccomp.h>
 #include <poll.h>
+#include <sched.h>
 #include <string>
 #include <sys/mman.h>
 #include <sys/prctl.h>
@@ -26,19 +30,6 @@
 #include <thread>
 #include <unistd.h>
 #include <vector>
-
-// Match the driver's compatibility with the older headers in the CI image.
-#ifndef SYS_pidfd_open
-#ifdef __NR_pidfd_open
-#define SYS_pidfd_open __NR_pidfd_open
-#else
-#define SYS_pidfd_open 434
-#endif
-#endif
-
-#ifndef SYS_close_range
-#define SYS_close_range 436
-#endif
 
 namespace {
 namespace backing = rocjitsu::memory_backing;
@@ -52,6 +43,36 @@ protected:
     ASSERT_EQ(std::fflush(stdout), 0);
   }
 };
+
+TEST_F(MemoryBackingDeathTest, NativePreallocationAndForcedTokensPreserveMetadata) {
+  ASSERT_EXIT(
+      {
+        const int sparse = backing::create(kSize);
+        const int committed = backing::create(kSize, true);
+        struct stat sparse_info {};
+        struct stat committed_info {};
+        bool okay = sparse >= 0 && committed >= 0 && fstat(sparse, &sparse_info) == 0 &&
+                    fstat(committed, &committed_info) == 0 && sparse_info.st_blocks == 0 &&
+                    committed_info.st_blocks >= static_cast<blkcnt_t>(kSize / 512);
+        setenv("RJ_TEST_FORCE_TOKEN_BACKING", "1", 1);
+        const int token = backing::create(kSize, true);
+        char path[] = "/tmp/rocjitsu-metadata-XXXXXX";
+        const int metadata = mkstemp(path);
+        unlink(path);
+        const char contents[] = "metadata";
+        okay = okay && token >= 0 && backing::contains(token) && metadata >= 0 &&
+               backing::populate_file(metadata, contents, sizeof(contents)) == 0;
+        char observed[sizeof(contents)]{};
+        okay = okay && pread(metadata, observed, sizeof(observed), 0) == sizeof(observed) &&
+               std::memcmp(contents, observed, sizeof(contents)) == 0;
+        close(metadata);
+        close(token);
+        close(committed);
+        close(sparse);
+        _exit(okay ? 0 : 1);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
 
 void check_inherited_descriptors() {
   int pipes[2];
@@ -439,7 +460,7 @@ volatile sig_atomic_t child_signal = 0;
 void observe_child_signal(int) { child_signal = 1; }
 
 void check_helper_lifecycle(bool subreaper = false) {
-  if (subreaper) {
+  if (subreaper && getpid() != 1) {
     ASSERT_EQ(prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0), 0);
   }
   const rlimit zero{};
@@ -531,6 +552,29 @@ TEST_F(MemoryBackingDeathTest, SubreaperWarnsAboutChildWaitsAndRecoversAfterFail
         _exit(::testing::Test::HasFailure() ? 1 : 0);
       },
       ::testing::ExitedWithCode(0), "");
+}
+
+TEST(MemoryBackingNamespaceTest, NamespaceInitWarnsAndReapsKeepers) {
+  const pid_t child = fork();
+  ASSERT_GE(child, 0);
+  if (child == 0) {
+    if (unshare(CLONE_NEWPID) != 0)
+      _exit(errno == EPERM || errno == EINVAL ? 77 : 1);
+    const pid_t init = fork();
+    if (init == 0) {
+      check_subreaper_warning();
+      _exit(::testing::Test::HasFailure() ? 1 : 0);
+    }
+    int status = 0;
+    _exit(init > 0 && waitpid(init, &status, 0) == init && WIFEXITED(status) ? WEXITSTATUS(status)
+                                                                             : 1);
+  }
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+  ASSERT_TRUE(WIFEXITED(status));
+  if (WEXITSTATUS(status) == 77)
+    GTEST_SKIP() << "Creating a PID namespace requires namespace privileges";
+  EXPECT_EQ(WEXITSTATUS(status), 0);
 }
 
 void check_group_signal() {
