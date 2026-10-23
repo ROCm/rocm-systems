@@ -6,7 +6,7 @@
 
 #include "hip_capture_metadata.h"
 
-#include "amd_comgr/amd_comgr.h"
+#include "device/comgrctx.hpp"
 #include "hip/hip_runtime_api.h"
 
 #include <cstdio>
@@ -117,9 +117,12 @@ void append_prop_fields(std::ostringstream& os, const hipDeviceProp_t& prop) {
 }
 
 std::string collect_comgr_version() {
+  std::call_once(amd::Comgr::initialized, amd::Comgr::LoadLib);
+  if (!amd::Comgr::IsReady()) return "";  // comgr not loaded: nothing to record
+
   size_t major = 0;
   size_t minor = 0;
-  amd_comgr_get_version(&major, &minor);
+  amd::Comgr::get_version(&major, &minor);
   return std::to_string(static_cast<unsigned long long>(major)) + "." +
          std::to_string(static_cast<unsigned long long>(minor));
 }
