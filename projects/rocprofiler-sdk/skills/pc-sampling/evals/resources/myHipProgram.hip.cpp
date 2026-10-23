@@ -21,10 +21,10 @@
 // SOFTWARE.
 
 // Build:
-//   hipcc -O3 -g demo_program.hip.cpp -o demo_program
+//   hipcc -O3 -g myHipProgram.hip.cpp -o myHipProgram
 //
 // Run:
-//   ./demo_program [repeat]     # repeat defaults to 1 (~100 ms of kernel time)
+//   ./myHipProgram [repeat]     # repeat defaults to 1 (~100 ms of kernel time)
 
 #include <hip/hip_runtime.h>
 
