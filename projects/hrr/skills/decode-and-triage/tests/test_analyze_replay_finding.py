@@ -30,7 +30,8 @@ Reason: Write access to a read-only page
         self.assertIn("Cijk_Test", finding.kernel_name or "")
 
     def test_version_mismatch_from_info(self) -> None:
-        text = "[HRR] Version mismatch: file=3 reader=4\n"
+        # hrr_reader.cpp: "[HRR] Version mismatch in %s: file=%u reader=%u\n"
+        text = "[HRR] Version mismatch in /data/hrr/pid-4242/events.bin: file=3 reader=4\n"
         finding = arf.Finding(outcome="UNKNOWN", fault_class="unknown")
         arf.parse_text(text, "info", finding)
         self.assertEqual(finding.fault_class, "version_mismatch")
@@ -344,11 +345,51 @@ class RecordedCaptureTests(unittest.TestCase):
         self.assertEqual(finding.last_progress_kernel, "crash_oob")
 
     def test_unreadable_archive_records_both_versions(self) -> None:
+        """hrr_reader.cpp: "[HRR] Version mismatch in %s: file=%u reader=%u\\n"."""
         finding = self._analyze("version_mismatch.log")
         self.assertEqual(finding.fault_class, "version_mismatch")
         self.assertEqual(finding.archive_format_version, 3)
         self.assertEqual(finding.reader_format_version, 4)
         self.assertIsNone(finding.kernel_name)
+
+    def test_memory_fault_bracket_printed_apart_from_its_title(self) -> None:
+        """rocdevice.cpp prints the two parts with separate calls:
+
+        LogError("Memory Fault Error");
+        ClPrint(amd::LOG_NONE, amd::LOG_ALWAYS,
+                "[%sGPU index: %u, faulting addr: 0x%" PRIx64 ", kernel: %s]", ...);
+
+        and debug.cpp log_printf formats each as
+        ":%d:%-25s:%-4d: %010" PRIu64 " us: %s %s\\n".
+        """
+        text = (
+            ":1:rocdevice.cpp            :4039: 0001736211 us:  Memory Fault Error\n"
+            ":0:rocdevice.cpp            :4055: 0001736215 us:  [host: node1, "
+            "GPU index: 0, faulting addr: 0x7f8c11a00000, kernel: crash_oob]\n"
+        )
+        finding = arf.Finding(outcome="UNKNOWN", fault_class="unknown")
+        arf.parse_text(text, "replay.log", finding)
+        self.assertEqual(finding.outcome, "MAF")
+        self.assertEqual(finding.fault_class, "illegal_memory_access")
+        self.assertEqual(finding.fault_address, "0x7f8c11a00000")
+        self.assertEqual(finding.kernel_name, "crash_oob")
+
+    def test_sync_after_launch_error_names_the_kernel(self) -> None:
+        """hip_playback.cpp prints
+        "[HRR] GPU error after '%s': %d (%s) last=%d (%s)\\n" and hrr_playback.cpp
+        "[HRR] Fatal: T%llu Event %zu (%s) returned %d (%s) — aborting replay\\n".
+        """
+        text = (
+            "[HRR] GPU error after 'crash_oob': 719 (unspecified launch failure) "
+            "last=719 (unspecified launch failure)\n"
+            "[HRR] Fatal: T0 Event 12 (hipLaunchKernel) returned 719 "
+            "(unspecified launch failure) — aborting replay\n"
+        )
+        finding = arf.Finding(outcome="UNKNOWN", fault_class="unknown")
+        arf.parse_text(text, "replay.log", finding)
+        self.assertEqual(finding.fault_class, "replay_fatal_api")
+        self.assertEqual(finding.failing_call_index, 12)
+        self.assertEqual(finding.kernel_name, "crash_oob")
 
 
 if __name__ == "__main__":
