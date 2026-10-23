@@ -965,10 +965,13 @@ fn read_node(
     }
     let sdma_ip = sdma_version(drm, render)?;
     // This transport publishes monotonic 64-bit byte indices and 64-bit
-    // doorbells across the supported GFX10.1–GFX12 native targets.
+    // doorbells across the supported GFX9–GFX12 native targets. GFX9 uses
+    // ROCr's SDMA v4 packet path, so its IP version must match that dialect.
     // Commands remain target-specific and caller-owned; a discovered SDMA IP
     // does not change any frontend's advertised transport revision.
-    let sdma_qualified = ((100_100..=120_001).contains(&gfx) || gfx == 120_500)
+    let gfx9_sdma = matches!(gfx, 90008 | 90010 | 90402 | 90500)
+        && sdma_ip.is_some_and(|(major, _, _)| major == 4);
+    let sdma_qualified = (gfx9_sdma || (100_100..=120_001).contains(&gfx) || gfx == 120_500)
         && sdma.unwrap_or(0) != 0
         && sdma_queues.unwrap_or(0) != 0;
 
@@ -1082,6 +1085,7 @@ fn read_node(
                 gws_count,
                 iommu_v2_supported: capability & (1 << 1) != 0,
                 coherent_host_access: capability & (1 << 28) != 0,
+                sram_ecc_enabled: capability & 0x0400_0000 != 0,
                 packet_processor_firmware_version: p.optional_u32("fw_version")?.unwrap_or(0)
                     & 0x3ff,
                 sdma_firmware_version: p.optional_u32("sdma_fw_version")?.unwrap_or(0) & 0x3ff,

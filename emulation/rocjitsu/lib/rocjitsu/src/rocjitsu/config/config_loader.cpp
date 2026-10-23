@@ -996,10 +996,12 @@ ExecutionThreadSettings execution_thread_settings(const fb::SimulationConfig *co
   return settings;
 }
 
-util::FailureOr<LoadedConfig> build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config,
-                                            uint32_t host_threads, std::string_view node_id,
-                                            util::DiagnosticEmitter emit_error,
-                                            BuildMode build_mode = BuildMode::Full) {
+util::FailureOr<LoadedConfig>
+build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint32_t host_threads,
+              std::string_view node_id, util::DiagnosticEmitter emit_error,
+              BuildMode build_mode = BuildMode::Full,
+              std::optional<std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources>>
+                  async_resources_override = std::nullopt) {
   CfgMap cu_overrides;
   if (const auto *setting = fb_config->wait_checking()) {
     const auto mode = parse_wait_checking(setting->string_view());
@@ -1096,7 +1098,14 @@ util::FailureOr<LoadedConfig> build_from_fb(const rocjitsu::fb::SimulationConfig
   result.execution_threads = thread_settings.resolve(host_threads);
   if (!result.engine_config.num_threads)
     result.engine_config.num_threads = result.execution_threads.engines;
-  result.async_resources = make_async_execution_resources(result.execution_threads.helpers);
+  if (async_resources_override) {
+    result.async_resources = std::move(*async_resources_override);
+    result.execution_threads.helpers =
+        result.async_resources ? result.async_resources->helpers() : 0;
+    result.async_helper_threads = static_cast<int32_t>(result.execution_threads.helpers);
+  } else {
+    result.async_resources = make_async_execution_resources(result.execution_threads.helpers);
+  }
   result.build_result =
       build_topology(topo_def, result.exec_mode, arch, result.target, result.async_resources,
                      result.device.num_cu_per_sh, result.device.num_shader_arrays_per_engine,
@@ -1367,6 +1376,19 @@ util::FailureOr<LoadedConfig> load_config_from_string_for_node(const std::string
                                                                util::DiagnosticEmitter emit_error) {
   return load_config_from_string_for_node(json, schema_text, node_id, emit_error,
                                           amdgpu::available_host_threads());
+}
+
+util::FailureOr<LoadedConfig> load_config_from_string(
+    const std::string &json, const std::string &schema_text, util::DiagnosticEmitter emit_error,
+    uint32_t host_threads,
+    std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources> async_resources) {
+  return with_config_json(json, schema_text, emit_error,
+                          [host_threads, emit_error, async_resources = std::move(async_resources)](
+                              const fb::SimulationConfig *fb_config) mutable {
+                            return build_from_fb(fb_config, host_threads, {}, emit_error,
+                                                 BuildMode::Full,
+                                                 std::optional{std::move(async_resources)});
+                          });
 }
 
 } // namespace config

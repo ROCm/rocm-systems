@@ -3145,34 +3145,40 @@ def test_cdna4_fp8_cvt_keeps_ocp_helper_variant():
         encoding_map=None,
     )
 
-    widen = gen_cvt_fp8(SimpleNamespace(**ctx.__dict__, op='pk_f32_fp8'))
+    # CDNA4 keeps util's OCP helpers and its manual's FP16_OVFL rule; see
+    # fp8_formats.fp8_policy.
+    widen = gen_cvt_fp8(SimpleNamespace(**ctx.__dict__, op='pk_f32_fp8', has_abs=True))
     assert 'util::fp8_e4m3_to_f32' in widen
-    assert 'util::fp8_e4m3_fnuz_to_f32' not in widen
+    assert 'amdgpu::conversion::decode_fp8' not in widen
+    assert 'fnuz' not in widen
 
-    narrow = gen_cvt_fp8(SimpleNamespace(**ctx.__dict__, op='pk_fp8_f32'))
+    narrow = gen_cvt_fp8(SimpleNamespace(**ctx.__dict__, op='pk_fp8_f32', has_abs=True))
     assert 'util::f32_to_fp8_e4m3_rne_mode' in narrow
-    assert 'util::f32_to_fp8_e4m3_fnuz_rne_mode' not in narrow
     assert 'wf.fp16_ovfl()' in narrow
+    assert 'amdgpu::conversion_to_fp8' not in narrow
+    assert 'fnuz' not in narrow
 
     unary = _lower_unary('V_CVT_F32_FP8', 'cdna4')
     assert 'util::fp8_e4m3_to_f32' in unary
-    assert 'util::fp8_e4m3_fnuz_to_f32' not in unary
+    assert 'fnuz' not in unary
 
 
-def test_f32_to_f16_vector_conversion_threads_fp16_ovfl():
+def test_f32_to_f16_vector_conversion_resolves_mode_once():
+    # conversion_to_float reads FP16_OVFL and the rounding fields from MODE.
     unary = _lower_unary('V_CVT_F16_F32')
 
-    assert 'util::f32_to_f16_mode(' in unary
-    assert ', wf.fp16_ovfl())' in unary
+    declaration = 'const auto conversion = amdgpu::sdwa_conversion_to_f16<amdgpu::fp_format::F32>('
+    assert declaration in unary
+    assert unary.index(declaration) < unary.index('for (uint32_t lane')
+    assert 'util::f32_to_f16' not in unary
 
 
 def test_fp16_ovfl_sensitive_f16_simd_probes_stay_vectorized():
+    # The scalar body's stage object reads FP16_OVFL when it is resolved.
     cvt_probe = simd_probe_line('v_cvt_f16_f32_vop1')
-    assert cvt_probe is not None
-    assert 'if (wf.fp16_ovfl())' in cvt_probe
-    assert 'util::f32_to_f16_ovfl_simd' in cvt_probe
-    assert 'util::f32_to_f16_simd' in cvt_probe
-    assert 'ROCJITSU_TRY_SIMD_VOP1_UNARY' in cvt_probe
+    assert (
+        cvt_probe == '  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, conversion);'
+    )
 
     add_probe = simd_probe_line('v_add_f16_vop3', true16_vop3=True)
     assert add_probe is not None
@@ -3720,12 +3726,19 @@ def test_generated_f32_to_f64_conversion_applies_vop3_modifiers(
         execute_shared, 'v_cvt_f64_f32_vop3', 'v_cvt_f64_i32_vop1'
     )
 
-    assert (
-        '!inst.inst_.abs && !inst.inst_.neg && !inst.inst_.omod && '
-        '!inst.inst_.clamp' in body
+    # One stage object takes all four fields; the SIMD probe and the scalar
+    # loop both use it, so a modified encoding stays on the SIMD path.
+    declaration = (
+        'const auto conversion =\n'
+        '      amdgpu::conversion_to_float<amdgpu::fp_format::F32, amdgpu::fp_format::F64>(\n'
+        '          wf, inst.inst_.abs, inst.inst_.neg, inst.inst_.omod, inst.inst_.clamp);'
     )
-    assert 'amdgpu::source_modifier::apply_to_float' in body
-    assert 'amdgpu::output_modifier::apply<amdgpu::fp_format::F64>' in body
+    probe = 'ROCJITSU_TRY_SIMD_CONVERSION_TO_F64(conversion);'
+    assert body.count('amdgpu::conversion_to_float<') == 1
+    assert (
+        body.index(declaration) < body.index(probe) < body.index('for (uint32_t lane')
+    )
+    assert '!inst.inst_.abs' not in body
 
 
 def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
@@ -6159,23 +6172,23 @@ def test_generated_dpp_commit_separates_modern_source_and_destination_masks(
         assert 'amdgpu::dpp::dpp_compare_result(' in body
 
 
-def test_rdna1_2_generated_vopc_dpp_is_explicitly_unsupported(
-    amdgpu_generated_root: Path,
+@pytest.mark.parametrize('arch', ('cdna1', 'cdna2', 'cdna3', 'cdna4', 'rdna1', 'rdna2'))
+def test_generated_vopc_dpp_is_explicitly_unsupported(
+    amdgpu_generated_root: Path, arch
 ):
-    for arch in ('rdna1', 'rdna2'):
-        vopc_model = (amdgpu_generated_root / arch / 'vopc.cpp').read_text()
-        vopc_exec = (amdgpu_generated_root / arch / 'vopc_exec.cpp').read_text()
-        assert 'amdgpu::dpp::apply_dpp' not in vopc_exec, arch
-        assert 'dpp_write_mask' not in vopc_exec, arch
-
-        ctor = _generated_decode_body(vopc_model, 'VCmpEqU32Vopc')
-        assert 'emit_error.emit() << "V_CMP_EQ_U32 does not support DPP"' in ctor, arch
-        assert 'amdgpu::dpp::is_src_dpp8(' in ctor, arch
-        assert 'reinterpret_cast<const Vop1VopDpp16MachineInst *>' not in ctor, arch
-
-        body = _generated_method_body(vopc_exec, 'VCmpEqU32Vopc', 'VCmpLeU32Vopc')
-        assert 'throw util::UnimplementedInst(mnemonic());' in body, arch
-        assert 'amdgpu::dpp::is_src_dpp8(inst_.src0)' in body, arch
+    vopc_model = (amdgpu_generated_root / arch / 'vopc.cpp').read_text()
+    vopc_exec = (amdgpu_generated_root / arch / 'vopc_exec.cpp').read_text()
+    assert 'SRC_SDWA' in vopc_exec
+    assert 'SRC_DPP' not in vopc_exec
+    assert 'is_src_dpp8' not in vopc_exec
+    assert 'amdgpu::dpp::apply_dpp' not in vopc_exec
+    assert 'dpp_write_mask' not in vopc_exec
+    assert 'throw util::UnimplementedInst' not in vopc_exec
+    ctor = _generated_decode_body(vopc_model, 'VCmpEqU32Vopc')
+    assert 'emit_error.emit() << "V_CMP_EQ_U32 does not support DPP"' in ctor
+    if arch in ('rdna1', 'rdna2'):
+        assert 'amdgpu::dpp::is_src_dpp8(' in ctor
+        assert 'reinterpret_cast<const Vop1VopDpp16MachineInst *>' not in ctor
 
 
 def test_generated_cmpx_dpp_cleanup_applies_arch_compare_rules(
@@ -6743,6 +6756,7 @@ def test_cdna4_generated_cvt_keeps_ocp_format(
     assert 'inline void execute_v_cvt_f32_bf8_vop1' not in shared
     assert 'inline void execute_v_cvt_f32_fp8_vop3' not in shared
     assert 'inline void execute_v_cvt_f32_bf8_vop3' not in shared
+    # CDNA4 keeps util's OCP helpers; see fp8_formats.fp8_policy.
     assert 'util::fp8_e4m3_to_f32' in cdna4_vop1
     assert 'util::bf8_e5m2_to_f32' in cdna4_vop1
     assert 'util::fp8_e4m3_to_f32' in cdna4_vop3
@@ -6751,6 +6765,8 @@ def test_cdna4_generated_cvt_keeps_ocp_format(
     assert 'util::f32_to_bf8_e5m2_rne_mode' in cdna4_vop3
     assert 'util::f32_to_fp8_e4m3_sr_mode' in cdna4_vop3
     assert 'util::f32_to_bf8_e5m2_sr_mode' in cdna4_vop3
+    assert 'amdgpu::conversion::decode_fp8' not in cdna4_vop1 + cdna4_vop3
+    assert 'amdgpu::conversion_to_fp8' not in cdna4_vop3
     assert 'util::fp8_e4m3_fnuz_to_f32' not in shared
     assert 'util::fp8_e4m3_fnuz_to_f32' not in cdna4_vop1
     assert 'util::fp8_e4m3_fnuz_to_f32' not in cdna4_vop3

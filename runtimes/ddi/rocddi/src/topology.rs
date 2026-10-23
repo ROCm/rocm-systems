@@ -1,26 +1,27 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-//! Passive hardware discovery records and topology relationships.
+//! Passive hardware facts and source-qualified topology relationships.
 //!
-//! An endpoint describes hardware discovered in one generation-consistent
-//! topology snapshot. Optional information from other sources may be populated
-//! later on the same record. Inspecting or cloning an endpoint does not
-//! activate hardware, acquire an address space, or grant access to memory. An
-//! activated endpoint is represented separately by `crate::device::Device`.
+//! The records defined here describe hardware independently of a topology
+//! graph: an endpoint can be opened directly, and cache, link, PCI, and GPU
+//! information can be used without a node ID. `model` defines the sources,
+//! nodes, and relationships that bind those facts into one snapshot. Its public
+//! types are re-exported here so callers have one topology interface.
 //!
-//! Endpoint-kind variants carry only the capabilities meaningful to that kind.
-//! A backend publishes a variant only when it can populate and activate that
-//! endpoint faithfully; an activated device remains a separate session-owned
-//! state object.
+//! An endpoint is a passive discovery record. Optional facts from other
+//! sources may be populated later. Inspecting or cloning one does not activate
+//! hardware, acquire an address space, or grant memory access; an activated
+//! endpoint is a separate session-owned `crate::device::Device`. Endpoint-kind
+//! variants contain only capabilities meaningful to that kind.
 
 use crate::driver;
 use crate::memory::{DeviceAccess, HostCacheability};
 
 pub mod host;
+mod model;
 pub mod platform;
-mod snapshot;
-pub use snapshot::{
+pub use model::{
     AttachmentKind, EndpointAttachment, MemoryLocation, MemoryLocationKind, NativeNodeId, NodeId,
     NodeKind, ReportedRoute, SourceId, SourceKind, TopologyCache, TopologyNode, TopologySnapshot,
     TopologySource,
@@ -183,6 +184,10 @@ pub struct GpuQueueCapabilities {
 /// Required geometry fields must be complete and consistent before this record
 /// is published; opening an endpoint never substitutes guessed dimensions.
 /// Optional DRM facts may be populated later.
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "GPU topology reports independent native capabilities as flags"
+)]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct GpuInfo {
     /// Native KFD GPU identity used to resolve imported allocation placement.
@@ -239,6 +244,8 @@ pub struct GpuInfo {
     pub iommu_v2_supported: bool,
     /// Device-local memory can be coherently accessed by the host.
     pub coherent_host_access: bool,
+    /// SRAM ECC mode reported by the native GPU topology.
+    pub sram_ecc_enabled: bool,
     /// Packet processor firmware revision reported by the backend.
     pub packet_processor_firmware_version: u32,
     /// SDMA firmware revision reported by the backend.

@@ -17,6 +17,7 @@
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/comparison.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/conversion.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/denormal_value.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/division.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
@@ -103,6 +104,13 @@ enum class SimdFastPath : uint8_t {
   VOP3_TERNARY_TRUE16_RAW_FP16,
   VOP3_FMA_FP16,
   VOP_WORDS,
+  VOP1_UNARY,
+  VOP2_BINARY,
+  VOP3_BINARY,
+  VOP3_BINARY_TRUE16_SRC,
+  VOP3_TERNARY,
+  CVT_F64_TO_B32,
+  CVT_B32_TO_F64,
 };
 
 namespace detail {
@@ -818,6 +826,105 @@ inline auto flush_input_then(input_denormal::Policy policy, Op operation) {
       return operation(input_denormal::flush_input<Fmt>(value, policy));
     }
   };
+}
+
+/// @brief The MODE.FP_DENORM field that governs format Fmt.
+template <typename Fmt> inline uint32_t fp_denorm_mode(const Wavefront &wf) {
+  static_assert(std::is_same_v<Fmt, fp_format::F32> || std::is_same_v<Fmt, fp_format::F16> ||
+                    std::is_same_v<Fmt, fp_format::F64>,
+                "Unsupported format for fp_denorm_mode");
+  return std::is_same_v<Fmt, fp_format::F32> ? wf.fp_denorm_mode_f32()
+                                             : wf.fp_denorm_mode_f16_f64();
+}
+
+/// @brief The input flush that MODE selects for a format Fmt source.
+template <typename Fmt> inline input_denormal::Policy input_denormal_policy(const Wavefront &wf) {
+  return input_denormal::Policy::make(fp_denorm_mode<Fmt>(wf));
+}
+
+/// @brief Resolve a conversion to a floating format from MODE and the instruction fields.
+/// @details Each format reads its own MODE fields: the source's input-denormal
+/// control and the destination's rounding, output-denormal and FP16_OVFL
+/// controls. The result is ready for scalar lanes and SIMD batches alike.
+/// @param abs VOP3 ABS field, or zero.
+/// @param neg VOP3 NEG field, or zero.
+/// @param omod VOP3 OMOD field, or zero.
+/// @param clamp VOP3 CLAMP field, or zero.
+template <typename From, typename To>
+inline conversion::ToFloat<From, To> conversion_to_float(const Wavefront &wf, uint32_t abs = 0,
+                                                         uint32_t neg = 0, uint32_t omod = 0,
+                                                         uint32_t clamp = 0) {
+  conversion::ToFloat<From, To> stages;
+  stages.abs = abs;
+  stages.neg = neg;
+  if constexpr (!conversion::is_integer_v<From>)
+    stages.input = input_denormal_policy<From>(wf);
+  stages.output = output_modifier_policy<To>(wf, omod, clamp);
+  // OMOD treats a result that is tiny after rounding as zero, as disabled
+  // output denormals do; output_modifier then makes it +0.
+  const bool flush_tiny = output_denormal::Policy::make(fp_denorm_mode<To>(wf)).flush_outputs ||
+                          stages.output.omod != 0;
+  stages.rounding = {conversion::mode_rounding(stages.output.round_mode), flush_tiny,
+                     std::is_same_v<To, fp_format::F16> && wf.fp16_ovfl()};
+  // gfx1100 keeps a widened signaling NaN unquieted with MODE.IEEE clear, and
+  // quiets every narrowed one.
+  stages.quiet_nan = fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode());
+  return stages;
+}
+
+/// @brief Resolve a VOP1 conversion to F16, which scales by SDWA OMOD before rounding.
+/// @details Keeps the emulator's SDWA F16 order of sdwa::round_f16_result: the
+/// producer scales before narrowing, and sdwa::write_lane then applies OMOD's zero
+/// rules and CLAMP. gfx1030 captures disagree: SDWA F16 conversions match VOP3,
+/// rounding first (65535 div:2 gives 0x7c00, not 0x7800). Without SDWA there is no OMOD.
+template <typename From, typename Inst>
+inline conversion::ToFloat<From, fp_format::F16> sdwa_conversion_to_f16(const Inst &inst,
+                                                                        const Wavefront &wf) {
+  auto stages = conversion_to_float<From, fp_format::F16>(wf);
+  constexpr int32_t kScale[] = {0, 1, 2, -1};
+  stages.rounding.prescale = kScale[sdwa::output_modifier<sdwa::ResultFormat::F16>(inst, wf) & 3u];
+  return stages;
+}
+
+/// @brief Resolve V_CVT_FLOOR_I32_F32 or V_CVT_NEAREST_I32_F32 (conversion::FloorI32,
+/// conversion::NearestI32) from the F32 input-denormal control and ABS/NEG.
+template <typename Op>
+inline Op conversion_f32_to_integer(const Wavefront &wf, uint32_t abs = 0, uint32_t neg = 0) {
+  return {abs, neg, input_denormal_policy<fp_format::F32>(wf)};
+}
+
+/// @brief Resolve V_CVT_PK_U8_F32, which rounds in the F32 MODE.FP_ROUND field.
+inline conversion::PackU8 conversion_pk_u8(const Wavefront &wf, uint32_t abs = 0,
+                                           uint32_t neg = 0) {
+  return {abs, neg, input_denormal_policy<fp_format::F32>(wf),
+          conversion::mode_rounding(wf.fp_round_mode_f32())};
+}
+
+/// @brief Resolve V_PACK_B32_F16 from MODE and the target's NaN quieting.
+inline conversion::PackB32F16 conversion_pack_b32_f16(const Wavefront &wf, uint32_t abs = 0,
+                                                      uint32_t neg = 0) {
+  return {abs, neg, input_denormal_policy<fp_format::F16>(wf),
+          fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode())};
+}
+
+/// @brief Resolve an F32-to-FP8/BF8 conversion; FP16_OVFL saturates finite overflow.
+template <typename Fmt>
+inline conversion::ToFp8<Fmt> conversion_to_fp8(const Wavefront &wf, uint32_t abs = 0,
+                                                uint32_t neg = 0) {
+  return {abs, neg, input_denormal_policy<fp_format::F32>(wf), wf.fp16_ovfl()};
+}
+
+/// @brief Resolve V_CVT_PK_RTZ_F16_F32: each F32 source rounds toward zero into one half.
+/// @details MODE.FP_ROUND is ignored. ABS/NEG bit i applies to source i; OMOD and
+/// CLAMP are not applied to the packed result.
+inline conversion::PackedF16<fp_format::F32>
+conversion_pk_rtz_f16(const Wavefront &wf, uint32_t abs = 0, uint32_t neg = 0) {
+  conversion::PackedF16<fp_format::F32> packed{
+      conversion_to_float<fp_format::F32, fp_format::F16>(wf, abs, neg),
+      conversion_to_float<fp_format::F32, fp_format::F16>(wf, abs >> 1, neg >> 1)};
+  packed.low.rounding.direction = conversion::Rounding::TOWARD_ZERO;
+  packed.high.rounding.direction = conversion::Rounding::TOWARD_ZERO;
+  return packed;
 }
 
 /// @brief Wrap a raw-bit operation with the instruction's source and output modifiers.
@@ -1746,6 +1853,44 @@ template <typename Tin, typename Inst, typename CvtOp>
 /// Unconstrained fallback for the b32->f64 cvt path; see the binary-path note.
 template <typename Tin, typename Inst, typename CvtOp>
 [[nodiscard]] bool try_execute_cvt_b32_to_f64_simd(Inst &, Wavefront &, CvtOp) {
+  return false;
+}
+
+/// @brief Run a raw-bit F64-source conversion on the f64->b32 cvt path.
+/// @details `stages` maps F64 encodings in 64-bit lanes to 32-bit destination
+/// encodings in the same lanes, such as a conversion::ToFloat; the store keeps
+/// their low 32 bits.
+template <typename Inst, typename Stages>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_conversion_from_f64_simd(Inst &inst, Wavefront &wf,
+                                                               const Stages &stages) {
+  return try_execute_cvt_f64_to_b32_simd<uint32_t>(inst, wf, [&stages](util::native<double> s) {
+    return util::stdx::static_simd_cast<util::narrow32<uint32_t>>(
+        stages(std::bit_cast<util::native<uint64_t>>(s)));
+  });
+}
+
+template <typename Inst, typename Stages>
+[[nodiscard]] bool try_execute_conversion_from_f64_simd(Inst &, Wavefront &, const Stages &) {
+  return false;
+}
+
+/// @brief Run a raw-bit conversion to F64 on the b32->f64 cvt path.
+/// @details The 32-bit source encodings are zero-extended into 64-bit lanes for
+/// `stages`, which returns F64 encodings.
+template <typename Inst, typename Stages>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_conversion_to_f64_simd(Inst &inst, Wavefront &wf,
+                                                             const Stages &stages) {
+  return try_execute_cvt_b32_to_f64_simd<uint32_t>(
+      inst, wf, [&stages](util::narrow32<uint32_t> source) {
+        return std::bit_cast<util::native<double>>(
+            stages(util::stdx::static_simd_cast<util::native<uint64_t>>(source)));
+      });
+}
+
+template <typename Inst, typename Stages>
+[[nodiscard]] bool try_execute_conversion_to_f64_simd(Inst &, Wavefront &, const Stages &) {
   return false;
 }
 
@@ -4785,14 +4930,20 @@ template <bool Vop3, typename Inst>
 /// commas) pass through as one token sequence. Relies on the kernel's `inst`
 /// and `wf` parameters being in scope.
 #define ROCJITSU_TRY_SIMD_VOP2_BINARY(T, ...)                                                      \
-  if (::rocjitsu::amdgpu::try_execute_binary_vop2_simd<T>(inst, wf, __VA_ARGS__))                  \
-  return
+  if (::rocjitsu::amdgpu::try_execute_binary_vop2_simd<T>(inst, wf, __VA_ARGS__)) {                \
+    ::rocjitsu::amdgpu::detail::record_simd_fast_path(                                             \
+        ::rocjitsu::amdgpu::SimdFastPath::VOP2_BINARY);                                            \
+    return;                                                                                        \
+  }
 
 /// VOP1 unary counterpart of ROCJITSU_TRY_SIMD_VOP2_BINARY. Variadic in the
 /// operator argument so functor lambdas pass through as one token sequence.
 #define ROCJITSU_TRY_SIMD_VOP1_UNARY(Tin, Tout, ...)                                               \
-  if (::rocjitsu::amdgpu::try_execute_unary_vop1_simd<Tin, Tout>(inst, wf, __VA_ARGS__))           \
-  return
+  if (::rocjitsu::amdgpu::try_execute_unary_vop1_simd<Tin, Tout>(inst, wf, __VA_ARGS__)) {         \
+    ::rocjitsu::amdgpu::detail::record_simd_fast_path(                                             \
+        ::rocjitsu::amdgpu::SimdFastPath::VOP1_UNARY);                                             \
+    return;                                                                                        \
+  }
 
 /// Carry-VOP2 counterpart. The wrapper-owned writer merges DPP-suppressed
 /// lanes and applies the target wave-width policy before the VCC commit.
@@ -4896,8 +5047,11 @@ template <bool Vop3, typename Inst>
 #define ROCJITSU_TRY_SIMD_CVT_F64_TO_B32(Tout, ...) static_cast<void>(inst)
 #else
 #define ROCJITSU_TRY_SIMD_CVT_F64_TO_B32(Tout, ...)                                                \
-  if (::rocjitsu::amdgpu::try_execute_cvt_f64_to_b32_simd<Tout>(inst, wf, __VA_ARGS__))            \
-  return
+  if (::rocjitsu::amdgpu::try_execute_cvt_f64_to_b32_simd<Tout>(inst, wf, __VA_ARGS__)) {          \
+    ::rocjitsu::amdgpu::detail::record_simd_fast_path(                                             \
+        ::rocjitsu::amdgpu::SimdFastPath::CVT_F64_TO_B32);                                         \
+    return;                                                                                        \
+  }
 #endif
 
 /// Mixed-width cvt counterpart, 32-bit source -> f64 dst. `Tin` is the 32-bit
@@ -4906,8 +5060,30 @@ template <bool Vop3, typename Inst>
 #define ROCJITSU_TRY_SIMD_CVT_B32_TO_F64(Tin, ...) static_cast<void>(inst)
 #else
 #define ROCJITSU_TRY_SIMD_CVT_B32_TO_F64(Tin, ...)                                                 \
-  if (::rocjitsu::amdgpu::try_execute_cvt_b32_to_f64_simd<Tin>(inst, wf, __VA_ARGS__))             \
-  return
+  if (::rocjitsu::amdgpu::try_execute_cvt_b32_to_f64_simd<Tin>(inst, wf, __VA_ARGS__)) {           \
+    ::rocjitsu::amdgpu::detail::record_simd_fast_path(                                             \
+        ::rocjitsu::amdgpu::SimdFastPath::CVT_B32_TO_F64);                                         \
+    return;                                                                                        \
+  }
+#endif
+
+/// Raw-bit conversions from or to F64 (shared/conversion.h stage objects).
+#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#define ROCJITSU_TRY_SIMD_CONVERSION_FROM_F64(...) static_cast<void>(inst)
+#define ROCJITSU_TRY_SIMD_CONVERSION_TO_F64(...) static_cast<void>(inst)
+#else
+#define ROCJITSU_TRY_SIMD_CONVERSION_FROM_F64(...)                                                 \
+  if (::rocjitsu::amdgpu::try_execute_conversion_from_f64_simd(inst, wf, __VA_ARGS__)) {           \
+    ::rocjitsu::amdgpu::detail::record_simd_fast_path(                                             \
+        ::rocjitsu::amdgpu::SimdFastPath::CVT_F64_TO_B32);                                         \
+    return;                                                                                        \
+  }
+#define ROCJITSU_TRY_SIMD_CONVERSION_TO_F64(...)                                                   \
+  if (::rocjitsu::amdgpu::try_execute_conversion_to_f64_simd(inst, wf, __VA_ARGS__)) {             \
+    ::rocjitsu::amdgpu::detail::record_simd_fast_path(                                             \
+        ::rocjitsu::amdgpu::SimdFastPath::CVT_B32_TO_F64);                                         \
+    return;                                                                                        \
+  }
 #endif
 
 /// VOP3 v_cvt_f32_f16 counterpart. Generic form reads src0.l; TRUE16 form
@@ -4997,14 +5173,20 @@ template <bool Vop3, typename Inst>
 /// VOP3 integer/bitwise binary counterpart (reads src0/src1, no modifiers).
 /// `T` is the 32-bit integer lane type; variadic in the functor.
 #define ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(T, ...)                                                  \
-  if (::rocjitsu::amdgpu::try_execute_binary_vop3_simd<T>(inst, wf, __VA_ARGS__))                  \
-  return
+  if (::rocjitsu::amdgpu::try_execute_binary_vop3_simd<T>(inst, wf, __VA_ARGS__)) {                \
+    ::rocjitsu::amdgpu::detail::record_simd_fast_path(                                             \
+        ::rocjitsu::amdgpu::SimdFastPath::VOP3_BINARY);                                            \
+    return;                                                                                        \
+  }
 
 /// VOP3 binary counterpart for true16 source selectors with a full b32 result,
 /// such as v_pack_b32_f16.
 #define ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC(T, ...)                                           \
-  if (::rocjitsu::amdgpu::try_execute_binary_vop3_true16_src_simd<T>(inst, wf, __VA_ARGS__))       \
-  return
+  if (::rocjitsu::amdgpu::try_execute_binary_vop3_true16_src_simd<T>(inst, wf, __VA_ARGS__)) {     \
+    ::rocjitsu::amdgpu::detail::record_simd_fast_path(                                             \
+        ::rocjitsu::amdgpu::SimdFastPath::VOP3_BINARY_TRUE16_SRC);                                 \
+    return;                                                                                        \
+  }
 
 /// VOP3 f16 binary counterpart: same packed path as the integer form, but bails
 /// to the (modifier-applying) scalar body when any abs/neg/omod/clamp field is
@@ -5164,8 +5346,11 @@ template <bool Vop3, typename Inst>
 /// VOP3 integer/bitwise ternary counterpart (reads src0/src1/src2, no
 /// modifiers). `T` is the 32-bit integer lane type; variadic in the functor.
 #define ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(T, ...)                                                 \
-  if (::rocjitsu::amdgpu::try_execute_ternary_vop3_simd<T>(inst, wf, __VA_ARGS__))                 \
-  return
+  if (::rocjitsu::amdgpu::try_execute_ternary_vop3_simd<T>(inst, wf, __VA_ARGS__)) {               \
+    ::rocjitsu::amdgpu::detail::record_simd_fast_path(                                             \
+        ::rocjitsu::amdgpu::SimdFastPath::VOP3_TERNARY);                                           \
+    return;                                                                                        \
+  }
 
 /// VOP3 ternary counterpart for true16 SRC0/SRC1 plus full-width SRC2/result.
 #define ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_SRC01(T, ...)                                        \
