@@ -99,6 +99,7 @@ struct TraceControl
     uint64_t gpu_clock_latest{0};
     uint32_t status_double_buffer{0};
     uint32_t wptr_doublebuffer{0};
+    uint32_t cntr_doublebuffer{0};
 };
 
 // Encapsulates the various Api and structures that are used to enable
@@ -711,11 +712,19 @@ public:
                                        Primitives::COPY_DATA_SEL_COUNT_1DW_PRM,
                                        false);
         if(Primitives::GFXIP_LEVEL == 9)
+        {
             builder.BuildCopyRegDataPacket(cmd_buffer,
                                            Primitives::SQ_THREAD_TRACE_WPTR_ADDR,
                                            &control.wptr_doublebuffer,
                                            Primitives::COPY_DATA_SEL_COUNT_1DW_PRM,
                                            false);
+            // Read after WPTR so a rollover between the two reads cannot overcount buffers.
+            builder.BuildCopyRegDataPacket(cmd_buffer,
+                                           Primitives::SQ_THREAD_TRACE_CNTR_ADDR,
+                                           &control.cntr_doublebuffer,
+                                           Primitives::COPY_DATA_SEL_COUNT_1DW_PRM,
+                                           false);
+        }
     }
 
     void flushControl(CmdBuffer* cmd_buffer, const void* address, size_t elements)

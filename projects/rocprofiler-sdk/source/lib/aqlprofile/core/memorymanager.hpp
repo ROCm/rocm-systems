@@ -338,6 +338,8 @@ public:
 
     pm4_builder::TraceConfig config{};
     std::vector<size_t>      buffer_swaps{};
+    // Per SE: bytes to skip at the start of the buffer being written, from WPTR.READ_OFFSET (gfx9).
+    std::vector<uint64_t> read_offsets{};
 
 protected:
     int                                             target_cu = -1;

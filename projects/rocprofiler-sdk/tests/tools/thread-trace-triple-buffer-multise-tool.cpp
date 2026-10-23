@@ -62,9 +62,10 @@ check(rocprofiler_status_t status, const char* operation)
 
 struct chunk_t
 {
-    std::vector<char> bytes{};
-    bool              end{};
-    bool              retired_buffer{};
+    const char* bytes{};
+    size_t      size{};
+    bool        end{};
+    bool        retired_buffer{};
 };
 
 struct engine_trace_t
@@ -86,7 +87,9 @@ struct capture_t
     rocprofiler_context_id_t                    control_context{};
     rocprofiler_thread_trace_decoder_id_t       decoder{};
     std::vector<std::unique_ptr<agent_trace_t>> agents{};
-    std::atomic<size_t>                         byte_count{0};
+    // Zero-filled up front so callbacks copy into resident memory.
+    std::vector<char>   arena = std::vector<char>(MAX_CAPTURE_BYTES);
+    std::atomic<size_t> byte_count{0};
     bool                                        started{};
     bool                                        validated{};
 };
@@ -108,17 +111,19 @@ collect(rocprofiler_thread_trace_shader_data_t data, rocprofiler_user_data_t use
     require(data.read_offset <= data.data_size && (data.data_size == 0 || data.data != nullptr),
             "invalid chunk data or read offset");
 
-    const auto size = data.data_size - data.read_offset;
+    // read_offset skips the tail of a token that started in the previous chunk, which only helps
+    // when a chunk is decoded alone. Concatenated chunks need those bytes to complete the token.
+    const auto size = data.data_size;
     require(size <= MAX_CAPTURE_BYTES, "chunk exceeds capture budget");
-    const auto previous_size = capture->byte_count.fetch_add(size);
-    require(previous_size <= MAX_CAPTURE_BYTES - size, "capture exceeds host memory budget");
+    const auto offset = capture->byte_count.fetch_add(size);
+    require(offset <= MAX_CAPTURE_BYTES - size, "capture exceeds host memory budget");
 
     // Copy before returning the SDK-owned buffer. No callback waits for another chunk.
-    auto chunk = chunk_t{};
-    chunk.bytes.resize(size);
+    auto chunk  = chunk_t{};
+    chunk.bytes = capture->arena.data() + offset;
+    chunk.size  = size;
     if(size > 0)
-        std::memcpy(
-            chunk.bytes.data(), static_cast<const char*>(data.data) + data.read_offset, size);
+        std::memcpy(capture->arena.data() + offset, data.data, size);
     chunk.end = (data.flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END) != 0;
     // Supported GFX9/GFX12 hardware retires a full per-SE buffer on each swap.
     // Neither the small GFX9 header nor the final END/drain chunk counts as a swap.
@@ -197,7 +202,7 @@ validate()
                 require(!ended, "chunk received after END");
                 ended = chunk.end;
                 swaps += chunk.retired_buffer;
-                bytes.insert(bytes.end(), chunk.bytes.begin(), chunk.bytes.end());
+                bytes.insert(bytes.end(), chunk.bytes, chunk.bytes + chunk.size);
             }
             require(ended, "missing END chunk");
             engine.chunks.clear();
@@ -255,7 +260,7 @@ configure_agents(rocprofiler_agent_version_t, const void** agents, size_t count,
         const auto engines = agent->engines.size();
         // NUM_BUFFERS controls CPU staging slots; the SDK uses three GPU buffers per SE.
         auto parameters = std::array<rocprofiler_thread_trace_parameter_t, 5>{
-            {{ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT, {1}},
+            {{ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT, {0}},
              {ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, {GPU_BYTES_PER_SE * engines}},
              {ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK,
               {(uint64_t{1} << engines) - 1}},

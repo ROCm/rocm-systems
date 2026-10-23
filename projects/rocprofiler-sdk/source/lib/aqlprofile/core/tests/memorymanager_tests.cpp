@@ -157,6 +157,7 @@ TEST(TraceMemoryManagerTest, MultiSEDrainResetsAllSwapCountersOnCallbackError)
     mgr->config.capacity_per_se = 256;
     mgr->AddExtraCmdBuf(64);
     mgr->buffer_swaps = {1, 0, 2, 0};
+    mgr->read_offsets.assign(info.se_num, 0);
     MemoryManager::RegisterManager(mgr);
     auto cleanup = rocprofiler::common::scope_destructor{
         [&] { MemoryManager::DeleteManager(mgr->GetHandler()); }};
@@ -177,7 +178,10 @@ TEST(TraceMemoryManagerTest, MultiSEDrainResetsAllSwapCountersOnCallbackError)
     for(auto status : {HSA_STATUS_SUCCESS, HSA_STATUS_ERROR})
     {
         mgr->buffer_swaps = {1, 0, 2, 0};
-        auto state        = state_t{mgr.get(), {}, status};
+        for(size_t se = 0; se < info.se_num; ++se)
+            control[se].cntr = mgr->buffer_swaps[se] * mgr->config.capacity_per_se / 32 +
+                               control[se].wptr;
+        auto state = state_t{mgr.get(), {}, status};
         EXPECT_EQ(aqlprofile_att_iterate_data({mgr->GetHandler()}, callback, &state), status);
         EXPECT_EQ(state.engines,
                   status == HSA_STATUS_SUCCESS ? std::vector<uint32_t>({0, 2})

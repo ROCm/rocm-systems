@@ -33,6 +33,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <deque>
 #include <thread>
 
 namespace rocprofiler
@@ -40,6 +41,8 @@ namespace rocprofiler
 namespace thread_trace
 {
 constexpr double SQTT_BANDWIDTH_DEFAULT = 60E9;  // 60GB/s, for wiggle room
+// Retired buffers copied between status polls, so engines that fill meanwhile are swapped promptly.
+constexpr size_t COPIES_PER_POLL = 4;
 
 rocprofiler_thread_trace_timestamp_t
 convert_timestamp(rocprofiler_agent_id_t agent_id, uint64_t gpu_clock)
@@ -260,11 +263,12 @@ producer_loop(
         auto         data   = iterate_data(*buffer_packets.at(0), status);
         for(auto& packet : buffer_packets)
         {
-            auto wptr = trace_callback_data_t{};
-            auto it   = std::find_if(data.begin(), data.end(), [&](const auto& sample) {
-                return sample.se_id == static_cast<uint32_t>(packet->shader_engine_id);
-            });
-            if(it != data.end()) wptr = *it;
+            // A filled buffer awaiting its swap at stop arrives before the active buffer.
+            auto samples = std::vector<trace_callback_data_t>{};
+            for(const auto& sample : data)
+                if(sample.se_id == static_cast<uint32_t>(packet->shader_engine_id))
+                    samples.emplace_back(sample);
+            if(samples.empty()) samples.emplace_back();
 
             auto& current_ts = current_timestamps.at(packet->shader_engine_id);
             auto  clock      = packet->get_gpu_clock();
@@ -272,30 +276,36 @@ producer_loop(
                 current_ts = convert_timestamp(queue.agent_id, clock.start);
             auto end_ts = convert_timestamp(queue.agent_id, clock.latest);
             packet->reset_current_buffer();
-            int flags = ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END;
-            if(status == HSA_STATUS_ERROR_OUT_OF_RESOURCES)
-                flags |= ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL;
-            if(status != HSA_STATUS_SUCCESS || (wptr.size > 0 && !wptr.data) ||
-               wptr.size > buffer_size)
+            for(size_t i = 0; i < samples.size(); i++)
             {
+                auto&      wptr  = samples[i];
+                const bool last  = i + 1 == samples.size();
+                int        flags = ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE;
+                if(last) flags |= ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END;
                 if(status == HSA_STATUS_ERROR_OUT_OF_RESOURCES)
-                    ROCP_WARNING << "Discarding ATT drain payload after GPU buffer overflow";
-                else
-                    ROCP_CI_LOG(ERROR) << "Discarding ATT drain payload: status " << status
-                                       << ", size " << wptr.size;
-                wptr.size = 0;
+                    flags |= ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL;
+                if(status != HSA_STATUS_SUCCESS || (wptr.size > 0 && !wptr.data) ||
+                   wptr.size > buffer_size)
+                {
+                    if(status == HSA_STATUS_ERROR_OUT_OF_RESOURCES)
+                        ROCP_WARNING << "Discarding ATT drain payload after GPU buffer overflow";
+                    else
+                        ROCP_CI_LOG(ERROR) << "Discarding ATT drain payload: status " << status
+                                           << ", size " << wptr.size;
+                    wptr.size = 0;
+                }
+                ROCP_INFO << "Iterate data for " << packet->shader_engine_id
+                          << " with size: " << wptr.size;
+                send_to_consumer(wptr.data,
+                                 wptr.size,
+                                 flags,
+                                 wait_for_free_slot(),
+                                 packet->shader_engine_id,
+                                 false,
+                                 0,
+                                 current_ts,
+                                 end_ts);
             }
-            ROCP_INFO << "Iterate data for " << packet->shader_engine_id
-                      << " with size: " << wptr.size;
-            send_to_consumer(wptr.data,
-                             wptr.size,
-                             flags,
-                             wait_for_free_slot(),
-                             packet->shader_engine_id,
-                             false,
-                             0,
-                             current_ts,
-                             end_ts);
         }
     };
 
@@ -335,6 +345,50 @@ producer_loop(
         ROCP_INFO << "Total trace time: " << (end_t0 - start_t0).count() * 1E-9f << " s.";
     }};
 
+    struct retired_buffer_t
+    {
+        hsa::sqtt_buffer_status_t            status{};
+        rocprofiler_thread_trace_timestamp_t start_ts{};
+        rocprofiler_thread_trace_timestamp_t end_ts{};
+        int                                  flags{ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE};
+    };
+    std::deque<retired_buffer_t> retired_buffers{};
+    bool                         any_full = false;
+
+    // Copies a retired buffer to a CPU slot. With allow_stop, stops the trace once if consumers
+    // cannot keep up; this must only happen after the swaps of the current poll were submitted.
+    auto copy_retired = [&](std::deque<retired_buffer_t>::iterator it, bool allow_stop) {
+        size_t slot_idx = try_claim_slot();
+        int    flags    = it->flags;
+        if(slot_idx == num_buffers)
+        {
+            if(allow_stop)
+            {
+                if(!any_full && !stop_trace()) return false;
+                any_full = true;
+                flags |= ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_CPU_BUFFER_FULL;
+            }
+            slot_idx = wait_for_free_slot();
+        }
+        send_to_consumer(it->status.data,
+                         it->status.size,
+                         flags,
+                         slot_idx,
+                         it->status.shader_engine_id,
+                         false,
+                         it->status.read_offset,
+                         it->start_ts,
+                         it->end_ts);
+        retired_buffers.erase(it);
+        return true;
+    };
+
+    auto copy_all_retired = [&](bool allow_stop) {
+        while(!retired_buffers.empty())
+            if(!copy_retired(retired_buffers.begin(), allow_stop)) return false;
+        return true;
+    };
+
     while(worker_flag.load() == WORKER_FLAG_RUNNING)
     {
         if(do_sleep) sleep_fn();
@@ -344,7 +398,8 @@ producer_loop(
         if(!att_queue_submit(queue, &buffer_packets.at(0)->query_status, &submit_signal)) return;
         signal_wait(submit_signal);
 
-        // Check all engines before submitting any swaps: overflow disables the entire queue.
+        // Check all engines before submitting any swaps: on gfx10+ overflow disables the queue.
+        bool gpu_full = false;
         for(auto& packet : buffer_packets)
         {
             auto& current_ts = current_timestamps.at(packet->shader_engine_id);
@@ -353,7 +408,14 @@ producer_loop(
 
             if(auto status = packet->query_buffer_status())
             {
-                if(status->gpu_full)
+                if(status->gpu_full && parameters.restart_on_gpu_full)
+                {
+                    ROCP_WARNING << "GPU buffer overflow on agent " << queue.agent_id.handle
+                                 << " SE " << packet->shader_engine_id
+                                 << ": restarting thread trace";
+                    gpu_full = true;
+                }
+                else if(status->gpu_full)
                 {
                     auto submit_lock = std::unique_lock{queue.submit_mutex};
                     queue.submit_fn  = nullptr;
@@ -366,6 +428,7 @@ producer_loop(
                                   "packets on this queue, including stop/restart. Tracing will not "
                                   "resume on this queue; already-copied CPU data will still be "
                                   "delivered.";
+                    copy_all_retired(false);
                     return;
                 }
 
@@ -376,12 +439,35 @@ producer_loop(
             }
         }
 
+        // The buffer retired by an SE's previous swap becomes its next pending buffer, so it must
+        // be copied before that SE is swapped again. Swap engines without such a copy first so
+        // they are not delayed behind other engines' copies.
+        std::stable_partition(
+            buffers_requiring_swap.begin(), buffers_requiring_swap.end(), [&](const auto& status) {
+                return std::none_of(
+                    retired_buffers.begin(), retired_buffers.end(), [&](const auto& retired) {
+                        return retired.status.shader_engine_id == status.shader_engine_id;
+                    });
+            });
+        // Swap packets carry the barrier bit and retire in order, so only the last one needs a
+        // completion signal.
+        for(size_t i = 0; i < buffers_requiring_swap.size(); i++)
+        {
+            auto& status = buffers_requiring_swap[i];
+            auto  it     = std::find_if(
+                retired_buffers.begin(), retired_buffers.end(), [&](const auto& retired) {
+                    return retired.status.shader_engine_id == status.shader_engine_id;
+                });
+            if(it != retired_buffers.end() && !copy_retired(it, false)) return;
+
+            const bool last = i + 1 == buffers_requiring_swap.size();
+            ROCP_TRACE << "Sending buffer swap for SE " << status.shader_engine_id;
+            if(!att_queue_submit(queue, &status.packet, last ? &submit_signal : nullptr)) return;
+        }
+        // The copy engine is not ordered by the AQL barrier bit; wait for the swaps.
+        if(!buffers_requiring_swap.empty()) signal_wait(submit_signal);
         for(auto& status : buffers_requiring_swap)
         {
-            ROCP_TRACE << "Sending buffer swap for SE " << status.shader_engine_id;
-            // The copy engine is not ordered by the AQL barrier bit; wait for the swap.
-            if(!att_queue_submit(queue, &status.packet, &submit_signal)) return;
-            signal_wait(submit_signal);
             auto it =
                 std::find_if(buffer_packets.begin(), buffer_packets.end(), [&](const auto& packet) {
                     return packet->shader_engine_id == status.shader_engine_id;
@@ -390,43 +476,39 @@ producer_loop(
                 convert_timestamp(queue.agent_id, (*it)->get_gpu_clock().latest);
         }
 
-        bool any_full = false;
         for(auto& status : buffers_requiring_swap)
         {
-            // Try to claim a free CPU slot. Stop the trace once if consumers cannot keep up.
-            size_t     slot_idx = try_claim_slot();
-            const bool cpu_full = slot_idx == num_buffers;
-
-            int flags = ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE;
-            if(cpu_full)
-            {
-                if(!any_full && !stop_trace()) return;
-                any_full = true;
-                flags    = ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_CPU_BUFFER_FULL;
-                slot_idx = wait_for_free_slot();
-            }
-
             auto& current_ts = current_timestamps.at(status.shader_engine_id);
             auto  swap_ts    = swap_timestamps.at(status.shader_engine_id);
-            send_to_consumer(status.data,
-                             status.size,
-                             flags,
-                             slot_idx,
-                             status.shader_engine_id,
-                             false,
-                             status.read_offset,
-                             current_ts,
-                             swap_ts);
+            retired_buffers.push_back(
+                {status,
+                 current_ts,
+                 swap_ts,
+                 status.gpu_full ? ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL
+                                 : ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE});
             current_ts = swap_ts;
         }
-
         buffers_requiring_swap.clear();
+
+        if(gpu_full && !any_full)
+        {
+            if(!stop_trace()) return;
+            any_full = true;
+        }
+
+        // Poll again after a few copies so engines that fill meanwhile are swapped promptly.
+        for(size_t i = 0; i < COPIES_PER_POLL && !retired_buffers.empty() && !any_full; i++)
+            if(!copy_retired(retired_buffers.begin(), true)) return;
+        if(!retired_buffers.empty()) do_sleep = false;
+
         if(any_full)
         {
+            if(!copy_all_retired(true)) return;
             iterate_trace();
             send_header();
 
             if(!parameters.restart_trace(parameters.control_packet)) return;
+            any_full = false;
             // Read each restarted engine's clock after the next query or final stop.
             std::fill(current_timestamps.begin(),
                       current_timestamps.end(),
@@ -434,6 +516,7 @@ producer_loop(
         }
     }
 
+    if(!copy_all_retired(false)) return;
     if(stop_trace()) iterate_trace();
 }
 }  // namespace thread_trace

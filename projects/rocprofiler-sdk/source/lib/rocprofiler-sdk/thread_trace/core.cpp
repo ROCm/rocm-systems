@@ -419,6 +419,9 @@ ThreadTracerAgent::start_thread_trace_locked()
         producer_data.copy_data_fn       = att_queue_copy;
         producer_data.shared             = worker_data;
         producer_data.num_shader_engines = num_shader_engines;
+        // gfx9 restarts the trace after a GPU buffer overflow.
+        producer_data.restart_on_gpu_full =
+            CHECK_NOTNULL(agent::get_agent(agent_id))->gfx_target_version < 100000;
         producer_data.buffer_packets     = std::move(buffer_packets);
         producer_data.restart_trace      = [this](auto& snapshot) {
             auto snapshot_lock = std::unique_lock{trace_resources_mut};
