@@ -65,7 +65,9 @@ uint32_t Reference(uint32_t x) {
     const uint32_t h1 = x * 3u + static_cast<uint32_t>(l);
     const uint32_t h2 = h1 * 5u + 7u;
     const uint32_t routed = h2 * 9u + 1u;
-    const uint32_t shared = x * 11u + static_cast<uint32_t>(l);
+    // 10 keeps the per-layer multiplier odd (135 + 10): with an even one the product over the
+    // layers is 0 mod 2^32, every element ends at the same value and early errors are erased.
+    const uint32_t shared = x * 10u + static_cast<uint32_t>(l);
     x = routed + shared;
   }
   return x;
@@ -83,7 +85,7 @@ void RoutedBranch(const LayerBuffers& b, const uint32_t* in, int layer, hipStrea
 void SharedBranch(const LayerBuffers& b, const uint32_t* in, int layer, hipStream_t s) {
   const dim3 block(256);
   const dim3 grid((kElems + block.x - 1) / block.x);
-  MulAddSpin<<<grid, block, 0, s>>>(b.shared, in, 11u, static_cast<uint32_t>(layer), kLightSpin,
+  MulAddSpin<<<grid, block, 0, s>>>(b.shared, in, 10u, static_cast<uint32_t>(layer), kLightSpin,
                                     kElems);
 }
 
