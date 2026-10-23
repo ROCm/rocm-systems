@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
 # Build and run the RCCL CPU-only host unit tests: rccl-HostUnitTests plus the
-# host-only microtests. The authoritative list is host_test_binaries.txt in the
-# build directory, which test/host/CMakeLists.txt writes from its
-# rccl_add_micro_binary() calls -- it is not duplicated here, so the two cannot drift.
+# host-only microtests, the latter through rccl-UnitTestsHostAll, the front door
+# that discovers the rccl-UnitTestsMicro* binaries at run time. This script
+# therefore holds no list of them, and adding one needs no change here.
 #
 # Single source of truth for every command the host-test pipeline needs, so the
 # same steps run locally and in CI and nothing is scattered in the workflow YAML.
@@ -150,37 +150,41 @@ do_host_tests() {
     stamp=(cat)
   fi
 
-  # Every host binary the build configured, as test/host/CMakeLists.txt writes them to
-  # host_test_binaries.txt. Each writes its own JUnit XML (host_tests*.xml) and appends to the
-  # single console LOG_FILE. rccl-HostUnitTests keeps host_tests.xml for backward compatibility.
-  local manifest="$BUILD_DIR/host_test_binaries.txt"
-  if [ ! -f "$manifest" ]; then
-    echo "ERROR: $manifest not found -- run the configure phase first" >&2
-    return 1
-  fi
-  local -a binaries=()
-  local bin xml_stem
-  while IFS= read -r bin; do
-    [ -n "$bin" ] || continue
-    if [ "$bin" = rccl-HostUnitTests ]; then
-      binaries+=("$bin:$XML_FILE")
-      continue
-    fi
-    # rccl-UnitTestsMicroDdaColl -> host_tests_micro_dda_coll.xml
-    xml_stem="$(printf '%s' "${bin#rccl-UnitTests}" | sed 's/\([a-z0-9]\)\([A-Z]\)/\1_\2/g; s/-/_/g' \
-      | tr '[:upper:]' '[:lower:]')"
-    binaries+=("$bin:$SCRIPT_DIR/host_tests_${xml_stem}.xml")
-  done < "$manifest"
-  if [ "${#binaries[@]}" -eq 0 ]; then
-    echo "ERROR: $manifest lists no binaries" >&2
-    return 1
-  fi
+  # The two binaries this script runs directly. Each writes its own JUnit XML
+  # (host_tests*.xml, all uploaded) and appends to the single console LOG_FILE.
+  #
+  # rccl-UnitTestsHostAll is the front door for the ~40 rccl-UnitTestsMicro*
+  # binaries: it discovers them beside itself at run time, runs the ones holding
+  # a selected case, and merges their reports into the one asked for here. That
+  # is why there is no list of them in this script -- adding a host test binary
+  # needs no change here. See MICROTEST_README.md, "rccl-UnitTestsHostAll".
+  # It also absorbs what the list used to encode: a binary that is not built
+  # (rccl-UnitTestsMicroSymKernels needs GENERATE_SYM_KERNELS, off via
+  # install.sh --disable-sym-kernels) is simply not discovered, and a binary
+  # that cannot start is reported as a failing case rather than skipped.
+  #
+  # rccl-HostUnitTests is NOT fronted -- its name does not carry the
+  # rccl-UnitTestsMicro prefix the dispatcher discovers on -- so it is run here,
+  # and keeps host_tests.xml for backward compatibility.
+  #
+  # Third field: where this binary's llvm profiles go, which `coverage` reads
+  # back as $COVERAGE_DIR/<binary>/. For the front door that is $COVERAGE_DIR
+  # itself: the dispatcher inserts each child's own name as a directory
+  # component, so the children land in exactly the per-binary layout `coverage`
+  # expects. (The dispatcher's own profile is then the one file at the top of
+  # $COVERAGE_DIR, which `coverage` ignores; host_test_dispatch.cc's coverage
+  # comes from rccl-UnitTestsMicroHostDispatch, one of the binaries it fronts.)
+  local -a binaries=(
+    "rccl-HostUnitTests:$XML_FILE:$COVERAGE_DIR/rccl-HostUnitTests"
+    "rccl-UnitTestsHostAll:$SCRIPT_DIR/host_tests_micro.xml:$COVERAGE_DIR"
+  )
 
   : > "$LOG_FILE"   # truncate; each binary appends below
   local rc=0 entry exe name xml profdir
   for entry in "${binaries[@]}"; do
     name="${entry%%:*}"
-    xml="${entry#*:}"
+    xml="${entry#*:}"; xml="${xml%%:*}"
+    profdir="${entry##*:}"
     exe="$BUILD_DIR/$name"
     if [ ! -x "$exe" ]; then
       echo "ERROR: expected binary not built: $exe" | tee -a "$LOG_FILE"
@@ -188,12 +192,12 @@ do_host_tests() {
       continue
     fi
     echo "----- $name -----" | tee -a "$LOG_FILE"
-    # Direct this binary's llvm profiles into its OWN subdir so `coverage` finds
-    # them at $COVERAGE_DIR/<binary>/. Without this, instrumented binaries write
-    # default.profraw into the CWD and coverage sees nothing. %p (PID) + %m
-    # (module hash) keep the process-isolated forks' files distinct; the runner
-    # inherits this value (it sets LLVM_PROFILE_FILE with overwrite=0).
-    profdir="$COVERAGE_DIR/$name"
+    # Direct this binary's llvm profiles into the subdir `coverage` reads back.
+    # Without this, instrumented binaries write default.profraw into the CWD and
+    # coverage sees nothing. %p (PID) + %m (module hash) keep the
+    # process-isolated forks' files distinct; the runner inherits this value (it
+    # sets LLVM_PROFILE_FILE with overwrite=0), as does every binary the front
+    # door forks.
     mkdir -p "$profdir"
     export LLVM_PROFILE_FILE="$profdir/$name-%p-%m.profraw"
     # Shuffle every binary here, not just the micro ones: the init microtests share ~40 mutable

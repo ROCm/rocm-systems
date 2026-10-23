@@ -903,6 +903,38 @@ std::string shellQuote(const std::string &argument)
     return quoted + "'";
 }
 
+// LLVM_PROFILE_FILE for the child at *path*, given the *pattern* this process inherited.
+//
+// Empty when coverage is not being collected. Otherwise the child's own name is inserted as a
+// directory component, so each binary's .profraw files land in <dir>/<binary>/ and nothing else
+// writes there. That separation is not tidiness: the host binaries compile some of the same
+// source under different #defines, so a shared function has a different coverage-mapping hash in
+// each, and a report built from one object over a pool of mixed profiles is rejected as
+// mismatched data. Isolating them is what lets run_host_tests.sh keep emitting a clean
+// per-binary report, which it previously got by exporting a different LLVM_PROFILE_FILE around
+// each binary in the hand-kept loop this dispatcher replaces.
+//
+// The caller's filename pattern is carried over untouched, so its %p/%m/%c specifiers keep
+// meaning what the caller chose.
+std::string childProfileFile(std::string_view pattern, std::string_view path)
+{
+    if (pattern.empty()) {
+        return "";
+    }
+    const fs::path profile{std::string(pattern)};
+    const std::string binary = fs::path(std::string(path)).filename().string();
+    return (profile.parent_path() / binary / profile.filename()).string();
+}
+
+// The LLVM_PROFILE_FILE the child at *path* should run under, read from this process's
+// environment. Empty when coverage is not being collected.
+std::string childProfileFile(const std::string &path)
+{
+    const char *pattern = std::getenv("LLVM_PROFILE_FILE");
+    return childProfileFile(pattern == nullptr ? std::string_view() : std::string_view(pattern),
+                            path);
+}
+
 // *path*'s --gtest_list_tests output, or nullopt when the binary failed to produce one.
 //
 // The two are deliberately distinguishable: a healthy binary that holds no cases lists nothing
@@ -914,12 +946,20 @@ std::optional<std::string> listTestsOutput(const std::string &path)
     // The listing children are fork sites like any other, so they get the same stripped
     // environment. popen() hands them this process's one, which must keep its originals, so the
     // strip is expressed to the shell instead -- same list, same guarantee.
-    std::string unset;
+    std::string environment;
     for (const std::string &name : gtestVariablesToStrip()) {
-        unset += fmt::format("-u {} ", shellQuote(name));
+        environment += fmt::format("-u {} ", shellQuote(name));
+    }
+    // The listing run is a run of the binary like any other: it executes its static
+    // initialisers, and an instrumented build writes a profile for them. Point it at the same
+    // per-binary directory the real run uses, so that profile is credited to this binary rather
+    // than left in the dispatcher's own.
+    const std::string profile = childProfileFile(path);
+    if (!profile.empty()) {
+        environment += fmt::format("LLVM_PROFILE_FILE={} ", shellQuote(profile));
     }
     const std::string command =
-        fmt::format("env {}{} --gtest_list_tests 2>/dev/null", unset, shellQuote(path));
+        fmt::format("env {}{} --gtest_list_tests 2>/dev/null", environment, shellQuote(path));
     std::unique_ptr<FILE, int (*)(FILE *)> pipe(popen(command.c_str(), "r"), pclose);
     if (pipe == nullptr) {
         return std::nullopt;
@@ -988,6 +1028,7 @@ int runChild(const std::string &path, const std::vector<std::string> &args)
     // Collected before the fork: it reads the environment, which is cheaper and simpler to do
     // here than in the narrow async-signal-safe window after it.
     const std::vector<std::string> strip = gtestVariablesToStrip();
+    const std::string profile = childProfileFile(path);
 
     const pid_t pid = fork();
     if (pid < 0) {
@@ -996,8 +1037,14 @@ int runChild(const std::string &path, const std::vector<std::string> &args)
     }
     if (pid == 0) {
         // In the child, on its own copy of the environment: what the dispatcher has already
-        // decided must not be decided again over the case list this child was handed.
+        // decided must not be decided again over the case list this child was handed, and the
+        // profile runtime reads LLVM_PROFILE_FILE once at its own initialisation, so changing it
+        // in this process would not move this process's profile -- it would only be inherited,
+        // which is exactly what is wanted here and nowhere else.
         stripGtestVariablesInChild(strip);
+        if (!profile.empty()) {
+            setenv("LLVM_PROFILE_FILE", profile.c_str(), 1);
+        }
         execv(path.c_str(), argv.data());
         fmt::print(stderr, "host-test-dispatch: exec {} failed: {}\n", path,
                    std::strerror(errno));
