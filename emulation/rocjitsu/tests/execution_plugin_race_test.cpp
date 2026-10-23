@@ -228,6 +228,27 @@ TEST_F(FormattedLoadRaceTest, CompletedDispatchReleasesDisassemblyAfterWaveReuse
   fixture.plugin_group_->onAmdgpuDispatchExecutionEnd(2);
 }
 
+TEST_F(FormattedLoadRaceTest, RedispatchReplacesStateFromAnotherPlugin) {
+  struct OtherPluginState : WavefrontState {
+    // An invalid reuse stays within this allocation, so the type assertion can
+    // report the failure without corrupting neighboring objects.
+    std::array<std::byte, sizeof(RaceWavefrontState)> storage{};
+  };
+  fixture.plugin_group_->onAmdgpuWorkgroupCompleted(1, 0);
+  wave->set_plugin_state(0, std::make_unique<OtherPluginState>());
+  auto replacement = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  ASSERT_TRUE(replacement->add(std::make_unique<RaceDetectorPlugin>()));
+  fixture.soc->set_plugin_group(replacement);
+  std::array<Wavefront *, 1> waves{wave};
+  replacement->onAmdgpuWorkgroupDispatched(2, 0, 256, 128, waves);
+  auto *state = dynamic_cast<RaceWavefrontState *>(wave->plugin_state(0));
+  ASSERT_NE(state, nullptr);
+  EXPECT_EQ(state->trace.size(), 0u);
+  EXPECT_NE(state->race_state, nullptr);
+  replacement->onAmdgpuWorkgroupCompleted(2, 0);
+  replacement->onAmdgpuDispatchExecutionEnd(2);
+}
+
 TEST_F(FormattedLoadRaceTest, RejectsWholeDestinationRangeWhenItExceedsTheWaveAllocation) {
   issue(rdna4::kBufferLoadFormatXyzwVbuffer, 46, 255, 4);
   EXPECT_TRUE(plugin_state->race_state->getWaveMemoryEvents().empty());

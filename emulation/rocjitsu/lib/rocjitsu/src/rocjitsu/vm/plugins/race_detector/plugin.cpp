@@ -360,17 +360,21 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
   for (uint32_t w = 0; w < num_waves; ++w) {
     // Wavefront objects are pooled and keep their plugin state across workgroups,
     // so recycle the state, including its 2 KiB PC trace, instead of reallocating.
-    if (wavefronts[w]->has_plugin_state(slot_index())) {
-      auto *state = get_state(*wavefronts[w]);
+    auto *state =
+        wavefronts[w]->has_plugin_state(slot_index())
+            ? dynamic_cast<RaceWavefrontState *>(wavefronts[w]->plugin_state(slot_index()))
+            : nullptr;
+    // Plugin-group replacement can leave a different plugin's state in this slot.
+    if (state) {
       state->trace.clear();
       state->race_state = &det.getWaveRaceState(static_cast<int>(w));
       state->disasm = dc;
       continue;
     }
-    auto state = std::make_unique<RaceWavefrontState>();
-    state->race_state = &det.getWaveRaceState(static_cast<int>(w));
-    state->disasm = dc;
-    wavefronts[w]->set_plugin_state(slot_index(), std::move(state));
+    auto new_state = std::make_unique<RaceWavefrontState>();
+    new_state->race_state = &det.getWaveRaceState(static_cast<int>(w));
+    new_state->disasm = dc;
+    wavefronts[w]->set_plugin_state(slot_index(), std::move(new_state));
   }
 }
 
