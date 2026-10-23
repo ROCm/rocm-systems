@@ -402,6 +402,9 @@ SCbranchIForkSopk::SCbranchIForkSopk(const MachineInst *inst)
   src_operands_[1] = &simm16;
   num_src_ = 2;
   num_dst_ = 0;
+  flags_ |= COND_BRANCH;
+  flags_ |= IGNORES_EXEC;
+  flags_ |= WRITES_EXEC;
 }
 
 namespace detail {
@@ -414,6 +417,11 @@ DecodeResult decodeSCbranchIForkSopk(const MachineInst *opcode,
   return std::make_unique<SCbranchIForkSopk>(opcode);
 }
 } // namespace detail
+
+std::optional<int64_t> SCbranchIForkSopk::branch_offset_bytes() const {
+  // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
+  return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
+}
 
 SGetregB32Sopk::SGetregB32Sopk(const MachineInst *inst)
     : Sopk("s_getreg_b32", reinterpret_cast<const OpEncoding *>(inst),

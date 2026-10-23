@@ -1441,6 +1441,9 @@ SCbranchGForkSop2::SCbranchGForkSop2(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   pc.apply_fieldless_caps(false, false, false);
+  flags_ |= INDIRECT_BRANCH;
+  flags_ |= IGNORES_EXEC;
+  flags_ |= WRITES_EXEC;
 }
 
 namespace detail {

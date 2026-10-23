@@ -2305,7 +2305,7 @@ TEST_P(KfdInstructionRejectionTest, RoutesFailureToQueueOwner) {
     words = {0xd0710001u, 0x7c000000u, 0x7c7c0c00u};
     expected_error = rocjitsu::amdgpu::InstructionExecutionError::UnsupportedOperandValue;
   } else if (GetParam().kind == RejectionKind::Unimplemented) {
-    words = {0xb8000000u, 0, 0}; // s_cbranch_i_fork on CDNA4.
+    words = {0x95800000u, 0, 0}; // s_rfe_restore_b64 on CDNA4.
     expected_error = rocjitsu::amdgpu::InstructionExecutionError::UnimplementedInstruction;
   }
   std::memcpy(code_page.data(), words.data(), sizeof(words));

@@ -487,7 +487,9 @@ public:
 
   /// @brief Set MODE.CSP, leaving every other MODE bit unchanged.
   /// @param csp New stack depth; only the lowest 3 bits are used.
-  void set_cond_stack_ptr(uint32_t csp) { set_mode_raw((mode_raw_ & ~CSP_MASK) | (csp << CSP_SHIFT)); }
+  void set_cond_stack_ptr(uint32_t csp) {
+    set_mode_raw((mode_raw_ & ~CSP_MASK) | (csp << CSP_SHIFT));
+  }
 
   uint32_t fp_round_mode_f32() const { return mode_raw_ & 0x3u; }
   uint32_t fp_round_mode_f16_f64() const { return (mode_raw_ >> 2) & 0x3u; }

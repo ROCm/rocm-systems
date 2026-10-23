@@ -2913,6 +2913,47 @@ class _Cbranch(_ScalarDeriver):
         return SemaBlock(sem.name, ExecModel.BRANCH, body)
 
 
+@_register('cbranch_fork')
+class _CbranchFork(_ScalarDeriver):
+    """S_CBRANCH_{G,I}_FORK: EXEC = cbranch_fork(compare, target, EXEC)."""
+
+    @staticmethod
+    def derive(sem: InstructionSemantics) -> SemaBlock:
+        result = SemaNode(
+            SemaNodeKind.CALL,
+            ty=SemaType.U64,
+            call_name='cbranch_fork',
+            children=(
+                _id('cbranch_fork'),
+                _cast(_src(0), SemaType.U64),
+                _cast(_src(1), SemaType.U64),
+                _id('EXEC_RAW', SemaType.U64),
+            ),
+        )
+        body = _assign(_id('EXEC_RAW', SemaType.U64), result)
+        return SemaBlock(sem.name, ExecModel.BRANCH, body)
+
+
+@_register('cbranch_join')
+class _CbranchJoin(_ScalarDeriver):
+    """S_CBRANCH_JOIN: EXEC = cbranch_join(saved_csp, EXEC)."""
+
+    @staticmethod
+    def derive(sem: InstructionSemantics) -> SemaBlock:
+        result = SemaNode(
+            SemaNodeKind.CALL,
+            ty=SemaType.U64,
+            call_name='cbranch_join',
+            children=(
+                _id('cbranch_join'),
+                _cast(_src(0), SemaType.U32),
+                _id('EXEC_RAW', SemaType.U64),
+            ),
+        )
+        body = _assign(_id('EXEC_RAW', SemaType.U64), result)
+        return SemaBlock(sem.name, ExecModel.BRANCH, body)
+
+
 @_register('endpgm')
 class _Endpgm(_ScalarDeriver):
     @staticmethod
