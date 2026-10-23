@@ -6,6 +6,8 @@
 
 #include "hip_capture_metadata.h"
 
+#include "top.hpp"
+#include "utils/flags.hpp"
 #include "device/comgrctx.hpp"
 #include "hip/hip_runtime_api.h"
 
