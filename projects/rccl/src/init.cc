@@ -4988,7 +4988,8 @@ exit:
   // for loggin only, not ready for replaying
   // TODO: further integrate overloaded record header
   // !recording at sink
-  Recorder::instance().record(rrCommSplit, color, key, (ncclUniqueId*)comm, config, *newcomm);
+  Recorder::instance().record(rrCommSplit, color, key, (ncclUniqueId*)comm, config,
+                              newcomm ? *newcomm : NCCL_COMM_NULL);
   (void)cudaSetDevice(oldDev);
   return res;
 fail:

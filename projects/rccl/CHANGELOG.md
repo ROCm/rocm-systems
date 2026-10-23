@@ -16,6 +16,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Fixed the device linker dropping feature suffixes such as `xnack+` from `GPU_TARGETS`, which left address sanitizer builds without instrumented device code.
 * Fixed `NCCL_CUMEM_ENABLE=1` being ignored on Linux kernels older than 6.8 (for example 6.6 on MI308X). cuMem stayed off, so RCCL buffers bypassed the memory manager and `ncclCommSuspend` released no GPU memory.
 * Fixed `ncclCommShrink` accepting an exclusion list with negative, out-of-range or duplicate ranks and building a child communicator with an inconsistent rank count, which could hang or access memory out of bounds. Such a list now returns `ncclInvalidArgument`.
+* Fixed `ncclCommSplit` and `ncclCommShrink` crashing when `newcomm` is `NULL`. They now return `ncclInvalidArgument`.
 
 ### Known issues
 
