@@ -3292,20 +3292,7 @@ static hipError_t playback_hipSetDeviceFlags(PlaybackContext& ctx, const uint8_t
   return _r;
 }
 
-static hipError_t playback_hipSetupArgument(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipSetupArgument*>(payload);
-  unsigned char _d_arg[256]{};
-  uint32_t _d_arg_n = a->arg_n > 256u ? 256u : a->arg_n;
-  (void)_d_arg_n;
-  if (a->arg_present)
-    std::memcpy(_d_arg, a->arg_bytes, static_cast<size_t>(_d_arg_n) * sizeof(unsigned char));
-  hipError_t _r = (hipError_t)hipSetupArgument((const void*)(_d_arg_n ? _d_arg : nullptr), (size_t)_d_arg_n, (size_t)a->offset);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipSetupArgument", a->ret);
-    return hipSuccess;
-  }
-  return _r;
-}
+extern hipError_t playback_hipSetupArgument(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipSignalExternalSemaphoresAsync(PlaybackContext& ctx, const uint8_t* payload) {
   (void)payload;

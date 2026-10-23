@@ -1540,6 +1540,35 @@ hipError_t playback_hipLaunchByPtr(PlaybackContext& ctx,
     return replay_kernel_launch(ctx, payload);
 }
 
+hipError_t playback_hipSetupArgument(PlaybackContext& ctx, const uint8_t* payload) {
+    const auto* a = reinterpret_cast<const hrr_args_hipSetupArgument*>(payload);
+    // The runtime copies `size` bytes to arguments[offset] after growing the
+    // vector to offset + size, and that sum wraps in size_t for an offset the
+    // archive chose. Refuse a range outside the legacy argument buffer before
+    // the call, so neither the wrap nor an offset that asks for terabytes
+    // reaches the runtime.
+    const uint32_t n = a->arg_n > sizeof(a->arg_bytes)
+                           ? static_cast<uint32_t>(sizeof(a->arg_bytes))
+                           : a->arg_n;
+    if (!hrr::setup_argument_range_ok(a->offset, n)) {
+        fprintf(stderr,
+                "[HRR] hipSetupArgument: event with sequence number %llu pushes %u bytes at offset "
+                "%llu, which does not fit a %llu-byte legacy argument buffer (or wraps); "
+                "refusing the call\n",
+                (unsigned long long)hrr_dispatch_seq, n, (unsigned long long)a->offset,
+                (unsigned long long)hrr::kMaxLegacyArgBytes);
+        return hipErrorInvalidValue;
+    }
+    unsigned char arg[sizeof(a->arg_bytes)]{};
+    if (a->arg_present) std::memcpy(arg, a->arg_bytes, n);
+    hipError_t r = hipSetupArgument(n ? arg : nullptr, n, static_cast<size_t>(a->offset));
+    if (r != hipSuccess && a->ret != 0 && static_cast<int32_t>(r) == a->ret) {
+        hrr_note_recorded_error(ctx, "hipSetupArgument", a->ret);
+        return hipSuccess;
+    }
+    return r;
+}
+
 hipError_t playback_hipLaunchKernel_spt(PlaybackContext& ctx,
                                         const uint8_t* payload) {
     // Which stream the launch goes on is recorded in the payload, so the

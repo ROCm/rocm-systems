@@ -96,4 +96,30 @@ HRR_TEST_CASE(Unit_HRR_Slots_BoundedCstr) {
   CHECK(hrr::bounded_cstr(empty, 0).empty());
 }
 
+/**
+ * Test Description
+ * ----------------
+ *   - setup_argument_range_ok accepts a range that ends inside the legacy
+ *     argument buffer, up to and including its last byte, and rejects one that
+ *     ends past it or whose offset + size wraps in 64 bits. The wrapping
+ *     operands are the point: their sum is small, so a check on the sum accepts
+ *     them.
+ */
+TEST_CASE("Unit_HRR_Slots_SetupArgumentRange", "[hrr]") {
+  const uint64_t cap = hrr::kMaxLegacyArgBytes;
+  CHECK(hrr::setup_argument_range_ok(0, 0));
+  CHECK(hrr::setup_argument_range_ok(0, 256));
+  CHECK(hrr::setup_argument_range_ok(8, 8));
+  CHECK(hrr::setup_argument_range_ok(cap - 256, 256));
+  CHECK(hrr::setup_argument_range_ok(cap, 0));
+  CHECK_FALSE(hrr::setup_argument_range_ok(cap - 255, 256));
+  CHECK_FALSE(hrr::setup_argument_range_ok(cap + 1, 0));
+  CHECK_FALSE(hrr::setup_argument_range_ok(1ull << 40, 4));
+  CHECK_FALSE(hrr::setup_argument_range_ok(UINT64_MAX, 8));
+  CHECK_FALSE(hrr::setup_argument_range_ok(UINT64_MAX - 3, 8));
+  CHECK_FALSE(hrr::setup_argument_range_ok(UINT64_MAX - 255, 256));
+  // offset + size wraps to a value the buffer would hold.
+  CHECK(static_cast<uint64_t>(UINT64_MAX - 3 + 8) < cap);
+}
+
 /** @} */

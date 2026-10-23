@@ -53,4 +53,19 @@ constexpr bool deps_complete(uint64_t recorded, uint64_t stored) {
   return stored >= recorded;
 }
 
+// Largest legacy argument buffer a hipSetupArgument sequence may build. The
+// pre-chevron launch ABI pushes each argument at an offset into one buffer that
+// becomes the kernel argument block, and HIP caps that block at 4 KiB.
+constexpr uint64_t kMaxLegacyArgBytes = 4096;
+
+// True if `size` bytes pushed at `offset` end inside the legacy argument buffer
+// without the sum wrapping. The runtime computes `offset + size` in size_t and
+// sizes its vector from it, so an offset near the top of the range wraps to a
+// small value, the vector does not grow, and the copy lands at `offset`. Test
+// each operand against the bound before adding.
+constexpr bool setup_argument_range_ok(uint64_t offset, uint64_t size,
+                                       uint64_t limit = kMaxLegacyArgBytes) {
+  return offset <= limit && size <= limit - offset;
+}
+
 }  // namespace hrr
