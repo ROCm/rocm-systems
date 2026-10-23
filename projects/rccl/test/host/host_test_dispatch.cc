@@ -1065,6 +1065,17 @@ int main(int argc, char **argv)
         return enumeration.unlistable.empty() ? status : 1;
     }
 
+    if (chosen.empty() && !candidates.empty()) {
+        // Not an error -- gtest exits 0 for a filter that matches nothing, and the shared
+        // categories yaml hands every binary every category's patterns, most of which it does
+        // not own. But the usual cause here is a pattern written against a single binary, whose
+        // names carry no qualifier, so say so rather than leave an empty report to explain it.
+        fmt::print(stderr,
+                   "host-test-dispatch: filter \"{}\" selected no case. Published names are"
+                   " qualified, e.g. \"{}\"; lead the pattern with '*' to match any binary.\n",
+                   options.filter, candidates.front().suite);
+    }
+
     const std::vector<Selection> selections = group(directory, binaries, candidates, chosen, options.alsoRunDisabled);
 
     const ReportDirectory reportDir;

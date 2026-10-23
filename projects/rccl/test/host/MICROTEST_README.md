@@ -999,13 +999,31 @@ report through one front door. The dashes are folded away (`MicroInitUncached`,
 not `MicroInit-uncached`) because gtest splits a `--gtest_filter` at its first
 `-`, so a qualifier carrying one could never be named by a positive pattern.
 
+The qualifier is part of the name a filter has to match, so a pattern written
+against one binary does **not** carry over unchanged: `P2pMicrotest.*` (as in
+`test_categories_micro.yaml`) matches nothing here, because every published name
+begins `<Qualifier>/`. Lead with `*` to mean "in whichever binary owns it", or
+name the qualifier to mean one arm:
+
+```bash
+# Wherever it lives:
+--gtest_filter='*P2pMicrotest.*'
+# Only the uncached arm's copy:
+--gtest_filter='MicroInitUncached/InitMicrotest.*'
+```
+
+A filter that selects nothing is not an error — gtest exits 0 for one too, and
+the shared categories yaml depends on that, since each binary is handed every
+category's patterns and most match none of them. The front door prints the
+qualification rule when it happens, so a pattern that silently selected nothing
+says why.
+
 The filter itself is resolved by **gtest**, not by the dispatcher: it registers
 the qualified names as empty tests and reads back `should_run()`. gtest exposes
 no matcher any other way (`UnitTestOptions::FilterMatchesTest` is declared only
 in `src/gtest-internal-inl.h`, which is not installed), and a reimplementation
 drifts — the first one here selected `DISABLED_` cases that gtest would not have
-run. So every filter you can write against a single binary behaves identically
-against the front door.
+run.
 
 For coverage, each child inherits `LLVM_PROFILE_FILE` and drops its own
 `.profraw` as usual. What a harness cannot know is which binaries those
