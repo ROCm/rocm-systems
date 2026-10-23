@@ -67,8 +67,9 @@ enough privilege, a RAID LV is reported as ``unverified``. Linear and
 striped volumes are classified from sysfs alone and are unaffected.
 
 The ``AIS support in`` table at the end of the report is a final pass or fail summary. It shows whether the four parts of the fastpath stack are
-present: kernel P2PDMA, a HIP runtime with AIS symbols, the amdgpu driver hook, and at least one qualifying mounted volume. Each line reads ``True`` or
-``False``. hipFile uses fastpath only when all four read ``True``.
+present: kernel P2PDMA, a HIP runtime with AIS symbols, the amdgpu driver hook, and at least one qualifying mounted volume. Each line reads ``True``,
+``False``, or ``unverified``. hipFile uses fastpath only when all four are in
+fact present, which ``True`` on all four lines confirms.
 
 .. code-block:: shell-session
 
@@ -78,10 +79,22 @@ present: kernel P2PDMA, a HIP runtime with AIS symbols, the amdgpu driver hook, 
            amdgpu                  : True
            hipFile-capable volume  : True
 
-| ``Kernel P2PDMA support``: Peer-to-peer DMA between the GPU and storage is available. On recent ``amdgpu`` DKMS builds, ``ais-check`` reads the AIS capability bit exposed by the KFD topology. On older builds, or when the driver version can't be determined, ``ais-check`` looks for ``CONFIG_PCI_P2PDMA=y`` in the running kernel's configuration.
+| ``Kernel P2PDMA support``: Peer-to-peer DMA between the GPU and storage is available. ``ais-check`` reads the AIS capability bit the KFD topology exposes once ``amdgpu`` has registered VRAM as a PCI P2PDMA resource; a GPU reporting that bit means AIS is up. Otherwise ``ais-check`` reports ``False`` when the running kernel's configuration lacks ``CONFIG_PCI_P2PDMA=y``, or when the loaded ``amdgpu`` has no AIS support, and ``unverified`` when neither rules it out.
 | ``HIP runtime``: A discovered HIP runtime library exports  ``hipAmdFileRead()`` and ``hipAmdFileWrite()``.
 | ``amdgpu``: The loaded amdgpu kernel driver exposes ``kfd_ais_rw_file`` in ``/proc/kallsyms``.
 | ``hipFile-capable volume``: At least one row in the mounted volumes table has ``HIPFILE`` set to ``yes``.
+
+``Kernel P2PDMA support : unverified`` means the loaded ``amdgpu`` driver carries
+AIS support and the kernel is built with ``CONFIG_PCI_P2PDMA=y``, but no GPU
+reports AIS as initialized in the KFD topology. That happens either on a driver
+predating the topology capability bit, where AIS may well be working, or where
+AIS failed to initialize on every GPU: an SR-IOV virtual function, an APU, a GPU
+whose BAR is not resizable or has not been resized, or a P2PDMA resource that
+could not be registered. Nothing readable from userspace distinguishes the two,
+so ``ais-check`` prints a warning to stderr rather than guessing, and the
+unverified line on its own does not make ``ais-check`` exit non-zero. Check the
+kernel log for AIS messages (``dmesg | grep 'AIS:'``); a line reporting
+registered device memory means AIS came up on that GPU.
 
 ``Kernel P2PDMA support : False`` most often means the distribution's kernel was
 built without ``CONFIG_PCI_P2PDMA``. For example, the Ubuntu 22.04 LTS default

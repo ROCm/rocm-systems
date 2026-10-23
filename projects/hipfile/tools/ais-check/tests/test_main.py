@@ -38,12 +38,18 @@ def stub_checks(monkeypatch, ais_check):
                 "capable": volumes,
             }
         ]
-        monkeypatch.setattr(ais_check, "kernel_supports_p2pdma", lambda: p2pdma)
+        monkeypatch.setattr(
+            ais_check, "kernel_supports_p2pdma", lambda _amdgpu_has_ais: p2pdma
+        )
         monkeypatch.setattr(ais_check, "amdgpu_supports_ais", lambda: amdgpu)
         monkeypatch.setattr(
             ais_check, "hip_runtime_supports_ais", lambda: dict(hip_libraries)
         )
         monkeypatch.setattr(ais_check, "capable_volumes", lambda: (rows, volumes))
+        # sriov_vf_gpus() shells out to amd-smi, which needs a GPU and takes
+        # over a minute to fail on a machine without one. Stub it so main() stays
+        # hermetic and fast; test_sriov.py covers the real thing.
+        monkeypatch.setattr(ais_check, "sriov_vf_gpus", list)
         monkeypatch.setattr(
             ais_check.os,
             "uname",
@@ -78,6 +84,42 @@ def test_any_missing_component_exit_nonzero(
 ):
     stub_checks(**kwargs)
     assert _run(monkeypatch, ais_check, []) != 0
+
+
+def test_unverified_kernel_does_not_fail_exit_code(monkeypatch, stub_checks, ais_check):
+    stub_checks(p2pdma=None)
+    assert _run(monkeypatch, ais_check, []) == 0
+
+
+def test_unverified_kernel_still_fails_on_another_component(
+    monkeypatch, stub_checks, ais_check
+):
+    stub_checks(p2pdma=None, volumes=False)
+    assert _run(monkeypatch, ais_check, []) != 0
+
+
+def test_unverified_kernel_is_reported_and_warned(
+    monkeypatch, capsys, stub_checks, ais_check
+):
+    stub_checks(p2pdma=None)
+    _run(monkeypatch, ais_check, [])
+
+    captured = capsys.readouterr()
+    assert "Kernel P2PDMA support   : unverified" in captured.out
+    assert "could not determine whether AIS P2P-DMA is up" in captured.err
+
+
+def test_unverified_kernel_warns_in_quiet_mode(
+    monkeypatch, capsys, stub_checks, ais_check
+):
+    # The warning goes to stderr so -q cannot swallow it.
+    stub_checks(p2pdma=None)
+    rc = _run(monkeypatch, ais_check, ["-q"])
+
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert captured.out == ""
+    assert "could not determine whether AIS P2P-DMA is up" in captured.err
 
 
 def test_hip_runtime_true_if_any_library_supported(monkeypatch, stub_checks, ais_check):

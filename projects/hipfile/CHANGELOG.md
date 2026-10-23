@@ -14,12 +14,15 @@
 * The hipFile CMake options have been renamed from `AIS_*` to `HIPFILE_*` (e.g., `AIS_CXX_STANDARD` is now `HIPFILE_CXX_STANDARD`). The old `AIS_*` names still work but are deprecated and emit a CMake deprecation warning.
 * The `HIPFILE_WARN_UNSAFE_BUFFER_OPS` CMake option now defaults to `OFF`.
 * Documented that Linux kernels built with `CONFIG_PCI_P2PDMA=y` are required for fastpath.
+* `ais-check` no longer decides how to interpret the KFD topology AIS capability bit from the `amdgpu-dkms` build number. It now combines the capability bit, `CONFIG_PCI_P2PDMA`, and whether the loaded `amdgpu` carries AIS code at all, none of which depend on the driver's version.
+* `ais-check` can now report a component as `unverified` rather than `True` or `False`. `Kernel P2PDMA support` is unverified when the driver has AIS support and the kernel has `CONFIG_PCI_P2PDMA=y`, but no GPU reports AIS as initialized, which is indistinguishable from userspace between a driver that predates the capability bit and one where AIS failed to initialize. An unverified component prints a warning on stderr, explaining what to check, and does not by itself make `ais-check` exit non-zero; a component known to be missing still does.
 
 ### Fixed
 
 * Asynchronous fastpath operations now fail over to the fallback backend on `ENODEV` or `EREMOTEIO`, matching the synchronous and batch paths.
 * hipFile now returns `hipFileGetNewFDFailed` instead of `hipFileInternalError` when the process or system runs out of file descriptors. API calls that need a new file descriptor, such as `hipFileHandleRegister()`, can return this error.
 * `ais-check` no longer reports an LVM parity RAID logical volume (`raid4`, `raid5`, `raid6`) as fastpath capable.
+* `ais-check` no longer reports `Kernel P2PDMA support: False`, and exits non-zero, on a system whose `amdgpu` driver has working AIS but predates the KFD topology AIS capability bit. Any driver built recently enough carries a build number past the threshold `ais-check` used, including one built from a release branch that never sets the bit, so the bit was read as authoritative on drivers that never write it.
 * The `HIPFILE_WARN_UNSAFE_BUFFER_OPS` CMake option now applies the clang `-Wunsafe-buffer-usage` and `-fsafe-buffer-usage-suggestions` flags to C++ sources. Previously, the flags were never passed to the compiler.
 * Per-GPU I/O statistics are now attributed to the GPU that owns the I/O buffer instead of the caller's active HIP device. Previously, `hipFileGetStatsL3()` and `ais-stats` could report counters against the wrong GPU when the active device differed from the buffer's device.
 * `hipfile.h` now includes `<time.h>`, which declares the `struct timespec` used by `hipFileBatchIOGetStatus()`. Previously, C code that included `<time.h>` after `hipfile.h` got an incompatible pointer type error or warning when passing a `struct timespec *` to `hipFileBatchIOGetStatus()`.

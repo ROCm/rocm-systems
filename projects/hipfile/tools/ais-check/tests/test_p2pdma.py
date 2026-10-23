@@ -120,91 +120,6 @@ def test_first_matching_source_wins(monkeypatch, ais_check):
 
 
 # ---------------------------------------------------------------------------
-# amdgpu_dkms_version(): parse the build number out of `dkms status`.
-# ---------------------------------------------------------------------------
-
-_Completed = namedtuple("CompletedProcess", "stdout")
-
-
-def _patch_dkms(monkeypatch, ais_check, *, stdout=None, exc=None, release="6.8.0-101"):
-    monkeypatch.setattr(ais_check.os, "uname", lambda: _fake_uname(release))
-
-    def fake_run(*_args, **_kwargs):
-        if exc is not None:
-            raise exc
-        return _Completed(stdout)
-
-    monkeypatch.setattr(ais_check.subprocess, "run", fake_run)
-
-
-def test_dkms_version_new_format(monkeypatch, ais_check):
-    _patch_dkms(
-        monkeypatch,
-        ais_check,
-        stdout=(
-            "amdgpu/6.16.13-2278356.24.04, 6.8.0-101, x86_64: installed\n"
-            "nvidia/555.42.06, 6.8.0-101, x86_64: installed\n"
-        ),
-    )
-
-    assert ais_check.amdgpu_dkms_version() == 2278356
-
-
-def test_dkms_version_old_format(monkeypatch, ais_check):
-    _patch_dkms(
-        monkeypatch,
-        ais_check,
-        stdout="amdgpu, 6.16.13-2327937.24.04, 6.8.0-101, x86_64: installed\n",
-    )
-
-    assert ais_check.amdgpu_dkms_version() == 2327937
-
-
-def test_dkms_version_prefers_running_kernel(monkeypatch, ais_check):
-    _patch_dkms(
-        monkeypatch,
-        ais_check,
-        release="6.8.0-101",
-        stdout=(
-            "amdgpu/6.16.13-1111111.24.04, 6.8.0-100, x86_64: installed\n"
-            "amdgpu/6.16.13-2278356.24.04, 6.8.0-101, x86_64: installed\n"
-        ),
-    )
-
-    assert ais_check.amdgpu_dkms_version() == 2278356
-
-
-def test_dkms_version_falls_back_to_max_when_no_running_match(monkeypatch, ais_check):
-    _patch_dkms(
-        monkeypatch,
-        ais_check,
-        release="6.8.0-999",
-        stdout=(
-            "amdgpu/6.16.13-1111111.24.04, 6.8.0-100, x86_64: installed\n"
-            "amdgpu/6.16.13-2278356.24.04, 6.8.0-101, x86_64: installed\n"
-        ),
-    )
-
-    assert ais_check.amdgpu_dkms_version() == 2278356
-
-
-def test_dkms_version_no_amdgpu_entry(monkeypatch, ais_check):
-    _patch_dkms(
-        monkeypatch,
-        ais_check,
-        stdout="nvidia/555.42.06, 6.8.0-101, x86_64: installed\n",
-    )
-
-    assert ais_check.amdgpu_dkms_version() is None
-
-
-def test_dkms_version_missing_binary(monkeypatch, ais_check):
-    _patch_dkms(monkeypatch, ais_check, exc=FileNotFoundError())
-
-    assert ais_check.amdgpu_dkms_version() is None
-
-
-# ---------------------------------------------------------------------------
 # topology_reports_ais(): read the KFD topology "capability" bit.
 # ---------------------------------------------------------------------------
 
@@ -305,73 +220,46 @@ def test_topology_no_nodes_dir(monkeypatch, ais_check):
 
 
 # ---------------------------------------------------------------------------
-# kernel_supports_p2pdma(): the version-gated dispatcher.
+# kernel_supports_p2pdma(): combine the topology bit, the kernel config and
+# whether the loaded amdgpu carries AIS code at all.
 # ---------------------------------------------------------------------------
 
 
-def _patch_dispatch(monkeypatch, ais_check, *, version, topology, config):
-    monkeypatch.setattr(ais_check, "amdgpu_dkms_version", lambda: version)
+def _patch_dispatch(monkeypatch, ais_check, *, topology, config):
     monkeypatch.setattr(ais_check, "topology_reports_ais", lambda: topology)
     monkeypatch.setattr(ais_check, "config_supports_p2pdma", lambda: config)
 
 
-def test_new_driver_uses_topology_true(monkeypatch, ais_check):
-    _patch_dispatch(
-        monkeypatch,
-        ais_check,
-        version=ais_check.KFD_AIS_CAPABILITY_MIN_VERSION + 1,
-        topology=True,
-        config=False,
-    )
+@pytest.mark.parametrize("config", [True, False])
+@pytest.mark.parametrize("amdgpu_has_ais", [True, False])
+def test_topology_bit_set_settles_it(monkeypatch, ais_check, config, amdgpu_has_ais):
+    # The bit is only set once amdgpu has AIS up, so nothing else can overturn
+    # it -- including a driver version, which is no longer consulted at all.
+    _patch_dispatch(monkeypatch, ais_check, topology=True, config=config)
 
-    assert ais_check.kernel_supports_p2pdma() is True
+    assert ais_check.kernel_supports_p2pdma(amdgpu_has_ais) is True
 
 
-def test_new_driver_bit_unset_reports_unsupported(monkeypatch, ais_check):
-    # New enough driver but topology bit clear -> unsupported, config ignored.
-    _patch_dispatch(
-        monkeypatch,
-        ais_check,
-        version=ais_check.KFD_AIS_CAPABILITY_MIN_VERSION + 1,
-        topology=False,
-        config=True,
-    )
+@pytest.mark.parametrize("amdgpu_has_ais", [True, False])
+def test_no_config_option_reports_unsupported(monkeypatch, ais_check, amdgpu_has_ais):
+    # kfd_ais_init() is compiled out without CONFIG_PCI_P2PDMA, so AIS cannot be
+    # up no matter what the driver carries.
+    _patch_dispatch(monkeypatch, ais_check, topology=False, config=False)
 
-    assert ais_check.kernel_supports_p2pdma() is False
+    assert ais_check.kernel_supports_p2pdma(amdgpu_has_ais) is False
 
 
-def test_threshold_is_exclusive(monkeypatch, ais_check):
-    # Exactly at the threshold is not "higher", so it uses the config path.
-    _patch_dispatch(
-        monkeypatch,
-        ais_check,
-        version=ais_check.KFD_AIS_CAPABILITY_MIN_VERSION,
-        topology=False,
-        config=True,
-    )
+def test_driver_without_ais_reports_unsupported(monkeypatch, ais_check):
+    # CONFIG_PCI_P2PDMA=y, but the loaded amdgpu has no AIS code to bring up.
+    _patch_dispatch(monkeypatch, ais_check, topology=False, config=True)
 
-    assert ais_check.kernel_supports_p2pdma() is True
+    assert ais_check.kernel_supports_p2pdma(False) is False
 
 
-def test_old_driver_uses_config(monkeypatch, ais_check):
-    _patch_dispatch(
-        monkeypatch,
-        ais_check,
-        version=ais_check.KFD_AIS_CAPABILITY_MIN_VERSION - 1,
-        topology=False,
-        config=True,
-    )
+def test_ais_driver_without_bit_is_unverified(monkeypatch, ais_check):
+    # A driver with AIS code on a CONFIG_PCI_P2PDMA=y kernel, with no GPU
+    # reporting the bit, is either older than the capability flag or one where
+    # AIS failed to initialize. Neither can be ruled out from userspace.
+    _patch_dispatch(monkeypatch, ais_check, topology=False, config=True)
 
-    assert ais_check.kernel_supports_p2pdma() is True
-
-
-def test_unknown_version_falls_back_to_config(monkeypatch, ais_check):
-    _patch_dispatch(
-        monkeypatch,
-        ais_check,
-        version=None,
-        topology=True,
-        config=False,
-    )
-
-    assert ais_check.kernel_supports_p2pdma() is False
+    assert ais_check.kernel_supports_p2pdma(True) is None

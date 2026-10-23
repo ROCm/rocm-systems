@@ -14,8 +14,10 @@ Check if the necessary AMD Infinity Storage (AIS) components are installed
 and whether at least one mounted volume can use hipFile's fast path.
 
 If all required components are installed and at least one volume is
-hipFile-capable the program exits with exit code 0. Otherwise it exits with a
-non-zero exit code.
+hipFile-capable the program exits with exit code 0. If any component is known
+to be missing it exits with a non-zero exit code. A component the available
+evidence cannot settle is reported as "unverified" and warned about on stderr,
+but does not by itself change the exit code.
 
 A volume is reported as hipFile-capable when it mirrors the fast-path
 eligibility the hipFile library enforces for a regular file:
@@ -77,12 +79,6 @@ PSEUDO_FSTYPES = {
 }
 
 
-# amdgpu DKMS builds newer than this expose an authoritative AIS P2P-DMA state
-# through the KFD topology "capability" bit. On such drivers we trust that bit
-# instead of the kernel's CONFIG_PCI_P2PDMA, which only reports build-time
-# support, not whether AIS actually came up.
-KFD_AIS_CAPABILITY_MIN_VERSION = 2327936
-
 # Bit set in a KFD topology node's "capability" mask once AIS P2P-DMA is
 # initialized for that GPU.
 KFD_CAPABILITY_AIS = 0x40
@@ -112,60 +108,6 @@ DM_RAID_PASSTHROUGH_TYPES = {
     "raid10_near",
     "raid10_offset",
 }
-
-
-def amdgpu_dkms_version():
-    """
-    Return the amdgpu DKMS build number (e.g. 2278356 from a module version of
-    "6.16.13-2278356.24.04"), or None if it cannot be determined.
-
-    The build number is the integer immediately after the first '-' in the
-    module version. dkms lists one entry per installed kernel; the entry for the
-    running kernel is preferred, otherwise the highest build number is used.
-    """
-    try:
-        result = subprocess.run(
-            ["dkms", "status", "amdgpu"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except OSError:
-        return None
-
-    running = os.uname().release
-    builds = []
-    running_build = None
-    for line in result.stdout.splitlines():
-        # Two dkms output shapes exist: "amdgpu/<ver>, <kernel>, ..." (newer)
-        # and "amdgpu, <ver>, <kernel>, ..." (older). Parse the status-free head
-        # by comma, then reconcile the version/kernel split.
-        head = line.split(":", 1)[0]
-        parts = [p.strip() for p in head.split(",")]
-        first = parts[0]
-        if "/" in first:
-            version = first.partition("/")[2]
-            kernel = parts[1] if len(parts) > 1 else None
-        else:
-            version = parts[1] if len(parts) > 1 else None
-            kernel = parts[2] if len(parts) > 2 else None
-
-        if not version or "-" not in version:
-            continue
-        token = version.split("-", 1)[1].split(".", 1)[0]
-        if not token.isdigit():
-            continue
-
-        build = int(token)
-        builds.append(build)
-        if kernel == running:
-            running_build = build
-
-    if running_build is not None:
-        return running_build
-    if builds:
-        return max(builds)
-    return None
 
 
 def topology_reports_ais():
@@ -233,19 +175,38 @@ def config_supports_p2pdma():
     return False
 
 
-def kernel_supports_p2pdma():
+def kernel_supports_p2pdma(amdgpu_has_ais):
     """
-    Check for P2P DMA support.
+    Whether the kernel has AIS P2P-DMA up, as an Optional[bool]: True, False, or
+    None when the available evidence cannot settle it.
 
-    On amdgpu DKMS builds newer than KFD_AIS_CAPABILITY_MIN_VERSION the KFD
-    topology exposes an authoritative AIS capability bit, so it alone decides the
-    verdict. Older builds -- and any case where the driver version can't be
-    determined -- fall back to inspecting the kernel's CONFIG_PCI_P2PDMA.
+    amdgpu_has_ais is amdgpu_supports_ais(), passed in so the caller reads
+    /proc/kallsyms once.
+
+    Three signals are combined, none of which involves the driver's version:
+
+      * The KFD topology AIS bit, set per GPU once amdgpu has registered VRAM as
+        a PCI P2PDMA resource. Set means AIS is up, which settles it.
+      * CONFIG_PCI_P2PDMA. The driver's kfd_ais_init() is compiled out without
+        it, so AIS cannot be up. Clear settles it the other way.
+      * Whether the loaded amdgpu carries AIS code at all (kallsyms). A driver
+        without it never brings AIS up.
+
+    What they cannot settle is a driver that has AIS code and a kernel that has
+    CONFIG_PCI_P2PDMA=y, yet no GPU reporting the bit. That is either a driver
+    predating the capability flag (which never sets the bit, so its AIS may well
+    be working) or one where AIS genuinely failed to initialize -- an SR-IOV
+    virtual function, an APU, a GPU without a resizable BAR, or a failed P2PDMA
+    resource registration. Nothing readable from userspace tells the two apart,
+    so the verdict is None and the caller warns rather than guessing.
     """
-    version = amdgpu_dkms_version()
-    if version is not None and version > KFD_AIS_CAPABILITY_MIN_VERSION:
-        return topology_reports_ais()
-    return config_supports_p2pdma()
+    if topology_reports_ais():
+        return True
+    if not config_supports_p2pdma():
+        return False
+    if not amdgpu_has_ais:
+        return False
+    return None
 
 
 def find_hip_runtimes():
@@ -497,6 +458,32 @@ def print_sriov_warning(vf_gpus):
         "hipFile's fast path is not available on GPU virtual functions; "
         "I/O will fall back to the slower compatibility path. The fast path "
         "requires a GPU physical function (PF).",
+        file=sys.stderr,
+    )
+
+
+def print_unverified_kernel_warning(kernel_ais):
+    """
+    Print a warning to stderr when kernel_supports_p2pdma() could not settle a
+    verdict. Does nothing otherwise.
+
+    Written to stderr (not stdout) so it remains visible in quiet mode.
+    """
+    if kernel_ais is not None:
+        return
+
+    print(
+        "WARNING: could not determine whether AIS P2P-DMA is up. The amdgpu "
+        "driver carries AIS support and the kernel is built with "
+        "CONFIG_PCI_P2PDMA=y, but no GPU reports AIS as initialized in the KFD "
+        "topology. Either the driver predates the topology capability flag, in "
+        "which case AIS may be working, or AIS failed to initialize for every "
+        "GPU: a virtual function, an APU, a GPU whose BAR is not resizable or "
+        "has not been resized, or a P2PDMA resource that could not be "
+        "registered.\n"
+        "Check the kernel log for AIS messages (dmesg | grep 'AIS:'); a line "
+        "reporting registered device memory means AIS came up on that GPU. "
+        "This warning does not affect the exit code.",
         file=sys.stderr,
     )
 
@@ -988,6 +975,36 @@ def capable_volumes():
     return rows, any(r["capable"] is True for r in rows)
 
 
+def print_report(args, hip_libraries, volume_rows, component_support):
+    """Print the regular (non-quiet) report to stdout."""
+    u = os.uname()
+    print()
+    print(u.sysname, u.nodename, u.release, u.version, u.machine)
+
+    if args.verbose:
+        print()
+        print("Found these HIP libraries (some may refer to the same library):")
+        for lib, support in hip_libraries.items():
+            if support:
+                pretty_supported = "supported"
+            else:
+                pretty_supported = "NOT supported"
+            print(f"\t{lib} (AIS {pretty_supported})")
+
+    print()
+    print("Mounted volumes:")
+    if volume_rows:
+        print_volume_table(volume_rows)
+    else:
+        print("No block-backed volumes found.")
+
+    print()
+    print("AIS support in:")
+    for name, supported in component_support:
+        pretty = "unverified" if supported is None else str(supported)
+        print(f"\t{name:<24}: {pretty}")
+
+
 # Reimplemented in hipfile/test/common/ais-capability.h.
 def main():
     """
@@ -1020,46 +1037,29 @@ def main():
     hip_libraries = hip_runtime_supports_ais()
     volume_rows, volumes_ok = capable_volumes()
     vf_gpus = sriov_vf_gpus()
+    amdgpu_ais = amdgpu_supports_ais()
+    kernel_ais = kernel_supports_p2pdma(amdgpu_ais)
 
     component_support = [
-        ("Kernel P2PDMA support", kernel_supports_p2pdma()),
+        ("Kernel P2PDMA support", kernel_ais),
         ("HIP runtime", any(hip_libraries.values())),
-        ("amdgpu", amdgpu_supports_ais()),
+        ("amdgpu", amdgpu_ais),
         ("hipFile-capable volume", volumes_ok),
     ]
 
     if not args.quiet:
-        u = os.uname()
-        print()
-        print(u.sysname, u.nodename, u.release, u.version, u.machine)
-
-        if args.verbose:
-            print()
-            print("Found these HIP libraries (some may refer to the same library):")
-            for lib, support in hip_libraries.items():
-                if support:
-                    pretty_supported = "supported"
-                else:
-                    pretty_supported = "NOT supported"
-                print(f"\t{lib} (AIS {pretty_supported})")
-
-        print()
-        print("Mounted volumes:")
-        if volume_rows:
-            print_volume_table(volume_rows)
-        else:
-            print("No block-backed volumes found.")
-
-        print()
-        print("AIS support in:")
-        for name, supported in component_support:
-            print(f"\t{name:<24}: {supported}")
+        print_report(args, hip_libraries, volume_rows, component_support)
 
     # A VF is a performance caveat, not a missing component, so warn (always, even
     # in quiet mode) without affecting the exit code.
     print_sriov_warning(vf_gpus)
 
-    return int(not all(supported for (_, supported) in component_support))
+    # An unverified component is not a component known to be missing, so it warns
+    # rather than failing: reporting a working system as unsupported would have
+    # callers skip the fastpath they can actually use.
+    print_unverified_kernel_warning(kernel_ais)
+
+    return int(any(supported is False for (_, supported) in component_support))
 
 
 if __name__ == "__main__":
