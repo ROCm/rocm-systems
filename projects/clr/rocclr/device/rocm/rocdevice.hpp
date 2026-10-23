@@ -69,6 +69,16 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   //! AccumulateCommand dispatch record this signal supplies timing for.
   uint32_t dispatch_slot_ = kNoDispatchSlot;
   std::recursive_mutex lock_;  //!< Signal lock for update
+
+  //! Reuse bookkeeping, touched only by the owning RetiringSignalTracker. Kept out of flags_
+  //! because timestamp processing updates flags_ from other threads.
+  uint64_t use_seq_ = 0;         //!< Queue sequence of the last use, 0 if unused
+  uint64_t use_aql_slot_ = kInvalidAqlSlot;  //!< AQL packet completing the use, if it retires
+                                             //!< in queue order
+  uint64_t use_queue_gen_ = 0;   //!< HW queue generation the packet was submitted to
+  bool use_fence_ = false;       //!< The packet was published with the barrier bit
+  bool use_retired_ = true;      //!< The last use is known to be complete
+  bool armed_ = false;           //!< The value holds kInitSignalValueOne, visible to the GPU
   bool in_device_memory_ = false;  //!< Host stores to the value need FlushSignalStores
 
   typedef union {
@@ -100,8 +110,9 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   virtual ~ProfilingSignal();
   std::recursive_mutex& LockSignalOps() { return lock_; }
 
-  //! Cache timing data from HSA for this signal (called once when signal completes)
-  void CacheTimingData(hsa_agent_t gpu_device);
+  //! Cache timing data from HSA for this signal (called once when signal completes).
+  //! completed skips the value check when the caller already knows the signal completed.
+  void CacheTimingData(hsa_agent_t gpu_device, bool completed = false);
 
   //! Reset cached timing for signal reuse
   void ResetCachedTiming() {
@@ -547,6 +558,8 @@ class Device : public NullDevice {
   bool CreateSignals(uint32_t count, hsa_signal_value_t initial_value, uint64_t attributes,
                      bool batched, bool device_memory, hsa_signal_t* signals,
                      bool& in_device_memory) const;
+  //! True if queue completion signals are batched in device memory
+  bool QueueDeviceSignals() const { return queue_device_signals_; }
   //! Makes earlier host stores to device-memory signal values visible to the GPU. When ROCr
   //! reports that stores to device memory come over PCIe, re-store the last one and read it back.
   //! last_stored must be in device memory, or the readback does not drain HDP.
@@ -778,6 +791,7 @@ class Device : public NullDevice {
   hsa_amd_memory_pool_t gpu_ext_fine_grained_segment_;
   hsa_amd_memory_pool_t device_signal_pool_{0};  //!< Pool for signals in device memory, if any
   bool graph_device_signals_ = false;  //!< Graph signals live in device_signal_pool_
+  bool queue_device_signals_ = false;  //!< Queue signals live in device_signal_pool_
   bool pcie_stores_need_flush_ = true;  //!< Stores to device memory come over PCIe through HDP
   hsa_signal_t prefetch_signal_;  //!< Prefetch signal, used to explicitly prefetch SVM on device
   std::atomic<int> cache_state_;  //!< State of cache, kUnknown/kFlushedToDevice/kFlushedToSystem

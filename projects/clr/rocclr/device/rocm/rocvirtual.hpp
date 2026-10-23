@@ -18,6 +18,7 @@
 #include "os/os.hpp"
 #include <atomic>
 #include <condition_variable>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <stack>
@@ -53,43 +54,41 @@ constexpr static uint64_t kInvalidQueueIndex = std::numeric_limits<uint64_t>::ma
 constexpr static uint64_t kTimeout4Secs = 4 * M;
 
 inline bool WaitForSignal(hsa_signal_t signal, bool active_wait = false, bool yield = false) {
-  hsa_wait_state_t wait_state = HSA_WAIT_STATE_BLOCKED;
-  if (active_wait) {
-    wait_state = HSA_WAIT_STATE_ACTIVE;
+  const hsa_wait_state_t wait_state = active_wait ? HSA_WAIT_STATE_ACTIVE : HSA_WAIT_STATE_BLOCKED;
+
+  // Each wait loads the value before anything else, and for a signal in device memory every load
+  // is a PCIe read, so the waits are not preceded by a separate check.
+  // When it is blocked wait, we wait in active state for 100 us before proceeding to wait in
+  // blocked state indefinitely.
+  if (!active_wait) {
+    ClPrint(amd::LOG_INFO, amd::LOG_SIG, "Host active wait for Signal = (0x%lx) for %d ns",
+            signal.handle, kTimeout100us);
+    if (Hsa::signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, kInitSignalValueOne,
+                                  kTimeout100us, HSA_WAIT_STATE_ACTIVE) == 0) {
+      return true;
+    }
+    if (HIP_SKIP_ABORT_ON_GPU_ERROR && amd::Device::IsGPUInError()) {
+      ClPrint(amd::LOG_ERROR, amd::LOG_SIG,
+              "Device not Stable, while waiting for Signal ="
+              "(0x%lx) for %d ns",
+              signal.handle, kTimeout100us);
+      return true;
+    }
   }
 
-  if (Hsa::signal_load_relaxed(signal) > 0) {
-    // When it is blocked wait, we wait in active state for 100 us before proceeding to wait in
-    // blocked state indefinitely.
-    if (!active_wait) {
-      ClPrint(amd::LOG_INFO, amd::LOG_SIG, "Host active wait for Signal = (0x%lx) for %d ns",
-              signal.handle, kTimeout100us);
-      if (Hsa::signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, kInitSignalValueOne,
-                                    kTimeout100us, HSA_WAIT_STATE_ACTIVE) != 0) {
-        if (HIP_SKIP_ABORT_ON_GPU_ERROR && amd::Device::IsGPUInError()) {
-          ClPrint(amd::LOG_ERROR, amd::LOG_SIG,
-                  "Device not Stable, while waiting for Signal ="
-                  "(0x%lx) for %d ns",
-                  signal.handle, kTimeout100us);
-          return true;
-        }
-      }
+  // This is unlimited wait, but we wait for 4 secs and check if the device is
+  // unstable, if so we return, otherwise we continue to wait in the while loop.
+  while (Hsa::signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, kInitSignalValueOne,
+                                   kTimeout4Secs, wait_state) != 0) {
+    if (HIP_SKIP_ABORT_ON_GPU_ERROR && amd::Device::IsGPUInError()) {
+      ClPrint(amd::LOG_ERROR, amd::LOG_SIG,
+              "Device not Stable, while waiting for Signal ="
+              "(0x%lx) for %d ns",
+              signal.handle, kTimeout4Secs);
+      return true;
     }
-
-    // This is unlimited wait, but we wait for 4 secs and check if the device is
-    // unstable, if so we return, otherwise we continue to wait in the while loop.
-    while (Hsa::signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, kInitSignalValueOne,
-                                     kTimeout4Secs, wait_state) != 0) {
-      if (HIP_SKIP_ABORT_ON_GPU_ERROR && amd::Device::IsGPUInError()) {
-        ClPrint(amd::LOG_ERROR, amd::LOG_SIG,
-                "Device not Stable, while waiting for Signal ="
-                "(0x%lx) for %d ns",
-                signal.handle, kTimeout4Secs);
-        return true;
-      }
-      if (yield && wait_state == HSA_WAIT_STATE_ACTIVE) {
-        amd::Os::yield();
-      }
+    if (yield && wait_state == HSA_WAIT_STATE_ACTIVE) {
+      amd::Os::yield();
     }
   }
 
@@ -127,7 +126,7 @@ class Timestamp : public amd::ReferenceCountedObject {
   //! Extract timing from a single signal and update accumulators
   void ExtractSignalTiming(ProfilingSignal* signal,
                            uint64_t& start, uint64_t& end,
-                           uint64_t& sdmaStart, uint64_t& sdmaEnd);
+                           uint64_t& sdmaStart, uint64_t& sdmaEnd, bool completed);
 
   Timestamp(const Timestamp&) = delete;
   Timestamp& operator=(const Timestamp&) = delete;
@@ -161,7 +160,8 @@ class Timestamp : public amd::ReferenceCountedObject {
   //! Finds execution ticks on GPU
   //! If single_signal is nullptr, processes all signals and clears the list
   //! If single_signal is provided, processes only that signal with merge enabled
-  void checkGpuTime(ProfilingSignal* single_signal = nullptr);
+  //! completed tells that single_signal is known to have completed
+  void checkGpuTime(ProfilingSignal* single_signal = nullptr, bool completed = false);
 
   // Start a timestamp (get timestamp from OS)
   void start() { start_ = amd::Os::timeNanos(); }
@@ -282,12 +282,24 @@ class VirtualGPU : public device::VirtualDevice {
     //! Creates a pool of signals for tracking of HW operations on the queue
     bool Create();
 
-    //! Finds a free signal for the upcoming operation
+    //! Finds a free signal for the upcoming operation. aql_slot is the AQL packet that completes
+    //! the signal in queue order, and barrier_bit whether it was published with the barrier bit.
+    //! Leave aql_slot invalid for operations that complete outside queue order.
     hsa_signal_t ActiveSignal(hsa_signal_value_t init_val = kInitSignalValueOne,
-                              Timestamp* ts = nullptr, bool attach_signal = true);
+                              Timestamp* ts = nullptr, bool attach_signal = true,
+                              uint64_t aql_slot = kInvalidAqlSlot, bool barrier_bit = false);
+
+    //! Records a packet published with the barrier bit on the current HW queue
+    virtual void NoteFence(uint64_t /*aql_slot*/) {}
+
+    //! The HW queue changed, so AQL slots of earlier uses no longer prove anything
+    virtual void NoteQueueChange() {}
+
+    //! The HW queue is idle and about to be released: every AQL packet on it has launched
+    virtual void NoteQueueDrained() {}
 
     //! Wait for the curent active signal. Can idle the queue
-    bool WaitCurrent();
+    virtual bool WaitCurrent();
 
     //! Update current active engine
     void SetActiveEngine(HwQueueEngine engine = HwQueueEngine::Compute) { engine_ = engine; }
@@ -298,6 +310,10 @@ class VirtualGPU : public device::VirtualDevice {
 
     //! Resets current signal back to the previous one. It's necessary in a case of ROCr failure.
     virtual void ResetCurrentSignal() = 0;
+
+    //! Resets current signal after a ROCr failure left some of its sub-ops issued. The signal
+    //! settles at unissued_ops once the issued ones complete.
+    virtual void ResetPartialSignal(hsa_signal_value_t /*unissued_ops*/) { ResetCurrentSignal(); }
 
     //! Adds an external signal(submission in another queue) for dependency tracking
     void AddExternalSignal(ProfilingSignal* signal) { external_signals_.push_back(signal); }
@@ -315,17 +331,32 @@ class VirtualGPU : public device::VirtualDevice {
     void AddDynamicQueueWait(hsa_signal_t signal) { dynamic_queue_waits_.push_back(signal); }
 
    protected:
+    //! Returns the signal attributes for the requested scope and updates interrupt
+    uint64_t SignalAttributes(bool& interrupt) const;
+
     //! Creates HSA signal with the specified scope
     bool CreateSignal(ProfilingSignal* signal, bool interrupt = false) const;
+
+    //! Creates count HSA signals with the specified scope from one allocation
+    bool CreateSignals(uint32_t count, bool interrupt,
+                       std::vector<ProfilingSignal*>& signals) const;
 
     //! Wait for the provided signal
     bool CpuWaitForSignal(ProfilingSignal* signal);
 
+    //! Hands a completed use's timing to its Timestamp, or marks the signal done
+    void CompleteUse(ProfilingSignal* signal);
+
+    //! Readies signals entering the pools ActiveSignal swaps interrupt signals in from
+    virtual void PreparePooledSignals(const std::vector<ProfilingSignal*>& /*signals*/) {}
+
     //! Moves current_id_ to the slot of the next use and makes its signal reusable
     virtual void AcquireSlot() = 0;
 
-    //! Starts a use of the current slot's signal at init_val
-    virtual void BeginUse(ProfilingSignal* signal, hsa_signal_value_t init_val) = 0;
+    //! Starts a use of the current slot's signal at init_val. blocking_callback means the value
+    //! stays above 0 after the packet retires.
+    virtual void BeginUse(ProfilingSignal* signal, hsa_signal_value_t init_val,
+                          uint64_t aql_slot, bool barrier_bit, bool blocking_callback) = 0;
 
     //! Registers the async handler that processes ts once the signal drops below init_value
     virtual hsa_status_t SetAsyncHandler(ProfilingSignal* signal, Timestamp* ts,
@@ -333,6 +364,12 @@ class VirtualGPU : public device::VirtualDevice {
 
     //! True if the GPU may still be working on the last use of the signal
     virtual bool IsBusy(const ProfilingSignal* signal) const = 0;
+
+    //! The operations consuming the waits of the previous WaitingSignal call have been submitted
+    virtual void NoteWaitsSubmitted() {}
+
+    //! A GPU waiter will read the busy signal
+    virtual void NoteGpuWait(ProfilingSignal* /*signal*/) {}
 
     HwQueueEngine engine_ = HwQueueEngine::Unknown;  //!< Engine used in the current operations
     std::stack<ProfilingSignal*> signal_pool_irq_;   //!< The pool of free signals with interrupts
@@ -354,13 +391,115 @@ class VirtualGPU : public device::VirtualDevice {
 
    private:
     void AcquireSlot() override;
-    void BeginUse(ProfilingSignal* signal, hsa_signal_value_t init_val) override;
+    void BeginUse(ProfilingSignal* signal, hsa_signal_value_t init_val, uint64_t aql_slot,
+                  bool barrier_bit, bool blocking_callback) override;
     hsa_status_t SetAsyncHandler(ProfilingSignal* signal, Timestamp* ts,
                                  hsa_signal_value_t init_value) override;
     bool IsBusy(const ProfilingSignal* signal) const override;
 
     //! Wait for the next active signal
     void WaitNext();
+  };
+
+  //! Proves reuse from host memory instead of reading every signal, and rearms signals ahead of
+  //! use with one flush per batch. For device-memory signals, where every host access crosses
+  //! PCIe.
+  class RetiringSignalTracker final : public HwQueueTracker {
+   public:
+    RetiringSignalTracker(const VirtualGPU& gpu)
+        : HwQueueTracker(gpu), max_signals_(16 * ROC_SIGNAL_POOL_SIZE) {}
+
+    ~RetiringSignalTracker() override;
+
+    void NoteFence(uint64_t aql_slot) override;
+    void NoteQueueChange() override;
+    void NoteQueueDrained() override;
+    bool WaitCurrent() override;
+    void ResetCurrentSignal() override;
+    void ResetPartialSignal(hsa_signal_value_t unissued_ops) override;
+
+   private:
+    void PreparePooledSignals(const std::vector<ProfilingSignal*>& signals) override;
+    //! Advances current_id_ to an armed slot
+    void AcquireSlot() override;
+    void BeginUse(ProfilingSignal* signal, hsa_signal_value_t init_val, uint64_t aql_slot,
+                  bool barrier_bit, bool blocking_callback) override;
+    hsa_status_t SetAsyncHandler(ProfilingSignal* signal, Timestamp* ts,
+                                 hsa_signal_value_t init_value) override;
+    bool IsBusy(const ProfilingSignal* signal) const override;
+    void NoteWaitsSubmitted() override;
+    void NoteGpuWait(ProfilingSignal* signal) override;
+
+    //! Signals a set of GPU waits captured in one WaitingSignal call. Holding a reference keeps
+    //! the owner from rearming them while a waiter may still read the old use.
+    struct PinnedWaits {
+      std::vector<ProfilingSignal*> signals;
+      uint64_t close_seq = 0;   //!< Uses below this sequence consume the waits
+      uint64_t close_aql = 0;   //!< AQL packets below this slot consume the waits
+      uint64_t queue_gen = 0;   //!< HW queue generation of those packets
+      bool consumers_passed = false;  //!< The queue drained, so every AQL consumer launched
+    };
+
+    //! True if the last use of the signal is known to be complete without reading its value
+    bool IsRetired(const ProfilingSignal* signal) const;
+
+    //! Records that the last use of the signal completed
+    void MarkCompleted(ProfilingSignal* signal);
+
+    //! Proves retirement from host memory, rearms retired slots ahead of current_id_ with one
+    //! flush, and releases pins whose waiters have passed
+    void Reclaim();
+
+    //! Advances retired_below_ from the HW queue read index
+    void RefreshRetiredBelow();
+
+    //! Reads the newest unretired fence within kArmBatch uses of the slot
+    void ProbeFence(size_t first_offset);
+
+    //! Puts an armed spare into the slot and parks the shared signal
+    bool ReplaceWithSpare(size_t slot);
+
+    //! Returns an armed signal from the spare pool, refilled with one batched allocation
+    ProfilingSignal* TakeSpare();
+
+    //! Arms parked signals the tracker holds the last reference to and returns them to the pools
+    void RecycleParked();
+
+    //! Closes the pins captured by the last WaitingSignal call
+    void ClosePins();
+
+    //! Drops pins whose consumers have all passed their waits
+    void ReleasePins(bool release_all = false);
+
+    hsa_signal_value_t LoadValue(const ProfilingSignal* signal) const;
+
+    //! Stores without an HDP flush; FlushStores publishes the last store to device memory
+    void StoreValue(ProfilingSignal* signal, hsa_signal_value_t value);
+
+    //! Publishes the stores before a packet on this device's AQL rings can use the signals
+    void FlushStores();
+
+    static constexpr size_t kArmBatch = 32;       //!< Slots rearmed per flush
+    static constexpr size_t kLowWatermark = 16;   //!< Armed slots left before reclaiming
+    static constexpr uint32_t kSpareBatch = 64;   //!< Signals per spare pool allocation
+    static constexpr size_t kMaxFenceSlots = 256; //!< Barrier-bit packets tracked per queue
+
+    uint64_t next_use_seq_ = 1;       //!< Sequence number of the next use
+    uint64_t oldest_unretired_seq_ = 1;  //!< Every use below this sequence completed
+    uint64_t queue_gen_ = 1;          //!< Generation of the current HW queue
+    uint64_t retired_below_ = 0;      //!< Every packet below this slot on queue_gen_ completed
+    std::deque<uint64_t> fence_slots_;  //!< Barrier-bit packets not yet passed by the read index
+    size_t num_armed_ahead_ = 0;      //!< Armed slots following current_id_
+    bool reclaim_stalled_ = false;    //!< The last reclaim stopped at a busy signal
+    const size_t max_signals_;        //!< Ring size beyond which reuse waits on a signal
+    std::vector<ProfilingSignal*> spare_signals_;  //!< Armed signals for growth and swaps
+    //! Retired signals swapped out while shared. Reusing them avoids destroying and recreating
+    //! device-memory signals.
+    std::vector<ProfilingSignal*> parked_signals_;
+    PinnedWaits open_pins_;                        //!< Pins from the last WaitingSignal call
+    std::deque<PinnedWaits> closed_pins_;          //!< Pins waiting for their consumers
+    ProfilingSignal* unflushed_store_ = nullptr;  //!< Last direct store not yet flushed
+    hsa_signal_value_t unflushed_value_ = 0;      //!< Value of unflushed_store_
   };
 
   class MetaDataPreloader : public amd::EmbeddedObject {

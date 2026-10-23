@@ -339,7 +339,7 @@ bool DmaBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory& d
                                      (reinterpret_cast<const_address>(src) + srcOffset), srcAgent,
                                      size[0], wait_events.size(), wait_events.data(), active);
           if (status != HSA_STATUS_SUCCESS) {
-            gpu().Barriers().ResetCurrentSignal();
+            gpu().Barriers().ResetPartialSignal(kInitVal - (z * size[1] + y));
             LogPrintfError("DMA buffer failed with code %d", status);
             return false;
           }
