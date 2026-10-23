@@ -24,7 +24,7 @@ namespace rocjitsu::amdgpu {
 /// @brief Test-only access to legacy compatibility implementation details.
 class LegacyAddressSpaceTestAccess {
 public:
-  static std::mutex *backing_atomic_mutex_for(const void *address) {
+  static auto *backing_atomic_mutex_for(const void *address) {
     return &LegacyAddressSpace::backing_atomic_mutex(reinterpret_cast<uintptr_t>(address));
   }
 
@@ -61,8 +61,10 @@ namespace rocjitsu::test {
 /// @brief Test-only owner that keeps legacy mappings under a real GpuVm.
 class LegacyGpuMemoryFixture : public amdgpu::GpuMemory {
 public:
-  explicit LegacyGpuMemoryFixture(std::string name)
-      : GpuMemory(std::move(name)), direct_address_space_(*this), legacy_vm_(gpu_vm_, this) {}
+  explicit LegacyGpuMemoryFixture(std::string name,
+                                  amdgpu::MemoryTransactionPolicy transactions = {})
+      : GpuMemory(std::move(name), transactions), direct_address_space_(*this),
+        legacy_vm_(gpu_vm_, this) {}
 
   using GpuMemory::read32;
   using GpuMemory::write32;
