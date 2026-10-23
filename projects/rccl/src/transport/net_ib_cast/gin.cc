@@ -404,6 +404,7 @@ extern int64_t ncclParamIbCastTimeout();
 extern int64_t ncclParamIbCastRetryCnt();
 
 struct IbCastRmaProxySegMrHandle {
+  uint32_t tag; // rcclRmaSegMrTag, so rcclRmaMrSegmentCount reads CAST handles like net_ib ones.
   int nSegments;
   // segOff[0]==0, segOff[nSegments]==size; per-segment local MRs.
   // base_vas indexed [rank*nSegments + seg].
@@ -417,6 +418,10 @@ struct IbCastRmaProxySegMrHandle {
   int* ibDevNs;
   size_t* rankSegOff;
 };
+
+static_assert(offsetof(struct IbCastRmaProxySegMrHandle, tag) == 0, "segment-count tag is the first field");
+static_assert(offsetof(struct IbCastRmaProxySegMrHandle, nSegments) == sizeof(uint32_t),
+              "nSegments follows the tag");
 
 // Fixed-size record every rank sends even on local failure; magic/version fail mismatched layouts collectively.
 #define IBCAST_RMA_REGISTRATION_MAGIC 0x524d5347u
@@ -597,6 +602,7 @@ static ncclResult_t rcclIbCastRmaIbProxyRegMrSymDmaBuf(void* collComm, void* dat
     ret = ncclInvalidUsage;
     goto reconcile;
   }
+  ginMrHandle->tag = rcclRmaSegMrTag();
   ginMrHandle->nSegments = nSeg;
   ginMrHandle->segOff[0] = 0;
 
