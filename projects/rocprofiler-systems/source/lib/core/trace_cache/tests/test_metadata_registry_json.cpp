@@ -16,8 +16,7 @@
 #include <vector>
 
 // ═══════════════════════════════════════════════════════════════════════════
-// metadata_registry save_to_file → load_from_file — a child process's metadata
-// reaches the root process's post-processing only through this JSON file
+// metadata_registry save_to_file → load_from_file
 // ═══════════════════════════════════════════════════════════════════════════
 
 namespace
