@@ -15,12 +15,10 @@
 #include <assert.h>
 #include <errno.h>
 #include <arpa/inet.h>
-#include <arpa/inet.h>
 #include <assert.h>
 #include <errno.h>
 #include <netinet/in.h>
 #include <poll.h>
-#include <pthread.h>
 #include <sched.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
@@ -30,7 +28,6 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#include <atomic>
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
@@ -1036,6 +1033,9 @@ TEST(ProxyTests, ProxyServiceDoesNotHangOnExternalBadMagic)
             // the proxy service continues after the expected warning.
             proxyState.cudaDev = -1;
 
+            ncclSocket goodSock = {};
+            ASSERT_EQ(ncclSocketInit(&goodSock, &boundAddr, NCCL_SOCKET_MAGIC, ncclSocketTypeProxy),
+                      ncclSuccess);
             const int externalFd = socket(AF_INET, SOCK_STREAM, 0);
             ASSERT_GE(externalFd, 0);
 
@@ -1054,19 +1054,11 @@ TEST(ProxyTests, ProxyServiceDoesNotHangOnExternalBadMagic)
                 }
             } serviceGuard{&abortFlag, serviceThread};
 
-            // Let ncclProxyService enter its poll loop before delivering the
-            // malformed connection.
-            std::this_thread::sleep_for(std::chrono::seconds(3));
+            // Establish a valid peer before injecting the malformed peer. The
+            // stop request below proves that the service returns to poll() and
+            // continues servicing existing connections after rejecting it.
+            ASSERT_EQ(ncclSocketConnect(&goodSock), ncclSuccess);
 
-            clockid_t serviceClock;
-            ASSERT_EQ(pthread_getcpuclockid(serviceThread.native_handle(), &serviceClock), 0);
-            struct timespec cpuBefore = {};
-            ASSERT_EQ(clock_gettime(serviceClock, &cpuBefore), 0);
-            const auto wallBefore = std::chrono::steady_clock::now();
-
-            // Connect only after the service is already polling. Otherwise
-            // the peer sits in the listen backlog and the service spends this
-            // whole setup interval inside the handshake receive loop.
             const int connectResult =
                 connect(externalFd, reinterpret_cast<const sockaddr*>(&boundAddr.sin), sizeof(boundAddr.sin));
             if (connectResult != 0) {
@@ -1096,25 +1088,10 @@ TEST(ProxyTests, ProxyServiceDoesNotHangOnExternalBadMagic)
             }
             close(externalFd);
 
-            // The fixed service returns to poll(). The pre-fix retry loop
-            // repeatedly accepts the nonblocking listen socket, treats EAGAIN
-            // as success, and burns a CPU while no new peer exists.
-            std::this_thread::sleep_for(std::chrono::milliseconds(250));
-            struct timespec cpuAfter = {};
-            ASSERT_EQ(clock_gettime(serviceClock, &cpuAfter), 0);
-            const auto wallAfter = std::chrono::steady_clock::now();
-            const double cpuMs = SocketTestUtils::timespecDiffMs(cpuBefore, cpuAfter);
-            const double wallMs =
-                std::chrono::duration<double, std::milli>(wallAfter - wallBefore).count();
-            ASSERT_GT(wallMs, 200.0)
-                << "proxy CPU measurement window was too short (" << wallMs << " ms)";
-            const double cpuRatio = cpuMs / wallMs;
-            EXPECT_LT(cpuRatio, SocketTestUtils::kCpuBusyThreshold)
-                << "proxy service busy-spun after bad magic (CPU time " << cpuMs
-                << " ms, wall time " << wallMs << " ms, ratio " << cpuRatio << ")";
-
-            __atomic_store_n(&abortFlag, 1, __ATOMIC_RELEASE);
+            int stopType = ncclProxyMsgStop;
+            ASSERT_EQ(ncclSocketSend(&goodSock, &stopType, sizeof(stopType)), ncclSuccess);
             serviceThread.join();
+            ncclSocketClose(&goodSock);
             TEST_INFO("ProxyServiceDoesNotHangOnExternalBadMagic PASSED");
             })
             .withTimeout(std::chrono::seconds(10)));
