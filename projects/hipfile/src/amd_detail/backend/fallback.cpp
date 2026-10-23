@@ -81,8 +81,11 @@ BounceStreamPool::getStream(int device_id)
     auto &slot   = ring.streams[ring.current];
     ring.current = (ring.current + 1) % ring.streams.size();
     if (!slot) {
-        slot = std::make_shared<BounceStream>(
-            device_id, Context<Hip>::get()->hipStreamCreateWithFlags(hipStreamNonBlocking));
+        // HIP pools hardware queues per stream priority. A priority callers rarely use keeps bounce copies
+        // off queues where caller streams can be parked on stream waits or host functions.
+        auto priority = Context<Hip>::get()->hipDeviceGetStreamPriorityRange().greatest;
+        slot          = std::make_shared<BounceStream>(
+            device_id, Context<Hip>::get()->hipStreamCreateWithPriority(hipStreamNonBlocking, priority));
     }
     return slot;
 }

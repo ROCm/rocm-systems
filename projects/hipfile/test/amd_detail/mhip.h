@@ -28,7 +28,9 @@ struct MHip : Hip {
                 (void *dst, const void *src, size_t sizeBytes, hipMemcpyKind kind, hipStream_t stream),
                 (const, override));
     MOCK_METHOD(void, hipStreamSynchronize, (hipStream_t stream), (const, override));
-    MOCK_METHOD(hipStream_t, hipStreamCreateWithFlags, (unsigned int flags), (const, override));
+    MOCK_METHOD(hipStream_t, hipStreamCreateWithPriority, (unsigned int flags, int priority),
+                (const, override));
+    MOCK_METHOD(HipStreamPriorityRange, hipDeviceGetStreamPriorityRange, (), (const, override));
     MOCK_METHOD(void, hipStreamDestroy, (hipStream_t stream), (const, override));
     MOCK_METHOD(void, hipStreamWaitValue64,
                 (hipStream_t stream, uint64_t *ptr, uint64_t value, unsigned int flags, uint64_t mask),

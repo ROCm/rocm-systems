@@ -30,6 +30,12 @@ struct HipMemAddressRange {
     size_t         size;
 };
 
+/// @brief Stream priority bounds; lower numbers are higher priorities
+struct HipStreamPriorityRange {
+    int least;
+    int greatest;
+};
+
 /// @brief Platform independent handle to an open file
 ///
 /// This definition must stay in sync with the one defined in
@@ -60,8 +66,9 @@ struct Hip {
     virtual void        hipMemcpyWithStream(void *dst, const void *src, size_t sizeBytes, hipMemcpyKind kind,
                                             hipStream_t stream) const;
     virtual void        hipStreamSynchronize(hipStream_t stream) const;
-    virtual hipStream_t hipStreamCreateWithFlags(unsigned int flags) const;
-    virtual void        hipStreamDestroy(hipStream_t stream) const;
+    virtual hipStream_t hipStreamCreateWithPriority(unsigned int flags, int priority) const;
+    virtual HipStreamPriorityRange hipDeviceGetStreamPriorityRange() const;
+    virtual void                   hipStreamDestroy(hipStream_t stream) const;
     virtual void  hipStreamWaitValue64(hipStream_t stream, uint64_t *ptr, uint64_t value, unsigned int flags,
                                        uint64_t mask) const;
     virtual void *hipHostMalloc(size_t size, unsigned int flags) const;

@@ -113,7 +113,10 @@ static void
 expect_bounce_stream_pool(MHip &mhip, MConfiguration &mcfg)
 {
     EXPECT_CALL(mhip, hipGetDevice).Times(AnyNumber()).WillRepeatedly(Return(0));
-    EXPECT_CALL(mhip, hipStreamCreateWithFlags)
+    EXPECT_CALL(mhip, hipDeviceGetStreamPriorityRange)
+        .Times(AnyNumber())
+        .WillRepeatedly(Return(HipStreamPriorityRange{1, -1}));
+    EXPECT_CALL(mhip, hipStreamCreateWithPriority)
         .Times(AnyNumber())
         .WillRepeatedly(Return(reinterpret_cast<hipStream_t>(0x1234)));
     EXPECT_CALL(mhip, hipStreamDestroy).Times(AnyNumber());
@@ -552,7 +555,8 @@ TEST_F(FallbackWrite, WriteCopiesAndSynchronizesOnPooledStream)
     auto   stream = reinterpret_cast<hipStream_t>(0xBEEF);
     randomize_device_buffer();
 
-    EXPECT_CALL(mhip, hipStreamCreateWithFlags(hipStreamNonBlocking)).WillRepeatedly(testing::Return(stream));
+    EXPECT_CALL(mhip, hipStreamCreateWithPriority(hipStreamNonBlocking, testing::_))
+        .WillRepeatedly(testing::Return(stream));
     EXPECT_CALL(mcfg, fallback()).WillOnce(testing::Return(true));
     EXPECT_CALL(msys, mmap).WillOnce(testing::Invoke(::mmap));
     EXPECT_CALL(mhip, hipMemcpyWithStream(testing::_, testing::_, testing::_, hipMemcpyDeviceToHost, stream))
@@ -885,7 +889,8 @@ TEST_F(FallbackRead, ReadCopiesAndSynchronizesOnPooledStream)
     init_file(file_length);
     auto stream = reinterpret_cast<hipStream_t>(0xBEEF);
 
-    EXPECT_CALL(mhip, hipStreamCreateWithFlags(hipStreamNonBlocking)).WillRepeatedly(testing::Return(stream));
+    EXPECT_CALL(mhip, hipStreamCreateWithPriority(hipStreamNonBlocking, testing::_))
+        .WillRepeatedly(testing::Return(stream));
     EXPECT_CALL(mcfg, fallback()).WillOnce(testing::Return(true));
     EXPECT_CALL(msys, mmap).WillOnce(testing::Invoke(::mmap));
     EXPECT_CALL(msys, pread).WillRepeatedly(testing::Invoke(this, &FallbackRead::fake_pread));
@@ -910,7 +915,7 @@ TEST_F(FallbackRead, PooledStreamSurvivesDriverTeardownDuringInFlightRead)
     auto               pread_entered_fut = pread_entered.get_future();
     auto               resume_pread_fut  = resume_pread.get_future();
 
-    EXPECT_CALL(mhip, hipStreamCreateWithFlags(hipStreamNonBlocking))
+    EXPECT_CALL(mhip, hipStreamCreateWithPriority(hipStreamNonBlocking, testing::_))
         .WillRepeatedly(testing::InvokeWithoutArgs([&]() -> hipStream_t {
             stream_live = true;
             return stream;
@@ -1069,6 +1074,9 @@ struct BounceStreamPoolTest : public testing::Test {
     {
         expect_device_query(mhip, current_device);
         expect_device_updates(mhip, current_device);
+        EXPECT_CALL(mhip, hipDeviceGetStreamPriorityRange)
+            .Times(AnyNumber())
+            .WillRepeatedly(testing::Return(HipStreamPriorityRange{1, -1}));
         EXPECT_CALL(mhip, hipStreamDestroy).Times(AnyNumber());
         EXPECT_CALL(mcfg, deviceStreamPoolSize()).WillRepeatedly(testing::Return(pool_size));
     }
@@ -1082,15 +1090,27 @@ struct BounceStreamPoolTest : public testing::Test {
 TEST_F(BounceStreamPoolTest, LazilyCreatesNonBlockingStreamOnFirstUse)
 {
     auto handle = reinterpret_cast<hipStream_t>(0x1234);
-    EXPECT_CALL(mhip, hipStreamCreateWithFlags(hipStreamNonBlocking)).WillOnce(testing::Return(handle));
+    EXPECT_CALL(mhip, hipStreamCreateWithPriority(hipStreamNonBlocking, testing::_))
+        .WillOnce(testing::Return(handle));
 
     BounceStreamPool pool;
     EXPECT_EQ(handle, pool.getStream(0)->stream);
 }
 
+TEST_F(BounceStreamPoolTest, CreatesStreamsAtGreatestPriority)
+{
+    EXPECT_CALL(mhip, hipDeviceGetStreamPriorityRange)
+        .WillOnce(testing::Return(HipStreamPriorityRange{3, -7}));
+    EXPECT_CALL(mhip, hipStreamCreateWithPriority(hipStreamNonBlocking, -7))
+        .WillOnce(testing::Return(make_handle()));
+
+    BounceStreamPool pool;
+    pool.getStream(0);
+}
+
 TEST_F(BounceStreamPoolTest, CreatesOneStreamPerRingSlotOverAFullRotation)
 {
-    EXPECT_CALL(mhip, hipStreamCreateWithFlags(hipStreamNonBlocking))
+    EXPECT_CALL(mhip, hipStreamCreateWithPriority(hipStreamNonBlocking, testing::_))
         .Times(static_cast<int>(pool_size))
         .WillRepeatedly(testing::InvokeWithoutArgs([this] { return make_handle(); }));
 
@@ -1107,7 +1127,7 @@ TEST_F(BounceStreamPoolTest, CreatesOneStreamPerRingSlotOverAFullRotation)
 
 TEST_F(BounceStreamPoolTest, ReusesStreamsInOrderAfterFullRotation)
 {
-    EXPECT_CALL(mhip, hipStreamCreateWithFlags(hipStreamNonBlocking))
+    EXPECT_CALL(mhip, hipStreamCreateWithPriority(hipStreamNonBlocking, testing::_))
         .Times(static_cast<int>(pool_size))
         .WillRepeatedly(testing::InvokeWithoutArgs([this] { return make_handle(); }));
 
@@ -1126,7 +1146,7 @@ TEST_F(BounceStreamPoolTest, ReusesStreamsInOrderAfterFullRotation)
 
 TEST_F(BounceStreamPoolTest, MaintainsSeparateRingsPerDevice)
 {
-    EXPECT_CALL(mhip, hipStreamCreateWithFlags(hipStreamNonBlocking))
+    EXPECT_CALL(mhip, hipStreamCreateWithPriority(hipStreamNonBlocking, testing::_))
         .WillRepeatedly(testing::InvokeWithoutArgs([this] { return make_handle(); }));
 
     BounceStreamPool pool;
@@ -1143,7 +1163,7 @@ TEST_F(BounceStreamPoolTest, MaintainsSeparateRingsPerDevice)
 
 TEST_F(BounceStreamPoolTest, CreatesStreamOnRequestedDeviceThenRestoresCaller)
 {
-    EXPECT_CALL(mhip, hipStreamCreateWithFlags(hipStreamNonBlocking))
+    EXPECT_CALL(mhip, hipStreamCreateWithPriority(hipStreamNonBlocking, testing::_))
         .WillOnce(testing::InvokeWithoutArgs([this] {
             EXPECT_EQ(5, current_device);
             return make_handle();
@@ -1156,7 +1176,7 @@ TEST_F(BounceStreamPoolTest, CreatesStreamOnRequestedDeviceThenRestoresCaller)
 
 TEST_F(BounceStreamPoolTest, DestroysStreamsOnOwningDeviceThenRestoresCaller)
 {
-    EXPECT_CALL(mhip, hipStreamCreateWithFlags(hipStreamNonBlocking))
+    EXPECT_CALL(mhip, hipStreamCreateWithPriority(hipStreamNonBlocking, testing::_))
         .WillOnce(testing::InvokeWithoutArgs([this] { return make_handle(); }));
     EXPECT_CALL(mhip, hipStreamDestroy).WillRepeatedly(testing::Invoke([this](hipStream_t) {
         EXPECT_EQ(9, current_device);
@@ -1175,7 +1195,7 @@ TEST_F(BounceStreamPoolTest, ClearDestroysOnlyCreatedStreamsThenResetsPool)
     std::vector<hipStream_t> created;
     std::vector<hipStream_t> destroyed;
 
-    EXPECT_CALL(mhip, hipStreamCreateWithFlags(hipStreamNonBlocking))
+    EXPECT_CALL(mhip, hipStreamCreateWithPriority(hipStreamNonBlocking, testing::_))
         .WillRepeatedly(testing::InvokeWithoutArgs([&] {
             auto stream = make_handle();
             created.push_back(stream);

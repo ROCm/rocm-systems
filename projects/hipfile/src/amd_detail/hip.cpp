@@ -76,11 +76,20 @@ Hip::hipStreamSynchronize(hipStream_t stream) const
 }
 
 hipStream_t
-Hip::hipStreamCreateWithFlags(unsigned int flags) const
+Hip::hipStreamCreateWithPriority(unsigned int flags, int priority) const
 {
     hipStream_t stream;
-    (void)throwOnHipError<Hip::RuntimeError>(::hipStreamCreateWithFlags(&stream, flags));
+    (void)throwOnHipError<Hip::RuntimeError>(::hipStreamCreateWithPriority(&stream, flags, priority));
     return stream;
+}
+
+HipStreamPriorityRange
+Hip::hipDeviceGetStreamPriorityRange() const
+{
+    HipStreamPriorityRange range{};
+    (void)throwOnHipError<Hip::RuntimeError>(
+        ::hipDeviceGetStreamPriorityRange(&range.least, &range.greatest));
+    return range;
 }
 
 void
