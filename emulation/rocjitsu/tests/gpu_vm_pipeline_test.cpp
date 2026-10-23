@@ -253,11 +253,13 @@ class TranslatedPipelineContext {
 public:
   Gfx1250Sim sim;
   std::shared_ptr<TestExternalAddressSpace> external = std::make_shared<TestExternalAddressSpace>();
-  amdgpu::ComputeUnitCore *cu = sim.cu();
+  amdgpu::ComputeUnitCore *cu = nullptr;
   amdgpu::Wavefront *wf = nullptr;
   amdgpu::AddressSpaceHandle address_space;
 
-  explicit TranslatedPipelineContext(bool legacy_cache_compatible = false) {
+  void initialize(bool legacy_cache_compatible = false) {
+    ASSERT_NO_FATAL_FAILURE(sim.initialize());
+    cu = sim.cu();
     address_space = sim.soc->gpu_vm().register_address_space(77, external, external, {},
                                                              legacy_cache_compatible);
     cu->set_gpu_vm(&sim.soc->gpu_vm());
@@ -292,6 +294,7 @@ public:
 
 TEST(GpuVmPipeline, NestedStepPreservesOuterInstructionSnapshot) {
   TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
   ASSERT_NE(context.wf, nullptr);
   constexpr uint64_t kCode = 0x1000, kData = 0x2000;
   constexpr uint32_t kValue = 0x12345678, kDestination = 1;
@@ -351,6 +354,7 @@ TEST(GpuVmPipeline, QuantumInstructionFetchTracksAddressSpaceChanges) {
                         Change::ExplicitHandle, Change::NumericVmid}) {
     SCOPED_TRACE(static_cast<int>(change));
     TranslatedPipelineContext context;
+    ASSERT_NO_FATAL_FAILURE(context.initialize());
     ASSERT_NE(context.wf, nullptr);
     auto &vm = context.sim.soc->gpu_vm();
     constexpr uint64_t kCode = 0x1000;
@@ -407,6 +411,7 @@ TEST(GpuVmPipeline, QuantumReleasesInstructionSnapshotOnReturnAndException) {
   for (bool throw_from_plugin : {false, true}) {
     SCOPED_TRACE(throw_from_plugin);
     TranslatedPipelineContext context;
+    ASSERT_NO_FATAL_FAILURE(context.initialize());
     ASSERT_NE(context.wf, nullptr);
     constexpr uint64_t kCode = 0x1000;
     context.external->store(kCode, std::array<uint32_t, 4>{0xBF800000u, S_ENDPGM_GFX12, 0, 0});
@@ -446,6 +451,7 @@ TEST(GpuVmPipeline, QuantumRetainsAdmissionSnapshotAcrossReturnAndException) {
   for (bool throw_from_plugin : {false, true}) {
     SCOPED_TRACE(throw_from_plugin);
     TranslatedPipelineContext context;
+    ASSERT_NO_FATAL_FAILURE(context.initialize());
     ASSERT_NE(context.wf, nullptr);
     constexpr uint64_t kCode = 0x1000;
     constexpr uint32_t kNop = 0xBF800000u;
@@ -492,6 +498,7 @@ TEST(GpuVmPipeline, QuantumRetainsAdmissionSnapshotAcrossReturnAndException) {
 
 TEST(GpuVmPipeline, WaveUsesAdmissionSnapshotAcrossRootReplacement) {
   TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
   ASSERT_TRUE(context.address_space);
   ASSERT_NE(context.wf, nullptr);
 
@@ -519,6 +526,7 @@ TEST(GpuVmPipeline, WaveUsesAdmissionSnapshotAcrossRootReplacement) {
 
 TEST(GpuVmPipeline, WaveAdmissionSnapshotRevocationTerminatesAfterUnregister) {
   TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
   ASSERT_TRUE(context.address_space);
   ASSERT_NE(context.wf, nullptr);
 
@@ -538,6 +546,7 @@ TEST(GpuVmPipeline, WaveAdmissionSnapshotRevocationTerminatesAfterUnregister) {
 
 TEST(GpuVmPipeline, TranslatedScalarLoadAndStoreUseExternalBacking) {
   TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
   ASSERT_TRUE(context.address_space);
   ASSERT_NE(context.wf, nullptr);
 
@@ -581,6 +590,7 @@ TEST(GpuVmPipeline, DdsStepReportsUnsupportedInstructionAndPcBeforeFaulting) {
         SCOPED_TRACE(testing::Message()
                      << "mixed=" << mixed << " load=" << load << " DDS lane=" << dds_lane);
         TranslatedPipelineContext context;
+        ASSERT_NO_FATAL_FAILURE(context.initialize());
         ASSERT_NE(context.wf, nullptr);
         constexpr uint64_t shared_base = uint64_t{1} << 48;
         constexpr uint64_t pc = 0x1000;
@@ -622,6 +632,7 @@ TEST(GpuVmPipeline, DdsStepReportsUnsupportedInstructionAndPcBeforeFaulting) {
 
 TEST(GpuVmPipeline, ScratchWithoutBackingIsATerminalFault) {
   TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
   ASSERT_TRUE(context.address_space);
   ASSERT_NE(context.wf, nullptr);
   ASSERT_EQ(context.wf->scratch_base(), 0u);
@@ -651,6 +662,7 @@ TEST(GpuVmPipeline, ScratchWithoutBackingIsATerminalFault) {
 
 TEST(GpuVmPipeline, ScratchRetryWithRevokedBackingReportsOneFault) {
   TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
   ASSERT_TRUE(context.address_space);
   ASSERT_NE(context.wf, nullptr);
 
@@ -696,6 +708,7 @@ TEST(GpuVmPipeline, ScratchRetryWithRevokedBackingReportsOneFault) {
 
 TEST(GpuVmPipeline, CompletionRetryOnOneQueueDoesNotStarveAnotherQueue) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto external = std::make_shared<TestExternalAddressSpace>();
   constexpr uint32_t kProcessId = 77;
   const amdgpu::AddressSpaceHandle address_space =
@@ -781,6 +794,7 @@ TEST(GpuVmPipeline, CompletionRetryOnOneQueueDoesNotStarveAnotherQueue) {
 
 TEST(GpuVmPipeline, UnavailableDataRetryDoesNotReplayInstructionPluginCallbacks) {
   TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
   ASSERT_TRUE(context.address_space);
   ASSERT_NE(context.wf, nullptr);
 
@@ -825,6 +839,7 @@ TEST(GpuVmPipeline, UnavailableDataRetryDoesNotReplayInstructionPluginCallbacks)
 
 TEST(GpuVmPipeline, RevokedDataRetryTerminatesInsteadOfSpinning) {
   TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
   ASSERT_TRUE(context.address_space);
   ASSERT_NE(context.wf, nullptr);
 
@@ -867,6 +882,7 @@ TEST(GpuVmPipeline, RevokedDataRetryTerminatesInsteadOfSpinning) {
 
 TEST(GpuVmPipeline, TranslatedScalarReadAndWriteResumeWithoutReplayingCompletedChunks) {
   TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
   ASSERT_TRUE(context.address_space);
   ASSERT_NE(context.wf, nullptr);
   context.external->translation_granule = sizeof(uint32_t);
@@ -928,6 +944,7 @@ TEST(GpuVmPipeline, TranslatedScalarReadAndWriteResumeWithoutReplayingCompletedC
 
 TEST(GpuVmPipeline, MaskedScalarStoreRetryPreservesCompletedWordsAndPartialWord) {
   TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
   ASSERT_TRUE(context.address_space);
   ASSERT_NE(context.wf, nullptr);
   context.external->translation_granule = sizeof(uint16_t);
@@ -977,6 +994,7 @@ TEST(GpuVmPipeline, MaskedScalarStoreRetryPreservesCompletedWordsAndPartialWord)
 
 TEST(GpuVmPipeline, FullyMaskedScalarStoreDoesNotAcquireRevokedAddressSpace) {
   TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
   ASSERT_TRUE(context.address_space);
   ASSERT_NE(context.wf, nullptr);
   ASSERT_TRUE(context.sim.soc->gpu_vm().invalidate(context.address_space));
@@ -997,6 +1015,7 @@ TEST(GpuVmPipeline, FullyMaskedScalarStoreDoesNotAcquireRevokedAddressSpace) {
 
 TEST(GpuVmPipeline, DeferredOperationCannotWriteBackIntoReusedWaveSlot) {
   TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
   ASSERT_TRUE(context.address_space);
   ASSERT_NE(context.wf, nullptr);
 
@@ -1037,6 +1056,7 @@ TEST(GpuVmPipeline, DeferredOperationCannotWriteBackIntoReusedWaveSlot) {
 
 TEST(GpuVmPipeline, UnreadyGartRemainsOnTranslatedPathUntilPublication) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto external = std::make_shared<TestExternalAddressSpace>();
   amdgpu::ComputeUnitCore *cu = sim.cu();
   const amdgpu::AddressSpaceHandle address_space =
@@ -1091,6 +1111,7 @@ TEST(GpuVmPipeline, UnreadyGartRemainsOnTranslatedPathUntilPublication) {
 
 TEST(GpuVmPipeline, TranslatedVectorLoadAndStoreCoalesceInExternalBacking) {
   TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
   ASSERT_TRUE(context.address_space);
   ASSERT_NE(context.wf, nullptr);
 
@@ -1147,6 +1168,7 @@ TEST(GpuVmPipeline, TranslatedVectorLoadAndStoreCoalesceInExternalBacking) {
 
 TEST(GpuVmPipeline, TranslatedVectorStoreRetrySkipsCompletedRequests) {
   TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
   ASSERT_TRUE(context.address_space);
   ASSERT_NE(context.wf, nullptr);
 
@@ -1188,6 +1210,7 @@ TEST(GpuVmPipeline, TranslatedVectorStoreRetrySkipsCompletedRequests) {
 
 TEST(GpuVmPipeline, TranslatedAtomicsUseStrongBackingOperationsForBothWidths) {
   TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
   ASSERT_TRUE(context.address_space);
   ASSERT_NE(context.wf, nullptr);
 
@@ -1265,6 +1288,7 @@ TEST(GpuVmPipeline, TranslatedAtomicsUseStrongBackingOperationsForBothWidths) {
 
 TEST(GpuVmPipeline, UnavailableAtomicDoesNotCompleteArchitecturalState) {
   TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
   ASSERT_TRUE(context.address_space);
   ASSERT_NE(context.wf, nullptr);
 
@@ -1304,7 +1328,8 @@ TEST(GpuVmPipeline, LegacyAtomicBatchPreservesLaneResultsOnRetry) {
     for (bool retry : {false, true}) {
       SCOPED_TRACE(mask);
       SCOPED_TRACE(retry);
-      TranslatedPipelineContext context(/*legacy_cache_compatible=*/true);
+      TranslatedPipelineContext context;
+      ASSERT_NO_FATAL_FAILURE(context.initialize(/*legacy_cache_compatible=*/true));
       ASSERT_NE(context.wf, nullptr);
       constexpr uint64_t kAddress = 0x420;
       constexpr uint32_t kInitial = 10, kDestination = 30, kSentinel = 0xdeadbeef;
@@ -1365,6 +1390,7 @@ TEST(GpuVmPipeline, LegacyAtomicBatchPreservesLaneResultsOnRetry) {
 
 TEST(GpuVmPipeline, TranslatedAtomicRetrySkipsCompletedLanes) {
   TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
   ASSERT_TRUE(context.address_space);
   ASSERT_NE(context.wf, nullptr);
 
@@ -1410,6 +1436,7 @@ TEST(GpuVmPipeline, TranslatedAtomicRetrySkipsCompletedLanes) {
 
 TEST(GpuVmPipeline, MixedFlatAtomicRetryPreservesLdsAndCompletedGlobalLanes) {
   TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
   ASSERT_TRUE(context.address_space);
   ASSERT_NE(context.wf, nullptr);
   auto &wf = *context.wf;
@@ -1462,7 +1489,8 @@ TEST(GpuVmPipeline, MixedFlatLegacyAtomicRetryRefreshesVmSnapshot) {
   for (uint32_t local_lane : {0u, 1u}) {
     SCOPED_TRACE(local_lane);
     const uint32_t first_global_lane = 1 - local_lane;
-    TranslatedPipelineContext context(/*legacy_cache_compatible=*/true);
+    TranslatedPipelineContext context;
+    ASSERT_NO_FATAL_FAILURE(context.initialize(/*legacy_cache_compatible=*/true));
     ASSERT_TRUE(context.address_space);
     ASSERT_NE(context.wf, nullptr);
     auto &wf = *context.wf;
@@ -1519,6 +1547,7 @@ TEST(GpuVmPipeline, MixedFlatLegacyAtomicRetryRefreshesVmSnapshot) {
 
 TEST(GpuVmPipeline, TranslatedTensorLoadRetriesBeforeCommittingLdsOrBarrier) {
   TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
   ASSERT_TRUE(context.address_space);
   ASSERT_NE(context.wf, nullptr);
   context.wf->set_lds_base(context.cu->allocate_lds(256));
@@ -1576,6 +1605,7 @@ TEST(GpuVmPipeline, TranslatedTensorLoadRetriesBeforeCommittingLdsOrBarrier) {
 
 TEST(GpuVmPipeline, TranslatedTensorStoreRetriesWithoutReplayingOrResnapshottingLds) {
   TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
   ASSERT_TRUE(context.address_space);
   ASSERT_NE(context.wf, nullptr);
   context.wf->set_lds_base(context.cu->allocate_lds(256));
@@ -1628,6 +1658,7 @@ TEST(GpuVmPipeline, TranslatedTensorStoreRetriesWithoutReplayingOrResnapshotting
 
 TEST(GpuVmPipeline, TranslatedAtomicRetriesCompareExchangeContention) {
   TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
   ASSERT_TRUE(context.address_space);
   ASSERT_NE(context.wf, nullptr);
 
@@ -1668,6 +1699,7 @@ TEST(GpuVmPipeline, TranslatedAtomicRetriesCompareExchangeContention) {
 
 TEST(GpuVmPipeline, AtomicPermissionFaultDoesNotReachPhysicalBacking) {
   TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
   ASSERT_TRUE(context.address_space);
   ASSERT_NE(context.wf, nullptr);
 

@@ -142,9 +142,15 @@ function(add_rocshmem_targets)
         endif()
         message(STATUS "rocSHMEM: building from ${ROCSHMEM_SOURCE_DIR}")
 
+        # Both of these are named by absolute path as graph inputs -- the
+        # archive by target_link_libraries, the header by the copy_files
+        # custom command on the GIN path -- so ninja needs an edge producing
+        # them; add_dependencies() gives only an order-only edge.
         ExternalProject_Add(rocshmem_ext
             SOURCE_DIR          "${ROCSHMEM_SOURCE_DIR}"
             INSTALL_DIR         "${ROCSHMEM_INSTALL_DIR}"
+            BUILD_BYPRODUCTS    "${ROCSHMEM_INSTALL_DIR}/lib/librocshmem.a"
+                                "${ROCSHMEM_INSTALL_DIR}/include/rocshmem/rocshmem_config.h"
             UPDATE_DISCONNECTED TRUE
             LOG_DOWNLOAD        FALSE
             LOG_CONFIGURE       FALSE
