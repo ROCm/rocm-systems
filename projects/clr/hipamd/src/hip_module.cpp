@@ -369,6 +369,14 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
   if (launch_params.local_.product() > info.maxWorkGroupSize_) {
     return hipErrorInvalidConfiguration;
   }
+
+  // Make sure dispatch doesn't exceed max grid dimensions
+  if (launch_params.grid_[0] > info.maxGridDim_[0] ||
+      launch_params.grid_[1] > info.maxGridDim_[1] ||
+      launch_params.grid_[2] > info.maxGridDim_[2]) {
+    return hipErrorInvalidConfiguration;
+  }
+
   amd::Kernel* kernel = hip::asKernel(f);
   if (!kernel) {
     LogPrintfError("%s", "Kernel object is invalid or null, possibly due to architecture mismatch.");
