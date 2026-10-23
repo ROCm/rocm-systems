@@ -79,6 +79,12 @@ rdc_status_t RdcWatchTableImpl::rdc_job_start_stats(rdc_gpu_group_t group_id, co
   if (result != RDC_ST_OK) {
     return result;
   }
+  if (ginfo.count > RDC_MAX_NUM_GPUS_PER_JOB) {
+    RDC_LOG(RDC_ERROR, "Fail to start job " << job_id << ". The group " << group_id << " has "
+                                            << ginfo.count << " GPUs; a job holds at most "
+                                            << RDC_MAX_NUM_GPUS_PER_JOB << ".");
+    return RDC_ST_MAX_LIMIT;
+  }
 
   for (uint32_t ix = 0; ix < ginfo.count; ++ix) {
     uint32_t gpu = ginfo.entity_ids[ix];
