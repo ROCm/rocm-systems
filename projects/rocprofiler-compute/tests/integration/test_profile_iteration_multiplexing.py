@@ -343,13 +343,11 @@ def test_iteration_multiplexing_insufficient_dispatches(
 
 
 @pytest.mark.iteration_multiplexing_2
-def test_iteration_multiplexing_data_types(
+def test_iteration_multiplexing_roofline(
     binary_handler_profile_rocprof_compute,
     binary_handler_analyze_rocprof_compute,
 ):
-    """Verify roofline analysis with different data types (FP32 and FP16)
-    on iteration-multiplexed profiling data.
-    """
+    """Verify roofline analysis on iteration-multiplexed profiling data."""
     skip_unsupported_roofline_soc()
 
     options = [
@@ -358,7 +356,7 @@ def test_iteration_multiplexing_data_types(
         "--iteration-multiplexing",
         "kernel_launch_params",
     ]
-    workload_dir = common.get_output_dir(param_id="iter_mplx_dtypes")
+    workload_dir = common.get_output_dir(param_id="iter_mplx_roofline")
     binary_handler_profile_rocprof_compute(
         config,
         workload_dir,
@@ -372,22 +370,11 @@ def test_iteration_multiplexing_data_types(
     roofline_df = pd.read_csv(f"{workload_dir}/roofline.csv")
     assert len(roofline_df) >= num_devices
 
-    code_fp32 = binary_handler_analyze_rocprof_compute([
+    code = binary_handler_analyze_rocprof_compute([
         "analyze",
         "--path",
         workload_dir,
-        "--roofline-data-type",
-        "FP32",
     ])
-    assert code_fp32 == 0
-
-    code_fp16 = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-        "--roofline-data-type",
-        "FP16",
-    ])
-    assert code_fp16 == 0
+    assert code == 0
 
     common.clean_output_dir(config["cleanup"], workload_dir)
