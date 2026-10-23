@@ -1181,6 +1181,22 @@ threshold table introduced for gfx1250.
         | ``0``: Disabled.
         | ``1``: Force-enabled (CTA_POLICY check bypassed for AG and A2A registered CE).
 
+    * - | ``RCCL_FORCE_SYMMETRIC``
+        | Biases the ``ncclAllReduce`` backend selector to prefer the symmetric
+          kernel path over all other candidates. Hard eligibility checks (buffer
+          registration, op support) are still enforced; if no symmetric path is
+          eligible the selector falls back normally. Off by default.
+      - | ``0``: Disabled (default).
+        | ``1``: Prefer symmetric kernel for AllReduce.
+
+    * - | ``RCCL_FORCE_DDA``
+        | Biases the ``ncclAllReduce`` backend selector to prefer DDA (Direct Data
+          Access) paths over all other candidates, including symmetric and Copy
+          Engine. If no DDA path is eligible for the given message size and
+          communicator the selector falls back normally. Off by default.
+      - | ``0``: Disabled (default).
+        | ``1``: Prefer DDA for AllReduce.
+
     * - | ``RCCL_CE_AR_2SHOT_MAX_BYTES``
         | Overrides the CE 2-shot AllReduce message size cap. When ``-1`` (default),
           the cap is read from ``ceNonRegMax[AllReduce]`` in the per-arch table. A
