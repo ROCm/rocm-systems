@@ -103,27 +103,66 @@ void pc_sampling_collector_impl_t::on_code_object_load(
     }
 }
 
-void pc_sampling_collector_impl_t::finalize(code_object_writer_t& writer)
+void pc_sampling_collector_impl_t::on_kernel_symbol_register(uint64_t         kernel_id,
+                                                             uint64_t         code_object_id,
+                                                             std::string_view symbol_name)
 {
-    for (const auto& id : m_translator->get_code_object_ids())
+    m_kernel_symbols.insert_or_assign(kernel_id,
+                                      KernelSymbolKey{code_object_id, std::string{symbol_name}});
+}
+
+bool pc_sampling_collector_impl_t::has_code_objects() const
+{
+    return !m_translator->get_code_object_ids().empty();
+}
+
+void pc_sampling_collector_impl_t::write_symbol(code_object_writer_t& writer,
+                                                uint64_t              code_object_id,
+                                                const symbol_t&       symbol)
+{
+    writer.start_symbol(symbol);
+    uint64_t       pc  = symbol.virtual_address;
+    const uint64_t end = symbol.virtual_address + symbol.size;
+    while (pc < end)
     {
+        const auto& instruction = m_translator->get_instruction(code_object_id, pc);
+        Expects(instruction.size);
+        writer.write_instruction(instruction);
+        collect_source_paths_from_comment(instruction.comment, m_source_paths);
+        pc += instruction.size;
+    }
+    writer.end_symbol();
+}
+
+void pc_sampling_collector_impl_t::finalize(code_object_writer_t&     writer,
+                                            const std::set<uint64_t>& dispatched_kernel_ids)
+{
+    std::set<std::pair<uint64_t, std::string>> dispatched_symbols;
+    for (const auto kernel_id : dispatched_kernel_ids)
+    {
+        const auto found = m_kernel_symbols.find(kernel_id);
+        if (found == m_kernel_symbols.end())
+            continue;
+
+        const auto& key = found->second;
+        if (key.code_object_id != ROCPROFILER_CODE_OBJECT_ID_NONE && !key.symbol_name.empty())
+            dispatched_symbols.emplace(key.code_object_id, key.symbol_name);
+    }
+
+    for (const auto id : m_translator->get_code_object_ids())
+    {
+        auto symbols = m_translator->get_symbols(id);
+        symbols.erase(std::remove_if(symbols.begin(),
+                                     symbols.end(),
+                                     [&](const auto& symbol)
+                                     { return dispatched_symbols.count({id, symbol.name}) == 0; }),
+                      symbols.end());
+        if (symbols.empty())
+            continue;
+
         writer.start_code_obj(id);
-        const auto& symbols = m_translator->get_symbols(id);
-        for (const auto& sym : symbols)
-        {
-            writer.start_symbol(sym);
-            uint64_t       pc  = sym.virtual_address;
-            const uint64_t end = sym.virtual_address + sym.size;
-            while (pc < end)
-            {
-                const auto& inst = m_translator->get_instruction(id, pc);
-                Expects(inst.size);
-                writer.write_instruction(inst);
-                collect_source_paths_from_comment(inst.comment, m_source_paths);
-                pc += inst.size;
-            }
-            writer.end_symbol();
-        }
+        for (const auto& symbol : symbols)
+            write_symbol(writer, id, symbol);
         writer.end_code_obj();
     }
 }
