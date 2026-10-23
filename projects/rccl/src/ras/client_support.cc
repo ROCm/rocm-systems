@@ -1158,6 +1158,48 @@ fail:
 }
 #endif
 
+// Checks the RAS_COLL_COMMS records before rasClientRunComms uses them. They carry peer-supplied values that size
+// and index its scratch arrays: auxCommRanks is sized by commNRanks but filled with nRanks entries, peerIdx indexes
+// peerIdxConv/peerNvmlDevs (nPeers entries), nvmlDev is a shift count into a 64-bit mask, and initState/asyncError
+// (4-bit fields) index ncclErrors[ncclNumResults].
+static ncclResult_t rasClientValidateComms(const struct rasCollective* coll) {
+  const char* const end = coll->data + coll->nData;
+  const struct rasCollComms* commsData = (const struct rasCollComms*)coll->data;
+  if (coll->nData < (int)offsetof(struct rasCollComms, comms) || commsData->nComms < 0) {
+    INFO(NCCL_RAS, "RAS rejecting malformed communicators report (nData %d)", coll->nData);
+    return ncclInternalError;
+  }
+  const struct rasCollComms::comm* comm = commsData->comms;
+  for (int commIdx = 0; commIdx < commsData->nComms; commIdx++) {
+    if (end - (const char*)comm < (ptrdiff_t)sizeof(*comm) || comm->commNRanks < 0 || comm->nRanks < 0 ||
+        comm->nMissingRanks < 0 || (int64_t)comm->nRanks + comm->nMissingRanks > comm->commNRanks) {
+      INFO(NCCL_RAS, "RAS rejecting malformed communicator record %d", commIdx);
+      return ncclInternalError;
+    }
+    const size_t recordSize = sizeof(*comm) + (size_t)comm->nRanks * sizeof(*comm->ranks) +
+                              (size_t)comm->nMissingRanks * sizeof(struct rasCollCommsMissingRank);
+    if ((size_t)(end - (const char*)comm) < recordSize) {
+      INFO(NCCL_RAS, "RAS rejecting truncated communicator record %d", commIdx);
+      return ncclInternalError;
+    }
+    for (int rankIdx = 0; rankIdx < comm->nRanks; rankIdx++) {
+      const struct rasCollComms::comm::rank* rank = comm->ranks + rankIdx;
+      const int initState = rank->status.initState;
+      const int asyncError = rank->status.asyncError;
+      if (rank->peerIdx < 0 || rank->peerIdx >= coll->nPeers || rank->nvmlDev < 0 || rank->nvmlDev >= 64 ||
+          initState < 0 || initState >= ncclNumResults || asyncError < 0 || asyncError >= ncclNumResults) {
+        INFO(NCCL_RAS,
+             "RAS rejecting malformed rank record (commRank %d, peerIdx %d of %d, nvmlDev %d, initState %d, "
+             "asyncError %d)",
+             rank->commRank, rank->peerIdx, coll->nPeers, (int)rank->nvmlDev, initState, asyncError);
+        return ncclInternalError;
+      }
+    }
+    comm = (const struct rasCollComms::comm*)(((const char*)comm) + recordSize);
+  }
+  return ncclSuccess;
+}
+
 // Processes the response from the RAS_COLL_COMMS collective operation and sends the data to the client:
 // statistics on the communicators, missing data from ranks, inconsistent collective operation counts,
 // initialization and asynchronous errors, and inconsistent initialization/termination status.
@@ -1166,6 +1208,11 @@ static ncclResult_t rasClientRunComms(struct rasClient* client) {
   char* msg = nullptr;
   int msgLen;
   struct rasCollective* coll = client->coll;
+  // Validate the collective before dereferencing it or its data below (TRACE, commsData, etc.).
+  if (coll == nullptr || coll->data == nullptr) {
+    INFO(NCCL_RAS, "RAS invalid collective operation status; client status %d -- internal error?", client->status);
+    return ncclInternalError;
+  }
   struct rasCollComms* commsData = (struct rasCollComms*)coll->data;
   struct rasCollComms::comm* comm;
   struct rasAuxCommRank* auxCommRanks = nullptr;
@@ -1195,10 +1242,12 @@ static ncclResult_t rasClientRunComms(struct rasClient* client) {
   TRACE(NCCL_RAS, "RAS: coll nLegTimeouts %d, nPeers %d, nData %d; commsData nComms %d", coll->nLegTimeouts,
         coll->nPeers, coll->nData, commsData->nComms);
 
-  if (coll == nullptr || coll->nFwdSent != coll->nFwdRecv) {
+  if (coll->nFwdSent != coll->nFwdRecv) {
     INFO(NCCL_RAS, "RAS invalid collective operation status; client status %d -- internal error?", client->status);
     return ncclInternalError;
   }
+  // Like the check above, return while client->coll is still set, so that rasClientRun frees it.
+  NCCLCHECK(rasClientValidateComms(coll));
   client->coll = nullptr;
 
   rasOutReset();
