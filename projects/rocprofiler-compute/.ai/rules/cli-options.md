@@ -37,7 +37,7 @@ names since customers rarely touch them.
 A list of values is passed as one comma-separated argument.
 
 ```console
---gpu-id 0,1,2
+--example-ids 0,1,2
 ```
 
 ## Help Messages
