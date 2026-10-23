@@ -397,7 +397,7 @@ TEST(ProbeLiveInTest, RejectsSymbolOutsideText) {
   EXPECT_NE(err.find("not in the code object's .text"), std::string::npos) << err;
 }
 
-TEST(ProbeLiveInTest, RejectsEntryThatDoesNotStartABlock) {
+TEST(ProbeLiveInTest, RejectsAnEntryInsideAnInstruction) {
   const std::vector<uint32_t> body{kSWaitcnt0, kSSetpcS30S31};
   const auto image = make_elf(body);
   const AmdGpuCodeObject obj(image.data(), image.size());

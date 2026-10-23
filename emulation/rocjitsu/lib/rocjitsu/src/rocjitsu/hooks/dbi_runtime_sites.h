@@ -20,16 +20,13 @@ namespace rocjitsu::hooks {
 
 /// @brief Whether the DBI runtime instruments a code object, and if not, why.
 enum class DbiLoadDecision : uint8_t {
-  Instrumented,           ///< The patched object replaces the original.
-  NotAmdGpuObject,        ///< The bytes do not parse as an AMDGPU code object.
-  UnsupportedArch,        ///< DBI is not validated end to end on the object's target.
-  ProbeTargetMismatch,    ///< The probe was built for a different target than the object.
-  NotSingleKernel,        ///< The object has zero or several kernels.
-  Wave32,                 ///< The kernel runs in wave32.
-  UnsupportedControlFlow, ///< The kernel makes a call or has unresolved control flow.
-  NoSites,                ///< No reachable block has an instruction that can anchor a site.
-  PatchFailed,            ///< The Instrumentor refused the object; see the errors.
-  Count,                  ///< Number of decisions; not a decision.
+  Instrumented,    ///< The patched object replaces the original.
+  NotAmdGpuObject, ///< The bytes do not parse as an AMDGPU code object.
+  UnsupportedArch, ///< DBI is not validated end to end on the object's target.
+  NotSingleKernel, ///< The object has zero or several kernels.
+  NoSites,         ///< No reachable block has an instruction that can anchor a site.
+  PatchFailed,     ///< The Instrumentor refused the object; see the errors.
+  Count,           ///< Number of decisions; not a decision.
 };
 
 inline constexpr size_t kDbiLoadDecisionCount = static_cast<size_t>(DbiLoadDecision::Count);
@@ -58,12 +55,9 @@ struct DbiInstrumentation {
 /// code is left alone. A block's site is its first instruction that can anchor
 /// a trampoline (Instrumentor::first_anchor()); blocks without one are counted
 /// and skipped. Only single-kernel objects on a target DBI is validated on are
-/// instrumented, and only when the kernel runs in wave64, makes no call and has
-/// no unresolved control flow. The liveness the trampolines rely on follows
-/// neither kind of edge, and reads a wave32 lane mask's SGPR destination as a
-/// pair.
-/// Patching is all-or-nothing, so one refused site leaves the whole object
-/// unpatched.
+/// instrumented. Instrumentor::patch() refuses what it cannot patch correctly,
+/// a wave32 kernel or a call for example. Patching is all-or-nothing, so one
+/// refused site leaves the whole object unpatched.
 ///
 /// @pre @p probe.object is a valid code object.
 [[nodiscard]] DbiInstrumentation instrument_each_block(std::span<const uint8_t> elf,

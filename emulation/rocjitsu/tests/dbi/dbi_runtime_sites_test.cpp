@@ -1,21 +1,23 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Site selection for the DBI runtime hook, on synthetic code objects. The hook
-// end-to-end tests cover a compiled kernel; these cover the decisions that leave
-// an object unpatched and which instruction each block's site lands on.
+// Site selection for the DBI runtime hook, on synthetic code objects: the
+// decisions that leave an object unpatched, and which instruction each block's
+// site lands on.
 
 #include "rocjitsu/hooks/dbi_runtime_sites.h"
 
 #include "dbi_test_util.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
+#include "scalar_builders.h"
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <cstring>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace rocjitsu::hooks {
@@ -30,13 +32,12 @@ struct SitesTarget {
   const char *name;
   uint32_t e_flags;
   rj_code_arch_t arch;
-  uint32_t s_cbranch_scc0_plus1; // No arch-aware builder; checked against llvm-mc.
 };
 
 const SitesTarget kTargets[] = {
-    {"Gfx942", EF_AMDGPU_MACH_AMDGCN_GFX942, ROCJITSU_CODE_ARCH_CDNA3, 0xBF840001u},
-    {"Gfx950", EF_AMDGPU_MACH_AMDGCN_GFX950, ROCJITSU_CODE_ARCH_CDNA4, 0xBF840001u},
-    {"Gfx1200", EF_AMDGPU_MACH_AMDGCN_GFX1200, ROCJITSU_CODE_ARCH_RDNA4, 0xBFA10001u},
+    {"Gfx942", EF_AMDGPU_MACH_AMDGCN_GFX942, ROCJITSU_CODE_ARCH_CDNA3},
+    {"Gfx950", EF_AMDGPU_MACH_AMDGCN_GFX950, ROCJITSU_CODE_ARCH_CDNA4},
+    {"Gfx1200", EF_AMDGPU_MACH_AMDGCN_GFX1200, ROCJITSU_CODE_ARCH_RDNA4},
 };
 const SitesTarget &kGfx950 = kTargets[1];
 const SitesTarget &kGfx1200 = kTargets[2];
@@ -47,7 +48,7 @@ const SitesTarget &kGfx1200 = kTargets[2];
 // candidates after it.
 std::vector<uint32_t> three_block_text(const SitesTarget &target) {
   return {kMovV2Zero,
-          target.s_cbranch_scc0_plus1,
+          test::build_s_cbranch_scc(/*scc1=*/false, /*offset_dwords=*/1, target.arch),
           build_s_endpgm(target.arch),
           build_s_getpc_b64(/*s[0:1]=*/0, target.arch),
           kMovV3V2,
@@ -95,6 +96,14 @@ std::vector<uint32_t> text_words(const AmdGpuCodeObject &object) {
   return words;
 }
 
+// The Instrumentor refused the object, with an error naming @p reason.
+void expect_refused(const DbiInstrumentation &result, std::string_view reason) {
+  EXPECT_EQ(result.decision, DbiLoadDecision::PatchFailed);
+  EXPECT_TRUE(result.elf_bytes.empty());
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find(reason), std::string::npos) << result.errors.front();
+}
+
 class DbiRuntimeSitesTargetTest : public ::testing::TestWithParam<SitesTarget> {};
 
 TEST_P(DbiRuntimeSitesTargetTest, CallsTheProbeAtTheFirstAnchorOfEachBlock) {
@@ -139,25 +148,21 @@ TEST(DbiRuntimeSites, RejectsBytesThatAreNotACodeObject) {
 }
 
 TEST(DbiRuntimeSites, LeavesUnvalidatedArchUnpatched) {
-  const SitesTarget gfx90a{"Gfx90a", EF_AMDGPU_MACH_AMDGCN_GFX90A, ROCJITSU_CODE_ARCH_CDNA2,
-                           0xBF840001u};
+  const SitesTarget gfx90a{"Gfx90a", EF_AMDGPU_MACH_AMDGCN_GFX90A, ROCJITSU_CODE_ARCH_CDNA2};
   const DbiInstrumentation result =
-      instrument(kernel(gfx90a, three_block_text(gfx90a)), probe(gfx90a));
+      instrument(kernel(gfx90a, {kMovV2Zero, build_s_endpgm(gfx90a.arch)}), probe(gfx90a));
   EXPECT_EQ(result.decision, DbiLoadDecision::UnsupportedArch);
   EXPECT_TRUE(result.elf_bytes.empty());
 }
 
 TEST(DbiRuntimeSites, LeavesObjectUnpatchedWhenProbeTargetDiffers) {
   // gfx1200 and gfx1201 are both RDNA4; the Instrumentor still refuses the pair.
-  const SitesTarget gfx1201{"Gfx1201", EF_AMDGPU_MACH_AMDGCN_GFX1201, ROCJITSU_CODE_ARCH_RDNA4,
-                            0xBFA10001u};
-  const DbiInstrumentation same_arch =
-      instrument(kernel(gfx1201, three_block_text(gfx1201)), probe(kGfx1200));
-  EXPECT_EQ(same_arch.decision, DbiLoadDecision::ProbeTargetMismatch);
-
-  const DbiInstrumentation other_arch =
-      instrument(kernel(kGfx950, three_block_text(kGfx950)), probe(kGfx1200));
-  EXPECT_EQ(other_arch.decision, DbiLoadDecision::ProbeTargetMismatch);
+  const SitesTarget gfx1201{"Gfx1201", EF_AMDGPU_MACH_AMDGCN_GFX1201, ROCJITSU_CODE_ARCH_RDNA4};
+  for (const DbiInstrumentation &result :
+       {instrument(kernel(gfx1201, three_block_text(gfx1201)), probe(kGfx1200)),
+        instrument(kernel(kGfx950, three_block_text(kGfx950)), probe(kGfx1200))}) {
+    expect_refused(result, "concrete target");
+  }
 }
 
 TEST(DbiRuntimeSites, LeavesObjectWithoutKernelUnpatched) {
@@ -182,31 +187,26 @@ TEST(DbiRuntimeSites, LeavesWave32KernelUnpatched) {
       instrument(kernel(kGfx1200, three_block_text(kGfx1200), /*granulated_sgpr_count=*/3,
                         /*entry_text_offset=*/0, /*wave32=*/true),
                  probe(kGfx1200));
-  EXPECT_EQ(result.decision, DbiLoadDecision::Wave32);
-  EXPECT_TRUE(result.elf_bytes.empty());
+  expect_refused(result, "wave32");
 }
 
 TEST(DbiRuntimeSites, LeavesKernelThatMakesACallUnpatched) {
   // 0x00 s_call_b64 s[30:31] -> 0x0c, 0x04 v_mov, 0x08 s_endpgm,
-  // 0x0c v_mov, 0x10 s_setpc_b64 s[30:31]. Every block has an anchor.
+  // 0x0c v_mov, 0x10 s_setpc_b64 s[30:31]. Every block but the s_call_b64's has
+  // an anchor.
   const rj_code_arch_t arch = kGfx950.arch;
   const std::vector<uint32_t> text = {build_s_call_b64(/*s[30:31]=*/30, /*offset_dwords=*/2, arch),
                                       kMovV2Zero, build_s_endpgm(arch), kMovV3V2,
                                       build_s_setpc_b64(/*s[30:31]=*/30, arch)};
   const DbiInstrumentation result = instrument(kernel(kGfx950, text), probe(kGfx950));
-  EXPECT_EQ(result.decision, DbiLoadDecision::UnsupportedControlFlow);
-  EXPECT_TRUE(result.elf_bytes.empty());
+  expect_refused(result, "makes a call");
 }
 
 TEST(DbiRuntimeSites, LeavesKernelWithAnUnresolvedJumpUnpatched) {
-  // s[4:5] rather than the link pair: a live s[30:31] would also make the
-  // Instrumentor refuse the object, so this gate would not be the only thing
-  // keeping it unpatched.
   const rj_code_arch_t arch = kGfx950.arch;
   const std::vector<uint32_t> text = {kMovV2Zero, build_s_setpc_b64(/*s[4:5]=*/4, arch)};
   const DbiInstrumentation result = instrument(kernel(kGfx950, text), probe(kGfx950));
-  EXPECT_EQ(result.decision, DbiLoadDecision::UnsupportedControlFlow);
-  EXPECT_TRUE(result.elf_bytes.empty());
+  expect_refused(result, "unresolved successor");
 }
 
 TEST(DbiRuntimeSites, LeavesKernelThatBranchesOutOfTextUnpatched) {
@@ -214,8 +214,7 @@ TEST(DbiRuntimeSites, LeavesKernelThatBranchesOutOfTextUnpatched) {
   const std::vector<uint32_t> text = {kMovV2Zero, build_s_branch(/*offset_dwords=*/0x7fff, arch),
                                       build_s_endpgm(arch)};
   const DbiInstrumentation result = instrument(kernel(kGfx950, text), probe(kGfx950));
-  EXPECT_EQ(result.decision, DbiLoadDecision::UnsupportedControlFlow);
-  EXPECT_TRUE(result.elf_bytes.empty());
+  expect_refused(result, "unresolved successor");
 }
 
 TEST(DbiRuntimeSites, LeavesDeadCodeAlone) {
@@ -304,6 +303,14 @@ TEST(DbiRuntimeSites, ReportsInstrumentorRefusal) {
   EXPECT_NE(result.errors.front().find("return-link pair"), std::string::npos)
       << result.errors.front();
   EXPECT_TRUE(result.elf_bytes.empty());
+}
+
+TEST(DbiRuntimeSites, ReportsAKernelThatDoesNotDecode) {
+  // RDNA4 has no encoding for a zero word, and this one is reachable from the
+  // entry, so the kernel's blocks cannot be built.
+  const DbiInstrumentation result = instrument(
+      kernel(kGfx1200, {kMovV2Zero, 0u, build_s_endpgm(kGfx1200.arch)}), probe(kGfx1200));
+  expect_refused(result, "Invalid instruction opcode");
 }
 
 TEST(DbiRuntimeSites, NamesEveryDecision) {

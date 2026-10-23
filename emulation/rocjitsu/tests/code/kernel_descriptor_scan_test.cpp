@@ -90,7 +90,7 @@ TEST(KernelDescriptorScan, SingleKernelDecodesAllFields) {
   EXPECT_EQ(at_offset.private_segment_fixed_size, 256u);
 }
 
-// The object-wide scan covers each .text section and keeps every descriptor.
+// The object-wide scan keeps every descriptor.
 TEST(KernelDescriptorScan, ObjectScanFindsEveryKernel) {
   const auto image = make_gfx950_two_kernel_elf({kMovV3V2, 0xbf810000u}, /*private_bytes=*/0);
   const AmdGpuCodeObject obj(image.data(), image.size());

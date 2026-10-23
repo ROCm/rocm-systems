@@ -255,6 +255,68 @@ bool check_probe_link_pair(const ProbeClobberSummary &summary, const ProbeAbi &a
   return false;
 }
 
+// Liveness decides which registers a trampoline may take, and it cannot see
+// every register some kernels still need:
+// - it reads the SGPR destination of a wave32 compare or carry-out as the pair
+//   its encoding names, so the register after it can read dead;
+// - it follows successors() only, so a register read across a call or an
+//   unresolved edge reads dead;
+// - it sees the register an operand encodes, so one reached relative to M0 or
+//   through GPR index mode reads dead;
+// - it sees only the operands the decoder reports, which leaves out an RDNA4
+//   image instruction's address VGPRs.
+// Returns why @p blocks, decoded from @p text, hold such a kernel, or empty when
+// they do not.
+std::string liveness_limit(rj_code_arch_t arch, const CodeObject &obj,
+                           const std::vector<std::unique_ptr<BasicBlock>> &blocks,
+                           std::span<const uint8_t> text) {
+  for (const KernelDescriptorInfo &kernel : scan_object_kernel_descriptors(obj)) {
+    if (kernel_wavefront_size(arch, kernel.descriptor) == 32)
+      return "the kernel at text offset " + std::to_string(kernel.entry_text_offset) +
+             " runs in wave32, and liveness reads a wave32 lane mask's SGPR destination as a "
+             "pair";
+  }
+  for (const auto &block : blocks) {
+    const std::string where = "the block at text offset " + std::to_string(block->start_offset());
+    if (!block->call_edges().empty())
+      return where + " makes a call, which liveness does not follow";
+    if (block->successor_issue() != BasicBlock::SuccessorIssue::None)
+      return where + " has an unresolved successor, which liveness does not follow";
+  }
+  std::vector<BasicBlock *> scope;
+  scope.reserve(blocks.size());
+  for (const auto &block : blocks)
+    scope.push_back(block.get());
+  if (accesses_sgprs_indirectly_via_movrel(scope))
+    return "the code accesses an SGPR relative to M0 (s_movrel*), which liveness does not model";
+  if (accesses_vgprs_indirectly(scope, text, arch))
+    return "the code accesses a VGPR relative to M0 or through GPR index mode, which liveness "
+           "does not model";
+  for (const auto &block : blocks) {
+    for (const Instruction &inst : block->instructions()) {
+      if (is_unmodeled_image_access(arch, inst.mnemonic()))
+        return "the code has an RDNA4 image instruction (" + std::string(inst.mnemonic()) +
+               "), whose address VGPRs the decoder does not report";
+    }
+  }
+  return {};
+}
+
+// On CDNA3/CDNA4, firmware that supports kernarg preload enters a preloading
+// kernel 256 bytes past its descriptor entry, skipping a compatibility window.
+// Only the descriptor entry is decoded from, so a site in the window would not
+// run there, and the code past it may not be decoded at all. Handling that
+// second entry is deferred, so every preloading kernel is refused.
+std::string kernarg_preload_limit(const CodeObject &obj) {
+  for (const KernelDescriptorInfo &kernel : scan_object_kernel_descriptors(obj)) {
+    if (const uint32_t preload = kernarg_preload_length(kernel.descriptor); preload != 0)
+      return "the kernel at text offset " + std::to_string(kernel.entry_text_offset) +
+             " preloads " + std::to_string(preload) +
+             " kernarg dwords, so firmware may enter it at an entry that is not decoded";
+  }
+  return {};
+}
+
 } // namespace
 
 bool is_relocatable_anchor(const Instruction &anchor, uint64_t anchor_offset,
@@ -897,7 +959,7 @@ std::string Instrumentor::undecoded_anchor_error(uint64_t anchor_offset, uint64_
   if (block_for_offset(build_block_offset_index(blocks_), anchor_offset) != nullptr)
     return message + ": it is inside a decoded instruction";
   if (!kernel_entries_.empty())
-    return message + ": it is not in code reachable from a kernel entry, which is all that is "
+    return message + ": it is not in code decoded from a kernel entry, which is all that is "
                      "decoded";
   return message;
 }
@@ -1026,10 +1088,14 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
              " arguments; the limit is " + std::to_string(kMaxProbeArgVgprs);
       return std::nullopt;
     }
+    // A probe with no concrete target takes its arch's default target, which
+    // only gfx1250 has. Otherwise it is refused: it would be decoded for the
+    // destination's arch whatever it was built for.
     const rj_code_target_id_t probe_target = effective_target(*pt.probe_obj);
-    if (destination_target != ROCJITSU_CODE_TARGET_INVALID &&
-        probe_target != ROCJITSU_CODE_TARGET_INVALID && destination_target != probe_target) {
-      perr = "probe concrete target does not match the destination code-object target";
+    if (destination_target != ROCJITSU_CODE_TARGET_INVALID && destination_target != probe_target) {
+      perr = probe_target == ROCJITSU_CODE_TARGET_INVALID
+                 ? "probe has no concrete target, and the destination code object has one"
+                 : "probe concrete target does not match the destination code-object target";
       return std::nullopt;
     }
     auto sym = resolve_probe_symbol(*pt.probe_obj, pt.probe_symbol, &perr);
@@ -1146,6 +1212,27 @@ InstrumentedCodeObject Instrumentor::patch() {
                                "wrapper that no runtime builds yet; requested by " +
                                readers);
     return result;
+  }
+
+  // patch() refuses a code object liveness_limit() or kernarg_preload_limit()
+  // flags.
+  // patch_with_debug_summaries() does not, for tests that patch such kernels
+  // on purpose. A failed decode, or a .text it cannot anchor in, is left for it
+  // to report.
+  if (!patched_) {
+    const std::optional<std::span<const uint8_t>> text = anchor_text(nullptr);
+    std::string refusal;
+    if (text) {
+      refusal = liveness_limit(arch_, obj_, blocks_, *text);
+      if (refusal.empty())
+        refusal = kernarg_preload_limit(obj_);
+    }
+    if (!refusal.empty()) {
+      patched_ = true;
+      InstrumentedCodeObject result;
+      result.errors.push_back(std::move(refusal));
+      return result;
+    }
   }
 
   // Slice off the debug summaries; move the base subobject into the return.

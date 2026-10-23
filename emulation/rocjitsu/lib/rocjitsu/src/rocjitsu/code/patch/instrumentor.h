@@ -397,9 +397,9 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
 ///
 /// Block decoding is lazy so the CFG is built on the first call that needs
 /// it (validate_points, kernel_blocks or patch). An Instrumentor that is never
-/// asked for any of these calls also never decodes. When the object has kernel
-/// descriptors, only code reachable from a kernel entry is decoded; otherwise
-/// the whole .text is.
+/// asked for any of these calls also never decodes. When the object has one
+/// .text section and kernel descriptors, only code reachable from a kernel
+/// entry is decoded; otherwise the whole .text is.
 class Instrumentor {
 public:
   /// @param obj  The code object to instrument. Borrowed; must outlive the
@@ -477,8 +477,16 @@ public:
   /// return edge, and nothing past an unresolved edge
   /// (BasicBlock::successor_issue()). A register read only in a callee, after a
   /// call returns, or past such an edge counts as dead, so a trampoline in such
-  /// a kernel may clobber it. patch() does not detect this; the DBI runtime's
-  /// site selector (instrument_each_block()) refuses such kernels.
+  /// a kernel may clobber it. Liveness also reads the SGPR destination of a
+  /// wave32 compare or carry-out as the pair its encoding names, so the register
+  /// after it can count as dead in a wave32 kernel (#14022). And it sees the
+  /// register an operand encodes, not the one an `s_movrel*` / `v_movrel*`
+  /// access or GPR index mode reaches. patch() refuses a code object with a
+  /// wave32 kernel, a call, an unresolved edge (code that runs off the end of
+  /// .text included), such a relative access, or an RDNA4 image instruction,
+  /// whose address VGPRs the decoder does not report. It also refuses a kernel that
+  /// preloads kernel arguments: on CDNA3/CDNA4, firmware can enter one 256 bytes
+  /// past its descriptor entry, and only the descriptor entry is decoded from.
   ///
   /// Refuses any point whose probe reads a `LogBufferPtr*` argument: the entry
   /// prologue those need loads through a kernarg wrapper that no runtime builds
@@ -488,7 +496,11 @@ public:
   /// @brief Same as patch(), plus per-site InstrumentationPatch summaries.
   ///
   /// Unlike patch(), accepts `LogBufferPtr*` arguments, for callers that supply
-  /// the kernarg wrapper themselves.
+  /// the kernarg wrapper themselves. It also patches every kernel patch()
+  /// refuses for its liveness or entries: wave32 kernels, kernels with a call,
+  /// an unresolved edge, a relative register access or an RDNA4 image
+  /// instruction, and kernels that preload kernel arguments, for tests that
+  /// exercise those shapes.
   ///
   /// Currently intended for tests and debugging, although could eventually
   /// be used to communicate important information for the host (an ordering
