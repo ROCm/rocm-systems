@@ -46,6 +46,7 @@
 #include "hip_capture.h"
 #include "hip_capture_metadata.h"
 #include "hip_capture_scrub.h"
+#include "hrr_archive_sign.h"
 
 #include "os/os.hpp"           // amd::Os::timeNanos()
 #include "utils/debug.hpp"     // LogPrintfError, LogPrintfWarning, LogPrintfInfo
@@ -187,6 +188,9 @@ static uint64_t g_events_since_ckpt  = 0;
 // manifest already holds the event count. Atomic because emergency_finalize()
 // and atfork_child() use it without taking either.
 static std::atomic<bool> g_events_finalized{false};
+// Set once flush() has signed the archive. A crash callback after that must not
+// rewrite manifest.json, which the signature covers.
+static std::atomic<bool> g_archive_signed{false};
 
 // Set when an event could not be serialized losslessly and had to be dropped
 // (e.g. an oversized kernel launch). A capture with this flag set is finalized
@@ -669,6 +673,7 @@ static void atfork_child() {
   g_buf_len = 0;
   g_events_since_ckpt = 0;
   g_events_finalized = false;
+  g_archive_signed   = false;
   g_output_dir.clear();
   g_manifest_path[0] = '\0';
   // The child's archive is a new one: an event the parent dropped is not
@@ -1243,6 +1248,7 @@ bool open(const char* output_dir) {
     g_buf_len           = 0;
     g_events_since_ckpt = 0;
     g_events_finalized  = false;
+    g_archive_signed    = false;
     g_seq_id.store(0, std::memory_order_relaxed);
     g_event_count.store(0, std::memory_order_relaxed);
     g_blob_count.store(0, std::memory_order_relaxed);
@@ -1320,6 +1326,27 @@ void note_unreplayable(const char* api, const char* reason) {
   if (fresh) warn_unreplayable(api, reason);
 }
 
+// Signs the finished archive when HIP_HRR_SIGNING_KEY names a seed file. Only the
+// clean path calls this: the crash path may not allocate or read files, so a
+// crashed archive stays unsigned until `hrr-playback --repair --signing-key`. A
+// crash while signing is under way can leave a manifest.json that no longer
+// matches the pair; replay refuses that archive, it never accepts it.
+// A failure is loud but does not stop the process; the archive stays unsigned.
+static void sign_finished_archive(const std::string& out_dir) {
+  const char* key_path = std::getenv("HIP_HRR_SIGNING_KEY");
+  if (key_path == nullptr || key_path[0] == '\0') return;
+  uint8_t seed[hrr_sign::kSeedSize];
+  std::string err;
+  if (hrr_sign::read_key_file(key_path, /*is_seed=*/true, seed, &err) &&
+      hrr_sign::sign_archive(out_dir, seed, &err)) {
+    g_archive_signed = true;
+    LogPrintfInfo("[HRR capture] Signed %s", out_dir.c_str());
+  } else {
+    LogPrintfError("[HRR capture] NOT signed, %s: %s", out_dir.c_str(), err.c_str());
+  }
+  hrr_sign::wipe(seed, sizeof(seed));
+}
+
 void flush(const char* /*output_dir*/) {
   // Always finalize the *effective* directory this process actually wrote to
   // (g_output_dir), which is always a pid-<pid> sub-archive. The caller passes
@@ -1373,6 +1400,7 @@ void flush(const char* /*output_dir*/) {
   write_manifest_stdio(dir_fd, out_dir, /*complete=*/!incomplete);
   update_root_manifest();
   remove_in_archive(dir_fd, out_dir, kActiveMarker);
+  sign_finished_archive(out_dir);
 }
 
 void close() {
@@ -1429,6 +1457,7 @@ static size_t append_lit(char* out, size_t off, const char* s) {
 }
 
 void emergency_finalize(bool clean_shutdown) {
+  if (g_archive_signed.load(std::memory_order_acquire)) return;  // finished and signed
   // A space stop has already closed events.bin, but a crash after it must still
   // leave a manifest that says the archive is incomplete.
   if (g_events_fd < 0 && (clean_shutdown || !g_out_of_space.load(std::memory_order_relaxed)))
