@@ -1286,6 +1286,22 @@
         }
       ]
     },
+    "net_ib_cast_gin_error_path": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 120,
+      "description": "Host-only regression for the net_ib error-path fixes ported into net_ib_cast (AICOMRCCL-2750). No NIC or MPI traffic: exercises the IGet request name, a non-first error completion, the receiver wr_id bound, and the GIN allgather CTS poll via test-only seams.",
+      "tests": [
+        {
+          "name": "NetIbCast_GinErrorPath",
+          "description": "All four ported net_ib_cast error-path checks.",
+          "test_filter": "NetIbCast.CastGinErrorPath"
+        }
+      ]
+    },
     "socket_poll_bootstrap": {
       "is_gtest": true,
       "binary": "rccl-UnitTestsFixturesDebug",

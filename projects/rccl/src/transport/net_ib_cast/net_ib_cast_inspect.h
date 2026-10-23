@@ -138,7 +138,8 @@ ncclResult_t ncclIbCastGetRepostCount(void* sendComm, int* out);
 /* Host-only checks for the net_ib error-path port (AICOMRCCL-2750).
  * No NIC: the helpers build the arguments and call the real functions. */
 
-/* IbCastReqTypeStr[NCCL_NET_IB_REQ_GIN_IGET]. NULL if the slot is missing. */
+/* Returns IbCastReqTypeStr[NCCL_NET_IB_REQ_GIN_IGET] ("IGet"). A short array
+ * would read out of bounds here, not return NULL. */
 const char* ncclIbCastTestGinIgetName(void);
 
 /* Two CQEs, success then error, with devBases[1] left NULL.

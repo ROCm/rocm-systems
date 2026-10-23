@@ -981,11 +981,9 @@ extern "C" ncclResult_t ncclIbCastTestGinAllGatherPollsRecv(int* recvPolledBefor
   castGinRecvPolledBeforeSend = 0;
   castGinSendPosted = 0;
 
-  auto savedRegMr = netIbCast.regMr;
-  auto savedDeregMr = netIbCast.deregMr;
-  auto savedIsend = netIbCast.isend;
-  auto savedIrecv = netIbCast.irecv;
-  auto savedTest = netIbCast.test;
+  // Save and restore the whole ops table (one struct copy): transiently swaps a
+  // few entries for the no-HW allgather, then puts every field back as it was.
+  auto savedNet = netIbCast;
   netIbCast.regMr = castGinFakeRegMr;
   netIbCast.deregMr = castGinFakeDeregMr;
   netIbCast.isend = castGinFakeIsend;
@@ -1001,11 +999,7 @@ extern "C" ncclResult_t ncclIbCastTestGinAllGatherPollsRecv(int* recvPolledBefor
   int recvBuf[2] = {};
   ncclResult_t ret = IbCastGinIbAllGather(&cComm, &src, recvBuf, sizeof(src));
 
-  netIbCast.regMr = savedRegMr;
-  netIbCast.deregMr = savedDeregMr;
-  netIbCast.isend = savedIsend;
-  netIbCast.irecv = savedIrecv;
-  netIbCast.test = savedTest;
+  netIbCast = savedNet;
 
   *recvPolledBeforeSend = castGinRecvPolledBeforeSend;
   return ret;
