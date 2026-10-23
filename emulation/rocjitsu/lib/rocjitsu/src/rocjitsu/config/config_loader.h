@@ -11,14 +11,18 @@
 #include "rocjitsu/config/dbt_guest_config.h"
 #include "rocjitsu/config/kfd_device_config.h"
 #include "rocjitsu/config/pci_device_config.h"
+#include "rocjitsu/config/system_graph.h"
 
 #include "simdojo/sim/simulation.h"
 #include "simdojo/sim/topology.h"
+#include "util/diagnostic.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -27,16 +31,114 @@ class SoC;
 namespace amdgpu {
 class GpuMemory;
 class Xcd;
+namespace matrix_coexecution {
+class ExecutionResources;
+} // namespace matrix_coexecution
 } // namespace amdgpu
 
 namespace config {
 
-/// Default host-wide thread cap for automatic functional CU dispatch.
+/// Default clocked-engine and legacy dispatch-only ceiling.
 ///
-/// This conservative policy limit bounds persistent worker allocation on
-/// large hosts while retaining substantial CU parallelism. It is not a
-/// hardware limit; embedding callers can override it.
-inline constexpr uint32_t kDefaultCpuDispatchThreadCap = 32;
+/// These paths do not use the functional allocation table. Bound their
+/// automatic worker counts on large hosts; explicit requests can override this
+/// policy. Functional limits instead come from affinity and the target table.
+inline constexpr uint32_t kDefaultExecutionThreadCap = 32;
+/// Compatibility name for the older dispatch-only override API.
+inline constexpr uint32_t kDefaultCpuDispatchThreadCap = kDefaultExecutionThreadCap;
+
+/// A single VM-wide budget includes engines, retained workers from every SoC's
+/// dispatch pool, and one shared async-helper pool. Explicit knobs take priority.
+struct ExecutionThreadRequest {
+  uint32_t budget = 0;   ///< Zero uses affinity and the target allocation table.
+  uint32_t engines = 0;  ///< Zero selects from the table.
+  uint32_t dispatch = 0; ///< Inclusive width per SoC; zero selects automatic sizing.
+  int32_t helpers = -1;  ///< -1 selects automatic sizing; zero disables helpers.
+};
+
+/// One target-configured granule, with an inclusive dispatch width per GPU.
+/// engines maps to num_threads, dispatch to cpu_dispatch_threads, and helpers
+/// to async_helper_threads in JSON.
+struct ExecutionThreadChoice {
+  uint32_t engines = 1;
+  uint32_t dispatch = 1;
+  uint32_t helpers = 0;
+  bool operator==(const ExecutionThreadChoice &) const = default;
+};
+
+struct ExecutionThreadAllocation {
+  uint32_t engines = 1;
+  std::vector<uint32_t> dispatch;
+  uint32_t helpers = 0;
+};
+
+/// Pure table selector. Choose the largest effective allocation fitting the budget,
+/// after topology clamps and explicit overrides; later entries break ties.
+/// Explicit knobs may exceed the budget. With no fitting entry, unspecified knobs use
+/// serial defaults. Clocked mode only allocates engine partitions.
+ExecutionThreadAllocation resolve_execution_threads(const ExecutionThreadRequest &request,
+                                                    uint32_t host_threads, uint32_t xcds,
+                                                    std::span<const uint32_t> dispatch_capacities,
+                                                    bool async_supported,
+                                                    std::span<const ExecutionThreadChoice> choices,
+                                                    bool clocked = false);
+
+/// Metadata needed to evaluate the pure allocation rule without building a VM.
+struct ExecutionThreadSettings {
+  ExecutionThreadRequest request;
+  std::vector<ExecutionThreadChoice> choices;
+  uint32_t xcds = 1;
+  std::vector<uint32_t> dispatch_capacities;
+  bool async_supported = false;
+  bool clocked = false;
+  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
+
+  ExecutionThreadAllocation resolve(uint32_t host_threads) const {
+    return resolve_execution_threads(request, host_threads, xcds, dispatch_capacities,
+                                     async_supported, choices, clocked);
+  }
+};
+
+/// @brief Read only a config's thread requests and topology dimensions.
+/// @details Allocates no simulator components or worker threads. File-reading
+/// and parsing failures emit a diagnostic and return failure.
+/// @param json_path Path to the JSON config file.
+/// @param schema_text FlatBuffers schema text (the .fbs content).
+/// @param emit_error Destination for failure diagnostics.
+/// @returns Settings for evaluating allocation, or failure after emitting a diagnostic.
+/// @throws std::invalid_argument when required allocation metadata is invalid.
+util::FailureOr<ExecutionThreadSettings>
+load_execution_thread_settings(const std::string &json_path, const std::string &schema_text,
+                               util::DiagnosticEmitter emit_error);
+
+/// @brief Read thread requests and topology dimensions from config JSON text.
+/// @details Same as the path overload, for a config a launch has already rewritten
+/// in memory and does not need to place on disk. Parsing failures emit a diagnostic
+/// and return failure.
+/// @param json JSON configuration string.
+/// @param schema_text FlatBuffers schema text (the .fbs content).
+/// @param emit_error Destination for failure diagnostics.
+/// @returns Settings for evaluating allocation, or failure after emitting a diagnostic.
+/// @throws std::invalid_argument when required allocation metadata is invalid.
+util::FailureOr<ExecutionThreadSettings>
+load_execution_thread_settings_from_string(const std::string &json, const std::string &schema_text,
+                                           util::DiagnosticEmitter emit_error);
+
+/// Read thread dimensions for one selected node. An empty selector uses the
+/// config's local_node field or defaults only when the graph has one node.
+util::FailureOr<ExecutionThreadSettings>
+load_execution_thread_settings_for_node(const std::string &json_path,
+                                        const std::string &schema_text, std::string_view node_id,
+                                        util::DiagnosticEmitter emit_error);
+util::FailureOr<ExecutionThreadSettings> load_execution_thread_settings_from_string_for_node(
+    const std::string &json, const std::string &schema_text, std::string_view node_id,
+    util::DiagnosticEmitter emit_error);
+
+/// @brief Check whether the ISA supports asynchronous MMA execution.
+bool configured_async_mma_supported(rj_code_arch_t arch);
+/// @brief Create lazy VM-owned resources for the requested helper count.
+std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources>
+make_async_execution_resources(uint32_t helpers);
 
 /// Resolve the requested functional CU-dispatch width for each SoC.
 ///
@@ -80,13 +182,20 @@ struct TopologyBuildResult {
 ///
 /// load_config() has already resolved engine_config.num_threads by the time it
 /// returns: a config that omits the field (or sets it to 0) comes back holding
-/// min(available host threads, XCD count). Overriding it here is what the clamp
+/// the shared execution-budget allocation. Overriding it here is what the clamp
 /// is for; pin 1 when the consumer needs SimulationEngine::step(), which
 /// rejects a multi-partition engine.
 /// @code
 ///   #include "rocjitsu/vm/amdgpu/partitioning.h"
 ///
-///   config::LoadedConfig loaded = load_config("config.json", kEmbeddedSchema);
+///   util::StringDiagnostic diagnostic;
+///   util::FailureOr<config::LoadedConfig> result =
+///       load_config("config.json", kEmbeddedSchema, diagnostic.emitter());
+///   if (result.failed()) {
+///     // Report diagnostic.message() and stop before accessing the value.
+///     return;
+///   }
+///   config::LoadedConfig loaded = std::move(result.value());
 ///   SoC *soc = loaded.soc();
 ///   loaded.apply_cpu_dispatch_threads();
 ///
@@ -118,25 +227,39 @@ struct LoadedConfig {
   DbtGuestConfig dbt_guest;             ///< Optional DBT guest-GPU discovery config.
   uint32_t num_gpus = 1;                ///< Number of simulated GPU instances.
   std::vector<KfdDeviceConfig> devices; ///< Per-GPU configs (populated when num_gpus > 1).
+  SystemGraph system_graph;             ///< Validated graph, including remote descriptions.
+  std::string local_node_id;            ///< Node used for this VM's local projection.
+  std::unordered_map<std::string, uint32_t>
+      global_to_local_ordinals; ///< Global instance ID to local gpuN ordinal.
   rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID;
-  /// Requested functional dispatch width. Automatic mode uses a host-wide
-  /// budget capped at 32; each SoC's effective width is CU-capacity-clamped.
-  uint32_t cpu_dispatch_threads = 1;
+  /// Requested dispatch width. Omitted/zero selects from thread_allocations;
+  /// each SoC's upper bound is one plus the sum of CUs-1 across nonempty XCDs.
+  uint32_t cpu_dispatch_threads = 0;
+  uint32_t cpu_thread_budget = 0; ///< Zero uses affinity and the target allocation table.
+  /// Preserve old automatic-dispatch checkpoint metadata when saving again.
+  bool legacy_auto_dispatch = false;
+  int32_t async_helper_threads = -1;           ///< -1 selects from the table; zero disables.
+  uint32_t requested_engine_threads = 0;       ///< Original request, retained for checkpoints.
+  ExecutionThreadAllocation execution_threads; ///< Effective allocation resolved during loading.
+  std::vector<ExecutionThreadChoice> thread_allocations; ///< Target-preferred granules.
+  std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources>
+      async_resources; ///< Shared by CUs.
 
   /// @brief Apply the requested functional dispatch policy to every loaded SoC.
   ///
   /// Call this before transferring topology ownership with take_root(). The
-  /// no-argument overload detects the current host's hardware-thread count.
+  /// method applies the allocation resolved during loading.
   void apply_cpu_dispatch_threads();
 
-  /// @brief Apply the dispatch policy using supplied automatic-mode inputs.
-  /// @details This overload makes host-dependent policy explicit for embedding
-  /// callers and deterministic tests.
+  /// @brief Explicitly override dispatch sizing independently of the total budget.
+  /// @details This dispatch-only override ignores the allocation table and does not
+  /// reallocate engines or helpers. Use resolve_execution_threads() to evaluate
+  /// the joint plan for another host width.
   /// @param hardware_threads Host-thread count available for automatic sizing.
   /// @param automatic_thread_cap Maximum host-wide width in automatic mode;
   /// values below one are treated as one.
-  void apply_cpu_dispatch_threads(uint32_t hardware_threads,
-                                  uint32_t automatic_thread_cap = kDefaultCpuDispatchThreadCap);
+  void override_cpu_dispatch_threads(uint32_t hardware_threads,
+                                     uint32_t automatic_thread_cap = kDefaultCpuDispatchThreadCap);
 
   /// @brief Return the SoC from the topology root.
   SoC *soc();
@@ -158,15 +281,18 @@ struct DeviceIdentityConfig {
 };
 
 /// @brief Read only a config's device identity and bus shape.
-/// @param json_path Path to the JSON config file.
-/// @param schema_text FlatBuffers schema text (the .fbs content).
-/// @returns The identity and bus shape.
-/// @throws std::runtime_error when the file cannot be read or parsed.
 /// @details Building the topology allocates the whole simulated machine, which
 /// for a large part is gigabytes of register files. A front end that only needs
 /// to know which GPU to present should not pay for a machine it never runs.
-DeviceIdentityConfig load_device_identity(const std::string &json_path,
-                                          const std::string &schema_text);
+/// File-reading, parsing, and device conversion failures emit a diagnostic
+/// and return failure. Other validation and allocation exceptions propagate.
+/// @param json_path Path to the JSON config file.
+/// @param schema_text FlatBuffers schema text (the .fbs content).
+/// @param emit_error Destination for failure diagnostics.
+/// @returns The identity and bus shape, or failure after emitting a diagnostic.
+util::FailureOr<DeviceIdentityConfig> load_device_identity(const std::string &json_path,
+                                                           const std::string &schema_text,
+                                                           util::DiagnosticEmitter emit_error);
 
 /// @brief Parse an architecture name string to an rj_code_arch_t enum value.
 rj_code_arch_t parse_arch(const std::string &arch_str);
@@ -177,46 +303,109 @@ const char *arch_to_string(rj_code_arch_t arch);
 /// @brief Parse an execution mode name, defaulting to FUNCTIONAL.
 simdojo::ExecMode parse_exec_mode(const std::string &mode_str);
 
+/// @brief Validate configuration through the loader's shared component traversal.
+/// @details Shares CU resource and ISA checks with construction, using placeholders
+/// for CUs. CU-dependent topology checks must use the declarative configuration;
+/// execution wiring and its geometry warnings only run during full construction.
+/// @param json_path Path to the JSON configuration file.
+/// @param schema_text FlatBuffers schema text.
+/// @param emit_error Destination for failure diagnostics.
+/// @returns Success, or failure with a diagnostic for file-reading, parsing, or
+/// KFD/DBT device conversion errors. Other validation and allocation exceptions propagate.
+util::Result validate_config(const std::string &json_path, const std::string &schema_text,
+                             util::DiagnosticEmitter emit_error);
+
 /// @brief Load simulation config from a JSON file.
+/// @details File-reading, parsing, and KFD/DBT device conversion failures emit a
+/// diagnostic and return failure. Other validation and allocation exceptions propagate.
 /// @param json_path Path to the JSON config file.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
-/// @returns LoadedConfig with engine parameters and built topology.
-/// @throws std::runtime_error on file I/O, parse errors, or invalid config.
-LoadedConfig load_config(const std::string &json_path, const std::string &schema_text);
+/// @param emit_error Destination for failure diagnostics.
+/// @returns LoadedConfig with engine parameters and built topology, or failure.
+util::FailureOr<LoadedConfig> load_config(const std::string &json_path,
+                                          const std::string &schema_text,
+                                          util::DiagnosticEmitter emit_error);
 
 /// @brief Load simulation config from a JSON file against a stated host width.
 ///
-/// @details Like the two-argument overload, but resolves an unset (or zero)
-/// `num_threads` against @p host_threads instead of the process's own affinity,
-/// making host-dependent policy explicit for embedding callers and
-/// deterministic tests. @p host_threads is always the width used, including 0,
-/// which means indeterminate and resolves to a single partition.
+/// @details Like the three-argument overload, but uses @p host_threads as the
+/// affinity input to the shared execution budget. Zero means indeterminate and
+/// gives an automatic budget of one. An explicit cpu_thread_budget overrides it.
+/// File-reading, parsing, and KFD/DBT device conversion failures emit a diagnostic
+/// and return failure. Other validation and allocation exceptions propagate.
 /// @param json_path Path to the JSON config file.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
-/// @param host_threads Host width to resolve the default partition count
-/// against.
-/// @returns LoadedConfig with engine parameters and built topology.
-/// @throws std::runtime_error on file I/O, parse errors, or invalid config.
-LoadedConfig load_config(const std::string &json_path, const std::string &schema_text,
-                         uint32_t host_threads);
+/// @param emit_error Destination for failure diagnostics.
+/// @param host_threads Affinity width used for automatic budget selection.
+/// @returns LoadedConfig with engine parameters and built topology, or failure.
+util::FailureOr<LoadedConfig> load_config(const std::string &json_path,
+                                          const std::string &schema_text,
+                                          util::DiagnosticEmitter emit_error,
+                                          uint32_t host_threads);
 
 /// @brief Load simulation config from a JSON string.
+/// @details Parsing and KFD/DBT device conversion failures emit a diagnostic and
+/// return failure. Other validation and allocation exceptions propagate.
 /// @param json JSON configuration string.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
-/// @returns LoadedConfig with engine parameters and built topology.
-/// @throws std::runtime_error on parse errors or invalid config.
-LoadedConfig load_config_from_string(const std::string &json, const std::string &schema_text);
+/// @param emit_error Destination for failure diagnostics.
+/// @returns LoadedConfig with engine parameters and built topology, or failure.
+util::FailureOr<LoadedConfig> load_config_from_string(const std::string &json,
+                                                      const std::string &schema_text,
+                                                      util::DiagnosticEmitter emit_error);
 
 /// @brief Load simulation config from a JSON string against a stated host width.
-/// @details See the three-argument @ref load_config overload.
+/// @details See the four-argument @ref load_config overload.
+/// Parsing and KFD/DBT device conversion failures emit a diagnostic and
+/// return failure. Other validation and allocation exceptions propagate.
 /// @param json JSON configuration string.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
-/// @param host_threads Host width to resolve the default partition count
-/// against; 0 means indeterminate and resolves to a single partition.
-/// @returns LoadedConfig with engine parameters and built topology.
-/// @throws std::runtime_error on parse errors or invalid config.
-LoadedConfig load_config_from_string(const std::string &json, const std::string &schema_text,
-                                     uint32_t host_threads);
+/// @param emit_error Destination for failure diagnostics.
+/// @param host_threads Affinity width for automatic selection; zero gives a budget of one.
+/// @returns LoadedConfig with engine parameters and built topology, or failure.
+util::FailureOr<LoadedConfig> load_config_from_string(const std::string &json,
+                                                      const std::string &schema_text,
+                                                      util::DiagnosticEmitter emit_error,
+                                                      uint32_t host_threads);
+
+/// @brief Load simulation config text with caller-owned asynchronous execution resources.
+/// @details This overload takes its helper allocation from the caller. A null resource explicitly
+/// disables asynchronous helpers. The loaded CUs share the supplied resource, which is useful
+/// when several independently loaded topologies must use one bounded helper pool.
+/// @param json JSON configuration string.
+/// @param schema_text FlatBuffers schema text (the .fbs content).
+/// @param emit_error Destination for failure diagnostics.
+/// @param host_threads Affinity width for automatic selection; zero gives a budget of one.
+/// @param async_resources Shared asynchronous execution resources, or null to disable helpers.
+/// @returns LoadedConfig with engine parameters and built topology, or failure.
+util::FailureOr<LoadedConfig> load_config_from_string(
+    const std::string &json, const std::string &schema_text, util::DiagnosticEmitter emit_error,
+    uint32_t host_threads,
+    std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources> async_resources);
+
+/// Build only the selected local node. A nonempty node_id must agree with a
+/// local_node field in the JSON, if one exists. An empty node_id uses local_node;
+/// if neither selects a node, the graph must contain exactly one node. This
+/// contract applies to both path and string overloads below. The graph remains
+/// owned in the result for later topology and route projections.
+util::FailureOr<LoadedConfig> load_config_for_node(const std::string &json_path,
+                                                   const std::string &schema_text,
+                                                   std::string_view node_id,
+                                                   util::DiagnosticEmitter emit_error,
+                                                   uint32_t host_threads);
+util::FailureOr<LoadedConfig> load_config_for_node(const std::string &json_path,
+                                                   const std::string &schema_text,
+                                                   std::string_view node_id,
+                                                   util::DiagnosticEmitter emit_error);
+util::FailureOr<LoadedConfig> load_config_from_string_for_node(const std::string &json,
+                                                               const std::string &schema_text,
+                                                               std::string_view node_id,
+                                                               util::DiagnosticEmitter emit_error,
+                                                               uint32_t host_threads);
+util::FailureOr<LoadedConfig> load_config_from_string_for_node(const std::string &json,
+                                                               const std::string &schema_text,
+                                                               std::string_view node_id,
+                                                               util::DiagnosticEmitter emit_error);
 
 } // namespace config
 } // namespace rocjitsu

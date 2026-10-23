@@ -8,8 +8,10 @@ set(TEST_SRC
     library_negative.cc
     library_get_global.cc
     library_get_global_co.cc
+    library_get_module.cc
     library_invariants.cc
     hipKernelGetAttribute.cc
+    hipKernelSetAttributeForDevice.cc
     lib_attribute.cc
 )
 

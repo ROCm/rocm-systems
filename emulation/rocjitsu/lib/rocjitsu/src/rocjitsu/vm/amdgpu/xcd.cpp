@@ -8,20 +8,25 @@
 
 #include <cassert>
 #include <memory>
+#include <stdexcept>
 #include <string>
 
 namespace rocjitsu {
 namespace amdgpu {
 
 Xcd::Xcd(std::string name, const Config &config, rj_code_arch_t arch, GpuMemory *memory,
-         simdojo::ExecMode exec_mode)
-    : simdojo::CompositeComponent(std::move(name)), exec_mode_(exec_mode) {
+         simdojo::ExecMode exec_mode, std::shared_ptr<DeviceCacheCoherence> coherence)
+    : simdojo::CompositeComponent(std::move(name)), exec_mode_(exec_mode),
+      coherence_(std::move(coherence)) {
+  if (!coherence_)
+    throw std::invalid_argument("XCD requires a cache-coherence domain");
   set_weight(0); // Structural container, not a work-producing component.
   auto xcd_name = this->name();
 
   // Create shared L2 cache for this XCD. The backing store is connected
   // via the L2's requester port (wired by SoC::initialize()).
-  auto l2 = std::make_unique<L2Cache>(xcd_name + ".l2");
+  auto l2 = std::make_unique<L2Cache>(xcd_name + ".l2", coherence_);
+  l2->set_legacy_maintenance_memory(memory);
   l2_cache_ = l2.get();
   add_child(std::move(l2));
 
@@ -39,7 +44,8 @@ Xcd::Xcd(std::string name, const Config &config, rj_code_arch_t arch, GpuMemory 
     // This also sets up on_idle callbacks from CUs to CP::check_all_idle().
     for (uint32_t c = 0; c < se->num_compute_units(); ++c) {
       auto *cu = se->compute_unit(c);
-      cu->set_shader_engine_location(i, c);
+      cu->set_shader_engine_location(i, c, config.shader_engine.cus_per_shader_array,
+                                     se->num_compute_units());
       cp_->add_compute_unit(cu);
     }
     // Register the SE's SPI with the CP so ace_dispatch_all() can use the
@@ -51,6 +57,61 @@ Xcd::Xcd(std::string name, const Config &config, rj_code_arch_t arch, GpuMemory 
 
   cp_->add_l2_cache(l2_cache_);
   add_child(std::move(cp));
+
+  // Share one device-global GWS store across every CU of this XCD now that all
+  // shader engines and their CUs exist.
+  wire_gws_to_cus();
+}
+
+void Xcd::wire_gws_to_cus() {
+  // Include CUs attached directly to the CP by custom topologies.
+  if (cp_) {
+    cp_->set_gws_device(gws_device_);
+    return;
+  }
+  // Standalone-XCD fallback: no command processor, so wire the CUs directly.
+  for (ShaderEngine *shader_engine : shader_engines_)
+    for (ComputeUnitCore *compute_unit : shader_engine->compute_units())
+      if (!compute_unit->can_set_gws_device(gws_device_))
+        throw std::logic_error("Cannot wire GWS store with active waves or workgroups");
+  for (ShaderEngine *shader_engine : shader_engines_)
+    for (ComputeUnitCore *compute_unit : shader_engine->compute_units())
+      compute_unit->set_gws_device(gws_device_);
+}
+
+void Xcd::adopt_gws_store(std::shared_ptr<GwsDevice> store) {
+  if (!store || store == gws_device_)
+    return;
+  // Preflight the entire XCD before changing any owner. Topology changes require
+  // external serialization and drained CUs, as for the CP wiring API.
+  for (ShaderEngine *se : shader_engines_)
+    for (ComputeUnitCore *cu : se->compute_units())
+      if (!cu->can_set_gws_device(store))
+        throw std::logic_error("Cannot replace XCD GWS store with active waves or workgroups");
+  if (cp_)
+    cp_->set_gws_device(store);
+  else
+    for (ShaderEngine *se : shader_engines_)
+      for (ComputeUnitCore *cu : se->compute_units())
+        (void)cu->set_gws_device(store);
+  gws_device_ = std::move(store);
+}
+
+void Xcd::set_l2_cache(L2Cache *l2) {
+  l2_cache_ = l2;
+  if (l2_cache_)
+    l2_cache_->set_coherence_domain(coherence_);
+}
+
+void Xcd::set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence) {
+  if (!coherence)
+    throw std::invalid_argument("XCD requires a cache-coherence domain");
+  coherence_ = std::move(coherence);
+  if (l2_cache_)
+    l2_cache_->set_coherence_domain(coherence_);
+  for (ShaderEngine *shader_engine : shader_engines_)
+    for (ComputeUnitCore *compute_unit : shader_engine->compute_units())
+      compute_unit->set_l2(l2_cache_);
 }
 
 void Xcd::initialize() {

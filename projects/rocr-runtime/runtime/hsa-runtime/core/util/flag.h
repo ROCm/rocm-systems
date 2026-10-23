@@ -45,6 +45,7 @@
 
 #include <stdint.h>
 
+#include <atomic>
 #include <vector>
 #include <map>
 #include <string>
@@ -133,6 +134,11 @@ class Flag {
     // Enable DRM interface only when HSA_ENABLE_DRM_DEBUG=1 is explicitly set.
     var = os::GetEnvVar("HSA_ENABLE_DRM_DEBUG");
     enable_drm_ = (var == "1") ? true : false;
+    // Opt-in multi-sample GPU/CPU clock correlation. Profiling tools enable this
+    // at runtime through hsa_amd_enable_high_precision_timestamps. Unset or any
+    // value other than "1" leaves the single-query path in place.
+    var = os::GetEnvVar("HSA_ENABLE_HIGH_PRECISION_TIMESTAMPS");
+    enable_high_precision_timestamps_.store(var == "1", std::memory_order_relaxed);
 
     var = os::GetEnvVar("HSA_ENABLE_PEER_SDMA");
     enable_peer_sdma_ = (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
@@ -223,11 +229,9 @@ class Flag {
     var = os::GetEnvVar("HSA_TOOLS_REPORT_REGISTER_FAILURE");
     report_tool_register_failures_ = (var == "1") ? true : false;
 
-    // Kill switch for the rocjitsu hotswap tool. Unlike most flags here it
-    // accepts the spelled-out negatives, because the scripts that set it were
-    // written against the retired hotswap implementation and pass "0"/"false"
-    // to mean "leave hotswap on".
-    hotswap_disable_ = IsEnvVarTruthy("HSA_HOTSWAP_DISABLE");
+    // Opt-in switch for the rocjitsu hotswap tool. Leave the tool disabled
+    // unless the user explicitly requests it with a truthy value.
+    hotswap_enable_ = IsEnvVarTruthy("HSA_HOTSWAP_ENABLE");
 
     var = os::GetEnvVar("HSA_DISABLE_FRAGMENT_ALLOCATOR");
     disable_fragment_alloc_ = (var == "1") ? true : false;
@@ -428,7 +432,7 @@ class Flag {
 
   bool report_tool_load_failures() const { return report_tool_load_failures_; }
 
-  bool hotswap_disable() const { return hotswap_disable_; }
+  bool hotswap_enable() const { return hotswap_enable_; }
 
   bool report_tool_register_failures() const { return report_tool_register_failures_; }
 
@@ -455,6 +459,13 @@ class Flag {
   SDMA_OVERRIDE enable_sdma_recommended_eng() const { return enable_sdma_recommended_eng_; }
 
   bool enable_drm() const { return enable_drm_; }
+  bool enable_high_precision_timestamps() const {
+    return enable_high_precision_timestamps_.load(std::memory_order_relaxed);
+  }
+
+  void set_enable_high_precision_timestamps(bool enable) {
+    enable_high_precision_timestamps_.store(enable, std::memory_order_relaxed);
+  }
 
   std::string visible_gpus() const { return visible_gpus_; }
 
@@ -610,7 +621,7 @@ class Flag {
   bool poison_sigbus_delay_set_ = false;
   uint32_t poison_sigbus_delay_ms_ = 0;
   bool report_tool_load_failures_;
-  bool hotswap_disable_ = false;
+  bool hotswap_enable_ = false;
   bool report_tool_register_failures_ = false;
   bool disable_tool_register_ = false;
   bool disable_fragment_alloc_;
@@ -651,6 +662,7 @@ class Flag {
   SDMA_OVERRIDE enable_sdma_recommended_eng_;
 
   bool enable_drm_;
+  std::atomic<bool> enable_high_precision_timestamps_{false};
 
   bool filter_visible_gpus_;
   std::string visible_gpus_;

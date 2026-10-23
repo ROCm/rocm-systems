@@ -10,14 +10,22 @@
 #include "MPIHelpers.hpp"
 #include "TestChecks.hpp"
 #include "ResourceGuards.hpp"
+#include "SymmetricMemPrereq.hpp"
+#include "DeviceBufferHelpers.hpp"
 
 #include "nccl_device.h"
 #include "comm.h"
+#include "rccl_float8.h"
+
+#include <hip/hip_fp16.h>
 
 #include <array>
+#include <cstdint>
 #include <cstdlib>
 #include <regex>
 #include <string>
+#include <sys/syscall.h>
+#include <unistd.h>
 #include <vector>
 
 using namespace MPITestConstants;
@@ -664,6 +672,552 @@ TEST_F(PatSharedConnectionMPITest, GroupedReduceScatterAndAllGatherOnOneCommunic
     }
 }
 
+namespace
+{
+    enum class SizeTier
+    {
+        Short,
+        Large,
+        Count
+    };
+
+    constexpr const char* kSizeTierNames[] = {"short", "large"};
+    static_assert(sizeof(kSizeTierNames) / sizeof(kSizeTierNames[0])
+                      == static_cast<size_t>(SizeTier::Count),
+                  "kSizeTierNames needs one entry per SizeTier");
+
+    constexpr const char* kDtypeNames[] = {"int8",
+                                           "uint8",
+                                           "int32",
+                                           "uint32",
+                                           "int64",
+                                           "uint64",
+                                           "fp16",
+                                           "fp32",
+                                           "fp64",
+                                           "bf16",
+                                           "fp8e4m3",
+                                           "fp8e5m2"};
+    static_assert(sizeof(kDtypeNames) / sizeof(kDtypeNames[0])
+                      == static_cast<size_t>(ncclNumTypes),
+                  "kDtypeNames needs one entry per ncclDataType_t");
+
+    constexpr const char* sizeTierName(SizeTier tier)
+    {
+        return kSizeTierNames[static_cast<size_t>(tier)];
+    }
+
+    constexpr const char* dtypeName(ncclDataType_t dtype)
+    {
+        return kDtypeNames[static_cast<size_t>(dtype)];
+    }
+
+    struct DtypeSizeCase
+    {
+        ncclDataType_t dtype;
+        SizeTier       sizeTier;
+    };
+
+    constexpr DtypeSizeCase kShortTierCases[] = {
+        {ncclInt8, SizeTier::Short},
+        {ncclUint8, SizeTier::Short},
+        {ncclInt32, SizeTier::Short},
+        {ncclUint32, SizeTier::Short},
+        {ncclInt64, SizeTier::Short},
+        {ncclUint64, SizeTier::Short},
+        {ncclFloat16, SizeTier::Short},
+        {ncclFloat32, SizeTier::Short},
+        {ncclFloat64, SizeTier::Short},
+        {ncclBfloat16, SizeTier::Short},
+        {ncclFloat8e4m3, SizeTier::Short},
+        {ncclFloat8e5m2, SizeTier::Short},
+    };
+
+    constexpr DtypeSizeCase kLargeTierCases[] = {
+        {ncclFloat32, SizeTier::Large},
+        {ncclBfloat16, SizeTier::Large},
+        {ncclFloat8e4m3, SizeTier::Large},
+    };
+
+    std::vector<DtypeSizeCase> allDtypeSizeCases()
+    {
+        std::vector<DtypeSizeCase> cases(std::begin(kShortTierCases), std::end(kShortTierCases));
+        cases.insert(cases.end(), std::begin(kLargeTierCases), std::end(kLargeTierCases));
+        return cases;
+    }
+
+    // Unequal on purpose: a uniform bucket size would let a per-plan sizing bug cancel out across the burst.
+    constexpr size_t kBucketCounts[] = {64, 128, 256, 512, 1024, 2048};
+    constexpr size_t kBucketCountsPeriod = sizeof(kBucketCounts) / sizeof(kBucketCounts[0]);
+
+    constexpr size_t largestBucketCount()
+    {
+        size_t largest = 0;
+        for(size_t i = 0; i < kBucketCountsPeriod; ++i)
+        {
+            if(kBucketCounts[i] > largest)
+            {
+                largest = kBucketCounts[i];
+            }
+        }
+        return largest;
+    }
+
+    constexpr size_t kLargestBucket = largestBucketCount();
+
+    constexpr int kNcclStatusOffset = 1000;
+
+    template <typename T>
+    T makeStorageValue(int value)
+    {
+        return static_cast<T>(value);
+    }
+
+    template <>
+    __half makeStorageValue<__half>(int value)
+    {
+        return __float2half(static_cast<float>(value));
+    }
+
+    template <>
+    hip_bfloat16 makeStorageValue<hip_bfloat16>(int value)
+    {
+        return hip_bfloat16(static_cast<float>(value));
+    }
+
+    template <>
+    rccl_float8 makeStorageValue<rccl_float8>(int value)
+    {
+        return rccl_float8(static_cast<float>(value));
+    }
+
+    template <>
+    rccl_bfloat8 makeStorageValue<rccl_bfloat8>(int value)
+    {
+        return rccl_bfloat8(static_cast<float>(value));
+    }
+
+    template <typename T>
+    float storageValueAsFloat(T value)
+    {
+        return static_cast<float>(value);
+    }
+
+    template <>
+    float storageValueAsFloat<__half>(__half value)
+    {
+        return __half2float(value);
+    }
+}
+
+class PersistentCommunicatorMPITest
+    : public MPITestBase
+    , public ::testing::WithParamInterface<DtypeSizeCase>
+{
+protected:
+    // A reduced element sums at most nranks 0/1 terms, and fp8e5m2 holds consecutive integers exactly only up to 8.
+    static constexpr int kMaxRanksAssumed = 8;
+
+    static constexpr int    kSteps           = 64;
+    static constexpr int    kGradientBuckets = 24;
+    static constexpr size_t kParamCount      = 1024;
+    static constexpr size_t kActivationCount = 1024;
+    static constexpr size_t kMetricCount     = 64;
+    static constexpr size_t kShortShardCount = 4096;
+
+    // Large enough to outrun the GPU caches; every ncclTypeSize divides it, so the element count is exact.
+    static constexpr size_t kLargeShardBytes = 2 * 1024 * 1024;
+
+    // 29 gives each fill its own residue (see assert); 15 ones of 29 let the reduced sum hit every value 0..nranks.
+    static constexpr size_t kContributionModulus   = 29;
+    static constexpr size_t kContributionThreshold = 15;
+
+    static_assert(kGradientBuckets + 4 <= static_cast<int>(kContributionModulus),
+                  "kContributionModulus must leave a residue per bucket and payload buffer");
+
+    // Modulus + 1 puts bucket b at residue b, so reducing the wrong bucket cannot match a neighbour's payload.
+    static constexpr size_t kBucketStride = kContributionModulus + 1;
+
+    // Distinct residues give distinct fills only while every buffer holds at least kContributionModulus elements.
+    static constexpr size_t kParamIndexBase      = static_cast<size_t>(kGradientBuckets);
+    static constexpr size_t kGradIndexBase       = kParamIndexBase + 1;
+    static constexpr size_t kActivationIndexBase = kParamIndexBase + 2;
+    static constexpr size_t kMetricIndexBase     = kParamIndexBase + 3;
+
+    static size_t bucketCount(int bucket)
+    {
+        return kBucketCounts[static_cast<size_t>(bucket) % kBucketCountsPeriod];
+    }
+
+    static size_t bucketIndex(int bucket, size_t element)
+    {
+        return static_cast<size_t>(bucket) * kBucketStride + element;
+    }
+
+    // Step-keyed so a no-op collective leaves stale data; rank-keyed so a dropped plus doubled rank changes the sum.
+    static int contribution(int step, int rank, size_t index)
+    {
+        return ((index + static_cast<size_t>(step) + static_cast<size_t>(rank))
+                    % kContributionModulus
+                < kContributionThreshold)
+                   ? 1
+                   : 0;
+    }
+
+    using ReducedContributionTable = std::array<int, kContributionModulus>;
+
+    static ReducedContributionTable makeReducedContributionTable(int nranks)
+    {
+        ReducedContributionTable table{};
+        for(size_t phase = 0; phase < kContributionModulus; ++phase)
+        {
+            int sum = 0;
+            for(int r = 0; r < nranks; ++r)
+            {
+                sum += contribution(/*step=*/0, r, phase);
+            }
+            table[phase] = sum;
+        }
+        return table;
+    }
+
+    static int reducedContribution(const ReducedContributionTable& table, int step, size_t index)
+    {
+        return table[(index + static_cast<size_t>(step)) % kContributionModulus];
+    }
+
+    template <typename T>
+    void runPersistentCommunicatorCase(ncclDataType_t dtype, size_t shard_count);
+};
+
+template <typename T>
+void PersistentCommunicatorMPITest::runPersistentCommunicatorCase(ncclDataType_t dtype, size_t shard_count)
+{
+    ncclComm_t comm = getActiveCommunicator();
+    ASSERT_MPI_TRUE(comm != nullptr);
+    hipStream_t stream = getActiveStream();
+    ASSERT_MPI_TRUE(stream != nullptr);
+
+    const int rank      = comm->rank;
+    const int nranks    = comm->nRanks;
+    const int next_rank = (rank + 1) % nranks;
+    const int prev_rank = (rank - 1 + nranks) % nranks;
+
+    const size_t total_grad = shard_count * static_cast<size_t>(nranks);
+
+    void* param_buffer = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&param_buffer, kParamCount * sizeof(T)));
+    auto param_guard = makeDeviceBufferAutoGuard(param_buffer);
+
+    std::vector<void*>                 bucket_buffers(kGradientBuckets, nullptr);
+    std::vector<DeviceBufferAutoGuard> bucket_guards;
+    bucket_guards.reserve(kGradientBuckets);
+    for(int b = 0; b < kGradientBuckets; ++b)
+    {
+        ASSERT_MPI_EQ(hipSuccess, hipMalloc(&bucket_buffers[b], bucketCount(b) * sizeof(T)));
+        bucket_guards.push_back(makeDeviceBufferAutoGuard(bucket_buffers[b]));
+    }
+
+    void* grad_flat  = nullptr;
+    void* grad_shard = nullptr;
+    void* grad_full  = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&grad_flat, total_grad * sizeof(T)));
+    auto grad_flat_guard = makeDeviceBufferAutoGuard(grad_flat);
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&grad_shard, shard_count * sizeof(T)));
+    auto grad_shard_guard = makeDeviceBufferAutoGuard(grad_shard);
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&grad_full, total_grad * sizeof(T)));
+    auto grad_full_guard = makeDeviceBufferAutoGuard(grad_full);
+
+    void* activation_send = nullptr;
+    void* activation_recv = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&activation_send, kActivationCount * sizeof(T)));
+    auto activation_send_guard = makeDeviceBufferAutoGuard(activation_send);
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&activation_recv, kActivationCount * sizeof(T)));
+    auto activation_recv_guard = makeDeviceBufferAutoGuard(activation_recv);
+
+    void* metric_send = nullptr;
+    void* metric_recv = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&metric_send, kMetricCount * sizeof(T)));
+    auto metric_send_guard = makeDeviceBufferAutoGuard(metric_send);
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&metric_recv, kMetricCount * sizeof(T)));
+    auto metric_recv_guard = makeDeviceBufferAutoGuard(metric_recv);
+
+    std::vector<T> host_param(kParamCount);
+    std::vector<T> host_bucket(kLargestBucket);
+    std::vector<T> host_grad(total_grad);
+    std::vector<T> host_shard(shard_count);
+    std::vector<T> host_full(total_grad);
+    std::vector<T> host_activation(kActivationCount);
+    std::vector<T> host_metric(kMetricCount);
+
+    const ReducedContributionTable reduced_table = makeReducedContributionTable(nranks);
+
+    TEST_INFO("persistent communicator: %d steps, %d ranks, %d fused AllReduce buckets/step, "
+              "%zu elements (%zu KiB) ReduceScatter+AllGather/step",
+              kSteps,
+              nranks,
+              kGradientBuckets,
+              total_grad,
+              total_grad * sizeof(T) / 1024);
+
+    for(int step = 0; step < kSteps; ++step)
+    {
+        SCOPED_TRACE("step " + std::to_string(step));
+
+        for(size_t i = 0; i < kParamCount; ++i)
+        {
+            host_param[i] = makeStorageValue<T>(contribution(step, rank, kParamIndexBase + i));
+        }
+        for(size_t i = 0; i < total_grad; ++i)
+        {
+            host_grad[i] = makeStorageValue<T>(contribution(step, rank, kGradIndexBase + i));
+        }
+        for(size_t i = 0; i < kActivationCount; ++i)
+        {
+            host_activation[i]
+                = makeStorageValue<T>(contribution(step, rank, kActivationIndexBase + i));
+        }
+        for(size_t i = 0; i < kMetricCount; ++i)
+        {
+            host_metric[i] = makeStorageValue<T>(contribution(step, rank, kMetricIndexBase + i));
+        }
+
+        // Not asserted per call: each ASSERT_MPI_EQ is an MPI_Allreduce, and an early return would leave a group open.
+        int  step_status = 0;
+        auto recordHip   = [&step_status](hipError_t status) {
+            if(status != hipSuccess && step_status == 0)
+            {
+                step_status = static_cast<int>(status);
+            }
+        };
+        auto recordNccl = [&step_status](ncclResult_t status) {
+            if(status != ncclSuccess && step_status == 0)
+            {
+                step_status = kNcclStatusOffset + static_cast<int>(status);
+            }
+        };
+
+        recordHip(hipMemcpy(
+            param_buffer, host_param.data(), kParamCount * sizeof(T), hipMemcpyHostToDevice));
+        recordHip(hipMemcpy(
+            grad_flat, host_grad.data(), total_grad * sizeof(T), hipMemcpyHostToDevice));
+        recordHip(hipMemcpy(activation_send,
+                            host_activation.data(),
+                            kActivationCount * sizeof(T),
+                            hipMemcpyHostToDevice));
+        recordHip(hipMemcpy(
+            metric_send, host_metric.data(), kMetricCount * sizeof(T), hipMemcpyHostToDevice));
+        for(int b = 0; b < kGradientBuckets; ++b)
+        {
+            const size_t count = bucketCount(b);
+            for(size_t i = 0; i < count; ++i)
+            {
+                host_bucket[i] = makeStorageValue<T>(contribution(step, rank, bucketIndex(b, i)));
+            }
+            recordHip(hipMemcpy(
+                bucket_buffers[b], host_bucket.data(), count * sizeof(T), hipMemcpyHostToDevice));
+        }
+
+        recordNccl(ncclBroadcast(
+            param_buffer, param_buffer, kParamCount, dtype, /*root=*/0, comm, stream));
+
+        recordNccl(ncclGroupStart());
+        for(int b = 0; b < kGradientBuckets; ++b)
+        {
+            recordNccl(ncclAllReduce(bucket_buffers[b],
+                                     bucket_buffers[b],
+                                     bucketCount(b),
+                                     dtype,
+                                     ncclSum,
+                                     comm,
+                                     stream));
+        }
+        recordNccl(ncclGroupEnd());
+
+        recordNccl(
+            ncclReduceScatter(grad_flat, grad_shard, shard_count, dtype, ncclSum, comm, stream));
+        recordNccl(ncclAllGather(grad_shard, grad_full, shard_count, dtype, comm, stream));
+
+        recordNccl(ncclGroupStart());
+        recordNccl(ncclSend(activation_send, kActivationCount, dtype, next_rank, comm, stream));
+        recordNccl(ncclRecv(activation_recv, kActivationCount, dtype, prev_rank, comm, stream));
+        recordNccl(ncclGroupEnd());
+
+        recordNccl(ncclReduce(
+            metric_send, metric_recv, kMetricCount, dtype, ncclSum, /*root=*/0, comm, stream));
+
+        // Checked before the sync: a rank whose enqueue failed has nothing to drain and runs ahead while peers hang.
+        EXPECT_EQ(0, step_status) << "rank " << rank;
+        ASSERT_MPI_EQ(0, step_status);
+
+        recordHip(hipStreamSynchronize(stream));
+
+        recordHip(hipMemcpy(
+            host_param.data(), param_buffer, kParamCount * sizeof(T), hipMemcpyDeviceToHost));
+        recordHip(hipMemcpy(
+            host_shard.data(), grad_shard, shard_count * sizeof(T), hipMemcpyDeviceToHost));
+        recordHip(hipMemcpy(
+            host_full.data(), grad_full, total_grad * sizeof(T), hipMemcpyDeviceToHost));
+        recordHip(hipMemcpy(host_activation.data(),
+                            activation_recv,
+                            kActivationCount * sizeof(T),
+                            hipMemcpyDeviceToHost));
+        recordHip(hipMemcpy(
+            host_metric.data(), metric_recv, kMetricCount * sizeof(T), hipMemcpyDeviceToHost));
+
+        size_t      mismatches     = 0;
+        const char* first_phase    = nullptr;
+        size_t      first_index    = 0;
+        float       first_expected = 0.0f;
+        float       first_actual   = 0.0f;
+
+        auto check = [&](const char* phase, size_t index, float expected, float actual) {
+            if(expected == actual)
+            {
+                return;
+            }
+            if(mismatches == 0)
+            {
+                first_phase    = phase;
+                first_index    = index;
+                first_expected = expected;
+                first_actual   = actual;
+            }
+            ++mismatches;
+        };
+
+        if(step_status == 0)
+        {
+            for(size_t i = 0; i < kParamCount; ++i)
+            {
+                check("broadcast_param",
+                      kParamIndexBase + i,
+                      static_cast<float>(contribution(step, /*rank=*/0, kParamIndexBase + i)),
+                      storageValueAsFloat(host_param[i]));
+            }
+
+            for(int b = 0; b < kGradientBuckets; ++b)
+            {
+                const size_t     count         = bucketCount(b);
+                const hipError_t bucket_status = hipMemcpy(host_bucket.data(),
+                                                           bucket_buffers[b],
+                                                           count * sizeof(T),
+                                                           hipMemcpyDeviceToHost);
+                recordHip(bucket_status);
+                if(bucket_status != hipSuccess)
+                {
+                    continue;
+                }
+                for(size_t i = 0; i < count; ++i)
+                {
+                    const size_t index = bucketIndex(b, i);
+                    check("allreduce_bucket",
+                          index,
+                          static_cast<float>(reducedContribution(reduced_table, step, index)),
+                          storageValueAsFloat(host_bucket[i]));
+                }
+            }
+
+            for(size_t i = 0; i < shard_count; ++i)
+            {
+                const size_t index
+                    = kGradIndexBase + static_cast<size_t>(rank) * shard_count + i;
+                check("reducescatter_shard",
+                      index,
+                      static_cast<float>(reducedContribution(reduced_table, step, index)),
+                      storageValueAsFloat(host_shard[i]));
+            }
+
+            for(size_t i = 0; i < total_grad; ++i)
+            {
+                const size_t index = kGradIndexBase + i;
+                check("allgather_grad_full",
+                      index,
+                      static_cast<float>(reducedContribution(reduced_table, step, index)),
+                      storageValueAsFloat(host_full[i]));
+            }
+
+            for(size_t i = 0; i < kActivationCount; ++i)
+            {
+                check("p2p_activation",
+                      kActivationIndexBase + i,
+                      static_cast<float>(
+                          contribution(step, prev_rank, kActivationIndexBase + i)),
+                      storageValueAsFloat(host_activation[i]));
+            }
+
+            if(rank == 0)
+            {
+                for(size_t i = 0; i < kMetricCount; ++i)
+                {
+                    const size_t index = kMetricIndexBase + i;
+                    check("reduce_metric",
+                          index,
+                          static_cast<float>(reducedContribution(reduced_table, step, index)),
+                          storageValueAsFloat(host_metric[i]));
+                }
+            }
+        }
+
+        ncclResult_t async_error = ncclSuccess;
+        recordNccl(ncclCommGetAsyncError(comm, &async_error));
+        recordNccl(async_error);
+
+        EXPECT_EQ(size_t{0}, mismatches)
+            << "rank " << rank << ", first mismatch in phase "
+            << (first_phase != nullptr ? first_phase : "none") << " at payload index "
+            << first_index << ": expected " << first_expected << ", got " << first_actual;
+        EXPECT_EQ(0, step_status) << "rank " << rank;
+        ASSERT_MPI_TRUE(mismatches == 0 && step_status == 0);
+    }
+}
+
+TEST_P(PersistentCommunicatorMPITest, HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator)
+{
+    const DtypeSizeCase& test_case = GetParam();
+    SCOPED_TRACE(std::string("dtype=") + dtypeName(test_case.dtype)
+                 + " tier=" + sizeTierName(test_case.sizeTier));
+
+    // Single node: the cache-coherence defect this targets is on intra-node P2P, which a multi-host job routes via NET.
+    SKIP_UNLESS_MPI_PREREQS(/*min_processes=*/2,
+                            /*max_processes=*/kMaxRanksAssumed,
+                            kNoPowerOfTwoRequired,
+                            /*min_nodes=*/1,
+                            kRequireSingleNode);
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    const size_t shard_count
+        = (test_case.sizeTier == SizeTier::Large)
+              ? kLargeShardBytes / static_cast<size_t>(ncclTypeSize(test_case.dtype))
+              : kShortShardCount;
+
+    switch(test_case.dtype)
+    {
+    case ncclInt8: runPersistentCommunicatorCase<int8_t>(test_case.dtype, shard_count); break;
+    case ncclUint8: runPersistentCommunicatorCase<uint8_t>(test_case.dtype, shard_count); break;
+    case ncclInt32: runPersistentCommunicatorCase<int32_t>(test_case.dtype, shard_count); break;
+    case ncclUint32: runPersistentCommunicatorCase<uint32_t>(test_case.dtype, shard_count); break;
+    case ncclInt64: runPersistentCommunicatorCase<int64_t>(test_case.dtype, shard_count); break;
+    case ncclUint64: runPersistentCommunicatorCase<uint64_t>(test_case.dtype, shard_count); break;
+    case ncclFloat16: runPersistentCommunicatorCase<__half>(test_case.dtype, shard_count); break;
+    case ncclFloat32: runPersistentCommunicatorCase<float>(test_case.dtype, shard_count); break;
+    case ncclFloat64: runPersistentCommunicatorCase<double>(test_case.dtype, shard_count); break;
+    case ncclBfloat16: runPersistentCommunicatorCase<hip_bfloat16>(test_case.dtype, shard_count); break;
+    case ncclFloat8e4m3: runPersistentCommunicatorCase<rccl_float8>(test_case.dtype, shard_count); break;
+    case ncclFloat8e5m2: runPersistentCommunicatorCase<rccl_bfloat8>(test_case.dtype, shard_count); break;
+    default: FAIL() << "no storage type mapped for datatype " << static_cast<int>(test_case.dtype);
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(DtypeSizeCases,
+                         PersistentCommunicatorMPITest,
+                         ::testing::ValuesIn(allDtypeSizeCases()),
+                         [](const ::testing::TestParamInfo<DtypeSizeCase>& info) {
+                             return std::string(dtypeName(info.param.dtype)) + "_"
+                                    + sizeTierName(info.param.sizeTier);
+                         });
+
 /**
  * @class TrafficClassMPITest
  * @brief Test fixture for Traffic Class (QoS) configuration via ncclConfig_t.
@@ -702,6 +1256,12 @@ TEST_F(TrafficClassMPITest, ConfiguredTrafficClass)
     constexpr int kTestTrafficClass = 46;
     configured_traffic_class_ = kTestTrafficClass;
 
+    // The needle below is an INFO(NCCL_ENV) line. Force INFO regardless of the
+    // outer NCCL_DEBUG (CI sets INFO; bundled WARN runs otherwise miss it).
+    MPIHelpers::MpiEnvGuard debug("NCCL_DEBUG", "INFO");
+    MPIHelpers::MpiEnvGuard debug_subsys("NCCL_DEBUG_SUBSYS", "ENV");
+    MPIHelpers::resetNcclDebugState();
+
     MPIHelpers::TestLogAssertionContext log_ctx(
         MPIHelpers::makeCombinedAssertionLogOptions(getTestMpiRank()));
 
@@ -734,6 +1294,7 @@ constexpr int kHostCommTrafficClass   = 3;   // ncclConfig_t::trafficClass
 constexpr int kDeviceCommTrafficClass = 7;   // ncclDevCommRequirements::ginTrafficClass
 constexpr int kEnvServiceLevel        = 5;   // NCCL_IB_SL
 constexpr int kEnvTrafficClass        = 96;  // NCCL_IB_TC
+constexpr int kEnvGinTrafficClass     = 104; // NCCL_GIN_IB_TC
 
 // ibv_link_layer::IBV_LINK_LAYER_ETHERNET. On native InfiniBand the generic
 // traffic-class value programs SL while the GRH traffic-class field stays zero;
@@ -744,6 +1305,12 @@ constexpr int kInfiniBandGrhTrafficClass = 0;
 // getEnvParam() fallback: no valid service level or traffic class is negative.
 constexpr int kEnvParamUnset = -1;
 
+// qpsMatch() sentinel for QP sets whose service levels legitimately differ.
+constexpr int kAnyServiceLevel = -1;
+
+constexpr const char* kNoQpTraceSkipReason =
+    "No QP RTR traces parsed: RCCL built without TRACE=ON, or the trace format changed";
+
 // One rank on each of exactly two nodes. The QP oracle reads the leading GIN
 // queue pairs of a single cross-node connection, so extra ranks would add
 // connections whose attributes it does not expect.
@@ -752,9 +1319,10 @@ constexpr int kTrafficClassNodes = 2;
 
 struct GinQpTrafficClass
 {
-    int link_layer;
-    int service_level;
-    int traffic_class;
+    int  link_layer;
+    int  service_level;
+    int  traffic_class;
+    long tid;  // thread that programmed the QP, -1 when the log line has no prefix
 };
 
 struct GinTrafficClassCapture
@@ -765,6 +1333,15 @@ struct GinTrafficClassCapture
     int           connection_count{0};
     bool          saw_create_marker{false};
     std::vector<GinQpTrafficClass> qps;
+};
+
+// QPs programmed from communicator init through the host RMA proxy connect.
+struct InitQpCapture
+{
+    bool thread_ids_parsed{false};
+    bool rma_proxy_connected{false};
+    std::vector<GinQpTrafficClass> transport;  // proxy thread: collective network transport
+    std::vector<GinQpTrafficClass> gin_rma;    // calling thread: GIN and the host RMA proxy
 };
 
 class GinTrafficClassMPITest : public TrafficClassMPITest
@@ -781,7 +1358,8 @@ protected:
         const char* gin_type = std::getenv("NCCL_GIN_TYPE");
         const char* cumem    = std::getenv("NCCL_CUMEM_ENABLE");
         return gin_type != nullptr && std::string(gin_type) == "2"
-            && cumem != nullptr && std::string(cumem) == "1";
+            && cumem != nullptr && std::string(cumem) == "1"
+            && ncclCuMemRuntimeSupported();
     }
 
     static std::array<int, 2> collectiveBoolSummary(bool value)
@@ -791,6 +1369,65 @@ protected:
         MPI_Allreduce(MPI_IN_PLACE, &minimum, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
         MPI_Allreduce(MPI_IN_PLACE, &maximum, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
         return {minimum, maximum};
+    }
+
+    static std::string appendedLog(const std::string& before, const std::string& after)
+    {
+        return after.size() >= before.size() ? after.substr(before.size()) : after;
+    }
+
+    // Both IB network plugins print the same QP RTR TRACE line; IB-CAST prints it
+    // from IbCastQpRtr. The host:pid:tid prefix is optional so that a change to
+    // it only loses the thread id, which only the init-window split uses.
+    static std::vector<GinQpTrafficClass> parseQpRtrTrace(const std::string& log)
+    {
+        const std::regex qp_pattern(R"((?::[0-9]+:([0-9]+) \[[0-9]+\] .*)?)"
+                                    R"((?:ncclIbQpRtr|IbCastQpRtr):.*ll=([0-9]+).*sl: ([0-9]+) tc: ([0-9]+))");
+        std::vector<GinQpTrafficClass> qps;
+        for(std::sregex_iterator it(log.begin(), log.end(), qp_pattern), end; it != end; ++it)
+        {
+            qps.push_back({std::stoi((*it)[2].str()),
+                           std::stoi((*it)[3].str()),
+                           std::stoi((*it)[4].str()),
+                           (*it)[1].matched ? std::stol((*it)[1].str()) : -1L});
+        }
+        return qps;
+    }
+
+    // The proxy thread connects the collective network transport. GIN and the
+    // host RMA proxy connect on the calling thread, including the GIN contexts
+    // that communicator init creates for its own device communicator.
+    static InitQpCapture splitInitQps(const std::string& init_log)
+    {
+        InitQpCapture capture;
+        const long caller = static_cast<long>(syscall(SYS_gettid));
+        const std::vector<GinQpTrafficClass> qps = parseQpRtrTrace(init_log);
+        capture.thread_ids_parsed = !qps.empty();
+        for(const auto& qp : qps)
+        {
+            if(qp.tid < 0) capture.thread_ids_parsed = false;
+            (qp.tid == caller ? capture.gin_rma : capture.transport).push_back(qp);
+        }
+        capture.rma_proxy_connected = init_log.find("ncclRmaProxyConnectOnce:") != std::string::npos;
+        return capture;
+    }
+
+    // RCCL connects the collective network transport during communicator init
+    // unless NCCL_RUNTIME_CONNECT=1 defers it to the first collective, so one
+    // small AllReduce guarantees those QPs exist in either mode. A failure on one
+    // rank skips the others out of this helper only, so callers must return on
+    // HasFatalFailure() || IsSkipped() before the next collective.
+    void runConnectingAllReduce()
+    {
+        constexpr size_t kCount = 1024;
+        void* buf = nullptr;
+        ASSERT_MPI_EQ(hipSuccess, hipMalloc(&buf, kCount * sizeof(float)));
+        auto buf_guard = makeDeviceBufferAutoGuard(buf);
+        ASSERT_MPI_EQ(hipSuccess, hipMemset(buf, 0, kCount * sizeof(float)));
+        ASSERT_MPI_EQ(ncclSuccess,
+                      ncclAllReduce(buf, buf, kCount, ncclFloat, ncclSum,
+                                    getActiveCommunicator(), getActiveStream()));
+        ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
     }
 
     GinTrafficClassCapture captureGinQpTrafficClass(
@@ -822,26 +1459,13 @@ protected:
         // The log is sampled immediately before and after ncclDevCommCreate, so
         // the appended text covers only this device communicator. The existing
         // devCommCreate marker narrows it further to the last GIN setup.
-        const std::string after = log_ctx.readNcclDebugLog();
-        const std::string appended =
-            after.size() >= before.size() ? after.substr(before.size()) : after;
+        const std::string appended = appendedLog(before, log_ctx.readNcclDebugLog());
         const std::string marker = "devCommCreate: creating";
         const size_t marker_pos = appended.rfind(marker);
         capture.saw_create_marker = marker_pos != std::string::npos;
         const std::string qp_log =
             capture.saw_create_marker ? appended.substr(marker_pos) : appended;
-
-        const std::regex qp_pattern(
-            R"(ncclIbQpRtr:.*ll=([0-9]+).*sl: ([0-9]+) tc: ([0-9]+))");
-        for(std::sregex_iterator it(qp_log.begin(), qp_log.end(), qp_pattern), end;
-            it != end;
-            ++it)
-        {
-            capture.qps.push_back(
-                {std::stoi((*it)[1].str()),
-                 std::stoi((*it)[2].str()),
-                 std::stoi((*it)[3].str())});
-        }
+        capture.qps = parseQpRtrTrace(qp_log);
 
         capture.destroy_result =
             ncclDevCommDestroy(getActiveCommunicator(), &dev_comm);
@@ -851,15 +1475,17 @@ protected:
     static bool qpsMatch(
         const std::vector<GinQpTrafficClass>& qps,
         int expected_service_level,
-        int expected_roce_traffic_class)
+        int expected_roce_traffic_class,
+        const char* kind = "GIN")
     {
         for(const auto& qp : qps)
         {
-            if(qp.service_level != expected_service_level)
+            if(expected_service_level != kAnyServiceLevel && qp.service_level != expected_service_level)
             {
                 fprintf(stderr,
-                        "Unexpected GIN QP traffic class: ll=%d sl=%d tc=%d; "
+                        "Unexpected %s QP traffic class: ll=%d sl=%d tc=%d; "
                         "expected sl=%d\n",
+                        kind,
                         qp.link_layer,
                         qp.service_level,
                         qp.traffic_class,
@@ -872,8 +1498,9 @@ protected:
             if(qp.traffic_class != expected_tc)
             {
                 fprintf(stderr,
-                        "Unexpected GIN QP traffic class: ll=%d sl=%d tc=%d; "
+                        "Unexpected %s QP traffic class: ll=%d sl=%d tc=%d; "
                         "expected tc=%d\n",
+                        kind,
                         qp.link_layer,
                         qp.service_level,
                         qp.traffic_class,
@@ -892,9 +1519,10 @@ protected:
     }
 
     // The GIN contexts are created first inside ncclDevCommCreate, so their queue
-    // pairs lead the captured window. The ordinary transport connections that
-    // follow in the same call always carry the host communicator value, so
-    // compare only the leading run sharing one SL/TC pair.
+    // pairs lead the captured window. Connections set up later in the same call,
+    // such as the host RMA proxy when init has not already connected it, can
+    // carry a different value, so compare only the leading run sharing one SL/TC
+    // pair.
     static std::vector<GinQpTrafficClass> leadingGinQps(
         const std::vector<GinQpTrafficClass>& qps)
     {
@@ -911,22 +1539,22 @@ protected:
     }
 };
 
-// Run this case in a fresh process with NCCL_IB_SL/NCCL_IB_TC unset. It
-// observes the QP RTR attributes submitted to ibv_modify_qp, proving that a
-// device-communicator traffic class overrides the host communicator value and
-// that an unset device value falls back to it.
+// Run this case in a fresh process with NCCL_IB_SL, NCCL_IB_TC and
+// NCCL_GIN_IB_TC unset. It observes the QP RTR attributes submitted to
+// ibv_modify_qp, proving that a device-communicator traffic class overrides the
+// host communicator value and that an unset device value falls back to it.
 TEST_F(GinTrafficClassMPITest, DeviceHostPrecedence)
 {
     const auto proxy_prerequisites = collectiveBoolSummary(proxyPrerequisitesMet());
     if(proxy_prerequisites[0] == 0 && proxy_prerequisites[1] == 0)
-        GTEST_SKIP() << "Requires NCCL_GIN_TYPE=2 and NCCL_CUMEM_ENABLE=1";
+        GTEST_SKIP() << "Requires NCCL_GIN_TYPE=2 and runtime-supported cuMem";
     ASSERT_MPI_TRUE(proxy_prerequisites[0] == 1 && proxy_prerequisites[1] == 1);
 
-    const bool local_ib_env_unset =
-        envParamIsUnset("NCCL_IB_SL") && envParamIsUnset("NCCL_IB_TC");
+    const bool local_ib_env_unset = envParamIsUnset("NCCL_IB_SL") && envParamIsUnset("NCCL_IB_TC")
+                                    && envParamIsUnset("NCCL_GIN_IB_TC");
     const auto ib_env_unset = collectiveBoolSummary(local_ib_env_unset);
     if(ib_env_unset[0] == 0 && ib_env_unset[1] == 0)
-        GTEST_SKIP() << "Run with NCCL_IB_SL and NCCL_IB_TC unset";
+        GTEST_SKIP() << "Run with NCCL_IB_SL, NCCL_IB_TC and NCCL_GIN_IB_TC unset";
     ASSERT_MPI_TRUE(ib_env_unset[0] == 1 && ib_env_unset[1] == 1);
 
     if(!validateTestPrerequisites(/*min_processes=*/kTrafficClassRanks,
@@ -947,6 +1575,7 @@ TEST_F(GinTrafficClassMPITest, DeviceHostPrecedence)
 
     configured_traffic_class_ = kHostCommTrafficClass;
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    SKIP_IF_GIN_UNSUPPORTED();
 
     GinTrafficClassCapture device =
         captureGinQpTrafficClass(kDeviceCommTrafficClass, log_ctx);
@@ -958,7 +1587,7 @@ TEST_F(GinTrafficClassMPITest, DeviceHostPrecedence)
         device.saw_create_marker && device.qps.empty();
     const auto trace_unavailable = collectiveBoolSummary(local_trace_unavailable);
     if(trace_unavailable[0] == 1 && trace_unavailable[1] == 1)
-        GTEST_SKIP() << "RCCL was built without TRACE=ON; QP RTR attributes are unavailable";
+        GTEST_SKIP() << kNoQpTraceSkipReason;
     const bool local_trace_ready = device.saw_create_marker && !device.qps.empty();
     const auto trace_ready = collectiveBoolSummary(local_trace_ready);
     ASSERT_MPI_TRUE(trace_ready[0] == 1 && trace_ready[1] == 1);
@@ -980,9 +1609,9 @@ TEST_F(GinTrafficClassMPITest, DeviceHostPrecedence)
                              /*expected_roce_traffic_class=*/kHostCommTrafficClass));
 }
 
-// Run in a separate process with NCCL_IB_SL=5 and NCCL_IB_TC=96. Distinct
-// values prove the two explicit IB settings independently override both the
-// device-communicator value and the host communicator value.
+// Run in a separate process with NCCL_IB_SL=5, NCCL_IB_TC=96 and NCCL_GIN_IB_TC
+// unset. Distinct values prove the two explicit IB settings independently
+// override both the device-communicator value and the host communicator value.
 TEST_F(GinTrafficClassMPITest, ExplicitIbEnvironmentOverrides)
 {
     const auto proxy_prerequisites = collectiveBoolSummary(proxyPrerequisitesMet());
@@ -992,11 +1621,12 @@ TEST_F(GinTrafficClassMPITest, ExplicitIbEnvironmentOverrides)
 
     const bool local_env_matches =
         MPIHelpers::getEnvParam<int>("NCCL_IB_SL", kEnvParamUnset) == kEnvServiceLevel
-        && MPIHelpers::getEnvParam<int>("NCCL_IB_TC", kEnvParamUnset) == kEnvTrafficClass;
+        && MPIHelpers::getEnvParam<int>("NCCL_IB_TC", kEnvParamUnset) == kEnvTrafficClass
+        && envParamIsUnset("NCCL_GIN_IB_TC");
     const auto env_matches = collectiveBoolSummary(local_env_matches);
     if(env_matches[0] == 0 && env_matches[1] == 0)
         GTEST_SKIP() << "Run in a fresh process with NCCL_IB_SL=" << kEnvServiceLevel
-                     << " and NCCL_IB_TC=" << kEnvTrafficClass;
+                     << ", NCCL_IB_TC=" << kEnvTrafficClass << " and NCCL_GIN_IB_TC unset";
     ASSERT_MPI_TRUE(env_matches[0] == 1 && env_matches[1] == 1);
 
     if(!validateTestPrerequisites(/*min_processes=*/kTrafficClassRanks,
@@ -1017,6 +1647,7 @@ TEST_F(GinTrafficClassMPITest, ExplicitIbEnvironmentOverrides)
 
     configured_traffic_class_ = kHostCommTrafficClass;
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    SKIP_IF_GIN_UNSUPPORTED();
     GinTrafficClassCapture capture =
         captureGinQpTrafficClass(kDeviceCommTrafficClass, log_ctx);
     ASSERT_MPI_EQ(ncclSuccess, capture.create_result);
@@ -1027,7 +1658,7 @@ TEST_F(GinTrafficClassMPITest, ExplicitIbEnvironmentOverrides)
         capture.saw_create_marker && capture.qps.empty();
     const auto trace_unavailable = collectiveBoolSummary(local_trace_unavailable);
     if(trace_unavailable[0] == 1 && trace_unavailable[1] == 1)
-        GTEST_SKIP() << "RCCL was built without TRACE=ON; QP RTR attributes are unavailable";
+        GTEST_SKIP() << kNoQpTraceSkipReason;
     const bool local_trace_ready = capture.saw_create_marker && !capture.qps.empty();
     const auto trace_ready = collectiveBoolSummary(local_trace_ready);
     ASSERT_MPI_TRUE(trace_ready[0] == 1 && trace_ready[1] == 1);
@@ -1036,6 +1667,187 @@ TEST_F(GinTrafficClassMPITest, ExplicitIbEnvironmentOverrides)
     ASSERT_MPI_TRUE(qpsMatch(gin_qps,
                              /*expected_service_level=*/kEnvServiceLevel,
                              /*expected_roce_traffic_class=*/kEnvTrafficClass));
+}
+
+// Run in a separate process with NCCL_IB_SL=5, NCCL_IB_TC=96 and
+// NCCL_GIN_IB_TC=104. NCCL_GIN_IB_TC must win on the GIN and host RMA queue pairs
+// while the collective network-transport queue pairs keep NCCL_IB_TC, and neither
+// may disturb the NCCL_IB_SL service level.
+TEST_F(GinTrafficClassMPITest, GinIbTcOverridesIbTc)
+{
+    const auto proxy_prerequisites = collectiveBoolSummary(proxyPrerequisitesMet());
+    if(proxy_prerequisites[0] == 0 && proxy_prerequisites[1] == 0)
+        GTEST_SKIP() << "Requires NCCL_GIN_TYPE=2 and NCCL_CUMEM_ENABLE=1";
+    ASSERT_MPI_TRUE(proxy_prerequisites[0] == 1 && proxy_prerequisites[1] == 1);
+
+    const bool local_env_matches =
+        MPIHelpers::getEnvParam<int>("NCCL_IB_SL", kEnvParamUnset) == kEnvServiceLevel
+        && MPIHelpers::getEnvParam<int>("NCCL_IB_TC", kEnvParamUnset) == kEnvTrafficClass
+        && MPIHelpers::getEnvParam<int>("NCCL_GIN_IB_TC", kEnvParamUnset) == kEnvGinTrafficClass;
+    const auto env_matches = collectiveBoolSummary(local_env_matches);
+    if(env_matches[0] == 0 && env_matches[1] == 0)
+        GTEST_SKIP() << "Run in a fresh process with NCCL_IB_SL=" << kEnvServiceLevel
+                     << ", NCCL_IB_TC=" << kEnvTrafficClass
+                     << " and NCCL_GIN_IB_TC=" << kEnvGinTrafficClass;
+    ASSERT_MPI_TRUE(env_matches[0] == 1 && env_matches[1] == 1);
+
+    if(!validateTestPrerequisites(/*min_processes=*/kTrafficClassRanks,
+                                  /*max_processes=*/kTrafficClassRanks,
+                                  /*require_power_of_two=*/false,
+                                  /*min_nodes=*/kTrafficClassNodes,
+                                  /*max_nodes=*/kTrafficClassNodes))
+        GTEST_SKIP() << "Requires exactly " << kTrafficClassRanks << " ranks on "
+                     << kTrafficClassNodes << " nodes";
+
+    auto reset_debug =
+        makeScopeGuard([]() { MPIHelpers::resetNcclDebugState(); });
+    MPIHelpers::MpiEnvGuard debug("NCCL_DEBUG", "TRACE");
+    MPIHelpers::MpiEnvGuard debug_subsys("NCCL_DEBUG_SUBSYS", "INIT,NET");
+    MPIHelpers::resetNcclDebugState();
+    MPIHelpers::TestLogAssertionContext log_ctx(
+        MPIHelpers::makeNcclDebugFileAssertionOptions(getTestMpiRank()));
+
+    const std::string before_init = log_ctx.readNcclDebugLog();
+    configured_traffic_class_ = kHostCommTrafficClass;
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    SKIP_IF_GIN_UNSUPPORTED();
+    runConnectingAllReduce();
+    if(HasFatalFailure() || IsSkipped())
+        return;
+    const bool rma_proxy_enabled = ncclRmaProxyEnabled(getActiveCommunicator());
+    if(rma_proxy_enabled)
+        ASSERT_MPI_EQ(ncclSuccess, ncclRmaProxyConnectOnce(getActiveCommunicator()));
+    const InitQpCapture init = splitInitQps(appendedLog(before_init, log_ctx.readNcclDebugLog()));
+
+    GinTrafficClassCapture capture =
+        captureGinQpTrafficClass(kDeviceCommTrafficClass, log_ctx);
+    ASSERT_MPI_EQ(ncclSuccess, capture.create_result);
+    ASSERT_MPI_EQ(ncclSuccess, capture.destroy_result);
+    ASSERT_MPI_GT(capture.connection_count, 0);
+    ASSERT_MPI_TRUE(capture.proxy_handles);
+    const bool local_trace_unavailable =
+        capture.saw_create_marker && capture.qps.empty();
+    const auto trace_unavailable = collectiveBoolSummary(local_trace_unavailable);
+    if(trace_unavailable[0] == 1 && trace_unavailable[1] == 1)
+        GTEST_SKIP() << kNoQpTraceSkipReason;
+    const bool local_trace_ready = capture.saw_create_marker && !capture.qps.empty();
+    const auto trace_ready = collectiveBoolSummary(local_trace_ready);
+    ASSERT_MPI_TRUE(trace_ready[0] == 1 && trace_ready[1] == 1);
+    const std::vector<GinQpTrafficClass> gin_qps = leadingGinQps(capture.qps);
+    ASSERT_MPI_TRUE(containsEthernetQp(gin_qps));
+    ASSERT_MPI_TRUE(qpsMatch(gin_qps,
+                             /*expected_service_level=*/kEnvServiceLevel,
+                             /*expected_roce_traffic_class=*/kEnvGinTrafficClass));
+    ASSERT_MPI_TRUE(init.thread_ids_parsed);
+    ASSERT_MPI_TRUE(init.rma_proxy_connected || !rma_proxy_enabled);
+    ASSERT_MPI_TRUE(containsEthernetQp(init.gin_rma));
+    ASSERT_MPI_TRUE(qpsMatch(init.gin_rma,
+                             /*expected_service_level=*/kEnvServiceLevel,
+                             /*expected_roce_traffic_class=*/kEnvGinTrafficClass,
+                             "GIN/RMA"));
+    ASSERT_MPI_TRUE(containsEthernetQp(init.transport));
+    ASSERT_MPI_TRUE(qpsMatch(init.transport,
+                             /*expected_service_level=*/kEnvServiceLevel,
+                             /*expected_roce_traffic_class=*/kEnvTrafficClass,
+                             "transport"));
+}
+
+// Run in a separate process with NCCL_IB_SL and NCCL_IB_TC unset and
+// NCCL_GIN_IB_TC=104. The GIN traffic class then overrides both the
+// device-communicator and host values on the GIN and host RMA queue pairs, the
+// service level still follows that device/host precedence, and the collective
+// network-transport queue pairs keep the host value.
+TEST_F(GinTrafficClassMPITest, GinIbTcOverridesDeviceAndHost)
+{
+    const auto proxy_prerequisites = collectiveBoolSummary(proxyPrerequisitesMet());
+    if(proxy_prerequisites[0] == 0 && proxy_prerequisites[1] == 0)
+        GTEST_SKIP() << "Requires NCCL_GIN_TYPE=2 and NCCL_CUMEM_ENABLE=1";
+    ASSERT_MPI_TRUE(proxy_prerequisites[0] == 1 && proxy_prerequisites[1] == 1);
+
+    const bool local_env_matches =
+        envParamIsUnset("NCCL_IB_SL") && envParamIsUnset("NCCL_IB_TC")
+        && MPIHelpers::getEnvParam<int>("NCCL_GIN_IB_TC", kEnvParamUnset) == kEnvGinTrafficClass;
+    const auto env_matches = collectiveBoolSummary(local_env_matches);
+    if(env_matches[0] == 0 && env_matches[1] == 0)
+        GTEST_SKIP() << "Run in a fresh process with NCCL_IB_SL and NCCL_IB_TC unset and "
+                     << "NCCL_GIN_IB_TC=" << kEnvGinTrafficClass;
+    ASSERT_MPI_TRUE(env_matches[0] == 1 && env_matches[1] == 1);
+
+    if(!validateTestPrerequisites(/*min_processes=*/kTrafficClassRanks,
+                                  /*max_processes=*/kTrafficClassRanks,
+                                  /*require_power_of_two=*/false,
+                                  /*min_nodes=*/kTrafficClassNodes,
+                                  /*max_nodes=*/kTrafficClassNodes))
+        GTEST_SKIP() << "Requires exactly " << kTrafficClassRanks << " ranks on "
+                     << kTrafficClassNodes << " nodes";
+
+    auto reset_debug =
+        makeScopeGuard([]() { MPIHelpers::resetNcclDebugState(); });
+    MPIHelpers::MpiEnvGuard debug("NCCL_DEBUG", "TRACE");
+    MPIHelpers::MpiEnvGuard debug_subsys("NCCL_DEBUG_SUBSYS", "INIT,NET");
+    MPIHelpers::resetNcclDebugState();
+    MPIHelpers::TestLogAssertionContext log_ctx(
+        MPIHelpers::makeNcclDebugFileAssertionOptions(getTestMpiRank()));
+
+    const std::string before_init = log_ctx.readNcclDebugLog();
+    configured_traffic_class_ = kHostCommTrafficClass;
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    SKIP_IF_GIN_UNSUPPORTED();
+    runConnectingAllReduce();
+    if(HasFatalFailure() || IsSkipped())
+        return;
+    const bool rma_proxy_enabled = ncclRmaProxyEnabled(getActiveCommunicator());
+    if(rma_proxy_enabled)
+        ASSERT_MPI_EQ(ncclSuccess, ncclRmaProxyConnectOnce(getActiveCommunicator()));
+    const InitQpCapture init = splitInitQps(appendedLog(before_init, log_ctx.readNcclDebugLog()));
+
+    GinTrafficClassCapture device =
+        captureGinQpTrafficClass(kDeviceCommTrafficClass, log_ctx);
+    ASSERT_MPI_EQ(ncclSuccess, device.create_result);
+    ASSERT_MPI_EQ(ncclSuccess, device.destroy_result);
+    ASSERT_MPI_GT(device.connection_count, 0);
+    ASSERT_MPI_TRUE(device.proxy_handles);
+    const bool local_trace_unavailable =
+        device.saw_create_marker && device.qps.empty();
+    const auto trace_unavailable = collectiveBoolSummary(local_trace_unavailable);
+    if(trace_unavailable[0] == 1 && trace_unavailable[1] == 1)
+        GTEST_SKIP() << kNoQpTraceSkipReason;
+    const bool local_trace_ready = device.saw_create_marker && !device.qps.empty();
+    const auto trace_ready = collectiveBoolSummary(local_trace_ready);
+    ASSERT_MPI_TRUE(trace_ready[0] == 1 && trace_ready[1] == 1);
+    const std::vector<GinQpTrafficClass> device_qps = leadingGinQps(device.qps);
+    ASSERT_MPI_TRUE(containsEthernetQp(device_qps));
+    ASSERT_MPI_TRUE(qpsMatch(device_qps,
+                             /*expected_service_level=*/kDeviceCommTrafficClass,
+                             /*expected_roce_traffic_class=*/kEnvGinTrafficClass));
+
+    GinTrafficClassCapture host =
+        captureGinQpTrafficClass(NCCL_CONFIG_UNDEF_INT, log_ctx);
+    ASSERT_MPI_EQ(ncclSuccess, host.create_result);
+    ASSERT_MPI_EQ(ncclSuccess, host.destroy_result);
+    ASSERT_MPI_GT(host.connection_count, 0);
+    ASSERT_MPI_TRUE(host.proxy_handles);
+    ASSERT_MPI_TRUE(host.saw_create_marker);
+    const std::vector<GinQpTrafficClass> host_qps = leadingGinQps(host.qps);
+    ASSERT_MPI_TRUE(containsEthernetQp(host_qps));
+    ASSERT_MPI_TRUE(qpsMatch(host_qps,
+                             /*expected_service_level=*/kHostCommTrafficClass,
+                             /*expected_roce_traffic_class=*/kEnvGinTrafficClass));
+
+    ASSERT_MPI_TRUE(init.thread_ids_parsed);
+    ASSERT_MPI_TRUE(init.rma_proxy_connected || !rma_proxy_enabled);
+    ASSERT_MPI_TRUE(containsEthernetQp(init.gin_rma));
+    // The GIN bootstrap ring connects before any traffic class is configured, so
+    // its sl differs from the contexts'; only the traffic class is shared.
+    ASSERT_MPI_TRUE(qpsMatch(init.gin_rma,
+                             /*expected_service_level=*/kAnyServiceLevel,
+                             /*expected_roce_traffic_class=*/kEnvGinTrafficClass,
+                             "GIN/RMA"));
+    ASSERT_MPI_TRUE(containsEthernetQp(init.transport));
+    ASSERT_MPI_TRUE(qpsMatch(init.transport,
+                             /*expected_service_level=*/kHostCommTrafficClass,
+                             /*expected_roce_traffic_class=*/kHostCommTrafficClass,
+                             "transport"));
 }
 
 /**
@@ -1401,16 +2213,19 @@ TEST_F(GinRmaContextMPITest, RmaAndGinFinalizeWithSplitComm)
     ASSERT_MPI_TRUE(parent != nullptr);
     ASSERT_MPI_TRUE(parent->sharedRes != nullptr);
 
-    if(parent->sharedRes->ginState.ncclGin == nullptr || parent->rmaState.rmaProxyState.ncclRma == nullptr)
+    if(parent->sharedRes->ginState.numActiveBackends == 0 ||
+       parent->sharedRes->ginState.backends[0].ginInstance == nullptr ||
+       parent->rmaState.rmaProxyState.ncclRma == nullptr)
     {
         GTEST_SKIP() << "Requires both the GIN and RMA plugins enabled on this host";
     }
 
     // One internal backend serves both roles, so the contexts are distinct
     // only when RMA owns a separate field.
-    ASSERT_MPI_TRUE(parent->ginContext != nullptr);
+    void* ginInstance = parent->sharedRes->ginState.backends[0].ginInstance;
+    ASSERT_MPI_TRUE(ginInstance != nullptr);
     ASSERT_MPI_TRUE(parent->rmaContext != nullptr);
-    ASSERT_MPI_TRUE(parent->ginContext != parent->rmaContext);
+    ASSERT_MPI_TRUE(ginInstance != parent->rmaContext);
 
     // The parent shares its resources, so the child inherits both contexts
     // instead of initializing the plugins again.
@@ -1420,13 +2235,259 @@ TEST_F(GinRmaContextMPITest, RmaAndGinFinalizeWithSplitComm)
 
     struct ncclComm* child = splitComm;
     ASSERT_MPI_TRUE(child->sharedRes == parent->sharedRes);
-    ASSERT_MPI_TRUE(child->ginContext == parent->ginContext);
+    ASSERT_MPI_TRUE(child->sharedRes->ginState.backends[0].ginInstance == ginInstance);
     ASSERT_MPI_TRUE(child->rmaContext == parent->rmaContext);
 
     // Destroy the parent first so the child holds the last reference and
     // finalizes both plugins against the contexts it inherited.
     ASSERT_MPI_EQ(ncclSuccess, cleanupTestCommunicator());
     ASSERT_MPI_EQ(ncclSuccess, ncclCommDestroy(splitComm));
+}
+
+/**
+ * @class GraphStreamOrderingConfigMPITest
+ * @brief Validates NCCL 2.30 graphStreamOrdering config parsing and compatibility
+ *        rules (see NCCL_GRAPH_STREAM_ORDERING in env.rst).
+ */
+class GraphStreamOrderingConfigMPITest : public ConfigCommMPITestBase
+{
+protected:
+    int configured_graph_stream_ordering_ = NCCL_CONFIG_UNDEF_INT;
+    int configured_graph_usage_mode_      = NCCL_CONFIG_UNDEF_INT;
+
+    void applyConfig(ncclConfig_t& config) override
+    {
+        config.graphStreamOrdering = configured_graph_stream_ordering_;
+        config.graphUsageMode      = configured_graph_usage_mode_;
+    }
+
+    std::string configLabel() const override
+    {
+        return "graphStreamOrdering=" + std::to_string(configured_graph_stream_ordering_)
+             + " graphUsageMode=" + std::to_string(configured_graph_usage_mode_);
+    }
+
+    static int graphStreamOrderingEnv()
+    {
+        return MPIHelpers::getEnvParam<int>("NCCL_GRAPH_STREAM_ORDERING",
+                                            NCCL_CONFIG_UNDEF_INT);
+    }
+
+    // envConfigOverride() lets NCCL_GRAPH_MIXING_SUPPORT 0/1 overwrite graphUsageMode (0->0,
+    // 1->2), so the value set by applyConfig() would not stick.
+    static bool mixingEnvOverridesUsageMode()
+    {
+        const int mixing = MPIHelpers::getEnvParam<int>("NCCL_GRAPH_MIXING_SUPPORT",
+                                                        NCCL_CONFIG_UNDEF_INT);
+        return mixing == 0 || mixing == 1;
+    }
+};
+
+/**
+ * @test GraphStreamOrderingConfigMPITest.ConfigOverrideAppliesGraphStreamOrdering
+ * @brief ncclConfig_t graphStreamOrdering is stored on comm->config when env is unset.
+ *
+ * NCCL 2.30.7 upstream applies NCCL_GRAPH_STREAM_ORDERING after ncclConfig_t in
+ * envConfigOverride(), so this test requires the env var to be absent.
+ */
+TEST_F(GraphStreamOrderingConfigMPITest, ConfigOverrideAppliesGraphStreamOrdering)
+{
+    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
+
+    if(graphStreamOrderingEnv() != NCCL_CONFIG_UNDEF_INT)
+    {
+        GTEST_SKIP() << "NCCL_GRAPH_STREAM_ORDERING must not be set; upstream NCCL "
+                        "envConfigOverride() overrides explicit ncclConfig_t graphStreamOrdering.";
+    }
+    if(mixingEnvOverridesUsageMode())
+    {
+        GTEST_SKIP() << "NCCL_GRAPH_MIXING_SUPPORT must not be set to 0 or 1; it overwrites "
+                        "the graphUsageMode this test configures.";
+    }
+
+    configured_graph_stream_ordering_ = 0;
+    configured_graph_usage_mode_      = 1;
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ncclComm_t comm = getActiveCommunicator();
+    ASSERT_MPI_TRUE(comm != nullptr);
+    ASSERT_MPI_EQ(comm->config.graphStreamOrdering, 0);
+    ASSERT_MPI_EQ(comm->config.graphUsageMode, 1);
+}
+
+/**
+ * @test GraphStreamOrderingConfigMPITest.IncompatibleMixingFallsBackToEnabledOrdering
+ * @brief graphStreamOrdering=0 with graphUsageMode=2 is unsupported and falls back to 1.
+ */
+TEST_F(GraphStreamOrderingConfigMPITest, IncompatibleMixingFallsBackToEnabledOrdering)
+{
+    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
+
+    const int graphStreamOrdering = graphStreamOrderingEnv();
+    if(graphStreamOrdering != NCCL_CONFIG_UNDEF_INT && graphStreamOrdering != 0)
+    {
+        GTEST_SKIP() << "NCCL_GRAPH_STREAM_ORDERING must be unset or 0; value 1 sets "
+                        "graphStreamOrdering=1 before the incompatible-mixing fallback, which "
+                        "would then not be exercised.";
+    }
+    if(mixingEnvOverridesUsageMode())
+    {
+        GTEST_SKIP() << "NCCL_GRAPH_MIXING_SUPPORT must not be set to 0 or 1; it overwrites "
+                        "the graphUsageMode this test configures.";
+    }
+
+    configured_graph_stream_ordering_ = 0;
+    configured_graph_usage_mode_      = 2;
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ncclComm_t comm = getActiveCommunicator();
+    ASSERT_MPI_TRUE(comm != nullptr);
+    ASSERT_MPI_EQ(comm->config.graphStreamOrdering, 1);
+    ASSERT_MPI_EQ(comm->config.graphUsageMode, 2);
+}
+
+/**
+ * @test GraphStreamOrderingConfigMPITest.EnvOverrideAppliesGraphStreamOrdering
+ * @brief NCCL_GRAPH_STREAM_ORDERING overrides ncclConfig_t graphStreamOrdering at init.
+ */
+TEST_F(GraphStreamOrderingConfigMPITest, EnvOverrideAppliesGraphStreamOrdering)
+{
+    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
+
+    const int expected = graphStreamOrderingEnv();
+    if(expected != 0 && expected != 1)
+    {
+        GTEST_SKIP() << "NCCL_GRAPH_STREAM_ORDERING must be set to 0 or 1";
+    }
+    if(mixingEnvOverridesUsageMode())
+    {
+        GTEST_SKIP() << "NCCL_GRAPH_MIXING_SUPPORT must not be set to 0 or 1; it overwrites "
+                        "the graphUsageMode this test configures.";
+    }
+
+    // Set config to the opposite value; upstream NCCL envConfigOverride() must win.
+    configured_graph_stream_ordering_ = (expected == 0) ? 1 : 0;
+    configured_graph_usage_mode_      = 1;
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ncclComm_t comm = getActiveCommunicator();
+    ASSERT_MPI_TRUE(comm != nullptr);
+    ASSERT_MPI_EQ(comm->config.graphStreamOrdering, expected);
+}
+
+/**
+ * @test GraphStreamOrderingConfigMPITest.DisabledOrderingGraphCaptureSmoke
+ * @brief graphStreamOrdering=0 with graphUsageMode=1 captures and replays AllReduce.
+ *
+ * Captures the same collective into two graphs and replays both, so the first/subsequent
+ * capture split of the origin-stream path is covered rather than just the single-capture
+ * case. Both graphs are launched on one stream with a host sync between them, so the
+ * cross-graph serialEvent dependency is not itself exercised.
+ *
+ * Requires effective ordering 0. Skips when NCCL_GRAPH_STREAM_ORDERING is set to 1,
+ * because upstream NCCL envConfigOverride() would override config graphStreamOrdering=0.
+ */
+TEST_F(GraphStreamOrderingConfigMPITest, DisabledOrderingGraphCaptureSmoke)
+{
+    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
+
+    const int graphStreamOrdering = graphStreamOrderingEnv();
+    if(graphStreamOrdering != NCCL_CONFIG_UNDEF_INT && graphStreamOrdering != 0)
+    {
+        GTEST_SKIP() << "NCCL_GRAPH_STREAM_ORDERING must be unset or 0; value 1 overrides config "
+                        "graphStreamOrdering=0 in upstream NCCL.";
+    }
+    if(mixingEnvOverridesUsageMode())
+    {
+        GTEST_SKIP() << "NCCL_GRAPH_MIXING_SUPPORT must not be set to 0 or 1; it overwrites "
+                        "the graphUsageMode this test configures.";
+    }
+
+    configured_graph_stream_ordering_ = 0;
+    configured_graph_usage_mode_      = 1;
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ncclComm_t comm = getActiveCommunicator();
+    ASSERT_MPI_TRUE(comm != nullptr);
+    ASSERT_MPI_EQ(comm->config.graphStreamOrdering, 0);
+
+    void* sendBuf = nullptr;
+    void* recvBuf = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&sendBuf, sizeof(float)));
+    auto sendGuard = makeDeviceBufferAutoGuard(sendBuf);
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recvBuf, sizeof(float)));
+    auto recvGuard = makeDeviceBufferAutoGuard(recvBuf);
+
+    const float sendVal = static_cast<float>(getTestMpiRank() + 1.0f);
+    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(sendBuf, &sendVal, sizeof(float), hipMemcpyHostToDevice));
+
+    constexpr int  kGraphs             = 2;
+    hipGraph_t     graphs[kGraphs]     = {};
+    hipGraphExec_t graphExecs[kGraphs] = {};
+
+    auto graphCleanup = makeScopeGuard([&]() {
+        for(int i = 0; i < kGraphs; ++i)
+        {
+            if(graphExecs[i]) (void)hipGraphExecDestroy(graphExecs[i]);
+            if(graphs[i]) (void)hipGraphDestroy(graphs[i]);
+        }
+    });
+
+    bool captureActive = false;
+    auto captureCleanup = makeScopeGuard([&]() {
+        if(captureActive)
+        {
+            hipGraph_t abandonedGraph = nullptr;
+            if(hipStreamEndCapture(getActiveStream(), &abandonedGraph) == hipSuccess &&
+               abandonedGraph)
+                (void)hipGraphDestroy(abandonedGraph);
+        }
+    });
+
+    // Capture twice so both halves of the origin-stream path run: the first capture bootstraps
+    // serialEvent on the live stream, the second must take the already-bootstrapped path.
+    for(int i = 0; i < kGraphs; ++i)
+    {
+        const hipError_t captureBeginStatus =
+            hipStreamBeginCapture(getActiveStream(), hipStreamCaptureModeThreadLocal);
+        captureActive = (captureBeginStatus == hipSuccess);
+        ASSERT_MPI_EQ(hipSuccess, captureBeginStatus);
+        ASSERT_MPI_EQ(ncclSuccess,
+                      ncclAllReduce(sendBuf, recvBuf, 1, ncclFloat, ncclSum, comm, getActiveStream()));
+        const hipError_t captureEndStatus = hipStreamEndCapture(getActiveStream(), &graphs[i]);
+        if(captureEndStatus == hipSuccess) captureActive = false;
+        ASSERT_MPI_EQ(hipSuccess, captureEndStatus);
+        ASSERT_MPI_NE(nullptr, graphs[i]);
+        ASSERT_MPI_EQ(hipSuccess, hipGraphInstantiate(&graphExecs[i], graphs[i], nullptr, nullptr, 0));
+    }
+
+#if ROCM_VERSION >= 60100
+    // graphStreamOrdering=0 must launch directly on the graph origin instead of acquiring
+    // deviceStream.captureStream. This assertion fails if the enqueue.cc feature is reverted.
+    ASSERT_MPI_TRUE(comm->sharedRes->deviceStream.captureHead == nullptr);
+#endif
+
+    const int   worldSize = MPIEnvironment::world_size;
+    const float expected  = static_cast<float>(worldSize * (worldSize + 1) / 2);
+
+    for(int i = 0; i < kGraphs; ++i)
+    {
+        ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, 0, sizeof(float)));
+        ASSERT_MPI_EQ(hipSuccess, hipGraphLaunch(graphExecs[i], getActiveStream()));
+        ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+        float result = 0.0f;
+        ASSERT_MPI_EQ(hipSuccess, hipMemcpy(&result, recvBuf, sizeof(float), hipMemcpyDeviceToHost));
+
+        // EXPECT_NEAR reports the values; the fatal check must be MPI-aware so one mismatching
+        // rank cannot leave the others waiting in the next iteration's collective asserts.
+        EXPECT_NEAR(result, expected, 1e-3f) << "graph " << i;
+        ASSERT_MPI_TRUE(result >= expected - 1e-3f && result <= expected + 1e-3f);
+    }
 }
 
 #endif // MPI_TESTS_ENABLED

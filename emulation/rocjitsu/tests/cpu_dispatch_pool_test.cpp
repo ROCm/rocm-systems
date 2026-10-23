@@ -5,15 +5,23 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "throwing_instruction_test_util.h"
 
 #include <gtest/gtest.h>
 
 #include <array>
+#include <barrier>
+#include <chrono>
+#include <condition_variable>
 #include <cstdint>
+#include <cstdio>
+#include <future>
 #include <memory>
+#include <mutex>
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace rocjitsu::amdgpu {
@@ -22,6 +30,25 @@ class CpuDispatchPoolTestAccess {
 public:
   static void construct_with_failure(uint32_t threads, uint32_t fail_after) {
     CpuDispatchPool pool(threads, fail_after);
+  }
+
+  // The test keeps the submitting caller gated for the lifetime of this view.
+  static CpuDispatchPool::Submission *pending_submission(CpuDispatchPool &pool,
+                                                         std::span<ComputeUnitCore *> tasks) {
+    std::lock_guard lock(pool.mutex_);
+    for (auto *submission = pool.ready_head_; submission; submission = submission->next)
+      if (submission->tasks.data() == tasks.data())
+        return submission;
+    return static_cast<CpuDispatchPool::Submission *>(nullptr);
+  }
+
+  struct Progress {
+    size_t next_task;
+    uint32_t active_workers;
+  };
+  static Progress progress(CpuDispatchPool &pool, const CpuDispatchPool::Submission *submission) {
+    std::lock_guard lock(pool.mutex_);
+    return {submission->next_task.load(std::memory_order_relaxed), submission->active_workers};
   }
 };
 
@@ -32,7 +59,8 @@ namespace {
 using namespace rocjitsu;
 
 constexpr uint32_t kSNop = 0xBF800000u;
-constexpr uint32_t kSSetvskip = 0xBF100000u;
+constexpr uint32_t kSMovB32 = 0xBE800000u; // s_mov_b32 s0, s0
+constexpr uint32_t kSCbranchIFork = 0xB8000000u;
 constexpr uint64_t kProgramBase = 0x100000;
 
 struct DispatchPoolFixture {
@@ -67,6 +95,280 @@ struct DispatchPoolFixture {
   std::vector<amdgpu::ComputeUnitCore *> tasks;
   std::vector<amdgpu::Wavefront *> wfs;
 };
+
+// Hold CUs at an observable instruction callback so tests can count overlapping
+// execution and keep submissions open until every waiter is explicitly released.
+class GatedInstructionPlugin final : public ExecutionPlugin {
+public:
+  GatedInstructionPlugin() : ExecutionPlugin("gated_instruction") {}
+
+  void onAmdgpuReadSgpr(const amdgpu::Wavefront *, uint32_t) override {
+    std::unique_lock lock(mutex_);
+    ++entered_;
+    changed_.notify_all();
+    changed_.wait(lock, [this] { return released_; });
+  }
+
+  // Checks after launching gated work must stay nonfatal: even a timeout must
+  // be followed by release() before a future is destroyed and joins its task.
+  bool wait_for_entries(size_t count, std::chrono::milliseconds timeout = std::chrono::seconds(2)) {
+    std::unique_lock lock(mutex_);
+    return changed_.wait_for(lock, timeout, [&] { return entered_ >= count; });
+  }
+
+  void release() {
+    std::lock_guard lock(mutex_);
+    released_ = true;
+    changed_.notify_all();
+  }
+
+private:
+  std::mutex mutex_;
+  std::condition_variable changed_;
+  size_t entered_ = 0;
+  bool released_ = false;
+};
+
+GatedInstructionPlugin *gate_fixture(DispatchPoolFixture &fixture) {
+  fixture.memory.write32(kProgramBase, kSMovB32);
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto plugin = std::make_unique<GatedInstructionPlugin>();
+  auto *gate = plugin.get();
+  if (!group->add(std::move(plugin)))
+    throw std::runtime_error("failed to install gated instruction plugin");
+  for (auto &cu : fixture.cus)
+    cu->set_plugin_group(group);
+  return gate;
+}
+
+// Hold the caller and one assigned worker while the other worker drains all
+// remaining CUs. The caller identity is published before run() queues work.
+class DrainingWorkerGate final : public ExecutionPlugin {
+public:
+  DrainingWorkerGate() : ExecutionPlugin("draining_worker_gate") {}
+  void set_caller() {
+    std::lock_guard lock(mutex_);
+    caller_ = std::this_thread::get_id();
+  }
+  void onAmdgpuReadSgpr(const amdgpu::Wavefront *, uint32_t) override {
+    std::unique_lock lock(mutex_);
+    const auto id = std::this_thread::get_id();
+    if (id == caller_) {
+      caller_entered_ = true;
+      changed_.notify_all();
+      changed_.wait(lock, [&] { return caller_released_; });
+      return;
+    }
+    changed_.wait(lock, [&] { return caller_entered_ || all_released_; });
+    if (worker_ == std::thread::id{})
+      worker_ = id;
+    if (id == worker_) {
+      worker_entered_ = true;
+      changed_.notify_all();
+      changed_.wait(lock, [&] { return worker_released_; });
+    } else {
+      draining_entered_ = true;
+      changed_.notify_all();
+      changed_.wait(lock, [&] { return draining_released_; });
+    }
+  }
+  bool wait_for_all_roles() {
+    std::unique_lock lock(mutex_);
+    return changed_.wait_for(lock, std::chrono::seconds(2), [&] {
+      return caller_entered_ && worker_entered_ && draining_entered_;
+    });
+  }
+  void release_draining() { release(draining_released_); }
+  void release_caller() { release(caller_released_); }
+  void release_worker() { release(worker_released_); }
+  void release_all() {
+    std::lock_guard lock(mutex_);
+    caller_released_ = worker_released_ = draining_released_ = all_released_ = true;
+    changed_.notify_all();
+  }
+
+private:
+  void release(bool &flag) {
+    std::lock_guard lock(mutex_);
+    flag = true;
+    changed_.notify_all();
+  }
+  std::mutex mutex_;
+  std::condition_variable changed_;
+  std::thread::id caller_;
+  std::thread::id worker_;
+  bool caller_entered_ = false;
+  bool worker_entered_ = false;
+  bool draining_entered_ = false;
+  bool caller_released_ = false;
+  bool worker_released_ = false;
+  bool draining_released_ = false;
+  bool all_released_ = false;
+};
+
+TEST(CpuDispatchPoolTest, WorkerCancelsUnusedTicketsWhileCallerAndPeerAreGated) {
+  using Access = amdgpu::CpuDispatchPoolTestAccess;
+  amdgpu::CpuDispatchPool pool(/*threads=*/5);
+  DispatchPoolFixture foreign(/*cu_count=*/3), target(/*cu_count=*/4), probe(/*cu_count=*/2);
+  auto *foreign_gate = gate_fixture(foreign);
+  auto *probe_gate = gate_fixture(probe);
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto plugin = std::make_unique<DrainingWorkerGate>();
+  auto *target_gate = plugin.get();
+  ASSERT_TRUE(group->add(std::move(plugin)));
+  target.memory.write32(kProgramBase, kSMovB32);
+  for (auto &cu : target.cus)
+    cu->set_plugin_group(group);
+
+  // Occupy two of the four workers, leaving fewer free workers than the target
+  // batch's three tickets. Its caller and two workers each enter a known gate.
+  auto foreign_run = std::async(std::launch::async, [&] { pool.run(foreign.tasks, 3); });
+  const bool occupied = foreign_gate->wait_for_entries(3);
+  EXPECT_TRUE(occupied);
+  if (!occupied) {
+    foreign_gate->release();
+    foreign_run.get();
+    return;
+  }
+  auto target_run = std::async(std::launch::async, [&] {
+    target_gate->set_caller();
+    pool.run(target.tasks, 4);
+  });
+  const bool held = target_gate->wait_for_all_roles();
+  EXPECT_TRUE(held);
+  auto *submission = held ? Access::pending_submission(pool, target.tasks) : nullptr;
+  EXPECT_NE(submission, nullptr);
+  if (submission) {
+    target_gate->release_draining();
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (Access::progress(pool, submission).active_workers != 1 &&
+           std::chrono::steady_clock::now() < deadline)
+      std::this_thread::yield();
+    EXPECT_EQ(Access::progress(pool, submission).active_workers, 1u);
+
+    // The only available worker must reach this later submission. Without
+    // worker-side cancellation it first claims the target's leftover ticket,
+    // advancing next_task again despite having no CU left to execute.
+    auto probe_run = std::async(std::launch::async, [&] { pool.run(probe.tasks, 2); });
+    EXPECT_TRUE(probe_gate->wait_for_entries(2));
+    EXPECT_EQ(Access::progress(pool, submission).next_task, target.tasks.size() + 1);
+    target_gate->release_caller();
+    EXPECT_EQ(target_run.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+    target_gate->release_worker();
+    EXPECT_EQ(target_run.wait_for(std::chrono::seconds(2)), std::future_status::ready);
+    probe_gate->release();
+    EXPECT_NO_THROW(probe_run.get());
+    for (const auto *wf : probe.wfs)
+      EXPECT_EQ(wf->pc, kProgramBase + sizeof(uint32_t));
+  }
+  target_gate->release_all();
+  foreign_gate->release();
+  EXPECT_NO_THROW(target_run.get());
+  EXPECT_NO_THROW(foreign_run.get());
+  for (const auto *fixture : {&foreign, &target})
+    for (const auto *wf : fixture->wfs)
+      EXPECT_EQ(wf->pc, kProgramBase + sizeof(uint32_t));
+}
+
+TEST(CpuDispatchPoolTest, ConcurrentSubmissionsUseWorkersAndCompleteIndependently) {
+  DispatchPoolFixture first(/*cu_count=*/2), second(/*cu_count=*/2);
+  auto *first_gate = gate_fixture(first);
+  auto *second_gate = gate_fixture(second);
+  amdgpu::CpuDispatchPool pool(/*threads=*/4);
+  std::array<amdgpu::FunctionalQuantumResult, 2> first_results{}, second_results{};
+  auto first_run = std::async(std::launch::async,
+                              [&] { return pool.run(first.tasks, /*threads=*/2, first_results); });
+  // One CU blocks its caller and one blocks a worker, leaving other pool workers free.
+  EXPECT_TRUE(first_gate->wait_for_entries(2));
+  auto second_run = std::async(
+      std::launch::async, [&] { return pool.run(second.tasks, /*threads=*/2, second_results); });
+  EXPECT_TRUE(second_gate->wait_for_entries(2));
+  second_gate->release();
+  const auto second_status = second_run.wait_for(std::chrono::seconds(2));
+  first_gate->release();
+  EXPECT_EQ(second_status, std::future_status::ready);
+  EXPECT_TRUE(first_run.get().ran);
+  EXPECT_TRUE(second_run.get().ran);
+  for (const auto &result : first_results)
+    EXPECT_EQ(result.iterations, 1u);
+  for (const auto &result : second_results)
+    EXPECT_EQ(result.iterations, 1u);
+}
+
+TEST(CpuDispatchPoolTest, ConcurrentFailureStaysWithItsSubmission) {
+  DispatchPoolFixture failing(/*cu_count=*/3), succeeding(/*cu_count=*/4);
+  auto *gate = gate_fixture(failing);
+  auto throwing = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  ASSERT_TRUE(throwing->add(std::make_unique<test::ThrowingInstructionPlugin>()));
+  failing.cus[0]->set_plugin_group(throwing);
+  amdgpu::CpuDispatchPool pool(/*threads=*/4);
+  auto failed_run = std::async(std::launch::async, [&] { pool.run(failing.tasks, /*threads=*/2); });
+  // With two executors and three CUs, reaching both gates proves one executor
+  // has already caught the first CU's exception and advanced to another task.
+  // The exception stays pending until these two remaining CUs are released.
+  EXPECT_TRUE(gate->wait_for_entries(2));
+  auto successful_run =
+      std::async(std::launch::async, [&] { pool.run(succeeding.tasks, /*threads=*/2); });
+  const auto successful_status = successful_run.wait_for(std::chrono::seconds(2));
+  // Complete the unrelated join while the failing caller cannot yet consume
+  // its exception. A shared exception slot would leak or lose that exception.
+  if (successful_status == std::future_status::ready) {
+    EXPECT_NO_THROW(successful_run.get());
+  }
+  gate->release();
+  EXPECT_EQ(successful_status, std::future_status::ready);
+  EXPECT_THROW(failed_run.get(), std::runtime_error);
+  if (successful_run.valid()) {
+    EXPECT_NO_THROW(successful_run.get());
+  }
+  for (auto *wf : succeeding.wfs)
+    EXPECT_EQ(wf->pc, kProgramBase + sizeof(uint32_t));
+  EXPECT_NO_THROW(pool.run(succeeding.tasks, /*threads=*/4));
+}
+
+TEST(CpuDispatchPoolTest, SubmissionsRespectRequestedWidthWithIdleWorkers) {
+  amdgpu::CpuDispatchPool pool(/*threads=*/4);
+  for (uint32_t width : {1u, 2u}) {
+    DispatchPoolFixture fixture(/*cu_count=*/8);
+    auto *gate = gate_fixture(fixture);
+    auto run = std::async(std::launch::async, [&] { pool.run(fixture.tasks, /*threads=*/width); });
+    EXPECT_TRUE(gate->wait_for_entries(width));
+    // All entered CUs remain blocked. Extra entries would require exceeding the
+    // requested width, even though the pool has more idle workers available.
+    const bool exceeded_width = gate->wait_for_entries(width + 1, std::chrono::milliseconds(100));
+    gate->release();
+    EXPECT_FALSE(exceeded_width) << "requested width " << width;
+    EXPECT_NO_THROW(run.get());
+    for (auto *wf : fixture.wfs)
+      EXPECT_EQ(wf->pc, kProgramBase + sizeof(uint32_t));
+  }
+}
+
+TEST(CpuDispatchPoolTest, ConcurrentReusedSubmissionsRunEveryCuOnce) {
+  constexpr size_t kSubmitters = 8;
+  constexpr uint32_t kRounds = 32;
+  std::array<std::unique_ptr<DispatchPoolFixture>, kSubmitters> fixtures;
+  for (auto &fixture : fixtures)
+    fixture = std::make_unique<DispatchPoolFixture>(/*cu_count=*/8);
+  amdgpu::CpuDispatchPool pool(/*threads=*/4);
+  std::barrier start(static_cast<std::ptrdiff_t>(kSubmitters));
+  std::vector<std::future<void>> runs;
+  for (size_t i = 0; i < kSubmitters; ++i) {
+    runs.push_back(std::async(std::launch::async, [&, i] {
+      start.arrive_and_wait();
+      for (uint32_t round = 0; round < kRounds; ++round)
+        pool.run(fixtures[i]->tasks, /*threads=*/1 + (round + i) % 4);
+    }));
+  }
+  for (auto &run : runs)
+    EXPECT_NO_THROW(run.get());
+  for (const auto &fixture : fixtures) {
+    for (auto *wf : fixture->wfs) {
+      EXPECT_EQ(wf->trace_inst_count_, kRounds);
+      EXPECT_EQ(wf->pc, kProgramBase + kRounds * sizeof(uint32_t));
+    }
+  }
+}
 
 TEST(CpuDispatchPoolTest, ReusedBatchesRunEachCuOnceAtRequestedThreadCounts) {
   DispatchPoolFixture fixture(/*cu_count=*/8);
@@ -130,14 +432,17 @@ TEST(CpuDispatchPoolTest, ZeroFunctionalQuantumRunsUntilWavefrontHalts) {
 TEST(CpuDispatchPoolTest, WorkerExceptionsRethrowAndPoolRemainsReusable) {
   DispatchPoolFixture fixture(/*cu_count=*/64);
   amdgpu::CpuDispatchPool pool(/*threads=*/8);
+  fixture.memory.write32(kProgramBase, kSMovB32);
 
-  fixture.memory.write32(kProgramBase, kSSetvskip);
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  ASSERT_TRUE(group->add(std::make_unique<test::ThrowingInstructionPlugin>()));
+  for (auto &cu : fixture.cus)
+    cu->set_plugin_group(group);
   EXPECT_THROW(pool.run(std::span<amdgpu::ComputeUnitCore *>(fixture.tasks), /*threads=*/8),
                std::exception);
 
-  fixture.memory.write32(kProgramBase, kSNop);
   for (auto &cu : fixture.cus)
-    cu->instruction_cache().invalidate_all();
+    cu->set_plugin_group(nullptr);
   for (auto *wf : fixture.wfs)
     wf->pc = kProgramBase;
   EXPECT_NO_THROW(pool.run(std::span<amdgpu::ComputeUnitCore *>(fixture.tasks), /*threads=*/8));
@@ -146,16 +451,27 @@ TEST(CpuDispatchPoolTest, WorkerExceptionsRethrowAndPoolRemainsReusable) {
 }
 
 TEST(CpuDispatchPoolTest, OneThreadFinishesBatchBeforeRethrowing) {
-  constexpr uint64_t kBadProgramBase = kProgramBase + 0x2000;
   DispatchPoolFixture fixture(/*cu_count=*/4);
   amdgpu::CpuDispatchPool pool(/*threads=*/4);
-  fixture.memory.write32(kBadProgramBase, kSSetvskip);
-  fixture.wfs[0]->pc = kBadProgramBase;
+  fixture.memory.write32(kProgramBase, kSMovB32);
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  ASSERT_TRUE(group->add(std::make_unique<test::ThrowingInstructionPlugin>()));
+  fixture.cus[0]->set_plugin_group(group);
 
   EXPECT_THROW(pool.run(std::span<amdgpu::ComputeUnitCore *>(fixture.tasks), /*threads=*/1),
                std::exception);
   for (size_t i = 1; i < fixture.wfs.size(); ++i)
     EXPECT_EQ(fixture.wfs[i]->pc, kProgramBase + sizeof(uint32_t));
+}
+
+TEST(CpuDispatchPoolTest, UnimplementedInstructionsHaltWithoutThrowing) {
+  DispatchPoolFixture fixture(/*cu_count=*/8);
+  amdgpu::CpuDispatchPool pool(/*threads=*/4);
+  fixture.memory.write32(kProgramBase, kSCbranchIFork);
+
+  EXPECT_NO_THROW(pool.run(std::span<amdgpu::ComputeUnitCore *>(fixture.tasks), /*threads=*/4));
+  for (const auto &cu : fixture.cus)
+    EXPECT_TRUE(cu->is_idle());
 }
 
 TEST(CpuDispatchPoolTest, DestroyJoinsParkedWorkers) {
@@ -169,6 +485,86 @@ TEST(CpuDispatchPoolTest, PartialConstructionJoinsParkedWorkers) {
   EXPECT_THROW(amdgpu::CpuDispatchPoolTestAccess::construct_with_failure(/*threads=*/8,
                                                                          /*fail_after=*/2),
                std::runtime_error);
+}
+
+// A caller must not steal pending work from another submission: that work can
+// be waiting for the caller's own submission to complete.
+TEST(CpuDispatchPoolTest, SubmittingThreadRunsOnlyItsOwnSubmission) {
+  DispatchPoolFixture foreign(/*cu_count=*/3), own(/*cu_count=*/1);
+  auto *gate = gate_fixture(foreign);
+  amdgpu::CpuDispatchPool pool(/*threads=*/2);
+  auto foreign_run = std::async(std::launch::async, [&] { pool.run(foreign.tasks, 2); });
+  // Occupy the worker and foreign caller while one foreign CU remains pending.
+  EXPECT_TRUE(gate->wait_for_entries(2));
+  auto own_run = std::async(std::launch::async, [&] { pool.run(own.tasks, 1); });
+  const auto own_status = own_run.wait_for(std::chrono::seconds(2));
+  gate->release();
+  EXPECT_EQ(own_status, std::future_status::ready);
+  EXPECT_NO_THROW(own_run.get());
+  EXPECT_NO_THROW(foreign_run.get());
+  EXPECT_EQ(own.wfs.front()->trace_inst_count_, 1u);
+  for (const auto *wf : foreign.wfs)
+    EXPECT_EQ(wf->trace_inst_count_, 1u);
+}
+
+// Measures the sparse-XCD shape that motivated concurrent submissions: eight
+// command processors share one SoC pool, but each has only a few runnable CUs.
+// This is deliberately excluded from the default CTest run with the other
+// *Benchmark* tests. Invoke it directly and compare identical builds/configs.
+TEST(CpuDispatchPoolBenchmark, SparseConcurrentSubmissions) {
+  constexpr uint32_t kSubmissions = 8;
+  constexpr uint32_t kPoolThreads = 32;
+  constexpr uint32_t kFunctionalQuantum = 100000;
+  constexpr uint32_t kWarmupRounds = 1;
+  constexpr uint32_t kMeasuredRounds = 3;
+  constexpr uint32_t kSBranchSelf = 0xBF82FFFFu; // s_branch -1
+
+  for (uint32_t cus_per_submission : {1u, 2u, 4u, 8u, 16u, 32u}) {
+    amdgpu::CpuDispatchPool pool(kPoolThreads);
+    std::vector<std::unique_ptr<DispatchPoolFixture>> fixtures;
+    fixtures.reserve(kSubmissions);
+    for (uint32_t i = 0; i < kSubmissions; ++i) {
+      auto fixture = std::make_unique<DispatchPoolFixture>(cus_per_submission, kFunctionalQuantum);
+      fixture->memory.write32(kProgramBase, kSBranchSelf);
+      fixtures.push_back(std::move(fixture));
+    }
+
+    std::barrier start_round(static_cast<std::ptrdiff_t>(kSubmissions + 1));
+    std::barrier finish_round(static_cast<std::ptrdiff_t>(kSubmissions + 1));
+    std::vector<std::jthread> submitters;
+    submitters.reserve(kSubmissions);
+    for (uint32_t i = 0; i < kSubmissions; ++i) {
+      submitters.emplace_back([&, i]() {
+        for (uint32_t round = 0; round < kWarmupRounds + kMeasuredRounds; ++round) {
+          start_round.arrive_and_wait();
+          pool.run(std::span<amdgpu::ComputeUnitCore *>(fixtures[i]->tasks), kPoolThreads);
+          finish_round.arrive_and_wait();
+        }
+      });
+    }
+
+    start_round.arrive_and_wait();
+    finish_round.arrive_and_wait();
+    const auto begin = std::chrono::steady_clock::now();
+    for (uint32_t round = 0; round < kMeasuredRounds; ++round) {
+      start_round.arrive_and_wait();
+      finish_round.arrive_and_wait();
+    }
+    const auto elapsed = std::chrono::steady_clock::now() - begin;
+    const double elapsed_ms = std::chrono::duration<double, std::milli>(elapsed).count();
+    const uint64_t instructions = static_cast<uint64_t>(kSubmissions) * cus_per_submission *
+                                  kFunctionalQuantum * kMeasuredRounds;
+    std::printf("  submissions=%u cus/submission=%u pool_threads=%u elapsed_ms=%.3f "
+                "throughput_minst_s=%.3f\n",
+                kSubmissions, cus_per_submission, kPoolThreads, elapsed_ms,
+                static_cast<double>(instructions) / (elapsed_ms * 1000.0));
+
+    const uint64_t expected_instructions =
+        static_cast<uint64_t>(kFunctionalQuantum) * (kWarmupRounds + kMeasuredRounds);
+    for (const auto &fixture : fixtures)
+      for (const auto *wf : fixture->wfs)
+        EXPECT_EQ(wf->trace_inst_count_, expected_instructions);
+  }
 }
 
 } // namespace

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
+#include "rocjitsu/kmd/linux/remote_driver.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/rocjitsu.h"
 
@@ -189,6 +190,111 @@ TEST(DaemonApi, RejectsInvalidArguments) {
   EXPECT_EQ(daemon, nullptr);
   EXPECT_EQ(rj_daemon_status(nullptr), RJ_DAEMON_STATUS_STOPPED);
   EXPECT_EQ(rj_daemon_stop(nullptr), ROCJITSU_STATUS_SUCCESS);
+}
+
+TEST(DaemonApi, HandshakePublishesEachSelectedRenderMinor) {
+  constexpr const char *json = R"({
+    "vm":{"arch":"cdna5","gpu":{"device":{
+      "gpu_id":1250,"gfx_target_version":120500,"unique_id":1250,
+      "num_sdma_engines":0}}},
+    "topology":{"root":{"name":"soc","type":"soc","children":[
+      {"name":"vram","type":"gpu_memory"},
+      {"name":"xcd0","type":"xcd","children":[
+        {"name":"l2","type":"l2_cache"},
+        {"name":"cp","type":"command_processor"},
+        {"name":"se0","type":"shader_engine","children":[
+          {"name":"cu[0:4]","type":"compute_unit"}]}]}]}},
+    "system":{"nodes":[{"id":"tray7","gpus":[
+      {"id":"g5","gpu_id":505,"unique_id":3005,
+       "location_id":1024,"drm_render_minor":129},
+      {"id":"g9","gpu_id":909,"unique_id":3009,
+       "location_id":1280,"drm_render_minor":130}]}]},
+    "local_node":"tray7"
+  })";
+  TempDirectory directory;
+  const std::filesystem::path socket = directory.path() / "daemon.sock";
+  TestDaemon daemon(json, socket.c_str());
+  ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
+
+  const int connection = connect_to(socket);
+  ASSERT_GE(connection, 0);
+  RemoteDriver client(connection);
+  const int kfd_fd = client.open();
+  ASSERT_GE(kfd_fd, 0);
+  EXPECT_FALSE(client.handles_drm_render_minor(128));
+  EXPECT_TRUE(client.handles_drm_render_minor(129));
+  EXPECT_TRUE(client.handles_drm_render_minor(130));
+  const auto *first = client.gpu_info_for_render_minor(129);
+  const auto *second = client.gpu_info_for_render_minor(130);
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+  EXPECT_EQ(first->gpu_id, 505u);
+  EXPECT_EQ(second->gpu_id, 909u);
+  EXPECT_EQ(client.gpu_info_for_render_minor(128), nullptr);
+  EXPECT_EQ(client.close(), 0);
+  close(kfd_fd);
+}
+
+TEST(DaemonApi, LegacyOneGpuHandshakeKeepsRenderMinorCompatibility) {
+  std::string json = daemon_json();
+  const std::string configured = "\"drm_render_minor\": 128";
+  const auto position = json.find(configured);
+  ASSERT_NE(position, std::string::npos);
+  json.replace(position, configured.size(), "\"drm_render_minor\": 129");
+
+  TempDirectory directory;
+  const std::filesystem::path socket = directory.path() / "daemon.sock";
+  TestDaemon daemon(json.c_str(), socket.c_str());
+  ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
+  const int connection = connect_to(socket);
+  ASSERT_GE(connection, 0);
+  RemoteDriver client(connection);
+  const int kfd_fd = client.open();
+  ASSERT_GE(kfd_fd, 0);
+  EXPECT_TRUE(client.handles_drm_render_minor(128));
+  EXPECT_TRUE(client.handles_drm_render_minor(129));
+  ASSERT_NE(client.gpu_info_for_render_minor(128), nullptr);
+  EXPECT_EQ(client.gpu_info_for_render_minor(128)->drm_render_minor, 129u);
+  EXPECT_EQ(client.close(), 0);
+  close(kfd_fd);
+}
+
+TEST(DaemonApi, OneGpuManifestHandshakeMatchesOnlySelectedRenderMinor) {
+  constexpr const char *json = R"({
+    "vm":{"arch":"cdna5","gpu":{"device":{
+      "gpu_id":1250,"gfx_target_version":120500,"unique_id":1250,
+      "num_sdma_engines":0}}},
+    "topology":{"root":{"name":"soc","type":"soc","children":[
+      {"name":"vram","type":"gpu_memory"},
+      {"name":"xcd0","type":"xcd","children":[
+        {"name":"l2","type":"l2_cache"},
+        {"name":"cp","type":"command_processor"},
+        {"name":"se0","type":"shader_engine","children":[
+          {"name":"cu[0:4]","type":"compute_unit"}]}]}]}},
+    "system":{"nodes":[{"id":"tray7","gpus":[
+      {"id":"g5","gpu_id":505,"unique_id":3005,
+       "location_id":1024,"drm_render_minor":129}]}]},
+    "local_node":"tray7"
+  })";
+  TempDirectory directory;
+  const std::filesystem::path socket = directory.path() / "daemon.sock";
+  TestDaemon daemon(json, socket.c_str());
+  ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
+
+  const int connection = connect_to(socket);
+  ASSERT_GE(connection, 0);
+  RemoteDriver client(connection);
+  const int kfd_fd = client.open();
+  ASSERT_GE(kfd_fd, 0);
+  EXPECT_FALSE(client.handles_drm_render_minor(128));
+  EXPECT_TRUE(client.handles_drm_render_minor(129));
+  EXPECT_EQ(client.gpu_info_for_render_minor(128), nullptr);
+  const auto *gpu = client.gpu_info_for_render_minor(129);
+  ASSERT_NE(gpu, nullptr);
+  EXPECT_EQ(gpu->gpu_id, 505u);
+  EXPECT_EQ(gpu->drm_render_minor, 129u);
+  EXPECT_EQ(client.close(), 0);
+  close(kfd_fd);
 }
 
 TEST(DaemonApi, RejectsInvalidJsonAndLongSocketPath) {
@@ -406,9 +512,79 @@ TEST(DaemonApi, AcceptsValidGetVersionIoctlPayload) {
   ASSERT_EQ(response.payload_bytes, sizeof(arguments));
   ASSERT_TRUE(rpc_recv_exact(client, &arguments, sizeof(arguments)));
   EXPECT_EQ(arguments.major_version, KFD_IOCTL_MAJOR_VERSION);
-  EXPECT_EQ(arguments.minor_version, KFD_IOCTL_MINOR_VERSION);
+  // Metadata-ring queues from KFD 1.19 are not implemented by the simulator.
+  EXPECT_EQ(arguments.minor_version, 18u);
   EXPECT_EQ(daemon.status(), RJ_DAEMON_STATUS_RUNNING);
   close_session(client, 3);
+}
+
+TEST(DaemonApi, AcceptsCuMaskInlinePayloadAndKeepsConnectionUsable) {
+  TempDirectory directory;
+  const auto socket_path = directory.path() / "daemon.sock";
+  TestDaemon daemon(socket_path);
+  ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
+  const int client = connect_to(socket_path);
+  ASSERT_GE(client, 0);
+  ASSERT_EQ(handshake(client).version, kRpcProtocolVersion);
+  kfd_ioctl_set_cu_mask_args args{};
+  args.queue_id = 999;
+  args.num_cu_mask = 32;
+  args.cu_mask_ptr = 0xDEADBEEF;
+  const uint32_t mask = 1;
+  ASSERT_TRUE(send_ioctl_request(client, 2, AMDKFD_IOC_SET_CU_MASK, &args, sizeof(args), &mask,
+                                 sizeof(mask)));
+  RpcHeader response{};
+  ASSERT_TRUE(rpc_recv_exact(client, &response, sizeof(response)));
+  EXPECT_EQ(response.result, -EFAULT); // Valid payload, missing queue.
+  std::vector<uint8_t> payload(response.payload_bytes);
+  ASSERT_TRUE(rpc_recv_exact(client, payload.data(), payload.size()));
+  kfd_ioctl_get_version_args version{};
+  ASSERT_TRUE(send_ioctl_request(client, 3, AMDKFD_IOC_GET_VERSION, &version, sizeof(version)));
+  ASSERT_TRUE(rpc_recv_exact(client, &response, sizeof(response)));
+  ASSERT_EQ(response.result, 0);
+  ASSERT_EQ(response.payload_bytes, sizeof(version));
+  ASSERT_TRUE(rpc_recv_exact(client, &version, sizeof(version)));
+  close_session(client, 4);
+}
+
+TEST(DaemonApi, RejectsMalformedCuMaskPayloadWithoutStoppingServer) {
+  TempDirectory directory;
+  const auto socket_path = directory.path() / "daemon.sock";
+  TestDaemon daemon(socket_path);
+  ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
+  struct MaskPayloadCase {
+    uint32_t bits;
+    size_t bytes;
+    uint64_t pointer = 0xDEADBEEF;
+  };
+  for (const MaskPayloadCase &test :
+       {MaskPayloadCase{0, 0}, MaskPayloadCase{31, sizeof(uint32_t)},
+        MaskPayloadCase{32, sizeof(uint32_t) - 1}, MaskPayloadCase{32, sizeof(uint32_t) + 1},
+        MaskPayloadCase{32, sizeof(uint32_t), 0}}) {
+    const uint32_t bits = test.bits;
+    const size_t bytes = test.bytes;
+    SCOPED_TRACE(bits);
+    SCOPED_TRACE(bytes);
+    const int client = connect_to(socket_path);
+    ASSERT_GE(client, 0);
+    ASSERT_EQ(handshake(client).version, kRpcProtocolVersion);
+    kfd_ioctl_set_cu_mask_args args{};
+    args.queue_id = 999;
+    args.num_cu_mask = bits;
+    args.cu_mask_ptr = test.pointer;
+    std::vector<uint8_t> mask(bytes);
+    ASSERT_TRUE(send_ioctl_request(client, 2, AMDKFD_IOC_SET_CU_MASK, &args, sizeof(args),
+                                   mask.data(), mask.size()));
+    RpcHeader response{};
+    EXPECT_FALSE(rpc_recv_exact(client, &response, sizeof(response)));
+    EXPECT_EQ(daemon.status(), RJ_DAEMON_STATUS_RUNNING);
+    close(client);
+  }
+  // A malformed client's disconnect must not prevent a fresh session.
+  const int client = connect_to(socket_path);
+  ASSERT_GE(client, 0);
+  ASSERT_EQ(handshake(client).version, kRpcProtocolVersion);
+  close_session(client, 2);
 }
 
 TEST(DaemonApi, RejectsWaitEventsInlineArrayOverflowWithoutStoppingServer) {

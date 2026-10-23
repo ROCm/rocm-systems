@@ -7,8 +7,6 @@
 #ifndef ROCRTST_SUITES_PERFORMANCE_MEMORY_ASYNC_COPY_ON_ENGINE_H_
 #define ROCRTST_SUITES_PERFORMANCE_MEMORY_ASYNC_COPY_ON_ENGINE_H_
 
-#include <hwloc.h>
-
 #include <vector>
 #include <algorithm>
 

@@ -6,11 +6,13 @@
 ///
 /// Compiled with hipcc. Requires LD_PRELOAD=librocjitsu.so.
 
+#include <array>
 #include <hip/hip_runtime.h>
 #include <vector>
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdint>
 #include <cstdlib>
 
@@ -45,6 +47,64 @@ TEST(HipMemcpyTest, RoundTripFloat) {
     EXPECT_FLOAT_EQ(dst[i], src[i]) << "mismatch at index " << i;
 
   (void)hipFree(d_buf);
+}
+
+namespace {
+
+__global__ void write_reused_lds(uint32_t words, uint32_t cookie) {
+  extern __shared__ volatile uint32_t lds[];
+  for (uint32_t i = threadIdx.x; i < words; i += blockDim.x)
+    lds[i] = cookie ^ i;
+}
+
+__global__ void read_reused_lds(uint32_t *output, uint32_t words) {
+  extern __shared__ volatile uint32_t lds[];
+  for (uint32_t i = threadIdx.x; i < words; i += blockDim.x)
+    output[i] = lds[i];
+}
+
+} // namespace
+
+// This probes physical LDS reuse, not a HIP guarantee about uninitialized
+// shared memory. A matching RDNA4 hardware probe retains a full allocation
+// between dispatches pinned to one WGP. Distinct masks must also keep the
+// streams' patterns separate, even when their queue owner is another XCD.
+TEST(HipMemcpyTest, MaskedStreamLdsReuse) {
+  hipDeviceProp_t props{};
+  HIP_ASSERT(hipGetDeviceProperties(&props, 0));
+  const size_t bytes = props.sharedMemPerBlock;
+  const uint32_t words = static_cast<uint32_t>(bytes / sizeof(uint32_t));
+  // HIP expands each mask bit to a complete CU pair in RDNA WGP mode.
+  // One HIP bit pins one LDS allocation: a WGP on RDNA, or a CU on CDNA.
+  std::array<hipStream_t, 2> streams{};
+  for (uint32_t i = 0; i < streams.size(); ++i) {
+    const uint32_t mask = 1u << i;
+    HIP_ASSERT(hipExtStreamCreateWithCUMask(&streams[i], 1, &mask));
+  }
+  uint32_t *output = nullptr;
+  HIP_ASSERT(hipMalloc(&output, bytes));
+  std::vector<uint32_t> host(words);
+  for (uint32_t round = 0; round < 3; ++round) {
+    for (uint32_t i = 0; i < streams.size(); ++i) {
+      const uint32_t cookie = 0xFAB1FAB1u + round * 17 + i;
+      write_reused_lds<<<1, 64, bytes, streams[i]>>>(words, cookie);
+      HIP_ASSERT(hipGetLastError());
+      HIP_ASSERT(hipStreamSynchronize(streams[i]));
+    }
+    for (uint32_t i = 0; i < streams.size(); ++i) {
+      const uint32_t cookie = 0xFAB1FAB1u + round * 17 + i;
+      read_reused_lds<<<1, 64, bytes, streams[i]>>>(output, words);
+      HIP_ASSERT(hipGetLastError());
+      HIP_ASSERT(hipStreamSynchronize(streams[i]));
+      HIP_ASSERT(hipMemcpy(host.data(), output, bytes, hipMemcpyDeviceToHost));
+      for (uint32_t word = 0; word < words; ++word)
+        ASSERT_EQ(host[word], cookie ^ word)
+            << "round=" << round << " stream=" << i << " word=" << word;
+    }
+  }
+  HIP_ASSERT(hipFree(output));
+  for (hipStream_t stream : streams)
+    HIP_ASSERT(hipStreamDestroy(stream));
 }
 
 TEST(HipMemcpyTest, RoundTripInt) {

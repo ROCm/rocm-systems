@@ -166,33 +166,9 @@ endforeach()
 #
 # ----------------------------------------------------------------------------------------#
 
-find_package(ROCmVersion)
+find_package(ROCmVersion ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
 
-if(NOT ROCmVersion_FOUND)
-    find_package(
-        hip
-        ${rocprofiler_systems_FIND_QUIETLY}
-        REQUIRED
-        HINTS ${ROCPROFSYS_DEFAULT_ROCM_PATH}
-        PATHS ${ROCPROFSYS_DEFAULT_ROCM_PATH}
-    )
-    find_package(ROCmVersion HINTS ${ROCM_PATH} PATHS ${ROCM_PATH})
-endif()
-
-if(NOT ROCmVersion_FOUND)
-    rocm_version_compute("${hip_VERSION}" _local)
-
-    foreach(_V ${ROCmVersion_VARIABLES})
-        set(_CACHE_VAR ROCmVersion_${_V}_VERSION)
-        set(_LOCAL_VAR _local_${_V}_VERSION)
-        set(ROCmVersion_${_V}_VERSION
-            "${${_LOCAL_VAR}}"
-            CACHE STRING
-            "ROCm ${_V} version"
-        )
-        rocm_version_watch_for_change(${_CACHE_VAR})
-    endforeach()
-else()
+if(ROCmVersion_DIR)
     list(APPEND CMAKE_PREFIX_PATH ${ROCmVersion_DIR})
 endif()
 
@@ -299,6 +275,131 @@ if(ROCPROFSYS_BUILD_AINIC)
     target_compile_definitions(
         rocprofiler-systems-compile-definitions
         INTERFACE ROCPROFSYS_BUILD_AINIC=1
+    )
+endif()
+
+# ----------------------------------------------------------------------------------------#
+#
+# hipFile (Infinity Storage I/O stats)
+#
+# ----------------------------------------------------------------------------------------#
+
+# hipFile telemetry is requested with ROCPROFSYS_USE_HIPFILE (ON / OFF / AUTO).
+# The derived ROCPROFSYS_HIPFILE_SUPPORT cache (INTERNAL FORCE) is what every
+# downstream if(), compile definition, and add_subdirectory consults.
+# The user-facing cache is never overwritten:
+#
+#   AUTO + package missing  -> SUPPORT OFF, STATUS (default; a box without hipFile still builds)
+#   ON   + package missing  -> FATAL_ERROR naming the version found, the version required,
+#                              and how to point CMake at a different prefix
+#   OFF                     -> never search
+set(ROCPROFSYS_HIPFILE_MIN_VERSION
+    "0.5.0"
+    CACHE STRING
+    "Minimum hipFile version required for GPU-direct storage I/O telemetry"
+)
+
+set(ROCPROFSYS_HIPFILE_SUPPORT
+    OFF
+    CACHE INTERNAL
+    "Whether hipFile GPU-direct storage I/O telemetry is being built"
+    FORCE
+)
+
+if(NOT ROCPROFSYS_HIPFILE_MIN_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+    message(
+        FATAL_ERROR
+        "ROCPROFSYS_HIPFILE_MIN_VERSION must be major.minor.patch (for example 0.5.0), got '${ROCPROFSYS_HIPFILE_MIN_VERSION}'"
+    )
+endif()
+
+rocprofiler_systems_resolve_tristate_option(
+    ROCPROFSYS_USE_HIPFILE
+    _rocprofsys_use_hipfile
+)
+
+set(_rocprofsys_hipfile_prefix_hint
+    "Set -Dhipfile_DIR=<prefix>/lib/cmake/hipfile or add the install prefix to CMAKE_PREFIX_PATH"
+)
+
+if(_rocprofsys_use_hipfile STREQUAL "OFF")
+    message(STATUS "hipFile stats support disabled: ROCPROFSYS_USE_HIPFILE is OFF")
+else()
+    find_package(
+        hipfile
+        ${rocprofiler_systems_FIND_QUIETLY}
+        HINTS ${ROCmVersion_DIR} ${ROCM_PATH}
+        PATHS ${ROCmVersion_DIR} ${ROCM_PATH}
+    )
+    set(_rocprofsys_hipfile_usable FALSE)
+    if(
+        hipfile_FOUND
+        AND hipfile_VERSION VERSION_GREATER_EQUAL ROCPROFSYS_HIPFILE_MIN_VERSION
+    )
+        set(_rocprofsys_hipfile_usable TRUE)
+    endif()
+
+    if(_rocprofsys_hipfile_usable)
+        set(ROCPROFSYS_HIPFILE_SUPPORT
+            ON
+            CACHE INTERNAL
+            "Whether hipFile GPU-direct storage I/O telemetry is being built"
+            FORCE
+        )
+        message(
+            STATUS
+            "hipFile stats support enabled (version: ${hipfile_VERSION}, headers: "
+            "${hipfile_INCLUDE_DIRS})"
+        )
+    else()
+        if(hipfile_VERSION)
+            set(_rocprofsys_hipfile_found_desc "hipFile ${hipfile_VERSION} was found")
+        elseif(hipfile_FOUND)
+            set(_rocprofsys_hipfile_found_desc
+                "a hipFile package with no reported version was found"
+            )
+        else()
+            set(_rocprofsys_hipfile_found_desc "no hipFile package was found")
+        endif()
+        if(_rocprofsys_use_hipfile STREQUAL "ON")
+            message(
+                FATAL_ERROR
+                "ROCPROFSYS_USE_HIPFILE=ON requires hipFile >= ${ROCPROFSYS_HIPFILE_MIN_VERSION}, but ${_rocprofsys_hipfile_found_desc} "
+                "(the per-GPU stats API is not present before ${ROCPROFSYS_HIPFILE_MIN_VERSION}). "
+                "${_rocprofsys_hipfile_prefix_hint}. "
+                "Configure with -DROCPROFSYS_USE_HIPFILE=OFF to disable the feature, or "
+                "-DROCPROFSYS_USE_HIPFILE=AUTO to disable it only when hipFile is missing."
+            )
+        else()
+            message(
+                STATUS
+                "hipFile stats support disabled: ${_rocprofsys_hipfile_found_desc}; "
+                "${ROCPROFSYS_HIPFILE_MIN_VERSION} or later is required (the per-GPU stats API is not "
+                "present before then). ${_rocprofsys_hipfile_prefix_hint}."
+            )
+        endif()
+    endif()
+endif()
+
+unset(_rocprofsys_use_hipfile)
+unset(_rocprofsys_hipfile_usable)
+unset(_rocprofsys_hipfile_found_desc)
+unset(_rocprofsys_hipfile_prefix_hint)
+
+rocprofiler_systems_add_feature(
+    ROCPROFSYS_HIPFILE_SUPPORT
+    "hipFile GPU-direct storage I/O telemetry compiled in"
+)
+
+# Expose support as a global compile definition so core (and rocprof-sys-avail) can
+# guard setting registration, matching AINIC. The hipFile backend already defines
+# ROCPROFSYS_BUILD_HIPFILE=1 on its INTERFACE target, but core does not link that
+# target, so without this the settings would still be advertised in builds that
+# cannot collect them.
+if(ROCPROFSYS_HIPFILE_SUPPORT)
+    target_compile_definitions(
+        rocprofiler-systems-compile-definitions
+        INTERFACE ROCPROFSYS_BUILD_HIPFILE=1
     )
 endif()
 
@@ -656,7 +757,6 @@ include(NlohmannJson)
 
 if(ROCPROFSYS_BUILD_TESTING)
     include(GTest)
-    include(GhcFilesystem)
 endif()
 
 # ----------------------------------------------------------------------------------------#
@@ -806,7 +906,7 @@ rocprofiler_systems_checkout_git_submodule(
     RELATIVE_PATH external/timemory
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     REPO_URL https://github.com/ROCm/timemory.git
-    REPO_BRANCH rocprofiler-systems-cppstd20
+    REPO_BRANCH rocprofiler-systems
 )
 
 rocprofiler_systems_save_variables(

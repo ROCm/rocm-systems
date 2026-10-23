@@ -14,6 +14,7 @@
 namespace amd::activity_prof {
 
 decltype(report_activity) report_activity{nullptr};
+std::atomic<bool> tool_attached{false};
 
 // Reserved sentinel pointer value (0x1) used to signal roctracer that CLR commits
 // to delivering an activity record for this operation. roctracer's TracerCallback
@@ -110,6 +111,16 @@ void ReportActivity(const amd::Command& command) {
       record.bytes = total;
       break;
     }
+    case ROCCLR_COMMAND_BATCH_COPY_BUFFER_RECT: {
+      const std::vector<amd::BatchCopyRectOp>& ops =
+          static_cast<const amd::BatchCopyMemoryRectCommand&>(command).CopyOps();
+      size_t total = 0;
+      for (const amd::BatchCopyRectOp& op : ops) {
+        total += linearSize(op.size);
+      }
+      record.bytes = total;
+      break;
+    }
     case ROCCLR_COMMAND_BATCH_WRITE_BUFFER: {
       const std::vector<amd::BatchWriteMemoryOp>& ops =
           static_cast<const amd::BatchWriteMemoryCommand&>(command).WriteOps();
@@ -145,9 +156,16 @@ void ReportActivity(const amd::Command& command) {
       }
       record.begin_ns = dispatch.start_ns;
       record.end_ns = dispatch.end_ns;
-      record.kernel_name = dispatch.kernel_name;
       record.queue_id = static_cast<uint64_t>(dispatch.queue_index);
-      function(ACTIVITY_DOMAIN_HIP_OPS, operation_id, &record);
+      // A graph's cross-stream sync packets share this command but are not
+      // dispatches, so they carry no name and go out under the barrier op.
+      record.op = dispatch.is_barrier ? OP_ID_BARRIER : operation_id;
+      if (dispatch.is_barrier) {
+        record.bytes = 0;
+      } else {
+        record.kernel_name = dispatch.kernel_name;
+      }
+      function(ACTIVITY_DOMAIN_HIP_OPS, record.op, &record);
     }
   } else {
     record.begin_ns = command.profilingInfo().start_;
@@ -198,6 +216,7 @@ const char* getOclCommandKindString(cl_command_type commandType) {
     CASE_STRING(ROCCLR_COMMAND_STREAM_WRITE_VALUE, StreamWrite);
     CASE_STRING(ROCCLR_COMMAND_BATCH_STREAM, BatchStreamOp);
     CASE_STRING(ROCCLR_COMMAND_BATCH_COPY_BUFFER, BatchCopyBuffer);
+    CASE_STRING(ROCCLR_COMMAND_BATCH_COPY_BUFFER_RECT, BatchCopyBufferRect);
     CASE_STRING(ROCCLR_COMMAND_BATCH_WRITE_BUFFER, BatchWriteBuffer);
     CASE_STRING(ROCCLR_COMMAND_BATCH_READ_BUFFER, BatchReadBuffer);
     default:

@@ -8,6 +8,9 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -222,9 +225,11 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Negative) {
 
   SECTION("Null source element") {
     src_ptrs[1] = nullptr;
+    size_t fail_idx = 0;
     HIP_CHECK_ERROR(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), kCount,
-                                        nullptr, attrs_idxs, 0, nullptr, stream_guard.stream()),
+                                        nullptr, attrs_idxs, 0, &fail_idx, stream_guard.stream()),
                     hipErrorInvalidValue);
+    REQUIRE(fail_idx == 1);
   }
 
   SECTION("Zero size first copy") {
@@ -801,8 +806,6 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_P2P_Functional) {
  * hipMemcpyFlagExtOpSwap across generated per-side allocation types, copy counts, and sizes.
  */
 HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap) {
-  skipMemcpyBatchAsyncIfAnyGfx1250();
-
   const size_t count = GENERATE(2, 3, 8);
   const size_t size_in_bytes = GENERATE(as<size_t>{}, 1, 63, 4096);
   const LinearAllocs allocTypeA =
@@ -853,6 +856,108 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap) {
       requireBufferEquals(swapPtrsB[i], initialValuesA[i], allocTypeB);
     }
   }
+}
+
+/**
+ * A misaligned swap is rejected, reported through failIdx, and nothing in the batch runs.
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap_Misaligned) {
+  constexpr size_t kSizeInBytes = 4096;
+  constexpr size_t kMisalignment = 16;  // Below every swap granularity.
+  const bool misalignA = GENERATE(true, false);
+  const bool misalignB = GENERATE(true, false);
+  if (!misalignA && !misalignB) {
+    return;
+  }
+  CAPTURE(misalignA, misalignB);
+
+  const hipError_t expectedError =
+      getSwapExpectedReturn(LinearAllocs::hipMalloc, LinearAllocs::hipMalloc) == hipSuccess
+          ? hipErrorInvalidValue
+          : hipErrorNotSupported;
+
+  HIP_CHECK(hipSetDevice(0));
+  StreamGuard stream_guard(Streams::created);
+  const std::vector<unsigned char> initialValuesA(kSizeInBytes + kMisalignment, 10);
+  const std::vector<unsigned char> initialValuesB(kSizeInBytes + kMisalignment, 4);
+  LinearAllocGuard<unsigned char> allocA(LinearAllocs::hipMalloc, initialValuesA.size());
+  LinearAllocGuard<unsigned char> allocB(LinearAllocs::hipMalloc, initialValuesB.size());
+  fillBuffer(allocA.ptr(), initialValuesA, LinearAllocs::hipMalloc);
+  fillBuffer(allocB.ptr(), initialValuesB, LinearAllocs::hipMalloc);
+
+  // A valid copy ahead of the swap, so failIdx must point past it.
+  const std::vector<unsigned char> initialValuesCopy(kSizeInBytes, 7);
+  LinearAllocGuard<unsigned char> copySrc(LinearAllocs::hipMalloc, kSizeInBytes);
+  LinearAllocGuard<unsigned char> copyDst(LinearAllocs::hipMalloc, kSizeInBytes);
+  HIP_CHECK(hipMemset(copySrc.ptr(), 1, kSizeInBytes));
+  fillBuffer(copyDst.ptr(), initialValuesCopy, LinearAllocs::hipMalloc);
+
+  void* dsts[2] = {copyDst.ptr(), allocA.ptr() + (misalignA ? kMisalignment : 0)};
+  void* srcs[2] = {copySrc.ptr(), allocB.ptr() + (misalignB ? kMisalignment : 0)};
+  size_t sizes[2] = {kSizeInBytes, kSizeInBytes};
+  hipMemcpyAttributes attrs[2] = {{hipMemcpySrcAccessOrderStream, {}, {}, 0},
+                                  {hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagExtOpSwap}};
+  size_t attrs_idxs[2] = {0, 1};
+  size_t fail_idx = 0;
+
+  HIP_CHECK_ERROR(hipMemcpyBatchAsync(dsts, srcs, sizes, 2, attrs, attrs_idxs, 2, &fail_idx,
+                                      stream_guard.stream()),
+                  expectedError);
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+
+  // An unsupported swap is rejected for the whole batch, not for one entry.
+  REQUIRE(fail_idx == (expectedError == hipErrorInvalidValue ? 1 : SIZE_MAX));
+  requireBufferEquals(copyDst.ptr(), initialValuesCopy, LinearAllocs::hipMalloc);
+  requireBufferEquals(allocA.ptr(), initialValuesA, LinearAllocs::hipMalloc);
+  requireBufferEquals(allocB.ptr(), initialValuesB, LinearAllocs::hipMalloc);
+}
+
+/**
+ * Swaps a range at an offset into each buffer; only that range is exchanged.
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap_Offsets) {
+  constexpr size_t kAllocSize = 8192;
+  constexpr size_t kSwapSize = 4096;
+  const LinearAllocs allocTypeB = GENERATE(LinearAllocs::hipMalloc, LinearAllocs::hipHostMalloc);
+  const auto [offsetA, offsetB] = GENERATE(table<size_t, size_t>(
+      {{0x0, 0x0}, {0x40, 0x40}, {0x0, 0x100}, {0x80, 0x180}, {0x0, 0x40}, {0xc0, 0x40}}));
+  CAPTURE(allocTypeB, offsetA, offsetB);
+
+  HIP_CHECK(hipSetDevice(0));
+  if (getSwapExpectedReturn(LinearAllocs::hipMalloc, allocTypeB) != hipSuccess) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kSdmaSwapUnsupported);
+    return;
+  }
+
+  std::vector<unsigned char> initialA(kAllocSize);
+  std::vector<unsigned char> initialB(kAllocSize);
+  for (size_t i = 0; i < kAllocSize; ++i) {
+    initialA[i] = static_cast<unsigned char>(i ^ (i >> 8));
+    initialB[i] = static_cast<unsigned char>(~(i ^ (i >> 8)));
+  }
+
+  StreamGuard stream_guard(Streams::created);
+  LinearAllocGuard<unsigned char> allocA(LinearAllocs::hipMalloc, kAllocSize);
+  LinearAllocGuard<unsigned char> allocB(allocTypeB, kAllocSize);
+  fillBuffer(allocA.ptr(), initialA, LinearAllocs::hipMalloc);
+  fillBuffer(allocB.ptr(), initialB, allocTypeB);
+
+  void* dsts[] = {allocA.ptr() + offsetA};
+  void* srcs[] = {allocB.ptr() + offsetB};
+  size_t sizes[] = {kSwapSize};
+  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagExtOpSwap};
+  size_t attrs_idxs[1] = {0};
+
+  HIP_CHECK(hipMemcpyBatchAsync(dsts, srcs, sizes, 1, &attr, attrs_idxs, 1, nullptr,
+                                stream_guard.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+
+  std::vector<unsigned char> expectedA = initialA;
+  std::vector<unsigned char> expectedB = initialB;
+  std::copy_n(initialB.begin() + offsetB, kSwapSize, expectedA.begin() + offsetA);
+  std::copy_n(initialA.begin() + offsetA, kSwapSize, expectedB.begin() + offsetB);
+  requireBufferEquals(allocA.ptr(), expectedA, LinearAllocs::hipMalloc);
+  requireBufferEquals(allocB.ptr(), expectedB, allocTypeB);
 }
 
 // Batched multicast copy: one shared source, multiple destinations.
@@ -1092,6 +1197,100 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_ExtOp_Negative) {
 }
 
 /**
+ * An indirect copy larger than a single SDMA packet can carry is rejected up front.
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Indirect_TooLarge) {
+  constexpr size_t kSizeInBytes = size_t{1} << 30;  // One byte over the SDMA limit.
+
+  const hipError_t expectedError =
+      getIndirectExpectedReturn(LinearAllocs::hipMalloc, LinearAllocs::hipMalloc) == hipSuccess
+          ? hipErrorInvalidValue
+          : hipErrorNotSupported;
+
+  HIP_CHECK(hipSetDevice(0));
+  StreamGuard stream_guard(Streams::created);
+  // Both sides indirect, so only the pointer slots are range-checked and allocated.
+  LinearAllocGuard<unsigned char> srcSlot(LinearAllocs::hipMalloc, sizeof(void*));
+  LinearAllocGuard<unsigned char> dstSlot(LinearAllocs::hipMalloc, sizeof(void*));
+  HIP_CHECK(hipMemset(srcSlot.ptr(), 0, sizeof(void*)));
+  HIP_CHECK(hipMemset(dstSlot.ptr(), 0, sizeof(void*)));
+
+  void* srcPtr = srcSlot.ptr();
+  void* dstPtr = dstSlot.ptr();
+  size_t size = kSizeInBytes;
+  constexpr unsigned int kFlags = hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst;
+  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, kFlags};
+  size_t attrs_idxs[1] = {0};
+  size_t fail_idx = 1;
+
+  HIP_CHECK_ERROR(hipMemcpyBatchAsync(&dstPtr, &srcPtr, &size, 1, &attr, attrs_idxs, 1, &fail_idx,
+                                      stream_guard.stream()),
+                  expectedError);
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+
+  REQUIRE(fail_idx == (expectedError == hipErrorInvalidValue ? 0 : SIZE_MAX));
+}
+
+/**
+ * With SDMA disabled ROCr rejects indirect copies; the shader fallback must not copy the pointer
+ * slot in their place. Runs the child test case in a process with HSA_ENABLE_SDMA=0.
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Indirect_SdmaDisabled) {
+  if (getIndirectExpectedReturn(LinearAllocs::hipMalloc, LinearAllocs::hipMalloc) != hipSuccess) {
+    HIP_SKIP_TEST("SDMA indirect copies are not supported on this device.");
+  }
+
+  hip::SpawnProc proc(getSelfExePath());
+  proc.setEnv("HSA_ENABLE_SDMA", "0");
+  REQUIRE(proc.run("Unit_hipMemcpyBatchAsync_Indirect_SdmaDisabled_Child") == 0);
+}
+
+/**
+ * Child of Unit_hipMemcpyBatchAsync_Indirect_SdmaDisabled, not meant to run on its own.
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Indirect_SdmaDisabled_Child) {
+  const char* enableSdma = std::getenv("HSA_ENABLE_SDMA");
+  if (enableSdma == nullptr || std::string(enableSdma) != "0") {
+    HIP_SKIP_TEST("Only run by Unit_hipMemcpyBatchAsync_Indirect_SdmaDisabled.");
+  }
+
+  constexpr size_t kSizeInBytes = 4096;
+  const unsigned int flag = GENERATE(hipMemcpyFlagExtOpIndirectSrc, hipMemcpyFlagExtOpIndirectDst);
+  const bool indirectSrc = flag == hipMemcpyFlagExtOpIndirectSrc;
+  CAPTURE(indirectSrc);
+
+  HIP_CHECK(hipSetDevice(0));
+  StreamGuard stream_guard(Streams::created);
+  const std::vector<unsigned char> srcValues(kSizeInBytes, 10);
+  const std::vector<unsigned char> dstValues(kSizeInBytes, 0);
+  std::vector<LinearAllocGuard<unsigned char>> allocations;
+  void* src = addBuffer(allocations, srcValues, LinearAllocs::hipMalloc);
+  void* dst = addBuffer(allocations, dstValues, LinearAllocs::hipMalloc);
+
+  // As large as the copy, so a linear copy of it stays in bounds; the bytes after the pointer are a
+  // canary.
+  void* target = indirectSrc ? src : dst;
+  std::vector<unsigned char> slotValues(kSizeInBytes, 0xEE);
+  std::memcpy(slotValues.data(), &target, sizeof(target));
+  void* slot = addBuffer(allocations, slotValues, LinearAllocs::hipMalloc);
+
+  void* srcPtr = indirectSrc ? slot : src;
+  void* dstPtr = indirectSrc ? dst : slot;
+  size_t size = kSizeInBytes;
+  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, flag};
+  size_t attrs_idxs[1] = {0};
+
+  // The batch fails after the call returns, so only the memory is checked.
+  HIP_CHECK(hipMemcpyBatchAsync(&dstPtr, &srcPtr, &size, 1, &attr, attrs_idxs, 1, nullptr,
+                                stream_guard.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+
+  requireBufferEquals(slot, slotValues, LinearAllocs::hipMalloc);
+  requireBufferEquals(src, srcValues, LinearAllocs::hipMalloc);
+  requireBufferEquals(dst, dstValues, LinearAllocs::hipMalloc);
+}
+
+/**
  * Test Description
  * ------------------------
  * Verifies that an indirect copy dereferences its pointer slot on the device when the copy runs,
@@ -1224,8 +1423,6 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_IndirectCopy_StreamOrderedPointer) {
  *  - HIP_VERSION >= 7.1
  */
 HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_MixedAttributes_DefaultSwapIndirect) {
-  skipMemcpyBatchAsyncIfAnyGfx1250();
-
   constexpr size_t kSizeInBytes = 4096;
   constexpr size_t kCopiesPerAttr = 2;
 

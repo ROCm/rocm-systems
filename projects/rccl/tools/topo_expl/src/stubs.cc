@@ -97,10 +97,23 @@ int64_t ncclParamWorkArgsBytes() {
   return INT64_MAX;
 }
 
+// The NCCL 2.31 sync moved these tuning params out of src/enqueue.cc into
+// src/tuning/, which topo_expl does not link. graph/tuning.cc forward-declares
+// and calls them, so define them here with the real macro to keep the env-var
+// names and defaults identical to the runtime.
+NCCL_PARAM(Nthreads, "NTHREADS", -2);
+NCCL_PARAM(Ll128Nthreads, "LL128_NTHREADS", -2);
+NCCL_PARAM(PatEnable, "PAT_ENABLE", 0);
+NCCL_PARAM(NetOverhead, "NET_OVERHEAD", -2);
+
 // Stubs for symbols newly referenced by src/misc/param.cc and debug.h
 // after the NCCL 2.28.9 sync. topo_expl does not use the env-plugin
 // machinery and does not link debug.cc, so provide minimal definitions.
 __attribute__((visibility("default"))) uint64_t ncclDebugMask = 0;
+// NCCL 2.32: the inline ncclDebugShouldLog() in debug.h reads the level bitmask.
+// Leave it uninitialized so every INFO/TRACE reaches topo_expl's own
+// ncclDebugLog(), which applies the tool's NCCL_DEBUG filtering.
+__attribute__((visibility("default"))) uint32_t ncclDebugLevelMask = NCCL_DEBUG_LEVEL_MASK_UNINITIALIZED;
 
 ncclResult_t ncclInitEnv(void) {
   return ncclSuccess;

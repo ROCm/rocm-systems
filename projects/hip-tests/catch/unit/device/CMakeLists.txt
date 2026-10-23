@@ -15,12 +15,14 @@ set(TEST_SRC
     hipGetDeviceAttribute.cc
     hipGetDeviceCount.cc
     hipGetDeviceProperties.cc
+    hipGetDeviceProperties_R0000.cc
     hipRuntimeGetVersion.cc
     hipGetSetDeviceFlags.cc
     hipSetGetDevice.cc
     hipDeviceGetUuid.cc
     hipDeviceGetLuid.cc
     hipDeviceAPUCheck.cc
+    hipDeviceFlushGPUDirectRDMAWrites.cc
     hipDeviceGetDefaultMemPool.cc
     hipDeviceCanAccessPeer.cc
     hipDeviceEnableDisablePeerAccess.cc

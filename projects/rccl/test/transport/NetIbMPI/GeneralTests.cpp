@@ -7,15 +7,17 @@
 #include "NetIbMPITestBase.hpp"
 #include <sstream>
 #include <array>
+#include <map>
+#include <string>
+#include <utility>
 
 #ifdef MPI_TESTS_ENABLED
 
 // Initialization Tests
 
 TEST_F(NetIbMPITest, InitializePlugin) {
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
-                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
-        << "Test requirements not met";
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
 
     ncclResult_t result = InitNetIb();
     ASSERT_EQ(result, ncclSuccess) << "Failed to initialize NET IB plugin";
@@ -23,9 +25,8 @@ TEST_F(NetIbMPITest, InitializePlugin) {
 }
 
 TEST_F(NetIbMPITest, GetDeviceCount) {
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
-                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
-        << "Test requirements not met";
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
 
     ASSERT_EQ(InitNetIb(), ncclSuccess);
 
@@ -41,9 +42,8 @@ TEST_F(NetIbMPITest, GetDeviceCount) {
 // Device Properties Tests
 
 TEST_F(NetIbMPITest, GetDeviceProperties) {
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
-                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
-        << "Test requirements not met";
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -67,9 +67,8 @@ TEST_F(NetIbMPITest, GetDeviceProperties) {
 }
 
 TEST_F(NetIbMPITest, GetDevicePropertiesInvalidDevice) {
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
-                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
-        << "Test requirements not met";
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -81,12 +80,92 @@ TEST_F(NetIbMPITest, GetDevicePropertiesInvalidDevice) {
     EXPECT_NE(result, ncclSuccess) << "Should fail for invalid device ID";
 }
 
+// IB and IB-CAST must report the same port speed. Matched by (name, port) since a multi-port HCA
+// reuses the same name across ports.
+TEST_F(NetIbMPITest, CastPortSpeedMatchesIb) {
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
+
+    net_ = &ncclNetIb;
+    int ndevIb = 0;
+    AssertInitAndGetDevices(&ndevIb);
+
+    std::map<std::pair<std::string, int>, int> ibSpeeds;
+    for (int i = 0; i < ndevIb; i++) {
+        ncclNetProperties_t props;
+        memset(&props, 0, sizeof(props));
+        ASSERT_EQ(GetDeviceProperties(i, &props), ncclSuccess) << "IB device " << i;
+        ibSpeeds[{props.name, props.port}] = props.speed;
+    }
+
+    void* castCtx = nullptr;
+    ncclNetCommConfig_t commConfig = {};
+    commConfig.trafficClass = NCCL_NET_TRAFFIC_CLASS_UNDEF;
+    bool localInitOk = netIbCast.init(&castCtx, 0, &commConfig, nullptr, nullptr) == ncclSuccess;
+    {
+        int localInitFailed = localInitOk ? 0 : 1, anyInitFailed = 0;
+        MPI_Allreduce(&localInitFailed, &anyInitFailed, 1, MPI_INT, MPI_LOR, MPI_COMM_WORLD);
+        if (anyInitFailed) {
+            // IbCastInit() unwinds its own state on failure, so only a rank that succeeded needs to finalize.
+            if (localInitOk) netIbCast.finalize(castCtx);
+            GTEST_SKIP() << "IB-CAST plugin failed to initialize on at least one rank";
+        }
+    }
+    struct CastFinalizer {
+        void* ctx;
+        ~CastFinalizer() { netIbCast.finalize(ctx); }
+    } castFinalizer{castCtx};
+
+    // NCCL_IB_QUERY_PORT_SPEED=0 is the only deterministic case: every raw device must use the fallback.
+    // With query enabled we don't assert fromQuery, since a verb error or querySpeed==0 also fall through.
+    const char* queryEnv = getenv("NCCL_IB_QUERY_PORT_SPEED");
+    bool queryDisabledByEnv = queryEnv && strcmp(queryEnv, "0") == 0;
+    if (queryDisabledByEnv) {
+        int nRawDevs = ncclIbCastTestGetNDevs();
+        for (int d = 0; d < nRawDevs; d++) {
+            int fromQuery = -1;
+            ASSERT_EQ(ncclIbCastTestSpeedSource(d, &fromQuery), ncclSuccess) << "raw device " << d;
+            EXPECT_EQ(fromQuery, 0)
+                << "raw device " << d << " used ibv_query_port_speed() despite NCCL_IB_QUERY_PORT_SPEED=0";
+        }
+    }
+
+    int ndevCast = 0;
+    ASSERT_EQ(netIbCast.devices(&ndevCast), ncclSuccess);
+
+    int matched = 0;
+    for (int i = 0; i < ndevCast; i++) {
+        ncclNetProperties_t props;
+        memset(&props, 0, sizeof(props));
+        ASSERT_EQ(netIbCast.getProperties(i, &props), ncclSuccess) << "IB-CAST device " << i;
+        EXPECT_GT(props.speed, 0) << "IB-CAST device " << props.name << " has invalid speed";
+        auto it = ibSpeeds.find({props.name, props.port});
+        // speed 0 means IB's own query returned 0; IB-CAST's querySpeed != 0 guard deliberately diverges here.
+        if (it == ibSpeeds.end() || it->second == 0) continue;
+        EXPECT_EQ(props.speed, it->second) << "Speed mismatch for " << props.name << " port " << props.port;
+        matched++;
+        if (MPIEnvironment::world_rank == 0) {
+            TEST_INFO("Device %s: IB speed=%d IB-CAST speed=%d", props.name, it->second, props.speed);
+        }
+    }
+
+    if (MPIEnvironment::world_rank == 0) {
+        const char* path = queryDisabledByEnv
+            ? "ibv_query_port_speed disabled (NCCL_IB_QUERY_PORT_SPEED=0), active_speed/active_width fallback"
+            : "ibv_query_port_speed enabled (default)";
+        TEST_INFO("Port speed source: %s; %d device(s) compared", path, matched);
+    }
+
+    int localNoMatch = (matched == 0) ? 1 : 0, anyNoMatch = 0;
+    MPI_Allreduce(&localNoMatch, &anyNoMatch, 1, MPI_INT, MPI_LOR, MPI_COMM_WORLD);
+    if (anyNoMatch) GTEST_SKIP() << "No device name common to IB and IB-CAST on at least one rank";
+}
+
 // Connection Setup Tests
 
 TEST_F(NetIbMPITest, ListenAndConnect) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -94,7 +173,7 @@ TEST_F(NetIbMPITest, ListenAndConnect) {
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
     if (rank == 0) {
         EXPECT_NE(pair.recvComm, nullptr) << "Recv comm should be established";
@@ -105,9 +184,8 @@ TEST_F(NetIbMPITest, ListenAndConnect) {
 }
 
 TEST_F(NetIbMPITest, ConnectWithInvalidHandle) {
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
-                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
-        << "Test requirements not met";
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -124,9 +202,8 @@ TEST_F(NetIbMPITest, ConnectWithInvalidHandle) {
 // Memory Registration Tests
 
 TEST_F(NetIbMPITest, RegisterHostMemory) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -134,7 +211,7 @@ TEST_F(NetIbMPITest, RegisterHostMemory) {
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
     const size_t bufferSize = kSmallBufferSize;
     void* buffer = malloc(bufferSize);
@@ -152,9 +229,8 @@ TEST_F(NetIbMPITest, RegisterHostMemory) {
 }
 
 TEST_F(NetIbMPITest, RegisterGpuMemory) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -162,7 +238,7 @@ TEST_F(NetIbMPITest, RegisterGpuMemory) {
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
     const size_t bufferSize = kSmallBufferSize;
     void* buffer = nullptr;
@@ -180,9 +256,8 @@ TEST_F(NetIbMPITest, RegisterGpuMemory) {
 }
 
 TEST_F(NetIbMPITest, RegisterMemoryNullPointer) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -190,7 +265,7 @@ TEST_F(NetIbMPITest, RegisterMemoryNullPointer) {
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
     void* mhandle = nullptr;
     void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
@@ -201,9 +276,8 @@ TEST_F(NetIbMPITest, RegisterMemoryNullPointer) {
 }
 
 TEST_F(NetIbMPITest, DeregisterNullHandle) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -211,7 +285,7 @@ TEST_F(NetIbMPITest, DeregisterNullHandle) {
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
     void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
 
@@ -226,9 +300,8 @@ TEST_F(NetIbMPITest, DeregisterNullHandle) {
 // harness performs MPI setup and failure handshakes on the main thread, then
 // releases the workers together so their data paths overlap deterministically.
 TEST_F(NetIbMPITest, SimpleSendRecv) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -240,7 +313,7 @@ TEST_F(NetIbMPITest, SimpleSendRecv) {
     if (nThreads == 1) {
         ConnectionPair pair;
         NetConnectionGuard connGuard(net_);
-        SetupConnectionWithGuard(0, pair, connGuard);
+        ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
         const size_t bufferSize = kSmallBufferSize;
         const int tag = 42;
@@ -280,7 +353,7 @@ TEST_F(NetIbMPITest, SimpleSendRecv) {
         ThreadResult result;
         const size_t bufferSize = kSmallBufferSize;
         const int tag = 42;
-        const int seed = senderRank + threadIdx * 97;
+        const int seed = WorkerSeed(threadIdx, senderRank);
 
         void* buffer = malloc(bufferSize);
         if (!buffer) { result.ok = false; result.msg = "malloc failed"; return result; }
@@ -354,21 +427,48 @@ TEST_F(NetIbMPITest, SimpleSendRecv) {
     AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded SimpleSendRecv");
 }
 
+// Parameterized by MPIEnvironment::nThreads. Concurrent workers each sweep the
+// same size ladder on an independent connection, so registrations of many
+// different sizes hit the shared per-device MR cache at once.
 TEST_F(NetIbMPITest, SendRecvMultipleSizes) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
 
     const int rank = MPIEnvironment::world_rank;
-    ConnectionPair pair;
-    NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
+    const int nThreads = MPIEnvironment::nThreads;
 
     // Test various sizes
     std::vector<size_t> testSizes = {1, 64, 256, 1024, 4096, 16384, 65536};
+
+    if (nThreads > 1) {
+        // Pinned, unlike SimpleSendRecv: this test's claim is the shared per-device MR
+        // cache, and spreading workers across NICs gives each its own cache, so at two
+        // and four workers on a four-NIC host the contention would not exist at all.
+        RunThreadedBody(
+            ThreadDevPolicy::Fixed(0), nThreads,
+            "threaded SendRecvMultipleSizes",
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                ThreadResult result;
+                // One pattern per worker across the whole ladder. Folding the size into
+                // the seed put different workers on the same bytes at different sizes;
+                // a payload arriving from the wrong connection at the wrong size is
+                // caught by the size check, and at the right size by the pattern.
+                const int seed = WorkerSeed(threadIdx, kMultiSizeSeedOffset);
+                for (size_t size : testSizes) {
+                    result = WorkerHostTransfer(rank, pair, size, 100, seed);
+                    if (!result.ok) return result;
+                }
+                return result;
+            });
+        return;
+    }
+
+    ConnectionPair pair;
+    NetConnectionGuard connGuard(net_);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
     for (size_t size : testSizes) {
         const int tag = 100;
@@ -416,9 +516,8 @@ TEST_F(NetIbMPITest, SendRecvMultipleSizes) {
 }
 
 TEST_F(NetIbMPITest, SendRecvZeroSize) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -426,7 +525,7 @@ TEST_F(NetIbMPITest, SendRecvZeroSize) {
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
     const size_t bufferSize = kSmallBufferSize;
     const int tag = 50;
@@ -463,9 +562,8 @@ TEST_F(NetIbMPITest, SendRecvZeroSize) {
 }
 
 TEST_F(NetIbMPITest, FlushAfterRecv) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     ASSERT_EQ(InitNetIb(), ncclSuccess);
 
@@ -577,9 +675,8 @@ TEST_F(NetIbMPITest, FlushAfterRecv) {
 // threaded path leaves rank synchronization to the main-thread harness after
 // every worker has completed.
 TEST_F(NetIbMPITest, MultipleSequentialTransfers) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -592,7 +689,7 @@ TEST_F(NetIbMPITest, MultipleSequentialTransfers) {
     if (nThreads == 1) {
         ConnectionPair pair;
         NetConnectionGuard connGuard(net_);
-        SetupConnectionWithGuard(0, pair, connGuard);
+        ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
         void* sendBuffer = nullptr;
         void* recvBuffer = nullptr;
@@ -682,9 +779,15 @@ TEST_F(NetIbMPITest, MultipleSequentialTransfers) {
 
         NetMHandleWorkerGuard mhandleGuard(mhandle, NetMHandleWorkerDeleter(net_, comm));
 
+        // One pattern for this worker, held across all of its transfers. A per-iteration
+        // seed reduces modulo 256 into another worker's space -- at sixteen workers
+        // thread 0's iteration 66 and thread 2's iteration 0 produce the same bytes --
+        // and these transfers are not synchronized between workers, so a payload
+        // crossing connections could verify clean. The tag still changes per iteration,
+        // which is what the plugin matches on.
+        const int seed = WorkerSeed(threadIdx, kBaseSeedOffset);
         for (int i = 0; i < numTransfers; i++) {
             const int tag = kTransferTagBase + i;
-            const int seed = kBaseSeedOffset + threadIdx * 10000 + i;
             void* request = nullptr;
             bool postOk = true;
 
@@ -743,18 +846,36 @@ TEST_F(NetIbMPITest, MultipleSequentialTransfers) {
     AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded MultipleSequentialTransfers");
 }
 
+// Parameterized by MPIEnvironment::nThreads. Concurrent 16 MB transfers put
+// several large registrations in the per-device MR cache simultaneously and
+// keep the NIC saturated while every worker verifies its own payload.
 TEST_F(NetIbMPITest, LargeTransfer) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
 
     const int rank = MPIEnvironment::world_rank;
+    const int nThreads = MPIEnvironment::nThreads;
+
+    if (nThreads > 1) {
+        // Pinned for the same reason: several large registrations live on one device is
+        // the claim, which spreading would defeat.
+        RunThreadedBody(
+            ThreadDevPolicy::Fixed(0), nThreads,
+            "threaded LargeTransfer",
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                return WorkerHostTransfer(rank, pair, kLargeBufferSize, 400,
+                                          WorkerSeed(threadIdx, kBaseSeedOffset),
+                                          kLargeTransferTimeoutMs);
+            });
+        return;
+    }
+
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
     const size_t bufferSize = kLargeBufferSize; // 16 MB
     const int tag = 400;
@@ -784,7 +905,7 @@ TEST_F(NetIbMPITest, LargeTransfer) {
     // Wait for completion with longer timeout for large transfer
     int sizes[1] = {0};
     ASSERT_NE(request, nullptr) << "Request must be non-NULL before waiting";
-    ASSERT_EQ(WaitForCompletion(request, sizes, kLargeTransferTimeout), ncclSuccess);
+    ASSERT_EQ(WaitForCompletion(request, sizes, kLargeTransferTimeoutMs), ncclSuccess);
 
     if (rank == 0) {
         EXPECT_EQ(sizes[0], bufferSize) << "Large transfer size mismatch";
@@ -798,22 +919,20 @@ TEST_F(NetIbMPITest, LargeTransfer) {
 }
 
 TEST_F(NetIbMPITest, CloseWithoutWaitingForCompletion) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
 
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 }
 
 TEST_F(NetIbMPITest, ListenCloseListen) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int rank = MPIEnvironment::world_rank;
     int peerRank = (rank + 1) % 2;
@@ -826,74 +945,119 @@ TEST_F(NetIbMPITest, ListenCloseListen) {
     }
 
     for (int iter = 0; iter < 3; iter++) {
-        // Iteration 3: abandoned listen-close
+        // Iteration 3: abandoned listen-close. Self-contained on rank 0 and
+        // nothing on rank 1 waits on it, so a failure here is recorded rather
+        // than made fatal: a fatal exit would skip this iteration's handshake
+        // below and strand rank 1 in its MPI_Recv.
         if (iter == 2) {
             if (rank == 0) {
                 void* abandonedListen = nullptr;
                 ncclNetHandle_t abandonedHandle;
-                ASSERT_EQ(CreateListenComm(mergedDev, &abandonedHandle, &abandonedListen),
+                EXPECT_EQ(CreateListenComm(mergedDev, &abandonedHandle, &abandonedListen),
                           ncclSuccess)
                     << "Iter 3: abandoned listen failed";
-                ASSERT_NE(abandonedListen, nullptr);
-                ASSERT_EQ(CloseListenComm(abandonedListen), ncclSuccess)
+                EXPECT_NE(abandonedListen, nullptr);
+                EXPECT_EQ(CloseListenComm(abandonedListen), ncclSuccess)
                     << "Iter 3: close abandoned listen failed";
             }
         }
 
         ConnectionPair pair;
-        ncclNetHandle_t handle;
+        // A failed listen on rank 0 must still reach rank 1: a fatal ASSERT_EQ
+        // here would return before the handle is ever sent, and rank 1's
+        // MPI_Recv below has no timeout, so it would block until the suite
+        // timeout instead of failing with this test. The status word makes the
+        // failure observable to both ranks instead.
+        //
+        // handshake.handle sits at a 4-byte offset (after `status`), but
+        // ncclIbListen writes a uint64_t magic through the pointer it's given,
+        // so listen()/connect() must see pair.handle (8-byte aligned, same
+        // layout SetupConnection relies on) rather than &handshake.handle
+        // directly; the handshake only carries a byte-copy of it.
+        struct SetupHandshake {
+            int status;  // 1 when rank 0's listener is ready and the handle is valid
+            ncclNetHandle_t handle;
+        } handshake = {};
 
         if (rank == 0) {
-            ASSERT_EQ(CreateListenComm(mergedDev, &handle, &pair.listenComm), ncclSuccess)
-                << "Listen failed iter " << iter;
-            ASSERT_NE(pair.listenComm, nullptr);
-        }
-
-        if (rank == 0) {
-            MPI_Send(&handle, sizeof(handle), MPI_BYTE, peerRank, 0, MPI_COMM_WORLD);
+            ncclResult_t local = CreateListenComm(mergedDev, &pair.handle, &pair.listenComm);
+            handshake.status = (local == ncclSuccess && pair.listenComm != nullptr) ? 1 : 0;
+            if (handshake.status) memcpy(handshake.handle, pair.handle, sizeof(pair.handle));
+            // Sent even on failure: the peer is waiting for this message.
+            MPI_Send(&handshake, sizeof(handshake), MPI_BYTE, peerRank, 0, MPI_COMM_WORLD);
         } else {
-            MPI_Recv(&handle, sizeof(handle), MPI_BYTE, peerRank, 0,
+            MPI_Recv(&handshake, sizeof(handshake), MPI_BYTE, peerRank, 0,
                      MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            if (handshake.status) memcpy(pair.handle, handshake.handle, sizeof(pair.handle));
         }
 
         int connectFailed = 0;
         if (rank == 0) {
-            ncclResult_t r = ncclSuccess;
-            while (!pair.recvComm && r == ncclSuccess)
-                r = AcceptConnection(pair.listenComm, &pair.recvComm);
-            if (r != ncclSuccess || !pair.recvComm) connectFailed = 1;
+            if (!handshake.status) {
+                connectFailed = 1;
+            } else {
+                // Bounded and paced. Accept is asynchronous, so it can keep
+                // returning ncclSuccess with a null comm -- the state the shared
+                // setup helper guards against -- and an unbounded spin here would
+                // hang this rank while the peer waits in the reduction below, which
+                // is the failure this test exists to have reported instead.
+                ncclResult_t r = ncclSuccess;
+                for (int attempt = 0; attempt < kConnectTimeoutMs / kPollIntervalMs
+                                      && !pair.recvComm && r == ncclSuccess; attempt++) {
+                    r = AcceptConnection(pair.listenComm, &pair.recvComm);
+                    if (!pair.recvComm && r == ncclSuccess) usleep(kPollIntervalUs);
+                }
+                if (r != ncclSuccess || !pair.recvComm) connectFailed = 1;
+            }
         } else {
-            ncclResult_t r = ncclSuccess;
-            while (!pair.sendComm && r == ncclSuccess)
-                r = ConnectToRemote(mergedDev, &handle, &pair.sendComm);
-            if (r != ncclSuccess || !pair.sendComm) connectFailed = 1;
+            if (!handshake.status) {
+                connectFailed = 1;  // rank 0's listen failed
+            } else {
+                // Bounded and paced, for the same reason as the accept side.
+                ncclResult_t r = ncclSuccess;
+                for (int attempt = 0; attempt < kConnectTimeoutMs / kPollIntervalMs
+                                      && !pair.sendComm && r == ncclSuccess; attempt++) {
+                    r = ConnectToRemote(mergedDev, &pair.handle, &pair.sendComm);
+                    if (!pair.sendComm && r == ncclSuccess) usleep(kPollIntervalUs);
+                }
+                if (r != ncclSuccess || !pair.sendComm) connectFailed = 1;
+            }
         }
         MPI_Allreduce(MPI_IN_PLACE, &connectFailed, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
         if (connectFailed) {
-            if (rank == 0 && pair.listenComm) CloseListenComm(pair.listenComm);
-            FAIL() << "IB QP connect/accept failed (cross-subnet node pair)";
+            // Either side may have completed its own comm before the peer failed,
+            // and FAIL() ends the test before the loop's normal close path, so
+            // every local handle is released here. Data comms first, then listen.
+            if (pair.sendComm) CloseSendComm(pair.sendComm);
+            if (pair.recvComm) CloseRecvComm(pair.recvComm);
+            if (pair.listenComm) CloseListenComm(pair.listenComm);
+            FAIL() << "IB QP listen/connect/accept failed iter " << iter
+                   << " (cross-subnet node pair, or rank 0's listen failed)";
         }
 
-        // Close: data comms first, then listen
+        // Close: data comms first, then listen. Reported, not asserted: a fatal
+        // assertion here leaves this rank's loop while its peer starts the next
+        // iteration and blocks in the MPI_Recv above -- the hang this test was
+        // rewritten to remove. ncclIbCloseRecv is a chain of NCCLCHECKs, so it can
+        // genuinely fail, and both ranks have to keep walking the same iterations.
         if (rank == 0) {
-            ASSERT_EQ(CloseRecvComm(pair.recvComm), ncclSuccess)
+            EXPECT_EQ(CloseRecvComm(pair.recvComm), ncclSuccess)
                 << "CloseRecvComm failed iter " << iter;
         } else {
-            ASSERT_EQ(CloseSendComm(pair.sendComm), ncclSuccess)
+            EXPECT_EQ(CloseSendComm(pair.sendComm), ncclSuccess)
                 << "CloseSendComm failed iter " << iter;
         }
 
         if (rank == 0) {
-            ASSERT_EQ(CloseListenComm(pair.listenComm), ncclSuccess)
+            EXPECT_EQ(CloseListenComm(pair.listenComm), ncclSuccess)
                 << "CloseListenComm failed iter " << iter;
         }
     }
 }
 
 TEST_F(NetIbMPITest, MultipleSimultaneousListens) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int rank = MPIEnvironment::world_rank;
     int peerRank = (rank + 1) % 2;
@@ -1078,9 +1242,8 @@ TEST_F(NetIbMPITest, MultipleSimultaneousListens) {
 }
 
 TEST_F(NetIbMPITest, MultipleSequentialConnections) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     ASSERT_EQ(InitNetIb(), ncclSuccess);
 
@@ -1116,9 +1279,8 @@ TEST_F(NetIbMPITest, MultipleSequentialConnections) {
 }
 
 TEST_F(NetIbMPITest, RapidConnectDisconnect) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int rank = MPIEnvironment::world_rank;
     int peerRank = (rank + 1) % 2;
@@ -1294,9 +1456,8 @@ TEST_F(NetIbMPITest, RapidConnectDisconnect) {
 }
 
 TEST_F(NetIbMPITest, MultiRecv) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly 2 processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int rank = MPIEnvironment::world_rank;
     int peerRank = (rank + 1) % 2;
@@ -1440,9 +1601,8 @@ TEST_F(NetIbMPITest, MultiRecv) {
 }
 
 TEST_F(NetIbMPITest, MultiRecvShuffled) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly 2 processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int rank = MPIEnvironment::world_rank;
     int peerRank = (rank + 1) % 2;
@@ -1616,9 +1776,8 @@ TEST_F(NetIbMPITest, MultiRecvShuffled) {
 // With RCCL_IB_P2P_DISABLE_CTS=0 the AINIC CTS table overflows ~256 entries
 // and the drain times out; with =1 it passes. Requires exactly 2 ranks.
 TEST_F(NetIbMPITest, CtsDepthStress) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " MPI processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     net_ = &netIbCast;
     ASSERT_EQ(InitNetIb(), ncclSuccess);

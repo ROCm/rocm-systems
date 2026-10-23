@@ -149,7 +149,7 @@ __host__ void HostInterface::create_hdp_window() {
                             sizeof(unsigned int), /* size of window */
                             sizeof(unsigned int), /* displacement */
                             MPI_INFO_NULL, host_comm_world_, &hdp_win);
-  
+
   /*
    * Start a shared access epoch on windows of all ranks,
    * and let the library there is no need to check for

@@ -3,32 +3,76 @@
 Documentation for rocJPEG is available at
 [https://rocm.docs.amd.com/projects/rocJPEG/en/latest/](https://rocm.docs.amd.com/projects/rocJPEG/en/latest/)
 
-## (unreleased) rocJPEG 1.9.0
+## rocJPEG 1.13.0 for ROCm 10.2.0
 
 ### Added
 
-* Added rocJpegDecodeBatchedAsync and rocJpegDecodeBatchedSync APIs to support asynchronous batched JPEG decoding.
+* Added the `rocJpegGetDecoderCaps` API and the `RocJpegDecodeCaps` structure to query the decode capabilities of a rocJPEG handle, including the number of JPEG cores, the supported JPEG coding processes, image resolutions, chroma subsamplings, and output formats, the native output surface format of each chroma subsampling as verified with the VA-API driver, and the hardware ROI decode and color conversion support.
+* Added the `RocJpegSurfaceFormat` enum to describe the layout of the decoded image produced by the VCN JPEG decoder, and the `RocJpegCodingProcess` enum to report the supported JPEG coding processes.
+* Added the `jpegDecodeCaps` sample to demonstrate the `rocJpegGetDecoderCaps` API.
+* Added HIP-based color conversion kernels to the batched decode path, improving batched decoding performance.
+
+### Changed
+
+* The decode APIs (`rocJpegDecode`, `rocJpegDecodeAsync`, `rocJpegDecodeBatched`, and `rocJpegDecodeBatchedAsync`) now return `ROCJPEG_STATUS_INVALID_PARAMETER` when the crop rectangle in `RocJpegDecodeParams` does not lie within the image.
+
+## rocJPEG 1.10.0 for ROCm 10.1.0
+
+### Added
+
+* Added rocJpegDecodeBatchedAsync and rocJpegDecodeBatchedSync APIs to support asynchronous batched JPEG decoding, and the `jpegDecodeBatchedAsync` sample.
 * Added support for explicitly loading librocm_sysdeps_va via dlopen, ensuring complete isolation from the system libva library.
+* `BUILD_TESTS` CMake option (default OFF) to build and install the sample and negative API test binaries, including under TheRock.
+* CTests for the `jpegDecodeAsync` and `jpegDecodeBatchedAsync` samples.
+* `rocjpeg_benchmark.py` script to build `jpegDecodePerf` and run decode benchmarks across image resolutions, batch sizes, and thread counts.
 
-## rocJPEG 1.7.0
+### Changed
+
+* Changed the HIP YUV-to-RGB color conversion kernels from the BT.709 standard to BT.601 for color space conversion.
+* The VA-API and DRM CMake find modules now search only the TheRock sysdeps location (`${ROCM_PATH}/lib/rocm_sysdeps`) instead of falling back to system paths.
+* The `jpegDecodePerf` sample allocates and frees the output buffers outside the timed decode loop, so multi-threaded runs no longer block on `hipFree`.
+
+### Resolved issues
+
+* Fixed link failures (undefined `pthread_create`) in the `jpegDecodeAsync` and `jpegDecodeBatchedAsync` samples.
+
+## rocJPEG 1.7.0 for ROCm 10.0.0
 
 ### Added
 
-* Added rocJpegDecodeAsync and rocJpegDecodeSync APIs to support asynchronous single-image JPEG decoding, allowing decode submission and completion to be separated across threads for improved pipeline throughput.
-
-## (unreleased) rocJPEG 1.6.1
+* Added rocJpegDecodeAsync and rocJpegDecodeSync APIs to support asynchronous single-image JPEG decoding, allowing decode submission and completion to be separated across threads for improved pipeline throughput, and the `jpegDecodeAsync` sample.
 
 ### Changed
 
 * Improved VAAPI batch grouping by using reusable surface bucket dimensions to reduce decode batch fragmentation.
+* The `jpegDecodePerf` sample pre-allocates GPU output memory instead of allocating and freeing it for every image.
+* Info level logs list each GPU UUID and PCI bus/device/function to render node mapping and the selected render node.
 
-## rocJPEG 1.6.0 for ROCm 7.14
+### Resolved issues
+
+* Fixed decoding always running on the first GPU (`renderD128`) on GPUs whose HIP device UUID doesn't match the amdgpu sysfs `unique_id` (for example, MI355X). The decoder now binds to the requested device by PCI bus/device/function.
+* Fixed integer overflows in the SOF marker parser and in channel copies for very large image dimensions. Images with a width or height of 0 or greater than 65500 are now rejected.
+
+## rocJPEG 1.6.0 for ROCm 7.14.1
 
 ### Added
 
 * Added a logging mechanism for core APIs that can be controlled by setting the `ROCJPEG_LOG_LEVEL` environment variable.
+* Debug level logs for each JPEG marker (SOF, DQT, DHT, SOS, EOI) with its stream offset, and clearer error messages for unsupported JPEG streams. Progressive JPEG streams are explicitly rejected.
+* Info level logs include the VA-API version and driver, the DRM render node, and the GPU UUID mapping.
+* A Python test runner is installed with the rocJPEG tests.
+* Support for gfx1250.
+
+### Changed
+
+* Added DRM render node offset handling for MI308 compute partitions.
 
 ## rocJPEG 1.5.0 for ROCm 7.13
+
+### Added
+
+* The `jpegDecodePerf` sample reports the total wall time of the decode.
+* Support for gfx1150, gfx1152, and gfx1153.
 
 ### Changed
 
@@ -40,8 +84,12 @@ Documentation for rocJPEG is available at
 * Simplified libva version check (single `>= 1.22` requirement).
 * Cleaned up CMake error messages.
 
-## rocJPEG 1.4.0 for ROCm 7.2.1
- 
+### Resolved issues
+
+* Fixed the sample CMake files skipping their `Threads_FOUND` checks.
+
+## rocJPEG 1.4.0 for ROCm 7.2.4
+
 ### Changed
 
 * Bug fixes and performance improvements

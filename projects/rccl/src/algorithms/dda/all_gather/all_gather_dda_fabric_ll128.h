@@ -24,6 +24,14 @@
 
 namespace dda::common {
 
+// Slot geometry, derived from the scratch bank the host picked. The bank splits
+// evenly across ranks and the per-rank stride is floored to a whole number of
+// slices, so a slot always begins on a slice boundary and the 16B wire accesses
+// stay aligned however nRanks divides the bank.
+constexpr size_t ddaLL128AgSlotWords(size_t bankSize, int nRanks) {
+  return ddaLL128SlotWords(bankSize, nRanks, 1);
+}
+
 // LL128 all-gather. 2D grid: grid.x == nRanks - 1 places one column per remote
 // peer; grid.y splits that peer's slices across blocks, one
 // warp per slice. Each column packs this rank's payload into its peer's slot,
@@ -40,7 +48,8 @@ __launch_bounds__(1024)
                                           uint32_t* __restrict__ epochDev, // per-block LL epoch cells
                                           int epochLen, // number of cells in epochDev
                                           size_t slicesTotal, // slices this call uses
-                                          size_t slotWords) { // per-rank slot stride, in 8B words
+                                          size_t bankSize, // scratch bank size (from host)
+                                          DdaKernelParams params) {
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
 
@@ -58,7 +67,10 @@ __launch_bounds__(1024)
   const int total = (int)(gridDim.x * gridDim.y);
   const uint32_t flag32 = ddaGetLLEpochInc(epochDev, flatBlockId, 1);
   const uint64_t flag = ((uint64_t)flag32 << 32) | (uint64_t)flag32;
-  const uint64_t bankWords = (uint64_t)(flag32 & 1u) * (uint64_t)nRanks * (uint64_t)slotWords;
+  const size_t slotWords = ddaLL128AgSlotWords(bankSize, nRanks);
+  // Bank 1 sits at bankSize rather than right after the slots, so every DDA LL
+  // tier sharing this scratch and epoch counter banks at the same byte offsets.
+  const uint64_t bankWords = (uint64_t)(flag32 & 1u) * (uint64_t)(bankSize / sizeof(uint64_t));
 
   // Slices stride by warp within this peer's column only.
   const size_t gwarp = (size_t)blockIdx.y * (size_t)nwarps + (size_t)warp;
@@ -102,10 +114,13 @@ __launch_bounds__(1024)
     const int eltInSlice =
       rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
     uint64_t vr[kDdaLL128WordsPerThread];
-    ddaLL128PollWire(gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, vr, flag, lane);
+    if (!ddaLL128PollWire(gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, vr, flag, lane,
+                          params)) {
+      break; // not return: every thread must reach the __syncthreads below
+    }
     ddaLL128StoreRegs<int8_t>(dstBytes + dataByte, vr, eltInSlice, lane, flagLane);
   }
-#if defined(__gfx1250__)
+#if (defined(__gfx1250__) || defined(__gfx1250_strict__))
   asm volatile("s_wait_storecnt 0x0" ::: "memory");
 #endif
   __syncthreads();

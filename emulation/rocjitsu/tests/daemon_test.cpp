@@ -374,6 +374,11 @@ TEST_F(DaemonTest, HipMemcpyRoundTripPageableAbovePinThreshold) {
   EXPECT_EQ(r.exit_code, 0) << r.output;
 }
 
+TEST_F(DaemonTest, HipMaskedStreamLdsReuse) {
+  auto r = run_hip_test(hip_memcpy_bin(), "HipMemcpyTest.MaskedStreamLdsReuse");
+  EXPECT_EQ(r.exit_code, 0) << r.output;
+}
+
 TEST_F(DaemonTest, HipMemcpyDeviceToDevice) {
   auto r = run_hip_test(hip_memcpy_bin(), "HipMemcpyTest.DeviceToDevice");
   EXPECT_EQ(r.exit_code, 0) << r.output;
@@ -462,6 +467,13 @@ TEST_F(DaemonPluginTest, LoggingPluginDispatchLogged) {
 // on the remote path — the primary-fd re-mint (reissue_synthetic_kfd_fd) and the
 // invalidation-vs-open serialization — which the CLI-launched (local) variant of
 // the same tests cannot reach.
+
+TEST_F(DaemonTest, ForkserverChildrenInitializeIndependentBackends) {
+  const ProcessResult result =
+      run_hip_test(interposer_dup_bin(),
+                   "InterposerFreshForkTest.ChildAndGrandchildInitializeIndependentBackends");
+  EXPECT_EQ(result.exit_code, 0) << result.output;
+}
 
 TEST_F(DaemonTest, InterposerDupReopenAfterPrimaryOverwriteRemote) {
   auto r = run_hip_test(interposer_dup_bin(),
@@ -616,5 +628,6 @@ TEST_F(RcclDaemonTest, Broadcast) { run_collective("RcclTest.Broadcast"); }
 TEST_F(RcclDaemonTest, AllGather) { run_collective("RcclTest.AllGather"); }
 TEST_F(RcclDaemonTest, ReduceScatter) { run_collective("RcclTest.ReduceScatter"); }
 TEST_F(RcclDaemonTest, SendRecv) { run_collective("RcclTest.SendRecv"); }
+TEST_F(RcclDaemonTest, AllCasesInOneSession) { run_collective(nullptr); }
 
 } // namespace

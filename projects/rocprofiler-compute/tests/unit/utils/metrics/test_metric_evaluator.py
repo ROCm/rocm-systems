@@ -34,6 +34,36 @@ class TestMetricEvaluator:
         assert result == "N/A"
         assert mock_warning.called
 
+    def test_eval_expression_reports_na_at_debug_level(self):
+        """A result of NaN is reported as debug, not as a warning."""
+        metric_evaluator = MetricEvaluator({}, {}, {})
+        with patch("builtins.eval") as mock_eval, patch("builtins.compile"), patch(
+            "utils.metrics.metric_evaluator.console_warning"
+        ) as mock_warning, patch(
+            "utils.metrics.metric_evaluator.console_debug"
+        ) as mock_debug:
+            mock_eval.return_value = np.nan
+            assert metric_evaluator.eval_expression("Mock Metric") == "N/A"
+
+        mock_warning.assert_not_called()
+        debug_msgs = [call.args[0] for call in mock_debug.call_args_list]
+        assert any("evaluated to N/A" in msg for msg in debug_msgs), (
+            f"Expected an N/A message at debug level, got {debug_msgs}"
+        )
+
+    def test_eval_expression_failure_message_names_the_exception_type(self):
+        """A failed expression is reported with the exception type."""
+        metric_evaluator = MetricEvaluator({}, {}, {})
+        with patch("builtins.eval") as mock_eval, patch("builtins.compile"), patch(
+            "utils.metrics.metric_evaluator.console_warning"
+        ) as mock_warning:
+            mock_eval.side_effect = KeyError("TCC_TAG_STALL_sum")
+            assert metric_evaluator.eval_expression("Mock Metric") == "N/A"
+
+        warning_msgs = [call.args[0] for call in mock_warning.call_args_list]
+        assert len(warning_msgs) == 1, f"Expected one warning, got {warning_msgs}"
+        assert "KeyError: 'TCC_TAG_STALL_sum'" in warning_msgs[0]
+
     def test_eval_expression_returns_na_when_eval_returns_none(self):
         """eval_expression returns 'N/A' when the evaluated expression yields None."""
         metric_evaluator = MetricEvaluator({}, {}, {})

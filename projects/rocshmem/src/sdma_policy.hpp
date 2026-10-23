@@ -86,14 +86,16 @@ class SdmaImpl {
       // the SDMA engine reads from GL2, but __syncthreads() in the caller only
       // drains stores to GL0 without flushing to GL2.  Agent scope is sufficient
       // because SDMA probes GL2 via the coherence protocol on the same die.
-      __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
+      atomic::threadfence<atomic::memory_scope::device,
+                          atomic::memory_order::release>();
       sdma_anvil::put(*handle, dst, src, size);
       // Mark (local_pe, effective_channel) dirty so sdmaQuiet drains the right
       // channel.  Blocking copies drain inline via quietAll, so the dirty bit
       // is unnecessary and would only cause a redundant poll in a later fence.
       if constexpr (!is_blocking(Kind)) {
         uint64_t bit = 1ULL << (local_pe * numChannels + effective_channel);
-        __hip_atomic_fetch_or(&sdmaDirty, bit, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+        atomic::fetch_or<atomic::memory_scope::device,
+                         atomic::memory_order::relaxed>(&sdmaDirty, bit);
       }
     }
     return handle;
@@ -107,9 +109,10 @@ class SdmaImpl {
   __device__ void sdmaQuiet(int local_pe) {
     // Build mask covering all channels for this PE.
     uint64_t pe_mask = ((1ULL << numChannels) - 1) << (local_pe * numChannels);
-    uint64_t was_dirty = __hip_atomic_fetch_and(&sdmaDirty, ~pe_mask,
-                                                __ATOMIC_RELAXED,
-                                                __HIP_MEMORY_SCOPE_AGENT) & pe_mask;
+    uint64_t was_dirty =
+      atomic::fetch_and<atomic::memory_scope::device,
+                        atomic::memory_order::relaxed>(
+                          &sdmaDirty, ~pe_mask) & pe_mask;
     if (!was_dirty) return;
     // Drain only the channels that were marked dirty.
     for (int ch = 0; ch < numChannels; ch++) {
@@ -124,8 +127,9 @@ class SdmaImpl {
   // Iterates the sdmaDirty bitmask where each set bit corresponds to a
   // (pe, channel) pair that has a pending SDMA op.
   __device__ void sdmaQuietAll() {
-    uint64_t dirty = __hip_atomic_exchange(&sdmaDirty, 0ULL, __ATOMIC_RELAXED,
-                                           __HIP_MEMORY_SCOPE_AGENT);
+    uint64_t dirty =
+      atomic::exchange<atomic::memory_scope::device,
+                       atomic::memory_order::relaxed>(&sdmaDirty, 0ULL);
     while (dirty) {
       int bit = __builtin_ffsll(dirty) - 1;  // bit = pe * numChannels + ch
       sdma_anvil::SdmaQueueDeviceHandle* handle = deviceHandles_d[bit];

@@ -19,11 +19,15 @@ dump_info(std::ostream& _os, const fmodset_t& _data)
 {
     module_function::reset_width();
     for(const auto& itr : _data)
+    {
         module_function::update_width(itr);
+    }
 
     module_function::write_header(_os);
     for(const auto& itr : _data)
+    {
         _os << itr << '\n';
+    }
 
     module_function::reset_width();
 }
@@ -43,18 +47,23 @@ dump_info(const string_t& _label, string_t _oname, const string_t& _ext,
     namespace cereal = tim::cereal;
     namespace policy = tim::policy;
 
-    auto _cfg          = tim::settings::compose_filename_config{};
-    _cfg.subdirectory  = "instrumentation";
-    _oname             = tim::settings::compose_output_filename(_oname, _ext, _cfg);
-    auto _handle_error = [&]() {
+    auto _cfg                = tim::settings::compose_filename_config{};
+    _cfg.subdirectory        = "instrumentation";
+    _oname                   = tim::settings::compose_output_filename(_oname, _ext, _cfg);
+    auto const _handle_error = [&]() {
         std::stringstream _msg{};
         _msg << "[dump_info] Error opening '" << _oname << " for output";
         verbprintf(_level, "%s\n", _msg.str().c_str());
         if(_fail)
+        {
             throw std::runtime_error(std::string{ "[rocprof-sys][exe]" } + _msg.str());
+        }
     };
 
-    if(!debug_print && verbose_level < _level) return;
+    if(!debug_print && verbose_level < _level)
+    {
+        return;
+    }
 
     if(_ext == "txt")
     {
@@ -78,7 +87,7 @@ dump_info(const string_t& _label, string_t _oname, const string_t& _ext,
         {
             using output_policy     = policy::output_archive<cereal::XMLOutputArchive>;
             output_policy::indent() = true;
-            auto ar                 = output_policy::get(oss);
+            auto const ar           = output_policy::get(oss);
 
             ar->setNextName("rocprofsys");
             ar->startNode();
@@ -108,7 +117,7 @@ dump_info(const string_t& _label, string_t _oname, const string_t& _ext,
         std::stringstream oss{};
         {
             using output_policy = policy::output_archive<cereal::PrettyJSONOutputArchive>;
-            auto ar             = output_policy::get(oss);
+            auto const ar       = output_policy::get(oss);
 
             ar->setNextName("rocprofsys");
             ar->startNode();
@@ -147,7 +156,9 @@ dump_info(const string_t& _oname, const fmodset_t& _data, int _level, bool _fail
           const string_t& _type, const strset_t& _ext)
 {
     for(const auto& itr : _ext)
+    {
         dump_info(_type, _oname, itr, _data, _level, _fail);
+    }
 }
 //
 static inline void
@@ -156,11 +167,14 @@ load_info(const string_t& _label, const string_t& _iname, fmodset_t& _data, int 
     namespace cereal = tim::cereal;
     namespace policy = tim::policy;
 
-    auto        _pos = _iname.find_last_of('.');
+    auto const  _pos = _iname.find_last_of('.');
     std::string _ext = {};
-    if(_pos != std::string::npos) _ext = _iname.substr(_pos + 1);
+    if(_pos != std::string::npos)
+    {
+        _ext = _iname.substr(_pos + 1);
+    }
 
-    auto _handle_error = [&]() {
+    auto const _handle_error = [&]() {
         std::stringstream _msg{};
         _msg << "[load_info] Error opening '" << _iname << " for input";
         verbprintf(_level, "%s\n", _msg.str().c_str());
@@ -172,11 +186,13 @@ load_info(const string_t& _label, const string_t& _iname, fmodset_t& _data, int 
         verbprintf(_level, "Reading '%s'... ", _iname.c_str());
         std::ifstream ifs{ _iname };
         if(!ifs)
+        {
             _handle_error();
+        }
         else
         {
             using input_policy = policy::input_archive<cereal::XMLInputArchive>;
-            auto ar            = input_policy::get(ifs);
+            auto const ar      = input_policy::get(ifs);
 
             ar->setNextName("rocprofsys");
             ar->startNode();
@@ -194,11 +210,13 @@ load_info(const string_t& _label, const string_t& _iname, fmodset_t& _data, int 
         verbprintf(_level, "Reading '%s'... ", _iname.c_str());
         std::ifstream ifs{ _iname };
         if(!ifs)
+        {
             _handle_error();
+        }
         else
         {
             using input_policy = policy::input_archive<cereal::JSONInputArchive>;
-            auto ar            = input_policy::get(ifs);
+            auto const ar      = input_policy::get(ifs);
 
             ar->setNextName("rocprofsys");
             ar->startNode();
@@ -244,7 +262,7 @@ load_info(const string_t& _inp, std::map<std::string, fmodset_t*>& _data, int _l
     if(!_exceptions.empty())
     {
         std::stringstream _msg{};
-        for(auto& itr : _exceptions)
+        for(auto const& itr : _exceptions)
         {
             _msg << "[rocprof-sys][exe] " << itr << "\n";
         }

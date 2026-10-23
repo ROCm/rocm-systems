@@ -1281,6 +1281,137 @@ __CG_QUALIFIER__ thread_block_tile<size, ParentCGTy> tiled_partition(const Paren
   return impl::tiled_partition_internal<size, ParentCGTy>(g);
 }
 
+namespace impl {
+
+template <typename T>
+__CG_QUALIFIER__ T&& forward(typename __hip_internal::remove_reference<T>::type& t) {
+  return static_cast<T&&>(t);
+}
+
+template <typename T>
+__CG_QUALIFIER__ T&& forward(typename __hip_internal::remove_reference<T>::type&& t) {
+  return static_cast<T&&>(t);
+}
+
+}  // namespace impl
+
+/** \ingroup CooperativeGAPI
+ *  \brief   Calls an invocable on a single thread of the group.
+ *
+ *  \details Selects one thread of the group and uses it to call the supplied function
+ *           with specified arguments. All group types are supported. The group is
+ *           not synchronized, so communication or synchronization within the
+ *           calling group is not allowed inside function.
+ *
+ *  \tparam Group The cooperative group class template parameter.
+ *  \tparam Fn    The type of the invocable.
+ *  \tparam Args  The types of the arguments of the invocable.
+ *
+ *  \param g    [in] The group to select the thread from.
+ *  \param fn   [in] The invocable called by the selected thread.
+ *  \param args [in] The arguments passed to the invocable.
+ */
+template <typename Group, typename Fn, typename... Args>
+__CG_QUALIFIER__ void invoke_one(const Group& g, Fn&& fn, Args&&... args) {
+  if (g.thread_rank() == 0) {
+    impl::forward<Fn>(fn)(impl::forward<Args>(args)...);
+  }
+}
+
+namespace impl {
+
+template <typename Group, typename Fn, typename... Args>
+__CG_QUALIFIER__ auto invoke_one_broadcast_impl(const Group& g, Fn&& fn, Args&&... args) ->
+    typename __hip_internal::remove_reference<decltype(impl::forward<Fn>(fn)(
+        impl::forward<Args>(args)...))>::type {
+  using ResultType = typename __hip_internal::remove_cvref<decltype(impl::forward<Fn>(fn)(
+      impl::forward<Args>(args)...))>::type;
+  static_assert(__hip_internal::is_trivially_copyable<ResultType>::value,
+                "The return type of the invocable must be trivially copyable");
+  static_assert(sizeof(ResultType) <= 32,
+                "The return type of the invocable must be at most 32 bytes");
+
+  // The result is moved one 32-bit word at a time.
+  constexpr unsigned int num_words =
+      (sizeof(ResultType) + sizeof(unsigned int) - 1) / sizeof(unsigned int);
+
+  struct ResultBytes {
+    unsigned char data[sizeof(ResultType)];
+  };
+
+  unsigned int words[num_words] = {};
+  if (g.thread_rank() == 0) {
+    ResultBytes selected =
+        __builtin_bit_cast(ResultBytes, impl::forward<Fn>(fn)(impl::forward<Args>(args)...));
+    __builtin_memcpy(words, &selected, sizeof(ResultType));
+  }
+
+  for (unsigned int i = 0; i < num_words; ++i) {
+    words[i] = g.shfl(words[i], 0);
+  }
+
+  ResultBytes result{};
+  __builtin_memcpy(&result, words, sizeof(ResultType));
+  return __builtin_bit_cast(ResultType, result);
+}
+
+}  // namespace impl
+
+/** \ingroup CooperativeGAPI
+ *  \brief   Calls an invocable on a single thread of the group and broadcasts the result.
+ *
+ *  \details Selects one thread of the group and uses it to call the supplied function with
+ *           specified arguments and then, distributes the returned value to all threads of
+ *           the group. The group is not synchronized, so communication or synchronization
+ *           within the calling group is not allowed inside function. The return type of the
+ *           function must be trivially copyable and at most 32 bytes in size.
+ *
+ *  \tparam Fn    The type of the invocable.
+ *  \tparam Args  The types of the arguments of the invocable.
+ *
+ *  \param g    [in] The group to select the thread from.
+ *  \param fn   [in] The invocable called by the selected thread.
+ *  \param args [in] The arguments passed to the invocable.
+ */
+template <typename Fn, typename... Args>
+__CG_QUALIFIER__ auto invoke_one_broadcast(const coalesced_group& g, Fn&& fn, Args&&... args) ->
+    typename __hip_internal::remove_reference<decltype(impl::forward<Fn>(fn)(
+        impl::forward<Args>(args)...))>::type {
+  using ResultType = decltype(impl::forward<Fn>(fn)(impl::forward<Args>(args)...));
+  static_assert(!__hip_internal::is_void<ResultType>::value,
+                "For invocables returning void invoke_one should be used instead");
+  return impl::invoke_one_broadcast_impl(g, impl::forward<Fn>(fn), impl::forward<Args>(args)...);
+}
+
+/** \ingroup CooperativeGAPI
+ *  \brief   Calls an invocable on a single thread of the group and broadcasts the result.
+ *
+ *  \details Selects one thread of the group and uses it to call the supplied function with
+ *           specified arguments and then, distributes the returned value to all threads of
+ *           the group. The group is not synchronized, so communication or synchronization
+ *           within the calling group is not allowed inside function. The return type of the
+ *           function must be trivially copyable and at most 32 bytes in size.
+ *
+ *  \tparam Size   The size of the thread block tile group.
+ *  \tparam Parent The cooperative group class template parameter of the input group.
+ *  \tparam Fn     The type of the invocable.
+ *  \tparam Args   The types of the arguments of the invocable.
+ *
+ *  \param g    [in] The group to select the thread from.
+ *  \param fn   [in] The invocable called by the selected thread.
+ *  \param args [in] The arguments passed to the invocable.
+ */
+template <unsigned int Size, typename Parent, typename Fn, typename... Args>
+__CG_QUALIFIER__ auto invoke_one_broadcast(const thread_block_tile<Size, Parent>& g, Fn&& fn,
+                                           Args&&... args) ->
+    typename __hip_internal::remove_reference<decltype(impl::forward<Fn>(fn)(
+        impl::forward<Args>(args)...))>::type {
+  using ResultType = decltype(impl::forward<Fn>(fn)(impl::forward<Args>(args)...));
+  static_assert(!__hip_internal::is_void<ResultType>::value,
+                "For invocables returning void invoke_one should be used instead");
+  return impl::invoke_one_broadcast_impl(g, impl::forward<Fn>(fn), impl::forward<Args>(args)...);
+}
+
 #if !defined(HIP_DISABLE_WARP_SYNC_BUILTINS)
 
 /** \ingroup CooperativeGConstruct
@@ -1431,13 +1562,37 @@ struct CGIdentity<T, cooperative_groups::bit_and<T>> {
   }
 };
 
+template <>
+struct CGIdentity<bool, cooperative_groups::bit_and<bool>> {
+  __CG_QUALIFIER__ bool operator()()
+  {
+    return true;
+  }
+};
+
+template <>
+struct CGIdentity<bool, cooperative_groups::bit_or<bool>> {
+  __CG_QUALIFIER__ bool operator()()
+  {
+    return false;
+  }
+};
+
 template <class T>
 struct CGIdentity<T, cooperative_groups::less<T>> {
   __CG_QUALIFIER__ T operator()()
   {
     // CUDA would return 0 in this case. But in our case we mimic what __ockl_wfscan_*
     // would do
-    return __hip_internal::NumericLimits<T>::maximum();
+    return __hip_internal::ExclusiveScanIdentity<T>::maximum();
+  }
+};
+
+template <>
+struct CGIdentity<bool, cooperative_groups::less<bool>> {
+  __CG_QUALIFIER__ bool operator()()
+  {
+    return true;
   }
 };
 
@@ -1445,7 +1600,15 @@ template <class T>
 struct CGIdentity<T, cooperative_groups::greater<T>> {
   __CG_QUALIFIER__ T operator()()
   {
-    return __hip_internal::NumericLimits<T>::minimum();
+    return __hip_internal::ExclusiveScanIdentity<T>::minimum();
+  }
+};
+
+template <>
+struct CGIdentity<bool, cooperative_groups::greater<bool>> {
+  __CG_QUALIFIER__ bool operator()()
+  {
+    return false;
   }
 };
 
@@ -1472,13 +1635,15 @@ __CG_QUALIFIER__ unsigned long long groupMask(const TyGroup& group)
 // for up to 32 bytes (__hip_ds_bpermute() can only do 4 bytes at a time,
 // this function calls it (or the floating point version) multiple times to
 // implement it for bigger sizes
-template <bool isPrimitiveType, class T, size_t NumPermutes, typename __hip_internal::enable_if<NumPermutes == 0, int>::type = 0>
+template <bool isPrimitiveType, class T, size_t NumPermutes,
+          typename __hip_internal::enable_if<NumPermutes == 0, int>::type = 0>
 __CG_QUALIFIER__ void bPermute(T&, T, int from)
 {
 }
 
 // trivial case: the type fits within the permute size
-template <bool IsPrimitiveType, class T, size_t NumPermutes, typename __hip_internal::enable_if<IsPrimitiveType && NumPermutes == 1, int>::type = 0>
+template <bool IsPrimitiveType, class T, size_t NumPermutes,
+          typename __hip_internal::enable_if<IsPrimitiveType && NumPermutes == 1, int>::type = 0>
 __CG_QUALIFIER__ void bPermute(T& permuteResult, T result, int from)
 {
   auto backwardPermute = [](int index, T arg) {
@@ -1490,11 +1655,11 @@ __CG_QUALIFIER__ void bPermute(T& permuteResult, T result, int from)
       }
     };
 
-  if constexpr (sizeof(T) == 2) {
+  if constexpr (sizeof(T) <= 2) {
     union {
       int i;
       T f;
-    } tmp;
+    } tmp = {};
 
     tmp.f = result;
     tmp.i = __hip_ds_bpermute(from << 2, tmp.i);

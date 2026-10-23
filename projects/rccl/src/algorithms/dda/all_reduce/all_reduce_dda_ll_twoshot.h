@@ -36,10 +36,14 @@
 
 namespace dda::common {
 
-// Both tiers share one scratch and epoch, so bank 1 has to start at the same
-// offset for both: a slot here holds only a shard, and the bank spans two of them
-// (publish + write-back). dda_all_reduce_fabric_ll.cu static_asserts the halving.
-constexpr size_t kDdaLLArTwoShotSlotStridePkts = kDdaLLArSlotStridePkts / 2;
+// Packets one per-rank slot holds. A bank has to carry two staging areas here
+// (publish + write-back), so a slot is half the one-shot's and the bank stride
+// is unchanged -- which is what keeps bank 1 at the same byte offset for both
+// tiers, since they share one scratch and one epoch counter. Floored to the same
+// 16-packet granule as the one-shot so both tiers land slots identically.
+constexpr size_t ddaLLArTwoShotSlotPkts(size_t bankSize, int nRanks) {
+  return ddaLLSlotPkts(bankSize, sizeof(LLPacket16) * (size_t)nRanks * 2, 16);
+}
 
 // Fixed-width peer staging for phase 1: a runtime-sized array, or a runtime index
 // into one, is placed in scratch. 8 covers rank counts 4 and 8 in a single pass.
@@ -75,16 +79,18 @@ __launch_bounds__(1024)
                                         size_t count,                       // full-message element count
                                         int selfRank, int nRanksRt,
                                         uint32_t* __restrict__ epochDev,    // per-block LL epoch cells (shared AG+AR)
-                                        int epochLen) {                     // number of cells in epochDev
+                                        int epochLen,                       // number of cells in epochDev
+                                        size_t bankSize,                  // scratch bank size (from host)
+                                        DdaKernelParams params) {
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const size_t bytes = count * sizeof(T);
   const size_t nPk = bytes >> 3;           // 8 payload bytes per packet
   const size_t nPk_rank = nPk / nRanks;
-  const size_t slot = kDdaLLArTwoShotSlotStridePkts;
+  const size_t slot = ddaLLArTwoShotSlotPkts(bankSize, nRanks);
 
   const uint32_t flag = ddaGetLLEpochInc(epochDev, blockIdx.x, 1);
-  const size_t bankOffsetPkts = (size_t)(flag & 1u) * (size_t)nRanks * slot * 2;
+  const size_t bankOffsetPkts = (size_t)(flag & 1u) * (bankSize / sizeof(LLPacket16));
   const size_t bankOffsetPkts_next = bankOffsetPkts + (size_t)nRanks * slot;
 
   const size_t gtid = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
@@ -125,6 +131,10 @@ __launch_bounds__(1024)
 
   // Phase 2: poll my slots for the other ranks, reduce with my own data, then
   // publish the reduced shard to every peer's second stage.
+  // A sticky abort, not an early return: an exit per unrolled wait nearly doubles
+  // the NRANKS_CT == 8 kernel. Once aborted, the remaining waits are skipped and
+  // the kernel still reaches the epoch bump at the end.
+  bool aborted = false;
   LLPacket16* myBase = reinterpret_cast<LLPacket16*>(peerScratch[selfRank]) + bankOffsetPkts;
   for (size_t pk = gtid; pk < nPk_rank; pk += stride) {
     uint32_t acc0 = in[2 * pk];
@@ -132,16 +142,16 @@ __launch_bounds__(1024)
     for (int r = 1; r < nRanks; ++r) {
       const int peer = (selfRank + r) % nRanks;
       volatile LLPacket16* src = myBase + (size_t)peer * slot;
-      uint32_t d0, f0, d1, f1;
-      do {
-        ddaLLLoadLineB128(reinterpret_cast<const uint32_t*>(const_cast<LLPacket16*>(&src[pk])), d0, f0, d1, f1);
-      } while (f0 != flag || f1 != flag);
-      acc0 = vecElementAdd<T>(acc0, d0);
-      acc1 = vecElementAdd<T>(acc1, d1);
+      uint32_t d0 = 0, f0, d1 = 0, f1;
+      if (!aborted) aborted = !ddaLLWaitLineFlags(&src[pk], flag, params, d0, f0, d1, f1);
+      ddaLLAddPayload<T>(acc0, acc1, d0, d1);
     }
     out[2 * pk] = acc0;
     out[2 * pk + 1] = acc1;
 
+    // After an abort acc0/acc1 are partial sums; publishing them under this
+    // epoch's flag would let a peer that has not aborted accept them as final.
+    if (aborted) continue;
     #pragma unroll
     for (int r = 1; r < nRanks; ++r) {
       const int peer = (selfRank + r) % nRanks;
@@ -158,10 +168,8 @@ __launch_bounds__(1024)
       const int peer = (selfRank + r) % nRanks;
       uint32_t *peer_out = reinterpret_cast<uint32_t*>(recvbuff) + peer * nPk_rank * 2;
       volatile LLPacket16* src = myBase + (size_t)peer * slot;
-      uint32_t d0, f0, d1, f1;
-      do {
-        ddaLLLoadLineB128(reinterpret_cast<const uint32_t*>(const_cast<LLPacket16*>(&src[pk])), d0, f0, d1, f1);
-      } while (f0 != flag || f1 != flag);
+      uint32_t d0 = 0, f0, d1 = 0, f1;
+      if (!aborted) aborted = !ddaLLWaitLineFlags(&src[pk], flag, params, d0, f0, d1, f1);
       peer_out[2 * pk] = d0;
       peer_out[2 * pk + 1] = d1;
     }

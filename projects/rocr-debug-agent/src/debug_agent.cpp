@@ -631,6 +631,38 @@ stop_all_wavefronts (amd_dbgapi_process_id_t process_id)
   agent_log (log_level_t::info, "all wavefronts are stopped");
 }
 
+/* Resumes the waves stop_all_wavefronts stopped only to print them (no stop
+   reason).  Waves stopped by an exception are left to the event handling.  */
+void
+resume_requested_stops (amd_dbgapi_process_id_t process_id)
+{
+  amd_dbgapi_wave_id_t *wave_ids;
+  size_t wave_count;
+  DBGAPI_CHECK (amd_dbgapi_process_wave_list (process_id, &wave_count,
+                                              &wave_ids, nullptr));
+  std::unique_ptr<amd_dbgapi_wave_id_t, decltype (free) *> wave_ids_cleaner (
+      wave_ids, free);
+
+  for (size_t i = 0; i < wave_count; ++i)
+    {
+      amd_dbgapi_wave_state_t state;
+      if (amd_dbgapi_wave_get_info (wave_ids[i], AMD_DBGAPI_WAVE_INFO_STATE,
+                                    sizeof (state), &state)
+              != AMD_DBGAPI_STATUS_SUCCESS
+          || state != AMD_DBGAPI_WAVE_STATE_STOP)
+        continue;
+
+      std::underlying_type_t<amd_dbgapi_wave_stop_reasons_t> stop_reason;
+      DBGAPI_CHECK (amd_dbgapi_wave_get_info (
+          wave_ids[i], AMD_DBGAPI_WAVE_INFO_STOP_REASON, sizeof (stop_reason),
+          &stop_reason));
+      if (stop_reason == AMD_DBGAPI_WAVE_STOP_REASON_NONE)
+        DBGAPI_CHECK (amd_dbgapi_wave_resume (wave_ids[i],
+                                              AMD_DBGAPI_RESUME_MODE_NORMAL,
+                                              AMD_DBGAPI_EXCEPTION_NONE));
+    }
+}
+
 std::unordered_set<amd_dbgapi_code_object_id_t>
 print_wavefronts (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
                   code_object_map_t &code_object_map)
@@ -878,6 +910,11 @@ print_wavefronts (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
     }
 
   free (wave_ids);
+
+  /* Let the waves stopped above for printing run again.  */
+  if (all_wavefronts)
+    resume_requested_stops (process_id);
+
   return code_objects_reported;
 }
 
@@ -1271,7 +1308,7 @@ process_dbgapi_events (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
               = stop_reason_bits ^ (stop_reason_bits & (stop_reason_bits - 1));
           stop_reason_bits ^= one_bit;
 
-          switch (stop_reason)
+          switch (one_bit)
             {
             case AMD_DBGAPI_WAVE_STOP_REASON_NONE:
             case AMD_DBGAPI_WAVE_STOP_REASON_DEBUG_TRAP:

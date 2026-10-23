@@ -20,7 +20,7 @@
 struct ncclCudaContext;
 
 // Get a ncclCudaContext to track the currently active CUDA context.
-ncclResult_t ncclCudaContextTrack(struct ncclCudaContext** out);
+ncclResult_t ncclCudaContextTrack(struct ncclCudaContext** out, int launchOrderImplicit, uint64_t commHash);
 // Drop reference.
 void ncclCudaContextDrop(struct ncclCudaContext* cxt);
 
@@ -120,6 +120,10 @@ struct ncclStrongStream {
 #if ROCM_VERSION >= 60100
   // This stream ever appeared in a graph capture.
   bool everCaptured;
+  // serialEvent has been recorded at least once for the graph-origin path used when
+  // graphStreamOrdering=0. Separate from everCaptured, which is also set by captures that never
+  // record serialEvent (graphUsageMode != 2) and is shared with splitShare children.
+  bool graphOriginCaptured;
   std::mutex mutex;
   struct ncclStrongStreamCapture* captureHead;
   // The event used to establish order between graphs and streams. During acquire
@@ -132,6 +136,8 @@ struct ncclCudaContext {
   struct ncclCudaContext* next;
   int hcontext;
   int refCount;
+  bool launchOrderImplicitEverEnabled;
+  bool launchOrderImplicitEverDisabled;
   struct ncclStrongStream launchOrder;
 };
 

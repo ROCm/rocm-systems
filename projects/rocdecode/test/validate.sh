@@ -36,6 +36,44 @@ SKIP_CTEST=0
 SKIP_CONFORMANCE=0
 CHECK_ROCM=0
 
+# Cross-platform knobs. On Windows (Git Bash reports MINGW*/MSYS*/CYGWIN* from uname)
+# the core library is built with the MSVC multi-config generator, so CTest needs an
+# explicit -C Release, and the conformance script is launched with `python` (the
+# `python3` name on Windows is usually the inert Store shim). On Linux these stay as
+# they were: no config flag, python3.
+IS_WINDOWS=0
+PY=python3
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) IS_WINDOWS=1; PY=python ;;
+esac
+
+# On Windows, make the install's runtime DLLs loadable from just ROCM_PATH. The
+# Windows loader ignores ROCM_PATH, so rocdecode.dll (in ROCM_PATH/bin), the
+# rocm_sysdeps_va*.dll and vaon12_drv_video.dll (in ROCM_PATH/lib/rocm_sysdeps/bin)
+# are only found if those dirs are on PATH; the VA-API layer also needs
+# LIBVA_DRIVERS_PATH pointed at the sysdeps bin dir. If the caller already set these
+# up, this is a harmless no-op (dirs are only prepended when not already on PATH).
+if [[ $IS_WINDOWS -eq 1 ]]; then
+  WIN_ROCM="${ROCM_PATH:-C:/opt/rocm}"
+  SYSDEPS_BIN="$WIN_ROCM/lib/rocm_sysdeps/bin"
+  # Git Bash's PATH is colon-separated, but native Windows paths carry a
+  # drive-letter colon (C:/opt/rocm) that would split mid-path and leave the DLL
+  # dirs unreachable. Convert to POSIX form (/c/opt/rocm) with cygpath before
+  # prepending so launched programs actually find the decode DLLs.
+  for d in "$WIN_ROCM/bin" "$SYSDEPS_BIN"; do
+    if [[ -d "$d" ]]; then
+      d_posix="$(cygpath -u "$d")"
+      if [[ ":$PATH:" != *":$d_posix:"* ]]; then
+        PATH="$d_posix:$PATH"
+      fi
+    fi
+  done
+  export PATH
+  # LIBVA_DRIVERS_PATH is read by the VA-API loader (native Windows code), so it
+  # must stay a native path, not the POSIX form used for PATH.
+  [[ -d "$SYSDEPS_BIN" ]] && export LIBVA_DRIVERS_PATH="$SYSDEPS_BIN"
+fi
+
 usage() {
   cat <<'EOF'
 Usage: validate.sh [--build-dir DIR] [--skip-ctest] [--skip-conformance] [--check-rocm]
@@ -67,6 +105,23 @@ EOF
 # derives its compiler, install prefix, and CTest data path from ROCM_PATH
 # (defaulting to /opt/rocm), so a wrong/unset value fails confusingly.
 check_rocm_path() {
+  # On Windows the compiler is MSVC (no amdclang++); ROCM_PATH only selects the
+  # install tree rocDecode is resolved from, so a dir-exists check is what matters.
+  # The caller is expected to have already set up the env (ROCM_PATH plus the
+  # install's bin dirs on PATH and LIBVA_DRIVERS_PATH) in this cmd/shell session.
+  if [[ $IS_WINDOWS -eq 1 ]]; then
+    local rp="${ROCM_PATH:-C:/opt/rocm}"
+    if [[ ! -d "$rp" ]]; then
+      {
+        echo "ERROR: ROCM_PATH does not exist: $rp"
+        echo "  Fix: point ROCM_PATH at your rocDecode install prefix (default C:/opt/rocm)"
+        echo "       and make sure its bin dirs are on PATH before launching Claude Code."
+      } >&2
+      return 1
+    fi
+    echo "Using ROCM_PATH=$rp (Windows/MSVC)"
+    return 0
+  fi
   local rp="${ROCM_PATH:-/opt/rocm}"
   local note
   if [[ -n "${ROCM_PATH:-}" ]]; then
@@ -132,7 +187,13 @@ done
 # normal test run (which does not install) skips it.
 check_rocm_path || exit 1
 if [[ $CHECK_ROCM -eq 1 ]]; then
-  check_rocm_writable || exit 1
+  # The writable-prefix check guards `make install` into ROCM_PATH on Linux. On
+  # Windows the bash `-w` test on a native path is unreliable and the MSVC
+  # `cmake --install` does not need sudo, so the dir-exists check (done above) is
+  # sufficient there.
+  if [[ $IS_WINDOWS -eq 0 ]]; then
+    check_rocm_writable || exit 1
+  fi
   exit 0
 fi
 
@@ -140,8 +201,13 @@ TIMESTAMP=$(date +%Y-%m-%d_%H-%M-%S)
 # Write results outside the repo tree (default: $HOME) so they do not clutter
 # `git status`. Override the base dir with ROCDECODE_VALIDATION_RESULTS_DIR.
 RESULTS_BASE="${ROCDECODE_VALIDATION_RESULTS_DIR:-$HOME/rocDecode_validation_results}"
-RESULTS_DIR="$RESULTS_BASE/$TIMESTAMP"
-mkdir -p "$RESULTS_DIR"
+mkdir -p "$RESULTS_BASE"
+# The timestamp is only second resolution and mkdir -p is happy with a directory that already
+# exists, so two runs started in the same second would share this directory and everything
+# derived from it: the CTest log, the per codec output files and the per codec directories
+# handed to the conformance script. Let mktemp pick the name so it is unique by construction.
+# The timestamp stays in it for readability.
+RESULTS_DIR=$(mktemp -d "$RESULTS_BASE/${TIMESTAMP}.XXXXXX") || exit 1
 
 # ANSI colors
 GREEN='\033[0;32m'
@@ -167,7 +233,14 @@ if [[ $SKIP_CTEST -eq 0 ]]; then
     echo "ERROR: Build directory not found: $BUILD_DIR" >&2
     RESULTS["$CTEST_PHASE"]="FAILED"
   else
-    make -C "$BUILD_DIR" test ARGS="-VV" 2>&1 | tee "$RESULTS_DIR/ctest_output.txt"
+    # Linux uses `make test`; Windows has no make and the MSVC generator is
+    # multi-config, so drive CTest directly with -C Release. Both emit the same
+    # "100% tests passed"/"0 tests failed" summary the grep below keys on.
+    if [[ $IS_WINDOWS -eq 1 ]]; then
+      ctest --test-dir "$BUILD_DIR" -C Release -VV 2>&1 | tee "$RESULTS_DIR/ctest_output.txt"
+    else
+      make -C "$BUILD_DIR" test ARGS="-VV" 2>&1 | tee "$RESULTS_DIR/ctest_output.txt"
+    fi
     if grep -qE "100% tests passed|0 tests failed" "$RESULTS_DIR/ctest_output.txt"; then
       RESULTS["$CTEST_PHASE"]="PASSED"
     else
@@ -204,12 +277,27 @@ if [[ $SKIP_CONFORMANCE -eq 0 ]]; then
     fi
     echo "=== Running Conformance: $CODEC ==="
     OUT="$RESULTS_DIR/conformance_${CODEC}_output.txt"
-    python3 run_rocDecode_Conformance.py \
+    # Give each codec its own results directory under this run. Without it every codec, and
+    # every other sweep on the machine, shares the script's default directory and appends to one
+    # rocDecode_output.log, so the pass counts are taken over another run's output.
+    "$PY" run_rocDecode_Conformance.py \
       --rocDecode_directory "$SCRIPT_DIR/.." \
       --files_directory "$DIR" \
+      --results_directory "$RESULTS_DIR/$CODEC" \
       2>&1 | tee "$OUT"
-    if grep -q "The number of failing streams is 0" "$OUT" && \
-       grep -q "The number of streams that did not finish decoding is 0" "$OUT"; then
+    # A pass count above the stream count cannot come from decoding; it means the tally was taken
+    # over output that is not all from this run. Call that out rather than letting it land as an
+    # ordinary pass or failure, which is how it reads otherwise.
+    TOTAL_STREAMS=$(grep -oE "completed on the [0-9]+ streams" "$OUT" | grep -oE "[0-9]+" | tail -1)
+    PASSING_STREAMS=$(grep -oE "number of passing streams is [0-9]+" "$OUT" | grep -oE "[0-9]+" | tail -1)
+    if [[ -n "$TOTAL_STREAMS" && -n "$PASSING_STREAMS" && "$PASSING_STREAMS" -gt "$TOTAL_STREAMS" ]]; then
+      echo "ERROR: $CODEC reported $PASSING_STREAMS passing streams out of $TOTAL_STREAMS."
+      echo "       The tally is inconsistent, so these results are not usable. This happens when"
+      echo "       another conformance run shares the results directory; re-run with nothing else"
+      echo "       decoding on this machine."
+      RESULTS["Conformance $CODEC"]="FAILED"
+    elif grep -q "The number of failing streams is 0" "$OUT" && \
+         grep -q "The number of streams that did not finish decoding is 0" "$OUT"; then
       RESULTS["Conformance $CODEC"]="PASSED"
     else
       RESULTS["Conformance $CODEC"]="FAILED"

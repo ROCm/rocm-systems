@@ -36,7 +36,7 @@ extern uint64_t g_proxySaveOpLastOpCount;
 // test pin this fake instead of production.
 extern bool g_proxySaveOpSawNonNullJustInquire;
 
-extern ncclResult_t g_proxyStartResult;  // UNDRIVEN
+extern ncclResult_t g_proxyStartResult;
 
 void ResetProxyFakes();
 

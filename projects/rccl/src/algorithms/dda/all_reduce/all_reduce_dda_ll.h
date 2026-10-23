@@ -29,9 +29,16 @@
 
 namespace dda::common {
 
-// LL is for small-message, so the full payload is well under the staging cap.
-// each packet takes 16 bytes.
-constexpr size_t kDdaLLArSlotStridePkts = kDdaLLMaxBytes / sizeof(LLPacket16);
+// Packets one per-rank slot holds, derived from the scratch bank the host picked
+// rather than a fixed constant, so the tier's reach follows the allocation. A
+// packet is 16B and the slot is floored to a whole 16 of them, so the slot base
+// stays aligned for any nRanks.
+//
+// Both the kernel and the eligibility check call this, so the size the host
+// admits is exactly the geometry the kernel addresses.
+constexpr size_t ddaLLArSlotPkts(size_t bankSize, int nRanks) {
+  return ddaLLSlotPkts(bankSize, sizeof(LLPacket16) * (size_t)nRanks, 16);
+}
 
 // LL flat all-reduce kernel. 1D grid over packets (8B payload each).
 //
@@ -55,15 +62,17 @@ __launch_bounds__(512)
                                      size_t count,                          // full-message element count
                                      int selfRank, int nRanksRt,
                                      uint32_t* __restrict__ epochDev,       // per-block LL epoch cells (shared AG+AR)
-                                     int epochLen) {                        // number of cells in epochDev
+                                     int epochLen,                          // number of cells in epochDev
+                                     size_t bankSize,                     // scratch bank size (from host)
+                                     DdaKernelParams params) {
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const size_t bytes = count * sizeof(T);
   const size_t nPk = bytes >> 3;           // 8 payload bytes per packet
-  const size_t slot = kDdaLLArSlotStridePkts;
+  const size_t slot = ddaLLArSlotPkts(bankSize, nRanks);
 
   const uint32_t flag = ddaGetLLEpochInc(epochDev, blockIdx.x, 1);
-  const size_t bankOffsetPkts = (size_t)(flag & 1u) * (size_t)nRanks * slot;
+  const size_t bankOffsetPkts = (size_t)(flag & 1u) * (bankSize / sizeof(LLPacket16));
 
   const size_t gtid = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
   const size_t stride = (size_t)gridDim.x * blockDim.x;
@@ -84,20 +93,31 @@ __launch_bounds__(512)
     }
   }
 
-  // Phase 2: poll my slots for the other ranks, reduce with my own data.
+  // Phase 2: poll my slots for the other ranks and fold every rank's payload in
+  // rank order, so each rank rounds the same partial sums and all get the same
+  // result. My own payload comes straight from sendbuff.
   LLPacket16* myBase = reinterpret_cast<LLPacket16*>(peerScratch[selfRank]) + bankOffsetPkts;
   for (size_t pk = gtid; pk < nPk; pk += stride) {
-    uint32_t acc0 = in[2 * pk];
-    uint32_t acc1 = in[2 * pk + 1];
-    for (int r = 1; r < nRanks; ++r) {
-      const int peer = (selfRank + r) % nRanks;
-      volatile LLPacket16* src = myBase + (size_t)peer * slot;
-      uint32_t d0, f0, d1, f1;
-      do {
-        ddaLLLoadLineB128(reinterpret_cast<const uint32_t*>(const_cast<LLPacket16*>(&src[pk])), d0, f0, d1, f1);
-      } while (f0 != flag || f1 != flag);
-      acc0 = vecElementAdd<T>(acc0, d0);
-      acc1 = vecElementAdd<T>(acc1, d1);
+    uint32_t acc0 = 0, acc1 = 0;
+    for (int peer = 0; peer < nRanks; ++peer) {
+      uint32_t d0, d1;
+      if (peer == selfRank) {
+        d0 = in[2 * pk];
+        d1 = in[2 * pk + 1];
+      } else {
+        volatile LLPacket16* src = myBase + (size_t)peer * slot;
+        uint32_t f0, f1;
+        if (!ddaLLWaitLineFlags(&src[pk], flag, params, d0, f0, d1, f1)) {
+          ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag);
+          return;
+        }
+      }
+      if (peer == 0) {
+        acc0 = d0;
+        acc1 = d1;
+      } else {
+        ddaLLAddPayload<T>(acc0, acc1, d0, d1);
+      }
     }
     out[2 * pk] = acc0;
     out[2 * pk + 1] = acc1;

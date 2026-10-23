@@ -31,6 +31,7 @@ target_include_directories(hrr_reader PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
   $<INSTALL_INTERFACE:include/hrr/playback>
 )
+target_compile_definitions(hrr_reader PRIVATE HIP_ABI_IMPL)
 target_compile_definitions(hrr_reader PRIVATE
   HRR_API_ARGS_IMPLEMENTATION
   $<$<BOOL:${WIN32}>:NOMINMAX WIN32_LEAN_AND_MEAN>
@@ -47,6 +48,7 @@ if(HRR_BUILD_PLAYBACK)
     hrr_playback.cpp
     hip_playback.cpp
     hip_playback_generated.cpp
+    hrr_region_map.cpp
   )
   set_target_properties(hrr-playback PROPERTIES
     CXX_STANDARD ${HRR_CXX_STANDARD}
@@ -54,12 +56,15 @@ if(HRR_BUILD_PLAYBACK)
   target_include_directories(hrr-playback PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
   )
+  target_compile_definitions(hrr-playback PRIVATE HIP_ABI_IMPL)
   target_compile_definitions(hrr-playback PRIVATE
     __HIP_PLATFORM_AMD__
     "HRR_BUILD_TYPE=\"$<IF:$<BOOL:$<CONFIG>>,$<CONFIG>,unknown>\""
     $<$<BOOL:${WIN32}>:NOMINMAX WIN32_LEAN_AND_MEAN>
   )
   target_link_libraries(hrr-playback PRIVATE hrr::reader hip::host Threads::Threads)
+  # hrr_runtime_symbol: dlsym on POSIX, module enumeration on Windows.
+  target_link_libraries(hrr-playback PRIVATE ${CMAKE_DL_LIBS} $<$<BOOL:${WIN32}>:psapi>)
 
   # Build identity reported by --version. Stamped by a build rule rather than at
   # configure time so it cannot name a commit the binary was not built from; see

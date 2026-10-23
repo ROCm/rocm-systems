@@ -14,6 +14,19 @@ For example, in a distributed training job, the GPU can appear idle not because 
 
 This topic orients you to how ROCm Systems Profiler is put together and how to invoke it. For the full, categorized feature catalog and use cases, see :doc:`conceptual/rocprof-sys-feature-set`.
 
+.. _glance-architecture:
+
+How it works
+=============
+
+ROCm Systems Profiler couples GPU kernel dispatches, memory copies, and device telemetry with the host-side activity around them. GPU data is captured via ROCprofiler-SDK callbacks and ``amd-smi`` polling; host call stacks, MPI, OpenMP, and Python frames are captured via binary instrumentation, statistical sampling, callback APIs, or symbol interception. Everything is merged into a single trace/profile output, correlated on the GPU timeline.
+
+.. image:: data/how_systems_profiler_works.png
+   :width: 100%
+   :align: center
+
+For the full explanation of each collection mode, including overhead trade-offs and a worked instrumentation-vs-sampling example, see :doc:`conceptual/data-collection-modes`.
+
 .. _glance-capabilities:
 
 Capabilities
@@ -114,19 +127,6 @@ Analysis
      - Estimates the end-to-end speedup from optimizing a given function or line by selectively slowing other code regions.
      - :doc:`how-to/performing-causal-profiling`
 
-.. _glance-architecture:
-
-How it works
-=============
-
-ROCm Systems Profiler couples GPU kernel dispatches, memory copies, and device telemetry with the host-side activity around them. GPU data is captured via ROCprofiler-SDK callbacks and ``amd-smi`` polling; host call stacks, MPI, OpenMP, and Python frames are captured via binary instrumentation, statistical sampling, callback APIs, or symbol interception. Everything is merged into a single trace/profile output, correlated on the GPU timeline.
-
-.. image:: data/how_systems_profiler_works.png
-   :width: 100%
-   :align: center
-
-For the full explanation of each collection mode, including overhead trade-offs and a worked instrumentation-vs-sampling example, see :doc:`conceptual/data-collection-modes`.
-
 .. _glance-modes-compared:
 
 Binary instrumentation vs. call-stack sampling
@@ -160,7 +160,8 @@ To use ROCm Systems Profiler for instrumentation, follow these two configuration
 Command-line tools
 ====================
 
-ROCm Systems Profiler ships as a set of standalone executables, each oriented toward a different profiling workflow:
+ROCm Systems Profiler ships as a set of standalone executables, each oriented toward a different profiling workflow.
+``rocsys`` is the unified entry point that dispatches to these tools. See :doc:`how-to/using-rocsys`.
 
 .. list-table::
    :header-rows: 1
@@ -170,6 +171,10 @@ ROCm Systems Profiler ships as a set of standalone executables, each oriented to
      - Purpose
      - Example
      - See also
+   * - ``rocsys``
+     - Dispatches a subcommand to the tool for that workflow. ``rocsys -- ./app`` and ``rocsys profile -- ./app`` collect a full trace profile.
+     - ``rocsys profile -- ./app``
+     - :doc:`how-to/using-rocsys`
    * - ``rocprof-sys-avail``
      - Lists what is available to configure and collect on your system (settings, domains, counters, components).
      - ``rocprof-sys-avail -d`` or ``rocprof-sys-avail -H -c GPU``
@@ -262,7 +267,7 @@ For the exact configuration behind a preset, run ``rocprof-sys-run --explain=<na
 Output formats
 ================
 
-ROCm Systems Profiler supports several output formats, each suited to a different analysis or visualization workflow. ``rocpd`` is expected to become the default output format in an upcoming release.
+ROCm Systems Profiler supports several output formats, each suited to a different analysis or visualization workflow. ``rocpd`` is the default output format.
 
 .. list-table::
    :header-rows: 1
@@ -271,14 +276,14 @@ ROCm Systems Profiler supports several output formats, each suited to a differen
      - File extension
      - Description
      - Viewer
-   * - Perfetto (proto)
-     - ``.proto``
-     - Detailed trace stored as a protocol buffer for interactive timeline visualization
-     - `ui.perfetto.dev <https://ui.perfetto.dev>`_
    * - ROCm Profiling Data (rocpd)
      - ``.db``
      - Detailed trace and counter data stored as a SQLite3 database; queryable with SQL or convertible to other formats via ``rocpd convert``
      - `ROCm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/>`_
+   * - Perfetto (pftrace)
+     - ``.pftrace``
+     - Detailed trace stored as a protocol buffer for interactive timeline visualization
+     - `ui.perfetto.dev <https://ui.perfetto.dev>`_
    * - Text
      - ``.txt``
      - Aggregated results (mean, min, max, stddev per function) as human-readable text
@@ -300,7 +305,7 @@ Output-format selection differs by tool:
 
   .. code-block:: shell
 
-     rocprof-sys-run --output-format proto rocpd json text -- ./my_app
+     rocprof-sys-run --output-format pftrace rocpd json text -- ./my_app
 
 * ``rocprof-sys-attach`` uses its own ``-F`` flag with different token names for the same formats (``perfetto`` instead of ``proto``):
 

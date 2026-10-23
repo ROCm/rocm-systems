@@ -1,7 +1,42 @@
 ################################################################################
 ##
-## Copyright © Advanced Micro Devices, Inc., or its affiliates.
-## SPDX-License-Identifier: NCSA
+## The University of Illinois/NCSA
+## Open Source License (NCSA)
+##
+## Copyright (c) 2014-2026, Advanced Micro Devices, Inc. All rights reserved.
+##
+## Developed by:
+##
+##                 AMD Research and AMD HSA Software Development
+##
+##                 Advanced Micro Devices, Inc.
+##
+##                 www.amd.com
+##
+## Permission is hereby granted, free of charge, to any person obtaining a copy
+## of this software and associated documentation files (the "Software"), to
+## deal with the Software without restriction, including without limitation
+## the rights to use, copy, modify, merge, publish, distribute, sublicense,
+## and/or sell copies of the Software, and to permit persons to whom the
+## Software is furnished to do so, subject to the following conditions:
+##
+##  - Redistributions of source code must retain the above copyright notice,
+##    this list of conditions and the following disclaimers.
+##  - Redistributions in binary form must reproduce the above copyright
+##    notice, this list of conditions and the following disclaimers in
+##    the documentation and/or other materials provided with the distribution.
+##  - Neither the names of Advanced Micro Devices, Inc,
+##    nor the names of its contributors may be used to endorse or promote
+##    products derived from this Software without specific prior written
+##    permission.
+##
+## THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+## IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+## FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+## THE CONTRIBUTORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+## OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+## ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+## DEALINGS WITH THE SOFTWARE.
 ##
 ################################################################################
 
@@ -70,7 +105,7 @@ find_path(AMDCUID_INCLUDE_DIR
   PATHS ${AMDCUID_ROOT}/include
   NO_DEFAULT_PATH
 )
-if (AMDCUID_LIB AND AMDCUID_INCLUDE_DIR) 
+if (AMDCUID_LIB AND AMDCUID_INCLUDE_DIR)
   message(STATUS "Found AMDCUID lib: ${AMDCUID_LIB}")
   message(STATUS "Found AMDCUID header: ${AMDCUID_INCLUDE_DIR}")
   set(AMDCUID_FOUND TRUE)
@@ -225,17 +260,21 @@ set ( SRCS core/driver/driver.cpp
            libamdhsacode/amd_hsa_code_util.cpp
            libamdhsacode/amd_hsa_locks.cpp
            libamdhsacode/amd_options.cpp
-           libamdhsacode/amd_hsa_code.cpp)
+           libamdhsacode/amd_hsa_code.cpp
+           core/runtime/amd_aie_code.cpp)
 
 if(UNIX)
   set(SRC_OS core/util/lnx/os_linux.cpp
+	     core/runtime/thunk_loader_linux.cpp
 	     libamdhsacode/lnx/amd_core_dump.cpp)
   set(SRC_XDNA core/driver/xdna/amd_xdna_driver.cpp
                core/runtime/amd_aie_agent.cpp
-               core/runtime/amd_aie_aql_queue.cpp)
+               core/runtime/amd_aie_aql_queue.cpp
+               core/runtime/amd_aie_elf.cpp)
 else()
   target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE NOMINMAX)
   set(SRC_OS core/util/win/os_win.cpp
+	     core/runtime/thunk_loader_win.cpp
 	     libamdhsacode/win32/amd_core_dump.cpp)
 endif()
 

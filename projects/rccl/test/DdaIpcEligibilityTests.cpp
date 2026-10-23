@@ -144,7 +144,7 @@ TEST_F(DdaIpcEligibilityTest, AllToAll_StagingBytesAtThresholdFitsScratch)
         kAlltoAllFloat32CountAt4MbThreshold,
         mockComm_.comm.nRanks,
         sizeof(float));
-    EXPECT_EQ(stagingBytes, kDdaAlltoAllGfx950ThresholdBytes);
+    EXPECT_EQ(stagingBytes, rcclGetArchThresholds("gfx950")->ddaVmmMax[ncclFuncAlltoAll]);
     EXPECT_LE(stagingBytes, mockComm_.comm.ddaScratchBytes);
 }
 
@@ -154,7 +154,7 @@ TEST_F(DdaIpcEligibilityTest, AllToAll_StagingBytesOneCountOverThresholdStillEli
     const size_t count = kAlltoAllFloat32CountAt4MbThreshold + 4;
     const size_t stagingBytes = testAlltoAllDdaIpcStagingBytes(
         count, mockComm_.comm.nRanks, sizeof(float));
-    EXPECT_GT(stagingBytes, kDdaAlltoAllGfx950ThresholdBytes);
+    EXPECT_GT(stagingBytes, rcclGetArchThresholds("gfx950")->ddaVmmMax[ncclFuncAlltoAll]);
     EXPECT_TRUE(ncclAllToAllDdaIpcEligible(
         mockComm_.get(), sendbuff_, recvbuff_, count, ncclFloat32));
 }
@@ -194,6 +194,35 @@ TEST_F(DdaIpcEligibilityTest, ReduceScatter_PerRankUnaligned)
 {
     EXPECT_FALSE(ncclReduceScatterDdaIpcEligible(
         mockComm_.get(), sendbuff_, recvbuff_, 2, ncclFloat32, ncclSum));
+}
+
+TEST_F(DdaIpcEligibilityTest, ReduceScatter_MisalignedSendbuff)
+{
+    void* misaligned = reinterpret_cast<void*>(0x14);
+    EXPECT_FALSE(ncclReduceScatterDdaIpcEligible(
+        mockComm_.get(), misaligned, recvbuff_, 4, ncclFloat32, ncclSum));
+}
+
+// Boundaries of ddaReduceScatterIpcStaging. The host flag is the only copy
+// decision: at or below 1 MiB per shard the kernel copies each shard, including
+// a message that fits in one block. Above that the host pre-copies. A 1 MiB
+// shard stays in-kernel even when 8 ranks make the total 8 MiB, which is the
+// case that used to memcpy on the host and copy again in the kernel.
+TEST_F(DdaIpcEligibilityTest, ReduceScatter_StagingBoundaries)
+{
+    using dda::common::DdaRsIpcStaging;
+    using dda::common::ddaReduceScatterIpcStaging;
+    using dda::common::kDdaRsIpcKernelCopyMaxBytes;
+
+    EXPECT_EQ(ddaReduceScatterIpcStaging(4, sizeof(float)), DdaRsIpcStaging::InKernel);
+
+    const size_t atKernelCap = kDdaRsIpcKernelCopyMaxBytes / sizeof(float);
+    EXPECT_EQ(ddaReduceScatterIpcStaging(atKernelCap, sizeof(float)), DdaRsIpcStaging::InKernel);
+
+    const size_t pastKernelCap = atKernelCap + 4;
+    EXPECT_EQ(ddaReduceScatterIpcStaging(pastKernelCap, sizeof(float)), DdaRsIpcStaging::HostPreCopy);
+    EXPECT_GT(pastKernelCap * sizeof(float), kDdaRsIpcKernelCopyMaxBytes);
+    EXPECT_GT(atKernelCap * sizeof(float) * 8, 4u * 1024u * 1024u);
 }
 
 TEST_F(DdaIpcEligibilityTest, ReduceScatter_InvalidDatatypeDispatch)

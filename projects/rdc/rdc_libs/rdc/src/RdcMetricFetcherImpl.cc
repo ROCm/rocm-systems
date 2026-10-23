@@ -26,6 +26,7 @@ THE SOFTWARE.
 #include <sys/time.h>
 
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <set>
 #include <string>
@@ -82,9 +83,17 @@ RdcMetricFetcherImpl::RdcMetricFetcherImpl() : task_started_(true) {
 }
 
 RdcMetricFetcherImpl::~RdcMetricFetcherImpl() {
-  // Notify the async task to stop
-  task_started_ = false;
+  {
+    // Under the worker's mutex, so a worker between its check and its wait cannot miss the
+    // wake-up and block forever.
+    std::lock_guard<std::mutex> lock(task_mutex_);
+    task_started_ = false;
+  }
   cv_.notify_all();
+  // Join the worker before the members it uses are destroyed.
+  if (updater_.valid()) {
+    updater_.wait();
+  }
 }
 
 uint64_t RdcMetricFetcherImpl::now() {
@@ -590,15 +599,17 @@ rdc_status_t RdcMetricFetcherImpl::bulk_fetch_smi_fields(
         case RDC_FI_POWER_USAGE:  // average_socket_power
           value.field_value.value.l_int = static_cast<int64_t>(gpu_metrics.average_socket_power);
           // Use current_socket_power if average_socket_power is not available
-          if (value.field_value.value.l_int == 65535) {
+          if (value.field_value.value.l_int == std::numeric_limits<uint16_t>::max()) {
             RDC_LOG(RDC_DEBUG, "Bulk fetch "
                                    << value.gpu_index << ":"
                                    << "RDC_FI_POWER_USAGE fallback to current_socket_power.");
             value.field_value.value.l_int = static_cast<int64_t>(gpu_metrics.current_socket_power);
           }
 
-          // Ignore if the power is 0, which will fallback to non-bulk fetch.
-          if (value.field_value.value.l_int == 0) {
+          // Leave a power of 0 or one gpu_metrics cannot report (UINT16_MAX) to the
+          // per-field fetch, which reads amdsmi_get_power_info() instead.
+          if (value.field_value.value.l_int == 0 ||
+              value.field_value.value.l_int == std::numeric_limits<uint16_t>::max()) {
             RDC_LOG(RDC_DEBUG, "Bulk fetch " << value.gpu_index << ":"
                                              << "RDC_FI_POWER_USAGE fallback to regular way.");
             continue;
@@ -776,19 +787,60 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       break;
     }
     case RDC_FI_GPU_MEMORY_CUR_BANDWIDTH: {
-      amdsmi_engine_usage_t engine_usage;
+      amdsmi_gpu_metrics_t gpu_metrics;
       amdsmi_vram_info_t vram_info;
-
-      value->status = amdsmi_get_gpu_activity(processor_handle, &engine_usage);
       value->type = INTEGER;
-      if (value->status == AMDSMI_STATUS_SUCCESS) {
-        value->value.l_int = static_cast<int64_t>(engine_usage.umc_activity);
+
+      // A single PMFW metrics snapshot provides both the instantaneous UMC
+      // activity and the accumulator; amdsmi_get_gpu_activity() would fetch the
+      // same snapshot internally, so query it once here.
+      const amdsmi_status_t metrics_status =
+          amdsmi_get_gpu_metrics_info(processor_handle, &gpu_metrics);
+
+      // In gpu_metrics the max value of the type means "not supported".
+      const uint16_t kU16NotSupported = std::numeric_limits<uint16_t>::max();
+      const uint64_t kU64NotSupported = std::numeric_limits<uint64_t>::max();
+
+      // Instantaneous UMC controller activity. On some ASICs this only reflects
+      // compute-shader memory traffic and reads zero under DMA/copy traffic.
+      double activity_pct = 0.0;
+      if (metrics_status == AMDSMI_STATUS_SUCCESS &&
+          gpu_metrics.average_umc_activity != kU16NotSupported) {
+        activity_pct = static_cast<double>(gpu_metrics.average_umc_activity);
       }
 
-      value->status = amdsmi_get_gpu_vram_info(processor_handle, &vram_info);
-      if (value->status == AMDSMI_STATUS_SUCCESS) {
-        value->value.l_int = value->value.l_int * vram_info.vram_max_bandwidth / 100;
+      // Prefer the memory-activity accumulator when available: unlike the
+      // instantaneous reading it also captures DMA/copy traffic. Track the
+      // previous sample per GPU and derive a percentage from the accumulator
+      // delta over firmware time (see derive_mem_activity_percent()).
+      if (metrics_status == AMDSMI_STATUS_SUCCESS && gpu_metrics.firmware_timestamp != 0 &&
+          gpu_metrics.firmware_timestamp != kU64NotSupported &&
+          gpu_metrics.mem_activity_acc != kU64NotSupported) {
+        std::lock_guard<std::mutex> lock(mem_activity_mutex_);
+        auto prev = mem_activity_cache_.find(gpu_index);
+        const bool have_prev = prev != mem_activity_cache_.end();
+        activity_pct = derive_mem_activity_percent(
+            activity_pct, have_prev, have_prev ? prev->second.mem_activity_acc : 0,
+            have_prev ? prev->second.firmware_timestamp : 0, gpu_metrics.mem_activity_acc,
+            gpu_metrics.firmware_timestamp);
+        // Only advance the cache with a newer firmware sample: the metrics read
+        // happens before the lock, so concurrent fetches can take the lock out of
+        // firmware-timestamp order and would otherwise cache an older sample last.
+        if (!have_prev || gpu_metrics.firmware_timestamp > prev->second.firmware_timestamp) {
+          mem_activity_cache_[gpu_index] = {gpu_metrics.mem_activity_acc,
+                                            gpu_metrics.firmware_timestamp};
+        }
       }
+
+      const amdsmi_status_t vram_status = amdsmi_get_gpu_vram_info(processor_handle, &vram_info);
+      // Report a bandwidth only when both reads succeeded; otherwise leave a zero
+      // value (not a bare activity percentage) and surface the failing status.
+      value->value.l_int =
+          (vram_status == AMDSMI_STATUS_SUCCESS)
+              ? static_cast<int64_t>(activity_pct * vram_info.vram_max_bandwidth / 100.0)
+              : 0;
+      // Don't mask a metrics-fetch failure with vram-info success.
+      value->status = (metrics_status != AMDSMI_STATUS_SUCCESS) ? metrics_status : vram_status;
       break;
     }
     case RDC_FI_GPU_MEMORY_FREE: {
@@ -880,14 +932,14 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       }
     } break;
     case RDC_FI_GPU_PARTITION_COUNT: {
-      uint32_t partition_count = 0;
-      amdsmi_gpu_metrics_t metrics;
-      memset(&metrics, 0, sizeof(metrics));
-      value->status = get_metrics_info(processor_handle, &metrics);
-      partition_count = metrics.num_partition;
+      // Only some drivers fill the gpu_metrics partition count (none that publish
+      // gpu_metrics v1.9), so take the count from the GPU's partition profile, as
+      // rdci discovery does.
+      uint16_t num_partitions = 0;
+      value->status = get_num_partition(gpu_index, &num_partitions);
       value->type = INTEGER;
       if (value->status == AMDSMI_STATUS_SUCCESS) {
-        value->value.l_int = static_cast<int64_t>(partition_count);
+        value->value.l_int = static_cast<int64_t>(num_partitions);
       }
     } break;
     case RDC_FI_KFD_ID: {
@@ -907,14 +959,21 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
         break;
       }
 
+      // amd-smi reports a power it cannot read as UINT32_MAX; older releases
+      // reported UINT16_MAX.
+      auto power_available = [](uint32_t watts) {
+        return watts != std::numeric_limits<uint32_t>::max() &&
+               watts != std::numeric_limits<uint16_t>::max();
+      };
+
       // Use current_socket_power if average_socket_power is not available
-      if (power_info.average_socket_power != 65535) {
+      if (power_available(power_info.average_socket_power)) {
         RDC_LOG(RDC_DEBUG, "AMDSMI: using average_socket_power");
         value->value.l_int = static_cast<int64_t>(power_info.average_socket_power) * 1000 * 1000;
         break;
       }
 
-      if (power_info.current_socket_power != 65535) {
+      if (power_available(power_info.current_socket_power)) {
         RDC_LOG(RDC_DEBUG, "AMDSMI: using current_socket_power");
         value->value.l_int = static_cast<int64_t>(power_info.current_socket_power) * 1000 * 1000;
         break;
