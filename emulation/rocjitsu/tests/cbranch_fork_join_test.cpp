@@ -2,14 +2,19 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/isa/arch/amdgpu/shared/branch_stack.h"
+#include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/register_set.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace {
@@ -26,6 +31,46 @@ constexpr uint64_t kTarget = 0x200000;
 constexpr uint64_t kNextPc = kCodeBase + 4;
 // Seeded into stack entries to show a uniform fork leaves them alone.
 constexpr uint64_t kStackSentinel = 0xDEADBEEFCAFEF00Dull;
+
+// If/else through the branch stack. Offsets are bytes from kCodeBase.
+constexpr uint32_t kIForkVccThen = 0xB86A0002u; // s_cbranch_i_fork vcc, THEN
+constexpr uint32_t kGForkVccS36 = 0x9480246Au;  // s_cbranch_g_fork vcc, s[36:37]
+constexpr uint64_t kForkOffset = 0x08;
+constexpr uint64_t kElseOffset = 0x0C;
+constexpr uint64_t kThenOffset = 0x14;
+constexpr uint64_t kJoinOffset = 0x18;
+constexpr uint64_t kEndOffset = 0x24;
+constexpr uint32_t kThenValue = 1;
+constexpr uint32_t kElseValue = 2;
+constexpr uint32_t kAfterJoinValue = 7;
+
+// Per lane:
+//   v0 = (vcc lane set) ? 1 : 2;
+//   v1 = 7;
+//
+// As assembly:
+//         s_getreg_b32      s34, hwreg(HW_REG_MODE, 29, 3)  ; saved CSP
+//         s_mov_b64         s[32:33], exec                  ; saved EXEC
+//         <fork>            vcc, THEN
+//   ELSE: v_mov_b32         v0, 2
+//         s_branch          JOIN
+//   THEN: v_mov_b32         v0, 1
+//   JOIN: s_cbranch_join    s34
+//         s_mov_b64         exec, s[32:33]                  ; join leaves the last side's EXEC
+//         v_mov_b32         v1, 7
+Program if_else_program(uint32_t fork) {
+  return {
+      0xB8A21741u, // 0x00 s_getreg_b32 s34, hwreg(HW_REG_MODE, 29, 3)
+      0xBEA0017Eu, // 0x04 s_mov_b64 s[32:33], exec
+      fork,        // 0x08 fork to THEN
+      0x7E000282u, // 0x0C ELSE: v_mov_b32 v0, 2
+      0xBF820001u, // 0x10 s_branch JOIN
+      0x7E000281u, // 0x14 THEN: v_mov_b32 v0, 1
+      0xBE802E22u, // 0x18 JOIN: s_cbranch_join s34
+      0xBEFE0120u, // 0x1C s_mov_b64 exec, s[32:33]
+      0x7E020287u, // 0x20 v_mov_b32 v1, 7
+  };
+}
 
 class CbranchForkJoinTest : public ::testing::TestWithParam<rj_code_arch_t> {
 protected:
@@ -73,6 +118,27 @@ protected:
   void set_sgpr64(uint32_t index, uint64_t value) {
     set_sgpr(index, static_cast<uint32_t>(value));
     set_sgpr(index + 1, static_cast<uint32_t>(value >> 32));
+  }
+  uint32_t vgpr(uint32_t index, uint32_t lane) {
+    return cu->read_vgpr(wf->vgpr_alloc().base + index, lane);
+  }
+  void fill_vgpr(uint32_t index, uint32_t value) {
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+      cu->write_vgpr(wf->vgpr_alloc().base + index, lane, value);
+  }
+
+  /// Run until the PC reaches @p end_offset; returns the offset of each executed instruction.
+  std::vector<uint64_t> run_until(uint64_t end_offset, size_t max_steps = 32) {
+    std::vector<uint64_t> trace;
+    while (wf->pc != kCodeBase + end_offset && trace.size() < max_steps) {
+      trace.push_back(wf->pc - kCodeBase);
+      (void)cu->step();
+      if (wf->is_halted())
+        break;
+    }
+    EXPECT_FALSE(wf->is_halted());
+    EXPECT_EQ(wf->pc, kCodeBase + end_offset);
+    return trace;
   }
 
   GpuMemory memory{"cbranch_fork_join_memory"};
@@ -304,7 +370,110 @@ TEST_P(CbranchForkJoinTest, ForkAtFullDepthWritesEntrySevenAndWrapsCsp) {
   EXPECT_EQ(sgpr64(30), kNextPc);
 }
 
-// MODE.CSP and the fork/join instructions exist only on GFX9-derived ISAs.
+TEST_P(CbranchForkJoinTest, IForkRunsTheSmallerPassSideThenTheSavedFailSide) {
+  constexpr uint64_t kPass = 0x15; // 3 lanes pass, 61 fail
+  write_program(if_else_program(kIForkVccThen));
+  wf->set_vcc(kPass);
+  fill_vgpr(0, 0);
+
+  EXPECT_EQ(run_until(kEndOffset),
+            (std::vector<uint64_t>{0x00, 0x04, kForkOffset, kThenOffset, kJoinOffset, kElseOffset,
+                                   0x10, kJoinOffset, 0x1C, 0x20}));
+  for (uint32_t lane = 0; lane < 64; ++lane) {
+    const bool passed = (kPass >> lane) & 1;
+    EXPECT_EQ(vgpr(0, lane), passed ? kThenValue : kElseValue) << "lane " << lane;
+    EXPECT_EQ(vgpr(1, lane), kAfterJoinValue) << "lane " << lane;
+  }
+  EXPECT_EQ(wf->exec(), ~uint64_t{0});
+  EXPECT_EQ(wf->cond_stack_ptr(), 0u);
+}
+
+TEST_P(CbranchForkJoinTest, IForkRunsTheSmallerFailSideFirst) {
+  constexpr uint64_t kFail = 0x15; // 3 lanes fail, 61 pass
+  write_program(if_else_program(kIForkVccThen));
+  wf->set_vcc(~kFail);
+  fill_vgpr(0, 0);
+
+  EXPECT_EQ(run_until(kEndOffset),
+            (std::vector<uint64_t>{0x00, 0x04, kForkOffset, kElseOffset, 0x10, kJoinOffset,
+                                   kThenOffset, kJoinOffset, 0x1C, 0x20}));
+  for (uint32_t lane = 0; lane < 64; ++lane) {
+    const bool failed = (kFail >> lane) & 1;
+    EXPECT_EQ(vgpr(0, lane), failed ? kElseValue : kThenValue) << "lane " << lane;
+    EXPECT_EQ(vgpr(1, lane), kAfterJoinValue) << "lane " << lane;
+  }
+  EXPECT_EQ(wf->exec(), ~uint64_t{0});
+  EXPECT_EQ(wf->cond_stack_ptr(), 0u);
+}
+
+TEST_P(CbranchForkJoinTest, UniformIForkSkipsTheStackAndTheElseSide) {
+  write_program(if_else_program(kIForkVccThen));
+  wf->set_vcc(~uint64_t{0});
+  fill_vgpr(0, 0);
+  set_sgpr64(0, kStackSentinel);
+
+  EXPECT_EQ(run_until(kEndOffset),
+            (std::vector<uint64_t>{0x00, 0x04, kForkOffset, kThenOffset, kJoinOffset, 0x1C, 0x20}));
+  for (uint32_t lane = 0; lane < 64; ++lane)
+    EXPECT_EQ(vgpr(0, lane), kThenValue) << "lane " << lane;
+  EXPECT_EQ(sgpr64(0), kStackSentinel);
+  EXPECT_EQ(wf->cond_stack_ptr(), 0u);
+}
+
+TEST_P(CbranchForkJoinTest, GForkTakesItsTargetFromAnSgprPair) {
+  constexpr uint64_t kPass = 0x15;
+  write_program(if_else_program(kGForkVccS36));
+  wf->set_vcc(kPass);
+  set_sgpr64(36, kCodeBase + kThenOffset);
+  fill_vgpr(0, 0);
+
+  EXPECT_EQ(run_until(kEndOffset),
+            (std::vector<uint64_t>{0x00, 0x04, kForkOffset, kThenOffset, kJoinOffset, kElseOffset,
+                                   0x10, kJoinOffset, 0x1C, 0x20}));
+  for (uint32_t lane = 0; lane < 64; ++lane) {
+    const bool passed = (kPass >> lane) & 1;
+    EXPECT_EQ(vgpr(0, lane), passed ? kThenValue : kElseValue) << "lane " << lane;
+  }
+  EXPECT_EQ(wf->exec(), ~uint64_t{0});
+  EXPECT_EQ(wf->cond_stack_ptr(), 0u);
+}
+
+TEST_P(CbranchForkJoinTest, ForkAndJoinCarryControlFlowMetadata) {
+  auto decoder = Decoder::create(GetParam());
+  ASSERT_NE(decoder, nullptr);
+  constexpr uint64_t kCfgFlags = BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL;
+  const auto check = [&](uint32_t word, uint64_t cfg_flag, std::optional<int64_t> offset,
+                         bool is_fork) {
+    const std::array<uint32_t, 4> words{word, 0, 0, 0};
+    auto decoded = decoder->decode(words.data());
+    ASSERT_FALSE(decoded.failed()) << std::hex << word;
+    const Instruction &inst = *decoded.value();
+    SCOPED_TRACE(inst.mnemonic());
+    EXPECT_EQ(inst.flags() & kCfgFlags, cfg_flag);
+    EXPECT_NE(inst.flags() & IGNORES_EXEC, 0u);
+    EXPECT_NE(inst.flags() & WRITES_EXEC, 0u);
+    EXPECT_NE(inst.flags() & BRANCH_STACK, 0u);
+    EXPECT_EQ(inst.branch_offset_bytes(), offset);
+
+    // A fork may write any stack entry, so its defs must not kill; a join may
+    // read any of them.
+    EXPECT_EQ((inst.flags() & PREDICATED_DEF) != 0, is_fork);
+    RegisterSet defs;
+    RegisterSet uses;
+    inst.implicit_defs(defs);
+    inst.implicit_uses(uses);
+    const RegisterSet &stack = is_fork ? defs : uses;
+    EXPECT_TRUE(stack.contains(RegisterRef{RegClass::SGPR, 0, 1}));
+    EXPECT_TRUE(stack.contains(RegisterRef{RegClass::SGPR, 31, 1}));
+    EXPECT_FALSE(stack.contains(RegisterRef{RegClass::SGPR, 32, 1}));
+    EXPECT_FALSE((is_fork ? uses : defs).contains(RegisterRef{RegClass::SGPR, 0, 1}));
+  };
+  check(kIForkVccThen, COND_BRANCH, int64_t{8}, /*is_fork=*/true);
+  check(kGForkVccS36, INDIRECT_BRANCH, std::nullopt, /*is_fork=*/true);
+  check(0xBE802E22u, INDIRECT_BRANCH, std::nullopt, /*is_fork=*/false); // s_cbranch_join s34
+}
+
+// MODE.CSP and the fork/join instructions exist only on CDNA1-4.
 INSTANTIATE_TEST_SUITE_P(Cdna, CbranchForkJoinTest,
                          ::testing::Values(ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
                                            ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4));

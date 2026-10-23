@@ -78,6 +78,10 @@ enum InstFlags : uint64_t {
   DIRECT_REGISTER_ACCESSES = (1ULL << 21),
   /// @brief Unconditional full-dword memory results described by the decoded destinations.
   SIMPLE_MEMORY_RESULT = (1ULL << 22),
+  /// @brief Pushes or pops the CDNA1-4 conditional branch stack (S_CBRANCH_{G,I}_FORK,
+  /// S_CBRANCH_JOIN). Its entries live in SGPRs selected by MODE.CSP at run time, and a join
+  /// resumes at a PC read from them.
+  BRANCH_STACK = (1ULL << 23),
   /// @brief Memory result lanes depend on controls beyond EXEC and issue masking.
   CONDITIONAL_MEMORY_LANES = (1ULL << 24),
   /// @brief Matrix execution accesses register lanes independently of EXEC.

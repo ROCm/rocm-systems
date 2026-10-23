@@ -3953,6 +3953,27 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         const bool target_is_relocated_by_construction =
             (object_produces_code_addresses && code_addresses_fully_accounted) ||
             kernarg_supplied_targets().contains(offset);
+        // A join resumes at a PC popped from SGPRs, so its block has no CFG successors and the
+        // liveness this translation relies on sees every register live after it as dead before it.
+        // Refuse before the relocated-by-construction permission can admit the join verbatim.
+        if ((inst.flags() & BRANCH_STACK) != 0) {
+          auto failure = make_kernel_failure(
+              DiagnosticKind::Legalization,
+              "conditional branch stack (fork/join) is not supported for relocated kernel text",
+              offset, std::string(inst.mnemonic()));
+          if (continue_after_failure && !skip_failed_kernels) {
+            append_error(result.diagnostics, failure.kind, failure.message, failure.guest_offset,
+                         failure.mnemonic, failure.required_work);
+            if (continue_after_instruction_error(inst, offset, kernel_text, pending_traces)) {
+              continue;
+            }
+          }
+          if (fail_or_skip_kernel(scope, std::move(failure), transaction)) {
+            skip_scope = true;
+            break;
+          }
+          return leave_unchanged();
+        }
         if ((inst.flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0 &&
             !has_recovered_indirect_call && !has_relocation_table_call &&
             !recovered_indirect_return && !direct_branch_delta &&

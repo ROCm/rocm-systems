@@ -875,6 +875,20 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     out.errors.emplace_back("code object has multiple .text sections; currently supports only one");
     return out;
   }
+  // A join resumes at a PC popped from SGPRs, so its block has no CFG successors and liveness
+  // would report every register live after it as dead before it. Scratch registers chosen from
+  // that liveness could overwrite the stack entries or the values the program restores.
+  for (const auto &block : blocks_) {
+    for (const Instruction &inst : block->instructions()) {
+      if (inst.flags() & BRANCH_STACK) {
+        out.errors.push_back("code object uses the conditional branch stack (" +
+                             std::string(inst.mnemonic()) + " at .text offset " +
+                             std::to_string(inst.src_loc()) +
+                             "); liveness across fork/join is not modelled");
+        return out;
+      }
+    }
+  }
   const Section *text = obj_.text_sections().front();
   const std::span<const uint8_t> text_bytes(reinterpret_cast<const uint8_t *>(text->data()),
                                             text->size());

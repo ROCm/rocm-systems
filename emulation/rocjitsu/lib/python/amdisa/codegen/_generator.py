@@ -123,6 +123,10 @@ _SIMM32_LITERAL_WIDENING = {
     (128, 'FMT_NUM_PK2_F64'): _Literal32Widening.F64_HIGH_BITS,
 }
 
+# S_CBRANCH_{G,I}_FORK / S_CBRANCH_JOIN stack: a 3-bit MODE.CSP indexes
+# eight 4-SGPR entries, s[0..31].
+_BRANCH_STACK_SGPRS = 32
+
 _LITERAL_ENCODING_OPERANDS = {
     'ENC_SOP1': ('Sop1InstLiteralMachineInst', ('ssrc0',)),
     'ENC_SOP2': ('Sop2InstLiteralMachineInst', ('ssrc0', 'ssrc1')),
@@ -11638,6 +11642,18 @@ class CodeGenerator:
                                 'std::optional<int64_t> branch_offset_bytes() const override'
                             )
                         )
+                    if inst_sem and inst_sem.semantic_class == 'cbranch_fork':
+                        public_members.append(
+                            cgen.Statement(
+                                'void implicit_defs(RegisterSet &defs) const override'
+                            )
+                        )
+                    if inst_sem and inst_sem.semantic_class == 'cbranch_join':
+                        public_members.append(
+                            cgen.Statement(
+                                'void implicit_uses(RegisterSet &uses) const override'
+                            )
+                        )
                     # Embed the full mnemonic (with suffix) as a string literal
                     # so the encoding base gets a string_view to static storage.
                     rule = self.isa_spec.profile.mnemonic_rule(enc.enc_name)
@@ -12975,8 +12991,13 @@ class CodeGenerator:
                             if _mem_sem.operation == 'direct'
                             else 'flags_ |= INDIRECT_BRANCH;'
                         )
+                        # The pushed entry may land in any of the stack SGPRs,
+                        # so its implicit defs must never kill.
+                        ctor_body_parts.append('flags_ |= BRANCH_STACK;')
+                        ctor_body_parts.append('flags_ |= PREDICATED_DEF;')
                     if _mem_sem and _mem_sem.semantic_class == 'cbranch_join':
                         ctor_body_parts.append('flags_ |= INDIRECT_BRANCH;')
+                        ctor_body_parts.append('flags_ |= BRANCH_STACK;')
                     if _mem_sem and _mem_sem.semantic_class == 'setkill':
                         ctor_body_parts.append(
                             'if (inst_.simm16 & 1u) flags_ |= PROGRAM_TERMINATOR;'
@@ -14041,6 +14062,30 @@ class CodeGenerator:
                                 f'instruction-count deltas.\n'
                                 f'  return static_cast<int64_t>('
                                 f'static_cast<int16_t>({branch_offset_operand}.encoding_value_)) * 4;\n'
+                                f'}}'
+                            )
+                        )
+                    # MODE.CSP picks the stack entry at run time, so report
+                    # every SGPR any entry can occupy.
+                    if inst_sem and inst_sem.semantic_class == 'cbranch_fork':
+                        inst_impls.append(
+                            cgen.Line(
+                                f'void {inst.fmt_name}::implicit_defs'
+                                f'(RegisterSet &defs) const {{\n'
+                                f'  {inst.fmt_true_enc_name}::implicit_defs(defs);\n'
+                                f'  defs.expand(RegisterRef{{RegClass::SGPR, 0, '
+                                f'{_BRANCH_STACK_SGPRS}}});\n'
+                                f'}}'
+                            )
+                        )
+                    if inst_sem and inst_sem.semantic_class == 'cbranch_join':
+                        inst_impls.append(
+                            cgen.Line(
+                                f'void {inst.fmt_name}::implicit_uses'
+                                f'(RegisterSet &uses) const {{\n'
+                                f'  {inst.fmt_true_enc_name}::implicit_uses(uses);\n'
+                                f'  uses.expand(RegisterRef{{RegClass::SGPR, 0, '
+                                f'{_BRANCH_STACK_SGPRS}}});\n'
                                 f'}}'
                             )
                         )
