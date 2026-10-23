@@ -841,6 +841,28 @@ Enumeration enumerate(const std::string &directory, const std::vector<std::strin
     return enumeration;
 }
 
+// The variables gtest sharding is driven by. Cleared from the environment the children
+// inherit; see clearShardingEnvironment().
+constexpr std::string_view kShardingVariables[] = {"GTEST_TOTAL_SHARDS", "GTEST_SHARD_INDEX",
+                                                   "GTEST_SHARD_STATUS_FILE"};
+
+// Drop the sharding variables, so the children run what they are told and nothing less.
+//
+// Sharding has to happen once, and it already has: this process resolved the caller's shard
+// over the published names, and each child is then handed its cases BY NAME. A child that still
+// saw these variables would shard that exact list a second time and run a fraction of it -- for
+// N shards the run as a whole covers 1/N of the tree instead of all of it, and every shard
+// still exits 0. test/common/ProcessIsolatedTestRunner.cpp clears them before its own forks for
+// the same reason.
+//
+// Called after the filter resolution above, which is the legitimate use of these variables.
+void clearShardingEnvironment()
+{
+    for (const std::string_view variable : kShardingVariables) {
+        unsetenv(std::string(variable).c_str());
+    }
+}
+
 // Run *path* with *args*, inheriting stdio, and return its exit status (128+signal if killed).
 int runChild(const std::string &path, const std::vector<std::string> &args)
 {
@@ -1051,6 +1073,8 @@ int main(int argc, char **argv)
                    std::strerror(errno));
         return 1;
     }
+
+    clearShardingEnvironment();
 
     std::vector<SuiteFragment> fragments;
     std::vector<std::string> ran;
