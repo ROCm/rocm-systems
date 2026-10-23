@@ -434,7 +434,7 @@ static ncclTeam_t DefaultTeamWorld(ncclComm_t comm) {
 }
 std::function<ncclTeam_t(ncclComm_t)> g_devrTeamWorld = DefaultTeamWorld;
 extern "C" ncclTeam_t ncclTeamWorld(ncclComm_t comm) { return g_devrTeamWorld(comm); }
-extern "C" ncclTeam_t ncclTeamRail(ncclComm_t) { return ncclTeam_t{}; }
+// ncclTeamRail is in devcomm_fakes.cc.
 
 // The CFT teams, read by symMemoryObtain and ncclDevrCommCreateInternal. Same
 // shape as the real host accessors in nccl_device/core.cc, reading the sizes
