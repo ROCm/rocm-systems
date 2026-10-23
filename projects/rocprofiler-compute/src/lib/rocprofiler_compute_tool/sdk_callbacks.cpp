@@ -365,6 +365,8 @@ void SdkCallbacksImpl::tool_tracing_callback(rocprofiler_callback_tracing_record
     else if (record.operation == ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
     {
         auto* data = static_cast<kernel_symbol_data_t*>(record.payload);
+        if (tool->pc_sampling->enabled())
+            tool->pc_sampling->on_kernel_symbol_register(*data);
 
         auto symbol              = kernel_symbol_record_t{};
         symbol.kernel_name       = format_kernel_name(data->kernel_name);
