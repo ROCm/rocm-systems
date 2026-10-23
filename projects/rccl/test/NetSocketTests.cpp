@@ -6,10 +6,18 @@
 #include "net.h"
 #include "common/ErrCode.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
+#include "common/ScopedEnv.hpp"
 #include "gtest/gtest.h"
 #include <atomic>
+#include <cctype>
+#include <cstdlib>
 #include <cstring>
+#include <dirent.h>
+#include <string>
+#include <sys/stat.h>
 #include <thread>
+#include <ftw.h>
+#include <unistd.h>
 
 extern ncclNet_t ncclNetSocket;
 
@@ -1602,3 +1610,118 @@ TEST_F(NetSocketTests, TestIflushAlwaysFails) {
 }
 
 } // namespace RcclUnitTesting
+
+// Forward declaration — getBcmLinks is defined in src/graph/xml.cc.
+ncclResult_t getBcmLinks(const char* busId, int* nlinks, char** peers);
+
+// A failing ASSERT_* returns from the test body, so cleanup written at the end
+// is skipped and temp trees accumulate.  Tie removal to scope instead.
+namespace {
+class TempDir {
+ public:
+  explicit TempDir(std::string path) : path_(std::move(path)) {}
+  ~TempDir() { nftw(path_.c_str(), rmEntry_, 16, FTW_DEPTH | FTW_PHYS); }
+  TempDir(const TempDir&) = delete;
+  TempDir& operator=(const TempDir&) = delete;
+  const std::string& str() const { return path_; }
+
+ private:
+  static int rmEntry_(const char* p, const struct stat*, int, struct FTW*) {
+    return remove(p);
+  }
+  std::string path_;
+};
+}  // namespace
+
+// Test: BcmLinksEnvFallback
+//
+// GPU-free unit test for the RCCL_BCM_LINKS_PATH env-var fallback in
+// getBcmLinks().  Creates a tmpdir whose layout mirrors the sysfs
+// structure that the BCM switch_discovery kernel module would populate,
+// using two real PCI bus IDs read from /sys/bus/pci/devices/ (required
+// because getPciPath validates each peer via realpath).
+// ---------------------------------------------------------------------------
+TEST(BcmLinksTest, EnvFallback) {
+  // Skip when the kernel module's default sysfs directory exists —
+  // the env-var fallback is never reached in that case.
+  struct stat st;
+  if (stat("/sys/kernel/pci_switch_link/virtual_switch_links", &st) == 0 &&
+      S_ISDIR(st.st_mode)) {
+    GTEST_SKIP() << "BCM switch_discovery sysfs path exists; "
+                    "env-var fallback not exercised";
+  }
+
+  // Pick two real PCI bus IDs so getPciPath's realpath() succeeds.
+  DIR* pciDir = opendir("/sys/bus/pci/devices");
+  if (pciDir == nullptr) {
+    GTEST_SKIP() << "/sys/bus/pci/devices not available";
+  }
+
+  std::string bdfA, bdfB;
+  struct dirent* entry;
+  while ((entry = readdir(pciDir)) != nullptr) {
+    if (entry->d_name[0] == '.') continue;
+    if (strlen(entry->d_name) != 12) continue;  // "0000:00:00.0"
+    if (bdfA.empty()) {
+      bdfA = entry->d_name;
+    } else if (bdfB.empty()) {
+      bdfB = entry->d_name;
+      break;
+    }
+  }
+  closedir(pciDir);
+
+  if (bdfA.empty()) {
+    GTEST_SKIP() << "no PCI devices in /sys/bus/pci/devices";
+  }
+  if (bdfB.empty()) {
+    GTEST_SKIP() << "fewer than 2 PCI devices found";
+  }
+
+  // Build mock directory: <tmpdir>/<bdfA>/<bdfB>
+  // TempDir is RAII — nftw-removes the tree on scope exit even if an
+  // ASSERT_ fires early, preventing /tmp/rccl_bcm_test_* accumulation.
+  char tmpl[] = "/tmp/rccl_bcm_test_XXXXXX";
+  ASSERT_NE(mkdtemp(tmpl), nullptr) << "mkdtemp failed";
+  TempDir tmpdir(tmpl);
+
+  std::string linkDir   = tmpdir.str() + "/" + bdfA;
+  std::string linkEntry = linkDir + "/" + bdfB;
+  ASSERT_EQ(mkdir(linkDir.c_str(), 0755), 0)
+      << "mkdir failed: " << linkDir;
+  { FILE* f = fopen(linkEntry.c_str(), "w");
+    ASSERT_NE(f, nullptr) << "cannot create " << linkEntry;
+    fclose(f); }
+
+  // Redirect the fallback path to our tmpdir.
+  RcclUnitTesting::ScopedEnv guard("RCCL_BCM_LINKS_PATH", tmpdir.str().c_str());
+
+  // Query bdfA — should discover bdfB as its sole peer.
+  int   nlinks = -1;
+  char* peers  = nullptr;
+  ASSERT_EQ(getBcmLinks(bdfA.c_str(), &nlinks, &peers), ncclSuccess);
+  EXPECT_EQ(nlinks, 1) << "expected 1 peer for " << bdfA;
+  if (nlinks == 1 && peers != nullptr) {
+    // Peers are stored as 13-byte (12-char + NUL) entries.
+    std::string got(peers, 12);
+    // Case-insensitive compare (readdir preserves on-disk case).
+    auto toLower = [](std::string s) {
+      for (auto& c : s) c = static_cast<char>(tolower(c));
+      return s;
+    };
+    EXPECT_EQ(toLower(got), toLower(bdfB))
+        << "peer mismatch: expected " << bdfB << ", got " << got;
+  }
+  free(peers);
+
+  // Query bdfB — no subdirectory exists for it, expect 0 peers.
+  int   nlinks2 = -1;
+  char* peers2  = nullptr;
+  ASSERT_EQ(getBcmLinks(bdfB.c_str(), &nlinks2, &peers2), ncclSuccess);
+  EXPECT_EQ(nlinks2, 0) << "expected 0 peers for " << bdfB;
+  free(peers2);
+
+  // tmpdir cleaned up by TempDir destructor on scope exit.
+  printf("[     INFO ] BcmLinksEnvFallback: bdfA=%s bdfB=%s nlinks=%d\n",
+         bdfA.c_str(), bdfB.c_str(), nlinks);
+}

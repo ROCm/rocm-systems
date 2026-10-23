@@ -2,6 +2,11 @@
 
 Full documentation for RCCL is available at [https://rccl.readthedocs.io](https://rccl.readthedocs.io)
 
+## Unreleased - RCCL 2.30.4 for ROCm 7.14.2
+
+### Added
+* `RCCL_BCM_LINKS_PATH`: fallback directory path for Broadcom PEX890xx multi-host switch inter-switch-link topology. On systems where a single physical PEX switch is partitioned across multiple CPU domains (upstream ports), RCCL needs to know which ports share the same switch so it can classify cross-partition PCIe paths as `PXB` instead of `PHB` and enable GDR across them. The `switch_discovery` kernel module exposes this via sysfs (`/sys/kernel/pci_switch_link/virtual_switch_links`); when that path is not available, RCCL reads the same directory layout from `RCCL_BCM_LINKS_PATH`. The companion userspace tool `rccl_bcm_isl_discover.sh` discovers the switch groups by reading the PCIe Device Serial Number (DSN) from extended config space (vendor `1000`, device `c030`) and populates this directory.
+
 ## Unreleased - RCCL 2.30.4 for ROCm 7.12
 
 ### Changed
