@@ -209,6 +209,25 @@ TEST_F(FormattedLoadRaceTest, PartialWaitRetiresOneLoadWithAllItsDestinations) {
   EXPECT_FALSE(probe(13, 0xf, false));
 }
 
+TEST_F(FormattedLoadRaceTest, CompletedDispatchReleasesDisassemblyAfterWaveReuse) {
+  Instruction instruction("s_nop 0", nullptr);
+  fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(0x100, instruction, *wave);
+  std::weak_ptr<DisasmCache> previous = plugin_state->disasm;
+  fixture.plugin_group_->onAmdgpuWorkgroupCompleted(1, 0);
+  fixture.plugin_group_->onAmdgpuDispatchExecutionEnd(1);
+
+  // A halted wave retains its state until reuse. The dispatch must release its
+  // own reference so the cache can disappear when that last wave moves on.
+  EXPECT_FALSE(previous.expired());
+  std::array<Wavefront *, 1> waves{wave};
+  fixture.plugin_group_->onAmdgpuWorkgroupDispatched(2, 0, 256, 128, waves);
+  EXPECT_TRUE(previous.expired());
+  EXPECT_EQ(plugin_state->trace.size(), 0u);
+  EXPECT_TRUE(plugin_state->disasm->to_map().empty());
+  fixture.plugin_group_->onAmdgpuWorkgroupCompleted(2, 0);
+  fixture.plugin_group_->onAmdgpuDispatchExecutionEnd(2);
+}
+
 TEST_F(FormattedLoadRaceTest, RejectsWholeDestinationRangeWhenItExceedsTheWaveAllocation) {
   issue(rdna4::kBufferLoadFormatXyzwVbuffer, 46, 255, 4);
   EXPECT_TRUE(plugin_state->race_state->getWaveMemoryEvents().empty());

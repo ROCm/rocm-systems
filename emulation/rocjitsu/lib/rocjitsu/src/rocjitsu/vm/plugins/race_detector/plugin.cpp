@@ -249,6 +249,13 @@ void RaceDetectorPlugin::onAmdgpuDispatchPacketProcessed(const KernelDispatchInf
                            kernel_names.symbol));
 }
 
+void RaceDetectorPlugin::onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) {
+  std::lock_guard<std::mutex> lock(dispatch_mutex_);
+  // Pooled waves may still hold the cache until reuse. Finished dispatches must
+  // not retain another copy of the PC table for the lifetime of the plugin.
+  dispatch_disasm_.erase(dispatch_id);
+}
+
 void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id,
                                                      uint32_t physical_vgpr_count,
                                                      uint32_t physical_sgpr_count,

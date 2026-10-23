@@ -134,6 +134,7 @@ public:
   bool observes_memory_routing() const override { return true; }
 
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override;
+  void onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) override;
 
   void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id,
                                    uint32_t physical_vgpr_count, uint32_t physical_sgpr_count,
