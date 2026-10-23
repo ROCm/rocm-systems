@@ -822,8 +822,8 @@ amdsmi_status_t AMDSmiSystem::handle_to_processor(amdsmi_processor_handle proces
   return AMDSMI_STATUS_NOT_FOUND;
 }
 
-// See amd_smi_system.h for the contract; only the guard in
-// amd_smi_test_overrides.h is meant to call register/unregister_processor_for_testing.
+// See amd_smi_system.h; only testing::ScopedProcessorRegistration may call
+// register/unregister_processor_for_testing.
 std::set<AMDSmiProcessor*>& AMDSmiSystem::set_for_type_for_testing(amdsmi_processor_type_t type) {
   switch (type) {
     case AMDSMI_PROCESSOR_TYPE_BRCM_NIC:

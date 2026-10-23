@@ -131,6 +131,9 @@ behavior — the thing this fix changed — with no real hardware involved.
   call it. This is a linker-level guarantee, not a convention — confirmed via the
   explicit comment in `src/CMakeLists.txt` describing which symbols the version
   script's `amdsmi_*` glob does and doesn't match.
+- The layer-1 registration methods on `AMDSmiSystem` are also `private` in the
+  installed header, reachable only through `ScopedProcessorRegistration` via a
+  `friend` declaration, so misuse is a compile error rather than a convention.
 - The `amdsmitst` gtest binary does not link the shared `.so` at all — it links a
   separate static archive built from the same sources, never installed/packaged. A
   static archive has no symbol-visibility restriction, so the test binary can call
@@ -142,8 +145,10 @@ behavior — the thing this fix changed — with no real hardware involved.
 
 ## How to reuse this for a new device type or a new fake interface
 
-1. **Register your processor** using the existing layer-1 seam on `AMDSmiSystem` —
-   no new code needed for this step, regardless of processor type.
+1. **Register your processor** with `ScopedProcessorRegistration`
+   (`test_fixture_utils.h`), the only caller of the layer-1 seam on
+   `AMDSmiSystem` — no new code needed for this step, regardless of processor
+   type.
 2. **Find out what your processor's methods actually touch** before assuming you
    need a new seam. Check: does it go through `get_mutex()`/`RocmSMI`? Does it read
    a fixed sysfs path? Does it call into ESMI, a vendor NIC library, or something
@@ -267,11 +272,11 @@ in any process's memory.
 ## Explicitly out of scope for this fix
 
 - Migrating the other ~15 `"/sys/class/drm/" + device->get_gpu_path()` call sites in
-  `amd_smi_utils.cc` to the sysfs-root seam (tracked as AILITOOLS-333). Structure
-  supports it; not done now.
+  `amd_smi_utils.cc` to the sysfs-root seam. Structure supports it; not done
+  now.
 - Propagating a failed per-block `amdsmi_get_gpu_ecc_count()` on a mask-enabled
   block. It is logged but the total still returns `AMDSMI_STATUS_SUCCESS` and can
-  undercount (tracked as AILITOOLS-330).
+  undercount.
 - Full success-path coverage of `amdsmi_get_gpu_total_ecc_count()` through the
   public API for every RAS block. Only UMC
   (`RAS_FEATURES__ValidMaskOverwritesStaleOutput`) and UMC plus SDMA
