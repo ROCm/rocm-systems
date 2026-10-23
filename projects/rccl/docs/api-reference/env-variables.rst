@@ -621,9 +621,10 @@ in the following table.
           (``NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=1``) or port-failover
           resiliency (``NCCL_IB_RESILIENCY_PORT_FAILOVER``). Otherwise every
           rank keeps the RDMA read flush. A connection also keeps it when
-          either side uses a fused NIC (NIC Fusion, ``NCCL_NET_MERGE_LEVEL``),
-          a request spans more than 8 QPs, or the flag memory cannot be
-          registered. LL and LL128 receives never use the flag.
+          either side uses more than one NIC (NIC Fusion, including a fused
+          vNIC chosen by ``NCCL_IB_SUBNET_AWARE_ROUTING``), a request spans
+          more than 8 QPs, or the flag memory cannot be registered. LL and
+          LL128 receives never use the flag.
         | On gfx950 with 2 to 8 nodes of 8 GPUs, a communicator using it also
           adjusts the ``ncclAllReduce`` algorithm and protocol choice from
           16 MB per node upward, and switches ``ncclReduceScatter`` from LL128

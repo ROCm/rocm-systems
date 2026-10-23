@@ -301,7 +301,7 @@ test_categories:
     env_variables:
       - "NCCL_DEBUG=INFO"
   standard_env_gdr_flush_flag:
-    description: "Remote GDR flush flag. RCCL_PARAM caches RCCL_IB_GDR_FLUSH_FLAG for the process lifetime, so it is set before launch. GdrFlushFlagTest and GdrFlushTest need exactly 2 ranks, and GdrFlushFlagProtoSwitchMPITest needs 2 or more nodes; each skips otherwise."
+    description: "Remote GDR flush flag. RCCL_PARAM caches RCCL_IB_GDR_FLUSH_FLAG for the process lifetime, so it is set before launch. GdrFlushFlagTest and GdrFlushTest need exactly 2 ranks, and GdrFlushFlagProtoSwitchMPITest needs 2 or more nodes; each skips otherwise. Cluster jobs run this via test_runner suite net_ib_gdr_flush_flag (2 ranks on 2 nodes)."
     test_patterns:
       - "GdrFlushFlagTest.*"
       - "GdrFlushTest.*"
@@ -312,7 +312,7 @@ test_categories:
       - "NCCL_DEBUG=INFO"
       - "RCCL_IB_GDR_FLUSH_FLAG=1"
   standard_env_gdr_flush_flag_4qps:
-    description: "Remote GDR flush flag over 4 QPs per connection: requests rotate over the QPs and each flag tracks its own QP."
+    description: "Remote GDR flush flag over 4 QPs per connection: requests rotate over the QPs and each flag tracks its own QP. Cluster jobs run this via test_runner suite net_ib_gdr_flush_flag_4qps (2 ranks on 2 nodes)."
     test_patterns:
       - "GdrFlushFlagTest.*"
       - "GdrFlushFlagProtoSwitchMPITest.*"
@@ -323,7 +323,7 @@ test_categories:
       - "RCCL_IB_GDR_FLUSH_FLAG=1"
       - "NCCL_IB_QPS_PER_CONNECTION=4"
   standard_env_gdr_flush_flag_4qps_split:
-    description: "Remote GDR flush flag over 4 QPs with NCCL_IB_SPLIT_DATA_ON_QPS=1: every request spans all 4 QPs, and the GPU waits on all 4 flags."
+    description: "Remote GDR flush flag over 4 QPs with NCCL_IB_SPLIT_DATA_ON_QPS=1: every request spans all 4 QPs, and the GPU waits on all 4 flags. Cluster jobs run this via test_runner suite net_ib_gdr_flush_flag_4qps_split (2 ranks on 2 nodes)."
     test_patterns:
       - "GdrFlushFlagTest.*"
       - "GdrFlushFlagProtoSwitchMPITest.*"

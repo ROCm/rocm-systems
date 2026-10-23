@@ -457,7 +457,9 @@ TEST_F(GdrFlushFlagTest, Disabled_NoFlagAndHintIgnored) {
 
 // Enabled for the communicator, but over a fused (two-NIC) device: the flag WR
 // would carry one NIC's keys on the other NIC's QPs, so the connection keeps
-// the RDMA read flush and a flagged hint has no effect.
+// the RDMA read flush and a flagged hint has no effect. Accept uses the
+// post-routing vProps.ndevs (and remMeta.ndevs), covering both makeVDevice
+// fusion and subnet-aware routing onto a fused vNIC.
 TEST_F(GdrFlushFlagTest, Enabled_FusedNicKeepsRdmaReadFlush) {
     if (!validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                    false, kMinGpusPerNode, kNoNodeLimit))

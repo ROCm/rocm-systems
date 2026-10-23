@@ -295,6 +295,54 @@
         }
       ]
     },
+    "net_ib_gdr_flush_flag_base": {
+      "extends": "net_ib_base",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 1200,
+      "description": "Shared env for remote GDR flush flag suites. Carries no tests: extends merges test lists, so children would inherit them.",
+      "env_variables": {
+        "RCCL_IB_GDR_FLUSH_FLAG": "1"
+      }
+    },
+    "net_ib_gdr_flush_flag": {
+      "extends": "net_ib_gdr_flush_flag_base",
+      "tests": [
+        {
+          "name": "GdrFlushFlag_DefaultQps",
+          "description": "Remote GDR flush flag with default QPs. GdrFlushFlagTest needs 2 ranks; GdrFlushFlagProtoSwitchMPITest needs 2 nodes.",
+          "test_filter": "GdrFlushFlagTest.*:GdrFlushTest.*:GdrFlushFlagProtoSwitchMPITest.*"
+        }
+      ]
+    },
+    "net_ib_gdr_flush_flag_4qps": {
+      "extends": "net_ib_gdr_flush_flag_base",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "4"
+      },
+      "tests": [
+        {
+          "name": "GdrFlushFlag_4Qps",
+          "description": "Remote GDR flush flag over 4 QPs per connection: requests rotate over the QPs and each flag tracks its own QP.",
+          "test_filter": "GdrFlushFlagTest.*:GdrFlushFlagProtoSwitchMPITest.*"
+        }
+      ]
+    },
+    "net_ib_gdr_flush_flag_4qps_split": {
+      "extends": "net_ib_gdr_flush_flag_base",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
+      },
+      "tests": [
+        {
+          "name": "GdrFlushFlag_4QpsSplit",
+          "description": "Remote GDR flush flag over 4 QPs with NCCL_IB_SPLIT_DATA_ON_QPS=1: every request spans all 4 QPs, and the GPU waits on all 4 flags.",
+          "test_filter": "GdrFlushFlagTest.*:GdrFlushFlagProtoSwitchMPITest.*"
+        }
+      ]
+    },
     "gdr_flush_cumem_multinode": {
       "extends": "default",
       "is_gtest": true,
@@ -3728,6 +3776,24 @@
       "name": "GDR Flush - Whitebox ncclIbIflush (Single-Node, 2-Rank)",
       "description": "Whitebox coverage of the NET/IB GDR flush: dma-buf and peermem RO=0 scratchpad fence, feature-disabled fallback, and repeated-flush burst",
       "config": "net_ib_gdr_flush",
+      "enabled": true
+    },
+    {
+      "name": "GDR Flush Flag - Default QPs (2-Node, 2-Rank)",
+      "description": "Remote GDR flush flag (RCCL_IB_GDR_FLUSH_FLAG=1) over 2 ranks on 2 nodes",
+      "config": "net_ib_gdr_flush_flag",
+      "enabled": true
+    },
+    {
+      "name": "GDR Flush Flag - 4 QPs (2-Node, 2-Rank)",
+      "description": "Remote GDR flush flag over 4 QPs per connection",
+      "config": "net_ib_gdr_flush_flag_4qps",
+      "enabled": true
+    },
+    {
+      "name": "GDR Flush Flag - 4 QPs split (2-Node, 2-Rank)",
+      "description": "Remote GDR flush flag over 4 QPs with NCCL_IB_SPLIT_DATA_ON_QPS=1",
+      "config": "net_ib_gdr_flush_flag_4qps_split",
       "enabled": true
     },
     {

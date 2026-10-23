@@ -2053,9 +2053,10 @@ ib_recv:
       COMPILER_ATOMIC_LOAD(&ncclIbDevs[rCommDev->base.ibDevN].currSpeed, std::memory_order_relaxed);
     rComm->lastSentSpeeds[i] = (uint16_t)(meta.devs[i].currSpeed / 1000);
   }
-  // The flag WR carries devs[0]'s keys, so both sides must use a single NIC
-  // (nDataQps is the larger NIC count of the two).
-  if (lComm->gdrFlushFlag && rComm->flushEnabled && rComm->base.nDataQps == 1) {
+  // The flag WR carries devs[0]'s keys, so both sides must use a single NIC.
+  // Check vProps after subnet-aware routing, which can replace vProps with a
+  // fused vNIC while leaving nDataQps at its pre-fusion value.
+  if (lComm->gdrFlushFlag && rComm->flushEnabled && rComm->base.vProps.ndevs == 1 && remMeta.ndevs == 1) {
     int nQpsPerRequest = 0;
     NCCLCHECKGOTO(ncclIbCommBaseGetNqpsPerRequest(&rComm->base, &nQpsPerRequest), ret, fail);
     if (nQpsPerRequest <= NCCL_GDR_FLUSH_MAX_WAIT_QPS)
