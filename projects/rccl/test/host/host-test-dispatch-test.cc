@@ -631,6 +631,25 @@ TEST(HostDispatchArgsMicrotest, HelpIsNotAssumedOfEveryFlagThatMerelyLooksLikeIt
     EXPECT_EQ(options.passthrough, (std::vector<std::string>{"--helper-mode", "-household"}));
 }
 
+// ── clearShardingEnvironment ────────────────────────────────────────
+
+TEST(HostDispatchShardingMicrotest, EveryShardingVariableIsClearedForTheChildren)
+{
+    // A child that still saw these would shard the exact case list it was handed, running a
+    // fraction of it and exiting 0 -- so the whole run covers 1/N of the tree and says nothing.
+    // Spelled out here rather than looped over kShardingVariables, so a typo in that array
+    // cannot make the test agree with the bug.
+    setenv("GTEST_TOTAL_SHARDS", "4", 1);
+    setenv("GTEST_SHARD_INDEX", "2", 1);
+    setenv("GTEST_SHARD_STATUS_FILE", "/tmp/shard_status", 1);
+
+    clearShardingEnvironment();
+
+    EXPECT_EQ(getenv("GTEST_TOTAL_SHARDS"), nullptr);
+    EXPECT_EQ(getenv("GTEST_SHARD_INDEX"), nullptr);
+    EXPECT_EQ(getenv("GTEST_SHARD_STATUS_FILE"), nullptr);
+}
+
 // ── coverageDirectory ───────────────────────────────────────────────
 
 TEST(HostDispatchCoverageMicrotest, ObjectsAreRecordedBesideTheProfiles)
