@@ -203,7 +203,7 @@ def _print_roofline_html_path(runs: dict[str, Any], output: Optional[TextIO]) ->
     for workload in runs.values():
         html_path = getattr(workload, "roofline_html_path", None)
         if html_path:
-            print(f"\nInteractive roofline plot saved to {html_path}", file=output)
+            print(f"\nInteractive roofline plot saved to {html_path}\n", file=output)
 
 
 def is_roofline_shown(
@@ -244,7 +244,7 @@ def is_roofline_shown(
     for run_path, workload in runs.items():
         if hasattr(workload, "roofline_metrics") and workload.roofline_metrics:
             print(
-                "\n(4.1) Per-Kernel Roofline Metrics and (4.2) AI Plot Points",
+                "(4.1) Per-Kernel Roofline Metrics and (4.2) AI Plot Points",
                 file=output,
             )
 
