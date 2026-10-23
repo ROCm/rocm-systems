@@ -9,6 +9,7 @@
 
 #include <cerrno>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -54,7 +55,14 @@ float ncclParamRasTimeoutFactor(void) {
 }
 
 int64_t rasTimeoutFactorNs(int64_t baseSeconds) {
-  return (int64_t)((double)baseSeconds * 1000000000.0 * ncclParamRasTimeoutFactor());
+  const double scaled = (double)baseSeconds * 1000000000.0 * ncclParamRasTimeoutFactor();
+  // Guard the double->int64 conversion: an out-of-range conversion is undefined behavior. Note
+  // double(INT64_MAX) rounds up to 2^63, which is itself not representable as int64_t, so the
+  // upper bound must be a strict "< 2^63" (equivalently reject >= 2^63).
+  constexpr double kInt64Max = 9223372036854775808.0; // 2^63, exactly representable as double
+  if (!std::isfinite(scaled) || scaled >= kInt64Max) return INT64_MAX;
+  if (scaled <= -kInt64Max) return INT64_MIN;
+  return (int64_t)scaled;
 }
 
 double rasTimeoutFactorSec(int baseSeconds) {
