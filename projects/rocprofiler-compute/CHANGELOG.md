@@ -70,6 +70,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Optimized
 
+* Profile mode collects only the counters that metric equations use, which can reduce the number of profiling passes.
+
 ### Resolved issues
 
 * Fixed a `KeyError: 'title'` when combining `analyze --list-stats` with `--output-format csv` or `--output-format db`. These unsupported combinations now report a clear error during option validation.
