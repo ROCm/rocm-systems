@@ -542,6 +542,8 @@ protected:
       comm->base.activeQps[q] = &comm->base.qps[q];
     }
 
+    std::memset(ctsSlots, 0, sizeof(ctsSlots));
+    comm->ctsFifo = ctsSlots;
     ncclIbSendFifo& cts = comm->ctsFifo[0][0];
     cts.idx = 1;
     cts.nreqs = 1;
@@ -574,6 +576,7 @@ protected:
   }
 
   ncclIbSendComm* comm = nullptr;
+  alignas(64) ncclIbSendFifo ctsSlots[1][NCCL_NET_IB_MAX_RECVS];
   ibv_context ctx;
   ibv_qp qps[kSegSendNqps];
   ibv_mr mrs[3];

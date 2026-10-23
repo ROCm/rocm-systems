@@ -738,15 +738,16 @@ struct ncclIbSendComm {
   // for multi-receive requests will be used as a contiguous buffer of
   // 32B element (instead of 64B) and not used as a 2D array with
   // with each element of size 64B.
-  struct ncclIbSendFifo ctsFifo[NET_IB_MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
-  // Side table immediately after ctsFifo so one covering MR registers both.
+  // RCCL: points into one page-aligned block (IbCastSendCommAllocCts) so the side table can follow it.
+  struct ncclIbSendFifo (*ctsFifo)[NCCL_NET_IB_MAX_RECVS];
+  // Side table immediately after ctsFifo so one covering MR registers both; NULL unless advertising.
   // The receiver RDMA-writes every CTS slot when the peer advertised
   // NCCL_IB_CAP_MULTISEG (including nSegments==1) so the sender can wait on idx.
-  struct ncclIbSegLayout segLayoutFifo[NET_IB_MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
+  struct ncclIbSegLayout (*segLayoutFifo)[NCCL_NET_IB_MAX_RECVS];
   // A multi-segment send may split one request's per-QP chunk into up to one WR
   // per local+remote segment boundary crossing. Size the WR/SGE pools
   // for the worst case; single-segment sends use exactly one WR per request.
-  struct ibv_sge sges[NCCL_IB_MAX_WRS_PER_SEND];
+  alignas(32) struct ibv_sge sges[NCCL_IB_MAX_WRS_PER_SEND];
   struct ibv_send_wr wrs[NCCL_IB_MAX_WRS_PER_SEND + 1];
   // Each dev correlates to a mergedIbDev
   struct ncclIbSendCommDev devs[NCCL_IB_MAX_DEVS_PER_NIC];
@@ -774,7 +775,6 @@ struct ncclIbSendComm {
 // written out of order when IB Relaxed Ordering is enabled
 static_assert((sizeof(struct ncclIbNetCommBase) % 32) == 0,
               "ncclIbNetCommBase size must be 32-byte multiple to ensure ctsFifo is at proper offset");
-static_assert((offsetof(struct ncclIbSendComm, ctsFifo) % 32) == 0, "ncclIbSendComm ctsFifo must be 32-byte aligned");
 static_assert((sizeof(struct ncclIbSendFifo) % 32) == 0, "ncclIbSendFifo element size must be 32-byte multiples");
 static_assert(sizeof(struct ncclIbSendFifo) <= 64, "struct ncclIbSendFifo should fit one cache line");
 static_assert((sizeof(struct ncclIbSendFifoCtsInline) % 32) == 0,
@@ -782,9 +782,9 @@ static_assert((sizeof(struct ncclIbSendFifoCtsInline) % 32) == 0,
 static_assert((sizeof(struct ncclIbSendFifoCtsInline) <= 32),
               "struct ncclIbSendFifoCtsInline should fit within 32-bytes");
 static_assert((sizeof(struct ncclIbSegLayout) % 32) == 0, "ncclIbSegLayout element size must be 32-byte multiples");
-static_assert(offsetof(struct ncclIbSendComm, segLayoutFifo) ==
-                offsetof(struct ncclIbSendComm, ctsFifo) + sizeof(((struct ncclIbSendComm*)0)->ctsFifo),
-              "segLayoutFifo must immediately follow ctsFifo for a covering MR");
+#define IB_CAST_CTS_FIFO_BYTES (sizeof(struct ncclIbSendFifo) * (size_t)NET_IB_MAX_REQUESTS * (size_t)NCCL_NET_IB_MAX_RECVS)
+#define IB_CAST_SEG_LAYOUT_FIFO_BYTES (sizeof(struct ncclIbSegLayout) * (size_t)NET_IB_MAX_REQUESTS * (size_t)NCCL_NET_IB_MAX_RECVS)
+static_assert(IB_CAST_CTS_FIFO_BYTES % 64 == 0, "CTS FIFO size must keep the following side table 64-byte aligned");
 static_assert((offsetof(struct ncclIbSendComm, sges) % 32) == 0, "sges must be 32-byte aligned");
 static_assert((offsetof(struct ncclIbSendComm, wrs) % 32) == 0, "wrs must be 32-byte aligned");
 

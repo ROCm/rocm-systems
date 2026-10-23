@@ -1378,6 +1378,19 @@ static ncclResult_t IbCastQpSharingSenderRegisterPrimary(
   return ncclSuccess;
 }
 
+// RCCL: one page-aligned block. The side table is appended only when advertising.
+static ncclResult_t IbCastSendCommAllocCts(struct ncclIbSendComm* comm) {
+  size_t bytes = IB_CAST_CTS_FIFO_BYTES;
+  if (IbCastAdvertiseMultiSeg()) bytes += IB_CAST_SEG_LAYOUT_FIFO_BYTES;
+  void* region = NULL;
+  NCCLCHECK(ncclIbMalloc(&region, bytes));
+  comm->ctsFifo = (struct ncclIbSendFifo (*)[NCCL_NET_IB_MAX_RECVS])region;
+  comm->segLayoutFifo = IbCastAdvertiseMultiSeg()
+                            ? (struct ncclIbSegLayout (*)[NCCL_NET_IB_MAX_RECVS])((uint8_t*)region + IB_CAST_CTS_FIFO_BYTES)
+                            : NULL;
+  return ncclSuccess;
+}
+
 ncclResult_t IbCastConnectImpl(void* ctx, int dev, void* opaqueHandle, void** sendComm,
                                ncclNetDeviceHandle_t** sendDevComm, int envTrafficClass) {
   ncclResult_t ret = ncclSuccess;
@@ -1417,6 +1430,7 @@ ncclResult_t IbCastConnectImpl(void* ctx, int dev, void* opaqueHandle, void** se
   stage->buffer = NULL;
 
   NCCLCHECK(ncclIbMalloc((void**)&comm, sizeof(struct ncclIbSendComm)));
+  NCCLCHECKGOTO(IbCastSendCommAllocCts(comm), ret, fail); // RCCL: side table only when advertising.
   NCCLCHECKGOTO(IbCastSendCommInit(comm), ret, fail);
   NCCLCHECKGOTO(IbCastStatsInit(&comm->base.stats), ret, fail);
   NCCLCHECKGOTO(ncclSocketInit(&comm->base.sock, &handle->connectAddr, handle->magic, ncclSocketTypeNetIb, NULL, 1),
@@ -1609,7 +1623,7 @@ ib_recv_dev_list:
 
     // Prepare my CTS FIFO + multi-seg side table (one covering MR).
     NCCLCHECKGOTO(wrap_ibv_reg_mr(&commDev->ctsFifoMr, commDev->base.pd, comm->ctsFifo,
-                                  sizeof(comm->ctsFifo) + (IbCastAdvertiseMultiSeg() ? sizeof(comm->segLayoutFifo) : 0),
+                                  IB_CAST_CTS_FIFO_BYTES + (comm->segLayoutFifo ? IB_CAST_SEG_LAYOUT_FIFO_BYTES : 0),
                                   IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ),
                   ret, fail);
     devInfo->rkey = commDev->ctsFifoMr->rkey;
@@ -1760,6 +1774,7 @@ exit:
   stage->state = ncclIbCommStateStart;
   return ret;
 fail:
+  if (comm) free(comm->ctsFifo); // RCCL: the CTS block is a separate allocation.
   free(comm);
   goto exit;
 }
@@ -2581,7 +2596,7 @@ ib_recv:
   rComm->remCtsFifo.addr = remMeta.addr;
   if (rComm->peerCaps & NCCL_IB_CAP_MULTISEG) {
     NCCLCHECKGOTO(ncclIbMalloc((void**)&rComm->remSegLayout, sizeof(*rComm->remSegLayout)), ret, fail);
-    rComm->remSegLayout->addr = remMeta.addr + sizeof(((struct ncclIbSendComm*)0)->ctsFifo);
+    rComm->remSegLayout->addr = remMeta.addr + IB_CAST_CTS_FIFO_BYTES;
   }
   for (int i = 0; i < rComm->base.nRemDevs; i++) {
     rComm->remCtsFifo.rkeys[i] = remMeta.devs[i].rkey;
@@ -2830,6 +2845,7 @@ ncclResult_t IbCastCloseSend(void* sendComm) {
     if (comm->base.resiliency) {
       NCCLCHECK(IbCastResiliencyDestroy(&comm->base.resiliency));
     }
+    free(comm->ctsFifo); // RCCL: the CTS block is a separate allocation.
     free(comm);
   }
   TIME_PRINT("IB");
