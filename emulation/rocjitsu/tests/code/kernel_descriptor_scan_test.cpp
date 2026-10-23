@@ -173,6 +173,7 @@ TEST(KernelDescriptorScan, UnalignedSectionAndSymbolTablesAreReadAsBytes) {
   std::memcpy(&header, image.data(), sizeof(header));
   std::vector<Elf64_Shdr> sections(header.e_shnum);
   std::memcpy(sections.data(), image.data() + header.e_shoff, sections.size() * sizeof(Elf64_Shdr));
+  size_t symbol_tables = 0;
   for (Elf64_Shdr &section : sections) {
     if (section.sh_type != SHT_SYMTAB)
       continue;
@@ -181,16 +182,23 @@ TEST(KernelDescriptorScan, UnalignedSectionAndSymbolTablesAreReadAsBytes) {
     while (image.size() % 8 != 1)
       image.push_back(0);
     section.sh_offset = image.size();
-    image.insert(image.end(), symbols.begin(), symbols.end());
+    image.resize(image.size() + symbols.size());
+    std::memcpy(image.data() + section.sh_offset, symbols.data(), symbols.size());
+    EXPECT_NE(section.sh_offset % alignof(Elf64_Sym), 0u);
+    ++symbol_tables;
   }
+  ASSERT_EQ(symbol_tables, 1u);
   while (image.size() % 8 != 1)
     image.push_back(0);
   header.e_shoff = image.size();
   const std::span<const std::byte> bytes = std::as_bytes(std::span(sections));
-  image.insert(image.end(), reinterpret_cast<const uint8_t *>(bytes.data()),
-               reinterpret_cast<const uint8_t *>(bytes.data()) + bytes.size());
+  image.resize(image.size() + bytes.size());
+  std::memcpy(image.data() + header.e_shoff, bytes.data(), bytes.size());
+  EXPECT_NE(header.e_shoff % alignof(Elf64_Shdr), 0u);
   std::memcpy(image.data(), &header, sizeof(header));
-  ASSERT_EQ(scan_kernel_descriptors(image, text_off, text_sz).size(), 1u);
+  const std::vector<KernelDescriptorInfo> found = scan_kernel_descriptors(image, text_off, text_sz);
+  ASSERT_EQ(found.size(), 1u);
+  EXPECT_EQ(found.front().kernel_name, "test_kernel");
 }
 
 TEST(KernelDescriptorScan, EntryDisplacementOutsideTextIsRejected) {
