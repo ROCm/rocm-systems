@@ -271,11 +271,13 @@ class VirtualGPU : public device::VirtualDevice {
     size_t maxMemObjectsInQueue_;     //!< Maximum number of mem objects in the queue
   };
 
-  class HwQueueTracker : public amd::EmbeddedObject {
+  //! Hands out the completion signals of the operations on the queue. Subclasses decide how a
+  //! signal is proven free before its reuse.
+  class HwQueueTracker {
    public:
     HwQueueTracker(const VirtualGPU& gpu) : gpu_(gpu) {}
 
-    ~HwQueueTracker();
+    virtual ~HwQueueTracker();
 
     //! Creates a pool of signals for tracking of HW operations on the queue
     bool Create();
@@ -287,6 +289,9 @@ class VirtualGPU : public device::VirtualDevice {
     //! Wait for the curent active signal. Can idle the queue
     bool WaitCurrent();
 
+    //! Process the timing of the completed signal before its reuse. Requires the execution() lock
+    void ProcessSignalTiming(ProfilingSignal* signal);
+
     //! Update current active engine
     void SetActiveEngine(HwQueueEngine engine = HwQueueEngine::Compute) { engine_ = engine; }
     HwQueueEngine GetActiveEngine() const { return engine_; }
@@ -295,7 +300,7 @@ class VirtualGPU : public device::VirtualDevice {
     std::vector<hsa_signal_t>& WaitingSignal(HwQueueEngine engine = HwQueueEngine::Compute);
 
     //! Resets current signal back to the previous one. It's necessary in a case of ROCr failure.
-    void ResetCurrentSignal();
+    virtual void ResetCurrentSignal() = 0;
 
     //! Adds an external signal(submission in another queue) for dependency tracking
     void AddExternalSignal(ProfilingSignal* signal) { external_signals_.push_back(signal); }
@@ -312,15 +317,25 @@ class VirtualGPU : public device::VirtualDevice {
     //! Adds a raw signal for dependency tracking
     void AddDynamicQueueWait(hsa_signal_t signal) { dynamic_queue_waits_.push_back(signal); }
 
-   private:
+   protected:
     //! Creates HSA signal with the specified scope
     bool CreateSignal(ProfilingSignal* signal, bool interrupt = false) const;
 
-    //! Wait for the next active signal
-    void WaitNext();
-
     //! Wait for the provided signal
     bool CpuWaitForSignal(ProfilingSignal* signal);
+
+    //! Moves current_id_ to the slot of the next use and makes its signal reusable
+    virtual void AcquireSlot() = 0;
+
+    //! Starts a use of the current slot's signal at init_val
+    virtual void BeginUse(ProfilingSignal* signal, hsa_signal_value_t init_val) = 0;
+
+    //! Registers the async handler that processes ts once the signal drops below init_value
+    virtual hsa_status_t SetAsyncHandler(ProfilingSignal* signal, Timestamp* ts,
+                                         hsa_signal_value_t init_value) = 0;
+
+    //! True if the GPU may still be working on the last use of the signal
+    virtual bool IsBusy(const ProfilingSignal* signal) const = 0;
 
     HwQueueEngine engine_ = HwQueueEngine::Unknown;  //!< Engine used in the current operations
     std::stack<ProfilingSignal*> signal_pool_irq_;   //!< The pool of free signals with interrupts
@@ -331,6 +346,24 @@ class VirtualGPU : public device::VirtualDevice {
     std::vector<ProfilingSignal*> external_signals_;  //!< External signals for a wait in this queue
     std::vector<hsa_signal_t> dynamic_queue_waits_;   //!< Extra raw signals for a wait in this queue
     std::vector<hsa_signal_t> waiting_signals_;       //!< Current waiting signals in this queue
+  };
+
+  //! Reads and resets each signal when it is handed out
+  class LegacySignalTracker final : public HwQueueTracker {
+   public:
+    LegacySignalTracker(const VirtualGPU& gpu) : HwQueueTracker(gpu) {}
+
+    void ResetCurrentSignal() override;
+
+   private:
+    void AcquireSlot() override;
+    void BeginUse(ProfilingSignal* signal, hsa_signal_value_t init_val) override;
+    hsa_status_t SetAsyncHandler(ProfilingSignal* signal, Timestamp* ts,
+                                 hsa_signal_value_t init_value) override;
+    bool IsBusy(const ProfilingSignal* signal) const override;
+
+    //! Wait for the next active signal
+    void WaitNext();
   };
 
   class MetaDataPreloader : public amd::EmbeddedObject {
@@ -539,6 +572,7 @@ class VirtualGPU : public device::VirtualDevice {
   void submitCopyMemory(amd::CopyMemoryCommand& cmd);
   void submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd);
   void submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd);
+  void SubmitBatchCopyMemoryRect(amd::BatchCopyMemoryRectCommand& cmd);
   void SubmitBatchWriteMemory(amd::BatchWriteMemoryCommand& cmd);
   void SubmitBatchReadMemory(amd::BatchReadMemoryCommand& cmd);
   void submitMapMemory(amd::MapMemoryCommand& cmd);
@@ -555,6 +589,7 @@ class VirtualGPU : public device::VirtualDevice {
       bool attach_signal = false);
   void submitNativeFn(amd::NativeFnCommand& cmd);
   void submitMarker(amd::Marker& cmd);
+  void CompleteCpuWait(amd::Command& cmd) override;
   void submitAccumulate(amd::AccumulateCommand& cmd);
   void submitAcquireExtObjects(amd::AcquireExtObjectsCommand& cmd);
   void submitReleaseExtObjects(amd::ReleaseExtObjectsCommand& cmd);
@@ -648,15 +683,15 @@ class VirtualGPU : public device::VirtualDevice {
 
   void enableSyncBlit() const;
 
-  void hasPendingDispatch() { hasPendingDispatch_ = true; }
-  bool IsPendingDispatch() const { return (hasPendingDispatch_) ? true : false; }
+  void hasPendingDispatch() { SetStateFlag(kHasPendingDispatch); }
+  bool IsPendingDispatch() const { return GetStateFlag(kHasPendingDispatch); }
   void addSystemScope() override {
-    addSystemScope_ = true;
+    SetStateFlag(kAddSystemScope);
     fence_state_ = amd::Device::CacheState::kCacheStateInvalid;
   }
   void SetCopyCommandType(cl_command_type type) { copy_command_type_ = type; }
 
-  HwQueueTracker& Barriers() { return barriers_; }
+  HwQueueTracker& Barriers() { return *barriers_; }
 
   Timestamp* timestamp() const { return timestamp_; }
   amd::Command* command() const { return command_; }
@@ -696,7 +731,7 @@ class VirtualGPU : public device::VirtualDevice {
   //! Emits the hang report itself. Called by AnalyzeAqlQueue, which brackets it
   //! with the banner.
   std::string AnalyzeAqlQueueBody() const;
-  bool ForceIrq() const { return force_irq_; }
+  bool ForceIrq() const { return GetStateFlag(kForceIrq); }
 
   //! SDMA engine affinity management
   uint32_t AssignedSdmaEngine() const {
@@ -766,7 +801,9 @@ class VirtualGPU : public device::VirtualDevice {
   //! Ring the queue doorbell via direct UC store or ROCr signal.
   void ringQueueDoorbell(uint64_t index);
 
-  //! Snapshot shared barrier state before atomically reserving AQL queue slots.
+  //! Snapshot shared barrier state before atomically reserving AQL queue slots. Spins until
+  //! the ring has room for all \p packet_count slots, so the write index never leads the read
+  //! index by a full ring and the reserved slots are free to write on return.
   AqlSlotReservation ReserveAqlSlots(size_t packet_count);
 
   //! Clear a caller-requested barrier when prior queue state already preserves stream ordering.
@@ -859,36 +896,35 @@ class VirtualGPU : public device::VirtualDevice {
   //! one and retaining the new one. No-op if cmd or hw_event is null.
   static void AttachHwEvent(amd::Command* cmd, void* hw_event);
 
-  //! Spin-wait until queue has space for a packet at \p write_index.
-  //! Uses cached_read_dispatch_id_ to avoid DRAM traffic on the fast path;
-  //! only re-reads the hardware read_dispatch_id when the cached value
-  //! indicates the queue might be full.
-  void WaitForQueueSlot(uint64_t write_index, uint32_t capacity) {
-    if ((write_index - cached_read_dispatch_id_) < capacity) {
-      return;
-    }
-    do {
-      cached_read_dispatch_id_ = Hsa::queue_load_read_index_scacquire(gpu_queue_);
-      if ((write_index - cached_read_dispatch_id_) < capacity) {
-        return;
-      }
-      amd::Os::yield();
-    } while (true);
+  //! Queue state flags — using atomic with bit operations to handle concurrent
+  //! access from multiple threads under different locks (or no locks).
+  enum StateFlags : uint8_t {
+    kHasPendingDispatch = 1 << 0,
+    kProfiling = 1 << 1,
+    kCooperative = 1 << 2,
+    kAddSystemScope = 1 << 3,
+    kTrackingCreated = 1 << 4,
+    kRetainExternalSignals = 1 << 5,
+    kForceIrq = 1 << 6,
+  };
+
+  void SetStateFlag(StateFlags flag) {
+    state_.fetch_or(flag, std::memory_order_release);
   }
 
-  //! Queue state flags
-  union {
-    struct {
-      uint32_t hasPendingDispatch_ : 1;     //!< A kernel dispatch is outstanding
-      uint32_t profiling_ : 1;              //!< Profiling is enabled
-      uint32_t cooperative_ : 1;            //!< Cooperative launch is enabled
-      uint32_t addSystemScope_ : 1;         //!< Insert a system scope to the next aql
-      uint32_t tracking_created_ : 1;       //!< Enabled if tracking object was properly initialized
-      uint32_t retainExternalSignals_ : 1;  //!< Indicate to retain external signal array
-      uint32_t force_irq_ : 1;              //!< Forces interrupt on the signal completion
-    };
-    uint32_t state_;
-  };
+  void ClearStateFlag(StateFlags flag) {
+    state_.fetch_and(~flag, std::memory_order_release);
+  }
+
+  bool GetStateFlag(StateFlags flag) const {
+    return (state_.load(std::memory_order_acquire) & flag) != 0;
+  }
+
+  bool TestAndClearStateFlag(StateFlags flag) {
+    return (state_.fetch_and(static_cast<uint8_t>(~flag), std::memory_order_acq_rel) & flag) != 0;
+  }
+
+  std::atomic<uint8_t> state_{0};
 
   Timestamp* timestamp_;
   bool sdma_profiling_for_cmd_ = false;  //!< SDMA profiling enabled for current command
@@ -942,7 +978,7 @@ class VirtualGPU : public device::VirtualDevice {
   std::once_flag scheduler_thread_init_;              //!< Ensures thread is initialized exactly once
   std::vector<hsa_signal_t> pendingSchedulerEvents_;  //!< Pending scheduler completion signals
 
-  HwQueueTracker barriers_;  //!< Tracks active barriers in ROCr
+  std::unique_ptr<HwQueueTracker> barriers_;  //!< Tracks active barriers in ROCr
 
   ManagedBuffer managed_buffer_;          //!< Memory manager for staging copies
   ManagedBuffer managed_kernarg_buffer_;  //!< Managed memory for kernel args

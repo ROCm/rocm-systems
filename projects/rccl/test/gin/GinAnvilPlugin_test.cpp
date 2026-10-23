@@ -10,6 +10,8 @@
 
 #include "gin_anvil_plugin_test_stubs.h"
 
+#include "../common/ScopedEnv.hpp"
+
 #include "gin/gin_host_anvil_sdma.h"
 #include "comm.h"
 #include "nccl_device/gin/anvil_sdma/gin_anvil_ipc_table.h"
@@ -29,29 +31,6 @@
 
 namespace RcclUnitTesting
 {
-
-class ScopedEnv {
- public:
-  ScopedEnv(const char* name, const char* value) : name_(name) {
-    if (const char* prev = getenv(name)) {
-      had_ = true;
-      prev_ = prev;
-    }
-    setenv(name, value, 1);
-  }
-  ~ScopedEnv() {
-    if (had_) {
-      setenv(name_, prev_.c_str(), 1);
-    } else {
-      unsetenv(name_);
-    }
-  }
-
- private:
-  const char* name_;
-  std::string prev_;
-  bool had_{false};
-};
 
 struct HipFreeDeleter {
   void operator()(void* ptr) const {
@@ -849,8 +828,8 @@ TEST_F(GinAnvilPluginTest, ConnCheck_FailedBindRetriesGate) {
   stopGin(ictx, coll, ginCtx);
 }
 
-// closeColl must un-mark the set: production never reaches plugin finalize
-// (ginState is memset first), so leaving erase only in finalize would leave a
+// closeColl must un-mark the set: erase also covers backend-drop paths that
+// never reach plugin finalize, so leaving erase only in finalize would leave a
 // recycled ncclComm* marked and skip the gate on the next job.
 TEST_F(GinAnvilPluginTest, ConnCheck_CloseCollUnmarksCommForReuse) {
   void* rawDevLsa = nullptr;
@@ -872,7 +851,9 @@ TEST_F(GinAnvilPluginTest, ConnCheck_CloseCollUnmarksCommForReuse) {
   ginCtx = nullptr;
   ASSERT_EQ(plugin_.closeColl(coll), ncclSuccess);
   coll = nullptr;
-  // Intentionally skip finalize: that path is unreachable after HostFinalize.
+  // Intentionally skip finalize: closeColl alone must clear the dedup mark.
+  // Host finalize still runs plugin finalize for a live backend (AICOMRCCL-2739),
+  // but that is a separate erase site and not required for reuse after closeColl.
 
   connectColl(ictx, &coll, 2);
   ncclGinConfig_t cfg{};
@@ -981,6 +962,47 @@ TEST_F(GinAnvilPluginTest, ConnCheck_UsesLsaTeamForBootstrap) {
   EXPECT_EQ(GinAnvilPluginStubs::GetLastIntraNodeBarrierRanks(), std::vector<int>({1, 0}));
 
   stopGin(ictx, coll, ginCtx);
+}
+
+// AICOMRCCL-2739: GinMPIDeviceTests.CommDestroy_FreesAnvilInitContext asserts on
+// this count. closeColl is all the pre-fix ncclGinHostFinalize reached, so the
+// init context must stay live through it and be released only by finalize.
+TEST_F(GinAnvilPluginTest, LiveInitCtx_ReleasedByFinalizeNotCloseColl) {
+  const int before = ncclGinAnvilPluginTestLiveInitCtxCount();
+
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* otherIctx = nullptr;
+  initCtx(&otherIctx);
+  EXPECT_EQ(ncclGinAnvilPluginTestLiveInitCtxCount(), before + 2);
+
+  void* coll = nullptr;
+  connectColl(ictx, &coll);
+  ASSERT_NE(coll, nullptr);
+  ASSERT_EQ(plugin_.closeColl(coll), ncclSuccess);
+  EXPECT_EQ(ncclGinAnvilPluginTestLiveInitCtxCount(), before + 2);
+
+  ASSERT_EQ(plugin_.finalize(ictx), ncclSuccess);
+  EXPECT_EQ(ncclGinAnvilPluginTestLiveInitCtxCount(), before + 1);
+  ASSERT_EQ(plugin_.finalize(otherIctx), ncclSuccess);
+  EXPECT_EQ(ncclGinAnvilPluginTestLiveInitCtxCount(), before);
+}
+
+TEST_F(GinAnvilPluginTest, LiveInitCtx_FailedInitAndNullFinalizeLeaveCountUnchanged) {
+  const int before = ncclGinAnvilPluginTestLiveInitCtxCount();
+
+  void* ictx = nullptr;
+  {
+    ScopedEnv ty("NCCL_GIN_TYPE", "4");
+    EXPECT_EQ(plugin_.init(&ictx, 0, nullptr), ncclInternalError);
+  }
+  GinAnvilPluginStubs::SetProbeResult(0);
+  EXPECT_EQ(plugin_.init(&ictx, 0, nullptr), ncclInternalError);
+  EXPECT_EQ(ictx, nullptr);
+  EXPECT_EQ(ncclGinAnvilPluginTestLiveInitCtxCount(), before);
+
+  EXPECT_EQ(plugin_.finalize(nullptr), ncclSuccess);
+  EXPECT_EQ(ncclGinAnvilPluginTestLiveInitCtxCount(), before);
 }
 
 }  // namespace RcclUnitTesting
