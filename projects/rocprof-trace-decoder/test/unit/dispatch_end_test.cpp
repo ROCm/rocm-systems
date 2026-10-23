@@ -625,36 +625,53 @@ TEST(DispatchEndTest, RegTokenMeAboveOneIsMasked)
     expect_end(records.ends[0], 1, dispatch_end, 1, 1);
 }
 
-TEST(DispatchEndTest, OccupancyDispatchIdKeepsLow10Bits)
+TEST(DispatchEndTest, DispatchIdSkipsMultiplesOf1024)
 {
-    constexpr uint64_t kDispatches = 1025;
-
+    // Occupancy records keep the low 10 bits of the dispatch ID and 0 means unknown,
+    // so the 1024th dispatch on a pipe gets ID 1025.
     TraceBuilder trace;
     trace.advance(10);
-    for (uint64_t i = 0; i < kDispatches - 1; i++)
+    for (int i = 0; i < 1022; i++)
     {
         trace.reg_init(0, 0);
         trace.dispatch_end(0, 0);
     }
-    trace.reg_init(0, 0);
-    int64_t start = trace.now();
-    trace.wave_start(0, 0, 0);
-    trace.dispatch_end(0, 0);
-    trace.advance(10);
-    int64_t end = trace.now();
-    trace.wave_end(0);
-    trace.advance(10);
+
+    std::vector<std::pair<int64_t, int64_t>> waves{}; // {start, end} of dispatches 1023, 1025 and 1026
+    for (uint8_t wid = 0; wid < 3; wid++)
+    {
+        trace.reg_init(0, 0);
+        int64_t start = trace.now();
+        trace.wave_start(0, 0, wid);
+        trace.dispatch_end(0, 0);
+        trace.advance(10);
+        waves.emplace_back(start, trace.now());
+        trace.wave_end(wid);
+        trace.advance(10);
+    }
 
     auto records = decode(trace);
 
-    ASSERT_EQ(records.dispatches.size(), kDispatches);
-    EXPECT_EQ(records.dispatches.back().dispatch_id, kDispatches);
-    ASSERT_EQ(records.ends.size(), kDispatches);
-    expect_end(records.ends.back(), kDispatches, end, 0, 0);
+    ASSERT_EQ(records.dispatches.size(), 1025u);
+    EXPECT_EQ(records.dispatches[1021].dispatch_id, 1022u);
+    EXPECT_EQ(records.dispatches[1022].dispatch_id, 1023u);
+    EXPECT_EQ(records.dispatches[1023].dispatch_id, 1025u);
+    EXPECT_EQ(records.dispatches[1024].dispatch_id, 1026u);
+    for (auto& dispatch : records.dispatches) EXPECT_NE(dispatch.dispatch_id & 0x3FF, 0u);
 
-    auto* s = records.wave_start(0, start);
-    auto* e = records.wave_end(0, end);
-    ASSERT_TRUE(s && e);
-    EXPECT_EQ(s->dispatch_id, kDispatches & 0x3FF);
-    EXPECT_EQ(e->dispatch_id, kDispatches & 0x3FF);
+    // The dispatch-end counter skips the same IDs, so ENDs still match their dispatches
+    ASSERT_EQ(records.ends.size(), 1025u);
+    expect_end(records.ends[1022], 1023, waves[0].second, 0, 0);
+    expect_end(records.ends[1023], 1025, waves[1].second, 0, 0);
+    expect_end(records.ends[1024], 1026, waves[2].second, 0, 0);
+
+    const uint64_t expected[] = {1023, 1, 2};
+    for (uint8_t wid = 0; wid < 3; wid++)
+    {
+        auto* s = records.wave_start(wid, waves[wid].first);
+        auto* e = records.wave_end(wid, waves[wid].second);
+        ASSERT_TRUE(s && e);
+        EXPECT_EQ(s->dispatch_id, expected[wid]);
+        EXPECT_EQ(e->dispatch_id, expected[wid]);
+    }
 }

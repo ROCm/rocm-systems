@@ -59,6 +59,13 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
     PipeArray<uint64_t> current_dispatch_id{};
     PipeArray<uint64_t> dispatch_id_end{};
 
+    // Occupancy records keep the low 10 bits of the dispatch ID, where 0 means unknown,
+    // so IDs that are multiples of 1024 are skipped.
+    auto next_dispatch_id = [](uint64_t& id)
+    {
+        if ((++id & 0x3FF) == 0) ++id;
+    };
+
     auto send_occupancy = [&]()
     {
         for (auto& occ : occupancy)
@@ -539,7 +546,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                     csregister.UpdateRegCS(reg);
                     if (reg.regaddr == COMPUTE_DISPATCH_END && current_dispatch_id.at_reg(reg))
                     {
-                        dispatch_id_end.at_reg(reg)++;
+                        next_dispatch_id(dispatch_id_end.at_reg(reg));
                         // Handle the case we started in the middle of a dispatch
                         if (current_dispatch_id.at_reg(reg) < dispatch_id_end.at_reg(reg))
                             current_dispatch_id.at_reg(reg) = dispatch_id_end.at_reg(reg);
@@ -588,7 +595,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                 gfx10::reg_init_type reg{.raw = token.contents};
                 DEBUGPRINT(reg);
                 if (reg.type != 2 || (reg.data & 1) == 0) break;
-                current_dispatch_id.at_reg(reg)++;
+                next_dispatch_id(current_dispatch_id.at_reg(reg));
                 stitch.sendDispatch(csregister, token.time, reg.me, reg.pipe, current_dispatch_id.at_reg(reg));
                 break;
             }
