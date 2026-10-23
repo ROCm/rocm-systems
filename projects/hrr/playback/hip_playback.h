@@ -104,6 +104,26 @@ inline std::vector<HrrVaRange> hrr_place_plan(std::vector<HrrVaRange> allocs,
     return out;
 }
 
+// The granule-aligned range [base, end) that placing `size` bytes at the
+// recorded address `rec` would map, checked: false if `rec + size` or the
+// rounding wraps, if the range is empty, or if it passes the placement ceiling
+// (the one hrr_place_plan applies). `rec` and `size` come from the archive.
+inline bool hrr_place_range(uint64_t rec, uint64_t size, uint64_t gran,
+                            uint64_t* base, uint64_t* end) {
+    constexpr uint64_t kCeiling = 1ull << 47;
+    if (gran == 0 || rec == 0 || size == 0) return false;
+    uint64_t last;  // one past the last byte
+    if (__builtin_add_overflow(rec, size, &last)) return false;
+    const uint64_t b = rec - rec % gran;
+    uint64_t up;
+    if (__builtin_add_overflow(last, gran - 1, &up)) return false;
+    const uint64_t e = up / gran * gran;
+    if (e <= b || e > kCeiling) return false;
+    *base = b;
+    *end = e;
+    return true;
+}
+
 // The placeholders still standing, base -> end, kept merged.
 struct HrrHeldRanges {
     std::map<uint64_t, uint64_t> r;
@@ -121,8 +141,10 @@ struct HrrHeldRanges {
         }
         r[b] = e;
     }
-    // Drop [b, e) if one held range covers all of it.
+    // Drop [b, e) if one held range covers all of it. An empty or inverted
+    // range is never held: a wrapped end would otherwise split a real range.
     bool take(uint64_t b, uint64_t e) {
+        if (e <= b) return false;
         auto it = r.upper_bound(b);
         if (it == r.begin()) return false;
         --it;
