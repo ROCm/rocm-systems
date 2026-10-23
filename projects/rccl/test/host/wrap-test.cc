@@ -5721,6 +5721,44 @@ TEST(WrapMicrotest, AllReducePreferredBackends_ForceDdaTakesPriorityOverCTAZero)
   DeleteCommWithArch(comm);
 }
 
+
+namespace {
+int SelectAllReduceDdaAlgo(ncclComm* comm, size_t bytes) {
+  rcclCollDecision decision{};
+  EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, bytes / sizeof(float), ncclFloat32, ncclSum,
+                                              /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                              &decision));
+  return decision.algo;
+}
+
+template <typename F>
+struct HookSig;
+template <typename Sig>
+struct HookSig<std::function<Sig>> {
+  using type = Sig;
+};
+template <typename Slot>
+using HookFor = ScopedHook<typename HookSig<Slot>::type>;
+
+// AllReduce DDA path taken and its LL tier eligible; ArVmmEligible adds the VMM tier.
+struct ArDdaHooks {
+  HookFor<decltype(g_allReduceShouldTakeDdaPath)> shouldTakeDda{
+      g_allReduceShouldTakeDdaPath, [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; }};
+  HookFor<decltype(g_allReduceDdaFabricLLEligible)> llEligible{
+      g_allReduceDdaFabricLLEligible, [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; }};
+};
+struct ArVmmEligible {
+  HookFor<decltype(g_allReduceDdaFabricEligible)> vmmEligible{
+      g_allReduceDdaFabricEligible, [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; }};
+};
+ncclComm* MakeArDdaComm(int nRanks) {
+  ncclComm* comm = MakeCommWithArch("gfx1250");
+  comm->nRanks = nRanks;
+  comm->archThresholds = Gfx1250Table();
+  return comm;
+}
+}  // namespace
+
 // ===========================================================================
 // rcclSelectAllReduce -- preferred-backend mask integration tests.
 //
@@ -5815,10 +5853,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_ForceDdaChoosesDdaWhenEligible) {
           return def;
         };
         g_ceImplemented = true;
-        ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
-                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
-        ScopedHook llEligible(g_allReduceDdaFabricLLEligible,
-                              [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
+        ArDdaHooks hooks;
         ncclComm* comm = MakeCommWithArch("gfx1250");
         comm->nRanks = 1;
         comm->nNodes = 1;
@@ -5853,13 +5888,9 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_ForceDdaWithLLDisabledChoosesVmm) {
           if (std::strcmp(env, "RCCL_DDA_LL")  == 0)  return 0;
           return def;
         };
-        ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
-                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
+        ArDdaHooks hooks;
         // LL is eligible — proves arDdaLLMax > 0 guard, not eligibility, skips it.
-        ScopedHook llEligible(g_allReduceDdaFabricLLEligible,
-                              [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
-        ScopedHook vmmEligible(g_allReduceDdaFabricEligible,
-                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
+        ArVmmEligible vmm;
         ncclComm* comm = MakeCommWithArch("gfx1250");
         comm->nRanks = 1;
         comm->nNodes = 1;
@@ -6914,42 +6945,6 @@ TEST(WrapMicrotestIsolated, DdaFabricVmmBlocks_BudgetPerRank) {
       });
 }
 
-namespace {
-int SelectAllReduceDdaAlgo(ncclComm* comm, size_t bytes) {
-  rcclCollDecision decision{};
-  EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, bytes / sizeof(float), ncclFloat32, ncclSum,
-                                              /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
-                                              &decision));
-  return decision.algo;
-}
-
-template <typename F>
-struct HookSig;
-template <typename Sig>
-struct HookSig<std::function<Sig>> {
-  using type = Sig;
-};
-template <typename Slot>
-using HookFor = ScopedHook<typename HookSig<Slot>::type>;
-
-// AllReduce DDA path taken and its LL tier eligible; ArVmmEligible adds the VMM tier.
-struct ArDdaHooks {
-  HookFor<decltype(g_allReduceShouldTakeDdaPath)> shouldTakeDda{
-      g_allReduceShouldTakeDdaPath, [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; }};
-  HookFor<decltype(g_allReduceDdaFabricLLEligible)> llEligible{
-      g_allReduceDdaFabricLLEligible, [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; }};
-};
-struct ArVmmEligible {
-  HookFor<decltype(g_allReduceDdaFabricEligible)> vmmEligible{
-      g_allReduceDdaFabricEligible, [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; }};
-};
-ncclComm* MakeArDdaComm(int nRanks) {
-  ncclComm* comm = MakeCommWithArch("gfx1250");
-  comm->nRanks = nRanks;
-  comm->archThresholds = Gfx1250Table();
-  return comm;
-}
-}  // namespace
 
 // From 32 ranks, DDA VMM claims (2 MiB, nRanks x 512 KiB] ahead of LL; at and below
 // 2 MiB, past the window, or on a 16-rank comm, LL keeps it.
