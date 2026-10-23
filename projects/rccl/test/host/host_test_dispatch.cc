@@ -612,15 +612,22 @@ struct Options {
     std::vector<std::string> passthrough;
 };
 
-// A --gtest_output= value ("<format>:<path>", or a bare path) applied to *options*.
+// A --gtest_output= value ("<format>:<path>", a bare format, or a bare path) applied to *options*.
 //
-// gtest's own rules, mirrored: no prefix means xml, and a path ending in '/' is a directory to
-// write the default filename into.
+// gtest's own rules, mirrored: a colon-less value that is "xml" or "json" names the FORMAT and
+// leaves the path at gtest's default, any other colon-less value is a path in xml, and a path
+// ending in '/' is a directory to write the default filename into.
 void applyOutputSpec(std::string_view value, Options *options)
 {
     const size_t colon = value.find(':');
-    std::string_view format = colon == std::string_view::npos ? "xml" : value.substr(0, colon);
-    std::string path(colon == std::string_view::npos ? value : value.substr(colon + 1));
+    const bool bareFormat = colon == std::string_view::npos && (value == "xml" || value == "json");
+    std::string_view format =
+        colon == std::string_view::npos
+            ? (bareFormat ? value : std::string_view("xml"))
+            : value.substr(0, colon);
+    std::string path(colon == std::string_view::npos
+                         ? (bareFormat ? std::string_view("./") : value)
+                         : value.substr(colon + 1));
     options->outputFormat = format == "json" ? ReportFormat::Json : ReportFormat::Xml;
     if (!path.empty() && path.back() == '/') {
         path += fmt::format("test_detail.{}", formatName(options->outputFormat));
