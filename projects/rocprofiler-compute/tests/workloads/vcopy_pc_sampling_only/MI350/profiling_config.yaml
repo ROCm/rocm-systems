@@ -3,25 +3,24 @@ attach_pid: null
 bench_only: false
 config_dir: /app/projects/rocprofiler-compute/src/rocprof_compute_soc/analysis_configs
 device: 0
-dispatch: null
 experimental: true
 filter_blocks:
 - '21'
 format_rocprof_output: rocpd
 iteration_multiplexing: null
 kernel: null
-kokkos_trace: false
+kernel_iteration_range: null
 list_available_metrics: false
 list_blocks: null
 list_metrics: null
 list_sets: false
-loglevel: 10
+loglevel: 5
 membw_analysis: false
 ml_api_trace: false
 mode: profile
 name: vcopy_pcsampling
 no_native_tool: false
-no_roof: false
+no_roof: true
 output_directory: /app/projects/rocprofiler-compute/workloads/vcopy_pcsampling/MI350
 overwrite: false
 pc_sampling: true
@@ -34,7 +33,6 @@ rocprofiler_sdk_tool_path: /rocm-venv/lib/python3.12/site-packages/_rocm_sdk_dev
 roof_only: false
 set_selected: null
 specs: false
-target: null
 torch_trace: false
 triton_trace: false
-verbose: 1
+verbose: 3
