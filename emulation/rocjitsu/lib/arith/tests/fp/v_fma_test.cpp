@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// gfx12 FP16/FP32 FMA: deterministic fractional inputs, exceptional values,
+// gfx11/gfx12 FP16/FP32 FMA: deterministic fractional inputs, exceptional values,
 // EXEC, whole-register aliases, preserved halfwords, FP-status reporting, and errors.
 
 #include "common/contracts.h"
@@ -23,7 +23,7 @@ namespace {
 using namespace rocjitsu::arith::test;
 
 // Check low-half arithmetic and that all storage outside active results is preserved.
-template <int Lanes, typename Call> void check_fma16(Call call) {
+template <int Lanes, bool Rdna3 = false, typename Call> void check_fma16(Call call) {
   using namespace rocjitsu::arith::test;
   using RegBank = Registers<5, Lanes>;
   using Mask = std::conditional_t<Lanes == 32, uint32_t, uint64_t>;
@@ -50,6 +50,14 @@ template <int Lanes, typename Call> void check_fma16(Call call) {
         for (int aliasing_offset : {0, 1, 2, 3}) {
           RegBank r = input;
           uint32_t status = 0x80000000U;
+          if (Rdna3 && semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+            EXPECT_EQ(call(cpu | semantics, exec_mask, 0, r.v + aliasing_offset, r.v, r.v + 1,
+                           r.v + 2, &status),
+                      RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS);
+            r.expect_preserved(input, 0, 0);
+            EXPECT_EQ(status, 0x80000000U);
+            continue;
+          }
           ASSERT_EQ(call(cpu | semantics, exec_mask, 0, r.v + aliasing_offset, r.v, r.v + 1,
                          r.v + 2, &status),
                     RJ_ARITH_SUCCESS);
@@ -76,7 +84,11 @@ template <int Lanes, typename Call> void check_fma16(Call call) {
                     ? half_bits(value)
                     : half_fma_reference::evaluate(uint16_t(input.v[0][lane]),
                                                    uint16_t(input.v[1][lane]),
-                                                   uint16_t(input.v[2][lane]), false);
+                                                   uint16_t(input.v[2][lane]), false, Rdna3);
+            if (semantics != RJ_ARITH_SEMANTICS_LOOSE) {
+              EXPECT_EQ(uint16_t(actual), expected_bits);
+              continue;
+            }
             float expected = float(half_value(expected_bits));
             expect_f32(std::bit_cast<uint32_t>(float(half_value(uint16_t(actual)))), expected,
                        semantics,
@@ -200,12 +212,17 @@ TEST(FpFmaF16W64Gfx12, RoundingBoundaries) {
 }
 
 // Check signed zeros, infinities, and NaN payloads for either wave width.
-template <int Lanes, typename Call> void check_fma16_exact_encodings(Call call) {
+template <int Lanes, bool Rdna3 = false, typename Call>
+void check_fma16_exact_encodings(Call call) {
   using namespace rocjitsu::arith::test;
   const struct {
     uint16_t a, b, c, expected;
     uint64_t flags;
   } cases[] = {
+      // MODE.IEEE=0: gfx11 preserves the selected signaling NaN; gfx12 quiets it.
+      {0x3c00, 0x7c05, 0x7c07, Rdna3 ? 0x7c05U : 0x7e05U, 0}, // B precedes C.
+      {0x3c00, 0x3c00, 0x7c07, Rdna3 ? 0x7c07U : 0x7e07U, 0}, // C selected.
+
       {0x7e01, 0x7c03, 0, 0x7e01, 0},      // Earlier qNaN beats later sNaN.
       {0x3c00, 0x7e05, 0x7d07, 0x7e05, 0}, // B NaN beats C sNaN.
       {0x7c00, 0x3c00, 0xfc00, 0xfe00, 0}, // Opposite infinities.
@@ -214,18 +231,21 @@ template <int Lanes, typename Call> void check_fma16_exact_encodings(Call call) 
       {0x0001, 0x3800, 0, 0x0000, 0},      // Tie rounds to even zero.
       {0x0003, 0x3800, 0, 0x0002, 0},      // Tie rounds up to even subnormal.
 
-      {0x4782, 0xda00, 0x03e1, 0xe5a1, 0},             // Rounding witness.
-      {0, 0x7c00, 0x7e01, 0xfe00, 0},                  // Invalid product precedes C NaN.
-      {0x7c03, 0x7e01, 0, 0x7e03, 0},                  // Quiet the first NaN.
-      {0x7bff, 0x7bff, 0, 0x7c00, 0},                  // Finite overflow.
-      {0x7bff, 0x7bff, 0, 0x7bff, RJ_ARITH_FP16_OVFL}, // Saturate finite overflow.
-      {0x3c00, 0x3c00, 0xbc00, 0, 0},                  // Exact cancellation.
-      {1, 0x3c00, 0, 1, 0},                            // Exact subnormal result.
+      {0x4782, 0xda00, 0x03e1, 0xe5a1, 0},               // Rounding witness.
+      {0, 0x7c00, 0x7e01, 0xfe00, 0},                    // Invalid product precedes C NaN.
+      {0x7c03, 0x7e01, 0, Rdna3 ? 0x7c03U : 0x7e03U, 0}, // Select the first source NaN.
+      {0x7bff, 0x7bff, 0, 0x7c00, 0},                    // Finite overflow.
+      {0x7bff, 0x7bff, 0, 0x7bff, RJ_ARITH_FP16_OVFL},   // Saturate finite overflow.
+      {0x3c00, 0x3c00, 0xbc00, 0, 0},                    // Exact cancellation.
+      {1, 0x3c00, 0, 1, 0},                              // Exact subnormal result.
   };
   for (uint64_t cpu : supported_cpu_levels()) {
     for (uint64_t semantics : {RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE,
                                RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS,
                                RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL}) {
+      if (Rdna3 && semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+        continue;
+      }
       for (const auto &sample : cases) {
         SCOPED_TRACE(testing::Message()
                      << "cpu=" << cpu << " semantics=" << semantics << " a=" << sample.a
@@ -251,7 +271,8 @@ TEST(FpFmaF16W64Gfx12, ExactEncodings) {
 }
 
 // Check signed zeros, infinities, and NaN payloads for either wave width.
-template <int Lanes, typename Call> void check_fma32_exact_encodings(Call call) {
+template <int Lanes, bool Rdna3 = false, typename Call>
+void check_fma32_exact_encodings(Call call) {
   using namespace rocjitsu::arith::test;
   const struct {
     uint32_t a, b, c, expected;
@@ -261,12 +282,13 @@ template <int Lanes, typename Call> void check_fma32_exact_encodings(Call call) 
       {1, 0x3f400000, 0, 1},                            // Above underflow midpoint.
       {1, 0x3f000000, 0, 0},                            // Tie to even zero.
       {0x7f800000, 0x3f800000, 0xff800000, 0xffc00000}, // Opposite infinities.
-      {0x3f800000, 0x7f800001, 0x7fc00002, 0x7fc00001}, // B NaN precedes C.
-      {0x7f7fffff, 0x40000000, 0, 0x7f800000},          // Finite overflow.
-      {0x007fffff, 0x3f800001, 0, 0x00800000},          // Promote to normal.
+      {0x3f800000, 0x7f800001, 0x7fc00002, Rdna3 ? 0x7f800001U : 0x7fc00001U}, // B NaN precedes C.
+      {0x7f7fffff, 0x40000000, 0, 0x7f800000},                                 // Finite overflow.
+      {0x007fffff, 0x3f800001, 0, 0x00800000},                                 // Promote to normal.
       {0x3f800001, 0x3f7ffffe, 0xbf800000, 0xa8800000}, // Fused cancellation.
       {0, 0x7f800000, 0x7fc12345, 0xffc00000},          // Invalid product beats C NaN.
-      {0x7f800003, 0x7fc00005, 0, 0x7fc00003},          // First NaN, quieted.
+      {0x7f800003, 0x7fc00005, 0,
+       Rdna3 ? 0x7f800003U : 0x7fc00003U},              // Select the first source NaN.
       {0x80000000, 0x3f800000, 0x80000000, 0x80000000}, // Matching negative zeros.
       {3, 0x3f000000, 0, 2},                            // Subnormal halfway rounds to even.
   };
@@ -415,6 +437,39 @@ TEST(FpFmaF16W32Gfx12, StatusBoundariesAndExec) {
 }
 TEST(FpFmaF16W64Gfx12, StatusBoundariesAndExec) {
   check_fma16_status<64>(rj_arith_v_fma_f16_w64_gfx12);
+}
+
+TEST(FpFmaF16W32Gfx11, Arithmetic) { check_fma16<32, true>(rj_arith_v_fma_f16_w32); }
+TEST(FpFmaF16W32Gfx11, ExactEncodings) {
+  check_fma16_exact_encodings<32, true>(rj_arith_v_fma_f16_w32);
+}
+
+TEST(FpFmaF16W64Gfx11, Arithmetic) { check_fma16<64, true>(rj_arith_v_fma_f16_w64); }
+TEST(FpFmaF16W64Gfx11, ExactEncodings) {
+  check_fma16_exact_encodings<64, true>(rj_arith_v_fma_f16_w64);
+}
+
+TEST(FpFmaF32W32Gfx11, Arithmetic) { check_fma32<32>(rj_arith_v_fma_f32_w32); }
+TEST(FpFmaF32W32Gfx11, ExactEncodings) {
+  check_fma32_exact_encodings<32, true>(rj_arith_v_fma_f32_w32);
+}
+
+TEST(FpFmaF32W64Gfx11, Arithmetic) { check_fma32<64>(rj_arith_v_fma_f32_w64); }
+TEST(FpFmaF32W64Gfx11, ExactEncodings) {
+  check_fma32_exact_encodings<64, true>(rj_arith_v_fma_f32_w64);
+}
+
+TEST(FpFmaF16W32Gfx11, UnsupportedGuestControls) {
+  check_fma_unsupported_guest_controls<32>(rj_arith_v_fma_f16_w32);
+}
+TEST(FpFmaF16W64Gfx11, UnsupportedGuestControls) {
+  check_fma_unsupported_guest_controls<64>(rj_arith_v_fma_f16_w64);
+}
+TEST(FpFmaF32W32Gfx11, UnsupportedGuestControls) {
+  check_fma_unsupported_guest_controls<32>(rj_arith_v_fma_f32_w32);
+}
+TEST(FpFmaF32W64Gfx11, UnsupportedGuestControls) {
+  check_fma_unsupported_guest_controls<64>(rj_arith_v_fma_f32_w64);
 }
 
 } // namespace

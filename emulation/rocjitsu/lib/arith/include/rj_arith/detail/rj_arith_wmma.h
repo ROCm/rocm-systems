@@ -14,10 +14,38 @@
 extern "C" {
 #endif
 
-// Dense matrix multiply-accumulate on 32 lanes. A/B each use four packed-FP16
-// VGPRs; C/D each use eight FP32 VGPRs. C/D[row][col] maps to
-// [row % 8][col + 16 * (row / 8)]. See lib/arith/README.md for a packing example.
-// Results are staged before writes, permitting whole-VGPR aliases.
+// gfx11 dense FP16 matrix multiply-accumulate. A/B each use eight packed VGPRs;
+// C/D use eight FP32 VGPRs in Wave32 and four in Wave64. A[row][k] and B[k][col]
+// map to [k / 2][row or col + 16 * group], half k % 2, replicated across every
+// 16-lane group. Results are unspecified without this replication.
+// C/D[row][col] maps to [row / 2][col + 16 * (row % 2)] in Wave32 and
+// [row / 4][col + 16 * (row % 4)] in Wave64. Whole-VGPR aliases are supported.
+// These gfx11 entry points support modes 0..3 without FP status. Instruction flags
+// must be zero; only supported CPU/semantics fields and FP16_OVFL are accepted.
+// FP16_OVFL has no effect on FP32 results.
+int rj_arith_v_wmma_f32_16x16x16_f16_w32(uint64_t flags, uint64_t instruction_flags,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         const uint32_t *const *b, const uint32_t *const *c);
+
+// gfx11 Wave64 uses the layout, replication and controls documented above.
+int rj_arith_v_wmma_f32_16x16x16_f16_w64(uint64_t flags, uint64_t instruction_flags,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         const uint32_t *const *b, const uint32_t *const *c);
+
+// BF16 uses the gfx11 Wave32 layout, replication and controls above.
+int rj_arith_v_wmma_f32_16x16x16_bf16_w32(uint64_t flags, uint64_t instruction_flags,
+                                          uint32_t *const *d, const uint32_t *const *a,
+                                          const uint32_t *const *b, const uint32_t *const *c);
+
+// BF16 uses the gfx11 Wave64 layout, replication and controls above.
+int rj_arith_v_wmma_f32_16x16x16_bf16_w64(uint64_t flags, uint64_t instruction_flags,
+                                          uint32_t *const *d, const uint32_t *const *a,
+                                          const uint32_t *const *b, const uint32_t *const *c);
+
+// gfx12 Wave32: A/B each use four packed VGPRs; C/D use eight FP32 VGPRs.
+// A[row][k] and B[k][col] map to [(k % 8) / 2][row or col + 16 * (k / 8)],
+// half k % 2. C/D[row][col] maps to [row % 8][col + 16 * (row / 8)].
+// See lib/arith/README.md for a packing example. Whole-VGPR aliases are supported.
 // Instruction flags must be zero. Only CPU-level and semantics fields (with supported
 // values) and RJ_ARITH_FP16_OVFL are accepted; all other flag bits are rejected.
 // RJ_ARITH_FP16_OVFL is accepted but has no effect on the FP32 result.

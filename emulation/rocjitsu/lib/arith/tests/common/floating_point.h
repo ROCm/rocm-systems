@@ -26,6 +26,7 @@ static const uint16_t kBF16PositiveInfinityBits = 0x7f80;
 
 // FP32 special-value bit patterns. The NaN is quiet with payload 0x12345.
 static const uint32_t kF32QuietNaNBits = 0x7fc12345U;
+static const uint32_t kF32SignalingNaNBits = 0x7f812345U;
 static const uint32_t kF32PositiveInfinityBits = 0x7f800000U;
 
 // Draw two finite FP16 values, using the high 16 bits of each engine result.
