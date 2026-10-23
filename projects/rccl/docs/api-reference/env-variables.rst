@@ -211,7 +211,7 @@ in the following table.
 
     * - | ``NCCL_DIAGNOSTICS_ECC_THRESHOLD``
         | Number of corrected volatile ECC errors at or above which the RAS
-          diagnostics report a GPU. Has no effect while the ECC check reports
+          diagnostics report a GPU. Has no effect when the ECC check reports
           ``unavailable`` on AMD GPUs.
       - | ``0``: Corrected errors are not reported (default).
         | ``N`` > 0: Ranks with at least ``N`` corrected errors are reported.
