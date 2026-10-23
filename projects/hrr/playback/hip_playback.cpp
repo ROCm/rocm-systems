@@ -3621,13 +3621,6 @@ static hipError_t replay_memcpy_impl(PlaybackContext& ctx, const char* api,
                                      uint64_t size, int32_t kind,
                                      bool is_async, hipStream_t stream,
                                      uint64_t hash_lo, uint64_t hash_hi) {
-    // Capture leaves out the contents of a copy over HIP_HRR_CAPTURE_MAX_BLOB_MB.
-    if (kind == hipMemcpyHostToDevice && size > 0 && !hash_lo && !hash_hi) {
-        fprintf(stderr, "[HRR] %s: host-to-device copy of %llu bytes was captured without "
-                        "its contents; refusing the call\n",
-                api, (unsigned long long)size);
-        return hipErrorNotFound;
-    }
     void*      dst = translate_or_materialize(ctx, dst_rec);
     hipError_t r   = hipSuccess;
 
