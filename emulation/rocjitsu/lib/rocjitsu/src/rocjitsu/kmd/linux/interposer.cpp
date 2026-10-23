@@ -31,6 +31,7 @@
 #include "rocjitsu/vm/plugins/plugin_loader.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
+#include "util/diagnostic.h"
 
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
@@ -1446,7 +1447,8 @@ public:
       // Through the accessor, not the field: publish_mutex_ is the innermost lock
       // and every other reader goes this way, so a raw read here would be the one
       // access a reviewer has to re-derive the safety of.
-      if (auto active_remote = remote()) {
+      if (auto active_remote = remote();
+          active_remote && active_remote->handles_drm_render_minor(render_minor)) {
         remote_open_refs_.fetch_add(1, std::memory_order_acq_rel);
         return DrmBackendLease(this, std::move(active_remote));
       }
@@ -3433,7 +3435,15 @@ public:
       }
 
       try {
-        auto dbt_guest = rocjitsu::config::load_dbt_guest_config_from_handoff(*handoff);
+        util::StringDiagnostic diagnostic;
+        auto maybe_dbt_guest =
+            rocjitsu::config::load_dbt_guest_config_from_handoff(*handoff, diagnostic.emitter());
+        if (maybe_dbt_guest.failed()) {
+          util::Logger::warn("rocjitsu: failed to load child config: ", diagnostic.message());
+          destroy_local_vm();
+          return nullptr;
+        }
+        auto dbt_guest = std::move(maybe_dbt_guest.value());
         if (dbt_guest.enabled) {
           LinuxKfd *execution_driver = nullptr;
           const bool simulator_backend =
@@ -5894,7 +5904,7 @@ interposer_gpu_info_for(const InterposerContext::DrmFileToken &file) {
     return std::nullopt;
   }
   if (const auto &remote = lease.remote()) {
-    if (const Sysfs::GpuInfo *info = remote->gpu_info())
+    if (const Sysfs::GpuInfo *info = remote->gpu_info_for_render_minor(render_minor))
       return *info;
     return std::nullopt;
   }
@@ -5910,7 +5920,7 @@ static std::optional<Sysfs::GpuInfo> interposer_gpu_info(uint32_t render_minor) 
     }
   }
   if (auto remote = InterposerContext::ctx.remote()) {
-    if (const Sysfs::GpuInfo *info = remote->gpu_info())
+    if (const Sysfs::GpuInfo *info = remote->gpu_info_for_render_minor(render_minor))
       return *info;
   }
   return std::nullopt;

@@ -132,11 +132,21 @@ def _legacy_dpp_opcode_rule(inst_name: str) -> DppOpcodeRule:
     return DppOpcodeRule.ALLOW
 
 
+_RDNA4_DPP_FLOAT_DOT4 = frozenset(
+    {
+        'V_DOT4_F32_FP8_BF8',
+        'V_DOT4_F32_BF8_FP8',
+        'V_DOT4_F32_FP8_FP8',
+        'V_DOT4_F32_BF8_BF8',
+    }
+)
+
+
 def _modern_rdna_dpp_opcode_rule(
     enc_name: str,
     inst_name: str,
     *,
-    allow_dot2_vop3p: bool,
+    allow_dot4_float_vop3p: bool,
     forbid_cvt_pk_f32_vop3: bool,
     rdna4_vop1_exclusions: bool,
 ) -> DppOpcodeRule:
@@ -176,10 +186,14 @@ def _modern_rdna_dpp_opcode_rule(
     if enc == 'ENC_VOP3P':
         if name.startswith('V_FMA_MIX'):
             return DppOpcodeRule.ALLOW
-        if allow_dot2_vop3p and name in (
+        if name in (
             'V_DOT2_F32_F16',
             'V_DOT2_F32_BF16',
         ):
+            return DppOpcodeRule.ALLOW
+        # RDNA4 floating dot products have DPP16 and DPP8 encodings. The
+        # integer DOT4/DOT8 and packed arithmetic restrictions do not apply.
+        if allow_dot4_float_vop3p and name in _RDNA4_DPP_FLOAT_DOT4:
             return DppOpcodeRule.ALLOW
         if (
             name in _DPP_VOP3P_FORBIDDEN
@@ -888,6 +902,17 @@ class IsaProfile(ABC):
         del enc_name, inst_name, src0_size_bits
         return DppOpcodeRule.ALLOW
 
+    def supports_dpp_opcode(
+        self,
+        enc_name: str,
+        inst_name: str,
+        *,
+        has_modifier_encoding: bool,
+    ) -> bool:
+        """Qualify DPP16/DPP8 availability when the XML omits a valid form."""
+        del enc_name, inst_name
+        return has_modifier_encoding
+
     def supports_sdwa_opcode(
         self,
         enc_name: str,
@@ -1110,10 +1135,14 @@ class IsaProfile(ABC):
     def unique_flat_segment(self, enc_name: str) -> int | None:
         """Segment required by retained opcodes absent from the parent FLAT table.
 
-        GLOBAL may define standalone opcodes. SCRATCH-only opcode numbers can
-        collide with GLOBAL and are not candidates for parent-table retention.
+        Segment-only opcodes share the FLAT layout but may require a secondary
+        dispatch on the segment when GLOBAL and SCRATCH reuse an opcode number.
         """
-        return 2 if enc_name in ('ENC_FLAT_GLBL', 'ENC_FLAT_GLOBAL') else None
+        if enc_name in ('ENC_FLAT_GLBL', 'ENC_FLAT_GLOBAL'):
+            return 2
+        if enc_name == 'ENC_FLAT_SCRATCH':
+            return 1
+        return None
 
     @abstractmethod
     def skip_inst_encoding(
@@ -1391,6 +1420,14 @@ class _AmdgpuProfileBase(IsaProfile):
         if upper == 'ENC_FLAT':
             return MnemonicRule(use_flat_mnemonic=True)
         return MnemonicRule()
+
+    # FLAT encoding facts used by load execution and operand metadata.
+    legacy_flat_lds = False
+    legacy_flat_d16_lds = False
+    flat_offset_bits: int | None = None
+    flat_lds_m0_mask: int | None = None
+    scratch_has_vaddr_expr: str | None = None
+    flat_saddr_null_aliases: tuple[str, ...] = ()
 
     def saddr_null_selector_expr(self, enc_name: str) -> str | None:
         """Legacy FLAT reserves the all-ones 7-bit SADDR selector."""
@@ -1775,6 +1812,10 @@ class CdnaProfile(_AmdgpuProfileBase):
       struct already spans the full instruction width.
     """
 
+    flat_offset_bits = 13
+    flat_lds_m0_mask = 0x3FFFC
+    scratch_has_vaddr_expr = 'inst_.lds != 0'
+
     @property
     def ds_compare_store_compare_first(self) -> bool:
         # CDNA1-4 / RDNA1-2 DS CMPST reverses the BUFFER operand order.
@@ -1991,6 +2032,11 @@ class Cdna1Profile(CdnaProfile):
     - The current runtime ISA trait leaves SRAM ECC disabled.
     """
 
+    legacy_flat_lds = True
+    scratch_has_vaddr_expr = 'inst_.saddr == 0x7F'
+
+    flat_lds_m0_mask = 0xFFFC
+
     @property
     def d16_loads_zero_unselected_half(self) -> bool:
         return False
@@ -2067,6 +2113,11 @@ class Cdna2Profile(CdnaProfile):
     - Scratch base via SGPR pair.
     - ENC_VOP3PX2 does not exist in CDNA2 XML.
     """
+
+    legacy_flat_lds = True
+    scratch_has_vaddr_expr = 'inst_.saddr == 0x7F'
+
+    flat_lds_m0_mask = 0xFFFC
 
     @property
     def acc_vgpr_encoding_base(self) -> int:
@@ -2146,6 +2197,19 @@ class Rdna1Profile(_AmdgpuProfileBase):
 
     _FLAT_SEGMENTS = frozenset({'GLBL', 'SCRATCH'})
     _SKIP_DPP_SDWA = True
+
+    legacy_flat_lds = True
+    legacy_flat_d16_lds = True
+    flat_offset_bits = 12
+    scratch_has_vaddr_expr = '(inst_.saddr == 0x7D || inst_.saddr == 0x7F)'
+
+    def saddr_null_selector_expr(self, enc_name: str) -> str | None:
+        if enc_name.upper() == 'ENC_FLAT':
+            return '0x7D'
+        return super().saddr_null_selector_expr(enc_name)
+
+    flat_lds_m0_mask = 0xFFFC
+    flat_saddr_null_aliases = ('127',)
 
     @property
     def vmem_writes_use_expcnt(self) -> bool:
@@ -2251,6 +2315,9 @@ class Rdna2Profile(Rdna1Profile):
     remain skipped (``_SKIP_DPP_SDWA = True``).
     """
 
+    # GFX10.3 assigns SADDR=127 to the immediate-only scratch form.
+    scratch_has_vaddr_expr = 'inst_.saddr == 0x7D'
+
 
 class Rdna3Profile(_AmdgpuProfileBase):
     """ISA profile for RDNA3 (GFX11, Navi3x).
@@ -2294,6 +2361,8 @@ class Rdna3Profile(_AmdgpuProfileBase):
         if enc_name.upper() == 'ENC_VINTERP' and field_name in ('src0', 'src1', 'src2'):
             return 'OPR_SRC_VGPR'
         return super().normalize_operand_type(enc_name, field_name, operand_type)
+
+    flat_saddr_null_aliases = ('127',)
 
     @property
     def has_gfx11_image_address_extension(self) -> bool:
@@ -2367,7 +2436,7 @@ class Rdna3Profile(_AmdgpuProfileBase):
         return _modern_rdna_dpp_opcode_rule(
             enc_name,
             inst_name,
-            allow_dot2_vop3p=True,
+            allow_dot4_float_vop3p=False,
             forbid_cvt_pk_f32_vop3=False,
             rdna4_vop1_exclusions=False,
         )
@@ -2620,6 +2689,8 @@ class Rdna4Profile(_AmdgpuProfileBase):
             enc_name, enc_cond, unique_segment_opcode=unique_segment_opcode
         )
 
+    flat_saddr_null_aliases = ('127',)
+
     @property
     def extra_lane_selector_intervals(self) -> tuple[tuple[int, int], ...]:
         # READLANE masks the value to the wave width, not the selector encoding.
@@ -2686,10 +2757,24 @@ class Rdna4Profile(_AmdgpuProfileBase):
         return _modern_rdna_dpp_opcode_rule(
             enc_name,
             inst_name,
-            allow_dot2_vop3p=False,
+            allow_dot4_float_vop3p=True,
             forbid_cvt_pk_f32_vop3=True,
             rdna4_vop1_exclusions=True,
         )
+
+    def supports_dpp_opcode(
+        self,
+        enc_name: str,
+        inst_name: str,
+        *,
+        has_modifier_encoding: bool,
+    ) -> bool:
+        # The RDNA4 XML omits the floating DOT4 DPP alternates. LLVM's
+        # VOP3P_Realtriple_gfx11_gfx12 and physical gfx1201 execution confirm
+        # both DPP16 and DPP8 for these four opcodes.
+        if enc_name.upper() == 'ENC_VOP3P' and inst_name in _RDNA4_DPP_FLOAT_DOT4:
+            return True
+        return has_modifier_encoding
 
     @property
     def ds_b8_transpose_kind(self) -> int:
@@ -2908,6 +2993,8 @@ class Cdna5Profile(Rdna4Profile):
     logical target used by parser/codegen rules while generated and handwritten
     C++ lives under ``amdgpu/cdna5`` in the ``cdna5`` namespace.
     """
+
+    flat_saddr_null_aliases = ()
 
     @property
     def smem_register_offset_condition(self) -> str:

@@ -82,7 +82,7 @@ class DdaReduceScatterFabricLL128Microtest : public ::testing::Test {
   template <typename T>
   void ExpectLaunchOf(const DdaLaunch& launch, size_t recvcount) {
     EXPECT_EQ(launch.kernel, (Kernel<T, 8>()));
-    ASSERT_EQ(launch.args.size(), 10u);
+    ASSERT_EQ(launch.args.size(), 11u);
     EXPECT_EQ(launch.Arg<T**>(0), comm().ddaPeerPtrsDev);
     EXPECT_EQ(launch.Arg<T*>(1), kRecvbuff);
     EXPECT_EQ(launch.Arg<const T*>(2), kSendbuff);
@@ -93,6 +93,7 @@ class DdaReduceScatterFabricLL128Microtest : public ::testing::Test {
     EXPECT_EQ(launch.Arg<int>(7), comm().ddaLLEpochLen);
     EXPECT_EQ(launch.Arg<size_t>(8), (recvcount * sizeof(T) + 1919) / 1920);
     EXPECT_EQ(launch.Arg<size_t>(9), (comm().ddaScratchBytes / 2) / 16 * 16);
+    EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(10).flag, comm().abortFlagDev);
   }
 
   DdaFabricMockComm mock_;
@@ -103,9 +104,10 @@ TEST_F(DdaReduceScatterFabricLL128Microtest, Eligible_BaselineFp32Sum) {
   EXPECT_TRUE(Eligible(4));
 }
 
-TEST_F(DdaReduceScatterFabricLL128Microtest, Eligible_DdaLLZeroRejects) {
+// LL128 is gated by RCCL_DDA_LL128 alone; RCCL_DDA_LL only controls the LL tier.
+TEST_F(DdaReduceScatterFabricLL128Microtest, Eligible_DdaLLZeroDoesNotGateLL128) {
   params_["RCCL_DDA_LL"] = 0;
-  EXPECT_FALSE(Eligible(4));
+  EXPECT_TRUE(Eligible(4));
 }
 
 TEST_F(DdaReduceScatterFabricLL128Microtest, Eligible_NeedsCommAndBootstrap) {

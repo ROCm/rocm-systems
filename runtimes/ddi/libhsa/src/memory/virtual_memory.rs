@@ -5,6 +5,7 @@
 
 use super::*;
 
+/// Finds a reservation containing the complete virtual address range.
 fn vmem_reservation_base(runtime: &HsaState, address: usize, size: usize) -> Option<usize> {
     let (&base, reservation) = runtime
         .memory_state
@@ -14,6 +15,7 @@ fn vmem_reservation_base(runtime: &HsaState, address: usize, size: usize) -> Opt
     reservation.contains_range(address, size).then_some(base)
 }
 
+/// Collects all mappings intersecting the requested virtual address range.
 fn vmem_mapping_bases(
     runtime: &HsaState,
     address: usize,
@@ -39,6 +41,7 @@ fn vmem_mapping_bases(
     }
 }
 
+/// Replaces access permissions for the specified mappings and agents.
 fn replace_vmem_access(
     runtime: &mut HsaState,
     mapping_base: usize,
@@ -160,6 +163,7 @@ fn replace_vmem_access(
     unsafe(export_name = "__hsa_impl_hsa_amd_vmem_address_reserve")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Reserves a virtual address range without backing memory.
 pub unsafe extern "C" fn hsa_amd_vmem_address_reserve(
     address: *mut *mut c_void,
     size: usize,
@@ -179,6 +183,7 @@ pub unsafe extern "C" fn hsa_amd_vmem_address_reserve(
     unsafe(export_name = "__hsa_impl_hsa_amd_vmem_address_reserve_align")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Reserves a virtual address range with explicit alignment.
 pub unsafe extern "C" fn hsa_amd_vmem_address_reserve_align(
     address: *mut *mut c_void,
     size: usize,
@@ -237,6 +242,7 @@ pub unsafe extern "C" fn hsa_amd_vmem_address_reserve_align(
     unsafe(export_name = "__hsa_impl_hsa_amd_vmem_address_free")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Releases the virtual memory address resource.
 pub extern "C" fn hsa_amd_vmem_address_free(address: *mut c_void, size: usize) -> Status {
     boundary(|| {
         if address.is_null() || size == 0 {
@@ -297,6 +303,7 @@ pub extern "C" fn hsa_amd_vmem_address_free(address: *mut c_void, size: usize) -
     unsafe(export_name = "__hsa_impl_hsa_amd_vmem_handle_create")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Allocates backing for a virtual-memory handle.
 pub unsafe extern "C" fn hsa_amd_vmem_handle_create(
     pool: HsaMemoryPool,
     size: usize,
@@ -376,6 +383,7 @@ pub unsafe extern "C" fn hsa_amd_vmem_handle_create(
     unsafe(export_name = "__hsa_impl_hsa_amd_vmem_handle_release")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Releases the virtual memory handle resource.
 pub extern "C" fn hsa_amd_vmem_handle_release(memory_handle: HsaAmdVmemAllocHandle) -> Status {
     boundary(|| {
         let mut guard = match lock() {
@@ -424,6 +432,7 @@ pub extern "C" fn hsa_amd_vmem_handle_release(memory_handle: HsaAmdVmemAllocHand
     unsafe(export_name = "__hsa_impl_hsa_amd_vmem_map")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Maps a virtual memory handle into a reserved address range.
 pub extern "C" fn hsa_amd_vmem_map(
     address: *mut c_void,
     size: usize,
@@ -534,6 +543,7 @@ pub extern "C" fn hsa_amd_vmem_map(
     unsafe(export_name = "__hsa_impl_hsa_amd_vmem_unmap")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Unmaps backing memory from a virtual address range.
 pub extern "C" fn hsa_amd_vmem_unmap(address: *mut c_void, size: usize) -> Status {
     boundary(|| {
         if address.is_null() || size == 0 {
@@ -551,7 +561,10 @@ pub extern "C" fn hsa_amd_vmem_unmap(address: *mut c_void, size: usize) -> Statu
             Ok(bases) => bases,
             Err(status) => return status,
         };
-        if bases.iter().any(|&base| copy_borrowed(runtime, base)) {
+        if bases
+            .iter()
+            .any(|&base| runtime.memory_state.copy_borrowed(base))
+        {
             return OUT_OF_RESOURCES;
         }
         for base in bases {
@@ -618,6 +631,7 @@ pub extern "C" fn hsa_amd_vmem_unmap(address: *mut c_void, size: usize) -> Statu
     unsafe(export_name = "__hsa_impl_hsa_amd_vmem_set_access")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Sets per-agent access permissions for virtual memory mappings.
 pub unsafe extern "C" fn hsa_amd_vmem_set_access(
     address: *mut c_void,
     size: usize,
@@ -663,7 +677,10 @@ pub unsafe extern "C" fn hsa_amd_vmem_set_access(
             Ok(bases) => bases,
             Err(status) => return status,
         };
-        if bases.iter().any(|&base| copy_borrowed(runtime, base)) {
+        if bases
+            .iter()
+            .any(|&base| runtime.memory_state.copy_borrowed(base))
+        {
             return OUT_OF_RESOURCES;
         }
         for base in bases {
@@ -683,6 +700,7 @@ pub unsafe extern "C" fn hsa_amd_vmem_set_access(
     unsafe(export_name = "__hsa_impl_hsa_amd_vmem_get_access")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Reports an agent’s access permissions for a virtual address.
 pub unsafe extern "C" fn hsa_amd_vmem_get_access(
     address: *mut c_void,
     permissions: *mut u32,
@@ -726,6 +744,7 @@ pub unsafe extern "C" fn hsa_amd_vmem_get_access(
     unsafe(export_name = "__hsa_impl_hsa_amd_vmem_export_shareable_handle")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Exports virtual memory backing as a shareable OS handle.
 pub unsafe extern "C" fn hsa_amd_vmem_export_shareable_handle(
     descriptor: *mut i32,
     memory_handle: HsaAmdVmemAllocHandle,
@@ -777,6 +796,7 @@ pub unsafe extern "C" fn hsa_amd_vmem_export_shareable_handle(
     unsafe(export_name = "__hsa_impl_hsa_amd_vmem_import_shareable_handle")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Imports virtual memory backing from a shareable OS handle.
 pub unsafe extern "C" fn hsa_amd_vmem_import_shareable_handle(
     descriptor: i32,
     memory_handle: *mut HsaAmdVmemAllocHandle,
@@ -837,6 +857,7 @@ pub unsafe extern "C" fn hsa_amd_vmem_import_shareable_handle(
     unsafe(export_name = "__hsa_impl_hsa_amd_vmem_retain_alloc_handle")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Retains the allocation handle backing a virtual address.
 pub unsafe extern "C" fn hsa_amd_vmem_retain_alloc_handle(
     memory_handle: *mut HsaAmdVmemAllocHandle,
     address: *mut c_void,
@@ -875,6 +896,7 @@ pub unsafe extern "C" fn hsa_amd_vmem_retain_alloc_handle(
     unsafe(export_name = "__hsa_impl_hsa_amd_vmem_get_alloc_properties_from_handle")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Writes allocation properties for a virtual memory handle.
 pub unsafe extern "C" fn hsa_amd_vmem_get_alloc_properties_from_handle(
     memory_handle: HsaAmdVmemAllocHandle,
     pool: *mut HsaMemoryPool,
@@ -908,6 +930,7 @@ pub unsafe extern "C" fn hsa_amd_vmem_get_alloc_properties_from_handle(
     unsafe(export_name = "__hsa_impl_hsa_amd_vmem_get_vmem_info")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Writes metadata for a virtual memory reservation or mapping.
 pub unsafe extern "C" fn hsa_amd_vmem_get_vmem_info(
     memory_handle: HsaAmdVmemAllocHandle,
     info: *mut HsaAmdVmemHandleInfo,
@@ -1001,6 +1024,7 @@ unsafe fn fill_vmem_handle_info(
     unsafe(export_name = "__hsa_impl_hsa_amd_vmem_export_fabric_handle")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Exports virtual memory backing as a fabric handle.
 pub unsafe extern "C" fn hsa_amd_vmem_export_fabric_handle(
     fabric_handle: *mut HsaFabricHandle,
     memory_handle: HsaAmdVmemAllocHandle,
@@ -1053,6 +1077,7 @@ pub unsafe extern "C" fn hsa_amd_vmem_export_fabric_handle(
     unsafe(export_name = "__hsa_impl_hsa_amd_vmem_import_fabric_handle")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Imports virtual memory backing from a fabric handle.
 pub unsafe extern "C" fn hsa_amd_vmem_import_fabric_handle(
     fabric_handle: HsaFabricHandle,
     memory_handle: *mut HsaAmdVmemAllocHandle,
@@ -1094,10 +1119,12 @@ pub unsafe extern "C" fn hsa_amd_vmem_import_fabric_handle(
 }
 
 #[cfg(test)]
+/// Virtual-memory ABI compatibility checks for older caller record sizes.
 mod handle_info_tests {
     use super::*;
 
     #[test]
+    /// Checks short caller records leave later fields and guard bytes intact.
     fn old_layouts_leave_later_fields_and_guard_bytes_untouched() {
         for caller_size in [8, 16, 20, 24, 32] {
             let mut words = [0xabab_abab_abab_abab_u64; 4];
