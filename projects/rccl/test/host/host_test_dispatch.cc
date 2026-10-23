@@ -845,13 +845,19 @@ void clearShardingEnvironment()
 }
 
 // The variables parseArgs() has already acted on, and which must not reach a child.
-constexpr std::string_view kConsumedVariables[] = {"GTEST_FILTER"};
+constexpr std::string_view kConsumedVariables[] = {"GTEST_FILTER", "GTEST_OUTPUT"};
 
 // Drop the variables this process has consumed, so no child acts on them a second time.
 //
 // GTEST_FILTER was resolved over the published, qualified names; each child is then handed its
 // cases by name. A child that still saw the variable would apply it again to its own unqualified
 // listing and run a subset of what it was told to run -- or nothing at all, silently and green.
+//
+// GTEST_OUTPUT is the caller's report destination, and every child is given an explicit
+// --gtest_output pointing into the report directory instead. A child that still saw the variable
+// would write to the caller's path as well -- and the enumeration children would do it in
+// list mode, since gtest writes a listing report when --gtest_list_tests and an output are both
+// set, so the caller's file would hold one sibling's listing (or a directory of ~40 of them).
 //
 // Called before enumerate(), since the --gtest_list_tests children see this environment too.
 void clearConsumedEnvironment()
