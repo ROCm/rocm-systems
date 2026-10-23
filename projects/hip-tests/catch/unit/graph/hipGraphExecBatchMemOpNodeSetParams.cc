@@ -6,6 +6,7 @@
 
 #include <hip_test_common.hh>
 #include <hip_test_defgroups.hh>
+#include <hip_test_memop.hh>
 #include <resource_guards.hh>
 /**
  * @addtogroup hipGraphExecBatchMemOpNodeSetParams
@@ -451,9 +452,9 @@ template <typename T> void CheckMemOpUpdateCompletion(bool initiallyHasWrites, b
  * - AMD segmented graph executor and signal memory support
  */
 HIP_TEMPLATE_TEST_CASE(Unit_hipGraphExecBatchMemOpNodeSetParams_LayoutChange, uint32_t, uint64_t) {
-#if HT_WIN
-  HIP_SKIP_TEST("Requires the ROCr segmented graph executor");
-#endif
+  if (!HipTest::IsRocrMemOpBackendSelected()) {
+    HIP_SKIP_TEST("Requires ROCr batch memops; select GPU_ENABLE_PAL=0 for automatic selection.");
+  }
   const char* classic = std::getenv("DEBUG_HIP_GRAPH_CLASSIC_PATH");
   if (classic && (std::atoi(classic) != 0 || std::strcmp(classic, "true") == 0)) {
     HIP_SKIP_TEST("Requires the segmented graph executor");

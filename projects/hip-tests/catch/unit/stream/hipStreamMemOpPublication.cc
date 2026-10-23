@@ -20,6 +20,7 @@
 // THE SOFTWARE.
 
 #include <hip_test_common.hh>
+#include <hip_test_memop.hh>
 #include <resource_guards.hh>
 
 #include <array>
@@ -61,6 +62,49 @@ template <typename T> T Load(T* ptr) { return __atomic_load_n(ptr, __ATOMIC_ACQU
 template <typename T> void Store(T* ptr, T value) {
   __atomic_store_n(ptr, value, __ATOMIC_RELEASE);
 }
+
+constexpr unsigned kCopyWords = 136;
+uint32_t CopyPattern(unsigned epoch, unsigned index) {
+  return 0x80000001u ^ (epoch * 107u) ^ (index * 13007u);
+}
+
+// Join even if a HIP_CHECK throws while asynchronous work is outstanding.
+// This observer never calls HIP or writes a GPU completion notification.
+template <typename T> struct CopyObserver {
+  std::atomic<unsigned> checked{0};
+  std::atomic<bool> stop{false}, timedOut{false};
+  unsigned badInputs = 0;
+  std::thread worker;
+
+  CopyObserver(T* ready, const uint32_t* host, unsigned iterations)
+      : worker([this, ready, host, iterations] {
+          std::array<uint32_t, kCopyWords> snapshot{};
+          for (unsigned epoch = 1; epoch <= iterations; ++epoch) {
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+            while (Load(ready) != static_cast<T>(epoch)) {
+              if (stop.load()) return;
+              if (std::chrono::steady_clock::now() > deadline) {
+                timedOut = true;
+                return;
+              }
+            }
+            std::memcpy(snapshot.data(), host, sizeof(snapshot));
+            for (unsigned i = 0; i < kCopyWords; ++i) {
+              if (snapshot[i] != CopyPattern(epoch, i)) {
+                ++badInputs;
+                break;
+              }
+            }
+            checked.store(epoch, std::memory_order_release);
+          }
+        }) {}
+
+  void Join() {
+    stop = true;
+    if (worker.joinable()) worker.join();
+  }
+  ~CopyObserver() { Join(); }
+};
 
 struct SignalMemory {
   uint64_t* ptr = nullptr;
@@ -244,11 +288,73 @@ template <typename T> void CheckPublication(Submission submission) {
 /**
  * Test Description
  * ------------------------
+ * - Isolate one D2H copy followed by one default WRITE. The CPU observer checks
+ *   poisoned host memory before any completion synchronization. There is no
+ *   graph, GPU WAIT, reset WRITE, result H2D, or custom GPU kernel.
+ * - Cover 32/64-bit notifications, compare real data before and after stream
+ *   synchronization, and fail on timeout without a diagnostic unlock.
+ * Test source
+ * ------------------------
+ * - unit/stream/hipStreamMemOpPublication.cc
+ * Test requirements
+ * ------------------------
+ * - HIP_VERSION >= 6.4
+ */
+HIP_TEMPLATE_TEST_CASE(Unit_hipStreamMemOp_D2HWritePublication, uint32_t, uint64_t) {
+  int device = 0, supported = 0;
+  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipDeviceGetAttribute(&supported, hipDeviceAttributeCanUseStreamWaitValue, device));
+  if (!supported) HIP_SKIP_TEST(HipTest::SkipReason::kStreamWaitValueUnsupported);
+
+  constexpr unsigned iterations = 2000;
+  std::array<uint32_t, kCopyWords> input{};
+  SignalMemory readyMemory;
+  auto* ready = reinterpret_cast<TestType*>(readyMemory.ptr);
+  LinearAllocGuard<uint32_t> deviceInput(LinearAllocs::hipMalloc, sizeof(input));
+  LinearAllocGuard<uint32_t> hostInput(LinearAllocs::hipHostMalloc, sizeof(input),
+                                       hipHostMallocMapped | hipHostMallocCoherent);
+  auto* host = hostInput.host_ptr();
+  StreamGuard streamGuard(Streams::withFlags, hipStreamNonBlocking);
+  const auto stream = streamGuard.stream();
+  CopyObserver<TestType> observer(ready, host, iterations);
+  unsigned badAfterSync = 0;
+  for (unsigned epoch = 1; epoch <= iterations && !observer.timedOut.load(); ++epoch) {
+    for (unsigned i = 0; i < kCopyWords; ++i) input[i] = CopyPattern(epoch, i);
+    HIP_CHECK(hipMemcpyAsync(deviceInput.ptr(), input.data(), sizeof(input), hipMemcpyHostToDevice,
+                             stream));
+    HIP_CHECK(hipStreamSynchronize(stream));  // Finish input setup before the tested sequence.
+    std::memset(host, 0xa5, sizeof(input));
+    HIP_CHECK(
+        hipMemcpyAsync(host, deviceInput.ptr(), sizeof(input), hipMemcpyDeviceToHost, stream));
+    if constexpr (sizeof(TestType) == 4) {
+      HIP_CHECK(hipStreamWriteValue32(stream, ready, epoch, hipStreamWriteValueDefault));
+    } else {
+      HIP_CHECK(hipStreamWriteValue64(stream, ready, epoch, hipStreamWriteValueDefault));
+    }
+    while (observer.checked.load(std::memory_order_acquire) != epoch && !observer.timedOut.load()) {
+      std::this_thread::yield();
+    }
+    if (observer.timedOut.load()) break;
+    HIP_CHECK(hipStreamSynchronize(stream));  // The CPU snapshot has already been checked.
+    badAfterSync += std::memcmp(host, input.data(), sizeof(input)) != 0;
+  }
+  observer.Join();
+  INFO("checked=" << observer.checked.load() << ", bad inputs=" << observer.badInputs
+                  << ", bad after sync=" << badAfterSync);
+  REQUIRE_FALSE(observer.timedOut.load());
+  CHECK(observer.checked.load() == iterations);
+  CHECK(observer.badInputs == 0);
+  CHECK(badAfterSync == 0);
+}
+
+/**
+ * Test Description
+ * ------------------------
  * - A single WRITE must publish three earlier D2H copies before the host sees
  *   its notification. Check the actual input and the result copied back to the
  *   GPU against independent references, without a preceding reset WRITE.
- * - Cover 32/64-bit writes, eager single and batch operations, native capture,
- *   captured batches, and an explicit batch memop graph node across replays.
+ * - Cover 32/64-bit eager writes independently of batch support, so PAL keeps
+ *   this data-publication check even when batch/captured modes are skipped.
  * Test source
  * ------------------------
  * - unit/stream/hipStreamMemOpPublication.cc
@@ -261,7 +367,33 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipStreamMemOp_PublishPriorCopies, uint32_t, uint64_
   HIP_CHECK(hipGetDevice(&device));
   HIP_CHECK(hipDeviceGetAttribute(&supported, hipDeviceAttributeCanUseStreamWaitValue, device));
   if (!supported) HIP_SKIP_TEST(HipTest::SkipReason::kStreamWaitValueUnsupported);
-  const auto submission = GENERATE(Submission::Eager, Submission::Batch, Submission::Capture,
-                                   Submission::CaptureBatch, Submission::ExplicitGraph);
+  CheckPublication<TestType>(Submission::Eager);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - Run the same input/output publication checks through eager batches, native
+ *   stream capture, captured batches, and explicit batch memop graph nodes.
+ * - Require ROCr batch support separately from single stream WAIT support.
+ * Test source
+ * ------------------------
+ * - unit/stream/hipStreamMemOpPublication.cc
+ * Test requirements
+ * ------------------------
+ * - HIP_VERSION >= 6.4, ROCr backend
+ */
+HIP_TEMPLATE_TEST_CASE(Unit_hipStreamMemOp_PublishPriorCopies_Batch, uint32_t, uint64_t) {
+  if (!HipTest::IsRocrMemOpBackendSelected()) {
+    HIP_SKIP_TEST(
+        "Batch/captured memops require ROCr; PAL is unsupported. Select GPU_ENABLE_PAL=0 "
+        "when using automatic backend selection.");
+  }
+  int device = 0, supported = 0;
+  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipDeviceGetAttribute(&supported, hipDeviceAttributeCanUseStreamWaitValue, device));
+  if (!supported) HIP_SKIP_TEST(HipTest::SkipReason::kStreamWaitValueUnsupported);
+  const auto submission = GENERATE(Submission::Batch, Submission::Capture, Submission::CaptureBatch,
+                                   Submission::ExplicitGraph);
   CheckPublication<TestType>(submission);
 }
