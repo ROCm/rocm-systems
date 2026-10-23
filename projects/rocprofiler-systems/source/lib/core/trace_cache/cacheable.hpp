@@ -6,6 +6,7 @@
 #include <cstdint>
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <chrono>
 #include <cstdlib>
@@ -32,9 +33,7 @@ constexpr auto   CACHE_FILE_FLUSH_TIMEOUT = 10ms;
 constexpr auto ABSOLUTE   = "ABS";
 constexpr auto PERCENTAGE = "%";
 
-template <typename TypeIdentifierEnum>
-constexpr size_t header_size = sizeof(TypeIdentifierEnum) + sizeof(size_t);
-using buffer_array_t         = std::array<std::uint8_t, buffer_size>;
+using buffer_array_t = std::array<std::uint8_t, buffer_size>;
 
 const auto tmp_directory = std::string{ "/tmp/" };
 

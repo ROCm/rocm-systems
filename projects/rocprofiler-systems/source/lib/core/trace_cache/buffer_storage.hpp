@@ -7,6 +7,7 @@
 #include "core/trace_cache/archive.hpp"
 #include "core/trace_cache/cache_type_traits.hpp"
 #include "core/trace_cache/cacheable.hpp"
+#include "core/trace_cache/record_header.hpp"
 
 #include "policies/thread_state_policy.hpp"
 
@@ -138,11 +139,8 @@ public:
                 "Trying to use buffered storage while it is not running");
         }
 
-        using TypeIdentifierEnumUderlayingType =
-            std::underlying_type_t<TypeIdentifierEnum>;
-
-        size_t const sample_size      = get_size(value);
-        size_t const bytes_to_reserve = header_size<TypeIdentifierEnum> + sample_size;
+        const record_header<TypeIdentifierEnum> header{ .type = Type::type_identifier,
+                                                        .size = get_size(value) };
 
         // Hold the mutex for the entire reserve-and-write operation so that
         // the flush worker thread never reads a buffer region whose write is
@@ -154,14 +152,8 @@ public:
             ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
         std::lock_guard const scope{ m_mutex };
 
-        auto*      buf      = reserve_memory_space(bytes_to_reserve);
-        size_t     position = 0;
-        auto const type_identifier_value =
-            static_cast<TypeIdentifierEnumUderlayingType>(Type::type_identifier);
-
-        utility::store_value(type_identifier_value, buf, position);
-        utility::store_value(sample_size, buf, position);
-        serialize(buf + position, value);
+        auto* buf = reserve_memory_space(k_header_size<TypeIdentifierEnum> + header.size);
+        write_record(buf, header, value);
     }
 
     [[nodiscard]] __attribute__((always_inline)) bool is_running() const
@@ -220,12 +212,12 @@ private:
         memset(_data + m_head, std::numeric_limits<std::uint8_t>::max(),
                buffer_size - m_head);
 
-        const TypeIdentifierEnum tag = TypeIdentifierEnum::fragmented_space;
-        std::memcpy(_data + m_head, &tag, sizeof(TypeIdentifierEnum));
-
-        size_t remaining_bytes = buffer_size - m_head - header_size<TypeIdentifierEnum>;
-        std::memcpy(_data + m_head + sizeof(TypeIdentifierEnum), &remaining_bytes,
-                    sizeof(size_t));
+        const record_header<TypeIdentifierEnum> header{
+            .type = TypeIdentifierEnum::fragmented_space,
+            .size = buffer_size - m_head - k_header_size<TypeIdentifierEnum>
+        };
+        binary_write_archive archive{ .buffer = _data + m_head, .position = 0 };
+        archive(header);
 
         m_head = 0;
     }
@@ -234,8 +226,8 @@ private:
     [[nodiscard]] __attribute__((always_inline)) std::uint8_t* reserve_memory_space(
         const size_t& number_of_bytes)
     {
-        if(__builtin_expect((m_head + number_of_bytes + header_size<TypeIdentifierEnum>) >
-                                buffer_size,
+        if(__builtin_expect((m_head + number_of_bytes +
+                             k_header_size<TypeIdentifierEnum>) > buffer_size,
                             0))
         {
             fragment_memory();

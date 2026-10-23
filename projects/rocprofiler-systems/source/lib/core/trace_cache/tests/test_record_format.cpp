@@ -3,6 +3,7 @@
 
 #include "backends/amd_smi/gpu_types.hpp"
 #include "core/trace_cache/archive.hpp"
+#include "core/trace_cache/record_header.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/pmc/collectors/cpu/sample.hpp"
 #include "library/pmc/collectors/cpu/types.hpp"
@@ -55,6 +56,27 @@ expect_golden(const Record& record, const std::array<std::uint8_t, N>& expected)
 }
 
 }  // namespace
+
+TEST(record_format, record_header)
+{
+    const rocprofsys::trace_cache::record_header<
+        rocprofsys::trace_cache::type_identifier_t>
+        header{ .type = rocprofsys::trace_cache::type_identifier_t::kernel_dispatch,
+                .size = 0x1122334455667788UL };
+
+    constexpr std::array<std::uint8_t, 12> k_expected{
+        0x03, 0x00, 0x00, 0x00, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11
+    };
+    static_assert(rocprofsys::trace_cache::k_header_size<
+                      rocprofsys::trace_cache::type_identifier_t> == k_expected.size());
+
+    std::array<std::uint8_t, k_expected.size()>   buffer{};
+    rocprofsys::trace_cache::binary_write_archive archive{ .buffer   = buffer.data(),
+                                                           .position = 0 };
+    archive(header);
+
+    EXPECT_EQ(buffer, k_expected);
+}
 
 TEST(record_format, kernel_dispatch_sample)
 {

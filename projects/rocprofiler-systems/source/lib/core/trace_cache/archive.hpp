@@ -28,14 +28,14 @@ struct binary_size_archive
     std::size_t           size         = 0;
 
     template <typename... Types>
-    void operator()(const Types&... values)
+    constexpr void operator()(const Types&... values)
     {
         (measure_value(values), ...);
     }
 
 private:
     template <typename Type>
-    void measure_value(const Type& value)
+    constexpr void measure_value(const Type& value)
     {
         if constexpr(archive_serializable<Type, binary_size_archive>)
         {
