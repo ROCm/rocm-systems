@@ -77,6 +77,21 @@ add_library(
     register/permlane.cpp
     register/relative_move.cpp
     register/swap.cpp
+    scalar/guest_mode.cpp
+    scalar/hwreg.cpp
+    scalar/pseudo_scalar.cpp
+    scalar/scalar_bits.cpp
+    scalar/scalar_compare.cpp
+    scalar/scalar_convert.cpp
+    scalar/scalar_exec.cpp
+    scalar/scalar_field.cpp
+    scalar/scalar_fma.cpp
+    scalar/scalar_fp.cpp
+    scalar/scalar_integer.cpp
+    scalar/scalar_move.cpp
+    scalar/scalar_pack.cpp
+    scalar/scalar_relative_move.cpp
+    scalar/scalar_round.cpp
     wmma/swmmac16.cpp
     wmma/swmmac8.cpp
     wmma/swmmac_float.cpp

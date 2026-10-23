@@ -210,6 +210,32 @@ foreach(family IN ITEMS cube interp mullit)
     rj_arith_add_test(${target} graphics/${family}_test.cpp)
 endforeach()
 
+# Scalar families keep required SCC/EXEC results distinct from FP status.
+foreach(
+    family
+    IN
+    ITEMS
+        boolean
+        shift
+        move
+        field
+        count
+        pack
+        arithmetic
+        compare_integer
+        compare_float
+        exec
+        fp
+        round
+        conversion
+        state
+        relative
+        pseudo
+)
+    set(target "rj_arith_scalar_${family}_test")
+    rj_arith_add_test(${target} scalar/${family}_test.cpp)
+endforeach()
+
 # Math families share unary layouts, with independent loose and exact references.
 foreach(
     family
