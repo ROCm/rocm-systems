@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <cstring>
 #include <iostream>
 #include <limits>
 #include <map>
@@ -24,10 +25,11 @@ const uint32_t MAX_TPX_PARTITIONS = 3;
 const uint32_t MAX_QPX_PARTITIONS = 4;
 
 TestMemoryPartitionReadWrite::TestMemoryPartitionReadWrite() : TestBase() {
+  api_.print_device_header = [this](amdsmi_processor_handle handle) { PrintDeviceHeader(handle); };
   set_title("AMDSMI Memory Partition Read Test");
   set_description(
-      "The memory partition tests verifies that the memory "
-      "partition settings can be read and updated properly.");
+      "Verify memory partition reads, capabilities, invalid inputs, and current-mode sets. "
+      "Alternate NPS transitions require a separate isolated lifecycle harness.");
 }
 
 TestMemoryPartitionReadWrite::~TestMemoryPartitionReadWrite(void) {}
@@ -66,21 +68,15 @@ static const std::string memoryPartitionString(amdsmi_memory_partition_type_t me
   }
 }
 
-static const std::map<std::string, amdsmi_memory_partition_type_t>
-    mapStringToRSMIMemoryPartitionTypes{{"NPS1", AMDSMI_MEMORY_PARTITION_NPS1},
-                                        {"NPS2", AMDSMI_MEMORY_PARTITION_NPS2},
-                                        {"NPS4", AMDSMI_MEMORY_PARTITION_NPS4},
-                                        {"NPS8", AMDSMI_MEMORY_PARTITION_NPS8}};
-
 void TestMemoryPartitionReadWrite::Run(void) {
   amdsmi_status_t ret, err, ret_set;
   constexpr uint32_t k255Len = 255;
   constexpr uint32_t k0Len = 0;
-  char orig_memory_partition[k255Len];
-  orig_memory_partition[0] = '\0';
+  char orig_memory_partition[k255Len] = {};
   amdsmi_memory_partition_config_t current_memory_config;
   const uint32_t kMAX_UINT32 = std::numeric_limits<uint32_t>::max();
-  std::map<uint32_t, AcceleratorProfileConfig> orig_dev_config;  // index, ProfileConfig
+  std::map<amdsmi_processor_handle, amdsmi_accelerator_partition_profile_t> original_profiles;
+  std::map<amdsmi_processor_handle, std::string> original_memory_modes;
 
   TestBase::Run();
   PRINT_VERBOSITY();
@@ -92,26 +88,46 @@ void TestMemoryPartitionReadWrite::Run(void) {
   bool isVerbose =
       (this->verbosity() && this->verbosity() >= (this->TestBase::VERBOSE_STANDARD)) ? true : false;
 
-  // Save original memory partition settings (see orig_dev_config ^)
+  // Save each device independently; mixed compute configurations are valid.
   IF_VERB(STANDARD) {
     std::cout << "\t**=========================================================\n";
     std::cout << "\t**Save Original Compute Partition Settings ================\n";
     std::cout << "\t**=========================================================\n";
   }
   auto initial_num_devices = num_monitor_devs();
+  ASSERT_LE(initial_num_devices, MAX_MONITOR_DEVICES);
+  std::vector<bool> safe_to_test(initial_num_devices, true);
   amdsmi_accelerator_partition_type_t primary_partition_type = AMDSMI_ACCELERATOR_PARTITION_INVALID;
   uint32_t primary_index = 0;
   for (uint32_t dv_ind = 0; dv_ind < initial_num_devices; ++dv_ind) {
+    EXPECT_NE(processor_handles_[dv_ind], nullptr) << "Missing processor handle";
+    if (processor_handles_[dv_ind] == nullptr) {
+      safe_to_test[dv_ind] = false;
+      continue;
+    }
     if (dv_ind != 0) {
       std::cout << "\n";
     }
-    PrintDeviceHeader(processor_handles_[dv_ind]);
+    api_.print_device_header(processor_handles_[dv_ind]);
     amdsmi_accelerator_partition_profile_t profile = {};
     uint32_t partition_id[8] = {0, 0, 0, 0, 0, 0, 0, 0};
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_accelerator_partition_profile", "", VERB(STANDARD));
-    ret = amdsmi_get_gpu_accelerator_partition_profile(processor_handles_[dv_ind], &profile,
-                                                       &partition_id[0]);
+    ret = api_.get_profile(processor_handles_[dv_ind], &profile, &partition_id[0]);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+    if (ret == AMDSMI_STATUS_NOT_SUPPORTED) continue;
+    EXPECT_EQ(ret, AMDSMI_STATUS_SUCCESS) << "Compute partition snapshot failed";
+    if (ret != AMDSMI_STATUS_SUCCESS) {
+      safe_to_test[dv_ind] = false;
+      continue;
+    }
+    const bool valid_type = profile.profile_type >= AMDSMI_ACCELERATOR_PARTITION_SPX &&
+                            profile.profile_type <= AMDSMI_ACCELERATOR_PARTITION_CPX;
+    EXPECT_TRUE(valid_type) << "Invalid compute partition snapshot";
+    if (!valid_type) {
+      safe_to_test[dv_ind] = false;
+      continue;
+    }
+    original_profiles[processor_handles_[dv_ind]] = profile;
     std::string nps_caps_str = "";
     if ((profile.memory_caps.nps_flags.nps1_cap == 0 &&
          profile.memory_caps.nps_flags.nps2_cap == 0 &&
@@ -178,7 +194,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
           uint32_t max_xcps = 0;
           DISPLAY_AMDSMI_API("amdsmi_get_gpu_xcd_counter", "gpu=" + std::to_string(primary_index),
                              VERB(STANDARD));
-          ret = amdsmi_get_gpu_xcd_counter(processor_handles_[primary_index], &num_xcd);
+          ret = api_.get_xcd_counter(processor_handles_[primary_index], &num_xcd);
           DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
           if (ret == AMDSMI_STATUS_SUCCESS) {
             max_xcps = static_cast<uint32_t>(num_xcd);
@@ -220,8 +236,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
     amdsmi_accelerator_partition_profile_config_t profile_config = {};
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_accelerator_partition_profile_config",
                        "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
-    ret = amdsmi_get_gpu_accelerator_partition_profile_config(processor_handles_[dv_ind],
-                                                              &profile_config);
+    ret = api_.get_profile_config(processor_handles_[dv_ind], &profile_config);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     IF_VERB(STANDARD) {
       std::cout << "\t**amdsmi_get_gpu_accelerator_partition_profile_config(processor_handles_["
@@ -231,9 +246,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
                 << "\n\t**profile_config.num_resource_profiles: "
                 << profile_config.num_resource_profiles << std::endl;
     }
-    AcceleratorProfileConfig original_profile_config =
-        getAvailableProfileConfigs(dv_ind, profile, profile_config, isVerbose);
-    orig_dev_config[dv_ind] = original_profile_config;
+    getAvailableProfileConfigs(dv_ind, profile, profile_config, isVerbose);
 
     IF_VERB(STANDARD) {
       std::cout << "\t**=========================================================\n";
@@ -313,61 +326,53 @@ void TestMemoryPartitionReadWrite::Run(void) {
     }
   }
 
-  // Basic check we can reload the driver, regardless of if changing memory partition
-  // is supported or not
-  // FYI Need to place after saving current compute partitions, since reloading driver will reset
-  // all back to SPX/DPX/etc (whatever is default for that NPS mode; see
-  // `sudo amd-smi partition -a`).
-
   // Run memory partition tests
   IF_VERB(STANDARD) {
     std::cout << "\t**=========================================================\n";
     std::cout << "\t**Test: Memory Partition Sets =============================\n";
     std::cout << "\t**=========================================================\n";
   }
-  uint32_t current_num_devices = 0;
-  smi_amdgpu_get_device_count(&current_num_devices);
-
-  IF_VERB(STANDARD) { std::cout << "\t**Total Num Devices: " << current_num_devices << std::endl; }
-  // Leaving for debug purposes - uncomment to test a specific number of devices
-  // uint32_t num_devices_to_test = 1;
-  uint32_t num_devices_to_test = current_num_devices;
-  for (uint32_t dv_ind = 0; dv_ind < num_devices_to_test; ++dv_ind) {
+  for (uint32_t dv_ind = 0; dv_ind < initial_num_devices; ++dv_ind) {
+    if (!safe_to_test[dv_ind]) continue;
     if (dv_ind != 0) {
       IF_VERB(STANDARD) { std::cout << std::endl; }
     }
-    PrintDeviceHeader(processor_handles_[dv_ind]);
+    api_.print_device_header(processor_handles_[dv_ind]);
 
     // Standard checks to see if API is supported, before running full tests
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_partition", "gpu=" + std::to_string(dv_ind),
                        VERB(STANDARD));
-    ret =
-        amdsmi_get_gpu_memory_partition(processor_handles_[dv_ind], orig_memory_partition, k255Len);
+    std::memset(orig_memory_partition, 0, sizeof(orig_memory_partition));
+    ret = api_.get_memory(processor_handles_[dv_ind], orig_memory_partition, k255Len);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
       continue;
-    } else {
-      CHK_ERR_ASRT(ret)
     }
-    IF_VERB(STANDARD) {
-      std::cout << std::endl
-                << "\t**Current Memory Partition: " << orig_memory_partition << std::endl;
-    }
-
-    if (orig_memory_partition[0] == '\0') {
-      std::cout << "***System memory partition value is not defined or received"
-                   " unexpected data. Skip memory partition test."
-                << std::endl;
+    EXPECT_EQ(ret, AMDSMI_STATUS_SUCCESS) << "Memory partition snapshot failed";
+    if (ret != AMDSMI_STATUS_SUCCESS) continue;
+    const std::map<std::string, amdsmi_memory_partition_type_t> memory_modes = {
+        {"NPS1", AMDSMI_MEMORY_PARTITION_NPS1},
+        {"NPS2", AMDSMI_MEMORY_PARTITION_NPS2},
+        {"NPS4", AMDSMI_MEMORY_PARTITION_NPS4},
+        {"NPS8", AMDSMI_MEMORY_PARTITION_NPS8}};
+    const std::string original_memory(
+        orig_memory_partition, strnlen(orig_memory_partition, sizeof(orig_memory_partition)));
+    const auto original_mode = memory_modes.find(original_memory);
+    EXPECT_NE(original_mode, memory_modes.end()) << "Invalid memory partition snapshot";
+    if (original_mode == memory_modes.end()) {
       continue;
     }
-    ASSERT_TRUE(ret == AMDSMI_STATUS_SUCCESS);
+    original_memory_modes[processor_handles_[dv_ind]] = original_memory;
+    IF_VERB(STANDARD) {
+      std::cout << "\t**Current Memory Partition: " << original_memory << std::endl;
+    }
 
     // Verify api support checking functionality is working
     constexpr uint32_t k2Len = 2;
     char smallBuffer[k2Len];
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_partition", "gpu=" + std::to_string(dv_ind),
                        VERB(STANDARD));
-    err = amdsmi_get_gpu_memory_partition(processor_handles_[dv_ind], smallBuffer, k2Len);
+    err = api_.get_memory(processor_handles_[dv_ind], smallBuffer, k2Len);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INSUFFICIENT_SIZE);
     uint32_t size = static_cast<uint32_t>(sizeof(smallBuffer) / sizeof(*smallBuffer));
     ASSERT_EQ(err, AMDSMI_STATUS_INSUFFICIENT_SIZE);
@@ -383,7 +388,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
     // Verify api support checking functionality is working
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_partition", "gpu=" + std::to_string(dv_ind),
                        VERB(STANDARD));
-    err = amdsmi_get_gpu_memory_partition(processor_handles_[dv_ind], nullptr, k255Len);
+    err = api_.get_memory(processor_handles_[dv_ind], nullptr, k255Len);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
     ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 
@@ -397,7 +402,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
 
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_partition_config", "gpu=" + std::to_string(dv_ind),
                        VERB(STANDARD));
-    err = amdsmi_get_gpu_memory_partition_config(processor_handles_[dv_ind], nullptr);
+    err = api_.get_memory_config(processor_handles_[dv_ind], nullptr);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
     ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 
@@ -411,7 +416,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
     // Verify api support checking functionality is working
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_partition", "gpu=" + std::to_string(dv_ind),
                        VERB(STANDARD));
-    err = amdsmi_get_gpu_memory_partition(processor_handles_[dv_ind], orig_memory_partition, k0Len);
+    err = api_.get_memory(processor_handles_[dv_ind], orig_memory_partition, k0Len);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
     ASSERT_TRUE(err == AMDSMI_STATUS_INVAL);
     if (err == AMDSMI_STATUS_INVAL) {
@@ -425,8 +430,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
     amdsmi_memory_partition_config_t* null_memory_partition_config = nullptr;
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_partition_config", "gpu=" + std::to_string(dv_ind),
                        VERB(STANDARD));
-    err = amdsmi_get_gpu_memory_partition_config(processor_handles_[dv_ind],
-                                                 null_memory_partition_config);
+    err = api_.get_memory_config(processor_handles_[dv_ind], null_memory_partition_config);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
                           AMDSMI_STATUS_NOT_SUPPORTED);
     ASSERT_TRUE((err == AMDSMI_STATUS_INVAL) || (err == AMDSMI_STATUS_NOT_SUPPORTED));
@@ -446,7 +450,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
     amdsmi_memory_partition_type_t null_memory_partition = {};
     DISPLAY_AMDSMI_API("amdsmi_set_gpu_memory_partition_mode", "gpu=" + std::to_string(dv_ind),
                        VERB(STANDARD));
-    err = amdsmi_set_gpu_memory_partition_mode(processor_handles_[dv_ind], null_memory_partition);
+    err = api_.set_memory(processor_handles_[dv_ind], null_memory_partition);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
     std::cout << "\t**amdsmi_set_gpu_memory_partition_mode"
               << "(processor_handles_[" << dv_ind
@@ -474,7 +478,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
     amdsmi_memory_partition_type_t new_memory_partition = AMDSMI_MEMORY_PARTITION_UNKNOWN;
     DISPLAY_AMDSMI_API("amdsmi_set_gpu_memory_partition_mode", "gpu=" + std::to_string(dv_ind),
                        VERB(STANDARD));
-    err = amdsmi_set_gpu_memory_partition_mode(processor_handles_[dv_ind], new_memory_partition);
+    err = api_.set_memory(processor_handles_[dv_ind], new_memory_partition);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
     ASSERT_TRUE((err == AMDSMI_STATUS_INVAL) || (err == AMDSMI_STATUS_NOT_SUPPORTED) ||
                 (err == AMDSMI_STATUS_NO_PERM));
@@ -489,24 +493,22 @@ void TestMemoryPartitionReadWrite::Run(void) {
       }
     }
 
-    // Re-run original get, so we can reset to later
+    // Do not turn a same-mode check into a write after an observed external change.
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_partition", "gpu=" + std::to_string(dv_ind),
                        VERB(STANDARD));
-    ret =
-        amdsmi_get_gpu_memory_partition(processor_handles_[dv_ind], orig_memory_partition, k255Len);
+    ret = api_.get_memory(processor_handles_[dv_ind], orig_memory_partition, k255Len);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
-    ASSERT_EQ(AMDSMI_STATUS_SUCCESS, ret);
+    EXPECT_EQ(ret, AMDSMI_STATUS_SUCCESS) << "Memory partition pre-set read failed";
+    if (ret != AMDSMI_STATUS_SUCCESS) continue;
+    const std::string before_set(orig_memory_partition,
+                                 strnlen(orig_memory_partition, sizeof(orig_memory_partition)));
+    EXPECT_EQ(before_set, original_memory) << "Memory partition changed before same-mode set";
+    if (before_set != original_memory) continue;
 
-    for (int partition = static_cast<int>(AMDSMI_MEMORY_PARTITION_NPS1);
-         partition <= static_cast<int>(AMDSMI_MEMORY_PARTITION_NPS8); partition++) {
+    {
       ret_set = AMDSMI_STATUS_NOT_SUPPORTED;
-      new_memory_partition = static_cast<amdsmi_memory_partition_type_t>(partition);
-      if (new_memory_partition != AMDSMI_MEMORY_PARTITION_NPS1 &&
-          new_memory_partition != AMDSMI_MEMORY_PARTITION_NPS2 &&
-          new_memory_partition != AMDSMI_MEMORY_PARTITION_NPS4 &&
-          new_memory_partition != AMDSMI_MEMORY_PARTITION_NPS8) {
-        continue;  // skip unknown partition, this is already tested above ^
-      }
+      // Active-mode requests cannot cancel a deferred alternate-NPS write.
+      new_memory_partition = original_mode->second;
       IF_VERB(STANDARD) {
         std::cout << std::endl;
         std::cout << "\t**"
@@ -518,14 +520,16 @@ void TestMemoryPartitionReadWrite::Run(void) {
       current_memory_config = {};
       DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_partition_config", "gpu=" + std::to_string(dv_ind),
                          VERB(STANDARD));
-      auto ret_caps = amdsmi_get_gpu_memory_partition_config(processor_handles_[dv_ind],
-                                                             &current_memory_config);
+      auto ret_caps = api_.get_memory_config(processor_handles_[dv_ind], &current_memory_config);
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret_caps, AMDSMI_STATUS_SUCCESS);
       ASSERT_TRUE((ret_caps == AMDSMI_STATUS_NOT_SUPPORTED) || (ret_caps == AMDSMI_STATUS_SUCCESS));
 
       std::string memory_caps_str = "N/A";
       bool partition_is_supported = false;
       if (ret_caps == AMDSMI_STATUS_SUCCESS) {
+        EXPECT_EQ(current_memory_config.mp_mode, new_memory_partition)
+            << "Memory partition changed before same-mode set";
+        if (current_memory_config.mp_mode != new_memory_partition) continue;
         memory_caps_str.clear();
         if (current_memory_config.partition_caps.nps_flags.nps1_cap) {
           memory_caps_str += (memory_caps_str.empty() ? "NPS1" : ", NPS1");
@@ -564,8 +568,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
 
       DISPLAY_AMDSMI_API("amdsmi_set_gpu_memory_partition_mode", "gpu=" + std::to_string(dv_ind),
                          VERB(STANDARD));
-      ret_set =
-          amdsmi_set_gpu_memory_partition_mode(processor_handles_[dv_ind], new_memory_partition);
+      ret_set = api_.set_memory(processor_handles_[dv_ind], new_memory_partition);
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret_set, AMDSMI_STATUS_SUCCESS,
                             AMDSMI_STATUS_INVAL, AMDSMI_STATUS_NOT_SUPPORTED);
       IF_VERB(STANDARD) {
@@ -575,7 +578,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
                   << "): " << smi_amdgpu_get_status_string(ret_set, false) << "\n";
       }
       if (ret_set == AMDSMI_STATUS_NOT_SUPPORTED) {
-        break;
+        continue;
       }
       ASSERT_TRUE((ret_set == AMDSMI_STATUS_SUCCESS) || (ret_set == AMDSMI_STATUS_BUSY) ||
                   (ret_set == AMDSMI_STATUS_AMDGPU_RESTART_ERR) ||
@@ -590,16 +593,13 @@ void TestMemoryPartitionReadWrite::Run(void) {
       }
 
       if (ret_set == AMDSMI_STATUS_SUCCESS) {
-        std::cout << "\t** Memory partition staged to "
-                  << memoryPartitionString(new_memory_partition)
-                  << ". A driver reload is required to apply: "
-                  << "sudo modprobe -r amdgpu && sudo modprobe amdgpu\n";
+        std::cout << "\t** Current-mode memory partition request accepted; "
+                     "alternate NPS transitions were not tested.\n";
       }
 
       // Verify capabilities are unchanged after the set attempt.
       amdsmi_memory_partition_config_t post_set_config = {};
-      auto ret_caps_post =
-          amdsmi_get_gpu_memory_partition_config(processor_handles_[dv_ind], &post_set_config);
+      auto ret_caps_post = api_.get_memory_config(processor_handles_[dv_ind], &post_set_config);
       if (ret_caps_post == AMDSMI_STATUS_SUCCESS && ret_caps == AMDSMI_STATUS_SUCCESS) {
         EXPECT_EQ(post_set_config.partition_caps.nps_flags.nps1_cap,
                   current_memory_config.partition_caps.nps_flags.nps1_cap);
@@ -610,138 +610,28 @@ void TestMemoryPartitionReadWrite::Run(void) {
         EXPECT_EQ(post_set_config.partition_caps.nps_flags.nps8_cap,
                   current_memory_config.partition_caps.nps_flags.nps8_cap);
       }
-    }  // END MEMORY PARTITION FOR LOOP
-
-    /* TEST RETURN TO ORIGINAL MEMORY PARTITION SETTING */
-    IF_VERB(STANDARD) {
-      std::cout << std::endl;
-      std::cout << "\t**"
-                << "=========== TEST RETURN TO ORIGINAL MEMORY PARTITION "
-                << "SETTING (" << orig_memory_partition << ") ========" << std::endl;
     }
-
-    DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_partition_config", "gpu=" + std::to_string(dv_ind),
-                       VERB(STANDARD));
-    ret =
-        amdsmi_get_gpu_memory_partition_config(processor_handles_[dv_ind], &current_memory_config);
-    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
-    ASSERT_TRUE((ret == AMDSMI_STATUS_NOT_SUPPORTED) || (ret == AMDSMI_STATUS_SUCCESS));
-    IF_VERB(STANDARD) {
-      std::cout << "\t**"
-                << "amdsmi_get_gpu_memory_partition_config(processor_handles_[" << dv_ind
-                << "], current_memory_config): " << smi_amdgpu_get_status_string(ret, false)
-                << std::endl;
-      std::cout << "\t**"
-                << "Current memory partition: "
-                << memoryPartitionString(current_memory_config.mp_mode) << std::endl;
-    }
-    if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
-      continue;
-    }
-
-    new_memory_partition = mapStringToRSMIMemoryPartitionTypes.at(orig_memory_partition);
-    IF_VERB(STANDARD) {
-      std::cout << "\t**"
-                << "Returning memory partition to: " << memoryPartitionString(new_memory_partition)
-                << std::endl;
-    }
-    DISPLAY_AMDSMI_API("amdsmi_set_gpu_memory_partition_mode", "gpu=" + std::to_string(dv_ind),
-                       VERB(STANDARD));
-    ret = amdsmi_set_gpu_memory_partition_mode(processor_handles_[dv_ind], new_memory_partition);
-    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
-    IF_VERB(STANDARD) {
-      std::cout << "\t**"
-                << "amdsmi_set_gpu_memory_partition_mode(processor_handles_[" << dv_ind << "], "
-                << orig_memory_partition << "): " << smi_amdgpu_get_status_string(ret, false)
-                << std::endl;
-    }
-    // The set stages the restore; a driver reload is required before the sysfs
-    // value flips. Assert only that the API accepted the request.
-    ASSERT_TRUE(ret == AMDSMI_STATUS_SUCCESS || ret == AMDSMI_STATUS_INVAL ||
-                ret == AMDSMI_STATUS_NOT_SUPPORTED)
-        << "amdsmi_set_gpu_memory_partition returned unexpected status: "
-        << smi_amdgpu_get_status_string(ret, false);
-    std::cout << "\t** Memory partition restore staged to " << orig_memory_partition
-              << ". A driver reload is required to apply: "
-              << "sudo modprobe -r amdgpu && sudo modprobe amdgpu\n";
   }  // END DEVICE FOR LOOP
 
-  // Restore original compute partition settings (see orig_dev_config ^)
-  IF_VERB(STANDARD) {
-    std::cout << "\t**=========================================================\n";
-    std::cout << "\t**Restore Original Compute Partition Settings =============\n";
-    std::cout << "\t**=========================================================\n";
+  for (const auto& entry : original_memory_modes) {
+    SCOPED_TRACE(::testing::Message() << "Memory partition handle " << entry.first);
+    char current[k255Len] = {};
+    const auto status = api_.get_memory(entry.first, current, sizeof(current));
+    EXPECT_EQ(status, AMDSMI_STATUS_SUCCESS) << "Memory partition readback failed";
+    if (status != AMDSMI_STATUS_SUCCESS) continue;
+    EXPECT_EQ(std::string(current, strnlen(current, sizeof(current))), entry.second)
+        << "Memory partition drift";
   }
-  initial_num_devices = num_monitor_devs();
-  for (uint32_t dv_ind = 0; dv_ind < initial_num_devices; ++dv_ind) {
-    if (dv_ind != 0) {
-      std::cout << "\n";
-    }
-    PrintDeviceHeader(processor_handles_[dv_ind]);
 
-    AcceleratorProfileConfig original_profile_config = orig_dev_config[dv_ind];
-
-    // Return to original profile
-    IF_VERB(STANDARD) {
-      std::cout << "\t**Device Index: " << dv_ind << std::endl
-                << "\t**======== Return to original AMDSMI_ACCELERATOR_PARTITION_"
-                << original_profile_config.original_profile_type_str << " (profile_index: "
-                << (original_profile_config.original_profile_index == kMAX_UINT32
-                        ? "N/A"
-                        : std::to_string(original_profile_config.original_profile_index))
-                << ")"
-                << " ===============" << std::endl;
-    }
-    DISPLAY_AMDSMI_API("amdsmi_set_gpu_accelerator_partition_profile",
-                       "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
-    auto ret_set = amdsmi_set_gpu_accelerator_partition_profile(
-        processor_handles_[dv_ind], original_profile_config.original_profile_index);
-    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret_set, AMDSMI_STATUS_SUCCESS);
-    EXPECT_TRUE((ret_set == AMDSMI_STATUS_SETTING_UNAVAILABLE) ||
-                (ret_set == AMDSMI_STATUS_NO_PERM) || (ret_set == AMDSMI_STATUS_SUCCESS) ||
-                ret_set == AMDSMI_STATUS_BUSY || ret_set == AMDSMI_STATUS_NOT_SUPPORTED);
+  // Another actor's changes must fail verification, not be overwritten.
+  for (const auto& entry : original_profiles) {
+    SCOPED_TRACE(::testing::Message() << "Compute partition handle " << entry.first);
     amdsmi_accelerator_partition_profile_t profile = {};
-    uint32_t partition_id[8] = {0, 0, 0, 0, 0, 0, 0, 0};
-    DISPLAY_AMDSMI_API("amdsmi_get_gpu_accelerator_partition_profile",
-                       "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
-    auto ret_get = amdsmi_get_gpu_accelerator_partition_profile(processor_handles_[dv_ind],
-                                                                &profile, &partition_id[0]);
-    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret_get, AMDSMI_STATUS_SUCCESS);
-    if (ret_get == AMDSMI_STATUS_SUCCESS && ret_set == AMDSMI_STATUS_SUCCESS) {
-      std::string profile_type_str = partition_types_map.at(profile.profile_type);
-      IF_VERB(STANDARD) {
-        std::cout << "\t**amdsmi_set_gpu_accelerator_partition_profile(processor_handles_["
-                  << dv_ind << "],"
-                  << "\n\t\t" << original_profile_config.original_profile_index
-                  << " (AMDSMI_ACCELERATOR_PARTITION_"
-                  << original_profile_config.original_profile_type_str << "): "
-                  << "\n\t\t" << smi_amdgpu_get_status_string(ret_set, false)
-                  << "\n\t**amdsmi_get_gpu_accelerator_partition_profile(processor_handles_["
-                  << dv_ind << "], &profile, &partition_id[0]):\n"
-                  << "\t\t" << smi_amdgpu_get_status_string(ret_get, false)
-                  << "\n\t**Current profile.profile_type: " << profile_type_str
-                  << "\n\t**profile.num_partitions: "
-                  << (profile.num_partitions == kMAX_UINT32
-                          ? "N/A"
-                          : std::to_string(profile.num_partitions))
-                  << "\n\t**profile.profile_index: "
-                  << (profile.profile_index == kMAX_UINT32 ? "N/A"
-                                                           : std::to_string(profile.profile_index))
-                  << std::endl;
-      }
-      EXPECT_STREQ(partition_types_map.at(profile.profile_type).c_str(),
-                   original_profile_config.original_profile_type_str.c_str());
-      EXPECT_EQ(profile.profile_type, original_profile_config.original_profile_type);
-      EXPECT_EQ(profile.profile_index, original_profile_config.original_profile_index);
-    } else {
-      IF_VERB(STANDARD) {
-        std::cout << "\t**Could not change or read profiles. "
-                  << "Skipping return to original profile on this device."
-                  << "\n\t**amdsmi_set_gpu_accelerator_partition_profile(): "
-                  << smi_amdgpu_get_status_string(ret_set, false)
-                  << "\n\t**amdsmi_get_gpu_accelerator_partition_profile(): "
-                  << smi_amdgpu_get_status_string(ret_get, false) << std::endl;
-      }
-    }
+    uint32_t partition_id[8] = {};
+    const auto status = api_.get_profile(entry.first, &profile, partition_id);
+    EXPECT_EQ(status, AMDSMI_STATUS_SUCCESS) << "Compute partition readback failed";
+    if (status != AMDSMI_STATUS_SUCCESS) continue;
+    EXPECT_EQ(profile.profile_type, entry.second.profile_type) << "Compute partition drift";
+    EXPECT_EQ(profile.profile_index, entry.second.profile_index) << "Compute profile index drift";
   }
 }
