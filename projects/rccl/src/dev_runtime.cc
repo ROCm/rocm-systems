@@ -828,9 +828,9 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
     int ptrType;
     bool needDmabuf;
-    NCCLCHECKGOTO(rcclDevrGinSegmentRegType(ncclSymIsHostSegment(cuMemLocType), mem->globalHasSysmemSegment,
-                                            mem->maxGlobalNumSegments, &ptrType, &needDmabuf),
-                  ret, fail);
+    NCCLCHECKGOTO(
+        rcclDevrGinSegmentRegType(mem->globalHasSysmemSegment, mem->maxGlobalNumSegments, &ptrType, &needDmabuf),
+        ret, fail);
 #else
     // CUDA HOST_NUMA is pin-able CPU pages (NCCL_PTR_HOST); device VMM is NCCL_PTR_CUDA.
     int ptrType = ncclSymIsHostSegment(cuMemLocType) ? NCCL_PTR_HOST : NCCL_PTR_CUDA;

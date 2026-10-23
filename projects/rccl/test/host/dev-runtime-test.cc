@@ -2147,6 +2147,27 @@ TEST_F(SymMemoryRegisterGinElasticTest, ImportedHostSegment_DmabufDisabled_Fails
   EXPECT_EQ(reg.calls, 0);
   EXPECT_EQ(mem.ginSegmentInfos, nullptr);
 }
+
+// The host owner asks for DMA-BUF, so a peer that sees the imported segment as device must
+// ask too, or only the owner fails the DMA-BUF support check before the collective register.
+TEST_F(SymMemoryRegisterGinElasticTest, ImportedHostSegment_RequestsDmabufLikeTheOwner) {
+  mem.numSegments = 1;
+  mem.maxGlobalNumSegments = 1;
+  segmentSizes.assign({4096});
+  mem.segmentSizes = segmentSizes.data();
+  ScopedHook gather(g_devrBootstrapAllGather, AgreeingAllGather());
+  std::vector<bool> needDmabuf;
+  // RCCL: the register seam includes the generation array.
+  ScopedHook reg(g_devrGinRegister,
+                 [&](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool dmabuf, int) {
+                   needDmabuf.push_back(dmabuf);
+                   return ncclSuccess;
+                 });
+
+  ASSERT_EQ(symMemoryRegisterGin(comm, &mem), ncclSuccess);  // props fake reports device
+  ASSERT_EQ(needDmabuf.size(), 1u);
+  EXPECT_TRUE(needDmabuf[0]);
+}
 #endif
 
 // Branch: another rank reports a different segment size, so the layout check
