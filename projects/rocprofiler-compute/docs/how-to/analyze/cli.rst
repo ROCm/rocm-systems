@@ -672,18 +672,6 @@ Two-step workflow:
    # Step 2: Analyze to generate HTML roofline plots
    $ rocprof-compute analyze -p workloads/vcopy/MI300A_A1/ -b 4
 
-Roofline visualization options (available only in analyze mode):
-
-* ``--sort``: Overlay top kernels or top dispatches (default: kernels)
-* ``--mem-level``: Filter by memory level -- HBM, L2, vL1D, L0, LDS (default: ALL)
-* ``--roofline-data-type``: Choose datatypes for roofline visualization (default: FP32)
-
-Example with multiple ``--mem-level`` and ``--roofline-data-type`` options:
-
-.. code-block:: shell-session
-
-   $ rocprof-compute analyze -p workloads/vcopy/MI200/ --sort dispatches --mem-level HBM L2 --roofline-data-type FP32 FP16
-
 Interactive Roofline HTML:
 
 * Use the *AI axis* selector to choose one memory level per kernel, *All peaks* to plot every level at once, or *Limited by* to show each kernel's limiting memory-level point (falling back to its leftmost point when no memory-level limiter is available).
