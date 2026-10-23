@@ -153,10 +153,17 @@ applies (`scripts/hrr_ci_configure.py`):
 
 - `paths.cpu`: a change under one of these runs the generated-source, script and unit
   jobs. `paths.capture` also runs the capture-enabled build and the GPU suite.
-  `paths.excluded` counts for neither.
+  `paths.excluded` counts for neither. The `paths` filter of `hrr-ci.yml` is the same
+  lists, so a pull request that touches none of them starts no HRR CI run;
+  `test_hrr_ci_configure.py` fails when the filter and `ci.yaml` disagree.
 - `capture_label` (`ci:hrr-capture`) runs the GPU suite on a pull request that touches
-  no capture path. Adding it restarts the run; adding any other label, including
-  TheRock's `ci:gfx...` labels, leaves the run in progress alone.
+  an HRR path but no capture path. Adding it restarts the run; adding any other label,
+  including TheRock's `ci:gfx...` labels, leaves the run in progress alone.
+- `simulator.source_paths`: the simulator jobs take rocJitsu, with that build's
+  configs, from the newest develop TheRock run that has the rocJitsu artifacts, if
+  those include the launcher. They build it from this tree instead on `schedule` and
+  `workflow_dispatch`, when a change touches one of these paths or cannot be listed,
+  and when that run's artifacts lack the launcher.
 - `families`: the GPU families the suite runs on, as TheRock family keys, on the runner
   TheRock's family matrix names. By default each runs on every event (`pull_request`,
   `push`, `schedule`, `workflow_dispatch`). Per family, `enabled: false` leaves it to
@@ -179,13 +186,13 @@ GPU targets in TheRock's family matrix are not all in `targets.arch` of
 `config/integration.yaml`. To take load off the GPU
 pools, disable families or narrow their triggers here.
 
-Until the TheRock commit pinned by `.github/workflows/therock-multi-arch-ci.yml`
-includes [TheRock #8965](https://github.com/ROCm/TheRock/pull/8965), TheRock
-treats `hrr-ci.yml`, `hrr-gpu.yml`, and `projects/hrr` as unclassified and
-builds every stage. A pull request that changes only those workflow files or
-`config/ci.yaml` should carry the `ci:skip` label. Remove that label when the
-change should build HRR sources, and drop this note once the pin includes
-#8965.
+TheRock never reads the HRR workflows or `projects/hrr/tests`, `tools` and `skills`,
+so `.github/skip-ci-config.toml` lists them: a pull request that changes only those
+skips TheRock CI. CLR compiles against `projects/hrr/include`. Any other change to
+`projects/hrr` builds every TheRock stage until the TheRock commit pinned by
+`.github/workflows/therock-multi-arch-ci.yml` includes
+[TheRock #8965](https://github.com/ROCm/TheRock/pull/8965), which adds
+`hrr-playback` to TheRock's `compiler-runtime` stage on Linux.
 
 ## Configuring where a case runs
 
