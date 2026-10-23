@@ -128,6 +128,14 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
   (``CTA_POLICY_ZERO``); it is gated only by the per-arch table window and ``RCCL_CE_ALLREDUCE``.
   ``RCCL_FORCE_CE_ALLREDUCE`` now applies exclusively to the non-registered (2-shot/staged) CE
   AllReduce path.
+* `RCCL_FORCE_SYMMETRIC` (default `0`): when set to a non-zero value, biases the `ncclAllReduce`
+  backend selector to prefer the symmetric kernel path over all other candidates. The selector
+  still requires the operand buffers to be registered symmetric windows; if the symmetric
+  path is ineligible the selector falls back normally.
+* `RCCL_FORCE_DDA` (default `0`): when set to a non-zero value, biases the `ncclAllReduce`
+  backend selector to prefer DDA (Direct Data Access) paths over all other candidates,
+  including symmetric and Copy Engine. If no DDA path is eligible for the given message
+  size and communicator the selector falls back normally.
 
 ### Removed
 * `NCCL_TOPO_SCATTER_START_NET`, which selected how the first network device was scattered across GPUs. Rail and plane assignment replaces it.
