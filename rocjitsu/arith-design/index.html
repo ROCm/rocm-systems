@@ -2168,8 +2168,12 @@ and guest FP controls.</p>
 </tbody>
 </table>
 <p>Loose semantics permit numerical approximations, not wrong operands, missing
-operations, or incorrect integer and comparison results. Modes 2 and 3 reject
-unsupported behavior rather than silently falling back to loose arithmetic.</p>
+operations, or incorrect integer and comparison results. Native floating-point
+arithmetic may overflow intermediate values or use a different accumulation order,
+including returning infinity where the GPU returns a finite value. Loose paths
+need not reorder terms or check operand ranges to prevent these discrepancies.
+Modes 2 and 3 reject unsupported behavior rather than silently falling back to
+loose arithmetic.</p>
 <h3 id="compatibility-mode-planned">Compatibility mode (planned)<a class="headerlink" href="#compatibility-mode-planned" title="Permanent link">&para;</a></h3>
 <p>Once implemented, mode 7 will be a temporary, instruction-specific policy outside the ordered modes.
 Each entry point resolves it before validation or calling another entry point;
@@ -2227,8 +2231,12 @@ as <code>std::default_random_engine</code> and the algorithms used by <code>std:
 <p>Loose-semantics validation uses fuzzy comparisons with empirically calibrated
 <code>atol</code> and <code>rtol</code> tolerances against independent references:
 <code>abs(actual - expected) &lt;= atol + rtol * abs(expected)</code>.
-NaNs match NaNs and infinities must match in sign; masks and preserved storage
-are checked exactly. Bounds live beside the instruction tests or family helpers.</p>
+These bounds apply to the tested input domain, not to arbitrary floating-point
+inputs. Within that domain, NaNs match NaNs and infinities must match in sign.
+Cases requiring GPU-specific cancellation or overflow behavior belong in exact
+tests; loose tests must not impose those guarantees on native arithmetic. Masks
+and preserved storage are checked exactly. Bounds live beside the instruction
+tests or family helpers.</p>
 <p>Exact-semantics validation uses golden results or computed references whose
 bit-exact equivalence is established, rather than assumed from mathematical
 plausibility. Fixtures record their model or hardware provenance. Production
