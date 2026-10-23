@@ -3,7 +3,12 @@
 #include "pc_sampling_feature.h"
 
 #include "code_object_writer.h"
+#include "kernel_name.h"
 #include "sdk_callbacks.h"
+
+#include <algorithm>
+#include <iterator>
+#include <set>
 
 using namespace rocprofiler_compute_tool;
 
@@ -47,7 +52,7 @@ pc_sampling_feature_t::pc_sampling_feature_t(PcSamplingMode               mode,
                                              pc_sampling_collector_t::ptr collector,
                                              source_snapshotter_t::ptr    snapshotter,
                                              code_object_writer_t::ptr    writer)
-    : m_enabled(true)
+    : m_enabled(mode != PcSamplingMode::Disabled)
     , m_mode(mode)
     , m_code_object_info_path(std::move(code_object_info_path))
     , m_source_snapshot_path(std::move(source_snapshot_path))
@@ -62,20 +67,32 @@ void pc_sampling_feature_t::on_code_object_load(const rocprofiler_callback_traci
     m_collector->on_code_object_load(info);
 }
 
-void pc_sampling_feature_t::write(tool_data_t& /*tool_data*/)
+void pc_sampling_feature_t::on_kernel_symbol_register(
+    const rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t& info)
 {
-    if (m_enabled)
-        finalize();
+    const auto name = info.kernel_name ? std::string_view{info.kernel_name} : std::string_view{};
+    m_collector->on_kernel_symbol_register(info.kernel_id,
+                                           info.code_object_id,
+                                           strip_kernel_descriptor_suffix(name));
 }
 
-void pc_sampling_feature_t::finalize()
+void pc_sampling_feature_t::write(tool_data_t& tool_data)
 {
-    m_collector->finalize(*m_writer);
-    // Processes that loaded no code objects (e.g. non-GPU launchers/forks)
-    // should not leave an empty artifact behind.
-    if (!m_writer->empty())
-    {
-        m_writer->flush(m_code_object_info_path);
-        m_snapshotter->snapshot(m_collector->get_source_paths(), m_source_snapshot_path);
-    }
+    if (!m_enabled || !m_collector->has_code_objects())
+        return;
+
+    std::set<uint64_t> dispatched_kernel_ids;
+    std::transform(tool_data.dispatch_records.begin(),
+                   tool_data.dispatch_records.end(),
+                   std::inserter(dispatched_kernel_ids, dispatched_kernel_ids.end()),
+                   [](const auto& dispatch) { return dispatch.kernel_id; });
+
+    finalize(dispatched_kernel_ids);
+}
+
+void pc_sampling_feature_t::finalize(const std::set<uint64_t>& dispatched_kernel_ids)
+{
+    m_collector->finalize(*m_writer, dispatched_kernel_ids);
+    m_writer->flush(m_code_object_info_path);
+    m_snapshotter->snapshot(m_collector->get_source_paths(), m_source_snapshot_path);
 }
