@@ -1464,11 +1464,25 @@ class Common:
             print(f"{status_msg}", flush=True)
         return status_ret
 
+    @classmethod
+    def for_unit_tests(cls, verbosity=None):
+        """A Common carrying only what the status helpers read, so no device is touched.
+
+        For tests that call the Python wrapper with the ctypes layer mocked: they have
+        no processors to enumerate but still want ``expect_status`` and ``status_sweep``.
+        *verbosity* defaults to the level parsed from the command line.
+        """
+        common = object.__new__(cls)
+        common.error_map = ERROR_MAP
+        common.verbose = verbose if verbosity is None else verbosity
+        common._status_failures = None
+        return common
+
     # TODO(amdsmi_team): migrate the suite off check_ret, which tolerates NOT_SUPPORTED,
     # NOT_YET_IMPLEMENTED and NO_HSMP_MSG_SUP for every call no matter what the caller
     # expected. test_set_gpu_power_profile & test_gpu_counter are the first conversions.
     @contextlib.contextmanager
-    def expect_status(self, msg, accept):
+    def expect_status(self, msg, accept=None, raises=None):
         """Judge one amdsmi call against the statuses the caller declares correct.
 
         Nothing is tolerated implicitly, unlike ``check_ret``: a status outside
@@ -1480,6 +1494,14 @@ class Common:
             with self.common.expect_status(msg, accept):
                 amdsmi.amdsmi_set_gpu_power_profile(gpu, 0, mask)
 
+        The Python wrapper rejects a bad argument with AmdSmiParameterException
+        before any C call, so no status exists to judge. Pass *raises* instead, the
+        exception type (or tuple of types) the call must raise; returning normally
+        or raising anything else fails::
+
+            with self.common.expect_status(msg, raises=amdsmi.AmdSmiParameterException):
+                amdsmi.amdsmi_set_npm_limit("not-a-node-handle", 100)
+
         An open ``status_sweep`` collects the failure and reports every one at
         the end. Without one, it is raised here.
 
@@ -1487,14 +1509,25 @@ class Common:
             msg (str): header printed above the verdict, and the name a sweep
                 reports the call under. Keep it specific.
             accept (str | list): every status treated as correct, as
-                ``AMDSMI_STATUS_*`` names or AmdSmiStatus members.
+                ``AMDSMI_STATUS_*`` names or AmdSmiStatus members. Pass
+                ``amdsmi.AmdSmiStatus.SUCCESS`` for a call that must succeed. Exactly
+                one of *accept* and *raises* is required.
+            raises (type | tuple): exception type(s) the call must raise, for a
+                call that is rejected before it has a status.
 
         Raises:
             AssertionError: when no sweep is open to collect the failure.
-            ValueError: when *accept* names a status outside AMDSMI_STATUS_*.
-            Exception: anything the block raised without a status code, which is
-                a bug in the test body rather than an API result.
+            ValueError: when *accept* names a status outside AMDSMI_STATUS_*, or
+                not exactly one of *accept* and *raises* is given.
+            Exception: with *accept*, anything the block raised without a status
+                code, which is a bug in the test body rather than an API result.
         """
+        if (accept is None) == (raises is None):
+            raise ValueError("expect_status needs exactly one of accept or raises")
+        if raises is not None:
+            with self._expect_exception(msg, raises):
+                yield
+            return
         outcome = self._new_status_outcome(msg, accept)
         try:
             yield
@@ -1505,6 +1538,36 @@ class Common:
         else:
             self._record_returned_status(outcome)
         self._print_status_outcome(outcome)
+        if outcome.failed:
+            self._note_status_failure(outcome)
+
+    @contextlib.contextmanager
+    def _expect_exception(self, msg, raises):
+        """``expect_status`` for a call judged by the exception type it raises."""
+        expected = raises if isinstance(raises, tuple) else (raises,)
+        outcome = types.SimpleNamespace(
+            msg=msg,
+            status_code=None,
+            status_name=None,
+            accepted=[exc.__name__ for exc in expected],
+            failed=False,
+            exception=None,
+        )
+        try:
+            yield
+        except expected as exc:
+            outcome.status_name = f"raised {type(exc).__name__}"
+        except Exception as exc:
+            outcome.status_name = f"raised {type(exc).__name__}"
+            outcome.failed = True
+            outcome.exception = exc
+        else:
+            outcome.status_name = "returned without raising"
+            outcome.failed = True
+        verdict = "TEST FAILURE" if outcome.failed else "TEST SUCCESS"
+        lines = [f"{msg}\n\t{verdict}, AMDSMI API {outcome.status_name}"]
+        lines += [f"\t              AMDSMI API Accepted {name}" for name in outcome.accepted]
+        self.print("\n".join(lines))
         if outcome.failed:
             self._note_status_failure(outcome)
 
@@ -1556,7 +1619,9 @@ class Common:
         plural = "call" if len(collected) == 1 else "calls"
         lines = [f"{len(collected)} {plural} did not return an accepted status:"]
         for out in collected:
-            lines.append(f"  {out.msg.strip().rstrip(':')} -> {out.status_code} {out.status_name}")
+            # An exception outcome has no status code, only what was raised.
+            got = " ".join(filter(None, (out.status_code, out.status_name)))
+            lines.append(f"  {out.msg.strip().rstrip(':')} -> {got}")
             lines.append(f"      accepted: {', '.join(out.accepted)}")
         return AssertionError("\n".join(lines))
 

@@ -73,7 +73,7 @@ class TestGpuMetrics(unittest.TestCase):
         for i, gpu in enumerate(self.common.processors):
             self.common.print_device_header(i)
             try:
-                msg = f"gpu({i}): "
+                msg = f"\t### amdsmi_get_gpu_partition_metrics_info(gpu={i}):"
                 ret = amdsmi.amdsmi_get_gpu_partition_metrics_info(gpu)
                 self.common.print(msg, ret)
                 self.common.check_ret("", "", self.common.PASS)

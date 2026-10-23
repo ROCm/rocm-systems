@@ -17,6 +17,10 @@ import types
 import unittest
 from unittest.mock import patch
 
+from common.common import Common
+
+_common = Common.for_unit_tests()
+
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _REPO_ROOT = os.path.abspath(os.path.join(_THIS_DIR, "..", "..", "..", ".."))
 _PY_INTERFACE = os.path.join(_REPO_ROOT, "py-interface")
@@ -109,7 +113,10 @@ class TestFabricCperInterface(unittest.TestCase):
 
     def test_invalid_handle_type(self):
         """Test exception on invalid processor_handle type"""
-        with self.assertRaises(amdsmi_exception.AmdSmiParameterException):
+        with _common.expect_status(
+            '\t### amdsmi_get_fabric_cper_entries("not_a_handle", 0xFFFF):',
+            raises=amdsmi_exception.AmdSmiParameterException,
+        ):
             amdsmi_interface.amdsmi_get_fabric_cper_entries("not_a_handle", 0xFFFF)
 
     @_patch_fabric_symbol()
@@ -117,14 +124,13 @@ class TestFabricCperInterface(unittest.TestCase):
         """Test NOT_SUPPORTED error handling (UALoE unavailable)"""
         mock_fabric_cper.return_value = amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
 
-        with self.assertRaises(amdsmi_exception.AmdSmiLibraryException) as context:
+        with _common.expect_status(
+            "\t### amdsmi_get_fabric_cper_entries(self.processor_handle, severity_mask=0xFFFF) [mocked C call]:",
+            amdsmi_interface.AmdSmiStatus.NOT_SUPPORTED,
+        ):
             amdsmi_interface.amdsmi_get_fabric_cper_entries(
                 self.processor_handle, severity_mask=0xFFFF
             )
-
-        self.assertEqual(
-            context.exception.get_error_code(), amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
-        )
 
     @_patch_fabric_symbol()
     def test_success_no_entries(self, mock_fabric_cper):
@@ -138,9 +144,15 @@ class TestFabricCperInterface(unittest.TestCase):
 
         mock_fabric_cper.side_effect = mock_impl
 
-        entries, new_cursor, cper_data, status = amdsmi_interface.amdsmi_get_fabric_cper_entries(
-            self.processor_handle, severity_mask=0xFFFF
-        )
+        with _common.expect_status(
+            "\t### amdsmi_get_fabric_cper_entries(self.processor_handle, severity_mask=0xFFFF) [mocked C call]:",
+            amdsmi_interface.AmdSmiStatus.SUCCESS,
+        ):
+            entries, new_cursor, cper_data, status = (
+                amdsmi_interface.amdsmi_get_fabric_cper_entries(
+                    self.processor_handle, severity_mask=0xFFFF
+                )
+            )
 
         self.assertEqual(status, amdsmi_wrapper.AMDSMI_STATUS_SUCCESS)
         self.assertEqual(len(entries), 0)
@@ -185,9 +197,15 @@ class TestFabricCperInterface(unittest.TestCase):
 
         mock_fabric_cper.side_effect = mock_impl
 
-        entries, new_cursor, cper_data, status = amdsmi_interface.amdsmi_get_fabric_cper_entries(
-            self.processor_handle, severity_mask=0xFFFF
-        )
+        with _common.expect_status(
+            "\t### amdsmi_get_fabric_cper_entries(self.processor_handle, severity_mask=0xFFFF) [mocked C call]:",
+            amdsmi_interface.AmdSmiStatus.SUCCESS,
+        ):
+            entries, new_cursor, cper_data, status = (
+                amdsmi_interface.amdsmi_get_fabric_cper_entries(
+                    self.processor_handle, severity_mask=0xFFFF
+                )
+            )
 
         self.assertEqual(status, amdsmi_wrapper.AMDSMI_STATUS_SUCCESS)
         self.assertEqual(len(entries), 1)
@@ -214,9 +232,15 @@ class TestFabricCperInterface(unittest.TestCase):
 
         mock_fabric_cper.side_effect = mock_impl
 
-        entries, new_cursor, cper_data, status = amdsmi_interface.amdsmi_get_fabric_cper_entries(
-            self.processor_handle, severity_mask=0xFFFF, cursor=0
-        )
+        with _common.expect_status(
+            "\t### amdsmi_get_fabric_cper_entries(self.processor_handle, severity_mask=0xFFFF, cursor=0) [mocked C call]:",
+            amdsmi_interface.AmdSmiStatus.SUCCESS,
+        ):
+            entries, new_cursor, cper_data, status = (
+                amdsmi_interface.amdsmi_get_fabric_cper_entries(
+                    self.processor_handle, severity_mask=0xFFFF, cursor=0
+                )
+            )
 
         self.assertEqual(status, amdsmi_wrapper.AMDSMI_STATUS_MORE_DATA)
         self.assertEqual(new_cursor, 100)
@@ -237,9 +261,15 @@ class TestFabricCperInterface(unittest.TestCase):
         mock_fabric_cper.side_effect = mock_impl
 
         custom_buffer_size = 2 * 1048576
-        _entries, _new_cursor, _cper_data, status = amdsmi_interface.amdsmi_get_fabric_cper_entries(
-            self.processor_handle, severity_mask=0xFFFF, buffer_size=custom_buffer_size
-        )
+        with _common.expect_status(
+            "\t### amdsmi_get_fabric_cper_entries(self.processor_handle, severity_mask=0xFFFF, buffer_size=custom_buffer_size) [mocked C call]:",
+            amdsmi_interface.AmdSmiStatus.SUCCESS,
+        ):
+            _entries, _new_cursor, _cper_data, status = (
+                amdsmi_interface.amdsmi_get_fabric_cper_entries(
+                    self.processor_handle, severity_mask=0xFFFF, buffer_size=custom_buffer_size
+                )
+            )
 
         self.assertEqual(status, amdsmi_wrapper.AMDSMI_STATUS_SUCCESS)
         self.assertEqual(seen["buf_len"], custom_buffer_size)
@@ -270,9 +300,15 @@ class TestFabricCperInterface(unittest.TestCase):
 
         mock_fabric_cper.side_effect = mock_impl
 
-        entries, _new_cursor, _cper_data, _status = amdsmi_interface.amdsmi_get_fabric_cper_entries(
-            self.processor_handle, severity_mask=0xFFFF
-        )
+        with _common.expect_status(
+            "\t### amdsmi_get_fabric_cper_entries(self.processor_handle, severity_mask=0xFFFF) [mocked C call]:",
+            amdsmi_interface.AmdSmiStatus.SUCCESS,
+        ):
+            entries, _new_cursor, _cper_data, _status = (
+                amdsmi_interface.amdsmi_get_fabric_cper_entries(
+                    self.processor_handle, severity_mask=0xFFFF
+                )
+            )
 
         self.assertEqual(len(entries), 1)
         self.assertEqual(entries[0]["source"], "fabric")
