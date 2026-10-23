@@ -5742,7 +5742,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_ForceSymmetricChoosesSymkWhenEligibl
         ScopedHook symkAvailable(g_symkAvailable,
                                  [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
         ScopedHook tuningCompute(g_tuningCompute,
-                                 SelectSymkTuning(ncclSymkKernelId_AllReduce_RSxLD_AGxST, /*maxChannels=*/4));
+                                 SelectSymkTuning(ncclFuncAllReduce, ncclSymkKernelId_AllReduce_RSxLD_AGxST, /*maxChannels=*/4));
         ncclComm* comm = MakeSelectComm();
         comm->symmetricSupport = 1;
         rcclCollDecision decision{};
