@@ -4087,7 +4087,7 @@ rocprofiler-sdk:
           block: SQ
           event: 265
     - name: SQC_TC_INST_REQ
-      description: Number of instruction requests to the TC (No-Masking, nondeterministic)
+      description: Number of instruction requests to the texture cache (TC).
       properties: []
       definitions:
         - architectures:
@@ -15548,7 +15548,7 @@ rocprofiler-sdk:
           block: GL2C
           event: 80
     - name: GL2C_WRITE
-      description: This counter counts write requests at the output_fifos block.
+      description: Number of write requests. This is measured at the output_fifos block.
       properties: []
       definitions:
         - architectures:
@@ -15565,7 +15565,7 @@ rocprofiler-sdk:
           event: 74
     - name: GL2C_WRITE_sum
       description: >-
-        Sum across all GL2C instances. This counter counts write requests at the output_fifos block.
+        Sum across all GL2C instances: Number of write requests. This is measured at the output_fifos block.
       properties: []
       definitions:
         - architectures:
@@ -15813,7 +15813,7 @@ rocprofiler-sdk:
           expression: reduce(SQC_TC_DATA_READ_REQ,sum)
     - name: SQC_TC_INST_REQ_sum
       description: >-
-        Sum across all SQC instances. This counter counts instruction requests to the texture cache (TC).
+        Sum across all SQC instances. Number of instruction requests to the texture cache (TC).
       properties: []
       definitions:
         - architectures:
@@ -15997,7 +15997,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(SQ_INSTS_LDS_DIRECT_LOAD,sum)
     - name: SQ_INSTS_LDS_PARAM_LOAD
-      description: This counter counts issued LDS_PARAM_LOAD instructions.
+      description: Number of LDS_PARAM_LOAD instructions issued.
       properties: []
       definitions:
         - architectures:
@@ -16010,7 +16010,7 @@ rocprofiler-sdk:
           event: 172
     - name: SQ_INSTS_LDS_PARAM_LOAD_sum
       description: >-
-        Sum across all SQ instances. This counter counts issued LDS_PARAM_LOAD instructions.
+        Sum across all SQ instances: Number of LDS_PARAM_LOAD instructions issued.
       properties: []
       definitions:
         - architectures:
@@ -16152,7 +16152,7 @@ rocprofiler-sdk:
           event: 135
     - name: SQ_INSTS_VALU_TRANS_sum
       description: >-
-        Sum across all SQ instances. This counter counts issued transcendental VALU instructions.
+        Sum across all SQ instances: Number of transcendental VALU instructions issued.
       properties: []
       definitions:
         - architectures:
