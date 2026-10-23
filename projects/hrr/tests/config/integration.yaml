@@ -64,6 +64,12 @@ cases:
   Unit_HRR_CaptureExitSummary: {}
   Unit_HRR_CaptureForkWithoutFds_Direct: {}
   Unit_HRR_CaptureKeepsRootManifestWhenBaseIsUnreadable: {}
+  Unit_HRR_CaptureLimit_ForkAfterStop: {}
+  Unit_HRR_CaptureLimit_ForkAfterStop_Direct: {}
+  Unit_HRR_CaptureLimit_SkipsLargeBlob: {}
+  Unit_HRR_CaptureLimit_SkipsLargeBlob_Direct: {}
+  Unit_HRR_CaptureLimit_StopsAtSize: {}
+  Unit_HRR_CaptureLimit_StopsAtSize_Direct: {}
   Unit_HRR_CaptureMarkerRefused_Direct: {}
   Unit_HRR_CaptureMarksUnwrittenFilesIncomplete: {}
   Unit_HRR_CaptureMovesEarlierArchiveAside: {}
@@ -147,6 +153,8 @@ cases:
   Unit_HRR_FailedShimCalls_Direct: {}
   Unit_HRR_FatBinHeaderChecks: {}
   Unit_HRR_FatBinHeader_Direct: {}
+  Unit_HRR_FatBinOverBlobLimit: {}
+  Unit_HRR_FatBinOverBlobLimit_Direct: {}
   Unit_HRR_FirstMallocRoundtrip: {}
   Unit_HRR_FirstMalloc_Direct: {}
   Unit_HRR_ForkAfterCaptureShutdown: {}

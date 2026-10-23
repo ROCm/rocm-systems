@@ -278,6 +278,12 @@ release(cstring, HIP_HRR_CAPTURE_OUTPUT, "",                                  \
 release(bool, HIP_HRR_DEBUG_ARGS, false,                                      \
         "Enable HRR capture argument-provenance tracing (per-arg dumps and "  \
         "H2D destination logging) at LOG_INFO level")                         \
+release(size_t, HIP_HRR_CAPTURE_MAX_MB, 0,                                    \
+        "Stop HRR capture before a process archive exceeds this many MiB; "   \
+        "0 = no limit")                                                       \
+release(size_t, HIP_HRR_CAPTURE_MAX_BLOB_MB, 0,                               \
+        "Do not store an HRR capture blob larger than this many MiB; "        \
+        "0 = no limit")                                                       \
 release(uint, DEBUG_CLR_DOORBELL_SKIP, 16,                                    \
         "Number of consecutive dispatches that may skip the doorbell flush.") \
 release(bool, DEBUG_CLR_DISABLE_FALLBACK, false,                              \
