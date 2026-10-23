@@ -934,6 +934,7 @@ struct gmock_externals
     MOCK_METHOD(std::vector<std::shared_ptr<agent_t>>, get_agents_by_type, (int type));
 
     MOCK_METHOD(bool, is_active, ());
+    MOCK_METHOD(bool, is_finalized, ());
     MOCK_METHOD(bool, get_use_timemory, ());
     MOCK_METHOD(void, tracing_push_timemory, (std::string_view name));
     MOCK_METHOD(void, tracing_pop_timemory, (std::string_view name));
@@ -1398,6 +1399,8 @@ struct externals
 
     static bool is_active() { return true; }
 
+    static bool is_finalized() { return true; }
+
     template <typename CategoryT>
     static void tracing_push_timemory(CategoryT, std::string_view /*name*/)
     {}
@@ -1783,6 +1786,7 @@ struct mock_sdk_with_tracing : mock_sdk
 struct externals_with_tracing : externals
 {
     static bool is_active() { return g_externals_mock->is_active(); }
+    static bool is_finalized() { return g_externals_mock->is_finalized(); }
     static bool get_use_timemory() { return g_externals_mock->get_use_timemory(); }
 
     template <typename CategoryT>
