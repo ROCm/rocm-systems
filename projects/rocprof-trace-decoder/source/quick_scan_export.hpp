@@ -67,13 +67,10 @@ struct QuickToken
     uint64_t offset : 48;
 };
 
-// The scanners are SIMD-only and built only on GCC/clang x86-64. On other
-// compilers (MSVC), other architectures (aarch64, non-x86), or x86 CPUs at
-// runtime that lack AVX-512, no implementation is available. Availability
-// is probed at the export entry point (rocprof_trace_decoder_quick_scan
-// with data=nullptr), which returns ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED
-// when the scanner cannot run. Callers must NOT invoke these scan_*
-// functions directly without first confirming availability via that probe.
+// Scanners select SIMD implementations when the host supports them and otherwise
+// use portable scalar token walks. The null-data API probe therefore succeeds
+// independently of AVX-512 availability. Unsupported GPU trace formats still
+// return NOT_IMPLEMENTED when actual data is supplied.
 //
 // Purpose-built fast scanners that walk an SQTT token stream and capture
 // only the rare-token cluster (REG / REG_CS / EVENT / EVENT_CS /
@@ -87,17 +84,12 @@ struct QuickToken
 //
 // Writes up to `out_cap` entries into `out` in stream order and returns
 // the number written. Single-threaded, no exceptions.
-#if ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD
-size_t scan_gfx9(const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap);
-size_t scan_gfx12(const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap);
-size_t scan_mi400(const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap);
-#endif
+size_t scan_gfx9(const uint8_t* buf, size_t size, QuickToken* out, size_t out_cap);
+size_t scan_gfx12(const uint8_t* buf, size_t size, QuickToken* out, size_t out_cap);
+size_t scan_mi400(const uint8_t* buf, size_t size, QuickToken* out, size_t out_cap);
 
-// Returns true iff the running CPU supports AVX-512 (vbmi+bw+f) and the
-// TU was built for x86 with a compiler that has the SIMD paths. False on
-// MSVC, on non-x86 targets, or on x86 CPUs lacking AVX-512. Used by the
-// export to decide between dispatching the scanner and returning
-// ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED.
+// Reports AVX-512 (vbmi+bw+f) capability for diagnostics and SIMD-specific tests.
+// This is not a prerequisite for the quick-scan or standalone extraction APIs.
 bool avx512_available();
 }; // namespace quick_scan
 

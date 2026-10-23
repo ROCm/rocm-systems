@@ -22,24 +22,16 @@
 
 #include "../quick_scan_export.hpp"
 
+#include <cstdlib>
 #include <cstring>
 
 #include "gfx10/token_types.h"
 #include "mi400parser.h"
 
-// SIMD-only scanner — no scalar fallback. The AVX-512 path uses GCC
-// function multiversioning (__attribute__((target("…")))) which MSVC does
-// not implement, so MSVC and non-x86 targets compile to a stub that
-// returns SCAN_NOT_IMPLEMENTED. x86 CPUs without AVX-512 also resolve to
-// the stub at runtime.
-#if (defined(__GNUC__) || defined(__clang__)) && (defined(__x86_64__) || defined(__i386__))
+// Prefer SIMD when supported, with a scalar token walk on other CPUs and compilers.
+#if ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD
 #    include <immintrin.h>
-#    define MI400_RARE_SCAN_HAS_X86 1
-#else
-#    define MI400_RARE_SCAN_HAS_X86 0
 #endif
-
-#if MI400_RARE_SCAN_HAS_X86
 
 namespace mi400::quick_scan
 {
@@ -79,7 +71,7 @@ const Tables& tables()
             const auto& info = lk.lookup(static_cast<uint8_t>(b));
             const unsigned len = static_cast<unsigned>(info.length) >> 3;
             const unsigned type = info.type;
-            if (len > MAX_TOKEN_BYTES) __builtin_trap();
+            if (len > MAX_TOKEN_BYTES) std::abort();
             uint8_t v = static_cast<uint8_t>(len & INFO_LEN);
             if (type < mi400::TokenGenerator::RARE_END)
             {
@@ -94,6 +86,38 @@ const Tables& tables()
     return t;
 }
 
+size_t scan_mi400_scalar(const uint8_t* buf, size_t size, QuickToken* out, size_t out_cap)
+{
+    if (!buf || !out || out_cap == 0 || size == 0) return 0;
+
+    const auto& table = tables();
+    size_t count = 0;
+    bool ext = false;
+    for (size_t pos = 0; pos < size && count < out_cap;)
+    {
+        const uint8_t key = buf[pos];
+        if (ext && (key & 1u))
+        {
+            ++pos;
+            continue;
+        }
+
+        const uint8_t info = table.info[key];
+        if (info & INFO_RARE)
+        {
+            uint64_t contents = 0;
+            const size_t available = size - pos;
+            std::memcpy(&contents, buf + pos, available < sizeof(contents) ? available : sizeof(contents));
+            out[count++] = QuickToken{contents, table.rare_type[key], pos};
+        }
+        ext = (info & INFO_EXT) != 0;
+        const unsigned bytes = info & INFO_LEN;
+        pos += bytes ? bytes : 1;
+    }
+    return count;
+}
+
+#if ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD
 // AVX-512_VBMI path. Per 64-byte chunk:
 //   1. Load 64 bytes.
 //   2. Look up info[byte] for each lane via two `vpermi2b` over the 256-byte
@@ -273,15 +297,19 @@ done:
     return n_out;
 }
 
+#endif // ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD
+
 using ScanFn = size_t (*)(const uint8_t*, size_t, QuickToken*, size_t);
 
-// Returns nullptr if the x86 CPU lacks AVX-512.
+// Use the scalar walk when AVX-512 is unavailable.
 ScanFn select_scanner()
 {
+#if ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD
     __builtin_cpu_init();
     if (__builtin_cpu_supports("avx512vbmi") && __builtin_cpu_supports("avx512bw") && __builtin_cpu_supports("avx512f"))
         return &scan_mi400_avx512;
-    return nullptr;
+#endif
+    return &scan_mi400_scalar;
 }
 
 } // namespace
@@ -289,13 +317,9 @@ ScanFn select_scanner()
 
 namespace quick_scan
 {
-size_t scan_mi400(const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap)
+size_t scan_mi400(const uint8_t* buf, size_t size, QuickToken* out, size_t out_cap)
 {
     static const mi400::quick_scan::ScanFn fn = mi400::quick_scan::select_scanner();
-    if (!fn) throw std::exception();
-
     return fn(buf, size, out, out_cap);
 }
 } // namespace quick_scan
-
-#endif // MI400_RARE_SCAN_HAS_X86

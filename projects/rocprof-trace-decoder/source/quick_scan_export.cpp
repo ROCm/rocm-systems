@@ -400,8 +400,6 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
 {
     thread_local std::vector<quick_scan::QuickToken> raw{1u << 18};
 
-    if (!quick_scan::avx512_available()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
-
     if (!data || data_size == 0)
     {
         for (auto& r : raw) r = quick_scan::QuickToken{};
@@ -457,7 +455,6 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
     buf += header_skip;
 
     size_t ntokens = 0;
-#if ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD
     try
     {
         auto scanner = (gfxip == 9) ? &quick_scan::scan_gfx9 : &scan_none;
@@ -472,7 +469,6 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
         }
     }
     catch (std::exception&)
-#endif
     {
         return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
     }
@@ -601,11 +597,8 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
 
     thread_local std::vector<quick_scan::QuickToken> raw{1u << 16};
 
-    if (!quick_scan::avx512_available()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
-
     size_t ntokens = 0;
     const uint64_t header_offset = (gfxip == 9 && chunk_index == 0) ? sizeof(uint64_t) : 0;
-#if ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD
     auto scanner = (gfxip == 9) ? &quick_scan::scan_gfx9 : &scan_none;
     if (gfxip == 12) scanner = &quick_scan::scan_gfx12;
     if (gfxip == 1250) scanner = &quick_scan::scan_mi400;
@@ -623,9 +616,6 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
         raw.resize(raw.size() * 2);
         ntokens = scanner(buf, offset_begin, raw.data(), raw.size());
     }
-#else
-    return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
-#endif
 
     if (gfxip == 9)
         process_events_gfx9<false>(temp, raw, static_cast<int>(ntokens), header_offset, nullptr, nullptr);

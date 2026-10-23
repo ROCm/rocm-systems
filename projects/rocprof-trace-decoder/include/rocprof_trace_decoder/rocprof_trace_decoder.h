@@ -314,6 +314,9 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
  * ::ROCPROFILER_THREAD_TRACE_DECODER_RECORD_EVENT. Significantly faster than
  * ::rocprof_trace_decoder_parse since waves, instructions, occupancy, perf
  * events and shader data are not decoded.
+ * SIMD acceleration is selected when supported by the host CPU; otherwise a
+ * scalar scanner is used. AVX-512 is not required. Passing null data or zero
+ * data_size is an availability probe and returns SUCCESS without scanning.
  *
  * Because this scan does not track time, every emitted event has a zero
  * timestamp; only @c type, @c me_id, @c pipe_id and @c payload are populated
@@ -332,7 +335,7 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
  * @param[in] userdata Userdata passed back to caller via @p trace_callback.
  * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS on success.
  * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT for
- *   null/empty inputs.
+ *   invalid handles or undersized nonempty inputs.
  * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_SHADER_DATA
  *   when the header does not describe a
  * recognized trace.

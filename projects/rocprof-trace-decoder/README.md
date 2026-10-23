@@ -91,6 +91,13 @@ See [TESTING.md](TESTING.md) for test and code coverage information.
 
 ## Usage with rocprofv3
 
+`rocprofv3 --att-no-intercept` uses the decoder's quick-scan and standalone
+extraction APIs to select kernels from device-wide traces. These APIs automatically
+use scalar token scanning when the host lacks AVX-512, including in virtual
+machines that do not expose it. GFX9 also has an AVX2 path. AVX-512 remains the
+preferred path when the required extensions are available; scalar scanning can
+increase CPU processing time. No additional runtime option is needed.
+
 ```bash
 rocprofv3 --att -- ./a.out
 ```

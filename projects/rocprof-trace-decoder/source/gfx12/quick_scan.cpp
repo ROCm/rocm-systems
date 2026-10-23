@@ -22,24 +22,16 @@
 
 #include "../quick_scan_export.hpp"
 
+#include <cstdlib>
 #include <cstring>
 
 #include "gfx10/token_types.h"
 #include "gfx12parser.h"
 
-// SIMD-only scanner — no scalar fallback. The AVX-512 path uses GCC
-// function multiversioning (__attribute__((target("…")))) which MSVC does
-// not implement, so MSVC and non-x86 targets compile to a stub that
-// returns quick_scan::SCAN_NOT_IMPLEMENTED. x86 CPUs without AVX-512 also
-// resolve to the stub at runtime.
-#if (defined(__GNUC__) || defined(__clang__)) && (defined(__x86_64__) || defined(__i386__))
+// Prefer SIMD when supported, with a scalar token walk on other CPUs and compilers.
+#if ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD
 #    include <immintrin.h>
-#    define GFX12_RARE_SCAN_HAS_X86 1
-#else
-#    define GFX12_RARE_SCAN_HAS_X86 0
 #endif
-
-#if GFX12_RARE_SCAN_HAS_X86
 
 namespace gfx12::quick_scan
 {
@@ -79,7 +71,7 @@ const Tables& tables()
             const auto& token_info = lk.lookup(static_cast<uint8_t>(key));
             const unsigned nibbles = static_cast<unsigned>(token_info.length) >> 2;
             const unsigned type = token_info.type;
-            if ((token_info.length & 3u) != 0 || nibbles > MAX_TOKEN_NIBBLES) __builtin_trap();
+            if ((token_info.length & 3u) != 0 || nibbles > MAX_TOKEN_NIBBLES) std::abort();
 
             uint8_t v = static_cast<uint8_t>((nibbles ? nibbles : 1) & INFO_LEN);
             if (type < RARE_END)
@@ -93,7 +85,7 @@ const Tables& tables()
         }
         for (int key = 128; key < 256; ++key)
         {
-            if (key != 0xE1 && out.info[key] != out.info[key & 0x7F]) __builtin_trap();
+            if (key != 0xE1 && out.info[key] != out.info[key & 0x7F]) std::abort();
         }
         return out;
     }();
@@ -127,6 +119,34 @@ uint64_t load_contents64(const uint8_t* buf, size_t size, size_t nibble_pos)
     return (contents >> 4) | carry;
 }
 
+size_t scan_gfx12_scalar(const uint8_t* buf, size_t size, QuickToken* out, size_t out_cap)
+{
+    if (!buf || !out || out_cap == 0 || size == 0) return 0;
+
+    const auto& table = tables();
+    size_t count = 0;
+    bool ext = false;
+    for (size_t pos = 0; pos < size * 2 && count < out_cap;)
+    {
+        const uint8_t key = load_key(buf, size, pos);
+        if (ext && (key & 1u))
+        {
+            pos += 2;
+            continue;
+        }
+
+        const uint8_t info = table.info[key];
+        if (info & INFO_RARE)
+            out[count++] = QuickToken{load_contents64(buf, size, pos), table.rare_type[key], pos >> 1};
+
+        // NOP does not terminate a pending wave-start extension.
+        if ((info & INFO_NOP) == 0) ext = (info & INFO_EXT) != 0;
+        pos += info & INFO_LEN;
+    }
+    return count;
+}
+
+#if ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD
 __attribute__((target("avx512vbmi,avx512bw,avx512f,avx2,bmi2"))) size_t scan_gfx12_avx512vbmi(
     const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap
 )
@@ -307,32 +327,30 @@ __attribute__((target("avx512vbmi,avx512bw,avx512f,avx2,bmi2"))) size_t scan_gfx
     return n_out;
 }
 
+#endif // ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD
+
 using ScanFn = size_t (*)(const uint8_t*, size_t, QuickToken*, size_t);
 
-// Returns nullptr if the x86 CPU lacks AVX-512.
+// Use the scalar walk when AVX-512 is unavailable.
 ScanFn select_scanner()
 {
+#if ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD
     __builtin_cpu_init();
     if (__builtin_cpu_supports("avx512vbmi") && __builtin_cpu_supports("avx512bw") &&
         __builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx2"))
         return &scan_gfx12_avx512vbmi;
-    return nullptr;
+#endif
+    return &scan_gfx12_scalar;
 }
 
 } // namespace
 } // namespace gfx12::quick_scan
 
-#endif // GFX12_RARE_SCAN_HAS_X86
-
 namespace quick_scan
 {
-#if GFX12_RARE_SCAN_HAS_X86
-size_t scan_gfx12(const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap)
+size_t scan_gfx12(const uint8_t* buf, size_t size, QuickToken* out, size_t out_cap)
 {
     static const gfx12::quick_scan::ScanFn fn = gfx12::quick_scan::select_scanner();
-    if (!fn) throw std::exception();
-
     return fn(buf, size, out, out_cap);
 }
-#endif
 }; // namespace quick_scan

@@ -27,15 +27,9 @@
 
 #include "gfx9token.h" // gfx9::token_len_dict, sqtt_token_type_t
 
-// SIMD-only scanner — no scalar fallback. The AVX paths use GCC function
-// multiversioning (__attribute__((target("…")))) which MSVC does not
-// implement, so MSVC and non-x86 targets compile to a stub that returns
-// quick_scan::SCAN_NOT_IMPLEMENTED.
-#if (defined(__GNUC__) || defined(__clang__)) && (defined(__x86_64__) || defined(__i386__))
+// Prefer SIMD when supported, with a scalar token walk on other CPUs and compilers.
+#if ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD
 #    include <immintrin.h>
-#    define GFX9_QUICK_SCAN_HAS_X86 1
-#else
-#    define GFX9_QUICK_SCAN_HAS_X86 0
 #endif
 
 namespace gfx9::quick_scan
@@ -102,7 +96,32 @@ static_assert(
     "gfx9 rare-token cluster nibble ids changed — update RARE_MASK"
 );
 
-#if GFX9_QUICK_SCAN_HAS_X86
+// Capture the same 64-bit windows and byte offsets as the SIMD paths, including
+// zero-filled partial tokens at the end of a chunk.
+size_t scan_gfx9_scalar(const uint8_t* buf, size_t size, QuickToken* out, size_t out_cap)
+{
+    if (!buf || !out || out_cap == 0 || size == 0) return 0;
+
+    const auto& table = tables();
+    size_t count = 0;
+    for (size_t pos = 0; pos < size && count < out_cap;)
+    {
+        const uint8_t type = buf[pos] & 0x0F;
+        const uint8_t info = table.info_lut[type];
+        if (info & INFO_RARE)
+        {
+            uint64_t contents = 0;
+            const size_t available = size - pos;
+            std::memcpy(&contents, buf + pos, available < sizeof(contents) ? available : sizeof(contents));
+            out[count++] = QuickToken{contents, type, pos};
+        }
+        const unsigned bytes = info & INFO_LEN;
+        pos += bytes ? bytes : 2;
+    }
+    return count;
+}
+
+#if ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD
 
 // AVX-512_VBMI path. Per 64-byte chunk:
 //   1. Decode per-byte nibble info with vpshufb.
@@ -361,27 +380,25 @@ done:
     return n_out;
 }
 
-#endif // GFX9_QUICK_SCAN_HAS_X86
+#endif // ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD
 
 using ScanFn = size_t (*)(const uint8_t*, size_t, QuickToken*, size_t);
 
-// Returns nullptr when no SIMD path is available — either because the TU
-// was compiled for a non-x86 target / a non-GCC compiler, or because the
-// running x86 CPU is below the AVX2 bar.
+// Select once per thread; scalar needs no optional CPU instruction set.
 ScanFn select_scanner()
 {
-#if GFX9_QUICK_SCAN_HAS_X86
+#if ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD
     __builtin_cpu_init();
     if (__builtin_cpu_supports("avx512vbmi") && __builtin_cpu_supports("avx512bw") && __builtin_cpu_supports("avx512f"))
         return &scan_gfx9_avx512vbmi;
     if (__builtin_cpu_supports("avx2")) return &scan_gfx9_avx2;
 #endif
-    return nullptr;
+    return &scan_gfx9_scalar;
 }
 
 } // namespace
 
-#if GFX9_QUICK_SCAN_HAS_X86
+#if ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD
 size_t scan_gfx9_avx2_for_testing(const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap)
 {
     return scan_gfx9_avx2(buf, size, out, out_cap);
@@ -392,13 +409,9 @@ size_t scan_gfx9_avx2_for_testing(const uint8_t* buf, size_t size, QuickToken* _
 
 namespace quick_scan
 {
-#if GFX9_QUICK_SCAN_HAS_X86
-size_t scan_gfx9(const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap)
+size_t scan_gfx9(const uint8_t* buf, size_t size, QuickToken* out, size_t out_cap)
 {
     thread_local const gfx9::quick_scan::ScanFn fn = gfx9::quick_scan::select_scanner();
-    if (!fn) throw std::exception();
-
     return fn(buf, size, out, out_cap);
 }
-#endif
 } // namespace quick_scan
