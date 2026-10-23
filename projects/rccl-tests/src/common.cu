@@ -963,6 +963,26 @@ testResult_t completeColl(struct threadArgs* args) {
   return testSuccess;
 }
 
+// Line the ranks up right before a timer starts: a 1-element all-reduce on the
+// test's own communicators and streams, then wait for it. It cannot complete
+// until every rank has joined, so ranks leave it within its completion spread.
+// Barrier() (MPI_Barrier) instead releases ranks only as evenly as MPI's own
+// transport allows; across nodes over TCP that spread lands in the timed loop
+// and inflates small sizes. The operand, args->barrierBuffs, is set up in main().
+static testResult_t collBarrier(struct threadArgs* args) {
+  if (args->nGpus > 1) NCCLCHECK(ncclGroupStart());
+  for (int i = 0; i < args->nGpus; i++) {
+#ifndef NCCL_MAJOR
+    CUDACHECK(cudaSetDevice(args->gpus[i]));
+#endif
+    NCCLCHECK(ncclAllReduce(args->barrierBuffs[i], args->barrierBuffs[i], 1, ncclInt32, ncclMax,
+                            args->comms[i], args->streams[i]));
+  }
+  if (args->nGpus > 1) NCCLCHECK(ncclGroupEnd());
+  TESTCHECK(testStreamSynchronize(args->nGpus, args->streams, args->comms));
+  return testSuccess;
+}
+
 static int getEventCount(int eventIters) {
   return blocking_coll == 3 ? eventIters*2 : eventIters + 1;
 }
@@ -1034,7 +1054,9 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     TESTCHECK(completeColl(args));
   }
 
-  Barrier(args);
+  // Each rank starts its clock right after this, so line the ranks up with a
+  // collective rather than MPI_Barrier (see collBarrier).
+  TESTCHECK(collBarrier(args));
 
   // Device-time-only mode (--device_timing=2): for collectives that provide a
   // device-timing hook, skip the host/graph timed loop entirely and report the
@@ -1130,8 +1152,8 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
 #endif
       CUDACHECK(cudaGraphInstantiate(graphExec.data()+i, graphs[i], NULL, NULL, 0));
     }
-    // Resync CPU, restart timing, launch cuda graph
-    Barrier(args);
+    // Resync ranks (with a collective, see collBarrier), restart timing, launch cuda graph
+    TESTCHECK(collBarrier(args));
     tim.reset();
     for (int l=0; l<cudaGraphLaunches; l++) {
       for (int i=0; i<args->nGpus; i++) {
@@ -2541,6 +2563,7 @@ testResult_t run() {
   std::vector<void*> recvbuffs(nGpus*nThreads);
   std::vector<void*> bias(nGpus*nThreads);
   std::vector<void*> expected(nGpus*nThreads);
+  std::vector<int*> barrierBuffs(nGpus*nThreads, nullptr);
   size_t sendBytes, recvBytes;
 
   ncclTestEngine.getBuffSize(&sendBytes, &recvBytes, (size_t)maxBytes, (size_t)ncclProcs*nGpus*nThreads);
@@ -2556,6 +2579,9 @@ testResult_t run() {
     else {
       CUDACHECK(cudaStreamCreateWithFlags(streams.data()+i, cudaStreamNonBlocking));
     }
+    // collBarrier's all-reduce operand; its value is never used.
+    CUDACHECK(cudaMalloc((void**)&barrierBuffs[i], sizeof(int)));
+    CUDACHECK(cudaMemset(barrierBuffs[i], 0, sizeof(int)));
     int archMajor, archMinor;
     CUDACHECK(cudaDeviceGetAttribute(&archMajor, cudaDevAttrComputeCapabilityMajor, gpus[i]));
     CUDACHECK(cudaDeviceGetAttribute(&archMinor, cudaDevAttrComputeCapabilityMinor, gpus[i]));
@@ -2757,6 +2783,7 @@ testResult_t run() {
     threads[t].args.recvbuffs = recvbuffs.data()+t*nGpus;
     threads[t].args.bias = bias.data()+t*nGpus;
     threads[t].args.expected = expected.data()+t*nGpus;
+    threads[t].args.barrierBuffs = barrierBuffs.data()+t*nGpus;
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
     threads[t].args.devComms = devComms.data()+t*nGpus;
 #endif
@@ -2829,6 +2856,10 @@ testResult_t run() {
     TESTCHECK(destroyTestComms(comms, nGpus*nThreads));
     TESTCHECK(freeTestDeviceBuffers(sendbuffs.data(), recvbuffs.data(), bias.data(), expected.data(),
                                     nGpus*nThreads));
+  }
+  for (int i = 0; i < nGpus*nThreads; i++) {
+    CUDACHECK(cudaSetDevice(gpus[i]));
+    CUDACHECK(cudaFree(barrierBuffs[i]));
   }
   free(comms);
   envstr = getenv("NCCL_TESTS_MIN_BW");
