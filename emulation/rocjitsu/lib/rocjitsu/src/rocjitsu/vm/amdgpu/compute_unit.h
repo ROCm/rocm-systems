@@ -450,10 +450,11 @@ public:
   void set_illegal_inst_handler(IllegalInstHandler cb) { illegal_inst_handler_ = std::move(cb); }
 
   /// @brief Notify a frontend of a non-architectural execution failure.
-  /// @param retain_wave Whether delivery may retain the wave; false before dispatch abort.
   /// @returns True if the frontend owns queue-error delivery.
-  /// @details The engine retains its nonzero exit status regardless of ownership.
-  using ExecutionFailureHandler = std::function<bool(Wavefront &wf, bool retain_wave)>;
+  /// @details Delivery must not retain the wave, which is cancelled before
+  /// deferred notification. The engine retains its nonzero exit status
+  /// regardless of notification ownership.
+  using ExecutionFailureHandler = std::function<bool(Wavefront &wf)>;
   void set_execution_failure_handler(ExecutionFailureHandler cb) {
     execution_failure_handler_ = std::move(cb);
   }
