@@ -49,6 +49,7 @@ def torch_trace_coverage_sampling(request):
 
 def test_random_operator_kernel_coverage(
     request,
+    tmp_path,
     binary_handler_profile_rocprof_compute,
     torch_trace_coverage_sampling,
 ):
@@ -79,23 +80,15 @@ def test_random_operator_kernel_coverage(
         len(excluded_aten_ops),
     )
 
-    ground_truth_dir = common.get_output_dir(
-        param_id=common.unique_output_param_id("torch_trace_gt"),
-        suffix="_tmp",
-        clean_existing=True,
-    )
     workload_dir = common.get_output_dir(
         param_id=common.unique_output_param_id("random_op_coverage"),
         clean_existing=True,
     )
-    Path(ground_truth_dir).mkdir(parents=True, exist_ok=True)
     Path(workload_dir).mkdir(parents=True, exist_ok=True)
 
-    ground_truth_path = str(Path(ground_truth_dir) / "ground_truth.json")
-    workload_script_path = str(Path(ground_truth_dir) / "coverage_workload.py")
-    ground_truth_runner_script_path = str(
-        Path(ground_truth_dir) / "coverage_ground_truth_runner.py"
-    )
+    ground_truth_path = str(tmp_path / "ground_truth.json")
+    workload_script_path = str(tmp_path / "coverage_workload.py")
+    ground_truth_runner_script_path = str(tmp_path / "coverage_ground_truth_runner.py")
 
     try:
         coverage_utils.write_coverage_workload_artifacts(
@@ -197,8 +190,4 @@ def test_random_operator_kernel_coverage(
         common.clean_output_dir(
             COVERAGE_TEST_CONFIG["cleanup"],
             workload_dir,
-        )
-        common.clean_output_dir(
-            COVERAGE_TEST_CONFIG["cleanup"],
-            ground_truth_dir,
         )
