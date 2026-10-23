@@ -719,7 +719,7 @@ static HSAKMT_STATUS init_vars_from_env(void) {
     std::string devices(envvar);
     size_t first_num_pos = devices.find_first_of("0123456789");
     if (first_num_pos != std::string::npos) {
-      dxg_runtime->default_node = std::stoi(devices.substr(first_num_pos));
+      dxg_runtime->visible_gpu_index = std::stoi(devices.substr(first_num_pos));
     }
   }
 
