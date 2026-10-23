@@ -436,6 +436,17 @@ class VirtualGPU : public device::VirtualDevice {
         dyn_data_prefetch_enabled_ = false;
       }
 
+      //! Set the per-dispatch CU enable override (packed cu_enable DWORD)
+      void SetCUEnableOverride(uint32_t cu_enable_packed) {
+        cu_enable_override_active_ = true;
+        cu_enable_override_ = cu_enable_packed;
+      }
+
+      //! Reset the per-dispatch CU enable override after dispatch
+      void ClearCUEnableOverride() {
+        cu_enable_override_active_ = false;
+      }
+
       //! Whether the current queue has a valid metadata ring buffer. This is the
       //! single gate for all metadata work: the ring base is an optional resource
       //! provided by ROCr/firmware (HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_RING_BUFFER)
@@ -551,6 +562,8 @@ class VirtualGPU : public device::VirtualDevice {
       uint8_t dyn_data_prefetch_hints_ = 0;
       uint32_t dyn_data_prefetch_num_regions_ = 0;
       amd::DynDataPrefetchRegion dyn_data_prefetch_regions_[amd::kDynDataPrefetchMaxRegions] = {};
+      bool cu_enable_override_active_ = false;
+      uint32_t cu_enable_override_ = 0;
   };
 
   VirtualGPU(Device& device, bool profiling = false, bool cooperative = false,

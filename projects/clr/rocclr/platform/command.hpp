@@ -55,6 +55,13 @@ struct DynDataPrefetchConfig {
   bool isEnabled() const { return numRegions > 0; }
 };
 
+struct CUEnableConfig {
+  uint32_t cu_start = 0;
+  uint32_t cu_count = 0;
+  uint32_t se_en = 0;
+  bool isEnabled() const { return se_en != 0; }
+};
+
 /*! \addtogroup Runtime
  *  @{
  *
@@ -1593,6 +1600,7 @@ class NDRangeKernelCommand : public Command {
   uint32_t firstDevice_;     //!< Device index of the first device in the gridc
   uint32_t numWorkgroups_;   //!< Total number of workgroups in the current launch
   DynDataPrefetchConfig dynDataPrefetchConfig_;  //!< Dynamic data prefetch configuration
+  CUEnableConfig cuEnableConfig_;  //!< Per-dispatch CU enable configuration
 
  public:
   enum {
@@ -1658,6 +1666,9 @@ class NDRangeKernelCommand : public Command {
 
   const DynDataPrefetchConfig& dynDataPrefetchConfig() const { return dynDataPrefetchConfig_; }
   void setDynDataPrefetchConfig(const DynDataPrefetchConfig& cfg) { dynDataPrefetchConfig_ = cfg; }
+
+  const CUEnableConfig& cuEnableConfig() const { return cuEnableConfig_; }
+  void setCUEnableConfig(const CUEnableConfig& cfg) { cuEnableConfig_ = cfg; }
 
   //! Set the number of workgroups
   void setNumWorkgroups() {
