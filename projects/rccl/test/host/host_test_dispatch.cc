@@ -40,6 +40,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+extern char **environ;
+
 namespace rccl_host_dispatch {
 
 namespace fs = std::filesystem;
@@ -651,8 +653,14 @@ void applyOutputSpec(std::string_view value, Options *options)
 // qualified names would select nothing in any of them while this process still asked for every
 // case. Taken here it is a default for the dispatcher's own filter, resolved over the published
 // names like a --gtest_filter flag, and clearConsumedEnvironment() keeps it from the children.
+// gtest's rule for a boolean GTEST_ variable: set and not "0" is true.
+bool environmentFlagIsSet(std::string_view value)
+{
+    return !value.empty() && value != "0";
+}
+
 Options parseArgs(const std::vector<std::string> &args, std::string_view outputEnv = "",
-                  std::string_view filterEnv = "")
+                  std::string_view filterEnv = "", std::string_view disabledEnv = "")
 {
     constexpr std::string_view kFilterFlag = "--gtest_filter=";
     constexpr std::string_view kOutputFlag = "--gtest_output=";
@@ -663,6 +671,13 @@ Options parseArgs(const std::vector<std::string> &args, std::string_view outputE
     }
     if (!filterEnv.empty()) {
         options.filter = std::string(filterEnv);   // an explicit flag below overrides this
+    }
+    if (environmentFlagIsSet(disabledEnv)) {
+        // Acted on AND forwarded, exactly as the flag is: the selection here has to include the
+        // DISABLED_ cases, and each child has to be told to run the ones it is handed. Without
+        // this, a binary sent a name list would skip them while one sent "*" ran them.
+        options.alsoRunDisabled = true;
+        options.passthrough.emplace_back("--gtest_also_run_disabled_tests");
     }
     for (const std::string &arg : args) {
         if (isHelpFlag(arg)) {
@@ -675,8 +690,10 @@ Options parseArgs(const std::vector<std::string> &args, std::string_view outputE
         } else if (arg == "--gtest_also_run_disabled_tests") {
             // Acted on AND forwarded: the children need it to run their DISABLED_ cases, and
             // the filter resolution here needs it to select them in the first place.
+            if (!options.alsoRunDisabled) {   // the environment may have added it already
+                options.passthrough.push_back(arg);
+            }
             options.alsoRunDisabled = true;
-            options.passthrough.push_back(arg);
         } else if (startsWith(arg, kFilterFlag)) {
             options.filter = arg.substr(kFilterFlag.size());
         } else if (startsWith(arg, kOutputFlag)) {
@@ -744,6 +761,132 @@ std::vector<std::string> discoverBinaries(const std::string &directory, const st
     return binaries;
 }
 
+// ── the gtest environment the children are given ────────────────────
+//
+// gtest configures itself from GTEST_* variables as well as from flags, and a dispatcher sits in
+// the one place where that is dangerous: this process reads them too. Each variable is therefore
+// one of two things, and the table below says which.
+//
+//   Consume  this process acts on it, and re-expresses the decision as an explicit per-child
+//            flag. A child that saw the variable as well would act on it a SECOND time, over a
+//            case list that has already been narrowed -- running a fraction of what it was told
+//            to run, and exiting 0 for it.
+//   Forward  the variable means the same thing in a child as it does here and changes nothing
+//            about which cases run, so the children keep it.
+//
+// An unknown GTEST_* variable is consumed, which is the safe default of the two: a variable a
+// future gtest adds then costs a redundant strip and a line on stderr, where inheriting it could
+// silently cost coverage. Nothing here needs updating for gtest to stay correct -- the table only
+// buys back the forwarding of variables we have decided are harmless.
+enum class Disposition { Consume, Forward };
+
+constexpr std::string_view kGtestVariablePrefix = "GTEST_";
+
+constexpr struct {
+    std::string_view name;
+    Disposition how;
+} kGtestVariables[] = {
+    // Resolved here over the published, qualified names; each child is handed its cases by name.
+    {"GTEST_FILTER", Disposition::Consume},
+    // Becomes the destination of the merged report; each child writes the report directory.
+    {"GTEST_OUTPUT", Disposition::Consume},
+    // Decides the selection here, so a child must not re-decide it for the list it is handed.
+    {"GTEST_ALSO_RUN_DISABLED_TESTS", Disposition::Consume},
+    // Sharding happens once, over the published names. A child that sharded its own list again
+    // would run 1/N of it, so the run as a whole would cover 1/N of the tree and still be green.
+    // test/common/ProcessIsolatedTestRunner.cpp keeps these from its own forks for the same
+    // reason.
+    {"GTEST_TOTAL_SHARDS", Disposition::Consume},
+    {"GTEST_SHARD_INDEX", Disposition::Consume},
+    {"GTEST_SHARD_STATUS_FILE", Disposition::Consume},
+    // Presentation and repetition: identical meaning in a child, and no effect on the selection.
+    {"GTEST_COLOR", Disposition::Forward},
+    {"GTEST_BRIEF", Disposition::Forward},
+    {"GTEST_PRINT_TIME", Disposition::Forward},
+    {"GTEST_PRINT_UTF8", Disposition::Forward},
+    {"GTEST_REPEAT", Disposition::Forward},
+    {"GTEST_SHUFFLE", Disposition::Forward},
+    {"GTEST_RANDOM_SEED", Disposition::Forward},
+    {"GTEST_FAIL_FAST", Disposition::Forward},
+    {"GTEST_BREAK_ON_FAILURE", Disposition::Forward},
+    {"GTEST_THROW_ON_FAILURE", Disposition::Forward},
+    {"GTEST_CATCH_EXCEPTIONS", Disposition::Forward},
+    {"GTEST_DEATH_TEST_STYLE", Disposition::Forward},
+    {"GTEST_STACK_TRACE_DEPTH", Disposition::Forward},
+};
+
+// Whether *name* is a GTEST_ variable the table names as harmless to inherit.
+bool isForwardedVariable(std::string_view name)
+{
+    for (const auto &entry : kGtestVariables) {
+        if (entry.name == name) {
+            return entry.how == Disposition::Forward;
+        }
+    }
+    return false;   // unknown: consumed, per the fail-closed default above
+}
+
+// Whether *name* is a GTEST_ variable the table does not name at all.
+bool isUnknownGtestVariable(std::string_view name)
+{
+    if (!startsWith(name, kGtestVariablePrefix)) {
+        return false;
+    }
+    return std::none_of(std::begin(kGtestVariables), std::end(kGtestVariables),
+                        [name](const auto &entry) { return entry.name == name; });
+}
+
+// The GTEST_ variables currently set that a child must not see, in the environment's order.
+//
+// Read from the live environment rather than from the table, so a variable this build has never
+// heard of is still found and still stripped.
+std::vector<std::string> gtestVariablesToStrip()
+{
+    std::vector<std::string> names;
+    for (char **entry = environ; entry != nullptr && *entry != nullptr; ++entry) {
+        const std::string_view assignment(*entry);
+        const size_t equals = assignment.find('=');
+        if (equals == std::string_view::npos) {
+            continue;
+        }
+        const std::string_view name = assignment.substr(0, equals);
+        if (startsWith(name, kGtestVariablePrefix) && !isForwardedVariable(name)) {
+            names.emplace_back(name);
+        }
+    }
+    return names;
+}
+
+// Drop those variables from THIS process's environment.
+//
+// Called between fork() and exec() in the children, never in the dispatcher: the dispatcher goes
+// on using the originals after the first fork -- resolveFilter() shards over them -- and a child
+// owns its own copy of the environment, so stripping there cannot reach back. Putting it at the
+// fork sites is what makes the guarantee unconditional: there is no ordering in main() to get
+// right, and a fork site added later gets it by construction.
+void stripGtestVariablesInChild(const std::vector<std::string> &names)
+{
+    for (const std::string &name : names) {
+        unsetenv(name.c_str());
+    }
+}
+
+// Name on stderr any GTEST_ variable being stripped only because the table has not heard of it.
+//
+// The strip is the safe choice, but it is a choice made without knowing what the variable does,
+// so it is said out loud rather than left to be discovered as missing coverage.
+void warnAboutUnknownGtestVariables(const std::vector<std::string> &names)
+{
+    for (const std::string &name : names) {
+        if (isUnknownGtestVariable(name)) {
+            fmt::print(stderr,
+                       "host-test-dispatch: {} is not a variable this build knows; keeping it"
+                       " from the children rather than risk it narrowing their runs\n",
+                       name);
+        }
+    }
+}
+
 // *argument* quoted for a /bin/sh command line.
 std::string shellQuote(const std::string &argument)
 {
@@ -766,7 +909,15 @@ std::string shellQuote(const std::string &argument)
 // for the former. See enumerate().
 std::optional<std::string> listTestsOutput(const std::string &path)
 {
-    const std::string command = fmt::format("{} --gtest_list_tests 2>/dev/null", shellQuote(path));
+    // The listing children are fork sites like any other, so they get the same stripped
+    // environment. popen() hands them this process's one, which must keep its originals, so the
+    // strip is expressed to the shell instead -- same list, same guarantee.
+    std::string unset;
+    for (const std::string &name : gtestVariablesToStrip()) {
+        unset += fmt::format("-u {} ", shellQuote(name));
+    }
+    const std::string command =
+        fmt::format("env {}{} --gtest_list_tests 2>/dev/null", unset, shellQuote(path));
     std::unique_ptr<FILE, int (*)(FILE *)> pipe(popen(command.c_str(), "r"), pclose);
     if (pipe == nullptr) {
         return std::nullopt;
@@ -822,51 +973,6 @@ Enumeration enumerate(const std::string &directory, const std::vector<std::strin
     return enumeration;
 }
 
-// The variables gtest sharding is driven by. Cleared from the environment the children
-// inherit; see clearShardingEnvironment().
-constexpr std::string_view kShardingVariables[] = {"GTEST_TOTAL_SHARDS", "GTEST_SHARD_INDEX",
-                                                   "GTEST_SHARD_STATUS_FILE"};
-
-// Drop the sharding variables, so the children run what they are told and nothing less.
-//
-// Sharding has to happen once, and it already has: this process resolved the caller's shard
-// over the published names, and each child is then handed its cases BY NAME. A child that still
-// saw these variables would shard that exact list a second time and run a fraction of it -- for
-// N shards the run as a whole covers 1/N of the tree instead of all of it, and every shard
-// still exits 0. test/common/ProcessIsolatedTestRunner.cpp clears them before its own forks for
-// the same reason.
-//
-// Called after the filter resolution above, which is the legitimate use of these variables.
-void clearShardingEnvironment()
-{
-    for (const std::string_view variable : kShardingVariables) {
-        unsetenv(std::string(variable).c_str());
-    }
-}
-
-// The variables parseArgs() has already acted on, and which must not reach a child.
-constexpr std::string_view kConsumedVariables[] = {"GTEST_FILTER", "GTEST_OUTPUT"};
-
-// Drop the variables this process has consumed, so no child acts on them a second time.
-//
-// GTEST_FILTER was resolved over the published, qualified names; each child is then handed its
-// cases by name. A child that still saw the variable would apply it again to its own unqualified
-// listing and run a subset of what it was told to run -- or nothing at all, silently and green.
-//
-// GTEST_OUTPUT is the caller's report destination, and every child is given an explicit
-// --gtest_output pointing into the report directory instead. A child that still saw the variable
-// would write to the caller's path as well -- and the enumeration children would do it in
-// list mode, since gtest writes a listing report when --gtest_list_tests and an output are both
-// set, so the caller's file would hold one sibling's listing (or a directory of ~40 of them).
-//
-// Called before enumerate(), since the --gtest_list_tests children see this environment too.
-void clearConsumedEnvironment()
-{
-    for (const std::string_view variable : kConsumedVariables) {
-        unsetenv(std::string(variable).c_str());
-    }
-}
-
 // Run *path* with *args*, inheriting stdio, and return its exit status (128+signal if killed).
 int runChild(const std::string &path, const std::vector<std::string> &args)
 {
@@ -877,12 +983,19 @@ int runChild(const std::string &path, const std::vector<std::string> &args)
     }
     argv.push_back(nullptr);
 
+    // Collected before the fork: it reads the environment, which is cheaper and simpler to do
+    // here than in the narrow async-signal-safe window after it.
+    const std::vector<std::string> strip = gtestVariablesToStrip();
+
     const pid_t pid = fork();
     if (pid < 0) {
         fmt::print(stderr, "host-test-dispatch: fork failed: {}\n", std::strerror(errno));
         return 1;
     }
     if (pid == 0) {
+        // In the child, on its own copy of the environment: what the dispatcher has already
+        // decided must not be decided again over the case list this child was handed.
+        stripGtestVariablesInChild(strip);
         execv(path.c_str(), argv.data());
         fmt::print(stderr, "host-test-dispatch: exec {} failed: {}\n", path,
                    std::strerror(errno));
@@ -1005,8 +1118,11 @@ int main(int argc, char **argv)
     const std::vector<std::string> args(argv + 1, argv + argc);
     const char *outputEnv = std::getenv("GTEST_OUTPUT");
     const char *filterEnv = std::getenv("GTEST_FILTER");
+    const char *disabledEnv = std::getenv("GTEST_ALSO_RUN_DISABLED_TESTS");
     const Options options = parseArgs(args, outputEnv == nullptr ? "" : outputEnv,
-                                      filterEnv == nullptr ? "" : filterEnv);
+                                      filterEnv == nullptr ? "" : filterEnv,
+                                      disabledEnv == nullptr ? "" : disabledEnv);
+    warnAboutUnknownGtestVariables(gtestVariablesToStrip());
 
     const std::string directory = selfDirectory(argv[0]);
 
@@ -1052,9 +1168,6 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    // Before the first fork: the --gtest_list_tests children inherit this environment too.
-    clearConsumedEnvironment();
-
     const Enumeration enumeration = enumerate(directory, binaries, listTestsOutput);
     for (const std::string &binary : enumeration.unlistable) {
         fmt::print(stderr, "host-test-dispatch: {} could not list its tests\n", binary);
@@ -1093,8 +1206,6 @@ int main(int argc, char **argv)
                    std::strerror(errno));
         return 1;
     }
-
-    clearShardingEnvironment();
 
     std::vector<SuiteFragment> fragments;
     std::vector<std::string> ran;
