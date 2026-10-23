@@ -115,6 +115,9 @@ struct triple_buffer_producer_data_t
     std::unique_ptr<hsa::TraceControlAQLPacket>  control_packet{};
     std::shared_ptr<triple_buffer_shared_data_t> shared{};
     size_t                                       num_shader_engines{0};
+    /// On a GPU buffer overflow, stop, drain and restart the trace as on a CPU overflow.
+    /// Otherwise the queue is disabled.
+    bool restart_on_gpu_full{false};
 
     std::vector<std::unique_ptr<hsa::SQTTBufferingPackets>> buffer_packets{};
 
