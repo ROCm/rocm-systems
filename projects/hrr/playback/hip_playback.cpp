@@ -4559,6 +4559,31 @@ static bool memcpy3d_h2d_src(PlaybackContext& ctx, const char* api, uint64_t has
     return true;
 }
 
+// hipMemcpy3D reads srcArray / dstArray as array handles, and CLR dereferences
+// them to size the element and the layered layout, so a recorded address must
+// never reach it. A recorded array becomes the live one; a handle replay never
+// created (array creation APIs other than hipArrayCreate / hipArray3DCreate are
+// not replayed) is refused by name.
+bool hrr_translate_memcpy3d_arrays(const PlaybackContext& ctx, const char* api,
+                                   hipMemcpy3DParms& parms) {
+    struct Side { const char* what; hipArray_t* arr; };
+    for (const Side& s : {Side{"source", &parms.srcArray},
+                          Side{"destination", &parms.dstArray}}) {
+        if (!*s.arr) continue;
+        const uint64_t rec = reinterpret_cast<uint64_t>(*s.arr);
+        hipArray_t live = ctx.translate_array(rec);
+        if (!live) {
+            fprintf(stderr,
+                    "[HRR] %s: the %s array 0x%llx was not created at replay, so the "
+                    "copy is refused rather than hand a recorded address to HIP\n",
+                    api, s.what, (unsigned long long)rec);
+            return false;
+        }
+        *s.arr = live;
+    }
+    return true;
+}
+
 // hipMemcpy3D runs on the legacy default stream and hipMemcpy3D_spt on this
 // thread's, so an _spt event is reissued as _spt or it can be reordered against
 // work replayed on the per-thread stream.
@@ -4567,6 +4592,8 @@ static hipError_t replay_memcpy3d(PlaybackContext& ctx, const uint8_t* pl, bool 
     hipMemcpy3DParms parms{};
     std::memcpy(&parms, a->parms_bytes, sizeof(parms));
     hipError_t (*const copy)(const hipMemcpy3DParms*) = spt ? hipMemcpy3D_spt : hipMemcpy3D;
+    if (!hrr_translate_memcpy3d_arrays(ctx, spt ? "hipMemcpy3D_spt" : "hipMemcpy3D", parms))
+        return hipErrorInvalidValue;
 
     if (parms.kind == hipMemcpyHostToDevice) {
         if (!memcpy3d_h2d_src(ctx, "hipMemcpy3D", a->blob_hash_lo, a->blob_hash_hi, parms))
@@ -4617,6 +4644,9 @@ static hipError_t replay_memcpy3d_async(PlaybackContext& ctx, const uint8_t* pl,
     const auto* a = reinterpret_cast<const hrr_args_hipMemcpy3DAsync*>(pl);
     hipMemcpy3DParms parms{};
     std::memcpy(&parms, a->parms_bytes, sizeof(parms));
+    if (!hrr_translate_memcpy3d_arrays(
+            ctx, spt ? "hipMemcpy3DAsync_spt" : "hipMemcpy3DAsync", parms))
+        return hipErrorInvalidValue;
     hipStream_t stream = memcpy3d_async_stream(ctx, a->stream, spt);
 
     if (parms.kind == hipMemcpyHostToDevice) {
