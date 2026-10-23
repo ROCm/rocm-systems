@@ -24,7 +24,8 @@ std::set<std::filesystem::path> collect_source_paths_from_comment(std::string co
     translator->add_symbols(1, {{"name0", 0x10, 0x1000, 1}});
     translator->add_instruction({"inst0", std::move(comment), 0x1000, 0x10, 1});
 
-    collector->finalize(*writer);
+    collector->on_kernel_symbol_register(1, 1, "name0");
+    collector->finalize(*writer, {1});
     return collector->get_source_paths();
 }
 }  // namespace
@@ -60,7 +61,9 @@ TEST_F(test_pc_sampling_collector_t, ProvidedCodeObjects_WritesTheirIds)
 {
     m_pc_sampling_collector->on_code_object_load(m_file_info);
     m_pc_sampling_collector->on_code_object_load(m_mem_info);
-    m_pc_sampling_collector->finalize(*m_writer);
+    m_translator->add_symbols(m_file_info.code_object_id, {{"name0", 0, 0, 0}});
+    m_translator->add_symbols(m_mem_info.code_object_id, {{"name2", 0, 0, 0}});
+    m_pc_sampling_collector->finalize(*m_writer, {1, 2, 3, 4});
     EXPECT_EQ(m_writer->get_start_code_obj_ids().size(), 2);
     EXPECT_EQ(m_writer->get_end_code_obj_count(), 2);
     EXPECT_EQ(m_writer->get_start_code_obj_ids()[0], m_file_info.code_object_id);
@@ -75,7 +78,7 @@ TEST_F(test_pc_sampling_collector_t, ProvidedCodeObjectSymbols_WritesThem)
     const std::vector<symbol_t> symbols1 = {{"name2", 0x11, 0x1001, 1}, {"name3", 0x21, 0x2001, 0x61}};
     m_translator->add_symbols(m_file_info.code_object_id, symbols0);
     m_translator->add_symbols(m_mem_info.code_object_id, symbols1);
-    m_pc_sampling_collector->finalize(*m_writer);
+    m_pc_sampling_collector->finalize(*m_writer, {1, 2, 3, 4});
     EXPECT_EQ(m_writer->get_symbol_descriptions().size(), 4);
     EXPECT_EQ(m_writer->get_symbol_descriptions()[0].name, symbols0[0].name);
     EXPECT_EQ(m_writer->get_symbol_descriptions()[1].name, symbols0[1].name);
@@ -98,7 +101,7 @@ TEST_F(test_pc_sampling_collector_t, ProvidedSymbolInstructions_WritesThem)
                                   0x1003,
                                   {"inst2", "comment2", 0x1003, 0x13, 1});
 
-    m_pc_sampling_collector->finalize(*m_writer);
+    m_pc_sampling_collector->finalize(*m_writer, {1, 2, 3, 4});
 
     const std::vector<std::pair<size_t, uint64_t>> expected_requests = {
         {m_file_info.code_object_id, 0x1000},
@@ -124,7 +127,7 @@ TEST_F(test_pc_sampling_collector_t, ProvidedSymbolInstructionSizeZero_Throws)
     const instruction_t instruction = {"inst0", "comment0", 0x1000, 0x10, 0};
     m_translator->add_instruction(instruction);
 
-    EXPECT_THROW(m_pc_sampling_collector->finalize(*m_writer), std::runtime_error);
+    EXPECT_THROW(m_pc_sampling_collector->finalize(*m_writer, {1, 2, 3, 4}), std::runtime_error);
 }
 
 TEST(test_pc_sampling_collector_source_paths_t, ProvidedEmptyComment_ReturnsNoPaths)
@@ -221,10 +224,92 @@ TEST_F(test_pc_sampling_collector_t, ProvidedSymbolsAndInstructions_CollectsDedu
                                   0x3000,
                                   {"inst3", "other.cpp:?", 0x3000, 0x30, 1});
 
-    m_pc_sampling_collector->finalize(*m_writer);
+    m_pc_sampling_collector->finalize(*m_writer, {1, 2, 3, 4});
 
     const std::set<std::filesystem::path> expected_paths = {"header.h", "kernel.cpp", "other.cpp"};
     EXPECT_EQ(m_pc_sampling_collector->get_source_paths(), expected_paths);
+}
+
+TEST_F(test_pc_sampling_collector_t, OnlyOneSymbolDispatched_OmitsOtherSymbolsObjectsAndSources)
+{
+    m_pc_sampling_collector->on_code_object_load(m_file_info);
+    m_pc_sampling_collector->on_code_object_load(m_mem_info);
+    m_translator->add_symbols(m_file_info.code_object_id,
+                              {{"name0", 0x10, 0x1000, 1}, {"name1", 0x20, 0x2000, 1}});
+    m_translator->add_symbols(m_mem_info.code_object_id, {{"name0", 0x30, 0x3000, 1}});
+    m_translator->set_instruction(m_file_info.code_object_id,
+                                  0x1000,
+                                  {"kept", "kept.cpp:42", 0x1000, 0x10, 1});
+    m_translator->set_instruction(m_file_info.code_object_id,
+                                  0x2000,
+                                  {"dropped", "dropped.cpp:7", 0x2000, 0x20, 0});
+    m_translator->set_instruction(m_mem_info.code_object_id,
+                                  0x3000,
+                                  {"dropped", "other.cpp:7", 0x3000, 0x30, 0});
+
+    m_pc_sampling_collector->finalize(*m_writer, {1});
+
+    EXPECT_EQ(m_writer->get_start_code_obj_ids(), std::vector<size_t>{m_file_info.code_object_id});
+    ASSERT_EQ(m_writer->get_symbol_descriptions().size(), 1);
+    EXPECT_EQ(m_writer->get_symbol_descriptions()[0].name, "name0");
+    EXPECT_EQ(m_translator->get_instruction_requests().size(), 1);
+    EXPECT_EQ(m_pc_sampling_collector->get_source_paths(), std::set<std::filesystem::path>{"kept.cpp"});
+}
+
+TEST_F(test_pc_sampling_collector_t, UnknownOrInvalidKeys_WritesNothing)
+{
+    m_pc_sampling_collector->on_code_object_load(m_file_info);
+    m_translator->add_symbols(m_file_info.code_object_id, {{"name0", 0x10, 0x1000, 1}});
+    m_pc_sampling_collector->on_kernel_symbol_register(5, m_file_info.code_object_id, "");
+    m_pc_sampling_collector->on_kernel_symbol_register(6, ROCPROFILER_CODE_OBJECT_ID_NONE, "name0");
+    m_pc_sampling_collector->on_kernel_symbol_register(7, 12345, "name0");
+
+    EXPECT_NO_THROW(m_pc_sampling_collector->finalize(*m_writer, {5, 6, 7, 999}));
+    EXPECT_TRUE(m_writer->get_start_code_obj_ids().empty());
+    EXPECT_TRUE(m_translator->get_instruction_requests().empty());
+    EXPECT_TRUE(m_pc_sampling_collector->get_source_paths().empty());
+}
+
+TEST_F(test_pc_sampling_collector_t, RepeatedRegistration_KeepsLatestKeyOnly)
+{
+    m_pc_sampling_collector->on_code_object_load(m_file_info);
+    m_pc_sampling_collector->on_code_object_load(m_mem_info);
+    m_translator->add_symbols(m_file_info.code_object_id, {{"name0", 0, 0, 0}});
+    m_translator->add_symbols(m_mem_info.code_object_id, {{"name2", 0, 0, 0}});
+    m_pc_sampling_collector->on_kernel_symbol_register(1, m_mem_info.code_object_id, "name2");
+
+    m_pc_sampling_collector->finalize(*m_writer, {1});
+
+    EXPECT_EQ(m_writer->get_start_code_obj_ids(), std::vector<size_t>{m_mem_info.code_object_id});
+    ASSERT_EQ(m_writer->get_symbol_descriptions().size(), 1);
+    EXPECT_EQ(m_writer->get_symbol_descriptions()[0].name, "name2");
+}
+
+TEST_F(test_pc_sampling_collector_t, LoadedObjectsWithoutDispatches_WritesNothing)
+{
+    m_pc_sampling_collector->on_code_object_load(m_file_info);
+    m_translator->add_symbols(m_file_info.code_object_id, {{"name0", 0x10, 0x1000, 1}});
+    m_pc_sampling_collector->finalize(*m_writer, {});
+    EXPECT_TRUE(m_writer->get_start_code_obj_ids().empty());
+    EXPECT_TRUE(m_translator->get_instruction_requests().empty());
+}
+
+TEST_F(test_pc_sampling_collector_t, SupportedLoads_DetectsCodeObjectPresence)
+{
+    EXPECT_FALSE(m_pc_sampling_collector->has_code_objects());
+    auto unsupported         = m_file_info;
+    unsupported.storage_type = ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_NONE;
+    m_pc_sampling_collector->on_code_object_load(unsupported);
+    EXPECT_FALSE(m_pc_sampling_collector->has_code_objects());
+    m_pc_sampling_collector->on_code_object_load(m_file_info);
+    EXPECT_TRUE(m_pc_sampling_collector->has_code_objects());
+}
+
+TEST_F(test_pc_sampling_collector_t, MemoryLoad_DetectsCodeObjectPresence)
+{
+    EXPECT_FALSE(m_pc_sampling_collector->has_code_objects());
+    m_pc_sampling_collector->on_code_object_load(m_mem_info);
+    EXPECT_TRUE(m_pc_sampling_collector->has_code_objects());
 }
 
 void test_pc_sampling_collector_t::SetUp()
@@ -246,4 +331,9 @@ void test_pc_sampling_collector_t::SetUp()
     m_file_info.code_object_id = 222;
     m_file_info.load_base      = 0x1000;
     m_file_info.load_size      = 0x2000;
+
+    m_pc_sampling_collector->on_kernel_symbol_register(1, m_file_info.code_object_id, "name0");
+    m_pc_sampling_collector->on_kernel_symbol_register(2, m_file_info.code_object_id, "name1");
+    m_pc_sampling_collector->on_kernel_symbol_register(3, m_mem_info.code_object_id, "name2");
+    m_pc_sampling_collector->on_kernel_symbol_register(4, m_mem_info.code_object_id, "name3");
 }
