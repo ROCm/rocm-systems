@@ -110,7 +110,7 @@
       "args": "--gtest_filter=GinMPIDeviceTests.BarrierFence_*"
     },
     {
-      "_comment": "Proxy (NCCL_GIN_TYPE=2) reports strong-signal support, so the same filter reaches strongBarrierSignal. Anvil keeps that arm off.",
+      "_comment": "Proxy (NCCL_GIN_TYPE=2) reports strong-signal support, so the same filter reaches strongBarrierSignal. Anvil keeps that arm off. Skips on hosts without a GIN-capable NIC.",
       "name": "rccl-gin-mpi-barrier-fence-proxy",
       "kind": "mpi-fixtures",
       "bin": "rccl-UnitTestsMPI",

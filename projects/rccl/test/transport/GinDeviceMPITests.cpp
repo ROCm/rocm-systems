@@ -2066,6 +2066,7 @@ void GinMPIDeviceTests::runBarrierFenceVisibility(
     GTEST_SKIP() << "Requires exactly 2 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t comm = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
 
@@ -2154,6 +2155,7 @@ TEST_F(GinMPIDeviceTests, BarrierFence_IpcSignalIncMakesPutVisible_SingleNode) {
     GTEST_SKIP() << "Requires exactly 2 ranks";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t comm = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
 
