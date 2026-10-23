@@ -1379,13 +1379,13 @@ static ncclResult_t IbCastQpSharingSenderRegisterPrimary(
 }
 
 // RCCL: one page-aligned block. The side table is appended only when advertising.
-static ncclResult_t IbCastSendCommAllocCts(struct ncclIbSendComm* comm) {
+ncclResult_t IbCastSendCommAllocCts(struct ncclIbSendComm* comm, bool sideTable) {
   size_t bytes = IB_CAST_CTS_FIFO_BYTES;
-  if (IbCastAdvertiseMultiSeg()) bytes += IB_CAST_SEG_LAYOUT_FIFO_BYTES;
+  if (sideTable) bytes += IB_CAST_SEG_LAYOUT_FIFO_BYTES;
   void* region = NULL;
   NCCLCHECK(ncclIbMalloc(&region, bytes));
   comm->ctsFifo = (struct ncclIbSendFifo (*)[NCCL_NET_IB_MAX_RECVS])region;
-  comm->segLayoutFifo = IbCastAdvertiseMultiSeg()
+  comm->segLayoutFifo = sideTable
                             ? (struct ncclIbSegLayout (*)[NCCL_NET_IB_MAX_RECVS])((uint8_t*)region + IB_CAST_CTS_FIFO_BYTES)
                             : NULL;
   return ncclSuccess;
@@ -1430,7 +1430,8 @@ ncclResult_t IbCastConnectImpl(void* ctx, int dev, void* opaqueHandle, void** se
   stage->buffer = NULL;
 
   NCCLCHECK(ncclIbMalloc((void**)&comm, sizeof(struct ncclIbSendComm)));
-  NCCLCHECKGOTO(IbCastSendCommAllocCts(comm), ret, fail); // RCCL: side table only when advertising.
+  NCCLCHECKGOTO(IbCastSendCommAllocCts(comm, IbCastCommAdvertisesMultiSeg(IbCastAdvertiseMultiSeg(), handle->isRMA)),
+                ret, fail); // RCCL: side table only when advertising.
   NCCLCHECKGOTO(IbCastSendCommInit(comm), ret, fail);
   NCCLCHECKGOTO(IbCastStatsInit(&comm->base.stats), ret, fail);
   NCCLCHECKGOTO(ncclSocketInit(&comm->base.sock, &handle->connectAddr, handle->magic, ncclSocketTypeNetIb, NULL, 1),
@@ -1683,7 +1684,7 @@ ib_recv_dev_list:
             (trafficClass != NCCL_NET_TRAFFIC_CLASS_UNDEF) ? trafficClass :
                                                              NCCL_IB_TC_DEFAULT;
   strncpy(meta.devName, mergedDev->devName, MAX_MERGED_DEV_NAME);
-  if (IbCastAdvertiseMultiSeg()) ncclIbSetConnectCaps(meta.devName, sizeof(meta.devName), NCCL_IB_CAP_MULTISEG);
+  if (comm->segLayoutFifo) ncclIbSetConnectCaps(meta.devName, sizeof(meta.devName), NCCL_IB_CAP_MULTISEG);
 
   stage->state = ncclIbCommStateSend;
   stage->offset = 0;
@@ -1709,8 +1710,8 @@ ib_connect:
 
   memcpy(&remMeta, stage->buffer, sizeof(ncclIbConnectionMetadata));
   comm->base.optRecvCompletion = comm->base.optRecvCompletion && remMeta.optRecvCompletion;
-  // With the switch off, ignore the peer's MULTISEG cap so neither side waits on or writes a side table.
-  comm->peerCaps = IbCastAdvertiseMultiSeg() ? ncclIbGetConnectCaps(remMeta.devName, sizeof(remMeta.devName)) : 0;
+  // Without a side table (switch off or RMA), ignore the peer's MULTISEG cap so neither side uses one.
+  comm->peerCaps = comm->segLayoutFifo ? ncclIbGetConnectCaps(remMeta.devName, sizeof(remMeta.devName)) : 0;
 
   // ensure that the remote devices have the same link layer than the local devices used in the connection.
   if (comm->base.vProps.ndevs > 0) {
@@ -2421,7 +2422,9 @@ ib_recv:
 
   /* copy back the received info */
   memcpy(&remMeta, stage->buffer, sizeof(struct ncclIbConnectionMetadata));
-  rComm->peerCaps = IbCastAdvertiseMultiSeg() ? ncclIbGetConnectCaps(remMeta.devName, sizeof(remMeta.devName)) : 0;
+  rComm->peerCaps = IbCastCommAdvertisesMultiSeg(IbCastAdvertiseMultiSeg(), remMeta.isRMA)
+                        ? ncclIbGetConnectCaps(remMeta.devName, sizeof(remMeta.devName))
+                        : 0;
 
   rComm->base.isP2p = remMeta.isP2p;
   rComm->useCtsOffload = IbCastIsCtsOffloadEnabled(remMeta.isP2p) && !remMeta.isRMA;
@@ -2727,7 +2730,8 @@ ib_recv:
   meta.optRecvCompletion = rComm->base.optRecvCompletion;
   rComm->base.optRecvCompletion = rComm->base.optRecvCompletion && remMeta.optRecvCompletion;
   strncpy(meta.devName, mergedDev->devName, MAX_MERGED_DEV_NAME);
-  if (IbCastAdvertiseMultiSeg()) ncclIbSetConnectCaps(meta.devName, sizeof(meta.devName), NCCL_IB_CAP_MULTISEG);
+  if (IbCastCommAdvertisesMultiSeg(IbCastAdvertiseMultiSeg(), remMeta.isRMA))
+    ncclIbSetConnectCaps(meta.devName, sizeof(meta.devName), NCCL_IB_CAP_MULTISEG);
 
   stage->state = ncclIbCommStateSend;
   stage->offset = 0;
