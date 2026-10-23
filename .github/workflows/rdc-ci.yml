@@ -333,6 +333,330 @@ jobs:
         retention-days: 30
 
   # =================================================================
+  #  Sanitizer jobs — the no-GPU tests under ASan, and under UBSan
+  #  Report problems that do not crash, such as reads past a buffer.
+  #  Not gating until repo variable RDC_SANITIZE_GATING is 'true'.
+  # =================================================================
+  rdc_sanitize:
+    name: rdc_sanitize (${{ matrix.sanitizer }})
+    if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) }}
+    runs-on: lstt_ci_runners
+    timeout-minutes: 120
+    continue-on-error: ${{ vars.RDC_SANITIZE_GATING != 'true' }}
+    container: rocm/dev-ubuntu-22.04:7.2
+    strategy:
+      fail-fast: false
+      # One build per sanitizer: in a process with both of GCC's runtimes,
+      # UBSan reports go to stderr instead of to log_path.
+      matrix:
+        include:
+          - sanitizer: address
+            runtime: libasan.so
+            symbol: __asan_report_
+          - sanitizer: undefined
+            runtime: libubsan.so
+            symbol: __ubsan_handle_
+    env:
+      # Absolute paths inside the job container.
+      SANITIZE_PREFIX: /opt/rdc-sanitize
+      SANITIZER_LOGS: /tmp/rdc-sanitizer-logs
+      SANITIZER: ${{ matrix.sanitizer }}
+      SANITIZER_RUNTIME: ${{ matrix.runtime }}
+      SANITIZER_SYMBOL: ${{ matrix.symbol }}
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        sparse-checkout: |
+          projects/amdsmi
+          projects/rdc
+
+    - name: Install build and test tools
+      working-directory: .
+      run: |
+        apt update -y
+        apt install -y \
+          build-essential \
+          ccache \
+          cmake \
+          git \
+          libcap-dev \
+          libdrm-dev \
+          libgflags-dev \
+          libmnl-dev \
+          libnl-3-dev \
+          libnl-genl-3-dev \
+          pkg-config \
+          python3 \
+          python3-pip \
+          rocm-core
+        pip3 install pytest pytest-timeout prometheus_client
+
+    - name: Set the cache date
+      run: echo "TODAY=$(date +%Y_%m_%d)" >> "$GITHUB_ENV"
+
+    # actions/cache saves only when the job succeeds, and this job fails
+    # while there are sanitizer reports, so restore and save separately.
+    # The key names the container image; change it with the image or with
+    # the gRPC build.
+    - name: Restore gRPC
+      id: grpc-cache
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ env.GRPC_ROOT }}
+        key: grpc-${{ env.GRPC_VERSION }}-rocm-dev-ubuntu-22.04-7.2
+
+    - name: Build and install gRPC
+      if: ${{ steps.grpc-cache.outputs.cache-hit != 'true' }}
+      working-directory: .
+      shell: bash
+      run: |
+        set -euo pipefail
+        # The same gRPC as rdc_build: version, submodules and options.
+        git clone --branch "v${GRPC_VERSION}" --depth 1 \
+          https://github.com/grpc/grpc.git /tmp/grpc
+        git -C /tmp/grpc submodule update --init --depth 1 \
+          third_party/abseil-cpp \
+          third_party/boringssl-with-bazel \
+          third_party/cares/cares \
+          third_party/protobuf \
+          third_party/re2 \
+          third_party/zlib
+        cmake -S /tmp/grpc -B /tmp/grpc/build \
+          -DgRPC_INSTALL=ON \
+          -DgRPC_BUILD_TESTS=OFF \
+          -DBUILD_SHARED_LIBS=ON \
+          -DCMAKE_INSTALL_PREFIX="${GRPC_ROOT}" \
+          -DCMAKE_INSTALL_LIBDIR=lib \
+          -DCMAKE_BUILD_TYPE=Release
+        cmake --build /tmp/grpc/build --parallel "$(nproc)"
+        cmake --install /tmp/grpc/build
+
+    - name: Save gRPC
+      if: ${{ steps.grpc-cache.outputs.cache-hit != 'true' }}
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ env.GRPC_ROOT }}
+        key: grpc-${{ env.GRPC_VERSION }}-rocm-dev-ubuntu-22.04-7.2
+
+    - name: Register gRPC libraries
+      working-directory: .
+      run: |
+        echo "${GRPC_ROOT}/lib" > /etc/ld.so.conf.d/grpc.conf
+        ldconfig
+
+    - name: Restore .ccache
+      id: ccache
+      uses: actions/cache/restore@v4
+      with:
+        path: ~/.cache/ccache
+        key: ${{ runner.os }}-rdc-sanitize-${{ matrix.sanitizer }}-ccache-${{ github.ref_name }}-${{ env.TODAY }}
+        restore-keys: |
+          ${{ runner.os }}-rdc-sanitize-${{ matrix.sanitizer }}-ccache-${{ github.ref_name }}-
+          ${{ runner.os }}-rdc-sanitize-${{ matrix.sanitizer }}-ccache-
+
+    - name: Build and install amd-smi
+      working-directory: projects/amdsmi
+      run: |
+        # Without the sanitizers: these tests check RDC, and amd-smi either has
+        # no GPU here or is replaced by the fake amd-smi.
+        cmake -B build \
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
+          -DCMAKE_INSTALL_PREFIX="${ROCM_DIR}" \
+          -DENABLE_ESMI_LIB=ON
+        make -C build -j "$(nproc)"
+        make -C build install
+
+    - name: Build RDC with the sanitizer
+      run: |
+        # GCC links the sanitizer runtime as a shared library, so rdcd, rdci,
+        # the gtests, the fake amd-smi and Python (with LD_PRELOAD below) share
+        # one runtime.
+        flags="-fsanitize=${SANITIZER} -fno-omit-frame-pointer"
+        link="-fsanitize=${SANITIZER}"
+        cmake \
+          -B build-sanitize \
+          -DCMAKE_C_COMPILER=gcc \
+          -DCMAKE_CXX_COMPILER=g++ \
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
+          -DCMAKE_C_FLAGS="${flags}" \
+          -DCMAKE_CXX_FLAGS="${flags}" \
+          -DCMAKE_EXE_LINKER_FLAGS="${link}" \
+          -DCMAKE_SHARED_LINKER_FLAGS="${link}" \
+          -DCMAKE_MODULE_LINKER_FLAGS="${link}" \
+          -DGRPC_DESIRED_VERSION="${GRPC_VERSION}" \
+          -DGRPC_ROOT="${GRPC_ROOT}" \
+          -DBUILD_RUNTIME=OFF \
+          -DBUILD_PROFILER=OFF \
+          -DBUILD_RVS=OFF \
+          -DBUILD_TESTS=ON \
+          -DCMAKE_INSTALL_PREFIX="${SANITIZE_PREFIX}"
+        make -C build-sanitize -j "$(nproc)"
+        make -C build-sanitize install
+        ccache --show-stats
+
+    - name: Save .ccache
+      if: ${{ !cancelled() && steps.ccache.outputs.cache-hit != 'true' }}
+      uses: actions/cache/save@v4
+      with:
+        path: ~/.cache/ccache
+        key: ${{ runner.os }}-rdc-sanitize-${{ matrix.sanitizer }}-ccache-${{ github.ref_name }}-${{ env.TODAY }}
+
+    - name: Check that the sanitizers are active
+      shell: bash
+      run: |
+        set -euo pipefail
+        # A build or environment that drops the sanitizers would pass every
+        # test and write no reports.
+        tmp="$(mktemp -d)"
+        for f in bin/rdcd bin/rdci lib/librdc.so lib/librdc_bootstrap.so \
+                 share/rdc/rdctst_tests/fake_gpu/librdc_fake_amdsmi.so; do
+          # The runtime must be needed and found ("=> /path", not "not found").
+          if ! ldd "${SANITIZE_PREFIX}/${f}" > "${tmp}/ldd" \
+              || ! awk -v r="${SANITIZER_RUNTIME}" \
+                   'index($1, r) == 1 && $3 ~ /^\// { ok = 1 } END { exit !ok }' "${tmp}/ldd"; then
+            echo "${f} is missing or does not load ${SANITIZER_RUNTIME}"
+            exit 1
+          fi
+        done
+        # Linking is not enough: the code must call the checks.
+        nm -D --undefined-only "${SANITIZE_PREFIX}/lib/librdc.so" > "${tmp}/syms"
+        if ! grep -qF "${SANITIZER_SYMBOL}" "${tmp}/syms"; then
+          echo "librdc.so calls no ${SANITIZER_SYMBOL}* checks"
+          exit 1
+        fi
+        runtime="$(gcc -print-file-name="${SANITIZER_RUNTIME}")"
+        test -e "${runtime}" || { echo "no GCC ${SANITIZER_RUNTIME}"; exit 1; }
+        echo "SANITIZER_RUNTIME_PATH=${runtime}" >> "$GITHUB_ENV"
+        # Each leg's runtime must report its own error at log_path: ASan the
+        # read past the array, UBSan the signed overflow. The path is
+        # temporary because a report in SANITIZER_LOGS would count.
+        printf 'int main(int c, char** v) { int s = c + 2147483647; char a[4]; return a[c + 3] + s; }\n' > "${tmp}/c.c"
+        gcc -fsanitize="${SANITIZER}" -O0 -o "${tmp}/c" "${tmp}/c.c"
+        ASAN_OPTIONS="log_path=${tmp}/report" UBSAN_OPTIONS="log_path=${tmp}/report" "${tmp}/c" || true
+        grep -qE 'ERROR: AddressSanitizer|runtime error:' "${tmp}"/report.* \
+          || { echo "the ${SANITIZER} runtime wrote no report to log_path"; exit 1; }
+
+    - name: Run the no-GPU tests under the sanitizers
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p build
+        # Reports from every process, whichever user a test runs it as.
+        install -d -m 1777 "${SANITIZER_LOGS}"
+        export LD_LIBRARY_PATH="${SANITIZE_PREFIX}/lib:${SANITIZE_PREFIX}/lib/rdc:${GRPC_ROOT}/lib:${ROCM_DIR}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+        # Each runtime reads only its own options.
+        # Leak detection is off: Python, which runs the tests with the runtime
+        # preloaded, does not free everything at exit, and rdcd and rdci
+        # inherit its options.
+        # The fake amd-smi, which links the runtime, is preloaded ahead of it
+        # into rdcd, so the runtime cannot insist on loading first.
+        export ASAN_OPTIONS="detect_leaks=0:verify_asan_link_order=0:log_path=${SANITIZER_LOGS}/asan"
+        export UBSAN_OPTIONS="print_stacktrace=1:log_path=${SANITIZER_LOGS}/ubsan"
+        # Python loads RDC's instrumented libraries through ctypes.
+        runtime="${SANITIZER_RUNTIME_PATH}"
+        failed=0
+        ran=0
+        shopt -s nullglob
+        for t in "${SANITIZE_PREFIX}"/share/rdc/rdctst_tests/rdc_*_tests; do
+          name="$(basename "$t")"
+          case "${name}" in
+            rdc_unit_tests) continue ;;         # needs a GPU
+            rdc_diag_kernel_tests) continue ;;  # has no install RPATH
+          esac
+          echo "::group::${name}"
+          timeout -k 30 600 "$t" --gtest_output="xml:build/test-results-sanitize-${name}.xml" || failed=1
+          echo "::endgroup::"
+          ran=$((ran + 1))
+        done
+        # rdc_codec_tests and rdc_client_tests at least.
+        test "${ran}" -ge 2 || { echo "ran ${ran} gtests"; failed=1; }
+        LD_PRELOAD="${runtime}" python3 -m pytest \
+          "${SANITIZE_PREFIX}/share/rdc/rdctst_tests/fake_gpu" \
+          -v --tb=short -p no:cacheprovider --timeout=600 \
+          --junitxml=build/test-results-sanitize-fake-gpu.xml || failed=1
+        ROCM_DIR="${SANITIZE_PREFIX}" LD_PRELOAD="${runtime}" python3 -m pytest \
+          tests/ci --ignore-glob='tests/ci/test_fake_gpu*.py' \
+          -v --tb=short -p no:cacheprovider --timeout=600 \
+          --junitxml=build/test-results-sanitize-nogpu.xml || failed=1
+        exit "${failed}"
+      env:
+        PYTHONDONTWRITEBYTECODE: "1"
+        RDC_TEST_PREFIX: ${{ env.SANITIZE_PREFIX }}
+        RDC_CI_REQUIRE_FAKE: "1"
+        RDC_TEST_TIME_FACTOR: "3"
+
+    - name: Publish test summary
+      if: always()
+      run: python3 tests/ci/junit_summary.py >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Check sanitizer reports
+      if: ${{ !cancelled() }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        # No directory means that no test ran, which is not a clean result.
+        test -d "${SANITIZER_LOGS}" \
+          || { echo "no ${SANITIZER_LOGS}: the tests did not run"; exit 1; }
+        shopt -s nullglob
+        # The runtimes also log warnings; only these lines are errors.
+        errors='ERROR: [A-Za-z]*Sanitizer|CHECK failed:|runtime error:'
+        findings=()
+        for f in "${SANITIZER_LOGS}"/*; do
+          [ -f "$f" ] || continue
+          echo "::group::$(basename "$f")"
+          cat "$f"
+          echo "::endgroup::"
+          if grep -qaE "${errors}" "$f"; then
+            findings+=("$f")
+          fi
+        done
+        # A report that misses log_path lands in output the tests keep, such
+        # as the fake-GPU suite's rdcd.log files.
+        stray=()
+        for d in /tmp/pytest-of-*; do
+          while IFS= read -r f; do
+            stray+=("$f")
+          done < <(grep -rlaE "${errors}" "$d" || true)
+        done
+        {
+          echo "### ${SANITIZER} sanitizer: ${#findings[@]} report files with errors"
+          if [ "${#stray[@]}" -gt 0 ]; then
+            echo "Reports outside ${SANITIZER_LOGS}: ${stray[*]}"
+          fi
+          if [ "${#findings[@]}" -gt 0 ]; then
+            # Each distinct error once, the most frequent first, at most 50.
+            # A report cut short has no SUMMARY line, so its ERROR line
+            # stands in. Numbers after "ERROR:" or "runtime error:" vary, so
+            # they become N; a "==pid==" prefix goes.
+            for f in "${findings[@]}"; do
+              grep -haE 'SUMMARY: AddressSanitizer|CHECK failed:|runtime error:' "$f" \
+                || grep -haE -m1 'ERROR: [A-Za-z]*Sanitizer' "$f" || true
+            done \
+              | sed -E 's/^==[0-9]+==//' \
+              | awk '{ i = index($0, "runtime error:"); if (!i && index($0, "ERROR:") == 1) i = 1; if (i) { t = substr($0, i); gsub(/0x[0-9a-fA-F]+|[0-9]+/, "N", t); $0 = substr($0, 1, i - 1) t } print }' \
+              | sort | uniq -c | sort -rn \
+              | awk 'NR <= 50 { n = $1; $1 = ""; printf "- %d x `%s`\n", n, substr($0, 2) }
+                     END { if (NR > 50) printf "- and %d more\n", NR - 50 }'
+          fi
+        } | tee -a "$GITHUB_STEP_SUMMARY"
+        test "${#findings[@]}" -eq 0 && test "${#stray[@]}" -eq 0
+
+    - name: Upload sanitizer reports and test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: rdc-sanitize-${{ matrix.sanitizer }}-results
+        path: |
+          ${{ env.SANITIZER_LOGS }}
+          projects/rdc/build/test-results-sanitize-*.xml
+        retention-days: 30
+
+  # =================================================================
   #  GPU test job — requires AMD GPU hardware
   #  Enable by setting repo variable: RDC_GPU_TESTS_ENABLED=true
   # =================================================================
