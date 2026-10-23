@@ -9,6 +9,11 @@
 #include "alloc.h"
 #include "bootstrap.h"
 #include "comm.h"
+#if defined(NCCL_OS_WINDOWS)
+#include "gin/gin_host_win_stub.h"
+#else
+#include "gin/gin_host.h"
+#endif
 #include "rma.h" // RCCL: multi-segment RMA registration and the owner-fd table.
 #include "rocmwrap.h"
 #include "transport.h"
@@ -132,6 +137,16 @@ bool rcclDevrRmaRegistersMultiSegment(struct ncclComm* comm, int minGlobalNumSeg
   // and the IB proxy needs the same count on every rank within its MR table.
   return ncclParamMultiSegmentRegister() && comm->rmaState.rmaProxyState.ncclRma == &ncclRmaIbProxy &&
          minGlobalNumSegments == maxGlobalNumSegments && maxGlobalNumSegments <= NCCL_RMA_MAX_SEGMENTS;
+}
+
+bool rcclDevrGinRegistersMultiSegment(struct ncclComm* comm, int minGlobalNumSegments, int maxGlobalNumSegments) {
+  if (!rcclDevrRmaRegistersMultiSegment(comm, minGlobalNumSegments, maxGlobalNumSegments)) return false;
+  // RCCL: the GIN proxy registers through that RMA backend; other GIN backends take the window as one MR.
+  struct ncclGinState* ginState = &comm->sharedRes->ginState;
+  for (int b = 0; b < ginState->numActiveBackends; b++) {
+    if (!ginState->backends[b].closed && ginState->backends[b].ginType != NCCL_GIN_TYPE_PROXY) return false;
+  }
+  return true;
 }
 
 namespace { // RCCL: owner DMA-BUF fds for imported host segments, found by VA at registration.

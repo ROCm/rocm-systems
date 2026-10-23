@@ -1691,7 +1691,8 @@ TEST_F(SymMemoryMapLsaTeamTest, ImportedHostSegment_PublishesOwnerFd) {
   EXPECT_EQ(fcntl(owned, F_GETFD), -1);
 }
 
-// A failed fetch must not leave a live fd, and the map must not continue.
+// A failed fetch must not leave a live fd. The map still joins the barrier its
+// peers wait in, then fails.
 TEST_F(SymMemoryMapLsaTeamTest, OwnerFdFetchFails_FailsMapWithoutKeepingFd) {
   ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
     return std::string(env) == "SYM_REUSE_SYSMEM_HANDLES" ? 1 : deftVal;
@@ -1718,7 +1719,7 @@ TEST_F(SymMemoryMapLsaTeamTest, OwnerFdFetchFails_FailsMapWithoutKeepingFd) {
 
   EXPECT_NE(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
   EXPECT_EQ(proxy.calls, 1);
-  EXPECT_EQ(barrier.calls, 0);
+  EXPECT_EQ(barrier.calls, 1);
   ASSERT_NE(mem.hostOwnerFds, nullptr);
   EXPECT_EQ(mem.hostOwnerFds[0], -1);
 }
@@ -2345,6 +2346,16 @@ protected:
       return std::string(env) == "MULTI_SEGMENT_REGISTER" ? 1 : deftVal;
     };
   }
+
+  // One active GIN backend of this type, over the IB RMA proxy.
+  std::unique_ptr<ncclSharedResources> sharedRes;
+  void UseGinBackend(ncclGinType_t ginType) {
+    sharedRes = std::make_unique<ncclSharedResources>();
+    comm->sharedRes = sharedRes.get();
+    sharedRes->ginState.numActiveBackends = 1;
+    sharedRes->ginState.backends[0].ginType = ginType;
+    comm->rmaState.rmaProxyState.ncclRma = &ncclRmaIbProxy;
+  }
 };
 
 // Branch: no sysmem segment anywhere, so one device window covers the whole
@@ -2376,7 +2387,9 @@ TEST_F(SymMemoryRegisterGinTest, NoSysmemSegment_RegistersOneDeviceWindow) {
 // The multiSegment flag passed to GIN comes from the communicator-wide segment
 // count, not this rank's.
 TEST_F(SymMemoryRegisterGinTest, MultipleGlobalSegments_FlagsRegistrationMultiSegment) {
+  mem.minGlobalNumSegments = 2;
   mem.maxGlobalNumSegments = 2;
+  UseGinBackend(NCCL_GIN_TYPE_PROXY);
   ScopedHook loadParam(g_loadParam, MultiSegRegisterOn());
   bool registeredMultiSegment = false;
   ScopedHook reg(g_devrGinRegister,
@@ -2387,6 +2400,28 @@ TEST_F(SymMemoryRegisterGinTest, MultipleGlobalSegments_FlagsRegistrationMultiSe
 
   ASSERT_EQ(symMemoryRegisterGin(comm, &mem), ncclSuccess);
   EXPECT_TRUE(registeredMultiSegment);
+}
+
+// NCCL_MULTI_SEGMENT_REGISTER=1 does not help a GIN backend that registers the window as
+// one MR, so a device-only multi-segment window is still rejected before registering.
+TEST_F(SymMemoryRegisterGinTest, MultiSegmentRegisterOn_NonProxyGinBackend_RejectsMultiSegmentWindow) {
+  mem.minGlobalNumSegments = 2;
+  mem.maxGlobalNumSegments = 2;
+  UseGinBackend(NCCL_GIN_TYPE_ROCSHMEM_GDA);
+  ScopedHook loadParam(g_loadParam, MultiSegRegisterOn());
+  // RCCL: the register seam includes the generation array.
+  ScopedHook reg(g_devrGinRegister,
+                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int) {
+                   return ncclSuccess;
+                 });
+
+  EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclInvalidUsage);
+  EXPECT_EQ(reg.calls, 0);
+  EXPECT_EQ(mem.ginSegmentInfos, nullptr);
+
+  sharedRes->ginState.backends[0].ginType = NCCL_GIN_TYPE_PROXY;
+  EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclSuccess);
+  EXPECT_EQ(reg.calls, 1);
 }
 
 // NCCL_MULTI_SEGMENT_REGISTER=0: a device-only multi-segment window is rejected
@@ -2563,6 +2598,20 @@ TEST_F(SymMemoryRegisterGinElasticTest, MultiSegmentRegisterOff_RegistersOneWind
   EXPECT_EQ(sizes[0], 4096u);
   EXPECT_EQ(sizes[1], 8192u);
   EXPECT_EQ(mem.numGinSegments, 2);
+}
+
+// An imported host segment reads as device here; with the owner's fd it must still
+// register as HOST_NUMA and hand that fd to GIN. Segments without one pass -1.
+TEST_F(SymMemoryRegisterGinElasticTest, HostOwnerFd_ForwardedWithHostNumaType) {
+  ScopedHook gather(g_devrBootstrapAllGather, AgreeingAllGather());
+  int ownerFds[2] = {-1, 42};
+  mem.hostOwnerFds = ownerFds;
+
+  ASSERT_EQ(symMemoryRegisterGin(comm, &mem), ncclSuccess);  // props fake reports device
+  mem.hostOwnerFds = nullptr;
+  EXPECT_EQ(g_devrGinRegisterDmabufFds, (std::vector<int>{-1, 42}));
+  EXPECT_EQ(mem.ginSegmentInfos[0].memType, hipMemLocationTypeDevice);
+  EXPECT_EQ(mem.ginSegmentInfos[1].memType, kLocHostNuma);
 }
 
 #if defined(__HIP_PLATFORM_AMD__) && NCCL_CUMEM_HOST_GATE
