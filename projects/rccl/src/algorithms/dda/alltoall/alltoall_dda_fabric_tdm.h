@@ -130,8 +130,8 @@ ddaAllToAllFabricTdmPush(uint8_t* const* __restrict__ peerScratch, uint8_t* __re
 // recvbuff slots that other blocks of this rank may still be reading from sendbuff.
 // pieces >= 1 (the host never passes 0): a wave goes through nRounds rounds of UnrollPeers tiles, and a piece is a
 // run of those rounds. Step p pushes piece p, waits for the source's piece p - 1 and drains it, then posts piece p.
-// The flag slot holds one token, so a post first waits for the destination to consume the previous piece, and every
-// post is matched by exactly one wait. The pieces land at their place in the chunk, so the scratch needed is
+// The flags are the barrier's epoch flags (see FabricGpuBarrier): a post never waits for the previous piece to be
+// consumed, and every wave polls the flag itself. The pieces land at their place in the chunk, so the scratch needed is
 // unchanged. One piece pushes the whole share, posts, waits and drains: no overlap.
 template <int TileBytes, int UnrollPeers>
 __global__ void __launch_bounds__(kDdaA2ATdmMaxWarpsPerBlock* kDdaA2ATdmWave)
@@ -157,7 +157,8 @@ ddaAllToAllFabricTdmPushPeer(uint8_t* const* __restrict__ peerScratch, uint8_t* 
   const int from = (selfRank - k + nRanks) % nRanks;
 
   // Entry handshake instead of a full barrier: only peer reads the slot this block writes, so wait for peer alone.
-  if (k != 0) barrier.signalWaitPeer(from, peer, blockIdx.x);
+  const uint32_t epoch = barrier.epochBegin();
+  if (k != 0) barrier.epochSignalWait(from, peer, epoch);
 
   // Rounds a wave goes through and the pieces they are cut into. Every wave of every rank derives the same piece
   // count, since it depends only on bytesPerRank, blocksPerPeer and blockDim.
@@ -199,16 +200,18 @@ ddaAllToAllFabricTdmPushPeer(uint8_t* const* __restrict__ peerScratch, uint8_t* 
   const uint8_t* const src = sendbuff + static_cast<size_t>(peer) * bytesPerRank;
   const uint8_t* const slot = peerScratch[selfRank] + static_cast<size_t>(from) * bytesPerRank;
   uint8_t* const out = recvbuff + static_cast<size_t>(from) * bytesPerRank;
-  // Every TDM store of a piece has drained (tdmWait) before postPeer, which also waits for the wave's stores and
-  // syncs the block before thread 0 posts.
+  // Every TDM store of a piece has drained (tdmWait) before epochPostPiece, which also waits for the wave's stores and
+  // syncs the block before thread 0 posts. Every wave polls the source's flag itself.
+  const FabricGpuBarrier::FlagType* const ready = barrier.epochFlagFrom(from);
   for (size_t p = 0; p <= nPieces; ++p) {
     if (p < nPieces) pass(src, dst, p);
     if (p > 0) {
-      barrier.waitPeer(from);
+      barrier.epochWaitPiece(ready, epoch, static_cast<unsigned>(p - 1));
       pass(slot, out, p - 1);
     }
-    if (p < nPieces) barrier.postPeer(peer, blockIdx.x);
+    if (p < nPieces) barrier.epochPostPiece(peer, epoch, static_cast<unsigned>(p));
   }
+  barrier.epochEnd(epoch, pieces);
 #else
   // Only dispatched on gfx1250; every other arch still has to compile this kernel.
   (void)peerScratch;
