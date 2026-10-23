@@ -1709,7 +1709,7 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
   }
 
   if (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP &&
-      !coordinator->SwapSupported())
+      !coordinator->SwapSupported() && !coordinator->IsGfx125Plus())
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   // Swap ops alignment validation
@@ -2143,9 +2143,18 @@ hsa_status_t GpuAgent::DmaCopySwap(
   // form is the one a batch-copy caller builds, so restricting the fallback to
   // the scalar form would leave a batched swap with no route at all on an
   // agent whose SDMA engine lacks the swap sub-op.
+  //
+  // gfx125+ reaches the swap packet through its own condition rather than
+  // through swap_supported_, so it is native-capable here even though it does
+  // not claim the flag. Diverting it to the shader blit would move it off a
+  // working engine path, so it is excluded from the fallback. This mirrors the
+  // condition the fan-out validation and the SDMA submit guard already apply.
   lazy_ptr<core::Blit>& sdma_blit = GetBlitObject(BlitHostToDev);
-  const bool sdma_swap = sdma_blit->isSDMA() &&
-      static_cast<BlitSdmaBase*>((*sdma_blit).get())->SwapSupported();
+  BlitSdmaBase* const sdma_base = sdma_blit->isSDMA()
+      ? static_cast<BlitSdmaBase*>((*sdma_blit).get())
+      : nullptr;
+  const bool sdma_swap = sdma_base != nullptr &&
+      (sdma_base->SwapSupported() || sdma_base->IsGfx125Plus());
 
   if (!sdma_swap)
     return DmaCopyBatchFallback(op, dep_signals);
