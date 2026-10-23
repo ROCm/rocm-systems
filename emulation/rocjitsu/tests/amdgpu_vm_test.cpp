@@ -7011,6 +7011,37 @@ TEST_P(IsaTest, StepExecutesAndHalts) {
   EXPECT_EQ(f.cu()->num_wfs(), 0u);
 }
 
+TEST_P(IsaTest, KernelLaunchStartsWithEmptyBranchStack) {
+  // The CP builds each wave's MODE from COMPUTE_PGM_RSRC1, which has no CSP
+  // field, so a kernel cannot inherit a previous kernel's branch stack depth.
+  VmFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(arch()));
+  auto *snap = f.capture_halts();
+
+  const std::vector<uint32_t> set_csp = {
+      0xBA001741u,
+      6u, // s_setreg_imm32_b32 hwreg(HW_REG_MODE, 29, 3), 6
+      SOPP_S_ENDPGM,
+  };
+  const std::vector<uint32_t> read_csp = {
+      0xBE8500C1u, // s_mov_b32 s5, -1
+      0xB8851741u, // s_getreg_b32 s5, hwreg(HW_REG_MODE, 29, 3)
+      SOPP_S_ENDPGM,
+  };
+  uint64_t ko_set = f.write_kernel(0x0, set_csp.data(), set_csp.size() * sizeof(uint32_t));
+  uint64_t ko_read = f.write_kernel(0x2000, read_csp.data(), read_csp.size() * sizeof(uint32_t));
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(ko_set, 64);
+  step_until_halted(*f.engine, {f.cu()});
+  queue.dispatch(ko_read, 64);
+  step_until_halted(*f.engine, {f.cu()});
+
+  ASSERT_EQ(snap->snapshots().size(), 2u);
+  EXPECT_EQ(snap->snapshots()[0].mode_raw & amdgpu::Wavefront::CSP_MASK,
+            6u << amdgpu::Wavefront::CSP_SHIFT);
+  EXPECT_EQ(snap->snapshots()[1].sgpr(5), 0u);
+}
+
 TEST_P(IsaTest, RoundRobinScheduling) {
   VmFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize(arch()));
