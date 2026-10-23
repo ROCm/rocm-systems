@@ -963,24 +963,41 @@ testResult_t completeColl(struct threadArgs* args) {
   return testSuccess;
 }
 
-// Line the ranks up right before a timer starts: a 1-element all-reduce on the
-// test's own communicators and streams, then wait for it. It cannot complete
-// until every rank has joined, so ranks leave it within its completion spread.
-// Barrier() (MPI_Barrier) instead releases ranks only as evenly as MPI's own
-// transport allows; across nodes over TCP that spread lands in the timed loop
-// and inflates small sizes. The operand, args->barrierBuffs, is set up in main().
-static testResult_t collBarrier(struct threadArgs* args) {
-  if (args->nGpus > 1) NCCLCHECK(ncclGroupStart());
-  for (int i = 0; i < args->nGpus; i++) {
+// Line the ranks up before a timer starts. Dissemination barrier: in round k
+// each rank sends to rank+2^k and receives from rank-2^k; after log2(n) rounds
+// every rank has heard from all others, and all finish on the same last round.
+// MPI_Barrier over TCP releases ranks unevenly, which inflates small sizes.
+// Buffers: args->barrierBuffs (send, receive), set up in run().
+static testResult_t disseminate(struct threadArgs* args) {
+  const int nRanks = args->nProcs * args->nThreads * args->nGpus;
+  for (int step = 1; step < nRanks; step <<= 1) {
+    NCCLCHECK(ncclGroupStart());
+    for (int i = 0; i < args->nGpus; i++) {
 #ifndef NCCL_MAJOR
-    CUDACHECK(cudaSetDevice(args->gpus[i]));
+      CUDACHECK(cudaSetDevice(args->gpus[i]));
 #endif
-    NCCLCHECK(ncclAllReduce(args->barrierBuffs[i], args->barrierBuffs[i], 1, ncclInt32, ncclMax,
-                            args->comms[i], args->streams[i]));
+      const int rank = (args->proc * args->nThreads + args->thread) * args->nGpus + i;
+      NCCLCHECK(ncclSend(args->barrierBuffs[i], 1, ncclInt32, (rank + step) % nRanks,
+                         args->comms[i], args->streams[i]));
+      NCCLCHECK(ncclRecv(args->barrierBuffs[i] + 1, 1, ncclInt32, (rank - step + nRanks) % nRanks,
+                         args->comms[i], args->streams[i]));
+    }
+    NCCLCHECK(ncclGroupEnd());
   }
-  if (args->nGpus > 1) NCCLCHECK(ncclGroupEnd());
   TESTCHECK(testStreamSynchronize(args->nGpus, args->streams, args->comms));
   return testSuccess;
+}
+
+static testResult_t collBarrier(struct threadArgs* args) {
+  // RCCL sets up point-to-point connections on first use, and that set-up
+  // finishes at very different times on different ranks. Pay it once, untimed,
+  // so no measured barrier includes it.
+  thread_local bool connected = false;
+  if (!connected) {
+    TESTCHECK(disseminate(args));
+    connected = true;
+  }
+  return disseminate(args);
 }
 
 static int getEventCount(int eventIters) {
@@ -2579,9 +2596,9 @@ testResult_t run() {
     else {
       CUDACHECK(cudaStreamCreateWithFlags(streams.data()+i, cudaStreamNonBlocking));
     }
-    // collBarrier's all-reduce operand; its value is never used.
-    CUDACHECK(cudaMalloc((void**)&barrierBuffs[i], sizeof(int)));
-    CUDACHECK(cudaMemset(barrierBuffs[i], 0, sizeof(int)));
+    // collBarrier's send/receive operands; their values are never used.
+    CUDACHECK(cudaMalloc((void**)&barrierBuffs[i], 2 * sizeof(int)));
+    CUDACHECK(cudaMemset(barrierBuffs[i], 0, 2 * sizeof(int)));
     int archMajor, archMinor;
     CUDACHECK(cudaDeviceGetAttribute(&archMajor, cudaDevAttrComputeCapabilityMajor, gpus[i]));
     CUDACHECK(cudaDeviceGetAttribute(&archMinor, cudaDevAttrComputeCapabilityMinor, gpus[i]));

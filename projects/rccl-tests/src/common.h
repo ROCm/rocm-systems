@@ -226,7 +226,7 @@ struct threadArgs {
   size_t sendInplaceOffset;
   void** recvbuffs;
   size_t recvInplaceOffset;
-  int** barrierBuffs;  // one int per GPU, the operand of collBarrier's all-reduce
+  int** barrierBuffs;  // two ints per GPU, collBarrier's send/receive operands
   ncclUniqueId ncclId;
   ncclComm_t* comms;
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
