@@ -11,6 +11,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from common.common import log_api_call
 
 _PACKAGE_DIR = Path(__file__).resolve().parents[4] / "py-interface"
 
@@ -44,6 +45,7 @@ class TestDriverDate(unittest.TestCase):
 
         with mock.patch.object(amdsmi.amdsmi_wrapper, "amdsmi_get_gpu_driver_info", _stub):
             info = amdsmi.amdsmi_interface.amdsmi_get_gpu_driver_info(handle)
+            log_api_call("\t### amdsmi_get_gpu_driver_info(handle):")
 
         self.assertEqual(info["driver_date"], "N/A")
         self.assertEqual(info["driver_version"], "6.8.0")

@@ -29,7 +29,7 @@ import ctypes
 import unittest
 from unittest import mock
 
-from common.common import amdsmi
+from common.common import amdsmi, log_api_call
 
 
 def _make_node_handle() -> "amdsmi.amdsmi_wrapper.amdsmi_node_handle":
@@ -74,7 +74,9 @@ class TestNpmInfoCurrentNodePowerKey(unittest.TestCase):
         with mock.patch.object(
             amdsmi.amdsmi_wrapper, "amdsmi_get_npm_info", side_effect=_fake_amdsmi_get_npm_info
         ):
-            return amdsmi.amdsmi_get_npm_info(node_handle)
+            info = amdsmi.amdsmi_get_npm_info(node_handle)
+            log_api_call("\t### amdsmi_get_npm_info():")
+            return info
 
     def test_current_node_power_key_present_with_concrete_value(self):
         result = self._get_npm_info_with_mocked_c_call(current_node_power_raw=5800)
