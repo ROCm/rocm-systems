@@ -3910,8 +3910,17 @@ TEST_F(KfdIoctlTest, DbgTrapWithoutLibcPidfdWrapperReturnsEnosys) {
   auto &libc = rocjitsu::libc_passthrough();
   const auto saved_pidfd_open = std::exchange(libc.pidfd_open, nullptr);
   const int result = driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &args);
+  args.op = KFD_IOC_DBG_TRAP_DISABLE;
+  const int disable_result = driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &args);
+  args.op = KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED;
+  const int inactive_result = driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &args);
+  args.pid = 0x7fffffff;
+  const int absent_result = driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &args);
   libc.pidfd_open = saved_pidfd_open;
   EXPECT_EQ(result, -ENOSYS);
+  EXPECT_EQ(disable_result, -EINVAL);
+  EXPECT_EQ(inactive_result, -EINVAL);
+  EXPECT_EQ(absent_result, -ESRCH);
 }
 
 TEST_F(KfdIoctlTest, DbgTrapEnablePopulatesRuntimeInfoThenDisable) {

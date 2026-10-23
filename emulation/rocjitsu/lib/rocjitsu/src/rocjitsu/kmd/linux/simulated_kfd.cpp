@@ -491,7 +491,7 @@ int write_debug_notification(int fd, const std::function<void()> &before_write =
     const int result = written == static_cast<ssize_t>(arguments.size) ? 0
                        : written < 0                                   ? errno
                                                                        : EIO;
-    ::_exit(result);
+    return result;
   };
 
   // Block application handlers before the child exists, including the window
@@ -5891,13 +5891,13 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_me
 
   // Non-ENABLE ops require an active debug session (kernel: EINVAL).
   if (args->op != KFD_IOC_DBG_TRAP_ENABLE && !enabled) {
-    UniqueDriverFd probe_pidfd;
-    UniqueDriverFd probe_procfd;
-    const int probe_result = pin_process_identity(target_pid, probe_pidfd, probe_procfd);
-    if (probe_result == -ESRCH)
-      return -ESRCH;
-    if (probe_result != 0)
-      return probe_result;
+    // This path always rejects the operation; it needs only a procfs liveness
+    // snapshot, not the pidfd identity pin used to authorize a debug session.
+    const std::string proc_path = "/proc/" + std::to_string(target_pid);
+    UniqueDriverFd probe_procfd(libc_passthrough().openat(AT_FDCWD, proc_path.c_str(),
+                                                          O_RDONLY | O_DIRECTORY | O_CLOEXEC, 0));
+    if (!probe_procfd)
+      return errno == ENOENT ? -ESRCH : -errno;
     const int zombie = procfd_is_zombie(probe_procfd.get());
     if (zombie != 0)
       return zombie == 1 ? -ESRCH : zombie;

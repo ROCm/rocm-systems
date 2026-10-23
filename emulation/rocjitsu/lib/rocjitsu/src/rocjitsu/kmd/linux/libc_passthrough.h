@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <dirent.h>
+#include <semaphore.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -73,7 +74,13 @@ public:
   int (*lxstat_fn)(int, const char *, struct stat *) = nullptr;
   int (*lxstat64_fn)(int, const char *, struct stat64 *) = nullptr;
   pid_t (*fork)() = nullptr;
+  // Non-noexcept signatures preserve forced unwinding from signal handlers.
+  int (*clock_gettime)(clockid_t, timespec *) = nullptr;
+  int (*sem_init)(sem_t *, int, unsigned int) = nullptr;
+  int (*sem_destroy)(sem_t *) = nullptr;
+  int (*sem_post)(sem_t *) = nullptr;
   // Optional on older libc versions; callers must handle a missing wrapper.
+  int (*sem_clockwait)(sem_t *, clockid_t, const timespec *) = nullptr;
   int (*pidfd_open)(pid_t, unsigned int) = nullptr;
   ssize_t (*getdents64)(int, void *, size_t) = nullptr;
 

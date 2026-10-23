@@ -43,6 +43,7 @@ RJ_DIAGNOSTIC_POP
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <fstream>
+#include <linux/futex.h>
 #include <linux/sync_file.h>
 #include <memory>
 #include <poll.h>
@@ -112,13 +113,18 @@ bool read_gpu_id(uint32_t &gpu_id) {
   return static_cast<bool>(gpu_id_file >> gpu_id);
 }
 
-bool thread_is_polling(pid_t tid) {
+bool thread_is_waiting_on_syncobj(pid_t tid) {
   if (tid == 0)
     return false;
   std::ifstream state("/proc/self/task/" + std::to_string(tid) + "/syscall");
   long number;
-  unsigned long address, count;
-  return (state >> number >> std::hex >> address >> count) && number == SYS_ppoll && count == 1;
+  unsigned long address, operation;
+  if (!(state >> number >> std::hex >> address >> operation))
+    return false;
+  // Observe libc's semaphore wait or the older-libc polling fallback. The
+  // ppoll-with-one-fd case also lets this regression expose the former wait.
+  return (number == SYS_futex && (operation & FUTEX_CMD_MASK) == FUTEX_WAIT_BITSET) ||
+         (number == SYS_ppoll && operation <= 1);
 }
 
 void noop_signal_handler(int) {}
@@ -4584,6 +4590,113 @@ TEST(InterposerSyncobjTest, TimelineWaitExpiresWithoutSignal) {
   EXPECT_EQ(close(drm), 0);
 }
 
+TEST(InterposerSyncobjTest, TimelineWaitExpiresWithExhaustedDescriptors) {
+  const int drm = open_drm_render();
+  ASSERT_GE(drm, 0);
+  drm_syncobj_create create{};
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_CREATE, &create), 0);
+  const int source = open("/dev/null", O_RDONLY | O_CLOEXEC);
+  ASSERT_GE(source, 0);
+  struct rlimit original {};
+  ASSERT_EQ(getrlimit(RLIMIT_NOFILE, &original), 0);
+  RestoreLimit restore(original);
+  struct rlimit limited = original;
+  limited.rlim_cur = std::min<rlim_t>(original.rlim_cur, 256);
+  ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &limited), 0);
+  std::vector<int> occupied;
+  int descriptor;
+  while ((descriptor = dup(source)) >= 0)
+    occupied.push_back(descriptor);
+  const int allocation_error = errno;
+
+  uint64_t point = 1;
+  drm_syncobj_timeline_wait wait{};
+  wait.handles = reinterpret_cast<uintptr_t>(&create.handle);
+  wait.points = reinterpret_cast<uintptr_t>(&point);
+  wait.count_handles = 1;
+  wait.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL | DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT;
+  wait.timeout_nsec = monotonic_deadline_after(std::chrono::milliseconds(50));
+  const auto start = std::chrono::steady_clock::now();
+  const int result = ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait);
+  const int error = errno;
+  const auto elapsed = std::chrono::steady_clock::now() - start;
+  for (int occupied_fd : occupied)
+    EXPECT_EQ(close(occupied_fd), 0);
+  EXPECT_EQ(allocation_error, EMFILE);
+  EXPECT_EQ(result, -1);
+  EXPECT_EQ(error, ETIME);
+  EXPECT_GE(elapsed, std::chrono::milliseconds(49));
+  drm_syncobj_destroy destroy{};
+  destroy.handle = create.handle;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), 0);
+  EXPECT_EQ(close(source), 0);
+  EXPECT_EQ(close(drm), 0);
+}
+
+static void check_syncobj_wait_after_descriptor_replacement(bool use_dup3) {
+  const int drm = open_drm_render();
+  ASSERT_GE(drm, 0);
+  drm_syncobj_create create{};
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_CREATE, &create), 0);
+  const int source = make_sized_memfd(0);
+  ASSERT_GE(source, 0);
+  const int target = dup(source);
+  ASSERT_GE(target, 0);
+  // The former eventfd-based wait would allocate this application-visible slot.
+  ASSERT_EQ(close(target), 0);
+  uint64_t point = 1;
+  drm_syncobj_timeline_wait wait{};
+  wait.handles = reinterpret_cast<uintptr_t>(&create.handle);
+  wait.points = reinterpret_cast<uintptr_t>(&point);
+  wait.count_handles = 1;
+  wait.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL | DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT;
+  wait.timeout_nsec = monotonic_deadline_after(std::chrono::seconds(3));
+  std::atomic<pid_t> tid{0};
+  int wait_result = -2;
+  std::thread waiter([&] {
+    tid.store(gettid(), std::memory_order_release);
+    wait_result = ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait);
+  });
+  bool blocked = false;
+  const auto limit = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+  while (std::chrono::steady_clock::now() < limit) {
+    if (thread_is_waiting_on_syncobj(tid.load(std::memory_order_acquire))) {
+      blocked = true;
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  EXPECT_EQ(use_dup3 ? dup3(source, target, O_CLOEXEC) : dup2(source, target), target);
+  drm_syncobj_timeline_array signal{};
+  signal.handles = reinterpret_cast<uintptr_t>(&create.handle);
+  signal.points = reinterpret_cast<uintptr_t>(&point);
+  signal.count_handles = 1;
+  const auto signaled = std::chrono::steady_clock::now();
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_SIGNAL, &signal), 0);
+  waiter.join();
+  EXPECT_TRUE(blocked);
+  EXPECT_EQ(wait_result, 0);
+  EXPECT_LT(std::chrono::steady_clock::now() - signaled, std::chrono::milliseconds(500));
+  struct stat contents {};
+  EXPECT_EQ(fstat(source, &contents), 0);
+  EXPECT_EQ(contents.st_size, 0);
+  EXPECT_GE(fcntl(target, F_GETFD), 0);
+  EXPECT_EQ(close(target), 0);
+  EXPECT_EQ(close(source), 0);
+  drm_syncobj_destroy destroy{};
+  destroy.handle = create.handle;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), 0);
+  EXPECT_EQ(close(drm), 0);
+}
+
+TEST(InterposerSyncobjTest, TimelineWaitSurvivesDup2Replacement) {
+  check_syncobj_wait_after_descriptor_replacement(false);
+}
+
+TEST(InterposerSyncobjTest, TimelineWaitSurvivesDup3Replacement) {
+  check_syncobj_wait_after_descriptor_replacement(true);
+}
+
 TEST(InterposerSyncobjTest, TimelineSignalWakesEveryBlockedWaiter) {
   const int drm = open_drm_render();
   ASSERT_GE(drm, 0);
@@ -4609,7 +4722,7 @@ TEST(InterposerSyncobjTest, TimelineSignalWakesEveryBlockedWaiter) {
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
   while (std::chrono::steady_clock::now() < deadline) {
     all_blocked = std::all_of(tids.begin(), tids.end(), [](const auto &tid) {
-      return thread_is_polling(tid.load(std::memory_order_acquire));
+      return thread_is_waiting_on_syncobj(tid.load(std::memory_order_acquire));
     });
     if (all_blocked)
       break;
@@ -4721,12 +4834,12 @@ TEST(InterposerSyncobjTest, TimelineWaitAllowsThreadExitFromSignal) {
     (void)call(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait);
     returned = true;
   });
-  // Wait for the actual ppoll sleep so a signal during setup cannot make this
+  // Wait for the actual libc sleep so a signal during setup cannot make this
   // pass without exercising forced unwinding through the interposer.
   bool blocked = false;
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
   while (std::chrono::steady_clock::now() < deadline) {
-    if (thread_is_polling(tid.load(std::memory_order_acquire))) {
+    if (thread_is_waiting_on_syncobj(tid.load(std::memory_order_acquire))) {
       blocked = true;
       break;
     }

@@ -25,6 +25,7 @@
 #include "rocjitsu/kmd/linux/remote_driver.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
+#include "rocjitsu/kmd/linux/syncobj_notification.h"
 #include "rocjitsu/kmd/linux/sysfs.h"
 #include "rocjitsu/vm/amdgpu/hsa_clock.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
@@ -100,6 +101,7 @@ using rocjitsu::GuestKfd;
 using rocjitsu::LinuxKfd;
 using rocjitsu::RemoteDriver;
 using rocjitsu::SimulatedKfd;
+using rocjitsu::SyncobjNotification;
 using rocjitsu::Sysfs;
 
 namespace rocjitsu {
@@ -143,89 +145,6 @@ static_assert(std::atomic<bool>::is_always_lock_free,
   return S_ISCHR(info.st_mode) &&
          (major(info.st_rdev) == kDrmMajor || (host_kfd != 0 && info.st_rdev == host_kfd));
 }
-
-/// @brief Broadcast state changes through interruptible libc waits.
-/// @details Each sleeper owns an eventfd so one waiter cannot consume another's
-/// wakeup. Registration precedes the generation check, closing the check/sleep
-/// race. ppoll preserves EINTR and permits forced unwinding during thread exit.
-class SyncobjNotification {
-public:
-  uint32_t load(std::memory_order order) const { return generation_.load(order); }
-
-  int wait_until(uint32_t expected, const timespec *deadline) {
-    rocjitsu::UniqueDriverFd event(::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK));
-    if (!event)
-      return -1;
-    Waiter waiter(*this, event.get());
-    if (generation_.load(std::memory_order_acquire) != expected)
-      return 0;
-    timespec remaining{};
-    if (deadline) {
-      timespec now{};
-      if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
-        return -1;
-      remaining.tv_sec = deadline->tv_sec - now.tv_sec;
-      remaining.tv_nsec = deadline->tv_nsec - now.tv_nsec;
-      if (remaining.tv_nsec < 0) {
-        --remaining.tv_sec;
-        remaining.tv_nsec += 1'000'000'000;
-      }
-      if (remaining.tv_sec < 0) {
-        errno = ETIMEDOUT;
-        return -1;
-      }
-    }
-    pollfd descriptor{event.get(), POLLIN, 0};
-    const int result = ::ppoll(&descriptor, 1, deadline ? &remaining : nullptr, nullptr);
-    if (result > 0)
-      return 0;
-    if (result == 0)
-      errno = ETIMEDOUT;
-    return -1;
-  }
-
-  void notify_all() {
-    std::lock_guard lock(mutex_);
-    generation_.fetch_add(1, std::memory_order_release);
-    const uint64_t value = 1;
-    for (Waiter *waiter = waiters_; waiter; waiter = waiter->next) {
-      ssize_t result;
-      do {
-        result = rocjitsu::libc_passthrough().write(waiter->fd, &value, sizeof(value));
-      } while (result < 0 && errno == EINTR);
-      // EAGAIN means the eventfd already contains a wakeup.
-    }
-  }
-
-private:
-  class Waiter {
-  public:
-    Waiter(SyncobjNotification &owner, int descriptor) : fd(descriptor), owner_(owner) {
-      std::lock_guard lock(owner_.mutex_);
-      next = owner_.waiters_;
-      owner_.waiters_ = this;
-    }
-    ~Waiter() {
-      std::lock_guard lock(owner_.mutex_);
-      Waiter **entry = &owner_.waiters_;
-      while (*entry != this)
-        entry = &(*entry)->next;
-      *entry = next;
-    }
-    Waiter(const Waiter &) = delete;
-    Waiter &operator=(const Waiter &) = delete;
-
-    int fd;
-    Waiter *next = nullptr;
-
-  private:
-    SyncobjNotification &owner_;
-  };
-
-  std::atomic<uint32_t> generation_{0};
-  std::mutex mutex_;
-  Waiter *waiters_ = nullptr;
-};
 
 /// @brief Attempt to connect @p sock to the AF_UNIX socket at @p path.
 /// @returns A connected socket fd on success; -1 with errno set on failure.
@@ -1964,7 +1883,7 @@ public:
       // the payload to exist, not for its GPU work to finish; retain the source
       // and destination objects across handle deletion and replacement.
       timespec deadline{};
-      if (clock_gettime(CLOCK_MONOTONIC, &deadline) != 0)
+      if (real().clock_gettime(CLOCK_MONOTONIC, &deadline) != 0)
         return -errno;
       deadline.tv_sec += 5;
       std::shared_ptr<SyncobjFence> fence;
@@ -2218,7 +2137,7 @@ public:
       }
 
       timespec now{};
-      if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+      if (real().clock_gettime(CLOCK_MONOTONIC, &now) != 0)
         return -errno;
       const int64_t now_ns = static_cast<int64_t>(now.tv_sec) * 1'000'000'000LL + now.tv_nsec;
       if (request.timeout_nsec <= now_ns)
@@ -2226,7 +2145,7 @@ public:
       lock.unlock();
       const timespec deadline{static_cast<time_t>(request.timeout_nsec / 1'000'000'000LL),
                               static_cast<long>(request.timeout_nsec % 1'000'000'000LL)};
-      // This user-space model cannot recover which signal interrupted ppoll(2),
+      // This user-space model cannot recover which signal interrupted the libc wait,
       // so it cannot apply the kernel ioctl layer's SA_RESTART decision. Surface
       // EINTR consistently and let callers retry; the focused regression pins
       // that documented difference from the in-kernel DRM implementation.
@@ -2852,7 +2771,7 @@ public:
       if (!fence || fence->is_signaled())
         return finish(false);
       timespec now{};
-      if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+      if (real().clock_gettime(CLOCK_MONOTONIC, &now) != 0)
         return -errno;
       const uint64_t now_ns = static_cast<uint64_t>(now.tv_sec) * 1'000'000'000 + now.tv_nsec;
       if (request.timeout <= now_ns)

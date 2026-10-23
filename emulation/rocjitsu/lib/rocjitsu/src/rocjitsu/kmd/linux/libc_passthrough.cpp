@@ -57,6 +57,11 @@ void LibcPassthrough::resolve() {
   realpath_fn = util::lookup_symbol<decltype(realpath_fn)>(handle, "realpath");
   realpath_chk_fn = util::lookup_symbol<decltype(realpath_chk_fn)>(handle, "__realpath_chk");
   fork = util::lookup_symbol<decltype(fork)>(handle, "fork");
+  clock_gettime = util::lookup_symbol<decltype(clock_gettime)>(handle, "clock_gettime");
+  sem_init = util::lookup_symbol<decltype(sem_init)>(handle, "sem_init");
+  sem_destroy = util::lookup_symbol<decltype(sem_destroy)>(handle, "sem_destroy");
+  sem_post = util::lookup_symbol<decltype(sem_post)>(handle, "sem_post");
+  sem_clockwait = util::lookup_symbol<decltype(sem_clockwait)>(handle, "sem_clockwait");
   pidfd_open = util::lookup_symbol<decltype(pidfd_open)>(handle, "pidfd_open");
   getdents64 = util::lookup_symbol<decltype(getdents64)>(handle, "getdents64");
   // Keep ready() false unless every required interposed libc entry point was
@@ -66,7 +71,8 @@ void LibcPassthrough::resolve() {
   initialized_ = openat && close && read && write && ioctl && mmap && munmap && mprotect &&
                  madvise && memfd_create && dup && dup2 && dup3 && fcntl && fopen && freopen &&
                  opendir && readdir && closedir && stat && lstat && access && fstat_fn &&
-                 readlink_fn && realpath_fn && fork;
+                 readlink_fn && realpath_fn && fork && clock_gettime && sem_init && sem_destroy &&
+                 sem_post;
   assert(initialized_);
 }
 

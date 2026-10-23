@@ -480,6 +480,7 @@ add_executable(
     mtype_flags_test.cpp
     sysfs_test.cpp
     kfd_ioctl_test.cpp
+    syncobj_notification_test.cpp
     waitcnt_counter_test.cpp
     wait_hazard_test.cpp
     memory_wait_scoreboard_test.cpp
@@ -2203,6 +2204,9 @@ set(_rj_interposer_syncobj_tests
     DestroyRejectsInvalidInput
     TimelineWaitBlocksUntilSignalOrDeadline
     TimelineWaitExpiresWithoutSignal
+    TimelineWaitExpiresWithExhaustedDescriptors
+    TimelineWaitSurvivesDup2Replacement
+    TimelineWaitSurvivesDup3Replacement
     TimelineSignalWakesEveryBlockedWaiter
     TimelineWaitReturnsEintrForSignal
     ConcurrentVmUpdatesShareTimeline
