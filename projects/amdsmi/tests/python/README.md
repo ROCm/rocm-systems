@@ -151,6 +151,8 @@ Notes:
 | `ROCM_HOME` | ROCm install root, used when `AMDSMI_PATH` is unset. |
 | `ROCM_PATH` | Fallback ROCm install root (default `/opt/rocm`). |
 | `NO_COLOR` | If set, disables ANSI colors in the summary (see <https://no-color.org/>). |
+| `AMDSMI_ALLOW_DESTRUCTIVE_TESTS` | Set to `1` to run `test_memory_partition_cycle.py`, which stages NPS modes and reloads amdgpu. Needs root; skipped otherwise. |
+| `AMDSMI_TEST_ALWAYS_RELOAD` | Set to `1`, with the variable above, to reload amdgpu even when a mode was rejected or already active. For debugging. |
 
 The resolved path must contain the `amdsmi` package. If a system-installed
 `amdsmi` shadows the intended build, the runner prints an explicit remediation

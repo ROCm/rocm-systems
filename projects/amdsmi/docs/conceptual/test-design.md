@@ -222,6 +222,12 @@ The cper suite shows both styles:
 Fixtures should be static, sanitized blobs so the tests stay deterministic and **run on any
 machine regardless of GPU** (see `mock_cper/README.md` for provenance).
 
+**To unit-test a functional test's own logic**, such as which values it writes, give its fixture a
+`protected` struct of `std::function` members for the APIs it calls and replace them from a unit
+test. `unit/gpu/memorypartition_read_write_test.cc` does this for `TestMemoryPartitionReadWrite`.
+Assert outcomes (what was requested, what failed), not call counts or order, so that a harmless
+extra read does not break the tests.
+
 ### CMake integration
 
 `tests/amd_smi_test/CMakeLists.txt` uses `file(GLOB_RECURSE ... CONFIGURE_DEPENDS)` to collect all
