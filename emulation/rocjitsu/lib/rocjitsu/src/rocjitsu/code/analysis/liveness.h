@@ -233,6 +233,10 @@ public:
   [[nodiscard]] bool has_materialized_cfg_liveness() const { return analyzed_; }
 
   /// @brief Block liveness by block object.
+  /// @pre @p block must be one of the BasicBlock objects passed to the constructor.
+  /// @details Passing a block outside that scope violates an internal contract
+  /// and is asserted in assertion-enabled builds. Throws std::logic_error when
+  /// the analysis is unavailable, matching live_before().
   [[nodiscard]] const BlockLiveness &block_liveness(const BasicBlock &block) const;
 
   /// @brief Whether a live-before snapshot was materialized for @p inst.
