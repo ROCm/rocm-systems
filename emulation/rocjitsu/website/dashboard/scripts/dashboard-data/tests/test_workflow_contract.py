@@ -11,6 +11,52 @@ import yaml
 WORKFLOWS = Path(__file__).resolve().parents[7] / '.github/workflows'
 
 
+@pytest.mark.parametrize('event', ['pull_request', 'push'])
+def test_website_ci_watches_benchmark_preparation(event):
+    workflow = yaml.safe_load((WORKFLOWS / 'rocjitsu-website-test.yml').read_text())
+    # PyYAML's YAML 1.1 loader reads the unquoted Actions `on` key as True.
+    triggers = workflow[True]
+    assert (
+        'emulation/rocjitsu/scripts/prepare-benchmarks.py' in triggers[event]['paths']
+    )
+
+
+def test_python_ci_names_its_current_workflow_responsibilities():
+    workflow = yaml.safe_load((WORKFLOWS / 'rocjitsu-website-test.yml').read_text())
+    job = workflow['jobs']['dashboard-data']
+    assert job['name'] == 'Verify benchmark preparation and publication'
+    step = next(s for s in job['steps'] if 'python -m pytest' in s.get('run', ''))
+    assert step['name'] == 'Test benchmark preparation and publication'
+    assert step['run'] == 'python -m pytest scripts/dashboard-data/tests'
+
+
+def test_website_ci_runs_opt_in_published_data_production_smoke():
+    workflow = yaml.safe_load((WORKFLOWS / 'rocjitsu-website-test.yml').read_text())
+    job = workflow['jobs']['verify']
+    steps = job['steps']
+    smoke = next(
+        (s for s in steps if s['name'] == 'Smoke test published dashboard data'), None
+    )
+    assert (
+        smoke is not None
+    ), 'Website CI must test the new build against published data'
+    assert (
+        smoke['run']
+        == 'npm run test:e2e:production -- tests/production/published-data.e2e.js'
+    )
+    assert smoke['env'] == {'PLAYWRIGHT_PUBLISHED_DATA': '1'}
+    assert 'if' not in smoke and 'continue-on-error' not in smoke
+    assert not job.get('continue-on-error', False)
+    assert steps.index(smoke) > next(
+        i for i, s in enumerate(steps) if s['name'] == 'Verify website'
+    )
+    assert steps.index(smoke) < next(
+        i for i, s in enumerate(steps) if s['name'] == 'Upload Playwright diagnostics'
+    )
+    assert 'PLAYWRIGHT_PUBLISHED_DATA' not in workflow.get('env', {})
+    assert 'PLAYWRIGHT_PUBLISHED_DATA' not in job.get('env', {})
+
+
 def test_publication_serializes_shared_branch_writes_without_dropping_pending_jobs():
     workflow = yaml.safe_load((WORKFLOWS / 'rocjitsu-benchmarks.yml').read_text())
     assert workflow['jobs']['publish']['concurrency'] == {
