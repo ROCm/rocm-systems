@@ -215,14 +215,18 @@ TEST_F(FormattedLoadRaceTest, RecordingPcsDoesNotDisassemble) {
   class ObservableInstruction final : public Instruction {
   public:
     ObservableInstruction() : Instruction("s_nop", nullptr) {}
-    bool was_disassembled() const { return !disassembly_.empty(); }
+    std::string disassemble() const override {
+      was_disassembled = true;
+      return Instruction::disassemble();
+    }
+    mutable bool was_disassembled = false;
   } instruction;
   for (uint64_t pc : {0x540024b100ULL, 0x100002a100ULL})
     fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(pc, instruction, *wave);
   ASSERT_EQ(plugin_state->trace.size(), 2u);
   EXPECT_EQ(plugin_state->trace[0], 0x540024b100ULL);
   EXPECT_EQ(plugin_state->trace[1], 0x100002a100ULL);
-  EXPECT_FALSE(instruction.was_disassembled());
+  EXPECT_FALSE(instruction.was_disassembled);
 }
 
 TEST_F(FormattedLoadRaceTest, RejectsWholeDestinationRangeWhenItExceedsTheWaveAllocation) {
