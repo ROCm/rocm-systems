@@ -1768,6 +1768,8 @@ NCCL_MULTI_SEGMENT_REGISTER
 Register one DMA-BUF memory region per physical segment. When this is off,
 registration keeps the single-region path.
 
+On HIP, GIN registration of a window that spans more than one device-memory segment requires this variable set to 1. With 0, registration fails with ``ncclInvalidUsage`` instead of registering only the first segment.
+
 Value accepted
 ^^^^^^^^^^^^^^
 0 or 1. Default is 0 on HIP, so multi-segment registration stays off until a
