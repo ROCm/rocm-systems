@@ -104,6 +104,8 @@ store_value(const Type& value, std::uint8_t* buffer, size_t& position)
     else if constexpr(type_traits::is_vector_v<DecayedType> ||
                       type_traits::is_span_v<DecayedType>)
     {
+        static_assert(std::is_trivially_copyable_v<typename DecayedType::value_type>,
+                      "vectors are cached as raw bytes");
         const size_t total_size  = get_size(value);
         const size_t header_size = sizeof(size_t);
         const size_t data_size   = total_size - header_size;
@@ -147,19 +149,16 @@ parse_value(std::uint8_t*& data_pos, Type& arg)
     else if constexpr(type_traits::is_vector_v<DecayedType> ||
                       type_traits::is_span_v<DecayedType>)
     {
-        using ContainerType     = std::decay_t<decltype(arg)>;
-        using ItemType          = ContainerType::value_type;
-        const size_t item_size  = sizeof(ItemType);
-        size_t       total_size = 0;
+        using item_type = std::decay_t<decltype(arg)>::value_type;
+        static_assert(std::is_trivially_copyable_v<item_type>,
+                      "vectors are cached as raw bytes");
+        size_t total_size = 0;
         std::memcpy(&total_size, data_pos, sizeof(size_t));
         data_pos += sizeof(size_t);
-        const size_t item_count = total_size / item_size;
-        arg.reserve(item_count);
-        for(size_t i = 0; i < item_count; ++i)
+        arg.resize(total_size / sizeof(item_type));
+        if(total_size != 0)
         {
-            ItemType item;
-            std::memcpy(&item, data_pos + i * item_size, item_size);
-            arg.push_back(std::move(item));
+            std::memcpy(arg.data(), data_pos, total_size);
         }
         data_pos += total_size;
     }
