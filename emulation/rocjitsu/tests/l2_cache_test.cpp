@@ -39,7 +39,6 @@
 #include <string>
 #include <string_view>
 #include <sys/mman.h>
-#include <sys/syscall.h>
 #include <thread>
 #include <unistd.h>
 #include <vector>
@@ -3028,7 +3027,7 @@ TEST(L2CacheThreadingTest, CrossL2AtomicRmwAliasedVasIsSerialized) {
 
 TEST(L2CacheThreadingTest, CrossL2AtomicRmwDistinctSharedMappingsIncludesDirtyWriteback) {
   constexpr size_t kMappingSize = GpuMemory::PAGE_SIZE;
-  const int raw_fd = static_cast<int>(syscall(SYS_memfd_create, "l2_atomic_alias", MFD_CLOEXEC));
+  const int raw_fd = static_cast<int>(memfd_create("l2_atomic_alias", MFD_CLOEXEC));
   ASSERT_GE(raw_fd, 0);
   ScopedFd fd(raw_fd);
   ASSERT_EQ(ftruncate(fd.get(), static_cast<off_t>(kMappingSize)), 0);
@@ -3112,8 +3111,7 @@ TEST(L2CacheThreadingTest, CrossL2AtomicRmwDistinctSharedMappingsIncludesDirtyWr
 
 TEST(DeviceCacheCoherenceTest, ScalarWriteThroughSurvivesAliasedRemoteAtomic) {
   constexpr size_t kMappingSize = GpuMemory::PAGE_SIZE;
-  const int raw_fd =
-      static_cast<int>(syscall(SYS_memfd_create, "scalar_atomic_alias", MFD_CLOEXEC));
+  const int raw_fd = static_cast<int>(memfd_create("scalar_atomic_alias", MFD_CLOEXEC));
   ASSERT_GE(raw_fd, 0);
   ScopedFd fd(raw_fd);
   ASSERT_EQ(ftruncate(fd.get(), static_cast<off_t>(kMappingSize)), 0);
@@ -3177,8 +3175,7 @@ TEST(DeviceCacheCoherenceTest, ScalarWriteThroughSurvivesAliasedRemoteAtomic) {
 
 TEST(DeviceCacheCoherenceTest, DisjointDirtyL2AliasesSurviveRemoteAtomic) {
   constexpr size_t kMappingSize = GpuMemory::PAGE_SIZE;
-  const int raw_fd =
-      static_cast<int>(syscall(SYS_memfd_create, "l2_dirty_atomic_alias", MFD_CLOEXEC));
+  const int raw_fd = static_cast<int>(memfd_create("l2_dirty_atomic_alias", MFD_CLOEXEC));
   ASSERT_GE(raw_fd, 0);
   ScopedFd fd(raw_fd);
   ASSERT_EQ(ftruncate(fd.get(), static_cast<off_t>(kMappingSize)), 0);

@@ -34,7 +34,6 @@ public:
   ssize_t (*read)(int, void *, size_t) = nullptr;
   ssize_t (*write)(int, const void *, size_t) = nullptr;
   int (*ioctl)(int, unsigned long, ...) = nullptr;
-  long (*syscall)(long, ...) = nullptr;
   void *(*mmap)(void *, size_t, int, int, int, off_t) = nullptr;
   int (*munmap)(void *, size_t) = nullptr;
   int (*mprotect)(void *, size_t, int) = nullptr;
@@ -74,6 +73,9 @@ public:
   int (*lxstat_fn)(int, const char *, struct stat *) = nullptr;
   int (*lxstat64_fn)(int, const char *, struct stat64 *) = nullptr;
   pid_t (*fork)() = nullptr;
+  // Optional on older libc versions; callers must handle a missing wrapper.
+  int (*pidfd_open)(pid_t, unsigned int) = nullptr;
+  ssize_t (*getdents64)(int, void *, size_t) = nullptr;
 
   /// @brief Return true after all required symbols have been resolved.
   [[nodiscard]] bool ready() const { return initialized_; }

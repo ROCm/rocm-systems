@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/kmd/linux/transport.h"
+#include "rocjitsu/kmd/linux/libc_passthrough.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 
 #include <filesystem>
 #include <sys/socket.h>
-#include <sys/syscall.h>
 #include <sys/un.h>
 #include <unistd.h>
 
@@ -30,7 +30,7 @@ std::unique_ptr<UnixTransport> UnixTransport::listen(const std::string &endpoint
 
   if (bind(sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0 ||
       ::listen(sock, 16) != 0) {
-    ::close(sock);
+    PassthroughFdTraits::close(sock);
     return nullptr;
   }
 
@@ -54,7 +54,7 @@ std::unique_ptr<UnixTransport> UnixTransport::connect(const std::string &endpoin
   endpoint.copy(addr.sun_path, sizeof(addr.sun_path) - 1);
 
   if (::connect(sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0) {
-    syscall(SYS_close, sock);
+    PassthroughFdTraits::close(sock);
     return nullptr;
   }
 
@@ -76,7 +76,7 @@ ssize_t UnixTransport::recv_with_handle(void *data, size_t len, int *handle_out,
 
 void UnixTransport::close() {
   if (fd_ >= 0) {
-    ::close(fd_);
+    PassthroughFdTraits::close(fd_);
     fd_ = -1;
   }
 }

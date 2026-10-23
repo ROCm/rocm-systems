@@ -66,13 +66,13 @@ RJ_DIAGNOSTIC_POP
 #include <exception>
 #include <fcntl.h>
 #include <limits>
-#include <linux/futex.h>
 #include <linux/memfd.h>
 #include <linux/sync_file.h>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <poll.h>
 #include <pthread.h>
 #include <signal.h>
 #include <sstream>
@@ -85,7 +85,6 @@ RJ_DIAGNOSTIC_POP
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
-#include <sys/syscall.h>
 #include <sys/sysmacros.h>
 #include <sys/uio.h>
 #include <sys/un.h>
@@ -138,9 +137,6 @@ namespace {
 static_assert(std::atomic<bool>::is_always_lock_free,
               "fork child initialization requires a lock-free backend flag");
 
-static_assert(std::atomic<uint32_t>::is_always_lock_free,
-              "futex-backed state requires a lock-free uint32_t atomic");
-
 /// @brief Classify real GPU device identities without locks or context access.
 [[nodiscard]] bool is_real_gpu_device(const struct stat &info, dev_t host_kfd) {
   constexpr unsigned kDrmMajor = 226;
@@ -148,20 +144,88 @@ static_assert(std::atomic<uint32_t>::is_always_lock_free,
          (major(info.st_rdev) == kDrmMajor || (host_kfd != 0 && info.st_rdev == host_kfd));
 }
 
-/// @brief Sleep while @p word still equals @p expected, until @p deadline or a signal.
-long futex_wait_until(std::atomic<uint32_t> &word, uint32_t expected, const timespec *deadline) {
-  // Wine may call pthread_exit from a signal handler during this wait. Use the
-  // resolved pointer to avoid libc's noexcept declaration of syscall, which
-  // would terminate forced unwinding instead of releasing the waiter's state.
-  return rocjitsu::libc_passthrough().syscall(SYS_futex, &word, FUTEX_WAIT_BITSET_PRIVATE, expected,
-                                              deadline, nullptr, FUTEX_BITSET_MATCH_ANY);
-}
+/// @brief Broadcast state changes through interruptible libc waits.
+/// @details Each sleeper owns an eventfd so one waiter cannot consume another's
+/// wakeup. Registration precedes the generation check, closing the check/sleep
+/// race. ppoll preserves EINTR and permits forced unwinding during thread exit.
+class SyncobjNotification {
+public:
+  uint32_t load(std::memory_order order) const { return generation_.load(order); }
 
-/// @brief Wake every waiter sleeping on @p word.
-void futex_wake_all(std::atomic<uint32_t> &word) {
-  (void)syscall(SYS_futex, &word, FUTEX_WAKE_PRIVATE, std::numeric_limits<int>::max(), nullptr,
-                nullptr, 0);
-}
+  int wait_until(uint32_t expected, const timespec *deadline) {
+    rocjitsu::UniqueDriverFd event(::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK));
+    if (!event)
+      return -1;
+    Waiter waiter(*this, event.get());
+    if (generation_.load(std::memory_order_acquire) != expected)
+      return 0;
+    timespec remaining{};
+    if (deadline) {
+      timespec now{};
+      if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+        return -1;
+      remaining.tv_sec = deadline->tv_sec - now.tv_sec;
+      remaining.tv_nsec = deadline->tv_nsec - now.tv_nsec;
+      if (remaining.tv_nsec < 0) {
+        --remaining.tv_sec;
+        remaining.tv_nsec += 1'000'000'000;
+      }
+      if (remaining.tv_sec < 0) {
+        errno = ETIMEDOUT;
+        return -1;
+      }
+    }
+    pollfd descriptor{event.get(), POLLIN, 0};
+    const int result = ::ppoll(&descriptor, 1, deadline ? &remaining : nullptr, nullptr);
+    if (result > 0)
+      return 0;
+    if (result == 0)
+      errno = ETIMEDOUT;
+    return -1;
+  }
+
+  void notify_all() {
+    std::lock_guard lock(mutex_);
+    generation_.fetch_add(1, std::memory_order_release);
+    const uint64_t value = 1;
+    for (Waiter *waiter = waiters_; waiter; waiter = waiter->next) {
+      ssize_t result;
+      do {
+        result = rocjitsu::libc_passthrough().write(waiter->fd, &value, sizeof(value));
+      } while (result < 0 && errno == EINTR);
+      // EAGAIN means the eventfd already contains a wakeup.
+    }
+  }
+
+private:
+  class Waiter {
+  public:
+    Waiter(SyncobjNotification &owner, int descriptor) : fd(descriptor), owner_(owner) {
+      std::lock_guard lock(owner_.mutex_);
+      next = owner_.waiters_;
+      owner_.waiters_ = this;
+    }
+    ~Waiter() {
+      std::lock_guard lock(owner_.mutex_);
+      Waiter **entry = &owner_.waiters_;
+      while (*entry != this)
+        entry = &(*entry)->next;
+      *entry = next;
+    }
+    Waiter(const Waiter &) = delete;
+    Waiter &operator=(const Waiter &) = delete;
+
+    int fd;
+    Waiter *next = nullptr;
+
+  private:
+    SyncobjNotification &owner_;
+  };
+
+  std::atomic<uint32_t> generation_{0};
+  std::mutex mutex_;
+  Waiter *waiters_ = nullptr;
+};
 
 /// @brief Attempt to connect @p sock to the AF_UNIX socket at @p path.
 /// @returns A connected socket fd on success; -1 with errno set on failure.
@@ -330,30 +394,6 @@ child_config_handoff(const std::string &cfg_file) {
   return rocjitsu::config::parse_dbt_runtime_config_handoff(contents);
 }
 
-void *raw_mmap_syscall(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
-  // syscall(2) is the libc wrapper, not a raw inline syscall instruction: on
-  // kernel errors it returns -1 and sets errno. For mmap(2), success returns
-  // the mapped address; for munmap(2), success returns exactly 0.
-  long rc = syscall(SYS_mmap, addr, length, prot, flags, fd, offset);
-  if (rc == -1)
-    return MAP_FAILED;
-  return reinterpret_cast<void *>(static_cast<uintptr_t>(rc));
-}
-
-void *raw_mremap_syscall(void *old_address, size_t old_size, size_t new_size, int flags,
-                         void *new_address) {
-  long rc = syscall(SYS_mremap, old_address, old_size, new_size, flags, new_address);
-  if (rc < 0)
-    return MAP_FAILED;
-  return reinterpret_cast<void *>(static_cast<uintptr_t>(rc));
-}
-
-int raw_munmap_syscall(void *addr, size_t length) {
-  long rc = syscall(SYS_munmap, addr, length);
-  assert(rc == 0 || rc == -1);
-  return static_cast<int>(rc);
-}
-
 void rj_sigsegv_handler(int, siginfo_t *, void *) {
   signal(SIGSEGV, SIG_DFL);
   raise(SIGSEGV);
@@ -377,7 +417,7 @@ void preallocate_backing_fd_table() {
   if (!single_threaded || !*single_threaded)
     return;
   struct rlimit original {};
-  if (syscall(SYS_prlimit64, 0, RLIMIT_NOFILE, nullptr, &original) != 0)
+  if (getrlimit(RLIMIT_NOFILE, &original) != 0)
     return;
   const bool raise_limit = original.rlim_cur <= SimulatedKfd::kBackingFdMin;
   if (raise_limit) {
@@ -387,21 +427,20 @@ void preallocate_backing_fd_table() {
     // Temporarily lift it while this thread owns the process limit exclusively.
     struct rlimit temporary = original;
     temporary.rlim_cur = SimulatedKfd::kBackingFdMin + 1;
-    if (syscall(SYS_prlimit64, 0, RLIMIT_NOFILE, &temporary, nullptr) != 0)
+    if (setrlimit(RLIMIT_NOFILE, &temporary) != 0)
       return;
   }
-  // Use only raw syscalls until the limit is restored: no callback can create a
-  // thread while the process limit differs from the application's setting.
-  const int temporary_fd =
-      static_cast<int>(syscall(SYS_openat, AT_FDCWD, "/dev/null", O_RDONLY | O_CLOEXEC, 0));
+  // Bypass our hooks while the process limit differs from the application's setting.
+  const int temporary_fd = static_cast<int>(
+      rocjitsu::libc_passthrough().openat(AT_FDCWD, "/dev/null", O_RDONLY | O_CLOEXEC, 0));
   if (temporary_fd >= 0) {
-    const int high_fd = static_cast<int>(
-        syscall(SYS_fcntl, temporary_fd, F_DUPFD_CLOEXEC, SimulatedKfd::kBackingFdMin));
+    const int high_fd = static_cast<int>(rocjitsu::libc_passthrough().fcntl(
+        temporary_fd, F_DUPFD_CLOEXEC, SimulatedKfd::kBackingFdMin));
     if (high_fd >= 0)
-      syscall(SYS_close, high_fd);
-    syscall(SYS_close, temporary_fd);
+      rocjitsu::libc_passthrough().close(high_fd);
+    rocjitsu::libc_passthrough().close(temporary_fd);
   }
-  if (raise_limit && syscall(SYS_prlimit64, 0, RLIMIT_NOFILE, &original, nullptr) != 0)
+  if (raise_limit && setrlimit(RLIMIT_NOFILE, &original) != 0)
     std::fprintf(stderr, "rocjitsu: cannot restore descriptor limit: %s\n", std::strerror(errno));
 }
 
@@ -436,14 +475,6 @@ public:
   static InterposerContext &ctx;
 
   static void init() {
-    // Grow the descriptor table before the backend starts worker threads. Growing
-    // a shared Linux descriptor table for the first high backing descriptor can
-    // wait for an RCU grace period. Keep the driver's existing descriptor range;
-    // only the table capacity survives these temporary descriptors. Failure is
-    // harmless, including when the hard descriptor limit excludes that range.
-    const int saved_errno = errno;
-    preallocate_backing_fd_table();
-    errno = saved_errno;
     new (storage_) InterposerContext();
     ctx.owner_pid_ = getpid();
     // Record the HOST KFD device identity once, here, while single-threaded and
@@ -497,26 +528,31 @@ public:
       std::fprintf(stderr, "rocjitsu: cannot register fork child initialization: %s\n",
                    std::strerror(fork_error));
     real().resolve();
+    // Grow the descriptor table before the backend starts worker threads. Growing
+    // a shared Linux descriptor table for the first high backing descriptor can
+    // wait for an RCU grace period. Keep the driver's existing descriptor range;
+    // only the table capacity survives these temporary descriptors. Failure is
+    // harmless, including when the hard descriptor limit excludes that range.
+    const int saved_errno = errno;
+    preallocate_backing_fd_table();
+    errno = saved_errno;
   }
 
   /// @brief Conservatively detect real GPU descriptors inherited outside this backend.
-  /// @details Only raw syscalls and stack storage are used in the child handler.
+  /// @details Only resolved libc wrappers and stack storage are used in the child handler.
   static bool inherits_real_gpu_descriptor() {
-    const int directory = static_cast<int>(
-        syscall(SYS_openat, AT_FDCWD, "/proc/self/fd", O_RDONLY | O_DIRECTORY | O_CLOEXEC, 0));
+    // Older libc versions cannot enumerate descriptors without allocating here.
+    // Refuse fresh GPU initialization when inherited descriptors cannot be checked.
+    if (!real().getdents64)
+      return true;
+    const int directory = static_cast<int>(rocjitsu::libc_passthrough().openat(
+        AT_FDCWD, "/proc/self/fd", O_RDONLY | O_DIRECTORY | O_CLOEXEC, 0));
     if (directory < 0)
       return true;
-    struct DirectoryEntry {
-      uint64_t inode;
-      int64_t offset;
-      uint16_t record_size;
-      uint8_t type;
-      char name[1];
-    };
-    alignas(DirectoryEntry) char entries[4096];
+    alignas(struct dirent64) char entries[4096];
     bool found = false;
     for (;;) {
-      const long count = syscall(SYS_getdents64, directory, entries, sizeof(entries));
+      const long count = real().getdents64(directory, entries, sizeof(entries));
       if (count < 0 && errno == EINTR)
         continue;
       if (count <= 0) {
@@ -524,14 +560,14 @@ public:
         break;
       }
       for (long offset = 0; offset < count;) {
-        const DirectoryEntry *entry = reinterpret_cast<const DirectoryEntry *>(entries + offset);
-        if (entry->record_size < offsetof(DirectoryEntry, name) + 2 ||
-            entry->record_size > count - offset) {
+        const auto *entry = reinterpret_cast<const struct dirent64 *>(entries + offset);
+        if (entry->d_reclen < offsetof(struct dirent64, d_name) + 2 ||
+            entry->d_reclen > count - offset) {
           found = true;
           break;
         }
-        const char *name = entries + offset + offsetof(DirectoryEntry, name);
-        offset += entry->record_size;
+        const char *name = entries + offset + offsetof(struct dirent64, d_name);
+        offset += entry->d_reclen;
         if (*name < '0' || *name > '9')
           continue;
         int fd = 0;
@@ -540,7 +576,7 @@ public:
         struct stat info {};
         long status;
         do {
-          status = syscall(SYS_fstat, fd, &info);
+          status = real().fstat_fn(fd, &info);
         } while (status < 0 && errno == EINTR);
         // An unclassified inherited descriptor may be a real GPU device.
         if (status < 0 || is_real_gpu_device(info, ctx.host_kfd_rdev_)) {
@@ -551,7 +587,7 @@ public:
       if (found)
         break;
     }
-    (void)syscall(SYS_close, directory);
+    (void)rocjitsu::libc_passthrough().close(directory);
     return found;
   }
 
@@ -1356,8 +1392,9 @@ public:
       if (notified || !fence || (!fence->is_signaled() && !fence->is_failed()))
         return;
       uint64_t value = 1;
-      if (event_fd->use([&](int fd) { return syscall(SYS_write, fd, &value, sizeof(value)); }) ==
-          sizeof(value))
+      if (event_fd->use([&](int fd) {
+            return rocjitsu::libc_passthrough().write(fd, &value, sizeof(value));
+          }) == sizeof(value))
         notified = true;
     }
   };
@@ -1475,10 +1512,8 @@ public:
     uint32_t next_syncobj_handle = 1;
     std::unordered_map<uint32_t, std::shared_ptr<SyncobjEntry>> syncobj_entries;
     // Timeline activity on one DRM file must not wake waiters belonging to every
-    // other open DRM file in the process. Waiters sleep on this generation with
-    // futex(2), which preserves EINTR instead of transparently restarting after a
-    // signal as std::condition_variable does.
-    std::atomic<uint32_t> syncobj_generation{0};
+    // other open DRM file in the process. ppoll preserves signal interruption.
+    SyncobjNotification syncobj_generation;
     bool imported_sync_fence = false; // Wait on the cross-file notification generation.
     uint32_t next_context_id = 1;
     std::unordered_set<uint32_t> contexts;
@@ -1941,7 +1976,7 @@ public:
         if (!(request.flags & DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT))
           return -EINVAL;
         lock.unlock();
-        const long rc = futex_wait_until(file->syncobj_generation, generation, &deadline);
+        const long rc = file->syncobj_generation.wait_until(generation, &deadline);
         const int wait_errno = errno;
         lock.lock();
         if (rc == 0 || wait_errno == EAGAIN)
@@ -1967,7 +2002,7 @@ public:
   int create_sync_file_locked(const std::shared_ptr<SyncobjFence> &fence) {
     auto object = std::make_shared<SyncFile>();
     object->fence = fence;
-    const int fd = static_cast<int>(syscall(SYS_eventfd2, 0, EFD_CLOEXEC | EFD_NONBLOCK));
+    const int fd = static_cast<int>(::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK));
     if (fd < 0)
       return -errno;
     object->event_fd = PrivateDrmFd::duplicate(fd);
@@ -2098,7 +2133,7 @@ public:
   }
 
   /// @brief Wait for one or all requested points in a DRM-file namespace.
-  /// @details Waiters use a per-file generation futex. Producers update the
+  /// @details Waiters use per-file notifications. Producers update the
   /// points under fd_mutex_, increment the generation with release ordering, and
   /// wake all sleepers; waiters recheck state under the same mutex after waking.
   int wait_syncobj_timeline(const DrmFileToken &file, drm_syncobj_timeline_wait *wait) {
@@ -2191,11 +2226,11 @@ public:
       lock.unlock();
       const timespec deadline{static_cast<time_t>(request.timeout_nsec / 1'000'000'000LL),
                               static_cast<long>(request.timeout_nsec % 1'000'000'000LL)};
-      // This user-space model cannot recover which signal interrupted futex(2),
+      // This user-space model cannot recover which signal interrupted ppoll(2),
       // so it cannot apply the kernel ioctl layer's SA_RESTART decision. Surface
       // EINTR consistently and let callers retry; the focused regression pins
       // that documented difference from the in-kernel DRM implementation.
-      const long rc = futex_wait_until(generation_word, generation, &deadline);
+      const long rc = generation_word.wait_until(generation, &deadline);
       const int wait_errno = errno;
       lock.lock();
       if (rc == 0 || wait_errno == EAGAIN)
@@ -2238,14 +2273,12 @@ public:
     return entry != file->syncobj_entries.end() ? entry->second : nullptr;
   }
 
-  /// @brief Advance the per-file generation and wake every futex waiter.
+  /// @brief Advance the per-file generation and wake every waiter.
   void notify_syncobj_waiters(const DrmFileToken &file) {
     if (!file)
       return;
-    file->syncobj_generation.fetch_add(1, std::memory_order_release);
-    futex_wake_all(file->syncobj_generation);
-    imported_syncobj_generation_.fetch_add(1, std::memory_order_release);
-    futex_wake_all(imported_syncobj_generation_);
+    file->syncobj_generation.notify_all();
+    imported_syncobj_generation_.notify_all();
     std::lock_guard lock(fd_mutex_);
     for (const auto &[fd, object] : sync_file_fds_)
       object->refresh();
@@ -2729,7 +2762,7 @@ public:
                              driver](bool success) {
         if (success && fence_fd)
           success = fence_fd->use([&](int fd) {
-            return syscall(SYS_pwrite64, fd, &sequence, sizeof(sequence), user_fence->offset);
+            return ::pwrite(fd, &sequence, sizeof(sequence), user_fence->offset);
           }) == sizeof(sequence);
         // The executing CP keeps its driver alive. Do not acquire a VM ownership
         // snapshot here: its last release must never join the engine from itself.
@@ -2827,8 +2860,8 @@ public:
       const timespec deadline{static_cast<time_t>(request.timeout / 1'000'000'000),
                               static_cast<long>(request.timeout % 1'000'000'000)};
       lock.unlock();
-      const long rc = futex_wait_until(file->syncobj_generation, generation,
-                                       request.timeout == UINT64_MAX ? nullptr : &deadline);
+      const long rc = file->syncobj_generation.wait_until(
+          generation, request.timeout == UINT64_MAX ? nullptr : &deadline);
       const int wait_errno = errno;
       lock.lock();
       if (rc == 0 || wait_errno == EAGAIN || wait_errno == ETIMEDOUT)
@@ -3710,7 +3743,7 @@ private:
   std::mutex init_mutex_;
   std::mutex fd_mutex_;
   std::unordered_map<int, std::shared_ptr<SyncFile>> sync_file_fds_;
-  std::atomic<uint32_t> imported_syncobj_generation_{0};
+  SyncobjNotification imported_syncobj_generation_;
   /// Serializes synthetic DRM fd-table operations with tracking updates. The
   /// kernel makes close and duplication atomic with respect to the process fd
   /// table; this lock extends that atomicity through the interposer's drm_fds_
@@ -3892,9 +3925,9 @@ namespace {
 /// @pre The caller owns the interposer state. A child that inherited an active
 /// backend must not reach this: the lock's holder may not have survived fork.
 /// Children of an unused context get a fresh lock in the atfork handler.
-template <typename F> auto with_host_mapping_held(F &&syscall) {
+template <typename F> auto with_host_mapping_held(F &&operation) {
   auto lock = rocjitsu::host_mapping_lock().lock_exclusive();
-  return syscall();
+  return operation();
 }
 } // namespace
 
@@ -4279,8 +4312,7 @@ inline void rj_path_normalize(char *p) {
 /// or any mutex -- i.e. before touching anything inherited at all.
 ///
 /// Callers must already have confirmed real().ready(); this deliberately does not
-/// re-test it, because the not-ready early path differs per hook (raw syscall or
-/// dlsym) and must run first.
+/// re-test it, because each hook's early libc lookup must run first.
 [[nodiscard]] inline bool rj_owns_interposer_state() {
   return InterposerContext::ctx.owned_by_current_process();
 }
@@ -4460,9 +4492,10 @@ RJ_INTERPOSER_EXPORT int close(int fd) {
   // A PRIME export fd also releases the BO state it retained. No-op for
   // non-dmabuf fds.
   //
-  // A record does not prove the fd is a dmabuf: close_range or a raw SYS_close leaves
-  // it behind on a number the kernel then reuses. The descriptor's own cleanup below
-  // therefore still runs, and only a descriptor nothing else tracks is closed here.
+  // A record does not prove the fd is a dmabuf: close_range or a close that
+  // bypasses the interposer leaves it behind on a number the kernel then reuses.
+  // The descriptor's own cleanup below therefore still runs, and only a
+  // descriptor nothing else tracks is closed here.
   const bool maybe_export = InterposerContext::ctx.has_gem_export(fd);
   const bool tracked_elsewhere = maybe_export && (InterposerContext::ctx.lookup(fd) != nullptr ||
                                                   InterposerContext::ctx.owns_fd(fd) ||
@@ -5235,7 +5268,7 @@ RJ_INTERPOSER_EXPORT int dup2(int oldfd, int newfd) {
   if (!rj_owns_interposer_state()) {
     if (rj_child_refuses_fd(oldfd))
       return -1;
-    return static_cast<int>(syscall(SYS_dup2, oldfd, newfd));
+    return static_cast<int>(rocjitsu::libc_passthrough().dup2(oldfd, newfd));
   }
   // dup2(fd, fd) is a POSIX no-op that leaves the descriptor live; mutating
   // tracking would drop a still-open ref. Forward without touching tracking.
@@ -5280,13 +5313,12 @@ RJ_INTERPOSER_EXPORT int dup2(int oldfd, int newfd) {
   return rc;
 }
 
-#ifdef SYS_dup3
 RJ_INTERPOSER_EXPORT int dup3(int oldfd, int newfd, int flags) {
   assert(InterposerContext::real().ready());
   if (!rj_owns_interposer_state()) {
     if (rj_child_refuses_fd(oldfd))
       return -1;
-    return static_cast<int>(syscall(SYS_dup3, oldfd, newfd, flags));
+    return static_cast<int>(rocjitsu::libc_passthrough().dup3(oldfd, newfd, flags));
   }
   // dup3(fd, fd, ...) is required to fail with EINVAL without altering the
   // descriptor; do not mutate tracking before the syscall confirms that.
@@ -5328,7 +5360,6 @@ RJ_INTERPOSER_EXPORT int dup3(int oldfd, int newfd, int flags) {
   reconcile_dup_target(rc, reserved, std::move(overwritten_release), std::move(displaced_release));
   return rc;
 }
-#endif
 
 namespace {
 enum class FcntlArgKind { None, Int, Ptr };
@@ -5529,8 +5560,14 @@ RJ_INTERPOSER_EXPORT void *mmap64(void *addr, size_t length, int prot, int flags
 }
 
 static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
-  if (!InterposerContext::real().ready() || !InterposerContext::real().mmap)
-    return raw_mmap_syscall(addr, length, prot, flags, fd, offset);
+  if (!InterposerContext::real().ready() || !InterposerContext::real().mmap) {
+    auto function =
+        util::lookup_symbol<decltype(InterposerContext::real().mmap)>(RTLD_NEXT, "mmap");
+    if (function)
+      return function(addr, length, prot, flags, fd, offset);
+    errno = ENOSYS;
+    return MAP_FAILED;
+  }
   if (!rj_owns_interposer_state()) {
     if (rj_child_refuses_fd(fd))
       return MAP_FAILED;
@@ -5685,8 +5722,14 @@ RJ_INTERPOSER_EXPORT void *mremap(void *old_address, size_t old_size, size_t new
     new_address = va_arg(ap, void *);
     va_end(ap);
   }
-  if (!InterposerContext::real().ready() || !InterposerContext::real().mremap)
-    return raw_mremap_syscall(old_address, old_size, new_size, flags, new_address);
+  if (!InterposerContext::real().ready() || !InterposerContext::real().mremap) {
+    auto function =
+        util::lookup_symbol<decltype(InterposerContext::real().mremap)>(RTLD_NEXT, "mremap");
+    if (function)
+      return function(old_address, old_size, new_size, flags, new_address);
+    errno = ENOSYS;
+    return MAP_FAILED;
+  }
   if (!rj_owns_interposer_state())
     return InterposerContext::real().mremap(old_address, old_size, new_size, flags, new_address);
   return with_host_mapping_held([&] {
@@ -5695,8 +5738,14 @@ RJ_INTERPOSER_EXPORT void *mremap(void *old_address, size_t old_size, size_t new
 }
 
 RJ_INTERPOSER_EXPORT int munmap(void *addr, size_t length) {
-  if (!InterposerContext::real().ready() || !InterposerContext::real().munmap)
-    return raw_munmap_syscall(addr, length);
+  if (!InterposerContext::real().ready() || !InterposerContext::real().munmap) {
+    auto function =
+        util::lookup_symbol<decltype(InterposerContext::real().munmap)>(RTLD_NEXT, "munmap");
+    if (function)
+      return function(addr, length);
+    errno = ENOSYS;
+    return -1;
+  }
   if (!rj_owns_interposer_state())
     return InterposerContext::real().munmap(addr, length);
 

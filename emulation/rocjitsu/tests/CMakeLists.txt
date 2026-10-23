@@ -2202,6 +2202,8 @@ set(_rj_interposer_syncobj_tests
     OversizedBinaryWaitReturnsEnomem
     DestroyRejectsInvalidInput
     TimelineWaitBlocksUntilSignalOrDeadline
+    TimelineWaitExpiresWithoutSignal
+    TimelineSignalWakesEveryBlockedWaiter
     TimelineWaitReturnsEintrForSignal
     ConcurrentVmUpdatesShareTimeline
     OutOfOrderTimelinePointPreservesWatermark

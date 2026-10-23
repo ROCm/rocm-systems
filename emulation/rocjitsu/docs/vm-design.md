@@ -671,7 +671,7 @@ ROCm application
 
 | File | Purpose |
 |------|---------|
-| `interposer.cpp` | LD_PRELOAD shim: intercepts `open`, `ioctl`, `mmap`, `munmap`, `fopen`, `close` via syscall |
+| `interposer.cpp` | LD_PRELOAD shim: intercepts `open`, `ioctl`, `mmap`, `munmap`, `fopen`, `close` with libc passthroughs |
 | `simulated_kfd.h/cpp` | `SimulatedKfd`: handles all KFD ioctls, owns doorbell/event pages |
 | `sysfs.h/cpp` | `Sysfs`: generates a per-process `/tmp/rocjitsu_topology_*` directory that ROCR reads instead of the real `/sys/devices/virtual/kfd/kfd/topology` |
 

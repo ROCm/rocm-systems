@@ -43,7 +43,6 @@ RJ_DIAGNOSTIC_POP
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <fstream>
-#include <linux/futex.h>
 #include <linux/sync_file.h>
 #include <memory>
 #include <poll.h>
@@ -111,6 +110,15 @@ int open_kfd() { return open("/dev/kfd", O_RDWR | O_CLOEXEC); }
 bool read_gpu_id(uint32_t &gpu_id) {
   std::ifstream gpu_id_file("/sys/class/kfd/kfd/topology/nodes/1/gpu_id");
   return static_cast<bool>(gpu_id_file >> gpu_id);
+}
+
+bool thread_is_polling(pid_t tid) {
+  if (tid == 0)
+    return false;
+  std::ifstream state("/proc/self/task/" + std::to_string(tid) + "/syscall");
+  long number;
+  unsigned long address, count;
+  return (state >> number >> std::hex >> address >> count) && number == SYS_ppoll && count == 1;
 }
 
 void noop_signal_handler(int) {}
@@ -4554,6 +4562,75 @@ TEST(InterposerSyncobjTest, TimelineWaitBlocksUntilSignalOrDeadline) {
   EXPECT_EQ(close(kfd), 0);
 }
 
+TEST(InterposerSyncobjTest, TimelineWaitExpiresWithoutSignal) {
+  const int drm = open_drm_render();
+  ASSERT_GE(drm, 0);
+  drm_syncobj_create create{};
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_CREATE, &create), 0);
+  uint64_t point = 1;
+  drm_syncobj_timeline_wait wait{};
+  wait.handles = reinterpret_cast<uintptr_t>(&create.handle);
+  wait.points = reinterpret_cast<uintptr_t>(&point);
+  wait.count_handles = 1;
+  wait.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL | DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT;
+  const auto start = std::chrono::steady_clock::now();
+  wait.timeout_nsec = monotonic_deadline_after(std::chrono::milliseconds(100));
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait), -1);
+  EXPECT_EQ(errno, ETIME);
+  EXPECT_GE(std::chrono::steady_clock::now() - start, std::chrono::milliseconds(50));
+  drm_syncobj_destroy destroy{};
+  destroy.handle = create.handle;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), 0);
+  EXPECT_EQ(close(drm), 0);
+}
+
+TEST(InterposerSyncobjTest, TimelineSignalWakesEveryBlockedWaiter) {
+  const int drm = open_drm_render();
+  ASSERT_GE(drm, 0);
+  drm_syncobj_create create{};
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_CREATE, &create), 0);
+  uint64_t point = 1;
+  std::array<std::atomic<pid_t>, 4> tids{};
+  std::array<int, 4> results{};
+  std::array<std::thread, 4> waiters;
+  for (size_t index = 0; index < waiters.size(); ++index) {
+    waiters[index] = std::thread([&, index] {
+      drm_syncobj_timeline_wait wait{};
+      wait.handles = reinterpret_cast<uintptr_t>(&create.handle);
+      wait.points = reinterpret_cast<uintptr_t>(&point);
+      wait.count_handles = 1;
+      wait.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL | DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT;
+      wait.timeout_nsec = monotonic_deadline_after(std::chrono::seconds(5));
+      tids[index].store(static_cast<pid_t>(syscall(SYS_gettid)), std::memory_order_release);
+      results[index] = ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait);
+    });
+  }
+  bool all_blocked = false;
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+  while (std::chrono::steady_clock::now() < deadline) {
+    all_blocked = std::all_of(tids.begin(), tids.end(), [](const auto &tid) {
+      return thread_is_polling(tid.load(std::memory_order_acquire));
+    });
+    if (all_blocked)
+      break;
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  drm_syncobj_timeline_array signal{};
+  signal.handles = reinterpret_cast<uintptr_t>(&create.handle);
+  signal.points = reinterpret_cast<uintptr_t>(&point);
+  signal.count_handles = 1;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_SIGNAL, &signal), 0);
+  for (auto &waiter : waiters)
+    waiter.join();
+  EXPECT_TRUE(all_blocked);
+  for (int result : results)
+    EXPECT_EQ(result, 0);
+  drm_syncobj_destroy destroy{};
+  destroy.handle = create.handle;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), 0);
+  EXPECT_EQ(close(drm), 0);
+}
+
 TEST(InterposerSyncobjTest, TimelineWaitReturnsEintrForSignal) {
   int kfd = open_kfd();
   ASSERT_GE(kfd, 0);
@@ -4644,20 +4721,14 @@ TEST(InterposerSyncobjTest, TimelineWaitAllowsThreadExitFromSignal) {
     (void)call(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait);
     returned = true;
   });
-  // Wait for the actual futex sleep so a signal during setup cannot make this
+  // Wait for the actual ppoll sleep so a signal during setup cannot make this
   // pass without exercising forced unwinding through the interposer.
   bool blocked = false;
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
   while (std::chrono::steady_clock::now() < deadline) {
-    if (pid_t id = tid.load(std::memory_order_acquire)) {
-      std::ifstream state("/proc/self/task/" + std::to_string(id) + "/syscall");
-      long number;
-      unsigned long address, operation;
-      if (state >> number >> std::hex >> address >> operation && number == SYS_futex &&
-          operation == FUTEX_WAIT_BITSET_PRIVATE) {
-        blocked = true;
-        break;
-      }
+    if (thread_is_polling(tid.load(std::memory_order_acquire))) {
+      blocked = true;
+      break;
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
