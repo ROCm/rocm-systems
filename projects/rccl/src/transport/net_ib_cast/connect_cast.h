@@ -144,6 +144,12 @@ static_assert(offsetof(struct ncclIbConnectionMetadata, devName) ==
 extern int64_t ncclParamMultiSegmentRegister();
 // NCCL_MULTI_SEGMENT_REGISTER=0 keeps the legacy connect metadata, CTS MR and QP depths.
 static inline bool IbCastAdvertiseMultiSeg() { return ncclParamMultiSegmentRegister() != 0; }
+// RCCL: RMA comms never post or wait on a CTS, so they skip the side table and the MULTISEG cap.
+static inline bool IbCastCommAdvertisesMultiSeg(bool multiSegRegister, bool isRMA) {
+  return multiSegRegister && !isRMA;
+}
+// Allocates the CTS block, with the side table appended when sideTable is set.
+ncclResult_t IbCastSendCommAllocCts(struct ncclIbSendComm* comm, bool sideTable);
 
 // RCCL: same outstanding-step depth as classic. One extra chain is not enough.
 static inline int IbCastFlushQpSendDepth() {

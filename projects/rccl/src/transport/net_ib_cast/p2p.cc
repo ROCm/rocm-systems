@@ -116,7 +116,7 @@ static inline ncclResult_t IbCastMultiSendSegmented(struct ncclIbSendComm* comm,
                                                     bool wrrSched, bool useWriteOp) {
   struct ncclIbRequest** reqs = comm->sendReqs[slot];
   volatile void* slots = (volatile void*)comm->ctsFifo[slot];
-  volatile struct ncclIbSegLayout* side = comm->segLayoutFifo[slot];
+  volatile struct ncclIbSegLayout* side = comm->segLayoutFifo ? comm->segLayoutFifo[slot] : NULL;
   int nreqs = ctsFifoNreqs(slots, 0);
   uint64_t nowNs = 0;
   // RCCL: the peer writes this slot, so bound the reload on both sides like IbCastIsend does.

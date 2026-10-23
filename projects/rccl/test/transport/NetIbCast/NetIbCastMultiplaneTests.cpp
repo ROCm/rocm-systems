@@ -29,6 +29,7 @@
 // multiplane public API — include the actual header for ibv_gid and function declarations
 #include "multiplane.h"
 #include "common_cast.h"  // for IbCastAinicRoce
+#include "connect_cast.h"
 
 namespace {
 
@@ -626,6 +627,33 @@ TEST_F(NetIbCastSegmentedSendPrefix, BothQpsPostKeepsBothEvents) {
   EXPECT_EQ(comm->base.reqs[0].type, NCCL_NET_IB_REQ_SEND);
   EXPECT_EQ(comm->base.reqs[0].events[0], 2);
   EXPECT_EQ(comm->base.stats.fatalErrorCount, 0);
+}
+
+TEST(NetIbCastSideTable, RmaCommsDoNotAdvertiseMultiSeg) {
+  EXPECT_TRUE(IbCastCommAdvertisesMultiSeg(/*multiSegRegister=*/true, /*isRMA=*/false));
+  EXPECT_FALSE(IbCastCommAdvertisesMultiSeg(/*multiSegRegister=*/true, /*isRMA=*/true));
+  EXPECT_FALSE(IbCastCommAdvertisesMultiSeg(/*multiSegRegister=*/false, /*isRMA=*/false));
+  EXPECT_FALSE(IbCastCommAdvertisesMultiSeg(/*multiSegRegister=*/false, /*isRMA=*/true));
+}
+
+TEST(NetIbCastSideTable, AllocCtsAppendsSideTableOnlyWhenAsked) {
+  const size_t bytes = (sizeof(ncclIbSendComm) + 63) / 64 * 64;
+  for (bool sideTable : {false, true}) {
+    SCOPED_TRACE(sideTable ? "sideTable" : "no sideTable");
+    auto* comm = static_cast<ncclIbSendComm*>(std::aligned_alloc(64, bytes));
+    ASSERT_NE(comm, nullptr);
+    std::memset(comm, 0, bytes);
+    ASSERT_EQ(IbCastSendCommAllocCts(comm, sideTable), ncclSuccess);
+    ASSERT_NE(comm->ctsFifo, nullptr);
+    if (sideTable) {
+      EXPECT_EQ(reinterpret_cast<uint8_t*>(comm->segLayoutFifo),
+                reinterpret_cast<uint8_t*>(comm->ctsFifo) + IB_CAST_CTS_FIFO_BYTES);
+    } else {
+      EXPECT_EQ(comm->segLayoutFifo, nullptr);
+    }
+    std::free(comm->ctsFifo);
+    std::free(comm);
+  }
 }
 
 }  // namespace
