@@ -48,7 +48,7 @@ def main(argv=None, config=None):
     from . import summary
     from . import time_window
     from . import version_info
-    from .importer import RocpdImportData
+    from .importer import RocpdImportData, add_decode_args, get_decode_args
 
     convert_examples = """
 
@@ -214,6 +214,11 @@ Example usage:
     add_required_args(query_reporter)
     add_required_args(generate_summary)
 
+    # ISA decode options apply to the subcommands that open/decode a database
+    add_decode_args(converter)
+    add_decode_args(query_reporter)
+    add_decode_args(generate_summary)
+
     # converter: add args from any sub-modules
     process_converter_args = []
     process_converter_args.append(output_config.add_args(converter))
@@ -266,6 +271,7 @@ Example usage:
             automerge_limit=getattr(
                 args, "automerge_limit", package.IDEAL_NUMBER_OF_DATABASE_FILES
             ),
+            **get_decode_args(args),
         )
 
         all_args = {}
@@ -325,6 +331,7 @@ Example usage:
             automerge_limit=getattr(
                 args, "automerge_limit", package.IDEAL_NUMBER_OF_DATABASE_FILES
             ),
+            **get_decode_args(args),
         )
 
         # query subparser args
@@ -346,6 +353,7 @@ Example usage:
             automerge_limit=getattr(
                 args, "automerge_limit", package.IDEAL_NUMBER_OF_DATABASE_FILES
             ),
+            **get_decode_args(args),
         )
 
         # summary subparser args

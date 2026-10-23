@@ -2,7 +2,7 @@
 ###############################################################################
 # MIT License
 #
-# Copyright (c) 2025 Advanced Micro Devices, Inc.
+# Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -24,23 +24,394 @@
 ###############################################################################
 
 import os
+import re
 import sys
+import time
 
 from typing import Union, Tuple, List, Optional
 from datetime import datetime
 
 from . import output_config
 from . import libpyrocpd
-from .importer import RocpdImportData
+from .importer import RocpdImportData, add_decode_args, get_decode_args
 
 __all__ = [
     "export_sqlite_query",
     "send_report_email",
     "zip_files",
+    "update_query_for_blob_views",
     "add_args",
     "execute",
     "main",
 ]
+
+
+_BLOB_DECODED_SUFFIX = "_decoded"
+
+
+def _sql_tokens(query: str):
+    """Yield lossless ``(kind, text, start, end)`` spans for SQLite query rewriting.
+
+    Strings, comments, and double-quoted/backtick/bracket identifiers remain
+    single tokens; doubled string and identifier quotes are retained verbatim.
+    Parentheses are individual symbols so callers can track nested expressions
+    and CTE bodies without treating their contents as top-level table factors.
+    Unterminated quotes/comments consume the remaining text; SQL validation is
+    left to SQLite rather than silently repairing the query.
+    """
+    index = 0
+    while index < len(query):
+        start = index
+        char = query[index]
+        if char.isspace():
+            index += 1
+            while index < len(query) and query[index].isspace():
+                index += 1
+            yield "space", query[start:index], start, index
+        elif query.startswith("--", index):
+            end = query.find("\n", index + 2)
+            index = len(query) if end < 0 else end
+            yield "comment", query[start:index], start, index
+        elif query.startswith("/*", index):
+            end = query.find("*/", index + 2)
+            index = len(query) if end < 0 else end + 2
+            yield "comment", query[start:index], start, index
+        elif char == "'":
+            index += 1
+            while index < len(query):
+                if query[index] == "'":
+                    index += 1
+                    if index < len(query) and query[index] == "'":
+                        index += 1
+                        continue
+                    break
+                index += 1
+            yield "string", query[start:index], start, index
+        elif char in ('"', "`", "["):
+            closing = "]" if char == "[" else char
+            index += 1
+            while index < len(query):
+                if query[index] == closing:
+                    index += 1
+                    if closing != "]" and index < len(query) and query[index] == closing:
+                        index += 1
+                        continue
+                    break
+                index += 1
+            yield "identifier", query[start:index], start, index
+        elif char.isalpha() or char == "_":
+            index += 1
+            while index < len(query) and (query[index].isalnum() or query[index] in "_$"):
+                index += 1
+            yield "identifier", query[start:index], start, index
+        else:
+            index += 1
+            yield "symbol", query[start:index], start, index
+
+
+def _identifier_value(text: str) -> str:
+    if text.startswith("[") and text.endswith("]"):
+        return text[1:-1]
+    if text[:1] in ('"', "`") and text.endswith(text[0]):
+        return text[1:-1].replace(text[0] * 2, text[0])
+    return text
+
+
+def _quote_like_identifier(original: str, value: str) -> str:
+    if original.startswith("["):
+        return "[" + value.replace("]", "]]") + "]"
+    if original[:1] in ('"', "`"):
+        quote = original[0]
+        return quote + value.replace(quote, quote * 2) + quote
+    return value
+
+
+def _significant_tokens(tokens):
+    return [token for token in tokens if token[0] not in ("space", "comment")]
+
+
+def _skip_parenthesized(significant, index):
+    """Return the index just past the parenthesized group opening at *index*."""
+    depth = 1
+    index += 1
+    while index < len(significant) and depth:
+        depth += significant[index][1] == "("
+        depth -= significant[index][1] == ")"
+        index += 1
+    return index
+
+
+def _cte_list_names(significant, index):
+    """Return the CTE names of the WITH list whose first token is at *index*."""
+    names = set()
+    if index < len(significant) and significant[index][1].casefold() == "recursive":
+        index += 1
+    while index < len(significant):
+        token = significant[index]
+        if token[0] != "identifier":
+            break
+        names.add(_identifier_value(token[1]).casefold())
+        index += 1
+        if index < len(significant) and significant[index][1] == "(":
+            index = _skip_parenthesized(significant, index)
+        if index >= len(significant) or significant[index][1].casefold() != "as":
+            break
+        index += 1
+        if index < len(significant) and significant[index][1].casefold() == "not":
+            index += 1
+        if (
+            index < len(significant)
+            and significant[index][1].casefold() == "materialized"
+        ):
+            index += 1
+        if index >= len(significant) or significant[index][1] != "(":
+            break
+        index = _skip_parenthesized(significant, index)
+        if index >= len(significant) or significant[index][1] != ",":
+            break
+        index += 1
+    return names
+
+
+def _cte_names(tokens):
+    """Return the names of every CTE in the query, at any nesting depth.
+
+    Identifier quoting is removed and names are case-folded. Comments and
+    literals cannot introduce CTEs. WITH RECURSIVE, optional column lists, and
+    materialization hints are accepted; balanced nested bodies are skipped when
+    advancing through each WITH list, then inspected for their own WITH lists.
+
+    Names are not scoped: a CTE that shadows a blob source table anywhere keeps
+    that name unrewritten everywhere, so the query runs exactly as written.
+    """
+    significant = _significant_tokens(tokens)
+    names = set()
+    for index, token in enumerate(significant):
+        if token[0] == "identifier" and token[1].casefold() == "with":
+            names.update(_cte_list_names(significant, index + 1))
+    return names
+
+
+# Keywords that can directly follow a table name in a FROM/JOIN without being an alias.
+_TABLE_FACTOR_FOLLOWERS = frozenset(
+    (
+        "cross",
+        "except",
+        "full",
+        "group",
+        "having",
+        "indexed",
+        "inner",
+        "intersect",
+        "join",
+        "left",
+        "limit",
+        "natural",
+        "not",
+        "on",
+        "order",
+        "outer",
+        "returning",
+        "right",
+        "union",
+        "using",
+        "where",
+        "window",
+    )
+)
+
+
+def _starts_table_alias(token):
+    """Return True when *token*, which follows a table name, begins its alias."""
+    if token is None or token[0] != "identifier":
+        return False
+    keyword = token[1].casefold()
+    return keyword == "as" or keyword not in _TABLE_FACTOR_FOLLOWERS
+
+
+def update_query_for_blob_views(conn, query: str = None, profile: bool = False):
+    """Rewrite *query* replacing blob-source table references with their
+    ``_decoded`` TEMP VIEW counterparts.
+
+    The decoded TEMP VIEWs and the ``rocpd_blob_field`` scalar function are
+    created during ``RocpdImportData`` initialisation by
+    :func:`importer.setup_blob_views`.  This function only rewrites the
+    query string so callers do not need to manually use the ``_decoded`` suffix.
+
+    A source table is rewritten only when its ``<source>_decoded`` view actually
+    exists -- blob-view setup is skipped for malformed/unknown blob metadata, and
+    rewriting to a non-existent view would turn a still-queryable base table into
+    an error.  Only unqualified references, or references explicitly qualified
+    with ``temp``, are rewritten (the decoded views are TEMP views, so a
+    ``main.``/attached-database qualifier is left untouched), and every table
+    factor in a comma-separated ``FROM`` list is rewritten, not just the first.
+    A rewritten table factor without an alias is aliased to its original name,
+    so ``<source>.<column>`` references keep resolving.  A name defined as a CTE
+    anywhere in *query* is never rewritten; select the ``_decoded`` view
+    explicitly where a query needs both.
+
+    When no rewritable blob source tables are registered, or *query* is ``None``,
+    returns *query* unchanged.
+    """
+    import sqlite3
+
+    _t0 = time.perf_counter() if profile else None
+
+    if not query:
+        return query
+
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT source_table FROM rocpd_info_blob_schema "
+            "WHERE source_table IS NOT NULL"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return query
+
+    if not rows:
+        return query
+
+    try:
+        existing_temp_views = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_temp_master WHERE type = 'view'"
+            ).fetchall()
+        }
+    except sqlite3.OperationalError:
+        return query
+
+    replacements = {}
+    for (source_table,) in rows:
+        if not source_table:
+            continue
+        decoded = f"{source_table}{_BLOB_DECODED_SUFFIX}"
+        if decoded in existing_temp_views:
+            replacements[str(source_table).casefold()] = decoded
+    if not replacements:
+        return query
+
+    tokens = list(_sql_tokens(query))
+    cte_names = _cte_names(tokens)
+    significant_indexes = [
+        index
+        for index, token in enumerate(tokens)
+        if token[0] not in ("space", "comment")
+    ]
+
+    # Clause keywords that close an open FROM list at its own parenthesis depth.
+    _from_list_enders = frozenset(
+        (
+            "where",
+            "group",
+            "having",
+            "window",
+            "order",
+            "limit",
+            "union",
+            "except",
+            "intersect",
+            "returning",
+        )
+    )
+
+    edits = []
+    expect_table = False
+    paren_depth = 0
+    from_list_depths = []  # stack of parenthesis depths with an active FROM list
+    for position, token_index in enumerate(significant_indexes):
+        kind, text, start, end = tokens[token_index]
+        keyword = text.casefold() if kind == "identifier" else text
+
+        if text == "(":
+            paren_depth += 1
+            expect_table = False
+            continue
+        if text == ")":
+            paren_depth -= 1
+            while from_list_depths and from_list_depths[-1] > paren_depth:
+                from_list_depths.pop()
+            expect_table = False
+            continue
+
+        if keyword in ("from", "join"):
+            expect_table = True
+            if keyword == "from":
+                from_list_depths.append(paren_depth)
+            continue
+
+        # A top-level comma inside an active FROM list starts another table factor.
+        if text == "," and from_list_depths and from_list_depths[-1] == paren_depth:
+            expect_table = True
+            continue
+
+        # A clause keyword at the FROM list's depth closes that FROM list.
+        if (
+            kind == "identifier"
+            and keyword in _from_list_enders
+            and from_list_depths
+            and from_list_depths[-1] == paren_depth
+        ):
+            from_list_depths.pop()
+            expect_table = False
+            continue
+
+        if not expect_table:
+            continue
+        expect_table = False
+        if kind != "identifier":
+            continue
+
+        # A qualified name such as main.table / temp.table.  Only rewrite when
+        # unqualified or explicitly qualified with temp (where decoded views live).
+        name_token = tokens[token_index]
+        qualifier = None
+        if position + 2 < len(significant_indexes):
+            dot = tokens[significant_indexes[position + 1]]
+            qualified = tokens[significant_indexes[position + 2]]
+            if dot[1] == "." and qualified[0] == "identifier":
+                qualifier = _identifier_value(name_token[1]).casefold()
+                name_token = qualified
+
+        if qualifier is not None and qualifier != "temp":
+            continue
+
+        name = _identifier_value(name_token[1])
+        replacement = replacements.get(name.casefold())
+        if not replacement:
+            continue
+        # An unqualified name matching a CTE is the CTE, not a table.
+        if qualifier is None and name.casefold() in cte_names:
+            continue
+        replacement_text = _quote_like_identifier(name_token[1], replacement)
+        alias_position = position + (3 if qualifier is not None else 1)
+        alias_token = (
+            tokens[significant_indexes[alias_position]]
+            if alias_position < len(significant_indexes)
+            else None
+        )
+        if not _starts_table_alias(alias_token):
+            replacement_text += f" AS {name_token[1]}"
+        edits.append((name_token[2], name_token[3], replacement_text))
+
+    for start, end, replacement in reversed(edits):
+        query = query[:start] + replacement + query[end:]
+
+    if profile and _t0 is not None:
+        elapsed_ms = (time.perf_counter() - _t0) * 1000.0
+        print(f"Blob view query rewrite: elapsed={elapsed_ms:.2f} ms")
+
+    return query
+
+
+_INTEGER_TEXT = re.compile(r"\s*[+-]?[0-9]+\s*")
+
+
+def _integer_text_to_int(value):
+    """Return integer text as an int; leave every other value unchanged."""
+    if isinstance(value, str) and _INTEGER_TEXT.fullmatch(value):
+        return int(value)
+    return value
 
 
 def export_sqlite_query(
@@ -68,6 +439,9 @@ def export_sqlite_query(
     If export_format == "dashboard", you may optionally pass a
     dashboard_template_path (a Jinja2 template file). If omitted,
     a built-in default template is used.
+
+    For CSV, the ``integer_columns`` keyword names columns whose integer text
+    values are written as unquoted numbers; all other values are unchanged.
     """
     try:
         import pandas as pd
@@ -113,6 +487,12 @@ def export_sqlite_query(
         # 3) Export based on format
         if export_format == "csv":
             import csv
+
+            # Callers name columns that hold integer text (e.g. a 64-bit mask
+            # stored as TEXT) so QUOTE_NONNUMERIC writes them as numbers.
+            for column in kwargs.get("integer_columns", ()):
+                if column in df.columns:
+                    df[column] = df[column].map(_integer_text_to_int)
 
             cols = [f"{itr}" for itr in df.columns.tolist()]
             col_names = (
@@ -187,7 +567,7 @@ def _export_df_to_pdf(df, path: str):
     from reportlab.lib.units import inch
 
     c = canvas.Canvas(path, pagesize=letter)
-    width, height = letter
+    _, height = letter
     x = 0.5 * inch
     y = height - 1 * inch
     row_height = 14
@@ -405,6 +785,12 @@ def add_args(parser):
         type=str.lower,
     )
 
+    query_options.add_argument(
+        "--blob-view-profile",
+        action="store_true",
+        help="Print timing for automatic blob-view query rewriting",
+    )
+
     email_options = parser.add_argument_group("Query Email Options")
 
     # Email options (optional)
@@ -470,11 +856,20 @@ def execute(input, args, config=None, **kwargs):
         # read script and execute statements
         with open(args.script, "r") as ifs:
             for itr in ifs.read().split(";"):
-                input.execute(f"{itr}")
+                stmt = itr.strip()
+                if stmt:
+                    input.execute(stmt)
 
     # Prepare parameters for export
     query = args.query
     db = input
+
+    query = update_query_for_blob_views(
+        db,
+        query=query,
+        profile=getattr(args, "blob_view_profile", False),
+    )
+
     export_format = args.format
     export_path = os.path.join(config.output_path, config.output_file)
 
@@ -538,11 +933,14 @@ def main(argv=None):
     process_generic_args = output_config.add_generic_args(parser)
     process_time_window_args = time_window.add_args(parser)
     process_query_args = add_args(parser)
+    add_decode_args(parser)
 
     args = parser.parse_args(argv)
 
     input = RocpdImportData(
-        args.input, automerge_limit=getattr(args, "automerge_limit", None)
+        args.input,
+        automerge_limit=getattr(args, "automerge_limit", None),
+        **get_decode_args(args),
     )
 
     out_cfg_args = process_out_config_args(input, args)
