@@ -12,6 +12,8 @@
 #include <cstdio>
 #include <cstring>
 #include <fcntl.h>
+#include <linux/filter.h>
+#include <linux/seccomp.h>
 #include <poll.h>
 #include <string>
 #include <sys/mman.h>
@@ -34,6 +36,10 @@
 #endif
 #endif
 
+#ifndef SYS_close_range
+#define SYS_close_range 436
+#endif
+
 namespace {
 namespace backing = rocjitsu::memory_backing;
 constexpr size_t kSize = 64 * 1024;
@@ -46,6 +52,42 @@ protected:
     ASSERT_EQ(std::fflush(stdout), 0);
   }
 };
+
+void check_inherited_descriptors() {
+  int pipes[2];
+  ASSERT_EQ(pipe(pipes), 0);
+  const int high = fcntl(pipes[1], F_DUPFD, 200);
+  ASSERT_GE(high, 200);
+  ASSERT_EQ(close(pipes[1]), 0);
+  const rlimit nofile{64, 64};
+  ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &nofile), 0);
+  sock_filter filter[] = {
+      BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(seccomp_data, nr)),
+      BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_close_range, 0, 1),
+      BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | ENOSYS),
+      BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+  };
+  sock_fprog program{static_cast<unsigned short>(std::size(filter)), filter};
+  ASSERT_EQ(prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0), 0);
+  ASSERT_EQ(prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &program), 0);
+  const int memory = backing::create(kSize);
+  ASSERT_GE(memory, 0);
+  ASSERT_EQ(close(high), 0);
+  pollfd pipe_state{pipes[0], POLLIN | POLLHUP, 0};
+  ASSERT_EQ(poll(&pipe_state, 1, 1000), 1);
+  EXPECT_TRUE(pipe_state.revents & POLLHUP);
+  close(memory);
+  close(pipes[0]);
+}
+
+TEST_F(MemoryBackingDeathTest, ClosesInheritedDescriptorsAboveLoweredHardLimit) {
+  ASSERT_EXIT(
+      {
+        check_inherited_descriptors();
+        _exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
 
 void check_metadata_population() {
   const int warmup = backing::create(1);

@@ -4,11 +4,16 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 
+#if __has_feature(thread_sanitizer)
+#include <sanitizer/common_interface_defs.h>
+#endif
+
 #include <cerrno>
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
+#include <poll.h>
 #include <sys/mman.h>
 #include <sys/resource.h>
 #include <sys/wait.h>
@@ -18,6 +23,13 @@
 namespace {
 volatile sig_atomic_t file_size_signal = 0;
 void on_file_size_signal(int) { file_size_signal = 1; }
+
+void expect_file_size_signal() {
+  // TSan can defer SIGXFSZ until another intercepted blocking call.
+  for (unsigned attempt = 0; attempt < 100 && !file_size_signal; ++attempt)
+    poll(nullptr, 0, 10);
+  EXPECT_EQ(static_cast<int>(file_size_signal), 1);
+}
 
 __global__ void write_cookie(unsigned char *data) { data[0] = 0x37; }
 __global__ void copy_cookie(const unsigned char *source, unsigned char *result) {
@@ -176,11 +188,11 @@ void check_application_limit() {
   EXPECT_EQ(observed_action.sa_handler, on_file_size_signal);
   EXPECT_EQ(pwrite(file, "x", 1, limit.rlim_cur), -1);
   EXPECT_EQ(errno, EFBIG);
-  EXPECT_EQ(file_size_signal, 1);
+  expect_file_size_signal();
   file_size_signal = 0;
   EXPECT_EQ(ftruncate(file, limit.rlim_cur + 1), -1);
   EXPECT_EQ(errno, EFBIG);
-  EXPECT_EQ(file_size_signal, 1);
+  expect_file_size_signal();
   close(file);
 }
 TEST(HipFileSizeLimitTest, PreservesApplicationLimit) {
@@ -207,6 +219,12 @@ TEST(HipFileSizeLimitTest, PreservesApplicationLimit) {
 } // namespace
 
 int main(int argc, char **argv) {
+#if __has_feature(thread_sanitizer)
+  // The symbolizer inherits LD_PRELOAD. Start it before lowering FSIZE so its
+  // TSan runtime can initialize and resolve the existing ROCr suppressions.
+  char symbol[1024];
+  __sanitizer_symbolize_pc(reinterpret_cast<void *>(&main), "%f", symbol, sizeof(symbol));
+#endif
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }

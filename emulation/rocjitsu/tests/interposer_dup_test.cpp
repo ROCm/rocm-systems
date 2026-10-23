@@ -2132,17 +2132,21 @@ protected:
   uint32_t *memory_ = nullptr;
   int private_gem_slot_ = -1;
 
-  void SetUp() override {
+  void SetUp() override { initialize(); }
+
+  void initialize(bool probe_private_descriptors = true) {
     kfd_ = open_kfd();
     ASSERT_GE(kfd_, 0);
     drm_ = open_drm_render();
     ASSERT_GE(drm_, 0);
-    int probe = open("/dev/null", O_RDONLY | O_CLOEXEC);
-    ASSERT_GE(probe, 0);
-    private_gem_slot_ = fcntl(probe, F_DUPFD_CLOEXEC, 4096);
-    ASSERT_GE(private_gem_slot_, 4096);
-    ASSERT_EQ(close(private_gem_slot_), 0);
-    ASSERT_EQ(close(probe), 0);
+    if (probe_private_descriptors) {
+      int probe = open("/dev/null", O_RDONLY | O_CLOEXEC);
+      ASSERT_GE(probe, 0);
+      private_gem_slot_ = fcntl(probe, F_DUPFD_CLOEXEC, 4096);
+      ASSERT_GE(private_gem_slot_, 4096);
+      ASSERT_EQ(close(private_gem_slot_), 0);
+      ASSERT_EQ(close(probe), 0);
+    }
     drm_amdgpu_gem_create create{};
     create.in.bo_size = 8192;
     create.in.alignment = 4096;
@@ -2185,7 +2189,8 @@ protected:
   }
 
   int submit(uint32_t dwords, bool wait_input, uint64_t *sequence,
-             uint32_t engine = AMDGPU_HW_IP_COMPUTE, uint64_t point = 0) {
+             uint32_t engine = AMDGPU_HW_IP_COMPUTE, uint64_t point = 0,
+             uint32_t fence_handle = 0) {
     drm_amdgpu_cs_chunk_ib ib{};
     ib.va_start = kAddress;
     ib.ib_bytes = dwords * 4;
@@ -2200,7 +2205,7 @@ protected:
     dependency.handle = input_;
     dependency.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT;
     drm_amdgpu_cs_chunk_fence fence{};
-    fence.handle = bo_;
+    fence.handle = fence_handle ? fence_handle : bo_;
     fence.offset = 4104;
     std::vector<drm_amdgpu_cs_chunk> chunks;
     auto add = [&](uint32_t id, const auto &data) {
@@ -3067,6 +3072,49 @@ TEST_F(InterposerPm4Test, MalformedPackedGraphicsRegistersFailFence) {
   ASSERT_EQ(submit(std::size(packet), false, &sequence, AMDGPU_HW_IP_GFX), 0);
   EXPECT_EQ(wait_output(monotonic_deadline_after(std::chrono::seconds(5))), -1);
   EXPECT_EQ(errno, EIO);
+}
+
+class InterposerPm4FileLimitTest : public InterposerPm4Test {
+protected:
+  void SetUp() override { initialize(false); }
+};
+
+TEST_F(InterposerPm4FileLimitTest, CompletionSurvivesClosedHandleAndFileLimit) {
+  memory_[0] = 0xffff1000;
+  // A separate fence BO has no GPU VA mapping to initialize its internal view.
+  drm_amdgpu_gem_create create{};
+  create.in.bo_size = 8192;
+  create.in.domains = AMDGPU_GEM_DOMAIN_GTT;
+  ASSERT_EQ(ioctl(drm_, DRM_IOCTL_AMDGPU_GEM_CREATE, &create), 0);
+  const uint32_t fence_handle = create.out.handle;
+  drm_amdgpu_gem_mmap mapping{};
+  mapping.in.handle = fence_handle;
+  ASSERT_EQ(ioctl(drm_, DRM_IOCTL_AMDGPU_GEM_MMAP, &mapping), 0);
+  auto *fence_view = static_cast<uint8_t *>(
+      mmap(nullptr, 8192, PROT_READ | PROT_WRITE, MAP_SHARED, drm_, mapping.out.addr_ptr));
+  ASSERT_NE(fence_view, MAP_FAILED);
+  rlimit limit{};
+  ASSERT_EQ(getrlimit(RLIMIT_FSIZE, &limit), 0);
+  limit.rlim_cur = 0;
+  ASSERT_EQ(setrlimit(RLIMIT_FSIZE, &limit), 0);
+  uint64_t sequence = 0;
+  ASSERT_EQ(submit(1, true, &sequence, AMDGPU_HW_IP_COMPUTE, 0, fence_handle), 0);
+  ASSERT_EQ(gem_close(drm_, fence_handle), 0);
+  ASSERT_EQ(gem_close(drm_, bo_), 0);
+  bo_ = 0;
+  drm_syncobj_array signal{};
+  signal.handles = reinterpret_cast<uint64_t>(&input_);
+  signal.count_handles = 1;
+  ASSERT_EQ(ioctl(drm_, DRM_IOCTL_SYNCOBJ_SIGNAL, &signal), 0);
+  ASSERT_EQ(wait_output(monotonic_deadline_after(std::chrono::seconds(5))), 0);
+  uint64_t observed = 0;
+  std::memcpy(&observed, fence_view + 4104, sizeof(observed));
+  EXPECT_EQ(munmap(fence_view, 8192), 0);
+  EXPECT_EQ(observed, sequence);
+  rlimit after{};
+  ASSERT_EQ(getrlimit(RLIMIT_FSIZE, &after), 0);
+  EXPECT_EQ(after.rlim_cur, limit.rlim_cur);
+  EXPECT_EQ(after.rlim_max, limit.rlim_max);
 }
 
 TEST_F(InterposerPm4Test, DependencyDefersMemoryWriteAndCompletion) {

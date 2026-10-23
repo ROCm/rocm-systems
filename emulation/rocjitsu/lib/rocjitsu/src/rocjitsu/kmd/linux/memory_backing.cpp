@@ -564,8 +564,66 @@ std::string keeper_path() {
   __builtin_unreachable();
 }
 
+// NOFILE may have been lowered below descriptors inherited from the application.
+// Enumerate the actual table without libc directory streams after the raw clone.
+bool close_inherited_fds() {
+  if (host_call(SYS_close_range, 6u, UINT_MAX, 0u) == 0)
+    return true;
+  const int directory =
+      host_call(SYS_openat, AT_FDCWD, "/proc/self/fd", O_RDONLY | O_DIRECTORY | O_CLOEXEC, 0);
+  if (directory < 0)
+    return false;
+  struct DirectoryEntry {
+    uint64_t inode;
+    int64_t offset;
+    unsigned short record_size;
+    unsigned char type;
+    char name[1];
+  };
+  alignas(DirectoryEntry) char buffer[4096];
+  int error = 0;
+  while (!error) {
+    const long bytes = host_call(SYS_getdents64, directory, buffer, sizeof(buffer));
+    if (bytes < 0 && errno == EINTR)
+      continue;
+    if (bytes <= 0) {
+      error = bytes < 0 ? errno : 0;
+      break;
+    }
+    for (size_t position = 0; position < static_cast<size_t>(bytes);) {
+      constexpr size_t name_offset = offsetof(DirectoryEntry, name);
+      if (static_cast<size_t>(bytes) - position < name_offset + 1) {
+        error = EIO;
+        break;
+      }
+      const auto *entry = reinterpret_cast<const DirectoryEntry *>(buffer + position);
+      if (entry->record_size <= name_offset || entry->record_size > bytes - position) {
+        error = EIO;
+        break;
+      }
+      const char *name = buffer + position + name_offset;
+      unsigned number = 0;
+      size_t index = 0;
+      for (; index < entry->record_size - name_offset && name[index] >= '0' && name[index] <= '9';
+           ++index) {
+        const unsigned digit = name[index] - '0';
+        if (number > (INT_MAX - digit) / 10)
+          break;
+        number = number * 10 + digit;
+      }
+      if (index && index < entry->record_size - name_offset && name[index] == '\0' && number >= 6 &&
+          number != static_cast<unsigned>(directory))
+        close_fd(static_cast<int>(number));
+      position += entry->record_size;
+    }
+  }
+  close_fd(directory);
+  errno = error;
+  return error == 0;
+}
+
 [[noreturn]] void exec_keeper(int control, int lease, int startup, const char *path,
-                              const char *owner, rlim_t nofile) {
+                              const char *owner) {
   // Preserve the incoming descriptors before moving them into fixed slots.
   const int saved_lease = host_call(SYS_fcntl, lease, F_DUPFD_CLOEXEC, 6);
   const int saved_startup = host_call(SYS_fcntl, startup, F_DUPFD_CLOEXEC, 6);
@@ -581,10 +639,8 @@ std::string keeper_path() {
     startup_failed(saved_startup, errno);
   for (int fd = 0; fd < 3; ++fd)
     close_fd(fd);
-  if (host_call(SYS_close_range, 6u, UINT_MAX, 0u) != 0) {
-    for (uint64_t fd = 6; fd < nofile && fd <= INT_MAX; ++fd)
-      close_fd(static_cast<int>(fd));
-  }
+  if (!close_inherited_fds())
+    startup_failed(5, errno);
   char *arguments[] = {const_cast<char *>(path), const_cast<char *>(owner), nullptr};
   // The helper links its C++ runtime statically. Application preload and loader
   // configuration must not initialize a simulator inside the helper.
@@ -713,10 +769,8 @@ private:
     if (listener < 0)
       return -1;
     int leases[2] = {-1, -1};
-    rlimit nofile{};
     if (host_call(SYS_bind, listener, &address_, length_) != 0 ||
         host_call(SYS_listen, listener, SOMAXCONN) != 0 ||
-        host_call(SYS_prlimit64, 0, RLIMIT_NOFILE, nullptr, &nofile) != 0 ||
         host_call(SYS_socketpair, AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, leases) != 0) {
       const int error = errno;
       close_fd(listener);
@@ -755,7 +809,7 @@ private:
       if (child < 0)
         startup_failed(leases[1], errno);
       if (child == 0)
-        exec_keeper(listener, lease_, leases[1], path, owner_text, nofile.rlim_max);
+        exec_keeper(listener, lease_, leases[1], path, owner_text);
       host_call(SYS_exit_group, 0);
       __builtin_unreachable();
     }

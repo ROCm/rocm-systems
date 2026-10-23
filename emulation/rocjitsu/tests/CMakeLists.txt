@@ -2275,6 +2275,25 @@ foreach(_config IN ITEMS gfx1100_w7900 gfx1201_r9700)
     )
 endforeach()
 
+foreach(_mode IN ITEMS native fallback)
+    set(_limit_command)
+    if(_mode STREQUAL "fallback")
+        set(_limit_command prlimit --fsize=4096:4096)
+    endif()
+    rj_add_test(
+        NAME "InterposerPm4FileLimitTest.${_mode}"
+        COMMAND ${_limit_command} ${RJ_CLI}
+            --config "${CMAKE_SOURCE_DIR}/configs/gfx1100_w7900.json"
+            -- $<TARGET_FILE:interposer_dup_test>
+            --gtest_filter=InterposerPm4FileLimitTest.CompletionSurvivesClosedHandleAndFileLimit
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        INSTALL_COMMAND ${_limit_command} "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+            --config "\${RJ_INSTALLED_CONFIG_DIR}/gfx1100_w7900.json"
+            -- bin/interposer_dup_test
+            --gtest_filter=InterposerPm4FileLimitTest.CompletionSurvivesClosedHandleAndFileLimit
+    )
+endforeach()
+
 rj_add_interposer_test_suite(
     InterposerFreshForkTest
     ChildAndGrandchildInitializeIndependentBackends
@@ -3875,14 +3894,14 @@ if(RJ_ENABLE_HIP_TESTS)
                         COMMAND ${_launcher_prefix} ${RJ_CLI} ${_daemon_arg}
                             --config ${RJ_HIP_TEST_CONFIG}
                             -- ${CMAKE_CURRENT_BINARY_DIR}/hip_rlimit_fsize_test
-                        ENVIRONMENT "RJ_TEST_LIMIT=${_limit}" "RJ_TEST_PHASE=${_phase}" "RJ_TEST_VMM=${_test_vmm}" "RJ_TEST_MODE=${_mode}"
+                        ENVIRONMENT ${RJ_HIP_ASAN_ENV} ${RJ_HIP_TSAN_ENV} "RJ_TEST_LIMIT=${_limit}" "RJ_TEST_PHASE=${_phase}" "RJ_TEST_VMM=${_test_vmm}" "RJ_TEST_MODE=${_mode}"
                             "ROCJITSU_RUNTIME_DIR=runtime/fsize-${_mode}-${_phase}-${_limit}"
                         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
                         TIMEOUT 120
                         INSTALL_COMMAND ${_launcher_prefix} "\${RJ_INSTALLED_BINDIR}/rocjitsu" ${_daemon_arg}
                             --config "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_HIP_TEST_CONFIG_NAME}"
                             -- bin/hip_rlimit_fsize_test
-                        INSTALL_ENVIRONMENT "RJ_TEST_LIMIT=${_limit}" "RJ_TEST_PHASE=${_phase}" "RJ_TEST_VMM=${_test_vmm}" "RJ_TEST_MODE=${_mode}"
+                        INSTALL_ENVIRONMENT ${RJ_HIP_ASAN_ENV} ${RJ_HIP_TSAN_INSTALL_ENV} "RJ_TEST_LIMIT=${_limit}" "RJ_TEST_PHASE=${_phase}" "RJ_TEST_VMM=${_test_vmm}" "RJ_TEST_MODE=${_mode}"
                     )
                 endforeach()
             endforeach()

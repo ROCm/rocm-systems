@@ -102,20 +102,20 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     file(
         RELATIVE_PATH
         _rj_keeper_relative
-        "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}"
-        "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}/rocjitsu/rocjitsu-memory"
+        "${CMAKE_INSTALL_FULL_LIBDIR}"
+        "${CMAKE_INSTALL_FULL_LIBEXECDIR}/rocjitsu/rocjitsu-memory"
     )
     file(
         RELATIVE_PATH
         _rj_keeper_bin_relative
-        "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}"
-        "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}/rocjitsu/rocjitsu-memory"
+        "${CMAKE_INSTALL_FULL_BINDIR}"
+        "${CMAKE_INSTALL_FULL_LIBEXECDIR}/rocjitsu/rocjitsu-memory"
     )
     file(
         RELATIVE_PATH
         _rj_keeper_test_relative
-        "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATADIR}/rocjitsu/tests/bin"
-        "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}/rocjitsu/rocjitsu-memory"
+        "${CMAKE_INSTALL_FULL_DATADIR}/rocjitsu/tests/bin"
+        "${CMAKE_INSTALL_FULL_LIBEXECDIR}/rocjitsu/rocjitsu-memory"
     )
     foreach(_target rocjitsu_memory rocjitsu_kmd)
         target_compile_definitions(

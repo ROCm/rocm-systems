@@ -19,6 +19,7 @@
 #include "rocjitsu/config/dbt_guest_config.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/guest_kfd.h"
+#include "rocjitsu/kmd/linux/host_access_guard.h"
 #include "rocjitsu/kmd/linux/host_mapping_lock.h"
 #include "rocjitsu/kmd/linux/libc_passthrough.h"
 #include "rocjitsu/kmd/linux/linux_kfd.h"
@@ -2658,7 +2659,7 @@ public:
       std::ranges::sort(retained->handles);
       retained->handles.erase(std::ranges::unique(retained->handles).begin(),
                               retained->handles.end());
-      std::shared_ptr<PrivateDrmFd> fence_fd;
+      void *fence_address = nullptr;
       uint64_t queue_key;
       {
         std::lock_guard lock(fd_mutex_);
@@ -2688,7 +2689,20 @@ public:
               it->second.drm_file_id != file->id || user_fence->offset % 8 || it->second.size < 8 ||
               user_fence->offset > it->second.size - 8)
             return -EINVAL;
-          fence_fd = it->second.dmabuf_fd;
+          auto &gem = it->second;
+          // The submission lease retains this mapping even if GEM_CLOSE arrives
+          // before completion. File writes cannot address fallback socket tokens.
+          if (!gem.cpu_ptr) {
+            auto mapping_lock = rocjitsu::host_mapping_lock().lock_exclusive();
+            void *mapping = gem.dmabuf_fd->use([&](int fd) {
+              return rocjitsu::memory_backing::map(nullptr, gem.size, PROT_READ | PROT_WRITE,
+                                                   MAP_SHARED, fd, 0);
+            });
+            if (mapping == MAP_FAILED)
+              return -errno;
+            gem.cpu_ptr = mapping;
+          }
+          fence_address = static_cast<uint8_t *>(gem.cpu_ptr) + user_fence->offset;
         }
         for (auto handle : retained->handles)
           ++gem_entries_.at(handle).submission_refs;
@@ -2730,12 +2744,13 @@ public:
         }
         return true;
       };
-      submission.complete = [this, file, finished, fence_fd, user_fence, sequence, retained,
+      submission.complete = [this, file, finished, fence_address, sequence, retained,
                              driver](bool success) {
-        if (success && fence_fd)
-          success = fence_fd->use([&](int fd) {
-            return syscall(SYS_pwrite64, fd, &sequence, sizeof(sequence), user_fence->offset);
-          }) == sizeof(sequence);
+        if (success && fence_address) {
+          auto mapping_lock = rocjitsu::host_mapping_lock().lock_shared();
+          success = rocjitsu::with_host_access_guard(
+              [&] { std::memcpy(fence_address, &sequence, sizeof(sequence)); });
+        }
         // The executing CP keeps its driver alive. Do not acquire a VM ownership
         // snapshot here: its last release must never join the engine from itself.
         retained->release(driver);
