@@ -57,7 +57,8 @@ paths:
     - projects/hrr/README.md
 
 # A pull request with this label runs the GPU suite even when it touches no
-# capture path.
+# capture path. It must still touch a cpu, capture or suite path: hrr-ci.yml's
+# paths filter, which is those lists, starts no run otherwise.
 capture_label: ci:hrr-capture
 
 # simulator runs rocJitsu on ubuntu-24.04. gpu runs TheRock's real runners.

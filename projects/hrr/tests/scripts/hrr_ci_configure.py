@@ -18,8 +18,9 @@ Writes these GitHub Actions outputs:
 
 The policy lives in projects/hrr/tests/config/ci.yaml. The suite needs an
 amdhip64 with HRR capture compiled in, which only the HRR GPU workflow builds.
-It runs when a change touches a capture or suite path, on any pull request
-with the capture label, nightly and on workflow_dispatch.
+It runs when a change touches a capture or suite path, on a pull request with
+the capture label that touches any HRR path (hrr-ci.yml's paths filter starts
+no run otherwise), nightly and on workflow_dispatch.
 
 The default backend is rocJitsu (simulator). Its jobs are
 simulator.default_families, not the families marked enabled. The

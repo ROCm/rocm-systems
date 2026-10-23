@@ -11,11 +11,42 @@ name: HRR CI
 # whether anything runs, and the summary job reports the verdict of the run
 # that actually tested the commit (see `pass_through_ok`). A label that
 # changes nothing therefore cannot mask a failing run on the same commit.
+#
+# The paths filters are the union of the paths.cpu, paths.capture and
+# paths.suite lists of projects/hrr/tests/config/ci.yaml, less paths.excluded,
+# so a pull request that touches no HRR path starts no run.
+# test_hrr_ci_configure.py fails when the two disagree.
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
+    paths:
+      - ".github/workflows/hrr-ci.yml"
+      - ".github/workflows/hrr-gpu.yml"
+      - "projects/clr/hipamd/include/hip/amd_detail/hip_api_trace.hpp"
+      - "projects/clr/hipamd/src/amdhip.def.in"
+      - "projects/clr/hipamd/src/hip_code_object.cpp"
+      - "projects/clr/hipamd/src/hip_code_object.hpp"
+      - "projects/clr/hipamd/src/hip_context.cpp"
+      - "projects/clr/hipamd/src/hrr/**"
+      - "projects/hip/include/hip/hip_runtime_api.h"
+      - "projects/hrr/**"
+      - "!projects/hrr/README.md"
+      - "!projects/hrr/skills/**"
   push:
     branches: [develop]
+    paths:
+      - ".github/workflows/hrr-ci.yml"
+      - ".github/workflows/hrr-gpu.yml"
+      - "projects/clr/hipamd/include/hip/amd_detail/hip_api_trace.hpp"
+      - "projects/clr/hipamd/src/amdhip.def.in"
+      - "projects/clr/hipamd/src/hip_code_object.cpp"
+      - "projects/clr/hipamd/src/hip_code_object.hpp"
+      - "projects/clr/hipamd/src/hip_context.cpp"
+      - "projects/clr/hipamd/src/hrr/**"
+      - "projects/hip/include/hip/hip_runtime_api.h"
+      - "projects/hrr/**"
+      - "!projects/hrr/README.md"
+      - "!projects/hrr/skills/**"
   schedule:
     # Nightly: capture-enabled build and the GPU suite on every HRR family.
     - cron: "0 3 * * *"

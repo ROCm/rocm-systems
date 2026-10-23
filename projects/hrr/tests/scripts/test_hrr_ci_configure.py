@@ -566,9 +566,7 @@ class SimulatorBackendTest(unittest.TestCase):
 
     def test_simulator_rejects_a_requested_family_without_a_config(self):
         with self.assertRaises(cfg.ConfigError) as caught:
-            decide(
-                "workflow_dispatch", [], requested=["gfx103x"], config=REPO
-            )
+            decide("workflow_dispatch", [], requested=["gfx103x"], config=REPO)
         self.assertIn("no config for gfx103x", str(caught.exception))
 
     def test_unknown_backend_value(self):
@@ -588,7 +586,13 @@ class LabelEventTest(unittest.TestCase):
     def test_which_labels_matter(self):
         for label in ("ci:hrr-capture", "CI:HRR-Capture"):
             self.assertTrue(cfg.label_matters(label, REPO), label)
-        for label in ("documentation", "ci:skip", "hrr", "ci:gfx110x", "ci:gfx110X-all"):
+        for label in (
+            "documentation",
+            "ci:skip",
+            "hrr",
+            "ci:gfx110x",
+            "ci:gfx110X-all",
+        ):
             self.assertFalse(cfg.label_matters(label, REPO), label)
 
     def test_other_label_runs_nothing(self):
@@ -757,7 +761,7 @@ class WorkflowPinTest(unittest.TestCase):
         for index, line in enumerate(lines):
             if "ROCm/TheRock" not in line:
                 continue
-            window = "\n".join(lines[index:index + 6])
+            window = "\n".join(lines[index : index + 6])
             found.extend(self.SHA.findall(window))
         return found
 
@@ -775,6 +779,55 @@ class WorkflowPinTest(unittest.TestCase):
             found = self.therock_shas(path)
             self.assertTrue(found, name)
             self.assertEqual(set(found), {pinned[0]}, name)
+
+
+class WorkflowPathsFilterTest(unittest.TestCase):
+    ROOT = Path(__file__).resolve().parents[4]
+
+    @staticmethod
+    def glob(path: str) -> str:
+        return path + "**" if path.endswith("/") else path
+
+    def expected(self, config: cfg.Config) -> tuple[set[str], set[str]]:
+        """ci.yaml's path lists as a GitHub paths filter: entries under a listed
+        directory fold into that directory's glob."""
+        union = set(config.cpu_paths + config.capture_paths + config.suite_paths)
+        dirs = [p for p in union if p.endswith("/")]
+        kept = {p for p in union if not any(p != d and p.startswith(d) for d in dirs)}
+        return (
+            {self.glob(p) for p in kept},
+            {"!" + self.glob(p) for p in config.excluded_paths},
+        )
+
+    def test_hrr_ci_paths_filter_matches_ci_yaml(self):
+        config = cfg.load_config(self.ROOT / "projects/hrr/tests/config/ci.yaml")
+        # ci.yaml matches every entry as a prefix; the filter matches an entry
+        # without a trailing "/" only as that exact file.
+        for path in (
+            config.cpu_paths
+            + config.capture_paths
+            + config.suite_paths
+            + config.excluded_paths
+        ):
+            if not path.endswith("/"):
+                self.assertTrue((self.ROOT / path).is_file(), path)
+        include, exclude = self.expected(config)
+        workflow = yaml.safe_load(
+            (self.ROOT / ".github/workflows/hrr-ci.yml").read_text(encoding="utf-8")
+        )
+        # PyYAML reads the bare key `on` as True.
+        triggers = workflow.get("on", workflow.get(True))
+        for event in ("pull_request", "push"):
+            with self.subTest(event=event):
+                paths = triggers[event]["paths"]
+                self.assertEqual(len(paths), len(set(paths)))
+                self.assertEqual({p for p in paths if not p.startswith("!")}, include)
+                self.assertEqual({p for p in paths if p.startswith("!")}, exclude)
+                # A negated pattern only drops what an earlier pattern matched.
+                first_negated = next(
+                    i for i, p in enumerate(paths) if p.startswith("!")
+                )
+                self.assertTrue(all(p.startswith("!") for p in paths[first_negated:]))
 
 
 if __name__ == "__main__":
