@@ -1,6 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+//! Core HSA frontend ABI, status, agent, and initialization tests.
+
 use super::*;
 use crate::api::host_alloc_dmabuf_supported;
 use crate::api::{agent::*, amd::*, isa::*, system::*};
@@ -10,6 +12,7 @@ use crate::runtime::lock;
 use std::ffi::{CStr, c_char, c_void};
 
 #[test]
+/// Verifies that extension metadata matches implemented capabilities.
 fn extension_metadata_matches_implemented_capabilities() {
     assert_eq!(HSA_RUNTIME_VERSION_MINOR, 21);
     assert_eq!(AMD_SYSTEM_INFO_EXT_VERSION_MAJOR, 0x207);
@@ -71,6 +74,7 @@ fn extension_metadata_matches_implemented_capabilities() {
 }
 
 #[test]
+/// Verifies that agent extension answers never exceed system capabilities.
 fn agent_extension_answers_never_exceed_system_capabilities() {
     let extensions = [
         EXTENSION_FINALIZER,
@@ -97,6 +101,7 @@ fn agent_extension_answers_never_exceed_system_capabilities() {
 }
 
 #[test]
+/// Verifies that status strings cover core and AMD status codes.
 fn status_strings_cover_core_and_amd_status_codes() {
     let cases = [
         (SUCCESS, "HSA_STATUS_SUCCESS"),
@@ -193,6 +198,7 @@ fn status_strings_cover_core_and_amd_status_codes() {
 }
 
 #[test]
+/// Verifies that status string rejects unknown status without writing output.
 fn status_string_rejects_unknown_status_without_writing_output() {
     let sentinel = c"unchanged".as_ptr();
     let mut output = sentinel;
@@ -205,6 +211,7 @@ fn status_string_rejects_unknown_status_without_writing_output() {
 }
 
 #[test]
+/// Verifies that AMD agent helpers match the public ABI.
 fn amd_agent_helpers_match_the_public_abi() {
     assert_eq!(std::mem::size_of::<HsaAmdEvent>(), 32);
     assert_eq!(std::mem::align_of::<HsaAmdEvent>(), 8);
@@ -284,6 +291,7 @@ fn amd_agent_helpers_match_the_public_abi() {
 }
 
 #[test]
+/// Verifies that ISA entry points match the public ABI.
 fn isa_entry_points_match_the_public_abi() {
     let _: unsafe extern "C" fn(HsaAgent, u32, *mut u16) -> Status =
         hsa_agent_get_exception_policies;
@@ -302,6 +310,7 @@ fn isa_entry_points_match_the_public_abi() {
 }
 
 #[test]
+/// Verifies that GFX12 ISA names match `ROCr`.
 fn gfx12_isa_names_match_rocr() {
     let gpu = rocddi::topology::GpuInfo {
         gfx_major: 12,
@@ -340,6 +349,7 @@ fn isa_get_info_ignores_index_for_other_attributes() {
 
 #[test]
 #[ignore = "requires a qualified GPU and KFD runtime"]
+/// Verifies that native clock queries return live GPU values.
 fn native_clock_queries_return_live_gpu_values() {
     assert_eq!(hsa_init(), SUCCESS);
     let agent = HsaAgent {
@@ -413,6 +423,7 @@ fn native_clock_queries_return_live_gpu_values() {
 
 #[test]
 #[ignore = "requires a qualified GPU and KFD runtime"]
+/// Verifies that shutdown waits for retained native call.
 fn shutdown_waits_for_retained_native_call() {
     assert_eq!(hsa_init(), SUCCESS);
     let (call, device) = retained_gpu_device(HsaAgent {

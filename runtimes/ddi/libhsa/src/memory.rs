@@ -58,25 +58,44 @@ use crate::runtime::{
 };
 use crate::signal::{AsyncCopyClock, AsyncCopyProfile, SignalState};
 
+/// Synthetic GPU pool kind for coarse-grained memory.
 const GPU_POOL_COARSE: u64 = 1;
+/// Synthetic GPU pool kind for fine-grained memory.
 pub(crate) const GPU_POOL_FINE: u64 = 2;
+/// Synthetic GPU pool kind for workgroup memory.
 const GPU_POOL_GROUP: u64 = 3;
+/// Synthetic GPU pool kind for extended fine-grained memory.
 pub(crate) const GPU_POOL_EXTENDED: u64 = 4;
+/// Native allocation flag requesting PCIe-visible memory.
 const ALLOC_PCIE: u32 = 1;
+/// Native allocation flag requesting contiguous memory.
 const ALLOC_CONTIGUOUS: u32 = 1 << 1;
+/// Native allocation flag permitting code execution.
 const ALLOC_EXECUTABLE: u32 = 1 << 2;
+/// Native allocation flag requesting uncached memory.
 const ALLOC_UNCACHED: u32 = 1 << 3;
+/// Native allocation flags accepted by this frontend.
 const ALLOC_FLAGS: u32 = ALLOC_PCIE | ALLOC_CONTIGUOUS | ALLOC_EXECUTABLE | ALLOC_UNCACHED;
+/// SVM policy bit allowing host access.
 const SVM_FLAG_HOST_ACCESS: u32 = 0x01;
+/// SVM policy bit requesting coherent access.
 const SVM_FLAG_COHERENT: u32 = 0x02;
+/// SVM policy bit restricting placement to the local hive.
 const SVM_FLAG_HIVE_LOCAL: u32 = 0x04;
+/// SVM policy bit making GPU access read-only.
 const SVM_FLAG_GPU_READ_ONLY: u32 = 0x08;
+/// SVM policy bit allowing GPU execution.
 const SVM_FLAG_GPU_EXECUTE: u32 = 0x10;
+/// SVM policy bit marking a range read-mostly for GPUs.
 const SVM_FLAG_GPU_READ_MOSTLY: u32 = 0x20;
+/// Largest accepted SVM migration-granularity encoding.
 const SVM_MAX_MIGRATION_GRANULARITY: u64 = 18;
+/// Maximum number of SVM attributes accepted in one request.
 const SVM_MAX_ATTRIBUTES: usize = 2044;
+/// Linux I/O error number used when native cleanup cannot be proved.
 const EIO: i32 = 5;
 
+/// Accepts only the HSA virtual-memory access bits implemented here.
 fn valid_access_permissions(access: u32) -> bool {
     access & !(ACCESS_PERMISSION_RW | ACCESS_PERMISSION_EX) == 0
 }
@@ -84,7 +103,9 @@ fn valid_access_permissions(access: u32) -> bool {
 /// Process setting captured when an asynchronous copy is accepted.
 #[derive(Clone, Copy)]
 pub(crate) enum AsyncCopyProfiling {
+    /// Async copies complete without retaining profiling timestamps.
     Disabled,
+    /// Async copies retain timestamps for later profiling queries.
     Enabled,
 }
 
@@ -115,6 +136,7 @@ pub(crate) struct MemoryState {
 }
 
 impl MemoryState {
+    /// Initializes the allocation, registration, and virtual memory registries.
     pub(crate) fn new() -> Self {
         Self {
             allocations: HashMap::new(),
@@ -131,6 +153,7 @@ impl MemoryState {
         }
     }
 
+    /// Checks whether the current thread is an asynchronous memory worker.
     pub(crate) fn running_on_worker(&self) -> bool {
         self.workers
             .iter()
@@ -158,6 +181,7 @@ impl MemoryState {
         }
     }
 
+    /// Reports whether an unfinished native copy still retains memory borrows.
     pub(crate) fn is_quarantined(&self) -> bool {
         self.async_copy_quarantine.load(Ordering::Acquire)
     }
@@ -207,6 +231,7 @@ struct PointerDescription {
 }
 
 impl PointerDescription {
+    /// Checks whether the requested address belongs to this object.
     fn contains(&self, address: usize) -> bool {
         contains(self.agent_base, self.size, address)
             || self
@@ -214,10 +239,12 @@ impl PointerDescription {
                 .is_some_and(|host| contains(host, self.size, address))
     }
 
+    /// Checks whether this allocation starts at the given address.
     fn starts_at(&self, address: usize) -> bool {
         self.agent_base == address || self.host_base == Some(address)
     }
 
+    /// Translates a device address to its host mapping when available.
     fn host_address(&self, address: usize) -> Option<usize> {
         if self
             .host_base
@@ -231,11 +258,13 @@ impl PointerDescription {
             .flatten()
     }
 
+    /// Returns a host mapping for a complete device address range.
     fn host_range(&self, address: usize, size: usize) -> Option<usize> {
         self.offset_range(address, size)?;
         self.host_address(address)
     }
 
+    /// Returns the offset of a complete range within this allocation.
     fn offset_range(&self, address: usize, size: usize) -> Option<usize> {
         let base = if contains(self.agent_base, self.size, address) {
             self.agent_base
@@ -276,6 +305,7 @@ struct RegisteredDeallocationCallback {
 }
 
 impl Memory {
+    /// Records an allocation’s native backing and HSA visibility.
     fn new(
         allocation: Allocation,
         size: usize,
@@ -331,10 +361,12 @@ impl Memory {
         }
     }
 
+    /// Checks whether the requested address belongs to this object.
     fn contains(&self, address: usize) -> bool {
         self.description.contains(address)
     }
 
+    /// Wraps an imported graphics allocation and its accessible agents.
     fn new_interop(allocation: Allocation, owner: HsaAgent, accessible: Vec<HsaAgent>) -> Self {
         let info = allocation.info();
         let agent_base = info.device_address as usize;
@@ -362,6 +394,7 @@ impl Memory {
         }
     }
 
+    /// Wraps an attached IPC allocation and its accessible agents.
     fn new_ipc(
         allocation: Allocation,
         size: usize,
@@ -393,6 +426,7 @@ impl Memory {
         }
     }
 
+    /// Releases this object’s native backing.
     fn free(&mut self) -> Result<(), rocddi::Error> {
         self.allocation.free()
     }
@@ -422,6 +456,7 @@ pub(crate) struct VmemReservation {
 }
 
 impl VmemReservation {
+    /// Records a reserved virtual range and its registration state.
     fn new(address: VirtualAddress, registered: bool) -> Self {
         let info = address.info();
         Self {
@@ -443,6 +478,7 @@ impl VmemReservation {
         }
     }
 
+    /// Checks whether the requested address belongs to this object.
     fn contains_range(&self, address: usize, size: usize) -> bool {
         address
             .checked_sub(self.address.info().address as usize)
@@ -450,6 +486,7 @@ impl VmemReservation {
             .is_some_and(|end| size != 0 && end <= self.description.size)
     }
 
+    /// Releases this object’s native backing.
     fn free(&mut self) -> Result<(), rocddi::Error> {
         self.address.free()
     }
@@ -485,6 +522,7 @@ enum VmemBacking {
 }
 
 impl VmemHandle {
+    /// Records virtual memory backing, pool, and memory type.
     fn new(backing: VmemBacking, pool: HsaMemoryPool, memory_type: u32) -> Self {
         Self {
             backing,
@@ -495,10 +533,12 @@ impl VmemHandle {
         }
     }
 
+    /// Checks whether the virtual memory handle came from an import.
     fn imported(&self) -> bool {
         !matches!(&self.backing, VmemBacking::Owned(_))
     }
 
+    /// Returns native backing when this frontend owns the allocation.
     fn owned_memory(&self) -> Option<&VirtualMemory> {
         match &self.backing {
             VmemBacking::Owned(memory) => Some(memory),
@@ -506,6 +546,7 @@ impl VmemHandle {
         }
     }
 
+    /// Returns the known allocation size, if native metadata provides it.
     fn known_size(&self) -> Option<u64> {
         match &self.backing {
             VmemBacking::Owned(memory) | VmemBacking::DmaBuf(memory) => Some(memory.info().size),
@@ -513,6 +554,7 @@ impl VmemHandle {
         }
     }
 
+    /// Returns backing memory after validating the requested access.
     fn memory_for_access(
         &mut self,
         gpu_index: usize,
@@ -532,6 +574,7 @@ impl VmemHandle {
         }
     }
 
+    /// Releases this object’s native backing.
     fn free(&mut self) -> Result<(), rocddi::Error> {
         match &mut self.backing {
             VmemBacking::Owned(memory) | VmemBacking::DmaBuf(memory) => memory.free(),
@@ -568,6 +611,7 @@ struct VmemAccess {
 }
 
 impl VmemAccess {
+    /// Releases this object’s native backing.
     fn free(&mut self) -> Result<(), rocddi::Error> {
         match &mut self.owner {
             VmemAccessOwner::Device(mapping) => mapping.free(),
@@ -593,10 +637,12 @@ pub(crate) struct VmemMapping {
 }
 
 impl VmemMapping {
+    /// Checks whether the requested address belongs to this object.
     fn contains(&self, address: usize) -> bool {
         contains(self.address, self.size, address)
     }
 
+    /// Releases access.
     fn free_access(&mut self) -> Result<(), rocddi::Error> {
         let agents = self.access.keys().copied().collect::<Vec<_>>();
         for agent in agents {
@@ -613,6 +659,7 @@ impl VmemMapping {
 }
 
 impl LockedMemory {
+    /// Records pinned host storage and its accessible agents.
     fn new(
         allocation: Option<Allocation>,
         host_base: usize,
@@ -638,21 +685,25 @@ impl LockedMemory {
         }
     }
 
+    /// Checks whether the requested address belongs to this object.
     fn contains(&self, address: usize) -> bool {
         self.description.contains(address)
     }
 
+    /// Releases this object’s native backing.
     fn free(&mut self) -> Result<(), rocddi::Error> {
         self.allocation.as_mut().map_or(Ok(()), Allocation::free)
     }
 }
 
+/// Checks whether the requested address belongs to this object.
 fn contains(base: usize, size: usize, address: usize) -> bool {
     address
         .checked_sub(base)
         .is_some_and(|offset| offset < size)
 }
 
+/// Returns the current host page.
 fn current_host_page() -> Result<usize, Status> {
     let page = usize::try_from(rocddi::memory::host::host_page_size().map_err(map_error)?)
         .map_err(|_| ERROR)?;

@@ -5,6 +5,7 @@
 
 use super::*;
 
+/// Checks whether a memory pool handle names a host CPU pool.
 pub(super) fn cpu_pool(pool: HsaMemoryPool) -> bool {
     matches!(
         pool.handle,
@@ -12,6 +13,7 @@ pub(super) fn cpu_pool(pool: HsaMemoryPool) -> bool {
     )
 }
 
+/// Maps a CPU pool handle to its native memory kind.
 pub(super) fn cpu_pool_memory_kind(
     pool: HsaMemoryPool,
     lifetime: DriverContextLifetime,
@@ -26,6 +28,7 @@ pub(super) fn cpu_pool_memory_kind(
     }
 }
 
+/// Chooses the host mapping policy for a CPU pool and flags.
 pub(super) fn cpu_pool_mapping_policy(pool: HsaMemoryPool, flags: u32) -> HostMappingPolicy {
     if pool.handle == CPU_POOL_KERNARG || flags & ALLOC_UNCACHED != 0 {
         HostMappingPolicy::Uncached
@@ -38,6 +41,7 @@ pub(super) fn cpu_pool_mapping_policy(pool: HsaMemoryPool, flags: u32) -> HostMa
     }
 }
 
+/// Combines pool flags with uncached and `PCIe` allocation properties.
 pub(super) fn effective_global_flags(pool_flags: u32, uncached: bool, pcie: bool) -> u32 {
     if uncached {
         (pool_flags & !(POOL_FLAG_COARSE | POOL_FLAG_EXTENDED_FINE))
@@ -50,6 +54,7 @@ pub(super) fn effective_global_flags(pool_flags: u32, uncached: bool, pcie: bool
     }
 }
 
+/// Returns the agent that owns a memory pool handle.
 pub(super) fn pool_owner(runtime: &HsaState, pool: HsaMemoryPool) -> Option<HsaAgent> {
     if cpu_pool(pool) {
         Some(HsaAgent { handle: CPU_AGENT })
@@ -60,6 +65,7 @@ pub(super) fn pool_owner(runtime: &HsaState, pool: HsaMemoryPool) -> Option<HsaA
     }
 }
 
+/// Returns the global flags advertised by a memory pool.
 pub(super) fn pool_global_flags(runtime: &HsaState, pool: HsaMemoryPool) -> Option<u32> {
     let flags = match pool.handle {
         CPU_POOL_FINE => POOL_FLAG_FINE,
@@ -77,6 +83,7 @@ pub(super) fn pool_global_flags(runtime: &HsaState, pool: HsaMemoryPool) -> Opti
     Some(flags)
 }
 
+/// Enumerates the native memory pools exposed by a GPU agent.
 pub(super) fn gpu_agent_pools(
     index: usize,
     fine_grain: bool,
@@ -94,6 +101,7 @@ pub(super) fn gpu_agent_pools(
     pools
 }
 
+/// Enumerates the HSA memory regions exposed by a GPU agent.
 pub(super) fn gpu_agent_regions(
     index: usize,
     fine_grain: bool,
@@ -130,6 +138,7 @@ pub(super) enum PoolStorage {
     Group,
 }
 
+/// Determines an agent’s access mode to a memory pool.
 pub(super) fn pool_access(
     same_owner: bool,
     storage: PoolStorage,
@@ -164,15 +173,22 @@ fn gpu_pool_fully_host_visible(runtime: &HsaState, index: usize) -> bool {
 }
 
 #[derive(Clone, Copy)]
+/// Host or device memory placement selected for signal batches.
 pub(crate) enum SignalBatchPool {
+    /// Host-visible signal storage allocated from a CPU pool.
     System,
+    /// GPU-visible signal storage with the selected mapping policy.
     Device {
+        /// Index of the GPU that owns the selected device pool.
         index: usize,
+        /// Whether the selected pool requests uncached memory.
         uncached: bool,
+        /// Whether signal writes require an HDP flush.
         flush: bool,
     },
 }
 
+/// Selects a host or device pool for allocating signal batches.
 pub(crate) fn signal_batch_pool(
     runtime: &HsaState,
     pool: HsaMemoryPool,
@@ -200,6 +216,7 @@ pub(crate) fn signal_batch_pool(
     )
 }
 
+/// Checks DMA-BUF support for `PCIe` memory on a GPU.
 pub(super) fn gpu_pcie_dmabuf_supported(runtime: &HsaState, index: usize) -> bool {
     // Full VRAM visibility supplies a large BAR. A CPU-to-GPU XGMI link is
     // the other route that can satisfy a requested PCIe DMA-BUF mapping.
@@ -210,10 +227,12 @@ pub(super) fn gpu_pcie_dmabuf_supported(runtime: &HsaState, index: usize) -> boo
             .is_some_and(|link| link.kind == MemoryLinkType::Xgmi)
 }
 
+/// Checks whether a GPU pool provides coherent access.
 pub(super) fn gpu_pool_coherent(pool_kind: u64, uncached: bool, pcie: bool) -> bool {
     matches!(pool_kind, GPU_POOL_FINE | GPU_POOL_EXTENDED) || uncached || pcie
 }
 
+/// Builds an agent-to-pool access and link description.
 pub(super) fn agent_pool_relationship(
     runtime: &HsaState,
     agent: HsaAgent,
@@ -277,6 +296,7 @@ pub(super) fn agent_pool_relationship(
     (access, link)
 }
 
+/// Converts native memory-link metadata to the HSA link record.
 pub(super) fn pool_link_info(link: Option<MemoryLinkInfo>) -> PoolLinkInfo {
     let Some(link) = link else {
         return PoolLinkInfo {
@@ -304,6 +324,7 @@ pub(super) fn pool_link_info(link: Option<MemoryLinkInfo>) -> PoolLinkInfo {
     }
 }
 
+/// Maps a native memory link kind to its HSA ABI value.
 pub(super) const fn hsa_link_type(kind: MemoryLinkType) -> u32 {
     match kind {
         MemoryLinkType::HyperTransport | MemoryLinkType::Unknown => 0,
@@ -314,6 +335,7 @@ pub(super) const fn hsa_link_type(kind: MemoryLinkType) -> u32 {
     }
 }
 
+/// Enumerates the memory pools visible to an HSA agent.
 fn agent_pools(runtime: &HsaState, agent: HsaAgent) -> Result<Vec<HsaMemoryPool>, Status> {
     if agent.handle == CPU_AGENT {
         Ok(vec![
@@ -342,6 +364,7 @@ fn agent_pools(runtime: &HsaState, agent: HsaAgent) -> Result<Vec<HsaMemoryPool>
     }
 }
 
+/// Enumerates the memory regions visible to an HSA agent.
 fn agent_regions(runtime: &HsaState, agent: HsaAgent) -> Result<Vec<HsaMemoryPool>, Status> {
     if agent.handle == CPU_AGENT {
         return agent_pools(runtime, agent);
@@ -362,6 +385,7 @@ fn agent_regions(runtime: &HsaState, agent: HsaAgent) -> Result<Vec<HsaMemoryPoo
     unsafe(export_name = "__hsa_impl_hsa_amd_agent_iterate_memory_pools")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Visits pools visible to an HSA agent.
 pub unsafe extern "C" fn hsa_amd_agent_iterate_memory_pools(
     agent: HsaAgent,
     callback: PoolCallback,
@@ -405,6 +429,7 @@ pub unsafe extern "C" fn hsa_amd_agent_iterate_memory_pools(
     unsafe(export_name = "__hsa_impl_hsa_agent_iterate_regions")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Visits memory regions visible to an HSA agent.
 pub unsafe extern "C" fn hsa_agent_iterate_regions(
     agent: HsaAgent,
     callback: RegionCallback,
@@ -451,6 +476,7 @@ pub unsafe extern "C" fn hsa_agent_iterate_regions(
     unsafe(export_name = "__hsa_impl_hsa_agent_iterate_caches")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Visits cache handles associated with an HSA agent.
 pub unsafe extern "C" fn hsa_agent_iterate_caches(
     agent: HsaAgent,
     callback: CacheCallback,
@@ -492,6 +518,7 @@ pub unsafe extern "C" fn hsa_agent_iterate_caches(
     unsafe(export_name = "__hsa_impl_hsa_cache_get_info")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Writes the requested cache attribute.
 pub unsafe extern "C" fn hsa_cache_get_info(
     cache: HsaCache,
     attribute: u32,
@@ -528,6 +555,7 @@ pub unsafe extern "C" fn hsa_cache_get_info(
     })
 }
 
+/// Writes a requested pool attribute to the caller’s output.
 unsafe fn memory_pool_get_info(
     runtime: &HsaState,
     pool: HsaMemoryPool,
@@ -598,6 +626,7 @@ unsafe fn memory_pool_get_info(
     unsafe(export_name = "__hsa_impl_hsa_amd_memory_pool_get_info")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Writes the requested memory-pool attribute.
 pub unsafe extern "C" fn hsa_amd_memory_pool_get_info(
     pool: HsaMemoryPool,
     attribute: u32,
@@ -625,6 +654,7 @@ pub unsafe extern "C" fn hsa_amd_memory_pool_get_info(
     unsafe(export_name = "__hsa_impl_hsa_region_get_info")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Writes the requested memory-region attribute.
 pub unsafe extern "C" fn hsa_region_get_info(
     region: HsaRegion,
     attribute: u32,

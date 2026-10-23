@@ -44,18 +44,25 @@ pub(crate) use wait::set_system_frequency;
 #[cfg(test)]
 use wait::*;
 
+/// Signal size in bytes.
 const SIGNAL_BYTES: usize = 64;
+/// Number of ordinary signals retained in one stable-address slab.
 const SIGNALS_PER_SLAB: usize = 1024;
+/// Maximum number of native events kept for signal reuse.
 const MAX_POOLED_SIGNAL_EVENTS: usize = 256;
+/// Fast path indicating whether any batch needs device-write readback.
 static HAS_FLUSH_BATCHES: AtomicBool = AtomicBool::new(false);
+/// Address ranges of live signal batches requiring HDP flushes.
 static FLUSH_BATCHES: Mutex<Vec<(usize, usize)>> = Mutex::new(Vec::new());
 
+/// Locks the address ranges whose device writes require an HDP readback.
 fn flush_batches() -> MutexGuard<'static, Vec<(usize, usize)>> {
     FLUSH_BATCHES
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+/// Checks whether an address lies in a signal batch needing HDP flushes.
 fn batch_needs_flush(address: usize) -> bool {
     HAS_FLUSH_BATCHES.load(Ordering::Acquire)
         && flush_batches()
@@ -63,6 +70,7 @@ fn batch_needs_flush(address: usize) -> bool {
             .any(|&(start, end)| start <= address && address < end)
 }
 
+/// Reads back a posted device write without overwriting a later update.
 fn flush_device_write(value: &AtomicI64) {
     // KFD's public VRAM mapping can post PCIe writes through HDP. Read back
     // the existing store; repeating it could overwrite an agent's update.
@@ -70,18 +78,21 @@ fn flush_device_write(value: &AtomicI64) {
     let _ = value.load(Ordering::Relaxed);
 }
 
+/// Stores a signal value and flushes posted device writes.
 fn flush_device_store(value: &AtomicI64, written: SignalValue) {
     fence(Ordering::Release);
     value.store(written, Ordering::Relaxed);
     flush_device_write(value);
 }
 
+/// Flushes a signal store when its batch uses device-visible backing.
 fn flush_signal_store(signal: &AmdSignal) {
     if batch_needs_flush(std::ptr::from_ref(signal) as usize) {
         flush_device_write(&signal.value);
     }
 }
 
+/// Flushes device-written profiling timestamps before the host reads them.
 pub(crate) fn flush_signal_timestamps(signal: &AmdSignal) {
     if batch_needs_flush(std::ptr::from_ref(signal) as usize) {
         fence(Ordering::SeqCst);
@@ -117,14 +128,17 @@ pub(crate) struct AmdSignal {
 }
 
 impl AmdSignal {
+    /// Builds an ordinary host-visible HSA signal record.
     pub(crate) fn user(value: SignalValue) -> Self {
         Self::user_with_event(value, 0, 0)
     }
 
+    /// Builds an interrupt-backed signal with its native event address and ID.
     pub(crate) fn interrupt(value: SignalValue, event_mailbox_ptr: usize, event_id: u32) -> Self {
         Self::user_with_event(value, event_mailbox_ptr as u64, event_id)
     }
 
+    /// Initializes the public signal layout for an ordinary or event signal.
     fn user_with_event(value: SignalValue, event_mailbox_ptr: u64, event_id: u32) -> Self {
         Self {
             kind: AtomicI64::new(AMD_SIGNAL_KIND_USER),
@@ -139,6 +153,7 @@ impl AmdSignal {
         }
     }
 
+    /// Builds a queue doorbell signal containing the queue address.
     pub(crate) fn doorbell(address: usize, queue: usize) -> Self {
         Self {
             kind: AtomicI64::new(AMD_SIGNAL_KIND_DOORBELL),
@@ -153,6 +168,7 @@ impl AmdSignal {
         }
     }
 
+    /// Builds a private intercept doorbell associated with its owner.
     pub(crate) fn intercept_doorbell(queue: usize, owner: usize) -> Self {
         Self {
             kind: AtomicI64::new(AMD_SIGNAL_KIND_LEGACY_DOORBELL),
@@ -170,6 +186,7 @@ impl AmdSignal {
         }
     }
 
+    /// Returns the private owner address recorded in an intercept doorbell.
     pub(crate) fn intercept_owner(&self) -> usize {
         self.event_mailbox_ptr as usize
     }
@@ -214,6 +231,7 @@ pub(crate) struct AsyncSignalRecord {
 }
 
 impl AsyncSignalRecord {
+    /// Restores a pooled signal slot to its reusable state.
     fn revive(&mut self) {
         if self.retired.load(Ordering::Acquire) {
             // Existing waiters must keep observing the prior retirement even
@@ -237,21 +255,29 @@ pub(crate) struct SignalSlab {
 /// One contiguous native allocation retained by its public handle and members.
 #[allow(dead_code, reason = "the backing is held for its lifetime, not read")]
 enum SignalBatchBacking {
+    /// Dedicated native allocation backing an interrupt-capable signal.
     Native(Allocation),
     #[cfg(test)]
+    /// In-memory signal records used to test batch ownership without KFD.
     Test(Box<[AmdSignal]>),
 }
 
+/// Owns native signal backing and tracks free and live slots.
 struct SignalBatchStorage {
+    /// Native allocation retained for the lifetime of this batch.
     _backing: SignalBatchBacking,
+    /// Number of batch slots that have not been allocated.
     remaining: usize,
+    /// Whether the public batch handle is still valid.
     handle_live: bool,
     /// Async copy and SVM completion require a host atomic decrement.
     host_atomics_supported: bool,
+    /// Optional flush range retained by this signal batch storage.
     flush_range: Option<(usize, usize)>,
 }
 
 impl Drop for SignalBatchStorage {
+    /// Removes this batch from the set of HDP-flush address ranges.
     fn drop(&mut self) {
         if let Some(range) = self.flush_range {
             let mut ranges = flush_batches();
@@ -262,6 +288,7 @@ impl Drop for SignalBatchStorage {
 }
 
 impl SignalSlab {
+    /// Allocates native backing for a device-visible signal batch.
     fn create(runtime: &HsaState) -> Result<Self, Status> {
         let (gpu, other_gpus) = runtime.gpus.split_first().ok_or(OUT_OF_RESOURCES)?;
         let peers = other_gpus
@@ -286,10 +313,12 @@ impl SignalSlab {
         })
     }
 
+    /// Checks whether the slab has an unused signal slot.
     fn has_space(&self) -> bool {
         self.next < SIGNALS_PER_SLAB
     }
 
+    /// Places an initialized signal in the next free batch slot.
     unsafe fn allocate(&mut self, signal: AmdSignal) -> HsaSignal {
         let address = self.host + self.next * SIGNAL_BYTES;
         self.next += 1;
@@ -301,6 +330,7 @@ impl SignalSlab {
         }
     }
 
+    /// Checks whether a live signal occupies this batch address.
     fn owns_live(&self, address: usize) -> bool {
         let end = self.host + self.next * SIGNAL_BYTES;
         if address < self.host || address >= end || (address - self.host) % SIGNAL_BYTES != 0 {
@@ -326,6 +356,7 @@ pub(crate) struct SignalState {
     recycled_signals: Vec<usize>,
     /// Contiguous batch backing and each member's owning batch ID.
     batches: HashMap<u64, SignalBatchStorage>,
+    /// Batch members owned by this signal state.
     batch_members: HashMap<usize, u64>,
     /// Native page preparation and first-event transaction.
     event_service: SignalEventService,
@@ -346,6 +377,7 @@ pub(crate) struct SignalState {
 }
 
 impl SignalState {
+    /// Destroys batch and releases its owned resources.
     fn destroy_batch(&mut self, batch: HsaAmdSignalBatch) -> Status {
         let Some(storage) = self.batches.get_mut(&batch.handle) else {
             return INVALID_ARGUMENT;
@@ -360,6 +392,7 @@ impl SignalState {
         SUCCESS
     }
 
+    /// Initializes signal registries and stores the native context lifetime.
     pub(crate) fn new(lifetime: DriverContextLifetime) -> Self {
         Self {
             signal_slabs: Vec::new(),
@@ -391,6 +424,7 @@ impl SignalState {
 }
 
 impl HsaState {
+    /// Ensures signal slab exists before use.
     fn ensure_signal_slab(&mut self) -> Result<(), Status> {
         if self
             .signal_state
@@ -405,6 +439,7 @@ impl HsaState {
         Ok(())
     }
 
+    /// Allocates signal for runtime use.
     fn allocate_signal(&mut self, signal: AmdSignal) -> Result<HsaSignal, Status> {
         if let Some(address) = self.signal_state.recycled_signals.pop() {
             // SAFETY: The slot was invalidated after its final asynchronous
@@ -424,6 +459,7 @@ impl HsaState {
         Ok(unsafe { slab.allocate(signal) })
     }
 
+    /// Creates signal batch and records its ownership.
     fn create_signal_batch(
         &mut self,
         values: &[SignalValue],
@@ -572,6 +608,7 @@ impl HsaState {
         Ok((batch, signals))
     }
 
+    /// Creates signal event and records its ownership.
     pub(crate) fn create_signal_event(
         &mut self,
     ) -> Option<(crate::platform::event::SignalEvent, usize, u32)> {
@@ -586,6 +623,7 @@ impl HsaState {
         Some((event, mailbox.host, id))
     }
 
+    /// Takes a pooled event or creates one for an interrupt signal.
     fn acquire_signal_event(&mut self) -> Option<(SignalEvent, usize, u32)> {
         // Reuse the KFD event after its previous signal has been destroyed.
         // The stable process event page supplies the same mailbox address.
@@ -603,6 +641,7 @@ impl HsaState {
         self.create_signal_event()
     }
 
+    /// Creates signal and records its ownership.
     pub(crate) fn create_signal(
         &mut self,
         value: SignalValue,
@@ -655,6 +694,7 @@ impl SignalState {
             .and_then(|record| record.copy_profile)
     }
 
+    /// Checks whether the frontend owns the supplied signal handle.
     pub(crate) fn owns_signal(&self, signal: HsaSignal) -> bool {
         let address = signal.handle as usize;
         if self
@@ -688,6 +728,7 @@ impl SignalState {
         }
     }
 
+    /// Retains async signal while dependent work may use it.
     pub(crate) fn retain_async_signal(&mut self, signal: HsaSignal) -> Result<(), Status> {
         let address = signal.handle as usize;
         if !self.async_signal_refs.contains_key(&address) {
@@ -711,6 +752,7 @@ impl SignalState {
         Ok(())
     }
 
+    /// Releases the retained async signal reference.
     pub(crate) fn release_async_signal(&mut self, signal: HsaSignal) {
         let address = signal.handle as usize;
         let Some(record) = self.async_signal_refs.get_mut(&address) else {
@@ -732,6 +774,7 @@ impl SignalState {
         }
     }
 
+    /// Destroys signal and releases its owned resources.
     fn destroy_signal(&mut self, signal: HsaSignal) -> Status {
         let address = signal.handle as usize;
         if !self.owns_signal(signal) {
@@ -777,6 +820,7 @@ impl SignalState {
         self.finish_signal_storage(address)
     }
 
+    /// Completes signal storage after its pending work has retired.
     fn finish_signal_storage(&mut self, address: usize) -> Status {
         if let Some(mut imported) = self.imported_ipc_signals.remove(&address) {
             return match imported.allocation.free() {
@@ -834,6 +878,7 @@ impl SignalState {
         SUCCESS
     }
 
+    /// Destroys events and releases its owned resources.
     pub(crate) fn destroy_events(&mut self) -> Status {
         let mut status = SUCCESS;
         for (_, event) in self.interrupt_signals.drain() {
@@ -871,6 +916,7 @@ impl SignalState {
     }
 }
 
+/// Rejects a null or duplicate consumer list before signal creation.
 unsafe fn valid_consumers(num_consumers: u32, consumers: *const HsaAgent) -> bool {
     if num_consumers == 0 {
         return true;
@@ -886,10 +932,12 @@ unsafe fn valid_consumers(num_consumers: u32, consumers: *const HsaAgent) -> boo
         .any(|(index, agent)| consumers[..index].contains(agent))
 }
 
+/// Checks whether AMD signal attributes require a consumer list.
 fn amd_signal_uses_consumer_list(attributes: u64) -> bool {
     attributes & (AMD_SIGNAL_AMD_GPU_ONLY | AMD_SIGNAL_IPC) == 0
 }
 
+/// Decides whether signal attributes require native interrupt backing.
 unsafe fn signal_uses_interrupt(
     num_consumers: u32,
     consumers: *const HsaAgent,
@@ -941,6 +989,7 @@ pub(crate) unsafe fn with_signal<R>(
     Some(operation(unsafe { pointer.as_ref() }))
 }
 
+/// Evaluates an HSA signal wait condition against the observed value.
 fn condition_met(condition: u32, observed: SignalValue, compare: SignalValue) -> bool {
     match condition {
         SIGNAL_CONDITION_EQ => observed == compare,
@@ -956,6 +1005,7 @@ fn condition_met(condition: u32, observed: SignalValue, compare: SignalValue) ->
     unsafe(export_name = "__hsa_impl_hsa_signal_create")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Creates an HSA signal with validated consumers.
 pub unsafe extern "C" fn hsa_signal_create(
     initial_value: SignalValue,
     num_consumers: u32,
@@ -994,6 +1044,7 @@ pub unsafe extern "C" fn hsa_signal_create(
     unsafe(export_name = "__hsa_impl_hsa_amd_signal_create")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Creates an AMD signal with attributes and consumer selection.
 pub unsafe extern "C" fn hsa_amd_signal_create(
     initial_value: SignalValue,
     num_consumers: u32,
@@ -1045,6 +1096,7 @@ pub unsafe extern "C" fn hsa_amd_signal_create(
     unsafe(export_name = "__hsa_impl_hsa_amd_signal_batch_create")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Creates a batch of signals with shared native backing.
 pub unsafe extern "C" fn hsa_amd_signal_batch_create(
     count: u32,
     initial_values: *const SignalValue,
@@ -1108,6 +1160,7 @@ pub unsafe extern "C" fn hsa_amd_signal_batch_create(
     unsafe(export_name = "__hsa_impl_hsa_amd_signal_batch_destroy")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Releases a signal batch after all members retire.
 pub extern "C" fn hsa_amd_signal_batch_destroy(batch: HsaAmdSignalBatch) -> Status {
     boundary(|| {
         let mut guard = match lock() {
@@ -1127,6 +1180,7 @@ pub extern "C" fn hsa_amd_signal_batch_destroy(batch: HsaAmdSignalBatch) -> Stat
     unsafe(export_name = "__hsa_impl_hsa_signal_destroy")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Invalidates a signal and retires its backing safely.
 pub unsafe extern "C" fn hsa_signal_destroy(signal: HsaSignal) -> Status {
     boundary(|| {
         let mut guard = match lock() {
@@ -1146,6 +1200,7 @@ pub unsafe extern "C" fn hsa_signal_destroy(signal: HsaSignal) -> Status {
     unsafe(export_name = "__hsa_impl_hsa_amd_ipc_signal_create")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Creates an IPC-capable signal in shared native storage.
 pub unsafe extern "C" fn hsa_amd_ipc_signal_create(
     signal: HsaSignal,
     handle: *mut HsaAmdIpcSignal,
@@ -1176,6 +1231,7 @@ pub unsafe extern "C" fn hsa_amd_ipc_signal_create(
     unsafe(export_name = "__hsa_impl_hsa_amd_ipc_signal_attach")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Attaches an exported IPC signal and returns its local HSA handle.
 pub unsafe extern "C" fn hsa_amd_ipc_signal_attach(
     handle: *const HsaAmdIpcSignal,
     signal: *mut HsaSignal,
@@ -1214,6 +1270,7 @@ pub unsafe extern "C" fn hsa_amd_ipc_signal_attach(
     unsafe(export_name = "__hsa_impl_hsa_signal_load_relaxed")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Loads an HSA signal value with relaxed memory ordering.
 pub unsafe extern "C" fn hsa_signal_load_relaxed(signal: HsaSignal) -> SignalValue {
     // SAFETY: Callers must supply a live HSA signal handle.
     unsafe { with_signal(signal, |signal| signal.value.load(Ordering::Relaxed)) }.unwrap_or(0)
@@ -1224,6 +1281,7 @@ pub unsafe extern "C" fn hsa_signal_load_relaxed(signal: HsaSignal) -> SignalVal
     unsafe(export_name = "__hsa_impl_hsa_signal_load_scacquire")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Loads a signal value with the HSA SC-acquire contract.
 pub unsafe extern "C" fn hsa_signal_load_scacquire(signal: HsaSignal) -> SignalValue {
     // SAFETY: Callers must supply a live HSA signal handle.
     unsafe { with_signal(signal, |signal| signal.value.load(Ordering::Acquire)) }.unwrap_or(0)
@@ -1234,6 +1292,7 @@ pub unsafe extern "C" fn hsa_signal_load_scacquire(signal: HsaSignal) -> SignalV
     unsafe(export_name = "__hsa_impl_hsa_signal_load_acquire")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Uses the deprecated acquire spelling for the SC-acquire load.
 pub unsafe extern "C" fn hsa_signal_load_acquire(signal: HsaSignal) -> SignalValue {
     // SAFETY: This deprecated entry point has the same contract as the
     // sequentially-consistent acquire spelling.
@@ -1245,6 +1304,7 @@ pub unsafe extern "C" fn hsa_signal_load_acquire(signal: HsaSignal) -> SignalVal
     unsafe(export_name = "__hsa_impl_hsa_signal_store_relaxed")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Stores an HSA signal value with relaxed memory ordering.
 pub unsafe extern "C" fn hsa_signal_store_relaxed(signal: HsaSignal, value: SignalValue) {
     // SAFETY: Callers must supply a live HSA signal handle.
     let _ = unsafe {
@@ -1275,6 +1335,7 @@ pub unsafe extern "C" fn hsa_signal_store_relaxed(signal: HsaSignal, value: Sign
     unsafe(export_name = "__hsa_impl_hsa_signal_silent_store_relaxed")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Uses the regular relaxed store path for polling-backed signals.
 pub unsafe extern "C" fn hsa_signal_silent_store_relaxed(signal: HsaSignal, value: SignalValue) {
     // SAFETY: Same operation is sufficient for polling-backed signals.
     unsafe { hsa_signal_store_relaxed(signal, value) };
@@ -1285,6 +1346,7 @@ pub unsafe extern "C" fn hsa_signal_silent_store_relaxed(signal: HsaSignal, valu
     unsafe(export_name = "__hsa_impl_hsa_signal_silent_store_screlease")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Uses the regular SC-release store path for polling-backed signals.
 pub unsafe extern "C" fn hsa_signal_silent_store_screlease(signal: HsaSignal, value: SignalValue) {
     // SAFETY: Same operation is sufficient for polling-backed signals.
     unsafe { hsa_signal_store_screlease(signal, value) };
@@ -1295,6 +1357,7 @@ pub unsafe extern "C" fn hsa_signal_silent_store_screlease(signal: HsaSignal, va
     unsafe(export_name = "__hsa_impl_hsa_signal_store_screlease")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Stores a signal value with the HSA SC-release contract.
 pub unsafe extern "C" fn hsa_signal_store_screlease(signal: HsaSignal, value: SignalValue) {
     // SAFETY: Callers must supply a live HSA signal handle.
     let _ = unsafe {
@@ -1326,12 +1389,14 @@ pub unsafe extern "C" fn hsa_signal_store_screlease(signal: HsaSignal, value: Si
     unsafe(export_name = "__hsa_impl_hsa_signal_store_release")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Uses the deprecated release spelling for the SC-release store.
 pub unsafe extern "C" fn hsa_signal_store_release(signal: HsaSignal, value: SignalValue) {
     // SAFETY: This deprecated entry point has the same contract as the
     // sequentially-consistent release spelling.
     unsafe { hsa_signal_store_screlease(signal, value) };
 }
 
+/// Exchanges a signal value using the requested atomic ordering.
 unsafe fn signal_exchange(signal: HsaSignal, value: SignalValue, order: Ordering) -> SignalValue {
     // SAFETY: Callers must supply a live HSA user signal.
     unsafe {
@@ -1348,6 +1413,7 @@ unsafe fn signal_exchange(signal: HsaSignal, value: SignalValue, order: Ordering
     .unwrap_or(0)
 }
 
+/// Compares and conditionally replaces a signal value atomically.
 unsafe fn signal_compare_exchange(
     signal: HsaSignal,
     expected: SignalValue,
@@ -1375,6 +1441,7 @@ unsafe fn signal_compare_exchange(
     .unwrap_or(0)
 }
 
+/// Applies a fetch-update operation to a signal atomically.
 unsafe fn signal_fetch_update(
     signal: HsaSignal,
     value: SignalValue,
@@ -1395,6 +1462,7 @@ unsafe fn signal_fetch_update(
     };
 }
 
+/// Selects wrapping arithmetic or bitwise updates for flush-backed signals.
 macro_rules! signal_plain {
     (signal_add) => {
         |old: SignalValue, value: SignalValue| old.wrapping_add(value)
@@ -1413,28 +1481,35 @@ macro_rules! signal_plain {
     };
 }
 
+/// Adds an operand to the signal using the requested ordering.
 fn signal_add(value: &AtomicI64, operand: SignalValue, order: Ordering) {
     value.fetch_add(operand, order);
 }
 
+/// Subtracts an operand from the signal using the requested ordering.
 fn signal_subtract(value: &AtomicI64, operand: SignalValue, order: Ordering) {
     value.fetch_sub(operand, order);
 }
 
+/// Bitwise-ANDs an operand into the signal value.
 fn signal_and(value: &AtomicI64, operand: SignalValue, order: Ordering) {
     value.fetch_and(operand, order);
 }
 
+/// Bitwise-ORs an operand into the signal value.
 fn signal_or(value: &AtomicI64, operand: SignalValue, order: Ordering) {
     value.fetch_or(operand, order);
 }
 
+/// Bitwise-XORs an operand into the signal value.
 fn signal_xor(value: &AtomicI64, operand: SignalValue, order: Ordering) {
     value.fetch_xor(operand, order);
 }
 
+/// Generates the signal exchange entry ABI entry points.
 macro_rules! signal_exchange_entry {
     ($name:ident, $order:expr) => {
+        #[doc = concat!("Atomically exchanges an HSA signal through `", stringify!($name), "`.")]
         #[cfg_attr(all(target_arch = "x86_64", not(test)), unsafe(export_name = concat!("__hsa_impl_", stringify!($name))))]
         #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
         pub unsafe extern "C" fn $name(signal: HsaSignal, value: SignalValue) -> SignalValue {
@@ -1444,8 +1519,10 @@ macro_rules! signal_exchange_entry {
     };
 }
 
+/// Generates the signal compare exchange entry ABI entry points.
 macro_rules! signal_compare_exchange_entry {
     ($name:ident, $success:expr, $failure:expr) => {
+        #[doc = concat!("Conditionally exchanges an HSA signal through `", stringify!($name), "`.")]
         #[cfg_attr(all(target_arch = "x86_64", not(test)), unsafe(export_name = concat!("__hsa_impl_", stringify!($name))))]
         #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
         pub unsafe extern "C" fn $name(
@@ -1459,8 +1536,10 @@ macro_rules! signal_compare_exchange_entry {
     };
 }
 
+/// Generates the signal fetch entry ABI entry points.
 macro_rules! signal_fetch_entry {
     ($name:ident, $order:expr, $operation:ident) => {
+        #[doc = concat!("Applies an atomic signal update through `", stringify!($name), "`.")]
         #[cfg_attr(all(target_arch = "x86_64", not(test)), unsafe(export_name = concat!("__hsa_impl_", stringify!($name))))]
         #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
         pub unsafe extern "C" fn $name(signal: HsaSignal, value: SignalValue) {
@@ -1566,6 +1645,7 @@ signal_fetch_entry!(hsa_signal_xor_relaxed, Ordering::Relaxed, signal_xor);
 signal_fetch_entry!(hsa_signal_xor_screlease, Ordering::Release, signal_xor);
 signal_fetch_entry!(hsa_signal_xor_release, Ordering::Release, signal_xor);
 
+/// Returns the public value address for an eligible signal.
 fn signal_value_pointer(signal: &AmdSignal, interrupt: bool) -> Result<*mut SignalValue, Status> {
     if signal.kind.load(Ordering::Acquire) == AMD_SIGNAL_KIND_INVALID {
         return Err(INVALID_SIGNAL);
@@ -1581,6 +1661,7 @@ fn signal_value_pointer(signal: &AmdSignal, interrupt: bool) -> Result<*mut Sign
     unsafe(export_name = "__hsa_impl_hsa_amd_signal_value_pointer")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Returns a stable host pointer to an eligible signal value.
 pub unsafe extern "C" fn hsa_amd_signal_value_pointer(
     signal: HsaSignal,
     value: *mut *mut SignalValue,
@@ -1625,6 +1706,7 @@ pub unsafe extern "C" fn hsa_amd_signal_value_pointer(
     unsafe(export_name = "__hsa_impl_hsa_amd_signal_get_event_id")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Writes the native event ID of an interrupt-backed signal.
 pub unsafe extern "C" fn hsa_amd_signal_get_event_id(
     signal: HsaSignal,
     event_id: *mut u32,
