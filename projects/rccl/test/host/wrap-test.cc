@@ -5317,7 +5317,19 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_ForceSymmetricChoosesSymkWhenEligibl
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllReduce_ForceSymmetricChoosesSymkWhenEligible",
       []() {
-        g_loadParam = ForceParam("RCCL_FORCE_SYMMETRIC", int64_t(1));
+        // CE-registered (section 5) is a competing candidate: without the flag it
+        // would win over symk (section 6). RCCL_FORCE_SYMMETRIC raises preferred
+        // to RCCL_BACKEND_SYMMETRIC so symk wins as the preferred candidate.
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_FORCE_SYMMETRIC") == 0)      return 1;
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0)         return 1;
+          if (std::strcmp(env, "RCCL_CE_AR_REG_MAX_MSG_BYTES") == 0) return INT64_MAX;
+          return def;
+        };
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
         ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
                                                                   size_t, const void*, void*, bool) { return true; });
         ScopedHook symkAvailable(g_symkAvailable,
@@ -5374,7 +5386,16 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_ForceDdaChoosesDdaWhenEligible) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllReduce_ForceDdaChoosesDdaWhenEligible",
       []() {
-        g_loadParam = ForceParam("RCCL_FORCE_DDA", int64_t(1));
+        // CE 2-shot (section 3) is a competing candidate: without the flag it would
+        // win over DDA (section 4). RCCL_FORCE_DDA raises preferred to
+        // RCCL_BACKEND_DDA so DDA wins as the preferred candidate.
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_FORCE_DDA") == 0)            return 1;
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0)         return 1;
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0)   return 1;
+          return def;
+        };
+        g_ceImplemented = true;
         ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
                                  [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
         ScopedHook llEligible(g_allReduceDdaFabricLLEligible,
@@ -5382,6 +5403,11 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_ForceDdaChoosesDdaWhenEligible) {
         ncclComm* comm = MakeCommWithArch("gfx1250");
         comm->nRanks = 1;
         comm->nNodes = 1;
+        comm->symmetricSupport = 1;
+        // Query mode never dereferences ceARTmpBuf; a non-null sentinel is enough
+        // to satisfy the selector's ceARTmpBuf != NULL gate for CE 2-shot.
+        uint8_t stagingBuf[1];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
         rcclCollDecision decision{};
         std::string warn = RcclUnitTesting::CaptureLog([&]() {
           EXPECT_EQ(ncclSuccess,
