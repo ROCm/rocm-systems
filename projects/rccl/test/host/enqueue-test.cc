@@ -1318,6 +1318,16 @@ TEST_F(EnqueueMicrotest, CalcCollChunking_Ll128GrainIsNonZeroForTheFixture) {
          "WarpSize, ll128ShmemElemsPerThread or ll128DataElems makes calcCollChunking:3302 SIGFPE";
 }
 
+TEST_F(EnqueueMicrotest, OneRpnNetRegChannelCap_GatesOnlyAllGatherOnOffloadCapability) {
+  EXPECT_TRUE(ncclUseOneRpnNetRegChannelCap(ncclFuncBroadcast));
+  EXPECT_EQ(bool(NCCL_ALLGATHER_NET_OFFLOAD_SUPPORTED), ncclUseOneRpnNetRegChannelCap(ncclFuncAllGather));
+  for (int i = 0; i < int(ncclNumFuncs); ++i) {
+    const auto func = static_cast<ncclFunc_t>(i);
+    if (func == ncclFuncBroadcast || func == ncclFuncAllGather) continue;
+    EXPECT_FALSE(ncclUseOneRpnNetRegChannelCap(func)) << "func=" << i;
+  }
+}
+
 TEST_F(EnqueueMicrotest, CalcCollChunking_NetOffloadUnsupportedOneRpnRegisteredAllGatherUsesKernelSchedule) {
 #if !NCCL_ALLGATHER_NET_OFFLOAD_SUPPORTED
   // ROCM-33020: without device net offload, registered one-RPN AllGather must

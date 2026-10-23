@@ -23,6 +23,11 @@
 #define NCCL_ALLGATHER_NET_OFFLOAD_SUPPORTED 1
 #endif
 
+static inline bool ncclUseOneRpnNetRegChannelCap(ncclFunc_t func) {
+  return func == ncclFuncBroadcast ||
+         (func == ncclFuncAllGather && NCCL_ALLGATHER_NET_OFFLOAD_SUPPORTED);
+}
+
 // CHUNKSIZE must be a multiple of SLICESIZE
 // RCCL: Benchmarking on single node for MI300X showed improved throughput for single node always using
 // a single slice, so we have separate configurations for single node and multi-node.  Single node configs
