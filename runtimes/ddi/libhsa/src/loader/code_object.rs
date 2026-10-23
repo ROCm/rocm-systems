@@ -210,6 +210,7 @@ pub(super) fn parse_and_load(
             MemoryKind::DeviceLocal {
                 host_visible: true,
                 coherent: false,
+                extended_coherent: false,
                 uncached: false,
                 contiguous: false,
             },

@@ -102,6 +102,8 @@ pub enum MemoryKind {
         host_visible: bool,
         /// Request coherent device mappings for fine-grained access.
         coherent: bool,
+        /// Promote device-scope atomic coherence to extended system scope.
+        extended_coherent: bool,
         /// Bypass device caches for this allocation.
         uncached: bool,
         /// Request physically contiguous backing.

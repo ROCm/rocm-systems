@@ -1043,11 +1043,7 @@ pub unsafe extern "C" fn hsa_soft_queue_create(
         let pool = HsaMemoryPool {
             handle: region.handle,
         };
-        if !matches!(
-            pool.handle,
-            CPU_POOL_FINE | CPU_POOL_EXTENDED | CPU_POOL_KERNARG | CPU_POOL_COARSE
-        ) && runtime.decode_gpu_pool(pool).is_none()
-        {
+        if runtime.decode_cpu_pool(pool).is_none() && runtime.decode_gpu_pool(pool).is_none() {
             return INVALID_REGION;
         }
         if !runtime.signal_state.owns_signal(doorbell_signal) {
