@@ -4,6 +4,7 @@
 add_library(
     lib-common-tests
     OBJECT
+    test_clocks.cpp
     test_delimit.cpp
     test_discover_llvm_libdir.cpp
     test_environment.cpp

@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/sampling.hpp"
+#include "common/clocks.hpp"
 #include "common/env_vars.hpp"
 #include "common/units/power.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
-#include "core/control/clocks/timeline.hpp"
 #include "core/demangler.hpp"
 #include "core/locking.hpp"
 #include "core/node_info.hpp"
@@ -35,7 +35,6 @@
 #include <timemory/components/papi/extern.hpp>
 #include <timemory/components/papi/papi_array.hpp>
 #include <timemory/components/papi/papi_vector.hpp>
-#include <timemory/components/timing/backends.hpp>
 #include <timemory/components/trip_count/extern.hpp>
 #include <timemory/macros.hpp>
 #include <timemory/math.hpp>
@@ -799,7 +798,7 @@ configure(bool _setup, std::int64_t _tid)
             // otherwise stay on perf's CLOCK_MONOTONIC, and parse_overflow_data()
             // freezes the monotonic-to-timeline offset from the first sample.
             _pe.use_clockid = 1;
-            _pe.clockid     = CLOCK_BOOTTIME;
+            _pe.clockid     = clocks::timeline::k_timeline_clock_id;
 
             auto _perf_open_error =
                 _perf_sampler->open(_pe, _info->index_data->system_value);
@@ -1573,10 +1572,12 @@ post_process_timemory(std::int64_t                               _tid,
 
                 if(_cc && _metrics && _metrics(category::thread_cpu_time{}))
                 {
-                    const double _elapsed_cc = _metrics.get_cpu_timestamp();
+                    const auto elapsed_cpu =
+                        static_cast<double>(_metrics.get_cpu_time().count()) /
+                        static_cast<double>(sampling_cpu_clock::get_unit());
 
-                    _cc->set_value(_elapsed_cc / sampling_cpu_clock::get_unit());
-                    _cc->set_accum(_elapsed_cc / sampling_cpu_clock::get_unit());
+                    _cc->set_value(elapsed_cpu);
+                    _cc->set_accum(elapsed_cpu);
                 }
             }
 
@@ -1812,7 +1813,7 @@ pause()
     }
 
     LOG_DEBUG("Pausing sampling...");
-    pending_pause_ts.store(control::clocks::timeline_ns());
+    pending_pause_ts.store(clocks::timeline::now_ns());
     block_samples();
     set_sampler_timers(timer_state::stopped);
 }
@@ -1831,7 +1832,7 @@ resume()
 
     LOG_DEBUG("Resuming sampling...");
     auto const pause_ts  = pending_pause_ts.exchange(0);
-    auto const resume_ts = control::clocks::timeline_ns();
+    auto const resume_ts = clocks::timeline::now_ns();
     if(pause_ts > 0)
     {
         auto const _lk = std::lock_guard<std::mutex>{ pause_mutex };
