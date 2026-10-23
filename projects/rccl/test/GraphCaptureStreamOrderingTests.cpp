@@ -19,6 +19,7 @@
 #include <hip/hip_runtime.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <functional>
@@ -346,6 +347,10 @@ void analyze(hipGraph_t g, GraphShape& shape)
         {
             shape.label[i] = 'E';
         }
+        else if(type == hipGraphNodeTypeHost)
+        {
+            shape.label[i] = 'H';
+        }
         else if(type == hipGraphNodeTypeKernel)
         {
             hipKernelNodeParams p{};
@@ -388,10 +393,11 @@ void analyzeRank(Graphs& g, int r, GraphShape& shape)
 }
 
 // A captured launch joins the user stream with deviceStream and at most one more internal
-// strong stream (hostStream when plans carry proxy ops), each adding one dependency. When user work sits between collectives, the deviceStream dependency
-// duplicates the path through that work, so redundant edges are expected; what must not
-// happen is a node's dependency count growing with the length of the capture, which is
-// what a deviceStream that is not fast-forwarded produces.
+// strong stream (hostStream when plans carry proxy ops), each adding one dependency. When
+// user work sits between collectives, the deviceStream dependency duplicates the path
+// through that work, so redundant edges are expected; what must not happen is a node's
+// dependency count growing with the length of the capture, which is what a deviceStream
+// that is not fast-forwarded produces.
 static constexpr size_t kMaxDependencies = 3;
 
 void expectBoundedDependencies(const GraphShape& shape, const std::string& what)
@@ -440,7 +446,8 @@ void sequentialCollectives(int n, hipStreamCaptureMode mode)
     }
 
     // Sum over ranks of (r+1) is 3, then each further AllReduce doubles it (mod 2^32).
-    const uint32_t expected = static_cast<uint32_t>(3ull << (n - 1));
+    uint32_t expected = 3;
+    for(int i = 1; i < n; i++) expected *= 2;
     for(int rep = 0; rep < 3; rep++)
     {
         ASSERT_NO_FATAL_FAILURE(launchGraphs(h, g, &Harness::s));
@@ -451,7 +458,7 @@ void sequentialCollectives(int n, hipStreamCaptureMode mode)
 
 // User work between captured collectives must stay ordered on both sides of each one.
 void interleavedUserWork(hipStreamCaptureMode mode, bool checkDependencyBound, bool checkSerialEvent,
-                         int rounds = 12)
+                         bool expectHostCallbacks = false, int rounds = 12)
 {
     Harness h;
     ASSERT_NO_FATAL_FAILURE(initHarness(h, kRanks));
@@ -476,6 +483,8 @@ void interleavedUserWork(hipStreamCaptureMode mode, bool checkDependencyBound, b
         EXPECT_EQ(shape.order(), expectedOrder) << "rank " << r << ": " << shape.describe();
         if(checkDependencyBound) expectBoundedDependencies(shape, "rank " + std::to_string(r));
         if(checkSerialEvent) expectSerialEventAfterCollectives(shape, "rank " + std::to_string(r));
+        if(expectHostCallbacks)
+            EXPECT_GT(shape.count('H'), 0) << "rank " << r << ": no host-callback nodes: " << shape.describe();
     }
 
     // Ranks start at 1 and 2; every AllReduce leaves both at twice the common value.
@@ -572,7 +581,7 @@ TEST_F(GraphCaptureStreamOrdering, InterleavedUserWorkNetTransport)
 {
     RUN_ISOLATED_TESTS_WITH_OPTIONS(
         parallelOptions(),
-        isolated("Socket", [] { interleavedUserWork(hipStreamCaptureModeThreadLocal, true, false); },
+        isolated("Socket", [] { interleavedUserWork(hipStreamCaptureModeThreadLocal, true, false, true); },
                  {{"NCCL_P2P_DISABLE", "1"}, {"NCCL_SHM_DISABLE", "1"}, {"NCCL_NET", "Socket"}}));
 }
 

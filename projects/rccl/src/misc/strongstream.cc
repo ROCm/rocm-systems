@@ -367,8 +367,7 @@ ncclResult_t ncclStreamWaitStream(cudaStream_t a, cudaStream_t b, cudaEvent_t sc
   return ncclSuccess;
 }
 
-// Replace the capture dependencies of `s` with the current capture dependencies of `source`.
-static ncclResult_t setCaptureDependenciesFrom(cudaStream_t s, cudaStream_t source) {
+ncclResult_t ncclStreamAdvanceToStream(cudaStream_t s, cudaStream_t source) {
   cudaStreamCaptureStatus status;
   cudaGraphNode_t const* nodes;
   size_t count = 0;
@@ -409,14 +408,10 @@ ncclResult_t ncclStreamAdvanceToEvent(struct ncclCudaGraph g, cudaStream_t s, cu
     cudaStream_t tmp;
     CUDACHECK(cudaStreamCreateWithFlags(&tmp, cudaStreamNonBlocking));
     CUDACHECK(cudaStreamWaitEvent(tmp, e, 0));
-    NCCLCHECK(setCaptureDependenciesFrom(s, tmp));
+    NCCLCHECK(ncclStreamAdvanceToStream(s, tmp));
     CUDACHECK(cudaStreamDestroy(tmp));
   }
   return ncclSuccess;
-}
-
-ncclResult_t ncclStreamAdvanceToStream(cudaStream_t s, cudaStream_t source) {
-  return setCaptureDependenciesFrom(s, source);
 }
 
 ncclResult_t ncclStrongStreamSynchronize(struct ncclStrongStream* ss) {
