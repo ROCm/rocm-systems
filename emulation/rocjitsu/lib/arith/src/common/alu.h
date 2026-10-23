@@ -49,6 +49,22 @@ inline float alu_output(float value, uint32_t modifiers) {
   return value;
 }
 
+// Scales an FP16 arithmetic result and applies CLAMP. OMOD flushes an
+// unscaled tiny result to positive zero; halving a normal into the subnormal
+// range produces signed zero instead. The input is represented in FP32.
+inline float alu_output_f16(float value, uint32_t modifiers) {
+  if (modifiers & RJ_ARITH_ALU_OMOD_HALF) {
+    uint32_t bits = as_bits(value), magnitude = bits & 0x7fffffffu;
+    if (magnitude < 0x38800000u) {
+      value = 0;
+    } else if ((modifiers & RJ_ARITH_ALU_OMOD_HALF) == RJ_ARITH_ALU_OMOD_HALF &&
+               magnitude < 0x39000000u) {
+      value = as_float(bits & 0x80000000u);
+    }
+  }
+  return alu_output(value, modifiers);
+}
+
 // Scale a rounded FP32 result with architectural tiny-result flushing and
 // directed overflow. Integer exponent adjustment is independent of host controls.
 inline uint32_t scale_omod_f32_bits(uint32_t bits, unsigned omod, unsigned rounding) {

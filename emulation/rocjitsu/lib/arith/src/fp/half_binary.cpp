@@ -1,0 +1,772 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+// FP16 add/subtract/multiply, including packed forms and guest FP status.
+// Owns public entry points and their validation/dispatch policy.
+
+#include "fp/half_binary.h"
+#include "common/alu.h"
+#include "common/float_formats.h"
+#include "common/internal.h"
+#include "common/packed_alu.h"
+#include "fp/binary.h"
+#include "fp/half_fma_scalar.h"
+#include "register/dpp.h"
+#include "rj_arith/rj_arith.h"
+#include <bit>
+
+#include <stdint.h>
+
+namespace {
+
+// Guest-mode packed ADD/MUL follows rocjitsu fp_mode::packed_binary_f16.
+// Finite FP16 addition and multiplication are exact in FP64; narrow with
+// integer rounding rather than changing the CPU environment.
+template <rocjitsu::arith::Binary Op, bool Rdna3>
+int packed_arithmetic_modes(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
+                            const uint32_t *const *a, const uint32_t *const *b) {
+  const unsigned rounding = unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24);
+  uint32_t result[32] = {};
+  for (int lane = 0; lane < 32; ++lane) {
+    for (int half = 0; half < 2; ++half) {
+      const uint32_t m = rocjitsu::arith::packed_half_mode(mode, half != 0);
+      uint16_t x = uint16_t(a[0][lane] >> (m & RJ_ARITH_ALU_HIGH_A ? 16 : 0));
+      uint16_t y = uint16_t(b[0][lane] >> (m & RJ_ARITH_ALU_HIGH_B ? 16 : 0));
+      if (m & RJ_ARITH_ALU_NEG_A) {
+        x ^= 0x8000;
+      }
+      if (m & RJ_ARITH_ALU_NEG_B) {
+        y ^= 0x8000;
+      }
+      if (flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) {
+        if ((x & 0x7fff) < 0x400) {
+          x &= 0x8000;
+        }
+        if ((y & 0x7fff) < 0x400) {
+          y &= 0x8000;
+        }
+      }
+      const uint16_t mx = x & 0x7fff, my = y & 0x7fff;
+      uint16_t encoded;
+      if (mx > 0x7c00 || my > 0x7c00) {
+        encoded = (mx > 0x7c00 ? x : y) | ((!Rdna3 || (flags & RJ_ARITH_FP_IEEE_MODE)) ? 0x200 : 0);
+      } else if constexpr (Op == rocjitsu::arith::Binary::Add) {
+        if (mx == 0x7c00 && my == 0x7c00 && ((x ^ y) & 0x8000)) {
+          encoded = 0xfe00;
+        } else if (mx == 0x7c00 || my == 0x7c00) {
+          encoded = mx == 0x7c00 ? x : y;
+        } else {
+          double value =
+              double(rocjitsu::arith::f16_to_float(x)) + double(rocjitsu::arith::f16_to_float(y));
+          if (value == 0 && ((x ^ y) & 0x8000)) {
+            value = rounding == 2 ? -0.0 : 0.0;
+          }
+          encoded = rocjitsu::arith::half_fma_narrow(std::bit_cast<uint64_t>(value),
+                                                     flags & RJ_ARITH_FP16_OVFL, rounding);
+        }
+      } else {
+        if ((mx == 0 && my == 0x7c00) || (my == 0 && mx == 0x7c00)) {
+          encoded = 0xfe00;
+        } else if (mx == 0x7c00 || my == 0x7c00) {
+          encoded = ((x ^ y) & 0x8000) | 0x7c00;
+        } else {
+          encoded = rocjitsu::arith::half_fma_narrow(
+              std::bit_cast<uint64_t>(double(rocjitsu::arith::f16_to_float(x)) *
+                                      double(rocjitsu::arith::f16_to_float(y))),
+              flags & RJ_ARITH_FP16_OVFL, rounding);
+        }
+      }
+      const bool preserve_nan =
+          Rdna3 && (flags & RJ_ARITH_FP_DX10_CLAMP_OFF) && (encoded & 0x7fff) > 0x7c00;
+      if ((m & RJ_ARITH_ALU_CLAMP) && !preserve_nan) {
+        encoded = rocjitsu::arith::half_fma_clamp(encoded);
+      }
+
+      // Unlike FMA, packed binary operations test the packed result's exponent.
+      if ((flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) && (encoded & 0x7fff) < 0x400) {
+        encoded &= 0x8000;
+      }
+      result[lane] |= uint32_t(encoded) << (half * 16);
+    }
+  }
+  for (int lane = 0; lane < 32; ++lane) {
+    if ((exec_mask >> lane) & 1) {
+      d[0][lane] = result[lane];
+    }
+  }
+  return RJ_ARITH_SUCCESS;
+}
+
+// Ordinary directed ADD/SUB/MUL follows rocjitsu fp_mode::arithmetic_f16:
+// finite FP16 operands produce an exact FP64 intermediate, then integer
+// narrowing applies the guest rounding mode without changing host controls.
+template <rocjitsu::arith::Binary Op>
+int arithmetic_modes(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
+                     const uint32_t *const *a, const uint32_t *const *b) {
+  const unsigned rounding = unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24);
+  const unsigned a_shift = mode & RJ_ARITH_ALU_HIGH_A ? 16 : 0;
+  const unsigned b_shift = mode & RJ_ARITH_ALU_HIGH_B ? 16 : 0;
+  const unsigned d_shift = mode & RJ_ARITH_ALU_HIGH_D ? 16 : 0;
+  const unsigned omod = (mode >> 6) & 3;
+  uint16_t result[32];
+  for (int lane = 0; lane < 32; ++lane) {
+    uint16_t x = uint16_t(a[0][lane] >> a_shift);
+    uint16_t y = uint16_t(b[0][lane] >> b_shift);
+    if (flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) {
+      if ((x & 0x7fff) < 0x400) {
+        x &= 0x8000;
+      }
+      if ((y & 0x7fff) < 0x400) {
+        y &= 0x8000;
+      }
+    }
+    if (mode & RJ_ARITH_ALU_ABS_A) {
+      x &= 0x7fff;
+    }
+    if (mode & RJ_ARITH_ALU_ABS_B) {
+      y &= 0x7fff;
+    }
+    if (mode & RJ_ARITH_ALU_NEG_A) {
+      x ^= 0x8000;
+    }
+    if (mode & RJ_ARITH_ALU_NEG_B) {
+      y ^= 0x8000;
+    }
+    if constexpr (Op == rocjitsu::arith::Binary::Sub) {
+      y ^= 0x8000;
+    }
+    if constexpr (Op == rocjitsu::arith::Binary::Subrev) {
+      x ^= 0x8000;
+    }
+    const double lhs = rocjitsu::arith::f16_to_float(x), rhs = rocjitsu::arith::f16_to_float(y);
+    double value;
+    if constexpr (Op == rocjitsu::arith::Binary::Mul) {
+      value = lhs * rhs;
+    } else {
+      value = lhs + rhs;
+      if (value == 0 && ((x ^ y) & 0x8000)) {
+        value = rounding == 2 ? -0.0 : 0.0;
+      }
+    }
+    // Retain the ordinary rj-arith OMOD tiny-result policy, applied before narrowing.
+    if (omod) {
+      const double magnitude = value < 0 ? -value : value;
+      if (magnitude < 0x1p-14) {
+        value = 0;
+      } else if (omod == 3 && magnitude < 0x1p-13) {
+        value = value < 0 ? -0.0 : 0.0;
+      }
+      const double scales[] = {1, 2, 4, 0.5};
+      value *= scales[omod];
+    }
+    const bool nan = value != value;
+    if ((mode & RJ_ARITH_ALU_CLAMP) && !(nan && (flags & RJ_ARITH_FP_DX10_CLAMP_OFF))) {
+      value = !(value > 0) ? 0 : value > 1 ? 1 : value;
+    }
+
+    // The finite narrowing helper excludes NaNs/infinities.
+    const uint64_t magnitude = rocjitsu::arith::double_bits(value) & 0x7fffffffffffffffULL;
+    uint16_t encoded = magnitude >= 0x7ff0000000000000ULL
+                           ? rocjitsu::arith::float_to_f16(float(value), flags & RJ_ARITH_FP16_OVFL)
+                           : rocjitsu::arith::half_fma_narrow(std::bit_cast<uint64_t>(value),
+                                                              flags & RJ_ARITH_FP16_OVFL, rounding);
+    if ((flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) && (encoded & 0x7fff) < 0x400) {
+      encoded &= 0x8000;
+    }
+    result[lane] = encoded;
+  }
+  for (int lane = 0; lane < 32; ++lane) {
+    if ((exec_mask >> lane) & 1) {
+      d[0][lane] = (d[0][lane] & ~(0xffffU << d_shift)) | (uint32_t(result[lane]) << d_shift);
+    }
+  }
+  return RJ_ARITH_SUCCESS;
+}
+
+// Computes masked scalar results; GuestDenormals enables guest input/output flushing.
+template <rocjitsu::arith::Binary Op, bool Packed, bool GuestDenormals>
+[[gnu::noinline]] int binary_scalar(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b) {
+  constexpr bool arithmetic =
+      Op == rocjitsu::arith::Binary::Add || Op == rocjitsu::arith::Binary::Sub ||
+      Op == rocjitsu::arith::Binary::Subrev || Op == rocjitsu::arith::Binary::Mul;
+
+  // Each packed result half has independent source-half selectors and sign modifiers.
+  uint32_t modes[] = {Packed ? rocjitsu::arith::packed_half_mode(mode, false) : uint32_t(mode),
+                      rocjitsu::arith::packed_half_mode(mode, true)};
+  int d_shift = mode & RJ_ARITH_ALU_HIGH_D ? 16 : 0;
+  uint32_t result[32];
+  for (int lane = 0; lane < 32; ++lane) {
+    result[lane] = 0;
+    for (int half = 0; half < (Packed ? 2 : 1); ++half) {
+      uint32_t m = modes[half];
+      int a_shift = m & RJ_ARITH_ALU_HIGH_A ? 16 : 0;
+      int b_shift = m & RJ_ARITH_ALU_HIGH_B ? 16 : 0;
+      uint16_t a_bits = uint16_t(a[0][lane] >> a_shift);
+      uint16_t b_bits = uint16_t(b[0][lane] >> b_shift);
+      if (GuestDenormals && (arithmetic) && (flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS)) {
+        if ((a_bits & 0x7fff) < 0x0400) {
+          a_bits &= 0x8000;
+        }
+        if ((b_bits & 0x7fff) < 0x0400) {
+          b_bits &= 0x8000;
+        }
+      }
+      float x = rocjitsu::arith::alu_input(
+          rocjitsu::arith::as_bits(rocjitsu::arith::f16_to_float(a_bits)), m);
+      float y = rocjitsu::arith::alu_input(
+          rocjitsu::arith::as_bits(rocjitsu::arith::f16_to_float(b_bits)), m >> 1);
+      float value;
+      if constexpr (Op == rocjitsu::arith::Binary::Add) {
+        value = x + y;
+      }
+      if constexpr (Op == rocjitsu::arith::Binary::Sub) {
+        value = x - y;
+      }
+      if constexpr (Op == rocjitsu::arith::Binary::Subrev) {
+        value = y - x;
+      }
+      if constexpr (Op == rocjitsu::arith::Binary::Mul) {
+        value = x * y;
+      }
+
+      if ((flags & RJ_ARITH_FP_DX10_CLAMP_OFF) &&
+          (rocjitsu::arith::as_bits(value) & 0x7fffffff) > 0x7f800000) {
+        m &= ~RJ_ARITH_ALU_CLAMP;
+      }
+      uint16_t encoded = rocjitsu::arith::float_to_f16(rocjitsu::arith::alu_output_f16(value, m),
+                                                       flags & RJ_ARITH_FP16_OVFL);
+      if (GuestDenormals && (arithmetic) && (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) &&
+          (encoded & 0x7fff) < 0x0400) {
+        encoded &= 0x8000;
+      }
+      result[lane] |= uint32_t(encoded) << (16 * half);
+    }
+  }
+  for (int lane = 0; lane < 32; ++lane) {
+    if ((exec_mask >> lane) & 1) {
+      if constexpr (Packed) {
+        d[0][lane] = result[lane];
+      } else {
+        d[0][lane] = (d[0][lane] & ~(0xffffU << d_shift)) | (result[lane] << d_shift);
+      }
+    }
+  }
+  return RJ_ARITH_SUCCESS;
+}
+
+// Evaluate FP16 binary arithmetic for the selected lanes. Reject invalid controls before
+// changing outputs.
+template <rocjitsu::arith::Binary Op, bool Packed = false, bool Rdna3 = false>
+int binary(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
+           const uint32_t *const *a, const uint32_t *const *b) {
+  if (mode >> 32) {
+    if constexpr (!Packed) {
+      return rocjitsu::arith::execute_dpp(
+          flags, exec_mask, mode, a, [&](uint32_t exec_mask, const uint32_t *const *source) {
+            return binary<Op, Packed, Rdna3>(flags, exec_mask, uint32_t(mode), d, source, b);
+          });
+    } else {
+      return RJ_ARITH_ERROR_INVALID_FLAGS;
+    }
+  }
+
+  const uint32_t known =
+      Packed ? RJ_ARITH_PK_NEG_LO_A | RJ_ARITH_PK_NEG_LO_B | RJ_ARITH_PK_NEG_HI_A |
+                   RJ_ARITH_PK_NEG_HI_B | RJ_ARITH_PK_CLAMP | RJ_ARITH_PK_LO_A_HIGH |
+                   RJ_ARITH_PK_LO_B_HIGH | RJ_ARITH_PK_HI_A_LOW | RJ_ARITH_PK_HI_B_LOW
+             : RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_NEG_B | RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_ABS_B |
+                   RJ_ARITH_ALU_OMOD_HALF | RJ_ARITH_ALU_CLAMP | RJ_ARITH_ALU_HIGH_A |
+                   RJ_ARITH_ALU_HIGH_B | RJ_ARITH_ALU_HIGH_D;
+  constexpr bool arithmetic =
+      Op == rocjitsu::arith::Binary::Add || Op == rocjitsu::arith::Binary::Sub ||
+      Op == rocjitsu::arith::Binary::Subrev || Op == rocjitsu::arith::Binary::Mul;
+
+  constexpr uint64_t fp_flags = (arithmetic)
+                                    ? RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
+                                          RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | RJ_ARITH_FP_IEEE_MODE
+                                    : 0;
+
+  // Selection ignores guest rounding: it chooses an FP16 operand and applies
+  // the existing fixed-nearest output policy, including when OMOD is present.
+  constexpr uint64_t mode_flags = RJ_ARITH_FP_ROUND_MASK | (Rdna3 ? RJ_ARITH_FP_DX10_CLAMP_OFF : 0);
+  if (int error = rocjitsu::arith::validate(flags, mode & ~known, false, fp_flags | mode_flags)) {
+    return error;
+  }
+  if constexpr (Rdna3 && !Packed) {
+    if (!(flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) || (flags & RJ_ARITH_FP_IEEE_MODE)) {
+      mode &= ~uint64_t(RJ_ARITH_ALU_OMOD_HALF);
+    }
+  }
+  if (exec_mask == 0) {
+    return RJ_ARITH_SUCCESS;
+  }
+  if constexpr (!Packed && arithmetic) {
+    if (flags & RJ_ARITH_FP_ROUND_MASK) {
+      return arithmetic_modes<Op>(flags, exec_mask, uint32_t(mode), d, a, b);
+    }
+  }
+  if constexpr (Packed && arithmetic) {
+    if ((flags & RJ_ARITH_FP_ROUND_MASK) ||
+        ((mode & RJ_ARITH_PK_CLAMP) && (flags & RJ_ARITH_FP_DX10_CLAMP_OFF))) {
+      return packed_arithmetic_modes<Op, Rdna3>(flags, exec_mask, uint32_t(mode), d, a, b);
+    }
+  }
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+  if ((flags & RJ_ARITH_CPU_MASK) >= RJ_ARITH_CPU_X86_64_V3) {
+    rocjitsu::arith::half_binary_x86_64_v3<Op, Packed>(flags, exec_mask, mode, d[0], a[0], b[0]);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+  if constexpr (Packed && arithmetic) {
+    if (!(flags & (RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS))) {
+      return binary_scalar<Op, Packed, false>(flags, exec_mask, mode, d, a, b);
+    }
+  }
+  return binary_scalar<Op, Packed, true>(flags, exec_mask, mode, d, a, b);
+}
+
+// Evaluate FP16 binary arithmetic for Wave64. Reject invalid controls before changing outputs.
+template <rocjitsu::arith::Binary Op, bool Packed = false, bool Rdna3 = false>
+int binary_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *d,
+                  const uint32_t *const *a, const uint32_t *const *b) {
+  // Validate before either Wave64 half can modify outputs, even when EXEC is empty.
+  if (int error = binary<Op, Packed, Rdna3>(flags, 0, mode, nullptr, nullptr, nullptr)) {
+    return error;
+  }
+  if (!exec_mask) {
+    return RJ_ARITH_SUCCESS;
+  }
+  for (int half = 0; half < 2; ++half) {
+    uint64_t half_mode = mode;
+    if (mode & RJ_ARITH_DPP16) {
+      // Each half-wave uses only its own two DPP16 rows.
+      uint64_t rows = (mode & RJ_ARITH_DPP_ROW_MASK) >> RJ_ARITH_DPP_ROW_SHIFT;
+      half_mode =
+          (mode & ~RJ_ARITH_DPP_ROW_MASK) | (((rows >> (half * 2)) & 3) << RJ_ARITH_DPP_ROW_SHIFT);
+    }
+    uint32_t *dest = d[0] + half * 32;
+    const uint32_t *x = a[0] + half * 32, *y = b[0] + half * 32;
+    if (int error = binary<Op, Packed, Rdna3>(flags, uint32_t(exec_mask >> (half * 32)), half_mode,
+                                              &dest, &x, &y)) {
+      return error;
+    }
+  }
+  return RJ_ARITH_SUCCESS;
+}
+
+} // namespace
+
+// Add the operands for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_add_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
+                           const uint32_t *const *a, const uint32_t *const *b,
+                           [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return binary<rocjitsu::arith::Binary::Add, false, true>(flags, exec_mask, mode, d, a, b);
+}
+
+// Add the operands for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_add_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                 uint32_t *const *d, const uint32_t *const *a,
+                                 const uint32_t *const *b,
+                                 [[maybe_unused]] uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return binary<rocjitsu::arith::Binary::Add>(flags, exec_mask, mode, d, a, b);
+}
+
+// Subtract B from A for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_sub_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
+                           const uint32_t *const *a, const uint32_t *const *b,
+                           [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return binary<rocjitsu::arith::Binary::Sub, false, true>(flags, exec_mask, mode, d, a, b);
+}
+
+// Subtract B from A for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_sub_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                 uint32_t *const *d, const uint32_t *const *a,
+                                 const uint32_t *const *b,
+                                 [[maybe_unused]] uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return binary<rocjitsu::arith::Binary::Sub>(flags, exec_mask, mode, d, a, b);
+}
+
+// Subtract A from B for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_subrev_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
+                              const uint32_t *const *a, const uint32_t *const *b,
+                              [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return binary<rocjitsu::arith::Binary::Subrev, false, true>(flags, exec_mask, mode, d, a, b);
+}
+
+// Subtract A from B for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_subrev_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b,
+                                    [[maybe_unused]] uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return binary<rocjitsu::arith::Binary::Subrev>(flags, exec_mask, mode, d, a, b);
+}
+
+// Multiply the operands for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_mul_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
+                           const uint32_t *const *a, const uint32_t *const *b,
+                           [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return binary<rocjitsu::arith::Binary::Mul, false, true>(flags, exec_mask, mode, d, a, b);
+}
+
+// Multiply the operands for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_mul_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                 uint32_t *const *d, const uint32_t *const *a,
+                                 const uint32_t *const *b,
+                                 [[maybe_unused]] uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return binary<rocjitsu::arith::Binary::Mul>(flags, exec_mask, mode, d, a, b);
+}
+
+// Add the operands with packed elements for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_pk_add_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b,
+                                    [[maybe_unused]] uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if (mode >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return binary<rocjitsu::arith::Binary::Add, true>(flags, exec_mask, mode, d, a, b);
+}
+
+// Multiply the operands with packed elements for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_pk_mul_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b,
+                                    [[maybe_unused]] uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if (mode >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return binary<rocjitsu::arith::Binary::Mul, true>(flags, exec_mask, mode, d, a, b);
+}
+
+// Add the operands for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_add_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *d,
+                           const uint32_t *const *a, const uint32_t *const *b,
+                           [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return binary_wave64<rocjitsu::arith::Binary::Add, false, true>(flags, exec_mask, mode, d, a, b);
+}
+
+// Add the operands for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_add_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                 uint32_t *const *d, const uint32_t *const *a,
+                                 const uint32_t *const *b,
+                                 [[maybe_unused]] uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return binary_wave64<rocjitsu::arith::Binary::Add>(flags, exec_mask, mode, d, a, b);
+}
+
+// Subtract B from A for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_sub_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *d,
+                           const uint32_t *const *a, const uint32_t *const *b,
+                           [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return binary_wave64<rocjitsu::arith::Binary::Sub, false, true>(flags, exec_mask, mode, d, a, b);
+}
+
+// Subtract B from A for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_sub_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                 uint32_t *const *d, const uint32_t *const *a,
+                                 const uint32_t *const *b,
+                                 [[maybe_unused]] uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return binary_wave64<rocjitsu::arith::Binary::Sub>(flags, exec_mask, mode, d, a, b);
+}
+
+// Subtract A from B for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_subrev_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *d,
+                              const uint32_t *const *a, const uint32_t *const *b,
+                              [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return binary_wave64<rocjitsu::arith::Binary::Subrev, false, true>(flags, exec_mask, mode, d, a,
+                                                                     b);
+}
+
+// Subtract A from B for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_subrev_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b,
+                                    [[maybe_unused]] uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return binary_wave64<rocjitsu::arith::Binary::Subrev>(flags, exec_mask, mode, d, a, b);
+}
+
+// Multiply the operands for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_mul_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *d,
+                           const uint32_t *const *a, const uint32_t *const *b,
+                           [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return binary_wave64<rocjitsu::arith::Binary::Mul, false, true>(flags, exec_mask, mode, d, a, b);
+}
+
+// Multiply the operands for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_mul_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                 uint32_t *const *d, const uint32_t *const *a,
+                                 const uint32_t *const *b,
+                                 [[maybe_unused]] uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return binary_wave64<rocjitsu::arith::Binary::Mul>(flags, exec_mask, mode, d, a, b);
+}
+
+// Add the operands with packed elements for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_pk_add_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b,
+                                    [[maybe_unused]] uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if (mode >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return binary_wave64<rocjitsu::arith::Binary::Add, true>(flags, exec_mask, mode, d, a, b);
+}
+
+// Multiply the operands with packed elements for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_pk_mul_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b,
+                                    [[maybe_unused]] uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if (mode >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return binary_wave64<rocjitsu::arith::Binary::Mul, true>(flags, exec_mask, mode, d, a, b);
+}
+
+// Add the operands with packed elements for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_pk_add_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *const *d, const uint32_t *const *a,
+                              const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return binary<rocjitsu::arith::Binary::Add, true, true>(flags, exec_mask, instruction_flags, d, a,
+                                                          b);
+}
+
+// Multiply the operands with packed elements for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_pk_mul_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *const *d, const uint32_t *const *a,
+                              const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return binary<rocjitsu::arith::Binary::Mul, true, true>(flags, exec_mask, instruction_flags, d, a,
+                                                          b);
+}
+
+// Add the operands with packed elements for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_pk_add_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *const *d, const uint32_t *const *a,
+                              const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return binary_wave64<rocjitsu::arith::Binary::Add, true, true>(flags, exec_mask,
+                                                                 instruction_flags, d, a, b);
+}
+
+// Multiply the operands with packed elements for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_pk_mul_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *const *d, const uint32_t *const *a,
+                              const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return binary_wave64<rocjitsu::arith::Binary::Mul, true, true>(flags, exec_mask,
+                                                                 instruction_flags, d, a, b);
+}
