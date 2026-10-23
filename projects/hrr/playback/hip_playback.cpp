@@ -339,27 +339,11 @@ const void* PlaybackContext::load_code_object(uint64_t hash_lo, uint64_t hash_hi
     return cache_file(key, co_path(archive_dir, hash_lo, hash_hi), sz_out, "code object cache");
 }
 
-// The device a module loaded now belongs to, and the suffix its co_modules key
-// carries: HIP builds the module for the current device only, so a code object
-// used on two devices is two modules.
-static std::string device_suffix() {
-    int dev = 0;
-    if (hipGetDevice(&dev) != hipSuccess) dev = 0;
-    return "@" + std::to_string(dev);
-}
-
-// Whether the co_modules entry `key` is a module on the device `dev_sfx` names.
-static bool on_device(const std::string& key, const std::string& dev_sfx) {
-    return key.size() >= dev_sfx.size() &&
-           key.compare(key.size() - dev_sfx.size(), dev_sfx.size(), dev_sfx) == 0;
-}
-
 hipModule_t PlaybackContext::load_module(uint64_t hash_lo, uint64_t hash_hi) {
     std::string hex = hrr::hash_hex(hash_lo, hash_hi);
-    const std::string key = hex + device_suffix();
     {
         std::shared_lock lk(map_mutex);
-        auto it = co_modules.find(key);
+        auto it = co_modules.find(hex);
         if (it != co_modules.end()) return it->second;
     }
 
@@ -392,7 +376,7 @@ hipModule_t PlaybackContext::load_module(uint64_t hash_lo, uint64_t hash_hi) {
     // Re-acquire with exclusive lock; if a concurrent thread already loaded
     // this module, discard ours to avoid a double-load leak.
     std::unique_lock lk(map_mutex);
-    auto [it, inserted] = co_modules.emplace(key, mod);
+    auto [it, inserted] = co_modules.emplace(hex, mod);
     if (!inserted) {
         (void)hipModuleUnload(mod);
         return it->second;
@@ -672,9 +656,6 @@ static hipFunction_t resolve_kernel_function(PlaybackContext& ctx,
     // code objects, so caching/searching by name alone binds every "triton_"
     // launch to one arbitrary kernel and faults (HIP 719 / VM fault). The recorded
     // code-object hash disambiguates which code object this launch came from.
-    // A function belongs to the module of one device, so the key names the
-    // current device as well.
-    const std::string dev_sfx = device_suffix();
     std::string cache_key = kernel_name;
     if (co_hash_lo || co_hash_hi) {
         char hpfx[34];
@@ -683,7 +664,6 @@ static hipFunction_t resolve_kernel_function(PlaybackContext& ctx,
         cache_key.assign(hpfx);
         cache_key += kernel_name;
     }
-    cache_key += dev_sfx;
 
     if (!func) {
         std::shared_lock lk(ctx.map_mutex);
@@ -709,8 +689,7 @@ static hipFunction_t resolve_kernel_function(PlaybackContext& ctx,
                 func = nullptr;
             }
             if (!func) {
-                for (auto& [key, mod] : ctx.co_modules) {
-                    if (!on_device(key, dev_sfx)) continue;
+                for (auto& [hex, mod] : ctx.co_modules) {
                     if (hipModuleGetFunction(&func, mod, kernel_name.c_str()) == hipSuccess
                         && func) break;
                     func = nullptr;
@@ -1604,11 +1583,10 @@ hipError_t playback_hipModuleLaunchCooperativeKernel(PlaybackContext& ctx,
 // ---------------------------------------------------------------------------
 // Manual playback: __hipRegisterFatBinary
 // ---------------------------------------------------------------------------
-// Archives from before capture stopped storing bundles carry the fat binary as
-// a blob: load it via hipModuleLoadData so all embedded kernel names become
-// resolvable at kernel launch replay time. Stored in co_modules keyed by the
-// full 32-char hex hash and the current device, as load_module() keys its
-// modules, so kernel name scans find it.
+// Load the fat binary blob via hipModuleLoadData so all embedded kernel names
+// become resolvable at kernel launch replay time.
+// Stored in co_modules keyed by the full 32-char hex hash — collision-free
+// and consistent with load_module(), so kernel name scans find it automatically.
 
 // A well-formed offload bundle starts with one of the two magics the bundler
 // emits: the clang text magic, or the compressed-bundle "CCOB" magic.
@@ -1628,19 +1606,17 @@ hipError_t playback___hipRegisterFatBinary(PlaybackContext& ctx,
     uint64_t blob_hash_hi = a->blob_hash_hi;
 
     if (!blob_hash_lo && !blob_hash_hi) return hipSuccess;  // no blob — skip
-    // No blob: the hash names the code object HIP loaded, which the pre-load
-    // in run_pass() has already loaded on every device capture used it on.
+    // No blob: the hash names a code object, which run_pass() pre-loads.
     if (!a->blob_size) return hipSuccess;
 
     std::string hex = hrr::hash_hex(blob_hash_lo, blob_hash_hi);
-    const std::string key = hex + device_suffix();
 
     // Deduplicate: if already loaded (e.g. multiple __hipRegisterFatBinary events
     // for the same binary), skip the load. Binaries already known to hold no code
     // for this GPU are skipped the same way.
     {
         std::shared_lock lk(ctx.map_mutex);
-        if (ctx.co_modules.count(key)) return hipSuccess;
+        if (ctx.co_modules.count(hex)) return hipSuccess;
         if (ctx.co_no_device_code.count(hex)) return hipSuccess;
     }
 
@@ -1678,7 +1654,7 @@ hipError_t playback___hipRegisterFatBinary(PlaybackContext& ctx,
 
     {
         std::unique_lock lk(ctx.map_mutex);
-        auto [it, inserted] = ctx.co_modules.emplace(key, mod);
+        auto [it, inserted] = ctx.co_modules.emplace(hex, mod);
         if (!inserted) {
             // Another thread raced us between the shared_lock check and here — discard ours.
             (void)hipModuleUnload(mod);
@@ -1700,12 +1676,9 @@ hipError_t playback___hipRegisterFatBinary(PlaybackContext& ctx,
 void* PlaybackContext::resolve_symbol_by_name(const char* name,
                                               size_t* sz_out) const {
     if (!name || !*name) return nullptr;
-    // Each device has its own copy of a global, in its own module: the one on
-    // the current device is the copy this device's kernels read.
-    const std::string dev_sfx = device_suffix();
     std::shared_lock lk(map_mutex);
-    for (const auto& [key, mod] : co_modules) {
-        if (!on_device(key, dev_sfx)) continue;
+    for (const auto& [hex, mod] : co_modules) {
+        (void)hex;
         hipDeviceptr_t dptr = nullptr;
         size_t bytes = 0;
         if (hipModuleGetGlobal(&dptr, &bytes, mod, name) == hipSuccess && dptr) {

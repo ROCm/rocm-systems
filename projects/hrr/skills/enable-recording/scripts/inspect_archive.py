@@ -83,9 +83,9 @@ COMPRESSED_BUNDLE_MAGIC = b"CCOB"
 # `blobs/` holds buffer contents as well as fat binaries, so the fat binaries
 # are the blobs a `__hipRegisterFatBinary` record names: its hrr_api_id_t, and
 # where the record keeps the hash after the event header and `uint64 ret`, then
-# the blob size. A record with a size of 0 names the code object HIP loaded,
-# under `code_objects/`, and no blob: capture stores no fat binary since
-# AIRUNTIME-2858, so only archives from before hold one.
+# the blob size. A record with a size names a whole bundle under `blobs/`; one
+# with a size of 0 names the code object HIP loaded, under `code_objects/`, and
+# no blob.
 # The id is per archive format version (hrr_api_args.h): v8 put two compiler
 # APIs ahead of it, v9 one more, and v10 left it where it was. A v7 archive may
 # hold either numbering, so that and any other version leaves the fat binaries

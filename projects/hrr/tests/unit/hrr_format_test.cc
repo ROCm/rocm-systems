@@ -470,9 +470,9 @@ HRR_TEST_CASE(Unit_HRR_Format_UnknownEventType) {
 
 // A kernel launch event with no arguments and one pinned host snapshot record,
 // cut `cut` bytes short of a whole record (v10 layout, as capture writes it).
-static std::vector<uint8_t> make_launch_with_snapshot(
-    uint64_t seq, const std::vector<uint8_t>& rec, size_t cut = 0,
-    uint16_t type = HRR_API_HIPMODULELAUNCHKERNEL) {
+static std::vector<uint8_t> make_launch_with_snapshot(uint64_t seq,
+                                                      const std::vector<uint8_t>& rec,
+                                                      size_t cut = 0) {
   std::vector<uint8_t> p(sizeof(hrr_event_header), 0);
   auto put = [&](const void* d, size_t n) {
     p.insert(p.end(), static_cast<const uint8_t*>(d), static_cast<const uint8_t*>(d) + n);
@@ -485,7 +485,7 @@ static std::vector<uint8_t> make_launch_with_snapshot(
   put(rec.data(), rec.size() - cut);
   if (!cut) put(attrs, sizeof(attrs));
   auto* h = reinterpret_cast<hrr_event_header*>(p.data());
-  h->event_type     = type;
+  h->event_type     = static_cast<uint16_t>(HRR_API_HIPMODULELAUNCHKERNEL);
   h->sequence_id    = seq;
   h->payload_length = static_cast<uint32_t>(p.size());
   return p;
@@ -547,36 +547,5 @@ HRR_TEST_CASE(Unit_HRR_Format_HostSnapshotRecord) {
     why = nullptr;
     CHECK(hrr_host_snapshot_target(ctx, bad.data(), blob.data(), blob.size(), &why) == nullptr);
     CHECK(why != nullptr);
-  }
-}
-
-/**
- * Test Description
- * ----------------
- *   - Every launch id capture writes decodes as a kernel launch, so replay
- *     sees which device each launch used its code object on.
- */
-HRR_TEST_CASE(Unit_HRR_Format_EveryLaunchIdDecodes) {
-  const uint16_t ids[] = {
-      HRR_API_HIPMODULELAUNCHKERNEL,           HRR_API_HIPEXTMODULELAUNCHKERNEL,
-      HRR_API_HIPLAUNCHKERNEL,                 HRR_API_HIPLAUNCHBYPTR,
-      HRR_API_HIPLAUNCHKERNEL_SPT,             HRR_API_HIPLAUNCHCOOPERATIVEKERNEL,
-      HRR_API_HIPLAUNCHCOOPERATIVEKERNEL_SPT,  HRR_API_HIPMODULELAUNCHCOOPERATIVEKERNEL,
-      HRR_API_HIPDRVLAUNCHKERNELEX,            HRR_API_HIPLAUNCHKERNELEXC};
-  TmpArchive arc("every_launch_id");
-  std::vector<uint8_t> body;
-  for (size_t i = 0; i < std::size(ids); ++i) {
-    const auto ev = make_launch_with_snapshot(i, std::vector<uint8_t>(kHostSnapRecordSize),
-                                              0, ids[i]);
-    body.insert(body.end(), ev.begin(), ev.end());
-  }
-  arc.write_events(body);
-  hrr::Archive archive;
-  REQUIRE(hrr::load_archive(arc.path(), archive));
-  REQUIRE(archive.events.size() == std::size(ids));
-  for (const auto& ev : archive.events) {
-    INFO(hrr::event_type_name(ev.header().event_type));
-    REQUIRE(ev.kernel_launch != nullptr);
-    CHECK(ev.kernel_launch->kernel_name == "k");
   }
 }

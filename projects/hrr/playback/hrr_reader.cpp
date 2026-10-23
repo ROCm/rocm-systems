@@ -506,18 +506,10 @@ bool load_archive(const std::string& path, Archive& archive) {
 
       // --- Kernel launch ---
 
-      // Every launch capture records through its kernel launch writer, which
-      // writes one layout whatever the id.
       case HRR_API_HIPMODULELAUNCHKERNEL:
       case HRR_API_HIPEXTMODULELAUNCHKERNEL:
       case HRR_API_HIPLAUNCHKERNEL:
-      case HRR_API_HIPLAUNCHBYPTR:
-      case HRR_API_HIPLAUNCHKERNEL_SPT:
-      case HRR_API_HIPLAUNCHCOOPERATIVEKERNEL:
-      case HRR_API_HIPLAUNCHCOOPERATIVEKERNEL_SPT:
-      case HRR_API_HIPMODULELAUNCHCOOPERATIVEKERNEL:
-      case HRR_API_HIPDRVLAUNCHKERNELEX:
-      case HRR_API_HIPLAUNCHKERNELEXC: {
+      case HRR_API_HIPLAUNCHBYPTR: {
         auto* kl = new KernelLaunchEvent();
         uint64_t sh = 0;
         const uint8_t* kl_data = ev.raw_payload.data() + hdr_size;

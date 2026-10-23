@@ -746,10 +746,9 @@ def test_only_blobs_registered_as_fat_binaries_are_checked(tmp_path, capsys):
 
 
 def test_a_registration_naming_a_code_object_names_no_blob(tmp_path, capsys):
-    """Since AIRUNTIME-2858 the record of a registered fat binary has a blob
-    size of 0 and names the code object HIP loaded, which is under
-    `code_objects/` and scanned there. A blob that happens to have that hash
-    is a host buffer, not a fat binary.
+    """A registration record with a blob size of 0 names the code object HIP
+    loaded, which is under `code_objects/` and scanned there. A blob that
+    happens to have that hash is a host buffer, not a fat binary.
     """
     pid_dir = make_process(tmp_path, 38, format_version=10)
     leaky = make_bundle(make_elf({".text": b"\1" * 8, ".debug_str": b"/app/build\0"}))

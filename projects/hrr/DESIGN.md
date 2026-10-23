@@ -502,7 +502,7 @@ manually: `const uint8_t* p = pl + sizeof(hrr_event_header);`
 
 | API | Extra fields |
 |-----|-------------|
-| `__hipRegisterFatBinary` | `blob_hash_lo u64`, `blob_hash_hi u64`, `blob_size u64` (zero since capture stopped storing bundles) |
+| `__hipRegisterFatBinary` | `blob_hash_lo u64`, `blob_hash_hi u64`, `blob_size u64` (0 when the hash names the code object HIP loaded) |
 | `hipModuleLoadData`, `hipModuleLoadDataEx`, `hipModuleLoad` | `co_hash_lo u64`, `co_hash_hi u64`, `module_id u32` |
 | `hipMemcpy`, `hipMemcpyAsync`, `hipMemcpyHtoD`, `hipMemcpyHtoDAsync` | `blob_hash_lo u64`, `blob_hash_hi u64` |
 | `hipHostRegister` | `blob_hash_lo u64`, `blob_hash_hi u64` |
@@ -737,15 +737,9 @@ from the bundle for the current device, bounded by the ELF's own headers and by 
 memory that can be read, since the size HIP knows is the one the bundle entry declares
 and the headers can declare as much; one whose headers reach further is not recorded.
 The register event names that code object (blob hash set, blob size 0). Replay pre-loads every code object,
-so kernels and `__device__` globals resolve as they do for module loads. HIP builds
-a loaded code object for one device, so replay keeps a module per code object and
-device, and pre-loads each code object on every device a registration naming it, a
-module load or a kernel launch used it on, the device current on that thread at
-that event, and on no other, since on a host with GPUs of more than one kind a code
-object loads only on GPUs of its own kind. Failing to load on one of those devices
-is fatal like any pre-load failure (`--continue-on-error` carries on). Archives from before this
-change still carry a blob, which playback loads with `hipModuleLoadData` on the
-current device, keyed like any other module.
+so kernels and `__device__` globals resolve as they do for module loads. A register
+event with a blob size carries the fat binary itself as a blob, which playback loads
+with `hipModuleLoadData`.
 
 ## Multi-Threaded Capture
 

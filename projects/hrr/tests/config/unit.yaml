@@ -20,7 +20,6 @@ cases:
   Unit_HRR_AllocKind_FreeDispatch: {}
   Unit_HRR_Format_BadMagic: {}
   Unit_HRR_Format_EventTypeName: {}
-  Unit_HRR_Format_EveryLaunchIdDecodes: {}
   Unit_HRR_Format_HashHex: {}
   Unit_HRR_Format_HostSnapshotRecord: {}
   Unit_HRR_Format_Roundtrip: {}

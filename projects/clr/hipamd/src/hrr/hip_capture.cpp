@@ -1126,18 +1126,18 @@ static std::mutex g_prog_hash_mu;
 static std::unordered_map<const amd::Program*, ProgramCodeObject> g_prog_hash;
 static std::atomic<bool> g_span_no_device_warned{false};
 
-// Fetch a program's device binary as (pointer, length) without dereferencing
-// the bytes (the call itself still goes through binary_'s inserting
-// operator[] — see above).
+// Fetch a program's device binary for device dev as (pointer, length) without
+// dereferencing the bytes (the call itself still goes through binary_'s
+// inserting operator[] — see above).
 // Caller must hold g_prog_hash_mu.
-// Returns false when there is no current device (or the index is out of
-// range): that is not "the program has no binary", so callers must not seed
-// g_prog_hash with a {0,0} / (nullptr,0) entry.
-static bool program_binary_span_locked(amd::Program* prog, const uint8_t*& data, size_t& size) {
+// Returns false when dev is not a device (no current device gives -1): that
+// is not "the program has no binary", so callers must not seed g_prog_hash
+// with a {0,0} / (nullptr,0) entry.
+static bool program_binary_span_locked(amd::Program* prog, int dev, const uint8_t*& data,
+                                       size_t& size) {
   data = nullptr;
   size = 0;
   if (!prog) return false;
-  const int dev = hip::ihipGetDevice();
   if (dev < 0 || static_cast<size_t>(dev) >= hip::g_devices.size()) {
     if (!g_span_no_device_warned.exchange(true)) {
       LogPrintfWarning("[HRR capture] program %p: no current HIP device "
@@ -1153,9 +1153,10 @@ static bool program_binary_span_locked(amd::Program* prog, const uint8_t*& data,
   return true;
 }
 
-static bool program_binary_span(amd::Program* prog, const uint8_t*& data, size_t& size) {
+static bool program_binary_span(amd::Program* prog, int dev, const uint8_t*& data,
+                                size_t& size) {
   std::lock_guard<std::mutex> lk(g_prog_hash_mu);
-  return program_binary_span_locked(prog, data, size);
+  return program_binary_span_locked(prog, dev, data, size);
 }
 
 static void remember_program_hash(const amd::Program* prog, const void* image, size_t size,
@@ -1270,6 +1271,15 @@ static hrr_cap::Hash128 hash_program_image(const amd::Program* prog, const uint8
   return hrr_cap::writer::write_code_object(data, size);
 }
 
+// hash_program_image(), and seed the launch-path hash cache (g_prog_hash) with
+// the result for this span.
+static hrr_cap::Hash128 record_program_image(const amd::Program* prog, const uint8_t* image,
+                                             size_t size) {
+  const hrr_cap::Hash128 h = hash_program_image(prog, image, size);
+  remember_program_hash(prog, image, size, h);
+  return h;
+}
+
 // Helper: get the actual device binary from a successfully loaded hipModule_t.
 // The module may come from an in-memory image or from a file (possibly a
 // bundle); either way the runtime stores the extracted device ELF in the
@@ -1280,10 +1290,8 @@ static hrr_cap::Hash128 write_module_code_object(hipModule_t module) {
   if (!prog) return {0, 0};
   const uint8_t* image = nullptr;
   size_t size = 0;
-  if (!program_binary_span(prog, image, size)) return {0, 0};
-  hrr_cap::Hash128 h = hash_program_image(prog, image, size);
-  remember_program_hash(prog, image, size, h);
-  return h;
+  if (!program_binary_span(prog, hip::ihipGetDevice(), image, size)) return {0, 0};
+  return record_program_image(prog, image, size);
 }
 
 static hrr_cap::Hash128 kernel_code_object_hash(amd::Kernel* kernel) {
@@ -1298,7 +1306,7 @@ static hrr_cap::Hash128 kernel_code_object_hash(amd::Kernel* kernel) {
   // lookup in costs nothing since we hold the lock anyway.
   {
     std::lock_guard<std::mutex> lk(g_prog_hash_mu);
-    got_span = program_binary_span_locked(prog, image, size);
+    got_span = program_binary_span_locked(prog, hip::ihipGetDevice(), image, size);
     if (got_span) {
       auto it = g_prog_hash.find(prog);
       if (it != g_prog_hash.end() && it->second.image == image && it->second.size == size)
@@ -1308,9 +1316,7 @@ static hrr_cap::Hash128 kernel_code_object_hash(amd::Kernel* kernel) {
   if (!got_span) return {0, 0};
   // Miss. Hash outside the lock — write_code_object takes the writer's own
   // locks, and hashing the same image twice is harmless (content-addressed).
-  hrr_cap::Hash128 h = hash_program_image(prog, image, size);
-  remember_program_hash(prog, image, size, h);
-  return h;
+  return record_program_image(prog, image, size);
 }
 
 hipError_t capture_hipModuleLoadData(hipModule_t* module, const void* image) {
@@ -1704,36 +1710,25 @@ hipError_t capture_hipLaunchByPtr(const void* func) {
 // variable sweep resolves on. A fat binary HIP has not digested yet has
 // nothing loaded; a launch from it records its code object then.
 //
-// Returns the code object's hash, which the register event carries so replay
-// loads it on the device that is current at that event, as HIP did here.
-// The size HIP holds is the bundle entry's declared one, so only an ELF, whose
-// headers bound it (see hash_program_image), is recorded.
+// Returns the code object's hash, which the register event names. The size
+// HIP holds is the bundle entry's declared one, so only an ELF, whose headers
+// bound it (see hash_program_image), is recorded.
 static hrr_cap::Hash128 record_fat_binary_code_object(hip::FatBinaryInfo* fbi) {
   if (!fbi) return {0, 0};
-  int dev = hip::ihipGetDevice();
-  if (dev < 0) dev = 0;
+  const int dev = std::max(hip::ihipGetDevice(), 0);
+  // GetProgram() aborts on a device it does not have.
   if (static_cast<size_t>(dev) >= hip::g_devices.size()) return {0, 0};
   amd::Program* prog = fbi->GetProgram(dev);
-  if (!prog) return {0, 0};
   const uint8_t* image = nullptr;
   size_t size = 0;
-  {
-    std::lock_guard<std::mutex> lk(g_prog_hash_mu);
-    const amd::Device* device = hip::g_devices[dev]->devices()[0];
-    const auto& bin = prog->binary(*device);
-    image = std::get<0>(bin);
-    size = std::get<1>(bin).first;
-  }
-  if (!image || size < sizeof(Elf64_Ehdr) ||
+  if (!program_binary_span(prog, dev, image, size) || !image || size < sizeof(Elf64_Ehdr) ||
       !amd::Elf::isElfMagic(reinterpret_cast<const char*>(image)))
     return {0, 0};
-  const hrr_cap::Hash128 h = hash_program_image(prog, image, size);
-  remember_program_hash(prog, image, size, h);
-  return h;
+  return record_program_image(prog, image, size);
 }
 
 // The register event names the code object in its blob hash, with a blob
-// size of 0; a bundle blob (archives from before) always has a size.
+// size of 0, which tells it from a fat binary blob.
 static void write_register_fat_binary_event(uint64_t ret, hrr_cap::Hash128 co) {
   hrr_args___hipRegisterFatBinary a{};
   a.ret = ret;
