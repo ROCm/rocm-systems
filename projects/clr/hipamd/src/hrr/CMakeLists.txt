@@ -39,6 +39,12 @@ target_include_directories(amdhip64 PRIVATE
 # objects so libamdhip64 does not gain a dependency, and the vendored Monocypher
 # (Ed25519). Neither links libcrypto.
 set(HRR_SHA256_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../shared/sha256")
+if(NOT EXISTS "${HRR_SHA256_DIR}/CMakeLists.txt")
+  message(FATAL_ERROR "HRR capture needs shared/sha256 from the rocm-systems monorepo "
+                      "(expected at ${HRR_SHA256_DIR}); build projects/clr from a full "
+                      "checkout, or add shared/ to a sparse one.")
+endif()
+enable_language(C)  # monocypher is C; do not rely on project() defaults
 if(NOT TARGET rocm-sha256-objects)
   add_subdirectory("${HRR_SHA256_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/rocm-sha256")
 endif()

@@ -1331,18 +1331,21 @@ void note_unreplayable(const char* api, const char* reason) {
 // crashed archive stays unsigned until `hrr-playback --repair --signing-key`. A
 // crash while signing is under way can leave a manifest.json that no longer
 // matches the pair; replay refuses that archive, it never accepts it.
-// A failure is loud but does not stop the process; the archive stays unsigned.
-static void sign_finished_archive(const std::string& out_dir) {
+// A failure does not stop the process; the archive stays unsigned, and says so on
+// stderr whatever AMD_LOG_LEVEL is, like the refusals in open().
+// `dir_fd` is the writer's checked descriptor for `out_dir`: the files are hashed
+// and written through it, not through the path.
+static void sign_finished_archive(int dir_fd, const std::string& out_dir) {
   const char* key_path = std::getenv("HIP_HRR_SIGNING_KEY");
   if (key_path == nullptr || key_path[0] == '\0') return;
   uint8_t seed[hrr_sign::kSeedSize];
   std::string err;
   if (hrr_sign::read_key_file(key_path, /*is_seed=*/true, seed, &err) &&
-      hrr_sign::sign_archive(out_dir, seed, &err)) {
+      hrr_sign::sign_archive(out_dir, seed, &err, dir_fd)) {
     g_archive_signed = true;
     LogPrintfInfo("[HRR capture] Signed %s", out_dir.c_str());
   } else {
-    LogPrintfError("[HRR capture] NOT signed, %s: %s", out_dir.c_str(), err.c_str());
+    fprintf(stderr, "[HRR capture] NOT signed, %s: %s\n", out_dir.c_str(), err.c_str());
   }
   hrr_sign::wipe(seed, sizeof(seed));
 }
@@ -1400,7 +1403,7 @@ void flush(const char* /*output_dir*/) {
   write_manifest_stdio(dir_fd, out_dir, /*complete=*/!incomplete);
   update_root_manifest();
   remove_in_archive(dir_fd, out_dir, kActiveMarker);
-  sign_finished_archive(out_dir);
+  sign_finished_archive(dir_fd, out_dir);
 }
 
 void close() {

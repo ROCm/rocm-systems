@@ -1225,12 +1225,13 @@ static bool resign_repaired(const fs::path& dir) {
   std::string err;
   if (!g_signing_key_path.empty()) {
     uint8_t seed[hrr_sign::kSeedSize];
-    if (!hrr_sign::read_key_file(g_signing_key_path, true, seed, &err) ||
-        !hrr_sign::sign_archive(dir.string(), seed, &err)) {
+    const bool signed_ok = hrr_sign::read_key_file(g_signing_key_path, true, seed, &err) &&
+                           hrr_sign::sign_archive(dir.string(), seed, &err);
+    hrr_sign::wipe(seed, sizeof(seed));  // on failure too
+    if (!signed_ok) {
       fprintf(stderr, "[HRR] repair: not signed: %s\n", err.c_str());
       return false;
     }
-    hrr_sign::wipe(seed, sizeof(seed));
     printf("[HRR] Signed %s\n", dir.string().c_str());
     return true;
   }

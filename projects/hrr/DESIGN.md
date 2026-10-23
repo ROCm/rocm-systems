@@ -205,8 +205,8 @@ Replay executes what the archive says: code objects, kernel arguments, event
 order. A modified archive can drive it into arbitrary code, so an archive that
 crosses a trust boundary must be signed, and replay must check it.
 
-**What is signed.** When capture finishes a process archive cleanly, and
-`HIP_HRR_SIGNING_KEY` names a seed file, `flush()` writes two files into
+**What is signed.** When `flush()` finishes a process archive (not a crash), and
+`HIP_HRR_SIGNING_KEY` names a seed file, it writes two files into
 `pid-<pid>/`:
 
 - `hrr.manifest`: one line `<64 hex>  <path>` per file in the directory, sorted by
@@ -216,7 +216,9 @@ crosses a trust boundary must be signed, and replay must check it.
 - `hrr.sig`: the 64-byte Ed25519 (RFC 8032) signature over the exact bytes of
   `hrr.manifest`.
 
-`hrr_sign::sign_archive(dir, seed)` does both and replaces an earlier pair, so a
+`hrr_sign::sign_archive(dir, seed)` does both and replaces an earlier pair (capture
+passes its checked directory descriptor, so the files signed are the ones in the
+archive it wrote, not whatever the path names by then), so a
 rewriter can sign again. `hrr-playback --repair --signing-key <seed>` does that;
 without `--signing-key`, `--repair` deletes the now-stale pair and says so. The
 format is additive: `events.bin` is unchanged, `HRR_VERSION` stays 10, and a
@@ -252,8 +254,11 @@ stays convenient. **An archive from another machine must be replayed with
 
 **What this does not cover.**
 
-- Only a cleanly finished archive is signed. A crash leaves it unsigned (the
-  crash callback may not hash files); sign it with `--repair --signing-key`, which also
+- Only an archive finished by `flush()` is signed; a crash leaves it unsigned (the
+  crash callback may not hash files). `flush()` also signs an archive it wrote with
+  `complete:false` (out of disk space, a failed blob write): the signature vouches
+  for the bytes and their origin, not for completeness, and replay still treats the
+  archive as incomplete. Sign a crashed one with `--repair --signing-key`, which also
   signs an already complete `pid-<pid>/` given by path (not one found by a root repair).
   A crash during signing can leave a pair that no longer matches; replay refuses it.
 - The root `manifest.json` is an index outside `pid-<pid>/` and is not covered;
@@ -265,7 +270,8 @@ stays convenient. **An archive from another machine must be replayed with
   key holder is honest. Check-then-use is not atomic: replay an archive nobody else
   can write to.
 - Hashing every file happens at process exit, so a very large capture delays exit.
-- Encryption is a separate piece of work (AIRUNTIME-2856) and is not implemented.
+- Encryption is not implemented here. It belongs to the same epic, AIRUNTIME-2856
+  (archive signing and encryption), as a separate piece of work.
 
 Implementation: `projects/clr/hipamd/src/hrr/hrr_archive_sign.{h,cpp}`, SHA-256
 from `shared/sha256` (embedded as objects), Ed25519 from a vendored, unmodified

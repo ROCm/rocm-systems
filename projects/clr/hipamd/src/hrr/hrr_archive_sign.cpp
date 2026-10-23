@@ -9,6 +9,7 @@
 #include "rocm/sha2/sha256.h"
 
 #include <algorithm>
+#include <cerrno>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -16,6 +17,7 @@
 #include <vector>
 
 #if !defined(_WIN32)
+#include <dirent.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -130,24 +132,133 @@ bool write_file(const fs::path& p, const std::string& data, std::string* err,
   return ok;
 }
 
+#if !defined(_WIN32)
+// Signing works relative to a directory descriptor, like the capture writer: every
+// component opened is a single name under an already-open directory, with
+// O_NOFOLLOW, so renaming or replacing a directory on the path cannot make the
+// walk hash or write files outside the archive that `fd` names.
+bool sha256_at(int dir, const char* name, std::string* hex_out) {
+  const int fd = openat(dir, name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+  if (fd < 0) return false;
+  rocm::sha2::sha256 h;
+  std::vector<uint8_t> buf(1u << 20);
+  bool ok = true;
+  for (;;) {
+    const ssize_t n = read(fd, buf.data(), buf.size());
+    if (n > 0) h.update(buf.data(), static_cast<size_t>(n));
+    else if (n == 0) break;
+    else if (errno != EINTR) { ok = false; break; }
+  }
+  close(fd);
+  if (!ok) return false;
+  const auto d = h.digest();
+  *hex_out = hex(d.data(), d.size());
+  return true;
+}
+
+// Hashes every regular file under the directory `dir` (borrowed), keyed by its
+// '/'-separated path below it. `prefix` is that path for `dir` ("" or "a/b/").
+bool hash_tree_at(int dir, const std::string& prefix, std::map<std::string, std::string>* out,
+                  std::string* err) {
+  const int dup_fd = openat(dir, ".", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  DIR* dp = dup_fd >= 0 ? fdopendir(dup_fd) : nullptr;
+  if (!dp) {
+    if (dup_fd >= 0) close(dup_fd);
+    *err = prefix + ": cannot list";
+    return false;
+  }
+  bool ok = true;
+  while (ok) {
+    errno = 0;
+    const dirent* e = readdir(dp);
+    if (!e) {
+      if (errno != 0) { *err = prefix + ": cannot list"; ok = false; }
+      break;
+    }
+    const std::string name = e->d_name;
+    if (name == "." || name == "..") continue;
+    const std::string rel = prefix + name;
+    struct stat st;
+    if (fstatat(dirfd(dp), name.c_str(), &st, AT_SYMLINK_NOFOLLOW) != 0) {
+      *err = rel + ": cannot stat";
+      ok = false;
+    } else if (S_ISDIR(st.st_mode)) {
+      const int sub = openat(dirfd(dp), name.c_str(),
+                             O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+      if (sub < 0) {
+        *err = rel + ": cannot open";
+        ok = false;
+      } else {
+        ok = hash_tree_at(sub, rel + "/", out, err);
+        close(sub);
+      }
+    } else if (!S_ISREG(st.st_mode)) {
+      *err = rel + ": not a regular file (a link or special file cannot be signed or verified)";
+      ok = false;
+    } else if (!is_sign_file(rel)) {
+      std::string h;
+      if (rel.find('\n') != std::string::npos) {
+        *err = rel + ": file name holds a newline";
+        ok = false;
+      } else if (!sha256_at(dirfd(dp), name.c_str(), &h)) {
+        *err = rel + ": cannot read";
+        ok = false;
+      } else {
+        (*out)[rel] = h;
+      }
+    }
+  }
+  closedir(dp);
+  return ok;
+}
+
+bool write_at(int dir, const char* name, const std::string& data, std::string* err) {
+  unlinkat(dir, name, 0);
+  const int fd = openat(dir, name, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
+  bool ok = fd >= 0;
+  for (size_t off = 0; ok && off < data.size();) {
+    const ssize_t n = write(fd, data.data() + off, data.size() - off);
+    if (n > 0) off += static_cast<size_t>(n);
+    else if (n < 0 && errno != EINTR) ok = false;
+  }
+  if (fd >= 0 && close(fd) != 0) ok = false;
+  if (!ok) *err = std::string(name) + ": cannot write";
+  return ok;
+}
+#endif
+
 }  // namespace
 
 void wipe(void* p, size_t n) { crypto_wipe(p, n); }
 
-bool sign_archive(const std::string& dir, const uint8_t seed[kSeedSize], std::string* err) {
-  const fs::path d(dir);
+bool sign_archive(const std::string& dir, const uint8_t seed[kSeedSize], std::string* err,
+                  int dir_fd) {
+  [[maybe_unused]] const fs::path d(dir);
+  std::map<std::string, std::string> hashes;  // sorted by path, as the manifest is
+#if !defined(_WIN32)
+  // The caller's descriptor when it has one; otherwise one opened here, so the
+  // walk and the writes below still share a single directory.
+  const int own = dir_fd >= 0 ? -1 : open(dir.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  const int fd = dir_fd >= 0 ? dir_fd : own;
+  if (fd < 0) {
+    *err = dir + ": cannot open";
+    return false;
+  }
+  struct Closer { int fd; ~Closer() { if (fd >= 0) close(fd); } } closer{own};
+  if (!hash_tree_at(fd, "", &hashes, err)) return false;
+#else
+  (void)dir_fd;
   std::vector<std::string> files;
   if (!list_files(d, &files, err)) return false;
-
-  std::string manifest;
   for (const std::string& rel : files) {
-    std::string h;
-    if (!sha256_file(d / rel, &h)) {
+    if (!sha256_file(d / rel, &hashes[rel])) {
       *err = rel + ": cannot read";
       return false;
     }
-    manifest += h + "  " + rel + "\n";
   }
+#endif
+  std::string manifest;
+  for (const auto& kv : hashes) manifest += kv.second + "  " + kv.first + "\n";
 
   uint8_t secret[64], pub[32], s[32];
   memcpy(s, seed, 32);
@@ -159,10 +270,16 @@ bool sign_archive(const std::string& dir, const uint8_t seed[kSeedSize], std::st
 
   // Remove the old signature first: a crash between the two writes then leaves an
   // unsigned archive, not one whose old signature meets a new manifest.
+  const std::string sigbytes(reinterpret_cast<char*>(sig), 64);
+#if !defined(_WIN32)
+  unlinkat(fd, kSignatureName, 0);
+  return write_at(fd, kManifestName, manifest, err) && write_at(fd, kSignatureName, sigbytes, err);
+#else
   std::error_code ec;
   fs::remove(d / kSignatureName, ec);
   if (!write_file(d / kManifestName, manifest, err)) return false;
-  return write_file(d / kSignatureName, std::string(reinterpret_cast<char*>(sig), 64), err);
+  return write_file(d / kSignatureName, sigbytes, err);
+#endif
 }
 
 VerifyResult verify_archive(const std::string& dir, const uint8_t public_key[kPublicKeySize],
@@ -278,21 +395,29 @@ bool generate_key_pair(const std::string& seed_path, const std::string& public_p
 
   std::string seed_hex = hex(seed, 32) + "\n";
   crypto_wipe(seed, sizeof(seed));
-  const int fd = open(seed_path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
-  if (fd < 0) {
+  // Both files are created exclusively: an existing key is never replaced, and a
+  // failure leaves neither file behind, so the same paths can be tried again.
+  const auto create = [](const std::string& path, const std::string& text, mode_t mode) {
+    const int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, mode);
+    if (fd < 0) return false;
+    bool ok = write(fd, text.data(), text.size()) == static_cast<ssize_t>(text.size());
+    ok = (mode == 0600 || fchmod(fd, mode) == 0) && ok;  // not narrowed by the umask
+    if (close(fd) != 0) ok = false;
+    if (!ok) unlink(path.c_str());
+    return ok;
+  };
+  const bool seed_ok = create(seed_path, seed_hex, 0600);
+  wipe(seed_hex.data(), seed_hex.size());
+  if (!seed_ok) {
     *err = seed_path + ": cannot create (it must not exist)";
     return false;
   }
-  const bool ok = write(fd, seed_hex.data(), seed_hex.size()) ==
-                  static_cast<ssize_t>(seed_hex.size());
-  close(fd);
-  wipe(seed_hex.data(), seed_hex.size());
-  if (!ok) {
+  if (!create(public_path, hex(pub, 32) + "\n", 0644)) {  // meant to be shared
     unlink(seed_path.c_str());
-    *err = seed_path + ": write failed";
+    *err = public_path + ": cannot create (it must not exist); no key pair written";
     return false;
   }
-  return write_file(public_path, hex(pub, 32) + "\n", err, 0644);  // meant to be shared
+  return true;
 #endif
 }
 

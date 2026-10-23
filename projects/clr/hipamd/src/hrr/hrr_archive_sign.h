@@ -33,7 +33,13 @@ constexpr size_t kPublicKeySize = 32;
 // Signs the finished archive in `dir`: writes hrr.manifest and hrr.sig, replacing
 // any earlier pair, so a rewriter (repair, scrub) can sign again. Refuses an
 // archive holding a link, a file that is not regular, or a name with a newline.
-bool sign_archive(const std::string& dir, const uint8_t seed[kSeedSize], std::string* err);
+// On POSIX the archive is read and written relative to one directory descriptor,
+// `dir_fd` when it is >= 0 (the capture writer's checked descriptor for `dir`),
+// else one opened from `dir`; a directory renamed or replaced on the path
+// afterwards cannot redirect the signing to other files. `dir` is then only used
+// in messages.
+bool sign_archive(const std::string& dir, const uint8_t seed[kSeedSize], std::string* err,
+                  int dir_fd = -1);
 
 enum class VerifyResult {
   kOk,        // signature is valid under the key and every file matches
@@ -54,8 +60,9 @@ void wipe(void* p, size_t n);
 // when group or others can read it (POSIX), as ssh does for a private key.
 bool read_key_file(const std::string& path, bool is_seed, uint8_t out[32], std::string* err);
 
-// Creates a new seed file (mode 0600, never overwriting) and the matching public
-// key file. POSIX only; the random bytes come from /dev/urandom.
+// Creates a new seed file (mode 0600) and the matching public key file, neither
+// overwriting an existing file; if either cannot be created, neither is left
+// behind. POSIX only; the random bytes come from /dev/urandom.
 bool generate_key_pair(const std::string& seed_path, const std::string& public_path,
                        std::string* err);
 

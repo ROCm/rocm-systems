@@ -30,6 +30,7 @@
 #include <vector>
 
 #ifndef _WIN32
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #endif
@@ -269,6 +270,17 @@ HRR_TEST_CASE(Unit_HRR_Sign_KeyFiles) {
   CHECK((st.st_mode & 0777) == 0600);
   CHECK_FALSE(hrr_sign::generate_key_pair(seed_path, pub_path, &err));
 
+  // An existing public key file is never replaced, and the refusal leaves no new
+  // seed behind; a public key that cannot be created takes the seed with it.
+  const std::string seed2 = (d / "seed2").string(), pub_before = read_bytes(pub_path);
+  CHECK_FALSE(hrr_sign::generate_key_pair(seed2, pub_path, &err));
+  CHECK_FALSE(fs::exists(seed2));
+  CHECK(read_bytes(pub_path) == pub_before);
+  CHECK_FALSE(hrr_sign::generate_key_pair(seed2, (d / "no_such_dir" / "pub").string(), &err));
+  CHECK_FALSE(fs::exists(seed2));
+  REQUIRE(hrr_sign::generate_key_pair(seed2, (d / "pub2").string(), &err));  // retry works
+  CHECK(fs::exists(seed2));
+
   uint8_t seed[32], pub[32];
   REQUIRE(hrr_sign::read_key_file(seed_path, true, seed, &err));
   REQUIRE(hrr_sign::read_key_file(pub_path, false, pub, &err));
@@ -283,6 +295,35 @@ HRR_TEST_CASE(Unit_HRR_Sign_KeyFiles) {
   write_bytes(d / "bad", "not hex\n");
   CHECK_FALSE(hrr_sign::read_key_file((d / "bad").string(), false, nullptr, &err));
   fs::remove_all(d);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - sign_archive with a directory descriptor signs the directory that descriptor
+ *     names, not whatever the path names by then: the archive is renamed away and
+ *     another directory takes its path. The signed manifest covers the original
+ *     files and the stand-in directory is left untouched (POSIX).
+ */
+HRR_TEST_CASE(Unit_HRR_Sign_SigningFollowsTheDirectoryDescriptor) {
+#ifndef _WIN32
+  Archive a("dirfd", /*sign=*/false);
+  const int fd = ::open(a.dir.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  REQUIRE(fd >= 0);
+  const fs::path moved = a.root / "pid-moved";
+  fs::rename(a.dir, moved);
+  write_bytes(a.dir / "events.bin", "someone else's file");
+  std::string err;
+  const bool ok = hrr_sign::sign_archive(a.dir.string(), a.seed, &err, fd);
+  ::close(fd);
+  INFO(err);
+  REQUIRE(ok);
+  CHECK(fs::exists(moved / "hrr.sig"));
+  CHECK(read_bytes(moved / "hrr.manifest").find("blobs/ab/abcdef.blob") != std::string::npos);
+  CHECK_FALSE(fs::exists(a.dir / "hrr.sig"));
+  CHECK_FALSE(fs::exists(a.dir / "hrr.manifest"));
+  CHECK(hrr_sign::verify_archive(moved.string(), a.pub, &err) == VerifyResult::kOk);
+#endif
 }
 
 /**
@@ -335,8 +376,23 @@ HRR_TEST_CASE(Unit_HRR_Sign_KeyOptionsAreNotIgnored) {
   CHECK(hrr_playback_merged(a.dir, "--info --trusted-key").first != 0);
   CHECK(hrr_playback_merged(a.dir, "--info", {{"HIP_HRR_TRUSTED_KEY", ""}}).first != 0);
   write_bytes(a.root / "trusted.pub", a.hex_pub());
-  CHECK(hrr_playback_merged(a.dir, "--repair --trusted-key " + (a.root / "trusted.pub").string())
-            .first != 0);
+  // A signed archive that verifies under the key: only the --repair guard can
+  // refuse it, since load_archive would accept it.
+  {
+    Archive sa("options_signed");
+    write_bytes(sa.root / "trusted.pub", sa.hex_pub());
+    const std::string before = read_bytes(sa.dir / "manifest.json");
+    auto [gret, gout] = hrr_playback_merged(
+        sa.dir, "--info --trusted-key " + (sa.root / "trusted.pub").string());
+    INFO(gout);
+    REQUIRE(gret == 0);  // the archive does verify
+    auto [rret, rout] = hrr_playback_merged(
+        sa.dir, "--repair --trusted-key " + (sa.root / "trusted.pub").string());
+    INFO(rout);
+    CHECK(rret != 0);
+    CHECK(rout.find("does not check a signature") != std::string::npos);
+    CHECK(read_bytes(sa.dir / "manifest.json") == before);
+  }
   CHECK(hrr_playback_merged(a.dir, "--info --signing-key x").first != 0);
 
   std::string hexseed, err;

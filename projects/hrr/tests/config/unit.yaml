@@ -49,6 +49,7 @@ cases:
   Unit_HRR_Scrub_SkipsUnterminatedName: {}
   Unit_HRR_Scrub_ZeroesAndRetypesBuildInfo: {}
   Unit_HRR_Sign_KeyFiles: {}
+  Unit_HRR_Sign_SigningFollowsTheDirectoryDescriptor: {}
   Unit_HRR_Sign_KeyOptionsAreNotIgnored: {}
   Unit_HRR_Sign_PlaybackRefusesTamperedArchive: {}
   Unit_HRR_Sign_RepairSignsOrDropsStaleSignature: {}
