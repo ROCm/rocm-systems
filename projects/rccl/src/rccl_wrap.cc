@@ -1914,7 +1914,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
       if (agFabricArch) {
         const size_t agDdaLLMax    = rcclDdaLLThresholdTab(archTable, ncclFuncAllGather, comm->nRanks);
         const size_t agDdaLL128Max = rcclDdaLL128ThresholdTab(archTable, ncclFuncAllGather, comm->nRanks);
-        if (msgSize <= agDdaLLMax &&
+        if (agDdaLLMax > 0 && msgSize <= agDdaLLMax &&
             ncclAllGatherDdaFabricLLEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
           decision->algo = RCCL_DDA_FABRIC_LL;
           decision->protocol = NCCL_PROTO_LL;

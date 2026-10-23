@@ -5570,6 +5570,34 @@ TEST(WrapMicrotestIsolated, SelectAllGather_DdaFabricVmmChosenWhenNeitherLLNorLL
       });
 }
 
+TEST(WrapMicrotestIsolated, SelectAllGather_ForceDdaWithLLDisabledChoosesVmm) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_ForceDdaWithLLDisabledChoosesVmm",
+      []() {
+        // RCCL_DDA_LL=0 makes agDdaLLMax=0 so the LL candidate block is skipped
+        // even though LL is structurally eligible.  VMM must win as the next DDA tier.
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_DDA_LL") == 0) return 0;
+          return def;
+        };
+        // LL is eligible — proves agDdaLLMax > 0 guard, not eligibility, skips it.
+        ScopedHook llEligible(g_allGatherDdaFabricLLEligible,
+                              [](ncclComm*, const void*, void*, size_t, ncclDataType_t) { return true; });
+        ScopedHook vmmEligible(g_allGatherDdaFabricEligible,
+                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t) { return true; });
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->nRanks = 1;
+        comm->nNodes = 1;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
+                                                   /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                   &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_VMM, decision.algo)
+            << "LL disabled via RCCL_DDA_LL=0 must not block VMM";
+        DeleteCommWithArch(comm);
+      });
+}
+
 TEST(WrapMicrotestIsolated, SelectAllGather_DdaIpcChosenOnNonGfx1250Arch) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllGather_DdaIpcChosenOnNonGfx1250Arch",
