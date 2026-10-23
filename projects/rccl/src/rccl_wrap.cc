@@ -1959,7 +1959,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     cand.nMaxChannels = ncclCeLocalReduceBlocks(datatype, count / comm->nRanks);
     rcclCandSearchRecord(cs, RCCL_BACKEND_CE, cand, ceRegBeatsSymk);
   }
-  if (!query && ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || !symEligible)) INFO(NCCL_TUNING,
+  if (!query && !cs.bestPreferredFound && ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || !symEligible)) INFO(NCCL_TUNING,
        "AR CE-registered disqualified: ceAvailable=%d(graphAllowed=%d bufOk=%d opOk=%d countDiv=%d archEnabled=%d)"
        " ceRegInWindow=%d hasSysmem=%d CTAPolicy=%d force=%d",
        (int)ceAvailable, (int)ceArGraphAllowed, (int)ceBufferOk, (int)ceAllReduceOpSupported,
