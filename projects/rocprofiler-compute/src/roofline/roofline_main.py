@@ -48,7 +48,7 @@ from utils.roofline_calc import (
     OpsSupport,
     construct_roof,
     machine_ceilings,
-    sanitize_mem_level,
+    roofline_mem_levels,
 )
 from utils.specs import MachineSpecs
 from utils.utils_analysis import get_matrix_ops_type
@@ -781,9 +781,7 @@ class Roofline:
         """
         is_new_figure = fig is None
 
-        sanitized_cache_hierarchy = sanitize_mem_level(
-            self.__run_parameters["mem_level"], self.__mspec.gpu_model
-        )
+        sanitized_cache_hierarchy = roofline_mem_levels(self.__mspec.gpu_model)
 
         self.__ceiling_data = self._ceiling_for_dtype(dtype)
         console_debug("roofline", f"Ceiling data:\n{self.__ceiling_data}")

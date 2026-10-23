@@ -273,13 +273,6 @@ add_test(
 )
 
 add_test(
-    NAME test_profile_sort
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_profile_sort.xml
-        ${COV_OPTION} tests/integration/test_profile_sort.py ${WORKING_DIR_OPTION}
-)
-
-add_test(
     NAME test_profile_misc
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest -m misc --junitxml=tests/test_profile_misc.xml
@@ -449,7 +442,6 @@ add_test(
 set_tests_properties(
     test_profile_kernel_execution
     test_profile_dispatch
-    test_profile_sort
     test_profile_misc
     test_profile_path
     test_profile_roofline_dir
@@ -1100,7 +1092,6 @@ if(${ENABLE_COVERAGE})
     set(ALL_TEST_NAMES
         test_profile_kernel_execution
         test_profile_dispatch
-        test_profile_sort
         test_profile_misc
         test_profile_path
         test_profile_roofline_dir
