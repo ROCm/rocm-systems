@@ -17,6 +17,37 @@
 #define RCCL_LL128_CONFIRM_RELOAD 0
 #endif
 
+// Bytes of flag at the end of each 64-byte line: 8, 4, 2 or 1 (64 - RCCL_LL128_FLAG_BYTES data bytes per line).
+// Narrow flags are single-node only: the net proxy's LL128 flag check still compares 8-byte flags, and the host
+// still sizes LL128 steps for 56 data bytes per line.
+#ifndef RCCL_LL128_FLAG_BYTES
+#define RCCL_LL128_FLAG_BYTES 8
+#endif
+#define RCCL_LL128_NARROW_FLAG (RCCL_LL128_FLAG_BYTES < 8)
+#ifndef RCCL_LL128_SKIP_CLEAN
+#define RCCL_LL128_SKIP_CLEAN 0
+#endif
+// A narrow flag wraps, so every (RCCL_LL128_CLEAN_MASK + 1) steps of a slot the sender stamps the current flag on
+// the lines of the step it did not write. No line's flag is then a whole flag period old, as in LL. Test mode 1
+// wraps the flag every 256 steps, test mode 2 every 32.
+#if RCCL_LL128_FLAG_TEST == 2
+#define RCCL_LL128_CLEAN_MASK 0x008
+#define RCCL_LL128_FLAG_OF(step1) ((uint64_t)((step1) % 0x20))
+#elif RCCL_LL128_FLAG_TEST || RCCL_LL128_FLAG_BYTES == 1
+#define RCCL_LL128_CLEAN_MASK 0x078
+#define RCCL_LL128_FLAG_OF(step1) ((uint64_t)((step1) % 0x100))
+#elif RCCL_LL128_FLAG_BYTES == 2
+#define RCCL_LL128_CLEAN_MASK 0x7ff8
+#define RCCL_LL128_FLAG_OF(step1) ((uint64_t)((step1) % 0x10000))
+#else
+#define RCCL_LL128_CLEAN_MASK 0x7ffffff8
+#define RCCL_LL128_FLAG_OF(step1) ((uint64_t)(uint32_t)(step1))
+#endif
+static_assert(RCCL_LL128_CLEAN_MASK % NCCL_STEPS == 0, "Invalid RCCL_LL128_CLEAN_MASK value");
+static_assert(RCCL_LL128_FLAG_BYTES == 8 || RCCL_LL128_FLAG_BYTES == 4 || RCCL_LL128_FLAG_BYTES == 2 ||
+                RCCL_LL128_FLAG_BYTES == 1,
+              "Invalid RCCL_LL128_FLAG_BYTES value");
+
 #ifndef RCCL_USE_WBINVL1_VOL
 #if defined(__GFX8__) || defined(__gfx906__) || defined(__gfx908__) || defined(__gfx90a__)
 #define RCCL_USE_WBINVL1_VOL 1
@@ -133,16 +164,26 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
   inline __device__ uint64_t* sendPtr(int i) {
     return sendBuff[i] + sendOffset(i);
   }
+  static constexpr int FlagBytes = RCCL_LL128_FLAG_BYTES;
+  static constexpr int FlagShift = 64 - 8 * FlagBytes;
+  static inline __device__ uint64_t flagOf(uint64_t step1) {
+    return RCCL_LL128_NARROW_FLAG ? RCCL_LL128_FLAG_OF(step1) : step1;
+  }
+  // word is the flag lane's second 64-bit word of a 16-byte chunk.
+  static inline __device__ bool flagMatches(uint64_t word, uint64_t flag) {
+    return RCCL_LL128_NARROW_FLAG ? (word >> FlagShift) == flag : word == flag;
+  }
   inline __device__ uint64_t recvFlag(int i) {
-    return recvStep[i] + 1;
+    return flagOf(recvStep[i] + 1);
   }
   inline __device__ uint64_t sendFlag(int i) {
-    return sendStep[i] + 1;
+    return flagOf(sendStep[i] + 1);
   }
 
   uint64_t* barriers;
   uint64_t barrier_next = 0;
   bool skip_fence = false;
+  int loadShift = 0;
 
   inline __device__ void barrier() {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
@@ -257,21 +298,128 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     }
   }
 
-  template <int WordPerThread>
-  __device__ __forceinline__ void loadRegsBegin(uint64_t (&regs)[WordPerThread], T const* src, int eltN) {
-    constexpr int EltPer16B = 16 / sizeof(T);
-    // Parametrize the warp-local addressing on the LL128 line geometry.
-    // The literals "16" and "4" originally hard-coded 2*LINEELEMS and
-    // LINEELEMS/2 for the 64-byte-line case; gfx1250 doubles LINEELEMS
-    // (128-byte non-tearing line) so the stride and flag-subgroup width
-    // both double accordingly.
+  // Slice-relative user word index of register pair g: regs[2g], regs[2g+1] hold user words ix, ix+1.
+  //
+  // 8-byte flags: a flag lane's pair 2k+1 is filled from pair 2k in loadRegsFinish, so it loads only even pairs.
+  // Narrow flags: a flag lane's 4 wire chunks each carry 16 - FlagBytes data bytes, packed from its user words by
+  // packWire / unpackWire. It holds 6 (4-byte flag), 7 (2-byte) or 7.5 (1-byte) user words. With a 1-byte flag the
+  // flag lanes of lines 2p and 2p+1 both hold the word they split, and each sends one half of it.
+  // Words a lane holds but does not store are duplicates.
+  template <int Chunks>
+  __device__ __forceinline__ int userWordIx(int g) {
+    if (RCCL_LL128_NARROW_FLAG) {
+      static_assert(!RCCL_LL128_NARROW_FLAG || (NCCL_LL128_LINEELEMS == 8 && Chunks == 4),
+                    "Narrow LL128 flags need 64-byte lines and 4 chunks per thread");
+      constexpr int DataLanes = WARP_SIZE * 3 / 4, FlagLanes = WARP_SIZE / 4;
+      constexpr int Base = 2 * Chunks * DataLanes;
+      const int line = laneId() / 4;
+      if (!isFlagLane()) return 2 * (g * DataLanes + laneId() - line);
+      if (FlagBytes == 4) return Base + 2 * (min(g, 2) * FlagLanes + line);
+      if (FlagBytes == 2) return Base + 7 * line + 2 * g;
+      return Base + 15 * (line / 2) + 7 * (line % 2) + 2 * g;
+    }
+    // gfx1250 doubles LINEELEMS (128-byte non-tearing line), so the stride and flag-subgroup width double too.
     constexpr int LineElems = NCCL_LL128_LINEELEMS;
     constexpr int LineSkip = 2 * WARP_SIZE / LineElems;
-    int ix[WordPerThread / 2];
-#pragma unroll
-    for (int g = 0; g < WordPerThread / 2; g++) {
-      ix[g] = g * WARP_SIZE - LineSkip * (g / 2) + laneId() - (g % 2) * (laneId() / (LineElems / 2));
+    return 2 * (g * WARP_SIZE - LineSkip * (g / 2) + laneId() - (g % 2) * (laneId() / (LineElems / 2)));
+  }
+  __device__ __forceinline__ bool isOddFlagLine() {
+    return FlagBytes == 1 && (laneId() / 4) % 2 == 1;
+  }
+  // Bit k set: this lane stores word k of pair g.
+  template <int Chunks>
+  __device__ __forceinline__ int storedWords(int g) {
+    if (!isFlagLane()) return 3;
+    if (!RCCL_LL128_NARROW_FLAG) return g % 2 == 0 ? 3 : 0;
+    if (FlagBytes == 4) return g < 3 ? 3 : 0;
+    if (isOddFlagLine()) return 3;
+    return g < 3 ? 3 : 1;
+  }
+
+  template <int N>
+  static __device__ __forceinline__ uint32_t dwordOf(uint64_t const (&x)[N], int k) {
+    return k >= 2 * N ? 0u : k % 2 ? uint32_t(x[k / 2] >> 32) : uint32_t(x[k / 2]);
+  }
+  // Bytes [sh, sh + 4) of the 8 bytes hi:lo.
+  static __device__ __forceinline__ uint32_t funnel(uint32_t lo, uint32_t hi, int sh) {
+    return sh == 0 ? lo : __builtin_amdgcn_alignbyte(hi, lo, sh);
+  }
+  static constexpr int WireData = 16 - FlagBytes;  // data bytes in a flag lane's wire chunk
+  static constexpr int StreamDw = WireData;        // dwords a flag lane sends per slice: 4 chunks * WireData / 4
+
+  // Narrow flags: wire chunk c of a flag lane is bytes [c * WireData, (c + 1) * WireData) of its stream, then the
+  // flag. The stream is the lane's user dwords in order, except that an odd 1-byte-flag line sends hi(u[7]) in
+  // place of lo(u[0]), the half of the shared word u[0] that its even partner sends.
+  template <int N>
+  __device__ __forceinline__ void packWire(uint64_t const (&u)[N], int c, uint64_t flag, uint64_t& w0, uint64_t& w1) {
+    if (!RCCL_LL128_NARROW_FLAG) {
+      w0 = u[2 * c];
+      w1 = isFlagLane() ? flag : u[2 * c + 1];
+      return;
     }
+    const bool odd = isOddFlagLine();
+    auto s = [&](int i) -> uint32_t {
+      if (i >= StreamDw) return 0u;
+      if (FlagBytes == 1 && i == 0) return odd ? dwordOf(u, 15) : dwordOf(u, 0);
+      return dwordOf(u, i);
+    };
+    uint32_t p[4];
+#pragma unroll
+    for (int j = 0; j < 4; j++) {
+      const int b = c * WireData + 4 * j;
+      p[j] = funnel(s(b / 4), s(b / 4 + 1), b % 4);
+    }
+    constexpr int DataBits = 32 - 8 * FlagBytes;
+    p[3] = DataBits == 0 ? uint32_t(flag) : (p[3] & ((1u << DataBits) - 1)) | (uint32_t(flag) << DataBits);
+    w0 = isFlagLane() ? (p[0] | uint64_t(p[1]) << 32) : u[2 * c];
+    w1 = isFlagLane() ? (p[2] | uint64_t(p[3]) << 32) : u[2 * c + 1];
+  }
+  template <int N>
+  __device__ __forceinline__ void unpackWire(uint64_t (&x)[N]) {
+    if (!RCCL_LL128_NARROW_FLAG) return;
+    static_assert(!RCCL_LL128_NARROW_FLAG || N == 8, "Narrow LL128 flags need 8 words per thread");
+    const bool fl = isFlagLane();
+    uint32_t d[2 * N];
+#pragma unroll
+    for (int k = 0; k < 2 * N; k++) d[k] = dwordOf(x, k);
+    uint32_t s[StreamDw];
+#pragma unroll
+    for (int i = 0; i < StreamDw; i++) {
+      const int c0 = 4 * i / WireData, o = 4 * i % WireData;
+      const int k = 4 * c0 + o / 4;
+      uint32_t v = funnel(d[k], k + 1 < 2 * N ? d[k + 1] : 0u, o % 4);
+      if (o + 4 > WireData) {
+        const int n = WireData - o;
+        v = (v & ((1u << (8 * n)) - 1)) | (d[4 * (c0 + 1)] << (8 * n));
+      }
+      s[i] = v;
+    }
+#pragma unroll
+    for (int i = 0; i < StreamDw; i++) d[i] = fl ? s[i] : d[i];
+    if (FlagBytes == 1) {
+      // Swap halves of the shared word: lo(u[7]) on the even line, hi(u[0]) on the odd line.
+      const bool odd = isOddFlagLine();
+      const uint32_t other = __shfl_xor(odd ? s[1] : s[StreamDw - 1], 4);
+      if (fl) {
+        d[0] = odd ? other : s[0];
+        d[2 * N - 1] = odd ? s[0] : other;
+      }
+    }
+#pragma unroll
+    for (int k = 0; k < N; k++) x[k] = d[2 * k] | uint64_t(d[2 * k + 1]) << 32;
+  }
+
+  __device__ __forceinline__ void storeUser64(uint64_t* ptr, uint64_t v) {
+    *((u64_gptr)ptr) = v;
+  }
+
+  template <int WordPerThread>
+  __device__ __forceinline__ void loadRegsBegin(uint64_t (&regs)[WordPerThread], T const* src, int eltN) {
+    constexpr int EltPer8B = 8 / sizeof(T);
+    constexpr int Chunks = WordPerThread / 2;
+    int ix[Chunks];
+#pragma unroll
+    for (int g = 0; g < Chunks; g++) ix[g] = userWordIx<Chunks>(g);
     if (reinterpret_cast<uintptr_t>(src) % 16 == 0) {
       /* We are aligned to 16 bytes, so load directly to registers no shmem.
        * Flag threads load half as much data which gets shuffled to the even
@@ -282,25 +430,30 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
       // Load unconditionally from an index clamped to the last chunk holding data. A guarded load leaves a phi that
       // needs the loaded value at the join, which forces a vmcnt wait right after the load, and on gfx9 that wait
       // also covers this warp's earlier FIFO stores. Words loaded only to satisfy the clamp are never stored:
-      // flag lanes drop odd groups in loadRegsFinish, and storeRegs and the receiver stop at eltN.
-      const int lastIx = (eltN - 1) / EltPer16B;
+      // storeRegs and the receiver stop at eltN.
+      // The clamp keeps a pair starting on an odd word inside the last 16-byte block; if that pair starts on the last
+      // word, the word lands in the pair's high half and loadRegsFinish moves it down.
+      const int lastIx = 2 * ((eltN - 1) / (2 * EltPer8B));
+      if (FlagBytes < 4) loadShift = 0;
 #pragma unroll
-      for (int g = 0; g < WordPerThread / 2; g++) {
+      for (int g = 0; g < Chunks; g++) {
         const int ixc = min(ix[g], lastIx);
-        loadUser128((uint64_t*)(src + ixc * EltPer16B), regs[2 * g + 0], regs[2 * g + 1]);
+        if (FlagBytes < 4) loadShift |= (ix[g] == lastIx + 1) << g;
+        loadUser128((uint64_t*)(src + ixc * EltPer8B), regs[2 * g + 0], regs[2 * g + 1]);
       }
     } else {
+      if (FlagBytes < 4) loadShift = 0;
       // Not aligned. Stage the smallest 16 byte aligned region subsuming the
       // buffer into shmem.
       int misalignment = reinterpret_cast<uintptr_t>(src) % 16;
       uint64_t* src8 = reinterpret_cast<uint64_t*>(reinterpret_cast<uintptr_t>(src) & -uintptr_t(16));
       uint64_t* shm8 = shmemCvtPtr((uint64_t*)ncclScratchForWarp(warpInBlock));
 #pragma unroll
-      for (int g = 0; g < WordPerThread / 2; g++)
+      for (int g = 0; g < Chunks; g++)
         if ((g * WARP_SIZE + laneId()) * 16 < misalignment + eltN * sizeof(T))
           loadUser128(src8 + 2 * (g * WARP_SIZE + laneId()), regs[2 * g + 0], regs[2 * g + 1]);
 #pragma unroll
-      for (int g = 0; g < WordPerThread / 2; g++)
+      for (int g = 0; g < Chunks; g++)
         storeShmem128(shm8 + 2 * (g * WARP_SIZE + laneId()), regs[2 * g + 0], regs[2 * g + 1]);
 
       __syncwarp();
@@ -309,18 +462,22 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
       // as the aligned case since Finish() will be applied regardless.
       T* shm = (T*)shm8 + misalignment / sizeof(T);
 #pragma unroll
-      for (int g = 0; g < WordPerThread / 2; g++) {
-        // int ix = g*WARP_SIZE - 16*(g/2) + laneId() - (g%2)*(laneId()/4);
-        if (!isFlagLane() || g % 2 == 0) {
-          if (ix[g] * EltPer16B < eltN)
-            loadShmemMisaligned128(shm + ix[g] * EltPer16B, regs[2 * g + 0], regs[2 * g + 1]);
-        }
+      for (int g = 0; g < Chunks; g++) {
+        if (storedWords<Chunks>(g) != 0 && ix[g] * EltPer8B < eltN)
+          loadShmemMisaligned128(shm + ix[g] * EltPer8B, regs[2 * g + 0], regs[2 * g + 1]);
       }
     }
   }
 
   template <int WordPerThread>
   __device__ __forceinline__ void loadRegsFinish(uint64_t (&regs)[WordPerThread]) {
+    if (FlagBytes < 4) {
+#pragma unroll
+      for (int g = 0; g < WordPerThread / 2; g++) {
+        if ((loadShift >> g) & 1) regs[2 * g] = regs[2 * g + 1];
+      }
+    }
+    if (RCCL_LL128_NARROW_FLAG) return;
     // Move data out of flag registers into the vacant registers.
 #pragma unroll
     for (int g = 1; g < WordPerThread / 2; g += 2) {
@@ -330,26 +487,52 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
 
   template <int WordPerThread>
   __device__ __forceinline__ void storeRegs(T* dst, uint64_t (&regs)[WordPerThread], int eltN) {
-    constexpr int EltPer16B = 16 / sizeof(T);
+    constexpr int EltPer8B = 8 / sizeof(T);
+    constexpr int Chunks = WordPerThread / 2;
     // Reverse Finish() register permuatation.
 #pragma unroll
-    for (int g = 1; g < WordPerThread / 2; g += 2) {
-      if (isFlagLane()) regs[2 * g - 1] = regs[2 * g];
+    for (int g = 1; g < Chunks; g += 2) {
+      if (!RCCL_LL128_NARROW_FLAG && isFlagLane()) regs[2 * g - 1] = regs[2 * g];
     }
 
-    // Write to dst if 4-byte aligned, shmem otherwise.
+    // Write to dst if 16-byte aligned, shmem otherwise.
     int misalignment = reinterpret_cast<uintptr_t>(dst) % 16;
     uint64_t* shm8 = shmemCvtPtr((uint64_t*)ncclScratchForWarp(warpInBlock));
-    constexpr int LineElems = NCCL_LL128_LINEELEMS;
-    constexpr int LineSkip = 2 * WARP_SIZE / LineElems;
+    if (FlagBytes >= 4) {
+      // Every stored pair is 16-byte aligned and whole.
 #pragma unroll
-    for (int g = 0; g < WordPerThread / 2; g++) {
-      int ix = g * WARP_SIZE - LineSkip * (g / 2) + laneId() - (g % 2) * (laneId() / (LineElems / 2));
-      if (!isFlagLane() || g % 2 == 0) {
-        if (misalignment == 0 && (ix + 1) * EltPer16B <= eltN) {
-          storeUser128((uint64_t*)(dst + ix * EltPer16B), regs[2 * g + 0], regs[2 * g + 1]);
-        } else {
-          storeShmem128(shm8 + 2 * ix, regs[2 * g + 0], regs[2 * g + 1]);
+      for (int g = 0; g < Chunks; g++) {
+        const int ix = userWordIx<Chunks>(g);
+        if (storedWords<Chunks>(g) == 3) {
+          if (misalignment == 0 && (ix + 2) * EltPer8B <= eltN) {
+            storeUser128((uint64_t*)(dst + ix * EltPer8B), regs[2 * g + 0], regs[2 * g + 1]);
+          } else {
+            storeShmem128(shm8 + ix, regs[2 * g + 0], regs[2 * g + 1]);
+          }
+        }
+      }
+      __syncwarp();
+      T* shm = (T*)ncclScratchForWarp(warpInBlock);
+      int skip = misalignment == 0 ? eltN & -(2 * EltPer8B) : 0;
+      for (int i = skip + laneId(); i < eltN; i += WARP_SIZE) dst[i] = shm[i];
+      return;
+    }
+#pragma unroll
+    for (int g = 0; g < Chunks; g++) {
+      const int ix = userWordIx<Chunks>(g);
+      const int m = storedWords<Chunks>(g);
+      if (m == 3 && misalignment == 0 && (ix + 2) * EltPer8B <= eltN) {
+        storeUser128((uint64_t*)(dst + ix * EltPer8B), regs[2 * g + 0], regs[2 * g + 1]);
+      } else {
+#pragma unroll
+        for (int k = 0; k < 2; k++) {
+          if ((m >> k) & 1) {
+            if (misalignment == 0 && (ix + k + 1) * EltPer8B <= eltN) {
+              storeUser64((uint64_t*)(dst + (ix + k) * EltPer8B), regs[2 * g + k]);
+            } else {
+              shm8[ix + k] = regs[2 * g + k];
+            }
+          }
         }
       }
     }
@@ -357,7 +540,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     // Write rest from shmem to dst. No need to coalesce stores to 16-bytes,
     // the hardware keeps up fine.
     T* shm = (T*)ncclScratchForWarp(warpInBlock);
-    int skip = misalignment == 0 ? eltN & -EltPer16B : 0;
+    int skip = misalignment == 0 ? eltN & -EltPer8B : 0;
     for (int i = skip + laneId(); i < eltN; i += WARP_SIZE) dst[i] = shm[i];
   }
 
@@ -383,7 +566,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
       uint64_t allOk = WarpMask;
 #pragma unroll
       for (int r = 0; r < Rows; r++) {
-        ok[r] = __ballot(vr[2 * r + 1] == flag) | (WarpMask & ~FlagLanes);
+        ok[r] = __ballot(flagMatches(vr[2 * r + 1], flag)) | (WarpMask & ~FlagLanes);
         allOk &= ok[r];
       }
       return allOk == WarpMask;
@@ -445,7 +628,10 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
 
     __syncwarp();
     /************************ Wait first recv ********************/
-    if (RECV) recvWaitLoad(recvPtr0 + ll128Offset, recvFlag0, vr);
+    if (RECV) {
+      recvWaitLoad(recvPtr0 + ll128Offset, recvFlag0, vr);
+      unpackWire(vr);
+    }
 
     /************* Finish register load **************/
     if (SRC) {
@@ -456,7 +642,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
 #pragma unroll
         for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
           v[u] = applyPreOp(redOp, v[u]);
-          if (!isFlagLane()) v[u + 1] = applyPreOp(redOp, v[u + 1]);
+          if (RCCL_LL128_NARROW_FLAG || !isFlagLane()) v[u + 1] = applyPreOp(redOp, v[u + 1]);
         }
       }
     }
@@ -475,6 +661,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
       // coverity[dead_error_line]
       for (int i = 1; i < MaxRecv && i < fan.nrecv(); i++) {
         recvWaitLoad(recvPtr(i) + ll128Offset, recvFlag(i), vr);
+        unpackWire(vr);
 
 #pragma unroll
         for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
@@ -505,13 +692,17 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
         uint64_t* ptr = sendPtr(i) + ll128Offset;
 #pragma unroll
         for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
-          store128Fifo(ptr + u * WARP_SIZE, v[u], isFlagLane() ? flag : v[u + 1]);
+          uint64_t w0, w1;
+          packWire(v, u / 2, flag, w0, w1);
+          store128Fifo(ptr + u * WARP_SIZE, w0, w1);
         }
       }
       uint64_t* ptr = sendPtr0 + ll128Offset;
 #pragma unroll
       for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
-        store128Fifo(ptr + u * WARP_SIZE, v[u], isFlagLane() ? sendFlag0 : v[u + 1]);
+        uint64_t w0, w1;
+        packWire(v, u / 2, sendFlag0, w0, w1);
+        store128Fifo(ptr + u * WARP_SIZE, w0, w1);
       }
     }
     /********************** End Send ************************/
@@ -519,7 +710,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
 
   static constexpr int WireWordPerSlice = WARP_SIZE * NCCL_LL128_SHMEM_ELEMS_PER_THREAD;
   static constexpr int DataEltPerSlice =
-    (WireWordPerSlice - WireWordPerSlice / NCCL_LL128_LINEELEMS) * (sizeof(uint64_t) / sizeof(T));
+    (WireWordPerSlice / NCCL_LL128_LINEELEMS) * (NCCL_LL128_LINESIZE - FlagBytes) / sizeof(T);
 
   template <int RECV, int SEND, int SrcBuf, int DstBuf>
   __device__ __forceinline__ void GenericOp(intptr_t srcIx, intptr_t dstIx, int nelem, bool postOp) {
@@ -531,8 +722,9 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     int wireOffset = WireWordPerSlice * warp + 2 * laneId();
     const int nwarps = nthreads / WARP_SIZE;
     nelem = nelem < 0 ? 0 : nelem;
+    const int slicesSent = divUp(nelem, DataEltPerSlice);
 
-    if (SEND) waitSend(divUp(nelem, DataEltPerSlice) * WireWordPerSlice * sizeof(uint64_t));
+    if (SEND) waitSend(slicesSent * WireWordPerSlice * sizeof(uint64_t));
     barrier();
 
     sqtt_marker_enter("PRIM_LL128_DATA_PROCESS");
@@ -568,6 +760,23 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
       srcPtr += DataEltPerSlice * nwarps;
       dstPtr += DataEltPerSlice * nwarps;
       nelem -= DataEltPerSlice * nwarps;
+    }
+
+    if (SEND && RCCL_LL128_NARROW_FLAG && !RCCL_LL128_SKIP_CLEAN) {
+      const int slicesPerStep = stepSize / WireWordPerSlice;
+#pragma unroll
+      for (int i = 0; i < MaxSend; i++) {
+        if (i >= fan.nsend()) break;
+        if ((sendStep[i] & RCCL_LL128_CLEAN_MASK) != RCCL_LL128_CLEAN_MASK) continue;
+        uint64_t* ptr = (i == 0 ? sendPtr0 : sendPtr(i)) + 2 * laneId();
+        const uint64_t flag = i == 0 ? sendFlag0 : sendFlag(i);
+        for (int s = slicesSent + warp; s < slicesPerStep; s += nwarps) {
+#pragma unroll
+          for (int u = 0; u < NCCL_LL128_SHMEM_ELEMS_PER_THREAD; u += 2) {
+            if (isFlagLane()) store128Fifo(ptr + s * WireWordPerSlice + u * WARP_SIZE, 0, flag << FlagShift);
+          }
+        }
+      }
     }
 
     barrier();
