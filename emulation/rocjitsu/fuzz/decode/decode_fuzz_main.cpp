@@ -30,6 +30,8 @@
 #include <vector>
 
 #ifdef __AFL_HAVE_MANUAL_CONTROL
+#include <unistd.h>
+
 __AFL_FUZZ_INIT();
 #endif
 
