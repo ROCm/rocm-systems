@@ -3938,8 +3938,8 @@ end:
   if (graph->id == 1) {
     for (int i = 0; i < graph->nChannels; i++) {
       int64_t netId;
-      ncclTopoGetLocalNet(system, graph->intra[i * ngpus + 1], i, &netId, nullptr);
-      graph->inter[i * 2 + 1] = netId;
+      if (ncclTopoGetLocalNet(system, graph->intra[i * ngpus + 1], i, &netId, nullptr) == ncclSuccess)
+        graph->inter[i * 2 + 1] = netId;
     }
   }
 

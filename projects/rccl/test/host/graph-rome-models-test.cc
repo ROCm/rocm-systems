@@ -733,6 +733,19 @@ TEST_F(GraphRomeModelsParseMicrotest, ParseGraph_TreeGraphTakesTheSecondGpusNic)
   EXPECT_EQ(system_->nodes[NET].nodes[2].id, tree->inter[1]);
 }
 
+TEST_F(GraphRomeModelsMicrotest, ParseGraph_TreeGraphWithoutNicsLeavesTheInterNetsAlone) {
+  Use(XgmiSystem(4), 4);
+  system_->totalBw = 120;
+  GraphPtr tree = NewGraph(1, NCCL_TOPO_PATTERN_BALANCED_TREE);
+  const int64_t untouched = 0x5a5a5a5a5a5a5a5a;
+  std::fill(tree->inter, tree->inter + 4, untouched);
+
+  ASSERT_EQ(ncclSuccess, parseGraph("0 2 1 3|3 1 2 0", system_.get(), tree.get(), nullptr, nullptr, 0));
+
+  ASSERT_EQ(2, tree->nChannels);
+  for (int i = 0; i < 4; i++) EXPECT_EQ(untouched, tree->inter[i]) << i;
+}
+
 TEST_F(GraphRomeModelsParseMicrotest, ParseGraph_UnknownDevIsAnError) {
   int gpuMap[4] = {0, 1, 2, 7};
 
