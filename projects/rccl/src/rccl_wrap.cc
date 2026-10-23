@@ -721,9 +721,12 @@ static int symkHostRedOpToDev(ncclRedOp_t op) {
 // Fills (algo, protocol, maxChannels) for the symmetric kernel that would run
 // for these operands; returns false if symk is unavailable or no kernel is
 // picked. Single source shared by rcclSymKGetInfo and the query-mode symmetric
-// reporting in rcclSelectAllReduce/rcclSelectAllGather.
+// reporting in rcclSelectAllReduce/rcclSelectAllGather/rcclSelectReduceScatter.
+// algo is RCCL_SYMMETRIC_TDM when the pick is a Tensor Data Mover kernel, else
+// RCCL_SYMMETRIC. symAligned16B is ncclSymAligned16B for the operands; rcclSymKGetInfo
+// has no buffers and leaves it true.
 static bool rcclSymkQuery(struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType,
-                          ncclRedOp_t op, int* algo, int* protocol, int* maxChannels) {
+                          ncclRedOp_t op, int* algo, int* protocol, int* maxChannels, bool symAligned16B = true) {
   // Symmetric kernels need symmetric-window support (cuMem). Without it the
   // windows are never registered symmetric and symk cannot run, so do not report
   // it -- rcclSymKGetInfo's caller then falls back to the actual backend.
@@ -751,12 +754,14 @@ static bool rcclSymkQuery(struct ncclComm* comm, ncclFunc_t coll, uint64_t count
   input.maxCTAs = comm->config.maxCTAs;
   input.CTAPolicy = comm->config.CTAPolicy;
   input.nvlsSupport = comm->nvlsSupport && (ncclNvlsSupported(devOp, dataType) || coll == ncclFuncAllGather);
+  input.symAligned16B = symAligned16B;
   struct ncclTuningResult_t bestTuning = NCCL_TUNING_RESULT_INIT;
   if (ncclTuningCompute(&input, &bestTuning) != ncclSuccess) return false;
   ncclSymkKernelId kernelId = (ncclSymkKernelId)bestTuning.symKernelId;
   if (kernelId == ncclSymkKernelId_Count) return false;
   *maxChannels = bestTuning.maxChannels;
-  *algo = (int)rcclAddonAlgos_t::RCCL_SYMMETRIC;
+  *algo = rcclSymkKernelIdIsTma((int)kernelId) ? (int)rcclAddonAlgos_t::RCCL_SYMMETRIC_TDM
+                                                : (int)rcclAddonAlgos_t::RCCL_SYMMETRIC;
   *protocol = rcclSymkKernelIdIsLL((int)kernelId) ? NCCL_PROTO_LL : NCCL_PROTO_SIMPLE;
   return true;
 }
@@ -805,6 +810,9 @@ ncclResult_t rcclGetAlgoName(int algo, const char** algoName) {
 #endif
     case rcclAddonAlgos_t::RCCL_SYMMETRIC:
       *algoName = "SYM";
+      break;
+    case rcclAddonAlgos_t::RCCL_SYMMETRIC_TDM:
+      *algoName = "SymTDM";
       break;
     case rcclAddonAlgos_t::RCCL_CE_2SHOT:
       *algoName = "CE2";
@@ -1762,8 +1770,10 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
       return ncclSuccess;
     }
     int a, p, ch;
-    if (rcclSymkQuery(comm, ncclFuncAllReduce, count, datatype, op, &a, &p, &ch)) {
-      decision->algo = RCCL_SYMMETRIC;
+    if (rcclSymkQuery(comm, ncclFuncAllReduce, count, datatype, op, &a, &p, &ch,
+                      ncclSymAligned16B(ncclFuncAllReduce, comm->rank, sendbuff, recvbuff, sendWin, recvWin,
+                                        count * ncclTypeSize(datatype)))) {
+      decision->algo = a;
       decision->protocol = p;
       decision->nMaxChannels = ch;
       return ncclSuccess;
@@ -1993,8 +2003,10 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
         return ncclSuccess;
       }
       int a, p, ch;
-      if (rcclSymkQuery(comm, ncclFuncAllGather, sendcount, datatype, ncclSum, &a, &p, &ch)) {
-        decision->algo = RCCL_SYMMETRIC;
+      if (rcclSymkQuery(comm, ncclFuncAllGather, sendcount, datatype, ncclSum, &a, &p, &ch,
+                        ncclSymAligned16B(ncclFuncAllGather, comm->rank, sendbuff, recvbuff, sendWin, recvWin,
+                                          sendcount * ncclTypeSize(datatype)))) {
+        decision->algo = a;
         decision->protocol = p;
         decision->nMaxChannels = ch;
         return ncclSuccess;
@@ -2126,8 +2138,10 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
         return ncclSuccess;
       }
       int a, p, ch;
-      if (rcclSymkQuery(comm, ncclFuncReduceScatter, recvcount, datatype, op, &a, &p, &ch)) {
-        decision->algo = RCCL_SYMMETRIC;
+      if (rcclSymkQuery(comm, ncclFuncReduceScatter, recvcount, datatype, op, &a, &p, &ch,
+                        ncclSymAligned16B(ncclFuncReduceScatter, comm->rank, sendbuff, recvbuff, rsSendWin,
+                                          rsRecvWin, recvcount * ncclTypeSize(datatype)))) {
+        decision->algo = a;
         decision->protocol = p;
         decision->nMaxChannels = ch;
         return ncclSuccess;
