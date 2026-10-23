@@ -50,13 +50,21 @@ use event::{queue_error_status, update_scratch_owner};
 #[cfg(test)]
 use index::*;
 
+/// Byte offset of the native queue write index.
 const WRITE_INDEX_OFFSET: usize = 56;
+/// Byte offset of the native queue read index.
 const READ_INDEX_OFFSET: usize = 128;
+/// Byte offset of the native queue properties word.
 const QUEUE_PROPERTIES_OFFSET: usize = 180;
+/// AQL packet size in bytes.
 const AQL_PACKET_BYTES: usize = 64;
+/// AQL packet type for a kernel dispatch.
 const AQL_PACKET_TYPE_KERNEL_DISPATCH: u16 = 2;
+/// Bits containing the AQL packet type.
 const AQL_PACKET_TYPE_MASK: u16 = 0xff;
+/// Byte offset of a dispatch packet’s private-segment size.
 const AQL_PRIVATE_SEGMENT_SIZE_OFFSET: usize = 24;
+/// GPU page size in bytes.
 const GPU_PAGE_BYTES: u64 = 4096;
 
 /// Serializes counted-pool decisions while native queue creation is unlocked.
@@ -85,6 +93,7 @@ pub(crate) struct QueueEventOwner {
 }
 
 impl QueueEventSignal {
+    /// Finds or creates the shared queue error event for a native device.
     fn shared_event(
         runtime: &mut crate::runtime::HsaState,
     ) -> Result<Arc<QueueEventOwner>, Status> {
@@ -104,6 +113,7 @@ impl QueueEventSignal {
         Ok(event)
     }
 
+    /// Creates an error event and registers the queue with its worker.
     fn create(
         event: Arc<QueueEventOwner>,
         device: &Device,
@@ -145,16 +155,19 @@ impl QueueEventSignal {
         })
     }
 
+    /// Returns the native event handle published to the queue.
     fn handle(&self) -> u64 {
         self.inactive_address as u64
     }
 
+    /// Returns a clone of the event used for queue errors.
     fn error_event(&self) -> QueueErrorEvent {
         self.shared_event
             .event
             .queue_error_event((self.error_address + std::mem::offset_of!(AmdSignal, value)) as u64)
     }
 
+    /// Reads the signal indicating that queue submission has stopped.
     fn load_inactive(&self) -> SignalValue {
         // SAFETY: This owner retains the initialized signal allocation.
         unsafe { &*(self.inactive_address as *const AmdSignal) }
@@ -162,6 +175,7 @@ impl QueueEventSignal {
             .load(Ordering::Acquire)
     }
 
+    /// Reads the signal containing the latest native queue error.
     fn load_error(&self) -> SignalValue {
         // SAFETY: This owner retains the initialized signal allocation.
         unsafe { &*(self.error_address as *const AmdSignal) }
@@ -169,6 +183,7 @@ impl QueueEventSignal {
             .load(Ordering::Acquire)
     }
 
+    /// Releases the retained queue reference.
     fn release_queue(&self) {
         // SAFETY: This owner retains the initialized signal allocation.
         unsafe { &*(self.inactive_address as *const AmdSignal) }
@@ -176,6 +191,7 @@ impl QueueEventSignal {
             .store(0, Ordering::Release);
     }
 
+    /// Releases the retained error reference.
     fn release_error(&self) {
         // SAFETY: This owner retains the initialized signal allocation.
         unsafe { &*(self.error_address as *const AmdSignal) }
@@ -231,8 +247,11 @@ pub(crate) struct Queue {
 
 /// External GPU addresses retained by the native queue through retirement.
 pub(crate) struct QueueBacking {
+    /// Inactive signal owned by this queue backing.
     inactive_signal: Arc<QueueEventSignal>,
+    /// Optional scratch retained by this queue backing.
     scratch: Option<Allocation>,
+    /// Uncertain scratch owned by this queue backing.
     uncertain_scratch: Vec<Allocation>,
 }
 
@@ -261,6 +280,7 @@ enum ScratchEventVisibility {
     Published,
 }
 
+/// Stops queue event worker.
 fn stop_queue_event_worker(
     alive: &AtomicBool,
     worker: &mut Option<JoinHandle<()>>,
@@ -281,6 +301,7 @@ fn stop_queue_event_worker(
     Ok(())
 }
 
+/// Destroys native queue and releases its owned resources.
 fn destroy_native_queue(
     native: &mut rocddi::device::gpu::queue::Queue,
     teardown_started: &mut bool,
@@ -295,6 +316,7 @@ fn destroy_native_queue(
     unsafe { native.destroy_with_retained_transport(callback) }
 }
 
+/// Destroys runtime queue and releases its owned resources.
 pub(crate) fn destroy_runtime_queue(queue: &mut Queue) -> Result<(), rocddi::Error> {
     stop_queue_event_worker(&queue.event_alive, &mut queue.event_worker)?;
     let public = queue.public_handle as *const HsaQueue;
@@ -323,6 +345,7 @@ pub(crate) fn destroy_runtime_queue(queue: &mut Queue) -> Result<(), rocddi::Err
     }
 }
 
+/// Destroys runtime SDMA queue and releases its owned resources.
 pub(crate) fn destroy_runtime_sdma_queue(queue: &mut SdmaQueue) -> Result<(), rocddi::Error> {
     destroy_native_queue(&mut queue.native, &mut queue.teardown_started, &mut || {})
 }
@@ -331,7 +354,9 @@ pub(crate) fn destroy_runtime_sdma_queue(queue: &mut SdmaQueue) -> Result<(), ro
 // Put counted handles 64 bytes past that boundary so index operations can
 // identify them without consulting the registry. SDMA controls put the public
 // header 128 bytes into a 256-byte allocation for the same reason.
+/// Tag bit distinguishing counted queue handles.
 const COUNTED_QUEUE_HANDLE_BIT: usize = 64;
+/// Tag bit distinguishing SDMA queue handles.
 const SDMA_QUEUE_HANDLE_BIT: usize = 128;
 
 /// Stable storage for the public prefix copied from a shared hardware queue.
@@ -358,6 +383,7 @@ pub(crate) struct CountedQueue {
 }
 
 impl CountedQueue {
+    /// Wraps a borrowed counted hardware queue with its pool key.
     unsafe fn new(hardware_queue: usize, pool_key: (u64, u32)) -> Self {
         // SAFETY: The caller retains the native queue and its initialized
         // public header for the complete lifetime of this logical handle.
@@ -391,6 +417,7 @@ impl CountedQueue {
         }
     }
 
+    /// Returns the stable address of the public HSA queue record.
     fn public_pointer(&mut self) -> *mut HsaQueue {
         self.public.header.as_mut_ptr().cast()
     }
@@ -425,6 +452,7 @@ pub(crate) struct SoftQueue {
 struct SoftQueueControl([u64; 32]);
 
 impl SoftQueue {
+    /// Marks the public queue inactive before native destruction.
     fn inactivate(&mut self) {
         self.active = false;
     }
@@ -496,6 +524,7 @@ pub(crate) struct QueueState {
 }
 
 impl QueueState {
+    /// Initializes empty queue registries and the next queue ID.
     pub(crate) fn new() -> Self {
         Self {
             next_queue_id: 0,
@@ -514,6 +543,7 @@ impl QueueState {
         }
     }
 
+    /// Allocates ID for runtime use.
     pub(crate) fn allocate_id(&mut self) -> Result<u64, Status> {
         let id = self.next_queue_id;
         self.next_queue_id = id.checked_add(1).ok_or(OUT_OF_RESOURCES)?;
@@ -557,6 +587,7 @@ impl QueueState {
     }
 }
 
+/// Allocates scratch for runtime use.
 fn allocate_scratch(
     device: &Device,
     gpu: GpuInfo,
@@ -578,6 +609,7 @@ fn allocate_scratch(
     Ok((allocation, scratch))
 }
 
+/// Reads the dispatch private-segment requirement from a native queue.
 fn dispatch_private_segment(queue: &Queue) -> Option<(u32, u64)> {
     let info = queue.native.info();
     let packet_count = info.ring_size_bytes / AQL_PACKET_BYTES as u64;
@@ -620,6 +652,7 @@ fn dispatch_private_segment(queue: &Queue) -> Option<(u32, u64)> {
     None
 }
 
+/// Finds the native queue key corresponding to a public queue pointer.
 fn hardware_queue_key(runtime: &crate::runtime::HsaState, queue: *const HsaQueue) -> Option<usize> {
     let key = queue as usize;
     if let Some(intercept) = runtime.queue_state.intercept_queues.get(&key) {
@@ -631,6 +664,7 @@ fn hardware_queue_key(runtime: &crate::runtime::HsaState, queue: *const HsaQueue
     )
 }
 
+/// Builds the pool key used to share counted hardware queues.
 fn counted_pool_key(
     runtime: &crate::runtime::HsaState,
     queue: *const HsaQueue,
@@ -648,6 +682,7 @@ fn counted_pool_key(
     )
 }
 
+/// Checks whether a public queue pointer is still registered.
 fn queue_known(runtime: &crate::runtime::HsaState, queue: *const HsaQueue) -> bool {
     !queue.is_null()
         && (hardware_queue_key(runtime, queue).is_some()
@@ -657,12 +692,14 @@ fn queue_known(runtime: &crate::runtime::HsaState, queue: *const HsaQueue) -> bo
                 .contains_key(&(queue as usize)))
 }
 
+/// Selects the least-used live hardware queue in a counted pool.
 fn least_used_counted_queue(pool: &[CountedHardwareQueue]) -> Option<usize> {
     pool.iter()
         .min_by_key(|entry| entry.use_count)
         .map(|entry| entry.queue)
 }
 
+/// Converts an HSA priority value to the native queue priority.
 fn queue_priority(priority: u32) -> Option<QueuePriority> {
     match priority {
         AMD_QUEUE_PRIORITY_LOW => Some(QueuePriority::Low),
@@ -677,6 +714,7 @@ fn queue_priority(priority: u32) -> Option<QueuePriority> {
     unsafe(export_name = "__hsa_impl_hsa_queue_create")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Creates a hardware-backed HSA queue.
 pub unsafe extern "C" fn hsa_queue_create(
     agent: HsaAgent,
     size: u32,
@@ -744,6 +782,7 @@ pub unsafe extern "C" fn hsa_queue_create(
     unsafe(export_name = "__hsa_impl_hsa_amd_counted_queue_acquire")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Acquires a counted queue backed by a shared hardware queue.
 pub unsafe extern "C" fn hsa_amd_counted_queue_acquire(
     agent: HsaAgent,
     queue_type: u32,
@@ -928,6 +967,7 @@ pub unsafe extern "C" fn hsa_amd_counted_queue_acquire(
     unsafe(export_name = "__hsa_impl_hsa_amd_counted_queue_release")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Releases the counted queue resource.
 pub unsafe extern "C" fn hsa_amd_counted_queue_release(queue: *mut HsaQueue) -> Status {
     boundary(|| {
         let mut guard = match lock() {
@@ -972,6 +1012,7 @@ pub unsafe extern "C" fn hsa_amd_counted_queue_release(queue: *mut HsaQueue) -> 
     unsafe(export_name = "__hsa_impl_hsa_soft_queue_create")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Creates a host-managed queue with direct index control.
 pub unsafe extern "C" fn hsa_soft_queue_create(
     region: HsaRegion,
     size: u32,
@@ -1065,6 +1106,7 @@ pub unsafe extern "C" fn hsa_soft_queue_create(
     })
 }
 
+/// Builds a CU mask with all reported compute units enabled.
 fn full_cu_mask(compute_units: u32) -> Vec<u32> {
     let mut mask = vec![u32::MAX; compute_units.div_ceil(32) as usize];
     if let Some(last) = mask.last_mut() {
@@ -1078,15 +1120,25 @@ fn full_cu_mask(compute_units: u32) -> Vec<u32> {
 
 /// Initialized input prefix copied from an extensible queue descriptor.
 struct QueueCreateInput {
+    /// Version of the AMD queue creation descriptor.
     version: u16,
+    /// Queue ring and descriptor memory placement flags.
     flags: u16,
+    /// Queue engine requested by the caller.
     engine_type: u8,
+    /// Reserved storage retained for the native layout.
     reserved_header: [u8; 3],
+    /// Requested queue ring capacity in bytes.
     queue_size_bytes: u32,
+    /// Scheduling priority requested for the new queue.
     priority: u32,
+    /// Asynchronous error callback, if provided by the caller.
     callback: QueueErrorCallback,
+    /// Opaque argument passed to the error callback.
     callback_data: *mut c_void,
+    /// Traffic class passed to the native queue transport.
     traffic_class: u32,
+    /// Reserved storage retained for the native layout.
     reserved: [u8; 20],
 }
 
@@ -1143,6 +1195,7 @@ unsafe fn copy_queue_create_mask(
     unsafe(export_name = "__hsa_impl_hsa_amd_queue_create")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Creates an AMD queue from an engine-specific descriptor.
 pub unsafe extern "C" fn hsa_amd_queue_create(
     agent: HsaAgent,
     descriptors: *mut HsaAmdQueueCreateDesc,
@@ -1345,6 +1398,7 @@ pub unsafe extern "C" fn hsa_amd_queue_create(
     unsafe(export_name = "__hsa_impl_hsa_amd_queue_cu_set_mask")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Sets the compute-unit mask used by a queue.
 pub unsafe extern "C" fn hsa_amd_queue_cu_set_mask(
     queue: *const HsaQueue,
     bit_count: u32,
@@ -1408,6 +1462,7 @@ pub unsafe extern "C" fn hsa_amd_queue_cu_set_mask(
     unsafe(export_name = "__hsa_impl_hsa_amd_queue_cu_get_mask")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Copies the queue compute-unit mask into caller storage.
 pub unsafe extern "C" fn hsa_amd_queue_cu_get_mask(
     queue: *const HsaQueue,
     bit_count: u32,
@@ -1458,6 +1513,7 @@ pub unsafe extern "C" fn hsa_amd_queue_cu_get_mask(
     unsafe(export_name = "__hsa_impl_hsa_amd_queue_set_priority")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Changes a queue’s native scheduling priority.
 pub unsafe extern "C" fn hsa_amd_queue_set_priority(queue: *mut HsaQueue, priority: u32) -> Status {
     boundary(|| {
         let mut guard = match lock() {
@@ -1503,6 +1559,7 @@ pub unsafe extern "C" fn hsa_amd_queue_set_priority(queue: *mut HsaQueue, priori
     unsafe(export_name = "__hsa_impl_hsa_queue_inactivate")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Stops a queue from accepting further packet submissions.
 pub unsafe extern "C" fn hsa_queue_inactivate(queue: *mut HsaQueue) -> Status {
     boundary(|| {
         if queue.is_null() {
@@ -1578,6 +1635,7 @@ pub unsafe extern "C" fn hsa_queue_inactivate(queue: *mut HsaQueue) -> Status {
     unsafe(export_name = "__hsa_impl_hsa_queue_destroy")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Stops a queue worker and retires its native queue.
 pub unsafe extern "C" fn hsa_queue_destroy(queue: *mut HsaQueue) -> Status {
     boundary(|| {
         #[allow(
@@ -1748,6 +1806,7 @@ pub unsafe extern "C" fn hsa_queue_destroy(queue: *mut HsaQueue) -> Status {
     unsafe(export_name = "__hsa_impl_hsa_amd_profiling_set_profiler_enabled")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Enables or disables dispatch profiling on a queue.
 pub unsafe extern "C" fn hsa_amd_profiling_set_profiler_enabled(
     queue: *mut HsaQueue,
     enable: i32,
@@ -1786,6 +1845,7 @@ pub unsafe extern "C" fn hsa_amd_profiling_set_profiler_enabled(
     unsafe(export_name = "__hsa_impl_hsa_amd_queue_get_info")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Writes the requested queue property or native status.
 pub unsafe extern "C" fn hsa_amd_queue_get_info(
     queue: *mut HsaQueue,
     attribute: u32,
@@ -1908,6 +1968,7 @@ pub unsafe extern "C" fn hsa_amd_queue_get_info(
     unsafe(export_name = "__hsa_impl_hsa_amd_queue_signal_external_semaphore")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Enqueues a signal operation for an external semaphore.
 pub unsafe extern "C" fn hsa_amd_queue_signal_external_semaphore(
     queue: *mut HsaQueue,
     semaphore: HsaAmdExternalSemaphore,
@@ -1939,6 +2000,7 @@ pub unsafe extern "C" fn hsa_amd_queue_signal_external_semaphore(
     unsafe(export_name = "__hsa_impl_hsa_amd_queue_wait_external_semaphore")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Waits for queue external semaphore under the requested wait policy.
 pub unsafe extern "C" fn hsa_amd_queue_wait_external_semaphore(
     queue: *mut HsaQueue,
     semaphore: HsaAmdExternalSemaphore,
@@ -1970,6 +2032,7 @@ pub unsafe extern "C" fn hsa_amd_queue_wait_external_semaphore(
     unsafe(export_name = "__hsa_impl_hsa_amd_profiling_get_dispatch_time")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Writes the recorded start and end timestamps of a dispatch.
 pub unsafe extern "C" fn hsa_amd_profiling_get_dispatch_time(
     agent: HsaAgent,
     signal: HsaSignal,
@@ -2026,6 +2089,7 @@ pub unsafe extern "C" fn hsa_amd_profiling_get_dispatch_time(
     unsafe(export_name = "__hsa_impl_hsa_amd_profiling_get_async_copy_time")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Writes timestamps recorded for an asynchronous copy.
 pub unsafe extern "C" fn hsa_amd_profiling_get_async_copy_time(
     signal: HsaSignal,
     time: *mut ProfilingTime,

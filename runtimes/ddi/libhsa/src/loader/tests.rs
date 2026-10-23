@@ -1,6 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+//! Loader ABI and executable ownership regression tests.
+
 use super::code_object::*;
 use super::executable::state::*;
 use super::executable::symbol::*;
@@ -8,6 +10,7 @@ use super::reader::*;
 use super::*;
 
 #[test]
+/// Verifies that memory reader rejects oversized slice before access.
 fn memory_reader_rejects_oversized_slice_before_access() {
     let byte = 0_u8;
     let mut reader = HsaCodeObjectReader { handle: 0 };
@@ -23,17 +26,20 @@ fn memory_reader_rejects_oversized_slice_before_access() {
 }
 
 #[test]
+/// Verifies that loader extension table contains every version 1 03 entry point.
 fn loader_extension_table_contains_every_version_1_03_entry_point() {
     assert!(loader_extension_table().into_iter().all(|entry| entry != 0));
 }
 
 #[test]
+/// Verifies that file reader entry point matches the public ABI.
 fn file_reader_entry_point_matches_the_public_abi() {
     let _: unsafe extern "C" fn(i32, *mut HsaCodeObjectReader) -> Status =
         hsa_code_object_reader_create_from_file;
 }
 
 #[test]
+/// Verifies that legacy entry points match the public ABI.
 fn legacy_entry_points_match_the_public_abi() {
     let _: unsafe extern "C" fn(*mut c_void, usize, *const c_char, *mut HsaCodeObject) -> Status =
         hsa_code_object_deserialize;
@@ -95,6 +101,7 @@ fn legacy_entry_points_match_the_public_abi() {
 }
 
 #[test]
+/// Verifies that public loader constants match HSA headers.
 fn public_loader_constants_match_hsa_headers() {
     assert_eq!(INVALID_CODE_SYMBOL, 0x1018);
     assert_eq!(INVALID_EXECUTABLE_SYMBOL, 0x1019);
@@ -105,6 +112,7 @@ fn public_loader_constants_match_hsa_headers() {
 }
 
 #[test]
+/// Checks reporting of one combined segment for v2 code objects.
 fn reports_one_combined_segment_for_v2_code_objects() {
     let loads = [
         LoadSegment {
@@ -144,6 +152,7 @@ fn reports_one_combined_segment_for_v2_code_objects() {
 }
 
 #[test]
+/// Checks scoping of v2 code object symbols to the load agent.
 fn scopes_v2_code_object_symbols_to_the_load_agent() {
     let agent = HsaAgent { handle: 7 };
     let symbol_agent = loaded_symbol_agent(false, agent);
@@ -151,6 +160,8 @@ fn scopes_v2_code_object_symbols_to_the_load_agent() {
 }
 
 #[test]
+/// Verifies that executable symbol lookup checks initialization before
+/// arguments.
 fn executable_symbol_lookup_checks_initialization_before_arguments() {
     assert!(lock().is_ok_and(|runtime| runtime.as_ref().is_none()));
     // SAFETY: An uninitialized runtime returns before inspecting the

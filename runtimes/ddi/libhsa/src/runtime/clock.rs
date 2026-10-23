@@ -5,6 +5,7 @@
 
 use super::*;
 
+/// Whether profiling requests high precision GPU clock samples.
 static PRECISE_TIMESTAMPS: AtomicBool = AtomicBool::new(false);
 
 /// Choose the KFD correlation least exposed to preemption between its reads.
@@ -24,6 +25,7 @@ pub(crate) fn clock_counters(
     })
 }
 
+/// Chooses the native clock sample with the smallest host read interval.
 pub(super) fn best_clock_sample<T, E>(
     count: usize,
     mut sample: impl FnMut() -> Result<(T, Duration), E>,
@@ -45,6 +47,7 @@ pub(super) fn best_clock_sample<T, E>(
     unsafe(export_name = "__hsa_impl_hsa_amd_enable_high_precision_timestamps")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Enables high precision timestamp sampling for profiling.
 pub extern "C" fn hsa_amd_enable_high_precision_timestamps() -> Status {
     boundary(|| {
         let guard = match lock() {
@@ -59,6 +62,7 @@ pub extern "C" fn hsa_amd_enable_high_precision_timestamps() -> Status {
     })
 }
 
+/// Converts a GPU-clock interval to the system-clock domain.
 pub(crate) fn translate_gpu_interval(
     device: &Device,
     start: u64,
@@ -74,6 +78,7 @@ pub(crate) fn translate_gpu_interval(
     ))
 }
 
+/// Converts one GPU clock tick to the system-clock domain.
 pub(crate) fn translate_gpu_tick(
     counters: rocddi::device::gpu::profiling::ClockCounters,
     tick: u64,

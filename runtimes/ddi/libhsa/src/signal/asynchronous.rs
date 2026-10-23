@@ -10,15 +10,22 @@ use super::*;
 pub(super) enum AsyncRequest {
     /// Run an application callback without a signal condition.
     Function {
+        /// One-shot application function scheduled on the dispatcher.
         callback: unsafe extern "C" fn(*mut c_void),
+        /// Opaque application argument retained for callback delivery.
         arg: CallbackArg,
     },
     /// Register a callback for a signal comparison.
     Signal {
+        /// Signal whose condition activates the handler.
         signal: HsaSignal,
+        /// HSA comparison condition evaluated by the dispatcher.
         condition: u32,
+        /// Value compared against the observed signal value.
         compare_value: SignalValue,
+        /// Application callback invoked when the signal condition holds.
         handler: unsafe extern "C" fn(SignalValue, *mut c_void) -> bool,
+        /// Opaque application argument retained for callback delivery.
         arg: CallbackArg,
     },
 }
@@ -46,12 +53,14 @@ pub(crate) struct AsyncDispatcher {
 }
 
 impl AsyncDispatcher {
+    /// Sends a registration or shutdown request to the callback dispatcher.
     fn send(&self, request: AsyncRequest) -> Status {
         self.sender.send(request).map_or(ERROR, |()| SUCCESS)
     }
 }
 
 impl SignalState {
+    /// Checks whether the caller is the asynchronous callback worker.
     pub(crate) fn running_on_worker(&self) -> bool {
         self.async_dispatcher
             .as_ref()
@@ -65,6 +74,7 @@ impl SignalState {
         }
     }
 
+    /// Starts the dispatcher if needed and enqueues a callback request.
     fn enqueue_async(&mut self, request: AsyncRequest, stop_workers: &Arc<AtomicBool>) -> Status {
         if self.async_dispatcher.is_none() {
             let (sender, receiver) = std::sync::mpsc::channel();
@@ -89,6 +99,7 @@ impl SignalState {
     unsafe(export_name = "__hsa_impl_hsa_amd_async_function")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Queues a function to run on the asynchronous callback worker.
 pub unsafe extern "C" fn hsa_amd_async_function(
     callback: AsyncFunction,
     arg: *mut c_void,
@@ -115,6 +126,7 @@ pub unsafe extern "C" fn hsa_amd_async_function(
     })
 }
 
+/// Adds or removes a signal handler from the dispatcher state.
 fn accept_async_request(request: AsyncRequest, handlers: &mut Vec<AsyncSignalHandler>) {
     match request {
         AsyncRequest::Function { callback, arg } => {
@@ -139,6 +151,7 @@ fn accept_async_request(request: AsyncRequest, handlers: &mut Vec<AsyncSignalHan
     }
 }
 
+/// Drains async requests.
 fn drain_async_requests(
     receiver: &Receiver<AsyncRequest>,
     handlers: &mut Vec<AsyncSignalHandler>,
@@ -161,6 +174,7 @@ fn drain_async_requests(
     }
 }
 
+/// Receives requests and invokes ready handlers outside the runtime lock.
 pub(super) fn run_async_dispatcher(
     receiver: &Receiver<AsyncRequest>,
     stop: &std::sync::atomic::AtomicBool,
@@ -242,6 +256,7 @@ pub(super) fn run_async_dispatcher(
     unsafe(export_name = "__hsa_impl_hsa_amd_signal_async_handler")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Registers a callback for a signal condition.
 pub unsafe extern "C" fn hsa_amd_signal_async_handler(
     signal: HsaSignal,
     condition: u32,

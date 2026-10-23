@@ -5,6 +5,7 @@
 
 use super::*;
 
+/// Finds the owned allocation containing a device address.
 pub(super) fn owned_memory(runtime: &HsaState, address: usize) -> Option<&Memory> {
     runtime
         .memory_state
@@ -27,6 +28,7 @@ pub(super) fn owned_memory(runtime: &HsaState, address: usize) -> Option<&Memory
         })
 }
 
+/// Builds HSA pointer metadata for an address known to the runtime.
 pub(super) fn pointer_description(
     runtime: &HsaState,
     address: usize,
@@ -46,6 +48,7 @@ pub(super) fn pointer_description(
     })
 }
 
+/// Builds pointer metadata for a virtual memory mapping.
 fn vmem_pointer_description(runtime: &HsaState, address: usize) -> Option<PointerDescription> {
     if let Some((_, mapping)) = runtime
         .memory_state
@@ -101,6 +104,7 @@ fn vmem_pointer_description(runtime: &HsaState, address: usize) -> Option<Pointe
         .map(|(_, reservation)| reservation.description.clone())
 }
 
+/// Returns a host-accessible address for a validated copy range.
 pub(super) fn host_copy_address(
     runtime: &HsaState,
     address: usize,
@@ -126,6 +130,7 @@ pub(super) fn host_copy_address(
         .map(|host| host.unwrap_or(address))
 }
 
+/// Checks copy pointers and size, distinguishing an empty copy.
 pub(super) fn memory_copy_has_work(
     destination: *mut c_void,
     source: *const c_void,
@@ -137,6 +142,7 @@ pub(super) fn memory_copy_has_work(
     Ok(size != 0)
 }
 
+/// Computes the byte extent of a 32-bit fill operation.
 pub(super) fn memory_fill_size(
     pointer: *mut c_void,
     count: usize,
@@ -154,6 +160,7 @@ pub(super) fn memory_fill_size(
         .ok_or(INVALID_ARGUMENT)
 }
 
+/// Writes pointer info to the validated destination.
 pub(super) unsafe fn write_pointer_info(
     destination: *mut HsaAmdPointerInfo,
     input_size: u32,
@@ -205,6 +212,7 @@ pub(super) unsafe fn write_pointer_info(
     unsafe(export_name = "__hsa_impl_hsa_amd_pointer_info")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Writes the allocation type, bounds, and owner for a pointer.
 pub unsafe extern "C" fn hsa_amd_pointer_info(
     pointer: *const c_void,
     info: *mut HsaAmdPointerInfo,
@@ -278,6 +286,7 @@ pub unsafe extern "C" fn hsa_amd_pointer_info(
     })
 }
 
+/// Attaches caller data to a tracked allocation or reserved address range.
 fn set_pointer_userdata(runtime: &mut HsaState, address: usize, user_data: usize) -> bool {
     if let Some((_, reservation)) = runtime
         .memory_state
@@ -321,6 +330,7 @@ fn set_pointer_userdata(runtime: &mut HsaState, address: usize, user_data: usize
     unsafe(export_name = "__hsa_impl_hsa_amd_pointer_info_set_userdata")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Associates caller-owned data with a tracked allocation.
 pub unsafe extern "C" fn hsa_amd_pointer_info_set_userdata(
     pointer: *const c_void,
     user_data: *mut c_void,
@@ -350,6 +360,7 @@ pub unsafe extern "C" fn hsa_amd_pointer_info_set_userdata(
     unsafe(export_name = "__hsa_impl_hsa_amd_agents_allow_access")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Grants the listed agents access to a memory allocation.
 pub unsafe extern "C" fn hsa_amd_agents_allow_access(
     num_agents: u32,
     agents: *const HsaAgent,
@@ -478,6 +489,7 @@ pub unsafe extern "C" fn hsa_amd_agents_allow_access(
     unsafe(export_name = "__hsa_impl_hsa_amd_memory_pool_can_migrate")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Reports whether memory can migrate between two pools.
 pub unsafe extern "C" fn hsa_amd_memory_pool_can_migrate(
     source_pool: HsaMemoryPool,
     destination_pool: HsaMemoryPool,
@@ -511,6 +523,7 @@ pub unsafe extern "C" fn hsa_amd_memory_pool_can_migrate(
     unsafe(export_name = "__hsa_impl_hsa_amd_memory_migrate")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Migrates an allocation to the requested memory pool.
 pub unsafe extern "C" fn hsa_amd_memory_migrate(
     pointer: *const c_void,
     memory_pool: HsaMemoryPool,

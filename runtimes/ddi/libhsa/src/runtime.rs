@@ -74,6 +74,7 @@ pub(crate) use logging::{LogOutput, LogWork, LogWriteScope};
 
 // KFD retains a primary process VM after its last descriptor closes. Later
 // HSA generations therefore need a private context to acquire a fresh VM.
+/// Records whether KFD’s process-primary VM has already been used.
 static PRIMARY_CONTEXT_USED: AtomicBool = AtomicBool::new(false);
 
 /// Initialization error with evidence that native rollback also failed.
@@ -85,6 +86,7 @@ pub(crate) struct InitFailure {
 }
 
 impl From<Status> for InitFailure {
+    /// Wraps an HSA status when rollback itself has not failed.
     fn from(status: Status) -> Self {
         Self {
             status,
@@ -100,6 +102,7 @@ trait RetireSession {
 }
 
 impl RetireSession for Session {
+    /// Destroys the native session and reports whether cleanup succeeded.
     fn retire(&mut self) -> bool {
         self.destroy().is_ok()
     }
@@ -114,6 +117,7 @@ struct PendingInit<S: RetireSession = Session, G = Gpu> {
 }
 
 impl<S: RetireSession, G> PendingInit<S, G> {
+    /// Drops activated GPUs before retiring the pending native session.
     fn cleanup(&mut self) -> bool {
         // Device and MMIO owners must release their session borrows first.
         self.gpus.clear();
@@ -131,6 +135,7 @@ impl<S: RetireSession, G> PendingInit<S, G> {
 }
 
 impl<S: RetireSession, G> Drop for PendingInit<S, G> {
+    /// Rolls back unpublished GPUs and their native session.
     fn drop(&mut self) {
         self.cleanup();
     }
@@ -192,6 +197,7 @@ pub(crate) struct HsaState {
     pub(crate) lifetime: DriverContextLifetime,
 }
 
+/// Schedules cleanup after in-flight native work has released its borrows.
 pub(crate) fn defer_cleanup<T: Send + 'static>(
     owner: T,
     cleanup: impl FnOnce(T) + Send + 'static,
@@ -220,6 +226,7 @@ pub(crate) fn defer_cleanup<T: Send + 'static>(
 }
 
 impl HsaState {
+    /// Checks whether the caller is one of this runtime’s callback workers.
     pub(crate) fn running_on_worker(&self) -> bool {
         self.signal_state.running_on_worker()
             || self.memory_state.running_on_worker()
@@ -229,11 +236,13 @@ impl HsaState {
                 .is_some_and(|worker| worker.thread().id() == thread::current().id())
     }
 
+    /// Requests all runtime workers to stop before teardown.
     pub(crate) fn request_stop(&self) {
         self.logging.stop();
         self.stop_workers.store(true, Ordering::Release);
     }
 
+    /// Discovers host and GPU agents and constructs process HSA state.
     pub(crate) fn create() -> Result<Self, InitFailure> {
         let host_page_size =
             usize::try_from(rocddi::memory::host::host_page_size().map_err(map_error)?)
@@ -293,6 +302,7 @@ impl HsaState {
         }
     }
 
+    /// Builds HSA state from a session retained through initialization.
     fn create_with_session(
         pending: &mut PendingInit,
         host_page_size: usize,
@@ -434,30 +444,36 @@ impl HsaState {
         })
     }
 
+    /// Allocates handle for runtime use.
     pub(crate) fn allocate_handle(&mut self) -> Result<u64, Status> {
         let handle = self.next_handle;
         self.next_handle = self.next_handle.checked_add(1).ok_or(OUT_OF_RESOURCES)?;
         Ok(handle)
     }
 
+    /// Returns the GPU index encoded in a valid HSA agent handle.
     pub(crate) fn gpu_index(&self, agent: HsaAgent) -> Option<usize> {
         let offset = agent.handle.checked_sub(GPU_AGENT_BASE)?;
         let index = usize::try_from(offset).ok()?;
         (index < self.gpus.len()).then_some(index)
     }
 
+    /// Checks whether a handle names the host CPU or a discovered GPU.
     pub(crate) fn is_agent(&self, agent: HsaAgent) -> bool {
         agent.handle == CPU_AGENT || self.gpu_index(agent).is_some()
     }
 
+    /// Returns the cache index encoded in a valid HSA cache handle.
     pub(crate) fn cache_index(&self, cache: HsaCache) -> Option<usize> {
         decode_cache_handle(cache, self.caches.len())
     }
 
+    /// Returns cache sizes by level for the requested agent.
     pub(crate) fn agent_cache_sizes(&self, agent: HsaAgent) -> [u32; 4] {
         cache_sizes(&self.caches, agent)
     }
 
+    /// Decodes an ISA handle into GPU index and variant.
     pub(crate) fn isa_parts(&self, isa: HsaIsa) -> Option<(usize, u64)> {
         let offset = isa.handle.checked_sub(ISA_BASE)?;
         let index = usize::try_from(offset / ISA_COUNT_PER_GPU).ok()?;
@@ -466,10 +482,12 @@ impl HsaState {
         isa_name(&gpu.info, gpu.xnack_enabled, variant).map(|_| (index, variant))
     }
 
+    /// Returns the GPU index associated with a valid ISA handle.
     pub(crate) fn isa_index(&self, isa: HsaIsa) -> Option<usize> {
         self.isa_parts(isa).map(|(index, _)| index)
     }
 
+    /// Finds the ISA handle associated with a wavefront handle.
     pub(crate) fn wavefront_isa(&self, wavefront: HsaWavefront) -> Option<HsaIsa> {
         let offset = wavefront.handle.checked_sub(WAVEFRONT_BASE)?;
         let isa = HsaIsa {
@@ -478,12 +496,14 @@ impl HsaState {
         self.isa_parts(isa).map(|_| isa)
     }
 
+    /// Builds a synthetic memory-pool handle for a GPU and pool kind.
     pub(crate) fn gpu_pool(index: usize, kind: u64) -> HsaMemoryPool {
         HsaMemoryPool {
             handle: GPU_POOL_BASE + (index as u64) * 0x10 + kind,
         }
     }
 
+    /// Decodes GPU pool into its runtime components.
     pub(crate) fn decode_gpu_pool(&self, pool: HsaMemoryPool) -> Option<(usize, u64)> {
         let (index, kind) = decode_gpu_pool_handle(pool, self.gpus.len())?;
         let gpu = &self.gpus[index];
@@ -497,10 +517,12 @@ impl HsaState {
         exposed.then_some((index, kind))
     }
 
+    /// Prepares log before publication or execution.
     pub(crate) fn prepare_log(&self, flag: u32, arguments: Arguments<'_>) -> Option<LogWork> {
         self.logging.prepare(&self.inflight, flag, arguments)
     }
 
+    /// Stops this session.
     pub(crate) fn stop(mut self) -> Status {
         if self.running_on_worker() || CallbackScope::active() {
             // Releasing signal storage from its own callback worker is unsafe.

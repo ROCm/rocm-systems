@@ -8,26 +8,45 @@ use crate::isa::{isa_handle, isa_name};
 
 /// HSA code-symbol metadata staged before receiving an opaque handle.
 struct ParsedCodeSymbol {
+    /// Qualified name including the module when present.
     full_name: String,
+    /// Unqualified symbol name.
     name: String,
+    /// Module namespace containing the symbol.
     module_name: String,
+    /// Size of the variable or function object in bytes.
     size: u32,
+    /// HSA discriminant for variable, kernel, or indirect function.
     kind: u32,
+    /// HSA module or program linkage discriminant.
     linkage: u32,
+    /// Whether this record defines the symbol.
     is_definition: bool,
+    /// HSA allocation scope for a variable symbol.
     allocation: u32,
+    /// HSA memory segment for a variable symbol.
     segment: u32,
+    /// Required alignment of the variable in bytes.
     alignment: u32,
+    /// Whether the variable is immutable.
     is_const: bool,
+    /// Kernel-argument segment size in bytes.
     kernarg_size: u32,
+    /// Kernel-argument segment alignment in bytes.
     kernarg_alignment: u32,
+    /// Static group-memory requirement in bytes.
     group_size: u32,
+    /// Private-memory requirement in bytes per work-item.
     private_size: u32,
+    /// Whether the kernel uses a dynamic call stack.
     dynamic_callstack: bool,
+    /// Calling-convention value for the function symbol.
     call_convention: u32,
+    /// Number of work-items in a wavefront for this kernel.
     wavefront_size: u32,
 }
 
+/// Maps loader error to the corresponding HSA representation.
 pub(super) fn map_loader_error(error: rocloader::Error) -> Status {
     match error {
         rocloader::Error::InvalidObject => INVALID_CODE_OBJECT,
@@ -44,6 +63,7 @@ pub(super) fn map_loader_error(error: rocloader::Error) -> Status {
     }
 }
 
+/// Maps a parsed symbol kind to its HSA ABI discriminant.
 pub(super) fn hsa_symbol_kind(kind: SymbolKind) -> u32 {
     match kind {
         SymbolKind::Kernel => SYMBOL_KIND_KERNEL,
@@ -52,6 +72,7 @@ pub(super) fn hsa_symbol_kind(kind: SymbolKind) -> u32 {
     }
 }
 
+/// Maps parsed symbol linkage to its HSA ABI discriminant.
 pub(super) fn hsa_symbol_linkage(linkage: SymbolLinkage) -> u32 {
     match linkage {
         SymbolLinkage::Module => SYMBOL_LINKAGE_MODULE,
@@ -59,6 +80,7 @@ pub(super) fn hsa_symbol_linkage(linkage: SymbolLinkage) -> u32 {
     }
 }
 
+/// Maps variable allocation scope to its HSA ABI value.
 pub(super) fn hsa_variable_allocation(allocation: VariableAllocation) -> u32 {
     match allocation {
         VariableAllocation::Agent => VARIABLE_ALLOCATION_AGENT,
@@ -66,6 +88,7 @@ pub(super) fn hsa_variable_allocation(allocation: VariableAllocation) -> u32 {
     }
 }
 
+/// Maps a variable segment to its HSA ABI value.
 pub(super) fn hsa_variable_segment(segment: VariableSegment) -> u32 {
     match segment {
         VariableSegment::Global => VARIABLE_SEGMENT_GLOBAL,
@@ -74,6 +97,7 @@ pub(super) fn hsa_variable_segment(segment: VariableSegment) -> u32 {
 }
 
 #[cfg(test)]
+/// Parses ELF layout through the production code-object parser for tests.
 fn parse_elf_layout(bytes: &[u8]) -> Result<ElfLayout, Status> {
     LoaderCodeObject::parse(bytes)
         .map(|object| object.layout())
@@ -81,6 +105,7 @@ fn parse_elf_layout(bytes: &[u8]) -> Result<ElfLayout, Status> {
 }
 
 impl From<rocloader::Symbol> for ParsedCodeSymbol {
+    /// Converts parsed loader metadata to HSA symbol query values.
     fn from(symbol: rocloader::Symbol) -> Self {
         Self {
             full_name: symbol.full_name,
@@ -106,6 +131,7 @@ impl From<rocloader::Symbol> for ParsedCodeSymbol {
 }
 
 #[cfg(test)]
+/// Parses symbols with the requested section-table precedence for tests.
 fn parse_symbols(
     bytes: &[u8],
     _layout: ElfLayout,
@@ -123,6 +149,7 @@ fn parse_symbols(
 }
 
 #[cfg(test)]
+/// Applies AMDGPU relocations to a test image using the production loader.
 fn apply_relocations(
     bytes: &[u8],
     layout: ElfLayout,
@@ -142,6 +169,7 @@ fn apply_relocations(
     .map_err(|error| map_loader_error(error.into()))
 }
 
+/// Resolves executable symbol to a validated runtime resource.
 fn resolve_executable_symbol(
     runtime: &HsaState,
     executable: HsaExecutable,
@@ -156,6 +184,7 @@ fn resolve_executable_symbol(
         .resolve(name, agent.handle)
 }
 
+/// Parses a code object and loads its segments for the selected agent.
 pub(super) fn parse_and_load(
     runtime: &HsaState,
     executable: HsaExecutable,
@@ -220,6 +249,7 @@ pub(super) fn parse_and_load(
     ))
 }
 
+/// Returns the ISA handle required by a parsed code object.
 fn code_object_isa(runtime: &HsaState, object: &LoaderCodeObject<'_>) -> Result<HsaIsa, Status> {
     let (target, variant) = object.target().map_err(map_loader_error)?;
     for (index, gpu) in runtime.gpus.iter().enumerate() {
@@ -240,6 +270,7 @@ fn code_object_isa(runtime: &HsaState, object: &LoaderCodeObject<'_>) -> Result<
     Err(INVALID_ISA_NAME)
 }
 
+/// Ensures code object symbols exists before use.
 fn ensure_code_object_symbols(runtime: &mut HsaState, handle: u64) -> Result<(), Status> {
     let Some(code_object) = runtime.loader.code_objects.get(&handle) else {
         return Err(INVALID_CODE_OBJECT);
@@ -302,6 +333,7 @@ fn ensure_code_object_symbols(runtime: &mut HsaState, handle: u64) -> Result<(),
     unsafe(export_name = "__hsa_impl_hsa_code_object_deserialize")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Deserializes a code object and publishes its HSA handle.
 pub unsafe extern "C" fn hsa_code_object_deserialize(
     serialized_code_object: *mut c_void,
     serialized_code_object_size: usize,
@@ -363,6 +395,7 @@ pub unsafe extern "C" fn hsa_code_object_deserialize(
     unsafe(export_name = "__hsa_impl_hsa_code_object_serialize")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Serializes a code object into caller-allocated storage.
 pub unsafe extern "C" fn hsa_code_object_serialize(
     code_object: HsaCodeObject,
     alloc_callback: CodeObjectAllocCallback,
@@ -415,6 +448,7 @@ pub unsafe extern "C" fn hsa_code_object_serialize(
     unsafe(export_name = "__hsa_impl_hsa_code_object_destroy")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Releases a deserialized code object and its symbols.
 pub unsafe extern "C" fn hsa_code_object_destroy(code_object: HsaCodeObject) -> Status {
     boundary(|| {
         let mut guard = match lock() {
@@ -440,6 +474,7 @@ pub unsafe extern "C" fn hsa_code_object_destroy(code_object: HsaCodeObject) -> 
     unsafe(export_name = "__hsa_impl_hsa_code_object_get_info")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Writes the requested code-object attribute.
 pub unsafe extern "C" fn hsa_code_object_get_info(
     code_object: HsaCodeObject,
     attribute: u32,
@@ -501,6 +536,7 @@ pub unsafe extern "C" fn hsa_code_object_get_info(
     })
 }
 
+/// Looks up a code-object symbol and writes its HSA handle.
 unsafe fn code_object_get_symbol_impl(
     code_object: HsaCodeObject,
     module_name: *const c_char,
@@ -558,6 +594,7 @@ unsafe fn code_object_get_symbol_impl(
     unsafe(export_name = "__hsa_impl_hsa_code_object_get_symbol")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Finds a symbol in a code object by module and name.
 pub unsafe extern "C" fn hsa_code_object_get_symbol(
     code_object: HsaCodeObject,
     symbol_name: *const c_char,
@@ -572,6 +609,7 @@ pub unsafe extern "C" fn hsa_code_object_get_symbol(
     unsafe(export_name = "__hsa_impl_hsa_code_object_get_symbol_from_name")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Finds a code-object symbol by its qualified name.
 pub unsafe extern "C" fn hsa_code_object_get_symbol_from_name(
     code_object: HsaCodeObject,
     module_name: *const c_char,
@@ -587,6 +625,7 @@ pub unsafe extern "C" fn hsa_code_object_get_symbol_from_name(
     unsafe(export_name = "__hsa_impl_hsa_code_symbol_get_info")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Writes the requested code-symbol attribute.
 pub unsafe extern "C" fn hsa_code_symbol_get_info(
     code_symbol: HsaCodeSymbol,
     attribute: u32,
@@ -674,6 +713,7 @@ pub unsafe extern "C" fn hsa_code_symbol_get_info(
     unsafe(export_name = "__hsa_impl_hsa_code_object_iterate_symbols")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Visits symbols in a deserialized code object.
 pub unsafe extern "C" fn hsa_code_object_iterate_symbols(
     code_object: HsaCodeObject,
     callback: CodeObjectSymbolCallback,

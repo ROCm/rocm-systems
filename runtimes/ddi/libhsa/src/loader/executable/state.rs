@@ -10,6 +10,7 @@ use super::*;
     unsafe(export_name = "__hsa_impl_hsa_executable_create")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Creates a mutable executable with the selected profile.
 pub unsafe extern "C" fn hsa_executable_create(
     profile: u32,
     state: u32,
@@ -58,6 +59,7 @@ pub unsafe extern "C" fn hsa_executable_create(
     unsafe(export_name = "__hsa_impl_hsa_executable_create_alt")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Creates a mutable executable using the alternate ABI signature.
 pub unsafe extern "C" fn hsa_executable_create_alt(
     profile: u32,
     rounding: u32,
@@ -106,6 +108,7 @@ pub unsafe extern "C" fn hsa_executable_create_alt(
     })
 }
 
+/// Selects the program or agent namespace for a loaded symbol.
 pub(in crate::loader) fn loaded_symbol_agent(program: bool, agent: HsaAgent) -> HsaAgent {
     if program {
         HsaAgent { handle: 0 }
@@ -114,6 +117,7 @@ pub(in crate::loader) fn loaded_symbol_agent(program: bool, agent: HsaAgent) -> 
     }
 }
 
+/// Loads code-object bytes and publishes a handle in the selected scope.
 unsafe fn load_executable_code_object(
     runtime: &mut HsaState,
     executable: HsaExecutable,
@@ -195,6 +199,7 @@ unsafe fn load_executable_code_object(
     unsafe(export_name = "__hsa_impl_hsa_executable_load_agent_code_object")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Loads a code object into one agent’s executable scope.
 pub unsafe extern "C" fn hsa_executable_load_agent_code_object(
     executable: HsaExecutable,
     agent: HsaAgent,
@@ -237,6 +242,7 @@ pub unsafe extern "C" fn hsa_executable_load_agent_code_object(
     unsafe(export_name = "__hsa_impl_hsa_executable_load_program_code_object")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Loads a code object into program-wide executable scope.
 pub unsafe extern "C" fn hsa_executable_load_program_code_object(
     executable: HsaExecutable,
     reader: HsaCodeObjectReader,
@@ -286,6 +292,7 @@ pub unsafe extern "C" fn hsa_executable_load_program_code_object(
     unsafe(export_name = "__hsa_impl_hsa_executable_load_code_object")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Loads a code object into the requested executable scope.
 pub unsafe extern "C" fn hsa_executable_load_code_object(
     executable: HsaExecutable,
     agent: HsaAgent,
@@ -335,6 +342,7 @@ pub unsafe extern "C" fn hsa_executable_load_code_object(
     unsafe(export_name = "__hsa_impl_hsa_executable_freeze")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Finalizes an executable so its symbols can be queried and used.
 pub unsafe extern "C" fn hsa_executable_freeze(
     executable: HsaExecutable,
     _options: *const c_char,
@@ -363,6 +371,7 @@ pub unsafe extern "C" fn hsa_executable_freeze(
     unsafe(export_name = "__hsa_impl_hsa_executable_destroy")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Releases an executable and its loaded code-object owners.
 pub unsafe extern "C" fn hsa_executable_destroy(executable: HsaExecutable) -> Status {
     boundary(|| {
         let _mutation = match EXECUTABLE_TRAVERSAL.write() {
@@ -392,6 +401,7 @@ pub unsafe extern "C" fn hsa_executable_destroy(executable: HsaExecutable) -> St
     unsafe(export_name = "__hsa_impl_hsa_executable_validate")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Validates that an executable is ready for use.
 pub unsafe extern "C" fn hsa_executable_validate(
     executable: HsaExecutable,
     result: *mut u32,
@@ -422,6 +432,7 @@ pub unsafe extern "C" fn hsa_executable_validate(
     unsafe(export_name = "__hsa_impl_hsa_executable_validate_alt")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Validates an executable and writes the failing symbol if any.
 pub unsafe extern "C" fn hsa_executable_validate_alt(
     executable: HsaExecutable,
     _options: *const c_char,

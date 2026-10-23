@@ -6,6 +6,7 @@
 use super::*;
 
 thread_local! {
+    /// Whether this thread currently invokes an application callback.
     static IN_CALLBACK: Cell<bool> = const { Cell::new(false) };
 }
 
@@ -13,16 +14,19 @@ thread_local! {
 pub(crate) struct CallbackScope(bool);
 
 impl CallbackScope {
+    /// Marks entry into an application callback scope for reentrancy checks.
     pub(crate) fn enter() -> Self {
         Self(IN_CALLBACK.with(|active| active.replace(true)))
     }
 
+    /// Checks whether the current thread is executing an application callback.
     pub(crate) fn active() -> bool {
         IN_CALLBACK.with(Cell::get)
     }
 }
 
 impl Drop for CallbackScope {
+    /// Restores the previous callback reentrancy state for this thread.
     fn drop(&mut self) {
         IN_CALLBACK.with(|active| active.set(self.0));
     }
@@ -46,6 +50,7 @@ impl HsaState {
         status
     }
 
+    /// Ensures system event worker exists before use.
     fn ensure_system_event_worker(&mut self) -> Status {
         if self.system_event_worker.is_some() {
             return SUCCESS;
@@ -70,6 +75,7 @@ impl HsaState {
     }
 }
 
+/// Notifies registered handlers of final system shutdown.
 pub(super) fn notify_system_shutdown(handlers: &[(SystemEventHandler, CallbackArg)]) {
     let event = HsaAmdEvent {
         event_type: AMD_SYSTEM_SHUTDOWN_EVENT,
@@ -78,6 +84,7 @@ pub(super) fn notify_system_shutdown(handlers: &[(SystemEventHandler, CallbackAr
     let _ = notify_system_event(handlers, &event, None);
 }
 
+/// Invokes system event handlers outside the global runtime lock.
 pub(super) fn notify_system_event(
     handlers: &[(SystemEventHandler, CallbackArg)],
     event: &HsaAmdEvent,
@@ -96,6 +103,7 @@ pub(super) fn notify_system_event(
     handled
 }
 
+/// Encodes a GPU memory fault as an AMD system event record.
 pub(super) fn memory_fault_event(agent: HsaAgent, fault: GpuMemoryFault) -> HsaAmdEvent {
     let mut reason = 0;
     if fault.page_not_present {
@@ -122,6 +130,7 @@ pub(super) fn memory_fault_event(agent: HsaAgent, fault: GpuMemoryFault) -> HsaA
     }
 }
 
+/// Encodes a GPU hardware exception as an AMD system event record.
 pub(super) fn hardware_exception_event(
     agent: HsaAgent,
     exception: GpuHardwareException,
@@ -141,6 +150,7 @@ pub(super) fn hardware_exception_event(
     }
 }
 
+/// Receives native device events and dispatches HSA callbacks.
 pub(super) fn system_event_worker(mut subscription: DeviceEventSubscription, stop: &AtomicBool) {
     while !stop.load(Ordering::Acquire) {
         match subscription.poll() {
