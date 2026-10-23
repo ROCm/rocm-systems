@@ -5,6 +5,7 @@
 // Owns public entry points and their validation/dispatch policy.
 
 #include "common/internal.h"
+#include "common/simd.h"
 #include "fp/half_fma_scalar.h"
 #include "register/dpp.h"
 #include "rj_arith/rj_arith.h"
@@ -27,7 +28,7 @@ int run(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
   if (mode >> 32) {
 
     return rocjitsu::arith::execute_dpp(
-        exec_mask, mode, a, [&](uint32_t exec_mask, const uint32_t *const *source) {
+        flags, exec_mask, mode, a, [&](uint32_t exec_mask, const uint32_t *const *source) {
           return run<Rdna3>(flags, exec_mask, uint32_t(mode), d, source, b, c, excp_flag_user);
         });
   }
@@ -44,6 +45,20 @@ int run(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
   if (exec_mask == 0) {
     return RJ_ARITH_SUCCESS;
   }
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+  if (!(flags & RJ_ARITH_FP_ROUND_MASK) && (flags & RJ_ARITH_CPU_MASK) >= RJ_ARITH_CPU_X86_64_V3) {
+    if (!rocjitsu::arith::is_exact(flags)) {
+      rocjitsu::arith::half_fma_x86_64_v3(flags, exec_mask, mode, d[0], a[0], b[0], c[0]);
+      return RJ_ARITH_SUCCESS;
+    }
+    // CLAMP suppresses status in the scalar model too; this backend never reports it.
+    if (!report || (mode & RJ_ARITH_ALU_CLAMP)) {
+      rocjitsu::arith::half_fma_exact_x86_64_v3(flags, exec_mask, uint32_t(mode), d[0], a[0], b[0],
+                                                c[0], Rdna3);
+      return RJ_ARITH_SUCCESS;
+    }
+  }
+#endif
   int a_shift = mode & RJ_ARITH_ALU_HIGH_A ? 16 : 0;
   int b_shift = mode & RJ_ARITH_ALU_HIGH_B ? 16 : 0;
   int c_shift = mode & RJ_ARITH_ALU_HIGH_C ? 16 : 0;

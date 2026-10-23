@@ -11,6 +11,7 @@
 #include "common/semantics.h"
 #include "fp/elementwise.h"
 #include "fp/fma_reference.h"
+#include "fp/fma_simd_test.h"
 #include "fp/half_fma_reference.h"
 #include "fp/reference.h"
 #include "rj_arith/rj_arith.h"
@@ -37,6 +38,9 @@ void check_half_fma(Call entry_point, bool gfx12, const Cases &status_cases) {
                   uint32_t *fp_status) {
     return entry_point(flags, exec_mask, mode, d, a, b, c, fp_status);
   };
+  check_fma_simd<16, Lanes>(call, {0, RJ_ARITH_ALU_NEG_A, RJ_ARITH_ALU_CLAMP, RJ_ARITH_ALU_OMOD_2,
+                                   RJ_ARITH_ALU_OMOD_4, RJ_ARITH_ALU_OMOD_HALF,
+                                   RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_D});
   using Registers = rocjitsu::arith::test::Registers<10, Lanes>;
   Registers input = rocjitsu::arith::test::make_fp_inputs<16, Lanes>();
 
