@@ -1,6 +1,6 @@
 ---
 name: rocprof-compute-kernel-bottleneck
-description: Profiles an AMD GPU application with rocprof-compute and finds which kernel is slow and why, using performance metrics and PC sampling. Collects counters and selects kernels and dispatches, then analyzes GPU memory throughput, compute efficiency, wavefront occupancy and wavefront limits, scheduler stalls, etc. Use when the user asks to profile, benchmark, or speed up a HIP/ROCm kernel or application, or asks where a kernel's bottleneck is. Not for CUDA tools, Windows, system-wide CPU/MPI tracing, or writing kernel source.
+description: Profiles an AMD GPU application with rocprof-compute and finds which kernel is slow and why, using performance metrics and PC sampling. Collects counters and selects kernels and dispatches, then analyzes GPU memory throughput, compute efficiency, wavefront occupancy and wavefront limits, scheduler stalls, etc. Use when the user asks to profile, benchmark, or speed up a HIP/ROCm kernel or application, or asks where a kernel's bottleneck is. Not for CUDA tools, Windows even when the user names rocprof-compute, system-wide CPU/MPI tracing, or writing kernel source.
 ---
 
 # Profile an AMD GPU application and find the kernel bottleneck
@@ -8,6 +8,12 @@ description: Profiles an AMD GPU application with rocprof-compute and finds whic
 Start here for any "profile this" or "why is this kernel slow" request. This
 skill collects counters, narrows a workload down to one kernel, and identifies
 what limits it. Hand off to a focused skill once the limit is clear.
+
+## Prerequisites
+
+- Linux with `rocprof-compute` on `PATH`. ROCm 6.2 and newer ship it. A source build needs ROCm 5.7.1 or newer; see [source install](../../docs/install/source-install.rst). Use the ROCm install the user already has. There is no default container image to guess.
+- Supported accelerators are the Instinct MI100, MI200, MI300, and MI350 series, plus the client APUs in [compatible accelerators](../../docs/reference/compatible-accelerators.rst). MI50 and MI60 are not supported. Read `GPU Arch` from `rocprof-compute --specs` before promising a feature the table does not list.
+- `HIP_VISIBLE_DEVICES` chooses the GPU the application runs on. A nonempty `HIP_VISIBLE_DEVICES` overrides `CUDA_VISIBLE_DEVICES`. If `HIP_VISIBLE_DEVICES` is empty, HIP uses `CUDA_VISIBLE_DEVICES`. An empty value of either variable does not hide GPUs. `-1`, or an empty `ROCR_VISIBLE_DEVICES`, hides every GPU. Do not set `HSA_OVERRIDE_GFX_VERSION` to force an unsupported architecture. The profiler then collects the wrong counters.
 
 Run `rocprof-compute profile --help` and `rocprof-compute analyze --help`
 before choosing flags. Options change between releases; do not guess one.
@@ -25,7 +31,8 @@ different questions. Choose by what the user is asking, not by difficulty.
 Counters are the default starting point because they cover the whole kernel
 cheaply. Go straight to `rocprof-compute-pc-sampling` when the user asks about instructions,
 source lines, or stall reasons, and use both when an architectural limit needs
-to be traced back to the code that causes it.
+to be traced back to the code that causes it. A request to run `rocprofv3`
+itself is neither this skill nor `rocprof-compute-pc-sampling`.
 
 ## 1. Check the environment
 

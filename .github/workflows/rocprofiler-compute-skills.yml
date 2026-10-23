@@ -1,0 +1,54 @@
+# Structural checks for the rocprofiler-compute agent skills. These are the
+# rules the AMD skills catalog enforces, and they need no GPU and no model key.
+#
+# Routing and behavioral grading need a product-owned model API key and, for
+# behavioral cases, a supported GPU. This repository does not have the catalog's
+# Instinct pool. Behavioral runs stay manual (`skills/run_evals.py --mode
+# behavioral`) until that hardware is available. In the AMD skills catalog, each
+# skill's evals/machine.yml asks for Linux plus the mi300x/gpu/rocm labels,
+# which holds those legs behind the catalog's enable_mi_ci gate.
+#
+# workflow_dispatch turns routing on for a manual run. Map a product-owned
+# model key to the ANTHROPIC_API_KEY secret before expecting that leg to pass.
+# Routing stays optional so a missing key is visible without failing structural
+# checks that do not need it.
+
+name: "rocprofiler-compute skills"
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "projects/rocprofiler-compute/skills/**"
+      - "projects/rocprofiler-compute/docs/**"
+      - ".github/workflows/rocprofiler-compute-skills.yml"
+  pull_request:
+    paths:
+      - "projects/rocprofiler-compute/skills/**"
+      - "projects/rocprofiler-compute/docs/**"
+      - ".github/workflows/rocprofiler-compute-skills.yml"
+  workflow_dispatch:
+    inputs:
+      routing:
+        description: "Grade routing as well as structure."
+        type: boolean
+        default: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  evals:
+    uses: amd/skillscope/.github/workflows/reusable.yml@v0.1.2
+    secrets:
+      api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+    with:
+      skills: projects/rocprofiler-compute/skills/*
+      structural: required
+      routing: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.routing == 'true' && 'optional' || 'off' }}
+      behavioral: off
+      runner: ubuntu-24.04

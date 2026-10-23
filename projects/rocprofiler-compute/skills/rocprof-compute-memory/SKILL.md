@@ -1,12 +1,18 @@
 ---
 name: rocprof-compute-memory
-description: Analyzes the AMD GPU memory hierarchy with rocprof-compute, covering the Memory Chart, vL1D and L2 caches, LDS bank conflicts, Infinity Fabric traffic, and the experimental gfx950 memory bandwidth analysis. Use when the user asks about memory bandwidth, cache hit rates, coalescing, LDS conflicts, data locality, HBM traffic, or says a kernel is memory-bound. Not for CUDA tools, Windows, host memory profiling, or system-wide tracing.
+description: Analyzes the AMD GPU memory hierarchy with rocprof-compute, covering the Memory Chart, vL1D and L2 caches, LDS bank conflicts, Infinity Fabric traffic, and the experimental gfx950 memory bandwidth analysis. Use when the user asks about memory bandwidth, cache hit rates, coalescing, LDS conflicts, data locality, HBM traffic, or says a kernel is memory-bound. Not for CUDA tools, Nsight, Windows, host-memory leaks, GPU out-of-memory allocation failures, or system-wide tracing.
 ---
 
 # Analyze the AMD GPU memory hierarchy
 
 Use this after Speed-of-Light points at memory, or when the user asks about
 bandwidth, caches, or data movement directly.
+
+## Prerequisites
+
+- Linux with `rocprof-compute` on `PATH`. ROCm 6.2 and newer ship it. A source build needs ROCm 5.7.1 or newer; see [source install](../../docs/install/source-install.rst). Use the ROCm install the user already has. There is no default container image to guess.
+- Supported accelerators are the Instinct MI100, MI200, MI300, and MI350 series, plus the client APUs in [compatible accelerators](../../docs/reference/compatible-accelerators.rst). MI50 and MI60 are not supported. The experimental memory-bandwidth analysis below is gfx950 only.
+- `HIP_VISIBLE_DEVICES` chooses the GPU the application runs on. A nonempty `HIP_VISIBLE_DEVICES` overrides `CUDA_VISIBLE_DEVICES`. If `HIP_VISIBLE_DEVICES` is empty, HIP uses `CUDA_VISIBLE_DEVICES`. An empty value of either variable does not hide GPUs. `-1`, or an empty `ROCR_VISIBLE_DEVICES`, hides every GPU. Do not set `HSA_OVERRIDE_GFX_VERSION` to force an unsupported architecture. The profiler then collects the wrong counters.
 
 Run `rocprof-compute analyze --help` before choosing flags.
 
@@ -95,9 +101,15 @@ rocprof-compute analyze --path ./workloads/<name>/<gpu_model> \
 ```
 
 Its cutoffs and guidance text are data, not something to restate from memory.
-They live in `src/membw_analysis/tree_spec/gfx950_membw_tree_spec.yaml` and
-`src/membw_analysis/tree_spec/gfx950_membw_guidance.yaml`. Read those files
-when you need to explain a verdict, and report the guidance the tool produced
+In a source checkout, read:
+
+- [gfx950_membw_tree_spec.yaml](../../src/membw_analysis/tree_spec/gfx950_membw_tree_spec.yaml)
+- [gfx950_membw_guidance.yaml](../../src/membw_analysis/tree_spec/gfx950_membw_guidance.yaml)
+
+A ROCm install copies the skills to `<rocm-path>/share/rocprofiler-compute/skills/`
+and does not copy these YAML files next to them. When this skill was installed
+rather than opened from the source tree, read those same two paths in the
+matching rocprofiler-compute checkout. Report the guidance the tool produced
 rather than substituting your own numbers.
 
 On any other architecture, use the Memory Chart path above.

@@ -13,6 +13,13 @@ Torch and Triton tracing are experimental. Every command needs
 `--experimental`, and option names can change between releases, so run
 `rocprof-compute profile --experimental --help` first.
 
+## Prerequisites
+
+- Linux with `rocprof-compute` on `PATH`. ROCm 6.2 and newer ship it. A source build needs ROCm 5.7.1 or newer; see [source install](../../docs/install/source-install.rst). Use the ROCm install the user already has. There is no default container image to guess.
+- A supported accelerator from [compatible accelerators](../../docs/reference/compatible-accelerators.rst): Instinct MI100, MI200, MI300, or MI350 series, or a listed client APU. MI50 and MI60 are not supported.
+- PyTorch, installed against that same ROCm. Versions 2.13 and 2.14 enable the torch trace collector and a full operator trace. Other versions still run `--torch-trace` with a warning and reduced `TorchDispatchMode` coverage, as detailed in the next section. If PyTorch and the profiler load two different ROCm installations in one process, the run aborts at startup. The profiled command must be Python.
+- `HIP_VISIBLE_DEVICES` chooses the GPU the application runs on. A nonempty `HIP_VISIBLE_DEVICES` overrides `CUDA_VISIBLE_DEVICES`. If `HIP_VISIBLE_DEVICES` is empty, HIP uses `CUDA_VISIBLE_DEVICES`. An empty value of either variable does not hide GPUs. `-1`, or an empty `ROCR_VISIBLE_DEVICES`, hides every GPU. Do not set `HSA_OVERRIDE_GFX_VERSION` to force an unsupported architecture. `ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS=0` drops device and layout wraps and changes what the trace records.
+
 ## 1. Check the requirements
 
 Torch tracing needs PyTorch installed against a matching ROCm. PyTorch 2.13

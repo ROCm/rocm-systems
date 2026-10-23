@@ -64,8 +64,14 @@ skills, so they keep working offline.
 
 ## Tests
 
-There is no CI for skills. `run_evals.py` is the gate, and it is meant to be
-run by hand before a release:
+Pull requests that touch these skills, or the docs they link, run structural
+checks through `.github/workflows/rocprofiler-compute-skills.yml`. That workflow
+calls the AMD skillscope reusable workflow. It does not grade routing or
+behavior on every pull request: routing needs a product-owned model API key,
+and behavior needs a supported GPU. Dispatch the workflow with routing enabled
+for a manual routing run. Grade behavior on hardware with `run_evals.py`.
+
+`run_evals.py` remains the release gate:
 
 ```bash
 ./skills/run_evals.py --list                         # validate the datasets
@@ -89,9 +95,12 @@ Each dataset needs at least three cases that should trigger the skill, two that
 should not, and one triggering case with judged behavior. Negative cases carry
 only an id, a prompt, and an optional note.
 
-Every workspace gets a copy of `sample/`. A triggering case that needs an
-application names one with `sample`, and behavioral mode tells the agent to use
-it. Routing mode sends the prompt unchanged.
+A triggering case that needs an application sets `workspace` to the existing
+sample directory that contains it, relative to the skill directory, and does
+not add those sources to the skill. For example, `../../sample` or
+`../../sample/membw_analysis_test_suite`. The prompt names the application
+relative to that directory. The contents of the workspace directory are copied
+to the workspace root when the case runs, as skillscope does.
 
 ## Keeping skills correct
 
