@@ -831,13 +831,22 @@ struct AsmAccess<16, LoadPolicy, StorePolicy> {
 #elif defined(__GFX12__)
       if constexpr (LoadPolicy == CachePolicy::GlobalCache) {
         asm volatile("global_load_b128 %0 %1 off scope:SCOPE_SE\n"
-                     "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT : "=&v"(val) : "v"(src) : "memory");
+                     "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT
+                     : "=&v"(val)
+                     : "v"(src)
+                     : "memory");
       } else if constexpr (LoadPolicy == CachePolicy::DeviceScope) {
         asm volatile("global_load_b128 %0 %1 off scope:SCOPE_DEV\n"
-                     "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT : "=&v"(val) : "v"(src) : "memory");
+                     "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT
+                     : "=&v"(val)
+                     : "v"(src)
+                     : "memory");
       } else {
         asm volatile("global_load_b128 %0 %1 off scope:SCOPE_SYS\n"
-                     "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT : "=&v"(val) : "v"(src) : "memory");
+                     "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT
+                     : "=&v"(val)
+                     : "v"(src)
+                     : "memory");
       }
 #else
       val = *reinterpret_cast<type*>(src);
@@ -872,11 +881,20 @@ struct AsmAccess<16, LoadPolicy, StorePolicy> {
       }
 #elif defined(__GFX12__)
       if constexpr (StorePolicy == CachePolicy::GlobalCache) {
-        asm volatile("global_store_b128 %0 %1 off scope:SCOPE_SE" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val) : "memory");
+        asm volatile("global_store_b128 %0 %1 off scope:SCOPE_SE" ROCSHMEM_XNACK_XCNT_WAIT
+                     :
+                     : "v"(dst), "v"(val)
+                     : "memory");
       } else if constexpr (StorePolicy == CachePolicy::DeviceScope) {
-        asm volatile("global_store_b128 %0 %1 off scope:SCOPE_DEV" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val) : "memory");
+        asm volatile("global_store_b128 %0 %1 off scope:SCOPE_DEV" ROCSHMEM_XNACK_XCNT_WAIT
+                     :
+                     : "v"(dst), "v"(val)
+                     : "memory");
       } else {
-        asm volatile("global_store_b128 %0 %1 off scope:SCOPE_SYS" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val) : "memory");
+        asm volatile("global_store_b128 %0 %1 off scope:SCOPE_SYS" ROCSHMEM_XNACK_XCNT_WAIT
+                     :
+                     : "v"(dst), "v"(val)
+                     : "memory");
       }
 #else
       *reinterpret_cast<type*>(dst) = val;
@@ -947,13 +965,22 @@ struct AsmAccess<8, LoadPolicy, StorePolicy> {
 #elif defined(__GFX12__)
       if constexpr (LoadPolicy == CachePolicy::GlobalCache) {
         asm volatile("global_load_b64 %0 %1 off scope:SCOPE_SE\n"
-                     "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT : "=&v"(val) : "v"(src) : "memory");
+                     "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT
+                     : "=&v"(val)
+                     : "v"(src)
+                     : "memory");
       } else if constexpr (LoadPolicy == CachePolicy::DeviceScope) {
         asm volatile("global_load_b64 %0 %1 off scope:SCOPE_DEV\n"
-                     "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT : "=&v"(val) : "v"(src) : "memory");
+                     "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT
+                     : "=&v"(val)
+                     : "v"(src)
+                     : "memory");
       } else {
         asm volatile("global_load_b64 %0 %1 off scope:SCOPE_SYS\n"
-                     "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT : "=&v"(val) : "v"(src) : "memory");
+                     "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT
+                     : "=&v"(val)
+                     : "v"(src)
+                     : "memory");
       }
 #else
       val = *reinterpret_cast<type*>(src);
@@ -988,11 +1015,20 @@ struct AsmAccess<8, LoadPolicy, StorePolicy> {
       }
 #elif defined(__GFX12__)
       if constexpr (StorePolicy == CachePolicy::GlobalCache) {
-        asm volatile("global_store_b64 %0 %1 off scope:SCOPE_SE" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val) : "memory");
+        asm volatile("global_store_b64 %0 %1 off scope:SCOPE_SE" ROCSHMEM_XNACK_XCNT_WAIT
+                     :
+                     : "v"(dst), "v"(val)
+                     : "memory");
       } else if constexpr (StorePolicy == CachePolicy::DeviceScope) {
-        asm volatile("global_store_b64 %0 %1 off scope:SCOPE_DEV" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val) : "memory");
+        asm volatile("global_store_b64 %0 %1 off scope:SCOPE_DEV" ROCSHMEM_XNACK_XCNT_WAIT
+                     :
+                     : "v"(dst), "v"(val)
+                     : "memory");
       } else {
-        asm volatile("global_store_b64 %0 %1 off scope:SCOPE_SYS" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val) : "memory");
+        asm volatile("global_store_b64 %0 %1 off scope:SCOPE_SYS" ROCSHMEM_XNACK_XCNT_WAIT
+                     :
+                     : "v"(dst), "v"(val)
+                     : "memory");
       }
 #else
       *reinterpret_cast<type*>(dst) = val;
@@ -1063,13 +1099,22 @@ struct AsmAccess<4, LoadPolicy, StorePolicy> {
 #elif defined(__GFX12__)
       if constexpr (LoadPolicy == CachePolicy::GlobalCache) {
         asm volatile("global_load_b32 %0 %1 off scope:SCOPE_SE\n"
-                     "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT : "=&v"(val) : "v"(src) : "memory");
+                     "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT
+                     : "=&v"(val)
+                     : "v"(src)
+                     : "memory");
       } else if constexpr (LoadPolicy == CachePolicy::DeviceScope) {
         asm volatile("global_load_b32 %0 %1 off scope:SCOPE_DEV\n"
-                     "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT : "=&v"(val) : "v"(src) : "memory");
+                     "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT
+                     : "=&v"(val)
+                     : "v"(src)
+                     : "memory");
       } else {
         asm volatile("global_load_b32 %0 %1 off scope:SCOPE_SYS\n"
-                     "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT : "=&v"(val) : "v"(src) : "memory");
+                     "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT
+                     : "=&v"(val)
+                     : "v"(src)
+                     : "memory");
       }
 #else
       val = *reinterpret_cast<type*>(src);
@@ -1104,11 +1149,20 @@ struct AsmAccess<4, LoadPolicy, StorePolicy> {
       }
 #elif defined(__GFX12__)
       if constexpr (StorePolicy == CachePolicy::GlobalCache) {
-        asm volatile("global_store_b32 %0 %1 off scope:SCOPE_SE" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val) : "memory");
+        asm volatile("global_store_b32 %0 %1 off scope:SCOPE_SE" ROCSHMEM_XNACK_XCNT_WAIT
+                     :
+                     : "v"(dst), "v"(val)
+                     : "memory");
       } else if constexpr (StorePolicy == CachePolicy::DeviceScope) {
-        asm volatile("global_store_b32 %0 %1 off scope:SCOPE_DEV" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val) : "memory");
+        asm volatile("global_store_b32 %0 %1 off scope:SCOPE_DEV" ROCSHMEM_XNACK_XCNT_WAIT
+                     :
+                     : "v"(dst), "v"(val)
+                     : "memory");
       } else {
-        asm volatile("global_store_b32 %0 %1 off scope:SCOPE_SYS" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val) : "memory");
+        asm volatile("global_store_b32 %0 %1 off scope:SCOPE_SYS" ROCSHMEM_XNACK_XCNT_WAIT
+                     :
+                     : "v"(dst), "v"(val)
+                     : "memory");
       }
 #else
       *reinterpret_cast<type*>(dst) = val;
@@ -1195,13 +1249,22 @@ struct AsmAccess<2, LoadPolicy, StorePolicy> {
   #else
       if constexpr (LoadPolicy == CachePolicy::GlobalCache) {
         asm volatile("global_load_u16 %0 %1 off scope:SCOPE_SE\n"
-                     "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT : "=&v"(val32) : "v"(src) : "memory");
+                     "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT
+                     : "=&v"(val32)
+                     : "v"(src)
+                     : "memory");
       } else if constexpr (LoadPolicy == CachePolicy::DeviceScope) {
         asm volatile("global_load_u16 %0 %1 off scope:SCOPE_DEV\n"
-                     "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT : "=&v"(val32) : "v"(src) : "memory");
+                     "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT
+                     : "=&v"(val32)
+                     : "v"(src)
+                     : "memory");
       } else {
         asm volatile("global_load_u16 %0 %1 off scope:SCOPE_SYS\n"
-                     "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT : "=&v"(val32) : "v"(src) : "memory");
+                     "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT
+                     : "=&v"(val32)
+                     : "v"(src)
+                     : "memory");
       }
   #endif
       return static_cast<type>(val32);
@@ -1250,11 +1313,20 @@ struct AsmAccess<2, LoadPolicy, StorePolicy> {
       }
   #else
       if constexpr (StorePolicy == CachePolicy::GlobalCache) {
-        asm volatile("global_store_b16 %0 %1 off scope:SCOPE_SE" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val32) : "memory");
+        asm volatile("global_store_b16 %0 %1 off scope:SCOPE_SE" ROCSHMEM_XNACK_XCNT_WAIT
+                     :
+                     : "v"(dst), "v"(val32)
+                     : "memory");
       } else if constexpr (StorePolicy == CachePolicy::DeviceScope) {
-        asm volatile("global_store_b16 %0 %1 off scope:SCOPE_DEV" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val32) : "memory");
+        asm volatile("global_store_b16 %0 %1 off scope:SCOPE_DEV" ROCSHMEM_XNACK_XCNT_WAIT
+                     :
+                     : "v"(dst), "v"(val32)
+                     : "memory");
       } else {
-        asm volatile("global_store_b16 %0 %1 off scope:SCOPE_SYS" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val32) : "memory");
+        asm volatile("global_store_b16 %0 %1 off scope:SCOPE_SYS" ROCSHMEM_XNACK_XCNT_WAIT
+                     :
+                     : "v"(dst), "v"(val32)
+                     : "memory");
       }
   #endif
 #else
@@ -1342,13 +1414,22 @@ struct AsmAccess<1, LoadPolicy, StorePolicy> {
   #else
       if constexpr (LoadPolicy == CachePolicy::GlobalCache) {
         asm volatile("global_load_u8 %0 %1 off scope:SCOPE_SE\n"
-                     "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT : "=&v"(val32) : "v"(src) : "memory");
+                     "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT
+                     : "=&v"(val32)
+                     : "v"(src)
+                     : "memory");
       } else if constexpr (LoadPolicy == CachePolicy::DeviceScope) {
         asm volatile("global_load_u8 %0 %1 off scope:SCOPE_DEV\n"
-                     "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT : "=&v"(val32) : "v"(src) : "memory");
+                     "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT
+                     : "=&v"(val32)
+                     : "v"(src)
+                     : "memory");
       } else {
         asm volatile("global_load_u8 %0 %1 off scope:SCOPE_SYS\n"
-                     "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT : "=&v"(val32) : "v"(src) : "memory");
+                     "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT
+                     : "=&v"(val32)
+                     : "v"(src)
+                     : "memory");
       }
   #endif
       return static_cast<type>(val32);
@@ -1397,11 +1478,20 @@ struct AsmAccess<1, LoadPolicy, StorePolicy> {
       }
   #else
       if constexpr (StorePolicy == CachePolicy::GlobalCache) {
-        asm volatile("global_store_b8 %0 %1 off scope:SCOPE_SE" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val32) : "memory");
+        asm volatile("global_store_b8 %0 %1 off scope:SCOPE_SE" ROCSHMEM_XNACK_XCNT_WAIT
+                     :
+                     : "v"(dst), "v"(val32)
+                     : "memory");
       } else if constexpr (StorePolicy == CachePolicy::DeviceScope) {
-        asm volatile("global_store_b8 %0 %1 off scope:SCOPE_DEV" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val32) : "memory");
+        asm volatile("global_store_b8 %0 %1 off scope:SCOPE_DEV" ROCSHMEM_XNACK_XCNT_WAIT
+                     :
+                     : "v"(dst), "v"(val32)
+                     : "memory");
       } else {
-        asm volatile("global_store_b8 %0 %1 off scope:SCOPE_SYS" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val32) : "memory");
+        asm volatile("global_store_b8 %0 %1 off scope:SCOPE_SYS" ROCSHMEM_XNACK_XCNT_WAIT
+                     :
+                     : "v"(dst), "v"(val32)
+                     : "memory");
       }
   #endif
 #else
@@ -1577,5 +1667,3 @@ __device__ __forceinline__ void wait_on_vmem_and_lds([[maybe_unused]] int waits)
 }  // namespace rocshmem
 
 #endif  // LIBRARY_SRC_ASSEMBLY_HPP_
-
-
