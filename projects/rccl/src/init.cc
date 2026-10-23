@@ -1254,7 +1254,7 @@ fail:
 #endif
 static void showVersion() {
   // Retrieve Hostname info
-  char hostBuf[HOST_NAME_MAX];
+  char hostBuf[HOST_NAME_MAX + 1] = {};
   std::string hostInfo = (gethostname(hostBuf, sizeof(hostBuf) - 1) == 0) ? hostBuf : "Unknown";
 
   // Retrieve librccl path
