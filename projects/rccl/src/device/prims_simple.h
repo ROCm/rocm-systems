@@ -866,9 +866,11 @@ public:
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
   skip_fence = !ncclShmem.comm.cheapPostSendFenceOff;
 #else
-    // The cheap post-peer fence is only safe with global DWORDX4 builtins
-    // (system-scope cache-bypassing stores); otherwise always use the full fence.
-    skip_fence = false;
+  // Without global DWORDX4 builtins, registered (direct) user-buffer stores are
+  // cacheable and need the full fence; unregistered collectives only store to the
+  // uncached comm FIFO, where the cheap fence suffices. P2P keeps the full fence.
+  skip_fence = !ncclShmem.comm.cheapPostSendFenceOff && collWork != nullptr && !collWork->regUsed &&
+               !collWork->netRegUsed;
 #endif
 }
 

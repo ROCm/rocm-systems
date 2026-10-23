@@ -581,9 +581,10 @@ public:
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
     skip_fence = !ncclShmem.comm.cheapPostSendFenceOff;
 #else
-    // The cheap post-peer fence is only safe with global DWORDX4 builtins
-    // (system-scope cache-bypassing stores); otherwise always use the full fence.
-    skip_fence = false;
+    // Without global DWORDX4 builtins, registered user buffers are accessed with
+    // cacheable stores and need the full fence. The comm FIFO is uncached device
+    // memory whenever cheapPostSendFenceOff == 0, so the cheap fence suffices there.
+    skip_fence = !ncclShmem.comm.cheapPostSendFenceOff && !userRegUsed;
 #endif
   }
 
