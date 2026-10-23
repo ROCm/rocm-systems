@@ -11,7 +11,7 @@ const displays = [
 ];
 
 for (const display of displays) {
-  test(`${display.name} uses the shared width formula and keeps cards beside the sidebar`, async ({ browser }) => {
+  test(`${display.name} uses CSS viewport width and keeps cards beside the sidebar`, async ({ browser }) => {
     const context = await browser.newContext({
       screen: display.screen, viewport: display.viewport, deviceScaleFactor: display.pixelRatio,
     });
@@ -20,7 +20,7 @@ for (const display of displays) {
       const errors = [];
       page.on('pageerror', (error) => errors.push(error.message));
       await page.goto('/');
-      const expectedScale = Math.max(0.73920, 0.73920 * display.viewport.width * display.pixelRatio / 1920 * 0.72);
+      const expectedScale = 0.7392;
       const zoom = () => page.locator('body').evaluate((body) => Number(getComputedStyle(body).zoom));
       await expect.poll(zoom).toBeCloseTo(expectedScale, 5);
       await expect(page.getByTestId('performance-trend')).toBeVisible();
@@ -69,26 +69,28 @@ for (const display of displays) {
 }
 
 for (const screen of [{ width: 1920, height: 1080 }, { width: 3840, height: 2160 }]) {
-  test(`${screen.width}px display keeps its scale through modeled browser zoom and reload`, async ({ browser }) => {
+  test(`${screen.width}px display follows CSS width through modeled browser zoom and reload`, async ({ browser }) => {
     const context = await browser.newContext({ screen, viewport: screen, deviceScaleFactor: 1 });
     try {
       const page = await context.newPage();
       await page.goto('/');
       const zoom = () => page.locator('body').evaluate((body) => Number(getComputedStyle(body).zoom));
-      const expectedScale = Math.max(0.73920, 0.73920 * screen.width / 1920 * 0.72);
+      const expectedScale = screen.width === 1920 ? 0.7392 : 1.064448;
       await expect.poll(zoom).toBeCloseTo(expectedScale, 5);
       const cdp = await context.newCDPSession(page);
       // Keep physical viewport width fixed while CSS width shrinks and DPR rises.
       // This is metric emulation, not a native toolbar-zoom test.
-      for (const factor of [1.25, 1.5, 2, 1]) {
+      for (const [factor, zoomedScale] of screen.width === 1920
+        ? [[1.25, 0.7392], [1.5, 0.7392], [2, 0.7392], [1, 0.7392]]
+        : [[1.25, 0.8515584], [1.5, 0.7392], [2, 0.7392], [1, 1.064448]]) {
         await cdp.send('Emulation.setDeviceMetricsOverride', {
           width: screen.width / factor, height: screen.height / factor,
           screenWidth: screen.width, screenHeight: screen.height,
           deviceScaleFactor: factor, mobile: false,
         });
-        await expect.poll(zoom).toBeCloseTo(expectedScale, 5);
+        await expect.poll(zoom).toBeCloseTo(zoomedScale, 5);
         await page.reload();
-        await expect.poll(zoom).toBeCloseTo(expectedScale, 5);
+        await expect.poll(zoom).toBeCloseTo(zoomedScale, 5);
       }
     } finally {
       await context.close();
@@ -104,17 +106,67 @@ test('desktop resizing follows one continuous width formula', async ({ browser }
     const page = await context.newPage();
     await page.goto('/');
     const cdp = await context.newCDPSession(page);
-    for (const width of [1280, 1920, 2560, 3000, 3440, 1920]) {
+    for (const [width, expectedScale] of [[1280, 0.7392], [1920, 0.7392], [2560, 0.7392], [3000, 0.8316], [3440, 0.953568], [1920, 0.7392]]) {
       await cdp.send('Emulation.setDeviceMetricsOverride', {
         width, height: 900, screenWidth: 3440, screenHeight: 1440,
         deviceScaleFactor: 1.5, mobile: false,
       });
       await expect.poll(() => page.locator('body').evaluate((body) => Number(getComputedStyle(body).zoom)))
-        .toBeCloseTo(Math.max(0.73920, 0.73920 * width * 1.5 / 1920 * 0.72), 5);
+        .toBeCloseTo(expectedScale, 5);
     }
   } finally {
     await context.close();
   }
+});
+
+for (const pixelRatio of [1, 2, 3]) {
+  test(`1920 CSS pixels keeps the same visible text and layout at DPR ${pixelRatio}`, async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: pixelRatio });
+    try {
+      const page = await context.newPage();
+      await page.goto('/');
+      await expect(page.getByTestId('performance-trend')).toBeVisible();
+      const geometry = await page.evaluate(async () => {
+        await document.fonts.ready;
+        const probe = document.createElement('span');
+        probe.textContent = 'Dashboard text';
+        probe.style.cssText = 'display:inline-block;font-size:14px;line-height:14px';
+        document.body.append(probe);
+        const textHeight = probe.getBoundingClientRect().height;
+        probe.remove();
+        return { textHeight, layoutWidth: document.body.clientWidth };
+      });
+      // Visible CSS geometry is the acceptance target, not a copy of the formula.
+      expect(geometry.textHeight).toBeGreaterThan(10.3);
+      expect(geometry.textHeight).toBeLessThan(10.4);
+      expect(geometry.layoutWidth).toBeGreaterThan(2596);
+      expect(geometry.layoutWidth).toBeLessThan(2599);
+    } finally {
+      await context.close();
+    }
+  });
+}
+
+test('popup geometry and text follow applied density, including CSS fallback', async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.goto('/');
+  await expect(page.getByTestId('performance-trend')).toBeVisible();
+  await page.evaluate(() => document.documentElement.style.removeProperty('--dashboard-scale'));
+  await expect(page.locator('body')).toHaveCSS('zoom', '0.7392');
+  await page.evaluate(() => document.body.style.setProperty('--dashboard-density', '0.9'));
+  await expect(page.locator('body')).toHaveCSS('zoom', '0.9');
+  const picker = page.getByRole('combobox').first();
+  const anchor = await picker.boundingBox();
+  await picker.click();
+  const listbox = page.getByRole('listbox');
+  await expect(listbox).toBeVisible();
+  const popup = await listbox.evaluate((element) => ({
+    zoom: Number(getComputedStyle(element.closest('.MuiPopover-root')).zoom),
+    fontSize: parseFloat(getComputedStyle(element.querySelector('[role="option"]')).fontSize),
+  }));
+  expect(popup.zoom).toBeCloseTo(1.111111, 4);
+  expect(popup.fontSize).toBeCloseTo(12.6, 2);
+  await expect.poll(async () => Math.abs((await listbox.boundingBox()).x - anchor.x)).toBeLessThan(4);
 });
 
 test('phones remain native-sized rather than receiving desktop scaling', async ({ browser }) => {

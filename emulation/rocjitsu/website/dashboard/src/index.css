@@ -102,13 +102,13 @@ pre {
 @supports (zoom: 0.8) {
   @media (min-width: 900px) {
     body {
-      --dashboard-density: var(--dashboard-scale, 0.8);
+      --dashboard-density: var(--dashboard-scale, 0.7392);
       zoom: var(--dashboard-density);
     }
     /* Popper/Popover receive viewport pixel anchors; cancel inherited zoom there
        so those coordinates are not scaled a second time. Dialog flex centering
        and in-chart tooltips stay in the shared density layer. */
-    .MuiPopover-root, .MuiPopper-root { zoom: calc(1 / var(--dashboard-scale, 0.8)); }
+    .MuiPopover-root, .MuiPopper-root { zoom: calc(1 / var(--dashboard-density)); }
     /* Only portal coordinates escape the density layer. Match the surrounding
        body / caption text using the same scale without scaling geometry again. */
     .MuiAutocomplete-popper .MuiAutocomplete-listbox .MuiAutocomplete-option,
@@ -118,21 +118,21 @@ pre {
     .MuiAutocomplete-popper .MuiAutocomplete-noOptions,
     .MuiAutocomplete-popper .MuiAutocomplete-loading,
     .MuiMenu-root .MuiMenu-list .MuiMenuItem-root {
-      font-size: calc(14px * var(--dashboard-scale, 0.8));
-      line-height: calc(20px * var(--dashboard-scale, 0.8));
+      font-size: calc(14px * var(--dashboard-density));
+      line-height: calc(20px * var(--dashboard-density));
     }
     .MuiAutocomplete-popper .MuiAutocomplete-option .MuiTypography-caption {
-      font-size: calc(12px * var(--dashboard-scale, 0.8));
-      line-height: calc(18px * var(--dashboard-scale, 0.8));
+      font-size: calc(12px * var(--dashboard-density));
+      line-height: calc(18px * var(--dashboard-density));
     }
     .MuiAutocomplete-popper .MuiAutocomplete-option .MuiSvgIcon-fontSizeSmall {
-      font-size: calc(20px * var(--dashboard-scale, 0.8));
+      font-size: calc(20px * var(--dashboard-density));
     }
     .MuiAutocomplete-popper .MuiAutocomplete-groupLabel {
-      line-height: calc(48px * var(--dashboard-scale, 0.8));
+      line-height: calc(48px * var(--dashboard-density));
     }
     .MuiAutocomplete-popper .MuiAutocomplete-option .MuiListItemText-root {
-      margin-block: calc(6px * var(--dashboard-scale, 0.8));
+      margin-block: calc(6px * var(--dashboard-density));
     }
   }
 }

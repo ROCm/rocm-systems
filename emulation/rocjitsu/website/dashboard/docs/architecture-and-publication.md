@@ -19,6 +19,16 @@ vite.config.js                        # build assets and select the data source
 
 This is a static React website. The browser fetches JSON and computes the displayed comparisons; there is no dashboard application server in production.
 
+## Display scaling
+
+Desktop density follows browser-window width in CSS pixels, not the display's
+physical pixel count or device pixel ratio. Equal-width windows therefore use
+the same text and layout sizes on standard and HiDPI displays. At a 1920 CSS-pixel
+width the scale is 0.7392: 14px text renders at about 10.35 CSS pixels. The scale
+increases for wider windows; below 900 CSS pixels the interface stays native-sized.
+Browser zoom can change the available CSS width and cause reflow. Popups use the
+applied body density for inverse coordinate scaling and matching text sizes.
+
 ## Website deployment versus data publication
 
 These are separate workflows and Git branches:

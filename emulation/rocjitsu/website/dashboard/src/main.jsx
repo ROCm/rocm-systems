@@ -3,10 +3,14 @@ import { createRoot } from 'react-dom/client';
 import App from './App';
 import './index.css';
 
-// Match the physical viewport width to the 1920px baseline. innerWidth is in
-// CSS pixels; devicePixelRatio accounts for display scaling and browser zoom.
+// Density follows CSS viewport width, not physical pixels: equal browser windows
+// keep equal text/layout sizes across displays. Browser zoom can still reflow.
+const MIN_DASHBOARD_SCALE = 0.7392;
+const BASELINE_VIEWPORT_WIDTH = 1920;
+const VIEWPORT_FIT_FACTOR = 0.72;
+
 function updateDashboardScale() {
-  const scale = Math.max(0.73920, 0.73920 * window.innerWidth * window.devicePixelRatio / 1920 * 0.72);
+  const scale = Math.max(MIN_DASHBOARD_SCALE, MIN_DASHBOARD_SCALE * window.innerWidth / BASELINE_VIEWPORT_WIDTH * VIEWPORT_FIT_FACTOR);
   document.documentElement.style.setProperty('--dashboard-scale', String(scale));
 }
 updateDashboardScale();
