@@ -1149,9 +1149,9 @@ function(rccl_add_micro_binary _name)
     endif()
     target_link_options(${_name} PRIVATE ${_ramb_link_opts})
     target_link_libraries(${_name} PRIVATE
-      GTest::GTest Threads::Threads fmt::fmt-header-only
-      nlohmann_json::nlohmann_json)
+      GTest::GTest Threads::Threads fmt::fmt-header-only)
   endif()
+  target_link_libraries(${_name} PRIVATE nlohmann_json::nlohmann_json)
 endfunction()
 
 # =====================================================================
