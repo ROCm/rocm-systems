@@ -1,13 +1,15 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// The borrowed gfx11 DOT2 integer-grid model for FP32 results.
+// The borrowed gfx11 DOT2 integer-grid model, including packed 16-bit results.
 // Internal helpers shared by instruction implementations; not part of the public C API.
 
 #pragma once
 
 // Adapted from rocjitsu 39fd0ea559a shared/gfx11_dot2.h.
 // Empirical evidence: rocjitsu/tests/fixtures/float_dot/README.md.
+
+#include "common/packed16.h"
 
 #include <algorithm>
 #include <bit>
@@ -115,22 +117,29 @@ inline uint32_t pack(int64_t units, int grid, bool frame_negative) {
 }
 } // namespace gfx11_dot2_detail
 
-// Return the empirical gfx11 FP32 result of two FP16/BF16 products plus acc.
-// In C's sign frame, an opposing term contributes ~m rather than -m after
-// grid truncation; signed zeros therefore matter. This policy is gfx11-specific.
-template <bool Bf16>
-inline uint32_t gfx11_dot2_f32(uint16_t a0_bits, uint16_t b0_bits, uint16_t a1_bits,
-                               uint16_t b1_bits, uint32_t acc) {
+// Return the gfx11 DOT2 result under the inherited alignment and NaN policies.
+// In C's sign frame, an opposing term contributes ~m rather than -m after grid
+// truncation. Packed FP16 aligns C with a -14 exponent floor; BF16 truncates the
+// rounded FP32 result after each step. No host FP-control changes are made.
+template <bool Bf16, bool Packed = false>
+inline uint32_t gfx11_dot2_bits(uint16_t a0_bits, uint16_t b0_bits, uint16_t a1_bits,
+                                uint16_t b1_bits, uint32_t acc, bool fp16_ovfl = false) {
   using namespace gfx11_dot2_detail;
+  const auto special = [](uint32_t bits) -> uint32_t {
+    if constexpr (Packed) {
+      return packed16::special<Bf16>(bits);
+    }
+    return bits;
+  };
   const Factor<Bf16> a0{a0_bits}, b0{b0_bits}, a1{a1_bits}, b1{b1_bits};
 
   // Lane NaNs and invalid products take precedence over an accumulator NaN.
   if (a0.nan() || b0.nan() || a1.nan() || b1.nan()) {
-    return kFactorNan;
+    return special(kFactorNan);
   }
   if ((a0.inf() && !b0.significand()) || (b0.inf() && !a0.significand()) ||
       (a1.inf() && !b1.significand()) || (b1.inf() && !a1.significand())) {
-    return kInvalidProductNan;
+    return special(kInvalidProductNan);
   }
   bool positive_inf = false;
   bool negative_inf = false;
@@ -146,17 +155,17 @@ inline uint32_t gfx11_dot2_f32(uint16_t a0_bits, uint16_t b0_bits, uint16_t a1_b
   add_inf(a0, b0);
   add_inf(a1, b1);
   if (positive_inf && negative_inf) {
-    return kInvalidProductNan;
+    return special(kInvalidProductNan);
   }
   if ((acc & 0x7fffffff) > 0x7f800000) {
-    return acc | kQuietNanBit;
+    return special(acc | kQuietNanBit);
   }
   positive_inf |= acc == 0x7f800000;
   negative_inf |= acc == 0xff800000;
   if (positive_inf || negative_inf) {
-    return positive_inf && negative_inf ? kInvalidProductNan
-           : negative_inf               ? 0xff800000
-                                        : 0x7f800000;
+    return special(positive_inf && negative_inf ? kInvalidProductNan
+                   : negative_inf               ? 0xff800000
+                                                : 0x7f800000);
   }
 
   const Term p0 = a0.product(b0), p1 = a1.product(b1);
@@ -171,9 +180,11 @@ inline uint32_t gfx11_dot2_f32(uint16_t a0_bits, uint16_t b0_bits, uint16_t a1_b
                p1.significand ? a1.alignment_exponent() + b1.alignment_exponent()
                               : kEmptyExponent) -
       24;
-  const int grid =
-      std::max(product_grid,
-               std::max({c.leading_exponent(), p0.leading_exponent(), p1.leading_exponent()}) - 26);
+  const int grid = std::max(
+      product_grid,
+      std::max({Packed && !Bf16 ? std::max(-14, c.leading_exponent()) : c.leading_exponent(),
+                p0.leading_exponent(), p1.leading_exponent()}) -
+          26);
   int64_t total = 0;
   for (const Term t : {c, p0, p1}) {
     const int shift = t.exponent - grid;
@@ -182,7 +193,27 @@ inline uint32_t gfx11_dot2_f32(uint16_t a0_bits, uint16_t b0_bits, uint16_t a1_b
                                                               : t.significand << shift;
     total += t.negative != c.negative ? -int64_t(magnitude) - 1 : int64_t(magnitude);
   }
+  if constexpr (Packed) {
+    if constexpr (Bf16) {
+      return pack(total, grid, c.negative) >> 16;
+    } else {
+      return packed16::pack_f16(total, grid, c.negative, fp16_ovfl);
+    }
+  }
   return pack(total, grid, c.negative);
 }
 
+// Return the empirical gfx11 FP32 result of two FP16/BF16 products plus acc.
+template <bool Bf16>
+inline uint32_t gfx11_dot2_f32(uint16_t a0, uint16_t b0, uint16_t a1, uint16_t b1, uint32_t acc) {
+  return gfx11_dot2_bits<Bf16>(a0, b0, a1, b1, acc);
+}
+
+/// @brief Widen packed C, execute one GFX11 DOT2 step and return packed result bits.
+template <bool Bf16>
+inline uint16_t gfx11_dot2_packed16(uint16_t a0, uint16_t b0, uint16_t a1, uint16_t b1,
+                                    uint16_t acc, bool fp16_ovfl = false) {
+  return uint16_t(
+      gfx11_dot2_bits<Bf16, true>(a0, b0, a1, b1, packed16::widen<Bf16>(acc), fp16_ovfl));
+}
 } // namespace rocjitsu::arith

@@ -98,6 +98,13 @@ inline __m256i choose(__m256i mask, __m256i yes, __m256i no) {
   return _mm256_blendv_epi8(no, yes, mask);
 }
 
+// Widen finite low-halfword FP16 encodings to FP32 bits; NaN/Inf handling belongs to the
+// caller.
+inline __m256i widen_finite_half(__m256i value) {
+  auto words = _mm_packus_epi32(_mm256_castsi256_si128(value), _mm256_extracti128_si256(value, 1));
+  return _mm256_castps_si256(_mm256_cvtph_ps(words));
+}
+
 #if defined(__AVX512F__)
 template <> inline __m512i constant<__m512i>(int value) { return _mm512_set1_epi32(value); }
 
@@ -176,6 +183,11 @@ inline __m512i choose(__m512i mask, __m512i yes, __m512i no) {
   return _mm512_mask_blend_epi32(_mm512_movepi32_mask(mask), no, yes);
 }
 
+// Widen finite low-halfword FP16 encodings to FP32 bits; NaN/Inf handling belongs to the
+// caller.
+inline __m512i widen_finite_half(__m512i value) {
+  return _mm512_castps_si512(_mm512_cvtph_ps(_mm512_cvtepi32_epi16(value)));
+}
 #endif
 
 } // namespace rocjitsu::arith::exact_dot

@@ -9,12 +9,13 @@ add_library(
     STATIC
     common/cpu.cpp
     common/cpu_decode.cpp
-    register/dpp.cpp
     fp/scalar_repair.cpp
     dot/scalar_repair.cpp
     fp/fma.cpp
     fp/half_fma.cpp
+    register/dpp.cpp
     wmma/wmma.cpp
+    wmma/wmma_fp8_integer.cpp
     wmma/wmma_replicated.cpp
 )
 
