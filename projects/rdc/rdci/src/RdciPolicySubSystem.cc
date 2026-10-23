@@ -254,6 +254,8 @@ void RdciPolicySubSystem::process() {
       result = rdc_policy_set(rdc_handle_, group_id_, policy);
       if (result == RDC_ST_NOT_SUPPORTED) {
         std::cout << "GPU NO SUPPORT SET " << condition_type_to_str(policy.condition.type) << "\n";
+      } else if (result != RDC_ST_OK) {
+        throw RdcException(result, rdc_status_string(result));
       }
       break;
     }

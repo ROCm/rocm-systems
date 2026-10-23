@@ -23,9 +23,9 @@ THE SOFTWARE.
 #include "rdc_lib/impl/RdcPolicyImpl.h"
 
 #include <sys/time.h>
-#include <unistd.h>
 
 #include <algorithm>
+#include <chrono>
 #include <ctime>
 #include <map>
 #include <sstream>
@@ -40,19 +40,38 @@ THE SOFTWARE.
 namespace amd {
 namespace rdc {
 
+// How often the policy thread checks the conditions.
+static constexpr auto kPolicyCheckPeriod = std::chrono::milliseconds(500);
+
+// The field each condition type reads, by rdc_policy_condition_type_t.
+static constexpr rdc_field_t kConditionFields[] = {RDC_FI_GPU_PAGE_RETRIED, RDC_FI_GPU_TEMP,
+                                                   RDC_FI_POWER_USAGE};
+static_assert(sizeof(kConditionFields) / sizeof(kConditionFields[0]) == RDC_POLICY_COND_MAX,
+              "one field per policy condition type");
+
+// rdc_policy_set() keeps at most one policy per condition type, so a group's
+// policies fit in rdc_policy_get()'s output.
+static_assert(RDC_POLICY_COND_MAX <= RDC_MAX_POLICY_SETTINGS, "rdc_policy_get() output too small");
+
 RdcPolicyImpl::RdcPolicyImpl(const RdcGroupSettingsPtr& group_settings,
                              const RdcMetricFetcherPtr& metric_fetcher)
-    : group_settings_(group_settings), metric_fetcher_(metric_fetcher), start_(true) {
+    : group_settings_(group_settings), metric_fetcher_(metric_fetcher), stop_(false) {
   thread_ = std::thread([this]() {
-    while (start_) {
+    std::unique_lock<std::mutex> lock(policy_mutex_);
+    while (!stop_cv_.wait_for(lock, kPolicyCheckPeriod, [this] { return stop_; })) {
+      lock.unlock();
       rdc_policy_check_condition();
-      usleep(500);  // 500ms
+      lock.lock();
     }
   });
 }
 
 RdcPolicyImpl::~RdcPolicyImpl() {
-  start_ = false;
+  {
+    std::lock_guard<std::mutex> guard(policy_mutex_);
+    stop_ = true;
+  }
+  stop_cv_.notify_all();
   thread_.join();
 }
 
@@ -71,13 +90,17 @@ rdc_status_t RdcPolicyImpl::rdc_policy_set(rdc_gpu_group_t group_id, rdc_policy_
     return status;
   }
 
+  rdc_group_info_t group_info;
+  status = group_settings_->rdc_group_gpu_get_info(group_id, &group_info);
+  if (status != RDC_ST_OK) {
+    return status;
+  }
+
   // check if support RDC_POLICY_COND_MAX_PAGE_RETRIED
   if (RDC_POLICY_COND_MAX_PAGE_RETRIED == policy.condition.type) {
     uint32_t gpu_index;
-    rdc_group_info_t group_info;
     rdc_field_value value;
 
-    status = group_settings_->rdc_group_gpu_get_info(group_id, &group_info);
     for (unsigned int i = 0; i < group_info.count; i++) {
       gpu_index = group_info.entity_ids[i];
 
@@ -197,25 +220,33 @@ rdc_status_t RdcPolicyImpl::rdc_policy_unregister(rdc_gpu_group_t group_id) {
 }
 
 void RdcPolicyImpl::rdc_policy_check_condition() {
-  // go through the settings
-  for (auto it : settings_) {
-    rdc_gpu_group_t group_id = it.first;
-    std::vector<rdc_policy_t> policies = it.second;
-    rdc_policy_register_callback callback = rdc_policy_get_callback(group_id);
+  // Check a copy: the amd-smi reads and the callbacks run without the lock.
+  std::map<rdc_gpu_group_t, std::vector<rdc_policy_t> > settings;
+  std::map<rdc_gpu_group_t, rdc_policy_register_callback> callbacks;
+  {
+    std::lock_guard<std::mutex> guard(policy_mutex_);
+    settings = settings_;
+    callbacks = callbacks_;
+  }
 
-    for (auto policy : policies) {
-      rdc_status_t status;
-      rdc_field_value value;
-      rdc_group_info_t group_info;
-      uint32_t gpu_index;
+  for (const auto& entry : settings) {
+    rdc_gpu_group_t group_id = entry.first;
+    auto cb = callbacks.find(group_id);
+    rdc_policy_register_callback callback = (cb != callbacks.end()) ? cb->second : nullptr;
 
-      status = group_settings_->rdc_group_gpu_get_info(group_id, &group_info);
+    rdc_group_info_t group_info;
+    if (group_settings_->rdc_group_gpu_get_info(group_id, &group_info) != RDC_ST_OK) {
+      // The group was deleted. Its policy settings remain until the policies are deleted;
+      // group IDs are not reused.
+      continue;
+    }
+
+    for (const auto& policy : entry.second) {
       for (unsigned int i = 0; i < group_info.count; i++) {
-        rdc_field_t map[RDC_POLICY_COND_MAX] = {RDC_FI_GPU_PAGE_RETRIED, RDC_FI_GPU_TEMP,
-                                                RDC_FI_POWER_USAGE};
-
-        gpu_index = group_info.entity_ids[i];
-        status = metric_fetcher_->fetch_smi_field(gpu_index, map[policy.condition.type], &value);
+        uint32_t gpu_index = group_info.entity_ids[i];
+        rdc_field_value value;
+        rdc_status_t status = metric_fetcher_->fetch_smi_field(
+            gpu_index, kConditionFields[policy.condition.type], &value);
         if (status == RDC_ST_OK) {
           if (value.value.l_int > policy.condition.value) {
             bool reset = RDC_POLICY_ACTION_GPU_RESET == policy.action;
@@ -235,15 +266,6 @@ void RdcPolicyImpl::rdc_policy_check_condition() {
       }
     }
   }
-}
-
-rdc_policy_register_callback RdcPolicyImpl::rdc_policy_get_callback(rdc_gpu_group_t group_id) {
-  rdc_policy_register_callback cb = nullptr;
-  auto it = callbacks_.find(group_id);
-  if (it != callbacks_.end()) {
-    cb = it->second;
-  }
-  return cb;
 }
 
 void RdcPolicyImpl::rdc_policy_gpu_reset(uint32_t gpu_index) {
