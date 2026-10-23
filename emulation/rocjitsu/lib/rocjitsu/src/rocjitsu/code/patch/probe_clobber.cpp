@@ -15,9 +15,9 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
-#include <vector>
 
 namespace rocjitsu {
 
@@ -68,8 +68,8 @@ void note_special_state(ProbeClobberSummary &summary, RegClass cls) {
 // TODO: drop this name fallback once the operand-type modeling work lands.
 std::optional<RegClass> special_class_from_name(std::string_view name) {
   std::string lower(name);
-  std::transform(lower.begin(), lower.end(), lower.begin(),
-                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  std::ranges::transform(lower, lower.begin(),
+                         [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
   const std::string_view n = lower;
   auto starts_with = [&](std::string_view prefix) { return n.substr(0, prefix.size()) == prefix; };
   if (starts_with("exec"))
@@ -134,13 +134,7 @@ std::optional<ProbeClobberSummary> build_probe_clobber_summary(const ProbeCallab
     return std::nullopt;
   }
 
-  // One extra zero word of slack so the decoder can always read a trailing
-  // second word for an 8-byte instruction whose first word is the last body
-  // word. build_probe_callable already verified the body decodes cleanly and is
-  // not truncated; this guards the independent decode here. See probe_callable.
-  const size_t num_words = callable.body_words.size();
-  std::vector<uint32_t> words(num_words + 1, 0);
-  std::copy(callable.body_words.begin(), callable.body_words.end(), words.begin());
+  const std::span<const uint32_t> body(callable.body_words);
 
   ProbeClobberSummary summary;
   // probe_callable rejects private/scratch access, so this stays false. Kept as
@@ -148,9 +142,13 @@ std::optional<ProbeClobberSummary> build_probe_clobber_summary(const ProbeCallab
   summary.uses_private_segment = false;
 
   size_t w = 0;
-  while (w < num_words) {
+  while (w < body.size()) {
     util::StringDiagnostic decode_error;
-    DecodeResult decoded = decoder->decode(&words[w], decode_error.emitter());
+    // Bounded by the words left in the body, so a truncated trailing
+    // instruction fails to decode rather than reading past the copy. See
+    // build_probe_callable, which applies the same bound.
+    DecodeResult decoded =
+        decoder->decode_window(body.subspan(w), w * sizeof(uint32_t), decode_error.emitter());
     if (decoded.failed()) {
       const std::string message = "failed to decode probe body at word " + std::to_string(w) +
                                   " while summarizing clobbers: " + decode_error.message();
@@ -158,16 +156,7 @@ std::optional<ProbeClobberSummary> build_probe_clobber_summary(const ProbeCallab
       return std::nullopt;
     }
     std::unique_ptr<Instruction> inst = std::move(decoded).value();
-    const int size = inst->size();
-    if (size != 4 && size != 8) {
-      report(error_out, "probe body instruction has an unexpected size");
-      return std::nullopt;
-    }
-    const size_t inst_words = static_cast<size_t>(size) / sizeof(uint32_t);
-    if (w + inst_words > num_words) {
-      report(error_out, "probe body instruction extends past the copied body");
-      return std::nullopt;
-    }
+    const size_t inst_words = static_cast<size_t>(inst->size()) / sizeof(uint32_t);
 
     // Ordinary clobbers (SGPR/VGPR/AccVGPR), including implicit defs. Special
     // singletons in du.defs are projected out — they are summarized separately

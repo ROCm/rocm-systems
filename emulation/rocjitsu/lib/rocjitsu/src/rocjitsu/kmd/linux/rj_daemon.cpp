@@ -5,7 +5,9 @@
 
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 #include "rocjitsu/kmd/linux/rpc.h"
+#include "rocjitsu/kmd/linux/simulated_kfd.h"
 #include "rocjitsu/vm/rj_vm.h"
+#include "rocjitsu/vm/rj_vm_impl.h"
 #include "util/unique_handle.h"
 
 #include <algorithm>
@@ -198,7 +200,7 @@ rj_client_pid_t peer_pid_for_socket(int fd) {
 
 void close_client(rj_daemon_t *daemon, int client_fd) {
   std::lock_guard lock(daemon->clients_mutex);
-  auto position = std::find(daemon->client_fds.begin(), daemon->client_fds.end(), client_fd);
+  auto position = std::ranges::find(daemon->client_fds, client_fd);
   if (position != daemon->client_fds.end())
     daemon->client_fds.erase(position);
   ::close(client_fd);
@@ -295,10 +297,19 @@ private:
 
     RpcHandshakeResponse handshake{};
     handshake.version = kRpcProtocolVersion;
+    handshake.strict_render_minor = daemon_->vm->vm->driver()->strict_render_minor() ? 1u : 0u;
+    uint32_t gpu_count = 0;
     if (rj_vm_gpu_id(daemon_->vm, &handshake.gpu_id) != ROCJITSU_STATUS_SUCCESS ||
+        rj_vm_gpu_count(daemon_->vm, &gpu_count) != ROCJITSU_STATUS_SUCCESS || gpu_count == 0 ||
         rj_vm_gpu_info(daemon_->vm, &handshake.gpu_info) != ROCJITSU_STATUS_SUCCESS) {
       return RequestDisposition::Disconnect;
     }
+    std::vector<RpcGpuInfo> extra_infos(gpu_count - 1);
+    for (uint32_t ordinal = 1; ordinal < gpu_count; ++ordinal)
+      if (rj_vm_gpu_info_at(daemon_->vm, ordinal, &extra_infos[ordinal - 1]) !=
+          ROCJITSU_STATUS_SUCCESS)
+        return RequestDisposition::Disconnect;
+    handshake.extra_gpu_infos = static_cast<uint32_t>(extra_infos.size());
 
     const char *topology = nullptr;
     const char *drm = nullptr;
@@ -308,9 +319,9 @@ private:
     }
     const size_t topology_length = topology ? std::strlen(topology) : 0;
     const size_t drm_length = drm ? std::strlen(drm) : 0;
-    constexpr size_t max_payload = std::numeric_limits<uint32_t>::max();
-    if (topology_length > max_payload - sizeof(handshake) ||
-        drm_length > max_payload - sizeof(handshake) - topology_length) {
+    const uint64_t payload_bytes = sizeof(handshake) + topology_length + drm_length +
+                                   uint64_t{extra_infos.size()} * sizeof(RpcGpuInfo);
+    if (payload_bytes > kMaxPayloadBytes || payload_bytes > std::numeric_limits<uint32_t>::max()) {
       return RequestDisposition::Disconnect;
     }
     handshake.topology_path_len = static_cast<uint32_t>(topology_length);
@@ -319,13 +330,14 @@ private:
     RpcHeader response{};
     response.opcode = header.opcode;
     response.request_id = header.request_id;
-    response.payload_bytes =
-        static_cast<uint32_t>(sizeof(handshake) + topology_length + drm_length);
+    response.payload_bytes = static_cast<uint32_t>(payload_bytes);
     const bool sent =
         rpc_send_exact(client_fd_, &response, sizeof(response)) &&
         rpc_send_exact(client_fd_, &handshake, sizeof(handshake)) &&
         (topology_length == 0 || rpc_send_exact(client_fd_, topology, topology_length)) &&
-        (drm_length == 0 || rpc_send_exact(client_fd_, drm, drm_length));
+        (drm_length == 0 || rpc_send_exact(client_fd_, drm, drm_length)) &&
+        (extra_infos.empty() ||
+         rpc_send_exact(client_fd_, extra_infos.data(), extra_infos.size() * sizeof(RpcGpuInfo)));
     return sent ? RequestDisposition::Continue : RequestDisposition::Disconnect;
   }
 

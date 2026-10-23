@@ -356,21 +356,18 @@ std::unique_ptr<Instruction> decode_one(uint32_t word, rj_code_arch_t arch) {
 
 bool has_error_containing(const TranslatedCodeObject &result, DiagnosticKind kind,
                           std::string_view message) {
-  return std::any_of(result.diagnostics.begin(), result.diagnostics.end(),
-                     [&](const TranslationDiagnostic &diagnostic) {
-                       return diagnostic.severity == DiagnosticSeverity::Error &&
-                              diagnostic.kind == kind &&
-                              diagnostic.message.find(message) != std::string::npos;
-                     });
+  return std::ranges::any_of(result.diagnostics, [&](const TranslationDiagnostic &diagnostic) {
+    return diagnostic.severity == DiagnosticSeverity::Error && diagnostic.kind == kind &&
+           diagnostic.message.find(message) != std::string::npos;
+  });
 }
 bool has_warning_at(const TranslatedCodeObject &result, DiagnosticKind kind,
                     std::string_view message, uint64_t guest_offset) {
-  return std::any_of(result.diagnostics.begin(), result.diagnostics.end(),
-                     [&](const TranslationDiagnostic &diagnostic) {
-                       return diagnostic.severity == DiagnosticSeverity::Warning &&
-                              diagnostic.kind == kind && diagnostic.guest_offset == guest_offset &&
-                              diagnostic.message.find(message) != std::string::npos;
-                     });
+  return std::ranges::any_of(result.diagnostics, [&](const TranslationDiagnostic &diagnostic) {
+    return diagnostic.severity == DiagnosticSeverity::Warning && diagnostic.kind == kind &&
+           diagnostic.guest_offset == guest_offset &&
+           diagnostic.message.find(message) != std::string::npos;
+  });
 }
 
 std::vector<uint8_t> make_minimal_amdgpu_elf_with_two_kernels_and_function_pointers(
@@ -871,7 +868,7 @@ std::vector<uint8_t> make_large_amdgpu_elf_with_waitcnt_entry() {
   return image;
 }
 void enable_workgroup_id_x_sgpr(std::vector<uint8_t> &image) {
-  using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
+  using KD = rocjitsu::amdhsa::kernel_descriptor_t;
 
   AmdGpuCodeObject layout(image.data(), image.size());
   ASSERT_TRUE(layout.is_valid());
@@ -881,7 +878,7 @@ void enable_workgroup_id_x_sgpr(std::vector<uint8_t> &image) {
 
   KD kd{};
   std::memcpy(&kd, image.data() + rodata->sectionOffset(), sizeof(kd));
-  kd.compute_pgm_rsrc2 |= rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X;
+  kd.compute_pgm_rsrc2 |= rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X;
   std::memcpy(image.data() + rodata->sectionOffset(), &kd, sizeof(kd));
 }
 

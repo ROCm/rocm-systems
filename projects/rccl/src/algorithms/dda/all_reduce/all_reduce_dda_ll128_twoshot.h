@@ -45,8 +45,7 @@ namespace dda::common {
 // same reason as the one-shot: an unrounded stride can come out an odd number of
 // 8B words and misalign every slot but rank 0's.
 constexpr size_t ddaLL128ArTwoShotSlotWords(size_t bankSize, int nRanks) {
-  return ddaLLSlotPkts(bankSize, sizeof(uint64_t) * (size_t)nRanks * 2,
-                       (size_t)kDdaLL128WireWordsPerSlice);
+  return ddaLL128SlotWords(bankSize, nRanks, 2);
 }
 
 // Fixed-width peer staging for phase 1: unlike the one-shot, each peer receives a
@@ -89,7 +88,8 @@ __launch_bounds__(512)
                                            uint32_t* __restrict__ epochDev, // per-block LL epoch cells
                                            int epochLen, // number of cells in epochDev
                                            size_t slicesTotal, // slices per shard this call uses
-                                           size_t bankSize) { // scratch bank size (from host)
+                                           size_t bankSize, // scratch bank size (from host)
+                                           DdaKernelParams params) {
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
 
@@ -166,7 +166,10 @@ __launch_bounds__(512)
       const int peer = (selfRank + r) % nRanks;
       const uint64_t* gatherSlot = selfBase + bankWords + (uint64_t)peer * (uint64_t)slotWords;
       uint64_t vr[kDdaLL128WordsPerThread];
-      ddaLL128PollWire(gatherSlot + wireOff, vr, flag, lane);
+      if (!ddaLL128PollWire(gatherSlot + wireOff, vr, flag, lane, params)) {
+        ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag32);
+        return;
+      }
       // On a flag lane the odd words hold flags rather than payload, so the sums
       // landing there are meaningless -- ddaLL128StoreRegs re-derives those slots
       // from the even ones and never writes them out, so folding blind is cheaper
@@ -202,12 +205,15 @@ __launch_bounds__(512)
       const int peer = (selfRank + r) % nRanks;
       const uint64_t* gatherSlot = selfBase + bankWordsNext + (uint64_t)peer * (uint64_t)slotWords;
       uint64_t vr[kDdaLL128WordsPerThread];
-      ddaLL128PollWire(gatherSlot + wireOff, vr, flag, lane);
+      if (!ddaLL128PollWire(gatherSlot + wireOff, vr, flag, lane, params)) {
+        ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag32);
+        return;
+      }
       ddaLL128StoreRegs<int8_t>(dstBytes + (size_t)peer * shardBytes + sliceByte, vr, eltInSlice, lane, flagLane);
     }
   }
 
-#if defined(__gfx1250__)
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
   asm volatile("s_wait_storecnt 0x0" ::: "memory");
 #endif
 

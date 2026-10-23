@@ -10,6 +10,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <sys/types.h>
+#include <time.h>
 
 /* Needed for struct sockaddr */
 #ifdef _WIN32
@@ -1179,7 +1180,7 @@ typedef struct hipFileStatsLevel2 {
  * to @c n_posix_reads / @c n_posix_writes.
  */
 typedef struct hipFilePerGpuStats {
-    char uuid[HIPFILE_GPU_UUID_LEN]; //!< GPU UUID (zero-filled)
+    char uuid[HIPFILE_GPU_UUID_LEN]; //!< Raw 16-byte GPU UUID; zero-filled if the device cannot report one
 
     uint64_t read_bytes;            //!< Total bytes read
     uint64_t read_bw_bytes_per_sec; //!< Read bandwidth (bytes/sec), derived from bytes and duration

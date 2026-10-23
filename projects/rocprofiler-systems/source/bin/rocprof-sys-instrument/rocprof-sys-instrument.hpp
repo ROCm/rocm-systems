@@ -70,15 +70,16 @@ struct rocprofsys_call_expr
     snippet_vec_t get_params()
     {
         snippet_vec_t _ret;
-        for(auto& itr : m_params)
+        for(auto const& itr : m_params)
+        {
             _ret.push_back(itr.get());
+        }
         return _ret;
     }
 
     call_expr_pointer_t get(procedure_t* func)
     {
-        return call_expr_pointer_t((func) ? new call_expr_t(*func, get_params())
-                                          : nullptr);
+        return call_expr_pointer_t(func ? new call_expr_t(*func, get_params()) : nullptr);
     }
 
 private:
@@ -95,8 +96,8 @@ struct rocprofsys_snippet_vec
     template <typename... Args>
     void generate(procedure_t* func, Args&&... args)
     {
-        auto _expr = rocprofsys_call_expr(std::forward<Args>(args)...);
-        auto _call = _expr.get(func);
+        auto       _expr = rocprofsys_call_expr(std::forward<Args>(args)...);
+        auto const _call = _expr.get(func);
         if(_call)
         {
             m_entries.push_back(_expr);
@@ -107,8 +108,10 @@ struct rocprofsys_snippet_vec
 
     void append(snippet_vec_t& _obj)
     {
-        for(auto& itr : m_data)
+        for(auto const& itr : m_data)
+        {
             _obj.push_back(itr.get());
+        }
     }
 
 private:
@@ -147,7 +150,7 @@ rocprofsys_get_is_executable(const std::string& _cmd, bool _default_v)
 //======================================================================================//
 //
 static inline address_space_t*
-rocprofsys_get_address_space(patch_pointer_t& _bpatch, int _cmdc, char** _cmdv,
+rocprofsys_get_address_space(patch_pointer_t const& _bpatch, int _cmdc, char** _cmdv,
                              const std::vector<std::string>& _cmdenv, bool _rewrite,
                              const std::string& _name = {})
 {
@@ -165,7 +168,10 @@ rocprofsys_get_address_space(patch_pointer_t& _bpatch, int _cmdc, char** _cmdv,
 
         verbprintf(1, "Opening '%s' for binary rewrite... ", _name.c_str());
         fflush(stderr);
-        if(!_name.empty()) mutatee = _bpatch->openBinary(_name.c_str(), false);
+        if(!_name.empty())
+        {
+            mutatee = _bpatch->openBinary(_name.c_str(), false);
+        }
         if(!mutatee)
         {
             verbprintf(-1, "Failed to open binary '%s'\n", _name.c_str());
@@ -176,13 +182,15 @@ rocprofsys_get_address_space(patch_pointer_t& _bpatch, int _cmdc, char** _cmdv,
     else
     {
         // override the current environment to start the process, revert environment
-        using strpair_t    = std::pair<std::string, std::string>;
-        auto _imported     = std::vector<strpair_t>{};
-        auto _exported     = std::vector<strpair_t>{};
-        auto _get_env_pair = [](const std::string& _full) {
-            auto _pos = _full.find('=');
+        using strpair_t          = std::pair<std::string, std::string>;
+        auto       _imported     = std::vector<strpair_t>{};
+        auto       _exported     = std::vector<strpair_t>{};
+        auto const _get_env_pair = [](const std::string& _full) {
+            auto const _pos = _full.find('=');
             if(_pos < _full.length())
+            {
                 return std::make_pair(_full.substr(0, _pos), _full.substr(_pos + 1));
+            }
             return strpair_t{};
         };
 
@@ -190,7 +198,9 @@ rocprofsys_get_address_space(patch_pointer_t& _bpatch, int _cmdc, char** _cmdv,
         {
             size_t _idx = 0;
             while(environ[_idx] != nullptr)
+            {
                 _imported.emplace_back(_get_env_pair(environ[_idx++]));
+            }
         }
 
         for(const auto& itr : _cmdenv)
@@ -217,11 +227,17 @@ rocprofsys_get_address_space(patch_pointer_t& _bpatch, int _cmdc, char** _cmdv,
         std::stringstream ss;
         for(int i = 0; i < _cmdc; ++i)
         {
-            if(!_cmdv || !_cmdv[i]) continue;
+            if(!_cmdv || !_cmdv[i])
+            {
+                continue;
+            }
             ss << " " << _cmdv[i];
         }
         auto _cmd_msg = ss.str();
-        if(_cmd_msg.length() > 1) _cmd_msg = _cmd_msg.substr(1);
+        if(_cmd_msg.length() > 1)
+        {
+            _cmd_msg = _cmd_msg.substr(1);
+        }
 
         verbprintf(1, "Creating process '%s'... ", _cmd_msg.c_str());
         fflush(stderr);
@@ -260,15 +276,23 @@ bool
 insert_instr(address_space_t* mutatee, const std::vector<point_t*>& _points, Tp traceFunc,
              procedure_loc_t, bool allow_traps)
 {
-    if(!traceFunc || _points.empty()) return false;
+    if(!traceFunc || _points.empty())
+    {
+        return false;
+    }
 
     auto _names = [&_points]() {
         std::set<std::string> _v{};
         for(const auto& itr : _points)
-            if(itr && itr->getFunction()) _v.emplace(get_name(itr->getFunction()));
+        {
+            if(itr && itr->getFunction())
+            {
+                _v.emplace(get_name(itr->getFunction()));
+            }
+        }
         return _v;
     }();
-    auto _names_str = fmt::format("[{}]", fmt::join(_names, ", "));
+    auto const _names_str = fmt::format("[{}]", fmt::join(_names, ", "));
 
     ROCPROFSYS_ADD_LOG_ENTRY("Inserting", _points.size(),
                              "instrumentation points into function(s)", _names_str);
@@ -279,7 +303,10 @@ insert_instr(address_space_t* mutatee, const std::vector<point_t*>& _points, Tp 
     {
         for(const auto& itr : _points)
         {
-            if(itr && itr->usesTrap_NP()) _traps.insert(itr);
+            if(itr && itr->usesTrap_NP())
+            {
+                _traps.insert(itr);
+            }
         }
     }
 
@@ -290,7 +317,10 @@ insert_instr(address_space_t* mutatee, const std::vector<point_t*>& _points, Tp 
     size_t _n = 0;
     for(const auto& itr : _points)
     {
-        if(!itr || _traps.count(itr) > 0) continue;
+        if(!itr || _traps.contains(itr))
+        {
+            continue;
+        }
         mutatee->insertSnippet(*_trace, *itr);
         ++_n;
     }
@@ -310,9 +340,15 @@ insert_instr(address_space_t* mutatee, procedure_t* funcToInstr, Tp traceFunc,
              procedure_loc_t traceLoc, flow_graph_t* cfGraph,
              basic_loop_t* loopToInstrument, bool allow_traps)
 {
-    if(!funcToInstr) return false;
-    module_t* module = funcToInstr->getModule();
-    if(!module || !traceFunc) return false;
+    if(!funcToInstr)
+    {
+        return false;
+    }
+    module_t const* module = funcToInstr->getModule();
+    if(!module || !traceFunc)
+    {
+        return false;
+    }
 
     std::vector<point_t*>* _points = nullptr;
     auto                   _trace  = traceFunc.get();
@@ -320,21 +356,34 @@ insert_instr(address_space_t* mutatee, procedure_t* funcToInstr, Tp traceFunc,
     ROCPROFSYS_ADD_LOG_ENTRY("Searching for loop instrumentation points in function",
                              get_name(funcToInstr));
 
-    if(!cfGraph) funcToInstr->getCFG();
+    if(!cfGraph)
+    {
+        funcToInstr->getCFG();
+    }
     if(cfGraph && loopToInstrument)
     {
         if(traceLoc == BPatch_entry)
+        {
             _points = cfGraph->findLoopInstPoints(BPatch_locLoopEntry, loopToInstrument);
+        }
         else if(traceLoc == BPatch_exit)
+        {
             _points = cfGraph->findLoopInstPoints(BPatch_locLoopExit, loopToInstrument);
+        }
     }
     else
     {
         _points = funcToInstr->findPoint(traceLoc);
     }
 
-    if(_points == nullptr) return false;
-    if(_points->empty()) return false;
+    if(_points == nullptr)
+    {
+        return false;
+    }
+    if(_points->empty())
+    {
+        return false;
+    }
 
     ROCPROFSYS_ADD_LOG_ENTRY("Inserting max of", _points->size(),
                              "loop instrumentation points in function",
@@ -345,7 +394,10 @@ insert_instr(address_space_t* mutatee, procedure_t* funcToInstr, Tp traceFunc,
     {
         for(auto& itr : *_points)
         {
-            if(itr && itr->usesTrap_NP()) _traps.insert(itr);
+            if(itr && itr->usesTrap_NP())
+            {
+                _traps.insert(itr);
+            }
         }
     }
 
@@ -356,7 +408,10 @@ insert_instr(address_space_t* mutatee, procedure_t* funcToInstr, Tp traceFunc,
     size_t _n = 0;
     for(auto& itr : *_points)
     {
-        if(!itr || _traps.count(itr) > 0) continue;
+        if(!itr || _traps.contains(itr))
+        {
+            continue;
+        }
         mutatee->insertSnippet(*_trace, *itr);
         ++_n;
     }
@@ -375,7 +430,10 @@ bool
 insert_instr(address_space_t* mutatee, Tp traceFunc, procedure_loc_t traceLoc,
              basic_block_t* basicBlock, bool allow_traps)
 {
-    if(!basicBlock) return false;
+    if(!basicBlock)
+    {
+        return false;
+    }
 
     point_t* _point = nullptr;
     auto     _trace = traceFunc.get();

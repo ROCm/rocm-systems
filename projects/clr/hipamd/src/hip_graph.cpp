@@ -107,16 +107,12 @@ inline hipError_t ihipGraphAddNode(hip::GraphNode* graphNode, hip::Graph* graph,
   return hipSuccess;
 }
 
-hipError_t ihipGraphAddKernelNode(hip::GraphNode** pGraphNode, hip::Graph* graph,
-                                  hip::GraphNode* const* pDependencies, size_t numDependencies,
-                                  const hipKernelNodeParams* pNodeParams,
-                                  const ihipExtKernelEvents* pNodeEvents = nullptr,
-                                  bool capture = true, int coopKernel = 0, int devId = -1,
-                                  int globalWorkSizeX_remainder = 0,
-                                  int globalWorkSizeY_remainder = 0,
-                                  int globalWorkSizeZ_remainder = 0,
-                                  dim3 clusterDim = {1, 1, 1},
-                                  uint32_t launchFlags = 0) {
+hipError_t ihipGraphAddKernelNode(
+    hip::GraphNode** pGraphNode, hip::Graph* graph, hip::GraphNode* const* pDependencies,
+    size_t numDependencies, const hipKernelNodeParams* pNodeParams,
+    const ihipExtKernelEvents* pNodeEvents = nullptr, bool capture = true, int coopKernel = 0,
+    int devId = -1, int globalWorkSizeX_remainder = 0, int globalWorkSizeY_remainder = 0,
+    int globalWorkSizeZ_remainder = 0, dim3 clusterDim = {0, 0, 0}, uint32_t launchFlags = 0) {
   if (!hip::Graph::isGraphValid(graph)) {
     return hipErrorInvalidValue;
   }
@@ -128,6 +124,13 @@ hipError_t ihipGraphAddKernelNode(hip::GraphNode** pGraphNode, hip::Graph* graph
   }
 
   const amd::Device* device = g_devices[deviceId]->devices()[0];
+  const bool clusterDimsSpecified =
+      clusterDim.x != 0 || clusterDim.y != 0 || clusterDim.z != 0;
+  if (hipError_t status =
+          ihipResolveGraphClusterDimensions(func, deviceId, pNodeParams->gridDim, &clusterDim);
+      status != hipSuccess) {
+    return status;
+  }
   amd::HIPLaunchParams launch_params(pNodeParams->gridDim.x, pNodeParams->gridDim.y,
                                      pNodeParams->gridDim.z, pNodeParams->blockDim.x,
                                      pNodeParams->blockDim.y, pNodeParams->blockDim.z,
@@ -158,7 +161,7 @@ hipError_t ihipGraphAddKernelNode(hip::GraphNode** pGraphNode, hip::Graph* graph
   auto* kernelNode =
       new hip::GraphKernelNode(pNodeParams, pNodeEvents, coopKernel, globalWorkSizeX_remainder,
                                globalWorkSizeY_remainder, globalWorkSizeZ_remainder, clusterDim,
-                               launchFlags);
+                               clusterDimsSpecified, launchFlags);
   status = kernelNode->GetParamCopyStatus();
   if (status != hipSuccess) {
     delete kernelNode;
@@ -179,6 +182,11 @@ hipError_t ihipGraphAddMemcpyNode(hip::GraphNode** pGraphNode, hip::Graph* graph
     return hipErrorInvalidValue;
   }
   hipError_t status = ihipMemcpy3D_validate(pCopyParams);
+  if (status != hipSuccess) {
+    return status;
+  }
+  const HIP_MEMCPY3D desc = hip::getDrvMemcpy3DDesc(*pCopyParams);
+  status = ihipDrvMemcpy3D_validate(&desc);
   if (status != hipSuccess) {
     return status;
   }
@@ -347,11 +355,11 @@ hipError_t ihipExtLaunchKernel(hipStream_t stream, hipFunction_t f, uint32_t glo
   nodeParams.kernelParams = kernelParams;
   nodeParams.sharedMemBytes = sharedMemBytes;
 
-  status = ihipGraphAddKernelNode(
-      &pGraphNode, s->GetCaptureGraph(), s->GetLastCapturedNodes().data(),
-      s->GetLastCapturedNodes().size(), &nodeParams, &nodeEvents, true, 0, s->DeviceId(),
-      globalWorkSizeX_remainder, globalWorkSizeY_remainder, globalWorkSizeZ_remainder,
-      {1, 1, 1}, flags);
+  status =
+      ihipGraphAddKernelNode(&pGraphNode, s->GetCaptureGraph(), s->GetLastCapturedNodes().data(),
+                             s->GetLastCapturedNodes().size(), &nodeParams, &nodeEvents, true, 0,
+                             s->DeviceId(), globalWorkSizeX_remainder, globalWorkSizeY_remainder,
+                             globalWorkSizeZ_remainder, {0, 0, 0}, flags);
 
   if (status != hipSuccess) {
     return status;
@@ -434,7 +442,7 @@ hipError_t capturehipDrvLaunchKernelEx(hipStream_t& stream, const HIP_LAUNCH_CON
   }
 
   hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
-  dim3 clusterDim = {1, 1, 1};
+  dim3 clusterDim = {0, 0, 0};
   int coopKernel = 0;
 
   for (size_t attr_idx = 0; attr_idx < config->numAttrs; ++attr_idx) {
@@ -457,7 +465,7 @@ hipError_t capturehipDrvLaunchKernelEx(hipStream_t& stream, const HIP_LAUNCH_CON
         if (attr.value.dynDataPrefetch == nullptr) {
           return hipErrorInvalidValue;
         }
-        s->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+        s->InvalidateCapture();
         return hipErrorStreamCaptureUnsupported;
       default:
         LogPrintfError("Attribute %u not supported", attr.id);
@@ -1240,18 +1248,16 @@ hipError_t hipStreamBeginCapture_common(hipStream_t stream, hipStreamCaptureMode
     return hipErrorInvalidValue;
   }
   hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
-  // It can be initiated if the stream is not already in capture mode
-  if (s->GetCaptureStatus() == hipStreamCaptureStatusActive) {
+  // A capture can only be started on a stream that is not already part of one. An
+  // invalidated capture still has to be ended on its origin before any of its streams can be
+  // reused, so an invalidated stream is not eligible either.
+  if (s->GetCaptureStatus() != hipStreamCaptureStatusNone) {
     return hipErrorIllegalState;
   }
-  if (graph == nullptr) {
-    s->SetCaptureGraph(new hip::Graph(s->GetDevice()));
-  } else {
-    s->SetCaptureGraph(reinterpret_cast<hip::Graph*>(graph));
-  }
-  s->SetCaptureID();
-  s->SetCaptureMode(mode);
-  s->SetOriginStream();
+  std::unique_ptr<hip::Graph> captureGraph(
+      (graph == nullptr) ? new hip::Graph(s->GetDevice()) : reinterpret_cast<hip::Graph*>(graph));
+  s->StartCapture(std::move(captureGraph), mode);
+
   if (mode != hipStreamCaptureModeRelaxed) {
     hip::tls.capture_streams_.push_back(s);
   }
@@ -1349,11 +1355,9 @@ hipError_t hipStreamEndCapture_common(hipStream_t stream, hip::Graph** pGraph) {
   }
   // If capture was invalidated, due to a violation of the rules of stream capture
   if (s->GetCaptureStatus() == hipStreamCaptureStatusInvalidated) {
-    *pGraph = nullptr;
-    // When capture is invalidated, graph should be deleted, otherwise it leaks
-    s->ReleaseCaptureGraph();
-    // Reset capture state to None so the stream is usable after a failed capture
-    (void)s->EndCapture();
+    // Reset capture state to None so the stream is usable after a failed capture. An
+    // invalidated capture yields no graph.
+    *pGraph = s->EndCapture();
     return hipErrorStreamCaptureInvalidated;
   }
 
@@ -1389,8 +1393,11 @@ hipError_t hipStreamEndCapture_common(hipStream_t stream, hip::Graph** pGraph) {
     s->GetCaptureGraph()->RemoveNode(pGraphNode);
     s->GetCaptureGraph()->RemoveManualNodesDuringCapture();
     if (leafNodes.size() > 1 && foundInRemovedDep == false) {
-      // Release created graph as it can't be retrieved anymore
-      s->ReleaseCaptureGraph();
+      // The unjoined work leaves a graph that can no longer be retrieved. Marking the capture
+      // invalidated has EndCapture discard it and return every stream in it to the
+      // non-capturing state.
+      s->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+      (void)s->EndCapture();
       return hipErrorStreamCaptureUnjoined;
     }
   } else {
@@ -1398,14 +1405,15 @@ hipError_t hipStreamEndCapture_common(hipStream_t stream, hip::Graph** pGraph) {
     s->GetCaptureGraph()->RemoveNode(pGraphNode);
   }
 
-  *pGraph = s->GetCaptureGraph();
-  // end capture on all streams/events part of graph capture
-  return s->EndCapture();
+  // end capture on all streams/events part of graph capture, which yields the graph the caller
+  // now owns
+  *pGraph = s->EndCapture();
+  return hipSuccess;
 }
 
 hipError_t hipStreamEndCapture(hipStream_t stream, hipGraph_t* pGraph) {
   HIP_INIT_API(hipStreamEndCapture, stream, pGraph);
-  hip::Graph* graph;
+  hip::Graph* graph = nullptr;
   hipError_t status = hipStreamEndCapture_common(stream, &graph);
   if (pGraph != nullptr) {
     *pGraph = reinterpret_cast<hipGraph_t>(graph);
@@ -1416,7 +1424,7 @@ hipError_t hipStreamEndCapture(hipStream_t stream, hipGraph_t* pGraph) {
 hipError_t hipStreamEndCapture_spt(hipStream_t stream, hipGraph_t* pGraph) {
   HIP_INIT_API(hipStreamEndCapture, stream, pGraph);
   PER_THREAD_DEFAULT_STREAM(stream);
-  hip::Graph* graph;
+  hip::Graph* graph = nullptr;
   hipError_t status = hipStreamEndCapture_common(stream, &graph);
   if (pGraph != nullptr) {
     *pGraph = reinterpret_cast<hipGraph_t>(graph);
@@ -1439,9 +1447,8 @@ hipError_t hipGraphDestroy(hipGraph_t graph) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   hip::Graph* g = reinterpret_cast<hip::Graph*>(graph);
-  // if graph is not valid its destroyed already
   if (!hip::Graph::isGraphValid(g)) {
-    HIP_RETURN(hipErrorIllegalState);
+    HIP_RETURN(hipErrorInvalidValue);
   }
   delete g;
   HIP_RETURN(hipSuccess);
@@ -1673,6 +1680,8 @@ hipError_t ihipGraphInstantiate(hip::GraphExecBase** pGraphExec, hip::Graph* gra
   // DEBUG_HIP_GRAPH_CLASSIC_PATH=1 forces this path on Linux for testing without
   // enabling the full PAL backend.
   if (GPU_ENABLE_PAL != 0 || DEBUG_HIP_GRAPH_CLASSIC_PATH) {
+    // hipGraphInstantiateFlagUseNodePriority is a scheduling hint; CUDA never
+    // fails instantiation for it, so accept and ignore it here too.
     auto* classicExec = new hip::GraphExecClassic(flags);
     graph->clone(classicExec, true);
     hipError_t initStatus = validateClonedKernelNodes(static_cast<const hip::Graph*>(classicExec));
@@ -1727,6 +1736,13 @@ hipError_t hipGraphInstantiate(hipGraphExec_t* pGraphExec, hipGraph_t graph,
   HIP_RETURN(status, ReturnPtrValue(pGraphExec));
 }
 
+// Accepted flag bitmasks per entry point; intentionally narrower than all declared flags.
+static constexpr unsigned long long kValidInstantiateFlags =
+    hipGraphInstantiateFlagAutoFreeOnLaunch | hipGraphInstantiateFlagUseNodePriority;
+static constexpr unsigned long long kValidInstantiateParamsFlags =
+    hipGraphInstantiateFlagAutoFreeOnLaunch | hipGraphInstantiateFlagUpload |
+    hipGraphInstantiateFlagDeviceLaunch | hipGraphInstantiateFlagUseNodePriority;
+
 hipError_t hipGraphInstantiateWithFlags(hipGraphExec_t* pGraphExec, hipGraph_t graph,
                                         unsigned long long flags = 0) {
   HIP_INIT_API(hipGraphInstantiateWithFlags, pGraphExec, graph, flags);
@@ -1734,9 +1750,7 @@ hipError_t hipGraphInstantiateWithFlags(hipGraphExec_t* pGraphExec, hipGraph_t g
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  // invalid flag check
-  if (flags != 0 && flags != hipGraphInstantiateFlagAutoFreeOnLaunch &&
-      flags != hipGraphInstantiateFlagUseNodePriority) {
+  if ((flags & ~kValidInstantiateFlags) != 0) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -1755,9 +1769,7 @@ hipError_t hipGraphInstantiateWithParams(hipGraphExec_t* pGraphExec, hipGraph_t 
 
   unsigned long long flags = instantiateParams->flags;
 
-  if (flags != 0 && flags != hipGraphInstantiateFlagAutoFreeOnLaunch &&
-      flags != hipGraphInstantiateFlagUpload && flags != hipGraphInstantiateFlagDeviceLaunch &&
-      flags != hipGraphInstantiateFlagUseNodePriority) {
+  if ((flags & ~kValidInstantiateParamsFlags) != 0) {
     instantiateParams->result_out = hipGraphInstantiateError;
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -1773,7 +1785,7 @@ hipError_t hipGraphInstantiateWithParams(hipGraphExec_t* pGraphExec, hipGraph_t 
   instantiateParams->result_out = hipGraphInstantiateSuccess;
   instantiateParams->errNode_out = nullptr;
 
-  if (flags == hipGraphInstantiateFlagUpload) {
+  if ((flags & hipGraphInstantiateFlagUpload) != 0) {
     hipError_t status = ihipGraphUpload(*pGraphExec, instantiateParams->uploadStream);
     HIP_RETURN(status);
   }
@@ -2306,6 +2318,9 @@ hipError_t ihipStreamUpdateCaptureDependencies(hipStream_t stream, hipGraphNode_
   if (s->GetCaptureStatus() == hipStreamCaptureStatusNone) {
     HIP_RETURN(hipErrorIllegalState);
   }
+  if (s->GetCaptureStatus() == hipStreamCaptureStatusInvalidated) {
+    HIP_RETURN(hipErrorStreamCaptureInvalidated);
+  }
   if ((s->GetCaptureGraph()->GetNodeCount() < numDependencies) ||
       (numDependencies > 0 && deps == nullptr) ||
       (flags != 0 && flags != hipStreamAddCaptureDependencies &&
@@ -2321,13 +2336,14 @@ hipError_t ihipStreamUpdateCaptureDependencies(hipStream_t stream, hipGraphNode_
     }
     depNodes.push_back(deps[i]);
   }
+  hipError_t status = hipSuccess;
   if (flags == hipStreamAddCaptureDependencies) {
-    s->AddCrossCapturedNode(depNodes);
+    status = s->AddCrossCapturedNode(depNodes);
   } else if (flags == hipStreamSetCaptureDependencies) {
     bool replace = true;
-    s->AddCrossCapturedNode(depNodes, replace);
+    status = s->AddCrossCapturedNode(depNodes, replace);
   }
-  HIP_RETURN(hipSuccess);
+  HIP_RETURN(status);
 }
 
 hipError_t hipStreamUpdateCaptureDependencies(hipStream_t stream, hipGraphNode_t* dependencies,

@@ -20,15 +20,21 @@ __global__ void TileAllgatherThreadTest(rocshmem_team_t team,
                                         int tile_extent_0, int tile_extent_1,
                                         int my_world_pe, int n_pes,
                                         ShmemContextType ctx_type,
+                                        int loop, int skip,
+                                        long long int *start_time,
+                                        long long int *end_time,
                                         int *error_flag);
 
-// Wave-level allgather test - single WG, single wave
-__global__ void TileAllgatherWaveTest(rocshmem_team_t team,
+// Wave-level allgather test - multiple waves, each with its own team/context
+__global__ void TileAllgatherWaveTest(rocshmem_team_t *teams,
                                       float *source, float *dest,
                                       int tile_extent_0, int tile_extent_1,
                                       int my_world_pe, int n_pes,
                                       ShmemContextType ctx_type,
-                                      int wf_size,
+                                      int wf_size, int num_waves_per_wg,
+                                      int loop, int skip,
+                                      long long int *start_time,
+                                      long long int *end_time,
                                       int *error_flag);
 
 // Workgroup-level allgather test - multiple WGs with different teams
@@ -37,6 +43,9 @@ __global__ void TileAllgatherTest(rocshmem_team_t *teams, int num_teams,
                                    int tile_extent_0, int tile_extent_1,
                                    int my_world_pe, int n_pes,
                                    ShmemContextType ctx_type,
+                                   int loop, int skip,
+                                   long long int *start_time,
+                                   long long int *end_time,
                                    int *error_flag);
 
 /******************************************************************************
@@ -65,6 +74,9 @@ class TileAllgatherTester : public Tester {
 
   float *source;           // Source tile data (one tile per PE)
   float *dest;             // Destination tile data (n_pes tiles per PE)
+  static constexpr int DEFAULT_TILE_ROWS = 8;
+  static constexpr int DEFAULT_TILE_COLS = 8;
+
   int tile_extent_0;       // Tile dimension 0
   int tile_extent_1;       // Tile dimension 1
 

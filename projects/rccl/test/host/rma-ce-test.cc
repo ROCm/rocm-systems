@@ -7,10 +7,11 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
-#include <set>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <memory>
+#include <set>
 #include <vector>
 
 #include "ScopedHook.h"
@@ -41,6 +42,7 @@ void ReclaimWindow(ncclDevrWindow* w) {
   if (w == nullptr) return;
   free(w->ipcPeerPtrs);
   free(w->ipcPeerPtrsAllocBase);
+  free(w->ipcPeerIsCuMem);
   free(w);
 }
 
@@ -164,15 +166,9 @@ protected:
   uint64_t* PeerWinByLsa(int lsaRank) { return peerWins_.data() + lsaRank * kWinSlots; }
   uint64_t* PeerWin(int peerWorldRank) { return PeerWinByLsa(LsaOf(peerWorldRank)); }
 
-  // Mirrors the entry windowRegisterNonSym all-gathers; the layout has to match
-  // for the hook to publish values the function then reads back.
-  struct ExchangeEntry {
-    hipIpcMemHandle_t handle;
-    uint64_t hostHash;
-    uint64_t pidHash;
-    size_t userOffset;
-    size_t userSize;
-  };
+  // The record windowRegisterNonSym all-gathers. Same type as production, so a
+  // field added on one side cannot be reinterpreted by the other.
+  using ExchangeEntry = ncclDevrNonSymExchangeEntry;
 
   void SetUp() override {
     ResetCeFakes();
@@ -231,8 +227,10 @@ protected:
           for (int r = 0; r < size; r++) {
             e[r].hostHash = (r == self) ? peerInfo_[kRank].hostHash : 500 + r;
             e[r].pidHash = (r == self) ? peerInfo_[kRank].pidHash : 600 + r;
-            e[r].userOffset = static_cast<size_t>(r) * kWinSlots * sizeof(uint64_t);
             e[r].userSize = kWinSlots * sizeof(uint64_t);
+            e[r].userOffset = static_cast<size_t>(r) * e[r].userSize;
+            e[r].allocSize = static_cast<size_t>(size) * e[r].userSize;
+            e[r].isCuMem = 0;
           }
           return ncclSuccess;
         };
@@ -522,6 +520,13 @@ protected:
     };
   }
 
+  // What every teardown leaves behind, whatever it reported on the way out.
+  void ExpectTornDown() {
+    EXPECT_FALSE(comm_->rmaState.rmaCeState.initialized);
+    EXPECT_EQ(comm_->rmaState.rmaCeState.rmaCeCtxCount, 0);
+    EXPECT_EQ(comm_->rmaState.rmaCeState.rmaCeCtxs, nullptr);
+  }
+
 };
 
 // The whole point: after teardown the comm reports no CE state, so a later
@@ -579,24 +584,31 @@ TEST_F(RmaCeFinalizeTest, Finalize_AfterInit_DeregistersAndFreesEverySignalWindo
   }
 }
 
-// Releasing the stream is the first thing teardown does after the task queue, so
-// a failure there propagates with the contexts still standing.
-TEST_F(RmaCeFinalizeTest, Finalize_StreamDestroyFails_Propagates) {
+// Destroying the stream is best-effort: teardown swallows a failure there
+// (CUDACHECKIGNORE), reports a clean finalize, and still runs to completion,
+// clearing the initialized flag.
+TEST_F(RmaCeFinalizeTest, Finalize_StreamDestroyFails_IsIgnored) {
   ASSERT_EQ(ncclRmaCeInit(comm_.get()), ncclSuccess);
   ScopedHook destroy(g_hipStreamDestroy, [](hipStream_t) { return hipErrorInvalidValue; });
 
-  EXPECT_EQ(ncclRmaCeFinalize(comm_.get()), ncclUnhandledCudaError);
-  EXPECT_TRUE(comm_->rmaState.rmaCeState.initialized);
+  EXPECT_EQ(ncclRmaCeFinalize(comm_.get()), ncclSuccess);
+  EXPECT_EQ(destroy.calls, 1);
+  EXPECT_EQ(comm_->rmaState.rmaCeState.ceStream, nullptr);
+  ExpectTornDown();
 }
 
-// A device buffer that will not release stops teardown rather than carrying on
-// and reporting a clean finalize.
+// A device buffer that will not release surfaces as the return value, but
+// teardown is best-effort: it carries on releasing the rest and finishes with
+// the state cleared rather than stopping at the failed free.
 TEST_F(RmaCeFinalizeTest, Finalize_DeviceFreeFails_Propagates) {
   ASSERT_EQ(ncclRmaCeInit(comm_.get()), ncclSuccess);
   g_hipFree = [](void*) { return hipErrorInvalidValue; };
 
   EXPECT_EQ(ncclRmaCeFinalize(comm_.get()), ncclUnhandledCudaError);
-  EXPECT_TRUE(comm_->rmaState.rmaCeState.initialized);
+  // The deregister runs after two of the failing frees, so seeing it proves the
+  // loop carried on instead of abandoning the context at the first one.
+  EXPECT_EQ(deregistered_.size(), 1u);
+  ExpectTornDown();
 }
 
 // Finalizing a comm that was never initialised is not an error: every field it
@@ -623,17 +635,23 @@ TEST_F(RmaCeFinalizeTest, Finalize_PendingInitTasks_DrainsTheQueue) {
   EXPECT_TRUE(ncclIntruQueueEmpty(&comm_->rmaCeInitTaskQueue));
 }
 
-// A failed deregistration stops teardown and surfaces, rather than carrying on
-// and reporting the state as cleanly torn down.
-TEST_F(RmaCeFinalizeTest, Finalize_DeregisterFails_PropagatesAndLeavesStateMarked) {
+// A failed deregistration surfaces as the return value, but teardown is
+// best-effort: it keeps releasing the remaining resources and finishes with the
+// state cleared rather than stopping at the failure.
+TEST_F(RmaCeFinalizeTest, Finalize_DeregisterFails_Propagates) {
+  comm_->config.numRmaCtx = 3;   // so "kept going" is observed, not inferred
   ASSERT_EQ(ncclRmaCeInit(comm_.get()), ncclSuccess);
-  g_devrNcclCommWindowDeregister = [](ncclComm_t, ncclWindow_t) { return ncclInternalError; };
+  // Distinct codes after the first, so the returned one pins NCCLCHECKIGNORE's
+  // first-wins rule (checks.h:171) rather than merely "some error surfaced".
+  int seen = 0;
+  ScopedHook dereg(g_devrNcclCommWindowDeregister,
+                   [&seen](ncclComm_t, ncclWindow_t) {
+                     return ++seen == 1 ? ncclInternalError : ncclSystemError;
+                   });
 
   EXPECT_EQ(ncclRmaCeFinalize(comm_.get()), ncclInternalError);
-  EXPECT_TRUE(comm_->rmaState.rmaCeState.initialized);
-  // Not retried here, and the state is left allocated on purpose: the failed
-  // attempt already released this context's buffers before the deregister, and
-  // Finalize restarts at context 0, so a second call double-frees them.
+  EXPECT_EQ(dereg.calls, 3);   // attempted for every context, not just the first
+  ExpectTornDown();
 }
 
 // ---------------------------------------------------------------------------
@@ -883,11 +901,14 @@ TEST_F(RmaCeNonPersistTest, NonPersist_TasksForDifferentPeers_BatchedIntoOneRoun
 
   ASSERT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
 
+  // NCCL 2.32 orders peers LSA-cyclically from lsaSelf+1 (not in enqueue order) to
+  // avoid destination incast. With kLsaSelf=3 and kLsaWorld={4,3,1,0,2} the walk
+  // visits world ranks 2,4,3,1, so peer 3 precedes peer 1.
   auto batches = Batches();
   ASSERT_EQ(batches.size(), 2u);
   ASSERT_EQ(batches[0].size(), 2u);
-  EXPECT_EQ(batches[0][0].dst, PeerData(1));
-  EXPECT_EQ(batches[0][1].dst, PeerData(3));
+  EXPECT_EQ(batches[0][0].dst, PeerData(3));
+  EXPECT_EQ(batches[0][1].dst, PeerData(1));
 
   // Both peers signal in the same round, so each takes its own staging slot --
   // sharing one would make the second overwrite the first. Pinned on the staging
@@ -899,8 +920,8 @@ TEST_F(RmaCeNonPersistTest, NonPersist_TasksForDifferentPeers_BatchedIntoOneRoun
   ASSERT_EQ(batches[1].size(), 2u);
   EXPECT_EQ(batches[1][0].src, &ceCtx->signalOpSeqsDev[0]);
   EXPECT_EQ(batches[1][1].src, &ceCtx->signalOpSeqsDev[1]);
-  EXPECT_EQ(batches[1][0].dst, SelfSlotIn(1, ceCtx->signalOffset));
-  EXPECT_EQ(batches[1][1].dst, SelfSlotIn(3, ceCtx->signalOffset));
+  EXPECT_EQ(batches[1][0].dst, SelfSlotIn(3, ceCtx->signalOffset));
+  EXPECT_EQ(batches[1][1].dst, SelfSlotIn(1, ceCtx->signalOffset));
 }
 
 // Two tasks for the same peer cannot share a batch, because a batched copy does

@@ -26,6 +26,11 @@ from a build with the Vulkan runtime driver and SPIR-V compiler backend enabled.
 Compare individual test results as well as suite results: an additional skipped
 case does not establish parity.
 
+The release corpus workflow runs selected Vulkan CTS compute and texel-buffer
+cases on both targets. See the
+[corpus test guide](../tests/corpus/README.md#vulkan-compute-and-buffer-cts)
+for a local smoke command using the same runner and dependencies as CI.
+
 ## Scope and limitations
 
 Matched Vulkan workloads have been validated on W7900 (`gfx1100`) and R9700

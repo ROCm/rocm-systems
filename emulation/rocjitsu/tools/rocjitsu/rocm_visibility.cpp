@@ -84,8 +84,8 @@ std::vector<VisibleGpu> filter_rocr_visible_gpus(const std::vector<VisibleGpu> &
   while (!rest.empty() && filtered.size() < gpus.size()) {
     const size_t comma = rest.find(',');
     std::string token(trim(comma == std::string_view::npos ? rest : rest.substr(0, comma)));
-    std::transform(token.begin(), token.end(), token.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+    std::ranges::transform(token, token.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
 
     std::optional<size_t> index;
     if (is_gpu_uuid_selector(token)) {
@@ -105,8 +105,7 @@ std::vector<VisibleGpu> filter_rocr_visible_gpus(const std::vector<VisibleGpu> &
     }
 
     if (!index || *index >= gpus.size() ||
-        std::any_of(filtered.begin(), filtered.end(),
-                    [&](const VisibleGpu &gpu) { return gpu.ordinal == gpus[*index].ordinal; }))
+        std::ranges::find(filtered, gpus[*index].ordinal, &VisibleGpu::ordinal) != filtered.end())
       return filtered;
     filtered.push_back(gpus[*index]);
 
@@ -160,8 +159,7 @@ std::vector<VisibleGpu> filter_client_visible_gpus(const std::vector<VisibleGpu>
     if (error != std::errc{} || ptr != end || token != std::to_string(index) ||
         index >= gpus.size())
       return filtered;
-    if (std::none_of(filtered.begin(), filtered.end(),
-                     [&](const VisibleGpu &gpu) { return gpu.gpu_id == gpus[index].gpu_id; }))
+    if (std::ranges::find(filtered, gpus[index].gpu_id, &VisibleGpu::gpu_id) == filtered.end())
       filtered.push_back(gpus[index]);
 
     if (comma == std::string_view::npos)
@@ -192,17 +190,13 @@ std::optional<VisibilityOverride> normalized_client_visible_devices(
   std::vector<VisibleGpu> selected =
       client ? filter_client_visible_gpus(rocr_gpus, client->second) : rocr_gpus;
   if (first_gpu_id) {
-    const auto first = std::find_if(selected.begin(), selected.end(), [&](const VisibleGpu &gpu) {
-      return gpu.gpu_id == *first_gpu_id;
-    });
+    const auto first = std::ranges::find(selected, *first_gpu_id, &VisibleGpu::gpu_id);
     if (first != selected.end())
-      std::rotate(selected.begin(), first, first + 1);
+      std::ranges::rotate(selected.begin(), first, first + 1);
   }
   std::vector<std::string> ordinals;
   for (const VisibleGpu &gpu : selected) {
-    auto match = std::find_if(rocr_gpus.begin(), rocr_gpus.end(), [&](const VisibleGpu &candidate) {
-      return candidate.gpu_id == gpu.gpu_id;
-    });
+    auto match = std::ranges::find(rocr_gpus, gpu.gpu_id, &VisibleGpu::gpu_id);
     if (match != rocr_gpus.end())
       ordinals.push_back(std::to_string(std::distance(rocr_gpus.begin(), match)));
   }
@@ -233,9 +227,7 @@ expanded_rocr_visible_devices(const std::vector<VisibleGpu> &topology,
 HostSelection select_host_gpu(const std::vector<VisibleGpu> &visible_gpus,
                               uint32_t configured_gpu_id, uint32_t gfx_target_version) {
   if (configured_gpu_id != 0) {
-    const auto match =
-        std::find_if(visible_gpus.begin(), visible_gpus.end(),
-                     [&](const VisibleGpu &gpu) { return gpu.gpu_id == configured_gpu_id; });
+    const auto match = std::ranges::find(visible_gpus, configured_gpu_id, &VisibleGpu::gpu_id);
     if (match == visible_gpus.end())
       return {HostSelectionStatus::ExplicitGpuHidden, configured_gpu_id};
     return {match->gfx_target_version == gfx_target_version
@@ -245,9 +237,7 @@ HostSelection select_host_gpu(const std::vector<VisibleGpu> &visible_gpus,
   }
 
   const auto match =
-      std::find_if(visible_gpus.begin(), visible_gpus.end(), [&](const VisibleGpu &gpu) {
-        return gpu.gfx_target_version == gfx_target_version;
-      });
+      std::ranges::find(visible_gpus, gfx_target_version, &VisibleGpu::gfx_target_version);
   return match == visible_gpus.end() ? HostSelection{HostSelectionStatus::NoIsaMatch, 0}
                                      : HostSelection{HostSelectionStatus::Selected, match->gpu_id};
 }

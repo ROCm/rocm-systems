@@ -143,13 +143,12 @@ void FlatStoreByteFlat::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data;
-  auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec);
+  auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec, 0x1);
   d->store_data.resize(wf.wf_size() * 1);
-  const auto data0 = data.lanes(0);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = data0[lane];
+    uint32_t val0 = data.lane(0, lane);
     d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
   }
   set_data(std::move(d));
@@ -166,13 +165,12 @@ void FlatStoreByteD16HiFlat::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data;
-  auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec);
+  auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec, 0x4);
   d->store_data.resize(wf.wf_size() * 1);
-  const auto data0 = data.lanes(0);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = data0[lane];
+    uint32_t val0 = data.lane(0, lane);
     val0 >>= 16;
     d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
   }
@@ -190,13 +188,12 @@ void FlatStoreShortFlat::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data;
-  auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec);
+  auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec, 0x3);
   d->store_data.resize(wf.wf_size() * 2);
-  const auto data0 = data.lanes(0);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = data0[lane];
+    uint32_t val0 = data.lane(0, lane);
     std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
   }
   set_data(std::move(d));
@@ -213,13 +210,12 @@ void FlatStoreShortD16HiFlat::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data;
-  auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec);
+  auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec, 0xc);
   d->store_data.resize(wf.wf_size() * 2);
-  const auto data0 = data.lanes(0);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = data0[lane];
+    uint32_t val0 = data.lane(0, lane);
     val0 >>= 16;
     std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
   }
@@ -1221,6 +1217,93 @@ void GlobalLoadLdsSshortFlat::execute_impl(amdgpu::Wavefront &wf) {
 void GlobalLoadLdsDwordFlat::execute_impl(amdgpu::Wavefront &wf) {
   wf.report_instruction_execution_error(
       amdgpu::InstructionExecutionError::UnimplementedInstruction);
+}
+
+void ScratchLoadLdsUbyteFlat::execute_impl(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->elem_size = 1;
+  d->num_elems = 1;
+  d->is_load = true;
+  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
+  d->non_temporal = inst_.nt;
+  flat_calculate_addresses(inst_, wf, *d);
+  d->lds_dst = true;
+  d->lds_dword_extend = true;
+  const int32_t offset = static_cast<int32_t>((inst_.offset | (inst_.pad_12 << 12)) << 19) >> 19;
+  amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                  static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 4, 4);
+  set_data(std::move(d));
+}
+
+void ScratchLoadLdsSbyteFlat::execute_impl(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->elem_size = 1;
+  d->num_elems = 1;
+  d->is_load = true;
+  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->sign_extend = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
+  d->non_temporal = inst_.nt;
+  flat_calculate_addresses(inst_, wf, *d);
+  d->lds_dst = true;
+  d->lds_dword_extend = true;
+  const int32_t offset = static_cast<int32_t>((inst_.offset | (inst_.pad_12 << 12)) << 19) >> 19;
+  amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                  static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 4, 4);
+  set_data(std::move(d));
+}
+
+void ScratchLoadLdsUshortFlat::execute_impl(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->elem_size = 2;
+  d->num_elems = 1;
+  d->is_load = true;
+  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
+  d->non_temporal = inst_.nt;
+  flat_calculate_addresses(inst_, wf, *d);
+  d->lds_dst = true;
+  d->lds_dword_extend = true;
+  const int32_t offset = static_cast<int32_t>((inst_.offset | (inst_.pad_12 << 12)) << 19) >> 19;
+  amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                  static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 4, 4);
+  set_data(std::move(d));
+}
+
+void ScratchLoadLdsSshortFlat::execute_impl(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->elem_size = 2;
+  d->num_elems = 1;
+  d->is_load = true;
+  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->sign_extend = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
+  d->non_temporal = inst_.nt;
+  flat_calculate_addresses(inst_, wf, *d);
+  d->lds_dst = true;
+  d->lds_dword_extend = true;
+  const int32_t offset = static_cast<int32_t>((inst_.offset | (inst_.pad_12 << 12)) << 19) >> 19;
+  amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                  static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 4, 4);
+  set_data(std::move(d));
+}
+
+void ScratchLoadLdsDwordFlat::execute_impl(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = true;
+  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
+  d->non_temporal = inst_.nt;
+  flat_calculate_addresses(inst_, wf, *d);
+  d->lds_dst = true;
+  d->lds_dword_extend = true;
+  const int32_t offset = static_cast<int32_t>((inst_.offset | (inst_.pad_12 << 12)) << 19) >> 19;
+  amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                  static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 4, 4);
+  set_data(std::move(d));
 }
 
 } // namespace cdna3

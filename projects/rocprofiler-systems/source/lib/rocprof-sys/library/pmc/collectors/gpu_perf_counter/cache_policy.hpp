@@ -74,8 +74,9 @@ struct cache_policy
                                     .is_derived       = meta.is_derived ? 1U : 0U,
                                     .extdata          = "{}" });
 
-            name_entries.push_back(
-                { meta.counter_id, std::move(qname), std::move(track_name) });
+            name_entries.push_back({ .counter_id    = meta.counter_id,
+                                     .pmc_info_name = std::move(qname),
+                                     .track_name    = std::move(track_name) });
         }
 
         registry.set_gpu_perf_counter_counter_names(static_cast<std::uint32_t>(gpu_id),
@@ -90,7 +91,10 @@ struct cache_policy
                              const enabled_metrics& /*supported_metrics*/,
                              const metrics& metric_values, std::uint64_t timestamp)
     {
-        if(metric_values.empty()) return;
+        if(metric_values.empty())
+        {
+            return;
+        }
 
         trace_cache::get_buffer_storage().store(trace_cache::gpu_perf_counter_sample{
             static_cast<std::uint32_t>(device_id), timestamp, metric_values });

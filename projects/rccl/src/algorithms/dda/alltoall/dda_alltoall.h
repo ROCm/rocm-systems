@@ -27,7 +27,8 @@ ncclResult_t ncclAllToAllDdaIpc(const void* sendbuff, void* recvbuff, size_t cou
                                 ncclComm* comm, cudaStream_t stream);
 
 // Total CTAs (grid blocks) each DDA alltoall launcher would use for the given
-// operands. Mirrors the launch grid math so reporting reflects real occupancy.
+// operands. Delegates to the shared *Geom() helper, so block counts are
+// guaranteed to match the actual launch grid.
 uint32_t ncclAllToAllDdaIpcBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype);
 uint32_t ncclAllToAllDdaFabricBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype);
 uint32_t ncclAllToAllDdaFabricLLBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype);

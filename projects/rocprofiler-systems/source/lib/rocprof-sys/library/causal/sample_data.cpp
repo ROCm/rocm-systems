@@ -22,7 +22,7 @@ get_samples(std::uint32_t _index)
     _data.reserve(samples.at(_index).size());
     for(const auto& itr : samples.at(_index))
     {
-        _data.emplace_back(sample_data{ itr.first, itr.second });
+        _data.emplace_back(sample_data{ .address = itr.first, .count = itr.second });
     }
     return _data;
 }
@@ -50,13 +50,17 @@ void
 add_samples(std::uint32_t _index, const std::vector<uintptr_t>& _v)
 {
     for(const auto& itr : _v)
+    {
         add_sample(_index, itr);
+    }
 }
 
 void
 add_samples(std::uint32_t _index, const std::map<uintptr_t, std::uint64_t>& _v)
 {
     for(const auto& itr : _v)
+    {
         add_sample(_index, itr.first, itr.second);
+    }
 }
 }  // namespace rocprofsys::causal

@@ -1,15 +1,17 @@
 ---
 launchBounds:
   Unit_Kernel_Launch_bounds_Positive_Basic:
-    <<: *level_2
+    <<: *level_default
     tags: [attributes, kernel]
   Unit_Kernel_Launch_bounds_Negative_OutOfBounds:
-    <<: *level_2
-    # Below tests are failing PSDB
-    disabled: [amd_windows, amd_wsl]
+    <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [attributes, kernel]
   Unit_Kernel_Launch_bounds_Negative_Parameters_RTC:
-    <<: *level_2
-    # Below tests are failing PSDB
-    disabled: [amd_windows, amd_wsl]
+    <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [attributes, kernel]

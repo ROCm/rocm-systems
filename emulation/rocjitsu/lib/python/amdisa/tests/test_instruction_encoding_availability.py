@@ -8,7 +8,15 @@ import pytest
 
 from amdisa.codegen import CodeGenerator
 from amdisa.gpuisa import Instruction
-from amdisa.isa_profile import Cdna4Profile, CdnaProfile, Rdna4Profile
+from amdisa.isa_profile import (
+    Cdna4Profile,
+    CdnaProfile,
+    Rdna1Profile,
+    Rdna2Profile,
+    Rdna3Profile,
+    Rdna3_5Profile,
+    Rdna4Profile,
+)
 from amdisa.parser import Parser
 
 
@@ -71,6 +79,27 @@ def test_rdna4_dpp_predicate_filters_opcodes_without_alternates():
     assert 'inst_.op >=' in helper
 
 
+def test_rdna4_floating_dot_dpp_availability():
+    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_rdna4.xml'), Rdna4Profile()).parse()
+    generator = CodeGenerator(spec, '')
+    for name in (
+        'V_DOT2_F32_F16',
+        'V_DOT2_F32_BF16',
+        'V_DOT4_F32_FP8_BF8',
+        'V_DOT4_F32_BF8_FP8',
+        'V_DOT4_F32_FP8_FP8',
+        'V_DOT4_F32_BF8_BF8',
+    ):
+        inst = _find_instruction(spec, 'ENC_VOP3P', name)
+        assert generator._instruction_supports_dpp(inst, 'ENC_VOP3P'), name
+        assert generator._instruction_supports_dpp8(inst, 'ENC_VOP3P'), name
+
+    for name in ('V_PK_ADD_F16', 'V_DOT4_I32_IU8', 'V_DOT8_U32_U4'):
+        inst = _find_instruction(spec, 'ENC_VOP3P', name)
+        assert not generator._instruction_supports_dpp(inst, 'ENC_VOP3P'), name
+        assert not generator._instruction_supports_dpp8(inst, 'ENC_VOP3P'), name
+
+
 def test_opcode_set_condition_omits_unsigned_domain_boundaries():
     assert CodeGenerator._opcode_set_condition([0, 1, 5]) == (
         'inst_.op <= 1 || inst_.op == 5'
@@ -117,3 +146,26 @@ def test_modifier_availability_requires_explicit_encoding_provenance():
     with pytest.raises(ValueError, match='V_SYNTHETIC.*encoding provenance'):
         generator._instruction_supports_dpp(unknown, 'ENC_VOP1')
     assert not generator._instruction_supports_dpp(known_absent, 'ENC_VOP1')
+
+
+@pytest.mark.parametrize(
+    'arch,profile,encoding,name',
+    [
+        ('rdna1', Rdna1Profile(), 'ENC_VOP3', 'V_LSHLREV_B64'),
+        ('rdna2', Rdna2Profile(), 'ENC_VOP3', 'V_LSHLREV_B64'),
+        ('rdna3', Rdna3Profile(), 'ENC_MIMG', 'IMAGE_GATHER4H'),
+        ('rdna3_5', Rdna3_5Profile(), 'ENC_MIMG', 'IMAGE_GATHER4H'),
+    ],
+)
+def test_subdecoder_keeps_opcodes_across_primary_prefixes(
+    arch, profile, encoding, name
+):
+    spec = Parser(str(_mrisa_dir() / f'amdgpu_isa_{arch}.xml'), profile).parse()
+    inst = _find_instruction(spec, encoding, name)
+    enc = spec.encoding_map[encoding]
+    # The generator emits one named table for every primary prefix of an encoding.
+    # Every such table must route the documented instruction, including opcodes
+    # whose prefix was first encountered without another instruction beside it.
+    for index in set(enc.primary_dt_ptrs) - {-1}:
+        entry = spec.primary_decode_table[index]
+        assert entry.sub_decode_funcs[inst.opcode] == f'decode{inst.fmt_name}'

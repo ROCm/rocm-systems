@@ -30,23 +30,26 @@
 
 class KFDExceptionTest : public KFDBaseComponentTest {
  public:
-    KFDExceptionTest() : m_ChildPid(-1) {
-        /* Because there could be early return before m_ChildPid is set
-         * by fork(), we should initialize m_ChildPid to a non-zero value
-         * to avoid possible exit of the main process.
+    KFDExceptionTest() : m_ChildStatus(HSAKMT_STATUS_ERROR) {
+        /* m_ChildStatus is only assigned once TestMemoryException() or
+         * TestSdmaException() gets as far as queue.Create(). Seed it to
+         * an error so a child that bails out before then fails closed
+         * rather than exiting on stack garbage, matching KFDSVMEvictTest
+         * and KFDMultiProcessTest.
          */
     }
 
-    ~KFDExceptionTest() {
-        /* exit() is necessary for the child process. Otherwise when the
-         * child process finishes, gtest assumes the test has finished and
-         * starts the next test while the parent is still active.
-         */
-        if (m_ChildPid == 0) {
-            if (!m_ChildStatus && HasFatalFailure())
-                m_ChildStatus = HSAKMT_STATUS_ERROR;
-            exit(m_ChildStatus);
-        }
+    /* exit() is necessary for the child process. Otherwise when the
+     * child process finishes, gtest assumes the test has finished and
+     * starts the next test while the parent is still active.
+     *
+     * exit() does not unwind, so the check has to happen here rather
+     * than in the destructor.
+     */
+    void ExitChild() {
+        if (!m_ChildStatus && HasFatalFailure())
+            m_ChildStatus = HSAKMT_STATUS_ERROR;
+        exit(m_ChildStatus);
     }
 
     void AddressFault(int gpuNode);
@@ -65,7 +68,6 @@ class KFDExceptionTest : public KFDBaseComponentTest {
     void TestSdmaException(int gpuNode, void *pDst);
 
  protected:  // Members
-    pid_t m_ChildPid;
     HSAKMT_STATUS m_ChildStatus;
 };
 

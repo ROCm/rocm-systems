@@ -72,10 +72,6 @@ if(NOT WIN32)
   else()
     set(ROCDECODE_SAMPLE_COMPILE_OPTIONS -O3 -DNDEBUG -fPIC)
   endif()
-else()
-  # MSVC supplies optimization and NDEBUG per configuration; these are the
-  # defines the sample sources need.
-  set(ROCDECODE_SAMPLE_COMPILE_OPTIONS /DNOMINMAX /D_CRT_SECURE_NO_WARNINGS)
 endif()
 
 # Set supported GPU Targets
@@ -86,7 +82,7 @@ if(NOT GPU_TARGETS AND NOT AMDGPU_TARGETS)
     endif()
     include(ROCMCheckTargetIds OPTIONAL RESULT_VARIABLE HAS_ROCM_CHECK_TARGET_IDS)
 
-    set(OPTIONAL_GPU_TARGETS "gfx950;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201;gfx1250")
+    set(OPTIONAL_GPU_TARGETS "gfx950;gfx1150;gfx1151;gfx1152;gfx1153;gfx1170;gfx1171;gfx1200;gfx1201;gfx1250;gfx1250-strict")
     if(HAS_ROCM_CHECK_TARGET_IDS AND NOT WIN32)
         rocm_check_target_ids(OPTIONAL_GPU_TARGETS_AVAILABLE TARGETS ${OPTIONAL_GPU_TARGETS})
     else() # if we don't have rocm_check_target_ids, just assume the targets are available
@@ -214,6 +210,7 @@ if(HIP_FOUND AND FFMPEG_FOUND AND rocdecode_FOUND AND (WIN32 OR (Threads_FOUND A
     add_executable(${PROJECT_NAME} ${SOURCES})
     target_compile_options(${PROJECT_NAME} PRIVATE ${ROCDECODE_SAMPLE_COMPILE_OPTIONS})
     if(WIN32)
+        target_compile_definitions(${PROJECT_NAME} PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS)
         add_dependencies(${PROJECT_NAME} hip_kernels)
         target_link_libraries(${PROJECT_NAME} ${KERNEL_OBJS})
     endif()

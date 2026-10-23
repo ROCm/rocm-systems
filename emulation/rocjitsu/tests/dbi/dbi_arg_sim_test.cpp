@@ -36,6 +36,7 @@
 #include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/code/rj_code.h"
 
+#include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -131,7 +132,8 @@ protected:
   void expect_argument_arrives_and_guest_register_survives() {
     EXPECT_EQ(patched_scratch_, 68u)
         << "descriptor scratch must grow to spill the live argument VGPR";
-    test::DbiSim sim(a_.sim_arch, a_.wave_size);
+    test::DbiSim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize(a_.sim_arch, a_.wave_size));
     const std::vector<std::vector<uint32_t>> regs =
         sim.run_and_read_vgprs(patched_text_, patched_scratch_, {/*v3=*/3, /*v1=*/1});
     const std::vector<uint32_t> &v3 = regs[0];
@@ -155,12 +157,13 @@ protected:
     const uint32_t nop = build_s_nop(0, a_.arch);
 
     std::vector<uint32_t> sabotaged = patched_text_;
-    auto it = std::search(sabotaged.begin(), sabotaged.end(), arg_write.begin(), arg_write.end());
+    auto it = std::ranges::search(sabotaged, arg_write).begin();
     ASSERT_NE(it, sabotaged.end()) << "argument materialization not found in the patched text";
     for (size_t i = 0; i < arg_write.size(); ++i)
       *(it + static_cast<std::ptrdiff_t>(i)) = nop;
 
-    test::DbiSim broken(a_.sim_arch, a_.wave_size);
+    test::DbiSim broken;
+    ASSERT_NO_FATAL_FAILURE(broken.initialize(a_.sim_arch, a_.wave_size));
     const std::vector<uint32_t> v3 =
         broken.run_and_read_vgpr(sabotaged, patched_scratch_, /*reg=*/3);
     ASSERT_EQ(v3.size(), a_.wave_size);
@@ -204,6 +207,15 @@ TEST_F(DbiRdna4ArgSimFixture, ArgumentArrivesAndGuestRegisterSurvives) {
 }
 TEST_F(DbiRdna4ArgSimFixture, WithoutTheArgumentWriteProbeReadsTheGuestValue) {
   expect_without_the_argument_write_probe_reads_the_guest_value();
+}
+
+TEST(DbiFixtureSetupTest, MalformedConfigRecordsFatalFailure) {
+  EXPECT_FATAL_FAILURE(
+      {
+        test::DbiSim sim;
+        sim.initialize("\"", 64);
+      },
+      "Failed to parse JSON config:");
 }
 
 } // namespace
