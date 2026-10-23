@@ -1060,6 +1060,7 @@ if(BUILD_TESTS)
       WarpSpeedMPITests.cpp
       ImplicitLaunchOrderMPITests.cpp
       CommMPITests.cpp
+      PatForcedMPITests.cpp
       NChannelsPerNetPeerMPITests.cpp
       MaxP2pPeersMPITests.cpp
       RegistrationMPITests.cpp
@@ -1120,7 +1121,7 @@ if(BUILD_TESTS)
 
     list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsMPI)
 
-    # Recorder profiler plugin for ProfilerKernelChMPITests. Unlike
+    # Recorder profiler plugin for ProfilerKernelChMPITests and PatForcedMPITests. Unlike
     # rccl-test-profiler-stub it is a working profiler: it records what RCCL
     # delivers so the test can check it. It builds against the standalone headers
     # an external plugin ships with rather than RCCL's own, and it lands and
@@ -1132,6 +1133,8 @@ if(BUILD_TESTS)
     set_target_properties(rccl-test-profiler-kch-recorder PROPERTIES
       CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
     add_dependencies(rccl-UnitTestsMPI rccl-test-profiler-kch-recorder)
+    # The recorder's query header is included as "plugin/profiler_kernelch_recorder.h".
+    target_include_directories(rccl-UnitTestsMPI PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(rccl-UnitTestsMPI PRIVATE
       RCCL_TEST_KCH_RECORDER_NAME="$<TARGET_FILE_NAME:rccl-test-profiler-kch-recorder>")
     install(TARGETS rccl-test-profiler-kch-recorder
