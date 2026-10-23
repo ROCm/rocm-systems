@@ -94,6 +94,9 @@ foreach(
     ITEMS
         v_add_sub
         v_round_f64
+        v_div_fixup
+        v_div_fmas
+        v_div_scale
         v_fma_dx9_zero
         v_fma
         v_fma_mix
