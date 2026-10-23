@@ -177,6 +177,12 @@ add_test(
 )
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(
+        NAME BenchmarkRunnerCpuPolicyUnitTest
+        COMMAND
+            ${Python3_EXECUTABLE} -B
+            ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_cpu_policy.py -v
+    )
+    add_test(
         NAME CorpusRunnerUnitTest
         COMMAND
             ${Python3_EXECUTABLE} -B
