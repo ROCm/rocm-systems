@@ -21,6 +21,7 @@ repos:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
+        exclude: ^projects/hip-tests/catch/config/configs/
       - id: check-added-large-files
         # Public MR ISA XMLs are intentionally checked-in vendor inputs; each
         # existing architecture file already exceeds the generic size limit.
@@ -77,3 +78,12 @@ repos:
         additional_dependencies: ["cmake-format==0.6.13", "pyyaml"]
         entry: cmake-format -i
         files: ^projects/rocprofiler-sdk/.*(CMakeLists\.txt|\.cmake)$
+      - id: hip-tests-check-config
+        name: check YAML (HIP test configs)
+        language: python
+        additional_dependencies: [pyyaml]
+        entry: >-
+          python projects/hip-tests/catch/config/check_config.py
+          projects/hip-tests/catch/config/configs
+        files: ^projects/hip-tests/catch/config/(configs/.*\.ya?ml|common\.py|check_config\.py)$
+        pass_filenames: false
