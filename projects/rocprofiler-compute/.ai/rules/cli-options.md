@@ -41,7 +41,7 @@ names since customers rarely touch them.
 A list of values is passed as one comma-separated argument.
 
 ```console
---roofline-data-types FP16,FP32,FP64
+--example-ids 0,1,2
 ```
 
 ## Help Messages

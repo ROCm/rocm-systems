@@ -700,8 +700,7 @@ b) Otherwise, profile mode runs microbenchmarks and collects roofline performanc
 Profile mode generates ``roofline.csv`` containing microbenchmark data. To generate
 roofline HTML plots, use ``rocprof-compute analyze`` on a profiling output directory
 that contains both ``roofline.csv`` and application performance counters
-(see :doc:`../analyze/mode`). Visualization options (``--sort``, ``--mem-level``,
-``--roofline-data-type``) are available in analyze mode.
+(see :doc:`../analyze/mode`).
 
 .. note::
    Matrix multiplication benchmarking and counter collection will vary depending on which architecture is profiled:
