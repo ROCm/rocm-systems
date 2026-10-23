@@ -18,16 +18,15 @@
 /.github/workflows/rocprofiler-register-*.yml                         @ROCm/rocm-devtools-team @ROCm/rocprofiler-owners
 /.github/workflows/aqlprofile-*.yml                                   @ROCm/rocm-devtools-team @ROCm/rocprofiler-owners
 /.github/workflows/rocprofiler-systems-*.yml                          @ROCm/rocprof-sys
-/.github/workflows/rocprofiler-sdk-docs.yml                           @ROCm/rocm-devtools-team @ROCm/rocprofiler-owners @ROCm/rocm-documentation
 /.github/workflows/*therock*.yml                                      @ROCm/therock-infra-write @ROCm/rocm-systems-reviewers
-/.github/**/*rccl*                                                    @ROCm/rccl-ci
+/.github/workflows/*rccl*                                             @ROCm/rccl-ci
 /.github/workflows/therock-rccl-*.yml                                 @ROCm/therock-infra-write @ROCm/rccl-ci
 
 # Individual contributors
 /.github/workflows/cuid-*.yml                                         @gabrpham @dmitrii-galantsev
 /.github/workflows/media-libs-ci.yml                                  @kiritigowda @AryanSalmanpour @rrawther
 /.github/workflows/rocr-runtime-*.yml                                 @kentrussell @dayatsin-amd @cfreeamd @atgutier @shwetagkhatri
-/.github/workflows/systems-pr-bot.yml                                 @samathew121
+/.github/workflows/systems-pr-bot.yml                                 @samathew121 @amd-shiraz
 /.github/workflows/issue-import.yml                                   @jayhawk-commits @ammallya
 /.github/workflows/import_pr_list.yml                                 @jayhawk-commits @ammallya
 /.github/workflows/pr-import.yml                                      @jayhawk-commits @ammallya
