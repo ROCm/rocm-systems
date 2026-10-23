@@ -120,6 +120,42 @@ cooperativeGrps:
   Unit_hipLaunchCooperativeKernel_QueueReclaim:
     <<: *level_default
     tags: [cooperative, launch]
+  Unit_ConcurrentCooperativeKernel_GridSync_Correctness:
+    <<: *level_2
+    disabled:
+      targets: [asan]
+      reason: "AIRUNTIME-74: Concurrent cooperative grids are sized near occupancy; ASAN shrinks occupancy, which can prevent co-residency and deadlock grid.sync()."
+    tags: [cooperative, launch]
+  Unit_ConcurrentCooperativeKernel_GridSync_SameStreamOrdering:
+    <<: *level_2
+    disabled:
+      targets: [asan]
+      reason: "AIRUNTIME-74: Same-stream coop dispatch chain is sized near occupancy; ASAN shrinks occupancy, which can prevent co-residency and deadlock grid.sync()."
+    tags: [cooperative, launch]
+  Unit_ConcurrentCooperativeKernel_GridSync_EqualGrids:
+    <<: *level_2
+    disabled:
+      targets: [asan]
+      reason: "AIRUNTIME-74: Equal coop grids are sized near occupancy; ASAN shrinks occupancy, which can prevent co-residency and deadlock grid.sync()."
+    tags: [cooperative, launch]
+  Unit_ConcurrentCooperativeKernel_GridSync_Oversubscription:
+    <<: *level_2
+    disabled:
+      targets: [asan]
+      reason: "AIRUNTIME-74: Oversubscribed coop grids; ASAN shrinks occupancy, which can prevent co-residency and deadlock grid.sync()."
+    tags: [cooperative, launch]
+  Unit_ConcurrentCooperativeKernel_GridSync_QueuedConcurrency:
+    <<: *level_2
+    disabled:
+      targets: [asan]
+      reason: "AIRUNTIME-74: Three coop grids past capacity; ASAN shrinks occupancy, which can prevent co-residency and deadlock grid.sync()."
+    tags: [cooperative, launch]
+  Unit_ConcurrentCooperativeKernel_GridSync_MixedRegularCoop:
+    <<: *level_2
+    disabled:
+      targets: [asan]
+      reason: "AIRUNTIME-74: Mixed regular/coop chain is sized near occupancy; ASAN shrinks occupancy, which can prevent co-residency and deadlock grid.sync()."
+    tags: [cooperative, launch]
   Unit_hipLaunchCooperativeKernelMultiDevice_Basic:
     <<: *level_default
     disabled:
