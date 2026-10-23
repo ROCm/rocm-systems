@@ -6013,6 +6013,131 @@ HSAKMT_STATUS hsakmt_fmm_register_graphics_handle(HsaKFDContext *ctx,
 	if (gpu_id_array_size > 0 && !gpu_id_array)
 		return HSAKMT_STATUS_INVALID_PARAMETER;
 
+	/* DRM import path: use hsaKmtHandleImport instead of KFD ioctls */
+	if (hsakmt_enable_drm) {
+		HsaHandleImportDesc import_desc = {0};
+		HsaHandleImportResult import_res = {0};
+		HsaHandleImportFlags import_flags = {0};
+		amdgpu_device_handle dev;
+		uint32_t gpu_id;
+
+		/* Resolve the GPU and device handle first */
+		gpu_id = fmm_ctx->first_gpu_mem ? fmm_ctx->first_gpu_mem->gpu_id : 0;
+		if (gpu_id_array && gpu_id_array_size > 0)
+			gpu_id = gpu_id_array[0];
+
+		gpu_mem_id = gpu_mem_find_by_gpu_id(fmm_ctx, gpu_id);
+		if (gpu_mem_id < 0)
+			return HSAKMT_STATUS_ERROR;
+
+		dev = fmm_get_amdgpu_device_handle(fmm_ctx, gpu_id);
+		if (!dev) {
+			pr_err("DRM import: no device handle for gpu_id 0x%x\n", gpu_id);
+			return HSAKMT_STATUS_ERROR;
+		}
+
+		/* Import the dmabuf using hsaKmtHandleImport */
+		import_desc.type = HSA_EXTERNAL_HANDLE_DMA_BUF;
+		import_desc.dmabuf_fd = (int)GraphicsResourceHandle;
+		import_desc.device_handle = dev;
+
+		status = hsaKmtHandleImport(&import_desc, &import_res, &import_flags);
+		if (status != HSAKMT_STATUS_SUCCESS) {
+			pr_err("DRM dmabuf import failed: %d\n", status);
+			return status;
+		}
+
+		/* Cast buf_handle back to amdgpu_bo_handle for DRM operations */
+		amdgpu_bo_handle bo_handle = (amdgpu_bo_handle)import_res.buf_handle;
+
+		/* Query BO info to get memory attributes (coherency flags, etc.) */
+		struct amdgpu_bo_info bo_info = {0};
+		r = amdgpu_bo_query_info(bo_handle, &bo_info);
+		if (r) {
+			pr_err("DRM bo_query_info failed: %d\n", r);
+			amdgpu_bo_free(bo_handle);
+			return HSAKMT_STATUS_ERROR;
+		}
+
+		/* Choose aperture */
+		if (!gpu_id_array && gpu_id_array_size == 0 && !RegisterFlags.ui32.requiresVAddr) {
+			aperture = &fmm_ctx->mem_handle_aperture;
+		} else if (hsakmt_topology_is_svm_needed(fmm_ctx->gpu_mem[gpu_mem_id].EngineId)) {
+			aperture = fmm_ctx->svm.dgpu_aperture;
+		} else {
+			aperture = &fmm_ctx->gpu_mem[gpu_mem_id].gpuvm_aperture;
+			aperture_base = aperture->base;
+		}
+		if (!aperture_is_valid(aperture->base, aperture->limit)) {
+			amdgpu_bo_free(bo_handle);
+			return HSAKMT_STATUS_ERROR;
+		}
+
+		/* Allocate VA range */
+		pthread_mutex_lock(&aperture->fmm_mutex);
+		mem = aperture_allocate_area_aligned(aperture, NULL,
+						     import_res.alloc_size, IMAGE_ALIGN);
+		if (!mem) {
+			pthread_mutex_unlock(&aperture->fmm_mutex);
+			amdgpu_bo_free(bo_handle);
+			return HSAKMT_STATUS_NO_MEMORY;
+		}
+
+		/* Track the imported BO
+		 * Note: We do NOT map the BO here. Mapping will be done later via
+		 * MakeMemoryResident -> hsaKmtMapMemoryToGPUNodes -> _fmm_map_to_gpu_drm,
+		 * matching the KFD path behavior where AMDKFD_IOC_IMPORT_DMABUF only
+		 * imports without mapping.
+		 */
+		mflags.Value = 0;
+		/* Derive coherency from DRM BO flags (similar to fmm_translate_ioc_to_hsa_flags).
+		 * AMDGPU_GEM_CREATE_COHERENT (bit 13) means fine-grain coherent.
+		 * If not set, the BO is non-coherent (coarse-grain).
+		 * AMDGPU_GEM_CREATE_UNCACHED (bit 14) is also coherent.
+		 * AMDGPU_GEM_CREATE_EXT_COHERENT (bit 15) means extended coherent.
+		 */
+		if (!(bo_info.alloc_flags & AMDGPU_GEM_CREATE_COHERENT) &&
+		    !(bo_info.alloc_flags & AMDGPU_GEM_CREATE_UNCACHED))
+			mflags.ui32.CoarseGrain = 1;
+		if (bo_info.alloc_flags & AMDGPU_GEM_CREATE_EXT_COHERENT)
+			mflags.ui32.ExtendedCoherent = 1;
+
+		/* Derive domain from BO preferred heap for is_supported_on_drm check */
+		alloc_flags_t alloc_flags = {0};
+		alloc_flags.mflags = mflags;
+		if (bo_info.preferred_heap & AMDGPU_GEM_DOMAIN_VRAM)
+			alloc_flags.domain = ALLOC_DOMAIN_VRAM;
+		else if (bo_info.preferred_heap & AMDGPU_GEM_DOMAIN_GTT)
+			alloc_flags.domain = ALLOC_DOMAIN_SYSTEM;
+		else
+			alloc_flags.domain = ALLOC_DOMAIN_SYSTEM; /* Default to system */
+
+		handle.drm = bo_handle;
+		obj = aperture_allocate_object(aperture, mem, handle,
+					       import_res.alloc_size, mflags);
+		if (!obj) {
+			pthread_mutex_unlock(&aperture->fmm_mutex);
+			aperture_release_area(aperture, mem, import_res.alloc_size);
+			amdgpu_bo_free(bo_handle);
+			return HSAKMT_STATUS_NO_MEMORY;
+		}
+		/* Set the domain so is_supported_on_drm() returns true for mapping */
+		obj->alloc_flags = alloc_flags;
+		obj->registered_device_id_array = gpu_id_array;
+		obj->registered_device_id_array_size = gpu_id_array_size;
+		hsakmt_gpuid_to_nodeid(ctx, gpu_id, &obj->node_id);
+		pthread_mutex_unlock(&aperture->fmm_mutex);
+
+		GraphicsResourceInfo->MemoryAddress = mem;
+		GraphicsResourceInfo->SizeInBytes = import_res.alloc_size;
+		GraphicsResourceInfo->Metadata = NULL;
+		GraphicsResourceInfo->MetadataSizeInBytes = 0;
+		hsakmt_gpuid_to_nodeid(ctx, gpu_id, &GraphicsResourceInfo->NodeId);
+
+		return HSAKMT_STATUS_SUCCESS;
+	}
+
+	/* KFD import path (original) */
 	infoArgs.dmabuf_fd = GraphicsResourceHandle;
 	infoArgs.metadata_size = GRAPHICS_METADATA_DEFAULT_SIZE;
 	metadata = calloc(infoArgs.metadata_size, 1);
