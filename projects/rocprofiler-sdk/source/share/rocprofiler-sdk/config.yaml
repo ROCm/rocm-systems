@@ -13976,7 +13976,7 @@ rocprofiler-sdk:
             - gfx1201
           expression: (1-(reduce(TCP_REQ_MISS,sum)/reduce(TCP_REQ,sum)))*100
     - name: CPC_GCRIU_BUSY
-      description: The GCRIU is busy.
+      description: The Graphics Cache Rinse Interface Unit (GCRIU) is busy.
       properties: []
       definitions:
         - architectures:
@@ -14073,7 +14073,8 @@ rocprofiler-sdk:
           block: CPC
           event: 10
     - name: CPC_ME1_STALL_WAIT_ON_RCIU_READY
-      description: Number of cycles the micro engine waits for the RCIU.
+      description: >-
+        Number of cycles the micro engine waits for the Register Cache Interface Unit (RCIU) to be ready.
       properties: []
       definitions:
         - architectures:
@@ -14304,7 +14305,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GCEA_RDRAM_REQ_PER_CLIGRP,sum)
     - name: GCEA_RDRAM_SIZE_REQ
-      description: Size of DRAM read requests, in steps of 32 bytes.
+      description: Total size of DRAM read requests, in 32-byte units.
       properties: []
       definitions:
         - architectures:
@@ -14317,7 +14318,7 @@ rocprofiler-sdk:
           event: 77
     - name: GCEA_RDRAM_SIZE_REQ_sum
       description: >-
-        Sum across all GCEA instances. Size of DRAM read requests, in steps of 32 bytes.
+        Sum across all GCEA instances. Total size of DRAM read requests, in 32-byte units.
       properties: []
       definitions:
         - architectures:
@@ -14533,7 +14534,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GCEA_WDRAM_REQ_PER_CLIGRP,sum)
     - name: GCEA_WDRAM_SIZE_REQ
-      description: Size of DRAM write requests, in steps of 32 bytes.
+      description: Total size of DRAM write requests, in 32-byte units.
       properties: []
       definitions:
         - architectures:
@@ -14546,7 +14547,7 @@ rocprofiler-sdk:
           event: 78
     - name: GCEA_WDRAM_SIZE_REQ_sum
       description: >-
-        Sum across all GCEA instances. Size of DRAM write requests, in steps of 32 bytes.
+        Sum across all GCEA instances. Total size of DRAM write requests, in 32-byte units.
       properties: []
       definitions:
         - architectures:
