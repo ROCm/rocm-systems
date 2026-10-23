@@ -131,6 +131,7 @@ public:
   ~RaceDetectorPlugin() override;
 
   bool observes_sgpr_reads() const override { return true; }
+  bool observes_memory_instruction_routing() const override { return false; }
   bool observes_memory_routing() const override { return true; }
 
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override;
