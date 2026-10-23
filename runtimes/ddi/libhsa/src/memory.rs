@@ -1,0 +1,726 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+//! HSA memory ownership, pools, allocations, and pointer metadata.
+//!
+//! rocddi owns native allocations and mappings; this module owns their HSA
+//! handles, compatibility metadata, deallocation callbacks, and public status
+//! translation. Every lookup accepts both host and device aliases where the HSA
+//! contract permits them, while range checks remain overflow-safe and bounded
+//! by the original allocation or reservation.
+//!
+//! Destruction removes public visibility only when ownership can be transferred
+//! safely. Failed native cleanup keeps the owning record available for retry,
+//! and user callbacks run outside the process-global runtime lock. Linux-only
+//! descriptor and AIS operations remain explicit rather than being presented
+//! as portable native-handle behavior. Child modules own pool projections,
+//! allocations, pointer metadata, IPC and interop, virtual memory, and
+//! copy/SVM operations. This root retains shared state and shutdown order.
+
+mod copy_svm;
+mod interop;
+pub(crate) use copy_svm::hsa_memory_copy;
+pub(crate) use copy_svm::image_device_address;
+use copy_svm::*;
+mod virtual_memory;
+
+use crate::platform::fd::{AsFd, IntoRawFd};
+use std::collections::{BTreeMap, HashMap};
+use std::ffi::{c_char, c_void};
+use std::mem::{MaybeUninit, align_of, size_of};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering, fence};
+use std::thread;
+use std::time::Duration;
+
+use crate::platform::memory as linux_interop;
+use crate::platform::memory::AisFileOperation as AisOperation;
+use crate::platform::memory::{
+    KfdIpcMemoryHandle as IpcMemoryHandle, KfdSvmAccess as SvmAccess,
+    KfdSvmAttribute as SvmAttribute, KfdSvmLocation as SvmLocation,
+};
+use rocddi::device::Device;
+use rocddi::device::gpu::{
+    CopyRect, GpuCopyOptions, GpuCopySequence, GpuCopySignal, GpuCopySignalOperation,
+    GpuCopyTimestamps, GpuCopyWait,
+};
+use rocddi::memory::device::{
+    Allocation, DeviceAccess, HostMappingPolicy, MemoryKind, VirtualAddress, VirtualDeviceMapping,
+    VirtualHostMapping, VirtualMemory, VirtualMemoryPlacement,
+};
+use rocddi::session::{DriverContextLifetime, Session};
+use rocddi::topology::{MemoryLinkInfo, MemoryLinkType};
+
+use crate::ffi::*;
+use crate::runtime::{
+    HsaState, InFlightGeneration, boundary, cache_handles_in_level_order, initialized_mut, lock,
+    map_error,
+};
+use crate::signal::{AsyncCopyClock, AsyncCopyProfile, SignalState};
+
+/// Synthetic GPU pool kind for coarse-grained memory.
+const GPU_POOL_COARSE: u64 = 1;
+/// Synthetic GPU pool kind for fine-grained memory.
+pub(crate) const GPU_POOL_FINE: u64 = 2;
+/// Synthetic GPU pool kind for workgroup memory.
+const GPU_POOL_GROUP: u64 = 3;
+/// Synthetic GPU pool kind for extended fine-grained memory.
+pub(crate) const GPU_POOL_EXTENDED: u64 = 4;
+/// Native allocation flag requesting PCIe-visible memory.
+const ALLOC_PCIE: u32 = 1;
+/// Native allocation flag requesting contiguous memory.
+const ALLOC_CONTIGUOUS: u32 = 1 << 1;
+/// Native allocation flag permitting code execution.
+const ALLOC_EXECUTABLE: u32 = 1 << 2;
+/// Native allocation flag requesting uncached memory.
+const ALLOC_UNCACHED: u32 = 1 << 3;
+/// Native allocation flags accepted by this frontend.
+const ALLOC_FLAGS: u32 = ALLOC_PCIE | ALLOC_CONTIGUOUS | ALLOC_EXECUTABLE | ALLOC_UNCACHED;
+/// SVM policy bit allowing host access.
+const SVM_FLAG_HOST_ACCESS: u32 = 0x01;
+/// SVM policy bit requesting coherent access.
+const SVM_FLAG_COHERENT: u32 = 0x02;
+/// SVM policy bit restricting placement to the local hive.
+const SVM_FLAG_HIVE_LOCAL: u32 = 0x04;
+/// SVM policy bit making GPU access read-only.
+const SVM_FLAG_GPU_READ_ONLY: u32 = 0x08;
+/// SVM policy bit allowing GPU execution.
+const SVM_FLAG_GPU_EXECUTE: u32 = 0x10;
+/// SVM policy bit marking a range read-mostly for GPUs.
+const SVM_FLAG_GPU_READ_MOSTLY: u32 = 0x20;
+/// Largest accepted SVM migration-granularity encoding.
+const SVM_MAX_MIGRATION_GRANULARITY: u64 = 18;
+/// Maximum number of SVM attributes accepted in one request.
+const SVM_MAX_ATTRIBUTES: usize = 2044;
+/// Linux I/O error number used when native cleanup cannot be proved.
+const EIO: i32 = 5;
+
+/// Accepts only the HSA virtual-memory access bits implemented here.
+fn valid_access_permissions(access: u32) -> bool {
+    access & !(ACCESS_PERMISSION_RW | ACCESS_PERMISSION_EX) == 0
+}
+
+/// Process setting captured when an asynchronous copy is accepted.
+#[derive(Clone, Copy)]
+pub(crate) enum AsyncCopyProfiling {
+    /// Async copies complete without retaining profiling timestamps.
+    Disabled,
+    /// Async copies retain timestamps for later profiling queries.
+    Enabled,
+}
+
+/// HSA memory handles and metadata around rocddi allocation owners.
+pub(crate) struct MemoryState {
+    /// Ordinary HSA allocations keyed by host address.
+    allocations: HashMap<usize, Memory>,
+    /// Imported IPC memory keyed by host address.
+    ipc_allocations: HashMap<usize, Memory>,
+    /// External memory imports keyed by host address.
+    interop_allocations: HashMap<usize, Memory>,
+    /// Host ranges locked for GPU access.
+    locked_allocations: Vec<LockedMemory>,
+    /// Outstanding asynchronous copy borrows per allocation address.
+    async_copy_borrows: HashMap<usize, usize>,
+    /// Prevents unsafe reuse after uncertain asynchronous copy retirement.
+    async_copy_quarantine: Arc<AtomicBool>,
+    /// Process setting captured by new asynchronous copies.
+    pub(crate) async_copy_profiling: AsyncCopyProfiling,
+    /// Virtual address reservations ordered by base address.
+    vmem_reservations: BTreeMap<usize, VmemReservation>,
+    /// Physical virtual-memory handles indexed by public ID.
+    vmem_handles: HashMap<u64, VmemHandle>,
+    /// Active virtual-memory mappings ordered by base address.
+    vmem_mappings: BTreeMap<usize, VmemMapping>,
+    /// Prefetch and copy workers joined before memory owners are released.
+    workers: Vec<thread::JoinHandle<()>>,
+}
+
+impl MemoryState {
+    /// Initializes the allocation, registration, and virtual memory registries.
+    pub(crate) fn new() -> Self {
+        Self {
+            allocations: HashMap::new(),
+            ipc_allocations: HashMap::new(),
+            interop_allocations: HashMap::new(),
+            locked_allocations: Vec::new(),
+            async_copy_borrows: HashMap::new(),
+            async_copy_quarantine: Arc::new(AtomicBool::new(false)),
+            async_copy_profiling: AsyncCopyProfiling::Disabled,
+            vmem_reservations: BTreeMap::new(),
+            vmem_handles: HashMap::new(),
+            vmem_mappings: BTreeMap::new(),
+            workers: Vec::new(),
+        }
+    }
+
+    /// Checks whether the current thread is an asynchronous memory worker.
+    pub(crate) fn running_on_worker(&self) -> bool {
+        self.workers
+            .iter()
+            .any(|worker| worker.thread().id() == thread::current().id())
+    }
+
+    /// Join completed workers before accepting another asynchronous operation.
+    /// `is_finished` ensures joining cannot wait for work that needs the runtime
+    /// lock held by the submitter.
+    fn reap_finished_workers(&mut self) {
+        let mut index = 0;
+        while index < self.workers.len() {
+            if self.workers[index].is_finished() {
+                let _ = self.workers.swap_remove(index).join();
+            } else {
+                index += 1;
+            }
+        }
+    }
+
+    /// Joins memory workers after the shared stop request is published.
+    pub(crate) fn join_workers(&mut self) {
+        for worker in self.workers.drain(..) {
+            let _ = worker.join();
+        }
+    }
+
+    /// Reports whether an unfinished native copy still retains memory borrows.
+    pub(crate) fn is_quarantined(&self) -> bool {
+        self.async_copy_quarantine.load(Ordering::Acquire)
+    }
+
+    /// Releases HSA metadata after queues, copies, and signal users stop.
+    pub(crate) fn clear(&mut self) {
+        self.locked_allocations.clear();
+        // Mappings borrow handles and reservations. Release them first, then
+        // the physical handles and finally their reserved address ranges.
+        self.vmem_mappings.clear();
+        self.vmem_handles.clear();
+        self.vmem_reservations.clear();
+        self.ipc_allocations.clear();
+        self.interop_allocations.clear();
+        self.allocations.clear();
+        self.async_copy_borrows.clear();
+    }
+}
+
+/// Canonical metadata for every address alias of one HSA-visible allocation.
+///
+/// `agent_base` is always present. `host_base` exists only when CPU access is
+/// valid. Range resolution preserves the offset between those aliases instead
+/// of assuming that host and GPU virtual addresses are identical.
+#[derive(Clone)]
+struct PointerDescription {
+    /// HSA pointer classification reported to callers.
+    pointer_type: u32,
+    /// Address visible to the owning agent.
+    agent_base: usize,
+    /// CPU alias when this allocation is host accessible.
+    host_base: Option<usize>,
+    /// Byte extent common to the address aliases.
+    size: usize,
+    /// HSA agent that owns the allocation.
+    owner: HsaAgent,
+    /// Pool allocation flags exposed by pointer queries.
+    global_flags: u32,
+    /// Whether this address came from host registration.
+    registered: bool,
+    /// Native allocation flags retained for compatibility queries.
+    alloc_flags: u32,
+    /// Caller-set pointer metadata.
+    user_data: usize,
+    /// Agents with established access to the allocation.
+    accessible: Vec<HsaAgent>,
+}
+
+impl PointerDescription {
+    /// Checks whether the requested address belongs to this object.
+    fn contains(&self, address: usize) -> bool {
+        contains(self.agent_base, self.size, address)
+            || self
+                .host_base
+                .is_some_and(|host| contains(host, self.size, address))
+    }
+
+    /// Checks whether this allocation starts at the given address.
+    fn starts_at(&self, address: usize) -> bool {
+        self.agent_base == address || self.host_base == Some(address)
+    }
+
+    /// Translates a device address to its host mapping when available.
+    fn host_address(&self, address: usize) -> Option<usize> {
+        if self
+            .host_base
+            .is_some_and(|host| contains(host, self.size, address))
+        {
+            return Some(address);
+        }
+        let offset = address.checked_sub(self.agent_base)?;
+        (offset < self.size)
+            .then(|| self.host_base?.checked_add(offset))
+            .flatten()
+    }
+
+    /// Returns a host mapping for a complete device address range.
+    fn host_range(&self, address: usize, size: usize) -> Option<usize> {
+        self.offset_range(address, size)?;
+        self.host_address(address)
+    }
+
+    /// Returns the offset of a complete range within this allocation.
+    fn offset_range(&self, address: usize, size: usize) -> Option<usize> {
+        let base = if contains(self.agent_base, self.size, address) {
+            self.agent_base
+        } else if self
+            .host_base
+            .is_some_and(|host| contains(host, self.size, address))
+        {
+            self.host_base?
+        } else {
+            return None;
+        };
+        let offset = address.checked_sub(base)?;
+        (offset.checked_add(size)? <= self.size).then_some(offset)
+    }
+}
+
+/// HsaState-owned allocation plus callbacks registered for its destruction.
+pub(crate) struct Memory {
+    /// Native backing and its mapping lifetime.
+    allocation: Allocation,
+    /// Canonical metadata for every public address alias.
+    description: PointerDescription,
+    /// Pool flags fixed when this allocation was created.
+    pool_global_flags: u32,
+    /// Callbacks invoked after public ownership is removed.
+    deallocation_callbacks: Vec<RegisteredDeallocationCallback>,
+}
+
+/// Application callback invoked after an allocation loses public ownership.
+#[derive(Clone, Copy)]
+struct RegisteredDeallocationCallback {
+    /// Public allocation address supplied when the callback was registered.
+    pointer: usize,
+    /// Application callback invoked after public ownership ends.
+    callback: unsafe extern "C" fn(*mut c_void, *mut c_void),
+    /// Caller-owned argument passed back to that callback.
+    user_data: usize,
+}
+
+impl Memory {
+    /// Records an allocation’s native backing and HSA visibility.
+    fn new(
+        allocation: Allocation,
+        size: usize,
+        owner: HsaAgent,
+        pool_global_flags: u32,
+        uncached: bool,
+        flags: u32,
+        accessible: Vec<HsaAgent>,
+    ) -> Self {
+        let info = allocation.info();
+        let agent_base = info.device_address as usize;
+        let global_flags =
+            effective_global_flags(pool_global_flags, uncached, flags & ALLOC_PCIE != 0);
+        let alloc_flags = POINTER_ALLOC_NONPAGED
+            | if info.host_address.is_some() {
+                POINTER_ALLOC_HOST_ACCESS
+            } else {
+                0
+            }
+            | if flags & ALLOC_CONTIGUOUS != 0 {
+                POINTER_ALLOC_CONTIGUOUS
+            } else {
+                0
+            }
+            | if flags & ALLOC_EXECUTABLE != 0 {
+                POINTER_ALLOC_EXECUTABLE
+            } else {
+                0
+            }
+            | if pool_global_flags & POOL_FLAG_FINE != 0 && flags & ALLOC_UNCACHED == 0 {
+                POINTER_ALLOC_ATOMIC_FULL
+            } else if flags & ALLOC_PCIE != 0 {
+                POINTER_ALLOC_ATOMIC_PARTIAL
+            } else {
+                0
+            };
+        Self {
+            allocation,
+            pool_global_flags,
+            description: PointerDescription {
+                pointer_type: POINTER_TYPE_HSA,
+                agent_base,
+                host_base: info.host_address,
+                size,
+                owner,
+                global_flags,
+                registered: true,
+                alloc_flags,
+                user_data: 0,
+                accessible,
+            },
+            deallocation_callbacks: Vec::new(),
+        }
+    }
+
+    /// Checks whether the requested address belongs to this object.
+    fn contains(&self, address: usize) -> bool {
+        self.description.contains(address)
+    }
+
+    /// Wraps an imported graphics allocation and its accessible agents.
+    fn new_interop(allocation: Allocation, owner: HsaAgent, accessible: Vec<HsaAgent>) -> Self {
+        let info = allocation.info();
+        let agent_base = info.device_address as usize;
+        Self {
+            allocation,
+            pool_global_flags: POOL_FLAG_COARSE,
+            description: PointerDescription {
+                pointer_type: POINTER_TYPE_GRAPHICS,
+                agent_base,
+                host_base: info.host_address,
+                size: info.size as usize,
+                owner,
+                global_flags: POOL_FLAG_COARSE,
+                registered: true,
+                alloc_flags: POINTER_ALLOC_NONPAGED
+                    | if info.host_address.is_some() {
+                        POINTER_ALLOC_HOST_ACCESS
+                    } else {
+                        0
+                    },
+                user_data: 0,
+                accessible,
+            },
+            deallocation_callbacks: Vec::new(),
+        }
+    }
+
+    /// Wraps an attached IPC allocation and its accessible agents.
+    fn new_ipc(
+        allocation: Allocation,
+        size: usize,
+        owner: HsaAgent,
+        accessible: Vec<HsaAgent>,
+    ) -> Self {
+        let info = allocation.info();
+        Self {
+            allocation,
+            pool_global_flags: POOL_FLAG_COARSE,
+            description: PointerDescription {
+                pointer_type: POINTER_TYPE_IPC,
+                agent_base: info.device_address as usize,
+                host_base: info.host_address,
+                size,
+                owner,
+                global_flags: POOL_FLAG_COARSE,
+                registered: true,
+                alloc_flags: POINTER_ALLOC_NONPAGED
+                    | if info.host_address.is_some() {
+                        POINTER_ALLOC_HOST_ACCESS
+                    } else {
+                        0
+                    },
+                user_data: 0,
+                accessible,
+            },
+            deallocation_callbacks: Vec::new(),
+        }
+    }
+
+    /// Releases this object’s native backing.
+    fn free(&mut self) -> Result<(), rocddi::Error> {
+        self.allocation.free()
+    }
+}
+
+/// Host memory registered or pinned for GPU access.
+///
+/// Some registrations require a native rocddi allocation while already-shared
+/// ranges need only the pointer metadata, hence the optional owner.
+pub(crate) struct LockedMemory {
+    /// Native registration when the host range needed one.
+    allocation: Option<Allocation>,
+    /// Host and agent aliases reported by pointer queries.
+    description: PointerDescription,
+}
+
+/// Reserved virtual-address interval and the mappings currently occupying it.
+pub(crate) struct VmemReservation {
+    /// Native reserved address range.
+    address: VirtualAddress,
+    /// Public pointer metadata for the reservation.
+    description: PointerDescription,
+    /// Callbacks invoked when public ownership is removed.
+    deallocation_callbacks: Vec<RegisteredDeallocationCallback>,
+    /// Mappings that still occupy this reserved range.
+    mappings: usize,
+}
+
+impl VmemReservation {
+    /// Records a reserved virtual range and its registration state.
+    fn new(address: VirtualAddress, registered: bool) -> Self {
+        let info = address.info();
+        Self {
+            address,
+            description: PointerDescription {
+                pointer_type: POINTER_TYPE_RESERVED_ADDR,
+                agent_base: 0,
+                host_base: Some(info.address as usize),
+                size: info.size as usize,
+                owner: HsaAgent { handle: 0 },
+                global_flags: 0,
+                registered,
+                alloc_flags: 0,
+                user_data: 0,
+                accessible: Vec::new(),
+            },
+            deallocation_callbacks: Vec::new(),
+            mappings: 0,
+        }
+    }
+
+    /// Checks whether the requested address belongs to this object.
+    fn contains_range(&self, address: usize, size: usize) -> bool {
+        address
+            .checked_sub(self.address.info().address as usize)
+            .and_then(|offset| offset.checked_add(size))
+            .is_some_and(|end| size != 0 && end <= self.description.size)
+    }
+
+    /// Releases this object’s native backing.
+    fn free(&mut self) -> Result<(), rocddi::Error> {
+        self.address.free()
+    }
+}
+
+/// Retained physical-memory handle shared by public references and mappings.
+pub(crate) struct VmemHandle {
+    /// Native physical backing or imported fabric handle.
+    backing: VmemBacking,
+    /// Number of public references to this handle.
+    references: usize,
+    /// Number of active virtual-address mappings.
+    mappings: usize,
+    /// HSA pool from which the backing originates.
+    pool: HsaMemoryPool,
+    /// HSA physical-memory type exposed for this handle.
+    memory_type: u32,
+}
+
+/// Origin of physical backing behind an HSA virtual-memory handle.
+enum VmemBacking {
+    /// Allocation created through this runtime.
+    Owned(VirtualMemory),
+    /// Native allocation imported from a DMA-BUF.
+    DmaBuf(VirtualMemory),
+    /// Fabric token with per-device imported native owners.
+    Fabric {
+        /// Opaque native token received from another process.
+        token: [u8; 16],
+        /// Imports keyed by activated GPU index in this runtime.
+        imports: HashMap<usize, VirtualMemory>,
+    },
+}
+
+impl VmemHandle {
+    /// Records virtual memory backing, pool, and memory type.
+    fn new(backing: VmemBacking, pool: HsaMemoryPool, memory_type: u32) -> Self {
+        Self {
+            backing,
+            references: 1,
+            mappings: 0,
+            pool,
+            memory_type,
+        }
+    }
+
+    /// Checks whether the virtual memory handle came from an import.
+    fn imported(&self) -> bool {
+        !matches!(&self.backing, VmemBacking::Owned(_))
+    }
+
+    /// Returns native backing when this frontend owns the allocation.
+    fn owned_memory(&self) -> Option<&VirtualMemory> {
+        match &self.backing {
+            VmemBacking::Owned(memory) => Some(memory),
+            VmemBacking::DmaBuf(_) | VmemBacking::Fabric { .. } => None,
+        }
+    }
+
+    /// Returns the known allocation size, if native metadata provides it.
+    fn known_size(&self) -> Option<u64> {
+        match &self.backing {
+            VmemBacking::Owned(memory) | VmemBacking::DmaBuf(memory) => Some(memory.info().size),
+            VmemBacking::Fabric { .. } => None,
+        }
+    }
+
+    /// Returns backing memory after validating the requested access.
+    fn memory_for_access(
+        &mut self,
+        gpu_index: usize,
+        device: &Device,
+    ) -> Result<&VirtualMemory, Status> {
+        match &mut self.backing {
+            VmemBacking::Owned(memory) | VmemBacking::DmaBuf(memory) => Ok(memory),
+            VmemBacking::Fabric { token, imports } => {
+                if !imports.contains_key(&gpu_index) {
+                    imports.try_reserve(1).map_err(|_| OUT_OF_RESOURCES)?;
+                    let memory = linux_interop::import_fabric_virtual_memory(device, *token)
+                        .map_err(map_error)?;
+                    imports.insert(gpu_index, memory);
+                }
+                imports.get(&gpu_index).ok_or(ERROR)
+            }
+        }
+    }
+
+    /// Releases this object’s native backing.
+    fn free(&mut self) -> Result<(), rocddi::Error> {
+        match &mut self.backing {
+            VmemBacking::Owned(memory) | VmemBacking::DmaBuf(memory) => memory.free(),
+            VmemBacking::Fabric { imports, .. } => {
+                while let Some(index) = imports.keys().next().copied() {
+                    let Some(mut memory) = imports.remove(&index) else {
+                        continue;
+                    };
+                    if let Err(error) = memory.free() {
+                        imports.insert(index, memory);
+                        return Err(error);
+                    }
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+/// Native mapping owner selected by whether access belongs to a CPU or GPU.
+enum VmemAccessOwner {
+    /// Native mapping in an activated device VM.
+    Device(VirtualDeviceMapping),
+    /// Native mapping in the host process address space.
+    Host(VirtualHostMapping),
+}
+
+/// Per-agent permissions and the native object that enforces them.
+struct VmemAccess {
+    /// HSA permission mask granted to this agent.
+    permissions: u32,
+    /// Native mapping retained until this access is removed.
+    owner: VmemAccessOwner,
+}
+
+impl VmemAccess {
+    /// Releases this object’s native backing.
+    fn free(&mut self) -> Result<(), rocddi::Error> {
+        match &mut self.owner {
+            VmemAccessOwner::Device(mapping) => mapping.free(),
+            VmemAccessOwner::Host(mapping) => mapping.free(),
+        }
+    }
+}
+
+/// One mapped virtual subrange and all native per-agent access mappings.
+pub(crate) struct VmemMapping {
+    /// Public physical-memory handle supplying backing.
+    handle: u64,
+    /// Base address of the parent reservation.
+    reservation: usize,
+    /// First mapped virtual byte.
+    address: usize,
+    /// Byte offset into physical backing.
+    offset: usize,
+    /// Mapped byte extent.
+    size: usize,
+    /// Per-agent permissions and native map owners.
+    access: HashMap<u64, VmemAccess>,
+}
+
+impl VmemMapping {
+    /// Checks whether the requested address belongs to this object.
+    fn contains(&self, address: usize) -> bool {
+        contains(self.address, self.size, address)
+    }
+
+    /// Releases access.
+    fn free_access(&mut self) -> Result<(), rocddi::Error> {
+        let agents = self.access.keys().copied().collect::<Vec<_>>();
+        for agent in agents {
+            let Some(mut access) = self.access.remove(&agent) else {
+                continue;
+            };
+            if let Err(error) = access.free() {
+                self.access.insert(agent, access);
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
+}
+
+impl LockedMemory {
+    /// Records pinned host storage and its accessible agents.
+    fn new(
+        allocation: Option<Allocation>,
+        host_base: usize,
+        device_base: usize,
+        size: usize,
+        global_flags: u32,
+        accessible: Vec<HsaAgent>,
+    ) -> Self {
+        Self {
+            allocation,
+            description: PointerDescription {
+                pointer_type: POINTER_TYPE_LOCKED,
+                agent_base: device_base,
+                host_base: Some(host_base),
+                size,
+                owner: HsaAgent { handle: CPU_AGENT },
+                global_flags,
+                registered: true,
+                alloc_flags: POINTER_ALLOC_NONPAGED | POINTER_ALLOC_HOST_ACCESS,
+                user_data: 0,
+                accessible,
+            },
+        }
+    }
+
+    /// Checks whether the requested address belongs to this object.
+    fn contains(&self, address: usize) -> bool {
+        self.description.contains(address)
+    }
+
+    /// Releases this object’s native backing.
+    fn free(&mut self) -> Result<(), rocddi::Error> {
+        self.allocation.as_mut().map_or(Ok(()), Allocation::free)
+    }
+}
+
+/// Checks whether the requested address belongs to this object.
+fn contains(base: usize, size: usize, address: usize) -> bool {
+    address
+        .checked_sub(base)
+        .is_some_and(|offset| offset < size)
+}
+
+/// Returns the current host page.
+fn current_host_page() -> Result<usize, Status> {
+    let page = usize::try_from(rocddi::memory::host::host_page_size().map_err(map_error)?)
+        .map_err(|_| ERROR)?;
+    if page < 4096 || !page.is_power_of_two() {
+        return Err(ERROR);
+    }
+    Ok(page)
+}
+
+mod allocation;
+mod pointer;
+mod pool;
+
+use pointer::*;
+use pool::*;
+pub(crate) use pool::{SignalBatchPool, signal_batch_pool};
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests;

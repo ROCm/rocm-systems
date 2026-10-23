@@ -20,8 +20,8 @@ namespace cdna2 {
 
 /// @brief CDNA2 ISA traits (GFX90a, Wave64, separate AccVGPR file, GFX9 S_WAITCNT).
 ///
-/// @details Overrides `MAX_ACC_VGPRS_PER_WF = 256` (CDNA2 introduced a
-/// dedicated AccVGPR register file; MFMA outputs go to AccVGPRs, not VGPRs).
+/// @details Reserves 256 AccVGPRs in the dedicated accumulator register file.
+/// MFMA outputs select VGPRs or AccVGPRs through the instruction encoding.
 /// All other constants inherit from `amdgpu::CdnaIsaBase`.
 ///
 /// CDNA2 hardware does not expose COND_DBG_USER / COND_DBG_SYS but those

@@ -224,8 +224,12 @@ observations still attach both obligations to the whole race-plugin event, so a
 consumer restricted to an already-completed lane group can still get a false
 report. `TODO(newling)` regression cases track this remaining #12237 gap. The
 core checker's [FLAT register-readiness policy](memory-wait-counter-coverage.md#flat-register-readiness)
-tracks the groups separately. Mixed LDS/global functional execution remains
-limited by first-request-lane routing, tracked separately in #11456.
+tracks the groups separately. Functional execution splits mixed requests by
+address space, completing retryable global/scratch work before accessing LDS.
+The race plugin retains both counter obligations on its single mixed event.
+LDS validation and interval registration are bounded by the CU backing capacity.
+Out-of-bounds addresses preserve register and counter dependencies without
+recording LDS bytes. DDS has no emulator backing and faults before execution.
 
 An all-ones wait-count field is the architectural “do not wait” value. CDNA's
 four-bit `lgkmcnt(15)` and six-bit `vmcnt(63)` therefore retire no events;
@@ -306,7 +310,11 @@ complete from their in-order completion rule.
 **LDS race detection** uses coarse-grained counters (one per 16-byte chunk) for
 fast-path checks, with interval-based overlap scanning as a fallback. Live
 events are split by direction so that RAW and WAR hazards are checked
-independently.
+independently. Chunks containing only ordinary LDS accesses from the accessing
+wave can bypass the interval scan because those operations are ordered. A
+mixed chunk uses the scan until its count drains. The history remains available
+for checks by other waves until a barrier retires it. Direct-to-LDS and unordered
+memory operations still require their own completion checks.
 
 **VGPR race detection** tracks events per register, using the stored exec mask
 to determine which lanes are affected. Tracking is at byte granularity within
@@ -370,7 +378,7 @@ Source files are under `lib/rocjitsu/src/rocjitsu/vm/plugins/race_detector/`:
 ```
 race_detector/
 ├── plugin.h/.cpp            rocjitsu plugin adapter (translates hooks to core API)
-└── core/                    detection algorithm (does not depend on rocjitsu types)
+└── core/                    event tracking and lifetime
     ├── race_detector.h/.cpp  main detector: event allocation, validation, retirement
     ├── wave_race_state.h/.cpp  per-wave state: register tracking, waitcnt resolution
     ├── event_registry.h      append-only event store with prefix trimming
@@ -381,6 +389,9 @@ race_detector/
     └── profiler_interface.h  optional hook profiling
 ```
 
+Explicit wait decoding is shared with the core checker in
+`lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h`.
+
 ## Tests
 
 Tests are part of the rocjitsu test suite (`emulation/rocjitsu/tests/`):
@@ -389,17 +400,25 @@ Tests are part of the rocjitsu test suite (`emulation/rocjitsu/tests/`):
   via `race_test_builder.h`, covering VGPR, SGPR, LDS, D16, DTL, exec mask,
   multi-workgroup, and mixed counter scenarios.
 - `interval_set_tests.cpp` — unit tests for `IntervalSet`.
-- `hip_race_gfx950_test.hip` and `hip_race_gfx1151_test.hip` — end-to-end HIP
-  kernel tests run under the emulator with the `race` plugin enabled in the
-  config file.
+- `wait_hazard_test.cpp` — wait/readiness tests shared with the core checker.
+- The `race` suite in
+  [ROCm/rocjitsu-test-corpus](https://github.com/ROCm/rocjitsu-test-corpus)
+  owns the gfx950 and gfx1151 end-to-end HIP programs. The
+  `rocjitsu-test-corpus` workflow builds them with the corpus HIP toolchain
+  and runs each case under the emulator with the `race` plugin enabled.
 
 ```bash
 # Core detection tests
 ctest --test-dir build -R "RaceDetector|IntervalSet"
-
-# End-to-end HIP tests (the test config enables the race plugin)
-ctest --test-dir $BUILD_DIR -R "RaceTest"
 ```
+
+To run the HIP cases locally, follow the corpus's
+[race-suite instructions](https://github.com/ROCm/rocjitsu-test-corpus#rocjitsu-race-detector-integration)
+and point the wrapper at the RocJITsu build being tested. Set
+`ROCJITSU_RACE_CONFIG` to `tests/race-detector/race_test_config.json` for gfx950
+or `configs/gfx1151.json` for gfx1151, using absolute paths from this source tree.
+The original `RaceTest.<target>_<name>` selectors remain available through
+the corpus's `--case` option.
 
 ## Limitations
 
@@ -417,6 +436,15 @@ ctest --test-dir $BUILD_DIR -R "RaceTest"
   asynchronous memory writes that overlap a pending load. Scalar-register WAW
   covers instruction writes and scalar loads that overlap pending scalar-memory
   destinations. LDS WAW is not currently reported.
+
+- **Embedded waits**: the plugin handles explicit wait instructions, including
+  `s_wait_idle` and RDNA4's compatibility `s_waitcnt`, but does not apply waits
+  embedded in other instructions. For example, RDNA4 `v_interp_p10_f32` with
+  `wait_exp:0` retires pending EXPCNT results in the core checker, while the
+  plugin leaves them pending and can report false register hazards. With
+  `wait_exp:7` (no wait), both keep those results pending. The shared
+  `wait_hazard_test.cpp` suite records this boundary. Supporting embedded waits
+  requires retirement before the instruction's register accesses.
 
 - **Conservative DPP/SDWA write masks**: WAW precision depends on the execution
   plugin's instruction-write lane and byte masks. DPP destinations can currently

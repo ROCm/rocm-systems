@@ -301,6 +301,30 @@ runs:
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1) 2>/dev/null || echo 'not found')"; $1 --version 2>&1 | head -n 1 || true; }
         for i in python3 git cmake ctest gcc g++ gcov clang clang++; do which-realpath $i; done
         echo ""
+        echo "Loaded AMD GPU driver version:"
+        cat /sys/module/amdgpu/version 2>/dev/null || echo "Loaded driver version unavailable (/sys/module/amdgpu/version)"
+        echo ""
+        echo "AMD SMI version and driver information:"
+        amd_smi=$(command -v amd-smi || echo "${{ inputs.rocm-path }}/bin/amd-smi")
+        if [ -x "$amd_smi" ]; then
+          "$amd_smi" version || echo "AMD SMI version query failed"
+          "$amd_smi" static --driver || echo "AMD SMI driver query failed"
+        else
+          echo "amd-smi not available"
+        fi
+        echo ""
+        if [ ! -r /sys/module/amdgpu/version ]; then
+          echo "AMD GPU module metadata (module on disk, if visible in the container):"
+          if command -v modinfo >/dev/null 2>&1; then
+            modinfo amdgpu 2>&1 | grep -E '^(filename|version|srcversion|vermagic|intree):|^modinfo:' || true
+          else
+            echo "modinfo not available"
+          fi
+          echo ""
+        fi
+        echo "Linux kernel version:"
+        uname -r
+        echo ""
         echo "ROCm version:"
         cat ${{ inputs.rocm-path }}/.info/version 2>/dev/null || echo "Version file not found"
         echo ""

@@ -16,12 +16,13 @@ namespace cdna2 {
 
 std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf,
                                                amdgpu::ScalarMemState *state) {
-  return amdgpu::addr_calc::smem_calculate_address(inst, wf, state);
+  return amdgpu::addr_calc::smem_calculate_address(inst, wf, state, true);
 }
 
 void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf,
                               amdgpu::VectorMemState &d) {
-  amdgpu::addr_calc::flat_calculate_addresses(inst, wf, d);
+  amdgpu::addr_calc::flat_calculate_addresses<amdgpu::addr_calc::ScratchAddressMode::LegacyCdna>(
+      inst, wf, d);
 }
 
 void mubuf_calculate_addresses(const MubufMachineInst &inst, amdgpu::Wavefront &wf,

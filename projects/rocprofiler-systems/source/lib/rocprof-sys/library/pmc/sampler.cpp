@@ -5,11 +5,11 @@
 // and ROCPROFSYS_USE_AINIC before any header gates code on that macro.
 #include "backends/amd_smi/ainic_feature.hpp"
 
+#include "core/control/clocks/timeline.hpp"
 #include "library/pmc/collectors/common/collector_slice.hpp"
 #include "library/pmc/collectors/common/settings.hpp"
 #include "library/pmc/collectors/gpu/cache_policy.hpp"
 #include "library/pmc/collectors/gpu/collector.hpp"
-#include "library/pmc/collectors/gpu/perfetto_policy.hpp"
 #include "library/pmc/device_providers/amd_smi/provider.hpp"
 #include <cstdint>
 #include <rocprofiler-sdk/version.h>
@@ -18,10 +18,9 @@
 #    include "library/pmc/device_providers/rocprofiler_sdk/provider.hpp"
 #endif
 
-#if defined(ROCPROFSYS_BUILD_AINIC)
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
 #    include "library/pmc/collectors/nic/cache_policy.hpp"
 #    include "library/pmc/collectors/nic/collector.hpp"
-#    include "library/pmc/collectors/nic/perfetto_policy.hpp"
 #endif
 
 #if defined(ROCPROFSYS_BUILD_HIPFILE)
@@ -30,13 +29,11 @@
 #    include "library/pmc/collectors/hipfile/cache_policy.hpp"
 #    include "library/pmc/collectors/hipfile/collector.hpp"
 #    include "library/pmc/collectors/hipfile/device.hpp"
-#    include "library/pmc/collectors/hipfile/perfetto_policy.hpp"
 #    include "library/pmc/device_providers/hipfile/provider.hpp"
 #endif
 
 #include "library/pmc/collectors/cpu/cache_policy.hpp"
 #include "library/pmc/collectors/cpu/collector.hpp"
-#include "library/pmc/collectors/cpu/perfetto_policy.hpp"
 #include "library/pmc/device_providers/procfs/provider.hpp"
 
 #include "backends/amd_smi/backend.hpp"
@@ -94,15 +91,13 @@ is_initialized()
 struct gpu_production_config
 {
     using SettingsApi = collectors::settings_policy;
-    using PerfettoApi = collectors::gpu::perfetto_policy;
     using CacheApi    = collectors::gpu::cache_policy;
 };
 
-#if defined(ROCPROFSYS_BUILD_AINIC)
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
 struct nic_production_config
 {
     using SettingsApi = collectors::settings_policy;
-    using PerfettoApi = collectors::nic::perfetto_policy;
     using CacheApi    = collectors::nic::cache_policy;
 };
 #endif
@@ -110,7 +105,6 @@ struct nic_production_config
 struct cpu_production_config
 {
     using SettingsApi = collectors::settings_policy;
-    using PerfettoApi = collectors::cpu::perfetto_policy;
     using CacheApi    = collectors::cpu::cache_policy;
 };
 
@@ -131,7 +125,7 @@ using gpu_perf_counter_collector_t =
     collectors::gpu_perf_counter::collector<gpu_perf_counter_provider_t>;
 #endif
 
-#if defined(ROCPROFSYS_BUILD_AINIC)
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
 using nic_device_t = collectors::nic::device<amd_smi_device_t>;
 using nic_collector_t =
     collectors::nic::collector<provider_t, nic_device_t, nic_production_config>;
@@ -146,9 +140,6 @@ using cpu_collector_t = collectors::cpu::collector<cpu_provider_t, cpu_productio
 struct hipfile_production_config
 {
     using SettingsApi = collectors::settings_policy;
-    // hipFile counter tracks reach Perfetto from hipfile_pmc_sample records, so
-    // the legacy per-collector Perfetto policy is a no-op rather than a second producer.
-    using PerfettoApi = collectors::hipfile::perfetto_policy;
     using CacheApi    = collectors::hipfile::cache_policy;
 };
 
@@ -168,7 +159,7 @@ std::unique_ptr<gpu_collector_t> g_gpu_collector;
 std::shared_ptr<gpu_perf_counter_provider_t>  g_gpu_perf_counter_provider;
 std::unique_ptr<gpu_perf_counter_collector_t> g_gpu_perf_counter_collector;
 #endif
-#if defined(ROCPROFSYS_BUILD_AINIC)
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
 std::unique_ptr<nic_collector_t> g_nic_collector;
 #endif
 
@@ -301,8 +292,7 @@ sample()
         return;
     }
 
-    auto timestamp =
-        static_cast<std::int64_t>(tim::get_clock_real_now<size_t, std::nano>());
+    auto timestamp = control::clocks::timeline_ns<std::int64_t>();
 
     for(auto& slice : g_collector_slices)
     {
@@ -343,12 +333,12 @@ setup()
             g_device_provider = provider_factory_t::create();
 
             g_gpu_collector = std::make_unique<gpu_collector_t>(g_device_provider);
-#if defined(ROCPROFSYS_BUILD_AINIC)
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
             g_nic_collector = std::make_unique<nic_collector_t>(g_device_provider);
 #endif
 
             g_collector_slices.emplace_back(*g_gpu_collector);
-#if defined(ROCPROFSYS_BUILD_AINIC)
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
             g_collector_slices.emplace_back(*g_nic_collector);
 #endif
         }
@@ -405,8 +395,7 @@ post_process()
 void
 pause()
 {
-    const auto timestamp =
-        static_cast<std::int64_t>(tim::get_clock_real_now<size_t, std::nano>());
+    const auto timestamp = control::clocks::timeline_ns<std::int64_t>();
 
     // sample() holds this lock for a whole AMD SMI sweep, and the caller is an
     // application thread leaving a traced region. Hand the timestamp to the
@@ -465,7 +454,7 @@ postfork_child_cleanup()
     g_gpu_perf_counter_provider.reset();
 #endif
     g_gpu_collector.reset();
-#if defined(ROCPROFSYS_BUILD_AINIC)
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
     g_nic_collector.reset();
 #endif
 #if defined(ROCPROFSYS_BUILD_HIPFILE)

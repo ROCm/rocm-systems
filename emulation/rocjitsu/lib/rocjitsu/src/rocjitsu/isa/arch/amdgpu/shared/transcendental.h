@@ -4,22 +4,18 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_SHARED_TRANSCENDENTAL_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_TRANSCENDENTAL_H_
 
-/// @file Shared transcendental function implementations for AMDGPU ISAs.
-///
-/// These reference implementations produce results within the ULP accuracy
-/// specified by the ISA manuals (typically 1 ULP for f32, 2 ULP for f64).
-/// They are used by the simulator's execute() bodies for V_RCP_F32,
-/// V_RSQ_F32, V_RSQ_F16, V_SQRT_F32, V_SQRT_F16, V_LOG_F32, V_EXP_F32, V_SIN_F32, V_COS_F32,
-/// V_RCP_F64, V_RSQ_F64, V_SQRT_F64.
-/// F32 reciprocal, square root and F32/F16 reciprocal square root match the captured RDNA3/4
-/// mappings. F16 RSQ/SQRT apply the half input-denormal policy after promotion to F32. F32 LOG/EXP
-/// and SIN/COS use staged integer arithmetic modeled from RDNA3/4 captures, including coordinate
-/// truncation and intermediate product rounding.
-///
-/// All functions handle special cases (NaN, Inf, denormals, ±0) per the
-/// AMD ISA specification.
+/// @file transcendental.h
+/// @brief Shared transcendental evaluation for AMDGPU execute bodies.
+/// @details F32 reciprocal/root/log/exp/trigonometric mappings use RDNA3/4
+/// capture-based implementations; F64 and TANH use host arithmetic. These have
+/// separate accuracy and hardware-coverage contracts.
+/// F16 callers flush the raw source half under MODE before widening, including
+/// for RSQ/SQRT. The half helpers round and flush the result; callers apply
+/// OMOD/CLAMP afterward. See output_modifier.h for migration scope and evidence.
 
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/output_denormal.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/output_modifier.h"
 #include "util/amdgpu_exp.h"
 #include "util/amdgpu_log.h"
 #include "util/amdgpu_rcp.h"
@@ -64,7 +60,8 @@ inline float exp_f32(float x, bool quiet_snan = true) {
 }
 
 namespace detail {
-// The caller establishes nearest rounding and preserves the host environment.
+// The caller establishes nearest rounding and preserves the host environment,
+// and flushes the source half under MODE before widening it (input_denormal.h).
 // The returned F32 value represents the already rounded architectural half.
 template <bool Logarithm>
 inline float log_exp_f16_nearest(float x, uint32_t denorm_mode, bool fp16_ovfl, bool quiet_snan) {
@@ -76,11 +73,6 @@ inline float log_exp_f16_nearest(float x, uint32_t denorm_mode, bool fp16_ovfl, 
     if constexpr (Logarithm)
       return bits & 0x80000000u ? std::bit_cast<float>(0xffc00000u) : x;
     return bits & 0x80000000u ? 0.0f : x;
-  }
-  if (!(denorm_mode & 1u) && magnitude < 0x38800000u) {
-    bits &= 0x80000000u;
-    magnitude = 0;
-    x = std::bit_cast<float>(bits);
   }
   double value;
   if constexpr (Logarithm) {
@@ -95,15 +87,16 @@ inline float log_exp_f16_nearest(float x, uint32_t denorm_mode, bool fp16_ovfl, 
     value = std::exp2(std::clamp(static_cast<double>(x), -32.0, 32.0));
   }
   // F32 evaluation can land on a half midpoint and round in the wrong direction.
-  uint16_t result = pseudo_scalar::round_f16_result(value, 0, 0, false, fp16_ovfl, false);
-  if (!(denorm_mode & 2u) && (result & 0x7c00u) == 0)
-    result &= 0x8000u;
-  return util::f16_to_f32(result);
+  const uint16_t result = pseudo_scalar::round_f16_result(value, 0, 0, false, fp16_ovfl, false);
+  return util::f16_to_f32(static_cast<uint16_t>(output_denormal::flush_output<fp_format::F16>(
+      uint32_t{result}, output_denormal::Policy::make(denorm_mode))));
 }
 } // namespace detail
 
-/// @brief Evaluate LOG/EXP with half input, output and finite-overflow policies.
-/// @details Round once to F16 before any output scaling. Guest rounding is ignored.
+/// @brief Evaluate LOG/EXP, round to F16, and apply output-denormal policy.
+/// @details The caller flushes the raw source half before widening. Return an
+/// already-rounded half represented in F32; the caller owns OMOD/CLAMP.
+/// Guest rounding is ignored; FP16_OVFL controls finite overflow.
 template <bool Logarithm>
 inline float log_exp_f16(float x, uint32_t denorm_mode, bool fp16_ovfl, bool quiet_snan) {
   fp_mode::ScopedEnvironment environment(0);
@@ -136,33 +129,34 @@ inline float cos_f32(float x, uint32_t denorm_mode = 3, bool quiet_snan = true) 
   return util::amdgpu_trig_f32(x, true, denorm_mode, quiet_snan);
 }
 
-/// @brief Half transcendental operations share input, rounding and output policies.
-/// @details Evaluate in F32, then round to half before applying any modifiers.
-/// FP16_OVFL also saturates infinity produced from zero or a flushed input.
+/// @brief Half transcendental mappings evaluated through their F32 counterparts.
 enum class HalfOperation { RCP, RSQ, SQRT, SIN, COS };
 
+/// @brief Evaluate a prepared source, round to F16, and apply output-denormal policy.
+/// @details The caller flushes the raw half before widening and owns OMOD/CLAMP.
+/// Return an already-rounded half represented in F32. FP16_OVFL also saturates
+/// infinity produced from zero or a flushed input.
 template <HalfOperation Op>
 inline float map_f16(float source, uint32_t denorm_mode, bool fp16_ovfl, bool quiet_snan) {
-  const float input = pseudo_scalar::detail::flush_input_f16(source, denorm_mode);
   float value;
   if constexpr (Op == HalfOperation::RCP)
-    value = util::amdgpu_rcp_f32(input, quiet_snan);
+    value = util::amdgpu_rcp_f32(source, quiet_snan);
   else if constexpr (Op == HalfOperation::RSQ)
-    value = util::amdgpu_rsq_f32(input, quiet_snan);
+    value = util::amdgpu_rsq_f32(source, quiet_snan);
   else if constexpr (Op == HalfOperation::SQRT)
-    value = util::amdgpu_sqrt_f32(input, quiet_snan);
+    value = util::amdgpu_sqrt_f32(source, quiet_snan);
   else
-    value = util::amdgpu_trig_f32(input, Op == HalfOperation::COS, 3, quiet_snan);
+    value = util::amdgpu_trig_f32(source, Op == HalfOperation::COS, 3, quiet_snan);
   const uint32_t bits = std::bit_cast<uint32_t>(value);
   if (fp16_ovfl && (bits & 0x7fffffffu) == 0x7f800000u &&
       (std::bit_cast<uint32_t>(source) & 0x7fffffffu) < 0x7f800000u)
     return std::bit_cast<float>((bits & 0x80000000u) | 0x477fe000u);
-  uint16_t result = util::f32_to_f16_mode(value, fp16_ovfl);
-  if (!(denorm_mode & 2u) && (result & 0x7c00u) == 0)
-    result &= 0x8000u;
-  return util::f16_to_f32(result);
+  const uint16_t result = util::f32_to_f16_mode(value, fp16_ovfl);
+  return util::f16_to_f32(static_cast<uint16_t>(output_denormal::flush_output<fp_format::F16>(
+      uint32_t{result}, output_denormal::Policy::make(denorm_mode))));
 }
 
+/// @brief Map a native batch lane by lane with the same F16 result policy.
 template <HalfOperation Op>
 inline util::native<float> map_f16_simd(util::native<float> source, uint32_t denorm_mode,
                                         bool fp16_ovfl, bool quiet_snan) {
@@ -173,6 +167,7 @@ inline util::native<float> map_f16_simd(util::native<float> source, uint32_t den
 /// @brief Apply the vector half mapping and result stages to a pseudo-scalar op.
 /// @details Physical gfx1201 ignores guest rounding for every half transcendental.
 /// Half rounding and output-denormal handling precede OMOD, just as for vectors.
+/// The caller flushes the source half under MODE before widening it.
 inline uint32_t execute_pseudo_f16(pseudo_scalar::Operation operation, float source, bool absolute,
                                    bool negate, [[maybe_unused]] uint32_t round_mode,
                                    uint32_t denorm_mode, uint32_t omod, bool clamp,
@@ -196,25 +191,21 @@ inline uint32_t execute_pseudo_f16(pseudo_scalar::Operation operation, float sou
     value = map_f16<HalfOperation::SQRT>(source, denorm_mode, fp16_ovfl, true);
     break;
   }
-  value = fp_mode::apply_omod_f16(value, omod, fp16_ovfl);
-  if (clamp) {
-    const uint32_t bits = std::bit_cast<uint32_t>(value);
-    if ((bits & 0x80000000u) || (bits & 0x7fffffffu) > 0x7f800000u)
-      value = 0.0f;
-    else if (bits > 0x3f800000u)
-      value = 1.0f;
-  }
-  return fp_mode::finalize_omod_f16(util::f32_to_f16(value), omod);
+  // The mapped value is already a half. TRANS OMOD overflow rounds to nearest,
+  // and CLAMP turns a NaN into +0 on every target with these instructions.
+  const output_modifier::Policy policy{
+      .omod = omod, .clamp = clamp, .clamp_nan_to_zero = true, .fp16_ovfl = fp16_ovfl};
+  return output_modifier::apply<fp_format::F16>(uint32_t{util::f32_to_f16(value)}, policy);
 }
 
-/// @brief Hyperbolic tangent (single-precision, correctly-rounded libm reference).
+/// @brief Evaluate single-precision TANH using host std::tanh.
 inline float tanh_f32(float x) {
   if (std::isnan(x))
     return std::bit_cast<float>(std::bit_cast<uint32_t>(x) | 0x00400000u);
   return std::tanh(x);
 }
 
-/// @brief 1.0 / x (double-precision reciprocal, ~1 ULP).
+/// @brief Evaluate reciprocal using host double division.
 inline double rcp_f64(double x) {
   if (std::isnan(x))
     return x;
@@ -225,7 +216,7 @@ inline double rcp_f64(double x) {
   return 1.0 / x;
 }
 
-/// @brief 1.0 / sqrt(x) (double-precision reciprocal square root, ~2 ULP).
+/// @brief Evaluate reciprocal square root using host double sqrt/division.
 inline double rsq_f64(double x) {
   if (std::isnan(x))
     return x;
@@ -238,7 +229,7 @@ inline double rsq_f64(double x) {
   return 1.0 / std::sqrt(x);
 }
 
-/// @brief sqrt(x) (double-precision square root, correctly-rounded).
+/// @brief Evaluate double-precision square root using host std::sqrt.
 inline double sqrt_f64(double x) {
   if (std::isnan(x))
     return x;

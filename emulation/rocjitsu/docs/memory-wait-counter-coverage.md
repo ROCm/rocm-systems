@@ -34,9 +34,18 @@ positions: a nonzero wait proves an ordered result complete only when at least t
 many younger operations in its own class follow it. Generic FLAT on older CDNA is treated
 conservatively as unordered. Zero waits reset this ordering state. FLAT contributes only
 to memory domains used by its resolved requests; register dependencies follow the
-resolved routing masks. Mixed global/shared FLAT functional execution still has the
-existing first-request-lane routing limitation; the checker does not repair memory
-routing.
+resolved routing masks. Mixed global/shared FLAT functional execution separates
+the lanes by address space; the diagnostic checker tracks their counter obligations
+independently of this functional execution.
+
+GFX12 block transfers use their issue-time M0 DWORD mask for register dependencies.
+Disabled load destinations and store-data words do not require completion or replay
+waits. Address registers remain replay sources even when they overlap disabled data
+words. An empty M0 mask still occupies the instruction's counter positions.
+Block data operands also check VGPR ownership per DWORD. Loads write and track
+their owned, enabled destinations; stores consume their owned words and use the
+wave's VGPR0 for enabled words outside the allocation. Replay dependencies and
+incoming register checks cover those actual sources, including the VGPR0 fallback.
 
 Legacy VMEM writeback can avoid an overwrite warning only when the pending result
 and the incoming producer share an ordered completion class. On legacy RDNA,
@@ -68,8 +77,8 @@ to DS when at least one lane requests LDS memory. This conditional-participation
 rule is the runtime model across AMD GPU targets; physical validation on every
 architecture is not established. Its global/scratch and LDS portions can complete independently;
 RDNA4 ISA section 5.7.1.3 describes complementary lane masks for these portions.
-The checker uses the resolved address of each lane, rather than the functional
-pipeline's first-lane route, to associate a returned VGPR lane with its counter.
+The checker uses the resolved address of each lane to associate a returned VGPR
+lane with its counter.
 For example, if lane 0 loads from LDS and lane 1 loads from global memory, a zero
 DS wait releases lane 0's register dependency while lane 1 still needs a VMEM wait.
 A consumer reading both lanes needs both; a consumer reading only lane 0 does not.
