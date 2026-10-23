@@ -89,6 +89,9 @@ typedef enum {
   // Appended rather than grouped with the other Direct entries so existing
   // values stay stable.
   RCCL_DIRECT_ALLTOALL, // AlltoAll as per-peer Send/Recv (no collective kernel)
+  // Reporting only (rcclGetCollImplInfo / rcclSymKGetInfo): a symmetric dispatch that
+  // resolves to a Tensor Data Mover kernel. Live dispatch always tags RCCL_SYMMETRIC.
+  RCCL_SYMMETRIC_TDM,
   RCCL_ALGO_COUNT
 } rcclAddonAlgos_t;
 
