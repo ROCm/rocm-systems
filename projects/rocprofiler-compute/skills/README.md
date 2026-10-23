@@ -95,9 +95,10 @@ Each dataset needs at least three cases that should trigger the skill, two that
 should not, and one triggering case with judged behavior. Negative cases carry
 only an id, a prompt, and an optional note.
 
-Every workspace gets a copy of `sample/`. A triggering case that needs an
-application names one with `sample`, and behavioral mode tells the agent to use
-it. Routing mode sends the prompt unchanged.
+A triggering case that needs an application sets `workspace` to a directory
+under that skill's `evals/files/`, and the prompt names the application. The
+contents of that directory are copied to the workspace root, as skillscope
+does.
 
 ## Keeping skills correct
 

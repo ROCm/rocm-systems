@@ -3,8 +3,8 @@
     {
       "id": "mem-access-inefficiency",
       "skill_should_trigger": true,
-      "prompt": "find the memory access inefficiencies in this rocprofiler-compute capture",
-      "sample": "vrandom_access.cpp",
+      "prompt": "find the memory access inefficiencies in this rocprofiler-compute capture\n\nThe application is ./sample/vrandom_access.cpp.",
+      "workspace": "evals/files/vrandom_access",
       "expected_behavior": [
         "reads the memory chart before opening an individual cache level",
         "cites hit rates or request counts from the report",
@@ -18,8 +18,8 @@
     {
       "id": "mem-cache-hit-rates",
       "skill_should_trigger": true,
-      "prompt": "what are my L2 and vL1D hit rates for this kernel and are they bad?",
-      "sample": "vsequential_access.cpp",
+      "prompt": "what are my L2 and vL1D hit rates for this kernel and are they bad?\n\nThe application is ./sample/vsequential_access.cpp.",
+      "workspace": "evals/files/vsequential_access",
       "expected_behavior": [
         "opens the l2 and vl1d blocks for a single kernel id",
         "judges the rates against what the algorithm should do rather than a fixed cutoff"
@@ -32,8 +32,8 @@
     {
       "id": "mem-lds-bank-conflicts",
       "skill_should_trigger": true,
-      "prompt": "does my kernel have LDS bank conflicts?",
-      "sample": "lds.hip",
+      "prompt": "does my kernel have LDS bank conflicts?\n\nThe application is ./sample/lds.hip.",
+      "workspace": "evals/files/lds",
       "expected_behavior": [
         "opens the lds block for the selected kernel",
         "reads the bank conflict counters from the report"
@@ -43,8 +43,8 @@
     {
       "id": "mem-bandwidth-bound",
       "skill_should_trigger": true,
-      "prompt": "this kernel looks memory bound, where is the bandwidth going?",
-      "sample": "vcopy.cpp",
+      "prompt": "this kernel looks memory bound, where is the bandwidth going?\n\nThe application is ./sample/vcopy.cpp.",
+      "workspace": "evals/files/vcopy",
       "expected_behavior": [
         "walks the hierarchy from the memory chart down to the level responsible",
         "distinguishes traffic that caches absorbed from traffic that reached HBM"
@@ -54,8 +54,8 @@
     {
       "id": "mem-membw-analysis-gfx950",
       "skill_should_trigger": true,
-      "prompt": "run the guided memory bandwidth analysis on my MI350 workload",
-      "sample": "membw_analysis_test_suite/gl2_backpressure.hip",
+      "prompt": "run the guided memory bandwidth analysis on my MI350 workload\n\nThe application is ./sample/membw_analysis_test_suite/gl2_backpressure.hip.",
+      "workspace": "evals/files/gl2_backpressure",
       "expected_behavior": [
         "uses --experimental --membw-analysis",
         "notes that the analysis is experimental and shipped for gfx950",
