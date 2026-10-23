@@ -26,6 +26,16 @@ int rj_arith_v_fma_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t in
                                  const uint32_t *const *b, const uint32_t *const *c,
                                  uint32_t *excp_flag_user);
 
+// FP32 FMA preserves inactive lanes and supports whole-register aliases.
+// Modes 0..2 are supported; mode 3 returns RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS
+// without changing D or FP status. The status pointer is unused in modes 0..2.
+// Instruction flags must be zero. Only supported CPU/semantics fields and
+// RJ_ARITH_FP16_OVFL are accepted; the latter has no effect on FP32 results.
+int rj_arith_v_fma_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                 uint32_t *const *d, const uint32_t *const *a,
+                                 const uint32_t *const *b, const uint32_t *const *c,
+                                 uint32_t *excp_flag_user);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif
