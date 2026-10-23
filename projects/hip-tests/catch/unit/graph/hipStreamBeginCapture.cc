@@ -2390,17 +2390,15 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_LegacyStreamWaitIsRejected) {
   CAPTURE(captureStreamFlags);
 
   StreamGuard stream_guard(Streams::withFlags, captureStreamFlags);
-  EventsGuard events(1);
-
+  EventsGuard event(1);
   hipStream_t captureStream = stream_guard.stream();
-  hipEvent_t originEvent = events[0];
 
   HIP_CHECK(hipStreamBeginCapture(captureStream, hipStreamCaptureModeThreadLocal));
   dummyKernel<<<1, 1, 0, captureStream>>>();
   HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipEventRecord(originEvent, captureStream));
+  HIP_CHECK(hipEventRecord(event, captureStream));
 
-  HIP_CHECK_ERROR(hipStreamWaitEvent(nullptr, originEvent, 0), hipErrorStreamCaptureImplicit);
+  HIP_CHECK_ERROR(hipStreamWaitEvent(nullptr, event, 0), hipErrorStreamCaptureImplicit);
 
   hipGraph_t graph = nullptr;
   HIP_CHECK_ERROR(hipStreamEndCapture(captureStream, &graph), hipErrorStreamCaptureInvalidated);
