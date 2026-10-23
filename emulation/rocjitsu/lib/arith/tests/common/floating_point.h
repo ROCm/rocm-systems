@@ -20,8 +20,13 @@ namespace rocjitsu::arith::test {
 static const uint16_t kF16QuietNaNBits = 0x7e01;
 static const uint16_t kF16PositiveInfinityBits = 0x7c00;
 
+// BF16 special-value bit patterns. The NaN is quiet with payload 1.
+static const uint16_t kBF16QuietNaNBits = 0x7fc1;
+static const uint16_t kBF16PositiveInfinityBits = 0x7f80;
+
 // FP32 special-value bit patterns. The NaN is quiet with payload 0x12345.
 static const uint32_t kF32QuietNaNBits = 0x7fc12345U;
+static const uint32_t kF32SignalingNaNBits = 0x7f812345U;
 static const uint32_t kF32PositiveInfinityBits = 0x7f800000U;
 
 // Draw two finite FP16 values, using the high 16 bits of each engine result.
@@ -31,6 +36,17 @@ inline uint32_t random_f16_pair(std::minstd_rand &random) {
   for (int shift : {0, 16}) {
     uint32_t half = uint32_t(random()) >> 15;
     word |= ((half & 0x8000) | ((half & 0x7fff) % 0x7c00)) << shift;
+  }
+  return word;
+}
+
+// Draw two finite BF16 values from the high 16 engine bits, with unbiased
+// exponents -8..7 and arbitrary signs/fractions. This keeps products finite.
+inline uint32_t random_bf16_pair(std::minstd_rand &random) {
+  uint32_t word = 0;
+  for (int shift : {0, 16}) {
+    uint32_t half = uint32_t(random()) >> 15;
+    word |= ((half & 0x8000) | ((119 + ((half >> 7) & 15)) << 7) | (half & 0x7f)) << shift;
   }
   return word;
 }
@@ -45,6 +61,12 @@ inline uint32_t random_f32_bits(std::minstd_rand &random) {
 inline uint16_t random_f16_bits(std::minstd_rand &random) {
   uint32_t raw = uint32_t(random()) >> 15;
   return uint16_t((raw & 0x8000) | ((12 + ((raw >> 10) & 3)) << 10) | (raw & 0x3ff));
+}
+
+// Draw a finite BF16 encoding with a modest exponent from the engine's high bits.
+inline uint16_t random_bf16_bits(std::minstd_rand &random) {
+  uint32_t raw = uint32_t(random()) >> 15;
+  return uint16_t((raw & 0x8000) | ((124 + ((raw >> 7) & 3)) << 7) | (raw & 0x7f));
 }
 
 // Match NaNs by classification. Loose semantics compare signed infinities
