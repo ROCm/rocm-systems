@@ -10,6 +10,7 @@ case is exercised against both front-ends.
 
 from __future__ import annotations
 import json
+from pathlib import Path
 import pytest
 from conftest import RocprofsysTest
 
@@ -223,6 +224,392 @@ class TestDomainFlags(RocprofsysTest):
                 "ls",
             ],
             pass_regex=["ROCPROFSYS_AMD_SMI_METRICS=temp,power"],
+        )
+
+
+# ============================================================================
+# Domain flag artifacts on a real GPU workload (transpose). The tests above
+# only prove flag -> env mapping on a cheap `ls` run; these assert the actual
+# Perfetto/RocPD content the flags are supposed to produce.
+# ============================================================================
+
+DOMAIN_FILTER_RULES = frozenset(
+    {
+        "gpu-metrics-selected",
+        "gpu-metrics-busy-mem",
+        "gpu-metrics-busy-only",
+        "rocm-hip-kernel",
+        "rocm-hip-api",
+        "sampling-target-gpu0",
+        "sampling-target-gpu-range",
+        "gpu-metrics-trace-gpu-preset",
+    }
+)
+
+# trace-hpc disables sampling in the preset JSON; re-enable for GPU metric collection.
+_PRESET_SAMPLING_ENV = {
+    "ROCPROFSYS_USE_SAMPLING": "ON",
+    "ROCPROFSYS_USE_PROCESS_SAMPLING": "ON",
+}
+
+
+def _resolve_rocpd_rules(
+    *,
+    validation_rules_dir: Path,
+    transpose_baseline_rules: list[Path],
+    domain_rules,
+    with_amd_smi: bool,
+    filter_profiles: list[str],
+) -> list[Path]:
+    if filter_profiles == ["rocm-hip-api"]:
+        return [validation_rules_dir / "domain-flags" / "rocm-hip-api-rules.json"]
+
+    files = list(transpose_baseline_rules)
+    if with_amd_smi and not filter_profiles:
+        files.append(validation_rules_dir / "transpose" / "amd-smi-rules.json")
+    for name in filter_profiles:
+        if name not in DOMAIN_FILTER_RULES:
+            pytest.fail(f"Unknown domain-flags filter profile: {name}")
+        files.extend(domain_rules(name))
+    return files
+
+
+def _assert_workload_artifacts(
+    test: RocprofsysTest,
+    result,
+    *,
+    env: dict[str, str],
+    validation_rules_dir: Path,
+    transpose_baseline_rules: list[Path],
+    domain_rules,
+    perfetto_categories: list[str] | None,
+    with_amd_smi: bool,
+    filter_profiles: list[str],
+) -> None:
+    if perfetto_categories:
+        test.assert_perfetto(
+            result,
+            subtest_name="Perfetto domain slices",
+            categories=perfetto_categories,
+        )
+    else:
+        test.assert_perfetto(result, subtest_name="Perfetto trace file")
+
+    if env.get("ROCPROFSYS_USE_ROCPD", "ON").upper() == "OFF":
+        return
+
+    rules_files = _resolve_rocpd_rules(
+        validation_rules_dir=validation_rules_dir,
+        transpose_baseline_rules=transpose_baseline_rules,
+        domain_rules=domain_rules,
+        with_amd_smi=with_amd_smi,
+        filter_profiles=filter_profiles,
+    )
+    test.assert_rocpd(
+        result,
+        subtest_name="RocPD validation",
+        rules_files=rules_files,
+    )
+
+
+# flag_args, pass_regex, seed_env, perfetto_categories, with_amd_smi, filter_profiles
+DOMAIN_ARTIFACT_CASES = [
+    pytest.param(
+        ["--gpu"],
+        ["ROCPROFSYS_USE_AMD_SMI=true"],
+        None,
+        ["hip_runtime_api"],
+        True,
+        [],
+        id="gpu_bare",
+    ),
+    pytest.param(
+        ["--gpu=temp,power"],
+        ["ROCPROFSYS_AMD_SMI_METRICS=temp,power"],
+        None,
+        ["hip_runtime_api"],
+        True,
+        ["gpu-metrics-selected"],
+        id="gpu_temp_power",
+    ),
+    pytest.param(
+        ["--gpu=busy,mem_usage"],
+        ["ROCPROFSYS_AMD_SMI_METRICS=busy,mem_usage"],
+        None,
+        ["hip_runtime_api"],
+        True,
+        ["gpu-metrics-busy-mem"],
+        id="gpu_busy_mem_usage",
+    ),
+    pytest.param(
+        ["--gpu=busy"],
+        ["ROCPROFSYS_AMD_SMI_METRICS=busy"],
+        None,
+        ["hip_runtime_api"],
+        True,
+        ["gpu-metrics-busy-only"],
+        id="gpu_busy_only",
+    ),
+    pytest.param(
+        ["--rocm"],
+        [
+            "ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,marker_api,"
+            "kernel_dispatch,memory_copy,scratch_memory"
+        ],
+        None,
+        ["hip_runtime_api", "kernel_dispatch", "memory_copy"],
+        False,
+        [],
+        id="rocm_bare",
+    ),
+    pytest.param(
+        ["--rocm=hip,kernel,memory"],
+        ["ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy"],
+        None,
+        ["hip_runtime_api", "kernel_dispatch", "memory_copy"],
+        False,
+        [],
+        id="rocm_hip_kernel_memory",
+    ),
+    pytest.param(
+        ["--rocm=hip,kernel"],
+        ["ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch"],
+        None,
+        ["hip_runtime_api"],
+        False,
+        ["rocm-hip-kernel"],
+        id="rocm_hip_kernel",
+    ),
+    pytest.param(
+        ["--rocm=hip"],
+        ["ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api"],
+        None,
+        ["hip_runtime_api"],
+        False,
+        ["rocm-hip-api"],
+        id="rocm_hip_only",
+    ),
+    pytest.param(
+        ["--gpu", "--gpus=0"],
+        ["ROCPROFSYS_SAMPLING_GPUS=0", "ROCPROFSYS_USE_AMD_SMI=true"],
+        None,
+        ["hip_runtime_api"],
+        True,
+        ["sampling-target-gpu0"],
+        id="gpu_with_gpus_0",
+    ),
+    pytest.param(
+        ["--gpu", "--gpus=0-1"],
+        ["ROCPROFSYS_SAMPLING_GPUS=0-1"],
+        None,
+        ["hip_runtime_api"],
+        True,
+        ["sampling-target-gpu-range"],
+        id="gpu_with_gpus_range",
+    ),
+    pytest.param(
+        ["--gpu", "--cpu", "--rocm"],
+        [
+            "ROCPROFSYS_USE_AMD_SMI=true",
+            "ROCPROFSYS_USE_SAMPLING=true",
+            "ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,marker_api,"
+            "kernel_dispatch,memory_copy,scratch_memory",
+        ],
+        {"ROCPROFSYS_USE_SAMPLING": "OFF"},
+        ["hip_runtime_api", "kernel_dispatch", "memory_copy"],
+        True,
+        [],
+        id="gpu_cpu_rocm_stack",
+    ),
+    pytest.param(
+        ["--gpu", "--rocm=hip,kernel"],
+        [
+            "ROCPROFSYS_USE_AMD_SMI=true",
+            "ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch",
+        ],
+        None,
+        ["hip_runtime_api"],
+        True,
+        ["rocm-hip-kernel"],
+        id="gpu_rocm_composed",
+    ),
+]
+
+PRESET_ARTIFACT_CASES = [
+    pytest.param(
+        ["--preset=trace-hpc", "--gpu=temp,power", "--gpus=0"],
+        [
+            r"Preset:\s+trace-hpc",
+            "ROCPROFSYS_SAMPLING_GPUS=0",
+            "ROCPROFSYS_USE_AMD_SMI=true",
+            r"ROCPROFSYS_AMD_SMI_METRICS=.*temp",
+            r"ROCPROFSYS_AMD_SMI_METRICS=.*power",
+        ],
+        _PRESET_SAMPLING_ENV,
+        ["hip_runtime_api", "kernel_dispatch"],
+        True,
+        ["sampling-target-gpu0"],
+        id="preset_domain_and_target",
+    ),
+    pytest.param(
+        ["--preset=trace-gpu"],
+        [r"Preset:\s+trace-gpu", "ROCPROFSYS_USE_AMD_SMI=true"],
+        None,
+        ["hip_runtime_api"],
+        True,
+        # trace-gpu only enables busy/mem_usage/power/temp (see
+        # source/bin/common/presets/trace-gpu.json), not gfx_clock/mem_clock,
+        # so it needs its own rule rather than the full amd-smi baseline.
+        ["gpu-metrics-trace-gpu-preset"],
+        id="trace_gpu_preset",
+    ),
+    pytest.param(
+        ["--preset=trace-gpu", "--gpus=0"],
+        [
+            r"Preset:\s+trace-gpu",
+            "ROCPROFSYS_SAMPLING_GPUS=0",
+            "ROCPROFSYS_USE_AMD_SMI=true",
+        ],
+        None,
+        ["hip_runtime_api"],
+        True,
+        ["sampling-target-gpu0"],
+        id="trace_gpu_preset_with_gpus",
+    ),
+    pytest.param(
+        ["--parallel=mpi,openmp", "--rocm=hip,kernel"],
+        [
+            "ROCPROFSYS_USE_MPIP=true",
+            "ROCPROFSYS_USE_OMPT=true",
+            "ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch",
+        ],
+        None,
+        ["hip_runtime_api"],
+        False,
+        ["rocm-hip-kernel"],
+        id="parallel_with_rocm",
+    ),
+]
+
+
+@pytest.fixture
+def domain_rules(validation_rules_dir: Path):
+    def _rules(*names: str) -> list[Path]:
+        return [
+            validation_rules_dir / "domain-flags" / f"{name}-rules.json" for name in names
+        ]
+
+    return _rules
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.gpu
+@pytest.mark.hip
+@pytest.mark.transpose
+@pytest.mark.sampling
+@pytest.mark.domain_flags
+@pytest.mark.rocpd("domain_backend_flag_env")
+@pytest.mark.class_name("domain-flags-artifacts")
+class TestDomainFlagsArtifactsOnWorkload(RocprofsysTest):
+    @pytest.mark.parametrize(
+        "flag_args, pass_regex, seed_env, perfetto_categories, with_amd_smi, filter_profiles",
+        DOMAIN_ARTIFACT_CASES,
+    )
+    def test_on_transpose(
+        self,
+        domain_backend_flag_env,
+        validation_rules_dir,
+        transpose_baseline_rules,
+        domain_rules,
+        flag_args,
+        pass_regex,
+        seed_env,
+        perfetto_categories,
+        with_amd_smi,
+        filter_profiles,
+    ):
+        env = {**domain_backend_flag_env, **(seed_env or {})}
+        result = self.run_transpose_sample(env, flag_args)
+        self.assert_regex(result, pass_regex=pass_regex)
+        _assert_workload_artifacts(
+            self,
+            result,
+            env=env,
+            validation_rules_dir=validation_rules_dir,
+            transpose_baseline_rules=transpose_baseline_rules,
+            domain_rules=domain_rules,
+            perfetto_categories=perfetto_categories,
+            with_amd_smi=with_amd_smi,
+            filter_profiles=filter_profiles,
+        )
+
+    @pytest.mark.parametrize(
+        "flag_args, pass_regex, seed_env, perfetto_categories, with_amd_smi, filter_profiles",
+        PRESET_ARTIFACT_CASES,
+    )
+    def test_preset_on_transpose(
+        self,
+        domain_backend_flag_env,
+        validation_rules_dir,
+        transpose_baseline_rules,
+        domain_rules,
+        flag_args,
+        pass_regex,
+        seed_env,
+        perfetto_categories,
+        with_amd_smi,
+        filter_profiles,
+    ):
+        env = {**domain_backend_flag_env, **(seed_env or {})}
+        result = self.run_transpose_sample(env, flag_args)
+        self.assert_regex(result, pass_regex=pass_regex)
+        _assert_workload_artifacts(
+            self,
+            result,
+            env=env,
+            validation_rules_dir=validation_rules_dir,
+            transpose_baseline_rules=transpose_baseline_rules,
+            domain_rules=domain_rules,
+            perfetto_categories=perfetto_categories,
+            with_amd_smi=with_amd_smi,
+            filter_profiles=filter_profiles,
+        )
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.gpu
+@pytest.mark.hip
+@pytest.mark.transpose
+@pytest.mark.sys_run
+@pytest.mark.domain_flags
+@pytest.mark.rocpd("domain_backend_flag_env")
+@pytest.mark.class_name("domain-flags-artifacts-run")
+class TestDomainFlagsArtifactsOnWorkloadViaRun(RocprofsysTest):
+    """One representative case proving the GPU-artifact check also holds via
+    rocprof-sys-run, not just rocprof-sys-sample. The env-echo layer above is
+    already proven symmetric across both launchers; this is the
+    artifact-content layer's one parity case, not a full matrix duplicate."""
+
+    def test_gpu_bare_on_transpose(
+        self,
+        domain_backend_flag_env,
+        validation_rules_dir,
+        transpose_baseline_rules,
+    ):
+        result = self.run_transpose(domain_backend_flag_env, ["--gpu"])
+        self.assert_regex(result, pass_regex=["ROCPROFSYS_USE_AMD_SMI=true"])
+        self.assert_perfetto(
+            result,
+            subtest_name="Perfetto domain slices",
+            categories=["hip_runtime_api"],
+        )
+        self.assert_rocpd(
+            result,
+            subtest_name="RocPD validation",
+            rules_files=[
+                *transpose_baseline_rules,
+                validation_rules_dir / "transpose" / "amd-smi-rules.json",
+            ],
         )
 
 
