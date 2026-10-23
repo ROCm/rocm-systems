@@ -378,7 +378,7 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
                                   .targets = {}});
       } else {
         DeferredCallSite &site = deferred_calls[map_it->second];
-        // A source has one fallthrough block, and discovery derives every target's
+        // A source has one continuation, and discovery derives every target's
         // return SGPR from the same decoded call instruction.
         assert(site.continuation == &continuation && site.return_sreg == return_sreg &&
                "inconsistent deferred call metadata for one terminator");
