@@ -30,6 +30,7 @@ THE SOFTWARE.
 //    rocprofiler-sdk, which keeps the agents and queues of the first ROCr load it sees; when a
 //    check unloaded ROCr and the next one loaded it again, rocprofiler-sdk was left with stale
 //    handles and aborted rdcd ("Could not find agent", "HSA Queue is not initialized").
+//    When the module's own hsa_init() fails, the run fails before any check loads ROCr.
 //  - The checks of a GPU share one queue, which the module destroys when it is destroyed.
 //    rocprofiler-sdk does not destroy a queue it intercepted, so a queue per check stayed in
 //    rdcd until queue creation failed.
@@ -69,16 +70,18 @@ constexpr char kGpuName[] = "gfx-rdc-fake";
 // The runtime state the fake keeps. Every call takes the mutex.
 struct FakeHsa {
   std::mutex mutex;
-  int refs = 0;           // hsa_init() calls not yet matched by an hsa_shut_down()
-  int loads = 0;          // hsa_init() calls that found no reference (ROCr loads)
-  int unloads = 0;        // hsa_shut_down() calls that released the last reference
-  int shut_downs = 0;     // every hsa_shut_down() call
-  int failing_inits = 0;  // the next hsa_init() calls that fail
-  int queue_creates = 0;  // hsa_queue_create() calls that created a queue
+  int refs = 0;            // hsa_init() calls not yet matched by an hsa_shut_down()
+  int loads = 0;           // hsa_init() calls that found no reference (ROCr loads)
+  int unloads = 0;         // hsa_shut_down() calls that released the last reference
+  int shut_downs = 0;      // every hsa_shut_down() call
+  int failing_inits = 0;   // the next hsa_init() calls that fail
+  int queue_creates = 0;   // hsa_queue_create() calls that created a queue
+  int failing_copies = 0;  // the next async copies that fail after they start
   uint64_t next_handle = 1;
   std::set<void*> buffers;
   std::map<hsa_queue_t*, uint64_t> queues;  // queue -> write index
   std::set<uint64_t> signals;
+  std::set<uint64_t> failed_signals;  // completion signals of the copies that failed
   std::set<uint64_t> executables;
   std::set<uint64_t> readers;
 };
@@ -158,9 +161,6 @@ hsa_status_t hsa_agent_get_info(hsa_agent_t agent, hsa_agent_info_t attribute, v
       return HSA_STATUS_SUCCESS;
     case HSA_AGENT_INFO_NODE:
       *static_cast<uint32_t*>(value) = gpu ? 1 : 0;
-      return HSA_STATUS_SUCCESS;
-    case HSA_AGENT_INFO_QUEUE_MAX_SIZE:
-      *static_cast<uint32_t*>(value) = kQueueSize;
       return HSA_STATUS_SUCCESS;
     case HSA_AGENT_INFO_PROFILE:
       *static_cast<hsa_profile_t*>(value) = HSA_PROFILE_BASE;
@@ -277,9 +277,18 @@ hsa_status_t hsa_memory_copy(void* dst, const void* src, size_t size) {
   return HSA_STATUS_SUCCESS;
 }
 
-// The copy completes at once; hsa_signal_wait_scacquire() then reports it done.
+// The copy completes at once; hsa_signal_wait_scacquire() then reports it done. A failing copy
+// starts, copies nothing and leaves its signal negative, as ROCr does when a copy fails.
 hsa_status_t hsa_amd_memory_async_copy(void* dst, hsa_agent_t, const void* src, hsa_agent_t,
-                                       size_t size, uint32_t, const hsa_signal_t*, hsa_signal_t) {
+                                       size_t size, uint32_t, const hsa_signal_t*,
+                                       hsa_signal_t completion_signal) {
+  FakeHsa& f = fake();
+  std::lock_guard<std::mutex> lock(f.mutex);
+  if (f.failing_copies > 0) {
+    --f.failing_copies;
+    f.failed_signals.insert(completion_signal.handle);
+    return HSA_STATUS_SUCCESS;
+  }
   memcpy(dst, src, size);
   return HSA_STATUS_SUCCESS;
 }
@@ -304,6 +313,7 @@ hsa_status_t hsa_signal_create(hsa_signal_value_t, uint32_t, const hsa_agent_t*,
 hsa_status_t hsa_signal_destroy(hsa_signal_t signal) {
   FakeHsa& f = fake();
   std::lock_guard<std::mutex> lock(f.mutex);
+  f.failed_signals.erase(signal.handle);
   return f.signals.erase(signal.handle) == 1 ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_SIGNAL;
 }
 
@@ -311,10 +321,12 @@ void hsa_signal_store_relaxed(hsa_signal_t, hsa_signal_value_t) {}
 
 void hsa_signal_store_screlease(hsa_signal_t, hsa_signal_value_t) {}
 
-// Every dispatch and copy is complete when it is waited for.
-hsa_signal_value_t hsa_signal_wait_scacquire(hsa_signal_t, hsa_signal_condition_t,
+// Every dispatch and copy is complete when it is waited for; a failed copy's signal is negative.
+hsa_signal_value_t hsa_signal_wait_scacquire(hsa_signal_t signal, hsa_signal_condition_t,
                                              hsa_signal_value_t, uint64_t, hsa_wait_state_t) {
-  return 0;
+  FakeHsa& f = fake();
+  std::lock_guard<std::mutex> lock(f.mutex);
+  return f.failed_signals.count(signal.handle) != 0 ? -1 : 0;
 }
 
 hsa_status_t hsa_queue_create(hsa_agent_t agent, uint32_t size, hsa_queue_type32_t,
@@ -448,7 +460,7 @@ class RocrDiagLifetime : public ::testing::Test {
     FakeHsa& f = fake();
     std::lock_guard<std::mutex> lock(f.mutex);
     ASSERT_EQ(f.refs, 0) << "an earlier test left ROCr loaded";
-    f.loads = f.unloads = f.shut_downs = f.failing_inits = f.queue_creates = 0;
+    f.loads = f.unloads = f.shut_downs = f.failing_inits = f.failing_copies = f.queue_creates = 0;
     // Drop what an earlier test left behind; that test has already reported it.
     for (void* buffer : f.buffers) {
       free(buffer);
@@ -460,6 +472,7 @@ class RocrDiagLifetime : public ::testing::Test {
     f.buffers.clear();
     f.queues.clear();
     f.signals.clear();
+    f.failed_signals.clear();
     f.executables.clear();
     f.readers.clear();
   }
@@ -584,21 +597,39 @@ TEST_F(RocrDiagLifetime, DispatchingChecksReleaseTheirObjects) {
   EXPECT_EQ(loads(), 1);
 }
 
-// The module's own hsa_init() is the first of a run. When it fails, the check runs with its own
-// reference but cannot take the GPU's queue, which needs the module's reference, and fails; the
-// next run takes the module's reference.
+// The module's own hsa_init() is the first of a run. When it fails, the run fails before it builds
+// a check: a check's own hsa_init() could succeed, and its hsa_shut_down() would then unload ROCr
+// for the next run to load again. The next run takes the module's reference.
 TEST_F(RocrDiagLifetime, FailedInitIsRetriedOnTheNextRun) {
   Locked([](FakeHsa& f) { return f.failing_inits = 1; });
   std::string info;
   EXPECT_EQ(Run(RDC_DIAG_COMPUTE_QUEUE, &info), RDC_DIAG_RESULT_FAIL) << info;
-  EXPECT_NE(info.find("Fail to create queue"), std::string::npos) << info;
+  EXPECT_NE(info.find("ROCr initialization failed"), std::string::npos) << info;
+  EXPECT_EQ(loads(), 0) << "a check loaded ROCr after the module's hsa_init() failed";
+  EXPECT_EQ(unloads(), 0);
+  EXPECT_EQ(shut_downs(), 0) << "hsa_shut_down() was called after hsa_init() failed";
   EXPECT_EQ(refs(), 0) << "a reference was kept after hsa_init() failed";
   EXPECT_EQ(live(), 0U);
 
   EXPECT_EQ(Run(RDC_DIAG_COMPUTE_QUEUE), RDC_DIAG_RESULT_SKIP);
+  EXPECT_EQ(loads(), 1);
+  EXPECT_EQ(unloads(), 0);
   EXPECT_EQ(refs(), 1);
   EXPECT_EQ(queues(), 1U);
   EXPECT_EQ(live(), 1U);
+}
+
+// A copy that fails after it started leaves its signal negative. The Compute Queue check then
+// fails, and destroys that signal along with everything else it created.
+TEST_F(RocrDiagLifetime, FailedCopyReleasesItsSignal) {
+  KernelFiles kernels;
+  Locked([](FakeHsa& f) { return f.failing_copies = 1; });
+  std::string info;
+  EXPECT_EQ(Run(RDC_DIAG_COMPUTE_QUEUE, &info), RDC_DIAG_RESULT_FAIL) << info;
+  EXPECT_NE(info.find("Compute Queue test returns with error"), std::string::npos) << info;
+  EXPECT_EQ(Locked([](FakeHsa& f) { return f.failing_copies; }), 0) << "the check made no copy";
+  EXPECT_EQ(queues(), 1U);
+  EXPECT_EQ(live(), 1U) << "the failed copy's signal, or another object, was left behind";
 }
 
 // Destroying a module that holds no reference calls no hsa_shut_down().

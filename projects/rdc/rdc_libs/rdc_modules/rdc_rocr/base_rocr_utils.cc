@@ -355,20 +355,6 @@ hsa_status_t LoadKernelFromObjFile(RdcRocrBase* test, hsa_agent_t* agent) {
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t CreateQueue(hsa_agent_t device, hsa_queue_t** queue, uint32_t num_pkts) {
-  hsa_status_t err;
-
-  if (num_pkts == 0) {
-    err = hsa_agent_get_info(device, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &num_pkts);
-    throw_if_error(err);
-  }
-
-  err = hsa_queue_create(device, num_pkts, HSA_QUEUE_TYPE_MULTI, NULL, NULL, UINT32_MAX, UINT32_MAX,
-                         queue);
-  throw_if_error(err);
-
-  return HSA_STATUS_SUCCESS;
-}
 // Initialize the provided aql packet with standard default values, and
 // values from provided RdcRocrBase object.
 hsa_status_t InitializeAQLPacket(const RdcRocrBase* test, hsa_kernel_dispatch_packet_t* aql) {

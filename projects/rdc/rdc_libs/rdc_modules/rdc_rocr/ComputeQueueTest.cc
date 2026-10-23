@@ -127,6 +127,8 @@ hsa_status_t ComputeQueueTest::AgentMemcpy(void* dst, const void* src, size_t si
 
   if (hsa_signal_wait_scacquire(s, HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX,
                                 HSA_WAIT_STATE_BLOCKED) != 0) {
+    // The copy failed and the runtime set the signal negative; the runtime is done with it.
+    hsa_signal_destroy(s);
     err = HSA_STATUS_ERROR;
     RDC_LOG(RDC_ERROR, "Async copy signal error");
 

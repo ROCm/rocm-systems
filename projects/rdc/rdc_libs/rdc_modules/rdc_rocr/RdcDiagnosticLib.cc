@@ -54,18 +54,19 @@ std::map<uint64_t, hsa_queue_t*> held_queues;
 // Runs one check at a time, since the checks share the queues above.
 std::mutex run_mutex;
 
-void hold_hsa() {
+hsa_status_t hold_hsa() {
   std::lock_guard<std::mutex> lock(hsa_hold_mutex);
   if (hsa_held) {
-    return;
+    return HSA_STATUS_SUCCESS;
   }
   const hsa_status_t status = hsa_init();
   if (status != HSA_STATUS_SUCCESS) {
-    // The tests call hsa_init() themselves and report the failure; the next run tries again.
+    // The run fails without building a test; the next run tries again.
     RDC_LOG(RDC_ERROR, "hsa_init() failed with status " << status);
-    return;
+    return status;
   }
   hsa_held = true;
+  return HSA_STATUS_SUCCESS;
 }
 
 void release_hsa() {
@@ -255,7 +256,21 @@ rdc_status_t rdc_diag_test_case_run(rdc_diag_test_cases_t test_case,
   result->per_gpu_result_count = 0;
 
   std::lock_guard<std::mutex> run_lock(run_mutex);
-  hold_hsa();
+  const hsa_status_t init_status = hold_hsa();
+  if (init_status != HSA_STATUS_SUCCESS) {
+    // Build no test without the module's reference: a test's own hsa_init() could succeed, and
+    // its hsa_shut_down() would then unload ROCr, which the next run would load again.
+    result->status = RDC_DIAG_RESULT_FAIL;
+    std::string info = "ROCr initialization failed. hsa error code: " + std::to_string(init_status);
+    const char* status_string = nullptr;
+    if (hsa_status_string(init_status, &status_string) == HSA_STATUS_SUCCESS &&
+        status_string != nullptr) {
+      info += " ";
+      info += status_string;
+    }
+    strncpy_with_null(result->info, info.c_str(), MAX_DIAG_MSG_LENGTH);
+    return RDC_ST_OK;
+  }
 
   // Run test for each GPU. It will continue even
   // if one GPU test is fail.
