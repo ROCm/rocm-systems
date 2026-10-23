@@ -550,3 +550,38 @@ stream:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - pre-existing PAL limitation (unrelated to the barrier-bit opt): spin-wait blit stream wait-value deadlocks on HW rings; gfx1201 (amd_windows) hangs (>300s timeout); needs to be re-triaged"
     tags: [synchronization, overlap]
+  PerDispatchCUMask_Baseline:
+    <<: *level_default
+    disabled:
+      reason: "AIRUNTIME-2948 - per-dispatch CU mask requires lower layer changes that need to be merged"
+    tags: [cu_mask, P1]
+  PerDispatchCUMask_SEIsolation:
+    <<: *level_default
+    disabled:
+      reason: "AIRUNTIME-2948 - per-dispatch CU mask requires lower layer changes that need to be merged"
+    tags: [cu_mask, P1]
+  PerDispatchCUMask_InvalidParams:
+    <<: *level_default
+    disabled:
+      reason: "AIRUNTIME-2948 - per-dispatch CU mask requires lower layer changes that need to be merged"
+    tags: [cu_mask, P1]
+  PerDispatchCUMask_CountReduction:
+    <<: *level_default
+    disabled:
+      reason: "AIRUNTIME-2948 - per-dispatch CU mask requires lower layer changes that need to be merged"
+    tags: [cu_mask, P1]
+  PerDispatchCUMask_NoLeak:
+    <<: *level_default
+    disabled:
+      reason: "AIRUNTIME-2948 - per-dispatch CU mask requires lower layer changes that need to be merged"
+    tags: [cu_mask, P1]
+  PerDispatchCUMask_PerThreadAudit:
+    <<: *level_default
+    disabled:
+      reason: "AIRUNTIME-2948 - per-dispatch CU mask requires lower layer changes that need to be merged"
+    tags: [cu_mask, P2]
+  PerDispatchCUMask_AtomicCorrectness:
+    <<: *level_default
+    disabled:
+      reason: "AIRUNTIME-2948 - per-dispatch CU mask requires lower layer changes that need to be merged"
+    tags: [cu_mask, P2]

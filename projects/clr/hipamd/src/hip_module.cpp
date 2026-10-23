@@ -43,7 +43,8 @@ extern hipError_t ihipLaunchKernel(
     const void* hostFunction, dim3 gridDim, dim3 blockDim, void** args, size_t sharedMemBytes,
     hipStream_t stream, hipEvent_t startEvent, hipEvent_t stopEvent, int flags,
     dim3 clusterDim = {1, 1, 1}, bool clusterDimsSpecified = false,
-    const amd::DynDataPrefetchConfig* dynDataPrefetchConfig = nullptr);
+    const amd::DynDataPrefetchConfig* dynDataPrefetchConfig = nullptr,
+    const amd::CUEnableConfig* cuEnableConfig = nullptr);
 
 const std::string& FunctionName(const hipFunction_t f) {
   return hip::asKernel(f)->name();
@@ -702,7 +703,8 @@ hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_par
                                   uint32_t params = 0, uint32_t gridId = 0, uint32_t numGrids = 0,
                                   uint64_t prevGridSum = 0, uint64_t allGridSum = 0,
                                   uint32_t firstDevice = 0,
-                                  const amd::DynDataPrefetchConfig* dynDataPrefetchConfig = nullptr) {
+                                  const amd::DynDataPrefetchConfig* dynDataPrefetchConfig = nullptr,
+                                  const amd::CUEnableConfig* cuEnableConfig = nullptr) {
   int deviceId = hip::Stream::DeviceId(hStream);
 
   // Ensure the stream's device matches the current device,
@@ -757,6 +759,11 @@ hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_par
   if (dynDataPrefetchConfig != nullptr && dynDataPrefetchConfig->isEnabled()) {
     amd::NDRangeKernelCommand* kernelCmd = static_cast<amd::NDRangeKernelCommand*>(command);
     kernelCmd->setDynDataPrefetchConfig(*dynDataPrefetchConfig);
+  }
+
+  if (cuEnableConfig != nullptr && cuEnableConfig->isEnabled()) {
+    amd::NDRangeKernelCommand* kernelCmd = static_cast<amd::NDRangeKernelCommand*>(command);
+    kernelCmd->setCUEnableConfig(*cuEnableConfig);
   }
 
   if (startEvent != nullptr) {
@@ -1105,14 +1112,16 @@ hipError_t hipGetFuncBySymbol(hipFunction_t* functionPtr, const void* symbolPtr)
 hipError_t hipLaunchKernel_common(
     const void* hostFunction, dim3 gridDim, dim3 blockDim, void** args, size_t sharedMemBytes,
     hipStream_t stream, dim3 clusterDim = {1, 1, 1}, bool clusterDimsSpecified = false,
-    const amd::DynDataPrefetchConfig* dynDataPrefetchConfig = nullptr) {
+    const amd::DynDataPrefetchConfig* dynDataPrefetchConfig = nullptr,
+    const amd::CUEnableConfig* cuEnableConfig = nullptr) {
   if (!hip::isValid(stream)) {
     return hipErrorInvalidValue;
   }
   CHECK_STREAM_DETACHED(stream);
   STREAM_CAPTURE(hipLaunchKernel, stream, hostFunction, gridDim, blockDim, args, sharedMemBytes);
   return ihipLaunchKernel(hostFunction, gridDim, blockDim, args, sharedMemBytes, stream, nullptr,
-                          nullptr, 0, clusterDim, clusterDimsSpecified, dynDataPrefetchConfig);
+                          nullptr, 0, clusterDim, clusterDimsSpecified, dynDataPrefetchConfig,
+                          cuEnableConfig);
 }
 
 hipError_t hipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDim, void** args,
@@ -1491,6 +1500,39 @@ hipError_t hipLinkDestroy(hipLinkState_t hip_link_state) {
   HIP_RETURN(hipSuccess);
 }
 
+static hipError_t validateAndSetCUMaskConfig(const hipExtCUMaskConfig& hipCfg,
+                                       amd::CUEnableConfig& clrCfg) {
+  if (hipCfg.cuStart > amd::CUEnableConfig::kMaxCUStart) {
+    LogPrintfError("Per-dispatch CU mask: cuStart=%u exceeds max %u",
+                   hipCfg.cuStart, amd::CUEnableConfig::kMaxCUStart);
+    return hipErrorInvalidValue;
+  }
+  if (hipCfg.cuCount > amd::CUEnableConfig::kMaxCUCount) {
+    LogPrintfError("Per-dispatch CU mask: cuCount=%u exceeds max %u",
+                   hipCfg.cuCount, amd::CUEnableConfig::kMaxCUCount);
+    return hipErrorInvalidValue;
+  }
+  if (hipCfg.seEn > amd::CUEnableConfig::kMaxSEEn) {
+    LogPrintfError("Per-dispatch CU mask: seEn=%u exceeds max %u",
+                   hipCfg.seEn, amd::CUEnableConfig::kMaxSEEn);
+    return hipErrorInvalidValue;
+  }
+
+  clrCfg.cu_start = hipCfg.cuStart;
+  clrCfg.cu_count = hipCfg.cuCount;
+  // seEn=0 means "all SEs"
+  clrCfg.se_en = (hipCfg.seEn == 0) ? amd::CUEnableConfig::kMaxSEEn : hipCfg.seEn;
+  return hipSuccess;
+}
+
+static inline bool checkIfStreamCapture(hipStream_t stream) {
+  if (stream == nullptr || stream == hipStreamLegacy) {
+    return false;
+  }
+  return reinterpret_cast<hip::Stream*>(stream)->GetCaptureStatus()
+      == hipStreamCaptureStatusActive;
+}
+
 static hipError_t validateDynDataPrefetchConfig(const hipExtDynDataPrefetchConfig& config,
                                                  uint32_t maxRegions,
                                                  size_t cacheLineSize) {
@@ -1564,14 +1606,14 @@ hipError_t hipLaunchKernelExC(const hipLaunchConfig_t* config, const void* fPtr,
   // Distinguish the implicit {1,1,1} default from an explicitly supplied tuple.
   bool clusterDimsSpecified = false;
   amd::DynDataPrefetchConfig dynDataPrefetchConfig;
+  amd::CUEnableConfig cuEnableConfig;
+  bool cooperative = false;
   for (size_t attr_idx = 0; attr_idx < config->numAttrs; ++attr_idx) {
     hipLaunchAttribute& attr = config->attrs[attr_idx];
     switch (attr.id) {
       case hipLaunchAttributeCooperative:
         if (attr.val.cooperative != 0) {
-          HIP_RETURN_DURATION(
-              hipLaunchCooperativeKernel_common(fPtr, config->gridDim, config->blockDim, args,
-                                                config->dynamicSmemBytes, config->stream));
+          cooperative = true;
         }
         break;
       case hipLaunchAttributeClusterDimension:
@@ -1595,10 +1637,31 @@ hipError_t hipLaunchKernelExC(const hipLaunchConfig_t* config, const void* fPtr,
         }
         break;
       }
+      case hipLaunchAttributeExtCUMask: {
+        hipError_t status = validateAndSetCUMaskConfig(attr.val.cuMask, cuEnableConfig);
+        if (status != hipSuccess) {
+          HIP_RETURN(status);
+        }
+        break;
+      }
       default:
         LogPrintfError("Attribute %u not supported", attr.id);
         HIP_RETURN(hipErrorInvalidValue);
     }
+  }
+
+  if (cooperative && cuEnableConfig.isEnabled()) {
+    HIP_RETURN(hipErrorNotSupported);
+  }
+
+  if (cuEnableConfig.isEnabled() && checkIfStreamCapture(config->stream)) {
+    HIP_RETURN(hipErrorNotSupported);
+  }
+
+  if (cooperative) {
+    HIP_RETURN_DURATION(
+        hipLaunchCooperativeKernel_common(fPtr, config->gridDim, config->blockDim, args,
+                                          config->dynamicSmemBytes, config->stream));
   }
 
   const auto& deviceInfo = hip::getCurrentDevice()->devices()[0]->info();
@@ -1625,7 +1688,8 @@ hipError_t hipLaunchKernelExC(const hipLaunchConfig_t* config, const void* fPtr,
   HIP_RETURN_DURATION(hipLaunchKernel_common(
       fPtr, config->gridDim, config->blockDim, args, config->dynamicSmemBytes, config->stream,
       clusterDims, clusterDimsSpecified,
-      dynDataPrefetchConfig.isEnabled() ? &dynDataPrefetchConfig : nullptr));
+      dynDataPrefetchConfig.isEnabled() ? &dynDataPrefetchConfig : nullptr,
+      cuEnableConfig.isEnabled() ? &cuEnableConfig : nullptr));
 }
 
 hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f,
@@ -1667,14 +1731,14 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
   // Preserve whether the driver launch explicitly supplied cluster dimensions.
   bool clusterDimsSpecified = false;
   amd::DynDataPrefetchConfig dynDataPrefetchConfig;
+  amd::CUEnableConfig cuEnableConfig;
+  bool cooperative = false;
   for (size_t attr_idx = 0; attr_idx < config->numAttrs; ++attr_idx) {
     hipLaunchAttribute& attr = config->attrs[attr_idx];
     switch (attr.id) {
       case hipLaunchAttributeCooperative: {
         if (attr.value.cooperative != 0) {
-          HIP_RETURN(ihipModuleLaunchKernel(f, launch_params, hStream, kernelParams,
-                                            extra, nullptr, nullptr, 0,
-                                            amd::NDRangeKernelCommand::CooperativeGroups));
+          cooperative = true;
         }
         break;
       }
@@ -1697,10 +1761,31 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
         }
         break;
       }
+      case hipLaunchAttributeExtCUMask: {
+        hipError_t status = validateAndSetCUMaskConfig(attr.value.cuMask, cuEnableConfig);
+        if (status != hipSuccess) {
+          HIP_RETURN(status);
+        }
+        break;
+      }
       default:
         LogPrintfError("Attribute %u not supported", attr.id);
         HIP_RETURN(hipErrorInvalidValue);
     }
+  }
+
+  if (cooperative && cuEnableConfig.isEnabled()) {
+    HIP_RETURN(hipErrorNotSupported);
+  }
+
+  if (cuEnableConfig.isEnabled() && checkIfStreamCapture(hStream)) {
+    HIP_RETURN(hipErrorNotSupported);
+  }
+
+  if (cooperative) {
+    HIP_RETURN(ihipModuleLaunchKernel(f, launch_params, hStream, kernelParams,
+                                      extra, nullptr, nullptr, 0,
+                                      amd::NDRangeKernelCommand::CooperativeGroups));
   }
 
   if (clusterDim.x == 0 || clusterDim.y == 0 || clusterDim.z == 0) {
@@ -1714,6 +1799,7 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
 
   HIP_RETURN(ihipModuleLaunchKernel(f, launch_params_cluster, hStream, kernelParams, extra, nullptr,
                                     nullptr, 0, 0, 0, 0, 0, 0, 0,
-                                    dynDataPrefetchConfig.isEnabled() ? &dynDataPrefetchConfig : nullptr));
+                                    dynDataPrefetchConfig.isEnabled() ? &dynDataPrefetchConfig : nullptr,
+                                    cuEnableConfig.isEnabled() ? &cuEnableConfig : nullptr));
 }
 }  // namespace hip

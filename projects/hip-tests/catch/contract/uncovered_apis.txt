@@ -47,3 +47,8 @@ hipBindTextureToMipmappedArray  # Windows-only positive path; Linux device-side 
 # --- Device management (2) ---
 hipChooseDeviceR0600  # This is covered via contract tests for hipChooseDevice
 hipGetDevicePropertiesR0600 # This is covered via contract tests for hipGetDeviceProperties
+
+# --- Per-dispatch CU mask (1) ---
+# Requires gfx1250 hardware (Format 4 launch descriptors); parameter validation
+# is covered by unit test PerDispatchCUMask_InvalidParams.
+hipLaunchKernelExC_hipLaunchAttributeExtCUMask  # gfx1250-only; covered by unit test
