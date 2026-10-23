@@ -79,6 +79,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Fixed `ncclCommAbort` and `ncclCommRevoke` hanging when a DDA collective (IPC on gfx942/gfx950, fabric LL/LL128/VMM on gfx1250) was waiting on a peer that never joined. DDA kernels now observe the communicator abort flag while waiting. A parent communicator shrunk with `NCCL_SHRINK_ABORT` no longer uses DDA for later collectives.
 * Fixed `ncclCommShrink` accepting an exclusion list with negative, out-of-range or duplicate ranks and building a child communicator with an inconsistent rank count, which could hang or access memory out of bounds. Such a list now returns `ncclInvalidArgument`.
 * Fixed `ncclCommSplit` and `ncclCommShrink` crashing when `newcomm` is `NULL`. They now return `ncclInvalidArgument`.
+* Fixed communicator initialization skipping its error cleanup when a step after transport setup failed, for example an invalid `RCCL_UNROLL_FACTOR`. The error is now recorded in the communicator state and a split or shrink child communicator handle is still returned to the caller.
 
 ### Known issues
 * The FP8 ReduceSum and ReduceCopy device APIs are not exported in the LLVM bitcode library.
