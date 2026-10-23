@@ -481,10 +481,16 @@ void rasClientEventLoop(struct rasClient* client, int pollIdx) {
         char* endPtr = nullptr;
         errno = 0;
         double timeout = strtod(cmd + strlen("timeout "), &endPtr);
-        if (errno != 0 || !endPtr || *endPtr != '\0' || !std::isfinite(timeout) || timeout < 0.0) {
+        // Range-check in double before the int64 conversion (out of range is undefined behavior). The cap
+        // is below INT64_MAX because collectives.cc adds the timeout to timestamps and to
+        // RAS_COLLECTIVE_EXTRA_TIMEOUT; it matches rasTimeoutFactorNs (INT64_MAX/4 ns, ~73 years).
+        const double scaledTimeout = timeout * (double)CLOCK_UNITS_PER_SEC;
+        constexpr double kMaxTimeout = (double)(INT64_MAX / 4);
+        if (errno != 0 || !endPtr || *endPtr != '\0' || !std::isfinite(timeout) || timeout < 0.0 ||
+            !(scaledTimeout <= kMaxTimeout)) {
           snprintf(rasLine, sizeof(rasLine), "ERROR: Invalid timeout value %s\n", cmd + strlen("timeout "));
         } else {
-          client->timeout = timeout * CLOCK_UNITS_PER_SEC;
+          client->timeout = (int64_t)scaledTimeout;
           strcpy(rasLine, "OK\n");
         }
         if (rasClientEnqueueString(client, rasLine) != ncclSuccess) {
