@@ -187,9 +187,9 @@ start_context(const context::context* ctx)
     }
 
     // By default the device lock is acquired here, at context start, rather than at
-    // configuration time; see controller.cpp's use_device_lock_at_start handling for the
+    // configuration time; see controller.cpp's lock_at_configure_time handling for the
     // legacy opt-in. Mirrors device_counting.cpp's start_agent_ctx().
-    if(!counters::use_device_lock_at_start())
+    if(!counters::lock_at_configure_time())
     {
         for(const auto& agent : agent::get_agents())
         {
@@ -261,9 +261,9 @@ stop_context(const context::context* ctx)
 
     // By default the device lock acquired in start_context() above is released here, at
     // context stop, rather than being held for the life of the process (the legacy
-    // behavior under use_device_lock_at_start()). Mirrors device_counting.cpp's
+    // behavior under lock_at_configure_time()). Mirrors device_counting.cpp's
     // stop_agent_ctx().
-    if(!counters::use_device_lock_at_start())
+    if(!counters::lock_at_configure_time())
     {
         for(const auto& agent : agent::get_agents())
         {

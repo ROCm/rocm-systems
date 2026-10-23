@@ -187,9 +187,9 @@ CounterController::configure_agent_collection(rocprofiler_context_id_t          
 
     // By default the device lock and PTL disable happen at context start (see
     // core.cpp's start_context() / device_counting.cpp's start_agent_ctx()).
-    // ROCPROFILER_DEVICE_LOCK_AT_START is the legacy opt-in that moves both here, at
+    // ROCPROFILER_DEVICE_LOCK_AT_CONFIGURE is the legacy opt-in that moves both here, at
     // configuration time; configure_dispatch() below does the same for dispatch collection.
-    if(counters::use_device_lock_at_start())
+    if(counters::lock_at_configure_time())
     {
         if(counters::counter_collection_has_device_lock())
         {
@@ -242,10 +242,10 @@ CounterController::configure_dispatch(rocprofiler_context_id_t                  
 
             // By default the device lock is acquired at context start (see core.cpp's
             // start_context() / device_counting.cpp's start_agent_ctx()).
-            // ROCPROFILER_DEVICE_LOCK_AT_START is the legacy opt-in that moves it here, at
+            // ROCPROFILER_DEVICE_LOCK_AT_CONFIGURE is the legacy opt-in that moves it here, at
             // configuration time; configure_agent_collection() above does the same for
             // agent collection.
-            if(counters::use_device_lock_at_start() && counters::counter_collection_has_device_lock())
+            if(counters::lock_at_configure_time() && counters::counter_collection_has_device_lock())
             {
                 counters::counter_collection_device_lock(agent, true);
             }

@@ -218,9 +218,9 @@ ptl_control_supported()
 }
 
 bool
-use_device_lock_at_start()
+lock_at_configure_time()
 {
-    static bool value = rocprofiler::common::get_env("ROCPROFILER_DEVICE_LOCK_AT_START", false);
+    static bool value = rocprofiler::common::get_env("ROCPROFILER_DEVICE_LOCK_AT_CONFIGURE", false);
     return value;
 }
 

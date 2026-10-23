@@ -52,7 +52,7 @@ bool
 ptl_control_supported();
 
 bool
-use_device_lock_at_start();
+lock_at_configure_time();
 
 rocprofiler_status_t
 counter_collection_ptl_disable(const rocprofiler_agent_t* agent);

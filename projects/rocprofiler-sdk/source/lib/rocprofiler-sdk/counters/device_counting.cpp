@@ -464,16 +464,16 @@ start_agent_ctx(const context::context* ctx)
         }
 
         // Lock the device for profiling (non-fatal if it fails). By default this happens
-        // here, at context start; use_device_lock_at_start() opts into locking earlier,
+        // here, at context start; lock_at_configure_time() opts into locking earlier,
         // at configuration time, in which case configure_agent_collection() already did it.
-        if(!use_device_lock_at_start() && counters::counter_collection_has_device_lock())
+        if(!lock_at_configure_time() && counters::counter_collection_has_device_lock())
         {
             counters::counter_collection_device_lock(agent->get_rocp_agent(), true);
         }
 
-        // Disable PTL (non-fatal if it fails). Same default-vs-use_device_lock_at_start
+        // Disable PTL (non-fatal if it fails). Same default-vs-lock_at_configure_time
         // split as the device lock above.
-        if(!use_device_lock_at_start())
+        if(!lock_at_configure_time())
         {
             counters::counter_collection_ptl_disable(agent->get_rocp_agent());
         }
@@ -617,15 +617,15 @@ stop_agent_ctx(const context::context* ctx)
                                                           HSA_WAIT_STATE_ACTIVE);
 
         // Re-enable PTL (non-fatal if it fails). Only needed if it was disabled above in
-        // start_agent_ctx(), i.e. when not using the legacy use_device_lock_at_start() path.
-        if(!use_device_lock_at_start())
+        // start_agent_ctx(), i.e. when not using the legacy lock_at_configure_time() path.
+        if(!lock_at_configure_time())
         {
             counters::counter_collection_ptl_enable(agent->get_rocp_agent());
         }
 
         // Unlock the device (non-fatal if it fails). Only needed if it was locked above in
-        // start_agent_ctx(), i.e. when not using the legacy use_device_lock_at_start() path.
-        if(!use_device_lock_at_start() && counters::counter_collection_has_device_lock())
+        // start_agent_ctx(), i.e. when not using the legacy lock_at_configure_time() path.
+        if(!lock_at_configure_time() && counters::counter_collection_has_device_lock())
         {
             counters::counter_collection_device_unlock(agent->get_rocp_agent());
         }
