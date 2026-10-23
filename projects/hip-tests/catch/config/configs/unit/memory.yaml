@@ -2218,20 +2218,32 @@ memory:
     <<: *level_default
     disabled:
       targets: [amd_linux, amd_wsl, nvidia_windows, nvidia_linux]
-      reason: "Tests the Windows APU runtime"
+      reason: "ROCM-33212 - tests the Windows APU runtime"
     tags: [query]
   Unit_hipMalloc_Apu_ReportedFreeIsAllocatable:
     <<: *level_default
     disabled:
       targets: [amd_linux, amd_wsl, nvidia_windows, nvidia_linux]
-      reason: "Tests the Windows APU runtime"
+      reason: "ROCM-33212 - tests the Windows APU runtime"
+    tags: [alloc, query]
+  Unit_hipMalloc_Apu_ReportedFreeIsAllocatableWithHostMemory:
+    <<: *level_default
+    disabled:
+      targets: [amd_linux, amd_wsl, nvidia_windows, nvidia_linux]
+      reason: "ROCM-33212 - tests the Windows APU runtime"
     tags: [alloc, query]
   Unit_hipMalloc_Apu_ConcurrentAllocationsStayWithinTotal:
     <<: *level_default
     disabled:
       targets: [amd_linux, amd_wsl, nvidia_windows, nvidia_linux]
-      reason: "Tests the Windows APU runtime"
+      reason: "ROCM-33212 - tests the Windows APU runtime"
     tags: [alloc]
+  Unit_hipMallocArray_Apu_ConcurrentAllocationsStayWithinTotal:
+    <<: *level_default
+    disabled:
+      targets: [amd_linux, amd_wsl, nvidia_windows, nvidia_linux]
+      reason: "ROCM-33212 - tests the Windows APU runtime"
+    tags: [alloc, image]
   Unit_hipFreeImplicitSyncDev:
     <<: *level_default
     tags: [alloc, P0]
