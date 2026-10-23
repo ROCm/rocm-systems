@@ -72,8 +72,10 @@ _NATIVE_F32_GATE = (
 # helpers install F32 MODE rounding in C++ instead, so _vop3_f32_core admits only
 # cores whose recipe asks for that rounding; the packed-F32 ternary functor uses
 # its unscoped core without consulting this table. Host-float functors (the DX9
-# and legacy multiplies, MAD, min/max, DIV_FIXUP) are absent on purpose: scoping
-# them buys nothing and perturbs the host NaN selection they rely on.
+# and legacy multiplies, MAD, min/max, DIV_FIXUP) are absent on purpose: they
+# retain their existing code generation, host NaN selection and flag behavior. A
+# scope would contain the flags they raise, which is why VOPD takes one around its
+# own host multiply in simd_coverage.h; the generated routes stay unscoped.
 _ARITHMETIC_CORES: dict[str, ArithmeticCore] = {
     'amdgpu::binary_f32_simd_unscoped<': ArithmeticCore('wf.fp_round_mode_f32()', None),
     'amdgpu::fma_f32_simd_unscoped(': ArithmeticCore('wf.fp_round_mode_f32()', None),

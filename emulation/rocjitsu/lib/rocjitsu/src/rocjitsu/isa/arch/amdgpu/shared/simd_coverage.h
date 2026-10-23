@@ -301,11 +301,6 @@ template <bool Extended, typename Slot>
   // the unscoped arithmetic cores inside it. Raw-bit routes, including the F32
   // MIN/MAX selections, need none, and register access, which can run callbacks,
   // stays outside every scope.
-  // Wider than is_arithmetic, which only gates MODE precision: F64 MIN/MAX
-  // select with host fmax/fmin and signal on NaN inputs under no MODE gate.
-  auto computes_on_host = [](const Slot &slot) {
-    return slot.op <= 7 || (Extended && (slot.op == 19 || (slot.op >= 32 && slot.op <= 36)));
-  };
   struct Results {
     alignas(util::native<uint32_t>) uint32_t words[64]{};
     alignas(util::native<uint64_t>) uint64_t pairs[64]{};
@@ -323,6 +318,8 @@ template <bool Extended, typename Slot>
         std::optional<RegisterAccess::OperandRead64View> c;
         if (slot.op == 32)
           c.emplace(regs.read_operand64(*slot.src2, exec));
+        // Every F64 slot computes on the host: 32-34 arithmetically, and MIN/MAX
+        // through fmax/fmin, which signal on a NaN input under no MODE gate.
         fp_mode::ScopedEnvironment environment(0);
         for (uint32_t base = 0; base < wf.wf_size(); base += W) {
           if (!((exec >> base) & util::mask<uint64_t>(W)))
@@ -374,10 +371,10 @@ template <bool Extended, typename Slot>
       acc.emplace(regs.read_operand(*slot.dst, exec));
     const uint64_t condition =
         slot.op == 9 ? (slot.uses_vcc ? wf.vcc_mask() : read_wave_mask_scalar(*slot.src2, wf)) : 0;
-    // The eligibility gate above leaves MODE.FP_ROUND nearest-even here, so this
-    // installs the same environment the scoped F32 helpers would.
+    // One environment per arithmetic slot, after that slot's reads. The gate
+    // above leaves MODE.FP_ROUND nearest-even, the rounding the cores below expect.
     std::optional<fp_mode::ScopedEnvironment> environment;
-    if (computes_on_host(slot))
+    if (is_arithmetic(slot))
       environment.emplace(wf.fp_round_mode_f32());
     for (uint32_t base = 0; base < wf.wf_size(); base += W) {
       if (!((exec >> base) & util::mask<uint64_t>(W)))
