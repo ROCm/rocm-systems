@@ -19,6 +19,11 @@
 
 namespace fs = std::filesystem;
 
+namespace {
+constexpr auto kIonicDriverName = "ionic";
+constexpr auto kIonicRdmaDriverName = "ionic_rdma.rdma";
+}  // namespace
+
 NicVendor SmiNicSubsystemPensando::vendor() const { return NicVendor::AMD; }
 
 bool SmiNicSubsystemPensando::is_bridge_device(uint16_t device_id) {
@@ -54,6 +59,17 @@ bool SmiNicSubsystemPensando::is_driver_loaded(const std::string& bdf,
       return is_driver_bound_to_bdf(
           driver_sysfs_root_ + "/sys/bus/auxiliary/drivers/ionic_rdma.rdma", bdf,
           /*is_canonical_match=*/true);
+    default:
+      return false;
+  }
+}
+
+auto SmiNicSubsystemPensando::is_driver_present(DriverType driver_type) const -> bool {
+  switch (driver_type) {
+    case DriverType::Main:
+      return is_directory_present(driver_sysfs_root_ + kPciDriversDir + kIonicDriverName);
+    case DriverType::Rdma:
+      return is_directory_present(driver_sysfs_root_ + kAuxDriversDir + kIonicRdmaDriverName);
     default:
       return false;
   }

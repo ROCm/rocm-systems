@@ -16,6 +16,7 @@ extern "C" {
 #define SMI_NIC_MAX_STRING_LENGTH 256
 #define SMI_NIC_MAX_DEVICES 64
 #define SMI_NIC_MAX_STATISTICS 256
+#define SMI_NIC_MAX_FW_VERSIONS 64
 #define SMI_NIC_MAX_PORTS 32
 #define SMI_NIC_MAX_RDMA_DEV 32
 
@@ -32,14 +33,23 @@ typedef enum {
 } smi_nic_status_t;
 
 /**
- * @brief Which tier of vendor statistics to return.
- *
- * SMI_NIC_STAT_SCOPE_EXTENDED is a superset of SMI_NIC_STAT_SCOPE_DEFAULT.
+ * @brief How a NIC connects to another device
  */
 typedef enum {
-  SMI_NIC_STAT_SCOPE_DEFAULT = 0,
-  SMI_NIC_STAT_SCOPE_EXTENDED = 1
-} smi_nic_stat_scope_t;
+  SMI_NIC_LINK_TYPE_UNKNOWN, /**< The link could not be determined */
+  SMI_NIC_LINK_TYPE_PCIE,    /**< Same PCIe switch */
+  SMI_NIC_LINK_TYPE_NUMA,    /**< Same NUMA node, different PCIe switch */
+  SMI_NIC_LINK_TYPE_XNUMA    /**< Different NUMA nodes */
+} smi_nic_link_type_t;
+
+/**
+ * @brief NIC vendor
+ */
+typedef enum {
+  SMI_NIC_VENDOR_UNKNOWN, /**< Unknown NIC vendor */
+  SMI_NIC_VENDOR_AMD,     /**< AMD NIC vendor */
+  SMI_NIC_VENDOR_BROADCOM /**< Broadcom NIC vendor */
+} smi_nic_vendor_t;
 
 /**
  * @struct smi_nic_discovery_t
@@ -57,6 +67,7 @@ typedef struct {
   uint32_t count;
   struct {
     char bdf[SMI_NIC_MAX_STRING_LENGTH]; /**< PCI BDF */
+    smi_nic_vendor_t vendor;             /**< NIC vendor */
   } devices[SMI_NIC_MAX_DEVICES];
 } smi_nic_discovery_t;
 
@@ -102,6 +113,36 @@ typedef struct {
 } smi_nic_driver_info_t;
 
 /**
+ * @brief Which firmware version class an entry belongs to
+ */
+typedef enum {
+  SMI_NIC_FW_VERSION_TYPE_FIXED,   /**< Fixed (hardware) firmware version */
+  SMI_NIC_FW_VERSION_TYPE_RUNNING, /**< Currently running firmware version */
+  SMI_NIC_FW_VERSION_TYPE_STORED   /**< Stored (pending) firmware version */
+} smi_nic_fw_version_type_t;
+
+/**
+ * @struct smi_nic_fw_version_t
+ * @brief One firmware version entry
+ */
+typedef struct {
+  smi_nic_fw_version_type_t type;
+  char name[SMI_NIC_MAX_STRING_LENGTH];
+  char version[SMI_NIC_MAX_STRING_LENGTH];
+} smi_nic_fw_version_t;
+
+/**
+ * @struct smi_nic_fw_info_t
+ * @brief Firmware versions of a NIC
+ *
+ * @var smi_nic_fw_info_t::count Number of valid entries in versions
+ */
+typedef struct {
+  uint32_t count;
+  smi_nic_fw_version_t versions[SMI_NIC_MAX_FW_VERSIONS];
+} smi_nic_fw_info_t;
+
+/**
  * @struct smi_nic_asic_info_t
  * @brief Structure containing NIC ASIC information
  *
@@ -119,8 +160,6 @@ typedef struct {
   char part_number[SMI_NIC_MAX_STRING_LENGTH];
   char serial_number[SMI_NIC_MAX_STRING_LENGTH];
   char vendor_name[SMI_NIC_MAX_STRING_LENGTH];
-  uint8_t type;        /**< SmiNicKind, mirrors the amdsmi asic type */
-  uint32_t capability; /**< Capability bitmask (SmiNicCapability), mirrors amdsmi asic capability */
 } smi_nic_asic_info_t;
 
 /**
@@ -226,8 +265,6 @@ typedef struct {
  * can be used concurrently from different threads.
  *
  * @param[out] ctx Pointer to store the created context handle
- * @param[in] is_ainic_only If true, discover only AMD NICs (AINIC cards and UALoE
- *            endpoints); if false, discover all supported NICs.
  *
  * @return ::SMI_NIC_STATUS_SUCCESS if context created successfully
  * @return ::SMI_NIC_STATUS_WRONG_PARAM if ctx is NULL
@@ -237,7 +274,7 @@ typedef struct {
  * @note The context must be destroyed with smi_nic_destroy_context()
  *
  */
-smi_nic_status_t smi_nic_create_context(smi_nic_ctx_t* ctx, bool is_ainic_only);
+smi_nic_status_t smi_nic_create_context(smi_nic_ctx_t* ctx);
 
 /**
  * @brief Destroy a NIC context and free its resources
@@ -269,6 +306,32 @@ smi_nic_status_t smi_nic_destroy_context(smi_nic_ctx_t ctx);
 smi_nic_status_t smi_discover_nics(smi_nic_ctx_t ctx, smi_nic_discovery_t* discovery);
 
 /**
+ * @brief Report whether a vendor's main NIC driver is loaded.
+ *
+ * Checks the vendor's driver directory only, so it works before any context exists.
+ *
+ * @param vendor The NIC vendor to check.
+ * @return ::smi_nic_status_t | ::SMI_NIC_STATUS_SUCCESS if the driver is loaded,
+ * ::SMI_NIC_STATUS_DRIVER_NOT_LOADED if not, ::SMI_NIC_STATUS_WRONG_PARAM for an unknown vendor.
+ */
+smi_nic_status_t smi_nic_driver_loaded(smi_nic_vendor_t vendor);
+
+/**
+ * @brief Get the link type between a NIC and another device (a GPU or a NIC).
+ *
+ * The link is a property of the PCI topology, so it needs no loaded driver and a NIC without ports
+ * answers too. A device outside sysfs or an unreadable NUMA node gives ::SMI_NIC_LINK_TYPE_UNKNOWN.
+ *
+ * @param ctx Context returned by ::smi_nic_create_context.
+ * @param device_src Packed BDF of the NIC, in the ::amdsmi_bdf_t as_uint encoding.
+ * @param device_dst Packed BDF of the other device, in the same encoding.
+ * @param type Filled on success; unmodified otherwise.
+ * @return ::smi_nic_status_t | ::SMI_NIC_STATUS_SUCCESS on success, non-zero on failure.
+ */
+smi_nic_status_t smi_topo_get_nic_link_type(smi_nic_ctx_t ctx, uint64_t device_src,
+                                            uint64_t device_dst, smi_nic_link_type_t* type);
+
+/**
  * @brief Retrieve NIC driver information.
  *
  * @param ctx Context handle
@@ -278,6 +341,16 @@ smi_nic_status_t smi_discover_nics(smi_nic_ctx_t ctx, smi_nic_discovery_t* disco
  */
 smi_nic_status_t smi_get_nic_driver_info(smi_nic_ctx_t ctx, uint64_t device,
                                          smi_nic_driver_info_t* info);
+
+/**
+ * @brief Retrieve the firmware versions of a NIC.
+ *
+ * @param ctx Context returned by ::smi_nic_create_context.
+ * @param device Packed BDF, in the ::amdsmi_bdf_t as_uint encoding.
+ * @param info Filled on success; unmodified otherwise.
+ * @return ::smi_nic_status_t | ::SMI_NIC_STATUS_SUCCESS on success, non-zero on failure.
+ */
+smi_nic_status_t smi_get_nic_fw_info(smi_nic_ctx_t ctx, uint64_t device, smi_nic_fw_info_t* info);
 
 /**
  * @brief Retrieve NIC ASIC information.
@@ -334,21 +407,6 @@ smi_nic_status_t smi_get_nic_port_info(smi_nic_ctx_t ctx, uint64_t device,
                                        smi_nic_port_info_t* info);
 
 /**
- * @brief Retrieve the full interface index of one NIC port.
- *
- * smi_nic_port_t holds the index in one byte; this returns the whole value.
- *
- * @param ctx Context handle
- * @param device BDF of the network device.
- * @param port_index Index of the NIC port (0-based), as in the statistics calls.
- * @param ifindex Pointer to uint32_t to store the interface index; 0 when unavailable.
- * @return ::smi_nic_status_t | ::SMI_NIC_STATUS_SUCCESS on success, ::SMI_NIC_STATUS_NOT_FOUND
- * when @p port_index is past the last port, non-zero on other failure.
- */
-smi_nic_status_t smi_get_nic_port_ifindex(smi_nic_ctx_t ctx, uint64_t device, uint32_t port_index,
-                                          uint32_t* ifindex);
-
-/**
  * @brief Retrieve RDMA device information for a NIC.
  *
  * @param ctx Context handle
@@ -394,13 +452,11 @@ smi_nic_status_t smi_get_nic_port_statistics_list(smi_nic_ctx_t ctx, uint64_t de
  * @param ctx Context handle
  * @param device BDF of the network device.
  * @param port_index Index of the NIC port (0-based).
- * @param scope Which tier of vendor statistics to count.
  * @param count Pointer to uint32_t to store the number of available statistics.
  * @return ::smi_nic_status_t | ::SMI_NIC_STATUS_SUCCESS on success, non-zero on failure.
  */
 smi_nic_status_t smi_get_nic_vendor_statistics_count(smi_nic_ctx_t ctx, uint64_t device,
-                                                     uint32_t port_index,
-                                                     smi_nic_stat_scope_t scope, uint32_t* count);
+                                                     uint32_t port_index, uint32_t* count);
 
 /**
  * @brief Retrieve vendor statistics list for a specified NIC port.
@@ -408,12 +464,11 @@ smi_nic_status_t smi_get_nic_vendor_statistics_count(smi_nic_ctx_t ctx, uint64_t
  * @param ctx Context handle
  * @param device BDF of the network device.
  * @param port_index Index of the NIC port (0-based).
- * @param scope Which tier of vendor statistics to return.
  * @param stats Pointer to smi_nic_stat_info_t structure to be filled.
  * @return ::smi_nic_status_t | ::SMI_NIC_STATUS_SUCCESS on success, non-zero on failure.
  */
 smi_nic_status_t smi_get_nic_vendor_statistics_list(smi_nic_ctx_t ctx, uint64_t device,
-                                                    uint32_t port_index, smi_nic_stat_scope_t scope,
+                                                    uint32_t port_index,
                                                     smi_nic_stat_info_t* stats);
 
 /**
@@ -449,66 +504,6 @@ smi_nic_status_t smi_get_nic_rdma_port_statistics_list(smi_nic_ctx_t ctx, uint64
 
 #ifdef __cplusplus
 }  // extern "C"
-
-#include <vector>
-
-// Declared, not included: this header is installed and smi_nic_telemetry.h is
-// not, so including it would ship a header that cannot be compiled. Both types
-// are only ever read through an out pointer, and every in-tree caller that
-// supplies one already has the defining header.
-namespace amd::smi::nic::telemetry {
-struct NicTelemetrySnapshot;
-}  // namespace amd::smi::nic::telemetry
-namespace amd::nic::netlink {
-struct DevlinkDeviceInfo;
-}  // namespace amd::nic::netlink
-namespace amd::smi::nic::hwmon {
-struct SensorRecord_t;
-}  // namespace amd::smi::nic::hwmon
-
-/**
- * @brief C++-only: live telemetry for the NIC registered under @p device.
- *
- * Reads through the discovered NIC, with its vendor subclass and its ports, so
- * devlink and hwmon are addressed at the port function rather than the bridge
- * the handle names. Resolution and the read both happen under the context lock,
- * so no reference to a context-owned NIC escapes.
- *
- * @param ctx Context returned by ::smi_nic_create_context.
- * @param device Packed BDF, in the ::amdsmi_bdf_t as_uint encoding.
- * @param snapshot Filled on success; unmodified otherwise.
- * @return ::smi_nic_status_t | ::SMI_NIC_STATUS_SUCCESS on success, non-zero on failure.
- */
-smi_nic_status_t smi_get_nic_telemetry(smi_nic_ctx_t ctx, uint64_t device,
-                                       amd::smi::nic::telemetry::NicTelemetrySnapshot* snapshot);
-
-/**
- * @brief C++-only: devlink firmware/identity versions for the NIC under @p device.
- *
- * Same resolution and locking as ::smi_get_nic_telemetry. The version list is a
- * raw vendor-defined name/value set, so it is forwarded unchanged.
- *
- * @param ctx Context returned by ::smi_nic_create_context.
- * @param device Packed BDF, in the ::amdsmi_bdf_t as_uint encoding.
- * @param info Filled on success; unmodified otherwise.
- * @return ::smi_nic_status_t | ::SMI_NIC_STATUS_SUCCESS on success, non-zero on failure.
- */
-smi_nic_status_t smi_get_nic_fw_info(smi_nic_ctx_t ctx, uint64_t device,
-                                     amd::nic::netlink::DevlinkDeviceInfo* info);
-
-/**
- * @brief C++-only: every hwmon sensor attribute of the NIC registered under @p device.
- *
- * Same resolution and locking as ::smi_get_nic_telemetry. A NIC with no hwmon node yields an
- * empty list, not an error.
- *
- * @param ctx Context returned by ::smi_nic_create_context.
- * @param device Packed BDF, in the ::amdsmi_bdf_t as_uint encoding.
- * @param records Replaced on success; unmodified otherwise.
- * @return ::smi_nic_status_t | ::SMI_NIC_STATUS_SUCCESS on success, non-zero on failure.
- */
-smi_nic_status_t smi_get_nic_hwmon_sensors(
-    smi_nic_ctx_t ctx, uint64_t device, std::vector<amd::smi::nic::hwmon::SensorRecord_t>* records);
 #endif
 
 #endif  // __SMI_NIC_INTERFACE_H__

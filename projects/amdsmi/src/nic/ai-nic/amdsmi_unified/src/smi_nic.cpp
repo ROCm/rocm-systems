@@ -12,6 +12,7 @@
 #include <exception>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <iterator>
 #include <map>
@@ -24,7 +25,9 @@
 #include <utility>
 #include <vector>
 
+#include "smi_ibverbs.h"
 #include "smi_nic_log.h"
+#include "smi_nic_testing.h"
 #include "smi_nic_transport.h"
 #include "smi_nic_vpd.h"
 #include "smi_sysfs.h"
@@ -378,9 +381,34 @@ const std::map<std::string, uint64_t>& SmiNicPort::get_standard_stats_map() cons
 
 // **** SmiInfiniBandPort ****
 
+namespace {
+
+// The libibverbs MTU query; a test replaces it through smi_nic_set_port_mtu_query_for_testing().
+auto& port_mtu_query() {
+  static auto query = PortMtuQuery_t{smi_ibverbs::query_port_mtu};
+  return query;
+}
+
+}  // namespace
+
+void smi_nic_set_port_mtu_query_for_testing(PortMtuQuery_t query) {
+  port_mtu_query() = query ? std::move(query) : PortMtuQuery_t{smi_ibverbs::query_port_mtu};
+}
+
 SmiInfiniBandPort::SmiInfiniBandPort(std::string& netdev, std::string& name,
                                      const std::string& sysfs_path)
-    : netdev_(netdev), name_(name), sysfs_path_(sysfs_path) {}
+    : netdev_(netdev), name_(name), sysfs_path_(sysfs_path) {
+  // The port directory is .../infiniband/<rdma_dev>/ports/<n>; libibverbs wants the device name.
+  const auto rdma_dev = std::filesystem::path(sysfs_path_).parent_path().parent_path().filename();
+  const auto port = port_num();
+  if (port.has_value()) {
+    const auto mtu = port_mtu_query()(rdma_dev.string(), port.value());
+    if (mtu.has_value()) {
+      m_ibverbs_max_mtu = mtu->max_mtu;
+      m_ibverbs_active_mtu = mtu->active_mtu;
+    }
+  }
+}
 
 const std::string& SmiInfiniBandPort::name() const { return name_; }
 
@@ -411,11 +439,13 @@ std::optional<std::string> SmiInfiniBandPort::state() const {
 }
 
 std::optional<uint16_t> SmiInfiniBandPort::max_mtu() const {
-  return get_sysfs_data<uint16_t>(sysfs_path_ + "/max_mtu");
+  return m_ibverbs_max_mtu.has_value() ? m_ibverbs_max_mtu
+                                       : get_sysfs_data<uint16_t>(sysfs_path_ + "/max_mtu");
 }
 
 std::optional<uint16_t> SmiInfiniBandPort::active_mtu() const {
-  return get_sysfs_data<uint16_t>(sysfs_path_ + "/active_mtu");
+  return m_ibverbs_active_mtu.has_value() ? m_ibverbs_active_mtu
+                                          : get_sysfs_data<uint16_t>(sysfs_path_ + "/active_mtu");
 }
 
 namespace {
@@ -577,6 +607,12 @@ uint32_t SmiNic::capabilities() const {
     caps |= SMI_NIC_CAP_NETDEV;
   }
   return caps;
+}
+
+auto SmiNic::link_type(uint64_t other_bdf, const std::string& pci_root) const
+    -> amd::smi::nic::pci::LinkType_t {
+  namespace pci = amd::smi::nic::pci;
+  return pci::get_link_type(bdf_, pci::format_bdf(other_bdf), pci_root);
 }
 
 std::optional<uint16_t> SmiNic::vendor_id() const {

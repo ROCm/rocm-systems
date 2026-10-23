@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
-"""NIC vendor statistics tier: chosen with a setter, read with the previous 4-argument getter.
+"""NIC vendor statistics tier: passed with each call to the scoped getter.
 
-``amdsmi_get_nic_vendor_statistics`` keeps its previous signature, so the Python function selects
-the tier through ``amdsmi_set_nic_stat_scope`` before it queries. The shipped
-``amdsmi_interface.py`` needs a built ``libamd_smi.so`` to import, so the function is compiled
-from the real source and run against a fake wrapper that records the order of the calls.
+The Python function hands its ``scope`` to ``amdsmi_get_nic_vendor_statistics_with_scope`` on
+every call, so no state is left on the handle. The shipped ``amdsmi_interface.py`` needs a built
+``libamd_smi.so`` to import, so the function is compiled from the real source and run against a
+fake wrapper that records the calls.
 """
 
 import ast
@@ -22,7 +22,6 @@ _FUNCTION_NAME = "amdsmi_get_nic_vendor_statistics"
 
 _STATUS_SUCCESS = 0
 _STATUS_FAILURE = 1
-_STATUS_RESET_FAILURE = 2
 _SCOPE_DEFAULT = 0
 _SCOPE_EXTENDED = 1
 _PORT_INDEX = 2
@@ -64,16 +63,12 @@ def _load_function(wrapper: types.SimpleNamespace) -> Any:
     return namespace[_FUNCTION_NAME]
 
 
-def _fake_wrapper() -> Tuple[types.SimpleNamespace, List[Tuple[str, tuple]]]:
-    """A wrapper that reports one counter and logs every set and get call in order."""
-    calls: List[Tuple[str, tuple]] = []
-
-    def fake_set_scope(handle: object, scope: int) -> int:
-        calls.append(("set", (handle, scope)))
-        return _STATUS_SUCCESS
+def _fake_wrapper() -> Tuple[types.SimpleNamespace, List[tuple]]:
+    """A wrapper that reports one counter and logs every scoped call. It has no setter."""
+    calls: List[tuple] = []
 
     def fake_get_stats(*args: Any) -> int:
-        calls.append(("get", args))
+        calls.append(args)
         num_stats, stats = args[-2], args[-1]
         num_stats._obj.value = 1
         if stats is not None:
@@ -85,96 +80,64 @@ def _fake_wrapper() -> Tuple[types.SimpleNamespace, List[Tuple[str, tuple]]]:
         amdsmi_processor_handle=_FakeHandle,
         amdsmi_nic_stat_t=_Stat,
         AMDSMI_NIC_STAT_SCOPE_DEFAULT=_SCOPE_DEFAULT,
-        amdsmi_set_nic_stat_scope=fake_set_scope,
-        amdsmi_get_nic_vendor_statistics=fake_get_stats,
+        amdsmi_get_nic_vendor_statistics_with_scope=fake_get_stats,
     )
     return wrapper, calls
 
 
 class TestNicVendorStatisticsScope(unittest.TestCase):
-    def test_the_requested_scope_is_set_before_the_first_query(self) -> None:
+    def test_the_requested_scope_travels_with_both_queries(self) -> None:
         wrapper, calls = _fake_wrapper()
         handle = _FakeHandle()
 
         result = _load_function(wrapper)(handle, _PORT_INDEX, scope=_SCOPE_EXTENDED)
 
         self.assertEqual(result, {_COUNTER_NAME.decode(): _COUNTER_VALUE})
-        self.assertEqual([kind for kind, _ in calls][:3], ["set", "get", "get"])
-        self.assertEqual(calls[0][1], (handle, _SCOPE_EXTENDED))
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(all(args[:3] == (handle, _PORT_INDEX, _SCOPE_EXTENDED) for args in calls))
 
     def test_an_omitted_scope_asks_for_the_default_tier(self) -> None:
         wrapper, calls = _fake_wrapper()
 
         _load_function(wrapper)(_FakeHandle(), _PORT_INDEX)
 
-        self.assertEqual(calls[0][1][1], _SCOPE_DEFAULT)
+        self.assertTrue(all(args[2] == _SCOPE_DEFAULT for args in calls))
 
-    def test_the_handle_is_left_on_the_default_tier(self) -> None:
-        wrapper, calls = _fake_wrapper()
-        handle = _FakeHandle()
-
-        _load_function(wrapper)(handle, _PORT_INDEX, scope=_SCOPE_EXTENDED)
-
-        self.assertEqual(calls[-1], ("set", (handle, _SCOPE_DEFAULT)))
-
-    def test_the_handle_is_left_on_the_default_tier_when_the_query_fails(self) -> None:
-        wrapper, calls = _fake_wrapper()
-        handle = _FakeHandle()
-        wrapper.amdsmi_get_nic_vendor_statistics = lambda *args: _STATUS_FAILURE
-
-        with self.assertRaises(AssertionError):
-            _load_function(wrapper)(handle, _PORT_INDEX, scope=_SCOPE_EXTENDED)
-
-        self.assertEqual(calls[-1], ("set", (handle, _SCOPE_DEFAULT)))
-
-    def test_a_failed_reset_is_reported_when_the_query_succeeded(self) -> None:
-        wrapper, calls = _fake_wrapper()
-        reset_calls: List[int] = []
-
-        def fake_set_scope(handle: object, scope: int) -> int:
-            calls.append(("set", (handle, scope)))
-            reset_calls.append(scope)
-            return _STATUS_SUCCESS if len(reset_calls) == 1 else _STATUS_RESET_FAILURE
-
-        wrapper.amdsmi_set_nic_stat_scope = fake_set_scope
-
-        with self.assertRaisesRegex(AssertionError, f"status {_STATUS_RESET_FAILURE}"):
-            _load_function(wrapper)(_FakeHandle(), _PORT_INDEX)
-
-    def test_a_failed_reset_does_not_hide_the_query_error(self) -> None:
+    def test_no_state_is_set_on_the_handle(self) -> None:
         wrapper, _ = _fake_wrapper()
-        reset_calls: List[int] = []
 
-        def fake_set_scope(handle: object, scope: int) -> int:
-            reset_calls.append(scope)
-            return _STATUS_SUCCESS if len(reset_calls) == 1 else _STATUS_RESET_FAILURE
+        # The fake wrapper has no amdsmi_set_nic_stat_scope: a call to it raises AttributeError.
+        _load_function(wrapper)(_FakeHandle(), _PORT_INDEX, scope=_SCOPE_EXTENDED)
 
-        wrapper.amdsmi_set_nic_stat_scope = fake_set_scope
-        wrapper.amdsmi_get_nic_vendor_statistics = lambda *args: _STATUS_FAILURE
+    def test_a_failed_query_is_reported(self) -> None:
+        wrapper, _ = _fake_wrapper()
+        wrapper.amdsmi_get_nic_vendor_statistics_with_scope = lambda *args: _STATUS_FAILURE
 
         with self.assertRaisesRegex(AssertionError, f"status {_STATUS_FAILURE}"):
-            _load_function(wrapper)(_FakeHandle(), _PORT_INDEX)
+            _load_function(wrapper)(_FakeHandle(), _PORT_INDEX, scope=_SCOPE_EXTENDED)
 
-    def test_a_port_with_no_counters_still_resets_the_handle(self) -> None:
+    def test_a_port_with_no_counters_returns_an_empty_dict_after_one_query(self) -> None:
         wrapper, calls = _fake_wrapper()
-        handle = _FakeHandle()
 
         def fake_get_stats(*args: Any) -> int:
-            calls.append(("get", args))
+            calls.append(args)
             args[-2]._obj.value = 0
             return _STATUS_SUCCESS
 
-        wrapper.amdsmi_get_nic_vendor_statistics = fake_get_stats
+        wrapper.amdsmi_get_nic_vendor_statistics_with_scope = fake_get_stats
 
-        self.assertEqual(_load_function(wrapper)(handle, _PORT_INDEX, scope=_SCOPE_EXTENDED), {})
-        self.assertEqual(calls[-1], ("set", (handle, _SCOPE_DEFAULT)))
+        self.assertEqual(
+            _load_function(wrapper)(_FakeHandle(), _PORT_INDEX, scope=_SCOPE_EXTENDED), {}
+        )
+        self.assertEqual(len(calls), 1)
 
-    def test_the_query_uses_the_four_argument_signature(self) -> None:
+    def test_the_query_uses_the_five_argument_signature(self) -> None:
         wrapper, calls = _fake_wrapper()
-        handle = _FakeHandle()
 
-        _load_function(wrapper)(handle, _PORT_INDEX)
+        _load_function(wrapper)(_FakeHandle(), _PORT_INDEX)
 
-        get_calls = [args for kind, args in calls if kind == "get"]
-        self.assertTrue(all(len(args) == 4 for args in get_calls))
-        self.assertTrue(all(args[:2] == (handle, _PORT_INDEX) for args in get_calls))
+        self.assertTrue(all(len(args) == 5 for args in calls))
+
+
+if __name__ == "__main__":
+    unittest.main()

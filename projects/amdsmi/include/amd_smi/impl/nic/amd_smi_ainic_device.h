@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <atomic>
 #include <memory>
 
 #include "amd_smi/amdsmi.h"
@@ -44,13 +43,8 @@ class AMDSmiAINICDevice : public AMDSmiProcessor {
   uint32_t capability() const { return ai_nic_info_.capability; }
   uint64_t bdf() const { return ai_nic_info_.bus.bdf.as_uint; }
 
-  // The tier amdsmi_get_nic_vendor_statistics() reads; set by amdsmi_set_nic_stat_scope().
-  amdsmi_nic_stat_scope_t stat_scope() const { return stat_scope_.load(); }
-  void set_stat_scope(amdsmi_nic_stat_scope_t scope) { stat_scope_.store(scope); }
-
  private:
   AINICInfo ai_nic_info_;
-  std::atomic<amdsmi_nic_stat_scope_t> stat_scope_{AMDSMI_NIC_STAT_SCOPE_DEFAULT};
 };
 
 }  // namespace amd::smi

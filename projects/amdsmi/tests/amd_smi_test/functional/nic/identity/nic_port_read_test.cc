@@ -17,10 +17,16 @@ namespace {
 
 constexpr auto kMaxByteIfindex = uint32_t{std::numeric_limits<uint8_t>::max()};
 
-// The vendor statistics count under the tier currently set on the handle.
+// The vendor statistics count of the default tier.
 auto read_vendor_count(amdsmi_processor_handle nic, uint32_t port_index, uint32_t* count)
     -> amdsmi_status_t {
   return amdsmi_get_nic_vendor_statistics(nic, port_index, count, nullptr);
+}
+
+// The vendor statistics count of the given tier.
+auto read_scoped_count(amdsmi_processor_handle nic, uint32_t port_index,
+                       amdsmi_nic_stat_scope_t scope, uint32_t* count) -> amdsmi_status_t {
+  return amdsmi_get_nic_vendor_statistics_with_scope(nic, port_index, scope, count, nullptr);
 }
 
 }  // namespace
@@ -28,7 +34,8 @@ auto read_vendor_count(amdsmi_processor_handle nic, uint32_t port_index, uint32_
 TestNicPortRead::TestNicPortRead() : TestBase() {
   set_title("AMDSMI NIC Port Read Test");
   set_description(
-      "This test verifies amdsmi_get_nic_port_ifindex() and amdsmi_set_nic_stat_scope(): they "
+      "This test verifies amdsmi_get_nic_port_ifindex() and "
+      "amdsmi_get_nic_vendor_statistics_with_scope(): they "
       "reject a null handle, the full interface index agrees with the one-byte struct field, and "
       "the extended statistics tier is a superset of the default one.");
 }
@@ -55,7 +62,10 @@ void TestNicPortRead::Run(void) {
   EXPECT_EQ(amdsmi_get_nic_port_ifindex(nullptr, 0, nullptr), AMDSMI_STATUS_INVAL);
   auto no_nic_ifindex = uint32_t{0};
   EXPECT_EQ(amdsmi_get_nic_port_ifindex(nullptr, 0, &no_nic_ifindex), AMDSMI_STATUS_INVAL);
-  EXPECT_EQ(amdsmi_set_nic_stat_scope(nullptr, AMDSMI_NIC_STAT_SCOPE_DEFAULT), AMDSMI_STATUS_INVAL);
+  auto no_nic_count = uint32_t{0};
+  EXPECT_EQ(amdsmi_get_nic_vendor_statistics_with_scope(nullptr, 0, AMDSMI_NIC_STAT_SCOPE_DEFAULT,
+                                                        &no_nic_count, nullptr),
+            AMDSMI_STATUS_INVAL);
 
   const auto nics = nic_handles();
   if (nics.empty()) {
@@ -85,19 +95,20 @@ void TestNicPortRead::Run(void) {
       continue;
     }
 
-    // The extended tier is a superset of the default one.
-    ASSERT_EQ(amdsmi_set_nic_stat_scope(nic, AMDSMI_NIC_STAT_SCOPE_DEFAULT), AMDSMI_STATUS_SUCCESS);
+    // The extended tier is a superset of the default one, and the unscoped call reads the default.
     auto default_count = uint32_t{0};
-    if (read_vendor_count(nic, 0, &default_count) != AMDSMI_STATUS_SUCCESS) {
+    if (read_scoped_count(nic, 0, AMDSMI_NIC_STAT_SCOPE_DEFAULT, &default_count) !=
+        AMDSMI_STATUS_SUCCESS) {
       IF_VERB(STANDARD) { std::cout << "\t**No vendor statistics on this NIC. Skipping.**\n"; }
       continue;
     }
-    ASSERT_EQ(amdsmi_set_nic_stat_scope(nic, AMDSMI_NIC_STAT_SCOPE_EXTENDED),
-              AMDSMI_STATUS_SUCCESS);
     auto extended_count = uint32_t{0};
-    ASSERT_EQ(read_vendor_count(nic, 0, &extended_count), AMDSMI_STATUS_SUCCESS);
+    ASSERT_EQ(read_scoped_count(nic, 0, AMDSMI_NIC_STAT_SCOPE_EXTENDED, &extended_count),
+              AMDSMI_STATUS_SUCCESS);
     EXPECT_GE(extended_count, default_count);
 
-    ASSERT_EQ(amdsmi_set_nic_stat_scope(nic, AMDSMI_NIC_STAT_SCOPE_DEFAULT), AMDSMI_STATUS_SUCCESS);
+    auto unscoped_count = uint32_t{0};
+    ASSERT_EQ(read_vendor_count(nic, 0, &unscoped_count), AMDSMI_STATUS_SUCCESS);
+    EXPECT_EQ(unscoped_count, default_count);
   }
 }

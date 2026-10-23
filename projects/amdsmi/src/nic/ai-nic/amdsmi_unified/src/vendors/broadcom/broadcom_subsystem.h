@@ -35,6 +35,7 @@ class SmiNicSubsystemBroadcom : public SmiNicSubsystem {
   static constexpr uint16_t VENDOR_ID = 0x14e4;
 
   bool is_driver_loaded(const std::string& bdf, DriverType driver_type) const override;
+  auto is_driver_present(DriverType driver_type) const -> bool override;
   bool is_bound_to_broadcom_main_driver(const std::string& sysfs_bus_path) const;
 
   std::string driver_sysfs_root_;
