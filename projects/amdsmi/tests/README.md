@@ -169,12 +169,16 @@ The install target remaps the tree to the historical path:
 
 A staged NPS mode takes effect on the next driver reload, and requesting the active
 mode does not cancel it. Default runs therefore never request an NPS mode other than
-the active one:
+the active one; only `AMDSMI_ALLOW_DESTRUCTIVE_TESTS=1` runs stage other modes, and they
+apply them with a reload before finishing:
 
 - `GpuFunctionalReadWrite.TestMemoryPartitionReadWrite` checks getters, capabilities,
-  invalid inputs, and setting only the current mode. It never sets compute profiles.
-  Saved per-device memory and compute state is verified without repair; drift or
-  unreadable saved state fails the test.
+  invalid inputs, and setting only the current mode. Saved per-device memory and compute
+  state is verified without repair; drift or unreadable saved state fails the test.
+  With `AMDSMI_ALLOW_DESTRUCTIVE_TESTS=1` it then sets each other NPS mode on every GPU,
+  reloads `amdgpu` once per mode and verifies it, then restores the starting mode and
+  each GPU's accelerator profile. It needs exclusive use of `amdgpu`: when another
+  process holds the driver it fails without staging anything.
 - `test_partition.py` sends only values the setter rejects, plus the active mode.
 - `test_benchmark.py` times the setter with the active mode only, so it measures the
   same-mode path, not a partition change.
