@@ -1654,11 +1654,8 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // for AllGather. Computed here so the bounds are visible in selector-level logs
   // alongside symMaxR2/symMinR2, rather than buried inside rcclUseCeAr2Shot.
   const size_t arTwoShotTabMax = rcclCeNonRegMaxTab(archTable, ncclFuncAllReduce);
-  // Under ZERO CU policy the staging buffer is always available (NCCL_CE_AR_TMPBUF_DEFAULT_BYTES),
-  // so treat a table value of 0 as "no arch-table upper bound" rather than "disabled".
   const bool arCeZeroPolicy = (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) != 0;
-  const size_t arTwoShotMax = (arCeZeroPolicy && arTwoShotTabMax == 0)
-                               ? NCCL_CE_AR_TMPBUF_DEFAULT_BYTES : arTwoShotTabMax;
+  const size_t arTwoShotMax = arTwoShotTabMax;
   const size_t arTwoShotMin = rcclCeNonRegMinTab(archTable, ncclFuncAllReduce);
   const bool twoShotWindow = rcclWindowFits(msgBytes, arTwoShotMin, arTwoShotMax);
   // This call site never carries a bias buffer (ncclAllReduceWithBias_impl bypasses it entirely
@@ -1792,8 +1789,17 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // gates CE as preferred. Under ZERO (preferred=CE) qualifiesAsPreferred=true regardless of ceRegBeatsSymk.
   const bool ceRegEnabled   = ceArRegMax != 0 && ceRegEnvCapOk;
   const bool ceRegBeatsSymk = !symEligible && ceRegInWindow;
-  const bool ceStagedUnregistered = !symkRequested && ncclGroupDepth == 0 && force &&
-      ceArGraphAllowed && ceAr2ShotEligible && twoShotWindow;
+  // ZERO policy arm: ignores zero ceNonRegMax table entries (placeholder arches),
+  // caps at ceArMaxBytes. Suppressed only by explicit RCCL_FORCE_CE_ALLREDUCE=0.
+  const bool ceZeroStagedWindow = arCeZeroPolicy &&
+      rcclParamForceCeAllReduce() != 0 &&
+      msgBytes <= comm->ceColl.ceArMaxBytes;
+  // Force arm: RCCL_FORCE_CE_ALLREDUCE=1 without ZERO policy obeys arTwoShotMax;
+  // twoShotWindow=false when arTwoShotMax=0 so placeholder arches are blocked here.
+  const bool ceForceStagedWindow = force && twoShotWindow;
+  const bool ceStagedUnregistered = !symkRequested && ncclGroupDepth == 0 &&
+      ceArGraphAllowed && ceAr2ShotEligible &&
+      (ceZeroStagedWindow || ceForceStagedWindow);
   if (!cs.bestPreferredFound && !hasSysmemSegment &&
       ((ceAvailable && ceRegEnabled) || ceStagedUnregistered)) {
     rcclCollDecision cand = *decision;
