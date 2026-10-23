@@ -8,19 +8,17 @@ target_include_directories(
 )
 target_link_libraries(
     rj_code_object_fuzz_core
-    PUBLIC
-        rocjitsu_code_object
-        rocjitsu_executable
-        rocjitsu_isa
-        rocjitsu_amdgpu_isa_model_registry
-        util
+    PUBLIC rocjitsu_code_object rocjitsu_executable rocjitsu_isa util
 )
 rj_configure_target(rj_code_object_fuzz_core PRIVATE_INCLUDES WARNINGS)
 
 add_executable(rj_code_object_fuzz code_object_fuzz_main.cpp)
 target_link_libraries(
     rj_code_object_fuzz
-    PRIVATE rj_code_object_fuzz_core Threads::Threads
+    PRIVATE
+        rj_code_object_fuzz_core
+        rocjitsu_amdgpu_isa_model_registry
+        Threads::Threads
 )
 rj_configure_target(rj_code_object_fuzz PRIVATE_INCLUDES WARNINGS)
 
