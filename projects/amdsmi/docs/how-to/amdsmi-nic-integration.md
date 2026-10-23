@@ -508,16 +508,31 @@ typedef struct {
 ### NIC firmware information
 
 ```c
+typedef enum {
+    AMDSMI_NIC_FW_VERSION_TYPE_FIXED,    // fixed (hardware) version
+    AMDSMI_NIC_FW_VERSION_TYPE_RUNNING,  // currently running version
+    AMDSMI_NIC_FW_VERSION_TYPE_STORED    // stored (pending) version
+} amdsmi_nic_fw_version_type_t;
+
 typedef struct {
     char name[AMDSMI_MAX_STRING_LENGTH];
     char version[AMDSMI_MAX_STRING_LENGTH];
 } amdsmi_nic_fw_t;
 
 typedef struct {
-    uint32_t        num_fw;
-    amdsmi_nic_fw_t fw[AMDSMI_MAX_NIC_FW];
+    amdsmi_nic_fw_version_type_t type;
+    amdsmi_nic_fw_t              fw;
+} amdsmi_nic_fw_entry_t;
+
+typedef struct {
+    uint32_t              num_fw;
+    amdsmi_nic_fw_entry_t fw[AMDSMI_MAX_NIC_FW];   // AMDSMI_MAX_NIC_FW is 64
 } amdsmi_nic_fw_info_t;
 ```
+
+The entry holds the name and version in ``fw``, so read ``entry.fw.name`` and
+``entry.fw.version``. The version types and the entry layout are the ones
+``amdsmi_unified`` uses.
 
 ### NIC telemetry
 
@@ -592,6 +607,14 @@ example, `ionic_rdma` blacklisted) is still enumerated, and
 `amdsmi_get_nic_rdma_dev_info()` returns `AMDSMI_STATUS_SUCCESS` with
 `num_rdma_dev` set to 0. Check `num_rdma_dev` rather than the return value to
 tell whether any RDMA device was reported.
+
+`max_mtu` and `active_mtu` come from libibverbs, with the sysfs ``max_mtu`` and
+``active_mtu`` files as the fallback; they read ``N/A`` when neither answers
+(some drivers, such as ``bng_re``, expose no MTU files). The query opens the RDMA
+device in a short-lived child process, because opening it loads the vendor's
+user-space provider, which can crash or hang. The child is stopped after two
+seconds and handles fatal signals itself, so a failing provider costs the MTU and
+nothing else.
 
 ### NIC statistics
 
@@ -729,6 +752,32 @@ amdsmi_status_t amdsmi_get_nic_rdma_dev_info(
     amdsmi_nic_rdma_devices_info_t *info);
 ```
 
+### NIC link type
+
+```c
+amdsmi_status_t amdsmi_topo_get_link_type(
+    amdsmi_processor_handle processor_handle_src,
+    amdsmi_processor_handle processor_handle_dst,
+    uint64_t *hops,
+    amdsmi_link_type_t *type);
+```
+
+``amdsmi_topo_get_link_type()`` accepts a NIC handle for either argument (NIC to GPU
+or NIC to NIC). The link type is computed from sysfs and needs no loaded driver:
+
+| Type | Meaning |
+|------|---------|
+| ``AMDSMI_LINK_TYPE_PCIE`` | Both devices sit behind the same PCIe switch |
+| ``AMDSMI_LINK_TYPE_NUMA`` | Same NUMA node, different PCIe switch (two functions of one card read ``NUMA``) |
+| ``AMDSMI_LINK_TYPE_XNUMA`` | Different NUMA nodes |
+| ``AMDSMI_LINK_TYPE_UNKNOWN`` | A BDF is invalid or a NUMA node cannot be read |
+
+``hops`` may be ``NULL``. For NIC pairs it is not meaningful and reads ``UINT64_MAX``.
+A GPU compute partition reports its partition number as the PCI function, so on a
+platform where that function is also a real device (a UALoE endpoint), the two
+share one BDF string; the result is still correct because both are on the same
+NUMA node.
+
 ### NIC RDMA port statistics
 
 This API uses a **two-call pattern**:
@@ -767,8 +816,9 @@ rdma_port_index)``. It returns a dictionary of counter name to value.
 
 Both APIs use a **two-call pattern** and return per-port counters. Port
 statistics are the standard driver counters for a NIC port; vendor statistics
-are the driver-defined counters exposed via ``ethtool -S``, tiered by the scope set with
-``amdsmi_set_nic_stat_scope()``.
+are the driver-defined counters exposed via ``ethtool -S``, in two tiers. The default call
+returns the default tier; ``amdsmi_get_nic_vendor_statistics_with_scope()`` takes the tier
+as a parameter.
 
 ```c
 amdsmi_status_t amdsmi_get_nic_port_statistics(
@@ -783,11 +833,15 @@ amdsmi_status_t amdsmi_get_nic_vendor_statistics(
     uint32_t *num_stats,
     amdsmi_nic_stat_t *stats);
 
-// Selects the tier for later vendor statistics calls on this handle:
-// AMDSMI_NIC_STAT_SCOPE_DEFAULT (until set) or AMDSMI_NIC_STAT_SCOPE_EXTENDED (a superset).
-amdsmi_status_t amdsmi_set_nic_stat_scope(
+// Same as amdsmi_get_nic_vendor_statistics(), with the tier given in the call:
+// AMDSMI_NIC_STAT_SCOPE_DEFAULT, or AMDSMI_NIC_STAT_SCOPE_EXTENDED (a superset).
+// Any other value returns AMDSMI_STATUS_INVAL.
+amdsmi_status_t amdsmi_get_nic_vendor_statistics_with_scope(
     amdsmi_processor_handle processor_handle,
-    amdsmi_nic_stat_scope_t scope);
+    uint32_t port_index,
+    amdsmi_nic_stat_scope_t scope,
+    uint32_t *num_stats,
+    amdsmi_nic_stat_t *stats);
 ```
 
 **Usage:**
@@ -823,6 +877,13 @@ smi_nic_status_t smi_get_nic_bus_info(smi_nic_ctx_t ctx, uint64_t device,
                                       smi_nic_bus_info_t* info);
 // ...and the remaining smi_get_nic_* queries.
 ```
+
+This header is shared with ``amdsmi_unified``: it has the same functions, types and
+macros, and the same struct layout, as the copy there, and it is plain C. What only
+the bare-metal library has (the NIC kind and capability, the port interface index,
+telemetry, hwmon sensors and the scoped vendor statistics) is declared in
+``include/amd_smi/impl/nic/amd_smi_nic_interface.h``, which includes the shared header.
+Change the shared header only together with ``amdsmi_unified``.
 
 ``smi_nic_status_t`` and the ``smi_nic_*`` structures are **internal to the NIC
 library**. The dispatch layer converts them to ``amdsmi_status_t`` and the
@@ -1156,6 +1217,7 @@ projects/amdsmi/
 │       ├── amd_smi_nic_stats.h               # copy_nic_stats() and was_nic_stat_scope_resolved(): the statistics getters' array and scope rules
 │       └── nic/
 │           ├── amd_smi_ainic_device.h        # AMDSmiAINICDevice and the AINICInfo snapshot
+│           ├── amd_smi_nic_interface.h       # C shim calls only the bare-metal library has (kind, capability, telemetry, sensors, scoped statistics)
 │           └── amdsmi_unified/interface/
 │               └── smi_nic_interface.h       # Internal C interface consumed by the dispatch layer
 ├── src/
@@ -1174,6 +1236,8 @@ projects/amdsmi/
 │       │   ├── smi_nic_telemetry.h           # NicTelemetry: temperature (hwmon), health and port split (devlink)
 │       │   ├── smi_nic_hwmon.h               # hwmon sensor scan: scan_sensors(), find_temperature_input()
 │       │   ├── smi_nic_log.h                 # Debug-log sink used by the library (RSMI_LOGGING)
+│       │   ├── smi_pci_topology.h            # PCI link type: same switch, same NUMA node or different NUMA nodes
+│       │   ├── smi_ibverbs.h                 # libibverbs MTU query, run in an isolated child process
 │       │   ├── smi_nic_vpd.h                  # PCI VPD (Vital Product Data) TLV parser interface
 │       │   ├── smi_ethtool_ioctl.h           # ethtool ioctl helpers (ioctl transport)
 │       │   ├── smi_nic_driver_stats.h        # read_driver_statistics(): the ethtool -S read, with injectable requests (not installed)
@@ -1193,6 +1257,8 @@ projects/amdsmi/
 │           ├── smi_nic_telemetry.cpp         # NicTelemetry implementation
 │           ├── smi_nic_hwmon.cpp             # hwmon scan: per-attribute records, label-based ASIC and BOARD lookup
 │           ├── smi_nic_log.cpp               # debug-log sink and value masking
+│           ├── smi_pci_topology.cpp          # sysfs PCI topology and link type
+│           ├── smi_ibverbs.cpp               # dlopen of libibverbs, MTU query and the child-process isolation
 │           ├── smi_ethtool_ioctl.cpp         # ethtool ioctl backend
 │           ├── smi_nic_vpd.cpp               # PCI VPD TLV parser (product/part/serial)
 │           ├── smi_devlink_netlink.cpp       # devlink-over-netlink backend
@@ -1593,6 +1659,7 @@ The following runtime dependencies are relevant to the BM AMD SMI NIC library:
 
 - Linux kernel sysfs (PCIe device info, netdev, InfiniBand/RDMA, VPD)
 - libnl-3 (optional; enables the netlink ethtool transport backend; requires kernel UAPI headers 5.13 or newer at build time)
+- libibverbs (optional; the build needs ``infiniband/verbs.h`` and the library is loaded at run time as ``libibverbs.so.1``; without either, the RDMA MTU falls back to sysfs or reads ``N/A``)
 - The relevant NIC vendor kernel driver (required for that vendor's device discovery)
 
 ---
@@ -1601,5 +1668,6 @@ The following runtime dependencies are relevant to the BM AMD SMI NIC library:
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 2.1 | October 23, 2026 | Aligned the NIC API with ``amdsmi_unified``: added ``amdsmi_get_nic_vendor_statistics_with_scope()`` and NIC support in ``amdsmi_topo_get_link_type()``, took the firmware version types from unified, and removed the statistics-scope setter and the NIC discovery filter. RDMA MTU now comes from libibverbs. Documented ``bng_en`` discovery and the ``shutdown`` sensor threshold. |
 | 2.0 | July 16, 2026 | Replaced the retired vendor-SMI-module example with the in-tree ``amdsminic`` vendor-plugin framework (``SmiNicSubsystem``, ``make_default_vendor_plugins()``, Pensando reference) and the shared ethtool transport. Updated public NIC API list, code organization, CLI, and build sections to match the current tree. |
 | 1.0 | April 26, 2026 | Initial public release. Covered AMD SMI bare-metal (BM) NIC public APIs, data structures, conventions, sysfs data sources, code organization, CLI commands, and external contribution guidelines for adding new NIC vendors. |

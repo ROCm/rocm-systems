@@ -46,6 +46,7 @@ class SmiNicSubsystemPensando : public SmiNicSubsystem {
   static bool is_pci_bridge_class(const std::string& sysfs_bus_path);
 
   bool is_driver_loaded(const std::string& bdf, DriverType driver_type) const override;
+  auto is_driver_present(DriverType driver_type) const -> bool override;
   bool is_downstream_port(const std::string& port_bdf, const std::string& bridge_bdf,
                           const std::string& pci_path) const;
   void discover_ports(SmiNic& nic, const std::string& bridge_bdf, const std::string& pci_path,

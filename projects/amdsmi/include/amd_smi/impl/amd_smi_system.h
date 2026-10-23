@@ -49,8 +49,6 @@ class AMDSmiSystem {
 
   std::vector<uint32_t> get_cpu_sockets_from_numa_node(int32_t numa_node);
 
-  void set_nic_filter(amdsmi_nic_filter_t mode) { nic_filter_ = mode; }
-
   // NIC discovery context, for the C++-only entry points that read through the
   // discovered SmiNic rather than a value copied out through the C ABI.
   smi_nic_ctx_t get_ainic_ctx() const { return ainic_ctx_; }
@@ -63,8 +61,7 @@ class AMDSmiSystem {
   void register_processor_for_testing(AMDSmiProcessor* processor);
   void unregister_processor_for_testing(AMDSmiProcessor* processor);
 
-  AMDSmiSystem()
-      : init_flag_(AMDSMI_INIT_AMD_GPUS), nic_filter_(AMDSMI_NIC_FILTER_ALL), ainic_ctx_(nullptr) {}
+  AMDSmiSystem() : init_flag_(AMDSMI_INIT_AMD_GPUS), ainic_ctx_(nullptr) {}
 
   /* The GPU socket id is used to identify the socket, so that the XCDs
   on the same physical device will be collected under the same socket.
@@ -77,11 +74,6 @@ class AMDSmiSystem {
   // Backing storage lookup for register/unregister_processor_for_testing().
   std::set<AMDSmiProcessor*>& set_for_type_for_testing(amdsmi_processor_type_t type);
   uint64_t init_flag_;
-  // NIC discovery filter, read in populate_amd_ainic_devices(). Default
-  // AMDSMI_NIC_FILTER_ALL keeps every NIC visible; a C caller enables AINIC-only
-  // discovery via amdsmi_set_nic_filter(AMDSMI_NIC_FILTER_AINIC_ONLY) before
-  // amdsmi_init, and disables it again with AMDSMI_NIC_FILTER_ALL.
-  amdsmi_nic_filter_t nic_filter_;
   AMDSmiDrm drm_;
   smi_nic_ctx_t ainic_ctx_;
   std::vector<AMDSmiSocket*> sockets_;

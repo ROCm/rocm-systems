@@ -2,72 +2,50 @@
 // SPDX-License-Identifier: MIT
 
 /**
- * The vendor statistics tier is per-handle state. amdsmi_get_nic_vendor_statistics() keeps its
- * released signature, so the tier is chosen with amdsmi_set_nic_stat_scope() and held on the NIC
- * device until the next set. A handle nobody configured must read the default tier, as a caller of
- * the released API expects.
+ * The vendor statistics tier is an argument of amdsmi_get_nic_vendor_statistics_with_scope(), so no
+ * state is left on a handle. amdsmi_get_nic_vendor_statistics() keeps its released signature and
+ * reads the default tier.
  */
 
 #include <gtest/gtest.h>
 
-#include <thread>
+#include <cstdint>
+#include <type_traits>
 
 #include "amd_smi/amdsmi.h"
-#include "amd_smi/impl/nic/amd_smi_ainic_device.h"
+#include "amd_smi/impl/amd_smi_nic_stats.h"
 #include "nic_unit_fixture.h"
 
 namespace {
 
-using amd::smi::AMDSmiAINICDevice;
-
-constexpr auto kNumToggles = 20000;
-
-TEST_F(NicUnit, StatScopeDefaultsToTheDefaultTier) {
-  const AMDSmiAINICDevice device(info_);
-
-  EXPECT_EQ(device.stat_scope(), AMDSMI_NIC_STAT_SCOPE_DEFAULT);
+TEST_F(NicUnit, StatScopeEnumValuesAreStable) {
+  EXPECT_EQ(static_cast<int>(AMDSMI_NIC_STAT_SCOPE_DEFAULT), 0);
+  EXPECT_EQ(static_cast<int>(AMDSMI_NIC_STAT_SCOPE_EXTENDED), 1);
 }
 
-// Setting back to the default must stick; a one-way latch to EXTENDED would pass the first set.
-TEST_F(NicUnit, StatScopeKeepsTheLastTierSet) {
-  AMDSmiAINICDevice device(info_);
+TEST_F(NicUnit, StatScopeIsAnArgumentOfTheScopedGetter) {
+  using ScopedSignature_t = amdsmi_status_t (*)(
+      amdsmi_processor_handle, uint32_t, amdsmi_nic_stat_scope_t, uint32_t*, amdsmi_nic_stat_t*);
 
-  device.set_stat_scope(AMDSMI_NIC_STAT_SCOPE_EXTENDED);
-  EXPECT_EQ(device.stat_scope(), AMDSMI_NIC_STAT_SCOPE_EXTENDED);
-
-  device.set_stat_scope(AMDSMI_NIC_STAT_SCOPE_DEFAULT);
-  EXPECT_EQ(device.stat_scope(), AMDSMI_NIC_STAT_SCOPE_DEFAULT);
+  EXPECT_TRUE(
+      (std::is_same_v<decltype(&amdsmi_get_nic_vendor_statistics_with_scope), ScopedSignature_t>));
 }
 
-TEST_F(NicUnit, StatScopeIsKeptPerDevice) {
-  AMDSmiAINICDevice first(info_);
-  const AMDSmiAINICDevice second(info_);
+// A value outside the enum is rejected rather than read as the default tier.
+TEST_F(NicUnit, StatScopeOutsideTheEnumIsNotResolved) {
+  auto nic_scope = SMI_NIC_STAT_SCOPE_DEFAULT;
 
-  first.set_stat_scope(AMDSMI_NIC_STAT_SCOPE_EXTENDED);
-
-  EXPECT_EQ(second.stat_scope(), AMDSMI_NIC_STAT_SCOPE_DEFAULT);
+  EXPECT_FALSE(amd::smi::was_nic_stat_scope_resolved(2, &nic_scope));
+  EXPECT_FALSE(amd::smi::was_nic_stat_scope_resolved(-1, &nic_scope));
 }
 
-// Two threads share one handle; under TSan a non-atomic tier reports a data race here.
-TEST_F(NicUnit, StatScopeSurvivesConcurrentSetAndGet) {
-  AMDSmiAINICDevice device(info_);
-  auto is_scope_seen_valid = true;
+TEST_F(NicUnit, StatScopeMapsEachPublicTierToTheLibraryTier) {
+  auto nic_scope = SMI_NIC_STAT_SCOPE_DEFAULT;
 
-  std::thread writer([&device] {
-    for (auto i = 0; i < kNumToggles; ++i) {
-      device.set_stat_scope(((i % 2) == 0) ? AMDSMI_NIC_STAT_SCOPE_EXTENDED
-                                           : AMDSMI_NIC_STAT_SCOPE_DEFAULT);
-    }
-  });
-  for (auto i = 0; i < kNumToggles; ++i) {
-    const auto scope = device.stat_scope();
-    if ((scope != AMDSMI_NIC_STAT_SCOPE_DEFAULT) && (scope != AMDSMI_NIC_STAT_SCOPE_EXTENDED)) {
-      is_scope_seen_valid = false;
-    }
-  }
-  writer.join();
-
-  EXPECT_TRUE(is_scope_seen_valid);
+  ASSERT_TRUE(amd::smi::was_nic_stat_scope_resolved(AMDSMI_NIC_STAT_SCOPE_EXTENDED, &nic_scope));
+  EXPECT_EQ(nic_scope, SMI_NIC_STAT_SCOPE_EXTENDED);
+  ASSERT_TRUE(amd::smi::was_nic_stat_scope_resolved(AMDSMI_NIC_STAT_SCOPE_DEFAULT, &nic_scope));
+  EXPECT_EQ(nic_scope, SMI_NIC_STAT_SCOPE_DEFAULT);
 }
 
 }  // namespace

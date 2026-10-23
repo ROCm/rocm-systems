@@ -690,6 +690,8 @@ class AmdSmiLinkType(IntEnum):
     AMDSMI_LINK_TYPE_PCIE = amdsmi_wrapper.AMDSMI_LINK_TYPE_PCIE
     AMDSMI_LINK_TYPE_NOT_APPLICABLE = amdsmi_wrapper.AMDSMI_LINK_TYPE_NOT_APPLICABLE
     AMDSMI_LINK_TYPE_UNKNOWN = amdsmi_wrapper.AMDSMI_LINK_TYPE_UNKNOWN
+    AMDSMI_LINK_TYPE_NUMA = amdsmi_wrapper.AMDSMI_LINK_TYPE_NUMA
+    AMDSMI_LINK_TYPE_XNUMA = amdsmi_wrapper.AMDSMI_LINK_TYPE_XNUMA
 
 
 class AmdSmiLinkStatus(IntEnum):
@@ -2737,7 +2739,7 @@ def amdsmi_get_nic_fw_info(
     # num_fw comes from the C layer; clamp to the fixed fw[] capacity so a bad
     # count can't drive an out-of-bounds ctypes access.
     for i in range(min(fw_info.num_fw, len(fw_info.fw))):
-        entry = fw_info.fw[i]
+        entry = fw_info.fw[i].fw
         name = entry.name.decode("utf-8", errors="replace")
         version = entry.version.decode("utf-8", errors="replace")
         fw_info_dict[name] = version if version else "N/A"
@@ -2952,38 +2954,26 @@ def amdsmi_get_nic_vendor_statistics(
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
-    # The C getter reads the tier set on the handle, which is shared by every caller in the
-    # process, so callers on other threads must agree on the tier while this runs. The handle is
-    # put back on the default tier afterwards so a later C caller does not inherit this scope.
-    _check_res(amdsmi_wrapper.amdsmi_set_nic_stat_scope(processor_handle, scope))
-    statistics = {}
-    try:
-        num_stats = ctypes.c_uint32(0)
-        _check_res(
-            amdsmi_wrapper.amdsmi_get_nic_vendor_statistics(
-                processor_handle, port_index, ctypes.byref(num_stats), None
-            )
+    num_stats = ctypes.c_uint32(0)
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_nic_vendor_statistics_with_scope(
+            processor_handle, port_index, scope, ctypes.byref(num_stats), None
         )
+    )
 
-        if num_stats.value > 0:
-            stats = (amdsmi_wrapper.amdsmi_nic_stat_t * num_stats.value)()
-            _check_res(
-                amdsmi_wrapper.amdsmi_get_nic_vendor_statistics(
-                    processor_handle, port_index, ctypes.byref(num_stats), stats
-                )
-            )
-            statistics = {
-                stats[i].name.decode("utf-8", errors="replace"): stats[i].value
-                for i in range(num_stats.value)
-            }
-    finally:
-        reset_status = amdsmi_wrapper.amdsmi_set_nic_stat_scope(
-            processor_handle, amdsmi_wrapper.AMDSMI_NIC_STAT_SCOPE_DEFAULT
+    if num_stats.value == 0:
+        return {}
+
+    stats = (amdsmi_wrapper.amdsmi_nic_stat_t * num_stats.value)()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_nic_vendor_statistics_with_scope(
+            processor_handle, port_index, scope, ctypes.byref(num_stats), stats
         )
-    # Reached only when the query succeeded, so a failed reset never hides the query's error.
-    _check_res(reset_status)
-
-    return statistics
+    )
+    return {
+        stats[i].name.decode("utf-8", errors="replace"): stats[i].value
+        for i in range(num_stats.value)
+    }
 
 
 def amdsmi_get_nic_rdma_port_statistics(
@@ -4779,10 +4769,15 @@ def amdsmi_get_link_metrics(processor_handle: processor_handle_t):
 def amdsmi_topo_get_link_type(
     processor_handle_src: processor_handle_t, processor_handle_dst: processor_handle_t
 ):
-    """Return the abstracted hop count and link type between two GPUs.
+    """Return the abstracted hop count and link type between two processors.
 
-    Both handles must be GPU processor handles. The hop count is an abstracted
-    topology step count, not the number of physical xGMI links traversed:
+    Both handles are GPU or NIC processor handles. For a NIC pair (NIC to GPU or
+    NIC to NIC) the type is PCIE (same PCIe switch), NUMA (same NUMA node,
+    different switch), XNUMA (different NUMA nodes) or UNKNOWN, and ``hops`` is
+    not meaningful: it reads ``UINT64_MAX``.
+
+    For two GPUs the hop count is an abstracted topology step count, not the
+    number of physical xGMI links traversed:
 
     - 1: The two GPUs are reachable over xGMI, regardless of the number of
          physical xGMI links on the route.

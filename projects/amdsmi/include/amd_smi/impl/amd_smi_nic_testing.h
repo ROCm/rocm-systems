@@ -4,6 +4,7 @@
 #pragma once
 
 #include "amd_smi/impl/nic/amd_smi_ainic_device.h"
+#include "amd_smi/impl/nic/amd_smi_nic_interface.h"
 
 // Included bare: the header opens its own extern "C", and wrapping it again
 // would extend C linkage over the C++-only declarations at its tail.
@@ -27,6 +28,8 @@ struct nic_info_getters_t {
   smi_nic_status_t (*numa)(smi_nic_ctx_t, uint64_t, smi_nic_numa_info_t*);
   smi_nic_status_t (*port)(smi_nic_ctx_t, uint64_t, smi_nic_port_info_t*);
   smi_nic_status_t (*rdma)(smi_nic_ctx_t, uint64_t, smi_nic_rdma_devices_info_t*);
+  smi_nic_status_t (*kind)(smi_nic_ctx_t, uint64_t, uint8_t*);
+  smi_nic_status_t (*capability)(smi_nic_ctx_t, uint64_t, uint32_t*);
 };
 
 // Passing nullptr restores the production getters. Not thread-safe: only the

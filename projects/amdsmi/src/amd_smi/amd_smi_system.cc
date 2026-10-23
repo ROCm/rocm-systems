@@ -414,8 +414,8 @@ amdsmi_status_t AMDSmiSystem::populate_amd_gpu_devices() {
 }
 
 static const nic_info_getters_t kRealNicInfoGetters = {
-    smi_get_nic_bus_info,  smi_get_nic_driver_info, smi_get_nic_asic_info,
-    smi_get_nic_numa_info, smi_get_nic_port_info,   smi_get_nic_rdma_dev_info,
+    smi_get_nic_bus_info,  smi_get_nic_driver_info,   smi_get_nic_asic_info, smi_get_nic_numa_info,
+    smi_get_nic_port_info, smi_get_nic_rdma_dev_info, smi_get_nic_kind,      smi_get_nic_capability,
 };
 
 // Rebound only by nic_set_info_getters_for_testing(); production never writes it.
@@ -456,18 +456,26 @@ amdsmi_status_t populate_amd_ainic_device(const smi_nic_ctx_t& ctx, uint64_t bdf
     CHK_AMDNIC_RET(status);
   }
 
-  // The shim struct has two trailing members the public one lacks: copy the common prefix and
-  // keep type and capability on the device.
+  static_assert(sizeof(smi_nic_asic_info_t) == sizeof(ai_nic_info.asic));
   static_assert(offsetof(smi_nic_asic_info_t, vendor_name) ==
                 offsetof(amdsmi_nic_asic_info_t, vendor_name));
-  static_assert(sizeof(amdsmi_nic_asic_info_t) <= sizeof(smi_nic_asic_info_t));
-  static_assert(offsetof(smi_nic_asic_info_t, type) <= sizeof(amdsmi_nic_asic_info_t));
-  smi_nic_asic_info_t asic = {};
-  status = g_nic_info_getters->asic(ctx, bdf_int, &asic);
+  status = g_nic_info_getters->asic(ctx, bdf_int,
+                                    reinterpret_cast<smi_nic_asic_info_t*>(&ai_nic_info.asic));
   CHK_AMDNIC_RET(status);
-  std::memcpy(&ai_nic_info.asic, &asic, sizeof(ai_nic_info.asic));
-  ai_nic_info.type = asic.type;
-  ai_nic_info.capability = asic.capability;
+
+  // Type and capability are cosmetic next to the identity read above: a failure leaves them at
+  // UNKNOWN and no capability instead of dropping a NIC every other getter could read.
+  ai_nic_info.type = 0;
+  ai_nic_info.capability = 0;
+  const auto kind_status = g_nic_info_getters->kind(ctx, bdf_int, &ai_nic_info.type);
+  const auto capability_status =
+      g_nic_info_getters->capability(ctx, bdf_int, &ai_nic_info.capability);
+  if ((kind_status != SMI_NIC_STATUS_SUCCESS) || (capability_status != SMI_NIC_STATUS_SUCCESS)) {
+    std::ostringstream ss;
+    ss << __func__ << ": NIC kind/capability unavailable for BDF=0x" << std::hex << bdf_int
+       << std::dec << " kind status " << kind_status << " capability status " << capability_status;
+    LOG_DEBUG(ss);
+  }
 
   static_assert(sizeof(smi_nic_numa_info_t) == sizeof(ai_nic_info.numa));
   static_assert(offsetof(smi_nic_numa_info_t, affinity) ==
@@ -549,8 +557,7 @@ static void install_nic_debug_log() {
 
 amdsmi_status_t AMDSmiSystem::populate_amd_ainic_devices() {
   install_nic_debug_log();
-  bool is_ainic_only = (nic_filter_ == AMDSMI_NIC_FILTER_AINIC_ONLY);
-  smi_nic_status_t status = smi_nic_create_context(&ainic_ctx_, is_ainic_only);
+  smi_nic_status_t status = smi_nic_create_context(&ainic_ctx_);
   CHK_AMDNIC_RET(status);
 
   smi_nic_discovery_t discovery = {};
