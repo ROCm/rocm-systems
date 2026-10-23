@@ -463,8 +463,7 @@ get_copy_metadata(hsa_agent_t      _hsa_dst_agent,
                     {
                         case HSA_EXT_POINTER_TYPE_HSA:
                         case HSA_EXT_POINTER_TYPE_IPC:
-                        case HSA_EXT_POINTER_TYPE_GRAPHICS:
-                        case HSA_EXT_POINTER_TYPE_HSA_VMEM: break;
+                        case HSA_EXT_POINTER_TYPE_GRAPHICS: break;
                         default: return nullptr;
                     }
 
