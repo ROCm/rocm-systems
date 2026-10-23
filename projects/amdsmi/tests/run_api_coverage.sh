@@ -33,6 +33,12 @@
 #   -v, --verbose        mirror suite output to the terminal as well as the log
 #       --no-cpp         skip the C++ suites
 #       --no-python      skip the Python suites
+#   -u, --unit-only      run only the unit suites (C++ unit, Python unit)
+#   -f, --functional-only  run only the suites that drive a live device (C++ functional,
+#                        Python functional, Python CLI)
+#
+# The two are mutually exclusive and combine with --no-cpp/--no-python. A partial run's
+# report and trend row only cover the suites that ran, so the run is tagged in its notes.
 #
 # GTest selection is "<positive>-<negative>": the positive half comes from
 # -U/-F, the negative half from amdsmitst.exclude via detect_asic_filter.sh
@@ -79,6 +85,8 @@ NO_EXCLUDE=0
 VERBOSE=0
 SKIP_CPP=0
 SKIP_PY=0
+RUN_UNIT=1
+RUN_FUNC=1
 
 usage() { tail -n +5 "$0" | sed -n '/^#/!q; s/^# \{0,1\}//p'; }
 
@@ -110,10 +118,19 @@ while [[ $# -gt 0 ]]; do
     -v | --verbose) VERBOSE=1; shift ;;
     --no-cpp) SKIP_CPP=1; shift ;;
     --no-python) SKIP_PY=1; shift ;;
+    -u | --unit-only) RUN_FUNC=0; shift ;;
+    -f | --functional-only) RUN_UNIT=0; shift ;;
     -h | --help) usage; exit 0 ;;
     *) echo "unknown arg: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
+
+if [[ "$RUN_UNIT" == 0 && "$RUN_FUNC" == 0 ]]; then
+  echo "error: --unit-only and --functional-only are mutually exclusive" >&2
+  exit 2
+fi
+[[ "$RUN_FUNC" == 0 ]] && NOTES="${NOTES:+$NOTES }(unit only)"
+[[ "$RUN_UNIT" == 0 ]] && NOTES="${NOTES:+$NOTES }(functional only)"
 
 [[ "$(id -u)" -eq 0 ]] || echo "warning: not root -- the Python suites will exit(1)" >&2
 [[ -x "$TESTS_DIR/amdsmitst" ]] || {
@@ -196,12 +213,16 @@ if [[ "$SKIP_CPP" == 0 ]]; then
     # add the negative half when there is something to exclude.
     unit_arg="$UNIT_FILTER${exclude:+-$exclude}"
     func_arg="$FUNC_FILTER${exclude:+-$exclude}"
-    echo "=== C++ unit ===   filter=$unit_arg" >&2
-    run_logged "$OUTDIR/_c_unit_test.log" ./amdsmitst -v 1 --gtest_filter="$unit_arg"
-    echo "c_unit,$?,_c_unit_test.log" >>"$STATUS_CSV"
-    echo "=== C++ functional ===   filter=$func_arg" >&2
-    run_logged "$OUTDIR/_c_func_test.log" ./amdsmitst -v 1 --gtest_filter="$func_arg"
-    echo "c_func,$?,_c_func_test.log" >>"$STATUS_CSV"
+    if [[ "$RUN_UNIT" == 1 ]]; then
+      echo "=== C++ unit ===   filter=$unit_arg" >&2
+      run_logged "$OUTDIR/_c_unit_test.log" ./amdsmitst -v 1 --gtest_filter="$unit_arg"
+      echo "c_unit,$?,_c_unit_test.log" >>"$STATUS_CSV"
+    fi
+    if [[ "$RUN_FUNC" == 1 ]]; then
+      echo "=== C++ functional ===   filter=$func_arg" >&2
+      run_logged "$OUTDIR/_c_func_test.log" ./amdsmitst -v 1 --gtest_filter="$func_arg"
+      echo "c_func,$?,_c_func_test.log" >>"$STATUS_CSV"
+    fi
   )
 fi
 
@@ -218,9 +239,13 @@ run_py() {
   fi
 }
 if [[ "$SKIP_PY" == 0 ]]; then
-  run_py unit_tests.py _py_unit_test.log "Python unit" py_unit
-  run_py integration_test.py _py_func_test.log "Python functional" py_func
-  run_py cli_unit_test.py _py_cli_test.log "Python CLI" py_cli
+  if [[ "$RUN_UNIT" == 1 ]]; then
+    run_py unit_tests.py _py_unit_test.log "Python unit" py_unit
+  fi
+  if [[ "$RUN_FUNC" == 1 ]]; then
+    run_py integration_test.py _py_func_test.log "Python functional" py_func
+    run_py cli_unit_test.py _py_cli_test.log "Python CLI" py_cli
+  fi
 fi
 
 # ---- Reports ----
@@ -230,7 +255,10 @@ fi
 # those are structural noise, so raise the threshold and check the logs we do
 # expect ourselves.
 missing=0
-for log in _c_unit_test.log _c_func_test.log _py_unit_test.log _py_func_test.log; do
+expected_logs=()
+[[ "$RUN_UNIT" == 1 ]] && expected_logs+=(_c_unit_test.log _py_unit_test.log)
+[[ "$RUN_FUNC" == 1 ]] && expected_logs+=(_c_func_test.log _py_func_test.log)
+for log in "${expected_logs[@]}"; do
   if [[ ! -s "$OUTDIR/$log" ]]; then
     echo "warning: expected log is missing or empty: $log" >&2
     missing=1
