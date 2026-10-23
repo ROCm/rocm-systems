@@ -7886,15 +7886,7 @@ class CodeGenerator:
             'ds_read_tr_b4',
             'ds_read_tr_b6',
         ):
-            gds_guard = ''
-            if self._enc_has_field('gds'):
-                gds_guard = (
-                    '  if (inst_.gds) {\n'
-                    '    wf.report_instruction_execution_error(\n'
-                    '        amdgpu::InstructionExecutionError::UnimplementedInstruction);\n'
-                    '    return;\n'
-                    '  }\n'
-                )
+            gds_guard = self._gen_ds_gds_guard()
             if cls == 'ds_read':
                 return gds_guard + self._gen_ds_read(dst_ops, src_ops, sem)
             if cls == 'ds_read2':
@@ -7965,16 +7957,6 @@ class CodeGenerator:
                 else '(8u << ((inst_.offset1 >> 4) & 3u))'
             )
             flags = '(1u | ((inst_.offset1 & 3u) << 1))' if modern else '0u'
-            if not modern:
-                L.extend(
-                    [
-                        '  if (inst_.gds) {',
-                        '    wf.report_instruction_execution_error(',
-                        '        amdgpu::InstructionExecutionError::UnimplementedInstruction);',
-                        '    return;',
-                        '  }',
-                    ]
-                )
             L.append(
                 '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
             )
@@ -7984,32 +7966,16 @@ class CodeGenerator:
                 f'inst_.vdst, {push}, {sem.num_elems}, {size}, {flags});'
             )
             L.append('  set_data(std::move(d));')
-            return '\n'.join(L)
+            return self._gen_ds_gds_guard() + '\n'.join(L)
 
         if cls in ('ds_atomic', 'ds_atomic2'):
-            gds_guard = ''
-            if self._enc_has_field('gds'):
-                gds_guard = (
-                    '  if (inst_.gds) {\n'
-                    '    wf.report_instruction_execution_error(\n'
-                    '        amdgpu::InstructionExecutionError::UnimplementedInstruction);\n'
-                    '    return;\n'
-                    '  }\n'
-                )
+            gds_guard = self._gen_ds_gds_guard()
             if cls == 'ds_atomic2':
                 return gds_guard + self._gen_ds_atomic2(dst_ops, src_ops, sem)
             return gds_guard + self._gen_ds_atomic(dst_ops, src_ops, sem)
 
         if cls in ('ds_mskor', 'ds_append_consume', 'ds_barrier_arrive'):
-            gds_guard = ''
-            if self._enc_has_field('gds'):
-                gds_guard = (
-                    '  if (inst_.gds) {\n'
-                    '    wf.report_instruction_execution_error(\n'
-                    '        amdgpu::InstructionExecutionError::UnimplementedInstruction);\n'
-                    '    return;\n'
-                    '  }\n'
-                )
+            gds_guard = self._gen_ds_gds_guard()
             if cls == 'ds_mskor':
                 return gds_guard + self._gen_ds_mskor(dst_ops, src_ops, sem)
             if cls == 'ds_append_consume':
@@ -8024,16 +7990,9 @@ class CodeGenerator:
             # classified as LDS and omits the GDS EXPCNT obligation, so the stateful
             # behavior and the memory-wait accounting would disagree. ISAs whose DS
             # encoding carries no gds field always target GDS, so no guard is emitted.
-            gds_guard = ''
-            if self._enc_has_field('gds'):
-                gds_guard = (
-                    '  if (!inst_.gds) {\n'
-                    '    wf.report_instruction_execution_error(\n'
-                    '        amdgpu::InstructionExecutionError::InvalidInstructionEncoding);\n'
-                    '    return;\n'
-                    '  }\n'
-                )
-            return gds_guard + self._gen_ds_gws(dst_ops, src_ops, sem)
+            return self._gen_ds_gds_guard(require_gds=True) + self._gen_ds_gws(
+                dst_ops, src_ops, sem
+            )
 
         if cls in ('ds_permute', 'ds_swizzle'):
             is_swizzle = cls == 'ds_swizzle'
@@ -9177,6 +9136,22 @@ class CodeGenerator:
         # Counter increment handled by MemoryPipeline::issue().
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
+
+    def _gen_ds_gds_guard(self, *, require_gds: bool = False) -> str:
+        """Reject unsupported DS modes before any execution side effects."""
+        if not self._enc_has_field('gds'):
+            return ''
+        condition = '!inst_.gds' if require_gds else 'inst_.gds'
+        error = (
+            'InvalidInstructionEncoding' if require_gds else 'UnimplementedInstruction'
+        )
+        return (
+            f'  if ({condition}) {{\n'
+            '    wf.report_instruction_execution_error(\n'
+            f'        amdgpu::InstructionExecutionError::{error});\n'
+            '    return;\n'
+            '  }\n'
+        )
 
     def _gen_ds_atomic(
         self, dst: list[str], src: list[str], sem: InstructionSemantics
