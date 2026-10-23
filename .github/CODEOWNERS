@@ -22,7 +22,7 @@
 /.github/workflows/rocr-runtime-*.yml                                 @ROCm/rocr-maintainers
 /.github/workflows/rocprofiler-systems-*.yml                          @ROCm/rocprof-sys
 /.github/workflows/*therock*.yml                                      @ROCm/therock-infra-write @ROCm/rocm-systems-reviewers
-/.github/workflows/*rccl*                                             @ROCm/rccl-ci
+/.github/**/*rccl*                                                    @ROCm/rccl-ci
 /.github/workflows/therock-rccl-*.yml                                 @ROCm/therock-infra-write @ROCm/rccl-ci
 
 # Individual contributors
