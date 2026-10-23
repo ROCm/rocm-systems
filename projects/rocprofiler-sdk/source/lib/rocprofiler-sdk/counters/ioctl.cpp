@@ -89,12 +89,13 @@ profiler_ioctl(kfd_ioctl_profiler_args& args)
 // exclusive profiler_process lock for a per-process perfmon clock override, and relies on
 // process teardown (not an explicit unlock ioctl) to release it. The kernel only honors this
 // behavior starting at KFD_IOC_PROFILER_VERSION_NUM 2; on older kernels it falls through to
-// the exclusive-lock path and would spuriously fail, so only use it when the running kernel
-// reports exactly that version.
+// the exclusive-lock path and would spuriously fail. Version numbers are cumulative (see the
+// history comment above KFD_IOC_PROFILER_VERSION_NUM in kfd_ioctl.h), so any version >= 2
+// retains this behavior.
 bool
 dispatch_mode_supported()
 {
-    return kfd_profiler_version() == KFD_IOC_PROFILER_VERSION_NUM;
+    return kfd_profiler_version() >= KFD_IOC_PROFILER_VERSION_NUM;
 }
 }  // namespace
 
