@@ -181,17 +181,17 @@ int SimulatedKfd::submit_pm4(uint32_t render_minor, uint64_t queue_key,
   std::lock_guard op_lock(process->op_mutex_);
   if (process->event_state_.is_closing())
     return -ENODEV;
-  const uint32_t ordinal = num_gpus() == 1 ? 0 : render_minor - 128;
-  if (ordinal >= gpus_.size())
+  const auto ordinal = gpu_ordinal_for_render_minor(render_minor);
+  if (!ordinal)
     return -ENODEV;
   std::lock_guard lock(pm4_mutex_);
   auto it = pm4_queues_.find(queue_key);
   if (it == pm4_queues_.end()) {
-    auto *cp = gpus_[ordinal].soc->assign_queue_owner_cp(0);
+    auto *cp = gpus_[*ordinal].soc->assign_queue_owner_cp(0);
     if (!cp)
       return -ENODEV;
     amdgpu::ComputeQueueConfig queue;
-    queue.address_space = process->gpu(ordinal).address_space;
+    queue.address_space = process->gpu(*ordinal).address_space;
     queue.process_id = local_process_id_;
     queue.queue_id = next_pm4_queue_id_++;
     const uint32_t queue_id = queue.queue_id;
@@ -796,15 +796,38 @@ std::string SimulatedKfd::redirect_sysfs_path(const char *path) const {
 bool SimulatedKfd::handles_drm_render_minor(uint32_t minor) const {
   if (topology().drm_path().empty())
     return false;
-  if (num_gpus() <= 1)
-    return true;
-  return minor >= 128 && minor < 128 + num_gpus();
+  return gpu_ordinal_for_render_minor(minor).has_value();
 }
 
-const Sysfs::GpuInfo *SimulatedKfd::gpu_info_for_render_minor(uint32_t /*minor*/) const {
+const Sysfs::GpuInfo *SimulatedKfd::gpu_info_for_render_minor(uint32_t minor) const {
   if (topology().drm_path().empty())
     return nullptr;
-  return &topology().gpu_info();
+  const auto ordinal = gpu_ordinal_for_render_minor(minor);
+  return ordinal && *ordinal < gpu_infos_.size() ? &gpu_infos_[*ordinal] : nullptr;
+}
+
+std::optional<uint32_t> SimulatedKfd::gpu_ordinal_for_render_minor(uint32_t minor) const {
+  if (num_gpus() == 0)
+    return std::nullopt;
+  // A legacy single-GPU driver accepted any render minor. Keep that routing
+  // when old configs advertise a different minor from their PM4 clients.
+  // Manifest projections require an exact match to avoid claiming a host GPU.
+  if (!strict_render_minor_ && num_gpus() == 1)
+    return 0;
+  if (!gpu_infos_.empty()) {
+    const auto it =
+        std::find_if(gpu_infos_.begin(), gpu_infos_.end(),
+                     [minor](const Sysfs::GpuInfo &gpu) { return gpu.drm_render_minor == minor; });
+    if (it == gpu_infos_.end())
+      return std::nullopt;
+    const auto ordinal = static_cast<uint32_t>(std::distance(gpu_infos_.begin(), it));
+    return ordinal < num_gpus() ? std::optional<uint32_t>{ordinal} : std::nullopt;
+  }
+  // A driver constructed directly by a unit test can submit before setup_topology.
+  if (num_gpus() == 1)
+    return 0;
+  return minor >= 128 && minor - 128 < num_gpus() ? std::optional<uint32_t>{minor - 128}
+                                                  : std::nullopt;
 }
 
 void SimulatedKfd::setup_topology(const config::KfdDeviceConfig &dev, uint32_t num_xcc) {
@@ -947,6 +970,7 @@ void SimulatedKfd::reap_exited_debug_sessions(std::stop_token stop) {
 }
 
 void SimulatedKfd::setup_topology(const Sysfs::GpuInfo &gpu) {
+  strict_render_minor_ = false;
   if (!gpus_.empty())
     gpus_[0].gpu_id = gpu.gpu_id;
   gpu_infos_ = {gpu};
@@ -955,20 +979,29 @@ void SimulatedKfd::setup_topology(const Sysfs::GpuInfo &gpu) {
 }
 
 void SimulatedKfd::setup_topology(const std::vector<config::KfdDeviceConfig> &devs,
-                                  uint32_t num_xcc) {
+                                  uint32_t num_xcc, bool publish_peer_links,
+                                  bool strict_render_minor) {
+  strict_render_minor_ = strict_render_minor;
   std::vector<Sysfs::GpuInfo> infos;
   infos.reserve(devs.size());
   for (auto &dev : devs) {
     if (!dev.present)
       continue;
-    infos.push_back(gpu_info_from_config(dev, num_xcc));
+    auto info = gpu_info_from_config(dev, num_xcc);
+    if (!publish_peer_links) {
+      // Until a manifest route can execute peer accesses, keep all KFD and
+      // daemon metadata that ROCr uses to infer an XGMI peer path conservative.
+      info.hive_id = 0;
+      info.num_sdma_xgmi_engines = 0;
+    }
+    infos.push_back(std::move(info));
   }
   if (infos.empty())
     return;
   for (size_t i = 0; i < infos.size() && i < gpus_.size(); ++i)
     gpus_[i].gpu_id = infos[i].gpu_id;
   gpu_infos_ = std::move(infos);
-  topology_.generate(gpu_infos_);
+  topology_.generate(gpu_infos_, publish_peer_links);
   topology_.setup_environment();
 }
 

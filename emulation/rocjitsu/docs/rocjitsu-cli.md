@@ -12,9 +12,9 @@ the simulated GPU. It operates in four modes:
   communicate with the daemon via RPC over a Unix domain socket. GPU memory
   is shared using backing descriptors passed via SCM_RIGHTS.
 - **Attach mode**: Launches an application against an already-running daemon.
-- **VFIO-user mode**: Serves one configured PCI function to an external VMM
-  through an AF_UNIX socket. This mode is available only in builds configured
-  with `ROCJITSU_ENABLE_VFIO=ON`.
+- **VFIO-user mode**: Serves each configured local GPU as a PCI function to an
+  external VMM through its own AF_UNIX socket. This mode is available only in
+  builds configured with `ROCJITSU_ENABLE_VFIO=ON`.
 
 Daemon mode supports vLLM's multiprocessing spawn, torchrun, torch.distributed,
 and NCCL --- workloads where multiple processes share a single simulated GPU.
@@ -60,15 +60,16 @@ receiving real GPU descriptors over a Unix socket.
 
 ```
 Usage: rocjitsu --config <config.json> [--daemon|--attach] -- <app> [args...]
-       rocjitsu --config <config.json> --vfio-socket <path>
+       rocjitsu --config <config.json> [--node <id>] --vfio-socket <path> [--vfio-socket <path> ...]
 ```
 
 | Option | Description |
 |--------|-------------|
 | `--config <path>` | Path to simulation config JSON (required) |
+| `--node <id>` | Select a local node from a multi-node system manifest. Legacy `vm.gpu.num_gpus` configs need no node selector. |
 | `--daemon` | Run in daemon mode: fork a daemon process hosting the simulation engine, then launch the application with the interposer. Without `-- <app>`, runs the daemon server only. |
 | `--attach` | Attach to a running daemon. The socket path is resolved as `$ROCJITSU_RUNTIME_DIR/daemon.sock`, then `$XDG_RUNTIME_DIR/rocjitsu/daemon.sock`, falling back to `/tmp/rocjitsu-<uid>/daemon.sock`. |
-| `--vfio-socket <path>` | Serve the configured GPU as a PCI function over VFIO-user. The VMM must share guest RAM through mmap-able file descriptors. |
+| `--vfio-socket <path>` | Serve a local GPU as a PCI function over VFIO-user. Repeat once per local GPU in ordinal order for a multi-GPU node. The number of sockets must match the selected node's local GPU count, and paths must be distinct. The VMM must share guest RAM through mmap-able file descriptors. |
 | `--check-vfio-user` | Exit successfully only when this binary was built with VFIO-user support. |
 | `--help`, `-h` | Print usage and exit |
 | `--version`, `-v` | Print version, Git revision, commit date, and commit title, then exit |
@@ -92,6 +93,11 @@ rocjitsu --attach --config configs/gfx950_mi355x_kmd.json -- ./app
 # Serve the gfx1250 PCI function to a VMM
 rocjitsu --config configs/gfx1250_mi455x.json \
   --vfio-socket /tmp/rocjitsu-vfio/vfio-user.sock
+
+# Argument-order example: this fixture has synthetic PCI IDs and is not a guest profile
+rocjitsu --config tests/fixtures/fabric_node_projection.json --node tray7 \
+  --vfio-socket /tmp/rocjitsu-vfio/gpu0.sock \
+  --vfio-socket /tmp/rocjitsu-vfio/gpu1.sock
 ```
 
 See [QEMU VFIO-user compute](qemu-vfio.md) for the supported guest contract and
@@ -139,7 +145,7 @@ destroys the topology root (VirtualMachine), which destroys the driver.
 | Local | `rocjitsu -- ./app` | SimulatedDriver (in-process) | Background thread |
 | Daemon (server) | `rocjitsu --daemon -- ./app` | SimulatedDriver (in-process) | Background thread |
 | Daemon (client) | LD_PRELOAD interposer | RemoteDriver (RPC stub) | In daemon process |
-| VFIO-user server | `rocjitsu --config ... --vfio-socket ...` | Guest AMDGPU driver through PCI/VFIO | rocJITsu process |
+| VFIO-user server | `rocjitsu --config ... --vfio-socket ...` (repeat per local GPU) | Guest AMDGPU driver through PCI/VFIO | rocJITsu process |
 
 ## RPC Protocol
 

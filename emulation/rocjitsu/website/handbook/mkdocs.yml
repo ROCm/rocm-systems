@@ -75,9 +75,11 @@ nav:
       - Build from source: building.md
       - Command-line interface: rocjitsu-cli.md
       - Configuration: configuration.md
+      - Two-node RCCL NET smoke: rccl-scaleout.md
       - Race detection: race-detector.md
       - GPU debugging: rocgdb-debugging.md
       - Benchmarking: benchmarking.md
+      - Benchmark runner setup: benchmark-runner-setup.md
       - QEMU VFIO-user compute: qemu-vfio.md
       - Vulkan compute: vulkan-compute.md
       - Memory wait diagnostics: memory-wait-diagnostics.md
@@ -85,6 +87,7 @@ nav:
   - Developer guide:
       - Architecture: architecture.md
       - KFD and GEM backing: memory-backing.md
+      - Arithmetic library: arith-design.md
       - Code style: style.md
       - Simulation engine: simdojo.md
       - GPU hardware model: vm-design.md
