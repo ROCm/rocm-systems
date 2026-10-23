@@ -1,38 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-add_library(control-posix-clock-tests OBJECT test_posix_clock.cpp)
-
-target_link_libraries(
-    control-posix-clock-tests
-    PRIVATE
-        rocprofiler-systems-googletest-library
-        rocprofiler-systems-core-library
-        rocprofiler-systems-common-library
-        rocprofiler-systems-logger
-)
-
-target_include_directories(
-    control-posix-clock-tests
-    PRIVATE ${PROJECT_SOURCE_DIR}/source/lib ${CMAKE_BINARY_DIR}/source/lib
-)
-
-add_library(control-steady-clock-tests OBJECT test_steady_clock.cpp)
-
-target_link_libraries(
-    control-steady-clock-tests
-    PRIVATE
-        rocprofiler-systems-googletest-library
-        rocprofiler-systems-core-library
-        rocprofiler-systems-common-library
-        rocprofiler-systems-logger
-)
-
-target_include_directories(
-    control-steady-clock-tests
-    PRIVATE ${PROJECT_SOURCE_DIR}/source/lib ${CMAKE_BINARY_DIR}/source/lib
-)
-
 add_library(control-session-scope-tests OBJECT test_session_scope.cpp)
 
 target_link_libraries(
@@ -46,5 +14,53 @@ target_link_libraries(
 
 target_include_directories(
     control-session-scope-tests
+    PRIVATE ${PROJECT_SOURCE_DIR}/source/lib ${CMAKE_BINARY_DIR}/source/lib
+)
+
+add_library(control-roctx-trigger-tests OBJECT test_roctx_trigger.cpp)
+
+target_link_libraries(
+    control-roctx-trigger-tests
+    PRIVATE
+        rocprofiler-systems-googletest-library
+        rocprofiler-systems-core-library
+        rocprofiler-systems-common-library
+        rocprofiler-systems-logger
+)
+
+target_include_directories(
+    control-roctx-trigger-tests
+    PRIVATE ${PROJECT_SOURCE_DIR}/source/lib ${CMAKE_BINARY_DIR}/source/lib
+)
+
+add_library(control-waitable-posix-tests OBJECT test_waitable_posix.cpp)
+
+target_link_libraries(
+    control-waitable-posix-tests
+    PRIVATE
+        rocprofiler-systems-googletest-library
+        rocprofiler-systems-core-library
+        rocprofiler-systems-common-library
+        rocprofiler-systems-logger
+)
+
+target_include_directories(
+    control-waitable-posix-tests
+    PRIVATE ${PROJECT_SOURCE_DIR}/source/lib ${CMAKE_BINARY_DIR}/source/lib
+)
+
+add_library(control-waitable-steady-tests OBJECT test_waitable_steady.cpp)
+
+target_link_libraries(
+    control-waitable-steady-tests
+    PRIVATE
+        rocprofiler-systems-googletest-library
+        rocprofiler-systems-core-library
+        rocprofiler-systems-common-library
+        rocprofiler-systems-logger
+)
+
+target_include_directories(
+    control-waitable-steady-tests
     PRIVATE ${PROJECT_SOURCE_DIR}/source/lib ${CMAKE_BINARY_DIR}/source/lib
 )

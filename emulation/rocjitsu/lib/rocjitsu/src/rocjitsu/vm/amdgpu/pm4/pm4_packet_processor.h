@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocjitsu/code/rj_code.h"
+#include "util/diagnostic.h"
 
 #include <array>
 #include <cstdint>
@@ -23,17 +24,24 @@ struct Pm4ExecutionContext {
   /// @brief Target architecture for architecture-specific packet behavior.
   /// @details INVALID represents a CP without a compute unit.
   rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
+  /// @brief XCD index used by PRED_EXEC in CDNA vendor command buffers.
+  uint32_t xcc_id = 0;
   /// @brief Flush GPU caches before packet memory effects and stream completion.
   std::function<void()> flush_caches;
   /// @brief Admit a dispatch through CP using X, Y, Z, and the initiator word.
   /// @details The initiator determines whether dimensions count threads or groups.
   /// CP appends admitted work to queue.dispatches.entries; processing pauses
-  /// until CP retires those entries.
-  std::function<void(const std::array<uint32_t, 4> &)> dispatch;
+  /// until CP retires those entries. On failure, emit the reason and return failure;
+  /// the processor faults the queue without retiring the failed packet.
+  std::function<util::Result(const std::array<uint32_t, 4> &, util::DiagnosticEmitter)> dispatch;
   /// @brief Preserve the owner's retry scheduling at the original execution points.
   /// @details Set queue.command_retry_pending and arrange a later CP scheduling
   /// turn. CP clears the flag before resuming processing.
   std::function<void()> retry;
+  /// @brief Wake CP promptly after stream completion or yielding runnable work.
+  /// @details Reset retry backoff and arrange a scheduling turn without marking
+  /// this queue blocked; packet processing may continue in the current turn.
+  std::function<void()> wake;
   /// @brief Cancel through CP at the original execution points, including exception scope.
   /// @details Set queue.faulted, cancel pending work, and notify failed submissions.
   /// The processor sets queue.publication_faulted before calling this callback

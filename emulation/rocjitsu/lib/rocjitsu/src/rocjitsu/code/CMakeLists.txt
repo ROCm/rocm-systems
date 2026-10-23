@@ -11,6 +11,12 @@ rj_add_object_library(rocjitsu_code_object
     kernel_symbol.cpp
 )
 
+# Executable loading is reusable by fuzz and runtime consumers, but remains
+# outside the offline-analysis archive's symbol boundary.
+rj_add_object_library(rocjitsu_executable
+    executable.cpp
+)
+
 # CFG construction and dataflow share indirect-target discovery. Keep them in
 # one object group; neither depends on the DBT/DBI transformation layer.
 rj_add_object_library(rocjitsu_analysis
@@ -27,7 +33,6 @@ rj_add_object_library(rocjitsu_analysis
 )
 
 rj_add_object_library(rocjitsu_code
-    executable.cpp
     rj_code.cpp
     builders/instruction_builder.cpp
     dbt/binary_translator.cpp
@@ -52,6 +57,7 @@ rj_add_object_library(rocjitsu_code
     patch/sidecar_metadata.cpp
     dbt/waitcnt_translator.cpp
     patch/code_object_patcher.cpp
+    patch/entry_prologue.cpp
     patch/kernarg_extension.cpp
     patch/kernel_text_layout.cpp
     patch/log_buffer.cpp

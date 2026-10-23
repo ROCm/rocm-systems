@@ -247,7 +247,15 @@ static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK 
 #define NCCL_P2P_WRITE 0x01
 #define NCCL_P2P_READ 0x02
 #define NCCL_DIRECT_NIC 0x04
+#define NCCL_GPU_PRODUCER 0x40 // RCCL: a peer GPU kernel publishes this conn's head/tail steps, not a proxy or copy engine
 #define NCCL_NVLS_MIN_POLL 0x80
+static_assert((NCCL_GPU_PRODUCER & (NCCL_P2P_WRITE | NCCL_P2P_READ | NCCL_DIRECT_NIC | NCCL_NVLS_MIN_POLL)) == 0,
+              "NCCL_GPU_PRODUCER must not share a bit with another conn flag");
+
+// RCCL: gfx950 Simple polls a head/tail step with a sys-scope acquire unless a peer GPU kernel publishes it.
+__host__ __device__ constexpr bool ncclConnStepNeedsSysAcquire(int connFlags) {
+  return (connFlags & NCCL_GPU_PRODUCER) == 0;
+}
 
 #define NCCL_REGULAR_BUFFER 0x00
 #define NCCL_IPC_REG_BUFFER 0x01
@@ -755,6 +763,28 @@ inline __host__ __device__ int countOneBits(struct channelMasks const& x) {
   return n;
 }
 
+// Channel of the channelOrdinal-th set bit of mask, or -1; needs 0 <= lane < WARP_SIZE.
+// Lane checks bits lane and WARP_SIZE + lane (wave32) per word.
+__device__ __forceinline__ int ncclChannelMaskNthChannelId(struct channelMasks const& mask, int channelOrdinal,
+                                                           int lane) {
+  int total = 0;
+  for (int i = 0; i < (int)(MAXCHANNELS / CHANNELS_PER_MASK_WORD); i++) {
+    const uint64_t word = mask.masks[i];
+    int bit = lane;
+    if ((word & (1ull << bit)) && total + __popcll(word & ((1ull << bit) - 1)) == channelOrdinal) {
+      return bit + i * CHANNELS_PER_MASK_WORD;
+    }
+    if (WARP_SIZE < 64) {
+      bit = WARP_SIZE + lane;
+      if ((word & (1ull << bit)) && total + __popcll(word & ((1ull << bit) - 1)) == channelOrdinal) {
+        return bit + i * CHANNELS_PER_MASK_WORD;
+      }
+    }
+    total += __popcll(word);
+  }
+  return -1;
+}
+
 struct alignas(16) ncclDevKernelArgs {
   struct ncclKernelComm* comm;
 #ifdef ENABLE_WARP_SPEED
@@ -940,7 +970,7 @@ extern bool const ncclDevFuncUnrollGenerated[NCCL_NUM_UNROLLS];
 // Arch each unroll factor's device functions were compiled for, or nullptr when
 // the unroll carries no arch restriction. Neither table implies the other, so both
 // have to be consulted: an entry names its arch even for an unroll this build left
-// out, and BUILD_ALL_UNROLLS clears every entry because it compiles them all.
+// out. BUILD_ALL_UNROLLS does not clear the pin.
 extern char const* const ncclDevFuncUnrollArch[NCCL_NUM_UNROLLS];
 
 // `ncclDevFuncId()` needs to be in sync with 'all_colls' in generate.py

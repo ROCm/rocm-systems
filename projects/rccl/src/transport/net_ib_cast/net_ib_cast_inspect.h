@@ -53,10 +53,65 @@ ncclResult_t ncclIbCastSetTokens(void* sendComm, const int* qpTokens, int nqps);
 ncclResult_t ncclIbCastSetSchedParms(void* sendComm, bool schedEnable, bool doWrr, bool splitData,
                                      uint32_t splitDataMin);
 
+/* ── Hardware capabilities of a vNic device, probed once and cached. ── */
+struct ncclIbCastDeviceCaps {
+  bool udSupported;
+  bool rdmaReadSupported;
+};
+
+ncclResult_t ncclIbCastGetDeviceCaps(int dev, struct ncclIbCastDeviceCaps* out);
+
+/* ── UDMA pinning shared helpers and introspection ── */
+
+/* Normalize a raw UDMA count from the driver.  A zero value (driver too old
+ * or symbol unavailable) falls back to 2 to match legacy 2-engine behavior.
+ * The UDMA mask is a uint8_t, so at most 8 engines (bits 0-7) are addressable;
+ * clamp to avoid shifting a bit off the end.
+ * Used by both init.cc (production) and unit tests. */
+#define NCCL_IB_CAST_UDMA_MAX_ENGINES ((uint8_t)(sizeof(uint8_t) * 8))
+static inline uint8_t ncclIbCastNormalizeUdmaCount(uint8_t raw) {
+  if (raw == 0) return 2;
+  return (raw > NCCL_IB_CAST_UDMA_MAX_ENGINES) ? NCCL_IB_CAST_UDMA_MAX_ENGINES : raw;
+}
+
+/* Compute the single-bit UDMA mask for the next channel/QP in a round-robin
+ * sequence.  *cursor is the current engine index (0-based) and is advanced to
+ * the next engine on return.  This is the exact function called by both the
+ * production QP-creation path (ncclIbCreateQpIonic) and the test inspect API,
+ * so host-only unit tests cover the shipped code path.
+ * Returns mask = 1u << old_cursor. */
+static inline uint8_t ncclIbCastUdmaRoundRobinMask(uint8_t udmaCount, uint8_t* cursor) {
+  uint8_t mask = 1u << (*cursor);
+  *cursor = (*cursor + 1) % udmaCount;
+  return mask;
+}
+
+/* Simulates the UDMA round-robin assignment for nChannels channels on a device
+ * with udmaCount UDMA engines. Writes the assigned UDMA mask (1u << udId) for
+ * each channel into outMasks[0..nChannels-1].
+ * Returns ncclInvalidArgument if pointers are null, udmaCount==0, or nChannels<=0. */
+ncclResult_t ncclIbCastTestUdmaRoundRobin(uint8_t udmaCount, int nChannels, uint8_t* outMasks);
+
+/* Returns the udmaCount stored on physical device ibDevN (0-based).
+ * Returns 0 if ibDevN is out of range. */
+uint8_t ncclIbCastTestGetDevUdmaCount(int ibDevN);
+
 /* ── Test-only wrappers over internal static helpers (host-only, no HW). ── */
 ncclResult_t ncclIbCastTestGetPlaneIndex(int devPlane, int16_t* count, int16_t* planes, int16_t* idx);
 int ncclIbCastTestGidSameSubnet(const uint8_t localGid[16], const uint8_t remoteGid[16], int prefixLen);
 int ncclIbCastTestSubnetMatchesAny(const uint8_t localGid[16], const uint8_t* remoteGids, int nRemote, int prefixLen);
+
+/* IbCastSpeed(active_speed|active_speed_ex bitmask) -> Mb/s, via the static ibvSpeeds[] table. */
+int ncclIbCastTestSpeed(int speed);
+
+/* *fromQuery is 1 if IbCastDevs[dev].speed came from ibv_query_port_speed(),
+ * 0 if it came from the active_speed(_ex)/active_width fallback.
+ * Returns ncclInvalidArgument if dev is out of range or fromQuery is null. */
+ncclResult_t ncclIbCastTestSpeedSource(int dev, int* fromQuery);
+
+/* Number of raw (pre-merge) devices in IbCastDevs[], i.e. the valid range
+ * [0, ncclIbCastTestGetNDevs()) for ncclIbCastTestSpeedSource()'s dev arg. */
+int ncclIbCastTestGetNDevs(void);
 
 /* GRH (global route header) state per active QP, read back from the driver.
  * isGlobal is queried from the live QP via ibv_query_qp (ah_attr.is_global), so
@@ -73,6 +128,19 @@ struct ncclIbCastGrhState {
 /* Copy per-QP GRH state out of a connected send or recv comm.
  * Returns ncclInvalidArgument on null pointers. */
 ncclResult_t ncclIbCastGetGrhState(void* sendComm, struct ncclIbCastGrhState* out);
+
+/* ── UDMA pinning introspection (HW: reads per-QP UDMA index from driver). ── */
+
+struct ncclIbCastUdmaState {
+  int      nqps;                          /* number of active QPs */
+  uint8_t  udmaCount;                     /* from capsProvider.ionic.udmaCount */
+  uint8_t  udmaIdx[NCCL_IB_MAX_QPS];     /* per-QP UDMA index read back via ionic_dv_qp_get_udma_idx */
+  bool     queryOk[NCCL_IB_MAX_QPS];     /* false if readback unavailable for this QP */
+};
+
+/* Copy per-QP UDMA pinning state out of a connected sendComm.
+ * Returns ncclInvalidArgument on null pointers. */
+ncclResult_t ncclIbCastGetUdmaState(void* sendComm, struct ncclIbCastUdmaState* out);
 
 /* ── Multiplane test-only wrappers (host-only, no HW). ── */
 

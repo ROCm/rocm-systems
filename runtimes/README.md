@@ -1,3 +1,6 @@
+<!-- Copyright (c) 2026 Advanced Micro Devices, Inc. -->
+<!-- SPDX-License-Identifier: MIT -->
+
 # ROCm Runtime Components
 
 The `runtimes` directory owns one Cargo workspace and a standalone CMake build
@@ -16,14 +19,37 @@ part of the repository's default build or installation yet.
 - [`ddi/rocddi`](ddi/rocddi/README.md) is the early-access, private,
   implementation-neutral AMD GPU device-interface layer.
 - [`ddi/libamdf`](ddi/libamdf/README.md) implements the AMDF C table ABI and
-  builds shared and static libraries.
-- [`hsa/libhsa`](hsa/libhsa/README.md) implements the HSA C ABI and builds a
-  shared library. It consumes rocddi directly, not through AMDF.
+  builds a static library. Its shared ABI is an alias of the shared image.
+- [`loader/rocelf`](loader/rocelf/README.md) provides a standalone Rust library for
+  checked ELF64 parsing and AMDGPU load-image construction. It depends on
+  neither rocddi nor the HSA frontend.
+- [`image/rocaddr3`](image/rocaddr3/README.md) wraps AddrLib3 to compute GFX12
+  surface layouts and map image rows without owning device memory.
+- [`loader/rocloader`](loader/rocloader/README.md) interprets AMD HSA code
+  objects, creates rocddi-backed GPU images, and owns executable state.
+- [`ddi/libhsa`](ddi/libhsa/README.md) implements the HSA C ABI and builds a
+  shared ABI in the same image. It consumes rocddi and rocloader directly,
+  not through AMDF.
 
 Component directories own implementation and local tests. The root owns the
-lockfile, toolchain, Rust profiles, and common CMake integration. Grouping
-directories do not introduce additional Cargo workspaces or CMake projects.
+shared-image linker package, lockfile, toolchain, Rust profiles,
+and common CMake integration. Grouping directories do not introduce additional
+Cargo workspaces or CMake projects.
 Rocddi remains an internal `rlib`; it has no standalone native ABI.
+
+## Shared image
+
+The workspace root is the `rocddi-frontends` Cargo package. It implements no
+third frontend. Its small `src/lib.rs` makes Cargo link the AMDF and HSA `rlib`s
+into one `cdylib`. The ABIs retain separate rocddi sessions and public handles;
+the shared image contains one copy of rocddi's process-local KFD backend state.
+The root `build.rs` retains both entry point sets, applies HSA symbol versions
+and SONAME, and marks the image `NODELETE` while native KFD and DRM owners may
+remain live. `cmake/SharedImage.cmake` owns the corresponding CMake targets.
+
+The CMake build below stages one physical `libhsa-runtime64.so.1` with
+`libhsa-runtime64.so`, `libhsa_runtime64.so`, `libamdf.so.0`, and
+`libamdf.so` aliases. The AMDF static archive is built separately.
 
 ## Build with CMake
 
@@ -36,7 +62,9 @@ the CMake configure or build.
 From the rocm-systems repository root:
 
 ```sh
-cmake -S runtimes -B build/runtimes -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cargo fetch --manifest-path runtimes/Cargo.toml --locked
+cmake -S runtimes -B build/runtimes -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+  -DROCM_RUNTIMES_CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
 cmake --build build/runtimes
 ctest --test-dir build/runtimes --output-on-failure
 ```
@@ -55,34 +83,36 @@ symlinks are provided there. The `rocm_runtime_rust` target invokes Cargo on eac
 build; Cargo decides what needs recompilation.
 
 Build-tree consumers can link `rocm_runtime::amdf_shared`, `rocm_runtime::amdf_static`, or
-`rocm_runtime::hsa_shared`. These targets include headers and build ordering. The AMDF
+`rocm_runtime::hsa_shared`. The two shared targets resolve to one image and
+retain native process state together. These targets include headers and build ordering. The AMDF
 static target propagates rustc's reported native link requirements through a
 generated linker response file. `rocm_runtime::runtime_headers` exposes the source
-header tree for internal tests, not an installed SDK contract.
+header tree for runtime consumers, not an installed SDK contract.
 
 The library helper takes keyword arguments for the Cargo package/target, native
-output name, type, and ABI version. Component `project(... VERSION ...)` calls
+output name, type, and ABI version. Component `project(... VERSION ...)` calls and the shared-image module
 own native versions; the helper handles filenames, symlinks, SONAME settings,
 and per-static-library link requirements. Platform-specific conventions live
 in the helper, with explicit errors for Windows/Darwin until implemented.
 The configure helper recognizes native Linux x86-64, AArch64, PPC64/PPC64LE,
 and RISC-V64 toolchains. This is not runtime backend support: rocddi currently
 supports only Linux x86-64/AArch64 and rejects other architectures at compile
-time in `ddi/rocddi/src/driver/builtin.rs`. Only x86-64 has been validated locally.
+time in `ddi/rocddi/src/driver.rs`. Only x86-64 has been validated locally.
 Python's standard-library TOML parser requires Python 3.11 or newer.
 `runtime-rust-config.cmake` in the build directory records the generated Cargo
 command and environment for inspection.
 
-With `BUILD_TESTING=ON` (the default), CTest runs build-helper tests, the Rust unit suite, AMDF C ABI
-layout and shared/static negotiation checks, and an HSA pre-initialization C ABI
-check. These tests do not require GPU activation. Device execution examples
-remain explicit qualification tools, not automatic build tests.
+With `BUILD_TESTING=ON` (the default), CTest runs build-helper and Rust tests,
+AMDF static and shared C smoke tests, an AMDF C layout check, and the HSA C
+smoke test. These checks do not require GPU activation. The
+[HSA GPU probes](ddi/libhsa/tests/gpu/README.md) run separately on a qualified
+host and include a kernel comparison against an installed ROCr runtime.
 
 ## Dependency inputs
 
 All CMake-driven Cargo metadata/build/test commands run frozen and offline.
-The current lockfile has no external dependencies. Future dependency inputs
-must be prepared before configuration; missing inputs fail rather than fetch.
+The lockfile includes the `libc` crate for Linux error numbers. Its source must
+be prepared before configuration; missing inputs fail rather than fetch.
 
 - `ROCM_RUNTIMES_CARGO_HOME`: writable Cargo home, defaulting to `cargo-home/`
   in the binary directory. Can point to a prepared registry/Git cache.
@@ -110,5 +140,4 @@ cargo fmt --all --check
 ```
 
 Direct Cargo uses the workspace `target/` directory unless `CARGO_TARGET_DIR`
-is set. Its output tree is separate from the CMake build. Shared-library
-coexistence and GPU behavior retain the qualification limits in component docs.
+is set. Its output tree is separate from the CMake build. GPU behavior retains the qualification limits in component docs.

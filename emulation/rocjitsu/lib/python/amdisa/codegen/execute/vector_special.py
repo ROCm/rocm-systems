@@ -10,8 +10,18 @@ saturating packs, arithmetic, lane permutations, and packed type conversion.
 
 from __future__ import annotations
 
-from amdisa.codegen.execute.fp8_formats import fp8_helper_name
+from amdisa.codegen.execute import input_policy
+from amdisa.codegen.execute.conversion import (
+    decode_fp8_expr,
+    pack_b32_f16_expr,
+    pk_rtz_f16_expr,
+    pk_u8_expr,
+    to_fp8_expr,
+)
+from amdisa.codegen.execute.fp8_formats import fp8_helper_name, uses_shared_fp8
 from amdisa.codegen.execute.vop3_modifiers import (
+    apply_output,
+    output_policy_decl,
     vop3_src_mod,
     vop3_dst_mod,
 )
@@ -55,14 +65,6 @@ def _fp8_rne_encode_call(cvt_fn: str, value_expr: str, use_fp16_ovfl: bool) -> s
     if use_fp16_ovfl:
         return f'{cvt_fn}({value_expr}, wf.fp16_ovfl())'
     return f'{cvt_fn}({value_expr})'
-
-
-def _fp8_sr_encode_call(
-    cvt_fn: str, value_expr: str, seed_expr: str, use_fp16_ovfl: bool
-) -> str:
-    if use_fp16_ovfl:
-        return f'{cvt_fn}({value_expr}, {seed_expr}, wf.fp16_ovfl())'
-    return f'{cvt_fn}({value_expr}, {seed_expr})'
 
 
 def _shared_inst_operand(opnd: str) -> bool:
@@ -165,8 +167,8 @@ def gen_vector_movrel(
             '? static_cast<uint64_t>(*rel_src_base) + wf.m0() : UINT64_MAX;'
         )
         L.append(
-            f'  bool rel_src_valid = rel_src_base && wf.m0() <= 1023u && '
-            f'rel_src_index + {src[0]}.vgpr_count() <= wf.vgpr_alloc().count;'
+            f'  bool rel_src_valid = amdgpu::relative_vgpr_index(rel_src_base, wf.m0(), '
+            f'{src[0]}.vgpr_count(), wf.vgpr_alloc().count).has_value();'
         )
         L.append(
             f'  Operand rel_src({src[0]}.size_bits(), OperandType::OPR_VGPR, '
@@ -204,12 +206,12 @@ def gen_vector_movrel(
             '? static_cast<uint64_t>(*rel_dst_base) + rel_dst_offset : UINT64_MAX;'
         )
         L.append(
-            f'  bool rel_src_valid = rel_src_base && rel_src_offset <= 1023u && '
-            f'rel_src_index + {src[0]}.vgpr_count() <= wf.vgpr_alloc().count;'
+            f'  bool rel_src_valid = amdgpu::relative_vgpr_index(rel_src_base, rel_src_offset, '
+            f'{src[0]}.vgpr_count(), wf.vgpr_alloc().count).has_value();'
         )
         L.append(
-            f'  bool rel_dst_valid = rel_dst_base && rel_dst_offset <= 1023u && '
-            f'rel_dst_index + {dst[0]}.vgpr_count() <= wf.vgpr_alloc().count;'
+            f'  bool rel_dst_valid = amdgpu::relative_vgpr_index(rel_dst_base, rel_dst_offset, '
+            f'{dst[0]}.vgpr_count(), wf.vgpr_alloc().count).has_value();'
         )
         L.append('  if (!rel_dst_valid) return;')
         L.append(
@@ -239,8 +241,8 @@ def gen_vector_movrel(
         '? static_cast<uint64_t>(*rel_dst_base) + wf.m0() : UINT64_MAX;'
     )
     L.append(
-        f'  bool rel_dst_valid = rel_dst_base && wf.m0() <= 1023u && '
-        f'rel_dst_index + {dst[0]}.vgpr_count() <= wf.vgpr_alloc().count;'
+        f'  bool rel_dst_valid = amdgpu::relative_vgpr_index(rel_dst_base, wf.m0(), '
+        f'{dst[0]}.vgpr_count(), wf.vgpr_alloc().count).has_value();'
     )
     L.append('  if (!rel_dst_valid) return;')
     L.append(
@@ -319,8 +321,8 @@ def gen_vector_swaprel(
         '  uint32_t rel_dst_offset = (wf.m0() >> 16) & 0x3ffu;',
         '  uint64_t rel_src_index = rel_src_base ? static_cast<uint64_t>(*rel_src_base) + rel_src_offset : UINT64_MAX;',
         '  uint64_t rel_dst_index = rel_dst_base ? static_cast<uint64_t>(*rel_dst_base) + rel_dst_offset : UINT64_MAX;',
-        f'  if (!rel_src_base || rel_src_index + {s}.vgpr_count() > wf.vgpr_alloc().count) return;',
-        f'  if (!rel_dst_base || rel_dst_index + {d}.vgpr_count() > wf.vgpr_alloc().count) return;',
+        f'  if (!amdgpu::relative_vgpr_index(rel_src_base, rel_src_offset, {s}.vgpr_count(), wf.vgpr_alloc().count)) return;',
+        f'  if (!amdgpu::relative_vgpr_index(rel_dst_base, rel_dst_offset, {d}.vgpr_count(), wf.vgpr_alloc().count)) return;',
         f'  Operand rel_src({s}.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_src_index));',
         f'  Operand rel_dst({d}.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));',
         '  uint64_t exec = wf.exec();',
@@ -335,8 +337,14 @@ def gen_vector_swaprel(
     return '\n'.join(L)
 
 
-def gen_vector_sat_pack(dst: list[str], src: list[str], op: str | None) -> str:
-    """Generate signed/unsigned saturating narrow-and-pack operations."""
+def gen_vector_sat_pack(
+    dst: list[str], src: list[str], op: str | None, *, true16_dst: bool = False
+) -> str:
+    """Generate signed/unsigned saturating narrow-and-pack operations.
+
+    V_SAT_PK_U8_I16 has a 16-bit result. With ``true16_dst`` its VOP3 form
+    writes the half selected by OP_SEL[3] and keeps the other half.
+    """
     if op not in ('u8_i16', 'i4_i8', 'u4_u8'):
         raise ValueError(f'unsupported saturating-pack operation: {op}')
     L = [
@@ -372,9 +380,16 @@ def gen_vector_sat_pack(dst: list[str], src: list[str], op: str | None) -> str:
                 '      result |= std::min((raw >> (i * 8)) & 0xffu, 15u) << (i * 4);',
             ]
         )
+    if true16_dst and op == 'u8_i16':
+        write = (
+            f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst[0]}, wf, lane, '
+            'amdgpu::vop3_opsel(inst_), result, true);'
+        )
+    else:
+        write = f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, result);'
     L.extend(
         [
-            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, result);',
+            write,
             '  }',
         ]
     )
@@ -717,8 +732,8 @@ def gen_vector_mad_64_32(
     D.u64 = S0.u32 * S1.u32 + S2.u64 (unsigned)
 
     Sources S0 and S1 are 32-bit; the accumulator S2 and result D are
-    64-bit VGPR pairs. The unsigned SDST-encoded form also writes the per-lane
-    carry-out mask to SDST.
+    64-bit VGPR pairs. SDST holds unsigned carry-out or signed bit 64 of the
+    65-bit sum, independently of integer saturation.
     """
     writes_carry = len(dst) > 1
     L = []
@@ -739,10 +754,13 @@ def gen_vector_mad_64_32(
         )
         L.append('    uint64_t product = static_cast<uint64_t>(s0 * s1);')
         L.append('    uint64_t result = product + s2;')
-        if writes_carry or integer_clamp:
+        if integer_clamp:
             L.append('    bool overflow = amdgpu::signed_add_overflows(product, s2);')
         if writes_carry:
-            L.append('    if (overflow)')
+            # SDST is bit 64 of the signed 65-bit sum, independent of saturation.
+            L.append(
+                '    if (((product >> 63) ^ (s2 >> 63) ^ (result < product)) != 0)'
+            )
             L.append('      carry |= 1ULL << lane;')
         if integer_clamp:
             L.append('    if (inst_.clamp && overflow) {')
@@ -1014,11 +1032,9 @@ def _gen_division_result(
     mode = 'f16_f64' if is_f64 else 'f32'
     L = ['  uint64_t exec = wf.exec();']
     if operation == 'fmas':
-        L.append('  const uint64_t vcc = wf.vcc_mask(exec);')
-    elif is_vop3:
-        L.append(
-            f'  const uint32_t omod = amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_{mode}(), wf.ieee_mode(), inst_.omod);'
-        )
+        L.append('  const uint64_t vcc = wf.vcc_mask();')
+    if is_vop3:
+        L.append(output_policy_decl(dtype or 'f32'))
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     for index, operand in enumerate(src):
@@ -1031,16 +1047,11 @@ def _gen_division_result(
     L.append(
         f'    {fp_type} result = div_{operation}(s0, s1, s2, {post_scale}wf.fp_round_mode_{mode}(), wf.fp_denorm_mode_{mode}());'
     )
-    if operation == 'fixup' and is_vop3:
-        L.append(
-            f'    result = div_apply_omod(result, wf.fp_round_mode_{mode}(), omod);'
-        )
-        L.append(
-            '    if (inst_.clamp) result = amdgpu::clamp_floating_result(result, wf);'
-        )
-    L.append(
-        f'    amdgpu::RegisterAccess(wf).{write}({dst[0]}, lane, std::bit_cast<{bits}>(result));'
-    )
+    result = f'std::bit_cast<{bits}>(result)'
+    if is_vop3:
+        # Both scale the rounded result, then clamp (checked on gfx1201).
+        result = apply_output(dtype or 'f32', result)
+    L.append(f'    amdgpu::RegisterAccess(wf).{write}({dst[0]}, lane, {result});')
     L.append('  }')
     return '\n'.join(L)
 
@@ -1204,10 +1215,11 @@ def gen_vector_permlane_swap(dst: list[str], src: list[str], stride: int) -> str
     So for the 16-lane form on a wave64 this swaps lanes 0-15<->16-31 AND
     32-47<->48-63 (all four groups); for the 32-lane form it swaps 0-31<->32-63.
     src0[base+stride..] and vdst[base..base+stride-1] within each block are
-    UNCHANGED. EXEC mask is IGNORED. Both vdst and src0 are outputs (LLVM:
-    returns {vdst_new, src0_new}).
+    UNCHANGED. Each output write is masked by its destination lane's EXEC bit.
+    Both vdst and src0 are outputs (LLVM: returns {vdst_new, src0_new}).
     """
     L = []
+    L.append('  uint64_t exec = wf.exec();')
     L.append('  uint32_t tmp_dst[64] = {}, tmp_src[64] = {};')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append(
@@ -1221,11 +1233,13 @@ def gen_vector_permlane_swap(dst: list[str], src: list[str], stride: int) -> str
         f'  for (uint32_t base = 0; base + {stride} < wf.wf_size(); base += 2u * {stride}) {{'
     )
     L.append(f'    for (uint32_t i = 0; i < {stride}; ++i) {{')
+    L.append('      if (exec & (1ULL << (base + i)))')
     L.append(
-        f'      amdgpu::RegisterAccess(wf).write_lane({dst[1]}, base + i, tmp_dst[base + {stride} + i]);'
+        f'        amdgpu::RegisterAccess(wf).write_lane({dst[1]}, base + i, tmp_dst[base + {stride} + i]);'
     )
+    L.append(f'      if (exec & (1ULL << (base + {stride} + i)))')
     L.append(
-        f'      amdgpu::RegisterAccess(wf).write_lane({dst[0]}, base + {stride} + i, tmp_src[base + i]);'
+        f'        amdgpu::RegisterAccess(wf).write_lane({dst[0]}, base + {stride} + i, tmp_src[base + i]);'
     )
     L.append('    }')
     L.append('  }')
@@ -1269,12 +1283,10 @@ def gen_vector_permlane(
         L.append(f'        ? amdgpu::RegisterAccess(wf).read_scalar({src[1]})')
         L.append(f'        : amdgpu::RegisterAccess(wf).read_scalar({src[2]});')
         L.append('    uint32_t sel = (sel_word >> ((sub & 7u) * 4u)) & 0xF;')
-    if cross:
-        L.append('    uint32_t row_base = lane & ~0x1Fu;')
-        L.append('    uint32_t half = (lane ^ 0x10u) & 0x10u;')
-        L.append('    uint32_t src_lane = row_base | half | sel;')
-    else:
-        L.append('    uint32_t src_lane = (lane & ~0xFu) | sel;')
+    kind = 'X16' if cross else 'Perm16'
+    L.append(
+        f'    uint32_t src_lane = amdgpu::valu_permutation_source(amdgpu::ValuPermutation::{kind}, lane, sel, 16, wf.wf_size());'
+    )
     L.append('    if (src_lane >= wf.wf_size()) continue;')
     L.append('    bool src_active = (exec & (1ULL << src_lane)) != 0;')
     L.append('    if (!src_active && !fi) {')
@@ -1298,7 +1310,9 @@ def gen_vector_permlane64(dst: list[str], src: list[str]) -> str:
     L.append(f'    snap[i] = amdgpu::RegisterAccess(wf).read_lane({src[0]}, i);')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
-    L.append('    uint32_t partner = lane ^ 32;')
+    L.append(
+        '    uint32_t partner = amdgpu::valu_permutation_source(amdgpu::ValuPermutation::Perm64, lane, 0, 0, wf.wf_size());'
+    )
     L.append('    if (partner < wf.wf_size())')
     L.append(
         f'      amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, snap[partner]);'
@@ -1321,28 +1335,18 @@ def gen_vector_permlane_family(dst: list[str], src: list[str], op: str | None) -
         f'  uint32_t lane_group_width = amdgpu::RegisterAccess(wf).read_scalar({src[2]});'
     )
     L.append(
-        '  if (lane_group_width == 0 || (lane_group_width & (lane_group_width - 1)) != 0)'
+        '  if (exec && inst_.src2 < 256 && '
+        '(!lane_group_width || (lane_group_width & (lane_group_width - 1))))'
     )
-    L.append('    lane_group_width = wf.wf_size();')
-    L.append('  lane_group_width = std::min(lane_group_width, wf.wf_size());')
+    L.append(
+        '    wf.report_undefined_behavior("permlane group width is not a power of two");'
+    )
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
-    L.append('    uint32_t group_base = (lane / lane_group_width) * lane_group_width;')
-    if op == 'bcast':
-        L.append('    uint32_t src_offset = selector % lane_group_width;')
-    elif op == 'down':
-        L.append('    uint32_t offset = lane - group_base;')
-        L.append('    uint32_t src_offset = offset + selector;')
-    elif op == 'up':
-        L.append('    uint32_t offset = lane - group_base;')
-        L.append(
-            '    uint32_t src_offset = (selector <= offset) ? (offset - selector) : lane_group_width;'
-        )
-    else:
-        L.append('    uint32_t offset = lane - group_base;')
-        L.append('    uint32_t src_offset = offset ^ selector;')
-    L.append('    uint32_t src_lane = group_base + src_offset;')
-    L.append('    if (src_offset >= lane_group_width || src_lane >= wf.wf_size()) {')
+    L.append(
+        f'    uint32_t src_lane = amdgpu::valu_permutation_source(amdgpu::ValuPermutation::{op.title()}, lane, selector, lane_group_width, wf.wf_size());'
+    )
+    L.append('    if (src_lane >= wf.wf_size()) {')
     L.append(f'      amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, 0);')
     L.append('      continue;')
     L.append('    }')
@@ -1370,6 +1374,45 @@ def gen_vector_permlane_idx_gen(dst: list[str], src: list[str]) -> str:
     return '\n'.join(L)
 
 
+def _gen_ocp_pk_fp8(
+    L: list[str],
+    dst: list[str],
+    src: list[str],
+    name: str,
+    opsel: str,
+    *,
+    is_vop3: bool,
+    has_abs: bool,
+) -> None:
+    """Pack two F32 sources as OCP FP8/BF8 into the OPSEL[3] word, keeping the other."""
+    L.insert(
+        0, f'  const auto conversion = {to_fp8_expr(name, is_vop3, has_abs, "inst_")};'
+    )
+    L.append(f'    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);')
+    L.append(f'    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane);')
+    L.append('    uint32_t packed = conversion(s0, s1);')
+    L.append(
+        f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst[0]}, wf, lane, ({opsel}) & 0x8u, packed, true);'
+    )
+
+
+def _gen_ocp_pk_f32_fp8(
+    L: list[str], dst: list[str], src: list[str], name: str, opsel: str
+) -> None:
+    """Decode the two OCP FP8/BF8 bytes of the OPSEL[0] half into two F32 results."""
+    L.append(
+        f'    uint32_t packed = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);'
+    )
+    half = 'packed' if opsel == '0u' else f'({opsel} & 1) ? (packed >> 16) : packed'
+    L.append(f'    uint32_t half = {half};')
+    low = decode_fp8_expr(name, 'half')
+    high = decode_fp8_expr(name, 'half >> 8')
+    L.append(
+        f'    amdgpu::RegisterAccess(wf).write_lane64({dst[0]}, lane, '
+        f'static_cast<uint64_t>({low}) | (static_cast<uint64_t>({high}) << 32));'
+    )
+
+
 def gen_vector_cvt_pk(
     dst: list[str],
     src: list[str],
@@ -1386,23 +1429,37 @@ def gen_vector_cvt_pk(
     """Generate pack/convert instructions."""
     L = []
     L.append('  uint64_t exec = wf.exec();')
+    if cls == 'vector_cvt_pknorm' and dtype == 'f16':
+        L.append(input_policy.policy_decl('f16'))
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
-    if cls == 'vector_cvt_pk_u8_f32':
+    if cls == 'vector_cvt_pk_u8_f32' and len(src) > 2:
+        # shared/conversion.h stages, resolved before the lane loop.
+        L.insert(
+            0, f'  const auto conversion = {pk_u8_expr(is_vop3, has_abs, "inst_")};'
+        )
+        L.extend(
+            f'    uint32_t s{i} = amdgpu::RegisterAccess(wf).read_lane({src[i]}, lane);'
+            for i in range(3)
+        )
+        L.append(
+            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, conversion(s0, s1, s2));'
+        )
+    elif cls == 'vector_cvt_pk_u8_f32':
         L.append(
             f'    float fval = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane));'
         )
         L.append(
             f'    uint32_t byte_sel = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane) & 3;'
         )
-        # V_CVT_PK_U8_F32 has 3 srcs; V_CVT_PKACCUM reads old from dst
-        old_src = src[2] if len(src) > 2 else dst[0]
+        # V_CVT_PKACCUM_U8_F32 (CDNA1-4) reads the packed bytes from its
+        # destination. It keeps truncation and ignores ABS/NEG and input
+        # flushing: no target with it has been captured.
+        old_src = dst[0]
         L.append(
             f'    uint32_t old = amdgpu::RegisterAccess(wf).read_lane({old_src}, lane);'
         )
-        L.append(
-            '    uint32_t byte = static_cast<uint32_t>(std::clamp(fval, 0.0f, 255.0f));'
-        )
+        L.append('    uint32_t byte = amdgpu::cvt_u8_f32(fval);')
         L.append('    uint32_t mask = ~(0xFFu << (byte_sel * 8));')
         L.append(
             f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, (old & mask) | (byte << (byte_sel * 8)));'
@@ -1410,18 +1467,22 @@ def gen_vector_cvt_pk(
     elif cls == 'vector_cvt_pknorm':
         if dtype == 'f16':
             if is_vop3:
-                L.append(
-                    f'    float s0 = util::f16_to_f32(static_cast<uint16_t>({_read_vop3_true16_src(src[0], opsel, 0)}));'
-                )
-                L.append(
-                    f'    float s1 = util::f16_to_f32(static_cast<uint16_t>({_read_vop3_true16_src(src[1], opsel, 1)}));'
-                )
+                reads = [_read_vop3_true16_src(src[i], opsel, i) for i in range(2)]
             else:
+                reads = [
+                    f'amdgpu::RegisterAccess(wf).read_lane({src[i]}, lane)'
+                    for i in range(2)
+                ]
+            abs_field = 'inst_.abs' if has_abs else '0u'
+            for i, read in enumerate(reads):
                 L.append(
-                    f'    float s0 = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane)));'
+                    f'    uint32_t s{i}_bits = amdgpu::input_denormal::prepare<amdgpu::fp_format::F16>('
+                    f'amdgpu::source_modifier::apply<amdgpu::fp_format::F16>('
+                    f'static_cast<uint32_t>({read}), {i}, {abs_field}, inst_.neg), '
+                    f'{input_policy.NAME});'
                 )
                 L.append(
-                    f'    float s1 = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane)));'
+                    f'    float s{i} = util::f16_to_f32(static_cast<uint16_t>(s{i}_bits));'
                 )
         else:
             L.append(
@@ -1430,9 +1491,15 @@ def gen_vector_cvt_pk(
             L.append(
                 f'    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane));'
             )
-        if is_vop3:
+        if is_vop3 and dtype != 'f16':
             L.extend(vop3_src_mod('s0', 0, has_abs))
             L.extend(vop3_src_mod('s1', 1, has_abs))
+        # Round to nearest even under every MODE.FP_ROUND setting. The ISA applies
+        # FP_ROUND to VALU float operations, and the packed NORM entries
+        # (V_CVT_PK_NORM_* and V_CVT_PKNORM_*) give no exception. gfx1100 and
+        # gfx1201 captures of V_CVT_PK_NORM_{I,U}16_{F16,F32} nevertheless do not
+        # change with FP_ROUND. CDNA1-5, RDNA1-2 and RDNA3.5 reuse this rounding
+        # without hardware verification.
         if op == 'i16':
             L.append('    auto cvt_i16 = [](float f) -> int16_t {')
             L.append('      if (std::isnan(f)) return 0;')
@@ -1455,22 +1522,34 @@ def gen_vector_cvt_pk(
             f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, (static_cast<uint32_t>(hi) << 16) | (static_cast<uint32_t>(lo) & 0xFFFF));'
         )
     elif cls == 'vector_cvt_pkrtz_f16_f32':
-        L.append(
-            f'    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane));'
+        # shared/conversion.h stages, resolved before the lane loop.
+        L.insert(
+            0,
+            f'  const auto conversion = {pk_rtz_f16_expr(is_vop3, has_abs, "inst_")};',
         )
         L.append(
-            f'    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane));'
+            f'    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);'
         )
-        if is_vop3:
-            L.extend(vop3_src_mod('s0', 0, has_abs))
-            L.extend(vop3_src_mod('s1', 1, has_abs))
-        L.append(f'    uint32_t lo = util::f32_to_f16_rtz(s0);')
-        L.append(f'    uint32_t hi = util::f32_to_f16_rtz(s1);')
         L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, lo | (hi << 16));'
+            f'    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane);'
+        )
+        L.append(
+            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, conversion(s0, s1));'
         )
     elif cls == 'vector_cvt_pk':
-        if op in ('fp8_f32', 'bf8_f32', 'fp8_f16', 'bf8_f16'):
+        if op in ('fp8_f32', 'bf8_f32') and uses_shared_fp8(arch_name):
+            _gen_ocp_pk_fp8(
+                L,
+                dst,
+                src,
+                op[:3],
+                opsel,
+                is_vop3=is_vop3,
+                has_abs=has_abs,
+            )
+        elif op in ('f32_fp8', 'f32_bf8') and uses_shared_fp8(arch_name):
+            _gen_ocp_pk_f32_fp8(L, dst, src, op[4:], opsel)
+        elif op in ('fp8_f32', 'bf8_f32', 'fp8_f16', 'bf8_f16'):
             # RDNA4 data-conversion prose scopes FP16_OVFL for FP8/BF8
             # destinations to conversions from F32 sources. Plain F16/BF16
             # sources convert the already-rounded 16-bit input value.
@@ -1572,22 +1651,17 @@ def gen_vector_cvt_pk(
             L.append(
                 f'    float f1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane));'
             )
+            if is_vop3:
+                L.extend(vop3_src_mod('f0', 0, has_abs))
+                L.extend(vop3_src_mod('f1', 1, has_abs))
             if op == 'u16_f32':
-                L.append(
-                    '    uint16_t lo = static_cast<uint16_t>(std::clamp(f0, 0.0f, 65535.0f));'
-                )
-                L.append(
-                    '    uint16_t hi = static_cast<uint16_t>(std::clamp(f1, 0.0f, 65535.0f));'
-                )
+                L.append('    uint32_t lo = amdgpu::cvt_u16_f32(f0);')
+                L.append('    uint32_t hi = amdgpu::cvt_u16_f32(f1);')
             else:
-                L.append(
-                    '    int16_t lo = static_cast<int16_t>(std::clamp(f0, -32768.0f, 32767.0f));'
-                )
-                L.append(
-                    '    int16_t hi = static_cast<int16_t>(std::clamp(f1, -32768.0f, 32767.0f));'
-                )
+                L.append('    uint32_t lo = amdgpu::cvt_i16_f32(f0);')
+                L.append('    uint32_t hi = amdgpu::cvt_i16_f32(f1);')
             L.append(
-                f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, (static_cast<uint32_t>(static_cast<uint16_t>(hi)) << 16) | static_cast<uint32_t>(static_cast<uint16_t>(lo)));'
+                f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, (hi << 16) | (lo & 0xFFFFu));'
             )
         else:
             L.append(
@@ -1678,18 +1752,23 @@ def gen_vector_cvt_pk(
             f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, lo | (hi << 16));'
         )
     elif cls == 'vector_pack_b32_f16':
+        # shared/conversion.h stages, resolved before the lane loop.
+        L.insert(
+            0,
+            f'  const auto conversion = {pack_b32_f16_expr(is_vop3, has_abs, "inst_")};',
+        )
         if is_vop3:
             L.append(f'    uint32_t s0 = {_read_vop3_true16_src(src[0], opsel, 0)};')
             L.append(f'    uint32_t s1 = {_read_vop3_true16_src(src[1], opsel, 1)};')
         else:
             L.append(
-                f'    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane) & 0xFFFF;'
+                f'    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);'
             )
             L.append(
-                f'    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane) & 0xFFFF;'
+                f'    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane);'
             )
         L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, s0 | (s1 << 16));'
+            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, conversion(s0, s1));'
         )
     elif cls == 'vector_cvt_sr_f16_f32':
         # Stochastic rounding: use src1 as random bits for rounding
@@ -2094,7 +2173,37 @@ def gen_cvt_fp8(ctx) -> str:
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
 
-    if op == 'pk_fp8_f32':
+    if uses_shared_fp8(ctx.arch_name) and op in (
+        'pk_fp8_f32',
+        'pk_bf8_f32',
+        'sr_fp8_f32',
+        'sr_bf8_f32',
+        'pk_f32_fp8',
+        'pk_f32_bf8',
+    ):
+        if op.startswith('pk_f32_'):
+            _gen_ocp_pk_f32_fp8(L, dst, src, op[-3:], opsel)
+        elif op.startswith('pk_'):
+            _gen_ocp_pk_fp8(
+                L,
+                dst,
+                src,
+                op[3:6],
+                opsel,
+                is_vop3=is_vop3,
+                has_abs=ctx.has_abs,
+            )
+        else:
+            _gen_ocp_sr_fp8(
+                L,
+                dst,
+                src,
+                op[3:6],
+                opsel,
+                is_vop3=is_vop3,
+                has_abs=ctx.has_abs,
+            )
+    elif op == 'pk_fp8_f32':
         _gen_pk_narrow_fp8(
             L,
             dst,
@@ -2219,6 +2328,34 @@ def _gen_sr_narrow_fp8(
     )
 
 
+def _gen_ocp_sr_fp8(
+    L: list[str],
+    dst: list[str],
+    src: list[str],
+    name: str,
+    opsel: str,
+    *,
+    is_vop3: bool,
+    has_abs: bool,
+) -> None:
+    """One F32 source to OCP FP8/BF8 with stochastic rounding, into the OPSEL[3:2] byte."""
+    L.insert(
+        0, f'  const auto conversion = {to_fp8_expr(name, is_vop3, has_abs, "inst_")};'
+    )
+    L.append(f'    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);')
+    L.append(
+        f'    uint32_t seed = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane);'
+    )
+    L.append('    uint32_t result = conversion.stochastic(s0, seed);')
+    L.append(f'    uint32_t shift = (({opsel} >> 2) & 0x3u) * 8u;')
+    L.append(
+        f'    uint32_t old = amdgpu::RegisterAccess(wf).read_lane({dst[0]}, lane);'
+    )
+    L.append(
+        f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, (old & ~(0xFFu << shift)) | (result << shift));'
+    )
+
+
 def _gen_pk_widen_fp8(
     L: list[str], dst: list[str], src: list[str], cvt_fn: str, opsel: str = '0u'
 ) -> None:
@@ -2336,17 +2473,6 @@ def _parse_scalef32_op(op: str):
         raise ValueError(f'cannot determine direction for {op}: {dst_fmt} vs {src_fmt}')
 
     return stochastic, mode, dst_fmt, src_fmt, direction
-
-
-def _read_as_f32(src_name: str, src_fmt: str) -> str:
-    """Return C++ expression to read a source value as float."""
-    if src_fmt == 'f32':
-        return f'std::bit_cast<float>(static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane({src_name}, lane)))'
-    elif src_fmt == 'f16':
-        return f'util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src_name}, lane) & 0xFFFF))'
-    elif src_fmt == 'bf16':
-        return f'util::bf16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src_name}, lane) & 0xFFFF))'
-    raise ValueError(f'unsupported source format: {src_fmt}')
 
 
 def _write_as_fmt(dst_name: str, dst_fmt: str, val_expr: str) -> str:

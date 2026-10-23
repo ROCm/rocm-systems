@@ -70,6 +70,23 @@ enum ncclIbRequestMatchingScheme {
   BY_ORDER = 2, // completions matched by posted WR identity (CTS offload, or software CTS with on-demand recvs)
 };
 
+// Values of RCCL_IB_UDMA_POLICY (AINIC QP-to-uDMA pipeline assignment). With QP
+// sharing enabled, the sharing-group alternation replaces the channel affinity
+// of ChannelAffinity, and of collective QPs under P2pRoundRobin.
+enum struct ncclIbCastUDMAPolicy : int {
+  // Pin every QP of a channel to one pipeline, chosen alternately as channels are first seen
+  ChannelAffinity = 0,
+  // Round-robin P2P QPs in creation order; collective QPs keep channel affinity
+  P2pRoundRobin = 1,
+  // Leave the PD mask unchanged so the driver picks the pipeline
+  DriverDefault = 2,
+  // Split each connection across both pipelines: channel-id popcount parity picks the
+  // starting pipeline and consecutive per-device QP indexes alternate
+  SplitConnection = 3,
+  First = ChannelAffinity,
+  Last = SplitConnection,
+};
+
 struct ncclIbMr {
   uintptr_t addr;
   size_t pages;
@@ -133,6 +150,9 @@ struct alignas(64) ncclIbDev {
   struct ibv_port_attr portAttr;
   struct ncclIbStats stats;
   int dmaBufSupported;
+  int8_t udSupported;  // -1 not probed yet, 0 no, 1 yes
+  int8_t rdmaReadSupported;  // -1 not probed yet, 0 no, 1 yes
+  bool speedFromQuery;  // test-only: true if speed came from ibv_query_port_speed()
   int16_t railId;
   int16_t planeId;
   int16_t planeIdx;
@@ -141,6 +161,9 @@ struct alignas(64) ncclIbDev {
     struct {
       int dataDirect;
     } mlx5;
+    struct {
+      uint8_t udmaCount;
+    } ionic;
   } capsProvider;
   struct ncclIbGidInfo gidInfo;
 };

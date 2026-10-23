@@ -14,6 +14,8 @@
 #include <atomic>
 #include <bit>
 #include <cfenv>
+#include <cstddef>
+#include <cstdint>
 #include <exception>
 #include <functional>
 #include <memory>
@@ -92,7 +94,15 @@ public:
 
 private:
   void publish(int value) {
-    state_.store(value, std::memory_order_release);
+    // A release store followed by notification is sufficient for this protocol
+    // under the C++ atomic wait/notify rules. The seq_cst store is a library
+    // workaround for libstdc++'s implementation.
+    // In libstdc++'s int-sized futex path, notify_one checks the bucket's
+    // waiter count before deciding whether to wake. Order publication before
+    // that check: on x86 a release store can remain buffered while the check
+    // sees no waiter and a newly registered waiter still sees the old state.
+    // Apply the ordering to job, completion, and shutdown publication.
+    state_.store(value, std::memory_order_seq_cst);
     state_.notify_one();
   }
 
@@ -134,6 +144,12 @@ private:
   std::exception_ptr error_;
   std::thread thread_;
 };
+
+// Map the issuer hash into the pool before selecting a bit in its current word.
+// Pools above 64 helpers keep first-word priority.
+constexpr unsigned preferred_helper_start(uint32_t issuer_hash, std::size_t capacity) {
+  return static_cast<unsigned>((uint64_t{issuer_hash} * capacity) >> 32) & 63;
+}
 
 // Each claim covers publication through joining, so another issuer cannot
 // reuse a helper's payload while its previous owner still reads completion.
@@ -203,19 +219,31 @@ private:
   Slot *try_submit(Instruction &instruction, void *wave) {
     if (!helpers_enabled())
       return nullptr;
+    // A stable preference may reuse a still-awake helper without pinning or a
+    // per-job cursor. Single-issuer counters support lower sleep/wakeup costs,
+    // but neither this preference nor more complex allocation policies gave
+    // consistent throughput gains; multi-issuer wake delays can increase.
+    // Keep the simple policy: useful issuer overlap and spare CPU capacity
+    // determine the payoff. Bound claims and fall back inline on a miss.
+    //
     // One or two loads detect an exhausted pool. Reservation is bounded even
     // under contention: after two failed CAS attempts per word, run inline.
     // A conservative miss is allowed; waiting for worker capacity is not.
+    // Scale the hash to the pool size so small pools do not send out-of-range
+    // starts to the lowest helper.
+    // Pools above 64 helpers retain first-word priority; this preference does
+    // not distribute issuers uniformly across both words.
+    static thread_local const uint32_t issuer_hash =
+        static_cast<uint32_t>(std::hash<std::thread::id>{}(std::this_thread::get_id()));
+    const unsigned start = preferred_helper_start(issuer_hash, slots_.size());
     for (unsigned word = 0; word != (slots_.size() > 64 ? 2u : 1u); ++word) {
       auto free = free_[word].load(std::memory_order_relaxed);
       for (unsigned attempt = 0; free && attempt != 2; ++attempt) {
-        thread_local unsigned next = std::hash<std::thread::id>{}(std::this_thread::get_id()) & 63;
-        const unsigned bit = (std::countr_zero(std::rotr(free, int(next))) + next) & 63;
+        const unsigned bit = (std::countr_zero(std::rotr(free, int(start))) + start) & 63;
         if (!free_[word].compare_exchange_strong(free, free & ~(uint64_t{1} << bit),
                                                  std::memory_order_acquire,
                                                  std::memory_order_relaxed))
           continue;
-        next = (bit + 1) & 63;
         auto *slot = slots_[word * 64 + bit].get();
         slot->helper.submit(instruction, wave);
         return slot;
