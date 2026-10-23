@@ -203,15 +203,7 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
       : (comm->archThresholds != nullptr && comm->archThresholds->ceNonRegMax[ncclFuncAllReduce] != 0
          ? comm->archThresholds->ceNonRegMax[ncclFuncAllReduce] : kCeArMaxDefault);
   comm->ceColl.ceArStagingBytes = (paramStaging >= 0) ? (size_t)paramStaging : (size_t)NCCL_CE_AR_STAGING_BYTES;
-  // Schedule AR staging init now: ncclCeInit runs inside ncclGroupEnd via ceInitTaskQueue
-  // (a collective context), and group.cc checks stagingPending immediately after draining
-  // ceInitTaskQueue. This ensures ncclCeEnsureAllReduceStaging fires collectively before
-  // the first AllReduce dispatch, avoiding the chicken-and-egg where CE 2-shot cannot be
-  // selected (ceARTmpBuf==NULL check) before the staging buffer is allocated.
-  if (comm->ceColl.ceArMaxBytes != 0 && rcclCeAllReduceEnabled(comm) &&
-      ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || rcclForceCeAllReduceEnabled(comm)) &&
-      comm->ceColl.ceARTmpBuf == nullptr)
-    comm->ceColl.stagingPending = true;
+
   int i = 0;
   int targetStreams = 0;
   uint32_t graphSyncValue = GRAPH_SYNC_VALUE;
