@@ -37,11 +37,10 @@ now() noexcept
     return detail::read(k_timeline_clock_id);
 }
 
-template <typename Tp = std::uint64_t>
-[[nodiscard]] inline Tp
+[[nodiscard]] inline std::uint64_t
 now_ns() noexcept
 {
-    return static_cast<Tp>(now().count());
+    return static_cast<std::uint64_t>(now().count());
 }
 }  // namespace rocprofsys::inline common::clocks::timeline
 

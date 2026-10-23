@@ -291,7 +291,7 @@ sample()
         return;
     }
 
-    const auto timestamp = clocks::timeline::now_ns<std::int64_t>();
+    const auto timestamp = static_cast<std::int64_t>(clocks::timeline::now_ns());
 
     for(auto& slice : g_collector_slices)
     {
@@ -394,7 +394,7 @@ post_process()
 void
 pause()
 {
-    const auto timestamp = clocks::timeline::now_ns<std::int64_t>();
+    const auto timestamp = static_cast<std::int64_t>(clocks::timeline::now_ns());
 
     // sample() holds this lock for a whole AMD SMI sweep, and the caller is an
     // application thread leaving a traced region. Hand the timestamp to the

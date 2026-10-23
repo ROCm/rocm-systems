@@ -69,11 +69,10 @@ template <typename CategoryT>
 auto&
 get_category_stack();
 
-template <typename Tp = std::uint64_t>
 ROCPROFSYS_INLINE auto
 now()
 {
-    return clocks::timeline::now_ns<Tp>();
+    return clocks::timeline::now_ns();
 }
 
 inline auto&

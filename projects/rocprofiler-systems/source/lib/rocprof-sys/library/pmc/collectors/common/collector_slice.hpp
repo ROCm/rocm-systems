@@ -31,7 +31,7 @@ namespace rocprofsys::pmc::collectors
  *     slices.emplace_back(gpu_collector);  // Creates slice to gpu_collector
  *     slices.emplace_back(nic_collector);  // Creates slice to nic_collector
  *
- *     auto timestamp = clocks::timeline::now_ns<std::int64_t>();
+ *     auto timestamp = static_cast<std::int64_t>(clocks::timeline::now_ns());
  *     for (auto& slice : slices) {
  *         slice.setup();             // Calls appropriate collector's setup()
  *         slice.sample(timestamp);   // Calls appropriate collector's sample()
