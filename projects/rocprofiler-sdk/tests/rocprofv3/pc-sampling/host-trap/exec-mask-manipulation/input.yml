@@ -1,4 +1,5 @@
 jobs:
-  - pc_sampling_unit: "time"
+  - pc_sampling_beta_enabled: true
+    pc_sampling_unit: "time"
     pc_sampling_method: "host_trap"
     pc_sampling_interval: 1

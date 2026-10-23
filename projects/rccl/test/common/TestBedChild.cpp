@@ -6,6 +6,9 @@
 
 #include "TestBedChild.hpp"
 #include "PipeUtils.hpp"
+#if defined(RCCL_TEST_CODE_COVERAGE)
+#include "ProcessIsolatedTestRunner.hpp"
+#endif
 #include "ResourceGuards.hpp"
 #include "comm.h"
 
@@ -214,9 +217,15 @@ namespace RcclUnitTesting
     close(this->childReadFd);
     close(this->childWriteFd);
 
+#if defined(RCCL_TEST_CODE_COVERAGE)
+    // Coverage profiles must be written before HIP/HSA teardown, so this path
+    // flushes and _exit()s instead of unwinding through main.
+    ProcessIsolatedTestRunner::exitChild(0);
+#else
     // Return through main so this stack object's vectors release their host
     // allocations. exit() bypasses automatic object destruction.
     return;
+#endif
   }
 
   ErrCode TestBedChild::GetUniqueId(std::vector<char>& retValBuf)

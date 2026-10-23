@@ -584,6 +584,18 @@ install(
     COMPONENT setup
 )
 
+# Agent skills (see skills/)
+install(
+    DIRECTORY skills/
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/skills
+    COMPONENT setup
+    USE_SOURCE_PERMISSIONS
+    PATTERN "evals" EXCLUDE
+    PATTERN "run_evals.py" EXCLUDE
+    PATTERN "test_run_evals.py" EXCLUDE
+    PATTERN "__pycache__" EXCLUDE
+)
+
 # ------------------------------------------------------------------------------#
 #
 # install

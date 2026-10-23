@@ -26,12 +26,18 @@
 // is usually part of what the unit is being tested for, and faking them would
 // assert the test's model of libc rather than the unit's use of it.
 //
+// malloc/calloc/free are seamed so a unit's out-of-memory arm is reachable on
+// demand; their defaults call real libc, so installing the seam without driving
+// it changes nothing. free() is seamed too so a test can assert the failing
+// path released what it had already taken.
+//
 // fprintf is seamed but not swappable per test: it always forwards to the real vfprintf so stderr output still
 // happens, and only records the call count and the FILE* argument, never the formatted text.
 
 // The headers that declare the names renamed below, so this file satisfies its own ordering rule and a unit following
 // the recipe above cannot get it wrong by forgetting one. Include guards make the includer's own copies free.
 #include <netdb.h>
+#include <fcntl.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -45,6 +51,12 @@ ssize_t micro_read(int, void*, size_t);
 int micro_close(int);
 int micro_socket(int, int, int);
 int micro_connect(int, const struct sockaddr*, socklen_t);
+int micro_bind(int, const struct sockaddr*, socklen_t);
+int micro_listen(int, int);
+int micro_accept(int, struct sockaddr*, socklen_t*);
+int micro_fcntl(int, int, ...);
+ssize_t micro_recv(int, void*, size_t, int);
+ssize_t micro_send(int, const void*, size_t, int);
 int micro_setsockopt(int, int, int, const void*, socklen_t);
 int micro_getaddrinfo(const char*, const char*, const struct addrinfo*, struct addrinfo**);
 void micro_freeaddrinfo(struct addrinfo*);
@@ -54,6 +66,9 @@ size_t micro_fwrite(const void*, size_t, size_t, FILE*);
 int micro_fflush(FILE*);
 void micro_perror(const char*);
 void micro_exit(int) __attribute__((noreturn));
+void* micro_malloc(size_t);
+void* micro_calloc(size_t, size_t);
+void micro_free(void*);
 int micro_fprintf(FILE*, const char*, ...) __attribute__((format(printf, 2, 3)));
 int micro_gethostname(char*, size_t);
 int micro_access(const char*, int);
@@ -64,6 +79,12 @@ int micro_access(const char*, int);
 #define close micro_close
 #define socket micro_socket
 #define connect micro_connect
+#define bind micro_bind
+#define listen micro_listen
+#define accept micro_accept
+#define fcntl micro_fcntl
+#define recv micro_recv
+#define send micro_send
 #define setsockopt micro_setsockopt
 #define getaddrinfo micro_getaddrinfo
 #define freeaddrinfo micro_freeaddrinfo
@@ -73,6 +94,9 @@ int micro_access(const char*, int);
 #define fflush micro_fflush
 #define perror micro_perror
 #define exit micro_exit
+#define malloc micro_malloc
+#define calloc micro_calloc
+#define free micro_free
 #define fprintf micro_fprintf
 #define gethostname micro_gethostname
 #define access micro_access
