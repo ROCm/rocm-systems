@@ -561,6 +561,8 @@ sudo tests/run_api_coverage.sh -A                             # nothing excluded
 sudo tests/run_api_coverage.sh -U 'GpuUnit*' -F 'GpuFunctional*'
 sudo tests/run_api_coverage.sh -X 'GpuFunctionalReadWrite*'   # skip destructive
 sudo tests/run_api_coverage.sh --no-python                    # C++ only
+sudo tests/run_api_coverage.sh --unit-only                    # C++ and Python unit suites only
+sudo tests/run_api_coverage.sh --functional-only              # C++ and Python functional + CLI only
 ```
 
 Each run echoes the filter it used, e.g.

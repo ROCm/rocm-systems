@@ -93,7 +93,7 @@ def load_parser(force_full_surface=True):
                 helpers = _FullSurfaceGates(helpers)
             noop = [lambda *a, **k: None] * 20
             return AMDSMIParser(*noop, sys_argv=["amd-smi", "--help"], helpers=helpers)
-        except Exception:  # noqa: BLE001 - try the next candidate directory
+        except (Exception, SystemExit):  # noqa: BLE001 - importing the CLI sys.exit()s when no driver is loaded
             sys.path.pop(0)
     return None
 
