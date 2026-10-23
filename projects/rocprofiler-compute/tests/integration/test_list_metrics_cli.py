@@ -3,16 +3,16 @@
 
 """Integration tests for the modeless --list-metrics and --list-blocks options."""
 
-from pathlib import Path
-
 import pytest
 import yaml
-from common import SRC
 
+import config
 import utils.utils_common as utils_common
 from utils.mi_gpu_spec import mi_gpu_specs
 
-ANALYSIS_CONFIGS = Path(SRC) / "rocprof_compute_soc" / "analysis_configs"
+ANALYSIS_CONFIGS = (
+    config.rocprof_compute_home / "rocprof_compute_soc" / "analysis_configs"
+)
 
 
 # =============================================================================
