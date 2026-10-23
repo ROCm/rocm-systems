@@ -10112,41 +10112,40 @@ inline void execute_v_dot2_f32_bf16_vop3p([[maybe_unused]] Inst &inst,
         raw0 = (amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane) >> 16) * 0x10001u;
       if (amdgpu::dot2_src_needs_half_replication(inst.inst_.src1))
         raw1 = (amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane) >> 16) * 0x10001u;
-      uint16_t a0 = static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0);
-      uint16_t a1 = static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0);
-      uint16_t b0 = static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1);
-      uint16_t b1 = static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1);
+      uint16_t src0_lo = static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0);
+      uint16_t src0_hi = static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0);
+      uint16_t src1_lo = static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1);
+      uint16_t src1_hi = static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1);
       if (inst.inst_.neg & 1)
-        a0 ^= 0x8000u;
+        src0_lo ^= 0x8000u;
       if (inst.inst_.neg & 2)
-        b0 ^= 0x8000u;
+        src1_lo ^= 0x8000u;
       if (inst.inst_.neg_hi & 1)
-        a1 ^= 0x8000u;
+        src0_hi ^= 0x8000u;
       if (inst.inst_.neg_hi & 2)
-        b1 ^= 0x8000u;
+        src1_hi ^= 0x8000u;
       uint32_t acc = amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane);
-      if (inst.inst_.neg & 4)
-        acc ^= 0x80000000u;
-      uint32_t result = amdgpu::gfx11_dot2_f32<true>(a0, b0, a1, b1, acc);
+      acc = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(acc, 2, inst.inst_.neg_hi,
+                                                                   inst.inst_.neg);
+      uint32_t result = amdgpu::gfx11_dot2_f32<true>(src0_lo, src1_lo, src0_hi, src1_hi, acc);
       sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(inst, wf, inst.vdst, lane, result);
       continue;
     }
-    float a0 = util::bf16_to_f32(static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0));
-    float a1 = util::bf16_to_f32(static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0));
-    float b0 = util::bf16_to_f32(static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1));
-    float b1 = util::bf16_to_f32(static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1));
+    float src0_lo = util::bf16_to_f32(static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0));
+    float src0_hi = util::bf16_to_f32(static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0));
+    float src1_lo = util::bf16_to_f32(static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1));
+    float src1_hi = util::bf16_to_f32(static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1));
     if (inst.inst_.neg & 1)
-      a0 = -a0;
+      src0_lo = -src0_lo;
     if (inst.inst_.neg & 2)
-      b0 = -b0;
+      src1_lo = -src1_lo;
     if (inst.inst_.neg_hi & 1)
-      a1 = -a1;
+      src0_hi = -src0_hi;
     if (inst.inst_.neg_hi & 2)
-      b1 = -b1;
+      src1_hi = -src1_hi;
     float acc = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane));
-    if (inst.inst_.neg & 4)
-      acc = -acc;
-    float result = a0 * b0 + a1 * b1 + acc;
+    acc = amdgpu::source_modifier::apply_to_float(acc, 2, inst.inst_.neg_hi, inst.inst_.neg);
+    float result = src0_lo * src1_lo + src0_hi * src1_hi + acc;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(inst, wf, inst.vdst, lane,
                                                        std::bit_cast<uint32_t>(result));
   }
@@ -10171,41 +10170,40 @@ inline void execute_v_dot2_f32_f16_vop3p([[maybe_unused]] Inst &inst,
     bool sel0_hi = (inst.inst_.op_sel_hi >> 0) & 1;
     bool sel1_hi = (inst.inst_.op_sel_hi >> 1) & 1;
     if (isa_properties(wf.cu().arch()).float_dot_accumulation == FloatDotAccumulation::Gfx11) {
-      uint16_t a0 = static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0);
-      uint16_t a1 = static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0);
-      uint16_t b0 = static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1);
-      uint16_t b1 = static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1);
+      uint16_t src0_lo = static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0);
+      uint16_t src0_hi = static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0);
+      uint16_t src1_lo = static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1);
+      uint16_t src1_hi = static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1);
       if (inst.inst_.neg & 1)
-        a0 ^= 0x8000u;
+        src0_lo ^= 0x8000u;
       if (inst.inst_.neg & 2)
-        b0 ^= 0x8000u;
+        src1_lo ^= 0x8000u;
       if (inst.inst_.neg_hi & 1)
-        a1 ^= 0x8000u;
+        src0_hi ^= 0x8000u;
       if (inst.inst_.neg_hi & 2)
-        b1 ^= 0x8000u;
+        src1_hi ^= 0x8000u;
       uint32_t acc = amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane);
-      if (inst.inst_.neg & 4)
-        acc ^= 0x80000000u;
-      uint32_t result = amdgpu::gfx11_dot2_f32<false>(a0, b0, a1, b1, acc);
+      acc = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(acc, 2, inst.inst_.neg_hi,
+                                                                   inst.inst_.neg);
+      uint32_t result = amdgpu::gfx11_dot2_f32<false>(src0_lo, src1_lo, src0_hi, src1_hi, acc);
       sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(inst, wf, inst.vdst, lane, result);
       continue;
     }
-    float a0 = util::f16_to_f32(static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0));
-    float a1 = util::f16_to_f32(static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0));
-    float b0 = util::f16_to_f32(static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1));
-    float b1 = util::f16_to_f32(static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1));
+    float src0_lo = util::f16_to_f32(static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0));
+    float src0_hi = util::f16_to_f32(static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0));
+    float src1_lo = util::f16_to_f32(static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1));
+    float src1_hi = util::f16_to_f32(static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1));
     if (inst.inst_.neg & 1)
-      a0 = -a0;
+      src0_lo = -src0_lo;
     if (inst.inst_.neg & 2)
-      b0 = -b0;
+      src1_lo = -src1_lo;
     if (inst.inst_.neg_hi & 1)
-      a1 = -a1;
+      src0_hi = -src0_hi;
     if (inst.inst_.neg_hi & 2)
-      b1 = -b1;
+      src1_hi = -src1_hi;
     float acc = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane));
-    if (inst.inst_.neg & 4)
-      acc = -acc;
-    float result = a0 * b0 + a1 * b1 + acc;
+    acc = amdgpu::source_modifier::apply_to_float(acc, 2, inst.inst_.neg_hi, inst.inst_.neg);
+    float result = src0_lo * src1_lo + src0_hi * src1_hi + acc;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(inst, wf, inst.vdst, lane,
                                                        std::bit_cast<uint32_t>(result));
   }
@@ -10225,14 +10223,14 @@ inline void execute_v_dot2_i32_i16_vop3p([[maybe_unused]] Inst &inst,
     bool sel1_lo = (inst.inst_.op_sel >> 1) & 1;
     bool sel0_hi = (inst.inst_.op_sel_hi >> 0) & 1;
     bool sel1_hi = (inst.inst_.op_sel_hi >> 1) & 1;
-    int16_t a0 = static_cast<int16_t>(sel0_lo ? (raw0 >> 16) : raw0);
-    int16_t a1 = static_cast<int16_t>(sel0_hi ? (raw0 >> 16) : raw0);
-    int16_t b0 = static_cast<int16_t>(sel1_lo ? (raw1 >> 16) : raw1);
-    int16_t b1 = static_cast<int16_t>(sel1_hi ? (raw1 >> 16) : raw1);
+    int16_t src0_lo = static_cast<int16_t>(sel0_lo ? (raw0 >> 16) : raw0);
+    int16_t src0_hi = static_cast<int16_t>(sel0_hi ? (raw0 >> 16) : raw0);
+    int16_t src1_lo = static_cast<int16_t>(sel1_lo ? (raw1 >> 16) : raw1);
+    int16_t src1_hi = static_cast<int16_t>(sel1_hi ? (raw1 >> 16) : raw1);
     int64_t result = static_cast<int64_t>(
         static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
-    result += static_cast<int64_t>(a0) * b0;
-    result += static_cast<int64_t>(a1) * b1;
+    result += static_cast<int64_t>(src0_lo) * src1_lo;
+    result += static_cast<int64_t>(src0_hi) * src1_hi;
     if (inst.inst_.clamp) {
       result = std::clamp(result, static_cast<int64_t>(std::numeric_limits<int32_t>::min()),
                           static_cast<int64_t>(std::numeric_limits<int32_t>::max()));
@@ -10256,13 +10254,13 @@ inline void execute_v_dot2_u32_u16_vop3p([[maybe_unused]] Inst &inst,
     bool sel1_lo = (inst.inst_.op_sel >> 1) & 1;
     bool sel0_hi = (inst.inst_.op_sel_hi >> 0) & 1;
     bool sel1_hi = (inst.inst_.op_sel_hi >> 1) & 1;
-    uint16_t a0 = static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0);
-    uint16_t a1 = static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0);
-    uint16_t b0 = static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1);
-    uint16_t b1 = static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1);
+    uint16_t src0_lo = static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0);
+    uint16_t src0_hi = static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0);
+    uint16_t src1_lo = static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1);
+    uint16_t src1_hi = static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1);
     uint64_t result = amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane);
-    result += static_cast<uint64_t>(a0) * b0;
-    result += static_cast<uint64_t>(a1) * b1;
+    result += static_cast<uint64_t>(src0_lo) * src1_lo;
+    result += static_cast<uint64_t>(src0_hi) * src1_hi;
     if (inst.inst_.clamp)
       result = std::min(result, static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()));
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(inst, wf, inst.vdst, lane,
@@ -10412,12 +10410,14 @@ inline void execute_v_dot4_i32_i8_vop3p([[maybe_unused]] Inst &inst,
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
+    raw0 = amdgpu::select_packed_halves(raw0, inst.inst_.op_sel, inst.inst_.op_sel_hi, 0);
+    raw1 = amdgpu::select_packed_halves(raw1, inst.inst_.op_sel, inst.inst_.op_sel_hi, 1);
     int64_t sum = static_cast<int64_t>(
         static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
     for (int i = 0; i < 4; ++i) {
-      int8_t a = static_cast<int8_t>((raw0 >> (i * 8)) & 0xFF);
-      int8_t b = static_cast<int8_t>((raw1 >> (i * 8)) & 0xFF);
-      sum += static_cast<int64_t>(a) * static_cast<int64_t>(b);
+      int8_t src0_elem = static_cast<int8_t>((raw0 >> (i * 8)) & 0xFF);
+      int8_t src1_elem = static_cast<int8_t>((raw1 >> (i * 8)) & 0xFF);
+      sum += static_cast<int64_t>(src0_elem) * static_cast<int64_t>(src1_elem);
     }
     if (inst.inst_.clamp && amdgpu::dot4_clamp_supported(wf)) {
       sum = std::clamp(sum, static_cast<int64_t>(std::numeric_limits<int32_t>::min()),
@@ -10438,18 +10438,20 @@ inline void execute_v_dot4_i32_iu8_vop3p([[maybe_unused]] Inst &inst,
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
+    raw0 = amdgpu::select_packed_halves(raw0, inst.inst_.op_sel, inst.inst_.op_sel_hi, 0);
+    raw1 = amdgpu::select_packed_halves(raw1, inst.inst_.op_sel, inst.inst_.op_sel_hi, 1);
     int64_t sum = static_cast<int64_t>(
         static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
     const bool src0_signed = (inst.inst_.neg & 0x1u) != 0;
     const bool src1_signed = (inst.inst_.neg & 0x2u) != 0;
     for (int i = 0; i < 4; ++i) {
-      uint32_t raw_a = (raw0 >> (i * 8)) & 0xFF;
-      uint32_t raw_b = (raw1 >> (i * 8)) & 0xFF;
-      int32_t a = src0_signed ? static_cast<int32_t>(static_cast<int8_t>(raw_a))
-                              : static_cast<int32_t>(raw_a);
-      int32_t b = src1_signed ? static_cast<int32_t>(static_cast<int8_t>(raw_b))
-                              : static_cast<int32_t>(raw_b);
-      sum += static_cast<int64_t>(a) * static_cast<int64_t>(b);
+      uint32_t src0_bits = (raw0 >> (i * 8)) & 0xFF;
+      uint32_t src1_bits = (raw1 >> (i * 8)) & 0xFF;
+      int32_t src0_elem = src0_signed ? static_cast<int32_t>(static_cast<int8_t>(src0_bits))
+                                      : static_cast<int32_t>(src0_bits);
+      int32_t src1_elem = src1_signed ? static_cast<int32_t>(static_cast<int8_t>(src1_bits))
+                                      : static_cast<int32_t>(src1_bits);
+      sum += static_cast<int64_t>(src0_elem) * static_cast<int64_t>(src1_elem);
     }
     if (inst.inst_.clamp && amdgpu::dot4_clamp_supported(wf)) {
       sum = std::clamp(sum, static_cast<int64_t>(std::numeric_limits<int32_t>::min()),
@@ -10470,11 +10472,13 @@ inline void execute_v_dot4_u32_u8_vop3p([[maybe_unused]] Inst &inst,
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
+    raw0 = amdgpu::select_packed_halves(raw0, inst.inst_.op_sel, inst.inst_.op_sel_hi, 0);
+    raw1 = amdgpu::select_packed_halves(raw1, inst.inst_.op_sel, inst.inst_.op_sel_hi, 1);
     uint64_t sum = amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane);
     for (int i = 0; i < 4; ++i) {
-      uint8_t a = static_cast<uint8_t>((raw0 >> (i * 8)) & 0xFF);
-      uint8_t b = static_cast<uint8_t>((raw1 >> (i * 8)) & 0xFF);
-      sum += static_cast<uint32_t>(a) * b;
+      uint8_t src0_elem = static_cast<uint8_t>((raw0 >> (i * 8)) & 0xFF);
+      uint8_t src1_elem = static_cast<uint8_t>((raw1 >> (i * 8)) & 0xFF);
+      sum += static_cast<uint32_t>(src0_elem) * src1_elem;
     }
     if (inst.inst_.clamp && amdgpu::dot4_clamp_supported(wf))
       sum = std::min(sum, static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()));
@@ -10533,16 +10537,18 @@ inline void execute_v_dot8_i32_i4_vop3p([[maybe_unused]] Inst &inst,
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
+    raw0 = amdgpu::select_packed_halves(raw0, inst.inst_.op_sel, inst.inst_.op_sel_hi, 0);
+    raw1 = amdgpu::select_packed_halves(raw1, inst.inst_.op_sel, inst.inst_.op_sel_hi, 1);
     int64_t sum = static_cast<int64_t>(
         static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
     for (int i = 0; i < 8; ++i) {
-      int32_t a = static_cast<int32_t>((raw0 >> (i * 4)) & 0xF);
-      if (a & 0x8)
-        a |= ~0xF;
-      int32_t b = static_cast<int32_t>((raw1 >> (i * 4)) & 0xF);
-      if (b & 0x8)
-        b |= ~0xF;
-      sum += static_cast<int64_t>(a) * static_cast<int64_t>(b);
+      int32_t src0_elem = static_cast<int32_t>((raw0 >> (i * 4)) & 0xF);
+      if (src0_elem & 0x8)
+        src0_elem |= ~0xF;
+      int32_t src1_elem = static_cast<int32_t>((raw1 >> (i * 4)) & 0xF);
+      if (src1_elem & 0x8)
+        src1_elem |= ~0xF;
+      sum += static_cast<int64_t>(src0_elem) * static_cast<int64_t>(src1_elem);
     }
     if (inst.inst_.clamp) {
       sum = std::clamp(sum, static_cast<int64_t>(std::numeric_limits<int32_t>::min()),
@@ -10563,18 +10569,22 @@ inline void execute_v_dot8_i32_iu4_vop3p([[maybe_unused]] Inst &inst,
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
+    raw0 = amdgpu::select_packed_halves(raw0, inst.inst_.op_sel, inst.inst_.op_sel_hi, 0);
+    raw1 = amdgpu::select_packed_halves(raw1, inst.inst_.op_sel, inst.inst_.op_sel_hi, 1);
     int64_t sum = static_cast<int64_t>(
         static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
     const bool src0_signed = (inst.inst_.neg & 0x1u) != 0;
     const bool src1_signed = (inst.inst_.neg & 0x2u) != 0;
     for (int i = 0; i < 8; ++i) {
-      uint32_t raw_a = (raw0 >> (i * 4)) & 0xF;
-      uint32_t raw_b = (raw1 >> (i * 4)) & 0xF;
-      int32_t a = src0_signed ? static_cast<int32_t>((raw_a & 0x8) ? (raw_a | ~0xF) : raw_a)
-                              : static_cast<int32_t>(raw_a);
-      int32_t b = src1_signed ? static_cast<int32_t>((raw_b & 0x8) ? (raw_b | ~0xF) : raw_b)
-                              : static_cast<int32_t>(raw_b);
-      sum += static_cast<int64_t>(a) * static_cast<int64_t>(b);
+      uint32_t src0_bits = (raw0 >> (i * 4)) & 0xF;
+      uint32_t src1_bits = (raw1 >> (i * 4)) & 0xF;
+      int32_t src0_elem =
+          src0_signed ? static_cast<int32_t>((src0_bits & 0x8) ? (src0_bits | ~0xF) : src0_bits)
+                      : static_cast<int32_t>(src0_bits);
+      int32_t src1_elem =
+          src1_signed ? static_cast<int32_t>((src1_bits & 0x8) ? (src1_bits | ~0xF) : src1_bits)
+                      : static_cast<int32_t>(src1_bits);
+      sum += static_cast<int64_t>(src0_elem) * static_cast<int64_t>(src1_elem);
     }
     if (inst.inst_.clamp) {
       sum = std::clamp(sum, static_cast<int64_t>(std::numeric_limits<int32_t>::min()),
@@ -10595,11 +10605,13 @@ inline void execute_v_dot8_u32_u4_vop3p([[maybe_unused]] Inst &inst,
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
+    raw0 = amdgpu::select_packed_halves(raw0, inst.inst_.op_sel, inst.inst_.op_sel_hi, 0);
+    raw1 = amdgpu::select_packed_halves(raw1, inst.inst_.op_sel, inst.inst_.op_sel_hi, 1);
     uint64_t sum = amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane);
     for (int i = 0; i < 8; ++i) {
-      uint32_t a = (raw0 >> (i * 4)) & 0xF;
-      uint32_t b = (raw1 >> (i * 4)) & 0xF;
-      sum += a * b;
+      uint32_t src0_elem = (raw0 >> (i * 4)) & 0xF;
+      uint32_t src1_elem = (raw1 >> (i * 4)) & 0xF;
+      sum += src0_elem * src1_elem;
     }
     if (inst.inst_.clamp)
       sum = std::min(sum, static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()));

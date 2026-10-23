@@ -1188,11 +1188,11 @@ SIMD_VOP3P_MOV_B32: set[str] = {
 }
 
 # VOP3P integer dot products. dst is a single 32-bit lane (not packed) and
-# src2 is the accumulator; the dot reduction happens within each lane so the
-# fast path vectorizes across lanes. Parameterised by (ElemBits, Signed):
-# the 8/4-bit forms ignore op_sel in the scalar body, the 16-bit forms gate
-# on default packing inside the glue. Signed forms lower-clamp to 0 when
-# inst.clamp is set; the unsigned scalar bodies have no clamp branch.
+# src2 is the accumulator, so the fast path vectorizes the reduction across
+# lanes. Parameterised by (ElemBits, Signed). Eligibility: the 16-bit forms
+# decline non-default op_sel packing, the 8/4-bit forms accept it. See
+# try_execute_vop3p_dot_int_simd in simd_glue.h for the arithmetic contract,
+# including how CLAMP and dot4_clamp_supported apply.
 SIMD_VOP3P_DOT_INT: dict[str, str] = {
     'v_dot4_i32_i8_vop3p': '8, true',
     'v_dot4_u32_u8_vop3p': '8, false',
@@ -1203,21 +1203,24 @@ SIMD_VOP3P_DOT_INT: dict[str, str] = {
 }
 
 # v_dot2_f32_{f16,bf16} — two half-precision products + an f32 accumulator into
-# one f32 lane. op_sel half-select (gated default), neg/neg_hi sign flips,
-# optional clamp to [0,1]. Functorless / fixed-op. The set spans BOTH 16-bit
+# one f32 lane. Eligibility: the HostF32 accumulation policy and the default
+# op_sel packing only; floating DOT ignores CLAMP. The set spans BOTH 16-bit
 # float formats, which share the entire dot2 structure but differ in how each
 # half is widened to f32 (f16 has a 5-bit exponent with denormal renormalization;
 # bf16 has an 8-bit exponent and is a pure left-shift). Both route through the
 # same ROCJITSU_TRY_SIMD_VOP3P_DOT_F16 glue, which takes the format as an
-# argument so it selects util::{f16,bf16}_to_f32_simd accordingly.
+# argument so it selects util::{f16,bf16}_to_f32_simd accordingly; see
+# try_execute_vop3p_dot_f16_simd in simd_glue.h.
 SIMD_VOP3P_DOT_F16_OR_BF16: set[str] = {
     'v_dot2_f32_f16_vop3p',
     'v_dot2_f32_bf16_vop3p',
 }
 
 # VOP3P mixed-sign integer dots: per-operand signedness from inst.neg bits 0/1
-# at runtime (src0/src1); int32 accumulate from src2; lower-clamp-to-0; no
-# op_sel/neg_hi in the scalar bodies. key -> ElemBits.
+# at runtime (src0/src1); int32 accumulate from src2. The scalar and SIMD paths
+# both apply op_sel half selection and saturate the signed result when CLAMP is
+# supported; see try_execute_vop3p_dot_int_mixed_simd in simd_glue.h.
+# key -> ElemBits.
 SIMD_VOP3P_DOT_INT_MIXED: dict[str, str] = {
     'v_dot4_i32_iu8_vop3p': '8',
     'v_dot8_i32_iu4_vop3p': '4',
