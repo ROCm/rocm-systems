@@ -5,16 +5,19 @@
 
 use crate::ffi::{HsaIsa, HsaWavefront, ISA_BASE, ISA_COUNT_PER_GPU, WAVEFRONT_BASE};
 
+/// Formats a GFX target name from its major, minor, and stepping values.
 pub(crate) fn gfx_target_name(major: u32, minor: u32, stepping: u32) -> String {
     format!("gfx{major}{minor}{stepping:x}")
 }
 
+/// Encodes a GPU index and ISA variant as an HSA ISA handle.
 pub(crate) fn isa_handle(gpu_index: usize, variant: u64) -> HsaIsa {
     HsaIsa {
         handle: ISA_BASE + gpu_index as u64 * ISA_COUNT_PER_GPU + variant,
     }
 }
 
+/// Builds the public ISA name for a GPU and wavefront variant.
 pub(crate) fn isa_name(
     gpu: &rocddi::topology::GpuInfo,
     xnack_enabled: bool,
@@ -45,6 +48,7 @@ pub(crate) fn isa_name(
     Some(format!("amdgcn-amd-amdhsa--{base}{features}"))
 }
 
+/// Encodes an ISA handle as the corresponding wavefront handle.
 pub(crate) fn wavefront_handle(isa: HsaIsa) -> HsaWavefront {
     HsaWavefront {
         handle: WAVEFRONT_BASE + isa.handle.saturating_sub(ISA_BASE),

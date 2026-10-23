@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-//! HSA C ABI entry points for this domain.
+//! AMD agent, logging, event, profiling, and monitor extension entry points.
 
 use std::ffi::c_void;
 
@@ -10,6 +10,7 @@ use crate::ffi::*;
 use crate::runtime::{InFlightToken, boundary, initialized_mut, lock, map_error};
 use crate::{memory, runtime};
 
+/// Flag that skips GPU linear-copy preload for an agent.
 const AMD_AGENT_PRELOAD_SKIP_BLITS: u64 = 1 << 1;
 
 /// # Safety
@@ -115,6 +116,7 @@ pub unsafe extern "C" fn hsa_amd_coherency_get_type(agent: HsaAgent, kind: *mut 
     unsafe(export_name = "__hsa_impl_hsa_amd_coherency_set_type")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Sets the coherency policy exposed by a GPU agent.
 pub extern "C" fn hsa_amd_coherency_set_type(agent: HsaAgent, kind: u32) -> Status {
     boundary(|| {
         let mut guard = match lock() {
@@ -144,6 +146,7 @@ pub extern "C" fn hsa_amd_coherency_set_type(agent: HsaAgent, kind: u32) -> Stat
     unsafe(export_name = "__hsa_impl_hsa_amd_agent_preload")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Requests that the selected agent preload its runtime state.
 pub extern "C" fn hsa_amd_agent_preload(agent: HsaAgent, flags: u64) -> Status {
     boundary(|| {
         let (_call, device) = {
@@ -180,6 +183,7 @@ pub extern "C" fn hsa_amd_agent_preload(agent: HsaAgent, flags: u64) -> Status {
     unsafe(export_name = "__hsa_impl_hsa_amd_agent_set_async_scratch_limit")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Rejects asynchronous scratch reclaim, which this backend does not expose.
 pub extern "C" fn hsa_amd_agent_set_async_scratch_limit(
     agent: HsaAgent,
     _threshold: usize,
@@ -205,6 +209,7 @@ pub extern "C" fn hsa_amd_agent_set_async_scratch_limit(
     unsafe(export_name = "__hsa_impl_hsa_amd_profiling_async_copy_enable")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Enables or disables timestamps for asynchronous copies.
 pub extern "C" fn hsa_amd_profiling_async_copy_enable(enable: bool) -> Status {
     boundary(|| {
         let mut guard = match lock() {
@@ -274,6 +279,7 @@ pub unsafe extern "C" fn hsa_amd_profiling_convert_tick_to_system_domain(
     unsafe(export_name = "__hsa_impl_hsa_amd_spm_acquire")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Acquires the agent’s streaming performance monitor.
 pub extern "C" fn hsa_amd_spm_acquire(agent: HsaAgent) -> Status {
     boundary(|| {
         let (_call, device) = match retained_gpu_device(agent) {
@@ -292,6 +298,7 @@ pub extern "C" fn hsa_amd_spm_acquire(agent: HsaAgent) -> Status {
     unsafe(export_name = "__hsa_impl_hsa_amd_spm_release")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Releases the SPM resource.
 pub extern "C" fn hsa_amd_spm_release(agent: HsaAgent) -> Status {
     boundary(|| {
         let (_call, device) = match retained_gpu_device(agent) {

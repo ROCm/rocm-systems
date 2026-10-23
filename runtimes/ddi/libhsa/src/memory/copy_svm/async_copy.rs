@@ -17,6 +17,7 @@ struct AsyncCopyTask {
     completion: HsaSignal,
 }
 
+/// Queues a resolved copy job for execution by a memory worker.
 fn enqueue_copy_job(
     runtime: &mut HsaState,
     tasks: Vec<AsyncCopyTask>,
@@ -127,6 +128,7 @@ fn enqueue_copy_job(
     SUCCESS
 }
 
+/// Resolves and queues an asynchronous copy with retained operands.
 fn enqueue_async_copy(
     runtime: &mut HsaState,
     resolved: ResolvedAsyncCopy,
@@ -147,6 +149,7 @@ fn enqueue_async_copy(
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Validates caller inputs and submits an asynchronous copy.
 unsafe fn submit_async_copy(
     dst: *mut c_void,
     dst_agent: HsaAgent,
@@ -241,6 +244,7 @@ unsafe fn submit_async_copy(
     unsafe(export_name = "__hsa_impl_hsa_amd_memory_async_copy")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Submits a copy after dependency signals complete.
 pub unsafe extern "C" fn hsa_amd_memory_async_copy(
     dst: *mut c_void,
     dst_agent: HsaAgent,
@@ -273,6 +277,7 @@ pub unsafe extern "C" fn hsa_amd_memory_async_copy(
     unsafe(export_name = "__hsa_impl_hsa_amd_memory_async_copy_on_engine")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Submits a copy on the requested SDMA engine.
 pub unsafe extern "C" fn hsa_amd_memory_async_copy_on_engine(
     dst: *mut c_void,
     dst_agent: HsaAgent,
@@ -327,9 +332,15 @@ enum BatchCopyMode {
     /// Exchange two ranges.
     Swap,
     /// Resolve source or destination through GPU pointer slots.
-    Indirect { source: bool, destination: bool },
+    Indirect {
+        /// Whether the source address comes from the indirect entry list.
+        source: bool,
+        /// Whether the destination address comes from the indirect entry list.
+        destination: bool,
+    },
 }
 
+/// Selects the copy mode encoded in a batch operation.
 fn batch_copy_mode(operation: u16) -> Result<BatchCopyMode, Status> {
     match operation {
         0 | 1 => Ok(BatchCopyMode::Linear),
@@ -365,6 +376,7 @@ unsafe fn batch_slice<'a, T>(pointer: *const T, count: usize) -> Result<&'a [T],
 }
 
 #[allow(unsafe_code)]
+/// Decodes copy entries from the caller’s batch descriptor.
 unsafe fn batch_copy_entries(op: HsaAmdMemoryCopyOp) -> Result<Vec<BatchCopyEntry>, Status> {
     let mode = batch_copy_mode(op.operation)?;
     if matches!(mode, BatchCopyMode::Indirect { .. }) && op.entry_count > 1024 {
@@ -467,6 +479,7 @@ unsafe fn batch_copy_entries(op: HsaAmdMemoryCopyOp) -> Result<Vec<BatchCopyEntr
     Ok(entries)
 }
 
+/// Resolves indirect batch entry to a validated runtime resource.
 fn resolve_indirect_batch_entry(
     runtime: &HsaState,
     entry: &BatchCopyEntry,
@@ -537,6 +550,7 @@ fn resolve_indirect_batch_entry(
     })
 }
 
+/// Resolves batch copy entries to a validated runtime resource.
 fn resolve_batch_copy_entries(
     runtime: &HsaState,
     entries: &[BatchCopyEntry],
@@ -661,6 +675,7 @@ struct PreparedBatchCopy {
     tasks: Vec<AsyncCopyTask>,
 }
 
+/// Resolves the address used by a batch wait or signal operation.
 fn batch_control_address(
     runtime: &HsaState,
     pointer: usize,
@@ -677,6 +692,7 @@ fn batch_control_address(
 }
 
 #[allow(unsafe_code)]
+/// Prepares batch copy before publication or execution.
 unsafe fn prepare_batch_copy(
     runtime: &HsaState,
     operations: &[HsaAmdMemoryCopyOp],
@@ -801,6 +817,7 @@ unsafe fn prepare_batch_copy(
     unsafe(export_name = "__hsa_impl_hsa_amd_memory_async_batch_copy")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Submits a batch of copy entries with control operations.
 pub unsafe extern "C" fn hsa_amd_memory_async_batch_copy(
     copy_operations: *const HsaAmdMemoryCopyOp,
     operation_count: u32,
@@ -859,6 +876,7 @@ pub unsafe extern "C" fn hsa_amd_memory_async_batch_copy(
     unsafe(export_name = "__hsa_impl_hsa_amd_memory_async_copy_rect")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Submits a rectangular copy between pitched ranges.
 pub unsafe extern "C" fn hsa_amd_memory_async_copy_rect(
     dst: *const HsaPitchedPtr,
     dst_offset: *const HsaDim3,
@@ -988,6 +1006,7 @@ pub unsafe extern "C" fn hsa_amd_memory_async_copy_rect(
     })
 }
 
+/// Computes the address range covered by a pitched copy.
 fn pitched_copy_range(
     pitched: HsaPitchedPtr,
     offset: HsaDim3,
@@ -1014,6 +1033,7 @@ fn pitched_copy_range(
     Some((address, extent))
 }
 
+/// Copies engine mask for GPU after validating its source and destination.
 fn copy_engine_mask_for_gpu(runtime: &HsaState, index: usize) -> Result<u32, Status> {
     let gpu = runtime.gpus[index].device.gpu().map_err(map_error)?;
     if !gpu.supports_linear_copy() {
@@ -1024,6 +1044,7 @@ fn copy_engine_mask_for_gpu(runtime: &HsaState, index: usize) -> Result<u32, Sta
     Ok(gpu.available_sdma_engines().map_err(map_error)? & valid_ids)
 }
 
+/// Copies engine mask after validating its source and destination.
 fn copy_engine_mask(runtime: &HsaState, dst: HsaAgent, src: HsaAgent) -> Result<u32, Status> {
     let Some(index) = runtime.gpu_index(src).or_else(|| runtime.gpu_index(dst)) else {
         return Ok(0);
@@ -1036,6 +1057,7 @@ fn copy_engine_mask(runtime: &HsaState, dst: HsaAgent, src: HsaAgent) -> Result<
     unsafe(export_name = "__hsa_impl_hsa_amd_memory_copy_engine_status")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Reports copy engines currently available for an agent.
 pub unsafe extern "C" fn hsa_amd_memory_copy_engine_status(
     dst: HsaAgent,
     src: HsaAgent,
@@ -1075,6 +1097,7 @@ pub unsafe extern "C" fn hsa_amd_memory_copy_engine_status(
     unsafe(export_name = "__hsa_impl_hsa_amd_memory_get_preferred_copy_engine")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Selects the preferred engine for a copy route.
 pub unsafe extern "C" fn hsa_amd_memory_get_preferred_copy_engine(
     dst: HsaAgent,
     src: HsaAgent,

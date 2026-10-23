@@ -1,12 +1,15 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+//! Lifecycle, event, clock, topology, and logging regression tests.
+
 use super::*;
 use rocddi::device::gpu::profiling::ClockCounters;
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering as AtomicOrdering};
 
 #[test]
+/// Verifies that precise clock sampling keeps the shortest complete sample.
 fn precise_clock_sampling_keeps_the_shortest_complete_sample() {
     let mut samples = [
         Ok::<_, &str>((10, Duration::from_micros(40))),
@@ -33,6 +36,7 @@ fn precise_clock_sampling_keeps_the_shortest_complete_sample() {
 }
 
 #[test]
+/// Verifies that native busy reports resource contention across frontends.
 fn native_busy_reports_resource_contention_across_frontends() {
     let busy = || rocddi::Error::Operation {
         kind: rocddi::ErrorKind::Busy,
@@ -44,6 +48,7 @@ fn native_busy_reports_resource_contention_across_frontends() {
 
 #[test]
 #[allow(clippy::unwrap_used)]
+/// Verifies that shutdown waits for inflight calls.
 fn shutdown_waits_for_inflight_calls() {
     let inflight = Arc::new(InFlightTracker::new());
     let token = inflight.enter().unwrap();
@@ -63,6 +68,7 @@ fn shutdown_waits_for_inflight_calls() {
 }
 
 #[test]
+/// Verifies that callback scope restricts queue and sampling teardown.
 fn callback_scope_restricts_queue_and_sampling_teardown() {
     assert!(!CallbackScope::active());
     {
@@ -86,10 +92,15 @@ fn callback_scope_restricts_queue_and_sampling_teardown() {
 }
 
 #[test]
+/// Verifies that deferred cleanup joins the callback worker after exit.
 fn deferred_cleanup_joins_the_callback_worker_after_exit() {
+    /// Owns a callback worker and its completion probe.
     struct Owner {
+        /// Worker joined by deferred cleanup.
         worker: JoinHandle<()>,
+        /// Records whether the worker exited before cleanup finished.
         exited: Arc<AtomicBool>,
+        /// Reports the observed exit state to the test thread.
         completed: std::sync::mpsc::Sender<bool>,
     }
     let exited = Arc::new(AtomicBool::new(false));
@@ -122,6 +133,7 @@ fn deferred_cleanup_joins_the_callback_worker_after_exit() {
 }
 
 #[test]
+/// Verifies that initialization gate rejects overlapping generations.
 fn initialization_gate_rejects_overlapping_generations() {
     let mut registry = HsaLifecycle::new();
     let first = registry.begin_init().unwrap().unwrap();
@@ -134,6 +146,7 @@ fn initialization_gate_rejects_overlapping_generations() {
 }
 
 #[test]
+/// Verifies that failed initialization cleanup quarantines the next generation.
 fn failed_initialization_cleanup_quarantines_the_next_generation() {
     let mut registry = HsaLifecycle::new();
     let generation = registry.begin_init().unwrap().unwrap();
@@ -142,20 +155,29 @@ fn failed_initialization_cleanup_quarantines_the_next_generation() {
 }
 
 #[test]
+/// Verifies that first and later GPU activation failures retire the session
+/// join.
 fn first_and_later_gpu_activation_failures_retire_the_session_join() {
+    /// Counts activated GPU owners in a rollback test.
     struct Activated {
+        /// Number of mock GPU owners still live.
         live: Arc<AtomicUsize>,
     }
     impl Drop for Activated {
+        /// Records destruction of the test owner.
         fn drop(&mut self) {
             self.live.fetch_sub(1, AtomicOrdering::Relaxed);
         }
     }
+    /// Tracks retirement of a mock session.
     struct Joined {
+        /// Number of GPU owners that must retire before the session.
         live: Arc<AtomicUsize>,
+        /// Number of mock session joins still outstanding.
         joins: Arc<AtomicUsize>,
     }
     impl RetireSession for Joined {
+        /// Checks native owners are gone before retiring the mock session.
         fn retire(&mut self) -> bool {
             assert_eq!(self.live.load(AtomicOrdering::Relaxed), 0);
             self.joins.fetch_sub(1, AtomicOrdering::Relaxed);
@@ -181,11 +203,15 @@ fn first_and_later_gpu_activation_failures_retire_the_session_join() {
     }
 }
 
+/// Captures system-event callback observations.
 struct ObservedEvent {
+    /// Number of times the callback ran.
     count: AtomicU32,
+    /// Last event type delivered to the callback.
     event_type: AtomicU32,
 }
 
+/// Records an event kind and callback count for assertions.
 unsafe extern "C" fn observe_system_event(event: *const HsaAmdEvent, data: *mut c_void) -> Status {
     // SAFETY: The test passes live event and observation storage.
     let observed = unsafe { &*data.cast::<ObservedEvent>() };
@@ -198,11 +224,15 @@ unsafe extern "C" fn observe_system_event(event: *const HsaAmdEvent, data: *mut 
     ERROR
 }
 
+/// Tracks stop requests and subsequent event callbacks.
 struct StopEventProbe {
+    /// Stop request written by the first callback.
     stop: AtomicBool,
+    /// Calls that reached a later callback after stop.
     later_calls: AtomicU32,
 }
 
+/// Requests worker stop from a system-event callback.
 unsafe extern "C" fn stop_from_fault_handler(
     _event: *const HsaAmdEvent,
     data: *mut c_void,
@@ -213,6 +243,7 @@ unsafe extern "C" fn stop_from_fault_handler(
     ERROR
 }
 
+/// Records whether a later fault handler was invoked.
 unsafe extern "C" fn count_later_fault_handler(
     _event: *const HsaAmdEvent,
     data: *mut c_void,
@@ -224,6 +255,7 @@ unsafe extern "C" fn count_later_fault_handler(
 }
 
 #[test]
+/// Verifies that shutdown requested by fault handler skips later handlers.
 fn shutdown_requested_by_fault_handler_skips_later_handlers() {
     let probe = StopEventProbe {
         stop: AtomicBool::new(false),
@@ -246,6 +278,7 @@ fn shutdown_requested_by_fault_handler_skips_later_handlers() {
 }
 
 #[test]
+/// Verifies that canonical GPU agent name uses the gfx target.
 fn canonical_gpu_agent_name_uses_the_gfx_target() {
     assert_eq!(
         gpu_agent_name(&GpuInfo {
@@ -259,12 +292,14 @@ fn canonical_gpu_agent_name_uses_the_gfx_target() {
 }
 
 #[test]
+/// Verifies that HDP flush registers are adjacent words in the MMIO page.
 fn hdp_flush_registers_are_adjacent_words_in_the_mmio_page() {
     assert_eq!(hdp_flush_pointers(None), [0, 0]);
     assert_eq!(hdp_flush_pointers(Some(0x1000)), [0x1000, 0x1004]);
 }
 
 #[test]
+/// Verifies that zero local memory identifies a full profile platform.
 fn zero_local_memory_identifies_a_full_profile_platform() {
     assert!(!full_profile_platform([]));
     assert!(full_profile_platform([0]));
@@ -273,6 +308,7 @@ fn zero_local_memory_identifies_a_full_profile_platform() {
 }
 
 #[test]
+/// Verifies that shutdown notifies every registered system event handler.
 fn shutdown_notifies_every_registered_system_event_handler() {
     let first = ObservedEvent {
         count: AtomicU32::new(0),
@@ -307,6 +343,7 @@ fn shutdown_notifies_every_registered_system_event_handler() {
 }
 
 #[test]
+/// Verifies that memory fault events match the AMD extension layout.
 fn memory_fault_events_match_the_amd_extension_layout() {
     let agent = HsaAgent { handle: 0x1234 };
     for (cause, extra_reason) in [
@@ -344,6 +381,7 @@ fn memory_fault_events_match_the_amd_extension_layout() {
 }
 
 #[test]
+/// Verifies that hardware exception events match the AMD extension layout.
 fn hardware_exception_events_match_the_amd_extension_layout() {
     let agent = HsaAgent { handle: 0x1234 };
     for (cause, expected_cause) in [
@@ -370,6 +408,7 @@ fn hardware_exception_events_match_the_amd_extension_layout() {
 }
 
 #[test]
+/// Verifies that GPU ticks translate around the correlated system sample.
 fn gpu_ticks_translate_around_the_correlated_system_sample() {
     let counters = ClockCounters {
         gpu: 100,
@@ -403,6 +442,7 @@ fn gpu_ticks_translate_around_the_correlated_system_sample() {
 }
 
 #[test]
+/// Verifies that logging flags use the public 64 bit mask layout.
 fn logging_flags_use_the_public_64_bit_mask_layout() {
     let flags = [0b0000_0101, 0, 0, 0, 0, 0, 0, 0];
     assert!(logging_flag_enabled(flags, 0));
@@ -412,6 +452,7 @@ fn logging_flags_use_the_public_64_bit_mask_layout() {
 }
 
 #[test]
+/// Verifies that GPU pool handle encoding reserves coarse fine and group memory.
 fn gpu_pool_handle_encoding_reserves_coarse_fine_and_group_memory() {
     assert_eq!(
         decode_gpu_pool_handle(
@@ -452,6 +493,7 @@ fn gpu_pool_handle_encoding_reserves_coarse_fine_and_group_memory() {
 }
 
 #[test]
+/// Verifies that cache handles and names are stable runtime objects.
 fn cache_handles_and_names_are_stable_runtime_objects() {
     let agent = HsaAgent {
         handle: GPU_AGENT_BASE,
@@ -495,6 +537,8 @@ fn cache_handles_and_names_are_stable_runtime_objects() {
 }
 
 #[test]
+/// Verifies that CPU cache source prefers numa zero and falls back to system
+/// scan.
 fn cpu_cache_source_prefers_numa_zero_and_falls_back_to_system_scan() {
     use rocddi::topology::host::{CpuCache, HostDomain};
 
@@ -537,6 +581,7 @@ fn cpu_cache_source_prefers_numa_zero_and_falls_back_to_system_scan() {
 }
 
 #[test]
+/// Verifies that cache iteration sorts levels without changing handles.
 fn cache_iteration_sorts_levels_without_changing_handles() {
     let agent = HsaAgent { handle: CPU_AGENT };
     let other = HsaAgent {
@@ -560,6 +605,7 @@ fn cache_iteration_sorts_levels_without_changing_handles() {
 }
 
 #[test]
+/// Verifies that legacy GPU cache sizes match `ROCr` aggregation.
 fn legacy_gpu_cache_sizes_match_rocr_aggregation() {
     let agent = HsaAgent {
         handle: GPU_AGENT_BASE,
@@ -584,6 +630,7 @@ fn legacy_gpu_cache_sizes_match_rocr_aggregation() {
 
 #[test]
 #[ignore = "requires a qualified GPU and KFD runtime"]
+/// Verifies that HSA runtime reinitializes after shutdown.
 fn hsa_runtime_reinitializes_after_shutdown() {
     for _ in 0..3 {
         assert_eq!(crate::hsa_init(), SUCCESS);

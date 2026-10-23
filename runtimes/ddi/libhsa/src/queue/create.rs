@@ -340,11 +340,14 @@ pub(super) unsafe fn create_hardware_queue(
 /// Quarantines an HSA generation if native creation unwinds or leaves an
 /// unpublished queue whose cleanup cannot be proven complete.
 struct UnpublishedQueueGuard<'a> {
+    /// In-flight tracker retained until queue publication or rollback.
     tracker: &'a crate::runtime::InFlightTracker,
+    /// Whether dropping this guard must retire an unpublished queue.
     armed: bool,
 }
 
 impl<'a> UnpublishedQueueGuard<'a> {
+    /// Arms rollback for an unpublished queue and retains its tracker.
     fn new(tracker: &'a crate::runtime::InFlightTracker) -> Self {
         Self {
             tracker,
@@ -352,12 +355,14 @@ impl<'a> UnpublishedQueueGuard<'a> {
         }
     }
 
+    /// Prevents this creation guard from retiring the published queue.
     fn disarm(&mut self) {
         self.armed = false;
     }
 }
 
 impl Drop for UnpublishedQueueGuard<'_> {
+    /// Quarantines the native generation if publication never disarmed rollback.
     fn drop(&mut self) {
         if self.armed {
             self.tracker.quarantine();
@@ -365,6 +370,7 @@ impl Drop for UnpublishedQueueGuard<'_> {
     }
 }
 
+/// Releases a queue that failed before it entered the public registry.
 fn abandon_unpublished_tracked<D: 'static>(
     native: rocddi::device::gpu::queue::Queue,
     dependencies: D,
@@ -382,6 +388,7 @@ fn abandon_unpublished_tracked<D: 'static>(
     }
 }
 
+/// Releases retained queue resources after a failed publication.
 fn abandon_unpublished_retained(
     native: RetainedQueue<QueueBacking>,
     status: Status,
@@ -398,6 +405,7 @@ fn abandon_unpublished_retained(
     }
 }
 
+/// Validates the requested SDMA engine against the queue transport.
 fn validated_sdma_engine(info: QueueTransport, size: u32) -> Option<u32> {
     let engine_id = info.sdma_engine_id?;
     (info.ring_size_bytes == u64::from(size)

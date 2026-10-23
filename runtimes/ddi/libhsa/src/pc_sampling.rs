@@ -33,6 +33,7 @@ pub(crate) struct PcSamplingState {
 }
 
 impl PcSamplingState {
+    /// Initializes an empty PC sampling session registry.
     pub(crate) fn new() -> Self {
         Self {
             sessions: HashMap::new(),
@@ -48,6 +49,7 @@ impl PcSamplingState {
             || self.sessions.values().any(|owner| owner.agent == agent)
     }
 
+    /// Quarantines all sessions whose native handler may still be installed.
     pub(crate) fn quarantine_all(&self) {
         for session in self.sessions.values() {
             session.quarantine();
@@ -76,11 +78,13 @@ impl PcSamplingState {
         true
     }
 
+    /// Drops assets whose native sampling sessions have retired.
     pub(crate) fn clear_retired(&mut self) {
         self.retired.clear();
     }
 }
 
+/// Translates a native sampling error into an HSA status.
 fn sampling_error(error: rocddi::Error) -> Status {
     match error.kind() {
         rocddi::ErrorKind::Unsupported => NOT_SUPPORTED,
@@ -88,6 +92,7 @@ fn sampling_error(error: rocddi::Error) -> Status {
     }
 }
 
+/// Runs a session operation while retaining its frontend owner.
 fn with_session(
     session: HsaPcSampling,
     operation: impl FnOnce(&SessionHandle) -> Status,
@@ -145,6 +150,7 @@ struct CreateArgs {
 }
 
 #[allow(unsafe_code)]
+/// Creates session and records its ownership.
 fn create_session(args: &CreateArgs) -> Status {
     if CallbackScope::active() {
         return INVALID_RUNTIME_STATE;
@@ -261,6 +267,7 @@ fn create_session(args: &CreateArgs) -> Status {
     SUCCESS
 }
 
+/// Destroys session and releases its owned resources.
 fn destroy_session(session: HsaPcSampling) -> Status {
     if CallbackScope::active() {
         return INVALID_RUNTIME_STATE;
@@ -337,6 +344,7 @@ fn destroy_session(session: HsaPcSampling) -> Status {
     unsafe(export_name = "__hsa_impl_hsa_ven_amd_pcs_iterate_configuration")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Visits PC sampling configurations supported by an agent.
 pub extern "C" fn hsa_ven_amd_pcs_iterate_configuration(
     agent: HsaAgent,
     configuration_callback: PcSamplingConfigurationCallback,
@@ -415,6 +423,7 @@ pub extern "C" fn hsa_ven_amd_pcs_iterate_configuration(
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 #[allow(clippy::too_many_arguments)]
+/// Creates a PC sampling session for a selected configuration.
 pub extern "C" fn hsa_ven_amd_pcs_create(
     agent: HsaAgent,
     method: u32,
@@ -447,6 +456,7 @@ pub extern "C" fn hsa_ven_amd_pcs_create(
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 #[allow(clippy::too_many_arguments)]
+/// Creates a PC sampling session by configuration ID.
 pub extern "C" fn hsa_ven_amd_pcs_create_from_id(
     trace_id: u32,
     agent: HsaAgent,
@@ -482,6 +492,7 @@ pub extern "C" fn hsa_ven_amd_pcs_create_from_id(
     unsafe(export_name = "__hsa_impl_hsa_ven_amd_pcs_start")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Changes the pcs session through the HSA C ABI.
 pub extern "C" fn hsa_ven_amd_pcs_start(pc_sampling: HsaPcSampling) -> Status {
     boundary(|| with_session(pc_sampling, SessionHandle::start))
 }
@@ -491,6 +502,7 @@ pub extern "C" fn hsa_ven_amd_pcs_start(pc_sampling: HsaPcSampling) -> Status {
     unsafe(export_name = "__hsa_impl_hsa_ven_amd_pcs_stop")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Changes the pcs session through the HSA C ABI.
 pub extern "C" fn hsa_ven_amd_pcs_stop(pc_sampling: HsaPcSampling) -> Status {
     boundary(|| with_session(pc_sampling, SessionHandle::stop))
 }
@@ -500,6 +512,7 @@ pub extern "C" fn hsa_ven_amd_pcs_stop(pc_sampling: HsaPcSampling) -> Status {
     unsafe(export_name = "__hsa_impl_hsa_ven_amd_pcs_flush")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Changes the pcs session through the HSA C ABI.
 pub extern "C" fn hsa_ven_amd_pcs_flush(pc_sampling: HsaPcSampling) -> Status {
     boundary(|| with_session(pc_sampling, SessionHandle::flush))
 }
@@ -509,11 +522,13 @@ pub extern "C" fn hsa_ven_amd_pcs_flush(pc_sampling: HsaPcSampling) -> Status {
     unsafe(export_name = "__hsa_impl_hsa_ven_amd_pcs_destroy")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Stops and releases a PC sampling session.
 pub extern "C" fn hsa_ven_amd_pcs_destroy(pc_sampling: HsaPcSampling) -> Status {
     boundary(|| destroy_session(pc_sampling))
 }
 
 #[cfg(any(test, not(all(target_os = "linux", target_arch = "x86_64"))))]
+/// Returns the PC sampling extension functions in public ABI table order.
 pub(crate) fn extension_table() -> [usize; 7] {
     [
         hsa_ven_amd_pcs_iterate_configuration as *const () as usize,
@@ -527,11 +542,13 @@ pub(crate) fn extension_table() -> [usize; 7] {
 }
 
 #[cfg(test)]
+/// PC sampling status and C ABI checks.
 mod tests {
     use super::*;
     use std::mem::{offset_of, size_of};
 
     #[test]
+    /// Checks that native contention becomes the public resource-busy status.
     fn sampling_busy_uses_the_resource_busy_status() {
         let error = rocddi::Error::Operation {
             kind: rocddi::ErrorKind::Busy,
@@ -541,9 +558,12 @@ mod tests {
     }
 
     #[test]
+    /// Checks PC sampling entry-point signatures and record field offsets.
     fn entry_points_and_records_match_the_public_abi() {
+        /// Configuration-iteration entry-point signature.
         type Iterate =
             extern "C" fn(HsaAgent, PcSamplingConfigurationCallback, *mut c_void) -> Status;
+        /// Session-creation entry-point signature.
         type Create = extern "C" fn(
             HsaAgent,
             u32,
@@ -555,6 +575,7 @@ mod tests {
             *mut c_void,
             *mut HsaPcSampling,
         ) -> Status;
+        /// ID-based session-creation entry-point signature.
         type CreateFromId = extern "C" fn(
             u32,
             HsaAgent,
@@ -567,6 +588,7 @@ mod tests {
             *mut c_void,
             *mut HsaPcSampling,
         ) -> Status;
+        /// Start, stop, flush, and destroy entry-point signature.
         type Control = extern "C" fn(HsaPcSampling) -> Status;
 
         let _: Iterate = hsa_ven_amd_pcs_iterate_configuration;

@@ -25,6 +25,7 @@ struct QueueEventOutcome {
     rearm: bool,
 }
 
+/// Maps a native queue error code to an HSA status.
 pub(super) fn queue_error_status(error: u64) -> Status {
     if error & 2 != 0 {
         INCOMPATIBLE_ARGUMENTS
@@ -51,6 +52,7 @@ pub(super) fn queue_error_status(error: u64) -> Status {
     }
 }
 
+/// Prepares a callback for a queue event without holding the registry lock.
 fn pending_callback(
     runtime: &crate::runtime::HsaState,
     key: usize,
@@ -65,6 +67,7 @@ fn pending_callback(
     })
 }
 
+/// Prepares the user error callback after a queue fault.
 fn pending_error_callback(
     runtime: &mut crate::runtime::HsaState,
     key: usize,
@@ -105,6 +108,7 @@ pub(super) fn update_scratch_owner<T>(
     Ok(std::mem::replace(current, uncertain.pop()))
 }
 
+/// Translates a native event observation into queue callback work.
 fn handle_queue_event(key: usize, observed: SignalValue) -> Option<QueueEventOutcome> {
     let mut guard = lock().ok()?;
     let runtime = guard.as_mut()?;
@@ -212,6 +216,7 @@ fn handle_queue_event(key: usize, observed: SignalValue) -> Option<QueueEventOut
     Some(outcome)
 }
 
+/// Polls queue events and invokes callbacks outside the runtime lock.
 pub(super) fn queue_event_worker(
     stop: &AtomicBool,
     alive: &AtomicBool,

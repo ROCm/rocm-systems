@@ -6,7 +6,9 @@
 use super::*;
 use crate::platform::memory::{self as linux_interop, KfdIpcMemoryHandle};
 
+/// IPC signal allocation size in bytes.
 pub(super) const IPC_SIGNAL_ALLOCATION_BYTES: u64 = 4096;
+/// Magic identifier used to validate an IPC signal block.
 const IPC_SIGNAL_ID: u64 = 0x71fc_ca6a_3d5d_5276;
 
 /// The mapped record exchanged with another HSA process.
@@ -15,14 +17,20 @@ const IPC_SIGNAL_ID: u64 = 0x71fc_ca6a_3d5d_5276;
 /// The other bytes are reserved wire storage, not per-process Rust state.
 #[repr(C, align(64))]
 pub(super) struct IpcSignalBlock {
+    /// Public signal record stored in shared memory.
     signal: AmdSignal,
+    /// Reserved storage retained for the native layout.
     reserved0: u64,
+    /// Native signal address exported through the IPC handle.
     core_signal: u64,
+    /// Stable identifier used to validate an attached signal.
     id: u64,
+    /// Reserved storage retained for the native layout.
     reserved: [u8; 40],
 }
 
 impl IpcSignalBlock {
+    /// Initializes the public signal and IPC identity in shared storage.
     pub(super) fn new(value: SignalValue) -> Self {
         Self {
             signal: AmdSignal::user(value),
@@ -61,17 +69,22 @@ const _: () = {
 
 /// Exporter-owned allocation retained for the public signal lifetime.
 pub(super) struct OwnedIpcSignal {
+    /// Native shared allocation retained while this signal is live.
     pub(super) allocation: Allocation,
 }
 
 /// Imported mapping with the number of local public references.
 pub(super) struct ImportedIpcSignal {
+    /// Native shared allocation retained while this signal is live.
     pub(super) allocation: Allocation,
+    /// Exported handle used to attach the shared allocation.
     pub(super) ipc_handle: [u32; 8],
+    /// Number of local HSA handles sharing this imported signal.
     pub(super) references: u32,
 }
 
 impl SignalState {
+    /// Creates IPC signal and records its ownership.
     pub(super) fn create_ipc_signal(
         &mut self,
         gpus: &[crate::runtime::Gpu],
@@ -116,6 +129,7 @@ impl SignalState {
         })
     }
 
+    /// Attaches an exported IPC signal to native shared storage.
     pub(super) unsafe fn attach_ipc_signal(
         &mut self,
         session: &rocddi::session::Session,
@@ -184,6 +198,7 @@ impl SignalState {
             handle: host as u64,
         })
     }
+    /// Encodes an owned IPC signal as an attachable native handle.
     pub(super) fn export_ipc_signal(&self, signal: HsaSignal) -> Result<[u32; 8], Status> {
         let address = signal.handle as usize;
         if !self.owns_signal(signal) {
@@ -206,10 +221,12 @@ impl SignalState {
 }
 
 #[cfg(test)]
+/// IPC signal layout and identity checks.
 mod tests {
     use super::*;
 
     #[test]
+    /// Checks the shared signal layout and validates a mapped IPC block.
     fn ipc_signal_storage_matches_the_rocr_shared_layout() {
         assert_eq!(size_of::<HsaAmdIpcSignal>(), 32);
         assert_eq!(align_of::<HsaAmdIpcSignal>(), 4);

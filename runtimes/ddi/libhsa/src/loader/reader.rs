@@ -10,6 +10,7 @@ use super::*;
     unsafe(export_name = "__hsa_impl_hsa_code_object_reader_create_from_file")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Snapshots a file descriptor into a code-object reader handle.
 pub unsafe extern "C" fn hsa_code_object_reader_create_from_file(
     file: i32,
     reader: *mut HsaCodeObjectReader,
@@ -64,6 +65,7 @@ pub unsafe extern "C" fn hsa_code_object_reader_create_from_file(
     unsafe(export_name = "__hsa_impl_hsa_code_object_reader_create_from_memory")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Snapshots caller bytes into a code-object reader handle.
 pub unsafe extern "C" fn hsa_code_object_reader_create_from_memory(
     code_object: *const c_void,
     size: usize,
@@ -112,6 +114,7 @@ pub unsafe extern "C" fn hsa_code_object_reader_create_from_memory(
     unsafe(export_name = "__hsa_impl_hsa_code_object_reader_destroy")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Releases a code-object reader and its snapshot.
 pub unsafe extern "C" fn hsa_code_object_reader_destroy(reader: HsaCodeObjectReader) -> Status {
     boundary(|| {
         let mut guard = match lock() {

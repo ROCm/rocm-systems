@@ -5,13 +5,17 @@
 
 use super::*;
 
+/// Time spent spinning before a blocked wait yields the CPU.
 const BLOCKED_SPIN_BUDGET: Duration = Duration::from_micros(200);
+/// Cached system clock frequency in hertz for timeout conversion.
 static SYSTEM_FREQUENCY_HZ: AtomicU64 = AtomicU64::new(0);
 
+/// Caches the frequency reported by native system clock discovery.
 pub(crate) fn set_system_frequency(frequency: u64) {
     SYSTEM_FREQUENCY_HZ.store(frequency, Ordering::Release);
 }
 
+/// Returns the system-clock frequency used for timeout conversion.
 fn system_frequency() -> u64 {
     let cached = SYSTEM_FREQUENCY_HZ.load(Ordering::Acquire);
     if cached != 0 {
@@ -46,6 +50,7 @@ fn system_frequency() -> u64 {
     }
 }
 
+/// Checks whether an HSA timeout hint has elapsed.
 pub(super) fn timeout_elapsed(elapsed: Duration, timeout_hint: u64, frequency: u64) -> bool {
     timeout_hint != u64::MAX
         && (frequency == 0
@@ -53,6 +58,7 @@ pub(super) fn timeout_elapsed(elapsed: Duration, timeout_hint: u64, frequency: u
                 >= u128::from(timeout_hint) * 1_000_000_000)
 }
 
+/// Waits for one signal condition with the requested memory ordering.
 unsafe fn signal_wait(
     signal: HsaSignal,
     condition: u32,
@@ -94,6 +100,7 @@ unsafe fn signal_wait(
     unsafe(export_name = "__hsa_impl_hsa_signal_wait_scacquire")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Waits for one signal with the HSA SC-acquire completion contract.
 pub unsafe extern "C" fn hsa_signal_wait_scacquire(
     signal: HsaSignal,
     condition: u32,
@@ -119,6 +126,7 @@ pub unsafe extern "C" fn hsa_signal_wait_scacquire(
     unsafe(export_name = "__hsa_impl_hsa_signal_wait_relaxed")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Waits for one signal without acquire synchronization.
 pub unsafe extern "C" fn hsa_signal_wait_relaxed(
     signal: HsaSignal,
     condition: u32,
@@ -144,6 +152,7 @@ pub unsafe extern "C" fn hsa_signal_wait_relaxed(
     unsafe(export_name = "__hsa_impl_hsa_signal_wait_acquire")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Uses the deprecated acquire spelling for a single-signal wait.
 pub unsafe extern "C" fn hsa_signal_wait_acquire(
     signal: HsaSignal,
     condition: u32,
@@ -169,6 +178,7 @@ pub unsafe extern "C" fn hsa_signal_wait_acquire(
     unsafe(export_name = "__hsa_impl_hsa_signal_group_create")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Creates a group that retains the listed signals for waits.
 pub unsafe extern "C" fn hsa_signal_group_create(
     signal_count: u32,
     signals: *const HsaSignal,
@@ -229,6 +239,7 @@ pub unsafe extern "C" fn hsa_signal_group_create(
     unsafe(export_name = "__hsa_impl_hsa_signal_group_destroy")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Releases a signal group and its retained signal references.
 pub extern "C" fn hsa_signal_group_destroy(group: HsaSignalGroup) -> Status {
     boundary(|| {
         let mut guard = match lock() {
@@ -252,6 +263,7 @@ pub extern "C" fn hsa_signal_group_destroy(group: HsaSignalGroup) -> Status {
     })
 }
 
+/// Waits until any signal in a group satisfies its condition.
 unsafe fn signal_group_wait_any(
     group: HsaSignalGroup,
     conditions: *const u32,
@@ -302,6 +314,7 @@ unsafe fn signal_group_wait_any(
     unsafe(export_name = "__hsa_impl_hsa_signal_group_wait_any_relaxed")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Returns when any group member satisfies its condition, without acquire.
 pub unsafe extern "C" fn hsa_signal_group_wait_any_relaxed(
     group: HsaSignalGroup,
     conditions: *const u32,
@@ -328,6 +341,7 @@ pub unsafe extern "C" fn hsa_signal_group_wait_any_relaxed(
     unsafe(export_name = "__hsa_impl_hsa_signal_group_wait_any_scacquire")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Returns when any group member satisfies its SC-acquire condition.
 pub unsafe extern "C" fn hsa_signal_group_wait_any_scacquire(
     group: HsaSignalGroup,
     conditions: *const u32,
@@ -363,6 +377,7 @@ pub(super) struct WaitInputs {
     pub(super) values: Vec<SignalValue>,
 }
 
+/// Copies wait input after validating its source and destination.
 unsafe fn copy_wait_input<T: Copy>(pointer: *const T, count: usize) -> Option<Vec<T>> {
     if count == 0 {
         return Some(Vec::new());
@@ -382,6 +397,7 @@ unsafe fn copy_wait_input<T: Copy>(pointer: *const T, count: usize) -> Option<Ve
     Some(copied)
 }
 
+/// Copies and validates signal handles and conditions from caller memory.
 pub(super) unsafe fn signal_wait_inputs(
     signal_count: u32,
     signals: *const HsaSignal,
@@ -398,6 +414,7 @@ pub(super) unsafe fn signal_wait_inputs(
     })
 }
 
+/// Waits for pause to complete.
 fn wait_pause(wait_state_hint: u32, start: &Instant) {
     // A brief active phase avoids scheduler latency for short GPU completions
     // even when the caller allows a blocked wait. Longer blocked waits yield.
@@ -433,6 +450,7 @@ struct WaitRegistration {
 }
 
 impl Drop for WaitRegistration {
+    /// Removes retained wait entries before their signal storage can retire.
     fn drop(&mut self) {
         if let Ok(mut guard) = lock() {
             if let Some(runtime) = guard.as_mut() {
@@ -442,6 +460,7 @@ impl Drop for WaitRegistration {
     }
 }
 
+/// Releases the retained wait entries reference.
 fn release_wait_entries(runtime: &mut HsaState, entries: &mut [WaitEntry]) {
     for entry in entries {
         if entry.retained {
@@ -520,6 +539,7 @@ pub(super) unsafe fn collect_wait_signals(
         .collect()
 }
 
+/// Opens a wait-any operation while retaining all referenced signals.
 pub(super) unsafe fn signal_wait_any_open(
     signals: &[WaitEntry],
     conditions: &[u32],
@@ -571,6 +591,7 @@ pub(super) unsafe fn signal_wait_any_open(
     unsafe(export_name = "__hsa_impl_hsa_amd_signal_wait_any")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Returns the first satisfied signal and its original input index.
 pub unsafe extern "C" fn hsa_amd_signal_wait_any(
     signal_count: u32,
     signals: *const HsaSignal,
@@ -613,6 +634,7 @@ pub unsafe extern "C" fn hsa_amd_signal_wait_any(
     }
 }
 
+/// Opens a wait-all operation while retaining all referenced signals.
 pub(super) unsafe fn signal_wait_all_open(
     pending: &mut [WaitEntry],
     conditions: &[u32],
@@ -673,6 +695,7 @@ pub(super) unsafe fn signal_wait_all_open(
     unsafe(export_name = "__hsa_impl_hsa_amd_signal_wait_all")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Waits until every signal condition holds or the timeout expires.
 pub unsafe extern "C" fn hsa_amd_signal_wait_all(
     signal_count: u32,
     signals: *const HsaSignal,

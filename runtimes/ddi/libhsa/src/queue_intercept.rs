@@ -26,23 +26,36 @@ use crate::ffi::*;
 use crate::runtime::{CallbackScope, boundary, initialized_mut, lock, map_error};
 use crate::signal::AmdSignal;
 
+/// Packet size in bytes.
 const PACKET_BYTES: usize = 64;
+/// Control size in bytes.
 const CONTROL_BYTES: u64 = 4096;
 // amd_queue_v2_t: 256-byte queue prefix and 128 per-XCC 16-byte index pairs.
+/// Control ABI size in bytes.
 const CONTROL_ABI_BYTES: usize = 2304;
+/// Byte offset of the native queue read index.
 const READ_INDEX_OFFSET: usize = 128;
+/// Byte offset of the native queue write index.
 const WRITE_INDEX_OFFSET: usize = 56;
+/// Byte offset of the intercept queue doorbell signal.
 const SIGNAL_OFFSET: usize = 3072;
+/// Bits containing the AQL packet type.
 const PACKET_TYPE_MASK: u16 = 0xff;
+/// AQL packet type indicating an unpublished slot.
 const PACKET_TYPE_INVALID: u16 = 1;
+/// AQL packet type used for vendor marker packets.
 const PACKET_TYPE_VENDOR: u16 = 0;
+/// Vendor packet format identifying an intercept marker.
 const INTERCEPT_MARKER_FORMAT: u8 = 0xfe;
 
 const _: () = assert!(CONTROL_ABI_BYTES <= SIGNAL_OFFSET);
 const _: () = assert!(SIGNAL_OFFSET + std::mem::size_of::<AmdSignal>() <= CONTROL_BYTES as usize);
 
+/// C callback that writes intercepted AQL packets.
 type PacketWriter = unsafe extern "C" fn(*const c_void, u64);
+/// C callback signature for intercept handler.
 type InterceptHandler = unsafe extern "C" fn(*const c_void, u64, u64, *mut c_void, PacketWriter);
+/// C callback notified of intercept queue creation.
 pub(crate) type QueueNotifier = unsafe extern "C" fn(*const HsaQueue, HsaAgent, *mut c_void);
 
 /// One aligned AQL packet copied between the proxy and lower queue.
@@ -68,6 +81,7 @@ struct InterceptMarker {
 const _: () = assert!(std::mem::size_of::<InterceptMarker>() == PACKET_BYTES);
 
 impl Packet {
+    /// Checks the packet type and format for an intercept marker.
     fn is_marker(&self) -> bool {
         u16::from_le_bytes([self.0[0], self.0[1]]) & PACKET_TYPE_MASK == PACKET_TYPE_VENDOR
             && self.0[2] == INTERCEPT_MARKER_FORMAT
@@ -100,9 +114,11 @@ struct RewriteFrame {
 }
 
 thread_local! {
+    /// Active nested rewrite frame for this callback thread.
     static REWRITE_FRAME: Cell<*mut RewriteFrame> = const { Cell::new(ptr::null_mut()) };
 }
 
+/// Copies intercepted AQL packets into the caller-provided write callback.
 unsafe extern "C" fn packet_writer(packets: *const c_void, count: u64) {
     REWRITE_FRAME.with(|slot| {
         let frame = slot.get();
@@ -206,6 +222,7 @@ pub(crate) struct InterceptQueue {
 }
 
 impl InterceptQueue {
+    /// Creates an intercept queue and its backing hardware queue.
     fn create(
         device: &Device,
         lower: usize,
@@ -301,6 +318,7 @@ impl InterceptQueue {
         Ok(owner)
     }
 
+    /// Starts this session.
     pub(crate) fn start(self: &Arc<Self>) -> Result<(), Status> {
         let mut worker_slot = self.worker.lock().map_err(|_| ERROR)?;
         let owner = self.clone();
@@ -312,6 +330,7 @@ impl InterceptQueue {
         Ok(())
     }
 
+    /// Stops this session.
     pub(crate) fn stop(&self) -> Result<(), Status> {
         self.active.store(false, Ordering::Release);
         let mut worker = self.worker.lock().map_err(|_| ERROR)?;
@@ -327,6 +346,7 @@ impl InterceptQueue {
         Ok(())
     }
 
+    /// Registers an intercept callback to run before packet forwarding.
     pub(crate) fn register(&self, callback: InterceptHandler, data: CallbackArg) -> Status {
         if !self.active.load(Ordering::Acquire) {
             return INVALID_QUEUE;
@@ -344,6 +364,7 @@ impl InterceptQueue {
         SUCCESS
     }
 
+    /// Consumes pending packets and doorbell updates on the intercept worker.
     fn work(&self) {
         while self.active.load(Ordering::Acquire) {
             self.drain();
@@ -351,6 +372,7 @@ impl InterceptQueue {
         }
     }
 
+    /// Drains pending work.
     fn drain(&self) {
         if !self.active.load(Ordering::Acquire) {
             return;
@@ -374,6 +396,7 @@ impl InterceptQueue {
         }
     }
 
+    /// Drains locked.
     fn drain_locked(&self) -> Result<(), Status> {
         let mut state = match self.state.try_lock() {
             Ok(state) => state,
@@ -458,6 +481,7 @@ impl InterceptQueue {
         Ok(())
     }
 
+    /// Forwards complete intercepted packets to the underlying queue.
     fn forward_pending(&self, state: &mut InterceptState) -> Result<(), Status> {
         while self.active.load(Ordering::Acquire) {
             let markers = state
@@ -524,6 +548,7 @@ impl InterceptQueue {
         Ok(())
     }
 
+    /// Invokes the matching intercept callback for a marker packet.
     fn invoke_marker(&self, packet: Packet, write: u64) {
         // SAFETY: The packet has the 64-byte public marker ABI and the lower
         // queue remains live until this worker stops.
@@ -600,6 +625,7 @@ pub(crate) fn destroy(owner: &InterceptQueue) -> Status {
     unsafe(export_name = "__hsa_impl_hsa_amd_queue_intercept_create")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Creates an intercept queue in front of a hardware queue.
 pub unsafe extern "C" fn hsa_amd_queue_intercept_create(
     agent: HsaAgent,
     size: u32,
@@ -695,6 +721,7 @@ pub unsafe extern "C" fn hsa_amd_queue_intercept_create(
     unsafe(export_name = "__hsa_impl_hsa_amd_queue_intercept_register")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Updates registration for the queue intercept register HSA operation.
 pub unsafe extern "C" fn hsa_amd_queue_intercept_register(
     queue: *mut HsaQueue,
     callback: Option<InterceptHandler>,
@@ -732,6 +759,7 @@ pub unsafe extern "C" fn hsa_amd_queue_intercept_register(
     unsafe(export_name = "__hsa_impl_hsa_amd_runtime_queue_create_register")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+/// Registers a callback for future runtime queue creation.
 pub unsafe extern "C" fn hsa_amd_runtime_queue_create_register(
     callback: Option<QueueNotifier>,
     data: *mut c_void,

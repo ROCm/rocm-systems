@@ -16,6 +16,7 @@ pub(crate) struct InFlightTracker {
 }
 
 impl InFlightTracker {
+    /// Initializes the count and closing flag for in-flight operations.
     pub(crate) fn new() -> Self {
         Self {
             active: Mutex::new(0),
@@ -24,6 +25,7 @@ impl InFlightTracker {
         }
     }
 
+    /// Adds an in-flight operation unless this generation is closing.
     pub(crate) fn enter(self: &Arc<Self>) -> Option<InFlightToken> {
         let mut active = self
             .active
@@ -35,6 +37,7 @@ impl InFlightTracker {
         })
     }
 
+    /// Waits for idle to complete.
     pub(crate) fn wait_idle(&self) {
         let mut active = self
             .active
@@ -54,6 +57,7 @@ impl InFlightTracker {
         self.cleanup_uncertain.store(true, Ordering::Release);
     }
 
+    /// Reports whether uncertain native cleanup prevents reuse of this state.
     pub(crate) fn is_quarantined(&self) -> bool {
         self.cleanup_uncertain.load(Ordering::Acquire)
     }
@@ -66,6 +70,7 @@ pub(crate) struct InFlightToken {
 }
 
 impl Drop for InFlightToken {
+    /// Decrements the active count and wakes teardown when it reaches zero.
     fn drop(&mut self) {
         let mut active = self
             .tracker
@@ -82,16 +87,20 @@ impl Drop for InFlightToken {
 /// Keeps an unlocked native operation in one HSA generation until its owner
 /// is either published back into that generation or safely retired.
 pub(crate) struct InFlightGeneration {
+    /// Lifecycle generation in which this token was acquired.
     generation: u64,
+    /// In-flight reference preventing that generation from retiring.
     token: InFlightToken,
 }
 
 impl InFlightGeneration {
+    /// Enters the active generation and retains its in-flight token.
     pub(crate) fn enter(generation: u64, tracker: &Arc<InFlightTracker>) -> Result<Self, Status> {
         let token = tracker.enter().ok_or(OUT_OF_RESOURCES)?;
         Ok(Self { generation, token })
     }
 
+    /// Checks whether this operation still belongs to the active generation.
     pub(crate) fn is_current(&self, lifecycle: &HsaLifecycle) -> bool {
         lifecycle.active_generation() == Some(self.generation)
     }
@@ -132,6 +141,7 @@ pub(crate) struct HsaLifecycle {
 }
 
 impl HsaLifecycle {
+    /// Initializes the unstarted process-global HSA lifecycle.
     pub(super) const fn new() -> Self {
         Self {
             state: None,
@@ -141,10 +151,12 @@ impl HsaLifecycle {
         }
     }
 
+    /// Returns this value as ref.
     pub(crate) fn as_ref(&self) -> Option<&HsaState> {
         self.state.as_ref()
     }
 
+    /// Returns this value as mut.
     pub(crate) fn as_mut(&mut self) -> Option<&mut HsaState> {
         self.state.as_mut()
     }
@@ -185,6 +197,7 @@ impl HsaLifecycle {
         }
     }
 
+    /// Publishes fully initialized HSA state for the active generation.
     pub(crate) fn publish_init(
         &mut self,
         generation: u64,
@@ -201,6 +214,7 @@ impl HsaLifecycle {
         Ok(())
     }
 
+    /// Completes init after its pending work has retired.
     pub(crate) fn finish_init(&mut self, generation: u64) -> Result<(), Status> {
         if self.phase != LifecyclePhase::LoadingTools(generation) || self.state.is_none() {
             return Err(ERROR);
@@ -209,6 +223,7 @@ impl HsaLifecycle {
         Ok(())
     }
 
+    /// Cancels an incomplete initialization and advances the lifecycle.
     pub(crate) fn cancel_init(
         &mut self,
         generation: u64,
@@ -250,6 +265,7 @@ impl HsaLifecycle {
         }
     }
 
+    /// Completes shutdown after its pending work has retired.
     pub(crate) fn finish_shutdown(
         &mut self,
         generation: u64,
@@ -278,6 +294,7 @@ pub(crate) struct LifecycleTransition {
 }
 
 impl LifecycleTransition {
+    /// Constructs a transition guard for initialization.
     pub(crate) fn starting(generation: u64) -> Self {
         Self {
             phase: LifecyclePhase::Starting(generation),
@@ -285,6 +302,7 @@ impl LifecycleTransition {
         }
     }
 
+    /// Constructs a transition guard for shutdown.
     pub(crate) fn stopping(generation: u64) -> Self {
         Self {
             phase: LifecyclePhase::Stopping(generation),
@@ -292,12 +310,14 @@ impl LifecycleTransition {
         }
     }
 
+    /// Prevents a completed transition guard from rolling back state.
     pub(crate) fn disarm(&mut self) {
         self.armed = false;
     }
 }
 
 impl Drop for LifecycleTransition {
+    /// Rolls back an incomplete generation transition.
     fn drop(&mut self) {
         if !self.armed {
             return;
@@ -317,14 +337,18 @@ impl Drop for LifecycleTransition {
     }
 }
 
+/// Process-global gate owning the active HSA generation.
 pub(crate) static LIFECYCLE: Mutex<HsaLifecycle> = Mutex::new(HsaLifecycle::new());
+/// Wakes callers waiting for a VM fault or lifecycle transition.
 pub(crate) static VM_FAULT_CONDVAR: Condvar = Condvar::new();
 
+/// Locks the process-global lifecycle state, handling poisoned locks.
 pub(crate) fn lock() -> Result<MutexGuard<'static, HsaLifecycle>, Status> {
     LIFECYCLE.lock().map_err(|_| ERROR)
 }
 
 #[allow(clippy::needless_pass_by_value)]
+/// Maps error to the corresponding HSA representation.
 pub(crate) fn map_error(error: rocddi::Error) -> Status {
     match error.kind() {
         rocddi::ErrorKind::InvalidArgument => INVALID_ARGUMENT,
@@ -336,10 +360,12 @@ pub(crate) fn map_error(error: rocddi::Error) -> Status {
     }
 }
 
+/// Runs an HSA ABI operation behind the panic-to-status boundary.
 pub(crate) fn boundary(operation: impl FnOnce() -> Status) -> Status {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(operation)).unwrap_or(ERROR)
 }
 
+/// Returns mutable initialized state or an HSA lifecycle error.
 pub(crate) fn initialized_mut(runtime: &mut HsaLifecycle) -> Result<&mut HsaState, Status> {
     runtime.as_mut().ok_or(NOT_INITIALIZED)
 }
