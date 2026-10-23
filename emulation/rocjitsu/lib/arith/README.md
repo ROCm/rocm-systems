@@ -2,7 +2,8 @@
 
 ## Current implementation
 
-FP16/BF16 WMMA and FP16/FP32 FMA support loose and empirical exact results.
+FP16/BF16 WMMA and FP16/FP32 FMA support Wave32 and Wave64, with loose
+and empirical exact results.
 FP16 FMA reports FP status in mode 3; FP32 FMA rejects mode 3. WMMA accepts
 modes 0–3 and has no FP-status output.
 CPU implementations are scalar; SIMD backends are planned.
