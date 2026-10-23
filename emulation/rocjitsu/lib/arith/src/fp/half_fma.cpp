@@ -45,6 +45,16 @@ int run(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
   if (exec_mask == 0) {
     return RJ_ARITH_SUCCESS;
   }
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if ((rocjitsu::arith::is_exact(flags) || (flags & RJ_ARITH_FP_ROUND_MASK)) &&
+      (flags & RJ_ARITH_CPU_MASK) >= RJ_ARITH_CPU_X86_64_V4) {
+
+    if (rocjitsu::arith::half_fma_exact_x86_64_v4(flags, exec_mask, uint32_t(mode), d[0], a[0],
+                                                  b[0], c[0], excp_flag_user, Rdna3)) {
+      return RJ_ARITH_SUCCESS;
+    }
+  }
+#endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (!(flags & RJ_ARITH_FP_ROUND_MASK) && (flags & RJ_ARITH_CPU_MASK) >= RJ_ARITH_CPU_X86_64_V3) {
     if (!rocjitsu::arith::is_exact(flags)) {
