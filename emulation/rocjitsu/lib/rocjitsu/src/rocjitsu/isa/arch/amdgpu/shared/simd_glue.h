@@ -1039,8 +1039,8 @@ fma_f16_mode_simd(util::native<uint32_t> src0, util::native<uint32_t> src1,
   return util::native<uint32_t>(out, util::stdx::vector_aligned);
 }
 
-/// F32 FMA under MODE denormal controls, in the caller's rounding environment.
-/// The caller owns that environment: MODE.FP_ROUND rounding, and containing the
+/// @brief F32 FMA under MODE denormal controls, in the caller's rounding environment.
+/// @details The caller owns that environment: MODE.FP_ROUND rounding, and containing the
 /// flags this arithmetic raises. Exceptional lanes use scalar NaN selection and
 /// minimum-normal boundary handling.
 /// Nonzero effective OMOD forces output flushing here, before destination scaling.
@@ -1070,9 +1070,9 @@ inline util::native<float> fma_f32_simd_unscoped(util::native<float> a, util::na
   return flush_output ? denormal::flush_value(result) : result;
 }
 
-/// ADD and MUL share FMA's NaN and pre-packing tininess policy. Callers pass
-/// SUB as ADD of the negated subtrahend. The guest rounding environment is the
-/// caller's, as for fma_f32_simd_unscoped.
+/// @brief F32 ADD and MUL with FMA's NaN and pre-packing tininess policy.
+/// @details Callers pass SUB as ADD of the negated subtrahend. The caller owns the
+/// guest rounding environment, as for fma_f32_simd_unscoped.
 template <fp_mode::Arithmetic operation>
 inline util::native<float> binary_f32_simd_unscoped(util::native<float> a, util::native<float> b,
                                                     const Wavefront &wf, uint32_t omod = 0) {
@@ -1126,9 +1126,10 @@ inline util::native<uint32_t> binary_f16_simd_unscoped(util::native<uint32_t> a,
   return output_denormal::flush_output<Fmt>(rounded, output_denormal::Policy::make(denorm_mode));
 }
 
-/// DX9 accumulator and three-source forms share the scalar flushing, zero-product,
-/// NaN and underflow policies. Source preparation is raw-bit; the caller owns the
-/// guest environment of the FMA, as for fma_f32_simd_unscoped.
+/// @brief DX9 FMA with the scalar flushing, zero-product, NaN and underflow policies.
+/// @details Accumulator and three-source forms share this core. Source preparation
+/// is raw-bit; the caller owns the guest rounding environment and contains the
+/// FMA's exception flags, as for fma_f32_simd_unscoped.
 inline util::native<float> fma_dx9_zero_f32_simd_unscoped(util::native<float> a,
                                                           util::native<float> b,
                                                           util::native<float> c,

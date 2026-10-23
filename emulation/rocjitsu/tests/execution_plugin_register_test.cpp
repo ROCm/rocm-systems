@@ -1921,8 +1921,10 @@ public:
   RoundingObserverPlugin() : ExecutionPlugin("rounding_observer") {}
   std::vector<int> read_roundings;
   std::vector<uint32_t> read_mxcsrs;
+  std::vector<uint32_t> read_registers;
 
-  void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *, uint32_t, uint64_t, uint8_t) override {
+  void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *, uint32_t reg, uint64_t, uint8_t) override {
+    read_registers.push_back(reg);
     read_roundings.push_back(std::fegetround());
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
     read_mxcsrs.push_back(_mm_getcsr());
@@ -2025,6 +2027,103 @@ TEST(ExecutionPluginTest, F32ModeArithmeticObserversSeeCallerRounding) {
     }
   }
 }
+
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+// VOPD arithmetic requires host and guest nearest-even, so rounding alone cannot
+// detect a scope opened before operand acquisition. A sticky underflow flag is
+// cleared inside the scope and must remain visible to reads from both slots.
+TEST(ExecutionPluginTest, VopdArithmeticObserversSeeCallerFpState) {
+  struct Case {
+    rj_code_arch_t arch;
+    std::array<uint32_t, 3> words;
+    std::vector<std::pair<uint32_t, uint32_t>> sources;
+    std::vector<std::pair<uint32_t, uint32_t>> expected;
+  };
+  const Case cases[] = {
+      // v_dual_add_f32 v6, v0, v1 :: v_dual_add_f32 v7, v2, v3
+      {ROCJITSU_CODE_ARCH_RDNA3,
+       {0xc9080300u, 0x06060702u, 0u},
+       {{0, 0x3f800000u}, {1, 0x33800001u}, {2, 0x3f800000u}, {3, 0x33800001u}},
+       {{6, 0x3f800001u}, {7, 0x3f800001u}}},
+      {ROCJITSU_CODE_ARCH_RDNA4,
+       {0xc9080300u, 0x06060702u, 0u},
+       {{0, 0x3f800000u}, {1, 0x33800001u}, {2, 0x3f800000u}, {3, 0x33800001u}},
+       {{6, 0x3f800001u}, {7, 0x3f800001u}}},
+      // VOPD3: v_dual_add_f64 v[8:9], v[0:1], v[4:5] :: v_dual_add_f32 v10, v2, v6.
+      // F64 is supported only in X; each source port uses disjoint VGPR banks.
+      {ROCJITSU_CODE_ARCH_CDNA5,
+       {0xcf000000u | (33u << 18) | (4u << 12) | 256u, 258u | (4u << 16),
+        8u | (6u << 8) | (10u << 24)},
+       {{0, 0u}, {1, 0x3ff00000u}, {4, 1u}, {5, 0x3ca00000u}, {2, 0x3f800000u}, {6, 0x33800001u}},
+       {{8, 1u}, {9, 0x3ff00000u}, {10, 0x3f800001u}}},
+  };
+  for (const Case &test : cases) {
+    for (bool force_scalar : {false, true}) {
+      SCOPED_TRACE(
+          std::format("arch={} force_scalar={}", static_cast<int>(test.arch), force_scalar));
+      ForceScalarOverride execution_mode(force_scalar);
+      Wave32PluginFixture fixture(test.arch);
+      auto observer_owner = std::make_unique<RoundingObserverPlugin>();
+      auto *observer = observer_owner.get();
+      fixture.plugin_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+      fixture.plugin_group->add(std::move(observer_owner));
+      fixture.cu->set_plugin_group(fixture.plugin_group);
+      fixture.plugin_group->onInit();
+      auto *wave = fixture.cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/32);
+      ASSERT_NE(wave, nullptr);
+      wave->set_mode_raw(0xf0u);
+      const uint32_t base = wave->vgpr_alloc().base;
+      auto decoder = Decoder::create(test.arch);
+      std::unique_ptr<Instruction> instruction(decode_valid(*decoder, test.words.data()));
+      ASSERT_NE(instruction, nullptr);
+      // Each slot adds 1 and just over half an ULP, rounding up and raising inexact.
+      for (uint64_t exec : {uint64_t{1}, uint64_t{0xffffffffu}}) {
+        SCOPED_TRACE(exec);
+        wave->set_exec(exec);
+        for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
+          for (const auto &[reg, bits] : test.sources)
+            fixture.cu->write_vgpr(base + reg, lane, bits);
+          for (const auto &[reg, bits] : test.expected)
+            fixture.cu->write_vgpr(base + reg, lane, 0xdeadbeefu);
+        }
+        observer->read_registers.clear();
+        observer->read_roundings.clear();
+        observer->read_mxcsrs.clear();
+        {
+          // Restore the original host environment even after a fatal assertion.
+          fp_mode::ScopedEnvironment environment(0);
+          _mm_setcsr((_mm_getcsr() & ~_MM_EXCEPT_MASK) | _MM_EXCEPT_UNDERFLOW);
+          const uint32_t host_mxcsr = _mm_getcsr();
+          ScopedSimdFastPathTracker tracker;
+          const bool succeeded =
+              fixture.cu->execute_instruction(instruction.get(), *wave).succeeded();
+          const uint32_t restored_mxcsr = _mm_getcsr();
+          ASSERT_TRUE(succeeded);
+          EXPECT_EQ(restored_mxcsr, host_mxcsr);
+          if (force_scalar || !util::has_stdx_simd)
+            EXPECT_TRUE(tracker.no_tracked_path_executed());
+          else
+            EXPECT_TRUE(tracker.only_tracked_path_executed(SimdFastPath::VOPD));
+          std::set<uint32_t> expected_reads;
+          for (const auto &[reg, bits] : test.sources)
+            expected_reads.insert(base + reg);
+          EXPECT_EQ(
+              std::set<uint32_t>(observer->read_registers.begin(), observer->read_registers.end()),
+              expected_reads);
+          for (uint32_t seen : observer->read_mxcsrs)
+            EXPECT_EQ(seen, host_mxcsr);
+          for (int seen : observer->read_roundings)
+            EXPECT_EQ(seen, FE_TONEAREST);
+        }
+        for (uint32_t lane = 0; lane < wave->wf_size(); ++lane)
+          for (const auto &[reg, bits] : test.expected)
+            EXPECT_EQ(fixture.cu->read_vgpr_storage(base + reg, lane),
+                      (exec & (uint64_t{1} << lane)) ? bits : 0xdeadbeefu);
+      }
+    }
+  }
+}
+#endif
 
 TEST(ExecutionPluginTest, Vop3CompareObservesOnlyArchitecturalDestinationReads) {
   Wave32PluginFixture f;

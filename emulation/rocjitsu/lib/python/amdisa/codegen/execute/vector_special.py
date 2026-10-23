@@ -425,10 +425,10 @@ def gen_vector_mullit(
             )
         L.append(f'    const uint32_t s{i} = {read};')
     # An effective OMOD flushes a tiny product before scaling, as for V_MUL_F32.
-    force_flush = 'output_policy.omod != 0' if is_vop3 else 'false'
+    force_output_flush = 'output_policy.omod != 0' if is_vop3 else 'false'
     result = (
         'amdgpu::fp_mode::mullit_f32(s0, s1, s2, wf.fp_round_mode_f32(), '
-        f'wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode(), {force_flush})'
+        f'wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode(), {force_output_flush})'
     )
     if is_vop3:
         result = apply_output('f32', result)
