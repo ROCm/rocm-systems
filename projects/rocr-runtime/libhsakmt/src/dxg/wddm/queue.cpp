@@ -40,6 +40,7 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
+#include <algorithm>
 #include <cstring>
 #include <cinttypes>
 #include <cstddef>
@@ -250,8 +251,16 @@ void ComputeQueue::AqlToPm4Thread(ComputeQueue* queue) {
   std::chrono::steady_clock::time_point start_time, time;
   // Set the polling timeout value for 2 seconds
   const std::chrono::milliseconds kMaxElapsed(2000);
+  // Device enqueue bumps the write index from the GPU and rings a software doorbell that is a
+  // plain memory write, so nothing notifies us; poll instead of waiting forever. Back off while
+  // nothing moves so an idle queue does not wake up thousands of times per second.
+  constexpr std::chrono::microseconds kPollMin(50);
+  constexpr std::chrono::microseconds kPollMax(2000);
+  auto poll_interval = kPollMin;
   uint64_t current_position = queue->GetAqlWriteIndex();
   bool sleep = false;
+  // Last reported {wptr, rptr, gpu fence} so the idle log only fires on real progress.
+  uint64_t last_wait_state[3] = {~0ull, ~0ull, ~0ull};
   start_time = std::chrono::steady_clock::now();
 
   while (true) {
@@ -283,9 +292,20 @@ void ComputeQueue::AqlToPm4Thread(ComputeQueue* queue) {
     if (queue->GetRingWptr()->load() <= queue->GetRingRptr()->load() ||
         (sleep && queue->IsInvalidPacket())) {
       if (queue->thread_stop_) break;
-      pr_debug("wait %p wptr=%" PRIx64 " rptr=%" PRIx64 "\n", queue->ring,
-               queue->GetRingWptr()->load(), queue->GetRingRptr()->load());
-      queue->thread_cond_.wait_for(lock, std::chrono::milliseconds(100));
+      // sync_addr stays NULL until Init(), which runs after this thread is spawned.
+      const uint64_t state[3] = {queue->GetRingWptr()->load(), queue->GetRingRptr()->load(),
+                                 queue->sync_addr ? *queue->sync_addr : 0};
+      if (memcmp(state, last_wait_state, sizeof(state))) {
+        pr_debug("wait %p wptr=%" PRIx64 " rptr=%" PRIx64 " fence=%" PRIx64 "\n", queue->ring,
+                 state[0], state[1], state[2]);
+        memcpy(last_wait_state, state, sizeof(state));
+        poll_interval = kPollMin;
+      } else {
+        poll_interval = std::min(poll_interval * 2, kPollMax);
+      }
+      // Submission still wakes us through notify_one; only thread_stop_ can be delayed by up
+      // to one interval, which the destructor absorbs.
+      queue->thread_cond_.wait_for(lock, poll_interval);
     }
   }
 
@@ -326,17 +346,19 @@ ComputeQueue::ComputeQueue(WDDMDevice* device, void* ring, uint64_t ring_size,
   bool ret = device->CreateQueue(this, !native_aql_ ? reinterpret_cast<uint64_t>(_ring_rptr) : 0);
   assert(ret);
 
+  // Device-side enqueue rings this doorbell with a plain store from the shader, so the address
+  // must be GPU mapped or the store faults. Nothing ever reads the value back: the host rings
+  // through hsaKmtQueueRingDoorbell and submission tracks amd_queue_rocr_->write_dispatch_id.
   GpuMemoryCreateInfo create_info{};
   create_info.size = dxg_runtime->page_size;
   create_info.domain = Wkmi::kSystem;
-  GpuMemory* gpu_mem = nullptr;
-  auto code = device->CreateGpuMemory(create_info, &gpu_mem);
+  GpuMemory* doorbell_mem = nullptr;
+  auto code = device->CreateGpuMemory(create_info, &doorbell_mem);
   assert(code == ErrorCode::Success);
-  amd_queue_mem_ = gpu_mem->GetGpuMemoryHandle();
-  amd_queue_ = reinterpret_cast<amd_queue_v2_t*>(gpu_mem->GpuAddress());
+  doorbell_mem_ = doorbell_mem->GetGpuMemoryHandle();
+  doorbell_ptr_ = reinterpret_cast<uint64_t*>(doorbell_mem->GpuAddress());
+  *doorbell_ptr_ = 0;
 
-  amd_queue_rocr_ =
-      (amd_queue_v2_t*)((char*)ring_rptr - offsetof(amd_queue_v2_t, read_dispatch_id));
   // Native AQL submission bypasses the PM4 translation thread.
   if (!native_aql_) {
     aql_to_pm4_thread_ = std::thread(AqlToPm4Thread, this);
@@ -366,8 +388,6 @@ ComputeQueue::~ComputeQueue() {
     fault_monitor_thread_.join();
   }
 
-  // doorbell_signal_->Release();
-
   device->DestroyQueue(this);
 
   if (scratch_base_) {
@@ -375,8 +395,8 @@ ComputeQueue::~ComputeQueue() {
     delete scratch_gpu_mem;
   }
 
-  auto amd_queue_gpu_mem = GpuMemory::Convert(amd_queue_mem_);
-  delete amd_queue_gpu_mem;
+  auto doorbell_gpu_mem = GpuMemory::Convert(doorbell_mem_);
+  delete doorbell_gpu_mem;
 }
 
 void ComputeQueue::InitScratchSRD() {
@@ -485,47 +505,38 @@ void ComputeQueue::InitScratchSRD() {
   }
 
   // Update Queue's Scratch descriptor's property
-  amd_queue_->scratch_resource_descriptor[0] = srd0.u32All;
-  amd_queue_->scratch_resource_descriptor[1] = srd1_u32;
-  amd_queue_->scratch_resource_descriptor[2] = srd2.u32All;
-  amd_queue_->scratch_resource_descriptor[3] = srd3_u32;
+  amd_queue_rocr_->scratch_resource_descriptor[0] = srd0.u32All;
+  amd_queue_rocr_->scratch_resource_descriptor[1] = srd1_u32;
+  amd_queue_rocr_->scratch_resource_descriptor[2] = srd2.u32All;
+  amd_queue_rocr_->scratch_resource_descriptor[3] = srd3_u32;
 
-  // Populate flat scratch parameters in amd_queue_.
-  amd_queue_->scratch_backing_memory_location = scratch_base;
+  // Populate flat scratch parameters in amd_queue_rocr_.
+  amd_queue_rocr_->scratch_backing_memory_location = scratch_base;
 
   // For backwards compatibility this field records the per-lane scratch
   // for a 64 lane wavefront. If scratch was allocated for 32 lane waves
   // then the effective size for a 64 lane wave is halved.
-  amd_queue_->scratch_wave64_lane_byte_size = scratch_size_per_wave_ / 64;
+  amd_queue_rocr_->scratch_wave64_lane_byte_size = scratch_size_per_wave_ / 64;
 
   if (device->Major() < 11) {
     COMPUTE_TMPRING_SIZE tmpring_size;
     tmpring_size.bits.WAVESIZE = scratch_size_per_wave_ / 1024;
     tmpring_size.bits.WAVES = scratch_waves_;
 
-    amd_queue_->compute_tmpring_size = tmpring_size.u32All;
+    amd_queue_rocr_->compute_tmpring_size = tmpring_size.u32All;
   } else if (device->Major() == 11) {
     COMPUTE_TMPRING_SIZE_GFX11 tmpring_size;
     tmpring_size.bits.WAVESIZE = scratch_size_per_wave_ >> 8;
     tmpring_size.bits.WAVES = scratch_waves_ / device->NumShaderEngine();
 
-    amd_queue_->compute_tmpring_size = tmpring_size.u32All;
+    amd_queue_rocr_->compute_tmpring_size = tmpring_size.u32All;
   } else {
     COMPUTE_TMPRING_SIZE_GFX12 tmpring_size = {};
     tmpring_size.bits.WAVESIZE = scratch_size_per_wave_ >> 8;
     tmpring_size.bits.WAVES = scratch_waves_ / device->NumShaderEngine();
 
-    amd_queue_->compute_tmpring_size = tmpring_size.u32All;
+    amd_queue_rocr_->compute_tmpring_size = tmpring_size.u32All;
   }
-
-  // Update the amd_queue_rocr_
-  amd_queue_rocr_->compute_tmpring_size = amd_queue_->compute_tmpring_size;
-  amd_queue_rocr_->scratch_resource_descriptor[0] = amd_queue_->scratch_resource_descriptor[0];
-  amd_queue_rocr_->scratch_resource_descriptor[1] = amd_queue_->scratch_resource_descriptor[1];
-  amd_queue_rocr_->scratch_resource_descriptor[2] = amd_queue_->scratch_resource_descriptor[2];
-  amd_queue_rocr_->scratch_resource_descriptor[3] = amd_queue_->scratch_resource_descriptor[3];
-  amd_queue_rocr_->scratch_backing_memory_location = amd_queue_->scratch_backing_memory_location;
-  amd_queue_rocr_->scratch_wave64_lane_byte_size = amd_queue_->scratch_wave64_lane_byte_size;
 
   return;
 }
@@ -650,6 +661,7 @@ void ComputeQueue::RingDoorbell(uint64_t value) {
     auto aql_addr = reinterpret_cast<uintptr_t>(reinterpret_cast<char*>(ring) +
                                                 (value % ring_size) * kSizeOfAqlPacket);
     if (!device->SubmitToAqlQueue(this, aql_addr, kSizeOfAqlPacket, value)) {
+      pr_err("AQL doorbell failed, wptr=%" PRIx64 "\n", value);
       assert(!"Doorbell failed!");
     }
   }
@@ -708,6 +720,9 @@ hsa_status_t ComputeQueue::Submit(void) {
   // The same value EndSubmit() latches into sync_point below, so the frame just
   // written and the fence value that retires it cannot drift apart.
   const uint64_t fence_value = CmdbufFrameRing::NextFenceValue(sync_point);
+
+  pr_debug("submit %p ib=%" PRIx64 " size=%" PRIx64 " wi=%" PRIx64 " fence=%" PRIx64 "\n", ring,
+           (uint64_t)ib_start_addr, (uint64_t)ib_size, cmdbuf_aql_frame_write_index, fence_value);
 
   ret = use_hws ? HwsSubmit(ib_start_addr, ib_size, fence_value)
                 : SwsSubmit(ib_start_addr, ib_size, fence_value);
@@ -785,7 +800,9 @@ hsa_status_t ComputeQueue::KernelDispatchAqlToPm4(char* cpu, hsa_kernel_dispatch
   info.pEntry = entry;
   info.pKernelObject = kernel_object;
   info.ldsBlks = lds_blks;
-  info.pAmdQueue = amd_queue_;
+  // Must be ROCr's queue header: it is what the QUEUE_PTR SGPR exposes to the kernel, and
+  // device-side enqueue requires host and kernel to share the same header.
+  info.pAmdQueue = amd_queue_rocr_;
   info.wave32 = wave32;
   info.srd = UpdateIndexStride(info.pAmdQueue->scratch_resource_descriptor[3], wave32);
   info.pScratchBase = ScratchBase();
@@ -1077,8 +1094,9 @@ hsa_status_t ComputeQueue::SwitchAql2PM4(void) {
       // 2) The merged packets would no longer fit in the current cmdbuf frame
       // 3) The HW queue is empty now, submit the packet right now.
       // 4) The AQL queue is empty now, submit the packet right now.
+      // sync_point is 0 until the first submission, when the HW queue is trivially empty.
       if (!(aql_packet->completion_signal.handle) &&
-          (cmdbuf_aql_frame_write_index % device->GetAqlMergeLimit()) &&
+          (cmdbuf_aql_frame_write_index % device->GetAqlMergeLimit()) && sync_point &&
           (LoadSyncValue(sync_addr) != sync_point) &&
           (cmdbuf_aql_frame_write_index != GetRingWptr()->load()))
         return HSA_STATUS_SUCCESS;
@@ -1156,11 +1174,11 @@ hsa_status_t ComputeQueue::Process(void) {
     if (!platform_atomic_support_ && signal_addr_) {
       constexpr int kFaultTimeoutMs = 30000;
       auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(kFaultTimeoutMs);
-      while (*sync_addr < cmdbuf_aql_frame_write_index) {
+      while (*sync_addr < sync_point) {
         if (!dxg_runtime->disable_wait_timeout_ &&
             std::chrono::steady_clock::now() >= deadline) {
           pr_err("GPU fence timeout after %dms — possible device fault (sync_addr=%" PRIu64
-                 " expected=%" PRIu64 ")\n", kFaultTimeoutMs, *sync_addr, cmdbuf_aql_frame_write_index);
+                 " expected=%" PRIu64 ")\n", kFaultTimeoutMs, *sync_addr, sync_point);
           return static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION);
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -1228,9 +1246,18 @@ void SDMAQueue::SdmaThread(SDMAQueue* queue) {
         poll_pkt += skip;
         poll_next_pkt += skip;
       }
-      queue->PreparePacket(queue->WrapIntoRocrRing(start), end - start);
-      std::atomic_thread_fence(std::memory_order_release);
-      queue->Submit();
+      if (queue->native_sdma_) {
+        // Native WDDM HwQueue: the ring is the command stream, so there is no IB to prepare.
+        if (!queue->SubmitNative(start, end)) {
+          pr_err("native SDMA submit failed for span %" PRIx64 "-%" PRIx64 "\n", start, end);
+        }
+        // Released once this span is submitted -- also on failure
+        queue->thread_pending_.fetch_sub(1, std::memory_order_release);
+      } else {
+        queue->PreparePacket(queue->WrapIntoRocrRing(start), end - start);
+        std::atomic_thread_fence(std::memory_order_release);
+        queue->Submit();
+      }
     }
   }
   pr_debug("sdma thread exit\n");
@@ -1246,39 +1273,176 @@ SDMAQueue::SDMAQueue(WDDMDevice* device, void* ring, uint64_t cmdbuf_size, uint3
       ib_size(0),
       ib_start_addr(0) {
   needs_cwsr_ = false;
-  bool ret = device->CreateQueue(this);
-  assert(ret);
+  native_sdma_ = use_hws && device->IsSdmaSupported();
+  gpu_poll_ = dxg_runtime->sdma_gpu_poll_;
 
-  thread_ = std::thread(SdmaThread, this);
+  // kmd_support is HWSInfo2Flags.SupportHsaSdmaQueue, logged separately from the decision so
+  // "the KMD cannot do this" is distinguishable from "HWS is off".
+  pr_rocr_info("SDMA user queue: kmd_support=%d hws=%d -> %s, dependency polls: %s\n",
+               (int)device->IsSdmaSupported(), (int)use_hws,
+               native_sdma_ ? "native user queue (WDDM HwQueue submit)"
+                            : "legacy SWS translation thread",
+               (native_sdma_ && gpu_poll_) ? "SDMA engine" : "host thread");
+
+  // The SDMA-AQL user queue needs an AmdQueueT allocation for its read_dispatch_id (rptr)
+  // report and ROCr provides none, so allocate a page BEFORE CreateQueue (which runs
+  // CreateHwQueue). Without it CreateHwQueue fails with STATUS_UNSUCCESSFUL.
+  if (native_sdma_) {
+    GpuMemoryCreateInfo create_info{};
+    create_info.size = dxg_runtime->page_size;
+    create_info.domain = Wkmi::kSystem;
+    // Queue-object allocation so wkmi sets AllocRequest3Flags.AmdQueueT; without that flag
+    // the KMD rejects the SDMA-AQL HwQueue with "AmdQueueT flag not set".
+    create_info.mem_flags = Wkmi::kQueueObject;
+    GpuMemory* gpu_mem = nullptr;
+    auto code = device->CreateGpuMemory(create_info, &gpu_mem);
+    if (code != ErrorCode::Success) {
+      pr_err("SDMA user queue: AmdQueueT page allocation failed, code=%d, size=%" PRIu64 "\n",
+             static_cast<int>(code), static_cast<uint64_t>(create_info.size));
+      return;
+    }
+    amd_queue_memory_ = gpu_mem;
+
+    // Zero the page: read_dispatch_id here is the ring read offset (GetRingRptr), and a
+    // garbage initial value would break the producer's free-space math before the first update.
+    if (gpu_mem != nullptr && gpu_mem->CpuAddress() != nullptr)
+      std::memset(gpu_mem->CpuAddress(), 0, create_info.size);
+  }
+
+  bool ret = device->CreateQueue(this);
+  if (!ret) {
+    if (amd_queue_memory_) {
+      delete amd_queue_memory_;
+      amd_queue_memory_ = nullptr;
+    }
+    pr_err("SDMA queue creation failed: engine=%u, hws=%d, path=%s\n", engine, (int)use_hws,
+           native_sdma_ ? "native user queue" : "legacy SWS translation thread");
+    return;
+  }
+
+  if (!native_sdma_ || !gpu_poll_) thread_ = std::thread(SdmaThread, this);
 }
 
 SDMAQueue::~SDMAQueue() {
-  thread_cond_lock_.lock();
-  thread_stop_ = true;
-  thread_cond_lock_.unlock();
-  thread_cond_.notify_one();
-  thread_.join();
+  if (thread_.joinable()) {
+    thread_cond_lock_.lock();
+    thread_stop_ = true;
+    thread_cond_lock_.unlock();
+    thread_cond_.notify_one();
+    thread_.join();
+  }
 
   device->DestroyQueue(this);
+
+  if (amd_queue_memory_) {
+    delete amd_queue_memory_;
+    amd_queue_memory_ = nullptr;
+  }
 }
 
-void SDMAQueue::RingDoorbell(uint64_t value) {
-  pr_debug("ringdoorbell %#" PRIx64 " %#" PRIx64 "\n", wptr_pre_, wptr_next_);
-  thread_cond_lock_.lock();
+// One Navi4+ SDMA FENCE_CONDITIONAL_INTERRUPT packet (8 dwords) at dst: the HW writes
+// FENCE_DATA to FENCE_ADDR, then raises the queue's fence interrupt when
+// FENCE_DATA >= *FENCE_REF_ADDR, so the KMD's existing WDDM fence-reporting path advances the
+// OS fence. INTERRUPT_CONTEXT is the doorbell offset the KMD uses to identify the queue.
+// Pre-Navi4 needs a separate TRAP packet.
+//
+// ref_va is fence_va, so the comparison is against the value just written and the interrupt
+// always fires.
+static size_t SdmaFenceCondIntPacket(void* dst, uint64_t fence_va, uint64_t fence_val,
+                                     uint64_t ref_va, uint32_t interrupt_context) {
+  // SDMA_PKT_FENCE_CONDITIONAL_INTERRUPT in drivers\drivers\ubm\gfx12\gfx12_sdma_pkt_struct.h
+  uint32_t* dw = reinterpret_cast<uint32_t*>(dst);
+  dw[0] = 0x80000105u;                             // op=5, sub_op=1, ddw=1 (sys=0)
+  dw[1] = static_cast<uint32_t>(fence_va);         // FENCE_ADDR lo
+  dw[2] = static_cast<uint32_t>(fence_va >> 32);   // FENCE_ADDR hi
+  dw[3] = static_cast<uint32_t>(fence_val);        // FENCE_DATA lo
+  dw[4] = static_cast<uint32_t>(fence_val >> 32);  // FENCE_DATA hi
+  dw[5] = static_cast<uint32_t>(ref_va);           // FENCE_REF_ADDR lo
+  dw[6] = static_cast<uint32_t>(ref_va >> 32);     // FENCE_REF_ADDR hi
+  dw[7] = interrupt_context;                       // INTERRUPT_CONTEXT (doorbell offset)
+  return 32;
+}
 
-  wptr_queue_.emplace_back(wptr_pre_, wptr_next_);
-  thread_cond_.notify_one();
+// Writes the progress-fence epilogue into the headroom the producer reserved at the tail of
+// [start, end) and submits the span through the WDDM HwQueue.
+bool SDMAQueue::SubmitNative(uint64_t start, uint64_t end) {
+  // Residency barrier, same as the legacy Submit() path: a queued paging operation must finish
+  // before the engine touches those pages.
+  if (!device->WaitPagingFence(this)) {
+    pr_err("paging fence wait failed, wptr=%" PRIx64 "\n", end);
+    return false;
+  }
 
-  thread_cond_lock_.unlock();
+  // The producer reserved kHwQueueEpilogueBytes of trailing headroom and `end` is already
+  // past it, so fill [end-epilogue, end) and submit `end` UNCHANGED. Advancing the wptr
+  // here would drift the producer's write index and corrupt the ring.
+  const uint32_t epilogue = kHwQueueEpilogueBytes;
+  const uint64_t ring_size = cmdbuf_size;
+  char* ring_base = reinterpret_cast<char*>(cmdbuf_addr);
+  const uint64_t fence_va = hwqueue_progress_fence_va_;
+
+  // Per the KMD spec the UMD increments this by 1 per submit, and the same id goes into both
+  // the FENCE packet and the submit DDI. It is not a ring read pointer -- that is reported
+  // separately into amd_queue_t::read_dispatch_id (GetRingRptr).
+  const uint64_t fence_id = ++hwqueue_fence_id_;
+
+  // Both producers reserve packets+epilogue as one contiguous span, so it cannot straddle the
+  // ring end and needs no NOP padding here.
+  assert(end >= epilogue && "SDMA submit smaller than reserved epilogue");
+  const size_t base = static_cast<size_t>((end - epilogue) % ring_size);
+  assert(base + epilogue <= ring_size && "reserved SDMA epilogue straddles ring end");
+  char* ep = ring_base + base;
+  size_t n = 0;
+  n += SdmaFenceCondIntPacket(ep + n, fence_va, fence_id, fence_va, aql_doorbell_offset_);
+
+  std::atomic_thread_fence(std::memory_order_release);
+
+  if (!device->SubmitToSdmaHwQueue(this, end)) {
+    pr_err("SDMA doorbell failed, wptr=%" PRIx64 " fence=%" PRIx64 "\n", end, fence_id);
+    assert(!"SDMA doorbell failed!");
+    return false;
+  }
+
+  return true;
+}
+
+bool SDMAQueue::ContainPollPacket(uint64_t start, uint64_t end) {
+  if (end - start < sizeof(SDMA_PKT_POLL_REGMEM)) return false;
+  return IsPollPacket(
+      reinterpret_cast<SDMA_PKT_POLL_REGMEM*>(cmdbuf_addr + WrapIntoRocrRing(start)));
+}
+
+void SDMAQueue::RingDoorbell(uint64_t /*value*/) {
+  // The synchronization with worker thread is lock-free when SDMA user queue enabled.
+  if (native_sdma_ && thread_pending_.load(std::memory_order_acquire) == 0 &&
+      (gpu_poll_ || !ContainPollPacket(wptr_pre_, wptr_next_))) {
+    const uint64_t start = wptr_pre_;
+    const uint64_t end = wptr_next_;
+    wptr_pre_ = wptr_next_;
+    if (!SubmitNative(start, end)) {
+      pr_err("native SDMA submit failed for span %" PRIx64 "-%" PRIx64 " (doorbell path)\n",
+             start, end);
+    }
+    return;
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(thread_cond_lock_);
+    wptr_queue_.emplace_back(wptr_pre_, wptr_next_);
+    // Counted before the notify so the thread can never drain and decrement below the value
+    // this enqueue contributed. Gated to match SdmaThread's decrement: the legacy path neither
+    // counts nor reads this, so leaving it ungated would grow it without bound.
+    if (native_sdma_) thread_pending_.fetch_add(1, std::memory_order_relaxed);
+    thread_cond_.notify_one();
+  }
   wptr_pre_ = wptr_next_;
 }
 
 hsa_status_t SDMAQueue::Init(void) {
-  hsa_status_t ret = use_hws ? HwsInit() : SwsInit();
-  if (ret) return ret;
-
+  // Zero the ring before HwsInit. For the SWS path the order doesn't matter.
   std::memset((char*)cmdbuf_addr, 0, cmdbuf_size);
 
+  hsa_status_t ret = use_hws ? HwsInit() : SwsInit();
   return ret;
 }
 

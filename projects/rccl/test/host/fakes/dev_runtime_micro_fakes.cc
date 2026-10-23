@@ -157,15 +157,6 @@ ncclResult_t ncclCommWindowDeregister(ncclComm_t comm, ncclWindow_t win) {
 // Group state machine.
 // ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// Param loader.
-// ---------------------------------------------------------------------------
-int64_t ncclLoadParam(char const*, int64_t deftVal, int64_t, int64_t* cache, int8_t* noCache) {
-  if (cache) *cache = deftVal;
-  if (noCache) *noCache = 0;
-  return deftVal;
-}
-
 // Emitted by init.cc, which this binary does not link, so the redirected
 // NCCL_PARAM in dev_runtime.cc does not cover it. Routed through g_loadParam
 // like the params dev_runtime.cc owns, so a test can drive the NCCL_WIN_ENABLE=0
@@ -328,26 +319,34 @@ ncclResult_t ncclGinAnvilBindResourceWindowSignals(struct ncclComm*, void*, size
 // Seams: symMemoryRegisterGin NCCLCHECKs both, and its rollback path is only
 // observable through the deregister count.
 static ncclResult_t DefaultGinRegister(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS],
-                                       ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS], int, bool, int) {
+                                       ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS],
+                                       uint32_t[NCCL_GIN_MAX_ACTIVE_BACKENDS], int, bool, int) {
   return ncclSuccess;
 }
 std::function<ncclResult_t(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS],
-                           ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS], int, bool, int)>
+                           ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS], uint32_t[NCCL_GIN_MAX_ACTIVE_BACKENDS], int,
+                           bool, int)>
     g_devrGinRegister = DefaultGinRegister;
 
 ncclResult_t ncclGinRegister(struct ncclComm* comm, void* addr, size_t size,
                              void* hostWins[NCCL_GIN_MAX_CONNECTIONS],
-                             ncclGinWindow_t devWins[NCCL_GIN_MAX_CONNECTIONS], int winFlags, bool multiSegment,
-                             int memType) {
-  return g_devrGinRegister(comm, addr, size, hostWins, devWins, winFlags, multiSegment, memType);
+                             ncclGinWindow_t devWins[NCCL_GIN_MAX_CONNECTIONS],
+                             uint32_t ginWinGenerations[NCCL_GIN_MAX_ACTIVE_BACKENDS], int winFlags,
+                             bool multiSegment, int memType) {
+  return g_devrGinRegister(comm, addr, size, hostWins, devWins, ginWinGenerations, winFlags, multiSegment, memType);
 }
 
-static ncclResult_t DefaultGinDeregister(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS]) { return ncclSuccess; }
-std::function<ncclResult_t(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS])> g_devrGinDeregister =
-    DefaultGinDeregister;
+static ncclResult_t DefaultGinDeregister(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS],
+                                         uint32_t const[NCCL_GIN_MAX_ACTIVE_BACKENDS]) {
+  return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS],
+                           uint32_t const[NCCL_GIN_MAX_ACTIVE_BACKENDS])>
+    g_devrGinDeregister = DefaultGinDeregister;
 
-ncclResult_t ncclGinDeregister(struct ncclComm* comm, void* hostWins[NCCL_GIN_MAX_CONNECTIONS]) {
-  return g_devrGinDeregister(comm, hostWins);
+ncclResult_t ncclGinDeregister(struct ncclComm* comm, void* hostWins[NCCL_GIN_MAX_CONNECTIONS],
+                               uint32_t const ginWinGenerations[NCCL_GIN_MAX_ACTIVE_BACKENDS]) {
+  return g_devrGinDeregister(comm, hostWins, ginWinGenerations);
 }
 
 // ---------------------------------------------------------------------------
@@ -435,7 +434,7 @@ static ncclTeam_t DefaultTeamWorld(ncclComm_t comm) {
 }
 std::function<ncclTeam_t(ncclComm_t)> g_devrTeamWorld = DefaultTeamWorld;
 extern "C" ncclTeam_t ncclTeamWorld(ncclComm_t comm) { return g_devrTeamWorld(comm); }
-extern "C" ncclTeam_t ncclTeamRail(ncclComm_t) { return ncclTeam_t{}; }
+// ncclTeamRail is in devcomm_fakes.cc.
 
 // The CFT teams, read by symMemoryObtain and ncclDevrCommCreateInternal. Same
 // shape as the real host accessors in nccl_device/core.cc, reading the sizes

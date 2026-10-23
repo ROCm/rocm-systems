@@ -170,7 +170,7 @@ inline std::vector<fs::path> hrr_process_archives(const fs::path& root) {
   for (const auto& ent : fs::directory_iterator(root, ec)) {
     if (!ent.is_directory()) continue;
     const std::string name = ent.path().filename().string();
-    if (name.rfind("pid-", 0) == 0 && fs::exists(ent.path() / "events.bin"))
+    if (hrr::pid_from_archive_dir_name(name) != 0 && fs::exists(ent.path() / "events.bin"))
       archives.push_back(ent.path());
   }
   std::sort(archives.begin(), archives.end());
@@ -185,7 +185,7 @@ inline fs::path hrr_single_process_archive(const fs::path& root) {
   for (const auto& ent : fs::directory_iterator(root)) {
     if (!ent.is_directory()) continue;
     const std::string name = ent.path().filename().string();
-    if (name.rfind("pid-", 0) == 0 && fs::exists(ent.path() / "events.bin"))
+    if (hrr::pid_from_archive_dir_name(name) != 0 && fs::exists(ent.path() / "events.bin"))
       archives.push_back(ent.path());
   }
   INFO("Process archive count: " << archives.size());
@@ -227,6 +227,22 @@ inline bool hrr_parse_d2h_summary(const std::string& out, int& d2h_pass, int& d2
 }
 
 // ---------------------------------------------------------------------------
+// hrr_d2h_mismatch_exit: whether a non-zero hrr-playback exit is explained by
+// D2H mismatches alone, the one failure Windows tolerates (see
+// hrr_run_playback):
+//   - exit 2: the divergence guard stopped the replay after too many D2H
+//     mismatches (it prints no summary);
+//   - exit 1 with a summary line that counts at least one failed D2H check.
+// A fatal HIP error aborts the replay before the summary is printed, so its
+// exit 1 is never taken for a mismatch.
+// ---------------------------------------------------------------------------
+inline bool hrr_d2h_mismatch_exit(int ret, const std::string& out) {
+  if (ret == 2) return true;
+  int d2h_pass = 0, d2h_fail = 0;
+  return ret == 1 && hrr_parse_d2h_summary(out, d2h_pass, d2h_fail) && d2h_fail > 0;
+}
+
+// ---------------------------------------------------------------------------
 // hrr_run_playback — spawn hrr-playback, capture stdout, assert:
 //   1. Exit code == 0.
 //   2. The "D2H checks" summary line is present and shows >= 1 pass, 0 fail.
@@ -247,10 +263,16 @@ inline void hrr_run_playback(const fs::path& cap_path,
   // On Windows (gfx1151 consumer iGPU CI target) replay is not guaranteed to
   // reproduce device output bit-for-bit — kernel output buffers can read back
   // as zero even though capture and playback both launch successfully. Treat
-  // D2H fidelity as best-effort there (same policy as the Linux fat-binary
-  // limitation below); a crash still fails the test via the ret < 128 check.
+  // D2H fidelity as best-effort there: a non-zero exit passes when D2H
+  // mismatches alone explain it, and only then. A crash or a fatal HIP error
+  // (which aborts before the summary) fails as it does on Linux, and a clean
+  // exit gets every check below.
 #ifdef _WIN32
-  require_d2h = false;
+  if (require_d2h && ret != 0) {
+    REQUIRE(hrr_d2h_mismatch_exit(ret, out));
+    WARN("D2H mismatch accepted: D2H fidelity is best-effort on Windows");
+    return;
+  }
 #endif
   // When require_d2h is false (e.g. no D2H in workload, or Linux fat-binary
   // limitation) we only assert that hrr-playback did not crash (signal).
@@ -324,6 +346,7 @@ inline void hrr_run_roundtrip(const std::string& direct_case,
 //
 // hrr_capture_direct: spawn a hidden _Direct workload with HIP_HRR_CAPTURE_OUTPUT
 //   set, REQUIRE a clean capture, and assert the archive has >= min_events.
+//   Pairs in env are set in the workload's environment as well.
 //
 // hrr_playback_env: run hrr-playback with arbitrary extra environment pairs
 //   (e.g. HIP_HRR_REPLAY_ZERO_INIT / HIP_HRR_REPLAY_DIVERGENCE_ABORT) and return
@@ -335,9 +358,11 @@ inline void hrr_run_roundtrip(const std::string& direct_case,
 // ---------------------------------------------------------------------------
 inline void hrr_capture_direct(const std::string& direct_case,
                                const fs::path& cap_path,
-                               size_t min_events = 5) {
+                               size_t min_events = 5,
+                               const std::vector<std::pair<std::string, std::string>>& env = {}) {
   { hrr::test::SpawnProc proc(hrr_self_exe());
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_path.string());
+    for (const auto& kv : env) proc.setEnv(kv.first, kv.second);
     { set_proc_search_path(proc); }
     int ret = proc.run("\"" + direct_case + "\"");
     INFO("Capture exit: " << ret);

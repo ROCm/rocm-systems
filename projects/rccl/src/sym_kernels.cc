@@ -35,6 +35,7 @@ constexpr uint32_t kernelMask_LL = 1 << ncclSymkKernelId_AllReduce_AGxLL_R | 1 <
 constexpr uint32_t kernelMask_AG = 1 << ncclSymkKernelId_AllGather_LL | 1 << ncclSymkKernelId_AllGather_LLMC |
                                    1 << ncclSymkKernelId_AllGather_ST | 1 << ncclSymkKernelId_AllGather_STMC |
                                    1 << ncclSymkKernelId_AllGather_TmaST | 1 << ncclSymkKernelId_AllGather_TmaSTMC |
+                                   1 << ncclSymkKernelId_AllGather_RailRing_LsaST |
                                    1 << ncclSymkKernelId_AllGather_RailRing_LsaSTMC;
 
 constexpr uint32_t kernelMask_AR = 1 << ncclSymkKernelId_AllReduce_AGxLLMC_R | 1 << ncclSymkKernelId_AllReduce_AGxLL_R |
@@ -58,6 +59,7 @@ constexpr uint32_t kernelMask_LSA =
 
 constexpr uint32_t kernelMask_Gin = 1 << ncclSymkKernelId_ReduceScatter_RailA2A_LsaLD |
                                     1 << ncclSymkKernelId_ReduceScatter_RailA2A_LsaLDMC |
+                                    1 << ncclSymkKernelId_AllGather_RailRing_LsaST |
                                     1 << ncclSymkKernelId_AllGather_RailRing_LsaSTMC;
 
 constexpr uint32_t kernelMask_Tma = 1 << ncclSymkKernelId_AllGather_TmaST | 1 << ncclSymkKernelId_AllGather_TmaSTMC |
@@ -139,10 +141,11 @@ static uint32_t kernelMask_coll(ncclFunc_t coll) {
 NCCL_PARAM(SymGinKernelsEnable, "SYM_GIN_KERNELS_ENABLE", 1)
 NCCL_PARAM(SymRsGinChunkSize, "SYM_RS_GIN_CHUNK_SIZE", -1)
 // [RCCL] These kernels stage tiles through a DMA engine: TMA on NVIDIA, the Tensor
-// Data Mover on gfx1250. Still opt-in while the gfx1250 path is being brought up.
+// Data Mover on gfx1250. On by default as in NCCL 2.31; ncclSymkTmaAvailable() still
+// confines them to gfx1250 builds whose SDK ships the TDM descriptor header.
 // 0 off, 1 offer to the tuner, 2 force (skips the cost model and the deep-loop size bar; for A/B
 // measurement). NCCL_SYM_KERNEL forces one named kernel, 2 forces whichever the collective has.
-NCCL_PARAM(SymTmaEnable, "SYM_TMA_ENABLE", 0)
+NCCL_PARAM(SymTmaEnable, "SYM_TMA_ENABLE", 1)
 
 bool ncclSymkTmaAvailable(struct ncclComm* comm) {
   if (!ncclParamSymTmaEnable()) return false;
@@ -421,7 +424,7 @@ static constexpr size_t ncclSymkArLLWideBytes = 64 << 10;
 static constexpr size_t ncclSymkAgLLWideBusBytes = 512 << 10;
 static constexpr size_t ncclSymkAgWideBlockBusBytes = 64 << 20;
 // Where AllGather's store kernel overtakes LL, which the shared cost model places past 8 MB.
-static constexpr size_t ncclSymkAgStoreMinBusBytes = 4 << 20;
+static constexpr size_t ncclSymkAgStoreMinBusBytes = 1 << 20;
 // Block widths those thresholds select between. 1024 is the widest workgroup gfx950 will launch.
 static constexpr int ncclSymkGfx950NarrowThreads = 256;
 static constexpr int ncclSymkGfx950WideThreads = 512;
@@ -519,6 +522,11 @@ ncclResult_t ncclGetSymRegType(struct ncclDevrWindow* sendWin, struct ncclDevrWi
 bool rcclSymkKernelIdIsLL(int kernelId) {
   if (kernelId < 0 || kernelId >= (int)ncclSymkKernelId_Count) return false;
   return (kernelMask_LL >> kernelId) & 1;
+}
+
+bool rcclSymkKernelIdIsTma(int kernelId) {
+  if (kernelId < 0 || kernelId >= (int)ncclSymkKernelId_Count) return false;
+  return (kernelMask_Tma >> kernelId) & 1;
 }
 
 #ifndef GENERATE_SYM_KERNELS
