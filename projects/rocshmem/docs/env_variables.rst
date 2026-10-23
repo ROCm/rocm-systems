@@ -260,8 +260,11 @@ control the behavior of rocSHMEM.
 
     * - | ``ROCSHMEM_TDM_TILE_BYTES``
         | TDM (Tensor Data Mover) tile size in bytes for LDS-staged work-group
-        | put/get on gfx1250 (requires ``USE_TDM`` build option). Doubled
-        | internally for double buffering; see ``rocshmem_query_tdm_lds_bytes()``.
+        | or wave put/get on gfx1250 (requires ``USE_TDM`` build option).
+        | Doubled internally for double buffering; see
+        | ``rocshmem_query_tdm_lds_bytes()``. Wave put/get splits the
+        | registered LDS buffer evenly across the block's waves, so each
+        | wave's effective tile is smaller than this value.
       - ``0``
       - | ``0`` (default): auto-size the tile to use all LDS available per
         | block on this device.
@@ -273,8 +276,9 @@ control the behavior of rocSHMEM.
 
     * - | ``ROCSHMEM_TDM_THRESHOLD``
         | Minimum transfer size in bytes to route through TDM for work-group
-        | put/get on gfx1250 (requires ``USE_TDM`` build option). Transfers
-        | smaller than this use the normal (non-TDM) copy path instead, since
-        | TDM's issue latency isn't amortized for small transfers.
+        | or wave put/get on gfx1250 (requires ``USE_TDM`` build option).
+        | Transfers smaller than this use the normal (non-TDM) copy path
+        | instead, since TDM's issue latency isn't amortized for small
+        | transfers.
       - ``16384``
       - Size in bytes.

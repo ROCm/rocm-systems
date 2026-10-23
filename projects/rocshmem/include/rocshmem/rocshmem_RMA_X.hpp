@@ -233,6 +233,11 @@ __device__ ATTR_NO_INLINE void rocshmem_ulonglong_put_wg(
  * granularity. However, all threads in a wave must participate in the
  * call using the same parameters.
  *
+ * On gfx1250 built with USE_TDM, this call uses the faster TDM (Tensor
+ * Data Mover) copy path if the workgroup registered an LDS buffer via
+ * rocshmem_set_tdm_lds(), split evenly across the block's waves;
+ * otherwise it falls back to the plain copy path.
+ *
  * @param[in] ctx    Context with which to perform this operation.
  * @param[in] dest   Destination address. Must be an address on the symmetric
  *                   heap.
@@ -485,6 +490,11 @@ __device__ ATTR_NO_INLINE void rocshmem_ulonglong_get_wg(
  * This function can be called from divergent control paths at per-wave
  * granularity. However, all threads in a the wave must participate in the
  * call using the same parameters
+ *
+ * On gfx1250 built with USE_TDM, this call uses the faster TDM (Tensor
+ * Data Mover) copy path if the workgroup registered an LDS buffer via
+ * rocshmem_set_tdm_lds(), split evenly across the block's waves;
+ * otherwise it falls back to the plain copy path.
  *
  * @param[in] ctx     Context with which to perform this operation.
  * @param[in] dest    Destination address. Must be an address on the symmetric

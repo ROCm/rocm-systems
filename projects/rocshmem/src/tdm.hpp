@@ -406,7 +406,10 @@ __device__ inline void copy_region_pipelined(void *dst, const void *src, size_t 
 // LDS REGISTRATION: backs rocshmem_set_tdm_lds()/rocshmem_query_tdm_lds_bytes().
 // Every thread in the block must call set_lds() -- only thread (0,0,0)'s
 // arguments are used, but its internal barrier needs every thread to reach
-// it -- before any work-group put/get in that kernel that should use TDM.
+// it -- before any work-group or wave put/get in that kernel that should use
+// TDM. One registration backs both: work-group put/get (memcpy_wg_tdm) uses
+// the whole buffer; wave put/get (memcpy_wave_tdm) splits it one slice per
+// wave so concurrent waves don't tile through the same LDS bytes.
 // ==============================================================================
 
 // Each workgroup gets its own private LDS, and set_lds() always runs earlier
