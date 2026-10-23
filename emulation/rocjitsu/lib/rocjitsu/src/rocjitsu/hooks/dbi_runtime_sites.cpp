@@ -38,14 +38,8 @@ const char *dbi_load_decision_name(DbiLoadDecision decision) {
     return "not-amdgpu-object";
   case DbiLoadDecision::UnsupportedArch:
     return "unsupported-arch";
-  case DbiLoadDecision::ProbeTargetMismatch:
-    return "probe-target-mismatch";
   case DbiLoadDecision::NotSingleKernel:
     return "not-single-kernel";
-  case DbiLoadDecision::Wave32:
-    return "wave32"; // Liveness bug
-  case DbiLoadDecision::UnsupportedControlFlow:
-    return "unsupported-control-flow";
   case DbiLoadDecision::NoSites:
     return "no-sites";
   case DbiLoadDecision::PatchFailed:
@@ -69,23 +63,11 @@ DbiInstrumentation instrument_each_block(std::span<const uint8_t> elf, const Dbi
     out.decision = DbiLoadDecision::UnsupportedArch;
     return out;
   }
-  if (probe.object->target_id() != object.target_id()) {
-    out.decision = DbiLoadDecision::ProbeTargetMismatch;
-    return out;
-  }
   // Checked before decoding: most HIP code objects hold many kernels, and
   // refusing those should not cost a decode of their .text.
   const std::vector<KernelDescriptorInfo> kernel_list = scan_object_kernel_descriptors(object);
   if (kernel_list.size() != 1) {
     out.decision = DbiLoadDecision::NotSingleKernel;
-    return out;
-  }
-  // Gate liveness bug:
-  // Liveness reads the SGPR destination of a wave32 compare or carry-out as the
-  // pair its encoding names, so it can report the register after it dead while
-  // the kernel still needs it, and a trampoline would take it.
-  if (kernel_wavefront_size(arch, kernel_list.front().descriptor) == 32) {
-    out.decision = DbiLoadDecision::Wave32;
     return out;
   }
 
@@ -97,15 +79,6 @@ DbiInstrumentation instrument_each_block(std::span<const uint8_t> elf, const Dbi
     out.decision = DbiLoadDecision::PatchFailed;
     out.errors.push_back(std::move(error));
     return out;
-  }
-  // The trampolines' liveness follows successors() only, so it would miss
-  // registers read across a call or an unresolved edge.
-  for (const BasicBlock *block : *blocks) {
-    if (!block->call_edges().empty() ||
-        block->successor_issue() != BasicBlock::SuccessorIssue::None) {
-      out.decision = DbiLoadDecision::UnsupportedControlFlow;
-      return out;
-    }
   }
   for (const BasicBlock *block : *blocks) {
     const std::optional<uint64_t> anchor = instrumentor.first_anchor(*block);

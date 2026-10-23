@@ -114,9 +114,10 @@ std::optional<RegisterSet> analyze_probe_live_ins(const AmdGpuCodeObject &probe_
 
   const BlockOffsetIndex block_index = build_block_offset_index(blocks);
   const BlockPositionIndex block_positions = build_block_position_index(blocks);
+  // build_reachable() starts a block at every entry it accepts.
   BasicBlock *entry = block_for_offset(block_index, entry_text_offset);
   if (entry == nullptr || entry->start_offset() != entry_text_offset) {
-    report(error_out, "probe entry offset does not start a decoded basic block");
+    report(error_out, "internal: probe entry offset does not start a decoded basic block");
     return std::nullopt;
   }
 

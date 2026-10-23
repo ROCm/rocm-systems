@@ -1864,7 +1864,7 @@ target_link_libraries(
         GTest::gtest_main
 )
 rj_configure_target(dbi_runtime_unit_test TEST)
-gtest_discover_tests(dbi_runtime_unit_test)
+rj_add_gtest_tests(dbi_runtime_unit_test)
 
 # A separate loadable module is the only way to observe the force-scalar gate's
 # per-module scope: the gate is an inline variable with hidden visibility, so
