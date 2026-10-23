@@ -285,13 +285,13 @@ TEST(SmemBuilder, EmitsOneDiagnosticOnlyOnFailure) {
   // failure must propagate without emitting a second diagnostic.
   EXPECT_TRUE(build_s_load_dwordx2(4, 0, 0, ROCJITSU_CODE_ARCH_INVALID, &error).failed());
   EXPECT_EQ(messages, 3u);
-  EXPECT_EQ(message, "SMEM offset range for target architecture");
+  EXPECT_EQ(message, "unsupported target architecture for the SMEM offset range");
   EXPECT_TRUE(build_wait_scalar_loads_complete(ROCJITSU_CODE_ARCH_INVALID, &error).failed());
   EXPECT_EQ(messages, 4u);
-  EXPECT_EQ(message, "scalar-load wait for target architecture");
+  EXPECT_EQ(message, "unsupported target architecture for the scalar-load wait");
   EXPECT_TRUE(max_smem_byte_offset(ROCJITSU_CODE_ARCH_INVALID, &error).failed());
   EXPECT_EQ(messages, 5u);
-  EXPECT_EQ(message, "SMEM offset range for target architecture");
+  EXPECT_EQ(message, "unsupported target architecture for the SMEM offset range");
 }
 
 TEST(SmemBuilder, NonAmdGpuArchsReturnFailure) {

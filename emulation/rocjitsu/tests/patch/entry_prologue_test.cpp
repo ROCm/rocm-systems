@@ -482,7 +482,7 @@ TEST(BuildDbiEntryPrologue, UnsupportedArchReturnsNoPrologueAndReportsTheError) 
     const auto prologue = build_dbi_entry_prologue(
         kernarg_descriptor(), arch, {.persistent_base = 26, .entry_temp_base = 28}, &error);
     EXPECT_FALSE(prologue.has_value());
-    EXPECT_EQ(error, "SMEM offset range for target architecture");
+    EXPECT_EQ(error, "unsupported target architecture for the SMEM offset range");
   }
 }
 

@@ -84,7 +84,7 @@ max_smem_byte_offset(rj_code_arch_t arch, const util::DiagnosticEmitter *error =
     return kSmem24BitMaxByteOffset;
   default:
     if (error != nullptr)
-      return error->emit() << "SMEM offset range for target architecture";
+      return error->emit() << "unsupported target architecture for the SMEM offset range";
     return util::Result::failure();
   }
 }
@@ -97,6 +97,7 @@ max_smem_byte_offset(rj_code_arch_t arch, const util::DiagnosticEmitter *error =
 ///        carries the index halved and has no bit for the low one.
 /// @param byte_offset Forward immediate byte offset from the base address. Must
 ///        be a multiple of 4 and not exceed @ref max_smem_byte_offset for @p arch.
+/// @param error Optional caller-owned diagnostic emitter, used only on failure.
 ///
 /// @details Three things the caller should not have to know. SBASE is the
 /// register index halved on every generation; the decoder multiplies it back.
@@ -111,7 +112,6 @@ max_smem_byte_offset(rj_code_arch_t arch, const util::DiagnosticEmitter *error =
 /// @returns Failure if either pair base is odd or out of field range, or
 ///          if @p byte_offset is unaligned or out of range, or for a non-AMDGPU
 ///          architecture.
-/// @param error Optional caller-owned diagnostic emitter, used only on failure.
 inline util::FailureOr<std::array<uint32_t, 2>>
 build_s_load_dwordx2(uint16_t sdst, uint16_t sbase, uint32_t byte_offset, rj_code_arch_t arch,
                      const util::DiagnosticEmitter *error = nullptr) {
@@ -133,6 +133,7 @@ build_s_load_dwordx2(uint16_t sdst, uint16_t sbase, uint32_t byte_offset, rj_cod
   if (sdst > kMaxSmemSdata)
     return fail("SMEM destination SGPR index exceeds the SDATA field");
   const auto offset_max = max_smem_byte_offset(arch, error);
+  // The delegated failure has already emitted its diagnostic; do not call fail again.
   if (offset_max.failed())
     return util::Result::failure();
   if (byte_offset > offset_max.value())
@@ -201,7 +202,7 @@ build_s_load_dwordx2(uint16_t sdst, uint16_t sbase, uint32_t byte_offset, rj_cod
                               .scale_offset = 0,
                               .soffset = static_cast<uint8_t>(cdna5::OPR_SMEM_OFFSET_NULL)});
   default:
-    return fail("s_load_dwordx2 for target architecture");
+    return fail("unsupported target architecture for s_load_dwordx2");
   }
 }
 
@@ -244,7 +245,7 @@ build_wait_scalar_loads_complete(rj_code_arch_t arch,
     return build_sopp_encoding(arch, cdna5::kSWaitKmcntSopp, 0);
   default:
     if (error != nullptr)
-      return error->emit() << "scalar-load wait for target architecture";
+      return error->emit() << "unsupported target architecture for the scalar-load wait";
     return util::Result::failure();
   }
 }

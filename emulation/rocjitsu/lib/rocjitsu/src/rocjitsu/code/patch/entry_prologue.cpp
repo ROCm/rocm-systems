@@ -7,6 +7,7 @@
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/builders/smem_builders.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
+#include "util/diagnostic.h"
 
 #include <algorithm>
 #include <array>
@@ -162,6 +163,7 @@ std::optional<DbiEntryPrologue> build_dbi_entry_prologue(const KD &desc, rj_code
       error_out->assign(message);
   };
   const util::DiagnosticEmitter error(record_error);
+  // Delegated failures use the adapter to populate error_out before returning failure.
   const auto offset_max = max_smem_byte_offset(arch, &error);
   if (offset_max.failed())
     return std::nullopt;
