@@ -450,6 +450,7 @@
       "timeout": 600,
       "description": "Classic NET/IB multi-segment DMA-BUF path: per-segment registration, asymmetric offsets, boundary splitting and the segment cap. One rank per node so the DeepEP multi-node stress test is not skipped; the fixture needs DMA-BUF export (NCCL_DMABUF_ENABLE from net_ib_base) and GDR, and skips gracefully without them. The flush tests are in net_ib_multisegment_flush because they need a non-default RCCL_PARAM.",
       "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
         "NCCL_DEBUG": "INFO",
         "NCCL_DEBUG_SUBSYS": "NET,REG"
       },
@@ -555,6 +556,26 @@
       ]
     },
 
+    "net_ib_multisegment_old_peer": {
+      "extends": "net_ib_base",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 600,
+      "description": "The sender forces NCCL_MULTI_SEGMENT_REGISTER off before connect and does not advertise. The receiver declines a multi-segment registration, posts one MR, and the boundary-crossing send uses that rkey.",
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "NET,REG"
+      },
+      "tests": [
+        {
+          "name": "NetIB_MultiSeg_OldPeer_SingleRkeyCrossBoundaryTransfer",
+          "description": "Sender cap off, receiver cap on: the receiver declines multi-segment registration and the cross-boundary write completes on one rkey",
+          "test_filter": "NetIbMultiSegmentMPITest.OldPeer_SingleRkeyCrossBoundaryTransfer"
+        }
+      ]
+    },
+
     "net_ib_multisegment_scale_2x4": {
       "extends": "net_ib_base",
       "num_ranks": 8,
@@ -563,6 +584,7 @@
       "timeout": 600,
       "description": "Classic NET/IB multi-segment transfers with 4 ranks on each of 2 nodes: 4 cross-node pairs, each on its own NIC, register and move multi-segment windows at once. Extends net_ib_base so it runs only the concurrent-pairs test.",
       "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
         "NCCL_DEBUG": "INFO",
         "NCCL_DEBUG_SUBSYS": "NET,REG"
       },
@@ -583,6 +605,7 @@
       "timeout": 300,
       "description": "Per-segment iflush chain. RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING defaults to 1, which routes ncclIbIflush through the RO=0 scratchpad and never reaches the segment-aware branch; 0 selects the direct GDR read per segment. RCCL_PARAM caches on first read, so this must be set before launch. Extends net_ib_base rather than net_ib_multisegment so it does not also re-run that suite's tests under this env.",
       "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
         "NCCL_DEBUG": "INFO",
         "NCCL_DEBUG_SUBSYS": "NET,REG",
         "RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING": "0"
@@ -2116,6 +2139,12 @@
       "name": "NET IB - Multi-Segment DMA-BUF (register off)",
       "description": "Classic NET/IB with NCCL_MULTI_SEGMENT_REGISTER=0: multi-segment registration declined, single-region paths unchanged",
       "config": "net_ib_multisegment_register_off",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Multi-Segment DMA-BUF (old peer)",
+      "description": "Sender forces the multi-segment cap off. The receiver declines multi-segment registration and the boundary-crossing write uses one rkey.",
+      "config": "net_ib_multisegment_old_peer",
       "enabled": true
     },
     {

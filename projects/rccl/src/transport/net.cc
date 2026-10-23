@@ -8,7 +8,6 @@
 
 #include "comm.h"
 #include "net.h"
-#include "rccl_ib_multiseg.h"
 #include "graph.h"
 #include "proxy.h"
 #include "collectives.h"
@@ -2459,10 +2458,14 @@ static ncclResult_t sendProxyRegBuffer(struct ncclProxyConnection* connection, s
   int dmabuf_fd = -1;
   /* DMA-BUF support */
   if (resources->useDmaBuf && ncclCuMemEnable()) {
-    // RCCL: one MR per physical segment; on failure needReg stays true and the caller stages.
+    // RCCL: fd < 0 asks the plugin to register one MR per physical segment.
+    // offset is (export flags << 32) | segment count. Failure stages.
     if (numSegments > 1) {
-      if (rcclNetIbRegMrMultiSeg(proxyState, resources->netSendComm, (void*)info->buffer, info->size, numSegments,
-                                 getHandleForAddressRangeFlags(resources->useGdr), &handle) == ncclSuccess)
+      uint64_t packed = (uint64_t)(uint32_t)numSegments |
+                        ((uint64_t)(uint32_t)getHandleForAddressRangeFlags(resources->useGdr) << 32);
+      if (proxyState->ncclNet->regMrDmaBuf &&
+          proxyState->ncclNet->regMrDmaBuf(resources->netSendComm, (void*)info->buffer, info->size, NCCL_PTR_CUDA,
+                                           packed, -1, &handle) == ncclSuccess)
         needReg = false;
       goto peermem;
     }
@@ -2486,7 +2489,7 @@ peermem:
   }
 #endif
 #if defined(__HIP_PLATFORM_AMD__)
-  // HSA DMA-BUF is whole-range (first VMM segment only); skip it for multi-seg.
+  // RCCL: HSA DMA-BUF is whole-range (first VMM segment only); skip it for multi-seg.
   if (needReg && numSegments <= 1 && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf) {
     if (ncclHsaRegMrDmaBuf(proxyState->ncclNet->regMrDmaBuf, resources->netSendComm, (void*)info->buffer, info->size,
                            NCCL_PTR_CUDA, &handle)) {
@@ -2547,10 +2550,14 @@ static ncclResult_t recvProxyRegBuffer(struct ncclProxyConnection* connection, s
   int dmabuf_fd = -1;
   /* DMA-BUF support */
   if (resources->useDmaBuf && ncclCuMemEnable()) {
-    // RCCL: one MR per physical segment; on failure needReg stays true and the caller stages.
+    // RCCL: fd < 0 asks the plugin to register one MR per physical segment.
+    // offset is (export flags << 32) | segment count. Failure stages.
     if (numSegments > 1) {
-      if (rcclNetIbRegMrMultiSeg(proxyState, resources->netRecvComm, (void*)info->buffer, info->size, numSegments,
-                                 getHandleForAddressRangeFlags(resources->useGdr), &handle) == ncclSuccess)
+      uint64_t packed = (uint64_t)(uint32_t)numSegments |
+                        ((uint64_t)(uint32_t)getHandleForAddressRangeFlags(resources->useGdr) << 32);
+      if (proxyState->ncclNet->regMrDmaBuf &&
+          proxyState->ncclNet->regMrDmaBuf(resources->netRecvComm, (void*)info->buffer, info->size, NCCL_PTR_CUDA,
+                                           packed, -1, &handle) == ncclSuccess)
         needReg = false;
       goto peermem;
     }
@@ -2574,7 +2581,7 @@ peermem:
   }
 #endif
 #if defined(__HIP_PLATFORM_AMD__)
-  // HSA DMA-BUF is whole-range (first VMM segment only); skip it for multi-seg.
+  // RCCL: HSA DMA-BUF is whole-range (first VMM segment only); skip it for multi-seg.
   if (needReg && numSegments <= 1 && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf) {
     if (ncclHsaRegMrDmaBuf(proxyState->ncclNet->regMrDmaBuf, resources->netRecvComm, (void*)info->buffer, info->size,
                            NCCL_PTR_CUDA, &handle)) {

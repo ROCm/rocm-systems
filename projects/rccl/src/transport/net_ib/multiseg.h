@@ -8,7 +8,7 @@
 #ifndef NCCL_NET_IB_MULTISEG_H_
 #define NCCL_NET_IB_MULTISEG_H_
 
-// Pure, dependency-free segment-selection helpers for the classic NET/IB
+// RCCL: pure, dependency-free segment-selection helpers for the classic NET/IB
 // multi-segment DMA-BUF path (AIRUNTIME-2351 classic-path follow-up). Kept free
 // of ibverbs / RCCL types so the boundary math can be unit-tested on the host
 // without IB hardware (see test/.../NetIbMultiSegmentUnitTests.cpp).
@@ -17,7 +17,7 @@
 #include <cstdint>
 #include <cstring>
 
-// Cap on physical segments per registered buffer for the classic NET/IB path.
+// RCCL: cap on physical segments per registered buffer for the classic NET/IB path.
 // Mirrors NCCL_RMA_MAX_SEGMENTS (net_ib/rma_multiseg.h): a ROCm/HIP dma-buf export only
 // describes the first physical segment, so multi-segment cuMem/VMM buffers are
 // registered as one MR per segment (AIRUNTIME-2351 classic-path follow-up).
@@ -27,7 +27,7 @@
 #define NCCL_IB_MAX_SEGMENTS 16
 #endif
 
-// Connect-time capability encoded in the reserved tail of the fixed-size
+// RCCL: connect-time capability encoded in the reserved tail of the fixed-size
 // devName field. This preserves the legacy metadata size and every legacy
 // field offset, so old and new peers can complete the same wire exchange.
 #define NCCL_IB_CAP_MULTISEG (1u << 0)
@@ -53,7 +53,7 @@ static inline uint32_t ncclIbGetConnectCaps(const char* devName, size_t len) {
   return trailer.magic == NCCL_IB_CONNECT_CAPS_MAGIC ? trailer.caps : 0;
 }
 
-// Set in every CTS entry's nreqs when the receiver also wrote the side table for
+// RCCL: set in every CTS entry's nreqs when the receiver also wrote the side table for
 // that slot. Only sent to peers that advertised NCCL_IB_CAP_MULTISEG, so slots
 // with only single-segment receives keep the legacy wire format.
 #define NCCL_IB_CTS_NREQS_SIDE_TABLE (1u << 31)
@@ -66,14 +66,24 @@ static inline bool ncclIbCtsHasSideTable(uint32_t nreqs) {
   return (nreqs & NCCL_IB_CTS_NREQS_SIDE_TABLE) != 0;
 }
 
-// A multi-segment registration is only usable if the peer can parse the
-// per-segment CTS side table. Single-segment buffers keep the legacy wire
-// format, so they are accepted whatever the peer advertised.
+// RCCL: false means the caller retries. No table, no peer cap, or no side bit is ready.
+static inline bool ncclIbSideTableReady(bool haveTable, bool peerMultiSeg, bool ctsHasSide, const uint64_t* slotIdx,
+                                        int nreqs, uint64_t idx) {
+  if (!haveTable || !peerMultiSeg || !ctsHasSide) return true;
+  if (slotIdx == NULL || nreqs < 1) return false;
+  for (int r = 0; r < nreqs; r++) {
+    if (slotIdx[r] != idx) return false;
+  }
+  return true;
+}
+
+// RCCL: a recv multi-segment registration is usable only if the peer can parse
+// the CTS side table. Single-segment buffers keep the legacy wire format.
 static inline bool ncclIbDeclineMultiSegRegistration(uint32_t peerCaps, int nSegments) {
   return nSegments > 1 && (peerCaps & NCCL_IB_CAP_MULTISEG) == 0;
 }
 
-// Return the index of the segment that fully contains [addr, addr+len), or -1
+// RCCL: return the index of the segment that fully contains [addr, addr+len), or -1
 // if addr is outside every segment or the range straddles a segment boundary
 // (which the classic single-rkey wire protocol cannot express).
 //
@@ -95,7 +105,7 @@ static inline int ncclIbSegmentIndexForRange(int nSegments, const uintptr_t* seg
   return -1;
 }
 
-// True iff every interior segment equals the largest segment. The first and
+// RCCL: true iff every interior segment equals the largest segment. The first and
 // last may be shorter, since registration can clip a physical allocation at
 // either end, so any two-segment layout passes (e.g. [6 MiB][2 MiB]).
 // Registration declines other layouts and falls back to staging buffers. This
@@ -113,7 +123,7 @@ static inline bool ncclIbSegmentsUniform(int nSegments, const size_t* segLen) {
   return segLen[0] <= stride && segLen[nSegments - 1] <= stride;
 }
 
-// Peer CTS side table is usable iff nSegments is in [1, maxSegments], remDevIdx
+// RCCL: peer CTS side table is usable iff nSegments is in [1, maxSegments], remDevIdx
 // is in range, segStart is strictly increasing, and every rkey is nonzero.
 static inline bool ncclIbCtsRemoteLayoutValid(uint32_t nSegments, int remDevIdx, int maxDevs, int maxSegments,
                                               const uint64_t* segStart, const uint32_t* rkeys) {
@@ -127,7 +137,7 @@ static inline bool ncclIbCtsRemoteLayoutValid(uint32_t nSegments, int remDevIdx,
   return true;
 }
 
-// Write the indices of segments that overlap [addr, addr+len) into out[0..n).
+// RCCL: write the indices of segments that overlap [addr, addr+len) into out[0..n).
 // Returns the count, 0 if len==0 or nothing overlaps, or -1 on overflow /
 // out-of-space. Used by classic IFlush to fence every GPUDirect segment the
 // receive actually touched, not only data[last].
@@ -151,7 +161,7 @@ static inline int ncclIbSegmentsOverlappingRange(int nSegments, const uintptr_t*
 }
 
 // ---------------------------------------------------------------------------
-// Wire-protocol segment splitting.
+// RCCL: wire-protocol segment splitting.
 //
 // A single logical transfer maps byte o -> localOff+o on the sender and
 // remoteOff+o on the receiver, each relative to its own registration. The two
@@ -231,9 +241,15 @@ static inline int ncclIbSplitTransferAtOffsets(int nLocal, const uint64_t* local
   return n;
 }
 
-// Host VMM can report base 0; subtracting then wraps the remaining length.
+// RCCL: host VMM can report base 0; subtracting then wraps the remaining length.
 static inline size_t ncclIbBytesRemainingInSegment(uintptr_t segPtr, uintptr_t segBase, size_t segSize) {
   return (segBase == 0) ? segSize : segSize - (segPtr - segBase);
+}
+
+// RCCL: direct-GDR iflush posts one read per recv per segment. The proxy can
+// post one flush per step before polling, so multi-seg depth is steps times that chain.
+static inline constexpr int ncclIbFlushQpSendDepth(int steps, int maxRecvs, int maxSegments, int legacyDepth, int multiSeg) {
+  return multiSeg ? steps * maxRecvs * maxSegments : legacyDepth;
 }
 
 #endif // NCCL_NET_IB_MULTISEG_H_
