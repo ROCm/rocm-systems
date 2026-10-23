@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 #
 # Build and run the RCCL CPU-only host unit tests: rccl-HostUnitTests plus the
-# host-only microtests. The authoritative list is the `binaries` array in the
-# run phase below -- it is not duplicated here, so the two cannot drift.
+# host-only microtests, the latter through rccl-UnitTestsHostAll, the front door
+# that discovers the rccl-UnitTestsMicro* binaries at run time. This script
+# therefore holds no list of them, and adding one needs no change here.
 #
 # Single source of truth for every command the host-test pipeline needs, so the
 # same steps run locally and in CI and nothing is scattered in the workflow YAML.
@@ -147,99 +148,54 @@ do_host_tests() {
     stamp=(cat)
   fi
 
-  # Every host binary the build produces. Each writes its own JUnit XML
+  # The two binaries this script runs directly. Each writes its own JUnit XML
   # (host_tests*.xml, all uploaded) and appends to the single console LOG_FILE.
-  # rccl-HostUnitTests keeps host_tests.xml for backward compatibility.
+  #
+  # rccl-UnitTestsHostAll is the front door for the ~40 rccl-UnitTestsMicro*
+  # binaries: it discovers them beside itself at run time, runs the ones holding
+  # a selected case, and merges their reports into the one asked for here. That
+  # is why there is no list of them in this script -- adding a host test binary
+  # needs no change here. See MICROTEST_README.md, "rccl-UnitTestsHostAll".
+  # It also absorbs what the list used to encode: a binary that is not built
+  # (rccl-UnitTestsMicroSymKernels needs GENERATE_SYM_KERNELS, off via
+  # install.sh --disable-sym-kernels) is simply not discovered, and a binary
+  # that cannot start is reported as a failing case rather than skipped.
+  #
+  # rccl-HostUnitTests is NOT fronted -- its name does not carry the
+  # rccl-UnitTestsMicro prefix the dispatcher discovers on -- so it is run here,
+  # and keeps host_tests.xml for backward compatibility.
+  #
+  # Third field: where this binary's llvm profiles go, which `coverage` reads
+  # back as $COVERAGE_DIR/<binary>/. For the front door that is $COVERAGE_DIR
+  # itself: the dispatcher inserts each child's own name as a directory
+  # component, so the children land in exactly the per-binary layout `coverage`
+  # expects. (The dispatcher's own profile is then the one file at the top of
+  # $COVERAGE_DIR, which `coverage` ignores; host_test_dispatch.cc's coverage
+  # comes from rccl-UnitTestsMicroHostDispatch, one of the binaries it fronts.)
   local -a binaries=(
-    "rccl-HostUnitTests:$XML_FILE"
-    "rccl-UnitTestsMicroBootstrap:$SCRIPT_DIR/host_tests_micro_bootstrap.xml"
-    "rccl-UnitTestsMicro:$SCRIPT_DIR/host_tests_micro.xml"
-    "rccl-UnitTestsMicroCollectives:$SCRIPT_DIR/host_tests_micro_collectives.xml"
-    "rccl-UnitTestsMicroOnerank:$SCRIPT_DIR/host_tests_micro_onerank.xml"
-    "rccl-UnitTestsMicroMgmtTaskEnq:$SCRIPT_DIR/host_tests_micro_mgmt_task_enq.xml"
-    "rccl-UnitTestsMicroWarpSpeed:$SCRIPT_DIR/host_tests_micro_warpspeed.xml"
-    "rccl-UnitTestsMicroCrypt:$SCRIPT_DIR/host_tests_micro_crypt.xml"
-    "rccl-UnitTestsMicroStrongstream:$SCRIPT_DIR/host_tests_micro_strongstream.xml"
-    "rccl-UnitTestsMicroUtils:$SCRIPT_DIR/host_tests_micro_utils.xml"
-    "rccl-UnitTestsMicroArgcheck:$SCRIPT_DIR/host_tests_micro_argcheck.xml"
-    "rccl-UnitTestsMicroCpuset:$SCRIPT_DIR/host_tests_micro_cpuset.xml"
-    "rccl-UnitTestsMicroInit:$SCRIPT_DIR/host_tests_micro_init.xml"
-    "rccl-UnitTestsMicroInit-uncached:$SCRIPT_DIR/host_tests_micro_init_uncached.xml"
-    "rccl-UnitTestsMicroDdaColl:$SCRIPT_DIR/host_tests_micro_dda_coll.xml"
-    # FAULT_INJECTION defaults ON, so this variant is the arm that ships; init.cc
-    # gates its fault-mask blocks on ENABLE_FAULT_INJECTION at the preprocessor,
-    # so one compile cannot cover both. See test/host/CMakeLists.txt.
-    "rccl-UnitTestsMicroInit-faultinj:$SCRIPT_DIR/host_tests_micro_init_faultinj.xml"
-    "rccl-UnitTestsMicroCollTrace:$SCRIPT_DIR/host_tests_micro_coll_trace.xml"
-    "rccl-UnitTestsMicroRecorder:$SCRIPT_DIR/host_tests_micro_recorder.xml"
-    "rccl-UnitTestsMicroApiTrace:$SCRIPT_DIR/host_tests_micro_api_trace.xml"
-    "rccl-UnitTestsMicroDebug:$SCRIPT_DIR/host_tests_micro_debug.xml"
-    "rccl-UnitTestsMicroEnqueue:$SCRIPT_DIR/host_tests_micro_enqueue.xml"
-    "rccl-UnitTestsMicroGinHostProxy:$SCRIPT_DIR/host_tests_micro_gin_host_proxy.xml"
-    # ENABLE_DEVICE_LINKER defaults ON, so this variant is the arm that ships;
-    # enqueue.cc gates rcclShmemDynamicSize on RCCL_DEVICE_LINKER at the
-    # preprocessor, so one compile cannot cover both. See test/host/CMakeLists.txt.
-    "rccl-UnitTestsMicroEnqueue-devlinker:$SCRIPT_DIR/host_tests_micro_enqueue_devlinker.xml"
-    "rccl-UnitTestsMicroSymKernels:$SCRIPT_DIR/host_tests_micro_symkernels.xml"
-    "rccl-UnitTestsMicroTaskPrep:$SCRIPT_DIR/host_tests_micro_taskprep.xml"
-    "rccl-UnitTestsMicroNvls:$SCRIPT_DIR/host_tests_micro_nvls.xml"
-    "rccl-UnitTestsMicroNcclDevice:$SCRIPT_DIR/host_tests_micro_nccl_device.xml"
-    "rccl-UnitTestsMicroCore:$SCRIPT_DIR/host_tests_micro_core.xml"
-    "rccl-UnitTestsMicroCftDevRuntime:$SCRIPT_DIR/host_tests_micro_cft_dev_runtime.xml"
-    "rccl-UnitTestsMicroConnect:$SCRIPT_DIR/host_tests_micro_connect.xml"
-    "rccl-UnitTestsMicroParam:$SCRIPT_DIR/host_tests_micro_param.xml"
-    "rccl-UnitTestsMicroCe:$SCRIPT_DIR/host_tests_micro_ce.xml"
-    "rccl-UnitTestsMicroPlugin:$SCRIPT_DIR/host_tests_micro_plugin.xml"
-    "rccl-UnitTestsMicroClientSupport:$SCRIPT_DIR/host_tests_micro_client_support.xml"
-    "rccl-UnitTestsMicroProfiler:$SCRIPT_DIR/host_tests_micro_profiler.xml"
-    "rccl-UnitTestsMicroGinHost:$SCRIPT_DIR/host_tests_micro_gin_host.xml"
-    "rccl-UnitTestsMicroGinHostFinalize:$SCRIPT_DIR/host_tests_micro_gin_host_finalize.xml"
-    "rccl-UnitTestsMicroProxy:$SCRIPT_DIR/host_tests_micro_proxy.xml"
-    "rccl-UnitTestsMicroDdaIpc:$SCRIPT_DIR/host_tests_micro_dda_ipc.xml"
-    "rccl-UnitTestsMicroRoctxNvml:$SCRIPT_DIR/host_tests_micro_roctx_nvml.xml"
-    # Standalone-only: roctx.cc's ROCTX_ENABLE arm.
-    "rccl-UnitTestsMicroRoctxNvml-roctx:$SCRIPT_DIR/host_tests_micro_roctx_nvml_roctx.xml"
-    "rccl-UnitTestsMicroRocmwrap:$SCRIPT_DIR/host_tests_micro_rocmwrap.xml"
-    "rccl-UnitTestsMicroAmdsmiWrap:$SCRIPT_DIR/host_tests_micro_amdsmi_wrap.xml"
-    "rccl-UnitTestsMicroRomeModels:$SCRIPT_DIR/host_tests_micro_rome_models.xml"
-    "rccl-UnitTestsMicroTopo:$SCRIPT_DIR/host_tests_micro_topo.xml"
-    "rccl-UnitTestsMicroDiagnostics:$SCRIPT_DIR/host_tests_micro_diagnostics.xml"
-    "rccl-UnitTestsMicroGraph:$SCRIPT_DIR/host_tests_micro_graph.xml"
-    "rccl-UnitTestsMicroRmaProxy:$SCRIPT_DIR/host_tests_micro_rma_proxy.xml"
-    "rccl-UnitTestsMicroDda:$SCRIPT_DIR/host_tests_micro_dda.xml"
-    "rccl-UnitTestsMicroNetIbCastInit:$SCRIPT_DIR/host_tests_micro_net_ib_cast_init.xml"
-    "rccl-UnitTestsMicroNetIbCastDataPath:$SCRIPT_DIR/host_tests_micro_net_ib_cast_data_path.xml"
-    "rccl-UnitTestsMicroNet:$SCRIPT_DIR/host_tests_micro_net.xml"
-    "rccl-UnitTestsMicroMisc:$SCRIPT_DIR/host_tests_micro_misc.xml"
-    "rccl-UnitTestsMicroHostDispatch:$SCRIPT_DIR/host_tests_micro_host_dispatch.xml"
-    "rccl-UnitTestsMicroP2pResiliency:$SCRIPT_DIR/host_tests_micro_p2p_resiliency.xml"
+    "rccl-HostUnitTests:$XML_FILE:$COVERAGE_DIR/rccl-HostUnitTests"
+    "rccl-UnitTestsHostAll:$SCRIPT_DIR/host_tests_micro.xml:$COVERAGE_DIR"
   )
-  # Binaries that only exist for some CMake option settings (rccl-UnitTestsMicroSymKernels needs
-  # GENERATE_SYM_KERNELS, off via install.sh --disable-sym-kernels); missing is a skip, not an error.
-  local -a optional_binaries=("rccl-UnitTestsMicroSymKernels")
 
   : > "$LOG_FILE"   # truncate; each binary appends below
   local rc=0 entry exe name xml profdir
   for entry in "${binaries[@]}"; do
     name="${entry%%:*}"
-    xml="${entry#*:}"
+    xml="${entry#*:}"; xml="${xml%%:*}"
+    profdir="${entry##*:}"
     exe="$BUILD_DIR/$name"
     if [ ! -x "$exe" ]; then
-      if printf '%s\n' "${optional_binaries[@]}" | grep -qx "$name"; then
-        echo "SKIP: $name not built (optional)" | tee -a "$LOG_FILE"
-        continue
-      fi
       echo "ERROR: expected binary not built: $exe" | tee -a "$LOG_FILE"
       rc=1
       continue
     fi
     echo "----- $name -----" | tee -a "$LOG_FILE"
-    # Direct this binary's llvm profiles into its OWN subdir so `coverage` finds
-    # them at $COVERAGE_DIR/<binary>/. Without this, instrumented binaries write
-    # default.profraw into the CWD and coverage sees nothing. %p (PID) + %m
-    # (module hash) keep the process-isolated forks' files distinct; the runner
-    # inherits this value (it sets LLVM_PROFILE_FILE with overwrite=0).
-    profdir="$COVERAGE_DIR/$name"
+    # Direct this binary's llvm profiles into the subdir `coverage` reads back.
+    # Without this, instrumented binaries write default.profraw into the CWD and
+    # coverage sees nothing. %p (PID) + %m (module hash) keep the
+    # process-isolated forks' files distinct; the runner inherits this value (it
+    # sets LLVM_PROFILE_FILE with overwrite=0), as does every binary the front
+    # door forks.
     mkdir -p "$profdir"
     export LLVM_PROFILE_FILE="$profdir/$name-%p-%m.profraw"
     # Shuffle every binary here, not just the micro ones: the init microtests share ~40 mutable

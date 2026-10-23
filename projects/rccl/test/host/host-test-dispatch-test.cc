@@ -817,4 +817,40 @@ TEST(HostDispatchCoverageMicrotest, NoProfileVariableMeansNoManifest)
     EXPECT_EQ(coverageDirectory(), "");
 }
 
+// ── childProfileFile ────────────────────────────────────────────────
+
+TEST(HostDispatchCoverageMicrotest, EachChildProfilesIntoItsOwnDirectory)
+{
+    // Two binaries under one inherited pattern have to end up in different directories: they
+    // compile shared source under different #defines, so their coverage-mapping hashes differ
+    // and a report built from one object over both their profiles is rejected as mismatched.
+    EXPECT_EQ(childProfileFile("/b/coverage/all-%p-%m.profraw", "/b/rccl-UnitTestsMicroInit"),
+              "/b/coverage/rccl-UnitTestsMicroInit/all-%p-%m.profraw");
+    EXPECT_EQ(childProfileFile("/b/coverage/all-%p-%m.profraw", "/b/rccl-UnitTestsMicroUtils"),
+              "/b/coverage/rccl-UnitTestsMicroUtils/all-%p-%m.profraw");
+}
+
+TEST(HostDispatchCoverageMicrotest, ChildProfileKeepsTheCallersFilenamePattern)
+{
+    // The specifiers are the caller's choice -- %p keeps the process-isolated forks' files
+    // distinct, %m the differing module hashes -- so the filename is carried over untouched.
+    EXPECT_EQ(childProfileFile("/b/cov/rccl_%h_%p_%m.profraw", "/b/rccl-UnitTestsMicroCrypt"),
+              "/b/cov/rccl-UnitTestsMicroCrypt/rccl_%h_%p_%m.profraw");
+}
+
+TEST(HostDispatchCoverageMicrotest, APatternWithNoDirectoryStillSeparatesTheChildren)
+{
+    // A bare filename means "profile into the cwd"; the child still gets a directory of its own
+    // so the binaries' profiles do not pool.
+    EXPECT_EQ(childProfileFile("default.profraw", "./rccl-UnitTestsMicroTopo"),
+              "rccl-UnitTestsMicroTopo/default.profraw");
+}
+
+TEST(HostDispatchCoverageMicrotest, NoProfileVariableLeavesTheChildEnvironmentAlone)
+{
+    // Nothing to redirect when coverage is not being collected, and an empty result is what the
+    // call sites test to decide whether to set the variable at all.
+    EXPECT_EQ(childProfileFile("", "/b/rccl-UnitTestsMicroTopo"), "");
+}
+
 }  // namespace

@@ -41,16 +41,19 @@ invented per binary. For a unit at `src/<dirs>/<stem>.cc`:
 | Binary | `rccl-UnitTestsMicro<Stem>`, `<Stem>` UpperCamel | `rccl-UnitTestsMicroGinHost` |
 | gtest suites | `<Stem>…Microtest` — every suite in the TU starts with `<Stem>` | `GinHostProxyAffinityMicrotest` |
 | CTest categories | `test/test_categories_micro_<stem>.yaml`, lowercase | `test/test_categories_micro_gin_host.yaml` |
-| JUnit XML | `host_tests_micro_<stem>.xml` (in `run_host_tests.sh`) | `host_tests_micro_gin_host.xml` |
 
 Because every suite starts with the binary's `<Stem>`, the categories yaml needs
 exactly one pattern (`GinHost*`) and a new suite in the same TU is picked up
 without editing it — gtest's `*` does not cross the `.`, so a per-suite list
 silently drops any suite someone forgets to add.
 
-A new binary is named in three places: `rccl_add_micro_binary()` in
-`test/host/CMakeLists.txt`, the `binaries` array in `run_host_tests.sh`, and
-the microtest list in `lib/test_executor.py` that llvm-cov reads as `--object`.
+A new binary is named in **one** place: `rccl_add_micro_binary()` in
+`test/host/CMakeLists.txt`. Everything that runs it finds it from the name alone
+— `run_host_tests.sh` and `configs/ci-precheckin.json` both go through
+[`rccl-UnitTestsHostAll`](#rccl-unittestshostall--one-front-door-for-every-host-binary),
+which discovers its `rccl-UnitTestsMicro*` siblings at run time. (The microtest
+list in `lib/test_executor.py` that llvm-cov reads as `--object` is the one copy
+left; see AICOMRCCL-2097.)
 
 ## Units under test
 
@@ -1227,10 +1230,21 @@ not a list maintained in the harness, is the object set.
 
 Adding a host test binary therefore needs no change outside this directory.
 
-`run_host_tests.sh` keeps driving the binaries individually: it writes each
-one's profiles into its own `coverage/<binary>/` subdirectory to produce the
-per-binary reports CI publishes, which a single shared profile directory could
-not reconstruct.
+Each child's `LLVM_PROFILE_FILE` is the inherited one with the child's own name
+inserted as a directory component, so the profiles land in
+`<profile dir>/<binary>/` rather than pooling. That is not tidiness: the
+binaries compile some of the same source under different `#define`s, so a shared
+function has a different coverage-mapping hash in each, and a report built from
+one object over a pool of mixed profiles is rejected as mismatched data. The
+layout is what lets `run_host_tests.sh coverage` emit a clean per-binary report
+— it used to get it by exporting a different `LLVM_PROFILE_FILE` around each
+binary in the loop this front door replaces.
+
+Both consumers in this tree now go through it: `run_host_tests.sh` runs
+`rccl-UnitTestsHostAll` (plus `rccl-HostUnitTests`, which is not fronted — its
+name carries no `rccl-UnitTestsMicro` prefix to be discovered on), and
+`configs/ci-precheckin.json` has one `unit_tests_host_all` configuration where
+it used to carry 27 per-binary ones.
 
 ## Standalone host-only build (no full librccl build)
 

@@ -208,6 +208,18 @@
       "tests": [
         {"name": "GdrPeerMem", "description": "net_ib peer-memory client sysfs detection (mock memory_peers tree)", "test_filter": "GdrPeerMem.*"}
       ]
+    },
+    "unit_tests_host_all": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsHostAll",
+      "description": "Every host-only microtest binary, through one front door. rccl-UnitTestsHostAll discovers its rccl-UnitTestsMicro* siblings at run time and merges their reports, so a new host-only binary is picked up here with no change to this file -- which the per-binary entries this replaces could never do. Case names are qualified with the owning binary (MicroInit/InitMicrotest.Case), so a filter can still name a single one. The timeout covers the whole tree rather than one binary.",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 1800,
+      "tests": [
+        {"name": "HostOnlyMicrotests", "description": "Every host-only microtest binary (no GPU, no HIP/RCCL runtime), run and reported through the rccl-UnitTestsHostAll front door", "test_filter": "*"}
+      ]
     }
   },
   "test_suites": [
@@ -221,6 +233,12 @@
       "name": "RCCL Unit Tests - Fixtures",
       "description": "rccl-UnitTestsFixtures (header-level tests including MiscTests.Sorter)",
       "config": "unit_tests_fixtures",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - host-only (all binaries)",
+      "description": "rccl-UnitTestsHostAll: every host-only rccl-UnitTestsMicro* binary, discovered at run time and merged into one report (no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_host_all",
       "enabled": true
     },
     {

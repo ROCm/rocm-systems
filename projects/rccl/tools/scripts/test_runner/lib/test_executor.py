@@ -1172,7 +1172,11 @@ class TestExecutor:
         os.makedirs(self.report_dir, exist_ok=True)
         os.makedirs(self.rawfiles_dir, exist_ok=True)
         if self.args.coverage_report and not getattr(self.args, "skip_tests", False):
-            for profile in Path(self.rawfiles_dir).glob("*.profraw"):
+            # Recursive: rccl-UnitTestsHostAll gives each binary it forks a
+            # directory of its own under here (see host_test_dispatch.cc,
+            # childProfileFile), so a flat glob would leave the previous run's
+            # host-test profiles in place and credit their coverage to this one.
+            for profile in Path(self.rawfiles_dir).rglob("*.profraw"):
                 profile.unlink()
 
         if self.args.verbose:
@@ -3190,7 +3194,12 @@ class TestExecutor:
         print(f"{'='*80}")
 
         rccl_tests_build_dir = self._rccl_tests_build_dir()
-        profraw_files = sorted(glob.glob(os.path.join(self.rawfiles_dir, "*.profraw")))
+        # Recursive for the same reason the cleanup above is: the host-test
+        # front door profiles each binary it forks into its own subdirectory, so
+        # a flat glob would report no host-test coverage at all.
+        profraw_files = sorted(
+            glob.glob(os.path.join(self.rawfiles_dir, "**", "*.profraw"), recursive=True)
+        )
 
         if not profraw_files:
             print(f"ERROR: No .profraw files found in {self.rawfiles_dir}")

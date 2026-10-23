@@ -217,6 +217,24 @@ class CoverageReportingTest(unittest.TestCase):
                     )
                     self.assertFalse(self._run_report(executor, results))
 
+    def test_profraw_from_the_host_test_front_door_is_found(self):
+        # rccl-UnitTestsHostAll gives each binary it forks a directory of its
+        # own under rawfiles/, so the host-only tests' profiles are never at the
+        # top level. A flat scan would find only the perf tests' profraw and
+        # report no host-test coverage at all, which reads as a source
+        # regression rather than as a harness that stopped looking.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            executor, _ = self._coverage_executor(root)
+            nested = Path(executor.rawfiles_dir) / "rccl-UnitTestsMicroInit"
+            nested.mkdir()
+            (nested / "init.profraw").write_bytes(b"profile")
+
+            self.assertTrue(self._run_report(executor, [mock.Mock(returncode=0)] * 4))
+
+            merged = (root / "logs" / "rawprofiles.list").read_text().split()
+            self.assertIn(str(nested / "init.profraw"), merged)
+
     def test_no_object_files_fails_report_generation(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             executor, _ = self._coverage_executor(
