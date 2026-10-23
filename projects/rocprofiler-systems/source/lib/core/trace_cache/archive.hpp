@@ -30,12 +30,12 @@ struct binary_size_archive
     template <typename... Types>
     void operator()(const Types&... values)
     {
-        (size_one(values), ...);
+        (measure_value(values), ...);
     }
 
 private:
     template <typename Type>
-    void size_one(const Type& value)
+    void measure_value(const Type& value)
     {
         if constexpr(archive_serializable<Type, binary_size_archive>)
         {
@@ -60,13 +60,13 @@ struct binary_write_archive
         // Locals: writes through the byte buffer may alias the members.
         std::uint8_t* const out = buffer;
         std::size_t         pos = position;
-        (write_one(values, out, pos), ...);
+        (write_value(values, out, pos), ...);
         position = pos;
     }
 
 private:
     template <typename Type>
-    void write_one(const Type& value, std::uint8_t* out, std::size_t& pos)
+    void write_value(const Type& value, std::uint8_t* out, std::size_t& pos)
     {
         if constexpr(archive_serializable<Type, binary_write_archive>)
         {
@@ -91,13 +91,13 @@ struct binary_read_archive
     void operator()(Types&... values)
     {
         std::uint8_t* cur = cursor;
-        (read_one(values, cur), ...);
+        (read_value(values, cur), ...);
         cursor = cur;
     }
 
 private:
     template <typename Type>
-    void read_one(Type& value, std::uint8_t*& cur)
+    void read_value(Type& value, std::uint8_t*& cur)
     {
         if constexpr(archive_serializable<Type, binary_read_archive>)
         {
