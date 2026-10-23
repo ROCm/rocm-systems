@@ -126,6 +126,12 @@ foreach(
     rj_arith_add_test(${target} fp/${mnemonic}_test.cpp)
 endforeach()
 
+# Dot-product formats retain family-specific arithmetic and status expectations.
+foreach(family IN ITEMS integer fp8 half dot2)
+    set(target "rj_arith_dot_${family}_test")
+    rj_arith_add_test(${target} dot/${family}_test.cpp)
+endforeach()
+
 # Infrastructure has no all-entry-point registry; contracts live in family helpers.
 rj_arith_add_test(rj_arith_cpu_test common/cpu_test.cpp)
 add_subdirectory(headers)
