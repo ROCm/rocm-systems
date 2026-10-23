@@ -361,6 +361,23 @@ jobs:
         -e ROCR_VISIBLE_DEVICES
         -e KUBE_CPU_REQUEST
     steps:
+      # The pre-job cleanup in TheRock's test_component.yml: before the
+      # checkout below cleans the workspace, stop the GPU processes that an
+      # earlier job on this runner left running from its build directory.
+      - name: Fetch the GPU process cleanup script
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          repository: ROCm/TheRock
+          ref: 488e66e7c2220df926c2762e9b97a50becfb4239 # 2026-10-21
+          path: prejob
+          sparse-checkout: build_tools/github_actions/cleanup_processes.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Pre-job cleanup GPU processes
+        timeout-minutes: 5
+        run: bash prejob/build_tools/github_actions/cleanup_processes.sh
+
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -434,3 +451,11 @@ jobs:
           path: integration-${{ matrix.family }}.xml
           if-no-files-found: ignore
           retention-days: 7
+
+      # The job container's init never reaps a killed process, so the script
+      # can report a failure after a passing suite; that must not fail the job.
+      - name: Post-job cleanup GPU processes
+        if: ${{ always() }}
+        continue-on-error: true
+        timeout-minutes: 5
+        run: bash therock/build_tools/github_actions/cleanup_processes.sh
