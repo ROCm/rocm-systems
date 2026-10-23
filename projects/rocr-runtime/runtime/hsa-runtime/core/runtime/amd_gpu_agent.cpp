@@ -98,6 +98,17 @@
 
 namespace rocr {
 
+// Set while this thread is constructing the PC sampling queue. Suppresses the eager utility
+// queue creation in QueueCreate.
+static thread_local bool creating_pc_sampling_queue = false;
+
+// Set while this thread is assembling the blit kernel that runs on the PC sampling queue.
+// Redirects code cache invalidation onto that queue. Armed only after the queue itself is
+// fully constructed, so the redirected dereference can never re-enter the queue's own
+// construction. Both flags are saved and restored rather than cleared, because these
+// constructions can nest.
+static thread_local bool assembling_pc_sampling_blit = false;
+
 namespace AMD {
 const uint64_t CP_DMA_DATA_TRANSFER_CNT_MAX = (1 << 26) - 1;
 
@@ -984,7 +995,15 @@ void GpuAgent::InitDma() {
   // Dedicated compute queue for PC Sampling CP-DMA commands. We need a dedicated queue that runs at
   // highest priority because we do not want the CP-DMA commands to be delayed/blocked due to
   // other dispatches/barriers that could be in the other AQL queues.
-  queues_[QueuePCSampling].reset([queue_lambda]() { return queue_lambda(HSA::HSA_AMD_QUEUE_PRIORITY_MAXIMUM); });
+  // This queue is created on every agent PC sampling is configured on, including agents the
+  // process never dispatches to. Such an agent does not need the utility queue that QueueCreate
+  // otherwise pre-creates, so suppress that for the duration of this construction.
+  queues_[QueuePCSampling].reset([queue_lambda]() {
+    const bool prev = creating_pc_sampling_queue;
+    creating_pc_sampling_queue = true;
+    MAKE_SCOPE_GUARD([&]() { creating_pc_sampling_queue = prev; });
+    return queue_lambda(HSA::HSA_AMD_QUEUE_PRIORITY_MAXIMUM);
+  });
 
   // Decide which engine to use for blits.
   auto blit_lambda = [this](bool prefer_xgmi, lazy_ptr<core::Queue>& queue, bool isHostToDev, uint32_t rec_eng) {
@@ -1076,6 +1095,22 @@ void GpuAgent::InitDma() {
         [blit_lambda, this, eng]() { return blit_lambda(true, queues_[QueueUtility], false, eng); });
   }
 
+  // Blit kernel for PC sampling setup copies. Construct queues_[QueuePCSampling] first and
+  // arm the redirect only afterwards, so the redirected dereference cannot re-enter the
+  // queue's own construction.
+  pcs_blit_.reset([this]() {
+    core::Queue* pcs_queue = (*queues_[QueuePCSampling]).get();
+
+    const bool prev = assembling_pc_sampling_blit;
+    assembling_pc_sampling_blit = true;
+    MAKE_SCOPE_GUARD([&]() { assembling_pc_sampling_blit = prev; });
+
+    auto ret = CreateBlitKernel(pcs_queue);
+    if (ret == nullptr)
+      throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES, "Blit creation failed.");
+    return ret;
+  });
+
   // GWS queues.
   InitGWS();
 }
@@ -1122,6 +1157,11 @@ void GpuAgent::ReleaseResources() {
         [[maybe_unused]] hsa_status_t destroy_st = blit->Destroy();
         assert(destroy_st == HSA_STATUS_SUCCESS);
       }
+    }
+
+    if (!pcs_blit_.empty()) {
+      [[maybe_unused]] hsa_status_t destroy_st = pcs_blit_->Destroy();
+      assert(destroy_st == HSA_STATUS_SUCCESS);
     }
 
     for (int i = 0; i < QueueCount; i++)
@@ -2911,8 +2951,9 @@ hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
 
   // Ensure utility queue has been created.
   // Deferring longer risks exhausting queue count before ISA upload and invalidation capability is
-  // ensured.
-  queues_[QueueUtility].touch();
+  // ensured. The PC sampling queue is exempt: the blit kernel that runs on it performs its own
+  // ISA upload and invalidation on that queue, so it does not depend on the utility queue.
+  if (!creating_pc_sampling_queue) queues_[QueueUtility].touch();
 
   bool dev_mem_queue_descriptor = (flags & HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR) != 0;
 
@@ -3467,9 +3508,9 @@ hsa_status_t GpuAgent::UpdateTrapHandlerWithPCS(pcs_sampling_data_t* pcs_hosttra
       assert(allow_ret == HSA_STATUS_SUCCESS);
     }
 
-    /* On non-large BAR systems, we may not be able to access device memory, so do a DmaCopy */
-    if (DmaCopy(trap_handler_tma_region_, tma_region_host, sizeof(pcs_tma2_t)) !=
-        HSA_STATUS_SUCCESS) {
+    /* On non-large BAR systems, we may not be able to access device memory, so do a copy */
+    if (pcs_blit_->SubmitLinearCopyCommand(trap_handler_tma_region_, tma_region_host,
+                                           sizeof(pcs_tma2_t)) != HSA_STATUS_SUCCESS) {
       finegrain_deallocator()(trap_handler_tma_region_);
       trap_handler_tma_region_ = nullptr;
       return HSA_STATUS_ERROR;
@@ -3593,8 +3634,18 @@ void GpuAgent::InvalidateCodeCaches(void *ptr, size_t size) {
     cache_inv[3] = PM4_ACQUIRE_MEM_DW3_COHER_SIZE_HI(0xFF);
   }
 
-  // Submit the command to the utility queue and wait for it to complete.
-  queues_[QueueUtility]->ExecutePM4(cache_inv, cache_inv_size_dw * sizeof(uint32_t));
+  // Submit the command and wait for it to complete. While the PC sampling blit kernel is being
+  // assembled, submit on queues_[QueuePCSampling] instead of the utility queue: that is the
+  // queue the code object being invalidated will be dispatched on, and dereferencing the utility
+  // queue here would create the queue that construction is avoiding. That queue is already
+  // constructed by the time the flag is set, so the dereference cannot re-enter it. Submissions
+  // on it are serialized by pcs_pm4_mutex_.
+  const bool on_pcs_queue = assembling_pc_sampling_blit;
+  std::unique_lock<std::mutex> pcs_lock(pcs_pm4_mutex_, std::defer_lock);
+  if (on_pcs_queue) pcs_lock.lock();
+
+  auto& inv_queue = on_pcs_queue ? queues_[QueuePCSampling] : queues_[QueueUtility];
+  inv_queue->ExecutePM4(cache_inv, cache_inv_size_dw * sizeof(uint32_t));
 }
 
 lazy_ptr<core::Blit>& GpuAgent::GetBlitObject(uint32_t engine_offset) {
@@ -4275,10 +4326,10 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
     init_data->buf_watermark0 = kPCSamplingWatermarkFraction * init_data->buf_size;
     init_data->buf_watermark1 = kPCSamplingWatermarkFraction * init_data->buf_size;
 
-    // DMA copy init structure to device (required for non-large BAR systems)
-    if (DmaCopy(pcs_data->xcc_data[xcc_id].device_data, init_data, sizeof(*init_data)) !=
-        HSA_STATUS_SUCCESS) {
-      debug_print("Failed to dmaCopy for XCC %u!\n", xcc_id);
+    // Copy init structure to device (required for non-large BAR systems)
+    if (pcs_blit_->SubmitLinearCopyCommand(pcs_data->xcc_data[xcc_id].device_data, init_data,
+                                           sizeof(*init_data)) != HSA_STATUS_SUCCESS) {
+      debug_print("Failed to copy for XCC %u!\n", xcc_id);
       return HSA_STATUS_ERROR;
     }
 
@@ -4287,8 +4338,9 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
         reinterpret_cast<uint8_t*>(pcs_data->xcc_data[xcc_id].device_data) + sizeof(pcs_sampling_data_t);
     size_t count_in_bytes = deviceAllocSize - sizeof(pcs_sampling_data_t);
     size_t count_in_dwords = count_in_bytes / sizeof(uint32_t);
-    if (DmaFill(device_buf_ptr, 0, count_in_dwords) != HSA_STATUS_SUCCESS) {
-      debug_print("Failed to dmaFill for XCC %u!\n", xcc_id);
+    if (pcs_blit_->SubmitLinearFillCommand(device_buf_ptr, 0, count_in_dwords) !=
+        HSA_STATUS_SUCCESS) {
+      debug_print("Failed to fill for XCC %u!\n", xcc_id);
       return HSA_STATUS_ERROR;
     }
   }
