@@ -26,11 +26,10 @@ import argparse
 import logging
 import sys
 import tempfile
-from collections.abc import Iterator
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Optional
+from typing import Optional
 
 from rich.console import Console
 
@@ -45,6 +44,7 @@ from rocprof_compute_soc.soc_base import (  # noqa: E402
     OmniSoC_Base,
     flat_counters_in_perfmon_file,
     is_tcc_channel_counter,
+    iter_analysis_config_metrics,
 )
 from utils.logger import console_error  # noqa: E402
 from utils.mi_gpu_spec import mi_gpu_specs  # noqa: E402
@@ -52,7 +52,6 @@ from utils.utils_common import canonical_config_arch  # noqa: E402
 from utils.utils_counter_defs import (  # noqa: E402
     extract_counters_and_variables,
 )
-from vendored import yaml  # noqa: E402
 
 
 def _counter_display_ip_prefix(counter: str) -> str:
@@ -73,50 +72,6 @@ def _counters_grouped_by_ip_sorted(counters: list[str]) -> dict[str, list[str]]:
     for names in by_ip.values():
         names.sort()
     return by_ip
-
-
-def iter_yaml_metrics(
-    config_dir: Path,
-    gpu_arch: str,
-) -> Iterator[tuple[str, Any, int, str, str]]:
-    """Iterate over all metrics in analysis YAML files."""
-    config_root = config_dir / canonical_config_arch(gpu_arch)
-    if not config_root.is_dir():
-        return
-
-    for ypath in sorted(config_root.glob("*.yaml")):
-        stem_id = ypath.name.split("_")[0]
-        try:
-            with open(ypath, encoding="utf-8") as stream:
-                doc = yaml.safe_load(stream)
-        except (OSError, UnicodeError, yaml.YAMLError):
-            continue
-        if not isinstance(doc, dict):
-            continue
-        panel_cfg = doc.get("Panel Config")
-        if not isinstance(panel_cfg, dict):
-            continue
-        sources = panel_cfg.get("data source")
-        if not isinstance(sources, list):
-            continue
-        for section in sources:
-            if not isinstance(section, dict) or "metric_table" not in section:
-                continue
-            mt = section["metric_table"]
-            if not isinstance(mt, dict):
-                continue
-            metrics = mt.get("metric")
-            if not isinstance(metrics, dict):
-                continue
-            panel_id = mt.get("id")
-            for idx, (metric_name, metric_body) in enumerate(metrics.items()):
-                try:
-                    metric_text = yaml.dump(
-                        metric_body, sort_keys=False, allow_unicode=True
-                    )
-                except (TypeError, yaml.YAMLError):
-                    continue
-                yield stem_id, panel_id, idx, metric_name, metric_text
 
 
 def _rocprof_supported_superset(counters: set[str]) -> set[str]:
@@ -167,10 +122,6 @@ def run_soc_detect_and_coalesce(
     soc.set_perfmon_config(perfmon_config)
 
     counters, _unused_filter_blocks = soc.detect_counters()
-    # Same as OmniSoC_Base.perfmon_filter before perfmon_coalesce: drop
-    # SQ_ACCUM_PREV_HIRES here; it is injected again when LEVEL counters are
-    # allocated so pass grouping matches profiling.
-    counters = counters - {"SQ_ACCUM_PREV_HIRES"}
     if not counters:
         return set(), []
 
@@ -312,12 +263,16 @@ def generate_bucket_metrics(
 
     gpu_series = mi_gpu_specs.get_gpu_series(arch)
     config_arch = canonical_config_arch(arch)
-    for file_id, panel_id, metric_idx, metric_name, metric_yaml in iter_yaml_metrics(
-        config_dir, arch
-    ):
+    for (
+        file_id,
+        panel_id,
+        metric_idx,
+        metric_name,
+        expressions,
+    ) in iter_analysis_config_metrics(config_dir / config_arch, set()):
         total_metrics += 1
         hardware_counters, _unused_builtin_vars = extract_counters_and_variables(
-            metric_yaml, gpu_series, include_supported_denom=False
+            "\n".join(expressions), gpu_series, include_supported_denom=False
         )
         buckets: set[str] = set()
         for formula_counter in hardware_counters:
