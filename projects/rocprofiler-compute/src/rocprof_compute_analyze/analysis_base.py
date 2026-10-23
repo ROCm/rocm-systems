@@ -14,7 +14,6 @@ import pandas as pd
 
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils import file_io, parser, schema
-from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.logger import (
     console_debug,
     console_error,
@@ -23,6 +22,11 @@ from utils.logger import (
     demarcate,
 )
 from utils.metrics.expression import build_metric_value_string
+from utils.ml_api_selectors import (
+    JAX_NOT_COLLECTED_WARNING,
+    resolve_list_selectors,
+    resolve_operator_patterns,
+)
 from utils.utils_analysis import (
     impute_counters_iteration_multiplex,
     validate_workload,
@@ -59,6 +63,60 @@ TOP_STATS_BUILD_IN_CONFIG: OrderedDict[int, dict[str, Any]] = OrderedDict([
         },
     ),
 ])
+
+
+def _authorize_ml_api_operator_flags(
+    args: argparse.Namespace,
+    profiling_config: dict[str, Any],
+) -> None:
+    """Error when operator flags name a selector the workload did not collect."""
+    saved_raw = profiling_config.get("trace_ml_api")
+    saved_selectors = [str(name) for name in saved_raw] if saved_raw else []
+    saved_set = set(saved_selectors)
+
+    try:
+        list_selectors = resolve_list_selectors(getattr(args, "list_operators", None))
+        operator_patterns = resolve_operator_patterns(getattr(args, "operator", None))
+    except ValueError as error:
+        console_error("ml api trace", str(error))
+
+    if list_selectors is None and operator_patterns is None:
+        return
+
+    jax_requested = False
+    explicit_frameworks: list[str] = []
+
+    if list_selectors is not None:
+        for name in list_selectors:
+            if name == "jax":
+                jax_requested = True
+            elif name != "user":
+                explicit_frameworks.append(name)
+
+    if operator_patterns is not None:
+        if operator_patterns.jax_requested:
+            jax_requested = True
+        for name in operator_patterns.explicit:
+            if name != "user":
+                explicit_frameworks.append(name)
+
+    if jax_requested:
+        console_warning("ml api trace", JAX_NOT_COLLECTED_WARNING)
+
+    if not saved_selectors:
+        console_error(
+            "ml api trace",
+            "Workload was not profiled with --trace-ml-api. "
+            "Cannot use --list-operators or --operator.",
+        )
+
+    for name in explicit_frameworks:
+        if name not in saved_set:
+            console_error(
+                "ml api trace",
+                f'Workload was not profiled with "--trace-ml-api {name}". '
+                "Cannot use that selector with --list-operators or --operator.",
+            )
 
 
 class OmniAnalyze_Base:
@@ -307,22 +365,7 @@ class OmniAnalyze_Base:
         )
         profiling_config = self.get_profiling_config()
 
-        # --ml-api-trace enables every backend.
-        ml_api_trace = profiling_config.get("ml_api_trace", False)
-        for backend in KNOWN_ML_API_BACKENDS:
-            needs_trace = getattr(
-                args, f"{backend}_operator", None
-            ) is not None or getattr(args, f"list_{backend}_operators", False)
-            if needs_trace and not (
-                profiling_config.get(f"{backend}_trace", False) or ml_api_trace
-            ):
-                console_error(
-                    "ml api trace",
-                    f'Workload was not profiled with "--{backend}-trace" or '
-                    '"--ml-api-trace". '
-                    f"Cannot use --{backend}-operator or "
-                    f"--list-{backend}-operators.",
-                )
+        _authorize_ml_api_operator_flags(args, profiling_config)
 
         for dir_info in args.path:
             if not any([

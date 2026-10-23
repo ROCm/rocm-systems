@@ -30,6 +30,10 @@ from utils.logger import (
     setup_logging_priority,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
+from utils.ml_api_selectors import (
+    resolve_list_selectors,
+    resolve_operator_patterns,
+)
 from utils.specs import (
     MachineSpecs,
     generate_machine_specs,
@@ -302,17 +306,20 @@ class RocProfCompute:
                 "Use --output-format stdout or txt, or remove --list-stats."
             )
 
-        operator_filter = (
-            args.torch_operator is not None or args.triton_operator is not None
-        )
-        operator_listing = args.list_torch_operators or args.list_triton_operators
+        try:
+            resolve_list_selectors(getattr(args, "list_operators", None))
+            resolve_operator_patterns(getattr(args, "operator", None))
+        except ValueError as error:
+            console_error("ml api trace", str(error))
+
+        operator_filter = getattr(args, "operator", None) is not None
+        operator_listing = getattr(args, "list_operators", None) is not None
 
         if operator_filter or operator_listing:
             if args.output_format != "stdout":
                 console_error(
                     "ml api trace",
-                    "Operator flags (--torch-operator, --triton-operator, "
-                    "--list-torch-operators, --list-triton-operators) are only "
+                    "Operator flags (--operator, --list-operators) are only "
                     "supported with --output-format stdout (the default). "
                     "The matched operator call tree is printed directly to "
                     "stdout and is not captured in txt, csv, or db output. "
@@ -322,10 +329,10 @@ class RocProfCompute:
             if operator_filter and operator_listing:
                 console_warning(
                     "ml api trace",
-                    "Operator filters are ignored when a --list-*-operators "
-                    "flag is used; the full operator tree will be shown. "
-                    "Drop the listing flag to apply the operator filter, or "
-                    "drop the filter to list all operators.",
+                    "Operator filters are ignored when --list-operators "
+                    "is used; the full operator tree will be shown. "
+                    "Drop --list-operators to apply the operator filter, or "
+                    "drop --operator to list all operators.",
                 )
 
     @demarcate

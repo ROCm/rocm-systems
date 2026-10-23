@@ -22,9 +22,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
-* `--triton-trace` no longer captures the Triton kernels that `torch.compile` generates. Use `--torch-trace` for those kernels.
+* Replaced the experimental `--torch-trace`, `--triton-trace`, `--ml-api-trace`, `--list-*-operators`, and `--*-operator` flags with `--trace-ml-api [torch triton jax]`, `--list-operators [torch triton jax user]`, and `--operator [FW:PATTERN]`. `jax` is accepted and not collected yet. User-defined regions are included with every `--trace-ml-api` run. Older workloads remain valid counter profiles; operator analyze requires a re-profile.
 
-* The PyTorch and Triton operator call trees now show each operator's arguments. `--torch-operator` and `--triton-operator` can now be used together.
+* `--trace-ml-api triton` does not capture the Triton kernels that `torch.compile` generates. Use `--trace-ml-api torch` for those kernels.
+
+* The PyTorch and Triton operator call trees now show each operator's arguments. Torch and Triton selectors can be passed together to `--operator`.
 
 * Improved the standalone roofline HTML kernel hover tooltip: it now shows the limiting roof, percent of roofline, achieved and peak bandwidth per memory level, dispatch count and share of total application dispatches, and kernel duration and share of total application time. Kernel names longer than 200 characters are truncated in the sidebar, with the full name shown on hover.
 
