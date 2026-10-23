@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <cstring>
 #include <atomic>
+#include <functional>
 #include <mutex>
 #include <shared_mutex>
 #include <chrono>
@@ -956,6 +957,12 @@ struct PlaybackContext {
     // Load a code object and cache the resulting hipModule_t
     hipModule_t load_module(uint64_t hash_lo, uint64_t hash_hi);
 
+    // Parameter sizes the code object declares for `func`, in order. Empty
+    // means the default, which asks HIP (hipKernelGetParamInfo); a handler test
+    // sets it to stand in for a code object. Returns false when the signature
+    // cannot be read.
+    std::function<bool(hipFunction_t, std::vector<size_t>&)> kernel_param_sizes;
+
     // Resolve a playback-time replacement function for a recorded kernel name.
     // Returns a hipFunction_t loaded from a user-supplied .hsaco if `kernel_name`
     // matches a --replace-kernel pattern, or nullptr if no replacement applies
@@ -1083,6 +1090,33 @@ inline constexpr size_t kHostSnapRecordSize = 41;
 // Whether n whole records fit between p and the end of the event.
 inline bool hrr_host_snapshots_fit(const uint8_t* p, const uint8_t* end, uint16_t n) {
     return p <= end && static_cast<size_t>(end - p) / kHostSnapRecordSize >= n;
+}
+
+// Whether the arguments a launch record carries fit the kernel's signature:
+// the same count, and each argument exactly as many bytes as its parameter. HIP
+// walks the signature of the loaded code object and copies each parameter's size
+// out of kernelParams[i], so an argument list that is short, or an argument that
+// is narrower than its parameter, is read past. On a mismatch *why says which.
+inline bool hrr_kernel_args_match(const std::vector<size_t>& recorded,
+                                  const std::vector<size_t>& declared,
+                                  std::string* why) {
+    char buf[160];
+    if (recorded.size() != declared.size()) {
+        snprintf(buf, sizeof(buf),
+                 "the record carries %zu arguments, the kernel declares %zu",
+                 recorded.size(), declared.size());
+        if (why) *why = buf;
+        return false;
+    }
+    for (size_t i = 0; i < recorded.size(); i++) {
+        if (recorded[i] == declared[i]) continue;
+        snprintf(buf, sizeof(buf),
+                 "argument %zu is %zu bytes, the kernel declares %zu", i,
+                 recorded[i], declared[i]);
+        if (why) *why = buf;
+        return false;
+    }
+    return true;
 }
 
 // Where replay writes the blob of the record at `rec`, or nullptr with *why
