@@ -1,13 +1,22 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-//! One passive, published view of independently reported topology facts.
+//! Source-qualified topology model assembled from passive hardware facts.
 //!
-//! Node IDs are indices into this snapshot, never native IDs. A KFD node
-//! ordinal and a Linux NUMA ID are separate namespaces even when equal.
-//! Routes are directed reports by one source, not a physical switch graph or
-//! permission to map memory. KFD sources have a checked native generation;
-//! the host OS source is best effort and has no atomic generation with KFD.
+//! The fact values in `crate::topology` stand alone. The records here associate
+//! them with sources and nodes in one `TopologySnapshot`. Node and source IDs
+//! are indices into that snapshot, never persistent native identities. Native
+//! node IDs are scoped by their source: a KFD node ordinal and a Linux NUMA ID
+//! remain distinct even when their numbers match.
+//! `TopologyCache` binds a `CacheInfo` to a node; `ReportedRoute` binds a
+//! `MemoryLinkInfo` to two nodes. The payloads remain reusable without either
+//! association.
+//!
+//! Nodes need not have an activatable endpoint, and an endpoint may attach to
+//! more than one node. Routes are directed reports by one source, not a
+//! physical switch graph or permission to map memory. KFD sources have a
+//! checked native generation; host OS observations are best effort and have
+//! no atomic generation in common with KFD or another driver.
 
 use super::host::HostTopologySnapshot;
 use super::{CacheInfo, Endpoint, MemoryLinkInfo};
@@ -47,7 +56,7 @@ pub struct TopologySource {
     pub(crate) driver_instance: Option<DriverInstanceId>,
 }
 
-/// Native node identities remain qualified by their source and type.
+/// Native node names, interpreted only with the source of their topology node.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NativeNodeId {
     /// Host-wide CPU/cache observation.
@@ -151,11 +160,13 @@ pub struct MemoryLocation {
     pub host_visible_bytes: Option<u64>,
 }
 
-/// Complete candidate published only after all driver contributions validate.
+/// One source-qualified view of independent passive topology observations.
+/// A session publishes it only after driver contributions validate.
 /// Host facts can be incomplete; their per-source `complete` flag records that.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TopologySnapshot {
-    /// Best-effort OS host observations used for CPU frontend policy.
+    /// Best-effort OS host observations, retained for CPU identity, CPU sets,
+    /// and cache-sharing details beyond the generic node and cache projection.
     pub host: HostTopologySnapshot,
     /// Passive activation endpoints discovered by installed drivers.
     pub endpoints: Vec<Endpoint>,
