@@ -690,6 +690,18 @@ TEST(HostDispatchShardingMicrotest, GtestFilterIsClearedBeforeAnyChildIsForked)
     EXPECT_EQ(getenv("GTEST_FILTER"), nullptr);
 }
 
+TEST(HostDispatchShardingMicrotest, GtestOutputIsClearedBeforeAnyChildIsForked)
+{
+    // Every child is given an explicit --gtest_output into the report directory. One that still
+    // saw the variable would write the caller's file too -- and in the enumeration pass it would
+    // write a LISTING there, because gtest reports in list mode when an output is set.
+    setenv("GTEST_OUTPUT", "xml:/tmp/callers_report.xml", 1);
+
+    clearConsumedEnvironment();
+
+    EXPECT_EQ(getenv("GTEST_OUTPUT"), nullptr);
+}
+
 // ── coverageDirectory ───────────────────────────────────────────────
 
 TEST(HostDispatchCoverageMicrotest, ObjectsAreRecordedBesideTheProfiles)
