@@ -56,6 +56,7 @@ struct TranslatedMemoryRequest {
   uint64_t address = 0;
   uint32_t data_offset = 0;
   uint32_t size = 0;
+  uint64_t reordered_lane_mask = 0;
 };
 
 /// @brief Retry state retained by a prepared translated memory instruction.
@@ -68,6 +69,7 @@ class TranslatedMemoryProgress {
 public:
   std::optional<GpuVmAccess> access;
   std::vector<TranslatedMemoryRequest> requests;
+  std::vector<uint8_t> reordered_data;
   std::size_t request_index = 0;
   std::size_t completed_bytes = 0;
   uint32_t atomic_lane = 0;
