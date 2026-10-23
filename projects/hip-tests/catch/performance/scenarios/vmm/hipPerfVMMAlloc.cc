@@ -63,8 +63,8 @@ bool ValidateUsingCopy(int deviceId, void* dev_ptr, size_t data_size,
                        std::chrono::microseconds& h2d_elapsed,
                        std::chrono::microseconds& d2h_elapsed) {
   // Get Host Data
-  std::vector<int> A_h(data_size), B_h(data_size);
   size_t size_n = GetSizeN<int>(data_size);
+  std::vector<int> A_h(size_n), B_h(size_n);
 
   for (size_t idx = 0; idx < size_n; ++idx) {
     A_h[idx] = idx;

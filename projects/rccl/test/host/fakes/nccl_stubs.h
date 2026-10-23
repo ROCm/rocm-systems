@@ -41,6 +41,9 @@ extern std::function<ncclResult_t(struct ncclComm*)> g_ncclProfilerPluginFinaliz
 // src/plugin/tuner.cc: commCleanup unloads the tuner plugin through this.
 extern std::function<ncclResult_t(struct ncclComm*)> g_ncclTunerPluginUnload;
 
+// src/allocator.cc: ce_coll.cc allocates its staging buffers here; the default aborts.
+extern std::function<ncclResult_t(void**, size_t)> g_ncclMemAlloc;
+
 // src/misc/mem_manager.cc: commFree releases the single-node size arrays here.
 extern std::function<ncclResult_t(void*)> g_ncclMemFree;
 
@@ -63,6 +66,15 @@ extern int g_initChannelLastId;
 // note a failing commFree bails before free(comm), so such a test must free it itself.
 extern std::vector<std::string> g_cleanupCallOrder;
 extern ncclResult_t g_ncclCeFinalizeResult;
+
+// src/init.cc commFree records these and returns the first GIN error after the
+// sharedRes frees. ncclRmaProxyFinalize still returns immediately.
+extern ncclResult_t g_ncclGinFinalizeResult;
+extern int g_ncclGinFinalizeCalls;
+extern ncclResult_t g_ncclGinHostFinalizeResult;
+extern int g_ncclGinHostFinalizeCalls;
+extern ncclResult_t g_ncclRmaProxyFinalizeResult;
+extern int g_ncclRmaProxyFinalizeCalls;
 // src/plugin/tuner.cc: the comm commCleanup forwarded to ncclTunerPluginUnload.
 extern struct ncclComm* g_ncclTunerPluginUnloadLastComm;
 

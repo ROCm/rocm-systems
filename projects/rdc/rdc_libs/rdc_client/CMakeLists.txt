@@ -38,6 +38,10 @@ target_include_directories(
         "${PROTOB_OUT_DIR}"
 )
 
+# gRPC threads outlive the last channel. rdc_shutdown() dlclose()s this library, and unloading it
+# under those threads crashes the process, so keep it resident.
+target_link_options(${RDCCLIENT_LIB} PRIVATE "LINKER:-z,nodelete")
+
 # Set the VERSION and SOVERSION values
 set_property(TARGET ${RDCCLIENT_LIB} PROPERTY SOVERSION "${VERSION_MAJOR}")
 set_property(TARGET ${RDCCLIENT_LIB} PROPERTY VERSION "${SO_VERSION_STRING}")
