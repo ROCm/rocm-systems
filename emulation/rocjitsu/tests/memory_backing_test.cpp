@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocjitsu/kmd/linux/libc_passthrough.h"
 #include "rocjitsu/kmd/linux/memory_backing.h"
 
 #include <gtest/gtest.h>
@@ -36,6 +37,62 @@
 namespace {
 namespace backing = rocjitsu::memory_backing;
 constexpr size_t kSize = 64 * 1024;
+
+class MemoryBackingDeathTest : public ::testing::Test {
+protected:
+  void SetUp() override {
+    // Re-exec buffers gtest_main's banner. TSan flushes it on _exit, which
+    // would exceed the test's later hard-zero limit when stdout is a file.
+    ASSERT_EQ(std::fflush(stdout), 0);
+  }
+};
+
+void check_metadata_population() {
+  const int warmup = backing::create(1);
+  ASSERT_GE(warmup, 0);
+  close(warmup);
+  const rlimit zero{};
+  ASSERT_EQ(setrlimit(RLIMIT_FSIZE, &zero), 0);
+  for (const bool resolved : {false, true}) {
+    if (resolved)
+      rocjitsu::libc_passthrough().resolve();
+    for (const bool memory_file : {false, true}) {
+      SCOPED_TRACE(resolved);
+      SCOPED_TRACE(memory_file);
+      char path[] = "/tmp/rocjitsu-metadata-XXXXXX";
+      const int fd = memory_file ? memfd_create("metadata", MFD_CLOEXEC) : mkstemp(path);
+      ASSERT_GE(fd, 0);
+      if (!memory_file) {
+        ASSERT_EQ(unlink(path), 0);
+      }
+      for (const size_t size : {size_t{2}, size_t{8193}}) {
+        const std::string expected(size, 'x');
+        ASSERT_EQ(backing::populate_file(fd, expected.data(), expected.size()), 0);
+        struct stat info {};
+        ASSERT_EQ(fstat(fd, &info), 0);
+        EXPECT_EQ(info.st_size, size);
+        EXPECT_EQ(lseek(fd, 0, SEEK_CUR), 0);
+        std::string actual(size, '\0');
+        ASSERT_EQ(pread(fd, actual.data(), actual.size(), 0), size);
+        EXPECT_EQ(actual, expected);
+      }
+      close(fd);
+    }
+  }
+  rlimit observed{};
+  ASSERT_EQ(getrlimit(RLIMIT_FSIZE, &observed), 0);
+  EXPECT_EQ(observed.rlim_cur, 0);
+  EXPECT_EQ(observed.rlim_max, 0);
+}
+
+TEST_F(MemoryBackingDeathTest, MetadataPopulationPreservesContentsAfterLimitDrops) {
+  ASSERT_EXIT(
+      {
+        check_metadata_population();
+        _exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
 
 void check_aliases() {
   const rlimit limit{};
@@ -82,7 +139,7 @@ void check_aliases() {
   EXPECT_EQ(observed.rlim_max, 0);
 }
 
-TEST(MemoryBackingDeathTest, HardZeroLimitPreservesAliasesAndAccessModes) {
+TEST_F(MemoryBackingDeathTest, HardZeroLimitPreservesAliasesAndAccessModes) {
   ASSERT_EXIT(
       {
         check_aliases();
@@ -240,7 +297,7 @@ void check_DescriptorSurvivesCreatingProcessExit() {
   EXPECT_EQ(shmctl(segment, IPC_STAT, &info), -1);
   EXPECT_EQ(errno, EINVAL);
 }
-TEST(MemoryBackingDeathTest, FixedPartialMappingsPreserveDataAndRejectOverlap) {
+TEST_F(MemoryBackingDeathTest, FixedPartialMappingsPreserveDataAndRejectOverlap) {
   ASSERT_EXIT(
       {
         const rlimit limit{};
@@ -252,7 +309,7 @@ TEST(MemoryBackingDeathTest, FixedPartialMappingsPreserveDataAndRejectOverlap) {
       ::testing::ExitedWithCode(0), "");
 }
 
-TEST(MemoryBackingDeathTest, ConcurrentReopensUseIndependentReplies) {
+TEST_F(MemoryBackingDeathTest, ConcurrentReopensUseIndependentReplies) {
   ASSERT_EXIT(
       {
         const rlimit limit{};
@@ -264,7 +321,7 @@ TEST(MemoryBackingDeathTest, ConcurrentReopensUseIndependentReplies) {
       ::testing::ExitedWithCode(0), "");
 }
 
-TEST(MemoryBackingDeathTest, DescriptorSurvivesCreatingProcessExit) {
+TEST_F(MemoryBackingDeathTest, DescriptorSurvivesCreatingProcessExit) {
   ASSERT_EXIT(
       {
         const rlimit limit{};
@@ -321,7 +378,7 @@ void check_concurrent_limits() {
   EXPECT_EQ(observed.rlim_cur, limit.rlim_cur);
 }
 
-TEST(MemoryBackingDeathTest, ConcurrentLimitChangesDoNotAffectAllocations) {
+TEST_F(MemoryBackingDeathTest, ConcurrentLimitChangesDoNotAffectAllocations) {
   ASSERT_EXIT(
       {
         check_concurrent_limits();
@@ -394,7 +451,7 @@ void check_helper_lifecycle(bool subreaper = false) {
   close(next);
 }
 
-TEST(MemoryBackingDeathTest, HelperDoesNotChangeChildWaitsAndRecoversAfterFailure) {
+TEST_F(MemoryBackingDeathTest, HelperDoesNotChangeChildWaitsAndRecoversAfterFailure) {
   ASSERT_EXIT(
       {
         check_helper_lifecycle();
@@ -404,9 +461,6 @@ TEST(MemoryBackingDeathTest, HelperDoesNotChangeChildWaitsAndRecoversAfterFailur
 }
 
 void check_subreaper_warning() {
-  // A re-exec leaves the gtest_main banner buffered on stdout. The logger's
-  // tied stderr stream would otherwise flush it after the file limit is zero.
-  ASSERT_EQ(std::fflush(stdout), 0);
   // GTest captures stderr in a regular file, which cannot accept the warning
   // under hard FSIZE=0. A pipe observes it without relaxing the file limit.
   int diagnostics[2];
@@ -428,7 +482,7 @@ void check_subreaper_warning() {
   EXPECT_EQ(output.find(warning, first + warning.size()), std::string::npos) << output;
 }
 
-TEST(MemoryBackingDeathTest, SubreaperWarnsAboutChildWaitsAndRecoversAfterFailure) {
+TEST_F(MemoryBackingDeathTest, SubreaperWarnsAboutChildWaitsAndRecoversAfterFailure) {
   ASSERT_EXIT(
       {
         check_subreaper_warning();
@@ -458,7 +512,7 @@ void check_group_signal() {
   munmap(view, kSize);
 }
 
-TEST(MemoryBackingDeathTest, GroupSignalsPreserveUnmappedTokens) {
+TEST_F(MemoryBackingDeathTest, GroupSignalsPreserveUnmappedTokens) {
   ASSERT_EXIT(
       {
         check_group_signal();
@@ -508,7 +562,7 @@ void check_lease_replacement() {
   close(lease);
 }
 
-TEST(MemoryBackingDeathTest, ReplacedLeasePreservesOtherDescriptorsAndTokens) {
+TEST_F(MemoryBackingDeathTest, ReplacedLeasePreservesOtherDescriptorsAndTokens) {
   ASSERT_EXIT(
       {
         check_lease_replacement();
@@ -563,7 +617,7 @@ void check_credential_retirement(gid_t alternate) {
   close(retained_pidfd);
 }
 
-TEST(MemoryBackingDeathTest, CredentialChangesRetireLeasesAndPreserveTokens) {
+TEST_F(MemoryBackingDeathTest, CredentialChangesRetireLeasesAndPreserveTokens) {
   gid_t real, effective, saved;
   ASSERT_EQ(getresgid(&real, &effective, &saved), 0);
   gid_t alternate = real != effective ? real : saved;
@@ -641,7 +695,7 @@ void check_exec_retirement() {
   ASSERT_EQ(waitpid(child, &status, 0), child);
 }
 
-TEST(MemoryBackingDeathTest, ExecRetiresUnusedHelperWhileOwnerLives) {
+TEST_F(MemoryBackingDeathTest, ExecRetiresUnusedHelperWhileOwnerLives) {
   ASSERT_EXIT(
       {
         check_exec_retirement();
@@ -672,7 +726,7 @@ void check_nofile_headroom() {
     close(fd);
 }
 
-TEST(MemoryBackingDeathTest, HelperUsesHardDescriptorLimit) {
+TEST_F(MemoryBackingDeathTest, HelperUsesHardDescriptorLimit) {
   ASSERT_EXIT(
       {
         check_nofile_headroom();
@@ -681,7 +735,7 @@ TEST(MemoryBackingDeathTest, HelperUsesHardDescriptorLimit) {
       ::testing::ExitedWithCode(0), "");
 }
 
-TEST(MemoryBackingDeathTest, StartupFailureNamesHelper) {
+TEST_F(MemoryBackingDeathTest, StartupFailureNamesHelper) {
   if (getuid() == 0)
     GTEST_SKIP() << "RLIMIT_NPROC does not constrain root";
   ASSERT_EXIT(
@@ -715,7 +769,7 @@ void check_seek_contract() {
   close(fd);
 }
 
-TEST(MemoryBackingDeathTest, TokenSupportsDmaBufSeekContract) {
+TEST_F(MemoryBackingDeathTest, TokenSupportsDmaBufSeekContract) {
   ASSERT_EXIT(
       {
         check_seek_contract();

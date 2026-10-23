@@ -32,6 +32,7 @@
 #include <sys/syscall.h>
 #include <sys/un.h>
 #include <sys/wait.h>
+#include <type_traits>
 #include <unistd.h>
 
 // The CI base image has older libc/kernel headers than its running kernel.
@@ -54,9 +55,18 @@
 namespace rocjitsu::memory_backing {
 namespace {
 
+// syscall consumes machine words, including arguments passed on the stack.
+// Passing an int mmap offset can leave its upper bits uninitialized.
+template <typename T> auto syscall_word(T value) {
+  if constexpr (std::is_integral_v<T> || std::is_enum_v<T>)
+    return static_cast<long>(value);
+  else
+    return value;
+}
+
 template <typename... Args> long host_call(long number, Args... args) {
   auto call = libc_passthrough().syscall;
-  return call ? call(number, args...) : ::syscall(number, args...);
+  return call ? call(number, syscall_word(args)...) : ::syscall(number, syscall_word(args)...);
 }
 
 void close_fd(int fd) {
@@ -578,7 +588,11 @@ std::string keeper_path() {
   char *arguments[] = {const_cast<char *>(path), const_cast<char *>(owner), nullptr};
   // The helper links its C++ runtime statically. Application preload and loader
   // configuration must not initialize a simulator inside the helper.
-  char *environment[] = {nullptr};
+  // TSan's optional read-only shadow optimization writes a temporary file
+  // before main. An unavailable temp directory skips that optimization while
+  // retaining instrumentation, including with an inherited hard file limit of zero.
+  char no_temporary_files[] = "TMPDIR=/dev/null";
+  char *environment[] = {no_temporary_files, nullptr};
   host_call(SYS_execve, path, arguments, environment);
   startup_failed(5, errno);
 }

@@ -237,7 +237,7 @@ allows. Larger allocations use System V shared RAM retained by Unix socket
 tokens, which travel through the same `SCM_RIGHTS` path. The mapping and metadata
 adapters support both representations; tokens require those adapters and do not
 support `pread`/`pwrite`. The PCI `VramStore` uses separate file-backed storage.
-See [the KMD architecture](architecture.md#kmd--kernel-mode-driver-emulation-kmdlinux) for the
+See [the KMD architecture](architecture.md#kmd-kernel-mode-driver-emulation-kmdlinux) for the
 fallback's same-UID trust assumption and namespace-wide shared-memory budgets.
 
 ### Proactive Mapping

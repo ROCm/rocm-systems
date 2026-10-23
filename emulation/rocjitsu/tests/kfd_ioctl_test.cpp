@@ -40,6 +40,7 @@ RJ_DIAGNOSTIC_POP
 
 #include <cerrno>
 #include <csignal>
+#include <cstdio>
 #include <fcntl.h>
 #include <poll.h>
 #include <spawn.h>
@@ -6724,6 +6725,8 @@ TEST_F(DbgTrapDaemonTest, QueueControlReconstructsRequestedIdsAndReportsInvalidQ
 using CloseOnScopeExit = util::UniqueHandle;
 
 void check_mmap_reply_ownership(bool fallback) {
+  // Flush the re-exec banner before TSan can flush stdout under the zero limit.
+  ASSERT_EQ(std::fflush(stdout), 0);
   if (fallback) {
     const rlimit zero{};
     ASSERT_EQ(setrlimit(RLIMIT_FSIZE, &zero), 0);
@@ -6736,11 +6739,15 @@ void check_mmap_reply_ownership(bool fallback) {
   ASSERT_EQ(rocjitsu::memory_backing::contains(backing.get()), fallback);
   struct stat identity {};
   ASSERT_EQ(fstat(backing.get(), &identity), 0);
+  int server_fd = -1;
   const auto aliases = [&] {
     size_t count = 0;
     for (const auto &entry : std::filesystem::directory_iterator("/proc/self/fd")) {
       struct stat info {};
       const int fd = std::stoi(entry.path().filename().string());
+      // The server may close its RPC socket concurrently with this scan.
+      if (fd == server_fd)
+        continue;
       if (fstat(fd, &info) == 0 && info.st_dev == identity.st_dev && info.st_ino == identity.st_ino)
         ++count;
     }
@@ -6750,7 +6757,8 @@ void check_mmap_reply_ownership(bool fallback) {
 
   int sv[2];
   ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
-  std::jthread server([&, server_fd = sv[1]] {
+  server_fd = sv[1];
+  std::jthread server([&] {
     const CloseOnScopeExit closer{server_fd};
     unsigned mmap_count = 0;
     rocjitsu::RpcHeader request{};
