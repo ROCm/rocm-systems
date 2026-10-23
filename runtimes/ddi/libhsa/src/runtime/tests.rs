@@ -452,35 +452,26 @@ fn logging_flags_use_the_public_64_bit_mask_layout() {
 }
 
 #[test]
-/// Verifies that GPU pool handle encoding reserves coarse fine and group memory.
-fn gpu_pool_handle_encoding_reserves_coarse_fine_and_group_memory() {
-    assert_eq!(
-        decode_gpu_pool_handle(
-            HsaMemoryPool {
-                handle: GPU_POOL_BASE + 1,
-            },
-            1,
-        ),
-        Some((0, 1))
-    );
-    assert_eq!(
-        decode_gpu_pool_handle(
-            HsaMemoryPool {
-                handle: GPU_POOL_BASE + 2,
-            },
-            1,
-        ),
-        Some((0, 2))
-    );
-    assert_eq!(
-        decode_gpu_pool_handle(
-            HsaMemoryPool {
-                handle: GPU_POOL_BASE + 3,
-            },
-            1,
-        ),
-        Some((0, 3))
-    );
+/// Verifies that GPU pool handle encoding preserves every pool class.
+fn gpu_pool_handle_encoding_preserves_every_pool_class() {
+    // Explicit slots pin the existing public handle encoding.
+    for (slot, kind) in [
+        (1, GpuPoolKind::Coarse),
+        (2, GpuPoolKind::Fine),
+        (3, GpuPoolKind::Group),
+        (4, GpuPoolKind::ExtendedFine),
+    ] {
+        assert_eq!(
+            decode_gpu_pool_handle(
+                HsaMemoryPool {
+                    handle: GPU_POOL_BASE + slot,
+                },
+                1,
+            ),
+            Some((0, kind))
+        );
+        assert_eq!(HsaState::gpu_pool(0, kind).handle, GPU_POOL_BASE + slot);
+    }
     assert_eq!(
         decode_gpu_pool_handle(
             HsaMemoryPool {
@@ -537,47 +528,115 @@ fn cache_handles_and_names_are_stable_runtime_objects() {
 }
 
 #[test]
-/// Verifies that CPU cache source prefers numa zero and falls back to system
-/// scan.
-fn cpu_cache_source_prefers_numa_zero_and_falls_back_to_system_scan() {
-    use rocddi::topology::host::{CpuCache, HostDomain};
+/// Verifies that OS caches are not assigned to an unidentified CPU node.
+fn cpu_cache_source_requires_a_unique_cpu_without_domain_evidence() {
+    use rocddi::topology::host::{CpuCache, HostCaches, HostTopologySnapshot};
 
     let cache = |cpu| CpuCache {
         cpu,
         shared_cpus: None,
         info: rocddi::topology::CacheInfo::new(1, 32 * 1024, None, CpuCacheKind::Data),
     };
-    let mut topology = HostTopologySnapshot {
+    let topology = HostTopologySnapshot {
         memory_bytes: None,
         cpu: None,
+        cpu_apic_ids: Vec::new(),
         online_cpus: None,
         caches: HostCaches {
             records: vec![cache(7)],
             complete: true,
         },
-        domains: vec![HostDomain {
-            numa_node: 2,
-            cpus: None,
-            caches: HostCaches {
-                records: vec![cache(2)],
-                complete: true,
-            },
-        }],
+        domains: Vec::new(),
         domains_complete: true,
     };
-    assert_eq!(selected_cpu_caches(&topology).records[0].cpu, 7);
+    assert_eq!(
+        host_caches_for_cpu(&topology, None, 1).unwrap().records[0].cpu,
+        7
+    );
+    assert!(host_caches_for_cpu(&topology, None, 2).is_none());
+}
 
-    topology.domains.push(HostDomain {
-        numa_node: 0,
-        cpus: None,
-        caches: HostCaches {
-            records: vec![cache(0)],
-            complete: true,
+#[test]
+/// Verifies separate KFD CPU nodes retain their bank sizes and APU policy.
+fn cpu_agents_follow_kfd_cpu_nodes_and_system_banks() {
+    use rocddi::topology::host::{HostCaches, HostTopologySnapshot};
+    use rocddi::topology::{
+        CpuNodeInfo, MemoryBank, MemoryBankKind, NativeNodeId, NodeId, NodeKind, SourceId,
+        TopologyNode,
+    };
+
+    let host = CpuInfo {
+        name: "test CPU".into(),
+        compute_units: 12,
+    };
+    let topology = TopologySnapshot {
+        host: HostTopologySnapshot {
+            memory_bytes: Some(3 << 30),
+            cpu: Some(host.clone()),
+            cpu_apic_ids: Vec::new(),
+            online_cpus: None,
+            caches: HostCaches {
+                records: Vec::new(),
+                complete: true,
+            },
+            domains: Vec::new(),
+            domains_complete: true,
         },
-    });
-    assert_eq!(selected_cpu_caches(&topology).records[0].cpu, 0);
-    topology.domains[1].caches.records.clear();
-    assert!(selected_cpu_caches(&topology).records.is_empty());
+        endpoints: Vec::new(),
+        sources: Vec::new(),
+        nodes: [(2, NodeKind::KfdHost, 8), (7, NodeKind::KfdGpu, 4)]
+            .into_iter()
+            .enumerate()
+            .map(|(id, (native, kind, count))| TopologyNode {
+                id: NodeId(id),
+                source: SourceId(0),
+                native_id: NativeNodeId::LinuxKfd(native),
+                kind,
+                cpu: Some(CpuNodeInfo {
+                    core_count: count,
+                    core_id_base: None,
+                    maximum_clock_mhz: None,
+                }),
+            })
+            .collect(),
+        attachments: Vec::new(),
+        routes: Vec::new(),
+        caches: Vec::new(),
+        memory_locations: Vec::new(),
+        memory_banks: [1_u64 << 30, 2_u64 << 30]
+            .into_iter()
+            .enumerate()
+            .map(|(node, capacity_bytes)| MemoryBank {
+                node: NodeId(node),
+                native_ordinal: 0,
+                kind: MemoryBankKind::System,
+                capacity_bytes,
+                native_flags: 0,
+                width_bits: None,
+                maximum_clock_mhz: None,
+            })
+            .collect(),
+    };
+    let cpus = cpu_agents(&topology, &host, 3 << 30);
+    assert_eq!(cpus.len(), 2);
+    assert_eq!(
+        (
+            cpus[0].native_node,
+            cpus[0].compute_units,
+            cpus[0].memory_bytes
+        ),
+        (2, 8, 1 << 30)
+    );
+    assert_eq!(
+        (
+            cpus[1].native_node,
+            cpus[1].compute_units,
+            cpus[1].memory_bytes
+        ),
+        (7, 4, 2 << 30)
+    );
+    assert!(!cpus[0].apu);
+    assert!(cpus[1].apu);
 }
 
 #[test]
@@ -626,6 +685,10 @@ fn legacy_gpu_cache_sizes_match_rocr_aggregation() {
         [32 * 1024, 512 * 1024, 8192 * 1024, 0]
     );
     assert_eq!(cache_sizes(&caches, other), [0, 0, 8192 * 1024, 0]);
+    assert_eq!(
+        cpu_cache_sizes(&caches, agent),
+        [32 * 1024, 256 * 1024, 8192 * 1024, 0]
+    );
 }
 
 #[test]

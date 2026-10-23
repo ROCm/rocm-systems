@@ -480,14 +480,15 @@ impl HsaState {
             SignalBatchPool::System => (0, MemoryKind::System, false),
             SignalBatchPool::Device {
                 index,
-                uncached,
+                extended,
                 flush,
             } => (
                 index,
                 MemoryKind::DeviceLocal {
                     host_visible: true,
-                    coherent: uncached,
-                    uncached,
+                    coherent: extended,
+                    extended_coherent: extended,
+                    uncached: false,
                     contiguous: false,
                 },
                 flush,
@@ -939,6 +940,7 @@ fn amd_signal_uses_consumer_list(attributes: u64) -> bool {
 
 /// Decides whether signal attributes require native interrupt backing.
 unsafe fn signal_uses_interrupt(
+    cpu_count: usize,
     num_consumers: u32,
     consumers: *const HsaAgent,
     attributes: u64,
@@ -955,7 +957,12 @@ unsafe fn signal_uses_interrupt(
     }
     // SAFETY: valid_consumers established this complete readable array.
     let consumers = unsafe { std::slice::from_raw_parts(consumers, num_consumers as usize) };
-    Ok(consumers.iter().any(|agent| agent.handle == CPU_AGENT))
+    Ok(consumers.iter().any(|agent| {
+        agent
+            .handle
+            .checked_sub(CPU_AGENT)
+            .is_some_and(|index| index < cpu_count as u64)
+    }))
 }
 
 /// Finds the record behind one live public signal handle without exporting a
@@ -1016,11 +1023,6 @@ pub unsafe extern "C" fn hsa_signal_create(
         if signal.is_null() {
             return INVALID_ARGUMENT;
         }
-        // SAFETY: The public ABI promises num_consumers readable handles when nonzero.
-        let interrupt = match unsafe { signal_uses_interrupt(num_consumers, consumers, 0) } {
-            Ok(interrupt) => interrupt,
-            Err(status) => return status,
-        };
         let mut guard = match lock() {
             Ok(guard) => guard,
             Err(status) => return status,
@@ -1029,6 +1031,13 @@ pub unsafe extern "C" fn hsa_signal_create(
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
+        // SAFETY: The public ABI promises num_consumers readable handles when nonzero.
+        let interrupt =
+            match unsafe { signal_uses_interrupt(runtime.cpus.len(), num_consumers, consumers, 0) }
+            {
+                Ok(interrupt) => interrupt,
+                Err(status) => return status,
+            };
         let created = match runtime.create_signal(initial_value, interrupt) {
             Ok(signal) => signal,
             Err(status) => return status,
@@ -1068,8 +1077,9 @@ pub unsafe extern "C" fn hsa_amd_signal_create(
         // not inspect a pointer the caller is allowed to omit for these modes.
         // SAFETY: The public ABI promises num_consumers readable handles when
         // the selected signal kind consumes this list.
-        let interrupt = match unsafe { signal_uses_interrupt(num_consumers, consumers, attributes) }
-        {
+        let interrupt = match unsafe {
+            signal_uses_interrupt(runtime.cpus.len(), num_consumers, consumers, attributes)
+        } {
             Ok(interrupt) => interrupt,
             Err(status) => return status,
         };
@@ -1135,8 +1145,9 @@ pub unsafe extern "C" fn hsa_amd_signal_batch_create(
             unsafe { std::slice::from_raw_parts(consumers, num_consumers as usize) }
         };
         // SAFETY: The validated consumer list meets the signal selector's ABI.
-        let interrupt = match unsafe { signal_uses_interrupt(num_consumers, consumers, attributes) }
-        {
+        let interrupt = match unsafe {
+            signal_uses_interrupt(runtime.cpus.len(), num_consumers, consumers, attributes)
+        } {
             Ok(value) => value,
             Err(status) => return status,
         };
