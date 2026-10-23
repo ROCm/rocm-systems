@@ -3,6 +3,7 @@
 
 from rj_arith_headers import public_headers
 
+from pathlib import Path
 import re
 
 import pytest
@@ -50,6 +51,34 @@ def test_other_architectures_keep_existing_path():
 
 
 @pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+def test_generated_float_methods_use_policy_and_no_legacy_fast_path(arch):
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+    )
+    checked = 0
+    for encoding in ('vop1', 'vop3'):
+        source = (root / (encoding + '_exec.cpp')).read_text()
+        for match in re.finditer(
+            r'void (\w+)::execute(?:_modifier)?_impl\([^)]*\)\s*\{', source
+        ):
+            end, depth = match.end(), 1
+            while depth:
+                depth += (source[end] == '{') - (source[end] == '}')
+                end += 1
+            body = source[match.end() : end - 1]
+            if 'arith::execute_float_unary32' not in body:
+                continue
+            assert 'RJ_SIMD' not in body, match[1]
+            assert 'try_execute_' not in body, match[1]
+            assert 'amdgpu::execute_v_' not in body, match[1]
+            assert 'arithmetic_reports_fp_status' in body, match[1]
+            checked += 1
+    assert checked == 60
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
 @pytest.mark.parametrize('name', sorted(BINARY_F32))
 def test_binary_float_bindings_match_architecture_and_policy(arch, name):
     body = gen_float_binary32(arch, name, ['dst'], ['a', 'b'], True)
@@ -87,6 +116,33 @@ def test_binary_float_bindings_match_architecture_and_policy(arch, name):
     assert gen_float_binary32('cdna4', name, ['dst'], ['a', 'b'], False) is None
 
 
+@pytest.mark.parametrize('arch,count', [('rdna3', 30), ('rdna4', 34)])
+def test_generated_binary_float_methods_have_no_legacy_bypass(arch, count):
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+    )
+    checked = 0
+    for encoding in ('vop2', 'vop3'):
+        source = (root / (encoding + '_exec.cpp')).read_text()
+        for match in re.finditer(
+            r'void (\w+)::execute(?:_modifier)?_impl\([^)]*\)\s*\{', source
+        ):
+            end, depth = match.end(), 1
+            while depth:
+                depth += (source[end] == '{') - (source[end] == '}')
+                end += 1
+            body = source[match.end() : end - 1]
+            if 'arith::execute_float_binary32' not in body:
+                continue
+            assert 'RJ_SIMD' not in body, match[1]
+            assert 'try_execute_' not in body, match[1]
+            assert 'amdgpu::execute_v_' not in body, match[1]
+            checked += 1
+    assert checked == count
+
+
 @pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
 @pytest.mark.parametrize('name', sorted(FMA_F32))
 def test_fma_operands_modifiers_and_optional_state(arch, name):
@@ -115,6 +171,34 @@ def test_literal_fma_sources_keep_their_arithmetic_order():
     assert 'dst, a, b, literal' in gen_float_fma32(
         'rdna3', 'V_FMAAK_F32', ['dst'], ['a', 'b', 'literal'], False
     )
+
+
+@pytest.mark.parametrize('arch,count', [('rdna3', 12), ('rdna4', 10)])
+def test_generated_fma_forms_use_rj_arith_without_legacy_arithmetic(arch, count):
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+    )
+    checked = 0
+    for encoding in ('vop2', 'vop3'):
+        source = (root / (encoding + '_exec.cpp')).read_text()
+        for match in re.finditer(
+            r'void (\w+)::execute(?:_modifier)?_impl\([^)]*\)\s*\{', source
+        ):
+            end, depth = match.end(), 1
+            while depth:
+                depth += (source[end] == '{') - (source[end] == '}')
+                end += 1
+            body = source[match.end() : end - 1]
+            if 'arith::execute_float_fma32' not in body:
+                continue
+            assert 'RJ_SIMD' not in body, match[1]
+            assert 'try_execute_' not in body, match[1]
+            assert 'amdgpu::execute_v_' not in body, match[1]
+            assert 'ScopedEnvironment' not in body, match[1]
+            checked += 1
+    assert checked == count
 
 
 @pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
@@ -177,6 +261,31 @@ def test_packed_binary_routes_modes_inline_sources_and_policy(arch, name):
         gen_packed_binary16(arch, name, ['d'], ['a', 'b'], 'ENC_VOP3', ('low', 'high'))
         is None
     )
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+def test_generated_packed_binary_methods_have_no_legacy_arithmetic(arch):
+    source = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+        / 'vop3p_exec.cpp'
+    ).read_text()
+    checked = 0
+    for match in re.finditer(r'void (\w+)::execute_impl\([^)]*\)\s*\{', source):
+        end, depth = match.end(), 1
+        while depth:
+            depth += (source[end] == '{') - (source[end] == '}')
+            end += 1
+        body = source[match.end() : end - 1]
+        if 'arith::execute_packed_binary16' not in body:
+            continue
+        assert 'try_execute_' not in body, match[1]
+        assert 'packed_binary_f16' not in body, match[1]
+        assert 'ScopedEnvironment' not in body, match[1]
+        assert 'arithmetic_reports_fp_status' in body, match[1]
+        checked += 1
+    assert checked == (4 if arch == 'rdna3' else 6)
 
 
 @pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
@@ -268,6 +377,34 @@ def test_dot4_formats_and_c_modifiers(name):
     )
 
 
+# RDNA4 now emits separate ordinary and modifier executors for these six instructions.
+@pytest.mark.parametrize('arch, count', [('rdna3', 6), ('rdna4', 12)])
+def test_generated_float_dot_methods_replace_all_legacy_paths(arch, count):
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+    )
+    checked = 0
+    for encoding in ('vop2', 'vop3p'):
+        source = (root / (encoding + '_exec.cpp')).read_text()
+        for match in re.finditer(
+            r'void (VDot(?:2(?:acc)?F32|4F32)\w+)::execute(?:_modifier)?_impl\([^)]*\)\s*\{',
+            source,
+        ):
+            end, depth = match.end(), 1
+            while depth:
+                depth += (source[end] == '{') - (source[end] == '}')
+                end += 1
+            body = source[match.end() : end - 1]
+            assert 'arith::execute_' in body, match[1]
+            assert 'ROCJITSU_TRY_SIMD' not in body, match[1]
+            assert 'amdgpu::execute_v_dot' not in body, match[1]
+            assert 'amdgpu::gfx' not in body, match[1]
+            checked += 1
+    assert checked == count
+
+
 @pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
 @pytest.mark.parametrize('name', ['V_DOT2_F16_F16', 'V_DOT2_BF16_BF16'])
 def test_half_dot_packed_sources_and_partial_accumulator(arch, name):
@@ -286,6 +423,31 @@ def test_half_dot_packed_sources_and_partial_accumulator(arch, name):
     assert 'dot2_src_needs_half_replication(inst_.src1)' in body
     assert 'arithmetic_flags()' in body
     assert gen_half_dot('cdna4', name, ['d'], ['a', 'b', 'c'], True) is None
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+def test_generated_half_dot_regular_and_dpp_bodies_use_rj_arith(arch):
+    source = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+        / 'vop3_exec.cpp'
+    ).read_text()
+    checked = 0
+    for match in re.finditer(
+        r'void (VDot2(?:F16F16|Bf16Bf16)Vop3)::execute(?:_modifier)?_impl\([^)]*\)\s*\{',
+        source,
+    ):
+        end, depth = match.end(), 1
+        while depth:
+            depth += (source[end] == '{') - (source[end] == '}')
+            end += 1
+        body = source[match.end() : end - 1]
+        assert 'arith::execute_dot2_f16' in body
+        assert 'fp_mode::dot2_' not in body
+        assert 'ROCJITSU_TRY_SIMD' not in body
+        checked += 1
+    assert checked == 4
 
 
 @pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
@@ -322,6 +484,84 @@ def test_half_binary_arithmetic_modes_and_selectors(arch, name):
 
 
 @pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+def test_half_binary_all_encoding_bodies_route_rj_arith(arch):
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+    )
+    count = 0
+    for encoding in ('vop2', 'vop3'):
+        source = (root / (encoding + '_exec.cpp')).read_text()
+        for match in re.finditer(
+            r'void (V(?:Add|Sub|Subrev|Mul|Ldexp)F16Vop[23])::execute(?:_modifier)?_impl\([^)]*\)\s*\{',
+            source,
+        ):
+            end, depth = match.end(), 1
+            while depth:
+                depth += (source[end] == '{') - (source[end] == '}')
+                end += 1
+            body = source[match.end() : end - 1]
+            assert 'arith::execute_float_binary16' in body
+            assert 'fp_mode::arithmetic_f16' not in body
+            assert 'ROCJITSU_TRY_SIMD' not in body
+            count += 1
+    assert count == 20
+
+
+@pytest.mark.parametrize(
+    'arch,names,count',
+    [
+        ('rdna3', ('V_MIN_F16', 'V_MAX_F16'), 8),
+        (
+            'rdna4',
+            ('V_MIN_NUM_F16', 'V_MAX_NUM_F16', 'V_MINIMUM_F16', 'V_MAXIMUM_F16'),
+            12,
+        ),
+    ],
+)
+def test_half_selection_uses_architecture_specific_names_and_all_bodies(
+    arch, names, count
+):
+    from amdisa.codegen.execute.rj_arith_float import gen_float_binary16
+
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+    )
+    for name in names:
+        body = gen_float_binary16(arch, name, ['d'], ['a', 'b'], True)
+        api = 'rj_arith_' + name.lower()
+        assert api + '_w32' + ', ' + api + '_w64' in body
+        assert 'arithmetic_flags()' in body
+        assert 'arithmetic_reports_fp_status()' in body
+        assert (
+            gen_float_binary16(
+                'rdna4' if arch == 'rdna3' else 'rdna3', name, ['d'], ['a', 'b'], True
+            )
+            is None
+        )
+    checked = 0
+    for encoding in ('vop2', 'vop3'):
+        source = (root / (encoding + '_exec.cpp')).read_text()
+        for match in re.finditer(
+            r'void (V(?:Min|Max)(?:Num|imum)?F16Vop[23])::execute(?:_modifier)?_impl\([^)]*\)\s*\{',
+            source,
+        ):
+            end, depth = match.end(), 1
+            while depth:
+                depth += (source[end] == '{') - (source[end] == '}')
+                end += 1
+            body = source[match.end() : end - 1]
+            assert 'arith::execute_float_binary16' in body
+            assert 'std::fmin' not in body and 'std::fmax' not in body
+            assert 'ROCJITSU_TRY_SIMD' not in body
+            checked += 1
+    assert checked == count
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
 @pytest.mark.parametrize(
     'name', ['V_FMA_F16', 'V_FMAC_F16', 'V_FMAAK_F16', 'V_FMAMK_F16']
 )
@@ -349,6 +589,237 @@ def test_half_fma_explicit_accumulator_literal_order_and_modifiers(arch, name):
         assert '((opsel & 4) ? RJ_ARITH_ALU_HIGH_C' in body
         assert 'RJ_ARITH_ALU_NEG_C' in body and 'RJ_ARITH_ALU_ABS_C' in body
     assert gen_float_fma16('rdna3_5', name, ['d'], inputs, False) is None
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+def test_all_half_fma_bodies_route_rj_arith(arch):
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+    )
+    count = 0
+    for encoding in ('vop2', 'vop3'):
+        source = (root / (encoding + '_exec.cpp')).read_text()
+        for match in re.finditer(
+            r'void (VFma(?:c|ak|mk)?F16Vop[23])::execute(?:_modifier)?_impl\([^)]*\)\s*\{',
+            source,
+        ):
+            end, depth = match.end(), 1
+            while depth:
+                depth += (source[end] == '{') - (source[end] == '}')
+                end += 1
+            body = source[match.end() : end - 1]
+            assert 'arith::execute_float_ternary16' in body
+            assert 'fp_mode::fma_f16' not in body and 'ROCJITSU_TRY_SIMD' not in body
+            count += 1
+    assert count == 8
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+def test_half_unary_modes_architecture_and_all_generated_encodings(arch):
+    from amdisa.codegen.execute.rj_arith_float import UNARY_F16, gen_float_unary16
+
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+    )
+    classes = {
+        'V' + ''.join(part.title() for part in name.split('_')[1:])
+        for name in UNARY_F16
+    }
+    for name in UNARY_F16:
+        body = gen_float_unary16(arch, name, ['d'], ['a'], True)
+        arch_suffix = '_gfx12' if arch == 'rdna4' else ''
+        api = 'rj_arith_' + name.lower()
+        assert api + '_w32' + arch_suffix + ', ' + api + '_w64' + arch_suffix in body
+        for flag in ('HIGH_A', 'HIGH_D', 'ABS_A', 'NEG_A'):
+            assert 'RJ_ARITH_ALU_' + flag in body
+        for flag in ('OMOD_2', 'CLAMP'):
+            assert ('RJ_ARITH_ALU_' + flag in body) == (
+                not name.startswith('V_FREXP_EXP_')
+            )
+        assert 'arithmetic_flags()' in body
+        assert 'arithmetic_reports_fp_status()' in body
+        assert gen_float_unary16('cdna4', name, ['d'], ['a'], True) is None
+    count = 0
+    for encoding in ('vop1', 'vop3'):
+        source = (root / (encoding + '_exec.cpp')).read_text()
+        for match in re.finditer(
+            r'void (V\w+F16)Vop[13]::execute(?:_modifier)?_impl\([^)]*\)\s*\{', source
+        ):
+            if match[1] not in classes:
+                continue
+            end, depth = match.end(), 1
+            while depth:
+                depth += (source[end] == '{') - (source[end] == '}')
+                end += 1
+            body = source[match.end() : end - 1]
+            assert 'arith::execute_float_unary16' in body
+            assert 'ROCJITSU_TRY_SIMD' not in body
+            assert 'try_execute_words_simd' not in body
+            count += 1
+    assert count == 56
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+def test_trig_all_encodings_route_rj_arith_instead_of_shared_legacy_helpers(arch):
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+    )
+    count = 0
+    for encoding in ('vop1', 'vop3'):
+        source = (root / (encoding + '_exec.cpp')).read_text()
+        for match in re.finditer(
+            r'void V(?:Sin|Cos)F(16|32)Vop[13]::execute(?:_modifier)?_impl\([^)]*\)\s*\{',
+            source,
+        ):
+            end, depth = match.end(), 1
+            while depth:
+                depth += (source[end] == '{') - (source[end] == '}')
+                end += 1
+            body = source[match.end() : end - 1]
+            assert 'arith::execute_float_unary' + match[1] in body
+            assert 'arithmetic_flags()' in body
+            assert 'arithmetic_reports_fp_status()' in body
+            assert 'amdgpu::execute_v_' not in body
+            assert 'try_execute_' not in body and 'ROCJITSU_TRY_SIMD' not in body
+            count += 1
+    assert count == 16
+
+
+@pytest.mark.parametrize('arch,count', [('rdna3', 20), ('rdna4', 36)])
+def test_ternary_selection_routes_all_encodings_and_modifiers(arch, count):
+    from amdisa.codegen.execute.rj_arith_float import (
+        TERNARY_SELECTION_RDNA3,
+        TERNARY_SELECTION_RDNA4,
+        gen_float_ternary_selection,
+    )
+
+    names = TERNARY_SELECTION_RDNA3 if arch == 'rdna3' else TERNARY_SELECTION_RDNA4
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+    )
+    classes = {
+        'V' + ''.join(part.title() for part in name.split('_')[1:]) for name in names
+    }
+    for name in names:
+        body = gen_float_ternary_selection(arch, name, ['d'], ['a', 'b', 'c'], True)
+        assert 'rj_arith_' + name.lower() + '_w64' in body
+        assert 'arithmetic_flags()' in body
+        assert 'arithmetic_reports_fp_status()' in body
+        for letter in 'ABC':
+            for flag in ('ABS_', 'NEG_'):
+                assert 'RJ_ARITH_ALU_' + flag + letter in body
+        if name.endswith('_F16'):
+            for letter in 'ABCD':
+                assert 'RJ_ARITH_ALU_HIGH_' + letter in body
+        else:
+            assert 'RJ_ARITH_ALU_HIGH' not in body
+        assert (
+            gen_float_ternary_selection('cdna4', name, ['d'], ['a', 'b', 'c'], True)
+            is None
+        )
+    source = (root / 'vop3_exec.cpp').read_text()
+    seen = 0
+    for match in re.finditer(
+        r'void (V\w+F(?:16|32))Vop3::execute(?:_modifier)?_impl\([^)]*\)\s*\{', source
+    ):
+        if match[1] not in classes:
+            continue
+        end, depth = match.end(), 1
+        while depth:
+            depth += (source[end] == '{') - (source[end] == '}')
+            end += 1
+        body = source[match.end() : end - 1]
+        assert 'arith::execute_float_ternary' in body
+        assert 'ROCJITSU_TRY_SIMD' not in body
+        seen += 1
+    assert seen == count
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+def test_fp64_unary_generated_paths(arch):
+    from amdisa.codegen.execute.rj_arith_float import UNARY_F64, gen_float_unary64
+
+    for name in sorted(UNARY_F64):
+        body = gen_float_unary64(arch, name, ['dst'], ['src'], True)
+        arch_suffix = '_gfx12' if arch == 'rdna4' else ''
+        api = 'rj_arith_' + name.lower()
+        assert api + '_w64' + arch_suffix in body
+        assert 'execute_float_unary64' in body
+        assert ('/*integer_result=*/true' in body) == (name == 'V_FREXP_EXP_I32_F64')
+        assert 'arithmetic_flags()' in body
+        assert 'arithmetic_reports_fp_status()' in body
+        for modifier in ('ABS_A', 'NEG_A'):
+            assert 'RJ_ARITH_ALU_' + modifier in body
+        for modifier in ('OMOD_2', 'CLAMP'):
+            assert ('RJ_ARITH_ALU_' + modifier in body) == (
+                not name.startswith('V_FREXP_EXP_')
+            )
+        assert gen_float_unary64('cdna4', name, ['dst'], ['src'], True) is None
+        assert gen_float_unary64(arch, name, ['dst'], ['src', 'extra'], True) is None
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+    )
+    checked = 0
+    for encoding in ('vop1', 'vop3'):
+        source = (root / (encoding + '_exec.cpp')).read_text()
+        for match in re.finditer(
+            r'void (\w+)::execute(?:_modifier)?_impl\([^)]*\)\s*\{', source
+        ):
+            end, depth = match.end(), 1
+            while depth:
+                depth += (source[end] == '{') - (source[end] == '}')
+                end += 1
+            body = source[match.end() : end - 1]
+            if 'arith::execute_float_unary64' not in body:
+                continue
+            assert 'RJ_SIMD' not in body
+            assert 'try_execute_' not in body
+            assert 'amdgpu::execute_v_' not in body
+            checked += 1
+    assert checked == 20
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+@pytest.mark.parametrize('name', ['V_LDEXP_F64', 'V_TRIG_PREOP_F64'])
+def test_float64_word_uses_pair_and_integer_adapter(arch, name):
+    from amdisa.codegen.execute.rj_arith_float import gen_float64_word
+
+    body = gen_float64_word(arch, name, ['dst'], ['a', 'b'], True)
+    assert 'execute_float64_word' in body
+    assert 'arithmetic_flags()' in body
+    assert 'arithmetic_reports_fp_status()' in body
+    assert 'RJ_ARITH_ALU_ABS_B' not in body
+    assert 'RJ_ARITH_ALU_NEG_B' not in body
+    assert gen_float64_word('cdna4', name, ['dst'], ['a', 'b'], True) is None
+    assert gen_float64_word(arch, name, ['dst'], ['a'], True) is None
+    assert ('fp_round_mode_f16_f64' in body) == (name == 'V_LDEXP_F64')
+    assert ('RJ_ARITH_FP_DX10_CLAMP_OFF' in body) == (
+        name == 'V_LDEXP_F64' and arch == 'rdna3'
+    )
+    path = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+        / 'vop3_exec.cpp'
+    )
+    source = path.read_text()
+    cls = 'VLdexpF64' if name == 'V_LDEXP_F64' else 'VTrigPreopF64'
+    start = source.index('void ' + cls + 'Vop3::execute_impl')
+    end = source.index('\n}', start)
+    body = source[start:end]
+    assert 'execute_float64_word' in body
+    assert 'try_execute_' not in body
+    assert 'amdgpu::execute_v_' not in body
 
 
 @pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
@@ -625,6 +1096,33 @@ def test_normalized_conversion_layouts_and_state_contract(arch):
 
 
 @pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+def test_generated_float_pack_methods_have_no_legacy_bypass(arch):
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+    )
+    checked = 0
+    for encoding in ('vop2', 'vop3'):
+        source = (root / (encoding + '_exec.cpp')).read_text()
+        for match in re.finditer(
+            r'void (\w+)::execute(?:_modifier)?_impl\([^)]*\)\s*\{', source
+        ):
+            end, depth = match.end(), 1
+            while depth:
+                depth += (source[end] == '{') - (source[end] == '}')
+                end += 1
+            body = source[match.end() : end - 1]
+            if 'arith::execute_float_pack' not in body:
+                continue
+            assert 'RJ_SIMD' not in body, match[1]
+            assert 'try_execute_' not in body, match[1]
+            assert 'amdgpu::execute_v_' not in body, match[1]
+            checked += 1
+    assert checked == 14
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
 def test_bit_pack_input_layouts_and_state_policy(arch):
     from amdisa.codegen.execute.rj_arith_float import BIT_PACK_NAMES, gen_bit_pack
 
@@ -648,3 +1146,126 @@ def test_bit_pack_input_layouts_and_state_policy(arch):
         assert gen_bit_pack('cdna4', name, ['d'], sources, True) is None
         assert gen_bit_pack(arch, name, ['d'], sources, False) is None
         assert gen_bit_pack(arch, name, ['d'], [], True) is None
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+def test_fma64_pair_layout_modifiers_and_policy(arch):
+    from amdisa.codegen.execute.rj_arith_float import FLOAT_NAMES, gen_float_fma64
+
+    body = gen_float_fma64(arch, 'V_FMA_F64', ['d'], ['a', 'b', 'c'], True)
+    arch_suffix = '_gfx12' if arch == 'rdna4' else ''
+    api = 'rj_arith_v_fma_f64'
+    assert api + '_w64' + arch_suffix in body
+    assert 'execute_float_ternary64' in body
+    assert 'd, a, b, c,' in body
+    for source in 'ABC':
+        assert 'RJ_ARITH_ALU_ABS_' + source in body
+        assert 'RJ_ARITH_ALU_NEG_' + source in body
+    assert 'RJ_ARITH_ALU_OMOD_2' in body
+    assert 'RJ_ARITH_ALU_CLAMP' in body
+    assert 'arithmetic_flags()' in body
+    assert 'arithmetic_reports_fp_status()' in body
+    assert 'V_FMA_F64' in FLOAT_NAMES
+    assert gen_float_fma64('cdna4', 'V_FMA_F64', ['d'], ['a', 'b', 'c'], True) is None
+    assert gen_float_fma64(arch, 'V_FMA_F64', ['d'], ['a', 'b'], True) is None
+    assert gen_float_fma64(arch, 'V_FMA_F64', ['d'], ['a', 'b', 'c'], False) is None
+
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+    )
+    source = (root / arch / 'vop3_exec.cpp').read_text()
+    match = re.search(r'void VFmaF64Vop3::execute_impl\([^)]*\)\s*\{([^}]+)\}', source)
+    assert match
+    assert 'execute_float_ternary64' in match[1]
+    assert 'try_execute_' not in match[1]
+    assert 'amdgpu::execute_v_' not in match[1]
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+def test_mixed_fma_formats_abs_partial_outputs_and_routing(arch):
+    from amdisa.codegen.execute.rj_arith_float import MIXED_FMA_NAMES, gen_mixed_fma
+
+    for name in MIXED_FMA_NAMES:
+        body = gen_mixed_fma(
+            arch, name, ['d'], ['a', 'b', 'c'], 'ENC_VOP3P', ('low', 'high'), 'high_c'
+        )
+        assert 'execute_mixed_fma' in body
+        assert 'arithmetic_flags()' in body
+        assert 'arithmetic_reports_fp_status()' in body
+        for operand in 'ABC':
+            assert 'RJ_ARITH_MIX_F16_' + operand in body
+            assert 'RJ_ARITH_ALU_HIGH_' + operand in body
+            assert 'RJ_ARITH_ALU_ABS_' + operand in body
+        assert 'inst_.neg_hi' in body and 'is_inline_float_src' in body
+        assert 'RJ_ARITH_ALU_OMOD' not in body
+        byte_mask = (
+            '0xF' if name == 'V_FMA_MIX_F32' else '0xC' if 'MIXHI' in name else '0x3'
+        )
+        assert 'narrow_sources, ' + byte_mask in body
+        assert (
+            gen_mixed_fma(
+                'cdna4',
+                name,
+                ['d'],
+                ['a', 'b', 'c'],
+                'ENC_VOP3P',
+                ('low', 'high'),
+                'high_c',
+            )
+            is None
+        )
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+    )
+    source = (root / arch / 'vop3p_exec.cpp').read_text()
+    checked = 0
+    for match in re.finditer(
+        r'void (VFmaMix(?:F32|loF16|hiF16)Vop3p)::execute(?:_modifier)?_impl\([^)]*\)\s*\{',
+        source,
+    ):
+        end, depth = match.end(), 1
+        while depth:
+            depth += (source[end] == '{') - (source[end] == '}')
+            end += 1
+        body = source[match.end() : end - 1]
+        assert 'execute_mixed_fma' in body
+        assert 'try_execute_' not in body and 'amdgpu::execute_v_' not in body
+        checked += 1
+    assert checked == 6
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4', 'cdna5'])
+def test_pseudo_scalar_routing_and_semantics(arch):
+    from amdisa.codegen.execute.rj_arith_float import (
+        PSEUDO_SCALAR_NAMES,
+        gen_pseudo_scalar,
+    )
+
+    for name in PSEUDO_SCALAR_NAMES:
+        body = gen_pseudo_scalar(arch, name, ['d'], ['a'], True)
+        if arch != 'rdna4':
+            assert body is None
+            continue
+        assert 'execute_pseudo_scalar' in body
+        assert 'rj_arith_' + name.lower() in body
+        assert 'arithmetic_flags()' in body
+        assert 'arithmetic_reports_fp_status()' in body
+        assert 'wave64' not in body and 'exec_mask' not in body
+        assert 'OPSEL' not in body and 'HIGH_A' not in body
+        assert gen_pseudo_scalar(arch, name, ['d'], ['a'], False) is None
+    if arch == 'rdna4':
+        root = (
+            Path(__file__).resolve().parents[3]
+            / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        )
+        source = (root / arch / 'vop3_exec.cpp').read_text()
+        bodies = re.findall(
+            r'void VS(?:Exp|Log|Rcp|Rsq|Sqrt)F(?:16|32)Vop3::execute_impl\([^)]*\)\s*\{([^}]+)\}',
+            source,
+        )
+        assert len(bodies) == 10
+        for body in bodies:
+            assert 'execute_pseudo_scalar' in body
+            assert 'transcendental::' not in body and 'amdgpu::execute_v_' not in body

@@ -1,6 +1,8 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+from pathlib import Path
+import re
 
 import pytest
 
@@ -47,3 +49,28 @@ def test_vector_move_and_conditional_controls(arch):
     assert 'wf.vcc_mask()' in gen_vector32(
         arch, 'V_CNDMASK_B32', ['d'], ['a', 'b'], False
     )
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+def test_all_move_and_selection_encodings_route_to_rj_arith(arch):
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+    )
+    count = 0
+    for file in ('sop1', 'sopk', 'vop1', 'vop2', 'vop3'):
+        source = (root / (file + '_exec.cpp')).read_text()
+        pattern = r'void ((?:S(?:Mov|Cmov)(?:B32|B64|kI32)|VMovB(?:16|32)|VCndmaskB(?:16|32))\w+)::execute(?:_modifier)?_impl\([^)]*\)\s*\{'
+        for match in re.finditer(pattern, source):
+            end, depth = match.end(), 1
+            while depth:
+                depth += (source[end] == '{') - (source[end] == '}')
+                end += 1
+            body = source[match.end() : end - 1]
+            assert re.search(r'\brj_arith(?:_|::)', body), match[1]
+            assert 'try_execute_' not in body
+            assert 'amdgpu::execute_s_' not in body
+            assert 'amdgpu::execute_v_' not in body
+            count += 1
+    assert count == 20  # Six scalar methods, eight MOV and six CNDMASK methods.

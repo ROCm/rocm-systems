@@ -339,10 +339,6 @@ does not select direct-CU groups; their WGP IDs still follow CU child order.
 
 ### CPU arithmetic policy
 
-Configuration and checkpoints currently store this policy. Instruction handlers
-continue to use their existing implementations until the rj-arith integration step.
-The execution behavior described below is the integration contract.
-
 The optional top-level `arithmetic` object selects one semantics mode for
 RDNA3/RDNA4 instructions executed through rj-arith:
 

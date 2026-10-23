@@ -4782,7 +4782,13 @@ TEST_P(ValuDotFamilyTest, MatchesCapturesWithSimdEnabledAndForcedScalar) {
   for (const bool scalar : {true, false}) {
     SCOPED_TRACE(scalar ? "forced scalar" : "SIMD enabled");
     util::set_force_scalar_for_testing(scalar);
-    expect_arithmetic_case(GetParam(), simd_expectation_for_run(GetParam(), scalar));
+    // RDNA3/4 now dispatch through rj-arith, outside the legacy SIMD tracker.
+    // Library tests cover its caller-selected scalar and SIMD backends.
+    const auto &test = GetParam();
+    const bool arith =
+        test.arch == ROCJITSU_CODE_ARCH_RDNA3 || test.arch == ROCJITSU_CODE_ARCH_RDNA4;
+    expect_arithmetic_case(test,
+                           arith ? SimdPathExpectation{} : simd_expectation_for_run(test, scalar));
   }
 }
 
@@ -5066,13 +5072,19 @@ INSTANTIATE_TEST_SUITE_P(MinmaxOutputModifiers, ValuMinmaxFpModeTest,
 
 class ValuConversionTest : public testing::TestWithParam<ArithmeticCase> {};
 
-// With SIMD enabled, each case asserts the fast path it takes, or that it has none.
+// Run captured conversions with native CPU dispatch and forced scalar execution.
+// RDNA3/4 use rj-arith, whose backends are covered by its own CPU-level tests;
+// the legacy SIMD tracker only describes the remaining architectures' handlers.
 TEST_P(ValuConversionTest, MatchesCapturesWithSimdEnabledAndForcedScalar) {
   ForceScalarGuard guard;
   for (const bool scalar : {true, false}) {
     SCOPED_TRACE(scalar ? "forced scalar" : "SIMD enabled");
     util::set_force_scalar_for_testing(scalar);
-    expect_arithmetic_case(GetParam(), simd_expectation_for_run(GetParam(), scalar));
+    const auto &test = GetParam();
+    const bool arith =
+        test.arch == ROCJITSU_CODE_ARCH_RDNA3 || test.arch == ROCJITSU_CODE_ARCH_RDNA4;
+    expect_arithmetic_case(test,
+                           arith ? SimdPathExpectation{} : simd_expectation_for_run(test, scalar));
   }
 }
 

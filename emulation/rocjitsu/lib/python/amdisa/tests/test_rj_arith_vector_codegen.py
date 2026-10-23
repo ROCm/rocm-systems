@@ -3,6 +3,7 @@
 
 from rj_arith_headers import public_headers
 
+from pathlib import Path
 import re
 
 import pytest
@@ -72,6 +73,40 @@ def test_single_vgpr_integer_bindings_match_public_signatures(name, count, kind)
 
 
 @pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+def test_generated_rj_arith_bodies_cannot_be_bypassed_by_legacy_simd(arch):
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+    )
+    checked = {'unary': 0, 'binary': 0, 'ternary': 0, 'carry': 0}
+    for path in root.glob('*_exec.cpp'):
+        source = path.read_text()
+        for match in re.finditer(
+            r'void (\w+)::execute(?:_modifier)?_impl\([^)]*\)\s*\{', source
+        ):
+            end, depth = match.end(), 1
+            while depth:
+                depth += (source[end] == '{') - (source[end] == '}')
+                end += 1
+            body = source[match.end() : end - 1]
+            kind = re.search(r'arith::execute_(unary|binary|ternary|carry)32', body)
+            if kind is None:
+                continue
+            assert 'RJ_SIMD' not in body, match[1]
+            assert 'try_execute_' not in body, match[1]
+            assert 'amdgpu::execute_v_' not in body, match[1]
+            checked[kind[1]] += 1
+    # Floating cube and RDNA4 DOT4 also use the full-word ternary adapter.
+    assert checked == {
+        'unary': 104 if arch == 'rdna4' else 96,
+        'binary': 115 if arch == 'rdna4' else 107,
+        'ternary': 90 if arch == 'rdna4' else 82,
+        'carry': 18,
+    }
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
 @pytest.mark.parametrize('name', sorted(CARRY32_NAMES))
 @pytest.mark.parametrize('vop3', [False, True])
 def test_carry_bindings_keep_decoder_commit_and_snapshot_input(arch, name, vop3):
@@ -88,6 +123,109 @@ def test_carry_bindings_keep_decoder_commit_and_snapshot_input(arch, name, vop3)
     else:
         assert 'input_carry = 0u' in body
     assert gen_carry32('cdna4', name, dst, src, vop3) is None
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+def test_wide_integer_bindings_and_generated_routing(arch):
+    from amdisa.codegen.execute.rj_arith_vector import (
+        SHIFT64_NAMES,
+        MAD64_NAMES,
+        gen_wide_integer,
+    )
+
+    for name in SHIFT64_NAMES:
+        body = gen_wide_integer(arch, name, ['d'], ['a', 'b'], True)
+        assert 'execute_shift64(wf, rj_arith_' + name.lower() in body
+        assert 'rj_arith_' + name.lower() + '_w64' in body
+        assert 'inst_.clamp' in body
+        assert gen_wide_integer(arch, name, ['d'], ['a', 'b'], True, 'commit') is None
+    for name in MAD64_NAMES:
+        body = gen_wide_integer(
+            arch, name, ['d', 'sdst'], ['a', 'b', 'c'], True, 'commit'
+        )
+        assert 'execute_mad64(wf, rj_arith_' + name.lower() in body
+        assert 'rj_arith_' + name.lower() + '_w64' in body
+        assert 'd, a, b, c, commit' in body
+        assert (
+            gen_wide_integer('cdna4', name, ['d', 'sdst'], ['a', 'b', 'c'], True)
+            is None
+        )
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+    )
+    checked = {'shift': 0, 'mad': 0}
+    for path in root.glob('*_exec.cpp'):
+        source = path.read_text()
+        for match in re.finditer(
+            r'void (\w+)::execute(?:_modifier)?_impl\([^)]*\)\s*\{', source
+        ):
+            end, depth = match.end(), 1
+            while depth:
+                depth += (source[end] == '{') - (source[end] == '}')
+                end += 1
+            body = source[match.end() : end - 1]
+            kind = re.search(r'arith::execute_(shift|mad)64', body)
+            if kind is None:
+                continue
+            assert 'RJ_SIMD' not in body, match[1]
+            assert 'try_execute_' not in body, match[1]
+            assert 'amdgpu::execute_v_' not in body, match[1]
+            checked[kind[1]] += 1
+    assert checked == {'shift': 3 if arch == 'rdna3' else 4, 'mad': 2}
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+def test_integer16_bindings_own_arithmetic_but_not_dpp_routing(arch):
+    from amdisa.codegen.execute.rj_arith_vector import (
+        UNARY16,
+        BINARY16,
+        TERNARY16,
+        gen_integer16,
+    )
+
+    for names, count in ((UNARY16, 1), (BINARY16, 2), (TERNARY16, 3)):
+        for name in names:
+            sources = ['a', 'b', 'c'][:count]
+            body = gen_integer16(arch, name, ['d'], sources, True)
+            assert (
+                f'execute_integer16<{count}>(wf, rj_arith_{name.lower()}_w32,' in body
+            )
+            assert f'rj_arith_{name.lower()}_w64' in body
+            assert 'RJ_ARITH_ALU_CLAMP' in body and 'RJ_ARITH_ALU_HIGH_D' in body
+            for index, selector in enumerate('ABC'):
+                assert (f'RJ_ARITH_ALU_HIGH_{selector}' in body) == (index < count)
+            assert 'RJ_ARITH_DPP' not in body
+            assert gen_integer16('cdna4', name, ['d'], sources, True) is None
+            assert gen_integer16(arch, name, ['d'], sources + ['extra'], True) is None
+    body = gen_integer16(arch, 'V_NOT_B16', ['d'], ['a'], False)
+    assert 'modifiers = 0' in body
+    assert 'inst_.clamp' not in body and 'opsel' not in body
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+    )
+    counts = {1: 0, 2: 0, 3: 0}
+    for path in root.glob('*_exec.cpp'):
+        source = path.read_text()
+        for match in re.finditer(
+            r'void (\w+)::execute(?:_modifier)?_impl\([^)]*\)\s*\{', source
+        ):
+            end, depth = match.end(), 1
+            while depth:
+                depth += (source[end] == '{') - (source[end] == '}')
+                end += 1
+            body = source[match.end() : end - 1]
+            count = re.search(r'arith::execute_integer16<([123])>', body)
+            if count is None:
+                continue
+            assert 'RJ_SIMD' not in body, match[1]
+            assert 'try_execute_' not in body, match[1]
+            assert 'amdgpu::execute_v_' not in body, match[1]
+            counts[int(count[1])] += 1
+    assert counts == {1: 8, 2: 2 * len(BINARY16), 3: 2 * len(TERNARY16)}
 
 
 @pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
@@ -178,3 +316,36 @@ def test_packed_saturation_reads_word_and_writes_selected_half(arch):
         assert ('vop3_opsel(inst_) & 8' in body) == vop3
         assert '0xF, modifiers & RJ_ARITH_ALU_HIGH_D ? 0xC : 0x3' in body
         assert 'inst_.abs' not in body and 'inst_.neg' not in body
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+def test_qsad_register_layouts_and_no_legacy_bypass(arch):
+    from amdisa.codegen.execute.rj_arith_vector import QSAD_NAMES, gen_wide_integer
+
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+    )
+    source = (root / arch / 'vop3_exec.cpp').read_text()
+    for name in QSAD_NAMES:
+        body = gen_wide_integer(arch, name, ['d'], ['a', 'b', 'c'], True)
+        assert 'execute_qsad' in body
+        assert 'rj_arith_' + name.lower() + '_w64' in body
+        assert 'RJ_ARITH_ALU_CLAMP' in body
+        assert 'RJ_ARITH_ALU_ABS' not in body and 'RJ_ARITH_ALU_NEG' not in body
+        assert ', ' + str(name != 'V_MQSAD_U32_U8').lower() + ');' in body
+        assert 'arithmetic_flags()' in body
+        assert gen_wide_integer('cdna4', name, ['d'], ['a', 'b', 'c'], True) is None
+        assert gen_wide_integer(arch, name, ['d'], ['a', 'b', 'c'], False) is None
+        assert gen_wide_integer(arch, name, ['d'], ['a', 'b'], True) is None
+        assert (
+            gen_wide_integer(arch, name, ['d'], ['a', 'b', 'c'], True, 'commit') is None
+        )
+    bodies = re.findall(
+        r'void V(?:QsadPkU16U8|MqsadPkU16U8|MqsadU32U8)Vop3::execute_impl\([^)]*\)\s*\{([^}]+)\}',
+        source,
+    )
+    assert len(bodies) == 3
+    for body in bodies:
+        assert 'execute_qsad' in body
+        assert 'try_execute_' not in body and 'amdgpu::execute_v_' not in body

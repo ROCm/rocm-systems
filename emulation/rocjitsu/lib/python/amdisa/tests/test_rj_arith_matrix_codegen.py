@@ -49,6 +49,11 @@ def test_shared_dense_forms_bind_both_public_wave_widths(arch, result, factors):
     assert 'arithmetic_flags()' in body
 
 
+@pytest.mark.parametrize('arch', ['rdna3_5', 'cdna4', 'cdna5'])
+def test_other_architectures_keep_their_existing_generators(arch):
+    assert gen_dense_wmma(context('V_WMMA_F32_16X16X16_F16', arch)) is None
+
+
 def test_packed_rdna3_preserves_half_selection_and_inline_replication():
     body = gen_dense_wmma(context('V_WMMA_F16_16X16X16_F16', 'rdna3'))
     assert 'RJ_ARITH_WMMA_HIGH_C_D' in body
