@@ -13976,7 +13976,7 @@ rocprofiler-sdk:
             - gfx1201
           expression: (1-(reduce(TCP_REQ_MISS,sum)/reduce(TCP_REQ,sum)))*100
     - name: CPC_GCRIU_BUSY
-      description: ''
+      description: CPC GCR interface Busy.
       properties: []
       definitions:
         - architectures:
@@ -13988,7 +13988,7 @@ rocprofiler-sdk:
           block: CPC
           event: 35
     - name: CPC_GUS_READ_REQUEST_SENT
-      description: ''
+      description: Count of MC read requests.
       properties: []
       definitions:
         - architectures:
@@ -14000,7 +14000,8 @@ rocprofiler-sdk:
           block: CPC
           event: 51
     - name: CPC_GUS_READ_REQUEST_SENT_sum
-      description: ''
+      description: >-
+        Sum across all CPC instances: Count of MC read requests.
       properties: []
       definitions:
         - architectures:
@@ -14011,7 +14012,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(CPC_GUS_READ_REQUEST_SENT,sum)
     - name: CPC_GUS_WRITE_REQUEST_SENT
-      description: ''
+      description: Count of MC write requests.
       properties: []
       definitions:
         - architectures:
@@ -14023,7 +14024,8 @@ rocprofiler-sdk:
           block: CPC
           event: 50
     - name: CPC_GUS_WRITE_REQUEST_SENT_sum
-      description: ''
+      description: >-
+        Sum across all CPC instances: Count of MC write requests.
       properties: []
       definitions:
         - architectures:
@@ -14034,7 +14036,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(CPC_GUS_WRITE_REQUEST_SENT,sum)
     - name: CPC_ME1_STALL_ON_DATA_FROM_ROQ
-      description: ''
+      description: Me1 stall on data from roq.
       properties: []
       definitions:
         - architectures:
@@ -14046,7 +14048,7 @@ rocprofiler-sdk:
           block: CPC
           event: 11
     - name: CPC_ME1_STALL_WAIT_ON_MEM_READ
-      description: ''
+      description: Me1 stall waiting on MEM read.
       properties: []
       definitions:
         - architectures:
@@ -14058,7 +14060,7 @@ rocprofiler-sdk:
           block: CPC
           event: 9
     - name: CPC_ME1_STALL_WAIT_ON_MEM_WRITE
-      description: ''
+      description: Me1 stall waiting on MEM write.
       properties: []
       definitions:
         - architectures:
@@ -14070,7 +14072,7 @@ rocprofiler-sdk:
           block: CPC
           event: 10
     - name: CPC_ME1_STALL_WAIT_ON_RCIU_READY
-      description: ''
+      description: Me1 stall waiting on RCIU Ready.
       properties: []
       definitions:
         - architectures:
@@ -14082,7 +14084,7 @@ rocprofiler-sdk:
           block: CPC
           event: 6
     - name: CPC_MEC_INSTR_CACHE_HIT
-      description: ''
+      description: MEC Instruction Cache Hits
       properties: []
       definitions:
         - architectures:
@@ -14094,7 +14096,8 @@ rocprofiler-sdk:
           block: CPC
           event: 43
     - name: CPC_MEC_INSTR_CACHE_HIT_sum
-      description: ''
+      description: >-
+        Sum across all CPC instances: MEC Instruction Cache Hits
       properties: []
       definitions:
         - architectures:
@@ -14105,7 +14108,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(CPC_MEC_INSTR_CACHE_HIT,sum)
     - name: CPC_MEC_INSTR_CACHE_MISS
-      description: ''
+      description: MEC Instruction Cache Misses
       properties: []
       definitions:
         - architectures:
@@ -14117,7 +14120,8 @@ rocprofiler-sdk:
           block: CPC
           event: 44
     - name: CPC_MEC_INSTR_CACHE_MISS_sum
-      description: ''
+      description: >-
+        Sum across all CPC instances: MEC Instruction Cache Misses
       properties: []
       definitions:
         - architectures:
@@ -14128,7 +14132,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(CPC_MEC_INSTR_CACHE_MISS,sum)
     - name: CPC_TCIU_READ_REQUEST_SENT
-      description: ''
+      description: Count of TC read requests.
       properties: []
       definitions:
         - architectures:
@@ -14140,7 +14144,8 @@ rocprofiler-sdk:
           block: CPC
           event: 49
     - name: CPC_TCIU_READ_REQUEST_SENT_sum
-      description: ''
+      description: >-
+        Sum across all CPC instances: Count of TC read requests.
       properties: []
       definitions:
         - architectures:
@@ -14151,7 +14156,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(CPC_TCIU_READ_REQUEST_SENT,sum)
     - name: CPC_TCIU_WRITE_REQUEST_SENT
-      description: ''
+      description: Count of TC write requests.
       properties: []
       definitions:
         - architectures:
@@ -14163,7 +14168,8 @@ rocprofiler-sdk:
           block: CPC
           event: 48
     - name: CPC_TCIU_WRITE_REQUEST_SENT_sum
-      description: ''
+      description: >-
+        Sum across all CPC instances: Count of TC write requests.
       properties: []
       definitions:
         - architectures:
@@ -14174,7 +14180,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(CPC_TCIU_WRITE_REQUEST_SENT,sum)
     - name: GCEA_ALWAYS_COUNT
-      description: ''
+      description: GCEA ALWAYS Cycles
       properties: []
       definitions:
         - architectures:
@@ -14186,7 +14192,8 @@ rocprofiler-sdk:
           block: GCEA
           event: 0
     - name: GCEA_ALWAYS_COUNT_sum
-      description: ''
+      description: >-
+        Sum across all GCEA instances: GCEA ALWAYS Cycles
       properties: []
       definitions:
         - architectures:
@@ -14197,7 +14204,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GCEA_ALWAYS_COUNT,sum)
     - name: GCEA_PRB_REQ
-      description: ''
+      description: Probe-invalidates
       properties: []
       definitions:
         - architectures:
@@ -14209,7 +14216,8 @@ rocprofiler-sdk:
           block: GCEA
           event: 68
     - name: GCEA_PRB_REQ_sum
-      description: ''
+      description: >-
+        Sum across all GCEA instances: Probe-invalidates
       properties: []
       definitions:
         - architectures:
@@ -14220,7 +14228,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GCEA_PRB_REQ,sum)
     - name: GCEA_RDRAM_CHAINED_REQ_PER_CLIGRP
-      description: ''
+      description: Request chains per client-group
       properties: []
       definitions:
         - architectures:
@@ -14232,7 +14240,8 @@ rocprofiler-sdk:
           block: GCEA
           event: 3
     - name: GCEA_RDRAM_CHAINED_REQ_PER_CLIGRP_sum
-      description: ''
+      description: >-
+        Sum across all GCEA instances: Request chains per client-group
       properties: []
       definitions:
         - architectures:
@@ -14243,7 +14252,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GCEA_RDRAM_CHAINED_REQ_PER_CLIGRP,sum)
     - name: GCEA_RDRAM_NUM_BANKS_VLD
-      description: ''
+      description: Number of pending banks, saturates at 16
       properties: []
       definitions:
         - architectures:
@@ -14255,7 +14264,8 @@ rocprofiler-sdk:
           block: GCEA
           event: 1
     - name: GCEA_RDRAM_NUM_BANKS_VLD_sum
-      description: ''
+      description: >-
+        Sum across all GCEA instances: Number of pending banks, saturates at 16
       properties: []
       definitions:
         - architectures:
@@ -14266,7 +14276,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GCEA_RDRAM_NUM_BANKS_VLD,sum)
     - name: GCEA_RDRAM_REQ_PER_CLIGRP
-      description: ''
+      description: Requests per client-group
       properties: []
       definitions:
         - architectures:
@@ -14278,7 +14288,8 @@ rocprofiler-sdk:
           block: GCEA
           event: 2
     - name: GCEA_RDRAM_REQ_PER_CLIGRP_sum
-      description: ''
+      description: >-
+        Sum across all GCEA instances: Requests per client-group
       properties: []
       definitions:
         - architectures:
@@ -14289,7 +14300,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GCEA_RDRAM_REQ_PER_CLIGRP,sum)
     - name: GCEA_RDRAM_SIZE_REQ
-      description: ''
+      description: Sized (in 32 byte increments) requests
       properties: []
       definitions:
         - architectures:
@@ -14301,7 +14312,8 @@ rocprofiler-sdk:
           block: GCEA
           event: 77
     - name: GCEA_RDRAM_SIZE_REQ_sum
-      description: ''
+      description: >-
+        Sum across all GCEA instances: Sized (in 32 byte increments) requests
       properties: []
       definitions:
         - architectures:
@@ -14312,7 +14324,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GCEA_RDRAM_SIZE_REQ,sum)
     - name: GCEA_RRET_VLD
-      description: ''
+      description: Read returns of GCEA VLD
       properties: []
       definitions:
         - architectures:
@@ -14324,7 +14336,8 @@ rocprofiler-sdk:
           block: GCEA
           event: 66
     - name: GCEA_RRET_VLD_sum
-      description: ''
+      description: >-
+        Sum across all GCEA instances: Read returns of GCEA VLD
       properties: []
       definitions:
         - architectures:
@@ -14335,7 +14348,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GCEA_RRET_VLD,sum)
     - name: GCEA_SARB_BUSY
-      description: ''
+      description: GCEA SARGB Busy
       properties: []
       definitions:
         - architectures:
@@ -14347,7 +14360,8 @@ rocprofiler-sdk:
           block: GCEA
           event: 62
     - name: GCEA_SARB_BUSY_sum
-      description: ''
+      description: >-
+        Sum across all GCEA instances: GCEA SARGB Busy
       properties: []
       definitions:
         - architectures:
@@ -14358,7 +14372,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GCEA_SARB_BUSY,sum)
     - name: GCEA_SARB_DRAM_REQ_PER_VC
-      description: ''
+      description: DRAM request per virtual channel
       properties: []
       definitions:
         - architectures:
@@ -14370,7 +14384,8 @@ rocprofiler-sdk:
           block: GCEA
           event: 51
     - name: GCEA_SARB_DRAM_REQ_PER_VC_sum
-      description: ''
+      description: >-
+        Sum across all GCEA instances: DRAM request per virtual channel
       properties: []
       definitions:
         - architectures:
@@ -14381,7 +14396,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GCEA_SARB_DRAM_REQ_PER_VC,sum)
     - name: GCEA_SARB_REQ_PER_VC
-      description: ''
+      description: Requests per virtual channel
       properties: []
       definitions:
         - architectures:
@@ -14393,7 +14408,8 @@ rocprofiler-sdk:
           block: GCEA
           event: 50
     - name: GCEA_SARB_REQ_PER_VC_sum
-      description: ''
+      description: >-
+        Sum across all GCEA instances: Requests per virtual channel
       properties: []
       definitions:
         - architectures:
@@ -14404,7 +14420,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GCEA_SARB_REQ_PER_VC,sum)
     - name: GCEA_SARB_STALLED
-      description: ''
+      description: GCEA to SARB communication is stalled
       properties: []
       definitions:
         - architectures:
@@ -14416,7 +14432,8 @@ rocprofiler-sdk:
           block: GCEA
           event: 63
     - name: GCEA_SARB_STALLED_sum
-      description: ''
+      description: >-
+        Sum across all GCEA instances: GCEA to SARB communication is stalled
       properties: []
       definitions:
         - architectures:
@@ -14427,7 +14444,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GCEA_SARB_STALLED,sum)
     - name: GCEA_SARB_STARVING
-      description: ''
+      description: Starving
       properties: []
       definitions:
         - architectures:
@@ -14439,7 +14456,7 @@ rocprofiler-sdk:
           block: GCEA
           event: 64
     - name: GCEA_WDRAM_CHAINED_REQ_PER_CLIGRP
-      description: ''
+      description: Request chains per client-group
       properties: []
       definitions:
         - architectures:
@@ -14451,7 +14468,8 @@ rocprofiler-sdk:
           block: GCEA
           event: 10
     - name: GCEA_WDRAM_CHAINED_REQ_PER_CLIGRP_sum
-      description: ''
+      description: >-
+        Sum across all GCEA instances: Request chains per client-group
       properties: []
       definitions:
         - architectures:
@@ -14462,7 +14480,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GCEA_WDRAM_CHAINED_REQ_PER_CLIGRP,sum)
     - name: GCEA_WDRAM_NUM_BANKS_VLD
-      description: ''
+      description: Number of pending banks, saturates at 16
       properties: []
       definitions:
         - architectures:
@@ -14474,7 +14492,8 @@ rocprofiler-sdk:
           block: GCEA
           event: 8
     - name: GCEA_WDRAM_NUM_BANKS_VLD_sum
-      description: ''
+      description: >-
+        Sum across all GCEA instances:  Number of pending banks, saturates at 16
       properties: []
       definitions:
         - architectures:
@@ -14485,7 +14504,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GCEA_WDRAM_NUM_BANKS_VLD,sum)
     - name: GCEA_WDRAM_REQ_PER_CLIGRP
-      description: ''
+      description: Requests per client-group
       properties: []
       definitions:
         - architectures:
@@ -14497,7 +14516,8 @@ rocprofiler-sdk:
           block: GCEA
           event: 9
     - name: GCEA_WDRAM_REQ_PER_CLIGRP_sum
-      description: ''
+      description: >-
+        Sum across all GCEA instances: Requests per client-group
       properties: []
       definitions:
         - architectures:
@@ -14508,7 +14528,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GCEA_WDRAM_REQ_PER_CLIGRP,sum)
     - name: GCEA_WDRAM_SIZE_REQ
-      description: ''
+      description: Sized (in 32 byte increments) requests
       properties: []
       definitions:
         - architectures:
@@ -14520,7 +14540,8 @@ rocprofiler-sdk:
           block: GCEA
           event: 78
     - name: GCEA_WDRAM_SIZE_REQ_sum
-      description: ''
+      description: >-
+        Sum across all GCEA instances:  Sized (in 32 byte increments) requests
       properties: []
       definitions:
         - architectures:
@@ -14531,7 +14552,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GCEA_WDRAM_SIZE_REQ,sum)
     - name: GCEA_WRET_VLD
-      description: ''
+      description: GCEA Write VLD returns
       properties: []
       definitions:
         - architectures:
@@ -14543,7 +14564,8 @@ rocprofiler-sdk:
           block: GCEA
           event: 67
     - name: GCEA_WRET_VLD_sum
-      description: ''
+      description: >-
+        Sum across all GCEA instances: GCEA Write VLD returns
       properties: []
       definitions:
         - architectures:
@@ -14554,7 +14576,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GCEA_WRET_VLD,sum)
     - name: GL1C_BUSY
-      description: ''
+      description: Number of cycles with a request pending. Not Windowed
       properties: []
       definitions:
         - architectures:
@@ -14566,7 +14588,8 @@ rocprofiler-sdk:
           block: GL1C
           event: 1
     - name: GL1C_BUSY_sum
-      description: ''
+      description: >-
+        Sum across all GL1C instances: Number of cycles with a request pending. Not Windowed
       properties: []
       definitions:
         - architectures:
@@ -14577,7 +14600,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GL1C_BUSY,sum)
     - name: GL1C_CYCLE
-      description: ''
+      description: Number of cycles. Not windowable.
       properties: []
       definitions:
         - architectures:
@@ -14589,7 +14612,8 @@ rocprofiler-sdk:
           block: GL1C
           event: 0
     - name: GL1C_CYCLE_sum
-      description: ''
+      description: >-
+        Sum across all GL1C instances: Number of cycles. Not windowable.
       properties: []
       definitions:
         - architectures:
@@ -14600,7 +14624,8 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GL1C_CYCLE,sum)
     - name: GL1C_GL2_REQ_READ
-      description: ''
+      description: >-
+        Sum of GL1C_PERF_SEL_GL2_REQ_READ_32B, GL1C_PERF_SEL_GL2_REQ_READ_64B, GL1C_PERF_SEL_GL2_REQ_READ_128B
       properties: []
       definitions:
         - architectures:
@@ -14612,7 +14637,7 @@ rocprofiler-sdk:
           block: GL1C
           event: 4
     - name: GL1C_GL2_REQ_READ_128B
-      description: ''
+      description: Reads requesting a 128B return from GL2
       properties: []
       definitions:
         - architectures:
@@ -14624,7 +14649,8 @@ rocprofiler-sdk:
           block: GL1C
           event: 5
     - name: GL1C_GL2_REQ_READ_128B_sum
-      description: ''
+      description: >-
+        Sum across all GL1C instances: Reads requesting a 128B return from GL2
       properties: []
       definitions:
         - architectures:
@@ -14635,7 +14661,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GL1C_GL2_REQ_READ_128B,sum)
     - name: GL1C_GL2_REQ_READ_32B
-      description: ''
+      description: Reads requesting a 32B return from GL2
       properties: []
       definitions:
         - architectures:
@@ -14647,7 +14673,8 @@ rocprofiler-sdk:
           block: GL1C
           event: 6
     - name: GL1C_GL2_REQ_READ_32B_sum
-      description: ''
+      description: >-
+        Sum across all GL1C instances: Reads requesting a 32B return from GL2
       properties: []
       definitions:
         - architectures:
@@ -14658,7 +14685,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GL1C_GL2_REQ_READ_32B,sum)
     - name: GL1C_GL2_REQ_READ_64B
-      description: ''
+      description: Reads requesting a 64B return from GL2
       properties: []
       definitions:
         - architectures:
@@ -14670,7 +14697,8 @@ rocprofiler-sdk:
           block: GL1C
           event: 7
     - name: GL1C_GL2_REQ_READ_64B_sum
-      description: ''
+      description: >-
+        Sum across all GL1C instances: Reads requesting a 64B return from GL2
       properties: []
       definitions:
         - architectures:
@@ -14681,7 +14709,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GL1C_GL2_REQ_READ_64B,sum)
     - name: GL1C_GL2_REQ_READ_LATENCY
-      description: ''
+      description: Cycles in flight for reads, atomics w/ return, nop_rtn0
       properties: []
       definitions:
         - architectures:
@@ -14693,7 +14721,8 @@ rocprofiler-sdk:
           block: GL1C
           event: 8
     - name: GL1C_GL2_REQ_READ_LATENCY_sum
-      description: ''
+      description: >-
+        Sum across all GL1C instances: Cycles in flight for reads, atomics w/ return, nop_rtn0
       properties: []
       definitions:
         - architectures:
@@ -14704,7 +14733,9 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GL1C_GL2_REQ_READ_LATENCY,sum)
     - name: GL1C_GL2_REQ_READ_sum
-      description: ''
+      description: >-
+        Sum across all GL1C instances: Sum of GL1C_PERF_SEL_GL2_REQ_READ_32B, GL1C_PERF_SEL_GL2_REQ_READ_64B,
+        GL1C_PERF_SEL_GL2_REQ_READ_128B
       properties: []
       definitions:
         - architectures:
@@ -14715,7 +14746,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GL1C_GL2_REQ_READ,sum)
     - name: GL1C_GL2_REQ_WRITE
-      description: ''
+      description: Sum of GL1C_PERF_SEL_GL2_REQ_WRITE_32B, GL1C_PERF_SEL_GL2_REQ_WRITE_64B
       properties: []
       definitions:
         - architectures:
@@ -14727,7 +14758,7 @@ rocprofiler-sdk:
           block: GL1C
           event: 9
     - name: GL1C_GL2_REQ_WRITE_32B
-      description: ''
+      description: Writes 32B in size to GL2
       properties: []
       definitions:
         - architectures:
@@ -14739,7 +14770,8 @@ rocprofiler-sdk:
           block: GL1C
           event: 10
     - name: GL1C_GL2_REQ_WRITE_32B_sum
-      description: ''
+      description: >-
+        Sum across all GL1C instances: Writes 32B in size to GL2
       properties: []
       definitions:
         - architectures:
@@ -14750,7 +14782,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GL1C_GL2_REQ_WRITE_32B,sum)
     - name: GL1C_GL2_REQ_WRITE_64B
-      description: ''
+      description: Writes 64B in size to GL2
       properties: []
       definitions:
         - architectures:
@@ -14762,7 +14794,8 @@ rocprofiler-sdk:
           block: GL1C
           event: 11
     - name: GL1C_GL2_REQ_WRITE_64B_sum
-      description: ''
+      description: >-
+        Sum across all GL1C instances: Writes 64B in size to GL2
       properties: []
       definitions:
         - architectures:
@@ -14773,7 +14806,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GL1C_GL2_REQ_WRITE_64B,sum)
     - name: GL1C_GL2_REQ_WRITE_LATENCY
-      description: ''
+      description: Cycles in flight for writes, atomics w/o return, nop_ack
       properties: []
       definitions:
         - architectures:
@@ -14785,7 +14818,8 @@ rocprofiler-sdk:
           block: GL1C
           event: 12
     - name: GL1C_GL2_REQ_WRITE_LATENCY_sum
-      description: ''
+      description: >-
+        Sum across all GL1C instances: Cycles in flight for writes, atomics w/o return, nop_ack
       properties: []
       definitions:
         - architectures:
@@ -14796,7 +14830,8 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GL1C_GL2_REQ_WRITE_LATENCY,sum)
     - name: GL1C_GL2_REQ_WRITE_sum
-      description: ''
+      description: >-
+        Sum across all GL1C instances: Sum of GL1C_PERF_SEL_GL2_REQ_WRITE_32B, GL1C_PERF_SEL_GL2_REQ_WRITE_64B
       properties: []
       definitions:
         - architectures:
@@ -14807,7 +14842,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GL1C_GL2_REQ_WRITE,sum)
     - name: GL1C_REQ
-      description: ''
+      description: Read, writes, atomics, nop. Invalids are not counted as requests.
       properties: []
       definitions:
         - architectures:
@@ -14819,7 +14854,9 @@ rocprofiler-sdk:
           block: GL1C
           event: 14
     - name: GL1C_REQ_MISS
-      description: ''
+      description: >-
+        Count of requests that miss in the cache. Writes and atomics always miss. Partial miss counts
+        as miss.
       properties: []
       definitions:
         - architectures:
@@ -14831,7 +14868,9 @@ rocprofiler-sdk:
           block: GL1C
           event: 18
     - name: GL1C_REQ_MISS_sum
-      description: ''
+      description: >-
+        Sum across all GL1C instances: Count of requests that miss in the cache. Writes and atomics always
+        miss. Partial miss counts as miss.
       properties: []
       definitions:
         - architectures:
@@ -14842,7 +14881,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GL1C_REQ_MISS,sum)
     - name: GL1C_REQ_READ
-      description: ''
+      description: Sum of REQ_READ_32B, REQ_READ_64B, REQ_READ_128B
       properties: []
       definitions:
         - architectures:
@@ -14854,7 +14893,8 @@ rocprofiler-sdk:
           block: GL1C
           event: 21
     - name: GL1C_REQ_READ_sum
-      description: ''
+      description: >-
+        Sum across all GL1C instances: Sum of REQ_READ_32B, REQ_READ_64B, REQ_READ_128B
       properties: []
       definitions:
         - architectures:
@@ -14865,7 +14905,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GL1C_REQ_READ,sum)
     - name: GL1C_REQ_WRITE
-      description: ''
+      description: Sum of REQ_WRITE_32B, REQ_WRITE_64B
       properties: []
       definitions:
         - architectures:
@@ -14877,7 +14917,8 @@ rocprofiler-sdk:
           block: GL1C
           event: 28
     - name: GL1C_REQ_WRITE_sum
-      description: ''
+      description: >-
+        Sum across all GL1C instances: Sum of REQ_WRITE_32B, REQ_WRITE_64B
       properties: []
       definitions:
         - architectures:
@@ -14888,7 +14929,8 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GL1C_REQ_WRITE,sum)
     - name: GL1C_REQ_sum
-      description: ''
+      description: >-
+        Sum across all GL1C instances: Read, writes, atomics, nop. Invalids are not counted as requests.
       properties: []
       definitions:
         - architectures:
@@ -14899,7 +14941,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GL1C_REQ,sum)
     - name: GL1C_STALL_GL2_GL1
-      description: ''
+      description: Number of cycles the cache was stalled due to backpressure from the GL2
       properties: []
       definitions:
         - architectures:
@@ -14911,7 +14953,9 @@ rocprofiler-sdk:
           block: GL1C
           event: 31
     - name: GL1C_STALL_GL2_GL1_sum
-      description: ''
+      description: >-
+        Sum across all GL1C instances: Number of cycles the cache was stalled due to backpressure from
+        the GL2
       properties: []
       definitions:
         - architectures:
@@ -14922,7 +14966,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GL1C_STALL_GL2_GL1,sum)
     - name: GL1C_STALL_LFIFO_FULL
-      description: ''
+      description: Number of cycles the latency fifo was full.
       properties: []
       definitions:
         - architectures:
@@ -14934,7 +14978,8 @@ rocprofiler-sdk:
           block: GL1C
           event: 32
     - name: GL1C_STALL_LFIFO_FULL_sum
-      description: ''
+      description: >-
+        Sum across all GL1C instances: Number of cycles the latency fifo was full.
       properties: []
       definitions:
         - architectures:
@@ -14945,7 +14990,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GL1C_STALL_LFIFO_FULL,sum)
     - name: GL1C_STARVE
-      description: ''
+      description: Number of cycles without a pending request from the GL1A. Windowed.
       properties: []
       definitions:
         - architectures:
@@ -14957,7 +15002,8 @@ rocprofiler-sdk:
           block: GL1C
           event: 2
     - name: GL1C_STARVE_sum
-      description: ''
+      description: >-
+        Sum across all GL1C instances: Number of cycles without a pending request from the GL1A. Windowed.
       properties: []
       definitions:
         - architectures:
@@ -15164,7 +15210,7 @@ rocprofiler-sdk:
             - gfx1250
           expression: reduce(GL2C_WRITE_SECTORS,sum)
     - name: GL2C_ATOMIC
-      description: ''
+      description: Number of atomic requests of all types. This is measured at output_fifos block.
       properties: []
       definitions:
         - architectures:
@@ -15180,7 +15226,9 @@ rocprofiler-sdk:
           block: GL2C
           event: 75
     - name: GL2C_ATOMIC_sum
-      description: ''
+      description: >-
+        Sum across all GL2C instances: Number of atomic requests of all types. This is measured at output_fifos
+        block.
       properties: []
       definitions:
         - architectures:
@@ -15207,7 +15255,8 @@ rocprofiler-sdk:
           block: GL2C
           event: 69
     - name: GL2C_BUSY_sum
-      description: ''
+      description: >-
+        Sum across all GL2C instances: Number of cycles we have a request pending. Not windowable.
       properties: []
       definitions:
         - architectures:
@@ -15218,7 +15267,9 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GL2C_BUSY,sum)
     - name: GL2C_COMPRESSED_READ_96_REQ
-      description: ''
+      description: >-
+        Number of compressed read requests. This includes requests that read 96 byte contiguous or split
+        compressed data. Metadata requests are not included. This is measured at the output_fifos block.
       properties: []
       definitions:
         - architectures:
@@ -15230,7 +15281,10 @@ rocprofiler-sdk:
           block: GL2C
           event: 81
     - name: GL2C_COMPRESSED_READ_96_REQ_sum
-      description: ''
+      description: >-
+        Sum across all GL2C instances: Number of compressed read requests. This includes requests that
+        read 96 byte contiguous or split compressed data. Metadata requests are not included. This is
+        measured at the output_fifos block.
       properties: []
       definitions:
         - architectures:
@@ -15257,7 +15311,8 @@ rocprofiler-sdk:
           block: GL2C
           event: 68
     - name: GL2C_CYCLE_sum
-      description: ''
+      description: >-
+        Sum across all GL2C instances: Number of cycles. Not windowable.
       properties: []
       definitions:
         - architectures:
@@ -15268,7 +15323,9 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GL2C_CYCLE,sum)
     - name: GL2C_EA_RDREQ_DRAM
-      description: ''
+      description: >-
+        Number of GL2C/EA read requests (either 32-byte, 64-byte, 96-byte or 128-byte) destined for DRAM
+        (MC).
       properties: []
       definitions:
         - architectures:
@@ -15284,7 +15341,9 @@ rocprofiler-sdk:
           block: GL2C
           event: 130
     - name: GL2C_EA_RDREQ_DRAM_sum
-      description: ''
+      description: >-
+        Sum across all GL2C instances: Number of GL2C/EA read requests (either 32-byte, 64-byte, 96-byte
+        or 128-byte) destined for DRAM (MC).
       properties: []
       definitions:
         - architectures:
@@ -15295,7 +15354,9 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GL2C_EA_RDREQ_DRAM,sum)
     - name: GL2C_EA_WRREQ_DRAM
-      description: ''
+      description: >-
+        Number of GL2C/EA write requests (either 32-byte, 64-byte, 96-byte or 128-byte) destined for DRAM
+        (MC).
       properties: []
       definitions:
         - architectures:
@@ -15311,7 +15372,9 @@ rocprofiler-sdk:
           block: GL2C
           event: 131
     - name: GL2C_EA_WRREQ_DRAM_sum
-      description: ''
+      description: >-
+        Sum across all GL2C instances: Number of GL2C/EA write requests (either 32-byte, 64-byte, 96-byte
+        or 128-byte) destined for DRAM (MC).
       properties: []
       definitions:
         - architectures:
@@ -15322,7 +15385,9 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GL2C_EA_WRREQ_DRAM,sum)
     - name: GL2C_READ
-      description: ''
+      description: >-
+        Number of read requests, including compressed reads and metadata reads. This is measured at output_fifos
+        block.
       properties: []
       definitions:
         - architectures:
@@ -15338,7 +15403,8 @@ rocprofiler-sdk:
           block: GL2C
           event: 73
     - name: GL2C_READ_128_REQ
-      description: ''
+      description: >-
+        Number of uncompressed 128 byte read requests. This is measured at the output_fifos block.
       properties: []
       definitions:
         - architectures:
@@ -15350,7 +15416,9 @@ rocprofiler-sdk:
           block: GL2C
           event: 75
     - name: GL2C_READ_128_REQ_sum
-      description: ''
+      description: >-
+        Sum across all GL2C instances: Number of uncompressed 128 byte read requests. This is measured
+        at the output_fifos block.
       properties: []
       definitions:
         - architectures:
@@ -15361,7 +15429,8 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GL2C_READ_128_REQ,sum)
     - name: GL2C_READ_32_REQ
-      description: ''
+      description: >-
+        Number of uncompressed 32 byte read requests. This is measured at the output_fifos block.
       properties: []
       definitions:
         - architectures:
@@ -15377,7 +15446,9 @@ rocprofiler-sdk:
           block: GL2C
           event: 94
     - name: GL2C_READ_32_REQ_sum
-      description: ''
+      description: >-
+        Sum across all GL2C instances: Number of uncompressed 32 byte read requests. This is measured
+        at the output_fifos block.
       properties: []
       definitions:
         - architectures:
@@ -15388,7 +15459,8 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GL2C_READ_32_REQ,sum)
     - name: GL2C_READ_64_REQ
-      description: ''
+      description: >-
+        Number of uncompressed 64 byte read requests. This is measured at the output_fifos block.
       properties: []
       definitions:
         - architectures:
@@ -15400,7 +15472,9 @@ rocprofiler-sdk:
           block: GL2C
           event: 74
     - name: GL2C_READ_64_REQ_sum
-      description: ''
+      description: >-
+        Sum across all GL2C instances: Number of uncompressed 64 byte read requests. This is measured
+        at the output_fifos block.
       properties: []
       definitions:
         - architectures:
@@ -15411,7 +15485,9 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GL2C_READ_64_REQ,sum)
     - name: GL2C_READ_sum
-      description: ''
+      description: >-
+        Sum across all GL2C instances: Number of read requests, including compressed reads and metadata
+        reads. This is measured at output_fifos block.
       properties: []
       definitions:
         - architectures:
@@ -15422,7 +15498,10 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GL2C_READ,sum)
     - name: GL2C_REQ
-      description: ''
+      description: >-
+        Number of requests of all types. This is measured at the tag block. This may be more than the
+        number of requests arriving at the GL2C, but it is a good indication of the total amount of work
+        that needs to be performed.
       properties: []
       definitions:
         - architectures:
@@ -15438,7 +15517,10 @@ rocprofiler-sdk:
           block: GL2C
           event: 70
     - name: GL2C_REQ_sum
-      description: ''
+      description: >-
+        Sum across all GL2C instances: Number of requests of all types. This is measured at the tag block.
+        This may be more than the number of requests arriving at the GL2C, but it is a good indication
+        of the total amount of work that needs to be performed.
       properties: []
       definitions:
         - architectures:
@@ -15457,7 +15539,9 @@ rocprofiler-sdk:
           block: GL2C
           event: 80
     - name: GL2C_WRITE
-      description: ''
+      description: >-
+        Number of read requests, including compressed reads and metadata reads. This is measured at output_fifos
+        block.
       properties: []
       definitions:
         - architectures:
@@ -15473,7 +15557,9 @@ rocprofiler-sdk:
           block: GL2C
           event: 74
     - name: GL2C_WRITE_sum
-      description: ''
+      description: >-
+        Sum across all GL2C instances: Number of read requests, including compressed reads and metadata
+        reads. This is measured at output_fifos block.
       properties: []
       definitions:
         - architectures:
@@ -15496,7 +15582,8 @@ rocprofiler-sdk:
           block: GRBM
           event: 40
     - name: GRBM_GUI_ACTIVE_sum
-      description: ''
+      description: >-
+        Sum across all GRBM instances: The GUI is Active
       properties: []
       definitions:
         - architectures:
@@ -15507,7 +15594,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(GRBM_GUI_ACTIVE,sum)
     - name: SPI_BUSY
-      description: ''
+      description: Number of clocks SPI is busy.
       properties: []
       definitions:
         - architectures:
@@ -15519,7 +15606,9 @@ rocprofiler-sdk:
           block: SPI
           event: 283
     - name: SPI_CSN_WAVE_sum
-      description: ''
+      description: >-
+        Sum across all SPI instances: Number of waves. Requires SPI_DEBUG_CNTL.DEBUG_PIPE_SEL to select
+        source.
       properties: []
       definitions:
         - architectures:
@@ -15530,7 +15619,8 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(SPI_CSN_WAVE,sum)
     - name: SQC_DCACHE_BUSY_CYCLES_sum
-      description: ''
+      description: >-
+        Sum across all SQC instances: Clock cycles while cache is reporting that it is busy.
       properties: []
       definitions:
         - architectures:
@@ -15541,7 +15631,8 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(SQC_DCACHE_BUSY_CYCLES,sum)
     - name: SQC_DCACHE_HITS_sum
-      description: ''
+      description: >-
+        Sum across all SQC instances: Number of cache hits.
       properties: []
       definitions:
         - architectures:
@@ -15565,7 +15656,8 @@ rocprofiler-sdk:
           block: SQ
           event: 276
     - name: SQC_DCACHE_INPUT_VALID_READYB_sum
-      description: ''
+      description: >-
+        Sum across all SQC instances: Input stalled by SQC
       properties: []
       definitions:
         - architectures:
@@ -15576,7 +15668,8 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(SQC_DCACHE_INPUT_VALID_READYB,sum)
     - name: SQC_DCACHE_MISSES_sum
-      description: ''
+      description: >-
+        Sum across all SQC instances: Number of cache misses, includes uncached requests.
       properties: []
       definitions:
         - architectures:
@@ -15587,7 +15680,8 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(SQC_DCACHE_MISSES,sum)
     - name: SQC_DCACHE_REQ_sum
-      description: ''
+      description: >-
+        Sum across all SQC instances: Number of requests (post-bank-serialization).
       properties: []
       definitions:
         - architectures:
@@ -15598,7 +15692,8 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(SQC_DCACHE_REQ,sum)
     - name: SQC_ICACHE_BUSY_CYCLES_sum
-      description: ''
+      description: >-
+        Sum across all SQC instances: Clock cycles while cache is reporting that it is busy.
       properties: []
       definitions:
         - architectures:
@@ -15609,7 +15704,8 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(SQC_ICACHE_BUSY_CYCLES,sum)
     - name: SQC_ICACHE_HITS_sum
-      description: ''
+      description: >-
+        Sum across all SQC instances: Number of cache hits.
       properties: []
       definitions:
         - architectures:
@@ -15637,7 +15733,8 @@ rocprofiler-sdk:
           block: SQ
           event: 645
     - name: SQC_ICACHE_INPUT_VALID_READYB_sum
-      description: ''
+      description: >-
+        Sum across all SQC instances: Input stalled by SQC
       properties: []
       definitions:
         - architectures:
@@ -15648,7 +15745,8 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(SQC_ICACHE_INPUT_VALID_READYB,sum)
     - name: SQC_ICACHE_MISSES_sum
-      description: ''
+      description: >-
+        Sum across all SQC instances: Number of cache misses, includes uncached requests.
       properties: []
       definitions:
         - architectures:
@@ -15659,7 +15757,8 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(SQC_ICACHE_MISSES,sum)
     - name: SQC_ICACHE_REQ_sum
-      description: ''
+      description: >-
+        Sum across all SQC instances: Number of requests.
       properties: []
       definitions:
         - architectures:
@@ -15670,7 +15769,8 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(SQC_ICACHE_REQ,sum)
     - name: SQC_LDS_BANK_CONFLICT_sum
-      description: ''
+      description: >-
+        Sum across all SQC instances: Number of cycles LDS is stalled by bank conflicts.
       properties: []
       definitions:
         - architectures:
@@ -15681,7 +15781,9 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(SQC_LDS_BANK_CONFLICT,sum)
     - name: SQC_LDS_IDX_ACTIVE_sum
-      description: ''
+      description: >-
+        Sum across all SQC instances: Number of cycles LDS is used for indexed (non-direct,non-interpolation)
+        operations.
       properties: []
       definitions:
         - architectures:
@@ -15692,7 +15794,8 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(SQC_LDS_IDX_ACTIVE,sum)
     - name: SQC_TC_DATA_READ_REQ_sum
-      description: ''
+      description: >-
+        Sum across all SQC instances: Number of data read requests to the TC
       properties: []
       definitions:
         - architectures:
@@ -15703,7 +15806,8 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(SQC_TC_DATA_READ_REQ,sum)
     - name: SQC_TC_INST_REQ_sum
-      description: ''
+      description: >-
+        Sum across all SQC instances: Number of insruction requests to the TC
       properties: []
       definitions:
         - architectures:
@@ -15727,7 +15831,8 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(SQ_BUSY_CYCLES,avr)
     - name: SQ_BUSY_CYCLES_sum
-      description: ''
+      description: >-
+        Sum across all SQ instances: Clock cycles while any SQs in SE reporting busy.
       properties: []
       definitions:
         - architectures:
@@ -15754,7 +15859,8 @@ rocprofiler-sdk:
           block: SQ
           event: 64
     - name: SQ_INSTS_ALL_sum
-      description: ''
+      description: >-
+        Sum across all SQ instances: Number of all instructions issued.
       properties: []
       definitions:
         - architectures:
@@ -15765,7 +15871,8 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(SQ_INSTS_ALL,sum)
     - name: SQ_INSTS_DUAL_VALU_WAVE32_sum
-      description: ''
+      description: >-
+        Sum across all SQ instances: Number of dual valu (VOPD) instructions issued in wave32 mode.
       properties: []
       definitions:
         - architectures:
@@ -15776,7 +15883,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(SQ_INSTS_DUAL_VALU_WAVE32,sum)
     - name: SQ_INSTS_FLAT_LOAD
-      description: ''
+      description: Number of flat load or atomic (with return) instructions issued.
       properties: []
       definitions:
         - architectures:
@@ -15788,7 +15895,8 @@ rocprofiler-sdk:
           block: SQ
           event: 189
     - name: SQ_INSTS_FLAT_LOAD_sum
-      description: ''
+      description: >-
+        Sum across all SQ instances: Number of flat load or atomic (with return) instructions issued.
       properties: []
       definitions:
         - architectures:
@@ -15799,7 +15907,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(SQ_INSTS_FLAT_LOAD,sum)
     - name: SQ_INSTS_FLAT_STORE
-      description: ''
+      description: Number of flat store or atomic (without return) instructions issued.
       properties: []
       definitions:
         - architectures:
@@ -15811,7 +15919,8 @@ rocprofiler-sdk:
           block: SQ
           event: 190
     - name: SQ_INSTS_FLAT_STORE_sum
-      description: ''
+      description: >-
+        Sum across all SQ instances: Number of flat store or atomic (without return) instructions issued.
       properties: []
       definitions:
         - architectures:
@@ -15822,7 +15931,8 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(SQ_INSTS_FLAT_STORE,sum)
     - name: SQ_INSTS_FLAT_sum
-      description: ''
+      description: >-
+        Sum across all SQ instances: Number of FLAT instructions issued.
       properties: []
       definitions:
         - architectures:
@@ -15833,7 +15943,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(SQ_INSTS_FLAT,sum)
     - name: SQ_INSTS_INTERNAL
-      description: ''
+      description: Number of internal IB instructions issued.
       properties: []
       definitions:
         - architectures:
@@ -15845,7 +15955,8 @@ rocprofiler-sdk:
           block: SQ
           event: 69
     - name: SQ_INSTS_INTERNAL_sum
-      description: ''
+      description: >-
+        Sum across all SQ instances: Number of internal IB instructions issued.
       properties: []
       definitions:
         - architectures:
@@ -15856,7 +15967,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(SQ_INSTS_INTERNAL,sum)
     - name: SQ_INSTS_LDS_DIRECT_LOAD
-      description: ''
+      description: Number of LDS_DIRECT_LOAD instructions issued.
       properties: []
       definitions:
         - architectures:
@@ -15868,7 +15979,8 @@ rocprofiler-sdk:
           block: SQ
           event: 171
     - name: SQ_INSTS_LDS_DIRECT_LOAD_sum
-      description: ''
+      description: >-
+        Sum across all SQ instances: Number of LDS_DIRECT_LOAD instructions issued.
       properties: []
       definitions:
         - architectures:
@@ -15879,7 +15991,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(SQ_INSTS_LDS_DIRECT_LOAD,sum)
     - name: SQ_INSTS_LDS_PARAM_LOAD
-      description: ''
+      description: Number of LDS_DIRECT_LOAD instructions issued.
       properties: []
       definitions:
         - architectures:
@@ -15891,7 +16003,8 @@ rocprofiler-sdk:
           block: SQ
           event: 172
     - name: SQ_INSTS_LDS_PARAM_LOAD_sum
-      description: ''
+      description: >-
+        Sum across all SQ instances: Number of LDS_DIRECT_LOAD instructions issued.
       properties: []
       definitions:
         - architectures:
@@ -15902,7 +16015,8 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(SQ_INSTS_LDS_PARAM_LOAD,sum)
     - name: SQ_INSTS_LDS_sum
-      description: ''
+      description: >-
+        Sum across all SQ instances: Number of LDS indexed instructions issued.
       properties: []
       definitions:
         - architectures:
@@ -15913,7 +16027,8 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(SQ_INSTS_LDS,sum)
     - name: SQ_INSTS_SALU_sum
-      description: ''
+      description: >-
+        Sum across all SQ instances: Number of SALU instructions issued.
       properties: []
       definitions:
         - architectures:
@@ -15924,7 +16039,8 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(SQ_INSTS_SALU,sum)
     - name: SQ_INSTS_SMEM_sum
-      description: ''
+      description: >-
+        Sum across all SQ instances: Number of SMEM instructions issued.
       properties: []
       definitions:
         - architectures:
@@ -15935,7 +16051,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(SQ_INSTS_SMEM,sum)
     - name: SQ_INSTS_TEX
-      description: ''
+      description: Number of image and buffer instructions issued.
       properties: []
       definitions:
         - architectures:
@@ -15951,7 +16067,9 @@ rocprofiler-sdk:
           block: SQ
           event: 163
     - name: SQ_INSTS_TEX_LOAD_sum
-      description: ''
+      description: >-
+        Sum across all SQ instances: Number of buffer load, image load, sample, or atomic (with return)
+        instructions issued.
       properties: []
       definitions:
         - architectures:
@@ -15962,7 +16080,9 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(SQ_INSTS_TEX_LOAD,sum)
     - name: SQ_INSTS_TEX_STORE_sum
-      description: ''
+      description: >-
+        Sum across all SQ instances: Number of buffer store, image store, or atomic (without return) instructions
+        issued.
       properties: []
       definitions:
         - architectures:
@@ -15973,7 +16093,8 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(SQ_INSTS_TEX_STORE,sum)
     - name: SQ_INSTS_TEX_sum
-      description: ''
+      description: >-
+        Sum across all SQ instances: Number of image and buffer instructions issued.
       properties: []
       definitions:
         - architectures:
@@ -15984,7 +16105,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(SQ_INSTS_TEX,sum)
     - name: SQ_INSTS_VALU_DP
-      description: ''
+      description: Number of Double precision VALU instructions issued.
       properties: []
       definitions:
         - architectures:
@@ -15996,7 +16117,8 @@ rocprofiler-sdk:
           block: SQ
           event: 182
     - name: SQ_INSTS_VALU_DP_sum
-      description: ''
+      description: >-
+        Sum across all SQ instances: Number of Double precision VALU instructions issued.
       properties: []
       definitions:
         - architectures:
@@ -16023,7 +16145,8 @@ rocprofiler-sdk:
           block: SQ
           event: 135
     - name: SQ_INSTS_VALU_TRANS_sum
-      description: ''
+      description: >-
+        Sum across all SQ instances: Number transcendental VALU instructions issued
       properties: []
       definitions:
         - architectures:
@@ -16034,7 +16157,8 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(SQ_INSTS_VALU_TRANS,sum)
     - name: SQ_INSTS_VALU_sum
-      description: ''
+      description: >-
+        Sum across all SQ instances: Number of VALU instructions issued excluding skipped instructions.
       properties: []
       definitions:
         - architectures:
@@ -16045,7 +16169,9 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(SQ_INSTS_VALU,sum)
     - name: SQ_INSTS_WAVE32_LDS_PARAM_LOAD
-      description: ''
+      description: >-
+        Number of wave32 LDS_PARAM_LOAD instructions issued. Wave64 may count 1 or 2, depending on what
+        gets issued.
       properties: []
       definitions:
         - architectures:
@@ -16057,7 +16183,9 @@ rocprofiler-sdk:
           block: SQ
           event: 173
     - name: SQ_INSTS_WAVE32_LDS_PARAM_LOAD_sum
-      description: ''
+      description: >-
+        Sum across all SQ instances: Number of wave32 LDS_PARAM_LOAD instructions issued. Wave64 may count
+        1 or 2, depending on what gets issued.
       properties: []
       definitions:
         - architectures:
@@ -16068,7 +16196,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(SQ_INSTS_WAVE32_LDS_PARAM_LOAD,sum)
     - name: SQ_INST_CYCLES_LDS
-      description: ''
+      description: Number of cycles needed to send addr and data for LDS indexed instructions.
       properties: []
       definitions:
         - architectures:
@@ -16102,7 +16230,8 @@ rocprofiler-sdk:
           block: SQ
           event: 338
     - name: SQ_INST_CYCLES_LDS_sum
-      description: ''
+      description: >-
+        Sum across all SQ instances: Number of cycles needed to send addr and data for LDS indexed instructions.
       properties: []
       definitions:
         - architectures:
@@ -16113,7 +16242,8 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(SQ_INST_CYCLES_LDS,sum)
     - name: SQ_ITEMS_sum
-      description: ''
+      description: >-
+        Sum across all SQ instances: Number of valid work items in SQs.
       properties: []
       definitions:
         - architectures:
@@ -16124,7 +16254,8 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(SQ_ITEMS,sum)
     - name: SQ_LDS_ATOMIC_RETURN_sum
-      description: ''
+      description: >-
+        Sum across all SQ instances: Number of atomic return cycles in LDS.
       properties: []
       definitions:
         - architectures:
@@ -16135,7 +16266,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(SQ_LDS_ATOMIC_RETURN,sum)
     - name: SQ_WAIT_BARRIER
-      description: ''
+      description: Number of clock cycles spent waiting for a barrier. In units of cycles.
       properties: []
       definitions:
         - architectures:
@@ -16147,7 +16278,7 @@ rocprofiler-sdk:
           block: SQ
           event: 42
     - name: SQ_WAIT_CNT_ANY
-      description: ''
+      description: Number of clock cycles spent waiting for any counter. In units of cycles.
       properties: []
       definitions:
         - architectures:
@@ -16159,7 +16290,7 @@ rocprofiler-sdk:
           block: SQ
           event: 36
     - name: SQ_WAIT_IFETCH
-      description: ''
+      description: Number of clock cycles spent waiting for instructions to arrive.
       properties: []
       definitions:
         - architectures:
@@ -16171,7 +16302,9 @@ rocprofiler-sdk:
           block: SQ
           event: 41
     - name: SQ_WAIT_INST_LDS_sum
-      description: ''
+      description: >-
+        Sum across all SQ instances: Number of clock cycles spent waiting for LDS (indexed) instruction
+        issue. In units of cycles.
       properties: []
       definitions:
         - architectures:
@@ -16182,7 +16315,9 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(SQ_WAIT_INST_LDS,sum)
     - name: SQ_WAVE_CYCLES_sum
-      description: ''
+      description: >-
+        Sum across all SQ instances: Number of clock cycles spent by waves in the SQs. Incremented by
+        number of living (valid) waves each cycle.
       properties: []
       definitions:
         - architectures:
@@ -16193,7 +16328,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(SQ_WAVE_CYCLES,sum)
     - name: TCP_DATA_FIFO_STALL
-      description: ''
+      description: TPCP stalls TA req due to data fifo full
       properties: []
       definitions:
         - architectures:
@@ -16205,7 +16340,8 @@ rocprofiler-sdk:
           block: TCP
           event: 41
     - name: TCP_DATA_FIFO_STALL_sum
-      description: ''
+      description: >-
+        Sum across all TCP instances: TPCP stalls TA req due to data fifo full
       properties: []
       definitions:
         - architectures:
@@ -16216,7 +16352,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(TCP_DATA_FIFO_STALL,sum)
     - name: TCP_GL1_REQ_READ
-      description: ''
+      description: Total read requests to GL1.
       properties: []
       definitions:
         - architectures:
@@ -16228,7 +16364,7 @@ rocprofiler-sdk:
           block: TCP
           event: 30
     - name: TCP_GL1_REQ_READ_128B
-      description: ''
+      description: Total read requests to GL1 with 128B size.
       properties: []
       definitions:
         - architectures:
@@ -16240,7 +16376,8 @@ rocprofiler-sdk:
           block: TCP
           event: 31
     - name: TCP_GL1_REQ_READ_128B_sum
-      description: ''
+      description: >-
+        Sum across all TCP instances: Total read requests to GL1 with 128B size.
       properties: []
       definitions:
         - architectures:
@@ -16251,7 +16388,8 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(TCP_GL1_REQ_READ_128B,sum)
     - name: TCP_GL1_REQ_READ_sum
-      description: ''
+      description: >-
+        Sum across all TCP instances: Total read requests to GL1.
       properties: []
       definitions:
         - architectures:
@@ -16262,7 +16400,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(TCP_GL1_REQ_READ,sum)
     - name: TCP_GL1_REQ_WRITE
-      description: ''
+      description: Total write requests to GL1.
       properties: []
       definitions:
         - architectures:
@@ -16274,7 +16412,8 @@ rocprofiler-sdk:
           block: TCP
           event: 33
     - name: TCP_GL1_REQ_WRITE_sum
-      description: ''
+      description: >-
+        Sum across all TCP instances: Total write requests to GL1.
       properties: []
       definitions:
         - architectures:
@@ -16285,7 +16424,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(TCP_GL1_REQ_WRITE,sum)
     - name: TCP_GL1_TCP_BACK_PRESSURE
-      description: ''
+      description: TCP has request to send to GL1 but it is out of credits
       properties: []
       definitions:
         - architectures:
@@ -16297,7 +16436,8 @@ rocprofiler-sdk:
           block: TCP
           event: 51
     - name: TCP_GL1_TCP_BACK_PRESSURE_sum
-      description: ''
+      description: >-
+        Sum across all TCP instances: TCP has request to send to GL1 but it is out of credits
       properties: []
       definitions:
         - architectures:
@@ -16308,7 +16448,8 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(TCP_GL1_TCP_BACK_PRESSURE,sum)
     - name: TCP_REQ_MISS_sum
-      description: ''
+      description: >-
+        Sum across all TCP instances: Total cache requests that missed
       properties: []
       definitions:
         - architectures:
@@ -16319,7 +16460,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(TCP_REQ_MISS,sum)
     - name: TCP_REQ_READ
-      description: ''
+      description: Total cache read requests
       properties: []
       definitions:
         - architectures:
@@ -16331,7 +16472,8 @@ rocprofiler-sdk:
           block: TCP
           event: 10
     - name: TCP_REQ_READ_sum
-      description: ''
+      description: >-
+        Sum across all TCP instances: Total cache read requests
       properties: []
       definitions:
         - architectures:
@@ -16342,7 +16484,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(TCP_REQ_READ,sum)
     - name: TCP_REQ_WRITE
-      description: ''
+      description: Total cache write requests
       properties: []
       definitions:
         - architectures:
@@ -16354,7 +16496,8 @@ rocprofiler-sdk:
           block: TCP
           event: 14
     - name: TCP_REQ_WRITE_sum
-      description: ''
+      description: >-
+        Sum across all TCP instances: Total cache write requests
       properties: []
       definitions:
         - architectures:
@@ -16365,7 +16508,8 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(TCP_REQ_WRITE,sum)
     - name: TCP_REQ_sum
-      description: ''
+      description: >-
+        Sum across all TCP instances: Total cache line accesses
       properties: []
       definitions:
         - architectures:
@@ -16376,7 +16520,7 @@ rocprofiler-sdk:
             - gfx1171
           expression: reduce(TCP_REQ,sum)
     - name: TCP_TCP_TA_REQ_STALL
-      description: ''
+      description: TCP stalls TA req interface.
       properties: []
       definitions:
         - architectures:
@@ -16388,7 +16532,8 @@ rocprofiler-sdk:
           block: TCP
           event: 39
     - name: TCP_TCP_TA_REQ_STALL_sum
-      description: ''
+      description: >-
+        Sum across all TCP instances: TCP stalls TA req interface.
       properties: []
       definitions:
         - architectures:
