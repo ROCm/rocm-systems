@@ -27,10 +27,17 @@ test('renders the dashboard shell and run progress while data is still loading',
   const runRequestGate = new Promise((resolve) => {
     releaseRunRequest = resolve;
   });
+  // Keep interception enabled: removing a one-shot route can strand another
+  // request in Chromium <155.
+  // See https://github.com/microsoft/playwright/issues/41802.
+  let runRequestHeld = false;
   await page.route('**/data/runs/**', async (route) => {
-    await runRequestGate;
+    if (!runRequestHeld) {
+      runRequestHeld = true;
+      await runRequestGate;
+    }
     await route.continue();
-  }, { times: 1 });
+  });
 
   await page.goto('/');
   try {

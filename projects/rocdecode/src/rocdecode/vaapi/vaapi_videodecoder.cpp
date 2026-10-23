@@ -36,6 +36,10 @@ THE SOFTWARE.
 // (e.g. loaded by libavcodec in the same process) from winning the symbol
 // table and intercepting rocdecode's VA calls.
 //
+// On Windows the vtable is populated from rocm_sysdeps_va_win32.dll and
+// rocm_sysdeps_va.dll loaded at runtime via LoadLibraryExW, so rocdecode.dll
+// carries no link-time dependency on the sysdeps VA DLLs.
+//
 // Macros are defined here, after the headers, so that:
 //  - Type declarations from <va/va.h> are still visible for the compiler.
 //  - The CHECK_VAAPI macro (which calls vaErrorStr at invocation time, not
@@ -44,14 +48,20 @@ THE SOFTWARE.
 static VaapiLoader *g_va_loader = nullptr;
 
 // clang-format off
+#ifdef _WIN32
+#define vaGetDisplayWin32(...)        (g_va_loader->fn.vaGetDisplayWin32(__VA_ARGS__))
+#else
 #define vaGetDisplayDRM(...)          (g_va_loader->fn.vaGetDisplayDRM(__VA_ARGS__))
+#endif
 #define vaInitialize(...)             (g_va_loader->fn.vaInitialize(__VA_ARGS__))
 #define vaTerminate(...)              (g_va_loader->fn.vaTerminate(__VA_ARGS__))
 #define vaSetInfoCallback(...)        (g_va_loader->fn.vaSetInfoCallback(__VA_ARGS__))
 #define vaQueryVendorString(...)      (g_va_loader->fn.vaQueryVendorString(__VA_ARGS__))
 #define vaErrorStr(...)               (g_va_loader->fn.vaErrorStr(__VA_ARGS__))
 #define vaMaxNumProfiles(...)         (g_va_loader->fn.vaMaxNumProfiles(__VA_ARGS__))
+#define vaMaxNumEntrypoints(...)      (g_va_loader->fn.vaMaxNumEntrypoints(__VA_ARGS__))
 #define vaQueryConfigProfiles(...)    (g_va_loader->fn.vaQueryConfigProfiles(__VA_ARGS__))
+#define vaQueryConfigEntrypoints(...) (g_va_loader->fn.vaQueryConfigEntrypoints(__VA_ARGS__))
 #define vaGetConfigAttributes(...)    (g_va_loader->fn.vaGetConfigAttributes(__VA_ARGS__))
 #define vaCreateConfig(...)           (g_va_loader->fn.vaCreateConfig(__VA_ARGS__))
 #define vaDestroyConfig(...)          (g_va_loader->fn.vaDestroyConfig(__VA_ARGS__))
@@ -70,6 +80,14 @@ static VaapiLoader *g_va_loader = nullptr;
 #define vaExportSurfaceHandle(...)    (g_va_loader->fn.vaExportSurfaceHandle(__VA_ARGS__))
 // clang-format on
 #endif // ROCDECODE_USE_DLOPEN_VA
+
+// Every rocDecVideoSurfaceFormat that stores 16 bits per sample. Used to keep the capability mask
+// from advertising a 16-bit output format for 8-bit content.
+static const uint16_t k16BitOutputFormatMask =
+    (1 << rocDecVideoSurfaceFormat_P016) |
+    (1 << rocDecVideoSurfaceFormat_YUV444_16Bit) |
+    (1 << rocDecVideoSurfaceFormat_YUV420_16Bit) |
+    (1 << rocDecVideoSurfaceFormat_YUV422_16Bit);
 
 VaapiVideoDecoder::VaapiVideoDecoder(RocDecoderCreateInfo &decoder_create_info) : decoder_create_info_{decoder_create_info},
     output_surface_format_override_{false}, va_display_{0}, va_config_attrib_{{}}, va_config_id_{0}, va_profile_ {VAProfileNone},
@@ -1388,6 +1406,10 @@ rocDecStatus VaContext::CheckDecCapForCodecType(RocdecDecodeCaps *dec_cap) {
 
     dec_cap->num_decoders = va_contexts_[va_ctx_id].num_dec_engines;
     dec_cap->output_format_mask = va_contexts_[va_ctx_id].output_format_mask;
+    // Check to ensure 10-bit output format is not set for an 8-bit stream
+    if (dec_cap->bit_depth_minus_8 == 0) {
+        dec_cap->output_format_mask &= ~k16BitOutputFormatMask;
+    }
     dec_cap->max_width = va_contexts_[va_ctx_id].max_width;
     dec_cap->max_height = va_contexts_[va_ctx_id].max_height;
     dec_cap->min_width = va_contexts_[va_ctx_id].min_width;

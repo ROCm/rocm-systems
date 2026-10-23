@@ -341,6 +341,19 @@
           "name": "NetIB_Props_InvalidDevice",
           "description": "Test error handling when querying properties of invalid InfiniBand device",
           "test_filter": "NetIbMPITest.GetDevicePropertiesInvalidDevice"
+        },
+        {
+          "name": "NetIB_Props_CastPortSpeedParity",
+          "description": "IB and IB-CAST report the same per-device speed (ibv_query_port_speed when libibverbs exports it, else active_speed/active_width)",
+          "test_filter": "NetIbMPITest.CastPortSpeedMatchesIb"
+        },
+        {
+          "name": "NetIB_Props_CastPortSpeedParity_QueryDisabled",
+          "description": "IB and IB-CAST report the same per-device speed with NCCL_IB_QUERY_PORT_SPEED=0 (active_speed/active_width only)",
+          "test_filter": "NetIbMPITest.CastPortSpeedMatchesIb",
+          "env_variables": {
+            "NCCL_IB_QUERY_PORT_SPEED": "0"
+          }
         }
       ]
     },
@@ -613,6 +626,11 @@
           "name": "Cast_SendRecvZeroSize",
           "description": "Zero-byte send: WRR oneQp path taken (dataPerQp=0 < splitDataMin), 1 token consumed, received size==0",
           "test_filter": "NetIbMPITest.CastSendRecvZeroSize"
+        },
+        {
+          "name": "Cast_RegistrationRejectsBadArguments",
+          "description": "regMr, regMrDmaBuf and deregMr reject a null communicator, and regMr rejects a zero size, instead of dereferencing it",
+          "test_filter": "NetIbMPITest.CastRegistrationRejectsBadArguments"
         }
       ]
     },
@@ -1359,17 +1377,17 @@
         },
         {
           "name": "DdaFabricEligibilityTest",
-          "description": "DDA fabric eligibility tests (gfx1250)",
+          "description": "DDA fabric eligibility tests for AllReduce, AllGather, ReduceScatter, AlltoAll across LL/LL128/VMM tiers on gfx1250",
           "test_filter": "DdaFabricEligibilityTest.*:DdaFabricLL128EligibilityTest.*"
         },
         {
           "name": "DdaFabricMaxBlocksTest",
-          "description": "DDA fabric max blocks tests (gfx1250)",
+          "description": "DDA fabric max-blocks CU cap computation and env-override tests",
           "test_filter": "DdaFabricMaxBlocksTest.*"
         },
         {
           "name": "DdaFabricScratchSizingTest",
-          "description": "DDA fabric scratch sizing tests (gfx1250)",
+          "description": "DDA fabric scratch-buffer sizing tests covering LL floor, LL128 floor, and CE scratch interplay",
           "test_filter": "DdaFabricScratchSizingTest.*"
         },
         {
@@ -1379,8 +1397,11 @@
         },
         {
           "name": "CeAllReduceEligibilityTest",
-          "description": "CE AllReduce eligibility gate tests. Opt-in cases set RCCL_CE_AR_MAX_MSG_BYTES themselves so the gfx1250 table default (ceNonRegMax[AllReduce]=0) stays off.",
-          "test_filter": "CeAllReduceEligibilityTest.*:RcclCeAllReduceEligibility.*"
+"description": "CE AllReduce eligibility gate tests. RCCL_CE_AR_2SHOT_MAX_BYTES activates 2-shot on gfx1250 (ceNonRegMax[AllReduce]=0 by table design).",
+          "test_filter": "CeAllReduceEligibilityTest.*:RcclCeAllReduceEligibility.*",
+          "env_variables": {
+            "RCCL_CE_AR_2SHOT_MAX_BYTES": "268435456"
+          }
         },
         {
           "name": "DdaAlltoAllThresholdTest",
@@ -1458,6 +1479,11 @@
           "test_filter": "NetIbCastSubnet.SubnetMatchesAny"
         },
         {
+          "name": "SignalingRateTable",
+          "description": "ibvSpeeds[] maps every IB signaling rate, including FDR10, to its Mb/s value",
+          "test_filter": "NetIbCastSpeed.SignalingRateTable"
+        },
+        {
           "name": "MemManager_FixturesDebug_CuMem0",
           "description": "MemManager pure-state, real-HIP, stats and allocator-wiring tests with NCCL_CUMEM_ENABLE=0 (CUMEM-gated subtests self-skip via GTEST_SKIP)",
           "test_filter": "MemManagerTest.*:MemManagerRealMem.*:MemManagerStatsTest.*:MemManagerAllocator.*",
@@ -1477,6 +1503,16 @@
           "name": "TopoTest",
           "description": "Topology construction tests",
           "test_filter": "TopoTest.*"
+        },
+        {
+          "name": "TopoGpuDev",
+          "description": "Topology GPU dev index tests",
+          "test_filter": "TopoGpuDev.*"
+        },
+        {
+          "name": "P2pPxnLevel1NetId",
+          "description": "PXN level-1 packed netId lookup (NCCL PR #2258 / AICOMRCCL-2038)",
+          "test_filter": "P2pPxnLevel1NetId.*"
         },
         {
           "name": "TimeoutTests",
@@ -1756,6 +1792,11 @@
           "test_filter": "AllGather.InPlaceGraph"
         },
         {
+          "name": "AllGather.SymmetricInPlaceSlices",
+          "description": "AllGather in-place on symmetric windows, 16 B aligned and unaligned per-rank slices",
+          "test_filter": "AllGather.SymmetricInPlaceSlices"
+        },
+        {
           "name": "AllGather.ManagedMem",
           "description": "AllGather managed memory",
           "test_filter": "AllGather.ManagedMem"
@@ -1949,6 +1990,11 @@
           "name": "ReduceScatter.InPlaceGraph",
           "description": "ReduceScatter in-place graph",
           "test_filter": "ReduceScatter.InPlaceGraph"
+        },
+        {
+          "name": "ReduceScatter.SymmetricInPlaceSlices",
+          "description": "ReduceScatter in-place on symmetric windows, 16 B aligned and unaligned per-rank slices",
+          "test_filter": "ReduceScatter.SymmetricInPlaceSlices"
         },
         {
           "name": "ReduceScatter.ManagedMem",
@@ -2418,6 +2464,414 @@
           "name": "CommMPITests_GinRmaFinalizeWithSplitComm",
           "description": "RMA and GIN hold separate contexts that a shared split child inherits and finalizes without a NULL access",
           "test_filter": "GinRmaContextMPITest.RmaAndGinFinalizeWithSplitComm"
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_int8_short",
+          "description": "Persistent communicator reuse (int8, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/int8_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_uint8_short",
+          "description": "Persistent communicator reuse (uint8, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/uint8_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_int32_short",
+          "description": "Persistent communicator reuse (int32, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/int32_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_uint32_short",
+          "description": "Persistent communicator reuse (uint32, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/uint32_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_int64_short",
+          "description": "Persistent communicator reuse (int64, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/int64_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_uint64_short",
+          "description": "Persistent communicator reuse (uint64, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/uint64_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_fp16_short",
+          "description": "Persistent communicator reuse (fp16, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp16_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_fp32_short",
+          "description": "Persistent communicator reuse (fp32, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp32_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_fp64_short",
+          "description": "Persistent communicator reuse (fp64, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp64_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_bf16_short",
+          "description": "Persistent communicator reuse (bf16, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/bf16_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_fp8e4m3_short",
+          "description": "Persistent communicator reuse (fp8e4m3, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp8e4m3_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_fp8e5m2_short",
+          "description": "Persistent communicator reuse (fp8e5m2, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp8e5m2_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_fp32_large",
+          "description": "Persistent communicator reuse (fp32, large tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp32_large",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_bf16_large",
+          "description": "Persistent communicator reuse (bf16, large tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/bf16_large",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_fp8e4m3_large",
+          "description": "Persistent communicator reuse (fp8e4m3, large tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp8e4m3_large",
+          "timeout": 120
+        }
+      ]
+    },
+    "comm_mpi_tests_3rank": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 3,
+      "num_nodes": 1,
+      "num_gpus": 3,
+      "timeout": 120,
+      "description": "Third rank count. At 3 the ring Send/Recv peers become distinct for the first time (at 2 the next and previous peer are the same rank) and the AllReduce ring loops at all_reduce.h:75 and :97 execute for the first time. Not a shard-remainder case: CommMPITests.cpp sets total_grad = shard_count * nranks and passes shard_count per rank, so the ReduceScatter/AllGather split is exact at every rank count and a non-dividing element count is still uncovered. Block timeout is 120 s, the same value every row here sets explicitly, so a row added without its own timeout key inherits the same budget.",
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "CommMPITests_PersistentCommunicator_int8_short_3rank",
+          "description": "Persistent communicator reuse (int8, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (3 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/int8_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_uint8_short_3rank",
+          "description": "Persistent communicator reuse (uint8, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (3 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/uint8_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_int32_short_3rank",
+          "description": "Persistent communicator reuse (int32, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (3 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/int32_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_uint32_short_3rank",
+          "description": "Persistent communicator reuse (uint32, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (3 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/uint32_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_int64_short_3rank",
+          "description": "Persistent communicator reuse (int64, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (3 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/int64_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_uint64_short_3rank",
+          "description": "Persistent communicator reuse (uint64, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (3 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/uint64_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_fp16_short_3rank",
+          "description": "Persistent communicator reuse (fp16, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (3 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp16_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_fp32_short_3rank",
+          "description": "Persistent communicator reuse (fp32, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (3 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp32_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_fp64_short_3rank",
+          "description": "Persistent communicator reuse (fp64, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (3 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp64_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_bf16_short_3rank",
+          "description": "Persistent communicator reuse (bf16, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (3 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/bf16_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_fp8e4m3_short_3rank",
+          "description": "Persistent communicator reuse (fp8e4m3, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (3 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp8e4m3_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_fp8e5m2_short_3rank",
+          "description": "Persistent communicator reuse (fp8e5m2, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (3 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp8e5m2_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_fp32_large_3rank",
+          "description": "Persistent communicator reuse (fp32, large tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (3 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp32_large",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_bf16_large_3rank",
+          "description": "Persistent communicator reuse (bf16, large tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (3 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/bf16_large",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_fp8e4m3_large_3rank",
+          "description": "Persistent communicator reuse (fp8e4m3, large tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (3 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp8e4m3_large",
+          "timeout": 120
+        }
+      ]
+    },
+    "comm_mpi_tests_4rank": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 1,
+      "num_gpus": 4,
+      "timeout": 120,
+      "description": "Fourth rank count, inside the range the fixture supports rather than a distinguished point for it: CommMPITests.cpp sets kMaxRanksAssumed = 8, and the ring Send/Recv peers are already distinct at 3, where the activation recv is validated against contribution(step, prev_rank, ...) so a reversed ring already fails. Four adds coverage breadth rather than a new detection property. Block timeout is 120 s, the same value every row here sets explicitly, so a row added without its own timeout key inherits the same budget.",
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "CommMPITests_PersistentCommunicator_int8_short_4rank",
+          "description": "Persistent communicator reuse (int8, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (4 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/int8_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_uint8_short_4rank",
+          "description": "Persistent communicator reuse (uint8, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (4 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/uint8_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_int32_short_4rank",
+          "description": "Persistent communicator reuse (int32, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (4 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/int32_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_uint32_short_4rank",
+          "description": "Persistent communicator reuse (uint32, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (4 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/uint32_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_int64_short_4rank",
+          "description": "Persistent communicator reuse (int64, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (4 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/int64_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_uint64_short_4rank",
+          "description": "Persistent communicator reuse (uint64, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (4 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/uint64_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_fp16_short_4rank",
+          "description": "Persistent communicator reuse (fp16, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (4 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp16_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_fp32_short_4rank",
+          "description": "Persistent communicator reuse (fp32, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (4 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp32_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_fp64_short_4rank",
+          "description": "Persistent communicator reuse (fp64, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (4 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp64_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_bf16_short_4rank",
+          "description": "Persistent communicator reuse (bf16, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (4 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/bf16_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_fp8e4m3_short_4rank",
+          "description": "Persistent communicator reuse (fp8e4m3, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (4 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp8e4m3_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_fp8e5m2_short_4rank",
+          "description": "Persistent communicator reuse (fp8e5m2, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (4 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp8e5m2_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_fp32_large_4rank",
+          "description": "Persistent communicator reuse (fp32, large tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (4 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp32_large",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_bf16_large_4rank",
+          "description": "Persistent communicator reuse (bf16, large tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (4 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/bf16_large",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_fp8e4m3_large_4rank",
+          "description": "Persistent communicator reuse (fp8e4m3, large tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (4 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp8e4m3_large",
+          "timeout": 120
+        }
+      ]
+    },
+    "comm_mpi_tests_8rank": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 120,
+      "description": "Default production topology, and the rank count the fixture declares as its ceiling: the test body skips above kMaxRanksAssumed = 8. That bound is the conservative one the payload formulas are proved against rather than an observed cliff -- a reduced element is a sum of at most nranks 0/1 contributions, so ncclFloat8e5m2's exact-integer range of 8 is what caps it, and contribution() does not collapse to a constant until nranks reaches kContributionModulus = 11. Block timeout is 120 s, the same value every row here sets explicitly, so a row added without its own timeout key inherits the same budget.",
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "CommMPITests_PersistentCommunicator_int8_short_8rank",
+          "description": "Persistent communicator reuse (int8, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (8 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/int8_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_uint8_short_8rank",
+          "description": "Persistent communicator reuse (uint8, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (8 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/uint8_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_int32_short_8rank",
+          "description": "Persistent communicator reuse (int32, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (8 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/int32_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_uint32_short_8rank",
+          "description": "Persistent communicator reuse (uint32, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (8 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/uint32_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_int64_short_8rank",
+          "description": "Persistent communicator reuse (int64, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (8 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/int64_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_uint64_short_8rank",
+          "description": "Persistent communicator reuse (uint64, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (8 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/uint64_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_fp16_short_8rank",
+          "description": "Persistent communicator reuse (fp16, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (8 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp16_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_fp32_short_8rank",
+          "description": "Persistent communicator reuse (fp32, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (8 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp32_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_fp64_short_8rank",
+          "description": "Persistent communicator reuse (fp64, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (8 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp64_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_bf16_short_8rank",
+          "description": "Persistent communicator reuse (bf16, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (8 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/bf16_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_fp8e4m3_short_8rank",
+          "description": "Persistent communicator reuse (fp8e4m3, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (8 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp8e4m3_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_fp8e5m2_short_8rank",
+          "description": "Persistent communicator reuse (fp8e5m2, short tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (8 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp8e5m2_short",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_fp32_large_8rank",
+          "description": "Persistent communicator reuse (fp32, large tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (8 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp32_large",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_bf16_large_8rank",
+          "description": "Persistent communicator reuse (bf16, large tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (8 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/bf16_large",
+          "timeout": 120
+        },
+        {
+          "name": "CommMPITests_PersistentCommunicator_fp8e4m3_large_8rank",
+          "description": "Persistent communicator reuse (fp8e4m3, large tier): Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator (8 ranks)",
+          "test_filter": "DtypeSizeCases/PersistentCommunicatorMPITest.HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator/fp8e4m3_large",
+          "timeout": 120
         }
       ]
     },
@@ -2648,6 +3102,71 @@
           "name": "IncompleteCollective_Revoke_Shrink_Collective",
           "description": "Rank np-1 skips AllReduce so the collective is truly in-flight when revoke fires; verifies device-side abortFlag path and recovery via shrink",
           "test_filter": "RevokeMPITest.IncompleteCollective_Revoke_Shrink_Collective"
+        },
+        {
+          "name": "IncompleteCollective_DdaLlTwoShot",
+          "description": "Rank np-1 skips DDA fabric LL two-shot AllReduce; asserts LL via rcclGetCollImplInfo; revoke must unblock stream sync then shrink",
+          "test_filter": "RevokeDdaMPITest.IncompleteCollective_DdaLlTwoShot"
+        },
+        {
+          "name": "IncompleteCollective_DdaLlOneShot",
+          "description": "Rank np-1 skips DDA fabric LL one-shot AllReduce; asserts LL via rcclGetCollImplInfo; revoke must unblock stream sync then shrink",
+          "test_filter": "RevokeDdaMPITest.IncompleteCollective_DdaLlOneShot"
+        },
+        {
+          "name": "IncompleteCollective_DdaLl128OneShot",
+          "description": "Rank np-1 skips DDA fabric LL128 one-shot AllReduce (LL sub-thresholds zeroed); asserts LL128 via rcclGetCollImplInfo; revoke must unblock stream sync then shrink",
+          "test_filter": "RevokeDdaMPITest.IncompleteCollective_DdaLl128OneShot"
+        },
+        {
+          "name": "IncompleteCollective_DdaLl128TwoShot",
+          "description": "Rank np-1 skips DDA fabric LL128 two-shot AllReduce (LL and LL128 one-shot thresholds zeroed); asserts LL128 via rcclGetCollImplInfo; revoke must unblock stream sync then shrink",
+          "test_filter": "RevokeDdaMPITest.IncompleteCollective_DdaLl128TwoShot"
+        },
+        {
+          "name": "IncompleteCollective_DdaVmmBarrier",
+          "description": "Rank np-1 skips DDA fabric VMM AllReduce (RCCL_DDA_LL=0, RCCL_DDA_LL128=0) so ranks wait in FabricGpuBarrier; asserts VMM via rcclGetCollImplInfo; revoke must unblock stream sync then shrink",
+          "test_filter": "RevokeDdaMPITest.IncompleteCollective_DdaVmmBarrier"
+        },
+        {
+          "name": "IncompleteCollective_DdaAllGatherLl",
+          "description": "Rank np-1 skips DDA fabric LL AllGather; asserts LL via rcclGetCollImplInfo; revoke must unblock stream sync then shrink",
+          "test_filter": "RevokeDdaMPITest.IncompleteCollective_DdaAllGatherLl"
+        },
+        {
+          "name": "IncompleteCollective_DdaAllGatherLl128",
+          "description": "Rank np-1 skips DDA fabric LL128 AllGather (RCCL_DDA_LL_THRESHOLD=0); asserts LL128 via rcclGetCollImplInfo; revoke must unblock stream sync then shrink",
+          "test_filter": "RevokeDdaMPITest.IncompleteCollective_DdaAllGatherLl128"
+        },
+        {
+          "name": "IncompleteCollective_DdaReduceScatterLl",
+          "description": "Rank np-1 skips DDA fabric LL ReduceScatter; asserts LL via rcclGetCollImplInfo; revoke must unblock stream sync then shrink",
+          "test_filter": "RevokeDdaMPITest.IncompleteCollective_DdaReduceScatterLl"
+        },
+        {
+          "name": "IncompleteCollective_DdaReduceScatterLl128",
+          "description": "Rank np-1 skips DDA fabric LL128 ReduceScatter (RCCL_DDA_LL_THRESHOLD=0); asserts LL128 via rcclGetCollImplInfo; revoke must unblock stream sync then shrink",
+          "test_filter": "RevokeDdaMPITest.IncompleteCollective_DdaReduceScatterLl128"
+        },
+        {
+          "name": "IncompleteCollective_DdaAlltoAllLl",
+          "description": "Rank np-1 skips DDA fabric LL AlltoAll; asserts LL via rcclGetCollImplInfo; revoke must unblock stream sync then shrink",
+          "test_filter": "RevokeDdaMPITest.IncompleteCollective_DdaAlltoAllLl"
+        },
+        {
+          "name": "IncompleteCollective_DdaAlltoAllLl128",
+          "description": "Rank np-1 skips DDA fabric LL128 AlltoAll (RCCL_DDA_LL_THRESHOLD=0); asserts LL128 via rcclGetCollImplInfo; revoke must unblock stream sync then shrink",
+          "test_filter": "RevokeDdaMPITest.IncompleteCollective_DdaAlltoAllLl128"
+        },
+        {
+          "name": "ShrinkAbort_DisablesDdaOnParent",
+          "description": "NCCL_SHRINK_ABORT on a DDA fabric parent; the survivors' parent must stop selecting DDA (rcclGetCollImplInfo) and the child AllReduce must complete",
+          "test_filter": "RevokeDdaMPITest.ShrinkAbort_DisablesDdaOnParent"
+        },
+        {
+          "name": "AbortDda_IncompleteCollective",
+          "description": "Rank np-1 skips a DDA fabric LL AllReduce/AllGather/ReduceScatter/AlltoAll; asserts LL via rcclGetCollImplInfo; ncclCommAbort must return and the blocked stream must drain",
+          "test_filter": "AbortDdaMPITest.*"
         },
         {
           "name": "ShrinkAbort_InFlight_ChildWorks_RankRenumbering",
@@ -2966,6 +3485,97 @@
           "name": "CE_Internal_AlltoAllv",
           "description": "CE AlltoAllv rejects missing size metadata before launching transfers",
           "test_filter": "CeInternalMPITest.AlltoAllvMissingSizesReturnsInvalidUsage"
+        }
+      ]
+    },
+    "ce_allreduce_lsa_guard": {
+      "extends": "ce_base",
+      "num_ranks": 4,
+      "num_gpus": 4,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_LSA_TEAM_SIZE": "2",
+        "RCCL_CE_ALLREDUCE": "1",
+        "RCCL_FORCE_CE_ALLREDUCE": "1"
+      },
+      "tests": [
+        {
+          "name": "CE_AllReduce_LsaGuard_SplitLsaTeam",
+          "description": "One node, 4 ranks, LSA team of 2: ncclCeAllReduce rejects before staging or launch (single-step and pipelined), the comm stays usable, and forced CE AllReduce is never selected",
+          "test_filter": "CeAllReduceLsaGuardTest.*"
+        }
+      ]
+    },
+    "ce_allreduce_spanning_lsa": {
+      "extends": "ce_base",
+      "num_ranks": 4,
+      "num_gpus": 4,
+      "timeout": 300,
+      "env_variables": {
+        "RCCL_CE_ALLREDUCE": "1",
+        "RCCL_FORCE_CE_ALLREDUCE": "1",
+        "RCCL_CE_AR_2SHOT_MAX_BYTES": "8388608"
+      },
+      "tests": [
+        {
+          "name": "CE_AllReduce_SpanningLsa_ForcedUnregistered",
+          "description": "One node, 4 ranks, one LSA team: forced CE AllReduce on unregistered buffers selects CE before staging exists, allocates staging, and returns the correct sum. gfx1250 leaves the unregistered cap at 0, so the 8 MiB call sets RCCL_CE_AR_2SHOT_MAX_BYTES.",
+          "test_filter": "CeAllReduceSpanningLsaTest.*"
+        }
+      ]
+    },
+    "ce_allreduce_lsa_guard_multinode": {
+      "extends": "ce_base",
+      "num_ranks": 4,
+      "num_nodes": 2,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_IB_DISABLE": "0",
+        "RCCL_CE_ALLREDUCE": "1",
+        "RCCL_FORCE_CE_ALLREDUCE": "1"
+      },
+      "tests": [
+        {
+          "name": "CE_AllReduce_LsaGuard_MultiNode",
+          "description": "Two nodes, 2 ranks each: ncclCeAllReduce rejects before staging or launch (single-step and pipelined), the comm stays usable, and forced CE AllReduce is never selected",
+          "test_filter": "CeAllReduceLsaGuardTest.*"
+        }
+      ]
+    },
+    "ce_allreduce_recv_offset": {
+      "extends": "ce_base",
+      "num_ranks": 2,
+      "num_gpus": 2,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_DEBUG_SUBSYS": "INIT,COLL,REG",
+        "NCCL_LOCAL_REGISTER": "1",
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "NCCL_WIN_ENABLE": "1",
+        "RCCL_CE_ALLREDUCE": "1",
+        "RCCL_FORCE_CE_ALLREDUCE": "1"
+      },
+      "tests": [
+        {
+          "name": "CE_RecvOffset_Symmetric_Lsa",
+          "description": "Registered CE AllReduce into a multi-segment symmetric window at a non-zero receive offset uses the window-relative offset",
+          "test_filter": "UBR_MultiSegment.Symmetric_Lsa"
+        },
+        {
+          "name": "CE_RecvOffset_BeforeLegacyRecvOffsetCorruptsResult",
+          "description": "BEFORE control: fault injection restores the legacy base-relative offset and the result must be corrupted (ENABLE_FAULT_INJECTION build)",
+          "test_filter": "UBR_MultiSegment.Symmetric_Lsa_BeforeLegacyRecvOffsetCorruptsResult"
+        },
+        {
+          "name": "CE_RecvOffset_RecvRangePastWindowFallsBack",
+          "description": "Receive range past the window tail disables the registered CE fast path and falls back to staging",
+          "test_filter": "UBR_MultiSegment.Symmetric_Lsa_RecvRangePastWindowFallsBack"
+        },
+        {
+          "name": "CE_RecvOffset_RecvRangePastWindowChunkedFallback",
+          "description": "Chunked registered CE AllReduce whose receive range runs past the window tail falls back to staging for every chunk",
+          "test_filter": "UBR_MultiSegment.Symmetric_Lsa_RecvRangePastWindowChunkedFallback"
         }
       ]
     },
@@ -4318,6 +4928,11 @@
           "name": "AsymmetricVisibility.CommInitRankAllReduce",
           "description": "ROCM-27034: RCCL comm init + AllReduce under asymmetric HIP_VISIBLE_DEVICES",
           "test_filter": "AsymmetricVisibility.CommInitRankAllReduce"
+        },
+        {
+          "name": "AsymmetricVisibility.OneGpuPerRankAllReduce",
+          "description": "Topology GPU dev index when each rank sees only its own GPU",
+          "test_filter": "AsymmetricVisibility.OneGpuPerRankAllReduce"
         }
       ]
     },
@@ -4509,6 +5124,100 @@
           "test_filter": "PluginCompatV11.CollNetLazyInitialization"
         }
       ]
+    },
+    "dda_fabric_reduce_scatter_base": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_nodes": 1,
+      "timeout": 300,
+      "env_variables": {
+        "UT_DDA_FABRIC_REQUIRE_INIT": "1"
+      },
+      "tests": [
+        {
+          "name": "DDA_Fabric_ReduceScatter_LL",
+          "description": "DDA fabric ReduceScatter LL tier: 16 B to ~1 MiB shards, three back-to-back calls per shape, position-dependent data, guard tail, one COLL launch line per call",
+          "test_filter": "DdaMPI_ReduceScatter.LLTierBackToBackShapes"
+        },
+        {
+          "name": "DDA_Fabric_ReduceScatter_LL128",
+          "description": "DDA fabric ReduceScatter LL128 tier: odd-word shards with a partial last 128 B line, three back-to-back calls per shape, position-dependent data, guard tail",
+          "test_filter": "DdaMPI_ReduceScatter.LL128TierBackToBackShapes"
+        },
+        {
+          "name": "DDA_Fabric_ReduceScatter_Interleaved",
+          "description": "DDA fabric ReduceScatter LL and LL128 alternated on one communicator: same-tier calls back to back, a stream drain and a global MPI barrier at each tier switch (LL and LL128 scratch banks overlap)",
+          "test_filter": "DdaMPI_ReduceScatter.LLAndLL128Interleaved"
+        },
+        {
+          "name": "DDA_Fabric_ReduceScatter_GridStride",
+          "description": "DDA fabric ReduceScatter LL and LL128 with RCCL_DDA_FABRIC_MAXBLOCKS=2 so both kernels grid-stride; stream drain and global MPI barrier at each tier switch",
+          "test_filter": "DdaMPI_ReduceScatter.GridStrideWithTwoBlocks"
+        }
+      ]
+    },
+    "dda_fabric_reduce_scatter_2rank": {
+      "extends": "dda_fabric_reduce_scatter_base",
+      "num_ranks": 2,
+      "num_gpus": 2
+    },
+    "dda_fabric_reduce_scatter_4rank": {
+      "extends": "dda_fabric_reduce_scatter_base",
+      "num_ranks": 4,
+      "num_gpus": 4
+    },
+    "dda_fabric_reduce_scatter_8rank": {
+      "extends": "dda_fabric_reduce_scatter_base",
+      "num_ranks": 8,
+      "num_gpus": 8
+    },
+    "dda_fabric_allreduce_ll_base": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_nodes": 1,
+      "timeout": 300,
+      "env_variables": {
+        "UT_DDA_FABRIC_REQUIRE_INIT": "1"
+      },
+      "tests": [
+        {
+          "name": "DDA_Fabric_AllReduce_LL_OneShot",
+          "description": "DDA fabric AllReduce LL one-shot tier: analytic sum and the one-shot COLL log line",
+          "test_filter": "DdaMPI_AllReduce.LLOneShotMultiRank"
+        },
+        {
+          "name": "DDA_Fabric_AllReduce_LL_TwoShot",
+          "description": "DDA fabric AllReduce LL two-shot tier past the one-shot threshold: analytic sum and the two-shot COLL log line",
+          "test_filter": "DdaMPI_AllReduce.LLTwoShotMultiRank"
+        },
+        {
+          "name": "DDA_Fabric_AllReduce_LL128_OneShot",
+          "description": "DDA fabric AllReduce LL128 one-shot tier with the LL thresholds zeroed; own process because RCCL_PARAM caches thresholds",
+          "test_filter": "DdaMPI_AllReduce.LL128OneShotMultiRank"
+        },
+        {
+          "name": "DDA_Fabric_AllReduce_LL128_TwoShot",
+          "description": "DDA fabric AllReduce LL128 two-shot tier with the LL and LL128 one-shot thresholds zeroed; own process",
+          "test_filter": "DdaMPI_AllReduce.LL128TwoShotMultiRank"
+        }
+      ]
+    },
+    "dda_fabric_allreduce_ll_2rank": {
+      "extends": "dda_fabric_allreduce_ll_base",
+      "num_ranks": 2,
+      "num_gpus": 2
+    },
+    "dda_fabric_allreduce_ll_4rank": {
+      "extends": "dda_fabric_allreduce_ll_base",
+      "num_ranks": 4,
+      "num_gpus": 4
+    },
+    "dda_fabric_allreduce_ll_8rank": {
+      "extends": "dda_fabric_allreduce_ll_base",
+      "num_ranks": 8,
+      "num_gpus": 8
     }
   },
   "test_suites": [
@@ -4939,6 +5648,24 @@
       "enabled": true
     },
     {
+      "name": "Comm MPI Tests - 3-Rank (persistent communicator)",
+      "description": "All 15 persistent-communicator rows from CommMPITests.cpp on 3 GPUs/ranks, single node: Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator",
+      "config": "comm_mpi_tests_3rank",
+      "enabled": true
+    },
+    {
+      "name": "Comm MPI Tests - 4-Rank (persistent communicator)",
+      "description": "All 15 persistent-communicator rows from CommMPITests.cpp on 4 GPUs/ranks, single node: Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator",
+      "config": "comm_mpi_tests_4rank",
+      "enabled": true
+    },
+    {
+      "name": "Comm MPI Tests - 8-Rank (persistent communicator)",
+      "description": "All 15 persistent-communicator rows from CommMPITests.cpp on 8 GPUs/ranks, single node: Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator",
+      "config": "comm_mpi_tests_8rank",
+      "enabled": true
+    },
+    {
       "name": "UBR Tests - Multi Node",
       "description": "User Buffer Registration tests on multi-node (requires 2+ nodes)",
       "config": "ubr_multi_node",
@@ -5008,6 +5735,30 @@
       "name": "CE Internal Tests (white-box, Debug build only)",
       "description": "White-box CE internal function tests (ncclCeInit, ncclPrepUCSync, ncclCeLaunchBatchOps). Requires Debug build for symbol visibility. Skips on unsupported driver version.",
       "config": "ce_internal",
+      "enabled": true
+    },
+    {
+      "name": "CE AllReduce LSA Guard (split LSA team, single node)",
+      "description": "ncclCeAllReduce must reject a comm whose LSA team does not span it before staging or any launch. Runs on one node with NCCL_LSA_TEAM_SIZE=2 at 4 ranks.",
+      "config": "ce_allreduce_lsa_guard",
+      "enabled": true
+    },
+    {
+      "name": "CE AllReduce Spanning LSA (forced unregistered, single node)",
+      "description": "One node, 4 ranks, one LSA team: forced CE AllReduce on unregistered buffers selects CE before staging exists, allocates staging, and returns the correct sum",
+      "config": "ce_allreduce_spanning_lsa",
+      "enabled": true
+    },
+    {
+      "name": "CE AllReduce LSA Guard (multi-node)",
+      "description": "ncclCeAllReduce must reject a comm spanning two nodes before staging or any launch; forced CE AllReduce must never be selected.",
+      "config": "ce_allreduce_lsa_guard_multinode",
+      "enabled": true
+    },
+    {
+      "name": "CE AllReduce Receive Offset (registered CE, single node)",
+      "description": "Registered CE AllReduce into multi-segment symmetric windows: receive-offset AFTER/BEFORE regression and past-window staging fallback.",
+      "config": "ce_allreduce_recv_offset",
       "enabled": true
     },
     {
@@ -5234,6 +5985,42 @@
       "name": "RMA External Plugin - Put Signal",
       "description": "Validate the EXTERNAL one-sided RMA plugin loader/assign path",
       "config": "rma_external_plugin_put_signal",
+      "enabled": true
+    },
+    {
+      "name": "DDA Fabric ReduceScatter LL/LL128 - 2-Rank",
+      "description": "DDA fabric ReduceScatter LL and LL128 tiers on 2 GPUs, runtime-nRanks kernel (NRANKS_CT 0). Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with MNNVL fabric DDA initialised.",
+      "config": "dda_fabric_reduce_scatter_2rank",
+      "enabled": true
+    },
+    {
+      "name": "DDA Fabric ReduceScatter LL/LL128 - 4-Rank",
+      "description": "DDA fabric ReduceScatter LL and LL128 tiers on 4 GPUs, unrolled NRANKS_CT=4 kernel. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with MNNVL fabric DDA initialised.",
+      "config": "dda_fabric_reduce_scatter_4rank",
+      "enabled": true
+    },
+    {
+      "name": "DDA Fabric ReduceScatter LL/LL128 - 8-Rank",
+      "description": "DDA fabric ReduceScatter LL and LL128 tiers on 8 GPUs, unrolled NRANKS_CT=8 kernel. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with MNNVL fabric DDA initialised.",
+      "config": "dda_fabric_reduce_scatter_8rank",
+      "enabled": true
+    },
+    {
+      "name": "DDA Fabric AllReduce LL/LL128 - 2-Rank",
+      "description": "DDA fabric AllReduce LL and LL128 one-shot and two-shot tiers on 2 GPUs, runtime-nRanks kernels. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with MNNVL fabric DDA initialised.",
+      "config": "dda_fabric_allreduce_ll_2rank",
+      "enabled": true
+    },
+    {
+      "name": "DDA Fabric AllReduce LL/LL128 - 4-Rank",
+      "description": "DDA fabric AllReduce LL and LL128 one-shot and two-shot tiers on 4 GPUs. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with MNNVL fabric DDA initialised.",
+      "config": "dda_fabric_allreduce_ll_4rank",
+      "enabled": true
+    },
+    {
+      "name": "DDA Fabric AllReduce LL/LL128 - 8-Rank",
+      "description": "DDA fabric AllReduce LL and LL128 one-shot and two-shot tiers on 8 GPUs. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with MNNVL fabric DDA initialised.",
+      "config": "dda_fabric_allreduce_ll_8rank",
       "enabled": true
     }
   ]

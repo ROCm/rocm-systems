@@ -24,8 +24,6 @@ namespace rocprofsys::pmc::collectors::nic
  *
  * This policy handles serialization of NIC RDMA metric samples into the
  * rocprofiler-systems trace cache for later analysis and visualization.
- *
- * @see perfetto_policy for direct Perfetto trace output
  */
 struct cache_policy
 {

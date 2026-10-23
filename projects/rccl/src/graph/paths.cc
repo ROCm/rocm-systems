@@ -531,7 +531,10 @@ NCCL_PARAM(NetGdrMloPart, "NET_GDR_MLOPART", 1);
 // the no-GDR diversion below (addInterStep, which only rewrites GPU<->NET) never degrades. Reading
 // the partition's own entry instead would feed the decision back its own diverted path and let
 // partitions of one device disagree about GDR.
+// A PXN relay is the exception: addInterStep marks it on the partition's own GPU<->NET entry only, never
+// on the DEV, so report PATH_PXN from there or ncclTopoCheckGdr cannot switch to the relay GPU's distance.
 static int ncclTopoGdrDistance(struct ncclTopoNode* gpu, int n) {
+  if (gpu->paths[NET] != NULL && gpu->paths[NET][n].type == PATH_PXN) return PATH_PXN;
   if (gpu->gpu.mloPart != NCCL_TOPO_UNDEF && gpu->gpu.parent != NULL && gpu->gpu.parent->paths[NET] != NULL)
     return gpu->gpu.parent->paths[NET][n].type;
   return gpu->paths[NET][n].type;
@@ -1195,12 +1198,12 @@ ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* 
 
   // detect if all GPUs are connected by XGMI
   for (int i = 0; i < system->nodes[GPU].count && allXgmi; i++) {
-    int cudaDev1 = system->nodes[GPU].nodes[i].gpu.dev;
+    int dev1 = system->nodes[GPU].nodes[i].gpu.dev;
     for (int j = 0; j < system->nodes[GPU].count && allXgmi; j++) {
       if (i == j) continue;
-      int cudaDev2 = system->nodes[GPU].nodes[j].gpu.dev;
+      int dev2 = system->nodes[GPU].nodes[j].gpu.dev;
       bool isXGMI;
-      NCCLCHECKGOTO(ncclTopoGetLinkType(comm->topo, cudaDev1, cudaDev2, &isXGMI), ret, fail);
+      NCCLCHECKGOTO(ncclTopoGetLinkType(comm->topo, dev1, dev2, &isXGMI), ret, fail);
       allXgmi &= isXGMI;
     }
   }
@@ -1260,7 +1263,13 @@ static ncclResult_t ncclTopoGetNchannels(struct ncclComm* comm, int g /*local gp
     }
     // Local rank
     path = system->nodes[GPU].nodes[peer].paths[GPU] + g;
-    if (path->type == PATH_NVL) {
+    if (path->type == PATH_NVL &&
+        ncclTopoIsMloPartSibling(system->nodes[GPU].nodes + g, system->nodes[GPU].nodes + peer)) {
+      // On-package hop between compute partitions of one device: path->bw is MLOPART_LOC_BW,
+      // which is not a multiple of the XGMI width, so the division below cannot read a link
+      // count out of it. See MLOPART_P2P_NCHANNELS.
+      *nChannels = MLOPART_P2P_NCHANNELS;
+    } else if (path->type == PATH_NVL) {
       float nvlBw = ncclTopoXGMISpeed(system->nodes[GPU].nodes[g].gpu.gcn);
       *nChannels = ((IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx942") ||
                      IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx950") ||
@@ -1491,6 +1500,47 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     }
   } else {
     comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, comm->p2pnChannels);
+    // Across compute partitions the on-package fabric is the bottleneck the network is above
+    // multi-node, and every peer of a plan puts its channels on it at once. Past the point where
+    // the peers fill the channel pool, more channels per peer only adds traffic that conflicts
+    // with the other peers', so fit the peers into a single round the way the branch above does
+    // for the NICs. On an 8x MI355X node in CPX, 1 GiB alltoall over 64 partitions runs 12.5 GB/s
+    // at 8 channels per peer, 15.0 at 4 and 29.6 at 1; over the 8 partitions of one device it
+    // runs 74.3 at 64 and 144.8 at 16.
+    //
+    // Strictly greater, where the branch above is >=, so a plan that exactly fills the pool is
+    // left alone instead of halved once more. Exactly full is one round, which is all either loop
+    // is after; the >= above goes a step past its own comment, and that step is not free here
+    // because it is the case that keeps coming up -- 8 partitions land on 16 channels per peer
+    // over 4 rounds and 16 partitions on 8 over 8, both exactly 64. Halving either would cost
+    // about a quarter of the bandwidth: 8 partitions run 1 GiB sendrecv at 120.9 GB/s with 16
+    // channels per peer and 88.5 with 8. The >= is left as it is because the net-bound branch has
+    // its own history and is not what this change is about.
+    //
+    // Gated on MLOPart because that is the configuration the contention was measured in: a
+    // whole-device (SPX) comm has its own per-peer counts and channel pool and is left as it was.
+    // Within MLOPart it is not narrowed to CPX, though CPX is where the numbers above come from.
+    // The bottleneck is that partitions of one device share one on-package fabric, which is true
+    // of DPX and the other XCP modes too; what changes is how many of them there are, and that is
+    // already the loop's input. A coarser partitioning has fewer peers per device and so needs
+    // fewer rounds to cover them, which is why the loop mostly does not fire there -- it reduces
+    // what the peer count says needs reducing rather than assuming a partition size.
+    // Decided per communicator rather than per operation because the device recovers a work's
+    // part index with comm->p2pnChannelsPerPeer (see sendrecv.h), so the channel stride cannot
+    // vary between plans; a workload whose real peers are few declares them through
+    // config.maxP2pPeers and keeps its full per-peer count.
+    //
+    // nNodes is tested here and not left to the else, which is also reached by a multi-node comm
+    // whose user pinned nChannelsPerNetPeer -- that pin is the whole reason the branch above
+    // declines to run, and ncclTopoGetNchannels() hands it straight back as the count for every
+    // remote peer, so halving it here would undo it. Multi-node is the network's bottleneck to
+    // size against, not the on-package fabric's.
+    if (comm->nNodes == 1 && comm->hasMloPart) {
+      while (comm->p2pnChannelsPerPeer * divUp(maxP2pPeers, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) >
+               comm->p2pnChannels &&
+             comm->p2pnChannelsPerPeer > 1)
+        comm->p2pnChannelsPerPeer /= 2;
+    }
   }
   // Final safety: arch-specific caps above and the halving loop may still
   // leave p2pnChannelsPerPeer > p2pnChannels (e.g. when the loop bottoms out

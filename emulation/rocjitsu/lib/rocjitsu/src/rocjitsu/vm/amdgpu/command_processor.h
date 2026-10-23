@@ -21,6 +21,7 @@
 /// href="https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/conceptual/command-processor.html">ROCm
 /// CP documentation</a>
 
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/vm/amdgpu/aql/aql_packet_processor.h"
 #include "rocjitsu/vm/amdgpu/aql/aql_packet_types.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
@@ -36,6 +37,7 @@
 #include "rocjitsu/vm/amdgpu/workgroup_key.h"
 
 #include "simdojo/sim/component.h"
+#include "util/diagnostic.h"
 
 #include <algorithm>
 #include <array>
@@ -61,7 +63,6 @@
 #endif
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
 #include "hsa/hsa.h"
 RJ_DIAGNOSTIC_POP
 
@@ -112,6 +113,19 @@ public:
   /// not participate in numeric VMID routing.
   void set_gpu_vm(GpuVm *gpu_vm, AddressSpaceHandle default_address_space = {});
   [[nodiscard]] AddressSpaceHandle default_address_space() const { return default_address_space_; }
+
+  /// @brief Replace the GWS store across this CP's drained compute units.
+  /// @details The caller serializes topology changes. Preflights every CU and
+  /// throws std::logic_error if any active CU would change stores, before
+  /// updating any CU or the CP's shared owner.
+  void set_gws_device(std::shared_ptr<GwsDevice> device) {
+    for (ComputeUnitCore *cu : cus_)
+      if (!cu->can_set_gws_device(device))
+        throw std::logic_error("Cannot replace GWS store with active waves or workgroups");
+    for (ComputeUnitCore *cu : cus_)
+      (void)cu->set_gws_device(device);
+    gws_device_ = std::move(device);
+  }
   void add_l2_cache(L2Cache *l2) {
     // Idempotent: the config-driven builder and the Xcd full constructor may
     // both attempt to register the same L2. Avoid duplicate entries so cache
@@ -166,6 +180,12 @@ public:
   /// @param peers All XCD command processors of the SoC, in XCD index order.
   void set_xcd_topology(uint32_t rank, std::vector<CommandProcessor *> peers);
 
+  /// @brief Return the physical XCC rank, or nullopt before topology assignment.
+  /// @details This is the rank from set_xcd_topology(), independent of scratch overrides.
+  std::optional<uint32_t> xcc_id() const {
+    return xcd_peers_.empty() ? std::nullopt : std::optional<uint32_t>(xcd_rank_);
+  }
+
   [[nodiscard]] uint64_t register_pm4_queue(Pm4QueueConfig config);
   [[nodiscard]] QueuePrepareCloseStatus
   prepare_unregister_pm4_queue_registration(uint64_t registration_id) noexcept;
@@ -203,7 +223,7 @@ public:
   /// @brief Cancel DRM work before its frontend revokes the process VM binding.
   void unregister_drm_queues(uint32_t process_id);
   void unregister_drm_queue(uint32_t queue_id, uint32_t process_id);
-  /// @brief Enqueue a DRM submission; return false if the queue has faulted.
+  /// @brief Enqueue a DRM submission; return false if its queue is missing, non-DRM, or faulted.
   [[nodiscard]] bool submit_pm4(uint32_t queue_id, uint32_t process_id, Pm4Submission submission);
   /// @brief Remove the queue currently identified by the legacy routing tuple.
   void unregister_queue(uint32_t queue_id, uint32_t process_id);
@@ -250,6 +270,8 @@ public:
   void add_spi(ShaderProcessorInput *spi) { spis_.push_back(spi); }
 
   void add_compute_unit(ComputeUnitCore *cu) {
+    if (gws_device_ && !cu->can_set_gws_device(gws_device_))
+      throw std::logic_error("Cannot attach an active CU to a different GWS store");
     auto port_id = static_cast<simdojo::PortID>(dispatch_ports_.size());
     auto port = std::make_unique<simdojo::Port>("req_" + cu->name(), port_id, this,
                                                 simdojo::PortDirection::OUT,
@@ -265,6 +287,10 @@ public:
     cu->set_pool_driven(dispatch_threads_ > 1);
     cu->set_command_processor(this);
     cu->set_gpu_vm(gpu_vm_);
+    // Forward the shared GWS store (like set_gpu_vm above) so a CU added after the
+    // store was wired joins it too; null leaves the CU on its private default store.
+    if (gws_device_)
+      cu->set_gws_device(gws_device_);
     cu->set_on_idle([this]() { on_cu_idle(); });
     cu->set_on_pool_ready([this, cu]() { on_cu_pool_ready(cu); });
     on_cu_pool_ready(cu);
@@ -277,6 +303,11 @@ public:
 
   /// @brief WG completion notification from CU refcount reaching zero.
   void notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id);
+
+  /// @brief Cancel all replicas of a failed queue before reporting VM failure.
+  /// @details Thread-safe publication; callbacks and cancellation execute on
+  /// each CP's engine partition after its current worker batch rejoins.
+  void notify_execution_failure(uint32_t queue_id, uint32_t process_id, std::string reason);
 
   /// @brief Terminate a dispatch after a CU observes a non-retryable VM fault.
   /// @details The caller must have released the CU wave-state lock. The owning
@@ -424,6 +455,8 @@ public:
   const std::vector<ComputeUnitCore *> &compute_units() const { return cus_; }
 
   /// @brief Return LDS targets selected by a cluster multicast mask.
+  /// @details Resolve targets only after all cluster peers have been admitted.
+  /// Dispatch plugin callbacks may run before cluster admission is complete.
   std::vector<ClusterLdsTarget> cluster_lds_targets(uint32_t dispatch_id, uint32_t wg_id,
                                                     uint32_t mcast_mask);
 
@@ -535,7 +568,7 @@ private:
 
   struct KernelDescriptorReadResult {
     VmAccessOutcome outcome;
-    rocr::llvm::amdhsa::kernel_descriptor_t descriptor{};
+    rocjitsu::amdhsa::kernel_descriptor_t descriptor{};
   };
 
   class ClusterWorkgroupPlacement;
@@ -624,8 +657,9 @@ private:
                                      simdojo::Tick now);
   void fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchState &qs);
   void fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs, simdojo::Tick now);
-  void dispatch_pm4(const ComputeQueueRecord &queue, Pm4DispatchState &qs,
-                    const std::array<uint32_t, 4> &dimensions);
+  util::Result dispatch_pm4(const ComputeQueueRecord &queue, Pm4DispatchState &qs,
+                            const std::array<uint32_t, 4> &dimensions,
+                            util::DiagnosticEmitter emit_error);
   void service_command_streams(simdojo::Tick now);
   void service_pm4_ring(ComputeQueueRecord &queue, simdojo::Tick now);
 
@@ -672,6 +706,7 @@ private:
     uint32_t process_id = 0;
     uint64_t dispatch_id = 0;
     VmAccessOutcome outcome;
+    std::function<void()> on_cancelled = {};
   };
   void accept_dispatch_fault(DispatchFaultNotification fault);
   void drain_dispatch_fault_inbox();
@@ -812,6 +847,9 @@ private:
   std::unordered_map<uint32_t, DispatchLaunchMetadata> dispatch_launch_metadata_;
   std::vector<ComputeUnitCore *> cus_;
   std::vector<simdojo::Port *> dispatch_ports_;
+  /// XCD/SoC store forwarded to every attached CU. Null on a standalone CP,
+  /// whose CUs retain their private defaults.
+  std::shared_ptr<GwsDevice> gws_device_;
 
   uint32_t xcd_rank_ = 0;
   // Every XCD's CP in XCD index order, including this one. Empty until the SoC
