@@ -5482,10 +5482,11 @@ struct ForceScalarGuard {
 // RDNA3 MAX selects on raw bits and raises nothing. mxcsr_mask makes the harness
 // assert the flags survive, which it does only where MXCSR exists.
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
-TEST(ValuFpModeHelpers, VopdMixedMaxKeepsHostFlags) {
+TEST(ValuFpModeHelpers, VopdInexactAddKeepsHostFlags) {
   const ArithmeticCase test{
       "gfx1100VopdInexactAddSignalingNanMaxKeepsHostFlags",
       ROCJITSU_CODE_ARCH_RDNA3,
+      // v_dual_add_f32 v6, v0, v1 :: v_dual_max_f32 v7, v2, v3
       {0xc9140300u, 0x06060702u},
       {{0, 0x3f800000u}, {1, 0x33800001u}, {2, 0x7f800001u}, {3, 0x3f800000u}},
       {{6, 0x3f800001u}, {7, 0x3f800000u}},
