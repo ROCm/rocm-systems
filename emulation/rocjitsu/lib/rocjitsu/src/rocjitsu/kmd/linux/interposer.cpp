@@ -1431,7 +1431,7 @@ public:
     uint32_t next_syncobj_handle = 1;
     std::unordered_map<uint32_t, std::shared_ptr<SyncobjEntry>> syncobj_entries;
     // Timeline activity on one DRM file must not wake waiters belonging to every
-    // other open DRM file in the process. ppoll preserves signal interruption.
+    // other open DRM file in the process. The libc wait preserves signal interruption.
     SyncobjNotification syncobj_generation;
     bool imported_sync_fence = false; // Wait on the cross-file notification generation.
     uint32_t next_context_id = 1;

@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <dirent.h>
+#include <pthread.h>
 #include <semaphore.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -76,6 +77,7 @@ public:
   pid_t (*fork)() = nullptr;
   // Non-noexcept signatures preserve forced unwinding from signal handlers.
   int (*clock_gettime)(clockid_t, timespec *) = nullptr;
+  int (*pthread_mutex_lock)(pthread_mutex_t *) = nullptr;
   int (*sem_init)(sem_t *, int, unsigned int) = nullptr;
   int (*sem_destroy)(sem_t *) = nullptr;
   int (*sem_post)(sem_t *) = nullptr;

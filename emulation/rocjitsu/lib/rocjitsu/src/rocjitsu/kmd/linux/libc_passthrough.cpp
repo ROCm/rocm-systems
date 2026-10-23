@@ -58,6 +58,8 @@ void LibcPassthrough::resolve() {
   realpath_chk_fn = util::lookup_symbol<decltype(realpath_chk_fn)>(handle, "__realpath_chk");
   fork = util::lookup_symbol<decltype(fork)>(handle, "fork");
   clock_gettime = util::lookup_symbol<decltype(clock_gettime)>(handle, "clock_gettime");
+  pthread_mutex_lock =
+      util::lookup_symbol<decltype(pthread_mutex_lock)>(handle, "pthread_mutex_lock");
   sem_init = util::lookup_symbol<decltype(sem_init)>(handle, "sem_init");
   sem_destroy = util::lookup_symbol<decltype(sem_destroy)>(handle, "sem_destroy");
   sem_post = util::lookup_symbol<decltype(sem_post)>(handle, "sem_post");
@@ -72,7 +74,7 @@ void LibcPassthrough::resolve() {
                  madvise && memfd_create && dup && dup2 && dup3 && fcntl && fopen && freopen &&
                  opendir && readdir && closedir && stat && lstat && access && fstat_fn &&
                  readlink_fn && realpath_fn && fork && clock_gettime && sem_init && sem_destroy &&
-                 sem_post;
+                 sem_post && pthread_mutex_lock;
   assert(initialized_);
 }
 

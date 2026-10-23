@@ -21,6 +21,8 @@ namespace rocjitsu {
 /// @details Each sleeper owns a stack semaphore, so waking one cannot consume
 /// another's notification. Registration precedes the generation check to close
 /// the check/sleep race. No application descriptor is allocated or borrowed.
+/// Signal-driven thread exit can unwind libc setup/waits and blocked registration.
+/// It is not supported during list mutation, notification, or noexcept cleanup.
 class SyncobjNotification {
 public:
   uint32_t load(std::memory_order order) const { return generation_.load(order); }
@@ -29,7 +31,8 @@ public:
     Waiter waiter(*this);
     if (waiter.initialize() != 0)
       return -1;
-    waiter.register_waiter();
+    if (waiter.register_waiter() != 0)
+      return -1;
     if (generation_.load(std::memory_order_acquire) != expected)
       return 0;
 
@@ -96,10 +99,18 @@ private:
       initialized_ = result == 0;
       return result;
     }
-    void register_waiter() {
-      std::lock_guard lock(owner_.mutex_);
+    int register_waiter() {
+      // std::mutex::lock reaches a noexcept libc declaration. Keep a signal's
+      // forced unwind able to reach the still-unregistered waiter's destructor.
+      const int result = libc_passthrough().pthread_mutex_lock(owner_.mutex_.native_handle());
+      if (result != 0) {
+        errno = result;
+        return -1;
+      }
+      std::lock_guard lock(owner_.mutex_, std::adopt_lock);
       owner_.waiters_.push_front(*this);
       registered_ = true;
+      return 0;
     }
     sem_t *semaphore() { return &semaphore_; }
     void notify() {
