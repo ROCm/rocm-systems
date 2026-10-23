@@ -102,10 +102,6 @@ jobs:
       gfx103x_runner: ${{ steps.runner.outputs.gfx103x_runner }}
       gfx110x_runner: ${{ steps.runner.outputs.gfx110x_runner }}
       gfx120x_runner: ${{ steps.runner.outputs.gfx120x_runner }}
-      EVENT_NAME: ${{ github.event_name }}
-      INPUT_MODE: ${{ inputs.mode }}
-      INPUT_ARCH: ${{ inputs.arch }}
-      INPUT_OS: ${{ inputs.os-release }}
     steps:
       - name: Checkout workflow actions
         uses: actions/checkout@v6
@@ -139,6 +135,10 @@ jobs:
           GFX103X_RUNNER: ${{ needs.ci_config.outputs.gfx103x_runner }}
           GFX110X_RUNNER: ${{ needs.ci_config.outputs.gfx110x_runner }}
           GFX120X_RUNNER: ${{ needs.ci_config.outputs.gfx120x_runner }}
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_MODE: ${{ inputs.mode }}
+          INPUT_ARCH: ${{ inputs.arch }}
+          INPUT_OS: ${{ inputs.os-release }}
         run: |
           set -e
           if [ "$EVENT_NAME" = 'schedule' ] || [ "$INPUT_MODE" = 'nightly' ]; then
