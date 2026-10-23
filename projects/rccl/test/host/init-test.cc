@@ -14,6 +14,7 @@
 #include <csignal>
 #include <cstdint>
 #include <cstdio>
+#include <dirent.h>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
@@ -6007,7 +6008,7 @@ struct Teardown_HeldGraph {
 static_assert(offsetof(Teardown_HeldGraph, plan) == 0, "the reclaimer cast relies on plan being first");
 }  // namespace
 
-TEST_F(InitMicrotest, CommDestroySync_AbortWithGraphStillHeld_ReclaimsItsPlansInsteadOfWaiting) {
+TEST_F(InitMicrotest, CommDestroySync_AbortWithGraphStillHeld_OrphansPlansWithoutReclaiming) {
   Teardown_LifecycleComm c;
   Teardown_AllowStreamCaptureExchange();
   ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclSuccess; });
@@ -6017,10 +6018,37 @@ TEST_F(InitMicrotest, CommDestroySync_AbortWithGraphStillHeld_ReclaimsItsPlansIn
   *c.get()->abortFlag = 1;
 
   EXPECT_EQ(ncclSuccess, Teardown_RunDestroySync(c.get()));
-  EXPECT_EQ(1, graph.reclaimed);
+  EXPECT_EQ(0, graph.reclaimed);
+  EXPECT_EQ(1, c.get()->localPersistentRefs);
+  EXPECT_EQ(graph.ref, c.get()->persistentPlanRefs);
+  EXPECT_EQ(ncclPersistentPlanRefOrphaned, graph.ref->state);
+  EXPECT_EQ(2, graph.ref->refCount);
+  c.get()->persistentPlanRefs = nullptr;
+  ncclPersistentPlanRefDrop(graph.ref);
+  ncclPersistentPlanRefDrop(graph.ref);
+}
+
+TEST_F(InitMicrotest, CommDestroySync_LiveGraphOnDestroy_WaitsAndDoesNotReclaim) {
+  Teardown_LifecycleComm c;
+  Teardown_AllowStreamCaptureExchange();
+  ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+  Teardown_HeldGraph graph;
+  graph.Attach(c.get(), ncclPersistentPlanRefLive);
+
+  static Teardown_CommCallback done;
+  done = {};
+  done.base.fn = [](ncclComm* comm, ncclCommCallback*) {
+    comm->localPersistentRefs = 0;
+    return ncclSuccess;
+  };
+  ncclIntruQueueMpscEnqueue(&c.get()->callbackQueue, &done.base);
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunDestroySync(c.get()));
+  EXPECT_EQ(0, graph.reclaimed);
+  EXPECT_EQ(ncclPersistentPlanRefLive, graph.ref->state);
   EXPECT_EQ(0, c.get()->localPersistentRefs);
   EXPECT_EQ(nullptr, c.get()->persistentPlanRefs);
-  EXPECT_EQ(ncclPersistentPlanRefOrphaned, graph.ref->state);
   EXPECT_EQ(1, graph.ref->refCount);
   ncclPersistentPlanRefDrop(graph.ref);
 }
@@ -7020,7 +7048,7 @@ TEST_F(InitMicrotest, CommReclaim_RevokedCommWithPersistentRefs_PollsUntilTheyCl
   EXPECT_EQ(1, members[0].rec.finalizeCalls);
 }
 
-TEST_F(InitMicrotest, CommReclaim_RevokedCommWithGraphStillHeld_ReclaimsItsPlansInsteadOfWaiting) {
+TEST_F(InitMicrotest, CommReclaim_RevokedCommWithGraphStillHeld_DefersCleanupUntilThePlanIsReleased) {
   const int kChainLength = 1;
   Teardown_ChainMember members[kChainLength];
   ASSERT_NO_FATAL_FAILURE(BuildCommChain(members, kChainLength));
@@ -7030,7 +7058,41 @@ TEST_F(InitMicrotest, CommReclaim_RevokedCommWithGraphStillHeld_ReclaimsItsPlans
   Teardown_HeldGraph graph;
   graph.Attach(comm, ncclPersistentPlanRefLive);
 
-  EXPECT_EQ(ncclSuccess, Teardown_RunReclaim(comm));  // frees comm
+  auto snapshotTasks = [] {
+    std::vector<int> tids;
+    DIR* dir = opendir("/proc/self/task");
+    if (dir == nullptr) return tids;
+    while (dirent* ent = readdir(dir)) {
+      if (ent->d_name[0] == '.') continue;
+      tids.push_back(std::atoi(ent->d_name));
+    }
+    closedir(dir);
+    return tids;
+  };
+  std::vector<int> tasksBefore = snapshotTasks();
+  EXPECT_EQ(ncclSuccess, Teardown_RunReclaim(comm));
+  EXPECT_EQ(0, graph.reclaimed);
+  EXPECT_EQ(0, members[0].rec.finalizeCalls);
+  int reaperTid = -1;
+  for (int i = 0; i < 100 && reaperTid < 0; ++i) {
+    for (int tid : snapshotTasks()) {
+      if (std::find(tasksBefore.begin(), tasksBefore.end(), tid) == tasksBefore.end()) {
+        reaperTid = tid;
+        break;
+      }
+    }
+    if (reaperTid < 0) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_GE(reaperTid, 0);
+  ncclIntruQueueMpscEnqueue(&comm->callbackQueue, &graph.plan.reclaimer);
+  for (int i = 0; i < 400; ++i) {
+    std::string taskPath = "/proc/self/task/" + std::to_string(reaperTid);
+    DIR* task = opendir(taskPath.c_str());
+    bool alive = task != nullptr;
+    if (task != nullptr) closedir(task);
+    if (members[0].rec.finalizeCalls != 0 && !alive) break;
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
   EXPECT_EQ(1, graph.reclaimed);
   EXPECT_EQ(1, members[0].rec.finalizeCalls);
   EXPECT_EQ(ncclPersistentPlanRefOrphaned, graph.ref->state);

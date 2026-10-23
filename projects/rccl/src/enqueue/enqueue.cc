@@ -2167,6 +2167,11 @@ static ncclResult_t hostStreamPlanTask(struct ncclComm* comm, struct ncclKernelP
 static void HIPRT_CB hostStreamPlanCallback(void* plan_) {
   NCCL_NVTX3_FUNC_RANGE;
   struct ncclKernelPlan* plan = (struct ncclKernelPlan*)plan_;
+  if (plan->persistent &&
+      (plan->comm->destroyFlag || plan->comm->revokedFlag ||
+       COMPILER_ATOMIC_LOAD(plan->comm->abortFlag, std::memory_order_acquire) != 0)) {
+    return;
+  }
   ncclResult_t result = hostStreamPlanTask(plan->comm, plan);
   if (result != ncclSuccess) {
     WARN("hostStreamPlanCallback() failed : %s", ncclGetErrorString(result));
@@ -2243,17 +2248,17 @@ static ncclResult_t reclaimPlan(struct ncclComm* comm, struct ncclCommCallback* 
 static void persistentDestructor(void* ref_) {
   struct ncclPersistentPlanRef* ref = (struct ncclPersistentPlanRef*)ref_;
   int expected = ncclPersistentPlanRefLive;
-  if (COMPILER_ATOMIC_COMPARE_EXCHANGE(&ref->state, &expected, (int)ncclPersistentPlanRefReleased,
-                                       std::memory_order_acq_rel, std::memory_order_acquire)) {
-    struct ncclComm* comm = ref->comm;
-    struct ncclKernelPlan* plan = ref->planHead;
-    while (plan != nullptr) {
-      struct ncclKernelPlan* next = plan->next;
-      ncclIntruQueueMpscEnqueue(&comm->callbackQueue, &plan->reclaimer);
-      plan = next;
-    }
-  }
+  bool won = COMPILER_ATOMIC_COMPARE_EXCHANGE(&ref->state, &expected, (int)ncclPersistentPlanRefReleased,
+                                              std::memory_order_acq_rel, std::memory_order_acquire);
+  struct ncclComm* comm = ref->comm;
+  struct ncclKernelPlan* plan = ref->planHead;
   ncclPersistentPlanRefDrop(ref);
+  if (!(won || expected == ncclPersistentPlanRefOrphaned)) return;
+  while (plan != nullptr) {
+    struct ncclKernelPlan* next = plan->next;
+    ncclIntruQueueMpscEnqueue(&comm->callbackQueue, &plan->reclaimer);
+    plan = next;
+  }
 }
 
 static ncclResult_t addPersistentPlanRef(struct ncclComm* comm, struct ncclCudaGraph graph,
@@ -2646,9 +2651,9 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
     }
 
     if (persistent) {
+      NCCLCHECKGOTO(addPersistentPlanRef(comm, planner->capturingGraph, planHead), result, failure);
       comm->sharedRes->persistentRefs += nPlans;
       comm->localPersistentRefs += nPlans;
-      NCCLCHECKGOTO(addPersistentPlanRef(comm, planner->capturingGraph, planHead), result, failure);
     }
   }
 failure:

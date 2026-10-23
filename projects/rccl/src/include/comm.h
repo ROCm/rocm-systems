@@ -1176,22 +1176,12 @@ inline void ncclPersistentPlanRefDrop(struct ncclPersistentPlanRef* ref) {
 }
 
 inline ncclResult_t ncclCommOrphanPersistentPlans(struct ncclComm* comm) {
-  ncclResult_t result = ncclSuccess;
   for (struct ncclPersistentPlanRef* ref = comm->persistentPlanRefs; ref != nullptr; ref = ref->next) {
     int expected = ncclPersistentPlanRefLive;
-    if (!COMPILER_ATOMIC_COMPARE_EXCHANGE(&ref->state, &expected, (int)ncclPersistentPlanRefOrphaned,
-                                          std::memory_order_acq_rel, std::memory_order_acquire)) {
-      continue;
-    }
-    struct ncclKernelPlan* plan = ref->planHead;
-    while (plan != nullptr) {
-      struct ncclKernelPlan* next = plan->next;
-      ncclResult_t res1 = plan->reclaimer.fn(comm, &plan->reclaimer);
-      if (res1 != ncclSuccess) result = res1;
-      plan = next;
-    }
+    COMPILER_ATOMIC_COMPARE_EXCHANGE(&ref->state, &expected, (int)ncclPersistentPlanRefOrphaned,
+                                     std::memory_order_acq_rel, std::memory_order_acquire);
   }
-  return result;
+  return ncclSuccess;
 }
 
 inline void ncclCommDropPersistentPlanRefs(struct ncclComm* comm) {
