@@ -57,7 +57,7 @@ get_size(Type&& val)
 {
     using DecayedType = std::decay_t<Type>;
 
-    if constexpr(type_traits::is_string_view_v<DecayedType>)
+    if constexpr(type_traits::is_string_v<DecayedType>)
     {
         return val.size() + sizeof(char) + sizeof(size_t);
     }
@@ -92,7 +92,7 @@ store_value(const Type& value, std::uint8_t* buffer, size_t& position)
 
     auto* dest = buffer + position;
 
-    if constexpr(type_traits::is_string_view_v<DecayedType>)
+    if constexpr(type_traits::is_string_v<DecayedType>)
     {
         const size_t data_size  = value.size();
         const size_t entry_size = sizeof(size_t) + data_size + sizeof(char);
@@ -138,7 +138,7 @@ parse_value(std::uint8_t*& data_pos, Type& arg)
 {
     using DecayedType = std::decay_t<Type>;
 
-    if constexpr(type_traits::is_string_view_v<DecayedType>)
+    if constexpr(type_traits::is_string_v<DecayedType>)
     {
         size_t string_size = 0;
         std::memcpy(&string_size, data_pos, sizeof(size_t));

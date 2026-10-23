@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <type_traits>
 #include <vector>
@@ -52,8 +53,8 @@ template <typename T>
 inline constexpr bool is_array_v = is_array<T>::value;
 
 template <typename T>
-static constexpr bool is_string_view_v =
-    std::is_same_v<std::decay_t<T>, std::string_view>;
+static constexpr bool is_string_v = std::is_same_v<std::decay_t<T>, std::string_view> ||
+                                    std::is_same_v<std::decay_t<T>, std::string>;
 
 template <typename T>
 struct is_optional : std::false_type
@@ -69,7 +70,8 @@ inline constexpr bool is_optional_v = is_optional<T>::value;
 template <typename T>
 inline constexpr bool is_supported_type_v =
     is_span_v<T> || std::is_integral_v<T> || std::is_floating_point_v<T> ||
-    is_string_view_v<T> || is_vector_v<T> || is_optional_v<T> || is_array_v<T>;
+    is_string_v<T> || is_vector_v<T> || is_optional_v<T> || is_array_v<T> ||
+    std::is_enum_v<T>;
 
 template <typename T>
 concept supported_cache_type = is_supported_type_v<std::decay_t<T>>;

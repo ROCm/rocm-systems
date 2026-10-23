@@ -8,7 +8,6 @@
 
 #include <cstdint>
 #include <string>
-#include <string_view>
 
 namespace rocprofsys::pmc::collectors::nic
 {
@@ -44,12 +43,7 @@ struct sample : trace_cache::cacheable_t
     template <typename Archive>
     void serialize(Archive& archive)
     {
-        std::string_view name_view = device_name;
-        archive(enabled_metric, device_id, name_view, timestamp, metric_values);
-        if constexpr(Archive::k_is_loading)
-        {
-            device_name = std::string(name_view);
-        }
+        archive(enabled_metric, device_id, device_name, timestamp, metric_values);
     }
 };
 

@@ -919,10 +919,16 @@ TEST(type_traits_test, is_supported_type_v)
     EXPECT_TRUE(
         rocprofsys::trace_cache::type_traits::is_supported_type_v<std::optional<double>>);
 
+    EXPECT_TRUE(rocprofsys::trace_cache::type_traits::is_supported_type_v<std::string>);
+
+    enum class custom_enum : std::uint16_t
+    {
+    };
+    EXPECT_TRUE(rocprofsys::trace_cache::type_traits::is_supported_type_v<custom_enum>);
+
     struct custom_type
     {};
     EXPECT_FALSE(rocprofsys::trace_cache::type_traits::is_supported_type_v<custom_type>);
-    EXPECT_FALSE(rocprofsys::trace_cache::type_traits::is_supported_type_v<std::string>);
 }
 
 TEST_F(cacheable_test, get_buffered_storage_filename)

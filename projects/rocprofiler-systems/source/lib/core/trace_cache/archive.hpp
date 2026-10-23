@@ -24,8 +24,7 @@ concept archive_serializable =
 
 struct binary_size_archive
 {
-    static constexpr bool k_is_loading = false;
-    std::size_t           size         = 0;
+    std::size_t size = 0;
 
     template <typename... Types>
     constexpr void operator()(const Types&... values)
@@ -50,9 +49,8 @@ private:
 
 struct binary_write_archive
 {
-    static constexpr bool k_is_loading = false;
-    std::uint8_t*         buffer       = nullptr;
-    std::size_t           position     = 0;
+    std::uint8_t* buffer   = nullptr;
+    std::size_t   position = 0;
 
     template <typename... Types>
     void operator()(const Types&... values)
@@ -84,8 +82,7 @@ private:
 /** string_view and span<const std::byte> fields are read as views into the buffer. */
 struct binary_read_archive
 {
-    static constexpr bool k_is_loading = true;
-    std::uint8_t*         cursor       = nullptr;
+    std::uint8_t* cursor = nullptr;
 
     template <typename... Types>
     void operator()(Types&... values)

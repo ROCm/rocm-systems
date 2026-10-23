@@ -7,7 +7,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <type_traits>
 
 namespace rocprofsys::trace_cache
 {
@@ -22,12 +21,7 @@ struct record_header
     template <typename Archive>
     constexpr void serialize(Archive& archive)
     {
-        auto raw_type = static_cast<std::underlying_type_t<TypeIdentifierEnum>>(type);
-        archive(raw_type, size);
-        if constexpr(Archive::k_is_loading)
-        {
-            type = static_cast<TypeIdentifierEnum>(raw_type);
-        }
+        archive(type, size);
     }
 };
 

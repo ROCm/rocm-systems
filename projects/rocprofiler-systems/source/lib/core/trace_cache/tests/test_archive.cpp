@@ -25,14 +25,13 @@ namespace
 
 enum class test_record_id : std::uint32_t
 {
-    scalar_test          = 1,
-    string_test          = 2,
-    vector_test          = 3,
-    optional_test        = 4,
-    span_test            = 5,
-    derived_test         = 6,
-    counted_entries_test = 7,
-    nested_test          = 8,
+    scalar_test   = 1,
+    string_test   = 2,
+    vector_test   = 3,
+    optional_test = 4,
+    span_test     = 5,
+    derived_test  = 6,
+    nested_test   = 8,
 };
 
 struct scalar_record
@@ -127,35 +126,6 @@ struct derived_record : base_record
     {
         base_record::serialize(archive);
         archive(extra_field);
-    }
-};
-
-struct entry
-{
-    std::uint64_t id    = 0;
-    double        value = 0.0;
-};
-
-struct counted_entries_record
-{
-    static constexpr auto type_identifier = test_record_id::counted_entries_test;
-
-    std::uint32_t      device = 0;
-    std::vector<entry> entries;
-
-    template <typename Archive>
-    void serialize(Archive& archive)
-    {
-        auto count = static_cast<std::uint32_t>(entries.size());
-        archive(device, count);
-        if constexpr(Archive::k_is_loading)
-        {
-            entries.resize(count);
-        }
-        for(std::size_t idx = 0; idx < entries.size(); ++idx)
-        {
-            archive(entries[idx].id, entries[idx].value);
-        }
     }
 };
 
@@ -346,44 +316,6 @@ TEST(archive, derived_record_serializes_base_first)
 
     EXPECT_EQ(total_size, base_size + sizeof(std::uint64_t));
     EXPECT_EQ(read_buffer - buffer.data(), static_cast<std::ptrdiff_t>(total_size));
-}
-
-TEST(archive, is_loading_branch_for_counted_entries)
-{
-    std::array<std::uint8_t, k_buffer_size> buffer{};
-    counted_entries_record                  orig;
-    orig.device = 1U;
-    orig.entries.push_back({ .id = 100, .value = 1.5 });
-    orig.entries.push_back({ .id = 200, .value = 2.5 });
-
-    const std::size_t size = get_size(orig);
-    serialize(buffer.data(), orig);
-
-    std::uint8_t*                read_buffer = buffer.data();
-    const counted_entries_record read = deserialize<counted_entries_record>(read_buffer);
-
-    EXPECT_EQ(read.device, 1U);
-    EXPECT_EQ(read.entries.size(), 2U);
-    EXPECT_EQ(read.entries[0].id, 100);
-    EXPECT_DOUBLE_EQ(read.entries[0].value, 1.5);
-    EXPECT_EQ(read.entries[1].id, 200);
-    EXPECT_DOUBLE_EQ(read.entries[1].value, 2.5);
-    EXPECT_EQ(read_buffer - buffer.data(), static_cast<std::ptrdiff_t>(size));
-
-    buffer.fill(0);
-    counted_entries_record orig_empty;
-    orig_empty.device = 2U;
-
-    const std::size_t size_empty = get_size(orig_empty);
-    serialize(buffer.data(), orig_empty);
-
-    read_buffer = buffer.data();
-    const counted_entries_record read_empty =
-        deserialize<counted_entries_record>(read_buffer);
-
-    EXPECT_EQ(read_empty.device, 2U);
-    EXPECT_EQ(read_empty.entries.size(), 0U);
-    EXPECT_EQ(read_buffer - buffer.data(), static_cast<std::ptrdiff_t>(size_empty));
 }
 
 TEST(archive, nested_struct_serializes_itself)
