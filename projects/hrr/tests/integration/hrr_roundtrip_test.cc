@@ -1193,6 +1193,28 @@ HRR_TEST_CASE(Unit_HRR_Memcpy3DSptRoundtrip) {
                            HRR_API_HIPMEMCPY});
 }
 
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_ArrayCopies_Direct: hipMemcpy3D and hipMemcpy3DAsync
+ *     between device buffers and arrays from hipArray3DCreate and hipArrayCreate,
+ *     and between arrays.
+ *   - Replay with byte-exact D2H: replay must copy through the arrays it created
+ *     for the recorded handles, so the device buffers the arrays are copied into
+ *     hold the bytes that went in. Skipped on a device without image support.
+ */
+HRR_TEST_CASE(Unit_HRR_ArrayCopiesRoundtrip) {
+  // Arrays need image support, which gfx950 (MI350X) reports as absent.
+  int images = 0;
+  HRR_HIP_CHECK(hipDeviceGetAttribute(&images, hipDeviceAttributeImageSupport, 0));
+  if (!images) HRR_SKIP("device has no image support, so no array can be created");
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_arraycopies"};
+  hrr_run_exact_roundtrip("Unit_HRR_ArrayCopies_Direct", cap.path,
+                          {HRR_API_HIPARRAY3DCREATE, HRR_API_HIPARRAYCREATE,
+                           HRR_API_HIPMEMCPY3D, HRR_API_HIPMEMCPY3DASYNC,
+                           HRR_API_HIPMEMCPY});
+}
+
 HRR_TEST_CASE(Unit_HRR_StreamQuerySptRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_streamqueryspt"};
   // The per-thread stream and event queries write no device memory, so the

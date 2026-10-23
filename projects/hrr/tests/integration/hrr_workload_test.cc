@@ -4728,3 +4728,122 @@ TEST_CASE("Unit_HRR_FailedShimCalls_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipStreamDestroy(stream));
   HRR_HIP_CHECK(hipMemPoolDestroy(pool));
 }
+
+// ===========================================================================
+// Unit_HRR_ArrayCopies_Direct — hipMemcpy3D and hipMemcpy3DAsync with a
+// hipArray_t on either end.
+//
+// A 3-D array made by hipArray3DCreate and a 2-D one made by hipArrayCreate are
+// filled from device buffers, copied array to array, and copied back into
+// device buffers, whose hipMemcpy to the host is the D2H blob replay validates.
+// A replay that handed the recorded array address to HIP instead of the array it
+// created for it would crash or move other bytes, and the blobs would differ.
+// No copy here has a host end: replay does not issue those (see
+// memcpy3d_declines_host_array). Replay's D2H blobs are the oracle, so the
+// workload checks no contents itself. Skipped on hardware without image support.
+// ===========================================================================
+TEST_CASE("Unit_HRR_ArrayCopies_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  int supports_images = 0;
+  HRR_HIP_CHECK(hipDeviceGetAttribute(&supports_images, hipDeviceAttributeImageSupport, 0));
+  if (!supports_images) {
+    SUCCEED("no image support on this device");
+    return;
+  }
+
+  constexpr size_t W = 16, H = 4, D = 2;  // elements; one int each
+  constexpr size_t ROW = W * sizeof(int);
+  constexpr size_t BYTES3 = ROW * H * D;
+  constexpr size_t BYTES2 = ROW * H;
+
+  std::vector<int> h3(W * H * D), h2(W * H);
+  for (size_t i = 0; i < h3.size(); ++i) h3[i] = static_cast<int>(i * 2654435761u) ^ 0x3d3d3d3d;
+  for (size_t i = 0; i < h2.size(); ++i) h2[i] = static_cast<int>(i * 2654435761u) ^ 0x2d2d2d2d;
+
+  HIP_ARRAY3D_DESCRIPTOR d3{};
+  d3.Width = W;
+  d3.Height = H;
+  d3.Depth = D;
+  d3.Format = HIP_AD_FORMAT_SIGNED_INT32;
+  d3.NumChannels = 1;
+  hipArray_t a3 = nullptr, a3_copy = nullptr;
+  HRR_HIP_CHECK(hipArray3DCreate(&a3, &d3));
+  HRR_HIP_CHECK(hipArray3DCreate(&a3_copy, &d3));
+
+  HIP_ARRAY_DESCRIPTOR d2{};
+  d2.Width = W;
+  d2.Height = H;
+  d2.Format = HIP_AD_FORMAT_SIGNED_INT32;
+  d2.NumChannels = 1;
+  hipArray_t a2 = nullptr;
+  HRR_HIP_CHECK(hipArrayCreate(&a2, &d2));
+
+  // Device buffers the arrays are filled from (in*) and read back into (out*).
+  void *in3 = nullptr, *in2 = nullptr, *out3 = nullptr, *out3_copy = nullptr, *out2 = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&in3, BYTES3));
+  HRR_HIP_CHECK(hipMalloc(&in2, BYTES2));
+  HRR_HIP_CHECK(hipMalloc(&out3, BYTES3));
+  HRR_HIP_CHECK(hipMalloc(&out3_copy, BYTES3));
+  HRR_HIP_CHECK(hipMalloc(&out2, BYTES2));
+  HRR_HIP_CHECK(hipMemcpy(in3, h3.data(), BYTES3, hipMemcpyHostToDevice));
+  HRR_HIP_CHECK(hipMemcpy(in2, h2.data(), BYTES2, hipMemcpyHostToDevice));
+  HRR_HIP_CHECK(hipMemset(out3, 0, BYTES3));
+  HRR_HIP_CHECK(hipMemset(out3_copy, 0, BYTES3));
+  HRR_HIP_CHECK(hipMemset(out2, 0, BYTES2));
+
+  // device -> array, plain and async
+  {
+    hipMemcpy3DParms p{};
+    p.srcPtr = make_hipPitchedPtr(in3, ROW, W, H);
+    p.dstArray = a3;
+    p.extent = make_hipExtent(W, H, D);
+    p.kind = hipMemcpyDeviceToDevice;
+    HRR_HIP_CHECK(hipMemcpy3D(&p));
+  }
+  {
+    hipMemcpy3DParms p{};
+    p.srcPtr = make_hipPitchedPtr(in2, ROW, W, H);
+    p.dstArray = a2;
+    p.extent = make_hipExtent(W, H, 1);
+    p.kind = hipMemcpyDeviceToDevice;
+    HRR_HIP_CHECK(hipMemcpy3DAsync(&p, nullptr));
+    HRR_HIP_CHECK(hipDeviceSynchronize());
+  }
+  // array -> array
+  {
+    hipMemcpy3DParms p{};
+    p.srcArray = a3;
+    p.dstArray = a3_copy;
+    p.extent = make_hipExtent(W, H, D);
+    p.kind = hipMemcpyDeviceToDevice;
+    HRR_HIP_CHECK(hipMemcpy3D(&p));
+  }
+  // array -> device
+  auto array_to_device = [&](hipArray_t src, void* dst, size_t depth) {
+    hipMemcpy3DParms p{};
+    p.srcArray = src;
+    p.dstPtr = make_hipPitchedPtr(dst, ROW, W, H);
+    p.extent = make_hipExtent(W, H, depth);
+    p.kind = hipMemcpyDeviceToDevice;
+    HRR_HIP_CHECK(hipMemcpy3D(&p));
+  };
+  array_to_device(a3, out3, D);
+  array_to_device(a3_copy, out3_copy, D);
+  array_to_device(a2, out2, 1);
+  HRR_HIP_CHECK(hipDeviceSynchronize());
+
+  // The D2H blobs of the output buffers are what replay validates.
+  std::vector<int> r3(W * H * D), r3c(W * H * D), r2(W * H);
+  HRR_HIP_CHECK(hipMemcpy(r3.data(), out3, BYTES3, hipMemcpyDeviceToHost));
+  HRR_HIP_CHECK(hipMemcpy(r3c.data(), out3_copy, BYTES3, hipMemcpyDeviceToHost));
+  HRR_HIP_CHECK(hipMemcpy(r2.data(), out2, BYTES2, hipMemcpyDeviceToHost));
+
+  HRR_HIP_CHECK(hipFree(in3));
+  HRR_HIP_CHECK(hipFree(in2));
+  HRR_HIP_CHECK(hipFree(out3));
+  HRR_HIP_CHECK(hipFree(out3_copy));
+  HRR_HIP_CHECK(hipFree(out2));
+  HRR_HIP_CHECK(hipFreeArray(a3));
+  HRR_HIP_CHECK(hipFreeArray(a3_copy));
+  HRR_HIP_CHECK(hipFreeArray(a2));
+}
