@@ -1479,13 +1479,8 @@ function(rccl_standalone_coverage)
 endfunction()
 
 # --- nlohmann/json: the RCCL-vendored single header ------------------
-# Unlike fmt, the library build has no use for it, so cmake/Dependencies.cmake does not
-# pull it in and the target does not exist in either mode until this runs. Outside the
-# `if`/`else` below so the two modes resolve it identically.
-if(NOT TARGET nlohmann_json::nlohmann_json)
-  add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../external/nlohmann_json"
-                   "${CMAKE_BINARY_DIR}/external/nlohmann_json")
-endif()
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../external/nlohmann_json"
+                 "${CMAKE_BINARY_DIR}/external/nlohmann_json")
 
 # =====================================================================
 # Driver: pick the mode, then define the micro-test binaries ONCE.
