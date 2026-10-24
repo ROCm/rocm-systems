@@ -145,3 +145,20 @@ static ncclResult_t ReachableCanConnect(int* ret, struct ncclComm*, struct ncclT
 }
 static struct ncclTransport reachableTransport = {"fake", ReachableCanConnect};
 struct ncclTransport* ncclTransports[NTRANSPORTS] = {&reachableTransport, &reachableTransport};
+
+// ppc64le TOC references survive --gc-sections, so plugin device-count
+// functions referenced as function pointers in topo.cc need definitions
+// even though the code path that stores them is dead.  Use weak symbols
+// so tests that supply their own strong definitions (e.g. gin-plugin-init-test)
+// win without a duplicate-symbol error.
+#if defined(__powerpc64__) || defined(__PPC64__)
+#include "gin.h"
+#include "net.h"
+#include "rma.h"
+__attribute__((weak)) ncclResult_t ncclGinGetDevCount(int, int*, int*) { ::abort(); }
+__attribute__((weak)) ncclResult_t ncclRmaGetDevCount(int, int*, int*) { ::abort(); }
+__attribute__((weak)) ncclResult_t ncclCollNetGetDevCount(int, int*, int*) { ::abort(); }
+__attribute__((weak)) ncclResult_t ncclCollNetSetVirtDevCount(int, int) { ::abort(); }
+__attribute__((weak)) ncclResult_t ncclNetGetDevCount(int, int*, int*) { ::abort(); }
+__attribute__((weak)) ncclResult_t ncclNetSetVirtDevCount(int, int) { ::abort(); }
+#endif
