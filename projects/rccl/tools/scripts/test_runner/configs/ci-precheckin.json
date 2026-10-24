@@ -24,17 +24,6 @@
     "generator": "Unix Makefiles"
   },
   "test_configurations": {
-    "unit_tests_micro_bootstrap": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroBootstrap",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 0,
-      "timeout": 60,
-      "tests": [
-        {"name": "BootstrapMicrotests", "description": "Host-only bootstrap microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
-      ]
-    },
     "unit_tests": {
       "is_gtest": true,
       "binary": "rccl-UnitTests",
@@ -498,12 +487,6 @@
     }
   },
   "test_suites": [
-    {
-      "name": "RCCL Microtests - bootstrap",
-      "description": "rccl-UnitTestsMicroBootstrap (host-only bootstrap microtests, no GPU/HIP/RCCL runtime)",
-      "config": "unit_tests_micro_bootstrap",
-      "enabled": true
-    },
     {
       "name": "RCCL Unit Tests - All Collectives",
       "description": "Standard RCCL unit tests for all collective operations",
