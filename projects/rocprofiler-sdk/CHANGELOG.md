@@ -76,6 +76,12 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - The thread trace decoder now tries the versioned library names (`librocprof-trace-decoder.so.<major>`, then `.so.<major>.<minor>`, then `.so.<major>.<minor>.<patch>`) before falling back to the unversioned name. This lets `rocprofv3 --att` work on installs that ship only the versioned library, such as TheRock runtime wheels.
 - Tool lifecycle messages are now logged at info level instead of warning. Processes that load a rocprofiler-sdk tool with logging disabled no longer write these messages to stderr.
 
+**API:**
+
+  - Kernel replay keeps its snapshot staging memory between replayed dispatches instead of allocating, zero-filling, and freeing the whole tracked footprint on every dispatch. What is kept between dispatches is bounded by the most recent snapshot's footprint.
+  - Kernel replay takes its drain signal from the SDK's signal pool and no longer snapshots HIP's one-byte `__hip_cuid_*` compilation-unit markers.
+  - Each replayed dispatch logs its lock and drain, snapshot, pass, and restore times at `ROCPROFILER_LOG_LEVEL=info`.
+
 ### Resolved issues
 
 - When a context that needs packet interception replaces a queue created by `hsa_amd_queue_create` with a system-memory intercept queue, the device-memory placement flags are now cleared in the caller's descriptor. HIP reads these flags back and previously assumed a device-memory ring buffer that profiling had silently replaced.
@@ -158,6 +164,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Resolved issues
 
+  - `rocprofv3 --kernel-replay-beta-enabled` given without `--replay-mode kernel` is now rejected instead of ignored. The flag acknowledges that kernel replay is a beta feature; it does not select it. Its name reads as if it did, so a command line carrying only the acknowledgement silently ran application replay, and the counter values that produces are indistinguishable from replayed ones.
   - Fixed `rocprofv3` crashing during output generation when a second tool subscribed to code object tracing in the same process, which blocked profiling PyTorch and Triton workloads through rocprofiler-compute.
   - Fixed `rocprofv3` hanging instead of exiting when a fatal signal arrives while it is already handling one, for example when output generation aborts. It previously left GPU child processes running and required killing the process manually.
   - Fixed memory write-bandwidth telemetry reporting N/A on gfx1250 (MI455X) by adding the missing `WRITE_SIZE` derived counter, computed from the `GL2C_WRITE_SECTORS` hardware counter. The read-side `FETCH_SIZE` counter was already defined for gfx1250 while the write side was not, so downstream consumers such as the memory write-bandwidth field exposed through RDC reported N/A.
