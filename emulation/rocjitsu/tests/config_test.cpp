@@ -220,6 +220,121 @@ std::string system_graph_test_config(std::string_view manifest) {
          std::string(manifest) + "}";
 }
 
+std::string link_expression_config(std::string_view definition) {
+  return std::string(R"json({"vm":{"arch":"cdna3"},"topology":{
+    "root":{"name":"soc","type":"soc","children":[
+      {"name":"vram","type":"gpu_memory"}]},"links":[)json") +
+         std::string(definition) + "]}}";
+}
+
+TEST(ConfigExpressionTest, MalformedLinksReturnDiagnostics) {
+  const struct {
+    const char *definition;
+    const char *message;
+  } cases[] = {
+      {R"json({"pattern":"src -> dst","where_expr":"@"})json", "Bad char in expr: '@'"},
+      {R"json({"pattern":"src -> dst","where_expr":"missing"})json",
+       "Unknown var 'missing' in: missing"},
+      {R"json({"pattern":"src -> dst","where_expr":"(1"})json", "Missing ')' in: (1"},
+      {R"json({"pattern":"src -> dst","where_expr":"1 +"})json", "Unexpected token in: 1 +"},
+      {R"json({"pattern":"src -> dst","where_expr":"1 2"})json", "Extra tokens in: 1 2"},
+      {R"json({"pattern":"src -> dst","where_expr":"1 || missing"})json",
+       "Unknown var 'missing' in: 1 || missing"},
+      {R"json({"pattern":"src -> dst","where_expr":"0 && missing"})json",
+       "Unknown var 'missing' in: 0 && missing"},
+      {R"json({"pattern":"src[i -> dst"})json", "Unmatched '[' in: src[i"},
+      {R"json({"pattern":"src[missing] -> dst"})json", "Unknown var 'missing'"},
+      {R"json({"pattern":"src -> dst[1 +]"})json", "Unexpected token in: 1 +"},
+      {R"json({"pattern":"src=>dst"})json", "Link pattern missing ' -> ': src=>dst"},
+  };
+  for (const auto &test : cases) {
+    SCOPED_TRACE(test.definition);
+    const std::string json = link_expression_config(test.definition);
+    util::StringDiagnostic diagnostic;
+    auto loaded = config::load_config_from_string(json, kEmbeddedSchema, diagnostic.emitter(), 1);
+    ASSERT_TRUE(loaded.failed());
+    EXPECT_THAT(diagnostic.message(), testing::HasSubstr(test.message));
+    auto file = write_temp_config(json);
+    util::StringDiagnostic validation_diagnostic;
+    EXPECT_TRUE(
+        config::validate_config(file.path(), kEmbeddedSchema, validation_diagnostic.emitter())
+            .failed());
+    EXPECT_EQ(validation_diagnostic.message(), diagnostic.message());
+  }
+}
+
+TEST(ConfigExpressionTest, ValidExpressionsExpandLinks) {
+  const auto json = link_expression_config(R"json({
+    "pattern":"src[i*2+1] -> dst[(i+3)/2]",
+    "for_ranges":[{"var_name":"i","start":0,"end":4}],
+    "where_expr":"(i >= 0 && i < 4) && (0 || i % 2 == 0)",
+    "latency":7,"weight":3})json");
+  util::StringDiagnostic diagnostic;
+  auto loaded = config::load_config_from_string(json, kEmbeddedSchema, diagnostic.emitter(), 1);
+  ASSERT_TRUE(loaded.succeeded()) << diagnostic.message();
+  const auto &links = loaded.value().build_result.link_specs;
+  ASSERT_EQ(links.size(), 2u);
+  EXPECT_EQ(links[0].src, "src1");
+  EXPECT_EQ(links[0].dst, "dst1");
+  EXPECT_EQ(links[1].src, "src5");
+  EXPECT_EQ(links[1].dst, "dst2");
+  EXPECT_EQ(links[0].latency, 7u);
+  EXPECT_EQ(links[0].weight, 3u);
+
+  const struct {
+    const char *expression;
+    size_t link_count;
+  } cases[] = {{"1 || 0", 4u}, {"0 && 1", 0u}, {"i == 0 || i == 3", 2u}};
+  for (const auto &test : cases) {
+    SCOPED_TRACE(test.expression);
+    const auto filtered_json =
+        link_expression_config(std::string(R"json({"pattern":"src[i] -> dst[i]",
+          "for_ranges":[{"var_name":"i","start":0,"end":4}],"where_expr":")json") +
+                               test.expression + R"json("})json");
+    util::StringDiagnostic filtered_diagnostic;
+    auto filtered = config::load_config_from_string(filtered_json, kEmbeddedSchema,
+                                                    filtered_diagnostic.emitter(), 1);
+    ASSERT_TRUE(filtered.succeeded()) << filtered_diagnostic.message();
+    EXPECT_EQ(filtered.value().build_result.link_specs.size(), test.link_count);
+  }
+}
+
+TEST(ConfigExpressionTest, ComponentRangeOverflowReturnsThroughBothLoaders) {
+  for (const char *range : {"part[18446744073709551616:1]", "part[0:18446744073709551616]"}) {
+    SCOPED_TRACE(range);
+    const auto json = std::string(R"json({"vm":{"arch":"cdna3"},"topology":{
+      "root":{"name":"soc","type":"soc","children":[
+        {"name":"vram","type":"gpu_memory"},{"name":")json") +
+                      range + R"json(","type":"composite"}]}}})json";
+    util::StringDiagnostic diagnostic;
+    auto loaded = config::load_config_from_string(json, kEmbeddedSchema, diagnostic.emitter(), 1);
+    EXPECT_TRUE(loaded.failed());
+    EXPECT_THAT(diagnostic.message(), testing::HasSubstr("Range bound out of unsigned long range"));
+    util::StringDiagnostic settings_diagnostic;
+    auto settings = config::load_execution_thread_settings_from_string(
+        json, kEmbeddedSchema, settings_diagnostic.emitter());
+    EXPECT_TRUE(settings.failed());
+    EXPECT_EQ(settings_diagnostic.message(), diagnostic.message());
+  }
+}
+
+TEST(ConfigExpressionTest, ComponentRangesPreserveHalfOpenAndEmptySemantics) {
+  const std::string json = R"json({"vm":{"arch":"cdna3"},"topology":{
+    "root":{"name":"soc","type":"soc","children":[
+      {"name":"vram","type":"gpu_memory"},
+      {"name":"part[4294967294:4294967295]","type":"composite"},
+      {"name":"empty[2:1]","type":"composite"},
+      {"name":"wrapped[4294967296:4294967297]","type":"composite"}]}}})json";
+  util::StringDiagnostic diagnostic;
+  auto loaded = config::load_config_from_string(json, kEmbeddedSchema, diagnostic.emitter(), 1);
+  ASSERT_TRUE(loaded.succeeded()) << diagnostic.message();
+  const auto &children = loaded.value().build_result.root->children();
+  ASSERT_EQ(children.size(), 3u);
+  EXPECT_EQ(children[1]->name(), "part4294967294");
+  // Preserve the old stoul-to-uint32_t narrowing: 4294967296 becomes component 0.
+  EXPECT_EQ(children.back()->name(), "wrapped0");
+}
+
 constexpr std::string_view kSystemGraphManifest = R"({
   "nodes":[
     {"id":"tray0","gpus":[
@@ -4630,7 +4745,12 @@ TEST(CApiTest, MissingConfigFileReturnsInvalidFile) {
 }
 
 TEST(CApiTest, InvalidConfigsReturnEntryPointSpecificStatus) {
-  for (const char *json : {"{", "{}"}) {
+  for (const std::string &json :
+       {std::string("{"), std::string("{}"),
+        link_expression_config(R"json({"pattern":"src -> dst","where_expr":"missing"})json"),
+        std::string(R"json({"vm":{"arch":"cdna3"},"topology":{
+             "root":{"name":"soc","type":"soc","children":[
+               {"name":"part[0:18446744073709551616]","type":"composite"}]}}})json")}) {
     SCOPED_TRACE(json);
     const test::ScopedTempFile file("rocjitsu-c-api-invalid-config-");
     file.write(json);
@@ -4640,7 +4760,7 @@ TEST(CApiTest, InvalidConfigsReturnEntryPointSpecificStatus) {
     EXPECT_EQ(file_handle, nullptr);
 
     rj_vm_t *string_handle = nullptr;
-    EXPECT_EQ(rj_vm_create_from_string(json, RJ_VM_MODE_DEFAULT, &string_handle),
+    EXPECT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &string_handle),
               ROCJITSU_STATUS_INVALID_ARGUMENT);
     EXPECT_EQ(string_handle, nullptr);
   }
