@@ -27,7 +27,7 @@ usage() {
   cat <<'EOF' >&2
 usage:
   hrr_capture.sh preflight [--output PATH] [--playback PATH] [-- <command> [args...]]
-  hrr_capture.sh run --output PATH [--playback PATH] -- <command> [args...]
+  hrr_capture.sh run --output PATH [--content] [--playback PATH] -- <command> [args...]
   hrr_capture.sh verify --output PATH [--playback PATH] [--json] [--no-playback]
 
   preflight  Check this environment can capture: which HIP runtime the workload
@@ -43,6 +43,9 @@ Options:
   --playback PATH      hrr-playback to cross-check the archive with. It has to be
                        the one matching the runtime that captured, or it will
                        refuse the archive over its format version
+  --content            run: also record host buffers, kernel argument values and
+                       code objects (HIP_HRR_CAPTURE_CONTENT=1), which replay
+                       needs. Without it the archive is metadata-only
   --json               verify: emit JSON instead of text
   --no-playback        verify: report from the manifests only, no cross-check
   --skip-preflight     run: do not preflight at all
@@ -512,6 +515,23 @@ group_running() {
   return 1
 }
 
+# Whether a process in archive $1 recorded without contents: the
+# HRR_FILE_FLAG_METADATA_ONLY bit (0x2) of the flags at bytes 6-7 of its
+# events.bin header. Replay refuses such an archive at the first call that
+# needs a buffer, an argument value or a code object. Only pid-<pid> counts, as
+# in the inspector: a pid-<pid>.prev-<n> is an earlier run moved aside.
+archive_is_metadata_only() {
+  local events flags dir
+  for events in "$1"/pid-*/events.bin; do
+    dir="${events%/events.bin}"
+    [[ "${dir##*/pid-}" =~ ^[0-9]+$ ]] || continue
+    [[ -f "$events" ]] || continue
+    flags="$(od -An -tu2 -j6 -N2 -- "$events" 2>/dev/null | tr -d ' ')"
+    [[ "$flags" =~ ^[0-9]+$ ]] && (( flags & 2 )) && return 0
+  done
+  return 1
+}
+
 # --- verbs ------------------------------------------------------------------
 
 VERB="${1:-}"
@@ -523,6 +543,7 @@ OUTPUT=""
 PLAYBACK=""
 SKIP_PREFLIGHT=0
 FORCE=0
+CONTENT=0
 MIN_FREE_GB=50
 PASSTHROUGH=()
 CMD=()
@@ -541,6 +562,7 @@ while [[ $# -gt 0 ]]; do
     --playback) needs_value --playback $#; PLAYBACK="$2"; shift 2 ;;
     --skip-preflight) SKIP_PREFLIGHT=1; shift ;;
     --force) FORCE=1; shift ;;
+    --content) CONTENT=1; shift ;;
     --json) PASSTHROUGH+=(--json); shift ;;
     --no-playback) PASSTHROUGH+=(--no-playback); shift ;;
     --min-free-gb)
@@ -645,10 +667,11 @@ case "$VERB" in
       fi
     fi
 
-    # The archive holds blobs, prompts and weights in clear, and a writer that
-    # creates its files 0644 leaves them to every user on a shared host under
-    # the usual umask. A directory created 0700 here closes that without
-    # changing the umask the workload's own files are written with.
+    # With --content the archive holds prompts and weights in the clear, and
+    # even a metadata-only one names every kernel. A writer that creates its
+    # files 0644 leaves them to every user on a shared host under the usual
+    # umask. A directory created 0700 here closes that without changing the
+    # umask the workload's own files are written with.
     if [[ ! -e "$OUTPUT" ]]; then
       mkdir -p -- "$(dirname -- "$OUTPUT")" && ( umask 077 && mkdir -- "$OUTPUT" ) ||
         fail "cannot create $OUTPUT"
@@ -692,6 +715,7 @@ case "$VERB" in
     (
       trap - INT QUIT
       export HIP_HRR_CAPTURE_OUTPUT="$OUTPUT"
+      if (( CONTENT )); then export HIP_HRR_CAPTURE_CONTENT=1; fi
       if [[ -t 0 ]]; then exec "${CMD[@]}" </dev/null; else exec "${CMD[@]}"; fi
     ) &
     workload_pid=$!
@@ -725,7 +749,11 @@ case "$VERB" in
     # machine in front of you. Its runtime is by definition the one the reader
     # has to match, so the pairing problem that dogs every later attempt does
     # not exist at this moment.
-    if (( inspect_rc == 0 )); then
+    if (( inspect_rc == 0 )) && archive_is_metadata_only "$OUTPUT"; then
+      log "the archive is metadata-only, and replay refuses it at the first call that needs"
+      log "a buffer, an argument value or a code object. To replay the failure, capture it"
+      log "again with --content."
+    elif (( inspect_rc == 0 )); then
       log "the archive holds events. To find out what went wrong, replay it here and now:"
       log "  $TRIAGE --archive $OUTPUT/pid-<pid>"
       log "this host captured it, so its runtime is the one the reader has to match."

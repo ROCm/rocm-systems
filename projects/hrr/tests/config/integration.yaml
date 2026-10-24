@@ -216,6 +216,9 @@ cases:
   Unit_HRR_MemsetVariantsRoundtrip: {}
   Unit_HRR_MemsetVariants_Direct: {}
   Unit_HRR_MetadataManifest: {}
+  Unit_HRR_MetadataOnlyCapture: {}
+  Unit_HRR_MetadataOnlyKernelArguments: {}
+  Unit_HRR_MetadataOnlySetupArgument: {}
   Unit_HRR_MiscAPIsRoundtrip: {}
   Unit_HRR_MiscAPIs_Direct: {}
   Unit_HRR_ModuleAPIRoundtrip: {}
@@ -238,6 +241,7 @@ cases:
   Unit_HRR_PinnedHostFreed_Direct: {}
   Unit_HRR_PinnedHostLarge_Direct: {}
   Unit_HRR_PinnedHostMalloc_Direct: {}
+  Unit_HRR_PinnedHostMetadataOnlyNoSnapshot: {}
   Unit_HRR_PinnedHostModule_Direct: {}
   Unit_HRR_PinnedHostRegister_Direct: {}
   Unit_HRR_PinnedHostRoundtrip: {}
@@ -275,6 +279,7 @@ cases:
   Unit_HRR_ReplaceKernelRoundtrip: {}
   Unit_HRR_SecureExecIgnoresCaptureOutput: {}
   Unit_HRR_SecureExecProbe_Direct: {}
+  Unit_HRR_SetupArgument_Direct: {}
   Unit_HRR_ShutdownWhileChildOpensArchive: {}
   Unit_HRR_ShutdownWhileChildOpensArchive_Direct: {}
   Unit_HRR_SparsePitchRoundtrip: {}

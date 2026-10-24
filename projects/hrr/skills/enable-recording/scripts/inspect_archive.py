@@ -57,6 +57,10 @@ VERSION_MISMATCH = "Version mismatch"
 # See projects/hrr/include/hrr/hrr_api_args.h and projects/hrr/DESIGN.md.
 HEADER_BYTES = 8
 HEADER_MAGIC = 0x52524845  # "HRRE"
+# HRR_FILE_FLAG_METADATA_ONLY in the header's reserved field: captured without
+# HIP_HRR_CAPTURE_CONTENT, so no host buffer, by-value kernel argument or code
+# object was recorded and replay refuses the first call that needs one.
+FLAG_METADATA_ONLY = 0x0002
 # `hrr_event_header.event_type` sentinel for the clean-shutdown trailer. A file
 # whose very first record is the trailer recorded nothing, however many bytes
 # it holds: header plus trailer is 52 bytes of no events at all.
@@ -84,11 +88,11 @@ COMPRESSED_BUNDLE_MAGIC = b"CCOB"
 # are the blobs a `__hipRegisterFatBinary` record names: its hrr_api_id_t, and
 # where the record keeps the hash after the event header and `uint64 ret`.
 # The id is per archive format version (hrr_api_args.h): v8 put two compiler
-# APIs ahead of it, v9 one more, and v10 left it where it was. A v7 archive may
-# hold either numbering, so that and any other version leaves the fat binaries
-# unscanned. tools/tests/test_skill_api_ids.py fails when HRR_VERSION moves
+# APIs ahead of it, v9 one more, and v10 and v11 left it where it was. A v7
+# archive may hold either numbering, so that and any other version leaves the
+# fat binaries unscanned. tools/tests/test_skill_api_ids.py fails when HRR_VERSION moves
 # past this table.
-REGISTER_FAT_BINARY = {8: 549, 9: 550, 10: 550}
+REGISTER_FAT_BINARY = {8: 549, 9: 550, 10: 550, 11: 550}
 FAT_BINARY_HASH_OFFSET = EVENT_HEADER_BYTES + 8
 HARDWARE_ID_FIELDS = ("pci", "uuid", "luid")
 # Capture cannot zero what the GPU loads, so `verify` looks there for strings
@@ -119,6 +123,7 @@ class ProcessArchive:
     manifest_bad_fields: list[str] = field(default_factory=list)
     hip_runtime_version: str | None = None
     format_version: int | None = None
+    metadata_only: bool = False
     holds_an_event: bool = False
     # Manifest fields that name the individual GPU and are not blank.
     hardware_ids: list[str] = field(default_factory=list)
@@ -318,17 +323,17 @@ def _scan_code_objects(pid_dir: Path, proc: ProcessArchive) -> None:
         proc.path_files += path
 
 
-def _archive_format_version(events: Path) -> int | None:
-    """The format version written in the first 8 bytes of `events.bin`."""
+def _archive_header(events: Path) -> tuple[int | None, int]:
+    """The format version and flags written in the first 8 bytes of `events.bin`."""
     try:
         with events.open("rb") as handle:
             head = handle.read(HEADER_BYTES)
     except OSError:
-        return None
+        return None, 0
     if len(head) < HEADER_BYTES:
-        return None
-    magic, version, _ = struct.unpack("<IHH", head)
-    return version if magic == HEADER_MAGIC else None
+        return None, 0
+    magic, version, flags = struct.unpack("<IHH", head)
+    return (version, flags) if magic == HEADER_MAGIC else (None, 0)
 
 
 def _holds_an_event(events: Path) -> bool:
@@ -394,7 +399,8 @@ def _load_process(pid_dir: Path) -> ProcessArchive:
     except OSError:
         proc.events_bytes = 0
 
-    proc.format_version = _archive_format_version(events)
+    proc.format_version, flags = _archive_header(events)
+    proc.metadata_only = bool(flags & FLAG_METADATA_ONLY)
     proc.holds_an_event = _holds_an_event(events)
     proc.blob_files, _ = _dir_stats(pid_dir / "blobs")
     proc.code_object_files, _ = _dir_stats(pid_dir / "code_objects")
@@ -862,6 +868,8 @@ def render(report: ArchiveReport) -> str:
         )
         if proc.parent_pid:
             lines.append(f"    parent pid: {proc.parent_pid}")
+        if proc.metadata_only:
+            lines.append("    contents: withheld (metadata-only capture)")
         hardware = ", ".join(proc.hardware_ids) if proc.hardware_ids else "blank"
         build_info = (
             f".comment/.debug* in {proc.debug_info_files} code objects, "
@@ -913,6 +921,12 @@ def render(report: ArchiveReport) -> str:
                 "processes belong together. Replay them one at a time, starting with one "
                 "that did not shut down cleanly."
             )
+        if any(p.metadata_only for p in report.recorded_processes):
+            lines.append(
+                "Metadata-only: the call sequence, handles and sizes are there, but no buffer "
+                "contents, kernel argument values or code objects, so replay refuses it. Capture "
+                "again with HIP_HRR_CAPTURE_CONTENT=1 ('hrr_capture.sh run --content') to replay it."
+            )
     else:
         lines.append("Verdict: empty. Process directories exist but no events were written.")
 
@@ -936,6 +950,7 @@ def to_dict(report: ArchiveReport) -> dict:
                 "blob_files": p.blob_files,
                 "code_object_files": p.code_object_files,
                 "finalized": p.finalized,
+                "metadata_only": p.metadata_only,
                 "hardware_ids": p.hardware_ids,
                 "debug_info_files": p.debug_info_files,
                 "path_files": p.path_files,

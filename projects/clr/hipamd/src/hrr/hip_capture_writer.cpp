@@ -225,6 +225,12 @@ struct BufWriteGuard {
 static std::atomic_flag g_emergency_manifest_busy = ATOMIC_FLAG_INIT;
 static char g_emergency_manifest_buf[kEmergencyManifestMax];
 
+// HIP_HRR_CAPTURE_CONTENT, set before open(). Without it the header carries
+// HRR_FILE_FLAG_METADATA_ONLY, and write_blob() and write_code_object() record
+// not even the hash: a hash of a four-byte token identifier is as good as the
+// identifier.
+static std::atomic<bool> g_record_content{false};
+
 static std::atomic<uint64_t> g_seq_id{0};
 static std::atomic<uint64_t> g_event_count{0};
 static std::atomic<uint64_t> g_blob_count{0};
@@ -1249,7 +1255,9 @@ bool open(const char* output_dir) {
     g_events_fd = fd;
     // Pitched host copies record only their copied rows (hip_capture.cpp,
     // write_host_rect_blob), which replay reads back by this flag.
-    hrr_file_header fh{HRR_MAGIC, HRR_VERSION, HRR_FILE_FLAG_PACKED_HOST_RECTS};
+    uint16_t flags = HRR_FILE_FLAG_PACKED_HOST_RECTS;
+    if (!g_record_content.load(std::memory_order_relaxed)) flags |= HRR_FILE_FLAG_METADATA_ONLY;
+    hrr_file_header fh{HRR_MAGIC, HRR_VERSION, flags};
     buffer_append_locked(&fh, sizeof(fh));
   }
   return true;
@@ -1705,12 +1713,17 @@ class BlobClaim {
 // write_blob
 // ---------------------------------------------------------------------------
 
+static constexpr Hash128 kWithheld{HRR_HASH_WITHHELD, HRR_HASH_WITHHELD};
+
+void set_record_content(bool on) { g_record_content.store(on, std::memory_order_relaxed); }
+
 Hash128 write_blob(const void* data, size_t len) {
   reopen_after_fork();
   {
     std::lock_guard<std::mutex> lk(g_file_mu);
     if (g_events_fd < 0 || g_events_finalized) return {};  // not open, or past the trailer
   }
+  if (!g_record_content.load(std::memory_order_relaxed)) return kWithheld;
 
   Hash128 h = hash_buffer(data, len);
 
@@ -1772,6 +1785,7 @@ Hash128 write_code_object(const void* image, size_t image_size) {
     std::lock_guard<std::mutex> lk(g_file_mu);
     if (g_events_fd < 0 || g_events_finalized) return {};  // not open, or past the trailer
   }
+  if (!g_record_content.load(std::memory_order_relaxed)) return kWithheld;  // as in write_blob()
 
   // The stored bytes, and so the hash, are the image with its .comment and
   // debug sections zeroed (see hip_capture_scrub.h).

@@ -147,6 +147,14 @@ static bool hrr_dbg_args_enabled() {
 #endif
 }
 
+// HIP_HRR_CAPTURE_CONTENT opts in to recording host buffer contents, kernel
+// argument values and code objects. Without it the archive holds the call
+// sequence, handles and sizes only. Independent of any consent to be recorded:
+// consenting does not change what is stored.
+static bool hrr_capture_content() {
+  return HIP_HRR_CAPTURE_CONTENT;
+}
+
 static void hrr_trace_h2d(const char* api, const void* dst, size_t sz) {
   if (hrr_dbg_args_enabled())
     LogPrintfInfo("[HRR h2d] %s dst=0x%llx size=%zu", api,
@@ -299,6 +307,10 @@ struct PinnedSnapshot {
   PinnedSnapshot(hipFunction_t f, void** params, void** extra,
                  const void* kbuf = nullptr, size_t ksz = 0) {
     t_snaps.clear();
+    // Metadata-only: write_blob would withhold the copy, so none is taken, and
+    // no allocation over the cap is noted as unreplayable. By-value arguments
+    // are recorded as zeros, so no struct word is flagged as a pinned pointer.
+    if (!hrr_capture_content()) return;
     if (!f || !hrr_host_snapshots_enabled() || g_pinned_count.load(std::memory_order_relaxed) == 0)
       return;
     if (!params && !kbuf && extra) parse_kernel_extra(extra, kbuf, ksz);
@@ -547,6 +559,8 @@ static void serialize_kernel_launch(
   uint16_t name_len = name_oversized ? 0 : static_cast<uint16_t>(kernel_name_len);
   push_u16(name_len);
   push_bytes(kernel_name, name_len);
+  // From kernel_code_object_hash(): withheld in metadata-only mode, which is
+  // what makes replay refuse this launch's zeroed by-value arguments.
   push_u64(co_hash.lo); push_u64(co_hash.hi);  // code object identity (0 = unknown)
   push_u32(gx); push_u32(gy); push_u32(gz);
   push_u32(bx); push_u32(by); push_u32(bz);
@@ -575,11 +589,18 @@ static void serialize_kernel_launch(
   // single cached accessor rather than re-reading the env var here.
   const bool dbg = hrr_dbg_args_enabled();
 
+  // A by-value argument is application data, so metadata-only capture records
+  // its size and zeros. A struct is withheld whole, device pointers embedded in
+  // it included (kind 0, never 3). A whole-argument pointer (kind 1) is an
+  // address, recorded either way.
+  const bool content = hrr_capture_content();
+
   // Serialize one argument: a whole-arg pointer (kind 1), or a scalar/struct
   // that we additionally scan for embedded device pointers (kind 3 if any are
   // found, else kind 0). `bytes` may be null (unavailable) -> zero-filled.
   auto emit_arg = [&](uint32_t idx, bool is_ptr,
                       const uint8_t* bytes, uint16_t sz) {
+    if (!is_ptr && !content) bytes = nullptr;
     if (is_ptr) {
       push_u8(1); push_u16(sz);
       if (bytes) push_bytes(bytes, sz);
@@ -794,8 +815,12 @@ static void append_kernel_node_tail(std::vector<uint8_t>& payload,
       if (!sig.at(i).info_.hidden_) num_args++;
   push_u16(num_args);
 
+  // As for a launch: by-value arguments, structs with embedded device pointers
+  // included, are recorded as zeros without contents.
+  const bool content = hrr_capture_content();
   auto emit_arg = [&](uint32_t idx, bool is_ptr, const uint8_t* bytes,
                       uint16_t sz) {
+    if (!is_ptr && !content) bytes = nullptr;
     if (is_ptr) {
       push_u8(1); push_u16(sz);
       if (bytes) push_bytes(bytes, sz);
@@ -1196,6 +1221,11 @@ static hrr_cap::Hash128 write_module_code_object(hipModule_t module) {
 }
 
 static hrr_cap::Hash128 kernel_code_object_hash(amd::Kernel* kernel) {
+  // Metadata-only: every launch and kernel node gets the withheld hash, even
+  // where no code object could be hashed. It also marks their by-value
+  // arguments as withheld, so replay refuses them on any path, --replace-kernel
+  // included. Nothing is read or cached.
+  if (!hrr_capture_content()) return {HRR_HASH_WITHHELD, HRR_HASH_WITHHELD};
   if (!kernel) return {0, 0};
   amd::Program* prog = &kernel->program();
   if (!prog) return {0, 0};
@@ -1673,8 +1703,11 @@ static size_t compute_bundle_size(const void* blob) {
 }
 
 // Stores a fat binary with the .comment and debug sections of its code
-// objects zeroed; the application's own copy is left alone.
+// objects zeroed; the application's own copy is left alone. Metadata-only
+// capture stores no code, so it hands write_blob() the bundle uncopied and
+// gets HRR_HASH_WITHHELD back without the bundle being read.
 static hrr_cap::Hash128 write_fat_binary_blob(const void* blob, size_t blob_size) {
+  if (!hrr_capture_content()) return hrr_cap::writer::write_blob(blob, blob_size);
   std::vector<uint8_t> scrubbed(static_cast<const uint8_t*>(blob),
                                 static_cast<const uint8_t*>(blob) + blob_size);
   hrr_cap::scrub::scrub_code_object(scrubbed.data(), scrubbed.size());
@@ -2076,6 +2109,9 @@ static hrr_cap::Hash128 write_host_rect_blob(const void* base, size_t pitch,
     return {0, 0};
   }
   if (r.bytes == 0) return {0, 0};
+  // Metadata-only: nothing is gathered, so no failed allocation can mark the
+  // capture incomplete over bytes it would not have recorded.
+  if (!hrr_capture_content()) return {HRR_HASH_WITHHELD, HRR_HASH_WITHHELD};
   // Neither product wraps: both are at most r.bytes, which fits.
   const size_t n = width * height * depth;
   const auto* src = static_cast<const uint8_t*>(base) + r.first;
@@ -3002,6 +3038,8 @@ void hip_capture_init() {
       hip_capture_install();
     }
 
+    hrr_cap::writer::set_record_content(hrr_capture_content());
+
     // Open the events writer now — Flag::init() has run so output_dir is valid.
     // A refused open leaves capture off. Without a writer the shims would only
     // cost time, and the D2H ones still synchronize streams, so take them out
@@ -3020,9 +3058,11 @@ void hip_capture_init() {
     // whatever the log level, since the traces carry argument bytes. This runs
     // only once the writer is open, so a refused open claims nothing.
     if (hrr_dbg_args_enabled()) {
+      // Metadata-only capture nulls by-value bytes before the dump reads them.
       fprintf(stderr,
-              "[HRR capture] HIP_HRR_DEBUG_ARGS is set: kernel argument bytes and "
-              "host-to-device copy destinations are also written to the log\n");
+              "[HRR capture] HIP_HRR_DEBUG_ARGS is set: kernel %s and host-to-device "
+              "copy destinations are also written to the log\n",
+              hrr_capture_content() ? "argument bytes" : "pointer argument values");
       if (AMD_LOG_LEVEL < amd::LOG_INFO) AMD_LOG_LEVEL = amd::LOG_INFO;
     }
 #if !defined(DEBUG)
@@ -3060,9 +3100,13 @@ void hip_capture_init() {
     // directory writer::open() creates. A fork() child records to a sibling
     // pid-<pid> directory without printing, because hip::init() does not run again.
     fprintf(stderr,
-            "[HRR capture] Recording this process's HIP calls, with their host buffers, kernel "
-            "arguments and code objects, to %s/pid-%d (child processes record to their own "
-            "pid-* directories in %s)\n",
+            "[HRR capture] Recording this process's HIP calls (%s) to %s/pid-%d (child "
+            "processes record to their own pid-* directories in %s)\n",
+            hrr_capture_content()
+                ? "content mode: with their host buffers, kernel arguments and code objects"
+                : "metadata-only mode: call sequence, handles and sizes, no buffer contents, "
+                  "kernel argument values or code objects; set HIP_HRR_CAPTURE_CONTENT=1 to "
+                  "record them",
             hip_capture_output_dir(), amd::Os::getProcessId(), hip_capture_output_dir());
   #else
     // HRR capture is disabled

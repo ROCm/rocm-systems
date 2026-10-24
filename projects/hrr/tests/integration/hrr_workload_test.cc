@@ -2072,6 +2072,30 @@ TEST_CASE("Unit_HRR_ConfigureCall_Direct", "[.][hrr-direct]") {
 }
 
 // ===========================================================================
+// Workload: legacy hipSetupArgument pushes of a known scalar and of a zero
+//
+// hipSetupArgument copies a kernel argument value from host memory into the
+// pending kernarg buffer, and capture copies the same bytes into the event.
+// Unit_HRR_MetadataOnlySetupArgument looks for the scalar in the archive and
+// replays both pushes. As in Unit_HRR_ConfigureCall_Direct, no hipLaunchByPtr
+// consumes the configuration. No final blob.
+// ===========================================================================
+TEST_CASE("Unit_HRR_SetupArgument_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  hipStream_t s;
+  HRR_HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
+  HRR_HIP_CHECK(hipConfigureCall(dim3(1), dim3(64), /*sharedMem*/ 0, s));
+  // Unit_HRR_MetadataOnlySetupArgument searches the archive for these bytes.
+  const uint64_t marker = 0x5e7a2c0ffee1d0a7ULL;
+  HRR_HIP_CHECK(hipSetupArgument(&marker, sizeof(marker), 0));
+  // A genuine zero: content-mode replay must push it like any other value.
+  const uint64_t zero = 0;
+  HRR_HIP_CHECK(hipSetupArgument(&zero, sizeof(zero), sizeof(marker)));
+  HRR_HIP_CHECK(hipStreamSynchronize(s));
+  HRR_HIP_CHECK(hipStreamDestroy(s));
+}
+
+// ===========================================================================
 // Workload: cross-GPU peer copy (REQUIRES 2 GPUs)
 //
 // First HRR workload that spans two devices. src_dev is memset to a known value

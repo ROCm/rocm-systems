@@ -296,6 +296,7 @@ HRR_TEST_CASE(Unit_HRR_FatBinHeaderChecks) {
   { hrr::test::SpawnProc proc(hrr_self_exe(), /*capture_stdout=*/true,
                               /*capture_stderr=*/true);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    proc.setEnv("HIP_HRR_CAPTURE_CONTENT", "1");
     // The refusals are reported as warnings.
     proc.setEnv("AMD_LOG_LEVEL", "2");
     set_proc_search_path(proc);

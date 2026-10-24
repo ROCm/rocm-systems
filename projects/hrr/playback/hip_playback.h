@@ -945,11 +945,17 @@ struct PlaybackContext {
     // ---- Blob/code-object loading ----
     // Load a blob from archive_dir/blobs/<2-char-prefix>/<hash>.blob
     // Returns nullptr if not found. Memory is owned by the context (cached).
+    // `what` names the blob if it is refused as withheld.
     const void* load_blob(uint64_t hash_lo, uint64_t hash_hi,
-                          size_t* sz_out = nullptr) const;
+                          size_t* sz_out = nullptr,
+                          const char* what = "host buffer") const;
     // Load a code object from archive_dir/code_objects/<hash>.hsaco
+    // Both loaders refuse HRR_HASH_WITHHELD (see refuse_withheld).
     const void* load_code_object(uint64_t hash_lo, uint64_t hash_hi,
                                  size_t* sz_out) const;
+    // True, after reporting the refusal and setting fatal_error, when the hash is
+    // HRR_HASH_WITHHELD: a metadata-only capture recorded no contents for it.
+    bool refuse_withheld(uint64_t hash_lo, uint64_t hash_hi, const char* what) const;
     // Read `path` into blob_cache_ under `key`, charged to the host budget.
     const void* cache_file(const std::string& key, const std::string& path,
                            size_t* sz_out, const char* what) const;

@@ -37,6 +37,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ### Changed
 
+* HRR capture is metadata-only unless `HIP_HRR_CAPTURE_CONTENT=1` is set alongside `HIP_HRR_CAPTURE_OUTPUT`. A metadata-only archive holds the call sequence, handles, sizes and scalar call arguments, but no host buffers, by-value kernel arguments or code objects, and `hrr-playback` refuses the first call that needs them. The archive format version is now 11, so archives from earlier runtimes must be re-captured.
 * Stream priority is now disabled to avoid known queue-priority-related issues. Priority streams are currently not supported.
 * HRR capture feature is now disabled.
 * `hipMemAdvise` now aliases `hipMemAdvise_v2`, which uses a `hipMemLocation` parameter instead of a device ID. Applications using the legacy `hipMemAdvise` signature may require source updates to pass a `hipMemLocation` structure. To maintain compatibility with the previous API signature, define `HIP_TARGET_API_VERSION` to a nonzero value less than 800 (for example, 700 for HIP 7.0 or 717 for HIP 7.17) at compile time. By default, `hipMemAdvise` alias to the `hipMemAdvise_v2` interface.

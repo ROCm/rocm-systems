@@ -709,6 +709,7 @@ WorkloadRun run_workload(const std::string& name, const fs::path& cap, uint64_t 
                          uint64_t avail = 0) {
   hrr::test::SpawnProc proc(hrr_self_exe(), /*capture_stdout=*/true, /*capture_stderr=*/true);
   proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.string());
+  proc.setEnv("HIP_HRR_CAPTURE_CONTENT", "1");
   proc.setEnv("HRR_TEST_FAKE_FS_TOTAL", std::to_string(total));
   if (avail != 0) proc.setEnv("HRR_TEST_FAKE_FS_AVAIL", std::to_string(avail));
   set_proc_search_path(proc);

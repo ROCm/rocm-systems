@@ -7,7 +7,8 @@ The page is the customer text for AIRUNTIME-2733. Its device table has to name
 exactly the fields hip_capture_metadata.cpp writes into a manifest, so a task
 that adds, removes or blanks one cannot land without updating the page. Its
 inventory has to list the active marker, the hipHostRegister snapshot, the
-hipLinkAddData inputs and the hipDeviceProp_t snapshots in events.bin.
+pinned host snapshots taken at kernel launch, the hipLinkAddData inputs and
+the hipDeviceProp_t snapshots in events.bin.
 
 Run: python3 -m unittest discover -s projects/hrr/tools/tests
 """
@@ -64,7 +65,7 @@ class PrivacyDocTest(unittest.TestCase):
 
     def test_inventory_lists_the_active_marker_capture_writes(self):
         writer = (CAPTURE_SRC / "hip_capture_writer.cpp").read_text(encoding="utf-8")
-        name = re.search(r'kActiveMarker = "/(\w+)"', writer).group(1)
+        name = re.search(r'kActiveMarker = "/?(\w+)"', writer).group(1)
         self.assertTrue(
             any(row.split("|")[2].strip() == f"`{name}`" for row in inventory_rows())
         )
@@ -81,6 +82,21 @@ class PrivacyDocTest(unittest.TestCase):
 
     def test_inventory_lists_the_host_register_snapshot(self):
         self.assert_blob_row("hipHostRegister")
+
+    def test_inventory_lists_the_pinned_host_snapshots(self):
+        # PinnedSnapshot writes each pinned allocation a launch points into
+        # through write_blob, which withholds it in metadata-only mode.
+        capture = (CAPTURE_SRC / "hip_capture.cpp").read_text(encoding="utf-8")
+        body = capture.split("struct PinnedSnapshot {", 1)[1].split("\n};\n", 1)[0]
+        self.assertIn("write_blob(", body)
+        apis = ("hipHostMalloc", "hipMallocHost", "hipHostRegister")
+        rows = [
+            r
+            for r in inventory_rows()
+            if "`blobs/`" in r and "launch" in r and all(f"`{a}`" in r for a in apis)
+        ]
+        self.assertTrue(rows)
+        self.assertEqual(rows[0].split("|")[3].strip(), "contents")
 
     def test_inventory_lists_linker_inputs_rejected_ones_included(self):
         body, row = self.assert_blob_row("hipLinkAddData")

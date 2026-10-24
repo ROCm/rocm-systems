@@ -7,16 +7,17 @@
 Recording and replaying HIP workloads
 **********************************************************
 
-HIP Record & Replay (HRR) records the HIP API calls an application makes, together
-with the host buffers and code objects it needs, into an archive that can be
-replayed on a GPU later. The replay does not need the original application, its
+HIP Record & Replay (HRR) records the HIP API calls an application makes into an
+archive. In content mode it also records the host buffers and code objects they
+need, and the archive can then be replayed on a GPU later. The replay does not need the original application, its
 source, or its input data, which makes an archive a practical way to hand a
 failing workload to somebody else.
 
 HRR has two halves:
 
-* **Capture** is part of the HIP runtime library. It is off unless you ask for it,
-  and is turned on with a single environment variable.
+* **Capture** is part of the HIP runtime library. It is off unless you ask for it:
+  one environment variable turns it on, and a second one records the contents
+  replay needs.
 * **Replay** is a separate developer tool, ``hrr-playback``, installed into the
   ROCm binary directory by a ROCm build that includes the HRR project.
 
@@ -62,16 +63,29 @@ sources reads archives recorded by the HIP runtime built from the same commit.
 Recording a workload
 =======================================================
 
-Set ``HIP_HRR_CAPTURE_OUTPUT`` to the archive you want written, and run the
+Set ``HIP_HRR_CAPTURE_OUTPUT`` to the archive you want written, and
+``HIP_HRR_CAPTURE_CONTENT=1`` to record what replay needs, then run the
 application as usual:
 
 .. code-block:: bash
 
-  HIP_HRR_CAPTURE_OUTPUT=./my_capture.hrr ./my_hip_app
+  HIP_HRR_CAPTURE_OUTPUT=./my_capture.hrr HIP_HRR_CAPTURE_CONTENT=1 ./my_hip_app
 
-Capture is off whenever the variable is unset, so nothing changes for an ordinary
-run. The archive is a directory, not a single file, and it holds one
-``pid-<pid>/`` subdirectory per recorded process:
+Capture is off whenever ``HIP_HRR_CAPTURE_OUTPUT`` is unset, so nothing changes
+for an ordinary run. The notice the capture prints on stderr names the mode it
+runs in.
+
+Without ``HIP_HRR_CAPTURE_CONTENT`` the capture is
+metadata-only: the archive holds the call sequence, handles and sizes, but no
+host buffer, no by-value kernel argument (a struct argument is withheld whole,
+device pointers inside it included) and no code object. Scalar values passed to
+a HIP call are kept in both modes, such as a memset fill value or the value
+``hipStreamWriteValue32`` writes. ``--info`` reads such an archive as usual and
+reports its contents as ``withheld``; a replay stops at the first call that needs the
+missing contents and says that content mode would have recorded them.
+
+The archive is a directory, not a single file, and it holds one ``pid-<pid>/``
+subdirectory per recorded process:
 
 .. code-block:: text
 
@@ -80,19 +94,22 @@ run. The archive is a directory, not a single file, and it holds one
     pid-<pid>/
       manifest.json     what this process recorded, and whether it ended cleanly
       events.bin        the recorded call sequence
-      blobs/            host buffers, addressed by content hash
-      code_objects/     the GPU code the run used
+      blobs/            host buffers, addressed by content hash (empty without content mode)
+      code_objects/     the GPU code the run used (empty without content mode)
       regions/          optional, and written by tooling outside the runtime:
                         memory a framework allocated without going through HIP
 
-Expect the result to be large. It contains the buffers the workload moved, so a
-short run of a big model produces gigabytes.
+In content mode, expect the result to be large. It contains the buffers the
+workload moved, so a short run of a big model produces gigabytes.
 
 .. warning::
 
-  The archive holds the recorded buffers verbatim, so anything the workload had
-  in host memory is readable in it. Treat an archive as you would treat the input
-  data of the run it came from.
+  A content-mode archive holds the recorded buffers verbatim, so anything the
+  workload had in host memory is readable in it. Treat an archive as you would treat the input
+  data of the run it came from. A metadata-only archive is not safe to share either: it
+  still names every kernel the run launched, and records the strings passed to HIP calls,
+  such as a linked file's path or a symbol looked up by name, and the device properties
+  passed to ``hipChooseDevice``.
 
 Your first replay
 =======================================================
@@ -114,12 +131,13 @@ Pointed at the archive directory, ``--info`` lists the recorded processes:
   Owner PID:    1180
   Processes:    2
 
-    PID          Parent PID   Complete   Events       Blobs      Path
-    ---          ----------   --------   ------       -----      ----
-    1180         0            yes        412          6          ./my_capture.hrr/pid-1180
-    1204         1180         NO         918274       1503       ./my_capture.hrr/pid-1204
+    PID          Parent PID   Complete   Contents   Events       Blobs      Path
+    ---          ----------   --------   --------   ------       -----      ----
+    1180         0            yes        recorded   412          6          ./my_capture.hrr/pid-1180
+    1204         1180         NO         recorded   918274       1503       ./my_capture.hrr/pid-1204
 
-``Complete`` reports whether that process shut down cleanly. An archive from a run
+``Complete`` reports whether that process shut down cleanly, and ``Contents``
+whether it ran in content mode (``recorded``) or metadata-only (``withheld``). An archive from a run
 that crashed is still usable: the reader recovers every complete record. To leave
 it in a tidy state, ``hrr-playback ./my_capture.hrr --repair`` rewrites every
 process capture under the archive with a clean trailer and rebuilds the index.

@@ -65,10 +65,10 @@ def _executable(path: Path, text: str) -> Path:
     return path
 
 
-def _archive_events() -> bytes:
+def _archive_events(flags: int = 0) -> bytes:
     """An events.bin the inspector counts as a recording: the file header, one
     whole event header and its payload."""
-    header = struct.pack("<IHH", inspect_archive.HEADER_MAGIC, 5, 0)
+    header = struct.pack("<IHH", inspect_archive.HEADER_MAGIC, 5, flags)
     payload_length = 4096 - len(header)
     event = struct.pack("<HQQQI2x", 1, 1, 0, 0, payload_length)
     return header + event + b"\0" * (payload_length - inspect_archive.EVENT_HEADER_BYTES)
@@ -110,7 +110,14 @@ class World:
         self.env = {
             key: value
             for key, value in os.environ.items()
-            if key not in ("LD_PRELOAD", "LD_LIBRARY_PATH", "HRR_PLAYBACK", "HIP_HRR_CAPTURE_OUTPUT")
+            if key
+            not in (
+                "LD_PRELOAD",
+                "LD_LIBRARY_PATH",
+                "HRR_PLAYBACK",
+                "HIP_HRR_CAPTURE_OUTPUT",
+                "HIP_HRR_CAPTURE_CONTENT",
+            )
         }
         self.env.update(PATH=f"{self.stubs}:/usr/bin:/bin", ROCM_PATH=str(self.rocm))
 
@@ -635,15 +642,21 @@ def test_the_filesystem_is_the_innermost_mount_holding_the_path(tmp_path, path, 
 
 def _capturing_workload(world: World, *, exit_status: int = 0, record: bool = True) -> Path:
     """A workload that does what libamdhip64 does with capture on: writes
-    pid-<pid>/ under HIP_HRR_CAPTURE_OUTPUT. It also notes the variable."""
-    events = world.root / "events.bin"
-    events.write_bytes(_archive_events())
+    pid-<pid>/ under HIP_HRR_CAPTURE_OUTPUT, metadata-only unless
+    HIP_HRR_CAPTURE_CONTENT is set. It also notes both variables."""
+    (world.root / "events.bin").write_bytes(_archive_events())
+    (world.root / "events-metadata.bin").write_bytes(
+        _archive_events(inspect_archive.FLAG_METADATA_ONLY)
+    )
     body = f'printf "%s" "$HIP_HRR_CAPTURE_OUTPUT" > "{world.root / "seen-output"}"\n'
+    body += f'printf "%s" "$HIP_HRR_CAPTURE_CONTENT" > "{world.root / "seen-content"}"\n'
     if record:
         body += (
             'dir="$HIP_HRR_CAPTURE_OUTPUT/pid-$$"\n'
             'mkdir -p "$dir/blobs"\n'
-            f'cp "{events}" "$dir/events.bin"\n'
+            f'events="{world.root / "events-metadata.bin"}"\n'
+            f'[ "$HIP_HRR_CAPTURE_CONTENT" = 1 ] && events="{world.root / "events.bin"}"\n'
+            'cp "$events" "$dir/events.bin"\n'
             "printf '{\"pid\": %s, \"parent_pid\": 1, \"complete\": true, "
             "\"event_count\": 1, \"blob_count\": 0}' $$ > \"$dir/manifest.json\"\n"
         )
@@ -655,11 +668,47 @@ def test_run_points_capture_at_the_output_and_offers_the_replay(world):
     out = world.root / "capture"
     app = _capturing_workload(world)
 
-    result = world.script("run", "--skip-preflight", "--no-playback", "--output", str(out), "--", str(app))
+    result = world.script(
+        "run", "--skip-preflight", "--no-playback", "--content", "--output", str(out), "--", str(app)
+    )
 
     assert result.returncode == 0, result.stderr
     assert (world.root / "seen-output").read_text() == str(out)
+    assert (world.root / "seen-content").read_text() == "1"
     assert "Verdict: recorded" in result.stdout
+    assert f"triage_archive.sh --archive {out}/pid-<pid>" in result.stderr
+
+
+def test_run_without_content_says_replay_refuses_and_offers_no_replay(world):
+    out = world.root / "capture"
+    app = _capturing_workload(world)
+
+    result = world.script("run", "--skip-preflight", "--no-playback", "--output", str(out), "--", str(app))
+
+    assert result.returncode == 0, result.stderr
+    assert (world.root / "seen-content").read_text() == ""
+    assert "Verdict: recorded" in result.stdout
+    assert "contents: withheld (metadata-only capture)" in result.stdout
+    assert "capture it\n[capture] again with --content" in result.stderr
+    assert "triage_archive.sh" not in result.stderr
+
+
+def test_run_with_content_ignores_a_metadata_only_backup(world):
+    """A pid-<pid>.prev-<n> left by an earlier metadata-only run is not this run's
+    capture, so the content capture beside it still gets the replay line."""
+    out = world.root / "capture"
+    backup = out / "pid-1.prev-1"
+    backup.mkdir(parents=True)
+    (backup / "events.bin").write_bytes(_archive_events(inspect_archive.FLAG_METADATA_ONLY))
+    app = _capturing_workload(world)
+
+    result = world.script(
+        "run", "--skip-preflight", "--no-playback", "--force", "--content",
+        "--output", str(out), "--", str(app),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "again with --content" not in result.stderr
     assert f"triage_archive.sh --archive {out}/pid-<pid>" in result.stderr
 
 
