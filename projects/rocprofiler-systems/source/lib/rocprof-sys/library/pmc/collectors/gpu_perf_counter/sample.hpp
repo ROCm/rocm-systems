@@ -10,6 +10,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -38,58 +39,30 @@ struct sample : trace_cache::cacheable_t
     std::uint32_t              device_id = 0;
     std::uint64_t              timestamp = 0;
     std::vector<counter_value> entries;
+
+    template <typename Archive>
+    void serialize(Archive& archive)
+    {
+        archive(device_id, timestamp, entries);
+    }
 };
 
 }  // namespace rocprofsys::pmc::collectors::gpu_perf_counter
+
+namespace rocprofsys::trace_cache::type_traits
+{
+
+// counter_value has no padding (see its static_assert), so its bytes are the format.
+template <>
+struct explicitly_raw<pmc::collectors::gpu_perf_counter::counter_value> : std::true_type
+{};
+
+}  // namespace rocprofsys::trace_cache::type_traits
 
 namespace rocprofsys::trace_cache
 {
 
 /// @brief SDK PMC sample type alias
 using gpu_perf_counter_sample = pmc::collectors::gpu_perf_counter::sample;
-
-template <>
-inline void
-serialize(std::uint8_t* buffer, const pmc::collectors::gpu_perf_counter::sample& item)
-{
-    size_t     pos         = 0;
-    const auto num_entries = static_cast<std::uint32_t>(item.entries.size());
-    utility::store_value(item.device_id, buffer, pos);
-    utility::store_value(item.timestamp, buffer, pos);
-    utility::store_value(num_entries, buffer, pos);
-    for(const auto& entry : item.entries)
-    {
-        utility::store_value(entry.counter_id, buffer, pos);
-        utility::store_value(entry.value, buffer, pos);
-    }
-}
-
-template <>
-inline pmc::collectors::gpu_perf_counter::sample
-deserialize(std::uint8_t*& buffer)
-{
-    pmc::collectors::gpu_perf_counter::sample item;
-    std::uint32_t                             num_entries = 0;
-    utility::parse_value(buffer, item.device_id, item.timestamp, num_entries);
-    item.entries.resize(num_entries);
-    for(auto& entry : item.entries)
-    {
-        utility::parse_value(buffer, entry.counter_id, entry.value);
-    }
-    return item;
-}
-
-template <>
-inline size_t
-get_size(const pmc::collectors::gpu_perf_counter::sample& item)
-{
-    size_t total_size = utility::get_size(
-        item.device_id, item.timestamp, static_cast<std::uint32_t>(item.entries.size()));
-    for(const auto& entry : item.entries)
-    {
-        total_size += utility::get_size(entry.counter_id, entry.value);
-    }
-    return total_size;
-}
 
 }  // namespace rocprofsys::trace_cache

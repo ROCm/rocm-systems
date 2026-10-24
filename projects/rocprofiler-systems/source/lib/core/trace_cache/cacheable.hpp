@@ -6,6 +6,7 @@
 #include <cstdint>
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <chrono>
 #include <cstdlib>
@@ -32,9 +33,7 @@ constexpr auto   CACHE_FILE_FLUSH_TIMEOUT = 10ms;
 constexpr auto ABSOLUTE   = "ABS";
 constexpr auto PERCENTAGE = "%";
 
-template <typename TypeIdentifierEnum>
-constexpr size_t header_size = sizeof(TypeIdentifierEnum) + sizeof(size_t);
-using buffer_array_t         = std::array<std::uint8_t, buffer_size>;
+using buffer_array_t = std::array<std::uint8_t, buffer_size>;
 
 const auto tmp_directory = std::string{ "/tmp/" };
 
@@ -58,15 +57,19 @@ get_size(Type&& val)
 {
     using DecayedType = std::decay_t<Type>;
 
-    if constexpr(type_traits::is_string_view_v<DecayedType>)
+    if constexpr(type_traits::string_like<DecayedType>)
     {
         return val.size() + sizeof(char) + sizeof(size_t);
     }
     else if constexpr(type_traits::is_vector_v<DecayedType> ||
                       type_traits::is_span_v<DecayedType>)
     {
-        using ContainerType     = std::decay_t<decltype(val)>;
-        const size_t item_size  = sizeof(typename ContainerType::value_type);
+        using container_type = std::decay_t<decltype(val)>;
+        static_assert(
+            type_traits::is_raw_cacheable<typename container_type::value_type>::value,
+            "vectors and spans are cached as raw bytes: the element must be a "
+            "number, a scoped enum or a struct marked explicitly_raw");
+        const size_t item_size  = sizeof(typename container_type::value_type);
         const size_t item_count = val.size();
         const size_t total_size = item_count * item_size;
 
@@ -80,15 +83,12 @@ get_size(Type&& val)
     }
     else
     {
+        static_assert(
+            type_traits::is_raw_cacheable<DecayedType>::value,
+            "field type is copied as raw bytes: give it serialize(Archive&) or, "
+            "if it is plain data, mark it explicitly_raw");
         return sizeof(DecayedType);
     }
-}
-
-template <typename Type, typename... Types>
-__attribute__((always_inline)) constexpr size_t
-get_size(Type&& val, Types&&... vals)
-{
-    return get_size(std::forward<Type>(val)) + get_size(std::forward<Types>(vals)...);
 }
 
 template <typename Type>
@@ -100,23 +100,34 @@ store_value(const Type& value, std::uint8_t* buffer, size_t& position)
 
     auto* dest = buffer + position;
 
-    if constexpr(type_traits::is_string_view_v<DecayedType>)
+    if constexpr(type_traits::string_like<DecayedType>)
     {
         const size_t data_size  = value.size();
         const size_t entry_size = sizeof(size_t) + data_size + sizeof(char);
         std::memcpy(dest, &data_size, sizeof(size_t));
-        std::memcpy(dest + sizeof(size_t), value.data(), data_size);
-        dest[entry_size - sizeof(char)] = '\0';
+        if(data_size != 0)
+        {
+            std::memcpy(dest + sizeof(size_t), value.data(), data_size);
+        }
+        dest[entry_size - sizeof(char)] =
+            '\0';  // part of the format, see binary_read_archive
         position += entry_size;
     }
     else if constexpr(type_traits::is_vector_v<DecayedType> ||
                       type_traits::is_span_v<DecayedType>)
     {
+        static_assert(
+            type_traits::is_raw_cacheable<typename DecayedType::value_type>::value,
+            "vectors and spans are cached as raw bytes: the element must be a "
+            "number, a scoped enum or a struct marked explicitly_raw");
         const size_t total_size  = get_size(value);
         const size_t header_size = sizeof(size_t);
         const size_t data_size   = total_size - header_size;
         std::memcpy(dest, &data_size, sizeof(size_t));
-        std::memcpy(dest + sizeof(size_t), value.data(), data_size);
+        if(data_size != 0)
+        {
+            std::memcpy(dest + sizeof(size_t), value.data(), data_size);
+        }
         position += total_size;
     }
     else if constexpr(type_traits::is_optional_v<DecayedType>)
@@ -132,17 +143,13 @@ store_value(const Type& value, std::uint8_t* buffer, size_t& position)
     }
     else
     {
+        static_assert(
+            type_traits::is_raw_cacheable<DecayedType>::value,
+            "field type is copied as raw bytes: give it serialize(Archive&) or, "
+            "if it is plain data, mark it explicitly_raw");
         std::memcpy(dest, &value, sizeof(DecayedType));
         position += sizeof(DecayedType);
     }
-}
-
-template <typename... Types>
-__attribute__((always_inline)) inline void
-store_value(std::uint8_t* buffer, const Types&... values)
-{
-    size_t position = 0;
-    (store_value(values, buffer, position), ...);
 }
 
 template <typename Type>
@@ -152,7 +159,7 @@ parse_value(std::uint8_t*& data_pos, Type& arg)
 {
     using DecayedType = std::decay_t<Type>;
 
-    if constexpr(type_traits::is_string_view_v<DecayedType>)
+    if constexpr(type_traits::string_like<DecayedType>)
     {
         size_t string_size = 0;
         std::memcpy(&string_size, data_pos, sizeof(size_t));
@@ -163,19 +170,19 @@ parse_value(std::uint8_t*& data_pos, Type& arg)
     else if constexpr(type_traits::is_vector_v<DecayedType> ||
                       type_traits::is_span_v<DecayedType>)
     {
-        using ContainerType     = std::decay_t<decltype(arg)>;
-        using ItemType          = ContainerType::value_type;
-        const size_t item_size  = sizeof(ItemType);
-        size_t       total_size = 0;
+        using item_type = std::decay_t<decltype(arg)>::value_type;
+        static_assert(type_traits::is_raw_cacheable<item_type>::value,
+                      "vectors and spans are cached as raw bytes: the element must be a "
+                      "number, a scoped enum or a struct marked explicitly_raw");
+        size_t total_size = 0;
         std::memcpy(&total_size, data_pos, sizeof(size_t));
         data_pos += sizeof(size_t);
-        const size_t item_count = total_size / item_size;
-        arg.reserve(item_count);
-        for(size_t i = 0; i < item_count; ++i)
+        // Only whole elements are read; a stray tail is skipped, never copied.
+        const size_t item_count = total_size / sizeof(item_type);
+        arg.resize(item_count);
+        if(item_count != 0)
         {
-            ItemType item;
-            std::memcpy(&item, data_pos + i * item_size, item_size);
-            arg.push_back(std::move(item));
+            std::memcpy(arg.data(), data_pos, item_count * sizeof(item_type));
         }
         data_pos += total_size;
     }
@@ -196,17 +203,13 @@ parse_value(std::uint8_t*& data_pos, Type& arg)
     }
     else
     {
+        static_assert(
+            type_traits::is_raw_cacheable<DecayedType>::value,
+            "field type is copied as raw bytes: give it serialize(Archive&) or, "
+            "if it is plain data, mark it explicitly_raw");
         std::memcpy(&arg, data_pos, sizeof(DecayedType));
         data_pos += sizeof(DecayedType);
     }
-}
-
-template <typename Type, typename... Types>
-__attribute__((always_inline)) inline static void
-parse_value(std::uint8_t*& data_pos, Type& arg, Types&... args)
-{
-    parse_value(data_pos, arg);
-    parse_value(data_pos, args...);
 }
 
 }  // namespace utility

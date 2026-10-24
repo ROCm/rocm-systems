@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "core/trace_cache/archive.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/pmc/collectors/hipfile/sample.hpp"
 #include "library/pmc/collectors/hipfile/types.hpp"

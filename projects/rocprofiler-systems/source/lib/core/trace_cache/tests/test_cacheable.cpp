@@ -7,12 +7,56 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <gtest/gtest.h>
+#include <limits>
 #include <span>
 #include <string>
+#include <string_view>
+#include <type_traits>
 #include <vector>
 
 using namespace std::string_view_literals;
+
+namespace type_traits = rocprofsys::trace_cache::type_traits;
+
+// Fields that are copied as raw bytes must be plain data.
+enum class scoped_test_enum : std::uint8_t
+{
+    first
+};
+struct plain_test_struct
+{
+    std::uint64_t id    = 0;
+    double        value = 0.0;
+};
+struct marked_test_struct
+{
+    std::uint64_t id    = 0;
+    double        value = 0.0;
+};
+
+template <>
+struct rocprofsys::trace_cache::type_traits::explicitly_raw<marked_test_struct>
+: std::true_type
+{};
+
+static_assert(type_traits::is_raw_cacheable<std::uint64_t>::value);
+static_assert(type_traits::is_raw_cacheable<double>::value);
+static_assert(type_traits::is_raw_cacheable<scoped_test_enum>::value);
+static_assert(type_traits::is_raw_cacheable<std::array<std::uint16_t, 4>>::value);
+static_assert(type_traits::is_raw_cacheable<marked_test_struct>::value);
+static_assert(type_traits::is_raw_cacheable<std::array<marked_test_struct, 2>>::value);
+static_assert(!type_traits::is_raw_cacheable<plain_test_struct>::value,
+              "a struct must opt in: padding or a pointer would be copied silently");
+static_assert(!type_traits::is_raw_cacheable<std::float_round_style>::value,
+              "an unscoped enum has no fixed underlying type");
+static_assert(!type_traits::is_raw_cacheable<std::string>::value);
+static_assert(!type_traits::is_raw_cacheable<std::string_view>::value);
+static_assert(!type_traits::is_raw_cacheable<std::array<std::string, 2>>::value);
+static_assert(!type_traits::is_raw_cacheable<std::array<std::string_view, 2>>::value,
+              "views point into memory that is not cached");
+static_assert(!type_traits::is_raw_cacheable<std::vector<std::uint8_t>>::value);
 
 class cacheable_test : public ::testing::Test
 {
@@ -343,8 +387,10 @@ TEST_F(cacheable_test, parse_multiple_values_with_optional)
     std::string_view             parsed_str;
     std::optional<double>        parsed_opt_empty;
 
-    rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_int, parsed_opt,
-                                                  parsed_str, parsed_opt_empty);
+    rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_int);
+    rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_opt);
+    rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_str);
+    rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_opt_empty);
 
     EXPECT_EQ(parsed_int, 100);
     ASSERT_TRUE(parsed_opt.has_value());
@@ -495,8 +541,11 @@ TEST_F(cacheable_test, parse_multiple_values_with_optional_vector_and_string_vie
     std::optional<std::vector<std::uint8_t>> parsed_nullvec;
     std::optional<std::string_view>          parsed_nullstr;
 
-    rocprofsys::trace_cache::utility::parse_value(
-        data_pos, parsed_int, parsed_vec, parsed_str, parsed_nullvec, parsed_nullstr);
+    rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_int);
+    rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_vec);
+    rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_str);
+    rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_nullvec);
+    rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_nullstr);
 
     EXPECT_EQ(parsed_int, 42);
     ASSERT_TRUE(parsed_vec.has_value());
@@ -536,6 +585,27 @@ TEST_F(cacheable_test, parse_value_empty_byte_array)
     EXPECT_TRUE(parsed_value.empty());
     EXPECT_EQ(data_pos, buffer.data() + sizeof(size_t));
 }
+TEST_F(cacheable_test, parse_value_vector_skips_a_trailing_partial_element)
+{
+    // The byte count is one whole uint32_t plus one stray byte. Only whole elements are
+    // read; the cursor still moves past the whole count.
+    constexpr std::uint64_t k_byte_count = sizeof(std::uint32_t) + 1;
+    constexpr std::uint32_t k_whole      = 0xDEADBEEF;
+    constexpr std::uint8_t  k_stray_byte = 0xAA;
+
+    std::memcpy(buffer.data(), &k_byte_count, sizeof(k_byte_count));
+    std::memcpy(buffer.data() + sizeof(k_byte_count), &k_whole, sizeof(k_whole));
+    buffer[sizeof(k_byte_count) + sizeof(k_whole)] = k_stray_byte;
+
+    std::uint8_t*              data_pos = buffer.data();
+    std::vector<std::uint32_t> parsed;
+    rocprofsys::trace_cache::utility::parse_value(data_pos, parsed);
+
+    ASSERT_EQ(parsed.size(), 1U);
+    EXPECT_EQ(parsed.front(), k_whole);
+    EXPECT_EQ(data_pos, buffer.data() + sizeof(k_byte_count) + k_byte_count);
+}
+
 TEST_F(cacheable_test, parse_multiple_values)
 {
     const int           int_val    = 42;
@@ -555,8 +625,10 @@ TEST_F(cacheable_test, parse_multiple_values)
     std::string_view parsed_string;
     unsigned char    parsed_uchar;
 
-    rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_int, parsed_double,
-                                                  parsed_string, parsed_uchar);
+    rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_int);
+    rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_double);
+    rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_string);
+    rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_uchar);
 
     EXPECT_EQ(parsed_int, 42);
     EXPECT_DOUBLE_EQ(parsed_double, 3.14);
@@ -912,10 +984,16 @@ TEST(type_traits_test, is_supported_type_v)
     EXPECT_TRUE(
         rocprofsys::trace_cache::type_traits::is_supported_type_v<std::optional<double>>);
 
+    EXPECT_TRUE(rocprofsys::trace_cache::type_traits::is_supported_type_v<std::string>);
+
+    enum class custom_enum : std::uint16_t
+    {
+    };
+    EXPECT_TRUE(rocprofsys::trace_cache::type_traits::is_supported_type_v<custom_enum>);
+
     struct custom_type
     {};
     EXPECT_FALSE(rocprofsys::trace_cache::type_traits::is_supported_type_v<custom_type>);
-    EXPECT_FALSE(rocprofsys::trace_cache::type_traits::is_supported_type_v<std::string>);
 }
 
 TEST_F(cacheable_test, get_buffered_storage_filename)
