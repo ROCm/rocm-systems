@@ -9,6 +9,7 @@
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/kmd/linux/cwsr.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
+#include "rocjitsu/kmd/linux/libc_passthrough.h"
 #include "rocjitsu/kmd/linux/remote_driver.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
@@ -48,7 +49,6 @@ RJ_DIAGNOSTIC_POP
 #include <sys/ptrace.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
-#include <sys/syscall.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -3755,7 +3755,7 @@ TEST(KfdIoctlStandaloneTest, GetTileConfigReportsRdnaGbAddrConfig) {
 
 TEST_F(KfdIoctlTest, ImportDmabufAndQueryInfo) {
   constexpr size_t kSize = 4096;
-  int memfd = static_cast<int>(syscall(SYS_memfd_create, "kfd_dmabuf_test", MFD_CLOEXEC));
+  int memfd = static_cast<int>(memfd_create("kfd_dmabuf_test", MFD_CLOEXEC));
   ASSERT_GE(memfd, 0);
   ASSERT_EQ(ftruncate(memfd, kSize), 0);
 
@@ -3900,6 +3900,18 @@ TEST_F(KfdIoctlTest, DbgTrapBareDisableReturnsEINVAL) {
   dis.pid = static_cast<uint32_t>(getpid());
   dis.op = KFD_IOC_DBG_TRAP_DISABLE;
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &dis), -EINVAL);
+}
+
+TEST_F(KfdIoctlTest, DbgTrapWithoutLibcPidfdWrapperReturnsEnosys) {
+  kfd_ioctl_dbg_trap_args args{};
+  args.pid = static_cast<uint32_t>(getpid());
+  args.op = KFD_IOC_DBG_TRAP_ENABLE;
+  args.enable.dbg_fd = make_debug_fd();
+  auto &libc = rocjitsu::libc_passthrough();
+  const auto saved_pidfd_open = std::exchange(libc.pidfd_open, nullptr);
+  const int result = driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &args);
+  libc.pidfd_open = saved_pidfd_open;
+  EXPECT_EQ(result, -ENOSYS);
 }
 
 TEST_F(KfdIoctlTest, DbgTrapEnablePopulatesRuntimeInfoThenDisable) {
@@ -4075,7 +4087,7 @@ TEST_F(KfdIoctlTest, DbgTrapEnableAcceptsPrimaryKfdDescriptor) {
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &disable), 0);
 }
 
-TEST_F(KfdIoctlTest, DbgTrapNotificationFallsBackWhenClone3IsUnavailable) {
+TEST_F(KfdIoctlTest, DbgTrapNotificationFallsBackWithoutClonePidfd) {
   constexpr uint64_t kException = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
   alignas(rocjitsu::amdgpu::kAqlPacketBytes) std::array<uint8_t, 4096> ring{};
   uint64_t read_pointer = 0;
@@ -4109,14 +4121,7 @@ TEST_F(KfdIoctlTest, DbgTrapNotificationFallsBackWhenClone3IsUnavailable) {
   snapshot.queue_snapshot.entry_size = sizeof(snapshot_entry);
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &snapshot), 0);
 
-  struct CloneFailures {
-    int clone3_error;
-    std::optional<int> clone_pidfd_error;
-  };
-  for (const auto &[clone3_error, clone_pidfd_error] :
-       std::array{CloneFailures{ENOSYS, std::nullopt}, CloneFailures{EPERM, std::nullopt},
-                  CloneFailures{ENOSYS, EINVAL}}) {
-    driver_->set_debug_notification_clone3_error_for_testing(clone3_error);
+  for (int clone_pidfd_error : {EINVAL, EPERM}) {
     driver_->set_debug_notification_clone_pidfd_error_for_testing(clone_pidfd_error);
     ASSERT_TRUE(driver_->notify_debug_event_for_testing(create.queue_id, kException,
                                                         /*retain_on_rejection=*/false));
@@ -4138,7 +4143,6 @@ TEST_F(KfdIoctlTest, DbgTrapNotificationFallsBackWhenClone3IsUnavailable) {
     EXPECT_EQ(::waitpid(-1, &status, WNOHANG | __WCLONE), -1);
     EXPECT_EQ(errno, ECHILD);
   }
-  driver_->set_debug_notification_clone3_error_for_testing(std::nullopt);
   driver_->set_debug_notification_clone_pidfd_error_for_testing(std::nullopt);
 }
 

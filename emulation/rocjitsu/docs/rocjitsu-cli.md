@@ -32,7 +32,8 @@ rocJITsu.** The child may inherit locks held by threads that no longer exist, so
 GPU endpoint opens fail with `ENODEV` until `exec` initializes a fresh context.
 This restriction applies to local and daemon clients, including after their GPU
 descriptors have been closed. Inheriting real GPU descriptors also prevents
-unused-context initialization.
+unused-context initialization. This check requires libc's `getdents64` wrapper;
+when it is unavailable, forked children must `exec` before GPU access.
 
 `vfork()` and `posix_spawn()` do not run this child handler and require `exec`
 before GPU access. The usual fork/spawn followed by exec, including Python's

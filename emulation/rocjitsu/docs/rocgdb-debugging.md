@@ -9,6 +9,10 @@ All KFD debug behaviour is mirrored from the real driver source
 (`amd/amdkfd/{kfd_chardev.c,kfd_debug.c,kfd_topology.c}`, amdgpu-6.16.13),
 cross-checked against a physical MI300X and the in-tree `projects/rocdbgapi`.
 
+Debug sessions require libc's `pidfd_open` wrapper to pin process identities.
+If the runtime libc does not provide it, debug session setup returns `ENOSYS`;
+ordinary simulation remains available.
+
 ## 1. How the pieces fit together
 
 ROCgdb does not talk to the GPU directly. It loads `librocm-dbgapi`, which opens

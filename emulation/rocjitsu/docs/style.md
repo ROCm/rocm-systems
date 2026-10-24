@@ -146,6 +146,30 @@ Foo foo = static_cast<Foo>(bar); // OK but could use auto instead to avoid repet
   diagnostics that must survive a log-groups-OFF build, plus an
   async-signal-safe `::write` backtrace path).
 
+## Operating System Calls
+
+- Production code must not call the generic `syscall()` function or enter the
+  kernel through inline assembly. This applies to the simulator and its tools.
+- Use the named libc wrapper (`mmap`, `close`, `clone`, etc.). Libc provides typed
+  interfaces, handles architecture and kernel ABI differences, and can select
+  optimized implementations such as vDSO calls.
+- Code that must bypass rocjitsu's interposed symbols must use
+  `libc_passthrough()` from `kmd/linux/libc_passthrough.h`. Extend that table
+  when another interposed operation needs a passthrough; do not bypass it with
+  a direct system call. Preserve return values, `errno`, ownership, and lock
+  ordering.
+- When a system call has no libc wrapper, use an equivalent library facility
+  (for example, libc polling for interruptible waits). Resolve optional newer
+  libc wrappers at runtime and handle their absence explicitly; never hard-code
+  syscall numbers as a compatibility fallback.
+- Keep loader initialization, fork-child, and signal-handler paths within their
+  allocation, locking, and async-signal-safety constraints. Resolve passthroughs
+  before entering such paths.
+- Tests may use `syscall()` when deliberately exercising behavior outside the
+  interposer or observing kernel state. Keep those calls confined to tests and
+  explain why bypassing the named wrapper is necessary. Prefer libc wrappers
+  for ordinary test setup and cleanup.
+
 ## Error Handling
 
 - Expected failures such as a rejected instruction encoding return `Result` or

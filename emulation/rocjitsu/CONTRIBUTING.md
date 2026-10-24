@@ -91,6 +91,11 @@ Before writing new infrastructure, check these existing libraries:
   `stderr` — it runs inside another runtime's `OnLoad`, its messages must
   survive a log-groups-OFF build, and its signal-backtrace path must stay
   async-signal-safe (`rj_hsa_dbt_hooks.cpp` uses raw `::write`).
+- **OS calls.** Production code uses named libc wrappers, never `syscall()` or
+  inline kernel-entry assembly. Use `libc_passthrough()` when bypassing our
+  interposer; extend its resolved table as needed. See
+  [Operating System Calls](docs/style.md#operating-system-calls) for compatibility
+  and initialization requirements and the exception for deliberate test probes.
 - **Errors.** Expected failures such as a rejected instruction encoding return
   `Result` or `FailureOr<T>` and optionally emit a diagnostic. Do not introduce
   new exception use unless an existing code path requires it. Exceptions are

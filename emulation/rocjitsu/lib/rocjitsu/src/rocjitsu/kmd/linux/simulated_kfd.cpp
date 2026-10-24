@@ -40,9 +40,9 @@ RJ_DIAGNOSTIC_POP
 #include <format>
 #include <iterator>
 #include <linux/sched.h>
-#include <linux/types.h>
 #include <new>
 #include <poll.h>
+#include <sched.h>
 #include <sstream>
 #include <string_view>
 #include <sys/eventfd.h>
@@ -50,30 +50,9 @@ RJ_DIAGNOSTIC_POP
 #include <sys/random.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
-#include <sys/syscall.h>
 #include <sys/wait.h>
 #ifndef MADV_POPULATE_WRITE
 #define MADV_POPULATE_WRITE 23
-#endif
-// pidfd_open(2) landed in Linux 5.3. The build hosts are older than their
-// kernels here -- gcc-toolset-13 on the CI base image ships sanitized headers
-// that predate it -- so the wrapper and even __NR_pidfd_open can be missing
-// while the running kernel implements it fine. 434 is the number on every
-// architecture ROCm targets; the syscall was added after new numbers began
-// being allocated identically across arches.
-#ifndef SYS_pidfd_open
-#ifdef __NR_pidfd_open
-#define SYS_pidfd_open __NR_pidfd_open
-#else
-#define SYS_pidfd_open 434
-#endif
-#endif
-#ifndef SYS_clone3
-#ifdef __NR_clone3
-#define SYS_clone3 __NR_clone3
-#else
-#define SYS_clone3 435
-#endif
 #endif
 #include <thread>
 #include <unistd.h>
@@ -83,22 +62,6 @@ RJ_DIAGNOSTIC_POP
 namespace rocjitsu {
 
 namespace {
-
-#ifndef CLONE_ARGS_SIZE_VER0
-// Older build headers may lack clone_args even when the host supports clone3.
-// The original 64-byte ABI is sufficient for the flags and pidfd used below.
-struct clone_args {
-  __aligned_u64 flags;
-  __aligned_u64 pidfd;
-  __aligned_u64 child_tid;
-  __aligned_u64 parent_tid;
-  __aligned_u64 exit_signal;
-  __aligned_u64 stack;
-  __aligned_u64 stack_size;
-  __aligned_u64 tls;
-};
-static_assert(sizeof(clone_args) == 64);
-#endif
 
 bool vm_trace_enabled() {
   static const bool enabled = (std::getenv("RJ_VMEM_TRACE") != nullptr);
@@ -485,12 +448,11 @@ int reap_notification_writer(pid_t writer, int pidfd, int *status, bool defer_re
 /// @details File-status flags belong to the shared open-file description, so a
 /// competing holder can clear O_NONBLOCK after any defensive F_SETFL and make a
 /// write block. Perform the write in a disposable child and kill it at a bounded
-/// deadline instead. A raw clone with no exit signal keeps the internal child
+/// deadline instead. A libc clone with no exit signal keeps the internal child
 /// out of the application's SIGCHLD and ordinary waitpid(-1) contract.
 /// CLONE_UNTRACED also keeps it out of a debugger attached to the host process.
-/// Prefer clone3's atomic pidfd result, but fall back to the legacy clone syscall
-/// on older kernels and seccomp profiles; its CLONE_PIDFD form is atomic too, and
-/// a final no-pidfd form is bounded by nonblocking waitpid polling. The child
+/// CLONE_PIDFD returns the child's identity atomically. Older kernels can use
+/// nonblocking waitpid polling instead. The child runs on a private stack and
 /// executes only async-signal-safe operations; it never reaches inherited
 /// simulator state or locks.
 ///
@@ -500,7 +462,6 @@ int reap_notification_writer(pid_t writer, int pidfd, int *status, bool defer_re
 /// @returns Zero after a complete write, otherwise the negative errno (EIO for a
 /// short write, EAGAIN after the delivery deadline).
 int write_debug_notification(int fd, const std::function<void()> &before_write = {},
-                             std::optional<int> clone3_error_for_testing = std::nullopt,
                              std::optional<int> clone_pidfd_error_for_testing = std::nullopt,
                              bool defer_reap_for_testing = false) {
   struct stat descriptor_stat {};
@@ -510,6 +471,28 @@ int write_debug_notification(int fd, const std::function<void()> &before_write =
 
   if (before_write)
     before_write();
+
+  constexpr size_t kWriterStackSize = 64 * 1024;
+  std::unique_ptr<uint8_t[]> stack(new (std::nothrow) uint8_t[kWriterStackSize]);
+  if (!stack)
+    return -ENOMEM;
+  struct WriterArguments {
+    int fd;
+    size_t size;
+    ssize_t (*write)(int, const void *, size_t);
+  } arguments{fd, write_size, libc_passthrough().write};
+  const auto write_notification = +[](void *opaque) -> int {
+    const auto &arguments = *static_cast<WriterArguments *>(opaque);
+    const uint64_t one = 1;
+    ssize_t written;
+    do {
+      written = arguments.write(arguments.fd, &one, arguments.size);
+    } while (written < 0 && errno == EINTR);
+    const int result = written == static_cast<ssize_t>(arguments.size) ? 0
+                       : written < 0                                   ? errno
+                                                                       : EIO;
+    ::_exit(result);
+  };
 
   // Block application handlers before the child exists, including the window
   // before write(). The parent restores its mask on every clone outcome.
@@ -521,45 +504,22 @@ int write_debug_notification(int fd, const std::function<void()> &before_write =
     return -mask_result;
 
   int raw_pidfd = -1;
-  clone_args clone{};
-  clone.flags = CLONE_PIDFD | CLONE_UNTRACED;
-  clone.pidfd = reinterpret_cast<uintptr_t>(&raw_pidfd);
   pid_t writer = -1;
-  if (clone3_error_for_testing) {
-    errno = *clone3_error_for_testing;
+  void *stack_top = stack.get() + kWriterStackSize;
+  if (clone_pidfd_error_for_testing) {
+    errno = *clone_pidfd_error_for_testing;
   } else {
-    writer = static_cast<pid_t>(::syscall(SYS_clone3, &clone, sizeof(clone)));
+    writer = ::clone(write_notification, stack_top, CLONE_PIDFD | CLONE_UNTRACED, &arguments,
+                     &raw_pidfd);
   }
-  if (writer < 0 && (errno == ENOSYS || errno == EPERM)) {
+  if (writer < 0 && (errno == EINVAL || errno == EPERM)) {
     raw_pidfd = -1;
-    if (clone_pidfd_error_for_testing) {
-      errno = *clone_pidfd_error_for_testing;
-    } else {
-      writer = static_cast<pid_t>(::syscall(SYS_clone, CLONE_PIDFD | CLONE_UNTRACED, nullptr,
-                                            &raw_pidfd, nullptr, nullptr));
-    }
-    if (writer < 0 && (errno == EINVAL || errno == EPERM)) {
-      raw_pidfd = -1;
-      writer = static_cast<pid_t>(
-          ::syscall(SYS_clone, CLONE_UNTRACED, nullptr, nullptr, nullptr, nullptr));
-    }
+    writer = ::clone(write_notification, stack_top, CLONE_UNTRACED, &arguments);
   }
-  if (writer != 0) {
-    const int clone_error = errno;
-    static_cast<void>(::pthread_sigmask(SIG_SETMASK, &previous_signals, nullptr));
-    if (writer < 0)
-      return -clone_error;
-  }
-  if (writer == 0) {
-    const uint64_t one = 1;
-    ssize_t written = 0;
-    do {
-      written = libc_passthrough().write(fd, &one, write_size);
-    } while (written < 0 && errno == EINTR);
-    const int result = written == static_cast<ssize_t>(write_size) ? 0 : written < 0 ? errno : EIO;
-    static_cast<void>(::syscall(SYS_exit_group, result));
-    __builtin_unreachable();
-  }
+  const int clone_error = errno;
+  static_cast<void>(::pthread_sigmask(SIG_SETMASK, &previous_signals, nullptr));
+  if (writer < 0)
+    return -clone_error;
 
   UniqueDriverFd pidfd(raw_pidfd);
   int status = 0;
@@ -640,7 +600,9 @@ int procfd_is_zombie(int procfd) {
 }
 
 int pin_process_identity(pid_t pid, UniqueDriverFd &pidfd, UniqueDriverFd &procfd) {
-  const int raw_pidfd = static_cast<int>(::syscall(SYS_pidfd_open, pid, 0));
+  if (!libc_passthrough().pidfd_open)
+    return -ENOSYS;
+  const int raw_pidfd = libc_passthrough().pidfd_open(pid, 0);
   if (raw_pidfd < 0)
     return errno == ESRCH ? -ESRCH : -errno;
   pidfd = UniqueDriverFd(raw_pidfd);
@@ -4104,7 +4066,6 @@ int SimulatedKfd::retry_debug_notifications(pid_t target_pid, bool invoke_result
   uint64_t process_mask = 0;
   std::vector<PendingEventClaim> process_claims;
   uint64_t session_generation = 0;
-  std::optional<int> clone3_error_for_testing;
   std::optional<int> clone_pidfd_error_for_testing;
   bool defer_reap_for_testing = false;
   std::function<void(bool)> result_hook;
@@ -4190,10 +4151,9 @@ int SimulatedKfd::retry_debug_notifications(pid_t target_pid, bool invoke_result
       // the event becomes visible. Serialize this bounded recovery write with
       // QUERY and session changes; it makes no new ownership claim and cannot
       // hide the committed event again. No CU or allocation lock is held.
-      const int result =
-          write_debug_notification(notifier.get(), {}, debug_notification_clone3_error_for_testing_,
-                                   debug_notification_clone_pidfd_error_for_testing_,
-                                   debug_notification_deferred_reap_for_testing_);
+      const int result = write_debug_notification(notifier.get(), {},
+                                                  debug_notification_clone_pidfd_error_for_testing_,
+                                                  debug_notification_deferred_reap_for_testing_);
       if (result != 0) {
         session->second.notification_retry_needed = true;
         debug_sessions_cv_.notify_one();
@@ -4209,7 +4169,6 @@ int SimulatedKfd::retry_debug_notifications(pid_t target_pid, bool invoke_result
     if (queues.empty() && process_mask == 0)
       return 0;
     session_generation = session->second.generation;
-    clone3_error_for_testing = debug_notification_clone3_error_for_testing_;
     clone_pidfd_error_for_testing = debug_notification_clone_pidfd_error_for_testing_;
     defer_reap_for_testing = debug_notification_deferred_reap_for_testing_;
     if (invoke_result_hook) {
@@ -4234,9 +4193,8 @@ int SimulatedKfd::retry_debug_notifications(pid_t target_pid, bool invoke_result
     }
   }
 
-  const int result =
-      write_debug_notification(notifier.get(), write_hook, clone3_error_for_testing,
-                               clone_pidfd_error_for_testing, defer_reap_for_testing);
+  const int result = write_debug_notification(
+      notifier.get(), write_hook, clone_pidfd_error_for_testing, defer_reap_for_testing);
   if (result_hook)
     result_hook(result == 0);
 
@@ -4565,7 +4523,6 @@ bool SimulatedKfd::notify_debug_event(const std::shared_ptr<KfdProcess> &proc, u
   bool subscribed = false;
   uint64_t session_generation = 0;
   uint64_t notification_claim_id = 0;
-  std::optional<int> clone3_error_for_testing;
   std::optional<int> clone_pidfd_error_for_testing;
   bool defer_reap_for_testing = false;
   bool notification_pending = false;
@@ -4580,7 +4537,6 @@ bool SimulatedKfd::notify_debug_event(const std::shared_ptr<KfdProcess> &proc, u
       return false;
     }
     session_generation = session->second.generation;
-    clone3_error_for_testing = debug_notification_clone3_error_for_testing_;
     clone_pidfd_error_for_testing = debug_notification_clone_pidfd_error_for_testing_;
     defer_reap_for_testing = debug_notification_deferred_reap_for_testing_;
     subscribed = (session->second.exception_enable_mask & exception_mask) != 0;
@@ -4614,8 +4570,8 @@ bool SimulatedKfd::notify_debug_event(const std::shared_ptr<KfdProcess> &proc, u
     return false;
   }
   const bool delivered =
-      write_debug_notification(notifier.get(), write_hook, clone3_error_for_testing,
-                               clone_pidfd_error_for_testing, defer_reap_for_testing) == 0;
+      write_debug_notification(notifier.get(), write_hook, clone_pidfd_error_for_testing,
+                               defer_reap_for_testing) == 0;
   if (result_hook)
     result_hook(delivered);
 

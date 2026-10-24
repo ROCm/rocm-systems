@@ -6,6 +6,7 @@
 
 #include "rocjitsu/kmd/linux/remote_driver.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
+#include "rocjitsu/kmd/linux/libc_passthrough.h"
 #include "rocjitsu/kmd/linux/linux_kfd.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "util/log.h"
@@ -40,7 +41,6 @@
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
-#include <sys/syscall.h>
 #include <sys/un.h>
 #include <thread>
 #include <unistd.h>
@@ -203,15 +203,6 @@ PtracerGrantVerdict authorize_daemon_address_space_access(int socket) {
         peer.pid, std::strerror(errno)));
   }
   return verdict;
-}
-
-/// @brief Safe wrapper around syscall(SYS_mmap, ...) that avoids UB from
-/// casting negative return values through uintptr_t/pointer types.
-void *safe_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
-  long rc = syscall(SYS_mmap, addr, length, prot, flags, fd, offset);
-  if (rc < 0)
-    return MAP_FAILED;
-  return reinterpret_cast<void *>(static_cast<uintptr_t>(rc));
 }
 
 Sysfs::GpuInfo gpu_info_from_rpc(const RpcGpuInfo &src) {
@@ -432,7 +423,7 @@ RemoteDriver::MemfdLookup RemoteDriver::find_memfd_for_addr(void *addr, size_t l
       // caller's ftruncate/fallocate/mmap, operating on a closed/reused fd. The
       // dup is taken under rpc_mutex_, the same lock close() holds, so the stored
       // fd is guaranteed still open here. The caller MUST close the returned fd.
-      int dup_fd = static_cast<int>(syscall(SYS_fcntl, r.memfd, F_DUPFD_CLOEXEC, 0));
+      int dup_fd = static_cast<int>(libc_passthrough().fcntl(r.memfd, F_DUPFD_CLOEXEC, 0));
       if (dup_fd < 0) {
         // The range matched but we could not hand out a descriptor. Report this
         // distinctly so the caller fails the mmap rather than silently falling
@@ -452,26 +443,27 @@ RemoteDriver::MemfdLookup RemoteDriver::find_memfd_for_addr(void *addr, size_t l
 }
 
 RemoteDriver::RemoteDriver(int sock_fd) : sock_(sock_fd) {
-  shutdown_efd_ = static_cast<int>(syscall(SYS_eventfd2, 0, EFD_CLOEXEC | EFD_NONBLOCK));
+  libc_passthrough().resolve();
+  shutdown_efd_ = static_cast<int>(::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK));
 }
 
 RemoteDriver::~RemoteDriver() {
   for (auto &[handle, fd] : handle_memfds_) {
     if (fd >= 0)
-      syscall(SYS_close, fd);
+      libc_passthrough().close(fd);
   }
   if (kfd_marker_ != nullptr)
-    syscall(SYS_munmap, kfd_marker_, kfd_marker_size_);
+    libc_passthrough().munmap(kfd_marker_, kfd_marker_size_);
   if (sock_ >= 0)
-    syscall(SYS_close, sock_);
+    libc_passthrough().close(sock_);
   if (shutdown_efd_ >= 0)
-    syscall(SYS_close, shutdown_efd_);
+    libc_passthrough().close(shutdown_efd_);
 }
 
 int RemoteDriver::poison_stream() {
   protocol_failed_.store(true, std::memory_order_release);
   if (sock_ >= 0)
-    syscall(SYS_shutdown, sock_, SHUT_RDWR);
+    ::shutdown(sock_, SHUT_RDWR);
   return -EPROTO;
 }
 
@@ -486,7 +478,7 @@ int RemoteDriver::open() {
   // Drain the shutdown eventfd so it doesn't immediately wake pollers.
   if (shutdown_efd_ >= 0) {
     uint64_t val = 0;
-    syscall(SYS_read, shutdown_efd_, &val, sizeof(val));
+    libc_passthrough().read(shutdown_efd_, &val, sizeof(val));
   }
   std::lock_guard<std::mutex> lock(rpc_mutex_);
 
@@ -611,28 +603,28 @@ int RemoteDriver::reissue_synthetic_kfd_fd() {
   // readiness follows debug notifications rather than regular-file semantics.
   if (kfd_marker_ == nullptr) {
     auto marker_fd =
-        static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_remote_kfd", MFD_CLOEXEC));
+        static_cast<int>(libc_passthrough().memfd_create("rocjitsu_remote_kfd", MFD_CLOEXEC));
     if (marker_fd < 0)
       return -1;
     constexpr size_t kMarkerSize = 4096;
-    if (syscall(SYS_ftruncate, marker_fd, kMarkerSize) == 0) {
-      void *marker = reinterpret_cast<void *>(
-          syscall(SYS_mmap, nullptr, kMarkerSize, PROT_NONE, MAP_SHARED, marker_fd, 0));
+    if (::ftruncate(marker_fd, kMarkerSize) == 0) {
+      void *marker =
+          libc_passthrough().mmap(nullptr, kMarkerSize, PROT_NONE, MAP_SHARED, marker_fd, 0);
       if (marker != MAP_FAILED) {
         kfd_marker_ = marker;
         kfd_marker_size_ = kMarkerSize;
       }
     }
-    syscall(SYS_close, marker_fd);
+    libc_passthrough().close(marker_fd);
   }
-  auto raw_fd = static_cast<int>(syscall(SYS_eventfd2, 0, EFD_CLOEXEC | EFD_NONBLOCK));
+  auto raw_fd = static_cast<int>(::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK));
   if (raw_fd < 0)
     return -1;
-  // Use the raw syscall, not fcntl(): this shared object exports an interposed
+  // Use the passthrough: this shared object exports an interposed
   // fcntl with default visibility, so an unqualified call would re-enter the
   // shim (reserve_dup_backend/untrack_dup, fd_mutex_) for a plain eventfd dup.
-  int fd = static_cast<int>(syscall(SYS_fcntl, raw_fd, F_DUPFD_CLOEXEC, fd_min));
-  syscall(SYS_close, raw_fd);
+  int fd = static_cast<int>(libc_passthrough().fcntl(raw_fd, F_DUPFD_CLOEXEC, fd_min));
+  libc_passthrough().close(raw_fd);
   return fd;
 }
 
@@ -640,7 +632,7 @@ int RemoteDriver::close() {
   closing_.store(true, std::memory_order_release);
   if (shutdown_efd_ >= 0) {
     uint64_t val = 1;
-    syscall(SYS_write, shutdown_efd_, &val, sizeof(val));
+    libc_passthrough().write(shutdown_efd_, &val, sizeof(val));
   }
 
   {
@@ -653,13 +645,13 @@ int RemoteDriver::close() {
     }
 
     if (sock_ >= 0) {
-      syscall(SYS_close, sock_);
+      libc_passthrough().close(sock_);
       sock_ = -1;
     }
 
     for (auto &[handle, fd] : handle_memfds_) {
       if (fd >= 0)
-        syscall(SYS_close, fd);
+        libc_passthrough().close(fd);
     }
     handle_memfds_.clear();
     alloc_ranges_.clear();
@@ -740,7 +732,7 @@ int RemoteDriver::ioctl(unsigned long request, void *arg) {
       if (shutdown_efd_ >= 0) {
         struct pollfd pfd = {shutdown_efd_, POLLIN, 0};
         struct timespec ts = {0, 5'000'000};
-        syscall(SYS_ppoll, &pfd, 1, &ts, nullptr, 0);
+        ::ppoll(&pfd, 1, &ts, nullptr);
       } else {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
       }
@@ -1086,7 +1078,7 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   // it.
   auto poison_reply = [&] {
     if (num_fds > 0 && received_fds[0] >= 0)
-      syscall(SYS_close, received_fds[0]);
+      libc_passthrough().close(received_fds[0]);
     return poison_stream();
   };
 
@@ -1333,10 +1325,10 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
     constexpr size_t page_size = 4096;
     size_t num_pages = (length + page_size - 1) / page_size;
     std::vector<uint8_t> resident(num_pages);
-    auto mc_rc = syscall(SYS_mincore, va, length, resident.data());
+    auto mc_rc = ::mincore(va, length, resident.data());
 
-    auto *temp =
-        static_cast<uint8_t *>(safe_mmap(nullptr, length, PROT_WRITE, MAP_SHARED, memfd, 0));
+    auto *temp = static_cast<uint8_t *>(
+        libc_passthrough().mmap(nullptr, length, PROT_WRITE, MAP_SHARED, memfd, 0));
     if (temp != MAP_FAILED) {
       if (mc_rc == 0) {
         auto *src = static_cast<uint8_t *>(va);
@@ -1348,12 +1340,13 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
           }
         }
       }
-      syscall(SYS_munmap, temp, length);
+      libc_passthrough().munmap(temp, length);
     }
 
-    auto *mapped = safe_mmap(va, length, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, memfd, 0);
+    auto *mapped = libc_passthrough().mmap(va, length, PROT_READ | PROT_WRITE,
+                                           MAP_SHARED | MAP_FIXED, memfd, 0);
     if (mapped != MAP_FAILED)
-      syscall(SYS_madvise, mapped, length, MADV_POPULATE_WRITE);
+      libc_passthrough().madvise(mapped, length, MADV_POPULATE_WRITE);
   };
 
   // Store memfd received from ALLOC_MEMORY for use in the subsequent mmap().
@@ -1392,7 +1385,7 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
       int freed_memfd = it->second;
       std::erase_if(alloc_ranges_,
                     [freed_memfd](const AllocRange &r) { return r.memfd == freed_memfd; });
-      syscall(SYS_close, freed_memfd);
+      libc_passthrough().close(freed_memfd);
       handle_memfds_.erase(it);
     }
   }
@@ -1418,7 +1411,7 @@ void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t o
   int rc = send_mmap(addr, length, prot, flags, offset, &memfd);
   if (rc != 0) {
     if (memfd >= 0)
-      syscall(SYS_close, memfd);
+      libc_passthrough().close(memfd);
     // send_mmap() reports a negative errno, but only its transport failures
     // leave errno set as a side effect; the poison paths and the daemon's own
     // result do not, so without this the caller would read whatever errno this
@@ -1450,14 +1443,14 @@ void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t o
     // reservation into the memfd before MAP_FIXED replaces them. Uses a temp
     // mapping outside the GPUVM range for the copy target.
     if ((flags & MAP_FIXED) && addr != nullptr) {
-      auto prot_rc = syscall(SYS_mprotect, addr, length, PROT_READ | PROT_WRITE);
+      auto prot_rc = libc_passthrough().mprotect(addr, length, PROT_READ | PROT_WRITE);
       if (prot_rc == 0) {
         constexpr size_t page_size = 4096;
         size_t num_pages = (length + page_size - 1) / page_size;
         std::vector<uint8_t> page_resident(num_pages);
-        auto mc_rc = syscall(SYS_mincore, addr, length, page_resident.data());
+        auto mc_rc = ::mincore(addr, length, page_resident.data());
         auto *temp = static_cast<uint8_t *>(
-            safe_mmap(nullptr, length, PROT_WRITE, MAP_SHARED, mapping_memfd, 0));
+            libc_passthrough().mmap(nullptr, length, PROT_WRITE, MAP_SHARED, mapping_memfd, 0));
         if (temp != MAP_FAILED) {
           if (mc_rc == 0) {
             auto *src = static_cast<uint8_t *>(addr);
@@ -1469,7 +1462,7 @@ void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t o
               }
             }
           }
-          syscall(SYS_munmap, temp, length);
+          libc_passthrough().munmap(temp, length);
         }
       }
     }
@@ -1481,22 +1474,23 @@ void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t o
     int mflags = MAP_SHARED;
     if (flags & MAP_FIXED)
       mflags |= MAP_FIXED;
-    auto *mapped = safe_mmap(addr, length, PROT_READ | PROT_WRITE, mflags, mapping_memfd, 0);
+    auto *mapped =
+        libc_passthrough().mmap(addr, length, PROT_READ | PROT_WRITE, mflags, mapping_memfd, 0);
     if (mapped != MAP_FAILED)
-      syscall(SYS_madvise, mapped, length, MADV_POPULATE_WRITE);
+      libc_passthrough().madvise(mapped, length, MADV_POPULATE_WRITE);
 
     if (memfd >= 0 && memfd != mapping_memfd)
-      syscall(SYS_close, memfd);
+      libc_passthrough().close(memfd);
     return mapped;
   }
 
   // No memfd — anonymous fallback for doorbell/event pages.
   if (memfd >= 0)
-    syscall(SYS_close, memfd);
+    libc_passthrough().close(memfd);
   int mflags = MAP_ANONYMOUS | MAP_PRIVATE;
   if (flags & MAP_FIXED)
     mflags |= MAP_FIXED;
-  return safe_mmap(addr, length, PROT_READ | PROT_WRITE, mflags, -1, 0);
+  return libc_passthrough().mmap(addr, length, PROT_READ | PROT_WRITE, mflags, -1, 0);
 }
 
 int RemoteDriver::munmap(void *addr, size_t length) {
@@ -1536,7 +1530,7 @@ int RemoteDriver::munmap(void *addr, size_t length) {
     return poison_stream();
 
   if (resp.result == 0)
-    syscall(SYS_munmap, addr, length);
+    libc_passthrough().munmap(addr, length);
 
   return resp.result;
 }
@@ -1583,7 +1577,7 @@ int RemoteDriver::send_mmap(void *addr, size_t length, int prot, int flags, off_
   // -1, so nothing downstream would ever close it.
   auto poison_reply = [&] {
     if (num_fds > 0 && received_fds[0] >= 0)
-      syscall(SYS_close, received_fds[0]);
+      libc_passthrough().close(received_fds[0]);
     return poison_stream();
   };
   if (bytes_received <= 0)

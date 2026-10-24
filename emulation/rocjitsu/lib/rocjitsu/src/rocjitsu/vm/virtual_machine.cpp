@@ -7,7 +7,6 @@
 
 #include <cassert>
 #include <memory>
-#include <sys/syscall.h>
 #include <unistd.h>
 
 namespace rocjitsu {

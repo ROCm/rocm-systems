@@ -9,6 +9,7 @@
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/kmd/linux/host_access_guard.h"
 #include "rocjitsu/kmd/linux/host_mapping_lock.h"
+#include "rocjitsu/kmd/linux/libc_passthrough.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/legacy_page_table.h"
@@ -37,7 +38,6 @@
 #include <span>
 #include <stdexcept>
 #include <string>
-#include <sys/syscall.h>
 #include <sys/uio.h>
 #include <type_traits>
 #include <unistd.h>
@@ -2447,7 +2447,7 @@ private:
   /// protection in between, and the answer would describe a mapping that no
   /// longer exists.
   ///
-  /// Every syscall here is issued raw. rocjitsu interposes open() and close(),
+  /// Use libc passthroughs here. rocjitsu interposes open() and close(),
   /// and those hooks take the interposer's descriptor lock -- which a DRM
   /// GEM_VA ioctl already holds when it calls into the page table this runs
   /// under. Reaching them from here would close that cycle:
@@ -2460,7 +2460,12 @@ private:
     if (proc_maps_open_failure_for_test_.load(std::memory_order_relaxed))
       return PageWritability::Indeterminate;
     const auto address = reinterpret_cast<uintptr_t>(page);
-    const long fd = ::syscall(SYS_openat, AT_FDCWD, "/proc/self/maps", O_RDONLY | O_CLOEXEC);
+    const auto &libc = libc_passthrough();
+    // Standalone VM users may run before a KMD driver resolves the table.
+    const auto real_openat = libc.openat ? libc.openat : ::openat;
+    const auto real_read = libc.read ? libc.read : ::read;
+    const auto real_close = libc.close ? libc.close : ::close;
+    const int fd = real_openat(AT_FDCWD, "/proc/self/maps", O_RDONLY | O_CLOEXEC);
     if (fd < 0)
       return PageWritability::Indeterminate;
 
@@ -2470,7 +2475,7 @@ private:
     char chunk[8192];
     PageWritability answer = PageWritability::Indeterminate;
     for (bool reading = true; reading;) {
-      const long got = ::syscall(SYS_read, static_cast<int>(fd), chunk, sizeof(chunk));
+      const ssize_t got = real_read(fd, chunk, sizeof(chunk));
       if (got < 0) {
         // A signal arriving mid-read says nothing about the mapping.
         if (errno == EINTR)
@@ -2507,7 +2512,7 @@ private:
       }
       pending.erase(0, line_begin);
     }
-    ::syscall(SYS_close, static_cast<int>(fd));
+    real_close(fd);
     return answer;
   }
 
