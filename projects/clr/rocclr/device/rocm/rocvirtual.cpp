@@ -278,7 +278,8 @@ static inline void logAqlDispatchPacketExtended(
           "SWq=0x%zx, HWq=0x%zx, id=%d, priority=%d,%s Dispatch Header = "
           "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
           "setup=%d, cluster_count=[%u, %u, %u], cluster_size=[%u, %u, %u], "
-          "workgroup=[%u, %u, %u], private_seg_size=%u, group_seg_size=%u, kernel_obj=0x%zx, "
+          "workgroup=[%u, %u, %u], private_seg_size=%u, group_seg_size=%u, "
+          "group_mem_carveout=%u, kernel_obj=0x%zx, "
           "kernarg_address=0x%zx, dep_signal=0x%zx, completion_signal=0x%zx, "
           "rptr=%" PRIu64 ", wptr=%" PRIu64,
           queue, queue->base_address, queue->id, static_cast<int>(priority), prefix, header,
@@ -291,8 +292,9 @@ static inline void logAqlDispatchPacketExtended(
           pkt->setup, pkt->cluster_count_x, pkt->cluster_count_y, pkt->cluster_count_z,
           pkt->cluster_size_x, pkt->cluster_size_y, pkt->cluster_size_z, pkt->workgroup_size_x,
           pkt->workgroup_size_y, pkt->workgroup_size_z, pkt->private_segment_size,
-          pkt->group_segment_size, pkt->kernel_object, pkt->kernarg_address,
-          pkt->dep_signal.handle, pkt->completion_signal.handle, rptr, wptr));
+          pkt->group_segment_size, static_cast<unsigned>(pkt->perf_hint.group_mem_carveout),
+          pkt->kernel_object, pkt->kernarg_address, pkt->dep_signal.handle,
+          pkt->completion_signal.handle, rptr, wptr));
 
   logAqlMetadataPacket(dev, queue, meta, wptr, sink);
 }
@@ -5169,17 +5171,13 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
 
     if (dev().settings().groupMemCarveout_) {
       const int requestedPercent = devKernel->workGroupInfo()->groupMemCarveout_;
-      // Signed storage preserves -1 (device default) and explicit 0; cast only resolved 0..100.
-      const uint8_t percent = requestedPercent >= 0
-                                  ? static_cast<uint8_t>(requestedPercent)
-                                  : dev().GetGroupMemCarveout();
+      // -1 falls back to the device setting, which may also be -1 (no preference).
+      const int percent = requestedPercent >= 0 ? requestedPercent : dev().GetGroupMemCarveout();
       auto& dispatchPacketExt = dispatchPacketUnion.extKernelDispatch;
-      // Encodings [1, 127] represent a range from 0% (no group memory) to 100% (maximum
-      // group memory)
       if (dev().isa().versionMajor() == 12 && dev().isa().versionMinor() == 5) {
         dispatchPacketExt.perf_hint.group_mem_carveout = 127;
       } else {
-        dispatchPacketExt.perf_hint.group_mem_carveout = (percent + 1) * 1.26F;
+        dispatchPacketExt.perf_hint.group_mem_carveout = amd::encodeGroupMemCarveout(percent);
       }
     }
 

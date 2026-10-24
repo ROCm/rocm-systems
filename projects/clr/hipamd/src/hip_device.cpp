@@ -143,6 +143,8 @@ void Device::Reset() {
     }
   }
   flags_ = hipDeviceScheduleSpin;
+  cacheConfig_ = hipFuncCachePreferNone;
+  devices()[0]->UpdateGroupMemCarveout(-1);
   destroyAllStreams();
 
   // Clear hostcall allocations to avoid ~Device() accessing freed Memory objects later.
