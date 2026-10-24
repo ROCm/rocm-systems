@@ -1856,7 +1856,15 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
   fence_state_ = static_cast<Device::CacheState>(expected_fence_state);
 
   // A chunk is reserved whole, so it can never exceed the ring capacity.
-  const size_t kPeriod = std::min<size_t>(DEBUG_HIP_GRAPH_BATCH_SIZE, sw_queue_size);
+  // read_dispatch_id is published at CP_HQD_PQ_CONTROL.RPTR_BLOCK_SIZE granularity
+  // (DISP_ID_EVERY_8 on gfx1250), so the free-slot count derived from it can understate
+  // the truth by up to one block.  A chunk sized to the full ring capacity is therefore
+  // only grantable when that error happens to be zero - i.e. when the write index lands
+  // on a block boundary - and ReserveAqlSlots() spins forever for every other alignment.
+  // Keep the chunk a block below capacity so a reservation never depends on it.
+  constexpr size_t kRptrBlockPackets = 8;
+  const size_t kPeriod =
+      std::min<size_t>(DEBUG_HIP_GRAPH_BATCH_SIZE, sw_queue_size - kRptrBlockPackets);
   // Ramp-up: submit a small first (lead) chunk so the doorbell is rung after
   // copying only kLead packets instead of a full kPeriod, then double the chunk
   // size up to kPeriod. The GPU starts executing the lead while the CPU keeps
