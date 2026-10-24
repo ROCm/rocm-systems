@@ -77,12 +77,14 @@ fn callback_scope_restricts_queue_and_sampling_teardown() {
         // non-null pointer while a callback is active.
         assert_eq!(
             unsafe {
-                crate::queue::hsa_queue_destroy(std::ptr::NonNull::<HsaQueue>::dangling().as_ptr())
+                crate::api::queue::core::hsa_queue_destroy(
+                    std::ptr::NonNull::<HsaQueue>::dangling().as_ptr(),
+                )
             },
             INVALID_RUNTIME_STATE
         );
         assert_eq!(
-            crate::pc_sampling::hsa_ven_amd_pcs_stop(HsaPcSampling { handle: 1 }),
+            crate::api::pc_sampling::hsa_ven_amd_pcs_stop(HsaPcSampling { handle: 1 }),
             INVALID_RUNTIME_STATE
         );
         let _nested = CallbackScope::enter();
