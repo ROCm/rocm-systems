@@ -319,23 +319,33 @@ original spelling.
 
 ## Extending ConSan
 
-ConSan currently shares binary-instrumentation building blocks with general
-DBI: code-object patching, the entry prologue, kernarg wrappers, descriptor
-scanning, instruction builders, and text-layout helpers. Its LDS lowerer does
-not use `Instrumentor` or `TrampolineBuilder`. It owns instruction placement,
-branch rebinding, probe register reservation, and inline probe emission for a
-closed, acyclic CFG without probe calls. The general instrumentor currently
-admits only `BeforeInst` sites, limits its call-free inline path to a nop, and
-does not automatically grow SGPR allocations; it cannot directly express this
-lowering's entry, access, and exit probes.
+Preparation uses the shared `Instrumentor` and `TrampolineBuilder` with
+separately compiled, reusable HIP probe functions.
 
-A common binary-instrumentation layer shared by ConSan and general DBI is a
-possible future direction. Evaluating it requires common contracts for
-instruction placement and branch relocation, register allocation and resource
-growth, guest-state preservation, and target-specific hazards. LDS operation
-qualification and observation semantics would remain with ConSan. The current
-reuse boundary is a starting point for that discussion, not a commitment to
-move ConSan into the existing instrumentor or to introduce another framework.
+DBI owns dispatch entry and terminal placement, operand capture, parallel
+argument copies, call envelopes, state preservation, resource growth, and emitted
+site attribution. The runtime explicitly supplies the
+kernarg wrapper required by the DBI entry prologue. ConSan retains native LDS
+qualification, address grouping, observation fields, and diagnosis. Ordering and
+loss counters use DBI's explicit memory-backed wave state; their locations stay
+in ConSan's existing report rows. No hidden register state carries values from
+one probe invocation to the next.
+
+The callable path uses register backups instead of introducing a private frame.
+It requires one kernel with enumerable register uses, zero VGPR banks at gfx1250
+call sites, a bank-preserving probe body, and enough registers for the combined
+probe and preservation plan. An input exceeding that plan is rejected during
+preparation. Entry stubs and per-site trampolines use SOPP branches, whose
+signed 16-bit dword displacement reaches approximately 128 KiB in either
+direction. Large original text or dense instrumentation can exceed that reach
+even within the input size and instruction budgets; preparation rejects these
+inputs before publishing an artifact. Streaming transport, arbitrary placement,
+and general MODE save/restore remain outside the current implementation.
+
+The ConSan compiler requires the ROCm device compiler and offload bundler even
+when tests are disabled, because its callable probe catalogue is built for all
+supported target/wave modes. The runtime and analyzer remain independent of the
+device compiler.
 
 A new analysis primarily extends **compiler facts/probes and offline diagnosis**
 together. Define its question, scope, required evidence, and behavior under loss:

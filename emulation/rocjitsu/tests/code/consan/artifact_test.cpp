@@ -37,7 +37,7 @@ TEST_F(ConSanArtifact, SeparatePreparationProcessProducesLoadableOwningFactsAndI
   EXPECT_EQ(artifact_.manifest.original.sha256, digest(original_));
   EXPECT_EQ(artifact_.manifest.prepared.sha256, digest(artifact_.prepared));
   EXPECT_EQ(artifact_.manifest.sites.size(), 2u);
-  EXPECT_EQ(artifact_.manifest.entry.prepared_sgprs, 38u);
+  EXPECT_EQ(artifact_.manifest.entry.prepared_sgprs, 52u);
 }
 
 TEST_F(ConSanArtifact, MismatchedOriginalAndAgentFailWithoutACompilerFallback) {

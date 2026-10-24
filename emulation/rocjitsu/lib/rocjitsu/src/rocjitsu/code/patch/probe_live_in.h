@@ -50,6 +50,9 @@
 
 namespace rocjitsu {
 
+/// @brief Architectural state proven by the caller at every use of the body.
+enum class ProbeEntryState { Unknown, ZeroVgprBanks };
+
 /// @brief Registers @p sym reads before defining that @p abi does not supply.
 ///
 /// @details Builds the probe object's CFG, forms the block scope reachable from
@@ -77,7 +80,8 @@ namespace rocjitsu {
 /// access means its encoded operands do not name every register it reads.
 [[nodiscard]] std::optional<RegisterSet>
 analyze_probe_live_ins(const AmdGpuCodeObject &probe_obj, const ResolvedProbeSymbol &sym,
-                       rj_code_arch_t arch, const ProbeAbi &abi, std::string *error_out = nullptr);
+                       rj_code_arch_t arch, const ProbeAbi &abi, std::string *error_out = nullptr,
+                       ProbeEntryState entry_state = ProbeEntryState::Unknown);
 
 /// @brief Render @p regs as a comma-separated operand list, e.g. "s4, v0, v1".
 ///

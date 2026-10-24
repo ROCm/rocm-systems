@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -554,6 +555,55 @@ RegisterSet make_vgpr_set(std::initializer_list<uint16_t> indices) {
   for (uint16_t i : indices)
     set.expand(RegisterRef{RegClass::VGPR, i, 1});
   return set;
+}
+
+TEST(TrampolineBuilderPlan, GuestArgumentsCaptureBeforeArgumentDestinations) {
+  TrampolinePlan plan;
+  plan.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  plan.kernel_vgpr_count = 8;
+  plan.probe_args = {probe_arg_imm(99), probe_arg_vgpr(0)};
+  std::string error;
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, arg_abi(2), {}, {}, &error)) << error;
+  EXPECT_EQ(plan.argument_moves, (std::vector<ProbeArgumentMove>{{1, 0}}));
+  EXPECT_FALSE(plan.argument_copy_temp);
+}
+
+TEST(TrampolineBuilderPlan, GuestArgumentCyclesUseAnOwnedDeadTemporary) {
+  TrampolinePlan plan;
+  plan.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  plan.kernel_vgpr_count = 8;
+  plan.probe_args = {probe_arg_vgpr(1), probe_arg_vgpr(0)};
+  std::string error;
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, arg_abi(2), make_vgpr_set({2}), {}, &error))
+      << error;
+  ASSERT_EQ(plan.argument_copy_temp, 3u);
+  std::array<uint32_t, 8> registers{10, 20, 30, 40};
+  for (const ProbeArgumentMove &move : plan.argument_moves)
+    registers[move.destination] = registers[move.source];
+  EXPECT_EQ(registers[0], 20u);
+  EXPECT_EQ(registers[1], 10u);
+  EXPECT_EQ(registers[2], 30u);
+}
+
+TEST(TrampolineBuilderPlan, GuestArgumentCycleWithoutTemporaryFails) {
+  TrampolinePlan plan;
+  plan.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  plan.kernel_vgpr_count = 2;
+  plan.probe_args = {probe_arg_vgpr(1), probe_arg_vgpr(0)};
+  std::string error;
+  EXPECT_FALSE(TrampolineBuilder::plan_probe_call(plan, arg_abi(2), {}, {}, &error));
+  EXPECT_NE(error.find("copy cycle"), std::string::npos);
+  EXPECT_FALSE(plan.is_probe_call);
+}
+
+TEST(TrampolineBuilderPlan, GuestArgumentOutsideAllocationFails) {
+  TrampolinePlan plan;
+  plan.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  plan.kernel_vgpr_count = 4;
+  plan.probe_args = {probe_arg_vgpr(4)};
+  std::string error;
+  EXPECT_FALSE(TrampolineBuilder::plan_probe_call(plan, arg_abi(1), {}, {}, &error));
+  EXPECT_NE(error.find("allocation"), std::string::npos);
 }
 
 // Each argument costs a v_mov_b32 plus its literal word, and passing any
@@ -1261,6 +1311,97 @@ TEST(TrampolineBuilderEmit, ForwardBranchRangeFailureReported) {
   std::string err;
   EXPECT_FALSE(TrampolineBuilder::emit_probe_call(plan, &err).has_value());
   EXPECT_NE(err.find("forward branch"), std::string::npos);
+}
+
+TEST(TrampolineBuilderPlan, RegisterCopiesPreserveALiveReturnLinkWithoutScratch) {
+  TrampolinePlan plan = make_probe_plan();
+  plan.register_saves = {
+      {RegClass::SGPR, 30, 40}, {RegClass::SGPR, 31, 41}, {RegClass::VGPR, 0, 16}};
+  RegisterSet live = make_sgpr_set({30, 31});
+  live.expand({RegClass::VGPR, 0, 1});
+  std::string error;
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, kProbeAbi, live, {}, &error)) << error;
+  const auto bytes = TrampolineBuilder::emit_probe_call(plan, &error);
+  ASSERT_TRUE(bytes) << error;
+  const std::vector<uint32_t> &words = bytes->trampoline_words;
+  const auto call =
+      std::ranges::find(words, build_s_swappc_b64(30, plan.target_pair_base, plan.arch));
+  ASSERT_NE(call, words.end());
+  for (const RegisterSave &save : plan.register_saves) {
+    const uint32_t store =
+        save.cls == RegClass::SGPR
+            ? build_s_mov_b32(save.destination, save.source, plan.arch)
+            : build_v_mov_b32_src(save.destination, 256 + save.source, plan.arch);
+    const uint32_t restore =
+        save.cls == RegClass::SGPR
+            ? build_s_mov_b32(save.source, save.destination, plan.arch)
+            : build_v_mov_b32_src(save.source, 256 + save.destination, plan.arch);
+    EXPECT_NE(std::find(words.begin(), call, store), call);
+    EXPECT_NE(std::find(call, words.end(), restore), words.end());
+    EXPECT_TRUE(plan.builder_clobbers.contains({save.cls, save.destination, 1}));
+  }
+  EXPECT_TRUE(plan.vgpr_spills.empty());
+  EXPECT_TRUE(plan.sgpr_spills.empty());
+}
+
+TEST(TrampolineBuilderPlan, RegisterCopiesRejectOverlapsAndUnavailableDestinations) {
+  const std::vector<std::vector<RegisterSave>> invalid{
+      {{RegClass::SGPR, 0, 1}, {RegClass::SGPR, 2, 1}},
+      {{RegClass::SGPR, 0, 1}, {RegClass::SGPR, 1, 2}},
+      {{RegClass::SGPR, 0, 0}},
+      {{RegClass::SGPR, 0, 102}},
+      {{RegClass::VGPR, 0, 256}},
+      {{RegClass::ACC_VGPR, 0, 16}},
+      {{RegClass::SGPR, 0, 30}},
+      {{RegClass::SGPR, 0, 4}},
+      {{RegClass::SGPR, 0, 5}}};
+  for (const auto &saves : invalid) {
+    TrampolinePlan plan = make_probe_plan();
+    plan.register_saves = saves;
+    std::string error;
+    EXPECT_FALSE(TrampolineBuilder::plan_probe_call(plan, kProbeAbi, make_sgpr_set({4}),
+                                                    make_sgpr_set({5}), &error));
+    EXPECT_FALSE(error.empty());
+  }
+  TrampolinePlan plan = make_probe_plan();
+  plan.probe_args = {probe_arg_imm(17)};
+  plan.register_saves = {{RegClass::VGPR, 1, 0}};
+  const auto argument_abi = derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31, 1);
+  std::string error;
+  EXPECT_FALSE(TrampolineBuilder::plan_probe_call(plan, *argument_abi, {}, {}, &error));
+}
+
+TEST(TrampolineBuilderEmit, RejectsABackupTamperedToOverlapTheArgumentBlock) {
+  TrampolinePlan plan = make_probe_plan();
+  plan.probe_args = {probe_arg_imm(17)};
+  plan.register_saves = {{RegClass::VGPR, 1, 16}};
+  const auto argument_abi = derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31, 1);
+  std::string error;
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, *argument_abi, {}, {}, &error)) << error;
+  plan.register_saves.front().destination = 0;
+  EXPECT_FALSE(TrampolineBuilder::emit_probe_call(plan, &error));
+  EXPECT_NE(error.find("preservation destination"), std::string::npos);
+}
+
+TEST(TrampolineBuilderEmit, Rdna4OrdersScalarStateAcrossTheCallAndGuestResume) {
+  const TrampolinePlan plan = make_probe_plan(ROCJITSU_CODE_ARCH_RDNA4, true);
+  std::string error;
+  const auto bytes = TrampolineBuilder::emit_probe_call(plan, &error);
+  ASSERT_TRUE(bytes) << error;
+  const std::vector<uint32_t> &words = bytes->trampoline_words;
+  const uint32_t wait = build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xf1fc);
+  const size_t loads = build_wait_all_loads_complete(plan.arch).size();
+  ASSERT_GT(words.size(), loads);
+  EXPECT_EQ(words[loads], wait);
+  const auto call =
+      std::ranges::find(words, build_s_swappc_b64(30, plan.target_pair_base, plan.arch));
+  ASSERT_NE(call, words.end());
+  ASSERT_LT(call + loads + 1, words.end());
+  EXPECT_EQ(*(call + loads + 1), wait);
+  const auto original = std::ranges::find(words, plan.original_words.front());
+  ASSERT_NE(original, words.end());
+  ASSERT_NE(original, words.begin());
+  EXPECT_EQ(*(original - 1), wait);
 }
 
 } // namespace

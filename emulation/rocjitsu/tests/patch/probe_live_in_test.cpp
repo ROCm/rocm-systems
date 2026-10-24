@@ -13,6 +13,8 @@
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/builders/spill_builders.h"
+#include "rocjitsu/code/builders/vector_builders.h"
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/patch/probe_live_in.h"
 #include "rocjitsu/code/patch/probe_symbol.h"
@@ -365,6 +367,27 @@ TEST(ProbeLiveInTest, RejectsCdna5) {
                    *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31), &err)
                    .has_value());
   EXPECT_NE(err.find("VGPR_MSB"), std::string::npos) << err;
+}
+
+TEST(ProbeLiveInTest, Cdna5ProvenZeroBanksResolveGuestArgumentRegisters) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  const std::vector<uint32_t> body{build_v_mov_b32_src(1, 256, kArch),
+                                   build_s_setpc_b64(30, kArch)};
+  const std::vector<uint8_t> image = make_elf(body, EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  const AmdGpuCodeObject object(image.data(), image.size());
+  std::string error;
+  const auto live =
+      analyze_probe_live_ins(object, whole_body_symbol(body), kArch,
+                             *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31, 1),
+                             &error, ProbeEntryState::ZeroVgprBanks);
+  ASSERT_TRUE(live) << error;
+  EXPECT_TRUE(live->none()) << format_register_set(*live);
+  const auto missing_argument =
+      analyze_probe_live_ins(object, whole_body_symbol(body), kArch,
+                             *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31),
+                             &error, ProbeEntryState::ZeroVgprBanks);
+  ASSERT_TRUE(missing_argument) << error;
+  EXPECT_EQ(format_register_set(*missing_argument), "v0");
 }
 
 TEST(ProbeLiveInTest, RejectsUnusableAbi) {

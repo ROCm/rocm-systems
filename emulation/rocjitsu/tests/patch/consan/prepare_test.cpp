@@ -1,6 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "target_fixture.h"
+
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/consan/encoding.h"
 #include "rocjitsu/code/consan/image/artifact.h"
@@ -109,24 +111,32 @@ TEST_F(ConSanPrepare, EntryPrologueOffsetsMustMatchTheRuntimeWrapper) {
   const std::optional<KernargExtensionLayout> kernarg = make_kernarg_extension_layout(
       input.value().kernel.descriptor.kernarg_size, kContextPointerPayloads);
   ASSERT_TRUE(kernarg.has_value());
-  const DbiEntryPrologue &original = input.value().entry_plan.prologue;
-  EXPECT_TRUE(validate_entry_kernarg_layout(original, *kernarg, error_).succeeded());
-
-  for (const bool payload_offset : {true, false}) {
-    SCOPED_TRACE(payload_offset ? "context payload" : "original kernarg pointer");
-    DbiEntryPrologue mismatched = original;
-    if (payload_offset)
-      mismatched.payload_byte_offset += sizeof(uint64_t);
-    else
-      mismatched.original_kernarg_pointer_offset += sizeof(uint64_t);
-    EXPECT_TRUE(validate_entry_kernarg_layout(mismatched, *kernarg, error_).failed());
-    EXPECT_EQ(error_.code, InputErrorCode::UnsupportedEntry);
-    EXPECT_EQ(error_.message, "entry prologue and ConSan kernarg wrapper offsets disagree");
+  const auto artifact =
+      prepare(original_, *target_profile("gfx1100"), "lds_producer_consumer", error_);
+  ASSERT_TRUE(artifact.succeeded()) << error_.message;
+  AmdGpuCodeObject object(artifact.value().image.data(), artifact.value().image.size());
+  bool found = false;
+  for (const auto &section : object.all_sections()) {
+    if (section->name() != kKernargExtensionMetadataSectionName)
+      continue;
+    const auto records = parse_kernarg_extension_metadata(
+        {reinterpret_cast<const uint8_t *>(section->data()), section->size()});
+    ASSERT_TRUE(records);
+    ASSERT_EQ(records->size(), 1u);
+    const auto &record = records->front();
+    EXPECT_EQ(record.kernel_name, "lds_producer_consumer");
+    EXPECT_EQ(record.original_kernarg_size, kernarg->original_kernarg_size);
+    ASSERT_EQ(record.payloads.size(), 1u);
+    const std::array payloads{KernargExtensionPayloadLayout{record.payloads.front().size,
+                                                            record.payloads.front().alignment}};
+    const auto declared = make_kernarg_extension_layout(record.original_kernarg_size, payloads);
+    ASSERT_TRUE(declared);
+    EXPECT_EQ(declared->wrapper_size, kernarg->wrapper_size);
+    EXPECT_EQ(declared->payload_offsets, kernarg->payload_offsets);
+    EXPECT_EQ(declared->original_kernarg_pointer_offset, kernarg->original_kernarg_pointer_offset);
+    found = true;
   }
-
-  KernargExtensionLayout missing_payload = *kernarg;
-  missing_payload.payload_offsets.clear();
-  EXPECT_TRUE(validate_entry_kernarg_layout(original, missing_payload, error_).failed());
+  EXPECT_TRUE(found);
 }
 
 TEST_F(ConSanPrepare, EntryNamesMustBeUsableByTheShippedJsonAnalyzer) {
@@ -193,7 +203,8 @@ TEST_F(ConSanPrepare, RegisterPressureReturnsAResourceErrorInsteadOfAnInternalAs
   const FailureOr<MetadataResources> metadata =
       inspect_metadata(original_, input.value().kernel, &metadata_error);
   ASSERT_TRUE(metadata.succeeded()) << metadata_error;
-  for (const uint32_t declared : {80u, 82u}) {
+  for (const uint32_t declared : {16u, 80u, 82u}) {
+    SCOPED_TRACE(declared);
     std::vector<uint8_t> image = original_;
     MetadataResources resources = metadata.value();
     resources.sgprs = declared;
@@ -206,13 +217,16 @@ TEST_F(ConSanPrepare, RegisterPressureReturnsAResourceErrorInsteadOfAnInternalAs
     EXPECT_EQ(qualified.value().original_sgprs, declared);
     const FailureOr<PreparedArtifact> artifact =
         prepare(image, *target_profile("gfx1100"), "lds_producer_consumer", error_);
-    if (declared == 80) {
+    if (declared == 16) {
       ASSERT_TRUE(artifact.succeeded()) << error_.message;
-      EXPECT_EQ(artifact.value().manifest.entry.prepared_sgprs, 102u);
+      EXPECT_EQ(artifact.value().manifest.entry.prepared_sgprs, 52u);
     } else {
       EXPECT_TRUE(artifact.failed());
       EXPECT_EQ(error_.code, InputErrorCode::ResourceLimit);
-      EXPECT_EQ(error_.message, "no bounded, disjoint probe register/report plan");
+      const std::string_view reason =
+          declared == 80 ? "no dead SGPR pair available for the probe target address"
+                         : "register preservation exceeds the bounded register file";
+      EXPECT_NE(error_.message.find(reason), std::string::npos) << error_.message;
     }
   }
 }

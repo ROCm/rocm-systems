@@ -24,6 +24,26 @@ def main():
     root.mkdir(parents=True, exist_ok=True)
     directory = Path(tempfile.mkdtemp(prefix='prepare-io-', dir=root))
     print(f'evidence: {directory}', flush=True)
+    for name in ('distant-entry', 'dense-sites'):
+        original = fixture.parent / 'targets/gfx1100/wave32' / f'native-{name}.hsaco'
+        destination = directory / name
+        command = [
+            str(prepare),
+            str(original),
+            'gfx1100',
+            'lds_producer_consumer',
+            str(destination),
+        ]
+        result = subprocess.run(
+            command, capture_output=True, text=True, timeout=60, check=False
+        )
+        record = dict(
+            command=command, exit_status=result.returncode, stderr=result.stderr
+        )
+        (directory / f'{name}.json').write_text(json.dumps(record, indent=2) + '\n')
+        assert result.returncode == 2, record
+        assert 'branch' in result.stderr, record
+        assert not destination.exists(), record
     empty = directory / 'empty.hsaco'
     empty.touch()
     oversized = directory / 'oversized.hsaco'

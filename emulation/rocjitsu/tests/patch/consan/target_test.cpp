@@ -9,11 +9,11 @@
 #include "rocjitsu/code/patch/consan/prepare.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/target_registry.h"
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
-#include <bitset>
 #include <cstring>
 
 namespace rocjitsu::consan {
@@ -21,10 +21,62 @@ namespace {
 
 class ConSanTargetStatic : public ::testing::TestWithParam<test::TargetMode> {};
 
+TEST_P(ConSanTargetStatic, CallableArtifactsPreserveStaticSitesAndPrivateFrameAdmission) {
+  const auto mode = GetParam();
+  const TargetProfile &target = *target_profile(mode.target);
+  for (const std::string_view fixture :
+       {"race", "disjoint", "read_read", "collision", "single_lane", "alias", "immediate",
+        "four_ranges", "exhausted", "empty", "branched", "native-14"}) {
+    SCOPED_TRACE(fixture);
+    const auto original = test::read_fixture(test::target_fixture_path(mode, fixture));
+    ASSERT_FALSE(original.empty());
+    InputError error;
+    const auto called = prepare(original, target, "lds_producer_consumer", error);
+    ASSERT_TRUE(called.succeeded()) << error.message;
+    const auto input = build_input_program(original, target, "lds_producer_consumer", error);
+    ASSERT_TRUE(input.succeeded());
+    const auto &sites = called.value().manifest.sites;
+    ASSERT_EQ(sites.size(), input.value().accesses.size());
+    for (size_t index = 0; index < sites.size(); ++index) {
+      const auto &access = input.value().accesses[index];
+      EXPECT_EQ(sites[index].id, access.site);
+      EXPECT_EQ(sites[index].original_offset, access.original_offset);
+      EXPECT_EQ(sites[index].access, access.kind);
+      EXPECT_EQ(sites[index].first_slot, access.site * kAddressGroupsPerSite);
+    }
+    AmdGpuCodeObject image(called.value().image.data(), called.value().image.size());
+    const auto *text = image.text_sections().front();
+    const auto kernels =
+        scan_kernel_descriptors(called.value().image, text->sectionOffset(), text->size());
+    ASSERT_EQ(kernels.size(), 1u);
+    std::vector<uint32_t> words(text->size() / sizeof(uint32_t));
+    std::memcpy(words.data(), text->data(), text->size());
+    auto decoder = target.public_id == ROCJITSU_CODE_TARGET_INVALID
+                       ? Decoder::create(target.arch)
+                       : Decoder::create(default_isa_target_registry(), target.public_id);
+    ASSERT_TRUE(decoder);
+    size_t calls = 0;
+    for (size_t cursor = 0; cursor < words.size();) {
+      auto instruction = decoder->decode_window(std::span(words).subspan(cursor), cursor * 4);
+      ASSERT_TRUE(instruction.succeeded());
+      calls += (instruction.value()->flags() & INDIRECT_CALL) != 0;
+      cursor += instruction.value()->size() / sizeof(uint32_t);
+    }
+    EXPECT_EQ(calls, sites.size() + input.value().exit_offsets.size() + 1);
+    EXPECT_EQ(kernels.front().descriptor.private_segment_fixed_size, 0u);
+    EXPECT_EQ(kernels.front().descriptor.group_segment_fixed_size,
+              input.value().kernel.descriptor.group_segment_fixed_size);
+    auto corrupted = called.value();
+    corrupted.image[text->sectionOffset() + sites.front().probe_offset] ^= 1;
+    corrupted.manifest.prepared.sha256 = digest(corrupted.image);
+    EXPECT_TRUE(validate_prepared(original, corrupted, error).failed());
+  }
+}
+
 TEST_P(ConSanTargetStatic, EquivalentMetadataEnvironmentsPreserveTargetAndAbiValidation) {
   const test::TargetMode mode = GetParam();
   const TargetProfile &target = *target_profile(mode.target);
-  std::vector<OriginalInstruction> instructions;
+  std::vector<uint8_t> original_text;
   for (const std::string_view fixture : {"native-1", "native-unknown-environment"}) {
     SCOPED_TRACE(fixture);
     const std::vector<uint8_t> original =
@@ -33,13 +85,12 @@ TEST_P(ConSanTargetStatic, EquivalentMetadataEnvironmentsPreserveTargetAndAbiVal
     const FailureOr<InputProgram> input =
         build_input_program(original, target, "lds_producer_consumer", error);
     ASSERT_TRUE(input.succeeded()) << error.message;
-    if (instructions.empty()) {
-      instructions = input.value().instructions;
-    } else {
-      ASSERT_EQ(instructions.size(), input.value().instructions.size());
-      for (size_t index = 0; index < instructions.size(); ++index)
-        EXPECT_EQ(instructions[index].words, input.value().instructions[index].words);
-    }
+    const auto text =
+        std::span(original).subspan(input.value().text_file_offset, input.value().text_bytes);
+    if (original_text.empty())
+      original_text.assign(text.begin(), text.end());
+    else
+      EXPECT_TRUE(std::ranges::equal(original_text, text));
     const FailureOr<PreparedArtifact> prepared =
         prepare(original, target, "lds_producer_consumer", error);
     ASSERT_TRUE(prepared.succeeded()) << error.message;
@@ -131,152 +182,23 @@ TEST_P(ConSanTargetStatic, PreparedCdnaDescriptorMustAllocateItsDeclaredOrdinary
   }
 }
 
-TEST_P(ConSanTargetStatic, ProbeScalarDependenciesHaveTargetRequiredGuards) {
-  const test::TargetMode mode = GetParam();
-  const TargetProfile &target = *target_profile(mode.target);
-  const std::vector<uint8_t> original =
-      test::read_fixture(test::target_fixture_path(mode, "native-1"));
-  InputError error;
-  const FailureOr<InputProgram> program =
-      build_input_program(original, target, "lds_producer_consumer", error);
-  ASSERT_TRUE(program.succeeded()) << error.message;
-  const FailureOr<LdsRaceProbePlan> plan = plan_lds_race_probes(program.value(), error);
-  ASSERT_TRUE(plan.succeeded()) << error.message;
-  std::vector<uint8_t> text;
-  ASSERT_TRUE(emit_lds_race_entry(text, plan.value(), error).succeeded());
-  // Repeated probes exercise scratch reuse across separate emitter instances.
-  for (int repetition = 0; repetition < 2; ++repetition)
-    for (const NativeLdsAccess &access : program.value().accesses)
-      ASSERT_TRUE(emit_lds_race_access(text, plan.value(), access, error).succeeded());
-  ASSERT_TRUE(emit_lds_race_exit(text, plan.value(), error).succeeded());
-  std::vector<uint32_t> words(text.size() / 4);
-  std::memcpy(words.data(), text.data(), text.size());
-  std::unique_ptr<Decoder> decoder = Decoder::create(target.arch);
-  struct Dependencies {
-    std::bitset<128> salu;
-    std::bitset<128> valu;
-    std::bitset<64> tracked;
-    bool vcc = false;
-    bool reachable = false;
-  };
-  std::vector<Dependencies> incoming(words.size() + 1);
-  incoming[0].reachable = true;
-  size_t reads = 0;
-  size_t vector_consumers = 0;
-  size_t waits = 0;
-  for (size_t offset = 0; offset < words.size();) {
-    DecodeResult decoded = decoder->decode_window(std::span(words).subspan(offset), offset * 4);
-    ASSERT_TRUE(decoded.succeeded()) << "offset=" << offset * 4;
-    const Instruction &instruction = *decoded.value();
-    const std::string_view name = instruction.mnemonic();
-    const size_t next = offset + instruction.size() / 4;
-    if (target.id == 942 || target.id == 950) {
-      if (name.starts_with("v_readfirstlane_b32")) {
-        ++reads;
-        const std::optional<RegisterRef> destination =
-            instruction.dst_operand(0)->to_register_ref();
-        ASSERT_TRUE(destination);
-        ASSERT_EQ(destination->cls, RegClass::SGPR);
-        uint32_t wait_states = 0;
-        // Check the emitted dependency distance, allowing independent
-        // instructions as well as nop padding to satisfy the hardware rule.
-        for (size_t cursor = next; cursor < words.size();) {
-          DecodeResult following = decoder->decode_window(std::span(words).subspan(cursor));
-          ASSERT_TRUE(following.succeeded());
-          const Instruction &consumer = *following.value();
-          bool reads_destination = false;
-          bool overwrites_destination = false;
-          for (int index = 0; index < consumer.num_src_operands(); ++index) {
-            const std::optional<RegisterRef> source =
-                consumer.src_operand(index)->to_register_ref();
-            reads_destination |= source && source->cls == RegClass::SGPR &&
-                                 source->index <= destination->index &&
-                                 destination->index < source->index + source->width;
-          }
-          for (int index = 0; index < consumer.num_dst_operands(); ++index) {
-            const std::optional<RegisterRef> written =
-                consumer.dst_operand(index)->to_register_ref();
-            overwrites_destination |= written && written->cls == RegClass::SGPR &&
-                                      written->index <= destination->index &&
-                                      destination->index < written->index + written->width;
-          }
-          if (reads_destination && consumer.mnemonic().starts_with("v_")) {
-            EXPECT_GE(wait_states, 2u) << "consumer at " << cursor * 4;
-            ++vector_consumers;
-            break;
-          }
-          if (overwrites_destination)
-            break;
-          wait_states += consumer.mnemonic() == "s_nop" ? (words[cursor] & 0xffffu) + 1 : 1;
-          cursor += consumer.size() / 4;
-        }
-      }
-    } else if (target.id == 1201 && incoming[offset].reachable) {
-      Dependencies state = incoming[offset];
-      if (name == "s_wait_alu") {
-        const uint32_t control = words[offset] & 0xffff;
-        if ((control & 1) == 0)
-          state.salu.reset();
-        if ((control & 0xe00) == 0)
-          state.valu.reset();
-        if ((control & 2) == 0)
-          state.vcc = false;
-        ++waits;
-      }
-      const bool vector_alu = name.starts_with("v_");
-      for (int operand_index = 0; operand_index < instruction.num_src_operands(); ++operand_index) {
-        const std::optional<RegisterRef> reg =
-            instruction.src_operand(operand_index)->to_register_ref();
-        if (!reg)
-          continue;
-        if (reg->cls == RegClass::VCC) {
-          EXPECT_FALSE(state.vcc) << "VCC consumer at " << offset * 4 << ": " << name;
-        }
-        if (reg->cls != RegClass::SGPR)
-          continue;
-        for (uint16_t lane = reg->index; lane < reg->index + reg->width; ++lane) {
-          EXPECT_FALSE(state.salu[lane])
-              << "SALU consumer s" << lane << " at " << offset * 4 << ": " << name;
-          if (vector_alu) {
-            EXPECT_FALSE(state.valu[lane]) << "VALU consumer s" << lane << " at " << offset * 4;
-            state.tracked.set(lane / 2);
-          }
-        }
-      }
-      for (int operand_index = 0; operand_index < instruction.num_dst_operands(); ++operand_index) {
-        const std::optional<RegisterRef> reg =
-            instruction.dst_operand(operand_index)->to_register_ref();
-        if (!reg || reg->cls != RegClass::SGPR)
-          continue;
-        for (uint16_t lane = reg->index; lane < reg->index + reg->width; ++lane)
-          if (state.tracked[lane / 2])
-            (vector_alu ? state.valu : state.salu).set(lane);
-      }
-      if (name.starts_with("v_cmp_"))
-        state.vcc = true;
-      const auto merge = [&](size_t destination) {
-        ASSERT_LE(destination, words.size());
-        incoming[destination].salu |= state.salu;
-        incoming[destination].valu |= state.valu;
-        incoming[destination].tracked |= state.tracked;
-        incoming[destination].vcc |= state.vcc;
-        incoming[destination].reachable = true;
-      };
-      if (name.starts_with("s_cbranch_")) {
-        const int16_t displacement = static_cast<int16_t>(words[offset] & 0xffff);
-        ASSERT_GE(displacement, 0);
-        merge(offset + 1 + displacement);
-      }
-      merge(next);
-    }
-    offset = next;
-  }
-  if (target.id == 942 || target.id == 950) {
-    EXPECT_GT(reads, 1u);
-    EXPECT_GT(vector_consumers, 0u);
-  }
-  if (target.id == 1201) {
-    EXPECT_GT(waits, 0u);
+TEST_P(ConSanTargetStatic, UnreachableEntryOrDenseSitesFailBeforeArtifactPublication) {
+  const auto mode = GetParam();
+  const auto &target = *target_profile(mode.target);
+  for (const auto fixture : {"native-distant-entry", "native-dense-sites"}) {
+    SCOPED_TRACE(fixture);
+    const auto original = test::read_fixture(test::target_fixture_path(mode, fixture));
+    ASSERT_FALSE(original.empty());
+    InputError error;
+    ASSERT_TRUE(build_input_program(original, target, "lds_producer_consumer", error).succeeded())
+        << error.message;
+    EXPECT_TRUE(prepare(original, target, "lds_producer_consumer", error).failed());
+    EXPECT_EQ(error.code, InputErrorCode::ResourceLimit);
+    EXPECT_NE(error.message.find("branch"), std::string::npos) << error.message;
+    const std::string_view reason = std::string_view(fixture) == "native-distant-entry"
+                                        ? "entry-prologue stub is out of branch range"
+                                        : "return branch exceeds s_branch simm16";
+    EXPECT_NE(error.message.find(reason), std::string::npos) << error.message;
   }
 }
 

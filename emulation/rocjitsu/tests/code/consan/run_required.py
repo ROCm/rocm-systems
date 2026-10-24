@@ -43,6 +43,7 @@ ANALYSIS_CASES = (*RUNTIME_CASES, 'repeat_race', 'utf8_entry')
 
 def required_names():
     names = {
+        'ConSanConfigure.EnvironmentOnlySdk',
         'ConSanRuntimeIntegration.Guards',
         'ConSanRuntime.SymbolBoundary',
         'ConSanHsaPlugin.RuntimeConfigurationRequiresBothPrefixedPaths',
@@ -102,7 +103,7 @@ def required_names():
             'EquivalentMetadataEnvironmentsPreserveTargetAndAbiValidation',
             'AssemblyLoweringPreservesConcreteIdentityAndLoadableImages',
             'PreparedCdnaDescriptorMustAllocateItsDeclaredOrdinarySgprs',
-            'ProbeScalarDependenciesHaveTargetRequiredGuards',
+            'UnreachableEntryOrDenseSitesFailBeforeArtifactPublication',
             'HipWorkloadsMustContainQualifiedNativeLdsSites',
             'GdsAndAccumulatorAliasingAreRejectedAtTheirActualBoundaries',
         ):
@@ -122,6 +123,15 @@ def required_names():
             names.add(
                 f'ConSanTargets/ConSanHipSim.CompiledHipRaceDisjointAndReadReadExecuteTheirNativeSites/{suffix}'
             )
+    for gpu, wave in MODES:
+        names.add(
+            'ConSanTargets/ConSanTargetStatic.'
+            f'CallableArtifactsPreserveStaticSitesAndPrivateFrameAdmission/{gpu}Wave{wave}'
+        )
+        names.add(
+            'ConSanProbeModes/ConSanCallableProbe.'
+            f'CompiledBodiesAreSelfContainedAndUseOnlyTheirArguments/{gpu}Wave{wave}'
+        )
     return names
 
 

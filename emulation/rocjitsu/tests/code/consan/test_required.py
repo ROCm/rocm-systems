@@ -74,6 +74,14 @@ def set_property(test, name, value):
 
 
 class RequiredCoverage(unittest.TestCase):
+    def test_compiled_probe_validation_is_required_for_every_mode(self):
+        for name in required_names():
+            if name.startswith('ConSanProbeModes/'):
+                with self.subTest(name=name), self.assertRaises(ValueError):
+                    validate_selected(
+                        [{'name': item} for item in required_names() - {name}]
+                    )
+
     def test_missing_physical_registration_fails(self):
         tests = paired_registrations()
         validate_physical_registrations(tests)
@@ -158,7 +166,7 @@ class RequiredCoverage(unittest.TestCase):
                 ):
                     validate_physical_registrations(tests)
 
-    def test_twins_must_agree_on_nonbackend_flags(self):
+    def test_twins_must_agree_on_application_flags(self):
         for flag in ('--utf8-entry', '--test-statistics'):
             with self.subTest(flag=flag):
                 tests = paired_registrations()

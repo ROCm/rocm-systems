@@ -34,9 +34,23 @@ foreach(
         foreach(
             _case
             IN
-            ITEMS 1 2 3 4 6 11 12 13 14 unknown-environment ${_names}
+            ITEMS
+                1
+                2
+                3
+                4
+                6
+                11
+                12
+                13
+                14
+                unknown-environment
+                distant-entry
+                dense-sites
+                ${_names}
         )
             set(_case_number ${_case})
+            set(_layout_options)
             set(_metadata_target "amdgcn-amd-amdhsa--${_gpu}")
             set(_fixture_name native-${_case})
             set(_group_options -DCONSAN_GROUP_BYTES=128)
@@ -56,6 +70,13 @@ foreach(
                 set(_case_number 1)
                 set(_metadata_target "amdgcn-amd-amdhsa-unknown-${_gpu}")
             endif()
+            if(_case STREQUAL "distant-entry")
+                set(_case_number 2)
+                set(_layout_options -DCONSAN_PREFIX_NOPS=33000)
+            elseif(_case STREQUAL "dense-sites")
+                set(_case_number 2)
+                set(_layout_options -DCONSAN_LDS_ACCESS_PAIRS=256)
+            endif()
             set(_object ${_directory}/${_fixture_name}.o)
             set(_image ${_directory}/${_fixture_name}.hsaco)
             add_custom_command(
@@ -68,7 +89,7 @@ foreach(
                     -DCONSAN_METADATA_TARGET="${_metadata_target}"
                     -DCONSAN_WAVE_SIZE=${_wave} -DCONSAN_LEGACY=${_legacy}
                     -DCONSAN_GFX12=${_gfx12} -DCONSAN_CASE=${_case_number}
-                    ${_group_options} -c
+                    ${_group_options} ${_layout_options} -c
                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/native_lds.s -o
                     ${_object}
                 DEPENDS fixtures/native_lds.s ${AMDCXX}

@@ -13,6 +13,34 @@ from consan_runtime_e2e import Driver, HardwareUnavailable
 
 
 class RuntimeIntegration(unittest.TestCase):
+    def test_preparation_failures_cannot_continue_the_pipeline(self):
+        for status in (0, 2):
+            with self.subTest(
+                status=status
+            ), tempfile.TemporaryDirectory() as directory:
+                driver = Driver(
+                    argparse.Namespace(root=Path(directory), case='disjoint')
+                )
+                command = ['prepare', 'original', 'target', 'entry', 'artifact']
+                result = argparse.Namespace(
+                    returncode=status, stdout='prepared', stderr='rejected'
+                )
+                with mock.patch(
+                    'consan_runtime_e2e.subprocess.run', return_value=result
+                ) as run:
+                    if status:
+                        with self.assertRaisesRegex(
+                            AssertionError, 'expected exit 0, got 2'
+                        ):
+                            driver.run('prepare', command)
+                    else:
+                        self.assertEqual(driver.run('prepare', command), 'prepared')
+                self.assertEqual(run.call_args.args[0], command)
+                self.assertEqual(driver.commands[-1]['exit_status'], status)
+                self.assertEqual(
+                    (driver.directory / 'prepare.stderr').read_text(), 'rejected'
+                )
+
     def test_missing_statistics_checks_the_requested_agent_first(self):
         with tempfile.TemporaryDirectory() as directory:
             build = Path(directory)
