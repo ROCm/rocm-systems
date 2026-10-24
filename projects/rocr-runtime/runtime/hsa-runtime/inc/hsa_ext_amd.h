@@ -146,6 +146,12 @@ typedef enum {
    */
   HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH = 3,
 
+  /**
+   * Extended kernel dispatch packet with launch descriptor support.
+   * Supports clusters, launch descriptor for advanced scheduling, and L2 prefetch.
+   */
+  HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD = 4,
+
   /* Reserved for a packet that is not yet released */
   HSA_AMD_PACKET_TYPE_RESERVED200 = 200,
 } hsa_amd_packet_type_t;
@@ -423,16 +429,28 @@ typedef struct hsa_amd_ext_kernel_dispatch_packet_s {
   void* kernarg_address;
 
   /**
-   * Dependent signal object. This signal is read in the launch phase.​
+   * Format-dependent field (DW 14:13).
+   * Interpretation depends on amd_format:
    *
-   * The packet processor does not exit the launch phase for this packet, and
-   * thus does not perform the requested acquire fence scope’s actions, until
-   * the signal has been observed with the value 0.​
+   * Format 3 (HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH):
+   *   - dep_signal: Dependent signal object read in the launch phase.
+   *     The packet processor waits until the signal value is 0 before
+   *     exiting the launch phase. A signal handle value of 0 is allowed
+   *     and is interpreted as a satisfied dependency.
    *
-   * A signal handle value of 0 is allowed and is interpreted by the packet
-   * processor as a satisfied dependency.​
+   * Format 4 (HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD):
+   *   - launch_descriptor: Opaque handle to launch descriptor configuration
+   *     providing advanced scheduling control (CU enable, wave limiter,
+   *     L2 prefetch, etc.). A handle value of 0 indicates no launch descriptor
+   *     is used. Dependencies must be handled via barrier packets.
+   *
+   *     The handle's internal value (handle.handle) is a pointer to the
+   *     52-byte amd_launch_descriptor_data_t structure that FW reads directly.
    */
-  hsa_signal_t dep_signal;
+  union {
+    hsa_signal_t dep_signal;                      // Format 3: signal-based dependency
+    amd_launch_descriptor_t launch_descriptor;    // Format 4: opaque handle
+  };
 
   /**
    * Signal used to indicate completion of the job. The application can use the
@@ -561,10 +579,11 @@ typedef struct hsa_amd_metadata_kernel_dispatch_packet_s {
      */
     uint8_t reserved1[52];
     /**
-     * Launch descriptor. Overlays the former reserved1[52] area.
+     * Launch descriptor data. Overlays the former reserved1[52] area.
      * Zero-initialised means version=0 (NONE) — CP treats as "no descriptor".
+     * This is the 52-byte hardware structure, not an opaque handle.
      */
-    amd_launch_descriptor_t launch_descriptor;
+    amd_launch_descriptor_data_t launch_descriptor;
   };
 } hsa_amd_metadata_kernel_dispatch_packet_t;
 
