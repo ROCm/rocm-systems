@@ -779,8 +779,14 @@ TEST_F(RegisterCleanupMicrotest, CollnetDeregisterFails_StillSucceeds) {
   ncclReg* reg = Seed(0x10000, 0x11000);
   reg->state = COLLNET_REG_COMPLETE;
   reg->collnetProxyconn = &proxyA_;
-  g_ncclCollnetDeregBuffer = [](ncclComm*, ncclProxyConnector*, void*) { return ncclSystemError; };
+  AddIpcInfos(reg, {true});
+  ScopedHook collnet(g_ncclCollnetDeregBuffer,
+                     [](ncclComm*, ncclProxyConnector*, void*) { return ncclSystemError; });
+  ScopedHook ipc(g_ncclIpcDeregBuffer, [](ncclComm*, ncclIpcRegInfo*) { return ncclSuccess; });
+
   EXPECT_EQ(CleanupAll(), ncclSuccess);
+  EXPECT_EQ(collnet.calls, 1);
+  EXPECT_EQ(ipc.calls, 1);
 }
 
 TEST_F(RegisterCleanupMicrotest, NoTransportRegistered_DeregistersNothing) {
