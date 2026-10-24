@@ -1,4 +1,5 @@
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
+import * as schema from '../../src/data/runSchema.js';
 import raw from '../fixtures/fictional-producer-run.json' with { type: 'json' };
 import { loadDashboardDataFiles } from '../../src/data/dashboardData.js';
 import { adaptPublishedDashboardData } from '../../src/data/dashboardDataAdapter.js';
@@ -20,6 +21,18 @@ test.each([false, true])('later configurations retain their cohort regardless of
   expect(projection.attempts.map(({ points }) => points[0].durationSeconds)).toEqual([null, 104.4]);
   expect(sourceData.runs).toBe(source.runs);
   expect(source).toEqual(before);
+});
+
+test('membership and normalized configuration maps share configurationKey', () => {
+  const source = publication();
+  const key = vi.spyOn(schema, 'configurationKey');
+  try {
+    adaptPublishedDashboardData(source);
+    expect(key).toHaveBeenCalledWith('gfx950', 'default');
+    expect(key).toHaveBeenCalledTimes(source.runs[0].benchmark_results.length * 2);
+  } finally {
+    key.mockRestore();
+  }
 });
 
 function publication() {

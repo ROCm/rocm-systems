@@ -24,7 +24,8 @@ function Stat({ label, value, icon: Icon, tone = 'neutral', caption, children })
   </Box>;
 }
 
-export default function ComparisonMetrics({ model, candidate, baseline, tolerance = model.tolerance ?? DURATION_CHANGE_BAND_PERCENT }) {
+export default function ComparisonMetrics({ model, candidate, baseline }) {
+  const tolerance = model.tolerance ?? DURATION_CHANGE_BAND_PERCENT;
   const hasPair = Boolean(candidate && baseline);
   const matched = model.comparable.length;
   const state = classifyDurationChange(model.aggregateDelta, tolerance);

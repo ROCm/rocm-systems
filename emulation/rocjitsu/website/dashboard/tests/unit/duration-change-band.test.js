@@ -40,7 +40,7 @@ test.each([
   expect(classifyDurationChange(value, tolerance)).toBe(state);
 });
 
-test('selector tolerance travels with the model into metric defaults', () => {
+test('the model owns metric tolerance, with a named fallback for older models', () => {
   const model = selectRunComparison(run(104), run(100), filters, 5);
   expect(model.tolerance).toBe(5);
   expect(model.counts.neutral).toBe(1);
@@ -48,7 +48,12 @@ test('selector tolerance travels with the model into metric defaults', () => {
   expect(html).toContain('data-testid="comparison-metric-aggregate-change" data-tone="neutral"');
   expect(html).toContain('Within ±5% noise tolerance');
   const overridden = renderToStaticMarkup(createElement(ComparisonMetrics, { model, tolerance: 0 }));
-  expect(overridden).toContain('data-testid="comparison-metric-aggregate-change" data-tone="error"');
+  expect(overridden).toContain('data-testid="comparison-metric-aggregate-change" data-tone="neutral"');
+  expect(overridden).toContain('Within ±5% noise tolerance');
+  const olderModel = selectRunComparison(run(102), run(100), filters);
+  delete olderModel.tolerance;
+  const legacy = renderToStaticMarkup(createElement(ComparisonMetrics, { model: olderModel }));
+  expect(legacy).toContain('Within ±3% noise tolerance');
 });
 
 const filters = { targets: ['gfx950'], modes: ['default'], suites: ['Triton'] };
@@ -65,7 +70,7 @@ test.each([
 ])('selector and metric agree for duration $duration and tolerance $tolerance', ({ duration, baseline = 100, tolerance, state }) => {
   const model = selectRunComparison(run(duration), run(baseline), filters, tolerance);
   expect(model.counts).toEqual({ faster: 0, slower: 0, neutral: 0, unavailable: 0, [state]: 1 });
-  const html = renderToStaticMarkup(createElement(ComparisonMetrics, { model, tolerance }));
+  const html = renderToStaticMarkup(createElement(ComparisonMetrics, { model }));
   const tone = state === 'faster' ? 'success' : state === 'slower' ? 'error' : 'neutral';
   expect(html).toContain(`data-testid="comparison-metric-aggregate-change" data-tone="${tone}"`);
   if (state === 'neutral') expect(html).toContain(`Within ±${tolerance ?? 3}% noise tolerance`);

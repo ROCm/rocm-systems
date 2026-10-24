@@ -1,6 +1,6 @@
 import { isSafeHttpUrl } from '../utils/externalUrls.js';
 import { isSupportedNumber, isTimingNumber, typedJsonIdentity } from './jsonValues.js';
-import { CURRENT_RUN_SCHEMA_VERSION, runSchemaVersion, THREAD_POLICIES } from './runSchema.js';
+import { CURRENT_RUN_SCHEMA_VERSION, configurationKey, runSchemaVersion, THREAD_POLICIES } from './runSchema.js';
 import { DASHBOARD_SITE_CONFIG } from '../config/siteConfig.js';
 import { backfillRunIds, compareRunExecution, sortRunsByCommit } from './runOrdering.js';
 
@@ -83,7 +83,7 @@ function normalizeRun(run) {
     ] },
     targets: [...new Set(run.benchmark_results.map(({ target }) => target))],
     modes: THREAD_POLICIES.filter((policy) => run.benchmark_results.some((row) => row.thread_policy === policy)),
-    configurations: [...new Map(run.benchmark_results.map(({ target, thread_policy }) => [`${target}/${thread_policy}`, { target, thread_policy }])).values()],
+    configurations: [...new Map(run.benchmark_results.map(({ target, thread_policy }) => [configurationKey(target, thread_policy), { target, thread_policy }])).values()],
     tests: run.benchmark_results.map(normalizeResult),
   };
 }
@@ -112,7 +112,7 @@ export function adaptPublishedDashboardData({ index, runs, runErrors = [], siteC
     const catalog = catalogs.get(suite);
     const configurations = new Map();
     for (const row of run.benchmark_results) {
-      const key = `${row.target}/${row.thread_policy}`;
+      const key = configurationKey(row.target, row.thread_policy);
       if (Object.hasOwn(catalog.configurations, key)) continue;
       if (!configurations.has(key)) configurations.set(key, []);
       configurations.get(key).push(row);
