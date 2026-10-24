@@ -7,15 +7,20 @@ Counter grouping inspector for rocprofiler-compute.
 Parses GFX architecture YAML configs and outputs counter grouping analysis
 without requiring GPU, rocprofiler, or full rocprof-compute initialization.
 
-Counter discovery uses ``OmniSoC_Base.detect_counters``; perfmon layout and
-YAML emission use ``OmniSoC_Base.perfmon_coalesce`` (which calls
-``_allocate_perfmon_counter_files`` and writes under ``<workload>/perfmon/``),
-matching the profiling path in ``soc_base.py``. ``get_rocprof_supported_counters``
+Counter discovery uses `OmniSoC_Base.detect_counters`; perfmon layout and
+YAML emission use `OmniSoC_Base.perfmon_coalesce` (which calls
+`_allocate_perfmon_counter_files` and writes under `<workload>/perfmon/`),
+matching the profiling path in `soc_base.py`. `get_rocprof_supported_counters`
 is stubbed so the tool runs without rocprofiler. Bucket views reuse a second
-``_allocate_perfmon_counter_files`` call on the same counter set (same result as
+`_allocate_perfmon_counter_files` call on the same counter set (same result as
 the coalesce pass).
 
-Usage (from the ``rocprofiler-compute`` project root):
+Each bucket-plan Summary is followed by HW packing limits from the arch's
+`perfmon_config` and notes that CPC/CPF/SQC/SQ table columns are
+display-only name-prefix lanes (SQC remaps to SQ for packing; CPC/CPF keep
+their own caps).
+
+Usage (from the `rocprofiler-compute` project root):
     ./tools/counter_grouping_inspector.py --arch gfx942
     ./tools/counter_grouping_inspector.py --arch gfx942 --block 2 3 4
     ./tools/counter_grouping_inspector.py --arch gfx942 --output plan.txt
@@ -30,7 +35,7 @@ import tempfile
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from rich.console import Console
 
@@ -51,6 +56,7 @@ from utils.logger import console_error  # noqa: E402
 from utils.mi_gpu_spec import mi_gpu_specs  # noqa: E402
 from utils.utils_common import canonical_config_arch  # noqa: E402
 from utils.utils_counter_defs import (  # noqa: E402
+    BLOCK_REMAP,
     extract_counters_and_variables,
 )
 
@@ -87,17 +93,13 @@ def _rocprof_supported_superset(counters: set[str]) -> set[str]:
     return out
 
 
-def run_soc_detect_and_coalesce(
+def _build_inspector_soc(
     arch: str,
     config_dir: Path,
     filter_blocks: Optional[list[str]],
     perfmon_config: dict[str, int],
     workload_root: Path,
-) -> tuple[set[str], list[CounterFile], OmniSoC_Base]:
-    """Run SoC counter detection and perfmon coalesce.
-
-    Writes YAML under ``workload_root/perfmon/``.
-    """
+) -> OmniSoC_Base:
     # num_xcd=1 is one reported die, not another arch's XCD count.
     # The arch SoC replaces l2_banks with that chip's own banks.
     machine_spec = SimpleNamespace(
@@ -107,7 +109,6 @@ def run_soc_detect_and_coalesce(
         gpu_arch=arch,
         gpu_series=mi_gpu_specs.get_gpu_series(arch),
     )
-
     filter_block_list = list(filter_blocks) if filter_blocks else []
     cli_args = argparse.Namespace(
         output_directory=str(workload_root.resolve()),
@@ -119,7 +120,6 @@ def run_soc_detect_and_coalesce(
         no_roof=True,
         device=0,
     )
-
     try:
         soc_module = importlib.import_module(f"rocprof_compute_soc.soc_{arch}")
         soc_class = getattr(soc_module, f"{arch}_soc")
@@ -128,8 +128,28 @@ def run_soc_detect_and_coalesce(
         soc = OmniSoC_Base(cli_args, machine_spec)
         soc.set_arch(arch)
     soc.set_perfmon_config(perfmon_config)
+    return soc
+
+
+def run_soc_detect_and_coalesce(
+    arch: str,
+    config_dir: Path,
+    filter_blocks: Optional[list[str]],
+    perfmon_config: dict[str, int],
+    workload_root: Path,
+) -> tuple[set[str], list[CounterFile], OmniSoC_Base]:
+    """Run SoC counter detection and perfmon coalesce.
+
+    Writes YAML under `workload_root/perfmon/`.
+    """
+    soc = _build_inspector_soc(
+        arch, config_dir, filter_blocks, perfmon_config, workload_root
+    )
 
     counters, _unused_filter_blocks = soc.detect_counters()
+    # Drop legacy SQ_ACCUM_PREV_HIRES if present; rocprofiler-sdk uses named
+    # *_ACCUM counters (accumulate(LEVEL, HIGH_RES) in sdk_config.yaml).
+    counters = counters - {"SQ_ACCUM_PREV_HIRES"}
     if not counters:
         return set(), [], soc
 
@@ -138,7 +158,6 @@ def run_soc_detect_and_coalesce(
     )
 
     soc.perfmon_coalesce(counters)
-
     perfmon_counter_files, _unused_perfmon_files, _unused_accumulator_files = (
         soc._allocate_perfmon_counter_files(counters)
     )
@@ -204,13 +223,42 @@ def _format_bucket_markdown(
     return "\n".join(lines)
 
 
+def _format_hw_limits_line(perfmon_config: dict[str, int]) -> str:
+    """Format packing slot caps from `perfmon_config` / mi_gpu_spec."""
+    limits = ", ".join(f"{block}: {cap}" for block, cap in perfmon_config.items())
+    return f"HW counter limits (perfmon_config packing slots): {limits}"
+
+
+def _format_display_column_comments() -> str:
+    """Clarify name-prefix columns vs real packing blocks / remaps."""
+    remap_bits = ", ".join(f"{src}→{dst}" for src, dst in sorted(BLOCK_REMAP.items()))
+    return (
+        "Comments: CPC, CPF, SQC, and SQ columns above are for display only "
+        "(name-prefix lanes), not separate perfmon buckets. SQC shares SQ's "
+        f"slot budget via BLOCK_REMAP ({remap_bits}); CPC and CPF each have "
+        "their own caps and do not remap into CP."
+    )
+
+
+def _format_summary_trailer(perfmon_config: dict[str, int]) -> str:
+    """HW limits + display notes appended after each Summary line."""
+    return (
+        f"\n{_format_hw_limits_line(perfmon_config)}\n"
+        f"{_format_display_column_comments()}\n\n"
+    )
+
+
 def generate_bucket_plan(
     output_files: list[CounterFile],
     arch: str,
+    *,
+    heading: Optional[str] = None,
+    perfmon_config: Optional[Dict[str, int]] = None,
 ) -> str:
     """Generate the bucket allocation plan as markdown tables."""
     buf = StringIO()
-    buf.write(f"Perfmon bucket allocation plan (architecture: {arch})\n\n")
+    title = heading or f"Perfmon bucket allocation plan (architecture: {arch})"
+    buf.write(f"{title}\n\n")
 
     global_columns, column_widths, sections, total_assignments = _bucket_plan_sections(
         output_files
@@ -228,8 +276,10 @@ def generate_bucket_plan(
 
     buf.write(
         f"Summary: {len(output_files)} bucket(s), "
-        f"{total_assignments} counter assignment(s).\n\n"
+        f"{total_assignments} counter assignment(s).\n"
     )
+    cfg = perfmon_config or mi_gpu_specs.get_perfmon_config(arch) or {}
+    buf.write(_format_summary_trailer(cfg))
 
     return buf.getvalue()
 
@@ -256,6 +306,8 @@ def generate_bucket_metrics(
     output_files: list[CounterFile],
     config_dir: Path,
     arch: str,
+    *,
+    section_heading: Optional[str] = None,
 ) -> str:
     """Generate metrics that span multiple buckets as a string.
 
@@ -263,6 +315,8 @@ def generate_bucket_metrics(
     this function's name reflects the primary bucket analysis use case.
     """
     buf = StringIO()
+    if section_heading:
+        buf.write(f"{section_heading}\n\n")
     counter_to_bucket = _counter_to_bucket_map(output_files)
 
     multi_rows: list[tuple[str, str, int, str, int, str]] = []
@@ -448,8 +502,13 @@ def render_perfmon_plan_svg(
 
     console.print(
         f"[bold]Summary:[/bold] {len(output_files)} bucket(s), "
-        f"{total_assignments} counter assignment(s).\n"
+        f"{total_assignments} counter assignment(s)."
     )
+    console.print()
+    perfmon_config = mi_gpu_specs.get_perfmon_config(arch) or {}
+    console.print(_format_hw_limits_line(perfmon_config))
+    console.print(_format_display_column_comments())
+    console.print()
 
     metrics_output = generate_bucket_metrics(output_files, config_dir, arch)
     console.print(metrics_output)
@@ -533,7 +592,6 @@ Examples:
             "  .svg - SVG image output (requires rich library)"
         ),
     )
-
     args = parser.parse_args()
 
     config_dir = args.config_dir or get_default_config_dir()
@@ -579,6 +637,13 @@ Examples:
         _emit_inspector_output(args, output_files, config_dir, arch)
 
 
+def _weighted_avg_section(config_dir: Path, arch: str) -> str:
+    from utils.metrics.weighted_avg import format_weighted_avg_inspector_section
+
+    config_arch_path = config_dir / canonical_config_arch(arch)
+    return format_weighted_avg_inspector_section(config_arch_path)
+
+
 def _emit_inspector_output(
     args: argparse.Namespace,
     output_files: list[CounterFile],
@@ -586,6 +651,7 @@ def _emit_inspector_output(
     arch: str,
 ) -> None:
     """Write or print bucket plan and multi-bucket metrics (stdout or --output)."""
+    weighted_section = _weighted_avg_section(config_dir, arch)
     # Handle output formats
     if args.output:
         output_path = args.output
@@ -604,7 +670,10 @@ def _emit_inspector_output(
             bucket_output = generate_bucket_plan(output_files, arch)
             metrics_output = generate_bucket_metrics(output_files, config_dir, arch)
             try:
-                output_path.write_text(bucket_output + metrics_output, encoding="utf-8")
+                output_path.write_text(
+                    bucket_output + metrics_output + weighted_section,
+                    encoding="utf-8",
+                )
             except OSError as exc:
                 console_error(
                     f"Error: could not write text output to {output_path}: {exc}"
@@ -619,9 +688,11 @@ def _emit_inspector_output(
             print("Falling back to stdout output.\n", file=sys.stderr)
             print_bucket_plan(output_files, arch)
             print_bucket_metrics(output_files, config_dir, arch)
+            print(weighted_section, end="")
     else:
         print_bucket_plan(output_files, arch)
         print_bucket_metrics(output_files, config_dir, arch)
+        print(weighted_section, end="")
 
 
 if __name__ == "__main__":
