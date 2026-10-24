@@ -99,6 +99,61 @@ HRR_TEST_CASE(Unit_HRR_Playback_PlacementHeldRanges) {
   CHECK(h.r.begin()->second == 0x20000);
 }
 
+// A range whose end is not above its start is never held, and asking for one
+// leaves the held ranges as they were (AIRUNTIME-3069).
+HRR_TEST_CASE(Unit_HRR_Playback_PlacementHeldRangesRejectInverted) {
+  HrrHeldRanges h;
+  h.add(0x10000, 0x20000);
+  CHECK_FALSE(h.take(0x18000, 0x18000));  // empty
+  CHECK_FALSE(h.take(0x18000, 0x14000));  // inverted
+  CHECK_FALSE(h.take(~0ull - 0xfff, 0x1000));  // end wrapped past 2^64
+  REQUIRE(h.r.size() == 1);
+  CHECK(h.r.begin()->first == 0x10000);
+  CHECK(h.r.begin()->second == 0x20000);
+}
+
+// The range placement maps for an allocation is checked: a size that wraps
+// 2^64, or rounding that does, is refused rather than turned into a small range
+// inside a held one (AIRUNTIME-3069).
+HRR_TEST_CASE(Unit_HRR_Playback_PlacementRangeChecked) {
+  const uint64_t G = 1ull << 21, B = 0x7f0000000000ull;
+  uint64_t b = 0, e = 0;
+  REQUIRE(hrr_place_range(B + 5, 100, G, &b, &e));
+  CHECK(b == B);
+  CHECK(e == B + G);
+  REQUIRE(hrr_place_range(B, G + 1, G, &b, &e));  // spills into a second granule
+  CHECK(e == B + 2 * G);
+
+  // rec + size lands exactly on 2^64, and one past it.
+  CHECK_FALSE(hrr_place_range(B, 0 - B, G, &b, &e));
+  CHECK_FALSE(hrr_place_range(B, 0 - B + 1, G, &b, &e));
+  CHECK_FALSE(hrr_place_range(B, ~0ull, G, &b, &e));
+  // rec + size ends just below 2^64: no wrap, but far above the ceiling.
+  CHECK_FALSE(hrr_place_range(B, (0 - B) - 1, G, &b, &e));
+  // Ends just below 2^64 but rounding up to a granule wraps.
+  CHECK_FALSE(hrr_place_range(1ull << 63, (1ull << 63) - 1, G, &b, &e));
+  // Not above its start, or not an address.
+  CHECK_FALSE(hrr_place_range(B, 0, G, &b, &e));
+  CHECK_FALSE(hrr_place_range(0, 64, G, &b, &e));
+  // The ceiling hrr_place_plan applies: the last byte at 2^47 - 1 is fine.
+  CHECK(hrr_place_range((1ull << 47) - 64, 64, G, &b, &e));
+  CHECK_FALSE(hrr_place_range((1ull << 47) - 64, 65, G, &b, &e));
+}
+
+// The plan drops an allocation whose recorded end wraps, including one that
+// ends exactly at 2^64 or whose page rounding wraps, so none is held.
+HRR_TEST_CASE(Unit_HRR_Playback_PlacementPlanDropsWrappedRange) {
+  const uint64_t B = 0x7f0000000000ull;
+  auto plan = hrr_place_plan({{B, B + 4096},
+                              {B + 8192, B},                 // end wrapped past 2^64
+                              {0ull - 4096, 0},               // ends at 2^64
+                              {0ull - 4096, ~0ull}},            // ends just below it
+                             {});
+  REQUIRE(plan.size() == 1);
+  CHECK(plan[0].base == B);
+  CHECK(plan[0].end == B + 4096);
+}
+
 /**
  * End doxygen group HRR.
  * @}
