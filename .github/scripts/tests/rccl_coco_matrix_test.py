@@ -28,7 +28,7 @@ class ScheduledRunsTest(unittest.TestCase):
         with mock.patch.object(matrix, "set_github_output") as emit:
             matrix.scheduled_runs("weekly")
         jobs = {entry["job"] for entry in json.loads(emit.call_args.args[0]["matrix"])["include"]}
-        self.assertEqual(jobs, {"ruby64-rccl-perf-weekly", "oci-rccl-perf-weekly"})
+        self.assertEqual(jobs, {"ruby64-rccl-perf-weekly", "oci-rccl-perf-weekly", "ruby64-rccl-tls-weekly"})
 
     def test_monthly_emits_only_monthly_jobs(self):
         with mock.patch.object(matrix, "set_github_output") as emit:
