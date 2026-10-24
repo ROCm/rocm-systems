@@ -231,7 +231,7 @@ extern std::function<hipError_t(hipStream_t /*stream*/, void* /*ptr*/,
     g_hipStreamWaitValue64;
 #ifdef RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED
 // cuMem DMA-BUF export (hipMemGetHandleForAddressRange). In-RCCL builds inherit the define;
-// standalone ones compile the callers out. Defaults to hipErrorNotSupported.
+// standalone ones compile the callers out. Defaults to hipErrorInvalidValue.
 extern std::function<hipError_t(void* /*handle*/, hipDeviceptr_t /*dptr*/, size_t /*size*/,
                                 hipMemRangeHandleType /*handleType*/, unsigned long long /*flags*/)>
     g_hipMemGetHandleForAddressRange;
