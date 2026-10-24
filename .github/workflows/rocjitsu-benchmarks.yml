@@ -139,6 +139,7 @@ jobs:
           repository: ROCm/rocm-libraries
           ref: ${{ env.TENSILE_SHA }}
           path: tensile-source
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Set up Python
