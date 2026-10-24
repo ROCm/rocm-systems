@@ -13,6 +13,8 @@
 
 * The hipFile CMake options have been renamed from `AIS_*` to `HIPFILE_*` (e.g., `AIS_CXX_STANDARD` is now `HIPFILE_CXX_STANDARD`). The old `AIS_*` names still work but are deprecated and emit a CMake deprecation warning.
 * The `HIPFILE_WARN_UNSAFE_BUFFER_OPS` CMake option now defaults to `OFF`.
+* hipFile is now built with exactly the C++ standard that the `HIPFILE_CXX_STANDARD` CMake option selects. Previously, the option set only a minimum, so a compiler whose default standard was newer built hipFile with that default. A value other than `20`, `23`, or `26` is now a configuration error, and `26` requires CMake 3.30 or later.
+* The installed `hipfile` CMake target no longer requires C++20 of the projects that link it. The installed examples now build as C++17, except `batch-roundtrip`, which still needs C++20.
 * Documented that Linux kernels built with `CONFIG_PCI_P2PDMA=y` are required for fastpath.
 
 ### Fixed

@@ -29,9 +29,8 @@ function(hipfile_add_executable)
     add_executable(${arg_NAME} ${arg_SRCS})
     hipfile_set_compiler_flags(${arg_NAME})
 
-    # Set C++ standard
-    target_compile_features(${arg_NAME} PRIVATE cxx_std_${HIPFILE_CXX_STANDARD})
-    set_target_properties(${arg_NAME} PROPERTIES CXX_EXTENSIONS OFF)
+    # Set the C++ standard
+    hipfile_set_cxx_standard(${arg_NAME})
 
     # Set position-independent code
     set_target_properties(${arg_NAME} PROPERTIES POSITION_INDEPENDENT_CODE ON)
