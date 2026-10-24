@@ -65,6 +65,24 @@ pub(crate) struct Reader {
     storage: ReaderStorage,
 }
 
+impl Reader {
+    /// Owns a snapshot supplied directly by an HSA caller.
+    pub(crate) fn from_memory(bytes: Vec<u8>) -> Self {
+        Self {
+            bytes: bytes.into(),
+            storage: ReaderStorage::Memory,
+        }
+    }
+
+    /// Owns a file snapshot and retains its source description.
+    pub(crate) fn from_file(bytes: Vec<u8>, descriptor: i32, size: usize) -> Self {
+        Self {
+            bytes: bytes.into(),
+            storage: ReaderStorage::from_file(descriptor, 0, size),
+        }
+    }
+}
+
 /// Parsed code-object metadata cached independently of any executable load.
 pub(crate) struct CodeObject {
     /// Immutable ELF bytes shared with readers and executable loads.
@@ -211,12 +229,21 @@ impl LoaderState {
         self.code_symbols.clear();
         self.code_objects.clear();
     }
+
+    /// Registers a caller-owned code-object reader snapshot.
+    pub(crate) fn insert_reader(&mut self, handle: u64, reader: Reader) {
+        self.readers.insert(handle, reader);
+    }
+
+    /// Retires a reader snapshot by public handle.
+    pub(crate) fn remove_reader(&mut self, handle: u64) -> bool {
+        self.readers.remove(&handle).is_some()
+    }
 }
 
 mod code_object;
 mod executable;
 mod query;
-mod reader;
 
 use code_object::map_loader_error;
 
