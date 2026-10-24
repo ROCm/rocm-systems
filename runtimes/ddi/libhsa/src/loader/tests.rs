@@ -6,8 +6,8 @@
 use super::code_object::*;
 use super::executable::state::*;
 use super::executable::symbol::*;
-use super::reader::*;
 use super::*;
+use crate::api::loader::reader::*;
 
 #[test]
 /// Verifies that memory reader rejects oversized slice before access.

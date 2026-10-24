@@ -4,6 +4,7 @@
 //! Queue ownership, atomic index, and ABI regression tests.
 
 use super::*;
+use crate::api::queue::index::*;
 use std::sync::atomic::AtomicUsize;
 
 /// Independent fixture positions for the public AMD queue control ABI.
