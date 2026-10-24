@@ -590,7 +590,7 @@ std::function<hipError_t(hipStream_t, unsigned int, hipStreamBatchMemOpParams*, 
 static hipError_t DefaultHipMemGetHandleForAddressRange(void*, hipDeviceptr_t, size_t, hipMemRangeHandleType,
                                                         unsigned long long)
 {
-    return hipErrorNotSupported;
+    return hipErrorInvalidValue;
 }
 std::function<hipError_t(void*, hipDeviceptr_t, size_t, hipMemRangeHandleType, unsigned long long)>
     g_hipMemGetHandleForAddressRange = DefaultHipMemGetHandleForAddressRange;
