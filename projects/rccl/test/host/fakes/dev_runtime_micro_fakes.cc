@@ -115,15 +115,6 @@ ncclResult_t bootstrapRecv(void* bs, int peer, int tag, void* data, int size) {
 }
 
 // ---------------------------------------------------------------------------
-// Arg checks / comm readiness.
-// ---------------------------------------------------------------------------
-ncclResult_t PtrCheck(const void*, const char*, const char*) { return ncclSuccess; }
-ncclResult_t CommCheck(struct ncclComm*, const char*, const char*) { return ncclSuccess; }
-// Seam: NCCLCHECK'd on entry to ncclCommWindowRegister_impl, so the
-// not-ready rejection is only reachable by driving it.
-
-
-// ---------------------------------------------------------------------------
 // Public registration API.
 // ---------------------------------------------------------------------------
 // Seams: ncclDevrWindowRegisterInGroup takes a local registration up front and
