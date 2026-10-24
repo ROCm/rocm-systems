@@ -840,9 +840,16 @@ TEST_F(BootstrapMicrotest, InitOverNet_UnidirRingAllGathersAndCloseReleasesEvery
   }
 }
 
-TEST_F(BootstrapMicrotest, InitOverNet_BidirRingUsesThePiggybackedReverseHandles) {
-  params_["OOB_NET_ENABLE"] = 1;
-  params_["BOOTSTRAP_BIDIR_NET"] = 1;
+class BootstrapNetBidirMicrotest : public BootstrapMicrotest {
+ protected:
+  void SetUp() override {
+    BootstrapMicrotest::SetUp();
+    params_["OOB_NET_ENABLE"] = 1;
+    params_["BOOTSTRAP_BIDIR_NET"] = 1;
+  }
+};
+
+TEST_F(BootstrapNetBidirMicrotest, InitOverNet_BidirRingUsesThePiggybackedReverseHandles) {
   for (int n = 3; n <= 6; n++) {
     SCOPED_TRACE(n);
     ranks_.clear();
@@ -863,9 +870,7 @@ TEST_F(BootstrapMicrotest, InitOverNet_BidirRingUsesThePiggybackedReverseHandles
   }
 }
 
-TEST_F(BootstrapMicrotest, InitOverNet_SlowConnectsAndPostsAreRetriedUntilTheyLand) {
-  params_["OOB_NET_ENABLE"] = 1;
-  params_["BOOTSTRAP_BIDIR_NET"] = 1;
+TEST_F(BootstrapNetBidirMicrotest, InitOverNet_SlowConnectsAndPostsAreRetriedUntilTheyLand) {
   g_netDeferConnect = 40;
   g_netDeferIsend = 40;
   g_netDeferIrecv = 40;
@@ -874,9 +879,7 @@ TEST_F(BootstrapMicrotest, InitOverNet_SlowConnectsAndPostsAreRetriedUntilTheyLa
   EXPECT_EQ(0, g_netDeferConnect.load());
 }
 
-TEST_F(BootstrapMicrotest, InitOverNet_ListenFailuresAreReturned) {
-  params_["OOB_NET_ENABLE"] = 1;
-  params_["BOOTSTRAP_BIDIR_NET"] = 1;
+TEST_F(BootstrapNetBidirMicrotest, InitOverNet_ListenFailuresAreReturned) {
   for (int nth : {1, 2}) {
     SCOPED_TRACE(nth);
     ranks_.clear();
@@ -895,9 +898,7 @@ TEST_F(BootstrapMicrotest, InitOverNet_ListenFailuresAreReturned) {
 }
 
 // The reverse handles cannot cross roots, so several roots fall back to the forward net ring.
-TEST_F(BootstrapMicrotest, InitOverNet_SeveralRootsKeepTheUnidirectionalRing) {
-  params_["OOB_NET_ENABLE"] = 1;
-  params_["BOOTSTRAP_BIDIR_NET"] = 1;
+TEST_F(BootstrapNetBidirMicrotest, InitOverNet_SeveralRootsKeepTheUnidirectionalRing) {
   MakeRanks(5);
   ncclUniqueId ids[2];
   for (auto& id : ids) ASSERT_EQ(ncclSuccess, bootstrapGetUniqueId((ncclBootstrapHandle*)&id, nullptr));
@@ -907,9 +908,7 @@ TEST_F(BootstrapMicrotest, InitOverNet_SeveralRootsKeepTheUnidirectionalRing) {
   EXPECT_TRUE(AllOk(CloseRanks()));
 }
 
-TEST_F(BootstrapMicrotest, BidirRingSetup_HandleExchangeFailureDeregistersAndIsReturned) {
-  params_["OOB_NET_ENABLE"] = 1;
-  params_["BOOTSTRAP_BIDIR_NET"] = 1;
+TEST_F(BootstrapNetBidirMicrotest, BidirRingSetup_HandleExchangeFailureDeregistersAndIsReturned) {
   NetLoop loop;
   struct bootstrapState state = {};
   state.nranks = 3;
@@ -930,9 +929,7 @@ TEST_F(BootstrapMicrotest, BidirRingSetup_HandleExchangeFailureDeregistersAndIsR
   EXPECT_NE(nullptr, state.listen.net.revComm);  // the in-place listen, done once
 }
 
-TEST_F(BootstrapMicrotest, BidirRingSetup_PiggybackedHandleSkipsTheExchange) {
-  params_["OOB_NET_ENABLE"] = 1;
-  params_["BOOTSTRAP_BIDIR_NET"] = 1;
+TEST_F(BootstrapNetBidirMicrotest, BidirRingSetup_PiggybackedHandleSkipsTheExchange) {
   struct bootstrapState state = {};
   state.nranks = 3;
   state.net = &g_fakeNet;
@@ -949,9 +946,7 @@ TEST_F(BootstrapMicrotest, BidirRingSetup_PiggybackedHandleSkipsTheExchange) {
   EXPECT_EQ(1u, g_netListens.size());
 }
 
-TEST_F(BootstrapMicrotest, BidirRingSetupStart_NeedsAPiggybackedHandleToStartConnecting) {
-  params_["OOB_NET_ENABLE"] = 1;
-  params_["BOOTSTRAP_BIDIR_NET"] = 1;
+TEST_F(BootstrapNetBidirMicrotest, BidirRingSetupStart_NeedsAPiggybackedHandleToStartConnecting) {
   struct bootstrapState state = {};
   state.nranks = 3;
   state.net = &g_fakeNet;
@@ -1035,9 +1030,7 @@ TEST_F(BootstrapMicrotest, Split_SharedResourcesMapsTopParentRanksAndSkipsThePro
   EXPECT_TRUE(AllOk(CloseRanks()));
 }
 
-TEST_F(BootstrapMicrotest, Split_NetModeExchangesReverseHandlesOverTheForwardRing) {
-  params_["OOB_NET_ENABLE"] = 1;
-  params_["BOOTSTRAP_BIDIR_NET"] = 1;
+TEST_F(BootstrapNetBidirMicrotest, Split_NetModeExchangesReverseHandlesOverTheForwardRing) {
   ASSERT_EQ(ncclSuccess, InitRanks(4));
   g_netDeferConnect = 20;
   ASSERT_TRUE(AllOk(Split({{1, 2, 3, 0}}, false)));
