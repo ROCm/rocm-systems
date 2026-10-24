@@ -58,6 +58,7 @@
 #include "suites/functional/memory_allocation.h"
 #include "suites/functional/memory_fragment.h"
 #include "suites/functional/memory_fill.h"
+#include "suites/functional/memory_fill_bytes.h"
 #include "suites/functional/deallocation_notifier.h"
 #include "suites/functional/virtual_memory.h"
 #include "suites/functional/svm_memory.h"
@@ -216,6 +217,13 @@ TEST(rocrtstFunc, MemoryFillTest) {
   if (!RunCustomTestProlog(&mf)) return;
   mf.MemoryFillTest();
   RunCustomTestEpilog(&mf);
+}
+
+TEST(rocrtstFunc, Memory_Fill_Bytes_Test) {
+  MemoryFillBytesTest mfb;
+  if (!RunCustomTestProlog(&mfb)) return;
+  mfb.MemoryFillBytesAllTests();
+  RunCustomTestEpilog(&mfb);
 }
 
 TEST(rocrtstFunc, Concurrent_Init_Test) {
