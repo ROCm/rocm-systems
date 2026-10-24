@@ -2527,6 +2527,23 @@ testResult_t run() {
     if (proc == 0) printf("#\n# Reducing maxBytes to %ld due to memory limitation\n", maxBytes);
   }
 
+  const char* tlsPsk = getenv("NCCL_TESTS_TLS_PSK");
+  if (tlsPsk && tlsPsk[0]) {
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,32,0)
+    if (test_ncclVersion < NCCL_VERSION(2,32,0)) {
+      if (proc == 0) printf("# NCCL_TESTS_TLS_PSK ignored: RCCL library older than 2.32\n");
+    } else {
+      ncclEncryptionConfig_t encryption = NCCL_ENCRYPTION_CONFIG_INITIALIZER;
+      encryption.mode = NCCL_ENCRYPTION_MODE_PSK;
+      encryption.psk = tlsPsk;
+      NCCLCHECK(ncclSetEncryption(&encryption));
+      if (proc == 0) printf("# Socket encryption: TLS, %zu-byte pre-shared key\n", strlen(tlsPsk));
+    }
+#else
+    if (proc == 0) printf("# NCCL_TESTS_TLS_PSK ignored: built against RCCL headers older than 2.32\n");
+#endif
+  }
+
   ncclUniqueId ncclId;
   if (ncclProc == 0) {
     NCCLCHECK(ncclGetUniqueId(&ncclId));

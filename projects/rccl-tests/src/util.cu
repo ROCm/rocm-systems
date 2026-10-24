@@ -373,7 +373,12 @@ void jsonOutputInit(const char *in_path,
   jsonKey("env");
   jsonStartList();
   for(char **e = envp; *e; e++) {
-    jsonStr(*e);
+    // Reports get shared; the TLS pre-shared key must not end up in them.
+    if (strncmp(*e, "NCCL_TESTS_TLS_PSK=", strlen("NCCL_TESTS_TLS_PSK=")) == 0) {
+      jsonStr("NCCL_TESTS_TLS_PSK=<redacted>");
+    } else {
+      jsonStr(*e);
+    }
   }
   jsonFinishList();
   jsonKey("nccl_version"); jsonInt(test_ncclVersion);
