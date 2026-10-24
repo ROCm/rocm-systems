@@ -394,6 +394,14 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `PROFILER_V<N>_CC_PATH`, from `profiler-v<N>-test.cc`); suites `Profiler*`. Its own binary
   because the tests define the logging, env, plugin-open and dlsym seams the shared fakes also
   define. See `test_categories_micro_profiler.yaml`.
+- **`rccl-UnitTestsMicroTransportGeneric`** — `src/transport/generic.cc` (via
+  `GENERIC_CC_PATH`, from `transport-generic-test.cc`); suite
+  `PatConnectMicrotest.*`. Its own binary, not sharing `rccl-UnitTestsMicro`:
+  `fakes/transport_stubs.cc` and `fakes/collective_stubs.cc` define fail-loud
+  stubs of `generic.cc`'s `ncclTransportRingConnect`, `ncclTransportTreeConnect`
+  and `ncclTransportPatConnect`, which would be duplicate symbols against the
+  real ones, so the test TU fakes `ncclPatEnable`, `ncclTransportP2pConnect` and
+  `ncclTransportP2pSetup` itself. See `test_categories_micro_transport_generic.yaml`.
 
 - **`rccl-UnitTestsMicroRmaProxy`** — `src/rma/rma_proxy.cc` (via
   `RMA_PROXY_CC_PATH`, from `rma-proxy-test.cc`); suite
@@ -975,8 +983,8 @@ can be configured **directly** to build every host binary — `rccl-HostUnitTest
 `rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker]`,
 `rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroGinHostFinalize`, `rccl-UnitTestsMicroDdaIpc`, `rccl-UnitTestsMicroCe`, `rccl-UnitTestsMicroDiagnostics`,
 `rccl-UnitTestsMicroGraph`, `rccl-UnitTestsMicroDiagnostics`, `rccl-UnitTestsMicroDda`,
-`rccl-UnitTestsMicroSymKernels`, `rccl-UnitTestsMicroTaskPrep` and
-`rccl-UnitTestsMicroRmaProxy` — **without configuring/building all of
+`rccl-UnitTestsMicroSymKernels`, `rccl-UnitTestsMicroTaskPrep`, `rccl-UnitTestsMicroRmaProxy` and
+`rccl-UnitTestsMicroTransportGeneric` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test
 sources.
 
@@ -1037,6 +1045,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroProfiler           # src/plugin/profiler.cc + profiler_v1..v7.cc
 ./build/rccl-UnitTestsMicroRmaProxy           # src/rma/rma_proxy.cc tests
 ./build/rccl-UnitTestsMicroDda                # src/algorithms/dda/ tests
+./build/rccl-UnitTestsMicroTransportGeneric   # src/transport/generic.cc tests
 ./build/rccl-HostUnitTests
 ./build/rccl-UnitTestsMicroRoctxNvml          # misc/roctx.cc + misc/nvmlwrap_stub.cc tests
 ./build/rccl-UnitTestsMicroRoctxNvml-roctx    # same, ROCTX_ENABLE arm
