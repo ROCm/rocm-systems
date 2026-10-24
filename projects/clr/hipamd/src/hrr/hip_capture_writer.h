@@ -20,6 +20,11 @@ namespace writer {
 // off, when the file system holding the archive has less than the reserve free.
 bool open(const char* output_dir);
 
+// Register the fork() handlers that hold the writer's mutexes across a fork.
+// open() registers them too. The capture calls this before it installs shims
+// that reach the writer, and so take its mutexes, before open().
+void install_fork_handlers();
+
 // True while events.bin is open: from a successful open() until close(), or
 // until capture stops because the file system fell to the reserve.
 bool is_open();

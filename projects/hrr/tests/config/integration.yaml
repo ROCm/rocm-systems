@@ -150,10 +150,17 @@ cases:
   Unit_HRR_FailedShimCalls_Direct: {}
   Unit_HRR_FatBinHeaderChecks: {}
   Unit_HRR_FatBinHeader_Direct: {}
+  Unit_HRR_FirstMallocRecorded: {}
   Unit_HRR_FirstMallocRoundtrip: {}
   Unit_HRR_FirstMalloc_Direct: {}
+  Unit_HRR_FirstSetDeviceFlagsRecorded: {}
+  Unit_HRR_FirstSetDeviceFlags_Direct: {}
+  Unit_HRR_FirstStreamCreateRecorded: {}
+  Unit_HRR_FirstStreamCreate_Direct: {}
   Unit_HRR_ForkAfterCaptureShutdown: {}
   Unit_HRR_ForkAfterCaptureShutdown_Direct: {}
+  Unit_HRR_ForkBeforeInit: {}
+  Unit_HRR_ForkBeforeInit_Direct: {}
   Unit_HRR_ForkBetweenCaptureFlushAndClose: {}
   Unit_HRR_ForkBetweenCaptureFlushAndClose_Direct: {}
   Unit_HRR_ForkDuringBlobWrite: {}
