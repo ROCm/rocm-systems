@@ -131,7 +131,7 @@ class TopoGpuDevMicrotest : public ::testing::Test {
     EXPECT_EQ(xmlAddNode(xml, top, "cpu", &cpu), ncclSuccess);
     EXPECT_EQ(xmlSetAttrLong(cpu, "host_hash", kHostHash), ncclSuccess);
     EXPECT_EQ(xmlSetAttrInt(cpu, "numaid", gpus_[proc.own].numa), ncclSuccess);
-    SetAttrs(cpu, {"affinity=", "arch=x86_64", "vendor=AuthenticAMD", "familyid=25", "modelid=1"});
+    SetAttrs(cpu, {"affinity=", "arch=x86_64", "vendor=AuthenticAMD", "familyid=26", "modelid=2"});
     EXPECT_EQ(xmlAddNode(xml, cpu, "pci", &pci), ncclSuccess);
     std::string physBusId = gpus_[proc.own].busId.substr(0, 11) + "0";
     SetAttrs(pci, {"class=0x03", "vendor=0x1002", "device=0x74a1", "subsystem_vendor=0x1002", "subsystem_device=0x74a1",

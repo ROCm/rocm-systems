@@ -63,6 +63,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * `RCCL_DDA_LL128_RS_THREADS` removed (was default `1024`): reduce-scatter LL128 now launches a fixed 512-thread block, one warp per slice, so the thread count is no longer a tuning knob.
 
 ### Resolved issues
+* Fixed AMD EPYC Rome, Milan and Genoa hosts no longer being recognized as Rome-class since the NCCL 2.31 CPU family detection change. The Rome topology presets (including the 4H4P and 1H16P models) and GDR between a GPU and a NIC on the same CPU root complex apply to these hosts again. Turin hosts stay outside the Rome class, and the inter-CPU bandwidth stays at 16 GB/s for every AMD generation.
 * Fixed topology GPU indices that followed the HIP device order instead of the PCI order. This reordered rings and NIC selection, causing an `ncclGather` performance regression on multi-node MI355X systems, and made communicator initialization fail when each rank sees only its own GPU.
 * Fixed profiler overhead when no profiler plugin is loaded or only kernel-channel events are enabled.
 * Fixed profiler API events reporting rank 0 instead of the originating communicator rank.
