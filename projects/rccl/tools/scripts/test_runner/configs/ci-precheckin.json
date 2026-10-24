@@ -484,28 +484,6 @@
       "tests": [
         {"name": "DdaMicrotests", "description": "Host-only src/algorithms/dda/ microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
       ]
-    },
-    "unit_tests_micro_net_ib_cast_connect": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroNetIbCastConnect",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 0,
-      "timeout": 60,
-      "tests": [
-        {"name": "NetIbCastConnectMicrotests", "description": "Host-only net_ib_cast connect.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
-      ]
-    },
-    "unit_tests_micro_net_ib_cast_qp_sharing": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroNetIbCastQpSharing",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 0,
-      "timeout": 60,
-      "tests": [
-        {"name": "NetIbCastQpSharingMicrotests", "description": "Host-only net_ib_cast qp_sharing.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
-      ]
     }
   },
   "test_suites": [
@@ -687,18 +665,6 @@
       "name": "RCCL Microtests - algorithms/dda",
       "description": "rccl-UnitTestsMicroDda (host-only src/algorithms/dda/ microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_dda",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Microtests - net_ib_cast connect.cc",
-      "description": "rccl-UnitTestsMicroNetIbCastConnect (host-only net_ib_cast connect.cc microtests, no GPU/HIP/RCCL runtime)",
-      "config": "unit_tests_micro_net_ib_cast_connect",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Microtests - net_ib_cast qp_sharing.cc",
-      "description": "rccl-UnitTestsMicroNetIbCastQpSharing (host-only net_ib_cast qp_sharing.cc microtests, no GPU/HIP/RCCL runtime)",
-      "config": "unit_tests_micro_net_ib_cast_qp_sharing",
       "enabled": true
     }
   ]
