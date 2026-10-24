@@ -25,6 +25,7 @@ from pc_sampling.code_object_analysis import CodeObjectInstruction, CodeObjectSy
 from pc_sampling.pc_sampling_analysis import SOURCE_LINE_MISSING, InstructionLineRecord
 from rocprof_compute_analyze.analysis_db import (
     SourceFrameCollector,
+    _visible_metric_rows,
     db_analysis,
     filter_dispatch_frame,
     report_evaluation_diagnostics,
@@ -81,6 +82,8 @@ def make_roofline_calc_analyzer(workload_path, pmc_df, roofline_df):
         _runs={workload_path: SimpleNamespace(sys_info=sys_info_df)},
         _pmc_df_per_workload={workload_path: pmc_df},
         _arch_configs={"gfx90a": arch_config},
+        _pass_layout_per_workload={},
+        _roofline_ceilings_per_workload={},
         get_args=lambda: SimpleNamespace(),
     )
 
@@ -1022,6 +1025,49 @@ def test_calc_metrics_data_builds_rows_and_preserves_schema():
     assert list(exprs["value_name"]) == ["Avg", "Min", "Max"]
     assert list(exprs["value"]) == ["10", "5", "20"]
     assert set(exprs["metric_id"]) == {"7.1.0"}
+
+
+def test_calc_metrics_data_ingests_null_min_max():
+    """YAML null min/max is an empty expression cell, not an AttributeError."""
+    workload_path = "/fake/workload"
+    metric_df = pd.DataFrame(
+        {
+            "Metric": ["VALU FLOPs"],
+            "Avg": [" 1 "],
+            "Min": ["x"],
+            "Max": ["y"],
+            "Unit": ["Gflop"],
+        },
+        index=pd.Index(["2.1.0"], name="Metric_ID"),
+    )
+    metric_df.at["2.1.0", "Min"] = None
+    metric_df.at["2.1.0", "Max"] = None
+    assert metric_df.loc["2.1.0", "Min"] is None
+    assert metric_df.loc["2.1.0", "Max"] is None
+    arch_config = schema.ArchConfig()
+    arch_config.dfs = {201: metric_df}
+    arch_config.panel_configs = {
+        200: {
+            "id": 200,
+            "title": "Workgroup",
+            "data source": [{"metric_table": {"id": 201, "title": "VALU"}}],
+        }
+    }
+
+    analyzer = db_analysis(MagicMock(verbose=0), {})
+    analyzer._pmc_df_per_workload = {workload_path: pd.DataFrame({"Counter1": [1]})}
+    analyzer._runs = {
+        workload_path: MagicMock(sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]))
+    }
+    analyzer._arch_configs = {"gfx942": arch_config}
+
+    _metrics_info, expressions = analyzer.calc_metrics_data()
+
+    exprs = expressions[workload_path]
+    by_name = dict(zip(exprs["value_name"], exprs["value"]))
+    assert by_name["Avg"] == "1"
+    assert by_name["Min"] == ""
+    assert by_name["Max"] == ""
 
 
 LONG_FORM_PMC_PERF = (
@@ -3773,3 +3819,12 @@ def test_run_analysis_stores_null_for_an_arch_without_a_layout(db_session, tmp_p
     # Also covers a layout file skipped as broken
     workload = run_memory_chart_workload(tmp_path, "gfx1030")
     assert workload.memory_chart_layout_extdata is None
+
+
+def test_visible_metric_rows_drop_collectable_names():
+    frame = pd.DataFrame({
+        "Metric": ["AI HBM", "_collect.flops", "VALU FLOPs"],
+        "Value": ["", "to_sum(raw_pmc_df['SQ_A'])", "1"],
+    })
+    names = [row["Metric"] for _metric_id, row in _visible_metric_rows(frame)]
+    assert names == ["AI HBM", "VALU FLOPs"]

@@ -3,11 +3,14 @@
 
 """Unit tests for same-pass analyze provenance and binding."""
 
+import logging
+
 import pandas as pd
 import pytest
 
 from utils.file_io import load_df_pmc
 from utils.metrics.evaluation_pipeline import eval_metric
+from utils.metrics.expression import build_eval_string, update_denominator_string
 from utils.metrics.pass_provenance import (
     METRIC_ROW_PASS_ATTR,
     PassLayout,
@@ -15,12 +18,16 @@ from utils.metrics.pass_provenance import (
     bind_expression_dataframe,
     bind_metric_tables_to_passes,
     build_pass_layout,
+    choose_metric_pass,
+    expand_required_counters,
     extract_row_refs,
     natural_pass_sort_key,
+    resolve_weight_counter_column,
     select_pass,
     select_pass_with_normalization_fallback,
 )
 from utils.utils_analysis import process_rocpd_csv
+from utils.utils_counter_defs import extract_counters_and_variables
 
 ROCPD_COUNTER_HEADER = (
     "GPU_ID,Dispatch_ID,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,"
@@ -34,6 +41,12 @@ def _write_gzip_csv(path, text: str) -> None:
     import gzip
 
     path.write_bytes(gzip.compress(text.encode("utf-8")))
+
+
+def _sub_metric_frame(pass_key: str) -> pd.DataFrame:
+    frame = pd.DataFrame({"Metric": ["read_sub"]})
+    frame.attrs[METRIC_ROW_PASS_ATTR] = {frame.index[0]: pass_key}
+    return frame
 
 
 def test_natural_pass_sort_key_orders_numeric_suffix() -> None:
@@ -87,7 +100,13 @@ def test_load_df_pmc_no_duplicates_matches_unique_columns(tmp_path) -> None:
     assert not layout.has_duplicates
     assert df["SQ_WAVES"].iloc[0] == 4
     assert df["SQ_BUSY_CYCLES"].iloc[0] == 100
-    assert not any("@pass:" in column for column in df.columns)
+    shadow = {column for column in df.columns if "@pass:" in column}
+    assert shadow == {
+        "Start_Timestamp@pass:pmc_perf_0",
+        "End_Timestamp@pass:pmc_perf_0",
+        "Start_Timestamp@pass:pmc_perf_1",
+        "End_Timestamp@pass:pmc_perf_1",
+    }
 
 
 def test_load_df_pmc_legacy_shape_for_iteration_multiplexing(tmp_path) -> None:
@@ -245,8 +264,9 @@ def test_select_pass_returns_none_when_counters_span_passes() -> None:
     assert select_pass(frozenset({"A", "B"}), layout) is None
 
 
-def test_select_pass_does_not_relax_sq_waves() -> None:
-    layout = PassLayout(
+def test_denominator_only_on_another_pass_does_not_bind(caplog) -> None:
+    """SQ_WAVES or GRBM_GUI_ACTIVE on a different pass leaves the metric unset."""
+    sq_layout = PassLayout(
         pass_keys=("pmc_perf_0", "pmc_perf_1"),
         counters_by_pass={
             "pmc_perf_0": frozenset({"TA_BUSY"}),
@@ -254,18 +274,120 @@ def test_select_pass_does_not_relax_sq_waves() -> None:
         },
         duplicated=frozenset(),
     )
-
     selected, relaxed = select_pass_with_normalization_fallback(
         frozenset({"TA_BUSY", "SQ_WAVES"}),
+        sq_layout,
+        "MI300",
+    )
+    assert selected is None
+    assert not relaxed
+
+    grbm_layout = PassLayout(
+        pass_keys=("pmc_perf_0", "pmc_perf_1"),
+        counters_by_pass={
+            "pmc_perf_0": frozenset({"TA_BUSY"}),
+            "pmc_perf_1": frozenset({"GRBM_GUI_ACTIVE"}),
+        },
+        duplicated=frozenset(),
+    )
+    selected, relaxed = select_pass_with_normalization_fallback(
+        frozenset({"TA_BUSY", "GRBM_GUI_ACTIVE"}),
+        grbm_layout,
+        "MI300",
+    )
+    assert selected is None
+    assert not relaxed
+
+    with caplog.at_level(logging.WARNING):
+        warned = choose_metric_pass(
+            frozenset({"TA_BUSY", "SQ_WAVES"}),
+            sq_layout,
+            "MI300",
+            "row sq",
+        )
+    assert warned is None
+    assert "leaving the metric unset" in caplog.text
+    assert "SQ_WAVES" in caplog.text
+
+
+def test_same_pass_denominator_still_selects_that_pass() -> None:
+    layout = PassLayout(
+        pass_keys=("pmc_perf_0", "pmc_perf_1"),
+        counters_by_pass={
+            "pmc_perf_0": frozenset({"TA_BUSY", "SQ_WAVES", "GRBM_GUI_ACTIVE"}),
+            "pmc_perf_1": frozenset({"TD_BUSY"}),
+        },
+        duplicated=frozenset(),
+    )
+
+    selected, relaxed = select_pass_with_normalization_fallback(
+        frozenset({"TA_BUSY", "SQ_WAVES", "GRBM_GUI_ACTIVE"}),
         layout,
         "MI300",
     )
 
-    assert selected is None
+    assert selected == "pmc_perf_0"
     assert not relaxed
+    assert (
+        choose_metric_pass(
+            frozenset({"TA_BUSY", "SQ_WAVES", "GRBM_GUI_ACTIVE"}),
+            layout,
+            "MI300",
+            "row same",
+        )
+        == "pmc_perf_0"
+    )
 
 
-def test_normalization_fallback_reports_failure_when_formula_still_spans_passes():
+def test_denom_choice_uses_only_the_counter_on_the_selected_pass(caplog) -> None:
+    """$denom is expanded before the pass is chosen.
+
+    Packing does not add SQ_WAVES or GRBM_GUI_ACTIVE for $denom. per_kernel
+    and per_second still use the pass that holds the metric counter. per_wave
+    and per_cycle stay unset when that counter is only on another pass.
+    """
+    formula = "SUM(TA_BUSY) / SUM($denom)"
+    packing_counters, _variables = extract_counters_and_variables(
+        formula, "MI300", include_supported_denom=False
+    )
+    assert packing_counters == {"TA_BUSY"}
+
+    layout = PassLayout(
+        pass_keys=("pmc_perf_0", "pmc_perf_1"),
+        counters_by_pass={
+            "pmc_perf_0": frozenset({"TA_BUSY"}),
+            "pmc_perf_1": frozenset({"SQ_WAVES", "GRBM_GUI_ACTIVE"}),
+        },
+        duplicated=frozenset(),
+    )
+    expected_pass = {
+        "per_kernel": "pmc_perf_0",
+        "per_second": "pmc_perf_0",
+        "per_wave": None,
+        "per_cycle": None,
+    }
+    with caplog.at_level(logging.WARNING):
+        for unit, chosen_pass in expected_pass.items():
+            built = build_eval_string(update_denominator_string(formula, unit))
+            required = expand_required_counters(extract_row_refs([built]), "MI300")
+            frame = pd.DataFrame({"Avg": [built]})
+            bind_metric_tables_to_passes(
+                {1: frame},
+                {1: "metric_table"},
+                layout,
+                "MI300",
+                frozenset({"Avg"}),
+            )
+            assert choose_metric_pass(required, layout, "MI300", unit) == chosen_pass
+            if chosen_pass is None:
+                assert frame.at[0, "Avg"] == ""
+            else:
+                assert "raw_pmc_df['TA_BUSY']" in frame.at[0, "Avg"]
+    assert "SQ_WAVES" in caplog.text
+    assert "GRBM_GUI_ACTIVE" in caplog.text
+
+
+def test_formula_that_spans_passes_stays_unset_with_its_denominator() -> None:
     layout = PassLayout(
         pass_keys=("pmc_perf_0", "pmc_perf_1"),
         counters_by_pass={
@@ -324,9 +446,75 @@ def test_missing_pass_cell_is_nan_and_warned(monkeypatch) -> None:
     assert warnings
 
 
-def test_process_rocpd_csv_skips_provenance_merge_without_duplicates(
-    monkeypatch,
-) -> None:
+def _two_pass_long_df(
+    counters: list, values: list, passes: list, starts: list, ends: list
+) -> pd.DataFrame:
+    rows = len(counters)
+    return pd.DataFrame({
+        "GPU_ID": [0] * rows,
+        "Dispatch_ID": [0] * rows,
+        "Grid_Size": [256] * rows,
+        "Workgroup_Size": [64] * rows,
+        "LDS_Per_Workgroup": [0] * rows,
+        "Scratch_Per_Workitem": [0] * rows,
+        "Arch_VGPR": [8] * rows,
+        "Accum_VGPR": [0] * rows,
+        "SGPR": [16] * rows,
+        "Kernel_Name": ["k"] * rows,
+        "Start_Timestamp": starts,
+        "End_Timestamp": ends,
+        "Kernel_ID": [0] * rows,
+        "Counter_Name": counters,
+        "Counter_Value": values,
+        "Pass_Key": passes,
+    })
+
+
+def _eval_sys_info() -> pd.Series:
+    return pd.Series({
+        "ip_blocks": "standard",
+        "gpu_arch": "gfx942",
+        "se_per_gpu": 4,
+        "sa_per_se": 1,
+        "pipes_per_gpu": 4,
+        "cu_per_gpu": 38,
+        "simd_per_cu": 4,
+        "sqc_per_gpu": 16,
+        "lds_banks_per_cu": 32,
+        "cur_sclk": 1800.0,
+        "cur_mclk": 1200.0,
+        "max_sclk": 2100.0,
+        "max_mclk": 1600.0,
+        "max_waves_per_cu": 32,
+        "num_memory_channels": 4,
+        "total_l2_chan": 16,
+        "num_xcd": 1,
+        "wave_size": 64,
+    })
+
+
+def _eval_one_metric(long_df: pd.DataFrame, expr: str) -> pd.DataFrame:
+    layout = build_pass_layout(long_df)
+    raw_pmc_df = process_rocpd_csv(long_df, pass_layout=layout)
+    metric_df = pd.DataFrame({
+        "Metric_ID": ["9.9.9"],
+        "Metric": ["m"],
+        "Avg": [expr],
+    }).set_index("Metric_ID")
+    eval_metric(
+        {1: metric_df},
+        {1: "metric_table"},
+        {1: [expr]},
+        _eval_sys_info(),
+        pd.DataFrame(),
+        raw_pmc_df,
+        debug=False,
+        pass_layout=layout,
+    )
+    return metric_df
+
+
+def test_process_rocpd_csv_keeps_counters_bare_without_duplicates() -> None:
     long_df = pd.DataFrame({
         "GPU_ID": [0, 0],
         "Dispatch_ID": [0, 0],
@@ -347,18 +535,12 @@ def test_process_rocpd_csv_skips_provenance_merge_without_duplicates(
     })
     layout = build_pass_layout(long_df)
 
-    def fail_provenance_merge(*_args, **_kwargs):
-        raise AssertionError
-
-    monkeypatch.setattr(
-        "utils.utils_analysis._merge_counters_with_pass_provenance",
-        fail_provenance_merge,
-    )
-
     result = process_rocpd_csv(long_df, pass_layout=layout)
 
     assert result["SQ_WAVES"].iloc[0] == 4
     assert result["TA_BUSY"].iloc[0] == 50
+    assert "SQ_WAVES@pass:pmc_perf_0" not in result.columns
+    assert result["End_Timestamp@pass:pmc_perf_1"].iloc[0] == 20
 
 
 def test_bind_expression_dataframe_groups_by_metric_id() -> None:
@@ -426,7 +608,7 @@ def test_bind_leaves_metric_unset_when_counters_span_passes() -> None:
         frozenset({"Avg"}),
     )
     assert table_used == set()
-    assert metric_df.at[0, "Avg"] == "None"
+    assert metric_df.at[0, "Avg"] == ""
 
 
 def test_eval_metric_uses_same_pass_for_duplicated_denominator() -> None:
@@ -507,3 +689,157 @@ def test_eval_metric_uses_same_pass_for_duplicated_denominator() -> None:
     # Same-pass: 100 * 50 / 200 = 25. Cross-pass base would be 100 * 50 / 100 = 50.
     assert float(dfs[1].at["9.9.9", "Avg"]) == 25.0
     assert dfs[1].attrs.get("metric_row_pass", {}).get("9.9.9") == "pmc_perf_1"
+
+
+def test_weight_counter_uses_the_sub_metric_pass() -> None:
+    layout = PassLayout(
+        pass_keys=("pmc_perf_0", "pmc_perf_1"),
+        counters_by_pass={
+            "pmc_perf_0": frozenset({"TCC_EA0_RDREQ_sum", "SQ_A"}),
+            "pmc_perf_1": frozenset({"TCC_EA0_RDREQ_sum", "SQ_A"}),
+        },
+        duplicated=frozenset({"TCC_EA0_RDREQ_sum", "SQ_A"}),
+    )
+    bound = resolve_weight_counter_column(
+        "TCC_EA0_RDREQ_sum",
+        "read_sub",
+        _sub_metric_frame("pmc_perf_1"),
+        layout,
+    )
+    assert bound == "TCC_EA0_RDREQ_sum@pass:pmc_perf_1"
+
+
+def test_weight_counter_refuses_a_different_pass() -> None:
+    layout = PassLayout(
+        pass_keys=("pmc_perf_0", "pmc_perf_1"),
+        counters_by_pass={
+            "pmc_perf_0": frozenset({"TCC_EA0_RDREQ_sum", "SQ_A"}),
+            "pmc_perf_1": frozenset({"SQ_A", "SQ_B"}),
+        },
+        duplicated=frozenset({"SQ_A"}),
+    )
+    bound = resolve_weight_counter_column(
+        "TCC_EA0_RDREQ_sum",
+        "read_sub",
+        _sub_metric_frame("pmc_perf_1"),
+        layout,
+    )
+    assert bound == "TCC_EA0_RDREQ_sum@pass:pmc_perf_1"
+
+
+def test_weight_counter_keeps_bare_name_when_its_only_copy_is_that_pass() -> None:
+    layout = PassLayout(
+        pass_keys=("pmc_perf_0", "pmc_perf_1"),
+        counters_by_pass={
+            "pmc_perf_0": frozenset({"SQ_A"}),
+            "pmc_perf_1": frozenset({"SQ_A", "TCC_EA0_RDREQ_sum"}),
+        },
+        duplicated=frozenset({"SQ_A"}),
+    )
+    bound = resolve_weight_counter_column(
+        "TCC_EA0_RDREQ_sum",
+        "read_sub",
+        _sub_metric_frame("pmc_perf_1"),
+        layout,
+    )
+    assert bound == "TCC_EA0_RDREQ_sum"
+
+
+def test_weight_only_in_another_pass_is_not_the_bare_column() -> None:
+    layout = PassLayout(
+        pass_keys=("pmc_perf_0", "pmc_perf_1"),
+        counters_by_pass={
+            "pmc_perf_0": frozenset({"TCC_EA0_RDREQ_sum"}),
+            "pmc_perf_1": frozenset({"SQ_A"}),
+        },
+        duplicated=frozenset(),
+    )
+    bound = resolve_weight_counter_column(
+        "TCC_EA0_RDREQ_sum",
+        "read_sub",
+        _sub_metric_frame("pmc_perf_1"),
+        layout,
+    )
+    assert bound == "TCC_EA0_RDREQ_sum@pass:pmc_perf_1"
+
+
+def test_bind_moves_timestamps_onto_the_pmc_chosen_pass() -> None:
+    layout = PassLayout(
+        pass_keys=("pmc_perf_0", "pmc_perf_1"),
+        counters_by_pass={
+            "pmc_perf_0": frozenset({"TCP_TOTAL_CACHE_ACCESSES_sum"}),
+            "pmc_perf_1": frozenset({"TCP_TOTAL_CACHE_ACCESSES_sum", "SQ_WAVES"}),
+        },
+        duplicated=frozenset({"TCP_TOTAL_CACHE_ACCESSES_sum"}),
+    )
+    expr = (
+        "to_sum(raw_pmc_df['TCP_TOTAL_CACHE_ACCESSES_sum']) / "
+        "to_sum(raw_pmc_df['End_Timestamp'] - raw_pmc_df['Start_Timestamp'])"
+    )
+    df = pd.DataFrame({"Avg": [expr], "Metric": ["rate"]})
+    bind_metric_tables_to_passes(
+        {1: df},
+        {1: "metric_table"},
+        layout,
+        "MI300",
+        frozenset({"Avg"}),
+    )
+    bound = df.at[0, "Avg"]
+    assert "TCP_TOTAL_CACHE_ACCESSES_sum@pass:pmc_perf_0" in bound
+    assert "raw_pmc_df['End_Timestamp@pass:pmc_perf_0']" in bound
+    assert "raw_pmc_df['Start_Timestamp@pass:pmc_perf_0']" in bound
+
+
+def test_eval_metric_rate_divides_by_the_selected_pass_duration() -> None:
+    """TCP is only in pass 1 (duration 50); pass 0 lasted 10."""
+    long_df = _two_pass_long_df(
+        counters=["SQ_WAVES", "TCP_TOTAL_CACHE_ACCESSES_sum"],
+        values=[4, 100],
+        passes=["pmc_perf_0", "pmc_perf_1"],
+        starts=[10, 100],
+        ends=[20, 150],
+    )
+    expr = (
+        "to_sum(raw_pmc_df['TCP_TOTAL_CACHE_ACCESSES_sum']) / "
+        "to_sum(raw_pmc_df['End_Timestamp'] - raw_pmc_df['Start_Timestamp'])"
+    )
+
+    metric_df = _eval_one_metric(long_df, expr)
+
+    # Pass-1 duration: 100 / 50 = 2. Pass-0 timestamps would give 100 / 10.
+    assert float(metric_df.at["9.9.9", "Avg"]) == 2.0
+
+
+def test_eval_metric_leaves_a_metric_unset_when_no_pass_holds_its_counters() -> None:
+    long_df = _two_pass_long_df(
+        counters=["TA_BUSY", "TD_BUSY"],
+        values=[50, 25],
+        passes=["pmc_perf_0", "pmc_perf_1"],
+        starts=[10, 10],
+        ends=[20, 20],
+    )
+    expr = "to_avg(100 * raw_pmc_df['TA_BUSY'] / raw_pmc_df['TD_BUSY'])"
+
+    metric_df = _eval_one_metric(long_df, expr)
+
+    assert metric_df.at["9.9.9", "Avg"] == ""
+
+
+def test_bind_expression_dataframe_unsets_a_metric_that_spans_passes() -> None:
+    layout = PassLayout(
+        pass_keys=("pmc_perf_0", "pmc_perf_1"),
+        counters_by_pass={
+            "pmc_perf_0": frozenset({"TA_BUSY"}),
+            "pmc_perf_1": frozenset({"TD_BUSY"}),
+        },
+        duplicated=frozenset(),
+    )
+    expression_df = pd.DataFrame({
+        "metric_id": ["9.9.9"],
+        "value_name": ["Avg"],
+        "value": ["to_avg(100 * raw_pmc_df['TA_BUSY'] / raw_pmc_df['TD_BUSY'])"],
+    })
+
+    bind_expression_dataframe(expression_df, layout, "MI300")
+
+    assert expression_df.at[0, "value"] == "None"

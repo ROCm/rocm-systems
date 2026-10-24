@@ -130,18 +130,38 @@ Panel Config:
         # Arithmetic Intensity relative to each memory level
         # Note: Using both VALU and WMMA FLOPs for total compute
         AI HBM:
-          value: SUM(SP_VALU_FLOPS_FP16_sum + SP_VALU_FLOPS_FP32_sum + SP_VALU_FLOPS_FP64_sum + SP_VALU_FLOPS_FP16_TRANS_sum + SP_VALU_FLOPS_FP32_TRANS_sum + SP_VALU_FLOPS_FP64_TRANS_sum + SQ_VALU_WMMA_FLOP_FP16_sum * 2048 + SQ_VALU_WMMA_FLOP_BF16_sum * 2048 + SQ_VALU_WMMA_FLOP_FP32_sum * 128 + SQ_VALU_WMMA_FLOP_FP64_sum * 64 + SQ_VALU_WMMA_FLOP_FP8_sum * 4096 + SQ_VALU_WMMA_FLOP_FP6_sum * 8192 + SQ_VALU_WMMA_FLOP_FP4_sum * 8192 + SQ_VALU_WMMA_FLOP_F6F4_sum * 8192) / (32 * SUM(GC_EA_SE_SARB_DRAM_RD_SIZE_REQ_sum + GC_EA_SE_SARB_DRAM_WR_SIZE_REQ_sum))
+          value: COLLECT_RATIO(_collect.ai_sp_flops + _collect.ai_wmma_flops, _collect.hbm_bytes)
           unit: FLOPs/Byte
         AI GL2:
-          value: SUM(SP_VALU_FLOPS_FP16_sum + SP_VALU_FLOPS_FP32_sum + SP_VALU_FLOPS_FP64_sum + SP_VALU_FLOPS_FP16_TRANS_sum + SP_VALU_FLOPS_FP32_TRANS_sum + SP_VALU_FLOPS_FP64_TRANS_sum + SQ_VALU_WMMA_FLOP_FP16_sum * 2048 + SQ_VALU_WMMA_FLOP_BF16_sum * 2048 + SQ_VALU_WMMA_FLOP_FP32_sum * 128 + SQ_VALU_WMMA_FLOP_FP64_sum * 64 + SQ_VALU_WMMA_FLOP_FP8_sum * 4096 + SQ_VALU_WMMA_FLOP_FP6_sum * 8192 + SQ_VALU_WMMA_FLOP_FP4_sum * 8192 + SQ_VALU_WMMA_FLOP_F6F4_sum * 8192) / (128 * SUM(TX_VMW_GL1_REQ_READ_sum + TX_VMW_GL1_REQ_WRITE_sum + TX_VMW_GL1_REQ_ATOMIC_WITH_RET_sum + TX_VMW_GL1_REQ_ATOMIC_WITHOUT_RET_sum))
+          value: COLLECT_RATIO(_collect.ai_sp_flops + _collect.ai_wmma_flops, _collect.gl2_bytes)
           unit: FLOPs/Byte
         AI GL0:
-          value: SUM(SP_VALU_FLOPS_FP16_sum + SP_VALU_FLOPS_FP32_sum + SP_VALU_FLOPS_FP64_sum + SP_VALU_FLOPS_FP16_TRANS_sum + SP_VALU_FLOPS_FP32_TRANS_sum + SP_VALU_FLOPS_FP64_TRANS_sum + SQ_VALU_WMMA_FLOP_FP16_sum * 2048 + SQ_VALU_WMMA_FLOP_BF16_sum * 2048 + SQ_VALU_WMMA_FLOP_FP32_sum * 128 + SQ_VALU_WMMA_FLOP_FP64_sum * 64 + SQ_VALU_WMMA_FLOP_FP8_sum * 4096 + SQ_VALU_WMMA_FLOP_FP6_sum * 8192 + SQ_VALU_WMMA_FLOP_FP4_sum * 8192 + SQ_VALU_WMMA_FLOP_F6F4_sum * 8192) / SUM(TX_VCA_CACHE_LOAD_BANDWIDTH_BYTES_sum + TX_VCA_CACHE_STORE_BANDWIDTH_BYTES_sum + TX_VCA_CACHE_ATOMIC_BANDWIDTH_BYTES_sum)
+          value: COLLECT_RATIO(_collect.ai_sp_flops + _collect.ai_wmma_flops, _collect.gl0_bytes)
           unit: FLOPs/Byte
         Performance (GFLOPs):
-          value: SUM(SP_VALU_FLOPS_FP16_sum + SP_VALU_FLOPS_FP32_sum + SP_VALU_FLOPS_FP64_sum + SP_VALU_FLOPS_FP16_TRANS_sum + SP_VALU_FLOPS_FP32_TRANS_sum + SP_VALU_FLOPS_FP64_TRANS_sum + SQ_VALU_WMMA_FLOP_FP16_sum * 2048 + SQ_VALU_WMMA_FLOP_BF16_sum * 2048 + SQ_VALU_WMMA_FLOP_FP32_sum * 128 + SQ_VALU_WMMA_FLOP_FP64_sum * 64 + SQ_VALU_WMMA_FLOP_FP8_sum * 4096 + SQ_VALU_WMMA_FLOP_FP6_sum * 8192 + SQ_VALU_WMMA_FLOP_FP4_sum * 8192 + SQ_VALU_WMMA_FLOP_F6F4_sum * 8192) / (SUM(End_Timestamp - Start_Timestamp) / 1e9) / 1e9
+          value: COLLECT_SUM(_collect.perf_sp, _collect.perf_wmma)
           unit: GFLOP/s
-
+        _collect.ai_sp_flops:
+          value: SUM(SP_VALU_FLOPS_FP16_sum + SP_VALU_FLOPS_FP32_sum + SP_VALU_FLOPS_FP64_sum + SP_VALU_FLOPS_FP16_TRANS_sum + SP_VALU_FLOPS_FP32_TRANS_sum + SP_VALU_FLOPS_FP64_TRANS_sum)
+          _collectable_id: collect.ai_sp_flops
+        _collect.ai_wmma_flops:
+          value: SUM(SQ_VALU_WMMA_FLOP_FP16_sum * 2048 + SQ_VALU_WMMA_FLOP_BF16_sum * 2048 + SQ_VALU_WMMA_FLOP_FP32_sum * 128 + SQ_VALU_WMMA_FLOP_FP64_sum * 64 + SQ_VALU_WMMA_FLOP_FP8_sum * 4096 + SQ_VALU_WMMA_FLOP_FP6_sum * 8192 + SQ_VALU_WMMA_FLOP_FP4_sum * 8192 + SQ_VALU_WMMA_FLOP_F6F4_sum * 8192)
+          _collectable_id: collect.ai_wmma_flops
+        _collect.hbm_bytes:
+          value: 32 * SUM(GC_EA_SE_SARB_DRAM_RD_SIZE_REQ_sum + GC_EA_SE_SARB_DRAM_WR_SIZE_REQ_sum)
+          _collectable_id: collect.hbm_bytes
+        _collect.gl2_bytes:
+          value: 128 * SUM(TX_VMW_GL1_REQ_READ_sum + TX_VMW_GL1_REQ_WRITE_sum + TX_VMW_GL1_REQ_ATOMIC_WITH_RET_sum + TX_VMW_GL1_REQ_ATOMIC_WITHOUT_RET_sum)
+          _collectable_id: collect.gl2_bytes
+        _collect.gl0_bytes:
+          value: SUM(TX_VCA_CACHE_LOAD_BANDWIDTH_BYTES_sum + TX_VCA_CACHE_STORE_BANDWIDTH_BYTES_sum + TX_VCA_CACHE_ATOMIC_BANDWIDTH_BYTES_sum)
+          _collectable_id: collect.gl0_bytes
+        _collect.perf_sp:
+          value: SUM(SP_VALU_FLOPS_FP16_sum + SP_VALU_FLOPS_FP32_sum + SP_VALU_FLOPS_FP64_sum + SP_VALU_FLOPS_FP16_TRANS_sum + SP_VALU_FLOPS_FP32_TRANS_sum + SP_VALU_FLOPS_FP64_TRANS_sum) / SUM(End_Timestamp - Start_Timestamp)
+          _collectable_id: collect.perf_sp
+        _collect.perf_wmma:
+          value: SUM(SQ_VALU_WMMA_FLOP_FP16_sum * 2048 + SQ_VALU_WMMA_FLOP_BF16_sum * 2048 + SQ_VALU_WMMA_FLOP_FP32_sum * 128 + SQ_VALU_WMMA_FLOP_FP64_sum * 64 + SQ_VALU_WMMA_FLOP_FP8_sum * 4096 + SQ_VALU_WMMA_FLOP_FP6_sum * 8192 + SQ_VALU_WMMA_FLOP_FP4_sum * 8192 + SQ_VALU_WMMA_FLOP_F6F4_sum * 8192) / SUM(End_Timestamp - Start_Timestamp)
+          _collectable_id: collect.perf_wmma
   metrics_description:
     VALU FLOPs (FP16): >-
       Achieved FP16 VALU throughput.

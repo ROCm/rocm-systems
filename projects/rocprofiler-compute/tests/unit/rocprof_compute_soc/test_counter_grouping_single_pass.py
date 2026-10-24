@@ -3,9 +3,14 @@
 
 """Unit tests for single-pass metric packing helpers."""
 
+from types import SimpleNamespace
+
 import pytest
 
-from rocprof_compute_soc.counter_grouping_buckets import rebuild_counter_file
+from rocprof_compute_soc.counter_grouping_buckets import (
+    iter_metric_groups,
+    rebuild_counter_file,
+)
 from rocprof_compute_soc.counter_grouping_single_pass import (
     _any_bucket_has_full_group,
     _ensure_single_pass_metric_set,
@@ -16,6 +21,7 @@ from rocprof_compute_soc.counter_grouping_single_pass import (
     try_allocate_single_pass_metrics,
 )
 from rocprof_compute_soc.soc_base import flat_counters_in_perfmon_file
+from vendored import yaml
 
 ITER_METRIC_GROUPS = (
     "rocprof_compute_soc.counter_grouping_single_pass.iter_metric_groups"
@@ -83,6 +89,32 @@ def test_overlapping_unions_share_bucket_when_cap_allows():
     assert len(files) == 1
     assert _any_bucket_has_full_group(files, g1)
     assert _any_bucket_has_full_group(files, g2)
+
+
+def test_sp_valu_and_sq_vmem_stay_in_different_passes():
+    """Placement, merge, and leftover fill keep the two gfx1250 families apart."""
+    cfg = {"SQ": 8}
+    sp_group = frozenset({"SP_VALU_FLOPS_FP32", "SP_VALU_FLOPS_FP16"})
+    vmem_group = frozenset({"SQ_VMEM_REQ", "SQ_VMEM_STALL"})
+    files, file_count = _ensure_single_pass_metric_set([], sp_group, cfg, 0)
+    files, file_count = _ensure_single_pass_metric_set(
+        files, vmem_group, cfg, file_count
+    )
+    assert len(files) == 2
+    assert _any_bucket_has_full_group(files, sp_group)
+    assert _any_bucket_has_full_group(files, vmem_group)
+
+    merged, merges = _reduce_passes(files, [sp_group, vmem_group], cfg)
+    assert merges == 0
+    assert len(merged) == 2
+
+    filled, _next, stats = fill_multi_pass_metrics_into_existing_passes(
+        [files[0]],
+        [vmem_group],
+        cfg,
+    )
+    assert stats.additional_passes == 1
+    assert len(filled) == 2
 
 
 def test_conflicting_unions_open_second_bucket_with_duplicate():
@@ -364,3 +396,46 @@ def test_allocator_keeps_tcc_request_row_and_level_pairs(monkeypatch):
         assert bucket_holding(files, latency) is not None
     read_home = bucket_holding(files, read_level | read)
     assert read_home is not row_home
+
+
+def test_weighted_avg_weight_joins_the_sub_ratio_group():
+    parent = yaml.dump(
+        {
+            "avg": "WEIGHTED_AVG(read_sub, write_sub)",
+            "_weighted_avg": {
+                "read_sub": {"weight_counter": "TCC_EA0_RDREQ_sum"},
+            },
+        },
+        sort_keys=False,
+    )
+    sub = yaml.dump(
+        {"avg": "SUM(SQ_INSTS_VALU_ADD_F32) / SUM(SQ_INSTS_VALU_MUL_F32)"},
+        sort_keys=False,
+    )
+
+    class _Soc(MinimalSoC):
+        def __init__(self):
+            self._mspec = SimpleNamespace(gpu_series="MI300")
+
+        def _expand_tcc_template_counters(self, counters):
+            return set(counters)
+
+        def _iter_arch_analysis_yaml_metrics(self):
+            return [
+                ("17", 1702, 0, "parent", parent),
+                ("17", 1702, 1, "read_sub", sub),
+            ]
+
+    profiled = {
+        "SQ_INSTS_VALU_ADD_F32",
+        "SQ_INSTS_VALU_MUL_F32",
+        "TCC_EA0_RDREQ_sum",
+    }
+    rows = iter_metric_groups(_Soc(), profiled)
+    groups = [counters for _key, counters, _label in rows]
+    assert len(groups) == 1
+    assert groups[0] == frozenset({
+        "SQ_INSTS_VALU_ADD_F32",
+        "SQ_INSTS_VALU_MUL_F32",
+        "TCC_EA0_RDREQ_sum",
+    })
