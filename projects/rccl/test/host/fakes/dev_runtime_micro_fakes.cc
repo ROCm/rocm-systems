@@ -33,7 +33,7 @@
 #include "fakes/dev_runtime_micro_fakes.h"
 #include "fakes/hip_fakes.h"   // shared HIP seams + InstallHipVmmEmulator()
 #include "fakes/nccl_fakes.h"  // g_ncclProxyClientGetFdBlocking, ResetNcclFakes()
-#include "fakes/signature-drift.h"
+#include "signature-drift.h"
 
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -304,9 +304,6 @@ ncclResult_t ncclGetRailedGinType(struct ncclComm*, ncclGinType_t* ginType) {
   return ncclSuccess;
 }
 ncclResult_t ncclGinConnectOnce(struct ncclComm*) { return ncclSuccess; }
-ncclResult_t ncclGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*) {
-  return ncclSuccess;
-}
 ncclResult_t ncclGinDevCommFree(struct ncclComm*, struct ncclDevComm const*) { return ncclSuccess; }
 #ifdef ENABLE_ROCSHMEM_GIN
 // Only referenced from ncclDevrCommCreateInternal's SDMA signal-binding block,
@@ -490,16 +487,26 @@ ncclResult_t symTeamObtainMcLe(struct ncclComm*, struct ncclDevrTeam*, struct nc
 // ---------------------------------------------------------------------------
 // Barrier requirement builders (host variants).
 // ---------------------------------------------------------------------------
+// ncclDevrCommCreateInternal assigns .next after each builder returns. The
+// fields it then reads off these stack objects are bufferAlign, bufferSize,
+// and the outBufferHandle / outGinSignalStart / outGinCounterStart pointers.
+// Zero them so that walk does not store through an uninitialized pointer.
+static void ZeroDevResourceReq(ncclDevResourceRequirements_t* req) {
+  if (req != nullptr) *req = ncclDevResourceRequirements{};
+}
 extern "C" ncclResult_t ncclLsaBarrierCreateRequirement(ncclTeam_t, int, ncclLsaBarrierHandle_t*,
-                                                        ncclDevResourceRequirements_t*) {
+                                                        ncclDevResourceRequirements_t* req) {
+  ZeroDevResourceReq(req);
   return ncclSuccess;
 }
 extern "C" ncclResult_t ncclGinBarrierCreateRequirement(ncclComm_t, ncclTeam_t, int, ncclGinBarrierHandle_t*,
-                                                        ncclDevResourceRequirements_t*) {
+                                                        ncclDevResourceRequirements_t* req) {
+  ZeroDevResourceReq(req);
   return ncclSuccess;
 }
 extern "C" ncclResult_t ncclCftBarrierCreateRequirement(ncclTeam_t, int, ncclCftBarrierHandle_t*,
-                                                        ncclDevResourceRequirements_t*) {
+                                                        ncclDevResourceRequirements_t* req) {
+  ZeroDevResourceReq(req);
   return ncclSuccess;
 }
 
@@ -507,12 +514,18 @@ extern "C" ncclResult_t ncclCftBarrierCreateRequirement(ncclTeam_t, int, ncclCft
 // this binary, so a fake would be a duplicate. Tests drive its terms instead of
 // its answer.
 
-// Reached only once GIN is activated, which the GIN gate rejects for every
-// comm this binary builds.
-ncclResult_t ncclGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*,
-                                 uint32_t) {
+static ncclResult_t DefaultGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*,
+                                           uint32_t) {
   return ncclSuccess;
 }
+std::function<ncclResult_t(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*, uint32_t)>
+    g_ncclGinDevCommSetup = DefaultGinDevCommSetup;
+ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequirements const* reqs,
+                                 struct ncclDevComm* devComm, uint32_t deviceCodeVersion) {
+  return g_ncclGinDevCommSetup(comm, reqs, devComm, deviceCodeVersion);
+}
+ASSERT_HOOK_MATCHES_PROD(g_ncclGinDevCommSetup, ncclGinDevCommSetup);
+#undef ASSERT_HOOK_MATCHES_PROD
 
 // The enqueue-rearch job path: collective_stubs.cc pins
 // ncclParamEnqueueRearchEnable to 0, so every call site takes the in-group task
@@ -570,6 +583,7 @@ void ResetDevRuntimeMicroFakes() {
   g_devrAllocAndPopulateSegmentWindows      = DefaultDevrAllocAndPopulateSegmentWindows;
   g_devrVerifySegmentLayouts                = DefaultVerifySegmentLayouts;
   g_devrBuildGinSegmentInfos                = DefaultBuildGinSegmentInfos;
+  g_ncclGinDevCommSetup                     = DefaultGinDevCommSetup;
 
   // Not a hook either, but 12 tests assign it directly to steer the
   // POSIX-FD-vs-shareable-handle split in symMemory{Export,ImportAndMap}

@@ -1441,6 +1441,20 @@ TEST_F(SymUnbindTeamMemoryTest, IsANoOpOnThisBuild) {
 }
 
 
+// symTeamObtain mallocs teams onto devrState.teamHead. symTeamDestroyAll also
+// unmaps CUDA multicast and destroys CFT logical endpoints, and a
+// value-initialized comm has le.baseId == 0 rather than NCCL_LE_ID_INVALID,
+// so these fixtures free only the malloc'd list.
+static void FreeMallocdDevrTeams(ncclComm* comm) {
+  ncclDevrTeam* t = comm->devrState.teamHead;
+  while (t != nullptr) {
+    ncclDevrTeam* next = t->next;
+    free(t);
+    t = next;
+  }
+  comm->devrState.teamHead = nullptr;
+}
+
 // ---------------------------------------------------------------------------
 // symTeamObtain looks up a team by (rank, nRanks, stride) and creates one if
 // the list has no match, pushing it onto devrState.teamHead.
@@ -1466,13 +1480,7 @@ protected:
 
   // Teams are malloc'd by the unit under test and linked onto teamHead.
   void TearDown() override {
-    ncclDevrTeam* t = comm->devrState.teamHead;
-    while (t != nullptr) {
-      ncclDevrTeam* next = t->next;
-      free(t);
-      t = next;
-    }
-    comm->devrState.teamHead = nullptr;
+    FreeMallocdDevrTeams(comm);
     ResetDevRuntimeMicroFakes();
   }
 
@@ -6173,8 +6181,8 @@ TEST_F(DevCommCreateTest, RequirementsFilterFails_ReturnsErrorWithoutQueueing) {
 // This suite covers its GIN request validation, which runs before any resource
 // is touched and rejects combinations the communicator cannot serve.
 //
-// The body past that gate builds the whole devcomm -- GIN activation, resource
-// windows, barriers -- and is not covered here.
+// The body past that gate builds the whole devcomm. The capture-mode test
+// below is the one exception: it reaches ncclGinDevCommSetup and stops there.
 
 class DevrCommCreateInternalTest : public NcclVersionCompatTest {
 protected:
@@ -6198,6 +6206,16 @@ protected:
     comm = commStorage.get();
     comm->nRanks = 1;
     comm->devrState.lsaSize = 1;
+    // This fixture skips ncclDevrInitOnce, which sets cftMcSize from
+    // computeCftMcSize. That helper returns at least 1, so production does
+    // not pass 0 to idivRcp32. A value-initialized comm would.
+    comm->devrState.cftMcSize = 1;
+    comm->devrState.granularity = 4096;
+  }
+
+  void TearDown() override {
+    FreeMallocdDevrTeams(comm);
+    NcclVersionCompatTest::TearDown();
   }
 
   ncclResult_t Create() {
@@ -6245,6 +6263,39 @@ TEST_F(DevrCommCreateInternalTest, GinForceEnable_BehavesAsFullConnection) {
   comm->globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
 
   EXPECT_EQ(Create(), ncclInvalidArgument);
+}
+
+// ginSignalCount stays at its initializer value of 0. The barrier fakes also
+// zero their ginSignalCount, so ginSignalTotal stays 0 and the sharedRes
+// walk is not taken. This fixture never assigns sharedRes.
+TEST_F(DevrCommCreateInternalTest, GinSetupFails_RestoresStreamCaptureMode) {
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+
+  hipStreamCaptureMode threadMode = hipStreamCaptureModeGlobal;
+  hipStreamCaptureMode requested = hipStreamCaptureModeGlobal;
+  bool sawRequest = false;
+  ScopedHook exchange(g_hipThreadExchangeStreamCaptureMode, [&](hipStreamCaptureMode* mode) {
+    if (mode == nullptr) return hipErrorInvalidValue;
+    if (!sawRequest) {
+      requested = *mode;
+      sawRequest = true;
+    }
+    hipStreamCaptureMode previous = threadMode;
+    threadMode = *mode;
+    *mode = previous;
+    return hipSuccess;
+  });
+  ScopedHook ginSetup(g_ncclGinDevCommSetup,
+                      [](struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*, uint32_t) {
+                        return ncclInternalError;
+                      });
+
+  EXPECT_EQ(Create(), ncclInternalError);
+  EXPECT_EQ(ginSetup.calls, 1);
+  EXPECT_TRUE(sawRequest);
+  EXPECT_EQ(requested, hipStreamCaptureModeRelaxed);
+  EXPECT_EQ(threadMode, hipStreamCaptureModeGlobal);
 }
 
 
