@@ -80,8 +80,7 @@ static ncclResult_t ncclTopoGetInterCpuBw(struct ncclTopoNode* cpu, float* bw) {
                                                             BDW_QPI_BW;
   }
   if (cpu->cpu.arch == NCCL_TOPO_CPU_ARCH_X86 && cpu->cpu.vendor == NCCL_TOPO_CPU_VENDOR_AMD) {
-    // RCCL: one inter-CPU bandwidth for every Zen generation. Upstream's per-generation values (AMD_ZEN34_BW,
-    // AMD_ZEN5_BW) change graph search on multi-NUMA hosts and have not been validated with AMD GPUs.
+    // RCCL: AMD_ZEN34_BW/AMD_ZEN5_BW are not yet validated with AMD GPUs; keep one value for every Zen generation.
     *bw = AMD_ZEN12_BW;
   }
   if (cpu->cpu.arch == NCCL_TOPO_CPU_ARCH_X86 && cpu->cpu.vendor == NCCL_TOPO_CPU_VENDOR_ZHAOXIN) {
@@ -834,9 +833,7 @@ struct kvDict kvDictCpuVendor[] = {{"GenuineIntel", NCCL_TOPO_CPU_VENDOR_INTEL},
                                    {"  Shanghai  ", NCCL_TOPO_CPU_VENDOR_ZHAOXIN},
                                    {NULL, 0}};
 
-// RCCL: Rome-class AMD hosts are Zen 2 Rome (family 17h, model >= 0x31) and all of family 19h (Milan, Genoa).
-// Accepts the CPUID family written by ncclTopoGetXmlFromCpu (0x17/0x19) as well as the older
-// family + (extFamily << 4) encoding (0x8F/0xAF) still found in injected topology files.
+// RCCL: Rome class is family 17h model >= 0x31, or all of 19h; also accepts the old file encoding (0x8F/0xAF).
 static bool rcclAmdCpuIsRome(int familyId, int modelId) {
   if (familyId == 0x17 || familyId == 0x8F) return modelId >= 0x31;
   return familyId == 0x19 || familyId == 0xAF;
