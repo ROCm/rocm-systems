@@ -171,6 +171,7 @@ do_host_tests() {
     "rccl-UnitTestsMicroEnqueue-devlinker:$SCRIPT_DIR/host_tests_micro_enqueue_devlinker.xml"
     "rccl-UnitTestsMicroSymKernels:$SCRIPT_DIR/host_tests_micro_symkernels.xml"
     "rccl-UnitTestsMicroTaskPrep:$SCRIPT_DIR/host_tests_micro_taskprep.xml"
+    "rccl-UnitTestsMicroNvls:$SCRIPT_DIR/host_tests_micro_nvls.xml"
     "rccl-UnitTestsMicroNcclDevice:$SCRIPT_DIR/host_tests_micro_nccl_device.xml"
     "rccl-UnitTestsMicroCore:$SCRIPT_DIR/host_tests_micro_core.xml"
     "rccl-UnitTestsMicroCftDevRuntime:$SCRIPT_DIR/host_tests_micro_cft_dev_runtime.xml"
