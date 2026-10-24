@@ -1267,12 +1267,16 @@ static ncclResult_t ncclTopoGetNchannels(struct ncclComm* comm, int g /*local gp
       *nChannels = MLOPART_P2P_NCHANNELS;
     } else if (path->type == PATH_NVL) {
       float nvlBw = ncclTopoXGMISpeed(system->nodes[GPU].nodes[g].gpu.gcn);
+      // A UALoE fabric peer is reached through the shared NVS node, whose link bw sums all of
+      // the GPU's fabric links (see ncclTopoAddXGMI). One peer still gets one link width.
+      bool viaNvs = false;
+      for (int i = 0; i < path->count && !viaNvs; i++) viaNvs = path->list[i]->remNode->type == NVS;
       *nChannels = ((IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx942") ||
                      IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx950") ||
                      IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx1250")) ?
                       4 :
                       2) *
-                   std::max(1, (int)(path->bw / nvlBw));
+                   (viaNvs ? 1 : std::max(1, (int)(path->bw / nvlBw)));
     } else {
       // PCIe connection
       *nChannels = 2;

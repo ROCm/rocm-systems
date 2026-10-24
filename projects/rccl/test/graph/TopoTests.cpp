@@ -43,7 +43,7 @@ namespace RcclUnitTesting {
 
 class TopoTest : public ::testing::Test {
 protected:
-  static constexpr int kMaxXmlNodes = 64;
+  static constexpr int kMaxXmlNodes = 128;
 
   void SetUp() override {
     system =
@@ -107,13 +107,14 @@ protected:
 
   // GPU-to-GPU link entry connecting to a peer GPU. Default tclass 0x03 (VGA);
   // xml.cc now also writes PCI_ACCELERATOR_CLASS ("0x120000") for AMD GPUs.
-  void addGpuLink(struct ncclXmlNode* holder, const char* targetBusId,
-                  int count, const char* tclass = "0x03") {
+  struct ncclXmlNode* addGpuLink(struct ncclXmlNode* holder, const char* targetBusId,
+                                 int count, const char* tclass = "0x03") {
     struct ncclXmlNode* link = nullptr;
     EXPECT_EQ(xmlAddNode(xml, holder, "xgmi", &link), ncclSuccess);
     EXPECT_EQ(xmlSetAttr(link, "target", targetBusId), ncclSuccess);
     EXPECT_EQ(xmlSetAttr(link, "tclass", tclass), ncclSuccess);
     EXPECT_EQ(xmlSetAttrInt(link, "count", count), ncclSuccess);
+    return link;
   }
 
   // Rebuild the fixture XML tree. Needed when one TEST_F walks several CPU
@@ -296,6 +297,38 @@ protected:
       if (NCCL_BUSID_DOMAIN(s->nodes[NET].nodes[n].net.busId) == (uint64_t)domain) return n;
     }
     return -1;
+  }
+
+  // One host of a UALoE fabric clique (Helios MI455X): gfx1250 GPUs, each with a NIC under its own
+  // PCIe switch, and one <xgmi> entry per local peer stamped the way xml.cc stamps amd-smi's
+  // report. amd-smi only sees the GPUs of its own host, so no entry names another host's GPU, and
+  // every host reuses the same bus ids. With fabricSupported=0 the entries are 1-hop XGMI instead.
+  static constexpr int kFabricGpusPerHost = 4;
+  static void fabricGpuBusId(int g, char* busId, size_t len) {
+    snprintf(busId, len, "0000:%02x:00.0", 0x11 + g * 0x10);
+  }
+  void addFabricHost(uint64_t hostHash, int baseRank, int fabricSupported) {
+    struct ncclXmlNode* cpu = addSystemCpu(hostHash);
+    struct ncclXmlNode* gpus[kFabricGpusPerHost] = {};
+    for (int g = 0; g < kFabricGpusPerHost; g++) {
+      char switchBus[32], gpuBus[32], nicBus[32];
+      snprintf(switchBus, sizeof(switchBus), "0000:%02x:00.0", 0x10 + g * 0x10);
+      fabricGpuBusId(g, gpuBus, sizeof(gpuBus));
+      snprintf(nicBus, sizeof(nicBus), "0000:%02x:00.0", 0x12 + g * 0x10);
+      struct ncclXmlNode* pciSwitch = addPciBridge(cpu, switchBus);
+      struct ncclXmlNode* gpuPci = addGpuPci(pciSwitch, gpuBus, "gfx1250", baseRank + g, /*dev=*/g);
+      EXPECT_EQ(xmlGetSub(gpuPci, "gpu", &gpus[g]), ncclSuccess);
+      addNic(pciSwitch, nicBus, /*dev=*/g);
+    }
+    for (int g = 0; g < kFabricGpusPerHost; g++) {
+      for (int p = 0; p < kFabricGpusPerHost; p++) {
+        if (p == g) continue;
+        char peerBus[32];
+        fabricGpuBusId(p, peerBus, sizeof(peerBus));
+        struct ncclXmlNode* link = addGpuLink(gpus[g], peerBus, /*count=*/1, PCI_ACCELERATOR_CLASS);
+        EXPECT_EQ(xmlSetAttrInt(link, "fabric_supported", fabricSupported), ncclSuccess);
+      }
+    }
   }
 
   struct ncclTopoSystem* buildSystemWithPaths(uint64_t host) {
@@ -1823,6 +1856,168 @@ TEST_F(TopoTest, ComputePaths_RecomputeKeepsPaths) {
       EXPECT_EQ(again[i].type, first[i].type) << "entry " << i;
       EXPECT_FLOAT_EQ(again[i].bw, first[i].bw) << "entry " << i;
       EXPECT_EQ(again[i].hops, first[i].hops) << "entry " << i;
+    }
+  }
+
+  ncclTopoFree(built);
+}
+
+// Helios cross-host clique: MNNVL fuses every host of the UALoE clique into one topology, but
+// amd-smi only reports the fabric peers on its own host. Wiring those entries as direct peer links
+// left the hosts unconnected (PATH_DIS), so ring/tree search fell back to simple order: one channel
+// at bw 0.1 on one NIC pair, which connect.cc then replicated to every CU and the ionic firmware
+// refused past ~1000 QPs on one NIC. The fabric is a switch, so model it as the shared NVS node.
+TEST_F(TopoTest, UaloeFabric_MultiHostCliqueSharesOneSwitch) {
+  const uint64_t hostA = 0x1250a, hostB = 0x1250b;
+  addFabricHost(hostA, /*baseRank=*/0, /*fabricSupported=*/1);
+  addFabricHost(hostB, /*baseRank=*/kFabricGpusPerHost, /*fabricSupported=*/1);
+  struct ncclTopoSystem* built = buildSystemWithPaths(hostA);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nHosts, 2);
+  ASSERT_EQ(built->nodes[GPU].count, 2 * kFabricGpusPerHost);
+  ASSERT_EQ(built->nodes[DEV].count, 2 * kFabricGpusPerHost);
+  ASSERT_EQ(built->nodes[NVS].count, 1) << "every fused host must hang off the same switch";
+  struct ncclTopoNode* nvs = built->nodes[NVS].nodes;
+
+  // Each fabric peer entry adds one link width, which is what a hand-written topo file states as
+  // count="3" on the GPU's NVS link.
+  const float fabricBw = (kFabricGpusPerHost - 1) * ncclTopoXGMISpeed("gfx1250");
+  for (int d = 0; d < built->nodes[DEV].count; d++) {
+    struct ncclTopoNode* dev = built->nodes[DEV].nodes + d;
+    struct ncclTopoLink* up = findLink(dev, nvs);
+    struct ncclTopoLink* down = findLink(nvs, dev);
+    ASSERT_NE(up, nullptr) << "DEV " << d;
+    ASSERT_NE(down, nullptr) << "DEV " << d;
+    EXPECT_FLOAT_EQ(up->bw, fabricBw) << "DEV " << d;
+    EXPECT_FLOAT_EQ(down->bw, fabricBw) << "DEV " << d;
+    for (int l = 0; l < dev->nlinks; l++) {
+      EXPECT_NE(dev->links[l].remNode->type, DEV) << "DEV " << d << " kept a direct peer link";
+    }
+  }
+
+  for (int g = 0; g < built->nodes[GPU].count; g++) {
+    struct ncclTopoNode* gpu = built->nodes[GPU].nodes + g;
+    for (int p = 0; p < built->nodes[GPU].count; p++) {
+      if (p == g) continue;
+      struct ncclTopoLinkList* path = gpu->paths[GPU] + p;
+      SCOPED_TRACE(testing::Message() << "GPU " << g << " -> GPU " << p);
+      EXPECT_EQ(path->type, PATH_NVL);
+      bool viaNvs = false;
+      for (int h = 0; h < path->count; h++) viaNvs |= path->list[h]->remNode == nvs;
+      EXPECT_TRUE(viaNvs);
+    }
+  }
+
+  ncclTopoFree(built);
+}
+
+// The same clique with a ring to search, as on a two-clique (cross-rack) job: the ring has to run
+// over the fabric across both hosts instead of falling back to simple order.
+TEST_F(TopoTest, UaloeFabric_MultiHostRingDoesNotFallBackToSimpleOrder) {
+  const uint64_t hostA = 0x1250c, hostB = 0x1250d;
+  addFabricHost(hostA, /*baseRank=*/0, /*fabricSupported=*/1);
+  addFabricHost(hostB, /*baseRank=*/kFabricGpusPerHost, /*fabricSupported=*/1);
+  struct ncclTopoSystem* built = buildSystemWithPaths(hostA);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nodes[NET].count, 2 * kFabricGpusPerHost);
+
+  // Two cliques of this size, which is what makes the search look for net legs at all.
+  built->nRanks = 2 * built->nodes[GPU].count;
+  built->inter = 1;
+
+  struct ncclTopoGraph ring;
+  memset(&ring, 0, sizeof(ring));
+  ring.id = 0;
+  ring.pattern = NCCL_TOPO_PATTERN_RING;
+  ring.minChannels = 1;
+  ring.maxChannels = MAXCHANNELS / 2;
+
+  ASSERT_EQ(ncclTopoSearchInit(built), ncclSuccess);
+  ASSERT_EQ(ncclTopoCompute(built, &ring), ncclSuccess);
+  // The fallback is the only way to a bwIntra of 0.1 with typeIntra PATH_SYS.
+  EXPECT_GT(ring.bwIntra, 0.1f);
+  EXPECT_EQ(ring.typeIntra, PATH_NVL);
+  EXPECT_GE(ring.nChannels, 1);
+
+  ncclTopoFree(built);
+}
+
+// Peers reached through the fabric switch get one link width of P2P channels, the same count the
+// cross-clique MNNVL branch of ncclTopoGetNchannels() gives. Reading a link count out of the NVS
+// path's bw would hand every peer the sum of the GPU's fabric links instead.
+TEST_F(TopoTest, UaloeFabric_PerPeerChannelsAreOneLinkWidth) {
+  const uint64_t hostA = 0x1250e, hostB = 0x1250f;
+  addFabricHost(hostA, /*baseRank=*/0, /*fabricSupported=*/1);
+  addFabricHost(hostB, /*baseRank=*/kFabricGpusPerHost, /*fabricSupported=*/1);
+  struct ncclTopoSystem* built = buildSystemWithPaths(hostA);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nodes[NVS].count, 1);
+
+  // ncclComm is several MB, so heap-allocate it. Same reason as P2pChannelsComm.
+  std::unique_ptr<struct ncclComm> comm(new ncclComm());
+  memset(comm.get(), 0, sizeof(*comm));
+  comm->topo = built;
+  comm->nRanks = 2 * kFabricGpusPerHost;
+  comm->nNodes = 1;
+  comm->config.maxP2pPeers = NCCL_CONFIG_UNDEF_INT;
+
+  // One rank on each host, so both same-host and cross-host peers are covered from either side.
+  for (int rank : {0, kFabricGpusPerHost}) {
+    SCOPED_TRACE(testing::Message() << "rank " << rank);
+    comm->rank = rank;
+    ASSERT_EQ(ncclTopoComputeP2pChannelsPerPeer(comm.get()), ncclSuccess);
+    EXPECT_EQ(comm->p2pnChannelsPerPeer, 4);
+  }
+
+  ncclTopoFree(built);
+}
+
+// Without fabric_supported the entries are host-local XGMI: direct peer links, no switch.
+TEST_F(TopoTest, UaloeFabric_XgmiEntriesKeepDirectPeerLinks) {
+  const uint64_t hostA = 0x12510, hostB = 0x12511;
+  addFabricHost(hostA, /*baseRank=*/0, /*fabricSupported=*/0);
+  addFabricHost(hostB, /*baseRank=*/kFabricGpusPerHost, /*fabricSupported=*/0);
+  struct ncclTopoSystem* built = buildSystemWithPaths(hostA);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nHosts, 2);
+  EXPECT_EQ(built->nodes[NVS].count, 0);
+
+  const float linkBw = ncclTopoXGMISpeed("gfx1250");
+  for (int d = 0; d < built->nodes[DEV].count; d++) {
+    struct ncclTopoNode* dev = built->nodes[DEV].nodes + d;
+    for (int p = 0; p < built->nodes[DEV].count; p++) {
+      if (p == d) continue;
+      struct ncclTopoNode* peer = built->nodes[DEV].nodes + p;
+      struct ncclTopoLink* link = findLink(dev, peer);
+      if (NCCL_TOPO_ID_SYSTEM_ID(dev->id) == NCCL_TOPO_ID_SYSTEM_ID(peer->id)) {
+        ASSERT_NE(link, nullptr) << "DEV " << d << " -> DEV " << p;
+        EXPECT_FLOAT_EQ(link->bw, linkBw) << "DEV " << d << " -> DEV " << p;
+      } else {
+        EXPECT_EQ(link, nullptr) << "DEV " << d << " -> DEV " << p << " links across hosts";
+      }
+    }
+  }
+
+  ncclTopoFree(built);
+}
+
+// A single host keeps direct peer links even when amd-smi reports UALoE: there is no other host to
+// reach, and a switch node would raise the search's starting bw to the sum of the fabric links.
+TEST_F(TopoTest, UaloeFabric_SingleHostKeepsDirectPeerLinks) {
+  const uint64_t host = 0x12512;
+  addFabricHost(host, /*baseRank=*/0, /*fabricSupported=*/1);
+  struct ncclTopoSystem* built = buildSystemWithPaths(host);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nHosts, 1);
+  EXPECT_EQ(built->nodes[NVS].count, 0);
+
+  const float linkBw = ncclTopoXGMISpeed("gfx1250");
+  for (int d = 0; d < built->nodes[DEV].count; d++) {
+    for (int p = 0; p < built->nodes[DEV].count; p++) {
+      if (p == d) continue;
+      struct ncclTopoLink* link = findLink(built->nodes[DEV].nodes + d, built->nodes[DEV].nodes + p);
+      ASSERT_NE(link, nullptr) << "DEV " << d << " -> DEV " << p;
+      EXPECT_FLOAT_EQ(link->bw, linkBw) << "DEV " << d << " -> DEV " << p;
     }
   }
 

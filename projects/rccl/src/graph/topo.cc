@@ -1013,7 +1013,14 @@ ncclResult_t ncclTopoAddXGMI(struct ncclXmlNode* node, struct ncclTopoSystem* sy
     int targetType;
     NCCLCHECK(kvConvertToInt(targetClass, &targetType, kvDictPciClass));
     struct ncclTopoNode* remote = NULL;
-    if (targetType == GPU) {
+    // UALoE: amd-smi only reports fabric peers on the local host, so when MNNVL fuses several
+    // hosts, direct peer links would leave them unconnected and the search would fall back to
+    // simple order. Link fabric peers to one NVS shared by all hosts instead; each entry adds one
+    // link width. A single host keeps direct peer links.
+    int fabric = 0;
+    NCCLCHECK(xmlGetAttrIntDefault(node, "fabric_supported", &fabric, 0));
+    bool viaFabricSwitch = targetType == GPU && fabric == 1 && system->nHosts > 1;
+    if (targetType == GPU && !viaFabricSwitch) {
       // XGMI P2P connection to another GPU (between physical DEV nodes)
       const char* target;
       NCCLCHECK(xmlGetAttrStr(node, "target", &target));
@@ -1033,7 +1040,7 @@ ncclResult_t ncclTopoAddXGMI(struct ncclXmlNode* node, struct ncclTopoSystem* sy
     if (remote) {
       float nvlSpeed = ncclTopoXGMISpeed(devNode->dev.gcn);
       NCCLCHECK(ncclTopoConnectNodes(devNode, remote, LINK_NVL, count * nvlSpeed));
-      if (targetType != GPU) {
+      if (targetType != GPU || viaFabricSwitch) {
         NCCLCHECK(ncclTopoConnectNodes(remote, devNode, LINK_NVL, count * nvlSpeed));
       }
     }
