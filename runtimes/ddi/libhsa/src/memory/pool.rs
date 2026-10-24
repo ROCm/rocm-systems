@@ -63,7 +63,7 @@ pub(super) fn effective_global_flags(pool_flags: u32, uncached: bool, pcie: bool
 }
 
 /// Returns the agent that owns a memory pool handle.
-pub(super) fn pool_owner(runtime: &HsaState, pool: HsaMemoryPool) -> Option<HsaAgent> {
+pub(crate) fn pool_owner(runtime: &HsaState, pool: HsaMemoryPool) -> Option<HsaAgent> {
     if let Some((index, _)) = runtime.decode_cpu_pool(pool) {
         Some(HsaAgent {
             handle: CPU_AGENT + index as u64,
@@ -113,7 +113,7 @@ pub(super) fn gpu_agent_pools(
 
 /// Backing and coherence class represented by one HSA memory pool.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum PoolStorage {
+pub(crate) enum PoolStorage {
     /// Host system memory.
     System,
     /// GPU local memory with coarse-grain coherence.
@@ -204,7 +204,7 @@ pub(crate) fn signal_batch_pool(
 }
 
 /// Checks DMA-BUF support for `PCIe` memory on a GPU.
-pub(super) fn gpu_pcie_dmabuf_supported(runtime: &HsaState, index: usize) -> bool {
+pub(crate) fn gpu_pcie_dmabuf_supported(runtime: &HsaState, index: usize) -> bool {
     // Full VRAM visibility supplies a large BAR. A CPU-to-GPU XGMI link is
     // the other route that can satisfy a requested PCIe DMA-BUF mapping.
     gpu_pool_fully_host_visible(runtime, index)
@@ -214,12 +214,12 @@ pub(super) fn gpu_pcie_dmabuf_supported(runtime: &HsaState, index: usize) -> boo
 }
 
 /// Checks whether a GPU pool provides coherent access.
-pub(super) fn gpu_pool_coherent(pool_kind: GpuPoolKind, uncached: bool, pcie: bool) -> bool {
+pub(crate) fn gpu_pool_coherent(pool_kind: GpuPoolKind, uncached: bool, pcie: bool) -> bool {
     matches!(pool_kind, GpuPoolKind::Fine | GpuPoolKind::ExtendedFine) || uncached || pcie
 }
 
 /// Builds an agent-to-pool access and link description.
-pub(super) fn agent_pool_relationship(
+pub(crate) fn agent_pool_relationship(
     runtime: &HsaState,
     agent: HsaAgent,
     owner: HsaAgent,
@@ -285,7 +285,7 @@ pub(super) fn agent_pool_relationship(
 }
 
 /// Converts native memory-link metadata to the HSA link record.
-pub(super) fn pool_link_info(link: Option<MemoryLinkInfo>) -> PoolLinkInfo {
+pub(crate) fn pool_link_info(link: Option<MemoryLinkInfo>) -> PoolLinkInfo {
     let Some(link) = link else {
         return PoolLinkInfo {
             min_latency: 0,
@@ -324,7 +324,10 @@ pub(super) const fn hsa_link_type(kind: MemoryLinkType) -> u32 {
 }
 
 /// Enumerates the memory pools visible to an HSA agent.
-fn agent_pools(runtime: &HsaState, agent: HsaAgent) -> Result<Vec<HsaMemoryPool>, Status> {
+pub(crate) fn agent_pools(
+    runtime: &HsaState,
+    agent: HsaAgent,
+) -> Result<Vec<HsaMemoryPool>, Status> {
     if let Some(index) = runtime.cpu_index(agent) {
         Ok(CpuPoolKind::ALL
             .into_iter()
@@ -346,7 +349,10 @@ fn agent_pools(runtime: &HsaState, agent: HsaAgent) -> Result<Vec<HsaMemoryPool>
 }
 
 /// Enumerates the memory regions visible to an HSA agent.
-fn agent_regions(runtime: &HsaState, agent: HsaAgent) -> Result<Vec<HsaMemoryPool>, Status> {
+pub(crate) fn agent_regions(
+    runtime: &HsaState,
+    agent: HsaAgent,
+) -> Result<Vec<HsaMemoryPool>, Status> {
     if !runtime.is_cpu_agent(agent) && runtime.gpu_index(agent).is_none() {
         return Err(INVALID_AGENT);
     }
@@ -366,183 +372,8 @@ fn agent_regions(runtime: &HsaState, agent: HsaAgent) -> Result<Vec<HsaMemoryPoo
     Ok(regions)
 }
 
-#[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
-    unsafe(export_name = "__hsa_impl_hsa_amd_agent_iterate_memory_pools")
-)]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
-/// Visits pools visible to an HSA agent.
-pub unsafe extern "C" fn hsa_amd_agent_iterate_memory_pools(
-    agent: HsaAgent,
-    callback: PoolCallback,
-    data: *mut c_void,
-) -> Status {
-    boundary(|| {
-        let pools = {
-            let guard = match lock() {
-                Ok(guard) => guard,
-                Err(status) => return status,
-            };
-            let runtime = match guard.as_ref() {
-                Some(runtime) => runtime,
-                None => return NOT_INITIALIZED,
-            };
-            if callback.is_none() {
-                return INVALID_ARGUMENT;
-            }
-            match agent_pools(runtime, agent) {
-                Ok(pools) => pools,
-                Err(status) => return status,
-            }
-        };
-        let Some(callback) = callback else {
-            return INVALID_ARGUMENT;
-        };
-        for pool in pools {
-            // SAFETY: HSA defines traversal callbacks as synchronous and the
-            // caller keeps its data pointer live through this call.
-            let status = unsafe { callback(pool, data) };
-            if status != SUCCESS {
-                return status;
-            }
-        }
-        SUCCESS
-    })
-}
-
-#[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
-    unsafe(export_name = "__hsa_impl_hsa_agent_iterate_regions")
-)]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
-/// Visits memory regions visible to an HSA agent.
-pub unsafe extern "C" fn hsa_agent_iterate_regions(
-    agent: HsaAgent,
-    callback: RegionCallback,
-    data: *mut c_void,
-) -> Status {
-    boundary(|| {
-        let regions = {
-            let guard = match lock() {
-                Ok(guard) => guard,
-                Err(status) => return status,
-            };
-            let Some(runtime) = guard.as_ref() else {
-                return NOT_INITIALIZED;
-            };
-            if callback.is_none() {
-                return INVALID_ARGUMENT;
-            }
-            match agent_regions(runtime, agent) {
-                Ok(pools) => pools
-                    .into_iter()
-                    .map(|pool| HsaRegion {
-                        handle: pool.handle,
-                    })
-                    .collect::<Vec<_>>(),
-                Err(status) => return status,
-            }
-        };
-        let Some(callback) = callback else {
-            return INVALID_ARGUMENT;
-        };
-        for region in regions {
-            // SAFETY: HSA region traversal is synchronous and data stays live.
-            let status = unsafe { callback(region, data) };
-            if status != SUCCESS {
-                return status;
-            }
-        }
-        SUCCESS
-    })
-}
-
-#[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
-    unsafe(export_name = "__hsa_impl_hsa_agent_iterate_caches")
-)]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
-/// Visits cache handles associated with an HSA agent.
-pub unsafe extern "C" fn hsa_agent_iterate_caches(
-    agent: HsaAgent,
-    callback: CacheCallback,
-    data: *mut c_void,
-) -> Status {
-    boundary(|| {
-        let caches = {
-            let guard = match lock() {
-                Ok(guard) => guard,
-                Err(status) => return status,
-            };
-            let Some(runtime) = guard.as_ref() else {
-                return NOT_INITIALIZED;
-            };
-            if !runtime.is_agent(agent) {
-                return INVALID_AGENT;
-            }
-            let Some(_) = callback else {
-                return INVALID_ARGUMENT;
-            };
-            cache_handles_in_level_order(&runtime.caches, agent)
-        };
-        let Some(callback) = callback else {
-            return INVALID_ARGUMENT;
-        };
-        for cache in caches {
-            // SAFETY: Cache traversal is synchronous and data stays live.
-            let status = unsafe { callback(cache, data) };
-            if status != SUCCESS {
-                return status;
-            }
-        }
-        SUCCESS
-    })
-}
-
-#[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
-    unsafe(export_name = "__hsa_impl_hsa_cache_get_info")
-)]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
-/// Writes the requested cache attribute.
-pub unsafe extern "C" fn hsa_cache_get_info(
-    cache: HsaCache,
-    attribute: u32,
-    value: *mut c_void,
-) -> Status {
-    boundary(|| {
-        let guard = match lock() {
-            Ok(guard) => guard,
-            Err(status) => return status,
-        };
-        let Some(runtime) = guard.as_ref() else {
-            return NOT_INITIALIZED;
-        };
-        let Some(index) = runtime.cache_index(cache) else {
-            return INVALID_CACHE;
-        };
-        if value.is_null() {
-            return INVALID_ARGUMENT;
-        }
-        let cache = &runtime.caches[index];
-        // SAFETY: Each arm writes the public value type for the attribute.
-        unsafe {
-            match attribute {
-                CACHE_INFO_NAME_LENGTH => value.cast::<u32>().write((cache.name.len() - 1) as u32),
-                CACHE_INFO_NAME => value
-                    .cast::<*const c_char>()
-                    .write(cache.name.as_ptr().cast()),
-                CACHE_INFO_LEVEL => value.cast::<u8>().write(cache.level),
-                CACHE_INFO_SIZE => value.cast::<u32>().write(cache.size),
-                _ => return INVALID_ARGUMENT,
-            }
-        }
-        SUCCESS
-    })
-}
-
 /// Writes a requested pool attribute to the caller’s output.
-unsafe fn memory_pool_get_info(
+pub(crate) unsafe fn memory_pool_get_info(
     runtime: &HsaState,
     pool: HsaMemoryPool,
     attribute: u32,
@@ -606,103 +437,4 @@ unsafe fn memory_pool_get_info(
         }
     }
     SUCCESS
-}
-
-#[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
-    unsafe(export_name = "__hsa_impl_hsa_amd_memory_pool_get_info")
-)]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
-/// Writes the requested memory-pool attribute.
-pub unsafe extern "C" fn hsa_amd_memory_pool_get_info(
-    pool: HsaMemoryPool,
-    attribute: u32,
-    value: *mut c_void,
-) -> Status {
-    boundary(|| {
-        let guard = match lock() {
-            Ok(guard) => guard,
-            Err(status) => return status,
-        };
-        let runtime = match guard.as_ref() {
-            Some(runtime) => runtime,
-            None => return NOT_INITIALIZED,
-        };
-        if value.is_null() {
-            return INVALID_ARGUMENT;
-        }
-        // SAFETY: The caller provided writable storage for the requested attribute.
-        unsafe { memory_pool_get_info(runtime, pool, attribute, value, INVALID_MEMORY_POOL) }
-    })
-}
-
-#[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
-    unsafe(export_name = "__hsa_impl_hsa_region_get_info")
-)]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
-/// Writes the requested memory-region attribute.
-pub unsafe extern "C" fn hsa_region_get_info(
-    region: HsaRegion,
-    attribute: u32,
-    value: *mut c_void,
-) -> Status {
-    boundary(|| {
-        let guard = match lock() {
-            Ok(guard) => guard,
-            Err(status) => return status,
-        };
-        let Some(runtime) = guard.as_ref() else {
-            return NOT_INITIALIZED;
-        };
-        if value.is_null() {
-            return INVALID_ARGUMENT;
-        }
-        let pool = HsaMemoryPool {
-            handle: region.handle,
-        };
-        let pool_attribute = match attribute {
-            POOL_INFO_SEGMENT
-            | POOL_INFO_GLOBAL_FLAGS
-            | POOL_INFO_SIZE
-            | POOL_INFO_RUNTIME_ALLOC_ALLOWED
-            | POOL_INFO_RUNTIME_ALLOC_GRANULE
-            | POOL_INFO_RUNTIME_ALLOC_ALIGNMENT => Some(attribute),
-            REGION_INFO_ALLOC_MAX_SIZE => Some(POOL_INFO_ALLOC_MAX_SIZE),
-            _ => None,
-        };
-        if let Some(pool_attribute) = pool_attribute {
-            // SAFETY: The caller provided writable storage for the requested attribute.
-            return unsafe {
-                memory_pool_get_info(runtime, pool, pool_attribute, value, INVALID_REGION)
-            };
-        }
-        if runtime.decode_cpu_pool(pool).is_none() && runtime.decode_gpu_pool(pool).is_none() {
-            return INVALID_REGION;
-        }
-        // SAFETY: Each arm writes the public value type for the attribute.
-        unsafe {
-            match attribute {
-                REGION_INFO_ALLOC_MAX_PRIVATE_WORKGROUP_SIZE => return INVALID_ARGUMENT,
-                AMD_REGION_INFO_HOST_ACCESSIBLE => value
-                    .cast::<bool>()
-                    .write(runtime.decode_cpu_pool(pool).is_some()),
-                AMD_REGION_INFO_BASE => value.cast::<*mut c_void>().write(std::ptr::null_mut()),
-                AMD_REGION_INFO_BUS_WIDTH => value.cast::<u32>().write(
-                    runtime
-                        .pool_bank(pool)
-                        .and_then(|bank| bank.width_bits)
-                        .unwrap_or(0),
-                ),
-                AMD_REGION_INFO_MAX_CLOCK_FREQUENCY => value.cast::<u32>().write(
-                    runtime
-                        .pool_bank(pool)
-                        .and_then(|bank| bank.maximum_clock_mhz)
-                        .unwrap_or(0),
-                ),
-                _ => return INVALID_ARGUMENT,
-            }
-        }
-        SUCCESS
-    })
 }
