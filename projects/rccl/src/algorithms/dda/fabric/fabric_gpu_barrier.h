@@ -115,6 +115,49 @@ public:
     }
   }
 
+  // Waits until every store this wave has issued has completed, so a system-scope store has reached its
+  // destination.
+  __device__ __forceinline__ void orderDestWrites() {
+#if defined(__gfx1250__)
+    __atomic_signal_fence(__ATOMIC_SEQ_CST);
+    asm volatile("s_wait_loadcnt 0x0\n\ts_wait_storecnt 0x0" ::: "memory");
+    __atomic_signal_fence(__ATOMIC_SEQ_CST);
+#else
+    __threadfence_system();
+#endif
+  }
+
+  // Two-rank form of syncOnSameBlockIdx<true, true>: posts this rank's flag into dstRank's slot for block dstBlock
+  // and waits for srcRank's flag in this rank's slot for this block. A flag slot holds one token, consumed by its
+  // wait, so every post must be matched by exactly one wait within the same kernel.
+  __device__ __forceinline__ void signalWaitPeer(int dstRank, int srcRank, int dstBlock) {
+    // Every wave drains its own stores, then the block syncs so thread 0 only posts once all of them are done.
+    orderDestWrites();
+    __syncthreads();
+    if (threadIdx.x == 0) {
+      putFlag<std::memory_order_release>(peerFlags_[dstRank] + getFlagIdx(selfRank_, dstBlock));
+      waitFlag<std::memory_order_acquire>(peerFlags_[selfRank_] + getFlagIdx(srcRank, blockIdx.x));
+    }
+    __syncthreads();
+  }
+
+  // The two halves of signalWaitPeer, for pipelined callers that post several pieces. A flag slot holds one token and
+  // a post waits until the previous token has been consumed, so every post must be matched by exactly one wait on
+  // the receiving rank within the same kernel.
+  __device__ __forceinline__ void postPeer(int dstRank, int dstBlock) {
+    orderDestWrites();
+    __syncthreads();
+    if (threadIdx.x == 0) {
+      putFlag<std::memory_order_release>(peerFlags_[dstRank] + getFlagIdx(selfRank_, dstBlock));
+    }
+  }
+  __device__ __forceinline__ void waitPeer(int srcRank) {
+    if (threadIdx.x == 0) {
+      waitFlag<std::memory_order_acquire>(peerFlags_[selfRank_] + getFlagIdx(srcRank, blockIdx.x));
+    }
+    __syncthreads();
+  }
+
 private:
   int nBlocks_{-1};
   int selfRank_{-1};
