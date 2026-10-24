@@ -2962,6 +2962,10 @@ hipError_t GraphExecSegmented::EnqueueSegment(const Segment& segment, hip::Strea
     if (status != hipSuccess) return status;
   }
 
+  // Track the most recent host node's completion marker so we can wait on it
+  // before a subsequent memcpy that needs a CPU-side staging copy.
+  amd::Command* pendingHostMarker = nullptr;
+
   // Process all nodes in this segment
   for (size_t i = 0; i < segment.nodes.size(); ++i) {
     auto& node = segment.nodes[i];
@@ -3008,12 +3012,44 @@ hipError_t GraphExecSegmented::EnqueueSegment(const Segment& segment, hip::Strea
         node->stream_id_ = stream->GetStreamId();
         node->hw_queue_id_ = stream->getQueueID();
       }
+
+      // If a host node's callback is still in flight and this node will do a
+      // CPU-side staging copy (memcpy from host to staging buffer), wait for
+      // the callback to complete first so the staging copy sees valid data.
+      if (pendingHostMarker != nullptr &&
+          node->GetType() == hipGraphNodeTypeMemcpy) {
+        auto* memcpyNode = dynamic_cast<GraphMemcpyNode*>(node);
+        if (memcpyNode != nullptr && memcpyNode->NeedsCpuStagingCopy()) {
+          pendingHostMarker->awaitCompletion();
+          pendingHostMarker->release();
+          pendingHostMarker = nullptr;
+        }
+      }
+
       node->SetStream(stream);
       status = node->CreateCommand(node->GetQueue());
       if (status != hipSuccess) return status;
       status = node->EnqueueCommands(stream);
       if (status != hipSuccess) return status;
+
+      // After a host node, capture its completion marker for deferred waiting.
+      if (node->GetType() == hipGraphNodeTypeHost) {
+        auto* hostNode = static_cast<GraphHostNode*>(node);
+        if (pendingHostMarker != nullptr) {
+          pendingHostMarker->release();
+        }
+        pendingHostMarker = hostNode->GetHostCompletionMarker();
+        if (pendingHostMarker != nullptr) {
+          pendingHostMarker->retain();
+        }
+      }
     }
+  }
+
+  // Release any unconsumed host completion marker.
+  if (pendingHostMarker != nullptr) {
+    pendingHostMarker->release();
+    pendingHostMarker = nullptr;
   }
 
   // Dispatch any remaining batches (e.g. trailing completion barrier for segments

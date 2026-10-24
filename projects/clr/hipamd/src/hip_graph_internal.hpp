@@ -2281,6 +2281,10 @@ class GraphMemcpyNode : public GraphNode {
 
   GraphMemcpyNodeKind GetMemcpyNodeKind() const override { return GraphMemcpyNodeKind::ThreeD; }
 
+  //! Returns true if EnqueueCommands will perform a CPU-side staging buffer
+  //! copy (memcpy from host to staging) that reads host memory at enqueue time.
+  virtual bool NeedsCpuStagingCopy() const { return false; }
+
   virtual hipError_t CreateCommand(hip::Stream* stream) override {
     // Clear commands_ first, even if node is disabled
     hipError_t status = GraphNode::CreateCommand(stream);
@@ -2766,6 +2770,16 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
   // used by KernelBlitManager::{read,write}Buffer. That flag is a process-wide
   // runtime constant, so sharing it keeps both decisions in sync without
   // introducing a separate source of truth.
+  //! H2D from unpinned host memory goes through hsaCopyStagedOrPinned which
+  //! does memcpy(staging, hostSrc) on the CPU thread at enqueue time.
+  bool NeedsCpuStagingCopy() const override {
+    size_t sOff = 0, dOff = 0;
+    amd::Memory* srcMem = getMemoryObjectForCurrentDevice(src_, sOff);
+    amd::Memory* dstMem = getMemoryObjectForCurrentDevice(dst_, dOff);
+    // srcMem == nullptr means unpinned host source; dstMem != nullptr means device dest.
+    return (srcMem == nullptr && dstMem != nullptr);
+  }
+
   virtual bool WillBypassSdmaEngine() const override {
     size_t sOffset = 0, dOffset = 0;
     amd::Memory* srcMemory = getMemoryObjectForCurrentDevice(src_, sOffset);
@@ -3385,6 +3399,10 @@ class GraphEventRecordNode : public GraphNode {
 
 class GraphHostNode : public GraphNode {
   hipHostNodeParams NodeParams_;
+  //! Marker command that completes when the host callback finishes.
+  //! Retained across EnqueueCommands so EnqueueSegment can wait on it
+  //! only when a subsequent node needs a CPU-side staging copy.
+  amd::Command* host_completion_marker_ = nullptr;
 
  protected:
   // Copy constructor. This is protected to prevent accidental copies causing unexpected behaviors.
@@ -3397,7 +3415,7 @@ class GraphHostNode : public GraphNode {
       : GraphNode(hipGraphNodeTypeHost, "solid", "rectangle", "HOST") {
     NodeParams_ = *NodeParams;
   }
-  ~GraphHostNode() {}
+  ~GraphHostNode() { ReleaseHostCompletionMarker(); }
 
   // Delete copy-assignment operator to prevent accidental copies causing unexpected behaviors.
   GraphHostNode& operator=(const GraphHostNode&) = delete;
@@ -3445,8 +3463,13 @@ class GraphHostNode : public GraphNode {
       // This is just to invoke a callback, so no need to flush caches.
       block_command->setCommandEntryScope(amd::Device::kCacheStateIgnore);
       block_command->enqueue();
-      block_command->notifyCmdQueue();
-      block_command->release();
+      // Do NOT awaitCompletion here — that would block the launching thread
+      // unconditionally, risking deadlock if the callback waits on a condition
+      // set after hipGraphLaunch returns.  Instead, retain the marker so
+      // EnqueueSegment can wait on it only when a subsequent node needs a
+      // CPU-side staging copy (NeedsCpuStagingCopy).
+      ReleaseHostCompletionMarker();
+      host_completion_marker_ = block_command;  // retained, not released
       commands_[0]->release();
     }
     return hipSuccess;
@@ -3458,6 +3481,17 @@ class GraphHostNode : public GraphNode {
   hipError_t SetParams(const hipHostNodeParams* params) {
     std::memcpy(&NodeParams_, params, sizeof(hipHostNodeParams));
     return hipSuccess;
+  }
+
+  //! Returns the marker that completes when the host callback finishes.
+  amd::Command* GetHostCompletionMarker() const { return host_completion_marker_; }
+
+  //! Releases the retained host completion marker.
+  void ReleaseHostCompletionMarker() {
+    if (host_completion_marker_ != nullptr) {
+      host_completion_marker_->release();
+      host_completion_marker_ = nullptr;
+    }
   }
 
   hipError_t SetParams(GraphNode* node) override {
