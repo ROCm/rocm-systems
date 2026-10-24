@@ -22,14 +22,18 @@
 #include "alloc.h"
 
 // Postset's scratch arrays, tracked from ncclCalloc to free so a test can see what an error path leaves behind.
-// g_failCallocIn names the function whose next ncclCalloc fails; null means none does.
+// While g_failCallocIn names a function, every ncclCalloc it makes fails; null means none does.
 static std::set<void*> g_postsetLive;
+static int g_postsetAllocs = 0;
 static const char* g_failCallocIn = nullptr;
 template <typename T>
 static ncclResult_t MicroCalloc(T** ptr, size_t nelem, const char* file, int line, const char* fn) {
   if (g_failCallocIn != nullptr && std::strcmp(fn, g_failCallocIn) == 0) return ncclSystemError;
   ncclResult_t res = ncclCallocDebug(ptr, nelem, file, line, fn, true);
-  if (res == ncclSuccess && std::strcmp(fn, "ncclTopoPostset") == 0) g_postsetLive.insert(*ptr);
+  if (res == ncclSuccess && std::strcmp(fn, "ncclTopoPostset") == 0) {
+    g_postsetLive.insert(*ptr);
+    g_postsetAllocs++;
+  }
   return res;
 }
 static void MicroFree(void* p) {
@@ -266,10 +270,12 @@ TEST(ConnectMicrotestReject, PresetPostset_LoadBalancedRingsFail_FreesEveryScrat
   ConnectScene scene("gfx1151", 2, 2);
   ASSERT_EQ(ncclSuccess, scene.presetAllRanks(0, 2));
   g_postsetLive.clear();
+  g_postsetAllocs = 0;
   g_failCallocIn = "connectRingsLoadBalanced";
   const ncclResult_t res = scene.postset(2);
   g_failCallocIn = nullptr;
   EXPECT_EQ(ncclSystemError, res);
+  EXPECT_EQ(8, g_postsetAllocs) << "Postset should have allocated all eight scratch arrays before failing";
   EXPECT_EQ(0u, g_postsetLive.size()) << "Postset scratch arrays leaked on the error path";
   g_postsetLive.clear();
 }
