@@ -357,6 +357,24 @@ struct AgentInfo {
   hsa_amd_memory_pool_t ext_fine_grain_pool;
 };
 
+//! Backs one cl_semaphore_khr / hipExternalSemaphore_t on a ROCr device.
+//!
+//! importExtSemaphore() and createExtSemaphore() both produce one of these, so
+//! everything downstream - submitExternalSemaphoreCmd, DestroyExtSemaphore -
+//! handles the two identically. The only difference is \c osHandle: a created
+//! semaphore owns an OS handle created by the KMD that must be closed with it,
+//! whereas an imported one borrows a handle the caller still owns.
+struct ExternalSemaphore {
+  hsa_amd_external_semaphore_t handle{};
+  //! Our own handle on a created semaphore. Invalid for an imported one.
+  amd::Os::FileDesc osHandle = amd::Os::FDescInit();
+  //! True when osHandle is a real NT handle, which we must close and which
+  //! exportExtSemaphore() duplicates per caller. False when it is a global
+  //! KMT handle (a D3DKMT_HANDLE), which is neither closeable nor
+  //! duplicable - handing out the same value is the only correct behaviour.
+  bool ntHandle = false;
+};
+
 //! A HSA device ordinal (physical HSA device)
 class Device : public NullDevice {
  public:
@@ -568,6 +586,11 @@ class Device : public NullDevice {
   virtual void SetUserEvent(amd::UserEvent* event) const override;
 
   virtual bool importExtSemaphore(void** extSemaphore, const amd::Os::FileDesc& handle,
+                                  amd::ExternalSemaphoreHandleType sem_handle_type) override;
+  virtual bool createExtSemaphore(void** extSemaphore,
+                                  amd::ExternalSemaphoreHandleType sem_handle_type,
+                                  bool timeline) override;
+  virtual bool exportExtSemaphore(amd::Os::FileDesc* handle, void* extSemaphore,
                                   amd::ExternalSemaphoreHandleType sem_handle_type) override;
   virtual void DestroyExtSemaphore(void* extSemaphore) override;
 

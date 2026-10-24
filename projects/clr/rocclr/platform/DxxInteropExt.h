@@ -77,6 +77,27 @@ class IAmdDxExtCLInterop : public IAmdDxExtInterface {
 
   virtual HRESULT CLAcquireResource9(IDirect3DSurface9* pResource, UINT* gpuIdBitmask) = 0;
   virtual HRESULT CLReleaseResource9(IDirect3DSurface9* pResource, UINT* gpuIdBitmask) = 0;
+  virtual HRESULT CLQueryResource9(IDirect3DSurface9* pResource, UINT planeIndex,
+                                   VOID* pSrd, UINT* pSrdSize) = 0;
+};
+
+// The D3D9 user-mode driver exposes its own, much smaller OpenCL interop interface under the
+// same extension ID. It is NOT the combined interface above: the vtable holds four methods,
+// the resource type is IDirect3DResource9, and the gpu mask is passed by value. Obtained from
+// the IAmdDxExt returned by AmdDxExtCreate9. Mirrors AmdDxExtOpenCLInteropApi.h in the dx9p
+// driver - the layout must stay in lockstep with it.
+interface IDirect3DResource9;
+
+class IAmdDxExtCLInterop9 : public IAmdDxExtInterface {
+ public:
+  virtual HRESULT QueryInteropGpuMask(UINT* pGpuIdBitmask) = 0;
+
+  virtual HRESULT CLAcquireResource(IDirect3DResource9* pResource, UINT gpuIdBitmask) = 0;
+  virtual HRESULT CLReleaseResource(IDirect3DResource9* pResource, UINT gpuIdBitmask) = 0;
+  // planeIndex selects one plane of a planar YUV image; ignored for other images and buffers.
+  // *pSrdSize is the output buffer capacity on input and the required size on return.
+  virtual HRESULT CLQueryResource(IDirect3DResource9* pResource, UINT planeIndex,
+                                  VOID* pSrd, UINT* pSrdSize) = 0;
 };
 
 // Use GetProcAddress, etc. to retrieve exported functions

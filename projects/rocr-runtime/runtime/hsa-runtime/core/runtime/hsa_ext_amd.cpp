@@ -2437,6 +2437,32 @@ hsa_status_t hsa_amd_external_semaphore_handle_open(
   CATCH;
 }
 
+hsa_status_t hsa_amd_external_semaphore_handle_create(
+    hsa_agent_t agent,
+    const hsa_amd_external_semaphore_create_descriptor_t *desc,
+    hsa_amd_external_semaphore_t *out_sem,
+    void **out_os_handle) {
+  TRY;
+  IS_OPEN();
+  if (desc == nullptr || out_sem == nullptr || out_os_handle == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  const core::Agent *core_agent = core::Agent::Convert(agent);
+  if (core_agent == NULL || !core_agent->IsValid() ||
+      core_agent->device_type() != core::Agent::kAmdGpuDevice)
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+
+  // NT and KMT are both exportable; an FD is not, on this platform.
+  if (desc->type != HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32 &&
+      desc->type != HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_KMT)
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
+
+  return core_agent->driver().CreateExternalSemaphore(
+      core_agent->node_id(), desc->type, desc->initial_value, desc->timeline != 0, out_sem,
+      out_os_handle);
+  CATCH;
+}
+
 hsa_status_t hsa_amd_external_semaphore_handle_close(
     hsa_amd_external_semaphore_t sem) {
   TRY;

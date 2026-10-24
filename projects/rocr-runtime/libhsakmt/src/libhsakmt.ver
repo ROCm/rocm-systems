@@ -30,6 +30,7 @@ hsaKmtAvailableMemory;
 hsaKmtRegisterMemory;
 hsaKmtRegisterMemoryToNodes;
 hsaKmtImportExternalSemaphore;
+hsaKmtCreateExternalSemaphore;
 hsaKmtDestroyExternalSemaphore;
 hsaKmtQueueSignalExternalSemaphore;
 hsaKmtQueueWaitExternalSemaphore;

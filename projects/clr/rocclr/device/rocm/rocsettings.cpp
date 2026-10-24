@@ -214,14 +214,26 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
 
 #if defined(_WIN32)
   if (gfxipMajor >= 11) {
-    // Due to driver limitation,
-    // D3D10/11 sharing extensions are only supported on GFX11 or later,
-    // and D3D9 sharing extension is not supported on any hardware as it is deprecated.
+    // Due to driver limitation, the D3D sharing extensions are only supported on
+    // GFX11 or later.
     enableExtension(ClKhrD3d10Sharing);
     enableExtension(ClKhrD3d11Sharing);
+    enableExtension(ClKhrD3d9Sharing);
     enableExtension(ClAmdPlanarYuv);
   }
+
+  // External memory/semaphore interop. ROCr routes signal/wait through libhsakmt to
+  // D3DKMT, so only the Win32 handle flavours exist here; the KFD path is a stub.
+  enableExtension(ClKhrSemaphore);
+  enableExtension(ClKhrExternalMemory);
+  enableExtension(ClKhrExternalSemaphore);
+  enableExtension(ClKhrExternalMemoryWin32);
+  enableExtension(ClKhrExternalSemaphoreWin32);
 #endif
+
+  // cl_khr_device_uuid is served from info_.uuid_/luid*, which ROCr fills in from
+  // HSA_AMD_AGENT_INFO_UUID and _LUID.
+  enableExtension(ClKhrDeviceUuid);
 
   // Override current device settings
   override();

@@ -936,17 +936,19 @@ bool Resource::CreateInterop(CreateParams* params) {
             case std::numeric_limits<uint>::max():
             case 0:
               break;
+            // A chroma plane is half the size of Y, not a quarter: every plane's pitch is
+            // aligned independently, so a half-width chroma row still occupies a full pitch.
+            // rowPitch here is the whole allocation's pitch (from GetExternalSharedImageSizes)
+            // and desc().height_ is the already-halved chroma height. Verified against the SRD
+            // base addresses the UMD reports for a 256x256 YV12 surface: Y at +0, V at +0x10000,
+            // U at +0x18000.
             case 1:
-              // Y - plane size to the offset
-              // YV12 format. U is 4 times smaller plane than Y
+              // Y plane size to the offset.
               viewOffset = 2 * imgCreateInfo.rowPitch * desc().height_;
-              imgCreateInfo.rowPitch >>= 1;
               break;
             case 2:
-              // Y + U plane sizes to the offest.
-              // U plane is 4 times smaller than Y and U == V
-              viewOffset = 5 * imgCreateInfo.rowPitch * desc().height_ / 2;
-              imgCreateInfo.rowPitch >>= 1;
+              // Y + V plane sizes to the offset.
+              viewOffset = 3 * imgCreateInfo.rowPitch * desc().height_;
               break;
             default:
               LogError("Unknown Interop View Type");
