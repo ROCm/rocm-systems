@@ -80,7 +80,9 @@ class ScopedInitDevicesBaseline {
         count_(count),
         symbols(g_ibvSymbols, [] { return ncclSuccess; }),
         forkInit(g_ibvForkInit, [] { return ncclSuccess; }),
-        findInterfaces(g_ncclFindInterfaces, [](char* names, ncclSocketAddress*, int nameSize, int, int* count) {
+        findInterfaces(g_ncclFindInterfaces,
+                       [this](char* names, ncclSocketAddress*, int nameSize, int maxIfs, int* count) {
+          findInterfacesMaxIfs = maxIfs;
           std::snprintf(names, nameSize, "eth0");
           *count = 1;
           return ncclSuccess;
@@ -90,7 +92,10 @@ class ScopedInitDevicesBaseline {
           *count = count_;
           return ncclSuccess;
         }),
-        freeDevices(g_ibvFreeDeviceList, [](ibv_device**) { return ncclSuccess; }),
+        freeDevices(g_ibvFreeDeviceList, [this](ibv_device** devices) {
+          freedDevices = devices;
+          return ncclSuccess;
+        }),
         relaxedProbe(g_ibvRegMrIova2, [](ibv_mr**, ibv_pd*, void*, size_t, uint64_t, int) {
           return ncclInternalError;
         }),
@@ -99,6 +104,8 @@ class ScopedInitDevicesBaseline {
           return text;
         }) {}
 
+  int findInterfacesMaxIfs = -1;
+  ibv_device** freedDevices = nullptr;
   ScopedHook<ncclResult_t()> symbols;
   ScopedHook<ncclResult_t()> forkInit;
   ScopedHook<ncclResult_t(char*, ncclSocketAddress*, int, int, int*)> findInterfaces;
@@ -705,8 +712,10 @@ TEST_F(NetIbInitMicrotest, InitDevices_OneActivePortPublishesPhysicalAndMergedDe
   EXPECT_EQ(ncclIbDevs[0].gidInfo.localGidIndex, 2);
   EXPECT_EQ(ncclIbMergedDevs[0].vProps.devs[0], 0);
   EXPECT_EQ(ncclIbMergedDevs[1].vProps.devs[0], 1);
+  EXPECT_EQ(baseline.findInterfacesMaxIfs, 1);
   EXPECT_EQ(baseline.getDevices.calls, 1);
   EXPECT_EQ(baseline.freeDevices.calls, 1);
+  EXPECT_EQ(baseline.freedDevices, devices);
   EXPECT_EQ(dmaProbe.allocContext, &context);
   EXPECT_EQ(dmaProbe.probePd, &pd);
   EXPECT_EQ(dmaProbe.alloc.calls, 1);
