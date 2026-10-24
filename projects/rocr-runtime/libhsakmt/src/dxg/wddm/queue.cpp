@@ -653,10 +653,11 @@ void ComputeQueue::RingDoorbell(uint64_t value) {
   if (!native_aql_) {
     thread_cond_lock_.lock();
     thread_cond_lock_.unlock();
-    pr_debug("notify %p wptr=%" PRIx64 " rptr=%" PRIx64 "\n", ring, GetRingWptr()->load(),
+    pr_debug("compute queue notify %p wptr=%" PRIx64 " rptr=%" PRIx64 "\n", ring, GetRingWptr()->load(),
              GetRingRptr()->load());
     thread_cond_.notify_one();
   } else {
+    pr_debug("compute queue notify %p value=%" PRIx64 "\n", ring, value);
     constexpr uint32_t kSizeOfAqlPacket = 64;
     auto aql_addr = reinterpret_cast<uintptr_t>(reinterpret_cast<char*>(ring) +
                                                 (value % ring_size) * kSizeOfAqlPacket);
@@ -1413,6 +1414,7 @@ bool SDMAQueue::ContainPollPacket(uint64_t start, uint64_t end) {
 }
 
 void SDMAQueue::RingDoorbell(uint64_t /*value*/) {
+  pr_debug("sdma ringdoorbell %#" PRIx64 " %#" PRIx64 "\n", wptr_pre_, wptr_next_);
   // The synchronization with worker thread is lock-free when SDMA user queue enabled.
   if (native_sdma_ && thread_pending_.load(std::memory_order_acquire) == 0 &&
       (gpu_poll_ || !ContainPollPacket(wptr_pre_, wptr_next_))) {
