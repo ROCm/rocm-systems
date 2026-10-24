@@ -584,7 +584,7 @@ TEST_F(GinRocshmemGdaTemplateTest, ResetSignal_NoneIsNoOp) {
   kernelResetSignalNone<<<1, 1>>>(env.dHarness.ptr);
   syncAndCheck();
   auto sigs = env.signals.copyTo();
-  EXPECT_EQ(sigs[0], 42ULL);  // untouched by non-indexed reset
+  EXPECT_EQ(sigs[0], 42ULL);  // untouched by NONE reset
 }
 
 // G13: GDA device dispatch selects the GPU context indexed by ncclGinCtx::contextId
@@ -704,10 +704,7 @@ TEST_F(GinRocshmemGdaTemplateTest, PutValue_SelectLogicalContextSignalStripe) {
       << "contextId=1 PutValue must deliver the signal into the context-1 stripe";
 }
 
-// G16: VA signals (AICOMRCCL-3180). The cell sits in the dst window past the
-// payload, and dstMh maps peer 1 back to the local dst buffer. vaSignal aliases
-// indexedSignal in a union, so reading signalId off a VA descriptor would
-// target an unrelated indexed cell instead of the window.
+// G16: VA signals (AICOMRCCL-3180) target a cell in the dst window, never the indexed signal buffer.
 constexpr size_t kVaSignalOff = 256;
 constexpr size_t kVaWindowBytes = kVaSignalOff + sizeof(uint64_t);
 
