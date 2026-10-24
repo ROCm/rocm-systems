@@ -286,9 +286,13 @@ def test_graph_dispatch_identity(input_data):
         corr_id = itr["correlation_id"]["internal"]
         if corr_id in launches:
             assert exec_id > 0, f"graph dispatch without its graph_exec_id: {itr}"
-            by_launch.setdefault(corr_id, []).append((info["dispatch_id"], exec_id, node_id))
+            by_launch.setdefault(corr_id, []).append(
+                (info["dispatch_id"], exec_id, node_id)
+            )
         else:
-            assert exec_id == 0 and node_id == 0, f"non-graph dispatch with graph ids: {itr}"
+            assert (
+                exec_id == 0 and node_id == 0
+            ), f"non-graph dispatch with graph ids: {itr}"
 
     assert len(by_launch) == len(launches)
     for corr_id, rows in by_launch.items():
