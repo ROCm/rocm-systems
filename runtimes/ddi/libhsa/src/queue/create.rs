@@ -237,15 +237,17 @@ pub(super) unsafe fn create_hardware_queue(
         }
     }
     let info = pending.info();
-    if info.write_index_host_address < WRITE_INDEX_OFFSET
-        || info.read_index_host_address < READ_INDEX_OFFSET
+    let Some(control) = info.aql_control else {
+        return abandon_unpublished_retained(pending, INVALID_QUEUE_CREATION, &mut creation_guard);
+    };
+    if control.alignment() < 256
+        || control.writable_prefix_bytes() < std::mem::size_of::<HsaQueue>()
+        || control.read_index_host_address() != info.read_index_host_address
+        || control.write_index_host_address() != info.write_index_host_address
     {
         return abandon_unpublished_retained(pending, ERROR, &mut creation_guard);
     }
-    let public = info.write_index_host_address - WRITE_INDEX_OFFSET;
-    if info.read_index_host_address - READ_INDEX_OFFSET != public || public % 256 != 0 {
-        return abandon_unpublished_retained(pending, ERROR, &mut creation_guard);
-    }
+    let public = control.host_base();
     *doorbell = AmdSignal::doorbell(info.doorbell_host_address, public);
     let doorbell_handle = (&raw mut *doorbell) as usize as u64;
     let mut guard = match lock() {

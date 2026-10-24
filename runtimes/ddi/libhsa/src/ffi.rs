@@ -941,6 +941,15 @@ pub(crate) struct HsaAmdVmemHandleInfo {
     pub(crate) agent: HsaAgent,
 }
 
+/// First complete version of the caller-sized VMEM handle information record.
+#[repr(C)]
+pub(crate) struct HsaAmdVmemHandleInfoPrefix {
+    /// Byte size of the caller-provided record.
+    pub(crate) size: usize,
+    /// Size in bytes of the underlying allocation.
+    pub(crate) alloc_size: usize,
+}
+
 const _: () = {
     assert!(std::mem::offset_of!(HsaAmdVmemHandleInfo, alloc_size) == std::mem::size_of::<usize>());
     assert!(std::mem::offset_of!(HsaAmdVmemHandleInfo, agent) == 2 * std::mem::size_of::<usize>());
@@ -1212,6 +1221,44 @@ pub struct HsaQueue {
     pub(crate) reserved: u32,
     /// Unique public queue identifier for this runtime generation.
     pub(crate) id: u64,
+}
+
+/// Public AQL kernel dispatch packet. The C header's anonymous header union is
+/// represented by its two 16-bit fields; no caller in this frontend reads the
+/// alternate 32-bit union member. Packet storage is aligned by its ring, not
+/// by this C record's own alignment.
+#[repr(C)]
+pub(crate) struct HsaKernelDispatchPacket {
+    /// Packet type, barriers, and fence scopes; published last.
+    pub(crate) header: u16,
+    /// Grid dimensionality and dispatch setup.
+    pub(crate) setup: u16,
+    /// Work-group extent in the X dimension.
+    pub(crate) workgroup_size_x: u16,
+    /// Work-group extent in the Y dimension.
+    pub(crate) workgroup_size_y: u16,
+    /// Work-group extent in the Z dimension.
+    pub(crate) workgroup_size_z: u16,
+    /// Reserved packet storage.
+    pub(crate) reserved0: u16,
+    /// Grid extent in the X dimension.
+    pub(crate) grid_size_x: u32,
+    /// Grid extent in the Y dimension.
+    pub(crate) grid_size_y: u32,
+    /// Grid extent in the Z dimension.
+    pub(crate) grid_size_z: u32,
+    /// Private segment bytes requested per work-item.
+    pub(crate) private_segment_size: u32,
+    /// Group segment bytes requested per work-group.
+    pub(crate) group_segment_size: u32,
+    /// Executable kernel handle.
+    pub(crate) kernel_object: u64,
+    /// Pointer to the kernel arguments.
+    pub(crate) kernarg_address: *mut c_void,
+    /// Reserved packet storage.
+    pub(crate) reserved2: u64,
+    /// Signal updated when dispatch completes.
+    pub(crate) completion_signal: HsaSignal,
 }
 
 #[repr(C)]
