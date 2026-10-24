@@ -47,8 +47,9 @@ options in [README.md](README.md).
 
 ### Capture Layer (`projects/clr/hipamd/src/hrr/`)
 At HIP init time the capture layer snapshots the real `HipDispatchTable` and writes 545
-shim function pointers into the live table, one slot at a time. Every HIP API call flows
-through one of these shims, which records a fixed-size `hrr_event_header` (32 bytes:
+shim function pointers into the live table, one slot at a time, with the helpers in
+`hipamd/src/hip_dispatch_slot.hpp` that the CLR profiler uses for its wrappers too.
+Every HIP API call flows through one of these shims, which records a fixed-size `hrr_event_header` (32 bytes:
 type, sequence ID, timestamp, thread ID) followed by a variable-length payload of
 serialised arguments into a streaming `events.bin` file.
 

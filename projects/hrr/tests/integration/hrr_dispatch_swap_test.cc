@@ -39,6 +39,18 @@
  *     afterwards writes its own archive and must still get its trailer, and
  *     the parent must keep capturing after fork().
  *
+ *   Unit_HRR_ProfilerSwap_ToolSlotOutlivesDisable:
+ *     A tool wraps two runtime slots and one compiler slot after
+ *     hipProfilerEnableExt(). hipProfilerDisableExt() must leave the wrappers
+ *     in place, restore every other slot, and not touch the size fields. Calls
+ *     through the tool's wrappers then reach the profiler's but must add no
+ *     record, and a graph instantiated through them must leave no node info
+ *     behind. Enabled again, the profiler must not call back into the tool's
+ *     wrappers, must record the calls through them again, and the wrappers
+ *     stay in place after the second disable. A slot the profiler does not
+ *     wrap, changed by the tool before the first enable, keeps the tool's
+ *     value.
+ *
  * The live dispatch table is reached through rocprofiler-register, the way a
  * profiler reaches it: hrr_dispatch_tool.cc is loaded as the tool library.
  * Preloading the same library lets a workload act as the capture opens its
@@ -59,6 +71,8 @@
 #include <hip/hip_deprecated.h>
 #include <hip/amd_detail/amd_hip_gl_interop.h>
 #include <hip/amd_detail/hip_api_trace.hpp>
+#include <hip/amd_detail/hip_profiler_ext.h>
+#include <hip/hiprtc.h>
 
 #include <dlfcn.h>
 #include <signal.h>
@@ -75,6 +89,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 #include <string>
 #include <thread>
 #include <vector>
@@ -86,6 +101,7 @@ namespace {
 #define HRR_LATE_MARKER "HRR_LATE_UNREPLAYABLE"
 #define HRR_CLOSE_MARKER "HRR_BLOB_CLOSE"
 #define HRR_NO_TABLE_MARKER "HRR_NO_HIP_TABLE"
+#define HRR_PROFILER_MARKER "HRR_PROFILER_SWAP"
 #define HRR_PRELOAD_MARKER "HRR_CHILD_PRELOAD"
 
 // Big enough that the failing write is cut off by the file size limit, which
@@ -432,6 +448,253 @@ TEST_CASE("Unit_HRR_Fork_Direct", "[.][hrr-direct]") {
 }
 
 // ---------------------------------------------------------------------------
+// CLR profiler enable and disable
+// ---------------------------------------------------------------------------
+
+HipCompilerDispatchTable* tool_hip_compiler_table() {
+  using Fn = void* (*)();
+  auto fn = reinterpret_cast<Fn>(dlsym(RTLD_DEFAULT, "hrr_dispatch_tool_hip_compiler_table"));
+  return fn ? static_cast<HipCompilerDispatchTable*>(fn()) : nullptr;
+}
+
+using PushFn = decltype(HipCompilerDispatchTable::__hipPushCallConfiguration_fn);
+using LuidFn = decltype(HipDispatchTable::hipDeviceGetLuid_fn);
+using InstantiateFn = decltype(HipDispatchTable::hipGraphInstantiate_fn);
+std::atomic<MemcpyFn> g_prof_next_memcpy{nullptr};
+std::atomic<PushFn> g_prof_next_push{nullptr};
+std::atomic<LuidFn> g_prof_next_luid{nullptr};
+std::atomic<InstantiateFn> g_prof_next_instantiate{nullptr};
+
+hipError_t tool_hipMemcpy(void* dst, const void* src, size_t bytes, hipMemcpyKind kind) {
+  return g_prof_next_memcpy.load(std::memory_order_acquire)(dst, src, bytes, kind);
+}
+
+hipError_t tool_hipPushCallConfiguration(dim3 grid, dim3 block, size_t shared,
+                                         hipStream_t stream) {
+  return g_prof_next_push.load(std::memory_order_acquire)(grid, block, shared, stream);
+}
+
+hipError_t tool_hipGraphInstantiate(hipGraphExec_t* exec, hipGraph_t graph,
+                                    hipGraphNode_t* error_node, char* log, size_t log_size) {
+  return g_prof_next_instantiate.load(std::memory_order_acquire)(exec, graph, error_node, log,
+                                                                 log_size);
+}
+
+// hipDeviceGetLuid is a slot the profiler does not wrap.
+hipError_t tool_hipDeviceGetLuid(char* luid, unsigned int* mask, hipDevice_t device) {
+  return g_prof_next_luid.load(std::memory_order_acquire)(luid, mask, device);
+}
+
+template <typename Table> std::vector<unsigned char> table_bytes(const Table& t) {
+  const auto* bytes = reinterpret_cast<const unsigned char*>(&t);
+  return std::vector<unsigned char>(bytes, bytes + sizeof(Table));
+}
+
+// Pointer-sized words of `t` that differ from `before`, the size field included,
+// leaving out the slots at `skip`.
+template <typename Table>
+size_t changed_words(const Table& t, const std::vector<unsigned char>& before,
+                     std::initializer_list<size_t> skip) {
+  const auto* now = reinterpret_cast<const unsigned char*>(&t);
+  size_t changed = 0;
+  for (size_t off = 0; off + sizeof(void*) <= before.size(); off += sizeof(void*)) {
+    bool skipped = false;
+    for (size_t s : skip) skipped = skipped || off == s;
+    if (!skipped && std::memcmp(now + off, before.data() + off, sizeof(void*)) != 0) ++changed;
+  }
+  return changed;
+}
+
+// The kernel of a graph node. This file is not compiled as HIP, so it comes
+// from hipRTC.
+const char* kNodeKernelSource =
+    "extern \"C\" __global__ void hrr_swap_node(int* out) { out[blockIdx.x] = 7; }";
+constexpr unsigned kNodeBlocks = 3;
+
+hipFunction_t node_kernel(hipModule_t* mod) {
+  hiprtcProgram prog = nullptr;
+  REQUIRE(hiprtcCreateProgram(&prog, kNodeKernelSource, "hrr_swap_node.hip", 0, nullptr,
+                              nullptr) == HIPRTC_SUCCESS);
+  REQUIRE(hiprtcCompileProgram(prog, 0, nullptr) == HIPRTC_SUCCESS);
+  size_t size = 0;
+  REQUIRE(hiprtcGetCodeSize(prog, &size) == HIPRTC_SUCCESS);
+  std::vector<char> code(size);
+  REQUIRE(hiprtcGetCode(prog, code.data()) == HIPRTC_SUCCESS);
+  REQUIRE(hiprtcDestroyProgram(&prog) == HIPRTC_SUCCESS);
+  HRR_HIP_CHECK(hipModuleLoadData(mod, code.data()));
+  hipFunction_t fn = nullptr;
+  HRR_HIP_CHECK(hipModuleGetFunction(&fn, *mod, "hrr_swap_node"));
+  return fn;
+}
+
+// A graph with one launch of `fn` over kNodeBlocks blocks. The profiler takes
+// the grid of a graph's kernel from what it noted at instantiate.
+hipGraph_t kernel_graph(hipFunction_t fn, void** args) {
+  hipGraph_t graph = nullptr;
+  HRR_HIP_CHECK(hipGraphCreate(&graph, 0));
+  hipKernelNodeParams p{};
+  p.func = reinterpret_cast<void*>(fn);
+  p.gridDim = dim3(kNodeBlocks);
+  p.blockDim = dim3(1);
+  p.kernelParams = args;
+  hipGraphNode_t node = nullptr;
+  HRR_HIP_CHECK(hipGraphAddKernelNode(&node, graph, nullptr, 0, &p));
+  return graph;
+}
+
+// One pushed and popped launch configuration, and one copy, through the tables.
+bool call_through(HipDispatchTable* t, HipCompilerDispatchTable* c, void* dev) {
+  dim3 grid(1), block(1);
+  size_t shared = 0;
+  hipStream_t stream = nullptr;
+  if (c->__hipPushCallConfiguration_fn(grid, block, 0, nullptr) != hipSuccess) return false;
+  if (c->__hipPopCallConfiguration_fn(&grid, &block, &shared, &stream) != hipSuccess) return false;
+  unsigned char buf[64] = {0x7a};
+  return t->hipMemcpy_fn(dev, buf, sizeof(buf), hipMemcpyHostToDevice) == hipSuccess;
+}
+
+TEST_CASE("Unit_HRR_ProfilerSwap_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));  // hip::init() installs the capture shims
+  if (runtime_has_no_table()) return;
+  HipDispatchTable* t = tool_hip_table();
+  HipCompilerDispatchTable* c = tool_hip_compiler_table();
+  INFO("rocprofiler-register did not pass the HIP tables to " HRR_DISPATCH_TOOL);
+  REQUIRE(t != nullptr);
+  REQUIRE(c != nullptr);
+
+  using EnableFn = hipError_t (*)(uint64_t*, uint64_t);
+  using DisableFn = hipError_t (*)(uint64_t*);
+  auto enable = reinterpret_cast<EnableFn>(dlsym(RTLD_DEFAULT, "hipProfilerEnableExt"));
+  auto disable = reinterpret_cast<DisableFn>(dlsym(RTLD_DEFAULT, "hipProfilerDisableExt"));
+  REQUIRE(enable != nullptr);
+  REQUIRE(disable != nullptr);
+  using RecordsFn = hipError_t (*)(const hipApiRecordExt* const**, size_t*, size_t*, size_t*);
+  auto records = reinterpret_cast<RecordsFn>(dlsym(RTLD_DEFAULT, "hipProfilerGetRecordsExt"));
+  REQUIRE(records != nullptr);
+  auto record_count = [records] {
+    const hipApiRecordExt* const* chunks = nullptr;
+    size_t chunk_count = 0, chunk_size = 0, total = 0;
+    HRR_HIP_CHECK(records(&chunks, &chunk_count, &chunk_size, &total));
+    return total;
+  };
+  // The record of a hipGraphLaunch of `exec` from record `from` on, or null.
+  auto launch_record = [records](size_t from, hipGraphExec_t exec) -> const hipApiRecordExt* {
+    const hipApiRecordExt* const* chunks = nullptr;
+    size_t chunk_count = 0, chunk_size = 0, total = 0;
+    HRR_HIP_CHECK(records(&chunks, &chunk_count, &chunk_size, &total));
+    for (size_t i = from; i < total && i / chunk_size < chunk_count; ++i) {
+      const hipApiRecordExt* r = &chunks[i / chunk_size][i % chunk_size];
+      if (r->memory1 == exec && std::strncmp(r->api_name, "hipGraphLaunch", 14) == 0) return r;
+    }
+    return nullptr;
+  };
+
+  void* dev = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&dev, 64));
+  hipModule_t mod = nullptr;
+  const hipFunction_t node_fn = node_kernel(&mod);
+  const LuidFn luid_before = t->hipDeviceGetLuid_fn;
+  g_prof_next_luid.store(luid_before, std::memory_order_release);
+  t->hipDeviceGetLuid_fn = &tool_hipDeviceGetLuid;
+  const std::vector<unsigned char> runtime_before = table_bytes(*t);
+  const std::vector<unsigned char> compiler_before = table_bytes(*c);
+  const MemcpyFn memcpy_before = t->hipMemcpy_fn;
+  const PushFn push_before = c->__hipPushCallConfiguration_fn;
+
+  HRR_HIP_CHECK(enable(nullptr, 0));
+  {
+    INFO("hipProfilerEnableExt() did not wrap the slots this test changes");
+    REQUIRE(t->hipMemcpy_fn != memcpy_before);
+    REQUIRE(c->__hipPushCallConfiguration_fn != push_before);
+  }
+  printf(HRR_PROFILER_MARKER " unwrapped_kept=%d\n",
+         t->hipDeviceGetLuid_fn == &tool_hipDeviceGetLuid ? 1 : 0);
+  fflush(stdout);
+  // A tool that attaches while the profiler is on chains to its wrappers.
+  g_prof_next_memcpy.store(t->hipMemcpy_fn, std::memory_order_release);
+  t->hipMemcpy_fn = &tool_hipMemcpy;
+  g_prof_next_push.store(c->__hipPushCallConfiguration_fn, std::memory_order_release);
+  c->__hipPushCallConfiguration_fn = &tool_hipPushCallConfiguration;
+  // hipGraphExecDestroy_fn is left to the profiler, so disable restores it.
+  g_prof_next_instantiate.store(t->hipGraphInstantiate_fn, std::memory_order_release);
+  t->hipGraphInstantiate_fn = &tool_hipGraphInstantiate;
+  HRR_HIP_CHECK(disable(nullptr));
+
+  const int kept_runtime = t->hipMemcpy_fn == &tool_hipMemcpy ? 1 : 0;
+  const int kept_compiler =
+      c->__hipPushCallConfiguration_fn == &tool_hipPushCallConfiguration ? 1 : 0;
+  const size_t others_runtime =
+      changed_words(*t, runtime_before,
+                    {offsetof(HipDispatchTable, hipMemcpy_fn),
+                     offsetof(HipDispatchTable, hipGraphInstantiate_fn)});
+  const size_t others_compiler = changed_words(
+      *c, compiler_before, {offsetof(HipCompilerDispatchTable, __hipPushCallConfiguration_fn)});
+  printf(HRR_PROFILER_MARKER " kept=%d/%d others=%zu/%zu\n", kept_runtime, kept_compiler,
+         others_runtime, others_compiler);
+  fflush(stdout);
+  // The tool's slots still chain to the profiler's wrappers, which must not
+  // record anything once profiling is off.
+  const size_t recorded_before = record_count();
+  REQUIRE(call_through(t, c, dev));
+  const size_t recorded_after_disable = record_count() - recorded_before;
+  printf(HRR_PROFILER_MARKER " recorded_after_disable=%zu\n", recorded_after_disable);
+  fflush(stdout);
+  CHECK(recorded_after_disable == 0);
+  // Nor note the nodes of a graph instantiated through them: the restored
+  // hipGraphExecDestroy would never erase them.
+  void* node_args[] = {&dev};
+  hipGraph_t graph = kernel_graph(node_fn, node_args);
+  hipGraphExec_t exec_off = nullptr;
+  HRR_HIP_CHECK(t->hipGraphInstantiate_fn(&exec_off, graph, nullptr, nullptr, 0));
+
+  // Enabled again, the wrappers must call on to what they wrapped first, not to
+  // the tool's slots that chain back to them, and record again.
+  // Neither must take the tool's slots out of the chain.
+  HRR_HIP_CHECK(enable(nullptr, 0));
+  const size_t reenabled_at = record_count();
+  REQUIRE(call_through(t, c, dev));
+  const size_t recorded_after_reenable = record_count() - reenabled_at;
+  printf(HRR_PROFILER_MARKER " recorded_after_reenable=%zu\n", recorded_after_reenable);
+  fflush(stdout);
+  CHECK(recorded_after_reenable >= 3);  // push, pop and the copy
+  // A launch of the same graph instantiated now finds the kernel node's grid;
+  // one of the graph instantiated while the profiler was off does not.
+  hipGraphExec_t exec_on = nullptr;
+  HRR_HIP_CHECK(t->hipGraphInstantiate_fn(&exec_on, graph, nullptr, nullptr, 0));
+  HRR_HIP_CHECK(hipGraphLaunch(exec_on, nullptr));
+  HRR_HIP_CHECK(hipGraphLaunch(exec_off, nullptr));
+  HRR_HIP_CHECK(hipStreamSynchronize(nullptr));
+  HRR_HIP_CHECK(disable(nullptr));  // waits for the kernels' activity
+  auto node_info = [&](hipGraphExec_t exec) {
+    const hipApiRecordExt* launch = launch_record(reenabled_at, exec);
+    REQUIRE(launch != nullptr);
+    const unsigned op = static_cast<unsigned>(launch->gpu.op);
+    INFO("launch op " << op << " ops " << launch->gpu.gpu_op_count << " kernel "
+                      << (op == HIP_OP_DISPATCH_EXT && launch->gpu.kernel_name
+                              ? launch->gpu.kernel_name
+                              : "-")
+                      << " grid " << launch->gpu.grid_x);
+    REQUIRE(op == HIP_OP_DISPATCH_EXT);
+    return launch->gpu.grid_x == kNodeBlocks ? 1 : 0;
+  };
+  const int info_on = node_info(exec_on);
+  const int info_off = node_info(exec_off);
+  printf(HRR_PROFILER_MARKER " node_info=%d/%d\n", info_on, info_off);
+  fflush(stdout);
+  CHECK(info_on == 1);
+  CHECK(info_off == 0);
+  HRR_HIP_CHECK(hipGraphExecDestroy(exec_on));
+  HRR_HIP_CHECK(hipGraphExecDestroy(exec_off));
+  HRR_HIP_CHECK(hipGraphDestroy(graph));
+  HRR_HIP_CHECK(hipModuleUnload(mod));
+  printf(HRR_PROFILER_MARKER " reenabled kept=%d/%d\n", t->hipMemcpy_fn == &tool_hipMemcpy ? 1 : 0,
+         c->__hipPushCallConfiguration_fn == &tool_hipPushCallConfiguration ? 1 : 0);
+  fflush(stdout);
+  t->hipDeviceGetLuid_fn = luid_before;
+  HRR_HIP_CHECK(hipFree(dev));
+}
+
+// ---------------------------------------------------------------------------
 // Drivers
 // ---------------------------------------------------------------------------
 
@@ -758,6 +1021,51 @@ HRR_TEST_CASE(Unit_HRR_Fork_ChildListsOnlyItsOwnUnreplayableApis) {
   INFO("child manifest.json:\n" << manifest);
   CHECK(manifest.find("\"hipLaunchHostFunc\"") == std::string::npos);
   CHECK(manifest.find("\"hipGraphAddEmptyNode\"") != std::string::npos);
+}
+
+// Before, hipProfilerDisableExt() copied the profiler's snapshot over both
+// tables and the tool's slots went back to what they held before the enable.
+HRR_TEST_CASE(Unit_HRR_ProfilerSwap_ToolSlotOutlivesDisable) {
+  ScopedDir cap(fs::temp_directory_path() / "hrr_profiler_swap.hrr");
+  const std::string out = capture_workload(cap.path, "Unit_HRR_ProfilerSwap_Direct", true);
+  INFO("Workload output:\n" << out);
+  if (skipped_without_table(out)) return;
+
+  const size_t at = out.find(HRR_PROFILER_MARKER " kept=");
+  REQUIRE(at != std::string::npos);
+  int kept_runtime = -1, kept_compiler = -1;
+  size_t others_runtime = 0, others_compiler = 0;
+  REQUIRE(sscanf(out.c_str() + at, HRR_PROFILER_MARKER " kept=%d/%d others=%zu/%zu",
+                 &kept_runtime, &kept_compiler, &others_runtime, &others_compiler) == 4);
+  // Disable left the tool's slots alone and restored every other one.
+  CHECK(kept_runtime == 1);
+  CHECK(kept_compiler == 1);
+  CHECK(others_runtime == 0);
+  CHECK(others_compiler == 0);
+  // Calls through the tool's slots after the disable added no record.
+  const size_t rec_at = out.find(HRR_PROFILER_MARKER " recorded_after_disable=");
+  REQUIRE(rec_at != std::string::npos);
+  size_t recorded_after_disable = 0;
+  REQUIRE(sscanf(out.c_str() + rec_at, HRR_PROFILER_MARKER " recorded_after_disable=%zu",
+                 &recorded_after_disable) == 1);
+  CHECK(recorded_after_disable == 0);
+  // Enabled again, the profiler records the calls through the tool's slots, but
+  // notes nothing for the graph instantiated through them while it was off.
+  const size_t re_at = out.find(HRR_PROFILER_MARKER " recorded_after_reenable=");
+  REQUIRE(re_at != std::string::npos);
+  size_t recorded_after_reenable = 0;
+  REQUIRE(sscanf(out.c_str() + re_at, HRR_PROFILER_MARKER " recorded_after_reenable=%zu",
+                 &recorded_after_reenable) == 1);
+  CHECK(recorded_after_reenable >= 3);
+  CHECK(out.find(HRR_PROFILER_MARKER " node_info=1/0") != std::string::npos);
+  // Enable left alone the slot the profiler does not wrap.
+  CHECK(out.find(HRR_PROFILER_MARKER " unwrapped_kept=1") != std::string::npos);
+  // A second enable and disable left the tool's slots in place too.
+  CHECK(out.find(HRR_PROFILER_MARKER " reenabled kept=1/1") != std::string::npos);
+
+  hrr::Archive ar;
+  REQUIRE(hrr::load_archive(hrr_single_process_archive(cap.path).string(), ar));
+  CHECK(ar.complete);
 }
 
 #endif  // !_WIN32 && HRR_TEST_EXE && HRR_DISPATCH_TOOL

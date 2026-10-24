@@ -13,8 +13,8 @@
  * libamdhip64 does not export its live dispatch table. A profiler gets it from
  * rocprofiler-register, which loads the library named by
  * ROCPROFILER_REGISTER_LIBRARY and passes it each runtime's tables. This one
- * keeps the HIP table so the workload can wrap a slot the way a profiler
- * attaching after capture would.
+ * keeps the HIP runtime and compiler tables so the workload can wrap a slot the
+ * way a profiler attaching after capture would.
  *
  * It also registers an exit handler when the HIP table arrives. That happens on
  * the first use of the table, before hip::init() registers
@@ -39,6 +39,7 @@
 
 namespace {
 std::atomic<void*> g_hip_table{nullptr};
+std::atomic<void*> g_hip_compiler_table{nullptr};
 std::atomic<void (*)()> g_late_hook{nullptr};
 
 void run_late_hook() {
@@ -126,11 +127,19 @@ HRR_TOOL_EXPORT int rocprofiler_set_api_table(const char* name, uint64_t /*lib_v
     void* expected = nullptr;
     if (g_hip_table.compare_exchange_strong(expected, tables[0])) std::atexit(run_late_hook);
   }
+  if (name && std::strcmp(name, "hip_compiler") == 0 && tables && num_tables > 0)
+    g_hip_compiler_table.store(tables[0]);
   return 0;
 }
 
 // The live HipDispatchTable, or null if rocprofiler-register never passed one.
 HRR_TOOL_EXPORT void* hrr_dispatch_tool_hip_table() { return g_hip_table.load(); }
+
+// The live HipCompilerDispatchTable, or null if rocprofiler-register never
+// passed one.
+HRR_TOOL_EXPORT void* hrr_dispatch_tool_hip_compiler_table() {
+  return g_hip_compiler_table.load();
+}
 
 // Runs `hook` from the exit handler above, after hip_capture_shutdown().
 HRR_TOOL_EXPORT void hrr_dispatch_tool_set_late_hook(void (*hook)()) {
