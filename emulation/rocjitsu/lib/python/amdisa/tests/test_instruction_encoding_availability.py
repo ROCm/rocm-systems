@@ -79,27 +79,6 @@ def test_rdna4_dpp_predicate_filters_opcodes_without_alternates():
     assert 'inst_.op >=' in helper
 
 
-def test_rdna4_floating_dot_dpp_availability():
-    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_rdna4.xml'), Rdna4Profile()).parse()
-    generator = CodeGenerator(spec, '')
-    for name in (
-        'V_DOT2_F32_F16',
-        'V_DOT2_F32_BF16',
-        'V_DOT4_F32_FP8_BF8',
-        'V_DOT4_F32_BF8_FP8',
-        'V_DOT4_F32_FP8_FP8',
-        'V_DOT4_F32_BF8_BF8',
-    ):
-        inst = _find_instruction(spec, 'ENC_VOP3P', name)
-        assert generator._instruction_supports_dpp(inst, 'ENC_VOP3P'), name
-        assert generator._instruction_supports_dpp8(inst, 'ENC_VOP3P'), name
-
-    for name in ('V_PK_ADD_F16', 'V_DOT4_I32_IU8', 'V_DOT8_U32_U4'):
-        inst = _find_instruction(spec, 'ENC_VOP3P', name)
-        assert not generator._instruction_supports_dpp(inst, 'ENC_VOP3P'), name
-        assert not generator._instruction_supports_dpp8(inst, 'ENC_VOP3P'), name
-
-
 def test_opcode_set_condition_omits_unsigned_domain_boundaries():
     assert CodeGenerator._opcode_set_condition([0, 1, 5]) == (
         'inst_.op <= 1 || inst_.op == 5'
@@ -169,3 +148,43 @@ def test_subdecoder_keeps_opcodes_across_primary_prefixes(
     for index in set(enc.primary_dt_ptrs) - {-1}:
         entry = spec.primary_decode_table[index]
         assert entry.sub_decode_funcs[inst.opcode] == f'decode{inst.fmt_name}'
+
+
+@pytest.mark.parametrize(
+    'name',
+    [
+        'V_DOT2_F32_F16',
+        'V_DOT2_F32_BF16',
+        'V_DOT4_F32_FP8_FP8',
+        'V_DOT4_F32_FP8_BF8',
+        'V_DOT4_F32_BF8_FP8',
+        'V_DOT4_F32_BF8_BF8',
+    ],
+)
+def test_rdna4_floating_dot_dpp_availability(name):
+    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_rdna4.xml'), Rdna4Profile()).parse()
+    inst = _find_instruction(spec, 'ENC_VOP3P', name)
+    generator = CodeGenerator(spec, '')
+    if name.startswith('V_DOT4_'):
+        assert 'VOP3P_VOP_DPP16' not in inst.available_encodings
+        assert 'VOP3P_VOP_DPP8' not in inst.available_encodings
+    assert generator._instruction_supports_dpp(inst, 'ENC_VOP3P')
+    assert generator._instruction_supports_dpp8(inst, 'ENC_VOP3P')
+
+
+@pytest.mark.parametrize(
+    'name',
+    [
+        'V_DOT4_I32_IU8',
+        'V_DOT4_U32_U8',
+        'V_DOT8_U32_U4',
+        'V_PK_ADD_F16',
+        'V_PK_ADD_U16',
+    ],
+)
+def test_rdna4_unsupported_packed_dpp_remains_forbidden(name):
+    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_rdna4.xml'), Rdna4Profile()).parse()
+    inst = _find_instruction(spec, 'ENC_VOP3P', name)
+    generator = CodeGenerator(spec, '')
+    assert not generator._instruction_supports_dpp(inst, 'ENC_VOP3P')
+    assert not generator._instruction_supports_dpp8(inst, 'ENC_VOP3P')

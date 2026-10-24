@@ -255,6 +255,8 @@ bool qualified_store_selectors(const Format &f, uint32_t selectors) {
     return selectors == identity || selectors == reversed || selectors == bgra ||
            selectors == rgb || selectors == (rgb | (1 << 9));
   }
+  if (channels == 1 && f.widths[0] == 32 && f.number == Number::Float && selectors == 0)
+    return true; // Native gfx1201 treats the all-zero view as X for stores.
   if (channels == 1 && (selectors == identity || selectors == reversed || selectors == (4 << 9)))
     return true; // Single-channel identity, WZYX, and A8 views were measured.
   if (!channels)
@@ -321,6 +323,8 @@ util::Result pack_buffer_format(uint32_t format, uint32_t selectors,
   if (decoded.failed() || components.empty() ||
       !qualified_store_selectors(decoded.value(), selectors))
     return util::Result::failure();
+  if (selectors == 0)
+    selectors = 4;
   const fp_mode::detail::ScopedFenv environment(0);
   pack_format(decoded.value(), selectors, components, bytes, missing, encoding);
   return util::Result::success();
@@ -391,6 +395,8 @@ util::FailureOr<bool> prepare_buffer_format(Wavefront &wf, VectorMemState &d, ui
   if (!d.is_load && format < 0 &&
       !qualified_store_selectors(d.decoded_buffer_format, d.buffer_selectors))
     return util::Result::failure();
+  if (!d.is_load && format < 0 && d.buffer_selectors == 0)
+    d.buffer_selectors = 4;
   return true;
 }
 

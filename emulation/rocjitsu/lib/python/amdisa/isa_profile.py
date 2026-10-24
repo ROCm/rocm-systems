@@ -913,7 +913,11 @@ class IsaProfile(ABC):
         *,
         has_modifier_encoding: bool,
     ) -> bool:
-        """Qualify DPP16/DPP8 availability when the XML omits a valid form."""
+        """Qualify DPP16/DPP8 encoding availability.
+
+        has_modifier_encoding supplies the XML default. Profiles may override
+        it when the XML omits a valid form; dpp_opcode_rule defines ISA legality.
+        """
         del enc_name, inst_name
         return has_modifier_encoding
 
