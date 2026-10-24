@@ -61,6 +61,7 @@ class TestNIC(RocprofsysTest):
 
     def test_performance(
         self,
+        rocprof_config,
         nic_perf_env,
         nic_perf_download_url_1,
         nic_perf_download_url_2,
@@ -69,6 +70,19 @@ class TestNIC(RocprofsysTest):
         target = shutil.which("wget")
         if not target:
             pytest.skip("wget not found")
+
+        # The trace stores one title per NIC counter. With perf events usable
+        # (paranoid <= 2, or CAP_PERFMON / CAP_SYS_ADMIN) the title is the
+        # event symbol. Otherwise it is the PAPI summary text.
+        if rocprof_config.capabilities.perf_events_usable:
+            counter_names = ["rx:byte", "rx:packet", "tx:byte", "tx:packet"]
+        else:
+            counter_names = [
+                "receive byte",
+                "receive packet",
+                "transmit byte",
+                "transmit packet",
+            ]
 
         download_cmd = [
             "--no-check-certificate",
@@ -86,12 +100,7 @@ class TestNIC(RocprofsysTest):
         self.assert_regex(result)
         self.assert_perfetto(
             result,
-            counter_names=[
-                "receive byte",
-                "receive packet",
-                "transmit byte",
-                "transmit packet",
-            ],
+            counter_names=counter_names,
             pass_regex=self.PERFETTO_PASS_REGEX,
             fail_regex=self.PERFETTO_FAIL_REGEX,
         )
