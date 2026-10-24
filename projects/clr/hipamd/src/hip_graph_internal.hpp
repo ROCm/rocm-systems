@@ -834,8 +834,10 @@ class Graph {
   //! Schedules all nodes in the graph into different streams
   hipError_t ScheduleNodes();
 
-  //! Runs one node on the assigned stream
-  hipError_t RunOneNode(Node node);  //!< Node for the execution on GPU
+  //! Runs one node on the assigned stream.
+  //! covered[execStream * Q + depStream] is the latest launch_id_ that execStream
+  //! has already waited for. Q is DEBUG_HIP_FORCE_GRAPH_QUEUES.
+  hipError_t RunOneNode(Node node, std::vector<int>& covered);
 
   //! Runs all nodes from the execution graph on the assigned streams
   hipError_t RunNodes(
