@@ -3,6 +3,7 @@
 
 include(rj_configure_target)
 include(rj_configure_device_tests)
+include(rj_find_rocm_library)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(
@@ -26,6 +27,7 @@ set(RJ_OBJECT_LIBS
     rocjitsu_analysis
     rocjitsu_code
     rocjitsu_code_object
+    rocjitsu_executable
     rocjitsu_isa
     rocjitsu_isa_registry
     simdojo
@@ -109,11 +111,68 @@ set_tests_properties(
 add_executable(rj_decode_fuzz_test fuzz/decode/decode_fuzz_test.cpp)
 target_link_libraries(
     rj_decode_fuzz_test
-    PRIVATE rj_decode_fuzz_core GTest::gtest_main
+    PRIVATE
+        rj_decode_fuzz_core
+        rocjitsu_amdgpu_isa_model_registry
+        GTest::gtest_main
 )
 rj_configure_target(rj_decode_fuzz_test PRIVATE_INCLUDES WARNINGS)
 add_dependencies(rj_decode_fuzz_test rj_decode_fuzz)
 rj_add_gtest_tests(rj_decode_fuzz_test)
+
+add_executable(
+    rj_code_object_fuzz_test
+    fuzz/code_object/code_object_fuzz_test.cpp
+)
+target_link_libraries(
+    rj_code_object_fuzz_test
+    PRIVATE
+        rj_code_object_fuzz_core
+        rocjitsu_amdgpu_isa_model_registry
+        GTest::gtest_main
+)
+target_include_directories(
+    rj_code_object_fuzz_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+)
+rj_configure_target(rj_code_object_fuzz_test PRIVATE_INCLUDES WARNINGS)
+add_dependencies(rj_code_object_fuzz_test rj_code_object_fuzz)
+rj_add_gtest_tests(rj_code_object_fuzz_test)
+add_test(
+    NAME CodeObjectFuzzCliTest
+    COMMAND
+        ${CMAKE_COMMAND} -DFUZZ_EXECUTABLE=$<TARGET_FILE:rj_code_object_fuzz>
+        -DWORK_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/code-object-fuzz-cli -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/code_object/test_code_object_fuzz_cli.cmake
+)
+
+add_executable(rj_execution_fuzz_test fuzz/execution/execution_fuzz_test.cpp)
+target_link_libraries(
+    rj_execution_fuzz_test
+    PRIVATE rj_execution_fuzz_core rocjitsu_isa_registry GTest::gtest_main
+)
+rj_configure_target(rj_execution_fuzz_test PRIVATE_INCLUDES WARNINGS)
+add_dependencies(rj_execution_fuzz_test rj_execution_fuzz)
+rj_add_gtest_tests(rj_execution_fuzz_test)
+
+add_executable(
+    rj_multiplexer_fuzz_test
+    fuzz/multiplexer/multiplexer_fuzz_test.cpp
+)
+target_link_libraries(
+    rj_multiplexer_fuzz_test
+    PRIVATE rj_multiplexer_fuzz_core rocjitsu_isa_registry GTest::gtest_main
+)
+rj_configure_target(rj_multiplexer_fuzz_test PRIVATE_INCLUDES WARNINGS)
+add_dependencies(rj_multiplexer_fuzz_test rj_fuzz)
+rj_add_gtest_tests(rj_multiplexer_fuzz_test)
+add_test(
+    NAME MultiplexerFuzzCliTest
+    COMMAND
+        ${CMAKE_COMMAND} -DFUZZ_EXECUTABLE=$<TARGET_FILE:rj_fuzz>
+        -DWORK_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/multiplexer-fuzz-cli -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/multiplexer/test_multiplexer_fuzz_cli.cmake
+)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(
@@ -146,12 +205,32 @@ add_test(
         ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/decode/test_decode_cli.py -v
 )
 add_test(
+    NAME ExecutionCampaignUnitTest
+    COMMAND
+        ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/execution/test_execution_campaign.py -v
+)
+add_test(
+    NAME ExecutionFuzzCliTest
+    COMMAND
+        ${CMAKE_COMMAND} -E env
+        RJ_EXECUTION_FUZZ=$<TARGET_FILE:rj_execution_fuzz> ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/execution/test_execution_cli.py -v
+)
+set_tests_properties(ExecutionFuzzCliTest PROPERTIES TIMEOUT 120)
+add_test(
     NAME PretranslateScriptUnitTest
     COMMAND
         ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_pretranslate.py -v
 )
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_test(
+        NAME BenchmarkRunnerCpuPolicyUnitTest
+        COMMAND
+            ${Python3_EXECUTABLE} -B
+            ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_cpu_policy.py -v
+    )
     add_test(
         NAME CorpusRunnerUnitTest
         COMMAND
@@ -164,6 +243,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             ${Python3_EXECUTABLE} -B
             ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_run_vfio_guest.py -v
     )
+    add_test(
+        NAME RcclScaleoutRunUnitTest
+        COMMAND
+            ${Python3_EXECUTABLE} -B
+            ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_run_rccl_scaleout.py -v
+    )
 endif()
 
 add_test(
@@ -172,6 +257,23 @@ add_test(
 )
 if(NOT ROCJITSU_ENABLE_VFIO)
     set_tests_properties(RocjitsuVfioCapabilityCheck PROPERTIES WILL_FAIL TRUE)
+endif()
+
+if(ROCJITSU_ENABLE_VFIO)
+    # Alias validation runs before binding and checks that the selected-node
+    # effective config is removed when the VFIO process exits.
+    add_test(
+        NAME RocjitsuVfioRepeatedSocketsRejectAliases
+        COMMAND
+            ${Python3_EXECUTABLE} -B
+            ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_vfio_cli.py
+            $<TARGET_FILE:rocjitsu_bin>
+            ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/fabric_node_projection.json
+    )
+    set_tests_properties(
+        RocjitsuVfioRepeatedSocketsRejectAliases
+        PROPERTIES TIMEOUT 15
+    )
 endif()
 
 add_test(
@@ -328,6 +430,7 @@ add_executable(
     scalar_cache_discard_test.cpp
     transcendental_test.cpp
     comparison_test.cpp
+    conversion_test.cpp
     denormal_test.cpp
     floating_operation_test.cpp
     input_denormal_test.cpp
@@ -364,6 +467,7 @@ add_executable(
     dbi/kernarg_sgpr_slot_test.cpp
     code/code_object_target_id_test.cpp
     code/executable_test.cpp
+    code/file_loading_test.cpp
     code/relocation_function_table_test.cpp
     dbt/semantic_scratch_test.cpp
     dbt/waitcnt_translator_test.cpp
@@ -532,6 +636,9 @@ if(ROCJITSU_ENABLE_VFIO)
         rocjitsu_tests
         PRIVATE rocjitsu_vmm_vfu libvfio-user::libvfio-user
     )
+    # Keep the fault in the host's final link: the wrapper replaces one
+    # vfu_run_ctx result after the library has answered a client request.
+    target_link_options(rocjitsu_tests PRIVATE "LINKER:--wrap=vfu_run_ctx")
     # Serving now builds a whole machine, so a test that drives the server end to
     # end needs a real config rather than a synthesized one.
     target_compile_definitions(
@@ -623,7 +730,7 @@ set(_rj_idle_wakeup_cases
 # Exclude exactly the cases registered below, so future cases still participate
 # in normal discovery until they receive an explicit timeout registration.
 set(_rj_gtest_exclusions
-    "-*Benchmark*:*RequestExitWakesAllPartitions*:MatrixCoexecutionTest.SharedPoolMakesProgressUnderConcurrentHandoffs:*DispatchedWaitSurvivesAConcurrentFinalClose*:*EffectiveConfigTest.ReadsNativeLaunchConfigHandoff"
+    "-*Benchmark*:*RequestExitWakesAllPartitions*:MatrixCoexecutionTest.SharedPoolMakesProgressUnderConcurrentHandoffs:*DispatchedWaitSurvivesAConcurrentFinalClose*:*EffectiveConfigTest.ReadsNativeLaunchConfigHandoff:*EffectiveConfigTest.ReadsSelectedNodeLaunchConfigHandoff"
 )
 foreach(_idle_wakeup_case IN LISTS _rj_idle_wakeup_cases)
     string(APPEND _rj_gtest_exclusions ":${_idle_wakeup_case}")
@@ -868,6 +975,26 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
     rj_configure_target(cache_allocation_failure_test WARNINGS)
     rj_add_gtest_tests(cache_allocation_failure_test)
+
+    # Isolate the process-wide replacement operator new from rocjitsu_tests.
+    add_executable(
+        file_loading_allocation_failure_test
+        code/file_loading_allocation_failure_test.cpp
+    )
+    target_include_directories(
+        file_loading_allocation_failure_test
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_link_libraries(
+        file_loading_allocation_failure_test
+        PRIVATE
+            rocjitsu_dbt_internal
+            rocjitsu_cdna5_model_registry
+            simdojo_headers
+            GTest::gtest_main
+    )
+    rj_configure_target(file_loading_allocation_failure_test PRIVATE_INCLUDES WARNINGS)
+    rj_add_gtest_tests(file_loading_allocation_failure_test)
 
     # Exercise the model ISA contract in a decoder-only final link.
     add_executable(rocjitsu_model_only_test model_only_isa_test.cpp)
@@ -1235,6 +1362,40 @@ rj_add_test(
         "--"
         "bin/rocjitsu_tests"
         "--gtest_filter=EffectiveConfigTest.ReadsNativeLaunchConfigHandoff"
+)
+
+rj_add_test(
+    NAME "EffectiveConfigTest.ReadsSelectedNodeLaunchConfigHandoff"
+    COMMAND
+        ${RJ_CLI}
+        --config
+        ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/fabric_node_projection.json
+        --node
+        tray7
+        --cpu-thread-budget
+        4
+        --
+        $<TARGET_FILE:rocjitsu_tests>
+        --gtest_filter=EffectiveConfigTest.ReadsSelectedNodeLaunchConfigHandoff
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    TIMEOUT 60
+)
+
+rj_add_test(
+    NAME "SystemGraphTest.DaemonStartsSelectedNode"
+    COMMAND
+        ${RJ_CLI}
+        --daemon
+        --config
+        ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/fabric_node_projection.json
+        --node
+        tray7
+        --
+        /bin/true
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    # AF_UNIX sun_path is short; the source/build checkout may be much longer.
+    ENVIRONMENT "ROCJITSU_RUNTIME_DIR=/tmp/rj-system-graph"
+    TIMEOUT 60
 )
 
 function(rj_detect_kfd_gfx_target_versions out_var)
@@ -2261,7 +2422,7 @@ endif()
 
 # --- HSA init test (requires ROCm HSA runtime + CLI launcher) ---
 
-find_library(HSA_RUNTIME64 hsa-runtime64 PATHS "${ROCM_PATH}" PATH_SUFFIXES lib)
+rj_find_rocm_library(HSA_RUNTIME64 hsa-runtime64)
 if(HSA_RUNTIME64)
     get_filename_component(RJ_HSA_LIBRARY_DIR "${HSA_RUNTIME64}" DIRECTORY)
     add_executable(hsa_init_test hsa_init_test.cpp)
@@ -3311,11 +3472,13 @@ endif()
 
 # --- HIP tests (requires amdclang++ + CLI launcher) ---
 
+rj_amdcxx_supports_arch(RJ_AMDCXX_SUPPORTS_GFX1250 "${AMDCXX}" gfx1250)
 set(RJ_ENABLE_HIP_TESTS ON)
-find_library(HIP_RUNTIME64 amdhip64 PATHS "${ROCM_PATH}" PATH_SUFFIXES lib)
+rj_find_rocm_library(HIP_RUNTIME64 amdhip64)
 set(RJ_HIP_RUNTIME_SUPPORTS_TEST_ARCH FALSE)
 set(RJ_HIP_RUNTIME_SUPPORTS_GFX950 FALSE)
 set(RJ_HIP_RUNTIME_SUPPORTS_GFX942 FALSE)
+set(RJ_HIP_RUNTIME_SUPPORTS_GFX1250 FALSE)
 
 function(rj_hip_runtime_supports_arch out_var arch)
     set(_supports FALSE)
@@ -3356,6 +3519,7 @@ if(RJ_ENABLE_HIP_TESTS)
     )
     rj_hip_runtime_supports_arch(RJ_HIP_RUNTIME_SUPPORTS_GFX950 "gfx950")
     rj_hip_runtime_supports_arch(RJ_HIP_RUNTIME_SUPPORTS_GFX942 "gfx942")
+    rj_hip_runtime_supports_arch(RJ_HIP_RUNTIME_SUPPORTS_GFX1250 "gfx1250")
 endif()
 
 if(RJ_ENABLE_HIP_TESTS)
@@ -3543,6 +3707,8 @@ if(RJ_ENABLE_HIP_TESTS)
         endif()
         rj_add_test(${_test_args})
     endfunction()
+
+    rj_find_rocm_library(RCCL_LIB rccl)
 
     if(RJ_HIP_RUNTIME_SUPPORTS_TEST_ARCH)
         rj_add_hip_test(hip_memcpy_test ARCH ${RJ_HIP_TEST_ARCH})
@@ -3740,7 +3906,6 @@ if(RJ_ENABLE_HIP_TESTS)
         )
 
         # --- RCCL collective test ---
-        find_library(RCCL_LIB rccl PATHS "${ROCM_PATH}" PATH_SUFFIXES lib)
         if(RCCL_LIB AND RJ_HIP_RUNTIME_SUPPORTS_GFX950)
             rj_add_hip_test(hip_rccl_test ARCH gfx950 EXTRA_LIBS ${RCCL_LIB})
             add_dependencies(daemon_test hip_rccl_test_target)
@@ -3750,6 +3915,7 @@ if(RJ_ENABLE_HIP_TESTS)
                 RcclDaemonTest.AllGather
                 RcclDaemonTest.ReduceScatter
                 RcclDaemonTest.SendRecv
+                RcclDaemonTest.AllCasesInOneSession
             )
             foreach(TC IN LISTS RJ_RCCL_TESTS)
                 rj_add_test(
@@ -3789,6 +3955,27 @@ if(RJ_ENABLE_HIP_TESTS)
             CONFIG ${RJ_CDNA3_KMD_CONFIG}
             ENVIRONMENT "RJ_HW_ID_XCDS=8" "RJ_HW_ID_SHADER_ENGINES=4" "RJ_HW_ID_CUS_PER_SE=10"
             TIMEOUT 120
+        )
+    endif()
+
+    # Build the same numerically checked rank workload for CDNA5 without
+    # changing the existing gfx950 daemon fixture or its CTest registrations.
+    if(
+        RCCL_LIB
+        AND RJ_HIP_RUNTIME_SUPPORTS_GFX1250
+        AND RJ_AMDCXX_SUPPORTS_GFX1250
+    )
+        rj_add_hip_test(
+            hip_rccl_gfx1250_test
+            ARCH gfx1250
+            SOURCE hip_rccl_test.cpp
+            EXTRA_LIBS ${RCCL_LIB}
+        )
+        message(STATUS "gfx1250 RCCL rank binary enabled (found ${RCCL_LIB})")
+    else()
+        message(
+            STATUS
+            "gfx1250 RCCL rank binary disabled (requires librccl and gfx1250 compiler/runtime support)"
         )
     endif()
 
