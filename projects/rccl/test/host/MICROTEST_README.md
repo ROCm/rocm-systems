@@ -65,9 +65,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   - `register/register.cc`, `register/coll_reg.cc` and `register/sendrecv_reg.cc`
     (`REGISTER_CC_PATH`, `COLL_REG_CC_PATH`, `SENDRECV_REG_CC_PATH`, from `register-test.cc`,
     `coll-reg-test.cc` and `sendrecv-reg-test.cc`); suites `Register*`. Their calls into `p2p.cc`,
-    compiled here for real, go through `fakes/transport_p2p_reg_seam.h`, and `fakes/register_seam.h`
-    renames `register.cc`'s definitions of the three names `nccl_fakes.cc` keeps as seams for
-    `p2p-test.cc`.
+    compiled here for real, go through `fakes/transport_p2p_reg_seam.h`; CollNet registration calls
+    use `fakes/transport_collnet_reg_seam.h`. `fakes/register_seam.h` renames `register.cc`'s
+    definitions of the three names `nccl_fakes.cc` keeps as seams for `p2p-test.cc`.
   - `rma/rma_proxy_progress.cc` (`RMA_PROXY_PROGRESS_CC_PATH`, from
     `rma-proxy-progress-test.cc`); suite `RmaProxyProgressTest.*`.
   - `plugin/gin.cc` (`GIN_CC_PATH`, from `gin-plugin-init-test.cc`); suite
@@ -638,6 +638,7 @@ symbol.
 | rocSHMEM host API | `fakes/rocshmem_fakes.cc` |
 | `src/transport/p2p.cc` shareable-buffer entry points (`rccl-UnitTestsMicroDiagnostics`) | `fakes/transport_p2p_fakes.cc` |
 | `src/transport/p2p.cc` registration entry points, macro-renamed in one unit via `fakes/transport_p2p_reg_seam.h` (`rccl-UnitTestsMicro`, which compiles the real file) | `fakes/transport_p2p_reg_fakes.cc` |
+| `src/transport/coll_net.cc` registration entry points, macro-renamed via `fakes/transport_collnet_reg_seam.h` when the real file shares the binary | `fakes/transport_stubs.cc` |
 | `src/transport/*`, `src/plugin/net.cc` | `fakes/transport_stubs.cc` |
 | libc (`gethostname`, `dladdr`), process-wide for units linking libc directly | `fakes/libc_interposers.cc` |
 | libc macro-renamed in one unit via `fakes/libc_seam.h` (sockets/stdio/exit for `ras/client.cc` and `ras/client_support.cc`; `gethostname`/`access` for `diagnostics/ib_write_bw.cc`; heap for `graph/rccl_graph_gen.cc`) | `fakes/libc_fakes.cc` |

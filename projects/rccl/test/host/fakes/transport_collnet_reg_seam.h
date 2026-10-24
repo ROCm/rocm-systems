@@ -9,6 +9,7 @@
 // binary compiles the real coll_net.cc definitions.
 
 #include "fakes/transport_reg_stubs.h"
+#include "transport.h"
 
 ncclResult_t micro_ncclCollnetDeregBuffer(struct ncclComm* comm, struct ncclProxyConnector* proxyConn, void* handle);
 ncclResult_t micro_ncclCollnetLocalRegisterBuffer(struct ncclComm* comm, const void* userbuff, size_t buffSize,
