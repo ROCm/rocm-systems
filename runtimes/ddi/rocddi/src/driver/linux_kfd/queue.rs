@@ -16,9 +16,9 @@ use std::sync::atomic::{Ordering, fence};
 use super::memory::{BufferKind, DeviceVm, KfdAllocation};
 use super::{errno, error, native_error, os_memory, sys, sysfs, uapi};
 use crate::device::gpu::queue::{
-    MAX_PRIVATE_SEGMENT_BYTES, QueueAccessWidth, QueueErrorEvent, QueueParameters, QueuePriority,
-    QueueProducerMode, QueueRequest, QueueRingMemory, QueueScratch, QueueTransport,
-    SdmaEngineSelection,
+    AqlControlLayout, AqlControlRegion, AqlQueueHeader, MAX_PRIVATE_SEGMENT_BYTES,
+    QueueAccessWidth, QueueErrorEvent, QueueParameters, QueuePriority, QueueProducerMode,
+    QueueRequest, QueueRingMemory, QueueScratch, QueueTransport, SdmaEngineSelection,
 };
 use crate::memory::AllocationDesc;
 use crate::memory::DeviceAccess;
@@ -62,53 +62,6 @@ fn sample_wrapping_indices(
         std::hint::spin_loop();
     }
     Err(io::Error::from(io::ErrorKind::WouldBlock))
-}
-
-/// HSA queue header prefix used to pin offsets in the native control page.
-#[allow(dead_code)]
-#[repr(C)]
-struct AqlQueueHeader {
-    queue_type: u32,
-    features: u32,
-    base_address: u64,
-    doorbell_signal: u64,
-    size: u32,
-    reserved: u32,
-    id: u64,
-}
-
-/// Native 256-byte AQL control layout shared with the command processor.
-#[allow(dead_code)]
-#[repr(C, align(64))]
-struct AqlControlLayout {
-    queue_header: AqlQueueHeader,
-    caps: u32,
-    reserved1: [u32; 3],
-    write_dispatch_id: u64,
-    group_segment_aperture_base_hi: u32,
-    private_segment_aperture_base_hi: u32,
-    max_cu_id: u32,
-    max_wave_id: u32,
-    max_legacy_doorbell_dispatch_id_plus_1: u64,
-    legacy_doorbell_lock: u32,
-    reserved2: [u32; 9],
-    read_dispatch_id: u64,
-    read_dispatch_id_field_base_byte_offset: u32,
-    compute_tmpring_size: u32,
-    scratch_resource_descriptor: [u32; 4],
-    scratch_backing_memory_location: u64,
-    scratch_backing_memory_byte_size: u64,
-    scratch_wave64_lane_byte_size: u32,
-    queue_properties: u32,
-    scratch_max_use_index: u64,
-    queue_inactive_signal: u64,
-    alt_scratch_max_use_index: u64,
-    alt_scratch_resource_descriptor: [u32; 4],
-    alt_scratch_backing_memory_location: u64,
-    alt_scratch_dispatch_limit: [u32; 3],
-    alt_scratch_wave64_lane_byte_size: u32,
-    alt_compute_tmpring_size: u32,
-    reserved5: u32,
 }
 
 const AQL_CONTROL_SIZE: usize = size_of::<AqlControlLayout>();
@@ -1674,6 +1627,7 @@ impl KfdQueue {
             BufferKind::Vram {
                 public: true,
                 coherent: false,
+                extended_coherent: false,
                 uncached: true,
                 contiguous: false,
             }
@@ -1714,6 +1668,16 @@ impl KfdQueue {
         let ring_device_address = ring.device_address(&vm)?;
         let pointer_host_address = pointers.host_address()?;
         let pointer_device_address = pointers.device_address(&vm)?;
+        if request.aql.is_some()
+            && (page < AQL_CONTROL_SIZE as u64
+                || pointer_host_address % 256 != 0
+                || pointer_host_address.checked_add(AQL_CONTROL_SIZE).is_none())
+        {
+            return Err(error(
+                ErrorKind::Driver,
+                "AQL control mapping does not contain an aligned control layout",
+            ));
+        }
         let mut eop = None;
         let mut context = None;
         if let Some(compute) = &request.compute {
@@ -1722,6 +1686,7 @@ impl KfdQueue {
                 BufferKind::Vram {
                     public: false,
                     coherent: false,
+                    extended_coherent: false,
                     uncached: false,
                     contiguous: false,
                 },
@@ -1772,10 +1737,27 @@ impl KfdQueue {
         } else {
             (SDMA_READ_OFFSET, SDMA_WRITE_OFFSET)
         };
+        let aql_control = if request.aql.is_some() {
+            Some(
+                AqlControlRegion::new(
+                    pointer_host_address,
+                    AQL_CONTROL_SIZE,
+                    256,
+                    size_of::<AqlQueueHeader>(),
+                    pointer_host_address + AQL_READ_OFFSET,
+                    pointer_host_address + AQL_WRITE_OFFSET,
+                    pointer_host_address + offset_of!(AqlControlLayout, queue_properties),
+                )
+                .ok_or_else(|| error(ErrorKind::Driver, "invalid AQL control region"))?,
+            )
+        } else {
+            None
+        };
         let info = QueueTransport {
             ring_host_address,
             ring_device_address,
             ring_size_bytes: u64::from(request.ring_size),
+            aql_control,
             sdma_engine_id: selected_sdma_engine_id,
             read_index_host_address: pointer_host_address + read_offset,
             read_index_device_address: pointer_device_address + read_offset as u64,

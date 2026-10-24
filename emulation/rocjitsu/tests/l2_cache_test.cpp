@@ -28,6 +28,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <format>
 #include <future>
 #include <iomanip>
 #include <iostream>
@@ -2588,6 +2589,165 @@ TEST(L2CacheTest, FullLineStoresSkipBackingReads) {
       }
     }
   }
+}
+
+TEST(L2CacheTest, TransactionPolicySplitsRequestsWithoutChangingCacheGeometry) {
+  using Policy = rocjitsu::amdgpu::MemoryTransactionPolicy;
+  ASSERT_EQ(L1VectorCache::LINE_SIZE, 128u);
+  ASSERT_EQ(L2Cache::LINE_SIZE, 128u);
+  for (auto policy : {Policy{}, Policy::unqualified_64()}) {
+    for (uint32_t elements : {3u, 4u}) {
+      for (uint32_t lanes : {4u, 8u, 16u}) {
+        for (uint32_t offset : {0u, 4u, 16u, 64u}) {
+          for (bool reverse : {false, true}) {
+            const uint32_t width = elements * sizeof(uint32_t);
+            const uint32_t bytes = lanes * width;
+            SCOPED_TRACE(std::format("granule={} bytes={} offset={} reverse={}", policy.bytes(),
+                                     bytes, offset, reverse));
+            const uint64_t base = 0x180000 + offset;
+            GpuMemory memory("memory", policy);
+            L2Cache l2("l2");
+            l2.set_backing_memory(&memory);
+            L1VectorCache l1(&l2, policy);
+            std::array<uint64_t, 64> addresses{};
+            std::array<uint32_t, 64 * 4> source{}, result{};
+            for (uint32_t lane = 0; lane < lanes; ++lane) {
+              addresses[lane] = base + (reverse ? lanes - 1 - lane : lane) * width;
+              for (uint32_t word = 0; word < elements; ++word)
+                source[elements * lane + word] = 100 * lane + word;
+            }
+            const uint64_t mask = (uint64_t{1} << lanes) - 1;
+            const uint64_t expected =
+                (offset % policy.bytes() + bytes + policy.bytes() - 1) / policy.bytes();
+            ASSERT_EQ(l1.store(addresses.data(), mask, sizeof(uint32_t), elements,
+                               reinterpret_cast<const uint8_t *>(source.data()), Mtype::UC, false,
+                               64),
+                      rocjitsu::amdgpu::VmAccessOutcome::Complete);
+            EXPECT_EQ(l2.backing_write_transactions(), expected);
+            ASSERT_EQ(l1.load(addresses.data(), mask, sizeof(uint32_t), elements,
+                              reinterpret_cast<uint8_t *>(result.data()), Mtype::UC, false, true,
+                              64),
+                      rocjitsu::amdgpu::VmAccessOutcome::Complete);
+            EXPECT_EQ(l2.backing_read_transactions(), expected);
+            EXPECT_EQ(result, source);
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(L2CacheTest, PermutedLanesPublishAndReadOneContiguousTransaction) {
+  constexpr uint64_t kAddress = 0x180000;
+  for (uint32_t bytes : {64u, 128u}) {
+    for (uint32_t width : {4u, 8u, 16u}) {
+      const uint32_t lanes = bytes / width;
+      for (uint32_t spacing : {1u, 2u}) {
+        for (uint32_t permutation : {0u, 1u, lanes - 1}) {
+          SCOPED_TRACE(std::format("bytes={} width={} spacing={} permutation={}", bytes, width,
+                                   spacing, permutation));
+          GpuMemory memory("memory");
+          L2Cache l2("l2");
+          l2.set_backing_memory(&memory);
+          L1VectorCache l1(&l2);
+          std::array<uint64_t, 64> addresses{};
+          std::array<uint8_t, 64 * 16> source{};
+          std::array<uint8_t, 64 * 16> result{};
+          std::array<uint8_t, L2Cache::LINE_SIZE> expected{};
+          std::array<uint8_t, L2Cache::LINE_SIZE> actual{};
+          result.fill(0xcd);
+          uint64_t mask = 0;
+          for (uint32_t index = 0; index < lanes; ++index) {
+            const uint32_t lane = index * spacing;
+            const uint32_t offset = (index ^ permutation) * width;
+            addresses[lane] = kAddress + offset;
+            mask |= uint64_t{1} << lane;
+            for (uint32_t byte = 0; byte < width; ++byte)
+              expected[offset + byte] = source[lane * width + byte] = lane + byte;
+          }
+          ASSERT_EQ(l1.store(addresses.data(), mask, sizeof(uint32_t), width / sizeof(uint32_t),
+                             source.data(), Mtype::UC, false, 64),
+                    rocjitsu::amdgpu::VmAccessOutcome::Complete);
+          EXPECT_EQ(l2.backing_write_transactions(), 1u);
+          EXPECT_EQ(l2.backing_read_transactions(), 0u);
+          memory.read_block(kAddress, std::span<uint8_t>(actual.data(), bytes));
+          EXPECT_EQ(actual, expected);
+          ASSERT_EQ(l1.load(addresses.data(), mask, sizeof(uint32_t), width / sizeof(uint32_t),
+                            result.data(), Mtype::UC, false, true, 64),
+                    rocjitsu::amdgpu::VmAccessOutcome::Complete);
+          EXPECT_EQ(l2.backing_read_transactions(), 1u);
+          for (uint32_t lane = 0; lane < 64; ++lane)
+            for (uint32_t byte = 0; byte < width; ++byte)
+              EXPECT_EQ(result[lane * width + byte],
+                        mask & (uint64_t{1} << lane) ? source[lane * width + byte] : 0xcd);
+        }
+      }
+    }
+  }
+}
+
+TEST(L2CacheTest, ReorderedTransactionsKeepGapsClippingAndDuplicateLaneOrder) {
+  constexpr uint64_t kAddress = 0x180000;
+  GpuMemory memory("memory");
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+  L1VectorCache l1(&l2);
+  std::array<uint32_t, 8> initial;
+  initial.fill(0xcccccccc);
+  memory.write_block(
+      kAddress,
+      std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(initial.data()), sizeof(initial)));
+  // Two complete b64 lanes are permuted; only the first dword of lane two is valid.
+  const uint64_t addresses[] = {kAddress + 8, kAddress, kAddress + 24};
+  const uint64_t elements[] = {0x7, 0x3};
+  const std::array<uint32_t, 6> values = {10, 11, 20, 21, 30, 31};
+  ASSERT_EQ(l1.store(addresses, 0x7, sizeof(uint32_t), 2,
+                     reinterpret_cast<const uint8_t *>(values.data()), Mtype::UC, false, 3, 0, 0, 0,
+                     elements),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  std::array<uint32_t, 8> actual{};
+  memory.read_block(kAddress,
+                    std::span<uint8_t>(reinterpret_cast<uint8_t *>(actual.data()), sizeof(actual)));
+  EXPECT_EQ(actual,
+            (std::array<uint32_t, 8>{20, 21, 10, 11, 0xcccccccc, 0xcccccccc, 30, 0xcccccccc}));
+  std::array<uint32_t, 6> loaded;
+  loaded.fill(0xdddddddd);
+  ASSERT_EQ(l1.load(addresses, 0x7, sizeof(uint32_t), 2, reinterpret_cast<uint8_t *>(loaded.data()),
+                    Mtype::UC, false, true, 3, 0, 0, 0, elements),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(loaded, (std::array<uint32_t, 6>{10, 11, 20, 21, 30, 0xdddddddd}));
+
+  const uint64_t aliases[] = {kAddress, kAddress, kAddress + 4};
+  const std::array<uint32_t, 3> overlapping = {1, 2, 3};
+  ASSERT_EQ(l1.store(aliases, 0x7, sizeof(uint32_t), 1,
+                     reinterpret_cast<const uint8_t *>(overlapping.data()), Mtype::UC, false, 3),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(memory.read32(kAddress), 2u);
+  EXPECT_EQ(memory.read32(kAddress + 4), 3u);
+}
+
+TEST(L2CacheTest, ReorderedTransactionStopsAtCacheLineBoundary) {
+  constexpr uint64_t kAddress = 0x180040;
+  GpuMemory memory("memory");
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+  L1VectorCache l1(&l2);
+  std::array<uint64_t, 32> addresses{};
+  std::array<uint32_t, 32> source{};
+  std::array<uint32_t, 32> result{};
+  for (uint32_t lane = 0; lane < 32; ++lane) {
+    addresses[lane] = kAddress + (31 - lane) * sizeof(uint32_t);
+    source[lane] = lane;
+  }
+  ASSERT_EQ(l1.store(addresses.data(), 0xffffffff, sizeof(uint32_t), 1,
+                     reinterpret_cast<const uint8_t *>(source.data()), Mtype::UC, false, 32),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(l2.backing_write_transactions(), 2u);
+  ASSERT_EQ(l1.load(addresses.data(), 0xffffffff, sizeof(uint32_t), 1,
+                    reinterpret_cast<uint8_t *>(result.data()), Mtype::UC, false, true, 32),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(l2.backing_read_transactions(), 2u);
+  EXPECT_EQ(result, source);
 }
 
 TEST(L2CacheTest, DisjointPartialStoresAcrossL2sNeverReadAllocate) {

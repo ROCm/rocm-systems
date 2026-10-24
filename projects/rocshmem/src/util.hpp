@@ -402,6 +402,9 @@ constexpr bool is_blocking(MemcpyKind k) {
   return k == MemcpyKind::PutBlocking || k == MemcpyKind::GetBlocking;
 }
 
+// Whenever LoadPolicy/StorePolicy isn't Standard, the tail loop's
+// AsmAccess::load/store (assembly.hpp) require dst/src to be genuine global
+// addresses (symmetric heap, or an IPC/RDMA-mapped remote of it).
 template <int ChunkSize, CachePolicy LoadPolicy, CachePolicy StorePolicy, int Unroll>
 __device__ __noinline__ void copy_bulk(void* dst, void* src,
                                           int n_chunks, int tid, int stride) {
@@ -438,10 +441,9 @@ __device__ __noinline__ void copy_bulk(void* dst, void* src,
 // ==============================================================================
 // REMAINDER COPY (< 16 Bytes Fast Path)
 // ==============================================================================
+// Whenever LP/SP isn't Standard, dst/src must be genuine global addresses;
 template <CachePolicy LP, CachePolicy SP>
-__device__ __forceinline__ void copy_remainder(uint8_t* dst,
-                                               uint8_t* src,
-                                               int remainder) {
+__device__ __forceinline__ void copy_remainder(uint8_t* dst, uint8_t* src, int remainder) {
   if (remainder == 0) return;
 
   if (remainder & 1) {
@@ -490,7 +492,7 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   constexpr int ChunkSize = 16;
   constexpr int Unroll    = 8;
   // Compile-time bypass policy: cache-bypass in the direction of the remote side.
-  constexpr CachePolicy LP = is_put(Kind) ? CachePolicy::Standard    : CachePolicy::SystemScope;
+  constexpr CachePolicy LP = is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope;
   constexpr CachePolicy SP = is_put(Kind) ? CachePolicy::SystemScope : CachePolicy::Standard;
 
   int n_chunks  = static_cast<int>(size / ChunkSize);

@@ -109,6 +109,39 @@ fn imported_vmem_placement_comes_from_kfd_dma_buf_info() {
 }
 
 #[test]
+fn extended_coherence_rejects_uncached_request_from_either_source() {
+    let (vm, _address, _physical) = fixture();
+    let kind = MemoryKind::DeviceLocal {
+        host_visible: false,
+        coherent: true,
+        extended_coherent: true,
+        uncached: false,
+        contiguous: false,
+    };
+    assert_eq!(
+        KfdVirtualMemory::create(vm.clone(), kind, page(), false, true)
+            .err()
+            .unwrap()
+            .kind(),
+        ErrorKind::InvalidArgument
+    );
+    let kind_uncached = MemoryKind::DeviceLocal {
+        host_visible: false,
+        coherent: true,
+        extended_coherent: true,
+        uncached: true,
+        contiguous: false,
+    };
+    assert_eq!(
+        KfdVirtualMemory::create(vm, kind_uncached, page(), false, false)
+            .err()
+            .unwrap()
+            .kind(),
+        ErrorKind::InvalidArgument
+    );
+}
+
+#[test]
 fn ambiguous_map_retains_address_backing_gem_and_pending_point() {
     let (vm, mut address, mut physical) = fixture();
     drm::with_script(
