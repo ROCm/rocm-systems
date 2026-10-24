@@ -61,6 +61,19 @@ ASSERT_HOOK_MATCHES_PROD(g_hipStreamWaitValue64,          hipStreamWaitValue64);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemcpyBatchAsync,           hipMemcpyBatchAsync);
 #endif
 ASSERT_HOOK_MATCHES_PROD(g_hipMemset,                     hipMemset);
+ASSERT_HOOK_MATCHES_PROD(g_hipDeviceGet,                  hipDeviceGet);
+ASSERT_HOOK_MATCHES_PROD(g_hipMemPoolCreate,              hipMemPoolCreate);
+ASSERT_HOOK_MATCHES_PROD(g_hipMemPoolDestroy,             hipMemPoolDestroy);
+// hipMallocFromPoolAsync also has a template overload, so pick the C one; the cast fails if it drifts.
+using HipMallocFromPoolAsyncFn = hipError_t(void**, size_t, hipMemPool_t, hipStream_t);
+static_assert(std::is_same_v<decltype(g_hipMallocFromPoolAsync), std::function<HipMallocFromPoolAsyncFn>> &&
+                  sizeof(static_cast<HipMallocFromPoolAsyncFn*>(&hipMallocFromPoolAsync)) != 0,
+              "signature drift: g_hipMallocFromPoolAsync no longer matches hipMallocFromPoolAsync");
+ASSERT_HOOK_MATCHES_PROD(g_hipFreeAsync,                  hipFreeAsync);
+ASSERT_HOOK_MATCHES_PROD(g_hipDeviceSynchronize,          hipDeviceSynchronize);
+ASSERT_HOOK_MATCHES_PROD(g_hipDeviceGetStreamPriorityRange, hipDeviceGetStreamPriorityRange);
+ASSERT_HOOK_MATCHES_PROD(g_hipStreamCreateWithPriority,   hipStreamCreateWithPriority);
+ASSERT_HOOK_MATCHES_PROD(g_hipDrvGetErrorString,         hipDrvGetErrorString);
 #define RCCL_ASSERT_INTERCEPTOR_HOOK(name, params) ASSERT_HOOK_MATCHES_PROD(g_##name, name);
 RCCL_HIP_PROFILE_INTERCEPTORS_HOOKED(RCCL_ASSERT_INTERCEPTOR_HOOK)
 #undef RCCL_ASSERT_INTERCEPTOR_HOOK
@@ -235,6 +248,16 @@ static hipError_t DefaultHipSetDevice(int dev)
 }
 std::function<hipError_t(int)> g_hipSetDevice = DefaultHipSetDevice;
 
+// fillInfo() CUCHECKs cuDeviceGet (hipDeviceGet) on every rank before it probes the fabric-handle
+// attribute, so this must succeed on the default TransportsRankComm path or initTransportsRank never
+// reaches the postset.
+static hipError_t DefaultHipDeviceGet(hipDevice_t* device, int)
+{
+    if (device) *device = 0;
+    return hipSuccess;
+}
+std::function<hipError_t(hipDevice_t*, int)> g_hipDeviceGet = DefaultHipDeviceGet;
+
 static hipError_t DefaultHipGetDeviceCount(int* count)
 {
     if (count) {
@@ -408,6 +431,48 @@ std::function<hipError_t(void*, const void*, size_t, hipMemcpyKind)> g_hipMemcpy
 std::function<hipError_t(void*, const void*, size_t, hipMemcpyKind, hipStream_t)>
     g_hipMemcpyAsync = DefaultHipMemcpyAsync;
 std::function<hipError_t(void*, int, size_t, hipStream_t)> g_hipMemsetAsync = DefaultHipMemsetAsync;
+static hipError_t DefaultHipMemPoolCreate(hipMemPool_t* p, const hipMemPoolProps*)
+{
+    if (p) *p = (g_hipMemPoolResult == hipSuccess) ? reinterpret_cast<hipMemPool_t>(0x1) : nullptr;
+    return g_hipMemPoolResult;
+}
+static hipError_t DefaultHipMemPoolDestroy(hipMemPool_t) { return hipSuccess; }  // benign teardown (commFree)
+static hipError_t DefaultHipMallocFromPoolAsync(void** ptr, size_t, hipMemPool_t, hipStream_t)
+{
+    if (ptr) *ptr = nullptr;
+    return hipErrorInvalidValue;
+}
+static hipError_t DefaultHipFreeAsync(void*, hipStream_t) { return hipErrorInvalidValue; }
+static hipError_t DefaultHipDeviceSynchronize(void) { return hipErrorInvalidValue; }
+static hipError_t DefaultHipDeviceGetStreamPriorityRange(int* least, int* greatest)
+{
+    if (least) *least = 0;
+    if (greatest) *greatest = 0;
+    return hipSuccess;
+}
+static hipError_t DefaultHipStreamCreateWithPriority(hipStream_t* stream, unsigned, int)
+{
+    if (stream) *stream = (g_hipStreamCreateResult == hipSuccess)
+                              ? reinterpret_cast<hipStream_t>(0x1) : nullptr;
+    return g_hipStreamCreateResult;
+}
+
+std::function<hipError_t(hipMemPool_t*, const hipMemPoolProps*)> g_hipMemPoolCreate = DefaultHipMemPoolCreate;
+std::function<hipError_t(hipMemPool_t)> g_hipMemPoolDestroy = DefaultHipMemPoolDestroy;
+std::function<hipError_t(void**, size_t, hipMemPool_t, hipStream_t)> g_hipMallocFromPoolAsync =
+    DefaultHipMallocFromPoolAsync;
+std::function<hipError_t(void*, hipStream_t)> g_hipFreeAsync = DefaultHipFreeAsync;
+std::function<hipError_t(void)> g_hipDeviceSynchronize = DefaultHipDeviceSynchronize;
+std::function<hipError_t(int*, int*)> g_hipDeviceGetStreamPriorityRange = DefaultHipDeviceGetStreamPriorityRange;
+std::function<hipError_t(hipStream_t*, unsigned, int)> g_hipStreamCreateWithPriority =
+    DefaultHipStreamCreateWithPriority;
+// Hands back the same text hipGetErrorString does.
+static hipError_t DefaultHipDrvGetErrorString(hipError_t, const char** str)
+{
+    if (str) *str = "[hip_fake] stub error";
+    return hipSuccess;
+}
+std::function<hipError_t(hipError_t, const char**)> g_hipDrvGetErrorString = DefaultHipDrvGetErrorString;
 std::function<hipError_t(void*, int, size_t)> g_hipMemset = DefaultHipMemset;
 std::function<hipError_t(hipStream_t*, unsigned)> g_hipStreamCreateWithFlags = DefaultHipStreamCreateWithFlags;
 std::function<hipError_t(hipStream_t)> g_hipStreamSynchronize = DefaultHipStreamSynchronize;
@@ -631,6 +696,7 @@ void ResetHipFakes()
     g_hipHostFree                   = DefaultHipHostFree;
     g_hipGetDevice                  = DefaultHipGetDevice;
     g_hipSetDevice                  = DefaultHipSetDevice;
+    g_hipDeviceGet                  = DefaultHipDeviceGet;
     g_hipGetDeviceCount             = DefaultHipGetDeviceCount;
     g_hipDeviceCanAccessPeer        = DefaultHipDeviceCanAccessPeer;
     g_hipDeviceEnablePeerAccess     = DefaultHipDeviceEnablePeerAccess;
@@ -667,6 +733,14 @@ void ResetHipFakes()
     g_hipMemcpy                     = DefaultHipMemcpy;
     g_hipMemcpyAsync                = DefaultHipMemcpyAsync;
     g_hipMemsetAsync                = DefaultHipMemsetAsync;
+    g_hipMemPoolCreate              = DefaultHipMemPoolCreate;
+    g_hipMemPoolDestroy             = DefaultHipMemPoolDestroy;
+    g_hipMallocFromPoolAsync        = DefaultHipMallocFromPoolAsync;
+    g_hipFreeAsync                  = DefaultHipFreeAsync;
+    g_hipDeviceSynchronize          = DefaultHipDeviceSynchronize;
+    g_hipDeviceGetStreamPriorityRange = DefaultHipDeviceGetStreamPriorityRange;
+    g_hipStreamCreateWithPriority   = DefaultHipStreamCreateWithPriority;
+    g_hipDrvGetErrorString          = DefaultHipDrvGetErrorString;
     g_hipMemset                     = DefaultHipMemset;
     g_hipStreamCreateWithFlags      = DefaultHipStreamCreateWithFlags;
     g_hipStreamSynchronize          = DefaultHipStreamSynchronize;
@@ -726,14 +800,7 @@ hipError_t hipDeviceDisablePeerAccess(int peerDevice)
     return g_hipDeviceDisablePeerAccess(peerDevice);
 }
 
-hipError_t hipDeviceGet(hipDevice_t* device, int)
-{
-    // fillInfo() CUCHECKs cuDeviceGet (hipDeviceGet) on every rank before it
-    // probes the fabric-handle attribute, so this must succeed on the default
-    // TransportsRankComm path or initTransportsRank never reaches the postset.
-    if (device) *device = 0;
-    return hipSuccess;
-}
+hipError_t hipDeviceGet(hipDevice_t* device, int ordinal) { return g_hipDeviceGet(device, ordinal); }
 
 hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t)
 {
@@ -836,6 +903,7 @@ hipError_t hipGetDevice(int* deviceId) { return g_hipGetDevice(deviceId); }
 hipError_t hipGetDeviceCount(int* count) { return g_hipGetDeviceCount(count); }
 
 const char* hipGetErrorString(hipError_t) { return "[hip_fake] stub error"; }
+hipError_t hipDrvGetErrorString(hipError_t err, const char** str) { return g_hipDrvGetErrorString(err, str); }
 
 hipError_t hipGetLastError(void) { return g_hipGetLastError(); }
 
@@ -947,24 +1015,14 @@ hipError_t hipStreamCreateWithFlags(hipStream_t* stream, unsigned int flags)
     return g_hipStreamCreateWithFlags(stream, flags);
 }
 
-hipError_t hipStreamCreateWithPriority(hipStream_t* stream, unsigned int, int)
+hipError_t hipStreamCreateWithPriority(hipStream_t* stream, unsigned int flags, int priority)
 {
-    if (stream) {
-        *stream = (g_hipStreamCreateResult == hipSuccess)
-                      ? reinterpret_cast<hipStream_t>(0x1) : nullptr;
-    }
-    return g_hipStreamCreateResult;
+    return g_hipStreamCreateWithPriority(stream, flags, priority);
 }
 
 hipError_t hipDeviceGetStreamPriorityRange(int* leastPriority, int* greatestPriority)
 {
-    if (leastPriority) {
-        *leastPriority = 0;
-    }
-    if (greatestPriority) {
-        *greatestPriority = 0;
-    }
-    return hipSuccess;
+    return g_hipDeviceGetStreamPriorityRange(leastPriority, greatestPriority);
 }
 
 hipError_t hipStreamDestroy(hipStream_t s)     { return g_hipStreamDestroy(s); }
@@ -1009,7 +1067,7 @@ hipError_t hipMallocManaged(void** p, size_t size, unsigned int flags)
 }
 hipError_t hipMemcpy(void* d, const void* s, size_t n, hipMemcpyKind k) { return g_hipMemcpy(d, s, n, k); }
 hipError_t hipMemset(void* dst, int value, size_t bytes) { return g_hipMemset(dst, value, bytes); }
-hipError_t hipDeviceSynchronize(void) { return hipErrorInvalidValue; }
+hipError_t hipDeviceSynchronize(void) { return g_hipDeviceSynchronize(); }
 // We define hipGetDevicePropertiesR0600, the versioned public HIP ABI symbol,
 // rather than the unversioned hipGetDeviceProperties. Callers write
 // hipGetDeviceProperties in source, but the HIP header (post rocm-systems
@@ -1042,11 +1100,13 @@ hipError_t hipEventCreateWithFlags(hipEvent_t* e, unsigned int) {
     if (e) *e = (g_hipEventCreateResult == hipSuccess) ? reinterpret_cast<hipEvent_t>(0x1) : nullptr;
     return g_hipEventCreateResult;
 }
-hipError_t hipMemPoolCreate(hipMemPool_t* p, const hipMemPoolProps*) {
-    if (p) *p = (g_hipMemPoolResult == hipSuccess) ? reinterpret_cast<hipMemPool_t>(0x1) : nullptr;
-    return g_hipMemPoolResult;
+hipError_t hipMemPoolCreate(hipMemPool_t* p, const hipMemPoolProps* props) { return g_hipMemPoolCreate(p, props); }
+hipError_t hipMemPoolDestroy(hipMemPool_t p) { return g_hipMemPoolDestroy(p); }
+hipError_t hipMallocFromPoolAsync(void** ptr, size_t size, hipMemPool_t pool, hipStream_t stream)
+{
+    return g_hipMallocFromPoolAsync(ptr, size, pool, stream);
 }
-hipError_t hipMemPoolDestroy(hipMemPool_t) { return hipSuccess; }  // benign teardown (commFree)
+hipError_t hipFreeAsync(void* ptr, hipStream_t stream) { return g_hipFreeAsync(ptr, stream); }
 hipError_t hipMemPoolSetAttribute(hipMemPool_t, hipMemPoolAttr, void*) { return g_hipMemPoolResult; }
 
 // ---- HIP entry points ROCm's profile runtime also defines -------------------

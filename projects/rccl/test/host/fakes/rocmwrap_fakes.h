@@ -12,6 +12,8 @@
 #ifndef RCCL_TEST_HOST_ROCMWRAP_FAKES_H_
 #define RCCL_TEST_HOST_ROCMWRAP_FAKES_H_
 
+extern int g_rocmLibraryInitCalls;
+
 // Resets the dmaBufSupported gate (pfn_hsa_amd_portable_export_dmabuf) to NULL, i.e. unsupported.
 void ResetRocmWrapFakes();
 
