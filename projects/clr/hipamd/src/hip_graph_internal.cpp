@@ -2525,6 +2525,11 @@ hipError_t GraphExecSegmented::UpdateAQLPacket(hip::GraphNode* node) {
           packetBatch.updatePending = true;
           updatedPacketBatches_.push_back(&packetBatch);
         }
+      } else if (newPacketCount == oldPacketCount && packetBatch.disabledNodeCount == 0) {
+        // No slot moved, so patch_list flat_packet pointers stay valid.
+        for (size_t i = 0; i < range.packetCount; ++i) {
+          packetBatch.rewriteFlatSlot(range.startIndex + i);
+        }
       } else {
         RebuildAQLPacketBatch(packetBatch);
       }
@@ -2567,20 +2572,15 @@ void GraphExecSegmented::RebuildAQLPacketBatch(PacketBatch& packetBatch) {
 }
 
 // ================================================================================================
-// Append one 64-byte AQL packet to a flat buffer: copies the body, saves the original full_header
-// and invalidates the header.
-void GraphExecSegmented::PacketBatch::appendPacketToFlatBuffer(const uint8_t* pkt_raw,
-                                                      const uint8_t* metadata_raw,
-                                                      amd::AlignedVector64<uint8_t>& flatData,
-                                                      std::vector<uint32_t>& fullHeaders,
-                                                      std::vector<uint8_t>& flatMetadata) {
+// Write one 64-byte AQL packet into a flat buffer slot: copies the body, saves the original
+// full_header and invalidates the header.
+void GraphExecSegmented::PacketBatch::writePacketToFlatSlot(const uint8_t* pkt_raw,
+                                                           const uint8_t* metadata_raw,
+                                                           uint8_t* dst, uint32_t* fullHeader,
+                                                           uint8_t* metadataDst) {
   static constexpr size_t kSigOff = 56;
-  const size_t baseOff = flatData.size();
-  flatData.insert(flatData.end(), pkt_raw, pkt_raw + kAqlPktSize);
-  uint8_t* dst = flatData.data() + baseOff;
-  uint32_t fullHeader = 0;
-  memcpy(&fullHeader, pkt_raw, sizeof(fullHeader));
-  fullHeaders.push_back(fullHeader);
+  memcpy(dst, pkt_raw, kAqlPktSize);
+  memcpy(fullHeader, pkt_raw, sizeof(*fullHeader));
   // Set header to HSA_PACKET_TYPE_INVALID (type=1) so the GPU CP skips this
   // packet until the valid header is committed with release semantics during
   // dispatch. Using type=0 (VENDOR_SPECIFIC) would be a processable packet type
@@ -2591,14 +2591,43 @@ void GraphExecSegmented::PacketBatch::appendPacketToFlatBuffer(const uint8_t* pk
   // Zero completion signal; ApplyHwEventPatches re-patches it directly via flat_packet pointers.
   memset(dst + kSigOff, 0, sizeof(uint64_t));
 
-  // Append the matching metadata-prefetch packet so flatMetadata stays index-
-  // aligned with flatData. A nullptr |metadata_raw| yields an invalid slot.
-  const size_t metaOff = flatMetadata.size();
-  flatMetadata.insert(flatMetadata.end(), kMetadataPktSize, 0);
+  // Write the matching metadata-prefetch packet so the metadata buffer stays index-
+  // aligned with the packet buffer. A nullptr |metadata_raw| yields an invalid slot.
   if (metadata_raw != nullptr) {
-    memcpy(flatMetadata.data() + metaOff, metadata_raw, kMetadataPktSize);
+    memcpy(metadataDst, metadata_raw, kMetadataPktSize);
   } else {
-    invalidateMetadataSlot(flatMetadata.data() + metaOff);
+    memset(metadataDst, 0, kMetadataPktSize);
+    invalidateMetadataSlot(metadataDst);
+  }
+}
+
+// ================================================================================================
+// Append one 64-byte AQL packet to a flat buffer.
+void GraphExecSegmented::PacketBatch::appendPacketToFlatBuffer(const uint8_t* pkt_raw,
+                                                      const uint8_t* metadata_raw,
+                                                      amd::AlignedVector64<uint8_t>& flatData,
+                                                      std::vector<uint32_t>& fullHeaders,
+                                                      std::vector<uint8_t>& flatMetadata) {
+  const size_t baseOff = flatData.size();
+  flatData.resize(baseOff + kAqlPktSize);
+  fullHeaders.push_back(0);
+  const size_t metaOff = flatMetadata.size();
+  flatMetadata.resize(metaOff + kMetadataPktSize);
+  writePacketToFlatSlot(pkt_raw, metadata_raw, flatData.data() + baseOff, &fullHeaders.back(),
+                        flatMetadata.data() + metaOff);
+}
+
+// ================================================================================================
+// Rewrite slot |idx| of the flat buffers from dispatchPackets[idx] without moving any other slot.
+void GraphExecSegmented::PacketBatch::rewriteFlatSlot(size_t idx) {
+  const uint8_t* metadata_raw =
+      (idx < dispatchMetadataPackets.size()) ? dispatchMetadataPackets[idx] : nullptr;
+  writePacketToFlatSlot(dispatchPackets[idx], metadata_raw,
+                        flatPacketData.data() + idx * kAqlPktSize, &validPacketFullHeaders[idx],
+                        flatMetadataData.data() + idx * kMetadataPktSize);
+  filteredCacheValid = false;
+  if (idx == 0) {
+    clearFirstBarrierBit(validPacketFullHeaders);
   }
 }
 
