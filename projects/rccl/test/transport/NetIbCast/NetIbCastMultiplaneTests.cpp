@@ -16,6 +16,7 @@
  * verifies multiple lookup scenarios.
  */
 
+#include <cerrno>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -28,6 +29,7 @@
 // multiplane public API — include the actual header for ibv_gid and function declarations
 #include "multiplane.h"
 #include "common_cast.h"  // for IbCastAinicRoce
+#include "connect_cast.h"
 
 namespace {
 
@@ -416,6 +418,242 @@ TEST_F(MultiplaneLoadTest, IPv6PipResolution) {
   EXPECT_EQ(pipGids[1].raw[15], 0x20);
 
   remove(path.c_str());
+}
+
+// A multi-read flush signals only the tail. If that post fails, the prefix has
+// no completion, so IbCastIflush must free the request instead of arming one.
+int g_flushNWrs = 0;
+int g_flushNSignaled = 0;
+
+extern "C" int FailFlushSignaledTail(struct ibv_qp*, struct ibv_send_wr* wr, struct ibv_send_wr** bad_wr) {
+  g_flushNWrs = 0;
+  g_flushNSignaled = 0;
+  struct ibv_send_wr* tail = wr;
+  for (struct ibv_send_wr* w = wr; w != nullptr; w = w->next) {
+    g_flushNWrs++;
+    if (w->send_flags & IBV_SEND_SIGNALED) g_flushNSignaled++;
+    tail = w;
+  }
+  if (bad_wr) *bad_wr = tail;
+  return ENOMEM;
+}
+
+TEST(NetIbCastFlushPrefix, FailedSignaledTailFreesRequest) {
+  auto* comm = static_cast<ncclIbRecvComm*>(std::calloc(1, sizeof(ncclIbRecvComm)));
+  ASSERT_NE(comm, nullptr);
+  comm->flushEnabled = 1;
+  comm->base.vProps.ndevs = 1;
+
+  ibv_context ctx;
+  ibv_qp qp;
+  std::memset(&ctx, 0, sizeof(ctx));
+  std::memset(&qp, 0, sizeof(qp));
+  ctx.ops.post_send = FailFlushSignaledTail;
+  qp.context = &ctx;
+  qp.qp_num = 1;
+  comm->devs[0].gpuFlush.qp.qp = &qp;
+
+  ibv_mr mr0, mr1;
+  std::memset(&mr0, 0, sizeof(mr0));
+  std::memset(&mr1, 0, sizeof(mr1));
+  mr0.rkey = 1;
+  mr1.rkey = 2;
+
+  ncclIbMrHandle handle;
+  std::memset(&handle, 0, sizeof(handle));
+  handle.nSegments = 2;
+  handle.segStart[0] = 0x1000;
+  handle.segLen[0] = 0x1000;
+  handle.segStart[1] = 0x2000;
+  handle.segLen[1] = 0x1000;
+  handle.segMrs[0][0] = &mr0;
+  handle.segMrs[1][0] = &mr1;
+
+  // [0x1800, 0x2800) overlaps both segments, so the flush posts two reads.
+  void* data = reinterpret_cast<void*>(static_cast<uintptr_t>(0x1800));
+  int size = 0x1000;
+  void* mhandle = &handle;
+  void* request = reinterpret_cast<void*>(static_cast<uintptr_t>(0x1));
+
+  const ncclResult_t ret = IbCastIflush(comm, 1, &data, &size, &mhandle, &request);
+
+  EXPECT_EQ(g_flushNWrs, 2);
+  EXPECT_EQ(g_flushNSignaled, 1);
+  EXPECT_EQ(ret, ncclSystemError);
+  EXPECT_EQ(request, nullptr);
+  EXPECT_EQ(comm->base.reqs[0].type, NCCL_NET_IB_REQ_UNUSED);
+  EXPECT_EQ(comm->base.reqs[0].events[0], 0);
+  EXPECT_EQ(comm->base.stats.fatalErrorCount, 1);
+  std::free(comm);
+}
+
+// A segmented send also signals only each QP's tail. When that tail never posts,
+// the prefix has no completion either, so isendFail must drop that QP's event.
+uint32_t g_sendFailQpNum = 0;
+int g_sendCalls = 0;
+int g_sendFailedWrs = 0;
+int g_sendFailedSignaled = 0;
+
+extern "C" int FailSendSignaledTail(struct ibv_qp* qp, struct ibv_send_wr* wr, struct ibv_send_wr** bad_wr) {
+  g_sendCalls++;
+  if (qp->qp_num != g_sendFailQpNum) return 0;
+  struct ibv_send_wr* tail = wr;
+  for (struct ibv_send_wr* w = wr; w != nullptr; w = w->next) {
+    g_sendFailedWrs++;
+    if (w->send_flags & IBV_SEND_SIGNALED) g_sendFailedSignaled++;
+    tail = w;
+  }
+  if (bad_wr) *bad_wr = tail;
+  return ENOMEM;
+}
+
+constexpr int kSegSendNqps = 2;
+constexpr int kSegSendTag = 7;
+constexpr uintptr_t kSegSendBase = 0x100000;
+constexpr size_t kSegSendSize = 0x2000;
+
+// One device, two data QPs, and a three-segment local buffer. Each QP gets a
+// 0x1000 chunk that crosses one boundary: two data WRs plus the sizes/imm tail.
+class NetIbCastSegmentedSendPrefix : public ::testing::Test {
+protected:
+  void SetUp() override {
+    g_sendFailQpNum = 0;
+    g_sendCalls = 0;
+    g_sendFailedWrs = 0;
+    g_sendFailedSignaled = 0;
+    const size_t bytes = (sizeof(ncclIbSendComm) + 63) / 64 * 64;
+    comm = static_cast<ncclIbSendComm*>(std::aligned_alloc(64, bytes));
+    ASSERT_NE(comm, nullptr);
+    std::memset(comm, 0, bytes);
+
+    comm->base.isSend = true;
+    comm->base.ready = 1;
+    comm->base.vProps.ndevs = 1;
+    comm->base.nqps = kSegSendNqps;
+    // BY_ORDER keeps the QP scheduler off, so the send spreads evenly over both QPs.
+    comm->base.recvMatchingScheme = BY_ORDER;
+
+    std::memset(&ctx, 0, sizeof(ctx));
+    ctx.ops.post_send = FailSendSignaledTail;
+    for (int q = 0; q < kSegSendNqps; q++) {
+      std::memset(&qps[q], 0, sizeof(qps[q]));
+      qps[q].context = &ctx;
+      qps[q].qp_num = 10 + q;
+      comm->base.qps[q].qp = &qps[q];
+      comm->base.activeQps[q] = &comm->base.qps[q];
+    }
+
+    std::memset(ctsSlots, 0, sizeof(ctsSlots));
+    comm->ctsFifo = ctsSlots;
+    ncclIbSendFifo& cts = comm->ctsFifo[0][0];
+    cts.idx = 1;
+    cts.nreqs = 1;
+    cts.tag = kSegSendTag;
+    cts.size = kSegSendSize;
+    cts.addr = 0x900000;
+    cts.rkeys[0] = 0x77;
+
+    std::memset(mrs, 0, sizeof(mrs));
+    std::memset(&mh, 0, sizeof(mh));
+    const size_t segLen[3] = {0x800, 0x1000, 0x800};
+    uintptr_t start = kSegSendBase;
+    mh.nSegments = 3;
+    for (int s = 0; s < 3; s++) {
+      mrs[s].lkey = 0x10 + s;
+      mh.segStart[s] = start;
+      mh.segLen[s] = segLen[s];
+      mh.segMrs[s][0] = &mrs[s];
+      start += segLen[s];
+    }
+    mh.mrs[0] = &mrs[0];
+  }
+
+  void TearDown() override { std::free(comm); }
+
+  ncclResult_t Isend(void** request) {
+    *request = nullptr;
+    return IbCastIsend(comm, reinterpret_cast<void*>(kSegSendBase), kSegSendSize, kSegSendTag, &mh, nullptr,
+                       request);
+  }
+
+  ncclIbSendComm* comm = nullptr;
+  alignas(64) ncclIbSendFifo ctsSlots[1][NCCL_NET_IB_MAX_RECVS];
+  ibv_context ctx;
+  ibv_qp qps[kSegSendNqps];
+  ibv_mr mrs[3];
+  ncclIbMrHandle mh;
+};
+
+TEST_F(NetIbCastSegmentedSendPrefix, FirstQpLosesSignaledTailFreesRequest) {
+  g_sendFailQpNum = qps[0].qp_num;
+  void* request = nullptr;
+  const ncclResult_t ret = Isend(&request);
+
+  EXPECT_EQ(g_sendCalls, 1);
+  EXPECT_EQ(g_sendFailedWrs, 3);
+  EXPECT_EQ(g_sendFailedSignaled, 1);
+  EXPECT_EQ(ret, ncclSystemError);
+  EXPECT_EQ(request, nullptr);
+  EXPECT_EQ(comm->base.reqs[0].type, NCCL_NET_IB_REQ_UNUSED);
+  EXPECT_EQ(comm->base.reqs[0].events[0], 0);
+  EXPECT_EQ(comm->sendReqs[0][0], nullptr);
+  EXPECT_EQ(comm->base.stats.fatalErrorCount, 1);
+}
+
+// The first QP's tail posted and will complete, so only its event survives.
+TEST_F(NetIbCastSegmentedSendPrefix, SecondQpLosesSignaledTailKeepsFirstQpEvent) {
+  g_sendFailQpNum = qps[1].qp_num;
+  void* request = nullptr;
+  const ncclResult_t ret = Isend(&request);
+
+  EXPECT_EQ(g_sendCalls, 2);
+  EXPECT_EQ(g_sendFailedWrs, 3);
+  EXPECT_EQ(ret, ncclSuccess);
+  EXPECT_EQ(request, &comm->base.reqs[0]);
+  EXPECT_EQ(comm->base.reqs[0].type, NCCL_NET_IB_REQ_FAILED);
+  EXPECT_EQ(comm->base.reqs[0].events[0], 1);
+  EXPECT_TRUE(comm->base.reqs[0].send.sentData[0]);
+  EXPECT_FALSE(comm->base.reqs[0].send.sentData[1]);
+  EXPECT_EQ(comm->base.stats.fatalErrorCount, 1);
+}
+
+// Control: with no failure both chains post and both events stay armed.
+TEST_F(NetIbCastSegmentedSendPrefix, BothQpsPostKeepsBothEvents) {
+  void* request = nullptr;
+  EXPECT_EQ(Isend(&request), ncclSuccess);
+
+  EXPECT_EQ(g_sendCalls, 2);
+  EXPECT_EQ(request, &comm->base.reqs[0]);
+  EXPECT_EQ(comm->base.reqs[0].type, NCCL_NET_IB_REQ_SEND);
+  EXPECT_EQ(comm->base.reqs[0].events[0], 2);
+  EXPECT_EQ(comm->base.stats.fatalErrorCount, 0);
+}
+
+TEST(NetIbCastSideTable, RmaCommsDoNotAdvertiseMultiSeg) {
+  EXPECT_TRUE(IbCastCommAdvertisesMultiSeg(/*multiSegRegister=*/true, /*isRMA=*/false));
+  EXPECT_FALSE(IbCastCommAdvertisesMultiSeg(/*multiSegRegister=*/true, /*isRMA=*/true));
+  EXPECT_FALSE(IbCastCommAdvertisesMultiSeg(/*multiSegRegister=*/false, /*isRMA=*/false));
+  EXPECT_FALSE(IbCastCommAdvertisesMultiSeg(/*multiSegRegister=*/false, /*isRMA=*/true));
+}
+
+TEST(NetIbCastSideTable, AllocCtsAppendsSideTableOnlyWhenAsked) {
+  const size_t bytes = (sizeof(ncclIbSendComm) + 63) / 64 * 64;
+  for (bool sideTable : {false, true}) {
+    SCOPED_TRACE(sideTable ? "sideTable" : "no sideTable");
+    auto* comm = static_cast<ncclIbSendComm*>(std::aligned_alloc(64, bytes));
+    ASSERT_NE(comm, nullptr);
+    std::memset(comm, 0, bytes);
+    ASSERT_EQ(IbCastSendCommAllocCts(comm, sideTable), ncclSuccess);
+    ASSERT_NE(comm->ctsFifo, nullptr);
+    if (sideTable) {
+      EXPECT_EQ(reinterpret_cast<uint8_t*>(comm->segLayoutFifo),
+                reinterpret_cast<uint8_t*>(comm->ctsFifo) + IB_CAST_CTS_FIFO_BYTES);
+    } else {
+      EXPECT_EQ(comm->segLayoutFifo, nullptr);
+    }
+    std::free(comm->ctsFifo);
+    std::free(comm);
+  }
 }
 
 }  // namespace

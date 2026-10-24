@@ -10,6 +10,7 @@
 
 #include "common_cast.h"
 #include "ibvwrap.h"
+#include "device.h"
 
 enum ncclIbCommState {
   ncclIbCommStateStart = 0,
@@ -129,6 +130,32 @@ struct ncclIbConnectionMetadata {
   int      senderIbDevIdx;      // sender's IB device index
   bool     optRecvCompletion;
 };
+static_assert(offsetof(struct ncclIbConnectionMetadata, ndevs) ==
+                offsetof(struct ncclIbConnectionMetadata, addr) +
+                  sizeof(((struct ncclIbConnectionMetadata*)0)->addr),
+              "CAST connection metadata must preserve legacy field offsets");
+// The connect-caps trailer lives at the end of devName, so its offset is wire format too.
+static_assert(offsetof(struct ncclIbConnectionMetadata, devName) ==
+                sizeof(((struct ncclIbConnectionMetadata*)0)->qpInfo) +
+                  sizeof(((struct ncclIbConnectionMetadata*)0)->resiliencyInfo) +
+                  sizeof(((struct ncclIbConnectionMetadata*)0)->devs),
+              "CAST connection metadata must keep devName at its legacy offset");
+
+extern int64_t ncclParamMultiSegmentRegister();
+// NCCL_MULTI_SEGMENT_REGISTER=0 keeps the legacy connect metadata, CTS MR and QP depths.
+static inline bool IbCastAdvertiseMultiSeg() { return ncclParamMultiSegmentRegister() != 0; }
+// RCCL: RMA comms never post or wait on a CTS, so they skip the side table and the MULTISEG cap.
+static inline bool IbCastCommAdvertisesMultiSeg(bool multiSegRegister, bool isRMA) {
+  return multiSegRegister && !isRMA;
+}
+// Allocates the CTS block, with the side table appended when sideTable is set.
+ncclResult_t IbCastSendCommAllocCts(struct ncclIbSendComm* comm, bool sideTable);
+
+// RCCL: same outstanding-step depth as classic. One extra chain is not enough.
+static inline int IbCastFlushQpSendDepth() {
+  return ncclIbFlushQpSendDepth(NCCL_STEPS, NCCL_NET_IB_MAX_RECVS, NCCL_IB_MAX_SEGMENTS, NET_IB_MAX_REQUESTS,
+                                IbCastAdvertiseMultiSeg());
+}
 
 // Initialize QP sharing fields to defaults (sharing disabled)
 static inline void IbCastQpCreateAttrInitSharing(struct ncclIbQpCreateAttr* attr) {

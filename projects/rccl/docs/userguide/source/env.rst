@@ -1768,7 +1768,7 @@ NCCL_MULTI_SEGMENT_REGISTER
 Register one DMA-BUF memory region per physical segment. When this is off,
 registration keeps the single-region path.
 
-For NET registration, the internal IB net plugin registers a buffer that spans several segments as one memory region per segment. Other net plugins are not supported with this variable set to 1.
+For NET registration, the internal IB and IB-CAST net plugins register a buffer that spans several segments as one memory region per segment. Other net plugins are not supported with this variable set to 1.
 
 On HIP, GIN registration of a window that spans more than one device-memory segment requires this variable set to 1, the proxy GIN backend over InfiniBand, and the same segment count on every rank. Otherwise registration fails with ``ncclInvalidUsage`` instead of registering only the first segment.
 

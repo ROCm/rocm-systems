@@ -62,6 +62,9 @@ test_categories:
       - "ChannelDefaults.*"
       - "NetIbCastUdma.*"
       - "NetIbSegmentedSendPrefix.*"
+      - "NetIbCastFlushPrefix.*"
+      - "NetIbCastSegmentedSendPrefix.*"
+      - "NetIbCastSideTable.*"
     exclude_windows:
       - "*"
     labels:
