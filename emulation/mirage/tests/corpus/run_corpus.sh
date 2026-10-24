@@ -9,7 +9,7 @@
 #
 # This bridge runs the *same* corpus but routes every IREE tool invocation
 # through `mirage run --profile <profile> -- <tool> ...`, so mirage injects the
-# emulator env contract (HotSwap by default). It supports two modes:
+# rocjitsu env contract. It supports two modes:
 #
 #   * host mode (default): the IREE tools come from the host PATH and run
 #     under a non-containerised mirage profile.
@@ -26,7 +26,7 @@
 # Inputs (all via environment):
 #   MIRAGE_BIN               mirage binary (default: mirage on PATH)
 #   CORPUS_ROOT              rocjitsu-corpus checkout (required)
-#   MIRAGE_CORPUS_EMULATOR   emulator to run under (default: hotswap)
+#   MIRAGE_CORPUS_EMULATOR   emulator to run under (default: rocjitsu)
 #   MIRAGE_CORPUS_PROFILE    mirage profile name (default: corpus-<emulator>[-img])
 #   MIRAGE_CORPUS_ENV_FILE   corpus env file (default: <script>/env/<emulator>.sh)
 #   MIRAGE_CORPUS_ONLY       all | e2e | matmul (default: all)
@@ -35,7 +35,7 @@
 #                            container mode (default: unset -> host mode)
 #   MIRAGE_CORPUS_PROVIDER   container provider for container mode (auto-detect)
 #   MIRAGE_CORPUS_AGENT      builtin GPU agent the profile pins
-#                            (default: MI450X for hotswap, MI300X otherwise)
+#                            (default: MI450X for the gfx1250 corpus)
 #
 # Exit codes:
 #   0    all selected corpus cases passed
@@ -56,7 +56,7 @@ script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # ---- inputs -----------------------------------------------------------------
 MIRAGE_BIN=${MIRAGE_BIN:-mirage}
 CORPUS_ROOT=${CORPUS_ROOT:-}
-EMULATOR=${MIRAGE_CORPUS_EMULATOR:-hotswap}
+EMULATOR=${MIRAGE_CORPUS_EMULATOR:-rocjitsu}
 ENV_FILE=${MIRAGE_CORPUS_ENV_FILE:-$script_dir/env/$EMULATOR.sh}
 ONLY=${MIRAGE_CORPUS_ONLY:-all}
 OUT_DIR=${MIRAGE_CORPUS_OUT_DIR:-}
@@ -75,14 +75,8 @@ case "$ONLY" in
   *) die "MIRAGE_CORPUS_ONLY must be all, e2e, or matmul (got: $ONLY)" ;;
 esac
 
-# Builtin GPU agent the profile pins. HotSwap only supports MI450X.
-if [[ -n "${MIRAGE_CORPUS_AGENT:-}" ]]; then
-  AGENT=$MIRAGE_CORPUS_AGENT
-elif [[ "$EMULATOR" == hotswap ]]; then
-  AGENT=MI450X
-else
-  AGENT=MI300X
-fi
+# Builtin GPU agent matching the corpus's gfx1250 kernels.
+AGENT=${MIRAGE_CORPUS_AGENT:-MI450X}
 
 # ---- shared prerequisites ---------------------------------------------------
 command -v "$MIRAGE_BIN" >/dev/null 2>&1 \
