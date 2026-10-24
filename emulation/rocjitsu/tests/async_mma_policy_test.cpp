@@ -399,4 +399,57 @@ TEST(AsyncMmaPolicyTest, WaitIdleDrainsBlockedMmaBeforeReturningToIssue) {
     window.drain();
   }
 }
+
+TEST(AsyncMmaPolicyTest, SynchronousFormatFailureDrainsEarlierMatrixWork) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  const auto good_words =
+      cdna5::build_vop3p(cdna5::kVWmmaF3216x16x64Fp8Fp8Vop3p,
+                         {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3});
+  std::unique_ptr<Instruction> decoded(decode_valid(*decoder, good_words.data()));
+  // Ordinary dynamic-format WMMA can decode a reserved format, but is not
+  // eligible for asynchronous execution. Its error must stay on the CU thread.
+  const auto bad_words =
+      cdna5::build_vop3p(cdna5::kVWmmaF3216x16x128F8f6f4Vop3p,
+                         {.vdst = 64, .opsel = 5, .src0 = 256, .src1 = 288, .src2 = 128});
+  std::unique_ptr<Instruction> failing(decode_valid(*decoder, bad_words.data()));
+  ASSERT_NE(failing, nullptr);
+  EXPECT_FALSE(policy::candidate(failing->mnemonic()));
+  amdgpu::GpuMemory memory("matrix_failure_memory");
+  amdgpu::L2Cache l2("matrix_failure_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 128;
+  config.async_resources = std::make_shared<mc::ExecutionResources>(1);
+  auto cu = amdgpu::ComputeUnitCore::create("matrix_failure_cu", config, &memory, &l2);
+  auto *wave = cu->dispatch_wf(0, 0, 106, 128);
+  ASSERT_NE(wave, nullptr);
+  wave->set_exec(0xffffffff);
+  BlockedMmaState state;
+  amdgpu::AsyncInstructionWindow window(*cu, *wave);
+  std::unique_ptr<Instruction> blocked = std::make_unique<BlockedMma>(*decoded, state);
+  ASSERT_TRUE(window.submit_mma(blocked));
+  state.started.acquire();
+
+  std::binary_semaphore returned{0};
+  bool returned_before_completion = false;
+  std::thread releaser([&] {
+    returned_before_completion = returned.try_acquire_for(std::chrono::milliseconds(50));
+    state.unblock.release();
+  });
+  window.before(*failing);
+  returned.release();
+  releaser.join();
+  EXPECT_FALSE(returned_before_completion);
+  EXPECT_FALSE(window.pending());
+  EXPECT_TRUE(window.stopped());
+  EXPECT_FALSE(window.submit_mma(failing));
+  ASSERT_NE(failing, nullptr);
+  EXPECT_NO_THROW({ EXPECT_TRUE(cu->execute_instruction(failing.get(), *wave).failed()); });
+  EXPECT_EQ(wave->instruction_execution_error(),
+            amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+  window.drain();
+  wave->halt();
+}
 } // namespace

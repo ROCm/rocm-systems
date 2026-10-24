@@ -2686,8 +2686,11 @@ def _gen_sr_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
             f'  auto data_src_off = Isa::resolved_vgpr_offset({src[0]}.opr_type_, '
             f'{src[0]}.encoding_value_);'
         )
-        L.append('  if (!data_src_off)')
-        L.append('    throw util::UnimplementedInst(mnemonic());')
+        L.append('  if (!data_src_off) {')
+        L.append('    wf.report_instruction_execution_error(')
+        L.append('        amdgpu::InstructionExecutionError::UnsupportedOperandValue);')
+        L.append('    return;')
+        L.append('  }')
         L.append(
             f'  uint32_t data_src_base = vb + amdgpu::apply_gpr_idx('
             f'wf, *data_src_off, {src[0]}.vgpr_msb_role());'
@@ -3003,8 +3006,11 @@ def _gen_wide_scalef32(
             f'  auto {direct_op}_off = Isa::resolved_vgpr_offset('
             f'{direct_op}.opr_type_, {direct_op}.encoding_value_);'
         )
-        L.append(f'  if (!{direct_op}_off)')
-        L.append('    throw util::UnimplementedInst(mnemonic());')
+        L.append(f'  if (!{direct_op}_off) {{')
+        L.append('    wf.report_instruction_execution_error(')
+        L.append('        amdgpu::InstructionExecutionError::UnsupportedOperandValue);')
+        L.append('    return;')
+        L.append('  }')
         L.append(
             f'  uint32_t {direct_op}_base = vb + amdgpu::apply_gpr_idx('
             f'wf, *{direct_op}_off, {direct_op}.vgpr_msb_role());'

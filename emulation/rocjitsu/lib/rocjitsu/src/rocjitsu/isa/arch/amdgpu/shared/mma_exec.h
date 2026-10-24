@@ -29,7 +29,6 @@
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "util/data_types.h"
-#include "util/except.h"
 #include "util/meta_programming.h"
 #include "util/simd.h"
 
@@ -239,19 +238,18 @@ inline OutputLoc output_loc_64(uint32_t M, uint32_t N, uint32_t i, uint32_t j, u
   return {local * 2, lane};
 }
 
-inline void require_wmma_wave32(const auto &cu) {
-  if (cu.wf_size() != WMMA_WAVE32)
-    throw util::ConfigError("gfx1250 WMMA requires wave32");
+inline void require_wmma_wave32([[maybe_unused]] const auto &cu) {
+  assert(cu.wf_size() == WMMA_WAVE32 && "gfx1250 WMMA requires wave32");
 }
 
-inline void require_gfx11_wmma_wave_size(uint32_t wave_size) {
-  if (wave_size != WMMA_WAVE32 && wave_size != WMMA_WAVE64)
-    throw util::ConfigError("gfx11 WMMA requires wave32 or wave64");
+inline void require_gfx11_wmma_wave_size([[maybe_unused]] uint32_t wave_size) {
+  assert((wave_size == WMMA_WAVE32 || wave_size == WMMA_WAVE64) &&
+         "gfx11 WMMA requires wave32 or wave64");
 }
 
-inline void require_gfx12_wmma_wave_size(uint32_t wave_size) {
-  if (wave_size != WMMA_WAVE32 && wave_size != WMMA_WAVE64)
-    throw util::ConfigError("gfx12 WMMA requires wave32 or wave64");
+inline void require_gfx12_wmma_wave_size([[maybe_unused]] uint32_t wave_size) {
+  assert((wave_size == WMMA_WAVE32 || wave_size == WMMA_WAVE64) &&
+         "gfx12 WMMA requires wave32 or wave64");
 }
 
 // CDNA5 WMMA is wave32-only. 16x16 WMMA v3 operands interleave the K
@@ -318,10 +316,10 @@ inline InputLoc wmma_packed_input_loc(uint32_t lane, uint32_t slot, uint32_t dat
 /// distributed across a wave64.
 inline InputLoc mfma_scale_f8f6f4_input_loc(uint32_t dim, uint32_t K, uint32_t index, uint32_t k,
                                             uint32_t data_bits) {
-  if (!((dim == 16 && K == 128) || (dim == 32 && K == 64)))
-    throw util::UnimplementedInst("unsupported CDNA4 block-scale MFMA input shape");
-  if (data_bits != 4 && data_bits != 6 && data_bits != 8)
-    throw util::UnimplementedInst("unsupported CDNA4 block-scale MFMA input format");
+  assert(((dim == 16 && K == 128) || (dim == 32 && K == 64)) &&
+         "unsupported CDNA4 block-scale MFMA input shape");
+  assert((data_bits == 4 || data_bits == 6 || data_bits == 8) &&
+         "unsupported CDNA4 block-scale MFMA input format");
   return input_loc(dim, K, /*B=*/1, index, k, /*b=*/0, data_bits);
 }
 
@@ -340,12 +338,10 @@ inline InputLoc gfx12_wmma_input_loc(uint32_t wave_size, uint32_t dim, uint32_t 
     const uint32_t lane_block = K == 16 ? block : ((block & 1u) << 1u) | (block >> 1u);
     return wmma_packed_input_loc(i + 16u * lane_block, k & 7u, data_bits);
   }
-  if (dim == 16 && K == 16) {
-    const uint32_t lane = i + 16u * ((k >> 2) & 1u) + 32u * ((k >> 3) & 1u);
-    const uint32_t slot = 2u * ((k >> 1) & 1u) + (k & 1u);
-    return wmma_packed_input_loc(lane, slot, data_bits);
-  }
-  throw util::UnimplementedInst("unsupported gfx12 wave64 WMMA input layout");
+  assert(dim == 16 && K == 16 && "unsupported gfx12 wave64 WMMA input layout");
+  const uint32_t lane = i + 16u * ((k >> 2) & 1u) + 32u * ((k >> 3) & 1u);
+  const uint32_t slot = 2u * ((k >> 1) & 1u) + (k & 1u);
+  return wmma_packed_input_loc(lane, slot, data_bits);
 }
 
 inline InputLoc wmma_f8f6f4_ab_input_loc(uint32_t dim, uint32_t K, uint32_t i, uint32_t k,
@@ -401,10 +397,11 @@ inline InputLoc wmma_b_input_loc(uint32_t N, uint32_t K, uint32_t col, uint32_t 
 /// Compute the CDNA5 block-scaled WMMA input layout. Unlike the same-format ordinary
 /// F8F6F4 WMMA layout, each operand format stores contiguous K ranges in each
 /// lane group: 16 values for 8-bit inputs and 32 values for 4/6-bit inputs.
-inline InputLoc wmma_block_scaled_input_loc(uint32_t dim, uint32_t K, uint32_t index, uint32_t k,
+inline InputLoc wmma_block_scaled_input_loc([[maybe_unused]] uint32_t dim,
+                                            [[maybe_unused]] uint32_t K, uint32_t index, uint32_t k,
                                             uint32_t data_bits) {
-  if (dim != 16 || K != 128 || (data_bits != 4 && data_bits != 6 && data_bits != 8))
-    throw util::UnimplementedInst("unsupported CDNA5 block-scaled WMMA input shape");
+  assert(dim == 16 && K == 128 && (data_bits == 4 || data_bits == 6 || data_bits == 8) &&
+         "unsupported CDNA5 block-scaled WMMA input shape");
   const uint32_t block_elems = data_bits == 8 ? 16u : 32u;
   const uint32_t lane = index + 16u * ((k / block_elems) & 1u);
   const uint32_t local = (k / (2u * block_elems)) * block_elems + (k % block_elems);
@@ -469,11 +466,9 @@ inline OutputLoc gfx12_wmma_output_loc_32(uint32_t wave_size, uint32_t M, uint32
   require_gfx12_wmma_wave_size(wave_size);
   if (wave_size == WMMA_WAVE32)
     return wmma_output_loc_32(M, N, row, col);
-  if (M == 16 && N == 16) {
-    const uint32_t lane = col + 16u * ((row >> 3) & 1u) + 32u * ((row >> 2) & 1u);
-    return {row & 3u, lane};
-  }
-  throw util::UnimplementedInst("unsupported gfx12 wave64 WMMA output layout");
+  assert(M == 16 && N == 16 && "unsupported gfx12 wave64 WMMA output layout");
+  const uint32_t lane = col + 16u * ((row >> 3) & 1u) + 32u * ((row >> 2) & 1u);
+  return {row & 3u, lane};
 }
 
 inline OutputLoc gfx11_wmma_output_loc_32(uint32_t wave_size, uint32_t M, uint32_t N, uint32_t row,
@@ -497,12 +492,10 @@ inline PackedOutputLoc gfx12_wmma_output_loc_16(uint32_t wave_size, uint32_t M, 
   require_gfx12_wmma_wave_size(wave_size);
   if (wave_size == WMMA_WAVE32)
     return wmma_output_loc_16(M, N, row, col);
-  if (M == 16 && N == 16) {
-    const uint32_t lane = col + 16u * ((row >> 3) & 1u) + 32u * ((row >> 2) & 1u);
-    const uint32_t elem = row & 3u;
-    return {elem / 2u, lane, elem & 1u};
-  }
-  throw util::UnimplementedInst("unsupported gfx12 wave64 WMMA output layout");
+  assert(M == 16 && N == 16 && "unsupported gfx12 wave64 WMMA output layout");
+  const uint32_t lane = col + 16u * ((row >> 3) & 1u) + 32u * ((row >> 2) & 1u);
+  const uint32_t elem = row & 3u;
+  return {elem / 2u, lane, elem & 1u};
 }
 
 constexpr PackedOutputLoc gfx11_wmma_output_loc_16(uint32_t wave_size, uint32_t M, uint32_t N,
@@ -519,6 +512,8 @@ inline uint64_t read_swmmac_index_set(auto &cu, uint32_t index_base, uint32_t la
   // gfx1250 FMT_WMMA_INDEX_SET and FMT_WMMA_INDEX_SET2 contain 16 and 32
   // packed 2-bit entries respectively. LLVM names the matching SWMMAC index
   // selector by entry count, not by total bit count.
+  assert((index_entries == 8 || index_entries == 16 || index_entries == 32) &&
+         "unsupported SWMMAC sparse index width");
   switch (index_entries) {
   case 8:
     return (RegisterAccess(cu).read_vgpr(index_base, lane) >> (8 * (index_key & 0x3u))) & 0xFFu;
@@ -526,15 +521,13 @@ inline uint64_t read_swmmac_index_set(auto &cu, uint32_t index_base, uint32_t la
     if (index_key & 0x1u)
       return (RegisterAccess(cu).read_vgpr(index_base, lane) >> 16) & 0xFFFFu;
     return RegisterAccess(cu).read_vgpr(index_base, lane);
-  case 32: {
+  default: {
     if (index_key & 0x1u)
       return RegisterAccess(cu).read_vgpr(index_base + 1, lane);
     uint64_t lo = RegisterAccess(cu).read_vgpr(index_base, lane);
     uint64_t hi = RegisterAccess(cu).read_vgpr(index_base + 1, lane);
     return lo | (hi << 32);
   }
-  default:
-    throw util::UnimplementedInst("unsupported SWMMAC sparse index width");
   }
 }
 
@@ -603,14 +596,13 @@ inline SwmmacIndexLoc swmmac_index_loc(uint32_t wave_size, uint32_t M, uint32_t 
     const uint32_t lane_block = K == 32 ? block : ((block & 1u) << 1u) | (block >> 1u);
     return {row + 16u * lane_block, compressed_k & 7u};
   }
-  if (M == 16 && K == 32 && index_entries == 16) {
-    const uint32_t group = compressed_k / 2u;
-    const uint32_t slot = compressed_k & 1u;
-    const uint32_t block =
-        (elem_bits <= 8) ? (2u * ((group >> 1) & 1u) + (group >> 2)) : (group >> 1);
-    return {row + 16u * block, 2u * (group & 1u) + slot};
-  }
-  throw util::UnimplementedInst("unsupported gfx12 wave64 SWMMAC index layout");
+  assert(M == 16 && K == 32 && index_entries == 16 &&
+         "unsupported gfx12 wave64 SWMMAC index layout");
+  const uint32_t group = compressed_k / 2u;
+  const uint32_t slot = compressed_k & 1u;
+  const uint32_t block =
+      (elem_bits <= 8) ? (2u * ((group >> 1) & 1u) + (group >> 2)) : (group >> 1);
+  return {row + 16u * block, 2u * (group & 1u) + slot};
 }
 
 [[gnu::always_inline]] inline InputLoc swmmac_a_input_loc(uint32_t M, uint32_t K, uint32_t row,
@@ -643,17 +635,15 @@ inline SwmmacIndexLoc swmmac_index_loc(uint32_t wave_size, uint32_t M, uint32_t 
     const uint32_t lane_block = K == 32 ? block : ((block & 1u) << 1u) | (block >> 1u);
     return wmma_packed_input_loc(row + 16u * lane_block, compressed_k & 7u, elem_bits);
   }
-  if (M == 16 && K == 32) {
-    const uint32_t group = compressed_k / 2u;
-    const uint32_t slot = compressed_k & 1u;
-    if (elem_bits == 8) {
-      const uint32_t block = 2u * ((group >> 1) & 1u) + (group >> 2);
-      return wmma_packed_input_loc(row + 16u * block, 2u * (group & 1u) + slot, elem_bits);
-    }
-    if (elem_bits >= 16)
-      return wmma_packed_input_loc(row + 16u * (group >> 1), 2u * (group & 1u) + slot, elem_bits);
+  assert(M == 16 && K == 32 && (elem_bits == 8 || elem_bits >= 16) &&
+         "unsupported gfx12 wave64 SWMMAC A layout");
+  const uint32_t group = compressed_k / 2u;
+  const uint32_t slot = compressed_k & 1u;
+  if (elem_bits == 8) {
+    const uint32_t block = 2u * ((group >> 1) & 1u) + (group >> 2);
+    return wmma_packed_input_loc(row + 16u * block, 2u * (group & 1u) + slot, elem_bits);
   }
-  throw util::UnimplementedInst("unsupported gfx12 wave64 SWMMAC A layout");
+  return wmma_packed_input_loc(row + 16u * (group >> 1), 2u * (group & 1u) + slot, elem_bits);
 }
 
 [[gnu::always_inline]] inline InputLoc swmmac_b_input_loc(uint32_t N, uint32_t K, uint32_t col,
@@ -691,16 +681,14 @@ inline SwmmacIndexLoc swmmac_index_loc(uint32_t wave_size, uint32_t M, uint32_t 
     const uint32_t lane_block = ((block & 1u) << 1u) | (block >> 1u);
     return wmma_packed_input_loc(col + 16u * lane_block, dense_k % values_per_lane, elem_bits);
   }
-  if (N == 16 && K == 32) {
-    if (elem_bits == 8) {
-      const uint32_t lane = col + 32u * ((dense_k >> 3) & 1u) + 16u * (dense_k >> 4);
-      const uint32_t slot = 4u * ((dense_k >> 2) & 1u) + (dense_k & 3u);
-      return wmma_packed_input_loc(lane, slot, elem_bits);
-    }
-    if (elem_bits >= 16)
-      return wmma_packed_input_loc(col + 16u * (dense_k / 8u), dense_k % 8u, elem_bits);
+  assert(N == 16 && K == 32 && (elem_bits == 8 || elem_bits >= 16) &&
+         "unsupported gfx12 wave64 SWMMAC B layout");
+  if (elem_bits == 8) {
+    const uint32_t lane = col + 32u * ((dense_k >> 3) & 1u) + 16u * (dense_k >> 4);
+    const uint32_t slot = 4u * ((dense_k >> 2) & 1u) + (dense_k & 3u);
+    return wmma_packed_input_loc(lane, slot, elem_bits);
   }
-  throw util::UnimplementedInst("unsupported gfx12 wave64 SWMMAC B layout");
+  return wmma_packed_input_loc(col + 16u * (dense_k / 8u), dense_k % 8u, elem_bits);
 }
 
 // ---------------------------------------------------------------------------
@@ -929,15 +917,14 @@ inline constexpr ExtractF64 extract_f64{};
 inline float decode_e8m0_scale(uint8_t raw) { return util::e8m0_to_f32(raw); }
 
 inline float decode_wmma_scale_byte(uint8_t raw, uint32_t fmt) {
+  assert(fmt <= 2 && "unsupported WMMA scale format");
   switch (fmt) {
   case 0:
     return decode_e8m0_scale(raw);
   case 1:
     return util::fp8_e5m3_to_f32(raw);
-  case 2:
-    return util::fp8_e4m3_to_f32(raw);
   default:
-    throw util::UnimplementedInst("unsupported WMMA scale format");
+    return util::fp8_e4m3_to_f32(raw);
   }
 }
 
@@ -3370,8 +3357,7 @@ void exec_swmmac_bf16f32(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t 
   // upper half of the F32 accumulator tuple. Accumulate a row's independent
   // columns together to hide the latency of the architecturally required fused
   // BF16 MAC chain while retaining each output's compressed-K order.
-  if (N != 16)
-    throw util::UnimplementedInst("BF16F32 SWMMAC requires N=16");
+  assert(N == 16 && "BF16F32 SWMMAC requires N=16");
   std::array<float, 16> accumulators{};
   for (uint32_t row = 0; row < M; ++row) {
     for (uint32_t col = 0; col < N; ++col)
