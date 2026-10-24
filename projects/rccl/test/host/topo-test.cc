@@ -575,13 +575,17 @@ TEST_F(TopoMicrotest, AddCpu_DecodesArchVendorAndModel) {
   }
 }
 
+std::string AmdCpu(int family, int model) {
+  return "arch=\"x86_64\" vendor=\"AuthenticAMD\" familyid=\"" + std::to_string(family) + "\" modelid=\"" +
+         std::to_string(model) + "\"";
+}
+
 // familyid/modelid as ncclTopoGetXmlFromCpu writes them from a CPUID leaf 1 EAX signature.
 std::string AmdCpuFromCpuid(uint32_t eax) {
   int family = (eax >> 8) & 0xf, model = (eax >> 4) & 0xf;
   if (family == 15 || family == 6) model += ((eax >> 16) & 0xf) << 4;
   if (family == 15) family += (eax >> 20) & 0xff;
-  return "arch=\"x86_64\" vendor=\"AuthenticAMD\" familyid=\"" + std::to_string(family) + "\" modelid=\"" +
-         std::to_string(model) + "\"";
+  return AmdCpu(family, model);
 }
 
 struct AmdHost {
@@ -603,8 +607,7 @@ void ExpectAmdHost(const AmdHost& h) {
   EXPECT_FLOAT_EQ(AMD_ZEN12_BW, cpu->links[0].bw) << h.name;
 }
 
-// Regression for the NCCL 2.31 CPUID family fix: hosts must be classified from the familyid the topology
-// detection writes today (0x17/0x19/0x1A), not only from the older encoding found in topology files.
+// Regression: classify from the familyid detection writes today (0x17/0x19/0x1A), not only the old file encoding.
 TEST_F(TopoMicrotest, AddCpu_AmdHostsFromLiveCpuidKeepZenGenerationAndRomeClass) {
   const AmdHost hosts[] = {
     {"Naples", AmdCpuFromCpuid(0x00800F12), NCCL_TOPO_CPU_MODEL_AMD_ZEN12, false},
@@ -619,17 +622,13 @@ TEST_F(TopoMicrotest, AddCpu_AmdHostsFromLiveCpuidKeepZenGenerationAndRomeClass)
 }
 
 TEST_F(TopoMicrotest, AddCpu_AmdHostsFromOldTopologyFileEncodingKeepTheirRomeClass) {
-  const auto ids = [](int family, int model) {
-    return "arch=\"x86_64\" vendor=\"AuthenticAMD\" familyid=\"" + std::to_string(family) + "\" modelid=\"" +
-           std::to_string(model) + "\"";
-  };
   const AmdHost hosts[] = {
-    {"Naples (143/1)", ids(143, 1), NCCL_TOPO_CPU_MODEL_AMD_ZEN12, false},
-    {"Zen 2 below Rome (143/48)", ids(143, 48), NCCL_TOPO_CPU_MODEL_AMD_ZEN12, false},
-    {"Rome (143/49)", ids(143, 49), NCCL_TOPO_CPU_MODEL_AMD_ZEN12, true},
-    {"Milan (175/1)", ids(175, 1), NCCL_TOPO_CPU_MODEL_AMD_ZEN34, true},
-    {"Genoa (175/17)", ids(175, 17), NCCL_TOPO_CPU_MODEL_AMD_ZEN34, true},
-    {"Turin (191/2)", ids(191, 2), NCCL_TOPO_CPU_MODEL_AMD_ZEN5, false},
+    {"Naples (143/1)", AmdCpu(143, 1), NCCL_TOPO_CPU_MODEL_AMD_ZEN12, false},
+    {"Zen 2 below Rome (143/48)", AmdCpu(143, 48), NCCL_TOPO_CPU_MODEL_AMD_ZEN12, false},
+    {"Rome (143/49)", AmdCpu(143, 49), NCCL_TOPO_CPU_MODEL_AMD_ZEN12, true},
+    {"Milan (175/1)", AmdCpu(175, 1), NCCL_TOPO_CPU_MODEL_AMD_ZEN34, true},
+    {"Genoa (175/17)", AmdCpu(175, 17), NCCL_TOPO_CPU_MODEL_AMD_ZEN34, true},
+    {"Turin (191/2)", AmdCpu(191, 2), NCCL_TOPO_CPU_MODEL_AMD_ZEN5, false},
   };
   for (const AmdHost& h : hosts) ExpectAmdHost(h);
 }
@@ -656,7 +655,8 @@ TEST_F(TopoMicrotest, AddCpu_BuildHostCpuidRoundTripsToItsRomeClass) {
   __cpuid(1, eax, ebx, ecx, edx);
   const unsigned baseFamily = (eax >> 8) & 0xf;
   const unsigned family = baseFamily == 0xf ? baseFamily + ((eax >> 20) & 0xff) : baseFamily;
-  const unsigned model = ((eax >> 4) & 0xf) | (((eax >> 16) & 0xf) << 4);
+  unsigned model = (eax >> 4) & 0xf;
+  if (baseFamily == 0xf || baseFamily == 6) model += ((eax >> 16) & 0xf) << 4;
   const bool expectRome = amd && ((family == 0x17 && model >= 0x31) || family == 0x19);
 
   SystemPtr system = BuildSystem(xml.get());
