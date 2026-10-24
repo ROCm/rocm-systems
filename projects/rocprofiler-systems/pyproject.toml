@@ -25,7 +25,14 @@ exclude = '''
     | .pytest_cache
     | build
     | build-release
-    | build-omnitrace
   )/
 )
 '''
+
+[tool.ruff]
+line-length = 90
+target-version = "py38"
+extend-exclude = [
+    "external",
+    "build",
+]
