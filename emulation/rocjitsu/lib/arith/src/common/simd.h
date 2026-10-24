@@ -198,4 +198,11 @@ void half_fma_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint3
                         uint16_t literal = 0);
 
 #endif
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+// Attempt finite MUL domains without writes on decline; uses default host FP state.
+// FP status reporting follows the resolved semantics.
+bool mul_exact_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d,
+                         const uint32_t *a, const uint32_t *b, uint32_t *state);
+#endif
+
 } // namespace rocjitsu::arith

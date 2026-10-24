@@ -70,6 +70,13 @@ inline bool reports_fp_status(uint64_t flags) {
   return (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL;
 }
 
+// A composed instruction may calculate its own status around a numeric sub-operation.
+inline uint64_t without_fp_status(uint64_t flags) {
+  return reports_fp_status(flags) ? (flags & ~RJ_ARITH_SEMANTICS_MASK) |
+                                        RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
+                                  : flags;
+}
+
 // Accept ordinary semantics modes 0..3; reject reserved or unresolved compatibility modes.
 inline int validate_semantics(uint64_t flags) {
   return (flags & RJ_ARITH_SEMANTICS_MASK) > RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL

@@ -13,10 +13,15 @@
 
 namespace rocjitsu::arith {
 
-enum class Fp64 { Fma, Trunc, Ceil, Rndne, Floor, Fract, Sqrt, Rcp, Rsq };
+enum class Fp64 { Add, Mul, Fma, Trunc, Ceil, Rndne, Floor, Fract, Sqrt, Rcp, FrexpMant, Rsq };
 
 // Return the number of source operands required by the selected FP64 operation.
-constexpr int fp64_sources(Fp64 op) { return op == Fp64::Fma ? 3 : 1; }
+constexpr int fp64_sources(Fp64 op) {
+  if (op == Fp64::Add || op == Fp64::Mul) {
+    return 2;
+  }
+  return op == Fp64::Fma ? 3 : 1;
+}
 
 // Flush FP64 subnormals to zero of the same sign without touching host FP state.
 inline double fp64_flush_denorm(double value) {
