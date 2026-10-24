@@ -4,10 +4,9 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Controllable host-only seams for src/misc/socket.cc, plus ncclSocketClose
-// from src/os/{linux,windows}.cc. Defaults fail loudly; fixtures install the
-// exact socket lifecycle behavior each test needs. ncclSocketClose stays out of
-// os_fakes because binaries that define their own close also link os_fakes.
+// Controllable host-only seams for src/misc/socket.cc. Defaults fail loudly;
+// fixtures install the exact socket lifecycle behavior each test needs.
+// ncclSocketClose remains owned by os_fakes with the other OS teardown seams.
 
 #ifndef RCCL_TEST_HOST_SOCKET_FAKES_H_
 #define RCCL_TEST_HOST_SOCKET_FAKES_H_
@@ -27,7 +26,6 @@ extern std::function<ncclResult_t(struct ncclSocket*, int*)> g_ncclSocketReady;
 extern std::function<ncclResult_t(struct ncclSocket*, void*, int)> g_ncclSocketSend;
 extern std::function<ncclResult_t(struct ncclSocket*, void*, int)> g_ncclSocketRecv;
 extern std::function<ncclResult_t(int, struct ncclSocket*, void*, int, int*, bool*)> g_ncclSocketProgress;
-extern std::function<ncclResult_t(struct ncclSocket*, bool)> g_ncclSocketClose;
 extern std::function<void(struct ncclSocket*, struct ncclSocket*)> g_ncclSocketMove;
 extern std::function<ncclResult_t(struct ncclSocket*, ncclSocketDescriptor*)> g_ncclSocketGetFd;
 extern std::function<ncclResult_t(char*, union ncclSocketAddress*, int, int, int*)> g_ncclFindInterfaces;
