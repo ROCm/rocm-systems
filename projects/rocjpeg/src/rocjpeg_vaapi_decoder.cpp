@@ -214,6 +214,7 @@ RocJpegStatus RocJpegVaapiMemoryPool::AddPoolEntry(uint32_t surface_format, cons
         DeleteIdleEntry();
     }
     entries.push_back(pool_entry);
+    entries.back().surface_status.assign(pool_entry.va_surface_ids.size(), pool_entry.entry_status);
     return ROCJPEG_STATUS_SUCCESS;
 }
 
@@ -231,10 +232,11 @@ RocJpegVaapiMemPoolEntry RocJpegVaapiMemoryPool::GetEntry(uint32_t surface_forma
     for (auto& entry : mem_pool_[surface_format]) {
         if (entry.image_width >= image_width && entry.image_height >= image_height && entry.va_surface_ids.size() == num_surfaces && entry.entry_status == kIdle) {
             entry.entry_status = kBusy;
+            std::fill(entry.surface_status.begin(), entry.surface_status.end(), kBusy);
             return entry;
         }
     }
-    return {0, 0, kIdle, {}, {}};
+    return {0, 0, kIdle, {}, {}, {}};
 }
 
 bool RocJpegVaapiMemoryPool::FindSurfaceId(VASurfaceID surface_id) {
@@ -368,8 +370,12 @@ bool RocJpegVaapiMemoryPool::SetSurfaceAsIdle(VASurfaceID surface_id) {
     std::lock_guard<std::mutex> lock(pool_mutex_);
     for (auto& pair : mem_pool_) {
         for (auto& entry : pair.second) {
-            if (std::find(entry.va_surface_ids.begin(), entry.va_surface_ids.end(), surface_id) != entry.va_surface_ids.end()) {
-                entry.entry_status = kIdle;
+            auto it = std::find(entry.va_surface_ids.begin(), entry.va_surface_ids.end(), surface_id);
+            if (it != entry.va_surface_ids.end()) {
+                entry.surface_status[std::distance(entry.va_surface_ids.begin(), it)] = kIdle;
+                if (std::all_of(entry.surface_status.begin(), entry.surface_status.end(), [](MemPoolEntryStatus status) { return status == kIdle; })) {
+                    entry.entry_status = kIdle;
+                }
                 return true;
             }
         }
