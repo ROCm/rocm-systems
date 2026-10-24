@@ -1254,16 +1254,19 @@ TEST_F(InitMicrotest, CommGetUniqueId_BcastGrowHandleFails_PropagatesError) {
 }
 
 TEST_F(InitMicrotest, CommShrink_NotReadyComm_ReturnsInvalidArgument) {
-  // rank 1 so the self-exclusion bsearch at init.cc:4039 does not reject first.
+  // rank 1 so the self-exclusion bsearch does not reject first.
   ReadyComm rc;
   rc.get()->rank = 1;
-  rc.get()->nRanks = 2;
   rc.get()->asyncResult = ncclInProgress;
   ncclComm_t out = nullptr;
   int exclude[1] = {0};
-  EXPECT_EQ(ncclInvalidArgument,
-            ncclCommShrink_impl(rc.get(), exclude, /*excludeRanksCount=*/1, &out,
-                                /*config=*/nullptr, /*shrinkFlags=*/0));
+  ncclResult_t res = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    res = ncclCommShrink_impl(rc.get(), exclude, /*excludeRanksCount=*/1, &out, /*config=*/nullptr,
+                              /*shrinkFlags=*/0);
+  });
+  EXPECT_EQ(ncclInvalidArgument, res);
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "Attempt to use communicator before")) << log;
   EXPECT_EQ(nullptr, out);
 }
 
@@ -1279,8 +1282,6 @@ TEST_F(InitMicrotest, CommShrink_ZeroExcludeCount_ReturnsInvalidArgumentViaExitP
 
 TEST_F(InitMicrotest, CommShrink_NullNewcomm_ReturnsInvalidArgument) {
   ReadyComm rc;
-  rc.get()->rank = 1;
-  rc.get()->nRanks = 2;
   int exclude[1] = {0};
   ncclResult_t res = ncclSuccess;
   const std::string log = RcclUnitTesting::CaptureLog([&] {

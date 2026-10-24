@@ -4896,6 +4896,14 @@ static ncclResult_t ncclCommInitChildComm(ncclComm_t comm, ncclComm_t* newcomm, 
     NCCLCHECKGOTO(excludeRanksCount > 0 ? ncclSuccess : ncclInvalidArgument, res, exit);
     // excludeRanksList may not be sorted, need to sort it
     qsort(excludeRanksList, excludeRanksCount, sizeof(int), compareInts);
+    // ranks in excludeRanksList should not call into this function
+    NCCLCHECKGOTO(bsearch(&comm->rank, excludeRanksList, excludeRanksCount, sizeof(int), compareInts) ?
+                    ncclInvalidArgument :
+                    ncclSuccess,
+                  res, exit);
+  }
+  NCCLCHECKGOTO(ncclCommEnsureReady(comm), res, exit);
+  if (isShrink) {
     if (excludeRanksList[0] < 0 || excludeRanksList[excludeRanksCount - 1] >= comm->nRanks) {
       WARN("%s: excludeRanksList entries must be in [0, %d)", caller, comm->nRanks);
       res = ncclInvalidArgument;
@@ -4908,13 +4916,7 @@ static ncclResult_t ncclCommInitChildComm(ncclComm_t comm, ncclComm_t* newcomm, 
         goto exit;
       }
     }
-    // ranks in excludeRanksList should not call into this function
-    NCCLCHECKGOTO(bsearch(&comm->rank, excludeRanksList, excludeRanksCount, sizeof(int), compareInts) ?
-                    ncclInvalidArgument :
-                    ncclSuccess,
-                  res, exit);
   }
-  NCCLCHECKGOTO(ncclCommEnsureReady(comm), res, exit);
   CUDACHECKGOTO(cudaSetDevice(comm->cudaDev), res, exit);
 
   /* *newcomm should be NCCL_COMM_NULL until comm split fully complete. */
