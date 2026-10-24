@@ -239,6 +239,8 @@ would otherwise produce numbers that look fine while measuring almost nothing.
 
 ## See also
 
+- [Benchmarking](kernel_replay_benchmarking.md) -- how to measure the above, and what the benchmark
+  suite records
 - [Memory snapshot and restore](kernel_replay_memory_snapshot.md) -- what is captured and excluded
 - [Concurrency and isolation](kernel_replay_concurrency_and_isolation.md) -- the drain and the lock
 - {ref}`using-kernel-replay-rocprofv3` -- when to prefer application replay
