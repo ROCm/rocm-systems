@@ -16,6 +16,8 @@ on:
     branches: [develop]
     paths:
       - 'projects/amdsmi/**'
+      - '!projects/amdsmi/go/**'
+      - '!projects/amdsmi/tests/go/**'
       - 'shared/cuid/**'
       - 'shared/sha256/**'
       - '.github/workflows/amdsmi-build.yml'
@@ -23,6 +25,8 @@ on:
     branches: [develop]
     paths:
       - 'projects/amdsmi/**'
+      - '!projects/amdsmi/go/**'
+      - '!projects/amdsmi/tests/go/**'
       - 'shared/cuid/**'
       - 'shared/sha256/**'
       - '.github/workflows/amdsmi-build.yml'
