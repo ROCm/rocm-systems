@@ -403,6 +403,7 @@ if(BUILD_TESTS)
       device/LlFifoSysScopeTests.cpp
       device/DdaIpcGpuBarrierOrderingTests.cpp
       device/DdaVecElementAddTests.cpp
+      device/DdaLL128PollWireTests.cpp
       device/TestTDM.cpp
       device/TestTdmCopy.cpp
       device/TestAsyncCopy.cpp
