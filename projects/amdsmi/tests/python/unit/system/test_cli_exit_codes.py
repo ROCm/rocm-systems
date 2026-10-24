@@ -2010,10 +2010,18 @@ def _build_reset_specs(reset):
         return {"amdsmi_reset_gpu": fn}
 
     def clocks(cmd, mode):
-        # Overdrive is reset first, then perf level (twice) with the same
-        # handle; both must be stubbed so a fake handle never reaches hardware.
+        # Overdrive is reset first, then the FCLK cap, then perf level (twice)
+        # with the same handle; all must be stubbed so a fake handle never
+        # reaches hardware.
         fn = _raise_not_supported if mode == "fail" else _noop
-        return {"amdsmi_set_gpu_overdrive_level": fn, "amdsmi_set_gpu_perf_level": fn}
+        if mode == "fail":
+            fclk = {"amdsmi_get_clk_freq": fn}
+        else:
+            fclk = {
+                "amdsmi_get_clk_freq": lambda *_: {"frequency": [1800_000_000]},
+                "amdsmi_get_clock_info": lambda *_: {"max_clk": 1800},
+            }
+        return {"amdsmi_set_gpu_overdrive_level": fn, "amdsmi_set_gpu_perf_level": fn, **fclk}
 
     def fans(cmd, mode):
         fn = _raise_not_supported if mode == "fail" else _noop

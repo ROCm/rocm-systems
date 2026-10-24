@@ -352,8 +352,15 @@ amdsmi_status_t smi_amdgpu_parse_dpm_ranges(std::istream& dpm_stream,
   unsigned int current_freq = 0;
   char str[10];
   char single_char;
+  bool has_levels = false;
   for (std::string line; getline(dpm_stream, line);) {
     unsigned int dpm_level, freq;
+
+    // A clock without a DPM table reads back as a bare newline.
+    if (line.find_first_not_of(" \t\r") == std::string::npos) {
+      continue;
+    }
+    has_levels = true;
 
     char firstChar = line[0];
     if (firstChar == 'S') {
@@ -386,6 +393,10 @@ amdsmi_status_t smi_amdgpu_parse_dpm_ranges(std::istream& dpm_stream,
       }
       dpm = dpm_level > dpm ? dpm_level : dpm;
     }
+  }
+  // Nothing to report a range from: answer as for a missing pp_dpm_* file.
+  if (!has_levels && !od_range.present) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
   }
   if (dpm == 0 && current_freq > 0) {
     // if the dpm level is 0, then the current frequency is the min/max frequency

@@ -1360,6 +1360,11 @@ static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type, rsmi_clk_type_
   f->current = 0;
 
   ret = GetDevValueVec(type, dv_ind, &val_vec);
+  // An empty pp_dpm_* file (e.g. FCLK on an iGPU) lists no levels, the same as a
+  // missing one.
+  if (ret == RSMI_STATUS_UNEXPECTED_DATA) {
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
   if (ret != RSMI_STATUS_SUCCESS) {
     return ret;
   }

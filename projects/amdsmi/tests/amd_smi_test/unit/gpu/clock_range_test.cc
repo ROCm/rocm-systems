@@ -252,15 +252,32 @@ TEST(GpuUnit, DpmRangesUnavailableSleepSentinelNotRejected) {
   EXPECT_EQ(ranges.sleep_state_freq, -1);
 }
 
-// An empty pp_dpm_* stream with no overdrive range: min keeps its UINT_MAX
-// "unavailable" sentinel and surfaces as -1 rather than failing the call.
-TEST(GpuUnit, DpmRangesEmptyStreamKeepsUnavailableMin) {
+// An empty pp_dpm_* stream with no overdrive range has no range to report, so it
+// answers as a missing pp_dpm_* file does.
+TEST(GpuUnit, DpmRangesEmptyStreamNotSupported) {
   std::istringstream dpm("");
   SmiAmdgpuOdClkRange od_range;  // not present -> derive from the (absent) levels
   SmiAmdgpuClkRanges ranges;
+  EXPECT_EQ(smi_amdgpu_parse_dpm_ranges(dpm, od_range, ranges), AMDSMI_STATUS_NOT_SUPPORTED);
+}
+
+// The amdgpu driver prints a bare newline for a clock without a DPM table, e.g.
+// pp_dpm_fclk on a Raphael iGPU. That line is not a malformed level.
+TEST(GpuUnit, DpmRangesBlankLineNotSupported) {
+  std::istringstream dpm("\n");
+  SmiAmdgpuOdClkRange od_range;
+  SmiAmdgpuClkRanges ranges;
+  EXPECT_EQ(smi_amdgpu_parse_dpm_ranges(dpm, od_range, ranges), AMDSMI_STATUS_NOT_SUPPORTED);
+}
+
+// With an overdrive range the domain still has a range to report.
+TEST(GpuUnit, DpmRangesBlankLineKeepsOdRange) {
+  std::istringstream dpm("\n");
+  SmiAmdgpuOdClkRange od_range{true, 1800u, 1300u};
+  SmiAmdgpuClkRanges ranges;
   EXPECT_EQ(smi_amdgpu_parse_dpm_ranges(dpm, od_range, ranges), AMDSMI_STATUS_SUCCESS);
-  EXPECT_EQ(ranges.max_freq, 0);
-  EXPECT_EQ(ranges.min_freq, -1);
+  EXPECT_EQ(ranges.max_freq, 1800);
+  EXPECT_EQ(ranges.min_freq, 1300);
 }
 
 // A genuinely out-of-range value (> INT_MAX, not the sentinel) is still

@@ -203,6 +203,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed GPU metrics returning no data on integrated GPUs**.  
   - `amdsmi_get_gpu_metrics_info()` and `amdsmi_get_gpu_activity()` failed on APUs such as gfx1103, leaving PLX temperature, GPU utilization and `amd-smi metric` empty. Those devices now report the values they provide with the rest marked N/A, and any GPU without a PLX sensor now reports N/A there instead of a placeholder reading.
 
+- **Fixed clock queries and `amd-smi set` on a clock without a DPM table returning an error instead of not supported**.  
+  - On GPUs such as the Raphael iGPU, an empty `pp_dpm_fclk` made `amdsmi_get_clk_freq()` return `AMDSMI_STATUS_UNEXPECTED_DATA` and `amdsmi_get_clock_info()` return `AMDSMI_STATUS_IO`, so `amd-smi set --clk-level FCLK` and `--clk-limit FCLK` failed. They now return `AMDSMI_STATUS_NOT_SUPPORTED`, as for a missing `pp_dpm_*` file.
+
+- **Fixed `amd-smi reset --clocks` leaving a lowered FCLK cap in place**.  
+  - On MI300X the cap from `amd-smi set --clk-limit FCLK MAX` survived the reset, because returning to the auto performance level restores only the GFX and memory clock ranges. The reset now raises the FCLK cap back to the top DPM level.
+
 - **Fixed `amd-smi` printing a Python traceback when an unknown NIC or switch is selected**.  
   - `amd-smi static --nic 999` and `--switch 999` failed while building the "device not found" error, so the command exited `1` with a traceback and no readable message. `--json` and `--csv` produced no parseable output.
   - Both now report `Can not find a device: NIC '999'` (or `SWITCH`) and exit `196`, matching `--gpu`, `--cpu`, and `--core`.
