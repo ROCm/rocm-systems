@@ -29,7 +29,6 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa.h>
 
-#include <atomic>
 #include <cstdint>
 #include <string>
 #include <unordered_map>
@@ -61,15 +60,15 @@ struct code_object
     code_object& operator=(const code_object&) = delete;
     code_object& operator                      =(code_object&&) noexcept;
 
-    std::atomic<bool>        beg_notified    = false;
-    std::atomic<bool>        end_notified    = false;
-    const std::string*       uri             = nullptr;
-    hsa_executable_t         hsa_executable  = {};
-    hsa_loaded_code_object_t hsa_code_object = {};
-    code_object_data_t       rocp_data       = common::init_public_api_struct(code_object_data_t{});
-    symbol_array_t           symbols         = {};
-    context_array_t          contexts        = {};
-    synchronized_user_data_t user_data       = {};
+    synchronized_context_set_t beg_notified    = {};
+    synchronized_context_set_t end_notified    = {};
+    const std::string*         uri             = nullptr;
+    hsa_executable_t           hsa_executable  = {};
+    hsa_loaded_code_object_t   hsa_code_object = {};
+    code_object_data_t         rocp_data = common::init_public_api_struct(code_object_data_t{});
+    symbol_array_t             symbols   = {};
+    context_array_t            contexts  = {};
+    synchronized_user_data_t   user_data = {};
 };
 
 struct code_object_unload

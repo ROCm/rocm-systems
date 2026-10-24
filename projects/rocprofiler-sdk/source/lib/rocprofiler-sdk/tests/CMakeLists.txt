@@ -27,6 +27,7 @@ set(rocprofiler_lib_sources
     agent_mapping.cpp
     parse_gfx_target_version_test.cpp
     buffer.cpp
+    code_object.cpp
     contexts.cpp
     enum_string.cpp
     hsa.cpp
