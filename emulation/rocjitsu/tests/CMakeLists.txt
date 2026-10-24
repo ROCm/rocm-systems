@@ -6,6 +6,30 @@ include(rj_configure_device_tests)
 include(rj_find_rocm_library)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # A separate executable lets --wrap hide modern stat symbols without
+    # affecting any other test or the interposer's own symbol resolution.
+    add_executable(
+        libc_passthrough_test
+        libc_passthrough_test.cpp
+        ../lib/rocjitsu/src/rocjitsu/kmd/linux/libc_passthrough.cpp
+    )
+    target_include_directories(
+        libc_passthrough_test
+        PRIVATE ../lib/rocjitsu/src ../lib/util/include
+    )
+    target_link_libraries(
+        libc_passthrough_test
+        PRIVATE GTest::gtest_main ${CMAKE_DL_LIBS}
+    )
+    target_link_options(libc_passthrough_test PRIVATE "-Wl,--wrap=dlsym")
+    rj_configure_target(libc_passthrough_test WARNINGS)
+    add_test(NAME LibcPassthrough.NativeStat COMMAND libc_passthrough_test)
+    add_test(
+        NAME LibcPassthrough.LegacyStat
+        COMMAND
+            ${CMAKE_COMMAND} -E env RJ_TEST_LEGACY_STAT=1
+            $<TARGET_FILE:libc_passthrough_test>
+    )
     add_test(
         NAME cmake.hip_toolchain_failure
         COMMAND

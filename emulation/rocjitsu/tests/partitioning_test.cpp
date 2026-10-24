@@ -991,24 +991,30 @@ TEST(XcdPartitioningTest, ShippedConfigsOmitNumThreadsExceptTheDocumentedPin) {
   EXPECT_GT(configs_checked, 1u);
 }
 
-TEST(XcdPartitioningTest, CApiDefaultsToOnePartitionPerXcdAndRuns) {
-  rj_vm_t *raw_vm = nullptr;
-  testing::internal::CaptureStderr();
-  const rj_status_t status = rj_vm_create(CONFIG_PATH.c_str(), RJ_VM_MODE_DEFAULT, &raw_vm);
-  const std::string warning = testing::internal::GetCapturedStderr();
-  ASSERT_EQ(status, ROCJITSU_STATUS_SUCCESS);
-  ASSERT_NE(raw_vm, nullptr);
-  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw_vm, &rj_vm_destroy);
+TEST(XcdPartitioningTest, CApiDefaultsFollowExecutionThreadBudgetAndRuns) {
+  // The shipped allocation table shares the budget with dispatch workers; a
+  // two-CPU host gets one engine, not min(host CPUs, XCDs). Pin the budgets so
+  // both small CI runners and large developer machines exercise this rule.
+  for (const auto [budget, engines] :
+       {std::pair{1u, 1u}, std::pair{2u, 1u}, std::pair{4u, 2u}, std::pair{16u, 8u}}) {
+    SCOPED_TRACE(budget);
+    auto json = config_json_with_num_threads(CONFIG_PATH, 0);
+    json.insert(json.find('{') + 1, "\"cpu_thread_budget\":" + std::to_string(budget) + ",");
+    rj_vm_t *raw_vm = nullptr;
+    testing::internal::CaptureStderr();
+    const rj_status_t status = rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw_vm);
+    const std::string warning = testing::internal::GetCapturedStderr();
+    ASSERT_EQ(status, ROCJITSU_STATUS_SUCCESS);
+    ASSERT_NE(raw_vm, nullptr);
+    std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw_vm, &rj_vm_destroy);
 
-  // Resolving the default is not a clamp, so it must not warn.
-  EXPECT_EQ(warning.find("num_threads clamped"), std::string::npos);
-  EXPECT_EQ(vm->engine_config.num_threads, amdgpu::default_xcd_partition_count(vm->soc));
-
-  ASSERT_NE(vm->soc, nullptr);
-  for (uint32_t i = 0; i < vm->soc->num_xcds(); ++i)
-    expect_subtree_partition(vm->soc->xcd(i), i % vm->engine_config.num_threads);
-
-  EXPECT_EQ(rj_vm_run(vm.get(), nullptr), ROCJITSU_STATUS_SUCCESS);
+    EXPECT_EQ(warning.find("num_threads clamped"), std::string::npos);
+    EXPECT_EQ(vm->engine_config.num_threads, engines);
+    ASSERT_NE(vm->soc, nullptr);
+    for (uint32_t i = 0; i < vm->soc->num_xcds(); ++i)
+      expect_subtree_partition(vm->soc->xcd(i), i % engines);
+    EXPECT_EQ(rj_vm_run(vm.get(), nullptr), ROCJITSU_STATUS_SUCCESS);
+  }
 }
 
 TEST(XcdPartitioningTest, CApiClampsMultiGpuThreadsToTotalXcdCountAndRuns) {
