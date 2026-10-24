@@ -485,6 +485,10 @@ TEST_F(NetIbCastInitVDeviceMicrotest, MakeVDevice_BadDeviceCounts_AreRejected) {
 }
 
 TEST_F(NetIbCastInitVDeviceMicrotest, MakeVDevice_UnknownPhysicalDevice_IsRejected) {
+  // Device 3 would merge fine, so only the range check can reject it.
+  Dev(3, "mlx5_3");
+  OnRoot0(3);
+  IbCastNDevs = 3;
   int d = -1;
   EXPECT_EQ(Make({0, 3}, &d), ncclInvalidUsage);
   // Not first: makeVDevice reads IbCastDevs[devs[0]] before it checks the range. The later checks
