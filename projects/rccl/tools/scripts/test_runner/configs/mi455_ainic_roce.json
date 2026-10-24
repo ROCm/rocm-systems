@@ -1717,6 +1717,11 @@
           "test_filter": "AllGather.InPlaceGraph"
         },
         {
+          "name": "AllGather.SymmetricInPlaceSlices",
+          "description": "AllGather in-place on symmetric windows, 16 B aligned and unaligned per-rank slices",
+          "test_filter": "AllGather.SymmetricInPlaceSlices"
+        },
+        {
           "name": "AllGather.ManagedMem",
           "description": "AllGather managed memory",
           "test_filter": "AllGather.ManagedMem"
@@ -1910,6 +1915,11 @@
           "name": "ReduceScatter.InPlaceGraph",
           "description": "ReduceScatter in-place graph",
           "test_filter": "ReduceScatter.InPlaceGraph"
+        },
+        {
+          "name": "ReduceScatter.SymmetricInPlaceSlices",
+          "description": "ReduceScatter in-place on symmetric windows, 16 B aligned and unaligned per-rank slices",
+          "test_filter": "ReduceScatter.SymmetricInPlaceSlices"
         },
         {
           "name": "ReduceScatter.ManagedMem",
