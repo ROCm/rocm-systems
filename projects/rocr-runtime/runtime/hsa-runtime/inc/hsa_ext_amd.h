@@ -4998,11 +4998,11 @@ hsa_status_t hsa_amd_vmem_import_shareable_handle(int dmabuf_fd,
  * to hsa_amd_vmem_handle_release.
  *
  * @param[out] memory_handle memory handle for this mapped address
- * @param[in] mapped address
+ * @param[in] addr Any address within a mapping created with hsa_amd_vmem_map.
  *
  * @retval ::HSA_STATUS_SUCCESS
  *
- * @retval ::HSA_STATUS_ERROR_INVALID_ALLOCATION Invalid address
+ * @retval ::HSA_STATUS_ERROR_INVALID_ALLOCATION @p addr is not within a mapping
  */
 hsa_status_t hsa_amd_vmem_retain_alloc_handle(hsa_amd_vmem_alloc_handle_t* memory_handle,
                                               void* addr);
