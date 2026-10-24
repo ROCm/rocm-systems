@@ -90,6 +90,19 @@ rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
   "int64_t g_paramMaxNchannels = -2;" "the MaxNchannels fake default")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/wrap_fakes.cc"
   "static int64_t DefaultParamForceCe() { return 1; }" "the ForceCe fake default")
+# rocmwrap_fakes.cc supplies these parameter bodies to targets that do not
+# compile real rocmwrap.cc; pin both names and defaults to production.
+rccl_assert_source_line("${_rccl_src_root}/misc/rocmwrap.cc"
+  "NCCL_PARAM(DmaBufEnable, \"DMABUF_ENABLE\", 1)" "fakes/rocmwrap_fakes.cc: ncclParamDmaBufEnable()")
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/rocmwrap_fakes.cc"
+  "int64_t ncclParamDmaBufEnable() { return g_loadParam(\"DMABUF_ENABLE\", 1); }"
+  "the DmaBufEnable fake default")
+rccl_assert_source_line("${_rccl_src_root}/misc/rocmwrap.cc"
+  "RCCL_PARAM(ForceEnableDMABUF, \"FORCE_ENABLE_DMABUF\", 0)"
+  "fakes/rocmwrap_fakes.cc: rcclParamForceEnableDMABUF()")
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/rocmwrap_fakes.cc"
+  "int64_t rcclParamForceEnableDMABUF() { return g_loadParam(\"RCCL_FORCE_ENABLE_DMABUF\", 0); }"
+  "the ForceEnableDMABUF fake default")
 # gdr-probe-test.cc pins the GDR probe's registration flags to production's; these
 # keep its kRegAccessFlags and both reg.cc copies spelling the same set.
 set(_rccl_reg_access_flags
@@ -448,6 +461,7 @@ function(rccl_define_micro_source_lists)
     rma-proxy-test.cc
     # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
     fakes/hip_fakes.cc
+    fakes/hsa_fakes.cc
     fakes/nccl_fakes.cc
     fakes/os_fakes.cc
     fakes/rma_fakes.cc
@@ -754,9 +768,11 @@ function(rccl_define_micro_source_lists)
   # network and GDRCopy seams.
   set(TEST_MICRO_TRANSPORT_SOURCE_FILES
     transport/net_ib/common-test.cc
+    transport/net_ib/connect-test.cc
     transport/net_ib/gdr-test.cc
     transport/net_ib/init-test.cc
     transport/net_ib/net-ib-gid-inspect-test.cc
+    transport/net_ib/p2p-test.cc
     transport/net_ib/reg-test.cc
     transport/rma-socket-test.cc
     transport/rma-socket-mem-test.cc
@@ -767,6 +783,8 @@ function(rccl_define_micro_source_lists)
     fakes/gdr_probe_fakes.cc
     fakes/gdrwrap_fakes.cc
     fakes/hip_fakes.cc
+    fakes/hsa_fakes.cc
+    fakes/ibv_ops_fakes.cc
     fakes/ibvwrap_fakes.cc
     fakes/mlx5dvwrap_fakes.cc
     fakes/nccl_fakes.cc
@@ -777,6 +795,7 @@ function(rccl_define_micro_source_lists)
     fakes/transport_net_ib_p2p_fakes.cc
     fakes/transport_net_ib_recovery_fakes.cc
     fakes/transport_net_ib_resiliency_fakes.cc
+    fakes/transport_net_ib_wqe_lat_fakes.cc
     fakes/transport_net_socket_common_fakes.cc
     fakes/transport_net_socket_fakes.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
@@ -1846,10 +1865,13 @@ rccl_add_micro_binary(rccl-UnitTestsMicroTransport
     ${_MICRO_MODE_DEFS}
     ENABLE_FAULT_INJECTION
     NET_IB_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/common.cc"
+    # graph/connect.cc and diagnostics/p2p.cc keep the original basenames.
+    NET_IB_CONNECT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/connect_tmp.cc"
     NET_IB_GDR_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/gdr.cc"
     # Hipify renames this to *_tmp.cc: src/init.cc keeps the basename.
     NET_IB_INIT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/init_tmp.cc"
     NET_IB_GID_INSPECT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/net_ib_gid_inspect.cc"
+    NET_IB_P2P_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/p2p_tmp.cc"
     NET_IB_REG_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/reg.cc"
     RMA_SOCKET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket.cc"
     RMA_SOCKET_MEM_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket_mem.cc"

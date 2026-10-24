@@ -21,6 +21,9 @@ extern std::function<ncclResult_t(struct ibv_mr**, struct ibv_pd*, uint64_t, siz
 extern std::function<struct ibv_mr*(struct ibv_pd*, uint64_t, size_t, uint64_t, int, int, int)>
     g_mlx5dvDirectRegDmaBufMr;
 extern std::function<ncclResult_t(struct ibv_context*, struct mlx5dv_context*)> g_mlx5dvQueryDevice;
+extern std::function<struct ibv_qp*(struct ibv_context*, struct ibv_qp_init_attr_ex*,
+                                    struct mlx5dv_qp_init_attr*)>
+    g_mlx5dvCreateQp;
 
 void ResetMlx5dvwrapFakes();
 

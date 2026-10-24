@@ -147,6 +147,12 @@ extern std::function<hipError_t(size_t* /*granularity*/, const hipMemAllocationP
     g_hipMemGetAllocationGranularity;
 extern std::function<hipError_t(hipMemAllocationProp* /*prop*/, hipMemGenericAllocationHandle_t /*handle*/)>
     g_hipMemGetAllocationPropertiesFromHandle;
+#ifdef RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED
+// cuMem DMA-BUF export. Standalone builds lack the define and compile the callers out.
+extern std::function<hipError_t(void* /*handle*/, hipDeviceptr_t /*ptr*/, size_t /*size*/,
+                                hipMemRangeHandleType /*type*/, unsigned long long /*flags*/)>
+    g_hipMemGetHandleForAddressRange;
+#endif
 extern std::function<hipError_t(hipMemGenericAllocationHandle_t* /*handle*/, void* /*shareable*/,
                                 hipMemAllocationHandleType /*type*/)>
     g_hipMemImportFromShareableHandle;

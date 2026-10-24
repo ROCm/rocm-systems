@@ -29,12 +29,15 @@ extern std::function<ncclResult_t()> g_ibvSymbols;
 extern std::function<ncclResult_t()> g_ibvForkInit;
 extern std::function<ncclResult_t(struct ibv_device***, int*)> g_ibvGetDeviceList;
 extern std::function<ncclResult_t(struct ibv_device**)> g_ibvFreeDeviceList;
+extern std::function<const char*(struct ibv_device*)> g_ibvGetDeviceName;
 extern std::function<ncclResult_t(struct ibv_context**, struct ibv_device*)> g_ibvOpenDevice;
 extern std::function<ncclResult_t(struct ibv_context*)> g_ibvCloseDevice;
 extern std::function<ncclResult_t(struct ibv_context*, struct ibv_async_event*)> g_ibvGetAsyncEvent;
 extern std::function<ncclResult_t(struct ibv_async_event*)> g_ibvAckAsyncEvent;
 extern std::function<ncclResult_t(struct ibv_context*, struct ibv_device_attr*)> g_ibvQueryDevice;
 extern std::function<ncclResult_t(struct ibv_context*, uint8_t, struct ibv_port_attr*)> g_ibvQueryPort;
+extern std::function<ncclResult_t(struct ibv_context*, uint8_t, int, union ibv_gid*)> g_ibvQueryGid;
+extern std::function<ncclResult_t(struct ibv_context*, uint8_t, int, uint16_t*)> g_ibvQueryPkey;
 extern std::function<ncclResult_t(struct ibv_qp*, struct ibv_qp_attr*, int, struct ibv_qp_init_attr*)> g_ibvQueryQp;
 
 extern std::function<ncclResult_t(struct ibv_pd** /*ret*/, struct ibv_context* /*context*/)> g_ibvAllocPd;
@@ -49,9 +52,19 @@ extern std::function<struct ibv_mr*(struct ibv_pd* /*pd*/, void* /*addr*/, size_
     g_ibvDirectRegMrIova2;
 extern std::function<struct ibv_mr*(struct ibv_pd*, uint64_t, size_t, uint64_t, int, int)> g_ibvDirectRegDmaBufMr;
 extern std::function<ncclResult_t(struct ibv_mr* /*mr*/)> g_ibvDeregMr;
+extern std::function<ncclResult_t(struct ibv_cq**, struct ibv_context*, int, void*, struct ibv_comp_channel*, int)>
+    g_ibvCreateCq;
+extern std::function<ncclResult_t(struct ibv_cq*)> g_ibvDestroyCq;
+extern std::function<ncclResult_t(struct ibv_qp**, struct ibv_pd*, struct ibv_qp_init_attr*)> g_ibvCreateQp;
 extern std::function<ncclResult_t(struct ibv_qp*, struct ibv_qp_attr*, int)> g_ibvModifyQp;
+extern std::function<ncclResult_t(struct ibv_qp*)> g_ibvDestroyQp;
+extern std::function<ncclResult_t(struct ibv_qp*, struct ibv_ece*, int*)> g_ibvQueryEce;
+extern std::function<ncclResult_t(struct ibv_qp*, struct ibv_ece*, int*)> g_ibvSetEce;
 extern std::function<ncclResult_t(struct ibv_context*, uint8_t, uint64_t*)> g_ibvQueryPortSpeed;
 extern std::function<ncclResult_t(char**, enum ibv_event_type)> g_ibvEventTypeStr;
+extern std::function<const char*(enum ibv_wc_status)> g_ibvWcStatusStr;
+extern std::function<const char*(enum ibv_wc_opcode)> g_ibvWcOpcodeStr;
+extern std::function<const char*(enum ibv_wr_opcode)> g_ibvWrOpcodeStr;
 
 class ScopedDmaBufProbe {
  private:
