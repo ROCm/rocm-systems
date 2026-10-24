@@ -24,6 +24,10 @@ downstream consumer of the library.
 
 - CMake configure now prints the profiler-hub version and the RocPD schema version. The project version moved to a `VERSION` file.
 
+### Fixed
+
+- `storage_t::get_storage_version()` now returns the schema version stamped in the trace's metadata instead of the library version; it returns 0.0.0 when the trace does not exist yet or its metadata is unreadable, and no longer creates the file.
+
 ## [0.2.0] - 2026-09-02
 
 ### Added

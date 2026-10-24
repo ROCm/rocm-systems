@@ -29,10 +29,13 @@ TEST(sqlite_backend_impl_test, get_schema_query_substitutes_metadata_version_pla
     const std::string query =
         get_schema_query(ROCPD_SQL_SCHEMA_ROCPD_METADATA, "test-uuid");
 
-    EXPECT_NE(query.find("(\"schema_version\", \"3.0.1\")"), std::string::npos);
-    EXPECT_NE(query.find("(\"schema_version_major\", \"3\")"), std::string::npos);
-    EXPECT_NE(query.find("(\"schema_version_minor\", \"0\")"), std::string::npos);
-    EXPECT_NE(query.find("(\"schema_version_patch\", \"1\")"), std::string::npos);
+    const auto has = [&](const std::string& tag, const std::string& value) {
+        return query.find("(\"" + tag + "\", \"" + value + "\")") != std::string::npos;
+    };
+    EXPECT_TRUE(has("schema_version", "3.0.1"));
+    EXPECT_TRUE(has("schema_version_major", "3"));
+    EXPECT_TRUE(has("schema_version_minor", "0"));
+    EXPECT_TRUE(has("schema_version_patch", "1"));
     EXPECT_EQ(query.find("{{schema_version}}"), std::string::npos);
     EXPECT_EQ(query.find("{{schema_version_major}}"), std::string::npos);
     EXPECT_EQ(query.find("{{schema_version_minor}}"), std::string::npos);
