@@ -3938,8 +3938,9 @@ end:
   if (graph->id == 1) {
     for (int i = 0; i < graph->nChannels; i++) {
       int64_t netId;
-      if (ncclTopoGetLocalNet(system, graph->intra[i * ngpus + 1], i, &netId, nullptr) == ncclSuccess)
+      if (ncclTopoGetLocalNet(system, graph->intra[i * ngpus + 1], i, &netId, nullptr) == ncclSuccess) {
         graph->inter[i * 2 + 1] = netId;
+      }
     }
   }
 
@@ -4116,8 +4117,9 @@ static void parseOptions(struct ncclTopoSystem* system, const char* options) {
       for (j = 0; j <= PATH_SYS; j++) {
         if (strcmp(value, topoPathTypeStr[j]) == 0) break;
       }
-      if (j <= PATH_SYS) system->netGdrLevel = j;
-      else {
+      if (j <= PATH_SYS) {
+        system->netGdrLevel = j;
+      } else {
         system->netGdrLevel = -2;
         WARN("invalid netGdrLevel: %s", value);
       }
@@ -4515,8 +4517,7 @@ static bool netIdsAssignable(const int* n, int s, int last, const std::vector<ch
   return true;
 }
 
-// Walks the NIC orderings in the same order as a plain swap permutation and returns the first one that fits,
-// but only descends into subtrees that still contain a fitting ordering.
+// Swap-permutation order, descending only into subtrees that still hold a fitting ordering.
 static bool permuteFittingNetIds(int* n, int s, int last, const std::vector<char>& fits, int* time) {
   (*time)++;
   if (!netIdsAssignable(n, s, last, fits)) return false;

@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <csignal>
+#include <functional>
 #include <memory>
 #include <random>
 #include <set>
@@ -317,6 +318,7 @@ TEST_F(GraphRomeModelsMicrotest, A2a8P_MatchesEightFullyConnectedGpusOnTwoSocket
   for (int i = 0; i < kModels; i++) {
     const rcclRomeModel& m = romeTopoModels[i];
     if (m.nGpus != 8 || m.nCpus != 2 || !checkAlltoallWidth(const_cast<rcclRomeModel*>(&m))) continue;
+    if (i == kSixteenNicModel) continue;  // see A2a8P_SixteenNicsMatchWithoutWalkingEveryNicOrdering
     for (int pattern : {NCCL_TOPO_PATTERN_RING, NCCL_TOPO_PATTERN_BALANCED_TREE}) {
       UseModel(m, -1, kAmdCpu);
       GraphPtr graph = NewGraph(pattern == NCCL_TOPO_PATTERN_RING ? 0 : 1, pattern);
@@ -331,32 +333,39 @@ TEST_F(GraphRomeModelsMicrotest, A2a8P_MatchesEightFullyConnectedGpusOnTwoSocket
   EXPECT_GE(matched, 5);
 }
 
-// Runs parseA2a8P in a child killed after a few seconds, so a search that walks every NIC ordering fails instead
-// of hanging the suite. The child exits 0 when the call succeeds with the expected channel count sign.
-void ExpectA2a8PFinishesQuickly(ncclTopoSystem* system, bool expectChannels) {
-  GraphPtr ring = NewGraph(0, NCCL_TOPO_PATTERN_RING);
+// Runs body in a child with a 10 s alarm, so a slow NIC search fails instead of hanging the suite.
+void ExpectFinishesQuickly(const std::function<bool()>& body) {
   const std::string style = ::testing::GTEST_FLAG(death_test_style);
   ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
 
   EXPECT_EXIT(
       {
         alarm(10);
-        ncclResult_t ret = parseA2a8P(system, ring.get(), nullptr);
-        _exit(ret == ncclSuccess && (ring->nChannels > 0) == expectChannels ? 0 : 1);
+        _exit(body() ? 0 : 1);
       },
       ::testing::ExitedWithCode(0), "");
   ::testing::GTEST_FLAG(death_test_style) = style;
 }
 
 TEST_F(GraphRomeModelsMicrotest, A2a8P_SixteenNicsMatchWithoutWalkingEveryNicOrdering) {
-  ExpectA2a8PFinishesQuickly(UseModel(romeTopoModels[kSixteenNicModel]), true);
+  for (int pattern : {NCCL_TOPO_PATTERN_RING, NCCL_TOPO_PATTERN_BALANCED_TREE}) {
+    UseModel(romeTopoModels[kSixteenNicModel], -1, kAmdCpu);
+    ExpectFinishesQuickly([&]() {
+      GraphPtr graph = NewGraph(pattern == NCCL_TOPO_PATTERN_RING ? 0 : 1, pattern);
+      return parseA2a8P(system_.get(), graph.get(), nullptr) == ncclSuccess &&
+             (graph->nChannels > 0 || graph->treeBase[0][0]) && (system_->type & RCCL_TOPO_4P2H_ROME);
+    });
+  }
 }
 
 TEST_F(GraphRomeModelsMicrotest, A2a8P_SixteenNicsThatFitNoModelGiveUpQuickly) {
   UseModel(romeTopoModels[kSixteenNicModel]);
   system_->nodes[GPU].nodes[0].paths[NET][0].type = PATH_DIS;
 
-  ExpectA2a8PFinishesQuickly(system_.get(), false);
+  ExpectFinishesQuickly([&]() {
+    GraphPtr ring = NewGraph(0, NCCL_TOPO_PATTERN_RING);
+    return parseA2a8P(system_.get(), ring.get(), nullptr) == ncclSuccess && ring->nChannels == 0;
+  });
 }
 
 TEST_F(GraphRomeModelsMicrotest, A2a8P_RailTreesUnlessDisabled) {
@@ -838,16 +847,17 @@ TEST_F(GraphRomeModelsMicrotest, CheckOption_ReadsABooleanByName) {
 // --- NIC ordering search
 
 // The search permuteNetIds replaced: every ordering in swap order, each checked only once complete.
-bool PlainPermuteNetIds(int* n, const int* g, int s, int last, rcclRomeModel* ref, rcclRomeModel* topo) {
+bool PlainPermuteNetIds(int* n, const int* g, int s, int last, rcclRomeModel* ref, rcclRomeModel* topo,
+                        bool ignoreNuma) {
   if (s == last) {
     for (int i = 0; i <= last; i++) {
-      if (!netIdFits(i, n[i], g, ref, topo, false)) return false;
+      if (!netIdFits(i, n[i], g, ref, topo, ignoreNuma)) return false;
     }
     return true;
   }
   for (int i = s; i <= last; i++) {
     std::swap(n[s], n[i]);
-    if (PlainPermuteNetIds(n, g, s + 1, last, ref, topo)) return true;
+    if (PlainPermuteNetIds(n, g, s + 1, last, ref, topo, ignoreNuma)) return true;
     std::swap(n[s], n[i]);
   }
   return false;
@@ -887,12 +897,15 @@ TEST_F(GraphRomeModelsMicrotest, PermuteNetIds_PicksTheOrderingAPlainPermutation
       }
     }
     if (trial % 2) topo->gdrLevel[rng() % (nNics * nGpus)] = levels[rng() % 5];
+    const bool ignoreNuma = trial % 3 == 0;
+    if (ignoreNuma) topo->nicNuma[rng() % nNics] ^= 1;  // a NUMA mismatch only these trials may ignore
 
     std::vector<int> fast = CallerNetOrder(nNics), plain = fast;
     int time = 0;
-    bool found = permuteNetIds(fast.data(), g.data(), 0, nNics - 1, ref.get(), topo.get(), &time, false);
+    bool found = permuteNetIds(fast.data(), g.data(), 0, nNics - 1, ref.get(), topo.get(), &time, ignoreNuma);
 
-    ASSERT_EQ(PlainPermuteNetIds(plain.data(), g.data(), 0, nNics - 1, ref.get(), topo.get()), found) << trial;
+    ASSERT_EQ(PlainPermuteNetIds(plain.data(), g.data(), 0, nNics - 1, ref.get(), topo.get(), ignoreNuma), found)
+      << trial;
     EXPECT_EQ(plain, fast) << trial;
     (found ? matched : unmatched)++;
   }
@@ -908,18 +921,17 @@ TEST_F(GraphRomeModelsMicrotest, PermuteNetIds_SixteenNicsTakePolynomialSteps) {
   ref->gdrLevel[(nNics - 1) * nGpus] = PATH_PIX;
   std::vector<int> g = {0, 1, 2, 3, 4, 5, 6, 7};
 
-  std::vector<int> n = CallerNetOrder(nNics);
-  int time = 0;
-  EXPECT_FALSE(permuteNetIds(n.data(), g.data(), 0, nNics - 1, ref.get(), topo.get(), &time, false));
-  EXPECT_EQ(CallerNetOrder(nNics), n);
-  EXPECT_LE(time, nNics * nNics);
+  ExpectFinishesQuickly([&]() {
+    std::vector<int> n = CallerNetOrder(nNics);
+    int time = 0;
+    if (permuteNetIds(n.data(), g.data(), 0, nNics - 1, ref.get(), topo.get(), &time, false)) return false;
+    if (n != CallerNetOrder(nNics) || time > nNics * nNics) return false;
 
-  topo->gdrLevel[5 * nGpus] = PATH_PIX;  // only NIC 5 fits the last position
-  time = 0;
-  ASSERT_TRUE(permuteNetIds(n.data(), g.data(), 0, nNics - 1, ref.get(), topo.get(), &time, false));
-  EXPECT_EQ(5, n[nNics - 1]);
-  EXPECT_EQ((size_t)nNics, std::set<int>(n.begin(), n.end()).size());
-  EXPECT_LE(time, nNics * nNics);
+    topo->gdrLevel[5 * nGpus] = PATH_PIX;  // only NIC 5 fits the last position
+    time = 0;
+    if (!permuteNetIds(n.data(), g.data(), 0, nNics - 1, ref.get(), topo.get(), &time, false)) return false;
+    return n[nNics - 1] == 5 && std::set<int>(n.begin(), n.end()).size() == (size_t)nNics && time <= nNics * nNics;
+  });
 }
 
 TEST_F(GraphRomeModelsMicrotest, SetPresetIdx_RejectsAConflictingModel) {
