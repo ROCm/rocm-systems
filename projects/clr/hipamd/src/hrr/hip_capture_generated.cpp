@@ -7837,6 +7837,188 @@ static hipError_t capture_hipKernelSetAttributeForDevice(hipKernel_t kernel, hip
 }
 
 // Generated shim
+static hipError_t capture_hipExtMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t* sizesDst, hipExtMemcpyWait* waits, hipExtMemcpySignal* signals, size_t count, hipExtMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs, hipStream_t stream) {
+  hipError_t r = g_real_table.hipExtMemcpyBatchAsync_fn(dsts, srcs, sizes, sizesDst, waits, signals, count, attrs, attrsIdxs, numAttrs, stream);
+  if (r == hipSuccess) {
+    hrr_args_hipExtMemcpyBatchAsync a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.sizes = reinterpret_cast<uint64_t>(sizes);
+    a.sizesDst = reinterpret_cast<uint64_t>(sizesDst);
+    a.waits = reinterpret_cast<uint64_t>(waits);
+    a.signals = reinterpret_cast<uint64_t>(signals);
+    a.count = static_cast<decltype(a.count)>(count);
+    a.attrs = reinterpret_cast<uint64_t>(attrs);
+    a.attrsIdxs = reinterpret_cast<uint64_t>(attrsIdxs);
+    a.numAttrs = static_cast<decltype(a.numAttrs)>(numAttrs);
+    a.stream = reinterpret_cast<uint64_t>(stream);
+    if (dsts) a.dsts = reinterpret_cast<uint64_t>(*dsts);
+    if (srcs) a.srcs = reinterpret_cast<uint64_t>(*srcs);
+    if (dsts && count > 0) {
+      uint32_t _n = static_cast<uint32_t>(count);
+      if (_n > 16u) {
+        static bool warned_dsts = false;
+        if (!warned_dsts) {
+          warned_dsts = true;
+          LogPrintfWarning(
+              "[HRR] hipExtMemcpyBatchAsync: recording only the first 16 "
+              "of %u dsts entries; replay of this call will be "
+              "incomplete", _n);
+        }
+        hrr_cap::writer::note_unreplayable("hipExtMemcpyBatchAsync",
+            "only the first 16 dsts entries were recorded at "
+            "capture time; replay would pass a partial array");
+        _n = 16u;
+      }
+      std::memcpy(a.dsts_bytes, dsts, static_cast<size_t>(_n) * sizeof(void*));
+      a.dsts_n   = _n;
+      a.dsts_present = 1;
+    }
+    if (srcs && count > 0) {
+      uint32_t _n = static_cast<uint32_t>(count);
+      if (_n > 16u) {
+        static bool warned_srcs = false;
+        if (!warned_srcs) {
+          warned_srcs = true;
+          LogPrintfWarning(
+              "[HRR] hipExtMemcpyBatchAsync: recording only the first 16 "
+              "of %u srcs entries; replay of this call will be "
+              "incomplete", _n);
+        }
+        hrr_cap::writer::note_unreplayable("hipExtMemcpyBatchAsync",
+            "only the first 16 srcs entries were recorded at "
+            "capture time; replay would pass a partial array");
+        _n = 16u;
+      }
+      std::memcpy(a.srcs_bytes, srcs, static_cast<size_t>(_n) * sizeof(void*));
+      a.srcs_n   = _n;
+      a.srcs_present = 1;
+    }
+    if (sizes && count > 0) {
+      uint32_t _n = static_cast<uint32_t>(count);
+      if (_n > 16u) {
+        static bool warned_sizes = false;
+        if (!warned_sizes) {
+          warned_sizes = true;
+          LogPrintfWarning(
+              "[HRR] hipExtMemcpyBatchAsync: recording only the first 16 "
+              "of %u sizes entries; replay of this call will be "
+              "incomplete", _n);
+        }
+        hrr_cap::writer::note_unreplayable("hipExtMemcpyBatchAsync",
+            "only the first 16 sizes entries were recorded at "
+            "capture time; replay would pass a partial array");
+        _n = 16u;
+      }
+      std::memcpy(a.sizes_bytes, sizes, static_cast<size_t>(_n) * sizeof(size_t));
+      a.sizes_n   = _n;
+      a.sizes_present = 1;
+    }
+    if (sizesDst && count > 0) {
+      uint32_t _n = static_cast<uint32_t>(count);
+      if (_n > 16u) {
+        static bool warned_sizesDst = false;
+        if (!warned_sizesDst) {
+          warned_sizesDst = true;
+          LogPrintfWarning(
+              "[HRR] hipExtMemcpyBatchAsync: recording only the first 16 "
+              "of %u sizesDst entries; replay of this call will be "
+              "incomplete", _n);
+        }
+        hrr_cap::writer::note_unreplayable("hipExtMemcpyBatchAsync",
+            "only the first 16 sizesDst entries were recorded at "
+            "capture time; replay would pass a partial array");
+        _n = 16u;
+      }
+      std::memcpy(a.sizesDst_bytes, sizesDst, static_cast<size_t>(_n) * sizeof(size_t));
+      a.sizesDst_n   = _n;
+      a.sizesDst_present = 1;
+    }
+    if (waits && count > 0) {
+      uint32_t _n = static_cast<uint32_t>(count);
+      if (_n > 16u) {
+        static bool warned_waits = false;
+        if (!warned_waits) {
+          warned_waits = true;
+          LogPrintfWarning(
+              "[HRR] hipExtMemcpyBatchAsync: recording only the first 16 "
+              "of %u waits entries; replay of this call will be "
+              "incomplete", _n);
+        }
+        hrr_cap::writer::note_unreplayable("hipExtMemcpyBatchAsync",
+            "only the first 16 waits entries were recorded at "
+            "capture time; replay would pass a partial array");
+        _n = 16u;
+      }
+      std::memcpy(a.waits_bytes, waits, static_cast<size_t>(_n) * sizeof(hipExtMemcpyWait));
+      a.waits_n   = _n;
+      a.waits_present = 1;
+    }
+    if (signals && count > 0) {
+      uint32_t _n = static_cast<uint32_t>(count);
+      if (_n > 16u) {
+        static bool warned_signals = false;
+        if (!warned_signals) {
+          warned_signals = true;
+          LogPrintfWarning(
+              "[HRR] hipExtMemcpyBatchAsync: recording only the first 16 "
+              "of %u signals entries; replay of this call will be "
+              "incomplete", _n);
+        }
+        hrr_cap::writer::note_unreplayable("hipExtMemcpyBatchAsync",
+            "only the first 16 signals entries were recorded at "
+            "capture time; replay would pass a partial array");
+        _n = 16u;
+      }
+      std::memcpy(a.signals_bytes, signals, static_cast<size_t>(_n) * sizeof(hipExtMemcpySignal));
+      a.signals_n   = _n;
+      a.signals_present = 1;
+    }
+    if (attrs && numAttrs > 0) {
+      uint32_t _n = static_cast<uint32_t>(numAttrs);
+      if (_n > 16u) {
+        static bool warned_attrs = false;
+        if (!warned_attrs) {
+          warned_attrs = true;
+          LogPrintfWarning(
+              "[HRR] hipExtMemcpyBatchAsync: recording only the first 16 "
+              "of %u attrs entries; replay of this call will be "
+              "incomplete", _n);
+        }
+        hrr_cap::writer::note_unreplayable("hipExtMemcpyBatchAsync",
+            "only the first 16 attrs entries were recorded at "
+            "capture time; replay would pass a partial array");
+        _n = 16u;
+      }
+      std::memcpy(a.attrs_bytes, attrs, static_cast<size_t>(_n) * sizeof(hipExtMemcpyAttributes));
+      a.attrs_n   = _n;
+      a.attrs_present = 1;
+    }
+    if (attrsIdxs && numAttrs > 0) {
+      uint32_t _n = static_cast<uint32_t>(numAttrs);
+      if (_n > 16u) {
+        static bool warned_attrsIdxs = false;
+        if (!warned_attrsIdxs) {
+          warned_attrsIdxs = true;
+          LogPrintfWarning(
+              "[HRR] hipExtMemcpyBatchAsync: recording only the first 16 "
+              "of %u attrsIdxs entries; replay of this call will be "
+              "incomplete", _n);
+        }
+        hrr_cap::writer::note_unreplayable("hipExtMemcpyBatchAsync",
+            "only the first 16 attrsIdxs entries were recorded at "
+            "capture time; replay would pass a partial array");
+        _n = 16u;
+      }
+      std::memcpy(a.attrsIdxs_bytes, attrsIdxs, static_cast<size_t>(_n) * sizeof(size_t));
+      a.attrsIdxs_n   = _n;
+      a.attrsIdxs_present = 1;
+    }
+    hrr_cap::writer::write_event_raw(HRR_API_HIPEXTMEMCPYBATCHASYNC, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
 static hipError_t capture___hipPopCallConfiguration(dim3* gridDim, dim3* blockDim, size_t* sharedMem, hipStream_t* stream) {
   hipError_t r = g_real_compiler_table.__hipPopCallConfiguration_fn(gridDim, blockDim, sharedMem, stream);
   if (r == hipSuccess) {
@@ -8574,6 +8756,7 @@ void hip_capture_build_table() {
   g_cap_table.hipDeviceFlushGPUDirectRDMAWrites_fn = capture_hipDeviceFlushGPUDirectRDMAWrites;
   g_cap_table.hipLibraryGetModule_fn = capture_hipLibraryGetModule;
   g_cap_table.hipKernelSetAttributeForDevice_fn = capture_hipKernelSetAttributeForDevice;
+  g_cap_table.hipExtMemcpyBatchAsync_fn = capture_hipExtMemcpyBatchAsync;
 }
 
 void hip_capture_build_compiler_table() {
