@@ -190,6 +190,19 @@ function(rccl_define_micro_source_lists)
     ../common/ProcessIsolatedTestRunner.cpp
     PARENT_SCOPE)
 
+  # rccl-UnitTestsMicroBootstrap -- src/bootstrap.cc. Own binary: bootstrap_micro_fakes.cc replaces misc/socket.cc
+  # wholesale, and other binaries link bootstrap_stubs.cc for this unit's symbols.
+  set(TEST_MICRO_BOOTSTRAP_SOURCE_FILES
+    bootstrap-test.cc
+    fakes/bootstrap_micro_fakes.cc
+    fakes/env_fakes.cc
+    fakes/hip_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/os_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
   # rccl-UnitTestsMicroWarpSpeed -- scheduler UUTs under ENABLE_WARP_SPEED.
   set(TEST_MICRO_SCHEDULER_SOURCE_FILES
     scheduler-test.cc
@@ -1189,6 +1202,16 @@ endif()
 # The property is directory-scoped and idempotent, so one call up front covers
 # all targets -- no need to repeat it per binary.
 rccl_mark_oracle_tus_generated(${RCCL_HOST_HIPIFY_DIR} argcheck archinfo utils kernel_config)
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroBootstrap
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroBootstrap
+  SOURCES ${TEST_MICRO_BOOTSTRAP_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    BOOTSTRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/bootstrap.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_bootstrap.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicro
