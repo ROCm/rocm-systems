@@ -10,7 +10,9 @@
 
 #include <dlfcn.h>
 
+#include <cerrno>
 #include <cstdlib>
+#include <cstring>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -20,6 +22,9 @@
 #include <unistd.h>
 
 #include "nccl.h"
+#include "param.h"
+
+#include "signature-drift.h"
 
 namespace {
 struct MicroEnvironState {
@@ -126,9 +131,40 @@ void ClearMicroEnv() {
   microEnvMap().clear();
 }
 
-void ResetEnvFakes() { ClearMicroEnv(); }
+void ResetEnvFakes() {
+  ClearMicroEnv();
+  g_ncclLoadParam = DefaultLoadParam;
+}
 
 const char* ncclGetEnv(const char* name) { return micro_getenv(name); }
+
+int64_t DefaultLoadParam(char const* env, int64_t deftVal, int64_t /*uninitialized*/,
+                         int64_t* cache, int8_t* noCache) {
+  int64_t value = deftVal;
+
+  const char* str = micro_getenv(env);
+  if (str && std::strlen(str) > 0) {
+    errno = 0;
+    char* end = nullptr;
+    const int64_t parsed = std::strtoll(str, &end, 0);
+    // Matches production: a non-numeric value falls back to the default rather
+    // than being reported as an error.
+    if (errno == 0 && end != str) value = parsed;
+  }
+
+  if (cache) *cache = value;
+  if (noCache) *noCache = 0;
+  return value;
+}
+
+std::function<int64_t(char const*, int64_t, int64_t, int64_t*, int8_t*)> g_ncclLoadParam =
+    DefaultLoadParam;
+ASSERT_HOOK_MATCHES_PROD(g_ncclLoadParam, ncclLoadParam);
+
+int64_t ncclLoadParam(char const* env, int64_t deftVal, int64_t uninitialized, int64_t* cache,
+                      int8_t* noCache) {
+  return g_ncclLoadParam(env, deftVal, uninitialized, cache, noCache);
+}
 
 // src/misc/param.cc:69. The real one reads /etc/nccl.conf into the environment; the microtests drive
 // the environment through SetMicroEnv instead, so this is a no-op rather than a seam.

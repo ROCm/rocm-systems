@@ -3832,10 +3832,15 @@ ncclResult_t parseGraph(const char* str, struct ncclTopoSystem* system, struct n
   int gpu = 0;
   int offset = 0;
   int status = 0; // 0 : between numbers, 1 : inside number, 2: start NET, 3: inside NET
-  int nets[NCCL_TOPO_MAX_NODES * 2];
+  int nets[NCCL_TOPO_MAX_NODES * 2] = {};
   int net_offset = 0, net_count = 0;
   int ngpus = system->nodes[GPU].count;
   int nnets = system->nodes[NET].count;
+
+  if (str == NULL) {
+    WARN("No user-defined rings to parse");
+    return ncclInvalidArgument;
+  }
 
   if (rcclParamModelReversalDisable()) reverse = 0;
 
@@ -3849,17 +3854,35 @@ ncclResult_t parseGraph(const char* str, struct ncclTopoSystem* system, struct n
       if (digit >= 0 && digit <= 9) {
         switch (status) {
         case 0:
+          if (gpu >= NCCL_TOPO_MAX_NODES) {
+            WARN("Too many GPUs in one ring (max %d) in user-defined rings (NCCL_RINGS); initialization will fail",
+                 NCCL_TOPO_MAX_NODES);
+            return ncclInvalidUsage;
+          }
           gpus[gpu] = digit;
           status = 1;
           break;
         case 1:
+          if (gpus[gpu] > (INT_MAX - digit) / 10) {
+            WARN("GPU number too large in user-defined rings (NCCL_RINGS); initialization will fail");
+            return ncclInvalidUsage;
+          }
           gpus[gpu] = gpus[gpu] * 10 + digit;
           break;
         case 2:
+          if (net_offset >= NCCL_TOPO_MAX_NODES * 2) {
+            WARN("Too many NETs in one ring (max %d) in user-defined rings (NCCL_RINGS); initialization will fail",
+                 NCCL_TOPO_MAX_NODES * 2);
+            return ncclInvalidUsage;
+          }
           nets[net_offset] = digit + 'N';
           status = 3;
           break;
         case 3:
+          if (nets[net_offset] - 'N' > (INT_MAX - 'N' - digit) / 10) {
+            WARN("NET number too large in user-defined rings (NCCL_RINGS); initialization will fail");
+            return ncclInvalidUsage;
+          }
           nets[net_offset] = (nets[net_offset] - 'N') * 10 + digit + 'N';
           break;
         }
@@ -3879,6 +3902,11 @@ ncclResult_t parseGraph(const char* str, struct ncclTopoSystem* system, struct n
           if (gpu != ngpus) goto newchannel;
           // Ignore if net_count is not 0 or odd number
           if (net_count && net_count % 2) goto newchannel;
+          if (nChannels >= MAXCHANNELS) {
+            WARN("Too many channels in user-defined rings (max %d) (NCCL_RINGS); initialization will fail",
+                 MAXCHANNELS);
+            return ncclInvalidUsage;
+          }
 
           for (int r = 0; r < ngpus; r++) {
             int g = gpus[r];
@@ -3924,13 +3952,14 @@ ncclResult_t parseGraph(const char* str, struct ncclTopoSystem* system, struct n
           gpu = 0;
           net_offset = 0;
           net_count = 0;
+          memset(nets, 0, sizeof(nets));
         }
       }
     }
   } while (str[offset++] != 0);
 end:
   graph->nChannels = nChannels;
-  graph->bwIntra = graph->bwInter = system->totalBw / nChannels;
+  graph->bwIntra = graph->bwInter = nChannels ? system->totalBw / nChannels : 0;
   if (graph->id == 1) {
     for (int i = 0; i < graph->nChannels; i++) {
       int64_t netId;
@@ -5270,7 +5299,7 @@ ncclResult_t parseGIOTopos(struct ncclTopoSystem* system, struct ncclTopoGraph* 
   const int ncpus = system->nodes[CPU].count;
   const int nnets = system->nodes[NET].count;
 
-  if (ngpus < NGPUS || ncpus > 2 || nnets != 0) return ncclSuccess;
+  if (ngpus != NGPUS || ncpus > 2 || nnets != 0) return ncclSuccess;
 
   struct rcclRomeModel romeTopo;
   char pattern[256];

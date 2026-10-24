@@ -740,22 +740,13 @@ TEST_F(GraphRomeModelsParseMicrotest, ParseGraph_StopsAtTooManyNics) {
   EXPECT_EQ(0, ring_->nChannels);
 }
 
-// The count is checked after gpus[gpu] is written, so one GPU too many lands past the array.
-// Pins AICOMRCCL-3030; a fix flips this pin.
-TEST_F(GraphRomeModelsParseMicrotest, ParseGraph_KnownBug_OneGpuPastTheLimitIsWrittenBeforeTheStop) {
-  if (kAsan) GTEST_SKIP() << "the out-of-bounds stack write would fail AddressSanitizer";
+// The GPU count is bounded before gpus[gpu] is written, so one GPU too many is
+// refused rather than landing past the array (AICOMRCCL-3030).
+TEST_F(GraphRomeModelsParseMicrotest, ParseGraph_OneGpuPastTheLimitIsRejected) {
   std::string many;
   for (int g = 0; g <= NCCL_TOPO_MAX_NODES; g++) many += std::to_string(g % 4) + " ";
-  const std::string style = ::testing::GTEST_FLAG(death_test_style);
-  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
 
-  EXPECT_EXIT(
-      {
-        ncclResult_t ret = parseGraph(many.c_str(), system_.get(), ring_.get(), nullptr, nullptr, 0);
-  ::testing::GTEST_FLAG(death_test_style) = style;
-        _exit(ret == ncclSuccess && ring_->nChannels == 0 ? 0 : 1);
-      },
-      ::testing::ExitedWithCode(0), "");
+  EXPECT_EQ(ncclInvalidUsage, parseGraph(many.c_str(), system_.get(), ring_.get(), nullptr, nullptr, 0));
 }
 
 TEST_F(GraphRomeModelsMicrotest, ParseOptions_SetsTheKnownKeys) {
