@@ -1322,21 +1322,40 @@ TEST_P(KfdAqlPm4Test, ExecutesEveryXcdAndRetainsBlockedIndirectBuffer) {
   ASSERT_NE(doorbell, MAP_FAILED);
   std::atomic_ref<uint64_t>(data[1]).store(2, std::memory_order_release);
   std::atomic_ref<uint64_t>(*static_cast<uint64_t *>(doorbell)).store(1, std::memory_order_release);
-  for (unsigned i = 0; i < 2000 && data[16] != 8; ++i) {
-    (void)engine_->step();
-    std::this_thread::sleep_for(std::chrono::microseconds(50));
-  }
+  // The KFD monitor retries blocked IBs on a host thread at a wall-clock cadence.
+  // Idle step() calls can finish before its next wake, so allow host progress
+  // while driving the engine and bound each wait by elapsed time.
+  const auto step_until = [&](const std::function<bool()> &ready) {
+    const std::chrono::steady_clock::time_point deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!ready() && std::chrono::steady_clock::now() < deadline) {
+      (void)engine_->step();
+      std::this_thread::sleep_for(std::chrono::microseconds(50));
+    }
+  };
+  step_until([&] { return data[16] == 8; });
   for (uint32_t xcc = 0; xcc < 8; ++xcc)
     EXPECT_EQ(data[8 + xcc], xcc + 1);
   ASSERT_EQ(data[16], 8u);
-  for (unsigned i = 0; i < 20; ++i)
-    (void)engine_->step();
+  // Observe a further pass on every XCD before checking that retries leave the
+  // IB's completed atomic and its blocked successor untouched.
+  std::array<uint64_t, 8> passes{};
+  for (uint32_t xcc = 0; xcc < 8; ++xcc)
+    passes[xcc] = soc_->xcd(xcc)->command_processor()->doorbell_handle_count_for_test();
+  step_until([&] {
+    for (uint32_t xcc = 0; xcc < 8; ++xcc)
+      if (soc_->xcd(xcc)->command_processor()->doorbell_handle_count_for_test() <= passes[xcc])
+        return false;
+    return true;
+  });
+  for (uint32_t xcc = 0; xcc < 8; ++xcc)
+    EXPECT_GT(soc_->xcd(xcc)->command_processor()->doorbell_handle_count_for_test(), passes[xcc])
+        << "XCD=" << xcc;
   EXPECT_EQ(data[16], 8u);
   EXPECT_EQ(data[18], 0u);
   EXPECT_EQ(data[25], 1u);
   std::atomic_ref<uint64_t>(data[17]).store(1, std::memory_order_release);
-  for (unsigned i = 0; i < 2000 && (data[18] != 99 || data[25] != 0); ++i)
-    (void)engine_->step();
+  step_until([&] { return data[18] == 99 && data[25] == 0; });
   EXPECT_EQ(data[18], 99u);
   EXPECT_EQ(data[25], 0u);
   EXPECT_EQ(data[16], 8u);

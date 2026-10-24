@@ -17,11 +17,11 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
-#include <ctime>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <time.h>
 #include <vector>
 
 using namespace simdojo;
@@ -1331,39 +1331,104 @@ TEST(TerminationTest, QuiescentEpochDoesNotStrandPeersAtTheBarrier) {
   EXPECT_EQ(responder->recv_count, 1u);
 }
 
+#if defined(CLOCK_THREAD_CPUTIME_ID)
+class IdleCpuProbe : public Component {
+public:
+  IdleCpuProbe(std::string name, std::atomic<uint64_t> &sample)
+      : Component(std::move(name)), sample_(sample) {
+    sample_event_.set_handler([this](Tick, Message *) {
+      timespec cpu{};
+      const uint64_t value = ::clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpu) == 0
+                                 ? static_cast<uint64_t>(cpu.tv_sec) * 1'000'000'000 + cpu.tv_nsec
+                                 : UINT64_MAX;
+      sample_.store(value, std::memory_order_release);
+    });
+  }
+
+  void startup() override { engine()->register_as_primary(); }
+  Event *sample_event() { return &sample_event_; }
+
+private:
+  std::atomic<uint64_t> &sample_;
+  Event sample_event_{this, EventType::TIMER_CALLBACK};
+};
+#endif
+
 // Regression: a quiescent engine must idle, not spin, in every worker mode.
 //
 // The single worker waits directly; in multi-worker mode, barrier completion
 // waits on behalf of all partitions. Removing either wait burns host CPU and
-// can starve the guest process that must ring the next doorbell. Measure process
-// CPU time so unrelated CTest jobs do not count against this engine's budget.
+// can starve the guest process that must ring the next doorbell. Measure only
+// worker CPU time so sanitizer and helper threads do not count against this
+// engine's budget. Sampling events also finish worker startup before measuring.
 TEST(TerminationTest, QuiescentEngineDoesNotSpinTheHost) {
+#if !defined(CLOCK_THREAD_CPUTIME_ID)
+  GTEST_SKIP() << "per-thread CPU clocks are unavailable";
+#else
   for (const uint32_t partitions : {1u, 2u, 4u}) {
     SCOPED_TRACE(partitions);
+    std::vector<std::atomic<uint64_t>> samples(partitions);
     SimulationEngine engine({.num_threads = partitions});
     auto root = std::make_unique<CompositeComponent>("root");
-    for (uint32_t i = 0; i < partitions; ++i)
-      root->add_child(std::make_unique<PeerWaitComponent>("idle" + std::to_string(i)));
+    std::vector<IdleCpuProbe *> probes;
+    for (uint32_t i = 0; i < partitions; ++i) {
+      auto probe = std::make_unique<IdleCpuProbe>("idle" + std::to_string(i), samples[i]);
+      probes.push_back(probe.get());
+      root->add_child(std::move(probe));
+    }
     engine.topology().set_root(std::move(root));
     engine.topology().partition_balanced(partitions);
     engine.create();
+    for (uint32_t i = 0; i < partitions; ++i)
+      ASSERT_EQ(std::ranges::count_if(
+                    probes, [i](const IdleCpuProbe *probe) { return probe->partition_id() == i; }),
+                1);
 
     std::thread runner([&]() { engine.run(); });
     const bool started = engine.wait_until_started();
 
-    const auto cpu_before = std::clock();
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    const auto cpu_used =
-        static_cast<double>(std::clock() - cpu_before) / static_cast<double>(CLOCKS_PER_SEC);
+    const auto sample_cpu = [&](uint64_t &total) {
+      for (std::atomic<uint64_t> &sample : samples)
+        sample.store(0, std::memory_order_relaxed);
+      for (IdleCpuProbe *probe : probes)
+        engine.schedule_event_now(probe->sample_event());
+      const std::chrono::steady_clock::time_point deadline =
+          std::chrono::steady_clock::now() + std::chrono::seconds(5);
+      while (std::chrono::steady_clock::now() < deadline) {
+        total = 0;
+        bool ready = true;
+        for (const std::atomic<uint64_t> &sample : samples) {
+          const uint64_t value = sample.load(std::memory_order_acquire);
+          if (value == UINT64_MAX)
+            return false;
+          ready &= value != 0;
+          total += value;
+        }
+        if (ready)
+          return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      }
+      return false;
+    };
+    uint64_t cpu_before = 0, cpu_after = 0;
+    const bool sampled_before = started && sample_cpu(cpu_before);
+    if (sampled_before)
+      std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    const bool sampled_after = sampled_before && sample_cpu(cpu_after);
 
     engine.request_exit("test stop");
     runner.join();
 
-    EXPECT_TRUE(started);
+    ASSERT_TRUE(started);
+    ASSERT_TRUE(sampled_before);
+    ASSERT_TRUE(sampled_after);
+    ASSERT_GE(cpu_after, cpu_before);
+    const double cpu_used = static_cast<double>(cpu_after - cpu_before) / 1'000'000'000;
     // Even one spinning worker burns about 0.2s of CPU over this window; idle
     // workers burn milliseconds. Leave room for startup and scheduling noise.
     EXPECT_LT(cpu_used, 0.05) << "idle engine consumed " << cpu_used << "s of CPU in 0.2s";
   }
+#endif
 }
 
 TEST(TerminationTest, StepModeConsistency) {
