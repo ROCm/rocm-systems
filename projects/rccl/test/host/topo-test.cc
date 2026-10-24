@@ -1845,18 +1845,14 @@ TEST_F(TopoMicrotest, GetXmlCpuArch_KnownBug_NoCpuArchCrashes) {
   ::testing::GTEST_FLAG(death_test_style) = style;
 }
 
-// A <gpu> without gcn (any NVIDIA-style topology file) crashes the system build.
-// Pins AICOMRCCL-3026; a fix flips this pin.
-TEST_F(TopoMicrotest, GetSystemFromXml_KnownBug_GpuWithoutGcnCrashes) {
-  XmlPtr xml = MustParseXml(System(Cpu(0, "<pci busid=\"0000:10:00.0\" class=\"0x120000\" link_speed=\"\" "
-                                          "link_width=\"16\"><gpu dev=\"0\" sm=\"90\" arch=\"0\" rank=\"0\" "
-                                          "gdr=\"1\"/></pci>")));
-  ncclTopoSystem* system = nullptr;
-  const std::string style = ::testing::GTEST_FLAG(death_test_style);
-  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
+// A <gpu> without gcn (any NVIDIA-style topology file) is rejected instead of crashing the system build.
+TEST_F(TopoMicrotest, GetSystemFromXml_GpuWithoutGcnIsAnError) {
+  SystemPtr system = BuildSystem(System(Cpu(0, "<pci busid=\"0000:10:00.0\" class=\"0x120000\" link_speed=\"\" "
+                                               "link_width=\"16\"><gpu dev=\"0\" sm=\"90\" arch=\"0\" rank=\"0\" "
+                                               "gdr=\"1\"/></pci>")),
+                                 ncclInternalError);
 
-  EXPECT_EXIT(ncclTopoGetSystemFromXml(xml.get(), &system, 0), DEATH_BY_SEGV, "");
-  ::testing::GTEST_FLAG(death_test_style) = style;
+  EXPECT_TRUE(Logged("Attribute gcn of node gpu not found"));
 }
 
 TEST_F(TopoMicrotest, GetFusionEnv_ReadsEnvOrDefaultsByPlatform) {

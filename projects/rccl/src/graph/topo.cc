@@ -618,7 +618,7 @@ ncclResult_t ncclTopoAddGpu(struct ncclXmlNode* xmlGpu, struct ncclTopoSystem* s
 #endif
   const char* gcnArch;
   const char* gcnArchName;
-  NCCLCHECK(xmlGetAttr(xmlGpu, "gcn", &gcnArch));
+  NCCLCHECK(xmlGetAttrStr(xmlGpu, "gcn", &gcnArch));
   convertGcnArchToGcnArchName(gcnArch, &gcnArchName);
   strncpy(gpu->gpu.gcn, gcnArchName, GCN_ARCH_NAME_LEN - 1);
   gpu->gpu.gcn[GCN_ARCH_NAME_LEN - 1] = '\0';
