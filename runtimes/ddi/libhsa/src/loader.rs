@@ -15,7 +15,6 @@ use std::collections::HashMap;
 use std::ffi::{CStr, c_char, c_void};
 use std::sync::{Arc, RwLock};
 
-use crate::platform::memory as linux_interop;
 use rocddi::memory::device::MemoryKind;
 #[cfg(test)]
 use rocelf::Layout as ElfLayout;
@@ -35,11 +34,11 @@ use crate::runtime::{HsaState, boundary, initialized_mut, lock, map_error};
 
 /// Keeps executable handles stable across loader traversal callbacks.
 /// Acquire this before the lifecycle mutex; callbacks may query that mutex.
-static EXECUTABLE_TRAVERSAL: RwLock<()> = RwLock::new(());
+pub(crate) static EXECUTABLE_TRAVERSAL: RwLock<()> = RwLock::new(());
 
 /// Origin retained for loader queries after bytes have been snapshotted.
 #[derive(Clone)]
-enum ReaderStorage {
+pub(crate) enum ReaderStorage {
     /// Snapshot from caller-owned memory.
     Memory,
     /// Snapshot from a file with a retained source URI.
@@ -66,6 +65,24 @@ pub(crate) struct Reader {
 }
 
 impl Reader {
+    /// Clones the immutable bytes and source description for a load.
+    pub(crate) fn snapshot(&self) -> (Arc<[u8]>, ReaderStorage) {
+        (self.bytes.clone(), self.storage.clone())
+    }
+
+    /// Owns a file snapshot while preserving its original offset.
+    pub(crate) fn from_file_with_offset(
+        bytes: Vec<u8>,
+        descriptor: i32,
+        offset: usize,
+        size: usize,
+    ) -> Self {
+        Self {
+            bytes: bytes.into(),
+            storage: ReaderStorage::from_file(descriptor, offset, size),
+        }
+    }
+
     /// Owns a snapshot supplied directly by an HSA caller.
     pub(crate) fn from_memory(bytes: Vec<u8>) -> Self {
         Self {
@@ -86,65 +103,65 @@ impl Reader {
 /// Parsed code-object metadata cached independently of any executable load.
 pub(crate) struct CodeObject {
     /// Immutable ELF bytes shared with readers and executable loads.
-    bytes: Arc<[u8]>,
+    pub(crate) bytes: Arc<[u8]>,
     /// Symbol name to public handle mapping.
-    names: HashMap<String, u64>,
+    pub(crate) names: HashMap<String, u64>,
     /// Public symbol handles in enumeration order.
-    symbol_handles: Vec<u64>,
+    pub(crate) symbol_handles: Vec<u64>,
     /// Whether symbols have already been parsed and published.
-    symbols_initialized: bool,
+    pub(crate) symbols_initialized: bool,
 }
 
 /// HSA-visible symbol facts belonging to one parsed code object.
 pub(crate) struct CodeSymbol {
     /// Public handle of the containing code object.
-    code_object: u64,
+    pub(crate) code_object: u64,
     /// Symbol name reported by HSA queries.
-    name: String,
+    pub(crate) name: String,
     /// Module name reported by HSA queries.
-    module_name: String,
+    pub(crate) module_name: String,
     /// HSA kernel, variable, or indirect-function kind.
-    kind: u32,
+    pub(crate) kind: u32,
     /// HSA program or module linkage.
-    linkage: u32,
+    pub(crate) linkage: u32,
     /// Whether this record defines rather than references a symbol.
-    is_definition: bool,
+    pub(crate) is_definition: bool,
     /// HSA variable allocation scope.
-    allocation: u32,
+    pub(crate) allocation: u32,
     /// HSA variable memory segment.
-    segment: u32,
+    pub(crate) segment: u32,
     /// Required variable alignment in bytes.
-    alignment: u32,
+    pub(crate) alignment: u32,
     /// Symbol byte size.
-    size: u32,
+    pub(crate) size: u32,
     /// Whether a variable is read-only.
-    is_const: bool,
+    pub(crate) is_const: bool,
     /// Kernel argument segment byte size.
-    kernarg_size: u32,
+    pub(crate) kernarg_size: u32,
     /// Kernel argument segment alignment.
-    kernarg_alignment: u32,
+    pub(crate) kernarg_alignment: u32,
     /// Kernel group segment byte size.
-    group_size: u32,
+    pub(crate) group_size: u32,
     /// Kernel private segment byte size.
-    private_size: u32,
+    pub(crate) private_size: u32,
     /// Whether kernel calls may require dynamic stack space.
-    dynamic_callstack: bool,
+    pub(crate) dynamic_callstack: bool,
     /// Kernel calling convention identifier.
-    call_convention: u32,
+    pub(crate) call_convention: u32,
     /// Kernel wavefront width.
-    wavefront_size: u32,
+    pub(crate) wavefront_size: u32,
 }
 
 /// ABI metadata kept alongside an owned image in the loader executable.
 pub(crate) struct LoadedMetadata {
     /// Public loaded-object handle.
-    handle: u64,
+    pub(crate) handle: u64,
     /// Agent whose device holds this loaded image.
-    agent: HsaAgent,
+    pub(crate) agent: HsaAgent,
     /// Public loaded-object type.
-    kind: u32,
+    pub(crate) kind: u32,
     /// Source URI reported to loader clients.
-    uri: Vec<u8>,
+    pub(crate) uri: Vec<u8>,
 }
 
 /// Loader owner for an executable or code object.
@@ -198,15 +215,15 @@ pub(crate) struct SymbolReference {
 /// HSA handles around code objects and rocloader-owned executables.
 pub(crate) struct LoaderState {
     /// Parsed code objects indexed by public handle.
-    code_objects: HashMap<u64, CodeObject>,
+    pub(crate) code_objects: HashMap<u64, CodeObject>,
     /// Code-object symbols indexed by public handle.
-    code_symbols: HashMap<u64, CodeSymbol>,
+    pub(crate) code_symbols: HashMap<u64, CodeSymbol>,
     /// Caller-supplied code-object readers.
-    readers: HashMap<u64, Reader>,
+    pub(crate) readers: HashMap<u64, Reader>,
     /// Executable owners indexed by public handle.
-    executables: HashMap<u64, Executable>,
+    pub(crate) executables: HashMap<u64, Executable>,
     /// Symbols published from loaded executables.
-    symbols: HashMap<u64, SymbolReference>,
+    pub(crate) symbols: HashMap<u64, SymbolReference>,
 }
 
 impl LoaderState {
@@ -241,9 +258,9 @@ impl LoaderState {
     }
 }
 
-mod code_object;
-mod executable;
-mod query;
+pub(crate) mod code_object;
+pub(crate) mod executable;
+pub(crate) mod query;
 
 use code_object::map_loader_error;
 
@@ -251,14 +268,14 @@ use code_object::map_loader_error;
 /// Returns the loader extension functions in public ABI table order.
 pub(crate) fn loader_extension_table() -> [usize; 7] {
     [
-        query::hsa_ven_amd_loader_query_host_address as *const () as usize,
-        query::hsa_ven_amd_loader_query_segment_descriptors as *const () as usize,
-        query::hsa_ven_amd_loader_query_executable as *const () as usize,
-        query::hsa_ven_amd_loader_executable_iterate_loaded_code_objects as *const () as usize,
-        query::hsa_ven_amd_loader_loaded_code_object_get_info as *const () as usize,
-        query::hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size as *const ()
+        crate::api::loader::query::hsa_ven_amd_loader_query_host_address as *const () as usize,
+        crate::api::loader::query::hsa_ven_amd_loader_query_segment_descriptors as *const () as usize,
+        crate::api::loader::query::hsa_ven_amd_loader_query_executable as *const () as usize,
+        crate::api::loader::query::hsa_ven_amd_loader_executable_iterate_loaded_code_objects as *const () as usize,
+        crate::api::loader::query::hsa_ven_amd_loader_loaded_code_object_get_info as *const () as usize,
+        crate::api::loader::query::hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size as *const ()
             as usize,
-        query::hsa_ven_amd_loader_iterate_executables as *const () as usize,
+        crate::api::loader::query::hsa_ven_amd_loader_iterate_executables as *const () as usize,
     ]
 }
 
