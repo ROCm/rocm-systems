@@ -38,8 +38,8 @@ struct process
     std::string   command;
     std::string   environment;
     std::string   extdata;
-    std::uint32_t start;
-    std::uint32_t end;
+    std::uint64_t start;
+    std::uint64_t end;
 };
 
 struct pmc
@@ -88,8 +88,8 @@ struct thread
     std::int32_t  parent_process_id;
     std::int32_t  process_id;
     std::uint64_t thread_id;  // < Unique
-    std::uint32_t start;
-    std::uint32_t end;
+    std::uint64_t start;
+    std::uint64_t end;
     std::string   extdata;
     friend bool   operator<(const thread& lhs, const thread& rhs)
     {

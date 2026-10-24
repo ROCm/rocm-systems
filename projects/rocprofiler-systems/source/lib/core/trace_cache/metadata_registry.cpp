@@ -77,8 +77,8 @@ from_json_process(const nlohmann::json& _json)
     p.pid     = _json["pid"].get<pid_t>();
     p.ppid    = _json["ppid"].get<pid_t>();
     p.command = _json["command"].get<std::string>();
-    p.start   = _json["start"].get<std::int32_t>();
-    p.end     = _json["end"].get<std::int32_t>();
+    p.start   = _json["start"].get<std::uint64_t>();
+    p.end     = _json["end"].get<std::uint64_t>();
     return p;
 }
 
@@ -150,8 +150,8 @@ from_json_thread(const nlohmann::json& _json)
     t.parent_process_id = _json["parent_process_id"].get<std::int32_t>();
     t.process_id        = _json["process_id"].get<std::int32_t>();
     t.thread_id         = _json["thread_id"].get<std::int32_t>();
-    t.start             = _json["start"].get<std::int32_t>();
-    t.end               = _json["end"].get<std::int32_t>();
+    t.start             = _json["start"].get<std::uint64_t>();
+    t.end               = _json["end"].get<std::uint64_t>();
     t.extdata           = _json["extdata"].get<std::string>();
     return t;
 }
