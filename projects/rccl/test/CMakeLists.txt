@@ -693,6 +693,32 @@ if(BUILD_TESTS)
   add_test(NAME rccl-UnitTestsGinSdmaPolicy COMMAND rccl-UnitTestsGinSdmaPolicy)
   set_tests_properties(rccl-UnitTestsGinSdmaPolicy PROPERTIES LABELS "unit")
 
+  # GinScatter local reduce on one GPU. Runs ginScatterReduceChunk against a fake
+  # scratch and a host sum, for staged and full-column layouts. No librccl.
+  # Skips when no GPU is visible.
+  add_executable(rccl-UnitTestsGinScatterReduceGpu gin/gin_scatter_reduce_gpu_test.cpp)
+  set_source_files_properties(gin/gin_scatter_reduce_gpu_test.cpp PROPERTIES LANGUAGE CXX)
+  target_include_directories(rccl-UnitTestsGinScatterReduceGpu PRIVATE
+    ${PROJECT_SOURCE_DIR}/src/include
+    ${PROJECT_SOURCE_DIR}/src)
+  set(_gin_scatter_gpu_offload "")
+  foreach(_g IN LISTS GPU_TARGETS)
+    if(_g)
+      list(APPEND _gin_scatter_gpu_offload "--offload-arch=${_g}")
+    endif()
+  endforeach()
+  if(_gin_scatter_gpu_offload)
+    target_compile_options(rccl-UnitTestsGinScatterReduceGpu PRIVATE ${_gin_scatter_gpu_offload})
+    target_link_options(rccl-UnitTestsGinScatterReduceGpu PRIVATE ${_gin_scatter_gpu_offload})
+  endif()
+  target_link_libraries(rccl-UnitTestsGinScatterReduceGpu PRIVATE
+    ${GTEST_BOTH_LIBRARIES} hip::host hip::device Threads::Threads)
+  set_target_properties(rccl-UnitTestsGinScatterReduceGpu PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test"
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+  add_test(NAME rccl-UnitTestsGinScatterReduceGpu COMMAND rccl-UnitTestsGinScatterReduceGpu)
+  set_tests_properties(rccl-UnitTestsGinScatterReduceGpu PROPERTIES LABELS "unit;gpu")
+
   # utility.h as plain C++ for its !NCCL_DEVICE_COMPILE branches; not with CXX=hipcc, which defines __HIPCC__ and fails strict CI.
   add_executable(rccl-UnitTestsUtilityHostOnly NcclUtilityHostOnlyTests.cpp)
   set_source_files_properties(NcclUtilityHostOnlyTests.cpp PROPERTIES LANGUAGE CXX)

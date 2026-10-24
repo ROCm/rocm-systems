@@ -921,6 +921,7 @@ endif()
 # The defines go here because this file is filtered out of the rccl target, so
 # per-source properties never apply. Leaving only SDMA on keeps ncclGinCallImpl
 # on its single backend branch. GDA must stay off, as this object gets no QP bitcode.
+# gfx1250 GinScatter and gfx950 two-shot both use Anvil SDMA gin.put().
 # ===========================================================================
 set(GIN_ALLREDUCE_SDMA_FAT_OBJ "")
 if(ENABLE_ROCSHMEM_GIN)
@@ -1305,13 +1306,13 @@ if(GENERATE_SYM_KERNELS)
   # .bc files are arch-optimized (opt -mcpu=) and can't be used with
   # -mlink-builtin-bitcode across archs. Instead, llvm-link the pre-opt
   # individual source .bc files (arch-agnostic) into a minimal QP-only bitcode.
+  # GinScatter does not use this bitcode, so it stays inside the symmetric-kernel build.
   set(_sym_rocshmem_bc_flag "")
   set(_sym_rocshmem_deps "")
   if(ENABLE_ROCSHMEM_GIN AND ROCSHMEM_SOURCE_DIR)
     # Pick the first arch's pre-opt bitcode dir (all archs produce identical
     # unoptimized IR since -Xclang -disable-llvm-passes is used).
     list(GET DL_GPU_TARGETS 0 _bc_arch)
-    set(_bc_dir "${ROCSHMEM_SOURCE_DIR}/build/bitcode/${_bc_arch}")
     set(_qp_bc "${DEVICE_BUILD_DIR}/rocshmem_qp_device.bc")
     find_program(_llvm_link llvm-link HINTS ${ROCM_PATH}/llvm/bin REQUIRED)
     find_program(_llvm_dis  llvm-dis  HINTS ${ROCM_PATH}/llvm/bin REQUIRED)
