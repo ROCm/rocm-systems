@@ -393,6 +393,36 @@ class StreamsGuard {
   std::vector<hipStream_t> streams_;
 };
 
+// Ends the capture on scope exit if the test did not.
+class StreamCaptureGuard {
+ public:
+  StreamCaptureGuard(hipStream_t stream, hipStreamCaptureMode mode) : stream_{stream} {
+    HIP_CHECK(hipStreamBeginCapture(stream_, mode));
+  }
+
+  StreamCaptureGuard(const StreamCaptureGuard&) = delete;
+  StreamCaptureGuard(StreamCaptureGuard&&) = delete;
+
+  ~StreamCaptureGuard() {
+    hipStreamCaptureStatus status = hipStreamCaptureStatusNone;
+    if (hipStreamIsCapturing(stream_, &status) != hipSuccess ||
+        status == hipStreamCaptureStatusNone) {
+      return;
+    }
+    hipGraph_t graph = nullptr;
+    static_cast<void>(hipStreamEndCapture(stream_, &graph));
+    if (graph != nullptr) {
+      static_cast<void>(hipGraphDestroy(graph));
+    }
+    static_cast<void>(hipGetLastError());
+  }
+
+  hipError_t End(hipGraph_t* graph) { return hipStreamEndCapture(stream_, graph); }
+
+ private:
+  hipStream_t stream_;
+};
+
 enum class MemPools { dev_default, created };
 
 class MemPoolGuard {
