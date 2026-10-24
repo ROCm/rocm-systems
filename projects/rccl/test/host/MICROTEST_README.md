@@ -383,6 +383,14 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `NCCL_GIN_PROXY_NTHREADS` progress-thread assignment. Its own binary, not
   sharing `rccl-UnitTestsMicro`: `gin-plugin-init-test.cc` already defines
   `ncclParamGinEnable` there. See `test_categories_micro_gin_host.yaml`.
+- **`rccl-UnitTestsMicroPlugin`** — `plugin/net.cc`, `plugin/plugin_open.cc` and the
+  `plugin/net/net_v6.cc` to `net_v12.cc` shims (via `PLUGIN_NET_CC_PATH`,
+  `PLUGIN_OPEN_CC_PATH` and `NET_V<N>_CC_PATH`, one test TU each); suite `Plugin*`. Its
+  own binary: `gin-plugin-init-test.cc` in `rccl-UnitTestsMicro` defines
+  `ncclPluginLibPaths`, `ncclClosePluginLib` and `ncclGetNetPluginLib`, which
+  `plugin_open.cc` defines. It links `fakes/transport_stubs.cc` with
+  `RCCL_TRANSPORT_STUBS_OMIT_ncclGpuGdrSupport`, since `net.cc` defines that too. See
+  `test_categories_micro_plugin.yaml`.
 - **`rccl-UnitTestsMicroDdaIpc`**: `algorithms/dda/all_reduce/dda_all_reduce_ipc.cu`
   (`DDA_ALL_REDUCE_IPC_CC_PATH`, from `dda-allreduce-ipc-test.cc`); suites
   `DdaAllReduceIpc*`. Eligibility gates, datatype dispatch and flat/tree kernel
@@ -546,6 +554,9 @@ test:
    [Installing per-test behaviour with `ScopedHook`](#installing-per-test-behaviour-with-scopedhook)),
    which installs the hook, counts calls, and restores the previous behaviour
    automatically on scope exit.
+   A death test takes `DEATH_BY_SEGV`, `DisableCoreDumpsForExpectedCrash()` and
+   `ScopedDeathTestStyle` from `ExpectedCrash.h`. If the crash needs a NULL, hide it
+   from the optimizer with `asm volatile("" : "+r"(p))`, or it may drop the crash.
 4. **Only exercise faked seams.** Every external symbol the `#include`d `.cc`
    reaches must be satisfied by `fakes/`: a missing symbol surfaces as a
    link error, a wrongly
@@ -617,6 +628,7 @@ symbol.
 | `src/os/linux.cc` | `fakes/os_fakes.cc` |
 | `src/plugin/env.cc` | `fakes/env_plugin_fakes.cc` |
 | `src/plugin/gin.cc`, `src/gin/gin_host.cc` (targets that do not compile the real file) | `fakes/gin_fakes.cc` |
+| `src/plugin/profiler.cc` (`ncclProfilerCallback`, until it has its own fakes file) | `fakes/nccl_fakes.cc` |
 | `src/proxy.cc` | `fakes/proxy_fakes.cc` |
 | `src/ras/ras_param.cc` (seconds and nanoseconds timeout scaling) | `fakes/ras_param_fakes.{h,cc}` (the direct `ras-param-test.cc` inclusion uses renamed symbols) |
 | `src/rccl_arch_thresholds.cc` | `fakes/rccl_arch_thresholds_fakes.cc` |
@@ -1033,6 +1045,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroDdaIpc             # src/algorithms/dda/all_reduce/dda_all_reduce_ipc.cu
 ./build/rccl-UnitTestsMicroParam              # src/param/*.cc, src/misc/param.cc tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/p2p.cc tests
+./build/rccl-UnitTestsMicroPlugin             # src/plugin/{net,plugin_open}.cc + net/net_v*.cc
 ./build/rccl-UnitTestsMicroCe                 # src/ce_coll.cc tests
 ./build/rccl-UnitTestsMicroProfiler           # src/plugin/profiler.cc + profiler_v1..v7.cc
 ./build/rccl-UnitTestsMicroRmaProxy           # src/rma/rma_proxy.cc tests

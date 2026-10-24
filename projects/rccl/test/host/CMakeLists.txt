@@ -577,6 +577,25 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
+  # rccl-UnitTestsMicroPlugin -- src/plugin/net.cc, net/net_v*.cc, plugin_open.cc. Own binary: gin-plugin-init-test.cc
+  # defines ncclPluginLibPaths, ncclClosePluginLib and ncclGetNetPluginLib in rccl-UnitTestsMicro.
+  set(TEST_MICRO_PLUGIN_SOURCE_FILES
+    plugin-net-test.cc
+    plugin-open-test.cc
+    net-v6-test.cc
+    net-v7-test.cc
+    net-v8-test.cc
+    net-v9-test.cc
+    net-v10-test.cc
+    net-v11-test.cc
+    net-v12-test.cc
+    fakes/env_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/transport_stubs.cc
+    ../common/ProcessIsolatedTestRunner.cpp
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
   # rccl-UnitTestsMicroGinHost -- src/gin/gin_host.cc (GIN_PROXY_NTHREADS, proxy affinity). Own
   # binary: gin-plugin-init-test.cc already defines ncclParamGinEnable in
   # rccl-UnitTestsMicro, and gin_fakes.cc supplies ncclGinQueryLastError to Init.
@@ -1553,6 +1572,25 @@ rccl_add_micro_binary(rccl-UnitTestsMicroClientSupport
     ${_MICRO_MODE_DEFS}
     CLIENT_SUPPORT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/client_support.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroPlugin
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroPlugin
+  SOURCES ${TEST_MICRO_PLUGIN_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    PLUGIN_NET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/net.cc"
+    PLUGIN_OPEN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/plugin_open.cc"
+    NET_V6_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/net/net_v6.cc"
+    NET_V7_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/net/net_v7.cc"
+    NET_V8_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/net/net_v8.cc"
+    NET_V9_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/net/net_v9.cc"
+    NET_V10_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/net/net_v10.cc"
+    NET_V11_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/net/net_v11.cc"
+    NET_V12_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/net/net_v12.cc"
+    RCCL_TRANSPORT_STUBS_OMIT_ncclGpuGdrSupport  # net.cc defines it
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_plugin.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroSymKernels
