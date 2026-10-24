@@ -13,6 +13,7 @@ namespace {
 
 TEST(ArithPolicyTest, DefaultForwardsTemporaryCompatibility) {
   ArithmeticExecution execution;
+  EXPECT_TRUE(execution.reports_fp_status());
   const uint64_t expected_cpu =
       util::force_scalar() ? RJ_ARITH_CPU_BASELINE : rj_arith_init_cpu_flags();
   EXPECT_EQ(execution.flags() & RJ_ARITH_CPU_MASK, expected_cpu & RJ_ARITH_CPU_MASK);
@@ -23,12 +24,15 @@ TEST(ArithPolicyTest, ConfigurationNamesMapDirectlyToArithSemantics) {
   const struct {
     const char *name;
     uint64_t mode;
+    bool reports_status;
   } cases[] = {
-      {"loose", RJ_ARITH_SEMANTICS_LOOSE},
-      {"bit_exact_empirical_allow_loose", RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE},
-      {"bit_exact_empirical_no_fp_status", RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS},
-      {"bit_exact_empirical", RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL},
-      {"compatibility", RJ_ARITH_SEMANTICS_COMPATIBILITY},
+      {"loose", RJ_ARITH_SEMANTICS_LOOSE, false},
+      {"bit_exact_empirical_allow_loose", RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE,
+       false},
+      {"bit_exact_empirical_no_fp_status", RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS,
+       false},
+      {"bit_exact_empirical", RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL, true},
+      {"compatibility", RJ_ARITH_SEMANTICS_COMPATIBILITY, true},
   };
   for (const auto &sample : cases) {
     SCOPED_TRACE(sample.name);
@@ -37,6 +41,7 @@ TEST(ArithPolicyTest, ConfigurationNamesMapDirectlyToArithSemantics) {
     EXPECT_EQ((static_cast<uint64_t>(policy.semantics) << 16), sample.mode);
     EXPECT_EQ(execution.flags() & RJ_ARITH_SEMANTICS_MASK, sample.mode);
     EXPECT_STREQ(arithmetic_semantics_name(policy.semantics), sample.name);
+    EXPECT_EQ(execution.reports_fp_status(), sample.reports_status);
     EXPECT_EQ(execution.flags() & RJ_ARITH_CPU_MASK,
               ArithmeticExecution().flags() & RJ_ARITH_CPU_MASK);
   }
