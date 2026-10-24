@@ -155,6 +155,7 @@ See [docs/building.md](docs/building.md) for container setup with PyTorch.
 | [Building](docs/building.md) | Build options, sanitizers, container setup |
 | [Benchmarking](docs/benchmarking.md) | Reproducible performance and memory measurement protocol |
 | [Configuration](docs/configuration.md) | JSON config format and topology |
+| [Two-node RCCL NET smoke](docs/rccl-scaleout.md) | Reproduce an unqualified gfx1250 daemon-mode control |
 | [QEMU VFIO-user compute](docs/qemu-vfio.md) | Run a gfx1250 guest and qualify a GEMM workload |
 | [CLI & Transport](docs/rocjitsu-cli.md) | CLI modes, daemon RPC protocol |
 | [Race Detector](docs/race-detector.md) | Race detection tutorial and internals |

@@ -2489,21 +2489,28 @@ uint64_t Device::hostVmemAlloc(size_t size, uint64_t flags, int numaNode) const 
     return 0;
   }
 
-  // numaNode < 0 (HostNumaCurrent) resolves to the calling thread's current node.
+  // Resolve the backing CPU agent.
+  //   -2 (Host)            -> default CPU agent.
+  //   -1 (HostNumaCurrent) -> current node
+  //   >= 0 (HostNuma)      -> that node
+  const AgentInfo* agentInfo = cpu_agent_info_;
   int node = numaNode;
-  if (node < 0) {
+  if (numaNode == -1) {
     node = static_cast<int>(numa::getCurrentNumaNode());
   }
-  if (node < 0 || static_cast<size_t>(node) >= cpu_agents_.size()) {
-    LogPrintfError("hostVmemAlloc: invalid NUMA node %d (cpu agents: %zu)", numaNode,
+  if (node >= static_cast<int>(cpu_agents_.size())) {
+    LogPrintfError("hostVmemAlloc: invalid NUMA node %d (cpu agents: %zu)", node,
                    cpu_agents_.size());
     return 0;
+  }
+  if (node >= 0) {
+    agentInfo = &cpu_agents_[node];
   }
 
   // PHYMEM: ROCCLR_MEM_HSA_UNCACHED is passed as HSA_AMD_MEMORY_POOL_UNCACHED_FLAG in |flags|.
   const bool uncached = (flags & HSA_AMD_MEMORY_POOL_UNCACHED_FLAG) != 0;
   const MemorySegment mem_seg = uncached ? kUncachedAtomics : kAtomics;
-  hsa_amd_memory_pool_t pool = getHostMemoryPool(mem_seg, &cpu_agents_[node]);
+  hsa_amd_memory_pool_t pool = getHostMemoryPool(mem_seg, agentInfo);
   if (pool.handle == 0) {
     LogPrintfError("hostVmemAlloc: no host memory pool for NUMA node %d", node);
     return 0;
@@ -4163,8 +4170,13 @@ bool Device::CreateSignals(uint32_t count, hsa_signal_value_t initial_value, uin
   // Device memory is only reachable through a batch
   if (batched || device_memory) {
     std::vector<hsa_signal_value_t> initial_values(count, initial_value);
-    const hsa_amd_memory_pool_t pool =
-        device_memory ? device_signal_pool_ : getHostMemoryPool(kAtomics);
+    // Host signals go to the kernarg pool, which ROCr allocates uncached, as it does for
+    // hsa_signal_create. The plain fine-grained pool is mapped MTYPE_NC on gfx950, where a CP
+    // polling the signal may not see another queue's update.
+    const hsa_amd_memory_pool_t host_pool = (cpu_agent_info_->kern_arg_pool.handle != 0)
+                                                ? cpu_agent_info_->kern_arg_pool
+                                                : getHostMemoryPool(kAtomics);
+    const hsa_amd_memory_pool_t pool = device_memory ? device_signal_pool_ : host_pool;
     hsa_amd_signal_batch_t batch;
     if (HSA_STATUS_SUCCESS == Hsa::signal_batch_create(count, initial_values.data(), 0, nullptr,
                                                        attributes, pool, &batch, signals)) {

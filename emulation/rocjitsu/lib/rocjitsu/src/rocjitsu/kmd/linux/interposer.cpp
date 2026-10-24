@@ -1447,7 +1447,8 @@ public:
       // Through the accessor, not the field: publish_mutex_ is the innermost lock
       // and every other reader goes this way, so a raw read here would be the one
       // access a reviewer has to re-derive the safety of.
-      if (auto active_remote = remote()) {
+      if (auto active_remote = remote();
+          active_remote && active_remote->handles_drm_render_minor(render_minor)) {
         remote_open_refs_.fetch_add(1, std::memory_order_acq_rel);
         return DrmBackendLease(this, std::move(active_remote));
       }
@@ -5903,7 +5904,7 @@ interposer_gpu_info_for(const InterposerContext::DrmFileToken &file) {
     return std::nullopt;
   }
   if (const auto &remote = lease.remote()) {
-    if (const Sysfs::GpuInfo *info = remote->gpu_info())
+    if (const Sysfs::GpuInfo *info = remote->gpu_info_for_render_minor(render_minor))
       return *info;
     return std::nullopt;
   }
@@ -5919,7 +5920,7 @@ static std::optional<Sysfs::GpuInfo> interposer_gpu_info(uint32_t render_minor) 
     }
   }
   if (auto remote = InterposerContext::ctx.remote()) {
-    if (const Sysfs::GpuInfo *info = remote->gpu_info())
+    if (const Sysfs::GpuInfo *info = remote->gpu_info_for_render_minor(render_minor))
       return *info;
   }
   return std::nullopt;

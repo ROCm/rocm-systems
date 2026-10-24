@@ -10,8 +10,6 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 
-#include "util/except.h"
-
 #include <algorithm>
 #include <cassert>
 #include <iterator>
@@ -380,9 +378,10 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
                                   .targets = {}});
       } else {
         DeferredCallSite &site = deferred_calls[map_it->second];
-        if (site.continuation != &continuation || site.return_sreg != return_sreg)
-          throw util::Exception(
-              std::string_view("inconsistent deferred call metadata for one terminator"));
+        // A source has one continuation, and discovery derives every target's
+        // return SGPR from the same decoded call instruction.
+        assert(site.continuation == &continuation && site.return_sreg == return_sreg &&
+               "inconsistent deferred call metadata for one terminator");
         site.target_set_incomplete |= target_set_incomplete;
       }
 
