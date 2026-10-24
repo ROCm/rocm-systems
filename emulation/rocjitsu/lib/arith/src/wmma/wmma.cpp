@@ -27,6 +27,23 @@ int wmma(uint64_t flags, uint32_t instruction_flags, uint32_t *const *d, const u
     return error;
   }
 
+#if defined(RJ_ARITH_HAVE_AVX512BF16)
+  if constexpr (Bf16) {
+    if ((flags & RJ_ARITH_CPU_MASK) >= RJ_ARITH_CPU_X86_64_ZEN4 &&
+        !rocjitsu::arith::is_exact(flags) &&
+        rocjitsu::arith::wmma_avx512bf16<WaveSize, false>(uint32_t(instruction_flags), d, a, b,
+                                                          c)) {
+      return RJ_ARITH_SUCCESS;
+    }
+  }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if ((flags & RJ_ARITH_CPU_MASK) >= RJ_ARITH_CPU_X86_64_V4 && rocjitsu::arith::is_exact(flags)) {
+    rocjitsu::arith::wmma_exact_x86_64_v4<Bf16, WaveSize, false>(uint32_t(instruction_flags), d, a,
+                                                                 b, c);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if ((flags & RJ_ARITH_CPU_MASK) >= RJ_ARITH_CPU_X86_64_V3 && rocjitsu::arith::is_exact(flags)) {
     rocjitsu::arith::wmma_exact_x86_64_v3<Bf16, WaveSize, false>(uint32_t(instruction_flags), d, a,

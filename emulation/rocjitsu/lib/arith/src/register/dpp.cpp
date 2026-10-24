@@ -18,6 +18,12 @@ void dpp8_source(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *ou
                  const uint32_t *a) {
   uint32_t selectors = uint32_t(mode >> RJ_ARITH_DPP8_SELECT_SHIFT);
   bool fi = (mode & RJ_ARITH_DPP_FI) != 0;
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if ((flags & RJ_ARITH_CPU_MASK) >= RJ_ARITH_CPU_X86_64_V4) {
+    dpp8_x86_64_v4(exec_mask, selectors, fi, out, a);
+    return;
+  }
+#endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if ((flags & RJ_ARITH_CPU_MASK) >= RJ_ARITH_CPU_X86_64_V3) {
     dpp8_x86_64_v3(exec_mask, selectors, fi, out, a);
@@ -64,8 +70,13 @@ uint32_t dpp16_source(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_
   }
   bool fi = (mode & RJ_ARITH_DPP_FI) != 0;
   uint32_t readable = 0;
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if ((flags & RJ_ARITH_CPU_MASK) >= RJ_ARITH_CPU_X86_64_V4) {
+    readable = dpp16_x86_64_v4(exec_mask, ctrl, valid_row, fi, out, a);
+  } else
+#endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
-  if ((flags & RJ_ARITH_CPU_MASK) >= RJ_ARITH_CPU_X86_64_V3) {
+      if ((flags & RJ_ARITH_CPU_MASK) >= RJ_ARITH_CPU_X86_64_V3) {
     readable = dpp16_x86_64_v3(exec_mask, ctrl, valid_row, fi, out, a);
   } else
 #endif

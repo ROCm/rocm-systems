@@ -98,4 +98,84 @@ inline __m256i choose(__m256i mask, __m256i yes, __m256i no) {
   return _mm256_blendv_epi8(no, yes, mask);
 }
 
+#if defined(__AVX512F__)
+template <> inline __m512i constant<__m512i>(int value) { return _mm512_set1_epi32(value); }
+
+template <> inline __m512i load<__m512i>(const void *p) { return _mm512_loadu_si512(p); }
+
+// Write vector values to destination storage.
+inline void store(void *p, __m512i value) { _mm512_storeu_si512(p, value); }
+
+// Add corresponding integer lanes with unsigned wraparound.
+inline __m512i add(__m512i a, __m512i b) { return _mm512_add_epi32(a, b); }
+
+// Subtract corresponding integer lanes with unsigned wraparound.
+inline __m512i sub(__m512i a, __m512i b) { return _mm512_sub_epi32(a, b); }
+
+// Multiply corresponding integer lanes, retaining the low result bits.
+inline __m512i mul(__m512i a, __m512i b) { return _mm512_mullo_epi32(a, b); }
+
+// Select the greater signed integer value in each lane.
+inline __m512i maximum(__m512i a, __m512i b) { return _mm512_max_epi32(a, b); }
+
+// Return the bitwise intersection of the vector operands.
+inline __m512i bit_and(__m512i a, __m512i b) { return _mm512_and_si512(a, b); }
+
+// Return the bitwise union of the vector operands.
+inline __m512i bit_or(__m512i a, __m512i b) { return _mm512_or_si512(a, b); }
+
+// Return the bitwise exclusive-or of the vector operands.
+inline __m512i bit_xor(__m512i a, __m512i b) { return _mm512_xor_si512(a, b); }
+
+// Return bits from b whose corresponding bits in a are clear.
+inline __m512i andnot(__m512i a, __m512i b) { return _mm512_andnot_si512(a, b); }
+
+// Shift integer lanes left, discarding bits outside the lane width.
+inline __m512i shift_left(__m512i a, __m512i b) { return _mm512_sllv_epi32(a, b); }
+
+// Logically shift integer lanes right, inserting zeros.
+inline __m512i shift_right(__m512i a, __m512i b) { return _mm512_srlv_epi32(a, b); }
+
+// Shift integer lanes left, discarding bits outside the lane width.
+inline __m512i shift_left(__m512i a, int count) { return _mm512_slli_epi32(a, count); }
+
+// Logically shift integer lanes right, inserting zeros.
+inline __m512i shift_right(__m512i a, int count) { return _mm512_srli_epi32(a, count); }
+
+// Arithmetically shift signed lanes right, extending their signs.
+inline __m512i signed_shift_right(__m512i a, int count) { return _mm512_srai_epi32(a, count); }
+
+// Return signed integer magnitudes lane by lane.
+inline __m512i absolute(__m512i a) { return _mm512_abs_epi32(a); }
+
+// Return the lane mask for equal operands.
+inline __m512i equal(__m512i a, __m512i b) {
+  return _mm512_movm_epi32(_mm512_cmpeq_epi32_mask(a, b));
+}
+
+// Return the lane mask for a > b.
+inline __m512i greater(__m512i a, __m512i b) {
+  return _mm512_movm_epi32(_mm512_cmpgt_epi32_mask(a, b));
+}
+
+// Convert signed integer lanes to FP32 and return their biased exponent fields.
+inline __m512i float_exponent(__m512i a) {
+  return _mm512_srli_epi32(_mm512_castps_si512(_mm512_cvtepi32_ps(a)), 23);
+}
+
+// AVX512CD is part of x86-64-v4; no floating conversion is needed here.
+inline __m512i highest_bit(__m512i magnitude) {
+  return _mm512_sub_epi32(_mm512_set1_epi32(31), _mm512_lzcnt_epi32(magnitude));
+}
+
+// Collect vector predicate sign bits into a scalar lane mask.
+inline int lane_mask(__m512i value) { return _mm512_movepi32_mask(value); }
+
+// Select values lane by lane according to the supplied predicate.
+inline __m512i choose(__m512i mask, __m512i yes, __m512i no) {
+  return _mm512_mask_blend_epi32(_mm512_movepi32_mask(mask), no, yes);
+}
+
+#endif
+
 } // namespace rocjitsu::arith::exact_dot
