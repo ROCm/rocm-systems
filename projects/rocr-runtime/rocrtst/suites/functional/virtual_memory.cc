@@ -2337,14 +2337,20 @@ void VirtMemoryTestInterProcess::ChildProcessImpl() {
     }
 
     // cpu agents
-    std::vector<hsa_amd_memory_access_desc_t> cpu_desc;
-    for (const auto& cpu : cpus) cpu_desc.push_back({HSA_ACCESS_PERMISSION_RW, cpu});
-    PROCESS_LOG("Child: set_access on imported handle for all available CPU agents\n");
-    EXPECT_SUCCESS(hsa_amd_vmem_set_access(addrRange, 10 * rec_mem_granule, cpu_desc.data(), cpu_desc.size()));
-    for (const auto& d : cpu_desc) {
-      hsa_access_permission_t perm = HSA_ACCESS_PERMISSION_NONE;
-      EXPECT_SUCCESS(hsa_amd_vmem_get_access(addrRange, &perm, d.agent_handle));
-      EXPECT_EQ(perm, HSA_ACCESS_PERMISSION_RW);
+    if (rocrtst::isWslEnvironment()) {
+      // CPU-agent vmem set_access is unimplemented on WSL/DXG. Skip only this
+      // block so the device-pool IPC path and the GPU-agent checks still run.
+      PROCESS_LOG("Child: CPU-agent vmem set_access unavailable on WSL/DXG - skipping\n");
+    } else {
+      std::vector<hsa_amd_memory_access_desc_t> cpu_desc;
+      for (const auto& cpu : cpus) cpu_desc.push_back({HSA_ACCESS_PERMISSION_RW, cpu});
+      PROCESS_LOG("Child: set_access on imported handle for all available CPU agents\n");
+      EXPECT_SUCCESS(hsa_amd_vmem_set_access(addrRange, 10 * rec_mem_granule, cpu_desc.data(), cpu_desc.size()));
+      for (const auto& d : cpu_desc) {
+        hsa_access_permission_t perm = HSA_ACCESS_PERMISSION_NONE;
+        EXPECT_SUCCESS(hsa_amd_vmem_get_access(addrRange, &perm, d.agent_handle));
+        EXPECT_EQ(perm, HSA_ACCESS_PERMISSION_RW);
+      }
     }
   }
 
