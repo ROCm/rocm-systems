@@ -11,7 +11,8 @@ instructions.
 ## Target scope
 
 The race detector focuses on pre-GFX12 architectures. Its current end-to-end
-coverage exercises gfx950 (GFX9/CDNA4) and gfx1151 (GFX11.5/RDNA3.5). GFX12
+coverage exercises gfx942 (GFX9/CDNA3), gfx950 (GFX9/CDNA4), and gfx1151
+(GFX11.5/RDNA3.5). GFX12
 and later architectures are not supported. Some GFX12 split-counter behavior
 is already modeled and covered by plugin tests, including partial load waits
 and address-dependent FLAT counter participation. This partial
@@ -209,9 +210,10 @@ flat_store_dword v[2:3], v8
 ```
 
 LDS-only loads instead require `lgkmcnt(0)`. Newer targets use their corresponding
-split counters. Routing preserves decoded completion ordering and independent
-obligations such as EXPCNT. In particular, CDNA4 FLAT completion stays unordered;
-a nonzero wait cannot prove a result ready.
+split counters. Routing preserves decoded completion ordering and the VMEM/DS
+obligations used by the requests. Generated VMEM/FLAT stores and atomics do not
+carry an EXP completion obligation. In particular, CDNA4 FLAT completion stays
+unordered; a nonzero wait cannot prove a result ready.
 
 Functional counter acquisition and both runtime checkers use the selected memory
 domains. FLAT capacity constraints are applied after addresses are resolved.
@@ -403,7 +405,7 @@ Tests are part of the rocjitsu test suite (`emulation/rocjitsu/tests/`):
 - `wait_hazard_test.cpp` — wait/readiness tests shared with the core checker.
 - The `race` suite in
   [ROCm/rocjitsu-test-corpus](https://github.com/ROCm/rocjitsu-test-corpus)
-  owns the gfx950 and gfx1151 end-to-end HIP programs. The
+  owns the gfx942, gfx950 and gfx1151 end-to-end HIP programs. The
   `rocjitsu-test-corpus` workflow builds them with the corpus HIP toolchain
   and runs each case under the emulator with the `race` plugin enabled.
 
@@ -415,10 +417,14 @@ ctest --test-dir build -R "RaceDetector|IntervalSet"
 To run the HIP cases locally, follow the corpus's
 [race-suite instructions](https://github.com/ROCm/rocjitsu-test-corpus#rocjitsu-race-detector-integration)
 and point the wrapper at the RocJITsu build being tested. Set
-`ROCJITSU_RACE_CONFIG` to `tests/race-detector/race_test_config.json` for gfx950
-or `configs/gfx1151.json` for gfx1151, using absolute paths from this source tree.
-The original `RaceTest.<target>_<name>` selectors remain available through
-the corpus's `--case` option.
+`ROCJITSU_RACE_CONFIG` to `tests/race-detector/race_test_gfx942_config.json` for gfx942,
+`tests/race-detector/race_test_config.json` for gfx950 or `configs/gfx1151.json` for
+gfx1151, using absolute paths from this source tree. The original
+`RaceTest.<target>_<name>` selectors remain available through the corpus's
+`--case` option. Shared atomic and FLAT-to-LDS cases use
+`RaceTest.vmem_<target>_<name>`, for example
+`--case RaceTest.vmem_gfx942_vmcnt_only`. Positive detection controls use the
+`_race` suffix.
 
 ## Limitations
 
