@@ -682,7 +682,7 @@ def main(argv=None) -> int:
 
     summary_args = process_summary_args(input, args)
     io_args = process_outcfg_args(input, args)
-    process_time_window_args(input, args)
+    time_window.process_args_or_exit(process_time_window_args, input, args)
 
     all_args = {**summary_args, **io_args}
 
