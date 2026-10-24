@@ -99,6 +99,7 @@ target_include_directories(
         ${CMAKE_CURRENT_SOURCE_DIR}/..
         ${ROCM_INC_DIR}/..
         ${CMAKE_CURRENT_SOURCE_DIR}/../../src/amd_smi
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/nic/ai-nic/amdsmi_unified/inc
 )
 
 # Absolute path to the committed mock CPER fixtures (unit/gpu/mock_cper).
