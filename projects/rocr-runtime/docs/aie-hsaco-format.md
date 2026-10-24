@@ -281,24 +281,25 @@ The symbol name gives the meaning of the patch site:
 | --- | --- | --- |
 | Starts with `.pdi` | The device address of the PDI in the section with this name. If more than one section has this name, their contents must be the same, or ROCR refuses the ELF. | 8 (`Address64`) |
 | Decimal digits only, 0 to 4095 | The address of kernel argument N. | 5 (`ShimDma48`) |
-| Any other name | Not supported (for example scratch pads or control packets). ROCR refuses the ELF. | — |
+| Any other name | The address of an external variable that the application defines before it loads the code object, for example the control scratchpad, `scratch-pad-ctrl` (section 9.3). `st_size` is the number of bytes that the control code reads there. | 8 (`Address64`) |
 
 ROCR applies these limits:
 
 - A kernel can have more than one PDI patch site, and the sites can name different PDI sections. For example, the control code from MLIR-AIR loads an empty PDI before and after the design runs. ROCR copies each different PDI into device memory one time for each kernel. Sites that name PDIs with the same contents use one copy.
 - Each PDI patch site offset must not be 0, must be a multiple of 4, and `offset + 8` must not be more than the control-code size.
 - Each argument patch site offset must be a multiple of 4, and `offset + 12` must not be more than the control-code size.
+- Each external variable patch site offset must be a multiple of 4, and `offset + 8` must not be more than the control-code size. All the symbols that name one external variable in a kernel must have the same `st_size`.
 - An argument can have more than one patch site. An argument index can have no patch site.
 - The number of kernel arguments is the highest argument index plus 1.
 - The loader refuses a kernel that has no PDI patch site.
 
-Preemption save and restore sections, control packets and scalar arguments are not supported.
+Preemption save and restore sections, control packets and scalar arguments are not supported. A relocation that names a control packet looks like an external variable to ROCR, so the load fails unless the application defines a variable with that name.
 
 ### 7.5 Patch schemes
 
-The loader applies the PDI patches once, at load time, to its copy of the control code. The driver applies the argument patches at dispatch time, on a new copy of that control code. It never patches the loader's copy, because `ShimDma48` adds to the existing value.
+The loader applies the PDI and external variable patches once, at load time, to its copy of the control code. The driver applies the argument patches at dispatch time, on a new copy of that control code. It never patches the loader's copy, because `ShimDma48` adds to the existing value.
 
-**`Address64` (8), for a PDI.** The loader writes the 64-bit device address of the PDI at each patch site of that PDI. The low word is first. This is a store, not an addition.
+**`Address64` (8), for a PDI or an external variable.** The loader writes the 64-bit device address of the PDI, or the device address of the external variable plus the addend, at each patch site. The low word is first. This is a store, not an addition.
 
 **`ShimDma48` (5), for arguments.** The patch site is three 32-bit words, `w[0]`, `w[1]` and `w[2]`. The driver does these steps, with `addr = argument address + addend`:
 
@@ -364,6 +365,26 @@ buffer arguments.
 
 The kernel descriptor is a host structure. It is not part of the file format. Its first word is a version (`kAieKernelDescriptorVersion`, now 1). The driver examines this word to find a handle that is not valid.
 
+### 9.3 External variables
+
+A full ELF can name a buffer that it does not contain (section 7.4). The control scratchpad is an example: the host writes runtime parameters into it, and the command processor copies them to the AIE array when the control code runs `create_scratchpad`.
+
+The application allocates the buffer and defines it before it loads the code object:
+
+```cpp
+void* scratchpad = nullptr;
+hsa_amd_memory_pool_allocate(dev_pool, size, 0, &scratchpad);  // the AIE agent's device-SVM pool
+hsa_executable_agent_global_variable_define(executable, aie_agent, "scratch-pad-ctrl", scratchpad);
+hsa_executable_load_agent_code_object(executable, aie_agent, reader, nullptr, nullptr);
+```
+
+This is the same mechanism that a GPU code object uses for an undefined symbol.
+
+- The variable must be defined for the AIE agent before the load. If it is not, the load fails with `HSA_STATUS_ERROR_VARIABLE_UNDEFINED`.
+- The `st_size` bytes from the defined address must be in one allocation that the AIE agent can reach. If they are not, the load fails with `HSA_STATUS_ERROR_INVALID_ALLOCATION`. For the control scratchpad, the allocation must come from the device-SVM pool. The command processor cannot read the scratchpad from other memory, and the dispatch fails.
+- The loader writes the device address of the variable into the control code. The variable must not be freed before the executable is destroyed.
+- At each dispatch, the driver flushes the `st_size` bytes from the CPU cache and keeps the allocation resident. The host can change the contents between dispatches with ordinary stores.
+
 ## 10. Load procedure in ROCR
 
 `hsa_executable_load_agent_code_object` does these steps for an AIE agent:
@@ -376,7 +397,7 @@ The kernel descriptor is a host structure. It is not part of the file format. It
    1. Refuse a `kind` of 2 or more.
    2. Refuse `num_cols` of 0, or more than the agent columns.
    3. `PdiInsts`: refuse an entry with no PDI. Copy the instruction blob and the PDI blob into device memory. Get the BO handles.
-   4. `FullElf`: parse the full ELF (one time for each distinct blob). Find the kernel by name. Examine `kernarg_size`. Copy each different PDI into device memory and get its BO handle. Keep the control code and the patch sites in host memory.
+   4. `FullElf`: parse the full ELF (one time for each distinct blob). Find the kernel by name. Examine `kernarg_size`. Copy each different PDI into device memory and get its BO handle. Find each external variable among the variables that the application defined (section 9.3), write its device address into the control code and get its BO handle. Keep the control code and the patch sites in host memory.
 6. Publish the symbols. Before this step, a failure releases all device memory from steps 5.3 and 5.4.
 
 Device memory for blobs comes from the device SVM region (the device heap). Each buffer has 64-byte alignment. The loader copies each distinct blob one time. It identifies a blob by its address and size in the hsaco buffer. This does not apply to the PDIs of a full-ELF kernel: the loader copies them out of the nested ELF and places them once per kernel, so two kernels that load the same PDI each get their own copy. After the copy, the loader flushes the CPU cache for the buffer one time.
@@ -416,6 +437,8 @@ The table shows which tool examines each rule. "—" means that the tool does no
 | Full ELF groups without `.ctrltext` are not kernels | Yes | Yes | — |
 | Full ELF patch sites in range | Yes | — | — |
 | Full ELF PDI section names are not ambiguous | Yes | — | — |
+| Full ELF external variables use `Address64` and one `st_size` | Yes | — | — |
+| Full ELF external variables are defined, in reachable memory | Yes (at load) | — | — |
 | Full ELF kernel names are unique | Yes | — | — |
 
 ## 12. The packer command line

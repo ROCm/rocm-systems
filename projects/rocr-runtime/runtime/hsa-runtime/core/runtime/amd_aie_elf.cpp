@@ -242,6 +242,8 @@ hsa_status_t Parse(const void* image_data, size_t image_size, std::string_view a
   std::map<uint32_t, std::map<uint32_t, std::vector<RelocSite>>> group_arg_sites;
   // group section index -> (PDI section index, patch offset) for each PDI site
   std::map<uint32_t, std::vector<std::pair<uint32_t, uint32_t>>> group_pdi_sites;
+  // group section index -> external symbols its control code references
+  std::map<uint32_t, std::map<std::string, ExternalSymbol>> group_ext_sites;
 
   // PDI sections are not group members, so a relocation names its PDI by section name only, and a
   // multi-kernel ELF can repeat a name (MLIR-AIR repeats .pdi.1.. for each kernel). A name is
@@ -316,9 +318,18 @@ hsa_status_t Parse(const void* image_data, size_t image_size, std::string_view a
 
       uint32_t arg_index = 0;
       if (!ParseArgIndex(sym_name, &arg_index)) {
-        // A scratch pad, control packet or similar. Skipping it would leave a dangling address in
-        // the control code, so refuse instead.
-        return fail(std::string("unsupported relocation symbol: ") + sym_name);
+        // An external variable, such as the control scratchpad, resolved by the loader.
+        if (site.scheme != PatchScheme::kAddress64) {
+          return fail(std::string("unsupported patch scheme for external symbol ") + sym_name);
+        }
+        auto [ext, inserted] = group_ext_sites[grp_it->second].try_emplace(sym_name);
+        if (inserted) {
+          ext->second.size = sym.st_size;
+        } else if (ext->second.size != sym.st_size) {
+          return fail(std::string("external symbol ") + sym_name + " has two sizes");
+        }
+        ext->second.sites.push_back(PatchSite{site.offset, site.addend});
+        continue;
       }
       if (site.scheme != PatchScheme::kShimDma48) {
         return fail("unsupported patch scheme for a kernel argument");
@@ -382,6 +393,20 @@ hsa_status_t Parse(const void* image_data, size_t image_size, std::string_view a
           dst.push_back(PatchSite{site.offset, site.addend});
         }
       }
+    }
+
+    auto ext_it = group_ext_sites.find(grp_index);
+    if (ext_it != group_ext_sites.end()) {
+      for (const auto& [name, ext] : ext_it->second) {
+        for (const PatchSite& site : ext.sites) {
+          // A 64-bit address is stored here.
+          if (site.offset % sizeof(uint32_t) != 0 ||
+              site.offset + sizeof(uint64_t) > k.ctrl_code.size()) {
+            return fail("external symbol patch site does not fit the control code");
+          }
+        }
+      }
+      k.external_symbols = std::move(ext_it->second);
     }
 
     // Kernels are looked up by name, so two groups with one name would make the lookup ambiguous.
