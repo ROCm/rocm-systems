@@ -64,6 +64,8 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 
 ### Resolved issues
 * Fixed topology GPU indices that followed the HIP device order instead of the PCI order. This reordered rings and NIC selection, causing an `ncclGather` performance regression on multi-node MI355X systems, and made communicator initialization fail when each rank sees only its own GPU.
+* Anvil SDMA (`NCCL_GIN_TYPE=7`) honours strong GIN signals. A strong signal drains every SDMA queue to that peer before it is sent, including puts that are no longer marked dirty. When the signal is fused with its SDMA put (gfx950), the drain covers only the earlier queue entries and the caller does not wait for the fused put itself. Legacy `ncclGin_SignalInc` is strong by default, so a caller that only needs to order the put it just issued should use `ncclGin_WeakSignalInc`. A barrier on this backend still flushes once and sends weak signals.
+* Fixed VA GIN signals (`ncclGin_VASignalInc`, `ncclGin_VASignalAdd` and their strong and weak forms) on Anvil SDMA (`NCCL_GIN_TYPE=7`). The backend read the VA descriptor as an indexed signal ID and incremented an unrelated signal cell, so the VA signal never arrived. VA signals now update the window cell on the peer, follow the same strong, weak and fused-signal rules as indexed signals, and `ncclGin::resetSignal` on a VA signal clears the local cell.
 * Fixed profiler overhead when no profiler plugin is loaded or only kernel-channel events are enabled.
 * Fixed profiler API events reporting rank 0 instead of the originating communicator rank.
 * Fixed P2P IPC registration reuse producing out-of-bounds remote addresses when a registered allocation spans multiple cuMem segments.
