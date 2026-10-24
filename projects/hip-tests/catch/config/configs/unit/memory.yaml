@@ -1507,6 +1507,9 @@ memory:
   Unit_hipMallocFromPoolAsync_ReuseAllowInternalDependencies:
     <<: *level_default
     tags: [alloc, P1]
+  Unit_hipMallocFromPoolAsync_InvalidPool:
+    <<: *level_default
+    tags: [alloc, P1]
   Unit_hipMemcpyPeer_Positive_Default:
     <<: *level_default
     tags: [multigpu, transfer, P1]
