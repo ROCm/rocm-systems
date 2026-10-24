@@ -331,6 +331,20 @@ loss counters use DBI's explicit memory-backed wave state; their locations stay
 in ConSan's existing report rows. No hidden register state carries values from
 one probe invocation to the next.
 
+ConSan selects DBI's `DeclaredRegisters` preservation policy. It restores
+originally declared GPRs that the probe or call envelope overwrites, including
+values liveness marks dead. This gives ConSan a stronger transparency contract
+and reduces its dependence on liveness precision. The LDS checks do not
+intrinsically require this policy: `LiveRegisters` preserves live values and
+can need fewer backups, but changing ConSan's policy would need execution validation of
+that narrower contract. Merely preparing a dense input under `LiveRegisters`
+does not establish that its instrumented execution is correct.
+
+The conservative choice can require more registers and save/restore
+instructions, and larger trampolines can exhaust branch reach sooner. ConSan
+currently accepts those costs rather than selecting a different policy when
+an input exceeds the resource or branch-distance limits.
+
 The callable path uses register backups instead of introducing a private frame.
 It requires one kernel with enumerable register uses, zero VGPR banks at gfx1250
 call sites, a bank-preserving probe body, and enough registers for the combined

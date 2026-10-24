@@ -74,6 +74,9 @@ FailureOr<PreparedArtifact> lower(const InputProgram &program, InputError &error
     return reject(error, "no compiled callable probe for the selected target/wave mode");
   AmdGpuCodeObject object(program.image.data(), program.image.size());
   AmdGpuCodeObject probes(probe_image.data(), probe_image.size());
+  // Preserve overwritten guest registers even when liveness marks them dead.
+  // This conservative client policy reduces reliance on liveness, at the cost
+  // of extra backups, register growth, and trampoline bytes.
   const InstrumentationOptions options{
       .kernarg_binding = DbiKernargBinding::CallerSuppliedWrapper,
       .preservation = GuestStatePreservation::DeclaredRegisters,
