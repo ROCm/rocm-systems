@@ -94,7 +94,7 @@ pub unsafe extern "C" fn hsa_system_get_info(attribute: u32, value: *mut c_void)
                         runtime
                             .gpus
                             .iter()
-                            .any(|gpu| image_gfx12::supported_gpu(&gpu.info)),
+                            .any(|gpu| image_gfx12::supported_gpu(&gpu.info())),
                         runtime.gpus.iter().any(|gpu| gpu.pc_sampling_supported),
                     ),
                 ),
@@ -115,7 +115,7 @@ pub unsafe extern "C" fn hsa_system_get_info(attribute: u32, value: *mut c_void)
                         && runtime
                             .gpus
                             .iter()
-                            .all(|gpu| gpu.info.fabric_handles_supported),
+                            .all(|gpu| gpu.info().fabric_handles_supported),
                 ),
                 AMD_SYSTEM_INFO_HOST_ALLOC_DMABUF_SUPPORTED => {
                     write_value(value, host_alloc_dmabuf_supported(runtime.gpus.len()))
@@ -269,7 +269,7 @@ pub unsafe extern "C" fn hsa_system_extension_supported(
                 EXTENSION_IMAGES => runtime
                     .gpus
                     .iter()
-                    .any(|gpu| image_gfx12::supported_gpu(&gpu.info)),
+                    .any(|gpu| image_gfx12::supported_gpu(&gpu.info())),
                 EXTENSION_AMD_PC_SAMPLING => {
                     runtime.gpus.iter().any(|gpu| gpu.pc_sampling_supported)
                 }
@@ -311,7 +311,7 @@ pub unsafe extern "C" fn hsa_system_major_extension_supported(
                 EXTENSION_IMAGES => runtime
                     .gpus
                     .iter()
-                    .any(|gpu| image_gfx12::supported_gpu(&gpu.info)),
+                    .any(|gpu| image_gfx12::supported_gpu(&gpu.info())),
                 EXTENSION_AMD_PC_SAMPLING => {
                     runtime.gpus.iter().any(|gpu| gpu.pc_sampling_supported)
                 }
@@ -391,7 +391,7 @@ pub unsafe extern "C" fn hsa_system_get_major_extension_table(
                 if !runtime
                     .gpus
                     .iter()
-                    .any(|gpu| image_gfx12::supported_gpu(&gpu.info))
+                    .any(|gpu| image_gfx12::supported_gpu(&gpu.info()))
                 {
                     return NOT_SUPPORTED;
                 }

@@ -8,7 +8,7 @@ use std::env;
 use std::error::Error;
 use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Header table names paired with their generated Rust field names.
 const TABLES: [(&str, &str); 6] = [
@@ -59,6 +59,16 @@ const PRIVATE_TABLE_FUNCTIONS: [&str; 3] = [
     "hsa_amd_runtime_queue_create_register",
 ];
 
+/// Macro families whose invocations each define one HSA C entry point.
+const ENTRY_MACROS: [&str; 6] = [
+    "queue_store_entry",
+    "queue_compare_exchange_entry",
+    "queue_add_entry",
+    "signal_exchange_entry",
+    "signal_compare_exchange_entry",
+    "signal_fetch_entry",
+];
+
 /// Builds an invalid-data error for a header or export-table mismatch.
 fn invalid(message: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message.into())
@@ -84,6 +94,99 @@ fn exported_symbols(source: &str) -> Result<Vec<String>, io::Error> {
         return Err(invalid("extension entry point missing from Linux exports"));
     }
     Ok(exports)
+}
+
+/// Extracts an HSA name at the start of a function signature or macro call.
+fn hsa_name(input: &str) -> Option<&str> {
+    let input = input.trim_start();
+    let end = input
+        .find(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_')
+        .unwrap_or(input.len());
+    let name = &input[..end];
+    name.starts_with("hsa_").then_some(name)
+}
+
+/// Finds concrete C bodies and known macro-generated bodies in one source.
+fn entry_bodies(source: &str) -> Vec<String> {
+    let mut bodies = Vec::new();
+    let mut lines = source.lines();
+    while let Some(line) = lines.next() {
+        let line = line.trim_start();
+        let direct = line
+            .strip_prefix("pub unsafe extern \"C\" fn ")
+            .or_else(|| line.strip_prefix("pub extern \"C\" fn "));
+        if let Some(name) = direct.and_then(hsa_name) {
+            bodies.push(name.to_owned());
+        }
+        for macro_name in ENTRY_MACROS {
+            let invocation = format!("{macro_name}!(");
+            if let Some(rest) = line.strip_prefix(&invocation) {
+                let argument = if rest.trim().is_empty() {
+                    lines.next().unwrap_or_default()
+                } else {
+                    rest
+                };
+                if let Some(name) = hsa_name(argument) {
+                    bodies.push(name.to_owned());
+                }
+                break;
+            }
+        }
+    }
+    bodies
+}
+
+/// Visits Rust source files without following paths outside this crate.
+fn rust_sources(directory: &Path, files: &mut Vec<PathBuf>) -> io::Result<()> {
+    for entry in fs::read_dir(directory)? {
+        let path = entry?.path();
+        if path.is_dir() {
+            rust_sources(&path, files)?;
+        } else if path.extension().is_some_and(|extension| extension == "rs") {
+            files.push(path);
+        }
+    }
+    Ok(())
+}
+
+/// Enforces one implementation per HSA export, always inside the API adapter.
+fn check_api_organization(source_root: &Path, exports: &[String]) -> io::Result<()> {
+    let expected: HashSet<&str> = exports
+        .iter()
+        .map(String::as_str)
+        .chain(PRIVATE_TABLE_FUNCTIONS)
+        .collect();
+    let mut implementations: HashMap<String, Vec<PathBuf>> = HashMap::new();
+    let mut files = Vec::new();
+    rust_sources(source_root, &mut files)?;
+    for path in files {
+        for name in entry_bodies(&fs::read_to_string(&path)?) {
+            implementations.entry(name).or_default().push(path.clone());
+        }
+    }
+    for name in &expected {
+        let Some(paths) = implementations.get(*name) else {
+            return Err(invalid(format!("missing HSA C implementation: {name}")));
+        };
+        if paths.len() != 1 {
+            return Err(invalid(format!(
+                "HSA C implementation {name} has {} bodies: {paths:?}",
+                paths.len()
+            )));
+        }
+        if !paths[0].starts_with(source_root.join("api")) {
+            return Err(invalid(format!(
+                "HSA C implementation {name} is outside api: {}",
+                paths[0].display()
+            )));
+        }
+    }
+    for name in implementations.keys() {
+        if !expected.contains(name.as_str()) {
+            return Err(invalid(format!("unexpected HSA C implementation: {name}")));
+        }
+    }
+    Ok(())
 }
 
 /// Extracts the ordered function fields of a named API table in a header.
@@ -338,9 +441,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let header = manifest.join("../../api-headers/include/hsa/hsa_api_trace.h");
     let versions = manifest.join("../../api-headers/include/hsa/hsa_api_trace_version.h");
     let exports = manifest.join("src/exports_linux.S");
+    let source_root = manifest.join("src");
     println!("cargo:rerun-if-changed={}", header.display());
     println!("cargo:rerun-if-changed={}", versions.display());
     println!("cargo:rerun-if-changed={}", exports.display());
+    println!("cargo:rerun-if-changed={}", source_root.display());
 
     let header = fs::read_to_string(header)?;
     let amd_step = macro_u32(
@@ -348,6 +453,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         "HSA_AMD_EXT_API_TABLE_STEP_VERSION",
     )?;
     let exports = exported_symbols(&fs::read_to_string(exports)?)?;
+    check_api_organization(&source_root, &exports)?;
     let tables = TABLES
         .iter()
         .map(|&(member, table)| table_fields(&header, table).map(|fields| (member, fields)))
