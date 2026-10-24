@@ -286,6 +286,7 @@ struct sqtt_buffer_status_t
     uint64_t                     read_offset{};
     hsa_ext_amd_aql_pm4_packet_t packet{};
     bool                         gpu_full{};
+    int                          shader_engine_id{};
 };
 
 aqlprofile_att_gpu_clock_t

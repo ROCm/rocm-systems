@@ -32,6 +32,7 @@
 #include <condition_variable>
 #include <memory>
 #include <mutex>
+#include <vector>
 
 namespace rocprofiler
 {
@@ -79,9 +80,7 @@ struct triple_buffer_shared_data_t
         std::condition_variable cv{};
     };
 
-    /// Maximum number of slots. Capped at 16 to keep the per-slot thread
-    /// count bounded; the public API rejects values above this.
-    static constexpr size_t MAX_SLOTS = 16;
+    static constexpr size_t MAX_SLOTS = 64;
 
     att_queue_t* queue{nullptr};  // non-owning; ThreadTracerAgent owns the queue
 
@@ -115,7 +114,12 @@ struct triple_buffer_producer_data_t
     signal_ptr_t                                 submit_signal{};
     std::unique_ptr<hsa::TraceControlAQLPacket>  control_packet{};
     std::shared_ptr<triple_buffer_shared_data_t> shared{};
-    std::unique_ptr<hsa::SQTTBufferingPackets>   buffer_packet{};
+    size_t                                       num_shader_engines{0};
+    /// On a GPU buffer overflow, stop, drain and restart the trace as on a CPU overflow.
+    /// Otherwise the queue is disabled.
+    bool restart_on_gpu_full{false};
+
+    std::vector<std::unique_ptr<hsa::SQTTBufferingPackets>> buffer_packets{};
 
     std::function<bool(std::unique_ptr<hsa::TraceControlAQLPacket>&)> restart_trace{};
 };

@@ -65,6 +65,25 @@ getHeaderPacket(int SE, int CU, int SIMD, aql_profile::gpu_id_t id, bool double_
 
 namespace aql_profile_v2
 {
+namespace
+{
+// Buffers the hardware filled and moved past since the last swap. gfx9 SQ_THREAD_TRACE_CNTR counts
+// every 32-byte block written across buffer rollovers; modular arithmetic handles CNTR wrapping.
+uint64_t
+unswapped_buffers(const TraceMemoryManager&       manager,
+                  const pm4_builder::SqttBuilder& sqtt_builder,
+                  int                             shader_engine_id,
+                  uint32_t                        cntr,
+                  uint32_t                        wptr)
+{
+    const uint64_t blocks = manager.config.capacity_per_se / sqtt_builder.GetWritePtrBlk();
+    const auto     swapped =
+        static_cast<uint32_t>(manager.buffer_swaps.at(shader_engine_id) * blocks +
+                              (wptr & sqtt_builder.GetWritePtrMask()));
+    return static_cast<uint32_t>(cntr - swapped) / blocks;
+}
+}  // namespace
+
 hsa_status_t
 _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t            handle,
                                       aqlprofile_att_data_callback_t callback,
@@ -76,8 +95,10 @@ _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t            handle,
     TraceMemoryManager* memorymgr = dynamic_cast<TraceMemoryManager*>(shared_memorymgr.get());
     if(!memorymgr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
-    auto reset_swaps =
-        rocprofiler::common::scope_destructor{[memorymgr]() { memorymgr->buffer_swaps = 0; }};
+    auto reset_swaps = rocprofiler::common::scope_destructor{[memorymgr]() {
+        std::fill(memorymgr->buffer_swaps.begin(), memorymgr->buffer_swaps.end(), 0);
+        std::fill(memorymgr->read_offsets.begin(), memorymgr->read_offsets.end(), 0);
+    }};
 
     aql_profile::Pm4Factory* pm4_factory =
         aql_profile::Pm4Factory::Create(memorymgr->AgentHandle());
@@ -102,7 +123,21 @@ _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t            handle,
         auto status2_value = (pm4_factory->GetGpuId() >= aql_profile::GFX12_GPU_ID)
                                  ? control_ptr[se_index].status2
                                  : control_ptr[se_index].status;
-        if(status2_value & sqttbuilder->GetBufferFullMask())
+        // With multiple buffers, FULL means the hardware moved on to the next buffer and the
+        // filled one still awaits a swap; only a lockdown failure means data was lost.
+        const bool buffer_full = (status2_value & sqttbuilder->GetBufferFullMask()) != 0;
+        const bool lockdown    = (status2_value & sqttbuilder->GetLockDownFailMask()) != 0;
+        uint64_t   unswapped   = 0;
+        if(memorymgr->isDoubleBuffer() && pm4_factory->GetGpuId() < aql_profile::GFX10_GPU_ID)
+            unswapped = unswapped_buffers(*memorymgr,
+                                          *sqttbuilder,
+                                          se_index,
+                                          control_ptr[se_index].cntr,
+                                          control_ptr[se_index].wptr);
+        else if(memorymgr->isDoubleBuffer())
+            unswapped = (buffer_full && !lockdown) ? 1 : 0;
+        const bool retired_pending = unswapped == 1;
+        if(memorymgr->isDoubleBuffer() ? (lockdown || unswapped > 1) : buffer_full)
         {
             AQL_WARNING << "SQTT data buffer full, SE(" << se_index << ")";
             if(status == HSA_STATUS_SUCCESS) status = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -140,13 +175,29 @@ _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t            handle,
 
         if(memorymgr->isDoubleBuffer())
         {
-            size_t buf_num = memorymgr->config.buffer_data.at(se_index).size();
-            sample_ptr     = memorymgr->config.buffer_data.at(
-                se_index)[(memorymgr->buffer_swaps + buf_num - 1) % buf_num];
+            auto&  buffer_swap = memorymgr->buffer_swaps.at(se_index);
+            auto&  buffer_data = memorymgr->config.buffer_data.at(se_index);
+            size_t buf_num     = buffer_data.size();
+            if(retired_pending)
+            {
+                // Deliver the filled buffer as a status query + swap would have. Like the
+                // active buffer below, it starts at byte 0 so concatenated data stays intact.
+                auto callback_status =
+                    callback(se_index,
+                             buffer_data[(buffer_swap + buf_num - 1) % buf_num],
+                             sample_capacity,
+                             userdata);
+                if(callback_status != HSA_STATUS_SUCCESS) return callback_status;
+                ++buffer_swap;
+            }
+            sample_ptr           = buffer_data[(buffer_swap + buf_num - 1) % buf_num];
             auto callback_status = callback(se_index, sample_ptr, sample_size, userdata);
-            return callback_status == HSA_STATUS_SUCCESS ? status : callback_status;
+            if(callback_status != HSA_STATUS_SUCCESS) return callback_status;
         }
     }
+
+    // The next section only applies to single buffer
+    if(memorymgr->isDoubleBuffer()) return status;
 
     constexpr size_t gfx9_header_size = sizeof(rocprof_trace_decoder_gfx9_header_t);
 
@@ -267,39 +318,78 @@ _internal_aqlprofile_att_create_packets(aqlprofile_handle_t*                  ha
                     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
             }
 
-    const size_t control_size = sizeof(pm4_builder::TraceControl) * se_number_total;
+    const size_t   control_size = sizeof(pm4_builder::TraceControl) * se_number_total;
+    const uint64_t se_num       = pm4_factory->GetShaderEnginesNumber();
 
     memorymgr->CreateTraceControlBuf(control_size + THREAD_TRACE_PREFIX_SIZE);
     memorymgr->CreateOutputBuf(buffer_size);
+    memorymgr->buffer_swaps.resize(se_num);
+    memorymgr->read_offsets.resize(se_num);
 
-    if(buffer_num > 1)
+    if(trace_config.se_mask == 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+    trace_config.active_se = 0;
     {
-        // Not supported: If more than one shader is enabled, return error
-        if((trace_config.se_mask & (trace_config.se_mask - 1)) != 0)
-            return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-
-        // Loop over all shader engines
-        for(int se_id = 0; (trace_config.se_mask >> se_id) != 0; se_id++)
+        // Count number of active SEs in the mask
+        uint64_t temp_mask = trace_config.se_mask;
+        while(temp_mask)
         {
-            if((trace_config.se_mask >> se_id) % 2 == 0) continue;
-
-            auto& buffer_data = trace_config.buffer_data[se_id];
-
-            for(int64_t i = 1; i < buffer_num; i++)
-                buffer_data.emplace_back(memorymgr->AddExtraOutputBuf());
-
-            // First == Last buf for ring
-            buffer_data.emplace_back(memorymgr->GetOutputBuf());
-
-            if(pm4_factory->GetGpuId() >= aql_profile::GFX10_GPU_ID && (buffer_num % 2))
-            {
-                // For gfxip != 9, an odd number of buffers in the ring causes buf0 and buf1 to have
-                // swapped pointers after a round trip. We need two turns around the ring to restore
-                // the state. Think about a Mobius Strip
-                for(int i = 0; i < buffer_num; i++)
-                    buffer_data.emplace_back(buffer_data.at(i));
-            }
+            trace_config.active_se += temp_mask & 1;
+            temp_mask >>= 1;
         }
+    }
+
+    pm4_builder::SqttBuilder* sqtt_builder = pm4_factory->GetSqttBuilder();
+
+    if(pm4_factory->GetGpuId() == aql_profile::GFX10_GPU_ID || pm4_factory->IsGFX11())
+        trace_config.capacity_per_disabled_se = uint64_t(1) << sqtt_builder->BufferAlignment();
+
+    const uint64_t TT_BUF_ALIGN_MASK = ~((uint64_t(1) << sqtt_builder->BufferAlignment()) - 1);
+    const uint64_t reserved_bytes    = se_num * trace_config.capacity_per_disabled_se;
+
+    trace_config.capacity_per_se =
+        (buffer_size / trace_config.active_se - reserved_bytes) & TT_BUF_ALIGN_MASK;
+
+    constexpr uint64_t MIN_BUFFER_SIZE = uint64_t(1) << 17;
+    uint64_t           MAX_BUFFER_SIZE = uint64_t(1) << 34;
+    if(pm4_factory->IsGFX11()) MAX_BUFFER_SIZE = uint64_t(1) << 29;
+
+    if(trace_config.capacity_per_se >= MAX_BUFFER_SIZE) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    if(trace_config.capacity_per_se < MIN_BUFFER_SIZE) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+    void* sqtt_buffer           = memorymgr->GetOutputBuf();
+    auto  increment_sqtt_buffer = [&sqtt_buffer](uint64_t size) {
+        sqtt_buffer = static_cast<void*>(static_cast<char*>(sqtt_buffer) + size);
+    };
+
+    for(int se_id = 0; se_id < se_num; se_id++)
+    {
+        bool is_se_active = (trace_config.se_mask >> se_id) % 2 != 0;
+
+        auto& buffer_data = trace_config.buffer_data[se_id];
+
+        if(is_se_active)
+        {
+            for(int64_t i = 1; i < buffer_num; i++)
+                buffer_data.emplace_back(memorymgr->AddSqttOutputBuf(trace_config.capacity_per_se));
+        }
+
+        // First == Last buf for ring
+        buffer_data.emplace_back(sqtt_buffer);
+
+        if(pm4_factory->GetGpuId() >= aql_profile::GFX10_GPU_ID && buffer_num > 1 && buffer_num % 2)
+        {
+            // For gfxip != 9, an odd number of buffers in the ring causes buf0 and buf1 to have
+            // swapped pointers after a round trip. We need two turns around the ring to restore
+            // the state. Think about a Mobius Strip
+            for(int i = 0; i < buffer_num; i++)
+                buffer_data.emplace_back(buffer_data.at(i));
+        }
+
+        if(is_se_active)
+            increment_sqtt_buffer(trace_config.capacity_per_se);
+        else
+            increment_sqtt_buffer(trace_config.capacity_per_disabled_se);
     }
 
     auto* control_ptr = memorymgr->GetTraceControlBuf<pm4_builder::TraceControl>();
@@ -314,9 +404,6 @@ _internal_aqlprofile_att_create_packets(aqlprofile_handle_t*                  ha
     trace_config.control_buffer_size = control_size;
     trace_config.data_buffer_ptr     = memorymgr->GetOutputBuf();
     trace_config.data_buffer_size    = memorymgr->GetOutputBufSize();
-
-    uint32_t se_per_xcc = pm4_factory->GetShaderEnginesNumber() / pm4_factory->GetXccNumber();
-    pm4_builder::SqttBuilder* sqtt_builder = pm4_factory->GetSqttBuilder();
 
     // Generate start commands
     sqtt_builder->Begin(&start_cmd, &trace_config);
@@ -445,19 +532,28 @@ aqlprofile_att_update_buffer_status(aqlprofile_att_buffer_status_t* out,
     if(out->needs_swap)
     {
         // Lockdown error signals we have overflown the buffer and the trace has already stopped
-        out->is_too_late = (status & aql_profile::Pm4Factory::Create(manager->AgentHandle())
-                                         ->GetSqttBuilder()
-                                         ->GetLockDownFailMask()) != 0;
+        auto* pm4_factory  = aql_profile::Pm4Factory::Create(manager->AgentHandle());
+        auto* sqtt_builder = pm4_factory->GetSqttBuilder();
+        out->is_too_late   = (status & sqtt_builder->GetLockDownFailMask()) != 0;
+        // gfx9 has no lockdown bit: a second unswapped rollover means the pending buffer overflowed.
+        if(pm4_factory->GetGpuId() < aql_profile::GFX10_GPU_ID)
+            out->is_too_late |= aql_profile_v2::unswapped_buffers(*manager,
+                                                                  *sqtt_builder,
+                                                                  shader_engine_id,
+                                                                  control.cntr_doublebuffer,
+                                                                  control.wptr_doublebuffer) > 1;
 
         ROCP_WARNING_IF(out->is_too_late) << "GPU buffer full!";
 
         auto& buffer_data = it->second;
         out->read_size    = manager->config.capacity_per_se;
-        out->num_swaps    = manager->buffer_swaps.fetch_add(1);
+        out->num_swaps    = manager->buffer_swaps.at(shader_engine_id)++;
         out->data = buffer_data.at((out->num_swaps + buffer_data.size() - 1) % buffer_data.size());
 
-        if(out->num_swaps > 0)
-            out->read_offset = sizeof(uint16_t) * (control.wptr_doublebuffer >> 30);
+        // READ_OFFSET describes the buffer the hardware just moved into, which retires next swap.
+        auto& read_offset = manager->read_offsets.at(shader_engine_id);
+        out->read_offset  = read_offset;
+        read_offset       = sizeof(uint16_t) * (control.wptr_doublebuffer >> 30);
     }
 
     return HSA_STATUS_SUCCESS;
@@ -541,9 +637,23 @@ aqlprofile_att_get_buffer_packets(uint64_t*                      header,
         aql_profile::PopulateAql(cmdbuffer, commands.Size(), cmd_writer, buffer_swap[i]);
     }
 
+    // TODO: Reuse cmdbuf memory from the status packets, since they are all identical
     pm4_builder::CmdBuffer commands;
-    auto& status = manager->GetTraceControlBuf<pm4_builder::TraceControl>()[shader_engine_id];
-    sqttbuilder->GetStatusPacket(&commands, &manager->config, status, shader_engine_id);
+    for(int se_id = 0; (manager->config.se_mask >> se_id) != 0; se_id++)
+    {
+        if(((manager->config.se_mask >> se_id) & 1) == 0) continue;
+
+        auto& status = manager->GetTraceControlBuf<pm4_builder::TraceControl>()[se_id];
+        sqttbuilder->GetStatusPacket(&commands, status, se_id);
+    }
+
+    // If more than one SE is active, we flush the entire trace control buffer.
+    // Otherwise, flush just the active SE's control
+    int num_controls = manager->config.active_se > 1 ? pm4_factory->GetShaderEnginesNumber() : 1;
+    int base_se      = manager->config.active_se > 1 ? 0 : shader_engine_id;
+
+    const auto* base_control = &manager->GetTraceControlBuf<pm4_builder::TraceControl>()[base_se];
+    sqttbuilder->flushControl(&commands, base_control, num_controls);
 
     void* cmdbuffer = manager->AddExtraCmdBuf(commands.Size());
     memcpy(cmdbuffer, commands.Data(), commands.Size());
