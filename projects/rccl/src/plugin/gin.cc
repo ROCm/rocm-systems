@@ -446,11 +446,26 @@ ncclResult_t ncclGinSetDefaultBackend(struct ncclComm* comm, uint64_t globalBitM
   if (ginState->finalized) return ncclSuccess;
   std::lock_guard<std::mutex> lock(pluginMutex);
 
-  // Close ALL non-global backends and compact the array
+  // Close ALL non-global backends and compact the array.
+  // Anvil SDMA peers are local GPU device ids (gin_anvil_sdma_create). On more
+  // than one node the same id is a different GPU, so leave SDMA out before
+  // connect instead of letting it become backends[0] or fail the whole GIN
+  // bring-up (AICOMRCCL-3417). Single-node ordering is unchanged.
   for (int i = 0; i < initialNumActiveBackends; i++) {
     struct ncclGinBackendState* backend = &ginState->backends[i];
-    if (!(BIT(backend->ginType) & globalBitMask)) {
-      WARN("GIN backend type %d not supported on all ranks, removing from active backends", backend->ginType);
+#ifdef ENABLE_ROCSHMEM_GIN
+    const bool anvilMultiNode = comm->nNodes > 1 && backend->ginType == NCCL_GIN_TYPE_ANVIL_SDMA;
+#else
+    const bool anvilMultiNode = false;
+#endif
+    if (anvilMultiNode || !(BIT(backend->ginType) & globalBitMask)) {
+      if (anvilMultiNode) {
+        INFO(NCCL_INIT | NCCL_NET,
+             "GIN backend ANVIL_SDMA is single-node only; removing it from active backends (nNodes=%d)",
+             comm->nNodes);
+      } else {
+        WARN("GIN backend type %d not supported on all ranks, removing from active backends", backend->ginType);
+      }
       NCCLCHECK(ncclGinPluginFinalize(comm, backend->pluginIndex, backend->ginInstance));
     } else {
       ginState->backends[currentNumActiveBackends++] = *backend;
