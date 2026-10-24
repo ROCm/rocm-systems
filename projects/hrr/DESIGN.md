@@ -11,7 +11,7 @@ User-facing quick start: [README.md](README.md).
 ## Quick Start
 
 ```bash
-# Capture
+# Capture, once you have consented (README.md#capture)
 HIP_HRR_CAPTURE_OUTPUT=./my_capture.hrr ./my_hip_app
 
 # Replay + D2H validation
@@ -27,7 +27,7 @@ hrr-playback ./my_capture.hrr --info [--events]
 
 ### Capture overhead
 
-Capture is **not free**. When `HIP_HRR_CAPTURE_OUTPUT` is set, every HIP API call
+Capture is **not free**. When capture is enabled (see [Enable Flag](#enable-flag)), every HIP API call
 flows through a capture shim (fixed-size event header + serialized arguments), and
 selected APIs add extra work:
 
@@ -246,7 +246,7 @@ kernel/code-object replay. Use the same install prefix or matching `LD_LIBRARY_P
 for both components.
 
 ```bash
-HIP_HRR_CAPTURE_OUTPUT=./out.hrr ./my_hip_app   # capture
+HIP_HRR_CAPTURE_OUTPUT=./out.hrr ./my_hip_app   # capture, once you have consented
 hrr-playback ./out.hrr                           # replay + D2H validation
 hrr-playback ./out.hrr --timing                  # with kernel + graph GPU timing
 hrr-playback ./out.hrr --info --events           # inspect archive (no GPU)
@@ -786,9 +786,9 @@ a child started with `exec` initialises HIP again and prints its own.
 
 ## Enable Flag
 
-Capture is enabled when `HIP_HRR_CAPTURE_OUTPUT` is set to a directory and the process
+Capture is enabled when `HIP_HRR_CAPTURE_OUTPUT` is set to a directory, the process
 was not started in secure-execution mode (see
-[README.md](README.md#capture-environment)). Defined as a `cstring` release flag in
+[README.md](README.md#capture-environment)), and the user has consented. Defined as a `cstring` release flag in
 `rocclr/utils/flags.hpp`. An empty or blank value leaves capture off: the flag parser
 stores an exported empty variable as a single space, and `hrr_capture_requested()` treats
 a value made only of whitespace as unset.
@@ -799,6 +799,22 @@ privileges that whoever set its environment does not, so it ignores the variable
 `secure_getenv()` would, and `hip_capture_init()` prints one line on stderr saying so.
 The check is `hrr_cap::metadata::secure_exec()` in `hip_capture_metadata.cpp`, and it is
 always false off Linux.
+
+Consent comes from `HIP_HRR_CAPTURE_CONSENT` or, when that is unset or blank, from the
+per-user file `${XDG_CONFIG_HOME:-$HOME/.config}/hrr/capture-consent`
+(`%APPDATA%\hrr\capture-consent` on Windows); see [README.md](README.md#capture). The
+variable decides the run when set: `yes` consents and any other value withholds consent.
+The file consents when its first line is `yes`, after any UTF-8 or UTF-16LE byte order
+mark and before trailing blanks. UTF-16LE is decoded before the line end is looked for,
+and a character outside ASCII makes the file no yes; so does a file over 4 KiB. On POSIX
+it counts only as a regular file, checked on the descriptor opened with `O_NONBLOCK`,
+owned by the effective user. Consent is read once, by `hrr_consent()`, and is part of
+`hip_capture_enabled()`, so `hip_capture_output_dir()` is empty without it. Without
+consent `hip_capture_init()` prints one line on stderr naming what withheld it (the
+variable, or the file missing, not a regular file, owned by another user or not saying
+yes) and the process runs unrecorded; it never prompts. With
+consent the manifest metadata records `capture_consent` as `"file"` or
+`"HIP_HRR_CAPTURE_CONSENT"`, not the file's path, which names the user.
 
 ## Playback Tools
 
@@ -1080,7 +1096,7 @@ cmake --build hrr-build --target hrr-playback -j"$(nproc)"
 ```bash
 # Make the freshly built capture runtime win over any system ROCm copy at run time
 export LD_LIBRARY_PATH=$PWD/build/hipamd/lib:$LD_LIBRARY_PATH
-# or LD_PRELOAD the capture lib for a single app:
+# or LD_PRELOAD the capture lib for a single app (capture also needs consent, README.md#capture):
 LD_PRELOAD=$PWD/build/hipamd/lib/libamdhip64.so.7 HIP_HRR_CAPTURE_OUTPUT=./out.hrr ./my_hip_app
 ```
 

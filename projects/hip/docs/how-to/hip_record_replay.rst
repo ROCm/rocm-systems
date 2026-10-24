@@ -15,8 +15,8 @@ failing workload to somebody else.
 
 HRR has two halves:
 
-* **Capture** is part of the HIP runtime library. It is off unless you ask for it,
-  and is turned on with a single environment variable.
+* **Capture** is part of the HIP runtime library. It is off unless you ask for it
+  with an environment variable, and records only once you have consented to it.
 * **Replay** is a separate developer tool, ``hrr-playback``, installed into the
   ROCm binary directory by a ROCm build that includes the HRR project.
 
@@ -70,7 +70,25 @@ application as usual:
   HIP_HRR_CAPTURE_OUTPUT=./my_capture.hrr ./my_hip_app
 
 Capture is off whenever the variable is unset, so nothing changes for an ordinary
-run. The archive is a directory, not a single file, and it holds one
+run. It also needs your consent, given once per user: write the line ``yes`` to
+``${XDG_CONFIG_HOME:-$HOME/.config}/hrr/capture-consent``
+(``%APPDATA%\hrr\capture-consent`` on Windows). Where no such file can be kept,
+as in CI or a container, set ``HIP_HRR_CAPTURE_CONSENT=yes`` for the run instead.
+Without either, the application runs unrecorded and says why on stderr. Any other
+value of ``HIP_HRR_CAPTURE_CONSENT``, such as ``no``, withholds consent for the run
+even when the file says yes.
+
+.. code-block:: bash
+
+  d="${XDG_CONFIG_HOME:-$HOME/.config}/hrr" && mkdir -p "$d" && echo yes > "$d/capture-consent"
+
+On Windows, in PowerShell:
+
+.. code-block:: powershell
+
+  New-Item -ItemType Directory -Force "$env:APPDATA\hrr" | Out-Null; Set-Content "$env:APPDATA\hrr\capture-consent" yes
+
+The archive is a directory, not a single file, and it holds one
 ``pid-<pid>/`` subdirectory per recorded process:
 
 .. code-block:: text
