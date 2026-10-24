@@ -23,6 +23,7 @@
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/register_set.h"
 
+#include "../amdhsa_metadata_test_util.h"
 #include "../dbi_test_util.h"
 
 #include <gtest/gtest.h>
@@ -3135,9 +3136,6 @@ TEST(InstrumentorKernargRecord, UnusedWrapperBindingRetainsTheOriginalKernargAbi
     SCOPED_TRACE(static_cast<int>(kind));
     InstrumentationOptions options;
     options.kernarg_binding = DbiKernargBinding::CallerSuppliedWrapper;
-    options.update_resource_metadata = [](std::span<uint8_t>, const KernelDescriptorInfo &,
-                                          const InstrumentationResources &,
-                                          std::string *) { return true; };
     Instrumentor instrumentor(object, ROCJITSU_CODE_ARCH_CDNA4, options);
     InstrumentationPoint point;
     point.anchor_offset = kind == InstrumentationKind::KernelEntry ? 0 : 4;
@@ -4334,9 +4332,7 @@ TEST(InstrumentorResources, ExplicitPoliciesRequireTheirMetadataInputs) {
   const std::vector<uint8_t> image = make_gfx950_kernel_elf_with_two_nops();
   const AmdGpuCodeObject object(image.data(), image.size());
   for (const InstrumentationOptions options :
-       {InstrumentationOptions{.kernarg_binding = DbiKernargBinding::CallerSuppliedWrapper,
-                               .register_growth = std::nullopt},
-        InstrumentationOptions{.preservation = GuestStatePreservation::DeclaredRegisters,
+       {InstrumentationOptions{.preservation = GuestStatePreservation::DeclaredRegisters,
                                .register_growth = std::nullopt},
         InstrumentationOptions{.register_growth = OriginalRegisterCounts{32, 4}}}) {
     Instrumentor instrumentor(object, ROCJITSU_CODE_ARCH_CDNA4, options);
@@ -4347,19 +4343,13 @@ TEST(InstrumentorResources, ExplicitPoliciesRequireTheirMetadataInputs) {
   }
 }
 
-TEST(InstrumentorResources, FailedMetadataUpdatePublishesNoPartialImageOrSites) {
+TEST(InstrumentorResources, MissingMetadataPublishesNoPartialImageOrSites) {
   const std::vector<uint8_t> image = make_gfx950_kernel_elf_with_two_nops();
   const AmdGpuCodeObject object(image.data(), image.size());
   const std::vector<uint8_t> body = make_gfx950_probe_elf("return", {kProbeSetpcS30S31});
   const AmdGpuCodeObject probe(body.data(), body.size());
   InstrumentationOptions options;
   options.register_growth = OriginalRegisterCounts{32, 4};
-  options.update_resource_metadata = [](std::span<uint8_t> bytes, const KernelDescriptorInfo &,
-                                        const InstrumentationResources &, std::string *error) {
-    bytes.front() = 0;
-    *error = "injected metadata failure";
-    return false;
-  };
   Instrumentor instrumentor(object, ROCJITSU_CODE_ARCH_CDNA4, options);
   InstrumentationPoint point;
   point.probe_obj = &probe;
@@ -4367,7 +4357,7 @@ TEST(InstrumentorResources, FailedMetadataUpdatePublishesNoPartialImageOrSites) 
   instrumentor.add_point(point);
   const InstrumentedCodeObject result = instrumentor.patch();
   ASSERT_FALSE(result.errors.empty());
-  EXPECT_NE(result.errors.front().find("injected metadata failure"), std::string::npos);
+  EXPECT_NE(result.errors.front().find("AMDHSA metadata"), std::string::npos);
   EXPECT_TRUE(result.elf_bytes.empty());
   EXPECT_TRUE(result.sites.empty());
   EXPECT_EQ(image.front(), 0x7f);
@@ -4382,9 +4372,6 @@ TEST(InstrumentorResources, RegisterBackupsExhaustTheRegisterFileBeforeImagePubl
   options.preservation = GuestStatePreservation::DeclaredRegisters;
   options.register_growth =
       OriginalRegisterCounts{static_cast<uint32_t>(REGISTER_SET_ALLOCATABLE_SGPRS), 4};
-  options.update_resource_metadata = [](std::span<uint8_t>, const KernelDescriptorInfo &,
-                                        const InstrumentationResources &,
-                                        std::string *) { return true; };
   Instrumentor instrumentor(object, ROCJITSU_CODE_ARCH_CDNA4, options);
   InstrumentationPoint point;
   point.probe_obj = &probe;
@@ -4402,9 +4389,10 @@ TEST(InstrumentorResources, OddSgprCountsLeaveBothEntrySnapshotsOutsideRegisterB
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   for (const uint32_t original_sgprs : {34u, 35u}) {
     SCOPED_TRACE(original_sgprs);
-    const std::vector<uint8_t> image =
+    const std::vector<uint8_t> image = test::with_resource_metadata(
         make_kernarg_kernel_elf({build_s_nop(0, kArch), build_s_endpgm(kArch)}, 0,
-                                EF_AMDGPU_MACH_AMDGCN_GFX950, kTestKernargSize, false, 5);
+                                EF_AMDGPU_MACH_AMDGCN_GFX950, kTestKernargSize, false, 5),
+        {{"test_kernel", kTestKernargSize, original_sgprs, 4}});
     const std::vector<uint8_t> body = make_gfx950_probe_elf("snapshots", {kProbeSetpcS30S31});
     const AmdGpuCodeObject object(image.data(), image.size());
     const AmdGpuCodeObject probe(body.data(), body.size());
@@ -4412,9 +4400,6 @@ TEST(InstrumentorResources, OddSgprCountsLeaveBothEntrySnapshotsOutsideRegisterB
     options.kernarg_binding = DbiKernargBinding::CallerSuppliedWrapper;
     options.preservation = GuestStatePreservation::DeclaredRegisters;
     options.register_growth = OriginalRegisterCounts{original_sgprs, 4};
-    options.update_resource_metadata = [](std::span<uint8_t>, const KernelDescriptorInfo &,
-                                          const InstrumentationResources &,
-                                          std::string *) { return true; };
     Instrumentor instrumentor(object, kArch, options);
     InstrumentationPoint point;
     point.kind = InstrumentationKind::KernelEntry;

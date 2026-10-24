@@ -1209,12 +1209,6 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   }
   patched_ = true;
 
-  if ((options_.register_growth ||
-       options_.kernarg_binding == DbiKernargBinding::CallerSuppliedWrapper) &&
-      !options_.update_resource_metadata) {
-    result.errors.emplace_back("resource growth and runtime binding require a metadata updater");
-    return result;
-  }
   if (options_.preservation == GuestStatePreservation::DeclaredRegisters &&
       !options_.register_growth) {
     result.errors.emplace_back("declared-register preservation requires original metadata counts");
@@ -1809,19 +1803,19 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
                            result.resources.vgprs / 4 - 1);
       }
     }
-    std::string error;
-    if (!options_.update_resource_metadata(image, kernel, result.resources, &error)) {
-      result.errors.push_back("resource metadata update failed: " + error);
-      return result;
+    if (options_.register_growth || entry_storage_base) {
+      CodeObjectPatcher resource_patcher{AmdGpuCodeObject(image.data(), image.size())};
+      std::string error;
+      const std::optional<uint32_t> sgprs =
+          options_.register_growth ? std::optional<uint32_t>{result.resources.sgprs} : std::nullopt;
+      const std::optional<uint32_t> vgprs =
+          options_.register_growth ? std::optional<uint32_t>{result.resources.vgprs} : std::nullopt;
+      if (!resource_patcher.patch_kernel_resources(kernel, descriptor, sgprs, vgprs, &error)) {
+        result.errors.push_back("resource metadata/descriptor update failed: " + error);
+        return result;
+      }
+      image = resource_patcher.emit();
     }
-    CodeObjectPatcher resource_patcher{AmdGpuCodeObject(image.data(), image.size())};
-    if (!resource_patcher.patch_kernel_descriptor(
-            kernel.descriptor_file_offset,
-            {reinterpret_cast<const uint8_t *>(&descriptor), sizeof(descriptor)})) {
-      result.errors.emplace_back("resource descriptor update failed");
-      return result;
-    }
-    image = resource_patcher.emit();
   }
   result.elf_bytes = std::move(image);
   for (const auto &a : applied) {

@@ -4,6 +4,7 @@
 #include "target_fixture.h"
 
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/amdhsa_metadata.h"
 #include "rocjitsu/code/consan/encoding.h"
 #include "rocjitsu/code/consan/image/artifact.h"
 #include "rocjitsu/code/consan/image/metadata.h"
@@ -212,8 +213,10 @@ TEST_F(ConSanPrepare, RegisterPressureReturnsAResourceErrorInsteadOfAnInternalAs
     std::vector<uint8_t> image = original_;
     MetadataResources resources = metadata.value();
     resources.sgprs = declared;
-    ASSERT_TRUE(
-        update_metadata(image, input.value().kernel, resources, &metadata_error).succeeded())
+    ASSERT_TRUE(amdhsa::update_resource_metadata(image, input.value().kernel,
+                                                 resources.kernarg_bytes, resources.sgprs,
+                                                 resources.vgprs, &metadata_error)
+                    .succeeded())
         << metadata_error;
     const FailureOr<InputProgram> qualified =
         build_input_program(image, *target_profile("gfx1100"), "lds_producer_consumer", error_);
@@ -260,7 +263,8 @@ TEST_F(ConSanPrepare, MetadataGrowthFailureDoesNotPartiallyMutateTheImage) {
   const std::vector<uint8_t> saved = original_;
   std::string message;
   EXPECT_TRUE(
-      update_metadata(original_, input.value().kernel, {4096, 8, 28, 16}, &message).failed());
+      amdhsa::update_resource_metadata(original_, input.value().kernel, 4096, 28, 16, &message)
+          .failed());
   EXPECT_EQ(original_, saved);
   EXPECT_NE(message.find("wider"), std::string::npos);
 }

@@ -2,15 +2,21 @@
 # SPDX-License-Identifier: MIT
 
 # Leaf helpers are shared by the transformation stack and native ConSan stages.
-# Neither helper requires an ISA registry, compiler implementation, or VM.
+# These helpers require no ISA registry, compiler implementation, or VM.
 add_library(rocjitsu_kernel_descriptor_scan STATIC kernel_descriptor_scan.cpp)
+add_library(rocjitsu_amdhsa_metadata STATIC amdhsa_metadata.cpp)
 add_library(
     rocjitsu_kernarg_extension
     STATIC
     patch/kernarg_extension.cpp
     patch/kernarg_extension_metadata.cpp
 )
-foreach(_helper rocjitsu_kernel_descriptor_scan rocjitsu_kernarg_extension)
+foreach(
+    _helper
+    rocjitsu_kernel_descriptor_scan
+    rocjitsu_kernarg_extension
+    rocjitsu_amdhsa_metadata
+)
     target_include_directories(
         ${_helper}
         PUBLIC ${ROCJITSU_INCLUDE_DIR} ${ROCJITSU_SRC_DIR}
@@ -90,4 +96,7 @@ rj_add_object_library(rocjitsu_code
     patch/spill_manager.cpp
     patch/trampoline_builder.cpp
 )
-target_link_libraries(rocjitsu_code PUBLIC rocjitsu_kernarg_extension)
+target_link_libraries(
+    rocjitsu_code
+    PUBLIC rocjitsu_kernarg_extension rocjitsu_amdhsa_metadata
+)

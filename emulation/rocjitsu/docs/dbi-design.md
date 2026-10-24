@@ -9,8 +9,8 @@ insert an inline nop or call a verified, copied probe body. Calls pass explicit
 arguments, preserve guest state, and share one body across sites. Before-placement
 and callable kernel entry/exit observations are supported; after-placement and
 block boundaries remain reserved. Existing scratch spills coexist with an
-explicit register-growth policy that uses disjoint register backups and requires
-a client metadata updater. General HWREG/MODE preservation, scratch enablement
+explicit register-growth policy that uses disjoint register backups. The shared
+code-object layer updates the resource note and descriptor together. General HWREG/MODE preservation, scratch enablement
 from zero, arbitrary composed instrumentation, and streaming transport remain
 future work. ConSan exercises the shared callable path across its
 seven target/wave modes; hardware and simulator coverage must be distinguished.
@@ -93,7 +93,7 @@ current limits.
 - `filter_flags` is still a reserved milestone guardrail; a non-default value is fatal until it gains a real consumer. `force_full_exec` is consumed (see [Mask policy](#mask-policy)); it is rejected only on an inline-nop site, which has no call envelope whose mask could be widened.
 - Probe calls require the probe body to read no register its ABI does not supply (`analyze_probe_live_ins`, see [Probe live-ins](#probe-live-ins)). Under `AmdGpuFuncReturnS30S31` that is the link pair plus the declared argument VGPRs; any other input is fatal.
 - Probe calls may pass 32-bit arguments via `InstrumentationPoint::probe_args`, delivered in VGPRs from `v0`. Each names a `ProbeArgSource`: a build-time constant, an anchor VGPR, a dword of the anchor `EXEC` mask, a dword of the framework's entry storage, or a lane-zero VGPR snapshot captured at dispatch entry. The count and the sources are declared by the caller and verified against the body; see [Probe arguments](#probe-arguments).
-- Probe calls require the probe's link pair (`s[30:31]` for `rj_nop_probe`) to be within the kernel's SGPR allocation (`kernel_sgpr_count`) and any chosen scratch/special-state temps to be below `ordinary_sgpr_bound` of it; allocation growth requires explicit original metadata counts and a metadata updater (see [Probe-call register requirement](#instrumentation-flow-probe-call)).
+- Probe calls require the probe's link pair (`s[30:31]` for `rj_nop_probe`) to be within the kernel's SGPR allocation (`kernel_sgpr_count`) and any chosen scratch/special-state temps to be below `ordinary_sgpr_bound` of it; allocation growth requires explicit original metadata counts and a supported resource note (see [Probe-call register requirement](#instrumentation-flow-probe-call)).
 - Register spilling is enabled for `spill_set = live_at_anchor ∩ (probe_clobbers ∪ builder_clobbers)`. The orchestrator scans the kernel descriptor (`scan_kernel_descriptors`), builds one `SpillManager` from its `private_segment_fixed_size`, splits the spill set by class, and calls `plan_vgpr_spills` / `plan_sgpr_spills` / `plan_acc_spills`. Spilling is gated per-arch by `max_scratch_offset_bytes()` (returns 0 ⇒ arch has no scratch emitter ⇒ unsupported) and by those fail-closed helpers; there is no `SpillPolicy` enum. A kernel with zero scratch, more than one kernel, an over-offset-cap slot, a probe that clobbers FLAT_SCRATCH, or (for SGPR spills) no dead bridge VGPR within the kernel's VGPR allocation fails closed.
 
 ### Key design constraint
@@ -434,7 +434,7 @@ A point may carry `probe_args`, a list of 32-bit values handed to the probe, eac
 
 **Verification is the live-in analysis, unchanged.** `supplied_registers()` widens to cover the argument VGPRs, and the existing "residual live-in set must be empty" rule then does the work: a declared argument the body reads subtracts away; one it reads but the caller did not declare survives and fails the site by name. Acceptance is "nothing left over" rather than "reads exactly what was declared", so a probe that ignores an argument it was handed is not rejected — wasteful, not unsafe. There is no argument-specific code in the analysis.
 
-**The framework's entry storage can be passed as a value.** `ProbeArgSource::LogBufferPtrLo` / `LogBufferPtrHi` name argument slots filled from `TrampolinePlan::entry_storage_base`, the persistent SGPR pair the kernel-entry prologue loaded the DBI payload pointer into. Unlike the `EXEC` sources, these read a pair that is live across the whole kernel rather than one the envelope just saved, so `plan_probe_call` keeps every dead-register choice off it at every site of such a kernel, not only the ones passing the pointer on. Liveness cannot supply that exclusion: the prologue's write lives in the cave, so the pair reads dead at every anchor. Three things fail the site closed: a plan naming no pair, a pair outside the kernel's ordinary SGPRs, and a probe body that writes the pair (nothing saves and restores it, so the value would be gone for every later site). `s_movrel*` anywhere in the kernel fails the entry prologue closed, since the storage floor is an operand scan that an M0-displaced write can land above. The prologue is not idempotent, so it runs from a stub only dispatch reaches (see *Placement*). `Instrumentor::patch()` requires an explicit `CallerSuppliedWrapper` binding and metadata updater for entry-storage arguments. Debug planning can omit that binding for tests that construct the wrapper themselves.
+**The framework's entry storage can be passed as a value.** `ProbeArgSource::LogBufferPtrLo` / `LogBufferPtrHi` name argument slots filled from `TrampolinePlan::entry_storage_base`, the persistent SGPR pair the kernel-entry prologue loaded the DBI payload pointer into. Unlike the `EXEC` sources, these read a pair that is live across the whole kernel rather than one the envelope just saved, so `plan_probe_call` keeps every dead-register choice off it at every site of such a kernel, not only the ones passing the pointer on. Liveness cannot supply that exclusion: the prologue's write lives in the cave, so the pair reads dead at every anchor. Three things fail the site closed: a plan naming no pair, a pair outside the kernel's ordinary SGPRs, and a probe body that writes the pair (nothing saves and restores it, so the value would be gone for every later site). `s_movrel*` anywhere in the kernel fails the entry prologue closed, since the storage floor is an operand scan that an M0-displaced write can land above. The prologue is not idempotent, so it runs from a stub only dispatch reaches (see *Placement*). `Instrumentor::patch()` requires an explicit `CallerSuppliedWrapper` binding for entry-storage arguments; resource changes also require a supported AMDHSA metadata note. Debug planning can omit that binding for tests that construct the wrapper themselves.
 
 `kMaxProbeArgVgprs` is 16, an arbitrary cap. The convention fills `v0` upward through `v30` (`v31` is the packed workitem id), so 31 dwords is the most that arrive in registers; the cap sits well inside that because the free-register search would refuse an argument block near 31 long before the convention did, and only single-dword integer arguments have been measured.
 
@@ -459,11 +459,13 @@ The planner also reserves, from the same dead-SGPR pool bounded by `ordinary_sgp
 By default the kernel must already allocate the link and temporary registers;
 existing hardware smoke fixtures are padded for that policy. A client may instead
 supply `InstrumentationOptions::register_growth` with validated
-`OriginalRegisterCounts` and `update_resource_metadata`. Kernarg sizing comes
+`OriginalRegisterCounts`. Kernarg sizing comes
 from the descriptor and wrapper layout, not the register-growth request.
 DBI then plans bounded SGPR/VGPR allocation and
-register backups, includes ABI input padding, updates metadata through the client,
-and writes matching descriptors. `DeclaredRegisters` preserves every originally
+register backups and includes ABI input padding. `CodeObjectPatcher` updates
+the matching numeric metadata and descriptor as one operation, rejecting missing
+fields or insufficient integer widths before either changes. Analysis-specific
+admission stays with the client. `DeclaredRegisters` preserves every originally
 declared GPR; the default preserves live values. Growth rejects AGPR guests and
 non-enumerable register uses, and never enables scratch. Metadata failure emits
 no ELF or site map. Resource policy fails closed when the probe body reads a register its convention does not supply, when the link pair is live without a register backup, when a site passes more argument dwords than `kMaxProbeArgVgprs`, when the argument VGPRs fall outside the kernel's ordinary-VGPR bound, when a site passes arguments but no single kernel descriptor was discovered to derive that bound from, when a non-empty `probe_args` accompanies an inline-nop point, when no dead target pair or required temp is available within the kernel's ordinary SGPRs, when the probe clobbers FLAT_SCRATCH (the spill store/load depend on it), when the kernel has zero scratch or is one of several kernels, when a spill offset exceeds the arch's scratch-offset field, (for SGPR spills) when no dead bridge VGPR exists in the ordinary-VGPR range, or (for AccVGPR spills) when the target has no AccVGPR file (`arch_has_accvgpr` is false) or an AccVGPR index falls outside the descriptor-derived accumulator window (`kernel_vgpr_count − accum_base`). The spill set itself is `instrument_clobbers ∩ live_at_anchor` and is spilled, not rejected.
@@ -513,7 +515,8 @@ The offsets the prologue bakes in come from `make_kernarg_extension_layout(desc.
 On the success path the instrumentor writes a `.rocjitsu.kernarg` record under variant `kDbiKernargVariantName` (`"dbi"`) with one payload named `kDbiEntryPayloadName` (`"dbi-log-buffer"`), so a runtime can build a conforming wrapper without reproducing the prologue's arithmetic. Records are keyed by `(kernel_name, variant_name)`, which discriminates within one serialized payload rather than across sections: the loader-side reader stops at the first section of this name, so the instrumentor refuses an object that already carries one.
 
 With `CallerSuppliedWrapper`, the instrumentor grows descriptor `kernarg_size`
-to the shared wrapper layout and asks the client to update its metadata. ConSan's
+to the shared wrapper layout and updates the corresponding metadata through the
+shared code-object editor. ConSan's
 runtime allocates and initializes that wrapper and retains it through completion.
 Without a binding, production `patch()` refuses entry-storage arguments. Debug
 planning retains the original size for tests that hand the CP a wrapper directly.

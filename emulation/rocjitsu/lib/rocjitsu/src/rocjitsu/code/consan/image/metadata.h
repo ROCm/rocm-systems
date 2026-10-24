@@ -24,10 +24,4 @@ struct MetadataResources {
                                                             const KernelDescriptorInfo &kernel,
                                                             std::string *error = nullptr);
 
-/// @brief Patch numeric resource values without moving allocated ELF storage.
-/// @details Reject values that cannot fit the note's existing integer encoding.
-[[nodiscard]] Result update_metadata(std::span<uint8_t> image, const KernelDescriptorInfo &kernel,
-                                     const MetadataResources &resources,
-                                     std::string *error = nullptr);
-
 } // namespace rocjitsu::consan

@@ -214,12 +214,6 @@ struct InstrumentationOptions {
   /// register-to-register preservation and bounded allocation growth; absent
   /// means the existing allocation/scratch policy.
   std::optional<OriginalRegisterCounts> register_growth;
-  /// Update the consumer's metadata after planning and before the framework
-  /// writes the new descriptor. Growth/binding without this writer is rejected.
-  /// With binding alone, zero sgprs/vgprs mean retain the original counts.
-  /// The callback must update only metadata; a failure discards the whole image.
-  bool (*update_resource_metadata)(std::span<uint8_t>, const KernelDescriptorInfo &,
-                                   const InstrumentationResources &, std::string *) = nullptr;
 };
 
 /// @brief Result of Instrumentor::patch_with_debug_summaries().
@@ -494,8 +488,9 @@ public:
   /// error. Shares the single-attempt budget with patch_with_debug_summaries();
   /// see the class-level note.
   ///
-  /// Entry-storage arguments require CallerSuppliedWrapper and a metadata
-  /// updater. The caller must bind that wrapper for every instrumented dispatch.
+  /// Entry-storage arguments require CallerSuppliedWrapper. The caller must
+  /// bind that wrapper for every instrumented dispatch. Resource edits require
+  /// an existing supported AMDHSA metadata note.
   [[nodiscard]] InstrumentedCodeObject patch();
 
   /// @brief Same as patch(), plus per-site InstrumentationPatch summaries.

@@ -4,12 +4,14 @@
 #pragma once
 
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/rj_code.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -145,6 +147,16 @@ public:
 
   [[nodiscard]] bool patch_kernel_descriptor(uint64_t file_offset,
                                              std::span<const uint8_t> descriptor);
+
+  /// @brief Patch a planned descriptor and its matching numeric metadata together.
+  /// @details The caller encodes architecture-specific allocation fields in the
+  /// descriptor. Missing metadata or insufficient integer widths reject before
+  /// either representation changes. Absent register counts retain their fields.
+  [[nodiscard]] bool patch_kernel_resources(const KernelDescriptorInfo &kernel,
+                                            const amdhsa::kernel_descriptor_t &descriptor,
+                                            std::optional<uint32_t> sgprs,
+                                            std::optional<uint32_t> vgprs,
+                                            std::string *error = nullptr);
 
   /// @brief Overwrite one kernel descriptor's `private_segment_fixed_size`.
   ///
